@@ -497,7 +497,10 @@ async function loadWebhookEvents() {
   if (whEvents.value.length) return;
   try {
     const cat = await chatopsApi.templates.list();
-    whEvents.value = cat.events.map((e) => ({ type: e.type, name: e.name }));
+    // Webhook 只会收到通知：命令回复与助手回复只发回说话的那个通道
+    whEvents.value = cat.events
+      .filter((e) => e.group === "notify")
+      .map((e) => ({ type: e.type, name: e.name }));
   } catch {
     // 事件列表读不到时只能按默认的那一种预览
   }

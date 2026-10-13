@@ -35,6 +35,7 @@ func wireAssistantChatOps(svc *assistant.Service, bs *chatopsBootstrap) {
 		return
 	}
 	h := assistant.NewChatOpsHandler(svc, bs.manager)
+	h.SetTemplates(bs.manager.templates)
 	bs.chain.SetAssistant(h)
 	chatopscmds.SetAssistant(h)
 }

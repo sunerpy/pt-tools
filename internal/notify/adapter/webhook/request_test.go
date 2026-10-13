@@ -285,6 +285,10 @@ func TestPreview(t *testing.T) {
 
 	_, err = Preview(PreviewInput{Type: "nope", EndpointURL: "https://example.com/hook"})
 	assert.ErrorIs(t, err, ErrUnknownEvent)
+	_, err = Preview(PreviewInput{Type: notify.EventReplyStatus, EndpointURL: "https://example.com/hook"})
+	assert.ErrorIs(t, err, ErrUnknownEvent, "命令回复到不了 Webhook")
+	_, err = Preview(PreviewInput{Type: notify.EventAssistantReply, EndpointURL: "https://example.com/hook"})
+	assert.ErrorIs(t, err, ErrUnknownEvent)
 	_, err = Preview(PreviewInput{Type: notify.EventTest})
 	assert.ErrorIs(t, err, ErrInvalid)
 	_, err = Preview(PreviewInput{Type: notify.EventTest, EndpointURL: "https://example.com/", BodyTemplate: "{{.nope}}"})
@@ -477,4 +481,14 @@ func TestScrubErrorOverlappingSecrets(t *testing.T) {
 	assert.ErrorIs(t, got, errResponseRejected)
 	assert.NotContains(t, got.Error(), "IJKL")
 	assert.NotContains(t, got.Error(), "ABCD")
+}
+
+// 保存前只用通知的示例校验：命令回复与助手回复的变量不在 Webhook 的数据里，也不会让通知才有的写法校验失败。
+func TestCheckSamplesOnlyNotifyEvents(t *testing.T) {
+	r, err := compile(&Config{EndpointURL: "https://example.com/hook", BodyTemplate: `{"rss": {{json .rss}}, "items": {{len .items}}}`})
+	require.NoError(t, err)
+	require.NoError(t, r.checkSamples())
+	r, err = compile(&Config{EndpointURL: "https://example.com/hook", BodyTemplate: `{{json .kind}}`})
+	require.NoError(t, err)
+	assert.ErrorContains(t, r.checkSamples(), "kind", "助手回复的变量不是 Webhook 的变量")
 }

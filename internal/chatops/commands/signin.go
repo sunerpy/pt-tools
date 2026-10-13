@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 func init() {
@@ -28,29 +29,53 @@ func signinHandler(ctx context.Context, args []string, src chatops.Source) (chat
 		if err != nil {
 			return errReply(src.ReplyLang, "签到失败: %v", "sign-in failed: %v", err), nil
 		}
-		return okReply(signinLine(src.ReplyLang, outcome)), nil
+		return eventReply(signinLine(src.ReplyLang, outcome), notify.EventReplySignin, signinFields(src.ReplyLang, []AttendanceOutcome{outcome})), nil
 	}
 	outcomes, err := svc.Attendance.SignInAll(ctx)
 	if err != nil {
 		return errReply(src.ReplyLang, "签到失败: %v", "sign-in failed: %v", err), nil
 	}
+	fields := signinFields(src.ReplyLang, outcomes)
 	if len(outcomes) == 0 {
-		return okReply(tr(src.ReplyLang, "没有开启自动签到的站点", "no site has automatic sign-in enabled")), nil
+		return eventReply(tr(src.ReplyLang, "没有开启自动签到的站点", "no site has automatic sign-in enabled"), notify.EventReplySignin, fields), nil
 	}
 	var b strings.Builder
 	for _, o := range outcomes {
 		b.WriteString(signinLine(src.ReplyLang, o))
 		b.WriteString("\n")
 	}
-	return okReply(strings.TrimRight(b.String(), "\n")), nil
+	return eventReply(strings.TrimRight(b.String(), "\n"), notify.EventReplySignin, fields), nil
+}
+
+// signinFields 是 reply.signin 的变量：各站点的结果，与成功（含今天已签到）、失败的站点数。
+func signinFields(lang string, outcomes []AttendanceOutcome) map[string]any {
+	items := make([]map[string]any, 0, len(outcomes))
+	signed, failed := 0, 0
+	for _, o := range outcomes {
+		switch o.Status {
+		case "signed", "already":
+			signed++
+		case "failed":
+			failed++
+		}
+		items = append(items, map[string]any{
+			"site": o.Site, "status": o.Status, "status_label": signinStatusLabel(lang, o.Status), "message": signinDetail(o),
+		})
+	}
+	return map[string]any{"signed": signed, "failed": failed, "items": items}
+}
+
+// signinDetail 是一个站点签到结果的说明：成功时是站点的说明，没成功时是失败原因（有的话）。
+func signinDetail(o AttendanceOutcome) string {
+	if o.Status != "signed" && o.Status != "already" && o.Error != "" {
+		return o.Error
+	}
+	return o.Message
 }
 
 func signinLine(lang string, o AttendanceOutcome) string {
 	label := signinStatusLabel(lang, o.Status)
-	detail := o.Message
-	if o.Status != "signed" && o.Status != "already" && o.Error != "" {
-		detail = o.Error
-	}
+	detail := signinDetail(o)
 	if detail == "" {
 		return fmt.Sprintf("%s: %s", o.Site, label)
 	}

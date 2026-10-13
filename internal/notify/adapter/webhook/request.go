@@ -417,12 +417,16 @@ func (r *request) render(n notify.Notification, channel string, strict bool) (*r
 	return out, nil
 }
 
-// checkSamples 用每种事件的示例数据渲染一遍：Webhook 会收到所有事件，每一种都要渲染得出来。
+// checkSamples 用每种通知的示例数据渲染一遍：Webhook 会收到所有通知，每一种都要渲染得出来。
+// ChatOps 命令回复与 AI 助手回复只发回说话的那个通道，到不了 Webhook，不在这里检查。
 func (r *request) checkSamples() error {
 	if r.urlTmpl == nil && r.body == nil {
 		return nil
 	}
 	for _, spec := range notify.Events {
+		if spec.Group != notify.GroupNotify {
+			continue
+		}
 		if _, err := r.render(sampleNotification(spec.Type), sampleChannel, true); err != nil {
 			return fmt.Errorf("%s（%s）：%w", spec.Name, spec.Type, err)
 		}
@@ -460,12 +464,12 @@ type PreviewResult struct {
 	SuccessReason string `json:"success_reason,omitempty"`
 }
 
-// ErrUnknownEvent 是预览时给了不认识的事件类型
+// ErrUnknownEvent 是预览时给了不认识的事件类型，或者给的不是通知（命令回复、助手回复到不了 Webhook）
 var ErrUnknownEvent = errors.New("没有这种事件")
 
 // Preview 按一种事件的示例数据渲染请求。配置不对时返回的错误包着 ErrInvalid 或 tmpl.ErrInvalid。
 func Preview(in PreviewInput) (*PreviewResult, error) {
-	if notify.Spec(in.Type) == nil {
+	if !notify.IsNotifyEvent(in.Type) {
 		return nil, fmt.Errorf("%w：%s", ErrUnknownEvent, in.Type)
 	}
 	if strings.TrimSpace(in.EndpointURL) == "" {

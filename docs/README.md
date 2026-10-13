@@ -45,7 +45,7 @@
 - [QQ OneBot（NapCat）](guide/chatops-qq-napcat.md)：反向 WebSocket、绑定与排障。
 - [Telegram Bot](guide/chatops-telegram.md)：BotFather、代理、绑定与排障。
 - [RSS 上新通知](guide/chatops-rss-notify.md)：通知模式、静默时段、digest、重试和配额。
-- [更多通知通道](guide/notify-channels.md)：企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；按事件自定义通知的标题与正文（消息模板）；通用 Webhook 的请求方法、请求体与预设（自定义 Webhook）。
+- [更多通知通道](guide/notify-channels.md)：企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；按事件自定义通知的标题与正文，以及 ChatOps 命令回复与 AI 助手回复的文字（消息模板）；通用 Webhook 的请求方法、请求体与预设（自定义 Webhook）。
 
 ## App 与接口
 

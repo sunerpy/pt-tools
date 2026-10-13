@@ -71,7 +71,7 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 
 ## 消息模板
 
-每种通知的标题和正文都可以改成自己的写法，所有通知通道（QQ、Telegram、群机器人、Bark 等）都按它发。在「ChatOps → 消息模板」里选一种事件，填「标题模板」或「正文模板」，点「保存」。空着的一项用内置文字；点「恢复默认」回到内置的写法。
+每种通知的标题和正文都可以改成自己的写法，所有通知通道（QQ、Telegram、群机器人、Bark 等）都按它发。在「ChatOps → 消息模板」里选一种事件，填「标题模板」或「正文模板」，点「保存」。空着的一项用内置文字；点「恢复默认」回到内置的写法。ChatOps 命令的回复和 AI 助手在通道里发的消息也能改，见下面的[命令回复与 AI 助手回复](#命令回复与-ai-助手回复)。
 
 模板用 Go 模板的写法：变量写成 `.site` 这样，放在两对花括号里，换成变量的值；`if` 是条件，`range` 遍历列表。页面上的「变量」列出这种事件能用的全部变量，点一下插到光标处；「预览（示例数据）」按示例数据实时渲染；「内置的样子」是不改时发出去的内容。
 
@@ -123,7 +123,44 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 
 保存时会用示例数据渲染一遍：变量名写错、模板语法不对时不会保存，并写明第几行哪里不对。为了不拖慢通知，有几条限制：`range` 只能遍历列表变量，最多嵌套两层，两层循环里只能放几个简单的动作；一份模板最多声明 64 个变量；模板最长 8 KB；渲染出来的标题最长 1 KB、正文最长 16 KB；`printf` 的宽度与精度最大 256，不支持 `*` 与 `[n]` 的写法；一个函数的参数合计与结果都最长 64 KB，一次渲染里所有函数处理的内容合计最多 4 MB。发送时万一渲染出错或结果是空的，这条通知照内置文字发，不会因为模板写坏而发不出去。
 
-模板只改通知，不改 ChatOps 命令和 AI 助手的回复。Telegram 按纯文本发，模板里写的 HTML、Markdown 标记会原样显示。
+Telegram 按纯文本发，模板里写的 HTML、Markdown 标记会原样显示。
+
+### 命令回复与 AI 助手回复
+
+在 Telegram、QQ 等通道里发命令时 pt-tools 的回复，以及 AI 助手在这些通道里发的消息，也能用模板改写。它们在消息模板页的「ChatOps 命令回复」「AI 助手回复」两组里，只有正文模板。回复只发回说话的那个通道，Webhook 收不到；模板对所有绑定都一样，不分绑定的回复语言。
+
+| 事件                       | 什么时候用                                                               | 主要变量                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `reply.status` 状态概览    | `/status`                                                                | `tasks`、`running`，`items`（各下载器：`name`、`type`、`healthy`）                                                                      |
+| `reply.torrents` 种子列表  | `/torrents <下载器>`                                                     | `downloader`、`total`，`items`（最多 20 个：`name`、`state`、`progress`、`size`、`size_bytes`），`items_more`                           |
+| `reply.sites` 站点列表     | `/sites`                                                                 | `count`，`items`（`name`、`status`、`enabled`）                                                                                         |
+| `reply.site_info` 用户信息 | `/sites <站点>`                                                          | `site`、`user`、`uploaded`、`downloaded`、`uploaded_bytes`、`downloaded_bytes`、`ratio`、`bonus`、`class`                               |
+| `reply.tasks` RSS 任务     | `/tasks`                                                                 | `count`、`running`，`items`（`site`、`rss`、`state`）                                                                                   |
+| `reply.signin` 签到        | `/signin`                                                                | `signed`、`failed`，`items`（`site`、`status`、`status_label`、`message`）                                                              |
+| `reply.version` 版本       | `/version`                                                               | `version`、`build`、`commit`、`update_checked`、`has_update`、`latest`                                                                  |
+| `reply.help` 命令列表      | `/help`                                                                  | `items`（`name`、`description`、`admin`）                                                                                               |
+| `reply.subs` 订阅列表      | `/subs`                                                                  | `count`，`items`（最多 20 个：`title`、`status`、`progress`），`items_more`                                                             |
+| `reply.other` 其他回复     | 其余的回复：别的命令的结果、命令出错，没绑定、权限不够、命令不认识的提示 | `command`（命令名，不带 `/`）、`ok`（做成了没有）                                                                                       |
+| `assistant.reply` AI 助手  | AI 助手发的消息                                                          | `kind`（`answer` 回答、`notice` 提示、`confirm` 要确认的操作、`timeout` 确认超时、`status` 收到消息时的即时答复）、`summary`、`expires` |
+
+公共变量里的 `text` 是内置的回复文字，`event`、`time` 等照常能用；回复没有标题，`title` 是空的。命令没做成时（参数不对、服务不可用、出错），回复按 `reply.other` 套用，`ok` 是 false，上面几个查询命令出错时也一样。
+
+例：没做成的回复前面加个标记；`/status` 只列连不上的下载器；AI 助手的回答前加「🤖」，其余消息照旧。
+
+```text
+{{if not .ok}}❌ {{end}}{{.text}}
+```
+
+```text
+{{.running}}/{{.tasks}} 个 RSS 任务在跑{{range .items}}{{if not .healthy}}
+⚠️ {{.name}} 连不上{{end}}{{end}}
+```
+
+```text
+{{if eq .kind "answer"}}🤖 {{end}}{{.text}}
+```
+
+回复太长时分几条发：每条最多 3500 个字，最多 4 条，再多的省略并注明。AI 助手的回答也是先套模板再分条，模板加的开头和结尾只出现一次。命令回复与助手回复的正文最长 64 KB，其余限制和通知一样；渲染出错或结果是空的时候发内置文字。
 
 ## 自定义 Webhook
 

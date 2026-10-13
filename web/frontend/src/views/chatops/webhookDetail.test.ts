@@ -90,10 +90,13 @@ async function mountDetail(over: Record<string, unknown> = {}) {
     ...over,
   });
   api.list.mockResolvedValue({
+    groups: [],
     common_vars: [],
     events: [
-      { type: "rss.matched", name: "RSS 命中过滤规则" },
-      { type: "test", name: "通道测试" },
+      { type: "rss.matched", group: "notify", name: "RSS 命中过滤规则" },
+      { type: "test", group: "notify", name: "通道测试" },
+      { type: "reply.status", group: "reply", name: "/status 状态概览", no_title: true },
+      { type: "assistant.reply", group: "assistant", name: "AI 助手的回复", no_title: true },
     ],
   });
   api.preview.mockResolvedValue({
@@ -267,6 +270,22 @@ describe("Webhook 的请求", () => {
     await vi.waitFor(() => expect((field("wh-body") as HTMLTextAreaElement).disabled).toBe(true));
     await vi.waitFor(() =>
       expect(api.preview).toHaveBeenCalledWith(expect.objectContaining({ method: "GET" })),
+    );
+  });
+});
+
+describe("Webhook 预览的事件", () => {
+  it("只列通知：命令回复与助手回复到不了 Webhook", async () => {
+    await mountDetail();
+    await pickOption("wh-preview-event", "通道测试");
+    const names = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].map(
+      (o) => o.textContent?.trim(),
+    );
+    expect(names).toContain("RSS 命中过滤规则");
+    expect(names).not.toContain("/status 状态概览");
+    expect(names).not.toContain("AI 助手的回复");
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenLastCalledWith(expect.objectContaining({ type: "test" })),
     );
   });
 });

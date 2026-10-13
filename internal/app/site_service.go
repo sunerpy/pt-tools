@@ -27,15 +27,20 @@ type SiteSummaryDTO struct {
 	Status        string    `json:"status"`
 }
 
-// UserInfoDTO 是站点用户信息的 chatops 友好快照（字段全部转字符串便于格式化展示）。
+// UserInfoDTO 是站点用户信息的 chatops 友好快照（字段转成字符串便于格式化展示）；*Bytes、*Value 是原始的数，
+// 给 /sites <站点> 回复的消息模板用。
 type UserInfoDTO struct {
-	SiteName   string `json:"site_name"`
-	Username   string `json:"username"`
-	Uploaded   string `json:"uploaded"`
-	Downloaded string `json:"downloaded"`
-	Ratio      string `json:"ratio"`
-	Bonus      string `json:"bonus"`
-	Class      string `json:"class"`
+	SiteName        string  `json:"site_name"`
+	Username        string  `json:"username"`
+	Uploaded        string  `json:"uploaded"`
+	Downloaded      string  `json:"downloaded"`
+	Ratio           string  `json:"ratio"`
+	Bonus           string  `json:"bonus"`
+	Class           string  `json:"class"`
+	UploadedBytes   int64   `json:"uploaded_bytes"`
+	DownloadedBytes int64   `json:"downloaded_bytes"`
+	RatioValue      float64 `json:"ratio_value"`
+	BonusValue      float64 `json:"bonus_value"`
 }
 
 // SiteService 为 chatops `/sites` `/userinfo` 等命令提供站点元数据与用户统计。
@@ -122,13 +127,17 @@ func (s *siteService) GetSiteUserInfo(ctx context.Context, siteName string) (Use
 		return UserInfoDTO{}, fmt.Errorf("get user info: %w", err)
 	}
 	return UserInfoDTO{
-		SiteName:   siteName,
-		Username:   info.Username,
-		Uploaded:   formatBytes(info.Uploaded),
-		Downloaded: formatBytes(info.Downloaded),
-		Ratio:      fmt.Sprintf("%.3f", info.Ratio),
-		Bonus:      fmt.Sprintf("%.0f", info.Bonus),
-		Class:      classOf(info),
+		SiteName:        siteName,
+		Username:        info.Username,
+		Uploaded:        formatBytes(info.Uploaded),
+		Downloaded:      formatBytes(info.Downloaded),
+		Ratio:           fmt.Sprintf("%.3f", info.Ratio),
+		Bonus:           fmt.Sprintf("%.0f", info.Bonus),
+		Class:           classOf(info),
+		UploadedBytes:   info.Uploaded,
+		DownloadedBytes: info.Downloaded,
+		RatioValue:      info.Ratio,
+		BonusValue:      info.Bonus,
 	}, nil
 }
 
