@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"regexp"
-	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -17,15 +15,16 @@ import (
 
 // funcs 是模板能用的函数。eq/ne/lt/le/gt/ge 换成认数字的版本（整数与浮点数可以直接比），
 // printf 限制宽度与精度，call 不让用（数据里没有函数，留着只会让人困惑）。
+// 内置的 print、println、html、js、urlquery 会把所有参数连成一串，换成限制了参数合计与结果长度的版本。
 func funcs() template.FuncMap {
 	return template.FuncMap{
 		"json":      toJSON,
 		"default":   dflt,
 		"truncate":  truncate,
-		"upper":     func(s any) string { return strings.ToUpper(str(s)) },
-		"lower":     func(s any) string { return strings.ToLower(str(s)) },
+		"upper":     func(s any) (string, error) { return capped(strings.ToUpper(str(s))) },
+		"lower":     func(s any) (string, error) { return capped(strings.ToLower(str(s))) },
 		"trim":      func(s any) string { return strings.TrimSpace(str(s)) },
-		"replace":   func(old, repl string, s any) string { return strings.ReplaceAll(str(s), old, repl) },
+		"replace":   replace,
 		"contains":  func(sub string, s any) bool { return strings.Contains(str(s), sub) },
 		"hasPrefix": func(p string, s any) bool { return strings.HasPrefix(str(s), p) },
 		"hasSuffix": func(p string, s any) bool { return strings.HasSuffix(str(s), p) },
@@ -34,6 +33,11 @@ func funcs() template.FuncMap {
 		"bytes":     humanBytes,
 		"date":      date,
 		"printf":    safePrintf,
+		"print":     bounded(fmt.Sprint),
+		"println":   bounded(fmt.Sprintln),
+		"html":      bounded(template.HTMLEscaper),
+		"js":        bounded(template.JSEscaper),
+		"urlquery":  bounded(template.URLQueryEscaper),
 		"eq":        eq,
 		"ne":        ne,
 		"lt":        func(a, b any) (bool, error) { return order(a, b, func(c int) bool { return c < 0 }) },
@@ -55,6 +59,71 @@ func str(v any) string {
 	return fmt.Sprint(v)
 }
 
+// maxIntermediate 是会让结果变长的函数的结果上限，也是把参数连成一串的函数的参数合计上限。
+// 函数的结果还能交给别的函数、同一个长字符串还能作为参数写很多遍，最终输出的上限管不到这些中间结果：
+// 没有这一条，replace、printf、html 这类可以先造出几百 G 的字符串。和最大的输出上限（请求体）一样大。
+const maxIntermediate = 64 << 10
+
+var (
+	errTooLongResult = fmt.Errorf("结果太长：一个函数的结果最多 %d 字节", maxIntermediate)
+	errTooLongArgs   = fmt.Errorf("参数太长：一个函数的参数合计最多 %d 字节", maxIntermediate)
+)
+
+func capped(s string) (string, error) {
+	if len(s) > maxIntermediate {
+		return "", errTooLongResult
+	}
+	return s, nil
+}
+
+// bounded 给把参数连成一串的函数（print、html 这些）加上限：先查参数合计，再查结果。
+func bounded(f func(...any) string) func(...any) (string, error) {
+	return func(args ...any) (string, error) {
+		if err := checkArgs(args); err != nil {
+			return "", err
+		}
+		return capped(f(args...))
+	}
+}
+
+func checkArgs(args []any) error {
+	size := 0
+	for _, a := range args {
+		if size += argSize(a); size > maxIntermediate {
+			return errTooLongArgs
+		}
+	}
+	return nil
+}
+
+// argSize 估算值写成文字有多长：字符串按字节数，列表与对象按各项之和，数字、真假值按 24 字节。
+func argSize(v any) int {
+	if v == nil {
+		return 0
+	}
+	if s, ok := v.(string); ok {
+		return len(s)
+	}
+	r := reflect.ValueOf(v)
+	switch r.Kind() {
+	case reflect.String:
+		return r.Len()
+	case reflect.Slice, reflect.Array:
+		n := 0
+		for i := range r.Len() {
+			n += 1 + argSize(r.Index(i).Interface())
+		}
+		return n
+	case reflect.Map:
+		n := 0
+		for it := r.MapRange(); it.Next(); {
+			n += 2 + argSize(it.Key().Interface()) + argSize(it.Value().Interface())
+		}
+		return n
+	}
+	return 24
+}
+
 // toJSON 是值的 JSON 写法（字符串带引号、转义好），用在请求体里：{"content": {{json .text}}}。
 func toJSON(v any) (string, error) {
 	var b bytes.Buffer
@@ -63,7 +132,17 @@ func toJSON(v any) (string, error) {
 	if err := enc.Encode(v); err != nil {
 		return "", err
 	}
-	return strings.TrimSuffix(b.String(), "\n"), nil
+	return capped(strings.TrimSuffix(b.String(), "\n"))
+}
+
+// replace 把 s 里的 old 全部换成 repl；先算出结果多长，超过上限就不做（old 为空时每个字符之间都插一份 repl）。
+func replace(old, repl string, s any) (string, error) {
+	text := str(s)
+	n := strings.Count(text, old)
+	if size := len(text) + n*(len(repl)-len(old)); size > maxIntermediate {
+		return "", errTooLongResult
+	}
+	return strings.ReplaceAll(text, old, repl), nil
 }
 
 // dflt 是 default：值为空（nil、空串、0、false、空列表）时用 def。写法：{{.rule | default "无"}}。
@@ -118,8 +197,15 @@ func join(sep string, list any) (string, error) {
 		return "", fmt.Errorf("join 要的是列表，给的是 %T", list)
 	}
 	parts := make([]string, r.Len())
+	size := 0
 	for i := range parts {
 		parts[i] = str(r.Index(i).Interface())
+		if size += len(parts[i]); i > 0 {
+			size += len(sep)
+		}
+		if size > maxIntermediate {
+			return "", errTooLongResult
+		}
 	}
 	return strings.Join(parts, sep), nil
 }
@@ -146,14 +232,14 @@ func humanBytes(v any) (string, error) {
 func date(layout string, v any) (string, error) {
 	switch t := v.(type) {
 	case time.Time:
-		return t.Local().Format(layout), nil
+		return capped(t.Local().Format(layout))
 	case string:
 		if t == "" {
 			return "", nil
 		}
 		for _, l := range []string{time.RFC3339Nano, time.DateTime} {
 			if at, err := time.ParseInLocation(l, t, time.Local); err == nil {
-				return at.Local().Format(layout), nil
+				return capped(at.Local().Format(layout))
 			}
 		}
 		return "", fmt.Errorf("date 读不懂这个时间：%q", t)
@@ -162,30 +248,56 @@ func date(layout string, v any) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("date 要的是时间戳或时间，给的是 %v", v)
 	}
-	return time.Unix(int64(sec), 0).Local().Format(layout), nil
+	return capped(time.Unix(int64(sec), 0).Local().Format(layout))
 }
-
-// fmtWidthRe 找出格式串里每个占位符的宽度与精度
-var fmtWidthRe = regexp.MustCompile(`%[-+# 0]*(\*|\d+)?(?:\.(\*|\d+))?[a-zA-Z%]`)
 
 // maxFmtWidth 是 printf 的宽度与精度上限：不然 %999999999d 一下就要分配上 G 的内存
 const maxFmtWidth = 256
 
-// safePrintf 是限制了宽度与精度的 printf。
-func safePrintf(format string, args ...any) (string, error) {
-	for _, m := range fmtWidthRe.FindAllStringSubmatch(format, -1) {
-		for _, w := range m[1:] {
-			if w == "*" {
-				return "", errors.New("printf 不支持用 * 指定宽度")
-			}
-			if w != "" {
-				if n, err := strconv.Atoi(w); err != nil || n > maxFmtWidth {
-					return "", fmt.Errorf("printf 的宽度与精度最多 %d", maxFmtWidth)
+// checkFormat 逐个看格式串里的占位符：从 % 读到动词（字母）为止，中间每一段数字（宽度、精度）都不能超过上限；
+// 不认 * 与 [n]（用参数指定宽度、指定第几个参数），它们能绕开写在格式串里的数字。
+func checkFormat(format string) error {
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		j := i + 1
+		if j < len(format) && format[j] == '%' {
+			i = j
+			continue
+		}
+		num := 0
+	spec:
+		for ; j < len(format); j++ {
+			c := format[j]
+			switch {
+			case c >= '0' && c <= '9':
+				num = num*10 + int(c-'0')
+				if num > maxFmtWidth {
+					return fmt.Errorf("printf 的宽度与精度最多 %d", maxFmtWidth)
 				}
+			case c == '*' || c == '[' || c == ']':
+				return errors.New("printf 不支持 * 与 [n] 的写法")
+			case c == '.' || c == '-' || c == '+' || c == '#' || c == ' ':
+				num = 0
+			default:
+				break spec
 			}
 		}
+		i = j
 	}
-	return fmt.Sprintf(format, args...), nil
+	return nil
+}
+
+// safePrintf 是限制了宽度与精度、参数合计与结果长度的 printf。
+func safePrintf(format string, args ...any) (string, error) {
+	if err := checkFormat(format); err != nil {
+		return "", err
+	}
+	if err := checkArgs(args); err != nil {
+		return "", err
+	}
+	return capped(fmt.Sprintf(format, args...))
 }
 
 // eq 认数字：两边都是数字时按数值比（整数与浮点数可以比）；其他按同类比较。和内置的一样，可以给多个候选：eq .x 1 2 3。

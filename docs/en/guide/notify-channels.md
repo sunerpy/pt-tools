@@ -121,6 +121,6 @@ Functions: the comparisons `eq`, `ne`, `lt`, `le`, `gt` and `ge` (integers and d
 {{printf "%.1f" .bonus}}
 ```
 
-Saving renders the template once with sample data: a misspelled variable or a syntax error is not saved, and the message says which line is wrong. So that templates cannot slow notifications down, there are a few limits: `range` only loops over list variables, at most two levels deep; a template can be up to 8 KB; a rendered title up to 1 KB and a body up to 16 KB. If rendering still fails when sending, or produces nothing, that notification goes out with the built-in text, so a broken template never stops notifications.
+Saving renders the template once with sample data: a misspelled variable or a syntax error is not saved, and the message says which line is wrong. So that templates cannot slow notifications down, there are a few limits: `range` only loops over list variables, at most two levels deep; a template can be up to 8 KB; a rendered title up to 1 KB and a body up to 16 KB; `printf` widths and precisions go up to 256, without the `*` and `[n]` forms; a function's arguments together, and its result, can be up to 64 KB. If rendering still fails when sending, or produces nothing, that notification goes out with the built-in text, so a broken template never stops notifications.
 
 Templates change notifications only, not the replies to ChatOps commands or from the AI assistant. Telegram messages are sent as plain text, so HTML or Markdown in a template shows up as written.

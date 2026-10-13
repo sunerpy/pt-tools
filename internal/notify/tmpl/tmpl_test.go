@@ -162,3 +162,59 @@ func TestExecuteErrors(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrInvalid))
 	assert.ErrorContains(t, err, "渲染结果太长")
 }
+
+// 函数的中间结果也有上限：printf 的宽度写不大，也不能用 * 与 [n] 绕过；会让结果变长的函数，结果最多 64 KiB；
+// 把参数连成一串的函数，参数合计也最多 64 KiB。否则几个函数一组合，最终输出的上限管不到之前就能造出几百 G 的字符串。
+func TestIntermediateLimits(t *testing.T) {
+	// 64 KiB 的空格：256 个空格里的每个都换成 256 个空格，正好在上限上
+	const b64k = `{{$b := replace " " (printf "%256s" "") (printf "%256s" "")}}`
+	bad := map[string]string{
+		`{{printf "%1000000[1]s" "x"}}`:                                          "printf 的宽度与精度最多 256",
+		`{{replace "" (printf "%1000000[1]s" "x") (printf "%1000000[1]s" "x")}}`: "printf 的宽度与精度最多 256",
+		`{{printf "%[1]s" "x"}}`:                                                 "不支持 * 与 [n]",
+		`{{printf "%[2]*[1]d" 1 5}}`:                                             "不支持 * 与 [n]",
+		`{{printf "%*d" 5 1}}`:                                                   "不支持 * 与 [n]",
+		`{{printf "%.*f" 2 1.5}}`:                                                "不支持 * 与 [n]",
+		`{{printf "%.300f" 1.5}}`:                                                "printf 的宽度与精度最多 256",
+		`{{printf "%0000300d" 1}}`:                                               "printf 的宽度与精度最多 256",
+		// 256 + 257×256 字节
+		`{{replace "" (printf "%256s" "x") (printf "%256s" "x")}}`: "结果太长",
+		// 257 + 256×256 字节
+		`{{join (printf "%256s" "") (split "" (print (printf "%256s" "") " "))}}`: "结果太长",
+		// 32768 个 ɐ（每个 2 字节）转成大写是每个 3 字节
+		`{{upper (replace " " (printf "%128s" "" | replace " " "ɐ") (printf "%256s" ""))}}`: "结果太长",
+		b64k + `{{json $b}}`:                   "结果太长",
+		b64k + `{{printf "%s%s" $b $b}}`:       "参数太长",
+		b64k + `{{print $b $b}}`:               "参数太长",
+		b64k + `{{println $b "x"}}`:            "参数太长",
+		b64k + `{{html $b $b}}`:                "参数太长",
+		b64k + `{{js $b "x"}}`:                 "参数太长",
+		b64k + `{{urlquery $b "x"}}`:           "参数太长",
+		b64k + `{{printf "%v" (split "" $b)}}`: "参数太长",
+	}
+	for src, want := range bad {
+		tp, err := Parse(src, Body, lists)
+		require.NoError(t, err, src)
+		_, err = tp.Check(data())
+		require.Error(t, err, src)
+		assert.ErrorIs(t, err, ErrInvalid, src)
+		assert.Contains(t, err.Error(), want, src)
+	}
+
+	ok := map[string]string{
+		`{{printf "%%300d"}}`:           "%300d",
+		`{{len (printf "%256s|" "x")}}`: "257",
+		b64k + `{{len $b}}`:             "65536",
+		// 256 + 255×256 字节，正好在上限上
+		`{{len (join (printf "%256s" "") (split "" (printf "%256s" "")))}}`: "65536",
+		`{{print "a" 1}}`:      "a1",
+		`{{println "x"}}`:      "x\n",
+		`{{html "<a>"}}`:       "&lt;a&gt;",
+		`{{js "'"}}`:           `\'`,
+		`{{urlquery "a b"}}`:   "a+b",
+		`{{.site | urlquery}}`: "hdtime",
+	}
+	for src, want := range ok {
+		assert.Equal(t, want, render(t, src, Body), src)
+	}
+}
