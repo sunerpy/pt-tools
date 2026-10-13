@@ -122,3 +122,26 @@ func TestMatchSites(t *testing.T) {
 	assert.Equal(t, "www.hdsky.me", got[1].Host)
 	assert.Equal(t, "o=1", got[2].Header, "hostOnly 字段优先于前导点")
 }
+
+// 浏览器扩展（tools/browser-extension 的 modules/cookiecloud）上传的密文：两边用同一份 OpenSSL 生成的向量，
+// 扩展的测试核对加密结果逐字节相同，这里核对 pt-tools 解得开。
+func TestDecryptExtensionVectors(t *testing.T) {
+	const (
+		uuid     = "test-uuid-1234"
+		password = "p@ss 中文"
+	)
+	require.Equal(t, "3fb1a74ab03ea4a0", passphrase(uuid, password))
+	for name, p := range map[string]Payload{
+		CryptoFixed: {CryptoType: CryptoFixed, Encrypted: "1Tm4pmaoEMIDtPcdOeKcSbNZZ/2r54DoKPlK4wl+1uQVcTEg479NKYZPN7GOo0J05ShoXe5iNP3h5RQWmXS6LjvhTRG/" +
+			"cSZsXyteNDn0+GTUIKrvMv2v5oSO6oJ2yjr4GzDCArorHJvD2wghOaJbZhiZi+wbR+PSZMIm3BEQ54c="},
+		CryptoLegacy: {CryptoType: CryptoLegacy, Encrypted: "U2FsdGVkX18BAgMEBQYHCCCzhyNw3DRq1A/8o3URw4n8gio0ile1cZMZoUAwxpyXNNm4yAIeJbc7ZXSBYxI1VJXIVNBjqkR+" +
+			"UOXi+Llol7oxiN0Rdudu1kXfW/y2HrrZTkUCpzpGGucz1MqMqu0hd8q26bCE1f22Qvv8fVp+eYktkSQeb7xpqYfAjHKMCckZ"},
+	} {
+		d, err := Decrypt(p, uuid, password)
+		require.NoError(t, err, name)
+		require.Len(t, d.CookieData["hdsky.me"], 1, name)
+		c := d.CookieData["hdsky.me"][0]
+		assert.Equal(t, "c_secure_uid", c.Name, name)
+		assert.Equal(t, ".hdsky.me", c.Domain, name)
+	}
+}

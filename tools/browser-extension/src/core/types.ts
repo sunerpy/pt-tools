@@ -83,6 +83,66 @@ export interface SiteCookieData {
   capturedAt: string;
 }
 
+/** SyncSchedule 是定时同步的设置。 */
+export interface SyncSchedule {
+  enabled: boolean;
+  /** intervalMinutes 在 MIN_SYNC_INTERVAL 与 MAX_SYNC_INTERVAL 之间 */
+  intervalMinutes: number;
+  /** allSites 为 true 时同步 pt-tools 里已启用的全部 Cookie 站点；false 时只同步打开了「自动同步」的站点 */
+  allSites: boolean;
+}
+
+/** SyncRunSummary 是一次定时（或「立即同步一次」）的结果。 */
+export interface SyncRunSummary {
+  at: string;
+  trigger: "schedule" | "manual";
+  ptTools: {
+    synced: string[];
+    unchanged: number;
+    failed: Array<{ siteId: string; error: string }>;
+    /** skipped 是这次没同步 pt-tools 的原因（没连上、没有要同步的站点） */
+    skipped?: string;
+    /** error 是这一轮同步了、但没能照设置做全的原因（例如读不到 pt-tools 的站点列表） */
+    error?: string;
+  };
+  cookieCloud: {
+    uploaded: boolean;
+    domains: number;
+    cookies: number;
+    error?: string;
+    skipped?: string;
+  };
+}
+
+/** CookieCloudSettingsView 是弹窗看到的 CookieCloud 设置：不带密码，只说有没有设置。 */
+export interface CookieCloudSettingsView {
+  enabled: boolean;
+  serverUrl: string;
+  uuid: string;
+  cryptoType: "aes-128-cbc-fixed" | "legacy";
+  hasPassword: boolean;
+  lastUploadAt: string | null;
+  domains: number;
+  cookies: number;
+  lastError: string | null;
+  lastErrorAt: string | null;
+}
+
+export interface SyncSettingsView {
+  schedule: SyncSchedule;
+  cookieCloud: CookieCloudSettingsView;
+  lastRun: SyncRunSummary | null;
+}
+
+export interface SaveCookieCloudPayload {
+  enabled: boolean;
+  serverUrl: string;
+  uuid: string;
+  cryptoType: "aes-128-cbc-fixed" | "legacy";
+  /** password 不传时保留原来的 */
+  password?: string;
+}
+
 export type MessageType =
   | "CAPTURE_PAGE"
   | "PAGE_CAPTURED"
@@ -102,7 +162,13 @@ export type MessageType =
   | "EXPORT_ZIP"
   | "CREATE_ISSUE"
   | "GET_STATUS"
-  | "STATUS_UPDATE";
+  | "STATUS_UPDATE"
+  | "GET_SYNC_SETTINGS"
+  | "SAVE_SYNC_SCHEDULE"
+  | "RUN_SYNC_NOW"
+  | "SAVE_COOKIECLOUD"
+  | "TEST_COOKIECLOUD"
+  | "UPLOAD_COOKIECLOUD";
 
 export interface Message<T = unknown> {
   type: MessageType;
@@ -224,6 +290,12 @@ export interface MessagePayloadMap {
   CREATE_ISSUE: CreateIssuePayload;
   GET_STATUS: Record<string, never>;
   STATUS_UPDATE: StatusPayload | TabSiteStatus;
+  GET_SYNC_SETTINGS: Record<string, never>;
+  SAVE_SYNC_SCHEDULE: SyncSchedule;
+  RUN_SYNC_NOW: Record<string, never>;
+  SAVE_COOKIECLOUD: SaveCookieCloudPayload;
+  TEST_COOKIECLOUD: Record<string, never>;
+  UPLOAD_COOKIECLOUD: { overwrite?: boolean };
 }
 
 export interface MessageSender {

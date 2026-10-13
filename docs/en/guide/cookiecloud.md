@@ -4,7 +4,7 @@ CookieCloud import (CookieCloud 导入), under Sites (站点), fetches the cooki
 
 ## Before you start
 
-- You need a working CookieCloud: the CookieCloud extension in your browser, syncing to your own server.
+- You need a working CookieCloud server: the CookieCloud extension in your browser syncing to it, or the PT Tools Helper extension uploading to it (see [Browser extension](browser-extension.md#syncing-to-cookiecloud); you do not need the CookieCloud extension as well).
 - The extension shows the server address, the user KEY (UUID) and the end-to-end encryption password; enter the same three in pt-tools.
 - pt-tools only fetches the encrypted data from the server (`GET <server address>/get/<UUID>`) and decrypts it on this machine with the password; the password is never sent to the CookieCloud server.
 - The password is stored on this machine, encrypted with the same key as the site cookies; the page and the API never show it, only whether it is set.
