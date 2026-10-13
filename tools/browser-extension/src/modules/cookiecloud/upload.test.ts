@@ -173,19 +173,32 @@ describe("上传到 CookieCloud", () => {
     expect(again.result.uploaded).toBe(false);
     expect(posts()).toBe(1);
 
-    // 只有过期时间变了：不算变化
+    // 只有过期时间变了也重新上传：pt-tools 导入时丢掉已经过期的 Cookie，服务端要拿到新的过期时间
     jar["hdsky.me"] = jar["hdsky.me"].map((c) => ({ ...c, expirationDate: 1999999999 }));
-    expect((await uploadToCookieCloud(CFG, state, { force: false })).result.uploaded).toBe(false);
-
-    jar["hdsky.me"] = [cookie("c_secure_uid", "2", ".hdsky.me")];
     ({ state } = await uploadToCookieCloud(CFG, state, { force: false }));
     expect(posts()).toBe(2);
 
-    await uploadToCookieCloud({ ...CFG, uuid: "uuid-2" }, state, { force: false });
+    jar["hdsky.me"] = [cookie("c_secure_uid", "2", ".hdsky.me")];
+    ({ state } = await uploadToCookieCloud(CFG, state, { force: false }));
     expect(posts()).toBe(3);
 
-    await uploadToCookieCloud(CFG, state, { force: true });
+    await uploadToCookieCloud({ ...CFG, uuid: "uuid-2" }, state, { force: false });
     expect(posts()).toBe(4);
+
+    await uploadToCookieCloud(CFG, state, { force: true });
+    expect(posts()).toBe(5);
+
+    // 换了密码：目标里有密码的指纹，照传（用新密码加密；服务端的数据是旧密码加密的，所以要覆盖）
+    await uploadToCookieCloud({ ...CFG, password: "new-pass" }, state, {
+      force: false,
+      overwrite: true,
+    });
+    expect(posts()).toBe(6);
+    // 之后旧密码解不开了：不覆盖
+    await expect(uploadToCookieCloud(CFG, state, { force: true })).rejects.toMatchObject({
+      code: "decrypt",
+    });
+    expect(posts()).toBe(6);
   });
 
   it("没填完整、地址不对、重定向、HTTP 出错时抛出能看懂的错误", async () => {

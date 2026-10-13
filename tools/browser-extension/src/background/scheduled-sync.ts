@@ -1,9 +1,10 @@
 /*
  * 定时同步（M22）：按设置的间隔把 Cookie 同步到 pt-tools，并上传到 CookieCloud（打开了的话）。
  *
- * pt-tools：只推 Cookie 有变化的站点（按上次推送的 Cookie 的 SHA-256 判断）。每推一次 pt-tools 都会启用站点、刷新站点实例、
- * 做一次登录探测并重载调度器，没变的不推。「全部站点」只推 pt-tools 里已经启用的站点，不替用户启用新站点；
- * 单独打开了「自动同步」的站点照旧算在里面。
+ * pt-tools：只推 Cookie 有变化的站点（按上次推送的指纹判断，指纹带着 pt-tools 的地址，见 pushFingerprint）。
+ * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器，没变的不推。「全部站点」只推 pt-tools 里
+ * 已经启用的站点，不替用户启用新站点；单独打开了「自动同步」的站点照旧算在里面。
+ * 推 Cookie 的各条路共用一把锁（withPushLock）：读 Cookie、比指纹、推送、记指纹在锁里一起做。
  * CookieCloud：Cookie 与目标都没变时不传（见 modules/cookiecloud/upload）。
  *
  * 依赖都从外面传进来（chrome API、存储、网络），这里只有挑站点与判断的逻辑，好测。
@@ -45,6 +46,26 @@ export async function sha256Hex(text: string): Promise<string> {
   return Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * pushFingerprint 是「推给哪个 pt-tools 的哪份 Cookie」的指纹：带上地址，换了 pt-tools 实例以后 Cookie 没变也会重新推。
+ */
+export function pushFingerprint(baseUrl: string, cookie: string): Promise<string> {
+  return sha256Hex(`${baseUrl.trim().replace(/\/+$/, "")}\n${cookie}`);
+}
+
+/**
+ * createLock 是一把异步锁：fn 一个接一个跑。推 Cookie 的各条路（定时、手动、批量、Cookie 变化时的自动同步）共用一把，
+ * 先读到的旧 Cookie 不会晚于新的推出去、把后端改回旧的。
+ */
+export function createLock(): <T>(fn: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = tail.then(fn, fn);
+    tail = run.catch(() => undefined);
+    return run;
+  };
+}
+
 /** AuthExpiredError 表示 pt-tools 的登录过期了：这一轮不再推别的站点。 */
 export class AuthExpiredError extends Error {
   constructor() {
@@ -57,7 +78,10 @@ export interface ScheduledSyncDeps {
   sites: KnownSite[];
   getSchedule(): Promise<SyncSchedule>;
   getAutoSyncMap(): Promise<Record<string, boolean>>;
-  getHashMap(): Promise<Record<string, string>>;
+  /** getHash 是这个站点上次推送成功的指纹（见 pushFingerprint） */
+  getHash(siteId: string): Promise<string | undefined>;
+  /** withPushLock 在推 Cookie 的锁里跑 fn（和手动、自动同步共用一把） */
+  withPushLock<T>(fn: () => Promise<T>): Promise<T>;
   /** ptTools 返回连着的 pt-tools 地址；没配地址或没连上时返回 null */
   ptTools(): Promise<string | null>;
   /** enabledSites 返回 pt-tools 里已启用的站点名（小写）；登录过期时抛 AuthExpiredError */
@@ -66,7 +90,7 @@ export interface ScheduledSyncDeps {
   readCookie(site: KnownSite): Promise<string>;
   /** pushCookie 把 Cookie 推给 pt-tools；登录过期时抛 AuthExpiredError */
   pushCookie(baseUrl: string, site: KnownSite, cookie: string): Promise<void>;
-  /** recordPushed 记下推送成功：Cookie 的指纹与时间 */
+  /** recordPushed 记下推送成功：指纹与时间 */
   recordPushed(siteId: string, hash: string, at: string): Promise<void>;
   /** authExpired 在 pt-tools 登录过期时调用（把连接标成断开） */
   authExpired(baseUrl: string): Promise<void>;
@@ -97,6 +121,8 @@ export function pickSites(
   );
 }
 
+type PushOutcome = "none" | "unchanged" | "pushed";
+
 async function syncPtTools(
   deps: ScheduledSyncDeps,
   schedule: SyncSchedule,
@@ -118,30 +144,34 @@ async function syncPtTools(
         out.skipped = t("sync.skipAuthExpired");
         return out;
       }
-      // 读不到站点列表时只同步单独打开了「自动同步」的站点
+      // 读不到站点列表：这一轮只同步单独打开了「自动同步」的站点，并写明原因（结果里看得到，也会发通知）
+      out.error = t("sync.enabledSitesFailed", deps.errorText(error));
       enabled = null;
     }
   }
   const sites = pickSites(deps.sites, schedule, autoSync, enabled);
   if (sites.length === 0) {
-    out.skipped = t("sync.skipNoSites");
+    if (!out.error) {
+      out.skipped = t("sync.skipNoSites");
+    }
     return out;
   }
-  const hashes = await deps.getHashMap();
   for (const site of sites) {
-    const cookie = await deps.readCookie(site);
-    if (!cookie) {
-      continue;
-    }
-    const hash = await sha256Hex(cookie);
-    if (hashes[site.id] === hash) {
-      out.unchanged += 1;
-      continue;
-    }
+    let outcome: PushOutcome;
     try {
-      await deps.pushCookie(baseUrl, site, cookie);
-      await deps.recordPushed(site.id, hash, deps.now().toISOString());
-      out.synced.push(site.id);
+      outcome = await deps.withPushLock(async (): Promise<PushOutcome> => {
+        const cookie = await deps.readCookie(site);
+        if (!cookie) {
+          return "none";
+        }
+        const hash = await pushFingerprint(baseUrl, cookie);
+        if ((await deps.getHash(site.id)) === hash) {
+          return "unchanged";
+        }
+        await deps.pushCookie(baseUrl, site, cookie);
+        await deps.recordPushed(site.id, hash, deps.now().toISOString());
+        return "pushed";
+      });
     } catch (error: unknown) {
       if (error instanceof AuthExpiredError) {
         await deps.authExpired(baseUrl);
@@ -149,6 +179,12 @@ async function syncPtTools(
         break;
       }
       out.failed.push({ siteId: site.id, error: deps.errorText(error) });
+      continue;
+    }
+    if (outcome === "unchanged") {
+      out.unchanged += 1;
+    } else if (outcome === "pushed") {
+      out.synced.push(site.id);
     }
   }
   return out;

@@ -34,7 +34,7 @@ export interface CookieCloudConfig {
 /** CookieCloudState 是上传的情况：上次成功的时间与指纹，上次的错误。 */
 export interface CookieCloudState {
   lastUploadAt: string | null;
-  /** lastDigest 与 lastTarget 是上次成功上传的 Cookie 指纹与「服务地址、UUID、加密方式」：都没变时定时上传跳过 */
+  /** lastDigest 与 lastTarget 是上次成功上传的 Cookie 指纹与目标（服务地址、UUID、加密方式与密码的指纹）：都没变时定时上传跳过 */
   lastDigest: string | null;
   lastTarget: string | null;
   domains: number;
@@ -75,8 +75,20 @@ function assertConfigured(cfg: CookieCloudConfig): void {
   parseServer(cfg.serverUrl);
 }
 
-function targetOf(cfg: CookieCloudConfig): string {
-  return [parseServer(cfg.serverUrl).toString(), cfg.uuid.trim(), cfg.cryptoType].join("|");
+/**
+ * targetOf 是上传的目标：服务地址、UUID、加密方式，加上密码的指纹（换了密码要用新密码重新加密上传）。
+ * 指纹是口令的 SHA-256，不是密码本身；密码本来就存在同一个扩展存储里。
+ */
+async function targetOf(cfg: CookieCloudConfig): Promise<string> {
+  const key = await sha256Hex(passphrase(cfg.uuid, cfg.password));
+  return [parseServer(cfg.serverUrl).toString(), cfg.uuid.trim(), cfg.cryptoType, key].join("|");
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const hash = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
+  );
+  return Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 let running: Promise<unknown> = Promise.resolve();
@@ -126,7 +138,7 @@ export function uploadToCookieCloud(
     const domains = Object.keys(ours).length;
     const cookies = Object.values(ours).reduce((n, list) => n + list.length, 0);
     const digest = await cookieDigest(ours);
-    const target = targetOf(cfg);
+    const target = await targetOf(cfg);
     const prev = state ?? EMPTY_COOKIECLOUD_STATE;
     if (!opts.force && prev.lastDigest === digest && prev.lastTarget === target) {
       return { result: { uploaded: false, domains, cookies }, state: prev };

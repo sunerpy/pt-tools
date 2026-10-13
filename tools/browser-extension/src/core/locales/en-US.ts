@@ -217,6 +217,8 @@ export default {
   "sync.problemTitle": "Scheduled cookie sync had problems",
   "sync.problemPtTools": "pt-tools: {0} site(s) failed ({1})",
   "sync.problemCookieCloud": "CookieCloud: {0}",
+  "sync.enabledSitesFailed":
+    "Could not read the pt-tools site list, so this run synced only the sites with “Auto-sync cookies” on: {0}",
   "sync.skipNotConnected": "Not connected to pt-tools",
   "sync.skipAuthExpired": "The pt-tools sign-in expired; reconnect in the extension settings",
   "sync.skipNoSites": "No sites to sync",

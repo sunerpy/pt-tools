@@ -6,10 +6,11 @@ import type { CookieCloudConfig, CookieCloudState } from "../modules/cookiecloud
 import {
   AuthExpiredError,
   type ScheduledSyncDeps,
+  createLock,
   normalizeSchedule,
   pickSites,
+  pushFingerprint,
   runSync,
-  sha256Hex,
 } from "./scheduled-sync";
 
 function site(id: string, syncField: KnownSite["syncField"] = "cookie"): KnownSite {
@@ -47,6 +48,7 @@ function harness(opts: {
   cookies?: Record<string, string>;
   pushError?: Record<string, Error>;
   connected?: boolean;
+  baseUrl?: string;
   cc?: CookieCloudConfig;
   upload?: ScheduledSyncDeps["upload"];
 }): Harness {
@@ -61,8 +63,9 @@ function harness(opts: {
     getSchedule: async () =>
       normalizeSchedule({ enabled: true, intervalMinutes: 60, ...opts.schedule }),
     getAutoSyncMap: async () => opts.autoSync ?? {},
-    getHashMap: async () => ({ ...h.hashes }),
-    ptTools: async () => (opts.connected === false ? null : "http://pt.example"),
+    getHash: async (siteId) => h.hashes[siteId],
+    withPushLock: createLock(),
+    ptTools: async () => (opts.connected === false ? null : (opts.baseUrl ?? "http://pt.example")),
     enabledSites: async () => {
       if (opts.enabled instanceof Error) throw opts.enabled;
       return opts.enabled ?? [];
@@ -133,11 +136,11 @@ describe("runSync", () => {
       enabled: ["hdsky", "hdtime", "ourbits"],
       cookies: { hdsky: "a=1", hdtime: "b=2" },
     });
-    h.hashes.hdtime = await sha256Hex("b=2");
+    h.hashes.hdtime = await pushFingerprint("http://pt.example", "b=2");
     const run = await runSync(h.deps, "schedule");
     expect(h.pushed).toEqual(["hdsky"]);
     expect(run.ptTools).toEqual({ synced: ["hdsky"], unchanged: 1, failed: [] });
-    expect(h.hashes.hdsky).toBe(await sha256Hex("a=1"));
+    expect(h.hashes.hdsky).toBe(await pushFingerprint("http://pt.example/", "a=1"));
     expect(run.cookieCloud.skipped).toBeTruthy();
 
     // 第二轮什么都没变：不推
@@ -242,5 +245,64 @@ describe("runSync", () => {
     expect(bad.ccState?.lastError).toBe("连不上");
     expect(bad.ccState?.lastErrorAt).toBe("2026-10-14T00:00:00.000Z");
     expect(bad.pushed).toEqual(["hdsky"]);
+  });
+
+  it("指纹带着 pt-tools 的地址：换了实例以后 Cookie 没变也会重新推", async () => {
+    const h = harness({ autoSync: { hdsky: true }, cookies: { hdsky: "a=1" } });
+    await runSync(h.deps, "schedule");
+    expect(h.pushed).toEqual(["hdsky"]);
+    await runSync(h.deps, "schedule");
+    expect(h.pushed).toEqual(["hdsky"]);
+    const other = harness({
+      autoSync: { hdsky: true },
+      cookies: { hdsky: "a=1" },
+      baseUrl: "http://other.example",
+    });
+    other.hashes = { ...h.hashes };
+    await runSync(other.deps, "schedule");
+    expect(other.pushed).toEqual(["hdsky"]);
+  });
+
+  it("读不到 pt-tools 的站点列表时写明原因，只同步单独打开了自动同步的", async () => {
+    const h = harness({
+      schedule: { allSites: true },
+      enabled: new Error("HTTP 500"),
+      cookies: { hdsky: "a=1" },
+    });
+    const run = await runSync(h.deps, "schedule");
+    expect(run.ptTools.error).toContain("HTTP 500");
+    expect(run.ptTools.skipped).toBeUndefined();
+    expect(h.pushed).toEqual([]);
+  });
+
+  it("每个站点的读 Cookie、比指纹、推送在同一把锁里：锁里有别的推送时等它做完再读", async () => {
+    const lock = createLock();
+    let cookie = "a=1";
+    const h = harness({ autoSync: { hdsky: true }, cookies: {} });
+    h.deps.withPushLock = lock;
+    h.deps.readCookie = async () => cookie;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const manual = lock(async () => {
+      entered();
+      await gate;
+      // 手动同步在锁里先把 Cookie 换成 b 并推了出去
+      cookie = "b=2";
+      h.hashes.hdsky = await pushFingerprint("http://pt.example", "b=2");
+    });
+    await started;
+    const scheduled = runSync(h.deps, "schedule");
+    release();
+    await manual;
+    const run = await scheduled;
+    // 定时同步等手动的做完才读：读到的是 b，和刚推的一样，不再推旧的 a
+    expect(run.ptTools.unchanged).toBe(1);
+    expect(h.pushed).toEqual([]);
   });
 });

@@ -75,9 +75,10 @@ import {
   AuthExpiredError,
   DEFAULT_SYNC_SCHEDULE,
   type ScheduledSyncDeps,
+  createLock,
   normalizeSchedule,
+  pushFingerprint,
   runSync,
-  sha256Hex,
 } from "./scheduled-sync";
 import { createTabGenerations } from "./tab-generation";
 
@@ -329,43 +330,46 @@ async function upsertCapturedPage(page: CapturedPage): Promise<void> {
   await publishStatus();
 }
 
+/** pushLock 是推 Cookie 的锁：定时同步、手动同步、批量同步与 Cookie 变化时的自动同步共用一把（见 scheduled-sync 的 createLock）。 */
+const pushLock = createLock();
+
 /**
- * syncKnownSite 把站点的 Cookie 推给 pt-tools，返回推了没有。skipUnchanged 时（自动同步）和上次推过的一样就不推：
+ * syncKnownSite 把站点的 Cookie 推给 pt-tools，返回推了没有。skipUnchanged 时（自动同步）和上次推给同一个 pt-tools 的一样就不推：
  * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器。手动同步总是推。
+ * 读 Cookie、比指纹、推送、记指纹都在 pushLock 里。
  */
-async function syncKnownSite(
-  site: KnownSite,
-  opts: { skipUnchanged?: boolean } = {},
-): Promise<boolean> {
-  if (site.syncField !== "cookie") {
-    throw new Error(t("error.authSyncUnsupported", site.name, site.syncField));
-  }
+function syncKnownSite(site: KnownSite, opts: { skipUnchanged?: boolean } = {}): Promise<boolean> {
+  return pushLock(async () => {
+    if (site.syncField !== "cookie") {
+      throw new Error(t("error.authSyncUnsupported", site.name, site.syncField));
+    }
 
-  const connection = await getConnection();
-  const baseUrl = connection.baseUrl?.trim();
-  if (!baseUrl) {
-    throw new Error(t("error.configurePtToolsUrl"));
-  }
+    const connection = await getConnection();
+    const baseUrl = connection.baseUrl?.trim();
+    if (!baseUrl) {
+      throw new Error(t("error.configurePtToolsUrl"));
+    }
 
-  const health = await checkCookieHealth(site);
-  if (!health.cookieString || health.status === "missing") {
-    throw new Error(t("error.cookieMissingCannotSync", site.name));
-  }
+    const health = await checkCookieHealth(site);
+    if (!health.cookieString || health.status === "missing") {
+      throw new Error(t("error.cookieMissingCannotSync", site.name));
+    }
 
-  const hash = await sha256Hex(health.cookieString);
-  if (opts.skipUnchanged && (await getSyncHashMap())[site.id] === hash) {
-    return false;
-  }
+    const hash = await pushFingerprint(baseUrl, health.cookieString);
+    if (opts.skipUnchanged && (await getSyncHashMap())[site.id] === hash) {
+      return false;
+    }
 
-  const api = new PtToolsApiClient(baseUrl);
-  await api.syncSiteCredential(site, health.cookieString);
+    const api = new PtToolsApiClient(baseUrl);
+    await api.syncSiteCredential(site, health.cookieString);
 
-  const syncedAt = new Date().toISOString();
-  await setLastSync(site.id, syncedAt);
-  await setSyncHash(site.id, hash);
-  // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
-  await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
-  return true;
+    const syncedAt = new Date().toISOString();
+    await setLastSync(site.id, syncedAt);
+    await setSyncHash(site.id, hash);
+    // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
+    await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
+    return true;
+  });
 }
 
 async function maybeAutoSyncByDomain(domain: string): Promise<void> {
@@ -682,7 +686,8 @@ const scheduledSyncDeps: ScheduledSyncDeps = {
   sites: KNOWN_SITES,
   getSchedule,
   getAutoSyncMap,
-  getHashMap: getSyncHashMap,
+  getHash: async (siteId) => (await getSyncHashMap())[siteId],
+  withPushLock: (fn) => pushLock(fn),
   ptTools: async () => {
     const connection = await getConnection();
     const baseUrl = connection.baseUrl?.trim();
@@ -729,6 +734,9 @@ function problemsOf(run: SyncRunSummary | null): string {
     return "";
   }
   const parts: string[] = [];
+  if (run.ptTools.error) {
+    parts.push(run.ptTools.error);
+  }
   if (run.ptTools.failed.length > 0) {
     parts.push(
       t(

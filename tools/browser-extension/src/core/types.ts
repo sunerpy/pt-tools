@@ -102,6 +102,8 @@ export interface SyncRunSummary {
     failed: Array<{ siteId: string; error: string }>;
     /** skipped 是这次没同步 pt-tools 的原因（没连上、没有要同步的站点） */
     skipped?: string;
+    /** error 是这一轮同步了、但没能照设置做全的原因（例如读不到 pt-tools 的站点列表） */
+    error?: string;
   };
   cookieCloud: {
     uploaded: boolean;

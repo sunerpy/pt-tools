@@ -209,6 +209,8 @@ export default {
   "sync.problemTitle": "Cookie 定时同步出了问题",
   "sync.problemPtTools": "pt-tools：{0} 个站点没同步上（{1}）",
   "sync.problemCookieCloud": "CookieCloud：{0}",
+  "sync.enabledSitesFailed":
+    "读不到 pt-tools 的站点列表，这一轮只同步了单独打开「自动同步 Cookie」的站点：{0}",
   "sync.skipNotConnected": "没有连上 pt-tools",
   "sync.skipAuthExpired": "pt-tools 的登录过期了，请在扩展设置里重新连接",
   "sync.skipNoSites": "没有要同步的站点",

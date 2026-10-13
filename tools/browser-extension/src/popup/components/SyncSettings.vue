@@ -192,6 +192,9 @@ function runLines(run: SyncRunSummary): string[] {
       ? t("schedule.summaryPtSkipped", pt.skipped)
       : t("schedule.summaryPt", pt.synced.length, pt.unchanged, pt.failed.length),
   );
+  if (pt.error) {
+    lines.push(pt.error);
+  }
   for (const f of pt.failed) {
     lines.push(`· ${f.siteId}: ${f.error}`);
   }

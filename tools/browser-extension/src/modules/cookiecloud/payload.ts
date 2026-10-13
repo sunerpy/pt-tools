@@ -122,14 +122,24 @@ export function parseCookieData(plain: string): CookieCloudData | null {
 }
 
 /**
- * cookieDigest 是 ours 的指纹（SHA-256）：名字、值、域名、路径与 hostOnly，不含过期时间（有的站点每次访问都把过期时间往后挪，
- * 只是它变了不用重新上传）。定时上传时指纹没变就不传。
+ * cookieDigest 是 ours 的指纹（SHA-256）：名字、值、域名、路径、hostOnly 与过期时间。过期时间也算：pt-tools 导入时丢掉已经过期的
+ * Cookie，站点只把过期时间往后挪（值不变）时也要重新上传，不然到了旧的过期时间 pt-tools 就取不到了。定时上传时指纹没变就不传。
  */
 export async function cookieDigest(ours: Record<string, CookieCloudCookie[]>): Promise<string> {
   const rows: string[] = [];
   for (const domain of Object.keys(ours).sort()) {
     for (const c of ours[domain]) {
-      rows.push(JSON.stringify([domain, c.domain, c.path, c.name, c.value, c.hostOnly]));
+      rows.push(
+        JSON.stringify([
+          domain,
+          c.domain,
+          c.path,
+          c.name,
+          c.value,
+          c.hostOnly,
+          c.expirationDate ?? null,
+        ]),
+      );
     }
   }
   rows.sort();
