@@ -3,9 +3,11 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -287,4 +289,192 @@ func TestPreview(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalid)
 	_, err = Preview(PreviewInput{Type: notify.EventTest, EndpointURL: "https://example.com/", BodyTemplate: "{{.nope}}"})
 	assert.ErrorIs(t, err, tmpl.ErrInvalid)
+}
+
+// 按响应内容判断成败：很多服务出错也回 200，错误写在响应里
+func TestCheckResponse(t *testing.T) {
+	check := func(src string, status int, body string) error {
+		t.Helper()
+		r, err := compile(&Config{EndpointURL: "https://example.com/hook", SuccessTemplate: src})
+		require.NoError(t, err, src)
+		return r.checkResponse(status, []byte(body))
+	}
+	// 没写成功条件：只看状态码（调用方判过 2xx）
+	r, err := compile(&Config{EndpointURL: "https://example.com/hook"})
+	require.NoError(t, err)
+	assert.NoError(t, r.checkResponse(200, []byte(`{"code":500}`)))
+
+	assert.NoError(t, check(`{{eq .json.code 200}}`, 200, `{"code":200,"msg":"ok"}`))
+	assert.ErrorIs(t, check(`{{eq .json.code 200}}`, 200, `{"code":500,"msg":"token 错误"}`), errResponseRejected)
+	assert.NoError(t, check(`  TRUE `, 200, ``), "true 不分大小写、去掉空白")
+	assert.NoError(t, check(`{{eq .body "ok"}}`, 200, `ok`))
+	assert.NoError(t, check(`{{gt .json.id 0}}`, 200, `{"id": 12, "title": "x"}`))
+	assert.NoError(t, check(`{{eq .json.data.ok true}}`, 200, `{"data":{"ok":true}}`), "嵌套字段")
+	assert.NoError(t, check(`{{eq .status 201}}`, 201, ``))
+
+	// 自己写的失败原因带进错误里（截到 200 个字）
+	err = check(`{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}`, 200, `{"code":40001,"msg":"invalid token"}`)
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.Contains(t, err.Error(), "invalid token")
+	// 不在 checkResponse 里截短（先去凭证再截，见 scrubError）
+	err = check(`{{.body}}`, 200, strings.Repeat("长", 300))
+	assert.Contains(t, err.Error(), strings.Repeat("长", 300))
+	assert.Less(t, len([]rune(scrubError(err, nil).Error())), maxReasonRunes+2)
+
+	// 响应不是 JSON：取字段得零值，判断为不成功；算不出来的也算失败
+	assert.ErrorIs(t, check(`{{eq .json.code 0}}`, 200, `<html>busy</html>`), errResponseRejected)
+	err = check(`{{lt .body 1}}`, 200, `x`)
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.Contains(t, err.Error(), "算不出来")
+}
+
+func TestWebhook_SuccessTemplateOnSend(t *testing.T) {
+	var reply string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(reply))
+	}))
+	t.Cleanup(srv.Close)
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL,
+		"success_template": `{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}`,
+	})
+	reply = `{"code":0}`
+	require.NoError(t, w.Send(context.Background(), sampleNotification(notify.EventTest)))
+	reply = `{"code":1,"msg":"quota exceeded"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "quota exceeded")
+
+	// 成功条件写错（没有这个函数）：保存前就被拒
+	assert.ErrorContains(t, checkConfig(map[string]any{"endpoint_url": srv.URL, "success_template": `{{nope .json}}`}), "成功条件")
+}
+
+func TestPreviewSuccessTemplate(t *testing.T) {
+	in := PreviewInput{
+		Type: notify.EventTest, EndpointURL: "https://example.com/hook",
+		SuccessTemplate: `{{eq .json.code 200}}`, SampleResponse: `{"code":200}`,
+	}
+	out, err := Preview(in)
+	require.NoError(t, err)
+	require.NotNil(t, out.Success)
+	assert.True(t, *out.Success)
+
+	in.SampleResponse = `{"code":500}`
+	out, err = Preview(in)
+	require.NoError(t, err)
+	assert.False(t, *out.Success)
+	assert.Contains(t, out.SuccessReason, "不满足成功条件")
+
+	in.SampleResponse, in.SampleStatus = `{"code":200}`, 302
+	out, err = Preview(in)
+	require.NoError(t, err)
+	assert.False(t, *out.Success, "状态码不是 2xx 就不看成功条件")
+	assert.Contains(t, out.SuccessReason, "302")
+
+	// 没写成功条件：不给 success
+	out, err = Preview(PreviewInput{Type: notify.EventTest, EndpointURL: "https://example.com/hook"})
+	require.NoError(t, err)
+	assert.Nil(t, out.Success)
+}
+
+// 对方的响应把我们发过去的凭证回显出来（地址查询、路径里的 token、请求头、请求体里的 token 字段、HMAC Secret）：
+// 成功条件拿它当失败原因时，写进错误、日志与重试记录以前都要去掉。
+func TestWebhook_FailureReasonHidesEchoedSecrets(t *testing.T) {
+	var echo string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(echo))
+	}))
+	t.Cleanup(srv.Close)
+	pathToken := "AbCdEfGhIjKlMnOpQrStUvWx"
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL + "/api/webhooks/123/" + pathToken + "?token=S3CRET-Q",
+		"headers":          map[string]string{"Authorization": "Bearer S3CRET-H"},
+		"hmac_secret":      "S3CRET-M",
+		"body_template":    `{"token": "S3CRET-B", "content": {{json .title}}}`,
+		"success_template": `{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}`,
+	})
+	echo = `{"code":1,"msg":"bad: S3CRET-Q S3CRET-H S3CRET-B S3CRET-M ` + pathToken + ` pt-tools 测试通知"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errResponseRejected)
+	for _, secret := range []string{"S3CRET-Q", "S3CRET-H", "S3CRET-B", "S3CRET-M", pathToken} {
+		assert.NotContains(t, err.Error(), secret)
+	}
+	assert.Contains(t, err.Error(), "pt-tools 测试通知", "不是凭证的内容照样留着")
+}
+
+// 响应只读前 64 KiB（对方回几百 MB 也不会都读进内存）；不跟随跳转。
+func TestWebhook_ResponseCapAndNoRedirect(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/big", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", 4<<20)))
+	})
+	mux.HandleFunc("/moved", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ok", http.StatusFound)
+	})
+	mux.HandleFunc("/ok", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	w := channelFor(t, map[string]any{"endpoint_url": srv.URL + "/big", "success_template": `{{eq (len .body) 65536}}`})
+	require.NoError(t, w.Send(context.Background(), sampleNotification(notify.EventTest)))
+
+	w = channelFor(t, map[string]any{"endpoint_url": srv.URL + "/moved"})
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "302")
+}
+
+// 太短的凭证（Bearer abc 里的 abc）没法放心替换：原因里出现它时整段不显示；普通的短查询参数（v=1）不算凭证
+func TestWebhook_FailureReasonShortSecret(t *testing.T) {
+	var echo string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(echo))
+	}))
+	t.Cleanup(srv.Close)
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL + "/hook?v=1",
+		"headers":          map[string]string{"Authorization": "Bearer abc"},
+		"success_template": `{{.json.msg}}`,
+	})
+	echo = `{"msg":"token abc is invalid"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.NotContains(t, err.Error(), "abc")
+	assert.Contains(t, err.Error(), "不显示")
+
+	echo = `{"msg":"quota 1 left"}`
+	err = w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.Contains(t, err.Error(), "quota 1 left", "普通的短查询参数不触发")
+}
+
+// 凭证正好横跨截断处：先去凭证再截短，截下来的半截凭证不会漏出去
+func TestWebhook_FailureReasonSecretAcrossCut(t *testing.T) {
+	var echo string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(echo))
+	}))
+	t.Cleanup(srv.Close)
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL + "/hook",
+		"headers":          map[string]string{"X-Key": "LONGSECRETVALUE1"},
+		"success_template": `{{.json.msg}}`,
+	})
+	prefix := "webhook 响应不满足成功条件："
+	pad := strings.Repeat("x", maxReasonRunes-len([]rune(prefix))-4)
+	echo = `{"msg":"` + pad + `LONGSECRETVALUE1 tail"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.NotContains(t, err.Error(), "LONG")
+}
+
+// 两个凭证互相包含：先换长的，短的那个换完不会留下长凭证的后半截
+func TestScrubErrorOverlappingSecrets(t *testing.T) {
+	err := fmt.Errorf("%w：echo ABCDEFGHIJKLMNOPQRSTUV and ABCDEFGH", errResponseRejected)
+	got := scrubError(err, []secretValue{{value: "ABCDEFGH", credential: true}, {value: "ABCDEFGHIJKLMNOPQRSTUV", credential: true}})
+	assert.ErrorIs(t, got, errResponseRejected)
+	assert.NotContains(t, got.Error(), "IJKL")
+	assert.NotContains(t, got.Error(), "ABCD")
 }

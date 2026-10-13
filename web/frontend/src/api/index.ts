@@ -1436,6 +1436,8 @@ export interface NotificationConfig {
   method?: string;
   content_type?: string;
   body_template?: string;
+  /** Webhook 按响应判断成败的模板（可选）：结果是 true 才算送到 */
+  success_template?: string;
   webhook_key?: string;
   proxy_url?: string;
   // 只出站的通道（Bark、Server 酱、ntfy、钉钉、飞书），字段见 utils/notifyChannels
@@ -1480,6 +1482,7 @@ const NOTIFICATION_DYNAMIC_FIELDS = [
   "method",
   "content_type",
   "body_template",
+  "success_template",
   "webhook_key",
   "proxy_url",
   "server_url",
@@ -1687,6 +1690,10 @@ export interface WebhookPreviewInput {
   content_type: string;
   headers: Record<string, string>;
   body_template: string;
+  /** 成功条件与拿来试它的一份响应（状态码默认 200） */
+  success_template?: string;
+  sample_response?: string;
+  sample_status?: number;
 }
 
 /** 按示例数据渲染出来的请求：只渲染、不发送，不含签名 */
@@ -1695,6 +1702,9 @@ export interface WebhookPreviewResult {
   url: string;
   content_type: string;
   body: string;
+  /** 写了成功条件时：按示例响应算出的成败与失败原因 */
+  success?: boolean;
+  success_reason?: string;
 }
 
 export const chatopsApi = {

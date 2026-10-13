@@ -148,4 +148,12 @@ With an empty body template, the channel sends the fixed JSON: `event_type` (alw
 
 A webhook receives every kind of notification, so saving renders the templates once with the sample data of each event: a misspelled variable, or a JSON body that does not render to valid JSON, is not saved, and the message names the event and the line. Variables that only some events have are empty or 0 in the others. "Preview with sample data" lets you pick an event and see the rendered request without sending it.
 
-With an HMAC secret, the `X-PT-Signature` header is the Base64-encoded HMAC-SHA256 of the body actually sent. Only a 2xx response counts as delivered; any other status, including a 3xx that is not followed to a new address, is retried under the notification retry rules. This channel is meant for your own services and may reach loopback and private addresses. Error messages and logs leave out the query part of the address and the body.
+With an HMAC secret, the `X-PT-Signature` header is the Base64-encoded HMAC-SHA256 of the body actually sent. Only a 2xx response counts as delivered; any other status is retried under the notification retry rules. Redirects are not followed: a redirect counts as a failure, so enter the final address. At most the first 64 KB of a response is read.
+
+Many services answer 200 even on errors and put the error in the response. For those, fill in the success condition: after a 2xx it is rendered against the response, and only the result `true` counts as delivered; `false` or an empty result is a failure, and any other text is used as the failure reason (tokens, header values and the HMAC secret we sent are replaced with `***` if the response echoes them). Variables: `status` (the status code), `body` (the raw response, up to the first 64 KB) and `json` (the parsed response when it is JSON; fields read as zero values otherwise). The PushPlus, Gotify and Slack presets include a success condition. The editor lets you paste a response to see whether it counts as success. Example:
+
+```text
+{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}
+```
+
+This channel is meant for your own services and may reach loopback and private addresses. Error messages and logs leave out the query part of the address and the body.

@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -8,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -33,6 +36,9 @@ type Config struct {
 	ContentType string `json:"content_type,omitempty"`
 	// BodyTemplate 是请求体模板（Go 模板，变量见消息模板的事件目录）；空着发原来的固定 JSON
 	BodyTemplate string `json:"body_template,omitempty"`
+	// SuccessTemplate 是按响应判断成败的模板（可选）：2xx 以后再用它算一遍，结果是 true 才算送到，
+	// 别的结果（false、空、或者自己写的原因）算失败。变量：status、body、json（响应是 JSON 时解出来的值）
+	SuccessTemplate string `json:"success_template,omitempty"`
 }
 
 // Headers 是自定义请求头。旧版编辑页把它存成了 JSON 文本（"{\"A\":\"b\"}"），两种写法都认。
@@ -175,40 +181,65 @@ func (w *WebhookChannel) Send(ctx context.Context, n notify.Notification) error 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	opts := []httpclient.RequestOption{
-		httpclient.WithTimeout(timeout),
-		httpclient.WithContext(ctx),
-	}
-	for k := range headers {
-		opts = append(opts, httpclient.WithHeader(k, headers.Get(k)))
-	}
-
-	resp, err := do(r.Method, r.URL, r.Body, opts...)
+	status, respBody, err := do(ctx, r.Method, r.URL, r.Body, headers)
 	if err != nil {
 		err = reason(err)
 		w.logger.Warnf("webhook send failed: %v", err)
 		return fmt.Errorf("webhook send failed: %w", err)
 	}
 
-	// 只有 2xx 算成功：3xx 没有跟到新地址时也是没送到
-	if !resp.IsSuccess() {
-		w.logger.Warnf("webhook returned status: %d", resp.StatusCode())
-		return fmt.Errorf("webhook returned status %d", resp.StatusCode())
+	// 只有 2xx 算成功：不跟随跳转，3xx 也是没送到
+	if status < 200 || status > 299 {
+		w.logger.Warnf("webhook returned status: %d", status)
+		return fmt.Errorf("webhook returned status %d", status)
+	}
+	// 写了成功条件的，再按响应内容判断（很多服务出错也回 200，错误写在响应里）。
+	// 失败原因来自对方的响应，可能把我们发过去的 token 原样回显：写进日志与错误以前去掉
+	if err := w.req.checkResponse(status, respBody); err != nil {
+		err = scrubError(err, sensitiveValues(r, w.config))
+		w.logger.Warnf("webhook response rejected: %v", err)
+		return err
 	}
 
 	return nil
 }
 
-func do(method, url string, body []byte, opts ...httpclient.RequestOption) (httpclient.Response, error) {
-	switch method {
-	case http.MethodPut:
-		return httpclient.Put(url, body, opts...)
-	case http.MethodPatch:
-		return httpclient.Patch(url, body, opts...)
-	case http.MethodGet:
-		return httpclient.Get(url, opts...)
+// httpClient 发 Webhook 请求：沿用环境变量里的代理（和原来一样，连 Discord 这类服务常要代理），不跟随跳转。
+var httpClient = &http.Client{
+	Transport: func() http.RoundTripper {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.Proxy = func(req *http.Request) (*url.URL, error) {
+			if p := httpclient.ResolveProxyFromEnvironment(req.URL.String()); p != "" {
+				return url.Parse(p)
+			}
+			return nil, nil
+		}
+		return t
+	}(),
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// do 发一次请求，返回状态码与响应的前 maxResponseBody 字节（再多的不读：对方回几百 MB 也不会占住内存）。
+func do(ctx context.Context, method, rawURL string, body []byte, headers http.Header) (int, []byte, error) {
+	var rd io.Reader
+	if method != http.MethodGet {
+		rd = bytes.NewReader(body)
 	}
-	return httpclient.Post(url, body, opts...)
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, rd)
+	if err != nil {
+		return 0, nil, errors.New("请求地址格式不对")
+	}
+	req.Header = headers.Clone()
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	if err != nil {
+		return resp.StatusCode, nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+	return resp.StatusCode, data, nil
 }
 
 // reason 是请求错误里不带地址的那一层：net/http 与 requests 包的外层错误都写着完整的地址，
