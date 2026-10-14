@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.28](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.27...v1.0.0-rc.28) (2026-10-14)
+
+
+### Features
+
+* **mobile:** App 跟着 pt-tools 的 Release 一起发布 ([#703](https://github.com/sunerpy/pt-tools/issues/703)) ([142a7b5](https://github.com/sunerpy/pt-tools/commit/142a7b5b566da2ad5ca0ff5e3f5aa54a98c8c74e))
+
 ## [1.0.0-rc.27](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.26...v1.0.0-rc.27) (2026-10-13)
 
 
