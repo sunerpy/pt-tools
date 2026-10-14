@@ -199,7 +199,7 @@ jobs:
           ls -l upload/archives
 
       - name: Upload archives for checksum aggregation
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-archives
           path: upload/archives
@@ -337,7 +337,7 @@ jobs:
             --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Upload extension assets for checksum aggregation
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-extension
           path: upload/extension
@@ -453,7 +453,7 @@ jobs:
           gh release upload "$TAG_NAME" checksums.txt --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Upload checksums for the publish job
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: checksums
           path: checksums.txt
