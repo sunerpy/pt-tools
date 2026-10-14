@@ -615,7 +615,7 @@ make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 浏览器扩展与 pt-tools 主程序使用**同一个版本和同一个 Release**，不再使用独立的 `ext-v*` tag：
 
 1. Conventional Commit 合入受保护的 `main` 后，release-please 更新版本、`CHANGELOG.md` 和扩展 `package.json`。
-2. 合并 release PR 后，同一次 `Release` workflow 创建 draft，并并行构建 Go 归档、扩展 `zip/crx` 与容器镜像。
+2. 合并 release PR 后，同一次 `Release` workflow 创建 draft，并并行构建 Go 归档、扩展 `zip/crx`、手机 App 的 APK 与容器镜像。
 3. 所有承诺产物和 `checksums.txt` 校验通过后，workflow 才把 draft 切换为公开 Release；任一必需 job 失败都会保留 draft。
 4. 稳定版公开后，`Publish to Edge Add-ons` 作为发布后的副作用提交 `pt-tools-helper.zip`；RC 不提交商店。
 
@@ -629,6 +629,7 @@ make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 - 开启时，release PR 的版本带 `-rc.N`：从稳定版开始取下一个版本的 `rc.1`（`0.48.0` → `0.49.0-rc.1`），之后只递增 `N`（`0.49.0-rc.1` → `0.49.0-rc.2`）。draft 标为预发布，公开时不设为 Latest；安装说明使用 `.github/release-notes/rc-footer.md`；不提交 Edge 商店；容器镜像只推版本号标签，不更新 `latest` 与 `主.次`、`主` 标签。
 - 删除 `"prerelease": true` 即回到稳定版：下一个 release PR 去掉后缀（`0.49.0-rc.2` → `0.49.0`），另外两项可以保留。
 - 扩展 manifest 的版本只能从 `rc.N`（N 为 1–65534）推导（`.github/scripts/extension-version.sh`），所以 `prerelease-type` 必须是 `rc.1`，不能写成 `rc` 或 `beta`。
+- 手机 App 的构建号也从版本推导（`.github/scripts/mobile-build-number.sh`），`rc.N` 的 N 不能超过 98，次版本与修订号不能超过 99，见下面的[手机 App 发版](#手机-app-发版)。
 
 Edge 商店发布需要仓库 Secrets：
 
@@ -684,12 +685,15 @@ bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署�
 
 ### 手机 App 发版
 
-App 不经过 release-please（`release-please-config.json` 的根包排除了 `apps/mobile` 与 `relay/cloudflare`，只改它们的提交不会让 pt-tools 发版）。先改 `apps/mobile/pubspec.yaml` 的 `version`（例如 `1.0.0+1`，`+` 后面的构建号每次递增：Android 只看它决定能不能覆盖安装，只改 `rc.N` 或去掉 `-rc` 不算），合入以后手动运行 `Mobile Release`（只在受保护的 `main`、`v1.0.0-rc` 上），`version` 填 `1.0.0`；预览版写成 `1.0.0-rc.1`，发成 Pre-release：
+App 和 pt-tools 主程序、浏览器扩展使用**同一个版本和同一个 Release**，不再单独打 `mobile-v*` tag（最早单独发布的 `mobile-v1.0.0-rc.1` 留作历史）：
 
-1. 构建按 CPU 架构拆分的 release APK（arm64-v8a、armeabi-v7a、x86_64），用 Environment `mobile-release` 里的 keystore 签名，`apksigner` 核对每个 APK 都是同一张证书，并且正式发版时必须是变量 `ANDROID_CERT_SHA256` 给的那张；生成 `checksums.txt` 与构建来源证明；
-2. `dry_run` 为真时只上传成 workflow artifact；否则建 draft Release `mobile-v1.0.0`，说明取上一个 `mobile-v*` 以来 `apps/mobile` 的提交，上传、核对资产以后再公开。任一步失败都停在 draft，修好以后用同一个版本重跑会接着发（只接同一个提交上的 draft）。App 的 Release 不会成为 Latest：安装脚本与稳定版的下载链接按 `releases/latest` 找服务端的资产；本地 `make` 取版本号时也只认 `v*` 的 tag。
+1. release PR 同时改 `apps/mobile/pubspec.yaml` 的 `version`（`release-please-config.json` 的 `extra-files`，那一行带 `# x-release-please-version`）。只改 `apps/mobile` 的提交也会让 pt-tools 发版、写进更新日志。
+2. 合并 release PR 后，`Release` workflow 的 `mobile` job 和归档、扩展并行：版本取 release tag，构建号由 `.github/scripts/mobile-build-number.sh` 推导；构建按 CPU 架构拆分的 release APK（arm64-v8a、armeabi-v7a、x86_64），用 Environment `mobile-release` 里的 keystore 签名；`apksigner` 核对每个 APK 都是变量 `ANDROID_CERT_SHA256` 给的那张证书，`aapt2` 核对 versionName 与 versionCode。
+3. APK 改名为 `pt-tools-app-<ABI>.apk`，由 `Assemble checksums` 传到 draft、写进 `checksums.txt`，再和其他资产一起由 `Publish Release` 校验、生成构建来源证明以后公开。缺签名密钥、`pubspec.yaml` 的版本和 release tag 对不上、构建或核对失败时，`mobile` job 失败，整个 Release 停在 draft。
 
-PR 改到这个 workflow 或 Android 工程时只跑验证：用现生成的密钥构建一遍，不碰任何 secret、没有写权限（产物文件名带 `-test-signed`，不能发布）。
+构建号 = 主版本×1000000 + 次版本×10000 + 修订号×100 + RC 序号（正式版记 99），例如 `1.0.0-rc.28` → `1000028`、`1.0.0` → `1000099`、`1.0.1-rc.1` → `1000101`。它随版本单调变大，同一个版本重建时不变；Android 只看它决定能不能覆盖安装（按 ABI 拆包时 Flutter 再加上 ABI×1000）。所以次版本、修订号不能超过 99，`rc.N` 的 N 不能超过 98。`mobile-v1.0.0-rc.1` 的构建号是 1，比之后的都小，可以直接覆盖安装。
+
+PR 改到打包流程（`.github/actions/build-android-release`）、Android 工程、构建号脚本或 `pubspec.yaml` 时，`Mobile Release` 的 `Verify (test-signed)` 用现生成的密钥按同样的方式构建一遍，并跑构建号脚本的用例：不碰任何 secret、没有写权限（产物文件名带 `-test-signed`，不能发布）。
 
 | 名称                                                                     | 放在哪里                   | 用途                                                                            |
 | ------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------- |
@@ -697,7 +701,7 @@ PR 改到这个 workflow 或 Android 工程时只跑验证：用现生成的密�
 | `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` | `mobile-release` 的 secret | keystore 口令、密钥别名与密钥口令                                               |
 | `ANDROID_CERT_SHA256`                                                    | 变量                       | 签名证书的 SHA-256（`apksigner verify --print-certs` 的写法），正式发版必须设好 |
 
-`mobile-release` 的部署分支同样限定为 `main` 与 `v1.0.0-rc`。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`。别名别用项目名这类日志里常见的词：secret 的值在 Actions 日志里会被换成 `***`。
+`mobile-release` 的部署分支限定为 `main` 与 `v1.0.0-rc`（`Release` workflow 也只在这两个分支上运行）。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`。别名别用项目名这类日志里常见的词：secret 的值在 Actions 日志里会被换成 `***`。
 
 ```bash
 keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias ptt-app-signing -keyalg RSA -keysize 4096 -validity 10000

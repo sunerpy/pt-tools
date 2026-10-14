@@ -1,5 +1,5 @@
-# 构建并校验 App 的 release APK（mobile-release.yml 的 PR 验证与正式构建共用）：装 Java 与 Flutter，按 ABI 拆分构建并签名，
-# apksigner 校验每个 APK 的签名证书，改名并生成 checksums.txt，放进 upload/。
+# 构建并校验 App 的 release APK（mobile-release.yml 的 PR 验证与 release.yml 的正式构建共用）：装 Java 与 Flutter，按 ABI 拆分构建并签名，
+# apksigner 校验每个 APK 的签名证书，给了构建号时再核对每个 APK 的 versionName 与 versionCode，改名并生成 checksums.txt，放进 upload/。
 # 这个 action 不读任何 secret：keystore 与口令经输入传进来；keystore-path 为空时现生成一把只用这一次的测试密钥（产物文件名带 -test-signed，不能发布）。
 name: Build Android release
 description: Build, sign and verify the split release APKs of the mobile app
@@ -28,6 +28,14 @@ inputs:
     description: "签名证书的 SHA-256（apksigner 的写法，小写十六进制）；不为空时每个 APK 都要是它"
     required: false
     default: ""
+  build-name:
+    description: "versionName；为空时用 pubspec.yaml 的版本"
+    required: false
+    default: ""
+  build-number:
+    description: "构建号（.github/scripts/mobile-build-number.sh 算出来的）；为空时用 pubspec.yaml 里 + 后面的数。给了就核对每个 APK 的 versionCode 是 ABI×1000 + 它"
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -49,6 +57,8 @@ runs:
         STORE_PASSWORD: ${{ inputs.store-password }}
         KEY_ALIAS: ${{ inputs.key-alias }}
         KEY_PASSWORD: ${{ inputs.key-password }}
+        BUILD_NAME: ${{ inputs.build-name }}
+        BUILD_NUMBER: ${{ inputs.build-number }}
       run: |
         set -euo pipefail
         if [ -z "$KEYSTORE" ]; then
@@ -61,7 +71,10 @@ runs:
         fi
         export ANDROID_KEYSTORE_PATH=$KEYSTORE ANDROID_KEYSTORE_PASSWORD=$STORE_PASSWORD ANDROID_KEY_ALIAS=$KEY_ALIAS ANDROID_KEY_PASSWORD=$KEY_PASSWORD
         flutter pub get
-        flutter build apk --release --split-per-abi
+        args=(--release --split-per-abi)
+        [ -z "$BUILD_NAME" ] || args+=(--build-name "$BUILD_NAME")
+        [ -z "$BUILD_NUMBER" ] || args+=(--build-number "$BUILD_NUMBER")
+        flutter build apk "${args[@]}"
 
     - name: Verify signatures and stage assets
       shell: bash
@@ -69,19 +82,35 @@ runs:
         VERSION: ${{ inputs.version }}
         TEST_SIGNED: ${{ inputs.keystore-path == '' }}
         EXPECTED_CERT: ${{ inputs.expected-cert }}
+        BUILD_NAME: ${{ inputs.build-name }}
+        BUILD_NUMBER: ${{ inputs.build-number }}
       run: |
         set -euo pipefail
         # 只挑正式版的 build-tools（跳过 rc、preview）
         tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
         apksigner="$ANDROID_HOME/build-tools/$tools/apksigner"
-        echo "apksigner from build-tools $tools"
+        aapt2="$ANDROID_HOME/build-tools/$tools/aapt2"
+        echo "apksigner and aapt2 from build-tools $tools"
         rm -rf upload
         mkdir -p upload
         suffix=""
         [ "$TEST_SIGNED" != true ] || suffix="-test-signed"
+        # Flutter 按 ABI 拆包时 versionCode = ABI×1000 + 构建号
+        declare -A abi_code=([armeabi-v7a]=1 [arm64-v8a]=2 [x86_64]=4)
         for abi in arm64-v8a armeabi-v7a x86_64; do
           src="apps/mobile/build/app/outputs/flutter-apk/app-$abi-release.apk"
           [ -f "$src" ] || { echo "::error title=Mobile release::missing $src"; exit 1; }
+          if [ -n "$BUILD_NUMBER" ]; then
+            badging=$("$aapt2" dump badging "$src" | sed -n "s/^package: .* versionCode='\([0-9]*\)' versionName='\([^']*\)'.*/\1 \2/p")
+            code=${badging%% *}
+            name=${badging#* }
+            want_code=$((abi_code[$abi] * 1000 + BUILD_NUMBER))
+            if [ "$code" != "$want_code" ] || { [ -n "$BUILD_NAME" ] && [ "$name" != "$BUILD_NAME" ]; }; then
+              echo "::error title=Mobile release::$src has versionCode '$code' and versionName '$name', want $want_code and ${BUILD_NAME:-the pubspec version}"
+              exit 1
+            fi
+            echo "$abi: versionCode $code, versionName $name"
+          fi
           certs=$("$apksigner" verify --print-certs "$src")
           # 不同版本的 apksigner 写法不同（「Signer #1 certificate SHA-256 digest: …」「V2 Signer: certificate SHA-256 digest: …」），
           # 只认证书的 SHA-256；各个签名方案列出的必须是同一张证书

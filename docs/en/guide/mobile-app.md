@@ -6,7 +6,7 @@ The app runs on Android (no App Store release for iOS yet). The interface is in 
 
 ## Install
 
-Android packages are published on [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) under versions starting with `mobile-v`, one per CPU architecture: most phones need `arm64-v8a`, older 32-bit phones `armeabi-v7a`. Open the downloaded file on the phone to install it; the first time, allow the browser or file manager to install unknown apps in the system settings. The `checksums.txt` in the same release lists the SHA-256 of each package so you can check the download.
+Android packages are published in the same [GitHub Release](https://github.com/sunerpy/pt-tools/releases) as pt-tools, and the app has the same version number as the server. There is one package per CPU architecture: most phones need `pt-tools-app-arm64-v8a.apk`, older 32-bit phones `pt-tools-app-armeabi-v7a.apk`. Open the downloaded file on the phone to install it; the first time, allow the browser or file manager to install unknown apps in the system settings. The `checksums.txt` in the same release lists the SHA-256 of each file so you can check the download. The first version, `1.0.0-rc.1`, was published on its own as `mobile-v1.0.0-rc.1`; every later version installs over it.
 
 Versions with `-rc` are previews and are marked Pre-release. Previews and stable versions are signed with the same key, so a newer version installs over the old one and keeps the paired hosts. If you installed a test build from CI, uninstall it first.
 
