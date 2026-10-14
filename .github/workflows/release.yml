@@ -290,6 +290,18 @@ jobs:
           ref: ${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false
 
+      # tag 名可以被改指：检出的必须是 release-please job 核对过的那个提交，再跑项目代码、碰签名 key
+      - name: Require the tag to resolve to the release commit
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "::error title=Extension::checked-out tag differs from the release commit"
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -537,7 +549,8 @@ jobs:
     secrets: inherit
     uses: ./.github/workflows/docker.yml
     with:
-      ref: ${{ needs.release-please.outputs.tag_name }}
+      # 按 release-please job 核对过的提交检出（tag 名可以被改指）；docker.yml 再核对 tag 仍指向它
+      ref: ${{ needs.release-please.outputs.release_sha }}
       tag_name: ${{ needs.release-please.outputs.tag_name }}
       use_release_archives: true
 
