@@ -235,6 +235,14 @@ func TestStoreSettings(t *testing.T) {
 	again, err := s.Settings(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, got, again)
+
+	// 「不使用 relay」存得住，填过的 relay 地址留着
+	off, err := s.SaveSettings(ctx, Settings{Enabled: true, Relays: []string{"wss://r.example.com"}, RelayDisabled: true})
+	require.NoError(t, err)
+	assert.True(t, off.RelayDisabled)
+	again, err = s.Settings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, Settings{Enabled: true, Relays: []string{"wss://r.example.com"}, RelayDisabled: true}, again)
 }
 
 // 主机密钥：第一次要的时候生成，落库的是密文；轮换时换一套并撤销所有设备；没有加密密钥时生成不了

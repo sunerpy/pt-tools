@@ -32,13 +32,21 @@ const EMPTY_OVERVIEW: RemoteOverview = {
   enabled: false,
   relays: [],
   direct_url: "",
+  relay_disabled: false,
+  active_relays: [],
   relay_status: [],
   sessions: 0,
   stream_path: "",
 };
 const ov = computed<RemoteOverview>(() => overview.value ?? EMPTY_OVERVIEW);
 const devices = ref<RemoteDevice[]>([]);
-const form = ref({ enabled: false, relaysText: "", direct_url: "" });
+const form = ref({ enabled: false, relaysText: "", direct_url: "", relay_disabled: false });
+/** relay 留空时用构建时内置的托管 relay（有的话），输入框里写明 */
+const relayPlaceholder = computed(() =>
+  ov.value.default_relay
+    ? `留空时用托管 relay：${ov.value.default_relay}；自己的 relay 每行一个，最多 4 个`
+    : "每行一个 wss:// 地址，最多 4 个",
+);
 const saving = ref(false);
 
 const FULL: RemoteScope[] = ["app:read", "app:write"];
@@ -67,7 +75,12 @@ function errText(e: unknown, fallback: string): string {
 }
 
 function fillForm(ov: RemoteOverview) {
-  form.value = { enabled: ov.enabled, relaysText: ov.relays.join("\n"), direct_url: ov.direct_url };
+  form.value = {
+    enabled: ov.enabled,
+    relaysText: ov.relays.join("\n"),
+    direct_url: ov.direct_url,
+    relay_disabled: ov.relay_disabled,
+  };
 }
 
 async function load() {
@@ -114,6 +127,7 @@ async function save() {
       enabled: form.value.enabled,
       relays: relayList(),
       direct_url: form.value.direct_url.trim(),
+      relay_disabled: form.value.relay_disabled,
     });
     overview.value = ov;
     fillForm(ov);
@@ -418,11 +432,17 @@ onBeforeUnmount(stopTimer);
               v-model="form.relaysText"
               type="textarea"
               :rows="3"
-              placeholder="每行一个 wss:// 地址，最多 4 个"
+              :placeholder="relayPlaceholder"
+              :disabled="form.relay_disabled"
               data-testid="ra-relays" />
+            <el-checkbox v-model="form.relay_disabled" data-testid="ra-relay-disabled"
+              >不使用 relay（只直连）</el-checkbox
+            >
             <div class="ra-tip">
-              relay 只转发加密以后的数据，看得到这台主机的
-              hostId、IP、连接时间与流量大小，看不到内容。
+              <template v-if="ov.default_relay"
+                >留空时用托管 relay，填了自己的就只用自己的。</template
+              >只在局域网里用、或者不想经过 relay 时勾上「不使用 relay」，填过的地址会留着。relay
+              只转发加密以后的数据，看得到这台主机的 hostId、IP、连接时间与流量大小，看不到内容。
               <el-button
                 v-if="ov.default_relay"
                 link
@@ -454,6 +474,9 @@ onBeforeUnmount(stopTimer);
           </li>
           <li>
             <span class="ra-k">在线的连接</span><span>{{ ov.sessions }} 个</span>
+          </li>
+          <li v-if="ov.relay_disabled">
+            <span class="ra-k">relay</span><span>不使用（只直连）</span>
           </li>
           <li v-for="r in ov.relay_status" :key="r.url" class="ra-relay">
             <span class="ra-k">relay</span>

@@ -67,8 +67,8 @@ type relayClient struct {
 
 // syncRelaysLocked 让 relay 客户端与设置一致：多的停掉，少的连上；hostId 变了的全部重连。
 func (h *Host) syncRelaysLocked(st *hostState) {
-	h.stopRelaysLocked(func(c *relayClient) bool { return slices.Contains(st.settings.Relays, c.url) && c.hostID == st.hostID })
-	for _, u := range st.settings.Relays {
+	h.stopRelaysLocked(func(c *relayClient) bool { return slices.Contains(st.relays, c.url) && c.hostID == st.hostID })
+	for _, u := range st.relays {
 		if h.relays[u] == nil {
 			h.relays[u] = h.startRelay(st, u)
 		}

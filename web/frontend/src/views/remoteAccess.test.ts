@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 /*
- * 钉子：远程访问页（路线图 M15）。设置只发接口认的三项（relay 按行拆开）；状态写明 hostId 与 relay 的连接；
+ * 钉子：远程访问页（路线图 M15）。设置只发接口认的四项（relay 按行拆开）；relay 留空时写明用托管 relay，
+ * 可以关掉 relay 只直连；状态写明 hostId 与 relay 的连接；
  * 添加设备按选的权限生成二维码，等到配对完成后刷新设备列表，关掉弹窗时还在等的二维码作废；
  * 设备可以改权限、撤销（都要确认），撤销了的可以删记录；读不到时写明原因。
  */
@@ -73,6 +74,8 @@ function overview(over: Record<string, unknown> = {}) {
     enabled: true,
     relays: ["wss://relay.example.com"],
     direct_url: "http://192.168.1.10:8080",
+    relay_disabled: false,
+    active_relays: ["wss://relay.example.com"],
     host_id: "abcdefghijklmnopqrstuvwxyz",
     host_key: "k",
     relay_status: [
@@ -145,7 +148,7 @@ describe("远程访问", () => {
     expect(q("ra-revoke-2")).toBeNull();
   });
 
-  it("保存：只发三项，relay 按行拆开、去掉空行", async () => {
+  it("保存：只发四项，relay 按行拆开、去掉空行", async () => {
     await mountPage();
     api.save.mockResolvedValue(
       overview({ relays: ["wss://a.example.com", "wss://b.example.com"] }),
@@ -160,7 +163,43 @@ describe("远程访问", () => {
       enabled: true,
       relays: ["wss://a.example.com", "wss://b.example.com"],
       direct_url: "http://192.168.1.10:8080",
+      relay_disabled: false,
     });
+  });
+
+  it("relay 留空时写明用托管 relay；关掉 relay 以后输入框不能改，保存带上开关，状态写明只直连", async () => {
+    await mountPage({
+      ov: {
+        relays: [],
+        active_relays: ["wss://relay.firlab.app"],
+        default_relay: "wss://relay.firlab.app",
+        relay_status: [],
+      },
+    });
+    const relays = inputOf("ra-relays");
+    expect(relays.placeholder).toContain("留空时用托管 relay");
+    expect(relays.placeholder).toContain("wss://relay.firlab.app");
+    expect(relays.disabled).toBe(false);
+
+    const toggle = q("ra-relay-disabled")!.querySelector("input")!;
+    toggle.click();
+    await flush();
+    expect(inputOf("ra-relays").disabled).toBe(true);
+
+    api.save.mockResolvedValue(
+      overview({ relays: [], active_relays: [], relay_disabled: true, relay_status: [] }),
+    );
+    q("ra-save")!.click();
+    await vi.waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
+    expect(api.save.mock.calls[0]![0]).toMatchObject({ relays: [], relay_disabled: true });
+    await flush();
+    expect(q("ra-status")!.textContent ?? "").toContain("不使用（只直连）");
+  });
+
+  it("没有托管 relay 的构建：留空就是不用 relay", async () => {
+    await mountPage({ ov: { relays: [], active_relays: [], relay_status: [] } });
+    expect(inputOf("ra-relays").placeholder).not.toContain("托管");
+    expect(q("ra-default-relay")).toBeNull();
   });
 
   it("有托管 relay 时可以一键填入", async () => {
