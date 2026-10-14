@@ -21,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **extension:** 定时同步把没有可用 Cookie 的站点按名字报出来 ([#688](https://github.com/sunerpy/pt-tools/issues/688)) ([baaa57b](https://github.com/sunerpy/pt-tools/commit/baaa57b8361e905b9109347230ad1509179a74a1))
 * **sitelogin:** 没写最近动向选择器的 NexusPHP 站点不再报解析失败 ([#680](https://github.com/sunerpy/pt-tools/issues/680)) ([c9afa5b](https://github.com/sunerpy/pt-tools/commit/c9afa5bff949b859261db320a13aa5e6d4ec99a6))
 * **site:** NexusPHP 用户详情页的实际上传、下载量按通用写法取 ([#682](https://github.com/sunerpy/pt-tools/issues/682)) ([0972481](https://github.com/sunerpy/pt-tools/commit/097248113d4b6df8546cda383c8921918f9f5ff8))
-* **site:** 上游 NexusPHP 做种汇总的条数解析成 0，补 gtkpw 做种体积的全流程测试（[#332](https://github.com/sunerpy/pt-tools/issues/332)） ([5bd0fff](https://github.com/sunerpy/pt-tools/commit/5bd0fffab312b837263e7dccea0ec415ac3cac48))
 * **site:** 上游 NexusPHP 做种汇总的条数解析成 0（[#332](https://github.com/sunerpy/pt-tools/issues/332)） ([#687](https://github.com/sunerpy/pt-tools/issues/687)) ([5bd0fff](https://github.com/sunerpy/pt-tools/commit/5bd0fffab312b837263e7dccea0ec415ac3cac48))
 * **web:** 过滤规则的用途经接口存取，列表加一列用途 ([#678](https://github.com/sunerpy/pt-tools/issues/678)) ([e93f040](https://github.com/sunerpy/pt-tools/commit/e93f04099dd8628629f57a79eeefcaaf96591f01))
 
