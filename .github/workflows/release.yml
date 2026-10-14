@@ -803,8 +803,9 @@ jobs:
       vars.PUBLISH_EDGE != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # edge-publish.sh 在 Release 正文里写 tag 键控的 marker（防止重跑重复提交），要写权限；工具取自受保护的 github.sha
     permissions:
-      contents: read
+      contents: write
     steps:
       # 只要提交脚本：取这次运行所在的受保护提交（和 publish-release 一样），不按可变的 tag 名检出
       - name: Checkout release tooling
@@ -828,6 +829,8 @@ jobs:
       # 上传前先查询商店当前版本以实现同 tag 幂等。
       - name: Upload and publish to Edge Add-ons
         env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
