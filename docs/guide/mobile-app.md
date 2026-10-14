@@ -6,7 +6,7 @@ App 支持 Android（iOS 暂不上架）。界面有中文与英文，跟随手�
 
 ## 安装
 
-Android 安装包发布在 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 里以 `mobile-v` 开头的版本中，按手机的 CPU 架构分开：大多数手机用 `arm64-v8a`，较老的 32 位手机用 `armeabi-v7a`。下载以后在手机上打开安装，第一次要在系统设置里允许浏览器或文件管理器「安装未知应用」。同一个版本里的 `checksums.txt` 是各安装包的 SHA-256，可以用来核对下载是否完整。
+Android 安装包和 pt-tools 发布在 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 的同一个版本里，App 与服务端版本号相同。安装包按手机的 CPU 架构分开：大多数手机用 `pt-tools-app-arm64-v8a.apk`，较老的 32 位手机用 `pt-tools-app-armeabi-v7a.apk`。下载以后在手机上打开安装，第一次要在系统设置里允许浏览器或文件管理器「安装未知应用」。同一个版本里的 `checksums.txt` 列出了各个文件的 SHA-256，可以用来核对下载是否完整。最早的 `1.0.0-rc.1` 单独发布在 `mobile-v1.0.0-rc.1` 里，之后的版本都可以直接覆盖安装。
 
 版本号带 `-rc` 的是预览版，标为 Pre-release。预览版与正式版用同一把密钥签名，装新版本时直接覆盖安装，已配对的主机都还在；装过 CI 构建的测试包的，要先卸载再装。
 

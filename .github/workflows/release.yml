@@ -100,6 +100,29 @@ jobs:
           RUN_REF: ${{ github.ref }}
         run: bash .github/scripts/resolve-release-gate.sh
 
+      # 下游 job 检出这个 tag，带着签名密钥和镜像仓库凭据跑里面的代码。有写权限的人能建一个指向任意提交的
+      # draft tag 再手动触发重建，所以 tag 的提交必须是这次运行的提交或它的祖先，也就是在受保护的分支上。
+      - name: Require the release commit to be on the protected branch
+        if: steps.gate.outputs.build_artifacts == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ steps.gate.outputs.release_sha }}
+          RUN_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          status=$(gh api "repos/$REPO/compare/$RELEASE_SHA...$RUN_SHA" --jq .status)
+          case "$status" in
+          identical | ahead)
+            echo "release commit $RELEASE_SHA is on the protected branch ($status)"
+            ;;
+          *)
+            echo "::error title=Release gate::release commit $RELEASE_SHA is not $RUN_SHA or one of its ancestors (compare status: $status)"
+            exit 1
+            ;;
+          esac
+
   goreleaser:
     name: Build and attach archives
     needs: release-please
@@ -267,6 +290,18 @@ jobs:
           ref: ${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false
 
+      # tag 名可以被改指：检出的必须是 release-please job 核对过的那个提交，再跑项目代码、碰签名 key
+      - name: Require the tag to resolve to the release commit
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "::error title=Extension::checked-out tag differs from the release commit"
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -390,11 +425,121 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # 手机 App 跟 pt-tools 用同一个版本、同一个 Release：版本取 release tag，构建号由版本推导
+  # （.github/scripts/mobile-build-number.sh，单调递增，同一个版本重建时不变）。APK 是承诺产物：缺签名密钥、
+  # 构建或核对失败时这个 job 失败，整个 Release 停在 draft。
+  mobile:
+    name: Build Android app
+    needs: release-please
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # 签名密钥只放在这个 Environment 里（部署分支限定为 main 与 v1.0.0-rc）。这个 job 跑项目代码又拿着密钥，
+    # 所以只读；APK 由 assemble-checksums 传到 draft。
+    environment: mobile-release
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Require the tag to resolve to the release commit
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "::error title=Android app::checked-out tag differs from the release commit"
+            exit 1
+          fi
+
+      # release-please 经 extra-files 把 apps/mobile/pubspec.yaml 的版本改成这一版，对不上说明没改到
+      - name: Resolve the app version
+        id: meta
+        shell: bash
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+          EXPECTED_CERT: ${{ vars.ANDROID_CERT_SHA256 }}
+          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "::error title=Android app::$*"
+            exit 1
+          }
+          [ "$HAS_KEYSTORE" = true ] || fail "the mobile-release environment has no ANDROID_KEYSTORE_BASE64; the app must be signed with the release key"
+          [[ "$EXPECTED_CERT" =~ ^[0-9a-f]{64}$ ]] || fail "set vars.ANDROID_CERT_SHA256 (lowercase hex SHA-256 of the signing certificate)"
+          pub=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]#]*\).*$/\1/p' apps/mobile/pubspec.yaml)
+          [ "$pub" = "$VERSION" ] || fail "apps/mobile/pubspec.yaml has version '$pub', not the release version $VERSION"
+          build_number=$(bash .github/scripts/mobile-build-number.sh "$VERSION")
+          echo "build_number=$build_number" >>"$GITHUB_OUTPUT"
+          echo "app $VERSION, build number $build_number"
+
+      - name: Decode the signing key
+        id: key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d >"$RUNNER_TEMP/release.jks"
+          echo "path=$RUNNER_TEMP/release.jks" >>"$GITHUB_OUTPUT"
+
+      - name: Build, sign and verify
+        uses: ./.github/actions/build-android-release
+        with:
+          version: ${{ needs.release-please.outputs.version }}
+          build-name: ${{ needs.release-please.outputs.version }}
+          build-number: ${{ steps.meta.outputs.build_number }}
+          keystore-path: ${{ steps.key.outputs.path }}
+          store-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          expected-cert: ${{ vars.ANDROID_CERT_SHA256 }}
+
+      - name: Remove the signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      # Release 里的文件名不带版本号（和归档、扩展一样），稳定版的 releases/latest/download 链接因此不变；
+      # action 生成的 upload/checksums.txt 不要，校验和由 assemble-checksums 统一生成。
+      - name: Stage the APKs
+        shell: bash
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p upload/mobile
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            mv "upload/pt-tools-app-$VERSION-$abi.apk" "upload/mobile/pt-tools-app-$abi.apk"
+          done
+          count=$(find upload/mobile -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 3 ]; then
+            echo "::error title=Android app::expected exactly 3 APKs, found $count"
+            exit 1
+          fi
+          ls -l upload/mobile
+
+      - name: Upload the APKs for the draft and checksum aggregation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-mobile
+          path: upload/mobile
+          if-no-files-found: error
+          retention-days: 1
+
   docker:
     name: Publish container
     # 容器复用本次 GoReleaser 归档内的 Linux 二进制，确保镜像与下载归档
     # 交付的是同一份字节，也避免 Dockerfile 的回退构建在发布时修改依赖图。
-    needs: [release-please, goreleaser]
+    # 镜像一推就公开了，所以等扩展与 App 也构建成功：它们失败时整个版本都不发（Release 停在 draft）。
+    needs: [release-please, goreleaser, extension, mobile]
     if: needs.release-please.outputs.build_artifacts == 'true'
     permissions:
       attestations: write
@@ -404,13 +549,14 @@ jobs:
     secrets: inherit
     uses: ./.github/workflows/docker.yml
     with:
-      ref: ${{ needs.release-please.outputs.tag_name }}
+      # 按 release-please job 核对过的提交检出（tag 名可以被改指）；docker.yml 再核对 tag 仍指向它
+      ref: ${{ needs.release-please.outputs.release_sha }}
       tag_name: ${{ needs.release-please.outputs.tag_name }}
       use_release_archives: true
 
   assemble-checksums:
     name: Assemble checksums
-    needs: [release-please, goreleaser, extension]
+    needs: [release-please, goreleaser, extension, mobile]
     if: needs.release-please.outputs.build_artifacts == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -430,6 +576,12 @@ jobs:
           name: release-extension
           path: assets/release-extension
 
+      - name: Download the Android app
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-mobile
+          path: assets/release-mobile
+
       # publish-release-draft.sh 把摘要后的字符串原样当远端 asset name，
       # 不调用 basename。因此必须在各输入目录内计算，行内只能出现裸 basename；
       # checksums.txt 生成在输入目录之外，且绝不列出自身。
@@ -440,6 +592,7 @@ jobs:
 
           archives=$(find assets/release-archives -maxdepth 1 -type f | wc -l)
           extension=$(find assets/release-extension -maxdepth 1 -type f | wc -l)
+          mobile=$(find assets/release-mobile -maxdepth 1 -type f | wc -l)
           if [ "$archives" -ne 4 ]; then
             echo "::error title=Checksums::expected 4 archives, found $archives"
             exit 1
@@ -448,17 +601,21 @@ jobs:
             echo "::error title=Checksums::expected 2 extension assets, found $extension"
             exit 1
           fi
+          if [ "$mobile" -ne 3 ]; then
+            echo "::error title=Checksums::expected 3 APKs, found $mobile"
+            exit 1
+          fi
 
           out="$PWD/checksums.txt"
           : >"$out"
-          for dir in assets/release-archives assets/release-extension; do
+          for dir in assets/release-archives assets/release-extension assets/release-mobile; do
             (cd "$dir" && sha256sum -- *) >>"$out"
           done
 
-          # 六行、名称唯一、均为裸 basename（不含 /）、排序稳定。
+          # 九行、名称唯一、均为裸 basename（不含 /）、排序稳定。
           lines=$(wc -l <"$out")
-          if [ "$lines" -ne 6 ]; then
-            echo "::error title=Checksums::expected 6 lines, found $lines"
+          if [ "$lines" -ne 9 ]; then
+            echo "::error title=Checksums::expected 9 lines, found $lines"
             exit 1
           fi
           if grep -q '/' "$out"; then
@@ -471,14 +628,14 @@ jobs:
             exit 1
           fi
           uniq_names=$(awk '{print $2}' "$out" | sed 's/^\*//' | sort -u | wc -l)
-          if [ "$uniq_names" -ne 6 ]; then
+          if [ "$uniq_names" -ne 9 ]; then
             echo "::error title=Checksums::duplicate asset names across artifacts"
             cat "$out"
             exit 1
           fi
 
-          expected="pt-tools-helper.crx pt-tools-helper.zip pt-tools-linux-amd64.tar.gz pt-tools-linux-arm64.tar.gz pt-tools-windows-amd64.exe.zip pt-tools-windows-arm64.exe.zip"
-          actual=$(awk '{print $2}' "$out" | sed 's/^\*//' | sort | tr '\n' ' ')
+          expected="pt-tools-app-arm64-v8a.apk pt-tools-app-armeabi-v7a.apk pt-tools-app-x86_64.apk pt-tools-helper.crx pt-tools-helper.zip pt-tools-linux-amd64.tar.gz pt-tools-linux-arm64.tar.gz pt-tools-windows-amd64.exe.zip pt-tools-windows-arm64.exe.zip"
+          actual=$(awk '{print $2}' "$out" | sed 's/^\*//' | LC_ALL=C sort | tr '\n' ' ')
           if [ "$actual" != "$expected " ]; then
             echo "::error title=Checksums::asset set mismatch"
             echo "expected: $expected"
@@ -488,6 +645,20 @@ jobs:
 
           LC_ALL=C sort -k2,2 -o "$out" "$out"
           cat "$out"
+
+      # App 的构建 job 拿着签名密钥、只读，APK 在这里传到 draft（这个 job 不跑项目代码）
+      - name: Attach the Android app to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG_NAME" \
+            assets/release-mobile/pt-tools-app-arm64-v8a.apk \
+            assets/release-mobile/pt-tools-app-armeabi-v7a.apk \
+            assets/release-mobile/pt-tools-app-x86_64.apk \
+            --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Attach checksums.txt to the draft
         shell: bash
@@ -508,7 +679,7 @@ jobs:
 
   publish-release:
     name: Publish Release
-    needs: [release-please, goreleaser, extension, docker, assemble-checksums]
+    needs: [release-please, goreleaser, extension, mobile, docker, assemble-checksums]
     # always() 单用不合规：必须逐一重述每个必需结果并封闭 cancelled。
     if: >-
       always() && !cancelled() &&
@@ -516,6 +687,7 @@ jobs:
       needs.release-please.outputs.build_artifacts == 'true' &&
       needs.goreleaser.result == 'success' &&
       needs.extension.result == 'success' &&
+      needs.mobile.result == 'success' &&
       needs.docker.result == 'success' &&
       needs.assemble-checksums.result == 'success'
     runs-on: ubuntu-24.04
@@ -590,7 +762,23 @@ jobs:
           cat body.trimmed footer.md >body.new
           gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --notes-file body.new
 
-      # 校验远端七个资产（checksums.txt 覆盖 6 个 + --asset 覆盖自身），
+      # tag 名可以被改指：公开以前再核对一次它仍指向 release-please job 核对过的提交（公开以后 tag 被锁定）
+      - name: Require the tag to still point at the release commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          sha=$(bash .github/scripts/resolve-release-gate.sh --peel-tag "$TAG")
+          if [ "$sha" != "$RELEASE_SHA" ]; then
+            echo "::error title=Publish::$TAG now points at $sha, not the release commit $RELEASE_SHA"
+            exit 1
+          fi
+
+      # 校验远端十个资产（checksums.txt 覆盖 9 个 + --asset 覆盖自身），
       # --exact 保证没有意外多余资产；全部通过后才 flip。
       - name: Verify remote assets and publish the draft
         shell: bash
@@ -615,13 +803,15 @@ jobs:
       vars.PUBLISH_EDGE != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # edge-publish.sh 在 Release 正文里写 tag 键控的 marker（防止重跑重复提交），要写权限；工具取自受保护的 github.sha
     permissions:
-      contents: read
+      contents: write
     steps:
-      - name: Checkout
+      # 只要提交脚本：取这次运行所在的受保护提交（和 publish-release 一样），不按可变的 tag 名检出
+      - name: Checkout release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Download the published crx-free zip
@@ -639,6 +829,8 @@ jobs:
       # 上传前先查询商店当前版本以实现同 tag 幂等。
       - name: Upload and publish to Edge Add-ons
         env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}

@@ -14,7 +14,7 @@
       "draft": true,
       "force-tag-creation": true,
       "changelog-path": "CHANGELOG.md",
-      "exclude-paths": ["apps/mobile", "relay/cloudflare"],
+      "exclude-paths": ["relay/cloudflare"],
       "extra-files": [
         {
           "type": "json",
@@ -25,6 +25,10 @@
           "type": "json",
           "path": ".github/scaffold.json",
           "jsonpath": "$.placeholders.CURRENT_VERSION"
+        },
+        {
+          "type": "generic",
+          "path": "apps/mobile/pubspec.yaml"
         }
       ]
     }
