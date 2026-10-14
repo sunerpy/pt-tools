@@ -229,8 +229,22 @@ func TestRemoteAPI_SettingsAndPairing(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	ov = decodeJSON[remote.Overview](t, w)
 	assert.Equal(t, []string{"wss://relay.example.com"}, ov.Relays)
+	assert.Equal(t, []string{"wss://relay.example.com"}, ov.ActiveRelays)
 	assert.Equal(t, e.ts.URL, ov.DirectURL)
 	require.Len(t, ov.RelayStatus, 1)
+
+	// 「不使用 relay」：只直连，填过的 relay 地址留着；再打开回到原来的样子
+	relayed := `{"enabled":true,"relays":["wss://relay.example.com"],"direct_url":"` + e.ts.URL + `"`
+	w = e.do(appReq{method: http.MethodPut, path: "/api/remote", session: true, body: relayed + `,"relay_disabled":true}`})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	off := decodeJSON[remote.Overview](t, w)
+	assert.True(t, off.RelayDisabled)
+	assert.Equal(t, []string{"wss://relay.example.com"}, off.Relays)
+	assert.Empty(t, off.ActiveRelays)
+	assert.Empty(t, off.RelayStatus)
+	w = e.do(appReq{method: http.MethodPut, path: "/api/remote", session: true, body: relayed + `}`})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, decodeJSON[remote.Overview](t, w).RelayStatus, 1)
 
 	// 添加设备：只读；链接与二维码只在回应里出现一次，回应不缓存
 	w = e.do(appReq{method: http.MethodPost, path: "/api/remote/pairings", session: true, body: `{"scopes":["app:read"]}`})

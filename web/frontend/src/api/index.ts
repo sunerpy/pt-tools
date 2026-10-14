@@ -3016,10 +3016,12 @@ export type RemoteScope = "app:read" | "app:write";
 
 export interface RemoteSettings {
   enabled: boolean;
-  /** relay 地址（ws:// 或 wss://），最多 4 个 */
+  /** 自己填的 relay 地址（ws:// 或 wss://），最多 4 个；留空时用构建时内置的托管 relay */
   relays: string[];
   /** App 直连用的地址（http:// 或 https://）；空的时候配对链接里不带 */
   direct_url: string;
+  /** 不使用 relay（只直连）；填过的 relay 地址留着 */
+  relay_disabled: boolean;
 }
 
 export interface RemoteRelayStatus {
@@ -3036,6 +3038,8 @@ export interface RemoteOverview extends RemoteSettings {
   host_key?: string;
   /** 构建时内置的托管 relay；没有时为空 */
   default_relay?: string;
+  /** 实际在用的 relay：自己填的，或者没填时的托管 relay；关掉 relay 时为空 */
+  active_relays: string[];
   relay_status: RemoteRelayStatus[];
   sessions: number;
   stream_path: string;

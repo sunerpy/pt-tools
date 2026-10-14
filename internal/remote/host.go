@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,6 +59,8 @@ type hostState struct {
 	keys     *HostKeys
 	hostID   string
 	settings Settings
+	// relays 是实际在用的 relay（settings.EffectiveRelays()，建状态时算一次）
+	relays []string
 }
 
 // Host 是主机端：直连入口、relay 客户端、配对窗口与会话登记。
@@ -160,11 +163,16 @@ func (h *Host) applyLocked(set Settings, keys *HostKeys) {
 		}
 		return
 	}
-	st := &hostState{keys: keys, hostID: keys.HostID(), settings: set}
+	st := &hostState{keys: keys, hostID: keys.HostID(), settings: set, relays: set.EffectiveRelays()}
 	old := h.state.Swap(st)
-	if old != nil && old.hostID != st.hostID {
+	switch {
+	case old != nil && old.hostID != st.hostID:
 		shutdownAll(h.sessions.takeAll(), GoAwayKeyRotated)
 		h.pairings.cancel()
+	case old != nil && !slices.Equal(old.relays, st.relays):
+		// 在用的 relay 变了：还在等的二维码里写的是旧的 relay（主机马上不连了），作废它和它的配对会话
+		h.pairings.cancel()
+		h.closePairingSessions(nil)
 	}
 	h.syncRelaysLocked(st)
 }
@@ -422,9 +430,11 @@ type RelayStatus struct {
 type Overview struct {
 	Settings
 	// HostID 与 HostKey（X25519 公钥）在第一次打开远程访问以后才有
-	HostID       string        `json:"host_id,omitempty"`
-	HostKey      string        `json:"host_key,omitempty"`
-	DefaultRelay string        `json:"default_relay,omitempty"`
+	HostID       string `json:"host_id,omitempty"`
+	HostKey      string `json:"host_key,omitempty"`
+	DefaultRelay string `json:"default_relay,omitempty"`
+	// ActiveRelays 是实际在用的 relay：自己填的，或者没填时的托管 relay；关掉 relay 时为空
+	ActiveRelays []string      `json:"active_relays"`
 	RelayStatus  []RelayStatus `json:"relay_status"`
 	Sessions     int           `json:"sessions"`
 	StreamPath   string        `json:"stream_path"`
@@ -436,7 +446,7 @@ func (h *Host) Overview(ctx context.Context) (Overview, error) {
 	if err != nil {
 		return Overview{}, err
 	}
-	out := Overview{Settings: set, RelayStatus: []RelayStatus{}, Sessions: h.sessions.count(), StreamPath: StreamPath}
+	out := Overview{Settings: set, ActiveRelays: []string{}, RelayStatus: []RelayStatus{}, Sessions: h.sessions.count(), StreamPath: StreamPath}
 	if u, nerr := NormalizeRelayURL(DefaultRelayURL); nerr == nil {
 		out.DefaultRelay = u
 	}
@@ -447,8 +457,12 @@ func (h *Host) Overview(ctx context.Context) (Overview, error) {
 	if keys != nil {
 		out.HostID, out.HostKey = keys.HostID(), EncodeKey(keys.Noise.Public)
 	}
+	// 在用的 relay 与它们的状态取自同一份运行时状态（远程访问关着时没有）
 	h.mu.Lock()
-	for _, u := range set.Relays {
+	if st := h.state.Load(); st != nil {
+		out.ActiveRelays = slices.Clone(st.relays)
+	}
+	for _, u := range out.ActiveRelays {
 		if c := h.relays[u]; c != nil {
 			out.RelayStatus = append(out.RelayStatus, c.statusSnapshot())
 		}
@@ -516,7 +530,10 @@ type PairingTicket struct {
 }
 
 // StartPairing 开一个配对窗口（替换旧的）。direct 不为空时用它做链接里的直连地址，否则用设置里的。
+// 拿着 h.mu：和改设置串行，链接里的 relay 就是主机正在连的；之后 relay 变了由 applyLocked 作废这个窗口。
 func (h *Host) StartPairing(_ context.Context, scopes []string, direct string) (PairingTicket, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	st := h.state.Load()
 	if st == nil {
 		return PairingTicket{}, ErrDisabled
@@ -531,7 +548,10 @@ func (h *Host) StartPairing(_ context.Context, scopes []string, direct string) (
 			return PairingTicket{}, fmt.Errorf("%w：%v", ErrInvalid, err)
 		}
 	}
-	if d == "" && len(st.settings.Relays) == 0 {
+	if d == "" && len(st.relays) == 0 {
+		if st.settings.RelayDisabled {
+			return PairingTicket{}, fmt.Errorf("%w：关掉了 relay，先填直连地址，App 才知道怎么连过来", ErrInvalid)
+		}
 		return PairingTicket{}, fmt.Errorf("%w：先填直连地址或者 relay，App 才知道怎么连过来", ErrInvalid)
 	}
 	secret, expires, _, err := h.pairings.start(scopes)
@@ -540,7 +560,7 @@ func (h *Host) StartPairing(_ context.Context, scopes []string, direct string) (
 	}
 	// 旧窗口里连上来的配对会话跟着作废
 	h.closePairingSessions(nil)
-	link := PairingLink{HostID: st.hostID, HostKey: st.keys.Noise.Public, Secret: secret, Relays: st.settings.Relays, Direct: d}
+	link := PairingLink{HostID: st.hostID, HostKey: st.keys.Noise.Public, Secret: secret, Relays: st.relays, Direct: d}
 	return PairingTicket{Link: link.String(), ExpiresAt: expires, Scopes: scopes, HostID: st.hostID}, nil
 }
 

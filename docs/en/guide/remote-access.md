@@ -23,8 +23,10 @@ Under System → Remote access (系统 → 远程访问):
 
 1. Turn on Remote access (远程访问).
 2. Under Direct address (直连地址), enter the address the app uses to reach this pt-tools, for example `http://192.168.1.10:8080`. Behind a reverse proxy, enter the proxy's address, with a sub-path if there is one, for example `https://example.com/pt-tools`. Leave it empty and the app connects only through a relay.
-3. Under Relay addresses (relay 地址), enter one `wss://` address per line, up to 4. Builds that include a hosted relay show Use the hosted relay (填入托管 relay). If you only use the app at home, you can leave this empty.
+3. Leave Relay addresses (relay 地址) empty to use the built-in hosted relay (the official binaries and images include it; builds you compile yourself do not). If you enter your own relays, only those are used: one `wss://` address per line, up to 4; to keep the hosted relay as well, click Use the hosted relay (填入托管 relay) to add it. If you only use the app at home or do not want traffic to go through a relay, tick Do not use a relay (不使用 relay（只直连）); the addresses you entered are kept.
 4. Save.
+
+A paired device keeps the relays and the direct address that were in its QR code. After you change the relays (including ticking or clearing Do not use a relay), a device that cannot reach the direct address has to scan a new QR code; a QR code that has not been scanned yet stops working, so add the device again.
 
 The first time you turn it on, pt-tools creates this host's keys and stores them in the database, encrypted with the AES key in `secret.key`. The Status panel on the right shows the hostId, the number of open connections and the state of each relay; when a relay is disconnected its line says why, and pt-tools keeps reconnecting with backoff.
 

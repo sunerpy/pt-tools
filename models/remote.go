@@ -10,6 +10,8 @@ type RemoteSetting struct {
 	RelaysJSON string `gorm:"type:text;default:''"`
 	// DirectURL 是 App 直连这台 pt-tools 用的地址（http:// 或 https://，可以带反向代理的子路径），空 = 配对链接里不带
 	DirectURL string `gorm:"size:512;default:''"`
+	// RelayDisabled 为真时不用任何 relay（只直连）。为假而 RelaysJSON 为空时用构建时内置的托管 relay
+	RelayDisabled bool `gorm:"not null;default:false"`
 	// HostKeysEncrypted 是加密后的主机密钥（Ed25519 与 X25519 的私钥）。第一次打开远程访问时生成，轮换时整个换掉
 	HostKeysEncrypted string `gorm:"type:text;default:''"`
 	UpdatedAt         time.Time

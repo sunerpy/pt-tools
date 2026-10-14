@@ -53,9 +53,27 @@ type Cipher interface {
 
 // Settings 是远程访问的设置。
 type Settings struct {
-	Enabled   bool     `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// Relays 是自己填的 relay；为空时用内置的托管 relay（见 EffectiveRelays）
 	Relays    []string `json:"relays"`
 	DirectURL string   `json:"direct_url"`
+	// RelayDisabled 为真时不用任何 relay（只直连），填过的 Relays 留着
+	RelayDisabled bool `json:"relay_disabled"`
+}
+
+// EffectiveRelays 是实际要连、也写进配对链接的 relay：关掉 relay 时没有；自己填了就只用自己填的；
+// 没填时用构建时内置的托管 relay（DefaultRelayURL，没有或者地址不对时就是不用 relay）。
+func (s Settings) EffectiveRelays() []string {
+	if s.RelayDisabled {
+		return []string{}
+	}
+	if len(s.Relays) > 0 {
+		return s.Relays
+	}
+	if u, err := NormalizeRelayURL(DefaultRelayURL); err == nil {
+		return []string{u}
+	}
+	return []string{}
 }
 
 // Device 是配对过的设备（不含公钥）。
@@ -110,7 +128,7 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	out := Settings{Enabled: r.Enabled, DirectURL: r.DirectURL, Relays: []string{}}
+	out := Settings{Enabled: r.Enabled, DirectURL: r.DirectURL, Relays: []string{}, RelayDisabled: r.RelayDisabled}
 	if r.RelaysJSON != "" {
 		if err := json.Unmarshal([]byte(r.RelaysJSON), &out.Relays); err != nil {
 			return Settings{}, fmt.Errorf("relay 列表格式不对: %w", err)
@@ -121,7 +139,7 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 
 // NormalizeSettings 检查并规整设置：relay 地址去重、最多 4 个；直连地址可以为空。
 func NormalizeSettings(in Settings) (Settings, error) {
-	out := Settings{Enabled: in.Enabled, Relays: []string{}}
+	out := Settings{Enabled: in.Enabled, Relays: []string{}, RelayDisabled: in.RelayDisabled}
 	for _, raw := range in.Relays {
 		if strings.TrimSpace(raw) == "" {
 			continue
@@ -161,7 +179,7 @@ func (s *Store) SaveSettings(ctx context.Context, in Settings) (Settings, error)
 	if err := ensureRow(db); err != nil {
 		return Settings{}, fmt.Errorf("保存远程访问设置失败: %w", err)
 	}
-	cols := map[string]any{"enabled": in.Enabled, "relays_json": string(relays), "direct_url": in.DirectURL}
+	cols := map[string]any{"enabled": in.Enabled, "relays_json": string(relays), "direct_url": in.DirectURL, "relay_disabled": in.RelayDisabled}
 	if err := db.Model(&models.RemoteSetting{}).Where("id = 1").Updates(cols).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存远程访问设置失败: %w", err)
 	}

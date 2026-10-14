@@ -587,15 +587,117 @@ func TestOverview(t *testing.T) {
 	old := DefaultRelayURL
 	DefaultRelayURL = "wss://relay.example.com/"
 	t.Cleanup(func() { DefaultRelayURL = old })
-	th := newTestHost(t, Settings{DirectURL: testDirect})
+	// 关掉 relay：不去连托管 relay，状态里也没有
+	th := newTestHost(t, Settings{DirectURL: testDirect, RelayDisabled: true})
 	ov, err := th.Overview(context.Background())
 	require.NoError(t, err)
 	assert.True(t, ov.Enabled)
+	assert.True(t, ov.RelayDisabled)
 	assert.Equal(t, th.keys.HostID(), ov.HostID)
 	assert.Equal(t, EncodeKey(th.keys.Noise.Public), ov.HostKey)
 	assert.Equal(t, "wss://relay.example.com", ov.DefaultRelay)
+	assert.Empty(t, ov.ActiveRelays)
 	assert.Equal(t, StreamPath, ov.StreamPath)
 	assert.Empty(t, ov.RelayStatus)
+}
+
+// relay 留空时用内置的托管 relay：连它、写进配对链接、状态里有它；自己填了就只用自己的；关掉 relay 时都不用
+func TestDefaultRelayWhenNoneConfigured(t *testing.T) {
+	old := DefaultRelayURL
+	// 本机没人监听的端口：连不上，不出网
+	DefaultRelayURL = "ws://127.0.0.1:1/"
+	t.Cleanup(func() { DefaultRelayURL = old })
+	ctx := context.Background()
+
+	th := newTestHost(t, Settings{})
+	ov, err := th.Overview(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, ov.Relays, "设置里还是空的")
+	assert.Equal(t, []string{"ws://127.0.0.1:1"}, ov.ActiveRelays)
+	require.Len(t, ov.RelayStatus, 1)
+	assert.Equal(t, "ws://127.0.0.1:1", ov.RelayStatus[0].URL)
+	ticket, err := th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err, "没有直连地址也能配对：走托管 relay")
+	link, err := ParseLink(ticket.Link)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ws://127.0.0.1:1"}, link.Relays)
+
+	own, err := th.UpdateSettings(ctx, Settings{Enabled: true, Relays: []string{"ws://127.0.0.1:2"}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ws://127.0.0.1:2"}, own.ActiveRelays)
+	ticket, err = th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	link, _ = ParseLink(ticket.Link)
+	assert.Equal(t, []string{"ws://127.0.0.1:2"}, link.Relays, "自己填了就不带托管 relay")
+
+	off, err := th.UpdateSettings(ctx, Settings{Enabled: true, Relays: []string{"ws://127.0.0.1:2"}, RelayDisabled: true})
+	require.NoError(t, err)
+	assert.Empty(t, off.ActiveRelays)
+	assert.Empty(t, off.RelayStatus)
+	assert.Equal(t, []string{"ws://127.0.0.1:2"}, off.Relays, "关掉 relay 不清掉填过的地址")
+	_, err = th.StartPairing(ctx, ScopesFull, "")
+	assert.ErrorIs(t, err, ErrInvalid, "关掉 relay 又没有直连地址")
+	ticket, err = th.StartPairing(ctx, ScopesFull, testDirect)
+	require.NoError(t, err)
+	link, _ = ParseLink(ticket.Link)
+	assert.Empty(t, link.Relays)
+}
+
+// 实际在用的 relay 变了：还在等的配对窗口作废（二维码里的 relay 主机已经不连了）；只改直连地址时不作废
+func TestPairingWindowClosesWhenRelaysChange(t *testing.T) {
+	old := DefaultRelayURL
+	DefaultRelayURL = "ws://127.0.0.1:1/"
+	t.Cleanup(func() { DefaultRelayURL = old })
+	ctx := context.Background()
+	th := newTestHost(t, Settings{DirectURL: testDirect})
+
+	_, err := th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	_, err = th.UpdateSettings(ctx, Settings{Enabled: true, DirectURL: "http://10.0.0.9:8080"})
+	require.NoError(t, err)
+	assert.Equal(t, PairingWaiting, th.PairingStatus().State, "relay 没变")
+
+	_, err = th.UpdateSettings(ctx, Settings{Enabled: true, DirectURL: testDirect, Relays: []string{"ws://127.0.0.1:2"}})
+	require.NoError(t, err)
+	assert.Equal(t, PairingClosed, th.PairingStatus().State, "托管 relay 换成自己的")
+
+	_, err = th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	_, err = th.UpdateSettings(ctx, Settings{Enabled: true, DirectURL: testDirect, Relays: []string{"ws://127.0.0.1:2"}, RelayDisabled: true})
+	require.NoError(t, err)
+	assert.Equal(t, PairingClosed, th.PairingStatus().State, "关掉 relay")
+}
+
+// 远程访问关着时没有在用的 relay，哪怕 relay 留空、构建里有托管 relay
+func TestOverviewDisabledHasNoActiveRelays(t *testing.T) {
+	old := DefaultRelayURL
+	DefaultRelayURL = "ws://127.0.0.1:1/"
+	t.Cleanup(func() { DefaultRelayURL = old })
+	ctx := context.Background()
+	th := newTestHost(t, Settings{})
+	ov, err := th.UpdateSettings(ctx, Settings{Enabled: false})
+	require.NoError(t, err)
+	assert.False(t, ov.Enabled)
+	assert.Empty(t, ov.ActiveRelays)
+	assert.Empty(t, ov.RelayStatus)
+	ov, err = th.Overview(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, ov.ActiveRelays)
+}
+
+func TestEffectiveRelays(t *testing.T) {
+	old := DefaultRelayURL
+	t.Cleanup(func() { DefaultRelayURL = old })
+
+	DefaultRelayURL = ""
+	assert.Empty(t, Settings{}.EffectiveRelays(), "没有内置托管 relay 的构建：留空就是不用 relay")
+	DefaultRelayURL = "not a url"
+	assert.Empty(t, Settings{}.EffectiveRelays(), "内置地址不对时当作没有")
+	DefaultRelayURL = "wss://relay.example.com/"
+	assert.Equal(t, []string{"wss://relay.example.com"}, Settings{}.EffectiveRelays())
+	assert.Equal(t, []string{"wss://a.example.com"}, Settings{Relays: []string{"wss://a.example.com"}}.EffectiveRelays())
+	assert.Empty(t, Settings{RelayDisabled: true}.EffectiveRelays())
+	assert.Empty(t, Settings{Relays: []string{"wss://a.example.com"}, RelayDisabled: true}.EffectiveRelays())
 }
 
 // 配对会话的请求体在收包时就按 4 KiB 截住；JSON 之后多出内容回 400；每个结果都记审计
