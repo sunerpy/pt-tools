@@ -615,12 +615,12 @@ make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 浏览器扩展与 pt-tools 主程序使用**同一个版本和同一个 Release**，不再使用独立的 `ext-v*` tag：
 
 1. Conventional Commit 合入受保护的 `main` 后，release-please 更新版本、`CHANGELOG.md` 和扩展 `package.json`。
-2. 合并 release PR 后，同一次 `Release` workflow 创建 draft，并并行构建 Go 归档、扩展 `zip/crx`、手机 App 的 APK 与容器镜像。
+2. 合并 release PR 后，同一次 `Release` workflow 创建 draft，并行构建 Go 归档、扩展 `zip/crx` 与手机 App 的 APK；三者都成功以后才推容器镜像（镜像一推就公开了）。
 3. 所有承诺产物和 `checksums.txt` 校验通过后，workflow 才把 draft 切换为公开 Release；任一必需 job 失败都会保留 draft。
 4. 稳定版公开后，`Publish to Edge Add-ons` 作为发布后的副作用提交 `pt-tools-helper.zip`；RC 不提交商店。
 
 > [!IMPORTANT]
-> 不要手工创建 release tag，也不要通过 `ext-v*` tag 发布扩展。普通发版由 release-please 管理；`workflow_dispatch` 只用于重建一个**已经存在且仍为 draft** 的 tag。
+> 不要手工创建 release tag，也不要通过 `ext-v*` tag 发布扩展。普通发版由 release-please 管理；`workflow_dispatch` 只用于重建一个**已经存在且仍为 draft** 的 tag，而且这个 tag 的提交必须在触发它的受保护分支上（是那个分支当前的提交或它的祖先）：下游 job 会带着签名密钥和镜像仓库凭据跑 tag 里的代码。
 
 #### 预览版（RC）
 

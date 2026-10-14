@@ -100,6 +100,29 @@ jobs:
           RUN_REF: ${{ github.ref }}
         run: bash .github/scripts/resolve-release-gate.sh
 
+      # 下游 job 检出这个 tag，带着签名密钥和镜像仓库凭据跑里面的代码。有写权限的人能建一个指向任意提交的
+      # draft tag 再手动触发重建，所以 tag 的提交必须是这次运行的提交或它的祖先，也就是在受保护的分支上。
+      - name: Require the release commit to be on the protected branch
+        if: steps.gate.outputs.build_artifacts == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ steps.gate.outputs.release_sha }}
+          RUN_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          status=$(gh api "repos/$REPO/compare/$RELEASE_SHA...$RUN_SHA" --jq .status)
+          case "$status" in
+          identical | ahead)
+            echo "release commit $RELEASE_SHA is on the protected branch ($status)"
+            ;;
+          *)
+            echo "::error title=Release gate::release commit $RELEASE_SHA is not $RUN_SHA or one of its ancestors (compare status: $status)"
+            exit 1
+            ;;
+          esac
+
   goreleaser:
     name: Build and attach archives
     needs: release-please
@@ -503,7 +526,8 @@ jobs:
     name: Publish container
     # 容器复用本次 GoReleaser 归档内的 Linux 二进制，确保镜像与下载归档
     # 交付的是同一份字节，也避免 Dockerfile 的回退构建在发布时修改依赖图。
-    needs: [release-please, goreleaser]
+    # 镜像一推就公开了，所以等扩展与 App 也构建成功：它们失败时整个版本都不发（Release 停在 draft）。
+    needs: [release-please, goreleaser, extension, mobile]
     if: needs.release-please.outputs.build_artifacts == 'true'
     permissions:
       attestations: write
