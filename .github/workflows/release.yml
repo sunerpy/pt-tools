@@ -762,6 +762,22 @@ jobs:
           cat body.trimmed footer.md >body.new
           gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --notes-file body.new
 
+      # tag 名可以被改指：公开以前再核对一次它仍指向 release-please job 核对过的提交（公开以后 tag 被锁定）
+      - name: Require the tag to still point at the release commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          sha=$(bash .github/scripts/resolve-release-gate.sh --peel-tag "$TAG")
+          if [ "$sha" != "$RELEASE_SHA" ]; then
+            echo "::error title=Publish::$TAG now points at $sha, not the release commit $RELEASE_SHA"
+            exit 1
+          fi
+
       # 校验远端十个资产（checksums.txt 覆盖 9 个 + --asset 覆盖自身），
       # --exact 保证没有意外多余资产；全部通过后才 flip。
       - name: Verify remote assets and publish the draft
@@ -790,10 +806,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      # 只要提交脚本：取这次运行所在的受保护提交（和 publish-release 一样），不按可变的 tag 名检出
+      - name: Checkout release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Download the published crx-free zip
