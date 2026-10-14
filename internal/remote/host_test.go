@@ -643,6 +643,48 @@ func TestDefaultRelayWhenNoneConfigured(t *testing.T) {
 	assert.Empty(t, link.Relays)
 }
 
+// 实际在用的 relay 变了：还在等的配对窗口作废（二维码里的 relay 主机已经不连了）；只改直连地址时不作废
+func TestPairingWindowClosesWhenRelaysChange(t *testing.T) {
+	old := DefaultRelayURL
+	DefaultRelayURL = "ws://127.0.0.1:1/"
+	t.Cleanup(func() { DefaultRelayURL = old })
+	ctx := context.Background()
+	th := newTestHost(t, Settings{DirectURL: testDirect})
+
+	_, err := th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	_, err = th.UpdateSettings(ctx, Settings{Enabled: true, DirectURL: "http://10.0.0.9:8080"})
+	require.NoError(t, err)
+	assert.Equal(t, PairingWaiting, th.PairingStatus().State, "relay 没变")
+
+	_, err = th.UpdateSettings(ctx, Settings{Enabled: true, DirectURL: testDirect, Relays: []string{"ws://127.0.0.1:2"}})
+	require.NoError(t, err)
+	assert.Equal(t, PairingClosed, th.PairingStatus().State, "托管 relay 换成自己的")
+
+	_, err = th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	_, err = th.UpdateSettings(ctx, Settings{Enabled: true, DirectURL: testDirect, Relays: []string{"ws://127.0.0.1:2"}, RelayDisabled: true})
+	require.NoError(t, err)
+	assert.Equal(t, PairingClosed, th.PairingStatus().State, "关掉 relay")
+}
+
+// 远程访问关着时没有在用的 relay，哪怕 relay 留空、构建里有托管 relay
+func TestOverviewDisabledHasNoActiveRelays(t *testing.T) {
+	old := DefaultRelayURL
+	DefaultRelayURL = "ws://127.0.0.1:1/"
+	t.Cleanup(func() { DefaultRelayURL = old })
+	ctx := context.Background()
+	th := newTestHost(t, Settings{})
+	ov, err := th.UpdateSettings(ctx, Settings{Enabled: false})
+	require.NoError(t, err)
+	assert.False(t, ov.Enabled)
+	assert.Empty(t, ov.ActiveRelays)
+	assert.Empty(t, ov.RelayStatus)
+	ov, err = th.Overview(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, ov.ActiveRelays)
+}
+
 func TestEffectiveRelays(t *testing.T) {
 	old := DefaultRelayURL
 	t.Cleanup(func() { DefaultRelayURL = old })

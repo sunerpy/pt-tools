@@ -441,8 +441,10 @@ onBeforeUnmount(stopTimer);
             <div class="ra-tip">
               <template v-if="ov.default_relay"
                 >留空时用托管 relay，填了自己的就只用自己的。</template
-              >只在局域网里用、或者不想经过 relay 时勾上「不使用 relay」，填过的地址会留着。relay
-              只转发加密以后的数据，看得到这台主机的 hostId、IP、连接时间与流量大小，看不到内容。
+              >只在局域网里用、或者不想经过 relay 时勾上「不使用
+              relay」，填过的地址会留着。已经配对的设备记着配对时的 relay：改了 relay
+              以后，直连连不上的设备要重新扫码配对。relay 只转发加密以后的数据，看得到这台主机的
+              hostId、IP、连接时间与流量大小，看不到内容。
               <el-button
                 v-if="ov.default_relay"
                 link

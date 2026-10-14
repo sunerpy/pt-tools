@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -164,9 +165,14 @@ func (h *Host) applyLocked(set Settings, keys *HostKeys) {
 	}
 	st := &hostState{keys: keys, hostID: keys.HostID(), settings: set, relays: set.EffectiveRelays()}
 	old := h.state.Swap(st)
-	if old != nil && old.hostID != st.hostID {
+	switch {
+	case old != nil && old.hostID != st.hostID:
 		shutdownAll(h.sessions.takeAll(), GoAwayKeyRotated)
 		h.pairings.cancel()
+	case old != nil && !slices.Equal(old.relays, st.relays):
+		// 在用的 relay 变了：还在等的二维码里写的是旧的 relay（主机马上不连了），作废它和它的配对会话
+		h.pairings.cancel()
+		h.closePairingSessions(nil)
 	}
 	h.syncRelaysLocked(st)
 }
@@ -440,7 +446,7 @@ func (h *Host) Overview(ctx context.Context) (Overview, error) {
 	if err != nil {
 		return Overview{}, err
 	}
-	out := Overview{Settings: set, ActiveRelays: set.EffectiveRelays(), RelayStatus: []RelayStatus{}, Sessions: h.sessions.count(), StreamPath: StreamPath}
+	out := Overview{Settings: set, ActiveRelays: []string{}, RelayStatus: []RelayStatus{}, Sessions: h.sessions.count(), StreamPath: StreamPath}
 	if u, nerr := NormalizeRelayURL(DefaultRelayURL); nerr == nil {
 		out.DefaultRelay = u
 	}
@@ -451,7 +457,11 @@ func (h *Host) Overview(ctx context.Context) (Overview, error) {
 	if keys != nil {
 		out.HostID, out.HostKey = keys.HostID(), EncodeKey(keys.Noise.Public)
 	}
+	// 在用的 relay 与它们的状态取自同一份运行时状态（远程访问关着时没有）
 	h.mu.Lock()
+	if st := h.state.Load(); st != nil {
+		out.ActiveRelays = slices.Clone(st.relays)
+	}
 	for _, u := range out.ActiveRelays {
 		if c := h.relays[u]; c != nil {
 			out.RelayStatus = append(out.RelayStatus, c.statusSnapshot())
@@ -520,7 +530,10 @@ type PairingTicket struct {
 }
 
 // StartPairing 开一个配对窗口（替换旧的）。direct 不为空时用它做链接里的直连地址，否则用设置里的。
+// 拿着 h.mu：和改设置串行，链接里的 relay 就是主机正在连的；之后 relay 变了由 applyLocked 作废这个窗口。
 func (h *Host) StartPairing(_ context.Context, scopes []string, direct string) (PairingTicket, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	st := h.state.Load()
 	if st == nil {
 		return PairingTicket{}, ErrDisabled
