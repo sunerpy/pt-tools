@@ -19,7 +19,7 @@
   "dependencies": {
     "@vueuse/core": "^14.4.0",
     "dompurify": "^3.4.12",
-    "element-plus": "^2.14.3",
+    "element-plus": "^2.14.7",
     "marked": "^17.0.6",
     "pinia": "^3.0.4",
     "vue": "^3.5.40",
