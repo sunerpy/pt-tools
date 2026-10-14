@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.29](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.28...v1.0.0-rc.29) (2026-10-14)
+
+
+### Features
+
+* **remote:** relay 留空时默认用内置的托管 relay，可以关掉只直连 ([#705](https://github.com/sunerpy/pt-tools/issues/705)) ([9ebea36](https://github.com/sunerpy/pt-tools/commit/9ebea3643a787d0a1df50154b4ddac7715ad1f3b))
+
 ## [1.0.0-rc.28](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.27...v1.0.0-rc.28) (2026-10-14)
 
 
