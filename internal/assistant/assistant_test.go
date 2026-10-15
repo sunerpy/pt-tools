@@ -700,14 +700,28 @@ func TestCloseCancelsRunsAndClosesSessions(t *testing.T) {
 	e := newEnv(t)
 	e.svc.confirmUnit = time.Minute
 	var notified atomic.Int32
+	confirmNotified := make(chan struct{})
+	var once sync.Once
 	a := admin
-	a.Notify = func(context.Context, Event) { notified.Add(1) }
+	a.Notify = func(_ context.Context, ev Event) {
+		notified.Add(1)
+		if ev.Type == EventConfirmation {
+			once.Do(func() { close(confirmNotified) })
+		}
+	}
 	e.llm.push(call("c1", "pause_torrent", `{"downloader_id":1,"task_id":"abc"}`))
 	conv := e.conversation(a)
 	_, err := e.svc.Send(context.Background(), a, conv, "暂停")
 	require.NoError(t, err)
 	events, _ := e.until(a, conv, 0, pendingConfirmation)
 	c := events[len(events)-1].Confirmation
+	// 待确认的事件先发到 hub、再交给 Notify：等它交给 Notify 以后再记数。否则关机以前已经在发的这一条
+	// 会被算成关机以后的回复（CI 上偶发 expected 1, actual 2）
+	select {
+	case <-confirmNotified:
+	case <-time.After(5 * time.Second):
+		t.Fatal("待确认的事件没有交给 Notify")
+	}
 	before := notified.Load()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
