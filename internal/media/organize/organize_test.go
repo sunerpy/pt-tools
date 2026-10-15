@@ -113,7 +113,9 @@ func TestOrganizeMovie(t *testing.T) {
 	assert.Equal(t, []uint{7}, notices[0].ChannelIDs)
 	assert.Contains(t, notices[0].Text, "画质：2160p BluRay HDR H.265")
 	assert.Contains(t, notices[0].Text, "媒体库：电影")
-	assert.Contains(t, notices[0].Text, "海报：https://image.tmdb.org/t/p/w500/opp.jpg")
+	// 海报用 TMDB 客户端的图片地址（这里是假服务；用户换了图片地址时就是换的地址）
+	poster := e.tmdb.URL + "/t/p/w500/opp.jpg"
+	assert.Contains(t, notices[0].Text, "海报："+poster)
 	require.NotNil(t, notices[0].Event)
 	assert.Equal(t, notify.EventMediaOrganized, notices[0].Event.Type)
 	f := notices[0].Event.Fields
@@ -121,7 +123,7 @@ func TestOrganizeMovie(t *testing.T) {
 	assert.Equal(t, "movie", f["media_type"])
 	assert.Equal(t, "2160p BluRay HDR H.265", f["quality"])
 	assert.Equal(t, "电影", f["library"])
-	assert.Equal(t, "https://image.tmdb.org/t/p/w500/opp.jpg", f["poster"])
+	assert.Equal(t, poster, f["poster"])
 	assert.IsType(t, int64(0), f["files"])
 
 	paths := emby.got()

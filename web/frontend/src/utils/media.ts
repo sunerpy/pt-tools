@@ -112,10 +112,13 @@ export function tmdbPageURL(kind: MediaKind, id: number): string {
   return `https://www.themoviedb.org/${kind}/${id}`;
 }
 
-/** TMDB 海报地址；没有海报时为空串 */
+/**
+ * TMDB 海报地址；没有海报时为空串。由 pt-tools 按「媒体识别」里的图片地址与代理去取
+ * （App API 的 /images/tmdb/{size}/{file}），浏览器不直接连 TMDB。
+ */
 export function posterURL(path?: string, size = "w185"): string {
   if (!path) return "";
-  return `https://image.tmdb.org/t/p/${size}/${path.replace(/^\//, "")}`;
+  return `/api/app/v1/images/tmdb/${size}/${path.replace(/^\//, "")}`;
 }
 
 // ---- 整理入库（M10） ----

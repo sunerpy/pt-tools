@@ -97,18 +97,23 @@ const (
 )
 
 // Settings 是给界面看的设置：API Key 只说有没有；代理地址里的密码换成 ***。
+// APIBaseURL、ImageBaseURL 是换掉的地址，空 = 官方地址。
 type Settings struct {
-	HasTMDBKey bool   `json:"has_tmdb_key"`
-	Language   string `json:"language"`
-	ProxyURL   string `json:"proxy_url"`
+	HasTMDBKey   bool   `json:"has_tmdb_key"`
+	Language     string `json:"language"`
+	ProxyURL     string `json:"proxy_url"`
+	APIBaseURL   string `json:"api_base_url"`
+	ImageBaseURL string `json:"image_base_url"`
 }
 
-// SettingsInput 是保存设置的参数。TMDBKey、ProxyURL 为 nil 时不改，为空串时清除。
-// ProxyURL 与 Settings 返回的（密码换成 *** 的）地址相同时也不改。
+// SettingsInput 是保存设置的参数。TMDBKey、ProxyURL、APIBaseURL、ImageBaseURL 为 nil 时不改，为空串时清除
+// （两个地址清除以后用官方地址）。ProxyURL 与 Settings 返回的（密码换成 *** 的）地址相同时也不改。
 type SettingsInput struct {
-	TMDBKey  *string `json:"tmdb_api_key,omitempty"`
-	Language string  `json:"language"`
-	ProxyURL *string `json:"proxy_url,omitempty"`
+	TMDBKey      *string `json:"tmdb_api_key,omitempty"`
+	Language     string  `json:"language"`
+	ProxyURL     *string `json:"proxy_url,omitempty"`
+	APIBaseURL   *string `json:"api_base_url,omitempty"`
+	ImageBaseURL *string `json:"image_base_url,omitempty"`
 }
 
 func (s *Service) load(ctx context.Context) (models.MediaSetting, error) {
@@ -132,7 +137,7 @@ func maskProxy(raw string) string {
 }
 
 func (s *Service) view(row models.MediaSetting) Settings {
-	out := Settings{HasTMDBKey: row.TMDBKeyEncrypted != "", Language: row.Language}
+	out := Settings{HasTMDBKey: row.TMDBKeyEncrypted != "", Language: row.Language, APIBaseURL: row.APIBaseURL, ImageBaseURL: row.ImageBaseURL}
 	if out.Language == "" {
 		out.Language = Languages[0]
 	}
@@ -202,9 +207,23 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 			row.ProxyEncrypted = enc
 		}
 	}
+	if in.APIBaseURL != nil {
+		u, err := tmdb.NormalizeAPIBaseURL(*in.APIBaseURL)
+		if err != nil {
+			return Settings{}, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+		}
+		row.APIBaseURL = u
+	}
+	if in.ImageBaseURL != nil {
+		u, err := tmdb.NormalizeImageBaseURL(*in.ImageBaseURL)
+		if err != nil {
+			return Settings{}, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+		}
+		row.ImageBaseURL = u
+	}
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"tmdb_key_encrypted", "language", "proxy_encrypted", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"tmdb_key_encrypted", "language", "proxy_encrypted", "api_base_url", "image_base_url", "updated_at"}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存媒体识别设置失败: %w", err)
 	}
@@ -234,8 +253,16 @@ func (s *Service) client(ctx context.Context) (*tmdb.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 用户换了地址就用换的；没换时用配置里的（qa 构建指向假服务），都没有时客户端用官方地址
+	base, imageBase := row.APIBaseURL, row.ImageBaseURL
+	if base == "" {
+		base = s.cfg.BaseURL
+	}
+	if imageBase == "" {
+		imageBase = s.cfg.ImageBaseURL
+	}
 	return tmdb.New(tmdb.Options{
-		APIKey: key, BaseURL: s.cfg.BaseURL, ImageBaseURL: s.cfg.ImageBaseURL, Language: s.view(row).Language,
+		APIKey: key, BaseURL: base, ImageBaseURL: imageBase, Language: s.view(row).Language,
 		Cache: s.cache, Limiter: s.limiter, HTTPClient: hc,
 	})
 }

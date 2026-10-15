@@ -521,7 +521,12 @@ func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o s
 		EventKey: fmt.Sprintf("sub-%d-%s-%s", sub.ID, o.c.Site, o.c.Item.ID), Title: "订阅下载：" + title, Body: b.String(),
 	}
 	if sub.PosterPath != "" {
-		n.ImageURL = tmdb.PosterURL(sub.PosterPath, "w500")
+		// 用户换了 TMDB 图片地址时，通知里的海报也用换的地址
+		if c, err := s.cfg.Recognizer.TMDB(ctx); err == nil {
+			n.ImageURL = c.PosterURL(sub.PosterPath, "w500")
+		} else {
+			n.ImageURL = tmdb.PosterURL(sub.PosterPath, "w500")
+		}
 	}
 	n.Event = notify.NewEvent(notify.EventSubscribeDownloaded, s.cfg.Now(), map[string]any{
 		"subscription": title, "media_type": sub.MediaType, "year": sub.Year, "season": sub.Season, "episodes": episodes,

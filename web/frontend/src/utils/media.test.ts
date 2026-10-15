@@ -102,8 +102,8 @@ describe("媒体识别的显示工具", () => {
 
   it("TMDB 地址与海报", () => {
     expect(tmdbPageURL("tv", 1399)).toBe("https://www.themoviedb.org/tv/1399");
-    expect(posterURL("/p.jpg")).toBe("https://image.tmdb.org/t/p/w185/p.jpg");
-    expect(posterURL("p.jpg", "w92")).toBe("https://image.tmdb.org/t/p/w92/p.jpg");
+    expect(posterURL("/p.jpg")).toBe("/api/app/v1/images/tmdb/w185/p.jpg");
+    expect(posterURL("p.jpg", "w92")).toBe("/api/app/v1/images/tmdb/w92/p.jpg");
     expect(posterURL()).toBe("");
   });
 });

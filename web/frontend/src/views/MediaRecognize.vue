@@ -44,14 +44,20 @@ const errText = (e: unknown, fallback: string) => (e as Error)?.message || fallb
 
 // ---- TMDB 设置 ----
 const settings = ref<MediaSettings | null>(null);
-const form = ref({ key: "", language: "zh-CN", proxy: "" });
+const form = ref({ key: "", language: "zh-CN", proxy: "", api: "", image: "" });
 const loadFailed = ref(false);
 const saving = ref(false);
 const testing = ref(false);
 
 function fill(s: MediaSettings) {
   settings.value = s;
-  form.value = { key: "", language: s.language, proxy: s.proxy_url };
+  form.value = {
+    key: "",
+    language: s.language,
+    proxy: s.proxy_url,
+    api: s.api_base_url ?? "",
+    image: s.image_base_url ?? "",
+  };
 }
 
 async function loadSettings() {
@@ -70,6 +76,8 @@ async function save(extra: Partial<MediaSettingsUpdate> = {}) {
     const body: MediaSettingsUpdate = {
       language: form.value.language,
       proxy_url: form.value.proxy.trim(),
+      api_base_url: form.value.api.trim(),
+      image_base_url: form.value.image.trim(),
       ...extra,
     };
     const key = form.value.key.trim();
@@ -371,6 +379,22 @@ onMounted(refresh);
               data-testid="media-proxy" />
           </el-form-item>
         </div>
+        <div class="md-row">
+          <el-form-item label="TMDB 接口地址（可选）">
+            <el-input
+              v-model="form.api"
+              placeholder="留空用官方地址 https://api.themoviedb.org/3"
+              autocomplete="off"
+              data-testid="media-api-base" />
+          </el-form-item>
+          <el-form-item label="TMDB 图片地址（可选）">
+            <el-input
+              v-model="form.image"
+              placeholder="留空用官方地址 https://image.tmdb.org/t/p/"
+              autocomplete="off"
+              data-testid="media-image-base" />
+          </el-form-item>
+        </div>
         <div class="md-actions">
           <el-button type="primary" :loading="saving" data-testid="media-save" @click="save()">
             <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
@@ -386,7 +410,9 @@ onMounted(refresh);
       </el-form>
       <p class="md-tip">
         代理地址留空时用环境变量里的代理（HTTP_PROXY、HTTPS_PROXY、ALL_PROXY），与访问站点相同；
-        支持 http、https 与 socks5。
+        支持 http、https 与 socks5。官方地址连不上或很慢时，可以把接口地址换成 api.tmdb.org
+        或自建的中转，图片地址换成镜像；只写域名时自动补上 https:// 与 /3、/t/p/。刮削下载的图片、
+        通知里的海报，以及网页和 App 上的海报都用这里的图片地址，并且由 pt-tools 去取。
       </p>
     </PtPanel>
 

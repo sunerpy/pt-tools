@@ -1124,8 +1124,16 @@ func noticeEvent(at time.Time, p *Plan, created []*PlanItem) *notify.Event {
 	return notify.NewEvent(notify.EventMediaOrganized, at, map[string]any{
 		"name": name, "media_type": m.MediaType, "episodes": episodes, "files": len(created),
 		"quality": vars(m, created[0].meta, p.meta).Quality, "library": p.Library.Name, "torrent": p.Name,
-		"poster": tmdb.PosterURL(m.PosterPath, "w500"),
+		"poster": p.posterURL(m.PosterPath),
 	})
+}
+
+// posterURL 是通知里的海报地址：用这次整理的 TMDB 客户端的图片地址（用户换了图片地址时跟着换），没有客户端时用官方地址。
+func (p *Plan) posterURL(path string) string {
+	if p.tmdbClient != nil {
+		return p.tmdbClient.PosterURL(path, "w500")
+	}
+	return tmdb.PosterURL(path, "w500")
 }
 
 func noticeText(p *Plan, created []*PlanItem) (string, string) {
@@ -1151,7 +1159,7 @@ func noticeText(p *Plan, created []*PlanItem) (string, string) {
 		lines = append(lines, "画质："+q)
 	}
 	lines = append(lines, "媒体库："+p.Library.Name, "种子："+p.Name)
-	if poster := tmdb.PosterURL(m.PosterPath, "w500"); poster != "" {
+	if poster := p.posterURL(m.PosterPath); poster != "" {
 		lines = append(lines, "海报："+poster)
 	}
 	return "入库：" + name, strings.Join(lines, "\n")

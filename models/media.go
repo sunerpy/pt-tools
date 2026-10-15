@@ -5,11 +5,14 @@ import "time"
 // MediaSetting 是媒体识别的设置（只有一行，ID 为 1）。TMDB 的 API Key 加密保存、只写不读；
 // 代理地址可能带用户名密码，也加密保存，为空时用环境变量里的代理（与站点请求相同）。
 type MediaSetting struct {
-	ID               uint      `gorm:"primaryKey" json:"id"`
-	TMDBKeyEncrypted string    `gorm:"type:text;default:''" json:"-"`
-	Language         string    `gorm:"size:16;default:''" json:"language"`
-	ProxyEncrypted   string    `gorm:"type:text;default:''" json:"-"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               uint   `gorm:"primaryKey" json:"id"`
+	TMDBKeyEncrypted string `gorm:"type:text;default:''" json:"-"`
+	Language         string `gorm:"size:16;default:''" json:"language"`
+	ProxyEncrypted   string `gorm:"type:text;default:''" json:"-"`
+	// APIBaseURL、ImageBaseURL 是换掉的 TMDB 接口地址与图片地址（镜像或自建中转），空 = 官方地址
+	APIBaseURL   string    `gorm:"size:512;default:''" json:"api_base_url"`
+	ImageBaseURL string    `gorm:"size:512;default:''" json:"image_base_url"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (MediaSetting) TableName() string { return "media_settings" }
