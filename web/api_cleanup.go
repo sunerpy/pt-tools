@@ -102,7 +102,7 @@ func (s *Server) apiCleanupPreview(w http.ResponseWriter, r *http.Request) {
 	cfg.CleanupSlowSeedTimeH, cfg.CleanupSlowMaxRatio = in.CleanupSlowSeedTimeH, in.CleanupSlowMaxRatio
 	cfg.CleanupDelFreeExpired, cfg.CleanupDiskProtect, cfg.CleanupMinDiskSpaceGB = in.CleanupDelFreeExpired, in.CleanupDiskProtect, in.CleanupMinDiskSpaceGB
 	cfg.CleanupProtectDL, cfg.CleanupProtectHR, cfg.CleanupMinRetainH, cfg.CleanupProtectTags = in.CleanupProtectDL, in.CleanupProtectHR, in.CleanupMinRetainH, in.CleanupProtectTags
-	res := s.mgr.CleanupPreview(&cfg)
+	res := s.mgr.CleanupPreview(r.Context(), &cfg)
 	if res == nil {
 		res = []scheduler.CleanupResult{}
 	}

@@ -27,7 +27,7 @@ func TestCleanupPreviewAndHistory(t *testing.T) {
 	keep := seedingTorrent("keep1", "hashkeep", "Young", 10, 1.0)
 	fake.torrents = []downloader.Torrent{old, both, keep}
 
-	got := cm.Preview(cfg)
+	got := cm.Preview(t.Context(), cfg)
 	require.Len(t, got, 1)
 	r := got[0]
 	assert.Equal(t, "qb1", r.Downloader)
@@ -56,7 +56,7 @@ func TestCleanupPreviewAndHistory(t *testing.T) {
 	cm.runOnce(cfg)
 	last, _ = cm.hist.Snapshot()
 	assert.Contains(t, last.Results[0].Error, "连不上")
-	assert.Contains(t, cm.Preview(cfg)[0].Error, "连不上")
+	assert.Contains(t, cm.Preview(t.Context(), cfg)[0].Error, "连不上")
 }
 
 // 条件之间是「且」时，设了的都对上才删，理由写全；免费期过了还没下完的直接删
@@ -97,14 +97,14 @@ func TestCleanupPreviewEmergency(t *testing.T) {
 	big.TotalSize = 200 * oneGB
 	fake.torrents = []downloader.Torrent{big}
 
-	r := cm.Preview(cfg)[0]
+	r := cm.Preview(t.Context(), cfg)[0]
 	assert.True(t, r.Emergency)
 	assert.InDelta(t, 10, r.FreeGB, 0.01)
 	require.Len(t, r.Items, 1)
 	assert.Contains(t, r.Items[0].Reasons[0], "紧急清理")
 
 	cfg.CleanupRemoveData = false
-	r = cm.Preview(cfg)[0]
+	r = cm.Preview(t.Context(), cfg)[0]
 	assert.Empty(t, r.Items)
 	assert.Contains(t, r.Notes[0], "腾不出空间")
 }

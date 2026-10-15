@@ -227,6 +227,9 @@ const lastRunText = computed(() => {
   const run = cleanupStatus.value?.last_run;
   if (!run) return "";
   const parts = run.results.map((r) => {
+    // 两批删除（连数据、保留数据）可能一批成了、一批失败：删了的个数与失败的原因都要写
+    if (r.deleted > 0 && r.error)
+      return `${r.downloader} 删了 ${r.deleted} 个，另有删除失败：${r.error}`;
     if (r.error) return `${r.downloader}：${r.error}`;
     if (r.deleted > 0) return `${r.downloader} 删了 ${r.deleted} 个`;
     return `${r.downloader} 没有要删的`;

@@ -44,6 +44,8 @@ type CleanupMonitor struct {
 	startDelay time.Duration
 	// hist 记最近一轮的结果与下一轮的时间（Manager 给的，换监控时不丢）；为空时不记
 	hist *CleanupHistory
+	// quiet 是预览用的实例：只算不删，不写「紧急清理、额外删除」这类像是真的删了的日志
+	quiet bool
 }
 
 // CleanupItem 是一个要删的种子与为什么删。
@@ -276,11 +278,12 @@ func (c *CleanupMonitor) runOnce(cfg *models.SettingsGlobal) {
 	c.hist.record(run)
 }
 
-// Preview 算出按 cfg 现在会删哪些种子，不删、不动磁盘预留：每台连得上的下载器一个结果。
-func (c *CleanupMonitor) Preview(cfg *models.SettingsGlobal) []CleanupResult {
+// Preview 算出按 cfg 现在会删哪些种子，不删、不动磁盘预留：每台连得上的下载器一个结果。取下载器以 ctx 为限
+// （连不上的下载器不等它重连）。
+func (c *CleanupMonitor) Preview(ctx context.Context, cfg *models.SettingsGlobal) []CleanupResult {
 	var out []CleanupResult
 	for _, name := range c.downloaderMgr.ListDownloaders() {
-		dl, err := c.downloaderMgr.GetDownloader(name)
+		dl, err := c.downloaderMgr.GetDownloaderContext(ctx, name)
 		if err != nil || !dl.IsHealthy() {
 			out = append(out, CleanupResult{Downloader: name, Error: "下载器连不上"})
 			continue
@@ -662,7 +665,9 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, sharing *d
 	if !cfg.CleanupRemoveData {
 		// 只从下载器移除任务、不删数据文件，磁盘空间一点也不会释放；
 		// 继续按体积挑种子只会一轮轮删掉任务和做种状态，空间照样不够。
-		c.logger.Warnf("[自动删种] 磁盘空间不足，但「删除时连数据文件一起删」未开启，紧急清理释放不了空间，跳过额外删除")
+		if !c.quiet {
+			c.logger.Warnf("[自动删种] 磁盘空间不足，但「删除时连数据文件一起删」未开启，紧急清理释放不了空间，跳过额外删除")
+		}
 		return alreadyMarked
 	}
 
@@ -753,8 +758,10 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, sharing *d
 	}
 
 	freedGB := freedBytes / (1024 * 1024 * 1024)
-	c.logger.Infof("[自动删种] 紧急清理: 当前 %.1f GB, 目标 %.1f GB (阈值 %.1f + 缓冲 %.1f), 预计释放 %.1f GB, 额外删除 %d 个种子",
-		currentFreeGB, targetGB, cfg.CleanupMinDiskSpaceGB, bufferGB, freedGB, len(result)-len(alreadyMarked))
+	if !c.quiet {
+		c.logger.Infof("[自动删种] 紧急清理: 当前 %.1f GB, 目标 %.1f GB (阈值 %.1f + 缓冲 %.1f), 预计释放 %.1f GB, 额外删除 %d 个种子",
+			currentFreeGB, targetGB, cfg.CleanupMinDiskSpaceGB, bufferGB, freedGB, len(result)-len(alreadyMarked))
+	}
 
 	return result
 }
@@ -788,7 +795,7 @@ func (c *CleanupMonitor) withoutLinked(candidates []downloader.Torrent, dlName s
 		}
 		out = append(out, t)
 	}
-	if skipped > 0 {
+	if skipped > 0 && !c.quiet {
 		c.logger.Infof("[自动删种] %s: %d 个种子已经硬链接整理进媒体库，删掉也腾不出空间，紧急清理不挑它们", dlName, skipped)
 	}
 	return out

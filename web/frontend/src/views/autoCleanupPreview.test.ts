@@ -70,6 +70,15 @@ describe("自动删种：预览与上次运行", () => {
             deleted: 0,
             error: "下载器连不上，这一轮没检查",
           },
+          {
+            downloader: "nas",
+            managed: 4,
+            protected: 0,
+            candidates: 4,
+            items: [],
+            deleted: 1,
+            error: "删除（保留数据）失败: timeout",
+          },
         ],
       },
       next_run_at: "2026-10-15T10:30:00Z",
@@ -79,6 +88,9 @@ describe("自动删种：预览与上次运行", () => {
     const text = q("ac-lastrun")!.textContent ?? "";
     expect(text).toContain("qb 删了 2 个");
     expect(text).toContain("tr：下载器连不上");
+    expect(text, "一批成了一批失败：两样都写").toContain(
+      "nas 删了 1 个，另有删除失败：删除（保留数据）失败: timeout",
+    );
     expect(text).toContain("下次大约");
   });
 

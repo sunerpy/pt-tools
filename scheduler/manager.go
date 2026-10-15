@@ -900,11 +900,12 @@ func (m *Manager) CleanupStatus() (*CleanupRun, time.Time) {
 }
 
 // CleanupPreview 按 cfg 算出现在会删哪些种子，不删：每台连得上的下载器一个结果（见 CleanupMonitor.Preview）。
-func (m *Manager) CleanupPreview(cfg *models.SettingsGlobal) []CleanupResult {
+func (m *Manager) CleanupPreview(ctx context.Context, cfg *models.SettingsGlobal) []CleanupResult {
 	if global.GlobalDB == nil || cfg == nil {
 		return nil
 	}
 	mon := NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
 	defer mon.cancel()
-	return mon.Preview(cfg)
+	mon.quiet = true
+	return mon.Preview(ctx, cfg)
 }
