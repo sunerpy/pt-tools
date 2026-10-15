@@ -16,7 +16,11 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
-  return { ...real, organizeApi: api };
+  return {
+    ...real,
+    organizeApi: api,
+    mediaApi: { ...real.mediaApi, settings: vi.fn(async () => ({ image_base_url: "" })) },
+  };
 });
 
 let view: MountedView | null = null;

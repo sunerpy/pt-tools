@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buttonByText, type MountedView, mountView } from "@/test-mount";
+import { posterURL, setTmdbImageBase } from "@/utils/media";
 
 const api = vi.hoisted(() => ({
   settings: vi.fn(),
@@ -51,6 +52,7 @@ afterEach(() => {
   view?.unmount();
   view = null;
   vi.clearAllMocks();
+  setTmdbImageBase();
 });
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -184,6 +186,9 @@ describe("媒体识别", () => {
     expect(inputOf("media-image-base").value, "回显服务端规整后的地址").toBe(
       "https://static.example.com/t/p/",
     );
+    expect(posterURL("/p.jpg"), "网页上的海报改从新地址加载").toBe(
+      "https://static.example.com/t/p/w185/p.jpg",
+    );
   });
 
   it("识别：显示解析结果、匹配条目与来源、候选；选候选后纠正并重新识别", async () => {
@@ -213,8 +218,8 @@ describe("媒体识别", () => {
     expect(q("media-match")!.querySelector("a")!.getAttribute("href")).toBe(
       "https://www.themoviedb.org/movie/278",
     );
-    expect(q("media-match")!.querySelector("img")!.getAttribute("src"), "海报经 pt-tools 取").toBe(
-      "/api/app/v1/images/tmdb/w185/p.jpg",
+    expect(q("media-match")!.querySelector("img")!.getAttribute("src")).toBe(
+      "https://image.tmdb.org/t/p/w185/p.jpg",
     );
     expect((q("media-pick-movie-278") as HTMLButtonElement).disabled, "已经是这一条").toBe(true);
 

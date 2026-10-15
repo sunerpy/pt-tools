@@ -19,7 +19,7 @@ Movie and TV data comes from [TMDB](https://www.themoviedb.org/). This product u
 
 The proxy address may include a user name and password. The whole address is stored encrypted, and the page shows the password as `***`. TMDB usually needs a proxy from mainland China; when the official addresses are unreachable or slow you can also replace the API and image addresses, with or without the proxy.
 
-Images downloaded for scraping, the poster links in organizing and subscription notifications, and the posters shown in the web UI and the mobile app all use the image address. pt-tools fetches the posters for the web UI and the app itself, through this image address and proxy, so the browser never connects to TMDB.
+Images downloaded for scraping, the poster links in organizing and subscription notifications, and the posters shown in the web UI and the mobile app all use the image address. pt-tools fetches scraping images and the app's posters itself, through the proxy above; the browser loads the web UI's posters straight from the image address, and the device that receives a notification opens its poster. If you point the image address at a relay on your LAN, make sure the browser and those devices can reach it too.
 
 ## Recognition preview
 

@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import type {
   MediaHistoryItem,
   MediaKind,
@@ -112,13 +113,21 @@ export function tmdbPageURL(kind: MediaKind, id: number): string {
   return `https://www.themoviedb.org/${kind}/${id}`;
 }
 
-/**
- * TMDB 海报地址；没有海报时为空串。由 pt-tools 按「媒体识别」里的图片地址与代理去取
- * （App API 的 /images/tmdb/{size}/{file}），浏览器不直接连 TMDB。
- */
+/** TMDB 官方的图片地址（到尺寸之前为止） */
+export const DEFAULT_TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/";
+/** 网页上海报用的图片地址：「媒体识别」里换了就用换的（见 composables/useTmdbImageBase） */
+const tmdbImageBase = ref(DEFAULT_TMDB_IMAGE_BASE);
+
+/** setTmdbImageBase 设置海报用的图片地址；空串或没有时用官方地址 */
+export function setTmdbImageBase(base?: string): void {
+  const b = (base ?? "").trim();
+  tmdbImageBase.value = b ? (b.endsWith("/") ? b : `${b}/`) : DEFAULT_TMDB_IMAGE_BASE;
+}
+
+/** TMDB 海报地址（浏览器按设置里的图片地址直接加载）；没有海报时为空串 */
 export function posterURL(path?: string, size = "w185"): string {
   if (!path) return "";
-  return `/api/app/v1/images/tmdb/${size}/${path.replace(/^\//, "")}`;
+  return `${tmdbImageBase.value}${size}/${path.replace(/^\//, "")}`;
 }
 
 // ---- 整理入库（M10） ----

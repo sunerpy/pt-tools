@@ -47,6 +47,7 @@ vi.mock("@/api", async (orig) => {
     downloadersApi: dl,
     sitesApi: sites,
     chatopsApi: { ...real.chatopsApi, notifications },
+    mediaApi: { ...real.mediaApi, settings: vi.fn(async () => ({ image_base_url: "" })) },
   };
 });
 

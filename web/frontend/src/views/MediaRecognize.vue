@@ -31,6 +31,7 @@ import {
   mediaSourceLabel,
   metaTags,
   posterURL,
+  setTmdbImageBase,
   tmdbPageURL,
   wordEffect,
   wordKindLabel,
@@ -51,6 +52,7 @@ const testing = ref(false);
 
 function fill(s: MediaSettings) {
   settings.value = s;
+  setTmdbImageBase(s.image_base_url);
   form.value = {
     key: "",
     language: s.language,
@@ -412,7 +414,8 @@ onMounted(refresh);
         代理地址留空时用环境变量里的代理（HTTP_PROXY、HTTPS_PROXY、ALL_PROXY），与访问站点相同；
         支持 http、https 与 socks5。官方地址连不上或很慢时，可以把接口地址换成 api.tmdb.org
         或自建的中转，图片地址换成镜像；只写域名时自动补上 https:// 与 /3、/t/p/。刮削下载的图片、
-        通知里的海报，以及网页和 App 上的海报都用这里的图片地址，并且由 pt-tools 去取。
+        通知里的海报，以及网页和 App 上的海报都用这里的图片地址：刮削和 App 的海报由 pt-tools
+        经上面的代理去取，网页上的海报由浏览器直接加载，通知里的海报由收到通知的设备打开。
       </p>
     </PtPanel>
 

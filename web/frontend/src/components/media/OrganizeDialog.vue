@@ -14,6 +14,7 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import {
   itemStatus,
   mediaKindLabel,
@@ -86,6 +87,8 @@ watch(
   () => [visible.value, props.target?.downloader_id, props.target?.hash] as const,
   ([open]) => {
     if (!open) return;
+    // 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载（打开时才读，页面上没打开就不发请求）
+    void loadTmdbImageBase();
     result.value = null;
     override.value = { type: "movie", id: undefined, library: undefined };
     void preview();
