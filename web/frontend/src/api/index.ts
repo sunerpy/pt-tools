@@ -1651,7 +1651,9 @@ export interface RSSNotificationLog {
 
 /**
  * 一个通道最近几天的投递：RSS 通知与后台监控通知（保号、签到、战报……）合计，按来源分。
- * pending 是还在等（安静时段挂起、等重试），skipped 是按规则没发的 RSS 通知（被同一种子后来的通知取代、超出每小时上限）。
+ * sent 是已发出：RSS 通知实时发不出去时转进重发队列也算，重发的结果在 requeued 里（按消息数，合并发送的一组算一条）。
+ * pending 是还在等（安静时段挂起、等重试）；canceled 是在 RSS 通知日志里取消的、或被同一种子后来的通知取代的；
+ * throttled 是超出 RSS 每小时上限没发的。
  */
 export interface NotifyStatsChannel {
   conf_id: number;
@@ -1659,7 +1661,9 @@ export interface NotifyStatsChannel {
   sent: number;
   failed: number;
   pending: number;
-  skipped: number;
+  canceled: number;
+  throttled: number;
+  requeued: { total: number; sent: number; pending: number; dead: number };
   sources: { source: string; total: number; sent: number }[];
 }
 

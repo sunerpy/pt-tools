@@ -191,37 +191,56 @@ const SOURCE_LABELS: Record<string, string> = {
   downloader_assistant: "失效种子",
   media: "订阅与入库",
   remote: "远程访问",
-  brush: "刷流",
 };
 
-/** p-stat：每个通道近 7 天投了多少、送达多少；小字写来源，再写没送达的是失败、在等还是按规则没发 */
+/**
+ * p-stat：每个通道近 7 天发了多少；小字写来源，再写没发出的是失败、在等、取消还是超出上限，
+ * 最后写 RSS 通知转进重发队列以后的结果（「已发出」里含这些，补发没成的要单独看得见）
+ */
 const statRows = computed<BreakdownRow[]>(() =>
   (stats.value?.channels ?? []).map((ch) => {
     const conf = notifications.value.find((n) => n.id === ch.conf_id);
-    const sources = ch.sources
-      .map((src) => `${SOURCE_LABELS[src.source] ?? src.source} ${src.total}`)
-      .join(" · ");
+    const parts: string[] = [];
+    if (ch.sources.length > 0) {
+      parts.push(
+        ch.sources
+          .map((src) => `${SOURCE_LABELS[src.source] ?? src.source} ${src.total}`)
+          .join(" · "),
+      );
+    }
     const left: string[] = [];
     if (ch.failed > 0) left.push(`${ch.failed} 条失败`);
     if (ch.pending > 0) left.push(`${ch.pending} 条等待发送`);
-    if (ch.skipped > 0) left.push(`${ch.skipped} 条按规则没发`);
-    const rest = ch.total - ch.sent - ch.failed - ch.pending - ch.skipped;
-    if (rest > 0) left.push(`${rest} 条没送达`);
+    if (ch.canceled > 0) left.push(`${ch.canceled} 条取消或被取代`);
+    if (ch.throttled > 0) left.push(`${ch.throttled} 条超出每小时上限`);
+    const rest = ch.total - ch.sent - ch.failed - ch.pending - ch.canceled - ch.throttled;
+    if (rest > 0) left.push(`${rest} 条没发出`);
+    if (ch.total > 0) parts.push(left.length > 0 ? left.join("、") : "全部发出");
+    const q = ch.requeued;
+    if (q.total > 0) {
+      const done: string[] = [];
+      if (q.sent > 0) done.push(`${q.sent} 条已补发`);
+      if (q.pending > 0) done.push(`${q.pending} 条重试中`);
+      if (q.dead > 0) done.push(`${q.dead} 条放弃`);
+      parts.push(
+        `${q.total} 条实时没发出、转入重发${done.length > 0 ? `：${done.join("、")}` : ""}`,
+      );
+    }
     return {
       key: String(ch.conf_id),
       label: conf ? conf.name : `已删除的通道 #${ch.conf_id}`,
       value: `${ch.sent} / ${ch.total}`,
       weight: ch.total,
-      tone: ch.failed > 0 ? ("warn" as const) : ("ok" as const),
-      hint: `${sources}；${left.length > 0 ? left.join("、") : "全部送达"}`,
+      tone: ch.failed > 0 || q.dead > 0 ? ("warn" as const) : ("ok" as const),
+      hint: parts.join("；"),
     };
   }),
 );
 
 const statFoot = computed(
   () =>
-    `口径是「已送达 / 总条数」：近 ${stats.value?.days ?? 7} 天的 RSS 通知与保号、签到、战报、失效种子、订阅与入库等后台通知都算，` +
-    "通道测试和命令回复不算。「按规则没发」是被同一种子后来的通知取代、或超出每小时上限的 RSS 通知。",
+    `口径是「已发出 / 总条数」，近 ${stats.value?.days ?? 7} 天：RSS 通知和保号、签到、战报、失效种子、订阅与入库、远程访问这些后台通知都算，` +
+    "通道测试和命令回复不算。RSS 通知实时发不出去会转入重发队列，也算已发出，补发的结果写在小字里。",
 );
 
 /** 画板 head 的 sub（11.5/400 t3）：共几个通道、几个启用、都是什么类型 */
