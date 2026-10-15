@@ -235,7 +235,7 @@ func newDB(t *testing.T) *gorm.DB {
 	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
-		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{},
+		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{},
 		&models.MediaTransferHistory{}, &models.TorrentInfo{}, &models.DownloaderSetting{},
 	))
 	return db

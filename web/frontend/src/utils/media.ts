@@ -6,6 +6,7 @@ import type {
   MediaKind,
   MediaMeta,
   MediaMode,
+  MediaOverwriteMode,
   MediaRecognizeResult,
   MediaScrapeItem,
   MediaServerKind,
@@ -363,8 +364,15 @@ const ITEM_STATUS: Record<OrganizeItemStatus, { label: string; tone: Tone }> = {
   pending: { label: "待整理", tone: "info" },
   done: { label: "已在库里", tone: "ok" },
   exists: { label: "目标已有文件", tone: "warn" },
+  replace: { label: "替换旧版本", tone: "info" },
   failed: { label: "整理不了", tone: "dang" },
 };
+
+/** 覆盖策略（和后端 organize.OverwriteNever 等一致）：目标位置已经有 pt-tools 之前放进库的旧版本时怎么办 */
+export const OVERWRITE_MODES: readonly { value: MediaOverwriteMode; label: string }[] = [
+  { value: "", label: "不替换" },
+  { value: "larger", label: "新文件更大时替换" },
+];
 
 export function itemStatus(status: OrganizeItemStatus): { label: string; tone: Tone } {
   return ITEM_STATUS[status] ?? { label: status, tone: "neutral" };

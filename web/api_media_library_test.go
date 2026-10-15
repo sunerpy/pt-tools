@@ -59,7 +59,7 @@ func newOrganizeServer(t *testing.T) *organizeTestEnv {
 	db := global.GlobalDB.DB
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
-		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaTransferHistory{},
+		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaTransferHistory{}, &models.MediaReplaceJournal{},
 	))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

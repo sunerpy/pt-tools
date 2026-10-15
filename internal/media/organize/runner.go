@@ -118,7 +118,11 @@ func (s *Service) Start() {
 			}
 		}
 	})
-	s.wg.Go(func() { s.worker(ctx) })
+	s.wg.Go(func() {
+		// 上次没做完的替换（覆盖策略）先恢复，再开始整理
+		s.recoverReplacements(ctx)
+		s.worker(ctx)
+	})
 	s.wg.Go(func() { s.loop(ctx) })
 }
 
@@ -386,7 +390,9 @@ func (s *Service) Organize(ctx context.Context, req Request) (*Result, error) {
 func (s *Service) loop(ctx context.Context) {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
+	// lastRecover 从开始时算起：worker 开始时已经恢复过一次
 	var lastSweep, lastScan, lastReconcile time.Time
+	lastRecover := s.cfg.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -411,6 +417,10 @@ func (s *Service) loop(ctx context.Context) {
 		if set.DeleteLinksOnRemove && now.Sub(lastReconcile) >= sweepInterval {
 			lastReconcile = now
 			s.Reconcile(ctx)
+		}
+		if now.Sub(lastRecover) >= sweepInterval {
+			lastRecover = now
+			s.recoverReplacements(ctx)
 		}
 	}
 }

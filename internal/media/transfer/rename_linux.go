@@ -26,3 +26,8 @@ func renameNoReplace(oldpath, newpath string) error {
 	}
 	return err
 }
+
+// moveNoReplace 是 Place 用的不覆盖的改名：Linux 上就是 renameNoReplace。
+func moveNoReplace(oldpath, newpath string) error {
+	return renameNoReplace(oldpath, newpath)
+}

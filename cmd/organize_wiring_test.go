@@ -28,9 +28,13 @@ func organizeTestDB(t *testing.T) *gorm.DB {
 	t.Cleanup(func() { global.GlobalDB = prevDB })
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	// 内存库每个连接各是一份：整理服务的后台一开始就读库（恢复没做完的替换），只留一个连接才看得到建好的表
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(
 		&models.SettingsGlobal{}, &models.DownloaderSetting{}, &models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{},
-		&models.MediaCache{}, &models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{},
+		&models.MediaCache{}, &models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{},
 		&models.MediaTransferHistory{}, &models.MonitorNotificationLog{}, &models.NotificationConf{},
 	))
 	global.GlobalDB = &models.TorrentDB{DB: db}

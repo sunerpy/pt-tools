@@ -25,15 +25,16 @@ When the downloader and pt-tools see different paths (for example when they run 
 
 Each library takes one kind of title. Create one for movies and one for TV shows; to keep animation apart, add a library with Animation only (只收动画) checked (titles with TMDB's "Animation" genre go there first, and to the regular library when there is no such library). When several libraries share a type, the first one is used.
 
-| Field          | Description                                                                                                                                     |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Type           | Movie or TV; with Animation only checked it takes animation only                                                                                |
-| Library folder | The path as pt-tools sees it (absolute)                                                                                                         |
-| Mode           | Hard link (default), copy, symbolic link or move, see below                                                                                     |
-| Template       | Leave empty for the default, see [naming templates](#naming-templates)                                                                          |
-| Scraping       | Write NFO files and images; what to write and which image language to use, see [scraping](#scraping); turn it off to let the media server do it |
-| Overwrite      | Rewrite NFO files and images on every run; when off, existing files are left alone                                                              |
-| Categories     | With Organise by category checked, files go into `<library folder>/<category>/…`, see [secondary categories](#secondary-categories)             |
+| Field           | Description                                                                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type            | Movie or TV; with Animation only checked it takes animation only                                                                                |
+| Library folder  | The path as pt-tools sees it (absolute)                                                                                                         |
+| Mode            | Hard link (default), copy, symbolic link or move, see below                                                                                     |
+| Template        | Leave empty for the default, see [naming templates](#naming-templates)                                                                          |
+| Scraping        | Write NFO files and images; what to write and which image language to use, see [scraping](#scraping); turn it off to let the media server do it |
+| Overwrite       | Rewrite NFO files and images on every run; when off, existing files are left alone                                                              |
+| Same-name files | Whether to replace an old version pt-tools put into the library, see [files with the same name](#files-with-the-same-name)                      |
+| Categories      | With Organise by category checked, files go into `<library folder>/<category>/…`, see [secondary categories](#secondary-categories)             |
 
 | Mode          | Description                                                                                                                              |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -97,6 +98,19 @@ With Organise by category (按二级分类放进子目录) checked on a library,
 - Fill in common categories (填入常用分类) uses the same categories as MoviePilot's defaults: animated, Chinese-language and foreign movies; for TV, Chinese animation, Japanese anime, documentaries, kids, variety, Chinese, Western and Japanese/Korean series, and uncategorised.
 
 The category name is the folder name, so it can't contain `/ \ : * ? " < > |`. Changing the rules or the checkbox only affects files organised afterwards; files already in the library stay where they are. For TV, the NFO files, poster and logo go into the show folder inside the category folder. The organise preview shows which category a title goes into. Categorising needs TMDB's details (a movie's production countries are only there); when they can't be fetched, the title isn't organised this time and is retried later.
+
+## Files with the same name
+
+When a movie or an episode gets another release (say 1080p first and 2160p later) and both come out with the same file name, the old version already occupies that spot in the library. Same-name files (同名文件) on the library decides what happens:
+
+| Option              | What it does                                                              |
+| ------------------- | ------------------------------------------------------------------------- |
+| Keep (default)      | Keep the old version; the new one is recorded as skipped, with the reason |
+| Replace when larger | Replace only when the new file is larger than the old version             |
+
+Only files pt-tools put into this library for the same movie (or the same episode) are replaced, confirmed by the organise record and file ID. Files you put there yourself, files that were changed, and moved files (the only copy) are never replaced, and nothing is replaced when the library organises by moving. The new file is placed under a temporary name next to the target first, the old file is moved to a backup name and checked to be the one the old record placed, then the new file goes into place, and the old file is deleted only after the records are saved. If any step fails the old file goes back where it was, and if pt-tools stops halfway the unfinished replacement is rolled back on the next start. The old version's subtitles and same-name NFO and thumbnail are swapped for the new ones, folder images stay, and the old record is marked removed with what replaced it. Files in the download folder are never touched. When the library's file system supports neither hard links nor no-overwrite renames (some network storage), nothing is replaced and the reason is shown.
+
+Only size decides: the smaller old version never swaps the larger one back when it's organised again (automatically or by hand); it's recorded as skipped. To go back, delete the new version's record together with its library files under organise history, then organise the old one. When the naming template includes the quality (the default movie template does), different releases get different file names, never collide, and both stay in the library; to keep only one, drop the quality from the template or use subscription upgrades.
 
 ## Which files are organised
 

@@ -109,6 +109,7 @@ const library = {
   scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
   scrape_image_lang: "",
   classify_dir: false,
+  overwrite_mode: "",
   enabled: true,
   created_at: "",
   updated_at: "",
@@ -236,6 +237,7 @@ describe("媒体库", () => {
         scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
         scrape_image_lang: "",
         classify_dir: false,
+        overwrite_mode: "",
         enabled: true,
       },
     ]);
@@ -350,6 +352,25 @@ describe("媒体库", () => {
     fillBtn!.click();
     await flush();
     expect(api.saveClassify).toHaveBeenCalledTimes(4);
+  });
+
+  it("媒体库：同名文件选「新文件更大时替换」时带上 overwrite_mode", async () => {
+    await mountPage();
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-overwrite-mode")).not.toBeNull());
+    const sel = q("ml-lib-overwrite-mode")!;
+    (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+    await vi.waitFor(() => {
+      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => (o.textContent ?? "").trim() === "新文件更大时替换",
+      );
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({ overwrite_mode: "larger" });
   });
 
   it("媒体库：勾选按二级分类放进子目录时带上 classify_dir", async () => {
