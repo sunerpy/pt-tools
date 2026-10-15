@@ -444,6 +444,7 @@ func (s *Service) loop(ctx context.Context) {
 		}
 		if now.Sub(lastWatch) >= time.Duration(set.WatchIntervalMin)*time.Minute {
 			lastWatch = now
+			s.markRun(&s.watchTick, now)
 			s.watchScan(ctx, set)
 		}
 		if now.Sub(lastRecover) >= sweepInterval {
@@ -686,18 +687,19 @@ func (s *Service) Runs(ctx context.Context, set Settings) RunTimes {
 		watching = 0
 	}
 	s.timesMu.Lock()
-	scanAt, watchAt := s.scanAt, s.watchAt
+	scanAt, watchTick, watchAt := s.scanAt, s.watchTick, s.watchAt
 	s.timesMu.Unlock()
 	running, now := s.isRunning(), s.cfg.Now()
-	at := func(last time.Time, on bool, intervalMin int) (*time.Time, *time.Time) {
+	// next 按后台节拍上一次做这件事的时间 tick 排（与 loop 一致）；last 是页面上的「上次」
+	at := func(last, tick time.Time, on bool, intervalMin int) (*time.Time, *time.Time) {
 		var l, n *time.Time
 		if !last.IsZero() {
 			l = &last
 		}
 		if running && on {
 			next := now
-			if !last.IsZero() {
-				if t := last.Add(time.Duration(intervalMin) * time.Minute); t.After(now) {
+			if !tick.IsZero() {
+				if t := tick.Add(time.Duration(intervalMin) * time.Minute); t.After(now) {
 					next = t
 				}
 			}
@@ -706,7 +708,7 @@ func (s *Service) Runs(ctx context.Context, set Settings) RunTimes {
 		return l, n
 	}
 	var rt RunTimes
-	rt.ScanLast, rt.ScanNext = at(scanAt, set.ScanEnabled, set.ScanIntervalMin)
-	rt.WatchLast, rt.WatchNext = at(watchAt, watching > 0, set.WatchIntervalMin)
+	rt.ScanLast, rt.ScanNext = at(scanAt, scanAt, set.ScanEnabled, set.ScanIntervalMin)
+	rt.WatchLast, rt.WatchNext = at(watchAt, watchTick, watching > 0, set.WatchIntervalMin)
 	return rt
 }

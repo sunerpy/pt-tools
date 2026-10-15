@@ -649,7 +649,8 @@ func TestRuns(t *testing.T) {
 	_, err := e.svc.SaveWatchDir(e.ctx, 0, WatchDirInput{Path: in, Enabled: true})
 	require.NoError(t, err)
 	e.svc.markRun(&e.svc.scanAt, e.Now())
-	e.svc.markRun(&e.svc.watchAt, e.Now())
+	e.svc.markRun(&e.svc.watchTick, e.Now())
+	e.svc.watchScan(e.ctx, set)
 	rt = e.svc.Runs(e.ctx, set)
 	assert.Equal(t, e.Now(), *rt.ScanLast)
 	assert.Equal(t, e.Now().Add(30*time.Minute), *rt.ScanNext)
@@ -657,4 +658,31 @@ func TestRuns(t *testing.T) {
 
 	set.ScanEnabled = false
 	assert.Nil(t, e.svc.Runs(e.ctx, set).ScanNext, "定期扫描关着")
+}
+
+// 后台节拍在没有开着的目录时也算做过一次目录监控扫描：之后开了目录，下一次按那一拍加间隔排，不是现在；
+// 页面上的「上次」只算真的扫了目录的
+func TestRunsWatchTickWithoutDirs(t *testing.T) {
+	e := newEnv(t)
+	set := e.settings(SettingsInput{WatchIntervalMin: 10})
+	e.svc.runMu.Lock()
+	e.svc.running = true
+	e.svc.runMu.Unlock()
+	t.Cleanup(func() {
+		e.svc.runMu.Lock()
+		e.svc.running = false
+		e.svc.runMu.Unlock()
+	})
+	// 这一拍没有开着的目录
+	e.svc.markRun(&e.svc.watchTick, e.Now())
+	e.svc.watchScan(e.ctx, set)
+	in := filepath.Join(e.root, "incoming")
+	require.NoError(t, os.MkdirAll(in, 0o755))
+	_, err := e.svc.SaveWatchDir(e.ctx, 0, WatchDirInput{Path: in, Enabled: true})
+	require.NoError(t, err)
+	e.advance(3 * time.Minute)
+	rt := e.svc.Runs(e.ctx, set)
+	assert.Nil(t, rt.WatchLast, "那一拍没扫到目录：不算上次")
+	require.NotNil(t, rt.WatchNext)
+	assert.Equal(t, e.Now().Add(7*time.Minute), *rt.WatchNext, "按那一拍加间隔排")
 }

@@ -114,11 +114,12 @@ type Service struct {
 	runMu   sync.Mutex
 	running bool
 
-	// timesMu 保护 scanAt、watchAt：后台节拍上一次定期扫描与目录监控扫描的时间（见 Runs）
-	timesMu         sync.Mutex
-	scanAt, watchAt time.Time
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
+	// timesMu 保护下面三个时间（见 Runs）：scanAt 是上一次定期扫描；watchTick 是后台节拍上一次做目录监控扫描
+	// （按它排下一次，没有开着的目录时也算），watchAt 是其中真的扫了目录的那一次（页面上的「上次」）
+	timesMu                    sync.Mutex
+	scanAt, watchTick, watchAt time.Time
+	cancel                     context.CancelFunc
+	wg                         sync.WaitGroup
 }
 
 // New 建一个服务（还没开始后台循环，见 Start）。
