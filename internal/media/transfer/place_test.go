@@ -64,3 +64,20 @@ func exists(p string) bool {
 	_, err := os.Lstat(p)
 	return err == nil
 }
+
+// 不覆盖的改名出了别的错：照实报错；改用硬链接时目标已经有了：报目标已存在
+func TestPlaceErrors(t *testing.T) {
+	oldRename, oldLink := placeRename, linkTmp
+	t.Cleanup(func() { placeRename, linkTmp = oldRename, oldLink })
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	require.NoError(t, os.WriteFile(src, []byte("A"), 0o644))
+
+	placeRename = func(string, string) error { return os.ErrPermission }
+	require.ErrorIs(t, Place(src, dst), os.ErrPermission)
+
+	placeRename = func(string, string) error { return errNoReplaceUnsupported }
+	require.NoError(t, os.WriteFile(dst, []byte("B"), 0o644))
+	linkTmp = func(a, b string) error { return &os.LinkError{Op: "link", Old: a, New: b, Err: os.ErrExist} }
+	require.ErrorIs(t, Place(src, dst), ErrTargetExists)
+}
