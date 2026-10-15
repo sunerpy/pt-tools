@@ -285,7 +285,7 @@ The response has `items`, `page` and `total_pages`. Each item has `id` (the TMDB
 
 ### GET /images/tmdb/{size}/{file}
 
-A TMDB image: `file` is `poster_path` without its leading `/`, and `size` is one of the poster sizes `w92`, `w154`, `w185`, `w342`, `w500` and `w780` (originals aren't offered, they can be several MB). pt-tools fetches it with the image address and proxy set under Media recognition and responds with the image and a one-day cache header, so clients never contact TMDB directly. Without a TMDB API key it responds with 400, when TMDB has no such image with 404, and when the image can't be fetched with 502 (`upstream`). pt-tools fetches at most 4 images at a time; a request that waits longer than 10 seconds gets 503 (`busy`, with `Retry-After`).
+A TMDB image: `file` is `poster_path` without its leading `/`, and `size` is one of the poster sizes `w92`, `w154`, `w185`, `w342`, `w500` and `w780` (originals aren't offered, they can be several MB). pt-tools fetches it with the image address and proxy set under Media recognition and responds with the image and a one-day cache header, so clients never contact TMDB directly. Fetching images doesn't need a TMDB API key. It responds with 404 when TMDB has no such image, and with 502 (`upstream`) when the image can't be fetched. pt-tools fetches at most 4 images at a time; a request that waits longer than 10 seconds gets 503 (`busy`, with `Retry-After`).
 
 ## AI assistant
 

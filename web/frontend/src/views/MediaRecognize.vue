@@ -31,6 +31,7 @@ import {
   mediaSourceLabel,
   metaTags,
   posterURL,
+  setTmdbImageBase,
   tmdbPageURL,
   wordEffect,
   wordKindLabel,
@@ -44,14 +45,25 @@ const errText = (e: unknown, fallback: string) => (e as Error)?.message || fallb
 
 // ---- TMDB 设置 ----
 const settings = ref<MediaSettings | null>(null);
-const form = ref({ key: "", language: "zh-CN", proxy: "" });
+const form = ref({ key: "", language: "zh-CN", proxy: "", api: "", image: "" });
 const loadFailed = ref(false);
 const saving = ref(false);
 const testing = ref(false);
+/** 网页用 https 打开、图片地址却是 http:// 时，浏览器会拦下网页上的海报（混合内容） */
+const imageBaseBlocked = computed(
+  () => window.location.protocol === "https:" && /^http:\/\//i.test(form.value.image.trim()),
+);
 
 function fill(s: MediaSettings) {
   settings.value = s;
-  form.value = { key: "", language: s.language, proxy: s.proxy_url };
+  setTmdbImageBase(s.image_base_url);
+  form.value = {
+    key: "",
+    language: s.language,
+    proxy: s.proxy_url,
+    api: s.api_base_url ?? "",
+    image: s.image_base_url ?? "",
+  };
 }
 
 async function loadSettings() {
@@ -70,6 +82,8 @@ async function save(extra: Partial<MediaSettingsUpdate> = {}) {
     const body: MediaSettingsUpdate = {
       language: form.value.language,
       proxy_url: form.value.proxy.trim(),
+      api_base_url: form.value.api.trim(),
+      image_base_url: form.value.image.trim(),
       ...extra,
     };
     const key = form.value.key.trim();
@@ -371,6 +385,29 @@ onMounted(refresh);
               data-testid="media-proxy" />
           </el-form-item>
         </div>
+        <div class="md-row">
+          <el-form-item label="TMDB 接口地址（可选）">
+            <el-input
+              v-model="form.api"
+              placeholder="留空用官方地址 https://api.themoviedb.org/3"
+              autocomplete="off"
+              data-testid="media-api-base" />
+          </el-form-item>
+          <el-form-item label="TMDB 图片地址（可选）">
+            <el-input
+              v-model="form.image"
+              placeholder="留空用官方地址 https://image.tmdb.org/t/p/"
+              autocomplete="off"
+              data-testid="media-image-base" />
+          </el-form-item>
+        </div>
+        <div v-if="imageBaseBlocked" class="pt-note pt-note--warn" data-testid="media-image-mixed">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span
+            >网页是用 https 打开的，浏览器不会加载 http:// 图片地址上的海报（刮削和手机 App
+            不受影响）。要在网页上显示海报，请换成 https 地址。</span
+          >
+        </div>
         <div class="md-actions">
           <el-button type="primary" :loading="saving" data-testid="media-save" @click="save()">
             <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
@@ -386,7 +423,10 @@ onMounted(refresh);
       </el-form>
       <p class="md-tip">
         代理地址留空时用环境变量里的代理（HTTP_PROXY、HTTPS_PROXY、ALL_PROXY），与访问站点相同；
-        支持 http、https 与 socks5。
+        支持 http、https 与 socks5。官方地址连不上或很慢时，可以把接口地址换成 api.tmdb.org
+        或自建的中转，图片地址换成镜像；只写域名时自动补上 https:// 与 /3、/t/p/。刮削下载的图片、
+        通知里的海报，以及网页和 App 上的海报都用这里的图片地址：刮削和 App 的海报由 pt-tools
+        经上面的代理去取，网页上的海报由浏览器直接加载，通知里的海报由收到通知的设备打开。
       </p>
     </PtPanel>
 
@@ -454,7 +494,7 @@ onMounted(refresh);
 
         <div v-if="result.match" class="md-match" data-testid="media-match">
           <img
-            v-if="result.match.poster_path"
+            v-if="posterURL(result.match.poster_path)"
             class="md-poster"
             :src="posterURL(result.match.poster_path)"
             :alt="`${result.match.title} 的海报`"
@@ -484,7 +524,7 @@ onMounted(refresh);
           <div class="md-cands" data-testid="media-candidates">
             <div v-for="c in result.candidates" :key="`${c.media_type}-${c.id}`" class="md-cand">
               <img
-                v-if="c.poster_path"
+                v-if="posterURL(c.poster_path, 'w92')"
                 class="md-poster md-poster--sm"
                 :src="posterURL(c.poster_path, 'w92')"
                 :alt="`${c.title} 的海报`"

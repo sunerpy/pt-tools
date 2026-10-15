@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   MEDIA_LANGUAGES,
@@ -8,6 +8,8 @@ import {
   mediaSourceLabel,
   metaTags,
   posterURL,
+  setTmdbImageBase,
+  setTmdbImageBasePending,
   tmdbPageURL,
   wordEffect,
   wordKindLabel,
@@ -105,5 +107,31 @@ describe("媒体识别的显示工具", () => {
     expect(posterURL("/p.jpg")).toBe("https://image.tmdb.org/t/p/w185/p.jpg");
     expect(posterURL("p.jpg", "w92")).toBe("https://image.tmdb.org/t/p/w92/p.jpg");
     expect(posterURL()).toBe("");
+  });
+
+  describe("换了图片地址", () => {
+    afterEach(() => setTmdbImageBase());
+
+    it("海报从换的地址加载；末尾没有 / 时补上，清空后回到官方地址", () => {
+      setTmdbImageBase("https://static.example.com/tmdb/t/p/");
+      expect(posterURL("/p.jpg", "w342")).toBe("https://static.example.com/tmdb/t/p/w342/p.jpg");
+      setTmdbImageBase(" http://10.0.0.2:9000/img ");
+      expect(posterURL("p.jpg")).toBe("http://10.0.0.2:9000/img/w185/p.jpg");
+      expect(posterURL(), "没有海报时仍是空串").toBe("");
+      setTmdbImageBase("");
+      expect(posterURL("/p.jpg")).toBe("https://image.tmdb.org/t/p/w185/p.jpg");
+    });
+
+    it("还在读图片地址时不给海报地址，读完以后照常", () => {
+      setTmdbImageBasePending(true);
+      expect(posterURL("/p.jpg")).toBe("");
+      setTmdbImageBasePending(false);
+      expect(posterURL("/p.jpg"), "读不到时用原来的地址").toBe(
+        "https://image.tmdb.org/t/p/w185/p.jpg",
+      );
+      setTmdbImageBasePending(true);
+      setTmdbImageBase("https://static.example.com/t/p/");
+      expect(posterURL("/p.jpg"), "读到了").toBe("https://static.example.com/t/p/w185/p.jpg");
+    });
   });
 });

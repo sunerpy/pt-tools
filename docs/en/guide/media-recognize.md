@@ -9,13 +9,17 @@ Movie and TV data comes from [TMDB](https://www.themoviedb.org/). This product u
 1. Sign in to TMDB and request a key on the API page of your account settings (free for personal use). Both a v3 API key and a v4 API read access token work.
 2. Enter the key in TMDB settings (TMDB 设置), choose a language, save, and click Test connection (测试连接).
 
-| Setting                  | Meaning                                                                                                          |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| API key                  | Stored encrypted; the page only shows whether one is set. Enter a new one to replace it, or click Clear (清除)   |
-| Language                 | Simplified Chinese (default), Traditional Chinese, English or Japanese; English overviews fill in missing ones   |
-| Proxy address (optional) | Proxy for TMDB requests: http, https or socks5. Left empty, the proxy from the environment is used, as for sites |
+| Setting                       | Meaning                                                                                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API key                       | Stored encrypted; the page only shows whether one is set. Enter a new one to replace it, or click Clear (清除)                                        |
+| Language                      | Simplified Chinese (default), Traditional Chinese, English or Japanese; English overviews fill in missing ones                                        |
+| Proxy address (optional)      | Proxy for TMDB requests: http, https or socks5. Left empty, the proxy from the environment is used, as for sites                                      |
+| TMDB API address (optional)   | Replaces the official `https://api.themoviedb.org/3`, for example with `api.tmdb.org` or your own relay; a bare domain gets `https://` and `/3` added |
+| TMDB image address (optional) | Replaces the official `https://image.tmdb.org/t/p/`, for example with an image mirror; a bare domain gets `https://` and `/t/p/` added                |
 
-The proxy address may include a user name and password. The whole address is stored encrypted, and the page shows the password as `***`. TMDB usually needs a proxy from mainland China.
+The proxy address may include a user name and password. The whole address is stored encrypted, and the page shows the password as `***`. TMDB usually needs a proxy from mainland China; when the official addresses are unreachable or slow you can also replace the API and image addresses, with or without the proxy.
+
+Images downloaded for scraping, the poster links in organizing and subscription notifications, and the posters shown in the web UI and the mobile app all use the image address. pt-tools fetches scraping images and the app's posters itself, through the proxy above; the browser loads the web UI's posters straight from the image address, and the device that receives a notification opens its poster. If you point the image address at a relay on your LAN, make sure the browser and those devices can reach it too. When you open the web UI over https, the image address must use https as well: browsers don't load http images on an https page (the settings page warns about this).
 
 ## Recognition preview
 

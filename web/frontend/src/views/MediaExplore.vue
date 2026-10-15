@@ -12,6 +12,7 @@ import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { useTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { posterURL } from "@/utils/media";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -19,6 +20,8 @@ import { useRouter } from "vue-router";
 type ListKind = "trending" | "popular" | "search";
 
 const isMobile = useIsMobile();
+// 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载
+useTmdbImageBase();
 const router = useRouter();
 const kind = ref<MediaKind>("movie");
 const list = ref<ListKind>("trending");
@@ -155,7 +158,7 @@ onMounted(load);
         <div v-for="it in items" :key="it.id" class="ex-card" :data-testid="`ex-item-${it.id}`">
           <div class="ex-card__poster">
             <img
-              v-if="it.poster_path && !failedPosters.has(it.id)"
+              v-if="posterURL(it.poster_path, 'w342') && !failedPosters.has(it.id)"
               :src="posterURL(it.poster_path, 'w342')"
               :alt="it.title"
               loading="lazy"

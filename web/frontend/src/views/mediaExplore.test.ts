@@ -15,11 +15,15 @@ const api = vi.hoisted(() => ({
 }));
 const dl = vi.hoisted(() => ({ list: vi.fn() }));
 const sites = vi.hoisted(() => ({ list: vi.fn() }));
+// 「媒体识别」里换了图片地址：海报要从这里加载
+const media = vi.hoisted(() => ({
+  settings: vi.fn(async () => ({ image_base_url: "https://static.example.com/t/p/" })),
+}));
 const ui = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 
 vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
-  return { ...real, subscribeApi: api, downloadersApi: dl, sitesApi: sites };
+  return { ...real, subscribeApi: api, downloadersApi: dl, sitesApi: sites, mediaApi: media };
 });
 
 vi.mock("element-plus", async (orig) => {
@@ -103,6 +107,11 @@ describe("探索", () => {
     expect(q("ex-sub-872585"), "已订阅的不再显示「订阅」").toBeNull();
     expect(q("ex-subscribed-872585")).not.toBeNull();
     expect(document.body.textContent).toContain("未经 TMDB 认可或认证");
+    await vi.waitFor(() =>
+      expect(q("ex-item-693134")!.querySelector("img")!.getAttribute("src"), "换过的图片地址").toBe(
+        "https://static.example.com/t/p/w342/p.jpg",
+      ),
+    );
 
     (q("ex-kind")!.querySelectorAll("input")[1] as HTMLInputElement).click();
     await vi.waitFor(() =>

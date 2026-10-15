@@ -2356,13 +2356,19 @@ export interface MediaSettings {
   has_tmdb_key: boolean;
   language: string;
   proxy_url: string;
+  /** 换掉的 TMDB 接口地址（镜像或自建中转）；空 = 官方地址 */
+  api_base_url: string;
+  /** 换掉的 TMDB 图片地址（到 /t/p/ 为止）；空 = 官方地址 */
+  image_base_url: string;
 }
 
-/** 保存设置：tmdb_api_key、proxy_url 不传时不改，传空串时清除 */
+/** 保存设置：tmdb_api_key、proxy_url、api_base_url、image_base_url 不传时不改，传空串时清除 */
 export interface MediaSettingsUpdate {
   tmdb_api_key?: string;
   language: string;
   proxy_url?: string;
+  api_base_url?: string;
+  image_base_url?: string;
 }
 
 /** 标题解析结果（internal/media/meta）：没解析出来的字段不出现 */

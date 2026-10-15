@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,6 +132,79 @@ func TestSettings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Settings{Language: "zh-CN"}, got, "清除 Key 与代理；语言留空时用默认值")
 	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrNoKey)
+}
+
+// 换了 TMDB 接口地址与图片地址：请求发到换的地址；清空以后回到默认（这里是 qa 构建给的假服务）
+func TestCustomTMDBBaseURLs(t *testing.T) {
+	s, db := newService(t)
+	ctx := context.Background()
+	var mirrorHits atomic.Int32
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mirrorHits.Add(1)
+		if r.URL.Path != "/3/configuration" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(mirror.Close)
+
+	got, err := s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(goodKey), APIBaseURL: ptr(mirror.URL + "/"), ImageBaseURL: ptr("static.example.com")})
+	require.NoError(t, err)
+	assert.Equal(t, mirror.URL+"/3", got.APIBaseURL)
+	assert.Equal(t, "https://static.example.com/t/p/", got.ImageBaseURL, "只写域名时补上 /t/p/")
+	require.NoError(t, s.TestTMDB(ctx))
+	assert.Equal(t, int32(1), mirrorHits.Load(), "测试连接走换的接口地址")
+	c, err := s.TMDB(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "https://static.example.com/t/p/w500/a.jpg", c.PosterURL("/a.jpg", "w500"))
+	var row models.MediaSetting
+	require.NoError(t, db.First(&row, 1).Error)
+	assert.Equal(t, mirror.URL+"/3", row.APIBaseURL)
+
+	// 不带这两项时不改
+	got, err = s.SaveSettings(ctx, SettingsInput{Language: "zh-CN"})
+	require.NoError(t, err)
+	assert.Equal(t, mirror.URL+"/3", got.APIBaseURL)
+
+	for _, bad := range []SettingsInput{{APIBaseURL: ptr("ftp://api.tmdb.org")}, {ImageBaseURL: ptr("https://u:p@image.tmdb.org")}} {
+		_, saveErr := s.SaveSettings(ctx, bad)
+		assert.ErrorIs(t, saveErr, ErrInvalid)
+	}
+
+	got, err = s.SaveSettings(ctx, SettingsInput{APIBaseURL: ptr(""), ImageBaseURL: ptr("")})
+	require.NoError(t, err)
+	assert.Empty(t, got.APIBaseURL)
+	assert.Empty(t, got.ImageBaseURL)
+	require.NoError(t, s.TestTMDB(ctx), "清空以后回到默认地址")
+	assert.Equal(t, int32(1), mirrorHits.Load())
+	c, err = s.TMDB(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "https://image.tmdb.org/t/p/w500/a.jpg", c.PosterURL("/a.jpg", "w500"))
+}
+
+// 只取图片的客户端不要 API Key，用设置里的图片地址
+func TestImagesWithoutKey(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	img := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mirror/w92/a.png" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("PNG"))
+	}))
+	t.Cleanup(img.Close)
+	_, err := s.SaveSettings(ctx, SettingsInput{ImageBaseURL: ptr(img.URL + "/mirror")})
+	require.NoError(t, err)
+	_, err = s.TMDB(ctx)
+	require.ErrorIs(t, err, tmdb.ErrNoKey)
+	c, err := s.Images(ctx)
+	require.NoError(t, err)
+	b, err := c.Image(ctx, "/a.png", "w92")
+	require.NoError(t, err)
+	assert.Equal(t, "PNG", string(b))
 }
 
 func TestTestTMDB(t *testing.T) {

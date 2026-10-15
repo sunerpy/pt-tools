@@ -14,6 +14,7 @@ import {
   subscribeApi,
 } from "@/api";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { posterURL } from "@/utils/media";
 import { ElMessage } from "element-plus";
 import { computed, ref, watch } from "vue";
@@ -86,6 +87,8 @@ watch(
   () => props.modelValue,
   (open) => {
     if (!open) return;
+    // 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载（打开时才读）
+    void loadTmdbImageBase();
     posterFailed.value = false;
     const s = props.sub;
     form.value = s
@@ -145,7 +148,7 @@ async function save() {
     <div class="sd">
       <div class="sd__head">
         <img
-          v-if="poster && !posterFailed"
+          v-if="posterURL(poster, 'w92') && !posterFailed"
           class="sd__poster"
           :src="posterURL(poster, 'w92')"
           alt=""

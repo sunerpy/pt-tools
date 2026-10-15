@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import type {
   MediaHistoryItem,
   MediaKind,
@@ -112,10 +113,29 @@ export function tmdbPageURL(kind: MediaKind, id: number): string {
   return `https://www.themoviedb.org/${kind}/${id}`;
 }
 
-/** TMDB 海报地址；没有海报时为空串 */
+/** TMDB 官方的图片地址（到尺寸之前为止） */
+export const DEFAULT_TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/";
+/** 网页上海报用的图片地址：「媒体识别」里换了就用换的（见 composables/useTmdbImageBase） */
+const tmdbImageBase = ref(DEFAULT_TMDB_IMAGE_BASE);
+/** 正在读设置里的图片地址：读到以前不给海报地址，免得先去连官方地址、失败后海报被藏起来 */
+const tmdbImageBasePending = ref(false);
+
+/** setTmdbImageBase 设置海报用的图片地址；空串或没有时用官方地址 */
+export function setTmdbImageBase(base?: string): void {
+  const b = (base ?? "").trim();
+  tmdbImageBase.value = b ? (b.endsWith("/") ? b : `${b}/`) : DEFAULT_TMDB_IMAGE_BASE;
+  tmdbImageBasePending.value = false;
+}
+
+/** setTmdbImageBasePending 标记开始或结束读设置（结束时图片地址不变） */
+export function setTmdbImageBasePending(pending: boolean): void {
+  tmdbImageBasePending.value = pending;
+}
+
+/** TMDB 海报地址（浏览器按设置里的图片地址直接加载）；没有海报、或还在读图片地址时为空串 */
 export function posterURL(path?: string, size = "w185"): string {
-  if (!path) return "";
-  return `https://image.tmdb.org/t/p/${size}/${path.replace(/^\//, "")}`;
+  if (!path || tmdbImageBasePending.value) return "";
+  return `${tmdbImageBase.value}${size}/${path.replace(/^\//, "")}`;
 }
 
 // ---- 整理入库（M10） ----

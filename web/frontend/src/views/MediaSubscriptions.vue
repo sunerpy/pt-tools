@@ -28,6 +28,7 @@ import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { useTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { formatShortDateTime } from "@/utils/format";
 import { posterURL } from "@/utils/media";
 import {
@@ -44,6 +45,8 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 const isMobile = useIsMobile();
+// 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载
+useTmdbImageBase();
 const router = useRouter();
 const errText = (e: unknown, fallback: string) => (e as Error)?.message || fallback;
 
@@ -397,7 +400,7 @@ onMounted(() => {
           <template #default="{ row }">
             <div class="ms-entry">
               <img
-                v-if="row.poster_path && !failedPosters.has(row.id)"
+                v-if="posterURL(row.poster_path, 'w92') && !failedPosters.has(row.id)"
                 class="ms-poster"
                 :src="posterURL(row.poster_path, 'w92')"
                 alt=""

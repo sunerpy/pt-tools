@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -187,12 +186,7 @@ func TestAppTMDBImage(t *testing.T) {
 
 	rec := recognize.New(recognize.Config{DB: db, Cipher: apiTestCipher{}, BaseURL: img.URL + "/3", ImageBaseURL: img.URL + "/t/p/", RatePerSecond: 1000})
 	srv.SetMediaService(rec)
-	// 没有 TMDB API Key：400
-	assert.Equal(t, http.StatusBadRequest, call("w342", "poster.png").Code)
-	key := mediaTestKey
-	_, err := rec.SaveSettings(context.Background(), recognize.SettingsInput{TMDBKey: &key})
-	require.NoError(t, err)
-
+	// 取图片不要 TMDB API Key（没填或清除了 Key，已有的海报照样能显示）
 	w := call("w342", "poster.png")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, "image/png", w.Header().Get("Content-Type"))

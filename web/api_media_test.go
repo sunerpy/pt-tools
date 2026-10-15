@@ -85,7 +85,17 @@ func TestMediaAPI_SettingsAndRecognize(t *testing.T) {
 	mux := newMediaServer(t)
 	w := serveAuthed(mux, http.MethodGet, "/api/media/settings", "")
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `{"has_tmdb_key":false,"language":"zh-CN","proxy_url":""}`, w.Body.String())
+	assert.JSONEq(t, `{"has_tmdb_key":false,"language":"zh-CN","proxy_url":"","api_base_url":"","image_base_url":""}`, w.Body.String())
+
+	// TMDB 接口地址与图片地址：只写域名时补全；格式不对回 400；清空回到官方地址
+	w = serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"api_base_url":"api.tmdb.org","image_base_url":"static.example.com"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"api_base_url":"https://api.tmdb.org/3"`)
+	assert.Contains(t, w.Body.String(), `"image_base_url":"https://static.example.com/t/p/"`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"api_base_url":"ftp://x"}`).Code)
+	w = serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"api_base_url":"","image_base_url":""}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"api_base_url":""`)
 
 	// 没有 Key：识别只做解析；测试连接回 400
 	w = serveAuthed(mux, http.MethodPost, "/api/media/recognize", `{"title":"The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi"}`)

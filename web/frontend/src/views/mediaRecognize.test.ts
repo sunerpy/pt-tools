@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buttonByText, type MountedView, mountView } from "@/test-mount";
+import { posterURL, setTmdbImageBase } from "@/utils/media";
 
 const api = vi.hoisted(() => ({
   settings: vi.fn(),
@@ -51,6 +52,7 @@ afterEach(() => {
   view?.unmount();
   view = null;
   vi.clearAllMocks();
+  setTmdbImageBase();
 });
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -103,11 +105,13 @@ const recognized = {
   ],
 };
 
-async function mountPage(opts: { hasKey?: boolean } = {}) {
+async function mountPage(opts: { hasKey?: boolean; api?: string; image?: string } = {}) {
   api.settings.mockResolvedValue({
     has_tmdb_key: opts.hasKey ?? false,
     language: "zh-CN",
     proxy_url: "",
+    api_base_url: opts.api ?? "",
+    image_base_url: opts.image ?? "",
   });
   api.overrides.mockResolvedValue([]);
   api.words.mockResolvedValue([]);
@@ -135,6 +139,8 @@ describe("媒体识别", () => {
     expect(api.saveSettings.mock.calls[0]![0]).toEqual({
       language: "zh-CN",
       proxy_url: "http://127.0.0.1:7890",
+      api_base_url: "",
+      image_base_url: "",
     });
     await flush();
 
@@ -156,6 +162,51 @@ describe("媒体识别", () => {
     await mountPage({ hasKey: true });
     q("media-test")!.click();
     await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("TMDB API Key 无效"));
+  });
+
+  it("设置：TMDB 接口地址与图片地址回显、去掉首尾空格后保存", async () => {
+    await mountPage({ hasKey: true, api: "https://api.tmdb.org/3" });
+    expect(inputOf("media-api-base").value).toBe("https://api.tmdb.org/3");
+    expect(inputOf("media-image-base").placeholder).toContain("image.tmdb.org");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: true,
+      language: "zh-CN",
+      proxy_url: "",
+      api_base_url: "https://api.tmdb.org/3",
+      image_base_url: "https://static.example.com/t/p/",
+    });
+    fill("media-image-base", " static.example.com ");
+    q("media-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toMatchObject({
+      api_base_url: "https://api.tmdb.org/3",
+      image_base_url: "static.example.com",
+    });
+    await flush();
+    expect(inputOf("media-image-base").value, "回显服务端规整后的地址").toBe(
+      "https://static.example.com/t/p/",
+    );
+    expect(posterURL("/p.jpg"), "网页上的海报改从新地址加载").toBe(
+      "https://static.example.com/t/p/w185/p.jpg",
+    );
+  });
+
+  it("设置：网页用 https 打开、图片地址是 http 时提示浏览器会拦下海报", async () => {
+    const dom = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
+    const prev = window.location.href;
+    dom.setURL("https://pt.example.com/");
+    try {
+      await mountPage({ hasKey: true });
+      expect(q("media-image-mixed")).toBeNull();
+      fill("media-image-base", " http://10.0.0.2:9000/img/");
+      await flush();
+      expect(q("media-image-mixed")!.textContent).toContain("请换成 https 地址");
+      fill("media-image-base", "https://static.example.com/");
+      await flush();
+      expect(q("media-image-mixed")).toBeNull();
+    } finally {
+      dom.setURL(prev);
+    }
   });
 
   it("识别：显示解析结果、匹配条目与来源、候选；选候选后纠正并重新识别", async () => {
