@@ -913,8 +913,8 @@ func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([
 //  2. 旧文件挪到旁边的备份名，确认挪走的就是旧记录放的那个（整理期间被换过就放回去，不替换）；
 //  3. 新文件不覆盖地放到目标位置；
 //  4. 同一个事务里写新记录、把旧记录标成已删除、把日志标成已提交；
-//  5. 收尾：删掉备份（旧文件）与旧记录的字幕、同名刮削文件，删掉日志。目录里的刮削文件归新记录；
-//  6. 放新字幕（旧字幕删掉以后才不会撞上），记进新记录。
+//  5. 收尾：删掉备份（旧文件）与旧记录的字幕、同名刮削文件（目录里的刮削文件归新记录），再放新字幕（旧字幕删掉以后
+//     才不会撞上）并记进新记录，都做完了删掉日志。收尾没做完的，日志留着，后台每隔一会儿与下次启动时接着做。
 //
 // 1–4 任一步失败都撤回：新文件删掉，旧文件放回原处，这次记成失败（之后自动重试）；在这之前旧版本的字幕与刮削文件都不动。
 // 返回是否换好了。
@@ -933,9 +933,10 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 		return fail("替换旧版本失败，旧版本留着：" + why)
 	}
 	db := s.cfg.DB.WithContext(ctx)
+	subs, _ := json.Marshal(it.Subtitles)
 	j := models.MediaReplaceJournal{
-		OldID: old.ID, Source: it.Source, Mode: p.Mode, Target: it.Target,
-		Temp: sideName(it.Target, "new"), Backup: sideName(it.Target, "old"), CreatedAt: s.cfg.Now(),
+		OldID: old.ID, Source: it.Source, Mode: firstNonEmpty(it.mode, p.Mode), Target: it.Target,
+		Temp: sideName(it.Target, "new"), Backup: sideName(it.Target, "old"), Subs: string(subs), CreatedAt: s.cfg.Now(),
 	}
 	if err := db.Create(&j).Error; err != nil {
 		return fail("替换旧版本失败，旧版本留着：替换日志写不进去（" + err.Error() + "）")
@@ -980,23 +981,7 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 	}
 	msgs, ferr := s.finishReplace(ctx, j, *old)
 	if ferr != nil {
-		msgs = append(msgs, "收尾没做完（"+ferr.Error()+"），之后再试")
-	}
-	// 旧字幕删掉了，放新字幕；记不进新记录时撤回这次放的（没人认领）
-	mode := firstNonEmpty(it.mode, p.Mode)
-	extras, newSubs, subMsgs := s.transferSubtitles(it, mode, rowExtras(it.row))
-	msgs = append(msgs, subMsgs...)
-	if len(newSubs) > 0 {
-		var row models.MediaTransferHistory
-		err := s.cfg.DB.WithContext(ctx).Where("source_path = ?", it.Source).Limit(1).Find(&row).Error
-		if err == nil {
-			b, _ := json.Marshal(mergeExtras(decodeExtras(row.Extras), extras))
-			err = s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Update("extras", string(b)).Error
-		}
-		if err != nil {
-			unplace(it, mode, "", false, newSubs)
-			msgs = append(msgs, "字幕记不进整理记录，这次放的字幕已撤回："+err.Error())
-		}
+		msgs = append(msgs, "收尾没做完（"+ferr.Error()+"），之后接着做（包括放新字幕）")
 	}
 	if len(msgs) > 0 {
 		_ = s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("source_path = ?", it.Source).
@@ -1055,7 +1040,11 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 			}
 		}
 	}
-	if bi, err := os.Lstat(j.Backup); err == nil {
+	bi, err := os.Lstat(j.Backup)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("看不了 %s: %w", filepath.Base(j.Backup), err)
+	}
+	if err == nil {
 		if ti, terr := os.Lstat(j.Target); terr == nil && os.SameFile(bi, ti) {
 			// 备份只是旧文件的另一个名字（挪的时候原来的名字没删掉）
 			if err := os.Remove(j.Backup); err != nil {
@@ -1065,10 +1054,13 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 			return fmt.Errorf("旧文件放不回 %s（还在 %s）: %w", j.Target, j.Backup, err)
 		}
 	}
-	if _, err := os.Lstat(j.Temp); err == nil {
+	switch _, err := os.Lstat(j.Temp); {
+	case err == nil:
 		if err := transfer.RemoveIfOurs(j.Temp, j.Mode, j.TempID, j.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
 			return fmt.Errorf("删不掉临时文件 %s: %w", filepath.Base(j.Temp), err)
 		}
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("看不了临时文件 %s: %w", filepath.Base(j.Temp), err)
 	}
 	return s.cfg.DB.WithContext(ctx).Delete(&models.MediaReplaceJournal{}, j.ID).Error
 }
@@ -1079,19 +1071,23 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJournal, old models.MediaTransferHistory) ([]string, error) {
 	var msgs []string
 	var errs []error
-	if _, err := os.Lstat(j.Backup); err == nil {
+	switch _, err := os.Lstat(j.Backup); {
+	case err == nil:
 		id, ierr := transfer.FileID(j.Target)
 		switch {
 		case ierr != nil || j.TempID == "" || id != j.TempID:
 			// 新文件不在目标位置了（中途退出期间被删或被换）：旧文件就是库里仅剩的版本，不删
 			errs = append(errs, fmt.Errorf("目标位置上不是这次放的新文件，旧文件留在 %s", j.Backup))
-		case !sameAsRecord(j.Backup, &old):
+		case old.ID != 0 && !sameAsRecord(j.Backup, &old):
 			msgs = append(msgs, "旧版本挪开的文件 "+filepath.Base(j.Backup)+" 换过了，留着")
 		default:
+			// 旧记录没了（被删了）时也删：提交以前已经确认过挪开的是旧记录放的那个
 			if err := os.Remove(j.Backup); err != nil {
 				errs = append(errs, fmt.Errorf("旧版本的文件 %s 没删掉: %w", filepath.Base(j.Backup), err))
 			}
 		}
+	case !errors.Is(err, os.ErrNotExist):
+		errs = append(errs, fmt.Errorf("看不了 %s: %w", filepath.Base(j.Backup), err))
 	}
 	for _, e := range decodeExtras(old.Extras) {
 		if e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)) {
@@ -1101,15 +1097,64 @@ func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJourna
 		if e.Kind == extraMeta {
 			mode = models.MediaModeCopy
 		}
-		if err := transfer.RemoveIfOurs(e.Target, mode, e.FileID, e.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+		if err := removeIfOurs(e.Target, mode, e.FileID, e.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
 			errs = append(errs, fmt.Errorf("旧版本的 %s 没删掉: %w", filepath.Base(e.Target), err))
 		}
 	}
 	if len(errs) > 0 {
 		return msgs, errors.Join(errs...)
 	}
+	subMsgs, err := s.placeReplaceSubs(ctx, j)
+	msgs = append(msgs, subMsgs...)
+	if err != nil {
+		return msgs, err
+	}
 	if err := s.cfg.DB.WithContext(ctx).Delete(&models.MediaReplaceJournal{}, j.ID).Error; err != nil {
 		return msgs, fmt.Errorf("替换日志没删掉: %w", err)
+	}
+	return msgs, nil
+}
+
+// placeReplaceSubs 放替换进来的新文件的字幕（日志里记着），记进新记录。字幕放不了（例如源文件没了、目标被占着）只写进说明，
+// 不再重试；记不进新记录时撤回这次放的并返回错误（日志留着，之后再放）。
+func (s *Service) placeReplaceSubs(ctx context.Context, j models.MediaReplaceJournal) ([]string, error) {
+	var subs []SubtitlePlan
+	if j.Subs != "" {
+		_ = json.Unmarshal([]byte(j.Subs), &subs)
+	}
+	var msgs []string
+	// placed 是要记进新记录的（这次放的，以及上次没做完时已经放好的）；created 是这次放的，记不进去时撤回
+	var placed, created []extra
+	for _, sub := range subs {
+		out, err := transfer.Transfer(sub.Source, sub.Target, j.Mode)
+		if err != nil {
+			msgs = append(msgs, fmt.Sprintf("字幕 %s：%v", filepath.Base(sub.Source), err))
+			continue
+		}
+		id, _ := transfer.FileID(sub.Target)
+		e := extra{Source: sub.Source, Target: sub.Target, FileID: id}
+		placed = append(placed, e)
+		if out == transfer.Created {
+			created = append(created, e)
+		}
+	}
+	if len(placed) == 0 {
+		return msgs, nil
+	}
+	var row models.MediaTransferHistory
+	err := s.cfg.DB.WithContext(ctx).Where("source_path = ?", j.Source).Limit(1).Find(&row).Error
+	if err == nil && row.ID == 0 {
+		err = errors.New("新文件的整理记录不在了")
+	}
+	if err == nil {
+		b, _ := json.Marshal(mergeExtras(decodeExtras(row.Extras), placed))
+		err = s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Update("extras", string(b)).Error
+	}
+	if err != nil {
+		for _, e := range created {
+			_ = transfer.RemoveIfOurs(e.Target, j.Mode, e.FileID, e.Source)
+		}
+		return msgs, fmt.Errorf("字幕记不进整理记录: %w", err)
 	}
 	return msgs, nil
 }

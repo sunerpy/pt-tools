@@ -182,8 +182,10 @@ type MediaReplaceJournal struct {
 	Target string `gorm:"size:2048;not null;default:''"`
 	Temp   string `gorm:"size:2048;not null;default:''"`
 	// TempID 是放好的临时文件的文件编号（新文件放到 Target 以后还是它）
-	TempID    string    `gorm:"size:64;not null;default:''"`
-	Backup    string    `gorm:"size:2048;not null;default:''"`
+	TempID string `gorm:"size:64;not null;default:''"`
+	Backup string `gorm:"size:2048;not null;default:''"`
+	// Subs 是新文件的字幕（JSON 数组，每项 source、target）：旧字幕删掉以后才放，收尾时放好并记进新记录
+	Subs      string    `gorm:"type:text;not null;default:''"`
 	Committed bool      `gorm:"not null;default:false"`
 	CreatedAt time.Time `json:"created_at"`
 }

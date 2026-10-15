@@ -1,8 +1,10 @@
 package organize
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -279,4 +281,67 @@ func TestRecoverReplacementKeepsBackup(t *testing.T) {
 	var n int64
 	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
 	assert.EqualValues(t, 1, n, "日志留着，之后再试")
+}
+
+// 收尾时旧字幕一时删不掉（被占用）：新字幕先不放、日志留着；好了以后后台恢复删掉旧字幕、放好新字幕并记进新记录
+func TestReplaceSubtitlesAfterCleanupRetry(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	target := e.rowOf(ep1Old).TargetPath
+	sub := strings.TrimSuffix(target, ".mkv") + ".zh-CN.srt"
+	newSub := filepath.Join(e.dlDir, "The.Last.of.Us.S01E01.2160p.BluRay", "The.Last.of.Us.S01E01.2160p.BluRay.chs.srt")
+
+	orig := removeIfOurs
+	t.Cleanup(func() { removeIfOurs = orig })
+	removeIfOurs = func(dst, mode, fileID, src string) error {
+		if strings.HasSuffix(dst, ".srt") {
+			return errors.New("file in use")
+		}
+		return orig(dst, mode, fileID, src)
+	}
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created)
+	assert.Contains(t, strings.Join(res.Messages, "\n"), "收尾没做完")
+	assert.True(t, sameFile(t, e.rowOf(ep1New).SourcePath, target), "视频已经换好")
+	assert.False(t, sameFile(t, newSub, sub), "旧字幕还占着，新字幕先不放")
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	require.EqualValues(t, 1, n, "日志留着")
+
+	removeIfOurs = orig
+	e.svc.recoverReplacements(e.ctx)
+	assert.True(t, sameFile(t, newSub, sub), "新字幕放好了")
+	assert.Contains(t, e.rowOf(ep1New).Extras, "zh-CN.srt", "记进了新记录")
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.Zero(t, n)
+}
+
+// 看不了临时文件（权限、挂载出错）时不能当成已经清理：日志留着，之后再撤回
+func TestUndoReplaceKeepsJournalOnStatError(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("要靠目录权限让 Lstat 出错")
+	}
+	e := newEnv(t)
+	locked := filepath.Join(e.root, "locked")
+	require.NoError(t, os.MkdirAll(locked, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(locked, "x.tmp"), []byte("x"), 0o644))
+	require.NoError(t, os.Chmod(locked, 0))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	j := models.MediaReplaceJournal{
+		Mode: models.MediaModeCopy, Target: filepath.Join(e.root, "t.mkv"),
+		Temp: filepath.Join(locked, "x.tmp"), Backup: filepath.Join(e.root, "t.mkv.old"),
+	}
+	require.NoError(t, e.db.Create(&j).Error)
+	e.svc.mu.Lock()
+	err := e.svc.undoReplace(e.ctx, j)
+	e.svc.mu.Unlock()
+	require.Error(t, err)
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.EqualValues(t, 1, n)
 }
