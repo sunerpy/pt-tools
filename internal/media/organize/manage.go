@@ -173,6 +173,16 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
 	db := s.cfg.DB.WithContext(ctx)
+	// 和 SaveWatchDir 反过来查：库在监控目录里时，库里的文件会被当成放进来的视频再整理一遍
+	var dirs []models.MediaWatchDir
+	if err := db.Find(&dirs).Error; err != nil {
+		return LibraryView{}, fmt.Errorf("读取监控目录失败: %w", err)
+	}
+	for _, d := range dirs {
+		if samePath(d.Path, row.Path) || transfer.Within(d.Path, row.Path) || transfer.Within(row.Path, d.Path) {
+			return LibraryView{}, fmt.Errorf("%w: 媒体库的目录不能是监控目录 %s，也不能在它里面或包含它", ErrInvalid, d.Path)
+		}
+	}
 	if id == 0 {
 		var n int64
 		if err := db.Model(&models.MediaLibrary{}).Count(&n).Error; err != nil {
@@ -399,16 +409,25 @@ func (s *Service) DeletePathMap(ctx context.Context, id uint) error {
 
 // localPath 把下载器里的路径换成 pt-tools 里的路径；没有匹配的映射时原样返回。
 func (s *Service) localPath(ctx context.Context, dlID uint, p string) (string, bool, error) {
+	maps, err := s.pathMaps(ctx, dlID)
+	if err != nil {
+		return "", false, err
+	}
+	out, ok := models.MapTransferPath(maps, p)
+	return out, ok, nil
+}
+
+// pathMaps 是这个下载器的路径映射。
+func (s *Service) pathMaps(ctx context.Context, dlID uint) ([]models.DownloaderPathMap, error) {
 	var rows []models.MediaPathMap
 	if err := s.cfg.DB.WithContext(ctx).Where("downloader_id = ?", dlID).Find(&rows).Error; err != nil {
-		return "", false, fmt.Errorf("读取路径映射失败: %w", err)
+		return nil, fmt.Errorf("读取路径映射失败: %w", err)
 	}
 	maps := make([]models.DownloaderPathMap, 0, len(rows))
 	for _, r := range rows {
 		maps = append(maps, models.DownloaderPathMap{SourcePrefix: r.DownloaderPrefix, TargetPrefix: r.LocalPrefix})
 	}
-	out, ok := models.MapTransferPath(maps, p)
-	return out, ok, nil
+	return maps, nil
 }
 
 // ServerView 是给界面看的媒体服务器：Token 只说有没有。

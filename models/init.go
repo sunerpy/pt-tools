@@ -241,6 +241,8 @@ func NewDBWithVersionAndHooks(
 		&MediaOrganizeSetting{},
 		&MediaTransferHistory{},
 		&MediaReplaceJournal{},
+		// 目录监控（M23）
+		&MediaWatchDir{},
 		// 订阅（M11）
 		&MediaQualityProfile{},
 		&MediaSubscription{},

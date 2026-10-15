@@ -39,6 +39,10 @@ func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/media/path-maps", s.auth(s.apiPathMapSave))
 	mux.HandleFunc("PUT /api/media/path-maps/{id}", s.auth(s.apiPathMapSave))
 	mux.HandleFunc("DELETE /api/media/path-maps/{id}", s.auth(s.apiPathMapDelete))
+	mux.HandleFunc("GET /api/media/watch-dirs", s.auth(s.apiWatchDirs))
+	mux.HandleFunc("POST /api/media/watch-dirs", s.auth(s.apiWatchDirSave))
+	mux.HandleFunc("PUT /api/media/watch-dirs/{id}", s.auth(s.apiWatchDirSave))
+	mux.HandleFunc("DELETE /api/media/watch-dirs/{id}", s.auth(s.apiWatchDirDelete))
 	mux.HandleFunc("GET /api/media/servers", s.auth(s.apiMediaServers))
 	mux.HandleFunc("POST /api/media/servers", s.auth(s.apiMediaServerSave))
 	mux.HandleFunc("PUT /api/media/servers/{id}", s.auth(s.apiMediaServerSave))
@@ -335,6 +339,59 @@ func (s *Server) apiPathMapDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := svc.DeletePathMap(r.Context(), id); err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// apiWatchDirs handles GET /api/media/watch-dirs
+func (s *Server) apiWatchDirs(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	list, err := svc.WatchDirs(r.Context())
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, list)
+}
+
+// apiWatchDirSave handles POST /api/media/watch-dirs and PUT /api/media/watch-dirs/{id}
+func (s *Server) apiWatchDirSave(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := optionalID(w, r)
+	if !ok {
+		return
+	}
+	var in organize.WatchDirInput
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	got, err := svc.SaveWatchDir(r.Context(), id, in)
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiWatchDirDelete handles DELETE /api/media/watch-dirs/{id}
+func (s *Server) apiWatchDirDelete(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := svc.DeleteWatchDir(r.Context(), id); err != nil {
 		writeOrganizeError(w, err)
 		return
 	}

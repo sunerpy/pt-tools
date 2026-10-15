@@ -59,7 +59,7 @@ func newOrganizeServer(t *testing.T) *organizeTestEnv {
 	db := global.GlobalDB.DB
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
-		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaTransferHistory{}, &models.MediaReplaceJournal{},
+		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaTransferHistory{}, &models.MediaReplaceJournal{}, &models.MediaWatchDir{},
 	))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -120,6 +120,10 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 		{http.MethodPost, "/api/media/path-maps"},
 		{http.MethodPut, "/api/media/path-maps/1"},
 		{http.MethodDelete, "/api/media/path-maps/1"},
+		{http.MethodGet, "/api/media/watch-dirs"},
+		{http.MethodPost, "/api/media/watch-dirs"},
+		{http.MethodPut, "/api/media/watch-dirs/1"},
+		{http.MethodDelete, "/api/media/watch-dirs/1"},
 		{http.MethodGet, "/api/media/servers"},
 		{http.MethodPost, "/api/media/servers"},
 		{http.MethodPut, "/api/media/servers/1"},
@@ -143,6 +147,30 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 	for _, c := range routes {
 		assert.Equal(t, http.StatusServiceUnavailable, serveAuthed(bare, c.method, c.path, "{}").Code, c.method+" "+c.path)
 	}
+}
+
+func TestOrganizeAPI_WatchDirs(t *testing.T) {
+	e := newOrganizeServer(t)
+	dir := filepath.Join(t.TempDir(), "incoming")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	w := serveAuthed(e.mux, http.MethodPost, "/api/media/watch-dirs", `{"path":`+jsonPath(dir)+`,"enabled":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var d models.MediaWatchDir
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &d))
+	assert.True(t, d.Enabled)
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/watch-dirs", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"enabled":true`)
+	id := strconv.FormatUint(uint64(d.ID), 10)
+	w = serveAuthed(e.mux, http.MethodPut, "/api/media/watch-dirs/"+id, `{"path":`+jsonPath(dir)+`,"enabled":false}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"enabled":false`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/watch-dirs", `{"path":"rel"}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/watch-dirs", `{"dir":"/x"}`).Code, "拼错的字段")
+	assert.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodDelete, "/api/media/watch-dirs/"+id, "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodDelete, "/api/media/watch-dirs/"+id, "").Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPut, "/api/media/watch-dirs/x", `{"path":`+jsonPath(dir)+`}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodDelete, "/api/media/watch-dirs/x", "").Code)
 }
 
 func TestOrganizeAPI_Classify(t *testing.T) {

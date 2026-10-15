@@ -57,6 +57,7 @@ describe("整理入库的显示工具", () => {
     expect(itemStatus("pending").label).toBe("待整理");
     expect(triggerLabel("auto")).toBe("下载完成后自动");
     expect(triggerLabel("scan")).toBe("定期扫描");
+    expect(triggerLabel("watch")).toBe("目录监控");
     expect(triggerLabel("x")).toBe("x");
   });
 

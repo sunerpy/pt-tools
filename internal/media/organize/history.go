@@ -106,13 +106,21 @@ func (s *Service) historyRow(ctx context.Context, id uint) (models.MediaTransfer
 	return row, nil
 }
 
+// requestOf 是重新整理这条记录所在的种子（或目录监控的那一项）的请求。
+func requestOf(r models.MediaTransferHistory) Request {
+	if r.WatchDirID > 0 {
+		return Request{WatchDirID: r.WatchDirID, Entry: r.TorrentName}
+	}
+	return Request{DownloaderID: r.DownloaderID, Hash: firstNonEmpty(r.TaskID, r.InfoHash)}
+}
+
 // Retry 重新整理这条记录所在的种子（按手动整理处理）。之前手动指定过条目的，沿用那个条目。
 func (s *Service) Retry(ctx context.Context, id uint) (*Result, error) {
 	row, err := s.historyRow(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	req := Request{DownloaderID: row.DownloaderID, Hash: firstNonEmpty(row.TaskID, row.InfoHash)}
+	req := requestOf(row)
 	if row.Trigger == models.MediaTriggerManual && row.TMDBID > 0 {
 		req.MediaType, req.TMDBID, req.LibraryID = row.MediaType, row.TMDBID, row.LibraryID
 	}
@@ -340,7 +348,8 @@ func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory,
 func (s *Service) Reconcile(ctx context.Context) int {
 	var rows []models.MediaTransferHistory
 	if err := s.cfg.DB.WithContext(ctx).
-		Where("status = ? AND mode IN ? AND target_path != ''", models.MediaTransferDone, []string{models.MediaModeHardlink, models.MediaModeSymlink}).
+		// 目录监控整理的（没有下载器）不跟着删：那里的文件不是种子，删不删由用户决定
+		Where("status = ? AND mode IN ? AND target_path != '' AND downloader_id > 0", models.MediaTransferDone, []string{models.MediaModeHardlink, models.MediaModeSymlink}).
 		Order("downloader_id, id").Find(&rows).Error; err != nil {
 		s.cfg.Logger.Warnf("[整理入库] 读取整理记录失败: %v", err)
 		return 0

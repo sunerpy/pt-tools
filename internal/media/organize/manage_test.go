@@ -22,7 +22,7 @@ func TestSettingsDefaultsAndValidation(t *testing.T) {
 	got, err := e.svc.Settings(e.ctx)
 	require.NoError(t, err)
 	assert.Equal(t, Settings{
-		ScanIntervalMin: DefaultScanIntervalMin, MinVideoMB: DefaultMinVideoMB,
+		ScanIntervalMin: DefaultScanIntervalMin, MinVideoMB: DefaultMinVideoMB, WatchIntervalMin: DefaultWatchIntervalMin,
 		Downloaders: []uint{}, Categories: []string{}, Tags: []string{}, SavePaths: []string{}, NotifyChannels: []uint{},
 	}, got)
 
@@ -46,7 +46,12 @@ func TestSettingsDefaultsAndValidation(t *testing.T) {
 	on := e.settings(SettingsInput{AutoEnabled: true})
 	assert.Equal(t, e.now, on.AutoSince.UTC(), "重新打开时重新记")
 
+	assert.Equal(t, DefaultWatchIntervalMin, again.WatchIntervalMin)
+	assert.Equal(t, 3, e.settings(SettingsInput{WatchIntervalMin: 3}).WatchIntervalMin)
+
 	for _, bad := range []SettingsInput{
+		{WatchIntervalMin: -1},
+		{WatchIntervalMin: MaxWatchIntervalMin + 1},
 		{ScanIntervalMin: 5},
 		{ScanIntervalMin: 2000},
 		{MinVideoMB: -1},

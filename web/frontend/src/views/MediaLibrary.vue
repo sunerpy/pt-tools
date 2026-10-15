@@ -15,6 +15,8 @@ import {
   type MediaPathMapInput,
   type MediaServer,
   type MediaServerInput,
+  type MediaWatchDir,
+  type MediaWatchDirInput,
   type NotificationConfig,
   type OrganizeSettings,
   type OrganizeSettingsInput,
@@ -70,6 +72,7 @@ const blankSettings = (): OrganizeSettingsInput => ({
   min_video_mb: 50,
   notify_channels: [],
   delete_links_on_remove: false,
+  watch_interval_min: 10,
 });
 const sform = ref<OrganizeSettingsInput>(blankSettings());
 const savePathsText = ref("");
@@ -423,6 +426,80 @@ async function fillClassifyPresets() {
   await saveClassify(presets, "已填入常用分类");
 }
 
+// ---- 目录监控 ----
+const watchDirs = ref<MediaWatchDir[]>([]);
+const watchDS = useDataState();
+const watchDialog = ref(false);
+const watchSaving = ref(false);
+const editingWatchID = ref<number | null>(null);
+const watchForm = ref<MediaWatchDirInput>({ path: "", enabled: true });
+
+async function loadWatchDirs() {
+  const pending = watchDS.run(() => organizeApi.watchDirs());
+  const data = await pending;
+  if (watchDS.isStale(pending) || !data) return;
+  watchDirs.value = data;
+}
+
+function openWatchDir(d?: MediaWatchDir) {
+  editingWatchID.value = d?.id ?? null;
+  watchForm.value = d ? { path: d.path, enabled: d.enabled } : { path: "", enabled: true };
+  watchDialog.value = true;
+}
+
+async function saveWatchDir() {
+  const f = watchForm.value;
+  if (!f.path.trim()) {
+    ElMessage.warning("填写要监控的目录");
+    return;
+  }
+  watchSaving.value = true;
+  try {
+    const body = { ...f, path: f.path.trim() };
+    if (editingWatchID.value) await organizeApi.updateWatchDir(editingWatchID.value, body);
+    else await organizeApi.createWatchDir(body);
+    ElMessage.success("已保存监控目录");
+    watchDialog.value = false;
+    await loadWatchDirs();
+  } catch (e) {
+    ElMessage.error(errText(e, "保存失败"));
+  } finally {
+    watchSaving.value = false;
+  }
+}
+
+async function toggleWatchDir(d: MediaWatchDir, enabled: boolean) {
+  try {
+    await organizeApi.updateWatchDir(d.id, { path: d.path, enabled });
+  } catch (e) {
+    ElMessage.error(errText(e, "保存失败"));
+  }
+  await loadWatchDirs();
+}
+
+async function removeWatchDir(d: MediaWatchDir) {
+  try {
+    await ElMessageBox.confirm(
+      `不再监控「${d.path}」？已经整理进库的文件与记录不动。`,
+      "删除监控目录",
+      {
+        type: "warning",
+        confirmButtonText: "删除",
+        cancelButtonText: "取消",
+      },
+    );
+  } catch {
+    return;
+  }
+  try {
+    await organizeApi.deleteWatchDir(d.id);
+    ElMessage.success("已删除");
+    await loadWatchDirs();
+  } catch (e) {
+    ElMessage.error(errText(e, "删除失败"));
+  }
+}
+
 // ---- 路径映射 ----
 const pathMaps = ref<MediaPathMap[]>([]);
 const mapsDS = useDataState();
@@ -651,6 +728,7 @@ function refresh() {
     loadOptions(),
     loadLibraries(),
     loadClassify(),
+    loadWatchDirs(),
     loadPathMaps(),
     loadServers(),
   ]);
@@ -700,6 +778,19 @@ onMounted(refresh);
               data-testid="ml-scan-interval"
               aria-label="扫描间隔（分钟）" />
             <span>分钟一次</span>
+          </div>
+        </el-form-item>
+        <el-form-item label="目录监控">
+          <div class="ml-inline ml-inline--grow">
+            <span>每</span>
+            <el-input-number
+              v-model="sform.watch_interval_min"
+              :min="1"
+              :max="1440"
+              controls-position="right"
+              data-testid="ml-watch-interval"
+              aria-label="目录监控的扫描间隔（分钟）" />
+            <span>分钟扫一次下面「目录监控」里开着的目录</span>
           </div>
         </el-form-item>
         <div class="ml-row">
@@ -975,6 +1066,60 @@ onMounted(refresh);
           </ol>
         </section>
       </div>
+    </PtPanel>
+
+    <PtPanel
+      title="目录监控"
+      icon="eye"
+      :count="watchDirs.length"
+      action="添加"
+      action-icon="plus"
+      @action="openWatchDir()">
+      <p class="ml-tip ml-tip--top">
+        放进这些目录的视频（不是下载器里的种子，例如手动拷进来的、别的工具下载的）按媒体库整理：目录下的每一项（一个文件，或一个文件夹）当作一个种子，按名字识别。最近
+        2
+        分钟里还在改动的先不整理；文件夹里后来多了几集时再整理新的那几集。不要监控下载器的下载目录（那里的种子由上面的自动整理与定期扫描处理），也不能是媒体库的目录。
+      </p>
+      <div
+        v-if="watchDS.error.value"
+        class="pt-note pt-note--warn ml-stale"
+        data-testid="ml-watch-stale">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>读取失败：{{ watchDS.errorText.value }}</span>
+      </div>
+      <div v-if="!watchDirs.length" class="ml-sub" data-testid="ml-watch-empty">
+        还没有监控的目录
+      </div>
+      <ul v-else class="ml-watch" data-testid="ml-watch">
+        <li
+          v-for="d in watchDirs"
+          :key="d.id"
+          class="ml-classify__row"
+          :data-testid="`ml-watch-${d.id}`">
+          <div class="ml-classify__text">
+            <span class="ml-path">{{ d.path }}</span>
+          </div>
+          <div class="ml-classify__acts">
+            <el-switch
+              :model-value="d.enabled"
+              :aria-label="`监控 ${d.path}`"
+              :data-testid="`ml-watch-enabled-${d.id}`"
+              @update:model-value="
+                (v: string | number | boolean) => toggleWatchDir(d, Boolean(v))
+              " />
+            <el-button link :data-testid="`ml-watch-edit-${d.id}`" @click="openWatchDir(d)"
+              >编辑</el-button
+            >
+            <el-button
+              link
+              type="danger"
+              :data-testid="`ml-watch-del-${d.id}`"
+              @click="removeWatchDir(d)"
+              >删除</el-button
+            >
+          </div>
+        </li>
+      </ul>
     </PtPanel>
 
     <PtPanel
@@ -1410,6 +1555,38 @@ onMounted(refresh);
     </el-dialog>
 
     <el-dialog
+      v-model="watchDialog"
+      class="pt-dialog"
+      :title="editingWatchID ? '编辑监控目录' : '添加监控目录'"
+      :width="isMobile ? '94%' : '520px'"
+      align-center>
+      <el-form class="pt-form" label-position="top" @submit.prevent>
+        <el-form-item label="目录（pt-tools 里看到的路径）" required>
+          <el-input
+            v-model="watchForm.path"
+            placeholder="/media/incoming"
+            data-testid="ml-watch-path" />
+          <div class="field-tip">
+            按各个媒体库的整理方式放进库里；用硬链接时，这个目录要和媒体库在同一个分区上
+          </div>
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="watchForm.enabled" data-testid="ml-watch-form-enabled" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="watchDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="watchSaving"
+          data-testid="ml-watch-save"
+          @click="saveWatchDir"
+          >保存</el-button
+        >
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="mapDialog"
       class="pt-dialog"
       :title="editingMapID ? '编辑路径映射' : '添加路径映射'"
@@ -1623,6 +1800,12 @@ onMounted(refresh);
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.ml-watch {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .ml-classify__acts {
