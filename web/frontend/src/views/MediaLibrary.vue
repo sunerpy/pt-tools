@@ -42,6 +42,7 @@ import {
   MEDIA_MODES,
   MEDIA_SERVER_KINDS,
   OVERWRITE_MODES,
+  SCRAPE_SOURCES,
   TEMPLATE_VARS,
   TMDB_GENRES,
   classifyRuleSummary,
@@ -144,6 +145,7 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   scrape_overwrite: false,
   scrape_items: [...DEFAULT_SCRAPE_ITEMS],
   scrape_image_lang: "",
+  scrape_source: "",
   classify_dir: false,
   overwrite_mode: "",
   enabled: true,
@@ -173,6 +175,7 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     scrape_overwrite: l.scrape_overwrite,
     scrape_items: [...(l.scrape_items ?? DEFAULT_SCRAPE_ITEMS)],
     scrape_image_lang: l.scrape_image_lang ?? "",
+    scrape_source: l.scrape_source ?? "",
     classify_dir: l.classify_dir ?? false,
     overwrite_mode: l.overwrite_mode ?? "",
     enabled: l.enabled,
@@ -1447,6 +1450,24 @@ onMounted(refresh);
               Logo 写成 clearlogo.png，Emby、Jellyfin 与 Kodi
               都认。选了图片语言时，海报优先用这种语言的、背景优先用没有文字的，没有就用 TMDB
               默认的那张；Logo 依次找这种语言（无文字是没有文字的）、识别语言与英文的。
+            </div>
+            <div class="ml-inline">
+              <span>简介与评分</span>
+              <el-select
+                v-model="libForm.scrape_source"
+                class="ml-lang"
+                data-testid="ml-lib-scrape-source">
+                <el-option
+                  v-for="o in SCRAPE_SOURCES"
+                  :key="o.value"
+                  :label="o.label"
+                  :value="o.value" />
+              </el-select>
+            </div>
+            <div v-if="libForm.scrape_source === 'douban'" class="field-tip">
+              写 NFO
+              时按中文名与年份在豆瓣上找同一部（剧集按季找），简介换成豆瓣的，评分以豆瓣的为主；站点给了豆瓣编号的电影直接用编号。豆瓣没有开放的接口，找不到或暂时不能访问时用
+              TMDB 的。每 2 秒最多请求一次豆瓣，结果缓存一段时间。
             </div>
           </template>
           <el-checkbox

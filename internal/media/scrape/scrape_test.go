@@ -51,25 +51,38 @@ var (
 )
 
 func TestNFOGolden(t *testing.T) {
-	b, err := MovieNFO(movie)
+	b, err := MovieNFO(movie, nil)
 	require.NoError(t, err)
 	golden(t, "movie.nfo", b)
 
 	bare := tmdb.Result{ID: 1, Title: "Same", OriginalTitle: "Same"}
-	b, err = MovieNFO(bare)
+	b, err = MovieNFO(bare, nil)
 	require.NoError(t, err)
 	golden(t, "movie-bare.nfo", b)
 
-	b, err = TVShowNFO(show)
+	b, err = TVShowNFO(show, nil)
 	require.NoError(t, err)
 	golden(t, "tvshow.nfo", b)
 
-	b, err = SeasonNFO(1, season1)
+	b, err = SeasonNFO(1, season1, nil)
 	require.NoError(t, err)
 	golden(t, "season.nfo", b)
-	b, err = SeasonNFO(0, nil)
+	b, err = SeasonNFO(0, nil, nil)
 	require.NoError(t, err)
 	golden(t, "season-bare.nfo", b)
+
+	// 豆瓣补充：简介换成豆瓣的，评分以豆瓣的为主（TMDB 的留着），记下豆瓣编号；季的简介也换
+	db := &Douban{ID: "35593344", Intro: "豆瓣的简介 & <更多>。", Rating: 8.8, Votes: 850981}
+	b, err = MovieNFO(movie, db)
+	require.NoError(t, err)
+	golden(t, "movie-douban.nfo", b)
+	b, err = MovieNFO(movie, &Douban{ID: "1"})
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "<plot>「原子弹之父」", "豆瓣没有简介时用 TMDB 的")
+	assert.Contains(t, string(b), `<rating name="themoviedb" max="10" default="true">`, "豆瓣没有评分时 TMDB 的是主要的")
+	b, err = SeasonNFO(1, season1, &Douban{ID: "25848328", Intro: "豆瓣上第一季的简介"})
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "<plot>豆瓣上第一季的简介</plot>")
 
 	b, err = EpisodeNFO(show, 1, 2, 0, season1)
 	require.NoError(t, err)

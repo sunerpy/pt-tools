@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/sunerpy/pt-tools/internal/media/douban"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
@@ -81,6 +82,16 @@ type Config struct {
 	Now func() time.Time
 	// ServerHTTP 为空时用 server.NewHTTPClient（测试里换成 httptest 的）
 	ServerHTTP *http.Client
+	// Douban 是刮削时补充简介与评分用的豆瓣（媒体库选了豆瓣时才用）；为空时一律用 TMDB 的
+	Douban Douban
+}
+
+// Douban 在豆瓣上找条目（生产环境是 *douban.Client）。
+type Douban interface {
+	// Find 按名字与年份找同一部（剧集是同一季），没找到时返回 nil、nil
+	Find(ctx context.Context, q douban.Query) (*douban.Subject, error)
+	// Subject 按豆瓣编号取条目
+	Subject(ctx context.Context, kind, id string) (*douban.Subject, error)
 }
 
 // Service 是整理入库服务。

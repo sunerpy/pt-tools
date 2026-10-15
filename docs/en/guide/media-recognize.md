@@ -57,4 +57,4 @@ Plain text matches ignore case; with regex matching (按正则匹配) the patter
 
 pt-tools records the IMDb and Douban IDs a site provides: from the M-Team API, and from the IMDb and Douban links on NexusPHP detail pages. RSS downloads and brush pushes store them with the torrent: library organising looks the ID up first, and subscriptions will use it later. An IMDb ID entered in the recognition preview is also looked up first.
 
-Douban IDs are for the upcoming Douban wishlist (想看) subscriptions; pt-tools does not call Douban's API.
+Douban IDs are used for Douban wishlist (想看) subscriptions, and, when a library's plot and rating come from Douban, scraping uses them to fetch Douban's plot and rating (see [scraping](media-library.md#scraping)).

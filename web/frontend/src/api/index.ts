@@ -2520,6 +2520,8 @@ export type OrganizeSettingsInput = Omit<OrganizeSettings, "auto_since">;
 export type MediaScrapeItem = "nfo" | "poster" | "fanart" | "logo" | "season_poster" | "thumb";
 /** 海报与 Logo 优先用的语言：空串用 TMDB 给的那张；none 是没有文字的 */
 export type MediaImageLang = "" | "zh" | "en" | "ja" | "none";
+/** NFO 里简介与评分的来源：空串用 TMDB 的；douban 用豆瓣的（找不到时用 TMDB 的） */
+export type MediaScrapeSource = "" | "douban";
 
 export interface MediaLibraryInput {
   name: string;
@@ -2535,6 +2537,7 @@ export interface MediaLibraryInput {
   /** 刮削要写的内容；没选过的库是默认的那几项（Logo 以外） */
   scrape_items: MediaScrapeItem[];
   scrape_image_lang: MediaImageLang;
+  scrape_source: MediaScrapeSource;
   /** 按二级分类放进库目录下的分类目录 */
   classify_dir: boolean;
   /** 目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时：空串不替换，larger 新文件更大时替换 */

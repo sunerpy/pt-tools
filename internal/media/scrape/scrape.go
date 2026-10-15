@@ -24,6 +24,9 @@ type Writer struct {
 	Overwrite bool
 	// Items 是要写的内容（ParseItems 读媒体库的设置）；零值什么都不写
 	Items Items
+	// Douban 是豆瓣补充的电影或剧集（第 1 季）的内容，Seasons 是剧集每一季的；没有时为空
+	Douban  *Douban
+	Seasons map[int]*Douban
 }
 
 // Report 是一次刮削写了哪些文件、哪些失败了。
@@ -108,7 +111,7 @@ func stem(videoPath string) string {
 func (w Writer) Movie(ctx context.Context, videoPath string, ownDir bool, r tmdb.Result, art Art) Report {
 	var rep Report
 	if w.Items.NFO {
-		data, err := MovieNFO(r)
+		data, err := MovieNFO(r, w.Douban)
 		w.nfo(stem(videoPath)+".nfo", data, err, &rep)
 	}
 	poster, fanart, logo := stem(videoPath)+"-poster.jpg", stem(videoPath)+"-fanart.jpg", stem(videoPath)+"-clearlogo.png"
@@ -124,7 +127,7 @@ func (w Writer) Movie(ctx context.Context, videoPath string, ownDir bool, r tmdb
 func (w Writer) Show(ctx context.Context, showDir string, r tmdb.Result, art Art) Report {
 	var rep Report
 	if w.Items.NFO {
-		data, err := TVShowNFO(r)
+		data, err := TVShowNFO(r, w.Douban)
 		w.nfo(filepath.Join(showDir, "tvshow.nfo"), data, err, &rep)
 	}
 	w.writeArt(ctx, filepath.Join(showDir, "poster.jpg"), filepath.Join(showDir, "fanart.jpg"), filepath.Join(showDir, "clearlogo.png"), art, &rep)
@@ -156,7 +159,7 @@ func SeasonPosterName(n int) string {
 func (w Writer) Season(ctx context.Context, showDir, seasonDir string, number int, s *tmdb.Season) Report {
 	var rep Report
 	if w.Items.NFO && seasonDir != "" && filepath.Clean(seasonDir) != filepath.Clean(showDir) {
-		data, err := SeasonNFO(number, s)
+		data, err := SeasonNFO(number, s, w.Seasons[number])
 		w.nfo(filepath.Join(seasonDir, "season.nfo"), data, err, &rep)
 	}
 	if w.Items.SeasonPoster && s != nil {

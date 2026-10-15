@@ -81,7 +81,7 @@ With upgrades on, a subscription keeps looking for higher-scoring releases after
 
 ## Douban wish list
 
-Under Douban wish list (豆瓣想看) on the Subscriptions page, add a Douban user ID, the part after `douban.com/people/` in the profile address. The collection must be public: pt-tools only fetches Douban's public collection RSS, without logging in or calling any non-public API.
+Under Douban wish list (豆瓣想看) on the Subscriptions page, add a Douban user ID, the part after `douban.com/people/` in the profile address. The collection must be public: for the wish list, pt-tools only fetches Douban's public collection RSS, without logging in or calling any non-public API.
 
 - It is fetched every 6 hours (plus up to 30 minutes of random offset), and only films and series marked "wish" (想看) are taken; books, music, and items marked watching or watched are skipped.
 - Each item is looked up on TMDB by its name (and the original title Douban gives). For a series, the season written in the title is used (such as 第二季), otherwise season 1. Titles that already have a subscription are only recorded, not subscribed twice.

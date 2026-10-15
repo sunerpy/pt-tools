@@ -35,6 +35,8 @@ type MediaLibrary struct {
 	ScrapeItems string `gorm:"size:128;not null;default:''" json:"-"`
 	// ScrapeImageLang 是海报与 Logo 优先用的语言：空串用 TMDB 给的那张；zh、en、ja；none 是没有文字的
 	ScrapeImageLang string `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
+	// ScrapeSource 是 NFO 里简介与评分的来源：空串用 TMDB 的；douban 用豆瓣的（找不到时用 TMDB 的）
+	ScrapeSource string `gorm:"size:16;not null;default:''" json:"scrape_source"`
 	// ClassifyDir 为真时按二级分类（MediaOrganizeSetting.ClassifyRules）放进库目录下的分类目录
 	ClassifyDir bool `gorm:"not null;default:false" json:"classify_dir"`
 	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办：空串不替换，larger 新文件更大时替换

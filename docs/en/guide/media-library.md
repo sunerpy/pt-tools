@@ -171,6 +171,13 @@ For the logo or a chosen image language, pt-tools fetches the title's image list
 
 The NFO files use the Kodi format, read by the NFO support of Emby, Jellyfin and Plex, and include the TMDB and IMDb IDs. Images are downloaded from TMDB through the proxy set under media recognition. When the template puts episodes directly in the library root, the show and season files are not written.
 
+Plot and rating (简介与评分) come from TMDB by default. With Douban (豆瓣) selected, pt-tools looks the title up on Douban by its Chinese name before writing the NFO, then by its original title. Among titles with a matching name, the same year wins; otherwise a title within one year is used only when it's the only one. When more than one title has the name and it's unclear which, TMDB's data is used.
+
+- For a movie, the plot is replaced with Douban's, Douban's rating becomes the main one (TMDB's is kept), and the Douban ID is added. When a torrent pushed by pt-tools carries a Douban ID from the site, that ID is tried first and used only when its name and year match.
+- Douban lists each season of a series separately: `tvshow.nfo` uses season 1, and `season.nfo` uses that season's plot. Episode NFO files still come from TMDB.
+- Douban has no public API; pt-tools uses the two endpoints Douban's own web pages use (search and title details), doesn't log in, and doesn't go through the media recognition proxy. When nothing is found or Douban can't be reached, TMDB's data is used; a manual organise says so in its result, and background organising writes it to the log.
+- Douban is requested at most once every 2 seconds; search results are cached for a day and titles for a week. Lookups happen only for NFO files that will be written: existing ones that aren't overwritten aren't looked up, and they're replaced after turning on Overwrite existing NFO and images (覆盖已有的 NFO 与图片) and organising again.
+
 ## Media servers
 
 After organising, pt-tools asks the media servers to scan the new folders. Organising also works without a media server; the server then scans on its own schedule.

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>奥本海默</title>
+  <originaltitle>Oppenheimer</originaltitle>
+  <year>2023</year>
+  <premiered>2023-07-19</premiered>
+  <plot>豆瓣的简介 &amp; &lt;更多&gt;。</plot>
+  <runtime>181</runtime>
+  <ratings>
+    <rating name="douban" max="10" default="true">
+      <value>8.8</value>
+      <votes>850981</votes>
+    </rating>
+    <rating name="themoviedb" max="10" default="false">
+      <value>8.1</value>
+    </rating>
+  </ratings>
+  <uniqueid type="tmdb" default="true">872585</uniqueid>
+  <uniqueid type="imdb">tt15398776</uniqueid>
+  <uniqueid type="douban">35593344</uniqueid>
+  <tmdbid>872585</tmdbid>
+  <imdbid>tt15398776</imdbid>
+  <genre>剧情</genre>
+  <genre>历史</genre>
+</movie>

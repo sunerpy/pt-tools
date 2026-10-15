@@ -100,6 +100,15 @@ const (
 	ImageLangNone = "none" // 没有文字的
 )
 
+// NFO 里简介与评分的来源（媒体库的 ScrapeSource）。
+const (
+	SourceTMDB   = ""       // 用 TMDB 的
+	SourceDouban = "douban" // 用豆瓣的，在豆瓣上找不到时用 TMDB 的
+)
+
+// Sources 是可选的来源。
+var Sources = []string{SourceTMDB, SourceDouban}
+
 // ImageLangs 是可选的图片语言。
 var ImageLangs = []string{ImageLangAuto, "zh", "en", "ja", ImageLangNone}
 

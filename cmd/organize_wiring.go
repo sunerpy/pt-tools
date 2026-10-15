@@ -8,15 +8,18 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/media/douban"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 // newOrganizeService 构造并启动整理入库服务：媒体服务器的 Token 用 ConfigStore 的 Cookie 密钥加解密，
-// 下载器取 DownloaderManager 的共享实例，入库通知写进监控通知日志、由现有的投递器发出。
+// 下载器取 DownloaderManager 的共享实例，入库通知写进监控通知日志、由现有的投递器发出。媒体库选了豆瓣时，
+// 刮削经豆瓣客户端补充简介与评分（响应缓存在 media_cache 表里，和 TMDB 共用）。
 func newOrganizeService(store *core.ConfigStore, mgr *scheduler.Manager, rec *recognize.Service, notifier *scheduler.MonitorNotifier) *organize.Service {
 	if global.GlobalDB == nil || global.GlobalDB.DB == nil || store == nil || mgr == nil || rec == nil {
 		global.GetSlogger().Warn("整理入库跳过初始化：数据库或媒体识别服务未就绪")
@@ -29,6 +32,7 @@ func newOrganizeService(store *core.ConfigStore, mgr *scheduler.Manager, rec *re
 		Downloaders: organizeDownloaders{mgr: mgr},
 		Notify:      organizeNotifier(notifier),
 		Logger:      global.GetSlogger(),
+		Douban:      douban.New(douban.Config{Cache: tmdb.NewDBCache(global.GlobalDB.DB)}),
 	})
 	svc.Start()
 	global.GetSlogger().Info("整理入库服务已启动")
