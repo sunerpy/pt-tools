@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -223,27 +224,38 @@ func TestQbitCompatSaveSerialized(t *testing.T) {
 		w := e.do(appReq{method: http.MethodPut, path: "/api/qbit-compat", session: true, body: `{"downloader_id":0,"full_control":false,"listen_addr":"` + addr + `"}`})
 		done <- w.Code
 	}
-	// assert.Never 到时就返回，它起的那一次检查可能在测试结束以后才跑完：这里不用 t.Context()（那时已取消）、
-	// 不在检查里 require，读的是开头拿到的库（不碰测试结束时被换回去的全局变量）
+	// 读的是开头拿到的库，不用 t.Context()：Eventually 起的检查不在测试的 goroutine 上，不在里面 require
 	db := global.GlobalDB.DB
-	stored := func() string {
+	stored := func() (string, error) {
 		row, err := qbitcompat.LoadSettings(context.Background(), db)
 		if err != nil {
-			return ""
+			return "", err
 		}
-		return row.ListenAddr
+		return row.ListenAddr, nil
 	}
+	// 失败退出时也放行卡住的那次保存，不留 goroutine
+	release := sync.OnceFunc(func() { close(ctl.gate) })
+	t.Cleanup(release)
 	a, b := make(chan int, 1), make(chan int, 1)
 	go put("127.0.0.1:18091", a)
-	require.Eventually(t, func() bool { return stored() == "127.0.0.1:18091" }, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		v, err := stored()
+		return err == nil && v == "127.0.0.1:18091"
+	}, 2*time.Second, 10*time.Millisecond)
 	go put("127.0.0.1:18092", b)
-	assert.Never(t, func() bool { return stored() == "127.0.0.1:18092" }, 300*time.Millisecond, 20*time.Millisecond, "前一次还在换监听：后一次等着，不先存")
-	close(ctl.gate)
+	// 前一次还在换监听：后一次等着，不先存。在测试自己的 goroutine 上逐次查，读失败直接算失败：
+	// 原来用 assert.Never，它到时就返回，最后一次检查可能在测试结束以后才跑完（Windows CI 上偶发 context canceled）
+	for end := time.Now().Add(300 * time.Millisecond); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+		v, err := stored()
+		require.NoError(t, err)
+		require.NotEqual(t, "127.0.0.1:18092", v, "前一次还在换监听：后一次等着，不先存")
+	}
+	release()
 	assert.Equal(t, http.StatusOK, <-a)
 	assert.Equal(t, http.StatusOK, <-b)
-	row, err := qbitcompat.LoadSettings(context.Background(), db)
+	v, err := stored()
 	require.NoError(t, err)
-	assert.Equal(t, "127.0.0.1:18092", row.ListenAddr)
+	assert.Equal(t, "127.0.0.1:18092", v)
 	assert.Equal(t, []string{"127.0.0.1:18091", "127.0.0.1:18092"}, ctl.applied)
 	assert.Equal(t, "127.0.0.1:18092", ctl.Runtime().Addr)
 }
