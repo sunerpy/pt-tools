@@ -162,7 +162,8 @@ func (m *DeadTorrentMonitor) RunOnce(ctx context.Context) int {
 	m.mu.Lock()
 	due := m.lastScan.IsZero() || !now.Before(m.lastScan.Add(interval))
 	if due {
-		m.lastScan = now
+		// 这一轮扫完以前，页面上的结果写「正在扫描」，不显示上一轮的
+		m.lastScan, m.lastResult = now, "正在扫描"
 	}
 	m.mu.Unlock()
 	if !due {
