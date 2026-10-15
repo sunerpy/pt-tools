@@ -1,8 +1,8 @@
-# pt-tools v2.0 Docker Compose Deployment
+# pt-tools + CloakBrowser-Manager Docker Compose example
 
 ## Quick Start
 
-This directory contains a Docker Compose template for deploying pt-tools v2.0 with CloakBrowser-Manager fallback support.
+This directory contains a Docker Compose template that runs pt-tools next to CloakBrowser-Manager, which pt-tools can use as a fallback for site login probes (see [Site login monitoring](../docs/en/guide/site-login-monitoring.md)).
 
 ### Prerequisites
 
@@ -39,7 +39,17 @@ This directory contains a Docker Compose template for deploying pt-tools v2.0 wi
 
    Look for `healthy` status on both `pt-tools-cloak` and `pt-tools` containers.
 
-5. Access pt-tools at `http://localhost:8081`
+5. Access pt-tools at `http://localhost:8081` (default login `admin` / `adminadmin`; change it after the first login).
+
+6. Create a profile in the CloakBrowser-Manager UI at `http://localhost:8080`.
+
+7. In pt-tools, open 系统 → CloakBrowser and fill in:
+
+   - CloakBrowser-Manager 端点: `http://cloakbrowser-manager:8080` (the service name inside the compose network, not `localhost`)
+   - Auth Token: the `CLOAK_AUTH_TOKEN` from `.env`
+   - Profile ID: the profile created in step 6
+
+   测试连接 checks the endpoint and token only. The fallback is used only when all three are set. pt-tools does not read these settings from environment variables.
 
 ### Common Operations
 
@@ -74,7 +84,7 @@ docker compose up -d
 **Pin to specific versions**:
 Edit the `image:` field in `docker-compose.yaml`, e.g.:
 
-- `sunerpy/pt-tools:v2.0.0` instead of `v2-latest`
+- `sunerpy/pt-tools:<version>` (for example `sunerpy/pt-tools:v1.0.0`) instead of `latest`
 - `cloakhq/cloakbrowser-manager:0.0.4@sha256:<digest>` for SHA-pinned Manager
 
 ### Manager Image SHA Digest Pinning (R21)
@@ -109,19 +119,19 @@ For production, pin the CloakBrowser-Manager image to a specific digest to preve
 **pt-tools cannot reach CloakBrowser-Manager**:
 
 - Verify Manager is healthy: `docker compose logs cloakbrowser-manager | tail -20`
-- Check network: `docker compose exec pt-tools ping cloakbrowser-manager`
+- Check that the endpoint in 系统 → CloakBrowser is `http://cloakbrowser-manager:8080`: inside the pt-tools container, `localhost` is pt-tools itself
+- Check network: `docker compose exec pt-tools wget -qO- http://cloakbrowser-manager:8080/api/status`
 
 **Port conflicts** (8080 or 8081 already in use):
 
-- Edit `docker-compose.yaml` ports section, e.g., `127.0.0.1:9080:8080`
+- Edit the host side of the `ports` entries in `docker-compose.yaml`, e.g. `127.0.0.1:9080:8080`
 
 ### Notes
 
 - Both services bind to **localhost only** (`127.0.0.1`) by default for security
-- Persistent data is stored in named Docker volumes (`cloak_profiles`, `pttools_data`)
-- Health checks ensure services are fully ready before dependent services start
-- `depends_on` with `condition: service_healthy` 确保 Manager 在 pt-tools 启动前就绪（供「CloakBrowser 配置」连通性测试使用；运行时探测 fallback 集成仍在开发中）。
+- Persistent data is stored in named Docker volumes (`cloak_profiles`, `pttools_data`); pt-tools keeps its database and `secret.key` in `/app/.pt-tools`, back up `secret.key` together with the database
+- Health checks ensure services are fully ready before dependent services start; pt-tools answers `GET /api/ping` without login. Its check runs `wget -Y off` because busybox wget ignores `no_proxy`, and Docker's client proxy settings (`~/.docker/config.json`) put `HTTP_PROXY` into the container
 
 ### Legal Compliance
 
-**Single-image deployment**: v2.0 ships only docker-compose; single-image solutions are pending legal confirmation from CloakHQ.
+**Separate containers**: CloakBrowser-Manager runs as its own container and is not bundled into the pt-tools image; a single-image setup is pending legal confirmation from CloakHQ.

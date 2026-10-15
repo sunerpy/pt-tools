@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   cloakbrowser-manager:
     # NOTE: Pin to specific version + SHA digest (R21). Discover the actual SHA via:
@@ -11,7 +9,7 @@ services:
     container_name: pt-tools-cloak
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080" # bind to localhost only (security)
+      - "127.0.0.1:8080:8080" # bind to localhost only (security); the Manager UI is where you create the profile
     volumes:
       - cloak_profiles:/data
     environment:
@@ -24,22 +22,27 @@ services:
       start_period: 60s
 
   pt-tools:
-    image: sunerpy/pt-tools:v2-latest
+    image: sunerpy/pt-tools:latest
     container_name: pt-tools
     restart: unless-stopped
     depends_on:
       cloakbrowser-manager:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8081:8081"
+      # pt-tools listens on 8080 inside the container (PT_PORT); 8081 on the host keeps it apart from the Manager
+      - "127.0.0.1:8081:8080"
     volumes:
-      - pttools_data:/root/.pt-tools
-    environment:
-      - PT_TOOLS_CLOAK_ENDPOINT=http://cloakbrowser-manager:8080
-      - PT_TOOLS_CLOAK_AUTH_TOKEN=${CLOAK_AUTH_TOKEN}
-      # Optional: extend with site-specific or notification config
+      # The image's HOME is /app: the database, secret.key and logs live in /app/.pt-tools
+      - pttools_data:/app/.pt-tools
+    # pt-tools does not read CloakBrowser settings from the environment. After the first login, open
+    # 系统 → CloakBrowser and fill in:
+    #   CloakBrowser-Manager 端点: http://cloakbrowser-manager:8080
+    #   Auth Token:               the CLOAK_AUTH_TOKEN from .env
+    #   Profile ID:               a profile created in the Manager UI (http://localhost:8080)
+    # The login-probe fallback is used only when all three are set.
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz || exit 1"]
+      # -Y off: busybox wget ignores no_proxy, and Docker's client proxy settings put HTTP_PROXY into the container
+      test: ["CMD-SHELL", "wget -Y off -qO- http://localhost:8080/api/ping || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
