@@ -20,6 +20,10 @@ vi.mock("@/api", async (orig) => {
   return {
     ...real,
     globalApi: { get: api.getGlobal, save: api.saveGlobal },
+    cleanupApi: {
+      status: vi.fn().mockResolvedValue({ enabled: false, interval_min: 30 }),
+      preview: vi.fn(),
+    },
     maintenanceApi: { preview: vi.fn(), clean: vi.fn() },
   };
 });

@@ -34,13 +34,15 @@ type Manager struct {
 	mu sync.Mutex
 	// monMu 串行化换监控（配置重载）与 StopAll：换的时候要在 mu 外停旧监控（见 detach），
 	// 有了它，同时进行的两次重载不会让新旧两个监控一起跑，StopAll 也会等正在换的那次停完旧的再返回。
-	monMu                sync.Mutex
-	jobs                 map[string]*job
-	wg                   sync.WaitGroup
-	lastVersion          int64
-	downloaderManager    *downloader.DownloaderManager
-	freeEndMonitor       *FreeEndMonitor
-	cleanupMonitor       *CleanupMonitor
+	monMu             sync.Mutex
+	jobs              map[string]*job
+	wg                sync.WaitGroup
+	lastVersion       int64
+	downloaderManager *downloader.DownloaderManager
+	freeEndMonitor    *FreeEndMonitor
+	cleanupMonitor    *CleanupMonitor
+	// cleanupHist 是最近一轮自动删种的结果，换监控（配置重载）时留着
+	cleanupHist          *CleanupHistory
 	peerRatioMonitor     *PeerRatioMonitor
 	loginReminderMonitor *LoginReminderMonitor
 	attendanceMonitor    *AttendanceMonitor
@@ -64,6 +66,7 @@ func NewManager() *Manager {
 	m := &Manager{
 		jobs:              map[string]*job{},
 		downloaderManager: downloader.NewDownloaderManager(),
+		cleanupHist:       &CleanupHistory{},
 	}
 
 	id, ch, cancel := events.Subscribe(64)
@@ -438,6 +441,7 @@ func (m *Manager) initCleanupMonitor() {
 		return
 	}
 	m.cleanupMonitor = NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
+	m.cleanupMonitor.hist = m.cleanupHist
 	if err := m.cleanupMonitor.Start(); err != nil {
 		global.GetSlogger().Errorf("启动自动删种监控器失败: %v", err)
 	}
@@ -888,4 +892,19 @@ func (m *Manager) GetAttendanceMonitor() *AttendanceMonitor {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.attendanceMonitor
+}
+
+// CleanupStatus 是最近一轮自动删种的结果（没跑过时为空）与下一轮大约什么时候（零值是不知道，例如没启用）。
+func (m *Manager) CleanupStatus() (*CleanupRun, time.Time) {
+	return m.cleanupHist.Snapshot()
+}
+
+// CleanupPreview 按 cfg 算出现在会删哪些种子，不删：每台连得上的下载器一个结果（见 CleanupMonitor.Preview）。
+func (m *Manager) CleanupPreview(cfg *models.SettingsGlobal) []CleanupResult {
+	if global.GlobalDB == nil || cfg == nil {
+		return nil
+	}
+	mon := NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
+	defer mon.cancel()
+	return mon.Preview(cfg)
 }

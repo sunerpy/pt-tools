@@ -164,6 +164,8 @@ const NOT_ON_BOARD = {
     "「转移到其他下载器」（路线图 M5）晚于画板 40 定稿：下载器 Web UI 与任务列表的批量操作共用这个弹窗",
   "views/DynamicSiteSettings.vue":
     "动态站点两个弹窗：路由在 router/index.ts 里已注释掉，画板刻意不画（design-system.md 的说明）",
+  "views/AutoCleanup.vue#按现在的规则会删这些":
+    "自动删种的「预览会删哪些」（路线图 M23）晚于画板 40 定稿：只读的结果弹窗，不在那张清点图里",
   "views/SiteList.vue#导入站点模板":
     "「导入站点模板」弹窗晚于画板 40 定稿，功能已上线但没进那张清点图",
   "views/SiteDetail.vue#编辑 RSS 订阅":
