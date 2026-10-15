@@ -40,8 +40,9 @@ type DeadTorrentDownloader struct {
 type DeadTorrentMonitorConfig struct {
 	// Settings 返回是否开启、扫描间隔与接收通知的通道。
 	Settings func() (enabled bool, interval time.Duration, channelIDs []uint, err error)
-	// Downloaders 返回已启用、能连上的下载器；连不上的放在 errs 里（只记日志）。
-	Downloaders func(ctx context.Context) (dls []DeadTorrentDownloader, errs []error)
+	// Downloaders 返回已启用、能连上的下载器；连不上的放在 unreachable 里（每台一条，记日志并写进结果）。
+	// err 不为空表示连下载器列表都没读到，这一轮整个不扫。
+	Downloaders func(ctx context.Context) (dls []DeadTorrentDownloader, unreachable []error, err error)
 	Notifier    *MonitorNotifier
 	// Resolver 按 tracker 识别站点；为空时用全部内置站点。
 	Resolver func() *v2.TrackerResolver
@@ -172,13 +173,20 @@ func (m *DeadTorrentMonitor) RunOnce(ctx context.Context) int {
 
 	ctx, cancel := context.WithTimeout(ctx, deadTorrentScanTimeout)
 	defer cancel()
-	dls, errs := m.cfg.Downloaders(ctx)
+	dls, unreachable, err := m.cfg.Downloaders(ctx)
+	if err != nil {
+		m.cfg.Logger.Warnf("[失效种子] 读取下载器列表失败，这一轮不扫描: %v", err)
+		m.mu.Lock()
+		m.lastResult = "读取下载器列表失败，这一轮没有扫描"
+		m.mu.Unlock()
+		return 0
+	}
 	var parts []string
-	for _, e := range errs {
+	for _, e := range unreachable {
 		m.cfg.Logger.Warnf("[失效种子] 下载器不可用，跳过: %v", e)
 	}
-	if len(errs) > 0 {
-		parts = append(parts, fmt.Sprintf("%d 台下载器连不上", len(errs)))
+	if len(unreachable) > 0 {
+		parts = append(parts, fmt.Sprintf("%d 台下载器连不上", len(unreachable)))
 	}
 	resolver := m.cfg.Resolver()
 	notified := 0

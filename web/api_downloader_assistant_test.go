@@ -203,7 +203,7 @@ func TestAssistantAPI_DeadScanSettings(t *testing.T) {
 	// 扫过一轮以后：读回的设置带上一轮的时间与结果、下一轮大约什么时候
 	mon := scheduler.NewDeadTorrentMonitor(scheduler.DeadTorrentMonitorConfig{
 		Settings:    func() (bool, time.Duration, []uint, error) { return true, 12 * time.Hour, []uint{conf.ID}, nil },
-		Downloaders: func(context.Context) ([]scheduler.DeadTorrentDownloader, []error) { return nil, nil },
+		Downloaders: func(context.Context) ([]scheduler.DeadTorrentDownloader, []error, error) { return nil, nil, nil },
 	})
 	mon.RunOnce(context.Background())
 	server.mgr.SetDeadTorrentMonitor(mon)

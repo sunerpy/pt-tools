@@ -35,13 +35,15 @@ func TestWireDeadTorrentMonitor(t *testing.T) {
 
 	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "qb-off", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: false}).Error)
 	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "qb-missing", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}).Error)
-	dls, errs := deadTorrentDownloaders(mgr)(context.Background())
+	dls, errs, err := deadTorrentDownloaders(mgr)(context.Background())
+	require.NoError(t, err)
 	assert.Empty(t, dls)
 	require.Len(t, errs, 1, "已启用但下载器管理器里没有的那台")
 	assert.Contains(t, errs[0].Error(), "qb-missing")
 
 	require.NoError(t, db.Migrator().DropTable(&models.DownloaderSetting{}))
-	_, errs = deadTorrentDownloaders(mgr)(context.Background())
-	require.Len(t, errs, 1)
-	assert.Contains(t, errs[0].Error(), "读取下载器失败")
+	_, errs, err = deadTorrentDownloaders(mgr)(context.Background())
+	assert.Empty(t, errs, "读不到列表时不算哪台连不上")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "读取下载器失败")
 }
