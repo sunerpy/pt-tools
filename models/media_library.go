@@ -27,8 +27,8 @@ type MediaLibrary struct {
 	// Path 是 pt-tools 里看到的库目录（绝对路径）
 	Path string `gorm:"size:1024;not null;default:''" json:"path"`
 	// Template 是命名模板（text/template，不写扩展名）；空串用默认模板
-	Template        string    `gorm:"size:1024;not null;default:''" json:"template"`
-	Mode            string    `gorm:"size:16;not null;default:''" json:"mode"`
+	Template        string `gorm:"size:1024;not null;default:''" json:"template"`
+	Mode            string `gorm:"size:16;not null;default:''" json:"mode"`
 	Scrape          bool   `gorm:"not null;default:false" json:"scrape"`
 	ScrapeOverwrite bool   `gorm:"not null;default:false" json:"scrape_overwrite"`
 	// ScrapeItems 是刮削要写的内容（逗号分隔，见 scrape.AllItems）；空串是默认的那几项（Logo 以外都写）

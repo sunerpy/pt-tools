@@ -117,7 +117,7 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 模板最多 1024 个字", ErrInvalid)
 	}
 	if tpl != "" {
-		if _, err := transfer.Check(tpl, in.Kind); err != nil {
+		if _, err = transfer.Check(tpl, in.Kind); err != nil {
 			return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 		}
 	}

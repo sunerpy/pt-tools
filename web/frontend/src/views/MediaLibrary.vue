@@ -1064,7 +1064,7 @@ onMounted(refresh);
             </div>
             <div class="field-tip">
               Logo 写成 clearlogo.png，Emby、Jellyfin 与 Kodi
-              都认。选了图片语言时，海报优先用这种语言的、背景优先用没有文字的， 没有就用 TMDB
+              都认。选了图片语言时，海报优先用这种语言的、背景优先用没有文字的，没有就用 TMDB
               默认的那张；Logo 依次找这种语言、识别语言与英文的。
             </div>
           </template>
