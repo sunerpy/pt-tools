@@ -54,6 +54,8 @@ var (
 	link      = os.Link
 	linkTmp   = os.Link
 	noReplace = renameNoReplace
+	// placeRename 是 Place 先试的不覆盖的改名（Linux 的 RENAME_NOREPLACE，Windows 的 MoveFileEx）
+	placeRename = moveNoReplace
 	// removeSrc 删掉移动以后的源文件（测试里换成会失败的）
 	removeSrc = os.Remove
 )
@@ -182,27 +184,34 @@ func existing(src, dst, mode string, srcInfo os.FileInfo, srcErr error, dstInfo 
 	return 0, ErrTargetExists
 }
 
-// Place 把同一个目录里的 src 放到 dst，不覆盖已有的文件：先用硬链接（成功后删掉 src）；不支持硬链接时用不覆盖的改名
-// （Linux 的 RENAME_NOREPLACE）；都不支持时返回错误，不冒险覆盖。dst 已存在时返回 ErrTargetExists。
+// Place 把同一个目录里的 src 挪到 dst，不覆盖已有的文件。先用原子的不覆盖改名（Linux 的 RENAME_NOREPLACE、Windows 的
+// MoveFileEx）；不支持时用硬链接放过去，确认 src 还是放过去的那个文件才删掉 src 这个名字（确认和删除之间别人换掉 src
+// 的窗口只有这一瞬）。都不支持时返回错误，不冒险覆盖。dst 已存在时返回 ErrTargetExists。
 func Place(src, dst string) error {
-	err := linkTmp(src, dst)
-	if err == nil {
-		_ = os.Remove(src)
-		return nil
-	}
-	if errors.Is(err, os.ErrExist) {
-		return ErrTargetExists
-	}
-	switch err := noReplace(src, dst); {
+	switch err := placeRename(src, dst); {
 	case err == nil:
 		return nil
 	case errors.Is(err, os.ErrExist):
 		return ErrTargetExists
-	case errors.Is(err, errNoReplaceUnsupported):
-		return errors.New("这个文件系统不支持不覆盖地放文件（硬链接与不覆盖的改名都不行）")
-	default:
+	case !errors.Is(err, errNoReplaceUnsupported):
 		return fmt.Errorf("放到目标位置失败: %w", err)
 	}
+	if err := linkTmp(src, dst); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return ErrTargetExists
+		}
+		return fmt.Errorf("这个文件系统不支持不覆盖地放文件（不覆盖的改名与硬链接都不行）: %w", err)
+	}
+	a, errA := os.Lstat(src)
+	b, errB := os.Lstat(dst)
+	if errA != nil || errB != nil || !os.SameFile(a, b) {
+		// src 在放过去以后换掉了：dst 是原来那个文件的另一个名字，src 留着不动
+		return errors.New("放的时候源文件被换掉了，没有删除原来的名字")
+	}
+	if err := os.Remove(src); err != nil {
+		return fmt.Errorf("放好了，但原来的名字删不掉: %w", err)
+	}
+	return nil
 }
 
 // copyFile 先复制到同目录的临时文件，写完、落盘后再放到目标位置，中途失败不会在库里留下半个文件。

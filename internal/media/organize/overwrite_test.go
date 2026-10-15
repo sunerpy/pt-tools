@@ -248,6 +248,7 @@ func TestRecoverReplacements(t *testing.T) {
 	}
 	require.NoError(t, os.Rename(old.TargetPath, j3.Backup))
 	require.NoError(t, os.Link(newSrc, old.TargetPath))
+	j3.TempID, _ = fileIDOf(old.TargetPath)
 	require.NoError(t, e.db.Create(&j3).Error)
 	e.svc.recoverReplacements(e.ctx)
 	assert.False(t, exists(j3.Backup), "挪开的旧文件删掉")
@@ -256,4 +257,26 @@ func TestRecoverReplacements(t *testing.T) {
 	assert.True(t, exists(old.SourcePath), "下载目录里的不动")
 	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
 	assert.Zero(t, n)
+}
+
+// 已提交的替换收尾时，目标位置上已经不是这次放的新文件（中途退出期间被删或被换）：挪开的旧文件就是仅剩的版本，不删，日志留着
+func TestRecoverReplacementKeepsBackup(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	old := e.rowOf(ep1Old)
+	j := models.MediaReplaceJournal{
+		OldID: old.ID, Mode: models.MediaModeHardlink, Target: old.TargetPath,
+		Temp: sideName(old.TargetPath, "new"), Backup: sideName(old.TargetPath, "old"), TempID: "1:2:3:4", Committed: true,
+	}
+	require.NoError(t, os.Rename(old.TargetPath, j.Backup))
+	require.NoError(t, e.db.Create(&j).Error)
+	e.svc.recoverReplacements(e.ctx)
+	assert.True(t, exists(j.Backup), "目标位置上没有新文件：旧文件留着")
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.EqualValues(t, 1, n, "日志留着，之后再试")
 }

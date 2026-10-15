@@ -978,7 +978,10 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 	if err != nil {
 		return undo(j, "整理记录写不进去（"+err.Error()+"）")
 	}
-	msgs := s.finishReplace(ctx, j, *old)
+	msgs, ferr := s.finishReplace(ctx, j, *old)
+	if ferr != nil {
+		msgs = append(msgs, "收尾没做完（"+ferr.Error()+"），之后再试")
+	}
 	// 旧字幕删掉了，放新字幕；记不进新记录时撤回这次放的（没人认领）
 	mode := firstNonEmpty(it.mode, p.Mode)
 	extras, newSubs, subMsgs := s.transferSubtitles(it, mode, rowExtras(it.row))
@@ -1042,8 +1045,8 @@ func sameAsRecord(p string, row *models.MediaTransferHistory) bool {
 	return false
 }
 
-// undoReplace 撤回一次没提交的替换：目标位置上是这次放的新文件就删掉，旧文件（备份）放回目标位置，删掉临时文件与日志。
-// 放不回去时返回错误、留着日志（下次启动再撤回）。
+// undoReplace 撤回一次没提交的替换：目标位置上是这次放的新文件就删掉，旧文件（备份）放回目标位置，删掉临时文件，
+// 都做完了才删日志。哪一步做不了就返回错误、留着日志，之后（后台每隔一会儿、下次启动）再撤回。
 func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal) error {
 	if j.TempID != "" {
 		if id, err := transfer.FileID(j.Target); err == nil && id == j.TempID {
@@ -1052,26 +1055,42 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 			}
 		}
 	}
-	if _, err := os.Lstat(j.Backup); err == nil {
-		if err := transfer.Place(j.Backup, j.Target); err != nil {
+	if bi, err := os.Lstat(j.Backup); err == nil {
+		if ti, terr := os.Lstat(j.Target); terr == nil && os.SameFile(bi, ti) {
+			// 备份只是旧文件的另一个名字（挪的时候原来的名字没删掉）
+			if err := os.Remove(j.Backup); err != nil {
+				return fmt.Errorf("删不掉多出来的 %s: %w", filepath.Base(j.Backup), err)
+			}
+		} else if err := transfer.Place(j.Backup, j.Target); err != nil {
 			return fmt.Errorf("旧文件放不回 %s（还在 %s）: %w", j.Target, j.Backup, err)
 		}
 	}
 	if _, err := os.Lstat(j.Temp); err == nil {
-		_ = transfer.RemoveIfOurs(j.Temp, j.Mode, j.TempID, j.Source)
+		if err := transfer.RemoveIfOurs(j.Temp, j.Mode, j.TempID, j.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+			return fmt.Errorf("删不掉临时文件 %s: %w", filepath.Base(j.Temp), err)
+		}
 	}
 	return s.cfg.DB.WithContext(ctx).Delete(&models.MediaReplaceJournal{}, j.ID).Error
 }
 
-// finishReplace 收尾一次已提交的替换：删掉备份（确认还是旧记录放的那个才删）与旧记录的字幕、同名刮削文件
-// （按文件编号确认，目录里的已经归了新记录），删掉日志。返回没删掉的说明。
-func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJournal, old models.MediaTransferHistory) []string {
+// finishReplace 收尾一次已提交的替换：删掉备份（目标位置上确实是这次放的新文件、备份还是旧记录放的那个才删）与旧记录的
+// 字幕、同名刮削文件（按文件编号确认，目录里的已经归了新记录）。都做完了才删日志；没做完的返回错误、留着日志，之后再试。
+// 第一个返回值是不需要再试的说明（例如备份已经换过、留着不动）。
+func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJournal, old models.MediaTransferHistory) ([]string, error) {
 	var msgs []string
+	var errs []error
 	if _, err := os.Lstat(j.Backup); err == nil {
-		if !sameAsRecord(j.Backup, &old) {
+		id, ierr := transfer.FileID(j.Target)
+		switch {
+		case ierr != nil || j.TempID == "" || id != j.TempID:
+			// 新文件不在目标位置了（中途退出期间被删或被换）：旧文件就是库里仅剩的版本，不删
+			errs = append(errs, fmt.Errorf("目标位置上不是这次放的新文件，旧文件留在 %s", j.Backup))
+		case !sameAsRecord(j.Backup, &old):
 			msgs = append(msgs, "旧版本挪开的文件 "+filepath.Base(j.Backup)+" 换过了，留着")
-		} else if err := os.Remove(j.Backup); err != nil {
-			msgs = append(msgs, "旧版本的文件 "+filepath.Base(j.Backup)+" 没删掉："+err.Error())
+		default:
+			if err := os.Remove(j.Backup); err != nil {
+				errs = append(errs, fmt.Errorf("旧版本的文件 %s 没删掉: %w", filepath.Base(j.Backup), err))
+			}
 		}
 	}
 	for _, e := range decodeExtras(old.Extras) {
@@ -1083,16 +1102,20 @@ func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJourna
 			mode = models.MediaModeCopy
 		}
 		if err := transfer.RemoveIfOurs(e.Target, mode, e.FileID, e.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
-			msgs = append(msgs, fmt.Sprintf("旧版本的 %s 没删掉：%v", filepath.Base(e.Target), err))
+			errs = append(errs, fmt.Errorf("旧版本的 %s 没删掉: %w", filepath.Base(e.Target), err))
 		}
 	}
-	if err := s.cfg.DB.WithContext(ctx).Delete(&models.MediaReplaceJournal{}, j.ID).Error; err != nil {
-		msgs = append(msgs, "替换日志没删掉："+err.Error())
+	if len(errs) > 0 {
+		return msgs, errors.Join(errs...)
 	}
-	return msgs
+	if err := s.cfg.DB.WithContext(ctx).Delete(&models.MediaReplaceJournal{}, j.ID).Error; err != nil {
+		return msgs, fmt.Errorf("替换日志没删掉: %w", err)
+	}
+	return msgs, nil
 }
 
-// recoverReplacements 处理上次没做完的替换（pt-tools 中途退出）：没提交的撤回，已提交的收尾。启动时调用一次。
+// recoverReplacements 处理没做完的替换（pt-tools 中途退出，或者撤回、收尾时文件被占用）：没提交的撤回，已提交的收尾。
+// 整理的后台开始时与之后每隔一会儿调用；做不完的日志留着，下次再试。
 func (s *Service) recoverReplacements(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1109,9 +1132,16 @@ func (s *Service) recoverReplacements(ctx context.Context) {
 			continue
 		}
 		var old models.MediaTransferHistory
-		_ = s.cfg.DB.WithContext(ctx).Where("id = ?", j.OldID).Limit(1).Find(&old).Error
-		for _, m := range s.finishReplace(ctx, j, old) {
+		if err := s.cfg.DB.WithContext(ctx).Where("id = ?", j.OldID).Limit(1).Find(&old).Error; err != nil {
+			s.cfg.Logger.Warnf("[整理入库] 替换收尾时读取旧记录失败 (%s): %v", j.Target, err)
+			continue
+		}
+		msgs, err := s.finishReplace(ctx, j, old)
+		for _, m := range msgs {
 			s.cfg.Logger.Warnf("[整理入库] 替换收尾 (%s): %s", j.Target, m)
+		}
+		if err != nil {
+			s.cfg.Logger.Warnf("[整理入库] 替换收尾没做完，之后再试 (%s): %v", j.Target, err)
 		}
 	}
 }
