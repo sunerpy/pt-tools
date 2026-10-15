@@ -3,6 +3,7 @@ package organize
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -159,10 +160,13 @@ type ClassifyView struct {
 	Presets ClassifyRules `json:"presets"`
 }
 
-func decodeClassify(raw string) ClassifyRules {
+// decodeClassify 读存着的规则：空串是没有规则；不是合法的 JSON 时报错（不能当成没有规则，那样会悄悄放错目录）。
+func decodeClassify(raw string) (ClassifyRules, error) {
 	var c ClassifyRules
 	if raw != "" {
-		_ = json.Unmarshal([]byte(raw), &c)
+		if err := json.Unmarshal([]byte(raw), &c); err != nil {
+			return ClassifyRules{}, fmt.Errorf("二级分类的规则读不出来（在「媒体库 → 二级分类」里重新保存）: %w", err)
+		}
 	}
 	if c.Movie == nil {
 		c.Movie = []ClassifyRule{}
@@ -170,7 +174,7 @@ func decodeClassify(raw string) ClassifyRules {
 	if c.TV == nil {
 		c.TV = []ClassifyRule{}
 	}
-	return c
+	return c, nil
 }
 
 // Classify 读二级分类的规则。
@@ -179,7 +183,11 @@ func (s *Service) Classify(ctx context.Context) (ClassifyView, error) {
 	if err != nil {
 		return ClassifyView{}, err
 	}
-	return ClassifyView{Rules: decodeClassify(row.ClassifyRules), Presets: DefaultClassifyRules}, nil
+	rules, err := decodeClassify(row.ClassifyRules)
+	if err != nil {
+		return ClassifyView{}, err
+	}
+	return ClassifyView{Rules: rules, Presets: DefaultClassifyRules}, nil
 }
 
 // SaveClassify 保存二级分类的规则（整份替换）。
@@ -203,17 +211,42 @@ func (s *Service) SaveClassify(ctx context.Context, in ClassifyRules) (ClassifyV
 	if err := s.cfg.DB.WithContext(ctx).Save(&row).Error; err != nil {
 		return ClassifyView{}, fmt.Errorf("保存二级分类失败: %w", err)
 	}
-	return ClassifyView{Rules: decodeClassify(row.ClassifyRules), Presets: DefaultClassifyRules}, nil
+	return ClassifyView{Rules: rules, Presets: DefaultClassifyRules}, nil
 }
 
-// classifyFor 是这次整理放进的分类：媒体库没开「按二级分类放进子目录」、没有规则或都对不上时为空串。
-func (s *Service) classifyFor(ctx context.Context, lib *models.MediaLibrary, r tmdb.Result) (string, error) {
+// classify 是这次整理放进的分类：媒体库没开「按二级分类放进子目录」、没有规则或都对不上时为空串。
+// 规则要用详情里才有的字段（电影的出品国家或地区）：识别时详情没取到、用的是搜索结果的，这里再取一次详情（多半读缓存）。
+// 取不到时这次不整理（写明原因、过一会儿再试），免得按不全的条目放错目录。第二个返回值为假时 p.Problem 写明了原因。
+func (s *Service) classify(ctx context.Context, p *Plan, lib *models.MediaLibrary) (string, bool) {
 	if lib == nil || !lib.ClassifyDir {
-		return "", nil
+		return "", true
 	}
 	row, err := s.loadSettings(ctx)
 	if err != nil {
-		return "", err
+		p.Problem, p.retryable = "读取二级分类失败："+err.Error(), true
+		return "", false
 	}
-	return decodeClassify(row.ClassifyRules).Classify(r), nil
+	rules, err := decodeClassify(row.ClassifyRules)
+	if err != nil {
+		p.Problem = err.Error()
+		return "", false
+	}
+	list := rules.Movie
+	if p.Match.MediaType == tmdb.KindTV {
+		list = rules.TV
+	}
+	if len(list) == 0 {
+		return "", true
+	}
+	if p.tmdbClient == nil {
+		p.Problem, p.retryable = "按二级分类放进子目录要用 TMDB 的详情：TMDB 暂时不能访问", true
+		return "", false
+	}
+	d, err := p.tmdbClient.Details(ctx, p.Match.MediaType, p.Match.ID)
+	if err != nil {
+		p.Problem, p.retryable = "取 TMDB 详情失败（二级分类要用）："+err.Error(), !errors.Is(err, tmdb.ErrNotFound)
+		return "", false
+	}
+	p.Match = d
+	return rules.Classify(*d), true
 }

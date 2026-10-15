@@ -42,7 +42,9 @@ type fakeTMDB struct {
 	down bool
 	// imagesDown 为真时图片列表（/images）回 503
 	imagesDown bool
-	hits       map[string]int
+	// detailsDown 为真时奥本海默的详情回 503（搜索照常）
+	detailsDown bool
+	hits        map[string]int
 }
 
 func (f *fakeTMDB) setDown(v bool) {
@@ -56,7 +58,7 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.hits[r.URL.Path]++
-		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images"))
+		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images")) || (f.detailsDown && r.URL.Path == "/3/movie/872585")
 		f.mu.Unlock()
 		if strings.HasPrefix(r.URL.Path, "/t/p/") {
 			w.Header().Set("Content-Type", "image/jpeg")

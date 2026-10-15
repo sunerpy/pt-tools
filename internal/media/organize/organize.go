@@ -110,13 +110,18 @@ func (p *Plan) base() string {
 	return p.Library.Path
 }
 
-// showDir 是这次整理里一个文件的剧集目录：按二级分类放进子目录时从分类目录算起；
-// 文件不在分类目录里（之前整理过，目标沿用记录里的位置）时从库目录算起。
-func (p *Plan) showDir(target string) string {
+// rootFor 是算剧集目录、电影有没有自己的目录时的起点：按二级分类放进子目录时是分类目录；
+// 文件不在分类目录里（之前整理过，目标沿用记录里的位置）时是库目录。
+func (p *Plan) rootFor(target string) string {
 	if root := p.base(); transfer.Within(root, target) {
-		return showDir(root, target)
+		return root
 	}
-	return showDir(p.Library.Path, target)
+	return p.Library.Path
+}
+
+// showDir 是这次整理里一个文件的剧集目录（从 rootFor 算起）。
+func (p *Plan) showDir(target string) string {
+	return showDir(p.rootFor(target), target)
 }
 
 // Result 是一次整理的结果。
@@ -451,9 +456,8 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	if p.Mode == "" {
 		p.Mode = models.MediaModeHardlink
 	}
-	cat, err := s.classifyFor(ctx, lib, *p.Match)
-	if err != nil {
-		p.Problem, p.retryable = "读取二级分类失败："+err.Error(), true
+	cat, ok := s.classify(ctx, p, lib)
+	if !ok {
 		return false
 	}
 	if dir := transfer.CleanName(cat); dir != "" {
@@ -1042,7 +1046,8 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]s
 	var rep scrape.Report
 	if p.Match.MediaType != tmdb.KindTV {
 		for _, it := range created {
-			ownDir := filepath.Clean(filepath.Dir(it.Target)) != filepath.Clean(p.Library.Path)
+			// 平铺在库目录（或分类目录）里的电影没有自己的目录：海报等带上文件名，免得几部电影共用一张
+			ownDir := filepath.Clean(filepath.Dir(it.Target)) != filepath.Clean(p.rootFor(it.Target))
 			rep.Merge(w.Movie(ctx, it.Target, ownDir, *p.Match, art))
 		}
 	} else {

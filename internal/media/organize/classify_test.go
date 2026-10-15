@@ -158,3 +158,67 @@ func TestOrganizeClassifyOff(t *testing.T) {
 	assert.Empty(t, p.Category)
 	assert.Equal(t, filepath.Join(e.movies, "奥本海默 (2023)", "奥本海默 (2023) - 2160p BluRay HDR H.265.mkv"), p.Items[0].Target)
 }
+
+// 平铺的电影模板放进分类目录：分类目录不是电影自己的目录，海报带上文件名
+func TestOrganizeClassifyFlatMovie(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	_, err := e.svc.SaveClassify(e.ctx, DefaultClassifyRules)
+	require.NoError(t, err)
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Template: "{{.Title}}", Scrape: true, ClassifyDir: true})
+	e.oppenheimer()
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created, res.Plan.Problem)
+	cat := filepath.Join(e.movies, "外语电影")
+	assert.True(t, exists(filepath.Join(cat, "奥本海默.mkv")))
+	assert.True(t, exists(filepath.Join(cat, "奥本海默-poster.jpg")))
+	assert.False(t, exists(filepath.Join(cat, "poster.jpg")), "不写成分类目录共用的海报")
+}
+
+// 存着的规则不是合法的 JSON：读规则报错；开了开关的媒体库不整理（不当成没有规则放进库目录）
+func TestClassifyRulesCorrupt(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	require.NoError(t, e.db.Model(&models.MediaOrganizeSetting{}).Where("id = 1").Update("classify_rules", "{bad").Error)
+	_, err := e.svc.Classify(e.ctx)
+	require.Error(t, err)
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, ClassifyDir: true})
+	e.oppenheimer()
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Contains(t, p.Problem, "二级分类的规则读不出来")
+	assert.Empty(t, p.Items[0].Target)
+
+	_, err = e.svc.SaveClassify(e.ctx, DefaultClassifyRules)
+	require.NoError(t, err, "重新保存就好了")
+	p, err = e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Empty(t, p.Problem)
+	assert.Equal(t, "外语电影", p.Category)
+}
+
+// 识别时 TMDB 详情没取到（用的是搜索结果，没有出品国家或地区）：按国家分的规则不能拿不全的条目定位置，这次不整理、过一会儿再试
+func TestOrganizeClassifyNeedsDetails(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	_, err := e.svc.SaveClassify(e.ctx, ClassifyRules{Movie: []ClassifyRule{{Name: "美国电影", Countries: []string{"US"}}, {Name: "其他"}}})
+	require.NoError(t, err)
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, ClassifyDir: true})
+	e.oppenheimer()
+	e.tmdb.mu.Lock()
+	e.tmdb.detailsDown = true
+	e.tmdb.mu.Unlock()
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Contains(t, p.Problem, "取 TMDB 详情失败")
+	assert.True(t, p.retryable)
+
+	e.tmdb.mu.Lock()
+	e.tmdb.detailsDown = false
+	e.tmdb.mu.Unlock()
+	p, err = e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Empty(t, p.Problem)
+	assert.Equal(t, "其他", p.Category, "奥本海默的详情里没有写出品国家或地区")
+}
