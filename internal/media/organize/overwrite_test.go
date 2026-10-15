@@ -107,6 +107,9 @@ func TestOverwriteKeepsOldVersion(t *testing.T) {
 		{name: "旧版本是移动整理的", mode: OverwriteLarger, oldMB: 2, newMB: 3, prepare: func(e *env, _ string) {
 			require.NoError(e.t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", ep1Old).Update("mode", models.MediaModeMove).Error)
 		}, want: "库里唯一的一份"},
+		{name: "记录里没有文件编号", mode: OverwriteLarger, oldMB: 2, newMB: 3, prepare: func(e *env, _ string) {
+			require.NoError(e.t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", ep1Old).Update("target_file_id", "").Error)
+		}, want: "没有它的文件编号"},
 		{name: "别的条目（模板是固定的文件名）", mode: OverwriteLarger, oldMB: 2, newMB: 3, prepare: func(e *env, _ string) {
 			require.NoError(e.t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", ep1Old).Update("tmdb_id", 1).Error)
 		}, want: "不会覆盖"},
@@ -393,4 +396,29 @@ func TestFinishReplaceVerifiesBackupAndTarget(t *testing.T) {
 	var n int64
 	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Where("id = ?", j2.ID).Count(&n).Error)
 	assert.Zero(t, n)
+}
+
+// 收尾时读不出目标的文件编号（权限、网络存储一时出错）：不能当成目标没了，日志留着
+func TestFinishReplaceKeepsJournalOnTargetStatError(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("要靠目录权限让读编号出错")
+	}
+	e := newEnv(t)
+	locked := filepath.Join(e.root, "locked")
+	require.NoError(t, os.MkdirAll(locked, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(locked, "t.mkv"), []byte("x"), 0o644))
+	require.NoError(t, os.Chmod(locked, 0))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	j := models.MediaReplaceJournal{
+		Mode: models.MediaModeCopy, Target: filepath.Join(locked, "t.mkv"), TempID: "1:2:3:4",
+		Temp: filepath.Join(e.root, "t.new.tmp"), Backup: filepath.Join(e.root, "t.old.tmp"), Committed: true,
+	}
+	require.NoError(t, e.db.Create(&j).Error)
+	e.svc.mu.Lock()
+	_, err := e.svc.finishReplace(e.ctx, j, models.MediaTransferHistory{})
+	e.svc.mu.Unlock()
+	require.Error(t, err)
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.EqualValues(t, 1, n)
 }

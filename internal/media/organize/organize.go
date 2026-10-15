@@ -683,6 +683,9 @@ func (s *Service) itemState(ctx context.Context, p *Plan, it *PlanItem) string {
 		it.Message = what + "，是移动整理的（库里唯一的一份），不替换"
 	case p.Mode == models.MediaModeMove:
 		it.Message = what + "，这个媒体库用移动整理，不替换旧版本"
+	case old.TargetFileID == "":
+		// 替换时按文件编号确认挪开的是旧版本，记录里没有编号就没法确认
+		it.Message = what + "，整理记录里没有它的文件编号，不替换"
 	case it.Size <= old.Size:
 		it.Message = what + fmt.Sprintf("，新文件（%s）不比它大，不替换", utils.FormatBytes(it.Size))
 	default:
@@ -955,10 +958,15 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 		// 硬链接放好了、原来的名字却删不掉（例如正被占用）：目标位置还是旧文件
 		return undo(j, "旧文件挪不开（可能正被占用）")
 	}
-	if !sameAsRecord(j.Backup, old) {
+	// 只读一次文件编号：拿它确认挪开的是旧记录放的那个，再把同一个编号记进日志（收尾时按它删）
+	bid, berr := transfer.FileID(j.Backup)
+	if berr != nil {
+		return undo(j, "读不出挪开的旧文件的编号（"+berr.Error()+"）")
+	}
+	if bid != old.TargetFileID {
 		return undo(j, "目标位置的文件在整理期间换过了")
 	}
-	j.BackupID, _ = transfer.FileID(j.Backup)
+	j.BackupID = bid
 	if err := db.Model(&j).Update("backup_id", j.BackupID).Error; err != nil {
 		return undo(j, "替换日志写不进去（"+err.Error()+"）")
 	}
@@ -1010,30 +1018,6 @@ func dirArtifacts(old *models.MediaTransferHistory) []extra {
 	return out
 }
 
-// sameAsRecord 报告 p 上的文件是不是这条记录当初放进库的那个（文件挪了位置，编号不变）：软链接看指向，其余看文件编号，
-// 硬链接也可以看和源文件是不是同一个。
-func sameAsRecord(p string, row *models.MediaTransferHistory) bool {
-	info, err := os.Lstat(p)
-	if err != nil {
-		return false
-	}
-	if row.Mode == models.MediaModeSymlink {
-		to, err := os.Readlink(p)
-		return err == nil && filepath.Clean(to) == filepath.Clean(row.SourcePath)
-	}
-	if !info.Mode().IsRegular() {
-		return false
-	}
-	if id, err := transfer.FileID(p); err == nil && row.TargetFileID != "" && id == row.TargetFileID {
-		return true
-	}
-	if row.Mode == models.MediaModeHardlink || row.Mode == "" {
-		src, err := os.Stat(row.SourcePath)
-		return err == nil && os.SameFile(src, info)
-	}
-	return false
-}
-
 // undoReplace 撤回一次没提交的替换：目标位置上是这次放的新文件就删掉，旧文件（备份）放回目标位置，删掉临时文件，
 // 都做完了才删日志。哪一步做不了就返回错误、留着日志，之后（后台每隔一会儿、下次启动）再撤回。
 func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal) error {
@@ -1076,6 +1060,10 @@ func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJourna
 	var msgs []string
 	var errs []error
 	id, ierr := transfer.FileID(j.Target)
+	if ierr != nil && !errors.Is(ierr, os.ErrNotExist) {
+		// 读不出目标的编号（权限、网络存储一时出错）：不能当成目标没了，留着日志之后再看
+		return msgs, fmt.Errorf("读不出 %s 的文件编号: %w", filepath.Base(j.Target), ierr)
+	}
 	targetOK := ierr == nil && j.TempID != "" && id == j.TempID
 	switch _, err := os.Lstat(j.Backup); {
 	case err == nil:
