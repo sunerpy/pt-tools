@@ -3,6 +3,7 @@ import type {
   ClassifyRule,
   MediaHistoryItem,
   MediaImageLang,
+  MediaScrapeSource,
   MediaKind,
   MediaMeta,
   MediaMode,
@@ -297,6 +298,11 @@ export const IMAGE_LANGS: readonly { value: MediaImageLang; label: string }[] = 
   { value: "en", label: "英文" },
   { value: "ja", label: "日文" },
   { value: "none", label: "无文字" },
+];
+
+export const SCRAPE_SOURCES: readonly { value: MediaScrapeSource; label: string }[] = [
+  { value: "", label: "TMDB" },
+  { value: "douban", label: "豆瓣（找不到时用 TMDB 的）" },
 ];
 
 /** 命名模板的预设：默认的三家都认；目录名里带上 TMDB 编号时按媒体服务器的写法 */

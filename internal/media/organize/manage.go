@@ -49,6 +49,8 @@ type LibraryInput struct {
 	ScrapeItems []string `json:"scrape_items"`
 	// ScrapeImageLang 是海报与 Logo 优先用的语言（scrape.ImageLangs）
 	ScrapeImageLang string `json:"scrape_image_lang"`
+	// ScrapeSource 是 NFO 里简介与评分的来源（scrape.Sources）
+	ScrapeSource string `json:"scrape_source"`
 	// ClassifyDir 为真时按二级分类放进库目录下的分类目录
 	ClassifyDir bool `json:"classify_dir"`
 	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办（OverwriteNever、OverwriteLarger）
@@ -136,13 +138,17 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 	if !slices.Contains(scrape.ImageLangs, lang) {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 图片语言要选 zh、en、ja、none 或留空", ErrInvalid)
 	}
+	source := strings.TrimSpace(in.ScrapeSource)
+	if !slices.Contains(scrape.Sources, source) {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 简介与评分的来源要选 douban 或留空（TMDB）", ErrInvalid)
+	}
 	overwrite := strings.TrimSpace(in.OverwriteMode)
 	if overwrite != OverwriteNever && overwrite != OverwriteLarger {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 同名文件要选 larger（新文件更大时替换）或留空（不替换）", ErrInvalid)
 	}
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
-		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
+		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang, ScrapeSource: source,
 		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, Enabled: in.Enabled,
 	}, nil
 }
@@ -200,7 +206,7 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 		return viewLibrary(row), nil
 	}
 	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(
-		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang",
+		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang", "scrape_source",
 		"classify_dir", "overwrite_mode", "enabled", "updated_at",
 	).Updates(&row)
 	if res.Error != nil {

@@ -113,6 +113,7 @@ const library = {
   scrape_overwrite: false,
   scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
   scrape_image_lang: "",
+  scrape_source: "",
   classify_dir: false,
   overwrite_mode: "",
   enabled: true,
@@ -245,6 +246,7 @@ describe("媒体库", () => {
         scrape_overwrite: false,
         scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
         scrape_image_lang: "",
+        scrape_source: "",
         classify_dir: false,
         overwrite_mode: "",
         enabled: true,
@@ -287,12 +289,25 @@ describe("媒体库", () => {
       expect(opt).toBeTruthy();
       opt!.click();
     });
+    const src = q("ml-lib-scrape-source")!;
+    (src.querySelector<HTMLElement>(".el-select__wrapper") ?? src).click();
+    await vi.waitFor(() => {
+      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => (o.textContent ?? "").trim().startsWith("豆瓣"),
+      );
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("按中文名与年份在豆瓣上找同一部"),
+    );
     api.updateLibrary.mockResolvedValue(library);
     q("ml-lib-save")!.click();
     await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
     expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
       scrape_items: ["nfo", "fanart", "season_poster", "thumb", "logo"],
       scrape_image_lang: "en",
+      scrape_source: "douban",
     });
 
     // 电影能选的几项都去掉：不保存，提示关掉刮削

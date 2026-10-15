@@ -12,12 +12,14 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/sunerpy/pt-tools/internal/media/douban"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
@@ -136,6 +138,8 @@ type Plan struct {
 	contentSrc string
 	meta       meta.Meta
 	siteName   string
+	// doubanID 是站点给的豆瓣编号（pt-tools 推送的种子才有），刮削补充豆瓣的内容时电影直接用它
+	doubanID   string
 	tmdbClient *tmdb.Client
 	// root 是这次整理放进的目录：库目录，按二级分类放进子目录时是库目录下的分类目录
 	root string
@@ -444,7 +448,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 		// 目录监控的一项不是种子：没有站点给的标题与 IMDb 编号
 		_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", p.Hash).Order("id DESC").Limit(1).Find(&info).Error
 	}
-	p.siteName = info.SiteName
+	p.siteName, p.doubanID = info.SiteName, info.DoubanID
 	source := sourceManual
 	if req.TMDBID == 0 {
 		// 之前整理过（比如手动指定过条目）：沿用那个条目，库里的文件名与重新整理时一致
@@ -1487,6 +1491,11 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]s
 	items := scrape.ParseItems(p.Library.ScrapeItems)
 	w := scrape.Writer{Overwrite: p.Library.ScrapeOverwrite, Items: items}
 	var msgs []string
+	if items.NFO && p.Library.ScrapeSource == scrape.SourceDouban && s.cfg.Douban != nil {
+		var dm []string
+		w.Douban, w.Seasons, dm = s.doubanInfo(ctx, p, created)
+		msgs = append(msgs, dm...)
+	}
 	art := scrape.ChooseArt(*p.Match, nil, scrape.ImageLangAuto, "")
 	if p.tmdbClient != nil {
 		w.Images = p.tmdbClient
@@ -1526,6 +1535,70 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]s
 		msgs = append(msgs, "刮削："+e)
 	}
 	return msgs, rep.Written
+}
+
+// doubanInfo 是刮削时从豆瓣补充的内容（媒体库的数据来源选了豆瓣时）：电影一个；剧集是第 1 季的（写进 tvshow.nfo）
+// 与这次整理到的每一季的（写进 season.nfo）。找不到或豆瓣不能访问的写进说明，那部分用 TMDB 的；豆瓣不能访问时不再接着找。
+func (s *Service) doubanInfo(ctx context.Context, p *Plan, created []*PlanItem) (*scrape.Douban, map[int]*scrape.Douban, []string) {
+	var msgs []string
+	down := false
+	get := func(season, year int) *scrape.Douban {
+		if down {
+			return nil
+		}
+		subj, err := s.doubanSubject(ctx, p, season, year)
+		switch {
+		case err != nil:
+			down = true
+			s.cfg.Logger.Warnf("[整理入库] 刮削「%s」时豆瓣取不到，简介与评分用 TMDB 的: %v", p.Name, err)
+			msgs = append(msgs, "刮削：豆瓣取不到（"+err.Error()+"），简介与评分用 TMDB 的")
+			return nil
+		case subj == nil:
+			what := "这部"
+			if p.Match.MediaType == tmdb.KindTV {
+				what = fmt.Sprintf("第 %d 季", max(season, 1))
+			}
+			s.cfg.Logger.Infof("[整理入库] 刮削「%s」时豆瓣上没找到%s，简介与评分用 TMDB 的", p.Name, what)
+			msgs = append(msgs, "刮削：豆瓣上没找到"+what+"（按名字与年份），简介与评分用 TMDB 的")
+			return nil
+		}
+		return &scrape.Douban{ID: subj.ID, Intro: subj.Intro, Rating: subj.Rating, Votes: subj.Votes}
+	}
+	if p.Match.MediaType != tmdb.KindTV {
+		return get(0, p.Match.Year), nil, msgs
+	}
+	show := get(1, p.Match.Year)
+	seasons := map[int]*scrape.Douban{1: show}
+	for _, it := range created {
+		// 第 0 季（特别篇）豆瓣上没有对应的条目
+		if _, ok := seasons[it.Season]; ok || it.Season < 1 {
+			continue
+		}
+		seasons[it.Season] = get(it.Season, airYear(it.stillFor))
+	}
+	return show, seasons, msgs
+}
+
+// doubanSubject 在豆瓣上找这部电影或这一季：站点给了豆瓣编号的电影先按编号取，年份和 TMDB 的差一年以内才用；
+// 其余按名字与年份找（见 douban.Client.Find）。
+func (s *Service) doubanSubject(ctx context.Context, p *Plan, season, year int) (*douban.Subject, error) {
+	m := p.Match
+	if m.MediaType != tmdb.KindTV && p.doubanID != "" {
+		if subj, err := s.cfg.Douban.Subject(ctx, douban.KindMovie, p.doubanID); err == nil &&
+			(m.Year == 0 || subj.Year == 0 || (subj.Year >= m.Year-1 && subj.Year <= m.Year+1)) {
+			return subj, nil
+		}
+	}
+	return s.cfg.Douban.Find(ctx, douban.Query{Kind: m.MediaType, Title: m.Title, OriginalTitle: m.OriginalTitle, Year: year, Season: season})
+}
+
+// airYear 是这一季开播的年份（季详情没有时为 0，不看年份）。
+func airYear(s *tmdb.Season) int {
+	if s == nil || len(s.AirDate) < 4 {
+		return 0
+	}
+	y, _ := strconv.Atoi(s.AirDate[:4])
+	return y
 }
 
 // refreshDirs 是要通知媒体服务器扫描的目录：电影是文件所在目录，剧集是剧集目录（平铺时是文件所在目录）。

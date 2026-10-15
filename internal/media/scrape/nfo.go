@@ -1,5 +1,5 @@
 // Package scrape 为整理进媒体库的电影与剧集写 Kodi 格式的 NFO（Emby、Jellyfin、Plex 的 NFO 插件都认），
-// 并下载海报、背景、季海报与集截图。数据来自 TMDB。
+// 并下载海报、背景、季海报与集截图。数据来自 TMDB；媒体库选了豆瓣时，简介与评分用豆瓣的（见 Douban）。
 package scrape
 
 import (
@@ -22,6 +22,16 @@ type rating struct {
 	Max     int    `xml:"max,attr"`
 	Default bool   `xml:"default,attr"`
 	Value   string `xml:"value"`
+	Votes   int    `xml:"votes,omitempty"`
+}
+
+// Douban 是从豆瓣补充的内容（媒体库的数据来源选了豆瓣、在豆瓣上找到了同一部时才有）：简介换成豆瓣的，
+// 评分以豆瓣的为主（TMDB 的也留着），再记下豆瓣编号。
+type Douban struct {
+	ID     string
+	Intro  string
+	Rating float64
+	Votes  int
 }
 
 type ratings struct {
@@ -43,7 +53,7 @@ type common struct {
 	Genres        []string   `xml:"genre"`
 }
 
-func commonOf(r tmdb.Result) common {
+func commonOf(r tmdb.Result, d *Douban) common {
 	c := common{
 		Title: r.Title, OriginalTitle: r.OriginalTitle, Year: r.Year, Premiered: r.Date, Plot: r.Overview,
 		Runtime: r.Runtime, Genres: r.Genres,
@@ -51,10 +61,18 @@ func commonOf(r tmdb.Result) common {
 	if c.OriginalTitle == c.Title {
 		c.OriginalTitle = ""
 	}
+	var rs []rating
+	if d != nil && d.Intro != "" {
+		c.Plot = d.Intro
+	}
+	if d != nil && d.Rating > 0 {
+		rs = append(rs, rating{Name: "douban", Max: 10, Default: true, Value: strconv.FormatFloat(d.Rating, 'f', 1, 64), Votes: d.Votes})
+	}
 	if r.VoteAverage > 0 {
-		c.Ratings = &ratings{Rating: []rating{{
-			Name: "themoviedb", Max: 10, Default: true, Value: strconv.FormatFloat(r.VoteAverage, 'f', 1, 64),
-		}}}
+		rs = append(rs, rating{Name: "themoviedb", Max: 10, Default: len(rs) == 0, Value: strconv.FormatFloat(r.VoteAverage, 'f', 1, 64)})
+	}
+	if len(rs) > 0 {
+		c.Ratings = &ratings{Rating: rs}
 	}
 	if r.ID > 0 {
 		c.UniqueIDs = append(c.UniqueIDs, uniqueID{Type: "tmdb", Default: true, Value: strconv.Itoa(r.ID)})
@@ -63,6 +81,9 @@ func commonOf(r tmdb.Result) common {
 	if r.IMDbID != "" {
 		c.UniqueIDs = append(c.UniqueIDs, uniqueID{Type: "imdb", Value: r.IMDbID})
 		c.IMDbID = r.IMDbID
+	}
+	if d != nil && d.ID != "" {
+		c.UniqueIDs = append(c.UniqueIDs, uniqueID{Type: "douban", Value: d.ID})
 	}
 	return c
 }
@@ -113,21 +134,25 @@ func marshal(vs ...any) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// MovieNFO 是电影的 NFO（<movie>）。
-func MovieNFO(r tmdb.Result) ([]byte, error) {
-	return marshal(movieNFO{common: commonOf(r)})
+// MovieNFO 是电影的 NFO（<movie>）。d 是豆瓣补充的内容，没有时为空。
+func MovieNFO(r tmdb.Result, d *Douban) ([]byte, error) {
+	return marshal(movieNFO{common: commonOf(r, d)})
 }
 
-// TVShowNFO 是剧集的 NFO（<tvshow>，放在剧集目录里，文件名 tvshow.nfo）。
-func TVShowNFO(r tmdb.Result) ([]byte, error) {
-	return marshal(tvshowNFO{common: commonOf(r)})
+// TVShowNFO 是剧集的 NFO（<tvshow>，放在剧集目录里，文件名 tvshow.nfo）。d 是豆瓣补充的内容（第 1 季的条目）。
+func TVShowNFO(r tmdb.Result, d *Douban) ([]byte, error) {
+	return marshal(tvshowNFO{common: commonOf(r, d)})
 }
 
-// SeasonNFO 是一季的 NFO（<season>，放在季目录里，文件名 season.nfo）。s 为空时只写季号。
-func SeasonNFO(number int, s *tmdb.Season) ([]byte, error) {
+// SeasonNFO 是一季的 NFO（<season>，放在季目录里，文件名 season.nfo）。s 为空时只写季号；d 是豆瓣上这一季的条目，
+// 有简介时用它的。
+func SeasonNFO(number int, s *tmdb.Season, d *Douban) ([]byte, error) {
 	n := seasonNFO{SeasonNumber: number}
 	if s != nil {
 		n.Title, n.Plot, n.Premiered = s.Name, s.Overview, s.AirDate
+	}
+	if d != nil && d.Intro != "" {
+		n.Plot = d.Intro
 	}
 	return marshal(n)
 }
