@@ -11,9 +11,10 @@ This directory contains a Docker Compose template that runs pt-tools next to Clo
 
 ### Deployment Steps
 
-1. Copy the example environment file:
+1. From the repository root, go into this directory and copy the example environment file:
 
    ```bash
+   cd build
    cp docker-compose.example.env .env
    ```
 
@@ -24,10 +25,9 @@ This directory contains a Docker Compose template that runs pt-tools next to Clo
    openssl rand -hex 32
    ```
 
-3. Start the services:
+3. Start the services (still in `build/`):
 
    ```bash
-   cd build
    docker compose up -d
    ```
 
