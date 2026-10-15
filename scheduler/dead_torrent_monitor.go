@@ -60,8 +60,20 @@ type DeadTorrentMonitor struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	lastScan time.Time
+	// lastResult 是上一轮的结果（每台下载器有几个失效种子、连不上的），页面上写明
+	lastResult string
 	// notified 是每台下载器上次通知过的失效种子；新一轮是它的子集时不再通知（用户删了一部分）。
 	notified map[string]map[string]struct{}
+}
+
+// Status 是上一轮扫描的时间与结果（这次启动以后还没扫过时为零值与空串）。
+func (m *DeadTorrentMonitor) Status() (time.Time, string) {
+	if m == nil {
+		return time.Time{}, ""
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastScan, m.lastResult
 }
 
 // NewDeadTorrentMonitor 构造监控，不启动。
@@ -160,24 +172,40 @@ func (m *DeadTorrentMonitor) RunOnce(ctx context.Context) int {
 	ctx, cancel := context.WithTimeout(ctx, deadTorrentScanTimeout)
 	defer cancel()
 	dls, errs := m.cfg.Downloaders(ctx)
+	var parts []string
 	for _, e := range errs {
 		m.cfg.Logger.Warnf("[失效种子] 下载器不可用，跳过: %v", e)
+	}
+	if len(errs) > 0 {
+		parts = append(parts, fmt.Sprintf("%d 台下载器连不上", len(errs)))
 	}
 	resolver := m.cfg.Resolver()
 	notified := 0
 	for _, d := range dls {
 		if ctx.Err() != nil {
+			parts = append(parts, "没扫完（超时）")
 			break
 		}
 		dead, _, err := dlassistant.ScanDeadTorrents(ctx, d.DL, resolver)
 		if err != nil {
 			m.cfg.Logger.Warnf("[失效种子] 扫描 %s 失败: %v", d.Name, err)
+			parts = append(parts, d.Name+" 扫描失败")
 			continue
 		}
+		parts = append(parts, fmt.Sprintf("%s 有 %d 个失效种子", d.Name, len(dead)))
 		if m.notify(ctx, d.Name, dead, channels) {
 			notified++
 		}
 	}
+	if notified > 0 {
+		parts = append(parts, fmt.Sprintf("通知了 %d 台的新失效种子", notified))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "没有可扫描的下载器")
+	}
+	m.mu.Lock()
+	m.lastResult = strings.Join(parts, "；")
+	m.mu.Unlock()
 	return notified
 }
 

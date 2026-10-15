@@ -91,8 +91,10 @@ afterEach(() => {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-async function mountPage() {
-  api.getDeadScan.mockResolvedValue({ enabled: false, interval_hours: 24, channel_ids: [] });
+async function mountPage(
+  scan: Record<string, unknown> = { enabled: false, interval_hours: 24, channel_ids: [] },
+) {
+  api.getDeadScan.mockResolvedValue(scan);
   const Page = (await import("./DownloaderAssistant.vue")).default;
   view = mountView(Page);
   await vi.waitFor(() => expect(document.body.textContent).toContain("qb-main"));
@@ -313,5 +315,29 @@ describe("下载器助手", () => {
     await flush();
     expect(ui.warning).toHaveBeenCalledWith("开启定时扫描至少要选一个通知通道");
     expect(api.saveDeadScan).not.toHaveBeenCalled();
+  });
+
+  it("定时扫描：写明上次扫描的结果与下次大约什么时候，保存时只发设置", async () => {
+    await mountPage({
+      enabled: true,
+      interval_hours: 24,
+      channel_ids: [3],
+      last_scan_at: "2026-10-15T10:00:00Z",
+      last_result: "qb 有 2 个失效种子",
+      next_scan_at: "2026-10-16T10:00:00Z",
+    });
+    await chooseTab("定时扫描");
+    await vi.waitFor(() =>
+      expect(testid("da-scan-status").textContent).toContain("qb 有 2 个失效种子"),
+    );
+    expect(testid("da-scan-status").textContent).toContain("大约");
+    api.saveDeadScan.mockResolvedValue({ enabled: true, interval_hours: 24, channel_ids: [3] });
+    testid("da-scan-save").click();
+    await vi.waitFor(() => expect(api.saveDeadScan).toHaveBeenCalledTimes(1));
+    expect(api.saveDeadScan.mock.calls[0]![0]).toEqual({
+      enabled: true,
+      interval_hours: 24,
+      channel_ids: [3],
+    });
   });
 });

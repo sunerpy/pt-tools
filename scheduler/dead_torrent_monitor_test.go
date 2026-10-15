@@ -171,3 +171,20 @@ func TestDeadTorrentMonitor_RetriesWhenNotDelivered(t *testing.T) {
 	clock.Advance(2 * time.Hour)
 	assert.Equal(t, 1, mon2.RunOnce(context.Background()), "下一轮重试成功")
 }
+
+// 上一轮的时间与结果：每台下载器有几个失效种子、连不上的台数、通知了几台
+func TestDeadTorrentMonitor_Status(t *testing.T) {
+	mon, dl, _, _ := deadRig(t)
+	at, res := mon.Status()
+	assert.True(t, at.IsZero())
+	assert.Empty(t, res)
+	deadTorrent(dl, "aa")
+	require.Equal(t, 1, mon.RunOnce(context.Background()))
+	at, res = mon.Status()
+	assert.False(t, at.IsZero())
+	assert.Equal(t, "1 台下载器连不上；qb 有 1 个失效种子；通知了 1 台的新失效种子", res)
+	var nilMon *DeadTorrentMonitor
+	at, res = nilMon.Status()
+	assert.True(t, at.IsZero())
+	assert.Empty(t, res)
+}

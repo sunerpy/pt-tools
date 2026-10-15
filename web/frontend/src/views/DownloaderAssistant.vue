@@ -11,6 +11,7 @@ import {
   type AssistantTrackerMatch,
   chatopsApi,
   type DeadTorrentScanSettings,
+  type DeadTorrentScanView,
   type DownloaderSetting,
   downloaderAssistantApi,
   downloadersApi,
@@ -27,6 +28,7 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { applySummary, applyTone, deadReasonLabel } from "@/utils/downloaderAssistant";
 import { formatBytes } from "@/utils/format";
+import { formatShortDateTime } from "@/utils/format";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 
@@ -109,6 +111,8 @@ const scanForm = ref<DeadTorrentScanSettings>({
   channel_ids: [],
 });
 const channels = ref<NotificationConfig[]>([]);
+/** 上一轮扫描的时间与结果、下一轮大约什么时候（读回来的，不进表单） */
+const scanStatus = ref<{ last_scan_at?: string; last_result?: string; next_scan_at?: string }>({});
 const scanLoadFailed = ref(false);
 const scanSaving = ref(false);
 
@@ -138,7 +142,7 @@ async function loadScanSettings() {
   ]);
   channels.value = (list ?? []).filter((c) => c.enabled);
   if (cfg) {
-    scanForm.value = { ...cfg, channel_ids: [...(cfg.channel_ids ?? [])] };
+    fillScan(cfg);
     scanLoadFailed.value = false;
   } else {
     scanLoadFailed.value = true;
@@ -276,6 +280,19 @@ async function applyTrackers() {
   }
 }
 
+function fillScan(v: DeadTorrentScanView) {
+  scanForm.value = {
+    enabled: v.enabled,
+    interval_hours: v.interval_hours,
+    channel_ids: [...(v.channel_ids ?? [])],
+  };
+  scanStatus.value = {
+    last_scan_at: v.last_scan_at,
+    last_result: v.last_result,
+    next_scan_at: v.next_scan_at,
+  };
+}
+
 async function saveScan() {
   if (scanForm.value.enabled && scanForm.value.channel_ids.length === 0) {
     ElMessage.warning("开启定时扫描至少要选一个通知通道");
@@ -283,8 +300,7 @@ async function saveScan() {
   }
   scanSaving.value = true;
   try {
-    const saved = await downloaderAssistantApi.saveDeadScan(scanForm.value);
-    scanForm.value = { ...saved, channel_ids: [...(saved.channel_ids ?? [])] };
+    fillScan(await downloaderAssistantApi.saveDeadScan(scanForm.value));
     ElMessage.success("已保存");
   } catch (e) {
     ElMessage.error((e as Error).message || "保存失败");
@@ -688,6 +704,22 @@ onMounted(() => {
           <PtIcon v-if="!scanSaving" name="save" :size="14" /><span>保存</span>
         </el-button>
       </el-form>
+      <ul class="da-status" data-testid="da-scan-status">
+        <li>
+          <span class="da-k">上次扫描</span>
+          <span v-if="scanStatus.last_scan_at"
+            >{{ formatShortDateTime(scanStatus.last_scan_at) }}：{{ scanStatus.last_result }}</span
+          >
+          <span v-else class="da-sub">这次启动以后还没扫过（重启以后重新算）</span>
+        </li>
+        <li>
+          <span class="da-k">下次扫描</span>
+          <span v-if="scanStatus.next_scan_at"
+            >大约 {{ formatShortDateTime(scanStatus.next_scan_at) }}</span
+          >
+          <span v-else class="da-sub">开启并选了通道以后按间隔扫描</span>
+        </li>
+      </ul>
     </PtPanel>
   </div>
 </template>
@@ -794,5 +826,31 @@ onMounted(() => {
   .da-bar--form .da-input {
     max-width: none;
   }
+}
+
+.da-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--pt-t1);
+}
+
+.da-status li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.da-k {
+  flex: 0 0 72px;
+  color: var(--pt-t3);
+}
+
+.da-sub {
+  color: var(--pt-t3);
 }
 </style>
