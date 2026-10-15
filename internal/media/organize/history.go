@@ -192,6 +192,9 @@ var fileIDOf = transfer.FileID
 // removeIfOurs 删替换下来的旧版本的字幕与刮削文件（测试里换成会出错的）。
 var removeIfOurs = transfer.RemoveIfOurs
 
+// transferTemp 把替换用的新文件放到临时名（测试里换成会撞上的）。
+var transferTemp = transfer.Transfer
+
 // isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、Logo、tvshow.nfo、season.nfo、季海报）。
 func isDirArtifact(name string) bool {
 	switch name {

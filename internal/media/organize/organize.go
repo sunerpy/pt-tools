@@ -937,15 +937,23 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 	}
 	db := s.cfg.DB.WithContext(ctx)
 	subs, _ := json.Marshal(it.Subtitles)
+	// 临时名与备份名先确认没有被占着：之后在这两个名字上看到的文件就是这次放的
+	temp, backup := freeSideName(it.Target, "new"), freeSideName(it.Target, "old")
+	if temp == "" || backup == "" {
+		return fail("替换旧版本失败，旧版本留着：找不到没被占用的临时名")
+	}
 	j := models.MediaReplaceJournal{
 		OldID: old.ID, Source: it.Source, Mode: firstNonEmpty(it.mode, p.Mode), Target: it.Target,
-		Temp: sideName(it.Target, "new"), Backup: sideName(it.Target, "old"), Subs: string(subs), CreatedAt: s.cfg.Now(),
+		Temp: temp, Backup: backup, Subs: string(subs), CreatedAt: s.cfg.Now(),
 	}
 	if err := db.Create(&j).Error; err != nil {
 		return fail("替换旧版本失败，旧版本留着：替换日志写不进去（" + err.Error() + "）")
 	}
-	if _, err := transfer.Transfer(it.Source, j.Temp, p.Mode); err != nil {
-		return undo(j, err.Error())
+	if _, err := transferTemp(it.Source, j.Temp, p.Mode); err != nil {
+		// 没放成：临时名上即使有文件也不是这次放的，撤回时不碰它
+		untouched := j
+		untouched.Temp = ""
+		return undo(untouched, err.Error())
 	}
 	tid, terr := transfer.FileID(j.Temp)
 	if terr != nil {
@@ -1049,10 +1057,15 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 	}
 	switch _, err := os.Lstat(j.Temp); {
 	case err == nil:
-		// 没记下编号（当时没读出来）时用现在的：临时名是这次随机取的，上面是这次放的文件
+		// 没记下编号（放好以后、记编号以前退出，或当时没读出来）时用现在的：临时名是放以前确认过没被占用的随机名，
+		// 上面是这次放的文件。读不出来就留着日志之后再试
 		tempID := j.TempID
 		if tempID == "" {
-			tempID, _ = transfer.FileID(j.Temp)
+			id, ierr := transfer.FileID(j.Temp)
+			if ierr != nil {
+				return fmt.Errorf("读不出临时文件 %s 的编号: %w", filepath.Base(j.Temp), ierr)
+			}
+			tempID = id
 		}
 		if rerr := transfer.RemoveIfOurs(j.Temp, j.Mode, tempID, j.Source); rerr != nil && !errors.Is(rerr, transfer.ErrNotOurs) {
 			return fmt.Errorf("删不掉临时文件 %s: %w", filepath.Base(j.Temp), rerr)
@@ -1201,6 +1214,17 @@ func (s *Service) recoverReplacements(ctx context.Context) {
 			s.cfg.Logger.Warnf("[整理入库] 替换收尾没做完，之后再试 (%s): %v", j.Target, err)
 		}
 	}
+}
+
+// freeSideName 是一个现在没被占用的临时名（几次都撞上时为空）。
+func freeSideName(target, what string) string {
+	for range 5 {
+		name := sideName(target, what)
+		if _, err := os.Lstat(name); errors.Is(err, os.ErrNotExist) {
+			return name
+		}
+	}
+	return ""
 }
 
 // sideName 是目标旁边的临时名：同一个目录（改名与硬链接才不跨文件系统），扩展名不是视频（媒体服务器不会扫进去）。

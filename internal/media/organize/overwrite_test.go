@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -615,4 +616,34 @@ func TestReplaceJournalFailures(t *testing.T) {
 	assert.Zero(t, n)
 
 	assert.Nil(t, e.svc.occupant(e.ctx, &Plan{}, &PlanItem{}), "没有媒体库与条目时没有可替换的")
+}
+
+// 选好临时名以后、放新文件以前，别的程序占了这个名字：放不成（目标已存在），撤回时不删那个文件
+func TestReplaceTempTakenKeepsForeignFile(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	old := e.rowOf(ep1Old)
+	var taken string
+	orig := transferTemp
+	t.Cleanup(func() { transferTemp = orig })
+	transferTemp = func(src, dst, mode string) (transfer.Outcome, error) {
+		taken = dst
+		if err := os.WriteFile(dst, []byte("someone else's"), 0o644); err != nil {
+			return 0, err
+		}
+		return orig(src, dst, mode)
+	}
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Failed)
+	require.NotEmpty(t, taken)
+	assert.Equal(t, "someone else's", readFile(t, taken), "别人的文件留着")
+	assert.True(t, sameFile(t, old.SourcePath, old.TargetPath))
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.Zero(t, n)
 }
