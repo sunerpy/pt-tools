@@ -9,6 +9,7 @@ import {
   metaTags,
   posterURL,
   setTmdbImageBase,
+  setTmdbImageBasePending,
   tmdbPageURL,
   wordEffect,
   wordKindLabel,
@@ -119,6 +120,18 @@ describe("媒体识别的显示工具", () => {
       expect(posterURL(), "没有海报时仍是空串").toBe("");
       setTmdbImageBase("");
       expect(posterURL("/p.jpg")).toBe("https://image.tmdb.org/t/p/w185/p.jpg");
+    });
+
+    it("还在读图片地址时不给海报地址，读完以后照常", () => {
+      setTmdbImageBasePending(true);
+      expect(posterURL("/p.jpg")).toBe("");
+      setTmdbImageBasePending(false);
+      expect(posterURL("/p.jpg"), "读不到时用原来的地址").toBe(
+        "https://image.tmdb.org/t/p/w185/p.jpg",
+      );
+      setTmdbImageBasePending(true);
+      setTmdbImageBase("https://static.example.com/t/p/");
+      expect(posterURL("/p.jpg"), "读到了").toBe("https://static.example.com/t/p/w185/p.jpg");
     });
   });
 });

@@ -1,5 +1,5 @@
 /*
- * 钉子：海报用的图片地址。同一个页面里只读一次设置；读不到时保持官方地址，下次再试。
+ * 钉子：海报用的图片地址。打开网页以后只读一次设置，读到以前不给海报地址；读不到时用原来的地址，下次再试。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -26,8 +26,10 @@ describe("海报的图片地址", () => {
   it("读设置里的图片地址，只读一次", async () => {
     media.settings.mockResolvedValue({ image_base_url: "https://static.example.com/t/p/" });
     const { loadTmdbImageBase, posterURL } = await fresh();
-    expect(posterURL("/p.jpg"), "读到之前用官方地址").toBe("https://image.tmdb.org/t/p/w185/p.jpg");
-    await Promise.all([loadTmdbImageBase(), loadTmdbImageBase()]);
+    expect(posterURL("/p.jpg"), "没读过时用官方地址").toBe("https://image.tmdb.org/t/p/w185/p.jpg");
+    const first = loadTmdbImageBase();
+    expect(posterURL("/p.jpg"), "读到以前先不加载海报").toBe("");
+    await Promise.all([first, loadTmdbImageBase()]);
     await loadTmdbImageBase();
     expect(media.settings).toHaveBeenCalledTimes(1);
     expect(posterURL("/p.jpg")).toBe("https://static.example.com/t/p/w185/p.jpg");

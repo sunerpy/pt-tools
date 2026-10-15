@@ -158,7 +158,7 @@ onMounted(load);
         <div v-for="it in items" :key="it.id" class="ex-card" :data-testid="`ex-item-${it.id}`">
           <div class="ex-card__poster">
             <img
-              v-if="it.poster_path && !failedPosters.has(it.id)"
+              v-if="posterURL(it.poster_path, 'w342') && !failedPosters.has(it.id)"
               :src="posterURL(it.poster_path, 'w342')"
               :alt="it.title"
               loading="lazy"

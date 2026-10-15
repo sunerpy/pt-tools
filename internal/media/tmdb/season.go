@@ -86,14 +86,38 @@ var (
 // Image 下载一张 TMDB 图片（path 是条目里的 poster_path 一类，size 如 w780）。
 // 只接受 image/* 响应，最多 10 MiB；图片走图片服务器，不占接口的限速额度。
 func (c *Client) Image(ctx context.Context, path, size string) ([]byte, error) {
+	return fetchImage(ctx, c.http, c.imageBase, path, size)
+}
+
+// ImageClient 只取图片：图片服务器不用 API Key，没填 Key 时 App 的海报也能经 pt-tools 取。
+type ImageClient struct {
+	base string
+	http *http.Client
+}
+
+// NewImageClient 建图片客户端：imageBaseURL 为空时用官方地址，hc 是发请求用的客户端（带代理）。
+func NewImageClient(imageBaseURL string, hc *http.Client) *ImageClient {
+	base := strings.TrimRight(strings.TrimSpace(imageBaseURL), "/")
+	if base == "" {
+		base = strings.TrimRight(ImageBaseURL, "/")
+	}
+	return &ImageClient{base: base + "/", http: hc}
+}
+
+// Image 同 Client.Image。
+func (c *ImageClient) Image(ctx context.Context, path, size string) ([]byte, error) {
+	return fetchImage(ctx, c.http, c.base, path, size)
+}
+
+func fetchImage(ctx context.Context, hc *http.Client, base, path, size string) ([]byte, error) {
 	if !imagePathRe.MatchString(path) || !imageSizeRe.MatchString(size) {
 		return nil, fmt.Errorf("TMDB 图片地址格式不对: %q", path)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.imageBase+size+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+size+path, nil)
 	if err != nil {
 		return nil, errors.New("TMDB 图片地址格式不对")
 	}
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		var ue *url.Error
 		if errors.As(err, &ue) {

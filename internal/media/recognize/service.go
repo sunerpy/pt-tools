@@ -243,23 +243,14 @@ func (s *Service) client(ctx context.Context) (*tmdb.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("解密 TMDB API Key 失败: %w", err)
 	}
-	proxy := ""
-	if row.ProxyEncrypted != "" {
-		if proxy, err = s.cfg.Cipher.Decrypt(row.ProxyEncrypted); err != nil {
-			return nil, fmt.Errorf("解密代理地址失败: %w", err)
-		}
-	}
-	hc, err := s.httpClient(proxy)
+	hc, imageBase, err := s.transport(row)
 	if err != nil {
 		return nil, err
 	}
 	// 用户换了地址就用换的；没换时用配置里的（qa 构建指向假服务），都没有时客户端用官方地址
-	base, imageBase := row.APIBaseURL, row.ImageBaseURL
+	base := row.APIBaseURL
 	if base == "" {
 		base = s.cfg.BaseURL
-	}
-	if imageBase == "" {
-		imageBase = s.cfg.ImageBaseURL
 	}
 	return tmdb.New(tmdb.Options{
 		APIKey: key, BaseURL: base, ImageBaseURL: imageBase, Language: s.view(row).Language,
@@ -267,9 +258,42 @@ func (s *Service) client(ctx context.Context) (*tmdb.Client, error) {
 	})
 }
 
+// transport 是按设置里的代理发请求的客户端，以及图片地址（用户换的，其次配置里的；空串是官方地址）。
+func (s *Service) transport(row models.MediaSetting) (*http.Client, string, error) {
+	proxy := ""
+	if row.ProxyEncrypted != "" {
+		var err error
+		if proxy, err = s.cfg.Cipher.Decrypt(row.ProxyEncrypted); err != nil {
+			return nil, "", fmt.Errorf("解密代理地址失败: %w", err)
+		}
+	}
+	hc, err := s.httpClient(proxy)
+	if err != nil {
+		return nil, "", err
+	}
+	imageBase := row.ImageBaseURL
+	if imageBase == "" {
+		imageBase = s.cfg.ImageBaseURL
+	}
+	return hc, imageBase, nil
+}
+
 // TMDB 按当前设置建 TMDB 客户端（整理入库时取详情、季详情与图片）；没有 API Key 时返回 tmdb.ErrNoKey。
 func (s *Service) TMDB(ctx context.Context) (*tmdb.Client, error) {
 	return s.client(ctx)
+}
+
+// Images 按当前设置（图片地址与代理）建只取图片的客户端：图片服务器不用 API Key。
+func (s *Service) Images(ctx context.Context) (*tmdb.ImageClient, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hc, imageBase, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return tmdb.NewImageClient(imageBase, hc), nil
 }
 
 // Parse 套用启用的识别词后解析一个标题（整理入库时解析每个文件名）。

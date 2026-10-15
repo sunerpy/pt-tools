@@ -189,7 +189,7 @@ const resultText = computed(() => {
 
         <div v-if="plan.match" class="od__match" data-testid="organize-match">
           <img
-            v-if="plan.match.poster_path && !posterFailed"
+            v-if="posterURL(plan.match.poster_path, 'w92') && !posterFailed"
             class="od__poster"
             :src="posterURL(plan.match.poster_path, 'w92')"
             :alt="`${plan.match.title} 的海报`"

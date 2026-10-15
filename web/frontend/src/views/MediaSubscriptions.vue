@@ -400,7 +400,7 @@ onMounted(() => {
           <template #default="{ row }">
             <div class="ms-entry">
               <img
-                v-if="row.poster_path && !failedPosters.has(row.id)"
+                v-if="posterURL(row.poster_path, 'w92') && !failedPosters.has(row.id)"
                 class="ms-poster"
                 :src="posterURL(row.poster_path, 'w92')"
                 alt=""

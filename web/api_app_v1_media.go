@@ -460,7 +460,8 @@ func (s *Server) appTMDBImage(w http.ResponseWriter, r *http.Request) {
 		appError(w, http.StatusServiceUnavailable, "unavailable", "媒体识别没有启动")
 		return
 	}
-	c, err := s.media.TMDB(r.Context())
+	// 只取图片，不要 API Key：清除 Key 以后已有订阅、记录里的海报照样能显示
+	c, err := s.media.Images(r.Context())
 	if err != nil {
 		appSubscribeError(w, err)
 		return

@@ -148,7 +148,7 @@ async function save() {
     <div class="sd">
       <div class="sd__head">
         <img
-          v-if="poster && !posterFailed"
+          v-if="posterURL(poster, 'w92') && !posterFailed"
           class="sd__poster"
           :src="posterURL(poster, 'w92')"
           alt=""

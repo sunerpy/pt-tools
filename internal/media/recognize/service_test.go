@@ -183,6 +183,30 @@ func TestCustomTMDBBaseURLs(t *testing.T) {
 	assert.Equal(t, "https://image.tmdb.org/t/p/w500/a.jpg", c.PosterURL("/a.jpg", "w500"))
 }
 
+// 只取图片的客户端不要 API Key，用设置里的图片地址
+func TestImagesWithoutKey(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	img := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mirror/w92/a.png" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("PNG"))
+	}))
+	t.Cleanup(img.Close)
+	_, err := s.SaveSettings(ctx, SettingsInput{ImageBaseURL: ptr(img.URL + "/mirror")})
+	require.NoError(t, err)
+	_, err = s.TMDB(ctx)
+	require.ErrorIs(t, err, tmdb.ErrNoKey)
+	c, err := s.Images(ctx)
+	require.NoError(t, err)
+	b, err := c.Image(ctx, "/a.png", "w92")
+	require.NoError(t, err)
+	assert.Equal(t, "PNG", string(b))
+}
+
 func TestTestTMDB(t *testing.T) {
 	s, _ := newService(t)
 	ctx := context.Background()

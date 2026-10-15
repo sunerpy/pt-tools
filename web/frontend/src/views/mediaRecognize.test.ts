@@ -191,6 +191,24 @@ describe("媒体识别", () => {
     );
   });
 
+  it("设置：网页用 https 打开、图片地址是 http 时提示浏览器会拦下海报", async () => {
+    const dom = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
+    const prev = window.location.href;
+    dom.setURL("https://pt.example.com/");
+    try {
+      await mountPage({ hasKey: true });
+      expect(q("media-image-mixed")).toBeNull();
+      fill("media-image-base", " http://10.0.0.2:9000/img/");
+      await flush();
+      expect(q("media-image-mixed")!.textContent).toContain("请换成 https 地址");
+      fill("media-image-base", "https://static.example.com/");
+      await flush();
+      expect(q("media-image-mixed")).toBeNull();
+    } finally {
+      dom.setURL(prev);
+    }
+  });
+
   it("识别：显示解析结果、匹配条目与来源、候选；选候选后纠正并重新识别", async () => {
     await mountPage({ hasKey: true });
     q("media-recognize")!.click();

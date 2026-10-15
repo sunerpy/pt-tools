@@ -49,6 +49,10 @@ const form = ref({ key: "", language: "zh-CN", proxy: "", api: "", image: "" });
 const loadFailed = ref(false);
 const saving = ref(false);
 const testing = ref(false);
+/** 网页用 https 打开、图片地址却是 http:// 时，浏览器会拦下网页上的海报（混合内容） */
+const imageBaseBlocked = computed(
+  () => window.location.protocol === "https:" && /^http:\/\//i.test(form.value.image.trim()),
+);
 
 function fill(s: MediaSettings) {
   settings.value = s;
@@ -397,6 +401,13 @@ onMounted(refresh);
               data-testid="media-image-base" />
           </el-form-item>
         </div>
+        <div v-if="imageBaseBlocked" class="pt-note pt-note--warn" data-testid="media-image-mixed">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span
+            >网页是用 https 打开的，浏览器不会加载 http:// 图片地址上的海报（刮削和手机 App
+            不受影响）。要在网页上显示海报，请换成 https 地址。</span
+          >
+        </div>
         <div class="md-actions">
           <el-button type="primary" :loading="saving" data-testid="media-save" @click="save()">
             <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
@@ -483,7 +494,7 @@ onMounted(refresh);
 
         <div v-if="result.match" class="md-match" data-testid="media-match">
           <img
-            v-if="result.match.poster_path"
+            v-if="posterURL(result.match.poster_path)"
             class="md-poster"
             :src="posterURL(result.match.poster_path)"
             :alt="`${result.match.title} 的海报`"
@@ -513,7 +524,7 @@ onMounted(refresh);
           <div class="md-cands" data-testid="media-candidates">
             <div v-for="c in result.candidates" :key="`${c.media_type}-${c.id}`" class="md-cand">
               <img
-                v-if="c.poster_path"
+                v-if="posterURL(c.poster_path, 'w92')"
                 class="md-poster md-poster--sm"
                 :src="posterURL(c.poster_path, 'w92')"
                 :alt="`${c.title} 的海报`"
