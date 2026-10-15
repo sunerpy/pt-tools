@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -196,9 +197,42 @@ func TestDeadTorrentMonitor_Status(t *testing.T) {
 	assert.Zero(t, broken.RunOnce(context.Background()))
 	at, res = broken.Status()
 	assert.False(t, at.IsZero())
-	assert.Equal(t, "读取下载器列表失败，这一轮没有扫描", res)
+	assert.Equal(t, "读取下载器列表失败，这一轮没有扫描，下一次检查时重试", res)
+	now := mon.cfg.Clock.Now()
+	assert.Equal(t, now, broken.NextScan(now, 24*time.Hour), "没扫成：下一次检查就重扫，不等满 24 小时")
 	var nilMon *DeadTorrentMonitor
 	at, res = nilMon.Status()
 	assert.True(t, at.IsZero())
 	assert.Empty(t, res)
+	assert.Equal(t, now, nilMon.NextScan(now, time.Hour))
+}
+
+// 读不到下载器列表的那一轮不算扫过：下一次检查（10 分钟后）就重扫；扫成以后才按间隔等
+func TestDeadTorrentMonitor_RetriesAfterListFailure(t *testing.T) {
+	mon, dl, _, _ := deadRig(t)
+	clock := mon.cfg.Clock.(*sitelogin.FakeClock)
+	calls := 0
+	fail := true
+	mon.cfg.Downloaders = func(context.Context) ([]DeadTorrentDownloader, []error, error) {
+		calls++
+		if fail {
+			return nil, nil, errors.New("database is locked")
+		}
+		return []DeadTorrentDownloader{{Name: "qb", DL: dl}}, nil, nil
+	}
+	mon.RunOnce(context.Background())
+	require.Equal(t, 1, calls)
+
+	clock.Advance(10 * time.Minute)
+	fail = false
+	mon.RunOnce(context.Background())
+	assert.Equal(t, 2, calls, "下一次检查就重扫")
+	_, res := mon.Status()
+	assert.Equal(t, "qb 有 0 个失效种子", res)
+	now := clock.Now()
+	assert.Equal(t, now.Add(24*time.Hour), mon.NextScan(now, 24*time.Hour), "扫成以后按间隔等")
+
+	clock.Advance(10 * time.Minute)
+	mon.RunOnce(context.Background())
+	assert.Equal(t, 2, calls, "没到间隔不扫")
 }

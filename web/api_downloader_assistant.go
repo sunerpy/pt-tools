@@ -317,12 +317,7 @@ func (s *Server) deadScanView(cfg core.DeadTorrentScanSettings) deadScanView {
 		v.LastScanAt, v.LastResult = &last, result
 	}
 	if cfg.Enabled && len(cfg.ChannelIDs) > 0 {
-		next := time.Now()
-		if !last.IsZero() {
-			if t := last.Add(time.Duration(cfg.IntervalHours) * time.Hour); t.After(next) {
-				next = t
-			}
-		}
+		next := mon.NextScan(time.Now(), time.Duration(cfg.IntervalHours)*time.Hour)
 		v.NextScanAt = &next
 	}
 	return v
