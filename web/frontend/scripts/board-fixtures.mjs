@@ -182,6 +182,64 @@ const RSS_LOGS = Array.from({ length: 10 }, (_, i) => ({
   created_at: "2026-09-18T22:00:00Z",
 }));
 
+/*
+ * 「最近投递统计」与「最近的通知」的两个接口（RSS 通知加后台监控通知）。
+ * 必须单独给：它们是 /api/chatops/notifications 的子路径，前缀匹配会让它们拿到通道列表那个数组。
+ */
+const NOTIFY_STATS = {
+  since: "2026-09-12T00:00:00Z",
+  days: 7,
+  channels: [
+    {
+      conf_id: 1,
+      total: 42,
+      sent: 39,
+      failed: 1,
+      pending: 1,
+      canceled: 1,
+      throttled: 0,
+      requeued: { total: 2, sent: 1, pending: 0, dead: 1 },
+      sources: [
+        { source: "rss", total: 30, sent: 28 },
+        { source: "attendance", total: 7, sent: 7 },
+        { source: "daily_report", total: 5, sent: 4 },
+      ],
+    },
+    {
+      conf_id: 2,
+      total: 12,
+      sent: 12,
+      failed: 0,
+      pending: 0,
+      canceled: 0,
+      throttled: 0,
+      requeued: { total: 0, sent: 0, pending: 0, dead: 0 },
+      sources: [
+        { source: "login", total: 8, sent: 8 },
+        { source: "media", total: 4, sent: 4 },
+      ],
+    },
+  ],
+};
+
+const NOTIFY_RECENT = Array.from({ length: 8 }, (_, i) => {
+  const rss = i % 2 === 0;
+  return {
+    source: rss ? "rss" : ["attendance", "login", "daily_report", "media"][(i >> 1) % 4],
+    log_id: i + 1,
+    conf_id: (i % 2) + 1,
+    title: rss
+      ? `Example.Show.S01E0${i + 1}.1080p.WEB-DL`
+      : ["签到汇总", "保号提醒", "每日战报", "已入库"][(i >> 1) % 4],
+    site: rss ? SITES[i % SITES.length][0] : undefined,
+    torrent_id: rss ? `t${1000 + i}` : undefined,
+    kind: rss ? (i % 4 === 0 ? "filtered" : "all") : "daily",
+    result: ["sent", "sent", "failed", "pending", "canceled", "sent", "throttled", "sent"][i],
+    attempts: (i % 3) + 1,
+    created_at: `2026-09-18T2${3 - (i >> 2)}:${String(50 - i * 5).padStart(2, "0")}:00Z`,
+  };
+});
+
 const FILTER_RULES = Array.from({ length: 6 }, (_, i) => ({
   id: i + 1,
   name: ["4K 资源", "1080p 资源", "REMUX", "HDR", "HEVC", "国语配音"][i],
@@ -676,6 +734,8 @@ export const FIXTURES = [
    * 否则 `/api/chatops/notifications/1` 会拿到列表那个数组，详情页把数组当对象读，
    * 画出来就是「未命名通道 / ID -」—— 画板 23 的内容等于没进验收。
    */
+  ["/api/chatops/notifications/stats", NOTIFY_STATS],
+  ["/api/chatops/notifications/recent", { items: NOTIFY_RECENT }],
   ["/api/chatops/notifications/1", CHANNELS[0]],
   ["/api/chatops/notifications", CHANNELS],
   ["/api/chatops/bindings", BINDINGS],
@@ -913,6 +973,9 @@ export function emptyStubScript() {
   const EMPTY = [
     ["/api/tasks", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/downloader-torrents", { items: [], total: 0, page: 1, page_size: 100, failures: [] }],
+    /* 子路径排在 /api/chatops/notifications 之前：前缀匹配，先命中先用 */
+    ["/api/chatops/notifications/stats", { since: "2026-09-12T00:00:00Z", days: 7, channels: [] }],
+    ["/api/chatops/notifications/recent", { items: [] }],
     ["/api/chatops/notifications", []],
     ["/api/chatops/bindings", []],
     ["/api/chatops/audit", { items: [], total: 0, page: 1, page_size: 50 }],

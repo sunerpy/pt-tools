@@ -15,6 +15,8 @@ When sending:
 
 The Recent delivery stats (最近投递统计) card on the Notifications page shows sent / total per channel over the last 7 days. RSS notifications and background notifications (keep-alive reminders, check-ins, daily reports, dead torrents, subscriptions and library imports, remote access) all count; channel tests and command replies do not. The small text under each channel gives the count per source and says whether the rest failed, are waiting (held for quiet hours or for a retry), were canceled or replaced (canceled in the RSS notification log, or replaced by a later notification for the same torrent), or went over the RSS hourly limit. An RSS notification that cannot be sent right away goes to the retry queue and still counts as sent; the small text gives how many went to the retry queue and how many of those were sent later, are still retrying, or were given up.
 
+The Recent notifications (最近的通知) card on the same page lists the latest 8, RSS and background notifications alike: the channel, the source, the notification's title (the torrent name for RSS notifications, after the site), the result and the number of attempts. This is the built-in title: with a message template, the title you receive follows the template, and RSS notifications combined into one message are still listed one by one here. The full RSS list, retries and cancels are in the RSS notification log (RSS 通知日志); a background notification that fails is retried after 1, 5 and 30 minutes.
+
 ## WeCom group bot
 
 | Setting     | Meaning                                                                                           |

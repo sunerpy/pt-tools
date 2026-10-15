@@ -8,14 +8,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type MountedView, mountView } from "@/test-mount";
 
-const api = vi.hoisted(() => ({ list: vi.fn(), stats: vi.fn(), logs: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), stats: vi.fn(), logs: vi.fn(), recent: vi.fn() }));
 
 vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
   return {
     ...real,
     chatopsApi: {
-      notifications: { list: api.list, stats: api.stats },
+      notifications: { list: api.list, stats: api.stats, recent: api.recent },
       rssNotifications: { list: api.logs },
     },
   };
@@ -38,6 +38,7 @@ const card = () => document.querySelector<HTMLElement>("[data-testid=notify-stat
 async function mountPage() {
   api.list.mockResolvedValue([{ id: 1, channel_type: "telegram", name: "TG", enabled: true }]);
   api.logs.mockResolvedValue({ items: [] });
+  api.recent.mockResolvedValue({ items: [] });
   const Page = (await import("./Notifications.vue")).default;
   view = mountView(Page);
   await vi.waitFor(() => expect(api.stats).toHaveBeenCalled());
