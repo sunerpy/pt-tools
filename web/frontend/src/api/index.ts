@@ -1649,6 +1649,30 @@ export interface RSSNotificationLog {
   updated_at: string;
 }
 
+/**
+ * 一个通道最近几天的投递：RSS 通知与后台监控通知（保号、签到、战报……）合计，按来源分。
+ * sent 是已发出：RSS 通知实时发不出去时转进重发队列也算，重发的结果在 requeued 里（按消息数，合并发送的一组算一条）。
+ * pending 是还在等（安静时段挂起、等重试）；canceled 是在 RSS 通知日志里取消的、或被同一种子后来的通知取代的；
+ * throttled 是超出 RSS 每小时上限没发的。
+ */
+export interface NotifyStatsChannel {
+  conf_id: number;
+  total: number;
+  sent: number;
+  failed: number;
+  pending: number;
+  canceled: number;
+  throttled: number;
+  requeued: { total: number; sent: number; pending: number; dead: number };
+  sources: { source: string; total: number; sent: number }[];
+}
+
+export interface NotifyStatsView {
+  since: string;
+  days: number;
+  channels: NotifyStatsChannel[];
+}
+
 /** 消息模板的一个变量（路线图 M21）。列表的每一项是对象，字段在 item 里。 */
 export interface NotifyTemplateVar {
   key: string;
@@ -1761,6 +1785,7 @@ export const chatopsApi = {
       }),
     delete: (id: number) => api.delete<void>(`/api/chatops/notifications/${id}`),
     test: (id: number) => api.post<{ success: boolean }>(`/api/chatops/notifications/${id}/test`),
+    stats: () => api.get<NotifyStatsView>("/api/chatops/notifications/stats"),
   },
   bindings: {
     list: () =>

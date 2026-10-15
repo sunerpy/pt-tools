@@ -13,6 +13,8 @@ When sending:
 - Local and private addresses (`127.0.0.1`, `192.168.x.x` and so on) are not used unless you allow them, and link-local addresses (including the cloud metadata address `169.254.169.254`) are never used.
 - Error messages leave out webhook addresses, keys, tokens and passwords.
 
+The Recent delivery stats (最近投递统计) card on the Notifications page shows sent / total per channel over the last 7 days. RSS notifications and background notifications (keep-alive reminders, check-ins, daily reports, dead torrents, subscriptions and library imports, remote access) all count; channel tests and command replies do not. The small text under each channel gives the count per source and says whether the rest failed, are waiting (held for quiet hours or for a retry), were canceled or replaced (canceled in the RSS notification log, or replaced by a later notification for the same torrent), or went over the RSS hourly limit. An RSS notification that cannot be sent right away goes to the retry queue and still counts as sent; the small text gives how many went to the retry queue and how many of those were sent later, are still retrying, or were given up.
+
 ## WeCom group bot
 
 | Setting     | Meaning                                                                                           |

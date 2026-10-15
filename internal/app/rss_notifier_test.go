@@ -129,6 +129,35 @@ func setupClosedForRSS(t *testing.T) *gorm.DB {
 	return db
 }
 
+// 超出每小时上限时，这条 RSS 选的每个通道各记一行 throttled（投递统计按通道算）
+func TestExceededHourlyQuota_ThrottlesEveryChannel(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &fakePushSvc{})
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "both", NotifyConfIDs: "[1,2]", MaxNotificationsPerHour: 1}
+	now := time.Now()
+	require.NoError(t, db.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "s", TorrentID: "old", NotifyKind: "all",
+		NotificationConfID: 1, Result: "sent", CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	require.NoError(t, n.NotifyNewItem(context.Background(), RSSItemEvent{
+		RSS: rss, SiteName: "s", TorrentID: "t2", FeedItem: newFeedItem(),
+	}))
+	require.NoError(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{
+		RSS: rss, Torrent: &v2.TorrentItem{ID: "t2", Title: "X", URL: "http://z"}, SiteName: "s", TorrentID: "t2",
+	}))
+	var rows []models.RSSNotificationLog
+	require.NoError(t, db.Where("result = ?", "throttled").Order("notify_kind, notification_conf_id").Find(&rows).Error)
+	require.Len(t, rows, 4)
+	for i, want := range []struct {
+		kind string
+		conf uint
+	}{{"all", 1}, {"all", 2}, {"filtered", 1}, {"filtered", 2}} {
+		assert.Equal(t, want.kind, rows[i].NotifyKind)
+		assert.Equal(t, want.conf, rows[i].NotificationConfID)
+	}
+}
+
 func TestNotifyFilteredItem_QuotaThrottles(t *testing.T) {
 	db := setupRSSNotifierDB(t)
 	n := NewRSSNotifier(db, &fakePushSvc{})

@@ -97,7 +97,7 @@ func (r *rssNotifier) NotifyNewItem(ctx context.Context, ev RSSItemEvent) error 
 	if exceeded, qerr := r.exceededHourlyQuota(ctx, ev.RSS); qerr != nil {
 		return qerr
 	} else if exceeded {
-		return r.recordThrottled(ctx, ev.RSS.ID, ev.SiteName, ev.TorrentID, "all", confIDs[0])
+		return r.recordThrottled(ctx, ev.RSS.ID, ev.SiteName, ev.TorrentID, "all", confIDs)
 	}
 	payload := renderAllPayload(ev)
 	payloadJSON, _ := json.Marshal(payload)
@@ -137,7 +137,7 @@ func (r *rssNotifier) NotifyFilteredItem(ctx context.Context, ev RSSFilteredEven
 	if exceeded, qerr := r.exceededHourlyQuota(ctx, ev.RSS); qerr != nil {
 		return qerr
 	} else if exceeded {
-		return r.recordThrottled(ctx, ev.RSS.ID, ev.SiteName, ev.TorrentID, "filtered", confIDs[0])
+		return r.recordThrottled(ctx, ev.RSS.ID, ev.SiteName, ev.TorrentID, "filtered", confIDs)
 	}
 	_ = r.db.WithContext(ctx).
 		Model(&models.RSSNotificationLog{}).
@@ -343,14 +343,19 @@ func (r *rssNotifier) exceededHourlyQuota(ctx context.Context, rss *models.RSSCo
 	return cnt >= int64(rss.MaxNotificationsPerHour), nil
 }
 
-func (r *rssNotifier) recordThrottled(ctx context.Context, rssID uint, site, tid, kind string, confID uint) error {
+// recordThrottled 给这条 RSS 选的每个通道各记一行 throttled：投递统计按通道算，只记第一个通道会漏掉其余的。
+func (r *rssNotifier) recordThrottled(ctx context.Context, rssID uint, site, tid, kind string, confIDs []uint) error {
 	now := r.now()
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&models.RSSNotificationLog{
-		RSSID: rssID, SiteName: site, TorrentID: tid,
-		NotifyKind: kind, NotificationConfID: confID,
-		Result:    "throttled",
-		CreatedAt: now, UpdatedAt: now,
-	}).Error
+	rows := make([]models.RSSNotificationLog, 0, len(confIDs))
+	for _, cid := range confIDs {
+		rows = append(rows, models.RSSNotificationLog{
+			RSSID: rssID, SiteName: site, TorrentID: tid,
+			NotifyKind: kind, NotificationConfID: cid,
+			Result:    "throttled",
+			CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error
 }
 
 func parseConfIDs(s string) ([]uint, error) {

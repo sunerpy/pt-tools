@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/api";
+import {
+  chatopsApi,
+  type NotificationConfig,
+  type NotifyStatsView,
+  type RSSNotificationLog,
+} from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -134,9 +139,9 @@ const { loading, state, errorText, run, isStale } = useDataState();
 /**
  * 画板 22 在四张通道卡之后还有三张：
  *   p-policy 548 投递策略（安静时段按通道配置，就在通道自己的字段里）
- *   p-stat 516  最近投递统计（按通道分组，数据来自 RSS 通知日志）
- *   p-recent 1080 最近的通知记录
- * 后两张读 `/api/chatops/rss-notifications` 的一页，不新增后端。
+ *   p-stat 516  最近投递统计（按通道分组，读 `/api/chatops/notifications/stats`：近 7 天的 RSS 通知
+ *               与后台监控通知合在一起算。以前只数 RSS 通知日志最近 50 条，签到、战报这些通知全不在里面）
+ *   p-recent 1080 最近的通知记录（读 `/api/chatops/rss-notifications` 的一页）
  */
 const recentLogs = ref<RSSNotificationLog[]>([]);
 
@@ -166,29 +171,77 @@ const policyRows = computed(() =>
   }),
 );
 
-/** p-stat：这 50 条里每个通道投了多少、成了多少 */
-const statRows = computed<BreakdownRow[]>(() => {
-  const buckets = new Map<number, { total: number; sent: number }>();
-  for (const log of recentLogs.value) {
-    const cur = buckets.get(log.notification_conf_id) ?? { total: 0, sent: 0 };
-    cur.total += 1;
-    if (log.result === "sent") cur.sent += 1;
-    buckets.set(log.notification_conf_id, cur);
+const stats = ref<NotifyStatsView | null>(null);
+
+async function loadStats() {
+  try {
+    stats.value = await chatopsApi.notifications.stats();
+  } catch {
+    /* 统计是附带信息，取不到就让卡里说明，不影响通道列表 */
+    stats.value = null;
   }
-  return [...buckets.entries()]
-    .sort((a, b) => b[1].total - a[1].total)
-    .map(([id, agg]) => {
-      const conf = notifications.value.find((n) => n.id === id);
-      return {
-        key: String(id),
-        label: conf ? conf.name : `#${id}`,
-        value: `${agg.sent} / ${agg.total}`,
-        weight: agg.total,
-        tone: agg.sent === agg.total ? ("ok" as const) : ("warn" as const),
-        hint: agg.sent === agg.total ? "全部送达" : `${agg.total - agg.sent} 条没送达`,
-      };
-    });
-});
+}
+
+/** 通知来源的叫法：RSS 以外都是后台监控发的 */
+const SOURCE_LABELS: Record<string, string> = {
+  rss: "RSS",
+  login: "保号提醒",
+  attendance: "签到",
+  daily_report: "每日战报",
+  downloader_assistant: "失效种子",
+  media: "订阅与入库",
+  remote: "远程访问",
+};
+
+/**
+ * p-stat：每个通道近 7 天发了多少；小字写来源，再写没发出的是失败、在等、取消还是超出上限，
+ * 最后写 RSS 通知转进重发队列以后的结果（「已发出」里含这些，补发没成的要单独看得见）
+ */
+const statRows = computed<BreakdownRow[]>(() =>
+  (stats.value?.channels ?? []).map((ch) => {
+    const conf = notifications.value.find((n) => n.id === ch.conf_id);
+    const parts: string[] = [];
+    if (ch.sources.length > 0) {
+      parts.push(
+        ch.sources
+          .map((src) => `${SOURCE_LABELS[src.source] ?? src.source} ${src.total}`)
+          .join(" · "),
+      );
+    }
+    const left: string[] = [];
+    if (ch.failed > 0) left.push(`${ch.failed} 条失败`);
+    if (ch.pending > 0) left.push(`${ch.pending} 条等待发送`);
+    if (ch.canceled > 0) left.push(`${ch.canceled} 条取消或被取代`);
+    if (ch.throttled > 0) left.push(`${ch.throttled} 条超出每小时上限`);
+    const rest = ch.total - ch.sent - ch.failed - ch.pending - ch.canceled - ch.throttled;
+    if (rest > 0) left.push(`${rest} 条没发出`);
+    if (ch.total > 0) parts.push(left.length > 0 ? left.join("、") : "全部发出");
+    const q = ch.requeued;
+    if (q.total > 0) {
+      const done: string[] = [];
+      if (q.sent > 0) done.push(`${q.sent} 条已补发`);
+      if (q.pending > 0) done.push(`${q.pending} 条重试中`);
+      if (q.dead > 0) done.push(`${q.dead} 条放弃`);
+      parts.push(
+        `${q.total} 条实时没发出、转入重发${done.length > 0 ? `：${done.join("、")}` : ""}`,
+      );
+    }
+    return {
+      key: String(ch.conf_id),
+      label: conf ? conf.name : `已删除的通道 #${ch.conf_id}`,
+      value: `${ch.sent} / ${ch.total}`,
+      weight: ch.total,
+      tone: ch.failed > 0 || q.dead > 0 ? ("warn" as const) : ("ok" as const),
+      hint: parts.join("；"),
+    };
+  }),
+);
+
+const statFoot = computed(
+  () =>
+    `口径是「已发出 / 总条数」，近 ${stats.value?.days ?? 7} 天：RSS 通知和保号、签到、战报、失效种子、订阅与入库、远程访问这些后台通知都算，` +
+    "通道测试和命令回复不算。RSS 通知实时发不出去会转入重发队列，也算已发出，补发的结果写在小字里。",
+);
 
 /** 画板 head 的 sub（11.5/400 t3）：共几个通道、几个启用、都是什么类型 */
 /** 表里这一批通道 = 状态筛 + 类型筛（两条都来自画板 bar-64） */
@@ -243,7 +296,7 @@ watch(
 );
 
 onMounted(async () => {
-  await Promise.all([loadNotifications(), loadRecent()]);
+  await Promise.all([loadNotifications(), loadRecent(), loadStats()]);
 });
 
 async function loadNotifications() {
@@ -570,7 +623,7 @@ function getChannelLabel(type: string) {
 
       <!--
         画板 22 的后三张卡：p-policy 548（投递策略）/ p-stat 516（最近投递统计）
-        / p-recent 1080（最近记录）。统计与记录读 RSS 通知日志的一页，不新增后端。
+        / p-recent 1080（最近记录）。统计读近 7 天的投递统计（RSS 与后台监控通知），记录读 RSS 通知日志的一页。
       -->
       <PtPanel title="投递策略" icon="moon" :count="`${policyRows.length} 个通道`">
         <ul class="pol">
@@ -592,12 +645,12 @@ function getChannelLabel(type: string) {
       <PtPanel
         title="最近投递统计"
         icon="chart-pie"
-        :count="recentLogs.length > 0 ? `最近 ${recentLogs.length} 条` : '暂无'">
-        <PtBreakdown
-          v-if="statRows.length > 0"
-          :rows="statRows"
-          foot="口径是「已送达 / 总条数」，取的是 RSS 通知日志最近 50 条，不是全量历史。" />
-        <p v-else class="pol__empty">还没有投递记录，或者通知日志没取到。</p>
+        :count="stats ? `近 ${stats.days} 天` : '暂无'"
+        data-testid="notify-stats">
+        <PtBreakdown v-if="statRows.length > 0" :rows="statRows" :foot="statFoot" />
+        <p v-else class="pol__empty">
+          {{ stats ? `近 ${stats.days} 天没有投递记录。` : "投递统计没取到。" }}
+        </p>
       </PtPanel>
 
       <PtPanel
