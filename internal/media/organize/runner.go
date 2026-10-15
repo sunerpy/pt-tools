@@ -75,7 +75,7 @@ const (
 
 // put 把任务放进队列，报告是新放进去了、已经在队列里（这个任务没放），还是队列满了。
 func (s *Service) put(j job) int {
-	key := jobKey(j.req.DownloaderID, j.dlName, j.req.Hash)
+	key := jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash())
 	s.qmu.Lock()
 	if s.queued[key] && j.done == nil {
 		s.qmu.Unlock()
@@ -189,9 +189,13 @@ func (s *Service) worker(ctx context.Context) {
 // handle 整理从队列里取出的一个任务：先从去重表里拿掉，整理完清掉它带的重试标记。
 func (s *Service) handle(ctx context.Context, j job) (*Result, error) {
 	s.qmu.Lock()
-	delete(s.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.Hash))
+	delete(s.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash()))
 	s.qmu.Unlock()
 	defer s.markRetrying(j.retryIDs, false)
+	if j.req.WatchDirID > 0 {
+		// 整理完（不管结果）就拿掉，下一轮扫描按记录重新看它
+		defer s.setWatchBusy(j.req.queueHash(), false)
+	}
 	return s.runJob(ctx, j)
 }
 
@@ -229,6 +233,22 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 		}
 		j.req.DownloaderID = setting.ID
 	}
+	// 目录监控发现的（包括失败后的重试）：目录关了就不整理，过一阵再看；删了就不再重试
+	if j.trigger == models.MediaTriggerWatch {
+		dir, err := s.watchDir(ctx, j.req.WatchDirID)
+		if err != nil {
+			s.fail(ctx, j)
+			return nil, err
+		}
+		if dir.ID == 0 || !dir.Enabled {
+			var next time.Time
+			if dir.ID != 0 {
+				next = s.cfg.Now().Add(retryOutOfScope)
+			}
+			s.releaseLease(ctx, j, next)
+			return nil, nil
+		}
+	}
 	// 自动与扫描触发的（包括它们失败后的重试）按现在的设置：对应的开关关了、种子不在范围里的不整理
 	if j.trigger == models.MediaTriggerAuto || j.trigger == models.MediaTriggerScan {
 		st, err := s.automated(ctx, j)
@@ -251,7 +271,7 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	s.mu.Unlock()
 	if err != nil {
 		s.fail(ctx, j)
-		s.cfg.Logger.Warnf("[整理入库] 整理失败 (下载器 %d, %s): %v", j.req.DownloaderID, j.req.Hash, err)
+		s.cfg.Logger.Warnf("[整理入库] 整理失败 (下载器 %d, %s): %v", j.req.DownloaderID, firstNonEmpty(j.req.Hash, j.req.Entry), err)
 		return nil, err
 	}
 	// 这次整理没有改写的重试记录（例如它的文件已经不在种子里）不再重试
@@ -334,7 +354,7 @@ func (s *Service) releaseLease(ctx context.Context, j job, next time.Time) {
 func (s *Service) fail(ctx context.Context, j job) {
 	next := s.cfg.Now().Add(sweepInterval)
 	if j.trigger != models.MediaTriggerManual {
-		key := jobKey(j.req.DownloaderID, j.dlName, j.req.Hash)
+		key := jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash())
 		s.qmu.Lock()
 		b := s.backoff[key]
 		b.fails++
@@ -348,7 +368,7 @@ func (s *Service) fail(ctx context.Context, j job) {
 
 func (s *Service) clearBackoff(j job) {
 	s.qmu.Lock()
-	delete(s.backoff, jobKey(j.req.DownloaderID, j.dlName, j.req.Hash))
+	delete(s.backoff, jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash()))
 	s.qmu.Unlock()
 }
 
@@ -362,8 +382,11 @@ func (s *Service) backedOff(dlID uint, hash string) bool {
 // Organize 手动整理一个种子：排进队列，等最多 20 秒；没等到时 Result.Queued 为真，整理在后台继续。
 // 后台循环没在跑时（例如测试）直接整理。
 func (s *Service) Organize(ctx context.Context, req Request) (*Result, error) {
-	if req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "" {
+	if req.WatchDirID == 0 && (req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "") {
 		return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
+	}
+	if req.WatchDirID > 0 && strings.TrimSpace(req.Entry) == "" {
+		return nil, fmt.Errorf("%w: 要指定监控目录里的哪一项", ErrInvalid)
 	}
 	if !s.isRunning() {
 		s.mu.Lock()
@@ -391,7 +414,7 @@ func (s *Service) loop(ctx context.Context) {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	// lastRecover 从开始时算起：worker 开始时已经恢复过一次
-	var lastSweep, lastScan, lastReconcile time.Time
+	var lastSweep, lastScan, lastReconcile, lastWatch time.Time
 	lastRecover := s.cfg.Now()
 	for {
 		select {
@@ -417,6 +440,10 @@ func (s *Service) loop(ctx context.Context) {
 		if set.DeleteLinksOnRemove && now.Sub(lastReconcile) >= sweepInterval {
 			lastReconcile = now
 			s.Reconcile(ctx)
+		}
+		if now.Sub(lastWatch) >= time.Duration(set.WatchIntervalMin)*time.Minute {
+			lastWatch = now
+			s.watchScan(ctx, set)
 		}
 		if now.Sub(lastRecover) >= sweepInterval {
 			lastRecover = now
@@ -483,7 +510,7 @@ func (s *Service) retryDue(ctx context.Context, set Settings) {
 			s.markRetrying(ids, false)
 			continue
 		}
-		req := Request{DownloaderID: r.DownloaderID, Hash: firstNonEmpty(r.TaskID, r.InfoHash)}
+		req := requestOf(r)
 		// 失败是在手动指定条目以后的（记录里有条目），重试沿用这个条目
 		if trigger == models.MediaTriggerManual && r.TMDBID > 0 {
 			req.MediaType, req.TMDBID, req.LibraryID = r.MediaType, r.TMDBID, r.LibraryID

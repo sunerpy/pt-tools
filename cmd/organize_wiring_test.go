@@ -34,7 +34,7 @@ func organizeTestDB(t *testing.T) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(
 		&models.SettingsGlobal{}, &models.DownloaderSetting{}, &models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{},
-		&models.MediaCache{}, &models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{},
+		&models.MediaCache{}, &models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{}, &models.MediaWatchDir{},
 		&models.MediaTransferHistory{}, &models.MonitorNotificationLog{}, &models.NotificationConf{},
 	))
 	global.GlobalDB = &models.TorrentDB{DB: db}

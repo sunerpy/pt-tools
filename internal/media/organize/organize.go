@@ -3,6 +3,7 @@ package organize
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha1" //nolint:gosec // 只用来给目录监控的一项取个短标识，不涉及安全
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,9 +34,26 @@ import (
 type Request struct {
 	DownloaderID uint   `json:"downloader_id"`
 	Hash         string `json:"hash"`
-	MediaType    string `json:"media_type,omitempty"`
-	TMDBID       int    `json:"tmdb_id,omitempty"`
-	LibraryID    uint   `json:"library_id,omitempty"`
+	// WatchDirID 与 Entry 是目录监控里的一项（目录下的一个文件或文件夹）：不为 0 时不看下载器与种子
+	WatchDirID uint   `json:"watch_dir_id,omitempty"`
+	Entry      string `json:"entry,omitempty"`
+	MediaType  string `json:"media_type,omitempty"`
+	TMDBID     int    `json:"tmdb_id,omitempty"`
+	LibraryID  uint   `json:"library_id,omitempty"`
+}
+
+// queueHash 是排队去重、退避与重试分组用的种子标识：目录监控的一项用 watchHash。
+func (r Request) queueHash() string {
+	if r.WatchDirID > 0 {
+		return watchHash(r.WatchDirID, r.Entry)
+	}
+	return r.Hash
+}
+
+// watchHash 是目录监控里一项的标识：记在整理记录的 InfoHash 里（不是种子的 info hash），重试、去重按它分组。
+func watchHash(dirID uint, entry string) string {
+	sum := sha1.Sum([]byte(entry))
+	return fmt.Sprintf("watch:%d:%x", dirID, sum[:8])
 }
 
 // 计划里每个文件的状态。
@@ -83,21 +101,27 @@ type PlanItem struct {
 	mode string
 	// replaces 是要替换的旧版本的整理记录（状态为 ItemReplace 时）
 	replaces *models.MediaTransferHistory
+	// otherFile 表示监控目录里这个位置上换成了另一个文件，记录管着库里的文件，不整理（见 markOtherFiles）
+	otherFile bool
+	// sourceID 是源文件现在的编号（目录监控的项才读，记进整理记录的 SourceFileID）
+	sourceID string
 }
 
 // Plan 是一个种子的整理计划，预览与执行共用。Problem 不为空时整个种子整理不了。
 type Plan struct {
-	DownloaderID   uint                 `json:"downloader_id"`
-	DownloaderName string               `json:"downloader_name"`
-	Hash           string               `json:"hash"`
-	TaskID         string               `json:"task_id"`
-	Name           string               `json:"name"`
-	SavePath       string               `json:"save_path"`
-	LocalPath      string               `json:"local_path"`
-	Mapped         bool                 `json:"mapped"`
-	Match          *tmdb.Result         `json:"match,omitempty"`
-	Source         string               `json:"source,omitempty"`
-	Library        *models.MediaLibrary `json:"library,omitempty"`
+	DownloaderID   uint   `json:"downloader_id"`
+	DownloaderName string `json:"downloader_name"`
+	Hash           string `json:"hash"`
+	TaskID         string `json:"task_id"`
+	Name           string `json:"name"`
+	SavePath       string `json:"save_path"`
+	LocalPath      string `json:"local_path"`
+	Mapped         bool   `json:"mapped"`
+	// WatchDirID 是目录监控的目录（这次整理的不是下载器里的种子时）
+	WatchDirID uint                 `json:"watch_dir_id,omitempty"`
+	Match      *tmdb.Result         `json:"match,omitempty"`
+	Source     string               `json:"source,omitempty"`
+	Library    *models.MediaLibrary `json:"library,omitempty"`
 	// Category 是放进的二级分类（媒体库开了「按二级分类放进子目录」、规则对得上时才有）
 	Category string          `json:"category,omitempty"`
 	Mode     string          `json:"mode,omitempty"`
@@ -180,17 +204,20 @@ func stemOf(name string) string {
 // 种子整理不了的原因写在 Plan.Problem 里，这时库里已经有的文件标成「已在库里」，其余标成「整理不了」。
 func (s *Service) plan(ctx context.Context, req Request) (*Plan, error) {
 	p, err := s.buildPlan(ctx, req)
-	if err != nil || p.Problem == "" {
+	if err != nil {
 		return p, err
 	}
-	for i := range p.Items {
-		it := &p.Items[i]
-		if it.row != nil && it.row.Status == models.MediaTransferDone && ours(it.row) {
-			it.Status, it.Target = ItemDone, it.row.TargetPath
-			continue
+	if p.Problem != "" {
+		for i := range p.Items {
+			it := &p.Items[i]
+			if it.row != nil && it.row.Status == models.MediaTransferDone && ours(it.row) {
+				it.Status, it.Target = ItemDone, it.row.TargetPath
+				continue
+			}
+			it.Status = ItemFailed
 		}
-		it.Status = ItemFailed
 	}
+	markOtherFiles(p)
 	return p, nil
 }
 
@@ -260,11 +287,14 @@ func priorEntry(p *Plan) (string, int) {
 }
 
 func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
-	if req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "" {
-		return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
-	}
 	if req.TMDBID < 0 || (req.TMDBID > 0 && req.MediaType != tmdb.KindMovie && req.MediaType != tmdb.KindTV) {
 		return nil, fmt.Errorf("%w: 指定条目时要写明类型（movie 或 tv）与 TMDB 编号", ErrInvalid)
+	}
+	if req.WatchDirID > 0 {
+		return s.buildWatchPlan(ctx, req)
+	}
+	if req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "" {
+		return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
 	}
 	dl, setting, err := s.cfg.Downloaders.Get(ctx, req.DownloaderID)
 	if err != nil {
@@ -314,6 +344,11 @@ func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 		}
 		tfs = append(tfs, transfer.File{Rel: rel, Path: filepath.Join(p.LocalPath, filepath.FromSlash(rel)), Size: f.Size})
 	}
+	return s.finishPlan(ctx, p, req, t, tfs, settings)
+}
+
+// finishPlan 是下载器的种子与目录监控的一项共用的部分：选出视频、读整理记录、识别、选媒体库、算目标。
+func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downloader.Torrent, tfs []transfer.File, settings Settings) (*Plan, error) {
 	sel := transfer.Select(tfs, int64(settings.MinVideoMB)<<20)
 	p.Skipped = sel.Skipped
 	switch {
@@ -325,7 +360,12 @@ func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 		return p, nil
 	}
 	for _, v := range sel.Videos {
-		p.Items = append(p.Items, PlanItem{Rel: v.Rel, Source: v.Path, Size: v.Size, Status: ItemPending})
+		it := PlanItem{Rel: v.Rel, Source: v.Path, Size: v.Size, Status: ItemPending}
+		if p.WatchDirID > 0 {
+			// 目录监控按源文件的编号认同一个位置上是不是换了文件（见 markOtherFiles）；移动整理以后就读不到了，先读
+			it.sourceID, _ = transfer.FileID(v.Path)
+		}
+		p.Items = append(p.Items, it)
 	}
 	if err := s.loadRows(ctx, p); err != nil {
 		return nil, err
@@ -347,7 +387,20 @@ func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 	if !s.pickLibrary(ctx, p, req) {
 		return p, nil
 	}
-	if p.Mode == models.MediaModeMove && t.State != downloader.TorrentPaused && t.State != downloader.TorrentStopped {
+	switch {
+	case p.Mode != models.MediaModeMove:
+	case p.WatchDirID > 0:
+		// 目录监控的一项可能是下载器里的种子（监控了下载目录）：移走了种子就没法做种
+		owner, err := s.watchTorrent(ctx, p.contentSrc, p.Name)
+		if err != nil {
+			p.Problem, p.retryable = "移动整理以前要确认「"+p.Name+"」不是下载器里的种子："+err.Error(), true
+			return p, nil
+		}
+		if owner != "" {
+			p.Problem = "「" + p.Name + "」是下载器里的种子（" + owner + "），目录监控不移动下载器里的种子：把媒体库改用硬链接，或不要监控下载目录"
+			return p, nil
+		}
+	case t.State != downloader.TorrentPaused && t.State != downloader.TorrentStopped:
 		p.Problem = "种子还在做种，不能用移动整理：暂停种子后再整理，或把媒体库改用硬链接"
 		return p, nil
 	}
@@ -387,7 +440,10 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 		p.tmdbClient = c
 	}
 	var info models.TorrentInfo
-	_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", p.Hash).Order("id DESC").Limit(1).Find(&info).Error
+	if p.WatchDirID == 0 {
+		// 目录监控的一项不是种子：没有站点给的标题与 IMDb 编号
+		_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", p.Hash).Order("id DESC").Limit(1).Find(&info).Error
+	}
 	p.siteName = info.SiteName
 	source := sourceManual
 	if req.TMDBID == 0 {
@@ -775,6 +831,12 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 	var created []*PlanItem
 	for i := range p.Items {
 		it := &p.Items[i]
+		if it.otherFile {
+			// 记录管着库里的文件，不改成这个新文件的（见 markOtherFiles）
+			res.Skipped++
+			s.noteOtherFile(ctx, it)
+			continue
+		}
 		switch it.Status {
 		case ItemFailed:
 			res.Failed++
@@ -1312,6 +1374,11 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 			res.Done++
 			continue
 		}
+		if it.otherFile {
+			res.Skipped++
+			s.noteOtherFile(ctx, it)
+			continue
+		}
 		it.Status, it.Message = ItemFailed, p.Problem
 		s.record(ctx, p, it, trigger, status, p.Problem, p.retryable, "", nil)
 		res.Failed++
@@ -1332,10 +1399,10 @@ func (s *Service) writeRecord(ctx context.Context, p *Plan, it *PlanItem, trigge
 func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *PlanItem, trigger, status, msg string, retry bool, fileID string, extras []extra) error {
 	now := s.cfg.Now()
 	row := models.MediaTransferHistory{
-		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, InfoHash: p.Hash, TaskID: p.TaskID,
+		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, WatchDirID: p.WatchDirID, InfoHash: p.Hash, TaskID: p.TaskID,
 		TorrentName: truncate(p.Name, 512), SourcePath: it.Source, SaveRoot: p.LocalPath, TargetPath: it.Target, Mode: firstNonEmpty(it.mode, p.Mode),
 		Season: it.Season, Episode: it.Episode, EpisodeEnd: it.EpisodeEnd, Size: it.Size, Status: status,
-		Message: truncate(msg, 1024), Trigger: trigger, TargetFileID: fileID, CreatedAt: now, UpdatedAt: now,
+		Message: truncate(msg, 1024), Trigger: trigger, TargetFileID: fileID, SourceFileID: it.sourceID, CreatedAt: now, UpdatedAt: now,
 	}
 	if p.Library != nil {
 		row.LibraryID = p.Library.ID
@@ -1369,9 +1436,9 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 	err := db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "source_path"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"downloader_id", "downloader_name", "info_hash", "task_id", "torrent_name", "library_id", "save_root", "target_path",
+			"downloader_id", "downloader_name", "watch_dir_id", "info_hash", "task_id", "torrent_name", "library_id", "save_root", "target_path",
 			"extras", "mode", "media_type", "tmdb_id", "title", "year", "season", "episode", "episode_end", "size",
-			"status", "message", "attempts", "next_retry_at", "target_file_id", "trigger", "updated_at",
+			"status", "message", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "updated_at",
 		}),
 	}).Create(&row).Error
 	if err != nil {
@@ -1591,7 +1658,11 @@ func noticeText(p *Plan, created []*PlanItem) (string, string) {
 	if q := vars(m, created[0].meta, p.meta).Quality; q != "" {
 		lines = append(lines, "画质："+q)
 	}
-	lines = append(lines, "媒体库："+p.Library.Name, "种子："+p.Name)
+	if p.WatchDirID > 0 {
+		lines = append(lines, "媒体库："+p.Library.Name, "来自目录监控："+p.Name)
+	} else {
+		lines = append(lines, "媒体库："+p.Library.Name, "种子："+p.Name)
+	}
 	if poster := p.posterURL(m.PosterPath); poster != "" {
 		lines = append(lines, "海报："+poster)
 	}

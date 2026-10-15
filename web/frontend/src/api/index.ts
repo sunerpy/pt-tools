@@ -2510,6 +2510,8 @@ export interface OrganizeSettings {
   min_video_mb: number;
   notify_channels: number[];
   delete_links_on_remove: boolean;
+  /** 扫描监控目录的间隔（分钟） */
+  watch_interval_min: number;
 }
 
 export type OrganizeSettingsInput = Omit<OrganizeSettings, "auto_since">;
@@ -2578,6 +2580,18 @@ export interface MediaCheckItem {
   name: string;
   ok: boolean;
   message?: string;
+}
+
+/** 监控的目录：放进来的视频（不是下载器里的种子）按媒体库整理，目录下的每一项当作一个种子 */
+export interface MediaWatchDirInput {
+  path: string;
+  enabled: boolean;
+}
+
+export interface MediaWatchDir extends MediaWatchDirInput {
+  id: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface MediaPathMapInput {
@@ -2706,7 +2720,9 @@ export interface MediaHistoryItem {
   message: string;
   attempts: number;
   next_retry_at?: string;
-  trigger: "auto" | "scan" | "manual";
+  trigger: "auto" | "scan" | "manual" | "watch";
+  /** 目录监控的目录（不是下载器里的种子时） */
+  watch_dir_id?: number;
   subtitles: number;
   /** 记录里记着 pt-tools 放进库的文件（跳过、失败的记录也可能有），可以连文件删 */
   has_files: boolean;
@@ -2724,6 +2740,12 @@ export const organizeApi = {
   saveSettings: (data: OrganizeSettingsInput) =>
     api.put<OrganizeSettings>("/api/media/organize/settings", data),
   classify: () => api.get<ClassifyView>("/api/media/organize/classify"),
+  watchDirs: () => api.get<MediaWatchDir[]>("/api/media/watch-dirs"),
+  createWatchDir: (data: MediaWatchDirInput) =>
+    api.post<MediaWatchDir>("/api/media/watch-dirs", data),
+  updateWatchDir: (id: number, data: MediaWatchDirInput) =>
+    api.put<MediaWatchDir>(`/api/media/watch-dirs/${id}`, data),
+  deleteWatchDir: (id: number) => api.delete<{ ok: boolean }>(`/api/media/watch-dirs/${id}`),
   saveClassify: (data: ClassifyRules) =>
     api.put<ClassifyView>("/api/media/organize/classify", data),
   preview: (data: OrganizeRequest) => api.post<OrganizePlan>("/api/media/organize/preview", data),

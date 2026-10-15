@@ -12,6 +12,10 @@ const api = vi.hoisted(() => ({
   saveSettings: vi.fn(),
   classify: vi.fn(),
   saveClassify: vi.fn(),
+  watchDirs: vi.fn(),
+  createWatchDir: vi.fn(),
+  updateWatchDir: vi.fn(),
+  deleteWatchDir: vi.fn(),
   libraries: vi.fn(),
   createLibrary: vi.fn(),
   updateLibrary: vi.fn(),
@@ -94,6 +98,7 @@ const settings = {
   min_video_mb: 50,
   notify_channels: [],
   delete_links_on_remove: false,
+  watch_interval_min: 10,
 };
 
 const library = {
@@ -154,6 +159,9 @@ async function mountPage(opts: { libsFail?: boolean } = {}) {
   ]);
   api.servers.mockResolvedValue([server]);
   api.classify.mockResolvedValue({ rules: { movie: [], tv: [] }, presets: classifyPresets });
+  api.watchDirs.mockResolvedValue([
+    { id: 4, path: "/media/incoming", enabled: true, created_at: "", updated_at: "" },
+  ]);
   api.templatePreview.mockResolvedValue({ template: "", preview: "示例路径" });
   dl.list.mockResolvedValue([
     {
@@ -195,6 +203,7 @@ describe("媒体库", () => {
       min_video_mb: 50,
       notify_channels: [],
       delete_links_on_remove: false,
+      watch_interval_min: 10,
     });
     expect(ui.success).toHaveBeenCalledWith("已保存整理设置");
   });
@@ -298,6 +307,42 @@ describe("媒体库", () => {
       expect(ui.warning).toHaveBeenCalledWith("刮削内容至少选一项；不想刮削就关掉刮削"),
     );
     expect(api.updateLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it("目录监控：列表、添加只发输入字段、启停与删除", async () => {
+    await mountPage();
+    await vi.waitFor(() => expect(q("ml-watch-4")).not.toBeNull());
+    expect(q("ml-watch-4")!.textContent).toContain("/media/incoming");
+
+    const add = [...document.querySelectorAll<HTMLButtonElement>("button")].filter((b) =>
+      (b.textContent ?? "").includes("添加"),
+    );
+    // 「目录监控」面板的添加：按面板顺序找到它
+    const watchPanel = q("ml-watch")!.closest(".pt-panel") ?? document.body;
+    const btn = add.find((b) => watchPanel.contains(b)) ?? add[0]!;
+    btn.click();
+    await vi.waitFor(() => expect(q("ml-watch-path")).not.toBeNull());
+    q("ml-watch-save")!.click();
+    await vi.waitFor(() => expect(ui.warning).toHaveBeenCalledWith("填写要监控的目录"));
+    api.createWatchDir.mockResolvedValue({ id: 5, path: "/data/in", enabled: true });
+    fill("ml-watch-path", " /data/in ");
+    q("ml-watch-save")!.click();
+    await vi.waitFor(() => expect(api.createWatchDir).toHaveBeenCalledTimes(1));
+    expect(api.createWatchDir.mock.calls[0]![0]).toEqual({ path: "/data/in", enabled: true });
+
+    api.updateWatchDir.mockResolvedValue({});
+    q("ml-watch-enabled-4")!.click();
+    await vi.waitFor(() =>
+      expect(api.updateWatchDir).toHaveBeenCalledWith(4, {
+        path: "/media/incoming",
+        enabled: false,
+      }),
+    );
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.deleteWatchDir.mockResolvedValue({ ok: true });
+    q("ml-watch-del-4")!.click();
+    await vi.waitFor(() => expect(api.deleteWatchDir).toHaveBeenCalledWith(4));
   });
 
   it("二级分类：填入常用分类、调整顺序、添加与删除，每次整份保存", async () => {

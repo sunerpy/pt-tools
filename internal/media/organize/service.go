@@ -97,6 +97,8 @@ type Service struct {
 	backoff map[string]backoffState
 	// retrying 是到期重试排上队、还没整理完的记录（retryDue 先清掉了它们的重试时间，见 Retrying）
 	retrying map[uint]bool
+	// watchBusy 是扫描排上了、还没整理完的目录监控的项（按 queueHash），整理完就拿掉：整理期间的扫描不再排它
+	watchBusy map[string]bool
 
 	runMu   sync.Mutex
 	running bool
@@ -145,6 +147,8 @@ type Settings struct {
 	MinVideoMB          int        `json:"min_video_mb"`
 	NotifyChannels      []uint     `json:"notify_channels"`
 	DeleteLinksOnRemove bool       `json:"delete_links_on_remove"`
+	// WatchIntervalMin 是扫描监控目录的间隔（分钟）
+	WatchIntervalMin int `json:"watch_interval_min"`
 }
 
 // SettingsInput 是保存设置的请求（AutoSince 由服务在打开自动整理时记下）。
@@ -159,6 +163,8 @@ type SettingsInput struct {
 	MinVideoMB          int      `json:"min_video_mb"`
 	NotifyChannels      []uint   `json:"notify_channels"`
 	DeleteLinksOnRemove bool     `json:"delete_links_on_remove"`
+	// WatchIntervalMin 是扫描监控目录的间隔（分钟）；0 用默认值
+	WatchIntervalMin int `json:"watch_interval_min"`
 }
 
 func (s *Service) loadSettings(ctx context.Context) (models.MediaOrganizeSetting, error) {
@@ -199,9 +205,13 @@ func viewSettings(row models.MediaOrganizeSetting) Settings {
 		Categories: splitList(row.ScopeCategories, ","), Tags: splitList(row.ScopeTags, ","),
 		SavePaths: splitList(row.ScopeSavePaths, "\n"), MinVideoMB: row.MinVideoMB,
 		NotifyChannels: decodeIDs(row.NotifyChannels), DeleteLinksOnRemove: row.DeleteLinksOnRemove,
+		WatchIntervalMin: row.WatchIntervalMin,
 	}
 	if v.ScanIntervalMin <= 0 {
 		v.ScanIntervalMin = DefaultScanIntervalMin
+	}
+	if v.WatchIntervalMin <= 0 {
+		v.WatchIntervalMin = DefaultWatchIntervalMin
 	}
 	if v.MinVideoMB <= 0 {
 		v.MinVideoMB = DefaultMinVideoMB
@@ -260,6 +270,12 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 	if in.ScanIntervalMin < MinScanIntervalMin || in.ScanIntervalMin > MaxScanIntervalMin {
 		return Settings{}, fmt.Errorf("%w: 扫描间隔要在 %d 到 %d 分钟之间", ErrInvalid, MinScanIntervalMin, MaxScanIntervalMin)
 	}
+	if in.WatchIntervalMin == 0 {
+		in.WatchIntervalMin = DefaultWatchIntervalMin
+	}
+	if in.WatchIntervalMin < MinWatchIntervalMin || in.WatchIntervalMin > MaxWatchIntervalMin {
+		return Settings{}, fmt.Errorf("%w: 目录监控的扫描间隔要在 %d 到 %d 分钟之间", ErrInvalid, MinWatchIntervalMin, MaxWatchIntervalMin)
+	}
 	if in.MinVideoMB == 0 {
 		in.MinVideoMB = DefaultMinVideoMB
 	}
@@ -304,13 +320,13 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 	row.AutoEnabled, row.ScanEnabled, row.ScanIntervalMin = in.AutoEnabled, in.ScanEnabled, in.ScanIntervalMin
 	row.ScopeDownloaders, row.NotifyChannels = string(dlJSON), string(chJSON)
 	row.ScopeCategories, row.ScopeTags, row.ScopeSavePaths = strings.Join(cats, ","), strings.Join(tags, ","), strings.Join(paths, "\n")
-	row.MinVideoMB, row.DeleteLinksOnRemove = in.MinVideoMB, in.DeleteLinksOnRemove
+	row.MinVideoMB, row.DeleteLinksOnRemove, row.WatchIntervalMin = in.MinVideoMB, in.DeleteLinksOnRemove, in.WatchIntervalMin
 	row.UpdatedAt = s.cfg.Now()
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"auto_enabled", "auto_since", "scan_enabled", "scan_interval_min", "scope_downloaders", "scope_categories",
-			"scope_tags", "scope_save_paths", "min_video_mb", "notify_channels", "delete_links_on_remove", "updated_at",
+			"scope_tags", "scope_save_paths", "min_video_mb", "notify_channels", "delete_links_on_remove", "watch_interval_min", "updated_at",
 		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存整理设置失败: %w", err)

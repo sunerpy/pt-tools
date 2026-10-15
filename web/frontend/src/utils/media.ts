@@ -357,7 +357,10 @@ export const HISTORY_FILTERS: readonly { value: "" | MediaTransferStatus; label:
 ];
 
 export function triggerLabel(trigger: string): string {
-  return { auto: "下载完成后自动", scan: "定期扫描", manual: "手动" }[trigger] ?? trigger;
+  return (
+    { auto: "下载完成后自动", scan: "定期扫描", manual: "手动", watch: "目录监控" }[trigger] ??
+    trigger
+  );
 }
 
 const ITEM_STATUS: Record<OrganizeItemStatus, { label: string; tone: Tone }> = {

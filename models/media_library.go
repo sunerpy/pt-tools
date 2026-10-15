@@ -59,6 +59,19 @@ type MediaPathMap struct {
 
 func (MediaPathMap) TableName() string { return "media_path_maps" }
 
+// MediaWatchDir 是监控的目录：放进来的视频（不是下载器里的种子，例如手动拷进来、别的工具下载的）按媒体库整理。
+// 目录下的每一项（一个文件，或一个文件夹）当作一个种子：名字用来识别，里面的视频按媒体库的方式整理。
+type MediaWatchDir struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Path 是 pt-tools 里看到的目录（绝对路径）
+	Path      string    `gorm:"size:1024;not null;uniqueIndex" json:"path"`
+	Enabled   bool      `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (MediaWatchDir) TableName() string { return "media_watch_dirs" }
+
 // 媒体服务器的种类与刷新方式。
 const (
 	MediaServerEmby     = "emby"
@@ -110,6 +123,8 @@ type MediaOrganizeSetting struct {
 	NotifyChannels string `gorm:"type:text;not null;default:''" json:"-"`
 	// DeleteLinksOnRemove：种子连数据一起删掉后，把从它整理出的硬链接与软链接也删掉（复制的文件不删）
 	DeleteLinksOnRemove bool `gorm:"not null;default:false" json:"delete_links_on_remove"`
+	// WatchIntervalMin 是目录监控扫描的间隔（分钟）；0 用默认值
+	WatchIntervalMin int `gorm:"not null;default:0" json:"watch_interval_min"`
 	// ClassifyRules 是二级分类的规则（JSON，见 organize.ClassifyRules）；空串是没有规则
 	ClassifyRules string    `gorm:"type:text;not null;default:''" json:"-"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -128,6 +143,8 @@ const (
 	MediaTriggerAuto   = "auto"
 	MediaTriggerScan   = "scan"
 	MediaTriggerManual = "manual"
+	// MediaTriggerWatch 是目录监控发现的（不是下载器里的种子）
+	MediaTriggerWatch = "watch"
 )
 
 // MediaTransferHistory 是一个视频文件的整理记录。源文件（pt-tools 里的路径）唯一：同一个文件只整理一次，
@@ -136,11 +153,13 @@ type MediaTransferHistory struct {
 	ID             uint   `gorm:"primaryKey" json:"id"`
 	DownloaderID   uint   `gorm:"not null;default:0;index" json:"downloader_id"`
 	DownloaderName string `gorm:"size:64;not null;default:''" json:"downloader_name"`
-	InfoHash       string `gorm:"size:64;not null;default:'';index" json:"info_hash"`
-	TaskID         string `gorm:"size:128;not null;default:''" json:"task_id"`
-	TorrentName    string `gorm:"size:512;not null;default:''" json:"torrent_name"`
-	LibraryID      uint   `gorm:"not null;default:0;index" json:"library_id"`
-	SourcePath     string `gorm:"size:2048;not null;uniqueIndex" json:"source_path"`
+	// WatchDirID 是目录监控的目录（MediaWatchDir）：不为 0 时这条不是下载器里的种子，DownloaderID 为 0，TorrentName 是目录下那一项的名字
+	WatchDirID  uint   `gorm:"not null;default:0;index" json:"watch_dir_id"`
+	InfoHash    string `gorm:"size:64;not null;default:'';index" json:"info_hash"`
+	TaskID      string `gorm:"size:128;not null;default:''" json:"task_id"`
+	TorrentName string `gorm:"size:512;not null;default:''" json:"torrent_name"`
+	LibraryID   uint   `gorm:"not null;default:0;index" json:"library_id"`
+	SourcePath  string `gorm:"size:2048;not null;uniqueIndex" json:"source_path"`
 	// SaveRoot 是整理时种子保存目录在 pt-tools 里的路径：清理入库链接前确认它还在（下载目录没挂载时不清理）
 	SaveRoot   string `gorm:"size:2048;not null;default:''" json:"-"`
 	TargetPath string `gorm:"size:2048;not null;default:''" json:"target_path"`
@@ -161,7 +180,10 @@ type MediaTransferHistory struct {
 	// NextRetryAt 是失败后下次自动重试的时间；为空的不自动重试（例如没识别出来，要先纠正）
 	NextRetryAt *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
 	// TargetFileID 是整理出的文件的设备号与 inode（Windows 是卷序列号与文件索引），删除库里的文件前用它确认还是这个文件
-	TargetFileID string    `gorm:"size:64;not null;default:''" json:"-"`
+	TargetFileID string `gorm:"size:64;not null;default:''" json:"-"`
+	// SourceFileID 是整理时源文件的编号（同 TargetFileID 的格式）：目录监控按它认同一个位置上是不是换成了另一个文件。
+	// 下载器的种子不记（种子按 info hash 认）
+	SourceFileID string    `gorm:"size:64;not null;default:''" json:"-"`
 	Trigger      string    `gorm:"size:16;not null;default:''" json:"trigger"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
