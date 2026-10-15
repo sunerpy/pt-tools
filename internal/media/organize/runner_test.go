@@ -3,6 +3,7 @@ package organize
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -627,7 +628,7 @@ func TestRetryDueMixedTriggersOnOneTorrent(t *testing.T) {
 func TestRuns(t *testing.T) {
 	e := newEnv(t)
 	set := e.settings(SettingsInput{ScanEnabled: true, ScanIntervalMin: 30, WatchIntervalMin: 10})
-	rt := e.svc.Runs(set)
+	rt := e.svc.Runs(e.ctx, set)
 	assert.Nil(t, rt.ScanNext, "后台没在跑")
 	assert.Nil(t, rt.ScanLast)
 
@@ -639,16 +640,21 @@ func TestRuns(t *testing.T) {
 		e.svc.running = false
 		e.svc.runMu.Unlock()
 	})
-	rt = e.svc.Runs(set)
+	rt = e.svc.Runs(e.ctx, set)
 	require.NotNil(t, rt.ScanNext)
 	assert.Equal(t, e.Now(), *rt.ScanNext, "还没扫过：下一拍就扫")
+	assert.Nil(t, rt.WatchNext, "没有开着的监控目录")
+	in := filepath.Join(e.root, "incoming")
+	require.NoError(t, os.MkdirAll(in, 0o755))
+	_, err := e.svc.SaveWatchDir(e.ctx, 0, WatchDirInput{Path: in, Enabled: true})
+	require.NoError(t, err)
 	e.svc.markRun(&e.svc.scanAt, e.Now())
 	e.svc.markRun(&e.svc.watchAt, e.Now())
-	rt = e.svc.Runs(set)
+	rt = e.svc.Runs(e.ctx, set)
 	assert.Equal(t, e.Now(), *rt.ScanLast)
 	assert.Equal(t, e.Now().Add(30*time.Minute), *rt.ScanNext)
 	assert.Equal(t, e.Now().Add(10*time.Minute), *rt.WatchNext)
 
 	set.ScanEnabled = false
-	assert.Nil(t, e.svc.Runs(set).ScanNext, "定期扫描关着")
+	assert.Nil(t, e.svc.Runs(e.ctx, set).ScanNext, "定期扫描关着")
 }

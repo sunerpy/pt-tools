@@ -818,7 +818,7 @@ onMounted(refresh);
             <span>分钟扫一次下面「目录监控」里开着的目录</span>
           </div>
           <div
-            v-if="watchDirs.length && watchRunText"
+            v-if="watchDirs.some((d) => d.enabled) && watchRunText"
             class="field-tip"
             data-testid="ml-watch-runs">
             {{ watchRunText }}

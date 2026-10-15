@@ -680,8 +680,12 @@ type RunTimes struct {
 	WatchNext *time.Time `json:"watch_next,omitempty"`
 }
 
-// Runs 是按设置 set 算的上一次与下一次扫描的时间（见 RunTimes）。
-func (s *Service) Runs(set Settings) RunTimes {
+// Runs 是按设置 set 算的上一次与下一次扫描的时间（见 RunTimes）。目录监控没有开着的目录时没有下一次（扫描只看开着的）。
+func (s *Service) Runs(ctx context.Context, set Settings) RunTimes {
+	var watching int64
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaWatchDir{}).Where("enabled = ?", true).Count(&watching).Error; err != nil {
+		watching = 0
+	}
 	s.timesMu.Lock()
 	scanAt, watchAt := s.scanAt, s.watchAt
 	s.timesMu.Unlock()
@@ -704,6 +708,6 @@ func (s *Service) Runs(set Settings) RunTimes {
 	}
 	var rt RunTimes
 	rt.ScanLast, rt.ScanNext = at(scanAt, set.ScanEnabled, set.ScanIntervalMin)
-	rt.WatchLast, rt.WatchNext = at(watchAt, true, set.WatchIntervalMin)
+	rt.WatchLast, rt.WatchNext = at(watchAt, watching > 0, set.WatchIntervalMin)
 	return rt
 }
