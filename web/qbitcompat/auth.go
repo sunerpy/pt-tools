@@ -96,6 +96,19 @@ func (s *sessions) get(sid string, now time.Time) (session, bool) {
 	return out, true
 }
 
+// count 是没过期的会话数。
+func (s *sessions) count(now time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, v := range s.m {
+		if now.Sub(v.seen) <= sessionTTL {
+			n++
+		}
+	}
+	return n
+}
+
 func (s *sessions) drop(sid string) {
 	s.mu.Lock()
 	delete(s.m, sid)
@@ -177,6 +190,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, _ *call) {
 	ip := clientIP(r)
 	now := s.deps.Now()
 	if s.lock.locked(ip, now) {
+		s.lastFail.Store(&LoginRecord{At: now, IP: ip, Result: "locked"})
 		text(w, http.StatusForbidden, "Your IP address has been banned for too many failed login attempts.")
 		return
 	}
@@ -197,6 +211,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, _ *call) {
 		if err == nil {
 			reason = "denied:scope"
 		}
+		s.lastFail.Store(&LoginRecord{At: now, IP: ip, Username: username, Result: strings.TrimPrefix(reason, "denied:")})
 		s.record(r, app.AuditEntry{
 			ChannelUserID: "ip:" + ip, Command: "POST /api/v2/auth/login", Result: reason,
 			Args: map[string]any{"username": username},
@@ -211,6 +226,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, _ *call) {
 	}
 	s.lock.reset(ip)
 	s.sessions.put(sid, &session{tokenID: tok.ID, username: username, seen: now})
+	s.lastOK.Store(&LoginRecord{At: now, IP: ip, Username: username, TokenID: tok.ID, Result: "ok"})
 	http.SetCookie(w, &http.Cookie{Name: "SID", Value: sid, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	text(w, http.StatusOK, "Ok.")
 }

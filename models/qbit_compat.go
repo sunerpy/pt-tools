@@ -9,6 +9,9 @@ type QbitCompatSetting struct {
 	DownloaderID uint `gorm:"not null;default:0" json:"downloader_id"`
 	// FullControl 打开后，写接口能动下载器里的全部种子；关着时只动经兼容入口加的
 	FullControl bool `gorm:"not null;default:false" json:"full_control"`
+	// ListenAddr 是在网页上设的监听地址（host:port）；空串是不开。启动参数 --qbit-compat-addr 或环境变量
+	// PT_QBIT_COMPAT_ADDR 给了地址时用那个，这里的不管用
+	ListenAddr string `gorm:"size:128;not null;default:''" json:"listen_addr"`
 	// Categories 是客户端用 createCategory 建的分类（JSON：名字 → 保存目录）；加种子时没给目录就用它
 	Categories string `gorm:"type:text;not null;default:''" json:"-"`
 	// Tags 是客户端用 createTags 建的标签（JSON 数组）
