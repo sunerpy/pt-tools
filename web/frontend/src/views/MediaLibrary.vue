@@ -431,7 +431,6 @@ const watchDirs = ref<MediaWatchDir[]>([]);
 const watchDS = useDataState();
 const watchDialog = ref(false);
 const watchSaving = ref(false);
-const editingWatchID = ref<number | null>(null);
 const watchForm = ref<MediaWatchDirInput>({ path: "", enabled: true });
 
 async function loadWatchDirs() {
@@ -441,9 +440,9 @@ async function loadWatchDirs() {
   watchDirs.value = data;
 }
 
-function openWatchDir(d?: MediaWatchDir) {
-  editingWatchID.value = d?.id ?? null;
-  watchForm.value = d ? { path: d.path, enabled: d.enabled } : { path: "", enabled: true };
+// 只能添加：路径不能改（排着的整理与整理记录只记着目录的编号），要换目录就删掉再添加
+function openWatchDir() {
+  watchForm.value = { path: "", enabled: true };
   watchDialog.value = true;
 }
 
@@ -455,9 +454,7 @@ async function saveWatchDir() {
   }
   watchSaving.value = true;
   try {
-    const body = { ...f, path: f.path.trim() };
-    if (editingWatchID.value) await organizeApi.updateWatchDir(editingWatchID.value, body);
-    else await organizeApi.createWatchDir(body);
+    await organizeApi.createWatchDir({ ...f, path: f.path.trim() });
     ElMessage.success("已保存监控目录");
     watchDialog.value = false;
     await loadWatchDirs();
@@ -1107,9 +1104,6 @@ onMounted(refresh);
               @update:model-value="
                 (v: string | number | boolean) => toggleWatchDir(d, Boolean(v))
               " />
-            <el-button link :data-testid="`ml-watch-edit-${d.id}`" @click="openWatchDir(d)"
-              >编辑</el-button
-            >
             <el-button
               link
               type="danger"
@@ -1557,7 +1551,7 @@ onMounted(refresh);
     <el-dialog
       v-model="watchDialog"
       class="pt-dialog"
-      :title="editingWatchID ? '编辑监控目录' : '添加监控目录'"
+      title="添加监控目录"
       :width="isMobile ? '94%' : '520px'"
       align-center>
       <el-form class="pt-form" label-position="top" @submit.prevent>
@@ -1567,7 +1561,7 @@ onMounted(refresh);
             placeholder="/media/incoming"
             data-testid="ml-watch-path" />
           <div class="field-tip">
-            按各个媒体库的整理方式放进库里；用硬链接时，这个目录要和媒体库在同一个分区上
+            按各个媒体库的整理方式放进库里；用硬链接时，这个目录要和媒体库在同一个分区上。添加以后路径不能改，要换目录就删掉再添加
           </div>
         </el-form-item>
         <el-form-item label="启用">

@@ -179,7 +179,7 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 		return LibraryView{}, fmt.Errorf("读取监控目录失败: %w", err)
 	}
 	for _, d := range dirs {
-		if samePath(d.Path, row.Path) || transfer.Within(d.Path, row.Path) || transfer.Within(row.Path, d.Path) {
+		if overlaps(d.Path, row.Path) {
 			return LibraryView{}, fmt.Errorf("%w: 媒体库的目录不能是监控目录 %s，也不能在它里面或包含它", ErrInvalid, d.Path)
 		}
 	}

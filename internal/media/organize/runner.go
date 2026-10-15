@@ -229,15 +229,21 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 		}
 		j.req.DownloaderID = setting.ID
 	}
-	// 目录监控发现的（包括失败后的重试）：目录关了或删了就不整理，过一阵再看
+	// 目录监控发现的（包括失败后的重试）：目录关了就不整理，过一阵再看；删了就不再重试。
+	// 扫描排队时记下了这一项（watchSeen），没整理就忘掉，重新打开目录以后扫描会再排它
 	if j.trigger == models.MediaTriggerWatch {
-		on, err := s.watchEnabled(ctx, j.req.WatchDirID)
+		dir, err := s.watchDir(ctx, j.req.WatchDirID)
 		if err != nil {
 			s.fail(ctx, j)
 			return nil, err
 		}
-		if !on {
-			s.releaseLease(ctx, j, s.cfg.Now().Add(retryOutOfScope))
+		if dir.ID == 0 || !dir.Enabled {
+			s.forgetWatch(j.req.queueHash())
+			var next time.Time
+			if dir.ID != 0 {
+				next = s.cfg.Now().Add(retryOutOfScope)
+			}
+			s.releaseLease(ctx, j, next)
 			return nil, nil
 		}
 	}

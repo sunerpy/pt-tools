@@ -101,6 +101,8 @@ type PlanItem struct {
 	mode string
 	// replaces 是要替换的旧版本的整理记录（状态为 ItemReplace 时）
 	replaces *models.MediaTransferHistory
+	// otherFile 表示监控目录里这个位置上换成了另一个文件，记录管着库里的文件，不整理（见 markOtherFiles）
+	otherFile bool
 }
 
 // Plan 是一个种子的整理计划，预览与执行共用。Problem 不为空时整个种子整理不了。
@@ -200,17 +202,20 @@ func stemOf(name string) string {
 // 种子整理不了的原因写在 Plan.Problem 里，这时库里已经有的文件标成「已在库里」，其余标成「整理不了」。
 func (s *Service) plan(ctx context.Context, req Request) (*Plan, error) {
 	p, err := s.buildPlan(ctx, req)
-	if err != nil || p.Problem == "" {
+	if err != nil {
 		return p, err
 	}
-	for i := range p.Items {
-		it := &p.Items[i]
-		if it.row != nil && it.row.Status == models.MediaTransferDone && ours(it.row) {
-			it.Status, it.Target = ItemDone, it.row.TargetPath
-			continue
+	if p.Problem != "" {
+		for i := range p.Items {
+			it := &p.Items[i]
+			if it.row != nil && it.row.Status == models.MediaTransferDone && ours(it.row) {
+				it.Status, it.Target = ItemDone, it.row.TargetPath
+				continue
+			}
+			it.Status = ItemFailed
 		}
-		it.Status = ItemFailed
 	}
+	markOtherFiles(p)
 	return p, nil
 }
 
@@ -379,7 +384,7 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 	case p.Mode != models.MediaModeMove:
 	case p.WatchDirID > 0:
 		// 目录监控的一项可能是下载器里的种子（监控了下载目录）：移走了种子就没法做种
-		owner, err := s.watchTorrent(ctx, p.contentSrc)
+		owner, err := s.watchTorrent(ctx, p.contentSrc, p.Name)
 		if err != nil {
 			p.Problem, p.retryable = "移动整理以前要确认「"+p.Name+"」不是下载器里的种子："+err.Error(), true
 			return p, nil
@@ -819,6 +824,12 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 	var created []*PlanItem
 	for i := range p.Items {
 		it := &p.Items[i]
+		if it.otherFile {
+			// 记录管着库里的文件，不改成这个新文件的（见 markOtherFiles）
+			res.Skipped++
+			s.noteOtherFile(ctx, it)
+			continue
+		}
 		switch it.Status {
 		case ItemFailed:
 			res.Failed++
@@ -1354,6 +1365,11 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 		// 已经整理好、库里还是那个文件的（plan 标成了 ItemDone）不因为这次识别失败改成失败
 		if it.Status == ItemDone {
 			res.Done++
+			continue
+		}
+		if it.otherFile {
+			res.Skipped++
+			s.noteOtherFile(ctx, it)
 			continue
 		}
 		it.Status, it.Message = ItemFailed, p.Problem
