@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -197,4 +198,44 @@ func TestQbitCompatLogins(t *testing.T) {
 	assert.Equal(t, "ok", v.LastLogin.Result)
 	require.NotNil(t, v.LastFailure)
 	assert.Equal(t, "scope", v.LastFailure.Result, "最近一次失败是令牌没有 qB 兼容权限")
+}
+
+type blockingCompatControl struct {
+	fakeCompatControl
+	gate chan struct{}
+}
+
+func (b *blockingCompatControl) Apply(addr string) error {
+	if addr == "127.0.0.1:18091" {
+		<-b.gate
+	}
+	return b.fakeCompatControl.Apply(addr)
+}
+
+// 两个页面同时保存：存设置与换监听一次只做一个，存下的地址与最后一次换的监听是同一个
+func TestQbitCompatSaveSerialized(t *testing.T) {
+	e := newAppEnv(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.QbitCompatSetting{}, &models.QbitCompatTorrent{}, &models.DownloaderSetting{}))
+	ctl := &blockingCompatControl{gate: make(chan struct{})}
+	e.srv.SetQbitCompatControl(ctl)
+	put := func(addr string, done chan<- int) {
+		w := e.do(appReq{method: http.MethodPut, path: "/api/qbit-compat", session: true, body: `{"downloader_id":0,"full_control":false,"listen_addr":"` + addr + `"}`})
+		done <- w.Code
+	}
+	stored := func() string {
+		row, err := qbitcompat.LoadSettings(t.Context(), global.GlobalDB.DB)
+		require.NoError(t, err)
+		return row.ListenAddr
+	}
+	a, b := make(chan int, 1), make(chan int, 1)
+	go put("127.0.0.1:18091", a)
+	require.Eventually(t, func() bool { return stored() == "127.0.0.1:18091" }, 2*time.Second, 10*time.Millisecond)
+	go put("127.0.0.1:18092", b)
+	assert.Never(t, func() bool { return stored() == "127.0.0.1:18092" }, 300*time.Millisecond, 20*time.Millisecond, "前一次还在换监听：后一次等着，不先存")
+	close(ctl.gate)
+	assert.Equal(t, http.StatusOK, <-a)
+	assert.Equal(t, http.StatusOK, <-b)
+	assert.Equal(t, "127.0.0.1:18092", stored())
+	assert.Equal(t, []string{"127.0.0.1:18091", "127.0.0.1:18092"}, ctl.applied)
+	assert.Equal(t, "127.0.0.1:18092", ctl.Runtime().Addr)
 }

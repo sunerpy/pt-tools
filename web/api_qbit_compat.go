@@ -182,7 +182,15 @@ func (s *Server) apiQbitCompatPut(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrictBody(w, r, &in) {
 		return
 	}
+	// 存设置与换监听一次只做一个：两个页面同时保存时，存下的地址与实际监听的地址是同一次的
+	s.qbitCompatMu.Lock()
 	row, err := qbitcompat.SaveSettings(r.Context(), global.GlobalDB.DB, in)
+	if err == nil && in.ListenAddr != nil && s.qbitCompatCtl != nil {
+		if aerr := s.qbitCompatCtl.Apply(row.ListenAddr); aerr != nil {
+			global.GetSlogger().Warnf("qB 兼容入口按新设置监听 %s 失败: %v", row.ListenAddr, aerr)
+		}
+	}
+	s.qbitCompatMu.Unlock()
 	if errors.Is(err, qbitcompat.ErrInvalid) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -190,11 +198,6 @@ func (s *Server) apiQbitCompatPut(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	if in.ListenAddr != nil && s.qbitCompatCtl != nil {
-		if aerr := s.qbitCompatCtl.Apply(row.ListenAddr); aerr != nil {
-			global.GetSlogger().Warnf("qB 兼容入口按新设置监听 %s 失败: %v", row.ListenAddr, aerr)
-		}
 	}
 	v, err := s.qbitCompatView(r, row)
 	if err != nil {

@@ -218,3 +218,43 @@ func TestQbitCompatShutdownForcesClose(t *testing.T) {
 		t.Fatal("连接没有被断开")
 	}
 }
+
+// 换地址时旧监听上有不理会取消的请求：在锁外等它收尾，Runtime 与退出不被挡住；等的时候退出了，就不再开新的
+func TestQbitCompatApplyDrainAndShutdown(t *testing.T) {
+	c, srv := newTestCompat(t)
+	c.stopTimeout = 2 * time.Second
+	a1 := freeAddr(t)
+	require.NoError(t, c.Apply(a1))
+	release, entered := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	c.cur.Handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		close(entered)
+		<-release
+	})
+	go func() {
+		if resp, err := http.Get("http://" + a1 + "/api/v2/app/version"); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-entered
+
+	a2 := freeAddr(t)
+	applied := make(chan error, 1)
+	go func() { applied <- c.Apply(a2) }()
+	assert.Eventually(t, func() bool { return c.Runtime().Want == a2 }, 2*time.Second, 10*time.Millisecond, "等旧监听收尾时 Runtime 不被挡住")
+	assert.Empty(t, srv.QbitCompatAddr(), "旧的已经摘下来")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	require.Error(t, c.Shutdown(ctx), "旧监听还在收尾：等到 ctx 结束")
+	assert.Less(t, time.Since(start), time.Second, "退出不等 Apply 持有的锁")
+	select {
+	case err := <-applied:
+		require.Error(t, err, "等的时候退出了：不再开新的")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Apply 没有返回")
+	}
+	assert.Empty(t, c.Runtime().Addr)
+	assert.Eventually(t, closed(a2), time.Second, 50*time.Millisecond)
+}

@@ -80,6 +80,8 @@ func (c *compatServer) Shutdown(ctx context.Context) error {
 // （地址由启动参数或环境变量给的时候不换）。每次监听用一个新的 http.Server，兼容入口本身（会话、登录锁）不变。
 type compatControl struct {
 	qc *qbitcompat.Server
+	// stopTimeout 是换地址时最多等旧监听上的请求收尾多久（测试里改短）
+	stopTimeout time.Duration
 
 	mu     sync.Mutex
 	cur    *compatServer
@@ -88,6 +90,10 @@ type compatControl struct {
 	source string // want 从哪来：flag、env、settings
 	err    error  // want 监听失败的原因
 	closed bool
+	// gen 每次 Apply 加一：等旧监听收尾（在锁外）的时候又改了设置，就不再按这一次的地址开
+	gen uint64
+	// draining 是换地址时还在收尾的旧监听（Shutdown 也等它们）
+	draining sync.WaitGroup
 }
 
 // qbitCompatListenAddr 是兼容入口的监听地址与它从哪来：参数优先，其次环境变量，再次网页上存的；都没有时不开。
@@ -111,7 +117,7 @@ func newQbitCompat(db *gorm.DB, srv *web.Server, mgr *scheduler.Manager, store *
 		Push: internal.PushTorrentToDownloader,
 		Site: enabledSite(store),
 	})
-	c := &compatControl{qc: qc}
+	c := &compatControl{qc: qc, stopTimeout: 10 * time.Second}
 	var saved string
 	if db != nil {
 		row, err := qbitcompat.LoadSettings(context.Background(), db)
@@ -147,29 +153,62 @@ func (c *compatControl) Runtime() web.QbitCompatRuntime {
 }
 
 // Apply 按网页上设的地址重新监听（空串是关掉）：地址没变、正在监听时不动；地址由启动参数或环境变量给的时候不动。
+// 旧的监听先从锁里摘下来，在锁外等它收尾（最多 stopTimeout），再开新的：等的时候 Runtime、Shutdown 不被挡住；
+// 这期间退出了或者又改了设置，就不再开。
 func (c *compatControl) Apply(addr string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closed {
+		c.mu.Unlock()
 		return errors.New("pt-tools 正在退出")
 	}
-	if c.source == "flag" || c.source == "env" {
+	if c.source == "flag" || c.source == "env" || (addr == c.want && (addr == "" || c.cur != nil)) {
+		c.mu.Unlock()
 		return nil
 	}
-	if addr == c.want && (addr == "" || c.cur != nil) {
-		return nil
-	}
-	c.stopLocked()
+	old := c.cur
+	c.cur, c.addr = nil, ""
 	c.want, c.source, c.err = addr, "", nil
+	if addr != "" {
+		c.source = "settings"
+	}
+	c.gen++
+	gen := c.gen
+	if old != nil {
+		c.draining.Add(1)
+	}
+	c.mu.Unlock()
+	if old != nil {
+		c.qc.SetAddr("")
+		c.drain(old)
+	}
 	if addr == "" {
 		global.GetSlogger().Info("qB 兼容入口已按设置关闭")
 		return nil
 	}
-	c.source = "settings"
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case c.closed:
+		return errors.New("pt-tools 正在退出")
+	case c.gen != gen:
+		// 等旧监听收尾的时候设置又改了：按新的那次开
+		return nil
+	}
 	return c.listenLocked(addr)
 }
 
-// Shutdown 停止监听（退出时）；之后的 Apply 不再开。
+// drain 等换下来的旧监听收尾（最多 stopTimeout，等不到就强行断开）。
+func (c *compatControl) drain(old *compatServer) {
+	defer c.draining.Done()
+	ctx, cancel := context.WithTimeout(context.Background(), c.stopTimeout)
+	defer cancel()
+	if err := old.Shutdown(ctx); err != nil {
+		global.GetSlogger().Warnf("qB 兼容入口换监听时没等到旧监听上的请求收尾: %v", err)
+	}
+}
+
+// Shutdown 停止监听（退出时）：先标记关闭（之后的 Apply 不再开），再在锁外关掉现在的监听，并等换地址时还在收尾的旧监听，
+// 都以 ctx 为限。
 func (c *compatControl) Shutdown(ctx context.Context) error {
 	c.mu.Lock()
 	c.closed = true
@@ -177,10 +216,23 @@ func (c *compatControl) Shutdown(ctx context.Context) error {
 	c.cur, c.addr = nil, ""
 	c.mu.Unlock()
 	c.qc.SetAddr("")
-	if cur == nil {
-		return nil
+	var err error
+	if cur != nil {
+		err = cur.Shutdown(ctx)
 	}
-	return cur.Shutdown(ctx)
+	done := make(chan struct{})
+	go func() {
+		c.draining.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if err == nil {
+			err = ctx.Err()
+		}
+	}
+	return err
 }
 
 func (c *compatControl) listenLocked(addr string) error {
@@ -205,18 +257,4 @@ func (c *compatControl) listenLocked(addr string) error {
 	}()
 	global.GetSlogger().Infof("qB 兼容入口启动于 %s", c.addr)
 	return nil
-}
-
-// stopLocked 停掉现在的监听（换地址或按设置关掉时）：最多等 10 秒让进行中的请求收尾。
-func (c *compatControl) stopLocked() {
-	if c.cur == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := c.cur.Shutdown(ctx); err != nil {
-		global.GetSlogger().Warnf("qB 兼容入口停止监听 %s 时没等到请求收尾: %v", c.addr, err)
-	}
-	c.cur, c.addr = nil, ""
-	c.qc.SetAddr("")
 }

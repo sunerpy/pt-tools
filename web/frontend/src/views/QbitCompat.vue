@@ -266,7 +266,7 @@ onMounted(load);
           <li>
             <span class="qc-k">监听</span>
             <PtStatusPill v-if="status.listening" tone="ok" dot size="sm">在监听</PtStatusPill>
-            <PtStatusPill v-else-if="status.listen_error" tone="danger" dot size="sm"
+            <PtStatusPill v-else-if="status.listen_error" tone="dang" dot size="sm"
               >开启失败</PtStatusPill
             >
             <PtStatusPill v-else tone="warn" dot size="sm">没有开启</PtStatusPill>
