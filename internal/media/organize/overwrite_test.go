@@ -1,6 +1,7 @@
 package organize
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -249,6 +250,7 @@ func TestRecoverReplacements(t *testing.T) {
 		Temp: sideName(old.TargetPath, "new"), Backup: sideName(old.TargetPath, "old"), Committed: true,
 	}
 	require.NoError(t, os.Rename(old.TargetPath, j3.Backup))
+	j3.BackupID, _ = fileIDOf(j3.Backup)
 	require.NoError(t, os.Link(newSrc, old.TargetPath))
 	j3.TempID, _ = fileIDOf(old.TargetPath)
 	require.NoError(t, e.db.Create(&j3).Error)
@@ -344,4 +346,51 @@ func TestUndoReplaceKeepsJournalOnStatError(t *testing.T) {
 	var n int64
 	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
 	assert.EqualValues(t, 1, n)
+}
+
+// 已提交的替换收尾：备份名上的文件换过了（例如旧记录被删以后有人放了别的文件）就不删；
+// 上一次已经删了备份、之后目标上的视频被换掉时不再放新字幕
+func TestFinishReplaceVerifiesBackupAndTarget(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	old := e.rowOf(ep1Old)
+	newDir := filepath.Join(e.dlDir, "The.Last.of.Us.S01E01.2160p.BluRay")
+	newSrc := filepath.Join(newDir, "The.Last.of.Us.S01E01.2160p.BluRay.mkv")
+
+	// 备份名上换成了别人的文件：编号对不上，不删
+	j := models.MediaReplaceJournal{
+		OldID: 9999, Source: newSrc, Mode: models.MediaModeHardlink, Target: old.TargetPath,
+		Temp: sideName(old.TargetPath, "new"), Backup: sideName(old.TargetPath, "old"), Committed: true,
+	}
+	require.NoError(t, os.Rename(old.TargetPath, j.Backup))
+	j.BackupID, _ = fileIDOf(j.Backup)
+	require.NoError(t, os.Remove(j.Backup))
+	require.NoError(t, os.WriteFile(j.Backup, []byte("someone else's"), 0o644))
+	require.NoError(t, os.Link(newSrc, old.TargetPath))
+	j.TempID, _ = fileIDOf(old.TargetPath)
+	require.NoError(t, e.db.Create(&j).Error)
+	e.svc.recoverReplacements(e.ctx)
+	assert.Equal(t, "someone else's", readFile(t, j.Backup), "别人的文件留着")
+	require.NoError(t, os.Remove(j.Backup))
+
+	// 备份已经删了、目标上的视频被换掉：不放新字幕，日志删掉
+	sub := strings.TrimSuffix(old.TargetPath, ".mkv") + ".zh-CN.srt"
+	require.NoError(t, os.Remove(sub))
+	subs, _ := json.Marshal([]SubtitlePlan{{Source: filepath.Join(newDir, "The.Last.of.Us.S01E01.2160p.BluRay.chs.srt"), Target: sub}})
+	j2 := models.MediaReplaceJournal{
+		OldID: old.ID, Source: newSrc, Mode: models.MediaModeHardlink, Target: old.TargetPath,
+		Temp: sideName(old.TargetPath, "new"), Backup: sideName(old.TargetPath, "old"), TempID: j.TempID, Subs: string(subs), Committed: true,
+	}
+	require.NoError(t, os.Remove(old.TargetPath))
+	require.NoError(t, os.WriteFile(old.TargetPath, []byte("another video"), 0o644))
+	require.NoError(t, e.db.Create(&j2).Error)
+	e.svc.recoverReplacements(e.ctx)
+	assert.False(t, exists(sub), "视频对不上，不放字幕")
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Where("id = ?", j2.ID).Count(&n).Error)
+	assert.Zero(t, n)
 }

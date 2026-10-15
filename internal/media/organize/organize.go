@@ -958,6 +958,10 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 	if !sameAsRecord(j.Backup, old) {
 		return undo(j, "目标位置的文件在整理期间换过了")
 	}
+	j.BackupID, _ = transfer.FileID(j.Backup)
+	if err := db.Model(&j).Update("backup_id", j.BackupID).Error; err != nil {
+		return undo(j, "替换日志写不进去（"+err.Error()+"）")
+	}
 	if err := transfer.Place(j.Temp, j.Target); err != nil {
 		return undo(j, err.Error())
 	}
@@ -1071,17 +1075,19 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJournal, old models.MediaTransferHistory) ([]string, error) {
 	var msgs []string
 	var errs []error
+	id, ierr := transfer.FileID(j.Target)
+	targetOK := ierr == nil && j.TempID != "" && id == j.TempID
 	switch _, err := os.Lstat(j.Backup); {
 	case err == nil:
-		id, ierr := transfer.FileID(j.Target)
+		bid, berr := transfer.FileID(j.Backup)
 		switch {
-		case ierr != nil || j.TempID == "" || id != j.TempID:
+		case !targetOK:
 			// 新文件不在目标位置了（中途退出期间被删或被换）：旧文件就是库里仅剩的版本，不删
 			errs = append(errs, fmt.Errorf("目标位置上不是这次放的新文件，旧文件留在 %s", j.Backup))
-		case old.ID != 0 && !sameAsRecord(j.Backup, &old):
+		case berr != nil || j.BackupID == "" || bid != j.BackupID:
+			// 挪开以后又被换过（或者编号读不出来）：不是确认过的那个旧文件，不删
 			msgs = append(msgs, "旧版本挪开的文件 "+filepath.Base(j.Backup)+" 换过了，留着")
 		default:
-			// 旧记录没了（被删了）时也删：提交以前已经确认过挪开的是旧记录放的那个
 			if rerr := os.Remove(j.Backup); rerr != nil {
 				errs = append(errs, fmt.Errorf("旧版本的文件 %s 没删掉: %w", filepath.Base(j.Backup), rerr))
 			}
@@ -1104,10 +1110,15 @@ func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJourna
 	if len(errs) > 0 {
 		return msgs, errors.Join(errs...)
 	}
-	subMsgs, err := s.placeReplaceSubs(ctx, j)
-	msgs = append(msgs, subMsgs...)
-	if err != nil {
-		return msgs, err
+	if !targetOK {
+		// 上一次收尾已经删了旧文件，之后目标位置上的视频被删或被换：新字幕放过去对不上，不放了
+		msgs = append(msgs, "目标位置上的视频已经不是这次放的新文件，新字幕没放")
+	} else {
+		subMsgs, err := s.placeReplaceSubs(ctx, j)
+		msgs = append(msgs, subMsgs...)
+		if err != nil {
+			return msgs, err
+		}
 	}
 	if err := s.cfg.DB.WithContext(ctx).Delete(&models.MediaReplaceJournal{}, j.ID).Error; err != nil {
 		return msgs, fmt.Errorf("替换日志没删掉: %w", err)
