@@ -106,6 +106,9 @@ describe("最近的通知", () => {
     expect(card()!.textContent).toContain("3 条");
     expect(card()!.textContent).toContain("后台通知发送失败会在 1、5、30 分钟后各重试一次");
     expect(card()!.textContent).toContain("配了消息模板时实际收到的标题按模板");
+    expect(card()!.textContent?.replace(/\s+/g, "")).toContain(
+      "几条RSS通知合并成一条发出时这里仍逐条列出",
+    );
   });
 
   it("没有记录、或者没取到时写明", async () => {
