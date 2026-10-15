@@ -1649,6 +1649,26 @@ export interface RSSNotificationLog {
   updated_at: string;
 }
 
+/**
+ * 一个通道最近几天的投递：RSS 通知与后台监控通知（保号、签到、战报……）合计，按来源分。
+ * pending 是还在等（安静时段挂起、等重试），skipped 是按规则没发的 RSS 通知（被同一种子后来的通知取代、超出每小时上限）。
+ */
+export interface NotifyStatsChannel {
+  conf_id: number;
+  total: number;
+  sent: number;
+  failed: number;
+  pending: number;
+  skipped: number;
+  sources: { source: string; total: number; sent: number }[];
+}
+
+export interface NotifyStatsView {
+  since: string;
+  days: number;
+  channels: NotifyStatsChannel[];
+}
+
 /** 消息模板的一个变量（路线图 M21）。列表的每一项是对象，字段在 item 里。 */
 export interface NotifyTemplateVar {
   key: string;
@@ -1761,6 +1781,7 @@ export const chatopsApi = {
       }),
     delete: (id: number) => api.delete<void>(`/api/chatops/notifications/${id}`),
     test: (id: number) => api.post<{ success: boolean }>(`/api/chatops/notifications/${id}/test`),
+    stats: () => api.get<NotifyStatsView>("/api/chatops/notifications/stats"),
   },
   bindings: {
     list: () =>
