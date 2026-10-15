@@ -711,7 +711,7 @@ function getChannelLabel(type: string) {
             <span class="recm__body">
               <span class="recm__l1">{{ contentOf(n) }}</span>
               <span class="recm__l2">
-                {{ channelNameOf(n.conf_id) }} · {{ sourceOf(n) }} · {{ resultOf(n.result).label
+                {{ resultOf(n.result).label }} · {{ channelNameOf(n.conf_id) }} · {{ sourceOf(n)
                 }}<template v-if="n.attempts > 1"> · 第 {{ n.attempts }} 次</template>
               </span>
             </span>
