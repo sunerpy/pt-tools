@@ -957,7 +957,7 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 	}
 	tid, terr := transfer.FileID(j.Temp)
 	if terr != nil {
-		// 没有编号就没法在撤回、收尾时认出它：撤回（按源文件认），不往下做
+		// 没有编号就没法在撤回、收尾时认出它：撤回，不往下做（临时文件认不出来，留着并写进日志）
 		return undo(j, "读不出放好的新文件的编号（"+terr.Error()+"）")
 	}
 	j.TempID = tid
@@ -1057,17 +1057,13 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 	}
 	switch _, err := os.Lstat(j.Temp); {
 	case err == nil:
-		// 没记下编号（放好以后、记编号以前退出，或当时没读出来）时用现在的：临时名是放以前确认过没被占用的随机名，
-		// 上面是这次放的文件。读不出来就留着日志之后再试
-		tempID := j.TempID
-		if tempID == "" {
-			id, ierr := transfer.FileID(j.Temp)
-			if ierr != nil {
-				return fmt.Errorf("读不出临时文件 %s 的编号: %w", filepath.Base(j.Temp), ierr)
-			}
-			tempID = id
+		if j.TempID == "" {
+			// 没记下编号（没放成、放好以后记编号以前退出，或当时没读出来）：认不出上面是不是这次放的文件，
+			// 不删，写进日志让用户看（宁可留下一个临时文件，也不删可能是别人的文件）
+			s.cfg.Logger.Warnf("[整理入库] 替换用的临时文件 %s 认不出是不是 pt-tools 放的，没有删除", j.Temp)
+			break
 		}
-		if rerr := transfer.RemoveIfOurs(j.Temp, j.Mode, tempID, j.Source); rerr != nil && !errors.Is(rerr, transfer.ErrNotOurs) {
+		if rerr := transfer.RemoveIfOurs(j.Temp, j.Mode, j.TempID, j.Source); rerr != nil && !errors.Is(rerr, transfer.ErrNotOurs) {
 			return fmt.Errorf("删不掉临时文件 %s: %w", filepath.Base(j.Temp), rerr)
 		}
 	case !errors.Is(err, os.ErrNotExist):

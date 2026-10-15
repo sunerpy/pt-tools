@@ -637,6 +637,13 @@ func TestReplaceTempTakenKeepsForeignFile(t *testing.T) {
 		}
 		return orig(src, dst, mode)
 	}
+	// 第一次撤回时日志删不掉：恢复时读回来的日志里还有临时名，也不能删别人的文件
+	deleteName := "test:fail-delete:" + t.Name()
+	require.NoError(t, e.db.Callback().Delete().Before("gorm:delete").Register(deleteName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "media_replace_journals" {
+			_ = tx.AddError(errors.New("injected"))
+		}
+	}))
 	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Failed)
@@ -644,6 +651,11 @@ func TestReplaceTempTakenKeepsForeignFile(t *testing.T) {
 	assert.Equal(t, "someone else's", readFile(t, taken), "别人的文件留着")
 	assert.True(t, sameFile(t, old.SourcePath, old.TargetPath))
 	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	require.EqualValues(t, 1, n, "日志没删掉")
+	require.NoError(t, e.db.Callback().Delete().Remove(deleteName))
+	e.svc.recoverReplacements(e.ctx)
+	assert.Equal(t, "someone else's", readFile(t, taken), "恢复时也不删")
 	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
 	assert.Zero(t, n)
 }
