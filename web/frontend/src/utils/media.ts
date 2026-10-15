@@ -1,10 +1,12 @@
 import { ref } from "vue";
 import type {
   MediaHistoryItem,
+  MediaImageLang,
   MediaKind,
   MediaMeta,
   MediaMode,
   MediaRecognizeResult,
+  MediaScrapeItem,
   MediaServerKind,
   MediaTransferStatus,
   MediaWordKind,
@@ -158,6 +160,44 @@ export const MEDIA_MODES: readonly { value: MediaMode; label: string; hint: stri
 export function modeLabel(mode?: string): string {
   return MEDIA_MODES.find((m) => m.value === (mode || "hardlink"))?.label ?? mode ?? "";
 }
+
+/** 刮削内容（和后端 scrape.AllItems 一致，界面上的顺序）；tvOnly 的只有剧集有 */
+export const SCRAPE_ITEMS: readonly {
+  value: MediaScrapeItem;
+  label: string;
+  file: string;
+  tvOnly?: boolean;
+}[] = [
+  { value: "nfo", label: "NFO", file: "电影、剧集、季与每一集的 .nfo" },
+  { value: "poster", label: "海报", file: "poster.jpg" },
+  { value: "fanart", label: "背景图", file: "fanart.jpg" },
+  { value: "logo", label: "Logo", file: "clearlogo.png" },
+  { value: "season_poster", label: "季海报", file: "season01-poster.jpg", tvOnly: true },
+  { value: "thumb", label: "集截图", file: "<文件名>-thumb.jpg", tvOnly: true },
+];
+
+/** 没选过刮削内容时写的那几项（和后端 scrape.DefaultItems 一致）：Logo 以外都写 */
+export const DEFAULT_SCRAPE_ITEMS: readonly MediaScrapeItem[] = [
+  "nfo",
+  "poster",
+  "fanart",
+  "season_poster",
+  "thumb",
+];
+
+/** 这种媒体库能选的刮削内容：电影没有季海报与集截图 */
+export function scrapeItemsFor(kind: MediaKind): (typeof SCRAPE_ITEMS)[number][] {
+  return SCRAPE_ITEMS.filter((i) => kind === "tv" || !i.tvOnly);
+}
+
+/** 图片语言（和后端 scrape.ImageLangs 一致） */
+export const IMAGE_LANGS: readonly { value: MediaImageLang; label: string }[] = [
+  { value: "", label: "跟识别语言（TMDB 默认的那张）" },
+  { value: "zh", label: "中文" },
+  { value: "en", label: "英文" },
+  { value: "ja", label: "日文" },
+  { value: "none", label: "无文字" },
+];
 
 /** 命名模板的预设：默认的三家都认；目录名里带上 TMDB 编号时按媒体服务器的写法 */
 export function templatePresets(kind: MediaKind): { label: string; template: string }[] {

@@ -31,11 +31,14 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
 import {
+  DEFAULT_SCRAPE_ITEMS,
+  IMAGE_LANGS,
   MEDIA_MODES,
   MEDIA_SERVER_KINDS,
   TEMPLATE_VARS,
   mediaKindLabel,
   modeLabel,
+  scrapeItemsFor,
   serverKindLabel,
   templatePresets,
 } from "@/utils/media";
@@ -129,6 +132,8 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   mode: "hardlink",
   scrape: true,
   scrape_overwrite: false,
+  scrape_items: [...DEFAULT_SCRAPE_ITEMS],
+  scrape_image_lang: "",
   enabled: true,
 });
 const libForm = ref<MediaLibraryInput>(blankLibrary());
@@ -154,6 +159,8 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     mode: l.mode || "hardlink",
     scrape: l.scrape,
     scrape_overwrite: l.scrape_overwrite,
+    scrape_items: [...(l.scrape_items ?? DEFAULT_SCRAPE_ITEMS)],
+    scrape_image_lang: l.scrape_image_lang ?? "",
     enabled: l.enabled,
   };
 }
@@ -229,6 +236,11 @@ async function saveLibrary() {
   const f = libForm.value;
   if (!f.name.trim() || !f.path.trim()) {
     ElMessage.warning("填写名称与库目录");
+    return;
+  }
+  const items = scrapeItemsFor(f.kind).map((i) => i.value);
+  if (f.scrape && !f.scrape_items.some((i) => items.includes(i))) {
+    ElMessage.warning("刮削内容至少选一项；不想刮削就关掉刮削");
     return;
   }
   libSaving.value = true;
@@ -1021,8 +1033,41 @@ onMounted(refresh);
         <el-form-item label="刮削">
           <div class="ml-switch">
             <el-switch v-model="libForm.scrape" data-testid="ml-lib-scrape" />
-            <span>写 NFO 与海报、背景、季海报、集截图（交给媒体服务器自己刮时关掉）</span>
+            <span>写 NFO 与图片给媒体服务器用（交给媒体服务器自己刮时关掉）</span>
           </div>
+          <template v-if="libForm.scrape">
+            <el-checkbox-group
+              v-model="libForm.scrape_items"
+              class="ml-inline"
+              data-testid="ml-lib-items">
+              <el-checkbox
+                v-for="i in scrapeItemsFor(libForm.kind)"
+                :key="i.value"
+                :value="i.value"
+                :title="i.file"
+                :data-testid="`ml-lib-item-${i.value}`"
+                >{{ i.label }}</el-checkbox
+              >
+            </el-checkbox-group>
+            <div class="ml-inline">
+              <span>图片语言</span>
+              <el-select
+                v-model="libForm.scrape_image_lang"
+                class="ml-lang"
+                data-testid="ml-lib-image-lang">
+                <el-option
+                  v-for="l in IMAGE_LANGS"
+                  :key="l.value"
+                  :label="l.label"
+                  :value="l.value" />
+              </el-select>
+            </div>
+            <div class="field-tip">
+              Logo 写成 clearlogo.png，Emby、Jellyfin 与 Kodi
+              都认。选了图片语言时，海报优先用这种语言的、背景优先用没有文字的， 没有就用 TMDB
+              默认的那张；Logo 依次找这种语言、识别语言与英文的。
+            </div>
+          </template>
           <el-checkbox
             v-model="libForm.scrape_overwrite"
             :disabled="!libForm.scrape"
@@ -1210,6 +1255,11 @@ onMounted(refresh);
 .ml-inline--grow {
   width: 100%;
   margin-top: 0;
+}
+
+.ml-lang {
+  width: 240px;
+  max-width: 100%;
 }
 
 .ml-inline--grow > .el-input {

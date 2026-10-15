@@ -71,6 +71,7 @@ const (
 	SizePoster   = "w780"
 	SizeBackdrop = "w1280"
 	SizeStill    = "w300"
+	SizeLogo     = "w500"
 )
 
 // maxImage 是一张图片最多读多少字节。

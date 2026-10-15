@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/server"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
@@ -25,11 +27,12 @@ const (
 	maxServers   = 20
 )
 
-// LibraryView 是给界面看的媒体库：带上实际用的模板与示例渲染的结果。
+// LibraryView 是给界面看的媒体库：带上实际用的模板与示例渲染的结果，以及刮削要写的内容（没选过时是默认的那几项）。
 type LibraryView struct {
 	models.MediaLibrary
-	EffectiveTemplate string `json:"effective_template"`
-	Preview           string `json:"preview"`
+	ScrapeItems       []string `json:"scrape_items"`
+	EffectiveTemplate string   `json:"effective_template"`
+	Preview           string   `json:"preview"`
 }
 
 // LibraryInput 是新建或修改媒体库的请求。
@@ -42,6 +45,10 @@ type LibraryInput struct {
 	Mode            string `json:"mode"`
 	Scrape          bool   `json:"scrape"`
 	ScrapeOverwrite bool   `json:"scrape_overwrite"`
+	// ScrapeItems 是刮削要写的内容（scrape.AllItems 里的名字）；不带时是默认的那几项
+	ScrapeItems []string `json:"scrape_items"`
+	// ScrapeImageLang 是海报与 Logo 优先用的语言（scrape.ImageLangs）
+	ScrapeImageLang string `json:"scrape_image_lang"`
 	Enabled         bool   `json:"enabled"`
 }
 
@@ -61,7 +68,7 @@ func effectiveTemplate(l models.MediaLibrary) string {
 }
 
 func viewLibrary(l models.MediaLibrary) LibraryView {
-	v := LibraryView{MediaLibrary: l, EffectiveTemplate: effectiveTemplate(l)}
+	v := LibraryView{MediaLibrary: l, ScrapeItems: scrape.ParseItems(l.ScrapeItems).List(), EffectiveTemplate: effectiveTemplate(l)}
 	v.Preview, _ = transfer.Check(v.EffectiveTemplate, l.Kind)
 	return v
 }
@@ -114,9 +121,21 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 			return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 		}
 	}
+	items, err := scrape.NormalizeItems(in.ScrapeItems)
+	if err != nil {
+		return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	if in.Scrape && in.ScrapeItems != nil && (items == "" || !scrape.ParseItems(items).Any(in.Kind == models.MediaKindTV)) {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 刮削内容至少选一项（季海报与集截图只有剧集有）；不想刮削就关掉刮削", ErrInvalid)
+	}
+	lang := strings.TrimSpace(in.ScrapeImageLang)
+	if !slices.Contains(scrape.ImageLangs, lang) {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 图片语言要选 zh、en、ja、none 或留空", ErrInvalid)
+	}
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
-		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, Enabled: in.Enabled,
+		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
+		Enabled: in.Enabled,
 	}, nil
 }
 
@@ -163,7 +182,8 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 		return viewLibrary(row), nil
 	}
 	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(
-		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "enabled", "updated_at",
+		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang",
+		"enabled", "updated_at",
 	).Updates(&row)
 	if res.Error != nil {
 		if isUnique(res.Error) {

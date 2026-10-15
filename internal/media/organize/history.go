@@ -186,10 +186,10 @@ func (s *Service) Retire(ctx context.Context, id uint, reason string) ([]string,
 
 var seasonPosterRe = regexp.MustCompile(`^season(\d+|-specials)-poster\.jpg$`)
 
-// isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、tvshow.nfo、season.nfo、季海报）。
+// isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、Logo、tvshow.nfo、season.nfo、季海报）。
 func isDirArtifact(name string) bool {
 	switch name {
-	case "poster.jpg", "fanart.jpg", "tvshow.nfo", "season.nfo":
+	case "poster.jpg", "fanart.jpg", "clearlogo.png", "tvshow.nfo", "season.nfo":
 		return true
 	}
 	return seasonPosterRe.MatchString(name)

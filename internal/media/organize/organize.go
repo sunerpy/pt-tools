@@ -990,20 +990,31 @@ func showDir(lib *models.MediaLibrary, target string) string {
 	return filepath.Join(lib.Path, segs[0])
 }
 
-// scrape 为这次新放进库的文件写 NFO 与图片（媒体库关了刮削时不写）。返回出错的消息与写出的文件。
+// scrape 为这次新放进库的文件写 NFO 与图片（媒体库关了刮削时不写；写哪些按媒体库选的刮削内容）。返回出错的消息与写出的文件。
 func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]string, []string) {
 	if !p.Library.Scrape {
 		return nil, nil
 	}
-	w := scrape.Writer{Overwrite: p.Library.ScrapeOverwrite}
+	items := scrape.ParseItems(p.Library.ScrapeItems)
+	w := scrape.Writer{Overwrite: p.Library.ScrapeOverwrite, Items: items}
+	var msgs []string
+	art := scrape.ChooseArt(*p.Match, nil, scrape.ImageLangAuto, "")
 	if p.tmdbClient != nil {
 		w.Images = p.tmdbClient
+		// 按语言挑海报、写 Logo 要先取图片列表；取不到时海报与背景用 TMDB 给的那张，不写 Logo
+		if items.Logo || p.Library.ScrapeImageLang != scrape.ImageLangAuto {
+			imgs, err := p.tmdbClient.Images(ctx, p.Match.MediaType, p.Match.ID)
+			if err != nil {
+				msgs = append(msgs, "刮削：取 TMDB 图片列表失败，海报与背景用默认的那张、不写 Logo："+err.Error())
+			}
+			art = scrape.ChooseArt(*p.Match, imgs, p.Library.ScrapeImageLang, p.tmdbClient.Language())
+		}
 	}
 	var rep scrape.Report
 	if p.Match.MediaType != tmdb.KindTV {
 		for _, it := range created {
 			ownDir := filepath.Clean(filepath.Dir(it.Target)) != filepath.Clean(p.Library.Path)
-			rep.Merge(w.Movie(ctx, it.Target, ownDir, *p.Match))
+			rep.Merge(w.Movie(ctx, it.Target, ownDir, *p.Match, art))
 		}
 	} else {
 		shows, seasons := map[string]bool{}, map[string]bool{}
@@ -1011,7 +1022,7 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]s
 			sd := showDir(p.Library, it.Target)
 			if sd != "" && !shows[sd] {
 				shows[sd] = true
-				rep.Merge(w.Show(ctx, sd, *p.Match))
+				rep.Merge(w.Show(ctx, sd, *p.Match, art))
 			}
 			key := fmt.Sprintf("%s|%d", sd, it.Season)
 			if sd != "" && !seasons[key] {
@@ -1021,7 +1032,6 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]s
 			rep.Merge(w.Episode(ctx, it.Target, *p.Match, it.Season, it.Episode, it.EpisodeEnd, it.stillFor))
 		}
 	}
-	msgs := make([]string, 0, len(rep.Errors))
 	for _, e := range rep.Errors {
 		msgs = append(msgs, "刮削："+e)
 	}
