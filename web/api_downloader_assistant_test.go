@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -198,6 +199,22 @@ func TestAssistantAPI_DeadScanSettings(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &cfg))
 	assert.True(t, cfg.Enabled)
 	assert.Equal(t, 12, cfg.IntervalHours)
+
+	// 扫过一轮以后：读回的设置带上一轮的时间与结果、下一轮大约什么时候
+	mon := scheduler.NewDeadTorrentMonitor(scheduler.DeadTorrentMonitorConfig{
+		Settings:    func() (bool, time.Duration, []uint, error) { return true, 12 * time.Hour, []uint{conf.ID}, nil },
+		Downloaders: func(context.Context) ([]scheduler.DeadTorrentDownloader, []error, error) { return nil, nil, nil },
+	})
+	mon.RunOnce(context.Background())
+	server.mgr.SetDeadTorrentMonitor(mon)
+	w = serveAuthed(mux, http.MethodGet, "/api/downloader-assistant/dead-scan", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var view deadScanView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &view))
+	require.NotNil(t, view.LastScanAt)
+	assert.Equal(t, "没有可扫描的下载器", view.LastResult)
+	require.NotNil(t, view.NextScanAt)
+	assert.WithinDuration(t, view.LastScanAt.Add(12*time.Hour), *view.NextScanAt, time.Second)
 
 	w = serveAuthed(mux, http.MethodPut, "/api/downloader-assistant/dead-scan", "{")
 	assert.Equal(t, http.StatusBadRequest, w.Code)

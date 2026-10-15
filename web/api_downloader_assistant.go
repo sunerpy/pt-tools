@@ -13,6 +13,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/internal/dlassistant"
+	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -267,7 +268,7 @@ func (s *Server) apiAssistantDeadScan(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, cfg)
+		writeJSON(w, s.deadScanView(cfg))
 	case http.MethodPut:
 		var in core.DeadTorrentScanSettings
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
@@ -287,8 +288,42 @@ func (s *Server) apiAssistantDeadScan(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, cfg)
+		writeJSON(w, s.deadScanView(cfg))
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// deadScanView 是定时扫描的设置加上上一轮的时间与结果、下一轮大约什么时候（在内存里，重启以后从头算）。
+type deadScanView struct {
+	core.DeadTorrentScanSettings
+	LastScanAt *time.Time `json:"last_scan_at,omitempty"`
+	LastResult string     `json:"last_result,omitempty"`
+	// NextScanAt 是开着、选了通道时下一轮大约什么时候：上一轮加间隔，这次启动以后还没扫过或已经到点时是现在（下一次检查时扫）
+	NextScanAt *time.Time `json:"next_scan_at,omitempty"`
+}
+
+func (s *Server) deadScanView(cfg core.DeadTorrentScanSettings) deadScanView {
+	v := deadScanView{DeadTorrentScanSettings: cfg}
+	var mon *scheduler.DeadTorrentMonitor
+	if s.mgr != nil {
+		mon = s.mgr.GetDeadTorrentMonitor()
+	}
+	if mon == nil {
+		return v
+	}
+	last, result := mon.Status()
+	if !last.IsZero() {
+		v.LastScanAt, v.LastResult = &last, result
+	}
+	if cfg.Enabled && len(cfg.ChannelIDs) > 0 {
+		next := time.Now()
+		if !last.IsZero() {
+			if t := last.Add(time.Duration(cfg.IntervalHours) * time.Hour); t.After(next) {
+				next = t
+			}
+		}
+		v.NextScanAt = &next
+	}
+	return v
 }

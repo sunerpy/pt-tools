@@ -2026,7 +2026,10 @@ async function saveLoginConfig() {
             <el-option label="手动" value="manual" />
             <el-option label="禁用" value="disabled" />
           </el-select>
-          <div class="field-tip">自动 = 跟随定时任务；手动 = 只在点「立即探测」时执行</div>
+          <div class="field-tip">
+            自动 = 大约每 6 小时探测一次登录状态（各站错开），会话过期、密钥错误以后隔 24
+            小时再探；手动 = 只在点「立即探测」时执行；禁用 = 不定时探测
+          </div>
         </el-form-item>
 
         <el-form-item label="每日自动签到">
@@ -2038,8 +2041,14 @@ async function saveLoginConfig() {
             {{
               configAttendance && !configAttendance.supported
                 ? configAttendance.unsupported_reason
-                : "每天在全局设置的签到时间窗内随机签到一次，失败最多重试 2 次"
+                : "每天在签到时间窗内随机签到一次，失败最多重试 2 次"
             }}
+            <router-link
+              v-if="!configAttendance || configAttendance.supported"
+              to="/global"
+              data-testid="login-config-window-link"
+              >签到时间窗在「系统设置」里改</router-link
+            >
           </div>
         </el-form-item>
       </el-form>

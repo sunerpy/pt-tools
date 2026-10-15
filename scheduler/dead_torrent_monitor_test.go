@@ -27,8 +27,8 @@ func deadRig(t *testing.T) (*DeadTorrentMonitor, *schedFakeDownloader, *bool, fu
 	enabled := true
 	mon := NewDeadTorrentMonitor(DeadTorrentMonitorConfig{
 		Settings: func() (bool, time.Duration, []uint, error) { return enabled, 24 * time.Hour, []uint{conf.ID}, nil },
-		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error) {
-			return []DeadTorrentDownloader{{Name: "qb", DL: dl}}, []error{errors.New("tr 连不上")}
+		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error, error) {
+			return []DeadTorrentDownloader{{Name: "qb", DL: dl}}, []error{errors.New("tr 连不上")}, nil
 		},
 		Notifier: notifier,
 		Resolver: func() *v2.TrackerResolver {
@@ -112,7 +112,7 @@ func TestDeadTorrentMonitor_Lifecycle(t *testing.T) {
 
 	m := NewDeadTorrentMonitor(DeadTorrentMonitorConfig{
 		Settings:    func() (bool, time.Duration, []uint, error) { return false, 0, nil, errors.New("db down") },
-		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error) { return nil, nil },
+		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error, error) { return nil, nil, nil },
 	})
 	assert.Zero(t, m.RunOnce(context.Background()), "读不到设置时不扫描")
 	m.Start()
@@ -142,8 +142,8 @@ func TestDeadTorrentMonitor_RetriesWhenNotDelivered(t *testing.T) {
 	deadTorrent(dl, "aa")
 	mon := NewDeadTorrentMonitor(DeadTorrentMonitorConfig{
 		Settings: func() (bool, time.Duration, []uint, error) { return true, time.Hour, []uint{conf.ID}, nil },
-		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error) {
-			return []DeadTorrentDownloader{{Name: "qb", DL: dl}}, nil
+		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error, error) {
+			return []DeadTorrentDownloader{{Name: "qb", DL: dl}}, nil, nil
 		},
 		Notifier: notifier,
 		Resolver: func() *v2.TrackerResolver { return v2.NewTrackerResolverFrom() },
@@ -170,4 +170,35 @@ func TestDeadTorrentMonitor_RetriesWhenNotDelivered(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.MonitorNotificationLog{}))
 	clock.Advance(2 * time.Hour)
 	assert.Equal(t, 1, mon2.RunOnce(context.Background()), "下一轮重试成功")
+}
+
+// 上一轮的时间与结果：每台下载器有几个失效种子、连不上的台数、通知了几台
+func TestDeadTorrentMonitor_Status(t *testing.T) {
+	mon, dl, _, _ := deadRig(t)
+	at, res := mon.Status()
+	assert.True(t, at.IsZero())
+	assert.Empty(t, res)
+	deadTorrent(dl, "aa")
+	require.Equal(t, 1, mon.RunOnce(context.Background()))
+	at, res = mon.Status()
+	assert.False(t, at.IsZero())
+	assert.Equal(t, "1 台下载器连不上；qb 有 1 个失效种子；通知了 1 台的新失效种子", res)
+
+	// 连下载器列表都没读到：写明这一轮没有扫描，不当成「几台连不上」，也不发通知
+	broken := NewDeadTorrentMonitor(DeadTorrentMonitorConfig{
+		Settings: mon.cfg.Settings,
+		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error, error) {
+			return nil, nil, errors.New("database is locked")
+		},
+		Notifier: mon.cfg.Notifier,
+		Clock:    mon.cfg.Clock,
+	})
+	assert.Zero(t, broken.RunOnce(context.Background()))
+	at, res = broken.Status()
+	assert.False(t, at.IsZero())
+	assert.Equal(t, "读取下载器列表失败，这一轮没有扫描", res)
+	var nilMon *DeadTorrentMonitor
+	at, res = nilMon.Status()
+	assert.True(t, at.IsZero())
+	assert.Empty(t, res)
 }

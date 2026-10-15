@@ -188,11 +188,12 @@ func wireDeadTorrentMonitor(mgr *scheduler.Manager, store *core.ConfigStore, not
 }
 
 // deadTorrentDownloaders 返回已启用的下载器实例；连不上的下载器放进错误列表，不影响其他下载器。
-func deadTorrentDownloaders(mgr *scheduler.Manager) func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error) {
-	return func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error) {
+// 读不到下载器列表时返回第三个错误，这一轮整个不扫。
+func deadTorrentDownloaders(mgr *scheduler.Manager) func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error, error) {
+	return func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error, error) {
 		var settings []models.DownloaderSetting
 		if err := global.GlobalDB.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&settings).Error; err != nil {
-			return nil, []error{fmt.Errorf("读取下载器失败: %w", err)}
+			return nil, nil, fmt.Errorf("读取下载器失败: %w", err)
 		}
 		dm := mgr.GetDownloaderManager()
 		out := make([]scheduler.DeadTorrentDownloader, 0, len(settings))
@@ -205,7 +206,7 @@ func deadTorrentDownloaders(mgr *scheduler.Manager) func(ctx context.Context) ([
 			}
 			out = append(out, scheduler.DeadTorrentDownloader{Name: s.Name, DL: dl})
 		}
-		return out, errs
+		return out, errs, nil
 	}
 }
 

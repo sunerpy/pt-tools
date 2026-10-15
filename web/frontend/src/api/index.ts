@@ -2144,6 +2144,13 @@ export interface DeadTorrentScanSettings {
   channel_ids: number[];
 }
 
+/** 读回的定时扫描设置还带上一轮的时间与结果、下一轮大约什么时候（在内存里，重启以后从头算） */
+export interface DeadTorrentScanView extends DeadTorrentScanSettings {
+  last_scan_at?: string;
+  last_result?: string;
+  next_scan_at?: string;
+}
+
 export const downloaderAssistantApi = {
   siteTags: (downloaderId: number) =>
     api.get<{ items: AssistantSiteTag[] } & AssistantScanInfo>(
@@ -2180,9 +2187,9 @@ export const downloaderAssistantApi = {
       hashes,
       remove_data: removeData,
     }),
-  getDeadScan: () => api.get<DeadTorrentScanSettings>("/api/downloader-assistant/dead-scan"),
+  getDeadScan: () => api.get<DeadTorrentScanView>("/api/downloader-assistant/dead-scan"),
   saveDeadScan: (data: DeadTorrentScanSettings) =>
-    api.put<DeadTorrentScanSettings>("/api/downloader-assistant/dead-scan", data),
+    api.put<DeadTorrentScanView>("/api/downloader-assistant/dead-scan", data),
 };
 
 // ---------- 转移做种（路线图 M5） ----------
