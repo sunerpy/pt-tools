@@ -208,6 +208,9 @@ onMounted(loadSettings);
             placeholder="https://cookiecloud.example.com"
             autocomplete="off"
             data-testid="cc-server" />
+          <div class="field-tip">
+            自建的 CookieCloud 服务的地址，和浏览器扩展里的「服务器地址」一样
+          </div>
         </el-form-item>
         <el-form-item label="用户 KEY（UUID）">
           <el-input
@@ -215,6 +218,9 @@ onMounted(loadSettings);
             placeholder="浏览器扩展里的用户 KEY"
             autocomplete="off"
             data-testid="cc-uuid" />
+          <div class="field-tip">
+            浏览器扩展里的「用户KEY · UUID」，用来在服务上找到你同步的那一份
+          </div>
         </el-form-item>
         <el-form-item label="端对端加密密码">
           <div class="cc-password">
@@ -234,6 +240,10 @@ onMounted(loadSettings);
               >清除</el-button
             >
           </div>
+          <div class="field-tip">
+            浏览器扩展里的「端对端加密密码」：只用来在本机解密，不发给 CookieCloud
+            服务，加密保存、页面上不显示
+          </div>
         </el-form-item>
         <div class="cc-row">
           <el-form-item label="定时同步">
@@ -252,11 +262,29 @@ onMounted(loadSettings);
           <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
         </el-button>
       </el-form>
+      <ul class="cc-status" data-testid="cc-status">
+        <li>
+          <span class="cc-k">上次同步</span>
+          <span v-if="settings?.last_sync_at"
+            >{{ formatShortDateTime(settings.last_sync_at) }}：{{ settings.last_result }}</span
+          >
+          <span v-else class="cc-sub">还没同步过</span>
+        </li>
+        <li>
+          <span class="cc-k">下次同步</span>
+          <span v-if="settings?.next_sync_at"
+            >大约 {{ formatShortDateTime(settings.next_sync_at) }}</span
+          >
+          <span v-else class="cc-sub">{{
+            configured
+              ? "定时同步没打开：在下面手动导入"
+              : "填写服务地址、用户 KEY 与密码，打开定时同步以后按间隔同步"
+          }}</span>
+        </li>
+      </ul>
       <p class="cc-tip">
-        定时同步只更新已经启用、Cookie 有变化的站点，不会启用新站点。
-        <template v-if="settings?.last_sync_at">
-          上次同步 {{ formatShortDateTime(settings.last_sync_at) }}：{{ settings.last_result }}
-        </template>
+        定时同步只更新已经启用、Cookie 有变化的站点，不会启用新站点。保存以后可以点下面的「读取
+        CookieCloud」试一下：能列出站点，说明地址、用户 KEY 与密码都对。
       </p>
     </PtPanel>
 
@@ -416,5 +444,31 @@ onMounted(loadSettings);
 
 .cc-full {
   flex-basis: 100%;
+}
+
+.cc-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--pt-t1);
+}
+
+.cc-status li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cc-k {
+  flex: 0 0 72px;
+  color: var(--pt-t3);
+}
+
+.cc-sub {
+  color: var(--pt-t3);
 }
 </style>

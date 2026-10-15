@@ -277,4 +277,28 @@ describe("IYUU 辅种", () => {
     await vi.waitFor(() => expect(api.run).toHaveBeenCalled());
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalled());
   });
+
+  it("写明 token 去哪里拿、上次运行与下次运行", async () => {
+    await mountPage(
+      settings({
+        has_token: true,
+        enabled: true,
+        last_run_at: "2026-10-15T10:00:00Z",
+        last_result: "辅种 3 个",
+        next_run_at: "2026-10-15T22:00:00Z",
+      }),
+    );
+    expect(testid("rs-token-tip").querySelector("a")!.getAttribute("href")).toBe(
+      "https://iyuu.cn/",
+    );
+    const st = testid("rs-status").textContent ?? "";
+    expect(st).toContain("辅种 3 个");
+    expect(st).toContain("大约");
+  });
+
+  it("有 token、没开启：写明只能立即运行", async () => {
+    await mountPage(settings({ has_token: true }));
+    expect(testid("rs-status").textContent).toContain("没开启：只能「立即运行」");
+    expect(testid("rs-status").textContent).toContain("还没运行过");
+  });
 });

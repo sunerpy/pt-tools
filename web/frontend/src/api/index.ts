@@ -2323,6 +2323,8 @@ export interface ReseedSettings {
   max_per_site_per_day: number;
   last_run_at?: string;
   last_result: string;
+  /** 下一轮大约什么时候（开着、有 token 时才有） */
+  next_run_at?: string;
   running: boolean;
 }
 
@@ -2378,6 +2380,8 @@ export interface CookieCloudSettings {
   interval_hours: number;
   last_sync_at?: string;
   last_result: string;
+  /** 下一次定时同步大约什么时候（打开定时同步、填全了设置才有） */
+  next_sync_at?: string;
 }
 
 export interface CookieCloudSettingsUpdate {

@@ -481,3 +481,22 @@ func TestSaveSettingsResetsScheduleOnNewSource(t *testing.T) {
 	assert.Empty(t, got.LastResult)
 	assert.True(t, e.svc.Due(ctx), "新来源马上到期")
 }
+
+// 下一次定时同步：打开定时同步、填全了设置才有；没同步过或已经到点是现在，否则是上一次加间隔
+func TestSettingsNextSync(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.configure(nil)
+	got, err := e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, got.NextSyncAt, "没打开定时同步")
+	e.configure(func(u *SettingsUpdate) { u.AutoSync, u.IntervalHours = true, 6 })
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, got.NextSyncAt)
+	assert.WithinDuration(t, e.now, *got.NextSyncAt, 0)
+	require.NoError(t, e.svc.RecordSync(ctx, e.now, "ok"))
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.WithinDuration(t, e.now.Add(6*time.Hour), *got.NextSyncAt, 0)
+}

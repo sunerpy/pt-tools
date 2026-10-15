@@ -280,6 +280,11 @@ onBeforeUnmount(() => {
               >清除</el-button
             >
           </div>
+          <div class="field-tip" data-testid="rs-token-tip">
+            在 IYUU 官网
+            <a href="https://iyuu.cn/" target="_blank" rel="noopener noreferrer">iyuu.cn</a>
+            点「开始使用」，用微信扫码登录后拿到 token。
+          </div>
         </el-form-item>
         <div class="rs-row">
           <el-form-item label="运行间隔（小时）">
@@ -289,6 +294,7 @@ onBeforeUnmount(() => {
               :max="168"
               controls-position="right"
               data-testid="rs-interval" />
+            <div class="field-tip">开着时按这个间隔自动运行；关着时只能「立即运行」</div>
           </el-form-item>
           <el-form-item label="每站每天最多（个）">
             <el-input-number
@@ -297,6 +303,9 @@ onBeforeUnmount(() => {
               :max="500"
               controls-position="right"
               data-testid="rs-max" />
+            <div class="field-tip">
+              每个站点每天最多尝试多少个辅种（下载失败、核对没通过的也算），一次不给站点太多请求
+            </div>
           </el-form-item>
         </div>
         <el-form-item label="参与的下载器">
@@ -329,12 +338,28 @@ onBeforeUnmount(() => {
           <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
         </el-button>
       </el-form>
+      <ul class="rs-status" data-testid="rs-status">
+        <li>
+          <span class="rs-k">上次运行</span>
+          <span v-if="settings?.last_run_at"
+            >{{ formatShortDateTime(settings.last_run_at) }}：{{ settings.last_result }}</span
+          >
+          <span v-else class="rs-sub">还没运行过</span>
+        </li>
+        <li>
+          <span class="rs-k">下次运行</span>
+          <span v-if="settings?.running">正在运行</span>
+          <span v-else-if="settings?.next_run_at"
+            >大约 {{ formatShortDateTime(settings.next_run_at) }}</span
+          >
+          <span v-else class="rs-sub">{{
+            settings?.has_token ? "没开启：只能「立即运行」" : "填写 token 并开启以后按间隔自动运行"
+          }}</span>
+        </li>
+      </ul>
       <p class="rs-tip">
         只辅种文件完全一样（路径和大小逐个相同）的种子；核对没通过的不再尝试，下载不到种子的过 7
         天再试。
-        <template v-if="settings?.last_run_at">
-          上次运行 {{ formatShortDateTime(settings.last_run_at) }}：{{ settings.last_result }}
-        </template>
       </p>
     </PtPanel>
 
@@ -512,5 +537,31 @@ onBeforeUnmount(() => {
 
 .rs-full {
   flex-basis: 100%;
+}
+
+.rs-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--pt-t1);
+}
+
+.rs-status li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rs-k {
+  flex: 0 0 72px;
+  color: var(--pt-t3);
+}
+
+.rs-sub {
+  color: var(--pt-t3);
 }
 </style>

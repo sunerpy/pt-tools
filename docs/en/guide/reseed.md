@@ -4,7 +4,7 @@ IYUU cross-seeding (IYUU 辅种), under Download (下载), uses [IYUU](https://d
 
 ## Before you turn it on
 
-- You need an IYUU token; see [IYUU's documentation](https://doc.iyuu.cn/) for how to get one.
+- You need an IYUU token: on the IYUU site [iyuu.cn](https://iyuu.cn/), click 开始使用 and sign in by scanning the code with WeChat to get one; see [IYUU's documentation](https://doc.iyuu.cn/) for details.
 - When it is on, pt-tools sends the info hashes of the finished torrents in the participating downloaders to IYUU (`2025.iyuu.cn`).
 - The token is stored on this machine, encrypted with the same key as the site cookies; the page and the API never show it, only whether it is set.
 
@@ -41,7 +41,7 @@ Deleting a torrent by hand, in the downloader or in a pt-tools torrent list, wit
 
 ## Records
 
-The Records (记录) tab lists the latest 200 records by the time of their last attempt: torrent, site and torrent ID, result, reason and time (a retry after 7 days updates the original record). The result is the progress of the job (waiting to add, checking and so on), or cross-seeded (已辅种), withdrawn (已撤回, the check stopped short of 100% and the torrent was removed), or failed (失败, the download or a check failed). Clearing finished cross-seeding jobs writes each job's result into its record first, so the result in the record stays; a record whose job was deleted some other way shows Job deleted (任务已删除). The summary of each run shows as Last run (上次运行) at the bottom of the Settings tab.
+The Records (记录) tab lists the latest 200 records by the time of their last attempt: torrent, site and torrent ID, result, reason and time (a retry after 7 days updates the original record). The result is the progress of the job (waiting to add, checking and so on), or cross-seeded (已辅种), withdrawn (已撤回, the check stopped short of 100% and the torrent was removed), or failed (失败, the download or a check failed). Clearing finished cross-seeding jobs writes each job's result into its record first, so the result in the record stays; a record whose job was deleted some other way shows Job deleted (任务已删除). The summary of each run shows as Last run (上次运行) at the bottom of the Settings tab, next to Next run (下次运行), roughly when the next run is (with cross-seeding on and a token set, by the interval; once it's due, it runs at the next check).
 
 ## API
 
