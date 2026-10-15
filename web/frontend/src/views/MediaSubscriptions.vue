@@ -17,6 +17,7 @@ import {
   subscribeApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import TmdbKeyNotice from "@/components/media/TmdbKeyNotice.vue";
 import DoubanSourceDialog from "@/components/media/DoubanSourceDialog.vue";
 import QualityProfileDialog from "@/components/media/QualityProfileDialog.vue";
 import SubscribeDialog from "@/components/media/SubscribeDialog.vue";
@@ -341,6 +342,7 @@ onMounted(() => {
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
     </Teleport>
+    <TmdbKeyNotice class="pt-cards__full" usage="订阅的搜索、补集与洗版" />
 
     <PtPanel title="订阅" icon="bookmark" :count="subs.length">
       <div

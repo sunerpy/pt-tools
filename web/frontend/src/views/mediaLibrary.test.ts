@@ -99,6 +99,7 @@ const settings = {
   notify_channels: [],
   delete_links_on_remove: false,
   watch_interval_min: 10,
+  runs: { watch_last: "2026-10-15T10:00:00Z", watch_next: "2026-10-15T10:10:00Z" },
 };
 
 const library = {
@@ -207,6 +208,7 @@ describe("媒体库", () => {
       watch_interval_min: 10,
     });
     expect(ui.success).toHaveBeenCalledWith("已保存整理设置");
+    expect(q("ml-watch-runs")!.textContent, "目录监控写明上次与下次扫描").toContain("下次大约");
   });
 
   it("媒体库：列表、编辑只发输入字段、预览模板、检查目录、启停与删除", async () => {

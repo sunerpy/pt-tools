@@ -9,6 +9,8 @@ Movie and TV data comes from [TMDB](https://www.themoviedb.org/). This product u
 1. Sign in to TMDB and request a key on the API page of your account settings (free for personal use). Both a v3 API key and a v4 API read access token work.
 2. Enter the key in TMDB settings (TMDB 设置), choose a language, save, and click Test connection (测试连接).
 
+Without an API key, the explore, subscriptions and media library pages show a notice at the top with a link to this page.
+
 | Setting                       | Meaning                                                                                                                                               |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | API key                       | Stored encrypted; the page only shows whether one is set. Enter a new one to replace it, or click Clear (清除)                                        |

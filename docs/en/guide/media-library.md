@@ -131,6 +131,8 @@ Recognition uses the torrent name (and the site title as a subtitle when it diff
 | Monitoring    | Monitored folders that are switched on are scanned at the interval, and videos dropped there (not torrents) are organised, see [directory monitoring](#directory-monitoring)                     |
 | Manual        | The organise icon in the Status (状态) column of the task list (整理入库 on mobile cards); in the downloader web UI, select one finished torrent and click 整理入库, or use the right-click menu |
 
+The organise settings show when the periodic scan and directory monitoring last ran and roughly when they run next (these times start over when pt-tools restarts, and the first round after start runs within a minute).
+
 Automatic organising and periodic scans only take torrents in the scope: downloaders, categories, tags and save paths (as the downloader sees them). An empty item means no limit; a filled one must match one of its values. Their automatic retries follow the current settings too: once the switch is turned off or the torrent is out of scope, they are not retried.
 
 Manual organising shows a preview first: the recognized title, the chosen library and where each file goes. When the match is wrong, enter a TMDB ID (choose movie or TV) or pick another library of the same type, click Preview again (重新预览), then organise. A torrent organised before keeps the title it was organised with (the preview says 沿用之前整理用的条目); to change it, enter a TMDB ID or delete its records first. Copying large files can take a while; the dialog waits 20 seconds, the work continues in the background and the result appears in the history.

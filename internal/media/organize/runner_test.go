@@ -622,3 +622,33 @@ func TestRetryDueMixedTriggersOnOneTorrent(t *testing.T) {
 	assert.True(t, e.svc.Retrying(manual.ID), "手动的那条排上了")
 	assert.Equal(t, 1, e.drain())
 }
+
+// 上一次与下一次扫描：后台没在跑时没有下一次；这次启动以后还没扫过时下一次是现在；扫过以后是上一次加间隔
+func TestRuns(t *testing.T) {
+	e := newEnv(t)
+	set := e.settings(SettingsInput{ScanEnabled: true, ScanIntervalMin: 30, WatchIntervalMin: 10})
+	rt := e.svc.Runs(set)
+	assert.Nil(t, rt.ScanNext, "后台没在跑")
+	assert.Nil(t, rt.ScanLast)
+
+	e.svc.runMu.Lock()
+	e.svc.running = true
+	e.svc.runMu.Unlock()
+	t.Cleanup(func() {
+		e.svc.runMu.Lock()
+		e.svc.running = false
+		e.svc.runMu.Unlock()
+	})
+	rt = e.svc.Runs(set)
+	require.NotNil(t, rt.ScanNext)
+	assert.Equal(t, e.Now(), *rt.ScanNext, "还没扫过：下一拍就扫")
+	e.svc.markRun(&e.svc.scanAt, e.Now())
+	e.svc.markRun(&e.svc.watchAt, e.Now())
+	rt = e.svc.Runs(set)
+	assert.Equal(t, e.Now(), *rt.ScanLast)
+	assert.Equal(t, e.Now().Add(30*time.Minute), *rt.ScanNext)
+	assert.Equal(t, e.Now().Add(10*time.Minute), *rt.WatchNext)
+
+	set.ScanEnabled = false
+	assert.Nil(t, e.svc.Runs(set).ScanNext, "定期扫描关着")
+}

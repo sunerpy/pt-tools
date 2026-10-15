@@ -25,6 +25,7 @@ import {
   organizeApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import TmdbKeyNotice from "@/components/media/TmdbKeyNotice.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -60,6 +61,22 @@ const errText = (e: unknown, fallback: string) => (e as Error)?.message || fallb
 
 // ---- 整理设置 ----
 const settings = ref<OrganizeSettings | null>(null);
+
+/** 上一次、下一次扫描的一句话（时间在内存里，重启以后从头算） */
+function runText(last?: string, next?: string): string {
+  return [
+    last ? `上次 ${formatShortDateTime(last)}` : "",
+    next ? `下次大约 ${formatShortDateTime(next)}` : "",
+  ]
+    .filter(Boolean)
+    .join("，");
+}
+const scanRunText = computed(() =>
+  runText(settings.value?.runs?.scan_last, settings.value?.runs?.scan_next),
+);
+const watchRunText = computed(() =>
+  runText(settings.value?.runs?.watch_last, settings.value?.runs?.watch_next),
+);
 const settingsFailed = ref(false);
 const savingSettings = ref(false);
 const blankSettings = (): OrganizeSettingsInput => ({
@@ -82,7 +99,8 @@ const channels = ref<NotificationConfig[]>([]);
 
 function fillSettings(s: OrganizeSettings) {
   settings.value = s;
-  const { auto_since: _since, ...rest } = s;
+  // 只读的字段不进表单：保存时按严格解析，带上会被拒
+  const { auto_since: _since, runs: _runs, ...rest } = s;
   sform.value = { ...rest };
   savePathsText.value = s.save_paths.join("\n");
 }
@@ -747,6 +765,7 @@ onMounted(refresh);
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
     </Teleport>
+    <TmdbKeyNotice class="pt-cards__full" usage="整理入库的识别与刮削" />
 
     <PtPanel title="整理设置" icon="sliders-horizontal">
       <div v-if="settingsFailed" class="pt-note pt-note--warn">
@@ -779,6 +798,12 @@ onMounted(refresh);
               aria-label="扫描间隔（分钟）" />
             <span>分钟一次</span>
           </div>
+          <div
+            v-if="sform.scan_enabled && scanRunText"
+            class="field-tip"
+            data-testid="ml-scan-runs">
+            {{ scanRunText }}
+          </div>
         </el-form-item>
         <el-form-item label="目录监控">
           <div class="ml-inline ml-inline--grow">
@@ -791,6 +816,12 @@ onMounted(refresh);
               data-testid="ml-watch-interval"
               aria-label="目录监控的扫描间隔（分钟）" />
             <span>分钟扫一次下面「目录监控」里开着的目录</span>
+          </div>
+          <div
+            v-if="watchDirs.length && watchRunText"
+            class="field-tip"
+            data-testid="ml-watch-runs">
+            {{ watchRunText }}
           </div>
         </el-form-item>
         <div class="ml-row">

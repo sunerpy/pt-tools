@@ -435,6 +435,7 @@ func (s *Service) loop(ctx context.Context) {
 		}
 		if set.ScanEnabled && now.Sub(lastScan) >= time.Duration(set.ScanIntervalMin)*time.Minute {
 			lastScan = now
+			s.markRun(&s.scanAt, now)
 			s.scan(ctx, set)
 		}
 		if set.DeleteLinksOnRemove && now.Sub(lastReconcile) >= sweepInterval {
@@ -443,6 +444,7 @@ func (s *Service) loop(ctx context.Context) {
 		}
 		if now.Sub(lastWatch) >= time.Duration(set.WatchIntervalMin)*time.Minute {
 			lastWatch = now
+			s.markRun(&s.watchAt, now)
 			s.watchScan(ctx, set)
 		}
 		if now.Sub(lastRecover) >= sweepInterval {
@@ -661,4 +663,47 @@ func containsID(ids []uint, id uint) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) markRun(at *time.Time, now time.Time) {
+	s.timesMu.Lock()
+	*at = now
+	s.timesMu.Unlock()
+}
+
+// RunTimes 是定期扫描与目录监控扫描上一次与下一次大约什么时候（在内存里，pt-tools 重启以后从头算）。
+// 后台没在跑、或者对应的开关关着时没有「下一次」；这次启动以后还没扫过时下一次是现在（下一拍就扫）。
+type RunTimes struct {
+	ScanLast  *time.Time `json:"scan_last,omitempty"`
+	ScanNext  *time.Time `json:"scan_next,omitempty"`
+	WatchLast *time.Time `json:"watch_last,omitempty"`
+	WatchNext *time.Time `json:"watch_next,omitempty"`
+}
+
+// Runs 是按设置 set 算的上一次与下一次扫描的时间（见 RunTimes）。
+func (s *Service) Runs(set Settings) RunTimes {
+	s.timesMu.Lock()
+	scanAt, watchAt := s.scanAt, s.watchAt
+	s.timesMu.Unlock()
+	running, now := s.isRunning(), s.cfg.Now()
+	at := func(last time.Time, on bool, intervalMin int) (*time.Time, *time.Time) {
+		var l, n *time.Time
+		if !last.IsZero() {
+			l = &last
+		}
+		if running && on {
+			next := now
+			if !last.IsZero() {
+				if t := last.Add(time.Duration(intervalMin) * time.Minute); t.After(now) {
+					next = t
+				}
+			}
+			n = &next
+		}
+		return l, n
+	}
+	var rt RunTimes
+	rt.ScanLast, rt.ScanNext = at(scanAt, set.ScanEnabled, set.ScanIntervalMin)
+	rt.WatchLast, rt.WatchNext = at(watchAt, true, set.WatchIntervalMin)
+	return rt
 }
