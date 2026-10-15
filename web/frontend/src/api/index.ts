@@ -3061,20 +3061,46 @@ export const tokensApi = {
 };
 
 /** qB 兼容入口（路线图 M13）：监听地址是启动参数，这里只读 */
+/** qB 兼容入口的一次登录：结果是 ok、bad_credentials（令牌不对）、scope（令牌没有 qB 兼容权限）、locked（失败太多次被锁了） */
+export interface QbitCompatLogin {
+  at: string;
+  ip: string;
+  username?: string;
+  /** 用的令牌的名字（成功时） */
+  token?: string;
+  result: "ok" | "bad_credentials" | "scope" | "locked";
+}
+
 export interface QbitCompatStatus {
+  /** 正在监听的地址；没在监听时是空的 */
   listen_addr: string;
   listening: boolean;
+  /** 要监听的地址从哪来：flag 启动参数、env 环境变量、settings 这里设的；都没设时是空的 */
+  listen_source: "" | "flag" | "env" | "settings";
+  /** 要监听的地址；listen_error 是它监听失败的原因 */
+  configured_addr: string;
+  listen_error?: string;
+  /** 这里存的监听地址（listen_source 是 flag、env 时不管用） */
+  settings_addr: string;
   /** 0 表示默认下载器 */
   downloader_id: number;
   full_control: boolean;
   /** 实际用的下载器名字；没有可用的下载器时是空的 */
   downloader: string;
+  /** 选的下载器为什么用不了（停用了、删掉了、没有启用的下载器） */
+  downloader_issue?: string;
   compat_torrents: number;
+  /** 登录着的客户端会话数；最近一次成功、失败的登录（重启以后没有） */
+  sessions: number;
+  last_login?: QbitCompatLogin;
+  last_failure?: QbitCompatLogin;
 }
 
 export interface QbitCompatInput {
   downloader_id: number;
   full_control: boolean;
+  /** 监听地址（地址:端口，空串是不开）；不带时不改 */
+  listen_addr?: string;
 }
 
 export const qbitCompatApi = {

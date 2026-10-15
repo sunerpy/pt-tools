@@ -78,6 +78,28 @@ type Server struct {
 	addr     atomic.Value // 监听地址，Status 用
 	// observe 是加完以后等下载器列出种子的时间（observeTimeout；测试里改短）
 	observe time.Duration
+	// lastOK、lastFail 是最近一次成功、失败的登录（网页上的状态用；重启以后没有）
+	lastOK, lastFail atomic.Pointer[LoginRecord]
+}
+
+// LoginRecord 是一次登录：时间、客户端的地址、客户端填的用户名、令牌编号（成功时）与结果。
+// Result 是 ok、bad_credentials（令牌不对）、scope（令牌没有 qB 兼容权限）或 locked（失败太多次，这个地址被锁了）。
+type LoginRecord struct {
+	At       time.Time `json:"at"`
+	IP       string    `json:"ip"`
+	Username string    `json:"username"`
+	TokenID  uint      `json:"token_id,omitempty"`
+	Result   string    `json:"result"`
+}
+
+// Logins 是最近一次成功与失败的登录（没有时为空）。
+func (s *Server) Logins() (ok, fail *LoginRecord) {
+	return s.lastOK.Load(), s.lastFail.Load()
+}
+
+// Sessions 是现在登录着的会话数（1 小时没用的不算）。
+func (s *Server) Sessions() int {
+	return s.sessions.count(s.deps.Now())
 }
 
 // New 建一个兼容入口。

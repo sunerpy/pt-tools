@@ -15,6 +15,7 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 const isMobile = useIsMobile();
 const tokens = ref<ApiToken[]>([]);
@@ -76,9 +77,22 @@ const form = ref<{ name: string; scopes: ApiTokenScope[]; expires_in_days: numbe
   expires_in_days: 90,
 });
 
-function openCreate() {
-  form.value = { name: "", scopes: ["app:read"], expires_in_days: 90 };
+function openCreate(preset?: { name: string; scopes: ApiTokenScope[] }) {
+  form.value = {
+    name: preset?.name ?? "",
+    scopes: preset ? [...preset.scopes] : ["app:read"],
+    expires_in_days: 90,
+  };
   createDialog.value = true;
+}
+
+// 从「qB 兼容入口」页点过来（?new=qbit）：直接打开新建，权限只选 qB 兼容
+const route = useRoute();
+const router = useRouter();
+function openFromLink() {
+  if (route?.query.new !== "qbit") return;
+  openCreate({ name: "qB 兼容入口", scopes: ["qbit:compat"] });
+  void router?.replace({ query: {} });
 }
 
 // ---- 明文只显示一次 ----
@@ -155,7 +169,10 @@ async function revoke(t: ApiToken) {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  openFromLink();
+});
 </script>
 
 <template>
@@ -176,7 +193,7 @@ onMounted(load);
       :count="tokens.length"
       action="新建"
       action-icon="plus"
-      @action="openCreate">
+      @action="openCreate()">
       <div v-if="tokens.length && ds.error.value" class="pt-note pt-note--warn tk-stale">
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
         <span>刷新失败：{{ ds.errorText.value }}。下面是上次读到的。</span>

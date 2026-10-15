@@ -120,6 +120,28 @@ describe("API 令牌", () => {
     );
   });
 
+  it("从 qB 兼容入口页点过来：直接打开新建，权限只选 qB 兼容", async () => {
+    api.list.mockResolvedValue([]);
+    const { createMemoryHistory, createRouter } = await import("vue-router");
+    const Page = (await import("./ApiTokens.vue")).default;
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/api-tokens", component: Page }],
+    });
+    await router.push("/api-tokens?new=qbit");
+    view = mountView(Page, { router });
+    await vi.waitFor(() => expect(q("token-dialog")).not.toBeNull());
+    api.create.mockResolvedValue({ token: { ...phone, id: 4 }, plaintext: "ptt_4_x" });
+    q("tk-save")!.click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0]![0]).toEqual({
+      name: "qB 兼容入口",
+      scopes: ["qbit:compat"],
+      expires_in_days: 90,
+    });
+    await vi.waitFor(() => expect(router.currentRoute.value.query.new).toBeUndefined());
+  });
+
   it("新建：名字没填时不发", async () => {
     await mountPage();
     const add = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) =>

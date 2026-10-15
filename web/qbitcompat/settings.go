@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +29,27 @@ var errNoDownloader = errors.New("没有可用的下载器：在「qB 兼容入�
 type Settings struct {
 	DownloaderID uint `json:"downloader_id"`
 	FullControl  bool `json:"full_control"`
+	// ListenAddr 是监听地址（host:port，空串是不开）；不带时不改（见 CleanListenAddr）
+	ListenAddr *string `json:"listen_addr,omitempty"`
+}
+
+// CleanListenAddr 检查监听地址：空串（不开），或「地址:端口」，地址是 IP、localhost 或留空（所有地址），端口 1 到 65535。
+func CleanListenAddr(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	host, port, err := net.SplitHostPort(s)
+	if err != nil {
+		return "", fmt.Errorf("%w: 监听地址要写成「地址:端口」，例如 0.0.0.0:8081", ErrInvalid)
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", fmt.Errorf("%w: 端口要在 1 到 65535 之间", ErrInvalid)
+	}
+	if host != "" && host != "localhost" && net.ParseIP(host) == nil {
+		return "", fmt.Errorf("%w: 地址要写 IP（例如 0.0.0.0 或 192.168.1.10），留空是监听所有地址", ErrInvalid)
+	}
+	return net.JoinHostPort(host, port), nil
 }
 
 // LoadSettings 读设置；还没存过时是零值（默认下载器、不开完全控制）。
@@ -39,8 +62,17 @@ func LoadSettings(ctx context.Context, db *gorm.DB) (models.QbitCompatSetting, e
 	return row, nil
 }
 
-// SaveSettings 存下载器与完全控制开关；分类与标签不动。指定的下载器要存在。
+// SaveSettings 存下载器、完全控制开关与监听地址（带了时）；分类与标签不动。指定的下载器要存在。
 func SaveSettings(ctx context.Context, db *gorm.DB, in Settings) (models.QbitCompatSetting, error) {
+	cols := []string{"downloader_id", "full_control", "updated_at"}
+	var addr string
+	if in.ListenAddr != nil {
+		a, err := CleanListenAddr(*in.ListenAddr)
+		if err != nil {
+			return models.QbitCompatSetting{}, err
+		}
+		addr, cols = a, append(cols, "listen_addr")
+	}
 	if in.DownloaderID != 0 {
 		var n int64
 		if err := db.WithContext(ctx).Model(&models.DownloaderSetting{}).Where("id = ?", in.DownloaderID).Count(&n).Error; err != nil {
@@ -50,10 +82,10 @@ func SaveSettings(ctx context.Context, db *gorm.DB, in Settings) (models.QbitCom
 			return models.QbitCompatSetting{}, fmt.Errorf("%w: 下载器 %d 不存在", ErrInvalid, in.DownloaderID)
 		}
 	}
-	row := models.QbitCompatSetting{ID: 1, DownloaderID: in.DownloaderID, FullControl: in.FullControl}
+	row := models.QbitCompatSetting{ID: 1, DownloaderID: in.DownloaderID, FullControl: in.FullControl, ListenAddr: addr}
 	if err := db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"downloader_id", "full_control", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns(cols),
 	}).Create(&row).Error; err != nil {
 		return models.QbitCompatSetting{}, fmt.Errorf("保存 qB 兼容入口设置失败: %w", err)
 	}

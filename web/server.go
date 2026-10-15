@@ -58,8 +58,9 @@ type Server struct {
 	tokens *apitoken.Store
 	// appAudit 记下 API 令牌等非 session 主体经 App API 做的写操作（M12）
 	appAudit appAuditRecorder
-	// qbitCompat 是 qB 兼容入口（M13，开了监听时才有），设置页用它显示监听地址
-	qbitCompat *qbitcompat.Server
+	// qbitCompat 是 qB 兼容入口（M13），设置页用它显示登录情况；qbitCompatCtl 管它的监听（cmd 里实现）
+	qbitCompat    *qbitcompat.Server
+	qbitCompatCtl QbitCompatControl
 	// remote 是远程访问的主机端（M15）；为空时直连入口 404，设置接口回 503
 	remote *remote.Host
 	// assistant 是内置 AI 助手（M19）；为空时接口回 503
