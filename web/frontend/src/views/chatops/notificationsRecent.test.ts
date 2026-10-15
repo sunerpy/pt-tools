@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /*
  * 钉子：「最近的通知」读 RSS 通知与后台通知合在一起的最近记录（以前只读 RSS 通知日志，签到、战报不在里面）。
- * 每行写通道、来源、内容（发出去的消息标题，RSS 前面加站点）、结果的中文说法与尝试次数。
+ * 每行写通道、来源、内容（通知的内置标题，RSS 前面加站点）、结果的中文说法与尝试次数。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -105,6 +105,7 @@ describe("最近的通知", () => {
     expect(head).toEqual(["时间", "通道", "来源", "内容", "结果", "尝试"]);
     expect(card()!.textContent).toContain("3 条");
     expect(card()!.textContent).toContain("后台通知发送失败会在 1、5、30 分钟后各重试一次");
+    expect(card()!.textContent).toContain("配了消息模板时实际收到的标题按模板");
   });
 
   it("没有记录、或者没取到时写明", async () => {

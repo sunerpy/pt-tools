@@ -1668,8 +1668,8 @@ export interface NotifyStatsChannel {
 }
 
 /**
- * 「最近的通知」里的一条：RSS 通知与后台监控通知合在一起按时间倒序。title 是发出去的那条消息的标题（RSS 是种子名），
- * 没存下内容的（超出每小时上限没发的）为空。result：sent 已发出、failed 失败、pending 等待发送、canceled 取消或被取代、
+ * 「最近的通知」里的一条：RSS 通知与后台监控通知合在一起按时间倒序。title 是通知的内置标题（RSS 是种子名），
+ * 投递以前存下的：配了消息模板时实际收到的标题按模板；没存下内容的（超出每小时上限没发的）为空。result：sent 已发出、failed 失败、pending 等待发送、canceled 取消或被取代、
  * throttled 超出每小时上限。
  */
 export interface RecentNotification {

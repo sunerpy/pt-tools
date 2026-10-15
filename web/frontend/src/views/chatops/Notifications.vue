@@ -182,7 +182,7 @@ function sourceOf(n: RecentNotification): string {
   return `${base} · ${n.kind === "filtered" ? "仅匹配的" : "全部新种"}`;
 }
 
-/** 内容：发出去的那条消息的标题；RSS 前面加站点，没存下标题的写种子编号 */
+/** 内容：通知的内置标题（不含消息模板的改动）；RSS 前面加站点，没存下标题的写种子编号 */
 function contentOf(n: RecentNotification): string {
   if (n.source !== "rss") return n.title || SOURCE_LABELS[n.source] || n.source;
   const what = n.title || `种子 ${n.torrent_id ?? ""}`.trim();
@@ -697,7 +697,8 @@ function getChannelLabel(type: string) {
           延迟 / 重试，正文 12.5、只有「结果」是胶囊），不是一排 chip。
           落地此前是无列名的 chip 串：一行里三枚色块，而且看不出哪个字段是什么。
           「延迟」那列没有对应数据（通知日志不记投递耗时），所以不画 —— 不造数。
-          后台通知没有站点与种子，「事件 / 站点」两列落成「来源 / 内容」：内容是发出去的那条消息的标题。
+          后台通知没有站点与种子，「事件 / 站点」两列落成「来源 / 内容」：内容是通知的内置标题
+          （投递以前存下的；配了消息模板时实际收到的标题按模板，几条 RSS 合并发出时这里仍逐条列出）。
         -->
         <!--
           窄屏降级成列表，不做横向滚动表格 —— 这是设计文档 §9 的四方向共用规则，
@@ -755,7 +756,8 @@ function getChannelLabel(type: string) {
           <el-button link type="primary" @click="router.push('/chatops/rss-notifications')">
             RSS 通知日志
           </el-button>
-          里；后台通知发送失败会在 1、5、30 分钟后各重试一次。
+          里；后台通知发送失败会在 1、5、30
+          分钟后各重试一次。「内容」是通知的内置标题，配了消息模板时实际收到的标题按模板。
         </p>
       </PtPanel>
     </div>

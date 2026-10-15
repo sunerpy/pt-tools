@@ -20,7 +20,8 @@ const (
 )
 
 // RecentNotification 是「最近的通知」里的一条：RSS 通知与后台监控通知合在一起按时间倒序。
-// Title 是发出去的那条消息的标题（RSS 是种子名）；没有存下内容的（例如超出每小时上限没发的）为空。
+// Title 是通知的内置标题（RSS 是种子名），投递以前存下的：配了消息模板时实际收到的标题按模板，
+// 几条 RSS 合并成一条发出时这里仍逐条列出。没有存下内容的（例如超出每小时上限没发的）为空。
 // Result 是 sent（已发出，含发出后点了「忽略」的）、failed、pending、canceled（取消或被取代）、throttled（超出每小时上限）。
 type RecentNotification struct {
 	Source    string    `json:"source"`
@@ -92,7 +93,7 @@ func (h *chatopsHandlers) notifyRecent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"items": items})
 }
 
-// payloadTitle 取通知日志里存下的消息标题（RSS 的 JSON 键是 Title，监控的是 title，解码不分大小写），截到 200 字以内。
+// payloadTitle 取通知日志里存下的内置标题（RSS 的 JSON 键是 Title，监控的是 title，解码不分大小写），截到 200 字以内。
 func payloadTitle(payload string) string {
 	if payload == "" {
 		return ""
