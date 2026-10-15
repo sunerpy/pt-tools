@@ -275,7 +275,7 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 		return nil, err
 	}
 	dirs := []string{filepath.Dir(row.TargetPath)}
-	if sd := showDir(&lib, row.TargetPath); sd != "" && sd != dirs[0] {
+	if sd := showDir(lib.Path, row.TargetPath); sd != "" && sd != dirs[0] {
 		dirs = append(dirs, sd)
 	}
 	for _, d := range dirs {

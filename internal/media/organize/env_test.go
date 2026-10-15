@@ -90,7 +90,7 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 			_, _ = w.Write([]byte(`{"results":[{"id":100088,"name":"最后生还者","original_name":"The Last of Us","first_air_date":"2023-01-15","popularity":500,"genre_ids":[18]}]}`))
 		case r.URL.Path == "/3/tv/100088":
 			_, _ = w.Write([]byte(`{"id":100088,"name":"最后生还者","original_name":"The Last of Us","first_air_date":"2023-01-15","overview":"末日之后。",
-				"poster_path":"/tlou.jpg","backdrop_path":"/tlou-bd.jpg","number_of_seasons":2,"genres":[{"id":18,"name":"剧情"}],"external_ids":{"imdb_id":"tt3581920"}}`))
+				"poster_path":"/tlou.jpg","backdrop_path":"/tlou-bd.jpg","number_of_seasons":2,"genres":[{"id":18,"name":"剧情"}],"origin_country":["US"],"external_ids":{"imdb_id":"tt3581920"}}`))
 		case r.URL.Path == "/3/tv/100088/season/1":
 			_, _ = w.Write([]byte(`{"season_number":1,"name":"第 1 季","poster_path":"/tlou-s1.jpg","air_date":"2023-01-15",
 				"episodes":[{"id":11,"episode_number":1,"name":"当你迷失在黑暗中","still_path":"/e1.jpg","air_date":"2023-01-15"},

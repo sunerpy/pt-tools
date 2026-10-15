@@ -49,7 +49,9 @@ type LibraryInput struct {
 	ScrapeItems []string `json:"scrape_items"`
 	// ScrapeImageLang 是海报与 Logo 优先用的语言（scrape.ImageLangs）
 	ScrapeImageLang string `json:"scrape_image_lang"`
-	Enabled         bool   `json:"enabled"`
+	// ClassifyDir 为真时按二级分类放进库目录下的分类目录
+	ClassifyDir bool `json:"classify_dir"`
+	Enabled     bool `json:"enabled"`
 }
 
 // DefaultTemplate 是这种媒体库的默认模板。
@@ -135,7 +137,7 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
 		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
-		Enabled: in.Enabled,
+		ClassifyDir: in.ClassifyDir, Enabled: in.Enabled,
 	}, nil
 }
 
@@ -183,7 +185,7 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 	}
 	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(
 		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang",
-		"enabled", "updated_at",
+		"classify_dir", "enabled", "updated_at",
 	).Updates(&row)
 	if res.Error != nil {
 		if isUnique(res.Error) {

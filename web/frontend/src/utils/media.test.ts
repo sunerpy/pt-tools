@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  CLASSIFY_COUNTRIES,
   DEFAULT_SCRAPE_ITEMS,
   IMAGE_LANGS,
   MEDIA_LANGUAGES,
   MEDIA_WORD_KINDS,
   SCRAPE_ITEMS,
+  TMDB_GENRES,
+  classifyRuleSummary,
   episodeText,
   mediaKindLabel,
   mediaSourceLabel,
@@ -50,6 +53,20 @@ describe("媒体识别的显示工具", () => {
       "logo",
     ]);
     expect(scrapeItemsFor("tv")).toHaveLength(6);
+  });
+
+  it("二级分类的条件写成一句话", () => {
+    expect(TMDB_GENRES.tv.find((g) => g.id === 10762)?.name).toBe("儿童");
+    expect(CLASSIFY_COUNTRIES.every((c) => /^[A-Z]{2}$/.test(c.value))).toBe(true);
+    expect(
+      classifyRuleSummary("tv", { name: "国漫", genres: [16], countries: ["CN", "TW", "XX"] }),
+    ).toBe("类型：动画；国家或地区：中国大陆、中国台湾、XX");
+    expect(classifyRuleSummary("movie", { name: "华语电影", languages: ["zh", "cn"] })).toBe(
+      "语言：中文、粤语",
+    );
+    expect(classifyRuleSummary("movie", { name: "外语电影" })).toBe(
+      "不限条件：前面都对不上的放进这里",
+    );
   });
 
   it("类型、来源", () => {

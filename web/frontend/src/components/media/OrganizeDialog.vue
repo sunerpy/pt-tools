@@ -211,6 +211,9 @@ const resultText = computed(() => {
             </div>
             <div v-if="plan.library" class="od__meta" data-testid="organize-library">
               <span>媒体库：{{ plan.library.name }}</span>
+              <span v-if="plan.category" data-testid="organize-category"
+                >分类：{{ plan.category }}</span
+              >
               <span>{{ modeLabel(plan.mode) }}</span>
               <span class="od__path">{{ plan.library.path }}</span>
             </div>

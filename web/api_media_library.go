@@ -25,6 +25,8 @@ func (s *Server) SetOrganizeService(svc *organize.Service) { s.organizer = svc }
 func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/media/organize/settings", s.auth(s.apiOrganizeSettingsGet))
 	mux.HandleFunc("PUT /api/media/organize/settings", s.auth(s.apiOrganizeSettingsPut))
+	mux.HandleFunc("GET /api/media/organize/classify", s.auth(s.apiClassifyGet))
+	mux.HandleFunc("PUT /api/media/organize/classify", s.auth(s.apiClassifyPut))
 	mux.HandleFunc("POST /api/media/organize/preview", s.auth(s.apiOrganizePreview))
 	mux.HandleFunc("POST /api/media/organize", s.auth(s.apiOrganizeRun))
 	mux.HandleFunc("GET /api/media/libraries", s.auth(s.apiLibraries))
@@ -88,6 +90,38 @@ func (s *Server) apiOrganizeSettingsGet(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	got, err := svc.Settings(r.Context())
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiClassifyGet handles GET /api/media/organize/classify
+func (s *Server) apiClassifyGet(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	got, err := svc.Classify(r.Context())
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiClassifyPut handles PUT /api/media/organize/classify
+func (s *Server) apiClassifyPut(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	var in organize.ClassifyRules
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	got, err := svc.SaveClassify(r.Context(), in)
 	if err != nil {
 		writeOrganizeError(w, err)
 		return

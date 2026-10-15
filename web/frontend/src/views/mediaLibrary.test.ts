@@ -10,6 +10,8 @@ import { type MountedView, mountView } from "@/test-mount";
 const api = vi.hoisted(() => ({
   settings: vi.fn(),
   saveSettings: vi.fn(),
+  classify: vi.fn(),
+  saveClassify: vi.fn(),
   libraries: vi.fn(),
   createLibrary: vi.fn(),
   updateLibrary: vi.fn(),
@@ -106,11 +108,17 @@ const library = {
   scrape_overwrite: false,
   scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
   scrape_image_lang: "",
+  classify_dir: false,
   enabled: true,
   created_at: "",
   updated_at: "",
   effective_template: "{{.Title}}",
   preview: "奥本海默 (2023)/奥本海默 (2023) - 2160p BluRay HDR10 H.265",
+};
+
+const classifyPresets = {
+  movie: [{ name: "华语电影", languages: ["zh"] }, { name: "外语电影" }],
+  tv: [{ name: "欧美剧", countries: ["US"] }],
 };
 
 const server = {
@@ -144,6 +152,7 @@ async function mountPage(opts: { libsFail?: boolean } = {}) {
     },
   ]);
   api.servers.mockResolvedValue([server]);
+  api.classify.mockResolvedValue({ rules: { movie: [], tv: [] }, presets: classifyPresets });
   api.templatePreview.mockResolvedValue({ template: "", preview: "示例路径" });
   dl.list.mockResolvedValue([
     {
@@ -226,6 +235,7 @@ describe("媒体库", () => {
         scrape_overwrite: false,
         scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
         scrape_image_lang: "",
+        classify_dir: false,
         enabled: true,
       },
     ]);
@@ -286,6 +296,72 @@ describe("媒体库", () => {
       expect(ui.warning).toHaveBeenCalledWith("刮削内容至少选一项；不想刮削就关掉刮削"),
     );
     expect(api.updateLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it("二级分类：填入常用分类、调整顺序、添加与删除，每次整份保存", async () => {
+    await mountPage();
+    await vi.waitFor(() => expect(api.classify).toHaveBeenCalled());
+    expect(q("ml-classify-movie")!.textContent).toContain("没有规则：电影不分类");
+
+    api.saveClassify.mockImplementation(async (rules) => ({ rules, presets: classifyPresets }));
+    const fillBtn = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
+      (b.textContent ?? "").includes("填入常用分类"),
+    );
+    fillBtn!.click();
+    await vi.waitFor(() => expect(api.saveClassify).toHaveBeenCalledTimes(1));
+    expect(ui.confirm, "还没有规则时不用确认").not.toHaveBeenCalled();
+    expect(api.saveClassify.mock.calls[0]![0]).toEqual(classifyPresets);
+    await flush();
+    expect(q("ml-rule-movie-0")!.textContent).toContain("华语电影");
+    expect(q("ml-rule-movie-0")!.textContent).toContain("语言：中文");
+    expect(q("ml-rule-movie-1")!.textContent).toContain("前面都对不上的放进这里");
+    expect(q("ml-rule-tv-0")!.textContent).toContain("国家或地区：美国");
+
+    q("ml-rule-down-movie-0")!.click();
+    await vi.waitFor(() => expect(api.saveClassify).toHaveBeenCalledTimes(2));
+    expect(api.saveClassify.mock.calls[1]![0].movie.map((r: { name: string }) => r.name)).toEqual([
+      "外语电影",
+      "华语电影",
+    ]);
+    await flush();
+
+    q("ml-classify-add-tv")!.click();
+    await vi.waitFor(() => expect(q("ml-rule-name")).not.toBeNull());
+    q("ml-rule-save")!.click();
+    await vi.waitFor(() => expect(ui.warning).toHaveBeenCalledWith("填写分类名称"));
+    fill("ml-rule-name", " 日韩剧 ");
+    q("ml-rule-save")!.click();
+    await vi.waitFor(() => expect(api.saveClassify).toHaveBeenCalledTimes(3));
+    expect(api.saveClassify.mock.calls[2]![0].tv).toEqual([
+      { name: "欧美剧", countries: ["US"] },
+      { name: "日韩剧", genres: [], languages: [], countries: [] },
+    ]);
+    await flush();
+
+    ui.confirm.mockResolvedValue("confirm");
+    q("ml-rule-del-tv-0")!.click();
+    await vi.waitFor(() => expect(api.saveClassify).toHaveBeenCalledTimes(4));
+    expect(api.saveClassify.mock.calls[3]![0].tv.map((r: { name: string }) => r.name)).toEqual([
+      "日韩剧",
+    ]);
+
+    // 已经有规则时填入常用分类要先确认；取消就不保存
+    ui.confirm.mockRejectedValueOnce("cancel");
+    fillBtn!.click();
+    await flush();
+    expect(api.saveClassify).toHaveBeenCalledTimes(4);
+  });
+
+  it("媒体库：勾选按二级分类放进子目录时带上 classify_dir", async () => {
+    await mountPage();
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-classify")).not.toBeNull());
+    q("ml-lib-classify")!.querySelector("input")!.click();
+    await flush();
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({ classify_dir: true });
   });
 
   it("模板写错时预览写明原因", async () => {

@@ -65,6 +65,7 @@ const plan = {
   },
   source: "search",
   library,
+  category: "外语电影",
   mode: "hardlink",
   items: [
     {
@@ -123,6 +124,7 @@ describe("整理入库弹窗", () => {
     expect(q("organize-match")!.textContent).toContain("按名字搜索");
     expect(q("organize-library")!.textContent).toContain("媒体库：电影");
     expect(q("organize-library")!.textContent).toContain("硬链接");
+    expect(q("organize-category")!.textContent, "放进的二级分类").toContain("分类：外语电影");
     const items = q("organize-items")!.textContent ?? "";
     expect(items).toContain("待整理");
     expect(items).toContain("奥本海默 (2023)/奥本海默 (2023) - 2160p.mkv");

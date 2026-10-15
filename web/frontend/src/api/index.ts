@@ -2533,7 +2533,32 @@ export interface MediaLibraryInput {
   /** 刮削要写的内容；没选过的库是默认的那几项（Logo 以外） */
   scrape_items: MediaScrapeItem[];
   scrape_image_lang: MediaImageLang;
+  /** 按二级分类放进库目录下的分类目录 */
+  classify_dir: boolean;
   enabled: boolean;
+}
+
+/** 一条二级分类：条件之间是「且」，同一个条件里的几个值是「或」，空的条件不限 */
+export interface ClassifyRule {
+  name: string;
+  /** TMDB 的类型编号 */
+  genres?: number[];
+  /** 原始语言（ISO 639-1，例如 zh、ja；TMDB 把粤语记作 cn） */
+  languages?: string[];
+  /** 出品国家或地区（ISO 3166-1，例如 CN、US） */
+  countries?: string[];
+}
+
+/** 电影与剧集各自的二级分类，按顺序取第一条对得上的 */
+export interface ClassifyRules {
+  movie: ClassifyRule[];
+  tv: ClassifyRule[];
+}
+
+export interface ClassifyView {
+  rules: ClassifyRules;
+  /** 常用的二级分类，「填入常用分类」用 */
+  presets: ClassifyRules;
 }
 
 export interface MediaLibrary extends MediaLibraryInput {
@@ -2631,6 +2656,8 @@ export interface OrganizePlan {
   /** manual 是手动指定的条目，history 是沿用之前整理这些文件时用的条目 */
   source?: MediaRecognizeResult["source"] | "manual" | "history";
   library?: MediaLibraryInput & { id: number };
+  /** 放进的二级分类（媒体库开了「按二级分类放进子目录」、规则对得上时才有） */
+  category?: string;
   mode?: MediaMode;
   items: OrganizePlanItem[];
   skipped?: { file: { rel: string; path: string; size: number }; reason: string }[];
@@ -2692,6 +2719,9 @@ export const organizeApi = {
   settings: () => api.get<OrganizeSettings>("/api/media/organize/settings"),
   saveSettings: (data: OrganizeSettingsInput) =>
     api.put<OrganizeSettings>("/api/media/organize/settings", data),
+  classify: () => api.get<ClassifyView>("/api/media/organize/classify"),
+  saveClassify: (data: ClassifyRules) =>
+    api.put<ClassifyView>("/api/media/organize/classify", data),
   preview: (data: OrganizeRequest) => api.post<OrganizePlan>("/api/media/organize/preview", data),
   organize: (data: OrganizeRequest) => api.post<OrganizeResult>("/api/media/organize", data),
   libraries: () => api.get<MediaLibrary[]>("/api/media/libraries"),

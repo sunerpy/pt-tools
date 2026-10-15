@@ -146,7 +146,7 @@ const NOT_ON_BOARD = {
   "views/MediaRecognize.vue":
     "媒体识别页（路线图 M9）晚于画板 40 定稿：识别词的添加 / 编辑弹窗不在那张清点图里",
   "views/MediaLibrary.vue":
-    "媒体库页（路线图 M10）晚于画板 40 定稿：媒体库、路径映射、媒体服务器的编辑弹窗不在那张清点图里",
+    "媒体库页（路线图 M10、M23）晚于画板 40 定稿：媒体库、二级分类、路径映射、媒体服务器的编辑弹窗不在那张清点图里",
   "views/MediaHistory.vue":
     "整理历史页（路线图 M10）晚于画板 40 定稿：删除记录（可连库里的文件一起删）的确认弹窗不在那张清点图里",
   "components/media/OrganizeDialog.vue":
