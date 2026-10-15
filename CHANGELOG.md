@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.30](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.29...v1.0.0-rc.30) (2026-10-15)
+
+
+### Features
+
+* **cleanup:** 自动删种可以先预览会删哪些，页面写明上一轮的结果 ([#715](https://github.com/sunerpy/pt-tools/issues/715)) ([cb5cb19](https://github.com/sunerpy/pt-tools/commit/cb5cb195047e76479410bfaecc74c7c1dd2ee360))
+* **media:** TMDB 接口地址与图片地址可以换 ([#707](https://github.com/sunerpy/pt-tools/issues/707)) ([1f9a3b5](https://github.com/sunerpy/pt-tools/commit/1f9a3b5e8640e7d124b8382a83662c2147b93b82))
+* **media:** 刮削内容可以分别开关，海报与 Logo 可以选图片语言 ([#709](https://github.com/sunerpy/pt-tools/issues/709)) ([7626961](https://github.com/sunerpy/pt-tools/commit/7626961427c88d64e7537cd394e30ce2340da5f9))
+* **media:** 刮削的简介与评分可以用豆瓣的 ([#713](https://github.com/sunerpy/pt-tools/issues/713)) ([42d10c8](https://github.com/sunerpy/pt-tools/commit/42d10c87c2372987105ed183603eef07e6c72ce7))
+* **media:** 整理入库可以按二级分类放进子目录 ([#710](https://github.com/sunerpy/pt-tools/issues/710)) ([c0ac37a](https://github.com/sunerpy/pt-tools/commit/c0ac37a4b83294161fadf372941a666cdb899da1))
+* **media:** 整理时同名的旧版本可以按策略替换 ([#711](https://github.com/sunerpy/pt-tools/issues/711)) ([d92cd88](https://github.com/sunerpy/pt-tools/commit/d92cd8826c1bc9fd55450dd0c53de47929d2f970))
+* **media:** 没填 TMDB API Key 时媒体页写明要用它、带链接；整理设置写明扫描的上次与下次 ([#717](https://github.com/sunerpy/pt-tools/issues/717)) ([fd4aea8](https://github.com/sunerpy/pt-tools/commit/fd4aea85f9cb8e6f7ada7dc8fe1a1721dbfa45bf))
+* **media:** 目录监控：放进监控目录的视频按媒体库整理 ([#712](https://github.com/sunerpy/pt-tools/issues/712)) ([8ce72f3](https://github.com/sunerpy/pt-tools/commit/8ce72f3dd5fa542d6902ab4f64d5a9c5cee4f302))
+* **notify:** 「最近的通知」列出 RSS 与后台通知，结果写中文 ([#725](https://github.com/sunerpy/pt-tools/issues/725)) ([06bd700](https://github.com/sunerpy/pt-tools/commit/06bd7009227840c36f818d90d9cb9dfb649ef756))
+* **notify:** 通知通道的投递统计算上签到、战报等后台通知，按来源写明 ([#719](https://github.com/sunerpy/pt-tools/issues/719)) ([5ec3785](https://github.com/sunerpy/pt-tools/commit/5ec3785b32d0fbde2cc45e1f97ea4f8a512488ad))
+* **qbit:** qB 兼容入口的监听地址在页面上设，页面写明状态与登录情况 ([#714](https://github.com/sunerpy/pt-tools/issues/714)) ([832133d](https://github.com/sunerpy/pt-tools/commit/832133d61e08b980076fa9c5a4ba8e8cd6eff233))
+* **settings:** IYUU 辅种与 CookieCloud 写明每项填什么，以及上次与下次运行 ([#716](https://github.com/sunerpy/pt-tools/issues/716)) ([d09df4a](https://github.com/sunerpy/pt-tools/commit/d09df4a4831d2a5c9d814938bcd7feac861c97dc))
+* **settings:** 失效种子定时扫描写明上次与下次，保号配置写明探测周期与签到时间窗在哪 ([#718](https://github.com/sunerpy/pt-tools/issues/718)) ([58a6479](https://github.com/sunerpy/pt-tools/commit/58a6479503387d350cd08b15886eb0701435adb2))
+
+
+### Bug Fixes
+
+* **build:** CloakBrowser 的 compose 示例改用存在的镜像标签、正确的端口与数据目录 ([#722](https://github.com/sunerpy/pt-tools/issues/722)) ([4ad01a8](https://github.com/sunerpy/pt-tools/commit/4ad01a8b1b1f95438fea0b06a1a1f6296f02f493))
+* **cloak:** 登录探测的后备能连上现在的 CloakBrowser-Manager，compose 示例的镜像与健康检查 ([#724](https://github.com/sunerpy/pt-tools/issues/724)) ([3c666ef](https://github.com/sunerpy/pt-tools/commit/3c666ef536b707665b88cf271e427571b76507b2))
+* **settings:** 读不到下载器列表时失效种子扫描下一次检查就重试 ([#726](https://github.com/sunerpy/pt-tools/issues/726)) ([a6f1cd9](https://github.com/sunerpy/pt-tools/commit/a6f1cd91fef5a1d07c220825c3db60eba449275b))
+* **web:** 媒体、qB 兼容入口、远程访问等 14 个页面在导航上高亮自己 ([#720](https://github.com/sunerpy/pt-tools/issues/720)) ([ff12c2c](https://github.com/sunerpy/pt-tools/commit/ff12c2ca88d9cdfb8bbd7a7412f7fd33ab0c629c))
+
 ## [1.0.0-rc.29](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.28...v1.0.0-rc.29) (2026-10-14)
 
 
