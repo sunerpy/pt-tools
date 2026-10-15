@@ -111,7 +111,8 @@ type Art struct {
 // ChooseArt 按图片语言挑海报、背景与 Logo。imgs 是条目的图片列表（没取或取不到时为空，这时用 TMDB 给的那张、不写 Logo）：
 //   - 海报：选了语言时优先用这种语言的（none 是没有文字的），没有就用 TMDB 给的那张；
 //   - 背景：选了语言时优先用没有文字的，没有就用 TMDB 给的那张；
-//   - Logo：依次找选的语言、识别语言（recogLang，例如 zh-CN）、英文、没有文字的，都没有时用评分最高的一张。
+//   - Logo：依次找选的语言（none 是没有文字的）、识别语言（recogLang，例如 zh-CN）、英文、没有文字的，
+//     都没有时用评分最高的一张。
 func ChooseArt(r tmdb.Result, imgs *tmdb.Images, lang, recogLang string) Art {
 	art := Art{Poster: r.PosterPath, Fanart: r.BackdropPath}
 	if imgs == nil {
@@ -130,7 +131,11 @@ func ChooseArt(r tmdb.Result, imgs *tmdb.Images, lang, recogLang string) Art {
 		}
 	}
 	var prefs []string
-	if lang != ImageLangAuto && lang != ImageLangNone {
+	switch lang {
+	case ImageLangAuto:
+	case ImageLangNone:
+		prefs = append(prefs, "")
+	default:
 		prefs = append(prefs, lang)
 	}
 	recog, _, _ := strings.Cut(recogLang, "-")

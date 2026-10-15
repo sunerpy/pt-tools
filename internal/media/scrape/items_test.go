@@ -46,7 +46,7 @@ func TestChooseArt(t *testing.T) {
 		{"没取图片列表：用 TMDB 给的、不写 Logo", ImageLangAuto, "zh-CN", nil, Art{Poster: "/default.jpg", Fanart: "/default-bd.jpg"}},
 		{"跟 TMDB：海报背景不换，Logo 用识别语言", ImageLangAuto, "zh-CN", imgs, Art{Poster: "/default.jpg", Fanart: "/default-bd.jpg", Logo: "/logo-zh.png"}},
 		{"英文海报，背景用没有文字的", "en", "zh-CN", imgs, Art{Poster: "/en.jpg", Fanart: "/bd-none.jpg", Logo: "/logo-en.png"}},
-		{"无文字", ImageLangNone, "ja-JP", imgs, Art{Poster: "/none.jpg", Fanart: "/bd-none.jpg", Logo: "/logo-ja.png"}},
+		{"无文字：没有无文字的 Logo 时找识别语言的", ImageLangNone, "ja-JP", imgs, Art{Poster: "/none.jpg", Fanart: "/bd-none.jpg", Logo: "/logo-ja.png"}},
 		{"没有这种语言的海报时用 TMDB 给的", "ja", "zh-CN", imgs, Art{Poster: "/default.jpg", Fanart: "/bd-none.jpg", Logo: "/logo-ja.png"}},
 	}
 	for _, c := range cases {
@@ -56,6 +56,8 @@ func TestChooseArt(t *testing.T) {
 	// Logo：识别语言与英文都没有时用没有文字的，再没有时用评分最高的一张
 	only := &tmdb.Images{Logos: []tmdb.Image{{Path: "/ko.png", Lang: "ko"}, {Path: "/plain.png"}}}
 	assert.Equal(t, "/plain.png", ChooseArt(r, only, ImageLangAuto, "zh-CN").Logo)
+	assert.Equal(t, "/plain.png", ChooseArt(r, &tmdb.Images{Logos: []tmdb.Image{{Path: "/zh.png", Lang: "zh"}, {Path: "/plain.png"}}}, ImageLangNone, "zh-CN").Logo,
+		"选了无文字时先找没有文字的 Logo")
 	only.Logos = only.Logos[:1]
 	assert.Equal(t, "/ko.png", ChooseArt(r, only, ImageLangAuto, "zh-CN").Logo)
 	assert.Empty(t, ChooseArt(r, &tmdb.Images{}, "zh", "zh-CN").Logo)

@@ -296,6 +296,11 @@ func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory,
 	}
 	add := map[uint][]extra{}
 	for _, e := range stay {
+		// 文件已经换过（开着覆盖时后一批整理重写了它，或者用户换了）：这条归属过期了，不转。
+		// 后一批重写的文件记在写它的那批记录里，转过去会把那边对得上的编号盖掉
+		if id, err := transfer.FileID(e.Target); err != nil || id != e.FileID {
+			continue
+		}
 		d := filepath.Dir(e.Target)
 		for _, r := range rows {
 			if transfer.Within(d, r.TargetPath) {

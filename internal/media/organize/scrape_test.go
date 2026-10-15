@@ -110,3 +110,35 @@ func TestDeleteHistoryKeepsShowLogo(t *testing.T) {
 	assert.False(t, exists(logo))
 	assert.False(t, exists(show), "剧集目录删干净")
 }
+
+// 开着覆盖、分两批整理同一部剧：后一批重写了目录里的 Logo 与海报。先删前一批时，过期的归属不能转给后一批、
+// 盖掉后一批记下的文件编号；删到最后一批时这些文件照样删掉
+func TestDeleteHistoryOverwrittenShowArt(t *testing.T) {
+	e := newEnv(t)
+	e.library(LibraryInput{
+		Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, Scrape: true, ScrapeOverwrite: true,
+		ScrapeItems: []string{"nfo", "poster", "logo"},
+	})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	const h1, h2 = "1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"
+	e.addTorrent(h1, "The.Last.of.Us.S01E01.2160p", map[string]int{"The.Last.of.Us.S01E01.2160p/The.Last.of.Us.S01E01.2160p.mkv": 2}, nil)
+	e.addTorrent(h2, "The.Last.of.Us.S01E02.2160p", map[string]int{"The.Last.of.Us.S01E02.2160p/The.Last.of.Us.S01E02.2160p.mkv": 2}, nil)
+	for _, h := range []string{h1, h2} {
+		res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: h})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Created, res.Plan.Problem)
+	}
+	show := filepath.Join(e.tv, "最后生还者 (2023)")
+	require.True(t, exists(filepath.Join(show, "clearlogo.png")))
+
+	var ep1, ep2 models.MediaTransferHistory
+	require.NoError(t, e.db.Where("info_hash = ?", h1).First(&ep1).Error)
+	require.NoError(t, e.db.Where("info_hash = ?", h2).First(&ep2).Error)
+	require.NoError(t, e.del(ep1.ID, true))
+	assert.True(t, exists(filepath.Join(show, "clearlogo.png")), "目录里还有第 2 集")
+	require.NoError(t, e.del(ep2.ID, true))
+	for _, f := range []string{"clearlogo.png", "poster.jpg", "tvshow.nfo"} {
+		assert.False(t, exists(filepath.Join(show, f)), f)
+	}
+	assert.False(t, exists(show), "剧集目录删干净")
+}

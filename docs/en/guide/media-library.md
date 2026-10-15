@@ -125,7 +125,7 @@ The logo is the title artwork on a transparent background; Emby, Jellyfin and Ko
 | ------------------------------ | --------------------------------------------------- | -------------------- | ---------------------------------------------------------- |
 | Recognition language (default) | The one TMDB returns for the recognition language   | The one TMDB returns | Recognition language, then English, then without text      |
 | Chinese, English or Japanese   | That language first, otherwise the one TMDB returns | Without text first   | That language, then the recognition language, then English |
-| Without text                   | Without text first                                  | Without text first   | Recognition language, then English                         |
+| Without text                   | Without text first                                  | Without text first   | Without text, then the recognition language, then English  |
 
 For the logo or a chosen image language, pt-tools fetches the title's image list once more (cached for a week). If that fails, the poster and background fall back to the ones TMDB returns, no logo is written, and the organize result says why. Season posters and episode thumbnails always use the ones TMDB returns.
 
