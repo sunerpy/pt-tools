@@ -63,6 +63,8 @@ type DeadTorrentMonitor struct {
 	lastScan time.Time
 	// lastResult 是上一轮的结果（每台下载器有几个失效种子、连不上的），页面上写明
 	lastResult string
+	// retry 表示上一轮没扫成（读不到下载器列表）：下一次检查就重扫，不等满间隔
+	retry bool
 	// notified 是每台下载器上次通知过的失效种子；新一轮是它的子集时不再通知（用户删了一部分）。
 	notified map[string]map[string]struct{}
 }
@@ -75,6 +77,24 @@ func (m *DeadTorrentMonitor) Status() (time.Time, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastScan, m.lastResult
+}
+
+// NextScan 是下一轮大约什么时候，与 RunOnce 的判断同源：还没扫过、已经到期、或者上一轮没扫成时是 now
+// （下一次检查就扫），否则是上一轮的时间加上间隔。
+func (m *DeadTorrentMonitor) NextScan(now time.Time, interval time.Duration) time.Time {
+	if m == nil {
+		return now
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.dueLocked(now, interval) {
+		return now
+	}
+	return m.lastScan.Add(interval)
+}
+
+func (m *DeadTorrentMonitor) dueLocked(now time.Time, interval time.Duration) bool {
+	return m.lastScan.IsZero() || m.retry || !now.Before(m.lastScan.Add(interval))
 }
 
 // NewDeadTorrentMonitor 构造监控，不启动。
@@ -161,10 +181,10 @@ func (m *DeadTorrentMonitor) RunOnce(ctx context.Context) int {
 	}
 	now := m.cfg.Clock.Now()
 	m.mu.Lock()
-	due := m.lastScan.IsZero() || !now.Before(m.lastScan.Add(interval))
+	due := m.dueLocked(now, interval)
 	if due {
 		// 这一轮扫完以前，页面上的结果写「正在扫描」，不显示上一轮的
-		m.lastScan, m.lastResult = now, "正在扫描"
+		m.lastScan, m.lastResult, m.retry = now, "正在扫描", false
 	}
 	m.mu.Unlock()
 	if !due {
@@ -175,9 +195,9 @@ func (m *DeadTorrentMonitor) RunOnce(ctx context.Context) int {
 	defer cancel()
 	dls, unreachable, err := m.cfg.Downloaders(ctx)
 	if err != nil {
-		m.cfg.Logger.Warnf("[失效种子] 读取下载器列表失败，这一轮不扫描: %v", err)
+		m.cfg.Logger.Warnf("[失效种子] 读取下载器列表失败，这一轮不扫描，下一次检查时重试: %v", err)
 		m.mu.Lock()
-		m.lastResult = "读取下载器列表失败，这一轮没有扫描"
+		m.lastResult, m.retry = "读取下载器列表失败，这一轮没有扫描，下一次检查时重试", true
 		m.mu.Unlock()
 		return 0
 	}

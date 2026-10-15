@@ -43,7 +43,7 @@ Both qBittorrent and Transmission can edit trackers. Transmission 4.0 and later 
 Turn the scan on under the Scheduled scan (定时扫描) tab and pt-tools scans every enabled downloader at the interval you set (6 to 168 hours, 24 by default). When it finds new dead torrents it sends one notification to the channels you choose; pick at least one enabled channel to turn it on.
 
 - It only sends notifications and never deletes a torrent.
-- The page shows when the last scan ran and what it found (how many dead torrents each downloader has, and how many downloaders couldn't be reached), and roughly when the next scan is. These start over when pt-tools restarts; the first scan runs a few minutes after start.
+- The page shows when the last scan ran and what it found (how many dead torrents each downloader has, and how many downloaders couldn't be reached), and roughly when the next scan is. These start over when pt-tools restarts; the first scan runs a few minutes after start. A round that could not read the downloader list does not count: the next check (every 10 minutes) scans again instead of waiting a full interval.
 - The same set of dead torrents is reported once. A new dead torrent triggers another notification listing all of them; a shrinking list does not.
 - A channel in its quiet hours gets the notification when the quiet hours end, and failed deliveries are retried.
 
