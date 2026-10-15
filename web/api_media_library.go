@@ -98,7 +98,13 @@ func (s *Server) apiOrganizeSettingsGet(w http.ResponseWriter, r *http.Request) 
 		writeOrganizeError(w, err)
 		return
 	}
-	writeJSON(w, got)
+	writeJSON(w, organizeSettingsView{Settings: got, Runs: svc.Runs(r.Context(), got)})
+}
+
+// organizeSettingsView 是整理设置加上定期扫描与目录监控扫描的上一次、下一次（页面上写明）。
+type organizeSettingsView struct {
+	organize.Settings
+	Runs organize.RunTimes `json:"runs"`
 }
 
 // apiClassifyGet handles GET /api/media/organize/classify
@@ -148,7 +154,7 @@ func (s *Server) apiOrganizeSettingsPut(w http.ResponseWriter, r *http.Request) 
 		writeOrganizeError(w, err)
 		return
 	}
-	writeJSON(w, got)
+	writeJSON(w, organizeSettingsView{Settings: got, Runs: svc.Runs(r.Context(), got)})
 }
 
 // apiOrganizePreview handles POST /api/media/organize/preview

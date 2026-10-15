@@ -2588,9 +2588,18 @@ export interface OrganizeSettings {
   delete_links_on_remove: boolean;
   /** 扫描监控目录的间隔（分钟） */
   watch_interval_min: number;
+  /** 定期扫描与目录监控扫描上一次、下一次大约什么时候（在内存里，重启以后从头算；只在读设置时回） */
+  runs?: OrganizeRunTimes;
 }
 
-export type OrganizeSettingsInput = Omit<OrganizeSettings, "auto_since">;
+export interface OrganizeRunTimes {
+  scan_last?: string;
+  scan_next?: string;
+  watch_last?: string;
+  watch_next?: string;
+}
+
+export type OrganizeSettingsInput = Omit<OrganizeSettings, "auto_since" | "runs">;
 
 /** 刮削内容（和后端 scrape.AllItems 一致） */
 export type MediaScrapeItem = "nfo" | "poster" | "fanart" | "logo" | "season_poster" | "thumb";

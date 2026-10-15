@@ -99,6 +99,7 @@ const settings = {
   notify_channels: [],
   delete_links_on_remove: false,
   watch_interval_min: 10,
+  runs: { watch_last: "2026-10-15T10:00:00Z", watch_next: "2026-10-15T10:10:00Z" },
 };
 
 const library = {
@@ -207,6 +208,7 @@ describe("媒体库", () => {
       watch_interval_min: 10,
     });
     expect(ui.success).toHaveBeenCalledWith("已保存整理设置");
+    expect(q("ml-watch-runs")!.textContent, "目录监控写明上次与下次扫描").toContain("下次大约");
   });
 
   it("媒体库：列表、编辑只发输入字段、预览模板、检查目录、启停与删除", async () => {
@@ -346,12 +348,19 @@ describe("媒体库", () => {
     expect(api.createWatchDir.mock.calls[0]![0]).toEqual({ path: "/data/in", enabled: true });
 
     api.updateWatchDir.mockResolvedValue({});
+    const before = api.settings.mock.calls.length;
     q("ml-watch-enabled-4")!.click();
     await vi.waitFor(() =>
       expect(api.updateWatchDir).toHaveBeenCalledWith(4, {
         path: "/media/incoming",
         enabled: false,
       }),
+    );
+
+    await vi.waitFor(() =>
+      expect(api.settings.mock.calls.length, "开关了目录：重新读扫描的上次与下次").toBeGreaterThan(
+        before,
+      ),
     );
 
     ui.confirm.mockResolvedValue("confirm");

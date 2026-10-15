@@ -435,6 +435,7 @@ func (s *Service) loop(ctx context.Context) {
 		}
 		if set.ScanEnabled && now.Sub(lastScan) >= time.Duration(set.ScanIntervalMin)*time.Minute {
 			lastScan = now
+			s.markRun(&s.scanAt, now)
 			s.scan(ctx, set)
 		}
 		if set.DeleteLinksOnRemove && now.Sub(lastReconcile) >= sweepInterval {
@@ -443,6 +444,7 @@ func (s *Service) loop(ctx context.Context) {
 		}
 		if now.Sub(lastWatch) >= time.Duration(set.WatchIntervalMin)*time.Minute {
 			lastWatch = now
+			s.markRun(&s.watchTick, now)
 			s.watchScan(ctx, set)
 		}
 		if now.Sub(lastRecover) >= sweepInterval {
@@ -661,4 +663,52 @@ func containsID(ids []uint, id uint) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) markRun(at *time.Time, now time.Time) {
+	s.timesMu.Lock()
+	*at = now
+	s.timesMu.Unlock()
+}
+
+// RunTimes 是定期扫描与目录监控扫描上一次与下一次大约什么时候（在内存里，pt-tools 重启以后从头算）。
+// 后台没在跑、或者对应的开关关着时没有「下一次」；这次启动以后还没扫过时下一次是现在（下一拍就扫）。
+type RunTimes struct {
+	ScanLast  *time.Time `json:"scan_last,omitempty"`
+	ScanNext  *time.Time `json:"scan_next,omitempty"`
+	WatchLast *time.Time `json:"watch_last,omitempty"`
+	WatchNext *time.Time `json:"watch_next,omitempty"`
+}
+
+// Runs 是按设置 set 算的上一次与下一次扫描的时间（见 RunTimes）。目录监控没有开着的目录时没有下一次（扫描只看开着的）。
+func (s *Service) Runs(ctx context.Context, set Settings) RunTimes {
+	var watching int64
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaWatchDir{}).Where("enabled = ?", true).Count(&watching).Error; err != nil {
+		watching = 0
+	}
+	s.timesMu.Lock()
+	scanAt, watchTick, watchAt := s.scanAt, s.watchTick, s.watchAt
+	s.timesMu.Unlock()
+	running, now := s.isRunning(), s.cfg.Now()
+	// next 按后台节拍上一次做这件事的时间 tick 排（与 loop 一致）；last 是页面上的「上次」
+	at := func(last, tick time.Time, on bool, intervalMin int) (*time.Time, *time.Time) {
+		var l, n *time.Time
+		if !last.IsZero() {
+			l = &last
+		}
+		if running && on {
+			next := now
+			if !tick.IsZero() {
+				if t := tick.Add(time.Duration(intervalMin) * time.Minute); t.After(now) {
+					next = t
+				}
+			}
+			n = &next
+		}
+		return l, n
+	}
+	var rt RunTimes
+	rt.ScanLast, rt.ScanNext = at(scanAt, scanAt, set.ScanEnabled, set.ScanIntervalMin)
+	rt.WatchLast, rt.WatchNext = at(watchAt, watchTick, watching > 0, set.WatchIntervalMin)
+	return rt
 }

@@ -5,6 +5,7 @@
  */
 import { type ExploreItem, type ExplorePage, type MediaKind, subscribeApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import TmdbKeyNotice from "@/components/media/TmdbKeyNotice.vue";
 import SubscribeDialog, { type SubscribeTarget } from "@/components/media/SubscribeDialog.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -102,6 +103,7 @@ onMounted(load);
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
     </Teleport>
+    <TmdbKeyNotice class="pt-cards__full" usage="探索与订阅" />
 
     <PtPanel title="探索" icon="compass">
       <div class="ex-bar">
