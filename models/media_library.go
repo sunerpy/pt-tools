@@ -34,10 +34,12 @@ type MediaLibrary struct {
 	// ScrapeItems 是刮削要写的内容（逗号分隔，见 scrape.AllItems）；空串是默认的那几项（Logo 以外都写）
 	ScrapeItems string `gorm:"size:128;not null;default:''" json:"-"`
 	// ScrapeImageLang 是海报与 Logo 优先用的语言：空串用 TMDB 给的那张；zh、en、ja；none 是没有文字的
-	ScrapeImageLang string    `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
-	Enabled         bool      `gorm:"not null;default:false" json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ScrapeImageLang string `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
+	// ClassifyDir 为真时按二级分类（MediaOrganizeSetting.ClassifyRules）放进库目录下的分类目录
+	ClassifyDir bool      `gorm:"not null;default:false" json:"classify_dir"`
+	Enabled     bool      `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (MediaLibrary) TableName() string { return "media_libraries" }
@@ -105,8 +107,10 @@ type MediaOrganizeSetting struct {
 	// NotifyChannels 是入库通知发往的通道 ID（JSON 数组）；空的不通知
 	NotifyChannels string `gorm:"type:text;not null;default:''" json:"-"`
 	// DeleteLinksOnRemove：种子连数据一起删掉后，把从它整理出的硬链接与软链接也删掉（复制的文件不删）
-	DeleteLinksOnRemove bool      `gorm:"not null;default:false" json:"delete_links_on_remove"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	DeleteLinksOnRemove bool `gorm:"not null;default:false" json:"delete_links_on_remove"`
+	// ClassifyRules 是二级分类的规则（JSON，见 organize.ClassifyRules）；空串是没有规则
+	ClassifyRules string    `gorm:"type:text;not null;default:''" json:"-"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (MediaOrganizeSetting) TableName() string { return "media_organize_settings" }

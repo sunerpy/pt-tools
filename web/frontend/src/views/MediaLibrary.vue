@@ -4,6 +4,8 @@
  * 整理后要通知的媒体服务器。画板没有这一页，沿用媒体识别页的样式：页头 + 面板里的表单与表格，手机是行卡。
  */
 import {
+  type ClassifyRule,
+  type ClassifyRules,
   type DownloaderSetting,
   type MediaCheckItem,
   type MediaKind,
@@ -31,11 +33,15 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
 import {
+  CLASSIFY_COUNTRIES,
+  CLASSIFY_LANGUAGES,
   DEFAULT_SCRAPE_ITEMS,
   IMAGE_LANGS,
   MEDIA_MODES,
   MEDIA_SERVER_KINDS,
   TEMPLATE_VARS,
+  TMDB_GENRES,
+  classifyRuleSummary,
   mediaKindLabel,
   modeLabel,
   scrapeItemsFor,
@@ -134,6 +140,7 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   scrape_overwrite: false,
   scrape_items: [...DEFAULT_SCRAPE_ITEMS],
   scrape_image_lang: "",
+  classify_dir: false,
   enabled: true,
 });
 const libForm = ref<MediaLibraryInput>(blankLibrary());
@@ -161,6 +168,7 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     scrape_overwrite: l.scrape_overwrite,
     scrape_items: [...(l.scrape_items ?? DEFAULT_SCRAPE_ITEMS)],
     scrape_image_lang: l.scrape_image_lang ?? "",
+    classify_dir: l.classify_dir ?? false,
     enabled: l.enabled,
   };
 }
@@ -292,6 +300,125 @@ async function removeLibrary(l: MediaLibrary) {
 
 const libKindText = (l: Pick<MediaLibrary, "kind" | "anime">) =>
   `${mediaKindLabel(l.kind)}${l.anime ? " · 只收动画" : ""}`;
+
+// ---- 二级分类 ----
+const CLASSIFY_KINDS: readonly { kind: MediaKind; label: string }[] = [
+  { kind: "movie", label: "电影" },
+  { kind: "tv", label: "剧集" },
+];
+const classify = ref<ClassifyRules>({ movie: [], tv: [] });
+const classifyPresets = ref<ClassifyRules>({ movie: [], tv: [] });
+const classifyDS = useDataState();
+const classifySaving = ref(false);
+const ruleDialog = ref(false);
+const ruleKind = ref<MediaKind>("movie");
+const ruleIndex = ref<number | null>(null);
+const ruleForm = ref<Required<ClassifyRule>>({
+  name: "",
+  genres: [],
+  languages: [],
+  countries: [],
+});
+const ruleTitle = computed(
+  () => `${ruleIndex.value === null ? "添加" : "编辑"}${mediaKindLabel(ruleKind.value)}分类`,
+);
+
+async function loadClassify() {
+  const pending = classifyDS.run(() => organizeApi.classify());
+  const data = await pending;
+  if (classifyDS.isStale(pending) || !data) return;
+  classify.value = data.rules;
+  classifyPresets.value = data.presets;
+}
+
+/** 整份保存二级分类（接口按整份替换）；成功时换成服务端规整后的 */
+async function saveClassify(next: ClassifyRules, done: string): Promise<boolean> {
+  classifySaving.value = true;
+  try {
+    const v = await organizeApi.saveClassify(next);
+    classify.value = v.rules;
+    ElMessage.success(done);
+    return true;
+  } catch (e) {
+    ElMessage.error(errText(e, "保存失败"));
+    return false;
+  } finally {
+    classifySaving.value = false;
+  }
+}
+
+function openRule(kind: MediaKind, index?: number) {
+  const r = index === undefined ? undefined : classify.value[kind][index];
+  ruleKind.value = kind;
+  ruleIndex.value = index ?? null;
+  ruleForm.value = {
+    name: r?.name ?? "",
+    genres: [...(r?.genres ?? [])],
+    languages: [...(r?.languages ?? [])],
+    countries: [...(r?.countries ?? [])],
+  };
+  ruleDialog.value = true;
+}
+
+async function saveRule() {
+  const f = ruleForm.value;
+  if (!f.name.trim()) {
+    ElMessage.warning("填写分类名称");
+    return;
+  }
+  const rule: ClassifyRule = {
+    name: f.name.trim(),
+    genres: [...f.genres],
+    languages: [...f.languages],
+    countries: [...f.countries],
+  };
+  const list = [...classify.value[ruleKind.value]];
+  if (ruleIndex.value === null) list.push(rule);
+  else list[ruleIndex.value] = rule;
+  if (await saveClassify({ ...classify.value, [ruleKind.value]: list }, "已保存分类")) {
+    ruleDialog.value = false;
+  }
+}
+
+async function moveRule(kind: MediaKind, index: number, delta: number) {
+  const list = [...classify.value[kind]];
+  const j = index + delta;
+  if (j < 0 || j >= list.length) return;
+  [list[index], list[j]] = [list[j]!, list[index]!];
+  await saveClassify({ ...classify.value, [kind]: list }, "已调整顺序");
+}
+
+async function removeRule(kind: MediaKind, index: number) {
+  const r = classify.value[kind][index];
+  if (!r) return;
+  try {
+    await ElMessageBox.confirm(
+      `删除分类「${r.name}」？已经放进这个分类目录的文件不动。`,
+      "删除分类",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
+    );
+  } catch {
+    return;
+  }
+  const list = classify.value[kind].filter((_, i) => i !== index);
+  await saveClassify({ ...classify.value, [kind]: list }, "已删除");
+}
+
+async function fillClassifyPresets() {
+  if (classify.value.movie.length || classify.value.tv.length) {
+    try {
+      await ElMessageBox.confirm("用常用分类替换现在的规则？", "填入常用分类", {
+        type: "warning",
+        confirmButtonText: "替换",
+        cancelButtonText: "取消",
+      });
+    } catch {
+      return;
+    }
+  }
+  const presets = JSON.parse(JSON.stringify(classifyPresets.value)) as ClassifyRules;
+  await saveClassify(presets, "已填入常用分类");
+}
 
 // ---- 路径映射 ----
 const pathMaps = ref<MediaPathMap[]>([]);
@@ -516,7 +643,14 @@ async function removeServer(s: MediaServer) {
 const refreshText = (mode: string) => (mode === "library" ? "刷新整个媒体库" : "只扫整理到的目录");
 
 function refresh() {
-  void Promise.all([loadSettings(), loadOptions(), loadLibraries(), loadPathMaps(), loadServers()]);
+  void Promise.all([
+    loadSettings(),
+    loadOptions(),
+    loadLibraries(),
+    loadClassify(),
+    loadPathMaps(),
+    loadServers(),
+  ]);
 }
 
 onMounted(refresh);
@@ -757,6 +891,86 @@ onMounted(refresh);
             <el-button size="small" type="danger" plain @click="removeLibrary(l)">删除</el-button>
           </template>
         </PtRowCard>
+      </div>
+    </PtPanel>
+
+    <PtPanel
+      title="二级分类"
+      icon="tags"
+      :count="classify.movie.length + classify.tv.length"
+      action="填入常用分类"
+      action-icon="sparkles"
+      @action="fillClassifyPresets">
+      <p class="ml-tip ml-tip--top">
+        媒体库勾选「按二级分类放进子目录」以后，条目按这里的规则放进库目录下的分类目录，例如「电影/华语电影/…」。从上往下取第一条对得上的：一条里的几个条件都要满足，一个条件里选了几个时满足其中一个就行；都对不上时直接放进库目录。
+      </p>
+      <div
+        v-if="classifyDS.error.value"
+        class="pt-note pt-note--warn ml-stale"
+        data-testid="ml-classify-stale">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>读取失败：{{ classifyDS.errorText.value }}</span>
+      </div>
+      <div class="ml-classify" data-testid="ml-classify">
+        <section
+          v-for="k in CLASSIFY_KINDS"
+          :key="k.kind"
+          class="ml-classify__kind"
+          :data-testid="`ml-classify-${k.kind}`">
+          <div class="ml-classify__head">
+            <span class="ml-classify__title">{{ k.label }}</span>
+            <el-button
+              link
+              type="primary"
+              :data-testid="`ml-classify-add-${k.kind}`"
+              @click="openRule(k.kind)"
+              >添加</el-button
+            >
+          </div>
+          <div v-if="!classify[k.kind].length" class="ml-sub">没有规则：{{ k.label }}不分类</div>
+          <ol v-else class="ml-classify__list">
+            <li
+              v-for="(r, i) in classify[k.kind]"
+              :key="r.name"
+              class="ml-classify__row"
+              :data-testid="`ml-rule-${k.kind}-${i}`">
+              <div class="ml-classify__text">
+                <span class="ml-classify__name">{{ r.name }}</span>
+                <span class="ml-sub">{{ classifyRuleSummary(k.kind, r) }}</span>
+              </div>
+              <div class="ml-classify__acts">
+                <el-button
+                  link
+                  :disabled="i === 0 || classifySaving"
+                  :aria-label="`上移 ${r.name}`"
+                  @click="moveRule(k.kind, i, -1)"
+                  >上移</el-button
+                >
+                <el-button
+                  link
+                  :disabled="i === classify[k.kind].length - 1 || classifySaving"
+                  :aria-label="`下移 ${r.name}`"
+                  :data-testid="`ml-rule-down-${k.kind}-${i}`"
+                  @click="moveRule(k.kind, i, 1)"
+                  >下移</el-button
+                >
+                <el-button
+                  link
+                  :data-testid="`ml-rule-edit-${k.kind}-${i}`"
+                  @click="openRule(k.kind, i)"
+                  >编辑</el-button
+                >
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`ml-rule-del-${k.kind}-${i}`"
+                  @click="removeRule(k.kind, i)"
+                  >删除</el-button
+                >
+              </div>
+            </li>
+          </ol>
+        </section>
       </div>
     </PtPanel>
 
@@ -1030,6 +1244,14 @@ onMounted(refresh);
             </ul>
           </details>
         </el-form-item>
+        <el-form-item label="二级分类">
+          <el-checkbox v-model="libForm.classify_dir" data-testid="ml-lib-classify"
+            >按二级分类放进子目录</el-checkbox
+          >
+          <div class="field-tip">
+            放进「库目录/分类/…」，分类按「二级分类」里的规则；没有规则或都对不上时直接放进库目录。改了以后只影响之后整理的文件。
+          </div>
+        </el-form-item>
         <el-form-item label="刮削">
           <div class="ml-switch">
             <el-switch v-model="libForm.scrape" data-testid="ml-lib-scrape" />
@@ -1086,6 +1308,82 @@ onMounted(refresh);
           :loading="libSaving"
           data-testid="ml-lib-save"
           @click="saveLibrary"
+          >保存</el-button
+        >
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="ruleDialog"
+      class="pt-dialog"
+      :title="ruleTitle"
+      :width="isMobile ? '94%' : '560px'"
+      align-center>
+      <el-form class="pt-form" label-position="top" @submit.prevent>
+        <el-form-item label="分类名称（也是目录名）" required>
+          <el-input
+            v-model="ruleForm.name"
+            maxlength="32"
+            placeholder="华语电影"
+            data-testid="ml-rule-name" />
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-select
+            v-model="ruleForm.genres"
+            multiple
+            filterable
+            placeholder="不限"
+            data-testid="ml-rule-genres">
+            <el-option
+              v-for="g in TMDB_GENRES[ruleKind]"
+              :key="g.id"
+              :label="g.name"
+              :value="g.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="原始语言">
+          <el-select
+            v-model="ruleForm.languages"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            placeholder="不限；不在列表里的可以直接输入代码，例如 vi"
+            data-testid="ml-rule-languages">
+            <el-option
+              v-for="l in CLASSIFY_LANGUAGES"
+              :key="l.value"
+              :label="`${l.label}（${l.value}）`"
+              :value="l.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="出品国家或地区">
+          <el-select
+            v-model="ruleForm.countries"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            placeholder="不限；不在列表里的可以直接输入代码，例如 BR"
+            data-testid="ml-rule-countries">
+            <el-option
+              v-for="c in CLASSIFY_COUNTRIES"
+              :key="c.value"
+              :label="`${c.label}（${c.value}）`"
+              :value="c.value" />
+          </el-select>
+          <div class="field-tip">
+            几个条件都要满足；一个条件里选了几个时满足其中一个就行。都不选时，前面的分类都对不上的放进这里。
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="ruleDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="classifySaving"
+          data-testid="ml-rule-save"
+          @click="saveRule"
           >保存</el-button
         >
       </template>
@@ -1260,6 +1558,57 @@ onMounted(refresh);
 .ml-lang {
   width: 240px;
   max-width: 100%;
+}
+
+.ml-classify {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.ml-classify__kind {
+  min-width: 0;
+}
+
+.ml-classify__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.ml-classify__title,
+.ml-classify__name {
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.ml-classify__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ml-classify__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--pt-border);
+}
+
+.ml-classify__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ml-classify__acts {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
 }
 
 .ml-inline--grow > .el-input {

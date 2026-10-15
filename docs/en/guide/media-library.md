@@ -33,6 +33,7 @@ Each library takes one kind of title. Create one for movies and one for TV shows
 | Template       | Leave empty for the default, see [naming templates](#naming-templates)                                                                          |
 | Scraping       | Write NFO files and images; what to write and which image language to use, see [scraping](#scraping); turn it off to let the media server do it |
 | Overwrite      | Rewrite NFO files and images on every run; when off, existing files are left alone                                                              |
+| Categories     | With Organise by category checked, files go into `<library folder>/<category>/…`, see [secondary categories](#secondary-categories)             |
 
 | Mode          | Description                                                                                                                              |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -85,6 +86,17 @@ The presets above the editor add the TMDB ID to the folder name the way each ser
 ```
 
 Characters not allowed in paths (`\ / * ? " < > |`) become spaces and colons become `-`. Each level is trimmed of spaces and dots, empty levels are dropped and each level is at most 200 bytes. The result never points outside the library folder.
+
+## Secondary categories
+
+With Organise by category (按二级分类放进子目录) checked on a library, each title is categorised first and then placed under `<library folder>/<category>/`, for example `Movies/华语电影/Let the Bullets Fly (2010)/…` or `TV/欧美剧/The Last of Us (2023)/Season 1/…`. The rules live under Secondary categories (二级分类) on the media library page, one list for movies and one for TV:
+
+- The first matching rule from the top wins; when none matches, the title goes straight into the library folder.
+- A rule can match on genre, original language and production country or region: all conditions must hold, and a condition with several values matches any of them. A rule with no conditions takes everything the rules above it didn't.
+- Original languages are ISO 639-1 codes (`zh`, `ja` and so on; TMDB records Cantonese as `cn`), countries and regions are ISO 3166-1 codes (`CN`, `US` and so on). Codes that aren't in the list can be typed in.
+- Fill in common categories (填入常用分类) uses the same categories as MoviePilot's defaults: animated, Chinese-language and foreign movies; for TV, Chinese animation, Japanese anime, documentaries, kids, variety, Chinese, Western and Japanese/Korean series, and uncategorised.
+
+The category name is the folder name, so it can't contain `/ \ : * ? " < > |`. Changing the rules or the checkbox only affects files organised afterwards; files already in the library stay where they are. For TV, the NFO files, poster and logo go into the show folder inside the category folder. The organise preview shows which category a title goes into. Categorising needs TMDB's details (a movie's production countries are only there); when they can't be fetched, the title isn't organised this time and is retried later.
 
 ## Which files are organised
 

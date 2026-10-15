@@ -106,6 +106,8 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/api/media/organize/settings"},
 		{http.MethodPut, "/api/media/organize/settings"},
+		{http.MethodGet, "/api/media/organize/classify"},
+		{http.MethodPut, "/api/media/organize/classify"},
 		{http.MethodPost, "/api/media/organize/preview"},
 		{http.MethodPost, "/api/media/organize"},
 		{http.MethodGet, "/api/media/libraries"},
@@ -141,6 +143,24 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 	for _, c := range routes {
 		assert.Equal(t, http.StatusServiceUnavailable, serveAuthed(bare, c.method, c.path, "{}").Code, c.method+" "+c.path)
 	}
+}
+
+func TestOrganizeAPI_Classify(t *testing.T) {
+	e := newOrganizeServer(t)
+	w := serveAuthed(e.mux, http.MethodGet, "/api/media/organize/classify", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"rules":{"movie":[],"tv":[]}`, "没设过时两类都是空的")
+	assert.Contains(t, w.Body.String(), `"name":"华语电影"`, "带上常用的预设")
+
+	w = serveAuthed(e.mux, http.MethodPut, "/api/media/organize/classify", `{"movie":[{"name":"华语电影","languages":["ZH"]}],"tv":[{"name":"美剧","countries":["us"]}]}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"rules":{"movie":[{"name":"华语电影","languages":["zh"]}],"tv":[{"name":"美剧","countries":["US"]}]}`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPut, "/api/media/organize/classify", `{"movie":[{"name":"a/b"}]}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPut, "/api/media/organize/classify", `{"films":[]}`).Code, "拼错的字段")
+
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"classify_dir":true,"enabled":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"classify_dir":true`)
 }
 
 func TestOrganizeAPI_SettingsLibrariesMapsServers(t *testing.T) {

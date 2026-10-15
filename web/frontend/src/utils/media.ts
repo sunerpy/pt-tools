@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import type {
+  ClassifyRule,
   MediaHistoryItem,
   MediaImageLang,
   MediaKind,
@@ -188,6 +189,104 @@ export const DEFAULT_SCRAPE_ITEMS: readonly MediaScrapeItem[] = [
 /** 这种媒体库能选的刮削内容：电影没有季海报与集截图 */
 export function scrapeItemsFor(kind: MediaKind): (typeof SCRAPE_ITEMS)[number][] {
   return SCRAPE_ITEMS.filter((i) => kind === "tv" || !i.tvOnly);
+}
+
+/** TMDB 的类型（编号与中文名），二级分类按它们分 */
+export const TMDB_GENRES: Record<MediaKind, readonly { id: number; name: string }[]> = {
+  movie: [
+    { id: 28, name: "动作" },
+    { id: 12, name: "冒险" },
+    { id: 16, name: "动画" },
+    { id: 35, name: "喜剧" },
+    { id: 80, name: "犯罪" },
+    { id: 99, name: "纪录" },
+    { id: 18, name: "剧情" },
+    { id: 10751, name: "家庭" },
+    { id: 14, name: "奇幻" },
+    { id: 36, name: "历史" },
+    { id: 27, name: "恐怖" },
+    { id: 10402, name: "音乐" },
+    { id: 9648, name: "悬疑" },
+    { id: 10749, name: "爱情" },
+    { id: 878, name: "科幻" },
+    { id: 10770, name: "电视电影" },
+    { id: 53, name: "惊悚" },
+    { id: 10752, name: "战争" },
+    { id: 37, name: "西部" },
+  ],
+  tv: [
+    { id: 10759, name: "动作冒险" },
+    { id: 16, name: "动画" },
+    { id: 35, name: "喜剧" },
+    { id: 80, name: "犯罪" },
+    { id: 99, name: "纪录" },
+    { id: 18, name: "剧情" },
+    { id: 10751, name: "家庭" },
+    { id: 10762, name: "儿童" },
+    { id: 9648, name: "悬疑" },
+    { id: 10763, name: "新闻" },
+    { id: 10764, name: "真人秀" },
+    { id: 10765, name: "科幻奇幻" },
+    { id: 10766, name: "肥皂剧" },
+    { id: 10767, name: "脱口秀" },
+    { id: 10768, name: "战争政治" },
+    { id: 37, name: "西部" },
+  ],
+};
+
+/** 二级分类里常用的原始语言（ISO 639-1；TMDB 把粤语记作 cn）；不在这里的可以直接输入代码 */
+export const CLASSIFY_LANGUAGES: readonly { value: string; label: string }[] = [
+  { value: "zh", label: "中文" },
+  { value: "cn", label: "粤语" },
+  { value: "en", label: "英语" },
+  { value: "ja", label: "日语" },
+  { value: "ko", label: "韩语" },
+  { value: "fr", label: "法语" },
+  { value: "de", label: "德语" },
+  { value: "es", label: "西班牙语" },
+  { value: "th", label: "泰语" },
+  { value: "hi", label: "印地语" },
+];
+
+/** 二级分类里常用的出品国家或地区（ISO 3166-1）；不在这里的可以直接输入代码 */
+export const CLASSIFY_COUNTRIES: readonly { value: string; label: string }[] = [
+  { value: "CN", label: "中国大陆" },
+  { value: "HK", label: "中国香港" },
+  { value: "TW", label: "中国台湾" },
+  { value: "US", label: "美国" },
+  { value: "GB", label: "英国" },
+  { value: "JP", label: "日本" },
+  { value: "KR", label: "韩国" },
+  { value: "FR", label: "法国" },
+  { value: "DE", label: "德国" },
+  { value: "ES", label: "西班牙" },
+  { value: "IT", label: "意大利" },
+  { value: "RU", label: "俄罗斯" },
+  { value: "IN", label: "印度" },
+  { value: "TH", label: "泰国" },
+  { value: "SG", label: "新加坡" },
+  { value: "CA", label: "加拿大" },
+  { value: "AU", label: "澳大利亚" },
+];
+
+/** classifyRuleSummary 是一条二级分类的条件，写成一句话 */
+export function classifyRuleSummary(kind: MediaKind, rule: ClassifyRule): string {
+  const label = (list: readonly { value: string; label: string }[], v: string) =>
+    list.find((x) => x.value === v)?.label ?? v;
+  const parts: string[] = [];
+  if (rule.genres?.length) {
+    const names = rule.genres.map(
+      (id) => TMDB_GENRES[kind].find((g) => g.id === id)?.name ?? String(id),
+    );
+    parts.push(`类型：${names.join("、")}`);
+  }
+  if (rule.languages?.length) {
+    parts.push(`语言：${rule.languages.map((l) => label(CLASSIFY_LANGUAGES, l)).join("、")}`);
+  }
+  if (rule.countries?.length) {
+    parts.push(`国家或地区：${rule.countries.map((c) => label(CLASSIFY_COUNTRIES, c)).join("、")}`);
+  }
+  return parts.length ? parts.join("；") : "不限条件：前面都对不上的放进这里";
 }
 
 /** 图片语言（和后端 scrape.ImageLangs 一致） */

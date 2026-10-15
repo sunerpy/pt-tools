@@ -56,9 +56,10 @@ func newFake(t *testing.T) *fakeTMDB {
 				_, _ = w.Write([]byte(`{"id":278,"title":"The Shawshank Redemption","original_title":"The Shawshank Redemption","release_date":"1994-09-23","overview":"Imprisoned in the 1940s...","imdb_id":"tt0111161"}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23","overview":"","imdb_id":"tt0111161","poster_path":"/p.jpg"}`))
+			_, _ = w.Write([]byte(`{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23","overview":"","imdb_id":"tt0111161","poster_path":"/p.jpg",
+				"origin_country":["US"],"production_countries":[{"iso_3166_1":"us","name":"United States of America"},{"iso_3166_1":"GB"}]}`))
 		case "/3/tv/1399":
-			_, _ = w.Write([]byte(`{"id":1399,"name":"权力的游戏","original_name":"Game of Thrones","first_air_date":"2011-04-17","overview":"七大王国……","number_of_seasons":8,"external_ids":{"imdb_id":"tt0944947"}}`))
+			_, _ = w.Write([]byte(`{"id":1399,"name":"权力的游戏","original_name":"Game of Thrones","first_air_date":"2011-04-17","overview":"七大王国……","number_of_seasons":8,"origin_country":["US"],"external_ids":{"imdb_id":"tt0944947"}}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"status_code":34,"status_message":"The resource you requested could not be found."}`))
@@ -143,10 +144,12 @@ func TestFindAndDetails(t *testing.T) {
 	assert.Equal(t, "肖申克的救赎", d.Title)
 	assert.Equal(t, "Imprisoned in the 1940s...", d.Overview, "中文简介为空时用英文的")
 	assert.Equal(t, "tt0111161", d.IMDbID)
+	assert.Equal(t, []string{"US", "GB"}, d.Countries, "origin_country 与 production_countries 合在一起，大写、去重")
 
 	tv, err := c.Details(context.Background(), KindTV, 1399)
 	require.NoError(t, err)
 	assert.Equal(t, 8, tv.Seasons)
+	assert.Equal(t, []string{"US"}, tv.Countries)
 	assert.Equal(t, "tt0944947", tv.IMDbID)
 	assert.Contains(t, f.lastURL.Load().(string), "append_to_response=external_ids")
 

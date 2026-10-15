@@ -83,10 +83,12 @@ type Plan struct {
 	Match          *tmdb.Result         `json:"match,omitempty"`
 	Source         string               `json:"source,omitempty"`
 	Library        *models.MediaLibrary `json:"library,omitempty"`
-	Mode           string               `json:"mode,omitempty"`
-	Items          []PlanItem           `json:"items"`
-	Skipped        []transfer.Skip      `json:"skipped,omitempty"`
-	Problem        string               `json:"problem,omitempty"`
+	// Category 是放进的二级分类（媒体库开了「按二级分类放进子目录」、规则对得上时才有）
+	Category string          `json:"category,omitempty"`
+	Mode     string          `json:"mode,omitempty"`
+	Items    []PlanItem      `json:"items"`
+	Skipped  []transfer.Skip `json:"skipped,omitempty"`
+	Problem  string          `json:"problem,omitempty"`
 
 	// retryable 表示过一会儿再试可能就好了（TMDB 暂时不能访问、文件操作失败）
 	retryable bool
@@ -96,6 +98,30 @@ type Plan struct {
 	meta       meta.Meta
 	siteName   string
 	tmdbClient *tmdb.Client
+	// root 是这次整理放进的目录：库目录，按二级分类放进子目录时是库目录下的分类目录
+	root string
+}
+
+// base 是这次整理放进的目录（见 root）。
+func (p *Plan) base() string {
+	if p.root != "" {
+		return p.root
+	}
+	return p.Library.Path
+}
+
+// rootFor 是算剧集目录、电影有没有自己的目录时的起点：按二级分类放进子目录时是分类目录；
+// 文件不在分类目录里（之前整理过，目标沿用记录里的位置）时是库目录。
+func (p *Plan) rootFor(target string) string {
+	if root := p.base(); transfer.Within(root, target) {
+		return root
+	}
+	return p.Library.Path
+}
+
+// showDir 是这次整理里一个文件的剧集目录（从 rootFor 算起）。
+func (p *Plan) showDir(target string) string {
+	return showDir(p.rootFor(target), target)
 }
 
 // Result 是一次整理的结果。
@@ -430,6 +456,13 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	if p.Mode == "" {
 		p.Mode = models.MediaModeHardlink
 	}
+	cat, ok := s.classify(ctx, p, lib)
+	if !ok {
+		return false
+	}
+	if dir := transfer.CleanName(cat); dir != "" {
+		p.Category, p.root = cat, filepath.Join(lib.Path, dir)
+	}
 	return true
 }
 
@@ -554,7 +587,7 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 			it.Status, it.Message = ItemFailed, err.Error()
 			continue
 		}
-		it.Target = filepath.Join(lib.Path, filepath.FromSlash(rel)) + strings.ToLower(path.Ext(it.Rel))
+		it.Target = filepath.Join(p.base(), filepath.FromSlash(rel)) + strings.ToLower(path.Ext(it.Rel))
 		if !transfer.Within(lib.Path, it.Target) {
 			it.Status, it.Message, it.Target = ItemFailed, "模板算出的路径不在库目录里", ""
 			continue
@@ -845,7 +878,7 @@ func (s *Service) recordScraped(ctx context.Context, p *Plan, created []*PlanIte
 		}
 		stem := strings.TrimSuffix(it.Target, filepath.Ext(it.Target))
 		dirs := []string{filepath.Dir(it.Target)}
-		if sd := showDir(p.Library, it.Target); sd != "" {
+		if sd := p.showDir(it.Target); sd != "" {
 			dirs = append(dirs, sd)
 		}
 		var add []extra
@@ -977,17 +1010,17 @@ func truncate(s string, n int) string {
 
 func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
-// showDir 是剧集目录：模板算出的路径至少有两级时取第一级；平铺时为空。
-func showDir(lib *models.MediaLibrary, target string) string {
-	rel, err := filepath.Rel(lib.Path, target)
+// showDir 是剧集目录：模板算出的路径（从 root 算起）至少有两级时取第一级；平铺时为空。
+func showDir(root, target string) string {
+	rel, err := filepath.Rel(root, target)
 	if err != nil {
 		return ""
 	}
 	segs := strings.Split(filepath.ToSlash(rel), "/")
-	if len(segs) < 2 {
+	if len(segs) < 2 || segs[0] == ".." {
 		return ""
 	}
-	return filepath.Join(lib.Path, segs[0])
+	return filepath.Join(root, segs[0])
 }
 
 // scrape 为这次新放进库的文件写 NFO 与图片（媒体库关了刮削时不写；写哪些按媒体库选的刮削内容）。返回出错的消息与写出的文件。
@@ -1013,13 +1046,14 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]s
 	var rep scrape.Report
 	if p.Match.MediaType != tmdb.KindTV {
 		for _, it := range created {
-			ownDir := filepath.Clean(filepath.Dir(it.Target)) != filepath.Clean(p.Library.Path)
+			// 平铺在库目录（或分类目录）里的电影没有自己的目录：海报等带上文件名，免得几部电影共用一张
+			ownDir := filepath.Clean(filepath.Dir(it.Target)) != filepath.Clean(p.rootFor(it.Target))
 			rep.Merge(w.Movie(ctx, it.Target, ownDir, *p.Match, art))
 		}
 	} else {
 		shows, seasons := map[string]bool{}, map[string]bool{}
 		for _, it := range created {
-			sd := showDir(p.Library, it.Target)
+			sd := p.showDir(it.Target)
 			if sd != "" && !shows[sd] {
 				shows[sd] = true
 				rep.Merge(w.Show(ctx, sd, *p.Match, art))
@@ -1044,7 +1078,7 @@ func refreshDirs(p *Plan, created []*PlanItem) []string {
 	for _, it := range created {
 		d := filepath.Dir(it.Target)
 		if p.Match.MediaType == tmdb.KindTV {
-			if sd := showDir(p.Library, it.Target); sd != "" {
+			if sd := p.showDir(it.Target); sd != "" {
 				d = sd
 			}
 		}

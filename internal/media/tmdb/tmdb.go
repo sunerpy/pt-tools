@@ -70,6 +70,9 @@ type Result struct {
 	Genres   []string `json:"genres,omitempty"`
 	// Runtime 是片长（分钟）：电影是整部，剧集是一集，只有详情里有
 	Runtime int `json:"runtime,omitempty"`
+	// Countries 是出品国家或地区（ISO 3166-1，例如 CN、US）：origin_country 与电影的 production_countries 合在一起；
+	// 详情里有，剧集的搜索结果里也有
+	Countries []string `json:"countries,omitempty"`
 }
 
 // GenreAnimation 是 TMDB 的「动画」类型编号（电影与剧集相同）。
@@ -235,9 +238,13 @@ type rawItem struct {
 		ID   int    `json:"id"`
 		Name string `json:"name"`
 	} `json:"genres"`
-	Runtime        int   `json:"runtime"`
-	EpisodeRunTime []int `json:"episode_run_time"`
-	ExternalIDs    struct {
+	Runtime             int      `json:"runtime"`
+	EpisodeRunTime      []int    `json:"episode_run_time"`
+	OriginCountry       []string `json:"origin_country"`
+	ProductionCountries []struct {
+		ISO string `json:"iso_3166_1"`
+	} `json:"production_countries"`
+	ExternalIDs struct {
 		IMDbID string `json:"imdb_id"`
 	} `json:"external_ids"`
 }
@@ -258,6 +265,15 @@ func (r rawItem) result(kind string) Result {
 	}
 	if out.Runtime == 0 && len(r.EpisodeRunTime) > 0 {
 		out.Runtime = r.EpisodeRunTime[0]
+	}
+	codes := slices.Clone(r.OriginCountry)
+	for _, c := range r.ProductionCountries {
+		codes = append(codes, c.ISO)
+	}
+	for _, c := range codes {
+		if c = strings.ToUpper(strings.TrimSpace(c)); c != "" && !slices.Contains(out.Countries, c) {
+			out.Countries = append(out.Countries, c)
+		}
 	}
 	if kind == KindTV {
 		out.Title, out.OriginalTitle, out.Date = r.Name, r.OriginalName, r.FirstAirDate
@@ -378,8 +394,8 @@ func (c *Client) details(ctx context.Context, kind string, id int, lang string) 
 
 // cached 读缓存；没有时调用 fetch，成功的结果写进缓存。
 func (c *Client) cached(ctx context.Context, key string, ttl time.Duration, out any, fetch func() (any, error)) error {
-	// v2：结果多了类型、背景图与片长，v1 的缓存不再使用
-	key = "tmdb:v2:" + key
+	// v3：结果多了出品国家或地区（二级分类用），v2 的缓存不再使用；v2 加了类型、背景图与片长
+	key = "tmdb:v3:" + key
 	if c.cache != nil {
 		if b, ok := c.cache.Get(key); ok && json.Unmarshal(b, out) == nil {
 			return nil
