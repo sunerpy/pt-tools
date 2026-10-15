@@ -103,10 +103,11 @@ type Query struct {
 
 // Subject 是豆瓣的一个条目（剧集是一季）。
 type Subject struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Year  int    `json:"year"`
-	Intro string `json:"intro"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	OriginalTitle string `json:"original_title"`
+	Year          int    `json:"year"`
+	Intro         string `json:"intro"`
 	// Rating 是 10 分制的评分，没人评分时为 0
 	Rating float64 `json:"rating"`
 	Votes  int     `json:"votes"`
@@ -123,11 +124,12 @@ type suggestion struct {
 }
 
 type detail struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Year   string `json:"year"`
-	Intro  string `json:"intro"`
-	Rating *struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	OriginalTitle string `json:"original_title"`
+	Year          string `json:"year"`
+	Intro         string `json:"intro"`
+	Rating        *struct {
 		Value float64 `json:"value"`
 		Count int     `json:"count"`
 	} `json:"rating"`
@@ -172,7 +174,7 @@ func (c *Client) Subject(ctx context.Context, kind, id string) (*Subject, error)
 	if d.ID == "" {
 		return nil, errors.New("豆瓣返回的条目是空的")
 	}
-	s := &Subject{ID: d.ID, Title: d.Title, Intro: strings.TrimSpace(d.Intro)}
+	s := &Subject{ID: d.ID, Title: d.Title, OriginalTitle: d.OriginalTitle, Intro: strings.TrimSpace(d.Intro)}
 	s.Year, _ = strconv.Atoi(strings.TrimSpace(d.Year))
 	if d.Rating != nil {
 		s.Rating, s.Votes = d.Rating.Value, d.Rating.Count
@@ -269,11 +271,26 @@ var (
 	subSeasonRe = regexp.MustCompile(`(?i)\s*season\s*\d+\s*$`)
 )
 
+// Matches 报告这个条目就是要找的那部（例如站点给的豆瓣编号取到的条目）：名字（标题去掉季，或原名去掉 Season N）
+// 和 TMDB 的中文名或原名之一相同，年份差一年以内（有一边不知道时只看名字）。
+func (s *Subject) Matches(q Query) bool {
+	title := s.Title
+	if m := seasonRe.FindStringIndex(title); m != nil {
+		title = title[:m[0]]
+	}
+	if !sameName(q, title, subSeasonRe.ReplaceAllString(s.OriginalTitle, "")) {
+		return false
+	}
+	return q.Year == 0 || s.Year == 0 || (s.Year >= q.Year-1 && s.Year <= q.Year+1)
+}
+
 // match 在搜索结果里挑出对得上的条目编号：种类（剧集有集数）、季（标题里的「第 N 季」，没写是第 1 季）、
-// 名字（豆瓣的标题去掉季，或豆瓣给的原名，和 TMDB 的中文名或原名之一相同，不看大小写、空格与标点）、
-// 年份（差一年以内；没给年份时不看）。没有时返回空串。
+// 名字（豆瓣的标题去掉季，或豆瓣给的原名，和 TMDB 的中文名或原名之一相同，不看大小写、空格与标点）都对得上的里面，
+// 年份相同的优先；没有年份相同的时，差一年以内的只有一个才用它。没给年份时，对得上的只有一个才用它。
+// 拿不准（同名的不止一个）或没有时返回空串，调用方用 TMDB 的。
 func match(cands []suggestion, q Query) string {
 	want := max(q.Season, 1)
+	var exact, near, any []string
 	for _, c := range cands {
 		if c.Type != "movie" {
 			// 搜索结果里电影与剧集都是 movie，别的（书、音乐等）不要
@@ -293,13 +310,25 @@ func match(cands []suggestion, q Query) string {
 		if !sameName(q, title, subSeasonRe.ReplaceAllString(c.SubTitle, "")) {
 			continue
 		}
-		if q.Year > 0 {
-			y, _ := strconv.Atoi(strings.TrimSpace(c.Year))
-			if y == 0 || y < q.Year-1 || y > q.Year+1 {
-				continue
-			}
+		any = append(any, c.ID)
+		y, _ := strconv.Atoi(strings.TrimSpace(c.Year))
+		switch {
+		case q.Year == 0 || y == 0:
+		case y == q.Year:
+			exact = append(exact, c.ID)
+		case y >= q.Year-1 && y <= q.Year+1:
+			near = append(near, c.ID)
 		}
-		return c.ID
+	}
+	switch {
+	case q.Year == 0:
+		if len(any) == 1 {
+			return any[0]
+		}
+	case len(exact) > 0:
+		return exact[0]
+	case len(near) == 1:
+		return near[0]
 	}
 	return ""
 }

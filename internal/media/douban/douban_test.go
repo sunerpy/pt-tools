@@ -119,7 +119,7 @@ func TestFindMovie(t *testing.T) {
 	got, err := c.Find(context.Background(), Query{Kind: KindMovie, Title: "奥本海默", OriginalTitle: "Oppenheimer", Year: 2023})
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.Equal(t, Subject{ID: "35593344", Title: "奥本海默", Year: 2023, Intro: "原子弹之父的故事。", Rating: 8.8, Votes: 850981}, *got)
+	assert.Equal(t, Subject{ID: "35593344", Title: "奥本海默", OriginalTitle: "Oppenheimer", Year: 2023, Intro: "原子弹之父的故事。", Rating: 8.8, Votes: 850981}, *got)
 	assert.Equal(t, []string{"/j/subject_suggest?q=%E5%A5%A5%E6%9C%AC%E6%B5%B7%E9%BB%98", "/rexxar/api/v2/movie/35593344?"}, f.requests())
 	assert.Equal(t, "https://m.douban.com/movie/subject/35593344/", f.referers[1])
 	assert.Contains(t, f.agents[0], "Mobile")
@@ -236,4 +236,32 @@ func TestMatchHelpers(t *testing.T) {
 	assert.Equal(t, "1", match([]suggestion{{ID: "1", Title: "最后生还者", SubTitle: "The Last of Us Season 1", Type: "movie", Episode: "9"}}, q),
 		"没写季是第 1 季；原名里的 Season 1 去掉再比")
 	assert.True(t, strings.HasPrefix(DefaultDetailURL, "https://m.douban.com/"))
+}
+
+// 同名的里年份相同的优先；没有年份相同的时，差一年以内的只有一个才用；没给年份时只有一个对得上才用
+func TestMatchYears(t *testing.T) {
+	two := []suggestion{
+		{ID: "2023", Title: "沙丘", SubTitle: "Dune", Year: "2023", Type: "movie"},
+		{ID: "2024", Title: "沙丘", SubTitle: "Dune", Year: "2024", Type: "movie"},
+		{ID: "1984", Title: "沙丘", SubTitle: "Dune", Year: "1984", Type: "movie"},
+	}
+	assert.Equal(t, "2024", match(two, Query{Kind: KindMovie, Title: "沙丘", Year: 2024}), "年份相同的优先")
+	assert.Equal(t, "1984", match(two, Query{Kind: KindMovie, Title: "沙丘", Year: 1985}), "差一年以内的只有一个")
+	around := []suggestion{
+		{ID: "2022", Title: "沙丘", Year: "2022", Type: "movie"},
+		{ID: "2024", Title: "沙丘", Year: "2024", Type: "movie"},
+	}
+	assert.Empty(t, match(around, Query{Kind: KindMovie, Title: "沙丘", Year: 2023}), "差一年以内的不止一个：拿不准")
+	assert.Empty(t, match(two, Query{Kind: KindMovie, Title: "沙丘"}), "没给年份、同名的不止一个：拿不准")
+	assert.Equal(t, "1984", match(two[2:], Query{Kind: KindMovie, Title: "沙丘"}), "没给年份、只有一个")
+}
+
+// 站点给的编号取到的条目：名字对得上、年份差一年以内（有一边不知道时只看名字）才算
+func TestSubjectMatches(t *testing.T) {
+	s := &Subject{ID: "1", Title: "最后生还者 第一季", OriginalTitle: "The Last of Us Season 1", Year: 2023}
+	assert.True(t, s.Matches(Query{Kind: KindTV, Title: "最后生还者", Year: 2023}))
+	assert.True(t, s.Matches(Query{Kind: KindTV, OriginalTitle: "The Last of Us", Year: 2024}))
+	assert.False(t, s.Matches(Query{Kind: KindTV, Title: "最后生还者", Year: 2020}), "年份对不上")
+	assert.False(t, s.Matches(Query{Kind: KindTV, Title: "别的剧", Year: 2023}), "名字对不上")
+	assert.True(t, (&Subject{Title: "奥本海默"}).Matches(Query{Title: "奥本海默", Year: 2023}), "条目没有年份时只看名字")
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -1537,8 +1538,9 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]s
 	return msgs, rep.Written
 }
 
-// doubanInfo 是刮削时从豆瓣补充的内容（媒体库的数据来源选了豆瓣时）：电影一个；剧集是第 1 季的（写进 tvshow.nfo）
-// 与这次整理到的每一季的（写进 season.nfo）。找不到或豆瓣不能访问的写进说明，那部分用 TMDB 的；豆瓣不能访问时不再接着找。
+// doubanInfo 是刮削时从豆瓣补充的内容（媒体库的数据来源选了豆瓣时）：电影一个；剧集按季，第 1 季的写进 tvshow.nfo，
+// 每一季的写进它的 season.nfo。只找这次要写的 NFO 用得上的（已经有、又不覆盖的 NFO 不写，不用去找）。
+// 找不到或豆瓣不能访问的写进说明，那部分用 TMDB 的；豆瓣不能访问时不再接着找。
 func (s *Service) doubanInfo(ctx context.Context, p *Plan, created []*PlanItem) (*scrape.Douban, map[int]*scrape.Douban, []string) {
 	var msgs []string
 	down := false
@@ -1564,32 +1566,61 @@ func (s *Service) doubanInfo(ctx context.Context, p *Plan, created []*PlanItem) 
 		}
 		return &scrape.Douban{ID: subj.ID, Intro: subj.Intro, Rating: subj.Rating, Votes: subj.Votes}
 	}
-	if p.Match.MediaType != tmdb.KindTV {
-		return get(0, p.Match.Year), nil, msgs
+	// writes 报告这个 NFO 这次会写（不存在，或者媒体库开着覆盖）
+	writes := func(nfo string) bool {
+		if p.Library.ScrapeOverwrite {
+			return true
+		}
+		_, err := os.Lstat(nfo)
+		return err != nil
 	}
-	show := get(1, p.Match.Year)
-	seasons := map[int]*scrape.Douban{1: show}
+	if p.Match.MediaType != tmdb.KindTV {
+		for _, it := range created {
+			if writes(strings.TrimSuffix(it.Target, filepath.Ext(it.Target)) + ".nfo") {
+				return get(0, p.Match.Year), nil, msgs
+			}
+		}
+		return nil, nil, msgs
+	}
+	need := map[int]*tmdb.Season{}
 	for _, it := range created {
-		// 第 0 季（特别篇）豆瓣上没有对应的条目
-		if _, ok := seasons[it.Season]; ok || it.Season < 1 {
+		sd := p.showDir(it.Target)
+		if sd == "" {
 			continue
 		}
-		seasons[it.Season] = get(it.Season, airYear(it.stillFor))
+		if writes(filepath.Join(sd, "tvshow.nfo")) {
+			if _, ok := need[1]; !ok {
+				need[1] = nil
+			}
+		}
+		// 第 0 季（特别篇）豆瓣上没有对应的条目
+		dir := filepath.Dir(it.Target)
+		if it.Season >= 1 && filepath.Clean(dir) != filepath.Clean(sd) && writes(filepath.Join(dir, "season.nfo")) {
+			need[it.Season] = it.stillFor
+		}
 	}
-	return show, seasons, msgs
+	seasons := map[int]*scrape.Douban{}
+	for _, n := range slices.Sorted(maps.Keys(need)) {
+		year := p.Match.Year
+		if n > 1 {
+			year = airYear(need[n])
+		}
+		seasons[n] = get(n, year)
+	}
+	return seasons[1], seasons, msgs
 }
 
-// doubanSubject 在豆瓣上找这部电影或这一季：站点给了豆瓣编号的电影先按编号取，年份和 TMDB 的差一年以内才用；
-// 其余按名字与年份找（见 douban.Client.Find）。
+// doubanSubject 在豆瓣上找这部电影或这一季：站点给了豆瓣编号的电影先按编号取，名字与年份都和这次的条目对得上
+// （见 douban.Subject.Matches；站点编号填错、或者手动换了条目时对不上）才用；其余按名字与年份找（见 douban.Client.Find）。
 func (s *Service) doubanSubject(ctx context.Context, p *Plan, season, year int) (*douban.Subject, error) {
 	m := p.Match
+	q := douban.Query{Kind: m.MediaType, Title: m.Title, OriginalTitle: m.OriginalTitle, Year: year, Season: season}
 	if m.MediaType != tmdb.KindTV && p.doubanID != "" {
-		if subj, err := s.cfg.Douban.Subject(ctx, douban.KindMovie, p.doubanID); err == nil &&
-			(m.Year == 0 || subj.Year == 0 || (subj.Year >= m.Year-1 && subj.Year <= m.Year+1)) {
+		if subj, err := s.cfg.Douban.Subject(ctx, douban.KindMovie, p.doubanID); err == nil && subj.Matches(q) {
 			return subj, nil
 		}
 	}
-	return s.cfg.Douban.Find(ctx, douban.Query{Kind: m.MediaType, Title: m.Title, OriginalTitle: m.OriginalTitle, Year: year, Season: season})
+	return s.cfg.Douban.Find(ctx, q)
 }
 
 // airYear 是这一季开播的年份（季详情没有时为 0，不看年份）。

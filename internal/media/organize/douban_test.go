@@ -3,6 +3,8 @@ package organize
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -59,7 +61,7 @@ func (f *fakeDouban) Subject(_ context.Context, _, id string) (*douban.Subject, 
 		s := doubanOpp
 		return &s, nil
 	}
-	return &douban.Subject{ID: id, Year: 1999, Intro: "别的电影"}, nil
+	return &douban.Subject{ID: id, Title: "别的电影", Year: 2023, Intro: "别的电影"}, nil
 }
 
 func doubanEnv(t *testing.T) (*env, *fakeDouban) {
@@ -104,7 +106,7 @@ func TestScrapeDoubanSiteID(t *testing.T) {
 	opp := &tmdb.Result{ID: 872585, MediaType: tmdb.KindMovie, Title: "奥本海默", OriginalTitle: "Oppenheimer", Year: 2023}
 	got, err := e.svc.doubanSubject(e.ctx, &Plan{Match: opp, doubanID: "1"}, 0, 2023)
 	require.NoError(t, err)
-	assert.Equal(t, doubanOpp.ID, got.ID, "编号是别的电影：按名字找")
+	assert.Equal(t, doubanOpp.ID, got.ID, "编号是同一年的别的电影（名字对不上）：按名字找")
 }
 
 // 豆瓣不能访问或找不到：NFO 用 TMDB 的，整理记录里写明
@@ -130,20 +132,46 @@ func TestScrapeDoubanFallback(t *testing.T) {
 	assert.NotContains(t, readFile(t, filepath.Join(show, "Season 1", "最后生还者 - S01E01 - 当你迷失在黑暗中.nfo")), "豆瓣", "每一集的 NFO 还是 TMDB 的")
 }
 
-// 剧集的第 2 季在豆瓣上没找到：只写说明，season.nfo 用 TMDB 的；第 0 季不找
+// 剧集按季找（第 2 季用这一季的年份），没找到的季只写说明，第 0 季不找；已经有、又不覆盖的 NFO 用不上，不找
 func TestDoubanInfoSeasons(t *testing.T) {
 	e, f := doubanEnv(t)
-	_ = e
-	p := &Plan{Match: &tmdb.Result{ID: 100088, MediaType: tmdb.KindTV, Title: "最后生还者", OriginalTitle: "The Last of Us", Year: 2023}}
-	show, seasons, msgs := e.svc.doubanInfo(e.ctx, p, []*PlanItem{{Season: 1}, {Season: 2}, {Season: 0}, {Season: 2}})
-	require.NotNil(t, show)
-	assert.Equal(t, doubanTLOU.ID, show.ID)
-	assert.Equal(t, show, seasons[1])
+	show := filepath.Join(e.tv, "最后生还者 (2023)")
+	p := &Plan{Library: &models.MediaLibrary{Path: e.tv}, Match: &tmdb.Result{ID: 100088, MediaType: tmdb.KindTV, Title: "最后生还者", OriginalTitle: "The Last of Us", Year: 2023}}
+	item := func(season int) *PlanItem {
+		return &PlanItem{Season: season, Target: filepath.Join(show, fmt.Sprintf("Season %d", season), "x.mkv"), stillFor: &tmdb.Season{AirDate: "2025-04-13"}}
+	}
+	got, seasons, msgs := e.svc.doubanInfo(e.ctx, p, []*PlanItem{item(1), item(2), item(0), item(2)})
+	require.NotNil(t, got)
+	assert.Equal(t, doubanTLOU.ID, got.ID)
+	assert.Equal(t, got, seasons[1])
 	assert.Nil(t, seasons[2])
 	_, has0 := seasons[0]
 	assert.False(t, has0)
 	assert.Equal(t, []string{"刮削：豆瓣上没找到第 2 季（按名字与年份），简介与评分用 TMDB 的"}, msgs)
-	assert.Len(t, f.finds, 2, "第 1 季、第 2 季各找一次")
+	require.Len(t, f.finds, 2, "第 1 季、第 2 季各找一次")
+	assert.Equal(t, 2025, f.finds[1].Year, "第 2 季用这一季的年份")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(show, "Season 1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(show, "tvshow.nfo"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(show, "Season 1", "season.nfo"), nil, 0o644))
+	f.finds = nil
+	got, _, _ = e.svc.doubanInfo(e.ctx, p, []*PlanItem{item(1)})
+	assert.Nil(t, got)
+	assert.Empty(t, f.finds, "NFO 都有了、不覆盖：不找")
+	p.Library.ScrapeOverwrite = true
+	got, _, _ = e.svc.doubanInfo(e.ctx, p, []*PlanItem{item(1)})
+	assert.NotNil(t, got)
+	assert.Len(t, f.finds, 1, "开着覆盖：照样找")
+
+	// 电影：NFO 已经有了、不覆盖时也不找
+	movie := filepath.Join(e.movies, "奥本海默 (2023)", "奥本海默 (2023).mkv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(movie), 0o755))
+	require.NoError(t, os.WriteFile(strings.TrimSuffix(movie, ".mkv")+".nfo", nil, 0o644))
+	f.finds = nil
+	mp := &Plan{Library: &models.MediaLibrary{Path: e.movies}, Match: &tmdb.Result{ID: 872585, MediaType: tmdb.KindMovie, Title: "奥本海默", Year: 2023}}
+	got, _, _ = e.svc.doubanInfo(e.ctx, mp, []*PlanItem{{Target: movie}})
+	assert.Nil(t, got)
+	assert.Empty(t, f.finds)
 }
 
 // 媒体库的「简介与评分」只认留空与 douban
