@@ -105,6 +105,16 @@ function fillSettings(s: OrganizeSettings) {
   savePathsText.value = s.save_paths.join("\n");
 }
 
+/** 只刷新扫描的上次与下次（例如开关了监控目录以后）：不动表单里还没保存的改动 */
+async function refreshRuns() {
+  try {
+    const s = await organizeApi.settings();
+    if (s && settings.value) settings.value = { ...settings.value, runs: s.runs };
+  } catch {
+    // 只是少一行时间
+  }
+}
+
 async function loadSettings() {
   try {
     const s = await organizeApi.settings();
@@ -478,7 +488,7 @@ async function saveWatchDir() {
     await organizeApi.createWatchDir({ ...f, path: f.path.trim() });
     ElMessage.success("已保存监控目录");
     watchDialog.value = false;
-    await loadWatchDirs();
+    await Promise.all([loadWatchDirs(), refreshRuns()]);
   } catch (e) {
     ElMessage.error(errText(e, "保存失败"));
   } finally {
@@ -492,7 +502,7 @@ async function toggleWatchDir(d: MediaWatchDir, enabled: boolean) {
   } catch (e) {
     ElMessage.error(errText(e, "保存失败"));
   }
-  await loadWatchDirs();
+  await Promise.all([loadWatchDirs(), refreshRuns()]);
 }
 
 async function removeWatchDir(d: MediaWatchDir) {
@@ -512,7 +522,7 @@ async function removeWatchDir(d: MediaWatchDir) {
   try {
     await organizeApi.deleteWatchDir(d.id);
     ElMessage.success("已删除");
-    await loadWatchDirs();
+    await Promise.all([loadWatchDirs(), refreshRuns()]);
   } catch (e) {
     ElMessage.error(errText(e, "删除失败"));
   }

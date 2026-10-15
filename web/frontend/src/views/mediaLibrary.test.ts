@@ -348,12 +348,19 @@ describe("媒体库", () => {
     expect(api.createWatchDir.mock.calls[0]![0]).toEqual({ path: "/data/in", enabled: true });
 
     api.updateWatchDir.mockResolvedValue({});
+    const before = api.settings.mock.calls.length;
     q("ml-watch-enabled-4")!.click();
     await vi.waitFor(() =>
       expect(api.updateWatchDir).toHaveBeenCalledWith(4, {
         path: "/media/incoming",
         enabled: false,
       }),
+    );
+
+    await vi.waitFor(() =>
+      expect(api.settings.mock.calls.length, "开关了目录：重新读扫描的上次与下次").toBeGreaterThan(
+        before,
+      ),
     );
 
     ui.confirm.mockResolvedValue("confirm");

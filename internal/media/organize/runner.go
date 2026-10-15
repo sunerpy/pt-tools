@@ -444,7 +444,6 @@ func (s *Service) loop(ctx context.Context) {
 		}
 		if now.Sub(lastWatch) >= time.Duration(set.WatchIntervalMin)*time.Minute {
 			lastWatch = now
-			s.markRun(&s.watchAt, now)
 			s.watchScan(ctx, set)
 		}
 		if now.Sub(lastRecover) >= sweepInterval {

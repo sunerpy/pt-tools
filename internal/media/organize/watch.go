@@ -341,6 +341,10 @@ func (s *Service) watchScan(ctx context.Context, set Settings) {
 		s.cfg.Logger.Warnf("[整理入库] 读取监控目录失败: %v", err)
 		return
 	}
+	if len(dirs) > 0 {
+		// 页面上的「上次扫描」只算真的扫了目录的（见 Runs）
+		s.markRun(&s.watchAt, s.cfg.Now())
+	}
 	queued := 0
 	for _, d := range dirs {
 		entries, err := os.ReadDir(d.Path)
