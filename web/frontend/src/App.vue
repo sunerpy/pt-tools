@@ -189,7 +189,12 @@ const crumbs = computed(() => {
     if (activePath.value !== HOME_PATH) out.push({ label: "首页", to: HOME_PATH });
     if (groupTitle.value) out.push({ label: groupTitle.value });
   }
-  if (navItem.value && navItem.value.label !== pageTitle.value) {
+  // 导航项就是当前页时不放链接（页面标题与导航名不同的页，例如「消息通知配置」与「消息通知」）
+  if (
+    navItem.value &&
+    navItem.value.label !== pageTitle.value &&
+    navItem.value.path !== route.path
+  ) {
     out.push({ label: navItem.value.label, to: navItem.value.path });
   }
   out.push({ label: pageTitle.value });

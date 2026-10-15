@@ -1667,6 +1667,24 @@ export interface NotifyStatsChannel {
   sources: { source: string; total: number; sent: number }[];
 }
 
+/**
+ * 「最近的通知」里的一条：RSS 通知与后台监控通知合在一起按时间倒序。title 是发出去的那条消息的标题（RSS 是种子名），
+ * 没存下内容的（超出每小时上限没发的）为空。result：sent 已发出、failed 失败、pending 等待发送、canceled 取消或被取代、
+ * throttled 超出每小时上限。
+ */
+export interface RecentNotification {
+  source: string;
+  log_id: number;
+  conf_id: number;
+  title: string;
+  site?: string;
+  torrent_id?: string;
+  kind: string;
+  result: "sent" | "failed" | "pending" | "canceled" | "throttled";
+  attempts: number;
+  created_at: string;
+}
+
 export interface NotifyStatsView {
   since: string;
   days: number;
@@ -1786,6 +1804,8 @@ export const chatopsApi = {
     delete: (id: number) => api.delete<void>(`/api/chatops/notifications/${id}`),
     test: (id: number) => api.post<{ success: boolean }>(`/api/chatops/notifications/${id}/test`),
     stats: () => api.get<NotifyStatsView>("/api/chatops/notifications/stats"),
+    recent: (limit = 8) =>
+      api.get<{ items: RecentNotification[] }>(`/api/chatops/notifications/recent?limit=${limit}`),
   },
   bindings: {
     list: () =>

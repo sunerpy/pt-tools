@@ -8,14 +8,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buttonByText, type MountedView, mountView } from "@/test-mount";
 
-const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), logs: vi.fn(), stats: vi.fn() }));
+const api = vi.hoisted(() => ({
+  list: vi.fn(),
+  create: vi.fn(),
+  logs: vi.fn(),
+  stats: vi.fn(),
+  recent: vi.fn(),
+}));
 
 vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
   return {
     ...real,
     chatopsApi: {
-      notifications: { list: api.list, create: api.create, stats: api.stats },
+      notifications: { list: api.list, create: api.create, stats: api.stats, recent: api.recent },
       rssNotifications: { list: api.logs },
     },
   };
@@ -57,6 +63,7 @@ async function openDialog() {
   api.list.mockResolvedValue([]);
   api.logs.mockResolvedValue({ items: [] });
   api.stats.mockResolvedValue({ since: "", days: 7, channels: [] });
+  api.recent.mockResolvedValue({ items: [] });
   api.create.mockResolvedValue({ id: 1 });
   const Page = (await import("./Notifications.vue")).default;
   view = mountView(Page);

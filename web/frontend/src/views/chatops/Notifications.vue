@@ -3,7 +3,7 @@ import {
   chatopsApi,
   type NotificationConfig,
   type NotifyStatsView,
-  type RSSNotificationLog,
+  type RecentNotification,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
@@ -141,19 +141,52 @@ const { loading, state, errorText, run, isStale } = useDataState();
  *   p-policy 548 投递策略（安静时段按通道配置，就在通道自己的字段里）
  *   p-stat 516  最近投递统计（按通道分组，读 `/api/chatops/notifications/stats`：近 7 天的 RSS 通知
  *               与后台监控通知合在一起算。以前只数 RSS 通知日志最近 50 条，签到、战报这些通知全不在里面）
- *   p-recent 1080 最近的通知记录（读 `/api/chatops/rss-notifications` 的一页）
+ *   p-recent 1080 最近的通知记录（读 `/api/chatops/notifications/recent`：RSS 通知与后台通知合在一起的
+ *               最近 8 条。以前读 RSS 通知日志的一页，后台通知不在里面）
  */
-const recentLogs = ref<RSSNotificationLog[]>([]);
+const recent = ref<RecentNotification[]>([]);
+const recentFailed = ref(false);
 
 async function loadRecent() {
   try {
-    const params = new URLSearchParams({ page: "1", page_size: "50" });
-    const res = await chatopsApi.rssNotifications.list(params);
-    recentLogs.value = res.items ?? [];
+    const res = await chatopsApi.notifications.recent(8);
+    recent.value = res.items ?? [];
+    recentFailed.value = false;
   } catch {
-    /* 统计是附带信息，取不到就让卡里说明，不影响通道列表 */
-    recentLogs.value = [];
+    /* 最近记录是附带信息，取不到就让卡里说明，不影响通道列表 */
+    recent.value = [];
+    recentFailed.value = true;
   }
+}
+
+/** 结果的叫法与胶囊色，和「最近投递统计」的小字同一套说法 */
+const RESULT_VIEW: Record<
+  RecentNotification["result"],
+  { label: string; tone: "ok" | "dang" | "warn" | "neutral" }
+> = {
+  sent: { label: "已发出", tone: "ok" },
+  failed: { label: "失败", tone: "dang" },
+  pending: { label: "等待发送", tone: "neutral" },
+  canceled: { label: "取消或被取代", tone: "neutral" },
+  throttled: { label: "超出每小时上限", tone: "warn" },
+};
+
+function resultOf(r: string) {
+  return RESULT_VIEW[r as RecentNotification["result"]] ?? { label: r, tone: "neutral" as const };
+}
+
+/** 来源：RSS 再写是「仅匹配的」还是「全部新种」 */
+function sourceOf(n: RecentNotification): string {
+  const base = SOURCE_LABELS[n.source] ?? n.source;
+  if (n.source !== "rss") return base;
+  return `${base} · ${n.kind === "filtered" ? "仅匹配的" : "全部新种"}`;
+}
+
+/** 内容：发出去的那条消息的标题；RSS 前面加站点，没存下标题的写种子编号 */
+function contentOf(n: RecentNotification): string {
+  if (n.source !== "rss") return n.title || SOURCE_LABELS[n.source] || n.source;
+  const what = n.title || `种子 ${n.torrent_id ?? ""}`.trim();
+  return n.site ? `${n.site} · ${what}` : what;
 }
 
 const policyRows = computed(() =>
@@ -623,7 +656,7 @@ function getChannelLabel(type: string) {
 
       <!--
         画板 22 的后三张卡：p-policy 548（投递策略）/ p-stat 516（最近投递统计）
-        / p-recent 1080（最近记录）。统计读近 7 天的投递统计（RSS 与后台监控通知），记录读 RSS 通知日志的一页。
+        / p-recent 1080（最近记录）。统计读近 7 天的投递统计，记录读最近 8 条，两者都含 RSS 与后台监控通知。
       -->
       <PtPanel title="投递策略" icon="moon" :count="`${policyRows.length} 个通道`">
         <ul class="pol">
@@ -657,12 +690,14 @@ function getChannelLabel(type: string) {
         class="pt-cards__full"
         title="最近的通知"
         icon="history"
-        :count="`${recentLogs.length} 条`">
+        :count="`${recent.length} 条`"
+        data-testid="notify-recent">
         <!--
           画板 22 的 p-recent 是一张**带表头的小表**（时间 / 通道 / 事件 / 站点 / 结果 /
           延迟 / 重试，正文 12.5、只有「结果」是胶囊），不是一排 chip。
           落地此前是无列名的 chip 串：一行里三枚色块，而且看不出哪个字段是什么。
-          「延迟」那列没有对应数据（RSS 通知日志不记投递耗时），所以不画 —— 不造数。
+          「延迟」那列没有对应数据（通知日志不记投递耗时），所以不画 —— 不造数。
+          后台通知没有站点与种子，「事件 / 站点」两列落成「来源 / 内容」：内容是发出去的那条消息的标题。
         -->
         <!--
           窄屏降级成列表，不做横向滚动表格 —— 这是设计文档 §9 的四方向共用规则，
@@ -670,66 +705,57 @@ function getChannelLabel(type: string) {
           上一版在所有视口都渲染这张七列表（单元格还都 nowrap），375 下右边两列直接被裁掉：
           外层是 overflow hidden，滚都滚不出来。一次评审查出这点，判得对。
         -->
-        <ul v-if="isMobile && recentLogs.length > 0" class="recm">
-          <li v-for="log in recentLogs.slice(0, 8)" :key="log.id" class="recm__row">
-            <span
-              class="recm__dot"
-              :class="`is-${log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'}`"
-              aria-hidden="true" />
+        <ul v-if="isMobile && recent.length > 0" class="recm">
+          <li v-for="n in recent" :key="`${n.source}-${n.log_id}`" class="recm__row">
+            <span class="recm__dot" :class="`is-${resultOf(n.result).tone}`" aria-hidden="true" />
             <span class="recm__body">
-              <span class="recm__l1">
-                {{ log.site_name || "未知站点" }}
-                <span class="recm__tid">{{ log.torrent_id }}</span>
-              </span>
+              <span class="recm__l1">{{ contentOf(n) }}</span>
               <span class="recm__l2">
-                {{ channelNameOf(log.notification_conf_id) }} ·
-                {{ log.notify_kind === "filtered" ? "仅匹配的" : "全部新种" }} · {{ log.result
-                }}<template v-if="(log.attempts ?? 0) > 1"> · 第 {{ log.attempts }} 次</template>
+                {{ channelNameOf(n.conf_id) }} · {{ sourceOf(n) }} · {{ resultOf(n.result).label
+                }}<template v-if="n.attempts > 1"> · 第 {{ n.attempts }} 次</template>
               </span>
             </span>
-            <span class="recm__when">{{ formatWhen(log.created_at) }}</span>
+            <span class="recm__when">{{ formatWhen(n.created_at) }}</span>
           </li>
         </ul>
 
-        <table v-else-if="recentLogs.length > 0" class="rec">
+        <table v-else-if="recent.length > 0" class="rec">
           <thead>
             <tr>
               <th>时间</th>
               <th>通道</th>
-              <th>类型</th>
-              <th>站点</th>
-              <th>种子 ID</th>
+              <th>来源</th>
+              <th>内容</th>
               <th>结果</th>
               <th class="rec__num">尝试</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="log in recentLogs.slice(0, 8)" :key="log.id">
-              <td class="rec__when">{{ formatWhen(log.created_at) }}</td>
-              <td>{{ channelNameOf(log.notification_conf_id) }}</td>
-              <td>{{ log.notify_kind === "filtered" ? "仅匹配的" : "全部新种" }}</td>
-              <td>{{ log.site_name || "未知站点" }}</td>
-              <td>{{ log.torrent_id }}</td>
+            <tr v-for="n in recent" :key="`${n.source}-${n.log_id}`">
+              <td class="rec__when">{{ formatWhen(n.created_at) }}</td>
+              <td>{{ channelNameOf(n.conf_id) }}</td>
+              <td>{{ sourceOf(n) }}</td>
               <td>
-                <PtStatusPill
-                  :tone="
-                    log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'
-                  "
-                  size="sm">
-                  {{ log.result }}
+                <span class="rec__what" :title="contentOf(n)">{{ contentOf(n) }}</span>
+              </td>
+              <td>
+                <PtStatusPill :tone="resultOf(n.result).tone" size="sm">
+                  {{ resultOf(n.result).label }}
                 </PtStatusPill>
               </td>
-              <td class="rec__num">{{ log.attempts ?? 0 }}</td>
+              <td class="rec__num">{{ n.attempts }}</td>
             </tr>
           </tbody>
         </table>
-        <p v-else class="pol__empty">还没有通知记录。</p>
+        <p v-else class="pol__empty">
+          {{ recentFailed ? "最近的通知没取到。" : "还没有通知记录。" }}
+        </p>
         <p class="pol__foot">
-          完整清单、重试与取消在
+          RSS 通知的完整清单、重试与取消在
           <el-button link type="primary" @click="router.push('/chatops/rss-notifications')">
             RSS 通知日志
           </el-button>
-          里。
+          里；后台通知发送失败会在 1、5、30 分钟后各重试一次。
         </p>
       </PtPanel>
     </div>
@@ -939,7 +965,7 @@ function getChannelLabel(type: string) {
   vertical-align: baseline;
 }
 
-/* 最近的通知：一行一条，站点 + 种子 ID + 通道 + 时间 */
+/* 最近的通知：一行一条，时间 + 通道 + 来源 + 内容 + 结果 */
 /*
  * 最近投递的小表 —— 画板 22 的 p-recent：表头 11/600 #7C8695 + 1px 行线，
  * 正文 12.5，时间列 500/t1（它是这一行的身份），其余 400/t2，只有「结果」是胶囊。
@@ -984,6 +1010,15 @@ function getChannelLabel(type: string) {
   text-align: right;
 }
 
+/* 内容是种子名、消息标题，长短不一：截断成一行，鼠标停上去看全名 */
+.rec__what {
+  display: inline-block;
+  max-width: 28em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
 /*
  * 窄屏的同一块数据：画板 33 的「最近投递」是四行「圆点 6 + 双行文本 + 右侧时间 +
  * 329×1 分隔线」，节奏 54。圆点承载结果的语义色 —— 一行里不再需要胶囊。
@@ -1024,6 +1059,10 @@ function getChannelLabel(type: string) {
   background: var(--pt-dang);
 }
 
+.recm__dot.is-warn {
+  background: var(--pt-warn);
+}
+
 .recm__body {
   display: flex;
   flex: 1 1 auto;
@@ -1039,11 +1078,6 @@ function getChannelLabel(type: string) {
   color: var(--pt-t1);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.recm__tid {
-  font-weight: 400;
-  color: var(--pt-t3);
 }
 
 .recm__l2 {
