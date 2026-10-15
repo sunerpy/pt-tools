@@ -11,8 +11,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 const (
@@ -421,4 +423,196 @@ func TestFinishReplaceKeepsJournalOnTargetStatError(t *testing.T) {
 	var n int64
 	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
 	assert.EqualValues(t, 1, n)
+}
+
+// 撤回的几种情况：备份只是旧文件多出来的名字时只删备份；旧文件放不回去（目标位置被占着）时报错、日志留着
+func TestUndoReplaceCases(t *testing.T) {
+	e := newEnv(t)
+	dir := filepath.Join(e.root, "lib")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	target := filepath.Join(dir, "a.mkv")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	// 备份与目标是同一个文件（挪的时候原来的名字没删掉）
+	j := models.MediaReplaceJournal{Mode: models.MediaModeCopy, Target: target, Temp: sideName(target, "new"), Backup: sideName(target, "old")}
+	require.NoError(t, os.Link(target, j.Backup))
+	require.NoError(t, e.db.Create(&j).Error)
+	e.svc.mu.Lock()
+	require.NoError(t, e.svc.undoReplace(e.ctx, j))
+	e.svc.mu.Unlock()
+	assert.False(t, exists(j.Backup))
+	assert.Equal(t, "old", readFile(t, target))
+
+	// 目标位置上是别人的文件、备份是旧文件：放不回去，报错、日志留着
+	j2 := models.MediaReplaceJournal{Mode: models.MediaModeCopy, Target: target, Temp: sideName(target, "new"), Backup: sideName(target, "old")}
+	require.NoError(t, os.WriteFile(j2.Backup, []byte("old2"), 0o644))
+	require.NoError(t, e.db.Create(&j2).Error)
+	e.svc.recoverReplacements(e.ctx)
+	assert.True(t, exists(j2.Backup), "旧文件留在备份名上")
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Where("id = ?", j2.ID).Count(&n).Error)
+	assert.EqualValues(t, 1, n)
+
+	// 临时名上不是这次放的（编号对不上）：不删它，日志照样删掉
+	require.NoError(t, os.Remove(j2.Backup))
+	j3 := models.MediaReplaceJournal{Mode: models.MediaModeCopy, Target: target, Temp: sideName(target, "new"), Backup: sideName(target, "old"), TempID: "x"}
+	require.NoError(t, os.WriteFile(j3.Temp, []byte("?"), 0o644))
+	require.NoError(t, e.db.Create(&j3).Error)
+	e.svc.mu.Lock()
+	require.NoError(t, e.svc.undoReplace(e.ctx, j3))
+	e.svc.mu.Unlock()
+	assert.True(t, exists(j3.Temp))
+}
+
+// 计划以后新文件的源文件没了：放不到临时名，撤回、记成失败，旧版本不动、不留日志
+func TestReplaceSourceGone(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+	require.NoError(t, err)
+	it := &p.Items[0]
+	require.Equal(t, ItemReplace, it.Status)
+	require.NoError(t, os.Remove(it.Source))
+	res := &Result{Plan: p}
+	e.svc.mu.Lock()
+	ok := e.svc.replace(e.ctx, p, it, models.MediaTriggerManual, res)
+	e.svc.mu.Unlock()
+	assert.False(t, ok)
+	assert.Equal(t, 1, res.Failed)
+	assert.Contains(t, it.Message, "旧版本留着")
+	assert.True(t, sameFile(t, e.rowOf(ep1Old).SourcePath, it.Target))
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.Zero(t, n)
+	assert.Equal(t, models.MediaTransferFailed, e.rowOf(ep1New).Status)
+}
+
+// failUpdate 让符合 match 的更新出错（模拟写库失败），测试结束时去掉。
+func failUpdate(t *testing.T, db *gorm.DB, match func(table string, dest any) bool) {
+	t.Helper()
+	name := "test:fail:" + t.Name()
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+		if match(tx.Statement.Table, tx.Statement.Dest) {
+			_ = tx.AddError(errors.New("injected"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(name) })
+}
+
+func hasKey(dest any, key string) bool {
+	m, ok := dest.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = m[key]
+	return ok
+}
+
+// 替换途中写日志或写整理记录失败：每一步都撤回，旧版本原样留着，不留临时文件、备份与日志
+func TestReplaceUndoOnWriteFailure(t *testing.T) {
+	steps := map[string]func(table string, dest any) bool{
+		"临时文件编号": func(table string, dest any) bool { return table == "media_replace_journals" && hasKey(dest, "temp_id") },
+		"备份编号": func(table string, dest any) bool {
+			return table == "media_replace_journals" && hasKey(dest, "backup_id")
+		},
+		"整理记录": func(table string, dest any) bool {
+			return table == "media_transfer_histories" && hasKey(dest, "status")
+		},
+	}
+	for name, match := range steps {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.settings(SettingsInput{MinVideoMB: 1})
+			e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+			e.episodeTorrents(2, 3)
+			_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+			require.NoError(t, err)
+			old := e.rowOf(ep1Old)
+			failUpdate(t, e.db, match)
+			res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+			require.NoError(t, err)
+			assert.Equal(t, 0, res.Created)
+			assert.Equal(t, 1, res.Failed)
+			assert.True(t, sameFile(t, old.SourcePath, old.TargetPath), "旧版本原样留着")
+			left, _ := filepath.Glob(filepath.Join(filepath.Dir(old.TargetPath), "*.pt-tools-*"))
+			assert.Empty(t, left)
+			var n int64
+			require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+			assert.Zero(t, n)
+			assert.Equal(t, models.MediaTransferDone, e.rowOf(ep1Old).Status)
+		})
+	}
+}
+
+// 媒体库后来改成了移动整理：不替换旧版本
+func TestOverwriteMoveLibraryKeepsOld(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	lib := e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	in := LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, Mode: models.MediaModeMove, OverwriteMode: OverwriteLarger, Enabled: true}
+	_, err = e.svc.SaveLibrary(e.ctx, lib.ID, in)
+	require.NoError(t, err)
+	e.dl.mu.Lock()
+	tr := e.dl.torrents[ep1New]
+	tr.State = downloader.TorrentPaused
+	e.dl.torrents[ep1New] = tr
+	e.dl.mu.Unlock()
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+	require.NoError(t, err)
+	require.Len(t, p.Items, 1, p.Problem)
+	assert.Equal(t, ItemExists, p.Items[0].Status)
+	assert.Contains(t, p.Items[0].Message, "用移动整理")
+}
+
+// 替换日志写不进去：不开始替换；撤回时删不掉日志：写明「下次再撤回」，恢复时照样撤回干净
+func TestReplaceJournalFailures(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	old := e.rowOf(ep1Old)
+
+	createName := "test:fail-create:" + t.Name()
+	require.NoError(t, e.db.Callback().Create().Before("gorm:create").Register(createName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "media_replace_journals" {
+			_ = tx.AddError(errors.New("injected"))
+		}
+	}))
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Failed)
+	assert.Contains(t, e.rowOf(ep1New).Message, "替换日志写不进去")
+	assert.True(t, sameFile(t, old.SourcePath, old.TargetPath))
+	require.NoError(t, e.db.Callback().Create().Remove(createName))
+
+	failUpdate(t, e.db, func(table string, dest any) bool {
+		return table == "media_replace_journals" && hasKey(dest, "backup_id")
+	})
+	deleteName := "test:fail-delete:" + t.Name()
+	require.NoError(t, e.db.Callback().Delete().Before("gorm:delete").Register(deleteName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "media_replace_journals" {
+			_ = tx.AddError(errors.New("injected"))
+		}
+	}))
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Failed)
+	assert.Contains(t, e.rowOf(ep1New).Message, "下次启动时再撤回")
+	assert.True(t, sameFile(t, old.SourcePath, old.TargetPath), "文件已经撤回了，只是日志没删掉")
+	require.NoError(t, e.db.Callback().Delete().Remove(deleteName))
+	e.svc.recoverReplacements(e.ctx)
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.Zero(t, n)
+
+	assert.Nil(t, e.svc.occupant(e.ctx, &Plan{}, &PlanItem{}), "没有媒体库与条目时没有可替换的")
 }

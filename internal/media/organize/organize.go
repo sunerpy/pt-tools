@@ -947,7 +947,12 @@ func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger st
 	if _, err := transfer.Transfer(it.Source, j.Temp, p.Mode); err != nil {
 		return undo(j, err.Error())
 	}
-	j.TempID, _ = transfer.FileID(j.Temp)
+	tid, terr := transfer.FileID(j.Temp)
+	if terr != nil {
+		// 没有编号就没法在撤回、收尾时认出它：撤回（按源文件认），不往下做
+		return undo(j, "读不出放好的新文件的编号（"+terr.Error()+"）")
+	}
+	j.TempID = tid
 	if err := db.Model(&j).Update("temp_id", j.TempID).Error; err != nil {
 		return undo(j, "替换日志写不进去（"+err.Error()+"）")
 	}
@@ -1044,7 +1049,12 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 	}
 	switch _, err := os.Lstat(j.Temp); {
 	case err == nil:
-		if rerr := transfer.RemoveIfOurs(j.Temp, j.Mode, j.TempID, j.Source); rerr != nil && !errors.Is(rerr, transfer.ErrNotOurs) {
+		// 没记下编号（当时没读出来）时用现在的：临时名是这次随机取的，上面是这次放的文件
+		tempID := j.TempID
+		if tempID == "" {
+			tempID, _ = transfer.FileID(j.Temp)
+		}
+		if rerr := transfer.RemoveIfOurs(j.Temp, j.Mode, tempID, j.Source); rerr != nil && !errors.Is(rerr, transfer.ErrNotOurs) {
 			return fmt.Errorf("删不掉临时文件 %s: %w", filepath.Base(j.Temp), rerr)
 		}
 	case !errors.Is(err, os.ErrNotExist):
@@ -1072,7 +1082,10 @@ func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJourna
 		case !targetOK:
 			// 新文件不在目标位置了（中途退出期间被删或被换）：旧文件就是库里仅剩的版本，不删
 			errs = append(errs, fmt.Errorf("目标位置上不是这次放的新文件，旧文件留在 %s", j.Backup))
-		case berr != nil || j.BackupID == "" || bid != j.BackupID:
+		case berr != nil:
+			// 读不出编号（权限、网络存储一时出错）：不能当成换过了，留着日志之后再看
+			errs = append(errs, fmt.Errorf("读不出 %s 的文件编号: %w", filepath.Base(j.Backup), berr))
+		case j.BackupID == "" || bid != j.BackupID:
 			// 挪开以后又被换过（或者编号读不出来）：不是确认过的那个旧文件，不删
 			msgs = append(msgs, "旧版本挪开的文件 "+filepath.Base(j.Backup)+" 换过了，留着")
 		default:
