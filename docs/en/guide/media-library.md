@@ -96,7 +96,7 @@ With Organise by category (按二级分类放进子目录) checked on a library,
 - Original languages are ISO 639-1 codes (`zh`, `ja` and so on; TMDB records Cantonese as `cn`), countries and regions are ISO 3166-1 codes (`CN`, `US` and so on). Codes that aren't in the list can be typed in.
 - Fill in common categories (填入常用分类) uses the same categories as MoviePilot's defaults: animated, Chinese-language and foreign movies; for TV, Chinese animation, Japanese anime, documentaries, kids, variety, Chinese, Western and Japanese/Korean series, and uncategorised.
 
-The category name is the folder name, so it can't contain `/ \ : * ? " < > |`. Changing the rules or the checkbox only affects files organised afterwards; files already in the library stay where they are. For TV, the NFO files, poster and logo go into the show folder inside the category folder. The organise preview shows which category a title goes into.
+The category name is the folder name, so it can't contain `/ \ : * ? " < > |`. Changing the rules or the checkbox only affects files organised afterwards; files already in the library stay where they are. For TV, the NFO files, poster and logo go into the show folder inside the category folder. The organise preview shows which category a title goes into. Categorising needs TMDB's details (a movie's production countries are only there); when they can't be fetched, the title isn't organised this time and is retried later.
 
 ## Which files are organised
 
