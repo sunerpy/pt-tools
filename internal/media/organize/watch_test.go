@@ -51,10 +51,11 @@ func (e *env) queuedJobs() []job {
 	for {
 		select {
 		case j := <-e.svc.jobs:
-			// 和 handle 一样先从去重表里拿掉，下一轮扫描才能再排
+			// 取出来由测试自己整理：和 handle 一样从去重表里拿掉、整理完拿掉「整理中」，下一轮扫描才能再排
 			e.svc.qmu.Lock()
 			delete(e.svc.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash()))
 			e.svc.qmu.Unlock()
+			e.svc.setWatchBusy(j.req.queueHash(), false)
 			out = append(out, j)
 		default:
 			return out
@@ -352,7 +353,6 @@ func TestWatchTooBig(t *testing.T) {
 	assert.Equal(t, filepath.Join(d.Path, entry), rows[0].SourcePath)
 	assert.Contains(t, rows[0].Message, "超过 6 层")
 
-	e.svc.forgetWatch(watchHash(d.ID, entry))
 	e.svc.watchScan(e.ctx, e.mustSettings())
 	assert.Zero(t, e.drain(), "写过跳过的记录：不再排")
 }
@@ -463,8 +463,8 @@ func TestWatchOtherFileAtSamePath(t *testing.T) {
 	require.Equal(t, models.MediaTransferDone, old.Status)
 	require.NotEmpty(t, old.SourceFileID, "记下了源文件的编号")
 
+	// 大小、修改时间都和原来的一样，只是另一个文件（inode 不同）：扫描照样认得出
 	e.put(d, name, 5, 10*time.Minute)
-	e.svc.forgetWatch(watchHash(d.ID, name))
 	e.svc.watchScan(e.ctx, e.mustSettings())
 	require.Equal(t, 1, e.drain(), "大小一样，但不是记录里的那个文件")
 	rows := e.history()
@@ -478,7 +478,6 @@ func TestWatchOtherFileAtSamePath(t *testing.T) {
 	assert.Equal(t, ItemExists, p.Items[0].Status)
 	assert.Contains(t, p.Items[0].Message, "先删除这条记录")
 
-	e.svc.forgetWatch(watchHash(d.ID, name))
 	e.svc.watchScan(e.ctx, e.mustSettings())
 	assert.Zero(t, e.drain(), "写过说明：不再排")
 
@@ -512,4 +511,37 @@ func TestSameSource(t *testing.T) {
 	assert.True(t, sameSource(&models.MediaTransferHistory{Size: 1}, "b", 1))
 	assert.False(t, sameSource(&models.MediaTransferHistory{Size: 1}, "", 2))
 	assert.True(t, sameSource(&models.MediaTransferHistory{SourceFileID: "a", Size: 1}, "", 1))
+}
+
+// 排上了还没整理完（整理中）的项，扫描不再排；整理完按记录看，整理好了就不排
+func TestWatchBusy(t *testing.T) {
+	e, d := watchEnv(t)
+	name := "Oppenheimer.2023.2160p.BluRay.x265-FRDS.mkv"
+	e.put(d, name, 5, 10*time.Minute)
+	e.svc.watchScan(e.ctx, e.mustSettings())
+	j := <-e.svc.jobs
+	// handle 开始时先从去重表里拿掉：这时候的扫描靠「整理中」不再排
+	e.svc.qmu.Lock()
+	delete(e.svc.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash()))
+	e.svc.qmu.Unlock()
+	e.svc.watchScan(e.ctx, e.mustSettings())
+	assert.Empty(t, e.svc.jobs, "整理中")
+	_, err := e.svc.handle(e.ctx, j)
+	require.NoError(t, err)
+	assert.False(t, e.svc.watchBusyOn(watchHash(d.ID, name)))
+	e.svc.watchScan(e.ctx, e.mustSettings())
+	assert.Empty(t, e.svc.jobs, "整理好了")
+}
+
+// 原盘的项排一次：整理时写一条跳过的记录，之后扫描不再排
+func TestWatchDiscOnce(t *testing.T) {
+	e, d := watchEnv(t)
+	e.put(d, "Oppenheimer.2023.BluRay/BDMV/STREAM/00000.m2ts", 5, 10*time.Minute)
+	e.svc.watchScan(e.ctx, e.mustSettings())
+	require.Equal(t, 1, e.drain())
+	rows := e.history()
+	require.Len(t, rows, 1)
+	assert.Contains(t, rows[0].Message, "原盘")
+	e.svc.watchScan(e.ctx, e.mustSettings())
+	assert.Zero(t, e.drain())
 }

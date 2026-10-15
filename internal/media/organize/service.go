@@ -97,8 +97,8 @@ type Service struct {
 	backoff map[string]backoffState
 	// retrying 是到期重试排上队、还没整理完的记录（retryDue 先清掉了它们的重试时间，见 Retrying）
 	retrying map[uint]bool
-	// watchSeen 是目录监控里每一项上次排队时最近一次改动的时间（见 watchUnchanged）
-	watchSeen map[string]time.Time
+	// watchBusy 是扫描排上了、还没整理完的目录监控的项（按 queueHash），整理完就拿掉：整理期间的扫描不再排它
+	watchBusy map[string]bool
 
 	runMu   sync.Mutex
 	running bool

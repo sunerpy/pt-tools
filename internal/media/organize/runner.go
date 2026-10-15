@@ -192,6 +192,10 @@ func (s *Service) handle(ctx context.Context, j job) (*Result, error) {
 	delete(s.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash()))
 	s.qmu.Unlock()
 	defer s.markRetrying(j.retryIDs, false)
+	if j.req.WatchDirID > 0 {
+		// 整理完（不管结果）就拿掉，下一轮扫描按记录重新看它
+		defer s.setWatchBusy(j.req.queueHash(), false)
+	}
 	return s.runJob(ctx, j)
 }
 
@@ -229,8 +233,7 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 		}
 		j.req.DownloaderID = setting.ID
 	}
-	// 目录监控发现的（包括失败后的重试）：目录关了就不整理，过一阵再看；删了就不再重试。
-	// 扫描排队时记下了这一项（watchSeen），没整理就忘掉，重新打开目录以后扫描会再排它
+	// 目录监控发现的（包括失败后的重试）：目录关了就不整理，过一阵再看；删了就不再重试
 	if j.trigger == models.MediaTriggerWatch {
 		dir, err := s.watchDir(ctx, j.req.WatchDirID)
 		if err != nil {
@@ -238,7 +241,6 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 			return nil, err
 		}
 		if dir.ID == 0 || !dir.Enabled {
-			s.forgetWatch(j.req.queueHash())
 			var next time.Time
 			if dir.ID != 0 {
 				next = s.cfg.Now().Add(retryOutOfScope)
@@ -359,8 +361,6 @@ func (s *Service) fail(ctx context.Context, j job) {
 		b.next = s.cfg.Now().Add(min(time.Duration(1<<min(b.fails, 6))*sweepInterval, 12*time.Hour))
 		s.backoff[key] = b
 		next = b.next
-		// 目录监控的这一项没整理成：退避到期以后扫描再排它（不算「排过、没再改动」）
-		delete(s.watchSeen, j.req.queueHash())
 		s.qmu.Unlock()
 	}
 	s.releaseLease(ctx, j, next)

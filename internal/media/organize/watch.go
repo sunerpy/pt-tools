@@ -332,8 +332,9 @@ func (s *Service) watchTorrent(ctx context.Context, path, entry string) (string,
 }
 
 // watchScan 扫描开着的监控目录，把有还没整理过的视频的项排进队列（例如新放进来的，或剧集文件夹里多了几集）。
-// 视频都有整理记录的不排（见 watchCovered）；最近还在改动的、在退避里的、这个进程里排过以后没再改动的也不排。
-// 没有视频、或者太大的项排一次：整理时写一条跳过的记录说明原因，之后看到这条记录就不再排。一轮最多排 maxPerRound 项。
+// 每一轮都按整理记录与文件编号看（见 watchCovered），不靠修改时间记住扫过的项：视频都有记录、还是记录里那个文件的不排；
+// 最近还在改动的、在退避里的、排上了还没整理完的也不排。没有视频、原盘或太大的项排一次：整理时写一条跳过的记录说明原因，
+// 之后看到这条记录就不再排。一轮最多排 maxPerRound 项。
 func (s *Service) watchScan(ctx context.Context, set Settings) {
 	var dirs []models.MediaWatchDir
 	if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&dirs).Error; err != nil {
@@ -353,14 +354,14 @@ func (s *Service) watchScan(ctx context.Context, set Settings) {
 				continue
 			}
 			hash := watchHash(d.ID, name)
-			if s.backedOff(0, hash) {
+			if s.backedOff(0, hash) || s.watchBusyOn(hash) {
 				continue
 			}
 			files, newest, err := watchFiles(d.Path, name)
 			if err != nil && !errors.Is(err, errWatchTooBig) {
 				continue
 			}
-			if (err == nil && s.cfg.Now().Sub(newest) < watchSettle) || s.watchUnchanged(hash, newest) {
+			if err == nil && s.cfg.Now().Sub(newest) < watchSettle {
 				continue
 			}
 			covered, cerr := s.watchCovered(ctx, filepath.Join(d.Path, name), files, err != nil, set)
@@ -369,29 +370,32 @@ func (s *Service) watchScan(ctx context.Context, set Settings) {
 				return
 			}
 			if covered {
-				s.watchSaw(hash, newest)
 				continue
 			}
 			if queued >= maxPerRound {
 				return
 			}
-			if s.enqueue(job{req: Request{WatchDirID: d.ID, Entry: name}, trigger: models.MediaTriggerWatch}) {
-				s.watchSaw(hash, newest)
-				queued++
+			s.setWatchBusy(hash, true)
+			if !s.enqueue(job{req: Request{WatchDirID: d.ID, Entry: name}, trigger: models.MediaTriggerWatch}) {
+				s.setWatchBusy(hash, false)
+				continue
 			}
+			queued++
 		}
 	}
 }
 
 // watchCovered 报告这一项不用再排：里面的视频都有整理记录（整理过、跳过或失败的；失败的由到期重试处理）。
-// 没有视频或太大（tooBig）的项看有没有给这一项本身写的记录。现在的文件不是记录里的那个时（见 sameSource），
+// 没有视频、原盘或太大（tooBig）的项看有没有给这一项本身写的记录。现在的文件不是记录里的那个时（见 sameSource），
 // 这个位置上换成了另一个文件：记录不管库里的文件时要排（按新文件整理）；管着时整理不了它，记录前面写过说明
 // （见 noteOtherFile）才不再排。
 func (s *Service) watchCovered(ctx context.Context, entryPath string, files []transfer.File, tooBig bool, set Settings) (bool, error) {
 	db := s.cfg.DB.WithContext(ctx)
 	var videos []transfer.File
 	if !tooBig {
-		videos = transfer.Select(files, int64(set.MinVideoMB)<<20).Videos
+		if sel := transfer.Select(files, int64(set.MinVideoMB)<<20); sel.Disc == "" {
+			videos = sel.Videos
+		}
 	}
 	if len(videos) == 0 {
 		var n int64
@@ -472,25 +476,21 @@ func (s *Service) noteOtherFile(ctx context.Context, it *PlanItem) {
 	}
 }
 
-func (s *Service) forgetWatch(hash string) {
-	s.qmu.Lock()
-	delete(s.watchSeen, hash)
-	s.qmu.Unlock()
-}
-
-// watchUnchanged 报告这一项上次排队以后没再改动过（这个进程里）：整理以后没写记录的（例如只多了张图片），不再每一轮都排。
-func (s *Service) watchUnchanged(hash string, newest time.Time) bool {
+func (s *Service) watchBusyOn(hash string) bool {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
-	seen, ok := s.watchSeen[hash]
-	return ok && !newest.After(seen)
+	return s.watchBusy[hash]
 }
 
-func (s *Service) watchSaw(hash string, newest time.Time) {
+func (s *Service) setWatchBusy(hash string, on bool) {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
-	if s.watchSeen == nil {
-		s.watchSeen = map[string]time.Time{}
+	if !on {
+		delete(s.watchBusy, hash)
+		return
 	}
-	s.watchSeen[hash] = newest
+	if s.watchBusy == nil {
+		s.watchBusy = map[string]bool{}
+	}
+	s.watchBusy[hash] = true
 }
