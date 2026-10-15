@@ -94,7 +94,7 @@ func (d *Driver) Probe(
 		_ = d.Manager.StopProfile(stopCtx, profileID)
 	}()
 
-	session, err := cloakdriver.NewCDPSession(ctx, launch.CdpURL)
+	session, err := cloakdriver.NewCDPSession(ctx, launch.CdpURL, launch.CdpHeader)
 	if err != nil {
 		return &sitelogin.ProbeResult{
 			Status:     sitelogin.NETWORK_ERROR,

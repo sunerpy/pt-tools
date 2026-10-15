@@ -5,9 +5,11 @@ package nexusphp
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -20,13 +22,20 @@ import (
 
 // TestNexusPHPCloakDriverIntegration is the Phase Gate sentinel.
 //
-// To run:
+// To run (verified against cloakhq/cloakbrowser-manager:v0.1.8):
 //
-//	docker run -d --rm -p 8080:8080 cloakhq/cloakbrowser-manager:0.0.4
-//	export PT_TOOLS_CLOAK_MGR_URL=http://127.0.0.1:8080
-//	export PT_TOOLS_CLOAK_MGR_TOKEN=""
+//	docker run -d --rm -e AUTH_TOKEN=<token> -p 127.0.0.1:18090:8080 cloakhq/cloakbrowser-manager:v0.1.8
+//	curl -H "Authorization: Bearer <token>" -H 'Content-Type: application/json' \
+//	  -d '{"name":"pt-tools-test"}' http://127.0.0.1:18090/api/profiles   # prints the profile id
+//	export PT_TOOLS_CLOAK_MGR_URL=http://127.0.0.1:18090
+//	export PT_TOOLS_CLOAK_MGR_TOKEN=<token>
 //	export PT_TOOLS_CLOAK_PROFILE_ID=<id-of-pre-created-profile>
+//	export PT_TOOLS_CLOAK_SITE_HOST=172.17.0.1   # the docker bridge gateway: the browser runs inside the container
 //	go test -v -tags integration -run TestNexusPHPCloakDriverIntegration ./internal/cloakdriver/nexusphp/...
+//
+// PT_TOOLS_CLOAK_SITE_HOST makes the fake site listen on all interfaces and
+// gives the browser that host; without it the site is on 127.0.0.1, which only
+// a Manager on the same network namespace can reach.
 //
 // If the env vars are unset, the test SKIPs — that signals the Phase
 // Gate is YELLOW (manually deferred) rather than failed.
@@ -44,7 +53,7 @@ func TestNexusPHPCloakDriverIntegration(t *testing.T) {
 	}
 	token := os.Getenv("PT_TOOLS_CLOAK_MGR_TOKEN")
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(`<!doctype html>
 <html>
@@ -58,19 +67,32 @@ func TestNexusPHPCloakDriverIntegration(t *testing.T) {
 </body>
 </html>`))
 	}))
+	siteHost := os.Getenv("PT_TOOLS_CLOAK_SITE_HOST")
+	if siteHost != "" {
+		l, err := net.Listen("tcp", "0.0.0.0:0")
+		require.NoError(t, err)
+		ts.Listener = l
+	}
+	ts.Start()
 	defer ts.Close()
+	siteURL := ts.URL
+	if siteHost != "" {
+		siteURL = "http://" + net.JoinHostPort(siteHost, strconv.Itoa(ts.Listener.Addr().(*net.TCPAddr).Port))
+	} else {
+		siteHost = "127.0.0.1"
+	}
 
 	mgr := cloakdriver.NewManagerClient(mgrURL, token, 30*time.Second)
 
 	cookies := []*http.Cookie{
-		{Name: "PHPSESSID", Value: "phase-gate-test", Domain: "127.0.0.1", Path: "/"},
+		{Name: "PHPSESSID", Value: "phase-gate-test", Domain: siteHost, Path: "/"},
 	}
 
 	d := NewDriver(mgr)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	res, err := d.Probe(ctx, ts.URL+"/", cookies, profileID)
+	res, err := d.Probe(ctx, siteURL+"/", cookies, profileID)
 	require.NoError(t, err, "Probe must not return programming error")
 	require.NotNil(t, res)
 
