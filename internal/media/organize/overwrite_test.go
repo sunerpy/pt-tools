@@ -632,8 +632,8 @@ func TestReplaceTempTakenKeepsForeignFile(t *testing.T) {
 	t.Cleanup(func() { transferTemp = orig })
 	transferTemp = func(src, dst, mode string) (transfer.Outcome, error) {
 		taken = dst
-		if err := os.WriteFile(dst, []byte("someone else's"), 0o644); err != nil {
-			return 0, err
+		if werr := os.WriteFile(dst, []byte("someone else's"), 0o644); werr != nil {
+			return 0, werr
 		}
 		return orig(src, dst, mode)
 	}
