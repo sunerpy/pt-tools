@@ -36,10 +36,12 @@ type MediaLibrary struct {
 	// ScrapeImageLang 是海报与 Logo 优先用的语言：空串用 TMDB 给的那张；zh、en、ja；none 是没有文字的
 	ScrapeImageLang string `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
 	// ClassifyDir 为真时按二级分类（MediaOrganizeSetting.ClassifyRules）放进库目录下的分类目录
-	ClassifyDir bool      `gorm:"not null;default:false" json:"classify_dir"`
-	Enabled     bool      `gorm:"not null;default:false" json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ClassifyDir bool `gorm:"not null;default:false" json:"classify_dir"`
+	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的旧版本时怎么办：空串不替换，larger 新文件更大时替换，always 总是替换
+	OverwriteMode string    `gorm:"size:16;not null;default:''" json:"overwrite_mode"`
+	Enabled       bool      `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (MediaLibrary) TableName() string { return "media_libraries" }

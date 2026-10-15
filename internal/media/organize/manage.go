@@ -51,7 +51,9 @@ type LibraryInput struct {
 	ScrapeImageLang string `json:"scrape_image_lang"`
 	// ClassifyDir 为真时按二级分类放进库目录下的分类目录
 	ClassifyDir bool `json:"classify_dir"`
-	Enabled     bool `json:"enabled"`
+	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的旧版本时怎么办（OverwriteNever、OverwriteLarger、OverwriteAlways）
+	OverwriteMode string `json:"overwrite_mode"`
+	Enabled       bool   `json:"enabled"`
 }
 
 // DefaultTemplate 是这种媒体库的默认模板。
@@ -134,10 +136,14 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 	if !slices.Contains(scrape.ImageLangs, lang) {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 图片语言要选 zh、en、ja、none 或留空", ErrInvalid)
 	}
+	overwrite := strings.TrimSpace(in.OverwriteMode)
+	if overwrite != OverwriteNever && overwrite != OverwriteLarger && overwrite != OverwriteAlways {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 覆盖策略要选 larger、always 或留空（不替换）", ErrInvalid)
+	}
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
 		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
-		ClassifyDir: in.ClassifyDir, Enabled: in.Enabled,
+		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, Enabled: in.Enabled,
 	}, nil
 }
 
@@ -185,7 +191,7 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 	}
 	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(
 		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang",
-		"classify_dir", "enabled", "updated_at",
+		"classify_dir", "overwrite_mode", "enabled", "updated_at",
 	).Updates(&row)
 	if res.Error != nil {
 		if isUnique(res.Error) {

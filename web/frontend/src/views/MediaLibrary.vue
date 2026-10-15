@@ -39,6 +39,7 @@ import {
   IMAGE_LANGS,
   MEDIA_MODES,
   MEDIA_SERVER_KINDS,
+  OVERWRITE_MODES,
   TEMPLATE_VARS,
   TMDB_GENRES,
   classifyRuleSummary,
@@ -141,6 +142,7 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   scrape_items: [...DEFAULT_SCRAPE_ITEMS],
   scrape_image_lang: "",
   classify_dir: false,
+  overwrite_mode: "",
   enabled: true,
 });
 const libForm = ref<MediaLibraryInput>(blankLibrary());
@@ -169,6 +171,7 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     scrape_items: [...(l.scrape_items ?? DEFAULT_SCRAPE_ITEMS)],
     scrape_image_lang: l.scrape_image_lang ?? "",
     classify_dir: l.classify_dir ?? false,
+    overwrite_mode: l.overwrite_mode ?? "",
     enabled: l.enabled,
   };
 }
@@ -1243,6 +1246,23 @@ onMounted(refresh);
               <li><code v-text="braces('pad .Season 2')" /> 补零到两位</li>
             </ul>
           </details>
+        </el-form-item>
+        <el-form-item label="同名文件">
+          <el-select
+            v-model="libForm.overwrite_mode"
+            class="ml-lang"
+            data-testid="ml-lib-overwrite-mode">
+            <el-option
+              v-for="m in OVERWRITE_MODES"
+              :key="m.value"
+              :label="m.label"
+              :value="m.value" />
+          </el-select>
+          <div class="field-tip">
+            目标位置已经有 pt-tools 之前放进库的旧版本（同一部或同一集）时怎么办。只替换 pt-tools
+            放进库的文件，用户自己放的、移动整理的不替换；旧版本的字幕与 NFO
+            一起换掉。命名模板里带画质时不同版本的文件名不同，不会撞上。
+          </div>
         </el-form-item>
         <el-form-item label="二级分类">
           <el-checkbox v-model="libForm.classify_dir" data-testid="ml-lib-classify"

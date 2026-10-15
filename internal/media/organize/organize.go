@@ -2,6 +2,8 @@ package organize
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // Request 是一次整理的请求。Hash 是种子在下载器里的编号（qBittorrent 是 info hash）。
@@ -39,7 +42,16 @@ const (
 	ItemPending = "pending" // 要整理
 	ItemDone    = "done"    // 库里已经有了（之前整理过）
 	ItemExists  = "exists"  // 目标位置被别的文件占着，不覆盖
+	ItemReplace = "replace" // 目标位置是 pt-tools 之前放进库的旧版本，按覆盖策略换成这个
 	ItemFailed  = "failed"  // 整理不了，Message 写明原因
+)
+
+// 覆盖策略（MediaLibrary.OverwriteMode）：目标位置已经有 pt-tools 之前放进库的另一个文件（同一部或同一集的旧版本）时怎么办。
+// 用户自己放的文件、移动整理的旧版本（库里唯一的一份）一律不替换。
+const (
+	OverwriteNever  = ""       // 不替换（默认）
+	OverwriteLarger = "larger" // 新文件更大时替换
+	OverwriteAlways = "always" // 总是替换
 )
 
 // SubtitlePlan 是一个跟着视频整理的字幕。
@@ -68,6 +80,8 @@ type PlanItem struct {
 	stillFor *tmdb.Season
 	// mode 是这个文件实际的整理方式，与计划不同时才有：移动时删不掉源文件，库里那份按硬链接或复制记
 	mode string
+	// replaces 是要替换的旧版本的整理记录（状态为 ItemReplace 时）
+	replaces *models.MediaTransferHistory
 }
 
 // Plan 是一个种子的整理计划，预览与执行共用。Problem 不为空时整个种子整理不了。
@@ -622,7 +636,7 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 			continue
 		}
 		// 先看库里是不是已经有了（有记录时目标换成记录里的），字幕跟着最终的目标走
-		it.Status = s.itemState(it)
+		it.Status = s.itemState(ctx, p, it)
 		counts := map[string]int{}
 		for _, sub := range matched[i] {
 			lang := transfer.SubtitleLang(sub.Rel) + strings.ToLower(path.Ext(sub.Rel))
@@ -633,7 +647,7 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 }
 
 // itemState 看库里是不是已经有这个文件。
-func (s *Service) itemState(it *PlanItem) string {
+func (s *Service) itemState(ctx context.Context, p *Plan, it *PlanItem) string {
 	if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.TargetPath != "" {
 		if _, err := os.Lstat(it.row.TargetPath); err == nil {
 			it.Target = it.row.TargetPath
@@ -654,8 +668,41 @@ func (s *Service) itemState(it *PlanItem) string {
 	if to, err := os.Readlink(it.Target); err == nil && filepath.Clean(to) == filepath.Clean(it.Source) {
 		return ItemDone
 	}
-	it.Message = "目标位置已经有同名文件（不是同一个文件），不会覆盖"
+	old := s.occupant(ctx, it)
+	if old == nil {
+		it.Message = "目标位置已经有同名文件（不是同一个文件），不会覆盖"
+		return ItemExists
+	}
+	// 目标位置是 pt-tools 之前放进库的另一个版本：按媒体库的覆盖策略看换不换
+	what := fmt.Sprintf("目标位置是之前整理的另一个版本（%s，%s）", firstNonEmpty(old.TorrentName, filepath.Base(old.SourcePath)), utils.FormatBytes(old.Size))
+	switch {
+	case p.Library.OverwriteMode == OverwriteNever:
+		it.Message = what + "，没有替换：要换成新的，在媒体库里把「同名文件」改成替换"
+	case old.Mode == models.MediaModeMove:
+		it.Message = what + "，是移动整理的（库里唯一的一份），不替换"
+	case p.Mode == models.MediaModeMove:
+		it.Message = what + "，这个媒体库用移动整理，不替换旧版本"
+	case p.Library.OverwriteMode == OverwriteLarger && it.Size <= old.Size:
+		it.Message = what + fmt.Sprintf("，新文件（%s）不比它大，不替换", utils.FormatBytes(it.Size))
+	default:
+		it.replaces = old
+		it.Message = fmt.Sprintf("替换库里的旧版本（%s，%s → %s）", firstNonEmpty(old.TorrentName, filepath.Base(old.SourcePath)),
+			utils.FormatBytes(old.Size), utils.FormatBytes(it.Size))
+		return ItemReplace
+	}
 	return ItemExists
+}
+
+// occupant 是占着目标位置的旧版本：pt-tools 整理进库的另一条已整理记录，库里还是它放的那个文件。没有时为空。
+func (s *Service) occupant(ctx context.Context, it *PlanItem) *models.MediaTransferHistory {
+	var row models.MediaTransferHistory
+	err := s.cfg.DB.WithContext(ctx).
+		Where("target_path = ? AND status = ? AND source_path <> ?", it.Target, models.MediaTransferDone, it.Source).
+		Order("id DESC").Limit(1).Find(&row).Error
+	if err != nil || row.ID == 0 || !ours(&row) {
+		return nil
+	}
+	return &row
 }
 
 // Preview 算出整理计划，不改动任何文件。
@@ -725,6 +772,18 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		case ItemExists:
 			res.Skipped++
 			s.record(ctx, p, it, trigger, models.MediaTransferSkipped, it.Message, false, "", nil)
+			continue
+		case ItemReplace:
+			// 之前被换下来的（覆盖策略或洗版换掉的，记录是已删除）：自动整理不再换回去，免得两个版本来回换；
+			// 也不改记录（改成跳过以后下次就又会换）。手动整理才换回去
+			if trigger != models.MediaTriggerManual && it.row != nil && it.row.Status == models.MediaTransferRemoved {
+				res.Skipped++
+				continue
+			}
+			if s.replace(ctx, p, it, trigger, res) {
+				res.Created++
+				created = append(created, it)
+			}
 			continue
 		case ItemDone:
 			// 库里已经是这个文件：补上之前没整理成的字幕；没有记录时（例如记录被删了）补一条
@@ -844,6 +903,76 @@ func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([
 		}
 	}
 	return out, created, msgs
+}
+
+// replace 按覆盖策略用这个文件替换库里的旧版本（调用方持有 s.mu）。新文件先放到同目录的临时名，再改名盖住旧文件：
+// 哪一步失败，旧文件都还在原处。换好以后删掉旧记录的字幕与同名的刮削文件（按文件编号确认，换过的不删），目录里的刮削文件
+// 归新记录；旧记录标成已删除并写明换成了什么。返回是否换好了（换好了的算新整理的，照常刮削与通知）。
+func (s *Service) replace(ctx context.Context, p *Plan, it *PlanItem, trigger string, res *Result) bool {
+	old := it.replaces
+	fail := func(msg string) bool {
+		it.Status, it.Message = ItemFailed, msg
+		res.Failed++
+		s.record(ctx, p, it, trigger, models.MediaTransferFailed, msg, true, "", nil)
+		return false
+	}
+	tmp := tempSibling(it.Target)
+	if _, err := transfer.Transfer(it.Source, tmp, p.Mode); err != nil {
+		return fail("替换旧版本失败，旧版本留着：" + err.Error())
+	}
+	if err := os.Rename(tmp, it.Target); err != nil {
+		tmpID, _ := transfer.FileID(tmp)
+		_ = transfer.RemoveIfOurs(tmp, p.Mode, tmpID, it.Source)
+		return fail("替换旧版本失败，旧版本留着：" + err.Error())
+	}
+	var carry []extra
+	var msgs []string
+	for _, e := range decodeExtras(old.Extras) {
+		if e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)) {
+			// 目录里的海报、tvshow.nfo 一类：还是当初写的那个就转给新记录
+			if id, err := fileIDOf(e.Target); err == nil && id == e.FileID {
+				carry = append(carry, e)
+			}
+			continue
+		}
+		mode := old.Mode
+		if e.Kind == extraMeta {
+			mode = models.MediaModeCopy
+		}
+		if err := transfer.RemoveIfOurs(e.Target, mode, e.FileID, e.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+			msgs = append(msgs, fmt.Sprintf("旧版本的 %s 没删掉：%v", filepath.Base(e.Target), err))
+		}
+	}
+	mode := firstNonEmpty(it.mode, p.Mode)
+	fileID, _ := transfer.FileID(it.Target)
+	extras, _, subMsgs := s.transferSubtitles(it, mode, rowExtras(it.row))
+	oldName := firstNonEmpty(old.TorrentName, filepath.Base(old.SourcePath))
+	msgs = append(append([]string{"替换了旧版本（" + oldName + "）"}, msgs...), subMsgs...)
+	if err := s.writeRecord(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID,
+		mergeExtras(mergeExtras(rowExtras(it.row), extras), carry)); err != nil {
+		// 旧文件已经被盖住了：新文件留在库里（撤回的话库里就什么都没有了），写明记录没写进去
+		it.Status, it.Message = ItemFailed, fmt.Sprintf("已经换成了新文件，但整理记录写不进去：%v", err)
+		res.Failed++
+		res.Messages = append(res.Messages, fmt.Sprintf("%s：%s", filepath.Base(it.Source), it.Message))
+		return false
+	}
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", old.ID).Updates(map[string]any{
+		"status": models.MediaTransferRemoved, "message": truncate("换成了 "+firstNonEmpty(p.Name, filepath.Base(it.Source))+"（覆盖策略）", 1024),
+		"updated_at": s.cfg.Now(),
+	}).Error; err != nil {
+		msgs = append(msgs, "旧版本的整理记录没改成已删除："+err.Error())
+	}
+	res.Messages = append(res.Messages, msgs...)
+	it.Status = ItemDone
+	return true
+}
+
+// tempSibling 是目标旁边的临时文件名：同一个目录（改名才是原子的），扩展名不变。
+func tempSibling(target string) string {
+	var rnd [6]byte
+	_, _ = rand.Read(rnd[:])
+	ext := filepath.Ext(target)
+	return strings.TrimSuffix(target, ext) + ".pt-tools-" + hex.EncodeToString(rnd[:]) + ext
 }
 
 // unplace 撤回这次放进库里、但整理记录没写进去的文件（视频要 placed 为真）：源文件还在，按文件编号或指向确认是自己放的才删；
