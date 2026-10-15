@@ -1056,8 +1056,8 @@ func (s *Service) undoReplace(ctx context.Context, j models.MediaReplaceJournal)
 	}
 	switch _, err := os.Lstat(j.Temp); {
 	case err == nil:
-		if err := transfer.RemoveIfOurs(j.Temp, j.Mode, j.TempID, j.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
-			return fmt.Errorf("删不掉临时文件 %s: %w", filepath.Base(j.Temp), err)
+		if rerr := transfer.RemoveIfOurs(j.Temp, j.Mode, j.TempID, j.Source); rerr != nil && !errors.Is(rerr, transfer.ErrNotOurs) {
+			return fmt.Errorf("删不掉临时文件 %s: %w", filepath.Base(j.Temp), rerr)
 		}
 	case !errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("看不了临时文件 %s: %w", filepath.Base(j.Temp), err)
@@ -1082,8 +1082,8 @@ func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJourna
 			msgs = append(msgs, "旧版本挪开的文件 "+filepath.Base(j.Backup)+" 换过了，留着")
 		default:
 			// 旧记录没了（被删了）时也删：提交以前已经确认过挪开的是旧记录放的那个
-			if err := os.Remove(j.Backup); err != nil {
-				errs = append(errs, fmt.Errorf("旧版本的文件 %s 没删掉: %w", filepath.Base(j.Backup), err))
+			if rerr := os.Remove(j.Backup); rerr != nil {
+				errs = append(errs, fmt.Errorf("旧版本的文件 %s 没删掉: %w", filepath.Base(j.Backup), rerr))
 			}
 		}
 	case !errors.Is(err, os.ErrNotExist):
