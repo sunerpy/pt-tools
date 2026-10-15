@@ -103,6 +103,8 @@ type PlanItem struct {
 	replaces *models.MediaTransferHistory
 	// otherFile 表示监控目录里这个位置上换成了另一个文件，记录管着库里的文件，不整理（见 markOtherFiles）
 	otherFile bool
+	// sourceID 是源文件现在的编号（目录监控的项才读，记进整理记录的 SourceFileID）
+	sourceID string
 }
 
 // Plan 是一个种子的整理计划，预览与执行共用。Problem 不为空时整个种子整理不了。
@@ -358,7 +360,12 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 		return p, nil
 	}
 	for _, v := range sel.Videos {
-		p.Items = append(p.Items, PlanItem{Rel: v.Rel, Source: v.Path, Size: v.Size, Status: ItemPending})
+		it := PlanItem{Rel: v.Rel, Source: v.Path, Size: v.Size, Status: ItemPending}
+		if p.WatchDirID > 0 {
+			// 目录监控按源文件的编号认同一个位置上是不是换了文件（见 markOtherFiles）；移动整理以后就读不到了，先读
+			it.sourceID, _ = transfer.FileID(v.Path)
+		}
+		p.Items = append(p.Items, it)
 	}
 	if err := s.loadRows(ctx, p); err != nil {
 		return nil, err
@@ -1395,7 +1402,7 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, WatchDirID: p.WatchDirID, InfoHash: p.Hash, TaskID: p.TaskID,
 		TorrentName: truncate(p.Name, 512), SourcePath: it.Source, SaveRoot: p.LocalPath, TargetPath: it.Target, Mode: firstNonEmpty(it.mode, p.Mode),
 		Season: it.Season, Episode: it.Episode, EpisodeEnd: it.EpisodeEnd, Size: it.Size, Status: status,
-		Message: truncate(msg, 1024), Trigger: trigger, TargetFileID: fileID, CreatedAt: now, UpdatedAt: now,
+		Message: truncate(msg, 1024), Trigger: trigger, TargetFileID: fileID, SourceFileID: it.sourceID, CreatedAt: now, UpdatedAt: now,
 	}
 	if p.Library != nil {
 		row.LibraryID = p.Library.ID
@@ -1431,7 +1438,7 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 		DoUpdates: clause.AssignmentColumns([]string{
 			"downloader_id", "downloader_name", "watch_dir_id", "info_hash", "task_id", "torrent_name", "library_id", "save_root", "target_path",
 			"extras", "mode", "media_type", "tmdb_id", "title", "year", "season", "episode", "episode_end", "size",
-			"status", "message", "attempts", "next_retry_at", "target_file_id", "trigger", "updated_at",
+			"status", "message", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "updated_at",
 		}),
 	}).Create(&row).Error
 	if err != nil {

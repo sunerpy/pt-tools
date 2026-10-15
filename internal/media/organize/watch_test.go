@@ -444,8 +444,8 @@ func TestWatchJobDirOffAndGone(t *testing.T) {
 	assert.Nil(t, e.history()[0].NextRetryAt)
 }
 
-// 移动整理以后同一个位置上又放进一个（大小不同的）文件：记录管着库里的文件，不改成新文件的、写明原因，
-// 之后扫描不再排；删掉那条记录以后照常整理。记录不管库里的文件时直接按新文件整理
+// 移动整理以后同一个位置上又放进一个文件（大小一样也认得出，按记下的源文件编号）：记录管着库里的文件，不改成新文件的、
+// 写明原因，之后扫描不再排；删掉那条记录以后下一轮扫描照常整理。记录不管库里的文件时直接按新文件整理
 func TestWatchOtherFileAtSamePath(t *testing.T) {
 	e := newEnv(t)
 	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Mode: models.MediaModeMove})
@@ -461,11 +461,12 @@ func TestWatchOtherFileAtSamePath(t *testing.T) {
 	require.False(t, exists(src), "移动进库")
 	old := e.history()[0]
 	require.Equal(t, models.MediaTransferDone, old.Status)
+	require.NotEmpty(t, old.SourceFileID, "记下了源文件的编号")
 
-	e.put(d, name, 6, 10*time.Minute)
+	e.put(d, name, 5, 10*time.Minute)
 	e.svc.forgetWatch(watchHash(d.ID, name))
 	e.svc.watchScan(e.ctx, e.mustSettings())
-	require.Equal(t, 1, e.drain(), "大小不一样：是另一个文件")
+	require.Equal(t, 1, e.drain(), "大小一样，但不是记录里的那个文件")
 	rows := e.history()
 	require.Len(t, rows, 1)
 	assert.Equal(t, models.MediaTransferDone, rows[0].Status, "那条记录还是原来的")
@@ -485,13 +486,12 @@ func TestWatchOtherFileAtSamePath(t *testing.T) {
 	_, err = e.svc.DeleteHistory(e.ctx, old.ID, false)
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(old.TargetPath))
-	e.svc.forgetWatch(watchHash(d.ID, name))
 	e.svc.watchScan(e.ctx, e.mustSettings())
-	require.Equal(t, 1, e.drain())
+	require.Equal(t, 1, e.drain(), "删了记录：下一轮扫描就排")
 	rows = e.history()
 	require.Len(t, rows, 1)
 	assert.Equal(t, models.MediaTransferDone, rows[0].Status)
-	assert.Equal(t, int64(6)<<20, rows[0].Size, "这回整理的是新文件")
+	assert.NotEqual(t, old.SourceFileID, rows[0].SourceFileID, "这回整理的是新文件")
 	assert.False(t, exists(src))
 
 	// 记录不管库里的文件（例如识别失败）：换成的新文件直接整理
@@ -503,4 +503,13 @@ func TestWatchOtherFileAtSamePath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Created)
 	assert.False(t, exists(bad))
+}
+
+// 记着源文件编号时按编号比，没记着（以前的记录）或读不出时按大小比
+func TestSameSource(t *testing.T) {
+	assert.True(t, sameSource(&models.MediaTransferHistory{SourceFileID: "a", Size: 1}, "a", 2))
+	assert.False(t, sameSource(&models.MediaTransferHistory{SourceFileID: "a", Size: 1}, "b", 1))
+	assert.True(t, sameSource(&models.MediaTransferHistory{Size: 1}, "b", 1))
+	assert.False(t, sameSource(&models.MediaTransferHistory{Size: 1}, "", 2))
+	assert.True(t, sameSource(&models.MediaTransferHistory{SourceFileID: "a", Size: 1}, "", 1))
 }

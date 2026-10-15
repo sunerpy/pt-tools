@@ -180,7 +180,10 @@ type MediaTransferHistory struct {
 	// NextRetryAt 是失败后下次自动重试的时间；为空的不自动重试（例如没识别出来，要先纠正）
 	NextRetryAt *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
 	// TargetFileID 是整理出的文件的设备号与 inode（Windows 是卷序列号与文件索引），删除库里的文件前用它确认还是这个文件
-	TargetFileID string    `gorm:"size:64;not null;default:''" json:"-"`
+	TargetFileID string `gorm:"size:64;not null;default:''" json:"-"`
+	// SourceFileID 是整理时源文件的编号（同 TargetFileID 的格式）：目录监控按它认同一个位置上是不是换成了另一个文件。
+	// 下载器的种子不记（种子按 info hash 认）
+	SourceFileID string    `gorm:"size:64;not null;default:''" json:"-"`
 	Trigger      string    `gorm:"size:16;not null;default:''" json:"trigger"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`

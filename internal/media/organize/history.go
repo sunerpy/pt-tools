@@ -158,6 +158,10 @@ func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) ([]str
 	if err := s.cfg.DB.WithContext(ctx).Delete(&models.MediaTransferHistory{}, row.ID).Error; err != nil {
 		return nil, fmt.Errorf("删除整理记录失败: %w", err)
 	}
+	if row.WatchDirID > 0 {
+		// 目录监控的项：下一轮扫描重新看它（例如删掉旧记录以后整理同一个位置上换成的文件）
+		s.forgetWatch(watchHash(row.WatchDirID, row.TorrentName))
+	}
 	return kept, nil
 }
 

@@ -31,8 +31,8 @@ const (
 	watchMaxFiles = 5000
 	// watchSource 是目录监控整理的记录里「下载器」一栏写的名字
 	watchSource = "目录监控"
-	// otherFileNote 写在整理记录的消息前面：监控目录里这个位置上又放进了另一个文件（见 noteOtherFile）
-	otherFileNote = "监控目录里这个位置上又放进了另一个文件"
+	// otherFileNote 写在整理记录的消息前面：监控目录里这个位置上的文件换过了（见 noteOtherFile）
+	otherFileNote = "监控目录里这个位置上的文件换过了"
 )
 
 // errWatchTooBig 表示一项里的目录太深或文件太多。
@@ -384,8 +384,9 @@ func (s *Service) watchScan(ctx context.Context, set Settings) {
 }
 
 // watchCovered 报告这一项不用再排：里面的视频都有整理记录（整理过、跳过或失败的；失败的由到期重试处理）。
-// 没有视频或太大（tooBig）的项看有没有给这一项本身写的记录。记录里的大小和现在的文件不一样时，这个位置上换成了
-// 另一个文件：记录不管库里的文件时要排（按新文件整理）；管着时整理不了它，记录前面写过说明（见 noteOtherFile）才不再排。
+// 没有视频或太大（tooBig）的项看有没有给这一项本身写的记录。现在的文件不是记录里的那个时（见 sameSource），
+// 这个位置上换成了另一个文件：记录不管库里的文件时要排（按新文件整理）；管着时整理不了它，记录前面写过说明
+// （见 noteOtherFile）才不再排。
 func (s *Service) watchCovered(ctx context.Context, entryPath string, files []transfer.File, tooBig bool, set Settings) (bool, error) {
 	db := s.cfg.DB.WithContext(ctx)
 	var videos []transfer.File
@@ -417,14 +418,23 @@ func (s *Service) watchCovered(ctx context.Context, entryPath string, files []tr
 			return false, nil
 		}
 		// 换成了另一个文件：记录管着库里的文件、已经写过说明的才算处理过
-		if r.Size != v.Size && (!hasLibraryFiles(r) || !strings.HasPrefix(r.Message, otherFileNote)) {
+		if id, _ := transfer.FileID(v.Path); !sameSource(r, id, v.Size) && (!hasLibraryFiles(r) || !strings.HasPrefix(r.Message, otherFileNote)) {
 			return false, nil
 		}
 	}
 	return true, nil
 }
 
-// markOtherFiles 处理监控目录里同一个位置上换成了另一个文件（和整理记录里的大小不一样，例如移动整理以后又放进来一个同名的）：
+// sameSource 报告监控目录里这个位置上现在的文件（编号 id、大小 size）就是整理记录里的那个：记录记着源文件的编号时
+// 按编号比（同一个文件，大小与修改时间也没变）；没记着（以前的记录）或现在读不出编号时按大小比。
+func sameSource(row *models.MediaTransferHistory, id string, size int64) bool {
+	if row.SourceFileID != "" && id != "" {
+		return row.SourceFileID == id
+	}
+	return row.Size == size
+}
+
+// markOtherFiles 处理监控目录里同一个位置上换成了另一个文件（见 sameSource，例如移动整理以后又放进来一个同名的）：
 // 记录不管库里的文件时当成新的整理（记录改成新文件的）；管着时不整理，免得那条记录改成新文件以后库里的文件没人管了。
 // 一个位置只能有一条整理记录：要整理新文件，先删除那条记录。
 func markOtherFiles(p *Plan) {
@@ -433,7 +443,7 @@ func markOtherFiles(p *Plan) {
 	}
 	for i := range p.Items {
 		it := &p.Items[i]
-		if it.row == nil || it.row.Size == it.Size {
+		if it.row == nil || sameSource(it.row, it.sourceID, it.Size) {
 			continue
 		}
 		if !hasLibraryFiles(it.row) {
@@ -442,7 +452,7 @@ func markOtherFiles(p *Plan) {
 		}
 		it.otherFile = true
 		it.Status, it.Target, it.Subtitles = ItemExists, it.row.TargetPath, nil
-		it.Message = fmt.Sprintf("%s（%s，记录里是 %s），没有整理：一个位置只能有一条整理记录，要整理它先删除这条记录（库里的文件可以留着）",
+		it.Message = fmt.Sprintf("%s（换成了另一个文件或改过，现在 %s，记录里是 %s），没有整理：一个位置只能有一条整理记录，要整理它先删除这条记录（库里的文件可以留着）",
 			otherFileNote, utils.FormatBytes(it.Size), utils.FormatBytes(it.row.Size))
 	}
 }
