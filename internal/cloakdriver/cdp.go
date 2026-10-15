@@ -29,8 +29,15 @@ type CDPSession struct {
 // NewCDPSession opens a chromedp remote allocator connection to cdpURL
 // and verifies the connection with a no-op chromedp.Do within a 5s
 // timeout. The returned session must be Close()d.
-func NewCDPSession(parent context.Context, cdpURL string) (*CDPSession, error) {
-	allocCtx, allocCancel := remote.NewAllocator(parent, cdpURL)
+//
+// header 不为 nil 表示 cdpURL 是经 Manager 转发的地址（见 ProfileLaunchResult.CdpHeader）：原样连接，
+// 不去查 /json/version（那个请求带不上令牌），握手带上 header。
+func NewCDPSession(parent context.Context, cdpURL string, header http.Header) (*CDPSession, error) {
+	var opts []remote.Option
+	if header != nil {
+		opts = append(opts, remote.NoModifyURL, remote.WithDialHTTPHeader(header))
+	}
+	allocCtx, allocCancel := remote.NewAllocator(parent, cdpURL, opts...)
 	taskCtx, taskCancel := chromedp.NewContext(allocCtx)
 
 	// chromedp 把第一次执行用的 ctx 当作标签页的生命周期：在它上面套超时并在返回时取消，

@@ -35,7 +35,7 @@ func TestCDPCookieInjectionRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(ctx, cdpURL)
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 
@@ -64,7 +64,7 @@ func TestCDPClearBeforeInject(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(ctx, cdpURL)
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 
@@ -96,7 +96,7 @@ func TestCDPContextCancellationIntegration(t *testing.T) {
 	parent, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(parent, cdpURL)
+	sess, err := NewCDPSession(parent, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 
@@ -120,7 +120,7 @@ func TestCDPCookieInjectionFromCookieHeader(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(ctx, cdpURL)
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 
@@ -159,7 +159,7 @@ func TestCDPLoadPageAndExtractSendsInjectedCookies(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	sess, err := NewCDPSession(ctx, cdpURL)
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 

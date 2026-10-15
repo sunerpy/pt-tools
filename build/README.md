@@ -41,7 +41,7 @@ This directory contains a Docker Compose template that runs pt-tools next to Clo
 
 5. Access pt-tools at `http://localhost:8081` (default login `admin` / `adminadmin`; change it after the first login).
 
-6. Create a profile in the CloakBrowser-Manager UI at `http://localhost:8080`.
+6. Open the CloakBrowser-Manager UI at `http://localhost:8080`, sign in with the same `CLOAK_AUTH_TOKEN`, and create a profile.
 
 7. In pt-tools, open 系统 → CloakBrowser and fill in:
 
@@ -87,7 +87,7 @@ docker compose up -d
 Edit the `image:` field in `docker-compose.yaml`, e.g.:
 
 - `sunerpy/pt-tools:<version>` (for example `sunerpy/pt-tools:v1.0.0`) instead of `latest`
-- `cloakhq/cloakbrowser-manager:0.0.4@sha256:<digest>` for SHA-pinned Manager
+- `cloakhq/cloakbrowser-manager:v0.1.8@sha256:<digest>` for SHA-pinned Manager (Manager tags start with `v`; pt-tools was verified against v0.1.8)
 
 ### Manager Image SHA Digest Pinning (R21)
 
@@ -96,14 +96,14 @@ For production, pin the CloakBrowser-Manager image to a specific digest to preve
 1. **Discover the current digest**:
 
    ```bash
-   docker pull cloakhq/cloakbrowser-manager:0.0.4
-   docker inspect cloakhq/cloakbrowser-manager:0.0.4 | jq '.[0].RepoDigests[0]'
+   docker pull cloakhq/cloakbrowser-manager:v0.1.8
+   docker inspect cloakhq/cloakbrowser-manager:v0.1.8 | jq '.[0].RepoDigests[0]'
    ```
 
 2. **Update `docker-compose.yaml`**:
 
    ```yaml
-   image: cloakhq/cloakbrowser-manager:0.0.4@sha256:<digest>
+   image: cloakhq/cloakbrowser-manager:v0.1.8@sha256:<digest>
    ```
 
 3. **Re-deploy**:
@@ -122,7 +122,11 @@ For production, pin the CloakBrowser-Manager image to a specific digest to preve
 
 - Verify Manager is healthy: `docker compose logs cloakbrowser-manager | tail -20`
 - Check that the endpoint in 系统 → CloakBrowser is `http://cloakbrowser-manager:8080`: inside the pt-tools container, `localhost` is pt-tools itself
-- Check network: `docker compose exec pt-tools wget -qO- http://cloakbrowser-manager:8080/api/status`
+- Check network: `docker compose exec pt-tools wget -Y off -qO- http://cloakbrowser-manager:8080/api/health` (answers `{"status":"ok"}`; `/api/status` needs the token)
+
+**A probe fails with "GeoIP database is unavailable" in the Manager logs**:
+
+- When it starts a profile, the Manager looks up the exit IP's location and downloads a GeoIP database for that. The Manager container needs internet access (through your proxy if you use one), or turn GeoIP off in the profile's settings
 
 **Port conflicts** (8080 or 8081 already in use):
 

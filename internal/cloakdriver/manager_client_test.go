@@ -56,6 +56,46 @@ func TestManagerClient_LaunchProfile_Happy(t *testing.T) {
 	}
 }
 
+// 新版 Manager（v0.1.x）回的 cdp_url 是相对路径，浏览器调试口经 Manager 转发、也要令牌：
+// 补成 Manager 地址上的 ws(s)://，并带上 Bearer 令牌；老版本回的完整地址原样用、不带请求头
+func TestManagerClient_LaunchProfile_CdpEndpoint(t *testing.T) {
+	launch := func(t *testing.T, base, token, cdpURL string) *ProfileLaunchResult {
+		t.Helper()
+		ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"profile_id":"p1","status":"running","cdp_url":"` + cdpURL + `"}`))
+		})
+		defer ts.Close()
+		c := NewManagerClient(ts.URL+base, token, 5*time.Second).(*httpManagerClient)
+		lr, err := c.LaunchProfile(context.Background(), "p1")
+		require.NoError(t, err)
+		return lr
+	}
+
+	lr := launch(t, "", testToken, "/api/profiles/p1/cdp")
+	assert.Regexp(t, `^ws://127\.0\.0\.1:\d+/api/profiles/p1/cdp$`, lr.CdpURL)
+	assert.Equal(t, http.Header{"Authorization": {"Bearer " + testToken}}, lr.CdpHeader)
+
+	lr = launch(t, "/cloak/", testToken, "/api/profiles/p1/cdp")
+	assert.Regexp(t, `^ws://127\.0\.0\.1:\d+/cloak/api/profiles/p1/cdp$`, lr.CdpURL, "Manager 挂在路径前缀下")
+
+	lr = launch(t, "", "", "/api/profiles/p1/cdp")
+	assert.NotNil(t, lr.CdpHeader, "没有令牌也照样原样连转发地址")
+	assert.Empty(t, lr.CdpHeader)
+
+	lr = launch(t, "", testToken, "ws://localhost:9222/devtools/browser/abc")
+	assert.Equal(t, "ws://localhost:9222/devtools/browser/abc", lr.CdpURL)
+	assert.Nil(t, lr.CdpHeader)
+
+	c := NewManagerClient("https://manager.example:8443", testToken, time.Second).(*httpManagerClient)
+	got, header := c.cdpEndpoint("/api/profiles/p1/cdp")
+	assert.Equal(t, "wss://manager.example:8443/api/profiles/p1/cdp", got)
+	assert.Equal(t, "Bearer "+testToken, header.Get("Authorization"))
+	got, header = c.cdpEndpoint("//other.example/x")
+	assert.Equal(t, "//other.example/x", got, "协议相对地址不当成路径")
+	assert.Nil(t, header)
+}
+
 func TestManagerClient_LaunchProfile_AuthFail(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -437,7 +477,7 @@ func TestManagerClientNewRequestErrorPaths(t *testing.T) {
 func TestNewCDPSessionEmptyURLFails(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	sess, err := NewCDPSession(ctx, "")
+	sess, err := NewCDPSession(ctx, "", nil)
 	if err == nil {
 		sess.Close()
 		t.Fatal("expected error for empty cdp url")

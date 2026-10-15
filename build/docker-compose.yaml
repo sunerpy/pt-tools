@@ -1,11 +1,9 @@
 services:
   cloakbrowser-manager:
-    # NOTE: Pin to specific version + SHA digest (R21). Discover the actual SHA via:
-    #   docker pull cloakhq/cloakbrowser-manager:0.0.4
-    #   docker inspect cloakhq/cloakbrowser-manager:0.0.4 | jq '.[0].RepoDigests[0]'
-    # If the digest is not yet known (alpha image, evolving), use just the tag and document this in the README + a TODO comment here.
-    image: cloakhq/cloakbrowser-manager:0.0.4
-    # image: cloakhq/cloakbrowser-manager:0.0.4@sha256:<digest>  # uncomment after digest captured
+    # Tags carry a leading "v" (v0.1.8, not 0.1.8). pt-tools was verified against v0.1.8.
+    # Pin the digest too for production (R21); see the README for how to look it up.
+    image: cloakhq/cloakbrowser-manager:v0.1.8
+    # image: cloakhq/cloakbrowser-manager:v0.1.8@sha256:04b82e42fe74ec34352580da47b096695e6a8d08745f88e3f5fd821be5ebf989
     container_name: pt-tools-cloak
     restart: unless-stopped
     ports:
@@ -15,7 +13,8 @@ services:
     environment:
       - AUTH_TOKEN=${CLOAK_AUTH_TOKEN:?must be set in .env}
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/status || exit 1"]
+      # /api/health needs no token (/api/status answers 401 without one); --no-proxy keeps Docker's client proxy settings out of it
+      test: ["CMD-SHELL", "wget --no-proxy -qO- http://localhost:8080/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
