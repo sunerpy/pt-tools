@@ -27,10 +27,14 @@ type MediaLibrary struct {
 	// Path 是 pt-tools 里看到的库目录（绝对路径）
 	Path string `gorm:"size:1024;not null;default:''" json:"path"`
 	// Template 是命名模板（text/template，不写扩展名）；空串用默认模板
-	Template        string    `gorm:"size:1024;not null;default:''" json:"template"`
-	Mode            string    `gorm:"size:16;not null;default:''" json:"mode"`
-	Scrape          bool      `gorm:"not null;default:false" json:"scrape"`
-	ScrapeOverwrite bool      `gorm:"not null;default:false" json:"scrape_overwrite"`
+	Template        string `gorm:"size:1024;not null;default:''" json:"template"`
+	Mode            string `gorm:"size:16;not null;default:''" json:"mode"`
+	Scrape          bool   `gorm:"not null;default:false" json:"scrape"`
+	ScrapeOverwrite bool   `gorm:"not null;default:false" json:"scrape_overwrite"`
+	// ScrapeItems 是刮削要写的内容（逗号分隔，见 scrape.AllItems）；空串是默认的那几项（Logo 以外都写）
+	ScrapeItems string `gorm:"size:128;not null;default:''" json:"-"`
+	// ScrapeImageLang 是海报与 Logo 优先用的语言：空串用 TMDB 给的那张；zh、en、ja；none 是没有文字的
+	ScrapeImageLang string    `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
 	Enabled         bool      `gorm:"not null;default:false" json:"enabled"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`

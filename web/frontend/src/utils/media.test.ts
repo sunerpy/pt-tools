@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_SCRAPE_ITEMS,
+  IMAGE_LANGS,
   MEDIA_LANGUAGES,
   MEDIA_WORD_KINDS,
+  SCRAPE_ITEMS,
   episodeText,
   mediaKindLabel,
   mediaSourceLabel,
   metaTags,
   posterURL,
+  scrapeItemsFor,
   setTmdbImageBase,
   setTmdbImageBasePending,
   tmdbPageURL,
@@ -26,6 +30,26 @@ describe("媒体识别的显示工具", () => {
     ]);
     expect(MEDIA_WORD_KINDS.map((k) => k.value)).toEqual(["block", "replace", "offset"]);
     expect(wordKindLabel("offset")).toBe("集数偏移");
+  });
+
+  it("刮削内容与图片语言和后端一致", () => {
+    expect(SCRAPE_ITEMS.map((i) => i.value)).toEqual([
+      "nfo",
+      "poster",
+      "fanart",
+      "logo",
+      "season_poster",
+      "thumb",
+    ]);
+    expect(DEFAULT_SCRAPE_ITEMS).toEqual(["nfo", "poster", "fanart", "season_poster", "thumb"]);
+    expect(IMAGE_LANGS.map((l) => l.value)).toEqual(["", "zh", "en", "ja", "none"]);
+    expect(scrapeItemsFor("movie").map((i) => i.value)).toEqual([
+      "nfo",
+      "poster",
+      "fanart",
+      "logo",
+    ]);
+    expect(scrapeItemsFor("tv")).toHaveLength(6);
   });
 
   it("类型、来源", () => {

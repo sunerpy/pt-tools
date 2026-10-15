@@ -186,10 +186,13 @@ func (s *Service) Retire(ctx context.Context, id uint, reason string) ([]string,
 
 var seasonPosterRe = regexp.MustCompile(`^season(\d+|-specials)-poster\.jpg$`)
 
-// isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、tvshow.nfo、season.nfo、季海报）。
+// fileIDOf 读文件编号（测试里换成会出错的）。
+var fileIDOf = transfer.FileID
+
+// isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、Logo、tvshow.nfo、season.nfo、季海报）。
 func isDirArtifact(name string) bool {
 	switch name {
-	case "poster.jpg", "fanart.jpg", "tvshow.nfo", "season.nfo":
+	case "poster.jpg", "fanart.jpg", "clearlogo.png", "tvshow.nfo", "season.nfo":
 		return true
 	}
 	return seasonPosterRe.MatchString(name)
@@ -296,6 +299,16 @@ func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory,
 	}
 	add := map[uint][]extra{}
 	for _, e := range stay {
+		// 文件已经没了，或者换过（开着覆盖时后一批整理重写了它，或者用户换了）：这条归属过期了，不转。
+		// 后一批重写的文件记在写它的那批记录里，转过去会把那边对得上的编号盖掉。
+		// 别的读取错误（权限、网络存储）不能当成过期：返回错误，记录留着下次再删
+		id, err := fileIDOf(e.Target)
+		if errors.Is(err, os.ErrNotExist) || (err == nil && id != e.FileID) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("读取刮削文件 %s 失败: %w", filepath.Base(e.Target), err)
+		}
 		d := filepath.Dir(e.Target)
 		for _, r := range rows {
 			if transfer.Within(d, r.TargetPath) {

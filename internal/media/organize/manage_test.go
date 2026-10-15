@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -111,6 +112,40 @@ func TestLibrariesCRUD(t *testing.T) {
 	require.ErrorIs(t, e.svc.DeleteLibrary(e.ctx, v.ID), ErrNotFound)
 	assert.True(t, isAbs(`\\nas\share`))
 	assert.True(t, isAbs(`D:/media`))
+}
+
+// 刮削内容与图片语言：不带时是默认的那几项；开着刮削时至少选一项这种库会写的
+func TestLibraryScrapeItems(t *testing.T) {
+	e := newEnv(t)
+	v := e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Scrape: true})
+	assert.Equal(t, scrape.DefaultItems, v.ScrapeItems, "没带时是默认的那几项")
+	assert.Empty(t, v.ScrapeImageLang)
+
+	in := LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Scrape: true, ScrapeItems: []string{"logo", "nfo", "logo"}, ScrapeImageLang: "ja"}
+	upd, err := e.svc.SaveLibrary(e.ctx, v.ID, in)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"nfo", "logo"}, upd.ScrapeItems)
+	assert.Equal(t, "ja", upd.ScrapeImageLang)
+	var row models.MediaLibrary
+	require.NoError(t, e.db.First(&row, v.ID).Error)
+	assert.Equal(t, "nfo,logo", row.ScrapeItems)
+
+	// 关着刮削时可以一项都不选（回到默认的那几项）
+	upd, err = e.svc.SaveLibrary(e.ctx, v.ID, LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, ScrapeItems: []string{}})
+	require.NoError(t, err)
+	assert.Equal(t, scrape.DefaultItems, upd.ScrapeItems)
+
+	for _, bad := range []LibraryInput{
+		{Name: "x", Kind: "movie", Path: e.movies, ScrapeItems: []string{"banner"}},
+		{Name: "x", Kind: "movie", Path: e.movies, Scrape: true, ScrapeItems: []string{}},
+		{Name: "x", Kind: "movie", Path: e.movies, Scrape: true, ScrapeItems: []string{"season_poster", "thumb"}},
+		{Name: "x", Kind: "movie", Path: e.movies, ScrapeImageLang: "fr"},
+	} {
+		_, err := e.svc.SaveLibrary(e.ctx, 0, bad)
+		require.ErrorIs(t, err, ErrInvalid, bad)
+	}
+	tv := e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, Scrape: true, ScrapeItems: []string{"thumb"}})
+	assert.Equal(t, []string{"thumb"}, tv.ScrapeItems, "剧集只要集截图也行")
 }
 
 func TestPathMapsCRUD(t *testing.T) {

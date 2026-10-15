@@ -166,6 +166,15 @@ func TestOrganizeAPI_SettingsLibrariesMapsServers(t *testing.T) {
 	var lib organize.LibraryView
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &lib))
 	assert.Equal(t, "hardlink", lib.Mode)
+	assert.Contains(t, w.Body.String(), `"scrape_items":["nfo","poster","fanart","season_poster","thumb"]`, "没选过时是默认的那几项")
+	assert.Contains(t, w.Body.String(), `"scrape_image_lang":""`)
+	w = serveAuthed(e.mux, http.MethodPut, "/api/media/libraries/"+strconv.FormatUint(uint64(lib.ID), 10),
+		`{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"scrape":true,"scrape_items":["logo","poster"],"scrape_image_lang":"none","enabled":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"scrape_items":["poster","logo"]`)
+	assert.Contains(t, w.Body.String(), `"scrape_image_lang":"none"`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPut, "/api/media/libraries/"+strconv.FormatUint(uint64(lib.ID), 10),
+		`{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"scrape":true,"scrape_items":[]}`).Code, "开着刮削时一项都没选")
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"x","kind":"movie","path":"rel"}`).Code)
 	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodPut, "/api/media/libraries/99", `{"name":"x","kind":"movie","path":"/x"}`).Code)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPut, "/api/media/libraries/abc", `{}`).Code)

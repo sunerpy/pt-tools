@@ -104,6 +104,8 @@ const library = {
   mode: "hardlink",
   scrape: true,
   scrape_overwrite: false,
+  scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
+  scrape_image_lang: "",
   enabled: true,
   created_at: "",
   updated_at: "",
@@ -222,6 +224,8 @@ describe("媒体库", () => {
         mode: "hardlink",
         scrape: true,
         scrape_overwrite: false,
+        scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
+        scrape_image_lang: "",
         enabled: true,
       },
     ]);
@@ -235,6 +239,53 @@ describe("媒体库", () => {
     api.deleteLibrary.mockResolvedValue({ ok: true });
     q("ml-lib-del-3")!.click();
     await vi.waitFor(() => expect(api.deleteLibrary).toHaveBeenCalledWith(3));
+  });
+
+  it("媒体库：刮削内容按类型列出，选了才写；开着刮削时至少选一项", async () => {
+    await mountPage();
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-items")).not.toBeNull());
+    expect(q("ml-lib-item-logo")).not.toBeNull();
+    expect(q("ml-lib-item-season_poster"), "电影没有季海报").toBeNull();
+    expect(q("ml-lib-item-thumb")).toBeNull();
+    const box = (id: string) => q(id)!.querySelector("input")!;
+    expect(box("ml-lib-item-poster").checked).toBe(true);
+    expect(box("ml-lib-item-logo").checked, "没选过时不写 Logo").toBe(false);
+
+    // 每点一下等一轮更新：选项组按上一次的值算下一次
+    box("ml-lib-item-poster").click();
+    await flush();
+    box("ml-lib-item-logo").click();
+    await flush();
+    const lang = q("ml-lib-image-lang")!;
+    (lang.querySelector<HTMLElement>(".el-select__wrapper") ?? lang).click();
+    await vi.waitFor(() => {
+      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => (o.textContent ?? "").trim() === "英文",
+      );
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
+      scrape_items: ["nfo", "fanart", "season_poster", "thumb", "logo"],
+      scrape_image_lang: "en",
+    });
+
+    // 电影能选的几项都去掉：不保存，提示关掉刮削
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-items")).not.toBeNull());
+    for (const id of ["nfo", "poster", "fanart", "logo"]) {
+      if (box(`ml-lib-item-${id}`).checked) box(`ml-lib-item-${id}`).click();
+      await flush();
+    }
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() =>
+      expect(ui.warning).toHaveBeenCalledWith("刮削内容至少选一项；不想刮削就关掉刮削"),
+    );
+    expect(api.updateLibrary).toHaveBeenCalledTimes(1);
   });
 
   it("模板写错时预览写明原因", async () => {

@@ -106,13 +106,19 @@ func listFiles(t *testing.T, root string) []string {
 	return out
 }
 
+// defaults 是没选过刮削内容时写的那几项
+var defaults = ParseItems("")
+
+// plain 是不按语言挑、用 TMDB 给的那几张图
+func plain(r tmdb.Result) Art { return ChooseArt(r, nil, ImageLangAuto, "") }
+
 func TestWriterMovie(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	img := &fakeImages{}
-	w := Writer{Images: img}
+	w := Writer{Images: img, Items: defaults}
 	video := filepath.Join(root, "奥本海默 (2023)", "奥本海默 (2023) - 2160p.mkv")
-	rep := w.Movie(ctx, video, true, movie)
+	rep := w.Movie(ctx, video, true, movie, plain(movie))
 	assert.Empty(t, rep.Errors)
 	assert.Len(t, rep.Written, 3)
 	assert.Equal(t, []string{
@@ -125,7 +131,7 @@ func TestWriterMovie(t *testing.T) {
 	// 不覆盖：已有的文件不动，也不再下载图片
 	require.NoError(t, os.WriteFile(filepath.Join(root, "奥本海默 (2023)", "poster.jpg"), []byte("mine"), 0o644))
 	img.calls = nil
-	rep = w.Movie(ctx, video, true, movie)
+	rep = w.Movie(ctx, video, true, movie, plain(movie))
 	assert.Empty(t, rep.Written)
 	assert.Empty(t, img.calls)
 	b, _ := os.ReadFile(filepath.Join(root, "奥本海默 (2023)", "poster.jpg"))
@@ -133,27 +139,27 @@ func TestWriterMovie(t *testing.T) {
 
 	// 覆盖
 	w.Overwrite = true
-	rep = w.Movie(ctx, video, true, movie)
+	rep = w.Movie(ctx, video, true, movie, plain(movie))
 	assert.Len(t, rep.Written, 3)
 	b, _ = os.ReadFile(filepath.Join(root, "奥本海默 (2023)", "poster.jpg"))
 	assert.Equal(t, "IMG/poster.jpg", string(b))
 
 	// 放在库目录根下：图片带上文件名
 	flat := t.TempDir()
-	rep = Writer{Images: &fakeImages{}}.Movie(ctx, filepath.Join(flat, "Movie.mkv"), false, movie)
+	rep = Writer{Images: &fakeImages{}, Items: defaults}.Movie(ctx, filepath.Join(flat, "Movie.mkv"), false, movie, plain(movie))
 	assert.Empty(t, rep.Errors)
 	assert.Equal(t, []string{"Movie-fanart.jpg", "Movie-poster.jpg", "Movie.nfo"}, listFiles(t, flat))
 
 	// 图片下载失败只记错误，NFO 照写
 	bad := t.TempDir()
-	rep = Writer{Images: &fakeImages{fail: map[string]error{"/backdrop.jpg": errors.New("boom")}}}.Movie(ctx, filepath.Join(bad, "M", "M.mkv"), true, movie)
+	rep = Writer{Images: &fakeImages{fail: map[string]error{"/backdrop.jpg": errors.New("boom")}}, Items: defaults}.Movie(ctx, filepath.Join(bad, "M", "M.mkv"), true, movie, plain(movie))
 	require.Len(t, rep.Errors, 1)
 	assert.Contains(t, rep.Errors[0], "fanart.jpg: boom")
 	assert.Equal(t, []string{"M/M.nfo", "M/poster.jpg"}, listFiles(t, bad))
 
 	// 没有图片下载器、条目没有图片时只写 NFO
 	none := t.TempDir()
-	rep = Writer{}.Movie(ctx, filepath.Join(none, "M", "M.mkv"), true, movie)
+	rep = Writer{Items: defaults}.Movie(ctx, filepath.Join(none, "M", "M.mkv"), true, movie, plain(movie))
 	assert.Empty(t, rep.Errors)
 	assert.Equal(t, []string{"M/M.nfo"}, listFiles(t, none))
 
@@ -165,13 +171,13 @@ func TestWriterTV(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	img := &fakeImages{}
-	w := Writer{Images: img}
+	w := Writer{Images: img, Items: defaults}
 	showDir := filepath.Join(root, "最后生还者 (2023)")
 	seasonDir := filepath.Join(showDir, "Season 1")
 	video := filepath.Join(seasonDir, "最后生还者 - S01E02 - 感染.mkv")
 
 	var rep Report
-	rep.Merge(w.Show(ctx, showDir, show))
+	rep.Merge(w.Show(ctx, showDir, show, plain(show)))
 	rep.Merge(w.Season(ctx, showDir, seasonDir, 1, season1))
 	rep.Merge(w.Episode(ctx, video, show, 1, 2, 0, season1))
 	assert.Empty(t, rep.Errors)
@@ -203,7 +209,7 @@ func TestWriterFailsOnBadDir(t *testing.T) {
 	root := t.TempDir()
 	blocker := filepath.Join(root, "file")
 	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o644))
-	rep := Writer{}.Movie(context.Background(), filepath.Join(blocker, "M", "M.mkv"), true, movie)
+	rep := Writer{Items: defaults}.Movie(context.Background(), filepath.Join(blocker, "M", "M.mkv"), true, movie, plain(movie))
 	require.Len(t, rep.Errors, 1)
 	assert.Contains(t, rep.Errors[0], "M.nfo")
 }

@@ -22,6 +22,8 @@ type Images interface {
 type Writer struct {
 	Images    Images
 	Overwrite bool
+	// Items 是要写的内容（ParseItems 读媒体库的设置）；零值什么都不写
+	Items Items
 }
 
 // Report 是一次刮削写了哪些文件、哪些失败了。
@@ -101,30 +103,45 @@ func stem(videoPath string) string {
 	return strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
 }
 
-// Movie 为一个电影文件写 <文件名>.nfo；电影有自己的目录（ownDir）时再写 poster.jpg 与 fanart.jpg，
-// 放在库目录根下时写成 <文件名>-poster.jpg 与 <文件名>-fanart.jpg。
-func (w Writer) Movie(ctx context.Context, videoPath string, ownDir bool, r tmdb.Result) Report {
+// Movie 为一个电影文件写 <文件名>.nfo；电影有自己的目录（ownDir）时再写 poster.jpg、fanart.jpg 与 clearlogo.png，
+// 放在库目录根下时写成 <文件名>-poster.jpg、<文件名>-fanart.jpg 与 <文件名>-clearlogo.png。art 是用哪几张图。
+func (w Writer) Movie(ctx context.Context, videoPath string, ownDir bool, r tmdb.Result, art Art) Report {
 	var rep Report
-	data, err := MovieNFO(r)
-	w.nfo(stem(videoPath)+".nfo", data, err, &rep)
-	poster, fanart := stem(videoPath)+"-poster.jpg", stem(videoPath)+"-fanart.jpg"
+	if w.Items.NFO {
+		data, err := MovieNFO(r)
+		w.nfo(stem(videoPath)+".nfo", data, err, &rep)
+	}
+	poster, fanart, logo := stem(videoPath)+"-poster.jpg", stem(videoPath)+"-fanart.jpg", stem(videoPath)+"-clearlogo.png"
 	if ownDir {
 		dir := filepath.Dir(videoPath)
-		poster, fanart = filepath.Join(dir, "poster.jpg"), filepath.Join(dir, "fanart.jpg")
+		poster, fanart, logo = filepath.Join(dir, "poster.jpg"), filepath.Join(dir, "fanart.jpg"), filepath.Join(dir, "clearlogo.png")
 	}
-	w.image(ctx, poster, r.PosterPath, tmdb.SizePoster, &rep)
-	w.image(ctx, fanart, r.BackdropPath, tmdb.SizeBackdrop, &rep)
+	w.writeArt(ctx, poster, fanart, logo, art, &rep)
 	return rep
 }
 
-// Show 在剧集目录里写 tvshow.nfo、poster.jpg 与 fanart.jpg。
-func (w Writer) Show(ctx context.Context, showDir string, r tmdb.Result) Report {
+// Show 在剧集目录里写 tvshow.nfo、poster.jpg、fanart.jpg 与 clearlogo.png。
+func (w Writer) Show(ctx context.Context, showDir string, r tmdb.Result, art Art) Report {
 	var rep Report
-	data, err := TVShowNFO(r)
-	w.nfo(filepath.Join(showDir, "tvshow.nfo"), data, err, &rep)
-	w.image(ctx, filepath.Join(showDir, "poster.jpg"), r.PosterPath, tmdb.SizePoster, &rep)
-	w.image(ctx, filepath.Join(showDir, "fanart.jpg"), r.BackdropPath, tmdb.SizeBackdrop, &rep)
+	if w.Items.NFO {
+		data, err := TVShowNFO(r)
+		w.nfo(filepath.Join(showDir, "tvshow.nfo"), data, err, &rep)
+	}
+	w.writeArt(ctx, filepath.Join(showDir, "poster.jpg"), filepath.Join(showDir, "fanart.jpg"), filepath.Join(showDir, "clearlogo.png"), art, &rep)
 	return rep
+}
+
+// writeArt 按选了的内容写海报、背景与 Logo。
+func (w Writer) writeArt(ctx context.Context, poster, fanart, logo string, art Art, rep *Report) {
+	if w.Items.Poster {
+		w.image(ctx, poster, art.Poster, tmdb.SizePoster, rep)
+	}
+	if w.Items.Fanart {
+		w.image(ctx, fanart, art.Fanart, tmdb.SizeBackdrop, rep)
+	}
+	if w.Items.Logo {
+		w.image(ctx, logo, art.Logo, tmdb.SizeLogo, rep)
+	}
 }
 
 // SeasonPosterName 是季海报放在剧集目录里的文件名：season01-poster.jpg，第 0 季是 season-specials-poster.jpg。
@@ -138,11 +155,11 @@ func SeasonPosterName(n int) string {
 // Season 在剧集目录里写季海报；季目录（seasonDir）不是剧集目录时在季目录里写 season.nfo。
 func (w Writer) Season(ctx context.Context, showDir, seasonDir string, number int, s *tmdb.Season) Report {
 	var rep Report
-	if seasonDir != "" && filepath.Clean(seasonDir) != filepath.Clean(showDir) {
+	if w.Items.NFO && seasonDir != "" && filepath.Clean(seasonDir) != filepath.Clean(showDir) {
 		data, err := SeasonNFO(number, s)
 		w.nfo(filepath.Join(seasonDir, "season.nfo"), data, err, &rep)
 	}
-	if s != nil {
+	if w.Items.SeasonPoster && s != nil {
 		w.image(ctx, filepath.Join(showDir, SeasonPosterName(number)), s.PosterPath, tmdb.SizePoster, &rep)
 	}
 	return rep
@@ -151,9 +168,11 @@ func (w Writer) Season(ctx context.Context, showDir, seasonDir string, number in
 // Episode 为一个剧集文件写 <文件名>.nfo 与 <文件名>-thumb.jpg（第一集的截图）。
 func (w Writer) Episode(ctx context.Context, videoPath string, show tmdb.Result, season, episode, end int, s *tmdb.Season) Report {
 	var rep Report
-	data, err := EpisodeNFO(show, season, episode, end, s)
-	w.nfo(stem(videoPath)+".nfo", data, err, &rep)
-	if ep := s.Episode(episode); ep != nil {
+	if w.Items.NFO {
+		data, err := EpisodeNFO(show, season, episode, end, s)
+		w.nfo(stem(videoPath)+".nfo", data, err, &rep)
+	}
+	if ep := s.Episode(episode); w.Items.Thumb && ep != nil {
 		w.image(ctx, stem(videoPath)+"-thumb.jpg", ep.StillPath, tmdb.SizeStill, &rep)
 	}
 	return rep

@@ -25,14 +25,14 @@ When the downloader and pt-tools see different paths (for example when they run 
 
 Each library takes one kind of title. Create one for movies and one for TV shows; to keep animation apart, add a library with Animation only (只收动画) checked (titles with TMDB's "Animation" genre go there first, and to the regular library when there is no such library). When several libraries share a type, the first one is used.
 
-| Field          | Description                                                                                                           |
-| -------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Type           | Movie or TV; with Animation only checked it takes animation only                                                      |
-| Library folder | The path as pt-tools sees it (absolute)                                                                               |
-| Mode           | Hard link (default), copy, symbolic link or move, see below                                                           |
-| Template       | Leave empty for the default, see [naming templates](#naming-templates)                                                |
-| Scraping       | Write NFO files, poster, background, season posters and episode thumbnails; turn it off to let the media server do it |
-| Overwrite      | Rewrite NFO files and images on every run; when off, existing files are left alone                                    |
+| Field          | Description                                                                                                                                     |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type           | Movie or TV; with Animation only checked it takes animation only                                                                                |
+| Library folder | The path as pt-tools sees it (absolute)                                                                                                         |
+| Mode           | Hard link (default), copy, symbolic link or move, see below                                                                                     |
+| Template       | Leave empty for the default, see [naming templates](#naming-templates)                                                                          |
+| Scraping       | Write NFO files and images; what to write and which image language to use, see [scraping](#scraping); turn it off to let the media server do it |
+| Overwrite      | Rewrite NFO files and images on every run; when off, existing files are left alone                                                              |
 
 | Mode          | Description                                                                                                                              |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -112,10 +112,22 @@ Each file is organised once: repeated completion events or several triggers at t
 
 ## Scraping
 
-| Title | Files written                                                                                                                                                                                                                         |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Movie | `<file name>.nfo`; with its own folder, `poster.jpg` and `fanart.jpg`; directly in the library root, `<file name>-poster.jpg` and `<file name>-fanart.jpg`                                                                            |
-| TV    | In the show folder: `tvshow.nfo`, `poster.jpg`, `fanart.jpg` and `season01-poster.jpg` (`season-specials-poster.jpg` for season 0); `season.nfo` in the season folder; `<file name>.nfo` and `<file name>-thumb.jpg` for each episode |
+With scraping on, Scraping content (刮削内容) lets you pick NFO, poster, background, logo, season posters and episode thumbnails one by one (the last two only exist for TV). A library you haven't changed writes everything except the logo.
+
+| Title | Files written                                                                                                                                                                                                                                          |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Movie | `<file name>.nfo`; with its own folder, `poster.jpg`, `fanart.jpg` and `clearlogo.png`; directly in the library root, `<file name>-poster.jpg`, `<file name>-fanart.jpg` and `<file name>-clearlogo.png`                                               |
+| TV    | In the show folder: `tvshow.nfo`, `poster.jpg`, `fanart.jpg`, `clearlogo.png` and `season01-poster.jpg` (`season-specials-poster.jpg` for season 0); `season.nfo` in the season folder; `<file name>.nfo` and `<file name>-thumb.jpg` for each episode |
+
+The logo is the title artwork on a transparent background; Emby, Jellyfin and Kodi all read `clearlogo.png`. Image language (图片语言) decides which image is used:
+
+| Image language                 | Poster                                              | Background           | Logo                                                       |
+| ------------------------------ | --------------------------------------------------- | -------------------- | ---------------------------------------------------------- |
+| Recognition language (default) | The one TMDB returns for the recognition language   | The one TMDB returns | Recognition language, then English, then without text      |
+| Chinese, English or Japanese   | That language first, otherwise the one TMDB returns | Without text first   | That language, then the recognition language, then English |
+| Without text                   | Without text first                                  | Without text first   | Without text, then the recognition language, then English  |
+
+For the logo or a chosen image language, pt-tools fetches the title's image list once more (cached for a week). If that fails, the poster and background fall back to the ones TMDB returns, no logo is written, and the organize result says why. Season posters and episode thumbnails always use the ones TMDB returns.
 
 The NFO files use the Kodi format, read by the NFO support of Emby, Jellyfin and Plex, and include the TMDB and IMDb IDs. Images are downloaded from TMDB through the proxy set under media recognition. When the template puts episodes directly in the library root, the show and season files are not written.
 
@@ -148,7 +160,7 @@ There is one record per video file, showing where it went, how, which trigger or
 | Skipped (跳过)   | Another file is at the target, or the torrent is a disc or has no video to organise                                                                                                                                                                                      |
 | Removed (已删除) | The files in the library have been deleted                                                                                                                                                                                                                               |
 
-Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): videos and subtitles are deleted only when still confirmed to be the files pt-tools created (hard links and copies by file ID: device, inode, size and modification time; symbolic links by their target); NFO files and images only when they are the copies pt-tools wrote, and the folder's posters, backgrounds and NFO files only once no video is left; empty folders go last. Replaced or edited files stay and are listed after the deletion. When a record turns skipped or failed (for example because the video in the library was replaced with another file), the subtitles and scraped files organised earlier stay recorded on it and are cleaned up by the same rules when it is deleted. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
+Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): videos and subtitles are deleted only when still confirmed to be the files pt-tools created (hard links and copies by file ID: device, inode, size and modification time; symbolic links by their target); NFO files and images only when they are the copies pt-tools wrote, and the folder's posters, backgrounds, logos and NFO files only once no video is left; empty folders go last. Replaced or edited files stay and are listed after the deletion. When a record turns skipped or failed (for example because the video in the library was replaced with another file), the subtitles and scraped files organised earlier stay recorded on it and are cleaned up by the same rules when it is deleted. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
 
 ## Interaction with auto cleanup
 

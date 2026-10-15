@@ -40,7 +40,9 @@ type fakeTMDB struct {
 	*httptest.Server
 	mu   sync.Mutex
 	down bool
-	hits map[string]int
+	// imagesDown 为真时图片列表（/images）回 503
+	imagesDown bool
+	hits       map[string]int
 }
 
 func (f *fakeTMDB) setDown(v bool) {
@@ -54,7 +56,7 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.hits[r.URL.Path]++
-		down := f.down
+		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images"))
 		f.mu.Unlock()
 		if strings.HasPrefix(r.URL.Path, "/t/p/") {
 			w.Header().Set("Content-Type", "image/jpeg")
@@ -77,6 +79,13 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 		case r.URL.Path == "/3/movie/872585":
 			_, _ = w.Write([]byte(`{"id":872585,"title":"奥本海默","original_title":"Oppenheimer","release_date":"2023-07-19","overview":"原子弹之父的故事。",
 				"imdb_id":"tt15398776","poster_path":"/opp.jpg","backdrop_path":"/opp-bd.jpg","vote_average":8.1,"runtime":181,"genres":[{"id":18,"name":"剧情"},{"id":36,"name":"历史"}]}`))
+		case r.URL.Path == "/3/movie/872585/images":
+			_, _ = w.Write([]byte(`{"posters":[{"file_path":"/opp-zh.jpg","iso_639_1":"zh","vote_average":6},{"file_path":"/opp-en.jpg","iso_639_1":"en","vote_average":7},
+				{"file_path":"/opp-none.jpg","iso_639_1":null,"vote_average":5}],"backdrops":[{"file_path":"/opp-bd-none.jpg","iso_639_1":null,"vote_average":5}],
+				"logos":[{"file_path":"/opp-logo.svg","iso_639_1":"en","vote_average":9},{"file_path":"/opp-logo-en.png","iso_639_1":"en","vote_average":5},
+				{"file_path":"/opp-logo-zh.png","iso_639_1":"zh","vote_average":4}]}`))
+		case r.URL.Path == "/3/tv/100088/images":
+			_, _ = w.Write([]byte(`{"posters":[],"backdrops":[],"logos":[{"file_path":"/tlou-logo.png","iso_639_1":"en","vote_average":5}]}`))
 		case r.URL.Path == "/3/search/tv" && (strings.Contains(q, "Last of Us") || strings.Contains(q, "最后生还者")):
 			_, _ = w.Write([]byte(`{"results":[{"id":100088,"name":"最后生还者","original_name":"The Last of Us","first_air_date":"2023-01-15","popularity":500,"genre_ids":[18]}]}`))
 		case r.URL.Path == "/3/tv/100088":

@@ -2514,6 +2514,11 @@ export interface OrganizeSettings {
 
 export type OrganizeSettingsInput = Omit<OrganizeSettings, "auto_since">;
 
+/** 刮削内容（和后端 scrape.AllItems 一致） */
+export type MediaScrapeItem = "nfo" | "poster" | "fanart" | "logo" | "season_poster" | "thumb";
+/** 海报与 Logo 优先用的语言：空串用 TMDB 给的那张；none 是没有文字的 */
+export type MediaImageLang = "" | "zh" | "en" | "ja" | "none";
+
 export interface MediaLibraryInput {
   name: string;
   kind: MediaKind;
@@ -2525,6 +2530,9 @@ export interface MediaLibraryInput {
   mode: MediaMode;
   scrape: boolean;
   scrape_overwrite: boolean;
+  /** 刮削要写的内容；没选过的库是默认的那几项（Logo 以外） */
+  scrape_items: MediaScrapeItem[];
+  scrape_image_lang: MediaImageLang;
   enabled: boolean;
 }
 
