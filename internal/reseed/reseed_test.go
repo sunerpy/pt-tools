@@ -646,3 +646,25 @@ func TestRunRetriesWhenSourceFilesUnavailable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Created, "过了 7 天再试，这次读到了")
 }
+
+// 下一轮的时间：开着、有 token 时才有；没跑过或已经到点是现在，否则是上一轮加间隔
+func TestSettingsNextRun(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	got, err := e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, got.NextRunAt, "没开启")
+	e.enable(nil)
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, got.NextRunAt)
+	assert.WithinDuration(t, e.now, *got.NextRunAt, 0, "没跑过：下一次检查时跑")
+	require.NoError(t, e.svc.RecordRun(ctx, e.now, "ok"))
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.WithinDuration(t, e.now.Add(time.Duration(got.IntervalHours)*time.Hour), *got.NextRunAt, 0)
+	e.now = e.now.Add(100 * time.Hour)
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.WithinDuration(t, e.now, *got.NextRunAt, 0, "已经到点：下一次检查时跑")
+}

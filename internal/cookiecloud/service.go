@@ -94,6 +94,8 @@ type Settings struct {
 	IntervalHours int        `json:"interval_hours"`
 	LastSyncAt    *time.Time `json:"last_sync_at,omitempty"`
 	LastResult    string     `json:"last_result"`
+	// NextSyncAt 是下一次定时同步大约什么时候（打开定时同步、填全了设置才有；到点以后在下一次检查时同步）
+	NextSyncAt *time.Time `json:"next_sync_at,omitempty"`
 }
 
 // SettingsUpdate 是保存设置的请求（密码以外整份保存）。Password 为 nil 时保留原来的，空串时清除。
@@ -129,6 +131,15 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	}
 	if out.IntervalHours == 0 {
 		out.IntervalHours = models.CookieCloudDefaultIntervalHours
+	}
+	if r.AutoSync && r.ServerURL != "" && r.UUID != "" && r.PasswordEncrypted != "" {
+		next := s.cfg.Now()
+		if r.LastSyncAt != nil {
+			if t := r.LastSyncAt.Add(time.Duration(out.IntervalHours) * time.Hour); t.After(next) {
+				next = t
+			}
+		}
+		out.NextSyncAt = &next
 	}
 	return out, nil
 }

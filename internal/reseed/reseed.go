@@ -118,6 +118,8 @@ type Settings struct {
 	MaxPerSitePerDay int        `json:"max_per_site_per_day"`
 	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
 	LastResult       string     `json:"last_result"`
+	// NextRunAt 是下一轮大约什么时候（开着、有 token 时才有；到点以后在下一次检查时跑）
+	NextRunAt *time.Time `json:"next_run_at,omitempty"`
 }
 
 // SettingsUpdate 是保存设置的请求。Token 为 nil 时保留原来的；为空串时清除。
@@ -148,7 +150,23 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	return view(r), nil
+	out := view(r)
+	out.NextRunAt = nextRun(r.Enabled && r.TokenEncrypted != "", r.LastRunAt, out.IntervalHours, s.cfg.Now())
+	return out, nil
+}
+
+// nextRun 是下一轮大约什么时候：上一轮加间隔，没跑过或已经到点时是现在（下一次检查时跑）；不会自动跑时为空。
+func nextRun(on bool, last *time.Time, intervalHours int, now time.Time) *time.Time {
+	if !on {
+		return nil
+	}
+	next := now
+	if last != nil {
+		if t := last.Add(time.Duration(intervalHours) * time.Hour); t.After(now) {
+			next = t
+		}
+	}
+	return &next
 }
 
 func view(r models.ReseedSetting) Settings {

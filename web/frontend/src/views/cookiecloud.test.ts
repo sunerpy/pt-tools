@@ -222,4 +222,24 @@ describe("CookieCloud 导入", () => {
     await vi.waitFor(() => expect(testid("cc-stale").textContent).toContain("解密失败"));
     expect(document.body.textContent).toContain("hdsky.me");
   });
+
+  it("写明上次同步与下次同步；没打开定时同步时写明要手动导入", async () => {
+    await mountPage(
+      settings({
+        server_url: "https://cc.example",
+        uuid: "u1",
+        has_password: true,
+        auto_sync: true,
+        last_sync_at: "2026-10-15T10:00:00Z",
+        last_result: "更新了 2 个站点的 Cookie",
+        next_sync_at: "2026-10-16T10:00:00Z",
+      }),
+    );
+    const st = testid("cc-status").textContent ?? "";
+    expect(st).toContain("更新了 2 个站点的 Cookie");
+    expect(st).toContain("大约");
+    view?.unmount();
+    await mountPage(configured);
+    expect(testid("cc-status").textContent).toContain("定时同步没打开");
+  });
 });

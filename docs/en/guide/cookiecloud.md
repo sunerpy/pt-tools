@@ -22,7 +22,7 @@ Both encryption modes of the extension are supported: the original default, and 
 | Scheduled sync (定时同步)   | Syncs at the interval when on, updating only enabled sites whose cookie changed; it never enables a site             |
 | Interval (同步间隔（小时）) | 1 to 168 hours, 24 by default                                                                                        |
 
-The result of each sync shows as Last sync (上次同步) below the settings.
+The result of each sync shows as Last sync (上次同步) below the settings, and Next sync (下次同步) shows roughly when the next scheduled sync is. After setting it up, click Read CookieCloud (读取 CookieCloud) to try it: when sites are listed, the address, user KEY and password are all right.
 
 ## Importing
 
