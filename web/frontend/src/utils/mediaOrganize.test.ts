@@ -53,7 +53,7 @@ describe("整理入库的显示工具", () => {
     expect(
       OVERWRITE_MODES.map((m) => m.value),
       "和后端的覆盖策略一致",
-    ).toEqual(["", "larger", "always"]);
+    ).toEqual(["", "larger"]);
     expect(itemStatus("pending").label).toBe("待整理");
     expect(triggerLabel("auto")).toBe("下载完成后自动");
     expect(triggerLabel("scan")).toBe("定期扫描");

@@ -2535,12 +2535,12 @@ export interface MediaLibraryInput {
   scrape_image_lang: MediaImageLang;
   /** 按二级分类放进库目录下的分类目录 */
   classify_dir: boolean;
-  /** 目标位置已经有 pt-tools 之前放进库的旧版本时：空串不替换，larger 新文件更大时替换，always 总是替换 */
+  /** 目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时：空串不替换，larger 新文件更大时替换 */
   overwrite_mode: MediaOverwriteMode;
   enabled: boolean;
 }
 
-export type MediaOverwriteMode = "" | "larger" | "always";
+export type MediaOverwriteMode = "" | "larger";
 
 /** 一条二级分类：条件之间是「且」，同一个条件里的几个值是「或」，空的条件不限 */
 export interface ClassifyRule {

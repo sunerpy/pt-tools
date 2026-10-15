@@ -240,6 +240,7 @@ func NewDBWithVersionAndHooks(
 		&MediaServer{},
 		&MediaOrganizeSetting{},
 		&MediaTransferHistory{},
+		&MediaReplaceJournal{},
 		// 订阅（M11）
 		&MediaQualityProfile{},
 		&MediaSubscription{},

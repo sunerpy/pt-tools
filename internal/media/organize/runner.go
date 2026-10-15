@@ -118,7 +118,11 @@ func (s *Service) Start() {
 			}
 		}
 	})
-	s.wg.Go(func() { s.worker(ctx) })
+	s.wg.Go(func() {
+		// 上次没做完的替换（覆盖策略）先恢复，再开始整理
+		s.recoverReplacements(ctx)
+		s.worker(ctx)
+	})
 	s.wg.Go(func() { s.loop(ctx) })
 }
 

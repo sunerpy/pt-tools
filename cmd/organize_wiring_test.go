@@ -30,7 +30,7 @@ func organizeTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&models.SettingsGlobal{}, &models.DownloaderSetting{}, &models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{},
-		&models.MediaCache{}, &models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{},
+		&models.MediaCache{}, &models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{},
 		&models.MediaTransferHistory{}, &models.MonitorNotificationLog{}, &models.NotificationConf{},
 	))
 	global.GlobalDB = &models.TorrentDB{DB: db}

@@ -182,6 +182,29 @@ func existing(src, dst, mode string, srcInfo os.FileInfo, srcErr error, dstInfo 
 	return 0, ErrTargetExists
 }
 
+// Place 把同一个目录里的 src 放到 dst，不覆盖已有的文件：先用硬链接（成功后删掉 src）；不支持硬链接时用不覆盖的改名
+// （Linux 的 RENAME_NOREPLACE）；都不支持时返回错误，不冒险覆盖。dst 已存在时返回 ErrTargetExists。
+func Place(src, dst string) error {
+	err := linkTmp(src, dst)
+	if err == nil {
+		_ = os.Remove(src)
+		return nil
+	}
+	if errors.Is(err, os.ErrExist) {
+		return ErrTargetExists
+	}
+	switch err := noReplace(src, dst); {
+	case err == nil:
+		return nil
+	case errors.Is(err, os.ErrExist):
+		return ErrTargetExists
+	case errors.Is(err, errNoReplaceUnsupported):
+		return errors.New("这个文件系统不支持不覆盖地放文件（硬链接与不覆盖的改名都不行）")
+	default:
+		return fmt.Errorf("放到目标位置失败: %w", err)
+	}
+}
+
 // copyFile 先复制到同目录的临时文件，写完、落盘后再放到目标位置，中途失败不会在库里留下半个文件。
 // 放到目标位置时都不覆盖已有的文件：先用硬链接；文件系统不支持硬链接时用不覆盖的改名（Linux 的
 // RENAME_NOREPLACE）；也不支持时以独占方式新建目标再复制一遍。修改时间跟源文件一样（媒体服务器按它排「最近添加」）。

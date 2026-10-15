@@ -51,7 +51,7 @@ type LibraryInput struct {
 	ScrapeImageLang string `json:"scrape_image_lang"`
 	// ClassifyDir 为真时按二级分类放进库目录下的分类目录
 	ClassifyDir bool `json:"classify_dir"`
-	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的旧版本时怎么办（OverwriteNever、OverwriteLarger、OverwriteAlways）
+	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办（OverwriteNever、OverwriteLarger）
 	OverwriteMode string `json:"overwrite_mode"`
 	Enabled       bool   `json:"enabled"`
 }
@@ -137,8 +137,8 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 图片语言要选 zh、en、ja、none 或留空", ErrInvalid)
 	}
 	overwrite := strings.TrimSpace(in.OverwriteMode)
-	if overwrite != OverwriteNever && overwrite != OverwriteLarger && overwrite != OverwriteAlways {
-		return models.MediaLibrary{}, fmt.Errorf("%w: 覆盖策略要选 larger、always 或留空（不替换）", ErrInvalid)
+	if overwrite != OverwriteNever && overwrite != OverwriteLarger {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 同名文件要选 larger（新文件更大时替换）或留空（不替换）", ErrInvalid)
 	}
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,

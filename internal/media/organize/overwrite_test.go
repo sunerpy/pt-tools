@@ -97,13 +97,19 @@ func TestOverwriteKeepsOldVersion(t *testing.T) {
 	}{
 		{name: "默认不替换", mode: OverwriteNever, oldMB: 2, newMB: 3, want: "没有替换：要换成新的"},
 		{name: "新文件不比旧的大", mode: OverwriteLarger, oldMB: 3, newMB: 2, want: "不比它大，不替换"},
-		{name: "用户换了库里的文件", mode: OverwriteAlways, oldMB: 2, newMB: 3, prepare: func(e *env, target string) {
+		{name: "用户换了库里的文件", mode: OverwriteLarger, oldMB: 2, newMB: 3, prepare: func(e *env, target string) {
 			require.NoError(e.t, os.Remove(target))
 			require.NoError(e.t, os.WriteFile(target, []byte("mine"), 0o644))
 		}, want: "不会覆盖"},
-		{name: "旧版本是移动整理的", mode: OverwriteAlways, oldMB: 2, newMB: 3, prepare: func(e *env, _ string) {
+		{name: "旧版本是移动整理的", mode: OverwriteLarger, oldMB: 2, newMB: 3, prepare: func(e *env, _ string) {
 			require.NoError(e.t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", ep1Old).Update("mode", models.MediaModeMove).Error)
 		}, want: "库里唯一的一份"},
+		{name: "别的条目（模板是固定的文件名）", mode: OverwriteLarger, oldMB: 2, newMB: 3, prepare: func(e *env, _ string) {
+			require.NoError(e.t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", ep1Old).Update("tmdb_id", 1).Error)
+		}, want: "不会覆盖"},
+		{name: "别的集", mode: OverwriteLarger, oldMB: 2, newMB: 3, prepare: func(e *env, _ string) {
+			require.NoError(e.t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", ep1Old).Update("episode", 9).Error)
+		}, want: "不会覆盖"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -130,11 +136,11 @@ func TestOverwriteKeepsOldVersion(t *testing.T) {
 	}
 }
 
-// 总是替换：换下来的旧种子自动整理（扫描）时不再换回去，记录保持已删除；手动整理才换回去
-func TestOverwriteNoPingPong(t *testing.T) {
+// 只按大小换：换下来的小的旧种子再整理（扫描或手动）时不会把大的换回去，记成跳过
+func TestOverwriteNoSwapBack(t *testing.T) {
 	e := newEnv(t)
 	e.settings(SettingsInput{MinVideoMB: 1})
-	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteAlways})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
 	e.episodeTorrents(2, 3)
 	for _, h := range []string{ep1Old, ep1New} {
 		res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: h})
@@ -142,29 +148,112 @@ func TestOverwriteNoPingPong(t *testing.T) {
 		require.Equal(t, 1, res.Created)
 	}
 	target := e.rowOf(ep1New).TargetPath
-	require.Equal(t, models.MediaTransferRemoved, e.rowOf(ep1Old).Status)
-
-	for range 2 {
-		e.svc.mu.Lock()
-		res, err := e.svc.organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old}, models.MediaTriggerScan)
-		e.svc.mu.Unlock()
-		require.NoError(t, err)
-		assert.Equal(t, 0, res.Created)
-		assert.Equal(t, models.MediaTransferRemoved, e.rowOf(ep1Old).Status, "记录不改，下次扫描也不换")
-		assert.True(t, sameFile(t, e.rowOf(ep1New).SourcePath, target))
-	}
-
-	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	e.svc.mu.Lock()
+	res, err := e.svc.organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old}, models.MediaTriggerScan)
+	e.svc.mu.Unlock()
 	require.NoError(t, err)
-	assert.Equal(t, 1, res.Created, "手动整理换回去")
-	assert.True(t, sameFile(t, e.rowOf(ep1Old).SourcePath, target))
-	assert.Equal(t, models.MediaTransferRemoved, e.rowOf(ep1New).Status)
+	assert.Equal(t, 0, res.Created)
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Created)
+	assert.True(t, sameFile(t, e.rowOf(ep1New).SourcePath, target), "库里还是大的那个")
+	assert.Equal(t, models.MediaTransferDone, e.rowOf(ep1New).Status)
 }
 
 func TestOverwriteModeValidation(t *testing.T) {
 	e := newEnv(t)
 	_, err := e.svc.SaveLibrary(e.ctx, 0, LibraryInput{Name: "x", Kind: "tv", Path: e.tv, OverwriteMode: "bigger"})
 	require.ErrorIs(t, err, ErrInvalid)
-	v := e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: " always "})
-	assert.Equal(t, OverwriteAlways, v.OverwriteMode)
+	_, err = e.svc.SaveLibrary(e.ctx, 0, LibraryInput{Name: "x", Kind: "tv", Path: e.tv, OverwriteMode: "always"})
+	require.ErrorIs(t, err, ErrInvalid, "只按大小换")
+	v := e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: " larger "})
+	assert.Equal(t, OverwriteLarger, v.OverwriteMode)
+}
+
+// 计划以后、替换以前目标位置被换成了别的文件：挪开以后认出不是旧记录放的，放回原处、不替换，不留临时文件与日志
+func TestReplaceForeignSwapDuringRun(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: ep1New})
+	require.NoError(t, err)
+	it := &p.Items[0]
+	require.Equal(t, ItemReplace, it.Status)
+	require.NoError(t, os.Remove(it.Target))
+	require.NoError(t, os.WriteFile(it.Target, []byte("someone else's"), 0o644))
+
+	res := &Result{Plan: p}
+	e.svc.mu.Lock()
+	ok := e.svc.replace(e.ctx, p, it, models.MediaTriggerManual, res)
+	e.svc.mu.Unlock()
+	assert.False(t, ok)
+	assert.Contains(t, it.Message, "换过了")
+	assert.Equal(t, "someone else's", readFile(t, it.Target), "别人的文件放回原处")
+	left, _ := filepath.Glob(filepath.Join(filepath.Dir(it.Target), "*.pt-tools-*"))
+	assert.Empty(t, left)
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.Zero(t, n)
+	assert.Equal(t, models.MediaTransferDone, e.rowOf(ep1Old).Status, "旧记录不动")
+}
+
+// pt-tools 中途退出：没提交的替换在下次启动时撤回（旧文件放回原处、新文件删掉），已提交的收尾（删掉挪开的旧文件）
+func TestRecoverReplacements(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, OverwriteMode: OverwriteLarger})
+	e.episodeTorrents(2, 3)
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: ep1Old})
+	require.NoError(t, err)
+	old := e.rowOf(ep1Old)
+	newSrc := filepath.Join(e.dlDir, "The.Last.of.Us.S01E01.2160p.BluRay", "The.Last.of.Us.S01E01.2160p.BluRay.mkv")
+
+	// 没提交：新文件已经放到目标位置、旧文件在备份名上
+	j := models.MediaReplaceJournal{
+		OldID: old.ID, Source: newSrc, Mode: models.MediaModeHardlink, Target: old.TargetPath,
+		Temp: sideName(old.TargetPath, "new"), Backup: sideName(old.TargetPath, "old"),
+	}
+	require.NoError(t, os.Rename(old.TargetPath, j.Backup))
+	require.NoError(t, os.Link(newSrc, old.TargetPath))
+	j.TempID, _ = fileIDOf(old.TargetPath)
+	require.NoError(t, e.db.Create(&j).Error)
+	e.svc.recoverReplacements(e.ctx)
+	assert.True(t, sameFile(t, old.SourcePath, old.TargetPath), "旧文件放回原处")
+	assert.False(t, exists(j.Backup))
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.Zero(t, n)
+
+	// 没提交、只放好了临时文件：删掉临时文件
+	j2 := models.MediaReplaceJournal{
+		OldID: old.ID, Source: newSrc, Mode: models.MediaModeHardlink, Target: old.TargetPath,
+		Temp: sideName(old.TargetPath, "new"), Backup: sideName(old.TargetPath, "old"),
+	}
+	require.NoError(t, os.Link(newSrc, j2.Temp))
+	j2.TempID, _ = fileIDOf(j2.Temp)
+	require.NoError(t, e.db.Create(&j2).Error)
+	e.svc.recoverReplacements(e.ctx)
+	assert.False(t, exists(j2.Temp))
+	assert.True(t, sameFile(t, old.SourcePath, old.TargetPath))
+
+	// 已提交：新文件在目标位置，删掉挪开的旧文件与旧字幕
+	sub := strings.TrimSuffix(old.TargetPath, ".mkv") + ".zh-CN.srt"
+	require.True(t, exists(sub))
+	j3 := models.MediaReplaceJournal{
+		OldID: old.ID, Source: newSrc, Mode: models.MediaModeHardlink, Target: old.TargetPath,
+		Temp: sideName(old.TargetPath, "new"), Backup: sideName(old.TargetPath, "old"), Committed: true,
+	}
+	require.NoError(t, os.Rename(old.TargetPath, j3.Backup))
+	require.NoError(t, os.Link(newSrc, old.TargetPath))
+	require.NoError(t, e.db.Create(&j3).Error)
+	e.svc.recoverReplacements(e.ctx)
+	assert.False(t, exists(j3.Backup), "挪开的旧文件删掉")
+	assert.False(t, exists(sub), "旧字幕删掉")
+	assert.True(t, sameFile(t, newSrc, old.TargetPath))
+	assert.True(t, exists(old.SourcePath), "下载目录里的不动")
+	require.NoError(t, e.db.Model(&models.MediaReplaceJournal{}).Count(&n).Error)
+	assert.Zero(t, n)
 }

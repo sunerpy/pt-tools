@@ -37,7 +37,7 @@ type MediaLibrary struct {
 	ScrapeImageLang string `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
 	// ClassifyDir 为真时按二级分类（MediaOrganizeSetting.ClassifyRules）放进库目录下的分类目录
 	ClassifyDir bool `gorm:"not null;default:false" json:"classify_dir"`
-	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的旧版本时怎么办：空串不替换，larger 新文件更大时替换，always 总是替换
+	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办：空串不替换，larger 新文件更大时替换
 	OverwriteMode string    `gorm:"size:16;not null;default:''" json:"overwrite_mode"`
 	Enabled       bool      `gorm:"not null;default:false" json:"enabled"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -168,3 +168,24 @@ type MediaTransferHistory struct {
 }
 
 func (MediaTransferHistory) TableName() string { return "media_transfer_histories" }
+
+// MediaReplaceJournal 是一次进行中的「同名文件替换」（覆盖策略）：新文件先放在 Temp，旧文件挪到 Backup，
+// 新文件放到 Target 以后与两条整理记录在同一个事务里写好并标成 Committed，收尾删掉 Backup 后删掉这一行。
+// 中途 pt-tools 退出了，下次启动时按它恢复：没写好记录的撤回（旧文件放回原处），写好了的收尾。
+type MediaReplaceJournal struct {
+	ID uint `gorm:"primaryKey"`
+	// OldID 是被换掉的整理记录
+	OldID uint `gorm:"not null;default:0"`
+	// Source 与 Mode 是新文件的源文件与整理方式
+	Source string `gorm:"size:2048;not null;default:''"`
+	Mode   string `gorm:"size:16;not null;default:''"`
+	Target string `gorm:"size:2048;not null;default:''"`
+	Temp   string `gorm:"size:2048;not null;default:''"`
+	// TempID 是放好的临时文件的文件编号（新文件放到 Target 以后还是它）
+	TempID    string    `gorm:"size:64;not null;default:''"`
+	Backup    string    `gorm:"size:2048;not null;default:''"`
+	Committed bool      `gorm:"not null;default:false"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (MediaReplaceJournal) TableName() string { return "media_replace_journals" }

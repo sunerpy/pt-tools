@@ -372,7 +372,6 @@ const ITEM_STATUS: Record<OrganizeItemStatus, { label: string; tone: Tone }> = {
 export const OVERWRITE_MODES: readonly { value: MediaOverwriteMode; label: string }[] = [
   { value: "", label: "不替换" },
   { value: "larger", label: "新文件更大时替换" },
-  { value: "always", label: "总是替换" },
 ];
 
 export function itemStatus(status: OrganizeItemStatus): { label: string; tone: Tone } {
