@@ -2,6 +2,9 @@
 import {
   type CleanCategoryResult,
   type CleanResult,
+  cleanupApi,
+  type CleanupResult,
+  type CleanupStatus,
   globalApi,
   type GlobalSettings,
   maintenanceApi,
@@ -13,6 +16,7 @@ import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { formatShortDateTime } from "@/utils/format";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 
@@ -203,8 +207,91 @@ const presetFields = computed(() => [
 watch(presetFields, () => detectPreset());
 
 onMounted(async () => {
-  await loadSettings();
+  await Promise.all([loadSettings(), loadCleanupStatus()]);
 });
+
+// ---- 上次运行与预览 ----
+const cleanupStatus = ref<CleanupStatus | null>(null);
+
+async function loadCleanupStatus() {
+  try {
+    cleanupStatus.value = await cleanupApi.status();
+  } catch {
+    // 只是少一行「上次运行」，不挡设置
+    cleanupStatus.value = null;
+  }
+}
+
+/** 上次运行的一句话：每台下载器删了几个、出了什么错 */
+const lastRunText = computed(() => {
+  const run = cleanupStatus.value?.last_run;
+  if (!run) return "";
+  const parts = run.results.map((r) => {
+    // 两批删除（连数据、保留数据）可能一批成了、一批失败：删了的个数与失败的原因都要写
+    if (r.deleted > 0 && r.error)
+      return `${r.downloader} 删了 ${r.deleted} 个，另有删除失败：${r.error}`;
+    if (r.error) return `${r.downloader}：${r.error}`;
+    if (r.deleted > 0) return `${r.downloader} 删了 ${r.deleted} 个`;
+    return `${r.downloader} 没有要删的`;
+  });
+  return `上次 ${formatShortDateTime(run.at)}：${parts.join("；") || "没有下载器"}`;
+});
+
+const nextRunText = computed(() => {
+  const at = cleanupStatus.value?.next_run_at;
+  return at ? `下次大约 ${formatShortDateTime(at)}` : "";
+});
+
+const cpDialog = ref(false);
+const cpLoading = ref(false);
+const cpResults = ref<CleanupResult[]>([]);
+
+const cpTotal = computed(() =>
+  cpResults.value.reduce(
+    (acc, r) => ({
+      n: acc.n + r.items.length,
+      size: acc.size + r.items.reduce((a, i) => a + i.size, 0),
+    }),
+    { n: 0, size: 0 },
+  ),
+);
+
+function cpSize(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(0)} MB`;
+}
+
+/** 按页面上的规则（还没保存的也算）看现在会删哪些，只算、不删 */
+async function runCleanupPreview() {
+  const f = form.value;
+  cpLoading.value = true;
+  try {
+    const res = await cleanupApi.preview({
+      cleanup_scope: f.cleanup_scope,
+      cleanup_scope_tags: f.cleanup_scope_tags.join(","),
+      cleanup_remove_data: f.cleanup_remove_data,
+      cleanup_condition_mode: f.cleanup_condition_mode,
+      cleanup_max_seed_time_h: f.cleanup_max_seed_time_h,
+      cleanup_min_ratio: f.cleanup_min_ratio,
+      cleanup_max_inactive_h: f.cleanup_max_inactive_h,
+      cleanup_slow_seed_time_h: f.cleanup_slow_seed_time_h,
+      cleanup_slow_max_ratio: f.cleanup_slow_max_ratio,
+      cleanup_del_free_expired: f.cleanup_del_free_expired,
+      cleanup_disk_protect: f.cleanup_disk_protect,
+      cleanup_min_disk_space_gb: f.cleanup_min_disk_space_gb,
+      cleanup_protect_dl: f.cleanup_protect_dl,
+      cleanup_protect_hr: f.cleanup_protect_hr,
+      cleanup_min_retain_h: f.cleanup_min_retain_h,
+      cleanup_protect_tags: f.cleanup_protect_tags.join(","),
+    });
+    cpResults.value = res.results;
+    cpDialog.value = true;
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "预览失败");
+  } finally {
+    cpLoading.value = false;
+  }
+}
 
 async function loadSettings() {
   const pending = runSettings(() => globalApi.get());
@@ -703,13 +790,76 @@ async function executeClean() {
         </template>
       </el-form>
 
+      <div
+        v-if="lastRunText || nextRunText"
+        class="pt-foot-note ac-lastrun"
+        data-testid="ac-lastrun">
+        {{ [lastRunText, nextRunText].filter(Boolean).join("，") }}
+      </div>
+
       <template #footer>
-        <span class="pt-foot-note">删除动作不可撤销，改完记得保存</span>
+        <span class="pt-foot-note">删除动作不可撤销：保存以前可以先预览会删哪些</span>
+        <el-button
+          :loading="cpLoading"
+          :disabled="saveLocked"
+          data-testid="ac-preview"
+          @click="runCleanupPreview">
+          <PtIcon name="eye" :size="14" /><span>预览会删哪些</span>
+        </el-button>
         <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
           <PtIcon name="save" :size="14" /><span>保存设置</span>
         </el-button>
       </template>
     </PtPanel>
+
+    <el-dialog
+      v-model="cpDialog"
+      class="pt-dialog"
+      title="按现在的规则会删这些"
+      :width="isMobile ? '94%' : '760px'"
+      align-center>
+      <p class="field-tip" data-testid="ac-preview-sum">
+        只是算一遍，没有删。按页面上的规则（还没保存的也算）共会删
+        {{ cpTotal.n }} 个，{{ cpSize(cpTotal.size) }}；真的删的时候以那时下载器里的种子为准。
+      </p>
+      <div
+        v-for="r in cpResults"
+        :key="r.downloader"
+        class="ac-pv"
+        :data-testid="`ac-pv-${r.downloader}`">
+        <div class="ac-pv__head">
+          <strong>{{ r.downloader }}</strong>
+          <span v-if="r.error" class="ac-pv__err">{{ r.error }}</span>
+          <span v-else class="pt-foot-note"
+            >管理范围里 {{ r.managed }} 个，受保护 {{ r.protected }} 个，会删
+            {{ r.items.length }} 个</span
+          >
+        </div>
+        <div v-if="r.emergency" class="pt-note pt-note--warn">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span>剩余空间 {{ r.free_gb?.toFixed(1) }} GB，低于下限：按紧急清理多挑了种子</span>
+        </div>
+        <div v-for="n in r.notes ?? []" :key="n" class="pt-note pt-note--warn">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span>{{ n }}</span>
+        </div>
+        <ul v-if="r.items.length" class="ac-pv__list">
+          <li v-for="it in r.items" :key="it.info_hash">
+            <span class="ac-pv__name">{{ it.name }}</span>
+            <span class="pt-foot-note"
+              >{{ cpSize(it.size) }} · 做种 {{ it.seeding_h.toFixed(1) }} 小时 · 分享率
+              {{ it.ratio.toFixed(2)
+              }}{{ it.keep_data ? " · 数据还被别的种子用着，只删种子" : "" }}</span
+            >
+            <span class="ac-pv__why">{{ it.reasons.join("；") }}</span>
+          </li>
+        </ul>
+      </div>
+      <div v-if="!cpResults.length" class="field-tip">没有下载器</div>
+      <template #footer>
+        <el-button type="primary" @click="cpDialog = false">知道了</el-button>
+      </template>
+    </el-dialog>
 
     <PtPanel title="做种竞争度监控" icon="users" padding="none">
       <template #actions>
@@ -1190,5 +1340,54 @@ async function executeClean() {
 .progress-pct {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
+}
+
+.ac-lastrun {
+  padding: 0 20px 12px;
+}
+
+.ac-pv {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ac-pv__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.ac-pv__err {
+  color: var(--pt-dang);
+  font-size: 12px;
+}
+
+.ac-pv__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-pv__list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ac-pv__name {
+  word-break: break-all;
+  font-size: 13px;
+}
+
+.ac-pv__why {
+  font-size: 12px;
+  color: var(--pt-warn);
 }
 </style>

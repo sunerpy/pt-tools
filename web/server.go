@@ -225,6 +225,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerExtensionActionRoutes(mux)
 	s.registerTokenRoutes(mux)
 	s.registerQbitCompatRoutes(mux)
+	s.registerCleanupRoutes(mux)
 	s.registerAppV1Routes(mux)
 	s.registerMCPRoutes(mux)
 	s.registerRemoteRoutes(mux)

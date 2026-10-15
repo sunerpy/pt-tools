@@ -1872,6 +1872,78 @@ export interface CleanRequest {
 }
 
 // 工作目录清理 API
+// ---- 自动删种的预览与上次运行 ----
+
+/** 一个要删的种子与为什么删 */
+export interface CleanupItem {
+  name: string;
+  info_hash: string;
+  size: number;
+  seeding_h: number;
+  ratio: number;
+  upload_kbs: number;
+  /** 对上了的删种条件（紧急清理多挑的写剩余空间不足） */
+  reasons: string[];
+  /** 数据还被别的种子用着：只删种子、保留数据 */
+  keep_data?: boolean;
+}
+
+/** 一台下载器一轮自动删种（或预览）的结果 */
+export interface CleanupResult {
+  downloader: string;
+  managed: number;
+  protected: number;
+  candidates: number;
+  /** 剩余空间低于下限、按紧急清理多挑了种子 */
+  emergency?: boolean;
+  free_gb?: number;
+  items: CleanupItem[];
+  notes?: string[];
+  /** 真的删掉的个数（预览时为 0） */
+  deleted: number;
+  error?: string;
+}
+
+export interface CleanupRun {
+  at: string;
+  results: CleanupResult[];
+}
+
+export interface CleanupStatus {
+  enabled: boolean;
+  interval_min: number;
+  /** 最近一轮（重启以后没有） */
+  last_run?: CleanupRun;
+  /** 下一轮大约什么时候（没启用时没有） */
+  next_run_at?: string;
+}
+
+/** 预览用的删种规则（自动删种页上的那几项，可以还没保存） */
+export interface CleanupPreviewInput {
+  cleanup_scope: string;
+  cleanup_scope_tags: string;
+  cleanup_remove_data: boolean;
+  cleanup_condition_mode: string;
+  cleanup_max_seed_time_h: number;
+  cleanup_min_ratio: number;
+  cleanup_max_inactive_h: number;
+  cleanup_slow_seed_time_h: number;
+  cleanup_slow_max_ratio: number;
+  cleanup_del_free_expired: boolean;
+  cleanup_disk_protect: boolean;
+  cleanup_min_disk_space_gb: number;
+  cleanup_protect_dl: boolean;
+  cleanup_protect_hr: boolean;
+  cleanup_min_retain_h: number;
+  cleanup_protect_tags: string;
+}
+
+export const cleanupApi = {
+  status: () => api.get<CleanupStatus>("/api/cleanup/status"),
+  preview: (data: CleanupPreviewInput) =>
+    api.post<{ results: CleanupResult[] }>("/api/cleanup/preview", data),
+};
+
 export const maintenanceApi = {
   // 预览可清理项（dryRun，不删除任何文件）
   preview: () => api.get<CleanResult>("/api/maintenance/clean"),

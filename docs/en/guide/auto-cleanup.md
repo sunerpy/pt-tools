@@ -124,6 +124,11 @@ These torrents are not deleted, even when they meet the deletion conditions:
 7. Delete, update the database and write the log
 ```
 
+### Preview and the last run
+
+- Preview what would be deleted (预览会删哪些) runs the flow above with the rules on the page (unsaved ones too) without deleting anything. For each downloader it shows how many torrents are in scope, how many are protected, which ones would be deleted, and why each one would go (the condition it meets, or low disk space and emergency cleanup). Torrents whose data other torrents still use are marked as deleting the torrent only and keeping the data. An actual run works with the torrents in the downloader at that time.
+- Below the card is the last run's result (how many each downloader deleted, and why a downloader couldn't be checked or a deletion failed) and roughly when the next run is. These start over when pt-tools restarts.
+
 ## H&R protection
 
 H&R (Hit and Run) is a rule on some private trackers: after downloading a torrent you have to seed it for a certain time, or you are penalised.
