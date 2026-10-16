@@ -60,7 +60,7 @@ A torrent that meets the configured conditions is marked for deletion.
 - **OR mode (任一满足即删（OR）)**, the default: a torrent is deleted when any one condition is met. Good for freeing space quickly.
 - **AND mode (全部满足才删（AND）)**: every configured condition has to be met at the same time. More conservative, for getting the most out of each torrent.
 
-Delete torrents still unfinished when freeleech ends is checked on its own, whatever the condition logic: when it is on, a torrent whose free period has passed before it finished is deleted even in AND mode.
+Delete torrents still unfinished when freeleech ends is checked on its own, whatever the condition logic: when it is on, a torrent whose free period has passed before it finished is deleted even in AND mode. The free period follows the site details the RSS subscription read most recently: if the site extends freeleech, pt-tools waits for the new end time; if freeleech is cancelled or ends early, it counts as ended once the subscription has read that.
 
 > A condition set to 0 is ignored. With the seeding time at 72 hours and the ratio at 0, for example, only the seeding time counts.
 
