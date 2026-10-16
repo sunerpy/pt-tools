@@ -172,3 +172,11 @@ func TestGameGamePT_Fixtures_NoSecrets(t *testing.T) {
 		t.Run(name, func(t *testing.T) { RequireNoSecrets(t, name, data) })
 	}
 }
+
+// #727：GGPT 开了整站 H&R；站点规则里没有做种时长，由用户在站点设置里填。
+func TestGameGamePT_SiteWideHR(t *testing.T) {
+	def, ok := v2.GetDefinitionRegistry().Get("gamegamept")
+	require.True(t, ok)
+	assert.True(t, def.HREnabled, "整站 H&R")
+	assert.False(t, def.HasHRSeedTimeRule(), "做种时长由站点设置补")
+}

@@ -15,6 +15,8 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 	TimezoneOffset: "+0800",
 	RateLimit:      0.5,
 	RateBurst:      2,
+	// 整站 H&R（#727）。站点规则里的做种时长没写进来：用户在站点设置里填「H&R 做种要求」
+	HREnabled: true,
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id"},
 		RequestDelay: 500,
