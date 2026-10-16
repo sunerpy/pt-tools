@@ -193,6 +193,7 @@ func (s *Service) search(ctx context.Context, sub *models.MediaSubscription, set
 	var errs []string
 	for _, kw := range keywords(sub) {
 		sctx, cancel := context.WithTimeout(ctx, searchTimeout)
+		searchedAt := s.cfg.Now()
 		res, err := s.cfg.Search.Search(sctx, v2.MultiSiteSearchQuery{SearchQuery: v2.SearchQuery{Keyword: kw}, Sites: sites, Timeout: searchTimeout, RawTitles: true})
 		cancel()
 		if err != nil {
@@ -209,7 +210,7 @@ func (s *Service) search(ctx context.Context, sub *models.MediaSubscription, set
 			}
 			seen[key] = true
 			hr, _ := siteHR(it.SourceSite)
-			cands = append(cands, Candidate{Site: it.SourceSite, Item: it, Meta: s.parse(ctx, it.Title, it.Subtitle), From: fromSearch, SiteHR: hr})
+			cands = append(cands, Candidate{Site: it.SourceSite, Item: it, Meta: s.parse(ctx, it.Title, it.Subtitle), From: fromSearch, SiteHR: hr, SeenAt: searchedAt})
 		}
 	}
 	s.mu.Lock()
@@ -435,6 +436,7 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 	if cur, cerr := s.subRow(ctx, sub.ID); cerr != nil || cur.Status != models.MediaSubActive {
 		return fmt.Sprintf("订阅已经暂停或删除，没有推送 %s", o.c.Item.Title)
 	}
+	policy, snap := s.admission(ctx, sub, set, site, o.c)
 	res, err := s.cfg.Push(ctx, ptinternal.PushTorrentRequest{
 		SiteID: o.c.Site, TorrentID: o.c.Item.ID, TorrentData: data, Title: o.c.Item.Title,
 		Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath, DownloaderID: dlID, Source: pushSource,
@@ -443,6 +445,8 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 			SizeBytes: size, HasHR: hasHR, HRSeedTimeH: hrHours,
 			IsFree: o.c.Item.IsFree(), FreeLevel: string(o.c.Item.DiscountLevel), FreeEndTime: freeEnd,
 		},
+		Policy:   policy,
+		Snapshot: snap,
 	})
 	if err != nil {
 		return fmt.Sprintf("推送 %s 失败：%v", o.c.Item.Title, err)
@@ -473,6 +477,36 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 }
 
 // fetchTorrent 经站点实例下载种子文件（走站点限速）；HDDolby 这类要 hash 的站点从下载地址里取 downhash。
+// admission 是这次推送的入场策略与资格快照。档案要求免费时推送要求免费：搜索结果可能来自缓存，
+// 所以推送前按站点详情重新读一次（读不到就没有快照，门禁会拒绝）；RSS 送来的候选用取详情时的资格。
+func (s *Service) admission(ctx context.Context, sub *models.MediaSubscription, set Settings, site v2.Site, c Candidate) (ptinternal.AdmissionPolicy, *v2.PromotionSnapshot) {
+	policy := ptinternal.AdmissionPolicy{
+		RequireFree:  s.profileFor(ctx, sub, set).Free == models.MediaPrefRequire,
+		SafetyMargin: ptinternal.DefaultSafetyMargin(),
+		SourceKind:   ptinternal.SourceKindSubscribe,
+		AttemptStart: c.SeenAt,
+		Clock:        s.cfg.Now,
+	}
+	if policy.RequireFree && c.From == fromSearch {
+		policy.AttemptStart = s.cfg.Now()
+		return policy, ptinternal.FreshPromotion(ctx, site, c.Site, c.Item.ID, policy.AttemptStart)
+	}
+	verified := c.Item.FetchedAt
+	if verified.IsZero() {
+		verified = c.SeenAt
+	}
+	snap := c.Item.Promotion(verified)
+	return policy, &snap
+}
+
+// offerSeenAt 是 RSS 送来的候选的取得时间：详情带了取得时间就用它，否则用送来的时间。
+func offerSeenAt(item v2.TorrentItem, now time.Time) time.Time {
+	if !item.FetchedAt.IsZero() {
+		return item.FetchedAt
+	}
+	return now
+}
+
 func fetchTorrent(ctx context.Context, site v2.Site, it v2.TorrentItem) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()

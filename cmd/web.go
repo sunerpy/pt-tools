@@ -200,6 +200,22 @@ var webCmd = &cobra.Command{
 				return site.Download(ctx, torrentID)
 			}
 			callbackActions := app.NewRSSCallbackActions(global.GlobalDB.DB, fetcher)
+			// 按钮推送继承 RSS 的到期暂停：推送前读一次详情拿到免费结束时间
+			callbackActions.SetDetailLookup(func(ctx context.Context, siteName, torrentID string) (*v2.TorrentItem, error) {
+				orchestrator := web.GetSearchOrchestrator()
+				if orchestrator == nil {
+					return nil, errors.New("搜索编排器未初始化")
+				}
+				site := orchestrator.GetSite(siteName)
+				if site == nil {
+					return nil, fmt.Errorf("站点 %s 未注册", siteName)
+				}
+				provider, ok := site.(v2.DetailFetcherProvider)
+				if !ok || provider.GetDetailFetcher() == nil {
+					return nil, fmt.Errorf("站点 %s 不支持读取种子详情", siteName)
+				}
+				return provider.GetDetailFetcher().GetTorrentDetail(ctx, torrentID, "", "")
+			})
 			registeredCallbackChannels := 0
 			bs.eachChannel(func(ch notify.Channel) {
 				if setter, ok := ch.(interface {

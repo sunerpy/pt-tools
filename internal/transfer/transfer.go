@@ -506,6 +506,8 @@ func (s *Service) add(ctx context.Context, j *models.TorrentTransferJob) error {
 		DownloaderID:      j.TargetDownloaderID,
 		Source:            pushSource(j.Kind),
 		ReuseExistingData: true,
+		// 转移做种与辅种：数据已经在盘上，不新增计费下载，不要求免费
+		Policy: ptinternal.AdmissionPolicy{SourceKind: ptinternal.SourceKindTransfer, SafetyMargin: ptinternal.DefaultSafetyMargin()},
 	})
 	switch {
 	case pushErr != nil:

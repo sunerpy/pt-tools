@@ -519,6 +519,7 @@ func TestBrushMonitor_StopsAfterConsecutiveFetchFailures(t *testing.T) {
 		id := fmt.Sprintf("x%d", i)
 		r.site.items = append(r.site.items, v2.TorrentItem{
 			ID: id, Title: "T" + id, SizeBytes: gib, Leechers: 10, DiscountLevel: v2.DiscountFree,
+			DiscountEndTime: r.clock.Now().Add(12 * time.Hour),
 		})
 		r.site.files[id] = []byte("not a torrent")
 	}

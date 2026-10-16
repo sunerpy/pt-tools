@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/models"
@@ -94,6 +95,8 @@ type Candidate struct {
 	From string
 	// SiteHR 是站点整站都有 H&R 要求
 	SiteHR bool
+	// SeenAt 是取得这条数据的时间（RSS 是取详情的时间，搜索是发起搜索的时间）
+	SeenAt time.Time
 }
 
 // 候选种子的来源。

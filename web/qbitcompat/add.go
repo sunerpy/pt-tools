@@ -246,6 +246,8 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 		SiteID: siteID, TorrentID: torrentID, TorrentData: data, Title: title, Category: o.category, Tags: strings.Join(tags, ","),
 		SavePath: save, DownloaderID: b.setting.ID, Source: Source, AddPaused: o.paused, Rename: o.rename,
 		UpLimitKBs: o.upKBs, DlLimitKBs: o.dlKBs,
+		// 外部程序经 qB 兼容入口加的：由调用方决定要不要，不要求免费
+		Policy: internal.AdmissionPolicy{SourceKind: internal.SourceKindQbitCompat, SafetyMargin: internal.DefaultSafetyMargin()},
 	})
 	switch {
 	case err != nil:

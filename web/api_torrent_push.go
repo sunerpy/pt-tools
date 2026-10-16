@@ -241,6 +241,8 @@ func (s *Server) processTorrentPush(r *http.Request, req TorrentPushRequest) Tor
 			Tags:         req.Tags,
 			SavePath:     req.SavePath,
 			DownloaderID: dlID,
+			// 网页里的手动推送：明确的用户操作，不要求免费
+			Policy: internal.AdmissionPolicy{SourceKind: internal.SourceKindManual, SafetyMargin: internal.DefaultSafetyMargin()},
 		}
 
 		pushResult, err := internal.PushTorrentToDownloader(ctx, pushReq)

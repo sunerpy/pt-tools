@@ -76,6 +76,37 @@ func detailSnapshot(siteName models.SiteGroup, torrentID string, d *v2.TorrentIt
 	return s
 }
 
+// SnapshotFromDetail 是 detailSnapshot 的导出形式（RSS 通知按钮等在别的包里取详情的入口用）。
+func SnapshotFromDetail(siteName models.SiteGroup, torrentID string, d *v2.TorrentItem, requestedAt time.Time) v2.PromotionSnapshot {
+	return detailSnapshot(siteName, torrentID, d, requestedAt)
+}
+
+// FreshPromotion 推送前按站点详情读一次免费资格，只认 attemptStart 以后取得的数据（缓存详情的驱动先刷新）。
+// 站点不支持读详情、读取失败时返回 nil：要求免费的推送会被门禁拒绝。
+func FreshPromotion(ctx context.Context, site v2.Site, siteName, torrentID string, attemptStart time.Time) *v2.PromotionSnapshot {
+	provider, ok := site.(v2.DetailFetcherProvider)
+	if !ok || provider.GetDetailFetcher() == nil {
+		LogPromotionLookupFailure(siteName, torrentID, errors.New("站点不支持读取种子详情"))
+		return nil
+	}
+	requestedAt := time.Now()
+	item, err := provider.GetDetailFetcher().GetTorrentDetail(v2.WithFreshAfter(ctx, attemptStart), torrentID, "", "")
+	if err == nil && item == nil {
+		err = errors.New("站点没有返回详情")
+	}
+	if err != nil {
+		LogPromotionLookupFailure(siteName, torrentID, err)
+		return nil
+	}
+	s := detailSnapshot(models.SiteGroup(siteName), torrentID, item, requestedAt)
+	return &s
+}
+
+// LogPromotionLookupFailure 记下推送前读详情失败（不写种子编号以外的内容，错误里不含密钥）。
+func LogPromotionLookupFailure(siteName, torrentID string, err error) {
+	sLogger().Warnf("[推送门禁] 读取免费资格失败: site=%s torrent_id=%s err=%v", siteName, torrentID, err)
+}
+
 // RevalidateFromSite 返回用站点详情接口重新验证资格的函数。种子编号用记录里不含密钥的 DetailID，没有时用 TorrentID。
 func RevalidateFromSite(site UnifiedPTSite) DetailRevalidator {
 	if site == nil {
@@ -83,11 +114,10 @@ func RevalidateFromSite(site UnifiedPTSite) DetailRevalidator {
 	}
 	return func(ctx context.Context, rec models.TorrentInfo) (*v2.TorrentItem, error) {
 		item := &gofeed.Item{GUID: rec.TorrentID, Title: rec.Title}
-		id := rec.DetailID
-		if id == "" {
-			id = rec.TorrentID
+		// 只在有从链接取出的种子编号时给链接（各驱动都认 id=）；没有时按条目编号取（如 Rousi 用链接最后一段）
+		if rec.DetailID != "" {
+			item.Link = "details.php?id=" + rec.DetailID
 		}
-		item.Link = "details.php?id=" + id
 		return fetchDetail(ctx, site, item)
 	}
 }

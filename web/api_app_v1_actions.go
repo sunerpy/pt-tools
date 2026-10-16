@@ -336,6 +336,8 @@ func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 	res, err := internal.PushTorrentToDownloader(ctx, internal.PushTorrentRequest{
 		SiteID: req.Site, TorrentID: req.TorrentID, TorrentData: data, Title: req.Title, Category: req.Category,
 		Tags: req.Tags, SavePath: req.SavePath, DownloaderID: dl.ID, Source: source, Meta: pushMeta(req.Site, req.TorrentID, data),
+		// App、MCP 与 AI 助手的推送是明确的用户操作：不要求免费，不承诺到期暂停
+		Policy: internal.AdmissionPolicy{SourceKind: internal.SourceKindApp, SafetyMargin: internal.DefaultSafetyMargin()},
 	})
 	out := AppPushResult{DownloaderID: dl.ID, Downloader: dl.Name}
 	switch {

@@ -21,7 +21,7 @@ func TestResolveDownloaderID_ConfiguredWins(t *testing.T) {
 	db := setupCallbackDB(t)
 	a := NewRSSCallbackActions(db, nil)
 	id := uint(42)
-	got, err := a.resolveDownloaderID(context.Background(), &id)
+	got, err := a.resolveDownloaderID(context.Background(), &id, "")
 	require.NoError(t, err)
 	assert.Equal(t, uint(42), got)
 }
@@ -33,7 +33,7 @@ func TestResolveDownloaderID_ZeroFallsThroughToDefault(t *testing.T) {
 	require.NoError(t, db.Create(&ds).Error)
 
 	zero := uint(0)
-	got, err := a.resolveDownloaderID(context.Background(), &zero)
+	got, err := a.resolveDownloaderID(context.Background(), &zero, "")
 	require.NoError(t, err)
 	assert.Equal(t, ds.ID, got)
 }
@@ -84,7 +84,7 @@ func TestResolveDownloaderID_QueryError(t *testing.T) {
 
 	a := NewRSSCallbackActions(db, nil)
 	zero := uint(0)
-	_, err = a.resolveDownloaderID(context.Background(), &zero)
+	_, err = a.resolveDownloaderID(context.Background(), &zero, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "查询默认下载器")
 }

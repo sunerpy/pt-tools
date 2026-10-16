@@ -126,6 +126,9 @@ func TestAddTorrentFile(t *testing.T) {
 	assert.Equal(t, 1, p[0].DlLimitKBs, "不足 1 KB/s 的按 1 KB/s")
 	assert.Equal(t, Source, p[0].Source)
 	assert.Equal(t, e.dlSet.ID, p[0].DownloaderID)
+	assert.Equal(t, internal.SourceKindQbitCompat, p[0].Policy.SourceKind, "每次推送都带入场策略")
+	assert.False(t, p[0].Policy.RequireFree, "外部程序明确加的，不要求免费")
+	assert.False(t, p[0].Policy.PauseOnFreeEnd)
 
 	assert.Empty(t, p[1].SiteID, "认不出站点")
 	assert.Equal(t, "hash:"+hashOf(t, unknown), p[1].TorrentID)

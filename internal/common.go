@@ -563,6 +563,12 @@ func downloadWorkerUnified(
 				stats.detailFailed.Add(1)
 				continue
 			}
+			if detail.FetchedAt.IsZero() {
+				// 驱动没给取得时间：按发起请求的时间算（订阅拿到的候选也带着它）。复制一份再改，不动驱动的结果
+				stamped := *detail
+				stamped.FetchedAt = requestedAt
+				detail = &stamped
+			}
 			snap := detailSnapshot(siteName, item.GUID, detail, requestedAt)
 			// 订阅也看 RSS 拉到的种子（不阻塞；对上了由订阅自己推送，和这里的过滤规则各管各的）
 			offerToSubscriptions(siteID, detail, item)

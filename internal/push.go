@@ -136,13 +136,14 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	}
 
 	// 门禁先于连接下载器：被拒绝的推送不用登录下载器
-	decision := CheckAdmission(req.Policy, snap, time.Now())
+	decision := CheckAdmission(req.Policy, snap, req.Policy.Now())
 	if !decision.Allow {
 		return rejectPush(req, record, bestEffortHash(req.TorrentData), decision.Status, decision.Reason), nil
 	}
 	if record {
-		if other := monitoredElsewhere(req.SiteID, req.TorrentID, target.ID); other != "" {
-			return rejectPush(req, record, bestEffortHash(req.TorrentData), PushStatusRejectedPlacement,
+		hash := bestEffortHash(req.TorrentData)
+		if other := monitoredElsewhere(req.SiteID, req.TorrentID, hash, target.ID); other != "" {
+			return rejectPush(req, record, hash, PushStatusRejectedPlacement,
 				fmt.Sprintf("这个种子已在下载器 %s 里并受免费结束监控，不再推到另一个下载器", other)), nil
 		}
 	}
@@ -377,7 +378,7 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 
 	// 等锁、读空间的工夫可能跨过免费边界：真正加入前再看一次，跨过了就归还预留、拒绝
 	if req.Policy.RequireFree {
-		if again := CheckAdmission(req.Policy, snap, time.Now()); !again.Allow {
+		if again := CheckAdmission(req.Policy, snap, req.Policy.Now()); !again.Allow {
 			release()
 			return rejectPush(req, record, torrentHash, again.Status, again.Reason), nil
 		}
@@ -662,16 +663,27 @@ func snapshotFromMeta(m *PushTorrentMeta) *v2.PromotionSnapshot {
 }
 
 // monitoredElsewhere 返回这个种子正在另一个下载器里受免费结束监控时那个下载器的名字。
-func monitoredElsewhere(siteID, torrentID string, downloaderID uint) string {
-	var cur models.TorrentInfo
-	err := global.GlobalDB.DB.Where("site_name = ? AND torrent_id = ?", siteID, torrentID).First(&cur).Error
-	if err != nil || cur.DownloaderID == nil || *cur.DownloaderID == downloaderID {
+// 同一个种子可能有两条记录（RSS 按条目编号、通知按钮与手动推送按详情编号），所以也按哈希找。
+func monitoredElsewhere(siteID, torrentID, hash string, downloaderID uint) string {
+	q := global.GlobalDB.DB.Where("site_name = ?", siteID)
+	if hash != "" {
+		q = q.Where("(torrent_id = ? OR torrent_hash = ?)", torrentID, hash)
+	} else {
+		q = q.Where("torrent_id = ?", torrentID)
+	}
+	var rows []models.TorrentInfo
+	if err := q.Find(&rows).Error; err != nil {
 		return ""
 	}
-	pushed := cur.IsPushed != nil && *cur.IsPushed
-	if pushed && cur.PauseOnFreeEnd && cur.DownloaderTaskID != "" && !cur.IsCompleted && !cur.IsPausedBySystem &&
-		cur.FreeValidity == string(v2.FreeUntil) {
-		return cur.DownloaderName
+	for _, cur := range rows {
+		if cur.DownloaderID == nil || *cur.DownloaderID == downloaderID {
+			continue
+		}
+		pushed := cur.IsPushed != nil && *cur.IsPushed
+		if pushed && cur.PauseOnFreeEnd && cur.DownloaderTaskID != "" && !cur.IsCompleted && !cur.IsPausedBySystem &&
+			cur.FreeValidity == string(v2.FreeUntil) {
+			return cur.DownloaderName
+		}
 	}
 	return ""
 }

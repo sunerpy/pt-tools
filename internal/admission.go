@@ -45,6 +45,21 @@ type AdmissionPolicy struct {
 	SourceKind string
 	// AttemptStart 是本次尝试开始的时间（RSS 是这一轮的开始）。RequireFree 时必须给出，快照不能早于它
 	AttemptStart time.Time
+	// Clock 是调用方的时钟（刷流、订阅在测试里用假时钟）；为空时用 time.Now
+	Clock func() time.Time
+}
+
+// Now 是门禁判断用的当前时间。
+func (p AdmissionPolicy) Now() time.Time {
+	if p.Clock != nil {
+		return p.Clock()
+	}
+	return time.Now()
+}
+
+// DefaultSafetyMargin 是按全局免费结束提前量算出的安全余量（读不到设置时按 0，即 5 分钟）。
+func DefaultSafetyMargin() time.Duration {
+	return SafetyMarginFor(freeEndAdvanceMinutes())
 }
 
 // SafetyMarginFor 按免费结束提前量（分钟）给出安全余量：不少于 5 分钟，不超过一小时。
