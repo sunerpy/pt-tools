@@ -185,7 +185,7 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
                     style: t.textTheme.bodySmall,
                   ),
                   Text('↑${formatBytes(u.uploaded)}'),
-                  Text('↓${formatBytes(u.downloaded)}'),
+                  Text(s.billedDownloaded(formatBytes(u.downloaded))),
                   Text('${s.kpiRatio} ${formatRatio(u.ratio)}'),
                   Text('${s.kpiBonus} ${formatNumber(u.bonus)}'),
                   Text('${s.kpiSeeding} ${u.seeding}'),

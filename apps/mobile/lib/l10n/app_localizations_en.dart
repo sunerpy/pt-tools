@@ -144,7 +144,7 @@ class SEn extends S {
   String get kpiUploaded => 'Uploaded';
 
   @override
-  String get kpiDownloaded => 'Downloaded';
+  String get kpiDownloaded => 'Billed download';
 
   @override
   String get kpiRatio => 'Ratio';
@@ -178,6 +178,15 @@ class SEn extends S {
 
   @override
   String get todayBySite => 'By site';
+
+  @override
+  String get todayBilledNote =>
+      '↓ is the download the sites bill (after promotions, counted toward ratio), not the amount actually transferred. Daily snapshots keep only this figure.';
+
+  @override
+  String billedDownloaded(String size) {
+    return '↓$size (billed)';
+  }
 
   @override
   String get downloadersTitle => 'Downloaders';

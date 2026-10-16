@@ -334,7 +334,7 @@ abstract class S {
   /// No description provided for @kpiDownloaded.
   ///
   /// In zh, this message translates to:
-  /// **'下载'**
+  /// **'下载（计费）'**
   String get kpiDownloaded;
 
   /// No description provided for @kpiRatio.
@@ -390,6 +390,18 @@ abstract class S {
   /// In zh, this message translates to:
   /// **'各站点'**
   String get todayBySite;
+
+  /// No description provided for @todayBilledNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'↓ 是站点计费的下载量（按优惠折算，计入分享率），不是实际传输量；每日快照只存这个口径'**
+  String get todayBilledNote;
+
+  /// No description provided for @billedDownloaded.
+  ///
+  /// In zh, this message translates to:
+  /// **'↓{size}（计费）'**
+  String billedDownloaded(String size);
 
   /// No description provided for @downloadersTitle.
   ///

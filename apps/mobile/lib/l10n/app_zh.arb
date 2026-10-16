@@ -87,7 +87,7 @@
     }
   },
   "kpiUploaded": "上传",
-  "kpiDownloaded": "下载",
+  "kpiDownloaded": "下载（计费）",
   "kpiRatio": "分享率",
   "kpiBonus": "魔力",
   "perHour": "每小时 {value}",
@@ -118,6 +118,15 @@
     }
   },
   "todayBySite": "各站点",
+  "todayBilledNote": "↓ 是站点计费的下载量（按优惠折算，计入分享率），不是实际传输量；每日快照只存这个口径",
+  "billedDownloaded": "↓{size}（计费）",
+  "@billedDownloaded": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "downloadersTitle": "下载器",
   "downloaderUnreachable": "连不上",
   "freeSpace": "剩余 {size}",
