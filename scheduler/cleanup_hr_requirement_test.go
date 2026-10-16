@@ -51,3 +51,42 @@ func TestCleanup_HRRequirementFromSiteSetting(t *testing.T) {
 	require.Len(t, candidates, 1)
 	assert.Equal(t, "done", candidates[0].ID, "做满了：照常按规则删")
 }
+
+// 同一个哈希有几条有 H&R 的记录（跨站辅种等）：取最严的——有一条要求未知就按未知保护，否则取最长的要求。
+func TestCleanup_HRMergesStrictestPerHash(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupProtectHR = true
+	pushed := true
+	add := func(site, id, hash string, req int) {
+		require.NoError(t, cm.db.Create(&models.TorrentInfo{
+			SiteName: site, TorrentID: id, TorrentHash: &hash, IsPushed: &pushed, HasHR: true, HRSeedTimeH: req,
+		}).Error)
+	}
+	add("a", "1", "hunknown", 0) // 要求未知的先写
+	add("b", "2", "hunknown", 24)
+	add("a", "3", "hlong", 720)
+	add("b", "4", "hlong", 24)
+	unknown := seedingTorrent("u", "hunknown", "U", 30, 5)
+	long := seedingTorrent("l", "hlong", "L", 30, 5)
+
+	protected, candidates := cm.splitProtected(cfg, []downloader.Torrent{unknown, long})
+	assert.Len(t, protected, 2, "做种 30 小时：一条要求未知、一条要求 720 小时，都没满")
+	assert.Empty(t, candidates)
+}
+
+// 记录归档以后 H&R 保护照样在：归档表里的 H&R 记录也算。
+func TestCleanup_HRFromArchivedRecord(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupProtectHR = true
+	pushed := true
+	hash := "harchived"
+	require.NoError(t, cm.db.Create(&models.TorrentInfoArchive{
+		SiteName: "a", TorrentID: "9", TorrentHash: &hash, IsPushed: &pushed, HasHR: true, HRSeedTimeH: 720,
+	}).Error)
+	tor := seedingTorrent("x", hash, "X", 400, 5)
+
+	protected, _ := cm.splitProtected(cfg, []downloader.Torrent{tor})
+	assert.Len(t, protected, 1, "归档的记录要求 720 小时，做种 400 小时：保护")
+}

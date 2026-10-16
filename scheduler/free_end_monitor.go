@@ -1137,6 +1137,8 @@ func (m *FreeEndMonitor) archiveOldTorrents() {
 			IsCompleted:        t.IsCompleted,
 			Progress:           t.Progress,
 			TorrentSize:        t.TorrentSize,
+			HasHR:              t.HasHR,
+			HRSeedTimeH:        t.HRSeedTimeH,
 			DownloaderTaskID:   t.DownloaderTaskID,
 			CheckCount:         t.CheckCount,
 			IMDbID:             t.IMDbID,
