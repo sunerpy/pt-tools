@@ -21,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 11
+const CurrentSchemaVersion = 12
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -150,6 +150,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     11,
 		Description: "site_settings: encrypt remaining plaintext cookies and clear the plaintext column",
 		Up:          sm.migrateV10ToV11,
+	})
+
+	// v11 -> v12: torrent_infos 按旧的 is_free / free_end_time 回填免费状态与是否要求免费
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     12,
+		Description: "torrent_infos: backfill free_validity (no end time is unknown, never permanent) and require_free",
+		Up:          sm.migrateV11ToV12,
 	})
 }
 
@@ -710,6 +717,41 @@ func (sm *SchemaManager) migrateV10ToV11(db *gorm.DB) error {
 			if err := tx.Model(&SiteSetting{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
 				return fmt.Errorf("v10→v11: clear plaintext cookie for site %s: %w", row.Name, err)
 			}
+		}
+		return nil
+	})
+}
+
+// migrateV11ToV12 回填旧记录的免费状态（docs/design/free-expiry-safety.md §9）。只写还没有状态的行：
+// 免费且有结束时间是 free_until；免费但没有结束时间是 unknown，不推断成永久；其余是 not_free。来源记成 legacy，
+// 验证时间留空（旧数据不算验证过，要求免费的暂存项推送前会重新取详情）。要求免费只回填 RSS 的免费通道
+// 与要求免费的过滤规则。不动推送、暂停、下载器字段：不自动删除、暂停或恢复任何任务。
+func (sm *SchemaManager) migrateV11ToV12(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&TorrentInfo{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		pending := "(free_validity = '' OR free_validity IS NULL)"
+		strictRule := "0"
+		if tx.Migrator().HasTable(&FilterRule{}) {
+			strictRule = "filter_rule_id IN (SELECT id FROM filter_rules WHERE require_free = 1)"
+		}
+		if err := tx.Exec(`UPDATE torrent_infos SET
+			require_free = CASE
+				WHEN download_source = 'free_download' OR download_source = '' OR download_source IS NULL THEN 1
+				WHEN download_source = 'filter_rule' AND ` + strictRule + ` THEN 1
+				ELSE 0 END
+			WHERE ` + pending).Error; err != nil {
+			return fmt.Errorf("v11→v12: backfill require_free: %w", err)
+		}
+		if err := tx.Exec(`UPDATE torrent_infos SET
+			free_validity = CASE
+				WHEN is_free = 1 AND free_end_time IS NOT NULL THEN 'free_until'
+				WHEN is_free = 1 THEN 'unknown'
+				ELSE 'not_free' END,
+			free_status_source = 'legacy'
+			WHERE ` + pending).Error; err != nil {
+			return fmt.Errorf("v11→v12: backfill free_validity: %w", err)
 		}
 		return nil
 	})

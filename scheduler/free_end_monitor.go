@@ -915,6 +915,15 @@ func (m *FreeEndMonitor) archiveOldTorrents() {
 			CheckCount:        t.CheckCount,
 			IMDbID:            t.IMDbID,
 			DoubanID:          t.DoubanID,
+			FreeValidity:      t.FreeValidity,
+			FreeVerifiedAt:    t.FreeVerifiedAt,
+			FreeStatusSource:  t.FreeStatusSource,
+			FreeStatusError:   t.FreeStatusError,
+			SourceRSSID:       t.SourceRSSID,
+			RequireFree:       t.RequireFree,
+			PausePlannedAt:    t.PausePlannedAt,
+			PauseRequestedAt:  t.PauseRequestedAt,
+			FreeEndFailures:   t.FreeEndFailures,
 		}
 
 		err := m.db.Transaction(func(tx *gorm.DB) error {

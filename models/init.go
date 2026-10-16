@@ -62,6 +62,26 @@ type TorrentInfo struct {
 	// IMDbID、DoubanID 是站点给的外部编号（详情页或接口里有时才有），媒体识别优先用它们
 	IMDbID   string `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
 	DoubanID string `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
+
+	// 免费资格（docs/design/free-expiry-safety.md）：每次读到站点详情都按规范快照整套写入。
+	// FreeValidity 是 not_free / free_until / free_permanent / unknown；空串是还没按新规则验证过的旧记录。
+	FreeValidity     string     `gorm:"size:16;default:''" json:"freeValidity"`
+	FreeVerifiedAt   *time.Time `gorm:"default:null" json:"freeVerifiedAt"`         // 最近一次成功读到资格的时间
+	FreeStatusSource string     `gorm:"size:32;default:''" json:"freeStatusSource"` // base / promotion_rule / mall_single_free / adapter / legacy
+	FreeStatusError  string     `gorm:"size:256;default:''" json:"freeStatusError"` // 读取资格时的问题（结束时间无法解析等），不含原始响应
+	// DetailID 是取站点详情用的种子编号（从 RSS 条目链接里取，不含密钥）；推送前重新验证资格时用
+	DetailID string `gorm:"size:64;default:''" json:"detailId"`
+	// SourceRSSID 是这个种子的所有者 RSS：第一次决定下载（进入暂存）的那条。其他 RSS 不改它的策略字段，也不处理它的暂存文件
+	SourceRSSID *uint `gorm:"column:source_rss_id;index" json:"sourceRssId"`
+	// RequireFree 是入场是否以免费为前提（免费通道、要求免费的过滤规则、要求免费的订阅与刷流）
+	RequireFree bool `gorm:"default:false" json:"requireFree"`
+
+	// 免费结束暂停的执行记录：计划时间（结束时间减提前量）、实际发出请求的时间；确认暂停的时间是 PausedAt。
+	PausePlannedAt   *time.Time `gorm:"default:null" json:"pausePlannedAt"`
+	PauseRequestedAt *time.Time `gorm:"default:null" json:"pauseRequestedAt"`
+	// FreeEndFailures 是到期处理连续失败的次数（与推送重试的 RetryCount 分开）；FreeEndAlertedAt 是已经告警的时间
+	FreeEndFailures  int        `gorm:"default:0" json:"freeEndFailures"`
+	FreeEndAlertedAt *time.Time `gorm:"default:null" json:"freeEndAlertedAt"`
 }
 
 // TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）
@@ -105,7 +125,17 @@ type TorrentInfoArchive struct {
 	CheckCount        int        `json:"checkCount"`
 	IMDbID            string     `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
 	DoubanID          string     `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
-	ArchivedAt        time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
+	// 免费资格、归属与暂停记录：与 TorrentInfo 同名的列，归档时原样复制
+	FreeValidity     string     `gorm:"size:16;default:''" json:"freeValidity"`
+	FreeVerifiedAt   *time.Time `json:"freeVerifiedAt"`
+	FreeStatusSource string     `gorm:"size:32;default:''" json:"freeStatusSource"`
+	FreeStatusError  string     `gorm:"size:256;default:''" json:"freeStatusError"`
+	SourceRSSID      *uint      `gorm:"column:source_rss_id" json:"sourceRssId"`
+	RequireFree      bool       `json:"requireFree"`
+	PausePlannedAt   *time.Time `json:"pausePlannedAt"`
+	PauseRequestedAt *time.Time `json:"pauseRequestedAt"`
+	FreeEndFailures  int        `json:"freeEndFailures"`
+	ArchivedAt       time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
 }
 
 func (t *TorrentInfo) GetExpired() bool {
@@ -291,6 +321,8 @@ func NewDBWithVersionAndHooks(
 			AutoStart:              false,
 			RetainHours:            24,
 			MaxRetry:               3,
+			// 新安装提前 5 分钟暂停，留出 tracker 汇报延迟；已有安装保持原值（gorm 默认值仍是 0，明确设成 0 的不会被改）
+			FreeEndAdvanceMinutes: 5,
 		}
 		if err := db.Create(&def).Error; err != nil {
 			return nil, fmt.Errorf("写入默认全局设置失败: %w", err)
