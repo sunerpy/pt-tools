@@ -69,12 +69,15 @@ const syncing = ref(false);
 const syncingSite = ref<string | null>(null);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
 
-/** 账户总量卡的 7 项（KPI 带里已有的总上传、平均分享率不重复），取值与格式沿用 main 那一排汇总卡 */
+/**
+ * 账户总量卡的 7 项（KPI 带里已有的总上传、平均分享率不重复），取值与格式沿用 main 那一排汇总卡。
+ * 下载量是各站计费口径的合计（按免费、折扣折算以后计入分享率的数）；实际下载只有部分站点报，不做合计。
+ */
 const totalsRows = computed(() => {
   const s = aggregatedStats.value;
   if (!s) return [];
   return [
-    { label: "总下载量", value: formatBytes(s.totalDownloaded) },
+    { label: "总下载量（计费）", value: formatBytes(s.totalDownloaded) },
     { label: "做种数", value: String(s.totalSeeding) },
     { label: "下载中", value: String(s.totalLeeching) },
     { label: "做种体积", value: formatBytes(s.totalSeederSize ?? 0) },
@@ -552,7 +555,7 @@ function onTableSortChange({ prop, order }: { prop: string; order: string | null
 const USERINFO_COLS_KEY = "pt-tools-userinfo-cols-v1";
 
 const OPTIONAL_USERINFO_COLS = [
-  { key: "trueData", label: "真实数据" },
+  { key: "trueData", label: "实际传输" },
   { key: "seedSize", label: "做种体积" },
   { key: "bonus", label: "积分" },
   { key: "bph", label: "时魔/h" },
@@ -565,7 +568,7 @@ const OPTIONAL_USERINFO_COLS = [
 type OptionalUserinfoCol = (typeof OPTIONAL_USERINFO_COLS)[number]["key"];
 
 /*
- * 没设过列偏好的用户，默认先收起三列低频列：真实数据（多数站点不报，整列是「-」）、入站日期、剩余天数
+ * 没设过列偏好的用户，默认先收起三列低频列：实际传输（多数站点不报，整列是「-」）、入站日期、剩余天数
  * （保号预警另有「需要关注的站点」卡与「保号预警」分段）。用户原话「表格列数量过多」——
  * 14 列 min-width 合计约 1780，1920 宽也要横滚；收起后 11 列，与画板 10 的十列 + 操作一致。
  * 这三列仍在「列设置」里，勾上就回来；已经存过偏好的用户按他们自己的来。
@@ -601,6 +604,16 @@ function toggleUserinfoCol(key: OptionalUserinfoCol) {
 
 const colShown = (key: OptionalUserinfoCol) => !hiddenUserinfoCols.value.has(key);
 
+/**
+ * 站点有没有另外报实际传输量（实际上传、实际下载，没按优惠折算）。
+ *
+ * 只要报了其中一个就显示：原来只在实际上传量与上传量不同时才显示，M-Team 这类站点
+ * 免费下载时只有实际下载在涨、实际上传与上传相同，实际下载就看不到了。
+ */
+function hasTrueData(row: { trueUploaded?: number; trueDownloaded?: number }): boolean {
+  return (row.trueUploaded ?? 0) > 0 || (row.trueDownloaded ?? 0) > 0;
+}
+
 /** 「更多」菜单里的四个低频动作 —— 与原来那四枚按钮是同一个动作，不是另一套逻辑 */
 function onMoreCommand(cmd: string) {
   if (cmd === "autoRefresh") return toggleAutoRefresh();
@@ -613,14 +626,14 @@ function onMoreCommand(cmd: string) {
  * 导出当前筛选出的这批站点（画板 bar-64 的 bi-file-down）。
  *
  * 列固定按画板那十列的口径导，不跟着「列设置」变：列设置是**看**的偏好，
- * 而导出是拿数据走，少一列就是少一份信息。
+ * 而导出是拿数据走，少一列就是少一份信息。下载那一列是站点计费的口径，表头写明。
  */
 function exportCsv() {
   const head = [
     "站点",
     "等级",
     "上传",
-    "下载",
+    "下载（计费）",
     "分享率",
     "做种",
     "做种体积",
@@ -733,7 +746,7 @@ const uploadRows = computed<BreakdownRow[]>(() => {
         weight: d.uploaded,
         tone: "primary" as const,
         hint:
-          `下载 +${formatBytes(d.downloaded)} · ${getSiteBonusName(d.site)} +${formatNumber(Math.round(d.bonus))}` +
+          `下载（计费）+${formatBytes(d.downloaded)} · ${getSiteBonusName(d.site)} +${formatNumber(Math.round(d.bonus))}` +
           (d.negative ? " · 有数值回退，按 0 计" : ""),
       }));
   }
@@ -1256,14 +1269,24 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
-          <!-- 上传/下载量：双行布局带图标 -->
+          <!--
+            上传 / 下载（计费）：站点记账的数。下载量是计费口径（按免费、折扣折算以后计入分享率），
+            跟站点另外报的实际传输量不是一回事，所以表头写明「计费」，实际传输另有一列。
+          -->
           <el-table-column
             prop="uploaded"
-            label="数据量"
+            label="上传 / 下载（计费）"
             min-width="170"
             sortable
             align="right"
             class-name="pt-cell-num">
+            <template #header>
+              <el-tooltip
+                content="站点记账的上传量与计费下载量：下载量按免费、折扣折算以后计入分享率。站点另外报的实际传输量在「实际传输」列（在「列设置」里打开）"
+                placement="top">
+                <span class="th-help">上传 / 下载（计费）</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
               <!--
               画板 td-*-2 的形状是一行「↑38.4 TB ↓4.2 TB」，箭头是**字符**不是图标 ——
@@ -1276,19 +1299,30 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
-          <!-- 真实数据（如果不同） -->
+          <!-- 实际传输：站点另外报的实际上传、实际下载（没按优惠折算），站点报了就显示 -->
           <el-table-column
             v-if="colShown('trueData')"
             prop="trueUploaded"
-            label="真实数据"
+            label="实际传输"
             min-width="170"
             sortable
             align="right"
             class-name="pt-cell-num">
+            <template #header>
+              <el-tooltip
+                content="站点另外报的实际上传、实际下载量，没按优惠折算。下载免费种子时实际下载会增长、计费下载量不变，这是正常的。多数站点不报这两个数"
+                placement="top">
+                <span class="th-help">实际传输</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
-              <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="io">
-                <span class="io__r is-up">↑{{ formatBytes(row.trueUploaded) }}</span>
-                <span class="io__r is-dn">↓{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
+              <div v-if="hasTrueData(row)" class="io">
+                <span class="io__r is-up">
+                  ↑{{ row.trueUploaded ? formatBytes(row.trueUploaded) : "-" }}
+                </span>
+                <span class="io__r is-dn">
+                  ↓{{ row.trueDownloaded ? formatBytes(row.trueDownloaded) : "-" }}
+                </span>
               </div>
               <span v-else class="nil">-</span>
             </template>
@@ -1607,6 +1641,7 @@ onUnmounted(() => {
               </span>
               <span class="io__r is-dn">
                 <PtIcon name="download" :size="13" />{{ formatBytes(row.downloaded) }}
+                <span class="io__tag">计费</span>
               </span>
             </div>
             <PtStatusPill :tone="ratioTone(row.ratio)">{{ formatRatio(row.ratio) }}</PtStatusPill>
@@ -1643,6 +1678,15 @@ onUnmounted(() => {
               class="stat">
               <span class="stat__l"><PtIcon name="medal" :size="11" />做种积分</span>
               <span class="stat__v is-ok">{{ formatNumber(row.seedingBonus) }}</span>
+            </div>
+            <!-- 站点另外报的实际传输量（没按优惠折算），报了才显示；上面那行的下载量是计费口径 -->
+            <div v-if="(row.trueUploaded ?? 0) > 0" class="stat">
+              <span class="stat__l"><PtIcon name="upload" :size="11" />实际上传</span>
+              <span class="stat__v">{{ formatBytes(row.trueUploaded ?? 0) }}</span>
+            </div>
+            <div v-if="(row.trueDownloaded ?? 0) > 0" class="stat">
+              <span class="stat__l"><PtIcon name="download" :size="11" />实际下载</span>
+              <span class="stat__v">{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
             </div>
             <div class="stat">
               <span class="stat__l"><PtIcon name="calendar" :size="11" />入站</span>
@@ -1745,7 +1789,7 @@ onUnmounted(() => {
           :total="uploadTotal"
           :foot="
             uploadByPeriod
-              ? `柱长是该站点${periodLabel}的上传增量占全部站点的比例，只列前 6 个；数值回退（站点重置、魔力兑换）的那一项按 0 计。`
+              ? `柱长是该站点${periodLabel}的上传增量占全部站点的比例，只列前 6 个；数值回退（站点重置、魔力兑换）的那一项按 0 计。下载增量只有计费口径：每日快照不存实际下载量。`
               : '还没有可比的历史快照，先按当前累计上传量排；每天同步一次之后这里改看所选周期的增量。只列前 6 个。'
           " />
       </PtPanel>
@@ -2032,6 +2076,13 @@ onUnmounted(() => {
 
 .io__r.is-dn {
   color: var(--pt-dang);
+}
+
+/* 行卡里下载量后面的「计费」：口径标注，用最弱一档的字，不和数字抢 */
+.io__tag {
+  font-size: var(--pt-fz-foot);
+  font-weight: 400;
+  color: var(--pt-t3);
 }
 
 /* 缺值统一用最弱的文字色，避免和真实数字抢注意力 */

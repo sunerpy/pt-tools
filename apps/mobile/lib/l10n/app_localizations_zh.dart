@@ -140,7 +140,7 @@ class SZh extends S {
   String get kpiUploaded => '上传';
 
   @override
-  String get kpiDownloaded => '下载';
+  String get kpiDownloaded => '下载（计费）';
 
   @override
   String get kpiRatio => '分享率';
@@ -174,6 +174,14 @@ class SZh extends S {
 
   @override
   String get todayBySite => '各站点';
+
+  @override
+  String get todayBilledNote => '↓ 是站点计费的下载量（按优惠折算，计入分享率），不是实际传输量；每日快照只存这个口径';
+
+  @override
+  String billedDownloaded(String size) {
+    return '↓$size（计费）';
+  }
 
   @override
   String get downloadersTitle => '下载器';

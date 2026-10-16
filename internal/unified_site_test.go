@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,13 +100,14 @@ func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
 	var buf bytes.Buffer
 	_ = bencode.NewEncoder(&buf).Encode(map[string]any{"info": map[string]any{"name": "x"}})
 	data := buf.Bytes()
-	p := filepath.Join(sub, "a.torrent")
+	p := filepath.Join(sub, "springsunday-a.torrent")
 	require.NoError(t, os.WriteFile(p, data, 0o644))
 	h, err := qbit.ComputeTorrentHashWithPath(p)
 	require.NoError(t, err)
 	pushed := false
 	ti := &models.TorrentInfo{SiteName: string(models.SiteGroup("springsunday")), TorrentHash: &h, IsPushed: &pushed}
 	require.NoError(t, db.UpsertTorrent(ti))
+	var added atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v2/auth/login":
@@ -113,11 +115,15 @@ func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
 			_, _ = w.Write([]byte("Ok."))
 		case "/api/v2/sync/maindata":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"server_state":{"free_space_on_disk":9999999999},"torrents":{}}`))
+			_, _ = w.Write([]byte(`{"server_state":{"free_space_on_disk":1125899906842624},"torrents":{}}`))
 		case "/api/v2/torrents/properties":
 			w.WriteHeader(http.StatusNotFound)
+		case "/api/v2/torrents/info":
+			// 磁盘保护要读下载中任务的待占用空间（以前这条记录被当成「免费已过期」直接删掉，没有走到推送）
+			_, _ = w.Write([]byte("[]"))
 		case "/api/v2/torrents/add":
 			w.WriteHeader(http.StatusOK)
+			added.Add(1)
 			_, _ = w.Write([]byte("ok"))
 		default:
 			w.WriteHeader(http.StatusOK)
@@ -150,6 +156,7 @@ func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
 	if _, err := os.Stat(p); err == nil {
 		t.Fatalf("expected file removed")
 	}
+	assert.Equal(t, int32(1), added.Load(), "暂存文件是推送成功后删除的")
 }
 
 func TestUnifiedSite_SendTorrentToDownloader_DisabledSurfacesError(t *testing.T) {

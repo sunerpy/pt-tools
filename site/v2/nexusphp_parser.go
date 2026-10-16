@@ -76,9 +76,11 @@ type TorrentDetailInfo struct {
 	SizeMB        float64
 	DiscountLevel DiscountLevel
 	DiscountEnd   time.Time
-	HasHR         bool
-	IMDbID        string
-	DoubanID      string
+	// DiscountErr 是读取优惠时遇到的问题：有优惠、结束时间元素也在，但值无法解析（只写字段名与错误类型）
+	DiscountErr string
+	HasHR       bool
+	IMDbID      string
+	DoubanID    string
 }
 
 // NexusPHPDetailParser 接口定义
@@ -254,6 +256,13 @@ func renderedPromotionAliases(level DiscountLevel) []string {
 }
 
 func (p *NexusPHPParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, time.Time) {
+	discount, endTime, _ := p.parseDiscount(doc)
+	return discount, endTime
+}
+
+// parseDiscount 返回优惠级别、结束时间与读取问题。有优惠、结束时间元素的 title 非空却无法解析时，
+// 结束时间留空并返回诊断说明——不能悄悄当成「没有结束时间」。没有优惠时结束时间无关，不记问题。
+func (p *NexusPHPParser) parseDiscount(doc *goquery.Selection) (DiscountLevel, time.Time, string) {
 	discount := DiscountNone
 	doc.Find(p.config.DiscountSelector).EachWithBreak(func(_ int, el *goquery.Selection) bool {
 		class, exists := el.Attr("class")
@@ -269,14 +278,18 @@ func (p *NexusPHPParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, t
 		return true
 	})
 
-	var endTime time.Time
-	if attr := doc.Find(p.config.EndTimeSelector).First().AttrOr("title", ""); attr != "" {
-		if t, err := ParseTimeInCST(p.config.TimeLayout, attr); err == nil {
-			endTime = t
-		}
+	value := strings.TrimSpace(doc.Find(p.config.EndTimeSelector).First().AttrOr("title", ""))
+	if value == "" {
+		return discount, time.Time{}, ""
 	}
-
-	return discount, endTime
+	endTime, err := ParseTimeInCST(p.config.TimeLayout, value)
+	if err != nil {
+		if discount == DiscountNone {
+			return discount, time.Time{}, ""
+		}
+		return discount, time.Time{}, DiscountTimeParseNote("discountEndTime")
+	}
+	return discount, endTime, ""
 }
 
 func (p *NexusPHPParser) ParseHR(doc *goquery.Selection) bool {
@@ -331,7 +344,7 @@ func (p *NexusPHPParser) ParseExternalIDs(doc *goquery.Selection) (imdbID, douba
 
 func (p *NexusPHPParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo {
 	title, torrentID := p.ParseTitleAndID(doc)
-	discount, endTime := p.ParseDiscount(doc)
+	discount, endTime, discountErr := p.parseDiscount(doc)
 	imdbID, doubanID := p.ParseExternalIDs(doc)
 	return &TorrentDetailInfo{
 		TorrentID:     torrentID,
@@ -339,6 +352,7 @@ func (p *NexusPHPParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo {
 		SizeMB:        p.ParseSizeMB(doc),
 		DiscountLevel: discount,
 		DiscountEnd:   endTime,
+		DiscountErr:   discountErr,
 		HasHR:         p.ParseHR(doc),
 		IMDbID:        imdbID,
 		DoubanID:      doubanID,

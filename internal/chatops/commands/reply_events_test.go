@@ -98,6 +98,7 @@ func TestSitesReplyEvents(t *testing.T) {
 		"uploaded_bytes": int64(1 << 40), "downloaded_bytes": int64(1 << 39), "ratio": float64(2), "bonus": 1234.6, "class": "VIP",
 	}, f)
 	assert.Contains(t, r.Text, "Bonus: 1235")
+	assert.Contains(t, r.Text, "Downloaded (billed): 512.00 GiB", "站点报的下载量写明是计费口径")
 }
 
 type siteInfoService struct {

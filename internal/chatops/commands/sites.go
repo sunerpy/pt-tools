@@ -37,7 +37,8 @@ func sitesHandler(ctx context.Context, args []string, src chatops.Source) (chato
 			return errReply(src.ReplyLang, "查询失败: %v", "query failed: %v", err), nil
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "Site: %s\nUser: %s\nUploaded: %s\nDownloaded: %s\nRatio: %s\nBonus: %s\nClass: %s",
+		// 站点报的下载量是计费口径（按免费、折扣折算以后计入分享率的数），不是实际传输量
+		fmt.Fprintf(&b, "Site: %s\nUser: %s\nUploaded: %s\nDownloaded (billed): %s\nRatio: %s\nBonus: %s\nClass: %s",
 			info.SiteName, info.Username, info.Uploaded, info.Downloaded, info.Ratio, info.Bonus, info.Class)
 		return eventReply(wrapMono(b.String()), notify.EventReplySiteInfo, map[string]any{
 			"site": info.SiteName, "user": info.Username, "uploaded": info.Uploaded, "downloaded": info.Downloaded,

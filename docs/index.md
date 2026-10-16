@@ -55,7 +55,7 @@ home:
             status: available
             link: /guide/user-stats
           - title: 每日战报
-            body: 每天定时把各站当天的上传、下载、魔力增量和登录异常发到选定的通知通道，默认关闭。
+            body: 每天定时把各站当天的上传、下载（计费）、魔力增量和登录异常发到选定的通知通道，默认关闭。
             status: available
             link: /guide/user-stats#每日战报
           - title: 跨站点搜索

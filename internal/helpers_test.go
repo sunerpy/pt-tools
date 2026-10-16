@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
@@ -373,4 +375,15 @@ func setupTestDB(t *testing.T) func() {
 	return func() {
 		// cleanup if needed
 	}
+}
+
+// pushLoopLegacy 用没有 RSS 编号的暂存推送跑推送循环（不按归属过滤，本次尝试从现在算）。
+func pushLoopLegacy(ctx context.Context, dl downloader.Downloader, dlInfo *DownloaderInfo, dir string, files []string,
+	category, tags, downloadPath string, siteName models.SiteGroup, pauseOnFreeEnd bool, retainHours int,
+) pushLoopResult {
+	sp := &stagedPush{
+		rss: models.RSSConfig{PauseOnFreeEnd: pauseOnFreeEnd}, dl: dl, dlInfo: dlInfo, category: category,
+		tags: tags, downloadPath: downloadPath, siteName: siteName, attemptStart: time.Now(),
+	}
+	return runPushLoop(ctx, sp, dir, files, retainHours)
 }

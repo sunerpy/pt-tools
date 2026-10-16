@@ -141,12 +141,19 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 	// Update cache
 	s.cache.set(siteID, info)
 
-	s.logger.Info(
-		"User info fetched and saved",
+	// 账号的下载量有两种口径，日志里并列写明：downloaded_billed 是站点计费的下载量（按免费、折扣折算以后
+	// 计入分享率），downloaded_actual 是部分站点另外报的实际传输量（站点不报时没有这一项）。
+	// 免费种子只让实际下载增长，判断有没有产生计费下载看 downloaded_billed。
+	fields := []zap.Field{
 		zap.String("site", siteID),
 		zap.String("username", info.Username),
 		zap.Int64("uploaded", info.Uploaded),
-	)
+		zap.Int64("downloaded_billed", info.Downloaded),
+	}
+	if info.TrueDownloaded > 0 {
+		fields = append(fields, zap.Int64("downloaded_actual", info.TrueDownloaded))
+	}
+	s.logger.Info("User info fetched and saved", fields...)
 
 	return info, nil
 }

@@ -58,6 +58,10 @@ func TestNewDBWithVersionAndHooks_PersistsTorrent(t *testing.T) {
 	var glCnt int64
 	require.NoError(t, tdb.DB.Model(&SettingsGlobal{}).Count(&glCnt).Error)
 	assert.Equal(t, int64(1), glCnt)
+	// 新安装默认提前 5 分钟暂停免费到期的种子（留出 tracker 汇报延迟）
+	var gl SettingsGlobal
+	require.NoError(t, tdb.DB.First(&gl).Error)
+	assert.Equal(t, 5, gl.FreeEndAdvanceMinutes)
 }
 
 func TestTorrentDB_WithTransactionContext(t *testing.T) {

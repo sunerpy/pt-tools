@@ -7,7 +7,9 @@ import '../format.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
 
-/// 概览：已启用站点的合计（上传、下载、分享率、魔力、做种、站内信）、今天的增量、下载器的速度。
+/// 概览：已启用站点的合计（上传、计费下载、分享率、魔力、做种、站内信）、今天的增量、下载器的速度。
+///
+/// 站点报的下载量是计费口径（按免费、折扣折算以后计入分享率），不是实际传输量；App API 没有实际传输量。
 class OverviewPage extends ConsumerWidget {
   const OverviewPage({super.key});
 
@@ -212,6 +214,11 @@ class _Today extends StatelessWidget {
                     style: t.textTheme.bodySmall,
                   ),
                 ),
+            ],
+            // 上面的 ↓ 都是计费下载量，增量来自每日快照，快照只存这个口径
+            if (d.error == null || d.error!.isEmpty) ...[
+              const SizedBox(height: 8),
+              Text(s.todayBilledNote, style: t.textTheme.bodySmall),
             ],
           ],
         ),

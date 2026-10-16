@@ -15,6 +15,7 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
+import { freeEndLabel, freeStatusReasons } from "@/utils/freeStatus";
 import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
@@ -270,6 +271,7 @@ const warnRows = computed<BreakdownRow[]>(() => {
     if (t.retryCount > 0) reasons.push(`重试过 ${t.retryCount} 次`);
     if (t.lastError) reasons.push(t.lastError);
     if (!t.isDownloaded && !t.isExpired && t.freeEndTime) reasons.push("免费期内还没下载");
+    reasons.push(...freeStatusReasons(t));
     if (reasons.length === 0) continue;
     out.push({
       key: String(t.id),
@@ -755,11 +757,9 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
         <el-table-column v-if="taskColShown('freeEnd')" label="免费结束" width="124">
           <template #default="{ row }">
-            <!-- 紧凑格式单行显示（之前「2026/9/30 20:00:00」在 150 宽里折两行），完整时间在 title -->
-            <span
-              :class="row.isExpired ? 'cell-dang' : 'cell-mute'"
-              :title="formatTime(row.freeEndTime)">
-              {{ formatShortDateTime(row.freeEndTime) }}
+            <!-- 紧凑格式单行显示（之前「2026/9/30 20:00:00」在 150 宽里折两行），完整时间与资格读取时间在 title -->
+            <span :class="`cell-${freeEndLabel(row).tone}`" :title="freeEndLabel(row).title">
+              {{ freeEndLabel(row).text }}
             </span>
           </template>
         </el-table-column>
@@ -838,9 +838,9 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
               {{ getDiscount(task).text }}
             </PtStatusPill>
             <span>{{ formatSize(task.torrentSize) }}</span>
-            <span :class="task.isExpired ? 'cell-dang' : undefined">
+            <span :class="`cell-${freeEndLabel(task).tone}`" :title="freeEndLabel(task).title">
               <PtIcon name="clock" :size="11" />
-              {{ formatTime(task.freeEndTime) }}
+              {{ freeEndLabel(task).text }}
             </span>
           </template>
 
@@ -1155,6 +1155,10 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
 .cell-dang {
   color: var(--pt-dang);
+}
+
+.cell-warn {
+  color: var(--pt-warn);
 }
 
 /*

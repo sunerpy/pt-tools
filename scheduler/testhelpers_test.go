@@ -30,6 +30,8 @@ type schedFakeDownloader struct {
 	removeErr   error
 	pauseErr    error
 	getErr      error
+	// pauseNoop：暂停接口返回成功，但种子状态不变（模拟下载器没真的暂停）
+	pauseNoop bool
 
 	// per-torrent GetTorrent override keyed by id
 	torrentByID map[string]downloader.Torrent
@@ -38,6 +40,7 @@ type schedFakeDownloader struct {
 	removedBatch    [][]string
 	removedSingle   []string
 	pausedIDs       []string
+	resumedIDs      []string
 	removeDataFlags []bool
 	closeCount      int
 }
@@ -106,10 +109,26 @@ func (f *schedFakeDownloader) PauseTorrent(id string) error {
 		return f.pauseErr
 	}
 	f.pausedIDs = append(f.pausedIDs, id)
+	if f.pauseNoop {
+		return nil
+	}
+	// 和真的下载器一样：暂停以后再读，状态是暂停
+	if t, ok := f.torrentByID[id]; ok {
+		t.State = downloader.TorrentPaused
+		f.torrentByID[id] = t
+	}
+	for i := range f.torrents {
+		if f.torrents[i].ID == id || f.torrents[i].InfoHash == id {
+			f.torrents[i].State = downloader.TorrentPaused
+		}
+	}
 	return nil
 }
 
-func (f *schedFakeDownloader) ResumeTorrent(_ string) error { return nil }
+func (f *schedFakeDownloader) ResumeTorrent(id string) error {
+	f.resumedIDs = append(f.resumedIDs, id)
+	return nil
+}
 
 func (f *schedFakeDownloader) RemoveTorrent(id string, removeData bool) error {
 	if f.removeErr != nil {

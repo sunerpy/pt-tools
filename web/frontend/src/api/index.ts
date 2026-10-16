@@ -174,6 +174,14 @@ export interface TaskItem {
   torrentSize: number; // 种子大小（字节）
   downloaderId?: number | null; // 推送到的下载器
   downloaderName?: string;
+  /** 免费资格：not_free / free_until / free_permanent / unknown（结束时间缺失或解析失败） */
+  freeValidity?: string;
+  freeVerifiedAt?: string | null; // 最近一次读到资格的时间
+  freeStatusError?: string; // 读取资格时的问题（不含原始响应）
+  requireFree?: boolean; // 推送是否以免费为前提
+  pauseOnFreeEnd?: boolean;
+  pausePlannedAt?: string | null; // 计划暂停时间（结束时间减提前量）
+  freeEndFailures?: number; // 到期暂停连续失败次数
 }
 
 export interface TaskListResponse {

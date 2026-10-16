@@ -68,7 +68,7 @@ Clients such as Claude Desktop only start a local program and talk to it over st
 | `list_downloader_torrents` | MCP read   | Torrents in the downloaders, paginated, filterable by downloader, state and keyword, sortable                      |
 | `get_downloader_stats`     | MCP read   | Whether each downloader is reachable, its upload and download speed, totals and free space                         |
 | `search_torrents`          | MCP read   | Search the enabled sites; results carry the site and torrent ID, never a download link                             |
-| `get_site_userinfo`        | MCP read   | Upload, download, ratio, bonus, seeding count, unread messages, login state and check-in per site                  |
+| `get_site_userinfo`        | MCP read   | Upload, billed download, ratio, bonus, seeding count, unread messages, login state and check-in per site           |
 | `check_updates`            | MCP read   | Whether a newer release exists; it never upgrades                                                                  |
 | `explore_media`            | MCP read   | Find movies and TV shows on TMDB by title, or list this week's trending and popular ones                           |
 | `list_subscriptions`       | MCP read   | Subscriptions and their progress: aired, in the library, downloading and missing episodes                          |
@@ -80,6 +80,7 @@ Clients such as Claude Desktop only start a local program and talk to it over st
 
 - Tools that change your downloaders or subscriptions require `confirm=true`: the assistant has to ask you first.
 - `push_torrent` has pt-tools download the torrent file with its own site configuration and goes through the disk-space protection and the site seeding-capacity check as usual. It does not take magnet links and never requests any other address. Torrents pushed through MCP show the source `mcp_push` in the task list.
+- The download figure `get_site_userinfo` returns (`downloaded`) is the billed download: what the site counts toward your ratio after free and discount promotions, not the amount actually transferred. See [Statistics](user-stats.md#two-kinds-of-download-figures).
 - The data returned is the same as the [App API](../reference/app-api.md) returns: no cookies, passkeys, passwords, RSS addresses or PT torrent download links, and downloader error messages have the downloader's address removed. `check_updates` returns the public GitHub release pages and asset addresses.
 - Invalid arguments (a missing required field, a value out of range, an unknown field) make the tool fail right away without calling pt-tools.
 

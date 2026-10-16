@@ -68,7 +68,7 @@ Claude Desktop 这类客户端只会启动一个本地程序，经标准输入�
 | `list_downloader_torrents` | MCP 读取 | 下载器里的种子，分页，可以按下载器、状态、关键字筛选与排序                   |
 | `get_downloader_stats`     | MCP 读取 | 各台下载器连不连得上、上传下载速度、累计量与剩余空间                         |
 | `search_torrents`          | MCP 读取 | 在已启用的站点上搜索种子；结果带站点与种子编号，不带下载链接                 |
-| `get_site_userinfo`        | MCP 读取 | 各站点的上传、下载、分享率、魔力、做种数、未读消息、登录状态与签到结果       |
+| `get_site_userinfo`        | MCP 读取 | 各站点的上传、计费下载量、分享率、魔力、做种数、未读消息、登录状态与签到结果 |
 | `check_updates`            | MCP 读取 | 有没有新版本，只看不升级                                                     |
 | `explore_media`            | MCP 读取 | 按片名在 TMDB 找电影与剧集，或者看本周趋势、热门                             |
 | `list_subscriptions`       | MCP 读取 | 订阅与进度：已播、已入库、下载中与缺的集                                     |
@@ -80,6 +80,7 @@ Claude Desktop 这类客户端只会启动一个本地程序，经标准输入�
 
 - 会改动下载器或订阅的工具都要带 `confirm=true`：AI 助手要先向你确认，再调用。
 - `push_torrent` 由 pt-tools 用自己的站点配置下载种子文件，照常经过磁盘空间保护与站点做种容量的检查；不接受磁力链接，也不去请求别的地址。经 MCP 推送的种子在任务列表里的来源是 `mcp_push`。
+- `get_site_userinfo` 返回的下载量（`downloaded`）是站点计费的下载量：站点按免费、折扣折算以后计入分享率的数，不是实际传输量，详见[数据统计](user-stats.md#下载量的两种口径)。
 - 返回的数据和 [App API](../reference/app-api.md) 一样：没有 Cookie、Passkey、密码、RSS 地址与 PT 站点的种子下载链接，下载器的错误信息里也去掉了它的地址。`check_updates` 会返回 GitHub 上公开的发布页与安装包地址。
 - 参数不对（缺必填项、取值不在范围里、多出不认识的字段）时工具直接报错，不会去调用 pt-tools 的接口。
 

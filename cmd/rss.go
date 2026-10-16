@@ -122,6 +122,8 @@ func executeTaskUnified(ctx context.Context, cfg models.RSSConfig, siteImpl inte
 
 // processRSSUnified 使用 UnifiedPTSite 接口处理单个 RSS 配置
 func processRSSUnified(ctx context.Context, cfg models.RSSConfig, ptSite internal.UnifiedPTSite) error {
+	// 取详情与推送共用这一轮的开始时间：推送只认这一轮读到的免费资格
+	ctx = internal.WithRSSAttempt(ctx, time.Now())
 	if err := internal.FetchAndDownloadFreeRSSUnified(ctx, ptSite, cfg); err != nil {
 		return err
 	}

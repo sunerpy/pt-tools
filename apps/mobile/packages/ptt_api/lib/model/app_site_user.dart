@@ -40,6 +40,7 @@ class AppSiteUser {
 
   int uploaded;
 
+  /// 站点按优惠折算后的计费下载量（计入分享率），不是实际传输量
   int downloaded;
 
   double ratio;

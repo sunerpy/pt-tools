@@ -55,7 +55,7 @@ home:
             status: available
             link: /en/guide/user-stats
           - title: Daily report
-            body: Each day at a set time, sends every site's upload, download and bonus increments and any login problems to the channels you choose. Off by default.
+            body: Each day at a set time, sends every site's upload, billed download and bonus increments and any login problems to the channels you choose. Off by default.
             status: available
             link: /en/guide/user-stats#daily-report
           - title: Search across sites

@@ -63,8 +63,9 @@ func TestMigrationV10ToV11ClearsPlaintextCookies(t *testing.T) {
 
 	version, err := sm.GetCurrentVersion()
 	require.NoError(t, err)
-	assert.Equal(t, 11, version)
-	assert.Equal(t, 11, CurrentSchemaVersion)
+	// 之后的迁移照样跑完；最新版本号由 v12 的测试钉住
+	assert.Equal(t, CurrentSchemaVersion, version)
+	assert.GreaterOrEqual(t, CurrentSchemaVersion, 11)
 
 	// 再跑一次没有可迁移的行，什么也不做。
 	encrypts := hooks.encryptCalls.Load()

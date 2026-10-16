@@ -241,7 +241,7 @@ func testRousiProDetail(t *testing.T) {
 	assert.Equal(t, 10, data.Downloads)
 
 	driver := newTestRousiDriver()
-	discount, _ := driver.parsePromotion(data.Promotion)
+	discount, _, _ := driver.parsePromotion(data.Promotion)
 	assert.Equal(t, v2.DiscountFree, discount, "promotion type 2 should be Free")
 }
 
@@ -419,7 +419,7 @@ func TestRousiDriver_ParsePromotion_Types(t *testing.T) {
 		{&rousiPromotion{IsActive: true, Type: 99, DownMultiplier: 1, UpMultiplier: 1}, v2.DiscountNone},
 	}
 	for _, c := range cases {
-		got, _ := d.parsePromotion(c.promo)
+		got, _, _ := d.parsePromotion(c.promo)
 		assert.Equal(t, c.want, got)
 	}
 }
@@ -428,16 +428,72 @@ func TestRousiDriver_ParsePromotion_Types(t *testing.T) {
 func TestRousiDriver_ParsePromotion_UntilLayouts(t *testing.T) {
 	d := newTestRousiDriverWithURL("https://rousi.pro")
 
-	_, end := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "2025-02-01T00:00:00+08:00"})
+	_, end, err := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "2025-02-01T00:00:00+08:00"})
+	require.NoError(t, err)
 	assert.False(t, end.IsZero())
 
-	_, end2 := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "2025-02-01 00:00:00"})
+	_, end2, err := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "2025-02-01 00:00:00"})
+	require.NoError(t, err)
 	assert.False(t, end2.IsZero())
 	// 不带时区的时间是北京时间：2025-02-01 00:00 CST 即 2025-01-31 16:00 UTC
 	assert.True(t, end2.Equal(time.Date(2025, 1, 31, 16, 0, 0, 0, time.UTC)), "got %s", end2.UTC())
 
-	_, end3 := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "garbage"})
+	// 所有写法都解析不了：结束时间留空，并报告出来（不能悄悄当成没有结束时间）
+	_, end3, err := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "garbage"})
+	require.Error(t, err)
 	assert.True(t, end3.IsZero())
+
+	// 没有 until：没有结束时间，不是解析失败
+	_, end4, err := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2})
+	require.NoError(t, err)
+	assert.True(t, end4.IsZero())
+}
+
+// 生效中的促销 until 解析不了：免费是 unknown 并记下原因；没有 until 时有效性留空（Promotion 推出 unknown）
+func TestRousiDriver_PromotionUntilUnparsable(t *testing.T) {
+	d := newTestRousiDriverWithURL("https://rousi.pro")
+	searchBody := `{"code":0,"message":"success","data":{"torrents":[
+		{"uuid":"a","title":"A","promotion":{"type":2,"is_active":true,"until":"2099-02-01T00:00:00+08:00"}},
+		{"uuid":"b","title":"B","promotion":{"type":2,"is_active":true,"until":"下周一"}},
+		{"uuid":"c","title":"C","promotion":{"type":2,"is_active":true}},
+		{"uuid":"d","title":"D","promotion":{"type":2,"is_active":false,"until":"下周一"}}
+	],"total":4}}`
+	resp := DecodeFixtureJSON[rousiResponse](t, "rousi_until", searchBody)
+	items, err := d.ParseSearch(resp)
+	require.NoError(t, err)
+	require.Len(t, items, 4)
+	now := time.Now()
+
+	assert.Empty(t, items[0].DiscountErr)
+	assert.Equal(t, v2.FreeUntil, items[0].Promotion(now).Validity)
+
+	assert.Equal(t, v2.DiscountFree, items[1].DiscountLevel)
+	assert.Equal(t, v2.FreeUnknown, items[1].DiscountValidity)
+	assert.Equal(t, "promotion.until: 时间格式无法解析", items[1].DiscountErr)
+	assert.Equal(t, v2.FreeUnknown, items[1].Promotion(now).Validity)
+
+	assert.Empty(t, items[2].DiscountValidity)
+	assert.Empty(t, items[2].DiscountErr)
+	assert.Equal(t, v2.FreeUnknown, items[2].Promotion(now).Validity, "没有结束时间不等于长期免费")
+
+	assert.Equal(t, v2.DiscountNone, items[3].DiscountLevel)
+	assert.Empty(t, items[3].DiscountErr, "促销没有生效时不看 until")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"uuid":"b","title":"B",` +
+			`"promotion":{"type":2,"is_active":true,"until":"下周一"}}}`))
+	}))
+	defer server.Close()
+	detailDriver := newTestRousiDriverWithURL(server.URL)
+	before := time.Now()
+	item, err := detailDriver.GetTorrentDetail(context.Background(), "b", "", "")
+	require.NoError(t, err)
+	require.NotNil(t, item)
+	assert.Equal(t, v2.FreeUnknown, item.DiscountValidity)
+	assert.Equal(t, "promotion.until: 时间格式无法解析", item.DiscountErr)
+	assert.False(t, item.FetchedAt.Before(before), "详情是实时请求，FetchedAt 是取得的时间：%s", item.FetchedAt)
+	assert.False(t, item.FetchedAt.After(time.Now()))
 }
 
 // TestRousiDriver_GetUserInfo_Full covers the full user data parse with seeding data + times.
@@ -749,8 +805,16 @@ func TestRousiDriver_GetTorrentDetail_NotFound(t *testing.T) {
 
 	d := newTestRousiDriverWithURL(server.URL)
 	item, err := d.GetTorrentDetail(context.Background(), "guid", "", "")
-	require.NoError(t, err)
+	// 找不到种子要返回错误：(nil, nil) 会让 RSS 工作协程解引用空指针
+	require.ErrorIs(t, err, v2.ErrTorrentDetailUnavailable)
+	require.ErrorIs(t, err, v2.ErrTorrentNotFound)
 	assert.Nil(t, item)
+
+	// 编号取自 RSS 链接，链接可能带密钥：错误里不带它
+	_, err = d.GetTorrentDetail(context.Background(), "guid", server.URL+"/torrent/abc?passkey=FAKE_TEST_PASSKEY_1234", "")
+	require.ErrorIs(t, err, v2.ErrTorrentDetailUnavailable)
+	assert.NotContains(t, err.Error(), "FAKE_TEST_PASSKEY_1234")
+	assert.NotContains(t, err.Error(), "guid")
 }
 
 func TestRousiDriver_GetTorrentDetail_APIError(t *testing.T) {

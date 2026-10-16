@@ -489,13 +489,16 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		}
 
 		// Parse discount end time
+		endTimeUnparsable := false
 		endTimeElem := s.Find(d.Selectors.DiscountEndTime)
 		if endTimeElem.Length() > 0 {
+			value := endTimeElem.Text()
 			if title, exists := endTimeElem.Attr("title"); exists {
-				item.DiscountEndTime = parseTime(title)
-			} else {
-				item.DiscountEndTime = parseTime(endTimeElem.Text())
+				value = title
 			}
+			endTime, err := parseDiscountEndTime(value)
+			item.DiscountEndTime = endTime
+			endTimeUnparsable = err != nil
 		}
 
 		// Fallback: parse discount end time from onmouseover attribute of discount icon
@@ -503,8 +506,18 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		// Format: domTT_activate(..., '<span title="2026-01-18 22:37:47">1时19分</span>', ...)
 		if item.DiscountEndTime.IsZero() && discountElem.Length() > 0 {
 			if onmouseover, exists := discountElem.Attr("onmouseover"); exists && onmouseover != "" {
-				item.DiscountEndTime = parseDiscountEndTimeFromOnmouseover(onmouseover)
+				endTime, err := parseDiscountEndTimeFromOnmouseover(onmouseover)
+				item.DiscountEndTime = endTime
+				if err != nil {
+					endTimeUnparsable = true
+				}
 			}
+		}
+
+		// 结束时间元素的值非空却解析不了、优惠图标的提示里也取不到：结束时间不可信，
+		// 不能当成「没有结束时间」，免费的有效性是 unknown
+		if endTimeUnparsable && item.DiscountEndTime.IsZero() {
+			NoteDiscountTimeUnparsable(&item, "discountEndTime")
 		}
 
 		// Parse download link - use proxy URL instead of direct link for authentication handling
@@ -1709,12 +1722,43 @@ func parseDiscountFromElement(elem *goquery.Selection, customMapping map[string]
 
 var discountEndTimeInOnmouseoverRegex = regexp.MustCompile(`title=(?:&quot;|")(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:&quot;|")`)
 
-func parseDiscountEndTimeFromOnmouseover(onmouseover string) time.Time {
+// parseDiscountEndTimeFromOnmouseover 从优惠图标的 onmouseover 提示里取结束时间：提示里没有时间时返回零时间且没有错误；
+// 有时间却解析不了（例如日期越界）返回错误。
+func parseDiscountEndTimeFromOnmouseover(onmouseover string) (time.Time, error) {
 	matches := discountEndTimeInOnmouseoverRegex.FindStringSubmatch(onmouseover)
-	if len(matches) >= 2 {
-		return parseTime(matches[1])
+	if len(matches) < 2 {
+		return time.Time{}, nil
 	}
-	return time.Time{}
+	return parseDiscountEndTime(matches[1])
+}
+
+// discountEndTimeLayouts 是列表页优惠结束时间不带时区的写法，按北京时间解释（与详情页解析一致；
+// time.Parse 会当成 UTC，结束时刻晚 8 小时）。都带年份：不带年份的写法定不下时刻，按无法解析处理。
+var discountEndTimeLayouts = []string{
+	"2006-01-02 15:04:05",
+	"2006-01-02 15:04",
+	"2006/01/02 15:04:05",
+	"2006/01/02 15:04",
+}
+
+var errDiscountEndTimeFormat = errors.New("unrecognized discount end time format")
+
+// parseDiscountEndTime 解析列表页里的优惠结束时间：空值返回零时间且没有错误（没有结束时间）；非空但无法解析返回错误。
+// 带时区的 RFC3339 照原样，不带时区的写法按北京时间。
+func parseDiscountEndTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	for _, layout := range discountEndTimeLayouts {
+		if t, err := ParseTimeInCST(layout, value); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, errDiscountEndTimeFormat
 }
 
 // parseTime parses various time formats
@@ -2137,6 +2181,7 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 		return nil, ErrParseError
 	}
 
+	fetchedAt := time.Now().UTC()
 	parser := NewNexusPHPParserFromDefinition(d.GetSiteDefinition())
 	detailInfo := parser.ParseAll(res.Document.Selection)
 
@@ -2150,7 +2195,10 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 		SourceSite:      d.getSiteID(),
 		IMDbID:          detailInfo.IMDbID,
 		DoubanID:        detailInfo.DoubanID,
+		FetchedAt:       fetchedAt,
 	}
+	// 结束时间元素在、值解析不了：免费的有效性是 unknown（元素不在时不写，由 Promotion 按零结束时间推出 unknown）
+	markDiscountUnreliable(item, detailInfo.DiscountErr)
 
 	return item, nil
 }

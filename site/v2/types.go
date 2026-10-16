@@ -39,6 +39,9 @@ var (
 	ErrUserInfoPersist = errors.New("persist user info failed")
 	// ErrCloudflareChallenge 表示站点返回的是 Cloudflare 质询页：请求被反爬拦截，凭证本身未必有问题。
 	ErrCloudflareChallenge = errors.New("cloudflare challenge")
+	// ErrTorrentDetailUnavailable 表示读不到这个种子的详情（站点上找不到，或缓存里没有）。
+	// 调用方要当作取详情失败处理，不能当成「不是免费」，也不能沿用旧数据。
+	ErrTorrentDetailUnavailable = errors.New("torrent detail unavailable")
 )
 
 // SiteKind represents the type of PT site architecture
@@ -181,6 +184,72 @@ var FreeDiscountLevels = []DiscountLevel{
 	Discount2xFree,
 }
 
+// FreeValidity 是免费资格的规范状态（docs/design/free-expiry-safety.md §4.1）。
+type FreeValidity string
+
+const (
+	// FreeNotFree：不是免费，或免费已经结束
+	FreeNotFree FreeValidity = "not_free"
+	// FreeUntil：免费，结束时间可信（EndsAt）
+	FreeUntil FreeValidity = "free_until"
+	// FreePermanent：站点明确表示长期有效的免费
+	FreePermanent FreeValidity = "free_permanent"
+	// FreeUnknown：免费但结束时间缺失或无法解析，不能当作免费放行的凭据
+	FreeUnknown FreeValidity = "unknown"
+)
+
+// PromotionSnapshot 是一次读取站点得到的优惠快照。不变量：free_until 一定有晚于 VerifiedAt 的 EndsAt；
+// free_permanent 只来自站点明确语义；unknown 不是免费放行的凭据。EndsAt 一律是绝对时间。
+type PromotionSnapshot struct {
+	Level      DiscountLevel
+	Validity   FreeValidity
+	EndsAt     *time.Time
+	VerifiedAt time.Time
+	Source     string
+	Err        string
+}
+
+// FreeFor 报告快照在 now 时能不能当作免费放行：长期免费，或者免费到 EndsAt 且 EndsAt-now 大于 margin。
+func (s PromotionSnapshot) FreeFor(now time.Time, margin time.Duration) bool {
+	switch s.Validity {
+	case FreePermanent:
+		return true
+	case FreeUntil:
+		return s.EndsAt != nil && s.EndsAt.Sub(now) > margin
+	}
+	return false
+}
+
+// Promotion 把驱动给出的优惠字段整理成规范快照。verifiedAt 是读到这份数据的时间。
+func (t *TorrentItem) Promotion(verifiedAt time.Time) PromotionSnapshot {
+	s := PromotionSnapshot{Level: t.DiscountLevel, VerifiedAt: verifiedAt, Source: t.DiscountSource, Err: t.DiscountErr}
+	if !t.DiscountEndTime.IsZero() {
+		end := t.DiscountEndTime.UTC()
+		s.EndsAt = &end
+	}
+	if !IsFreeTorrent(t.DiscountLevel) {
+		s.Validity = FreeNotFree
+		return s
+	}
+	switch t.DiscountValidity {
+	case FreePermanent:
+		s.Validity, s.EndsAt = FreePermanent, nil
+		return s
+	case FreeNotFree, FreeUnknown:
+		s.Validity = t.DiscountValidity
+		return s
+	}
+	switch {
+	case s.EndsAt == nil:
+		s.Validity = FreeUnknown
+	case !s.EndsAt.After(verifiedAt):
+		s.Validity = FreeNotFree
+	default:
+		s.Validity = FreeUntil
+	}
+	return s
+}
+
 // IsFreeTorrent checks if the given discount level results in free download
 func IsFreeTorrent(level DiscountLevel) bool {
 	for _, freeLevel := range FreeDiscountLevels {
@@ -286,6 +355,15 @@ type TorrentItem struct {
 	DiscountLevel DiscountLevel `json:"discountLevel"`
 	// DiscountEndTime is when the discount expires
 	DiscountEndTime time.Time `json:"discountEndTime,omitempty"`
+	// DiscountValidity 是站点驱动按原始响应给出的免费有效性（见 Promotion）。为空时按保守规则推导：
+	// 免费但没有结束时间为 unknown（零时间不等于永久），结束时间已过为 not_free。只有站点明确表示长期有效才写 free_permanent。
+	DiscountValidity FreeValidity `json:"discountValidity,omitempty"`
+	// DiscountSource 是优惠来自哪里：base、promotion_rule、mall_single_free，或适配层（adapter）
+	DiscountSource string `json:"discountSource,omitempty"`
+	// DiscountErr 是读取优惠时遇到的问题（例如结束时间无法解析），只写字段名与错误类型，不放原始响应
+	DiscountErr string `json:"discountErr,omitempty"`
+	// FetchedAt 是底层数据实际取得的时间（缓存命中时是缓存刷新的时间）；为零时调用方按调用时间算
+	FetchedAt time.Time `json:"fetchedAt,omitempty"`
 	// HasHR indicates if the torrent has H&R requirements
 	HasHR bool `json:"hasHR,omitempty"`
 	// DownloadURL is the direct download URL
@@ -380,7 +458,8 @@ type UserInfo struct {
 	UserID string `json:"userId"`
 	// Uploaded is the total uploaded bytes
 	Uploaded int64 `json:"uploaded"`
-	// Downloaded is the total downloaded bytes
+	// Downloaded is the total downloaded bytes as the site bills them (计费下载量): free and
+	// discount promotions already applied, the figure that counts toward ratio
 	Downloaded int64 `json:"downloaded"`
 	// Ratio is the upload/download ratio
 	Ratio float64 `json:"ratio"`
@@ -430,9 +509,10 @@ type UserInfo struct {
 	HnRUnsatisfied int `json:"hnrUnsatisfied,omitempty"`
 	// HnRPreWarning is the number of H&R pre-warnings
 	HnRPreWarning int `json:"hnrPreWarning,omitempty"`
-	// TrueUploaded is the true uploaded bytes (some sites track separately)
+	// TrueUploaded is the actual uploaded bytes, reported separately by some sites (实际上传量)
 	TrueUploaded int64 `json:"trueUploaded,omitempty"`
-	// TrueDownloaded is the true downloaded bytes
+	// TrueDownloaded is the actual downloaded bytes before promotions (实际下载量). It grows on
+	// free torrents while Downloaded does not; daily snapshots do not keep it.
 	TrueDownloaded int64 `json:"trueDownloaded,omitempty"`
 	// Uploads is the number of torrents uploaded by user
 	Uploads int `json:"uploads,omitempty"`
@@ -460,7 +540,7 @@ type LevelProgress struct {
 type AggregatedStats struct {
 	// TotalUploaded is the sum of all uploaded bytes
 	TotalUploaded int64 `json:"totalUploaded"`
-	// TotalDownloaded is the sum of all downloaded bytes
+	// TotalDownloaded is the sum of all billed downloaded bytes (UserInfo.Downloaded)
 	TotalDownloaded int64 `json:"totalDownloaded"`
 	// AverageRatio is the average ratio across all sites
 	AverageRatio float64 `json:"averageRatio"`
@@ -557,7 +637,9 @@ type HashDownloader interface {
 type TorrentDetailFetcher interface {
 	// GetTorrentDetail fetches detailed torrent info given an RSS item's GUID and link.
 	// The guid is typically the torrent ID, and link is the detail page URL.
-	// Returns nil TorrentItem if the torrent is not found (without error).
+	// 能判断出找不到种子、或读不到详情时，返回包装了 ErrTorrentDetailUnavailable 的错误，不返回 (nil, nil)，
+	// 也不返回一个「没有优惠」的占位结果（那等于声称不是免费）。
+	// 实时请求得到的结果写 FetchedAt；结果来自缓存时 FetchedAt 是缓存刷新的时间。
 	GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error)
 }
 

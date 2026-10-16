@@ -525,6 +525,9 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 	if !ok || site == nil {
 		return fmt.Errorf("站点 %s 未启用或未注册", task.SiteName)
 	}
+	// 这一轮列表的读取时间：只收免费的任务推送时以它为资格的「本次尝试」（直接问站点，不经搜索缓存）
+	searchAt := m.cfg.Clock.Now()
+	requireFree := brushRequiresFree(*task)
 	searchCtx, cancel := context.WithTimeout(ctx, brushSearchTimeout)
 	items, err := site.Search(searchCtx, v2.SearchQuery{FreeOnly: true})
 	cancel()
@@ -637,6 +640,14 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 				SizeBytes: size, HasHR: hasHR, HRSeedTimeH: hrHours,
 				IsFree: v2.IsFreeTorrent(it.DiscountLevel), FreeLevel: string(it.DiscountLevel), FreeEndTime: freeEnd,
 			},
+			Policy: ptinternal.AdmissionPolicy{
+				RequireFree:  requireFree,
+				SafetyMargin: ptinternal.DefaultSafetyMargin(),
+				SourceKind:   ptinternal.SourceKindBrush,
+				AttemptStart: searchAt,
+				Clock:        m.cfg.Clock.Now,
+			},
+			Snapshot: brushSnapshot(it, searchAt),
 		})
 		if err != nil {
 			// 推送出错（下载器不可达等）：这一轮不再继续，免得对着同一个错误把列表里的种子全下一遍
@@ -649,6 +660,11 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 			continue
 		}
 		if !pushRes.Success {
+			if pushRes.Status.IsFreeRejection() {
+				// 这个种子的免费资格不够（快到期、结束时间未知）：跳过它，后面的种子不受影响
+				res.Skipped = append(res.Skipped, it.Title+"："+pushRes.Message)
+				continue
+			}
 			// 磁盘保护或站点容量闸门拒绝：后面的种子同样会被拒，停在这里
 			res.Stopped = "推送被拒绝：" + pushRes.Message
 			return nil

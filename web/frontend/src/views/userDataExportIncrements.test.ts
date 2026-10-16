@@ -88,8 +88,9 @@ describe("分享图：周期增量", () => {
 
     await vi.waitFor(() => expect(posterStats()["本周上传"]).toBe("+4 GB"));
     expect(api.getSummary).toHaveBeenCalledWith("7d");
-    expect(posterStats()["本周下载"]).toBe("+1 GB");
+    expect(posterStats()["本周下载（计费）"]).toBe("+1 GB");
     expect(posterStats()["本周魔力"]).toBe("+250");
+    expect(posterStats()["总下载（计费）"], "账号的下载量写明是计费口径").toBe("10 GB");
   });
 
   it("关掉开关：三格撤下", async () => {

@@ -583,3 +583,35 @@ func TestNexusPHPParserFromDefinition_Default(t *testing.T) {
 	p2 := NewNexusPHPParserFromDefinition(def)
 	assert.Equal(t, "2006-01-02", p2.config.TimeLayout)
 }
+
+// 结束时间元素在、值却解析不了：要能看出来（DiscountErr），不能悄悄当成没有结束时间
+func TestNexusPHPParser_ParseAll_DiscountEndUnparsable(t *testing.T) {
+	parser := NewNexusPHPParser()
+	cases := []struct {
+		name    string
+		html    string
+		level   DiscountLevel
+		zeroEnd bool
+		wantErr string
+	}{
+		{"免费且结束时间有效", `<h1><font class="free">免费</font><span title="2099-10-20 12:00:00">3天</span></h1>`, DiscountFree, false, ""},
+		{"免费但结束时间无法解析", `<h1><font class="free">免费</font><span title="3天2时">3天</span></h1>`, DiscountFree, true, "discountEndTime: 时间格式无法解析"},
+		{"免费且没有结束时间元素", `<h1><font class="free">免费</font></h1>`, DiscountFree, true, ""},
+		{"结束时间元素的 title 是空白", `<h1><font class="free">免费</font><span title=" ">3天</span></h1>`, DiscountFree, true, ""},
+		{"半价的结束时间无法解析也记下", `<h1><font class="halfdown">50%</font><span title="bad">x</span></h1>`, DiscountPercent50, true, "discountEndTime: 时间格式无法解析"},
+		{"没有优惠时不记结束时间问题", `<h1>Normal <span title="提示文字">x</span></h1>`, DiscountNone, true, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			info := parser.ParseAll(parseHTML(t, "<html><body>"+c.html+"</body></html>"))
+			assert.Equal(t, c.level, info.DiscountLevel)
+			assert.Equal(t, c.zeroEnd, info.DiscountEnd.IsZero())
+			assert.Equal(t, c.wantErr, info.DiscountErr)
+		})
+	}
+
+	// ParseDiscount 的返回值不变
+	level, end := parser.ParseDiscount(parseHTML(t, `<html><body><h1><font class="free">免费</font><span title="3天2时">3天</span></h1></body></html>`))
+	assert.Equal(t, DiscountFree, level)
+	assert.True(t, end.IsZero())
+}

@@ -96,7 +96,7 @@ func TestHandleFreeEnded_AutoDelete_KeepsSharedData(t *testing.T) {
 		fake.torrents = []downloader.Torrent{inc, {ID: "other", InfoHash: "other", Progress: 1, ContentPath: "/d/Movie"}}
 		freeEnd := time.Now().Add(-time.Minute)
 		tor := models.TorrentInfo{
-			SiteName: "s", TorrentID: "ad9", Title: "Shared", PauseOnFreeEnd: true,
+			SiteName: "s", TorrentID: "ad9", Title: "Shared", PauseOnFreeEnd: true, IsFree: true,
 			FreeEndTime: &freeEnd, DownloaderTaskID: "task-sh", DownloaderName: "qb1",
 		}
 		require.NoError(t, db.DB.Create(&tor).Error)
@@ -115,7 +115,7 @@ func TestHandleFreeEnded_AutoDelete_KeepsSharedData(t *testing.T) {
 	var updated models.TorrentInfo
 	require.NoError(t, m.db.First(&updated, tor.ID).Error)
 	assert.False(t, updated.IsPausedBySystem)
-	assert.Greater(t, updated.RetryCount, 0, "下次再试")
+	assert.Greater(t, updated.FreeEndFailures, 0, "下次再试")
 }
 
 // 紧急清理：数据还被不删的种子用着的删了腾不出空间，不额外挑；和要删的种子共用数据的可以一起删，空间只算一次。

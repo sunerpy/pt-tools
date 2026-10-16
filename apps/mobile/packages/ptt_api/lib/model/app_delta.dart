@@ -28,6 +28,7 @@ class AppDelta {
 
   int uploaded;
 
+  /// 今天计费下载量的增量；每日快照只存计费口径，没有实际传输量
   int downloaded;
 
   double bonus;

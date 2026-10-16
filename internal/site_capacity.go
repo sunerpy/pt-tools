@@ -6,15 +6,12 @@ package internal
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
-	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 // gibiByte 是 1 GiB 的字节数，用于 SeedingCapacityGB 与字节数之间换算。
@@ -105,28 +102,6 @@ func trackerBelongsToSite(siteName string, t downloader.Torrent, resolver *v2.Tr
 	}
 	id, ok := resolver.Resolve(t.Tracker)
 	return ok && strings.EqualFold(id, siteName)
-}
-
-// checkSiteCapacity 判断推送这个种子后站点做种总量是否会超过 capGB；读不到做种总量时同样返回
-// ErrSiteCapacityExceeded（fail-closed）。torrentSize 未知时从种子文件解析。
-func checkSiteCapacity(ctx context.Context, siteName string, dl downloader.Downloader, capGB float64, torrentSize int64, torrentFile string) error {
-	if torrentSize <= 0 && torrentFile != "" {
-		if data, err := os.ReadFile(torrentFile); err == nil {
-			if size, sizeErr := qbit.ComputeTorrentSize(data); sizeErr == nil {
-				torrentSize = size
-			}
-		}
-	}
-	used, err := getSiteSeedingSizeBytes(ctx, siteName, dl)
-	if err != nil {
-		return fmt.Errorf("%w：无法读取站点做种总量，已拒绝推送: %v", ErrSiteCapacityExceeded, err)
-	}
-	capBytes := int64(capGB * gibiByte)
-	if used+torrentSize > capBytes {
-		return fmt.Errorf("%w (当前 %.1f GB + 种子 %.1f GB > %.1f GB)", ErrSiteCapacityExceeded,
-			float64(used)/gibiByte, float64(torrentSize)/gibiByte, capGB)
-	}
-	return nil
 }
 
 // siteSeedingCapacityGB 读取指定站点的 SeedingCapacityGB 配置；未配置/查不到/DB 不可用时返回 0（不限制）。

@@ -146,6 +146,11 @@ func (u *UnifiedSiteImpl) waitForRateLimit(ctx context.Context) error {
 
 // GetTorrentDetails 获取种子详情，返回统一的 TorrentItem
 func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem, error) {
+	return u.GetTorrentDetailsContext(u.ctx, item)
+}
+
+// GetTorrentDetailsContext 按调用方的 ctx 取详情：取消、超时与 v2.WithFreshAfter（只用这之后取得的数据）都传到驱动。
+func (u *UnifiedSiteImpl) GetTorrentDetailsContext(ctx context.Context, item *gofeed.Item) (*v2.TorrentItem, error) {
 	if !u.IsEnabled() {
 		return nil, errors.New(enableError)
 	}
@@ -153,7 +158,7 @@ func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem,
 		return nil, fmt.Errorf("RSS item 为空")
 	}
 
-	if err := u.waitForRateLimit(u.ctx); err != nil {
+	if err := u.waitForRateLimit(ctx); err != nil {
 		return nil, fmt.Errorf("速率限制等待失败: %w", err)
 	}
 
@@ -195,7 +200,7 @@ func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem,
 		return nil, fmt.Errorf("站点 %s 未实现 TorrentDetailFetcher", u.siteID)
 	}
 
-	return fetcher.GetTorrentDetail(u.ctx, item.GUID, item.Link, item.Title)
+	return fetcher.GetTorrentDetail(ctx, item.GUID, item.Link, item.Title)
 }
 
 // SendTorrentToDownloader 发送种子到下载器
@@ -227,7 +232,7 @@ func (u *UnifiedSiteImpl) SendTorrentToDownloader(ctx context.Context, rssCfg mo
 		return nil
 	}
 
-	err = ProcessTorrentsWithDownloaderByRSS(ctx, rssCfg, dirPath, rssCfg.Category, rssCfg.Tag, u.siteGroup)
+	err = ProcessTorrentsWithDownloaderByRSS(ctx, rssCfg, dirPath, rssCfg.Category, rssCfg.Tag, u.siteGroup, RevalidateFromSite(u))
 	if err != nil {
 		if strings.Contains(err.Error(), "未启用") {
 			u.logger.Warnf("[推送跳过] 站点=%s, 配置的下载器未启用：%v；请在站点设置中切换下载器或在下载器管理中启用",

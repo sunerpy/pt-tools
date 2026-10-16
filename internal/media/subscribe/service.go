@@ -160,7 +160,7 @@ func New(cfg Config) *Service {
 // Offer 把 RSS 拉到的种子交给订阅（不阻塞；队列满时丢掉，主动搜索还会找到）。
 func (s *Service) Offer(site string, item v2.TorrentItem) {
 	select {
-	case s.offers <- Candidate{Site: site, Item: item, From: fromRSS}:
+	case s.offers <- Candidate{Site: site, Item: item, From: fromRSS, SeenAt: offerSeenAt(item, s.cfg.Now())}:
 	default:
 		s.cfg.Logger.Debugf("[订阅] RSS 队列已满，丢掉 %s", item.Title)
 	}

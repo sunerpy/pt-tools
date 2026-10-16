@@ -46,7 +46,10 @@ func TestAdmitBrushItem(t *testing.T) {
 			item: func(i *v2.TorrentItem) { i.DiscountLevel = v2.DiscountPercent50 }, ok: true,
 		},
 		{name: "优惠已到期", item: func(i *v2.TorrentItem) { i.DiscountEndTime = brushNow.Add(-time.Minute) }, reason: "优惠已到期"},
-		{name: "永久免费（没有到期时间）不受剩余时间限制", task: func(t *models.BrushTask) { t.MinFreeRemainMin = 600 }, item: func(i *v2.TorrentItem) { i.DiscountEndTime = time.Time{} }, ok: true},
+		// 没有结束时间不等于长期免费：只收免费的任务不收；也收非免费优惠的任务不要求免费，剩余时间限制管不到它
+		{name: "免费但没有结束时间：只收免费的任务不收", task: func(t *models.BrushTask) { t.MinFreeRemainMin = 600 }, item: func(i *v2.TorrentItem) { i.DiscountEndTime = time.Time{} }, reason: "免费结束时间未知"},
+		{name: "免费但没有结束时间：也收半价的任务不受剩余时间限制", task: func(t *models.BrushTask) { t.MinFreeRemainMin = 600; t.Discounts = "FREE,PERCENT_50" }, item: func(i *v2.TorrentItem) { i.DiscountEndTime = time.Time{} }, ok: true},
+		{name: "只收免费：驱动给出结束时间解析失败", item: func(i *v2.TorrentItem) { i.DiscountEndTime = time.Time{}; i.DiscountValidity = v2.FreeUnknown }, reason: "免费结束时间未知"},
 		{name: "免费剩余不足", task: func(t *models.BrushTask) { t.MinFreeRemainMin = 11 * 60 }, reason: "优惠剩余不足 660 分钟"},
 		{name: "体积下限", task: func(t *models.BrushTask) { t.MinSizeGB = 20 }, reason: "小于 20.00 GB"},
 		{name: "体积上限", task: func(t *models.BrushTask) { t.MaxSizeGB = 5 }, reason: "大于 5.00 GB"},

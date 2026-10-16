@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,10 +100,10 @@ func TestHandleFreeEnded_PauseSuccessMarksPaused(t *testing.T) {
 	}
 	m, db := newFreeEndMonitorWithFake(t, fake)
 
-	future := time.Now().Add(time.Hour)
+	ended := time.Now().Add(-time.Minute) // 处理前重读记录：还没到暂停时间的只会重新预约
 	tor := models.TorrentInfo{
 		SiteName: "s", TorrentID: "ps1", Title: "PS", PauseOnFreeEnd: true, IsFree: true,
-		FreeEndTime: &future, DownloaderTaskID: "task-ps", DownloaderName: "qb1",
+		FreeEndTime: &ended, DownloaderTaskID: "task-ps", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
 
@@ -442,7 +443,8 @@ func TestHandleFreeEnded_AutoDelete_RealError_Retries(t *testing.T) {
 	var updated models.TorrentInfo
 	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
 	assert.False(t, updated.IsPausedBySystem)
-	assert.Greater(t, updated.RetryCount, 0, "delete error triggers retry")
+	assert.Greater(t, updated.FreeEndFailures, 0, "delete error triggers retry")
+	assert.Zero(t, updated.RetryCount, "监控失败用单独的计数")
 }
 
 func TestHandleFreeEnded_GetDownloaderError_Retries(t *testing.T) {
@@ -461,7 +463,8 @@ func TestHandleFreeEnded_GetDownloaderError_Retries(t *testing.T) {
 
 	var updated models.TorrentInfo
 	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
-	assert.Greater(t, updated.RetryCount, 0)
+	assert.Greater(t, updated.FreeEndFailures, 0)
+	assert.Zero(t, updated.RetryCount, "监控失败用单独的计数")
 	assert.Contains(t, updated.LastError, "获取下载器失败")
 }
 
@@ -481,7 +484,8 @@ func TestHandleFreeEnded_CheckCompletionError_Retries(t *testing.T) {
 
 	var updated models.TorrentInfo
 	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
-	assert.Greater(t, updated.RetryCount, 0)
+	assert.Greater(t, updated.FreeEndFailures, 0)
+	assert.Zero(t, updated.RetryCount, "监控失败用单独的计数")
 	assert.Contains(t, updated.LastError, "检查完成状态失败")
 }
 
@@ -506,7 +510,8 @@ func TestHandleFreeEnded_PauseError_Retries(t *testing.T) {
 	var updated models.TorrentInfo
 	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
 	assert.False(t, updated.IsPausedBySystem)
-	assert.Greater(t, updated.RetryCount, 0)
+	assert.Greater(t, updated.FreeEndFailures, 0)
+	assert.Zero(t, updated.RetryCount, "监控失败用单独的计数")
 }
 
 func TestHandleFreeEnded_AlreadyProcessed_Skips(t *testing.T) {
@@ -843,6 +848,8 @@ func setupTestDB(t *testing.T) *models.TorrentDB {
 
 func createMockQBitServer(t *testing.T, progress float64, paused bool) *httptest.Server {
 	t.Helper()
+	// 收到暂停（qB 5 叫 stop）以后再读，状态是暂停：监控器暂停后会回读确认
+	var pausedNow atomic.Bool
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v2/auth/login":
@@ -860,7 +867,7 @@ func createMockQBitServer(t *testing.T, progress float64, paused bool) *httptest
 			if progress >= 1.0 {
 				state = "uploading"
 			}
-			if paused {
+			if paused || pausedNow.Load() {
 				if progress >= 1.0 {
 					state = "pausedUP"
 				} else {
@@ -869,7 +876,8 @@ func createMockQBitServer(t *testing.T, progress float64, paused bool) *httptest
 			}
 			_, _ = w.Write([]byte(`[{"hash":"test-hash-123","name":"Test Torrent","progress":` +
 				floatToString(progress) + `,"state":"` + state + `","size":1073741824}]`))
-		case "/api/v2/torrents/pause":
+		case "/api/v2/torrents/pause", "/api/v2/torrents/stop":
+			pausedNow.Store(true)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("Ok."))
 		case "/api/v2/torrents/resume":
@@ -1445,7 +1453,8 @@ func TestFreeEndMonitor_MarkRetry(t *testing.T) {
 	var updated models.TorrentInfo
 	err = db.DB.First(&updated, torrent.ID).Error
 	require.NoError(t, err)
-	assert.Equal(t, 1, updated.RetryCount)
+	assert.Equal(t, 1, updated.FreeEndFailures)
+	assert.Zero(t, updated.RetryCount, "监控失败用单独的计数")
 	assert.Equal(t, "test error", updated.LastError)
 }
 
@@ -1933,22 +1942,16 @@ func TestMarkRetry_NotDoubleAdvanced(t *testing.T) {
 	advance := monitor.advanceDuration()
 	require.Equal(t, 10*time.Minute, advance)
 
-	// markRetry uses retryDeadline(now, retryCount=1, advance): retryTime is
-	// pre-advanced so scheduleTaskLocked's effectiveDeadline subtraction nets
-	// back to now+retryDelay (not double-advanced).
-	retryTime := retryDeadline(before, 1, advance)
-	netTrigger := effectiveDeadline(&retryTime, advance)
-	expectedRetryDelay := min(baseRetryDelay*time.Duration(1<<1)*2, maxRetryDelay)
-	gotNetDelay := netTrigger.Sub(before)
+	// 第一次失败后 30 秒重试：触发时刻是 now+退避，不受提前量影响（不会被提前量减成立刻）
+	expectedRetryDelay := freeEndBackoff(1)
+	require.Equal(t, 30*time.Second, expectedRetryDelay)
+	gotNetDelay := task.deadline.Sub(before)
 	assert.InDelta(t, expectedRetryDelay.Seconds(), gotNetDelay.Seconds(), 5.0,
-		"retry net trigger must be ~now+retryDelay, not double-advanced")
-
-	assert.InDelta(t, (expectedRetryDelay + advance).Seconds(), retryTime.Sub(before).Seconds(), 5.0,
-		"retryTime must be pre-compensated by +advance")
+		"retry net trigger must be ~now+retryDelay, not shifted by advance")
 
 	var updated models.TorrentInfo
 	require.NoError(t, db.DB.First(&updated, torrent.ID).Error)
-	require.Equal(t, 1, updated.RetryCount)
+	require.Equal(t, 1, updated.FreeEndFailures)
 }
 
 func TestPauseReason_TextByAdvance(t *testing.T) {
@@ -2202,16 +2205,24 @@ func TestIsAutoDeleteEnabled_TrueFalse(t *testing.T) {
 	assert.True(t, fm.isAutoDeleteEnabled())
 }
 
-func TestPauseTorrentWithRetry_CtxCancelledMidway(t *testing.T) {
+func TestPauseAndConfirm_Errors(t *testing.T) {
+	// 暂停接口报错：返回错误
 	fake := newSchedFakeDownloader("qb1")
 	fake.pauseErr = assertErr
 	m, _ := newFreeEndMonitorWithFake(t, fake)
+	tor := models.TorrentInfo{Title: "T", DownloaderTaskID: "x"}
+	require.Error(t, m.pauseAndConfirm(context.Background(), fake, tor))
 
+	// 回读确认期间取消：返回错误，不当成已暂停
+	fake2 := newSchedFakeDownloader("qb2")
+	fake2.pauseNoop = true
+	fake2.torrentByID["x"] = downloader.Torrent{ID: "x", State: downloader.TorrentDownloading}
+	m2, _ := newFreeEndMonitorWithFake(t, fake2)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	tor := models.TorrentInfo{Title: "T", DownloaderTaskID: "x"}
-	err := m.pauseTorrentWithRetry(ctx, fake, tor)
+	err := m2.pauseAndConfirm(ctx, fake2, tor)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "取消")
 }
 
 func TestMarkPaused_AdvancedReason(t *testing.T) {
@@ -2241,7 +2252,7 @@ func TestMarkRetry_SchedulesWhenUnderMax(t *testing.T) {
 	m.markRetry(tor, "boom")
 	var got models.TorrentInfo
 	require.NoError(t, db.DB.First(&got, tor.ID).Error)
-	assert.Equal(t, 1, got.RetryCount)
+	assert.Equal(t, 1, got.FreeEndFailures)
 	m.mu.Lock()
 	_, scheduled := m.pendingTasks[tor.ID]
 	m.mu.Unlock()

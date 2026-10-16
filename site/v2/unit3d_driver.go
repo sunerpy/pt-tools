@@ -236,10 +236,13 @@ func (d *Unit3DDriver) ParseSearch(res Unit3DResponse) ([]TorrentItem, error) {
 			}
 		}
 
-		// Parse freeleech end time
-		if t.FreeleechEnds != "" {
-			if endTime, err := time.Parse(time.RFC3339, t.FreeleechEnds); err == nil {
+		// Parse freeleech end time. 只认带时区的 RFC3339：不带时区的写法定不下时刻，和其他解析不了的值一样，
+		// 免费的有效性记为 unknown（不猜时区，也不当成没有结束时间）。
+		if ends := strings.TrimSpace(t.FreeleechEnds); ends != "" {
+			if endTime, err := time.Parse(time.RFC3339, ends); err == nil {
 				item.DiscountEndTime = endTime
+			} else {
+				NoteDiscountTimeUnparsable(&item, "freeleech_ends")
 			}
 		}
 

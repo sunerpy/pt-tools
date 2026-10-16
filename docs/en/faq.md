@@ -187,12 +187,13 @@ This page collects common problems with pt-tools and how to solve them.
    - pt-tools can control the downloader
 
 4. **The free end time**
-   - Some torrents have no free end time
-   - Those torrents cannot be monitored
+   - A torrent whose site gives no freeleech end time cannot be paused on time: with Pause when freeleech ends on, it is added paused and not started automatically, and the freeleech path does not push it
+   - The task list's Free end (免费结束) column shows End time unknown (结束时间未知) for these
 
 5. **The logs**
    - Check that the monitor is running
-   - Look for related errors
+   - Search for `[推送门禁]` (why a push was refused) and `[FreeEndMonitor]` (end-of-freeleech handling, pause failures and retries)
+   - When pausing keeps failing, a Free-end pause failing (免费结束暂停失败) alert is sent to enabled channels after 3 failures in a row
 
 **Suggested settings**:
 

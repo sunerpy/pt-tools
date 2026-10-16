@@ -813,6 +813,12 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 		Category:    req.Category,
 		Tags:        req.Tags,
 	}
+	// 下载器页面直接加任务：明确的用户操作，不要求免费，也不承诺到期暂停（没有站点资格可依据）
+	policy := ptinternal.AdmissionPolicy{SourceKind: ptinternal.SourceKindDownloaderAdd, SafetyMargin: ptinternal.DefaultSafetyMargin()}
+	if d := ptinternal.CheckAdmission(policy, nil, policy.Now()); !d.Allow {
+		http.Error(w, d.Reason, http.StatusConflict)
+		return
+	}
 
 	var torrentBytes []byte
 	if strings.TrimSpace(req.TorrentBase64) != "" {

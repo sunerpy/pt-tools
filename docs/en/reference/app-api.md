@@ -128,6 +128,7 @@ Whether a newer release exists: `current_version`, `has_update`, `new_releases` 
 - `totals` adds up the enabled sites: `uploaded`, `downloaded`, `ratio`, `seeding`, `leeching`, `bonus`, `bonus_per_hour`, `seeding_size`, `site_count`, `unread_messages`.
 - `today` holds today's changes: `from`, `to`, `uploaded`, `downloaded`, `bonus`, with per-site changes in `sites`. They are counted the same way as in [Statistics](../guide/user-stats.md). When today's changes cannot be computed, `today.error` gives the reason, and the zeros do not mean there was no traffic today.
 - `updated_at` is when the site statistics were last updated.
+- Every `downloaded` here is the billed download: what the site counts toward your ratio after free and discount promotions, not the amount actually transferred. The `today` changes come from the daily snapshots, which keep only the billed figure. See [Two kinds of download figures](../guide/user-stats.md#two-kinds-of-download-figures).
 
 ### GET /sites
 
@@ -139,6 +140,8 @@ The response is `{"items": [...], "user_error": "…"}`: `items` has one item pe
 | `login`                           | Login status: `tier` is the reminder level (`none`, `30d`, `14d`, `7d`, `3d`, `banned-imminent`, or `unknown` when there is no access record), `days_remaining` is the number of days left before the site's inactivity limit, plus `last_active_at`, `last_probe_at` and `last_probe_status` |
 | `attendance`                      | Today's sign-in: `supported`, `enabled`, `day`, `status` (`pending`, `signed`, `already`, `failed`, `unsupported`), `message`, `last_attempt_at`                                                                                                                                              |
 | `user`                            | Your statistics on the site, absent until they have been fetched: `username`, `level`, `uploaded`, `downloaded`, `ratio`, `bonus`, `bonus_per_hour`, `seeding`, `leeching`, `seeding_size`, `unread_messages`, `hnr_unsatisfied`, `updated_at`                                                |
+
+The `downloaded` in `user` is also the billed download, not the amount actually transferred.
 
 ### POST /sites/{site}/attend
 

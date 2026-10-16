@@ -40,7 +40,9 @@ type Manager struct {
 	lastVersion       int64
 	downloaderManager *downloader.DownloaderManager
 	freeEndMonitor    *FreeEndMonitor
-	cleanupMonitor    *CleanupMonitor
+	// freeEndNotifier 是免费结束监控的告警投递器（暂停连续失败时发），重建监控器时接上
+	freeEndNotifier *MonitorNotifier
+	cleanupMonitor  *CleanupMonitor
 	// cleanupHist 是最近一轮自动删种的结果，换监控（配置重载）时留着
 	cleanupHist          *CleanupHistory
 	peerRatioMonitor     *PeerRatioMonitor
@@ -370,6 +372,17 @@ func (m *Manager) detach(take func() func()) (stop func(), ok bool) {
 	return take(), true
 }
 
+// SetFreeEndNotifier 接上免费结束监控的告警投递器；正在运行的监控器立即换上，之后重建的也用它。
+func (m *Manager) SetFreeEndNotifier(n *MonitorNotifier) {
+	m.mu.Lock()
+	m.freeEndNotifier = n
+	mon := m.freeEndMonitor
+	m.mu.Unlock()
+	if mon != nil {
+		mon.SetNotifier(n)
+	}
+}
+
 func (m *Manager) initFreeEndMonitor() {
 	if global.GlobalDB == nil {
 		return
@@ -397,6 +410,7 @@ func (m *Manager) initFreeEndMonitor() {
 		return // 停旧的时候 StopAll 来了（它在等 monMu）
 	}
 	m.freeEndMonitor = NewFreeEndMonitor(global.GlobalDB.DB, m.downloaderManager)
+	m.freeEndMonitor.SetNotifier(m.freeEndNotifier)
 	if err := m.freeEndMonitor.Start(); err != nil {
 		global.GetSlogger().Errorf("启动免费结束监控器失败: %v", err)
 		return
@@ -680,6 +694,8 @@ func executeTaskUnified(ctx context.Context, cfg models.RSSConfig, siteImpl inte
 }
 
 func processRSSUnified(ctx context.Context, cfg models.RSSConfig, ptSite internal.UnifiedPTSite) error {
+	// 取详情与推送共用这一轮的开始时间：推送只认这一轮读到的免费资格
+	ctx = internal.WithRSSAttempt(ctx, time.Now())
 	if err := internal.FetchAndDownloadFreeRSSUnified(ctx, ptSite, cfg); err != nil {
 		return err
 	}

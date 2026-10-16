@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,10 +100,53 @@ func TestHDDolbyDriver_ParseDiscount(t *testing.T) {
 
 func TestHDDolbyDriver_ParseDiscountEndTime(t *testing.T) {
 	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: "https://x.com"})
-	assert.True(t, d.parseDiscountEndTime("").IsZero())
-	assert.True(t, d.parseDiscountEndTime("0000-00-00 00:00:00").IsZero())
-	assert.True(t, d.parseDiscountEndTime("invalid").IsZero())
-	assert.False(t, d.parseDiscountEndTime("2024-02-15 10:30:00").IsZero())
+	end, err := d.parseDiscountEndTime("")
+	require.NoError(t, err)
+	assert.True(t, end.IsZero())
+	end, err = d.parseDiscountEndTime("0000-00-00 00:00:00")
+	require.NoError(t, err, "零值日期表示没有结束时间，不是解析失败")
+	assert.True(t, end.IsZero())
+	end, err = d.parseDiscountEndTime("invalid")
+	require.Error(t, err)
+	assert.True(t, end.IsZero())
+	end, err = d.parseDiscountEndTime("2024-02-15 10:30:00")
+	require.NoError(t, err)
+	assert.True(t, end.Equal(time.Date(2024, 2, 15, 10, 30, 0, 0, CSTLocation)))
+}
+
+// promotion_until 非空却解析不了：免费是 unknown 并记下原因；零值日期表示没有结束时间（有效性留空，Promotion 推出 unknown）
+func TestHDDolbyDriver_ParseSearch_DiscountEndValidity(t *testing.T) {
+	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: "https://hddolby.com"})
+	searchJSON := `{"data":[
+		{"id":1,"name":"A","promotion_time_type":1,"promotion_until":"2099-10-20 12:00:00"},
+		{"id":2,"name":"B","promotion_time_type":1,"promotion_until":"2099/10/20"},
+		{"id":3,"name":"C","promotion_time_type":1,"promotion_until":"0000-00-00 00:00:00"},
+		{"id":4,"name":"D","promotion_time_type":4,"promotion_until":"bad"},
+		{"id":5,"name":"E","promotion_time_type":0,"promotion_until":"bad"}
+	],"total":5}`
+	items, err := d.ParseSearch(HDDolbyResponse{Data: json.RawMessage(searchJSON)})
+	require.NoError(t, err)
+	require.Len(t, items, 5)
+	now := time.Now()
+
+	assert.Empty(t, items[0].DiscountErr)
+	assert.Equal(t, FreeUntil, items[0].Promotion(now).Validity)
+
+	assert.Equal(t, DiscountFree, items[1].DiscountLevel)
+	assert.Equal(t, FreeUnknown, items[1].DiscountValidity)
+	assert.Equal(t, "promotion_until: 时间格式无法解析", items[1].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[1].Promotion(now).Validity)
+
+	assert.Empty(t, items[2].DiscountValidity)
+	assert.Empty(t, items[2].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[2].Promotion(now).Validity, "没有结束时间不等于长期免费")
+
+	assert.Equal(t, DiscountPercent50, items[3].DiscountLevel)
+	assert.Equal(t, "promotion_until: 时间格式无法解析", items[3].DiscountErr)
+	assert.Equal(t, FreeNotFree, items[3].Promotion(now).Validity)
+
+	assert.Equal(t, DiscountNone, items[4].DiscountLevel)
+	assert.Empty(t, items[4].DiscountErr, "没有优惠时结束时间无关")
 }
 
 func TestHDDolbyDriver_GetCategoryName(t *testing.T) {
@@ -314,11 +359,10 @@ func TestHDDolbyDriver_GetTorrentDetail(t *testing.T) {
 	assert.Equal(t, "Found", item.Title)
 	assert.Equal(t, DiscountFree, item.DiscountLevel)
 
-	// Not found -> returns default item, no error
+	// 缓存里没有：读不到详情就是取详情失败，不能返回一个「没有优惠」的占位结果（那等于声称不是免费）
 	item2, err := d.GetTorrentDetail(context.Background(), "999", "", "")
-	require.NoError(t, err)
-	assert.Equal(t, "999", item2.ID)
-	assert.Equal(t, DiscountNone, item2.DiscountLevel)
+	require.ErrorIs(t, err, ErrTorrentDetailUnavailable)
+	assert.Nil(t, item2)
 }
 
 func TestHDDolbyDriver_GetTorrentDetail_InvalidID(t *testing.T) {
@@ -365,10 +409,72 @@ func TestHDDolbyDriver_GetTorrentDetail_CacheMissRefresh(t *testing.T) {
 	// Requesting a missing ID repeatedly should trigger cache invalidation + refresh at miss>=3.
 	for i := 0; i < 3; i++ {
 		item, err := d.GetTorrentDetail(context.Background(), "999", "", "")
-		require.NoError(t, err)
-		assert.Equal(t, "999", item.ID)
+		require.ErrorIs(t, err, ErrTorrentDetailUnavailable)
+		assert.Nil(t, item)
 	}
 	assert.GreaterOrEqual(t, calls, 2)
+}
+
+// 详情来自最近一次列表的缓存：FetchedAt 是缓存取得的时间；要求 fresh-after 时缓存更早就先刷新，刷新失败返回错误
+func TestHDDolbyDriver_GetTorrentDetail_FreshAfter(t *testing.T) {
+	var calls atomic.Int32
+	var fail atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		if fail.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":200,"data":{"data":[` +
+			`{"id":42,"name":"Found","promotion_time_type":1,"promotion_until":"2099-10-20 12:00:00"},` +
+			`{"id":43,"name":"BadEnd","promotion_time_type":1,"promotion_until":"20991020"}],"total":2}}`))
+	}))
+	defer server.Close()
+	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: server.URL, APIURL: server.URL, APIKey: "k"})
+
+	before := time.Now()
+	item, err := d.GetTorrentDetail(context.Background(), "42", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), calls.Load())
+	assert.False(t, item.FetchedAt.Before(before), "FetchedAt 是缓存取得的时间：%s", item.FetchedAt)
+	assert.False(t, item.FetchedAt.After(time.Now()))
+	assert.Equal(t, FreeUntil, item.Promotion(time.Now()).Validity)
+	first := item.FetchedAt
+
+	// 详情走同一套优惠解析：结束时间解析不了是 unknown
+	item, err = d.GetTorrentDetail(context.Background(), "43", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, FreeUnknown, item.DiscountValidity)
+	assert.Equal(t, "promotion_until: 时间格式无法解析", item.DiscountErr)
+
+	// 5 分钟内、没要求新鲜：直接用缓存，FetchedAt 仍是缓存的时间
+	item, err = d.GetTorrentDetail(context.Background(), "42", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), calls.Load())
+	assert.True(t, first.Equal(item.FetchedAt))
+
+	// 缓存早于 fresh-after：先刷新再回答
+	d.detailCacheMu.Lock()
+	d.detailCacheTime = d.detailCacheTime.Add(-time.Minute)
+	d.detailCacheMu.Unlock()
+	freshAfter := time.Now()
+	item, err = d.GetTorrentDetail(WithFreshAfter(context.Background(), freshAfter), "42", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), calls.Load(), "缓存早于 fresh-after 时必须刷新")
+	assert.False(t, item.FetchedAt.Before(freshAfter), "FetchedAt %s 早于 fresh-after %s", item.FetchedAt, freshAfter)
+
+	// 缓存已经不早于 fresh-after：不重复请求站点
+	_, err = d.GetTorrentDetail(WithFreshAfter(context.Background(), freshAfter), "42", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), calls.Load())
+
+	// 刷新失败：返回错误，不拿旧缓存充数
+	fail.Store(true)
+	item, err = d.GetTorrentDetail(WithFreshAfter(context.Background(), time.Now().Add(time.Second)), "42", "", "")
+	require.Error(t, err)
+	assert.Nil(t, item)
+	assert.Equal(t, int32(3), calls.Load())
 }
 
 func TestHDDolbyDriver_DownloadWithHash(t *testing.T) {

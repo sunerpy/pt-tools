@@ -132,6 +132,7 @@ func TestToolList(t *testing.T) {
 		assert.NotEmpty(t, tool.Description, tool.Name)
 	}
 	assert.ElementsMatch(t, ToolNames, names)
+	assert.Contains(t, byName["get_site_userinfo"].Description, "billed download", "账号的下载量写明是站点计费的口径")
 	for _, name := range []string{"list_tasks", "search_torrents", "get_downloader_stats", "check_updates"} {
 		assert.True(t, byName[name].Annotations.ReadOnlyHint, name)
 	}

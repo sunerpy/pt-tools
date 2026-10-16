@@ -102,6 +102,30 @@ final _overview = {
   'updated_at': 1791500000,
 };
 
+/// 站点列表：一个站点，带站点上的用户数据
+final _sites = {
+  'items': [
+    {
+      'name': 'hdsky',
+      'display_name': 'HDSky',
+      'enabled': true,
+      'login': {'tier': 'none', 'days_remaining': 30},
+      'attendance': {'supported': false, 'enabled': false, 'day': '2026-10-09'},
+      'user': {
+        'username': 'fakeuser',
+        'uploaded': 11544872091648,
+        'downloaded': 2199023255552,
+        'ratio': 5.25,
+        'bonus': 4567.8,
+        'seeding': 8,
+        'leeching': 1,
+        'unread_messages': 0,
+        'updated_at': 1791500000,
+      },
+    },
+  ],
+};
+
 final _torrents = {
   'items': [
     {
@@ -171,6 +195,11 @@ class _World {
       '/api/app/v1/meta' => _meta(scopes),
       '/api/app/v1/overview' => _overview,
       '/api/app/v1/downloaders' => {'items': []},
+      '/api/app/v1/sites' => _sites,
+      '/api/app/v1/favicon/hdsky' => const ApiReply(404, {
+        'error': 'not_found',
+        'message': '没有图标',
+      }),
       '/api/app/v1/torrents' =>
         failTorrents
             ? const ApiReply(502, {
@@ -330,12 +359,25 @@ void main() {
     final w = await _pumpApp(tester);
     await _settle(tester);
     expect(find.text('上传'), findsOneWidget);
+    expect(find.text('下载（计费）'), findsOneWidget, reason: '账号的下载量写明是计费口径');
+    expect(find.textContaining('每日快照只存这个口径'), findsOneWidget);
     expect(find.text('10.5 TiB'), findsOneWidget);
     expect(find.text('5.25'), findsOneWidget);
     expect(find.text('4,567.8'), findsOneWidget);
     expect(find.text('2'), findsWidgets);
     expect(find.text('pt-tools v1.0.0-test'), findsOneWidget);
     expect(w.requests, contains('GET /api/app/v1/overview'));
+  });
+
+  testWidgets('站点：站点上的下载量写明是计费口径', (tester) async {
+    final w = await _pumpApp(tester);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.text('站点'));
+    await _settle(tester);
+    expect(w.requests, contains('GET /api/app/v1/sites'));
+    expect(find.text('↓2.0 TiB（计费）'), findsOneWidget);
   });
 
   testWidgets('种子：完全控制的设备有操作菜单，删除要确认，取消以后不发请求', (tester) async {

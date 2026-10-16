@@ -301,7 +301,8 @@ func registerTools(s *sdk.Server, d *Deps) {
 
 	register(s, d, spec{
 		name: "get_site_userinfo", title: "Site account statistics",
-		description: "Show the user's account on each configured PT site: upload, download, ratio, bonus, seeding count, unread messages, login status and check-in result (cached; updated_at tells when).",
+		description: "Show the user's account on each configured PT site: upload, billed download, ratio, bonus, seeding count, unread messages, login status and check-in result (cached; updated_at tells when). " +
+			"user.downloaded is the download the site bills after free and discount promotions (the figure that counts toward ratio), not the amount actually transferred.",
 	}, func(in siteInfoIn) (call, error) {
 		c := call{req: Request{Method: http.MethodGet, Path: "/sites"}}
 		if site := strings.ToLower(strings.TrimSpace(in.Site)); site != "" {

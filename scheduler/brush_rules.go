@@ -35,6 +35,26 @@ func brushAllowedDiscounts(task models.BrushTask) map[v2.DiscountLevel]bool {
 	return out
 }
 
+// brushRequiresFree 报告任务只收免费优惠（允许的优惠全是免费级别）：推送要求免费。
+func brushRequiresFree(task models.BrushTask) bool {
+	for lv := range brushAllowedDiscounts(task) {
+		if !v2.IsFreeTorrent(lv) {
+			return false
+		}
+	}
+	return true
+}
+
+// brushSnapshot 是列表结果的资格快照：取得时间用驱动给的，没有时用这一轮读列表的时间。
+func brushSnapshot(it v2.TorrentItem, searchAt time.Time) *v2.PromotionSnapshot {
+	verified := it.FetchedAt
+	if verified.IsZero() {
+		verified = searchAt
+	}
+	s := it.Promotion(verified)
+	return &s
+}
+
 // splitKeywords 按换行与逗号拆关键词，去空、转小写。
 func splitKeywords(s string) []string {
 	var out []string
@@ -66,6 +86,15 @@ func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, hrS
 		}
 		if task.MinFreeRemainMin > 0 && item.DiscountEndTime.Sub(now) < time.Duration(task.MinFreeRemainMin)*time.Minute {
 			return false, fmt.Sprintf("优惠剩余不足 %d 分钟", task.MinFreeRemainMin)
+		}
+	}
+	if brushRequiresFree(task) {
+		// 只收免费：结束时间未知（缺失或解析不了）不能当长期免费
+		switch item.Promotion(now).Validity {
+		case v2.FreeUnknown:
+			return false, "免费结束时间未知"
+		case v2.FreeNotFree:
+			return false, "不是免费"
 		}
 	}
 	if task.MinSizeGB > 0 || task.MaxSizeGB > 0 {

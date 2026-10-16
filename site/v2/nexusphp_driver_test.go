@@ -926,6 +926,7 @@ func TestParseDiscountEndTimeFromOnmouseover(t *testing.T) {
 		wantMinute  int
 		wantSecond  int
 		wantZero    bool
+		wantErr     bool
 	}{
 		{
 			name:        "HDSky format with HTML entities",
@@ -972,11 +973,23 @@ func TestParseDiscountEndTimeFromOnmouseover(t *testing.T) {
 			onmouseover: `domTT_activate(this, event, 'content', '&lt;span title=&quot;invalid-date&quot;&gt;')`,
 			wantZero:    true,
 		},
+		{
+			// 提示里有时间却解析不了：报告出来，不能悄悄当成没有结束时间
+			name:        "out-of-range date",
+			onmouseover: `domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-13-40 25:61:00&quot;&gt;')`,
+			wantZero:    true,
+			wantErr:     true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseDiscountEndTimeFromOnmouseover(tt.onmouseover)
+			result, err := parseDiscountEndTimeFromOnmouseover(tt.onmouseover)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 			if tt.wantZero {
 				assert.True(t, result.IsZero(), "expected zero time")
 			} else {
@@ -2115,4 +2128,133 @@ func TestNexusPHPDriver_DefaultTrueTransfer(t *testing.T) {
 	info = get(newDef(nil))
 	assert.Zero(t, info.TrueUploaded)
 	assert.Zero(t, info.TrueDownloaded)
+}
+
+// 详情页：免费且结束时间元素在、值解析不了时是 unknown 并记下原因；元素不在时有效性留空（Promotion 按零结束时间推出 unknown）
+func TestNexusPHPDriver_GetTorrentDetail_DiscountEndValidity(t *testing.T) {
+	pages := map[string]string{
+		"1": `<h1><font class="free">免费</font><span title="2099-10-20 12:00:00">3天</span></h1>`,
+		"2": `<h1><font class="free">免费</font><span title="3天2时">3天</span></h1>`,
+		"3": `<h1><font class="free">免费</font></h1>`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html><body><input name="torrent_name" value="T` + id + `">` +
+			`<input name="detail_torrent_id" value="` + id + `">` + pages[id] + `</body></html>`))
+	}))
+	defer server.Close()
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+
+	before := time.Now()
+	item, err := d.GetTorrentDetail(context.Background(), "1", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, item.DiscountValidity)
+	assert.Empty(t, item.DiscountErr)
+	assert.Equal(t, FreeUntil, item.Promotion(time.Now()).Validity)
+	assert.False(t, item.FetchedAt.Before(before), "详情是实时请求，FetchedAt 是取得的时间：%s", item.FetchedAt)
+	assert.False(t, item.FetchedAt.After(time.Now()))
+
+	item, err = d.GetTorrentDetail(context.Background(), "2", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.True(t, item.DiscountEndTime.IsZero())
+	assert.Equal(t, FreeUnknown, item.DiscountValidity)
+	assert.Equal(t, "discountEndTime: 时间格式无法解析", item.DiscountErr)
+	assert.Equal(t, FreeUnknown, item.Promotion(time.Now()).Validity)
+
+	item, err = d.GetTorrentDetail(context.Background(), "3", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, item.DiscountValidity)
+	assert.Empty(t, item.DiscountErr)
+	assert.Equal(t, FreeUnknown, item.Promotion(time.Now()).Validity, "没有结束时间不等于长期免费")
+}
+
+// 列表页：结束时间元素在、值解析不了时（且优惠图标里也取不到）是 unknown 并记下原因
+func TestNexusPHPDriver_ParseSearch_DiscountEndUnparsable(t *testing.T) {
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://example.org", Cookie: "c=1"})
+	row := func(id, cell string) string {
+		return `<tr><td><img alt="Movie" /></td><td><a href="details.php?id=` + id + `">T` + id + `</a>` + cell +
+			`</td><td></td><td><span>2024-01-01 00:00:00</span></td><td>1 GB</td><td>1</td><td>0</td><td>0</td></tr>`
+	}
+	free := `<img class="pro_free" src="pic/trans.gif" alt="Free" />`
+	html := `<html><body><table class="torrents"><tbody><tr><td>Header</td></tr>` +
+		row("1", free+`<span class="free_end_time" title="2099-10-20 12:00:00">3天</span>`) +
+		row("2", free+`<span class="free_end_time">剩余 3天2时</span>`) +
+		row("3", free) +
+		row("4", `<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2099-10-21 08:00:00&quot;&gt;1天&lt;/span&gt;', 'trail', false)" />`+
+			`<span class="free_end_time">剩余 3天2时</span>`) +
+		row("5", `<span class="free_end_time" title="不是时间">x</span>`) +
+		row("6", `<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-13-40 25:61:00&quot;&gt;1天&lt;/span&gt;', 'trail', false)" />`) +
+		`</tbody></table></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+
+	items, err := driver.ParseSearch(NexusPHPResponse{Document: doc})
+	require.NoError(t, err)
+	require.Len(t, items, 6)
+
+	// 只有优惠图标的提示里有时间、却解析不了：同样是 unknown 并记下原因
+	assert.Equal(t, DiscountFree, items[5].DiscountLevel)
+	assert.Equal(t, FreeUnknown, items[5].DiscountValidity)
+	assert.Equal(t, "discountEndTime: 时间格式无法解析", items[5].DiscountErr)
+	now := time.Now()
+
+	assert.Equal(t, DiscountFree, items[0].DiscountLevel)
+	assert.Empty(t, items[0].DiscountErr)
+	assert.Equal(t, FreeUntil, items[0].Promotion(now).Validity)
+
+	assert.Equal(t, DiscountFree, items[1].DiscountLevel)
+	assert.True(t, items[1].DiscountEndTime.IsZero())
+	assert.Equal(t, FreeUnknown, items[1].DiscountValidity)
+	assert.Equal(t, "discountEndTime: 时间格式无法解析", items[1].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[1].Promotion(now).Validity)
+
+	assert.Empty(t, items[2].DiscountValidity, "没有结束时间元素时不写有效性")
+	assert.Empty(t, items[2].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[2].Promotion(now).Validity)
+
+	// 元素里的值解析不了，但优惠图标的提示里有结束时间：用它，不算问题
+	assert.False(t, items[3].DiscountEndTime.IsZero())
+	assert.Empty(t, items[3].DiscountValidity)
+	assert.Empty(t, items[3].DiscountErr)
+	assert.Equal(t, FreeUntil, items[3].Promotion(now).Validity)
+
+	// 没有优惠：结束时间无关，不记
+	assert.Equal(t, DiscountNone, items[4].DiscountLevel)
+	assert.Empty(t, items[4].DiscountErr)
+	assert.Equal(t, FreeNotFree, items[4].Promotion(now).Validity)
+
+	for _, it := range items {
+		assert.True(t, it.FetchedAt.IsZero(), "搜索结果不写 FetchedAt")
+	}
+}
+
+// 列表页的优惠结束时间不带时区，是站点显示的北京时间，和详情页一样按北京时间解析；
+// 当成 UTC 会让结束时刻晚 8 小时，已经结束的免费在列表结果里看起来还有 8 小时
+func TestNexusPHPDriver_ParseSearch_DiscountEndTimeIsCST(t *testing.T) {
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://example.org", Cookie: "c=1"})
+	row := func(id, cell string) string {
+		return `<tr><td><img alt="Movie" /></td><td><a href="details.php?id=` + id + `">T` + id + `</a>` + cell +
+			`</td><td></td><td><span>2024-01-01 00:00:00</span></td><td>1 GB</td><td>1</td><td>0</td><td>0</td></tr>`
+	}
+	html := `<html><body><table class="torrents"><tbody><tr><td>Header</td></tr>` +
+		row("1", `<img class="pro_free" src="pic/trans.gif" alt="Free" /><span class="free_end_time" title="2026-10-20 12:00:00">3天</span>`) +
+		row("2", `<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-10-21 08:30:00&quot;&gt;1天&lt;/span&gt;', 'trail', false)" />`) +
+		row("3", `<img class="pro_free" src="pic/trans.gif" alt="Free" /><span class="free_end_time" title="2026-10-20T12:00:00Z">3天</span>`) +
+		`</tbody></table></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+
+	items, err := driver.ParseSearch(NexusPHPResponse{Document: doc})
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.True(t, time.Date(2026, 10, 20, 12, 0, 0, 0, CSTLocation).Equal(items[0].DiscountEndTime), "got %s", items[0].DiscountEndTime.UTC())
+	assert.True(t, time.Date(2026, 10, 21, 8, 30, 0, 0, CSTLocation).Equal(items[1].DiscountEndTime), "got %s", items[1].DiscountEndTime.UTC())
+	// 带时区的写法照原样
+	assert.True(t, time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC).Equal(items[2].DiscountEndTime), "got %s", items[2].DiscountEndTime.UTC())
+
+	// 结束时刻是北京时间 2026-10-20 12:00：北京时间 13:00（UTC 05:00）时已经结束
+	afterEnd := time.Date(2026, 10, 20, 5, 0, 0, 0, time.UTC)
+	assert.Equal(t, FreeNotFree, items[0].Promotion(afterEnd).Validity)
 }
