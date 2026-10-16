@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -85,4 +86,59 @@ func TestCleanup_FreeExpiredUsesThisDownloadersRecords(t *testing.T) {
 		deleted = append(deleted, it.Name)
 	}
 	assert.ElementsMatch(t, []string{"hmine"}, deleted, "只按这个下载器上的记录、而且都免费已过才删")
+}
+
+// 下载器可以改名，名字也可能被后建的下载器复用：免费到期按记录里的下载器编号认，不按名字。
+// 改名后原来的记录照样管（该删的删，不让任务继续计费下载）；新下载器复用了旧名字时，不按旧下载器的记录删它的任务。
+func TestCleanup_FreeExpiredFollowsDownloaderID(t *testing.T) {
+	past := time.Now().Add(-time.Minute)
+	pushed := true
+	setup := func(t *testing.T) (*CleanupMonitor, *schedFakeDownloader, *models.SettingsGlobal) {
+		fake := newSchedFakeDownloader("qb1")
+		cm := newCleanupMonitorWithFake(t, fake)
+		cfg := baseCfg()
+		cfg.CleanupScope = "all"
+		cfg.CleanupDelFreeExpired = true
+		cfg.CleanupProtectDL = false
+		cfg.CleanupProtectHR = false
+		tor := seedingTorrent("h1", "h1", "h1", 1, 0)
+		tor.State, tor.Progress = downloader.TorrentDownloading, 0.5
+		fake.torrents = []downloader.Torrent{tor}
+		return cm, fake, cfg
+	}
+	addSetting := func(t *testing.T, cm *CleanupMonitor, name string) uint {
+		ds := models.DownloaderSetting{Name: name, Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
+		require.NoError(t, cm.db.Create(&ds).Error)
+		return ds.ID
+	}
+	addExpired := func(t *testing.T, cm *CleanupMonitor, dlID uint, dlName string) {
+		hash := "h1"
+		ti := models.TorrentInfo{
+			SiteName: "s", TorrentID: "r1", TorrentHash: &hash, IsPushed: &pushed,
+			DownloaderID: &dlID, DownloaderName: dlName, IsFree: true, FreeEndTime: &past,
+		}
+		require.NoError(t, cm.db.Create(&ti).Error)
+	}
+	deleted := func(cm *CleanupMonitor, cfg *models.SettingsGlobal) []string {
+		var names []string
+		for _, it := range cm.Preview(context.Background(), cfg)[0].Items {
+			names = append(names, it.Name)
+		}
+		return names
+	}
+
+	t.Run("改名后照样按编号认出来", func(t *testing.T) {
+		cm, _, cfg := setup(t)
+		id := addSetting(t, cm, "qb1")  // 现在叫 qb1
+		addExpired(t, cm, id, "qb-old") // 推送时还叫 qb-old
+		assert.Equal(t, []string{"h1"}, deleted(cm, cfg))
+	})
+
+	t.Run("复用旧名字的新下载器不按旧下载器的记录删", func(t *testing.T) {
+		cm, _, cfg := setup(t)
+		oldID := addSetting(t, cm, "qb-old") // 原来叫 qb1，后来改名 qb-old
+		addSetting(t, cm, "qb1")             // 新建的下载器用了 qb1 这个名字
+		addExpired(t, cm, oldID, "qb1")
+		assert.Empty(t, deleted(cm, cfg))
+	})
 }

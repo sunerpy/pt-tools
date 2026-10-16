@@ -478,21 +478,40 @@ func (c *CleanupMonitor) filterManagedTorrents(cfg *models.SettingsGlobal, torre
 
 func (c *CleanupMonitor) getManagedHashes(dlName string) map[string]struct{} {
 	hashes := make(map[string]struct{})
+	dlID := c.downloaderID(dlName)
 
 	var dbHashes []string
-	c.db.Model(&models.TorrentInfo{}).
-		Where("torrent_hash IS NOT NULL AND torrent_hash != '' AND is_pushed IS NOT NULL AND downloader_name = ?", dlName).
+	recordsOn(c.db.Model(&models.TorrentInfo{}), dlID, dlName).
+		Where("torrent_hash IS NOT NULL AND torrent_hash != '' AND is_pushed IS NOT NULL").
 		Pluck("torrent_hash", &dbHashes)
 
 	var archiveHashes []string
-	c.db.Model(&models.TorrentInfoArchive{}).
-		Where("torrent_hash IS NOT NULL AND torrent_hash != '' AND is_pushed IS NOT NULL AND downloader_name = ?", dlName).
+	recordsOn(c.db.Model(&models.TorrentInfoArchive{}), dlID, dlName).
+		Where("torrent_hash IS NOT NULL AND torrent_hash != '' AND is_pushed IS NOT NULL").
 		Pluck("torrent_hash", &archiveHashes)
 
 	for _, h := range append(dbHashes, archiveHashes...) {
 		hashes[strings.ToLower(h)] = struct{}{}
 	}
 	return hashes
+}
+
+// downloaderID 是叫这个名字的下载器在设置里的编号；查不到时为 nil。
+func (c *CleanupMonitor) downloaderID(dlName string) *uint {
+	var ds models.DownloaderSetting
+	if err := c.db.Select("id").Where("name = ?", dlName).Take(&ds).Error; err != nil {
+		return nil
+	}
+	return &ds.ID
+}
+
+// recordsOn 把查询限定在推到这个下载器的种子记录：按下载器编号认（下载器可以改名，名字也可能被后建的下载器复用），
+// 没有编号的旧记录按名字认；查不到编号时只按名字认。
+func recordsOn(q *gorm.DB, dlID *uint, dlName string) *gorm.DB {
+	if dlID == nil {
+		return q.Where("downloader_name = ?", dlName)
+	}
+	return q.Where("(downloader_id = ? OR (downloader_id IS NULL AND downloader_name = ?))", *dlID, dlName)
 }
 
 func (c *CleanupMonitor) splitProtected(cfg *models.SettingsGlobal, torrents []downloader.Torrent) (protected, candidates []downloader.Torrent) {
@@ -647,8 +666,8 @@ func (c *CleanupMonitor) isPausedForPeerRatio(infoHash string) bool {
 
 // isFreeExpiredIncomplete 报告这个下载器里的种子没下载完、免费期已经过了：免费的记录结束时间已过，或者原来免费、
 // RSS 后来读到不再免费（free_ended_at，免费取消或提前结束）。结束时间跟着 RSS 每轮读到的详情走，免费延长了就等新的时间。
-// 只看推到这个下载器的记录（同一个哈希可能还有别的下载器、别的站点的记录），而且要每一条都免费已过：有一条还在免费期内
-// 或从来不是免费推的就不删——删种会删任务和数据，分不清时宁可不删。
+// 只看推到这个下载器的记录（按下载器编号认，见 recordsOn；同一个哈希可能还有别的下载器、别的站点的记录），
+// 而且要每一条都免费已过：有一条还在免费期内或从来不是免费推的就不删——删种会删任务和数据，分不清时宁可不删。
 // 只认免费的记录（is_free）：以前 RSS 把半价等优惠的结束时间也记成了 free_end_time，库里留着的这类记录不当成免费到期。
 // 时间按时刻比较（julianday），不按文本：库里的时间带各自的时区
 func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent, dlName string) bool {
@@ -659,10 +678,10 @@ func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent, dlName st
 	hash := strings.ToLower(t.InfoHash)
 	now := time.Now()
 	var rows []struct{ Ended int }
-	err := c.db.Model(&models.TorrentInfo{}).
+	err := recordsOn(c.db.Model(&models.TorrentInfo{}), c.downloaderID(dlName), dlName).
 		Select("CASE WHEN (is_free = ? AND free_end_time IS NOT NULL AND julianday(free_end_time) < julianday(?))"+
 			" OR (free_ended_at IS NOT NULL AND julianday(free_ended_at) <= julianday(?)) THEN 1 ELSE 0 END AS ended", true, now, now).
-		Where("LOWER(torrent_hash) = ? AND downloader_name = ?", hash, dlName).
+		Where("LOWER(torrent_hash) = ?", hash).
 		Scan(&rows).Error
 	if err != nil || len(rows) == 0 {
 		return false
