@@ -572,9 +572,9 @@ func rejectPush(req PushTorrentRequest, record bool, hash string, status PushSta
 }
 
 // addedByEarlierAttempt 报告下载器里的这个任务是之前一次暂停加入、记账没写成的：记录上留着加到这个下载器的推送标记，
-// 而且任务的加入时间（按秒）不早于标记（标记也可能是没清掉的旧标记——加入时下载器说原本就有、清标记又失败了——那时任务早就在了）。
-// 不留余量：下载器的时钟比本机慢时，自己加的任务也会被当成不是，结果只是保持暂停、不自动开始。
-// 读不到任务或加入时间时同样按不是算：不改已有任务的运行状态。
+// 而且任务的加入时间晚于标记所在的那一秒（标记也可能是没清掉的旧标记——加入时下载器说原本就有、清标记又失败了——那时任务早就在了）。
+// 下载器的加入时间只到秒：和标记在同一秒的分不清先后，按不是算；下载器时钟偏慢时自己加的任务也会被当成不是。
+// 这些情况和读不到任务、加入时间时一样，结果只是保持暂停、不自动开始，不改已有任务的运行状态。
 func addedByEarlierAttempt(dl downloader.Downloader, req PushTorrentRequest, target pushTarget, hash string) bool {
 	var cur models.TorrentInfo
 	if err := global.GlobalDB.DB.Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).First(&cur).Error; err != nil {
@@ -587,7 +587,7 @@ func addedByEarlierAttempt(dl downloader.Downloader, req PushTorrentRequest, tar
 	if err != nil || info.DateAdded <= 0 {
 		return false
 	}
-	return info.DateAdded >= cur.PushPendingAt.Unix()
+	return info.DateAdded > cur.PushPendingAt.Unix()
 }
 
 // adoptExistingTorrent 处理下载器里已经有这个种子的 RSS 推送：记账、按策略登记监控。

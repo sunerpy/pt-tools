@@ -152,6 +152,9 @@ func TestPush_RejectsSecondMonitoredPlacement(t *testing.T) {
 	assert.Equal(t, idA, *ti.DownloaderID, "原来的下载器与任务编号不被覆盖")
 }
 
+// sameSecondLater 是用例里「标记与任务加入在同一秒、标记在后」的记号。
+const sameSecondLater = time.Duration(-1 << 62)
+
 // RSS 暂存推送发现下载器里已有：是上次暂停加入、记账没写成的（记录上留着推送标记），补记账后按设置开始；
 // 下载器里原本就有的只记账，不改它的运行状态。
 func TestPush_AdoptExisting(t *testing.T) {
@@ -166,6 +169,7 @@ func TestPush_AdoptExisting(t *testing.T) {
 		{"下载器里原本就有", false, 0, 0},
 		{"旧标记、任务早就在了", true, 10 * time.Minute, 0},
 		{"旧标记、任务在标记前半分钟加入", true, 30 * time.Second, 0},
+		{"任务与标记在同一秒、分不清先后", true, sameSecondLater, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := pushRig(t)
@@ -179,7 +183,12 @@ func TestPush_AdoptExisting(t *testing.T) {
 			cols := map[string]any{"is_pushed": false, "downloader_task_id": ""}
 			if tc.pending {
 				h := hashOfBytes(t, data)
-				cols["push_pending_at"] = r.dls["qb"].addedAt[h].Add(tc.markAfterAdd)
+				at := r.dls["qb"].addedAt[h]
+				mark := at.Add(tc.markAfterAdd)
+				if tc.markAfterAdd == sameSecondLater {
+					mark = time.Unix(at.Unix(), 900_000_000) // 与任务加入同一秒、在它之后
+				}
+				cols["push_pending_at"] = mark
 			}
 			require.NoError(t, global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("torrent_id = ?", "ad").Updates(cols).Error)
 
