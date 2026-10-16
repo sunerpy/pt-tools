@@ -166,6 +166,18 @@ const hdareaUserdetailsFixture = `<html><body>
 </table>
 </body></html>`
 
+// mybonus.php：本站不写通用的「你当前每小时能获取」，而是「最终每小时获取」，
+// 且数字外套了一层 <b>；该 <b> 的 style 里还含 font-size: 16px 这类数字，
+// 所以不能简单「跳过非数字」，必须显式跳过标签本身。
+const hdareaMyBonusFixture = `<html><body><div id="outer">
+<table width="940" cellpadding="3"><tr><td>
+<h1>魔力值到底是什么玩意儿，我怎样才能得到它？</h1>
+做种每小时将得到如下的魔力值 (新版算法，缓存1小时 v2.0)
+</td></tr></table>
+<table><tr><td><img class="loadbaryellow" src="pic/trans.gif" style="width: 170px; height: 10px;" alt="42.449325553737%" /></td></tr></table>
+<div style='font-size:14px; margin-top:5px;'>最终每小时获取：<b style='color: green; font-size: 16px;'>424.49</b> 个魔力值</div>
+</div></body></html>`
+
 // --- Helpers ---
 
 func getHdareaDef(t *testing.T) *v2.SiteDefinition {
@@ -333,6 +345,16 @@ func testHdareaUserInfo(t *testing.T) {
 		assert.Regexp(t, `^\d+$`, got)
 		assert.Greater(t, got, "0")
 	})
+
+	t.Run("MyBonusPage", func(t *testing.T) {
+		doc := FixtureDoc(t, "hdarea_mybonus", hdareaMyBonusFixture)
+		sel, ok := def.UserInfo.Selectors["bonusPerHour"]
+		if !assert.True(t, ok, "selector %q not found", "bonusPerHour") {
+			return
+		}
+		// 取站点自报的「最终每小时获取」（已含各项加成）
+		assert.Equal(t, "424.49", driver.ExtractFieldValuePublic(doc, sel))
+	})
 }
 
 // --- Standalone Tests ---
@@ -344,6 +366,7 @@ func TestHdarea_Fixtures_NoSecrets(t *testing.T) {
 		"detail_hr":   hdareaDetailWithHRFixture,
 		"index":       hdareaIndexFixture,
 		"userdetails": hdareaUserdetailsFixture,
+		"mybonus":     hdareaMyBonusFixture,
 	}
 	for name, data := range fixtures {
 		t.Run(name, func(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 // 站点为 NexusPHP 1.5 魔改（页面自称 "Powered by HDAREA(基于NexusPHP1.5修改)"），详情页保留
 // input[name='torrent_name'] / input[name='detail_torrent_id'] 隐藏域，userdetails.php 的
 // 「传输」行是标准的 <strong>上传量</strong> 合并单元格，因此多数选择器与 btschool 一致。
-// 需要单独适配的三处：
+// 需要单独适配的四处：
 //
 //  1. torrents.php 上存在 **两个** table.torrents：
 //     第一个是「预告区（前 5 最新预告）」面板，表头为 td.colhead_notice（colspan=10），
@@ -22,6 +22,9 @@ import (
 //     但同一子表里的豆瓣评分 <span title="豆瓣评分"> 也是 span[title]，必须用 font[color]
 //     限定范围；不同促销等级的 font color 取值不同（免费 #0000FF、2X 免费 #00CC66），
 //     故只判断属性存在而不判断取值。
+//  4. 时魔取自 mybonus.php 的「最终每小时获取：<b …>424.49</b> 个魔力值」：本站不写通用的
+//     「你当前每小时能获取」，且数值外层包了带 style 的 <b>（其内含 font-size: 16px 这类
+//     数字），因此正则必须显式跳过标签而不能「跳过非数字」。
 var HdareaDefinition = &v2.SiteDefinition{
 	ID:             "hdarea",
 	Name:           "HDArea",
@@ -50,6 +53,10 @@ var HdareaDefinition = &v2.SiteDefinition{
 					"uploaded", "downloaded", "ratio",
 					"levelName", "joinTime", "lastAccessAt",
 				},
+			},
+			{
+				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
+				Fields:        []string{"bonusPerHour"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -122,6 +129,17 @@ var HdareaDefinition = &v2.SiteDefinition{
 				Attr:     "html",
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>\s*(\d+)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			// 本站不写通用的「你当前每小时能获取」，而是「最终每小时获取：<b …>424.49</b> 个魔力值」。
+			// 数值外层的 <b> 带 style（含 font-size: 16px），因此必须显式跳过标签，
+			// 不能用「跳过非数字」的写法，否则会抓到 16px 里的 16。
+			"bonusPerHour": {
+				Selector: []string{"#outer", "body"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`最终每小时获取[：:]\s*(?:<[^>]*>\s*)*([\d.,]+)`}},
 					{Name: "parseNumber"},
 				},
 			},
