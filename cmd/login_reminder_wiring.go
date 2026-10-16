@@ -164,6 +164,8 @@ func wireLoginReminderMonitor(
 
 	wireDailyReportJob(mgr, store, userInfo, notifier)
 	wireDeadTorrentMonitor(mgr, store, notifier)
+	// 免费结束暂停连续失败时的告警也走这个投递器（发给所有启用的通道）
+	mgr.SetFreeEndNotifier(notifier)
 	return notifier
 }
 

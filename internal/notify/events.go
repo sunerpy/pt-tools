@@ -21,6 +21,7 @@ const (
 	EventAttendanceDaily     = "attendance.daily"
 	EventReportDaily         = "report.daily"
 	EventDeadTorrents        = "downloader.dead_torrents"
+	EventFreeEndPauseFailed  = "downloader.free_end_pause_failed"
 	EventRemotePaired        = "remote.paired"
 	EventTest                = "test"
 )
@@ -283,6 +284,19 @@ var notifyEvents = []EventSpec{
 		},
 		SampleTitle: "下载器助手：发现失效种子",
 		SampleText:  "家里的 qB 里有 2 个种子（共 30.0 GiB）的 tracker 报告未注册或不存在。到「下载器助手 → 失效种子」确认后再删除，这里不会自动删。\n· Old.Movie.2019.1080p\n· Old.Show.S01.720p",
+	},
+	{
+		Type: EventFreeEndPauseFailed, Name: "免费结束暂停失败", Desc: "免费期结束时连续几次没能在下载器里暂停种子（每个免费期发一次）",
+		Vars: []Var{
+			{Key: "site", Type: VarString, Desc: "站点", Sample: "hdsky"},
+			{Key: "torrent_title", Type: VarString, Desc: "种子标题", Sample: "Dune.Part.Two.2024.2160p"},
+			{Key: "downloader", Type: VarString, Desc: "下载器", Sample: "家里的 qB"},
+			{Key: "free_end", Type: VarString, Desc: "免费结束时间", Sample: "2026-10-16 20:00"},
+			{Key: "failures", Type: VarInt, Desc: "连续失败次数", Sample: int64(3)},
+			{Key: "error", Type: VarString, Desc: "最后一次失败的原因", Sample: "暂停接口返回成功，但下载器里的状态仍是 downloading"},
+		},
+		SampleTitle: "免费结束暂停失败",
+		SampleText:  "「Dune.Part.Two.2024.2160p」（hdsky）的免费期在 2026-10-16 20:00 结束，已经连续 3 次没能在下载器 家里的 qB 里暂停：暂停接口返回成功，但下载器里的状态仍是 downloading。pt-tools 会继续重试；也请到下载器里手动暂停，避免产生计费下载量。",
 	},
 	{
 		Type: EventRemotePaired, Name: "新设备配对", Desc: "手机 App 扫码配对成功",
