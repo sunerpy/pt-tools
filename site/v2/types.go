@@ -181,6 +181,72 @@ var FreeDiscountLevels = []DiscountLevel{
 	Discount2xFree,
 }
 
+// FreeValidity 是免费资格的规范状态（docs/design/free-expiry-safety.md §4.1）。
+type FreeValidity string
+
+const (
+	// FreeNotFree：不是免费，或免费已经结束
+	FreeNotFree FreeValidity = "not_free"
+	// FreeUntil：免费，结束时间可信（EndsAt）
+	FreeUntil FreeValidity = "free_until"
+	// FreePermanent：站点明确表示长期有效的免费
+	FreePermanent FreeValidity = "free_permanent"
+	// FreeUnknown：免费但结束时间缺失或无法解析，不能当作免费放行的凭据
+	FreeUnknown FreeValidity = "unknown"
+)
+
+// PromotionSnapshot 是一次读取站点得到的优惠快照。不变量：free_until 一定有晚于 VerifiedAt 的 EndsAt；
+// free_permanent 只来自站点明确语义；unknown 不是免费放行的凭据。EndsAt 一律是绝对时间。
+type PromotionSnapshot struct {
+	Level      DiscountLevel
+	Validity   FreeValidity
+	EndsAt     *time.Time
+	VerifiedAt time.Time
+	Source     string
+	Err        string
+}
+
+// FreeFor 报告快照在 now 时能不能当作免费放行：长期免费，或者免费到 EndsAt 且 EndsAt-now 大于 margin。
+func (s PromotionSnapshot) FreeFor(now time.Time, margin time.Duration) bool {
+	switch s.Validity {
+	case FreePermanent:
+		return true
+	case FreeUntil:
+		return s.EndsAt != nil && s.EndsAt.Sub(now) > margin
+	}
+	return false
+}
+
+// Promotion 把驱动给出的优惠字段整理成规范快照。verifiedAt 是读到这份数据的时间。
+func (t *TorrentItem) Promotion(verifiedAt time.Time) PromotionSnapshot {
+	s := PromotionSnapshot{Level: t.DiscountLevel, VerifiedAt: verifiedAt, Source: t.DiscountSource, Err: t.DiscountErr}
+	if !t.DiscountEndTime.IsZero() {
+		end := t.DiscountEndTime.UTC()
+		s.EndsAt = &end
+	}
+	if !IsFreeTorrent(t.DiscountLevel) {
+		s.Validity = FreeNotFree
+		return s
+	}
+	switch t.DiscountValidity {
+	case FreePermanent:
+		s.Validity, s.EndsAt = FreePermanent, nil
+		return s
+	case FreeNotFree, FreeUnknown:
+		s.Validity = t.DiscountValidity
+		return s
+	}
+	switch {
+	case s.EndsAt == nil:
+		s.Validity = FreeUnknown
+	case !s.EndsAt.After(verifiedAt):
+		s.Validity = FreeNotFree
+	default:
+		s.Validity = FreeUntil
+	}
+	return s
+}
+
 // IsFreeTorrent checks if the given discount level results in free download
 func IsFreeTorrent(level DiscountLevel) bool {
 	for _, freeLevel := range FreeDiscountLevels {
@@ -286,6 +352,13 @@ type TorrentItem struct {
 	DiscountLevel DiscountLevel `json:"discountLevel"`
 	// DiscountEndTime is when the discount expires
 	DiscountEndTime time.Time `json:"discountEndTime,omitempty"`
+	// DiscountValidity 是站点驱动按原始响应给出的免费有效性（见 Promotion）。为空时按保守规则推导：
+	// 免费但没有结束时间为 unknown（零时间不等于永久），结束时间已过为 not_free。只有站点明确表示长期有效才写 free_permanent。
+	DiscountValidity FreeValidity `json:"discountValidity,omitempty"`
+	// DiscountSource 是优惠来自哪里：base、promotion_rule、mall_single_free，或适配层（adapter）
+	DiscountSource string `json:"discountSource,omitempty"`
+	// DiscountErr 是读取优惠时遇到的问题（例如结束时间无法解析），只写字段名与错误类型，不放原始响应
+	DiscountErr string `json:"discountErr,omitempty"`
 	// HasHR indicates if the torrent has H&R requirements
 	HasHR bool `json:"hasHR,omitempty"`
 	// DownloadURL is the direct download URL
