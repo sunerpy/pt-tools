@@ -137,6 +137,10 @@ export interface SiteConfig {
   upload_limit_kbs?: number;
   download_limit_kbs?: number;
   seeding_capacity_gb?: number;
+  /** 站点规则里没有 H&R 做种要求时用户填的（小时），0 = 不知道 */
+  hr_seed_time_h?: number;
+  /** 站点规则里已经写了 H&R 做种要求（这时不用填 hr_seed_time_h） */
+  hr_rule_builtin?: boolean;
   rss: RSSConfig[];
   urls?: string[];
   web_url?: string;
@@ -2101,6 +2105,8 @@ export interface BrushRunResult {
   skipped?: string[];
   errors?: string[];
   stopped?: string;
+  /** 不符合入场条件的原因与个数（多的在前） */
+  rejected?: { reason: string; count: number }[];
 }
 
 export interface BrushStatsPoint extends BrushStat {

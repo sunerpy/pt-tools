@@ -92,6 +92,9 @@ export function limitSummary(c: BrushTaskConfig): string {
   return parts.join(" · ");
 }
 
+/** 有 H&R、做种要求未知时的拒收原因（与后端 brushRejectHRUnknown 一致） */
+export const HR_UNKNOWN_REASON = "H&R 要求的做种时长未知";
+
 /** 「立即运行」之后弹的提示：结论在前，原因在后 */
 export function runMessage(
   r: BrushRunResult,
@@ -99,6 +102,14 @@ export function runMessage(
 ): { tone: "ok" | "warn" | "error"; text: string } {
   if (error) return { tone: "error", text: `运行失败：${error}` };
   const parts = [`列表 ${r.listed} 个，符合条件 ${r.eligible} 个，加入 ${r.added} 个`];
+  const rejected = r.rejected ?? [];
+  if (!r.eligible && rejected.length) {
+    const top = rejected.slice(0, 2);
+    let why = `不符合的原因：${top.map((x) => `${x.reason} ${x.count} 个`).join("、")}`;
+    if (top.some((x) => x.reason === HR_UNKNOWN_REASON))
+      why += "（可以在站点设置里填写 H&R 做种要求）";
+    parts.push(why);
+  }
   if (r.removed) parts.push(`删除 ${r.removed} 个`);
   if (r.gone) parts.push(`${r.gone} 个已不在下载器里`);
   if (r.stopped) parts.push(r.stopped);

@@ -61,6 +61,27 @@ describe("brush utils", () => {
     expect(runMessage(r, "站点 502").tone).toBe("error");
   });
 
+  it("一个都不符合时写出前两条原因，H&R 要求未知时提示去站点设置填写（#727）", () => {
+    const r = {
+      task_id: 1,
+      sampled: 0,
+      removed: 0,
+      gone: 0,
+      listed: 38,
+      eligible: 0,
+      added: 0,
+      rejected: [
+        { reason: "H&R 要求的做种时长未知", count: 36 },
+        { reason: "优惠类型 PERCENT_50 不在允许范围", count: 1 },
+        { reason: "优惠已到期", count: 1 },
+      ],
+    };
+    expect(runMessage(r).text).toBe(
+      "列表 38 个，符合条件 0 个，加入 0 个；不符合的原因：H&R 要求的做种时长未知 36 个、优惠类型 PERCENT_50 不在允许范围 1 个（可以在站点设置里填写 H&R 做种要求）",
+    );
+    expect(runMessage({ ...r, eligible: 2 }).text).toBe("列表 38 个，符合条件 2 个，加入 0 个");
+  });
+
   it("配置从任务里取回，下次运行时间按间隔算", () => {
     const task = {
       ...defaultBrushConfig(),
