@@ -131,3 +131,39 @@ func TestRSSFreeSafety_PushedRecordRefreshedEveryRound(t *testing.T) {
 	assert.Nil(t, r.record("q1").FreeEndedAt, "又变回免费：清掉")
 	assert.Len(t, r.dls["qb"].addCalls(), 1, "只是刷新资格，不会再推")
 }
+
+// 硬性语义 5 的「来源和过滤规则」：这条 RSS 推的种子每轮也按这一轮的判断刷新来源与命中的过滤规则
+// （规则改了、不再命中就清掉）；别的入口推的（手动推送等）保持那个入口写的来源。
+func TestRSSFreeSafety_PushedRecordRefreshesSourceAndRule(t *testing.T) {
+	r := newRSSRig(t)
+	feed := newFeedServer(t, "s9", "m9")
+	rss := r.addRSS(feed, models.RSSConfig{Name: "rule", Tag: "tv", IntervalMinutes: 10})[0]
+	rule := models.FilterRule{Name: "any", Pattern: ".*", PatternType: "regex", MatchField: "both", Enabled: true, Priority: 100, Purpose: "download"}
+	require.NoError(t, r.db.DB.Create(&rule).Error)
+	require.NoError(t, r.db.DB.Model(&models.FilterRule{}).Where("id = ?", rule.ID).Update("require_free", false).Error)
+	require.NoError(t, models.NewRSSFilterAssociationDB(r.db.DB).SetFilterRulesForRSS(rss.ID, []uint{rule.ID}))
+	pushed := true
+	manual := models.TorrentInfo{SiteName: "springsunday", TorrentID: "m9", Title: "Tm9", IsPushed: &pushed, DownloadSource: "manual_push"}
+	require.NoError(t, r.db.DB.Create(&manual).Error)
+
+	r.site.set("s9", v2.TorrentItem{DiscountLevel: v2.DiscountNone})
+	r.site.set("m9", v2.TorrentItem{DiscountLevel: v2.DiscountNone})
+	r.round(rss)
+	ti := r.record("s9")
+	require.True(t, pushedOf(ti))
+	require.Equal(t, filter.SourceFilterRule, ti.DownloadSource)
+	require.NotNil(t, ti.FilterRuleID)
+	require.NotNil(t, ti.PushedFilterRuleID, "推送时记下把它推进下载器的规则")
+	assert.Equal(t, rule.ID, *ti.PushedFilterRuleID)
+
+	require.NoError(t, r.db.DB.Model(&models.FilterRule{}).Where("id = ?", rule.ID).Update("pattern", "^nothing-matches$").Error)
+	r.site.set("s9", freeUntil(48*time.Hour))
+	r.round(rss)
+	ti = r.record("s9")
+	assert.Nil(t, ti.FilterRuleID, "规则不再命中：清掉")
+	require.NotNil(t, ti.PushedFilterRuleID, "推送时的规则不改（规则命中数按它统计）")
+	assert.Equal(t, rule.ID, *ti.PushedFilterRuleID)
+	assert.Equal(t, filter.SourceFreeDownload, ti.DownloadSource, "按这一轮的判断写来源")
+	assert.Equal(t, "manual_push", r.record("m9").DownloadSource, "别的入口推的保持原来的来源")
+	assert.Len(t, r.dls["qb"].addCalls(), 1, "只是刷新，不会再推")
+}

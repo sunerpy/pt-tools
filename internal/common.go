@@ -535,12 +535,21 @@ func downloadWorkerUnified(
 			}
 			if torrent != nil && isPushed(torrent) {
 				// 已推送：读一次详情刷新资格，不再推送。免费缩短、延长或取消时，自动删种的「免费到期未完成删除」
-				// 与到期暂停都按新的事实处理（受到期监控的把计划暂停改到新的时刻，监控器据此暂停）
+				// 与到期暂停都按新的事实处理（受到期监控的把计划暂停改到新的时刻，监控器据此暂停）；
+				// 这条 RSS 推的还按这一轮的判断刷新来源与命中的过滤规则
 				requestedAt := time.Now()
-				if d, derr := fetchDetail(v2.WithFreshAfter(ctx, attemptStart), site, item); derr != nil {
+				d, derr := fetchDetail(v2.WithFreshAfter(ctx, attemptStart), site, item)
+				if derr != nil {
 					sLogger().Warnf("%s: 刷新已推送种子的资格失败，保持原来的记录: %v", title, derr)
-				} else if rerr := refreshPushedRecord(torrent, detailSnapshot(siteName, item.GUID, d, requestedAt), time.Now()); rerr != nil {
-					sLogger().Warnf("%s: 写回已推送种子的资格失败: %v", title, rerr)
+				} else {
+					snap := detailSnapshot(siteName, item.GUID, d, requestedAt)
+					if rerr := refreshPushedRecord(torrent, snap, time.Now()); rerr != nil {
+						sLogger().Warnf("%s: 写回已推送种子的资格失败: %v", title, rerr)
+					}
+					dec := decideItem(title, d, snap, gl, rssCfg, filterSvc, hasAssociatedRules, margin)
+					if rerr := refreshPushedSource(torrent, rssCfg, dec.source, dec.ruleID); rerr != nil {
+						sLogger().Warnf("%s: 写回已推送种子的来源失败: %v", title, rerr)
+					}
 				}
 				stats.skipped.Add(1)
 				continue
@@ -580,25 +589,12 @@ func downloadWorkerUnified(
 			snap := detailSnapshot(siteName, item.GUID, detail, requestedAt)
 			// 订阅也看 RSS 拉到的种子（不阻塞；对上了由订阅自己推送，和这里的过滤规则各管各的）
 			offerToSubscriptions(siteID, detail, item)
-			// 使用 v2.TorrentItem 的方法（此处传 0 给 sizeLimitGB，全局大小硬上限由 filter.Decide 统一检查，
-			// 避免过滤规则通道绕过全局限制）
-			canFinished := detail.CanbeFinished(gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, 0)
-			// 决定下载时的「免费」：免费到某时（剩余超过安全余量）、长期免费，或免费但结束时间未知
-			// （未知的照样暂存，推送前要求免费的会被拦下，等下一轮读到结束时间）
-			isFree := freeForDecision(snap, time.Now(), margin)
-
-			if isFree && canFinished && snap.EndsAt != nil && gl.MinFreeMinutes > 0 {
-				remaining := time.Until(*snap.EndsAt)
-				if remaining < time.Duration(gl.MinFreeMinutes)*time.Minute {
-					canFinished = false
-					sLogger().Infof("种子: %s 免费剩余时间不足 (%.0f分钟 < %d分钟)，跳过",
-						title, remaining.Minutes(), gl.MinFreeMinutes)
-				}
+			dec := decideItem(title, detail, snap, gl, rssCfg, filterSvc, hasAssociatedRules, margin)
+			isFree, canFinished, detailTag, sizeGB := dec.isFree, dec.canFinished, dec.tag, dec.sizeGB
+			if dec.freeShort {
+				sLogger().Infof("种子: %s 免费剩余时间不足 (%.0f分钟 < %d分钟)，跳过",
+					title, dec.freeLeft.Minutes(), gl.MinFreeMinutes)
 			}
-
-			// 获取种子的标签/副标题用于过滤匹配
-			detailTag := detail.GetSubTitle()
-			sizeGB := float64(detail.SizeBytes) / 1024 / 1024 / 1024
 
 			// Sprint 2: 'filtered' 模式通知钩子。需要详情后才能匹配（subtitle/size）
 			// 与渲染模板。复用 GetTorrentDetails 已有的站点级 PersistentRateLimiter，
@@ -627,39 +623,12 @@ func downloadWorkerUnified(
 				}
 			}
 
-			// 统一通过 filter.Decide 做完整决策：全局大小硬限（上下限）→ 过滤规则通道 → 免费通道
-			var decision filter.Decision
-			if filterSvc != nil && rssCfg.ID != 0 && hasAssociatedRules {
-				decision = filterSvc.Decide(filter.DecisionContext{
-					Input:         filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
-					IsFree:        isFree,
-					CanFinish:     canFinished,
-					GlobalSize:    gl.TorrentSizeGB,
-					GlobalMinSize: gl.TorrentMinSizeGB,
-					FilterMode:    rssCfg.GetEffectiveFilterMode(&gl),
-				}, rssCfg.ID)
-			} else {
-				decision = filter.DecideWithoutRules(filter.DecisionContext{
-					Input:         filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
-					IsFree:        isFree,
-					CanFinish:     canFinished,
-					GlobalSize:    gl.TorrentSizeGB,
-					GlobalMinSize: gl.TorrentMinSizeGB,
-					FilterMode:    rssCfg.GetEffectiveFilterMode(&gl),
-				})
-			}
-
-			matchedRule := decision.MatchedRule
-			downloadSource := decision.Source
-			if downloadSource == "" {
-				downloadSource = filter.SourceFreeDownload
-			}
+			decision, matchedRule, downloadSource, ruleID := dec.decision, dec.rule, dec.source, dec.ruleID
 			if matchedRule != nil && decision.Source == filter.SourceFilterRule {
 				sLogger().Infof("种子 %s (tag: %s) 匹配 RSS 关联过滤规则: %s (require_free=%v, min=%d, max=%d)", title, detailTag, matchedRule.Name, matchedRule.RequireFree, matchedRule.MinSizeGB, matchedRule.MaxSizeGB)
 			}
 			shouldDownload := decision.ShouldDownload
-			// 免费通道与要求免费的规则：推送前必须持有本次读取、仍在免费期内的资格
-			requireFree := downloadSource == filter.SourceFreeDownload || (matchedRule != nil && matchedRule.RequireFree)
+			requireFree := dec.requireFree
 
 			if isFree {
 				stats.free.Add(1)
@@ -695,10 +664,6 @@ func downloadWorkerUnified(
 			}
 			if detail.DoubanID != "" {
 				facts["douban_id"] = detail.DoubanID
-			}
-			var ruleID *uint
-			if matchedRule != nil {
-				ruleID = &matchedRule.ID
 			}
 			policy := map[string]any{
 				"is_skipped":      !shouldDownload,
@@ -817,6 +782,62 @@ func downloadWorkerUnified(
 			}
 		}
 	}
+}
+
+// itemDecision 是 RSS 按这一轮的详情对一个条目做的下载决定（见 decideItem）。
+type itemDecision struct {
+	isFree, canFinished bool
+	// freeShort：免费剩余时间不足 MinFreeMinutes（freeLeft 是剩余时间），这一轮不下载
+	freeShort   bool
+	freeLeft    time.Duration
+	tag         string
+	sizeGB      float64
+	decision    filter.Decision
+	rule        *models.FilterRule
+	ruleID      *uint
+	source      string
+	requireFree bool
+}
+
+// decideItem 按这一轮的详情做下载决定：全局大小硬限（上下限）→ 过滤规则通道 → 免费通道（filter.Decide）。
+// 决定下载时的「免费」：免费到某时（剩余超过安全余量）、长期免费，或免费但结束时间未知
+// （未知的照样暂存，推送前要求免费的会被拦下，等下一轮读到结束时间）。
+func decideItem(title string, detail *v2.TorrentItem, snap v2.PromotionSnapshot, gl models.SettingsGlobal, rssCfg models.RSSConfig,
+	filterSvc filter.FilterService, hasRules bool, margin time.Duration,
+) itemDecision {
+	d := itemDecision{tag: detail.GetSubTitle(), sizeGB: float64(detail.SizeBytes) / 1024 / 1024 / 1024}
+	// 此处传 0 给 sizeLimitGB：全局大小硬上限由 filter.Decide 统一检查，避免过滤规则通道绕过全局限制
+	d.canFinished = detail.CanbeFinished(gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, 0)
+	d.isFree = freeForDecision(snap, time.Now(), margin)
+	if d.isFree && d.canFinished && snap.EndsAt != nil && gl.MinFreeMinutes > 0 {
+		if left := time.Until(*snap.EndsAt); left < time.Duration(gl.MinFreeMinutes)*time.Minute {
+			d.canFinished, d.freeShort, d.freeLeft = false, true, left
+		}
+	}
+	dc := filter.DecisionContext{
+		Input:         filter.MatchInput{Title: title, Tag: d.tag, SizeGB: d.sizeGB},
+		IsFree:        d.isFree,
+		CanFinish:     d.canFinished,
+		GlobalSize:    gl.TorrentSizeGB,
+		GlobalMinSize: gl.TorrentMinSizeGB,
+		FilterMode:    rssCfg.GetEffectiveFilterMode(&gl),
+	}
+	if filterSvc != nil && rssCfg.ID != 0 && hasRules {
+		d.decision = filterSvc.Decide(dc, rssCfg.ID)
+	} else {
+		d.decision = filter.DecideWithoutRules(dc)
+	}
+	d.rule = d.decision.MatchedRule
+	if d.rule != nil {
+		d.ruleID = &d.rule.ID
+	}
+	d.source = d.decision.Source
+	if d.source == "" {
+		d.source = filter.SourceFreeDownload
+	}
+	// 免费通道与要求免费的规则：推送前必须持有本次读取、仍在免费期内的资格
+	d.requireFree = d.source == filter.SourceFreeDownload || (d.rule != nil && d.rule.RequireFree)
+	return d
 }
 
 func ProcessTorrentsWithDBUpdate(
