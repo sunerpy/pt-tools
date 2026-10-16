@@ -28,6 +28,10 @@ var CrabPTDefinition = &v2.SiteDefinition{
 				Assertion:     map[string]string{"id": "params.id"},
 				Fields:        []string{"name", "uploaded", "downloaded", "ratio", "levelName", "joinTime", "lastAccessAt"},
 			},
+			{
+				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
+				Fields:        []string{"bonusPerHour"},
+			},
 		},
 		Selectors: map[string]v2.FieldSelector{
 			"id": {
@@ -49,18 +53,25 @@ var CrabPTDefinition = &v2.SiteDefinition{
 				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:下载量|下載量|Downloaded)[^\d]*([\d.,]+\s*[KMGTP]?i?B)`}}, {Name: "parseSize"}},
 			},
 			"ratio": {
-				Selector: []string{"td.rowhead:contains('传输') + td", "td.rowhead:contains('分享率') + td", "#info_block"},
+				Selector: []string{"#info_block", "body"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)[^\d∞]*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
+				Filters: []v2.Filter{
+					// 「无限」必须显式排除「无」，否则 [^\d∞]* 会把「无限」整段吃掉，转而抓到相邻的上传量
+					{Name: "regex", Args: []any{`(?:分享率|Ratio)[^\d∞无]{0,20}([\d.,]+|无限|∞|Inf|---)`}},
+					// 无穷分享率折算成远大于 1 的有限值，避免分享率门槛判断把它当成不达标。
+					// 这里不接 parseNumber：ratio 最终由 parseRatio 解析，而 parseNumber 会把该值
+					// 转成 float64 并以科学计数法输出（9.999999e+06）。
+					{Name: "replace", Args: []any{"无限", "9999999"}},
+				},
 			},
 			"levelName": {
 				Selector: []string{"td.rowhead:contains('等级') + td > img", "td.rowhead:contains('等级') + td img", "td.rowhead:contains('Class') + td > img"},
 				Attr:     "title",
 			},
 			"bonus": {
-				Selector: []string{"#info_block", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
+				Selector: []string{"#info_block", "td.rowhead:contains('蟹币值') + td", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
+				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:蟹币值|魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
 			},
 			"joinTime": {
 				Selector: []string{"td.rowhead:contains('加入日期') + td", "td.rowhead:contains('Join') + td"},
@@ -90,6 +101,15 @@ var CrabPTDefinition = &v2.SiteDefinition{
 				Selector: []string{"#info_block"},
 				Attr:     "html",
 				Filters:  []v2.Filter{{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>\s*(\d+)`}}, {Name: "parseNumber"}},
+			},
+			"bonusPerHour": {
+				Selector: []string{"#outer", "body"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					// 蟹币值页「每小时获得的合计蟹币值」表格末列，含勋章/官种/后宫加成的合计值
+					{Name: "regex", Args: []any{`合计</td>.*?<td rowspan="\d+">([\d.,]+)</td>`}},
+					{Name: "parseNumber"},
+				},
 			},
 		},
 	},
