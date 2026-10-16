@@ -482,13 +482,13 @@ func downloadWorkerUnified(
 
 	siteID := string(siteName)
 	var siteHR bool
-	var siteHRSeedTimeH int
 	var siteDef *v2.SiteDefinition
 	if def := v2.GetDefinitionRegistry().GetOrDefault(siteID); def != nil {
 		siteDef = def
 		siteHR = def.HREnabled
-		siteHRSeedTimeH = def.HRSeedTimeHours
 	}
+	// 站点定义里没有 H&R 做种时长时用站点设置里填的（#727），这一轮读一次
+	siteHRSettingH := SiteHRSeedTimeH(siteID)
 
 	var filterSvc filter.FilterService
 	if global.GlobalDB != nil {
@@ -691,7 +691,7 @@ func downloadWorkerUnified(
 					DetailID:       detailRef,
 					TorrentSize:    detail.SizeBytes,
 					HasHR:          detail.HasHR || siteHR,
-					HRSeedTimeH:    calcHRSeedTimeForTorrent(siteDef, siteHRSeedTimeH, detail.SizeBytes),
+					HRSeedTimeH:    v2.ResolveHRSeedTimeH(siteDef, detail.SizeBytes, siteHRSettingH),
 					IMDbID:         detail.IMDbID,
 					DoubanID:       detail.DoubanID,
 				}
@@ -1438,16 +1438,6 @@ func downloadWorker[T models.ResType](
 			}
 		}
 	}
-}
-
-// calcHRSeedTimeForTorrent returns the per-torrent HR seed time (hours).
-// If the site definition has size-tiered rules (HRSeedTimeRules), it calculates
-// based on the torrent size; otherwise falls back to the flat site-wide value.
-func calcHRSeedTimeForTorrent(def *v2.SiteDefinition, fallbackH int, sizeBytes int64) int {
-	if def != nil && len(def.HRSeedTimeRules) > 0 {
-		return def.CalcHRSeedTimeH(sizeBytes)
-	}
-	return fallbackH
 }
 
 func extractTorrentRef(item *gofeed.Item) (siteName, torrentID string) {
