@@ -505,6 +505,7 @@ type HRSeedTimeRule struct {
 //  1. HRCalcSeedTime — custom function (site-specific logic, e.g., ratio-based, tier-based)
 //  2. HRSeedTimeRules — built-in size-tiered rules
 //  3. HRSeedTimeHours — flat site-wide fallback
+//
 // ResolveHRSeedTimeH 是一个种子的 H&R 做种要求（小时）：站点定义能算出来时按定义（固定值、按体积分档或自定义规则），
 // 算不出时用站点设置里用户填的值 settingH（#727）；都没有时为 0，表示要求未知——刷流不收这类有 H&R 的种子、
 // 自动删种保护它们。def 可以为 nil。
