@@ -1470,6 +1470,7 @@ func TestMTorrentParseDownload_ErrorsHideSignedURL(t *testing.T) {
 	cases := []MTorrentResponse{
 		{Code: "0", Data: json.RawMessage(`{"url":"https://api.m-team.cc/api/rss/dlv2?sign=` + secret + `&t=1"}`)},
 		{Code: "1", Message: "busy", RawBody: []byte(`{"code":"1","data":"https://api.m-team.cc/api/rss/dlv2?sign=` + secret + `"}`)},
+		{Code: "1", Message: "请改用 https://api.m-team.cc/api/rss/dlv2?sign=" + secret, RawBody: []byte(`{"code":"1"}`)},
 	}
 	for _, res := range cases {
 		_, err := d.ParseDownload(res)

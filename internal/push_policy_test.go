@@ -158,10 +158,13 @@ func TestPush_AdoptExisting(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		pending bool
-		resumes int
+		// markLater 让标记比任务的加入时间晚得多：没清掉的旧标记（加入时下载器说原本就有、清标记又失败）
+		markLater bool
+		resumes   int
 	}{
-		{"上次加入、记账没写成", true, 1},
-		{"下载器里原本就有", false, 0},
+		{"上次加入、记账没写成", true, false, 1},
+		{"下载器里原本就有", false, false, 0},
+		{"旧标记、任务早就在了", true, true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := pushRig(t)
@@ -175,6 +178,9 @@ func TestPush_AdoptExisting(t *testing.T) {
 			cols := map[string]any{"is_pushed": false, "downloader_task_id": ""}
 			if tc.pending {
 				cols["push_pending_at"] = time.Now().Add(-time.Minute)
+				if tc.markLater {
+					cols["push_pending_at"] = time.Now().Add(10 * time.Minute)
+				}
 			}
 			require.NoError(t, global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("torrent_id = ?", "ad").Updates(cols).Error)
 
@@ -288,4 +294,32 @@ func TestPush_ConcurrentPlacementsSerialized(t *testing.T) {
 	ti := r.record("race1")
 	require.NotNil(t, ti.DownloaderID)
 	assert.Equal(t, idA, *ti.DownloaderID)
+}
+
+// 另一个下载器的加入还在补记账（推送标记还在）：也算一处受监控的加入，不再推到第二个下载器。
+func TestPush_PendingPlacementBlocksSecondDownloader(t *testing.T) {
+	r := pushRig(t, "qb-a", "qb-b")
+	idA, idB := r.dlID("qb-a"), r.dlID("qb-b")
+	pending := time.Now().Add(-5 * time.Minute)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.TorrentInfo{
+		SiteName: "springsunday", TorrentID: "pend", DownloaderID: &idA, DownloaderName: "qb-a",
+		PauseOnFreeEnd: true, PushPendingAt: &pending,
+	}).Error)
+	res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+		SiteID: "springsunday", TorrentID: "pend", TorrentData: roundTorrentBytes("pend"), DownloaderID: idB,
+		Policy: AdmissionPolicy{SourceKind: SourceKindManual},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, PushStatusRejectedPlacement, res.Status)
+	assert.Empty(t, r.dls["qb-b"].addCalls())
+}
+
+// 写进库里的时间都换成本地时区：SQLite 按文本比较，同一列混着 UTC 与本地时间会差出几个小时。
+func TestSnapshotColumnsUseLocalTime(t *testing.T) {
+	end := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	cols := SnapshotColumns(v2.PromotionSnapshot{Level: v2.DiscountFree, Validity: v2.FreeUntil, EndsAt: &end, VerifiedAt: end.Add(-time.Hour)})
+	got := cols["free_end_time"].(*time.Time)
+	assert.True(t, got.Equal(end))
+	assert.Equal(t, time.Local, got.Location())
+	assert.Equal(t, time.Local, cols["free_verified_at"].(*time.Time).Location())
 }

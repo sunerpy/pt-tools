@@ -740,7 +740,7 @@ func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 		if len(rawBody) > 500 {
 			rawBody = rawBody[:500] + "..."
 		}
-		return nil, fmt.Errorf("API error: %s - %s (raw: %s)", res.Code.String(), res.Message, sanitizeRawURLs(rawBody))
+		return nil, fmt.Errorf("API error: %s - %s (raw: %s)", res.Code.String(), sanitizeRawURLs(res.Message), sanitizeRawURLs(rawBody))
 	}
 
 	// M-Team returns the download URL directly as a string in the data field

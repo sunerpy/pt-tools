@@ -107,12 +107,18 @@ func pauseDeadline(t models.TorrentInfo, advance time.Duration) time.Time {
 	return d
 }
 
+// dbTime 把写进库里、会在 SQL 里比较的时间换成进程本地时区，与 internal.DBTime 一致（见那里的说明）。
+func dbTime(t time.Time) time.Time { return t.In(time.Local) }
+
 // 归免费结束监控管的记录（与 freeEndMonitored 同一个条件）
 const monitoredWhere = "pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND downloader_task_id != '' AND " +
 	"(pause_planned_at IS NOT NULL OR (is_free = ? AND free_end_time IS NOT NULL))"
 
 // 到了处理时刻的记录：计划暂停时间已到，或者免费结束时间减提前量已到
-const dueWhere = "((pause_planned_at IS NOT NULL AND pause_planned_at <= ?) OR (is_free = ? AND free_end_time IS NOT NULL AND free_end_time <= ?))"
+//
+// 时间按时刻比较（julianday），不按文本：SQLite 按文本存时间，旧记录与新记录的时区可能不一样。
+const dueWhere = "((pause_planned_at IS NOT NULL AND julianday(pause_planned_at) <= julianday(?)) OR " +
+	"(is_free = ? AND free_end_time IS NOT NULL AND julianday(free_end_time) <= julianday(?)))"
 
 type monitorTask struct {
 	torrentID uint
@@ -911,12 +917,17 @@ func (m *FreeEndMonitor) alertPauseFailing(t models.TorrentInfo, failures int, e
 		global.GetSlogger().Warnf("[FreeEndMonitor] 种子 %s 已连续 %d 次没能暂停，没有可用的通知服务，没有发出告警", t.Title, failures)
 		return
 	}
-	end := t.FreeEndTime.Local().Format("2006-01-02 15:04")
+	end := "（免费已结束或已取消）"
+	if t.FreeEndTime != nil {
+		end = t.FreeEndTime.Local().Format("2006-01-02 15:04")
+	}
+	deadline := pauseDeadline(t, m.advanceDuration())
 	safeErr := redact.Text(errMsg)
 	text := fmt.Sprintf("「%s」（%s）的免费期在 %s 结束，已经连续 %d 次没能在下载器 %s 里暂停：%s。pt-tools 会继续重试；也请到下载器里手动暂停，避免产生计费下载量。",
 		t.Title, t.SiteName, end, failures, t.DownloaderName, safeErr)
 	subject := strconv.FormatUint(uint64(t.ID), 10)
-	key := strconv.FormatInt(t.FreeEndTime.Unix(), 10)
+	// 同一次计划暂停只告警一次（免费结束时间可能已被清空，按处理时刻算）
+	key := strconv.FormatInt(deadline.Unix(), 10)
 	inserted, err := n.Enqueue(m.ctx, MonitorNotifyEntry{
 		Source: freeEndNotifySource, Subject: subject, Kind: "pause_failed", EventKey: key,
 		Title: "免费结束暂停失败", Text: text,
@@ -943,7 +954,7 @@ func (m *FreeEndMonitor) alertPauseFailing(t models.TorrentInfo, failures int, e
 func (m *FreeEndMonitor) reconcilePendingPushes() {
 	now := time.Now()
 	var rows []models.TorrentInfo
-	if err := m.db.Where("push_pending_at IS NOT NULL AND push_pending_at <= ?", now.Add(-pendingPushGrace)).
+	if err := m.db.Where("push_pending_at IS NOT NULL AND julianday(push_pending_at) <= julianday(?)", now.Add(-pendingPushGrace)).
 		Order("push_pending_at ASC, id ASC").Limit(progressUpdateBatchSize).Find(&rows).Error; err != nil {
 		global.GetSlogger().Errorf("[FreeEndMonitor] 查询待补记账的推送失败: %v", err)
 		return
@@ -985,7 +996,7 @@ func (m *FreeEndMonitor) finishPendingPush(row models.TorrentInfo, info download
 		"last_error":         "加入下载器以后的记账由对账补上：任务保持暂停，需要时请手动开始",
 	}
 	if row.PauseOnFreeEnd && row.IsFree && row.FreeEndTime != nil {
-		cols["pause_planned_at"] = row.FreeEndTime.Add(-m.advanceDuration())
+		cols["pause_planned_at"] = dbTime(row.FreeEndTime.Add(-m.advanceDuration()))
 	}
 	res := m.db.Model(&models.TorrentInfo{}).Where("id = ? AND push_pending_at IS NOT NULL", row.ID).Updates(cols)
 	if res.Error != nil || res.RowsAffected == 0 {

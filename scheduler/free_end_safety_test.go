@@ -287,3 +287,59 @@ func TestFreeEnd_PlannedPauseHandledAfterFreeCancelled(t *testing.T) {
 	assert.True(t, got.Equal(sooner), "处理时刻提前时换掉旧的预约")
 	m.CancelTorrent(row2.ID)
 }
+
+// 到期判断按时刻比较：库里的时间和进程时区不一样（旧记录、别的时区写的）也不提前、不推后。
+func TestFreeEnd_DueCheckIgnoresStoredTimeZone(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+	m.pauseConfirmWait = time.Millisecond
+	// 与本地时区不同的两种时区：到期的照样处理，没到的不提前暂停
+	east := time.FixedZone("E", 12*3600)
+	west := time.FixedZone("W", -5*3600)
+	pushed := true
+	future := time.Now().Add(2 * time.Hour).In(west)
+	past := time.Now().Add(-time.Minute).In(east)
+	notYet := models.TorrentInfo{
+		SiteName: "s", TorrentID: "tz1", Title: "Ttz1", PauseOnFreeEnd: true, IsPushed: &pushed, IsFree: true,
+		FreeLevel: "FREE", FreeValidity: "free_until", FreeEndTime: &future, DownloaderTaskID: "task-tz1", DownloaderName: "qb1",
+	}
+	due := models.TorrentInfo{
+		SiteName: "s", TorrentID: "tz2", Title: "Ttz2", PauseOnFreeEnd: true, IsPushed: &pushed, IsFree: true,
+		FreeLevel: "FREE", FreeValidity: "free_until", FreeEndTime: &past, DownloaderTaskID: "task-tz2", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&notYet).Error)
+	require.NoError(t, db.DB.Create(&due).Error)
+	fake.torrentByID["task-tz1"] = downloader.Torrent{ID: "task-tz1", Progress: 0.2, State: downloader.TorrentDownloading}
+	fake.torrentByID["task-tz2"] = downloader.Torrent{ID: "task-tz2", Progress: 0.2, State: downloader.TorrentDownloading}
+
+	m.checkAndProcessExpiredTorrents()
+	require.Eventually(t, func() bool { return reload(t, m, due.ID).IsPausedBySystem }, 5*time.Second, 10*time.Millisecond)
+	assert.False(t, reload(t, m, notYet.ID).IsPausedBySystem, "还有两小时，不提前暂停")
+	assert.NotContains(t, fake.pausedIDs, "task-tz1")
+	m.CancelTorrent(notYet.ID)
+}
+
+// 免费被取消（结束时间已清空、计划暂停改成现在）以后暂停一直失败：告警照样发，不因结束时间为空出错。
+func TestFreeEnd_AlertWithoutFreeEndTime(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.pauseErr = errors.New("连接被拒绝")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+	require.NoError(t, db.DB.AutoMigrate(&models.NotificationConf{}, &models.MonitorNotificationLog{}))
+	require.NoError(t, db.DB.Create(&models.NotificationConf{Name: "tg", ChannelType: "telegram", Enabled: true}).Error)
+	m.SetNotifier(NewMonitorNotifier(db.DB, MonitorSenderFunc(func(context.Context, uint, MonitorMessage) error { return nil }), nil, nil))
+	pushed := true
+	planned := time.Now().Add(-time.Second)
+	row := models.TorrentInfo{
+		SiteName: "s", TorrentID: "na1", Title: "Tna1", PauseOnFreeEnd: true, IsPushed: &pushed,
+		FreeLevel: "NONE", FreeValidity: "not_free", PausePlannedAt: &planned, FreeEndFailures: 2,
+		DownloaderTaskID: "task-na1", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&row).Error)
+	fake.torrentByID["task-na1"] = downloader.Torrent{ID: "task-na1", Progress: 0.2, State: downloader.TorrentDownloading}
+
+	require.NotPanics(t, func() { m.handleFreeEndedTorrent(row) })
+	got := reload(t, m, row.ID)
+	assert.Equal(t, 3, got.FreeEndFailures)
+	assert.NotNil(t, got.FreeEndAlertedAt, "第 3 次失败发了告警")
+	m.CancelTorrent(row.ID)
+}

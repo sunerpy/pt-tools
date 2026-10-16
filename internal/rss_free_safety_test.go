@@ -158,6 +158,7 @@ type fakeDL struct {
 	free    int64
 	adds    []downloader.AddTorrentOptions
 	added   map[string]bool
+	addedAt map[string]time.Time
 	resumes []string
 	// dupOnAdd：预检查不到，加入时下载器才说已经有了（Transmission 会这样）
 	dupOnAdd map[string]bool
@@ -167,7 +168,7 @@ func newFakeDL(t *testing.T, name string) *fakeDL {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	m := sm.NewMockDownloader(ctrl)
-	d := &fakeDL{MockDownloader: m, free: 1 << 50, added: map[string]bool{}}
+	d := &fakeDL{MockDownloader: m, free: 1 << 50, added: map[string]bool{}, addedAt: map[string]time.Time{}}
 	m.EXPECT().GetName().Return(name).AnyTimes()
 	m.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	m.EXPECT().Close().Return(nil).AnyTimes()
@@ -195,7 +196,16 @@ func newFakeDL(t *testing.T, name string) *fakeDL {
 			return downloader.AddTorrentResult{Success: true, Duplicate: true, Hash: h}, nil
 		}
 		d.added[h] = true
+		d.addedAt[h] = time.Now()
 		return downloader.AddTorrentResult{Success: true, Hash: h}, nil
+	}).AnyTimes()
+	m.EXPECT().GetTorrent(gomock.Any()).DoAndReturn(func(h string) (downloader.Torrent, error) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if !d.added[h] {
+			return downloader.Torrent{}, downloader.ErrTorrentNotFound
+		}
+		return downloader.Torrent{ID: h, InfoHash: h, DateAdded: d.addedAt[h].Unix(), State: downloader.TorrentPaused}, nil
 	}).AnyTimes()
 	m.EXPECT().ResumeTorrent(gomock.Any()).DoAndReturn(func(id string) error {
 		d.mu.Lock()

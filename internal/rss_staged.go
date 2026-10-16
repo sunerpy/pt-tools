@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/sunerpy/pt-tools/core"
@@ -345,7 +346,7 @@ func (sp *stagedPush) revalidateSnapshot(ctx context.Context, rec models.Torrent
 	s := detailSnapshot(sp.siteName, rec.TorrentID, item, requestedAt)
 	cols := SnapshotColumns(s)
 	cols["is_expired"] = promotionEnded(s)
-	if err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID).Updates(cols).Error; err != nil {
+	if err := notOlderSnapshot(global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID), s).Updates(cols).Error; err != nil {
 		sLogger().Warnf("[暂存推送] 写回资格失败 (ID:%d): %v", rec.ID, err)
 	}
 	sLogger().Infof("[暂存推送] 已重新验证资格: site=%s torrent_id=%s source_rss_id=%d result=%s",
@@ -531,7 +532,12 @@ func createTorrentRecord(t *models.TorrentInfo) (bool, error) {
 // 决定下载时先用条件更新取得归属，归另一条还在的 RSS 时不写策略。返回这条 RSS 能不能暂存它。
 func recordFetchDecision(rec *models.TorrentInfo, rss models.RSSConfig, facts, policy map[string]any, download bool) (bool, error) {
 	db := global.GlobalDB.DB
-	if err := db.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID).Updates(facts).Error; err != nil {
+	factsQ := db.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID)
+	if v, ok := facts["free_verified_at"].(*time.Time); ok && v != nil {
+		// 只让更新的读取写回：两条 RSS 同时读到同一个种子时，较旧的资格不盖掉较新的
+		factsQ = factsQ.Where("(free_verified_at IS NULL OR julianday(free_verified_at) <= julianday(?))", *v)
+	}
+	if err := factsQ.Updates(facts).Error; err != nil {
 		return false, err
 	}
 	if rss.ID == 0 {
@@ -580,6 +586,14 @@ func applySnapshotToRecord(t *models.TorrentInfo, s v2.PromotionSnapshot) {
 	t.IsExpired = promotionEnded(s)
 }
 
+// notOlderSnapshot 限定只更新库里资格读取时间不晚于这份快照的记录（按时刻比较，不按文本）。
+func notOlderSnapshot(q *gorm.DB, snap v2.PromotionSnapshot) *gorm.DB {
+	if snap.VerifiedAt.IsZero() {
+		return q
+	}
+	return q.Where("(free_verified_at IS NULL OR julianday(free_verified_at) <= julianday(?))", DBTime(snap.VerifiedAt))
+}
+
 // monitoredPushed 报告这是已推送、正受到期监控的种子：RSS 看到它时还要刷新资格（见 refreshMonitoredRecord）。
 func monitoredPushed(t *models.TorrentInfo) bool {
 	return t != nil && isPushed(t) && t.PauseOnFreeEnd && !t.IsCompleted && !t.IsPausedBySystem && t.DownloaderTaskID != ""
@@ -596,16 +610,17 @@ func refreshMonitoredRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, 
 	switch snap.Validity {
 	case v2.FreeUntil:
 		advance := min(max(time.Duration(freeEndAdvanceMinutes())*time.Minute, 0), maxSafetyMargin)
-		p := snap.EndsAt.Add(-advance)
+		p := DBTime(snap.EndsAt.Add(-advance))
 		planned = &p
 	case v2.FreePermanent:
 	default:
-		p := now
+		p := DBTime(now)
 		planned = &p
 	}
 	cols["pause_planned_at"] = planned
-	res := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
-		Where("id = ? AND is_paused_by_system = ? AND is_completed = ?", rec.ID, false, false).Updates(cols)
+	// 只让更新的读取写回：两条 RSS 同时刷新同一条记录时，较旧的「免费到某时」不能盖掉较新的「已不免费」
+	res := notOlderSnapshot(global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+		Where("id = ? AND is_paused_by_system = ? AND is_completed = ?", rec.ID, false, false), snap).Updates(cols)
 	if res.Error != nil || res.RowsAffected == 0 {
 		return res.Error
 	}

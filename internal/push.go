@@ -174,7 +174,7 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	}
 	if exists {
 		if req.AdoptExisting && record {
-			return adoptExistingTorrent(dl, target, req, torrentHash, snap, decision, addedByEarlierAttempt(req, target))
+			return adoptExistingTorrent(dl, target, req, torrentHash, snap, decision, addedByEarlierAttempt(dl, req, target, torrentHash))
 		}
 		sLogger().Infof("[PushTorrent] 种子已存在于下载器中，跳过: site=%s, id=%s, hash=%s, downloader=%s",
 			req.SiteID, req.TorrentID, torrentHash, target.Name)
@@ -571,13 +571,22 @@ func rejectPush(req PushTorrentRequest, record bool, hash string, status PushSta
 	return &PushTorrentResult{Success: false, TorrentHash: hash, Message: reason, Status: status}
 }
 
-// addedByEarlierAttempt 报告记录上留着之前一次加入的标记（暂停加入以后记账没写成），而且是加到这个下载器的。
-func addedByEarlierAttempt(req PushTorrentRequest, target pushTarget) bool {
+// addedByEarlierAttempt 报告下载器里的这个任务是之前一次暂停加入、记账没写成的：记录上留着加到这个下载器的推送标记，
+// 而且任务的加入时间不早于标记（标记也可能是没清掉的旧标记——加入时下载器说原本就有、清标记又失败了——那时任务早就在了）。
+// 读不到任务或加入时间时按不是算：不改已有任务的运行状态。
+func addedByEarlierAttempt(dl downloader.Downloader, req PushTorrentRequest, target pushTarget, hash string) bool {
 	var cur models.TorrentInfo
 	if err := global.GlobalDB.DB.Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).First(&cur).Error; err != nil {
 		return false
 	}
-	return cur.PushPendingAt != nil && cur.DownloaderID != nil && *cur.DownloaderID == target.ID
+	if cur.PushPendingAt == nil || cur.DownloaderID == nil || *cur.DownloaderID != target.ID {
+		return false
+	}
+	info, err := dl.GetTorrent(hash)
+	if err != nil || info.DateAdded <= 0 {
+		return false
+	}
+	return !time.Unix(info.DateAdded, 0).Before(cur.PushPendingAt.Add(-time.Minute))
 }
 
 // adoptExistingTorrent 处理下载器里已经有这个种子的 RSS 推送：记账、按策略登记监控。
@@ -628,7 +637,7 @@ func pushedColumns(target pushTarget, taskID string, policy AdmissionPolicy, sna
 	if decision.Monitor && snap != nil && snap.EndsAt != nil {
 		// 计划暂停时间与监控器一致：结束时间减提前量（0 到 60 分钟）
 		advance := min(max(time.Duration(freeEndAdvanceMinutes())*time.Minute, 0), maxSafetyMargin)
-		cols["pause_planned_at"] = snap.EndsAt.Add(-advance)
+		cols["pause_planned_at"] = DBTime(snap.EndsAt.Add(-advance))
 	}
 	return cols
 }
@@ -671,11 +680,11 @@ func snapshotFieldsOf(s v2.PromotionSnapshot) snapshotFields {
 		f.level = string(v2.DiscountNone)
 	}
 	if v2.IsFreeTorrent(s.Level) && s.EndsAt != nil {
-		e := s.EndsAt.UTC()
+		e := DBTime(*s.EndsAt)
 		f.end = &e
 	}
 	if !s.VerifiedAt.IsZero() {
-		v := s.VerifiedAt
+		v := DBTime(s.VerifiedAt)
 		f.verified = &v
 	}
 	if len(f.errText) > 250 {
@@ -683,6 +692,10 @@ func snapshotFieldsOf(s v2.PromotionSnapshot) snapshotFields {
 	}
 	return f
 }
+
+// DBTime 是写进库里、会在 SQL 里和别的时间比较的时间：一律换成进程本地时区。SQLite 按文本存时间、
+// 带各自的时区，文本比较不认时区，同一列混着 UTC 与本地时间会差出几个小时（与 time.Now() 写的列保持一致）。
+func DBTime(t time.Time) time.Time { return t.In(time.Local) }
 
 // truncateUTF8 截到不超过 n 字节，不截断多字节字符。
 func truncateUTF8(s string, n int) string {
@@ -714,6 +727,9 @@ func snapshotFromMeta(m *PushTorrentMeta) *v2.PromotionSnapshot {
 	return &s
 }
 
+// pendingPlacementTTL 是推送标记算作「还在进行的加入」的时长，与免费结束监控对账清标记的时长一致。
+const pendingPlacementTTL = 30 * time.Minute
+
 // monitoredElsewhere 返回这个种子正在另一个下载器里受免费结束监控时那个下载器的名字。
 // 同一个种子可能有两条记录（RSS 按条目编号、通知按钮与手动推送按详情编号），所以也按哈希找。
 func monitoredElsewhere(siteID, torrentID, hash string, downloaderID uint) string {
@@ -730,6 +746,10 @@ func monitoredElsewhere(siteID, torrentID, hash string, downloaderID uint) strin
 	for _, cur := range rows {
 		if cur.DownloaderID == nil || *cur.DownloaderID == downloaderID {
 			continue
+		}
+		if cur.PushPendingAt != nil && time.Since(*cur.PushPendingAt) < pendingPlacementTTL {
+			// 另一个下载器的加入还在补记账（暂停加入以后记账没写成）：也算一处受监控的加入
+			return cur.DownloaderName
 		}
 		pushed := cur.IsPushed != nil && *cur.IsPushed
 		if pushed && cur.PauseOnFreeEnd && cur.DownloaderTaskID != "" && !cur.IsCompleted && !cur.IsPausedBySystem &&
