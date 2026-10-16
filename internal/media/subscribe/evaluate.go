@@ -423,8 +423,8 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 	hasHR, def := siteHR(o.c.Site)
 	hasHR = hasHR || o.c.Item.HasHR
 	hrHours := 0
-	if hasHR && def != nil {
-		hrHours = def.CalcHRSeedTimeH(size)
+	if hasHR {
+		hrHours = ptinternal.HRSeedTimeH(o.c.Site, def, size)
 	}
 	// 只有免费的结束时间才是免费到期：半价、2X 这类优惠的结束时间写进去，免费到期清理会删掉没下完的种子
 	var freeEnd *time.Time

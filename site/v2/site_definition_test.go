@@ -728,3 +728,35 @@ func TestDefaultDetailParserConfig(t *testing.T) {
 	assert.Equal(t, DiscountFree, cfg.DiscountMapping["free"])
 	assert.NotEmpty(t, cfg.HRKeywords)
 }
+
+// ResolveHRSeedTimeH：站点定义能算出来时按定义，算不出时用站点设置里填的值（#727），都没有为 0（要求未知）。
+// 取代 internal 里的 calcHRSeedTimeForTorrent：那个函数只认分档规则、忽略自定义规则，第二个参数是定义里的固定值。
+func TestResolveHRSeedTimeH(t *testing.T) {
+	assert.Equal(t, 72, ResolveHRSeedTimeH(nil, 1<<30, 72), "没有站点定义：用站点设置")
+	assert.Equal(t, 0, ResolveHRSeedTimeH(nil, 1<<30, 0), "都没有：要求未知")
+	assert.Equal(t, 0, ResolveHRSeedTimeH(&SiteDefinition{}, 1<<30, -5), "负数当没填")
+
+	flat := &SiteDefinition{HREnabled: true, HRSeedTimeHours: 48}
+	assert.Equal(t, 48, ResolveHRSeedTimeH(flat, 1<<30, 24), "定义里有固定值：按定义，不用站点设置")
+
+	rules := &SiteDefinition{
+		HREnabled:       true,
+		HRSeedTimeHours: 10,
+		HRSeedTimeRules: []HRSeedTimeRule{
+			{MinSizeGB: 0, MaxSizeGB: 50, SeedTimeH: 100},
+			{MinSizeGB: 50, MaxSizeGB: 0, SeedTimeH: 200},
+		},
+	}
+	assert.Equal(t, 100, ResolveHRSeedTimeH(rules, 10*(1<<30), 24))
+	assert.Equal(t, 200, ResolveHRSeedTimeH(rules, 80*(1<<30), 24))
+
+	calc := &SiteDefinition{HRCalcSeedTime: func(int64) int { return 168 }}
+	assert.Equal(t, 168, ResolveHRSeedTimeH(calc, 1<<30, 24), "自定义规则也认")
+
+	none := &SiteDefinition{}
+	assert.Equal(t, 36, ResolveHRSeedTimeH(none, 1<<30, 36), "定义里没有：用站点设置")
+	assert.False(t, none.HasHRSeedTimeRule())
+	assert.True(t, flat.HasHRSeedTimeRule())
+	assert.True(t, rules.HasHRSeedTimeRule())
+	assert.True(t, calc.HasHRSeedTimeRule())
+}

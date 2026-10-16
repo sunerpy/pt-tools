@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -88,13 +89,48 @@ type BrushRunResult struct {
 	Added    int      `json:"added"`
 	Skipped  []string `json:"skipped,omitempty"`
 	Errors   []string `json:"errors,omitempty"`
+	// Rejected 是列表里不符合入场条件的原因与个数（多的在前），一个都不符合时 Summary 写出前两条
+	Rejected []BrushReject `json:"rejected,omitempty"`
 	// Stopped 说明这一轮为什么没有继续加种（限额已满、推送被闸门拒绝等）；为空表示列表里能加的都加了。
 	Stopped string `json:"stopped,omitempty"`
+}
+
+// BrushReject 是这一轮不符合入场条件的一类原因与个数。
+type BrushReject struct {
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
+}
+
+// brushRejectHRUnknown 是有 H&R、做种要求未知时的拒收原因：站点定义里没有、站点设置里也没填（#727）。
+const brushRejectHRUnknown = "H&R 要求的做种时长未知"
+
+// rejectSummary 是一个都不符合时写进 Summary 的原因（最多两条）；要求未知时提示去站点设置里填。
+func (r BrushRunResult) rejectSummary() string {
+	if r.Eligible > 0 || len(r.Rejected) == 0 {
+		return ""
+	}
+	var reasons []string
+	hint := false
+	for i, rj := range r.Rejected {
+		if i == 2 {
+			break
+		}
+		reasons = append(reasons, fmt.Sprintf("%s %d 个", rj.Reason, rj.Count))
+		hint = hint || rj.Reason == brushRejectHRUnknown
+	}
+	s := "不符合的原因：" + strings.Join(reasons, "、")
+	if hint {
+		s += "（可以在站点设置里填写 H&R 做种要求）"
+	}
+	return s
 }
 
 // Summary 是写进任务 last_result 的一句话。
 func (r BrushRunResult) Summary() string {
 	parts := []string{fmt.Sprintf("列表 %d 个、符合条件 %d 个、加入 %d 个", r.Listed, r.Eligible, r.Added)}
+	if s := r.rejectSummary(); s != "" {
+		parts = append(parts, s)
+	}
 	if r.Removed > 0 {
 		parts = append(parts, fmt.Sprintf("删除 %d 个", r.Removed))
 	}
@@ -541,6 +577,8 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 		def = d
 	}
 	siteHR := def != nil && def.HREnabled
+	// 站点定义里没有 H&R 做种时长时用站点设置里填的（#727）：入场判断与删种保护都按它
+	hrSettingH := ptinternal.SiteHRSeedTimeH(task.SiteName)
 	// 同一站点的加种串行：「读已加过的种子 → 推送 → 记录」之间不能插进另一个任务的同一段，
 	// 否则两个任务会同时把同一个种子各加一份（库里另有 site_name+torrent_id 唯一约束兜底）
 	unlock := m.lockSite(task.SiteName)
@@ -551,6 +589,7 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 		return err
 	}
 	candidates := make([]v2.TorrentItem, 0, len(items))
+	rejected := map[string]int{}
 	for _, it := range items {
 		if seen[it.ID] {
 			continue
@@ -561,14 +600,18 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 			}
 		}
 		hr := 0
-		if (it.HasHR || siteHR) && def != nil {
-			hr = def.CalcHRSeedTimeH(it.SizeBytes)
+		if it.HasHR || siteHR {
+			hr = v2.ResolveHRSeedTimeH(def, it.SizeBytes, hrSettingH)
 		}
-		if ok, _ := admitBrushItem(*task, it, siteHR, hr, now); ok {
+		ok, why := admitBrushItem(*task, it, siteHR, hr, now)
+		if ok {
 			candidates = append(candidates, it)
+			continue
 		}
+		rejected[why]++
 	}
 	res.Eligible = len(candidates)
+	res.Rejected = sortedRejects(rejected)
 	sortBrushCandidates(candidates)
 
 	fetchFailures := 0
@@ -616,8 +659,8 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 		}
 		hasHR := it.HasHR || siteHR
 		hrHours := 0
-		if hasHR && def != nil {
-			hrHours = def.CalcHRSeedTimeH(size)
+		if hasHR {
+			hrHours = v2.ResolveHRSeedTimeH(def, size, hrSettingH)
 		}
 		var freeEnd *time.Time
 		if !it.DiscountEndTime.IsZero() {
@@ -753,4 +796,22 @@ func downhashOf(raw string) string {
 		return ""
 	}
 	return u.Query().Get("downhash")
+}
+
+// sortedRejects 把不符合的原因按个数从多到少排（个数相同按原因排，结果稳定）。
+func sortedRejects(m map[string]int) []BrushReject {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]BrushReject, 0, len(m))
+	for reason, n := range m {
+		out = append(out, BrushReject{Reason: reason, Count: n})
+	}
+	slices.SortFunc(out, func(a, b BrushReject) int {
+		if c := cmp.Compare(b.Count, a.Count); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Reason, b.Reason)
+	})
+	return out
 }

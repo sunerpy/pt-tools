@@ -217,11 +217,12 @@ func pushMeta(site, id string, data []byte) *internal.PushTorrentMeta {
 		}
 	}
 	hasHR, hours := h.hasHR, 0
-	if def, ok := v2.GetDefinitionRegistry().Get(site); ok {
+	def, _ := v2.GetDefinitionRegistry().Get(site)
+	if def != nil {
 		hasHR = hasHR || def.HREnabled
-		if hasHR {
-			hours = def.CalcHRSeedTimeH(size)
-		}
+	}
+	if hasHR {
+		hours = internal.HRSeedTimeH(site, def, size)
 	}
 	meta := &internal.PushTorrentMeta{SizeBytes: size, HasHR: hasHR, HRSeedTimeH: hours, IsFree: h.free, FreeLevel: h.level}
 	// 半价、2X 这类优惠也有结束时间，但那不是免费到期：写进去的话，免费到期清理会删掉没下完的种子

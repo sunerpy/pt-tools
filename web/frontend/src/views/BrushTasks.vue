@@ -640,6 +640,10 @@ function progressText(t: BrushTorrent): string {
           </li>
           <li>默认只收免费种、排除 H&amp;R。站点开启了整站 H&amp;R 时，整站都按 H&amp;R 处理。</li>
           <li>
+            站点规则里没有 H&amp;R 做种要求时，在站点设置里填写「H&amp;R
+            做种要求」，刷流和自动删种都按它； 没填时有 H&amp;R 的种子刷流不收，自动删种也不删。
+          </li>
+          <li>
             删种只处理带本任务标签、并且是本任务加的种子；H&amp;R 种子在做种时长达标前一律不删。
           </li>
           <li>
@@ -786,6 +790,10 @@ function progressText(t: BrushTorrent): string {
           <el-checkbox v-model="form.exclude_hr"
             >排除 H&amp;R 种子（站点开启整站 H&amp;R 时整站都排除）</el-checkbox
           >
+          <div v-if="!form.exclude_hr" class="field-tip">
+            不排除时只收算得出 H&amp;R 做种要求的种子：站点规则里没有的，到站点设置里填写「H&amp;R
+            做种要求」
+          </div>
         </el-form-item>
 
         <div class="field-head">限额</div>

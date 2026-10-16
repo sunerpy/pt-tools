@@ -32,7 +32,7 @@
 | **TMPT**              | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **UBits**             | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **CrabPT**            | Cookie  | RSS, search, user info                     | ✅     | 蟹黄堡 (crabpt.vip)                                                                                                       |
-| **GameGamePT**        | Cookie  | RSS, search, user info                     | ✅     | GGPT (gamegamept.com)                                                                                                     |
+| **GameGamePT**        | Cookie  | RSS, search, user info                     | ✅     | GGPT (gamegamept.com, site-wide H&R; fill in the seeding requirement in the site settings, issue #727)                    |
 | **Dubhe**             | Cookie  | RSS, search, user info                     | ✅     | 天枢 (dubhe.site)                                                                                                         |
 | **PTCafe**            | Cookie  | RSS, search, user info                     | ✅     | 咖啡 (ptcafe.club)                                                                                                        |
 | **CyanBug**           | Cookie  | RSS, search, user info                     | ✅     | 大青虫 (cyanbug.net)                                                                                                      |

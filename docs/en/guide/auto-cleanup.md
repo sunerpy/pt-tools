@@ -137,8 +137,9 @@ H&R (Hit and Run) is a rule on some private trackers: after downloading a torren
 
 1. When pt-tools downloads a torrent, it records the H&R flag and the required seeding time that the site returns
 2. Auto-delete checks the H&R information in the database. For sites whose built-in definition declares H&R rules, the required seeding time is worked out from those rules even when a torrent has no H&R flag of its own
-3. A torrent with an H&R requirement that has not yet seeded long enough is protected and not deleted
-4. Sites and torrents without an H&R requirement are not affected
+3. When the site's built-in rules have no seeding time, the H&R seeding requirement (hours) (H&R 做种要求（小时）) filled in the site's settings is used; once it is filled in, torrents pushed earlier use it too
+4. A torrent with an H&R requirement that has not yet seeded long enough is protected and not deleted; when the required seeding time is unknown (no built-in rule and nothing filled in), the torrent is protected as well
+5. Sites and torrents without an H&R requirement are not affected
 
 > **Note**: not every site provides H&R information. When a site returns no H&R flag and its built-in definition has no H&R rules either, pt-tools cannot recognise H&R torrents. Set a reasonable minimum keep time as an extra safeguard.
 
@@ -147,7 +148,7 @@ H&R (Hit and Run) is a rule on some private trackers: after downloading a torren
 With several downloaders configured:
 
 - each downloader is **handled separately**, without affecting the others
-- with Torrents pushed by pt-tools only, each torrent is matched exactly to its downloader through the `downloader_name` field in the database
+- with Torrents pushed by pt-tools only, each torrent is matched to its downloader as recorded in the database (by downloader ID, so a renamed downloader is still recognised)
 - a torrent of downloader A is never treated as one of downloader B
 
 ## Example configurations

@@ -538,8 +538,9 @@ func (c *CleanupMonitor) splitProtected(cfg *models.SettingsGlobal, torrents []d
 		if cfg.CleanupProtectHR {
 			if hrInfo, ok := hrInfoMap[strings.ToLower(t.InfoHash)]; ok && hrInfo.HasHR {
 				requiredSeedTimeS := int64(hrInfo.HRSeedTimeH) * 3600
-				if requiredSeedTimeS > 0 && t.SeedingTime < requiredSeedTimeS {
-					c.logger.Debugf("[自动删种] H&R 保护: %s (需做种%dh, 已做种%.1fh)",
+				// 要求未知（站点定义里没有、站点设置也没填）时按没做满处理，一律保护（#727，和刷流的删种规则一致）
+				if requiredSeedTimeS <= 0 || t.SeedingTime < requiredSeedTimeS {
+					c.logger.Debugf("[自动删种] H&R 保护: %s (需做种%dh（0 为要求未知）, 已做种%.1fh)",
 						t.Name, hrInfo.HRSeedTimeH, float64(t.SeedingTime)/3600)
 					protected = append(protected, t)
 					continue
@@ -575,32 +576,61 @@ type hrInfo struct {
 func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
 	result := make(map[string]hrInfo)
 
-	siteDefMap := make(map[string]*v2.SiteDefinition)
+	defs := make(map[string]*v2.SiteDefinition)
 	for _, def := range v2.GetDefinitionRegistry().GetAll() {
-		if def.HREnabled {
-			siteDefMap[def.ID] = def
-		}
+		defs[def.ID] = def
+	}
+	// 站点设置里填的 H&R 做种要求（#727）：站点定义里没有时用它
+	settingH := make(map[string]int)
+	var settings []struct {
+		Name        string
+		HRSeedTimeH int
+	}
+	c.db.Model(&models.SiteSetting{}).Select("name, hr_seed_time_h").Where("hr_seed_time_h > 0").Scan(&settings)
+	for _, s := range settings {
+		settingH[s.Name] = s.HRSeedTimeH
 	}
 
-	var records []struct {
+	type hrRecord struct {
 		TorrentHash string
 		SiteName    string
 		HasHR       bool
 		HRSeedTimeH int
 		TorrentSize int64
 	}
-	c.db.Model(&models.TorrentInfo{}).
-		Select("torrent_hash, site_name, has_hr, hr_seed_time_h, torrent_size").
-		Where("torrent_hash IS NOT NULL AND torrent_hash != ''").
-		Find(&records)
+	// 活动表与归档表都看：记录归档以后，下载器里的种子照样要按 H&R 保护
+	var records, archived []hrRecord
+	const cols = "torrent_hash, site_name, has_hr, hr_seed_time_h, torrent_size"
+	c.db.Model(&models.TorrentInfo{}).Select(cols).Where("torrent_hash IS NOT NULL AND torrent_hash != ''").Find(&records)
+	c.db.Model(&models.TorrentInfoArchive{}).Select(cols).Where("torrent_hash IS NOT NULL AND torrent_hash != ''").Find(&archived)
 
-	for _, r := range records {
+	for _, r := range append(records, archived...) {
 		hash := strings.ToLower(r.TorrentHash)
-		if r.HasHR {
-			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: r.HRSeedTimeH}
-		} else if def, ok := siteDefMap[r.SiteName]; ok {
-			// Use per-torrent size-based calculation when available
-			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: def.CalcHRSeedTimeH(r.TorrentSize)}
+		def := defs[r.SiteName]
+		var info hrInfo
+		switch {
+		case r.HasHR:
+			h := r.HRSeedTimeH
+			if h <= 0 {
+				// 记录上没记下要求：按站点定义算，定义里没有时用站点设置（记录写成以后才填的设置也算）
+				h = v2.ResolveHRSeedTimeH(def, r.TorrentSize, settingH[r.SiteName])
+			}
+			info = hrInfo{HasHR: true, HRSeedTimeH: h}
+		case def != nil && def.HREnabled:
+			// 整站 H&R：按体积算要求
+			info = hrInfo{HasHR: true, HRSeedTimeH: v2.ResolveHRSeedTimeH(def, r.TorrentSize, settingH[r.SiteName])}
+		default:
+			continue
+		}
+		cur, seen := result[hash]
+		switch {
+		case !seen:
+			result[hash] = info
+		case cur.HRSeedTimeH <= 0 || info.HRSeedTimeH <= 0:
+			// 同一个哈希有几条记录（跨站辅种等）：取最严的——有一条要求未知就按未知保护
+			result[hash] = hrInfo{HasHR: true}
+		default:
+			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: max(cur.HRSeedTimeH, info.HRSeedTimeH)}
 		}
 	}
 	return result

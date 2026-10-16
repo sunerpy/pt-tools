@@ -128,7 +128,7 @@ func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, hrS
 	}
 	if (item.HasHR || siteHR) && hrSeedTimeH <= 0 {
 		// 不排除 H&R 时也只收算得出做种要求的：要求时长未知，删种规则就没法判断什么时候可以删
-		return false, "H&R 要求的做种时长未知"
+		return false, brushRejectHRUnknown
 	}
 	text := strings.ToLower(item.Title + " " + item.Subtitle)
 	if inc := splitKeywords(task.IncludeKeywords); len(inc) > 0 {

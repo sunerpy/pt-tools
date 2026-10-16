@@ -32,7 +32,7 @@
 | **TMPT**              | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **UBits**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **CrabPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 蟹黄堡（crabpt.vip）                                                         |
-| **GameGamePT**        | Cookie   | RSS、搜索、用户信息           | ✅       | GGPT（gamegamept.com）                                                       |
+| **GameGamePT**        | Cookie   | RSS、搜索、用户信息           | ✅       | GGPT（gamegamept.com，整站 H&R，做种要求在站点设置里填，issue #727）         |
 | **Dubhe**             | Cookie   | RSS、搜索、用户信息           | ✅       | 天枢（dubhe.site）                                                           |
 | **PTCafe**            | Cookie   | RSS、搜索、用户信息           | ✅       | 咖啡（ptcafe.club）                                                          |
 | **CyanBug**           | Cookie   | RSS、搜索、用户信息           | ✅       | 大青虫（cyanbug.net）                                                        |

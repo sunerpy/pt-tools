@@ -88,6 +88,7 @@ function emptySiteForm(): SiteConfig {
     upload_limit_kbs: 0,
     download_limit_kbs: 0,
     seeding_capacity_gb: 0,
+    hr_seed_time_h: 0,
     rss: [],
   };
 }
@@ -959,6 +960,32 @@ function ruleNameOf(id: number): string {
                   controls-position="right"
                   style="width: 100%" />
                 <div class="field-tip">该站点做种总量到顶后就不再推新种，避免把盘塞满</div>
+              </el-form-item>
+            </div>
+            <div class="pt-strip">
+              <PtIcon name="shield" :size="13" />
+              <span>H&amp;R</span>
+              <span class="pt-strip__end">0 = 不知道</span>
+            </div>
+            <div class="settings-body">
+              <el-form-item label="H&R 做种要求（小时）">
+                <el-input-number
+                  v-model="form.hr_seed_time_h"
+                  :min="0"
+                  :max="8760"
+                  :step="24"
+                  :disabled="form.hr_rule_builtin"
+                  controls-position="right"
+                  style="width: 100%"
+                  data-testid="site-hr-seed-time" />
+                <div v-if="form.hr_rule_builtin" class="field-tip">
+                  站点规则里已经写了 H&amp;R 做种要求，按站点规则算，这里不用填
+                </div>
+                <div v-else class="field-tip">
+                  站点有 H&amp;R、要求做种多久 pt-tools
+                  不知道时填写：刷流按它决定收不收、什么时候能删，自动删种做满之前不删。 没填时有
+                  H&amp;R 的种子刷流不收，自动删种也不删
+                </div>
               </el-form-item>
             </div>
           </el-form>

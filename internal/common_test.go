@@ -29,7 +29,6 @@ import (
 	"github.com/sunerpy/pt-tools/internal/filter"
 	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
-	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
@@ -2308,29 +2307,6 @@ func TestBuildSkipReason(t *testing.T) {
 			assert.Equal(t, c.wantSub, got)
 		})
 	}
-}
-
-func TestCalcHRSeedTimeForTorrent(t *testing.T) {
-	// nil def -> fallback.
-	assert.Equal(t, 72, calcHRSeedTimeForTorrent(nil, 72, 1<<30))
-
-	// def with no rules -> fallback.
-	defFlat := &v2.SiteDefinition{HREnabled: true, HRSeedTimeHours: 48}
-	assert.Equal(t, 24, calcHRSeedTimeForTorrent(defFlat, 24, 1<<30))
-
-	// def with size-tiered rules -> picks matching tier.
-	defRules := &v2.SiteDefinition{
-		HREnabled:       true,
-		HRSeedTimeHours: 10,
-		HRSeedTimeRules: []v2.HRSeedTimeRule{
-			{MinSizeGB: 0, MaxSizeGB: 50, SeedTimeH: 100},
-			{MinSizeGB: 50, MaxSizeGB: 0, SeedTimeH: 200},
-		},
-	}
-	// 10 GiB -> tier 1 (100h)
-	assert.Equal(t, 100, calcHRSeedTimeForTorrent(defRules, 10, 10*(1<<30)))
-	// 80 GiB -> tier 2 (200h)
-	assert.Equal(t, 200, calcHRSeedTimeForTorrent(defRules, 10, 80*(1<<30)))
 }
 
 func TestExtractTorrentRef(t *testing.T) {

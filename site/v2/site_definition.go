@@ -505,6 +505,24 @@ type HRSeedTimeRule struct {
 //  1. HRCalcSeedTime — custom function (site-specific logic, e.g., ratio-based, tier-based)
 //  2. HRSeedTimeRules — built-in size-tiered rules
 //  3. HRSeedTimeHours — flat site-wide fallback
+//
+// ResolveHRSeedTimeH 是一个种子的 H&R 做种要求（小时）：站点定义能算出来时按定义（固定值、按体积分档或自定义规则），
+// 算不出时用站点设置里用户填的值 settingH（#727）；都没有时为 0，表示要求未知——刷流不收这类有 H&R 的种子、
+// 自动删种保护它们。def 可以为 nil。
+func ResolveHRSeedTimeH(def *SiteDefinition, sizeBytes int64, settingH int) int {
+	if def != nil {
+		if h := def.CalcHRSeedTimeH(sizeBytes); h > 0 {
+			return h
+		}
+	}
+	return max(settingH, 0)
+}
+
+// HasHRSeedTimeRule 报告站点定义里写了 H&R 做种时长（固定值、按体积分档或自定义规则）。
+func (d *SiteDefinition) HasHRSeedTimeRule() bool {
+	return d.HRCalcSeedTime != nil || len(d.HRSeedTimeRules) > 0 || d.HRSeedTimeHours > 0
+}
+
 func (d *SiteDefinition) CalcHRSeedTimeH(sizeBytes int64) int {
 	if d.HRCalcSeedTime != nil {
 		return d.HRCalcSeedTime(sizeBytes)

@@ -994,24 +994,27 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 }
 
 type SiteConfigResponse struct {
-	Enabled            *bool              `json:"enabled"`
-	AuthMethod         string             `json:"auth_method"`
-	Cookie             string             `json:"cookie,omitempty"`
-	CookieEncrypted    string             `json:"cookie_encrypted,omitempty"`
-	HasCookie          bool               `json:"has_cookie"`
-	CookieFieldVisible bool               `json:"cookie_field_visible"`
-	APIKey             string             `json:"api_key"`
-	APIUrl             string             `json:"api_url"`
-	Passkey            string             `json:"passkey"`
-	UploadLimitKBs     int                `json:"upload_limit_kbs"`
-	DownloadLimitKBs   int                `json:"download_limit_kbs"`
-	SeedingCapacityGB  float64            `json:"seeding_capacity_gb"`
-	RSS                []models.RSSConfig `json:"rss"`
-	URLs               []string           `json:"urls,omitempty"`
-	WebURL             string             `json:"web_url,omitempty"`
-	Unavailable        bool               `json:"unavailable,omitempty"`
-	UnavailableReason  string             `json:"unavailable_reason,omitempty"`
-	IsBuiltin          bool               `json:"is_builtin"`
+	Enabled            *bool   `json:"enabled"`
+	AuthMethod         string  `json:"auth_method"`
+	Cookie             string  `json:"cookie,omitempty"`
+	CookieEncrypted    string  `json:"cookie_encrypted,omitempty"`
+	HasCookie          bool    `json:"has_cookie"`
+	CookieFieldVisible bool    `json:"cookie_field_visible"`
+	APIKey             string  `json:"api_key"`
+	APIUrl             string  `json:"api_url"`
+	Passkey            string  `json:"passkey"`
+	UploadLimitKBs     int     `json:"upload_limit_kbs"`
+	DownloadLimitKBs   int     `json:"download_limit_kbs"`
+	SeedingCapacityGB  float64 `json:"seeding_capacity_gb"`
+	HRSeedTimeH        int     `json:"hr_seed_time_h"`
+	// HRRuleBuiltin：站点定义里已经写了 H&R 做种时长，用户填的 HRSeedTimeH 只在定义算不出时才用
+	HRRuleBuiltin     bool               `json:"hr_rule_builtin"`
+	RSS               []models.RSSConfig `json:"rss"`
+	URLs              []string           `json:"urls,omitempty"`
+	WebURL            string             `json:"web_url,omitempty"`
+	Unavailable       bool               `json:"unavailable,omitempty"`
+	UnavailableReason string             `json:"unavailable_reason,omitempty"`
+	IsBuiltin         bool               `json:"is_builtin"`
 }
 
 func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
@@ -1038,9 +1041,11 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				UploadLimitKBs:    sc.UploadLimitKBs,
 				DownloadLimitKBs:  sc.DownloadLimitKBs,
 				SeedingCapacityGB: sc.SeedingCapacityGB,
+				HRSeedTimeH:       sc.HRSeedTimeH,
 				RSS:               sc.RSS,
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {
+				resp.HRRuleBuiltin = def.HasHRSeedTimeRule()
 				resp.URLs = def.URLs
 				resp.WebURL = def.WebURL
 				resp.Unavailable = def.Unavailable
@@ -1159,10 +1164,12 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			UploadLimitKBs:     sc.UploadLimitKBs,
 			DownloadLimitKBs:   sc.DownloadLimitKBs,
 			SeedingCapacityGB:  sc.SeedingCapacityGB,
+			HRSeedTimeH:        sc.HRSeedTimeH,
 			RSS:                sc.RSS,
 		}
 		defRegistry := v2.GetDefinitionRegistry()
 		if def, ok := defRegistry.Get(string(sg)); ok {
+			resp.HRRuleBuiltin = def.HasHRSeedTimeRule()
 			resp.URLs = def.URLs
 			resp.WebURL = def.WebURL
 			resp.Unavailable = def.Unavailable
