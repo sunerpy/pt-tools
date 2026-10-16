@@ -311,3 +311,27 @@ func TestRSSFreeSafety_FactsWriteFailureSkipsSource(t *testing.T) {
 	require.NotNil(t, ti.FilterRuleID)
 	assert.Equal(t, rule.ID, *ti.FilterRuleID)
 }
+
+// 没有所有者的旧记录，本 RSS 的两个 worker 交错：A 先接管（它的旧来源随后被新鲜度条件拒掉），B 拿着读进来时
+// 「没有所有者」的旧值再接管会失败——B 的较新来源照样要写进去（写按库里现在的所有者算，不按读进来的旧值）。
+func TestRefreshPushedSource_SiblingWorkerClaimed(t *testing.T) {
+	r := newRSSRig(t)
+	rss := r.addRSS(newFeedServer(t), models.RSSConfig{Name: "only", Tag: "tv", IntervalMinutes: 10})[0]
+	pushed := true
+	rule := uint(5)
+	verifiedB := DBTime(time.Now())
+	rec := models.TorrentInfo{
+		SiteName: "springsunday", TorrentID: "w2", IsPushed: &pushed, DownloadSource: filter.SourceFilterRule,
+		FilterRuleID: &rule, FreeVerifiedAt: &verifiedB, // B 的较新资格已经写成
+	}
+	require.NoError(t, r.db.DB.Create(&rec).Error)
+	stale := rec // B 读进来的：没有所有者
+	require.True(t, claimOwnership(rec.ID, nil, rss.ID), "A 先接管了")
+
+	snapB := v2.PromotionSnapshot{Level: v2.DiscountFree, Validity: v2.FreeUntil, VerifiedAt: verifiedB}
+	require.NoError(t, refreshPushedSource(&stale, rss, snapB, filter.SourceFreeDownload, nil))
+
+	ti := r.record("w2")
+	assert.Equal(t, filter.SourceFreeDownload, ti.DownloadSource, "B 的较新来源写进去了")
+	assert.Nil(t, ti.FilterRuleID)
+}

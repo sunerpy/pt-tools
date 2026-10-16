@@ -632,13 +632,10 @@ func refreshPushedSource(rec *models.TorrentInfo, rss models.RSSConfig, snap v2.
 	q := notOlderSnapshot(global.GlobalDB.DB.Model(&models.TorrentInfo{}), snap).
 		Where("id = ? AND download_source IN ?", rec.ID, []string{filter.SourceFreeDownload, filter.SourceFilterRule})
 	if rss.ID != 0 {
-		owner := rec.SourceRSSID
-		mine := owner != nil && *owner == rss.ID
-		if !mine && (owner == nil || !rssActive(*owner)) && soleRSSForSite(rec.SiteName) {
-			mine = claimOwnership(rec.ID, owner, rss.ID)
-		}
-		if !mine {
-			return nil
+		// 先按需接管（条件更新；失败也不要紧，可能是本 RSS 的另一个 worker 刚接管），写只按库里现在的所有者是本 RSS 算，
+		// 不按读进来的旧值
+		if owner := rec.SourceRSSID; (owner == nil || (*owner != rss.ID && !rssActive(*owner))) && soleRSSForSite(rec.SiteName) {
+			claimOwnership(rec.ID, owner, rss.ID)
 		}
 		q = q.Where("source_rss_id = ?", rss.ID)
 	}
