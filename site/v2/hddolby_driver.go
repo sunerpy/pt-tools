@@ -253,32 +253,25 @@ func (d *HDDolbyDriver) ParseSearch(res HDDolbyResponse) ([]TorrentItem, error) 
 
 	items := make([]TorrentItem, 0, len(searchData.Data))
 	for _, t := range searchData.Data {
-		discount := d.parseDiscount(t.PromotionTimeType, t.Tags)
-		discountEnd := d.parseDiscountEndTime(t.PromotionUntil)
-
 		siteID := d.getSiteID()
 		// Include downhash in download URL - required by HDDolby to avoid Cloudflare challenge
 		item := TorrentItem{
-			ID:            strconv.Itoa(t.ID),
-			Title:         t.Name,
-			Subtitle:      t.SmallDescr,
-			SizeBytes:     t.Size,
-			Seeders:       t.Seeders,
-			Leechers:      t.Leechers,
-			Snatched:      t.TimesCompleted,
-			DiscountLevel: discount,
-			Category:      d.getCategoryName(t.Category),
-			URL:           fmt.Sprintf("%s/details.php?id=%d", d.BaseURL, t.ID),
-			DownloadURL:   fmt.Sprintf("/api/site/%s/torrent/%d/download?downhash=%s", siteID, t.ID, t.DownHash),
-			SourceSite:    siteID,
+			ID:          strconv.Itoa(t.ID),
+			Title:       t.Name,
+			Subtitle:    t.SmallDescr,
+			SizeBytes:   t.Size,
+			Seeders:     t.Seeders,
+			Leechers:    t.Leechers,
+			Snatched:    t.TimesCompleted,
+			Category:    d.getCategoryName(t.Category),
+			URL:         fmt.Sprintf("%s/details.php?id=%d", d.BaseURL, t.ID),
+			DownloadURL: fmt.Sprintf("/api/site/%s/torrent/%d/download?downhash=%s", siteID, t.ID, t.DownHash),
+			SourceSite:  siteID,
 		}
+		d.applyDiscount(&item, t)
 
 		if t.HR == 1 {
 			item.HasHR = true
-		}
-
-		if !discountEnd.IsZero() {
-			item.DiscountEndTime = discountEnd
 		}
 
 		if t.Added != "" {
@@ -322,14 +315,28 @@ func (d *HDDolbyDriver) parseDiscount(promotionType int, tags string) DiscountLe
 	}
 }
 
-func (d *HDDolbyDriver) parseDiscountEndTime(until string) time.Time {
+// applyDiscount 写入优惠级别与结束时间；promotion_until 非空却解析不了时记下原因，免费的有效性是 unknown
+func (d *HDDolbyDriver) applyDiscount(item *TorrentItem, t HDDolbyTorrent) {
+	item.DiscountLevel = d.parseDiscount(t.PromotionTimeType, t.Tags)
+	end, err := d.parseDiscountEndTime(t.PromotionUntil)
+	item.DiscountEndTime = end
+	if err != nil {
+		NoteDiscountTimeUnparsable(item, "promotion_until")
+	}
+}
+
+// parseDiscountEndTime 解析 promotion_until：空值与 0000-00-00 00:00:00 表示没有结束时间（零时间、没有错误，
+// 不等于长期免费）；非空但无法解析返回错误。
+func (d *HDDolbyDriver) parseDiscountEndTime(until string) (time.Time, error) {
+	until = strings.TrimSpace(until)
 	if until == "" || until == "0000-00-00 00:00:00" {
-		return time.Time{}
+		return time.Time{}, nil
 	}
-	if t, err := ParseTimeInCST("2006-01-02 15:04:05", until); err == nil {
-		return t
+	t, err := ParseTimeInCST("2006-01-02 15:04:05", until)
+	if err != nil {
+		return time.Time{}, err
 	}
-	return time.Time{}
+	return t, nil
 }
 
 func (d *HDDolbyDriver) getCategoryName(catID int) string {
@@ -654,8 +661,12 @@ func (d *HDDolbyDriver) Search(ctx context.Context, query SearchQuery) ([]Torren
 	return d.ParseSearch(res)
 }
 
-// GetTorrentDetail fetches torrent detail from the detail page using cookie authentication.
-// HDDolby uses NexusPHP-style HTML detail pages, so we use the NexusPHP parser.
+// hddolbyDetailCacheTTL 是详情缓存（最近 100 条列表结果）的有效期
+const hddolbyDetailCacheTTL = 5 * time.Minute
+
+// GetTorrentDetail 在详情缓存（最近 100 条列表结果，最多 hddolbyDetailCacheTTL 刷新一次）里找种子。
+// 结果的 FetchedAt 是缓存取得的时间；ctx 带 WithFreshAfter 时缓存早于那个时间就先刷新，刷新失败返回错误。
+// 缓存里找不到时返回 ErrTorrentDetailUnavailable：读不到优惠不等于不是免费。
 func (d *HDDolbyDriver) GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error) {
 	torrentID := ""
 	if link != "" {
@@ -673,18 +684,13 @@ func (d *HDDolbyDriver) GetTorrentDetail(ctx context.Context, guid, link, title 
 		return nil, fmt.Errorf("invalid torrent ID %q: %w", torrentID, err)
 	}
 
-	torrents, err := d.getOrRefreshDetailCache(ctx)
+	freshAfter, _ := FreshAfterFrom(ctx)
+	torrents, fetchedAt, refreshed, err := d.getOrRefreshDetailCache(ctx, freshAfter)
 	if err != nil {
 		return nil, err
 	}
-
-	for _, t := range torrents {
-		if t.ID == numericID {
-			d.detailCacheMu.Lock()
-			d.detailCacheMiss = 0
-			d.detailCacheMu.Unlock()
-			return d.torrentToItem(t), nil
-		}
+	if item := d.findDetail(torrents, numericID, fetchedAt); item != nil {
+		return item, nil
 	}
 
 	d.detailCacheMu.Lock()
@@ -692,59 +698,69 @@ func (d *HDDolbyDriver) GetTorrentDetail(ctx context.Context, guid, link, title 
 	missCount := d.detailCacheMiss
 	d.detailCacheMu.Unlock()
 
-	if missCount >= 3 {
+	// 连续几次都找不到：缓存可能已经落后，刷新一次再找（这次调用刚刷新过就不重复请求站点）
+	if missCount >= 3 && !refreshed {
 		d.invalidateDetailCache()
-		torrents, err = d.getOrRefreshDetailCache(ctx)
-		if err == nil {
-			for _, t := range torrents {
-				if t.ID == numericID {
-					d.detailCacheMu.Lock()
-					d.detailCacheMiss = 0
-					d.detailCacheMu.Unlock()
-					return d.torrentToItem(t), nil
-				}
-			}
+		torrents, fetchedAt, _, err = d.getOrRefreshDetailCache(ctx, freshAfter)
+		if err != nil {
+			return nil, fmt.Errorf("refresh detail cache: %w", err)
+		}
+		if item := d.findDetail(torrents, numericID, fetchedAt); item != nil {
+			return item, nil
 		}
 	}
 
-	return &TorrentItem{
-		ID:            torrentID,
-		DiscountLevel: DiscountNone,
-		SourceSite:    d.getSiteID(),
-	}, nil
+	return nil, fmt.Errorf("HDDolby 最近 %d 条结果里没有种子 %s: %w", len(torrents), torrentID, ErrTorrentDetailUnavailable)
+}
+
+// findDetail 在详情缓存里找种子，结果的 FetchedAt 是缓存取得的时间；找到时清零连续未命中次数
+func (d *HDDolbyDriver) findDetail(torrents []HDDolbyTorrent, id int, fetchedAt time.Time) *TorrentItem {
+	for _, t := range torrents {
+		if t.ID != id {
+			continue
+		}
+		d.detailCacheMu.Lock()
+		d.detailCacheMiss = 0
+		d.detailCacheMu.Unlock()
+		item := d.torrentToItem(t)
+		item.FetchedAt = fetchedAt.UTC()
+		return item
+	}
+	return nil
 }
 
 func (d *HDDolbyDriver) torrentToItem(t HDDolbyTorrent) *TorrentItem {
-	discount := d.parseDiscount(t.PromotionTimeType, t.Tags)
-	discountEnd := d.parseDiscountEndTime(t.PromotionUntil)
-	return &TorrentItem{
-		ID:              strconv.Itoa(t.ID),
-		Title:           t.Name,
-		Subtitle:        t.SmallDescr,
-		SizeBytes:       t.Size,
-		Seeders:         t.Seeders,
-		Leechers:        t.Leechers,
-		Snatched:        t.TimesCompleted,
-		DiscountLevel:   discount,
-		DiscountEndTime: discountEnd,
-		HasHR:           t.HR > 0,
-		SourceSite:      d.getSiteID(),
+	item := &TorrentItem{
+		ID:         strconv.Itoa(t.ID),
+		Title:      t.Name,
+		Subtitle:   t.SmallDescr,
+		SizeBytes:  t.Size,
+		Seeders:    t.Seeders,
+		Leechers:   t.Leechers,
+		Snatched:   t.TimesCompleted,
+		HasHR:      t.HR > 0,
+		SourceSite: d.getSiteID(),
 	}
+	d.applyDiscount(item, t)
+	return item
 }
 
-func (d *HDDolbyDriver) getOrRefreshDetailCache(ctx context.Context) ([]HDDolbyTorrent, error) {
+// getOrRefreshDetailCache 返回详情缓存、缓存取得的时间，以及这次是否刷新过。缓存为空、超过有效期，
+// 或早于 freshAfter（非零时）就先刷新；刷新失败返回错误，不拿旧缓存充数。刷新在写锁里做：
+// 等锁期间别的调用已经刷新到足够新的话直接用，不重复请求站点。
+func (d *HDDolbyDriver) getOrRefreshDetailCache(ctx context.Context, freshAfter time.Time) ([]HDDolbyTorrent, time.Time, bool, error) {
 	d.detailCacheMu.RLock()
-	if d.detailCache != nil && time.Since(d.detailCacheTime) < 5*time.Minute {
+	if d.detailCacheUsable(freshAfter) {
 		defer d.detailCacheMu.RUnlock()
-		return d.detailCache, nil
+		return d.detailCache, d.detailCacheTime, false, nil
 	}
 	d.detailCacheMu.RUnlock()
 
 	d.detailCacheMu.Lock()
 	defer d.detailCacheMu.Unlock()
 
-	if d.detailCache != nil && time.Since(d.detailCacheTime) < 5*time.Minute {
-		return d.detailCache, nil
+	if d.detailCacheUsable(freshAfter) {
+		return d.detailCache, d.detailCacheTime, false, nil
 	}
 
 	req := HDDolbyRequest{
@@ -761,14 +777,14 @@ func (d *HDDolbyDriver) getOrRefreshDetailCache(ctx context.Context) ([]HDDolbyT
 
 	res, err := d.Execute(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("execute search API: %w", err)
+		return nil, time.Time{}, false, fmt.Errorf("execute search API: %w", err)
 	}
 
 	var searchData HDDolbySearchResponse
 	if err := json.Unmarshal(res.Data, &searchData); err != nil {
 		var torrents []HDDolbyTorrent
 		if err2 := json.Unmarshal(res.Data, &torrents); err2 != nil {
-			return nil, fmt.Errorf("parse search data: %w", err)
+			return nil, time.Time{}, false, fmt.Errorf("parse search data: %w", err)
 		}
 		searchData.Data = torrents
 	}
@@ -776,7 +792,15 @@ func (d *HDDolbyDriver) getOrRefreshDetailCache(ctx context.Context) ([]HDDolbyT
 	d.detailCache = searchData.Data
 	d.detailCacheTime = time.Now()
 	d.detailCacheMiss = 0
-	return d.detailCache, nil
+	return d.detailCache, d.detailCacheTime, true, nil
+}
+
+// detailCacheUsable 报告详情缓存能不能直接用：有数据、没过有效期，且不早于 freshAfter（非零时）。调用方持有 detailCacheMu。
+func (d *HDDolbyDriver) detailCacheUsable(freshAfter time.Time) bool {
+	if d.detailCache == nil || time.Since(d.detailCacheTime) >= hddolbyDetailCacheTTL {
+		return false
+	}
+	return freshAfter.IsZero() || !d.detailCacheTime.Before(freshAfter)
 }
 
 func (d *HDDolbyDriver) invalidateDetailCache() {

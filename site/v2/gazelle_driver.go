@@ -419,6 +419,7 @@ func (d *GazelleDriver) GetTorrentDetail(ctx context.Context, guid, link, title 
 		detailTitle = title
 	}
 
+	// 接口没有免费结束时间：DiscountEndTime 留空，免费的规范状态由 Promotion 推出 unknown（不是长期免费）
 	item := &TorrentItem{
 		ID:            torrentID,
 		Title:         detailTitle,
@@ -428,6 +429,7 @@ func (d *GazelleDriver) GetTorrentDetail(ctx context.Context, guid, link, title 
 		Snatched:      torrent.Snatches,
 		SourceSite:    d.BaseURL,
 		DiscountLevel: parseGazelleDiscount(torrent.IsFreeleech, torrent.IsNeutralLeech, torrent.IsPersonalFL),
+		FetchedAt:     time.Now().UTC(),
 	}
 
 	if torrent.Time != "" {

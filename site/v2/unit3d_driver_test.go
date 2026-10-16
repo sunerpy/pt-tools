@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -327,6 +328,37 @@ func TestUnit3DDriver_ParseSearch_BadJSON(t *testing.T) {
 	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: "https://u.example", APIKey: "k"})
 	_, err := d.ParseSearch(Unit3DResponse{Data: []byte("notjson")})
 	require.Error(t, err)
+}
+
+// freeleech_ends 非空却解析不了（包括不带时区、定不下时刻的写法）：免费是 unknown 并记下原因
+func TestUnit3DDriver_ParseSearch_FreeleechEndsValidity(t *testing.T) {
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: "https://u.example", APIKey: "k"})
+	data := []byte(`[
+		{"id":1,"name":"A","freeleech":"100","freeleech_ends":"2099-07-01T12:00:00.000000Z"},
+		{"id":2,"name":"B","freeleech":"100","freeleech_ends":"2099-07-01 12:00:00"},
+		{"id":3,"name":"C","freeleech":"100"},
+		{"id":4,"name":"D","freeleech":"0","freeleech_ends":"garbage"}
+	]`)
+	items, err := d.ParseSearch(Unit3DResponse{Data: data})
+	require.NoError(t, err)
+	require.Len(t, items, 4)
+	now := time.Now()
+
+	assert.Empty(t, items[0].DiscountErr)
+	assert.Equal(t, FreeUntil, items[0].Promotion(now).Validity)
+
+	assert.Equal(t, DiscountFree, items[1].DiscountLevel)
+	assert.True(t, items[1].DiscountEndTime.IsZero())
+	assert.Equal(t, FreeUnknown, items[1].DiscountValidity)
+	assert.Equal(t, "freeleech_ends: 时间格式无法解析", items[1].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[1].Promotion(now).Validity)
+
+	assert.Empty(t, items[2].DiscountValidity)
+	assert.Empty(t, items[2].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[2].Promotion(now).Validity, "没有结束时间不等于长期免费")
+
+	assert.Equal(t, DiscountNone, items[3].DiscountLevel)
+	assert.Empty(t, items[3].DiscountErr, "没有优惠时结束时间无关")
 }
 
 // ---------------------------------------------------------------------------

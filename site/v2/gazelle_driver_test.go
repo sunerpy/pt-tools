@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -338,6 +339,47 @@ func TestGazelleDriver_GetTorrentDetail(t *testing.T) {
 	assert.Equal(t, DiscountFree, item.DiscountLevel)
 	assert.Equal(t, server.URL, item.SourceSite)
 	assert.NotZero(t, item.UploadedAt)
+}
+
+// Gazelle 接口没有免费结束时间：免费的规范状态只能是 unknown，不能当成长期免费
+func TestGazelleDriver_FreeleechPromotionIsUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := GazelleResponse{
+			Status: "success",
+			Response: json.RawMessage(`{
+				"group": {"name": "Test Album", "artist": "Test Artist"},
+				"torrent": {"torrentId": 12345, "format": "FLAC", "size": 1024, "isFreeleech": true}
+			}`),
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+	driver := NewGazelleDriver(GazelleDriverConfig{BaseURL: server.URL, APIKey: "key"})
+
+	before := time.Now()
+	item, err := driver.GetTorrentDetail(context.Background(), "", "https://mooko.org/torrents.php?id=12345", "")
+	require.NoError(t, err)
+	require.NotNil(t, item)
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.True(t, item.DiscountEndTime.IsZero())
+	snap := item.Promotion(time.Now())
+	assert.Equal(t, FreeUnknown, snap.Validity)
+	assert.False(t, snap.FreeFor(time.Now(), 0), "unknown 不是免费放行的凭据")
+	assert.False(t, item.FetchedAt.Before(before), "详情是实时请求，FetchedAt 是取得的时间：%s", item.FetchedAt)
+	assert.False(t, item.FetchedAt.After(time.Now()))
+
+	searchResp := GazelleSearchResponse{Results: []GazelleTorrentGroup{{
+		GroupName: "Album",
+		Torrents:  []GazelleTorrent{{TorrentID: 1, IsFreeleech: true}, {TorrentID: 2, IsNeutralLeech: true}, {TorrentID: 3}},
+	}}}
+	raw, err := json.Marshal(searchResp)
+	require.NoError(t, err)
+	items, err := driver.ParseSearch(GazelleResponse{Status: "success", Response: raw})
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.Equal(t, FreeUnknown, items[0].Promotion(time.Now()).Validity)
+	assert.Equal(t, FreeUnknown, items[1].Promotion(time.Now()).Validity)
+	assert.Equal(t, FreeNotFree, items[2].Promotion(time.Now()).Validity)
 }
 
 func TestExtractGazelleTorrentID(t *testing.T) {

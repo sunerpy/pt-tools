@@ -3,6 +3,7 @@ package definitions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -291,7 +292,7 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 	siteID := d.getSiteID()
 
 	for _, t := range searchData.Torrents {
-		discount, discountEnd := d.parsePromotion(t.Promotion)
+		discount, discountEnd, untilErr := d.parsePromotion(t.Promotion)
 
 		item := v2.TorrentItem{
 			ID:              t.UUID,
@@ -309,6 +310,9 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 			DownloadURL: fmt.Sprintf("/api/site/%s/torrent/%s/download", siteID, t.UUID),
 			SourceSite:  siteID,
 		}
+		if untilErr != nil {
+			v2.NoteDiscountTimeUnparsable(&item, "promotion.until")
+		}
 
 		if t.CreatedAt != "" {
 			if uploadTime, err := time.Parse(time.RFC3339, t.CreatedAt); err == nil {
@@ -324,9 +328,13 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 	return items, nil
 }
 
-func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, time.Time) {
+var errRousiUntilFormat = errors.New("unrecognized promotion until format")
+
+// parsePromotion 返回优惠级别、结束时间，以及生效中的促销 until 非空却所有写法都解析不了时的错误
+// （这时结束时间留空；调用方要把它记成 unknown，不能当成没有结束时间）。
+func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, time.Time, error) {
 	if promo == nil || !promo.IsActive {
-		return v2.DiscountNone, time.Time{}
+		return v2.DiscountNone, time.Time{}, nil
 	}
 
 	if logger := global.GetSloggerSafe(); logger != nil {
@@ -335,7 +343,9 @@ func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, t
 	}
 
 	var endTime time.Time
-	if promo.Until != "" {
+	var untilErr error
+	if until := strings.TrimSpace(promo.Until); until != "" {
+		untilErr = errRousiUntilFormat
 		for _, layout := range []string{
 			time.RFC3339,
 			"2006-01-02T15:04:05-0700",
@@ -346,8 +356,8 @@ func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, t
 				// 不带时区的时间按北京时间解释；time.Parse 会当成 UTC，事后 In(CST) 只改显示时区，时刻会晚 8 小时。
 				parse = v2.ParseTimeInCST
 			}
-			if t, err := parse(layout, promo.Until); err == nil {
-				endTime = t
+			if t, err := parse(layout, until); err == nil {
+				endTime, untilErr = t, nil
 				break
 			}
 		}
@@ -378,7 +388,7 @@ func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, t
 			level = v2.DiscountNone
 		}
 	}
-	return level, endTime
+	return level, endTime, untilErr
 }
 
 func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
@@ -519,7 +529,8 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		// 不能返回 (nil, nil)：调用方会把空详情当成功结果解引用
+		return nil, fmt.Errorf("RousiPro 没有种子 %s（HTTP 404）: %w: %w", torrentUUID, v2.ErrTorrentDetailUnavailable, v2.ErrTorrentNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API error: HTTP %d", resp.StatusCode)
@@ -537,7 +548,7 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string
 		return nil, fmt.Errorf("API error: %s", result.Message)
 	}
 
-	discount, discountEnd := d.parsePromotion(result.Data.Promotion)
+	discount, discountEnd, untilErr := d.parsePromotion(result.Data.Promotion)
 
 	item := &v2.TorrentItem{
 		ID:              result.Data.UUID,
@@ -550,6 +561,10 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string
 		SourceSite:      d.getSiteID(),
 		DiscountLevel:   discount,
 		DiscountEndTime: discountEnd,
+		FetchedAt:       time.Now().UTC(),
+	}
+	if untilErr != nil {
+		v2.NoteDiscountTimeUnparsable(item, "promotion.until")
 	}
 
 	if result.Data.CreatedAt != "" {
