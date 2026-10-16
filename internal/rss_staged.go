@@ -618,8 +618,7 @@ func refreshMonitoredRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, 
 	var planned *time.Time
 	switch snap.Validity {
 	case v2.FreeUntil:
-		advance := min(max(time.Duration(freeEndAdvanceMinutes())*time.Minute, 0), maxSafetyMargin)
-		p := DBTime(snap.EndsAt.Add(-advance))
+		p := DBTime(plannedPauseAt(*snap.EndsAt))
 		planned = &p
 	case v2.FreePermanent:
 	default:

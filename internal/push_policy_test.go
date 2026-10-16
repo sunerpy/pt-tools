@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"sync"
@@ -164,12 +165,14 @@ func TestPush_AdoptExisting(t *testing.T) {
 		// markAfterAdd 是推送标记相对任务加入时间的偏移：正数是没清掉的旧标记（加入时下载器说原本就有、清标记又失败）
 		markAfterAdd time.Duration
 		resumes      int
+		untilEnd     time.Duration // 免费还剩多久；为零时 3 小时
 	}{
-		{"上次加入、记账没写成", true, -time.Second, 1},
-		{"下载器里原本就有", false, 0, 0},
-		{"旧标记、任务早就在了", true, 10 * time.Minute, 0},
-		{"旧标记、任务在标记前半分钟加入", true, 30 * time.Second, 0},
-		{"任务与标记在同一秒、分不清先后", true, sameSecondLater, 0},
+		{"上次加入、记账没写成", true, -time.Second, 1, 0},
+		{"下载器里原本就有", false, 0, 0, 0},
+		{"旧标记、任务早就在了", true, 10 * time.Minute, 0, 0},
+		{"旧标记、任务在标记前半分钟加入", true, 30 * time.Second, 0, 0},
+		{"任务与标记在同一秒、分不清先后", true, sameSecondLater, 0, 0},
+		{"上次加入、记账没写成，计划暂停时刻马上就到", true, -time.Second, 0, 30 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := pushRig(t)
@@ -193,13 +196,14 @@ func TestPush_AdoptExisting(t *testing.T) {
 			require.NoError(t, global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("torrent_id = ?", "ad").Updates(cols).Error)
 
 			now := time.Now()
+			untilEnd := cmp.Or(tc.untilEnd, 3*time.Hour)
 			info := &DownloaderInfo{ID: dlID, Name: "qb", AutoStart: true}
 			res, err = pushTorrent(context.Background(), pushTarget{ID: info.ID, Name: info.Name, AutoStart: true},
 				func() (downloader.Downloader, error) { return r.dls["qb"], nil },
 				PushTorrentRequest{
 					SiteID: "springsunday", TorrentID: "ad", TorrentData: data, DownloaderID: dlID,
 					Policy:        AdmissionPolicy{PauseOnFreeEnd: true, SourceKind: SourceKindRSS, AttemptStart: now},
-					Snapshot:      untilSnap(now, now.Add(3*time.Hour)),
+					Snapshot:      untilSnap(now, now.Add(untilEnd)),
 					AdoptExisting: true, KeepRecord: true,
 				})
 			require.NoError(t, err)

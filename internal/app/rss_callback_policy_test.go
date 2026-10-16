@@ -184,3 +184,35 @@ func TestOnRSSDownload_NoPauseNotFreePushes(t *testing.T) {
 	assert.Equal(t, string(v2.FreeNotFree), ti.FreeValidity)
 	assert.Nil(t, ti.PausePlannedAt)
 }
+
+// 继承了到期暂停、计划暂停时刻（结束时间减提前量）已到或一分钟内就到：暂停加入、不自动开始，交给监控器确认暂停。
+// 开始了马上又要暂停；到期暂停先执行时，随后的开始还会把暂停撤掉，继续计费下载。
+func TestOnRSSDownload_PauseDueStaysPaused(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		untilEnd time.Duration
+	}{
+		{"计划暂停时刻已过", 5 * time.Minute}, // 提前量 10 分钟
+		{"计划暂停时刻一分钟内就到", 10*time.Minute + 30*time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newButtonRig(t, true)
+			require.NoError(t, core.NewConfigStore(r.db).SaveGlobalSettings(models.SettingsGlobal{
+				DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, FreeEndAdvanceMinutes: 10,
+			}))
+			end := time.Now().Add(tc.untilEnd)
+			r.lookupFn = func() (*v2.TorrentItem, error) {
+				return &v2.TorrentItem{ID: "77", DiscountLevel: v2.DiscountFree, DiscountEndTime: end, FetchedAt: time.Now()}, nil
+			}
+
+			require.NoError(t, r.actions.OnRSSDownload(context.Background(), r.row.ID, 0))
+
+			require.Len(t, r.dl.adds, 1)
+			assert.True(t, r.dl.adds[0].AddAtPaused)
+			assert.Empty(t, r.dl.resumes, "计划暂停时刻已到或马上就到时不开始")
+			ti := r.record(t)
+			assert.True(t, ti.PauseOnFreeEnd)
+			require.NotNil(t, ti.PausePlannedAt, "照样登记到期监控")
+		})
+	}
+}

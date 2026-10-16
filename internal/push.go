@@ -490,10 +490,6 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 		}
 		return &PushTorrentResult{Success: true, TorrentHash: result.Hash, Message: msg, Status: status}, nil
 	}
-	if decision.Monitor {
-		scheduleFromDB(req.SiteID, req.TorrentID)
-	}
-
 	sLogger().Infof("[PushTorrent] 种子推送成功: site=%s, id=%s, hash=%s, downloader=%s, source_kind=%s, require_free=%v, pause_on_free_end=%v",
 		req.SiteID, req.TorrentID, torrentHash, target.Name, req.Policy.SourceKind, req.Policy.RequireFree, req.Policy.PauseOnFreeEnd)
 
@@ -501,13 +497,36 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	switch {
 	case decision.KeepPaused:
 		res.Status, res.Message = PushStatusPushedPaused, decision.Reason
+	case startAfter && pauseDueBy(snap, req.Policy.Now().Add(resumeGuard)):
+		res.Status, res.Message = PushStatusPushedPaused, pauseDueMessage
 	case startAfter:
 		if resumeErr := dl.ResumeTorrent(taskID); resumeErr != nil {
 			sLogger().Warnf("[PushTorrent] 种子已暂停加入并登记了免费结束监控，但开始下载失败: site=%s, id=%s, %v", req.SiteID, req.TorrentID, resumeErr)
 			res.Status, res.Message = PushStatusPushedPaused, fmt.Sprintf("已暂停加入，开始下载失败: %v", resumeErr)
 		}
 	}
+	// 记账已在库里（周期对账从库里重建）；内存定时器在开始之后才登记：到期暂停不会抢在开始之前执行、又被开始撤掉
+	if decision.Monitor {
+		scheduleFromDB(req.SiteID, req.TorrentID)
+	}
 	return res, nil
+}
+
+// resumeGuard：计划暂停时刻在这之内（含已经过了）的承诺暂停推送不开始，留给监控器确认暂停。
+// 开始了马上又要暂停；到期暂停若先执行，随后的开始会把它撤掉，继续计费下载。
+const resumeGuard = time.Minute
+
+const pauseDueMessage = "已到（或马上就到）计划暂停的时间，暂停加入、不开始"
+
+// plannedPauseAt 是免费结束前计划暂停的时刻：结束时间减提前量（0 到 60 分钟），与监控器一致。
+func plannedPauseAt(end time.Time) time.Time {
+	advance := min(max(time.Duration(freeEndAdvanceMinutes())*time.Minute, 0), maxSafetyMargin)
+	return end.Add(-advance)
+}
+
+// pauseDueBy 报告快照对应的计划暂停时刻不晚于 t。
+func pauseDueBy(snap *v2.PromotionSnapshot, t time.Time) bool {
+	return snap != nil && snap.EndsAt != nil && !plannedPauseAt(*snap.EndsAt).After(t)
 }
 
 // placementLocks 按站点与种子哈希串行化推送（见 pushTorrent）。
@@ -598,14 +617,14 @@ func adoptExistingTorrent(dl downloader.Downloader, target pushTarget, req PushT
 		Updates(pushedColumns(target, hash, req.Policy, snap, decision)).Error; err != nil {
 		return nil, fmt.Errorf("更新数据库状态失败: %w", err)
 	}
-	if decision.Monitor {
-		scheduleFromDB(req.SiteID, req.TorrentID)
-	}
 	res := &PushTorrentResult{Success: true, Skipped: true, TorrentHash: hash, Message: "种子已存在于下载器中，已记账", Status: PushStatusDuplicate}
-	if ours && decision.Monitor && target.AutoStart && !req.AddPaused {
+	if ours && decision.Monitor && target.AutoStart && !req.AddPaused && !pauseDueBy(snap, req.Policy.Now().Add(resumeGuard)) {
 		if err := dl.ResumeTorrent(hash); err != nil {
 			sLogger().Warnf("[PushTorrent] 补记账后开始下载失败: site=%s, id=%s, %v", req.SiteID, req.TorrentID, err)
 		}
+	}
+	if decision.Monitor {
+		scheduleFromDB(req.SiteID, req.TorrentID)
 	}
 	sLogger().Infof("[PushTorrent] 种子已存在于下载器 %s，已记账: site=%s, id=%s, hash=%s, 补上次的记账=%v", target.Name, req.SiteID, req.TorrentID, hash, ours)
 	return res, nil
@@ -636,9 +655,7 @@ func pushedColumns(target pushTarget, taskID string, policy AdmissionPolicy, sna
 		maps.Copy(cols, SnapshotColumns(*snap))
 	}
 	if decision.Monitor && snap != nil && snap.EndsAt != nil {
-		// 计划暂停时间与监控器一致：结束时间减提前量（0 到 60 分钟）
-		advance := min(max(time.Duration(freeEndAdvanceMinutes())*time.Minute, 0), maxSafetyMargin)
-		cols["pause_planned_at"] = DBTime(snap.EndsAt.Add(-advance))
+		cols["pause_planned_at"] = DBTime(plannedPauseAt(*snap.EndsAt))
 	}
 	return cols
 }
