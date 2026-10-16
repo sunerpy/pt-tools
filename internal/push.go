@@ -568,7 +568,8 @@ func pushedColumns(target pushTarget, taskID string, policy AdmissionPolicy, sna
 		"free_end_failures":  0,
 	}
 	if policy.SourceRSSID != nil {
-		cols["source_rss_id"] = *policy.SourceRSSID
+		// 已经有所有者 RSS 的不改（通知按钮推的是另一条 RSS 暂存过的种子时，暂存文件仍由所有者清理）
+		cols["source_rss_id"] = gorm.Expr("COALESCE(source_rss_id, ?)", *policy.SourceRSSID)
 	}
 	if snap != nil {
 		maps.Copy(cols, SnapshotColumns(*snap))
@@ -700,7 +701,7 @@ func markPushPending(req PushTorrentRequest, target pushTarget, hash string, sna
 		"require_free":      req.Policy.RequireFree,
 	}
 	if req.Policy.SourceRSSID != nil {
-		cols["source_rss_id"] = *req.Policy.SourceRSSID
+		cols["source_rss_id"] = gorm.Expr("COALESCE(source_rss_id, ?)", *req.Policy.SourceRSSID)
 	}
 	if snap != nil {
 		maps.Copy(cols, SnapshotColumns(*snap))

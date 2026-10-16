@@ -562,3 +562,41 @@ func TestRSSFreeSafety_ParseErrorObservable(t *testing.T) {
 	assert.Contains(t, ti.FreeStatusError, "endTime")
 	assert.Empty(t, r.dls["qb"].addCalls())
 }
+
+// 通知按钮推的是另一条 RSS 暂存过的种子：记录的所有者不变，所有者的暂存文件由它自己在推送循环里清掉。
+func TestRSSFreeSafety_ButtonPushKeepsOwner(t *testing.T) {
+	r := newRSSRig(t, "qb-a", "qb-b")
+	idA, idB := r.dlID("qb-a"), r.dlID("qb-b")
+	feed := newFeedServer(t, "o1")
+	rs := r.addRSS(feed,
+		models.RSSConfig{Name: "A", Tag: "movie", IntervalMinutes: 10, DownloaderID: &idA},
+		models.RSSConfig{Name: "B", Tag: "tv", IntervalMinutes: 10, DownloaderID: &idB},
+	)
+	a, b := rs[0], rs[1]
+	r.site.set("o1", freeUntil(48*time.Hour))
+	r.dls["qb-a"].setFree(5 * gb) // A 这一轮推不出去：暂存着
+	require.NoError(t, core.NewConfigStore(r.db).SaveGlobalSettings(models.SettingsGlobal{
+		DownloadDir: r.base, DefaultIntervalMinutes: 10, DefaultEnabled: true, MaxRetry: 3,
+		CleanupDiskProtect: true, CleanupMinDiskSpaceGB: 10,
+	}))
+	r.round(a)
+	require.True(t, r.staged(a, "o1"))
+
+	// B 的通知里点了「立即下载」：经共享推送加到 B 的下载器
+	t.Cleanup(SwapPushDownloaderFactory(func(s models.DownloaderSetting) (downloader.Downloader, error) { return r.dls[s.Name], nil }))
+	bID := b.ID
+	res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+		SiteID: "springsunday", TorrentID: "o1", TorrentData: roundTorrentBytes("springsunday-o1"), DownloaderID: idB,
+		Policy: AdmissionPolicy{SourceKind: SourceKindRSSNotify, SourceRSSID: &bID, AttemptStart: time.Now()},
+	})
+	require.NoError(t, err)
+	require.True(t, res.Success, res.Message)
+	ti := r.record("o1")
+	require.NotNil(t, ti.SourceRSSID)
+	assert.Equal(t, a.ID, *ti.SourceRSSID, "所有者还是 A")
+
+	r.dls["qb-a"].setFree(1 << 50)
+	r.round(a)
+	assert.False(t, r.staged(a, "o1"), "A 的推送循环看到已推送，清掉自己的暂存文件")
+	assert.Empty(t, r.dls["qb-a"].addCalls(), "已经在 B 的下载器里，A 不再推")
+}
