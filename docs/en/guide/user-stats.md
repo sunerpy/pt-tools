@@ -15,6 +15,13 @@ The User Stats page summarizes upload, download, ratio, bonus and seeding data a
 - A period increment (today, this week, this month) = the latest snapshot in the period − the most recent snapshot before the period starts; if there is none before the period, the earliest snapshot inside it is used. A site with a single snapshot has no increment.
 - When a site's numbers go backwards (the tracker reset its stats, or you spent bonus), that value counts as 0 and is left out of totals.
 
+## Two kinds of download figures
+
+- **Billed download (下载量（计费）)**: the download a site counts toward your ratio after free, discount and other promotions. Every download figure on the User Stats page, in site details, in the daily report, in the ChatOps `/sites <site>` reply, in the mobile app, in the App API and in MCP is this one, and each of them says so (计费 in the Web UI, `Downloaded (billed)` in the ChatOps reply).
+- **Actual download (实际下载)**: the amount actually transferred, before promotions, which some sites (M-Team, for example) report separately. It appears together with the actual upload in the "Actual transfer" (实际传输) column of the User Stats site table (hidden by default; turn it on under "Columns" (列设置)) and in the "Actual upload / download" (实际上传 / 下载) row of the "Site stats" (站点统计) card in site details. Sites that do not report it have no such figures.
+- Downloading a free torrent increases the actual download while the billed download stays the same; that is expected. To check whether a download was billed, look at the billed download and the ratio.
+- Daily snapshots keep only the billed figure: increments, trends and the daily report all use the billed download, and there is no history of the actual download.
+
 ## Where to look
 
 | Place                                | What it shows                                                                                                                           |
@@ -34,7 +41,7 @@ Turn it on under "Daily report" in System Settings, then set the send time (defa
 
 Each day at the send time, plus a fixed per-installation offset of up to 10 minutes (picked at random the first time it is needed and then kept, no later than 23:59), pt-tools sends one report for the day:
 
-- upload, download and bonus increments per site and in total, listing up to 10 sites by upload;
+- upload, billed download and bonus increments per site and in total, listing up to 10 sites by upload;
 - sites whose login state is abnormal (session expired, key error, challenged, network error and so on);
 - today's check-in results (how many sites signed in, were already signed in, or failed);
 - sites whose numbers went backwards and were counted as 0.

@@ -31,7 +31,7 @@ After pairing, the window in the web UI shows that the device is paired and the 
 
 | Page                       | Content                                                                                                                                                  |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Overview                   | Uploaded, downloaded, ratio, bonus, seeding and unread messages across enabled sites, today's numbers, downloader speeds and free space                  |
+| Overview                   | Uploaded, billed download, ratio, bonus, seeding and unread messages across enabled sites, today's numbers, downloader speeds and free space             |
 | Torrents                   | Torrents in your downloaders, filtered by state or title; pause, resume, delete (with a confirmation, optionally with the data)                          |
 | Search                     | Search all enabled sites and send a result to a downloader (with the usual disk-space and seeding-capacity checks)                                       |
 | Media                      | Subscriptions (progress, missing episodes, search now, pause, delete), recently added items, and Explore (trending, popular, search, subscribe directly) |
@@ -40,6 +40,8 @@ After pairing, the window in the web UI shows that the device is paired and the 
 | More → Tasks, Brush        | Send history, and brush tasks with their active torrents and totals                                                                                      |
 | More → Downloaders         | Downloader speeds, free space and versions                                                                                                               |
 | More → Connection & device | Connection method and address, host, this device's name and permissions; reconnect, forget this host                                                     |
+
+The download figures on Overview and under More → Sites are the billed download (what the sites count toward your ratio after free and discount promotions), not the amount actually transferred. See [Two kinds of download figures](user-stats.md#two-kinds-of-download-figures).
 
 Read-only devices don't see write actions (pause, delete, send, check in, subscribe).
 

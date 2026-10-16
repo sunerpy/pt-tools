@@ -128,6 +128,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - `totals` 是已启用站点的合计：`uploaded`、`downloaded`、`ratio`、`seeding`、`leeching`、`bonus`、`bonus_per_hour`、`seeding_size`、`site_count`、`unread_messages`。
 - `today` 是今天的增量：`from`、`to`、`uploaded`、`downloaded`、`bonus`，`sites` 是各站点的增量。口径与[数据统计](../guide/user-stats.md)相同。增量算不出来时 `today.error` 写明原因，这时的 0 不代表今天没有流量。
 - `updated_at` 是站点数据最近一次更新的时间。
+- 这里的 `downloaded` 都是站点计费的下载量：站点按免费、折扣折算以后计入分享率的数，不是实际传输量。`today` 的增量来自每日快照，快照只存计费口径。见[下载量的两种口径](../guide/user-stats.md#下载量的两种口径)。
 
 ### GET /sites
 
@@ -139,6 +140,8 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | `login`                           | 登录状态：`tier` 是提醒档位（`none`、`30d`、`14d`、`7d`、`3d`、`banned-imminent`，没有访问记录时是 `unknown`），`days_remaining` 是离封号阈值还剩几天，另有 `last_active_at`、`last_probe_at`、`last_probe_status`     |
 | `attendance`                      | 今天的签到：`supported`、`enabled`、`day`、`status`（`pending`、`signed`、`already`、`failed`、`unsupported`）、`message`、`last_attempt_at`                                                                           |
 | `user`                            | 站点上的用户数据，没有同步过时没有这一项：`username`、`level`、`uploaded`、`downloaded`、`ratio`、`bonus`、`bonus_per_hour`、`seeding`、`leeching`、`seeding_size`、`unread_messages`、`hnr_unsatisfied`、`updated_at` |
+
+`user` 里的 `downloaded` 同样是计费下载量，不是实际传输量。
 
 ### POST /sites/{site}/attend
 
