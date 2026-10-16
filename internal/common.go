@@ -543,12 +543,14 @@ func downloadWorkerUnified(
 					sLogger().Warnf("%s: 刷新已推送种子的资格失败，保持原来的记录: %v", title, derr)
 				} else {
 					snap := detailSnapshot(siteName, item.GUID, d, requestedAt)
-					if rerr := refreshPushedRecord(torrent, snap, time.Now()); rerr != nil {
+					// 来源与规则只跟着同一份资格一起写：这份资格没写成（读到的比库里旧、写库失败）就不写，不留新旧混合的记录
+					if applied, rerr := refreshPushedRecord(torrent, snap, time.Now()); rerr != nil {
 						sLogger().Warnf("%s: 写回已推送种子的资格失败: %v", title, rerr)
-					}
-					dec := decideItem(title, d, snap, gl, rssCfg, filterSvc, hasAssociatedRules, margin)
-					if rerr := refreshPushedSource(torrent, rssCfg, dec.source, dec.ruleID); rerr != nil {
-						sLogger().Warnf("%s: 写回已推送种子的来源失败: %v", title, rerr)
+					} else if applied {
+						dec := decideItem(title, d, snap, gl, rssCfg, filterSvc, hasAssociatedRules, margin)
+						if rerr := refreshPushedSource(torrent, rssCfg, snap, dec.source, dec.ruleID); rerr != nil {
+							sLogger().Warnf("%s: 写回已推送种子的来源失败: %v", title, rerr)
+						}
 					}
 				}
 				stats.skipped.Add(1)
