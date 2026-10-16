@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.34](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.33...v1.0.0-rc.34) (2026-10-16)
+
+
+### Bug Fixes
+
+* **rss:** 已推送种子的来源与规则只跟着同一份资格一起写 ([#736](https://github.com/sunerpy/pt-tools/issues/736)) ([b52a125](https://github.com/sunerpy/pt-tools/commit/b52a12503c1dd8a7cf5cd172a5b9015112cf4e67))
+
 ## [1.0.0-rc.33](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.32...v1.0.0-rc.33) (2026-10-16)
 
 
