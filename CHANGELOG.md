@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.35](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.34...v1.0.0-rc.35) (2026-10-16)
+
+
+### Bug Fixes
+
+* **brush:** 站点规则里没有 H&R 做种时长时按站点设置算，整站 H&R 也能刷流 ([#738](https://github.com/sunerpy/pt-tools/issues/738)) ([375ef23](https://github.com/sunerpy/pt-tools/commit/375ef23b5116210cf3f5f089bd9c0ef3f10d1a30)), closes [#727](https://github.com/sunerpy/pt-tools/issues/727)
+
 ## [1.0.0-rc.34](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.33...v1.0.0-rc.34) (2026-10-16)
 
 
