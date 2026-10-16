@@ -651,12 +651,7 @@ func pushedColumns(target pushTarget, taskID string, policy AdmissionPolicy, sna
 		// 已经有所有者 RSS 的不改（通知按钮推的是另一条 RSS 暂存过的种子时，暂存文件仍由所有者清理）
 		cols["source_rss_id"] = gorm.Expr("COALESCE(source_rss_id, ?)", *policy.SourceRSSID)
 	}
-	// 把它推进下载器的规则：RSS 暂存推送时就是记录上这一轮命中的规则（之后 filter_rule_id 每轮刷新，这一列不改）；别的入口推的没有
-	if policy.SourceKind == SourceKindRSS {
-		cols["pushed_filter_rule_id"] = gorm.Expr("filter_rule_id")
-	} else {
-		cols["pushed_filter_rule_id"] = nil
-	}
+	cols["pushed_filter_rule_id"] = pushedRule(policy)
 	if snap != nil {
 		maps.Copy(cols, SnapshotColumns(*snap))
 	}
@@ -792,6 +787,8 @@ func markPushPending(req PushTorrentRequest, target pushTarget, hash string, sna
 		"downloader_name":   target.Name,
 		"pause_on_free_end": req.Policy.PauseOnFreeEnd,
 		"require_free":      req.Policy.RequireFree,
+		// 对账补记账时不知道是哪个入口推的：把它推进下载器的规则随标记一起写下
+		"pushed_filter_rule_id": pushedRule(req.Policy),
 	}
 	if req.Policy.SourceRSSID != nil {
 		cols["source_rss_id"] = gorm.Expr("COALESCE(source_rss_id, ?)", *req.Policy.SourceRSSID)
@@ -801,6 +798,15 @@ func markPushPending(req PushTorrentRequest, target pushTarget, hash string, sna
 	}
 	return global.GlobalDB.DB.Model(&models.TorrentInfo{}).
 		Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).Updates(cols).Error
+}
+
+// pushedRule 是写进 pushed_filter_rule_id 的值：RSS 暂存推送时就是记录上这一轮命中的规则（之后 filter_rule_id 每轮刷新，
+// 这一列不改）；别的入口推的没有。
+func pushedRule(policy AdmissionPolicy) any {
+	if policy.SourceKind == SourceKindRSS {
+		return gorm.Expr("filter_rule_id")
+	}
+	return nil
 }
 
 func clearPushPending(siteID, torrentID string) {

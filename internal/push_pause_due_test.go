@@ -62,3 +62,25 @@ func TestPush_PauseDueKeepsPausedAndResumesBeforeSchedule(t *testing.T) {
 		})
 	}
 }
+
+// 暂停加入后记账失败、留着推送标记时，「把它推进下载器的规则」已经随标记写下：对账补记账后命中数照样算它。
+func TestPush_PendingMarkerKeepsPushedRule(t *testing.T) {
+	r := pushRig(t)
+	failBookkeeping(t, r.db.DB)
+	rule := uint(7)
+	ti := models.TorrentInfo{SiteName: "springsunday", TorrentID: "pr1", DownloadSource: "filter_rule", FilterRuleID: &rule}
+	require.NoError(t, r.db.DB.Create(&ti).Error)
+	now := time.Now()
+	res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+		SiteID: "springsunday", TorrentID: "pr1", TorrentData: roundTorrentBytes("pr1"), DownloaderID: r.dlID("qb"),
+		Policy:     AdmissionPolicy{PauseOnFreeEnd: true, SourceKind: SourceKindRSS, AttemptStart: now},
+		Snapshot:   untilSnap(now, now.Add(3*time.Hour)),
+		KeepRecord: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, PushStatusMonitorDegraded, res.Status)
+	var v *uint
+	require.NoError(t, r.db.DB.Model(&models.TorrentInfo{}).Select("pushed_filter_rule_id").Where("torrent_id = ?", "pr1").Scan(&v).Error)
+	require.NotNil(t, v, "推送标记写下时一并记下把它推进下载器的规则")
+	assert.Equal(t, rule, *v)
+}

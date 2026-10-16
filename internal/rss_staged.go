@@ -624,25 +624,34 @@ func notOlderSnapshot(q *gorm.DB, snap v2.PromotionSnapshot) *gorm.DB {
 }
 
 // refreshPushedSource 按这一轮的判断刷新已推送种子的来源与命中的过滤规则（规则不再命中就清掉）。只改 RSS 推的
-// （来源是免费通道或过滤规则；手动、通知按钮、订阅、刷流、辅种等入口推的保持那个入口写的来源），
-// 而且和暂存项的策略一样只由所有者 RSS 写：所有者是本 RSS、还没有所有者，或所有者已删除。是否要求免费、
-// 到期暂停与标签保持推送时的值（监控按它们执行）。
+// （来源是免费通道或过滤规则；手动、通知按钮、订阅、刷流、辅种等入口推的保持那个入口写的来源），而且只由所有者 RSS 写。
+// 没有所有者（升级前推送的）或所有者已删除的：本站点只有这一条 RSS 时用条件更新接管再写；有几条 RSS 时分不清该归谁，
+// 谁也不改（不然几条 RSS 轮流按各自的规则改写）。是否要求免费、到期暂停与标签保持推送时的值（监控按它们执行）。
 func refreshPushedSource(rec *models.TorrentInfo, rss models.RSSConfig, source string, ruleID *uint) error {
 	q := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
 		Where("id = ? AND download_source IN ?", rec.ID, []string{filter.SourceFreeDownload, filter.SourceFilterRule})
 	if rss.ID != 0 {
-		switch owner := rec.SourceRSSID; {
-		case owner == nil:
-			q = q.Where("source_rss_id IS NULL")
-		case *owner == rss.ID:
-			q = q.Where("source_rss_id = ?", rss.ID)
-		case !rssActive(*owner):
-			q = q.Where("source_rss_id = ?", *owner)
-		default:
+		owner := rec.SourceRSSID
+		mine := owner != nil && *owner == rss.ID
+		if !mine && (owner == nil || !rssActive(*owner)) && soleRSSForSite(rec.SiteName) {
+			mine = claimOwnership(rec.ID, owner, rss.ID)
+		}
+		if !mine {
 			return nil
 		}
+		q = q.Where("source_rss_id = ?", rss.ID)
 	}
 	return q.Updates(map[string]any{"download_source": source, "filter_rule_id": ruleID}).Error
+}
+
+// soleRSSForSite 报告这个站点只有一条（非示例）RSS。
+func soleRSSForSite(siteName string) bool {
+	var n int64
+	err := global.GlobalDB.DB.Model(&models.RSSSubscription{}).
+		Joins("JOIN site_settings ON site_settings.id = rss_subscriptions.site_id").
+		Where("site_settings.name = ? AND rss_subscriptions.is_example = ?", siteName, false).
+		Count(&n).Error
+	return err == nil && n == 1
 }
 
 // monitoredPushed 报告这是已推送、正受到期监控的种子：刷新资格时还要改计划暂停（见 refreshPushedRecord）。
