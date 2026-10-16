@@ -44,6 +44,11 @@ func shouldSweepDecision(torrent *models.TorrentInfo, filePath string, retainHou
 	return info.ModTime().Before(cutoff)
 }
 
+// ShouldSweepRecord 是同一条规则，记录由调用方查好（RSS 暂存清理先按归属过滤）；torrent 为 nil 表示孤立。
+func ShouldSweepRecord(torrent *models.TorrentInfo, filePath string, retainHours, maxRetry int) bool {
+	return shouldSweepDecision(torrent, filePath, retainHours, maxRetry)
+}
+
 // ShouldSweepStaging 判定一个暂存 .torrent 是否应被清理（按 site+hash 定位 DB 记录）。
 //
 // 这是从 internal/common.go 的 shouldSweep（Issue #450）提取出来的可复用决策，使 RSS

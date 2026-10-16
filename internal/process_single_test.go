@@ -130,7 +130,7 @@ func TestProcessSingleWithDownloader_SuccessPushSchedules(t *testing.T) {
 
 	future := time.Now().Add(2 * time.Hour)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "ps", FreeEndTime: &future, IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "ps", IsFree: true, FreeLevel: "free", FreeEndTime: &future, IsPushed: &pushed}
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
 
@@ -145,13 +145,21 @@ func TestProcessSingleWithDownloader_SuccessPushSchedules(t *testing.T) {
 	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(1)<<50, nil).AnyTimes()
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	var opts []downloader.AddTorrentOptions
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
-		Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
+		DoAndReturn(func(_ []byte, o downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+			opts = append(opts, o)
+			return downloader.AddTorrentResult{Success: true, Hash: hash}, nil
+		})
+	// 承诺到期暂停：先暂停加入，记账、登记监控以后才开始
+	mockDl.EXPECT().ResumeTorrent(hash).Return(nil)
 
 	dlInfo := &DownloaderInfo{ID: 3, Name: "d", AutoStart: true}
 	require.NoError(t, processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
 		path, "cat", "tag", "", models.SiteGroup("springsunday"), true))
 	assert.Equal(t, "ps", scheduled)
+	require.Len(t, opts, 1)
+	assert.True(t, opts[0].AddAtPaused)
 	_, statErr := os.Stat(path)
 	assert.True(t, os.IsNotExist(statErr))
 }
@@ -696,7 +704,8 @@ func TestProcessSingleWithDownloader_ExpiredMarks(t *testing.T) {
 
 	past := time.Now().Add(-1 * time.Hour)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "exp", FreeEndTime: &past, IsPushed: &pushed}
+	// 免费通道的记录（要求免费），免费已经结束
+	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "exp", IsFree: true, FreeLevel: "free", RequireFree: true, FreeEndTime: &past, IsPushed: &pushed}
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
 
@@ -754,7 +763,7 @@ func TestProcessSingleWithDownloader_ExistsSchedulesFreeEnd(t *testing.T) {
 
 	future := time.Now().Add(1 * time.Hour)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "exsc", FreeEndTime: &future, IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "exsc", IsFree: true, FreeLevel: "free", FreeEndTime: &future, IsPushed: &pushed}
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
 
@@ -789,11 +798,11 @@ func TestProcessSingleWithDownloader_MaxRetryDeletes(t *testing.T) {
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
 
+	// 超过最大重试次数的直接删除，不再联系下载器（没有设置任何调用期望）
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mockDl := sm.NewMockDownloader(ctrl)
 	mockDl.EXPECT().GetName().Return("d").AnyTimes()
-	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "d"}
 	require.NoError(t, processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
@@ -810,7 +819,7 @@ func TestProcessSingleWithDownloader_SuccessSchedulesFreeEnd(t *testing.T) {
 
 	future := time.Now().Add(2 * time.Hour)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "sc", FreeEndTime: &future, IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: "springsunday", TorrentID: "sc", IsFree: true, FreeLevel: "free", FreeEndTime: &future, IsPushed: &pushed}
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
 
@@ -827,6 +836,7 @@ func TestProcessSingleWithDownloader_SuccessSchedulesFreeEnd(t *testing.T) {
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
 		Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
+	mockDl.EXPECT().ResumeTorrent(hash).Return(nil)
 
 	dlInfo := &DownloaderInfo{ID: 3, Name: "d", AutoStart: true}
 	require.NoError(t, processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,

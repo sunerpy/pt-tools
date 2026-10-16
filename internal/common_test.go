@@ -44,7 +44,7 @@ func TestProcessTorrentsWithDownloaderByRSS_DisabledDownloader(t *testing.T) {
 	require.NoError(t, db.DB.Create(&ds).Error)
 
 	err := ProcessTorrentsWithDownloaderByRSS(context.Background(),
-		models.RSSConfig{DownloaderID: &dlID}, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"))
+		models.RSSConfig{DownloaderID: &dlID}, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "未启用")
 }
@@ -79,7 +79,7 @@ func TestProcessTorrentsWithDownloaderByRSS_SuccessAndSweep(t *testing.T) {
 	require.NoError(t, db.UpsertTorrent(ti))
 
 	require.NoError(t, ProcessTorrentsWithDownloaderByRSS(context.Background(),
-		models.RSSConfig{}, dir, "cat", "tag", models.SiteGroup("springsunday")))
+		models.RSSConfig{}, dir, "cat", "tag", models.SiteGroup("springsunday"), nil))
 
 	got, gerr := db.GetTorrentBySiteAndID("springsunday", "tsucc")
 	require.NoError(t, gerr)
@@ -1057,6 +1057,9 @@ func TestProcessSingleTorrentWithDownloader_Expired(t *testing.T) {
 	ti := &models.TorrentInfo{
 		SiteName:    string(models.SiteGroup("springsunday")),
 		TorrentHash: &hash,
+		IsFree:      true,
+		FreeLevel:   "free",
+		RequireFree: true, // 免费通道的记录
 		FreeEndTime: &past,
 	}
 	require.NoError(t, db.UpsertTorrent(ti))
@@ -1120,7 +1123,7 @@ func TestProcessTorrentsWithDownloaderByRSS_NoDownloader(t *testing.T) {
 	_ = setupDB(t)
 
 	rssCfg := models.RSSConfig{}
-	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"))
+	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "获取下载器失败")
 }
@@ -1329,7 +1332,7 @@ func TestProcessSingleTorrentWithDownloader_MaxRetryExceeded(t *testing.T) {
 	mockDl := sm.NewMockDownloader(ctrl)
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
-	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	// 超过最大重试次数的直接删除，不再联系下载器
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
 	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
@@ -1424,7 +1427,7 @@ func TestProcessTorrentsWithDownloaderByRSS_EmptyDir(t *testing.T) {
 	rssCfg := models.RSSConfig{}
 
 	// 由于没有实际的 qBittorrent 服务器，会返回连接错误
-	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, emptyDir, "cat", "tag", models.SiteGroup("springsunday"))
+	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, emptyDir, "cat", "tag", models.SiteGroup("springsunday"), nil)
 	// 可能成功（空目录）或返回连接错误
 	_ = err
 }
@@ -1710,16 +1713,15 @@ func TestFilterTorrentFilesBySite(t *testing.T) {
 	require.Equal(t, "/app/.pt-tools/downloads/AGSvpt-222.torrent", filtered[1])
 }
 
-func TestFilterTorrentFilesBySite_FallbackAllWhenNoPrefixMatch(t *testing.T) {
+func TestFilterTorrentFilesBySite_NoFallbackToOtherFiles(t *testing.T) {
+	// 暂存目录按标签共用：没有本站点前缀的文件不归这个站点处理（以前没有匹配时会退回处理全部文件）
 	files := []string{
 		"/app/.pt-tools/downloads/file-a.torrent",
-		"/app/.pt-tools/downloads/file-b.torrent",
+		"/app/.pt-tools/downloads/mteam-333.torrent",
 	}
 
 	filtered := filterTorrentFilesBySite(files, models.SiteGroup("agsvpt"))
-	require.Len(t, filtered, 2)
-	require.Equal(t, files[0], filtered[0])
-	require.Equal(t, files[1], filtered[1])
+	require.Empty(t, filtered)
 }
 
 func TestShouldSkipSiteDownload(t *testing.T) {

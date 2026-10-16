@@ -10,6 +10,7 @@ import (
 	"maps"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -158,6 +159,10 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	// 检查种子是否已存在于下载器中
 	exists, err := dl.CheckTorrentExists(torrentHash)
 	if err != nil {
+		if req.AdoptExisting {
+			// RSS 暂存推送：查不清下载器里有没有就不加，文件留到下一轮（可能已经加过、只差记账）
+			return nil, fmt.Errorf("检查种子存在失败: %w", err)
+		}
 		sLogger().Warnf("检查种子存在失败: %v", err)
 	}
 	if exists {
@@ -336,6 +341,9 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 			if size, sizeErr := qbit.ComputeTorrentSize(req.TorrentData); sizeErr == nil {
 				capSize = size
 			}
+		}
+		if capSize <= 0 && req.Meta != nil && req.Meta.SizeBytes > 0 {
+			capSize = req.Meta.SizeBytes
 		}
 		used, usedErr := getSiteSeedingSizeBytes(ctx, req.SiteID, dl)
 		if usedErr != nil {
@@ -574,33 +582,64 @@ func pushedColumns(target pushTarget, taskID string, policy AdmissionPolicy, sna
 
 // SnapshotColumns 是一份资格快照对应的种子记录列（每次读到站点详情都整套写入，不留旧值）。
 func SnapshotColumns(s v2.PromotionSnapshot) map[string]any {
-	level := string(s.Level)
-	if level == "" {
-		level = string(v2.DiscountNone)
+	f := snapshotFieldsOf(s)
+	return map[string]any{
+		"is_free":            f.isFree,
+		"free_level":         f.level,
+		"free_end_time":      f.end,
+		"free_validity":      f.validity,
+		"free_verified_at":   f.verified,
+		"free_status_source": f.source,
+		"free_status_error":  f.errText,
 	}
-	var end *time.Time
+}
+
+// snapshotFields 是快照落到种子记录上的取值：is_free 包括结束时间未知的免费（是否放行看 free_validity），
+// 结束时间只记免费级别的（半价、2X 的结束不触发免费结束处理）。
+type snapshotFields struct {
+	isFree   bool
+	level    string
+	end      *time.Time
+	validity string
+	verified *time.Time
+	source   string
+	errText  string
+}
+
+func snapshotFieldsOf(s v2.PromotionSnapshot) snapshotFields {
+	f := snapshotFields{
+		isFree:   s.Validity == v2.FreeUntil || s.Validity == v2.FreePermanent || s.Validity == v2.FreeUnknown,
+		level:    string(s.Level),
+		validity: string(s.Validity),
+		source:   s.Source,
+		errText:  s.Err,
+	}
+	if f.level == "" {
+		f.level = string(v2.DiscountNone)
+	}
 	if v2.IsFreeTorrent(s.Level) && s.EndsAt != nil {
 		e := s.EndsAt.UTC()
-		end = &e
+		f.end = &e
 	}
-	var verified *time.Time
 	if !s.VerifiedAt.IsZero() {
 		v := s.VerifiedAt
-		verified = &v
+		f.verified = &v
 	}
-	errText := s.Err
-	if len(errText) > 250 {
-		errText = errText[:250]
+	if len(f.errText) > 250 {
+		f.errText = truncateUTF8(f.errText, 250)
 	}
-	return map[string]any{
-		"is_free":            s.Validity == v2.FreeUntil || s.Validity == v2.FreePermanent || s.Validity == v2.FreeUnknown,
-		"free_level":         level,
-		"free_end_time":      end,
-		"free_validity":      string(s.Validity),
-		"free_verified_at":   verified,
-		"free_status_source": s.Source,
-		"free_status_error":  errText,
+	return f
+}
+
+// truncateUTF8 截到不超过 n 字节，不截断多字节字符。
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // snapshotFromMeta 把调用方给的优惠信息整理成记录用的快照；没有取得时间，不能当作要求免费的凭据。

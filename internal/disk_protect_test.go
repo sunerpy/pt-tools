@@ -308,7 +308,7 @@ func makeUniqueTorrentFile(t *testing.T, dir, nameSuffix string) (string, string
 	var buf bytes.Buffer
 	torrent := map[string]any{"info": map[string]any{"name": "abc-" + nameSuffix}}
 	require.NoError(t, bencode.NewEncoder(&buf).Encode(torrent))
-	path := filepath.Join(dir, "x-"+nameSuffix+".torrent")
+	path := filepath.Join(dir, "springsunday-x-"+nameSuffix+".torrent")
 	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
 	h, err := qbit.ComputeTorrentHashWithPath(path)
 	require.NoError(t, err)

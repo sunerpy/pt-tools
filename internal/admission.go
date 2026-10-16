@@ -114,6 +114,14 @@ func CheckAdmission(p AdmissionPolicy, snap *v2.PromotionSnapshot, now time.Time
 	if margin < MinSafetyMargin {
 		margin = MinSafetyMargin
 	}
+	// 已知的免费结束时间已经过去或剩余不超过安全余量：不用等重新读取，读得再新也不会放行
+	if snap != nil && snap.EndsAt != nil && v2.IsFreeTorrent(snap.Level) && snap.EndsAt.Sub(now) <= margin &&
+		(snap.Validity == v2.FreeUntil || snap.Validity == v2.FreeNotFree) {
+		if snap.EndsAt.After(now) {
+			return reject(PushStatusRejectedExpired, fmt.Sprintf("免费剩余时间不超过 %d 分钟，不推送", int(margin/time.Minute)))
+		}
+		return reject(PushStatusRejectedExpired, "免费已结束，不推送")
+	}
 	switch {
 	case snap == nil || snap.VerifiedAt.IsZero():
 		return reject(PushStatusRejectedStale, "没有本次读取的免费资格，不推送")
@@ -132,9 +140,6 @@ func CheckAdmission(p AdmissionPolicy, snap *v2.PromotionSnapshot, now time.Time
 		return reject(PushStatusRejectedExpired, fmt.Sprintf("免费剩余时间不超过 %d 分钟，不推送", int(margin/time.Minute)))
 	case v2.FreeUnknown:
 		return reject(PushStatusHeldFreeUnknown, "免费结束时间未知，暂不推送")
-	}
-	if v2.IsFreeTorrent(snap.Level) && snap.EndsAt != nil && !snap.EndsAt.After(snap.VerifiedAt) {
-		return reject(PushStatusRejectedExpired, "免费已结束，不推送")
 	}
 	return reject(PushStatusRejectedNotFree, "不是免费，不推送")
 }

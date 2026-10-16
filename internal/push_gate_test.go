@@ -108,7 +108,7 @@ func TestProcessSingleWithDownloader_SiteCapacityGate(t *testing.T) {
 
 	var got models.TorrentInfo
 	require.NoError(t, db.DB.Where("torrent_hash = ?", hash).First(&got).Error)
-	assert.Contains(t, got.LastError, "站点做种容量已满")
+	assert.Contains(t, got.LastError, "站点容量已满")
 }
 
 // 站点容量满了就停止本轮推送：同一站点后面的种子也推不进去。
@@ -133,7 +133,7 @@ func TestRunPushLoop_StopsWhenSiteCapacityFull(t *testing.T) {
 	dl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
 	dl.EXPECT().GetAllTorrents().Return(nil, nil)
 
-	result := runPushLoop(context.Background(), dl, &DownloaderInfo{ID: 1, Name: "qb"}, dir, []string{path, path},
+	result := pushLoopLegacy(context.Background(), dl, &DownloaderInfo{ID: 1, Name: "qb"}, dir, []string{path, path},
 		"", "", "", models.SiteGroup("springsunday"), false, 0)
 	assert.True(t, result.capacityFull)
 	assert.Zero(t, result.success)
