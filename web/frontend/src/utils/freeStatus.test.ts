@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { freeEndLabel, freeStatusReasons, type FreeStatusFields } from "./freeStatus";
 
 const base: FreeStatusFields = { isExpired: false, isPushed: false, freeEndTime: "" };
-const now = new Date("2026-10-16T12:00:00+08:00");
+// 用本地时间构造：显示按浏览器所在时区，CI 跑在 UTC
+const now = new Date(2026, 9, 16, 12, 0, 0);
+const local = (d: number, h: number, m = 0) => new Date(2026, 9, d, h, m, 0).toISOString();
 
 describe("freeEndLabel", () => {
   it("免费到某时显示时间，悬停带读取时间与计划暂停", () => {
@@ -11,10 +13,10 @@ describe("freeEndLabel", () => {
       {
         ...base,
         freeValidity: "free_until",
-        freeEndTime: "2026-10-17T20:00:00+08:00",
-        freeVerifiedAt: "2026-10-16T11:58:00+08:00",
+        freeEndTime: local(17, 20),
+        freeVerifiedAt: local(16, 11, 58),
         pauseOnFreeEnd: true,
-        pausePlannedAt: "2026-10-17T19:55:00+08:00",
+        pausePlannedAt: local(17, 19, 55),
       },
       now,
     );
@@ -39,10 +41,9 @@ describe("freeEndLabel", () => {
   });
 
   it("免费已结束用醒目颜色；没有结束时间的普通记录显示 -", () => {
-    expect(
-      freeEndLabel({ ...base, isExpired: true, freeEndTime: "2026-10-16T08:00:00+08:00" }, now)
-        .tone,
-    ).toBe("dang");
+    expect(freeEndLabel({ ...base, isExpired: true, freeEndTime: local(16, 8) }, now).tone).toBe(
+      "dang",
+    );
     expect(freeEndLabel({ ...base, freeValidity: "not_free" }, now).text).toBe("-");
   });
 });
