@@ -635,7 +635,7 @@ type HashDownloader interface {
 type TorrentDetailFetcher interface {
 	// GetTorrentDetail fetches detailed torrent info given an RSS item's GUID and link.
 	// The guid is typically the torrent ID, and link is the detail page URL.
-	// 找不到种子或读不到详情时返回包装了 ErrTorrentDetailUnavailable 的错误，不返回 (nil, nil)，
+	// 能判断出找不到种子、或读不到详情时，返回包装了 ErrTorrentDetailUnavailable 的错误，不返回 (nil, nil)，
 	// 也不返回一个「没有优惠」的占位结果（那等于声称不是免费）。
 	// 实时请求得到的结果写 FetchedAt；结果来自缓存时 FetchedAt 是缓存刷新的时间。
 	GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error)

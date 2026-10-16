@@ -809,6 +809,12 @@ func TestRousiDriver_GetTorrentDetail_NotFound(t *testing.T) {
 	require.ErrorIs(t, err, v2.ErrTorrentDetailUnavailable)
 	require.ErrorIs(t, err, v2.ErrTorrentNotFound)
 	assert.Nil(t, item)
+
+	// 编号取自 RSS 链接，链接可能带密钥：错误里不带它
+	_, err = d.GetTorrentDetail(context.Background(), "guid", server.URL+"/torrent/abc?passkey=FAKE_TEST_PASSKEY_1234", "")
+	require.ErrorIs(t, err, v2.ErrTorrentDetailUnavailable)
+	assert.NotContains(t, err.Error(), "FAKE_TEST_PASSKEY_1234")
+	assert.NotContains(t, err.Error(), "guid")
 }
 
 func TestRousiDriver_GetTorrentDetail_APIError(t *testing.T) {

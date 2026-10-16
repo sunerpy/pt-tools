@@ -529,8 +529,9 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		// 不能返回 (nil, nil)：调用方会把空详情当成功结果解引用
-		return nil, fmt.Errorf("RousiPro 没有种子 %s（HTTP 404）: %w: %w", torrentUUID, v2.ErrTorrentDetailUnavailable, v2.ErrTorrentNotFound)
+		// 不能返回 (nil, nil)：调用方会把空详情当成功结果解引用。
+		// 错误里不带编号：它取自 RSS 链接，链接带查询参数时可能含密钥
+		return nil, fmt.Errorf("RousiPro 详情返回 HTTP 404: %w: %w", v2.ErrTorrentDetailUnavailable, v2.ErrTorrentNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API error: HTTP %d", resp.StatusCode)
