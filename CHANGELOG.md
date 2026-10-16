@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.31](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.30...v1.0.0-rc.31) (2026-10-16)
+
+
+### Features
+
+* **push:** 免费资格门禁、RSS 暂存归属与到期暂停确认 ([#730](https://github.com/sunerpy/pt-tools/issues/730)) ([283d51c](https://github.com/sunerpy/pt-tools/commit/283d51cf22bbbee3ff4dac47705aa4a1ddfe21ac))
+
 ## [1.0.0-rc.30](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.29...v1.0.0-rc.30) (2026-10-15)
 
 
