@@ -627,8 +627,9 @@ func notOlderSnapshot(q *gorm.DB, snap v2.PromotionSnapshot) *gorm.DB {
 // （来源是免费通道或过滤规则；手动、通知按钮、订阅、刷流、辅种等入口推的保持那个入口写的来源），而且只由所有者 RSS 写。
 // 没有所有者（升级前推送的）或所有者已删除的：本站点只有这一条 RSS 时用条件更新接管再写；有几条 RSS 时分不清该归谁，
 // 谁也不改（不然几条 RSS 轮流按各自的规则改写）。是否要求免费、到期暂停与标签保持推送时的值（监控按它们执行）。
-func refreshPushedSource(rec *models.TorrentInfo, rss models.RSSConfig, source string, ruleID *uint) error {
-	q := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+// 只跟着同一份资格写（snap 是刚写成的那份）：库里的资格已经被更新的读取盖过时不写，较旧的判断不改写来源与规则。
+func refreshPushedSource(rec *models.TorrentInfo, rss models.RSSConfig, snap v2.PromotionSnapshot, source string, ruleID *uint) error {
+	q := notOlderSnapshot(global.GlobalDB.DB.Model(&models.TorrentInfo{}), snap).
 		Where("id = ? AND download_source IN ?", rec.ID, []string{filter.SourceFreeDownload, filter.SourceFilterRule})
 	if rss.ID != 0 {
 		owner := rec.SourceRSSID
@@ -664,7 +665,8 @@ func monitoredPushed(t *models.TorrentInfo) bool {
 // （free_ended_at，不晚于这次读到的时间），再变回免费时清掉。
 // 受到期监控的还改计划暂停：按新的结束时间算（免费延长就推后，缩短就提前），不再免费或结束时间读不出时改为现在，
 // 监控器马上暂停；长期免费的不再需要暂停。改完交给监控器按新的时刻重新预约。
-func refreshPushedRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, now time.Time) error {
+// applied 报告这份资格写进去了（读到的比库里旧、或受监控的已被暂停或已完成时为 false）。
+func refreshPushedRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, now time.Time) (applied bool, err error) {
 	cols := SnapshotColumns(snap)
 	cols["is_expired"] = promotionEnded(snap)
 	cols["last_check_time"] = now
@@ -700,8 +702,11 @@ func refreshPushedRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, now
 	}
 	// 只让更新的读取写回：两条 RSS 同时刷新同一条记录时，较旧的「免费到某时」不能盖掉较新的「已不免费」
 	res := notOlderSnapshot(q, snap).Updates(cols)
-	if res.Error != nil || res.RowsAffected == 0 || !monitored {
-		return res.Error
+	if res.Error != nil || res.RowsAffected == 0 {
+		return false, res.Error
+	}
+	if !monitored {
+		return true, nil
 	}
 	if planned != nil && (rec.PausePlannedAt == nil || planned.Before(*rec.PausePlannedAt)) {
 		sLogger().Infof("[到期监控] 已推送的种子 %s 免费有变化（%s），计划暂停提前到 %s",
@@ -711,5 +716,5 @@ func refreshPushedRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, now
 	if err := global.GlobalDB.DB.First(&updated, rec.ID).Error; err == nil {
 		ScheduleTorrentForMonitoring(updated)
 	}
-	return nil
+	return true, nil
 }

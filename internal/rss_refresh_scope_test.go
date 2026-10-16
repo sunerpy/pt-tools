@@ -1,12 +1,14 @@
 package internal
 
 import (
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/internal/filter"
@@ -226,4 +228,86 @@ func TestRSSFreeSafety_OwnerlessPushedRecordSourceRefresh(t *testing.T) {
 		require.NotNil(t, ti.FilterRuleID)
 		assert.Equal(t, old, *ti.FilterRuleID, "分不清归谁：保持原来的规则")
 	})
+}
+
+// 来源与规则只跟着同一份资格一起写：库里的资格比这一轮读到的还新（另一条 RSS 或另一个 worker 刚写过）时，
+// 这一轮较旧的判断不能改写来源与规则（不然记录上是新资格配旧来源）。
+func TestRSSFreeSafety_OlderDetailDoesNotOverwriteNewerSource(t *testing.T) {
+	r := newRSSRig(t)
+	feed := newFeedServer(t, "o9")
+	rss := r.addRSS(feed, models.RSSConfig{Name: "rule", Tag: "tv", IntervalMinutes: 10})[0]
+	rule := models.FilterRule{Name: "any", Pattern: ".*", PatternType: "regex", MatchField: "both", Enabled: true, Priority: 100, Purpose: "download"}
+	require.NoError(t, r.db.DB.Create(&rule).Error)
+	require.NoError(t, r.db.DB.Model(&models.FilterRule{}).Where("id = ?", rule.ID).Update("require_free", false).Error)
+	require.NoError(t, models.NewRSSFilterAssociationDB(r.db.DB).SetFilterRulesForRSS(rss.ID, []uint{rule.ID}))
+	r.site.set("o9", v2.TorrentItem{DiscountLevel: v2.DiscountNone})
+	r.round(rss)
+	require.True(t, pushedOf(r.record("o9")))
+	require.Equal(t, filter.SourceFilterRule, r.record("o9").DownloadSource)
+
+	// 别处刚写进了更新的资格；这一轮读到的详情比它旧，规则也已经改得不再命中
+	newer := DBTime(time.Now().Add(time.Hour))
+	require.NoError(t, r.db.DB.Model(&models.TorrentInfo{}).Where("torrent_id = ?", "o9").Update("free_verified_at", newer).Error)
+	require.NoError(t, r.db.DB.Model(&models.FilterRule{}).Where("id = ?", rule.ID).Update("pattern", "^nothing-matches$").Error)
+	r.round(rss)
+
+	ti := r.record("o9")
+	assert.Equal(t, filter.SourceFilterRule, ti.DownloadSource, "较旧的判断不改写来源")
+	require.NotNil(t, ti.FilterRuleID, "较旧的判断不改写规则")
+	assert.Equal(t, rule.ID, *ti.FilterRuleID)
+}
+
+// 两个 worker 交错：较旧的那份资格先写成、较新的随后也写成，较旧那份的来源随后才写——这时库里已经是较新的资格，
+// 较旧的判断不能把来源与规则改回去。
+func TestRefreshPushedSource_SkipsWhenNewerSnapshotStored(t *testing.T) {
+	r := newRSSRig(t)
+	rss := r.addRSS(newFeedServer(t), models.RSSConfig{Name: "rule", Tag: "tv", IntervalMinutes: 10})[0]
+	pushed := true
+	rule := uint(5)
+	newer := DBTime(time.Now())
+	rec := models.TorrentInfo{
+		SiteName: "springsunday", TorrentID: "w1", IsPushed: &pushed, DownloadSource: filter.SourceFilterRule,
+		FilterRuleID: &rule, SourceRSSID: &rss.ID, FreeVerifiedAt: &newer,
+	}
+	require.NoError(t, r.db.DB.Create(&rec).Error)
+	older := v2.PromotionSnapshot{Level: v2.DiscountNone, Validity: v2.FreeNotFree, VerifiedAt: newer.Add(-time.Minute)}
+
+	require.NoError(t, refreshPushedSource(&rec, rss, older, filter.SourceFreeDownload, nil))
+
+	ti := r.record("w1")
+	assert.Equal(t, filter.SourceFilterRule, ti.DownloadSource)
+	require.NotNil(t, ti.FilterRuleID)
+	assert.Equal(t, rule, *ti.FilterRuleID)
+}
+
+// 资格写库失败时也不写来源与规则（不留「旧资格配新来源」的半刷新记录）。
+func TestRSSFreeSafety_FactsWriteFailureSkipsSource(t *testing.T) {
+	r := newRSSRig(t)
+	feed := newFeedServer(t, "f9")
+	rss := r.addRSS(feed, models.RSSConfig{Name: "rule", Tag: "tv", IntervalMinutes: 10})[0]
+	rule := models.FilterRule{Name: "any", Pattern: ".*", PatternType: "regex", MatchField: "both", Enabled: true, Priority: 100, Purpose: "download"}
+	require.NoError(t, r.db.DB.Create(&rule).Error)
+	require.NoError(t, r.db.DB.Model(&models.FilterRule{}).Where("id = ?", rule.ID).Update("require_free", false).Error)
+	require.NoError(t, models.NewRSSFilterAssociationDB(r.db.DB).SetFilterRulesForRSS(rss.ID, []uint{rule.ID}))
+	r.site.set("f9", v2.TorrentItem{DiscountLevel: v2.DiscountNone})
+	r.round(rss)
+	require.True(t, pushedOf(r.record("f9")))
+
+	// 这一轮写资格（带 free_validity 的那条 UPDATE）失败
+	const name = "test:fail_facts_update"
+	require.NoError(t, r.db.DB.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+		if cols, ok := tx.Statement.Dest.(map[string]any); ok {
+			if _, has := cols["free_validity"]; has {
+				_ = tx.AddError(errors.New("disk I/O error"))
+			}
+		}
+	}))
+	t.Cleanup(func() { _ = r.db.DB.Callback().Update().Remove(name) })
+	require.NoError(t, r.db.DB.Model(&models.FilterRule{}).Where("id = ?", rule.ID).Update("pattern", "^nothing-matches$").Error)
+	r.round(rss)
+
+	ti := r.record("f9")
+	assert.Equal(t, filter.SourceFilterRule, ti.DownloadSource, "资格没写成就不写来源")
+	require.NotNil(t, ti.FilterRuleID)
+	assert.Equal(t, rule.ID, *ti.FilterRuleID)
 }
