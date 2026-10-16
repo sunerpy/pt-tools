@@ -21,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 12
+const CurrentSchemaVersion = 13
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -157,6 +157,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     12,
 		Description: "torrent_infos: backfill free_validity (no end time is unknown, never permanent) and require_free",
 		Up:          sm.migrateV11ToV12,
+	})
+
+	// v12 -> v13: 没有下载器编号的旧种子记录按下载器名字补上编号（删种按编号认下载器）
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     13,
+		Description: "torrent_infos, torrent_info_archives: backfill downloader_id from downloader_name",
+		Up:          sm.migrateV12ToV13,
 	})
 }
 
@@ -752,6 +759,28 @@ func (sm *SchemaManager) migrateV11ToV12(db *gorm.DB) error {
 			free_status_source = 'legacy'
 			WHERE ` + pending).Error; err != nil {
 			return fmt.Errorf("v11→v12: backfill free_validity: %w", err)
+		}
+		return nil
+	})
+}
+
+// migrateV12ToV13 给没有下载器编号的旧种子记录（2026-01 以前推送的）按现在的下载器名字补上编号：下载器可以改名、名字也可能
+// 被后建的下载器复用，删种从此只按编号认下载器。名字对不上任何下载器的留空（认不出是哪个下载器的），已有编号的不动。
+func (sm *SchemaManager) migrateV12ToV13(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&DownloaderSetting{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, table := range []string{"torrent_infos", "torrent_info_archives"} {
+			if !tx.Migrator().HasTable(table) || !tx.Migrator().HasColumn(table, "downloader_id") {
+				continue
+			}
+			if err := tx.Exec(`UPDATE ` + table + ` SET downloader_id =
+				(SELECT ds.id FROM downloader_settings ds WHERE ds.name = ` + table + `.downloader_name)
+				WHERE downloader_id IS NULL AND downloader_name != '' AND
+				EXISTS (SELECT 1 FROM downloader_settings ds WHERE ds.name = ` + table + `.downloader_name)`).Error; err != nil {
+				return fmt.Errorf("v12→v13: backfill %s.downloader_id: %w", table, err)
+			}
 		}
 		return nil
 	})

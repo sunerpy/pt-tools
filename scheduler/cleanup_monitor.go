@@ -505,13 +505,14 @@ func (c *CleanupMonitor) downloaderID(dlName string) *uint {
 	return &ds.ID
 }
 
-// recordsOn 把查询限定在推到这个下载器的种子记录：按下载器编号认（下载器可以改名，名字也可能被后建的下载器复用），
-// 没有编号的旧记录按名字认；查不到编号时只按名字认。
+// recordsOn 把查询限定在推到这个下载器的种子记录：按下载器编号认（下载器可以改名，名字也可能被后建的下载器复用）。
+// 没有编号的旧记录在 v13 迁移时按当时的名字补上了编号；补不上的认不出是哪个下载器的，不算（删种分不清时宁可不删）。
+// 设置里查不到这个下载器的编号时只按名字认。
 func recordsOn(q *gorm.DB, dlID *uint, dlName string) *gorm.DB {
 	if dlID == nil {
 		return q.Where("downloader_name = ?", dlName)
 	}
-	return q.Where("(downloader_id = ? OR (downloader_id IS NULL AND downloader_name = ?))", *dlID, dlName)
+	return q.Where("downloader_id = ?", *dlID)
 }
 
 func (c *CleanupMonitor) splitProtected(cfg *models.SettingsGlobal, torrents []downloader.Torrent) (protected, candidates []downloader.Torrent) {

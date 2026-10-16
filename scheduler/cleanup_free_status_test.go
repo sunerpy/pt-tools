@@ -142,3 +142,30 @@ func TestCleanup_FreeExpiredFollowsDownloaderID(t *testing.T) {
 		assert.Empty(t, deleted(cm, cfg))
 	})
 }
+
+// 没有下载器编号、升级时也补不上的旧记录认不出是哪个下载器的：不按它删任务（下载器改名、旧名字被新下载器复用时，
+// 按名字认会把旧下载器的记录算到新下载器上）。
+func TestCleanup_FreeExpiredIgnoresUnattributedLegacyRecord(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupDelFreeExpired = true
+	cfg.CleanupProtectDL = false
+	cfg.CleanupProtectHR = false
+	for _, name := range []string{"qb-old", "qb1"} { // 原来叫 qb1 的改名 qb-old，新下载器复用了 qb1
+		require.NoError(t, cm.db.Create(&models.DownloaderSetting{Name: name, Type: "qbittorrent", URL: "http://127.0.0.1:1"}).Error)
+	}
+	past := time.Now().Add(-time.Minute)
+	pushed := true
+	hash := "h1"
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "old", TorrentHash: &hash, IsPushed: &pushed,
+		DownloaderName: "qb1", IsFree: true, FreeEndTime: &past, // 没有编号
+	}).Error)
+	tor := seedingTorrent("h1", "h1", "h1", 1, 0)
+	tor.State, tor.Progress = downloader.TorrentDownloading, 0.5
+	fake.torrents = []downloader.Torrent{tor}
+
+	assert.Empty(t, cm.Preview(context.Background(), cfg)[0].Items)
+}

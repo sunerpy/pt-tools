@@ -81,7 +81,7 @@ func TestMigrationV11ToV12BackfillsFreeValidity(t *testing.T) {
 	version, err := sm.GetCurrentVersion()
 	require.NoError(t, err)
 	assert.Equal(t, CurrentSchemaVersion, version)
-	assert.Equal(t, 12, CurrentSchemaVersion)
+	assert.GreaterOrEqual(t, CurrentSchemaVersion, 12)
 
 	// 再跑一次：已经回填的行不再改（新代码写过的状态不会被旧规则覆盖）
 	require.NoError(t, db.Model(&TorrentInfo{}).Where("torrent_id = ?", "free-no-end").
