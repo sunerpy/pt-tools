@@ -26,7 +26,10 @@ func TestNewConstructors(t *testing.T) {
 	global.GlobalDB = nil
 
 	assert.NotNil(t, NewSiteService(core.NewConfigStore(nil), nil))
-	assert.NotNil(t, NewTaskService(scheduler.NewManager()))
+	// 管理器订阅了配置变更、在后台读 global.GlobalDB：测试结束时停掉，免得和后面改全局库的测试竞争
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	assert.NotNil(t, NewTaskService(mgr))
 	assert.NotNil(t, NewTorrentService(downloader.NewDownloaderManager()))
 	assert.NotNil(t, NewAuditService(db))
 	assert.NotNil(t, NewRSSCallbackActions(db, nil))
