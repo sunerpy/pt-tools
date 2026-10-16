@@ -338,7 +338,7 @@ func (c *CleanupMonitor) decide(cfg *models.SettingsGlobal, dl downloader.Downlo
 		if c.isPausedForPeerRatio(t.InfoHash) {
 			continue
 		}
-		if why := c.deleteReasons(cfg, t); len(why) > 0 {
+		if why := c.deleteReasons(cfg, t, dlName); len(why) > 0 {
 			toDelete = append(toDelete, t)
 			reasons[t.ID] = why
 		}
@@ -586,14 +586,14 @@ func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
 	return result
 }
 
-func (c *CleanupMonitor) shouldDelete(cfg *models.SettingsGlobal, t downloader.Torrent) bool {
-	return len(c.deleteReasons(cfg, t)) > 0
+func (c *CleanupMonitor) shouldDelete(cfg *models.SettingsGlobal, t downloader.Torrent, dlName string) bool {
+	return len(c.deleteReasons(cfg, t, dlName)) > 0
 }
 
 // deleteReasons 是这个种子对上的删种条件；为空时不删。条件之间按 cfg.CleanupConditionMode：or（默认）对上一个就删，
 // and 设了的都对上才删。打开了「免费到期没下完就删」时，免费期过了还没下完的直接删。
-func (c *CleanupMonitor) deleteReasons(cfg *models.SettingsGlobal, t downloader.Torrent) []string {
-	if cfg.CleanupDelFreeExpired && c.isFreeExpiredIncomplete(t) {
+func (c *CleanupMonitor) deleteReasons(cfg *models.SettingsGlobal, t downloader.Torrent, dlName string) []string {
+	if cfg.CleanupDelFreeExpired && c.isFreeExpiredIncomplete(t, dlName) {
 		return []string{"免费期过了还没下完"}
 	}
 	conds := []struct {
@@ -645,22 +645,34 @@ func (c *CleanupMonitor) isPausedForPeerRatio(infoHash string) bool {
 	return count > 0
 }
 
-// isFreeExpiredIncomplete 报告种子没下载完、免费期已经过了：免费的记录结束时间已过，或者原来免费、RSS 后来读到
-// 不再免费（free_ended_at，免费取消或提前结束）。结束时间跟着 RSS 每轮读到的详情走，免费延长了就等新的时间。
+// isFreeExpiredIncomplete 报告这个下载器里的种子没下载完、免费期已经过了：免费的记录结束时间已过，或者原来免费、
+// RSS 后来读到不再免费（free_ended_at，免费取消或提前结束）。结束时间跟着 RSS 每轮读到的详情走，免费延长了就等新的时间。
+// 只看推到这个下载器的记录（同一个哈希可能还有别的下载器、别的站点的记录），而且要每一条都免费已过：有一条还在免费期内
+// 或从来不是免费推的就不删——删种会删任务和数据，分不清时宁可不删。
 // 只认免费的记录（is_free）：以前 RSS 把半价等优惠的结束时间也记成了 free_end_time，库里留着的这类记录不当成免费到期。
 // 时间按时刻比较（julianday），不按文本：库里的时间带各自的时区
-func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent) bool {
+func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent, dlName string) bool {
 	if t.Progress >= 1.0 {
 		return false
 	}
 
 	hash := strings.ToLower(t.InfoHash)
 	now := time.Now()
-	var info models.TorrentInfo
-	err := c.db.Where("LOWER(torrent_hash) = ? AND ((is_free = ? AND free_end_time IS NOT NULL AND julianday(free_end_time) < julianday(?))"+
-		" OR (free_ended_at IS NOT NULL AND julianday(free_ended_at) <= julianday(?)))",
-		hash, true, now, now).First(&info).Error
-	return err == nil
+	var rows []struct{ Ended int }
+	err := c.db.Model(&models.TorrentInfo{}).
+		Select("CASE WHEN (is_free = ? AND free_end_time IS NOT NULL AND julianday(free_end_time) < julianday(?))"+
+			" OR (free_ended_at IS NOT NULL AND julianday(free_ended_at) <= julianday(?)) THEN 1 ELSE 0 END AS ended", true, now, now).
+		Where("LOWER(torrent_hash) = ? AND downloader_name = ?", hash, dlName).
+		Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return false
+	}
+	for _, r := range rows {
+		if r.Ended == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // 数据还被别的种子用着时，删了也腾不出空间（只删种子、保留数据）：共用这份数据的种子都在候选里时整组一起挑、空间只算一次；
