@@ -82,6 +82,9 @@ type TorrentInfo struct {
 	// FreeEndFailures 是到期处理连续失败的次数（与推送重试的 RetryCount 分开）；FreeEndAlertedAt 是已经告警的时间
 	FreeEndFailures  int        `gorm:"default:0" json:"freeEndFailures"`
 	FreeEndAlertedAt *time.Time `gorm:"default:null" json:"freeEndAlertedAt"`
+	// PushPendingAt 是承诺到期暂停的推送在加入下载器之前写下的标记：加入后补记账成功才清掉。
+	// 还留着标记说明加入后记账失败了，对账时按下载器与哈希找回任务、补记账（任务保持暂停，不自动开始）
+	PushPendingAt *time.Time `gorm:"default:null" json:"pushPendingAt"`
 }
 
 // TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）

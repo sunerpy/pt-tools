@@ -221,7 +221,8 @@ func TestPushTorrentToDownloader_SourceAndMeta(t *testing.T) {
 	restore := SwapPushDownloaderFactory(func(models.DownloaderSetting) (downloader.Downloader, error) { return dl, nil })
 	t.Cleanup(restore)
 
-	freeEnd := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	// 免费到期要在将来：已经结束的免费不再记成免费（记录按资格快照写）
+	freeEnd := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
 	data := makeSizedTorrentBytes(t, "z", gb)
 	res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
 		SiteID: "hdsky", TorrentID: "b1", TorrentData: data, DownloaderID: ds.ID, Source: "brush",
