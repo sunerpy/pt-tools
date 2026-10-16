@@ -21,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 13
+const CurrentSchemaVersion = 14
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -164,6 +164,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     13,
 		Description: "torrent_infos, torrent_info_archives: backfill downloader_id from downloader_name",
 		Up:          sm.migrateV12ToV13,
+	})
+
+	// v13 -> v14: 已推送的种子记下把它推进下载器的规则（filter_rule_id 从此每轮刷新）
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     14,
+		Description: "torrent_infos, torrent_info_archives: backfill pushed_filter_rule_id from filter_rule_id for pushed rows",
+		Up:          sm.migrateV13ToV14,
 	})
 }
 
@@ -785,6 +792,24 @@ func (sm *SchemaManager) migrateV12ToV13(db *gorm.DB) error {
 			if err := tx.Exec(`UPDATE ` + table + ` SET downloader_id = (SELECT ds.id ` + owner + `)
 				WHERE downloader_id IS NULL AND downloader_name != '' AND EXISTS (SELECT 1 ` + owner + `)`).Error; err != nil {
 				return fmt.Errorf("v12→v13: backfill %s.downloader_id: %w", table, err)
+			}
+		}
+		return nil
+	})
+}
+
+// migrateV13ToV14 给已推送的种子记下「把它推进下载器的规则」（pushed_filter_rule_id）：RSS 从此每轮按这一轮的判断刷新
+// filter_rule_id，规则命中数要按推送时的规则统计。升级前 RSS 不刷新已推送的记录，filter_rule_id 就是推送时的值，照抄；
+// 没推送的不填，已经填了的不动。
+func (sm *SchemaManager) migrateV13ToV14(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, table := range []string{"torrent_infos", "torrent_info_archives"} {
+			if !tx.Migrator().HasTable(table) || !tx.Migrator().HasColumn(table, "pushed_filter_rule_id") {
+				continue
+			}
+			if err := tx.Exec(`UPDATE ` + table + ` SET pushed_filter_rule_id = filter_rule_id
+				WHERE is_pushed = 1 AND pushed_filter_rule_id IS NULL AND filter_rule_id IS NOT NULL`).Error; err != nil {
+				return fmt.Errorf("v13→v14: backfill %s.pushed_filter_rule_id: %w", table, err)
 			}
 		}
 		return nil

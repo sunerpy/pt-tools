@@ -2472,3 +2472,31 @@ func TestApiLogFiles_BaseFilesAreNotRotated(t *testing.T) {
 	assert.True(t, active["all.log"], "页面 tail 的是 all.log")
 	assert.False(t, active["debug.log"])
 }
+
+// 已推送的种子按「把它推进下载器的规则」计数（pushed_filter_rule_id，推送时记下、之后不改）：
+// RSS 每轮刷新 filter_rule_id，免费结束或规则改了以后它会变，命中数不能跟着掉。没推送的仍按 filter_rule_id。
+func TestApiFilterRuleHits_PushedCountsPushTimeRule(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+	one, two := uint(1), uint(2)
+	pushed := true
+	create := func(id string, rule *uint, cols map[string]any) {
+		ti := models.TorrentInfo{SiteName: "a", TorrentID: id, FilterRuleID: rule}
+		require.NoError(t, global.GlobalDB.DB.Create(&ti).Error)
+		if cols != nil {
+			require.NoError(t, global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", ti.ID).Updates(cols).Error)
+		}
+	}
+	create("p1", nil, map[string]any{"is_pushed": &pushed, "pushed_filter_rule_id": one})  // 规则 1 推的，现在不再命中
+	create("p2", &two, map[string]any{"is_pushed": &pushed, "pushed_filter_rule_id": nil}) // 免费通道推的，现在命中规则 2
+	create("u1", &two, nil)                                                                // 没推送，命中规则 2
+
+	w := httptest.NewRecorder()
+	srv.apiFilterRuleHits(w, httptest.NewRequest(http.MethodGet, "/api/filter-rules/hits", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var got struct {
+		Hits map[string]int64 `json:"hits"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, map[string]int64{"1": 1, "2": 1}, got.Hits)
+}

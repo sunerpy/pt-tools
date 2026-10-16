@@ -232,7 +232,7 @@ func TestFreeEnd_ArchiveKeepsFreeStatusColumns(t *testing.T) {
 	require.NoError(t, db.DB.Create(&models.TorrentInfo{
 		SiteName: "s", TorrentID: "arch", Title: "Arch", IsCompleted: true, CreatedAt: old,
 		FreeValidity: "free_until", DetailID: "42", SourceRSSID: &rss, RequireFree: true,
-		FreeEndFailures: 3, FreeEndAlertedAt: &alerted, PushPendingAt: &pending, FreeEndedAt: &pending,
+		FreeEndFailures: 3, FreeEndAlertedAt: &alerted, PushPendingAt: &pending, FreeEndedAt: &pending, PushedFilterRuleID: &rss,
 	}).Error)
 
 	m.archiveOldTorrents()
@@ -248,6 +248,8 @@ func TestFreeEnd_ArchiveKeepsFreeStatusColumns(t *testing.T) {
 	assert.NotNil(t, a.FreeEndAlertedAt)
 	assert.NotNil(t, a.PushPendingAt)
 	assert.NotNil(t, a.FreeEndedAt)
+	require.NotNil(t, a.PushedFilterRuleID)
+	assert.Equal(t, rss, *a.PushedFilterRuleID)
 }
 
 // 计划暂停时间到了就处理，即使记录已经不是免费（RSS 读到免费被取消时把计划改成现在）。

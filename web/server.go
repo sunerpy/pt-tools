@@ -1539,7 +1539,8 @@ func (s *Server) apiTaskStats(w http.ResponseWriter, r *http.Request) {
 
 // 过滤规则命中数：哪条规则真的把种子下下来了。
 //
-// TorrentInfo.FilterRuleID 记的是命中的规则，所以这是一次 GROUP BY 就能拿到的数；
+// 已推送的按 PushedFilterRuleID（把它推进下载器的规则，推送时记下）计；没推送的按 FilterRuleID（RSS 最近一次判断命中的规则）。
+// FilterRuleID 每轮刷新，免费结束或规则改了以后会变，已推送的不能按它数。
 // 规则列表接口回的是 []FilterRule，不好塞这个额外字段，于是单独开一个只回计数的接口。
 func (s *Server) apiFilterRuleHits(w http.ResponseWriter, r *http.Request) {
 	type row struct {
@@ -1547,10 +1548,11 @@ func (s *Server) apiFilterRuleHits(w http.ResponseWriter, r *http.Request) {
 		Hits         int64 `json:"hits"`
 	}
 	var rows []row
+	const rule = "CASE WHEN is_pushed = 1 THEN pushed_filter_rule_id ELSE filter_rule_id END"
 	err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
-		Select("filter_rule_id, COUNT(*) AS hits").
-		Where("filter_rule_id IS NOT NULL").
-		Group("filter_rule_id").
+		Select(rule + " AS filter_rule_id, COUNT(*) AS hits").
+		Where(rule + " IS NOT NULL").
+		Group(rule).
 		Scan(&rows).Error
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
