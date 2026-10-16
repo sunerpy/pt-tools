@@ -766,19 +766,24 @@ func (sm *SchemaManager) migrateV11ToV12(db *gorm.DB) error {
 
 // migrateV12ToV13 给没有下载器编号的旧种子记录（2026-01 以前推送的）按现在的下载器名字补上编号：下载器可以改名、名字也可能
 // 被后建的下载器复用，删种从此只按编号认下载器。名字对不上任何下载器的留空（认不出是哪个下载器的），已有编号的不动。
+// 叫这个名字的下载器是在推送以后才建的，说明名字被复用过（原来的下载器改了名），记录不是它的，也留空；
+// 没有推送时间时按记录的创建时间比，两样都没有的留空。时间按时刻比较（julianday）。
 func (sm *SchemaManager) migrateV12ToV13(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&DownloaderSetting{}) {
 		return nil
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
-		for _, table := range []string{"torrent_infos", "torrent_info_archives"} {
+		for table, recordTime := range map[string]string{
+			"torrent_infos":         "COALESCE(torrent_infos.push_time, torrent_infos.created_at)",
+			"torrent_info_archives": "COALESCE(torrent_info_archives.push_time, torrent_info_archives.original_created_at)",
+		} {
 			if !tx.Migrator().HasTable(table) || !tx.Migrator().HasColumn(table, "downloader_id") {
 				continue
 			}
-			if err := tx.Exec(`UPDATE ` + table + ` SET downloader_id =
-				(SELECT ds.id FROM downloader_settings ds WHERE ds.name = ` + table + `.downloader_name)
-				WHERE downloader_id IS NULL AND downloader_name != '' AND
-				EXISTS (SELECT 1 FROM downloader_settings ds WHERE ds.name = ` + table + `.downloader_name)`).Error; err != nil {
+			owner := `FROM downloader_settings ds WHERE ds.name = ` + table + `.downloader_name
+				AND julianday(ds.created_at) <= julianday(` + recordTime + `)`
+			if err := tx.Exec(`UPDATE ` + table + ` SET downloader_id = (SELECT ds.id ` + owner + `)
+				WHERE downloader_id IS NULL AND downloader_name != '' AND EXISTS (SELECT 1 ` + owner + `)`).Error; err != nil {
 				return fmt.Errorf("v12→v13: backfill %s.downloader_id: %w", table, err)
 			}
 		}
