@@ -144,26 +144,37 @@ var (
 	errStagedHeld    = errors.New("暂存文件暂不推送")
 )
 
-// lookup 找暂存文件对应的记录：先按哈希，查不到再按文件名里的种子编号（取详情阶段刚下载、哈希还没写进记录的文件）。
+// lookup 找暂存文件对应的记录。文件名（<站点>-<种子编号>.torrent）是取详情阶段按记录起的，按它取记录：
+// 同一个哈希还可能有别的入口留下、编号不同、策略更宽的记录，按哈希随便取一条会用错下载策略。
+// 文件名里没有编号时才按哈希找，对上不止一条就不推（分不清该用哪条的策略）。文件与记录的哈希是否一致由调用方核对。
 func (sp *stagedPush) lookup(filePath string) (rec *models.TorrentInfo, hash string, err error) {
 	hash, err = qbit.ComputeTorrentHashWithPath(filePath)
 	if err != nil {
 		return nil, "", fmt.Errorf("计算种子哈希失败: %w", err)
 	}
-	rec, err = global.GlobalDB.GetTorrentBySiteAndHash(string(sp.siteName), hash)
-	if err != nil {
-		return nil, hash, fmt.Errorf("查询种子信息失败: %w", err)
-	}
-	if rec != nil {
+	if id := torrentIDFromStagedName(filePath, sp.siteName); id != "" {
+		rec, err = global.GlobalDB.GetTorrentBySiteAndID(string(sp.siteName), id)
+		if err != nil {
+			return nil, hash, fmt.Errorf("查询种子信息失败: %w", err)
+		}
 		return rec, hash, nil
 	}
-	if id := torrentIDFromStagedName(filePath, sp.siteName); id != "" {
-		byName, nameErr := global.GlobalDB.GetTorrentBySiteAndID(string(sp.siteName), id)
-		if nameErr == nil && byName != nil && byName.SourceRSSID != nil && *byName.SourceRSSID != sp.rss.ID && rssActive(*byName.SourceRSSID) {
-			return byName, hash, nil
-		}
+	var rows []models.TorrentInfo
+	if err = global.GlobalDB.DB.Where("site_name = ? AND torrent_hash = ?", string(sp.siteName), hash).Limit(2).Find(&rows).Error; err != nil {
+		return nil, hash, fmt.Errorf("查询种子信息失败: %w", err)
 	}
-	return nil, hash, nil
+	switch len(rows) {
+	case 0:
+		return nil, hash, nil
+	case 1:
+		return &rows[0], hash, nil
+	}
+	return nil, hash, fmt.Errorf("%w: 同一个哈希有多条种子记录，分不清用哪条的下载策略", errStagedHeld)
+}
+
+// matchesFile 报告记录里的哈希就是这个暂存文件的哈希。
+func matchesFile(t *models.TorrentInfo, hash string) bool {
+	return t.TorrentHash != nil && strings.EqualFold(*t.TorrentHash, hash)
 }
 
 // torrentIDFromStagedName 从暂存文件名（<站点>-<种子编号>.torrent）取种子编号。
@@ -224,6 +235,14 @@ func (sp *stagedPush) processFile(ctx context.Context, filePath string) error {
 		sLogger().Infof("种子已标记跳过，删除暂存文件: %s", filePath)
 		_ = os.Remove(filePath)
 		sp.releaseOwnership(torrent.ID)
+		return nil
+	}
+	if !matchesFile(torrent, torrentHash) {
+		// 文件不是这条记录记下的那个种子（站点更新过种子文件，或者下载后哈希没写进记录）：不推，删掉，下一轮重新下载
+		sLogger().Warnf("暂存文件与种子记录的哈希对不上，删除后下一轮重新下载: %s, hash: %s", filePath, torrentHash)
+		if err = os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("删除暂存文件失败: %w", err)
+		}
 		return nil
 	}
 

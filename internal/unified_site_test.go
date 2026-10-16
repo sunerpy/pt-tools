@@ -105,7 +105,8 @@ func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
 	h, err := qbit.ComputeTorrentHashWithPath(p)
 	require.NoError(t, err)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: string(models.SiteGroup("springsunday")), TorrentHash: &h, IsPushed: &pushed}
+	// 暂存文件按文件名（<站点>-<种子编号>.torrent）对应记录：记录的种子编号是 a
+	ti := &models.TorrentInfo{SiteName: string(models.SiteGroup("springsunday")), TorrentID: "a", TorrentHash: &h, IsPushed: &pushed}
 	require.NoError(t, db.UpsertTorrent(ti))
 	var added atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
