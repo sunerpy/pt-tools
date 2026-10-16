@@ -1732,25 +1732,29 @@ func parseDiscountEndTimeFromOnmouseover(onmouseover string) (time.Time, error) 
 	return parseDiscountEndTime(matches[1])
 }
 
-// discountEndTimeLayouts 是列表页优惠结束时间的写法。都带年份：不带年份的写法定不下时刻，按无法解析处理。
+// discountEndTimeLayouts 是列表页优惠结束时间不带时区的写法，按北京时间解释（与详情页解析一致；
+// time.Parse 会当成 UTC，结束时刻晚 8 小时）。都带年份：不带年份的写法定不下时刻，按无法解析处理。
 var discountEndTimeLayouts = []string{
 	"2006-01-02 15:04:05",
 	"2006-01-02 15:04",
 	"2006/01/02 15:04:05",
 	"2006/01/02 15:04",
-	time.RFC3339,
 }
 
 var errDiscountEndTimeFormat = errors.New("unrecognized discount end time format")
 
 // parseDiscountEndTime 解析列表页里的优惠结束时间：空值返回零时间且没有错误（没有结束时间）；非空但无法解析返回错误。
+// 带时区的 RFC3339 照原样，不带时区的写法按北京时间。
 func parseDiscountEndTime(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return time.Time{}, nil
 	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
 	for _, layout := range discountEndTimeLayouts {
-		if t, err := time.Parse(layout, value); err == nil {
+		if t, err := ParseTimeInCST(layout, value); err == nil {
 			return t, nil
 		}
 	}

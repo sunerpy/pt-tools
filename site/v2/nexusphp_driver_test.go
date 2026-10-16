@@ -2229,3 +2229,32 @@ func TestNexusPHPDriver_ParseSearch_DiscountEndUnparsable(t *testing.T) {
 		assert.True(t, it.FetchedAt.IsZero(), "搜索结果不写 FetchedAt")
 	}
 }
+
+// 列表页的优惠结束时间不带时区，是站点显示的北京时间，和详情页一样按北京时间解析；
+// 当成 UTC 会让结束时刻晚 8 小时，已经结束的免费在列表结果里看起来还有 8 小时
+func TestNexusPHPDriver_ParseSearch_DiscountEndTimeIsCST(t *testing.T) {
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://example.org", Cookie: "c=1"})
+	row := func(id, cell string) string {
+		return `<tr><td><img alt="Movie" /></td><td><a href="details.php?id=` + id + `">T` + id + `</a>` + cell +
+			`</td><td></td><td><span>2024-01-01 00:00:00</span></td><td>1 GB</td><td>1</td><td>0</td><td>0</td></tr>`
+	}
+	html := `<html><body><table class="torrents"><tbody><tr><td>Header</td></tr>` +
+		row("1", `<img class="pro_free" src="pic/trans.gif" alt="Free" /><span class="free_end_time" title="2026-10-20 12:00:00">3天</span>`) +
+		row("2", `<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-10-21 08:30:00&quot;&gt;1天&lt;/span&gt;', 'trail', false)" />`) +
+		row("3", `<img class="pro_free" src="pic/trans.gif" alt="Free" /><span class="free_end_time" title="2026-10-20T12:00:00Z">3天</span>`) +
+		`</tbody></table></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+
+	items, err := driver.ParseSearch(NexusPHPResponse{Document: doc})
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.True(t, time.Date(2026, 10, 20, 12, 0, 0, 0, CSTLocation).Equal(items[0].DiscountEndTime), "got %s", items[0].DiscountEndTime.UTC())
+	assert.True(t, time.Date(2026, 10, 21, 8, 30, 0, 0, CSTLocation).Equal(items[1].DiscountEndTime), "got %s", items[1].DiscountEndTime.UTC())
+	// 带时区的写法照原样
+	assert.True(t, time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC).Equal(items[2].DiscountEndTime), "got %s", items[2].DiscountEndTime.UTC())
+
+	// 结束时刻是北京时间 2026-10-20 12:00：北京时间 13:00（UTC 05:00）时已经结束
+	afterEnd := time.Date(2026, 10, 20, 5, 0, 0, 0, time.UTC)
+	assert.Equal(t, FreeNotFree, items[0].Promotion(afterEnd).Validity)
+}
