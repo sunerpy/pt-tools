@@ -85,6 +85,9 @@ type TorrentInfo struct {
 	// PushPendingAt 是承诺到期暂停的推送在加入下载器之前写下的标记：加入后补记账成功才清掉。
 	// 还留着标记说明加入后记账失败了，对账时按下载器与哈希找回任务、补记账（任务保持暂停，不自动开始）
 	PushPendingAt *time.Time `gorm:"default:null" json:"pushPendingAt"`
+	// FreeEndedAt 是已推送、原来免费的种子后来读到「不免费」时记下的免费结束时间（不晚于读到的时间）。
+	// 刷新资格会把 is_free、free_end_time 改成当前事实；自动删种的「免费到期未完成删除」靠它认出免费已经结束
+	FreeEndedAt *time.Time `gorm:"default:null" json:"freeEndedAt"`
 }
 
 // TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）
@@ -141,6 +144,7 @@ type TorrentInfoArchive struct {
 	FreeEndAlertedAt *time.Time `json:"freeEndAlertedAt"`
 	DetailID         string     `gorm:"size:64;default:''" json:"detailId"`
 	PushPendingAt    *time.Time `json:"pushPendingAt"`
+	FreeEndedAt      *time.Time `json:"freeEndedAt"`
 	ArchivedAt       time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
 }
 

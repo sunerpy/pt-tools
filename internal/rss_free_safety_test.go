@@ -654,6 +654,7 @@ func TestRSSFreeSafety_PushedMonitoredRefreshMovesPausePlan(t *testing.T) {
 	require.NotNil(t, ti.PausePlannedAt)
 	assert.False(t, ti.PausePlannedAt.After(time.Now()), "不再免费：计划暂停改成现在")
 	assert.False(t, ti.PausePlannedAt.Before(before.Add(-time.Second)))
+	require.NotNil(t, ti.FreeEndedAt, "原来免费、现在不免费：记下免费结束时间")
 	assert.Len(t, r.dls["qb"].addCalls(), 1, "只是刷新资格，不会再推")
 }
 

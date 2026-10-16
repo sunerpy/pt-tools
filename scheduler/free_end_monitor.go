@@ -1153,6 +1153,7 @@ func (m *FreeEndMonitor) archiveOldTorrents() {
 			FreeEndAlertedAt:  t.FreeEndAlertedAt,
 			DetailID:          t.DetailID,
 			PushPendingAt:     t.PushPendingAt,
+			FreeEndedAt:       t.FreeEndedAt,
 		}
 
 		err := m.db.Transaction(func(tx *gorm.DB) error {

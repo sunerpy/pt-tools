@@ -622,33 +622,53 @@ func notOlderSnapshot(q *gorm.DB, snap v2.PromotionSnapshot) *gorm.DB {
 	return q.Where("(free_verified_at IS NULL OR julianday(free_verified_at) <= julianday(?))", DBTime(snap.VerifiedAt))
 }
 
-// monitoredPushed 报告这是已推送、正受到期监控的种子：RSS 看到它时还要刷新资格（见 refreshMonitoredRecord）。
+// monitoredPushed 报告这是已推送、正受到期监控的种子：刷新资格时还要改计划暂停（见 refreshPushedRecord）。
 func monitoredPushed(t *models.TorrentInfo) bool {
 	return t != nil && isPushed(t) && t.PauseOnFreeEnd && !t.IsCompleted && !t.IsPausedBySystem && t.DownloaderTaskID != ""
 }
 
-// refreshMonitoredRecord 用这一轮读到的详情刷新已推送、受到期监控的种子：资格整套写入；计划暂停时间按新的结束时间算
-// （免费延长就推后，缩短就提前），不再免费或结束时间读不出时改为现在，监控器马上暂停；长期免费的不再需要暂停。
-// 改完交给监控器按新的时刻重新预约。
-func refreshMonitoredRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, now time.Time) error {
+// refreshPushedRecord 用这一轮读到的详情刷新已推送的种子：资格整套写入，推送时的下载策略不改。自动删种的
+// 「免费到期未完成删除」按刷新后的事实处理：免费延长就等新的结束时间；原来免费、现在不免费的记下免费结束时间
+// （free_ended_at，不晚于这次读到的时间），再变回免费时清掉。
+// 受到期监控的还改计划暂停：按新的结束时间算（免费延长就推后，缩短就提前），不再免费或结束时间读不出时改为现在，
+// 监控器马上暂停；长期免费的不再需要暂停。改完交给监控器按新的时刻重新预约。
+func refreshPushedRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, now time.Time) error {
 	cols := SnapshotColumns(snap)
 	cols["is_expired"] = promotionEnded(snap)
 	cols["last_check_time"] = now
-	var planned *time.Time
-	switch snap.Validity {
-	case v2.FreeUntil:
-		p := DBTime(plannedPauseAt(*snap.EndsAt))
-		planned = &p
-	case v2.FreePermanent:
-	default:
-		p := DBTime(now)
-		planned = &p
+	switch {
+	case snap.Validity != v2.FreeNotFree:
+		cols["free_ended_at"] = nil
+	case rec.FreeEndedAt == nil && rec.IsFree:
+		ended := snap.VerifiedAt
+		if ended.IsZero() {
+			ended = now
+		}
+		if rec.FreeEndTime != nil && rec.FreeEndTime.Before(ended) {
+			ended = *rec.FreeEndTime
+		}
+		cols["free_ended_at"] = DBTime(ended)
 	}
-	cols["pause_planned_at"] = planned
+	monitored := monitoredPushed(rec)
+	q := global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID)
+	var planned *time.Time
+	if monitored {
+		switch snap.Validity {
+		case v2.FreeUntil:
+			p := DBTime(plannedPauseAt(*snap.EndsAt))
+			planned = &p
+		case v2.FreePermanent:
+		default:
+			p := DBTime(now)
+			planned = &p
+		}
+		cols["pause_planned_at"] = planned
+		// 监控器已经暂停或种子已完成时不再改计划
+		q = q.Where("is_paused_by_system = ? AND is_completed = ?", false, false)
+	}
 	// 只让更新的读取写回：两条 RSS 同时刷新同一条记录时，较旧的「免费到某时」不能盖掉较新的「已不免费」
-	res := notOlderSnapshot(global.GlobalDB.DB.Model(&models.TorrentInfo{}).
-		Where("id = ? AND is_paused_by_system = ? AND is_completed = ?", rec.ID, false, false), snap).Updates(cols)
-	if res.Error != nil || res.RowsAffected == 0 {
+	res := notOlderSnapshot(q, snap).Updates(cols)
+	if res.Error != nil || res.RowsAffected == 0 || !monitored {
 		return res.Error
 	}
 	if planned != nil && (rec.PausePlannedAt == nil || planned.Before(*rec.PausePlannedAt)) {

@@ -77,23 +77,57 @@ func TestRSSFreeSafety_SkippedRecordRefreshedEveryRound(t *testing.T) {
 	})
 }
 
-// 已推送、不受到期监控的记录不再读详情：免费到期后它要保持「免费、结束时间已过」，自动删种的「免费到期未完成删除」
-// 按这个认出免费已过、没下完的任务（刷成「不免费」就认不出，任务会继续计费下载）。
-func TestRSSFreeSafety_PushedUnmonitoredKeepsFreeEnd(t *testing.T) {
+// 已推送、不受到期监控的记录每轮也读详情、整套刷新资格：免费缩短、延长、取消后，自动删种的「免费到期未完成删除」
+// 按新的事实处理（以前留着推送时的结束时间：取消或缩短时该删不删、继续计费下载，延长时提前误删）。
+func TestRSSFreeSafety_PushedRecordRefreshedEveryRound(t *testing.T) {
 	r := newRSSRig(t)
 	feed := newFeedServer(t, "q1")
 	rss := r.addRSS(feed, models.RSSConfig{Name: "free", Tag: "movie", IntervalMinutes: 10})[0]
-	end := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
-	r.site.set("q1", v2.TorrentItem{DiscountLevel: v2.DiscountFree, DiscountEndTime: end})
+	at := func(d time.Duration) time.Time { return time.Now().Add(d).UTC().Truncate(time.Second) }
+	setEnd := func(end time.Time) {
+		r.site.set("q1", v2.TorrentItem{DiscountLevel: v2.DiscountFree, DiscountEndTime: end})
+	}
+
+	setEnd(at(2 * time.Hour))
 	r.round(rss)
 	require.True(t, pushedOf(r.record("q1")))
 	calls := r.site.calls("q1")
 
-	r.site.set("q1", v2.TorrentItem{DiscountLevel: v2.DiscountNone})
+	shorter := at(time.Hour)
+	setEnd(shorter)
 	r.round(rss)
-	assert.Equal(t, calls, r.site.calls("q1"), "已推送、不受到期监控的记录不再读详情")
+	assert.Greater(t, r.site.calls("q1"), calls, "已推送的记录这一轮也读了详情")
 	ti := r.record("q1")
-	assert.True(t, ti.IsFree)
 	require.NotNil(t, ti.FreeEndTime)
-	assert.True(t, ti.FreeEndTime.Equal(end), "保留推送时的免费结束时间")
+	assert.True(t, ti.FreeEndTime.Equal(shorter), "免费缩短：按新的结束时间")
+
+	longer := at(5 * time.Hour)
+	setEnd(longer)
+	r.round(rss)
+	ti = r.record("q1")
+	require.NotNil(t, ti.FreeEndTime)
+	assert.True(t, ti.FreeEndTime.Equal(longer), "免费延长：按新的结束时间")
+
+	assert.Nil(t, ti.FreeEndedAt)
+
+	r.site.set("q1", v2.TorrentItem{DiscountLevel: v2.DiscountNone})
+	before := time.Now()
+	r.round(rss)
+	ti = r.record("q1")
+	assert.Equal(t, string(v2.FreeNotFree), ti.FreeValidity)
+	assert.False(t, ti.IsFree)
+	require.NotNil(t, ti.FreeEndedAt, "原来免费、现在不免费：记下免费结束时间，删种按它认")
+	assert.False(t, ti.FreeEndedAt.Before(before.Add(-time.Second)))
+	assert.False(t, ti.FreeEndedAt.After(time.Now()))
+	ended := *ti.FreeEndedAt
+
+	r.round(rss)
+	ti = r.record("q1")
+	require.NotNil(t, ti.FreeEndedAt)
+	assert.True(t, ti.FreeEndedAt.Equal(ended), "之后还是不免费：结束时间不往后挪")
+
+	setEnd(at(3 * time.Hour))
+	r.round(rss)
+	assert.Nil(t, r.record("q1").FreeEndedAt, "又变回免费：清掉")
+	assert.Len(t, r.dls["qb"].addCalls(), 1, "只是刷新资格，不会再推")
 }

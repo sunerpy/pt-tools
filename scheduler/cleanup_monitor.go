@@ -645,17 +645,21 @@ func (c *CleanupMonitor) isPausedForPeerRatio(infoHash string) bool {
 	return count > 0
 }
 
-// isFreeExpiredIncomplete 报告种子没下载完、免费期已经过了。只认免费的记录（is_free）：以前 RSS 把半价等优惠的
-// 结束时间也记成了 free_end_time，库里留着的这类记录不当成免费到期
+// isFreeExpiredIncomplete 报告种子没下载完、免费期已经过了：免费的记录结束时间已过，或者原来免费、RSS 后来读到
+// 不再免费（free_ended_at，免费取消或提前结束）。结束时间跟着 RSS 每轮读到的详情走，免费延长了就等新的时间。
+// 只认免费的记录（is_free）：以前 RSS 把半价等优惠的结束时间也记成了 free_end_time，库里留着的这类记录不当成免费到期。
+// 时间按时刻比较（julianday），不按文本：库里的时间带各自的时区
 func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent) bool {
 	if t.Progress >= 1.0 {
 		return false
 	}
 
 	hash := strings.ToLower(t.InfoHash)
+	now := time.Now()
 	var info models.TorrentInfo
-	err := c.db.Where("LOWER(torrent_hash) = ? AND is_free = ? AND free_end_time IS NOT NULL AND free_end_time < ?",
-		hash, true, time.Now()).First(&info).Error
+	err := c.db.Where("LOWER(torrent_hash) = ? AND ((is_free = ? AND free_end_time IS NOT NULL AND julianday(free_end_time) < julianday(?))"+
+		" OR (free_ended_at IS NOT NULL AND julianday(free_ended_at) <= julianday(?)))",
+		hash, true, now, now).First(&info).Error
 	return err == nil
 }
 
