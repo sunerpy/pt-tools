@@ -538,8 +538,9 @@ func (c *CleanupMonitor) splitProtected(cfg *models.SettingsGlobal, torrents []d
 		if cfg.CleanupProtectHR {
 			if hrInfo, ok := hrInfoMap[strings.ToLower(t.InfoHash)]; ok && hrInfo.HasHR {
 				requiredSeedTimeS := int64(hrInfo.HRSeedTimeH) * 3600
-				if requiredSeedTimeS > 0 && t.SeedingTime < requiredSeedTimeS {
-					c.logger.Debugf("[自动删种] H&R 保护: %s (需做种%dh, 已做种%.1fh)",
+				// 要求未知（站点定义里没有、站点设置也没填）时按没做满处理，一律保护（#727，和刷流的删种规则一致）
+				if requiredSeedTimeS <= 0 || t.SeedingTime < requiredSeedTimeS {
+					c.logger.Debugf("[自动删种] H&R 保护: %s (需做种%dh（0 为要求未知）, 已做种%.1fh)",
 						t.Name, hrInfo.HRSeedTimeH, float64(t.SeedingTime)/3600)
 					protected = append(protected, t)
 					continue
@@ -575,11 +576,19 @@ type hrInfo struct {
 func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
 	result := make(map[string]hrInfo)
 
-	siteDefMap := make(map[string]*v2.SiteDefinition)
+	defs := make(map[string]*v2.SiteDefinition)
 	for _, def := range v2.GetDefinitionRegistry().GetAll() {
-		if def.HREnabled {
-			siteDefMap[def.ID] = def
-		}
+		defs[def.ID] = def
+	}
+	// 站点设置里填的 H&R 做种要求（#727）：站点定义里没有时用它
+	settingH := make(map[string]int)
+	var settings []struct {
+		Name        string
+		HRSeedTimeH int
+	}
+	c.db.Model(&models.SiteSetting{}).Select("name, hr_seed_time_h").Where("hr_seed_time_h > 0").Scan(&settings)
+	for _, s := range settings {
+		settingH[s.Name] = s.HRSeedTimeH
 	}
 
 	var records []struct {
@@ -596,11 +605,18 @@ func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
 
 	for _, r := range records {
 		hash := strings.ToLower(r.TorrentHash)
-		if r.HasHR {
-			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: r.HRSeedTimeH}
-		} else if def, ok := siteDefMap[r.SiteName]; ok {
-			// Use per-torrent size-based calculation when available
-			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: def.CalcHRSeedTimeH(r.TorrentSize)}
+		def := defs[r.SiteName]
+		switch {
+		case r.HasHR:
+			h := r.HRSeedTimeH
+			if h <= 0 {
+				// 记录上没记下要求：按站点定义算，定义里没有时用站点设置（记录写成以后才填的设置也算）
+				h = v2.ResolveHRSeedTimeH(def, r.TorrentSize, settingH[r.SiteName])
+			}
+			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: h}
+		case def != nil && def.HREnabled:
+			// 整站 H&R：按体积算要求
+			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: v2.ResolveHRSeedTimeH(def, r.TorrentSize, settingH[r.SiteName])}
 		}
 	}
 	return result
