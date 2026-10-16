@@ -346,8 +346,17 @@ func (sp *stagedPush) revalidateSnapshot(ctx context.Context, rec models.Torrent
 	s := detailSnapshot(sp.siteName, rec.TorrentID, item, requestedAt)
 	cols := SnapshotColumns(s)
 	cols["is_expired"] = promotionEnded(s)
-	if err := notOlderSnapshot(global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID), s).Updates(cols).Error; err != nil {
-		sLogger().Warnf("[暂存推送] 写回资格失败 (ID:%d): %v", rec.ID, err)
+	res := notOlderSnapshot(global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID), s).Updates(cols)
+	if res.Error != nil {
+		sLogger().Warnf("[暂存推送] 写回资格失败 (ID:%d): %v", rec.ID, res.Error)
+	} else if res.RowsAffected == 0 {
+		// 库里已经有更新的读取（另一条 RSS 同时读到了）：按库里的推送，不用这份较旧的
+		var cur models.TorrentInfo
+		if err := global.GlobalDB.DB.First(&cur, rec.ID).Error; err == nil {
+			sLogger().Infof("[暂存推送] 库里有更新的资格读取，按它推送: site=%s torrent_id=%s", sp.siteName, rec.TorrentID)
+			return snapshotFromRecord(cur)
+		}
+		return old
 	}
 	sLogger().Infof("[暂存推送] 已重新验证资格: site=%s torrent_id=%s source_rss_id=%d result=%s",
 		sp.siteName, rec.TorrentID, sp.rss.ID, s.Validity)

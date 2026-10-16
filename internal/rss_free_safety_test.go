@@ -656,3 +656,38 @@ func TestRSSFreeSafety_PushedMonitoredRefreshMovesPausePlan(t *testing.T) {
 	assert.False(t, ti.PausePlannedAt.Before(before.Add(-time.Second)))
 	assert.Len(t, r.dls["qb"].addCalls(), 1, "只是刷新资格，不会再推")
 }
+
+// 推送前重新读到的资格比库里的还旧（读的同时另一条 RSS 写进了更新的「已不免费」）：按库里更新的推送，不加入下载器。
+func TestRSSFreeSafety_RevalidationOlderThanStoredIsNotUsed(t *testing.T) {
+	r := newRSSRig(t)
+	require.NoError(t, core.NewConfigStore(r.db).SaveGlobalSettings(models.SettingsGlobal{
+		DownloadDir: r.base, DefaultIntervalMinutes: 10, DefaultEnabled: true, MaxRetry: 3,
+		CleanupDiskProtect: true, CleanupMinDiskSpaceGB: 10,
+	}))
+	feed := newFeedServer(t, "o2")
+	rss := r.addRSS(feed, models.RSSConfig{Name: "free", Tag: "movie", IntervalMinutes: 10})[0]
+	r.dls["qb"].setFree(5 * gb)
+	r.site.set("o2", freeUntil(48*time.Hour))
+	r.round(rss)
+	require.True(t, r.staged(rss, "o2"))
+	r.dls["qb"].setFree(1 << 50)
+
+	attempt := time.Now()
+	revalidate := func(ctx context.Context, rec models.TorrentInfo) (*v2.TorrentItem, error) {
+		// 这一次读详情的同时，另一条 RSS 读到了更新的「已不免费」并先写进了库
+		require.NoError(t, r.db.DB.Model(&models.TorrentInfo{}).Where("id = ?", rec.ID).Updates(map[string]any{
+			"is_free": false, "free_level": "NONE", "free_end_time": nil, "free_validity": "not_free",
+			"free_verified_at": DBTime(attempt.Add(2 * time.Second)),
+		}).Error)
+		older := freeUntil(48 * time.Hour)
+		older.ID = rec.TorrentID
+		older.FetchedAt = attempt.Add(time.Second) // 晚于这一轮开始，早于库里那次
+		return &older, nil
+	}
+	require.NoError(t, ProcessTorrentsWithDownloaderByRSS(WithRSSAttempt(context.Background(), attempt), rss,
+		r.stagingDir(rss), rss.Category, rss.Tag, r.site.SiteGroup(), revalidate))
+
+	assert.Empty(t, r.dls["qb"].addCalls(), "较旧的「免费到某时」不能用来推送")
+	ti := r.record("o2")
+	assert.Equal(t, string(v2.FreeNotFree), ti.FreeValidity, "库里更新的读取没被盖掉")
+}
