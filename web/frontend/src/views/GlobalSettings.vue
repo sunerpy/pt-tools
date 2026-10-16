@@ -484,7 +484,7 @@ async function save() {
               :disabled="reportLoadFailed"
               data-testid="daily-report-enabled" />
             <div class="field-tip">
-              每天在设定时刻（再错开几分钟）把当天各站的上传、下载、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道
+              每天在设定时刻（再错开几分钟）把当天各站的上传、下载（计费）、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道
             </div>
           </el-form-item>
           <div class="field-row">

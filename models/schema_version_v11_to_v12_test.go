@@ -35,8 +35,10 @@ func TestMigrationV11ToV12BackfillsFreeValidity(t *testing.T) {
 	pushed := true
 	rows := []TorrentInfo{
 		{SiteName: "s", TorrentID: "free-end", IsFree: true, FreeLevel: "FREE", FreeEndTime: &end, DownloadSource: "free_download"},
-		{SiteName: "s", TorrentID: "free-no-end", IsFree: true, FreeLevel: "FREE", DownloadSource: "free_download",
-			IsPushed: &pushed, DownloaderTaskID: "abc", PauseOnFreeEnd: true},
+		{
+			SiteName: "s", TorrentID: "free-no-end", IsFree: true, FreeLevel: "FREE", DownloadSource: "free_download",
+			IsPushed: &pushed, DownloaderTaskID: "abc", PauseOnFreeEnd: true,
+		},
 		{SiteName: "s", TorrentID: "not-free", IsFree: false, FreeLevel: "PERCENT_50", DownloadSource: "free_download"},
 		{SiteName: "s", TorrentID: "rule-strict", IsFree: true, FreeLevel: "FREE", DownloadSource: "filter_rule", FilterRuleID: &strict.ID},
 		{SiteName: "s", TorrentID: "rule-loose", IsFree: false, DownloadSource: "filter_rule", FilterRuleID: &loose.ID},
