@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.32](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.31...v1.0.0-rc.32) (2026-10-16)
+
+
+### Bug Fixes
+
+* **push:** 暂存按文件名对应记录、计划暂停已到不开始、每轮刷新已有记录 ([#732](https://github.com/sunerpy/pt-tools/issues/732)) ([0b4e3b8](https://github.com/sunerpy/pt-tools/commit/0b4e3b8c669dfead8a088b085ac67e7d528c4136))
+
 ## [1.0.0-rc.31](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.30...v1.0.0-rc.31) (2026-10-16)
 
 
