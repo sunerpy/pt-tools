@@ -377,9 +377,9 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 
 	// 承诺到期暂停的推送：加入前写下标记（下载器、策略与快照），加入后记账失败时对账能找回任务
 	if record && pausePromised {
-		if err := markPushPending(req, target, torrentHash, snap); err != nil {
+		if markErr := markPushPending(req, target, torrentHash, snap); markErr != nil {
 			release()
-			return nil, fmt.Errorf("写入推送标记失败: %w", err)
+			return nil, fmt.Errorf("写入推送标记失败: %w", markErr)
 		}
 	}
 
@@ -484,9 +484,9 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	case decision.KeepPaused:
 		res.Status, res.Message = PushStatusPushedPaused, decision.Reason
 	case startAfter:
-		if err := dl.ResumeTorrent(taskID); err != nil {
-			sLogger().Warnf("[PushTorrent] 种子已暂停加入并登记了免费结束监控，但开始下载失败: site=%s, id=%s, %v", req.SiteID, req.TorrentID, err)
-			res.Status, res.Message = PushStatusPushedPaused, fmt.Sprintf("已暂停加入，开始下载失败: %v", err)
+		if resumeErr := dl.ResumeTorrent(taskID); resumeErr != nil {
+			sLogger().Warnf("[PushTorrent] 种子已暂停加入并登记了免费结束监控，但开始下载失败: site=%s, id=%s, %v", req.SiteID, req.TorrentID, resumeErr)
+			res.Status, res.Message = PushStatusPushedPaused, fmt.Sprintf("已暂停加入，开始下载失败: %v", resumeErr)
 		}
 	}
 	return res, nil
