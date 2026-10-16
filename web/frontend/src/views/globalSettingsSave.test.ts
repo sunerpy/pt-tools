@@ -151,3 +151,17 @@ describe("系统设置：两步保存分开报告", () => {
     expect(api.saveAttendance).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("系统设置：免费结束提前量", () => {
+  it("提前量是 0 时提示可能多出计费下载量，改成 5 以后不再提示", async () => {
+    await mountLoaded();
+    expect(document.querySelector("[data-testid=gs-advance-zero]")).toBeTruthy();
+    view!.unmount();
+    api.getGlobal.mockResolvedValue({ ...structuredClone(SETTINGS), free_end_advance_minutes: 5 });
+    await mountPage();
+    await vi.waitFor(() => expect(api.getGlobal).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=gs-advance-zero]")).toBeNull(),
+    );
+  });
+});

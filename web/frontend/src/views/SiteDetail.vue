@@ -1574,11 +1574,16 @@ function ruleNameOf(id: number): string {
           </el-radio-group>
           <div class="field-tip">
             <strong>智能</strong>：没规则就只下免费种，有规则就只下命中的。全局大小上限始终生效。
+            免费种要在推送前读到结束时间：站点没给结束时间的不当长期免费，等下一轮重新读取；确实要下载就用「不要求免费」的过滤规则。
           </div>
         </el-form-item>
         <el-form-item label="免费结束暂停">
           <span class="sw"><el-switch v-model="newRss.pause_on_free_end" /></span>
-          <div class="field-tip">免费期结束时若还没下完，自动暂停任务</div>
+          <div class="field-tip">
+            免费期结束时还没下完就暂停（全局设置开了「免费结束自动删除」时改为删除）。开着它的种子先暂停加入，登记好到期暂停才开始；
+            站点没有给出免费结束时间的只暂停加入、不自动开始。通知里的「立即下载」也按这条 RSS
+            的设置。
+          </div>
         </el-form-item>
 
         <div class="field-head">通知</div>
@@ -1740,11 +1745,16 @@ function ruleNameOf(id: number): string {
           </el-radio-group>
           <div class="field-tip">
             <strong>智能</strong>：没规则就只下免费种，有规则就只下命中的。全局大小上限始终生效。
+            免费种要在推送前读到结束时间：站点没给结束时间的不当长期免费，等下一轮重新读取；确实要下载就用「不要求免费」的过滤规则。
           </div>
         </el-form-item>
         <el-form-item label="免费结束暂停">
           <span class="sw"><el-switch v-model="editingRss.pause_on_free_end" /></span>
-          <div class="field-tip">免费期结束时若还没下完，自动暂停任务</div>
+          <div class="field-tip">
+            免费期结束时还没下完就暂停（全局设置开了「免费结束自动删除」时改为删除）。开着它的种子先暂停加入，登记好到期暂停才开始；
+            站点没有给出免费结束时间的只暂停加入、不自动开始。通知里的「立即下载」也按这条 RSS
+            的设置。
+          </div>
         </el-form-item>
 
         <div class="field-head">通知</div>

@@ -93,23 +93,24 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 
 每种事件都有的变量：`event`（事件类型）、`event_name`（事件名称）、`time`（本地时间，形如 `2026-10-12 08:00:00`）、`timestamp`（秒级时间戳）、`title`、`text`（内置的标题与正文，可以在自己的模板里接着用）。各事件的主要变量：
 
-| 事件                                       | 主要变量                                                                                                                   |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `rss.new` RSS 新种子                       | `site`、`rss`、`torrent_title`、`torrent_id`、`link`、`published`                                                          |
-| `rss.matched` RSS 命中过滤规则             | 同上，再加 `subtitle`、`size`、`size_bytes`、`free`、`free_end`、`free_remaining`、`rule`、`seeders`、`leechers`、`has_hr` |
-| `rss.digest` RSS 合并通知                  | `count`，`items`（每项 `title`、`site`、`torrent_title`、`torrent_id`）                                                    |
-| `subscribe.downloaded` 订阅下载            | `subscription`、`media_type`、`year`、`season`、`episodes`、`torrent_title`、`site`、`quality`、`poster`                   |
-| `subscribe.douban_failed` 豆瓣想看拉取失败 | `source`、`fails`、`error`                                                                                                 |
-| `media.organized` 入库                     | `name`、`media_type`、`episodes`、`files`、`quality`、`library`、`torrent`、`poster`                                       |
-| `site.login_expiring` 站点即将被封号       | `site`、`tier`、`days_remaining`、`last_active`、`days_since_active`、`access_stale`                                       |
-| `site.probe_failed` 站点探测失败           | `site`、`status`、`status_label`、`since`、`advice`、`diagnosis`                                                           |
-| `site.probe_recovered` 站点探测恢复        | `site`、`probed_at`                                                                                                        |
-| `site.login_test` 登录提醒测试             | `site`、`tier`、`days_remaining`、`last_active`                                                                            |
-| `attendance.daily` 签到结果                | `day`、`signed`、`failed`，`items`（每项 `site`、`status`、`status_label`、`message`）                                     |
-| `report.daily` 每日战报                    | `day`、`uploaded`、`downloaded`、`uploaded_bytes`、`downloaded_bytes`、`bonus`，`items`（各站点）                          |
-| `downloader.dead_torrents` 失效种子        | `downloader`、`count`、`size`、`size_bytes`，`items`（每项 `name`、`size`、`size_bytes`）                                  |
-| `remote.paired` 新设备配对                 | `device`、`permission`                                                                                                     |
-| `test` 通道测试                            | `channel`                                                                                                                  |
+| 事件                                                | 主要变量                                                                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `rss.new` RSS 新种子                                | `site`、`rss`、`torrent_title`、`torrent_id`、`link`、`published`                                                          |
+| `rss.matched` RSS 命中过滤规则                      | 同上，再加 `subtitle`、`size`、`size_bytes`、`free`、`free_end`、`free_remaining`、`rule`、`seeders`、`leechers`、`has_hr` |
+| `rss.digest` RSS 合并通知                           | `count`，`items`（每项 `title`、`site`、`torrent_title`、`torrent_id`）                                                    |
+| `subscribe.downloaded` 订阅下载                     | `subscription`、`media_type`、`year`、`season`、`episodes`、`torrent_title`、`site`、`quality`、`poster`                   |
+| `subscribe.douban_failed` 豆瓣想看拉取失败          | `source`、`fails`、`error`                                                                                                 |
+| `media.organized` 入库                              | `name`、`media_type`、`episodes`、`files`、`quality`、`library`、`torrent`、`poster`                                       |
+| `site.login_expiring` 站点即将被封号                | `site`、`tier`、`days_remaining`、`last_active`、`days_since_active`、`access_stale`                                       |
+| `site.probe_failed` 站点探测失败                    | `site`、`status`、`status_label`、`since`、`advice`、`diagnosis`                                                           |
+| `site.probe_recovered` 站点探测恢复                 | `site`、`probed_at`                                                                                                        |
+| `site.login_test` 登录提醒测试                      | `site`、`tier`、`days_remaining`、`last_active`                                                                            |
+| `attendance.daily` 签到结果                         | `day`、`signed`、`failed`，`items`（每项 `site`、`status`、`status_label`、`message`）                                     |
+| `report.daily` 每日战报                             | `day`、`uploaded`、`downloaded`、`uploaded_bytes`、`downloaded_bytes`、`bonus`，`items`（各站点）                          |
+| `downloader.dead_torrents` 失效种子                 | `downloader`、`count`、`size`、`size_bytes`，`items`（每项 `name`、`size`、`size_bytes`）                                  |
+| `downloader.free_end_pause_failed` 免费结束暂停失败 | `site`、`torrent_title`、`downloader`、`free_end`、`failures`、`error`                                                     |
+| `remote.paired` 新设备配对                          | `device`、`permission`                                                                                                     |
+| `test` 通道测试                                     | `channel`                                                                                                                  |
 
 每日战报的变量只有合计与各站点；登录异常、签到、刷流几段在 `text` 里。列表最多 100 项，省略的条数在 `items_more` 里。
 

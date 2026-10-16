@@ -133,15 +133,16 @@ Set it to 0 to turn the check off.
 
 ### When freeleech ends
 
-| Setting                                                                     | Meaning                                                                                                    | Default | Suggested         |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------- | ----------------- |
-| **Delete when freeleech ends (免费结束自动删除)**                           | When the free period ends, unfinished torrents are deleted with their data; when off, they are only paused | Off     | On if you need it |
-| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag          | 0       | 5 minutes or more |
+| Setting                                                                     | Meaning                                                                                                    | Default          | Suggested         |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| **Delete when freeleech ends (免费结束自动删除)**                           | When the free period ends, unfinished torrents are deleted with their data; when off, they are only paused | Off              | On if you need it |
+| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag          | 5 (new installs) | 5 minutes or more |
 
 Acting early adds a safety margin: the pause or deletion runs at `freeleech end time - N minutes`. That absorbs the delay of the deletion itself and the lag before the downloader reports to the tracker, so that no non-free download is counted after the free period has ended.
 
 - The range is `[0, 60]` minutes; a value outside it is clamped.
-- `0` acts exactly when freeleech ends. This is the earlier behaviour, so existing setups are unchanged.
+- `0` acts exactly when freeleech ends. A value you already set before upgrading is kept; new installs default to 5. When it is 0 the settings page warns that billed download may still be counted.
+- Pushes that require freeleech (the freeleech path, filter rules with Free only on, subscriptions whose quality profile requires free, brush tasks that only take free discounts) also require more than this much freeleech time left, and at least 5 minutes; otherwise they are not pushed.
 - The periodic fallback check runs every 5 minutes, so `≥5` minutes is recommended. Each torrent's own timer is accurate to the second, so the main path is not limited to that interval.
 - The margin only moves the freeleech-end action; retries keep their own schedule.
 

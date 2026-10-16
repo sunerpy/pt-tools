@@ -409,8 +409,19 @@ async function save() {
           <el-form-item label="免费期结束前提前处理（分钟）">
             <el-input-number v-model="form.free_end_advance_minutes" :min="0" :max="60" :step="1" />
             <div class="field-tip">
-              提前 N 分钟暂停或删除未完成的种子，规避删除延迟与 tracker 汇报滞后导致的超额下载量；0
-              表示到点处理（默认）。建议 ≥5 分钟。
+              提前 N 分钟暂停或删除未完成的种子，规避删除延迟与 tracker 汇报滞后导致的计费下载量；0
+              表示到点处理，新安装默认 5。要求免费的推送还要求免费剩余时间超过 N 分钟（至少 5
+              分钟），不够的不推送。
+            </div>
+            <div
+              v-if="form.free_end_advance_minutes === 0"
+              class="pt-note pt-note--warn mode-note"
+              data-testid="gs-advance-zero">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <span
+                >提前量是 0：到点才暂停，tracker 汇报滞后时仍可能多出计费下载量，建议设为 5
+                分钟以上</span
+              >
             </div>
           </el-form-item>
         </div>
