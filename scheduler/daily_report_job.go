@@ -276,13 +276,15 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 	fields := map[string]any{"day": today}
 	var b strings.Builder
 
+	// 账号的下载量写明「计费」：站点按免费、折扣折算以后计入分享率的数，每日快照只存这个口径，
+	// 免费种子的实际传输不在里面。下面刷流那几行是下载器里的实际传输，不加这个标注。
 	switch {
 	case len(sum.Sites) == 0:
 		b.WriteString("今天还没有同步到站点数据（登录探测成功或手动同步之后才有）。")
 	case countWithBaseline(sum.Sites) == 0:
 		b.WriteString("今天暂无可比的数据：站点要有今天之前的一份快照才算得出增量，明天起就有。")
 	default:
-		fmt.Fprintf(&b, "今日合计：上传 %s · 下载 %s · 魔力 %s",
+		fmt.Fprintf(&b, "今日合计：上传 %s · 下载（计费）%s · 魔力 %s",
 			utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded), formatBonus(sum.TotalBonus))
 		fields["uploaded"], fields["downloaded"] = utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded)
 		fields["uploaded_bytes"], fields["downloaded_bytes"], fields["bonus"] = sum.TotalUploaded, sum.TotalDownloaded, sum.TotalBonus
@@ -306,7 +308,7 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 				continue
 			}
 			shown++
-			fmt.Fprintf(&b, "\n· %s：上传 %s · 下载 %s · 魔力 %s", siteDisplayName(d.Site),
+			fmt.Fprintf(&b, "\n· %s：上传 %s · 下载（计费）%s · 魔力 %s", siteDisplayName(d.Site),
 				utils.FormatBytes(d.Uploaded), utils.FormatBytes(d.Downloaded), formatBonus(d.Bonus))
 		}
 		fields["items"] = items

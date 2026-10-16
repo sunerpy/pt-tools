@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // MockSite is a mock implementation of the Site interface
@@ -142,6 +143,38 @@ func TestUserInfoService_FetchAndSave(t *testing.T) {
 	assert.Equal(t, int64(1000000), info.Uploaded)
 
 	mockSite.AssertExpectations(t)
+}
+
+// 取到用户数据的那条日志并列写明两种下载量：计费的总在，实际的只在站点报了时才有
+func TestUserInfoService_FetchAndSave_LogsBilledAndActualDownload(t *testing.T) {
+	core, logs := observer.New(zap.InfoLevel)
+	service := NewUserInfoService(UserInfoServiceConfig{Logger: zap.New(core)})
+	ctx := context.Background()
+
+	mteam := &MockSite{}
+	mteam.On("ID").Return("mteam")
+	mteam.On("GetUserInfo", ctx).Return(UserInfo{Site: "mteam", Username: "u", Uploaded: 300, Downloaded: 100, TrueDownloaded: 900}, nil)
+	hdsky := &MockSite{}
+	hdsky.On("ID").Return("hdsky")
+	hdsky.On("GetUserInfo", ctx).Return(UserInfo{Site: "hdsky", Username: "u", Uploaded: 300, Downloaded: 100}, nil)
+	service.RegisterSite(mteam)
+	service.RegisterSite(hdsky)
+
+	_, err := service.FetchAndSave(ctx, "mteam")
+	require.NoError(t, err)
+	_, err = service.FetchAndSave(ctx, "hdsky")
+	require.NoError(t, err)
+
+	saved := logs.FilterMessage("User info fetched and saved").All()
+	require.Len(t, saved, 2)
+	m := saved[0].ContextMap()
+	assert.Equal(t, "mteam", m["site"])
+	assert.Equal(t, int64(100), m["downloaded_billed"], "计费下载量")
+	assert.Equal(t, int64(900), m["downloaded_actual"], "站点报的实际下载量")
+	h := saved[1].ContextMap()
+	assert.Equal(t, "hdsky", h["site"])
+	assert.Equal(t, int64(100), h["downloaded_billed"])
+	assert.NotContains(t, h, "downloaded_actual", "站点不报实际下载时不写这一项")
 }
 
 func TestUserInfoService_FetchAndSave_SiteNotFound(t *testing.T) {

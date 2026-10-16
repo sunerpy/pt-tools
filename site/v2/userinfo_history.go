@@ -12,6 +12,9 @@ import (
 //
 // 日期按仓库的时区（默认进程时区，Docker 里即 TZ）取 YYYY-MM-DD。只由 DBUserInfoRepo.Save 写：
 // 与 UserInfoRecord 在同一个事务里 upsert，同一天多次获取只留最后一次。
+//
+// Downloaded 是计费下载量（UserInfo.Downloaded）；快照不存实际下载量（TrueDownloaded），
+// 所以增量、走势与每日战报里的下载只有计费口径。
 type UserInfoDailySnapshot struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	Site       string    `gorm:"size:64;not null;uniqueIndex:idx_userinfo_snapshot_site_date,priority:1" json:"site"`

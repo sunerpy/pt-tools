@@ -66,7 +66,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "get_site_userinfo",
     write: false,
-    desc: "各站点的上传、下载、分享率、魔力、未读消息与登录状态",
+    desc: "各站点的上传、下载量（计费）、分享率、魔力、未读消息与登录状态",
   },
   { name: "check_updates", write: false, desc: "有没有新版本（只看，不升级）" },
   { name: "explore_media", write: false, desc: "按片名找电影与剧集，或者看本周趋势、热门" },

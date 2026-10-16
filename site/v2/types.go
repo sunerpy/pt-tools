@@ -458,7 +458,8 @@ type UserInfo struct {
 	UserID string `json:"userId"`
 	// Uploaded is the total uploaded bytes
 	Uploaded int64 `json:"uploaded"`
-	// Downloaded is the total downloaded bytes
+	// Downloaded is the total downloaded bytes as the site bills them (计费下载量): free and
+	// discount promotions already applied, the figure that counts toward ratio
 	Downloaded int64 `json:"downloaded"`
 	// Ratio is the upload/download ratio
 	Ratio float64 `json:"ratio"`
@@ -508,9 +509,10 @@ type UserInfo struct {
 	HnRUnsatisfied int `json:"hnrUnsatisfied,omitempty"`
 	// HnRPreWarning is the number of H&R pre-warnings
 	HnRPreWarning int `json:"hnrPreWarning,omitempty"`
-	// TrueUploaded is the true uploaded bytes (some sites track separately)
+	// TrueUploaded is the actual uploaded bytes, reported separately by some sites (实际上传量)
 	TrueUploaded int64 `json:"trueUploaded,omitempty"`
-	// TrueDownloaded is the true downloaded bytes
+	// TrueDownloaded is the actual downloaded bytes before promotions (实际下载量). It grows on
+	// free torrents while Downloaded does not; daily snapshots do not keep it.
 	TrueDownloaded int64 `json:"trueDownloaded,omitempty"`
 	// Uploads is the number of torrents uploaded by user
 	Uploads int `json:"uploads,omitempty"`
@@ -538,7 +540,7 @@ type LevelProgress struct {
 type AggregatedStats struct {
 	// TotalUploaded is the sum of all uploaded bytes
 	TotalUploaded int64 `json:"totalUploaded"`
-	// TotalDownloaded is the sum of all downloaded bytes
+	// TotalDownloaded is the sum of all billed downloaded bytes (UserInfo.Downloaded)
 	TotalDownloaded int64 `json:"totalDownloaded"`
 	// AverageRatio is the average ratio across all sites
 	AverageRatio float64 `json:"averageRatio"`

@@ -241,20 +241,20 @@ var notifyEvents = []EventSpec{
 		SampleText:  "· hdtime：签到成功（获得 10 魔力）\n· hdsky：签到失败（站点超时）",
 	},
 	{
-		Type: EventReportDaily, Name: "每日战报", Desc: "每天定时发的上传、下载与魔力统计（登录异常、签到、刷流几段只在 text 里）",
+		Type: EventReportDaily, Name: "每日战报", Desc: "每天定时发的上传、下载（计费）与魔力统计（登录异常、签到、刷流几段只在 text 里）",
 		Vars: []Var{
 			{Key: "day", Type: VarString, Desc: "日期", Sample: "2026-10-12"},
 			{Key: "uploaded", Type: VarString, Desc: "今天合计上传", Sample: "120.00 GB"},
-			{Key: "downloaded", Type: VarString, Desc: "今天合计下载", Sample: "30.00 GB"},
+			{Key: "downloaded", Type: VarString, Desc: "今天合计下载（计费）", Sample: "30.00 GB"},
 			{Key: "uploaded_bytes", Type: VarInt, Desc: "今天合计上传（字节）", Sample: int64(128849018880)},
-			{Key: "downloaded_bytes", Type: VarInt, Desc: "今天合计下载（字节）", Sample: int64(32212254720)},
+			{Key: "downloaded_bytes", Type: VarInt, Desc: "今天合计下载（计费，字节）", Sample: int64(32212254720)},
 			{Key: "bonus", Type: VarFloat, Desc: "今天合计魔力", Sample: float64(1234.5)},
 			{Key: "items", Type: VarList, Desc: "各站点（按上传从多到少）", Item: []Var{
 				{Key: "site", Type: VarString, Desc: "站点"},
 				{Key: "uploaded", Type: VarString, Desc: "上传"},
-				{Key: "downloaded", Type: VarString, Desc: "下载"},
+				{Key: "downloaded", Type: VarString, Desc: "下载（计费）"},
 				{Key: "uploaded_bytes", Type: VarInt, Desc: "上传（字节）"},
-				{Key: "downloaded_bytes", Type: VarInt, Desc: "下载（字节）"},
+				{Key: "downloaded_bytes", Type: VarInt, Desc: "下载（计费，字节）"},
 				{Key: "bonus", Type: VarFloat, Desc: "魔力"},
 			}, Sample: []map[string]any{
 				{"site": "HDTime", "uploaded": "100.00 GB", "downloaded": "20.00 GB", "uploaded_bytes": int64(107374182400), "downloaded_bytes": int64(21474836480), "bonus": float64(1000)},
@@ -263,7 +263,7 @@ var notifyEvents = []EventSpec{
 			more("省略的站点数"),
 		},
 		SampleTitle: "📊 每日战报 2026-10-12",
-		SampleText:  "今日合计：上传 120.00 GB · 下载 30.00 GB · 魔力 1234.5\n· HDTime：上传 100.00 GB · 下载 20.00 GB · 魔力 1000\n· HDSky：上传 20.00 GB · 下载 10.00 GB · 魔力 234.5",
+		SampleText:  "今日合计：上传 120.00 GB · 下载（计费）30.00 GB · 魔力 1234.5\n· HDTime：上传 100.00 GB · 下载（计费）20.00 GB · 魔力 1000\n· HDSky：上传 20.00 GB · 下载（计费）10.00 GB · 魔力 234.5",
 	},
 	{
 		Type: EventDeadTorrents, Name: "失效种子", Desc: "下载器助手扫到 tracker 报告未注册或不存在的种子",
