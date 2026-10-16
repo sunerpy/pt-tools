@@ -4,11 +4,13 @@
 package internal
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -142,6 +144,10 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	}
 	if record {
 		hash := bestEffortHash(req.TorrentData)
+		// 同一个种子的推送串行：「看别处有没有受监控的加入 → 加入 → 记账」整段不和另一次推送交错，
+		// 否则两边都看不到对方、各加一份，后写的记账盖掉先写的，被盖掉的那一处没有监控
+		unlock := placementLocks.lock(req.SiteID + "|" + cmp.Or(hash, "id:"+req.TorrentID))
+		defer unlock()
 		if other := monitoredElsewhere(req.SiteID, req.TorrentID, hash, target.ID); other != "" {
 			return rejectPush(req, record, hash, PushStatusRejectedPlacement,
 				fmt.Sprintf("这个种子已在下载器 %s 里并受免费结束监控，不再推到另一个下载器", other)), nil
@@ -168,7 +174,7 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	}
 	if exists {
 		if req.AdoptExisting && record {
-			return adoptExistingTorrent(dl, target, req, torrentHash, snap, decision)
+			return adoptExistingTorrent(dl, target, req, torrentHash, snap, decision, addedByEarlierAttempt(req, target))
 		}
 		sLogger().Infof("[PushTorrent] 种子已存在于下载器中，跳过: site=%s, id=%s, hash=%s, downloader=%s",
 			req.SiteID, req.TorrentID, torrentHash, target.Name)
@@ -436,11 +442,14 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 		}, nil
 	}
 	if result.Duplicate {
-		// 下载器说原来就有它（预检没查到：查询失败，或者刚好被别处加进去）：和预检查到时一样当作跳过，
-		// 不记成这次推送的（没有新加，归还预留）
+		// 下载器说原来就有它（预检没查到：查询失败，或者刚好被别处加进去）：没有新加，归还预留
 		release()
 		if record && pausePromised {
 			clearPushPending(req.SiteID, req.TorrentID)
+		}
+		if req.AdoptExisting && record {
+			// RSS 暂存推送：和预检查到时一样记账、按策略登记监控；不是这次加入的，不改它的运行状态
+			return adoptExistingTorrent(dl, target, req, torrentHash, snap, decision, false)
 		}
 		sLogger().Infof("[PushTorrent] 下载器里已有这个种子，跳过: site=%s, id=%s, hash=%s, downloader=%s",
 			req.SiteID, req.TorrentID, torrentHash, target.Name)
@@ -501,6 +510,44 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	return res, nil
 }
 
+// placementLocks 按站点与种子哈希串行化推送（见 pushTorrent）。
+var placementLocks keyedMutex
+
+// keyedMutex 是按键的互斥锁；没人用的键会被清掉。
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*keyedEntry
+}
+
+type keyedEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (k *keyedMutex) lock(key string) (unlock func()) {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = map[string]*keyedEntry{}
+	}
+	e := k.locks[key]
+	if e == nil {
+		e = &keyedEntry{}
+		k.locks[key] = e
+	}
+	e.refs++
+	k.mu.Unlock()
+	e.mu.Lock()
+	return func() {
+		e.mu.Unlock()
+		k.mu.Lock()
+		e.refs--
+		if e.refs == 0 {
+			delete(k.locks, key)
+		}
+		k.mu.Unlock()
+	}
+}
+
 // bestEffortHash 是被拒绝时结果里带的哈希；种子文件解析不了时为空。
 func bestEffortHash(data []byte) string {
 	h, err := qbit.ComputeTorrentHash(data)
@@ -524,14 +571,18 @@ func rejectPush(req PushTorrentRequest, record bool, hash string, status PushSta
 	return &PushTorrentResult{Success: false, TorrentHash: hash, Message: reason, Status: status}
 }
 
-// adoptExistingTorrent 处理下载器里已经有这个种子的 RSS 推送：记账、按策略登记监控。
-// 记录上留着本次加入的标记（上次暂停加入后记账失败）时，这次补上并按设置开始；否则是下载器里原本就有的，不改它的运行状态。
-func adoptExistingTorrent(dl downloader.Downloader, target pushTarget, req PushTorrentRequest, hash string, snap *v2.PromotionSnapshot, decision AdmissionDecision) (*PushTorrentResult, error) {
+// addedByEarlierAttempt 报告记录上留着之前一次加入的标记（暂停加入以后记账没写成），而且是加到这个下载器的。
+func addedByEarlierAttempt(req PushTorrentRequest, target pushTarget) bool {
 	var cur models.TorrentInfo
-	ours := false
-	if err := global.GlobalDB.DB.Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).First(&cur).Error; err == nil {
-		ours = cur.PushPendingAt != nil && cur.DownloaderID != nil && *cur.DownloaderID == target.ID
+	if err := global.GlobalDB.DB.Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).First(&cur).Error; err != nil {
+		return false
 	}
+	return cur.PushPendingAt != nil && cur.DownloaderID != nil && *cur.DownloaderID == target.ID
+}
+
+// adoptExistingTorrent 处理下载器里已经有这个种子的 RSS 推送：记账、按策略登记监控。
+// ours 为真（上次暂停加入后记账失败）时补上记账并按设置开始；否则是下载器里原本就有的，不改它的运行状态。
+func adoptExistingTorrent(dl downloader.Downloader, target pushTarget, req PushTorrentRequest, hash string, snap *v2.PromotionSnapshot, decision AdmissionDecision, ours bool) (*PushTorrentResult, error) {
 	if err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
 		Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
 		Updates(pushedColumns(target, hash, req.Policy, snap, decision)).Error; err != nil {

@@ -220,3 +220,70 @@ func TestFreeEnd_ReconcilesPendingPush(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// 归档时免费资格、归属与暂停执行记录一起复制，不随原记录删掉。
+func TestFreeEnd_ArchiveKeepsFreeStatusColumns(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+	old := time.Now().AddDate(0, 0, -40)
+	alerted := time.Now().AddDate(0, 0, -39)
+	pending := time.Now().AddDate(0, 0, -39)
+	rss := uint(7)
+	require.NoError(t, db.DB.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "arch", Title: "Arch", IsCompleted: true, CreatedAt: old,
+		FreeValidity: "free_until", DetailID: "42", SourceRSSID: &rss, RequireFree: true,
+		FreeEndFailures: 3, FreeEndAlertedAt: &alerted, PushPendingAt: &pending,
+	}).Error)
+
+	m.archiveOldTorrents()
+
+	var a models.TorrentInfoArchive
+	require.NoError(t, db.DB.Where("torrent_id = ?", "arch").First(&a).Error)
+	assert.Equal(t, "free_until", a.FreeValidity)
+	assert.Equal(t, "42", a.DetailID)
+	require.NotNil(t, a.SourceRSSID)
+	assert.Equal(t, rss, *a.SourceRSSID)
+	assert.True(t, a.RequireFree)
+	assert.Equal(t, 3, a.FreeEndFailures)
+	assert.NotNil(t, a.FreeEndAlertedAt)
+	assert.NotNil(t, a.PushPendingAt)
+}
+
+// 计划暂停时间到了就处理，即使记录已经不是免费（RSS 读到免费被取消时把计划改成现在）。
+func TestFreeEnd_PlannedPauseHandledAfterFreeCancelled(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+	m.pauseConfirmWait = time.Millisecond
+	pushed := true
+	planned := time.Now().Add(-time.Second)
+	row := models.TorrentInfo{
+		SiteName: "s", TorrentID: "pc1", Title: "Tpc1", PauseOnFreeEnd: true, IsPushed: &pushed,
+		IsFree: false, FreeLevel: "NONE", FreeValidity: "not_free", PausePlannedAt: &planned,
+		DownloaderTaskID: "task-pc1", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&row).Error)
+	fake.torrentByID["task-pc1"] = downloader.Torrent{ID: "task-pc1", Progress: 0.3, State: downloader.TorrentDownloading}
+
+	m.checkAndProcessExpiredTorrents()
+	require.Eventually(t, func() bool { return reload(t, m, row.ID).IsPausedBySystem }, 5*time.Second, 10*time.Millisecond)
+	assert.Contains(t, fake.pausedIDs, "task-pc1")
+
+	// 计划还没到的不处理，只预约；处理时刻变了就换掉旧的预约
+	later := time.Now().Add(2 * time.Hour)
+	row2 := models.TorrentInfo{
+		SiteName: "s", TorrentID: "pc2", Title: "Tpc2", PauseOnFreeEnd: true, IsPushed: &pushed,
+		IsFree: true, FreeLevel: "FREE", FreeValidity: "free_until", FreeEndTime: &later, PausePlannedAt: &later,
+		DownloaderTaskID: "task-pc2", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&row2).Error)
+	m.ScheduleTorrent(row2)
+	require.True(t, m.pending(row2.ID))
+	sooner := time.Now().Add(30 * time.Minute)
+	row2.PausePlannedAt = &sooner
+	m.ScheduleTorrent(row2)
+	m.mu.Lock()
+	got := m.pendingTasks[row2.ID].deadline
+	m.mu.Unlock()
+	assert.True(t, got.Equal(sooner), "处理时刻提前时换掉旧的预约")
+	m.CancelTorrent(row2.ID)
+}

@@ -579,3 +579,43 @@ func applySnapshotToRecord(t *models.TorrentInfo, s v2.PromotionSnapshot) {
 	t.FreeValidity, t.FreeVerifiedAt, t.FreeStatusSource, t.FreeStatusError = f.validity, f.verified, f.source, f.errText
 	t.IsExpired = promotionEnded(s)
 }
+
+// monitoredPushed 报告这是已推送、正受到期监控的种子：RSS 看到它时还要刷新资格（见 refreshMonitoredRecord）。
+func monitoredPushed(t *models.TorrentInfo) bool {
+	return t != nil && isPushed(t) && t.PauseOnFreeEnd && !t.IsCompleted && !t.IsPausedBySystem && t.DownloaderTaskID != ""
+}
+
+// refreshMonitoredRecord 用这一轮读到的详情刷新已推送、受到期监控的种子：资格整套写入；计划暂停时间按新的结束时间算
+// （免费延长就推后，缩短就提前），不再免费或结束时间读不出时改为现在，监控器马上暂停；长期免费的不再需要暂停。
+// 改完交给监控器按新的时刻重新预约。
+func refreshMonitoredRecord(rec *models.TorrentInfo, snap v2.PromotionSnapshot, now time.Time) error {
+	cols := SnapshotColumns(snap)
+	cols["is_expired"] = promotionEnded(snap)
+	cols["last_check_time"] = now
+	var planned *time.Time
+	switch snap.Validity {
+	case v2.FreeUntil:
+		advance := min(max(time.Duration(freeEndAdvanceMinutes())*time.Minute, 0), maxSafetyMargin)
+		p := snap.EndsAt.Add(-advance)
+		planned = &p
+	case v2.FreePermanent:
+	default:
+		p := now
+		planned = &p
+	}
+	cols["pause_planned_at"] = planned
+	res := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+		Where("id = ? AND is_paused_by_system = ? AND is_completed = ?", rec.ID, false, false).Updates(cols)
+	if res.Error != nil || res.RowsAffected == 0 {
+		return res.Error
+	}
+	if planned != nil && (rec.PausePlannedAt == nil || planned.Before(*rec.PausePlannedAt)) {
+		sLogger().Infof("[到期监控] 已推送的种子 %s 免费有变化（%s），计划暂停提前到 %s",
+			rec.Title, snap.Validity, planned.Local().Format(time.DateTime))
+	}
+	var updated models.TorrentInfo
+	if err := global.GlobalDB.DB.First(&updated, rec.ID).Error; err == nil {
+		ScheduleTorrentForMonitoring(updated)
+	}
+	return nil
+}

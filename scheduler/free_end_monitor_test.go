@@ -1942,19 +1942,12 @@ func TestMarkRetry_NotDoubleAdvanced(t *testing.T) {
 	advance := monitor.advanceDuration()
 	require.Equal(t, 10*time.Minute, advance)
 
-	// markRetry uses retryDeadline(now, failures=1, advance): retryTime is
-	// pre-advanced so scheduleTaskLocked's effectiveDeadline subtraction nets
-	// back to now+retryDelay (not double-advanced). 第一次失败后 30 秒重试。
-	retryTime := retryDeadline(before, 1, advance)
-	netTrigger := effectiveDeadline(&retryTime, advance)
+	// 第一次失败后 30 秒重试：触发时刻是 now+退避，不受提前量影响（不会被提前量减成立刻）
 	expectedRetryDelay := freeEndBackoff(1)
 	require.Equal(t, 30*time.Second, expectedRetryDelay)
-	gotNetDelay := netTrigger.Sub(before)
+	gotNetDelay := task.deadline.Sub(before)
 	assert.InDelta(t, expectedRetryDelay.Seconds(), gotNetDelay.Seconds(), 5.0,
-		"retry net trigger must be ~now+retryDelay, not double-advanced")
-
-	assert.InDelta(t, (expectedRetryDelay + advance).Seconds(), retryTime.Sub(before).Seconds(), 5.0,
-		"retryTime must be pre-compensated by +advance")
+		"retry net trigger must be ~now+retryDelay, not shifted by advance")
 
 	var updated models.TorrentInfo
 	require.NoError(t, db.DB.First(&updated, torrent.ID).Error)

@@ -724,6 +724,14 @@ func (d *MTorrentDriver) PrepareDownload(torrentID string) (MTorrentRequest, err
 	}, nil
 }
 
+// rawURLRe 是原始响应里的地址：签名下载地址的 sign 参数本身就是凭证，写进错误前先脱敏。
+var rawURLRe = regexp.MustCompile(`https?://[^\s"'<>\\]+`)
+
+// sanitizeRawURLs 把原始响应文本里的地址换成脱敏后的样子（凭证参数打码），其余原样留着便于排查。
+func sanitizeRawURLs(raw string) string {
+	return rawURLRe.ReplaceAllStringFunc(raw, utils.SanitizeURL)
+}
+
 // ParseDownload extracts torrent file data from the response
 func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 	if !res.Code.IsSuccess() {
@@ -732,18 +740,18 @@ func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 		if len(rawBody) > 500 {
 			rawBody = rawBody[:500] + "..."
 		}
-		return nil, fmt.Errorf("API error: %s - %s (raw: %s)", res.Code.String(), res.Message, rawBody)
+		return nil, fmt.Errorf("API error: %s - %s (raw: %s)", res.Code.String(), res.Message, sanitizeRawURLs(rawBody))
 	}
 
 	// M-Team returns the download URL directly as a string in the data field
 	// Example: {"code":"0","message":"SUCCESS","data":"https://api.m-team.cc/api/rss/dlv2?sign=..."}
 	var downloadURL string
 	if err := json.Unmarshal(res.Data, &downloadURL); err != nil {
-		return nil, fmt.Errorf("parse download URL: %w (raw: %s)", err, string(res.Data))
+		return nil, fmt.Errorf("parse download URL: %w (raw: %s)", err, sanitizeRawURLs(string(res.Data)))
 	}
 
 	if downloadURL == "" {
-		return nil, fmt.Errorf("empty download URL in response (data: %s)", string(res.Data))
+		return nil, fmt.Errorf("empty download URL in response (data: %s)", sanitizeRawURLs(string(res.Data)))
 	}
 
 	// 签名下载地址本身就是凭证（sign 参数），日志和错误信息里只出现脱敏后的地址。

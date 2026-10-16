@@ -85,15 +85,41 @@ func freeEndBackoff(n int) time.Duration {
 	return min(d, maxRetryDelay)
 }
 
-// freeEndMonitored 报告这条记录现在还归免费结束监控管。
+// freeEndMonitored 报告这条记录现在还归免费结束监控管：开着到期暂停、没暂停也没完成、有任务编号，
+// 而且有处理时刻（计划暂停时间，或者免费的结束时间）。
 func freeEndMonitored(t models.TorrentInfo) bool {
-	return t.PauseOnFreeEnd && t.IsFree && !t.IsPausedBySystem && !t.IsCompleted && t.FreeEndTime != nil && t.DownloaderTaskID != ""
+	return t.PauseOnFreeEnd && !t.IsPausedBySystem && !t.IsCompleted && t.DownloaderTaskID != "" &&
+		(t.PausePlannedAt != nil || (t.IsFree && t.FreeEndTime != nil))
 }
+
+// pauseDeadline 是这条记录该处理（暂停或删除）的时刻：计划暂停时间与「免费结束时间减提前量」里更早的那个，
+// 都没有时为零。计划暂停时间在推送时按结束时间写下；RSS 读到已推送的种子免费缩短、取消时把它改早。
+func pauseDeadline(t models.TorrentInfo, advance time.Duration) time.Time {
+	var d time.Time
+	if t.PausePlannedAt != nil {
+		d = *t.PausePlannedAt
+	}
+	if t.IsFree && t.FreeEndTime != nil {
+		if e := effectiveDeadline(t.FreeEndTime, advance); d.IsZero() || e.Before(d) {
+			d = e
+		}
+	}
+	return d
+}
+
+// 归免费结束监控管的记录（与 freeEndMonitored 同一个条件）
+const monitoredWhere = "pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND downloader_task_id != '' AND " +
+	"(pause_planned_at IS NOT NULL OR (is_free = ? AND free_end_time IS NOT NULL))"
+
+// 到了处理时刻的记录：计划暂停时间已到，或者免费结束时间减提前量已到
+const dueWhere = "((pause_planned_at IS NOT NULL AND pause_planned_at <= ?) OR (is_free = ? AND free_end_time IS NOT NULL AND free_end_time <= ?))"
 
 type monitorTask struct {
 	torrentID uint
 	timer     *time.Timer
 	cancel    context.CancelFunc
+	// deadline 是这次预约的处理时刻（ScheduleTorrent 据此判断要不要换掉旧的预约）
+	deadline time.Time
 }
 
 func NewFreeEndMonitor(db *gorm.DB, downloaderMgr *downloader.DownloaderManager) *FreeEndMonitor {
@@ -203,10 +229,7 @@ func (m *FreeEndMonitor) Stop() {
 
 func (m *FreeEndMonitor) loadPendingTasksFromDB() error {
 	var torrents []models.TorrentInfo
-	err := m.db.Where(
-		"pause_on_free_end = ? AND is_free = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND downloader_task_id != ''",
-		true, true, false, false,
-	).Find(&torrents).Error
+	err := m.db.Where(monitoredWhere, true, false, false, true).Find(&torrents).Error
 	if err != nil {
 		return fmt.Errorf("查询待监控种子失败: %w", err)
 	}
@@ -214,7 +237,7 @@ func (m *FreeEndMonitor) loadPendingTasksFromDB() error {
 	now := time.Now()
 	adv := m.advanceDuration()
 	for _, t := range torrents {
-		if t.FreeEndTime == nil || effectiveDeadline(t.FreeEndTime, adv).Before(now) {
+		if pauseDeadline(t, adv).Before(now) {
 			m.wg.Add(1)
 			go func(torrent models.TorrentInfo) {
 				defer m.wg.Done()
@@ -229,13 +252,16 @@ func (m *FreeEndMonitor) loadPendingTasksFromDB() error {
 	return nil
 }
 
+// ScheduleTorrent 按记录预约到期处理。已经预约过、处理时刻没变的不重复预约；时刻变了（RSS 读到免费缩短、取消或延长）就换掉旧的。
 func (m *FreeEndMonitor) ScheduleTorrent(torrent models.TorrentInfo) {
 	// 只管免费的种子：半价、2X 这类优惠结束时不暂停也不删（以前 RSS 把它们的结束时间也记成了免费到期）
-	if !torrent.PauseOnFreeEnd || !torrent.IsFree {
+	if !torrent.PauseOnFreeEnd {
 		return
 	}
-	if torrent.FreeEndTime == nil {
-		global.GetSlogger().Debugf("[FreeEndMonitor] 跳过调度 (种子:%s, ID:%d): FreeEndTime 为空", torrent.Title, torrent.ID)
+	if torrent.PausePlannedAt == nil && (!torrent.IsFree || torrent.FreeEndTime == nil) {
+		if torrent.IsFree {
+			global.GetSlogger().Debugf("[FreeEndMonitor] 跳过调度 (种子:%s, ID:%d): FreeEndTime 为空", torrent.Title, torrent.ID)
+		}
 		return
 	}
 	if torrent.DownloaderTaskID == "" {
@@ -244,17 +270,31 @@ func (m *FreeEndMonitor) ScheduleTorrent(torrent models.TorrentInfo) {
 	}
 
 	adv := m.advanceDuration()
+	deadline := pauseDeadline(torrent, adv)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.pendingTasks[torrent.ID]; exists {
-		return
+	if old, exists := m.pendingTasks[torrent.ID]; exists {
+		if old.deadline.Equal(deadline) {
+			return
+		}
+		stopTask(old)
+		delete(m.pendingTasks, torrent.ID)
 	}
 
-	m.scheduleTaskLockedWithAdvance(torrent, adv)
+	m.scheduleAtLocked(torrent, deadline)
 	global.GetSlogger().Infof("[FreeEndMonitor] 已调度种子 %s (ID:%d) 的免费结束监控，将在 %v 后检查",
-		torrent.Title, torrent.ID, time.Until(effectiveDeadline(torrent.FreeEndTime, adv)))
+		torrent.Title, torrent.ID, time.Until(deadline))
+}
+
+func stopTask(task *monitorTask) {
+	if task.timer != nil {
+		task.timer.Stop()
+	}
+	if task.cancel != nil {
+		task.cancel()
+	}
 }
 
 func (m *FreeEndMonitor) scheduleTask(torrent models.TorrentInfo) {
@@ -265,19 +305,22 @@ func (m *FreeEndMonitor) scheduleTask(torrent models.TorrentInfo) {
 }
 
 func (m *FreeEndMonitor) scheduleTaskLockedWithAdvance(torrent models.TorrentInfo, advance time.Duration) {
-	if torrent.FreeEndTime == nil {
+	deadline := pauseDeadline(torrent, advance)
+	if deadline.IsZero() {
 		return
 	}
+	m.scheduleAtLocked(torrent, deadline)
+}
 
-	delay := time.Until(effectiveDeadline(torrent.FreeEndTime, advance))
-	if delay < 0 {
-		delay = 0
-	}
+// scheduleAtLocked 在 deadline 处理这条记录（调用方持有 mu）。到时处理函数会重读记录，不用这里的结构体判断。
+func (m *FreeEndMonitor) scheduleAtLocked(torrent models.TorrentInfo, deadline time.Time) {
+	delay := max(time.Until(deadline), 0)
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	task := &monitorTask{
 		torrentID: torrent.ID,
 		cancel:    cancel,
+		deadline:  deadline,
 	}
 
 	task.timer = time.AfterFunc(delay, func() {
@@ -302,12 +345,7 @@ func (m *FreeEndMonitor) CancelTorrent(torrentID uint) {
 	defer m.mu.Unlock()
 
 	if task, exists := m.pendingTasks[torrentID]; exists {
-		if task.timer != nil {
-			task.timer.Stop()
-		}
-		if task.cancel != nil {
-			task.cancel()
-		}
+		stopTask(task)
 		delete(m.pendingTasks, torrentID)
 	}
 }
@@ -463,10 +501,8 @@ func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
 	now := time.Now()
 	cutoff := now.Add(m.advanceDuration())
 
-	err := m.db.Where(
-		"pause_on_free_end = ? AND is_free = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time <= ? AND downloader_task_id != ''",
-		true, true, false, false, cutoff,
-	).Find(&torrents).Error
+	err := m.db.Where(monitoredWhere, true, false, false, true).
+		Where(dueWhere, now, true, cutoff).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询已过期种子失败: %v", err)
 		return
@@ -499,19 +535,17 @@ func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
 // pause). Calling ScheduleTorrent is idempotent (it returns early when
 // the torrent is already in pendingTasks), so this is a cheap reconcile.
 func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(cutoff time.Time) {
+	now := time.Now()
 	var torrents []models.TorrentInfo
 	// Cap the scan like updateAllMonitoredProgress: rows beyond the batch are
 	// reconciled by the next 5-min periodicCheck (idempotent), so capping here
 	// bounds a restart-time mass load without dropping any torrent permanently.
 	// 已在内存里预约过的种子在 SQL 里排除：否则前 50 条都已预约时，每一批都只拿到它们，后面的永远补不上。
-	query := m.db.Where(
-		"pause_on_free_end = ? AND is_free = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time > ? AND downloader_task_id != ''",
-		true, true, false, false, cutoff,
-	)
+	query := m.db.Where(monitoredWhere, true, false, false, true).Where("NOT "+dueWhere, now, true, cutoff)
 	if pending := m.pendingTaskIDs(); len(pending) > 0 {
 		query = query.Where("id NOT IN ?", pending)
 	}
-	err := query.Order("free_end_time ASC, id ASC").Limit(progressUpdateBatchSize).Find(&torrents).Error
+	err := query.Order("COALESCE(pause_planned_at, free_end_time) ASC, id ASC").Limit(progressUpdateBatchSize).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询待补预约种子失败: %v", err)
 		return
@@ -578,10 +612,10 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(scheduled models.TorrentInfo) {
 		return
 	}
 	adv := m.advanceDuration()
-	if deadline := effectiveDeadline(torrent.FreeEndTime, adv); deadline.After(time.Now()) {
-		// 免费延长了（或提前量改小了）：按记录里现在的结束时间重新预约
+	if deadline := pauseDeadline(torrent, adv); deadline.After(time.Now()) {
+		// 免费延长了（或提前量改小了）：按记录里现在的处理时刻重新预约
 		m.scheduleTask(torrent)
-		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 的免费结束时间变晚了，改在 %s 处理", torrent.Title, deadline.Format(time.DateTime))
+		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 的处理时刻变晚了，改在 %s 处理", torrent.Title, deadline.Format(time.DateTime))
 		return
 	}
 	advanced := adv > 0
@@ -855,20 +889,17 @@ func (m *FreeEndMonitor) markRetry(torrent models.TorrentInfo, errMsg string) {
 	if failures >= freeEndAlertAfter && torrent.FreeEndAlertedAt == nil {
 		m.alertPauseFailing(torrent, failures, errMsg)
 	}
-	// 预补偿 advance：scheduleTaskLocked 会用 effectiveDeadline 再减去 advance，
-	// 这里先加回去，使净触发时刻保持 now+退避（重试不受提前量影响）。
+	// 重试在 now+退避 触发，不受提前量影响；到时处理函数重读记录
 	retry := torrent
 	retry.FreeEndFailures = failures
-	retryTime := retryDeadline(now, failures, m.advanceDuration())
-	retry.FreeEndTime = &retryTime
-	m.scheduleTask(retry)
+	m.mu.Lock()
+	if old, exists := m.pendingTasks[torrent.ID]; exists {
+		stopTask(old)
+	}
+	m.scheduleAtLocked(retry, now.Add(freeEndBackoff(failures)))
+	m.mu.Unlock()
 	global.GetSlogger().Warnf("[FreeEndMonitor] 种子 %s 到期处理失败（第 %d 次），%v 后重试: %s",
 		torrent.Title, failures, freeEndBackoff(failures), errMsg)
-}
-
-// retryDeadline 是第 failures 次失败后的重试时刻（加回提前量，见 markRetry）。
-func retryDeadline(now time.Time, failures int, advance time.Duration) time.Time {
-	return now.Add(freeEndBackoff(failures)).Add(advance)
 }
 
 // alertPauseFailing 发一次「到期暂停一直没成功」的告警，同一个免费期只发一次。
@@ -1108,6 +1139,9 @@ func (m *FreeEndMonitor) archiveOldTorrents() {
 			PausePlannedAt:    t.PausePlannedAt,
 			PauseRequestedAt:  t.PauseRequestedAt,
 			FreeEndFailures:   t.FreeEndFailures,
+			FreeEndAlertedAt:  t.FreeEndAlertedAt,
+			DetailID:          t.DetailID,
+			PushPendingAt:     t.PushPendingAt,
 		}
 
 		err := m.db.Transaction(func(tx *gorm.DB) error {

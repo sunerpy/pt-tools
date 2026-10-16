@@ -1462,3 +1462,19 @@ func TestMTorrentDriver_GetTorrentDetail_StrictDiscount(t *testing.T) {
 	assert.Equal(t, "discountEndTime: 时间格式无法解析", item.DiscountErr)
 	assert.Equal(t, FreeUnknown, item.Promotion(now).Validity)
 }
+
+// 下载令牌接口返回异常时，错误里的原始响应要把签名下载地址的凭证参数打码（错误会进日志）。
+func TestMTorrentParseDownload_ErrorsHideSignedURL(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	const secret = "s1GnSECRET0123456789"
+	cases := []MTorrentResponse{
+		{Code: "0", Data: json.RawMessage(`{"url":"https://api.m-team.cc/api/rss/dlv2?sign=` + secret + `&t=1"}`)},
+		{Code: "1", Message: "busy", RawBody: []byte(`{"code":"1","data":"https://api.m-team.cc/api/rss/dlv2?sign=` + secret + `"}`)},
+	}
+	for _, res := range cases {
+		_, err := d.ParseDownload(res)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), secret)
+		assert.Contains(t, err.Error(), "api.m-team.cc", "地址的其余部分照样留着便于排查")
+	}
+}

@@ -199,3 +199,93 @@ func TestPush_AdoptExisting(t *testing.T) {
 		})
 	}
 }
+
+// 预检查没查到、加入时下载器才说已经有了：RSS 暂存推送照样记账、登记监控，不改那个已有任务的运行状态。
+func TestPush_AddTimeDuplicateIsAdopted(t *testing.T) {
+	r := pushRig(t)
+	dlID := r.dlID("qb")
+	data := roundTorrentBytes("dup-at-add")
+	h := hashOfBytes(t, data)
+	r.dls["qb"].dupOnAdd = map[string]bool{h: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&models.TorrentInfo{SiteName: "springsunday", TorrentID: "dup", TorrentHash: &h}).Error)
+	var scheduled []string
+	RegisterTorrentScheduler(func(ti models.TorrentInfo) { scheduled = append(scheduled, ti.TorrentID) })
+	t.Cleanup(func() { RegisterTorrentScheduler(nil) })
+
+	now := time.Now()
+	res, err := pushTorrent(context.Background(), pushTarget{ID: dlID, Name: "qb", AutoStart: true},
+		func() (downloader.Downloader, error) { return r.dls["qb"], nil },
+		PushTorrentRequest{
+			SiteID: "springsunday", TorrentID: "dup", TorrentData: data, DownloaderID: dlID,
+			Policy:        AdmissionPolicy{PauseOnFreeEnd: true, SourceKind: SourceKindRSS, AttemptStart: now},
+			Snapshot:      untilSnap(now, now.Add(3*time.Hour)),
+			AdoptExisting: true, KeepRecord: true,
+		})
+	require.NoError(t, err)
+	assert.Equal(t, PushStatusDuplicate, res.Status)
+	ti := r.record("dup")
+	assert.True(t, pushedOf(ti), "记账了")
+	assert.Equal(t, h, ti.DownloaderTaskID)
+	assert.Nil(t, ti.PushPendingAt)
+	assert.Equal(t, []string{"dup"}, scheduled, "登记了到期监控")
+	assert.Empty(t, r.dls["qb"].resumeCalls(), "不是这次加入的，不改它的运行状态")
+}
+
+// blockingDL 在加入时停住，直到放行（用来让两次推送重叠）。
+type blockingDL struct {
+	*fakeDL
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingDL) AddTorrentFileEx(data []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	close(b.entered)
+	<-b.release
+	return b.fakeDL.AddTorrentFileEx(data, opt)
+}
+
+// 同一个种子同时推到两个下载器（都承诺到期暂停）：第二次等第一次记完账再判，被拒绝，不会两边各加一份。
+func TestPush_ConcurrentPlacementsSerialized(t *testing.T) {
+	r := newRSSRig(t, "qb-a", "qb-b")
+	idA, idB := r.dlID("qb-a"), r.dlID("qb-b")
+	blockA := &blockingDL{fakeDL: r.dls["qb-a"], entered: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(SwapPushDownloaderFactory(func(s models.DownloaderSetting) (downloader.Downloader, error) {
+		if s.Name == "qb-a" {
+			return blockA, nil
+		}
+		return r.dls[s.Name], nil
+	}))
+	data := roundTorrentBytes("race1")
+	now := time.Now()
+	push := func(dlID uint, id string) (*PushTorrentResult, error) {
+		return PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+			SiteID: "springsunday", TorrentID: id, TorrentData: data, DownloaderID: dlID,
+			Policy:   AdmissionPolicy{PauseOnFreeEnd: true, SourceKind: SourceKindManual, AttemptStart: now},
+			Snapshot: untilSnap(now, now.Add(3*time.Hour)),
+		})
+	}
+	doneA := make(chan error, 1)
+	go func() { _, err := push(idA, "race1"); doneA <- err }()
+	<-blockA.entered // A 已经过了检查、正在加入
+
+	type out struct {
+		res *PushTorrentResult
+		err error
+	}
+	doneB := make(chan out, 1)
+	go func() { res, err := push(idB, "race1"); doneB <- out{res, err} }()
+	select {
+	case o := <-doneB:
+		t.Fatalf("B 没有等 A 记完账就判定了: %+v %v", o.res, o.err)
+	case <-time.After(100 * time.Millisecond): // B 在等同一个种子的锁
+	}
+	close(blockA.release)
+	require.NoError(t, <-doneA)
+	o := <-doneB
+	require.NoError(t, o.err)
+	assert.Equal(t, PushStatusRejectedPlacement, o.res.Status)
+	assert.Empty(t, r.dls["qb-b"].addCalls(), "第二个下载器没有收到")
+	ti := r.record("race1")
+	require.NotNil(t, ti.DownloaderID)
+	assert.Equal(t, idA, *ti.DownloaderID)
+}

@@ -138,6 +138,9 @@ type TorrentInfoArchive struct {
 	PausePlannedAt   *time.Time `json:"pausePlannedAt"`
 	PauseRequestedAt *time.Time `json:"pauseRequestedAt"`
 	FreeEndFailures  int        `json:"freeEndFailures"`
+	FreeEndAlertedAt *time.Time `json:"freeEndAlertedAt"`
+	DetailID         string     `gorm:"size:64;default:''" json:"detailId"`
+	PushPendingAt    *time.Time `json:"pushPendingAt"`
 	ArchivedAt       time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
 }
 

@@ -159,6 +159,8 @@ type fakeDL struct {
 	adds    []downloader.AddTorrentOptions
 	added   map[string]bool
 	resumes []string
+	// dupOnAdd：预检查不到，加入时下载器才说已经有了（Transmission 会这样）
+	dupOnAdd map[string]bool
 }
 
 func newFakeDL(t *testing.T, name string) *fakeDL {
@@ -189,6 +191,9 @@ func newFakeDL(t *testing.T, name string) *fakeDL {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		d.adds = append(d.adds, opt)
+		if d.dupOnAdd[h] {
+			return downloader.AddTorrentResult{Success: true, Duplicate: true, Hash: h}, nil
+		}
 		d.added[h] = true
 		return downloader.AddTorrentResult{Success: true, Hash: h}, nil
 	}).AnyTimes()
@@ -599,4 +604,45 @@ func TestRSSFreeSafety_ButtonPushKeepsOwner(t *testing.T) {
 	r.round(a)
 	assert.False(t, r.staged(a, "o1"), "A 的推送循环看到已推送，清掉自己的暂存文件")
 	assert.Empty(t, r.dls["qb-a"].addCalls(), "已经在 B 的下载器里，A 不再推")
+}
+
+// 已推送、正受到期监控的种子：之后的 RSS 轮次照样读详情刷新资格；免费缩短把计划暂停提前，
+// 不再免费时改成现在（监控器马上暂停），并交给监控器重新预约。
+func TestRSSFreeSafety_PushedMonitoredRefreshMovesPausePlan(t *testing.T) {
+	r := newRSSRig(t)
+	feed := newFeedServer(t, "m1")
+	rss := r.addRSS(feed, models.RSSConfig{Name: "free", Tag: "movie", IntervalMinutes: 10, PauseOnFreeEnd: true})[0]
+	var scheduled []models.TorrentInfo
+	RegisterTorrentScheduler(func(ti models.TorrentInfo) { scheduled = append(scheduled, ti) })
+	t.Cleanup(func() { RegisterTorrentScheduler(nil) })
+
+	r.site.set("m1", freeUntil(48*time.Hour))
+	r.round(rss)
+	ti := r.record("m1")
+	require.True(t, pushedOf(ti))
+	require.NotNil(t, ti.PausePlannedAt)
+	firstPlan := *ti.PausePlannedAt
+
+	// 站点把免费缩短到 3 小时以后
+	shorter := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+	r.site.set("m1", v2.TorrentItem{DiscountLevel: v2.DiscountFree, DiscountEndTime: shorter})
+	r.round(rss)
+	ti = r.record("m1")
+	require.NotNil(t, ti.PausePlannedAt)
+	assert.True(t, ti.PausePlannedAt.Before(firstPlan), "计划暂停跟着缩短的结束时间提前")
+	require.NotNil(t, ti.FreeEndTime)
+	assert.True(t, ti.FreeEndTime.Equal(shorter))
+	require.NotEmpty(t, scheduled)
+	assert.True(t, scheduled[len(scheduled)-1].PausePlannedAt.Equal(*ti.PausePlannedAt), "交给监控器按新的时刻预约")
+
+	// 站点取消了免费
+	r.site.set("m1", v2.TorrentItem{DiscountLevel: v2.DiscountNone})
+	before := time.Now()
+	r.round(rss)
+	ti = r.record("m1")
+	assert.Equal(t, string(v2.FreeNotFree), ti.FreeValidity)
+	require.NotNil(t, ti.PausePlannedAt)
+	assert.False(t, ti.PausePlannedAt.After(time.Now()), "不再免费：计划暂停改成现在")
+	assert.False(t, ti.PausePlannedAt.Before(before.Add(-time.Second)))
+	assert.Len(t, r.dls["qb"].addCalls(), 1, "只是刷新资格，不会再推")
 }
