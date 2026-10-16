@@ -567,7 +567,14 @@ func TestFetchUnified_AlreadyPushedIsSkipped(t *testing.T) {
 	site := &unifiedFake{enabled: true}
 	require.NoError(t, FetchAndDownloadFreeRSSUnified(context.Background(), site,
 		models.RSSConfig{Name: "r", URL: srv.URL}))
-	assert.Equal(t, int32(0), site.detailCalls.Load(), "already-pushed torrent must be skipped before detail fetch")
+	// 已推送的不再下载、不再暂存；但每轮读一次详情刷新免费资格（硬性语义 5：删种与到期暂停按最新的事实处理）
+	assert.Equal(t, int32(0), site.downloadCalls.Load(), "already-pushed torrent must not be downloaded again")
+	assert.Equal(t, int32(1), site.detailCalls.Load(), "already-pushed torrent gets its free status refreshed")
+	got, err := db.GetTorrentBySiteAndID("springsunday", "g500")
+	require.NoError(t, err)
+	require.NotNil(t, got.IsPushed)
+	assert.True(t, *got.IsPushed)
+	assert.NotEmpty(t, got.FreeValidity, "资格按这一轮的详情写入")
 }
 
 func TestFetchUnified_ContextCanceled(t *testing.T) {

@@ -533,22 +533,19 @@ func downloadWorkerUnified(
 				sLogger().Errorf("从数据库获取种子: %s 详情失败, %v", title, err)
 				continue
 			}
-			if monitoredPushed(torrent) {
-				// 已推送、正受到期监控：读一次详情刷新资格，免费缩短或取消时把计划暂停改早（监控器据此暂停）
+			if torrent != nil && isPushed(torrent) {
+				// 已推送：读一次详情刷新资格，不再推送。免费缩短、延长或取消时，自动删种的「免费到期未完成删除」
+				// 与到期暂停都按新的事实处理（受到期监控的把计划暂停改到新的时刻，监控器据此暂停）
 				requestedAt := time.Now()
 				if d, derr := fetchDetail(v2.WithFreshAfter(ctx, attemptStart), site, item); derr != nil {
-					sLogger().Warnf("[到期监控] %s: 刷新已推送种子的资格失败，保持原来的计划: %v", title, derr)
-				} else if rerr := refreshMonitoredRecord(torrent, detailSnapshot(siteName, item.GUID, d, requestedAt), time.Now()); rerr != nil {
-					sLogger().Warnf("[到期监控] %s: 写回资格失败: %v", title, rerr)
+					sLogger().Warnf("%s: 刷新已推送种子的资格失败，保持原来的记录: %v", title, derr)
+				} else if rerr := refreshPushedRecord(torrent, detailSnapshot(siteName, item.GUID, d, requestedAt), time.Now()); rerr != nil {
+					sLogger().Warnf("%s: 写回已推送种子的资格失败: %v", title, rerr)
 				}
 				stats.skipped.Add(1)
 				continue
 			}
-			if shouldSkipExistingTorrent(torrent) {
-				sLogger().Infof("%s: 种子 %s 已跳过或已推送，直接跳过", title, item.GUID)
-				stats.skipped.Add(1)
-				continue
-			}
+			// 已跳过的记录也每轮读详情、整套刷新并按这一轮重新判断（不再等 6 小时）
 			if notifier := getRSSNotifier(); notifier != nil {
 				if rssCfg.NotifyMode == "all" || rssCfg.NotifyMode == "both" {
 					_, torrentRef := extractTorrentRef(item)

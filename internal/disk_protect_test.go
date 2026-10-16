@@ -308,7 +308,8 @@ func makeUniqueTorrentFile(t *testing.T, dir, nameSuffix string) (string, string
 	var buf bytes.Buffer
 	torrent := map[string]any{"info": map[string]any{"name": "abc-" + nameSuffix}}
 	require.NoError(t, bencode.NewEncoder(&buf).Encode(torrent))
-	path := filepath.Join(dir, "springsunday-x-"+nameSuffix+".torrent")
+	// 与生产命名一致：<站点>-<种子编号>.torrent，nameSuffix 就是对应记录的种子编号（暂存推送按文件名取记录）
+	path := filepath.Join(dir, "springsunday-"+nameSuffix+".torrent")
 	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
 	h, err := qbit.ComputeTorrentHashWithPath(path)
 	require.NoError(t, err)
@@ -346,7 +347,7 @@ func TestDiskProtect_RealRSSPath_SuccessKeepsReservation(t *testing.T) {
 	}
 	jobs := make([]job, workers)
 	for i := 0; i < workers; i++ {
-		path, hash := makeUniqueTorrentFile(t, dir, fmt.Sprintf("w%d", i))
+		path, hash := makeUniqueTorrentFile(t, dir, fmt.Sprintf("race-w%d", i))
 		pushed := false
 		future := time.Now().Add(1 * time.Hour)
 		ti := &models.TorrentInfo{

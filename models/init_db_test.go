@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,4 +85,34 @@ func TestTorrentDB_WithTransactionContext(t *testing.T) {
 	missHash, err := tdb.GetTorrentBySiteAndHash("s", "nohash")
 	require.NoError(t, err)
 	assert.Nil(t, missHash)
+}
+
+// free_ended_at 是只增不改的可空列：上一版的库启动时由 AutoMigrate 加上，已有记录是 NULL，其他值不变（不需要编号迁移）。
+func TestNewDB_UpgradeAddsFreeEndedAt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	tdb, err := NewDB(zapNopGormLogger())
+	require.NoError(t, err)
+	for _, m := range []any{&TorrentInfo{}, &TorrentInfoArchive{}} {
+		require.NoError(t, tdb.DB.Migrator().DropColumn(m, "free_ended_at"), "模拟上一版没有这一列")
+	}
+	end := time.Date(2026, 10, 20, 8, 0, 0, 0, time.Local)
+	require.NoError(t, tdb.DB.Table("torrent_infos").Create(map[string]any{
+		"site_name": "s", "torrent_id": "old", "is_free": true, "free_end_time": end, "is_pushed": true,
+	}).Error)
+	closeTestGorm(tdb.DB)
+
+	tdb, err = NewDB(zapNopGormLogger())
+	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(tdb.DB) })
+	assert.True(t, tdb.DB.Migrator().HasColumn(&TorrentInfo{}, "free_ended_at"))
+	assert.True(t, tdb.DB.Migrator().HasColumn(&TorrentInfoArchive{}, "free_ended_at"))
+	got, err := tdb.GetTorrentBySiteAndID("s", "old")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Nil(t, got.FreeEndedAt)
+	assert.True(t, got.IsFree)
+	require.NotNil(t, got.FreeEndTime)
+	assert.True(t, got.FreeEndTime.Equal(end))
 }

@@ -99,12 +99,15 @@ The freeleech path (free torrents in Smart and Free only modes) and filter rules
 
 A torrent that was not pushed last round (for example because the disk was full) has its site details read again before this round's push. If the item is no longer in the RSS feed or the details cannot be read, it is not pushed and last round's information is not reused. Filter rules with Free only off, Download now (立即下载) in a notification and manual pushes do not require freeleech; they push torrents that are not free as well.
 
+Every round reads the site details of every item in the feed, and torrents skipped earlier are decided again: if one becomes free later, or you change the filter rules or size limits, it is downloaded in the next round. Torrents already pushed are not pushed again, but when freeleech is shortened, extended or cancelled, Pause at freeleech end and the auto-cleanup option Delete torrents still unfinished when freeleech ends (免费到期仍未下完的种子自动删除) both follow the newly read end time. More items mean more requests to the site; for sites that are strict about request rates, such as M-Team, do not set the interval too short.
+
 Subscriptions of the same site that share a tag share a staging directory. Each torrent belongs to the subscription that first decided to download it; only that subscription pushes or cleans it up, with its own downloader, download path and Pause at freeleech end setting. Other subscriptions leave it alone.
 
 For subscriptions with Pause at freeleech end on:
 
 - The torrent is added to the downloader paused, and starts only after its task ID and the end-of-freeleech pause are recorded (it stays paused if the downloader is set not to start automatically).
 - If the site gave no freeleech end time, the torrent is only added paused and is not started automatically.
+- If the planned pause time (the freeleech end time minus the Act early minutes) has already passed or is less than a minute away, the torrent is also only added paused and is not started.
 - Download now (立即下载) in a notification uses this subscription's downloader, path and pause setting.
 - At pause time pt-tools reads the record again: if freeleech was extended, it waits for the new time. After pausing it reads the torrent back from the downloader, and only a paused state counts as success.
 - A failed pause is retried indefinitely (starting at 30 seconds and doubling, at most every 10 minutes). After 3 failures in a row, one Free-end pause failing (免费结束暂停失败) alert is sent to every enabled notification channel.

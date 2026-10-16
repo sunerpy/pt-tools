@@ -335,6 +335,9 @@ func newTestCleanupMonitor(t *testing.T) *CleanupMonitor {
 	return NewCleanupMonitor(db.DB, nil)
 }
 
+// cleanupTestDL 是删种判断所在的下载器：免费到期只看推到这个下载器的记录
+const cleanupTestDL = "qb1"
+
 func baseCfg() *models.SettingsGlobal {
 	return &models.SettingsGlobal{
 		CleanupEnabled:       true,
@@ -368,8 +371,8 @@ func TestShouldDelete_OR_SeedTimeExceeded(t *testing.T) {
 	t1 := seedingTorrent("1", "aaa", "T1", 73, 0.5)
 	t2 := seedingTorrent("2", "bbb", "T2", 71, 0.5)
 
-	assert.True(t, cm.shouldDelete(cfg, t1))
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestShouldDelete_OR_RatioReached(t *testing.T) {
@@ -380,8 +383,8 @@ func TestShouldDelete_OR_RatioReached(t *testing.T) {
 	t1 := seedingTorrent("1", "aaa", "T1", 10, 2.5)
 	t2 := seedingTorrent("2", "bbb", "T2", 10, 1.5)
 
-	assert.True(t, cm.shouldDelete(cfg, t1))
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestShouldDelete_OR_Inactive(t *testing.T) {
@@ -395,8 +398,8 @@ func TestShouldDelete_OR_Inactive(t *testing.T) {
 	t2 := seedingTorrent("2", "bbb", "T2", 49, 0.5)
 	t2.UploadSpeed = 1024
 
-	assert.True(t, cm.shouldDelete(cfg, t1))
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestShouldDelete_OR_AnyConditionSufficient(t *testing.T) {
@@ -407,15 +410,15 @@ func TestShouldDelete_OR_AnyConditionSufficient(t *testing.T) {
 
 	// Given: seed time exceeded but ratio not reached
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 1.0)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: ratio reached but seed time not exceeded
 	t2 := seedingTorrent("2", "bbb", "T2", 10, 5.0)
-	assert.True(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 
 	// Given: neither condition met
 	t3 := seedingTorrent("3", "ccc", "T3", 10, 1.0)
-	assert.False(t, cm.shouldDelete(cfg, t3))
+	assert.False(t, cm.shouldDelete(cfg, t3, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_AllConditionsRequired(t *testing.T) {
@@ -427,19 +430,19 @@ func TestShouldDelete_AND_AllConditionsRequired(t *testing.T) {
 
 	// Given: both conditions met
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 3.0)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: only seed time met
 	t2 := seedingTorrent("2", "bbb", "T2", 100, 1.0)
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 
 	// Given: only ratio met
 	t3 := seedingTorrent("3", "ccc", "T3", 10, 3.0)
-	assert.False(t, cm.shouldDelete(cfg, t3))
+	assert.False(t, cm.shouldDelete(cfg, t3, cleanupTestDL))
 
 	// Given: neither met
 	t4 := seedingTorrent("4", "ddd", "T4", 10, 1.0)
-	assert.False(t, cm.shouldDelete(cfg, t4))
+	assert.False(t, cm.shouldDelete(cfg, t4, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_SingleConditionAlwaysMatches(t *testing.T) {
@@ -451,7 +454,7 @@ func TestShouldDelete_AND_SingleConditionAlwaysMatches(t *testing.T) {
 
 	// Given: only seed time configured, seed time exceeded
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 0.5)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_NoConditions(t *testing.T) {
@@ -459,7 +462,7 @@ func TestShouldDelete_NoConditions(t *testing.T) {
 	cfg := baseCfg()
 
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 5.0)
-	assert.False(t, cm.shouldDelete(cfg, t1))
+	assert.False(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_FreeExpiredIncomplete(t *testing.T) {
@@ -471,22 +474,23 @@ func TestShouldDelete_FreeExpiredIncomplete(t *testing.T) {
 	hash := "abc123def456"
 	pushed := true
 	torrentInfo := models.TorrentInfo{
-		SiteName:    "testsite",
-		TorrentID:   "t1",
-		TorrentHash: &hash,
-		FreeEndTime: &expired,
-		IsFree:      true,
-		IsPushed:    &pushed,
-		Title:       "Test",
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &expired,
+		IsFree:         true,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Test",
 	}
 	require.NoError(t, cm.db.Create(&torrentInfo).Error)
 
 	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.5, State: downloader.TorrentDownloading}
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: completed torrent with expired free → should NOT delete
 	t2 := downloader.Torrent{ID: "2", InfoHash: hash, Progress: 1.0, State: downloader.TorrentSeeding}
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 // 过滤规则下载的半价种子：以前 RSS 把半价的结束时间记成了 free_end_time，库里留着这样的记录；
@@ -500,18 +504,19 @@ func TestShouldDelete_FreeExpiredSkipsNonFree(t *testing.T) {
 	hash := "half-price-hash"
 	pushed := true
 	require.NoError(t, cm.db.Create(&models.TorrentInfo{
-		SiteName:    "testsite",
-		TorrentID:   "t1",
-		TorrentHash: &hash,
-		FreeEndTime: &ended,
-		FreeLevel:   "PERCENT_50",
-		IsFree:      false,
-		IsPushed:    &pushed,
-		Title:       "Half Price",
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &ended,
+		FreeLevel:      "PERCENT_50",
+		IsFree:         false,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Half Price",
 	}).Error)
 
 	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.4, State: downloader.TorrentDownloading}
-	assert.False(t, cm.shouldDelete(cfg, t1))
+	assert.False(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_FreeExpiredDisabled(t *testing.T) {
@@ -523,17 +528,18 @@ func TestShouldDelete_FreeExpiredDisabled(t *testing.T) {
 	hash := "abc123def456"
 	pushed := true
 	torrentInfo := models.TorrentInfo{
-		SiteName:    "testsite",
-		TorrentID:   "t1",
-		TorrentHash: &hash,
-		FreeEndTime: &expired,
-		IsPushed:    &pushed,
-		Title:       "Test",
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &expired,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Test",
 	}
 	require.NoError(t, cm.db.Create(&torrentInfo).Error)
 
 	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.5}
-	assert.False(t, cm.shouldDelete(cfg, t1))
+	assert.False(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestSplitProtected_Downloading(t *testing.T) {
@@ -914,7 +920,7 @@ func TestShouldDelete_DefaultModeIsOR(t *testing.T) {
 	cfg.CleanupMaxSeedTimeH = 72
 
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 0.5)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_ThreeConditions(t *testing.T) {
@@ -928,12 +934,12 @@ func TestShouldDelete_AND_ThreeConditions(t *testing.T) {
 	// Given: all three met
 	t1 := seedingTorrent("1", "aaa", "T1", 49, 1.5)
 	t1.UploadSpeed = 0
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: two of three met (inactive not met because upload speed > 0)
 	t2 := seedingTorrent("2", "bbb", "T2", 49, 1.5)
 	t2.UploadSpeed = 1024
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestShouldDelete_FreeExpiredBypassesAndOr(t *testing.T) {
@@ -948,18 +954,19 @@ func TestShouldDelete_FreeExpiredBypassesAndOr(t *testing.T) {
 	hash := "free-expired-hash"
 	pushed := true
 	require.NoError(t, cm.db.Create(&models.TorrentInfo{
-		SiteName:    "testsite",
-		TorrentID:   "t1",
-		TorrentHash: &hash,
-		FreeEndTime: &expired,
-		IsFree:      true,
-		IsPushed:    &pushed,
-		Title:       "Free Expired",
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &expired,
+		IsFree:         true,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Free Expired",
 	}).Error)
 
 	// Given: AND mode with impossible conditions, but free expired
 	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.3, State: downloader.TorrentDownloading}
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_OR_SlowSeed(t *testing.T) {
@@ -971,22 +978,22 @@ func TestShouldDelete_OR_SlowSeed(t *testing.T) {
 	// Given: seeded 72h but ratio only 0.05 → low-efficiency, should delete
 	t1 := seedingTorrent("1", "aaa", "Slow", 72, 0.05)
 	t1.IsCompleted = true
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: seeded 72h and ratio 0.5 → above threshold, keep
 	t2 := seedingTorrent("2", "bbb", "OK", 72, 0.5)
 	t2.IsCompleted = true
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 
 	// Given: seeded only 24h with low ratio → not enough time yet, keep
 	t3 := seedingTorrent("3", "ccc", "Young", 24, 0.02)
 	t3.IsCompleted = true
-	assert.False(t, cm.shouldDelete(cfg, t3))
+	assert.False(t, cm.shouldDelete(cfg, t3, cleanupTestDL))
 
 	// Given: not completed yet → keep (still downloading)
 	t4 := seedingTorrent("4", "ddd", "Incomplete", 72, 0.01)
 	t4.IsCompleted = false
-	assert.False(t, cm.shouldDelete(cfg, t4))
+	assert.False(t, cm.shouldDelete(cfg, t4, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_SlowSeedWithOtherConditions(t *testing.T) {
@@ -1000,12 +1007,12 @@ func TestShouldDelete_AND_SlowSeedWithOtherConditions(t *testing.T) {
 	// Given: both seed time exceeded AND slow seed → delete
 	t1 := seedingTorrent("1", "aaa", "Both", 72, 0.05)
 	t1.IsCompleted = true
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: seed time exceeded but ratio above slow threshold → slow condition fails → AND fails
 	t2 := seedingTorrent("2", "bbb", "NotSlow", 72, 0.5)
 	t2.IsCompleted = true
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestDrainAndDebounce_ReturnsAfterQuiet(t *testing.T) {
