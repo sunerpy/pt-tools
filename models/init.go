@@ -41,6 +41,9 @@ type TorrentInfo struct {
 	LastError      string     `gorm:"default:''" json:"lastError"`
 	DownloadSource string     `gorm:"size:32;default:'free_download'" json:"downloadSource"` // free_download or filter_rule
 	FilterRuleID   *uint      `gorm:"index" json:"filterRuleId"`                             // ID of the matched filter rule
+	// PushedFilterRuleID 是把这个种子推进下载器的 RSS 过滤规则（推送时记下，之后不改）。FilterRuleID 是 RSS 最近一次判断命中的
+	// 规则，每轮刷新；规则命中数按它统计已推送的种子（「这条规则真的下过几个」）
+	PushedFilterRuleID *uint `gorm:"default:null" json:"pushedFilterRuleId"`
 
 	// 免费结束管理相关字段
 	DownloaderID     *uint      `gorm:"index" json:"downloaderId"`                // 推送到的下载器 ID
@@ -92,45 +95,46 @@ type TorrentInfo struct {
 
 // TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）
 type TorrentInfoArchive struct {
-	ID                uint       `gorm:"primaryKey" json:"id"`
-	OriginalID        uint       `gorm:"index" json:"originalId"`
-	SiteName          string     `gorm:"index" json:"siteName"`
-	TorrentID         string     `gorm:"index" json:"torrentId"`
-	TorrentHash       *string    `gorm:"index" json:"torrentHash"`
-	IsFree            bool       `json:"isFree"`
-	IsDownloaded      bool       `json:"isDownloaded"`
-	IsPushed          *bool      `json:"isPushed"`
-	IsSkipped         bool       `json:"isSkipped"`
-	FreeLevel         string     `json:"freeLevel"`
-	FreeEndTime       *time.Time `json:"freeEndTime"`
-	PushTime          *time.Time `json:"pushTime"`
-	Title             string     `json:"title"`
-	Category          string     `json:"category"`
-	Tag               string     `json:"tag"`
-	OriginalCreatedAt time.Time  `json:"originalCreatedAt"`
-	OriginalUpdatedAt time.Time  `json:"originalUpdatedAt"`
-	IsExpired         bool       `json:"isExpired"`
-	LastCheckTime     *time.Time `json:"lastCheckTime"`
-	RetryCount        int        `json:"retryCount"`
-	LastError         string     `json:"lastError"`
-	DownloadSource    string     `json:"downloadSource"`
-	FilterRuleID      *uint      `json:"filterRuleId"`
-	DownloaderID      *uint      `json:"downloaderId"`
-	DownloaderName    string     `json:"downloaderName"`
-	CompletedAt       *time.Time `json:"completedAt"`
-	IsPausedBySystem  bool       `json:"isPausedBySystem"`
-	PauseOnFreeEnd    bool       `json:"pauseOnFreeEnd"`
-	PausedAt          *time.Time `json:"pausedAt"`
-	PauseReason       string     `json:"pauseReason"`
-	IsCompleted       bool       `json:"isCompleted"`
-	Progress          float64    `json:"progress"`
-	TorrentSize       int64      `json:"torrentSize"`
-	DownloaderTaskID  string     `json:"downloaderTaskId"`
-	HasHR             bool       `json:"hasHR"`
-	HRSeedTimeH       int        `json:"hrSeedTimeH"`
-	CheckCount        int        `json:"checkCount"`
-	IMDbID            string     `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
-	DoubanID          string     `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
+	ID                 uint       `gorm:"primaryKey" json:"id"`
+	OriginalID         uint       `gorm:"index" json:"originalId"`
+	SiteName           string     `gorm:"index" json:"siteName"`
+	TorrentID          string     `gorm:"index" json:"torrentId"`
+	TorrentHash        *string    `gorm:"index" json:"torrentHash"`
+	IsFree             bool       `json:"isFree"`
+	IsDownloaded       bool       `json:"isDownloaded"`
+	IsPushed           *bool      `json:"isPushed"`
+	IsSkipped          bool       `json:"isSkipped"`
+	FreeLevel          string     `json:"freeLevel"`
+	FreeEndTime        *time.Time `json:"freeEndTime"`
+	PushTime           *time.Time `json:"pushTime"`
+	Title              string     `json:"title"`
+	Category           string     `json:"category"`
+	Tag                string     `json:"tag"`
+	OriginalCreatedAt  time.Time  `json:"originalCreatedAt"`
+	OriginalUpdatedAt  time.Time  `json:"originalUpdatedAt"`
+	IsExpired          bool       `json:"isExpired"`
+	LastCheckTime      *time.Time `json:"lastCheckTime"`
+	RetryCount         int        `json:"retryCount"`
+	LastError          string     `json:"lastError"`
+	DownloadSource     string     `json:"downloadSource"`
+	FilterRuleID       *uint      `json:"filterRuleId"`
+	PushedFilterRuleID *uint      `json:"pushedFilterRuleId"`
+	DownloaderID       *uint      `json:"downloaderId"`
+	DownloaderName     string     `json:"downloaderName"`
+	CompletedAt        *time.Time `json:"completedAt"`
+	IsPausedBySystem   bool       `json:"isPausedBySystem"`
+	PauseOnFreeEnd     bool       `json:"pauseOnFreeEnd"`
+	PausedAt           *time.Time `json:"pausedAt"`
+	PauseReason        string     `json:"pauseReason"`
+	IsCompleted        bool       `json:"isCompleted"`
+	Progress           float64    `json:"progress"`
+	TorrentSize        int64      `json:"torrentSize"`
+	DownloaderTaskID   string     `json:"downloaderTaskId"`
+	HasHR              bool       `json:"hasHR"`
+	HRSeedTimeH        int        `json:"hrSeedTimeH"`
+	CheckCount         int        `json:"checkCount"`
+	IMDbID             string     `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
+	DoubanID           string     `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
 	// 免费资格、归属与暂停记录：与 TorrentInfo 同名的列，归档时原样复制
 	FreeValidity     string     `gorm:"size:16;default:''" json:"freeValidity"`
 	FreeVerifiedAt   *time.Time `json:"freeVerifiedAt"`
