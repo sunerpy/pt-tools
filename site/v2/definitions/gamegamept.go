@@ -67,9 +67,10 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 				Attr:     "title",
 			},
 			"bonus": {
-				Selector: []string{"#info_block", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
+				// index.php 的币种是「G值」（userdetails.php 同位置写的是「魔力值」）
+				Selector: []string{"#info_block", "td.rowhead:contains('G值') + td", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
+				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:G值|魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
 			},
 			"joinTime": {
 				Selector: []string{"td.rowhead:contains('加入日期') + td", "td.rowhead:contains('Join') + td"},

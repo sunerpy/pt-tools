@@ -52,15 +52,15 @@ const gamegameptSearchFixture = `<html><body>
 </tbody></table>
 </body></html>`
 
+// index.php 顶部 #info_block：本站币种叫「G值」（不是魔力值），真实值形如 97,146.5。
+// 站内其它地方（公告、说明页）仍会出现「魔力值」字样，这里刻意保留作干扰项。
 const gamegameptIndexFixture = `<html><body>
-<table id="info_block"><tr><td>
-欢迎回来, <span class="nowrap"><a href="https://carpt.net/userdetails.php?id=15270" class='User_Name'><b>gamegamept_user</b></a></span>
-<font class='color_bonus'>魔力值 </font>[<a href="mybonus.php">使用</a>]: 1,234.5<br/>
-<font class="color_ratio">分享率:</font> ---
-<font class='color_uploaded'>上传量:</font> 0.00 KB
-<font class='color_downloaded'> 下载量:</font> 0.00 KB
-<font class='color_active'>当前活动:</font> <img class="arrowup" src="pic/trans.gif" />2 <img class="arrowdown" src="pic/trans.gif" />1
+<table id="info_block" cellpadding="4" cellspacing="0" border="0" width="100%"><tr><td>
+欢迎回来, <span class="nowrap"><a href="https://www.gamegamept.com/userdetails.php?id=15270" class='User_Name'><b>gamegamept_user</b></a></span>
+<font class = 'color_bonus'>G值 </font>[<a href="mybonus.php">使用</a>]: 1,234.5 <a href="attendance.php" class="faqlink">[签到得G值]</a> <a href="luckywheel.php">[幸运大转盘]</a>
+<font class="color_ratio">分享率:</font> --- <font class='color_uploaded'>上传量:</font> 0.00 KB <font class='color_downloaded'> 下载量:</font> 0.00 KB <font class='color_active'>当前活动:</font> <img class="arrowup" src="pic/trans.gif" />2 <img class="arrowdown" src="pic/trans.gif" />1
 </td></tr></table>
+<div class="notice">本站魔力值（即 G值）可用于兑换邀请与勋章。</div>
 </body></html>`
 
 const gamegameptUserdetailsFixture = `<html><body>
