@@ -128,7 +128,13 @@ const summaryStats = computed(() => {
   const stats = aggregatedStats.value;
   const items = [
     { label: "总上传", value: formatBytes(stats.totalUploaded), color: "#4ade80", icon: "↑" },
-    { label: "总下载", value: formatBytes(stats.totalDownloaded), color: "#f87171", icon: "↓" },
+    /* 下载量是站点计费的口径（按免费、折扣折算以后），分享图上也写明 */
+    {
+      label: "总下载（计费）",
+      value: formatBytes(stats.totalDownloaded),
+      color: "#f87171",
+      icon: "↓",
+    },
     { label: "分享率", value: formatRatio(stats.averageRatio), color: "#60a5fa", icon: "◎" },
     { label: "总魔力", value: formatNumber(stats.totalBonus), color: "#fbbf24", icon: "★" },
     {
@@ -165,7 +171,7 @@ const summaryStats = computed(() => {
         icon: "↗",
       },
       {
-        label: `${name}下载`,
+        label: `${name}下载（计费）`,
         value: `+${formatBytes(inc.totalDownloaded)}`,
         color: "#f87171",
         icon: "↘",

@@ -1401,10 +1401,20 @@ function ruleNameOf(id: number): string {
               <span class="sd-kv__k">等级</span>
               <span class="sd-kv__v">{{ siteStats.levelName || siteStats.rank || "-" }}</span>
             </li>
+            <!-- 下载量是站点计费的口径；站点另外报了实际传输量（没按优惠折算）时多一行 -->
             <li class="sd-kv__row">
-              <span class="sd-kv__k">上传 / 下载</span>
+              <span class="sd-kv__k">上传 / 下载（计费）</span>
               <span class="sd-kv__v">
                 {{ formatTB(siteStats.uploaded) }} / {{ formatTB(siteStats.downloaded) }}
+              </span>
+            </li>
+            <li
+              v-if="(siteStats.trueUploaded ?? 0) > 0 || (siteStats.trueDownloaded ?? 0) > 0"
+              class="sd-kv__row"
+              data-testid="site-true-transfer">
+              <span class="sd-kv__k">实际上传 / 下载</span>
+              <span class="sd-kv__v">
+                {{ formatTB(siteStats.trueUploaded) }} / {{ formatTB(siteStats.trueDownloaded) }}
               </span>
             </li>
             <li class="sd-kv__row">
