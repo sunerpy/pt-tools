@@ -181,11 +181,14 @@ type MTorrentSearchData struct {
 	Total FlexInt           `json:"total"`
 }
 
-// MTorrentPromotionRule represents an additional promotion rule from M-Team API
+// MTorrentPromotionRule represents an additional promotion rule from M-Team API.
+// 接口里的促销规则没有状态字段，只能按起止时间判断是否生效；Categories、Teams 是适用范围，空列表表示全站。
 type MTorrentPromotionRule struct {
-	Discount  string `json:"discount"`
-	StartTime string `json:"startTime,omitempty"`
-	EndTime   string `json:"endTime,omitempty"`
+	Discount   string         `json:"discount"`
+	StartTime  string         `json:"startTime,omitempty"`
+	EndTime    string         `json:"endTime,omitempty"`
+	Categories MTorrentIDList `json:"categories"`
+	Teams      MTorrentIDList `json:"teams"`
 }
 
 // MallSingleFree represents a mall single free from M-Team API
@@ -193,6 +196,76 @@ type MallSingleFree struct {
 	Status    string `json:"status,omitempty"`
 	StartDate string `json:"startDate,omitempty"`
 	EndDate   string `json:"endDate,omitempty"`
+}
+
+// MTorrentID 是可能以字符串或数字出现的编号（例如种子的 team）。解不开时当作没有，不报错：
+// 新读取的字段不能让原本能解析的整页结果失败。
+type MTorrentID string
+
+// UnmarshalJSON 接受字符串或数字；null、对象、数组当作没有
+func (id *MTorrentID) UnmarshalJSON(data []byte) error {
+	v, _ := decodeMTorrentID(data)
+	*id = MTorrentID(v)
+	return nil
+}
+
+// MTorrentIDList 是促销规则里的编号列表（categories、teams），元素可能是字符串也可能是数字。
+// 解不开时不报错（一个字段异常不该让整页结果都解析失败），记为 Invalid：无法证明覆盖，促销不适用。
+type MTorrentIDList struct {
+	Values  []string
+	Invalid bool
+}
+
+// UnmarshalJSON 接受字符串或数字组成的数组；null 当作空列表
+func (l *MTorrentIDList) UnmarshalJSON(data []byte) error {
+	*l = MTorrentIDList{}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		l.Invalid = true
+		return nil
+	}
+	for _, r := range raw {
+		v, ok := decodeMTorrentID(r)
+		if !ok {
+			l.Invalid = true
+			continue
+		}
+		l.Values = append(l.Values, v)
+	}
+	return nil
+}
+
+// covers 报告范围是否覆盖 id：空列表表示全站适用；列表非空时 id 必须在列表里，id 缺失就无法证明覆盖。
+func (l MTorrentIDList) covers(id string) bool {
+	if l.Invalid {
+		return false
+	}
+	if len(l.Values) == 0 {
+		return true
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, v := range l.Values {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeMTorrentID 把字符串或数字形式的编号解成去掉首尾空白的字符串；其他形式返回 ok=false
+func decodeMTorrentID(data []byte) (string, bool) {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		return strings.TrimSpace(s), true
+	}
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err == nil {
+		return n.String(), true
+	}
+	return "", false
 }
 
 // MTorrentTorrent represents a torrent in M-Team API response
@@ -212,6 +285,8 @@ type MTorrentTorrent struct {
 		MallSingleFree  *MallSingleFree        `json:"mallSingleFree,omitempty"`
 	} `json:"status"`
 	Category string `json:"category"`
+	// Team 是制作组编号，用来判断促销规则的 teams 范围
+	Team MTorrentID `json:"team"`
 	// IMDb、Douban 是条目链接（或编号），用 NormalizeIMDbID、NormalizeDoubanID 规整
 	IMDb   string `json:"imdb"`
 	Douban string `json:"douban"`
@@ -258,6 +333,8 @@ type MTorrentDriver struct {
 	userAgent      string
 	useFailover    bool
 	siteDefinition *SiteDefinition
+	// now 是判断优惠是否生效用的时钟，测试用来固定时间；为空时用 time.Now
+	now func() time.Time
 }
 
 // MTorrentDriverConfig holds configuration for creating an M-Team driver
@@ -482,24 +559,23 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 			searchData.Data[0].Name, searchData.Data[0].SmallDescr)
 	}
 
+	now := d.clock()
 	items := make([]TorrentItem, 0, len(searchData.Data))
 	for _, t := range searchData.Data {
-		discount, discountEndTime := parseMTorrentDiscountWithPromotionAndMallSingleFree(t.Status.Discount, t.Status.DiscountEndTime, t.Status.PromotionRule, t.Status.MallSingleFree)
 		item := TorrentItem{
-			ID:              t.ID,
-			Title:           t.Name,
-			Subtitle:        t.SmallDescr,
-			SizeBytes:       parseSize(t.Size),
-			Seeders:         t.Status.Seeders.Int(),
-			Leechers:        t.Status.Leechers.Int(),
-			Snatched:        t.Status.TimesCompleted.Int(),
-			SourceSite:      d.BaseURL,
-			Category:        getMTeamCategoryName(t.Category),
-			DiscountLevel:   discount,
-			DiscountEndTime: discountEndTime,
-			IMDbID:          NormalizeIMDbID(t.IMDb),
-			DoubanID:        NormalizeDoubanID(t.Douban),
+			ID:         t.ID,
+			Title:      t.Name,
+			Subtitle:   t.SmallDescr,
+			SizeBytes:  parseSize(t.Size),
+			Seeders:    t.Status.Seeders.Int(),
+			Leechers:   t.Status.Leechers.Int(),
+			Snatched:   t.Status.TimesCompleted.Int(),
+			SourceSite: d.BaseURL,
+			Category:   getMTeamCategoryName(t.Category),
+			IMDbID:     NormalizeIMDbID(t.IMDb),
+			DoubanID:   NormalizeDoubanID(t.Douban),
 		}
+		applyMTorrentDiscount(&item, evaluateMTorrentDiscount(&t, now))
 
 		// Parse upload time
 		if t.CreatedDate != "" {
@@ -774,46 +850,169 @@ func parseMTorrentDiscount(discount string) DiscountLevel {
 	}
 }
 
-func parseMTorrentDiscountWithPromotionAndMallSingleFree(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, mallSingleFree *MallSingleFree) (DiscountLevel, time.Time) {
-	return parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEndTime, promotion, mallSingleFree, time.Now())
+// M-Team 优惠的来源（TorrentItem.DiscountSource）
+const (
+	mteamSourceBase           = "base"
+	mteamSourcePromotionRule  = "promotion_rule"
+	mteamSourceMallSingleFree = "mall_single_free"
+)
+
+// mteamTimeLayout 是 M-Team 接口的时间格式：北京时间，不带时区
+const mteamTimeLayout = "2006-01-02 15:04:05"
+
+// mteamDiscount 是一条 M-Team 种子优惠的严格解析结果
+type mteamDiscount struct {
+	Level   DiscountLevel
+	EndTime time.Time // 零值：没有可信的结束时间
+	// Validity：免费时是 free_until 或 unknown，不是免费时是 not_free。
+	// M-Team 没有「长期有效」的明确标记，所以从不给 free_permanent。
+	Validity FreeValidity
+	Source   string // base、promotion_rule、mall_single_free；没有生效的优惠时为空
+	Err      string // 读取时遇到的问题（字段名: 问题类型），多条用「; 」连接
 }
 
+// mteamCandidate 是一条当前生效（或因时间无法解析而可能生效）的优惠
+type mteamCandidate struct {
+	level   DiscountLevel
+	end     time.Time // 零值：没有结束时间（缺失或无法解析）
+	trusted bool      // 起止时间都可信，且结束时间晚于现在
+	source  string
+}
+
+// better 报告 c 是否比 o 更该作为结果：下载计费比例低的优先；同比例时结束时间可信的优先；
+// 都可信时结束更晚的优先（免费期取最长的那段）；最后看优惠本身（2X 免费优于免费）。
+func (c mteamCandidate) better(o mteamCandidate) bool {
+	if cr, or := c.level.GetDownloadRatio(), o.level.GetDownloadRatio(); cr != or {
+		return cr < or
+	}
+	if c.trusted != o.trusted {
+		return c.trusted
+	}
+	if c.trusted && !c.end.Equal(o.end) {
+		return c.end.After(o.end)
+	}
+	return IsBetterDiscount(c.level, o.level)
+}
+
+// evaluateMTorrentDiscount 在 now 时严格解析一条种子的优惠。基础优惠、promotionRule、mallSingleFree 三者都看，
+// 只留下当前生效的（时间无法解析的算「可能生效」，但不可信），再按 better 选出结果。
+// 缺失或无法解析的结束时间不当作长期免费；基础优惠的结束时间已过就不再有效，不论哪一级。
+func evaluateMTorrentDiscount(t *MTorrentTorrent, now time.Time) mteamDiscount {
+	var notes []string
+	var cands []mteamCandidate
+
+	if level := parseMTorrentDiscount(t.Status.Discount); level != DiscountNone {
+		if end, active, trusted := mteamWindow("", "", "discountEndTime", t.Status.DiscountEndTime, now, &notes); active {
+			cands = append(cands, mteamCandidate{level: level, end: end, trusted: trusted, source: mteamSourceBase})
+		}
+	}
+
+	// promotionRule 没有状态字段：适用范围覆盖这条种子、且在起止时间内才算生效
+	if p := t.Status.PromotionRule; p != nil {
+		if level := parseMTorrentDiscount(p.Discount); level != DiscountNone && mteamPromotionCovers(p, t, &notes) {
+			end, active, trusted := mteamWindow("promotionRule.startTime", p.StartTime, "promotionRule.endTime", p.EndTime, now, &notes)
+			if active {
+				cands = append(cands, mteamCandidate{level: level, end: end, trusted: trusted, source: mteamSourcePromotionRule})
+			}
+		}
+	}
+
+	// 商城单种免费只认进行中（ONGOING）；没有结束时间同样是未知，不是长期免费
+	if m := t.Status.MallSingleFree; m != nil && strings.EqualFold(strings.TrimSpace(m.Status), "ONGOING") {
+		end, active, trusted := mteamWindow("mallSingleFree.startDate", m.StartDate, "mallSingleFree.endDate", m.EndDate, now, &notes)
+		if active {
+			cands = append(cands, mteamCandidate{level: DiscountFree, end: end, trusted: trusted, source: mteamSourceMallSingleFree})
+		}
+	}
+
+	result := mteamDiscount{Level: DiscountNone, Validity: FreeNotFree, Err: joinDiscountNotes(notes...)}
+	if len(cands) == 0 {
+		return result
+	}
+	best := cands[0]
+	for _, c := range cands[1:] {
+		if c.better(best) {
+			best = c
+		}
+	}
+	result.Level, result.EndTime, result.Source = best.level, best.end, best.source
+	switch {
+	case !IsFreeTorrent(best.level):
+		result.Validity = FreeNotFree
+	case best.trusted:
+		result.Validity = FreeUntil
+	default:
+		result.Validity = FreeUnknown
+	}
+	return result
+}
+
+// mteamWindow 按起止时间判断一条优惠在 now 时是否生效。空的起止时间表示这一端没有约束（没有结束时间
+// 不等于长期有效，只是结束时间未知）；非空但无法解析的时间记进 notes，这条优惠变成「可能生效、不可信」。
+// active=false 表示确定不生效：还没开始，或已经结束（结束时间不晚于 now）。
+func mteamWindow(startField, start, endField, end string, now time.Time, notes *[]string) (endAt time.Time, active, trusted bool) {
+	startAt, startErr := parseMTeamTime(start)
+	if startErr != nil {
+		*notes = append(*notes, DiscountTimeParseNote(startField))
+	}
+	endAt, endErr := parseMTeamTime(end)
+	if endErr != nil {
+		*notes = append(*notes, DiscountTimeParseNote(endField))
+	}
+	if !startAt.IsZero() && startAt.After(now) {
+		return time.Time{}, false, false
+	}
+	if !endAt.IsZero() && !endAt.After(now) {
+		return time.Time{}, false, false
+	}
+	return endAt, true, startErr == nil && endErr == nil && !endAt.IsZero()
+}
+
+// parseMTeamTime 解析 M-Team 的时间字段；空串返回零时间且没有错误（这一端没有约束）
+func parseMTeamTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	return ParseTimeInCST(mteamTimeLayout, value)
+}
+
+// mteamPromotionCovers 报告促销规则的适用范围是否覆盖这条种子；范围解不开时记下原因，当作不覆盖
+func mteamPromotionCovers(p *MTorrentPromotionRule, t *MTorrentTorrent, notes *[]string) bool {
+	if p.Categories.Invalid {
+		*notes = append(*notes, discountFormatParseNote("promotionRule.categories"))
+	}
+	if p.Teams.Invalid {
+		*notes = append(*notes, discountFormatParseNote("promotionRule.teams"))
+	}
+	return p.Categories.covers(t.Category) && p.Teams.covers(string(t.Team))
+}
+
+// applyMTorrentDiscount 把严格解析的结果写进 TorrentItem 的优惠字段
+func applyMTorrentDiscount(item *TorrentItem, d mteamDiscount) {
+	item.DiscountLevel = d.Level
+	item.DiscountEndTime = d.EndTime
+	item.DiscountValidity = d.Validity
+	item.DiscountSource = d.Source
+	item.DiscountErr = d.Err
+}
+
+// clock 返回判断优惠是否生效用的当前时间
+func (d *MTorrentDriver) clock() time.Time {
+	if d.now != nil {
+		return d.now()
+	}
+	return time.Now()
+}
+
+// parseMTorrentDiscountWithPromotionAndMallSingleFreeAt 只返回级别与结束时间（兼容旧调用）；
+// 有效性、来源与诊断说明见 evaluateMTorrentDiscount。不带种子的分类与制作组，有范围限制的促销不会生效。
 func parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, mallSingleFree *MallSingleFree, now time.Time) (DiscountLevel, time.Time) {
-	baseLevel := parseMTorrentDiscount(baseDiscount)
-	var baseEnd time.Time
-	if baseEndTime != "" {
-		baseEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", baseEndTime)
-	}
-
-	if promotion != nil && promotion.Discount != "" {
-		var promoStart, promoEnd time.Time
-		if promotion.StartTime != "" {
-			promoStart, _ = ParseTimeInCST("2006-01-02 15:04:05", promotion.StartTime)
-		}
-		if promotion.EndTime != "" {
-			promoEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", promotion.EndTime)
-		}
-
-		promoActive := (promoStart.IsZero() || !now.Before(promoStart)) && (promoEnd.IsZero() || now.Before(promoEnd))
-		if promoActive {
-			promoLevel := parseMTorrentDiscount(promotion.Discount)
-			if IsBetterDiscount(promoLevel, baseLevel) {
-				return promoLevel, promoEnd
-			}
-			if promoLevel == baseLevel && promoEnd.After(baseEnd) {
-				return promoLevel, promoEnd
-			}
-		}
-	} else if mallSingleFree != nil && mallSingleFree.Status == "ONGOING" && mallSingleFree.StartDate != "" && mallSingleFree.EndDate != "" {
-		var singleFreeStart, singleFreeEnd time.Time
-		singleFreeStart, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.StartDate)
-		singleFreeEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.EndDate)
-		if (singleFreeStart.IsZero() || !now.Before(singleFreeStart)) && (singleFreeEnd.IsZero() || now.Before(singleFreeEnd)) {
-			return DiscountFree, singleFreeEnd
-		}
-	}
-
-	return baseLevel, baseEnd
+	var t MTorrentTorrent
+	t.Status.Discount, t.Status.DiscountEndTime = baseDiscount, baseEndTime
+	t.Status.PromotionRule, t.Status.MallSingleFree = promotion, mallSingleFree
+	d := evaluateMTorrentDiscount(&t, now)
+	return d.Level, d.EndTime
 }
 
 // ============================================================================
@@ -1113,19 +1312,20 @@ func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _, _ string
 		return nil, fmt.Errorf("parse torrent detail: %w", err)
 	}
 
-	discount, discountEndTime := parseMTorrentDiscountWithPromotionAndMallSingleFree(detail.Status.Discount, detail.Status.DiscountEndTime, detail.Status.PromotionRule, detail.Status.MallSingleFree)
+	// 详情是实时请求：取得数据的时间既是判断优惠是否生效的时间，也是 FetchedAt
+	fetchedAt := d.clock()
 	item := &TorrentItem{
-		ID:              detail.ID,
-		Title:           detail.Name,
-		Seeders:         int(detail.Status.Seeders),
-		Leechers:        int(detail.Status.Leechers),
-		Snatched:        int(detail.Status.TimesCompleted),
-		SourceSite:      d.getSiteID(),
-		DiscountLevel:   discount,
-		DiscountEndTime: discountEndTime,
-		IMDbID:          NormalizeIMDbID(detail.IMDb),
-		DoubanID:        NormalizeDoubanID(detail.Douban),
+		ID:         detail.ID,
+		Title:      detail.Name,
+		Seeders:    int(detail.Status.Seeders),
+		Leechers:   int(detail.Status.Leechers),
+		Snatched:   int(detail.Status.TimesCompleted),
+		SourceSite: d.getSiteID(),
+		IMDbID:     NormalizeIMDbID(detail.IMDb),
+		DoubanID:   NormalizeDoubanID(detail.Douban),
+		FetchedAt:  fetchedAt.UTC(),
 	}
+	applyMTorrentDiscount(item, evaluateMTorrentDiscount(&detail, fetchedAt))
 
 	if detail.SmallDescr != "" {
 		item.Tags = []string{detail.SmallDescr}

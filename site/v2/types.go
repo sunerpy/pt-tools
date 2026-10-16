@@ -39,6 +39,9 @@ var (
 	ErrUserInfoPersist = errors.New("persist user info failed")
 	// ErrCloudflareChallenge 表示站点返回的是 Cloudflare 质询页：请求被反爬拦截，凭证本身未必有问题。
 	ErrCloudflareChallenge = errors.New("cloudflare challenge")
+	// ErrTorrentDetailUnavailable 表示读不到这个种子的详情（站点上找不到，或缓存里没有）。
+	// 调用方要当作取详情失败处理，不能当成「不是免费」，也不能沿用旧数据。
+	ErrTorrentDetailUnavailable = errors.New("torrent detail unavailable")
 )
 
 // SiteKind represents the type of PT site architecture
@@ -359,6 +362,8 @@ type TorrentItem struct {
 	DiscountSource string `json:"discountSource,omitempty"`
 	// DiscountErr 是读取优惠时遇到的问题（例如结束时间无法解析），只写字段名与错误类型，不放原始响应
 	DiscountErr string `json:"discountErr,omitempty"`
+	// FetchedAt 是底层数据实际取得的时间（缓存命中时是缓存刷新的时间）；为零时调用方按调用时间算
+	FetchedAt time.Time `json:"fetchedAt,omitempty"`
 	// HasHR indicates if the torrent has H&R requirements
 	HasHR bool `json:"hasHR,omitempty"`
 	// DownloadURL is the direct download URL
@@ -630,7 +635,9 @@ type HashDownloader interface {
 type TorrentDetailFetcher interface {
 	// GetTorrentDetail fetches detailed torrent info given an RSS item's GUID and link.
 	// The guid is typically the torrent ID, and link is the detail page URL.
-	// Returns nil TorrentItem if the torrent is not found (without error).
+	// 找不到种子或读不到详情时返回包装了 ErrTorrentDetailUnavailable 的错误，不返回 (nil, nil)，
+	// 也不返回一个「没有优惠」的占位结果（那等于声称不是免费）。
+	// 实时请求得到的结果写 FetchedAt；结果来自缓存时 FetchedAt 是缓存刷新的时间。
 	GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error)
 }
 
