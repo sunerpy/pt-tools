@@ -27,6 +27,7 @@ class AppTotals {
 
   int uploaded;
 
+  /// 已启用站点的计费下载量合计：站点按优惠折算后的下载量（计入分享率），不是实际传输量
   int downloaded;
 
   double ratio;

@@ -23,6 +23,7 @@ class AppSiteDelta {
 
   int uploaded;
 
+  /// 这个站点今天计费下载量的增量；每日快照只存计费口径，没有实际传输量
   int downloaded;
 
   double bonus;

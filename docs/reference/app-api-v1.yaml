@@ -750,7 +750,10 @@ components:
         ]
       properties:
         uploaded: { type: integer, format: int64 }
-        downloaded: { type: integer, format: int64 }
+        downloaded:
+          type: integer
+          format: int64
+          description: "已启用站点的计费下载量合计：站点按优惠折算后的下载量（计入分享率），不是实际传输量"
         ratio: { type: number, format: double }
         seeding: { type: integer }
         leeching: { type: integer }
@@ -766,7 +769,10 @@ components:
         from: { type: string }
         to: { type: string }
         uploaded: { type: integer, format: int64 }
-        downloaded: { type: integer, format: int64 }
+        downloaded:
+          type: integer
+          format: int64
+          description: "今天计费下载量的增量；每日快照只存计费口径，没有实际传输量"
         bonus: { type: number, format: double }
         sites:
           type: array
@@ -778,7 +784,10 @@ components:
       properties:
         site: { type: string }
         uploaded: { type: integer, format: int64 }
-        downloaded: { type: integer, format: int64 }
+        downloaded:
+          type: integer
+          format: int64
+          description: "这个站点今天计费下载量的增量；每日快照只存计费口径，没有实际传输量"
         bonus: { type: number, format: double }
     AppSiteList:
       type: object
@@ -835,7 +844,10 @@ components:
         username: { type: string }
         level: { type: string }
         uploaded: { type: integer, format: int64 }
-        downloaded: { type: integer, format: int64 }
+        downloaded:
+          type: integer
+          format: int64
+          description: "站点按优惠折算后的计费下载量（计入分享率），不是实际传输量"
         ratio: { type: number, format: double }
         bonus: { type: number, format: double }
         bonus_per_hour: { type: number, format: double }

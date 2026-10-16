@@ -55,7 +55,7 @@ type AppOverview struct {
 	UpdatedAt int64     `json:"updated_at"`
 }
 
-// AppTotals 是已启用站点的合计。
+// AppTotals 是已启用站点的合计。Downloaded 是计费下载量（站点按优惠折算以后计入分享率），不是实际传输量。
 type AppTotals struct {
 	Uploaded       int64   `json:"uploaded"`
 	Downloaded     int64   `json:"downloaded"`
@@ -70,6 +70,7 @@ type AppTotals struct {
 }
 
 // AppDelta 是一段时间里的增量（站点数据历史，M2）。Error 不为空时增量没算出来，数字都是 0，不代表这段时间没有流量。
+// 增量来自每日快照，Downloaded 只有计费口径。
 type AppDelta struct {
 	From       string         `json:"from"`
 	To         string         `json:"to"`
@@ -171,7 +172,7 @@ type AppSiteAttendance struct {
 	LastAttemptAt *int64 `json:"last_attempt_at,omitempty"`
 }
 
-// AppSiteUser 是站点上的用户数据。
+// AppSiteUser 是站点上的用户数据。Downloaded 是计费下载量，不是实际传输量。
 type AppSiteUser struct {
 	Username       string  `json:"username"`
 	Level          string  `json:"level,omitempty"`
