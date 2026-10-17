@@ -12,8 +12,17 @@ import (
 // 分享率不到 1 时，上游 NexusPHP 把数值包在带颜色的 <font> 里（include/functions.php 的 get_ratio、
 // public/userdetails.php 的「传输」格，颜色来自 get_ratio_color）。分享率正则不能停在颜色值上：
 // 以前 25 个站点的 [^\d∞]* 会把 0.750 取成 880000 / 990000 这类数。
-// 每个 NexusPHP 站的 ratio 选择器要么取到 0.75，要么取不到（取不到时按上传量 / 下载量计算）。
+// 每个 NexusPHP 站的 ratio 选择器要么取到 0.75，要么取不到（取不到时按上传量 / 下载量计算）；
+// 按上游写法改过的站（fixedRatioSites）必须取到 0.75，不能靠「取不到」通过。
 func TestAllSites_RatioIgnoresFontColor(t *testing.T) {
+	fixedRatioSites := map[string]bool{
+		"52pt": true, "byrpt": true, "carpt": true, "cyanbug": true, "dubhe": true, "duckboobee": true,
+		"gtkpw": true, "hdfans": true, "hdhome": true, "hdtime": true, "hdvideo": true, "hxpt": true,
+		"lajidui": true, "lemonhd": true, "longpt": true, "nicept": true, "ourbits": true, "ptcafe": true,
+		"ptlover": true, "ptskit": true, "raingfh": true, "tmpt": true, "ubits": true, "xingyunge": true,
+		"zmpt": true, "gamegamept": true, "crabpt": true,
+	}
+	seen := 0
 	colors := []string{"#ff0000", "#ee0000", "#dd0000", "#cc0000", "#bb0000", "#aa0000", "#990000", "#880000", "#770000", "#660000"}
 	for _, color := range colors {
 		ratio := `<font color="` + color + `">0.750</font>`
@@ -34,7 +43,9 @@ func TestAllSites_RatioIgnoresFontColor(t *testing.T) {
 				continue
 			}
 			got := newTestNexusPHPDriver(def).ExtractFieldValuePublic(doc, sel)
-			if got == "" || got == "0" {
+			if fixedRatioSites[def.ID] {
+				seen++
+			} else if got == "" || got == "0" {
 				continue
 			}
 			v, err := strconv.ParseFloat(got, 64)
@@ -43,4 +54,6 @@ func TestAllSites_RatioIgnoresFontColor(t *testing.T) {
 			}
 		}
 	}
+	// 名单里的站都还注册着：改名或删站时这里会提醒同步名单
+	assert.Equal(t, len(fixedRatioSites)*len(colors), seen)
 }
