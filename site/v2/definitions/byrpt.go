@@ -59,7 +59,7 @@ var BYRPTDefinition = &v2.SiteDefinition{
 				Selector: []string{"td.rowhead:contains('传输') + td", ".navbar-user-data", "body"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)[^\d∞]*([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)(?:<[^>]*>|[\s\p{Zs}：:])*([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},

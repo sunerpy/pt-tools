@@ -51,7 +51,7 @@ var CarPTDefinition = &v2.SiteDefinition{
 			"ratio": {
 				Selector: []string{"td.rowhead:contains('传输') + td", "td.rowhead:contains('分享率') + td", "#info_block"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)[^\d∞]*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
+				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s\p{Zs}：:])*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
 			},
 			"levelName": {
 				Selector: []string{"td.rowhead:contains('等级') + td > img", "td.rowhead:contains('等级') + td img", "td.rowhead:contains('Class') + td > img"},

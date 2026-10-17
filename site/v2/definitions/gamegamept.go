@@ -60,9 +60,18 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 			"ratio": {
 				Selector: []string{"td.rowhead:contains('传输') + td", "td.rowhead:contains('分享率') + td", "#info_block"},
 				Attr:     "html",
-				// 标签与数值之间只跳过标签、空白和冒号：分享率不到 1 时数值包在 <font color="#880000"> 里，
-				// 原来的 [^\d∞]* 会停在颜色值上，把 880000 当成分享率
-				Filters: []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s：:])*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
+				Filters: []v2.Filter{
+					// 标签与数值之间只跳过标签、空白和冒号：分享率不到 1 时数值包在 <font color="#880000"> 里，
+					// 原来的 [^\d∞]* 会停在颜色值上，把 880000 当成分享率
+					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s\p{Zs}：:])*([\d.,]+|无限|無限|∞|Inf|---)`}},
+					// 无穷分享率（无限 / 無限 / Inf. / ∞）和 CrabPT 一样折算成 9999999；原来 parseNumber 把它变成 0，
+					// 分享率门槛判断当成不达标。parseNumber 输出 9.999999e+06，parseRatio 照样解析成 9999999
+					{Name: "replace", Args: []any{"无限", "9999999"}},
+					{Name: "replace", Args: []any{"無限", "9999999"}},
+					{Name: "replace", Args: []any{"∞", "9999999"}},
+					{Name: "replace", Args: []any{"Inf", "9999999"}},
+					{Name: "parseNumber"},
+				},
 			},
 			"levelName": {
 				Selector: []string{"td.rowhead:contains('等级') + td > img", "td.rowhead:contains('等级') + td img", "td.rowhead:contains('Class') + td > img"},
