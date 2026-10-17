@@ -350,7 +350,8 @@ func (a *fakeAudit) all() []app.AuditEntry {
 
 func newTestDB(t testing.TB) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "assistant.db")), &gorm.Config{})
+	// 测试库不刷盘（同 core.NewTempDBDir）：Windows runner 上每次写都要刷盘，一条 SQL 能慢到几秒
+	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "assistant.db")+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() { closeTestGorm(db) })
 	sqlDB, err := db.DB()
@@ -394,7 +395,8 @@ func newEnv(t *testing.T) *env {
 	e.svc.confirmUnit = 200 * time.Millisecond
 	require.NoError(t, e.svc.Start(context.Background()))
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// 运行都退出了 Close 就返回；时限要给够：等不到就关库，后台还在写，Windows 上临时目录删不掉
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_ = e.svc.Close(ctx)
 	})

@@ -45,6 +45,8 @@ export default defineConfig({
   test: {
     // 见 src/test-setup.ts：happy-dom 的 storage 被 Node 25 的原生同名全局遮住了
     setupFiles: ["./src/test-setup.ts"],
+    // 挂载整页的视图测试在 CI 上一个要 2–5 秒，默认 5 秒的时限会偶发超时
+    testTimeout: 20_000,
   },
   server: {
     proxy: {
