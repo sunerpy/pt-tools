@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -200,6 +201,20 @@ func TestGameGamePT_UserInfoVariants(t *testing.T) {
 			require.NotEqual(t, gamegameptMyBonusFixture, html)
 			doc := FixtureDoc(t, "gamegamept_mybonus_"+total, html)
 			assert.Equal(t, "581.337", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonusPerHour"]))
+		})
+	}
+
+	// 无穷分享率（简体「无限」、繁体「無限」、英文「Inf.」，上游 lang_functions.php 的 text_inf）和 CrabPT 一样折算成 9999999：
+	// 原来交给 parseNumber 变成 0，下载量为 0 时也不会按上传量 / 下载量重算，分享率门槛判断当成不达标
+	for _, inf := range []string{"无限", "無限", "Inf.", "∞"} {
+		t.Run("ratio/"+inf, func(t *testing.T) {
+			html := strings.Replace(gamegameptIndexFixture, `<font class="color_ratio">分享率:</font> ---`, `<font class="color_ratio">分享率:</font> `+inf, 1)
+			require.NotEqual(t, gamegameptIndexFixture, html)
+			doc := FixtureDoc(t, "gamegamept_index_inf", html)
+			got := driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"])
+			v, err := strconv.ParseFloat(got, 64)
+			require.NoError(t, err, "ratio %q", got)
+			assert.Equal(t, float64(9999999), v)
 		})
 	}
 
