@@ -22,7 +22,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - Times are Unix timestamps in seconds. Sizes and uploaded or downloaded amounts are in bytes, speeds in bytes per second, and progress is a percentage from 0 to 100.
 - Paged endpoints accept the query parameters `page` (starting at 1) and `page_size` (20 by default; each endpoint states its maximum) and respond with `{"items": [...], "total": count, "page": page, "page_size": size}`.
 - Compatibility: `remote_api_level` in `GET /meta` is currently 1 and goes up only for incompatible changes. New endpoints or fields are not incompatible changes, so clients should ignore fields they do not know.
-- Contract: the machine-readable description is [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/main/docs/reference/app-api-v1.yaml) (OpenAPI 3.0) in the repository. pt-tools' tests check every endpoint's real responses against it, and the mobile app's Dart models are generated from it.
+- Contract: the machine-readable description is [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/v1.0.0-rc/docs/reference/app-api-v1.yaml) (OpenAPI 3.0) in the repository. pt-tools' tests check every endpoint's real responses against it, and the mobile app's Dart models are generated from it.
 
 ## Errors
 
