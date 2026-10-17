@@ -1036,11 +1036,8 @@ func TestFreeEndMonitor_ScheduleTorrent_SkipConditions(t *testing.T) {
 func TestFreeEndMonitor_CancelTorrent(t *testing.T) {
 	db := setupTestDB(t)
 	dlMgr := downloader.NewDownloaderManager()
+	// 不 Start：周期巡检会把这里刚取消的预约补回来
 	monitor := NewFreeEndMonitor(db.DB, dlMgr)
-
-	err := monitor.Start()
-	require.NoError(t, err)
-	defer monitor.Stop()
 
 	freeEndTime := time.Now().Add(1 * time.Hour)
 	torrent := models.TorrentInfo{
@@ -1052,7 +1049,7 @@ func TestFreeEndMonitor_CancelTorrent(t *testing.T) {
 		FreeEndTime:      &freeEndTime,
 		DownloaderTaskID: "test-hash-123",
 	}
-	err = db.DB.Create(&torrent).Error
+	err := db.DB.Create(&torrent).Error
 	require.NoError(t, err)
 
 	monitor.ScheduleTorrent(torrent)
@@ -1078,10 +1075,8 @@ func TestFreeEndMonitor_HandleFreeEndedTorrent_Completed(t *testing.T) {
 
 	dlMgr := setupTestDownloaderManager(t, srv)
 
+	// 不 Start：周期巡检会和这里抢同一个种子（直接调用被 inFlight 挡掉，断言读到处理前的记录），这里只测处理函数本身
 	monitor := NewFreeEndMonitor(db.DB, dlMgr)
-	err := monitor.Start()
-	require.NoError(t, err)
-	defer monitor.Stop()
 
 	freeEndTime := time.Now().Add(-1 * time.Minute)
 	torrent := models.TorrentInfo{
@@ -1094,7 +1089,7 @@ func TestFreeEndMonitor_HandleFreeEndedTorrent_Completed(t *testing.T) {
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
 	}
-	err = db.DB.Create(&torrent).Error
+	err := db.DB.Create(&torrent).Error
 	require.NoError(t, err)
 
 	monitor.handleFreeEndedTorrent(torrent)
@@ -1114,10 +1109,8 @@ func TestFreeEndMonitor_HandleFreeEndedTorrent_NotCompleted(t *testing.T) {
 
 	dlMgr := setupTestDownloaderManager(t, srv)
 
+	// 不 Start：周期巡检会和这里抢同一个种子（直接调用被 inFlight 挡掉，断言读到处理前的记录），这里只测处理函数本身
 	monitor := NewFreeEndMonitor(db.DB, dlMgr)
-	err := monitor.Start()
-	require.NoError(t, err)
-	defer monitor.Stop()
 
 	freeEndTime := time.Now().Add(-1 * time.Minute)
 	torrent := models.TorrentInfo{
@@ -1130,7 +1123,7 @@ func TestFreeEndMonitor_HandleFreeEndedTorrent_NotCompleted(t *testing.T) {
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
 	}
-	err = db.DB.Create(&torrent).Error
+	err := db.DB.Create(&torrent).Error
 	require.NoError(t, err)
 
 	monitor.handleFreeEndedTorrent(torrent)
@@ -1873,6 +1866,11 @@ func TestAdvanceLargerThanFreeWindow_Immediate(t *testing.T) {
 
 	setAdvanceMinutes(t, db, 10)
 	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+	// 计时器起的处理做完再关库（这个 Cleanup 比关库的先执行）
+	t.Cleanup(func() {
+		monitor.cancel()
+		monitor.wg.Wait()
+	})
 
 	freeEnd := time.Now().Add(2 * time.Minute)
 	torrent := models.TorrentInfo{
@@ -1887,22 +1885,23 @@ func TestAdvanceLargerThanFreeWindow_Immediate(t *testing.T) {
 	}
 	require.NoError(t, db.DB.Create(&torrent).Error)
 
+	effectiveDelay := time.Until(effectiveDeadline(&freeEnd, monitor.advanceDuration()))
+	assert.LessOrEqual(t, effectiveDelay, time.Duration(0), "effective deadline should be in the past")
+
 	require.NotPanics(t, func() {
 		monitor.scheduleTask(torrent)
 	})
 
+	// 处理时刻已经过了：计时器马上触发，种子当场按到期处理（下载没完成 → 暂停），预约随之清掉。
+	// 不在调度之后查预约还在不在：处理可能已经跑完、把它删了（CI 上的偶发失败就是这样）
+	require.Eventually(t, func() bool {
+		var got models.TorrentInfo
+		return db.DB.First(&got, torrent.ID).Error == nil && got.IsPausedBySystem
+	}, 10*time.Second, 10*time.Millisecond, "deadline already passed: the torrent should be handled at once")
 	monitor.mu.Lock()
-	task, exists := monitor.pendingTasks[torrent.ID]
+	_, pending := monitor.pendingTasks[torrent.ID]
 	monitor.mu.Unlock()
-	require.True(t, exists)
-	require.NotNil(t, task.timer)
-	task.timer.Stop()
-	if task.cancel != nil {
-		task.cancel()
-	}
-
-	effectiveDelay := time.Until(effectiveDeadline(&freeEnd, monitor.advanceDuration()))
-	assert.LessOrEqual(t, effectiveDelay, time.Duration(0), "effective deadline should be in the past")
+	assert.False(t, pending, "a handled torrent leaves no pending task")
 }
 
 func TestMarkRetry_NotDoubleAdvanced(t *testing.T) {
