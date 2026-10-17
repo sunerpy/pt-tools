@@ -74,9 +74,10 @@ func TestHDAreaAttendanceResponses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var method, path, body string
+			var method, path, query, contentType, body string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				method, path = r.Method, r.URL.Path
+				method, path, query = r.Method, r.URL.Path, r.URL.RawQuery
+				contentType = r.Header.Get("Content-Type")
 				raw, _ := io.ReadAll(r.Body)
 				body = string(raw)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -91,6 +92,9 @@ func TestHDAreaAttendanceResponses(t *testing.T) {
 			assert.NotEmpty(t, res.Message)
 			assert.Equal(t, http.MethodPost, method)
 			assert.Equal(t, "/sign_in.php", path)
+			// 参数只在表单体里：URL 上不能再带一份 action=sign_in
+			assert.Empty(t, query, "POST 签到不带查询串")
+			assert.Equal(t, "application/x-www-form-urlencoded", contentType)
 			assert.Equal(t, "action=sign_in", body)
 		})
 	}
