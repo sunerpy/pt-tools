@@ -1,4 +1,4 @@
-# Media recognition
+# Media recognition <Badge type="tip" text="1.0 preview" />
 
 pt-tools parses torrent titles and finds the matching movie or TV show on TMDB. [Media library organising](media-library.md) names files from the results, and subscriptions will use them later; in Media → Media recognition (媒体 → 媒体识别) you can preview and correct them, and keep recognition words.
 

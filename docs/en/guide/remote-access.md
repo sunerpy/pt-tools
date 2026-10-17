@@ -1,4 +1,4 @@
-# Remote access
+# Remote access <Badge type="tip" text="1.0 preview" />
 
 Remote access lets the pt-tools mobile app show your torrents, site statistics and subscriptions while you are away from home, and, with the permissions you grant, pause, delete and push torrents or manage subscriptions. You pair a phone by scanning a QR code in the web interface; from then on the app reaches this pt-tools through a direct address or through a relay. The connection is end-to-end encrypted: a relay only forwards it and cannot read it.
 

@@ -1,4 +1,4 @@
-# Media library organising
+# Media library organising <Badge type="tip" text="1.0 preview" />
 
 pt-tools can put finished movies and TV shows into your media library: it recognises the title, places the files in the library folder following the library's naming template (hard links by default, so no extra space is used and the torrent keeps seeding), writes NFO files and artwork, asks Emby, Jellyfin or Plex to scan, and sends a notification.
 

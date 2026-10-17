@@ -1,4 +1,4 @@
-# Subscriptions
+# Subscriptions <Badge type="tip" text="1.0 preview" />
 
 Once you subscribe to a film or one season of a series, pt-tools searches your sites on a schedule and also picks it up from RSS: it chooses the best release for your quality profile, pushes it to a downloader, and once the download completes, [library organising](media-library.md) puts it into your media library. For series it fills in missing episodes from TMDB's episode list; with upgrades on, it keeps looking for a better release and replaces the old one after the new one is organised. A Douban "wish list" (想看) can create subscriptions automatically.
 

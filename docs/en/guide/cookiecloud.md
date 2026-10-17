@@ -1,4 +1,4 @@
-# CookieCloud import
+# CookieCloud import <Badge type="tip" text="1.0 preview" />
 
 CookieCloud import (CookieCloud 导入), under Sites (站点), fetches the cookies the browser extension syncs to your self-hosted [CookieCloud](https://github.com/easychen/CookieCloud) server, decrypts them on this machine, picks the cookies that work for pt-tools sites by their addresses, and writes them into the sites after a preview. Scheduled sync is available and off by default.
 

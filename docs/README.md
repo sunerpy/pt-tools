@@ -7,6 +7,7 @@
 ## 开始使用
 
 - [pt-tools 是什么](guide/what-is-pt-tools.md)：工作方式、界面各页的用途与适用场景。
+- [1.0 预览版新功能](guide/whats-new-1.0.md)：0.48.0 之后预览版加入的功能与重要修复。
 - [安装](guide/install.md)：Docker、Linux 与 Windows 的安装方式、环境变量和首次登录。
 - [快速开始](guide/quick-start.md)：添加下载器、站点和 RSS 订阅，确认第一次自动下载。
 - [配置说明](configuration.md)：环境变量、代理、全局设置、下载器、持久化、日志和备份。
@@ -125,18 +126,19 @@ cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://
 - **规范书面语**：中文页不用口语（还没、没能、免得、搭的、咋、啥、搞定、折腾），英文页不用 just、gonna、stuff。中文与英文、数字之间留空格。
 - **用户页不写内部实现**：不出现 `UnifiedPTSite`、`ConfigStore`、`DiskBudget`、`MessageChain` 之类的代码名和 `§` 符号；`reference/developers.md` 例外。同步脚本会拒绝这些词。
 - **未发布的能力单独说明**：实验性、开发中和计划中的功能用 `<StatusTag>` 标出，不能写成已经可用。
+- **预览版的能力要标出来**：文档站按 1.0 预览版发布。只在预览版里的功能，首页条目用 `status: preview`，整页都是新功能的页面在标题后加 `<Badge type="tip" text="1.0 预览版" />`（英文页 `text="1.0 preview"`），只有一部分是新功能的页面在开头或对应小节写明哪些是预览版加入的，都写进 [1.0 预览版新功能](guide/whats-new-1.0.md)。1.0 正式版发布后去掉这些标记。
 - **不出现真实凭证**：文字和截图里不能有真实域名下的 Cookie、Passkey、Token 或下载器地址。
 
 ### 可用组件
 
 页面只能使用下面这些组件，其他标签会让同步失败：
 
-| 组件                                                                               | 用途                                          |
-| ---------------------------------------------------------------------------------- | --------------------------------------------- |
-| `<StatusTag status="available \| experimental \| building \| planned" />`          | 发布状态，以文字显示                          |
-| `<ScreenFigure src dark? width height alt caption? />`                             | 截图；`dark` 是同一画面的深色主题版本         |
-| `<Badge>`                                                                          | VitePress 自带的标记                          |
-| `HomeIndex`、`HomeSteps`、`SplitBlock`、`HomeDeploy`、`HomePrivacy`、`HomeRoadmap` | 仅用于首页，渲染 `home:` frontmatter 中的数据 |
+| 组件                                                                                 | 用途                                          |
+| ------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `<StatusTag status="available \| preview \| experimental \| building \| planned" />` | 发布状态，以文字显示                          |
+| `<ScreenFigure src dark? width height alt caption? />`                               | 截图；`dark` 是同一画面的深色主题版本         |
+| `<Badge>`                                                                            | VitePress 自带的标记                          |
+| `HomeIndex`、`HomeSteps`、`SplitBlock`、`HomeDeploy`、`HomePrivacy`、`HomeRoadmap`   | 仅用于首页，渲染 `home:` frontmatter 中的数据 |
 
 ### 首页数据
 
@@ -155,7 +157,7 @@ cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://
 | `privacy`  | 数据去向：`sendsLabel`，`modes[]`（`name`、`sends`、`detail`）                              |
 | `roadmap`  | 路线图：`items[]`（`title`、`body`、`status`），`notPlanned`                                |
 
-`status` 取值为 `available`、`experimental`、`building` 或 `planned`。
+`status` 取值为 `available`、`preview`（只在 1.0 预览版里）、`experimental`、`building` 或 `planned`。
 
 ### 截图
 

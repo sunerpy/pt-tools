@@ -1,4 +1,4 @@
-# CookieCloud 导入
+# CookieCloud 导入 <Badge type="tip" text="1.0 预览版" />
 
 「站点 → CookieCloud 导入」从自建的 [CookieCloud](https://github.com/easychen/CookieCloud) 服务取回浏览器扩展同步上去的 Cookie，在本机解密，按站点地址挑出 pt-tools 站点能用的 Cookie，预览后写进站点。也可以打开定时同步，默认关闭。
 

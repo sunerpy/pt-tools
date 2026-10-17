@@ -1,4 +1,4 @@
-# App API
+# App API <Badge type="tip" text="1.0 preview" />
 
 The App API is the interface for the mobile app and for scripts; every address starts with `/api/app/v1`. It exposes only what an app needs: responses never contain site cookies, API keys, passkeys, passwords, RSS addresses or download links, and addresses inside error messages have their query strings removed.
 

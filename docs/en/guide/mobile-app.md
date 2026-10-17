@@ -1,4 +1,4 @@
-# Mobile app
+# Mobile app <Badge type="tip" text="1.0 preview" />
 
 The pt-tools mobile app shows the overview, torrents, sites and subscriptions when you are away from home, and lets you pause, delete or send torrents and manage subscriptions within the permissions chosen when pairing. The app reaches pt-tools through [remote access](remote-access.md): scan the QR code in the web UI to pair, and the app then tries the direct address first and falls back to a relay. Connections are end-to-end encrypted; a relay only forwards traffic and cannot read it.
 

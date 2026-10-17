@@ -12,6 +12,8 @@ This page covers installing pt-tools with Docker, as a Linux binary or as a Wind
 
 There is no macOS binary; use Docker on macOS.
 
+This site documents the 1.0 preview. The commands below install the 0.48.0 stable release by default, which does not have the features marked "1.0 preview"; to use them, install a preview release as described in [Installing a preview release](#installing-a-preview-release).
+
 ## Docker Compose (recommended)
 
 Save this as `compose.yml`:
@@ -172,6 +174,17 @@ To install a particular version, set `$env:TOOL_VERSION = "v0.48.0"` first. You 
 ```
 
 The data is kept in the `.pt-tools` folder in your user folder.
+
+## Installing a preview release
+
+The preview releases are the versions marked Pre-release on [GitHub Releases](https://github.com/sunerpy/pt-tools/releases), numbered like `v1.0.0-rc.N`. The `latest` image tag and the install scripts still install the stable release by default, so name the preview version explicitly. The examples below use `v1.0.0-rc.36`; replace it with the latest preview on the Releases page.
+
+- Docker: use the image `sunerpy/pt-tools:v1.0.0-rc.36` (or `ghcr.io/sunerpy/pt-tools:v1.0.0-rc.36`) and recreate the container. Previews do not update the `latest` tag, so change the version yourself when a new preview comes out.
+- Linux: `curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.sh | TOOL_VERSION=v1.0.0-rc.36 sh`.
+- Windows: set `$env:TOOL_VERSION = "v1.0.0-rc.36"` first, then run the install command above.
+- Mobile app: in current previews its packages are in the same Release as the server; see [Mobile app](./mobile-app.md#install).
+
+The preview releases are for testing and are not recommended for production yet. Before upgrading from the stable release, save the data folder as described in [Backing up](./upgrade.md#backing-up): a preview migrates the database schema when it starts, so to go back to 0.48.0, restore the data folder you backed up before upgrading.
 
 ## Signing in for the first time
 

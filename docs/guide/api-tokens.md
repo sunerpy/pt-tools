@@ -1,4 +1,4 @@
-# API 令牌
+# API 令牌 <Badge type="tip" text="1.0 预览版" />
 
 API 令牌给手机 App、脚本这类客户端用：带上令牌就能访问 pt-tools 的 App 接口（`/api/app/v1/`）、登录 [qB 兼容入口](qbit-compat.md)，或者让 AI 助手经 [MCP](mcp.md) 调用 pt-tools，客户端里不用保存网页的登录密码。令牌访问不了网页的其他功能，那些仍然要登录。
 

@@ -1,4 +1,4 @@
-# Downloader assistant
+# Downloader assistant <Badge type="tip" text="1.0 preview" />
 
 Downloader assistant (下载器助手), under Download (下载), tidies up the torrents already in a downloader. It finds dead torrents that a site has deleted, adds site tags to torrents that lack one, and replaces tracker addresses in bulk. A scheduled dead-torrent scan sends notifications only.
 

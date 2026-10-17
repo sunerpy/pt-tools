@@ -2,12 +2,12 @@
 layout: home
 title: pt-tools：面向 PT 站点的自动化管理工具
 titleTemplate: false
-description: RSS 自动下载、多站点统计与搜索、下载器管理和 ChatOps，在一个 Web 界面中统一配置。支持 Docker、Linux 和 Windows。
+description: RSS 自动下载、刷流、IYUU 辅种、媒体库整理、多站点统计与下载器管理，在网页和手机 App 里统一操作，也可以在 QQ、Telegram 里查看和控制。支持 Docker、Linux 和 Windows。
 
 hero:
   name: pt-tools
   text: PT 站点的自动化管理工具
-  tagline: 按 RSS 订阅自动下载免费种子，汇总各站点的数据与登录状态，统一管理 qBittorrent 和 Transmission，并可以在 QQ 和 Telegram 里查看和控制。
+  tagline: 自动下载、刷流与 IYUU 辅种，把下载完的影视整理进媒体库；汇总各站点的数据与登录状态，统一管理 qBittorrent 和 Transmission，在网页、手机 App 和 QQ、Telegram 里查看和控制。
   actions:
     - theme: brand
       text: 安装
@@ -15,6 +15,9 @@ hero:
     - theme: alt
       text: 快速开始
       link: /guide/quick-start
+    - theme: alt
+      text: 1.0 预览版新功能
+      link: /guide/whats-new-1.0
     - theme: alt
       text: GitHub
       link: https://github.com/sunerpy/pt-tools
@@ -25,6 +28,8 @@ home:
       text: Docker 镜像（amd64、arm64），以及 Linux 和 Windows 的二进制。macOS 请使用 Docker。
     - term: 数据位置
       text: 配置、任务记录和站点凭证都保存在你自己的服务器上；Cookie 用本机生成的密钥加密后存储。
+    - term: 文档版本
+      text: 本站按 1.0 预览版（v1.0.0-rc.N）编写，标「预览版」的功能尚未包含在正式版 0.48.0 中。
 
   visual:
     desktop:
@@ -42,7 +47,7 @@ home:
 
   index:
     title: pt-tools 能做什么
-    intro: 全部功能一览。标记为「实验性」的功能已经包含在正式版本中，但尚未完成端到端验证。
+    intro: 全部功能一览。标「预览版」的功能已在 1.0 预览版中发布，正式版 0.48.0 尚未包含，新增内容见「1.0 预览版新功能」；标「实验性」的功能已经发布，但尚未完成端到端验证。
     groups:
       - name: 站点与数据
         items:
@@ -51,13 +56,13 @@ home:
             status: available
             link: /sites
           - title: 用户数据统计
-            body: 在一个页面查看所有站点的上传量、下载量、分享率、做种、积分和等级进度，按今日、本周、本月看增量和走势，也可以导出为分享图。
+            body: 在一个页面查看所有站点的上传量、下载量、分享率、做种、积分和等级进度，也可以导出为分享图。
             status: available
             link: /guide/user-stats
-          - title: 每日战报
-            body: 每天定时把各站当天的上传、下载（计费）、魔力增量和登录异常发到选定的通知通道，默认关闭。
-            status: available
-            link: /guide/user-stats#每日战报
+          - title: 增量走势与每日战报
+            body: 成功获取站点数据的当天存一份快照，按今日、本周、本月看增量和走势；每日战报可以每天定时把当天的增量和登录异常发到选定的通知通道，默认关闭。
+            status: preview
+            link: /guide/user-stats
           - title: 跨站点搜索
             body: 一次搜索多个站点，按体积、做种数和优惠筛选排序，结果可以直接推送到下载器。
             status: available
@@ -66,9 +71,13 @@ home:
             body: 按站点设置探测方式和提醒阈值，在长期未登录导致封号之前发出提醒。
             status: available
             link: /guide/site-login-monitoring
+          - title: 每日签到
+            body: 在设定的时间窗里给支持签到的站点签到，也可以用 /signin 命令；不支持自动签到的站点写明原因。默认关闭。
+            status: preview
+            link: /guide/site-login-monitoring#每日签到
           - title: CookieCloud 导入
             body: 从自建的 CookieCloud 服务取回浏览器同步的 Cookie，在本机解密，预览后写进站点；也可以定时同步。
-            status: available
+            status: preview
             link: /guide/cookiecloud
       - name: RSS 自动下载
         items:
@@ -82,7 +91,7 @@ home:
             link: /guide/filter-rules-tv-series
           - title: 刷流任务
             body: 从站点的免费列表里按条件挑新种做种，按做种时长、分享率、上传速度等规则删除，限定同时下载数和体积，默认关闭。
-            status: available
+            status: preview
             link: /guide/brush
           - title: 免费结束自动暂停
             body: 种子的免费期结束时如果尚未下载完成，自动暂停，避免计入下载量。
@@ -108,30 +117,52 @@ home:
             link: /configuration
           - title: 下载器助手
             body: 找出站点已删除的失效种子、按 tracker 给种子补站点标签、批量替换 tracker 地址，都是先预览再执行。
-            status: available
+            status: preview
             link: /guide/downloader-assistant
           - title: 转移做种
             body: 把下完的种子搬到另一台下载器继续做种，数据不动；校验到 100% 才从源下载器移除，也能按规则定时转移。
-            status: available
+            status: preview
             link: /guide/torrent-transfer
           - title: IYUU 辅种
             body: 用 IYUU 找出其他站点上数据相同的种子，核对文件后加进同一台下载器，校验到 100% 才开始做种。
-            status: available
+            status: preview
             link: /guide/reseed
+          - title: qB 兼容入口
+            body: MoviePilot、autobrr、Sonarr 这类只认 qBittorrent 的工具可以把 pt-tools 当成一台 qBittorrent，加的种子照常经过磁盘空间和站点做种容量的检查。
+            status: preview
+            link: /guide/qbit-compat
       - name: 媒体
         items:
           - title: 订阅
             body: 订阅电影或剧集的一季，定时到各站点搜索，RSS 里出现时也下载；按质量档案挑资源，剧集补缺的集，洗版换更好的版本，豆瓣想看自动建订阅。
-            status: available
+            status: preview
             link: /guide/media-subscribe
           - title: 整理入库
             body: 下载完的电影与剧集按模板硬链接进媒体库，写好 NFO 与海报，通知 Emby、Jellyfin、Plex 扫描，发入库通知。
-            status: available
+            status: preview
             link: /guide/media-library
           - title: 媒体识别
             body: 解析种子标题，到 TMDB 找对应的电影或剧集；记下站点给的 IMDb 与豆瓣编号，识别不对时可以手动纠正，也可以加识别词。
-            status: available
+            status: preview
             link: /guide/media-recognize
+      - name: 手机 App 与接口
+        items:
+          - title: 手机 App
+            body: Android App 在外面也能看概览、种子、站点与订阅，按配对时给的权限暂停、删除、推送种子或管理订阅。
+            status: preview
+            link: /guide/mobile-app
+          - title: 远程访问
+            body: 手机扫码配对，先试直连，连不上再经 relay 连回 pt-tools；连接端到端加密，relay 只转发，不需要把端口开放到公网。
+            status: preview
+            link: /guide/remote-access
+          - title: API 令牌与 App API
+            body: 脚本和客户端带令牌访问 /api/app/v1/，按权限范围读取或修改，不用保存网页的登录密码。
+            status: preview
+            link: /guide/api-tokens
+          - title: MCP 接入
+            body: Claude、Cursor、Cherry Studio 这类 MCP 客户端里的 AI 助手可以查看种子、站点数据与订阅，在你确认以后执行改动。
+            status: preview
+            link: /guide/mcp
       - name: 通知与 ChatOps
         items:
           - title: QQ 与 Telegram 命令
@@ -143,16 +174,24 @@ home:
             status: available
             link: /guide/chatops-rss-notify
           - title: 更多通知通道
-            body: 企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；只发送通知，不接收命令。
-            status: available
+            body: 钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；只发送通知，不接收命令。
+            status: preview
             link: /guide/notify-channels
-          - title: 通用 Webhook
-            body: 把通知以 JSON 发到自己的系统（HMAC 签名），接入 n8n、Zapier 等。
+          - title: 消息模板
+            body: 按事件自定义通知的标题与正文，命令回复与 AI 助手的回复也可以套用。
+            status: preview
+            link: /guide/notify-channels#消息模板
+          - title: 企业微信与通用 Webhook
+            body: 只能发送通知、不能接收命令的出站通道；通用 Webhook 把通知以 JSON 发到自己的系统（HMAC 签名），接入 n8n、Zapier 等。
             status: experimental
-            link: /guide/chatops-quickstart
+            link: /guide/notify-channels
+          - title: 自定义 Webhook 请求
+            body: 自定义请求方法、格式与请求体模板，内置 Discord、Slack、Gotify 等预设，可以按响应内容判断是否发送成功。
+            status: preview
+            link: /guide/notify-channels#自定义-webhook
           - title: AI 助手
             body: 接一个 OpenAI 兼容的大模型，用自然语言查数据、搜索与推送种子、添加订阅；改动类操作每次都要你确认。
-            status: available
+            status: preview
             link: /guide/assistant
       - name: 部署与维护
         items:
@@ -245,7 +284,7 @@ home:
 
   privacy:
     title: 数据去向
-    intro: pt-tools 不依赖任何托管服务。下面是它会主动连接的对象，全部由你自己配置。
+    intro: pt-tools 的核心功能不依赖托管服务。下面是它会主动连接的对象；除了检查更新时访问 GitHub，其余都在你启用或配置以后才连接。
     sendsLabel: 发送
     modes:
       - name: PT 站点
@@ -260,6 +299,12 @@ home:
       - name: AI 模型服务
         sends: 对话内容与工具查到的数据
         detail: 启用 AI 助手以后才连接，只发给你选的服务商；Cookie、Passkey 与密码不会交给模型。
+      - name: 远程访问的 relay
+        sends: 加密后的 App 连接
+        detail: 打开远程访问以后才连接。relay 留空时用内置的托管 relay，它只转发端到端加密的数据，看不到内容；也可以自建 relay 或只用直连。
+      - name: 媒体与辅种服务
+        sends: 片名、TMDB 编号与种子的 info hash
+        detail: 用到媒体功能时连接 TMDB 与豆瓣的公开数据；开启 IYUU 辅种后，把下载器里已下完种子的 info hash 发给 IYUU 查询；CookieCloud 只连接你自建的服务。
 
   roadmap:
     title: 路线图
@@ -350,6 +395,8 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 :::
 
 安装脚本会下载最新版本，并按同一版本的 `checksums.txt` 校验 SHA-256 后再解压。[安装指南](/guide/install)介绍了各种方式的完整步骤，以及如何固定版本。
+
+上面的命令安装的是正式版 0.48.0。要使用标「预览版」的功能，按[安装预览版](/guide/install#安装预览版)安装预览版；新增内容见 [1.0 预览版新功能](/guide/whats-new-1.0)。
 
 <HomeRoadmap />
 

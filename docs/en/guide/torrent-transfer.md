@@ -1,4 +1,4 @@
-# Torrent transfer
+# Torrent transfer <Badge type="tip" text="1.0 preview" />
 
 Torrent transfer (转移做种), under Download (下载), moves finished torrents from one downloader to another and keeps seeding them there. The data files stay where they are. For example, hand long-seeding torrents from qBittorrent on an SSD to Transmission on a NAS.
 

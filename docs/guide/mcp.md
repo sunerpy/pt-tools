@@ -1,4 +1,4 @@
-# MCP
+# MCP <Badge type="tip" text="1.0 预览版" />
 
 MCP（Model Context Protocol）是 AI 助手调用外部工具的协议。pt-tools 在 Web 端口上提供 MCP 服务：接上以后，Claude、Cursor、Cherry Studio 这类 MCP 客户端里的 AI 助手可以查看种子、下载器、站点数据与订阅，搜索种子，并在你确认以后暂停、删除、推送种子或添加订阅。
 

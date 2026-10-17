@@ -1,4 +1,4 @@
-# API tokens
+# API tokens <Badge type="tip" text="1.0 preview" />
 
 API tokens are for clients such as a mobile app or a script: with a token a client can use the pt-tools App API (`/api/app/v1/`), sign in to the [qB-compatible entrance](qbit-compat.md), or let an AI assistant call pt-tools over [MCP](mcp.md), without storing your web login password. A token cannot reach any other part of the web interface; those still require you to sign in.
 

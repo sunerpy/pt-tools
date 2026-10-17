@@ -1,4 +1,4 @@
-# AI assistant
+# AI assistant <Badge type="tip" text="1.0 preview" />
 
 pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask, on the web, in the mobile app or in notification channels (Telegram, QQ), about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader or add subscriptions. Every action that changes something waits for you to confirm it.
 

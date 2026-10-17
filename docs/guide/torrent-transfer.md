@@ -1,4 +1,4 @@
-# 转移做种
+# 转移做种 <Badge type="tip" text="1.0 预览版" />
 
 「下载 → 转移做种」把下载器里已经下完的种子搬到另一台下载器继续做种，数据文件不动。例如把做种很久的种子从 SSD 上的 qBittorrent 交给 NAS 上的 Transmission。
 

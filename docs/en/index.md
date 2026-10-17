@@ -2,12 +2,12 @@
 layout: home
 title: "pt-tools: automation for private trackers"
 titleTemplate: false
-description: RSS downloads, statistics and search across sites, downloader management and ChatOps, configured in one web interface. Runs in Docker, on Linux and on Windows.
+description: RSS downloads, seed boosting, IYUU cross-seeding, media library organising, statistics across sites and downloader management, in the web interface and the mobile app, with control from QQ and Telegram. Runs in Docker, on Linux and on Windows.
 
 hero:
   name: pt-tools
   text: Automation for private trackers
-  tagline: Download freeleech torrents from your RSS feeds, follow every site's statistics and login status, manage qBittorrent and Transmission in one place, and check on all of it from QQ or Telegram.
+  tagline: Download, boost and cross-seed with IYUU, and file finished films and shows into your media library; follow every site's statistics and login status, manage qBittorrent and Transmission in one place, and check on all of it from the web, the mobile app, QQ or Telegram.
   actions:
     - theme: brand
       text: Install
@@ -15,6 +15,9 @@ hero:
     - theme: alt
       text: Quick start
       link: /en/guide/quick-start
+    - theme: alt
+      text: What's new in the 1.0 preview
+      link: /en/guide/whats-new-1.0
     - theme: alt
       text: GitHub
       link: https://github.com/sunerpy/pt-tools
@@ -25,6 +28,8 @@ home:
       text: A Docker image (amd64 and arm64), and binaries for Linux and Windows. On macOS, use Docker.
     - term: Your data
       text: Settings, history and site credentials stay on your own server; cookies are encrypted with a key generated on that machine.
+    - term: Docs version
+      text: This site documents the 1.0 preview (v1.0.0-rc.N); features marked Preview are not in the 0.48.0 stable release yet.
 
   visual:
     desktop:
@@ -42,7 +47,7 @@ home:
 
   index:
     title: What pt-tools does
-    intro: Everything at a glance. Features marked Experimental ship in the release but have not been verified end to end.
+    intro: Everything at a glance. Features marked Preview ship in the 1.0 preview releases and are not in the 0.48.0 stable release yet; see What's new in the 1.0 preview. Features marked Experimental ship but have not been verified end to end.
     groups:
       - name: Sites and statistics
         items:
@@ -51,13 +56,13 @@ home:
             status: available
             link: /en/sites
           - title: Statistics across sites
-            body: Upload, download, ratio, seeding, bonus points and progress to the next class for every site on one page, with increments and trends for today, this week and this month, also exportable as an image to share.
+            body: Upload, download, ratio, seeding, bonus points and progress to the next class for every site on one page, also exportable as an image to share.
             status: available
             link: /en/guide/user-stats
-          - title: Daily report
-            body: Each day at a set time, sends every site's upload, billed download and bonus increments and any login problems to the channels you choose. Off by default.
-            status: available
-            link: /en/guide/user-stats#daily-report
+          - title: Trends and daily report
+            body: A snapshot is kept on each day a site's data is fetched, giving increments and trends for today, this week and this month; the daily report can send the day's increments and any login problems to the channels you choose at a set time. Off by default.
+            status: preview
+            link: /en/guide/user-stats
           - title: Search across sites
             body: Search several sites at once, filter and sort by size, seeders and freeleech, and send results straight to a downloader.
             status: available
@@ -66,9 +71,13 @@ home:
             body: Per-site checks and reminders, so you hear about a site before an inactive account is disabled.
             status: available
             link: /en/guide/site-login-monitoring
+          - title: Daily sign-in
+            body: Sign in to sites that support it within a time window you set, or with the /signin command; sites that cannot be signed in automatically say why. Off by default.
+            status: preview
+            link: /en/guide/site-login-monitoring#daily-sign-in
           - title: CookieCloud import
             body: Fetch the cookies your browser syncs to a self-hosted CookieCloud server, decrypt them on this machine and write them into the sites after a preview; scheduled sync is optional.
-            status: available
+            status: preview
             link: /en/guide/cookiecloud
       - name: Automatic RSS downloads
         items:
@@ -82,7 +91,7 @@ home:
             link: /en/guide/filter-rules-tv-series
           - title: Brush tasks
             body: Pick fresh torrents from a site's free list by your conditions, seed them, and remove them by seeding time, ratio or upload speed, within limits on concurrent downloads and size. Off by default.
-            status: available
+            status: preview
             link: /en/guide/brush
           - title: Pause when freeleech ends
             body: A torrent still downloading when its free period ends is paused, so it does not count against your download.
@@ -108,30 +117,52 @@ home:
             link: /en/configuration
           - title: Downloader assistant
             body: Find dead torrents a site has deleted, tag torrents with their site by tracker and replace tracker addresses in bulk, each previewed first.
-            status: available
+            status: preview
             link: /en/guide/downloader-assistant
           - title: Torrent transfer
             body: Move finished torrents to another downloader and keep seeding without touching the data; the source copy goes only after a 100% check, and rules can do it on a schedule.
-            status: available
+            status: preview
             link: /en/guide/torrent-transfer
           - title: IYUU cross-seeding
             body: Find torrents with the same data on other sites through IYUU, check their files and add them to the same downloader; they seed only after a 100% check.
-            status: available
+            status: preview
             link: /en/guide/reseed
+          - title: qB-compatible entrance
+            body: Tools that only talk to qBittorrent, such as MoviePilot, autobrr and Sonarr, can treat pt-tools as one; the torrents they add still pass the disk space and site seeding capacity checks.
+            status: preview
+            link: /en/guide/qbit-compat
       - name: Media
         items:
           - title: Subscriptions
             body: Subscribe to a film or a season, search your sites on a schedule and pick it up from RSS; quality profiles choose the release, missing episodes are filled in, upgrades swap in better releases, and a Douban wish list subscribes for you.
-            status: available
+            status: preview
             link: /en/guide/media-subscribe
           - title: Library organising
             body: Hard-link finished movies and shows into your library with a naming template, write NFO files and artwork, ask Emby, Jellyfin or Plex to scan, and send a notification.
-            status: available
+            status: preview
             link: /en/guide/media-library
           - title: Media recognition
             body: Parse torrent titles and find the movie or TV show on TMDB; IMDb and Douban IDs from sites are recorded, and wrong matches can be corrected by hand or with recognition words.
-            status: available
+            status: preview
             link: /en/guide/media-recognize
+      - name: Mobile app and APIs
+        items:
+          - title: Mobile app
+            body: The Android app shows the overview, torrents, sites and subscriptions away from home, and pauses, deletes and pushes torrents or manages subscriptions within the permissions given at pairing.
+            status: preview
+            link: /en/guide/mobile-app
+          - title: Remote access
+            body: Pair by scanning a QR code; the app tries a direct connection first and falls back to a relay. The connection is end-to-end encrypted, the relay only forwards, and no port has to be opened to the internet.
+            status: preview
+            link: /en/guide/remote-access
+          - title: API tokens and the App API
+            body: Scripts and clients reach /api/app/v1/ with a token, reading or changing data within its scopes, without storing the web password.
+            status: preview
+            link: /en/guide/api-tokens
+          - title: MCP
+            body: AI assistants in MCP clients such as Claude, Cursor and Cherry Studio can look at torrents, site data and subscriptions, and make changes after you confirm them.
+            status: preview
+            link: /en/guide/mcp
       - name: Notifications and ChatOps
         items:
           - title: Commands in QQ and Telegram
@@ -143,16 +174,24 @@ home:
             status: available
             link: /en/guide/chatops-rss-notify
           - title: More notification channels
-            body: WeCom, DingTalk and Feishu group bots, plus Bark, ServerChan and ntfy; they send notifications and do not take commands.
-            status: available
+            body: DingTalk and Feishu group bots, plus Bark, ServerChan and ntfy; they send notifications and do not take commands.
+            status: preview
             link: /en/guide/notify-channels
-          - title: Generic webhook
-            body: Sends notifications as JSON to your own system (HMAC-signed), for n8n, Zapier and the like.
+          - title: Message templates
+            body: Customize the title and body of each notification event; command replies and AI assistant replies can use templates too.
+            status: preview
+            link: /en/guide/notify-channels#message-templates
+          - title: WeCom and generic webhooks
+            body: Outbound channels that send notifications but cannot receive commands; the generic webhook sends notifications as JSON to your own system (HMAC-signed), for n8n, Zapier and the like.
             status: experimental
-            link: /en/guide/chatops-quickstart
+            link: /en/guide/notify-channels
+          - title: Custom webhook requests
+            body: Set the request method, format and body template, start from presets such as Discord, Slack and Gotify, and judge success by the response content.
+            status: preview
+            link: /en/guide/notify-channels#custom-webhook
           - title: AI assistant
             body: Connect an OpenAI-compatible model to query data, search and push torrents and add subscriptions in plain language; every change waits for your confirmation.
-            status: available
+            status: preview
             link: /en/guide/assistant
       - name: Running it
         items:
@@ -245,7 +284,7 @@ home:
 
   privacy:
     title: Where your data goes
-    intro: pt-tools depends on no hosted service. These are the only things it connects to, and you configure every one of them.
+    intro: The core features of pt-tools depend on no hosted service. These are the things it connects to; apart from update checks on GitHub, each one is contacted only after you enable or configure it.
     sendsLabel: Sends
     modes:
       - name: Private trackers
@@ -260,6 +299,12 @@ home:
       - name: AI model provider
         sends: The conversation and the data its tools return
         detail: Contacted only once the AI assistant is enabled, and only the provider you chose; cookies, passkeys and passwords are never given to the model.
+      - name: Remote access relay
+        sends: The app's encrypted connection
+        detail: Contacted only once remote access is turned on. With no relay set, the built-in hosted relay is used; it only forwards end-to-end encrypted data and cannot read it. You can run your own relay or connect directly only.
+      - name: Media and cross-seeding services
+        sends: Titles, TMDB IDs and torrent info hashes
+        detail: TMDB and Douban's public data are contacted when you use the media features; with IYUU cross-seeding on, the info hashes of finished torrents in your downloaders are sent to IYUU for lookup; CookieCloud only ever means your own server.
 
   roadmap:
     title: Roadmap
@@ -350,6 +395,8 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 :::
 
 The install scripts download the latest release and check it against the same release's `checksums.txt` before unpacking. The [install guide](/en/guide/install) covers each option in full, including how to pin a version.
+
+The commands above install the 0.48.0 stable release. To use the features marked Preview, install a preview release as described in [Installing a preview release](/en/guide/install#installing-a-preview-release); [What's new in the 1.0 preview](/en/guide/whats-new-1.0) lists what it adds.
 
 <HomeRoadmap />
 

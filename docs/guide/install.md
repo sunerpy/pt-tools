@@ -12,6 +12,8 @@
 
 不提供 macOS 二进制，macOS 请使用 Docker。
 
+本站文档按 1.0 预览版编写。下面的命令默认安装正式版 0.48.0，其中没有标「1.0 预览版」的功能；要使用这些功能，按[安装预览版](#安装预览版)安装预览版。
+
 ## Docker Compose（推荐）
 
 把下面的内容保存为 `compose.yml`：
@@ -172,6 +174,17 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 ```
 
 数据保存在用户目录下的 `.pt-tools` 文件夹中。
+
+## 安装预览版
+
+预览版发布在 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 里标为 Pre-release 的版本中，版本号形如 `v1.0.0-rc.N`。`latest` 镜像标签和安装脚本默认安装的仍是正式版；预览版要写明版本号，下面以 `v1.0.0-rc.36` 为例，实际请换成 Releases 页面上最新的预览版。
+
+- Docker：把镜像写成 `sunerpy/pt-tools:v1.0.0-rc.36`（或 `ghcr.io/sunerpy/pt-tools:v1.0.0-rc.36`），再重新创建容器。预览版不会更新 `latest` 标签，有新的预览版时要手动改版本号。
+- Linux：`curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.sh | TOOL_VERSION=v1.0.0-rc.36 sh`。
+- Windows：先设置 `$env:TOOL_VERSION = "v1.0.0-rc.36"`，再运行上面的安装命令。
+- 手机 App：现在的预览版里，安装包和服务端在同一个 Release 里，见[手机 App](./mobile-app.md#安装)。
+
+预览版用于测试，不建议直接用在生产环境。从正式版升级前先按[备份](./upgrade.md#备份)保存数据目录：预览版启动时会迁移数据库结构，要回到 0.48.0 时请换回升级前备份的数据目录。
 
 ## 首次登录
 

@@ -1,6 +1,8 @@
 # Statistics and daily report
 
-The User Stats page summarizes upload, download, ratio, bonus and seeding data across your sites. pt-tools stores one data snapshot per site per day and uses it to compute daily, weekly and monthly increments, draw trends on the page, and optionally send each day's increments to a notification channel (the daily report).
+The User Stats page summarizes upload, download, ratio, bonus and seeding data across your sites. pt-tools stores a snapshot for a site on each day its data is fetched successfully, and uses the snapshots to compute daily, weekly and monthly increments, draw trends on the page, and optionally send each day's increments to a notification channel (the daily report, off by default).
+
+The snapshots, increments, trends and daily report were added in the 1.0 preview; the Statistics (用户统计) page itself was already in 0.48.0.
 
 ## Where the data comes from
 
