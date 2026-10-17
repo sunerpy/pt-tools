@@ -28,6 +28,16 @@ func TestFormatBytes_Units(t *testing.T) {
 	assert.Equal(t, "1.00 GiB", formatBytes(1024*1024*1024))
 }
 
+// 和网页的 formatRatio 一致：极大（站点写「无限」时记成 9999999）显示 ∞，负数（「Inf」解析成 -1）显示 -
+func TestFormatRatio_MatchesWeb(t *testing.T) {
+	assert.Equal(t, "∞", formatRatio(9999999))
+	assert.Equal(t, "∞", formatRatio(1e6))
+	assert.Equal(t, "999999.000", formatRatio(999999))
+	assert.Equal(t, "-", formatRatio(-1))
+	assert.Equal(t, "3.500", formatRatio(3.5))
+	assert.Equal(t, "0.000", formatRatio(0))
+}
+
 func TestGetSiteUserInfo_EmptyName(t *testing.T) {
 	svc := NewSiteService(nil, nil)
 	_, err := svc.GetSiteUserInfo(context.Background(), "  ")
