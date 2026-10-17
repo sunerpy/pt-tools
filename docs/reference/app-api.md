@@ -22,7 +22,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - 时间是 Unix 时间戳（秒）。大小、上传量与下载量的单位是字节，速度的单位是字节每秒，进度是 0 到 100 的百分数。
 - 分页的接口接受查询参数 `page`（从 1 开始）与 `page_size`（默认 20，上限见各接口），回应是 `{"items": [...], "total": 总数, "page": 页码, "page_size": 每页条数}`。
 - 兼容性：`GET /meta` 返回的 `remote_api_level` 现在是 1，只在有不兼容的改动时加一。新增接口或字段不算不兼容，客户端应忽略不认识的字段。
-- 契约：机器可读的描述是仓库里的 [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/main/docs/reference/app-api-v1.yaml)（OpenAPI 3.0）。pt-tools 的测试用它核对每个接口的真实回应，手机 App 的 Dart 模型也由它生成。
+- 契约：机器可读的描述是仓库里的 [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/v1.0.0-rc/docs/reference/app-api-v1.yaml)（OpenAPI 3.0）。pt-tools 的测试用它核对每个接口的真实回应，手机 App 的 Dart 模型也由它生成。
 
 ## 错误
 

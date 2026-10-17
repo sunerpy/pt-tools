@@ -15,7 +15,7 @@ App 有两条路连回 pt-tools，配对时两条都会写进二维码，App 先
 
 - 两种方式里跑的都是同一种加密会话（Noise 协议），在局域网的明文 HTTP 上也是加密的。
 - 设备只能调用 [App API](../reference/app-api.md)：网页的设置、站点、下载器、通知通道、令牌管理等接口在加密通道里都不存在。
-- 协议的细节见仓库里的[远程访问协议](https://github.com/sunerpy/pt-tools/blob/main/docs/design/remote-access.md)。
+- 协议的细节见仓库里的[远程访问协议](https://github.com/sunerpy/pt-tools/blob/v1.0.0-rc/docs/design/remote-access.md)。
 
 ## 打开远程访问
 
