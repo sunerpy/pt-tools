@@ -541,6 +541,8 @@ func TestDisableAndRotate(t *testing.T) {
 	assert.Equal(t, th.keys.HostID(), ov.HostID, "重新打开用的还是原来的密钥")
 	c, err = th.connect(t, priv, ViaDirect)
 	require.NoError(t, err)
+	// 主机登记并核对完这条会话再轮换：核对要是读到了轮换以后的设备表，会先用 revoked 关掉它
+	require.Equal(t, http.StatusOK, waitServing(t, c))
 
 	ov, err = th.RotateKeys(ctx)
 	require.NoError(t, err)
@@ -844,6 +846,8 @@ func TestDisableWithCanceledRequest(t *testing.T) {
 	require.NoError(t, err)
 	c, err = th.connect(t, priv, ViaDirect)
 	require.NoError(t, err)
+	// 主机登记并核对完这条会话再轮换：核对要是读到了轮换以后的设备表，会先用 revoked 关掉它
+	require.Equal(t, http.StatusOK, waitServing(t, c))
 	_, err = th.RotateKeys(ctx)
 	require.NoError(t, err)
 	wantGoAway(t, c, GoAwayKeyRotated)
