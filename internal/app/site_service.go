@@ -155,8 +155,8 @@ func classOf(info v2.UserInfo) string {
 	return info.Rank
 }
 
-// formatBytes 将字节数格式化为 1024 进制可读字符串（chatops 展示友好），不依赖外部库。
-// formatRatio 和网页的 formatRatio 一致：极大（站点写「无限」时记成 9999999）显示 ∞，负数（「Inf」解析成 -1）显示 -。
+// formatRatio 的阈值和网页的 formatRatio 一致：极大（站点写「无限」时记成 9999999）显示 ∞，
+// 负数（「Inf」解析成 -1）显示 -；其余保留 ChatOps 原来的三位小数。
 func formatRatio(r float64) string {
 	switch {
 	case r > 999999:
@@ -167,6 +167,7 @@ func formatRatio(r float64) string {
 	return fmt.Sprintf("%.3f", r)
 }
 
+// formatBytes 将字节数格式化为 1024 进制可读字符串（chatops 展示友好），不依赖外部库。
 func formatBytes(n int64) string {
 	const unit = int64(1024)
 	if n < unit {
