@@ -226,6 +226,13 @@ func TestCompareVersions(t *testing.T) {
 			expected: -1,
 		},
 		{
+			// 预览版只在同号版本里低于正式版，比更早的正式版还是新
+			name:     "prerelease above older release: v1.0.0-rc.1 > v0.48.0",
+			a:        "v1.0.0-rc.1",
+			b:        "v0.48.0",
+			expected: 1,
+		},
+		{
 			name:     "with v prefix",
 			a:        "v2.0.0",
 			b:        "v1.0.0",
@@ -398,6 +405,29 @@ func TestFilterNewReleases_PrereleaseNumericOrder(t *testing.T) {
 	}
 	assert.Equal(t, []string{"v1.0.0-rc.100", "v1.0.0-rc.36"}, versions,
 		"只有 rc.36 与 rc.100 比 rc.35 新；rc.9/rc.10 虽字典序更大但版本更老")
+}
+
+// 预览版升正式版：当前是 v1.0.0-rc.35 时，v1.0.0 正式版不管开没开「包含预发版」都算新版本，
+// 更早的 v0.48.0 正式版不算
+func TestFilterNewReleases_PrereleaseToStable(t *testing.T) {
+	checker := NewChecker()
+	oldVersion := Version
+	defer func() { Version = oldVersion }()
+	Version = "v1.0.0-rc.35"
+
+	releases := []GitHubRelease{
+		{TagName: "v0.48.0", Name: "old stable", HTMLURL: "u"},
+		{TagName: "v1.0.0-rc.35", Name: "current", HTMLURL: "u", Prerelease: true},
+		{TagName: "v1.0.0", Name: "stable", HTMLURL: "u"},
+	}
+	for _, includePre := range []bool{false, true} {
+		got := checker.filterNewReleases(releases, includePre)
+		versions := make([]string, 0, len(got))
+		for _, r := range got {
+			versions = append(versions, r.Version)
+		}
+		assert.Equal(t, []string{"v1.0.0"}, versions, "includePrerelease=%v", includePre)
+	}
 }
 
 func TestFilterNewReleases_TagSuffixDetection(t *testing.T) {
