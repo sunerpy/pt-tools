@@ -60,7 +60,9 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 			"ratio": {
 				Selector: []string{"td.rowhead:contains('传输') + td", "td.rowhead:contains('分享率') + td", "#info_block"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)[^\d∞]*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
+				// 标签与数值之间只跳过标签、空白和冒号：分享率不到 1 时数值包在 <font color="#880000"> 里，
+				// 原来的 [^\d∞]* 会停在颜色值上，把 880000 当成分享率
+				Filters: []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s：:])*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
 			},
 			"levelName": {
 				Selector: []string{"td.rowhead:contains('等级') + td > img", "td.rowhead:contains('等级') + td img", "td.rowhead:contains('Class') + td > img"},
@@ -136,7 +138,8 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 					// （例：299.172 + 274.172 + 7.994 + 0 = 581.337）。
 					// 页面上方的「你当前每小时能获取X个魔力值」只给基本奖励，且位于该表格之前，
 					// 所以不能写成「合计…|你当前…」的交替（正则会取最左匹配，命中上方那句）。
-					{Name: "regex", Args: []any{`合计</td>.*?<td rowspan="\d+">([\d.,]+)</td>`}},
+					// 表头简体「合计」、繁体「合計」、英文「Total」（上游 resources/lang/*/bonus.php）
+					{Name: "regex", Args: []any{`(?:合计|合計|Total)</td>.*?<td rowspan="\d+">([\d.,]+)</td>`}},
 					{Name: "parseNumber"},
 				},
 			},

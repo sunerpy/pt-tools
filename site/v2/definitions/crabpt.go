@@ -56,12 +56,17 @@ var CrabPTDefinition = &v2.SiteDefinition{
 				Selector: []string{"#info_block", "body"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					// 「无限」必须显式排除「无」，否则 [^\d∞]* 会把「无限」整段吃掉，转而抓到相邻的上传量
-					{Name: "regex", Args: []any{`(?:分享率|Ratio)[^\d∞无]{0,20}([\d.,]+|无限|∞|Inf|---)`}},
+					// 标签与数值之间只跳过标签、空白和冒号：分享率不到 1 时数值包在 <font color="#880000"> 里，
+					// 不能停在颜色值上；也不会越过「无限」抓到相邻的上传量。
+					// 无穷：简体「无限」、繁体「無限」、英文「Inf.」（上游 lang_functions.php 的 text_inf）
+					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s：:])*([\d.,]+|无限|無限|∞|Inf|---)`}},
 					// 无穷分享率折算成远大于 1 的有限值，避免分享率门槛判断把它当成不达标。
 					// 这里不接 parseNumber：ratio 最终由 parseRatio 解析，而 parseNumber 会把该值
 					// 转成 float64 并以科学计数法输出（9.999999e+06）。
 					{Name: "replace", Args: []any{"无限", "9999999"}},
+					{Name: "replace", Args: []any{"無限", "9999999"}},
+					{Name: "replace", Args: []any{"∞", "9999999"}},
+					{Name: "replace", Args: []any{"Inf", "9999999"}},
 				},
 			},
 			"levelName": {
@@ -69,9 +74,9 @@ var CrabPTDefinition = &v2.SiteDefinition{
 				Attr:     "title",
 			},
 			"bonus": {
-				Selector: []string{"#info_block", "td.rowhead:contains('蟹币值') + td", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
+				Selector: []string{"#info_block", "td.rowhead:contains('蟹币值') + td", "td.rowhead:contains('蟹幣值') + td", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:蟹币值|魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
+				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:蟹币值|蟹幣值|魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
 			},
 			"joinTime": {
 				Selector: []string{"td.rowhead:contains('加入日期') + td", "td.rowhead:contains('Join') + td"},
@@ -107,7 +112,8 @@ var CrabPTDefinition = &v2.SiteDefinition{
 				Attr:     "html",
 				Filters: []v2.Filter{
 					// 蟹币值页「每小时获得的合计蟹币值」表格末列，含勋章/官种/后宫加成的合计值
-					{Name: "regex", Args: []any{`合计</td>.*?<td rowspan="\d+">([\d.,]+)</td>`}},
+					// 表头简体「合计」、繁体「合計」、英文「Total」（上游 resources/lang/*/bonus.php）
+					{Name: "regex", Args: []any{`(?:合计|合計|Total)</td>.*?<td rowspan="\d+">([\d.,]+)</td>`}},
 					{Name: "parseNumber"},
 				},
 			},

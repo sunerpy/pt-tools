@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -373,4 +374,14 @@ func TestHdarea_Fixtures_NoSecrets(t *testing.T) {
 			RequireNoSecrets(t, name, data)
 		})
 	}
+}
+
+// 繁体界面的「最終每小時獲取」
+func TestHdarea_UserInfoVariants(t *testing.T) {
+	def := getHdareaDef(t)
+	driver := newTestNexusPHPDriver(def)
+	html := strings.ReplaceAll(hdareaMyBonusFixture, "最终每小时获取", "最終每小時獲取")
+	require.NotEqual(t, hdareaMyBonusFixture, html)
+	doc := FixtureDoc(t, "hdarea_mybonus_cht", html)
+	assert.Equal(t, "424.49", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonusPerHour"]))
 }

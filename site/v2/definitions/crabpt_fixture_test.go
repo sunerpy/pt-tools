@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -216,4 +217,49 @@ func TestCrabPT_Fixtures_NoSecrets(t *testing.T) {
 	for name, data := range fixtures {
 		t.Run(name, func(t *testing.T) { RequireNoSecrets(t, name, data) })
 	}
+}
+
+// 繁体、英文界面与分享率不到 1 的写法：「无限」的繁体与英文取自上游 NexusPHP 的 lang_functions.php（無限 / Inf.），
+// 表头取自 resources/lang/*/bonus.php（合计 / 合計 / Total），分享率不到 1 时数值包在 <font color="#880000"> 里
+func TestCrabPT_UserInfoVariants(t *testing.T) {
+	def := getCrabPTDef(t)
+	driver := newTestNexusPHPDriver(def)
+
+	for _, total := range []string{"合計", "Total"} {
+		t.Run("bonusPerHour/"+total, func(t *testing.T) {
+			html := strings.ReplaceAll(crabptMyBonusFixture, "合计</td>", total+"</td>")
+			require.NotEqual(t, crabptMyBonusFixture, html)
+			doc := FixtureDoc(t, "crabpt_mybonus_"+total, html)
+			assert.Equal(t, "184.442", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonusPerHour"]))
+		})
+	}
+
+	t.Run("bonus/蟹幣值", func(t *testing.T) {
+		html := strings.Replace(crabptIndexFixture, "蟹币值 </font>", "蟹幣值 </font>", 1)
+		require.NotEqual(t, crabptIndexFixture, html)
+		doc := FixtureDoc(t, "crabpt_index_cht", html)
+		assert.Equal(t, "1234.5", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonus"]))
+	})
+
+	// 无穷分享率不管写成哪种，都和「无限」一样折算成 9999999
+	infinite := map[string]string{
+		"無限":   `<font class="color_ratio">分享率：</font> 無限`,
+		"Inf.": `<font class="color_ratio">Ratio:</font> Inf.`,
+		"∞":    `<font class="color_ratio">分享率:</font> ∞`,
+	}
+	for name, ratio := range infinite {
+		t.Run("ratio/"+name, func(t *testing.T) {
+			html := strings.Replace(crabptIndexFixture, `<font class="color_ratio">分享率:</font> 无限`, ratio, 1)
+			require.NotEqual(t, crabptIndexFixture, html)
+			doc := FixtureDoc(t, "crabpt_index_ratio", html)
+			assert.Equal(t, "9999999", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"]))
+		})
+	}
+
+	t.Run("ratio below 1", func(t *testing.T) {
+		html := strings.Replace(crabptUserdetailsFixture, "分享率:</font> 4.000", `分享率:</font> <font color="#880000">0.512</font>`, 1)
+		require.NotEqual(t, crabptUserdetailsFixture, html)
+		doc := FixtureDoc(t, "crabpt_userdetails_low_ratio", html)
+		assert.Equal(t, "0.512", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"]))
+	})
 }

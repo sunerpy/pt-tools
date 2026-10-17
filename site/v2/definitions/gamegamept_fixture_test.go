@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -185,4 +186,28 @@ func TestGameGamePT_SiteWideHR(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, def.HREnabled, "整站 H&R")
 	assert.False(t, def.HasHRSeedTimeRule(), "做种时长由站点设置补")
+}
+
+// 繁体、英文界面与分享率不到 1 的写法：表头取自上游 NexusPHP 的 resources/lang/*/bonus.php（合计 / 合計 / Total），
+// 分享率不到 1 时 userdetails.php 把数值包在 <font color="#880000"> 里
+func TestGameGamePT_UserInfoVariants(t *testing.T) {
+	def := getGameGamePTDef(t)
+	driver := newTestNexusPHPDriver(def)
+
+	for _, total := range []string{"合計", "Total"} {
+		t.Run("bonusPerHour/"+total, func(t *testing.T) {
+			html := strings.ReplaceAll(gamegameptMyBonusFixture, "合计</td>", total+"</td>")
+			require.NotEqual(t, gamegameptMyBonusFixture, html)
+			doc := FixtureDoc(t, "gamegamept_mybonus_"+total, html)
+			assert.Equal(t, "581.337", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonusPerHour"]))
+		})
+	}
+
+	t.Run("ratio below 1", func(t *testing.T) {
+		html := strings.Replace(gamegameptUserdetailsFixture, `<font color="">4.000</font>`, `<font color="#880000">0.512</font>`, 1)
+		require.NotEqual(t, gamegameptUserdetailsFixture, html)
+		doc := FixtureDoc(t, "gamegamept_userdetails_low_ratio", html)
+		// 不能把颜色值里的 880000 当成分享率
+		assert.Equal(t, "0.512", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"]))
+	})
 }

@@ -139,7 +139,7 @@ var HdareaDefinition = &v2.SiteDefinition{
 				Selector: []string{"#outer", "body"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`最终每小时获取[：:]\s*(?:<[^>]*>\s*)*([\d.,]+)`}},
+					{Name: "regex", Args: []any{`(?:最终每小时获取|最終每小時獲取)[：:]\s*(?:<[^>]*>\s*)*([\d.,]+)`}},
 					{Name: "parseNumber"},
 				},
 			},
