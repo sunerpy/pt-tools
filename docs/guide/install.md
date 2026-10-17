@@ -182,7 +182,7 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 - Docker：把镜像写成 `sunerpy/pt-tools:v1.0.0-rc.36`（或 `ghcr.io/sunerpy/pt-tools:v1.0.0-rc.36`），再重新创建容器。预览版不会更新 `latest` 标签，有新的预览版时要手动改版本号。
 - Linux：`curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.sh | TOOL_VERSION=v1.0.0-rc.36 sh`。
 - Windows：先设置 `$env:TOOL_VERSION = "v1.0.0-rc.36"`，再运行上面的安装命令。
-- 手机 App：安装包在同一个版本的 Release 里，见[手机 App](./mobile-app.md#安装)。
+- 手机 App：现在的预览版里，安装包和服务端在同一个 Release 里，见[手机 App](./mobile-app.md#安装)。
 
 预览版用于测试，不建议直接用在生产环境。从正式版升级前先按[备份](./upgrade.md#备份)保存数据目录：预览版启动时会迁移数据库结构，要回到 0.48.0 时请换回升级前备份的数据目录。
 

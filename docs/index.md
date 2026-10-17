@@ -56,13 +56,13 @@ home:
             status: available
             link: /sites
           - title: 用户数据统计
-            body: 在一个页面查看所有站点的上传量、下载量、分享率、做种、积分和等级进度，按今日、本周、本月看增量和走势，也可以导出为分享图。
+            body: 在一个页面查看所有站点的上传量、下载量、分享率、做种、积分和等级进度，也可以导出为分享图。
             status: available
             link: /guide/user-stats
-          - title: 每日战报
-            body: 每天定时把各站当天的上传、下载（计费）、魔力增量和登录异常发到选定的通知通道，默认关闭。
+          - title: 增量走势与每日战报
+            body: 成功获取站点数据的当天存一份快照，按今日、本周、本月看增量和走势；每日战报可以每天定时把当天的增量和登录异常发到选定的通知通道，默认关闭。
             status: preview
-            link: /guide/user-stats#每日战报
+            link: /guide/user-stats
           - title: 跨站点搜索
             body: 一次搜索多个站点，按体积、做种数和优惠筛选排序，结果可以直接推送到下载器。
             status: available
@@ -71,6 +71,10 @@ home:
             body: 按站点设置探测方式和提醒阈值，在长期未登录导致封号之前发出提醒。
             status: available
             link: /guide/site-login-monitoring
+          - title: 每日签到
+            body: 在设定的时间窗里给支持签到的站点签到，也可以用 /signin 命令；不支持自动签到的站点写明原因。默认关闭。
+            status: preview
+            link: /guide/site-login-monitoring#每日签到
           - title: CookieCloud 导入
             body: 从自建的 CookieCloud 服务取回浏览器同步的 Cookie，在本机解密，预览后写进站点；也可以定时同步。
             status: preview
@@ -170,16 +174,20 @@ home:
             status: available
             link: /guide/chatops-rss-notify
           - title: 更多通知通道
-            body: 企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；只发送通知，不接收命令。
+            body: 钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；只发送通知，不接收命令。
             status: preview
             link: /guide/notify-channels
           - title: 消息模板
             body: 按事件自定义通知的标题与正文，命令回复与 AI 助手的回复也可以套用。
             status: preview
             link: /guide/notify-channels#消息模板
-          - title: 通用 Webhook
-            body: 把通知以 JSON 发到自己的系统（HMAC 签名），接入 n8n、Zapier 等；预览版可以自定义请求方法、格式与请求体，内置 Discord、Slack 等预设。
+          - title: 企业微信与通用 Webhook
+            body: 只能发送通知、不能接收命令的出站通道；通用 Webhook 把通知以 JSON 发到自己的系统（HMAC 签名），接入 n8n、Zapier 等。
             status: experimental
+            link: /guide/notify-channels
+          - title: 自定义 Webhook 请求
+            body: 自定义请求方法、格式与请求体模板，内置 Discord、Slack、Gotify 等预设，可以按响应内容判断是否发送成功。
+            status: preview
             link: /guide/notify-channels#自定义-webhook
           - title: AI 助手
             body: 接一个 OpenAI 兼容的大模型，用自然语言查数据、搜索与推送种子、添加订阅；改动类操作每次都要你确认。
@@ -276,7 +284,7 @@ home:
 
   privacy:
     title: 数据去向
-    intro: pt-tools 不依赖任何托管服务。下面是它会主动连接的对象，全部由你自己配置。
+    intro: pt-tools 的核心功能不依赖托管服务。下面是它会主动连接的对象；除了检查更新时访问 GitHub，其余都在你启用或配置以后才连接。
     sendsLabel: 发送
     modes:
       - name: PT 站点
@@ -291,6 +299,12 @@ home:
       - name: AI 模型服务
         sends: 对话内容与工具查到的数据
         detail: 启用 AI 助手以后才连接，只发给你选的服务商；Cookie、Passkey 与密码不会交给模型。
+      - name: 远程访问的 relay
+        sends: 加密后的 App 连接
+        detail: 打开远程访问以后才连接。relay 留空时用内置的托管 relay，它只转发端到端加密的数据，看不到内容；也可以自建 relay 或只用直连。
+      - name: 媒体与辅种服务
+        sends: 片名、TMDB 编号与种子的 info hash
+        detail: 用到媒体功能时连接 TMDB 与豆瓣的公开数据；开启 IYUU 辅种后，把下载器里已下完种子的 info hash 发给 IYUU 查询；CookieCloud 只连接你自建的服务。
 
   roadmap:
     title: 路线图

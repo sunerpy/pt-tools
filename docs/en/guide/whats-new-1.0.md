@@ -1,6 +1,6 @@
 # What's new in the 1.0 preview <Badge type="tip" text="1.0 preview" />
 
-The 1.0 preview (versions such as `1.0.0-rc.N`) adds seed boosting (brush tasks), IYUU cross-seeding, media library organising, the mobile app, remote access, the AI assistant and more on top of 0.48.0. This site documents the preview: pages marked "1.0 preview" and features marked "Preview" on the home page are only in the preview releases, not in the 0.48.0 stable release; the 1.0 stable release will include all of them.
+The 1.0 preview (versions such as `1.0.0-rc.N`; the first few previews were `0.49.0-rc.N`) adds seed boosting (brush tasks), IYUU cross-seeding, media library organising, the mobile app, remote access, the AI assistant and more on top of 0.48.0. This site documents the preview: pages marked "1.0 preview" and features marked "Preview" on the home page are only in the preview releases, not in the 0.48.0 stable release; the 1.0 stable release will include all of them.
 
 The preview releases are for testing and are not recommended for production yet. See [Installing a preview release](./install.md#installing-a-preview-release) to install one, and back up the data folder before upgrading. The changes in each preview are listed under the Pre-release versions on [GitHub Releases](https://github.com/sunerpy/pt-tools/releases).
 
@@ -20,7 +20,7 @@ The preview releases are for testing and are not recommended for production yet.
 
 ## Mobile app and APIs
 
-- [Mobile app](./mobile-app.md): the Android app shows the overview, torrents, sites and subscriptions away from home, pauses, deletes and pushes torrents or manages subscriptions within the permissions given at pairing, and talks to the AI assistant; its packages are published in the same Release as each version.
+- [Mobile app](./mobile-app.md): the Android app shows the overview, torrents, sites and subscriptions away from home, pauses, deletes and pushes torrents or manages subscriptions within the permissions given at pairing, and talks to the AI assistant; since 1.0.0-rc.28 its packages are published in the same Release as the server.
 - [Remote access](./remote-access.md): pair by scanning the QR code in the web UI; the app tries a direct connection first and falls back to a relay. The connection is end-to-end encrypted and the relay only forwards. The built-in hosted relay is used by default; you can run your own relay or turn relays off and connect directly only.
 - [API tokens](./api-tokens.md) and the [App API](../reference/app-api.md): scripts and clients reach `/api/app/v1/` with a token, reading or changing data within its scopes, without storing the web password.
 - [MCP](./mcp.md): AI assistants in MCP clients such as Claude, Cursor and Cherry Studio can look at torrents, downloaders, site data and subscriptions, and make changes after you confirm them.
@@ -34,9 +34,10 @@ The preview releases are for testing and are not recommended for production yet.
 
 ## Sites and data
 
-- [Statistics and daily report](./user-stats.md): a daily snapshot of every site gives increments and trends for today, this week and this month, and the day's increments can be sent to a notification channel each day.
+- [Statistics and daily report](./user-stats.md): a snapshot is kept on each day a site's data is fetched, giving increments and trends for today, this week and this month; the daily report (off by default) can send the day's increments to the channels you choose.
 - [Daily sign-in](./site-login-monitoring.md#daily-sign-in): sign in to sites that support it within a time window, or with the `/signin` command; sites such as HDArea use their own sign-in endpoints.
 - [CookieCloud import](./cookiecloud.md): fetch the cookies your browser synced to your own CookieCloud server, decrypt them locally and write them to sites after a preview, or sync on a schedule; the browser extension can sync cookies on a schedule and upload them to CookieCloud encrypted.
+- [NAS installs](./install.md#nas): app definitions for 1Panel, Unraid and fnOS.
 - Site parsing: bonus, ratio and bonus per hour for CrabPT, GameGamePT, HDArea and OpenCD, and the ratio of many sites when it is below 1, are fixed; sites without an H&R seeding time in their rules can have one set in the site settings.
 
 ## Reliability and security

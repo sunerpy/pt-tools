@@ -126,7 +126,7 @@ cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://
 - **规范书面语**：中文页不用口语（还没、没能、免得、搭的、咋、啥、搞定、折腾），英文页不用 just、gonna、stuff。中文与英文、数字之间留空格。
 - **用户页不写内部实现**：不出现 `UnifiedPTSite`、`ConfigStore`、`DiskBudget`、`MessageChain` 之类的代码名和 `§` 符号；`reference/developers.md` 例外。同步脚本会拒绝这些词。
 - **未发布的能力单独说明**：实验性、开发中和计划中的功能用 `<StatusTag>` 标出，不能写成已经可用。
-- **预览版的能力要标出来**：文档站按 1.0 预览版发布。只在预览版里的功能，首页条目用 `status: preview`，整页都是新功能的页面在标题后加 `<Badge type="tip" text="1.0 预览版" />`（英文页 `text="1.0 preview"`），并写进 [1.0 预览版新功能](guide/whats-new-1.0.md)。1.0 正式版发布后去掉这些标记。
+- **预览版的能力要标出来**：文档站按 1.0 预览版发布。只在预览版里的功能，首页条目用 `status: preview`，整页都是新功能的页面在标题后加 `<Badge type="tip" text="1.0 预览版" />`（英文页 `text="1.0 preview"`），只有一部分是新功能的页面在开头或对应小节写明哪些是预览版加入的，都写进 [1.0 预览版新功能](guide/whats-new-1.0.md)。1.0 正式版发布后去掉这些标记。
 - **不出现真实凭证**：文字和截图里不能有真实域名下的 Cookie、Passkey、Token 或下载器地址。
 
 ### 可用组件

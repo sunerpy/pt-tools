@@ -16,7 +16,7 @@ hero:
       text: Quick start
       link: /en/guide/quick-start
     - theme: alt
-      text: What's new in 1.0 preview
+      text: What's new in the 1.0 preview
       link: /en/guide/whats-new-1.0
     - theme: alt
       text: GitHub
@@ -56,13 +56,13 @@ home:
             status: available
             link: /en/sites
           - title: Statistics across sites
-            body: Upload, download, ratio, seeding, bonus points and progress to the next class for every site on one page, with increments and trends for today, this week and this month, also exportable as an image to share.
+            body: Upload, download, ratio, seeding, bonus points and progress to the next class for every site on one page, also exportable as an image to share.
             status: available
             link: /en/guide/user-stats
-          - title: Daily report
-            body: Each day at a set time, sends every site's upload, billed download and bonus increments and any login problems to the channels you choose. Off by default.
+          - title: Trends and daily report
+            body: A snapshot is kept on each day a site's data is fetched, giving increments and trends for today, this week and this month; the daily report can send the day's increments and any login problems to the channels you choose at a set time. Off by default.
             status: preview
-            link: /en/guide/user-stats#daily-report
+            link: /en/guide/user-stats
           - title: Search across sites
             body: Search several sites at once, filter and sort by size, seeders and freeleech, and send results straight to a downloader.
             status: available
@@ -71,6 +71,10 @@ home:
             body: Per-site checks and reminders, so you hear about a site before an inactive account is disabled.
             status: available
             link: /en/guide/site-login-monitoring
+          - title: Daily sign-in
+            body: Sign in to sites that support it within a time window you set, or with the /signin command; sites that cannot be signed in automatically say why. Off by default.
+            status: preview
+            link: /en/guide/site-login-monitoring#daily-sign-in
           - title: CookieCloud import
             body: Fetch the cookies your browser syncs to a self-hosted CookieCloud server, decrypt them on this machine and write them into the sites after a preview; scheduled sync is optional.
             status: preview
@@ -170,16 +174,20 @@ home:
             status: available
             link: /en/guide/chatops-rss-notify
           - title: More notification channels
-            body: WeCom, DingTalk and Feishu group bots, plus Bark, ServerChan and ntfy; they send notifications and do not take commands.
+            body: DingTalk and Feishu group bots, plus Bark, ServerChan and ntfy; they send notifications and do not take commands.
             status: preview
             link: /en/guide/notify-channels
           - title: Message templates
             body: Customize the title and body of each notification event; command replies and AI assistant replies can use templates too.
             status: preview
             link: /en/guide/notify-channels#message-templates
-          - title: Generic webhook
-            body: Sends notifications as JSON to your own system (HMAC-signed), for n8n, Zapier and the like; in the preview the method, format and body can be customized, with presets such as Discord and Slack.
+          - title: WeCom and generic webhooks
+            body: Outbound channels that send notifications but cannot receive commands; the generic webhook sends notifications as JSON to your own system (HMAC-signed), for n8n, Zapier and the like.
             status: experimental
+            link: /en/guide/notify-channels
+          - title: Custom webhook requests
+            body: Set the request method, format and body template, start from presets such as Discord, Slack and Gotify, and judge success by the response content.
+            status: preview
             link: /en/guide/notify-channels#custom-webhook
           - title: AI assistant
             body: Connect an OpenAI-compatible model to query data, search and push torrents and add subscriptions in plain language; every change waits for your confirmation.
@@ -276,7 +284,7 @@ home:
 
   privacy:
     title: Where your data goes
-    intro: pt-tools depends on no hosted service. These are the only things it connects to, and you configure every one of them.
+    intro: The core features of pt-tools depend on no hosted service. These are the things it connects to; apart from update checks on GitHub, each one is contacted only after you enable or configure it.
     sendsLabel: Sends
     modes:
       - name: Private trackers
@@ -291,6 +299,12 @@ home:
       - name: AI model provider
         sends: The conversation and the data its tools return
         detail: Contacted only once the AI assistant is enabled, and only the provider you chose; cookies, passkeys and passwords are never given to the model.
+      - name: Remote access relay
+        sends: The app's encrypted connection
+        detail: Contacted only once remote access is turned on. With no relay set, the built-in hosted relay is used; it only forwards end-to-end encrypted data and cannot read it. You can run your own relay or connect directly only.
+      - name: Media and cross-seeding services
+        sends: Titles, TMDB IDs and torrent info hashes
+        detail: TMDB and Douban's public data are contacted when you use the media features; with IYUU cross-seeding on, the info hashes of finished torrents in your downloaders are sent to IYUU for lookup; CookieCloud only ever means your own server.
 
   roadmap:
     title: Roadmap

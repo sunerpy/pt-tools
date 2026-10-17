@@ -182,7 +182,7 @@ The preview releases are the versions marked Pre-release on [GitHub Releases](ht
 - Docker: use the image `sunerpy/pt-tools:v1.0.0-rc.36` (or `ghcr.io/sunerpy/pt-tools:v1.0.0-rc.36`) and recreate the container. Previews do not update the `latest` tag, so change the version yourself when a new preview comes out.
 - Linux: `curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.sh | TOOL_VERSION=v1.0.0-rc.36 sh`.
 - Windows: set `$env:TOOL_VERSION = "v1.0.0-rc.36"` first, then run the install command above.
-- Mobile app: its packages are in the same Release; see [Mobile app](./mobile-app.md#install).
+- Mobile app: in current previews its packages are in the same Release as the server; see [Mobile app](./mobile-app.md#install).
 
 The preview releases are for testing and are not recommended for production yet. Before upgrading from the stable release, save the data folder as described in [Backing up](./upgrade.md#backing-up): a preview migrates the database schema when it starts, so to go back to 0.48.0, restore the data folder you backed up before upgrading.
 

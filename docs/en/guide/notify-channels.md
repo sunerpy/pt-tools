@@ -1,6 +1,8 @@
-# More notification channels <Badge type="tip" text="1.0 preview" />
+# More notification channels
 
 Besides [QQ](chatops-qq-napcat.md) and [Telegram](chatops-telegram.md), which also take commands, pt-tools can push notifications to these outbound-only channels: WeCom group bots, DingTalk group bots, Feishu (Lark) group bots, Bark, ServerChan (Server 酱) and ntfy. They only send; you cannot send commands from them.
+
+DingTalk, Feishu, Bark, ServerChan and ntfy, [message templates](#message-templates) and the [custom webhook](#custom-webhook) settings were added in the 1.0 preview; the WeCom group bot and the generic webhook were already in 0.48.0 (experimental).
 
 In ChatOps → Notifications (消息通知), click Add channel (添加通道), choose the type, and enter a name and the settings. For Bark or ntfy on your own server, enter the server address and credentials in this step: the channel is enabled as soon as it is created, and with the address left empty it first sends to the default public server. After creating it, click Send test message (发送测试消息) to check that it arrives; you can change the settings later in the channel's settings. Credentials are stored encrypted like other channels and are not shown in the list.
 
