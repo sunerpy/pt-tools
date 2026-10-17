@@ -11,89 +11,90 @@ import (
 
 func TestParseVersion(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected *SemVer
+		name       string
+		input      string
+		major      uint64
+		minor      uint64
+		patch      uint64
+		prerelease string
+		metadata   string
+		invalid    bool
 	}{
 		{
 			name:  "simple version",
 			input: "1.2.3",
-			expected: &SemVer{
-				Major: 1,
-				Minor: 2,
-				Patch: 3,
-			},
+			major: 1,
+			minor: 2,
+			patch: 3,
 		},
 		{
 			name:  "version with v prefix",
 			input: "v1.2.3",
-			expected: &SemVer{
-				Major: 1,
-				Minor: 2,
-				Patch: 3,
-			},
+			major: 1,
+			minor: 2,
+			patch: 3,
 		},
 		{
-			name:  "version with prerelease",
-			input: "v1.2.3-beta.1",
-			expected: &SemVer{
-				Major:      1,
-				Minor:      2,
-				Patch:      3,
-				Prerelease: "beta.1",
-			},
+			name:       "version with prerelease",
+			input:      "v1.2.3-beta.1",
+			major:      1,
+			minor:      2,
+			patch:      3,
+			prerelease: "beta.1",
 		},
 		{
-			name:  "version with build metadata",
-			input: "v1.2.3+build.123",
-			expected: &SemVer{
-				Major: 1,
-				Minor: 2,
-				Patch: 3,
-				Build: "build.123",
-			},
+			name:     "version with build metadata",
+			input:    "v1.2.3+build.123",
+			major:    1,
+			minor:    2,
+			patch:    3,
+			metadata: "build.123",
 		},
 		{
-			name:  "version with prerelease and build",
-			input: "v1.2.3-alpha.1+build.456",
-			expected: &SemVer{
-				Major:      1,
-				Minor:      2,
-				Patch:      3,
-				Prerelease: "alpha.1",
-				Build:      "build.456",
-			},
+			name:       "version with prerelease and build",
+			input:      "v1.2.3-alpha.1+build.456",
+			major:      1,
+			minor:      2,
+			patch:      3,
+			prerelease: "alpha.1",
+			metadata:   "build.456",
 		},
 		{
-			name:     "invalid version - text only",
-			input:    "unknown",
-			expected: nil,
+			name:    "invalid version - text only",
+			input:   "unknown",
+			invalid: true,
 		},
 		{
-			name:     "invalid version - partial",
-			input:    "1.2",
-			expected: nil,
+			name:    "invalid version - partial",
+			input:   "1.2",
+			invalid: true,
 		},
 		{
-			name:     "invalid version - empty",
-			input:    "",
-			expected: nil,
+			name:    "invalid version - empty",
+			input:   "",
+			invalid: true,
+		},
+		{
+			// 严格模式按 semver §9 拒绝数字标识符的前导零
+			name:    "invalid version - leading zero in prerelease",
+			input:   "v1.0.0-rc.09",
+			invalid: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ParseVersion(tt.input)
-			if tt.expected == nil {
+			if tt.invalid {
 				assert.Nil(t, result)
-			} else {
-				require.NotNil(t, result)
-				assert.Equal(t, tt.expected.Major, result.Major)
-				assert.Equal(t, tt.expected.Minor, result.Minor)
-				assert.Equal(t, tt.expected.Patch, result.Patch)
-				assert.Equal(t, tt.expected.Prerelease, result.Prerelease)
-				assert.Equal(t, tt.expected.Build, result.Build)
+				return
 			}
+			require.NotNil(t, result)
+			assert.Equal(t, tt.major, result.Major())
+			assert.Equal(t, tt.minor, result.Minor())
+			assert.Equal(t, tt.patch, result.Patch())
+			assert.Equal(t, tt.prerelease, result.Prerelease())
+			assert.Equal(t, tt.metadata, result.Metadata())
 		})
 	}
 }
@@ -163,6 +164,51 @@ func TestCompareVersions(t *testing.T) {
 			name:     "prerelease comparison",
 			a:        "1.0.0-beta",
 			b:        "1.0.0-alpha",
+			expected: 1,
+		},
+		{
+			// semver §11.4：数字标识符按数值比较，不能按字典序（"9" > "3"）
+			name:     "prerelease numeric: rc.9 < rc.35",
+			a:        "1.0.0-rc.9",
+			b:        "1.0.0-rc.35",
+			expected: -1,
+		},
+		{
+			name:     "prerelease numeric: rc.35 > rc.9",
+			a:        "1.0.0-rc.35",
+			b:        "1.0.0-rc.9",
+			expected: 1,
+		},
+		{
+			name:     "prerelease numeric multi-digit: rc.10 > rc.9",
+			a:        "1.0.0-rc.10",
+			b:        "1.0.0-rc.9",
+			expected: 1,
+		},
+		{
+			name:     "prerelease numeric multi-digit: rc.2 < rc.10",
+			a:        "1.0.0-rc.2",
+			b:        "1.0.0-rc.10",
+			expected: -1,
+		},
+		{
+			name:     "prerelease beta numeric: beta.2 < beta.10",
+			a:        "1.0.0-beta.2",
+			b:        "1.0.0-beta.10",
+			expected: -1,
+		},
+		{
+			// semver §11.4：数字标识符优先级低于字母数字标识符
+			name:     "prerelease numeric lower than alphanumeric",
+			a:        "1.0.0-1",
+			b:        "1.0.0-alpha",
+			expected: -1,
+		},
+		{
+			// semver §11.4：前面都相同时，字段数多者更大
+			name:     "prerelease more fields wins: rc.1.1 > rc.1",
+			a:        "1.0.0-rc.1.1",
+			b:        "1.0.0-rc.1",
 			expected: 1,
 		},
 		{
@@ -312,6 +358,32 @@ func TestFilterNewReleases_IncludePrerelease(t *testing.T) {
 	excludePre := checker.filterNewReleases(releases, false)
 	require.Len(t, excludePre, 1)
 	assert.Equal(t, "v2.0.0", excludePre[0].Version)
+}
+
+// 回归：当前版本 v1.0.0-rc.35 时，rc.9 / rc.10 这类「字典序更大但版本更老」的预发版
+// 不能被当成新版本；rc.36 / rc.100 才是，且顺序必须按版本号而不是字典序。
+func TestFilterNewReleases_PrereleaseNumericOrder(t *testing.T) {
+	checker := NewChecker()
+	oldVersion := Version
+	defer func() { Version = oldVersion }()
+	Version = "v1.0.0-rc.35"
+
+	releases := []GitHubRelease{
+		{TagName: "v1.0.0-rc.9", Name: "old", HTMLURL: "u", Prerelease: true},
+		{TagName: "v1.0.0-rc.10", Name: "old", HTMLURL: "u", Prerelease: true},
+		{TagName: "v1.0.0-rc.35", Name: "current", HTMLURL: "u", Prerelease: true},
+		{TagName: "v1.0.0-rc.36", Name: "new", HTMLURL: "u", Prerelease: true},
+		{TagName: "v1.0.0-rc.100", Name: "newest", HTMLURL: "u", Prerelease: true},
+	}
+
+	got := checker.filterNewReleases(releases, true)
+
+	versions := make([]string, 0, len(got))
+	for _, r := range got {
+		versions = append(versions, r.Version)
+	}
+	assert.Equal(t, []string{"v1.0.0-rc.100", "v1.0.0-rc.36"}, versions,
+		"只有 rc.36 与 rc.100 比 rc.35 新；rc.9/rc.10 虽字典序更大但版本更老")
 }
 
 func TestFilterNewReleases_TagSuffixDetection(t *testing.T) {
