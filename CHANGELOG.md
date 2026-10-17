@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.36](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.35...v1.0.0-rc.36) (2026-10-17)
+
+
+### Features
+
+* **hdarea:** 支持 HDArea 每日自动签到 ([#744](https://github.com/sunerpy/pt-tools/issues/744)) ([323ee3f](https://github.com/sunerpy/pt-tools/commit/323ee3f40c29cee7725b2917130b4a86af13bcf4))
+
+
+### Bug Fixes
+
+* **sites:** 修正 CrabPT/GameGamePT/HDArea/OpenCD 的积分、分享率与时魔解析 ([#742](https://github.com/sunerpy/pt-tools/issues/742)) ([ca8691a](https://github.com/sunerpy/pt-tools/commit/ca8691a7a2b92903d038349c0e7116cdf292f823))
+* **sites:** 分享率不到 1 时不再取到颜色值，GameGamePT 无穷分享率按 9999999 记 ([#747](https://github.com/sunerpy/pt-tools/issues/747)) ([b9f48ad](https://github.com/sunerpy/pt-tools/commit/b9f48ad1fe6f04fa19393acba56643c71e3679e5))
+* **version:** 预发版改用 semver 库比较，修复旧版本被当成新版本 ([#743](https://github.com/sunerpy/pt-tools/issues/743)) ([8bc4621](https://github.com/sunerpy/pt-tools/commit/8bc4621b00241e766379c1a5dca3d363027c3e0f))
+
 ## [1.0.0-rc.35](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.34...v1.0.0-rc.35) (2026-10-16)
 
 
