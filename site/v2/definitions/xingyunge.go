@@ -103,7 +103,7 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s\x{00A0}：:])*([\d.,]+)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s\p{Zs}：:])*([\d.,]+)`}},
 					{Name: "parseNumber"},
 				},
 			},

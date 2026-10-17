@@ -24,13 +24,16 @@ func TestAllSites_RatioIgnoresFontColor(t *testing.T) {
 	}
 	seen := 0
 	colors := []string{"#ff0000", "#ee0000", "#dd0000", "#cc0000", "#bb0000", "#aa0000", "#990000", "#880000", "#770000", "#660000"}
-	for _, color := range colors {
+	// 标签与数值之间的空白轮流用普通空格、&nbsp;（解析后是 U+00A0）、全角空格、&ensp;
+	seps := []string{" ", "&nbsp;", "　", "&ensp;"}
+	for i, color := range colors {
+		sep := seps[i%len(seps)]
 		ratio := `<font color="` + color + `">0.750</font>`
 		page := `<html><body><table id="info_block"><tr><td><span class="medium">` +
-			`<font class="color_ratio">分享率:</font> ` + ratio + ` <font class='color_uploaded'>上传量:</font> 750.00 GB ` +
+			`<font class="color_ratio">分享率:</font>` + sep + ratio + ` <font class='color_uploaded'>上传量:</font> 750.00 GB ` +
 			`<font class='color_downloaded'>下载量:</font> 1.00 TB</span></td></tr></table>` +
 			`<table><tr><td class="rowhead nowrap">传输</td><td class="rowfollow"><table>` +
-			`<tr><td class="embedded"><strong>分享率</strong>:  ` + ratio + `（<strong>实际分享率</strong>：0.750）</td></tr>` +
+			`<tr><td class="embedded"><strong>分享率</strong>:` + sep + ratio + `（<strong>实际分享率</strong>：0.750）</td></tr>` +
 			`<tr><td class="embedded"><strong>上传量</strong>:  750.00 GB</td><td class="embedded"><strong>下载量</strong>:  1.00 TB</td></tr>` +
 			`</table></td></tr><tr><td class="rowhead">分享率</td><td class="rowfollow">` + ratio + `</td></tr></table></body></html>`
 		doc := FixtureDoc(t, "ratio_font_color", page)
@@ -49,8 +52,8 @@ func TestAllSites_RatioIgnoresFontColor(t *testing.T) {
 				continue
 			}
 			v, err := strconv.ParseFloat(got, 64)
-			if assert.NoError(t, err, "%s color=%s ratio=%q", def.ID, color, got) {
-				assert.InDelta(t, 0.75, v, 1e-9, "%s color=%s ratio=%q", def.ID, color, got)
+			if assert.NoError(t, err, "%s color=%s sep=%q ratio=%q", def.ID, color, sep, got) {
+				assert.InDelta(t, 0.75, v, 1e-9, "%s color=%s sep=%q ratio=%q", def.ID, color, sep, got)
 			}
 		}
 	}

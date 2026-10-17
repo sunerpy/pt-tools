@@ -69,7 +69,7 @@ var ZmptDefinition = &v2.SiteDefinition{
 				Selector: []string{"#info_block", "td.rowhead:contains('传输') + td", "td.rowhead:contains('分享率') + td"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s\x{00A0}：:])*([\d.,]+|∞|Inf|---)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s\p{Zs}：:])*([\d.,]+|∞|Inf|---)`}},
 					{Name: "parseNumber"},
 				},
 			},
