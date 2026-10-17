@@ -212,6 +212,20 @@ func TestCompareVersions(t *testing.T) {
 			expected: 1,
 		},
 		{
+			// 预览版升正式版：rc 号再大也低于同号的正式版（tag 带 v 前缀）
+			name:     "rc.35 < release: v1.0.0-rc.35 < v1.0.0",
+			a:        "v1.0.0-rc.35",
+			b:        "v1.0.0",
+			expected: -1,
+		},
+		{
+			// 先比通道名，后面的数字再大也越不过去（"beta" < "rc"）
+			name:     "channel before number: beta.10 < rc.1",
+			a:        "1.0.0-beta.10",
+			b:        "1.0.0-rc.1",
+			expected: -1,
+		},
+		{
 			name:     "with v prefix",
 			a:        "v2.0.0",
 			b:        "v1.0.0",
