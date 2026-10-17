@@ -132,6 +132,24 @@ func getOpenCDDef(t *testing.T) *v2.SiteDefinition {
 	return def
 }
 
+// mybonus.php 是「魔力值兑换商店」，但页面上方有一行自报的每小时收益：
+// 「你當前每小時能獲取2.845個魔力值 (A = 4); 如果你有捐贈標誌…每小時將能獲取5.689個魔力值」。
+// 前面的公式说明里还有大量数字（0.1/0.2/100/4/300…），用来验证正则不会误抓。
+const opencdMyBonusFixture = `<html><body>
+<h1>做種每小時將得到如下的魔力值</h1>
+<ul>
+<li>做種數：100M以下不計數，100M~300M每種0.1，300M以上每種0.2，封頂100魔力值</li>
+<li>每小時獲得的魔力值點數由下面的公式給出</li>
+<li><b>T0</b>為參數。<b>T0</b> = 4</li>
+<li><b>N0</b>為參數。<b>N0</b> = 7</li>
+<li><b>B0</b>為參數，代表用戶1小時獲得魔力值的上限。<b>B0</b> = 100</li>
+<li><b>L</b>為參數。<b>L</b> = 300</li>
+</ul>
+<table align="center" border="0" width="800"><tr><td width="800" colspan="2" style="border: none; padding: 0px;"><div align="center"><br />你當前每小時能獲取2.845個魔力值 (A = 4); 如果你有捐贈標誌<img class="star" src="pic/trans.gif" alt="Star" />，你每小時將能獲取5.689個魔力值 (A = 8)[<a href="donate.php"><b>馬上去捐贈</b></a>]</div></td></tr><tr><td width="800" colspan="2" class="loadbarbg" style="border: none; padding: 0px;"><img class="loadbarred" src="pic/trans.gif" style="width: 5.6891452839584px;" alt="0.7111431604948%" /></td></tr></table>
+<h1>其他獲取方式</h1>
+<ul><li>發布新種子 = 50個魔力值</li><li>上傳一個字幕 = 5個魔力值</li></ul>
+</body></html>`
+
 func testOpenCDSearch(t *testing.T) {
 	def := getOpenCDDef(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -204,6 +222,33 @@ func testOpenCDUserInfo(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("MyBonusPage", func(t *testing.T) {
+		doc := FixtureDoc(t, "opencd_mybonus", opencdMyBonusFixture)
+		sel, ok := def.UserInfo.Selectors["bonusPerHour"]
+		if !assert.True(t, ok, "selector %q not found", "bonusPerHour") {
+			return
+		}
+		// 取「你當前每小時能獲取」的当前值 2.845，而不是捐赠后假设的 5.689
+		assert.Equal(t, "2.845", driver.ExtractFieldValuePublic(doc, sel))
+	})
+
+	// 只有选择器还不够：UserInfo.Process 里必须真的请求 /mybonus.php 并取 bonusPerHour，
+	// 否则真实站点上这个字段永远不会被填充（之前 OpenCD 就是这种情况）。
+	t.Run("MyBonusRequest", func(t *testing.T) {
+		var found bool
+		for _, process := range def.UserInfo.Process {
+			if process.RequestConfig.URL != "/mybonus.php" {
+				continue
+			}
+			for _, field := range process.Fields {
+				if field == "bonusPerHour" {
+					found = true
+				}
+			}
+		}
+		assert.True(t, found, "UserInfo.Process 必须请求 /mybonus.php 并取 bonusPerHour")
+	})
 }
 
 func TestOpenCD_Fixtures_NoSecrets(t *testing.T) {
@@ -211,6 +256,7 @@ func TestOpenCD_Fixtures_NoSecrets(t *testing.T) {
 		"search":      opencdSearchFixture,
 		"index":       opencdIndexFixture,
 		"userdetails": opencdUserdetailsFixture,
+		"mybonus":     opencdMyBonusFixture,
 		"detail":      opencdDetailFixture,
 	}
 	for name, data := range fixtures {
