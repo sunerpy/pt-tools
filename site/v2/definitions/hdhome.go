@@ -58,7 +58,7 @@ var HDHomeDefinition = &v2.SiteDefinition{
 				Selector: []string{"#info_block", "td.rowhead:contains('分享率') + td font", "td.rowhead:contains('分享率') + td", "td.rowhead:contains('Ratio') + td font", "td.rowhead:contains('Ratio') + td", "td.rowhead:contains('传输') + td", "td.rowhead:contains('傳輸') + td"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|分享率：|Ratio)[^\d∞]*([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`(?:分享率|分享率：|Ratio)(?:<[^>]*>|[\s\x{00A0}：:])*([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},

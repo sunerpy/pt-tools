@@ -58,7 +58,7 @@ var LajiduiDefinition = &v2.SiteDefinition{
 				Selector: []string{"td.rowhead:contains('传输') + td", "td.rowhead:contains('傳輸') + td", "td.rowhead:contains('Transfer') + td", "td.rowhead:contains('分享率') + td font", "td.rowhead:contains('分享率') + td", "td.rowhead:contains('Ratio') + td font", "td.rowhead:contains('Ratio') + td", "#info_block"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)[^\d∞]*([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)(?:<[^>]*>|[\s\x{00A0}：:])*([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},

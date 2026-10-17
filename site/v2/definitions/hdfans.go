@@ -101,7 +101,7 @@ var HDFansDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)[^\d∞]*([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)(?:<[^>]*>|[\s\x{00A0}：:])*([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},

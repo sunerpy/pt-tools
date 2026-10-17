@@ -59,7 +59,7 @@ var CrabPTDefinition = &v2.SiteDefinition{
 					// 标签与数值之间只跳过标签、空白和冒号：分享率不到 1 时数值包在 <font color="#880000"> 里，
 					// 不能停在颜色值上；也不会越过「无限」抓到相邻的上传量。
 					// 无穷：简体「无限」、繁体「無限」、英文「Inf.」（上游 lang_functions.php 的 text_inf）
-					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s：:])*([\d.,]+|无限|無限|∞|Inf|---)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s\x{00A0}：:])*([\d.,]+|无限|無限|∞|Inf|---)`}},
 					// 无穷分享率折算成远大于 1 的有限值，避免分享率门槛判断把它当成不达标。
 					// 这里不接 parseNumber：ratio 最终由 parseRatio 解析，而 parseNumber 会把该值
 					// 转成 float64 并以科学计数法输出（9.999999e+06）。
