@@ -1,4 +1,4 @@
-# Seed boosting (brush tasks)
+# Seed boosting (brush tasks) <Badge type="tip" text="1.0 preview" />
 
 A brush task picks fresh torrents from one site's free-torrent list, pushes them to a downloader, and removes them by rule after they have seeded for a while, so you build up upload and bonus. It runs separately from RSS subscriptions; turning a brush task on does not change how RSS works.
 

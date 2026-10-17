@@ -1,4 +1,4 @@
-# More notification channels
+# More notification channels <Badge type="tip" text="1.0 preview" />
 
 Besides [QQ](chatops-qq-napcat.md) and [Telegram](chatops-telegram.md), which also take commands, pt-tools can push notifications to these outbound-only channels: WeCom group bots, DingTalk group bots, Feishu (Lark) group bots, Bark, ServerChan (Server 酱) and ntfy. They only send; you cannot send commands from them.
 

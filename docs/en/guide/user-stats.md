@@ -1,4 +1,4 @@
-# Statistics and daily report
+# Statistics and daily report <Badge type="tip" text="1.0 preview" />
 
 The User Stats page summarizes upload, download, ratio, bonus and seeding data across your sites. pt-tools stores one data snapshot per site per day and uses it to compute daily, weekly and monthly increments, draw trends on the page, and optionally send each day's increments to a notification channel (the daily report).
 

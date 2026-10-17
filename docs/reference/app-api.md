@@ -1,4 +1,4 @@
-# App API
+# App API <Badge type="tip" text="1.0 预览版" />
 
 App API 是给手机 App 和脚本用的接口，地址都以 `/api/app/v1` 开头。它只开放 App 要用的功能：回应里没有站点 Cookie、API Key、Passkey、密码、RSS 地址与下载链接，错误信息里的网址也去掉了查询串。
 

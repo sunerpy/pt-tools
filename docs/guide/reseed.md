@@ -1,4 +1,4 @@
-# IYUU 辅种
+# IYUU 辅种 <Badge type="tip" text="1.0 预览版" />
 
 「下载 → IYUU 辅种」用 [IYUU](https://doc.iyuu.cn/) 找出其他站点上数据相同的种子，加进同一台下载器一起做种：数据只存一份，多个站点都算做种。默认关闭。
 

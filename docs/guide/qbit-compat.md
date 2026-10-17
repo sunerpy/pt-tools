@@ -1,4 +1,4 @@
-# qB 兼容入口
+# qB 兼容入口 <Badge type="tip" text="1.0 预览版" />
 
 qB 兼容入口让 MoviePilot、IYUU、autobrr、Sonarr、Radarr 这类只认 qBittorrent 的工具把 pt-tools 当成一台 qBittorrent。它们加的种子经 pt-tools 推到你选的真实下载器，照常经过磁盘空间保护与站点做种容量的检查；种子记录、站点标签与操作审计也都留在 pt-tools 里。
 

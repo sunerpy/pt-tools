@@ -1,4 +1,4 @@
-# 更多通知通道
+# 更多通知通道 <Badge type="tip" text="1.0 预览版" />
 
 除了能收发命令的 [QQ](chatops-qq-napcat.md) 与 [Telegram](chatops-telegram.md)，pt-tools 还能把通知推送到下面这些只出站的通道：企业微信群机器人、钉钉群机器人、飞书群机器人、Bark、Server 酱和 ntfy。它们只发不收，不能在里面发命令。
 

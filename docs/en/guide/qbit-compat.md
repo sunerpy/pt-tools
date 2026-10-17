@@ -1,4 +1,4 @@
-# qB-compatible entrance
+# qB-compatible entrance <Badge type="tip" text="1.0 preview" />
 
 The qB-compatible entrance lets tools that only work with qBittorrent, such as MoviePilot, IYUU, autobrr, Sonarr and Radarr, treat pt-tools as a qBittorrent client. The torrents they add are pushed by pt-tools to the real downloader you choose, with the usual disk space protection and site seeding capacity checks; torrent records, site tags and the audit log all stay in pt-tools.
 

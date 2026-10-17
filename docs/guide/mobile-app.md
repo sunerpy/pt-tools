@@ -1,4 +1,4 @@
-# 手机 App
+# 手机 App <Badge type="tip" text="1.0 预览版" />
 
 pt-tools 的手机 App 在外面也能看概览、种子、站点与订阅，并按配对时给的权限暂停、删除、推送种子或管理订阅。App 经[远程访问](remote-access.md)连回 pt-tools：扫网页上的二维码配对，之后先试直连，连不上再走 relay。连接是端到端加密的，relay 只转发，看不到内容。
 

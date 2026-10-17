@@ -1,4 +1,4 @@
-# MCP
+# MCP <Badge type="tip" text="1.0 preview" />
 
 MCP (Model Context Protocol) is the protocol AI assistants use to call external tools. pt-tools serves MCP on its web port: once connected, the assistant in an MCP client such as Claude, Cursor or Cherry Studio can look at your torrents, downloaders, site statistics and subscriptions, search torrents, and, after you confirm, pause, delete or push torrents and add subscriptions.
 
