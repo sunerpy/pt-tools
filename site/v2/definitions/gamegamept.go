@@ -60,16 +60,19 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 			"ratio": {
 				Selector: []string{"td.rowhead:contains('传输') + td", "td.rowhead:contains('分享率') + td", "#info_block"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)[^\d∞]*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
+				// 标签与数值之间只跳过标签、空白和冒号：分享率不到 1 时数值包在 <font color="#880000"> 里，
+				// 原来的 [^\d∞]* 会停在颜色值上，把 880000 当成分享率
+				Filters: []v2.Filter{{Name: "regex", Args: []any{`(?:分享率|Ratio)(?:<[^>]*>|[\s：:])*([\d.,]+|∞|Inf|---)`}}, {Name: "parseNumber"}},
 			},
 			"levelName": {
 				Selector: []string{"td.rowhead:contains('等级') + td > img", "td.rowhead:contains('等级') + td img", "td.rowhead:contains('Class') + td > img"},
 				Attr:     "title",
 			},
 			"bonus": {
-				Selector: []string{"#info_block", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
+				// index.php 的币种是「G值」（userdetails.php 同位置写的是「魔力值」）
+				Selector: []string{"#info_block", "td.rowhead:contains('G值') + td", "td.rowhead:contains('魔力值') + td", "td.rowhead:contains('Bonus') + td"},
 				Attr:     "html",
-				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
+				Filters:  []v2.Filter{{Name: "regex", Args: []any{`(?:G值|魔力值|Bonus)[^\d]*([\d.,]+)`}}, {Name: "parseNumber"}},
 			},
 			"joinTime": {
 				Selector: []string{"td.rowhead:contains('加入日期') + td", "td.rowhead:contains('Join') + td"},
@@ -131,7 +134,12 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:你當前每小時能獲取|你当前每小时能获取|您當前每小時能獲取|您当前每小时能获取)[^\d-]{0,20}([\d.,]+)`}},
+					// 时魔取「每小时获得的合计魔力值」表格末列 = 基本奖励 + 勋章加成 + 官种加成 + 后宫加成
+					// （例：299.172 + 274.172 + 7.994 + 0 = 581.337）。
+					// 页面上方的「你当前每小时能获取X个魔力值」只给基本奖励，且位于该表格之前，
+					// 所以不能写成「合计…|你当前…」的交替（正则会取最左匹配，命中上方那句）。
+					// 表头简体「合计」、繁体「合計」、英文「Total」（上游 resources/lang/*/bonus.php）
+					{Name: "regex", Args: []any{`(?:合计|合計|Total)</td>.*?<td rowspan="\d+">([\d.,]+)</td>`}},
 					{Name: "parseNumber"},
 				},
 			},

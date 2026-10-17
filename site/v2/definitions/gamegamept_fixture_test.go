@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,15 +53,15 @@ const gamegameptSearchFixture = `<html><body>
 </tbody></table>
 </body></html>`
 
+// index.php 顶部 #info_block：本站币种叫「G值」（不是魔力值），真实值形如 97,146.5。
+// 站内其它地方（公告、说明页）仍会出现「魔力值」字样，这里刻意保留作干扰项。
 const gamegameptIndexFixture = `<html><body>
-<table id="info_block"><tr><td>
-欢迎回来, <span class="nowrap"><a href="https://carpt.net/userdetails.php?id=15270" class='User_Name'><b>gamegamept_user</b></a></span>
-<font class='color_bonus'>魔力值 </font>[<a href="mybonus.php">使用</a>]: 1,234.5<br/>
-<font class="color_ratio">分享率:</font> ---
-<font class='color_uploaded'>上传量:</font> 0.00 KB
-<font class='color_downloaded'> 下载量:</font> 0.00 KB
-<font class='color_active'>当前活动:</font> <img class="arrowup" src="pic/trans.gif" />2 <img class="arrowdown" src="pic/trans.gif" />1
+<table id="info_block" cellpadding="4" cellspacing="0" border="0" width="100%"><tr><td>
+欢迎回来, <span class="nowrap"><a href="https://www.gamegamept.com/userdetails.php?id=15270" class='User_Name'><b>gamegamept_user</b></a></span>
+<font class = 'color_bonus'>G值 </font>[<a href="mybonus.php">使用</a>]: 1,234.5 <a href="attendance.php" class="faqlink">[签到得G值]</a> <a href="luckywheel.php">[幸运大转盘]</a>
+<font class="color_ratio">分享率:</font> --- <font class='color_uploaded'>上传量:</font> 0.00 KB <font class='color_downloaded'> 下载量:</font> 0.00 KB <font class='color_active'>当前活动:</font> <img class="arrowup" src="pic/trans.gif" />2 <img class="arrowdown" src="pic/trans.gif" />1
 </td></tr></table>
+<div class="notice">本站魔力值（即 G值）可用于兑换邀请与勋章。</div>
 </body></html>`
 
 const gamegameptUserdetailsFixture = `<html><body>
@@ -72,11 +73,16 @@ const gamegameptUserdetailsFixture = `<html><body>
 </table>
 </body></html>`
 
-const gamegameptMyBonusFixture = `<html><body>
-<div id="outer">
-您当前每小时能获取 56.78 个魔力值
-</div>
-</body></html>`
+// mybonus.php：时魔要取「每小时获得的合计魔力值」表格末列（基本奖励 + 勋章加成 + 官种加成 + 后宫加成）。
+// 页面上方的「你当前每小时能获取」只给基本奖励，且出现在合计表格**之前**，因此不能用
+// 「A|B」交替（正则取最左匹配会命中上方那句），必须锚定合计表头。真实页面该表格为单行。
+const gamegameptMyBonusFixture = `<html><body><div id="outer">
+<h1>魔力值到底是什么玩意儿，我怎样才能得到它？</h1>
+<ul><li>简言之，为做种人数少、文件体积大的种子做种能获得更多魔力值。</li></ul>
+<div align="center">你当前每小时能获取299.172个魔力值 (A = 1469.9)</div>
+<h1>每小时获得的合计魔力值</h1>
+<div style="display: flex;justify-content: center;margin-top: 20px;"><table cellpadding="5" style="width: 50%"><tr><td class="colhead">奖励类型</td><td class="colhead">数量</td><td class="colhead">体积</td><td class="colhead">A 值</td><td class="colhead">基础魔力</td><td class="colhead">系数</td><td class="colhead">获得魔力</td><td class="colhead">合计</td></tr><tr><td>基本奖励</td><td>58</td><td>3.145 TB</td><td>1,469.869</td><td>299.172</td><td>1</td><td>299.172</td><td rowspan="4">581.337</td></tr><tr><td>勋章加成</td><td>58</td><td>3.145 TB</td><td>1,469.869</td><td>274.172</td><td>1.000</td><td>274.172</td></tr><tr><td>官种加成</td><td>1</td><td>16.78 GB</td><td>16.781</td><td>15.987</td><td>0.500</td><td>7.994</td></tr><tr><td>后宫加成</td><td>--</td><td>--</td><td>--</td><td>0.000</td><td>0.100</td><td>0.000</td></tr></table></div>
+</div></body></html>`
 
 const gamegameptDetailFixture = `<html><body>
 <h1 align="center" id="top" value="GamePT.Demo.2026-CarPT"><input name="torrent_name" type="hidden" value="GamePT.Demo.2026-CarPT" /><input name="detail_torrent_id" type="hidden" value="16295" />GamePT.Demo.2026-CarPT <b>[<font class='free'>免费</font>]</b> <font color='#0000FF'>剩余时间：<span title="2026-04-04 13:01:22">3天21时</span></font><img class="hitandrun" src="pic/trans.gif" alt="H&amp;R" title="H&amp;R" /></h1>
@@ -157,7 +163,8 @@ func testGameGamePTUserInfo(t *testing.T) {
 	assert.Equal(t, "1099511627776", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueDownloaded"]))
 
 	bonusDoc := FixtureDoc(t, "gamegamept_mybonus", gamegameptMyBonusFixture)
-	assert.Equal(t, "56.78", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]))
+	// 取合计（299.172 + 274.172 + 7.994 + 0），而不是上方「你当前每小时能获取」的基本奖励 299.172
+	assert.Equal(t, "581.337", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]))
 }
 
 func TestGameGamePT_Fixtures_NoSecrets(t *testing.T) {
@@ -179,4 +186,28 @@ func TestGameGamePT_SiteWideHR(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, def.HREnabled, "整站 H&R")
 	assert.False(t, def.HasHRSeedTimeRule(), "做种时长由站点设置补")
+}
+
+// 繁体、英文界面与分享率不到 1 的写法：表头取自上游 NexusPHP 的 resources/lang/*/bonus.php（合计 / 合計 / Total），
+// 分享率不到 1 时 userdetails.php 把数值包在 <font color="#880000"> 里
+func TestGameGamePT_UserInfoVariants(t *testing.T) {
+	def := getGameGamePTDef(t)
+	driver := newTestNexusPHPDriver(def)
+
+	for _, total := range []string{"合計", "Total"} {
+		t.Run("bonusPerHour/"+total, func(t *testing.T) {
+			html := strings.ReplaceAll(gamegameptMyBonusFixture, "合计</td>", total+"</td>")
+			require.NotEqual(t, gamegameptMyBonusFixture, html)
+			doc := FixtureDoc(t, "gamegamept_mybonus_"+total, html)
+			assert.Equal(t, "581.337", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonusPerHour"]))
+		})
+	}
+
+	t.Run("ratio below 1", func(t *testing.T) {
+		html := strings.Replace(gamegameptUserdetailsFixture, `<font color="">4.000</font>`, `<font color="#880000">0.512</font>`, 1)
+		require.NotEqual(t, gamegameptUserdetailsFixture, html)
+		doc := FixtureDoc(t, "gamegamept_userdetails_low_ratio", html)
+		// 不能把颜色值里的 880000 当成分享率
+		assert.Equal(t, "0.512", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"]))
+	})
 }

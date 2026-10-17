@@ -131,7 +131,7 @@ func (s *siteService) GetSiteUserInfo(ctx context.Context, siteName string) (Use
 		Username:        info.Username,
 		Uploaded:        formatBytes(info.Uploaded),
 		Downloaded:      formatBytes(info.Downloaded),
-		Ratio:           fmt.Sprintf("%.3f", info.Ratio),
+		Ratio:           formatRatio(info.Ratio),
 		Bonus:           fmt.Sprintf("%.0f", info.Bonus),
 		Class:           classOf(info),
 		UploadedBytes:   info.Uploaded,
@@ -153,6 +153,18 @@ func classOf(info v2.UserInfo) string {
 		return info.LevelName
 	}
 	return info.Rank
+}
+
+// formatRatio 的阈值和网页的 formatRatio 一致：极大（站点写「无限」时记成 9999999）显示 ∞，
+// 负数（「Inf」解析成 -1）显示 -；其余保留 ChatOps 原来的三位小数。
+func formatRatio(r float64) string {
+	switch {
+	case r > 999999:
+		return "∞"
+	case r < 0:
+		return "-"
+	}
+	return fmt.Sprintf("%.3f", r)
 }
 
 // formatBytes 将字节数格式化为 1024 进制可读字符串（chatops 展示友好），不依赖外部库。

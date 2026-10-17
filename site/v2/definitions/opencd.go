@@ -9,6 +9,9 @@ import (
 //   - Detail page uses <div class="title"> + td.rowtitle (not <h1> + td.rowhead)
 //   - Detail links use plugin_details.php (not details.php)
 //   - Discount end time is embedded in the onmouseover tooltip of the free icon
+//   - 时魔不在通用的「你当前每小时能获取」表格页，而在 mybonus.php 上方那行
+//     「你當前每小時能獲取2.845個魔力值 (A = 4)」；后面紧跟的
+//     「如果你有捐贈標誌…你每小時將能獲取5.689個魔力值」是捐赠后的假设值，不能取
 var OpenCDDefinition = &v2.SiteDefinition{
 	ID:             "opencd",
 	Name:           "OpenCD",
@@ -36,6 +39,10 @@ var OpenCDDefinition = &v2.SiteDefinition{
 					"name", "uploaded", "downloaded", "ratio", "levelName",
 					"bonus", "joinTime", "lastAccessAt",
 				},
+			},
+			{
+				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
+				Fields:        []string{"bonusPerHour"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -116,6 +123,18 @@ var OpenCDDefinition = &v2.SiteDefinition{
 					"td.rowhead:contains('Bonus') + td",
 				},
 				Filters: []v2.Filter{{Name: "parseNumber"}},
+			},
+			// 时魔取 mybonus.php 上方的「你當前每小時能獲取2.845個魔力值」——本站的
+			// mybonus.php 是兑换商店，没有通用站点的「每小时获得的合计魔力值」表格。
+			// 句中还跟着「如果你有捐贈標誌…你每小時將能獲取5.689個魔力值」的假设值，
+			// 因此只锚定「當前/当前」的那一句；繁简两种界面文案都覆盖。
+			"bonusPerHour": {
+				Selector: []string{"#outer", "body"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:你當前每小時能獲取|你当前每小时能获取|您當前每小時能獲取|您当前每小时能获取)[^\d-]{0,20}([\d.,]+)`}},
+					{Name: "parseNumber"},
+				},
 			},
 			"joinTime": {
 				Selector: []string{

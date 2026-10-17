@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,25 +53,41 @@ const crabptSearchFixture = `<html><body>
 </tbody></table>
 </body></html>`
 
+// 索引页：CrabPT 把「魔力值」改名为「蟹币值」；分享率为无穷时站点写的是「无限」而不是「∞」。
+// 站内公告里同样会出现「魔力值」字样，这里刻意保留，确保解析不会被公告内容带偏。
 const crabptIndexFixture = `<html><body>
-<table id="info_block"><tr><td>
-欢迎回来, <span class="nowrap"><a href="https://carpt.net/userdetails.php?id=19967" class='User_Name'><b>crabpt_user</b></a></span>
-<font class='color_bonus'>魔力值 </font>[<a href="mybonus.php">使用</a>]: 1,234.5<br/>
-<font class="color_ratio">分享率:</font> ---
-<font class='color_uploaded'>上传量:</font> 0.00 KB
-<font class='color_downloaded'> 下载量:</font> 0.00 KB
-<font class='color_active'>当前活动:</font> <img class="arrowup" src="pic/trans.gif" />2 <img class="arrowdown" src="pic/trans.gif" />1
+<table id="info_block" cellpadding="4" cellspacing="0" border="0" width="100%"><tr><td>
+欢迎回来, <span class="nowrap"><a href="https://crabpt.vip/userdetails.php?id=19967" class='User_Name'><b>crabpt_user</b></a></span>
+<font class = 'color_bonus'>蟹币值 </font>[<a href="mybonus.php">使用</a>]: 1,234.5 <a href="attendance.php" class="faqlink">[签到得蟹币]</a>
+<font class="color_ratio">分享率:</font> 无限 <font class='color_uploaded'>上传量:</font> 0.00 KB <font class='color_downloaded'> 下载量:</font> 0.00 KB <font class='color_active'>当前活动:</font> <img class="arrowup" src="pic/trans.gif" />2 <img class="arrowdown" src="pic/trans.gif" />1
 </td></tr></table>
+<div class="news">入选作品将有机会展示，并获得丰厚的上传量/魔力值补偿。</div>
 </body></html>`
 
+// 用户详情页：分享率只出现在顶部 #info_block 的用户栏里；
+// 「传输」单元格没有任何分享率数值（只有一句「不参与分享率计算」的说明）。
 const crabptUserdetailsFixture = `<html><body>
+<table id="info_block" cellpadding="4" cellspacing="0" border="0" width="100%"><tr><td>
+欢迎回来, <span class="nowrap"><a href="https://crabpt.vip/userdetails.php?id=19967" class='User_Name'><b>crabpt_user</b></a></span>
+<font class = 'color_bonus'>蟹币值 </font>[<a href="mybonus.php">使用</a>]: 1,234.5
+<font class="color_ratio">分享率:</font> 4.000 <font class='color_uploaded'>上传量:</font> 1.00 TB <font class='color_downloaded'> 下载量:</font> 256.00 GB
+</td></tr></table>
 <table>
   <tr><td class="rowhead">用户ID/UID</td><td class="rowfollow">44933</td></tr>
   <tr><td class="rowhead">加入日期</td><td class="rowfollow">2026-03-20 08:30:00 (<span title="2026-03-20 08:30:00">7天前</span>)</td></tr>
-  <tr><td class="rowhead">传输</td><td class="rowfollow"><table><tr><td class="embedded"><strong>分享率</strong>: <font color="">4.000</font></td></tr><tr><td class="embedded"><strong>上传量</strong>: 1.00 TB</td><td class="embedded"><strong>下载量</strong>: 256.00 GB</td></tr></table></td></tr>
+  <tr><td class="rowhead">传输</td><td class="rowfollow"><table><tr><td class="embedded"><strong>上传量</strong>: 1.00 TB</td><td class="embedded"><strong>下载量</strong>: 256.00 GB</td></tr><tr><td class="embedded"><strong>实际上传量</strong>: 900.00 GB</td><td class="embedded"><strong>实际下载量</strong>: 200.00 GB</td><td class="embedded text-muted">实际上传/下载量 (仅用于记录, 不参与分享率计算)</td></tr></table></td></tr>
   <tr><td class="rowhead">等级</td><td class="rowfollow"><img title="User" src="pic/user.gif" /></td></tr>
 </table>
 </body></html>`
+
+// 蟹币值页：句子里的数值是「基础」时魔，表格「每小时获得的合计蟹币值」才是含勋章/官种/后宫加成的合计值。
+const crabptMyBonusFixture = `<html><body><div id="outer"><table border="1"><tr><td class="text" align="left">
+<h1>做种每小时将得到如下的蟹币值</h1>
+<ul><li>0.5个蟹币值 * <i>你的做种数</i> (做种数最多计200个)</li></ul>
+<div align="center">你当前每小时能获取183.606个蟹币值 (A = 1139.1)</div>
+</td></tr></table>
+<h1>每小时获得的合计蟹币值</h1><div style="display: flex;justify-content: center;margin-top: 20px;"><table cellpadding="5" style="width: 50%"><tr><td class="colhead">奖励类型</td><td class="colhead">数量</td><td class="colhead">体积</td><td class="colhead">A 值</td><td class="colhead">基础蟹币</td><td class="colhead">系数</td><td class="colhead">获得蟹币</td><td class="colhead">合计</td></tr><tr><td>基本奖励</td><td>598</td><td>2.147 TB</td><td>1,139.130</td><td>183.606</td><td>1</td><td>183.606</td><td rowspan="4">184.442</td></tr><tr><td>勋章加成</td><td>598</td><td>2.147 TB</td><td>1,139.130</td><td>83.606</td><td>0.010</td><td>0.836</td></tr></table></div>
+</div></body></html>`
 
 const crabptDetailFixture = `<html><body>
 <h1 align="center" id="top" value="CrabPT.Demo.2026-CarPT"><input name="torrent_name" type="hidden" value="CrabPT.Demo.2026-CarPT" /><input name="detail_torrent_id" type="hidden" value="1811" />CrabPT.Demo.2026-CarPT <b>[<font class='free'>免费</font>]</b> <font color='#0000FF'>剩余时间：<span title="2026-04-04 13:01:22">3天21时</span></font><img class="hitandrun" src="pic/trans.gif" alt="H&amp;R" title="H&amp;R" /></h1>
@@ -134,19 +151,59 @@ func testCrabPTUserInfo(t *testing.T) {
 	def := getCrabPTDef(t)
 	driver := newTestNexusPHPDriver(def)
 
-	indexDoc := FixtureDoc(t, "crabpt_index", crabptIndexFixture)
-	assert.Equal(t, "19967", driver.ExtractFieldValuePublic(indexDoc, def.UserInfo.Selectors["id"]))
-	assert.Equal(t, "crabpt_user", driver.ExtractFieldValuePublic(indexDoc, def.UserInfo.Selectors["name"]))
-	assert.Equal(t, "1234.5", driver.ExtractFieldValuePublic(indexDoc, def.UserInfo.Selectors["bonus"]))
-	assert.Equal(t, "2", driver.ExtractFieldValuePublic(indexDoc, def.UserInfo.Selectors["seeding"]))
-	assert.Equal(t, "1", driver.ExtractFieldValuePublic(indexDoc, def.UserInfo.Selectors["leeching"]))
+	t.Run("IndexPage", func(t *testing.T) {
+		doc := FixtureDoc(t, "crabpt_index", crabptIndexFixture)
+		fields := map[string]string{
+			"id":       "19967",
+			"name":     "crabpt_user",
+			"bonus":    "1234.5",
+			"seeding":  "2",
+			"leeching": "1",
+			// 分享率为「无限」时统一折算成一个远大于 1 的有限值，
+			// 保证分享率门槛判断与前端展示（> 999999 显示 ∞）都正确。
+			"ratio": "9999999",
+		}
+		for field, expected := range fields {
+			t.Run(field, func(t *testing.T) {
+				sel, ok := def.UserInfo.Selectors[field]
+				if !assert.True(t, ok, "selector %q not found", field) {
+					return
+				}
+				assert.Equal(t, expected, driver.ExtractFieldValuePublic(doc, sel))
+			})
+		}
+	})
 
-	userDoc := FixtureDoc(t, "crabpt_userdetails", crabptUserdetailsFixture)
-	assert.Equal(t, "1099511627776", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["uploaded"]))
-	assert.Equal(t, "274877906944", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
-	assert.Equal(t, "4", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
-	assert.Equal(t, "User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1773966600", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	t.Run("UserdetailsPage", func(t *testing.T) {
+		doc := FixtureDoc(t, "crabpt_userdetails", crabptUserdetailsFixture)
+		fields := map[string]string{
+			"uploaded":   "1099511627776",
+			"downloaded": "274877906944",
+			"ratio":      "4.000",
+			"levelName":  "User",
+			// 2026-03-20 08:30:00 +0800
+			"joinTime": "1773966600",
+		}
+		for field, expected := range fields {
+			t.Run(field, func(t *testing.T) {
+				sel, ok := def.UserInfo.Selectors[field]
+				if !assert.True(t, ok, "selector %q not found", field) {
+					return
+				}
+				assert.Equal(t, expected, driver.ExtractFieldValuePublic(doc, sel))
+			})
+		}
+	})
+
+	t.Run("MyBonusPage", func(t *testing.T) {
+		doc := FixtureDoc(t, "crabpt_mybonus", crabptMyBonusFixture)
+		sel, ok := def.UserInfo.Selectors["bonusPerHour"]
+		if !assert.True(t, ok, "selector %q not found", "bonusPerHour") {
+			return
+		}
+		// 取「每小时获得的合计蟹币值」，而不是句子里的基础值 183.606
+		assert.Equal(t, "184.442", driver.ExtractFieldValuePublic(doc, sel))
+	})
 }
 
 func TestCrabPT_Fixtures_NoSecrets(t *testing.T) {
@@ -154,9 +211,55 @@ func TestCrabPT_Fixtures_NoSecrets(t *testing.T) {
 		"search":      crabptSearchFixture,
 		"index":       crabptIndexFixture,
 		"userdetails": crabptUserdetailsFixture,
+		"mybonus":     crabptMyBonusFixture,
 		"detail":      crabptDetailFixture,
 	}
 	for name, data := range fixtures {
 		t.Run(name, func(t *testing.T) { RequireNoSecrets(t, name, data) })
 	}
+}
+
+// 繁体、英文界面与分享率不到 1 的写法：「无限」的繁体与英文取自上游 NexusPHP 的 lang_functions.php（無限 / Inf.），
+// 表头取自 resources/lang/*/bonus.php（合计 / 合計 / Total），分享率不到 1 时数值包在 <font color="#880000"> 里
+func TestCrabPT_UserInfoVariants(t *testing.T) {
+	def := getCrabPTDef(t)
+	driver := newTestNexusPHPDriver(def)
+
+	for _, total := range []string{"合計", "Total"} {
+		t.Run("bonusPerHour/"+total, func(t *testing.T) {
+			html := strings.ReplaceAll(crabptMyBonusFixture, "合计</td>", total+"</td>")
+			require.NotEqual(t, crabptMyBonusFixture, html)
+			doc := FixtureDoc(t, "crabpt_mybonus_"+total, html)
+			assert.Equal(t, "184.442", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonusPerHour"]))
+		})
+	}
+
+	t.Run("bonus/蟹幣值", func(t *testing.T) {
+		html := strings.Replace(crabptIndexFixture, "蟹币值 </font>", "蟹幣值 </font>", 1)
+		require.NotEqual(t, crabptIndexFixture, html)
+		doc := FixtureDoc(t, "crabpt_index_cht", html)
+		assert.Equal(t, "1234.5", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonus"]))
+	})
+
+	// 无穷分享率不管写成哪种，都和「无限」一样折算成 9999999
+	infinite := map[string]string{
+		"無限":   `<font class="color_ratio">分享率：</font> 無限`,
+		"Inf.": `<font class="color_ratio">Ratio:</font> Inf.`,
+		"∞":    `<font class="color_ratio">分享率:</font> ∞`,
+	}
+	for name, ratio := range infinite {
+		t.Run("ratio/"+name, func(t *testing.T) {
+			html := strings.Replace(crabptIndexFixture, `<font class="color_ratio">分享率:</font> 无限`, ratio, 1)
+			require.NotEqual(t, crabptIndexFixture, html)
+			doc := FixtureDoc(t, "crabpt_index_ratio", html)
+			assert.Equal(t, "9999999", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"]))
+		})
+	}
+
+	t.Run("ratio below 1", func(t *testing.T) {
+		html := strings.Replace(crabptUserdetailsFixture, "分享率:</font> 4.000", `分享率:</font> <font color="#880000">0.512</font>`, 1)
+		require.NotEqual(t, crabptUserdetailsFixture, html)
+		doc := FixtureDoc(t, "crabpt_userdetails_low_ratio", html)
+		assert.Equal(t, "0.512", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"]))
+	})
 }
