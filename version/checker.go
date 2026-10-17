@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sunerpy/pt-tools/utils/httpclient"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/sunerpy/requests"
 )
 
@@ -99,7 +98,6 @@ type Checker struct {
 var (
 	defaultChecker *Checker
 	checkerOnce    sync.Once
-	semverRegex    = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
 )
 
 func GetChecker() *Checker {
@@ -252,7 +250,7 @@ func (c *Checker) filterNewReleases(releases []GitHubRelease, includePrerelease 
 			}
 			// 同时认两种信号：GitHub Release 的 prerelease 标记 + tag 中的 -beta/-rc/-alpha 后缀，
 			// 任一命中即当作预发版，避免发版时漏勾 prerelease 勾选导致误判。
-			label := extractPrereleaseLabel(releaseParsed.Prerelease)
+			label := extractPrereleaseLabel(releaseParsed.Prerelease())
 			isPrerelease := r.Prerelease || label != ""
 			newReleases = append(newReleases, ReleaseInfo{
 				Version:         r.TagName,
@@ -291,53 +289,28 @@ func extractPrereleaseLabel(prereleaseSegment string) string {
 	return ""
 }
 
-type SemVer struct {
-	Major      int
-	Minor      int
-	Patch      int
-	Prerelease string
-	Build      string
-}
-
-func ParseVersion(version string) *SemVer {
-	matches := semverRegex.FindStringSubmatch(version)
-	if matches == nil {
+// ParseVersion 解析 tag 形式的版本号（允许 v 前缀，例如 v1.0.0-rc.35）。
+//
+// 解析交给 Masterminds/semver 的严格模式：必须是 major.minor.patch，
+// 可带 -prerelease / +build，数字标识符不允许前导零（semver §9）。
+// 不符合上述规则的字符串返回 nil。
+func ParseVersion(version string) *semver.Version {
+	v, err := semver.StrictNewVersion(strings.TrimPrefix(version, "v"))
+	if err != nil {
 		return nil
 	}
-
-	major, _ := strconv.Atoi(matches[1])
-	minor, _ := strconv.Atoi(matches[2])
-	patch, _ := strconv.Atoi(matches[3])
-
-	return &SemVer{
-		Major:      major,
-		Minor:      minor,
-		Patch:      patch,
-		Prerelease: matches[4],
-		Build:      matches[5],
-	}
+	return v
 }
 
-func CompareVersions(a, b *SemVer) int {
+// CompareVersions 按 semver 2.0.0 的优先级规则比较两个版本：
+// a > b 返回正数，a < b 返回负数，相等返回 0；任一为 nil 返回 0。
+//
+// 预发版规则由 Masterminds/semver 保证：预发版低于同号正式版；
+// 预发版之间按标识符逐段比较，纯数字段按数值比较（"rc.9" < "rc.35"），
+// 纯数字段优先级低于含字母的段，前面相同则段数多者更大。
+func CompareVersions(a, b *semver.Version) int {
 	if a == nil || b == nil {
 		return 0
 	}
-
-	if a.Major != b.Major {
-		return a.Major - b.Major
-	}
-	if a.Minor != b.Minor {
-		return a.Minor - b.Minor
-	}
-	if a.Patch != b.Patch {
-		return a.Patch - b.Patch
-	}
-
-	if a.Prerelease == "" && b.Prerelease != "" {
-		return 1
-	}
-	if a.Prerelease != "" && b.Prerelease == "" {
-		return -1
-	}
-	return strings.Compare(a.Prerelease, b.Prerelease)
+	return a.Compare(b)
 }

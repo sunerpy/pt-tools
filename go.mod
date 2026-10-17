@@ -3,6 +3,7 @@ module github.com/sunerpy/pt-tools
 go 1.26.9
 
 require (
+	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/RomiChan/websocket v1.4.3-0.20251002072000-d3eb41798438
 	github.com/chromedp/cdproto v0.157.8
