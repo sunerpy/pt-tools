@@ -27,7 +27,8 @@ import (
 
 // 打开定时同步并到期时同步一次，把结果记下来（这里服务端没有这个 UUID 的数据，记为失败）；没打开时不同步。
 func TestCookieCloudWorker_SyncsWhenDue(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")), &gorm.Config{})
+	// 测试库不刷盘（同 core.NewTempDBDir）：Windows runner 上每次写都要刷盘，一条 SQL 能慢到几秒
+	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&models.CookieCloudSetting{}))
@@ -92,7 +93,7 @@ func encryptFixedForTest(t *testing.T, uuid, password string, plain []byte) stri
 
 // 同步写完 Cookie 后会回调 Manager（取登录探测）：这时程序退出，StopAll 在锁外停 CookieCloud 后台，不会互相等待。
 func TestCookieCloudWorker_StopAllWhileApplying(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&models.CookieCloudSetting{}))

@@ -25,7 +25,8 @@ func setupServiceTestDB(t *testing.T) (*gorm.DB, func()) {
 	require.NoError(t, err)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	// 测试库不刷盘（同 core.NewTempDBDir）：Windows runner 上每次写都要刷盘，一条 SQL 能慢到几秒
+	db, err := gorm.Open(sqlite.Open("file:"+dbPath+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
@@ -783,7 +784,7 @@ func setupServiceTestDBWithAssociations(t *testing.T) (*gorm.DB, func()) {
 	require.NoError(t, err)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	db, err := gorm.Open(sqlite.Open("file:"+dbPath+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
