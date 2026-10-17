@@ -72,11 +72,16 @@ const gamegameptUserdetailsFixture = `<html><body>
 </table>
 </body></html>`
 
-const gamegameptMyBonusFixture = `<html><body>
-<div id="outer">
-您当前每小时能获取 56.78 个魔力值
-</div>
-</body></html>`
+// mybonus.php：时魔要取「每小时获得的合计魔力值」表格末列（基本奖励 + 勋章加成 + 官种加成 + 后宫加成）。
+// 页面上方的「你当前每小时能获取」只给基本奖励，且出现在合计表格**之前**，因此不能用
+// 「A|B」交替（正则取最左匹配会命中上方那句），必须锚定合计表头。真实页面该表格为单行。
+const gamegameptMyBonusFixture = `<html><body><div id="outer">
+<h1>魔力值到底是什么玩意儿，我怎样才能得到它？</h1>
+<ul><li>简言之，为做种人数少、文件体积大的种子做种能获得更多魔力值。</li></ul>
+<div align="center">你当前每小时能获取299.172个魔力值 (A = 1469.9)</div>
+<h1>每小时获得的合计魔力值</h1>
+<div style="display: flex;justify-content: center;margin-top: 20px;"><table cellpadding="5" style="width: 50%"><tr><td class="colhead">奖励类型</td><td class="colhead">数量</td><td class="colhead">体积</td><td class="colhead">A 值</td><td class="colhead">基础魔力</td><td class="colhead">系数</td><td class="colhead">获得魔力</td><td class="colhead">合计</td></tr><tr><td>基本奖励</td><td>58</td><td>3.145 TB</td><td>1,469.869</td><td>299.172</td><td>1</td><td>299.172</td><td rowspan="4">581.337</td></tr><tr><td>勋章加成</td><td>58</td><td>3.145 TB</td><td>1,469.869</td><td>274.172</td><td>1.000</td><td>274.172</td></tr><tr><td>官种加成</td><td>1</td><td>16.78 GB</td><td>16.781</td><td>15.987</td><td>0.500</td><td>7.994</td></tr><tr><td>后宫加成</td><td>--</td><td>--</td><td>--</td><td>0.000</td><td>0.100</td><td>0.000</td></tr></table></div>
+</div></body></html>`
 
 const gamegameptDetailFixture = `<html><body>
 <h1 align="center" id="top" value="GamePT.Demo.2026-CarPT"><input name="torrent_name" type="hidden" value="GamePT.Demo.2026-CarPT" /><input name="detail_torrent_id" type="hidden" value="16295" />GamePT.Demo.2026-CarPT <b>[<font class='free'>免费</font>]</b> <font color='#0000FF'>剩余时间：<span title="2026-04-04 13:01:22">3天21时</span></font><img class="hitandrun" src="pic/trans.gif" alt="H&amp;R" title="H&amp;R" /></h1>
@@ -157,7 +162,8 @@ func testGameGamePTUserInfo(t *testing.T) {
 	assert.Equal(t, "1099511627776", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueDownloaded"]))
 
 	bonusDoc := FixtureDoc(t, "gamegamept_mybonus", gamegameptMyBonusFixture)
-	assert.Equal(t, "56.78", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]))
+	// 取合计（299.172 + 274.172 + 7.994 + 0），而不是上方「你当前每小时能获取」的基本奖励 299.172
+	assert.Equal(t, "581.337", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]))
 }
 
 func TestGameGamePT_Fixtures_NoSecrets(t *testing.T) {
