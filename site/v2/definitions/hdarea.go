@@ -1,6 +1,8 @@
 package definitions
 
 import (
+	"net/http"
+
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -23,12 +25,21 @@ import (
 //     限定范围；不同促销等级的 font color 取值不同（免费 #0000FF、2X 免费 #00CC66），
 //     故只判断属性存在而不判断取值。
 var HdareaDefinition = &v2.SiteDefinition{
-	ID:             "hdarea",
-	Name:           "HDArea",
-	Aka:            []string{"高清视界", "High Definition Area"},
-	Description:    "HDArea 高清设备交流分享平台",
-	Schema:         v2.SchemaNexusPHP,
-	Attendance:     &v2.AttendanceConfig{Unsupported: "签到方式与常见 NexusPHP 站点不同（提交表单），暂不支持自动签到"},
+	ID:          "hdarea",
+	Name:        "HDArea",
+	Aka:         []string{"高清视界", "High Definition Area"},
+	Description: "HDArea 高清设备交流分享平台",
+	Schema:      v2.SchemaNexusPHP,
+	// 签到由首页的 JS 触发（common.js 里的 sign_in()：ajax.post('sign_in.php', ..., 'action=sign_in')）：
+	// POST sign_in.php，表单体只有 action=sign_in（驱动在 POST 时把 Path 的查询参数作为表单体提交）。
+	// 返回纯文本，成功时含「此次签到您获得」，重复签到时含「请不要重复签到」；会话失效仍跳 login.php，
+	// 由驱动统一判为 ErrSessionExpired。
+	Attendance: &v2.AttendanceConfig{
+		Path:            "/sign_in.php?action=sign_in",
+		Method:          http.MethodPost,
+		SuccessPatterns: []string{`此次签到您获得`},
+		AlreadyPatterns: []string{`请不要重复签到`},
+	},
 	URLs:           []string{"https://hdarea.club/"},
 	FaviconURL:     "https://hdarea.club/favicon.ico",
 	AuthMethod:     v2.AuthMethodCookie,

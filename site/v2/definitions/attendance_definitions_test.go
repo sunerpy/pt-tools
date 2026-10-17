@@ -2,6 +2,7 @@ package definitions
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +20,6 @@ var attendanceUnsupported = map[string]string{
 	"u2dmhy":    "答题",
 	"hdsky":     "验证码",
 	"opencd":    "验证码",
-	"hdarea":    "签到方式",
 	"btschool":  "签到方式",
 }
 
@@ -44,15 +44,55 @@ func TestAttendanceDefinitions(t *testing.T) {
 		assert.True(t, ok, def.ID)
 		cfg := v2.ResolveAttendanceConfig(def)
 		require.NotNil(t, cfg, def.ID)
-		want := "/attendance.php"
-		if def.ID == "pterclub" {
-			want = "/attendance-ajax.php"
+		// 例外站点：PTerClub 走 ajax 接口；HDArea 的签到由首页 JS 触发，用 POST，参数在表单体里。
+		wantPath, wantMethod := "/attendance.php", http.MethodGet
+		switch def.ID {
+		case "pterclub":
+			wantPath = "/attendance-ajax.php"
+		case "hdarea":
+			wantPath, wantMethod = "/sign_in.php?action=sign_in", http.MethodPost
 		}
-		assert.Equal(t, want, cfg.Path, def.ID)
-		assert.Contains(t, []string{http.MethodGet, http.MethodPost}, cfg.Method, def.ID)
+		assert.Equal(t, wantPath, cfg.Path, def.ID)
+		assert.Equal(t, wantMethod, cfg.Method, def.ID)
 	}
 	for id := range attendanceUnsupported {
 		assert.True(t, seen[id], "%s is listed as unsupported but has no definition", id)
+	}
+}
+
+// HDArea 的签到由首页 JS（common.js 的 sign_in）触发：POST sign_in.php，表单体 action=sign_in，
+// 返回纯文本。下面两个 body 是站点真实回执：成功那条来自当天首次签到，
+// 重复那条来自已签到后再次 POST（真机验证，2026-10-17）。
+func TestHDAreaAttendanceResponses(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want v2.AttendStatus
+	}{
+		{"signed", "已连续签到2天，此次签到您获得了12魔力值奖励!", v2.AttendSigned},
+		{"already", "请不要重复签到哦！", v2.AttendAlready},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var method, path, body string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				method, path = r.Method, r.URL.Path
+				raw, _ := io.ReadAll(r.Body)
+				body = string(raw)
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			d := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: srv.URL, Cookie: "uid=1; pass=2"})
+			d.SetSiteDefinition(HdareaDefinition)
+			res, err := d.Attend(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, res.Status)
+			assert.NotEmpty(t, res.Message)
+			assert.Equal(t, http.MethodPost, method)
+			assert.Equal(t, "/sign_in.php", path)
+			assert.Equal(t, "action=sign_in", body)
+		})
 	}
 }
 

@@ -117,7 +117,7 @@ Reminders start once the days left are no more than Days ahead to remind:
 
 ## Daily sign-in
 
-pt-tools can sign in to a site once a day (the sign-in plugin of NexusPHP sites, a request to `attendance.php`). It is off by default.
+pt-tools can sign in to a site once a day (the sign-in plugin of NexusPHP sites, by default a request to `attendance.php`; sites such as HDArea and PTerClub use their own sign-in endpoints). It is off by default.
 
 - Turning it on: click Keep-alive settings (保号配置) on the site's row in the site list and turn on Daily automatic sign-in (每日自动签到). Sites that do not support it cannot be turned on; the reason is shown under the switch.
 - Timing: each day the site is signed in at a random moment within the window set under Global settings → Daily sign-in (每日签到), `08:00`–`10:00` by default, in the server's time zone (`TZ` in Docker). If the window has already passed when you turn it on or when pt-tools starts, the sign-in happens within the next 10 minutes.
@@ -132,7 +132,7 @@ Hover over Sign in now in the site list to see today's sign-in status. These bui
 | ---------------------------------- | ------------------------------------------------------ |
 | 52PT, PTCHDBits, U2                | Signing in requires answering a question               |
 | HDSky, OpenCD                      | Signing in requires a captcha                          |
-| HDArea, BTSCHOOL                   | Signing in works differently from usual NexusPHP sites |
+| BTSCHOOL                           | Signing in works differently from usual NexusPHP sites |
 | M-Team, HD Dolby, Rousi Pro, MooKo | Not NexusPHP sites; sign-in is not supported yet       |
 
 Signing in adds one request to the site every day; make sure the site's rules allow automatic sign-in before turning it on.

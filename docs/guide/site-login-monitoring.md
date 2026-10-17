@@ -117,7 +117,7 @@ pt-tools 用你配置的 Cookie、API Key 或 Passkey 定时访问站点的个�
 
 ## 每日签到
 
-pt-tools 可以每天在站点签到一次（NexusPHP 站点的签到插件，请求 `attendance.php`），默认关闭。
+pt-tools 可以每天在站点签到一次（NexusPHP 站点的签到插件，默认请求 `attendance.php`；HDArea、PTerClub 等站点走各自的签到接口），默认关闭。
 
 - 开启：在站点列表点击行内的「保号配置」，打开「每日自动签到」。不支持自动签到的站点不能开启，开关下方显示原因。
 - 时间：每天在「全局设置 → 每日签到」的时间窗内随机选一个时刻签到，默认 `08:00`–`10:00`，按服务器时区（Docker 的 `TZ`）。开启时或程序启动时已经过了当天的时间窗，就在接下来的 10 分钟内签到。
@@ -132,7 +132,7 @@ pt-tools 可以每天在站点签到一次（NexusPHP 站点的签到插件，�
 | ---------------------------------- | -------------------------------- |
 | 52PT、PTCHDBits、U2                | 签到需要答题                     |
 | HDSky、OpenCD                      | 签到需要验证码                   |
-| HDArea、BTSCHOOL                   | 签到方式与常见 NexusPHP 站点不同 |
+| BTSCHOOL                           | 签到方式与常见 NexusPHP 站点不同 |
 | M-Team、HD Dolby、Rousi Pro、MooKo | 不是 NexusPHP 架构，暂不支持签到 |
 
 签到每天会额外请求一次站点，开启前请确认站点规则允许自动签到。
