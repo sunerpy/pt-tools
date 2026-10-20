@@ -17,6 +17,8 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 	LegacyURLs:     []string{"https://hdcmct.org/"},
 	FaviconURL:     "https://springsunday.net/favicon.ico",
 	TimezoneOffset: "+0800",
+	// SSD 没有签到插件：attendance.php 回 404（2026-10-19 生产库里一条真实签到记录），PT-depiler 的定义里也没有签到。
+	Attendance: &v2.AttendanceConfig{Unsupported: "SpringSunday 没有签到（站点上没有签到页）"},
 	// Custom selectors for SpringSunday's unique HTML structure
 	// Row structure: 类型 | 标题 | 评论 | 存活时间 | 大小 | 种子 | 下载 | 完成 | 发布者
 	// Note: goquery doesn't support "> td:nth-of-type(n)" - use "td.rowfollow:nth-child(n)" instead

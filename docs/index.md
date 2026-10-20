@@ -72,7 +72,7 @@ home:
             status: available
             link: /guide/site-login-monitoring
           - title: 每日签到
-            body: 在设定的时间窗里给支持签到的站点签到，也可以用 /signin 命令；不支持自动签到的站点写明原因。默认关闭。
+            body: 独立的「自动签到」页：在设定的时间窗里给支持签到的站点签到，一键签到、签到记录、签到结果推送，也可以用 /signin 命令；要识别验证码或答题的站点可以交给 AI。默认关闭。
             status: preview
             link: /guide/site-login-monitoring#每日签到
           - title: CookieCloud 导入

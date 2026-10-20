@@ -42,6 +42,15 @@ func (s ProbeStatus) String() string {
 	return string(s)
 }
 
+// 解析失败时写给用户看的说明：缺了什么，下一步做什么。
+const (
+	// diagNoUsername：页面能打开，但上面没有用户名，多半不是登录后的页面。
+	diagNoUsername = "取回的页面上没有用户名，多半不是登录后的页面：Cookie 失效时有的站点不跳登录页，而是回一个别的页面；" +
+		"也可能是站点改了页面。先在浏览器里打开站点确认能登录，再用浏览器扩展重新同步 Cookie；仍然这样请反馈站点名"
+	// diagNoLastAccess：取到了用户信息，但里面没有最近访问时间（站点接口或页面改了）。
+	diagNoLastAccess = "取回了用户信息，但里面没有最近访问时间，可能是站点改了接口或页面；请反馈站点名"
+)
+
 // ProbeSource identifies which authentication path produced a probe's
 // last-login timestamp. The caller (LoginReminderMonitor) uses this to
 // dispatch the timestamp into either ApiLastLoginAt (API key) or

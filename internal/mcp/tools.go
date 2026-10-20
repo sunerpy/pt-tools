@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -16,6 +17,9 @@ var ToolNames = []string{
 	"pause_torrent", "resume_torrent", "delete_torrent", "push_torrent",
 	"get_site_userinfo", "check_updates",
 	"explore_media", "list_subscriptions", "add_subscription",
+	"get_subscription", "set_subscription_status", "search_subscription", "delete_subscription",
+	"recognize_media", "list_media_libraries", "list_media_history", "preview_media_organize", "organize_media",
+	"retry_media_organize", "get_config", "change_config", "get_skill",
 }
 
 // withQuery 拼查询串（空值不放）。
@@ -93,14 +97,14 @@ type searchIn struct {
 type torrentIn struct {
 	DownloaderID uint   `json:"downloader_id" jsonschema:"downloader id from list_downloader_torrents"`
 	TaskID       string `json:"task_id" jsonschema:"task_id from list_downloader_torrents"`
-	Confirm      bool   `json:"confirm" jsonschema:"must be true; ask the user before calling"`
+	Confirm      bool   `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
 }
 
 type deleteIn struct {
 	DownloaderID uint   `json:"downloader_id" jsonschema:"downloader id from list_downloader_torrents"`
 	TaskID       string `json:"task_id" jsonschema:"task_id from list_downloader_torrents"`
 	RemoveData   bool   `json:"remove_data,omitempty" jsonschema:"also delete the downloaded files from disk"`
-	Confirm      bool   `json:"confirm" jsonschema:"must be true; ask the user before calling"`
+	Confirm      bool   `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
 }
 
 type pushIn struct {
@@ -111,7 +115,7 @@ type pushIn struct {
 	Category     string `json:"category,omitempty" jsonschema:"downloader category"`
 	Tags         string `json:"tags,omitempty" jsonschema:"comma-separated downloader tags"`
 	SavePath     string `json:"save_path,omitempty" jsonschema:"save directory in the downloader"`
-	Confirm      bool   `json:"confirm" jsonschema:"must be true; ask the user before calling"`
+	Confirm      bool   `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
 }
 
 type siteInfoIn struct {
@@ -139,7 +143,92 @@ type addSubIn struct {
 	TMDBID    int    `json:"tmdb_id" jsonschema:"TMDB id from explore_media"`
 	Season    int    `json:"season,omitempty" jsonschema:"season number for tv; the latest season when omitted"`
 	Upgrade   bool   `json:"upgrade,omitempty" jsonschema:"keep looking for better releases after the first download"`
-	Confirm   bool   `json:"confirm" jsonschema:"must be true; ask the user before calling"`
+	Confirm   bool   `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
+}
+
+type subIDIn struct {
+	ID uint `json:"id" jsonschema:"subscription id from list_subscriptions"`
+}
+
+type subStatusIn struct {
+	ID      uint   `json:"id" jsonschema:"subscription id from list_subscriptions"`
+	Status  string `json:"status" jsonschema:"active to start (or keep) searching, paused to stop"`
+	Confirm bool   `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
+}
+
+type subWriteIn struct {
+	ID      uint `json:"id" jsonschema:"subscription id from list_subscriptions"`
+	Confirm bool `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
+}
+
+type recognizeIn struct {
+	Title    string `json:"title" jsonschema:"torrent title (release name) to parse"`
+	Subtitle string `json:"subtitle,omitempty" jsonschema:"the site's subtitle for the torrent, often the Chinese title"`
+	IMDbID   string `json:"imdb_id,omitempty" jsonschema:"IMDb id the site gives (tt1234567), if any"`
+}
+
+type mediaHistoryIn struct {
+	Status   string `json:"status,omitempty" jsonschema:"only records in this status"`
+	Keyword  string `json:"keyword,omitempty" jsonschema:"only records whose title or torrent name contains this keyword"`
+	Page     int    `json:"page,omitempty" jsonschema:"page number starting at 1"`
+	PageSize int    `json:"page_size,omitempty" jsonschema:"items per page, 1 to 100 (default 20)"`
+}
+
+type organizePreviewIn struct {
+	DownloaderID uint   `json:"downloader_id" jsonschema:"downloader id from list_downloader_torrents"`
+	Hash         string `json:"hash" jsonschema:"info_hash from list_downloader_torrents (task_id when it has no info_hash)"`
+	MediaType    string `json:"media_type,omitempty" jsonschema:"movie or tv, together with tmdb_id to override recognition"`
+	TMDBID       int    `json:"tmdb_id,omitempty" jsonschema:"TMDB id (from recognize_media or explore_media) to override recognition"`
+	LibraryID    uint   `json:"library_id,omitempty" jsonschema:"library id from list_media_libraries; chosen by media type when omitted"`
+}
+
+type organizeIn struct {
+	DownloaderID uint   `json:"downloader_id" jsonschema:"downloader id from list_downloader_torrents"`
+	Hash         string `json:"hash" jsonschema:"info_hash from list_downloader_torrents (task_id when it has no info_hash)"`
+	MediaType    string `json:"media_type,omitempty" jsonschema:"movie or tv, together with tmdb_id to override recognition"`
+	TMDBID       int    `json:"tmdb_id,omitempty" jsonschema:"TMDB id (from recognize_media or explore_media) to override recognition"`
+	LibraryID    uint   `json:"library_id,omitempty" jsonschema:"library id from list_media_libraries; chosen by media type when omitted"`
+	Confirm      bool   `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
+}
+
+type historyRetryIn struct {
+	ID      uint `json:"id" jsonschema:"record id from list_media_history"`
+	Confirm bool `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
+}
+
+// pushTarget 是推送的站点与种子编号：给了下载地址的按已配置的站点认出来。
+func pushTarget(d *Deps, in pushIn) (site, id string, err error) {
+	site, id = strings.TrimSpace(in.Site), strings.TrimSpace(in.TorrentID)
+	if raw := strings.TrimSpace(in.TorrentURL); raw != "" {
+		if site != "" || id != "" {
+			return "", "", errors.New("torrent_url 与 site、torrent_id 只给一种")
+		}
+		var ok bool
+		if d.ResolveURL != nil {
+			site, id, ok = d.ResolveURL(raw)
+		}
+		if !ok {
+			return "", "", errors.New("认不出这个地址：只收已配置站点的种子下载地址（磁力链接不收）")
+		}
+	}
+	if site == "" || id == "" {
+		return "", "", errors.New("要给 site 与 torrent_id（从 search_torrents 取），或者 torrent_url")
+	}
+	return site, id, nil
+}
+
+// organizeBody 是整理与整理预览的请求体（App API 的 AppOrganizeInput）。
+func organizeBody(downloaderID uint, hash, mediaType string, tmdbID int, libraryID uint) (map[string]any, error) {
+	hash = strings.TrimSpace(hash)
+	if downloaderID == 0 || hash == "" {
+		return nil, errors.New("要给 downloader_id 与 hash（从 list_downloader_torrents 取）")
+	}
+	if (tmdbID > 0) != (mediaType != "") {
+		return nil, errors.New("指定条目时 media_type 与 tmdb_id 一起给")
+	}
+	return map[string]any{
+		"downloader_id": downloaderID, "hash": hash, "media_type": mediaType, "tmdb_id": tmdbID, "library_id": libraryID,
+	}, nil
 }
 
 // errTarget 是暂停、继续、删除没给种子。
@@ -228,10 +317,12 @@ func registerTools(s *sdk.Server, d *Deps) {
 		}, nil
 	})
 
-	register(s, d, spec{
+	registerWrite(s, d, spec{
 		min:  map[string]float64{"downloader_id": 1},
-		name: "pause_torrent", title: "Pause a torrent", write: true,
+		name: "pause_torrent", title: "Pause a torrent",
 		description: "Pause one torrent in a downloader. Changes the user's downloader: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in torrentIn) (Preview, error) {
+		return torrentPreview(ctx, d, c, "pause_torrent", in.DownloaderID, in.TaskID, false)
 	}, func(in torrentIn) (call, error) {
 		if !in.Confirm {
 			return call{}, errConfirm
@@ -239,10 +330,12 @@ func registerTools(s *sdk.Server, d *Deps) {
 		return torrentAction("pause", in.DownloaderID, in.TaskID)
 	})
 
-	register(s, d, spec{
+	registerWrite(s, d, spec{
 		min:  map[string]float64{"downloader_id": 1},
-		name: "resume_torrent", title: "Resume a torrent", write: true,
+		name: "resume_torrent", title: "Resume a torrent",
 		description: "Resume one paused torrent in a downloader. Changes the user's downloader: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in torrentIn) (Preview, error) {
+		return torrentPreview(ctx, d, c, "resume_torrent", in.DownloaderID, in.TaskID, false)
 	}, func(in torrentIn) (call, error) {
 		if !in.Confirm {
 			return call{}, errConfirm
@@ -250,10 +343,12 @@ func registerTools(s *sdk.Server, d *Deps) {
 		return torrentAction("resume", in.DownloaderID, in.TaskID)
 	})
 
-	register(s, d, spec{
+	registerWrite(s, d, spec{
 		min:  map[string]float64{"downloader_id": 1},
-		name: "delete_torrent", title: "Delete a torrent", write: true, destructive: true,
+		name: "delete_torrent", title: "Delete a torrent", destructive: true,
 		description: "Remove one torrent from a downloader, optionally deleting its files (remove_data). Cannot be undone: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in deleteIn) (Preview, error) {
+		return torrentPreview(ctx, d, c, "delete_torrent", in.DownloaderID, in.TaskID, in.RemoveData)
 	}, func(in deleteIn) (call, error) {
 		if !in.Confirm {
 			return call{}, errConfirm
@@ -265,30 +360,24 @@ func registerTools(s *sdk.Server, d *Deps) {
 		return torrentAction(action, in.DownloaderID, in.TaskID)
 	})
 
-	register(s, d, spec{
-		name: "push_torrent", title: "Push a torrent to a downloader", write: true, openWorld: true,
+	registerWrite(s, d, spec{
+		name: "push_torrent", title: "Push a torrent to a downloader", openWorld: true,
 		description: "Download a torrent through pt-tools' own site configuration and add it to a downloader, applying the disk-space and site-capacity checks. " +
 			"Give site and torrent_id from search_torrents, or the torrent's download URL on a configured site. Magnet links and other URLs are not accepted. " +
 			"Changes the user's downloader: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in pushIn) (Preview, error) {
+		site, id, err := pushTarget(d, in)
+		if err != nil {
+			return Preview{}, err
+		}
+		return pushPreview(ctx, d, c, site, id, in), nil
 	}, func(in pushIn) (call, error) {
 		if !in.Confirm {
 			return call{}, errConfirm
 		}
-		site, id := strings.TrimSpace(in.Site), strings.TrimSpace(in.TorrentID)
-		if raw := strings.TrimSpace(in.TorrentURL); raw != "" {
-			if site != "" || id != "" {
-				return call{}, errors.New("torrent_url 与 site、torrent_id 只给一种")
-			}
-			var ok bool
-			if d.ResolveURL != nil {
-				site, id, ok = d.ResolveURL(raw)
-			}
-			if !ok {
-				return call{}, errors.New("认不出这个地址：只收已配置站点的种子下载地址（磁力链接不收）")
-			}
-		}
-		if site == "" || id == "" {
-			return call{}, errors.New("要给 site 与 torrent_id（从 search_torrents 取），或者 torrent_url")
+		site, id, err := pushTarget(d, in)
+		if err != nil {
+			return call{}, err
 		}
 		return call{
 			req: Request{Method: http.MethodPost, Path: "/push", Body: map[string]any{
@@ -349,12 +438,17 @@ func registerTools(s *sdk.Server, d *Deps) {
 		return call{req: Request{Method: http.MethodGet, Path: withQuery("/subscriptions", "status", in.Status, "q", in.Keyword)}}, nil
 	})
 
-	register(s, d, spec{
-		name: "add_subscription", title: "Subscribe to a movie or TV show", write: true, openWorld: true,
+	registerWrite(s, d, spec{
+		name: "add_subscription", title: "Subscribe to a movie or TV show", openWorld: true,
 		min: map[string]float64{"tmdb_id": 1, "season": 0},
 		description: "Subscribe to a movie or a TV season by TMDB id (from explore_media): pt-tools then searches the user's sites and downloads it. " +
 			"Changes the user's setup: ask first and pass confirm=true.",
 		enums: map[string][]any{"media_type": {"movie", "tv"}},
+	}, func(_ context.Context, _ *Deps, _ Caller, in addSubIn) (Preview, error) {
+		if in.TMDBID <= 0 {
+			return Preview{}, errors.New("tmdb_id 要填（从 explore_media 取）")
+		}
+		return addSubscriptionPreview(in), nil
 	}, func(in addSubIn) (call, error) {
 		if !in.Confirm {
 			return call{}, errConfirm
@@ -366,5 +460,140 @@ func registerTools(s *sdk.Server, d *Deps) {
 			req:   Request{Method: http.MethodPost, Path: "/subscriptions", Body: map[string]any{"media_type": in.MediaType, "tmdb_id": in.TMDBID, "season": in.Season, "upgrade": in.Upgrade}},
 			audit: map[string]any{"media_type": in.MediaType, "tmdb_id": in.TMDBID, "season": in.Season},
 		}, nil
+	})
+
+	registerMediaTools(s, d)
+	registerConfigTools(s, d)
+}
+
+// registerMediaTools 注册订阅管理、媒体识别与整理入库的工具。
+func registerMediaTools(s *sdk.Server, d *Deps) {
+	register(s, d, spec{
+		name: "get_subscription", title: "Subscription details",
+		min:         map[string]float64{"id": 1},
+		description: "Show one subscription: progress, each episode's state (library, downloading, missing, upcoming) and the torrents it downloaded.",
+	}, func(in subIDIn) (call, error) {
+		return call{req: Request{Method: http.MethodGet, Path: "/subscriptions/" + utoa(in.ID)}}, nil
+	})
+
+	registerWrite(s, d, spec{
+		name: "set_subscription_status", title: "Pause or resume a subscription",
+		min:         map[string]float64{"id": 1},
+		enums:       map[string][]any{"status": {"active", "paused"}},
+		description: "Pause a subscription (stop searching) or set it active again. Changes the user's subscriptions: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in subStatusIn) (Preview, error) {
+		return subscriptionPreview(ctx, d, c, "set_subscription_status", in.ID, in.Status)
+	}, func(in subStatusIn) (call, error) {
+		if !in.Confirm {
+			return call{}, errConfirm
+		}
+		return call{
+			req:   Request{Method: http.MethodPost, Path: "/subscriptions/" + utoa(in.ID) + "/status", Body: map[string]any{"status": in.Status}},
+			audit: map[string]any{"id": in.ID, "status": in.Status},
+		}, nil
+	})
+
+	registerWrite(s, d, spec{
+		name: "search_subscription", title: "Search a subscription now", openWorld: true,
+		min: map[string]float64{"id": 1},
+		description: "Search the user's sites for a subscription right now instead of waiting for the next scheduled search; matching torrents are downloaded. " +
+			"Changes the user's downloader: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in subWriteIn) (Preview, error) {
+		return subscriptionPreview(ctx, d, c, "search_subscription", in.ID, "")
+	}, func(in subWriteIn) (call, error) {
+		if !in.Confirm {
+			return call{}, errConfirm
+		}
+		return call{req: Request{Method: http.MethodPost, Path: "/subscriptions/" + utoa(in.ID) + "/search"}, audit: map[string]any{"id": in.ID}}, nil
+	})
+
+	registerWrite(s, d, spec{
+		name: "delete_subscription", title: "Delete a subscription", destructive: true,
+		min:         map[string]float64{"id": 1},
+		description: "Delete a subscription. Downloaded torrents and library files stay. Cannot be undone: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in subWriteIn) (Preview, error) {
+		return subscriptionPreview(ctx, d, c, "delete_subscription", in.ID, "")
+	}, func(in subWriteIn) (call, error) {
+		if !in.Confirm {
+			return call{}, errConfirm
+		}
+		return call{req: Request{Method: http.MethodDelete, Path: "/subscriptions/" + utoa(in.ID)}, audit: map[string]any{"id": in.ID}}, nil
+	})
+
+	register(s, d, spec{
+		name: "recognize_media", title: "Recognize a torrent title", openWorld: true,
+		description: "Parse a torrent title (name, year, season and episode, resolution, source, codec, group) and match it to a TMDB movie or TV show, " +
+			"applying the user's corrections and recognition words. Returns the match, how it was found and the best candidates.",
+	}, func(in recognizeIn) (call, error) {
+		if strings.TrimSpace(in.Title) == "" && strings.TrimSpace(in.Subtitle) == "" {
+			return call{}, errors.New("title 与 subtitle 至少给一个")
+		}
+		return call{req: Request{Method: http.MethodPost, Path: "/media/recognize", Body: map[string]any{
+			"title": in.Title, "subtitle": in.Subtitle, "imdb_id": in.IMDbID,
+		}}}, nil
+	})
+
+	register(s, d, spec{
+		name: "list_media_libraries", title: "List media libraries",
+		description: "List the user's media libraries (movie or TV, directory, organize mode, scraping) that organize_media puts files into.",
+	}, func(struct{}) (call, error) {
+		return call{req: Request{Method: http.MethodGet, Path: "/media/libraries"}}, nil
+	})
+
+	register(s, d, spec{
+		name: "list_media_history", title: "List library organize history",
+		min: map[string]float64{"page": 1, "page_size": 1}, max: map[string]float64{"page_size": 100},
+		enums:       map[string][]any{"status": {"done", "failed", "skipped", "removed"}},
+		description: "List organize records, newest first: one per video file put into a library (or skipped, failed), with the target path and the reason when it failed. Failed records can be retried with retry_media_organize.",
+	}, func(in mediaHistoryIn) (call, error) {
+		return call{req: Request{Method: http.MethodGet, Path: withQuery("/media/history",
+			"status", in.Status, "q", in.Keyword, "page", itoa(in.Page), "page_size", itoa(in.PageSize))}}, nil
+	})
+
+	register(s, d, spec{
+		name: "preview_media_organize", title: "Preview organizing a torrent", openWorld: true,
+		min:   map[string]float64{"downloader_id": 1, "tmdb_id": 0, "library_id": 0},
+		enums: map[string][]any{"media_type": {"movie", "tv"}},
+		description: "Show what organize_media would do with a downloaded torrent, without changing anything: the recognized TMDB entry, the library, " +
+			"and each video's target path and status (pending, done, exists, replace, failed).",
+	}, func(in organizePreviewIn) (call, error) {
+		body, err := organizeBody(in.DownloaderID, in.Hash, in.MediaType, in.TMDBID, in.LibraryID)
+		if err != nil {
+			return call{}, err
+		}
+		return call{req: Request{Method: http.MethodPost, Path: "/media/organize/preview", Body: body}}, nil
+	})
+
+	registerWrite(s, d, spec{
+		name: "organize_media", title: "Organize a torrent into the library", openWorld: true,
+		min:   map[string]float64{"downloader_id": 1, "tmdb_id": 0, "library_id": 0},
+		enums: map[string][]any{"media_type": {"movie", "tv"}},
+		description: "Put a downloaded torrent's videos into a media library with the naming template (hardlink, copy or move as the library says), " +
+			"write NFO and posters, and ask the media servers to scan. Use preview_media_organize first. Changes the user's library: ask first and pass confirm=true.",
+	}, organizePreview, func(in organizeIn) (call, error) {
+		if !in.Confirm {
+			return call{}, errConfirm
+		}
+		body, err := organizeBody(in.DownloaderID, in.Hash, in.MediaType, in.TMDBID, in.LibraryID)
+		if err != nil {
+			return call{}, err
+		}
+		return call{
+			req:   Request{Method: http.MethodPost, Path: "/media/organize", Body: body},
+			audit: map[string]any{"downloader_id": in.DownloaderID, "hash": strings.TrimSpace(in.Hash), "tmdb_id": in.TMDBID, "library_id": in.LibraryID},
+		}, nil
+	})
+
+	registerWrite(s, d, spec{
+		name: "retry_media_organize", title: "Retry organizing a record", openWorld: true,
+		min:         map[string]float64{"id": 1},
+		description: "Organize again the torrent of one record from list_media_history (usually a failed one). Changes the user's library: ask first and pass confirm=true.",
+	}, func(ctx context.Context, d *Deps, c Caller, in historyRetryIn) (Preview, error) {
+		return retryPreview(ctx, d, c, in.ID)
+	}, func(in historyRetryIn) (call, error) {
+		if !in.Confirm {
+			return call{}, errConfirm
+		}
+		return call{req: Request{Method: http.MethodPost, Path: "/media/history/" + utoa(in.ID) + "/retry"}, audit: map[string]any{"id": in.ID}}, nil
 	})
 }

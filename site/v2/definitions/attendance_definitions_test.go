@@ -13,14 +13,25 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
-// 签到不走 attendance.php 通用流程的站点：标为不支持并写明原因，界面直接显示这句原因。
+// 签到不走 attendance.php 通用流程、流程也没写的站点：标为不支持并写明原因，界面直接显示这句原因。
 var attendanceUnsupported = map[string]string{
-	"52pt":      "答题",
-	"ptchdbits": "答题",
-	"u2dmhy":    "答题",
-	"hdsky":     "验证码",
-	"opencd":    "验证码",
-	"btschool":  "签到方式",
+	"u2dmhy":       "动态图片验证码",
+	"btschool":     "签到方式",
+	"mteam":        "没有签到",
+	"springsunday": "没有签到",
+}
+
+// 不是 NexusPHP、但驱动自己实现了签到的站点（走站点的签到接口）。
+var attendanceAPISites = map[string]bool{
+	"rousipro": true,
+}
+
+// 签到要过一关的站点：识别验证码或答题，要用 AI（流程见 site/v2/attendance_challenge.go）。
+var attendanceChallenges = map[string]v2.AttendanceChallenge{
+	"hdsky":     v2.ChallengeHDSkyCaptcha,
+	"opencd":    v2.ChallengeOpenCDCaptcha,
+	"ptchdbits": v2.ChallengeBakaQuiz,
+	"52pt":      v2.ChallengeBakaQuiz,
 }
 
 // M1c：每个内置站点的签到配置都能解析——NexusPHP 默认 GET /attendance.php，例外站点写明原因，其他架构不支持。
@@ -34,6 +45,20 @@ func TestAttendanceDefinitions(t *testing.T) {
 			seen[def.ID] = true
 			assert.False(t, ok, def.ID)
 			assert.Contains(t, reason, want, def.ID)
+			continue
+		}
+		if want, listed := attendanceChallenges[def.ID]; listed {
+			seen[def.ID] = true
+			assert.True(t, ok, def.ID)
+			assert.Empty(t, reason, def.ID)
+			assert.Equal(t, want, v2.AttendanceChallengeOf(def), def.ID)
+			continue
+		}
+		assert.Empty(t, v2.AttendanceChallengeOf(def), "%s 有签到关卡但不在名单里", def.ID)
+		if attendanceAPISites[def.ID] {
+			seen[def.ID] = true
+			assert.True(t, ok, def.ID)
+			assert.Empty(t, reason, def.ID)
 			continue
 		}
 		if def.Schema != v2.SchemaNexusPHP {
@@ -57,6 +82,12 @@ func TestAttendanceDefinitions(t *testing.T) {
 	}
 	for id := range attendanceUnsupported {
 		assert.True(t, seen[id], "%s is listed as unsupported but has no definition", id)
+	}
+	for id := range attendanceChallenges {
+		assert.True(t, seen[id], "%s is listed with a challenge but has no definition", id)
+	}
+	for id := range attendanceAPISites {
+		assert.True(t, seen[id], "%s is listed as signing through its API but has no definition", id)
 	}
 }
 

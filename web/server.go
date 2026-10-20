@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -87,8 +88,14 @@ type Server struct {
 	// background 跟踪处理器派生的后台任务（如自动禁用不可用站点），测试据此等任务结束再清理临时目录。
 	background sync.WaitGroup
 
+	// attendanceRun 是网页「一键签到」的进度（见 apiAttendanceRun）
+	attendanceRun attendanceRunState
+
 	// checkUpdates 是 App API 的 /updates 查新版本用的（version.Checker；测试里换成假的，不访问 GitHub）
 	checkUpdates func(ctx context.Context, opts version.CheckOptions) (*version.VersionCheckResult, error)
+
+	// configMux 是 buildHandler 建出的路由：配置网关在进程内经它调网页用的接口（见 config_gateway.go）
+	configMux atomic.Pointer[http.ServeMux]
 }
 
 // goBackground 在后台执行 fn，并计入 background。
@@ -180,6 +187,8 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
 	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
 	mux.HandleFunc("/api/control/start", s.auth(s.apiStartAll))
+	mux.HandleFunc("/api/control/status", s.auth(s.apiControlStatus))
+	mux.HandleFunc("/api/control/auto-start", s.auth(s.apiControlAutoStart))
 	// Downloader management APIs
 	mux.HandleFunc("/api/downloaders", s.auth(s.apiDownloaders))
 	mux.HandleFunc("/api/downloaders/all-directories", s.auth(s.apiAllDownloaderDirectories))
@@ -307,6 +316,7 @@ func (s *Server) buildHandler() http.Handler {
 		// Serve Vue SPA index.html
 		http.ServeFileFS(w, r, distFS, "index.html")
 	})
+	s.configMux.Store(mux)
 	return logMiddleware(mux)
 }
 
@@ -366,6 +376,11 @@ func logMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 配置网关在进程内发的请求（只有进程里的代码能做这个标记，见 configInternalKey）
+		if configInternal(r.Context()) {
+			next(w, r)
+			return
+		}
 		sid, err := r.Cookie("session")
 		if err != nil || !s.sessions.valid(sid.Value) {
 			// 对 API 请求返回 401 + JSON，避免浏览器扩展/CLI 客户端
@@ -1316,7 +1331,7 @@ func (s *Server) apiStopAll(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	// 只停 RSS 任务：免费到期、自动删种等监控和配置热重载继续运行，「启动所有任务」可以恢复。
+	// 只停 RSS 任务：免费到期、自动删种等监控和配置热重载继续运行，「启动 RSS 任务」可以恢复。
 	// StopAll 是进程退出用的最终关闭，停掉后无法再启动。
 	s.mgr.StopJobs()
 	writeJSON(w, map[string]string{"status": "stopped"})

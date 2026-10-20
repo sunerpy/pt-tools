@@ -185,7 +185,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 	Aka:            []string{"HDS", "天空"},
 	Description:    "高清发烧友后花园PT",
 	Schema:         v2.SchemaNexusPHP,
-	Attendance:     &v2.AttendanceConfig{Unsupported: "签到需要验证码，暂不支持自动签到"},
+	Attendance:     &v2.AttendanceConfig{Challenge: v2.ChallengeHDSkyCaptcha},
 	URLs:           []string{"https://hdsky.me/"},
 	FaviconURL:     "https://hdsky.me/favicon.ico",
 	TimezoneOffset: "+0800",

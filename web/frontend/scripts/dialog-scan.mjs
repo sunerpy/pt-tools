@@ -86,8 +86,13 @@ const BOARD_40 = [
   },
 
   // --- ElMessageBox 确认（画板 19–37）
-  { tile: "19 确认 · 停止所有任务", file: "stores/runtime.ts", needle: "停止所有任务" },
-  { tile: "20 确认 · 启动所有任务", file: "stores/runtime.ts", needle: "启动所有任务" },
+  // 2026-10「调度器」改名「RSS 任务」，确认文案跟着改；小图名照画板原样
+  { tile: "19 确认 · 停止所有任务", file: "stores/runtime.ts", needle: "确定停止 RSS 任务吗" },
+  {
+    tile: "20 确认 · 启动所有任务",
+    file: "stores/runtime.ts",
+    needle: "按当前配置启动 RSS 任务吗",
+  },
   { tile: "21 确认 · 批量删除记录", file: "views/TaskList.vue", needle: "ElMessageBox.confirm" },
   { tile: "22 确认 · 删除站点", file: "views/SiteList.vue", needle: "ElMessageBox.confirm" },
   { tile: "23 确认 · 删除 RSS", file: "views/SiteDetail.vue", needle: "ElMessageBox.confirm" },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SiteAttendance } from "@/api";
-import { attendanceView } from "./attendanceStatus";
+import { attendanceChallengeText, attendanceView } from "./attendanceStatus";
 
 function att(partial: Partial<SiteAttendance>): SiteAttendance {
   return {
@@ -66,5 +66,14 @@ describe("attendanceView", () => {
     expect(attendanceView(att({})).label).toBe("待安排");
     expect(attendanceView(undefined).label).toBe("-");
     expect(attendanceView(att({ site_enabled: false })).canSign).toBe(false);
+  });
+});
+
+describe("attendanceChallengeText", () => {
+  it("要过验证码或答题的站点写明用 AI，其余站点不写", () => {
+    expect(attendanceChallengeText("hdsky_captcha")).toContain("识别验证码");
+    expect(attendanceChallengeText("opencd_captcha")).toContain("看图模型");
+    expect(attendanceChallengeText("baka_quiz")).toContain("答题");
+    expect(attendanceChallengeText(undefined)).toBe("");
   });
 });

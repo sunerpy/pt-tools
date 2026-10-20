@@ -668,7 +668,7 @@ onBeforeUnmount(() => {
 
       <PtPanel title="幂等与去重口径" icon="shield-check">
         <ul class="idem">
-          <li>每条「RSS + 种子 + 通道」只会留一条记录，调度器重跑同一轮不会重复推送。</li>
+          <li>每条「RSS + 种子 + 通道」只会留一条记录，RSS 任务重跑同一轮不会重复推送。</li>
           <!--
             之前写的是「被安静时段或每小时配额挡下的记为 suppressed」—— 与 internal/app/rss_notifier.go 不符：
             安静时段里的保持 pending、推迟到时段结束补发；超配额的记 throttled；suppressed 是被同一种子的

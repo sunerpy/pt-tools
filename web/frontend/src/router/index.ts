@@ -86,6 +86,12 @@ const router = createRouter({
       meta: { title: "站点列表" },
     },
     {
+      path: "/attendance",
+      name: "attendance",
+      component: () => import("@/views/Attendance.vue"),
+      meta: { title: "自动签到" },
+    },
+    {
       path: "/supported-sites",
       name: "supported-sites",
       component: () => import("@/views/SupportedSites.vue"),

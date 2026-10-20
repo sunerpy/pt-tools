@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 /*
- * 钉子：系统设置的「保存设置」先写全局配置、再写签到时间窗，两步分开报告结果。
+ * 钉子：系统设置的「保存设置」先写全局配置、再写每日战报，两步分开报告结果。
  *
- * 原来两步包在同一个 try 里：全局配置已经落库、签到时间窗没写上时，页面只弹一句「保存失败」，
- * 用户以为什么都没改，其实全局配置已经变了。
+ * 原来两步包在同一个 try 里：全局配置已经落库、后一步没写上时，页面只弹一句「保存失败」，
+ * 用户以为什么都没改，其实全局配置已经变了。（每日签到的设置挪到了「自动签到」页，第二步现在是每日战报。）
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,8 +12,8 @@ import { type MountedView, mountView } from "@/test-mount";
 const api = vi.hoisted(() => ({
   getGlobal: vi.fn(),
   saveGlobal: vi.fn(),
-  getAttendance: vi.fn(),
-  saveAttendance: vi.fn(),
+  getReport: vi.fn(),
+  saveReport: vi.fn(),
 }));
 
 const ui = vi.hoisted(() => ({
@@ -27,7 +27,12 @@ vi.mock("@/api", async (orig) => {
   return {
     ...real,
     globalApi: { get: api.getGlobal, save: api.saveGlobal },
-    attendanceApi: { getSettings: api.getAttendance, saveSettings: api.saveAttendance },
+    userInfoApi: {
+      ...real.userInfoApi,
+      getDailyReport: api.getReport,
+      saveDailyReport: api.saveReport,
+    },
+    chatopsApi: { ...real.chatopsApi, notifications: { list: vi.fn(() => Promise.resolve([])) } },
   };
 });
 
@@ -77,9 +82,9 @@ function saveButton(): HTMLButtonElement {
   return btn;
 }
 
-/** 把签到时间窗开始改成 00:00（只有开始那一列有这个选项） */
-async function changeWindowStart() {
-  const field = document.querySelector("[data-testid=attendance-window-start]")!;
+/** 把每日战报的发送时刻改成 00:00 */
+async function changeReportTime() {
+  const field = document.querySelector("[data-testid=daily-report-time]")!;
   (field.querySelector<HTMLElement>(".el-select__wrapper") ?? (field as HTMLElement)).click();
   await vi.waitFor(() => {
     const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
@@ -92,9 +97,9 @@ async function changeWindowStart() {
 
 async function mountLoaded() {
   api.getGlobal.mockResolvedValue(structuredClone(SETTINGS));
-  api.getAttendance.mockResolvedValue({ window_start: "08:00", window_end: "10:00" });
+  api.getReport.mockResolvedValue({ enabled: false, time: "22:00", channel_ids: [] });
   await mountPage();
-  await vi.waitFor(() => expect(api.getAttendance).toHaveBeenCalled());
+  await vi.waitFor(() => expect(api.getReport).toHaveBeenCalled());
   await vi.waitFor(() => saveButton());
 }
 
@@ -105,50 +110,55 @@ afterEach(() => {
 });
 
 describe("系统设置：两步保存分开报告", () => {
-  it("全局配置已保存、签到时间窗失败：说明前一步已生效，不报整体失败", async () => {
+  it("全局配置已保存、每日战报失败：说明前一步已生效，不报整体失败", async () => {
     await mountLoaded();
     api.saveGlobal.mockResolvedValue(undefined);
-    api.saveAttendance.mockRejectedValue(new Error("签到设置写入失败"));
-    await changeWindowStart();
+    api.saveReport.mockRejectedValue(new Error("战报设置写入失败"));
+    await changeReportTime();
 
     saveButton().click();
 
     await vi.waitFor(() => expect(ui.warning).toHaveBeenCalled());
     const msg = String(ui.warning.mock.calls[0]![0]);
     expect(msg).toContain("全局配置已保存");
-    expect(msg).toContain("签到设置写入失败");
+    expect(msg).toContain("战报设置写入失败");
     expect(ui.error).not.toHaveBeenCalled();
     expect(ui.success).not.toHaveBeenCalled();
   });
 
-  it("全局配置保存失败：报失败，不再写签到时间窗", async () => {
+  it("全局配置保存失败：报失败，不再写每日战报", async () => {
     await mountLoaded();
     api.saveGlobal.mockRejectedValue(new Error("磁盘只读"));
-    await changeWindowStart();
+    await changeReportTime();
 
     saveButton().click();
 
     await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("磁盘只读"));
-    expect(api.saveAttendance).not.toHaveBeenCalled();
+    expect(api.saveReport).not.toHaveBeenCalled();
     expect(ui.success).not.toHaveBeenCalled();
   });
 
-  it("两步都成功：提示保存成功，签到时间窗记成已保存，再点一次不重复写", async () => {
+  it("两步都成功：提示保存成功，战报记成已保存，再点一次不重复写", async () => {
     await mountLoaded();
     api.saveGlobal.mockResolvedValue(undefined);
-    api.saveAttendance.mockImplementation((v: { window_start: string; window_end: string }) =>
-      Promise.resolve({ ...v }),
-    );
-    await changeWindowStart();
+    api.saveReport.mockImplementation((v: Record<string, unknown>) => Promise.resolve({ ...v }));
+    await changeReportTime();
 
     saveButton().click();
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalledTimes(1));
-    expect(api.saveAttendance).toHaveBeenCalledWith({ window_start: "00:00", window_end: "10:00" });
+    expect(api.saveReport).toHaveBeenCalledWith({ enabled: false, time: "00:00", channel_ids: [] });
 
     await vi.waitFor(() => saveButton());
     saveButton().click();
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalledTimes(2));
-    expect(api.saveAttendance).toHaveBeenCalledTimes(1);
+    expect(api.saveReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("每日签到的设置挪到了「自动签到」页：这里只留一句指路", async () => {
+    await mountLoaded();
+    const moved = document.querySelector("[data-testid=attendance-moved]");
+    expect(moved?.textContent).toContain("自动签到");
+    expect(document.querySelector("[data-testid=attendance-window-start]")).toBeNull();
   });
 });
 

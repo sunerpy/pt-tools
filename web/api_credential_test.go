@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sunerpy/pt-tools/core"
+	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -188,4 +190,79 @@ func TestUpdateSiteCredential(t *testing.T) {
 		assert.True(t, *sc.Enabled)
 		settleCredentialReload(t, srv)
 	})
+}
+
+// HDDolby 要 Cookie 和 API Key：扩展只同步来 Cookie、库里还没有 API Key 时，Cookie 照样存下，站点保持停用，
+// 回 200 并说明还缺 API Key（以前走完整校验回 500「API Key 不能为空」，扩展每次同步都报失败、Cookie 也存不进去）。
+func TestUpdateSiteCredential_IncompleteKeepsDisabled(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	require.NoError(t, srv.store.SaveGlobalSettings(models.SettingsGlobal{
+		DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, AutoStart: true,
+	}))
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hddolby", DisplayName: "hddolby", AuthMethod: "cookie_and_api_key", IsBuiltin: true}).Error)
+
+	put := func(body credentialUpdateRequest) (*httptest.ResponseRecorder, map[string]any) {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		srv.updateSiteCredential(w, httptest.NewRequest(http.MethodPut, "/api/sites/hddolby", bytes.NewReader(raw)), models.SiteGroup("hddolby"))
+		var resp map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		return w, resp
+	}
+
+	w, resp := put(credentialUpdateRequest{Cookie: credStrPtr("c_secure_uid=1; c_secure_pass=2")})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, true, resp["success"])
+	assert.Equal(t, false, resp["enabled"])
+	assert.Contains(t, resp["warning"], "API Key")
+	assert.Contains(t, resp["warning"], "HD Dolby", "用站点定义里的名字")
+
+	sc, err := srv.store.GetSiteConf(models.SiteGroup("hddolby"))
+	require.NoError(t, err)
+	assert.Equal(t, "c_secure_uid=1; c_secure_pass=2", sc.Cookie, "Cookie 已加密存下")
+	require.NotNil(t, sc.Enabled)
+	assert.False(t, *sc.Enabled, "缺 API Key，站点不启用")
+	var row models.SiteSetting
+	require.NoError(t, db.Where("name = ?", "hddolby").First(&row).Error)
+	assert.Empty(t, row.Cookie, "不写旧的明文列")
+	assert.NotEmpty(t, row.CookieEncrypted)
+
+	// 再补上 API Key：凭据齐了，照原来的路径启用站点
+	w, resp = put(credentialUpdateRequest{APIKey: credStrPtr("dolby-key")})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Nil(t, resp["warning"])
+	sc, err = srv.store.GetSiteConf(models.SiteGroup("hddolby"))
+	require.NoError(t, err)
+	require.NotNil(t, sc.Enabled)
+	assert.True(t, *sc.Enabled)
+	assert.Equal(t, "c_secure_uid=1; c_secure_pass=2", sc.Cookie, "补 API Key 不影响已存的 Cookie")
+	settleCredentialReload(t, srv)
+}
+
+// 校验失败是请求的问题，回 400，不是 500：启用中的站点把 API Key 清空就会校验失败
+func TestUpdateSiteCredential_ValidationIs400(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "api_key", APIKey: "k", APIUrl: "https://api.m-team.cc",
+	}))
+	raw, _ := json.Marshal(credentialUpdateRequest{APIKey: credStrPtr("")})
+	w := httptest.NewRecorder()
+	srv.updateSiteCredential(w, httptest.NewRequest(http.MethodPut, "/api/sites/mteam", bytes.NewReader(raw)), models.SiteGroup("mteam"))
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "API Key 不能为空")
+}
+
+func TestMissingCredential(t *testing.T) {
+	assert.Equal(t, "", core.MissingCredential("cookie", "a=1", "", ""))
+	assert.Equal(t, "cookie", core.MissingCredential("cookie", " ", "", ""))
+	assert.Equal(t, "api_key", core.MissingCredential("api_key", "a=1", "", ""))
+	assert.Equal(t, "api_key", core.MissingCredential("cookie_and_api_key", "a=1", "", ""))
+	assert.Equal(t, "cookie", core.MissingCredential("cookie_and_api_key", "", "k", ""))
+	assert.Equal(t, "", core.MissingCredential("cookie_and_api_key", "a=1", "k", ""))
+	assert.Equal(t, "passkey", core.MissingCredential("passkey", "", "", ""))
 }

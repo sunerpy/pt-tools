@@ -167,6 +167,9 @@ func TestAppAPI_TokensCannotReachSessionAPIs(t *testing.T) {
 // 只读但用 POST 传条件的路由
 var appReadPosts = map[string]bool{
 	"POST /search": true,
+	// 识别与整理预览只算结果，不改动任何东西
+	"POST /media/recognize":        true,
+	"POST /media/organize/preview": true,
 	// AI 助手的对话只动调用者自己的会话：只要 app:read；改动类操作另要确认（POST /assistant/confirmations/{id} 要 app:write）
 	"POST /assistant/conversations":               true,
 	"DELETE /assistant/conversations/{id}":        true,
@@ -174,6 +177,13 @@ var appReadPosts = map[string]bool{
 	"POST /assistant/conversations/{id}/cancel":   true,
 	// 模板预览只渲染示例数据，不保存
 	"POST /templates/preview": true,
+	// 配置的预览只算会改什么，不保存
+	"POST /config/{resource}/preview": true,
+}
+
+// appConfigRoute 报告是不是配置接口：另外还要 app:config。
+func appConfigRoute(path string) bool {
+	return path == "/config" || strings.HasPrefix(path, "/config/")
 }
 
 // 路由表：每条都声明了权限范围；读是 GET（或者上面列出的只读 POST）+ app:read，写是别的方法 + app:write；没有重复
@@ -194,15 +204,24 @@ func TestAppAPI_RouteTable(t *testing.T) {
 	}
 }
 
-// 权限范围矩阵：只有 app:read 的令牌调不了写接口，只有 app:write 的调不了读接口
+// 权限范围矩阵：只有 app:read 的令牌调不了写接口，只有 app:write 的调不了读接口；配置接口另外要 app:config
 func TestAppAPI_ScopeMatrix(t *testing.T) {
 	e := newAppEnv(t)
 	read := e.token(apitoken.ScopeAppRead)
 	write := e.token(apitoken.ScopeAppWrite)
+	readCfg := e.token(apitoken.ScopeAppRead, apitoken.ScopeAppConfig)
+	writeCfg := e.token(apitoken.ScopeAppWrite, apitoken.ScopeAppConfig)
 	for _, rt := range e.srv.appRoutes() {
 		path := appPrefix + concretePath(rt.Path)
-		gotRead := e.do(appReq{method: rt.Method, path: path, bearer: read, body: "{}"}).Code
-		gotWrite := e.do(appReq{method: rt.Method, path: path, bearer: write, body: "{}"}).Code
+		r, w := read, write
+		if appConfigRoute(rt.Path) {
+			for _, tok := range []string{read, write} {
+				assert.Equal(t, http.StatusForbidden, e.do(appReq{method: rt.Method, path: path, bearer: tok, body: "{}"}).Code, "%s %s 没有 app:config", rt.Method, rt.Path)
+			}
+			r, w = readCfg, writeCfg
+		}
+		gotRead := e.do(appReq{method: rt.Method, path: path, bearer: r, body: "{}"}).Code
+		gotWrite := e.do(appReq{method: rt.Method, path: path, bearer: w, body: "{}"}).Code
 		if rt.Scope == apitoken.ScopeAppRead {
 			assert.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, gotRead, "%s %s 读令牌", rt.Method, rt.Path)
 			assert.Equal(t, http.StatusForbidden, gotWrite, "%s %s 写令牌", rt.Method, rt.Path)

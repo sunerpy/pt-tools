@@ -75,6 +75,8 @@ body {
 }
 
 .settings-trigger {
+  flex: 0 0 auto;
+  white-space: nowrap;
   border: 1px solid #ffffff40;
   border-radius: 999px;
   background: #ffffff18;
@@ -538,6 +540,178 @@ body {
   font-size: 12px;
   color: var(--primary);
   font-weight: 500;
+}
+
+/* 页头的连接状态：灰点在连、绿点连上了、红点没连上 */
+.app-header h1 {
+  flex: 0 0 auto;
+}
+
+.conn-chip {
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  margin: 0 8px;
+  overflow: hidden;
+  font-size: 11px;
+  color: #effaf6cc;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffffff80;
+}
+
+.conn-chip.tone-ok .conn-dot {
+  background: #7ef0c2;
+}
+
+.conn-chip.tone-bad .conn-dot {
+  background: #ffb4a8;
+}
+
+/* 主页面：我的站点 */
+.my-sites__head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.my-sites__head h2 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--primary);
+}
+
+.my-sites__count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.my-sites__gap {
+  flex: 1;
+}
+
+.btn.small {
+  width: auto;
+  min-height: 26px;
+  margin-top: 0;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.my-sites__note {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #8a6b18;
+  background: #e6a23c14;
+  border-radius: 8px;
+}
+
+.my-sites__list {
+  display: grid;
+  gap: 2px;
+  max-height: 300px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.my-site {
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.my-site:hover {
+  background: var(--primary-faint);
+}
+
+.my-site.attention {
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+.my-site__main,
+.my-site__meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.my-site__meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.my-site__name {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-site__login {
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.my-site__login.tone-ok {
+  color: var(--ok);
+}
+
+.my-site__login.tone-warn {
+  color: #8a6b18;
+}
+
+.my-site__login.tone-bad {
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.my-site__login.tone-muted {
+  color: var(--muted);
+}
+
+.my-site__synced {
+  margin-right: auto;
+}
+
+.link-btn {
+  padding: 0;
+  font-size: 11px;
+  color: var(--primary);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.my-sites__toggle {
+  display: block;
+  margin: 8px auto 0;
+}
+
+.update-section {
+  display: flex;
+  justify-content: center;
 }
 
 @keyframes reveal {

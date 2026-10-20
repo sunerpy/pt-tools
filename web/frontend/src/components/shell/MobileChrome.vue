@@ -6,6 +6,7 @@ import { useRuntimeStore } from "../../stores/runtime";
 import { useThemeStore } from "../../stores/theme";
 import PtIcon from "../PtIcon";
 import VersionChecker from "../VersionChecker.vue";
+import RssTaskPanel from "./RssTaskPanel.vue";
 import ThemePrefs from "./ThemePrefs.vue";
 
 /**
@@ -26,6 +27,9 @@ import ThemePrefs from "./ThemePrefs.vue";
  *
  * 「我的」在画板 34 上是一个设置聚合页，产品里没有这个路由，所以做成上拉抽屉，
  * 把「系统」「ChatOps」两组和偏好折进去 —— 行为等价且不新增路由。
+ * RSS 任务（原「调度器」）的启停与自动启动开关也放在这个抽屉里：手机上原来没有任何启停入口。
+ * 底栏状态行里的「RSS 任务」只显示状态、不做成按钮：那一行只有 24 高，又紧贴 tab 行，
+ * 达不到 §9 的 44×44 触控下限，还容易误触下面的 tab。
  */
 const props = defineProps<{ activePath: string; title: string }>();
 const emit = defineEmits<{ "open-nav": [] }>();
@@ -113,12 +117,12 @@ function goFromSheet(path: string) {
   <nav class="pt-mnav" aria-label="底部导航">
     <!--
       桌面状态条折进底栏顶部（round-2 的「chrome 条 + 折进来的状态行」；这条现在跟主题走，明亮主题下是浅色）。
-      之前这些数字只藏在「我的」抽屉里，手机上等于看不到调度器和速率。
+      之前这些数字只藏在「我的」抽屉里，手机上等于看不到 RSS 任务和速率。
     -->
     <div class="pt-mnav__status" :class="{ 'is-stale': runtimeStore.stale }">
-      <span class="pt-mnav__status-cell">
-        <i class="pt-mnav__dot" :class="`is-${runtimeStore.schedulerHint}`" aria-hidden="true" />
-        <span>{{ runtimeStore.schedulerText }}</span>
+      <span class="pt-mnav__status-cell" data-testid="rss-task-mcell">
+        <i class="pt-mnav__dot" :class="`is-${runtimeStore.rssView.tone}`" aria-hidden="true" />
+        <span>{{ runtimeStore.rssView.label }}</span>
       </span>
       <span class="pt-mnav__status-cell pt-mnav__status-cell--live">
         <PtIcon name="download" :size="11" />
@@ -160,6 +164,10 @@ function goFromSheet(path: string) {
         <span class="pt-msheet__title">版本与更新</span>
         <VersionChecker />
       </div>
+
+      <section class="pt-msheet__group pt-msheet__rss">
+        <RssTaskPanel />
+      </section>
 
       <section v-for="group in sheetGroups" :key="group.title" class="pt-msheet__group">
         <h2 class="pt-msheet__title">{{ group.title }}</h2>

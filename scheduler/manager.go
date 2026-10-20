@@ -58,10 +58,14 @@ type Manager struct {
 	// eventDone 在处理配置变更的协程退出时关闭：StopAll 等它，停下以后不会再有一次 Reload 在跑
 	eventDone chan struct{}
 	stopped   bool
-	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
+	// jobsWanted / jobsPaused 记录用户在网页上点的「启动 / 停止 RSS 任务」：
 	// 手动启动后配置变更照常重启任务；手动停止后配置变更不再把任务拉起来，直到再次手动启动。
 	jobsWanted bool
 	jobsPaused bool
+	// reloading 是正在进行的 Reload 次数；lastDecision 是最近一次 Reload / StartAll / StopJobs 的结论：
+	// RSSRunning 表示决定运行，其余是没有启动任务的原因，空串表示程序启动以后还没有决定过。状态查询（RSSStatus）用它们。
+	reloading    int
+	lastDecision RSSState
 }
 
 func NewManager() *Manager {
@@ -214,10 +218,20 @@ func (m *Manager) Reload(cfg *models.Config) {
 	// 先停掉旧任务再判断新配置：旧任务带着旧配置，新配置不让运行（下载目录清空等）时它们也必须停下。
 	m.mu.Lock()
 	wasRunning := len(m.jobs) > 0
+	m.reloading++
 	m.mu.Unlock()
+	// 每条退出路径都记下结论，状态查询据此说明任务为什么没有运行
+	decision := RSSRunning
+	defer func() {
+		m.mu.Lock()
+		m.reloading--
+		m.lastDecision = decision
+		m.mu.Unlock()
+	}()
 	m.cancelJobsAndWait()
 
 	if cfg == nil || cfg.Global.DownloadDir == "" {
+		decision = RSSNotReady
 		global.GetSlogger().Warn("配置未就绪：下载目录为空，任务不启动")
 		return
 	}
@@ -225,12 +239,14 @@ func (m *Manager) Reload(cfg *models.Config) {
 	paused, wanted := m.jobsPaused, m.jobsWanted
 	m.mu.Unlock()
 	if paused {
-		global.GetSlogger().Info("任务已在调度器中手动停止，配置变更后不自动启动")
+		decision = RSSPaused
+		global.GetSlogger().Info("RSS 任务已手动停止，配置变更后不自动启动")
 		return
 	}
 	// 自动启动只管程序启动时要不要跑；用户手动启动过（或任务正在运行）时，配置变更要按新配置重启。
 	if !cfg.Global.AutoStart && !wanted && !wasRunning {
-		global.GetSlogger().Info("任务设置为手动启动，跳过自动启动")
+		decision = RSSManual
+		global.GetSlogger().Info("RSS 任务设置为手动启动，跳过自动启动")
 		return
 	}
 
@@ -243,12 +259,19 @@ func (m *Manager) Reload(cfg *models.Config) {
 
 	defaultDl, err := m.downloaderManager.GetDefaultDownloader()
 	if err != nil {
-		global.GetSlogger().Warnf("未配置默认下载器，任务不启动: %v", err)
+		if errors.Is(err, downloader.ErrNoDefaultDownloader) {
+			decision = RSSNoDownloader
+			global.GetSlogger().Warnf("未配置默认下载器，任务不启动: %v", err)
+		} else {
+			decision = RSSDownloaderUnhealthy
+			global.GetSlogger().Errorf("连接默认下载器失败，任务不启动: %v", err)
+		}
 		return
 	}
 
 	// 对默认下载器进行健康检查
 	if ok, pingErr := defaultDl.Ping(); !ok {
+		decision = RSSDownloaderUnhealthy
 		global.GetSlogger().Errorf("默认下载器健康检查失败，任务不启动: %v", pingErr)
 		return
 	}
@@ -550,17 +573,18 @@ func (m *Manager) cancelJobsAndWait() {
 	m.mu.Unlock()
 }
 
-// StopJobs 停止全部 RSS 任务（调度器里的「停止所有任务」）。免费到期、自动删种、竞争度、
+// StopJobs 停止全部 RSS 任务（网页上的「停止 RSS 任务」）。免费到期、自动删种、竞争度、
 // 登录提醒和签到监控继续运行，配置热重载也照常；之后的配置变更不会把任务重新拉起，直到 StartAll。
 func (m *Manager) StopJobs() {
 	m.mu.Lock()
 	m.jobsPaused, m.jobsWanted = true, false
+	m.lastDecision = RSSPaused
 	m.mu.Unlock()
 	m.cancelJobsAndWait()
 }
 
 // StopAll 是进程退出前的最终关闭：取消所有任务并等待结束，停掉全部监控器和配置事件订阅。
-// 之后不能再用 StartAll 恢复；调度器里的「停止所有任务」用 StopJobs。
+// 之后不能再用 StartAll 恢复；网页上的「停止 RSS 任务」用 StopJobs。
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	m.stopped = true
@@ -638,6 +662,7 @@ func (m *Manager) StopAll() {
 func (m *Manager) StartAll(cfg *models.Config) {
 	m.mu.Lock()
 	m.jobsPaused, m.jobsWanted = false, true
+	m.lastDecision = RSSRunning
 	m.mu.Unlock()
 	for site, sc := range cfg.Sites {
 		if sc.Enabled != nil && *sc.Enabled {

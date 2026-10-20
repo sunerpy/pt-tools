@@ -24,7 +24,7 @@ func classifyMTorrentResult(info v2.UserInfo, err error) *ProbeResult {
 		return &ProbeResult{
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPAPIKey,
-			Diagnostic: "M-Team profile returned no lastModifiedDate / lastBrowse",
+			Diagnostic: "M-Team 的个人资料接口没有返回最近访问时间（lastBrowse），可能是接口改了；请反馈",
 		}
 	}
 

@@ -70,14 +70,11 @@ After the sync, the site's cookie in pt-tools is updated; there is nothing to fi
 
 If you are signed in to several sites, you can sync all their cookies in one go:
 
-1. Click the extension's icon
-2. Expand **Global Settings** at the bottom
-3. **Batch Cookie Sync** lists every built-in site
-4. Each site shows its cookie status (Valid, Expiring Soon, Expired or Missing)
-5. Tick the sites you want to sync (or click **Select All**)
-6. Click **🔄 Sync Selected**
+1. Click the extension's icon; its main page is **My sites**: every site with a cookie in the browser or enabled in pt-tools (the other built-in sites appear after Show all)
+2. Each site shows its cookie status (Valid, Expiring Soon, Expired or Missing) and its keep-alive status in pt-tools
+3. Click **Sync all** above the list to sync every site whose cookie is valid, or **Sync** on a row to sync just that site
 
-> **Note**: sites that use an API key or a passkey (such as M-Team and Rousi Pro) are greyed out and cannot be selected; their credentials are entered in pt-tools by hand.
+> **Note**: sites that use an API key or a passkey (such as M-Team and Rousi Pro) have no Sync; their credentials are entered in pt-tools by hand.
 
 ### Turning on automatic sync
 

@@ -1,23 +1,37 @@
 import { ElMessage, ElMessageBox } from "element-plus";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { controlApi, downloaderTorrentsApi, pausedTorrentsApi, sitesApi, tasksApi } from "../api";
+import {
+  controlApi,
+  downloaderTorrentsApi,
+  pausedTorrentsApi,
+  type RssTaskStatus,
+  sitesApi,
+  tasksApi,
+} from "../api";
+import { rssTaskView } from "../utils/rssTask";
 
 /**
- * 底部状态栏的数据源（设计稿 G 的 `statusbar`：调度器 / 最后同步 / ↓ / ↑ / 剩余空间）。
+ * 底部状态栏的数据源（设计稿 G 的 `statusbar`：RSS 任务 / 最后同步 / ↓ / ↑ / 剩余空间）。
  *
  * 只展示真实拿到的数字：/api/downloader-torrents/transfer-stats 是唯一能给出
  * 全局速率与剩余空间的接口，拿不到就显示 "—"，不猜、不填占位数。
  *
- * 调度器没有查询接口（controlApi 只有 stop/start），所以状态栏里的调度器格子
- * 显示的是「本次会话里最后一次操作的结果」而不是真实运行态，未操作时为未知。
+ * RSS 任务（原「调度器」）的格子按 /api/control/status 的真实状态显示：在跑几个订阅，
+ * 或者为什么没在跑（没开自动启动、手动停止、下载器连不上……）。跟速率同一个轮询周期刷新，
+ * 启停、切换自动启动以后再跟查一阵（见 followRss）。
  *
  * 顺带承担导航列的三个计数徽标（站点 / 任务 / 暂停任务）。都取 page_size=1
  * 的 total，请求很小；跟速率同一个轮询周期刷新，省得每个页面各自去数一遍。
  */
-export type SchedulerHint = "unknown" | "running" | "stopped";
-
 const POLL_MS = 30_000;
+
+/**
+ * 启停、切换自动启动以后，RSS 任务处在「启动中」时每隔多久再查一次、最多查几次（约 30 秒）。
+ * 重载是异步的：配置变更先去抖 200ms，连默认下载器可能还要等几十秒。
+ */
+const RSS_FOLLOW_MS = 2_000;
+const RSS_FOLLOW_MAX = 15;
 
 /**
  * 单轮请求的时间预算。
@@ -69,9 +83,11 @@ export const useRuntimeStore = defineStore("runtime", () => {
   const lastSync = ref<Date | null>(null);
   /** 拉取失败时把上一次的数字保留着，但标记为陈旧，状态栏据此变灰 */
   const stale = ref(true);
-  const schedulerHint = ref<SchedulerHint>("unknown");
+  /** RSS 任务的真实状态；null = 还没取到 */
+  const rss = ref<RssTaskStatus | null>(null);
   const stopLoading = ref(false);
   const startLoading = ref(false);
+  const autoStartLoading = ref(false);
 
   /** 导航徽标计数。null = 还没拿到，导航列就不画徽标 */
   const siteCount = ref<number | null>(null);
@@ -83,6 +99,9 @@ export const useRuntimeStore = defineStore("runtime", () => {
   let inFlight = false;
   let statsFailures = 0;
   let statsSkipTicks = 0;
+  /** 操作以后的跟查：新的一次跟查开始时旧的作废（代次不对就不再排下一拍） */
+  let rssFollowTimer: number | null = null;
+  let rssFollowGen = 0;
 
   const downloadText = computed(() => fmtSpeed(downloadSpeed.value));
   const uploadText = computed(() => fmtSpeed(uploadSpeed.value));
@@ -90,11 +109,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
   const lastSyncText = computed(() => fmtClock(lastSync.value));
   const pollMinutes = computed(() => Math.round(POLL_MS / 60_000) || 1);
 
-  const schedulerText = computed(() => {
-    if (schedulerHint.value === "running") return "调度器已启动";
-    if (schedulerHint.value === "stopped") return "调度器已停止";
-    return "调度器";
-  });
+  const rssView = computed(() => rssTaskView(rss.value));
 
   const badges = computed(() => ({
     sites: siteCount.value,
@@ -109,7 +124,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
    * 连续失败后按指数退避跳过若干拍，另外三个只读数据库的请求照常刷新，
    * 导航徽标不会因为一台下载器掉线而停止更新。
    *
-   * 退避只作用于定时轮询。用户主动触发的刷新（切回标签页、启停调度器、页面上点刷新）
+   * 退避只作用于定时轮询。用户主动触发的刷新（切回标签页、启停 RSS 任务、页面上点刷新）
    * 一律真刷，不让用户对着一个「还在退避中」的界面干等。
    */
   function shouldPollStats(polled: boolean): boolean {
@@ -128,14 +143,15 @@ export const useRuntimeStore = defineStore("runtime", () => {
     try {
       // 一轮共用一个超时预算：到点全部 abort，连接槽立即释放
       const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-      // 四个请求互不依赖，任何一个失败都不该拖掉其他的，所以用 allSettled 并发
-      const [stats, sites, tasks, paused] = await Promise.allSettled([
+      // 五个请求互不依赖，任何一个失败都不该拖掉其他的，所以用 allSettled 并发
+      const [stats, sites, tasks, paused, rssStatus] = await Promise.allSettled([
         shouldPollStats(opts?.polled === true)
           ? downloaderTorrentsApi.transferStats(signal)
           : Promise.resolve(null),
         sitesApi.list(signal),
         tasksApi.list(new URLSearchParams({ page: "1", page_size: "1" }), signal),
         pausedTorrentsApi.list(1, 1, undefined, signal),
+        controlApi.status(signal),
       ]);
 
       if (stats.status === "fulfilled" && stats.value) {
@@ -156,9 +172,41 @@ export const useRuntimeStore = defineStore("runtime", () => {
       if (sites.status === "fulfilled") siteCount.value = Object.keys(sites.value ?? {}).length;
       if (tasks.status === "fulfilled") taskCount.value = tasks.value.total;
       if (paused.status === "fulfilled") pausedCount.value = paused.value.total;
+      // 查不到就保留上一次的结果：状态栏是背景信息，不弹提示
+      if (rssStatus.status === "fulfilled") rss.value = rssStatus.value;
     } finally {
       inFlight = false;
     }
+  }
+
+  async function refreshRss() {
+    try {
+      rss.value = await controlApi.status(AbortSignal.timeout(REQUEST_TIMEOUT_MS));
+    } catch {
+      // 同上：保留上一次的结果
+    }
+  }
+
+  /**
+   * 操作以后跟查 RSS 任务的状态：先查一次，还在「启动中」就每 RSS_FOLLOW_MS 再查，
+   * 最多 RSS_FOLLOW_MAX 次。新的跟查开始（或停止轮询）时旧的作废。
+   */
+  function followRss() {
+    const gen = ++rssFollowGen;
+    if (rssFollowTimer !== null) {
+      window.clearTimeout(rssFollowTimer);
+      rssFollowTimer = null;
+    }
+    let left = RSS_FOLLOW_MAX;
+    const tick = async () => {
+      rssFollowTimer = null;
+      await refreshRss();
+      left -= 1;
+      if (gen === rssFollowGen && rss.value?.state === "starting" && left > 0) {
+        rssFollowTimer = window.setTimeout(() => void tick(), RSS_FOLLOW_MS);
+      }
+    };
+    void tick();
   }
 
   /** 只在页面可见时轮询：隐藏的标签页拉速率没有意义，还会白占下载器的连接 */
@@ -176,6 +224,11 @@ export const useRuntimeStore = defineStore("runtime", () => {
       window.clearInterval(timer);
       timer = null;
     }
+    rssFollowGen += 1;
+    if (rssFollowTimer !== null) {
+      window.clearTimeout(rssFollowTimer);
+      rssFollowTimer = null;
+    }
     document.removeEventListener("visibilitychange", onVisible);
   }
 
@@ -185,60 +238,80 @@ export const useRuntimeStore = defineStore("runtime", () => {
   }
 
   /**
-   * 文案、确认框类型和错误提示都保持旧顶栏的原样（"确认" / warning / info），
-   * 只是把 confirm 的取消从 catch 里分出来 —— 旧写法靠 `!== "cancel"` 过滤，
+   * 启停 RSS 任务。confirm 为 null 时不弹确认框（页面顶上的提示条点「启动」就是要启动）。
+   * confirm 的取消从 catch 里分出来 —— 旧写法靠 `!== "cancel"` 过滤，
    * 真实错误里带 "cancel" 字样时会被吞掉。
    */
-  async function confirmAnd(
-    text: string,
-    type: "warning" | "info",
-    loading: typeof stopLoading,
-    call: () => Promise<void>,
-    okMessage: string,
-    hint: SchedulerHint,
-  ) {
-    try {
-      await ElMessageBox.confirm(text, "确认", {
-        confirmButtonText: "确定",
-        cancelButtonText: "取消",
-        type,
-      });
-    } catch {
-      return; // 用户取消
+  async function runControl(opts: {
+    confirm: { text: string; type: "warning" | "info" } | null;
+    loading: typeof stopLoading;
+    call: () => Promise<void>;
+    okMessage: string;
+  }) {
+    if (opts.confirm) {
+      try {
+        await ElMessageBox.confirm(opts.confirm.text, "确认", {
+          confirmButtonText: "确定",
+          cancelButtonText: "取消",
+          type: opts.confirm.type,
+        });
+      } catch {
+        return; // 用户取消
+      }
     }
-    loading.value = true;
+    opts.loading.value = true;
     try {
-      await call();
-      schedulerHint.value = hint;
-      ElMessage.success(okMessage);
-      void refresh();
+      await opts.call();
+      ElMessage.success(opts.okMessage);
+      followRss();
     } catch (e: unknown) {
       ElMessage.error((e as Error).message || "操作失败");
     } finally {
-      loading.value = false;
+      opts.loading.value = false;
     }
   }
 
   function stopAll() {
-    return confirmAnd(
-      "确定要停止所有任务吗？",
-      "warning",
-      stopLoading,
-      () => controlApi.stop(),
-      "已停止所有任务",
-      "stopped",
-    );
+    return runControl({
+      confirm: {
+        text: "停止后 RSS 订阅不再拉取新种子，直到再次启动；刷流、辅种、自动删种等不受影响。确定停止 RSS 任务吗？",
+        type: "warning",
+      },
+      loading: stopLoading,
+      call: () => controlApi.stop(),
+      okMessage: "已停止 RSS 任务",
+    });
   }
 
-  function startAll() {
-    return confirmAnd(
-      "确定要启动所有任务吗？",
-      "info",
-      startLoading,
-      () => controlApi.start(),
-      "已启动所有任务",
-      "running",
-    );
+  function startAll(opts: { confirm?: boolean } = {}) {
+    return runControl({
+      confirm:
+        opts.confirm === false ? null : { text: "按当前配置启动 RSS 任务吗？", type: "info" },
+      loading: startLoading,
+      call: () => controlApi.start(),
+      okMessage: "已启动 RSS 任务",
+    });
+  }
+
+  /** 只切换「自动启动 RSS 任务」。打开时后端会像保存全局设置一样重载：没被手动停止的话 RSS 任务随即启动 */
+  async function setAutoStart(enabled: boolean) {
+    autoStartLoading.value = true;
+    try {
+      const next = await controlApi.setAutoStart(enabled);
+      rss.value = next;
+      if (!enabled) {
+        ElMessage.success("已关闭自动启动：程序重启后要手动启动 RSS 任务");
+      } else if (next.state === "paused") {
+        ElMessage.success("已打开自动启动。RSS 任务现在是手动停止的，要运行请点「启动」");
+      } else {
+        ElMessage.success("已打开自动启动：以后程序启动时会自动运行 RSS 任务");
+      }
+      followRss();
+    } catch (e: unknown) {
+      ElMessage.error((e as Error).message || "操作失败");
+    } finally {
+      autoStartLoading.value = false;
+    }
   }
 
   return {
@@ -247,9 +320,11 @@ export const useRuntimeStore = defineStore("runtime", () => {
     freeSpace,
     lastSync,
     stale,
-    schedulerHint,
+    rss,
+    rssView,
     stopLoading,
     startLoading,
+    autoStartLoading,
     siteCount,
     taskCount,
     pausedCount,
@@ -259,11 +334,12 @@ export const useRuntimeStore = defineStore("runtime", () => {
     freeSpaceText,
     lastSyncText,
     pollMinutes,
-    schedulerText,
     refresh,
+    refreshRss,
     startPolling,
     stopPolling,
     stopAll,
     startAll,
+    setAutoStart,
   };
 });

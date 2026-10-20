@@ -64,6 +64,11 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/sites/{site}/attend", w, s.appAttend},
 		{http.MethodGet, "/brush/tasks", r, s.appBrushTasks},
 		{http.MethodGet, "/media/history", r, s.appMediaHistory},
+		{http.MethodPost, "/media/history/{id}/retry", w, s.appMediaHistoryRetry},
+		{http.MethodGet, "/media/libraries", r, s.appMediaLibraries},
+		{http.MethodPost, "/media/recognize", r, s.appMediaRecognize},
+		{http.MethodPost, "/media/organize/preview", r, s.appOrganizePreview},
+		{http.MethodPost, "/media/organize", w, s.appOrganize},
 		{http.MethodGet, "/subscriptions", r, s.appSubscriptions},
 		{http.MethodGet, "/subscriptions/{id}", r, s.appSubscriptionDetail},
 		{http.MethodPost, "/subscriptions", w, s.appSubscriptionCreate},
@@ -87,6 +92,11 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/templates/preview", r, s.appTemplatePreview},
 		{http.MethodPut, "/templates/{type}", w, s.appTemplateSave},
 		{http.MethodDelete, "/templates/{type}", w, s.appTemplateReset},
+		// 配置（第五批）：另外都要 app:config；预览用 POST 传改动，但只读
+		{http.MethodGet, "/config", r, s.appNeedConfig(s.appConfigCatalog)},
+		{http.MethodGet, "/config/{resource}", r, s.appNeedConfig(s.appConfigGet)},
+		{http.MethodPost, "/config/{resource}/preview", r, s.appNeedConfig(s.appConfigPreview)},
+		{http.MethodPost, "/config/{resource}/changes", w, s.appNeedConfig(s.appConfigApply)},
 	}
 }
 
@@ -182,6 +192,18 @@ func appNoBody(w http.ResponseWriter, r *http.Request) bool {
 // appOutcomeKey 是请求上下文里放审计业务结果的位置（只在要记审计的写请求上有）。
 type appOutcomeKey struct{}
 
+// appAuditArgsKey 是请求上下文里放审计附加参数的位置（只在要记审计的写请求上有）。
+type appAuditArgsKey struct{}
+
+// appSetAuditArgs 给这次写请求的审计加几项参数（不要放密钥与原文）。
+func appSetAuditArgs(r *http.Request, args map[string]any) {
+	if m, ok := r.Context().Value(appAuditArgsKey{}).(map[string]any); ok {
+		for k, v := range args {
+			m[k] = v
+		}
+	}
+}
+
 // appSetOutcome 记下这次写请求的业务结果，例如推送被拦下、批量动作全失败：这些回应是 200，只看状态码会被记成 success。
 // 结果用审计的写法（error:…、denied:…）；状态码本身是失败时仍按状态码记。
 func appSetOutcome(r *http.Request, outcome string) {
@@ -244,12 +266,14 @@ func (s *Server) appHandler(rt appRoute) http.Handler {
 			return
 		}
 		outcome := new(string)
-		r = r.WithContext(context.WithValue(r.Context(), appOutcomeKey{}, outcome))
+		extra := map[string]any{}
+		r = r.WithContext(context.WithValue(context.WithValue(r.Context(), appOutcomeKey{}, outcome), appAuditArgsKey{}, extra))
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		rt.Handler(rec, r)
 		result := appAuditResult(rec.status)
-		if rec.status < http.StatusBadRequest && *outcome != "" {
+		// 处理函数自己判定的拒绝（比如缺 app:config）回的是 4xx，审计照样记 denied:…
+		if *outcome != "" && (rec.status < http.StatusBadRequest || strings.HasPrefix(*outcome, "denied:")) {
 			result = *outcome
 		}
 		s.recordAppWrite(r, p, command, result, rec.status, time.Since(start))
@@ -273,6 +297,13 @@ func (s *Server) recordAppWrite(r *http.Request, p *middleware.Principal, comman
 	e := app.AuditEntry{
 		ChannelType: p.Kind, ChannelUserID: p.ID, Command: command, Result: result, LatencyMs: took.Milliseconds(),
 		Args: map[string]any{"path": r.URL.Path, "status": status, "name": p.Name},
+	}
+	if extra, ok := r.Context().Value(appAuditArgsKey{}).(map[string]any); ok {
+		for k, v := range extra {
+			if _, taken := e.Args[k]; !taken {
+				e.Args[k] = v
+			}
+		}
 	}
 	// 请求可能已经被取消：审计照样写
 	if err := s.appAudit.Record(context.WithoutCancel(r.Context()), e); err != nil {

@@ -228,6 +228,8 @@ var assistantEvents = []EventSpec{
 			},
 			{Key: "summary", Type: VarString, Desc: "要确认的操作（confirm、timeout 才有）", Sample: ""},
 			{Key: "expires", Type: VarString, Desc: "确认的截止时间（HH:MM，confirm 才有）", Sample: ""},
+			{Key: "changes", Type: VarString, Desc: "会改什么，一行一项「- 名称：改以前 → 改以后」（confirm 才有，没有预览时为空）", Sample: ""},
+			{Key: "impact", Type: VarString, Desc: "可能有什么影响，一行一条「- …」（confirm 才有，没有预览时为空）", Sample: ""},
 		},
 		SampleText: "HDTime 今天上传了 100.00 GiB，下载了 20.00 GiB。",
 	},

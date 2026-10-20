@@ -123,11 +123,16 @@ func (b *mcpBackend) Call(ctx context.Context, c mcp.Caller, req mcp.Request) (m
 		body = bytes.NewReader(buf)
 	}
 	var scopes []string
-	if c.Has(apitoken.ScopeMCPRead) {
+	// 写工具的预览要读现状：有 mcp:write 就能读（不要求另外勾 mcp:read）
+	if c.Has(apitoken.ScopeMCPRead) || (req.Preview && c.Has(apitoken.ScopeMCPWrite)) {
 		scopes = append(scopes, apitoken.ScopeAppRead)
 	}
 	if c.Has(apitoken.ScopeMCPWrite) {
 		scopes = append(scopes, apitoken.ScopeAppWrite)
+	}
+	// 配置工具：令牌另外勾了 app:config 才能读改配置（内置 AI 助手按入口给）
+	if c.Has(apitoken.ScopeAppConfig) {
+		scopes = append(scopes, apitoken.ScopeAppConfig)
 	}
 	p := &middleware.Principal{Kind: middleware.KindMCP, ID: strconv.FormatUint(uint64(c.TokenID), 10), Name: c.Name, Scopes: scopes}
 	if c.Kind == mcp.KindAssistant {

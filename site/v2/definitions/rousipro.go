@@ -1,10 +1,12 @@
 package definitions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,7 +33,9 @@ var RousiProDefinition = &v2.SiteDefinition{
 	},
 	FaviconURL:     "https://rousi.pro/favicon.ico",
 	TimezoneOffset: "+0800",
-	CreateDriver:   createRousiDriver,
+	// 签到走 Rousi 的接口（见 rousiDriver.Attend），这里只标出支持签到；路径和方法不参与签到流程
+	Attendance:   &v2.AttendanceConfig{Path: rousiAttendanceEndpoint, Method: http.MethodPost},
+	CreateDriver: createRousiDriver,
 }
 
 func init() {
@@ -81,6 +85,10 @@ type rousiRequest struct {
 	Endpoint string
 	Method   string
 	Params   map[string]string
+	// Body 是 JSON 请求体（POST 时用），为空时不带请求体。
+	Body []byte
+	// Headers 是额外的请求头，同名时覆盖默认的（签到接口的 API Key 放在 api-token 头里）。
+	Headers map[string]string
 	// RawBody 为 true 时响应体按原始字节返回（种子文件下载），不按 JSON 解析。
 	RawBody bool
 }
@@ -217,8 +225,15 @@ func (d *rousiDriver) Execute(ctx context.Context, req rousiRequest) (rousiRespo
 		"Authorization": "Bearer " + d.Passkey,
 		"User-Agent":    d.userAgent,
 	}
+	for k, v := range req.Headers {
+		headers[k] = v
+	}
+	var body io.Reader
+	if len(req.Body) > 0 {
+		body = bytes.NewReader(req.Body)
+	}
 
-	resp, err := d.httpClient.DoRequest(ctx, method, fullURL, nil, headers)
+	resp, err := d.httpClient.DoRequest(ctx, method, fullURL, body, headers)
 	if err != nil {
 		// 下载地址的路径里带 passkey，传输层错误会原样带出完整 URL，这里先隐去再返回。
 		return rousiResponse{}, fmt.Errorf("request failed: %w", d.redactPasskey(err))
@@ -456,8 +471,101 @@ func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 			info.LastAccess = accessTime.Unix()
 		}
 	}
+	// 站点换到新系统以后 last_active_at 不再更新（2026-10 实测：当天网页登录、签到之后仍停在 2026-08-11），
+	// 只看它保号提醒会一直报「即将封禁」。今天签到过就说明账号今天还在用，取两者中较新的。
+	if signed := d.attendanceDay(ctx); signed > info.LastAccess {
+		info.LastAccess = signed
+	}
 
 	return info, nil
+}
+
+// rousiAttendanceEndpoint 是 Rousi 的签到接口。个人 API Key 放在 api-token 头里，要有签到（attendance:claim）权限；
+// 请求体 {"mode":"fixed"} 是固定奖励。返回 200 + code 0 是签到成功，400 + code 1 +「今日已签到」是今天签过了
+// （2026-10-19 用真实 Key 验证过已签到的返回）。出处：MoviePilot-Plugins 的 plugins.v2/autosignin/sites/rousipro.py
+// 与 jxxghp/MoviePilot-Plugins#1067。
+const rousiAttendanceEndpoint = "/api/points/attendance"
+
+// rousiDayZone 是 Rousi 划分签到日的时区（新接口返回 day_boundary_timezone=Asia/Shanghai），固定东八区，不依赖系统时区库。
+var rousiDayZone = time.FixedZone("CST", 8*3600)
+
+type rousiAttendanceStats struct {
+	ClaimedToday  bool   `json:"claimed_today"`
+	Today         string `json:"today"`
+	CurrentStreak int    `json:"current_streak"`
+	TotalDays     int    `json:"total_days"`
+}
+
+// attendanceDay 查签到统计：今天签到过时返回今天零点（东八区）的时间戳，没签或查不到时返回 0。
+// 只是给最近活跃时间补一个依据，查不到不影响用户信息本身。
+func (d *rousiDriver) attendanceDay(ctx context.Context) int64 {
+	res, err := d.Execute(ctx, rousiRequest{Endpoint: rousiAttendanceEndpoint + "/stats", Method: http.MethodGet})
+	if err != nil || !res.IsSuccess() {
+		return 0
+	}
+	var stats rousiAttendanceStats
+	if json.Unmarshal(res.Data, &stats) != nil || !stats.ClaimedToday {
+		return 0
+	}
+	day, err := time.ParseInLocation("2006-01-02", stats.Today, rousiDayZone)
+	if err != nil {
+		return 0
+	}
+	return day.Unix()
+}
+
+type rousiAttendanceReward struct {
+	BaseReward    json.Number `json:"base_reward"`
+	TotalReward   json.Number `json:"total_reward"`
+	Reward        json.Number `json:"reward"`
+	CurrentStreak int         `json:"current_streak"`
+	TotalDays     int         `json:"total_days"`
+}
+
+// Attend 签到一次。今天已经签过时返回「今天已签到」；API Key 失效或没有签到权限时返回 ErrInvalidCredentials，并说明怎么处理。
+func (d *rousiDriver) Attend(ctx context.Context) (v2.AttendResult, error) {
+	res, err := d.Execute(ctx, rousiRequest{
+		Endpoint: rousiAttendanceEndpoint,
+		Method:   http.MethodPost,
+		Body:     []byte(`{"mode":"fixed"}`),
+		Headers:  map[string]string{"api-token": d.Passkey},
+	})
+	switch {
+	case err == nil && res.IsSuccess():
+		return v2.AttendResult{Status: v2.AttendSigned, Message: rousiAttendMessage(res.Data)}, nil
+	case res.StatusCode == http.StatusBadRequest && res.Code == 1 && strings.Contains(res.Message, "已签到"):
+		return v2.AttendResult{Status: v2.AttendAlready, Message: res.Message}, nil
+	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
+		return v2.AttendResult{}, fmt.Errorf("%w: Rousi 拒绝了签到：API Key 已失效或没有签到权限。在 Rousi 的个人 API Key 里勾上签到权限（attendance:claim），再把 Key 填到 pt-tools 的站点设置",
+			v2.ErrInvalidCredentials)
+	case err != nil:
+		return v2.AttendResult{}, fmt.Errorf("Rousi 签到失败: %w", err)
+	default:
+		msg := strings.TrimSpace(res.Message)
+		if msg == "" {
+			msg = fmt.Sprintf("code=%d", res.Code)
+		}
+		return v2.AttendResult{}, fmt.Errorf("Rousi 签到失败: %s", msg)
+	}
+}
+
+// rousiAttendMessage 把签到成功的返回写成一句话：有奖励和连续天数时带上，没有时只说签到成功。
+func rousiAttendMessage(data json.RawMessage) string {
+	var r rousiAttendanceReward
+	if len(data) == 0 || json.Unmarshal(data, &r) != nil {
+		return "签到成功"
+	}
+	msg := "签到成功"
+	for _, n := range []json.Number{r.TotalReward, r.Reward, r.BaseReward} {
+		if n != "" && n != "0" {
+			msg += "，获得 " + n.String() + " 魔力"
+			break
+		}
+	}
+	if r.CurrentStreak > 0 {
+		msg += fmt.Sprintf("，已连续签到 %d 天", r.CurrentStreak)
+	}
+	return msg
 }
 
 func (d *rousiDriver) PrepareDownload(torrentID string) (rousiRequest, error) {

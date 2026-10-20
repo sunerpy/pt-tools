@@ -926,7 +926,10 @@
   gap: var(--pt-space-2);
 }
 
-/* 画板 41 的 sched-pop：小标题 + 状态胶囊一行，下面一行是同步口径 */
+/*
+ * 画板 41 的 sched-pop（现在叫「RSS 任务」）：小标题 + 状态胶囊一行，下面是状态说明、
+ * 作用范围、自动启动开关和停止 / 启动。桌面浮层与手机「我的」抽屉共用（RssTaskPanel.vue）。
+ */
 .pt-status__menu-head {
   display: flex;
   gap: var(--pt-space-2);
@@ -940,12 +943,35 @@
   color: var(--pt-t1);
 }
 
-.pt-status__menu-sync {
-  margin: 0 0 var(--pt-space-1);
+.pt-status__menu-detail {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.pt-status__menu-scope {
+  margin: 0;
   padding-bottom: var(--pt-space-2);
   font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
   color: var(--pt-t3);
   border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-status__menu-auto {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.pt-status__menu-acts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--pt-space-2);
 }
 
 /* 画板 41 的 user-pop 顶部身份行 */
@@ -1145,7 +1171,7 @@
   color: var(--pt-t3);
 }
 
-/* 稿上那个绿点：调度器在跑是绿的，停了是危险色，未知就是中性灰 */
+/* 稿上那个绿点：RSS 任务在跑是绿的，没在跑是警示色，启动中、无订阅、未知是中性灰 */
 .pt-mnav__dot {
   width: 5px;
   height: 5px;
@@ -1153,12 +1179,12 @@
   border-radius: 50%;
 }
 
-.pt-mnav__dot.is-running {
+.pt-mnav__dot.is-ok {
   background: var(--pt-ok);
 }
 
-.pt-mnav__dot.is-stopped {
-  background: var(--pt-dang);
+.pt-mnav__dot.is-warn {
+  background: var(--pt-warn);
 }
 
 .pt-mnav__tabs {
@@ -1200,11 +1226,40 @@
   border-radius: 2px;
 }
 
+/*
+ * 「我的」抽屉按内容撑高（size="auto"）。内容比屏幕高时（375×812 下就超出），抽屉顶端会被推出视口、
+ * 版本行和 RSS 任务面板都够不着：限高，在抽屉里滚动；顶上留一个触控高度的遮罩，点它关掉抽屉。
+ */
+.pt-msheet.el-drawer {
+  max-height: calc(100vh - var(--pt-m-touch));
+  max-height: calc(100dvh - var(--pt-m-touch));
+}
+
 .pt-msheet__body {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-5);
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 抽屉里的 RSS 任务面板（RssTaskPanel）：按钮与开关行都给足 §9 的 44 触控高度 */
+.pt-msheet__rss .el-button {
+  height: var(--pt-m-touch);
+}
+
+.pt-msheet__rss .pt-status__menu-auto {
+  min-height: var(--pt-m-touch);
+}
+
+/* 开关本体只有 16 高：命中区用 ::before 的负 inset 撑到 44（与顶栏图标钮同一个做法） */
+.pt-msheet__rss .el-switch {
+  position: relative;
+}
+
+.pt-msheet__rss .el-switch::before {
+  position: absolute;
+  inset: -14px -8px;
+  content: "";
 }
 
 .pt-msheet__group {

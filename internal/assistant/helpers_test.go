@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -58,7 +59,9 @@ func resolveURL(raw string) (string, string, bool) {
 type reply struct {
 	text      string
 	reasoning string
-	calls     []replyCall
+	// reasoningKey 是推理内容放在哪个字段（为空是 reasoning_content；OpenRouter、Groq 是 reasoning）
+	reasoningKey string
+	calls        []replyCall
 	// status 不为 0 时回这个状态码，错误信息是 body，回应头加上 header；raw 不为空时原样回它
 	status int
 	body   string
@@ -66,6 +69,8 @@ type reply struct {
 	raw    string
 	// block 不为 nil 时先发一段文字，再等它关上或者请求被取消
 	block chan struct{}
+	// usage 不为零时报这次的输入、输出 token：流式请求带了 stream_options.include_usage 时最后发一片 usage，非流式写在回应里
+	usage [2]int64
 }
 
 // replyCall 是一个工具调用；extra 不为空时作为 extra_content 放进这个调用的第一个分片（Gemini 的思考签名就在这里）。
@@ -83,9 +88,13 @@ type llmRequest struct {
 			Parameters  map[string]any `json:"parameters"`
 		} `json:"function"`
 	} `json:"tools"`
-	Stream bool   `json:"stream"`
-	Auth   string `json:"-"`
-	Raw    string `json:"-"`
+	Stream          bool   `json:"stream"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	StreamOptions   *struct {
+		IncludeUsage bool `json:"include_usage"`
+	} `json:"stream_options"`
+	Auth string `json:"-"`
+	Raw  string `json:"-"`
 }
 
 func (r llmRequest) toolNames() []string {
@@ -112,6 +121,10 @@ type fakeLLM struct {
 	modelAuths []string
 	// modelStatus 不为 0 时 GET /models 回这个状态码
 	modelStatus int
+	// modelWindows 是 GET /models 里给哪些模型报 context_length（OpenRouter 的写法）
+	modelWindows map[string]int
+	// noStreamOptions 为真时像不认 stream_options 的兼容服务：带了就回 400（不消耗 replies）
+	noStreamOptions bool
 }
 
 func newFakeLLM(t *testing.T) *fakeLLM {
@@ -182,15 +195,22 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.reqs = append(f.reqs, req)
 	rejected := f.strictArgs && badArgs(req) != ""
+	noOptions := f.noStreamOptions && req.StreamOptions != nil
 	var rep reply
 	ok := len(f.replies) > 0
-	if ok && !rejected {
+	if ok && !rejected && !noOptions {
 		rep, f.replies = f.replies[0], f.replies[1:]
 	}
 	f.mu.Unlock()
 	f.started <- struct{}{}
 	if rejected {
 		http.Error(w, `{"error":{"message":"invalid tool_call arguments JSON"}}`, http.StatusBadRequest)
+		return
+	}
+	if noOptions {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Unrecognized request argument supplied: stream_options","type":"invalid_request_error"}}`))
 		return
 	}
 	if !ok {
@@ -211,12 +231,17 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(buf)
 		return
 	}
+	usage := map[string]any{"prompt_tokens": rep.usage[0], "completion_tokens": rep.usage[1], "total_tokens": rep.usage[0] + rep.usage[1]}
 	if !req.Stream {
 		w.Header().Set("Content-Type", "application/json")
-		buf, _ := json.Marshal(map[string]any{
+		out := map[string]any{
 			"id": "chatcmpl-1", "object": "chat.completion", "created": 1, "model": "fake-model",
 			"choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": rep.text}}},
-		})
+		}
+		if rep.usage != [2]int64{} {
+			out["usage"] = usage
+		}
+		buf, _ := json.Marshal(out)
 		_, _ = w.Write(buf)
 		return
 	}
@@ -227,7 +252,15 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 		fl.Flush()
 	}
 	if rep.reasoning != "" {
-		send(chunkJSON(map[string]any{"role": "assistant", "reasoning_content": rep.reasoning}, ""))
+		key := rep.reasoningKey
+		if key == "" {
+			key = "reasoning_content"
+		}
+		// 分两片发，看拼得对不对
+		r := []rune(rep.reasoning)
+		half := len(r) / 2
+		send(chunkJSON(map[string]any{"role": "assistant", key: string(r[:half])}, ""))
+		send(chunkJSON(map[string]any{key: string(r[half:]), "content": nil}, ""))
 	}
 	text := []rune(rep.text)
 	for i := 0; i < len(text); i += 5 {
@@ -257,6 +290,12 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 		finish = "tool_calls"
 	}
 	send(chunkJSON(map[string]any{}, finish))
+	if rep.usage != [2]int64{} && req.StreamOptions != nil && req.StreamOptions.IncludeUsage {
+		buf, _ := json.Marshal(map[string]any{
+			"id": "chatcmpl-1", "object": "chat.completion.chunk", "created": 1, "model": "fake-model", "choices": []any{}, "usage": usage,
+		})
+		send(string(buf))
+	}
 	send("[DONE]")
 }
 
@@ -273,7 +312,13 @@ func (f *fakeLLM) serveModels(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
-		data = append(data, map[string]any{"id": id, "object": "model", "created": 1, "owned_by": "test"})
+		item := map[string]any{"id": id, "object": "model", "created": 1, "owned_by": "test"}
+		f.mu.Lock()
+		if w := f.modelWindows[id]; w > 0 {
+			item["context_length"] = w
+		}
+		f.mu.Unlock()
+		data = append(data, item)
 	}
 	buf, _ := json.Marshal(map[string]any{"object": "list", "data": data})
 	_, _ = w.Write(buf)
@@ -304,11 +349,25 @@ func (b *fakeBackend) Call(_ context.Context, c mcp.Caller, req mcp.Request) (mc
 	case req.Path == "/sites":
 		body = `[{"name":"hdsky","ratio":2.5,"uploaded":"1 TB"}]`
 	case req.Path == "/downloaders":
-		body = `[{"id":1,"name":"qb","online":true}]`
+		body = `{"items":[{"id":1,"name":"qb","default":true,"reachable":true,"free_space":107374182400}]}`
+	case strings.HasPrefix(req.Path, "/torrents?"):
+		// 写工具的预览按任务编号找种子：q 是任务编号时回这一个
+		body = `{"items":[]}`
+		if u, err := url.Parse(req.Path); err == nil {
+			if q := u.Query().Get("q"); q != "" {
+				body = fmt.Sprintf(`{"items":[{"downloader_id":1,"downloader":"qb","task_id":%q,"title":"Fake.Movie.2026","progress":1,"size":1073741824,"state":"seeding","ratio":1.2}]}`, q)
+			}
+		}
 	case req.Path == "/torrents/actions":
 		body = `{"results":[{"ok":true}]}`
 	case req.Path == "/push":
 		body = `{"ok":true,"downloader":"qb"}`
+	case req.Path == "/config":
+		body = `{"resources":[{"name":"downloaders","title":"下载器","description":"下载器","kind":"list","id_field":"id","ops":["add","update","delete"],"fields":["enabled","name","password"],"secrets":["password"]}],"excluded":["登录密码"],"secret_placeholder":"<已设置>"}`
+	case strings.HasPrefix(req.Path, "/config/") && strings.HasSuffix(req.Path, "/preview"):
+		body = `{"resource":"downloaders","op":"update","id":"1","summary":"改下载器「qb」的 2 项","changes":[{"label":"启用（enabled）","field":"enabled","before":"是","after":"否"},{"label":"密码（password）","field":"password","before":"（不显示）","after":"已更新（不显示）","secret":true}],"impact":["改了地址或账号以后 pt-tools 重新连接这个下载器"],"applied":false}`
+	case strings.HasPrefix(req.Path, "/config/") && strings.HasSuffix(req.Path, "/changes"):
+		body = `{"resource":"downloaders","op":"update","id":"1","summary":"改下载器「qb」的 2 项","changes":[],"impact":[],"applied":true,"item":{"id":1,"name":"qb","enabled":false}}`
 	}
 	return mcp.Response{Status: http.StatusOK, Body: []byte(body)}, nil
 }
@@ -358,7 +417,7 @@ func newTestDB(t testing.TB) *gorm.DB {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&models.AssistantSetting{}, &models.AssistantConversation{},
-		&models.AssistantMessage{}, &models.AssistantConfirmation{}))
+		&models.AssistantMessage{}, &models.AssistantConfirmation{}, &models.AssistantAttachment{}))
 	return db
 }
 
@@ -408,7 +467,7 @@ func newEnv(t *testing.T) *env {
 	return e
 }
 
-var admin = Actor{Owner: "web:admin", Entry: models.AssistantEntryWeb, Name: "admin", CanWrite: true}
+var admin = Actor{Owner: "web:admin", Entry: models.AssistantEntryWeb, Name: "admin", CanWrite: true, CanConfig: true}
 
 func (e *env) conversation(a Actor) uint {
 	e.t.Helper()

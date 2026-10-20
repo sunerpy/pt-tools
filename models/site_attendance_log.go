@@ -99,3 +99,12 @@ func (r *SiteAttendanceRepository) ListDay(day string) ([]SiteAttendanceLog, err
 	}
 	return rows, nil
 }
+
+// ListRange 返回 [fromDay, toDay] 之间（含两端，YYYY-MM-DD）所有站点的签到记录，按日期倒序、站点名排序。
+func (r *SiteAttendanceRepository) ListRange(fromDay, toDay string) ([]SiteAttendanceLog, error) {
+	var rows []SiteAttendanceLog
+	if err := r.db.Where("day >= ? AND day <= ?", fromDay, toDay).Order("day DESC, site_name").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}

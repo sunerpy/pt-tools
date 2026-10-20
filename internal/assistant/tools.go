@@ -31,11 +31,14 @@ type toolbox struct {
 	defs  []openai.ChatCompletionToolUnionParam
 }
 
-// caller 是这次运行在 MCP 里的调用方：属主当审计的触发用户，能写时才有 mcp:write。
+// caller 是这次运行在 MCP 里的调用方：属主当审计的触发用户，能写时才有 mcp:write，能改配置时才有 app:config。
 func caller(a Actor) mcp.Caller {
 	c := mcp.Caller{Kind: mcp.KindAssistant, Subject: a.Owner, Name: a.Name, Scopes: []string{apitoken.ScopeMCPRead}}
 	if a.CanWrite {
 		c.Scopes = append(c.Scopes, apitoken.ScopeMCPWrite)
+	}
+	if a.CanConfig {
+		c.Scopes = append(c.Scopes, apitoken.ScopeAppConfig)
 	}
 	return c
 }
@@ -66,6 +69,10 @@ func (s *Service) openToolbox(ctx context.Context, a Actor) (*toolbox, error) {
 		if write && !a.CanWrite {
 			continue
 		}
+		// 配置工具（与讲怎么用它们的技能）只给有配置权限的入口
+		if !a.CanConfig && (slices.Contains(mcp.ConfigTools, tool.Name) || tool.Name == mcp.SkillTool) {
+			continue
+		}
 		schema, err := modelSchema(tool.InputSchema, write)
 		if err != nil {
 			tb.Close()
@@ -79,6 +86,9 @@ func (s *Service) openToolbox(ctx context.Context, a Actor) (*toolbox, error) {
 		tb.defs = append(tb.defs, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name: tool.Name, Description: openai.String(desc), Parameters: schema,
 		}))
+	}
+	if buf, err := json.Marshal(tb.defs); err == nil {
+		s.toolsTokens.Store(int64(estimateTokens(string(buf))))
 	}
 	return tb, nil
 }
@@ -217,7 +227,33 @@ func (s *Service) normalize(id, name, raw string) pendingCall {
 		}
 	}
 	pc.display = displayArgs(pc.args)
+	if name == "change_config" {
+		pc.display = displayArgs(maskConfigValues(pc.args))
+	}
 	return pc
+}
+
+// configSecretArg 判断 change_config 的 values 里哪些键可能是密钥（令牌、密码、Cookie、地址、请求头这类）：
+// 这些键的值不落库、不下发（确认卡片上的改前改后由配置网关的预览给出，密钥两边都不写原文）。
+var configSecretArg = regexp.MustCompile(`(?i)(token|secret|password|passwd|passkey|key|sign|auth|cookie|webhook|endpoint|url|header|body_template|proxy|uuid)`)
+
+// maskConfigValues 是 change_config 落库与下发用的参数：values 里像密钥的键的值换成 ***。
+func maskConfigValues(args map[string]any) map[string]any {
+	values, ok := args["values"].(map[string]any)
+	if !ok {
+		return args
+	}
+	out := maps.Clone(args)
+	masked := make(map[string]any, len(values))
+	for k, v := range values {
+		if configSecretArg.MatchString(k) {
+			masked[k] = "***"
+			continue
+		}
+		masked[k] = v
+	}
+	out["values"] = masked
+	return out
 }
 
 // displayArgs 是参数的 JSON（键排好序），再过一遍 redact.Credentials。
@@ -231,19 +267,33 @@ func displayArgs(args map[string]any) string {
 
 // 写工具在确认卡片与 ChatOps 提示里的名字。
 var toolTitles = map[string]string{
-	"pause_torrent":    "暂停种子",
-	"resume_torrent":   "继续种子",
-	"delete_torrent":   "删除种子",
-	"push_torrent":     "推送种子到下载器",
-	"add_subscription": "添加订阅",
+	"pause_torrent":           "暂停种子",
+	"resume_torrent":          "继续种子",
+	"delete_torrent":          "删除种子",
+	"push_torrent":            "推送种子到下载器",
+	"add_subscription":        "添加订阅",
+	"set_subscription_status": "暂停或恢复订阅",
+	"search_subscription":     "立即搜索订阅（搜到就下载）",
+	"delete_subscription":     "删除订阅",
+	"organize_media":          "整理进媒体库",
+	"retry_media_organize":    "重新整理",
+	"change_config":           "修改配置",
 }
+
+// autoWhenZero 是为 0 时表示「自动」的参数（整理时自动识别、按类型选库），摘要里不写。
+var autoWhenZero = map[string]bool{"tmdb_id": true, "library_id": true}
+
+// statusTitles 是 set_subscription_status 按状态的名字。
+var statusTitles = map[string]string{"active": "恢复订阅", "paused": "暂停订阅"}
 
 // 参数在摘要里的叫法（按这个顺序列出）。
 var argLabels = []struct{ key, label string }{
+	{"id", "编号"},
 	{"site", "站点"},
 	{"torrent_id", "种子编号"},
 	{"downloader_id", "下载器"},
 	{"task_id", "任务"},
+	{"hash", "种子"},
 	{"remove_data", "同时删除文件"},
 	{"category", "分类"},
 	{"tags", "标签"},
@@ -252,20 +302,24 @@ var argLabels = []struct{ key, label string }{
 	{"tmdb_id", "TMDB 编号"},
 	{"season", "季"},
 	{"upgrade", "洗版"},
+	{"library_id", "媒体库"},
 }
 
 // summarize 是一个写操作给人看的一句话，例如「暂停种子：下载器 1，任务 abc」。
 func summarize(tool string, args map[string]any) string {
 	title := toolTitles[tool]
+	seen := map[string]bool{}
+	if st, _ := args["status"].(string); tool == "set_subscription_status" && statusTitles[st] != "" {
+		title, seen["status"] = statusTitles[st], true
+	}
 	if title == "" {
 		title = tool
 	}
 	var parts []string
-	seen := map[string]bool{}
 	for _, l := range argLabels {
 		if v, ok := args[l.key]; ok {
 			seen[l.key] = true
-			if s := argText(v); s != "" {
+			if s := argText(v); s != "" && (s != "0" || !autoWhenZero[l.key]) {
 				parts = append(parts, l.label+" "+s)
 			}
 		}

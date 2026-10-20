@@ -1009,10 +1009,43 @@
 }
 
 /*
+ * 宽屏两栏（第三批）：2048 宽的屏上设置页的卡停在 1080，右边空出一大片（用户原话「layout 区域有很大空白」）。
+ * 卡片分成左右两栏、各自从上往下排 —— 不按行对齐，一张卡展开变高不会把另一栏的卡挤到下面去。
+ * 内容区不到 ~1340（视口 1600）时照旧一栏：两栏各 600 以下，表单的字段就挤了。
+ *   .pt-cols > .pt-col × 2   两栏等宽，用于几张同等分量的设置卡
+ *   .pt-cards--aside          主栏 + 400 宽的侧栏，用于「表格 + 说明」这类一主一次的页面
+ */
+.pt-cols,
+.pt-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-pad);
+  min-width: 0;
+}
+
+@media (min-width: 1600px) {
+  .pt-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .pt-cards--aside {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    align-items: start;
+  }
+}
+
+/*
  * 居中窄卡（画板 44 修改密码：p-acct 624,92 520×456）—— 只有一张卡的设置页，
  * 拉通 1080 会让 6 个字段横铺在一片空白里。
  */
 .pt-cards--narrow {
   grid-template-columns: minmax(0, 520px);
   justify-content: center;
+}
+
+/* 点行进详情的表格（utils/rowClick.ts）：整行显示手形光标，行里的控件照旧 */
+.pt-grid.el-table .pt-row-link {
+  cursor: pointer;
 }

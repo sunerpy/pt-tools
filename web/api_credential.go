@@ -2,12 +2,15 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 type credentialUpdateRequest struct {
@@ -45,13 +48,32 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 	if req.Passkey != nil {
 		sc.Passkey = *req.Passkey
 	}
+	// 凭据还没配齐的停用站点（HDDolby 要 Cookie 和 API Key，扩展只同步来了 Cookie）：先把这次的凭据存下，
+	// 站点保持停用，告诉调用方还缺什么；不再走完整校验回 500，免得扩展每次同步都报失败、Cookie 也存不进去。
+	enabled := sc.Enabled != nil && *sc.Enabled
+	if missing := core.MissingCredential(sc.AuthMethod, sc.Cookie, sc.APIKey, sc.Passkey); missing != "" && !enabled && credentialProvided(req) {
+		if err := s.store.SaveSiteCredentials(sg, req.Cookie, req.APIKey, req.Passkey); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		global.GetSlogger().Infof("[Site] 凭据已保存，站点还缺 %s，保持停用: site=%s", missing, string(sg))
+		if req.LastVisitAt != nil {
+			recordExtensionVisit(string(sg), *req.LastVisitAt)
+		}
+		writeJSON(w, map[string]any{
+			"success": true, "site": string(sg), "enabled": false,
+			"warning": incompleteCredentialWarning(string(sg), missing),
+		})
+		return
+	}
 	if credentialProvided(req) {
 		enabled := true
 		sc.Enabled = &enabled
 	}
 
+	// 校验失败（缺凭据、认证方式不对）是请求的问题，和 POST 保存站点一样回 400
 	if err := s.store.UpsertSiteWithRSS(sg, sc); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -73,6 +95,16 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 	}()
 
 	writeJSON(w, map[string]any{"success": true, "site": string(sg)})
+}
+
+// incompleteCredentialWarning 说明凭据存下了、站点还缺哪一项才能启用。
+func incompleteCredentialWarning(siteName, missing string) string {
+	name := siteName
+	if def, ok := v2.GetDefinitionRegistry().Get(siteName); ok && def.Name != "" {
+		name = def.Name
+	}
+	label := map[string]string{"cookie": "Cookie", "api_key": "API Key", "passkey": "Passkey"}[missing]
+	return fmt.Sprintf("已保存，但 %s 还需要 %s 才能启用：在 pt-tools 的「站点列表」里编辑 %s，填上 %s", name, label, name, label)
 }
 
 func credentialProvided(req credentialUpdateRequest) bool {

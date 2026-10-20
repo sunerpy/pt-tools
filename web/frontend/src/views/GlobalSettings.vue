@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import {
-  type AttendanceSettings,
-  attendanceApi,
   chatopsApi,
   type DailyReportSettings,
   globalApi,
@@ -55,16 +53,7 @@ const form = ref<GlobalSettings>({
 });
 
 /**
- * 每日签到时间窗走自己的接口（只写这两列），和全局配置一起读、一起保存。
- * 读不回来时保留默认值，但不当成「改过」去保存。
- */
-const attendanceForm = ref<AttendanceSettings>({ window_start: "08:00", window_end: "10:00" });
-const attendanceSaved = ref<AttendanceSettings | null>(null);
-/** 签到时间窗读不回来：这一段禁用并说明，免得用户改了、点保存、看到「保存成功」却什么都没写 */
-const attendanceLoadFailed = ref(false);
-
-/**
- * 每日战报也走自己的接口（只写这三列），和全局配置一起读、一起保存，是保存的第三步。
+ * 每日战报走自己的接口（只写这三列），和全局配置一起读、一起保存，是保存的第二步。
  * 读不回来时不当成「改过」去保存。通道下拉只给启用的通道。
  */
 const reportForm = ref<DailyReportSettings>({ enabled: false, time: "22:00", channel_ids: [] });
@@ -147,15 +136,6 @@ async function loadData() {
   };
   loaded.value = true;
   showWarning.value = !form.value.download_dir;
-  try {
-    const att = await attendanceApi.getSettings();
-    attendanceForm.value = { ...att };
-    attendanceSaved.value = { ...att };
-    attendanceLoadFailed.value = false;
-  } catch {
-    attendanceSaved.value = null;
-    attendanceLoadFailed.value = true;
-  }
   const [report, channels] = await Promise.all([
     userInfoApi.getDailyReport().catch(() => null),
     chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
@@ -179,11 +159,6 @@ async function save() {
     showWarning.value = true;
     return;
   }
-  const att = attendanceForm.value;
-  if (!(att.window_start < att.window_end)) {
-    ElMessage.error("签到时间窗的开始时间必须早于结束时间");
-    return;
-  }
   const report = reportForm.value;
   if (report.enabled && report.channel_ids.length === 0) {
     ElMessage.error("开启每日战报至少要选一个通知通道");
@@ -202,22 +177,7 @@ async function save() {
       return;
     }
     showWarning.value = false;
-    /*
-     * 签到时间窗走自己的接口，是第二步。它失败时全局配置已经落库了：
-     * 不能再报一句笼统的「保存失败」，让人以为什么都没改。
-     */
-    const saved = attendanceSaved.value;
-    if (saved && (saved.window_start !== att.window_start || saved.window_end !== att.window_end)) {
-      try {
-        attendanceSaved.value = await attendanceApi.saveSettings({ ...att });
-      } catch (e: unknown) {
-        ElMessage.warning(
-          `全局配置已保存，签到时间窗没有保存：${(e as Error).message || "请求失败"}`,
-        );
-        return;
-      }
-    }
-    /* 每日战报是第三步：前两步已经落库，失败时同样说清哪些保存了 */
+    /* 每日战报是第二步：全局配置已经落库，失败时说清哪些保存了 */
     const savedReport = reportSaved.value;
     if (savedReport && !sameReport(savedReport, report)) {
       try {
@@ -227,7 +187,7 @@ async function save() {
         });
       } catch (e: unknown) {
         ElMessage.warning(
-          `全局配置与签到时间窗已保存，每日战报设置没有保存：${(e as Error).message || "请求失败"}`,
+          `全局配置已保存，每日战报设置没有保存：${(e as Error).message || "请求失败"}`,
         );
         return;
       }
@@ -244,9 +204,10 @@ async function save() {
     画板 27（系统设置）的主区只有两件东西：head 之后的提示，和一张通栏大卡片
     （warn 344,80 1080×58 → p-cfg 344,154 1080×812）。两者都在卡片层 ——
     左右各内缩 16、彼此间隔 16 —— 所以容器直接用 .pt-cards--wide，本页不再自己排版。
-    这一页没有表格，也就没有工具栏带 / 表格带 / 页脚带。宽屏下卡宽停在 1080（.pt-cards--form）。
+    这一页没有表格，也就没有工具栏带 / 表格带 / 页脚带。宽屏下卡片里的分组分左右两栏（.gs-split），
+    以前卡宽停在 1080，2048 的屏上右边空出 680（用户反馈）。
   -->
-  <div class="pt-cards pt-cards--wide pt-cards--form">
+  <div class="pt-cards pt-cards--wide">
     <!-- 页头摘要：口径是「当前生效的关键配置」，由本页把真实配置送进外壳页头 -->
     <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
 
@@ -276,241 +237,239 @@ async function save() {
         </template>
       </PtDataState>
 
-      <el-form v-else :model="form" label-position="top" class="pt-form settings-form">
-        <div class="pt-strip">
-          <PtIcon name="timer" :size="13" />
-          <span>运行频率</span>
-        </div>
-        <div class="settings-body">
-          <el-form-item label="默认间隔（分钟）">
-            <el-input-number
-              v-model="form.default_interval_minutes"
-              :min="5"
-              :max="1440"
-              :step="1" />
-            <div class="field-tip">所有 RSS 任务的默认检查时间间隔，最小 5 分钟</div>
-          </el-form-item>
-        </div>
-
-        <div class="pt-strip">
-          <PtIcon name="folder" :size="13" />
-          <span>存储路径</span>
-        </div>
-        <div class="settings-body">
-          <el-form-item label="种子下载目录">
-            <el-input v-model="form.download_dir" placeholder="保存 .torrent 种子文件的目录">
-              <template #prefix>
-                <PtIcon name="folder-open" :size="14" />
-              </template>
-            </el-input>
-            <div class="field-tip">
-              绝对路径直接使用；相对路径会拼接为 <code>~/.pt-tools/&lt;输入值&gt;</code>
-              并自动创建目录
+      <el-form v-else :model="form" label-position="top" class="pt-form">
+        <!-- 宽屏（视口 ≥1600）分左右两栏：左边运行与下载，右边清理、签到与战报 -->
+        <div class="gs-split">
+          <div class="gs-col">
+            <div class="pt-strip">
+              <PtIcon name="timer" :size="13" />
+              <span>运行频率</span>
             </div>
-            <div class="field-tip">
-              此目录仅用于备份下载的 <code>.torrent</code> 文件，不是下载器的数据保存路径
+            <div class="settings-body">
+              <el-form-item label="默认间隔（分钟）">
+                <el-input-number
+                  v-model="form.default_interval_minutes"
+                  :min="5"
+                  :max="1440"
+                  :step="1" />
+                <div class="field-tip">所有 RSS 任务的默认检查时间间隔，最小 5 分钟</div>
+              </el-form-item>
             </div>
-          </el-form-item>
-        </div>
 
-        <div class="pt-strip">
-          <PtIcon name="gauge" :size="13" />
-          <span>下载策略与限制</span>
-        </div>
-        <div class="settings-body">
-          <div class="field-row">
-            <el-form-item label="最大种子大小（GB）">
-              <el-input-number v-model="form.torrent_size_gb" :min="1" :max="10000" />
-              <div class="field-tip">超过此大小的种子将被自动忽略，防止磁盘撑爆</div>
-            </el-form-item>
-            <el-form-item label="最小种子大小（GB）">
-              <el-input-number v-model="form.torrent_min_size_gb" :min="0" :max="10000" />
-              <div class="field-tip">小于此大小的种子将被忽略；0 = 不限制，且必须小于最大值</div>
-            </el-form-item>
-          </div>
-
-          <el-form-item label="默认下载模式">
-            <el-radio-group v-model="form.default_filter_mode">
-              <el-radio-button v-for="opt in filterModeOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </el-radio-button>
-            </el-radio-group>
-            <div v-if="activeFilterMode" class="field-tip">{{ activeFilterMode.desc }}</div>
-            <div class="pt-note pt-note--warn mode-note">
-              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-              <span>
-                v0.26.0 起：智能模式下，为 RSS 关联过滤规则 =
-                精准下载，不再附带自动下载免费种子。RSS
-                订阅级别可覆盖此默认值，全局大小上限对所有模式都生效。
-              </span>
+            <div class="pt-strip">
+              <PtIcon name="folder" :size="13" />
+              <span>存储路径</span>
             </div>
-          </el-form-item>
-
-          <div class="field-row">
-            <el-form-item label="启用下载限速判断">
-              <el-switch v-model="form.download_limit_enabled" />
-              <div class="field-tip">用于评估种子是否能在免费期内下载完成</div>
-            </el-form-item>
-            <el-form-item label="预估下载速度（MB/s）">
-              <el-input-number
-                v-model="form.download_speed_limit"
-                :min="1"
-                :max="1000"
-                :disabled="!form.download_limit_enabled" />
-              <div class="field-tip">按您的网络环境填写实际平均下载速度</div>
-            </el-form-item>
-          </div>
-
-          <div class="field-row">
-            <el-form-item label="最短免费时间（分钟）">
-              <el-input-number v-model="form.min_free_minutes" :min="0" :max="1440" :step="5" />
-              <div class="field-tip">免费剩余时间少于此值的种子将被跳过，0 表示不限制</div>
-            </el-form-item>
-            <el-form-item label="自动启动任务">
-              <el-switch v-model="form.auto_start" />
-              <div class="field-tip">程序启动时立即开启已启用的 RSS 检查任务</div>
-            </el-form-item>
-          </div>
-        </div>
-
-        <div class="pt-strip">
-          <PtIcon name="archive" :size="13" />
-          <span>暂存种子清理</span>
-        </div>
-        <div class="settings-body">
-          <div class="field-row">
-            <el-form-item label="暂存种子保留时长（小时）">
-              <el-input-number v-model="form.retain_hours" :min="0" :max="8760" :step="1" />
-              <div class="field-tip">超期未推送将被自动清理。0 = 关闭自动清理</div>
-            </el-form-item>
-            <el-form-item label="最大重试次数">
-              <el-input-number v-model="form.max_retry" :min="0" :max="100" :step="1" />
-              <div class="field-tip">推送失败达到此次数后清理暂存种子；0 = 不按重试次数删除</div>
-            </el-form-item>
-          </div>
-        </div>
-
-        <div class="pt-strip">
-          <PtIcon name="calendar-clock" :size="13" />
-          <span>免费结束管理</span>
-        </div>
-        <div class="settings-body">
-          <el-form-item label="免费结束自动删除">
-            <el-switch v-model="form.auto_delete_on_free_end" />
-            <div class="field-tip">
-              开启后，免费期结束时未下载完成的种子将自动从下载器中删除（含数据文件）；关闭时仅暂停，可在「暂停任务」页手动恢复或删除
+            <div class="settings-body">
+              <el-form-item label="种子下载目录">
+                <el-input v-model="form.download_dir" placeholder="保存 .torrent 种子文件的目录">
+                  <template #prefix>
+                    <PtIcon name="folder-open" :size="14" />
+                  </template>
+                </el-input>
+                <div class="field-tip">
+                  绝对路径直接使用；相对路径会拼接为 <code>~/.pt-tools/&lt;输入值&gt;</code>
+                  并自动创建目录
+                </div>
+                <div class="field-tip">
+                  此目录仅用于备份下载的 <code>.torrent</code> 文件，不是下载器的数据保存路径
+                </div>
+              </el-form-item>
             </div>
-            <div v-if="form.auto_delete_on_free_end" class="pt-note pt-note--dang mode-note">
-              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-              <span>已开启：免费期结束时未完成的种子及其数据文件会被自动删除，此操作不可恢复</span>
-            </div>
-          </el-form-item>
 
-          <el-form-item label="免费期结束前提前处理（分钟）">
-            <el-input-number v-model="form.free_end_advance_minutes" :min="0" :max="60" :step="1" />
-            <div class="field-tip">
-              提前 N 分钟暂停或删除未完成的种子，规避删除延迟与 tracker 汇报滞后导致的计费下载量；0
-              表示到点处理，新安装默认 5。要求免费的推送还要求免费剩余时间超过 N 分钟（至少 5
-              分钟），不够的不推送。
+            <div class="pt-strip">
+              <PtIcon name="gauge" :size="13" />
+              <span>下载策略与限制</span>
             </div>
-            <div
-              v-if="form.free_end_advance_minutes === 0"
-              class="pt-note pt-note--warn mode-note"
-              data-testid="gs-advance-zero">
-              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-              <span
-                >提前量是 0：到点才暂停，tracker 汇报滞后时仍可能多出计费下载量，建议设为 5
-                分钟以上</span
-              >
-            </div>
-          </el-form-item>
-        </div>
-
-        <div class="pt-strip">
-          <PtIcon name="calendar-check" :size="13" />
-          <span>每日签到</span>
-        </div>
-        <div class="settings-body">
-          <div
-            v-if="attendanceLoadFailed"
-            class="pt-note pt-note--warn"
-            data-testid="attendance-load-failed">
-            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-            <span>签到时间窗读取失败，这一段暂时不能修改；刷新页面重试</span>
-          </div>
-          <div class="field-row">
-            <el-form-item label="签到时间窗开始">
-              <el-time-select
-                v-model="attendanceForm.window_start"
-                :disabled="attendanceLoadFailed"
-                start="00:00"
-                step="00:15"
-                end="23:45"
-                :clearable="false"
-                data-testid="attendance-window-start" />
-              <div class="field-tip">
-                开启了每日自动签到的站点，每天在这个时间段内随机选一个时刻签到（服务器时区）
+            <div class="settings-body">
+              <div class="field-row">
+                <el-form-item label="最大种子大小（GB）">
+                  <el-input-number v-model="form.torrent_size_gb" :min="1" :max="10000" />
+                  <div class="field-tip">超过此大小的种子将被自动忽略，防止磁盘撑爆</div>
+                </el-form-item>
+                <el-form-item label="最小种子大小（GB）">
+                  <el-input-number v-model="form.torrent_min_size_gb" :min="0" :max="10000" />
+                  <div class="field-tip">
+                    小于此大小的种子将被忽略；0 = 不限制，且必须小于最大值
+                  </div>
+                </el-form-item>
               </div>
-            </el-form-item>
-            <el-form-item label="签到时间窗结束">
-              <el-time-select
-                v-model="attendanceForm.window_end"
-                :disabled="attendanceLoadFailed"
-                start="00:15"
-                step="00:15"
-                end="23:45"
-                :clearable="false"
-                data-testid="attendance-window-end" />
-              <div class="field-tip">在站点列表的「保号配置」里按站点开启每日自动签到</div>
-            </el-form-item>
-          </div>
-        </div>
 
-        <div class="pt-strip">
-          <PtIcon name="chart-column" :size="13" />
-          <span>每日战报</span>
-        </div>
-        <div class="settings-body">
-          <div
-            v-if="reportLoadFailed"
-            class="pt-note pt-note--warn"
-            data-testid="daily-report-load-failed">
-            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-            <span>每日战报设置读取失败，这一段暂时不能修改；刷新页面重试</span>
-          </div>
-          <el-form-item label="开启每日战报">
-            <el-switch
-              v-model="reportForm.enabled"
-              :disabled="reportLoadFailed"
-              data-testid="daily-report-enabled" />
-            <div class="field-tip">
-              每天在设定时刻（再错开几分钟）把当天各站的上传、下载（计费）、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道
+              <el-form-item label="默认下载模式">
+                <el-radio-group v-model="form.default_filter_mode">
+                  <el-radio-button
+                    v-for="opt in filterModeOptions"
+                    :key="opt.value"
+                    :value="opt.value">
+                    {{ opt.label }}
+                  </el-radio-button>
+                </el-radio-group>
+                <div v-if="activeFilterMode" class="field-tip">{{ activeFilterMode.desc }}</div>
+                <div class="pt-note pt-note--warn mode-note">
+                  <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                  <span>
+                    v0.26.0 起：智能模式下，为 RSS 关联过滤规则 =
+                    精准下载，不再附带自动下载免费种子。RSS
+                    订阅级别可覆盖此默认值，全局大小上限对所有模式都生效。
+                  </span>
+                </div>
+              </el-form-item>
+
+              <div class="field-row">
+                <el-form-item label="启用下载限速判断">
+                  <el-switch v-model="form.download_limit_enabled" />
+                  <div class="field-tip">用于评估种子是否能在免费期内下载完成</div>
+                </el-form-item>
+                <el-form-item label="预估下载速度（MB/s）">
+                  <el-input-number
+                    v-model="form.download_speed_limit"
+                    :min="1"
+                    :max="1000"
+                    :disabled="!form.download_limit_enabled" />
+                  <div class="field-tip">按您的网络环境填写实际平均下载速度</div>
+                </el-form-item>
+              </div>
+
+              <div class="field-row">
+                <el-form-item label="最短免费时间（分钟）">
+                  <el-input-number v-model="form.min_free_minutes" :min="0" :max="1440" :step="5" />
+                  <div class="field-tip">免费剩余时间少于此值的种子将被跳过，0 表示不限制</div>
+                </el-form-item>
+                <el-form-item label="自动启动 RSS 任务">
+                  <el-switch v-model="form.auto_start" />
+                  <div class="field-tip">
+                    打开后程序一启动（包括重启容器）就运行 RSS 任务；关着时要在底部状态栏的「RSS
+                    任务」里手动启动。 只影响 RSS 订阅，刷流、辅种、自动删种等不受影响
+                  </div>
+                </el-form-item>
+              </div>
             </div>
-          </el-form-item>
-          <div class="field-row">
-            <el-form-item label="发送时刻">
-              <el-time-select
-                v-model="reportForm.time"
-                :disabled="reportLoadFailed"
-                start="00:00"
-                step="00:15"
-                end="23:45"
-                :clearable="false"
-                data-testid="daily-report-time" />
-              <div class="field-tip">服务器时区；通道处在静默时段时顺延到静默结束</div>
-            </el-form-item>
-            <el-form-item label="接收通道">
-              <el-select
-                v-model="reportForm.channel_ids"
-                :disabled="reportLoadFailed"
-                multiple
-                collapse-tags
-                placeholder="选择通知通道"
-                data-testid="daily-report-channels">
-                <el-option v-for="c in reportChannels" :key="c.id" :label="c.name" :value="c.id" />
-              </el-select>
-              <div class="field-tip">开启时至少选一个；没有通道时先去「消息通知」里添加</div>
-            </el-form-item>
+          </div>
+          <div class="gs-col">
+            <div class="pt-strip">
+              <PtIcon name="archive" :size="13" />
+              <span>暂存种子清理</span>
+            </div>
+            <div class="settings-body">
+              <div class="field-row">
+                <el-form-item label="暂存种子保留时长（小时）">
+                  <el-input-number v-model="form.retain_hours" :min="0" :max="8760" :step="1" />
+                  <div class="field-tip">超期未推送将被自动清理。0 = 关闭自动清理</div>
+                </el-form-item>
+                <el-form-item label="最大重试次数">
+                  <el-input-number v-model="form.max_retry" :min="0" :max="100" :step="1" />
+                  <div class="field-tip">
+                    推送失败达到此次数后清理暂存种子；0 = 不按重试次数删除
+                  </div>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="pt-strip">
+              <PtIcon name="calendar-clock" :size="13" />
+              <span>免费结束管理</span>
+            </div>
+            <div class="settings-body">
+              <el-form-item label="免费结束自动删除">
+                <el-switch v-model="form.auto_delete_on_free_end" />
+                <div class="field-tip">
+                  开启后，免费期结束时未下载完成的种子将自动从下载器中删除（含数据文件）；关闭时仅暂停，可在「暂停任务」页手动恢复或删除
+                </div>
+                <div v-if="form.auto_delete_on_free_end" class="pt-note pt-note--dang mode-note">
+                  <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                  <span
+                    >已开启：免费期结束时未完成的种子及其数据文件会被自动删除，此操作不可恢复</span
+                  >
+                </div>
+              </el-form-item>
+
+              <el-form-item label="免费期结束前提前处理（分钟）">
+                <el-input-number
+                  v-model="form.free_end_advance_minutes"
+                  :min="0"
+                  :max="60"
+                  :step="1" />
+                <div class="field-tip">
+                  提前 N 分钟暂停或删除未完成的种子，规避删除延迟与 tracker
+                  汇报滞后导致的计费下载量；0 表示到点处理，新安装默认
+                  5。要求免费的推送还要求免费剩余时间超过 N 分钟（至少 5 分钟），不够的不推送。
+                </div>
+                <div
+                  v-if="form.free_end_advance_minutes === 0"
+                  class="pt-note pt-note--warn mode-note"
+                  data-testid="gs-advance-zero">
+                  <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                  <span
+                    >提前量是 0：到点才暂停，tracker 汇报滞后时仍可能多出计费下载量，建议设为 5
+                    分钟以上</span
+                  >
+                </div>
+              </el-form-item>
+            </div>
+
+            <div class="pt-strip">
+              <PtIcon name="calendar-check" :size="13" />
+              <span>每日签到</span>
+            </div>
+            <div class="settings-body">
+              <p class="field-tip moved-tip" data-testid="attendance-moved">
+                签到时间窗、AI 签到和签到结果推送挪到了
+                <router-link to="/attendance">自动签到</router-link>
+                页，和每个站点的签到开关、签到记录放在一起
+              </p>
+            </div>
+
+            <div class="pt-strip">
+              <PtIcon name="chart-column" :size="13" />
+              <span>每日战报</span>
+            </div>
+            <div class="settings-body">
+              <div
+                v-if="reportLoadFailed"
+                class="pt-note pt-note--warn"
+                data-testid="daily-report-load-failed">
+                <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                <span>每日战报设置读取失败，这一段暂时不能修改；刷新页面重试</span>
+              </div>
+              <el-form-item label="开启每日战报">
+                <el-switch
+                  v-model="reportForm.enabled"
+                  :disabled="reportLoadFailed"
+                  data-testid="daily-report-enabled" />
+                <div class="field-tip">
+                  每天在设定时刻（再错开几分钟）把当天各站的上传、下载（计费）、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道
+                </div>
+              </el-form-item>
+              <div class="field-row">
+                <el-form-item label="发送时刻">
+                  <el-time-select
+                    v-model="reportForm.time"
+                    :disabled="reportLoadFailed"
+                    start="00:00"
+                    step="00:15"
+                    end="23:45"
+                    :clearable="false"
+                    data-testid="daily-report-time" />
+                  <div class="field-tip">服务器时区；通道处在静默时段时顺延到静默结束</div>
+                </el-form-item>
+                <el-form-item label="接收通道">
+                  <el-select
+                    v-model="reportForm.channel_ids"
+                    :disabled="reportLoadFailed"
+                    multiple
+                    collapse-tags
+                    placeholder="选择通知通道"
+                    data-testid="daily-report-channels">
+                    <el-option
+                      v-for="c in reportChannels"
+                      :key="c.id"
+                      :label="c.name"
+                      :value="c.id" />
+                  </el-select>
+                  <div class="field-tip">开启时至少选一个；没有通道时先去「消息通知」里添加</div>
+                </el-form-item>
+              </div>
+            </div>
           </div>
         </div>
       </el-form>
@@ -533,8 +492,25 @@ async function save() {
 
 <style scoped>
 /* 第一条区块条紧贴面板页头，两条发丝线会叠成 2px */
-.settings-form > .pt-strip:first-child {
+.gs-col:first-child > .pt-strip:first-child {
   border-top: 0;
+}
+
+/* 宽屏两栏：两栏各自从上往下排，中间一条竖线；右栏的第一条区块条也紧贴面板页头 */
+@media (min-width: 1600px) {
+  .gs-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .gs-col + .gs-col {
+    border-left: 1px solid var(--pt-border);
+  }
+
+  .gs-col + .gs-col > .pt-strip:first-child {
+    border-top: 0;
+  }
 }
 
 /* 下内边距留 0：末个字段自带的 16 下外边距正好等于 --pt-pad，凑成段尾留白 */
@@ -546,5 +522,10 @@ async function save() {
 .mode-note {
   width: 100%;
   margin-top: 6px;
+}
+
+/* 每日签到挪走以后留的一句指路：段尾补上 16 的留白（这一段没有字段自带的下外边距） */
+.moved-tip {
+  margin: 0 0 var(--pt-pad);
 }
 </style>

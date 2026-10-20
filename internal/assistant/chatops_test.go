@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/mcp"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -123,7 +125,7 @@ func TestChatOpsConfirmationByReply(t *testing.T) {
 	ctx := context.Background()
 	_, result := h.Handle(ctx, inbound("暂停 abc", true))
 	require.Equal(t, "success", result)
-	rp.waitFor(t, "需要你确认：暂停种子：下载器 1，任务 abc")
+	rp.waitFor(t, "需要你确认：暂停下载器「qb」里的「Fake.Movie.2026」")
 	assert.Empty(t, e.backend.writes())
 
 	// 两条「确认」同时到：只有一条算数，操作执行一次
@@ -176,7 +178,7 @@ func TestChatOpsTimeoutNotice(t *testing.T) {
 	e.svc.confirmUnit = 50 * time.Millisecond
 	e.llm.push(call("c1", "pause_torrent", `{"downloader_id":1,"task_id":"abc"}`), reply{text: "没有执行。"})
 	h.Handle(context.Background(), inbound("暂停 abc", true))
-	rp.waitFor(t, "确认超时，没有执行：暂停种子")
+	rp.waitFor(t, "确认超时，没有执行：暂停下载器「qb」")
 	assert.Empty(t, e.backend.writes())
 }
 
@@ -189,9 +191,25 @@ func TestChatOpsNonAdminHasNoWriteTools(t *testing.T) {
 	for _, w := range writeTools {
 		assert.NotContains(t, e.llm.requests()[0].toolNames(), w)
 	}
+	for _, c := range append(slices.Clone(mcp.ConfigTools), mcp.SkillTool) {
+		assert.NotContains(t, e.llm.requests()[0].toolNames(), c, "非管理员绑定也拿不到配置工具")
+	}
 	assert.Empty(t, e.backend.requests())
 	for _, s := range rp.texts() {
 		assert.NotContains(t, s, "需要你确认")
+	}
+}
+
+// 管理员绑定能改配置：拿得到配置工具。
+func TestChatOpsAdminHasConfigTools(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	e.llm.push(reply{text: "好的。"})
+	_, result := h.Handle(context.Background(), inbound("看看下载器配置", true))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "好的。")
+	names := e.llm.requests()[0].toolNames()
+	for _, c := range append(slices.Clone(mcp.ConfigTools), mcp.SkillTool) {
+		assert.Contains(t, names, c)
 	}
 }
 
@@ -229,7 +247,16 @@ func TestChatOpsEventText(t *testing.T) {
 		Status: "pending", Summary: "x", ExpiresAt: expires,
 	}}, "en")
 	assert.Contains(t, en, "Please confirm: x")
-	assert.Equal(t, map[string]any{"kind": "confirm", "summary": "x", "expires": "08:10"}, fields)
+	assert.NotContains(t, en, "Changes:", "没有预览时不写改动")
+	assert.Equal(t, map[string]any{"kind": "confirm", "summary": "x", "expires": "08:10", "changes": "", "impact": ""}, fields)
+	// 有预览：改动与影响一行一项写在确认消息里，密钥只写改了
+	zh, fields := chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
+		Status: "pending", Summary: "暂停「Dune」", ExpiresAt: expires,
+		Changes: []mcp.Change{{Label: "状态", Before: "做种中", After: "已暂停"}, {Label: "Cookie", Secret: true}},
+		Impact:  []string{"停止做种"},
+	}}, "")
+	assert.Equal(t, "需要你确认：暂停「Dune」\n改动：\n- 状态：做种中 → 已暂停\n- Cookie：已更新（不显示）\n影响：\n- 停止做种\n回复「确认」执行，回复别的内容取消（08:10 以前有效）。", zh)
+	assert.Equal(t, "- 停止做种", fields["impact"])
 	got, fields = chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
 		Status: "expired", DecidedBy: decidedByTimeout, Summary: "x",
 	}}, "")

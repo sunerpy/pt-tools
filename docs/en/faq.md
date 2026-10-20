@@ -164,6 +164,20 @@ This page collects common problems with pt-tools and how to solve them.
    - Turn off all the filter rules for a test
    - Add them back one at a time to find the problem
 
+### RSS feeds stop downloading after a restart
+
+**Symptom**: after the program or the container restarts, or after an upgrade, RSS feeds push no new torrents; the status bar at the bottom says RSS tasks not started (RSS 任务未启动) and a notice at the top of the page says RSS tasks are not running (RSS 任务没有运行).
+
+**Cause**: Start RSS tasks automatically (自动启动 RSS 任务) is off by default, and while it is off RSS tasks do not run on their own after the program starts. They only cover RSS feeds, so brush tasks, cross-seeding, auto-delete and the rest keep running and everything else looks normal.
+
+**Fix**:
+
+1. Click RSS tasks (RSS 任务) at the left end of the status bar, then Start (启动) in the panel (on a phone, the panel is under Me (我的) in the bottom tabs).
+2. To have them run automatically from now on, turn on Start when the program starts (程序启动时自动运行) in the same panel, or Start RSS tasks automatically (自动启动 RSS 任务) on the System → Global settings (系统 → 全局设置) page.
+3. When the status bar says RSS tasks not running (RSS 任务未运行), open it to see why: set a default downloader if there is none; if the default downloader cannot be reached, click Start once it is back.
+
+See [Starting and stopping RSS tasks](configuration.md#starting-and-stopping-rss-tasks).
+
 ---
 
 ## Pausing when freeleech ends

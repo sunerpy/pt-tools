@@ -20,12 +20,23 @@ import (
 // appAssistantWait 是长轮询事件最多等几秒。
 const appAssistantWait = 25
 
+// appAssistantEventTypes 是契约（AppAssistantEvent.type）里有的事件种类：新加的种类（例如推理内容的增量 reasoning）不给 App，
+// 装着旧版本的 App 认不得新的种类，整页事件会解析失败。推理内容在消息的 reasoning 里。
+var appAssistantEventTypes = map[string]bool{
+	assistant.EventRunStarted: true, assistant.EventDelta: true, assistant.EventMessage: true,
+	assistant.EventToolStarted: true, assistant.EventConfirmation: true, assistant.EventRunFinished: true,
+}
+
+func appAssistantEvent(ev assistant.Event) bool { return appAssistantEventTypes[ev.Type] }
+
 // appAssistantActor 把 App API 的主体换成助手的属主；别的主体（MCP、助手自己）不能用。
 func appAssistantActor(p *middleware.Principal) (assistant.Actor, bool) {
 	if p == nil {
 		return assistant.Actor{}, false
 	}
-	a := assistant.Actor{Entry: models.AssistantEntryApp, Name: p.Name, CanWrite: p.Has(apitoken.ScopeAppWrite)}
+	a := assistant.Actor{
+		Entry: models.AssistantEntryApp, Name: p.Name, CanWrite: p.Has(apitoken.ScopeAppWrite), CanConfig: p.Has(apitoken.ScopeAppConfig),
+	}
 	switch p.Kind {
 	case middleware.KindSession:
 		a.Owner, a.Name = "web:"+p.ID, p.ID
@@ -100,6 +111,8 @@ func (s *Server) appAssistantStatus(w http.ResponseWriter, r *http.Request) {
 		appAssistantError(w, err)
 		return
 	}
+	// 语音输入只在网页对话页：识别接口只认网页登录，App 用不了
+	got.Voice = false
 	appJSON(w, got)
 }
 
@@ -125,7 +138,7 @@ func (s *Server) appAssistantConversationCreate(w http.ResponseWriter, r *http.R
 	if !appDecode(w, r, &in) {
 		return
 	}
-	res, status, err := createAndSend(r.Context(), svc, a, in)
+	res, status, err := createAndSend(r.Context(), svc, a, in, nil)
 	if err != nil {
 		appAssistantError(w, err)
 		return
@@ -181,7 +194,7 @@ func (s *Server) appAssistantSend(w http.ResponseWriter, r *http.Request) {
 	if !appDecode(w, r, &in) {
 		return
 	}
-	res, err := svc.Send(r.Context(), a, id, in.Text)
+	res, err := svc.SendWith(r.Context(), a, id, in.options(nil))
 	if err != nil {
 		appAssistantError(w, err)
 		return
@@ -240,7 +253,7 @@ func (s *Server) appAssistantEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		wait = n
 	}
-	page, err := svc.Events(r.Context(), a, id, after, time.Duration(wait)*time.Second)
+	page, err := svc.EventsFor(r.Context(), a, id, after, time.Duration(wait)*time.Second, appAssistantEvent)
 	if err != nil {
 		appAssistantError(w, err)
 		return

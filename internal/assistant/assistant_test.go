@@ -123,8 +123,14 @@ func TestWriteToolApproved(t *testing.T) {
 	e := newEnv(t)
 	conv, res, c := startWrite(t, e, `{"downloader_id":1,"task_id":"abc"}`)
 	assert.Equal(t, "pause_torrent", c.Tool)
-	assert.Equal(t, "暂停种子：下载器 1，任务 abc", c.Summary)
+	// 确认卡片用写工具的预览：按下载器里的现状写改以前、改以后与影响
+	assert.Equal(t, "暂停下载器「qb」里的「Fake.Movie.2026」（1.0 GB，做种中）", c.Summary)
+	assert.Equal(t, []mcp.Change{{Label: "状态", Before: "做种中", After: "已暂停"}}, c.Changes)
+	assert.Contains(t, strings.Join(c.Impact, "\n"), "停止做种")
 	assert.Empty(t, e.backend.writes(), "确认以前不执行")
+	for _, r := range e.backend.requests() {
+		assert.True(t, r.Preview, "确认以前只有预览读现状")
+	}
 
 	got, err := e.svc.Decide(context.Background(), admin, c.ID, true)
 	require.NoError(t, err)
@@ -286,7 +292,9 @@ func TestMultipleWritesConfirmedOneByOne(t *testing.T) {
 
 	var paths []string
 	for _, r := range e.backend.requests() {
-		paths = append(paths, r.Path)
+		if !r.Preview {
+			paths = append(paths, r.Path)
+		}
 	}
 	assert.Equal(t, []string{"/torrents/actions", "/tasks", "/torrents/actions"}, paths, "按顺序执行")
 	w := e.backend.writes()
@@ -345,7 +353,9 @@ func TestPushTorrentURLNeverLeaks(t *testing.T) {
 	events, _ := e.until(admin, conv, 0, pendingConfirmation)
 	c := *events[len(events)-1].Confirmation
 	assert.Equal(t, map[string]any{"site": "hdsky", "torrent_id": "123", "downloader_id": float64(1)}, c.Arguments)
-	assert.Equal(t, "推送种子到下载器：站点 hdsky，种子编号 123，下载器 1", c.Summary)
+	assert.Equal(t, "把站点 hdsky 的种子 123 推送到「qb」", c.Summary, "有预览时用预览写的")
+	assert.Contains(t, c.Changes, mcp.Change{Label: "推送到", After: "qb"})
+	assert.NotEmpty(t, c.Impact)
 	_, err := e.svc.Decide(context.Background(), admin, c.ID, true)
 	require.NoError(t, err)
 	fin, all := e.waitRun(admin, conv, res.RunID)
@@ -477,9 +487,10 @@ func TestModelErrorDoesNotLeakKey(t *testing.T) {
 	assert.NotContains(t, last.Content, testKey)
 }
 
-func TestReasoningReplayedButHidden(t *testing.T) {
+func TestReasoningReplayedAndShownRedacted(t *testing.T) {
 	e := newEnv(t)
-	e.llm.push(reply{reasoning: "用户在打招呼。", text: "你好。"}, reply{text: "还在。"})
+	thought := "用户在打招呼，地址 https://x.example/dl?passkey=" + passkey + " 不能说。"
+	e.llm.push(reply{reasoning: thought, text: "你好。"}, reply{text: "还在。"})
 	conv := e.conversation(admin)
 	res := e.send(admin, conv, "你好")
 	_, all := e.waitRun(admin, conv, res.RunID)
@@ -487,13 +498,29 @@ func TestReasoningReplayedButHidden(t *testing.T) {
 	e.waitRun(admin, conv, res.RunID)
 	second := e.llm.requests()[1].Messages
 	assert.Equal(t, "assistant", second[2]["role"])
-	assert.Equal(t, "用户在打招呼。", second[2]["reasoning_content"], "推理内容回传给模型")
+	replay, _ := second[2]["reasoning_content"].(string)
+	assert.Contains(t, replay, "用户在打招呼", "reasoning_content 来的推理内容回传给模型")
+	assert.NotContains(t, replay, passkey, "回传的也遮了凭证")
+	reasoning := ""
+	for _, ev := range all {
+		if ev.Type == EventReasoning {
+			if ev.Replace {
+				reasoning = ev.Text
+			} else {
+				reasoning += ev.Text
+			}
+		}
+	}
+	assert.Contains(t, reasoning, "用户在打招呼", "推理内容的增量经事件流给页面")
 	buf, _ := json.Marshal(all)
-	assert.NotContains(t, string(buf), "用户在打招呼", "推理内容不下发")
+	assert.NotContains(t, string(buf), passkey, "事件里的推理内容脱敏了")
 	d, err := e.svc.Conversation(context.Background(), admin, conv)
 	require.NoError(t, err)
+	require.Len(t, d.Messages, 4)
+	assert.Contains(t, d.Messages[1].Reasoning, "用户在打招呼", "会话详情里的回答带着推理内容")
+	assert.Equal(t, reasoning, d.Messages[1].Reasoning, "流式的与落库以后的一样")
 	buf, _ = json.Marshal(d)
-	assert.NotContains(t, string(buf), "用户在打招呼")
+	assert.NotContains(t, string(buf), passkey)
 }
 
 func TestHistoryRepairsInterruptedCalls(t *testing.T) {
@@ -508,7 +535,7 @@ func TestHistoryRepairsInterruptedCalls(t *testing.T) {
 		{ConversationID: conv, Role: "user", Content: "再来"},
 	}
 	require.NoError(t, e.db.Create(&rows).Error)
-	hist, err := e.svc.history(context.Background(), conv)
+	hist, err := e.svc.history(context.Background(), conv, 0, 100_000)
 	require.NoError(t, err)
 	buf, _ := json.Marshal(hist)
 	var got []map[string]any
@@ -815,7 +842,8 @@ func TestUserTypedTaskIDReachesTool(t *testing.T) {
 	res := e.send(admin, conv, "暂停 "+hash+"，我的 key 是 sk-proj-abcdefghijklmnop1234")
 	events, _ := e.until(admin, conv, 0, pendingConfirmation)
 	c := *events[len(events)-1].Confirmation
-	assert.Equal(t, "暂停种子：下载器 1，任务 "+hash, c.Summary, "info hash 是编号，不当成密钥遮掉")
+	assert.Equal(t, hash, c.Arguments["task_id"], "info hash 是编号，不当成密钥遮掉")
+	assert.Contains(t, e.backend.requests()[0].Path, "q="+hash, "预览按这个编号找种子")
 	user := e.messages(conv)[0].Content
 	assert.Contains(t, user, hash)
 	assert.NotContains(t, user, "sk-proj-abcdefghijklmnop1234", "常见格式的 API Key 要遮")

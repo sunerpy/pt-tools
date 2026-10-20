@@ -742,6 +742,11 @@ func TestRousiDriver_Execute_APIError(t *testing.T) {
 
 func TestRousiDriver_GetUserInfo(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/points/attendance/stats" {
+			// 签到统计只用来补最近活跃时间，查不到不影响用户信息
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		assert.Contains(t, r.URL.Path, "/api/v1/profile")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(rousiUserInfoFixtureJSON))

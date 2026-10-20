@@ -30,6 +30,11 @@ const SCOPES: readonly { value: ApiTokenScope; label: string; hint: string }[] =
   },
   { value: "app:write", label: "操作", hint: "暂停、继续、删除种子，推送种子，签到，管理订阅" },
   {
+    value: "app:config",
+    label: "配置",
+    hint: "读、改 pt-tools 的配置（下载器、站点、RSS、规则、通知等；密钥只能写不能读）：另外要勾「读取」或「操作」，MCP 的配置工具要勾 MCP 的",
+  },
+  {
     value: "qbit:compat",
     label: "qB 兼容",
     hint: "登录 qB 兼容入口：MoviePilot、IYUU 这类只认 qBittorrent 的工具用",

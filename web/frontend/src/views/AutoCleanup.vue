@@ -522,646 +522,676 @@ async function executeClean() {
   <!--
     画板 21（p-main 344,84 1080×882）与画板 36（p-workdir 1080×570）都是通栏卡：
     head 之后直接进卡片层，左右各内缩 16，卡片之间间隔 16。本页没有表格带。
-    宽屏下卡宽停在 1080（.pt-cards--form），卡脚的「保存设置」不会跑到屏幕最右边。
+    宽屏（视口 ≥1600）分两栏：左边自动删种，右边竞争度监控与清理工作目录；以前卡宽停在 1080，
+    2048 的屏上右边空出 680（用户反馈）。窄屏照旧一栏。
   -->
-  <div class="cleanup-page pt-cards pt-cards--wide pt-cards--form">
-    <PtPanel v-loading="loading" title="自动删种" icon="trash-2" padding="none">
-      <template #actions>
-        <PtStatusPill :tone="form.cleanup_enabled ? 'ok' : 'neutral'" size="sm">
-          {{ form.cleanup_enabled ? "运行中" : "未启用" }}
-        </PtStatusPill>
-      </template>
+  <div class="cleanup-page pt-cards pt-cards--wide">
+    <div class="pt-cols">
+      <div class="pt-col">
+        <PtPanel v-loading="loading" title="自动删种" icon="trash-2" padding="none">
+          <template #actions>
+            <PtStatusPill :tone="form.cleanup_enabled ? 'ok' : 'neutral'" size="sm">
+              {{ form.cleanup_enabled ? "运行中" : "未启用" }}
+            </PtStatusPill>
+          </template>
 
-      <!--
+          <!--
         配置读失败时，表单会停在一整套默认值上 —— 长得和「服务端就是这么配的」一模一样。
         perm 不给重试：没权限点多少次都一样。
       -->
-      <div
-        v-if="settingsFailed"
-        class="pt-note settings-alert"
-        :class="settingsState === 'perm' ? 'pt-note--warn' : 'pt-note--dang'">
-        <PtIcon
-          :name="settingsState === 'perm' ? 'lock' : 'circle-alert'"
-          :size="14"
-          class="pt-note__icon" />
-        <span class="settings-alert__text">{{ settingsAlertText }}</span>
-        <el-button
-          v-if="settingsState === 'error'"
-          size="small"
-          :loading="loading"
-          @click="loadSettings">
-          <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-        </el-button>
-      </div>
+          <div
+            v-if="settingsFailed"
+            class="pt-note settings-alert"
+            :class="settingsState === 'perm' ? 'pt-note--warn' : 'pt-note--dang'">
+            <PtIcon
+              :name="settingsState === 'perm' ? 'lock' : 'circle-alert'"
+              :size="14"
+              class="pt-note__icon" />
+            <span class="settings-alert__text">{{ settingsAlertText }}</span>
+            <el-button
+              v-if="settingsState === 'error'"
+              size="small"
+              :loading="loading"
+              @click="loadSettings">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </div>
 
-      <el-form :model="form" label-position="top" class="pt-form settings-form">
-        <div class="pt-strip">
-          <PtIcon name="sliders-horizontal" :size="13" />
-          <span>基本设置</span>
-        </div>
-        <div class="settings-body">
-          <el-form-item label="启用自动删种">
-            <el-switch v-model="form.cleanup_enabled" />
-            <div class="field-tip">开启后按下面的规则定时清理符合条件的种子</div>
-          </el-form-item>
-
-          <template v-if="form.cleanup_enabled">
-            <div class="field-row">
-              <el-form-item label="检查间隔（分钟）">
-                <el-input-number
-                  v-model="form.cleanup_interval_min"
-                  :min="5"
-                  :max="1440"
-                  :step="5" />
-              </el-form-item>
-              <el-form-item label="删除时连数据文件一起删">
-                <el-switch v-model="form.cleanup_remove_data" />
-                <div class="field-tip">关掉则只从下载器移除，磁盘上的文件保留</div>
-              </el-form-item>
+          <el-form :model="form" label-position="top" class="pt-form settings-form">
+            <div class="pt-strip">
+              <PtIcon name="sliders-horizontal" :size="13" />
+              <span>基本设置</span>
             </div>
+            <div class="settings-body">
+              <el-form-item label="启用自动删种">
+                <el-switch v-model="form.cleanup_enabled" />
+                <div class="field-tip">开启后按下面的规则定时清理符合条件的种子</div>
+              </el-form-item>
 
-            <el-form-item label="管理范围">
-              <el-radio-group v-model="form.cleanup_scope" class="scope-list">
-                <div class="scope" :class="{ 'is-on': form.cleanup_scope === 'database' }">
-                  <el-radio value="database">仅本应用推送的种子（推荐）</el-radio>
-                  <p class="scope__desc">
-                    按数据库记录精确匹配，只管理 pt-tools 推送并记录在案的种子
-                  </p>
+              <template v-if="form.cleanup_enabled">
+                <div class="field-row">
+                  <el-form-item label="检查间隔（分钟）">
+                    <el-input-number
+                      v-model="form.cleanup_interval_min"
+                      :min="5"
+                      :max="1440"
+                      :step="5" />
+                  </el-form-item>
+                  <el-form-item label="删除时连数据文件一起删">
+                    <el-switch v-model="form.cleanup_remove_data" />
+                    <div class="field-tip">关掉则只从下载器移除，磁盘上的文件保留</div>
+                  </el-form-item>
                 </div>
 
-                <div class="scope" :class="{ 'is-on': form.cleanup_scope === 'tag' }">
-                  <el-radio value="tag">按标签匹配</el-radio>
-                  <p class="scope__desc">下载器里带这些标签的种子都会纳入管理</p>
-                  <template v-if="form.cleanup_scope === 'tag'">
+                <el-form-item label="管理范围">
+                  <el-radio-group v-model="form.cleanup_scope" class="scope-list">
+                    <div class="scope" :class="{ 'is-on': form.cleanup_scope === 'database' }">
+                      <el-radio value="database">仅本应用推送的种子（推荐）</el-radio>
+                      <p class="scope__desc">
+                        按数据库记录精确匹配，只管理 pt-tools 推送并记录在案的种子
+                      </p>
+                    </div>
+
+                    <div class="scope" :class="{ 'is-on': form.cleanup_scope === 'tag' }">
+                      <el-radio value="tag">按标签匹配</el-radio>
+                      <p class="scope__desc">下载器里带这些标签的种子都会纳入管理</p>
+                      <template v-if="form.cleanup_scope === 'tag'">
+                        <div class="tagbox">
+                          <el-tag
+                            v-for="(tag, i) in form.cleanup_scope_tags"
+                            :key="tag"
+                            closable
+                            size="small"
+                            @close="removeTag(form.cleanup_scope_tags, i)">
+                            {{ tag }}
+                          </el-tag>
+                          <el-input
+                            v-model="scopeTagInput"
+                            size="small"
+                            class="taginput"
+                            placeholder="输入标签后回车"
+                            @keyup.enter="addScopeTag()" />
+                        </div>
+                        <div class="pt-note pt-note--warn scope__note">
+                          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                          <span>你自己手动打了同样标签的种子也会被一起管理。</span>
+                        </div>
+                      </template>
+                    </div>
+
+                    <div class="scope" :class="{ 'is-on': form.cleanup_scope === 'all' }">
+                      <el-radio value="all">下载器中所有种子</el-radio>
+                      <p class="scope__desc">不区分来源，下载器里的每一个种子都参与判断</p>
+                      <div
+                        v-if="form.cleanup_scope === 'all'"
+                        class="pt-note pt-note--dang scope__note">
+                        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                        <span>危险：非本应用添加的种子也会被删，可能误删重要数据。</span>
+                      </div>
+                    </div>
+                  </el-radio-group>
+                </el-form-item>
+              </template>
+            </div>
+
+            <template v-if="form.cleanup_enabled">
+              <div class="pt-strip">
+                <PtIcon name="target" :size="13" />
+                <span>删除条件</span>
+              </div>
+              <div class="settings-body">
+                <el-form-item label="推荐方案">
+                  <el-select
+                    v-model="selectedPreset"
+                    placeholder="选一个预设，一键填好下面的参数"
+                    clearable
+                    style="width: 100%"
+                    @change="applyPreset">
+                    <el-option
+                      v-for="p in presets"
+                      :key="p.value"
+                      :label="p.label"
+                      :value="p.value">
+                      <span class="opt">
+                        <span>{{ p.label }}</span>
+                        <span class="opt__desc">{{ p.desc }}</span>
+                      </span>
+                    </el-option>
+                  </el-select>
+                  <div v-if="selectedPreset" class="field-tip field-tip--ok">
+                    已选「{{
+                      presets.find((p) => p.value === selectedPreset)?.label
+                    }}」，改动下面任一 参数后这个标记会自动清除
+                  </div>
+                  <div v-else class="field-tip">只填充表单，点保存才真正生效</div>
+                </el-form-item>
+
+                <el-form-item label="条件关系">
+                  <el-radio-group v-model="form.cleanup_condition_mode">
+                    <el-radio-button value="or">任一满足即删（OR）</el-radio-button>
+                    <el-radio-button value="and">全部满足才删（AND）</el-radio-button>
+                  </el-radio-group>
+                  <div v-if="form.cleanup_condition_mode === 'or'" class="field-tip">
+                    下面任意一个条件命中就删，低效做种也算一个条件
+                  </div>
+                  <div v-else class="field-tip">
+                    下面所有已配置的条件都要同时满足；填 0 或未启用的条件不参与判断
+                  </div>
+                </el-form-item>
+
+                <div class="field-row">
+                  <el-form-item label="做种时间超过（小时）">
+                    <el-input-number v-model="form.cleanup_max_seed_time_h" :min="0" :step="1" />
+                    <div class="field-tip">0 表示不限制</div>
+                  </el-form-item>
+                  <el-form-item label="分享率达到">
+                    <el-input-number
+                      v-model="form.cleanup_min_ratio"
+                      :min="0"
+                      :step="0.1"
+                      :precision="2" />
+                    <div class="field-tip">0 表示不限制</div>
+                  </el-form-item>
+                  <el-form-item label="不活跃超过（小时）">
+                    <el-input-number v-model="form.cleanup_max_inactive_h" :min="0" :step="1" />
+                    <div class="field-tip">0 表示不限制</div>
+                  </el-form-item>
+                </div>
+
+                <div class="field-row">
+                  <el-form-item label="低效做种：做种超过（小时）">
+                    <el-input-number v-model="form.cleanup_slow_seed_time_h" :min="0" :step="1" />
+                  </el-form-item>
+                  <el-form-item label="但分享率仍低于">
+                    <el-input-number
+                      v-model="form.cleanup_slow_max_ratio"
+                      :min="0"
+                      :step="0.01"
+                      :precision="2" />
+                  </el-form-item>
+                </div>
+
+                <div
+                  v-if="form.cleanup_slow_seed_time_h > 0 && form.cleanup_slow_max_ratio > 0"
+                  class="pt-note slow-note">
+                  <PtIcon name="info" :size="14" class="pt-note__icon" />
+                  <span>
+                    做种超过 {{ form.cleanup_slow_seed_time_h }} 小时、分享率仍低于
+                    {{ form.cleanup_slow_max_ratio }} 的已完成种子会被删除。
+                  </span>
+                </div>
+                <div v-else class="field-tip slow-note">
+                  低效做种要两个值都填才生效，任一为 0 则不启用这个条件
+                </div>
+
+                <el-form-item>
+                  <el-checkbox v-model="form.cleanup_del_free_expired">
+                    免费到期仍未下完的种子自动删除
+                  </el-checkbox>
+                  <div class="field-tip">
+                    只对本应用推送、且记录了免费结束时间的种子有效，与上面的管理范围无关
+                  </div>
+                </el-form-item>
+              </div>
+
+              <div class="pt-strip">
+                <PtIcon name="hard-drive" :size="13" />
+                <span>磁盘空间保护</span>
+              </div>
+              <div class="settings-body">
+                <el-form-item>
+                  <el-checkbox v-model="form.cleanup_disk_protect">启用磁盘空间保护</el-checkbox>
+                </el-form-item>
+                <el-form-item v-if="form.cleanup_disk_protect" label="最低剩余空间（GB）">
+                  <el-input-number v-model="form.cleanup_min_disk_space_gb" :min="1" :max="10000" />
+                  <div class="field-tip">
+                    低于这个值时：RSS
+                    停止推送新种子，同时按优先级强制删种腾空间（需开启「删除时连数据文件一起删」，只移除任务不会释放空间）
+                  </div>
+                </el-form-item>
+              </div>
+
+              <div class="pt-strip">
+                <PtIcon name="shield" :size="13" />
+                <span>保护规则</span>
+                <span class="pt-strip__end">命中任一条即不删</span>
+              </div>
+              <div class="settings-body">
+                <el-form-item>
+                  <el-checkbox v-model="form.cleanup_protect_dl">保护下载中的种子</el-checkbox>
+                  <div class="field-tip">正在下载或校验中的种子不会被删</div>
+                </el-form-item>
+
+                <el-form-item>
+                  <el-checkbox v-model="form.cleanup_protect_hr">保护 H&amp;R 种子</el-checkbox>
+                  <div class="field-tip">
+                    没满足站点 H&amp;R 做种时长要求的不删；无 H&amp;R 的站点不受影响
+                  </div>
+                </el-form-item>
+
+                <div class="field-row">
+                  <el-form-item label="最短保种时间（小时）">
+                    <el-input-number v-model="form.cleanup_min_retain_h" :min="0" />
+                    <div class="field-tip">加进下载器还不够这么久的种子不删</div>
+                  </el-form-item>
+                  <el-form-item label="保护标签">
                     <div class="tagbox">
                       <el-tag
-                        v-for="(tag, i) in form.cleanup_scope_tags"
+                        v-for="(tag, i) in form.cleanup_protect_tags"
                         :key="tag"
                         closable
                         size="small"
-                        @close="removeTag(form.cleanup_scope_tags, i)">
+                        @close="removeTag(form.cleanup_protect_tags, i)">
                         {{ tag }}
                       </el-tag>
                       <el-input
-                        v-model="scopeTagInput"
+                        v-model="protectTagInput"
                         size="small"
                         class="taginput"
                         placeholder="输入标签后回车"
-                        @keyup.enter="addScopeTag()" />
+                        @keyup.enter="addProtectTag()" />
                     </div>
-                    <div class="pt-note pt-note--warn scope__note">
-                      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-                      <span>你自己手动打了同样标签的种子也会被一起管理。</span>
-                    </div>
-                  </template>
+                    <div class="field-tip">带这些标签的种子一律不删</div>
+                  </el-form-item>
                 </div>
-
-                <div class="scope" :class="{ 'is-on': form.cleanup_scope === 'all' }">
-                  <el-radio value="all">下载器中所有种子</el-radio>
-                  <p class="scope__desc">不区分来源，下载器里的每一个种子都参与判断</p>
-                  <div
-                    v-if="form.cleanup_scope === 'all'"
-                    class="pt-note pt-note--dang scope__note">
-                    <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-                    <span>危险：非本应用添加的种子也会被删，可能误删重要数据。</span>
-                  </div>
-                </div>
-              </el-radio-group>
-            </el-form-item>
-          </template>
-        </div>
-
-        <template v-if="form.cleanup_enabled">
-          <div class="pt-strip">
-            <PtIcon name="target" :size="13" />
-            <span>删除条件</span>
-          </div>
-          <div class="settings-body">
-            <el-form-item label="推荐方案">
-              <el-select
-                v-model="selectedPreset"
-                placeholder="选一个预设，一键填好下面的参数"
-                clearable
-                style="width: 100%"
-                @change="applyPreset">
-                <el-option v-for="p in presets" :key="p.value" :label="p.label" :value="p.value">
-                  <span class="opt">
-                    <span>{{ p.label }}</span>
-                    <span class="opt__desc">{{ p.desc }}</span>
-                  </span>
-                </el-option>
-              </el-select>
-              <div v-if="selectedPreset" class="field-tip field-tip--ok">
-                已选「{{ presets.find((p) => p.value === selectedPreset)?.label }}」，改动下面任一
-                参数后这个标记会自动清除
               </div>
-              <div v-else class="field-tip">只填充表单，点保存才真正生效</div>
-            </el-form-item>
-
-            <el-form-item label="条件关系">
-              <el-radio-group v-model="form.cleanup_condition_mode">
-                <el-radio-button value="or">任一满足即删（OR）</el-radio-button>
-                <el-radio-button value="and">全部满足才删（AND）</el-radio-button>
-              </el-radio-group>
-              <div v-if="form.cleanup_condition_mode === 'or'" class="field-tip">
-                下面任意一个条件命中就删，低效做种也算一个条件
-              </div>
-              <div v-else class="field-tip">
-                下面所有已配置的条件都要同时满足；填 0 或未启用的条件不参与判断
-              </div>
-            </el-form-item>
-
-            <div class="field-row">
-              <el-form-item label="做种时间超过（小时）">
-                <el-input-number v-model="form.cleanup_max_seed_time_h" :min="0" :step="1" />
-                <div class="field-tip">0 表示不限制</div>
-              </el-form-item>
-              <el-form-item label="分享率达到">
-                <el-input-number
-                  v-model="form.cleanup_min_ratio"
-                  :min="0"
-                  :step="0.1"
-                  :precision="2" />
-                <div class="field-tip">0 表示不限制</div>
-              </el-form-item>
-              <el-form-item label="不活跃超过（小时）">
-                <el-input-number v-model="form.cleanup_max_inactive_h" :min="0" :step="1" />
-                <div class="field-tip">0 表示不限制</div>
-              </el-form-item>
-            </div>
-
-            <div class="field-row">
-              <el-form-item label="低效做种：做种超过（小时）">
-                <el-input-number v-model="form.cleanup_slow_seed_time_h" :min="0" :step="1" />
-              </el-form-item>
-              <el-form-item label="但分享率仍低于">
-                <el-input-number
-                  v-model="form.cleanup_slow_max_ratio"
-                  :min="0"
-                  :step="0.01"
-                  :precision="2" />
-              </el-form-item>
-            </div>
-
-            <div
-              v-if="form.cleanup_slow_seed_time_h > 0 && form.cleanup_slow_max_ratio > 0"
-              class="pt-note slow-note">
-              <PtIcon name="info" :size="14" class="pt-note__icon" />
-              <span>
-                做种超过 {{ form.cleanup_slow_seed_time_h }} 小时、分享率仍低于
-                {{ form.cleanup_slow_max_ratio }} 的已完成种子会被删除。
-              </span>
-            </div>
-            <div v-else class="field-tip slow-note">
-              低效做种要两个值都填才生效，任一为 0 则不启用这个条件
-            </div>
-
-            <el-form-item>
-              <el-checkbox v-model="form.cleanup_del_free_expired">
-                免费到期仍未下完的种子自动删除
-              </el-checkbox>
-              <div class="field-tip">
-                只对本应用推送、且记录了免费结束时间的种子有效，与上面的管理范围无关
-              </div>
-            </el-form-item>
-          </div>
-
-          <div class="pt-strip">
-            <PtIcon name="hard-drive" :size="13" />
-            <span>磁盘空间保护</span>
-          </div>
-          <div class="settings-body">
-            <el-form-item>
-              <el-checkbox v-model="form.cleanup_disk_protect">启用磁盘空间保护</el-checkbox>
-            </el-form-item>
-            <el-form-item v-if="form.cleanup_disk_protect" label="最低剩余空间（GB）">
-              <el-input-number v-model="form.cleanup_min_disk_space_gb" :min="1" :max="10000" />
-              <div class="field-tip">
-                低于这个值时：RSS
-                停止推送新种子，同时按优先级强制删种腾空间（需开启「删除时连数据文件一起删」，只移除任务不会释放空间）
-              </div>
-            </el-form-item>
-          </div>
-
-          <div class="pt-strip">
-            <PtIcon name="shield" :size="13" />
-            <span>保护规则</span>
-            <span class="pt-strip__end">命中任一条即不删</span>
-          </div>
-          <div class="settings-body">
-            <el-form-item>
-              <el-checkbox v-model="form.cleanup_protect_dl">保护下载中的种子</el-checkbox>
-              <div class="field-tip">正在下载或校验中的种子不会被删</div>
-            </el-form-item>
-
-            <el-form-item>
-              <el-checkbox v-model="form.cleanup_protect_hr">保护 H&amp;R 种子</el-checkbox>
-              <div class="field-tip">
-                没满足站点 H&amp;R 做种时长要求的不删；无 H&amp;R 的站点不受影响
-              </div>
-            </el-form-item>
-
-            <div class="field-row">
-              <el-form-item label="最短保种时间（小时）">
-                <el-input-number v-model="form.cleanup_min_retain_h" :min="0" />
-                <div class="field-tip">加进下载器还不够这么久的种子不删</div>
-              </el-form-item>
-              <el-form-item label="保护标签">
-                <div class="tagbox">
-                  <el-tag
-                    v-for="(tag, i) in form.cleanup_protect_tags"
-                    :key="tag"
-                    closable
-                    size="small"
-                    @close="removeTag(form.cleanup_protect_tags, i)">
-                    {{ tag }}
-                  </el-tag>
-                  <el-input
-                    v-model="protectTagInput"
-                    size="small"
-                    class="taginput"
-                    placeholder="输入标签后回车"
-                    @keyup.enter="addProtectTag()" />
-                </div>
-                <div class="field-tip">带这些标签的种子一律不删</div>
-              </el-form-item>
-            </div>
-          </div>
-        </template>
-      </el-form>
-
-      <div
-        v-if="lastRunText || nextRunText"
-        class="pt-foot-note ac-lastrun"
-        data-testid="ac-lastrun">
-        {{ [lastRunText, nextRunText].filter(Boolean).join("，") }}
-      </div>
-
-      <template #footer>
-        <span class="pt-foot-note">删除动作不可撤销：保存以前可以先预览会删哪些</span>
-        <el-button
-          :loading="cpLoading"
-          :disabled="saveLocked"
-          data-testid="ac-preview"
-          @click="runCleanupPreview">
-          <PtIcon name="eye" :size="14" /><span>预览会删哪些</span>
-        </el-button>
-        <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
-          <PtIcon name="save" :size="14" /><span>保存设置</span>
-        </el-button>
-      </template>
-    </PtPanel>
-
-    <el-dialog
-      v-model="cpDialog"
-      class="pt-dialog"
-      title="按现在的规则会删这些"
-      :width="isMobile ? '94%' : '760px'"
-      align-center>
-      <p class="field-tip" data-testid="ac-preview-sum">
-        只是算一遍，没有删。按页面上的规则（还没保存的也算）共会删
-        {{ cpTotal.n }} 个，{{ cpSize(cpTotal.size) }}；真的删的时候以那时下载器里的种子为准。
-      </p>
-      <div
-        v-for="r in cpResults"
-        :key="r.downloader"
-        class="ac-pv"
-        :data-testid="`ac-pv-${r.downloader}`">
-        <div class="ac-pv__head">
-          <strong>{{ r.downloader }}</strong>
-          <span v-if="r.error" class="ac-pv__err">{{ r.error }}</span>
-          <span v-else class="pt-foot-note"
-            >管理范围里 {{ r.managed }} 个，受保护 {{ r.protected }} 个，会删
-            {{ r.items.length }} 个</span
-          >
-        </div>
-        <div v-if="r.emergency" class="pt-note pt-note--warn">
-          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span>剩余空间 {{ r.free_gb?.toFixed(1) }} GB，低于下限：按紧急清理多挑了种子</span>
-        </div>
-        <div v-for="n in r.notes ?? []" :key="n" class="pt-note pt-note--warn">
-          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span>{{ n }}</span>
-        </div>
-        <ul v-if="r.items.length" class="ac-pv__list">
-          <li v-for="it in r.items" :key="it.info_hash">
-            <span class="ac-pv__name">{{ it.name }}</span>
-            <span class="pt-foot-note"
-              >{{ cpSize(it.size) }} · 做种 {{ it.seeding_h.toFixed(1) }} 小时 · 分享率
-              {{ it.ratio.toFixed(2)
-              }}{{ it.keep_data ? " · 数据还被别的种子用着，只删种子" : "" }}</span
-            >
-            <span class="ac-pv__why">{{ it.reasons.join("；") }}</span>
-          </li>
-        </ul>
-      </div>
-      <div v-if="!cpResults.length" class="field-tip">没有下载器</div>
-      <template #footer>
-        <el-button type="primary" @click="cpDialog = false">知道了</el-button>
-      </template>
-    </el-dialog>
-
-    <PtPanel title="做种竞争度监控" icon="users" padding="none">
-      <template #actions>
-        <el-switch v-model="form.peer_ratio_enabled" size="small" />
-      </template>
-
-      <el-form label-position="top" class="pt-form" :disabled="!form.peer_ratio_enabled">
-        <div class="settings-body settings-body--lead">
-          <div class="field-tip field-tip--lead">
-            盯着做种中种子的 Seeder/Leecher 比值，竞争度过高时自动暂停或删除。
-          </div>
-
-          <div class="field-row">
-            <el-form-item label="S/L 比值上限">
-              <el-input-number v-model="form.peer_ratio_max_sl" :min="1" :step="5" :precision="1" />
-              <div class="field-tip">比值超过这个数就触发，最小 1</div>
-            </el-form-item>
-            <el-form-item label="检查间隔（分钟）">
-              <el-input-number v-model="form.peer_ratio_interval_min" :min="5" :step="5" />
-              <div class="field-tip">从 Tracker 拿 Swarm 级别的做种/下载人数来判断</div>
-            </el-form-item>
-          </div>
-
-          <el-form-item>
-            <el-checkbox v-model="form.peer_ratio_remove_data">直接删除种子及数据</el-checkbox>
-            <div class="field-tip">
-              开启则超标种子连文件一起删；关闭只暂停，可以在「暂停任务」页手动恢复
-            </div>
-          </el-form-item>
-        </div>
-      </el-form>
-
-      <template #footer>
-        <span class="pt-foot-note">与自动删种共用同一个保存按钮的配置表</span>
-        <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
-          <PtIcon name="save" :size="14" /><span>保存设置</span>
-        </el-button>
-      </template>
-    </PtPanel>
-
-    <PtPanel title="清理工作目录" icon="folder" count=".pt-tools" padding="none">
-      <div class="settings-body settings-body--lead">
-        <div class="field-tip field-tip--lead">
-          清掉日志、暂存种子和旧配置备份。数据库、密钥等受保护项永远不会被删。
-        </div>
-
-        <el-form label-position="top" class="pt-form">
-          <el-form-item label="清理项">
-            <el-checkbox-group v-model="workdirCategories" class="cat-group">
-              <el-checkbox
-                v-for="opt in workdirCategoryOptions"
-                :key="opt.value"
-                :value="opt.value">
-                {{ opt.label }}
-                <span class="cat__desc">{{ opt.desc }}</span>
-              </el-checkbox>
-            </el-checkbox-group>
-          </el-form-item>
-
-          <el-form-item label="保留最近备份数量">
-            <el-input-number v-model="keepBackups" :min="0" :max="100" :step="1" />
-            <!-- 后端 maintenance.Cleaner 把 keep<=0 当成默认 5 份（internal/maintenance/cleaner.go），不是「全清」 -->
-            <div class="field-tip">清旧备份时留最近的 N 份，其余删除；填 0 按默认的 5 份保留</div>
-          </el-form-item>
-        </el-form>
-
-        <div class="clean-acts">
-          <el-button :loading="previewing" @click="previewClean">
-            <PtIcon name="eye" :size="14" /><span>预览可清理项</span>
-          </el-button>
-          <el-button type="danger" :loading="cleaning" @click="executeClean">
-            <PtIcon name="trash-2" :size="14" /><span>立即清理</span>
-          </el-button>
-        </div>
-      </div>
-
-      <template v-if="previewAsked">
-        <div class="pt-strip">
-          <PtIcon name="eye" :size="13" />
-          <span>预览结果</span>
-          <span v-if="cleanPreview" class="pt-strip__end">
-            可删 {{ cleanPreview.totalDeleted }} 项 · 可释放 {{ cleanPreview.totalFreedHuman }}
-          </span>
-        </div>
-
-        <!-- partial：有类别被整类拒绝，但拿到的行照样列出来，不用状态块顶掉表格 -->
-        <div v-if="previewPartial(previewRows.length)" class="pt-note pt-note--warn table-note">
-          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span>{{ previewFailed }} 个清理项被整类拒绝（原因见「备注」），其余结果照常列出。</span>
-        </div>
-
-        <el-table v-if="!isMobile" :data="previewRows" class="pt-grid" style="width: 100%">
-          <template #empty>
-            <PtDataState
-              :state="previewState"
-              dense
-              :title="previewStateTitle"
-              :sub="previewStateSub">
-              <template v-if="previewState === 'error'" #action>
-                <el-button size="small" @click="loadPreview">
-                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-                </el-button>
-              </template>
-            </PtDataState>
-          </template>
-
-          <el-table-column label="清理项" min-width="120" class-name="pt-cell-strong">
-            <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
-          </el-table-column>
-          <el-table-column
-            prop="dirUsedHuman"
-            label="当前已用"
-            width="110"
-            class-name="pt-cell-num"
-            label-class-name="pt-cell-num" />
-          <el-table-column
-            prop="deletedCount"
-            label="可删除"
-            width="90"
-            class-name="pt-cell-num"
-            label-class-name="pt-cell-num" />
-          <el-table-column
-            prop="freedHuman"
-            label="可释放"
-            width="110"
-            class-name="pt-cell-num"
-            label-class-name="pt-cell-num" />
-          <el-table-column label="备注" min-width="160" class-name="pt-cell-muted">
-            <template #default="{ row }">
-              <PtStatusPill v-if="row.note" :tone="isRejected(row) ? 'dang' : 'warn'" size="sm">
-                {{ row.note }}
-              </PtStatusPill>
-              <span v-else-if="row.skippedCount > 0">
-                跳过 {{ row.skippedCount }} 项（受保护）
-              </span>
-              <span v-else>—</span>
             </template>
-          </el-table-column>
-        </el-table>
+          </el-form>
 
-        <!--
+          <div
+            v-if="lastRunText || nextRunText"
+            class="pt-foot-note ac-lastrun"
+            data-testid="ac-lastrun">
+            {{ [lastRunText, nextRunText].filter(Boolean).join("，") }}
+          </div>
+
+          <template #footer>
+            <span class="pt-foot-note">删除动作不可撤销：保存以前可以先预览会删哪些</span>
+            <el-button
+              :loading="cpLoading"
+              :disabled="saveLocked"
+              data-testid="ac-preview"
+              @click="runCleanupPreview">
+              <PtIcon name="eye" :size="14" /><span>预览会删哪些</span>
+            </el-button>
+            <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
+              <PtIcon name="save" :size="14" /><span>保存设置</span>
+            </el-button>
+          </template>
+        </PtPanel>
+      </div>
+
+      <el-dialog
+        v-model="cpDialog"
+        class="pt-dialog"
+        title="按现在的规则会删这些"
+        :width="isMobile ? '94%' : '760px'"
+        align-center>
+        <p class="field-tip" data-testid="ac-preview-sum">
+          只是算一遍，没有删。按页面上的规则（还没保存的也算）共会删
+          {{ cpTotal.n }} 个，{{ cpSize(cpTotal.size) }}；真的删的时候以那时下载器里的种子为准。
+        </p>
+        <div
+          v-for="r in cpResults"
+          :key="r.downloader"
+          class="ac-pv"
+          :data-testid="`ac-pv-${r.downloader}`">
+          <div class="ac-pv__head">
+            <strong>{{ r.downloader }}</strong>
+            <span v-if="r.error" class="ac-pv__err">{{ r.error }}</span>
+            <span v-else class="pt-foot-note"
+              >管理范围里 {{ r.managed }} 个，受保护 {{ r.protected }} 个，会删
+              {{ r.items.length }} 个</span
+            >
+          </div>
+          <div v-if="r.emergency" class="pt-note pt-note--warn">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>剩余空间 {{ r.free_gb?.toFixed(1) }} GB，低于下限：按紧急清理多挑了种子</span>
+          </div>
+          <div v-for="n in r.notes ?? []" :key="n" class="pt-note pt-note--warn">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>{{ n }}</span>
+          </div>
+          <ul v-if="r.items.length" class="ac-pv__list">
+            <li v-for="it in r.items" :key="it.info_hash">
+              <span class="ac-pv__name">{{ it.name }}</span>
+              <span class="pt-foot-note"
+                >{{ cpSize(it.size) }} · 做种 {{ it.seeding_h.toFixed(1) }} 小时 · 分享率
+                {{ it.ratio.toFixed(2)
+                }}{{ it.keep_data ? " · 数据还被别的种子用着，只删种子" : "" }}</span
+              >
+              <span class="ac-pv__why">{{ it.reasons.join("；") }}</span>
+            </li>
+          </ul>
+        </div>
+        <div v-if="!cpResults.length" class="field-tip">没有下载器</div>
+        <template #footer>
+          <el-button type="primary" @click="cpDialog = false">知道了</el-button>
+        </template>
+      </el-dialog>
+
+      <div class="pt-col">
+        <PtPanel title="做种竞争度监控" icon="users" padding="none">
+          <template #actions>
+            <el-switch v-model="form.peer_ratio_enabled" size="small" />
+          </template>
+
+          <el-form label-position="top" class="pt-form" :disabled="!form.peer_ratio_enabled">
+            <div class="settings-body settings-body--lead">
+              <div class="field-tip field-tip--lead">
+                盯着做种中种子的 Seeder/Leecher 比值，竞争度过高时自动暂停或删除。
+              </div>
+
+              <div class="field-row">
+                <el-form-item label="S/L 比值上限">
+                  <el-input-number
+                    v-model="form.peer_ratio_max_sl"
+                    :min="1"
+                    :step="5"
+                    :precision="1" />
+                  <div class="field-tip">比值超过这个数就触发，最小 1</div>
+                </el-form-item>
+                <el-form-item label="检查间隔（分钟）">
+                  <el-input-number v-model="form.peer_ratio_interval_min" :min="5" :step="5" />
+                  <div class="field-tip">从 Tracker 拿 Swarm 级别的做种/下载人数来判断</div>
+                </el-form-item>
+              </div>
+
+              <el-form-item>
+                <el-checkbox v-model="form.peer_ratio_remove_data">直接删除种子及数据</el-checkbox>
+                <div class="field-tip">
+                  开启则超标种子连文件一起删；关闭只暂停，可以在「暂停任务」页手动恢复
+                </div>
+              </el-form-item>
+            </div>
+          </el-form>
+
+          <template #footer>
+            <span class="pt-foot-note">与自动删种共用同一个保存按钮的配置表</span>
+            <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
+              <PtIcon name="save" :size="14" /><span>保存设置</span>
+            </el-button>
+          </template>
+        </PtPanel>
+
+        <PtPanel title="清理工作目录" icon="folder" count=".pt-tools" padding="none">
+          <div class="settings-body settings-body--lead">
+            <div class="field-tip field-tip--lead">
+              清掉日志、暂存种子和旧配置备份。数据库、密钥等受保护项永远不会被删。
+            </div>
+
+            <el-form label-position="top" class="pt-form">
+              <el-form-item label="清理项">
+                <el-checkbox-group v-model="workdirCategories" class="cat-group">
+                  <el-checkbox
+                    v-for="opt in workdirCategoryOptions"
+                    :key="opt.value"
+                    :value="opt.value">
+                    {{ opt.label }}
+                    <span class="cat__desc">{{ opt.desc }}</span>
+                  </el-checkbox>
+                </el-checkbox-group>
+              </el-form-item>
+
+              <el-form-item label="保留最近备份数量">
+                <el-input-number v-model="keepBackups" :min="0" :max="100" :step="1" />
+                <!-- 后端 maintenance.Cleaner 把 keep<=0 当成默认 5 份（internal/maintenance/cleaner.go），不是「全清」 -->
+                <div class="field-tip">
+                  清旧备份时留最近的 N 份，其余删除；填 0 按默认的 5 份保留
+                </div>
+              </el-form-item>
+            </el-form>
+
+            <div class="clean-acts">
+              <el-button :loading="previewing" @click="previewClean">
+                <PtIcon name="eye" :size="14" /><span>预览可清理项</span>
+              </el-button>
+              <el-button type="danger" :loading="cleaning" @click="executeClean">
+                <PtIcon name="trash-2" :size="14" /><span>立即清理</span>
+              </el-button>
+            </div>
+          </div>
+
+          <template v-if="previewAsked">
+            <div class="pt-strip">
+              <PtIcon name="eye" :size="13" />
+              <span>预览结果</span>
+              <span v-if="cleanPreview" class="pt-strip__end">
+                可删 {{ cleanPreview.totalDeleted }} 项 · 可释放 {{ cleanPreview.totalFreedHuman }}
+              </span>
+            </div>
+
+            <!-- partial：有类别被整类拒绝，但拿到的行照样列出来，不用状态块顶掉表格 -->
+            <div v-if="previewPartial(previewRows.length)" class="pt-note pt-note--warn table-note">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <span
+                >{{ previewFailed }} 个清理项被整类拒绝（原因见「备注」），其余结果照常列出。</span
+              >
+            </div>
+
+            <el-table v-if="!isMobile" :data="previewRows" class="pt-grid" style="width: 100%">
+              <template #empty>
+                <PtDataState
+                  :state="previewState"
+                  dense
+                  :title="previewStateTitle"
+                  :sub="previewStateSub">
+                  <template v-if="previewState === 'error'" #action>
+                    <el-button size="small" @click="loadPreview">
+                      <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                    </el-button>
+                  </template>
+                </PtDataState>
+              </template>
+
+              <el-table-column label="清理项" min-width="120" class-name="pt-cell-strong">
+                <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
+              </el-table-column>
+              <el-table-column
+                prop="dirUsedHuman"
+                label="当前已用"
+                width="110"
+                class-name="pt-cell-num"
+                label-class-name="pt-cell-num" />
+              <el-table-column
+                prop="deletedCount"
+                label="可删除"
+                width="90"
+                class-name="pt-cell-num"
+                label-class-name="pt-cell-num" />
+              <el-table-column
+                prop="freedHuman"
+                label="可释放"
+                width="110"
+                class-name="pt-cell-num"
+                label-class-name="pt-cell-num" />
+              <el-table-column label="备注" min-width="160" class-name="pt-cell-muted">
+                <template #default="{ row }">
+                  <PtStatusPill v-if="row.note" :tone="isRejected(row) ? 'dang' : 'warn'" size="sm">
+                    {{ row.note }}
+                  </PtStatusPill>
+                  <span v-else-if="row.skippedCount > 0">
+                    跳过 {{ row.skippedCount }} 项（受保护）
+                  </span>
+                  <span v-else>—</span>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!--
           移动端行卡（§9）：这张表 5 列里有 3 列是数字，横着滚就没了列头，
           数字也就读不出是「已用」还是「可释放」。卡上给每个数字带上词。
         -->
-        <div v-else class="cards">
-          <PtDataState
-            v-if="!previewRows.length"
-            :state="previewState"
-            :title="previewStateTitle"
-            :sub="previewStateSub">
-            <template v-if="previewState === 'error'" #action>
-              <el-button size="small" @click="loadPreview">
-                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-              </el-button>
-            </template>
-          </PtDataState>
+            <div v-else class="cards">
+              <PtDataState
+                v-if="!previewRows.length"
+                :state="previewState"
+                :title="previewStateTitle"
+                :sub="previewStateSub">
+                <template v-if="previewState === 'error'" #action>
+                  <el-button size="small" @click="loadPreview">
+                    <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                  </el-button>
+                </template>
+              </PtDataState>
 
-          <PtRowCard v-for="row in previewRows" :key="row.name">
-            <template #title>{{ categoryLabel(row.name) }}</template>
+              <PtRowCard v-for="row in previewRows" :key="row.name">
+                <template #title>{{ categoryLabel(row.name) }}</template>
 
-            <template #meta>
-              <span>可删 {{ row.deletedCount }} 项</span>
-              <span v-if="row.skippedCount > 0">跳过 {{ row.skippedCount }} 项（受保护）</span>
-              <span
-                v-if="row.note"
-                class="note-line"
-                :class="isRejected(row) ? 'is-dang' : 'is-warn'">
-                {{ row.note }}
-              </span>
-            </template>
+                <template #meta>
+                  <span>可删 {{ row.deletedCount }} 项</span>
+                  <span v-if="row.skippedCount > 0">跳过 {{ row.skippedCount }} 项（受保护）</span>
+                  <span
+                    v-if="row.note"
+                    class="note-line"
+                    :class="isRejected(row) ? 'is-dang' : 'is-warn'">
+                    {{ row.note }}
+                  </span>
+                </template>
 
-            <template #status>
-              <PtStatusPill dot :tone="previewTone(row)" size="sm">{{
-                previewText(row)
-              }}</PtStatusPill>
-            </template>
+                <template #status>
+                  <PtStatusPill dot :tone="previewTone(row)" size="sm">{{
+                    previewText(row)
+                  }}</PtStatusPill>
+                </template>
 
-            <template v-if="row.dirUsedBytes > 0" #progress>
-              <el-progress
-                :percentage="freedPercent(row)"
-                :stroke-width="4"
-                :show-text="false"
-                color="var(--pt-p)" />
-              <span class="progress-info">
-                <span>可释放 {{ row.freedHuman }} / 已用 {{ row.dirUsedHuman }}</span>
-                <span class="progress-pct">{{ freedPercent(row) }}%</span>
-              </span>
-            </template>
-          </PtRowCard>
-        </div>
+                <template v-if="row.dirUsedBytes > 0" #progress>
+                  <el-progress
+                    :percentage="freedPercent(row)"
+                    :stroke-width="4"
+                    :show-text="false"
+                    color="var(--pt-p)" />
+                  <span class="progress-info">
+                    <span>可释放 {{ row.freedHuman }} / 已用 {{ row.dirUsedHuman }}</span>
+                    <span class="progress-pct">{{ freedPercent(row) }}%</span>
+                  </span>
+                </template>
+              </PtRowCard>
+            </div>
 
-        <div v-if="previewRows.length" class="settings-body settings-body--tail">
-          <div class="field-tip">这里只是预览，还没删任何文件；点「立即清理」并确认后才真删。</div>
-        </div>
-      </template>
-
-      <template v-if="cleanAsked">
-        <div class="pt-strip">
-          <PtIcon name="circle-check" :size="13" />
-          <span>清理结果</span>
-          <span v-if="cleanResult" class="pt-strip__end">
-            已删 {{ cleanResult.totalDeleted }} 项 · 释放 {{ cleanResult.totalFreedHuman }}
-          </span>
-        </div>
-
-        <div v-if="cleanPartial(cleanRows.length)" class="pt-note pt-note--warn table-note">
-          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span>{{ cleanFailed }} 个清理项被整类拒绝（原因见「备注」），其余已按结果处理。</span>
-        </div>
-
-        <el-table v-if="!isMobile" :data="cleanRows" class="pt-grid" style="width: 100%">
-          <template #empty>
-            <PtDataState :state="cleanState" dense :title="cleanStateTitle" :sub="cleanStateSub">
-              <!-- 重试走 executeClean，会重新弹确认框：删文件不能靠一个小按钮直接触发 -->
-              <template v-if="cleanState === 'error'" #action>
-                <el-button size="small" @click="executeClean">
-                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-                </el-button>
-              </template>
-            </PtDataState>
+            <div v-if="previewRows.length" class="settings-body settings-body--tail">
+              <div class="field-tip">
+                这里只是预览，还没删任何文件；点「立即清理」并确认后才真删。
+              </div>
+            </div>
           </template>
 
-          <el-table-column label="清理项" min-width="120" class-name="pt-cell-strong">
-            <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
-          </el-table-column>
-          <el-table-column
-            prop="dirUsedHuman"
-            label="当前已用"
-            width="110"
-            class-name="pt-cell-num"
-            label-class-name="pt-cell-num" />
-          <el-table-column
-            prop="deletedCount"
-            label="已删除"
-            width="90"
-            class-name="pt-cell-num"
-            label-class-name="pt-cell-num" />
-          <el-table-column
-            prop="freedHuman"
-            label="释放空间"
-            width="110"
-            class-name="pt-cell-num"
-            label-class-name="pt-cell-num" />
-          <el-table-column label="备注" min-width="160" class-name="pt-cell-muted">
-            <template #default="{ row }">
-              <PtStatusPill v-if="row.note" :tone="isRejected(row) ? 'dang' : 'warn'" size="sm">
-                {{ row.note }}
-              </PtStatusPill>
-              <span v-else-if="row.skippedCount > 0">
-                跳过 {{ row.skippedCount }} 项（受保护）
+          <template v-if="cleanAsked">
+            <div class="pt-strip">
+              <PtIcon name="circle-check" :size="13" />
+              <span>清理结果</span>
+              <span v-if="cleanResult" class="pt-strip__end">
+                已删 {{ cleanResult.totalDeleted }} 项 · 释放 {{ cleanResult.totalFreedHuman }}
               </span>
-              <span v-else>—</span>
-            </template>
-          </el-table-column>
-        </el-table>
+            </div>
 
-        <div v-else class="cards">
-          <PtDataState
-            v-if="!cleanRows.length"
-            :state="cleanState"
-            :title="cleanStateTitle"
-            :sub="cleanStateSub">
-            <template v-if="cleanState === 'error'" #action>
-              <el-button size="small" @click="executeClean">
-                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-              </el-button>
-            </template>
-          </PtDataState>
-
-          <PtRowCard v-for="row in cleanRows" :key="row.name">
-            <template #title>{{ categoryLabel(row.name) }}</template>
-
-            <template #meta>
-              <span>已删 {{ row.deletedCount }} 项</span>
-              <span v-if="row.skippedCount > 0">跳过 {{ row.skippedCount }} 项（受保护）</span>
+            <div v-if="cleanPartial(cleanRows.length)" class="pt-note pt-note--warn table-note">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
               <span
-                v-if="row.note"
-                class="note-line"
-                :class="isRejected(row) ? 'is-dang' : 'is-warn'">
-                {{ row.note }}
-              </span>
-            </template>
+                >{{ cleanFailed }} 个清理项被整类拒绝（原因见「备注」），其余已按结果处理。</span
+              >
+            </div>
 
-            <template #status>
-              <PtStatusPill dot :tone="cleanTone(row)" size="sm">{{ cleanText(row) }}</PtStatusPill>
-            </template>
+            <el-table v-if="!isMobile" :data="cleanRows" class="pt-grid" style="width: 100%">
+              <template #empty>
+                <PtDataState
+                  :state="cleanState"
+                  dense
+                  :title="cleanStateTitle"
+                  :sub="cleanStateSub">
+                  <!-- 重试走 executeClean，会重新弹确认框：删文件不能靠一个小按钮直接触发 -->
+                  <template v-if="cleanState === 'error'" #action>
+                    <el-button size="small" @click="executeClean">
+                      <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                    </el-button>
+                  </template>
+                </PtDataState>
+              </template>
 
-            <template v-if="row.dirUsedBytes > 0" #progress>
-              <el-progress
-                :percentage="freedPercent(row)"
-                :stroke-width="4"
-                :show-text="false"
-                color="var(--pt-ok)" />
-              <span class="progress-info">
-                <span>释放 {{ row.freedHuman }} / 清理前已用 {{ row.dirUsedHuman }}</span>
-                <span class="progress-pct">{{ freedPercent(row) }}%</span>
-              </span>
-            </template>
-          </PtRowCard>
-        </div>
-      </template>
-    </PtPanel>
+              <el-table-column label="清理项" min-width="120" class-name="pt-cell-strong">
+                <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
+              </el-table-column>
+              <el-table-column
+                prop="dirUsedHuman"
+                label="当前已用"
+                width="110"
+                class-name="pt-cell-num"
+                label-class-name="pt-cell-num" />
+              <el-table-column
+                prop="deletedCount"
+                label="已删除"
+                width="90"
+                class-name="pt-cell-num"
+                label-class-name="pt-cell-num" />
+              <el-table-column
+                prop="freedHuman"
+                label="释放空间"
+                width="110"
+                class-name="pt-cell-num"
+                label-class-name="pt-cell-num" />
+              <el-table-column label="备注" min-width="160" class-name="pt-cell-muted">
+                <template #default="{ row }">
+                  <PtStatusPill v-if="row.note" :tone="isRejected(row) ? 'dang' : 'warn'" size="sm">
+                    {{ row.note }}
+                  </PtStatusPill>
+                  <span v-else-if="row.skippedCount > 0">
+                    跳过 {{ row.skippedCount }} 项（受保护）
+                  </span>
+                  <span v-else>—</span>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div v-else class="cards">
+              <PtDataState
+                v-if="!cleanRows.length"
+                :state="cleanState"
+                :title="cleanStateTitle"
+                :sub="cleanStateSub">
+                <template v-if="cleanState === 'error'" #action>
+                  <el-button size="small" @click="executeClean">
+                    <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                  </el-button>
+                </template>
+              </PtDataState>
+
+              <PtRowCard v-for="row in cleanRows" :key="row.name">
+                <template #title>{{ categoryLabel(row.name) }}</template>
+
+                <template #meta>
+                  <span>已删 {{ row.deletedCount }} 项</span>
+                  <span v-if="row.skippedCount > 0">跳过 {{ row.skippedCount }} 项（受保护）</span>
+                  <span
+                    v-if="row.note"
+                    class="note-line"
+                    :class="isRejected(row) ? 'is-dang' : 'is-warn'">
+                    {{ row.note }}
+                  </span>
+                </template>
+
+                <template #status>
+                  <PtStatusPill dot :tone="cleanTone(row)" size="sm">{{
+                    cleanText(row)
+                  }}</PtStatusPill>
+                </template>
+
+                <template v-if="row.dirUsedBytes > 0" #progress>
+                  <el-progress
+                    :percentage="freedPercent(row)"
+                    :stroke-width="4"
+                    :show-text="false"
+                    color="var(--pt-ok)" />
+                  <span class="progress-info">
+                    <span>释放 {{ row.freedHuman }} / 清理前已用 {{ row.dirUsedHuman }}</span>
+                    <span class="progress-pct">{{ freedPercent(row) }}%</span>
+                  </span>
+                </template>
+              </PtRowCard>
+            </div>
+          </template>
+        </PtPanel>
+      </div>
+    </div>
   </div>
 </template>
 

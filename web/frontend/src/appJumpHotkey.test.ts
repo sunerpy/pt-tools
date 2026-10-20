@@ -42,7 +42,7 @@ vi.mock("./components/shell/AppRail.vue", async () => {
 });
 vi.mock("./components/shell/AppStatusBar.vue", () => ({ default: { render: () => null } }));
 vi.mock("./components/shell/MobileChrome.vue", () => ({ default: { render: () => null } }));
-vi.mock("./components/V2DeprecationBanner.vue", () => ({ default: { render: () => null } }));
+vi.mock("./components/shell/RssTaskBanner.vue", () => ({ default: { render: () => null } }));
 vi.mock("./stores/logLevel", () => ({ useLogLevelStore: () => ({ fetchLogLevel: vi.fn() }) }));
 vi.mock("./stores/version", () => ({
   useVersionStore: () => ({ fetchVersionInfo: vi.fn(), checkForUpdates: vi.fn() }),

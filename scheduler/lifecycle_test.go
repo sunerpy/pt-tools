@@ -39,7 +39,7 @@ func setupLifecycleDB(t *testing.T) *models.TorrentDB {
 	return db
 }
 
-// 「停止所有任务」只停 RSS 任务：监控器和配置热重载继续运行，「启动所有任务」能恢复。
+// 「停止 RSS 任务」只停 RSS 任务：监控器和配置热重载继续运行，「启动 RSS 任务」能恢复。
 func TestManager_StopJobsKeepsMonitorsRunning(t *testing.T) {
 	setupLifecycleDB(t)
 	m := newTestManager(t)

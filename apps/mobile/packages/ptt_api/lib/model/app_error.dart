@@ -17,7 +17,7 @@ class AppError {
     required this.message,
   });
 
-  /// invalid_body、invalid_argument、unauthorized、forbidden、not_found、method_not_allowed、busy、rate_limited、internal、search_failed、download_failed、attend_failed、upstream、unavailable、assistant_disabled、decided、too_many 等
+  /// invalid_body、invalid_argument、unauthorized、forbidden、not_found、method_not_allowed、busy、conflict、rate_limited、internal、search_failed、download_failed、attend_failed、upstream、unavailable、timeout、assistant_disabled、decided、too_many 等
   String error;
 
   String message;

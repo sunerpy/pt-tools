@@ -16,8 +16,7 @@ func ProbeNexusPHP(ctx context.Context, site v2.Site, clock Clock, source ProbeS
 	return classifyNexusPHPResult(info, err, clock, source)
 }
 
-func classifyNexusPHPResult(info v2.UserInfo, err error, clock Clock, source ProbeSource) (*ProbeResult, error) {
-	now := clock.Now()
+func classifyNexusPHPResult(info v2.UserInfo, err error, _ Clock, source ProbeSource) (*ProbeResult, error) {
 	result := &ProbeResult{Source: source}
 
 	if err == nil {
@@ -32,7 +31,12 @@ func classifyNexusPHPResult(info v2.UserInfo, err error, clock Clock, source Pro
 			return result, nil
 		}
 		result.Status = PARSE_ERROR
-		result.Diagnostic = "driver returned UserInfo with zero LastAccess at " + now.UTC().Format(time.RFC3339)
+		// NexusPHP 读到了用户名时由 withNexusPHPAccessFallback 按探测时间记；走到这里的 NexusPHP 是连用户名都没有
+		if strings.TrimSpace(info.Username) == "" {
+			result.Diagnostic = diagNoUsername
+		} else {
+			result.Diagnostic = diagNoLastAccess
+		}
 		return result, nil
 	}
 

@@ -49,7 +49,8 @@ async function copy(text: string) {
           <span
             >在
             <router-link to="/api-tokens" data-testid="mcp-tokens">系统 → API 令牌</router-link>
-            新建，选「MCP 读取」；要让它暂停、删除、推送种子或添加订阅，再选「MCP 操作」</span
+            新建，选「MCP 读取」；要让它暂停、删除、推送种子或添加订阅，再选「MCP 操作」；要让它读改
+            pt-tools 的配置（get_config、change_config），再选「配置」</span
           >
         </li>
       </ul>
@@ -59,8 +60,10 @@ async function copy(text: string) {
       <ul class="mcp-list">
         <li>只认 API 令牌，网页登录的会话不能用；令牌撤销以后马上失效。</li>
         <li>
-          会改动下载器或订阅的工具，每次都要 AI 先向你确认，并记在「操作审计」里，通道是「MCP」。
+          会改动下载器、订阅、媒体库或配置的工具，不带确认调用时只回预览（改以前、改以后与可能的影响），AI
+          要先向你确认才执行；执行的记在「操作审计」里，通道是「MCP」。
         </li>
+        <li>配置工具读到的密钥（密码、Cookie、令牌）只显示有没有设置，改的时候可以写新值。</li>
         <li>
           回应里没有 Cookie、Passkey、密码与种子下载链接，下载器的错误里也去掉了它的地址；推送由
           pt-tools 用自己的站点配置下载。
@@ -118,6 +121,13 @@ async function copy(text: string) {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* 工具清单在宽卡里排成多栏：一行一个时右边空出一大半（2048 宽的屏上空 65%） */
+.mcp-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
+  gap: 10px 24px;
 }
 
 .mcp-kv li,

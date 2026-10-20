@@ -283,6 +283,8 @@ export interface SiteAttendance {
   attendance_enabled: boolean;
   supported: boolean;
   unsupported_reason?: string;
+  /** 签到要过的一关：hdsky_captcha、opencd_captcha 要识别验证码，baka_quiz 要答题（都要用 AI）；不用时没有 */
+  challenge?: AttendanceChallenge;
   day: string;
   status: AttendanceStatus;
   attempts: number;
@@ -293,10 +295,124 @@ export interface SiteAttendance {
   last_attempt_at?: number;
 }
 
-/** 每日签到时间窗（HH:MM，服务端时区） */
+export type AttendanceChallenge = "hdsky_captcha" | "opencd_captcha" | "baka_quiz";
+
+/** 每日签到设置：时间窗（HH:MM，服务端时区）与 AI 签到 */
 export interface AttendanceSettings {
   window_start: string;
   window_end: string;
+  /** 让 AI 过签到的验证码与答题 */
+  ai_enabled?: boolean;
+  /** 识别验证码用的模型（要能看图），空时用 AI 助手的模型 */
+  vision_model?: string;
+  /** 只读：AI 助手是否启用并配好、用的哪个模型 */
+  assistant_ready?: boolean;
+  assistant_model?: string;
+  /** 每天所有站点签完后推一条签到结果（默认开） */
+  notify_enabled?: boolean;
+  /** 推到哪些通知通道；空表示所有启用的通道 */
+  notify_channel_ids?: number[];
+}
+
+/** 「一键签到」的进度：running 为 false 且有 finished_at 时是上一轮的结果（时间为 Unix 秒） */
+export interface AttendanceRunStatus {
+  running: boolean;
+  started_at?: number;
+  finished_at?: number;
+  done: number;
+  total: number;
+  error?: string;
+}
+
+/** 签到记录的一行：某站某天的结果 */
+export interface AttendanceHistoryRow {
+  site_name: string;
+  day: string;
+  status: AttendanceStatus;
+  attempts: number;
+  message?: string;
+  last_error?: string;
+  last_attempt_at?: number;
+}
+
+/** 最近几天的签到记录：days 从今天往前排 */
+export interface AttendanceHistory {
+  days: string[];
+  rows: AttendanceHistoryRow[];
+}
+
+/** 签到用的方式：直接签到，或者借助 AI 识别验证码、答题 */
+export type AttendanceMethod = "direct" | "ai_captcha" | "ai_quiz";
+
+/** 一次签到尝试的结果：retry 是这次没成、之后还会再试；failed 是当天不再试（或者手动签到失败） */
+export type AttendanceEventResult = "signed" | "already" | "retry" | "failed" | "unsupported";
+
+/** 一次签到尝试（时间为 Unix 秒） */
+export interface AttendanceEvent {
+  id: number;
+  trigger: "auto" | "manual";
+  result: AttendanceEventResult;
+  method: AttendanceMethod;
+  ai_model?: string;
+  ai_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  duration_ms: number;
+  message?: string;
+  error?: string;
+  started_at: number;
+  finished_at: number;
+}
+
+/** 某天一个站点的签到：当天的结果加上每次尝试；AI 的调用与 token 是这一天的合计 */
+export interface AttendanceDaySite {
+  site_name: string;
+  status: AttendanceStatus;
+  attempts: number;
+  message?: string;
+  last_error?: string;
+  last_attempt_at?: number;
+  next_attempt_at?: number;
+  method: AttendanceMethod;
+  ai_model?: string;
+  ai_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  events: AttendanceEvent[];
+}
+
+/** 某天所有站点签到的合计 */
+export interface AttendanceDaySummary {
+  sites: number;
+  signed: number;
+  already: number;
+  failed: number;
+  pending: number;
+  unsupported: number;
+  /** 借助 AI 签到（调过模型）的站点数 */
+  ai_sites: number;
+  ai_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+/** 签到详情：某天每个站点怎么签的 */
+export interface AttendanceDay {
+  day: string;
+  today: string;
+  summary: AttendanceDaySummary;
+  sites: AttendanceDaySite[];
+}
+
+/** 「测试看图」的结果：现画一张验证码让模型认 */
+export interface AttendanceVisionTest {
+  model: string;
+  expected: string;
+  got: string;
+  ok: boolean;
+  /** 认错了几个字 */
+  mismatch: number;
+  latency_ms: number;
 }
 
 export const attendanceApi = {
@@ -307,6 +423,18 @@ export const attendanceApi = {
   getSettings: () => api.get<AttendanceSettings>("/api/sites/attendance/settings"),
   saveSettings: (data: AttendanceSettings) =>
     api.put<AttendanceSettings>("/api/sites/attendance/settings", data),
+  /** 用现画的验证码试一下看图模型（为空时用 AI 助手的模型）认不认得出 */
+  testVision: (visionModel: string) =>
+    api.post<AttendanceVisionTest>("/api/sites/attendance/ai-test", { vision_model: visionModel }),
+  /** 一键签到：后台给开启了自动签到、今天还没有结果的站点各签一次，马上返回进度 */
+  runAll: () => api.post<AttendanceRunStatus>("/api/sites/attendance/run"),
+  runStatus: () => api.get<AttendanceRunStatus>("/api/sites/attendance/run"),
+  history: (days = 14) => api.get<AttendanceHistory>(`/api/sites/attendance/history?days=${days}`),
+  /** 签到详情：某天（YYYY-MM-DD，不给时是今天）每个站点的结果与每次尝试 */
+  events: (day?: string) =>
+    api.get<AttendanceDay>(
+      `/api/sites/attendance/events${day ? `?day=${encodeURIComponent(day)}` : ""}`,
+    ),
 };
 
 export const sitesApi = {
@@ -373,9 +501,39 @@ export const logsApi = {
   files: () => api.get<LogFilesResponse>("/api/logs/files"),
 };
 
+/**
+ * RSS 任务的状态（GET /api/control/status；POST /api/control/auto-start 也回它）。
+ * 文案与提示条规则见 utils/rssTask.ts。
+ */
+export type RssTaskState =
+  | "running"
+  | "starting"
+  | "paused"
+  | "manual"
+  | "not_ready"
+  | "no_downloader"
+  | "downloader_unhealthy"
+  | "no_subscriptions"
+  | "stopped";
+
+export interface RssTaskStatus {
+  state: RssTaskState;
+  /** 正在运行的 RSS 任务数（每个订阅一个） */
+  jobs: number;
+  /** 已启用站点下可以运行的订阅数 */
+  subscriptions: number;
+  auto_start: boolean;
+  /** 最早一个在运行的任务的启动时间；没有任务在运行时不给 */
+  started_at?: string;
+}
+
 export const controlApi = {
   stop: () => api.post<void>("/api/control/stop"),
   start: () => api.post<void>("/api/control/start"),
+  status: (signal?: AbortSignal) => api.get<RssTaskStatus>("/api/control/status", { signal }),
+  /** 只切换「自动启动 RSS 任务」，其余全局设置不动 */
+  setAutoStart: (enabled: boolean) =>
+    api.post<RssTaskStatus>("/api/control/auto-start", { enabled }),
 };
 
 export const passwordApi = {
@@ -1148,8 +1306,6 @@ export interface VersionInfo {
   version: string;
   build_time: string;
   commit_id: string;
-  /** 这个库是从 v1 升级上来的（有 v2 迁移的记录）：只有这样才显示「v2.0 升级完成」的说明 */
-  upgraded_from_v1?: boolean;
 }
 
 export interface ReleaseAsset {
@@ -3181,7 +3337,13 @@ export const reseedApi = {
 
 // ---- API 令牌（路线图 M12） ----
 
-export type ApiTokenScope = "app:read" | "app:write" | "mcp:read" | "mcp:write" | "qbit:compat";
+export type ApiTokenScope =
+  | "app:read"
+  | "app:write"
+  | "app:config"
+  | "mcp:read"
+  | "mcp:write"
+  | "qbit:compat";
 
 export interface ApiToken {
   id: number;
@@ -3356,6 +3518,16 @@ export interface AssistantSettings {
   confirm_minutes: number;
   /** 0 表示不清理 */
   retention_days: number;
+  /** 上下文窗口（token），0 是自动 */
+  context_window: number;
+  /** 上下文用到 compact_percent% 时自动压缩 */
+  auto_compact: boolean;
+  compact_percent: number;
+  /** 语音输入（Voltip）：访问令牌只写不读 */
+  voice_base_url: string;
+  has_voice_token: boolean;
+  voice_model: string;
+  voice_language: string;
 }
 
 /** 保存设置的参数：api_key、proxy_url 不给时不改，给空串时清除；换了接口地址又没给新 Key 时存着的 Key 清掉 */
@@ -3370,6 +3542,21 @@ export interface AssistantSettingsInput {
   max_steps: number;
   confirm_minutes: number;
   retention_days?: number;
+  /** 下面三项不给时不改；context_window 为 0 是自动 */
+  context_window?: number;
+  auto_compact?: boolean;
+  compact_percent?: number;
+  /** 语音输入：不给时不改；voice_token 给空串时清除，换了地址又没给新令牌时存着的清掉 */
+  voice_base_url?: string;
+  voice_token?: string;
+  voice_model?: string;
+  voice_language?: string;
+}
+
+/** 测试语音输入：Voltip 列出的处理方式（id 原样填进模型，name 是 Voltip 给的名字） */
+export interface AssistantVoiceTest {
+  models: { id: string; name: string }[];
+  latency_ms: number;
 }
 
 export interface AssistantStatus {
@@ -3377,6 +3564,8 @@ export interface AssistantStatus {
   model: string;
   can_confirm: boolean;
   chatops: boolean;
+  /** 配了语音输入（Voltip） */
+  voice?: boolean;
 }
 
 export interface AssistantTestResult {
@@ -3410,11 +3599,36 @@ export interface AssistantToolCall {
 
 export type AssistantRole = "user" | "assistant" | "tool" | "notice";
 
+/** 推理等级（reasoning_effort）：空串是不指定 */
+export type AssistantEffort = "" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/** 用户消息带的附件（内容经 assistantApi.attachmentURL 取） */
+export interface AssistantAttachment {
+  id: number;
+  name: string;
+  kind: "image" | "text";
+  mime: string;
+  size: number;
+}
+
+/** 对话页的模型下拉框：default 是设置里的模型（第一个）；error 是读服务商模型列表失败的原因 */
+export interface AssistantChatModels {
+  default: string;
+  models: string[];
+  error?: string;
+}
+
 export interface AssistantMessage {
   id: number;
   run_id?: string;
   role: AssistantRole;
   content: string;
+  /** 模型的推理内容（思考过程），只有助手消息有 */
+  reasoning?: string;
+  /** 这一轮的模型与推理等级（没有时是设置里的模型、不指定） */
+  model?: string;
+  effort?: AssistantEffort;
+  attachments?: AssistantAttachment[];
   tool_calls?: AssistantToolCall[];
   tool_name?: string;
   tool_call_id?: string;
@@ -3424,6 +3638,14 @@ export interface AssistantMessage {
 
 export type AssistantConfirmStatus = "pending" | "approved" | "denied" | "expired";
 
+/** 写操作的一项改动：改以前、改以后（新增的没有 before，删掉的没有 after）；secret 是密钥，不写原文 */
+export interface AssistantChange {
+  label: string;
+  before?: string;
+  after?: string;
+  secret?: boolean;
+}
+
 export interface AssistantConfirmation {
   id: number;
   run_id: string;
@@ -3431,6 +3653,9 @@ export interface AssistantConfirmation {
   tool: string;
   summary: string;
   arguments: Record<string, unknown>;
+  /** 会改什么、可能有什么影响（写工具的预览给的，没有时为空） */
+  changes?: AssistantChange[];
+  impact?: string[];
   status: AssistantConfirmStatus;
   /** 属主，或者 timeout、cancel、restart、shutdown */
   decided_by?: string;
@@ -3439,30 +3664,57 @@ export interface AssistantConfirmation {
   created_at: string;
 }
 
+/** 上下文窗口从哪儿来的：设置里填的、服务商的模型列表、按模型名的内置表、默认 128K */
+export type AssistantWindowSource = "setting" | "provider" | "table" | "default";
+
+/**
+ * 会话的上下文用量（单位都是 token）：context 是下一次请求大约要带的（estimated 为真时按字数估的），
+ * window 是窗口，到 compact_percent% 自动压缩；input、output 是本会话所有调用服务商报的合计。
+ */
+export interface AssistantUsage {
+  context: number;
+  estimated?: boolean;
+  window: number;
+  window_source: AssistantWindowSource;
+  auto_compact: boolean;
+  compact_percent: number;
+  input: number;
+  output: number;
+  compacted?: boolean;
+}
+
 export interface AssistantConversationDetail extends AssistantConversation {
   messages: AssistantMessage[];
   confirmations: AssistantConfirmation[];
   run_id?: string;
   partial?: string;
+  /** 进行中的运行这一步到现在的推理内容 */
+  partial_reasoning?: string;
   /** 读事件的 after：从它接着读不会漏 */
   last_seq: number;
+  /** 上下文用量（读不出来时没有） */
+  usage?: AssistantUsage;
 }
 
 export type AssistantEventType =
   | "run_started"
   | "delta"
+  | "reasoning"
   | "message"
   | "tool_started"
   | "confirmation"
   | "run_finished"
+  | "usage"
+  | "compacting"
   | "reset";
 
 export interface AssistantEvent {
   seq: number;
   type: AssistantEventType;
   run_id?: string;
+  /** delta、reasoning 的文字 */
   text?: string;
-  /** 为真时 text 是到现在的全部回答文字，整段替换 */
+  /** 为真时 text 是这一步到现在的全部文字，整段替换 */
   replace?: boolean;
   message?: AssistantMessage;
   tool?: AssistantToolCall;
@@ -3470,6 +3722,8 @@ export interface AssistantEvent {
   /** run_finished：done、canceled、failed */
   status?: "done" | "canceled" | "failed";
   error?: string;
+  /** usage：新的上下文用量 */
+  usage?: AssistantUsage;
   at?: string;
   /** reset：重新读会话以后从这里接着读 */
   last?: number;
@@ -3480,6 +3734,45 @@ export interface AssistantSendResult {
   message: AssistantMessage;
 }
 
+/** 发消息的选项：model 为空用设置里的模型，effort 为空不指定，attachment_ids 是先上传的附件 */
+export interface AssistantSendOptions {
+  model?: string;
+  effort?: AssistantEffort;
+  attachment_ids?: number[];
+}
+
+/** 把一段 WAV 录音交给 Voltip 识别（经 pt-tools，令牌不出后端）；失败时抛 ApiError（正文是原因） */
+async function transcribeVoice(wav: Blob, language?: string): Promise<string> {
+  const q = language ? `?language=${encodeURIComponent(language)}` : "";
+  const res = await fetch(`/api/assistant/transcribe${q}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "audio/wav" },
+    body: wav,
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new ApiError(res.status, msg.trim() || `HTTP ${res.status}`);
+  }
+  return ((await res.json()) as { text: string }).text;
+}
+
+/** 上传一个附件（还没发的只有自己看得到）；失败时抛 ApiError（正文是原因） */
+async function uploadAssistantAttachment(file: File): Promise<AssistantAttachment> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await fetch("/api/assistant/attachments", {
+    method: "POST",
+    credentials: "same-origin",
+    body: form,
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new ApiError(res.status, msg || `HTTP ${res.status}`);
+  }
+  return (await res.json()) as AssistantAttachment;
+}
+
 export const assistantApi = {
   settings: () => api.get<AssistantSettings>("/api/assistant/settings"),
   saveSettings: (data: AssistantSettingsInput) =>
@@ -3488,9 +3781,13 @@ export const assistantApi = {
     api.post<AssistantTestResult>("/api/assistant/settings/test", data),
   listModels: (data: AssistantSettingsInput) =>
     api.post<AssistantModelList>("/api/assistant/settings/models", data),
+  /** 按输入（还没保存的也行）读 Voltip 的模型列表，看语音输入能不能用 */
+  voiceTest: (data: AssistantSettingsInput) =>
+    api.post<AssistantVoiceTest>("/api/assistant/settings/voice-test", data),
+  transcribe: transcribeVoice,
   status: () => api.get<AssistantStatus>("/api/assistant/status"),
   conversations: () => api.get<AssistantConversation[]>("/api/assistant/conversations"),
-  create: (data: { title?: string; message?: string }) =>
+  create: (data: { title?: string; message?: string } & AssistantSendOptions) =>
     api.post<{ conversation: AssistantConversation; run?: AssistantSendResult }>(
       "/api/assistant/conversations",
       data,
@@ -3498,8 +3795,18 @@ export const assistantApi = {
   conversation: (id: number) =>
     api.get<AssistantConversationDetail>(`/api/assistant/conversations/${id}`),
   remove: (id: number) => api.delete<{ ok: boolean }>(`/api/assistant/conversations/${id}`),
-  send: (id: number, text: string) =>
-    api.post<AssistantSendResult>(`/api/assistant/conversations/${id}/messages`, { text }),
+  send: (id: number, text: string, opts: AssistantSendOptions = {}) =>
+    api.post<AssistantSendResult>(`/api/assistant/conversations/${id}/messages`, {
+      text,
+      ...opts,
+    }),
+  /** 对话页的模型下拉框（服务商的模型列表缓存 10 分钟） */
+  models: () => api.get<AssistantChatModels>("/api/assistant/models"),
+  upload: uploadAssistantAttachment,
+  /** 删掉一个还没发的附件 */
+  removeAttachment: (id: number) => api.delete<{ ok: boolean }>(`/api/assistant/attachments/${id}`),
+  /** 附件的内容：图片在页面上显示，文本文件下载 */
+  attachmentURL: (id: number) => `/api/assistant/attachments/${id}`,
   cancel: (id: number) => api.post<{ ok: boolean }>(`/api/assistant/conversations/${id}/cancel`),
   decide: (id: number, approve: boolean) =>
     api.post<AssistantConfirmation>(`/api/assistant/confirmations/${id}`, { approve }),

@@ -16,6 +16,66 @@ class AppApi {
 
   final ApiClient apiClient;
 
+  /// 保存一次改动（要 app:config 与 app:write）：按现状重新算一遍再保存，回改完的样子
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] resource (required):
+  ///   配置的名字，例如 global、downloaders、sites、rss（GET /config 列出全部）
+  ///
+  /// * [AppConfigChange] appConfigChange (required):
+  Future<Response> applyConfigChangeWithHttpInfo(String resource, AppConfigChange appConfigChange, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/config/{resource}/changes'
+      .replaceAll('{resource}', resource);
+
+    // ignore: prefer_final_locals
+    Object? postBody = appConfigChange;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 保存一次改动（要 app:config 与 app:write）：按现状重新算一遍再保存，回改完的样子
+  ///
+  /// Parameters:
+  ///
+  /// * [String] resource (required):
+  ///   配置的名字，例如 global、downloaders、sites、rss（GET /config 列出全部）
+  ///
+  /// * [AppConfigChange] appConfigChange (required):
+  Future<AppConfigResult?> applyConfigChange(String resource, AppConfigChange appConfigChange, { Future<void>? abortTrigger, }) async {
+    final response = await applyConfigChangeWithHttpInfo(resource, appConfigChange, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigResult',) as AppConfigResult;
+    
+    }
+    return null;
+  }
+
   /// 立即签到
   ///
   /// Note: This method returns the HTTP [Response].
@@ -644,6 +704,117 @@ class AppApi {
     return null;
   }
 
+  /// 一类配置的现状（要 app:config 与 app:read）；密钥的值是 <已设置> 或空串
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] resource (required):
+  ///   配置的名字，例如 global、downloaders、sites、rss（GET /config 列出全部）
+  ///
+  /// * [String] id:
+  ///   列表类配置只看这一项（id_field 的值）
+  Future<Response> getConfigWithHttpInfo(String resource, { String? id, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/config/{resource}'
+      .replaceAll('{resource}', resource);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (id != null) {
+      queryParams.addAll(_queryParams('', 'id', id));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 一类配置的现状（要 app:config 与 app:read）；密钥的值是 <已设置> 或空串
+  ///
+  /// Parameters:
+  ///
+  /// * [String] resource (required):
+  ///   配置的名字，例如 global、downloaders、sites、rss（GET /config 列出全部）
+  ///
+  /// * [String] id:
+  ///   列表类配置只看这一项（id_field 的值）
+  Future<AppConfigState?> getConfig(String resource, { String? id, Future<void>? abortTrigger, }) async {
+    final response = await getConfigWithHttpInfo(resource, id: id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigState',) as AppConfigState;
+    
+    }
+    return null;
+  }
+
+  /// 配置目录（要 app:config 与 app:read）：能经接口读改的各类配置、能做的操作、能改的字段与密钥字段
+  ///
+  /// Note: This method returns the HTTP [Response].
+  Future<Response> getConfigCatalogWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/config';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 配置目录（要 app:config 与 app:read）：能经接口读改的各类配置、能做的操作、能改的字段与密钥字段
+  Future<AppConfigCatalog?> getConfigCatalog({ Future<void>? abortTrigger, }) async {
+    final response = await getConfigCatalogWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigCatalog',) as AppConfigCatalog;
+    
+    }
+    return null;
+  }
+
   /// 站点图标（图片）
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1181,6 +1352,54 @@ class AppApi {
     return null;
   }
 
+  /// 媒体库列表
+  ///
+  /// Note: This method returns the HTTP [Response].
+  Future<Response> listMediaLibrariesWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/media/libraries';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 媒体库列表
+  Future<List<AppMediaLibrary>?> listMediaLibraries({ Future<void>? abortTrigger, }) async {
+    final response = await listMediaLibrariesWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppMediaLibrary>') as List)
+        .cast<AppMediaLibrary>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
   /// 站点、登录状态、今天的签到与站点上的用户数据
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1522,6 +1741,172 @@ class AppApi {
     return null;
   }
 
+  /// 把下载器里的一个种子整理进媒体库（按媒体库的方式硬链接、复制或移动，刮削，通知媒体服务器扫描）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [AppOrganizeInput] appOrganizeInput (required):
+  Future<Response> organizeMediaWithHttpInfo(AppOrganizeInput appOrganizeInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/media/organize';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appOrganizeInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 把下载器里的一个种子整理进媒体库（按媒体库的方式硬链接、复制或移动，刮削，通知媒体服务器扫描）
+  ///
+  /// Parameters:
+  ///
+  /// * [AppOrganizeInput] appOrganizeInput (required):
+  Future<AppOrganizeResult?> organizeMedia(AppOrganizeInput appOrganizeInput, { Future<void>? abortTrigger, }) async {
+    final response = await organizeMediaWithHttpInfo(appOrganizeInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizeResult',) as AppOrganizeResult;
+    
+    }
+    return null;
+  }
+
+  /// 预览一次改动（要 app:config 与 app:read）：每个字段改以前、改以后与可能的影响，不保存
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] resource (required):
+  ///   配置的名字，例如 global、downloaders、sites、rss（GET /config 列出全部）
+  ///
+  /// * [AppConfigChange] appConfigChange (required):
+  Future<Response> previewConfigChangeWithHttpInfo(String resource, AppConfigChange appConfigChange, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/config/{resource}/preview'
+      .replaceAll('{resource}', resource);
+
+    // ignore: prefer_final_locals
+    Object? postBody = appConfigChange;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 预览一次改动（要 app:config 与 app:read）：每个字段改以前、改以后与可能的影响，不保存
+  ///
+  /// Parameters:
+  ///
+  /// * [String] resource (required):
+  ///   配置的名字，例如 global、downloaders、sites、rss（GET /config 列出全部）
+  ///
+  /// * [AppConfigChange] appConfigChange (required):
+  Future<AppConfigResult?> previewConfigChange(String resource, AppConfigChange appConfigChange, { Future<void>? abortTrigger, }) async {
+    final response = await previewConfigChangeWithHttpInfo(resource, appConfigChange, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigResult',) as AppConfigResult;
+    
+    }
+    return null;
+  }
+
+  /// 预览整理下载器里的一个种子：认出的条目、媒体库、每个视频的目标位置（不改动任何东西）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [AppOrganizeInput] appOrganizeInput (required):
+  Future<Response> previewMediaOrganizeWithHttpInfo(AppOrganizeInput appOrganizeInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/media/organize/preview';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appOrganizeInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 预览整理下载器里的一个种子：认出的条目、媒体库、每个视频的目标位置（不改动任何东西）
+  ///
+  /// Parameters:
+  ///
+  /// * [AppOrganizeInput] appOrganizeInput (required):
+  Future<AppOrganizePlan?> previewMediaOrganize(AppOrganizeInput appOrganizeInput, { Future<void>? abortTrigger, }) async {
+    final response = await previewMediaOrganizeWithHttpInfo(appOrganizeInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizePlan',) as AppOrganizePlan;
+    
+    }
+    return null;
+  }
+
   /// 用示例数据渲染一份模板（不保存；模板不对时回 400 并写明哪里不对）
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1628,6 +2013,59 @@ class AppApi {
     return null;
   }
 
+  /// 识别一个种子标题：解析名字、年份、季集、规格，按手动纠正与识别词到 TMDB 找对应的条目（不改动任何东西）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [AppRecognizeInput] appRecognizeInput (required):
+  Future<Response> recognizeMediaWithHttpInfo(AppRecognizeInput appRecognizeInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/media/recognize';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appRecognizeInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 识别一个种子标题：解析名字、年份、季集、规格，按手动纠正与识别词到 TMDB 找对应的条目（不改动任何东西）
+  ///
+  /// Parameters:
+  ///
+  /// * [AppRecognizeInput] appRecognizeInput (required):
+  Future<AppRecognition?> recognizeMedia(AppRecognizeInput appRecognizeInput, { Future<void>? abortTrigger, }) async {
+    final response = await recognizeMediaWithHttpInfo(appRecognizeInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppRecognition',) as AppRecognition;
+    
+    }
+    return null;
+  }
+
   /// 恢复默认（要 app:write）
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1679,6 +2117,62 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
+    
+    }
+    return null;
+  }
+
+  /// 重新整理一条整理记录对应的种子（多半是失败的那条）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   整理记录的编号（GET /media/history 的 id）
+  Future<Response> retryMediaHistoryWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/media/history/{id}/retry'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 重新整理一条整理记录对应的种子（多半是失败的那条）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   整理记录的编号（GET /media/history 的 id）
+  Future<AppOrganizeResult?> retryMediaHistory(int id, { Future<void>? abortTrigger, }) async {
+    final response = await retryMediaHistoryWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizeResult',) as AppOrganizeResult;
     
     }
     return null;

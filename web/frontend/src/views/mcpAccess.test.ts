@@ -60,12 +60,16 @@ describe("MCP 接入", () => {
     expect(q("mcp-tokens")!.getAttribute("href")).toContain("api-tokens");
   });
 
-  it("工具清单：13 个，写工具标 MCP 操作", async () => {
+  it("工具清单：26 个（含订阅管理、媒体库与配置），写工具标 MCP 操作", async () => {
     await mountPage();
     const rows = document.querySelectorAll("[data-testid^=mcp-tool-]");
-    expect(rows).toHaveLength(13);
+    expect(rows).toHaveLength(26);
+    expect(q("mcp-tool-change_config")!.textContent).toContain("MCP 操作");
+    expect(q("mcp-tool-get_config")!.textContent).toContain("MCP 读取");
     expect(q("mcp-tool-delete_torrent")!.textContent).toContain("MCP 操作");
     expect(q("mcp-tool-search_torrents")!.textContent).toContain("MCP 读取");
+    expect(q("mcp-tool-organize_media")!.textContent).toContain("MCP 操作");
+    expect(q("mcp-tool-recognize_media")!.textContent).toContain("MCP 读取");
   });
 
   it("复制地址；浏览器不让复制时提示手动复制", async () => {

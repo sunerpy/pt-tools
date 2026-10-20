@@ -2,10 +2,14 @@ package web
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -34,6 +38,8 @@ type fakeChatLLM struct {
 type fakeChatReply struct {
 	text       string
 	tool, args string
+	// reasoning 不为空时先发这段推理内容（reasoning_content）
+	reasoning string
 }
 
 func (f *fakeChatLLM) push(r ...fakeChatReply) {
@@ -68,6 +74,10 @@ func (f *fakeChatLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `data: {"id":"x","object":"chat.completion.chunk","created":1,"model":"fake","choices":[{"index":0,"delta":%s}]}`+"\n\n", delta)
 		w.(http.Flusher).Flush()
 	}
+	if rep.reasoning != "" {
+		r, _ := json.Marshal(rep.reasoning)
+		chunk(fmt.Sprintf(`{"reasoning_content":%s}`, r))
+	}
 	if rep.tool != "" {
 		args, _ := json.Marshal(rep.args)
 		chunk(fmt.Sprintf(`{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":%q,"arguments":%s}}]}`, rep.tool, args))
@@ -84,6 +94,8 @@ type assistantEnv struct {
 	http  *httptest.Server
 	llm   *fakeChatLLM
 	audit *fakeAppAudit
+	// llmURL 是假模型服务的接口地址（到 /v1）
+	llmURL string
 }
 
 func newAssistantEnv(t *testing.T) *assistantEnv {
@@ -95,6 +107,7 @@ func newAssistantEnv(t *testing.T) *assistantEnv {
 	srv.SetAPITokens(apitoken.New(global.GlobalDB.DB), e.audit)
 	llm := httptest.NewServer(e.llm)
 	t.Cleanup(llm.Close)
+	e.llmURL = llm.URL + "/v1"
 	svc := assistant.New(assistant.Config{
 		DB: global.GlobalDB.DB, Cipher: apiTestCipher{}, Tools: srv.AssistantToolServer, HTTPClient: llm.Client(),
 	})
@@ -185,7 +198,13 @@ func TestAssistantAPI_RequiresSessionAndService(t *testing.T) {
 		{http.MethodPut, "/api/assistant/settings"},
 		{http.MethodPost, "/api/assistant/settings/test"},
 		{http.MethodPost, "/api/assistant/settings/models"},
+		{http.MethodPost, "/api/assistant/settings/voice-test"},
+		{http.MethodPost, "/api/assistant/transcribe"},
 		{http.MethodGet, "/api/assistant/status"},
+		{http.MethodGet, "/api/assistant/models"},
+		{http.MethodPost, "/api/assistant/attachments"},
+		{http.MethodGet, "/api/assistant/attachments/1"},
+		{http.MethodDelete, "/api/assistant/attachments/1"},
 		{http.MethodGet, "/api/assistant/conversations"},
 		{http.MethodPost, "/api/assistant/conversations"},
 		{http.MethodGet, "/api/assistant/conversations/1"},
@@ -238,6 +257,99 @@ func TestAssistantAPI_SettingsKeyIsWriteOnly(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 }
 
+// 语音输入：没配 Voltip 时识别回 409；配了以后令牌只写不读，测试读出处理方式，录音转发给 Voltip（带令牌），
+// 不是 WAV 回 400，Voltip 忙回 502 并写明原因，录音太大回 413。
+func TestAssistantAPI_Voice(t *testing.T) {
+	e := newAssistantEnv(t)
+	const voltipToken = "voltip-web-test-000000"
+	var (
+		mu    sync.Mutex
+		auths []string
+		busy  bool
+	)
+	voltip := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		auths = append(auths, r.Header.Get("Authorization"))
+		b := busy
+		mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer "+voltipToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if b {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"voltip","object":"model","created":0,"owned_by":"voltip","name":"默认处理方式"}]}`)
+		case "/v1/audio/transcriptions":
+			_, _ = io.WriteString(w, `{"text":"暂停所有下载"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(voltip.Close)
+	wav := func(n int) []byte {
+		b := make([]byte, 44+n)
+		copy(b, "RIFF")
+		copy(b[8:], "WAVEfmt ")
+		return b
+	}
+	post := func(path string, body []byte) *http.Response {
+		req, err := http.NewRequest(http.MethodPost, e.http.URL+path, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "audio/wav")
+		req.AddCookie(&http.Cookie{Name: "session", Value: "sess-test"})
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = res.Body.Close() })
+		return res
+	}
+
+	res := post("/api/assistant/transcribe", wav(320))
+	assert.Equal(t, http.StatusConflict, res.StatusCode)
+
+	res = e.do(http.MethodPut, "/api/assistant/settings", fmt.Sprintf(
+		`{"enabled":true,"provider":"custom","base_url":%q,"model":"fake","voice_base_url":%q,"voice_token":%q,"voice_language":"zh"}`,
+		e.llmURL, voltip.URL+"/v1", voltipToken,
+	))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	res = e.do(http.MethodGet, "/api/assistant/settings", "")
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"has_voice_token":true`)
+	assert.NotContains(t, string(body), voltipToken, "令牌只写不读")
+	res = e.do(http.MethodGet, "/api/assistant/status", "")
+	assert.True(t, readJSON[assistant.Status](t, res).Voice)
+
+	res = e.do(http.MethodPost, "/api/assistant/settings/voice-test", `{}`)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, []assistant.VoiceModel{{ID: "voltip", Name: "默认处理方式"}}, readJSON[assistant.VoiceTestResult](t, res).Models)
+
+	res = post("/api/assistant/transcribe", wav(320))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, map[string]string{"text": "暂停所有下载"}, readJSON[map[string]string](t, res))
+	mu.Lock()
+	assert.Equal(t, "Bearer "+voltipToken, auths[len(auths)-1])
+	mu.Unlock()
+
+	assert.Equal(t, http.StatusBadRequest, post("/api/assistant/transcribe", []byte("not a wav at all, just some text here.......")).StatusCode)
+	assert.Equal(t, http.StatusBadRequest, post("/api/assistant/transcribe?language=zh%3Bx", wav(16)).StatusCode)
+
+	mu.Lock()
+	busy = true
+	mu.Unlock()
+	res = post("/api/assistant/transcribe", wav(16))
+	assert.Equal(t, http.StatusBadGateway, res.StatusCode)
+	msg, _ := io.ReadAll(res.Body)
+	assert.Contains(t, string(msg), "正忙")
+	assert.NotContains(t, string(msg), voltipToken)
+
+	res = post("/api/assistant/transcribe", wav(assistant.MaxVoiceBytes))
+	assert.Equal(t, http.StatusRequestEntityTooLarge, res.StatusCode)
+}
+
 func TestAssistantAPI_ChatWithToolsAndConfirmation(t *testing.T) {
 	e := newAssistantEnv(t)
 	e.llm.push(fakeChatReply{tool: "list_tasks", args: `{}`}, fakeChatReply{text: "现在没有抓到的种子。"})
@@ -267,8 +379,8 @@ func TestAssistantAPI_ChatWithToolsAndConfirmation(t *testing.T) {
 	assert.Contains(t, d.Messages[2].Content, `"items"`, "工具经进程内的 App API 执行")
 	assert.False(t, d.Messages[2].IsError, d.Messages[2].Content)
 
-	// 写操作：等确认，确认一次算数，第二次回 409
-	e.llm.push(fakeChatReply{tool: "pause_torrent", args: `{"downloader_id":1,"task_id":"abc"}`}, fakeChatReply{text: "处理完了。"})
+	// 写操作：先取预览、再等确认，确认一次算数，第二次回 409（添加订阅的预览只看参数，不用准备下载器）
+	e.llm.push(fakeChatReply{tool: "add_subscription", args: `{"media_type":"movie","tmdb_id":438631}`}, fakeChatReply{text: "处理完了。"})
 	res = e.do(http.MethodPost, fmt.Sprintf("/api/assistant/conversations/%d/messages", conv), `{"text":"暂停 abc"}`)
 	require.Equal(t, http.StatusAccepted, res.StatusCode)
 	sent := readJSON[assistant.SendResult](t, res)
@@ -296,7 +408,7 @@ func TestAssistantAPI_ChatWithToolsAndConfirmation(t *testing.T) {
 	})
 	var found bool
 	for _, a := range e.audit.all() {
-		if a.Command == "pause_torrent" {
+		if a.Command == "add_subscription" {
 			found = true
 			assert.Equal(t, mcp.KindAssistant, a.ChannelType)
 			assert.Equal(t, "web:admin", a.ChannelUserID)
@@ -322,4 +434,115 @@ func TestAssistantAPI_Disabled(t *testing.T) {
 	assert.Contains(t, string(body), "没有启用")
 	res = e.do(http.MethodGet, "/api/assistant/conversations", "")
 	assert.Empty(t, readJSON[[]assistant.ConversationView](t, res), "发不出去的消息不留空会话")
+}
+
+// upload 经 multipart 传一个附件。
+func (e *assistantEnv) upload(name string, data []byte) *http.Response {
+	e.t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", name)
+	require.NoError(e.t, err)
+	_, _ = fw.Write(data)
+	require.NoError(e.t, mw.Close())
+	req, err := http.NewRequest(http.MethodPost, e.http.URL+"/api/assistant/attachments", &buf)
+	require.NoError(e.t, err)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.AddCookie(&http.Cookie{Name: "session", Value: "sess-test"})
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(e.t, err)
+	e.t.Cleanup(func() { _ = res.Body.Close() })
+	return res
+}
+
+func tinyPNG(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, image.NewGray(image.Rect(0, 0, 2, 2))))
+	return buf.Bytes()
+}
+
+func TestAssistantAPI_AttachmentsModelsAndOptions(t *testing.T) {
+	e := newAssistantEnv(t)
+
+	res := e.do(http.MethodGet, "/api/assistant/models", "")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, assistant.ChatModels{Default: "fake", Models: []string{"fake"}}, readJSON[assistant.ChatModels](t, res),
+		"设置里的模型在第一个，不能对话的去掉")
+
+	res = e.upload("截图.png", tinyPNG(t))
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+	img := readJSON[assistant.AttachmentView](t, res)
+	assert.Equal(t, "截图.png", img.Name)
+	assert.Equal(t, "image/png", img.MIME)
+	res = e.upload("notes.md", []byte("# 笔记\n下载器卡住了"))
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+	note := readJSON[assistant.AttachmentView](t, res)
+
+	res = e.do(http.MethodGet, fmt.Sprintf("/api/assistant/attachments/%d", img.ID), "")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "image/png", res.Header.Get("Content-Type"))
+	assert.Equal(t, "nosniff", res.Header.Get("X-Content-Type-Options"))
+	assert.Contains(t, res.Header.Get("Content-Security-Policy"), "sandbox")
+	assert.True(t, strings.HasPrefix(res.Header.Get("Content-Disposition"), "inline"))
+	body, _ := io.ReadAll(res.Body)
+	assert.Equal(t, tinyPNG(t), body)
+	res = e.do(http.MethodGet, fmt.Sprintf("/api/assistant/attachments/%d", note.ID), "")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "text/plain; charset=utf-8", res.Header.Get("Content-Type"))
+	assert.True(t, strings.HasPrefix(res.Header.Get("Content-Disposition"), "attachment"), "文本附件下载，不在页面上打开")
+
+	// 不是 multipart、太大、不认识的类型
+	res = e.do(http.MethodPost, "/api/assistant/attachments", `{}`)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	res = e.upload("big.png", append(tinyPNG(t), bytes.Repeat([]byte{0}, assistant.MaxUploadBytes)...))
+	assert.Equal(t, http.StatusRequestEntityTooLarge, res.StatusCode)
+	res = e.upload("a.exe", []byte("MZ\x90\x00"))
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+	// 带附件、模型与推理等级发消息
+	e.llm.push(fakeChatReply{text: "图里是灰的。", reasoning: "先看图"})
+	res = e.do(http.MethodPost, "/api/assistant/conversations", fmt.Sprintf(
+		`{"message":"看看","model":"fake-vision","effort":"low","attachment_ids":[%d,%d]}`, img.ID, note.ID,
+	))
+	require.Equal(t, http.StatusAccepted, res.StatusCode)
+	created := readJSON[assistantCreateResult](t, res)
+	require.NotNil(t, created.Run)
+	assert.Len(t, created.Run.Message.Attachments, 2)
+	events := e.stream(created.Conversation.ID, "", func(ev assistant.Event) bool { return ev.Type == assistant.EventRunFinished })
+	var sawReasoning bool
+	for _, ev := range events {
+		sawReasoning = sawReasoning || ev.Type == assistant.EventReasoning
+	}
+	assert.True(t, sawReasoning, "网页的事件流里有推理内容的增量")
+	e.llm.mu.Lock()
+	sent := e.llm.bodies[len(e.llm.bodies)-1]
+	e.llm.mu.Unlock()
+	assert.Contains(t, sent, `"model":"fake-vision"`)
+	assert.Contains(t, sent, `"reasoning_effort":"low"`)
+	assert.Contains(t, sent, "data:image/png;base64,")
+	assert.Contains(t, sent, "下载器卡住了")
+
+	res = e.do(http.MethodGet, fmt.Sprintf("/api/assistant/conversations/%d", created.Conversation.ID), "")
+	d := readJSON[assistant.ConversationDetail](t, res)
+	require.Len(t, d.Messages, 2)
+	assert.Len(t, d.Messages[0].Attachments, 2)
+	assert.Equal(t, "fake-vision", d.Messages[1].Model)
+	assert.Equal(t, "先看图", d.Messages[1].Reasoning)
+
+	// 发出去的附件不能单独删；没发的可以
+	res = e.do(http.MethodDelete, fmt.Sprintf("/api/assistant/attachments/%d", img.ID), "")
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	res = e.upload("c.txt", []byte("c"))
+	pending := readJSON[assistant.AttachmentView](t, res)
+	res = e.do(http.MethodDelete, fmt.Sprintf("/api/assistant/attachments/%d", pending.ID), "")
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+
+	// 选项不对的回 400，不留空会话
+	res = e.do(http.MethodPost, fmt.Sprintf("/api/assistant/conversations/%d/messages", created.Conversation.ID), `{"text":"x","effort":"ultra"}`)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	res = e.do(http.MethodPost, "/api/assistant/conversations", `{"message":"x","model":"a b"}`)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	res = e.do(http.MethodGet, "/api/assistant/conversations", "")
+	assert.Len(t, readJSON[[]assistant.ConversationView](t, res), 1)
 }

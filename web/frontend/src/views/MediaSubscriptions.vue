@@ -534,258 +534,275 @@ onMounted(() => {
       </div>
     </PtPanel>
 
-    <PtPanel title="订阅设置" icon="sliders-horizontal">
-      <div v-if="settingsFailed" class="pt-note pt-note--warn">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span v-if="settings">设置刷新失败，下面是上次读到的。</span>
-        <span v-else>设置没读到，读到以前不能修改，点刷新重试。</span>
-      </div>
-      <!-- 读到设置以前表单是默认值：不能保存，避免盖掉真正的设置 -->
-      <el-form class="pt-form ms-form" label-position="top" :disabled="!settings" @submit.prevent>
-        <el-form-item label="订阅">
-          <div class="ms-switch">
-            <el-switch v-model="sform.enabled" data-testid="ms-enabled" />
-            <span>打开以后定时搜索、对 RSS 里的种子、拉豆瓣想看</span>
+    <div class="pt-cols">
+      <div class="pt-col">
+        <PtPanel title="订阅设置" icon="sliders-horizontal">
+          <div v-if="settingsFailed" class="pt-note pt-note--warn">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span v-if="settings">设置刷新失败，下面是上次读到的。</span>
+            <span v-else>设置没读到，读到以前不能修改，点刷新重试。</span>
           </div>
-        </el-form-item>
-        <div class="ms-row">
-          <el-form-item label="主动搜索的间隔（小时）">
-            <el-input-number
-              v-model="sform.search_interval_hours"
-              :min="6"
-              :max="168"
-              controls-position="right"
-              data-testid="ms-interval" />
-            <div class="field-tip">
-              每个订阅按这个间隔搜一次，另加最多 30 分钟的随机偏移；最少 6 小时，避免给站点添负担
+          <!-- 读到设置以前表单是默认值：不能保存，避免盖掉真正的设置 -->
+          <el-form
+            class="pt-form ms-form"
+            label-position="top"
+            :disabled="!settings"
+            @submit.prevent>
+            <el-form-item label="订阅">
+              <div class="ms-switch">
+                <el-switch v-model="sform.enabled" data-testid="ms-enabled" />
+                <span>打开以后定时搜索、对 RSS 里的种子、拉豆瓣想看</span>
+              </div>
+            </el-form-item>
+            <div class="ms-row">
+              <el-form-item label="主动搜索的间隔（小时）">
+                <el-input-number
+                  v-model="sform.search_interval_hours"
+                  :min="6"
+                  :max="168"
+                  controls-position="right"
+                  data-testid="ms-interval" />
+                <div class="field-tip">
+                  每个订阅按这个间隔搜一次，另加最多 30 分钟的随机偏移；最少 6
+                  小时，避免给站点添负担
+                </div>
+              </el-form-item>
+              <el-form-item label="不参与主动搜索的站点">
+                <el-select
+                  v-model="sform.search_skip_sites"
+                  multiple
+                  filterable
+                  clearable
+                  placeholder="都参与"
+                  data-testid="ms-skip-sites">
+                  <el-option v-for="s in siteNames" :key="s" :value="s" :label="s" />
+                </el-select>
+                <div class="field-tip">这些站点只看 RSS 里的种子</div>
+              </el-form-item>
             </div>
-          </el-form-item>
-          <el-form-item label="不参与主动搜索的站点">
-            <el-select
-              v-model="sform.search_skip_sites"
-              multiple
-              filterable
-              clearable
-              placeholder="都参与"
-              data-testid="ms-skip-sites">
-              <el-option v-for="s in siteNames" :key="s" :value="s" :label="s" />
-            </el-select>
-            <div class="field-tip">这些站点只看 RSS 里的种子</div>
-          </el-form-item>
-        </div>
-        <div class="ms-row">
-          <el-form-item label="默认质量档案">
-            <el-select v-model="sform.default_profile_id" data-testid="ms-default-profile">
-              <el-option :value="0" label="不限（按分辨率与来源从好到差挑）" />
-              <el-option v-for="p in profiles" :key="p.id" :value="p.id" :label="p.name" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="默认下载器">
-            <el-select v-model="sform.default_downloader_id" data-testid="ms-default-downloader">
-              <el-option :value="0" label="pt-tools 的默认下载器" />
-              <el-option
-                v-for="d in downloaders"
-                :key="d.id"
-                :value="d.id as number"
-                :label="d.name" />
-            </el-select>
-          </el-form-item>
-        </div>
-        <div class="ms-row">
-          <el-form-item label="通知">
-            <el-select
-              v-model="sform.notify_channels"
-              multiple
-              clearable
-              placeholder="不通知"
-              data-testid="ms-notify">
-              <el-option v-for="c in channels" :key="c.id" :label="c.name" :value="c.id" />
-            </el-select>
-            <div class="field-tip">下载了订阅的资源、豆瓣想看连续拉取失败时通知</div>
-          </el-form-item>
-          <el-form-item label="洗版以后的旧种子">
-            <el-select v-model="sform.upgrade_old" data-testid="ms-upgrade-old">
-              <el-option value="keep" label="继续做种" />
-              <el-option value="delete" label="连数据删掉（有 H&R 要求的留着）" />
-            </el-select>
-          </el-form-item>
-        </div>
-        <el-button
-          type="primary"
-          :loading="savingSettings"
-          :disabled="!settings"
-          data-testid="ms-save-settings"
-          @click="saveSettings">
-          <PtIcon v-if="!savingSettings" name="save" :size="14" /><span>保存</span>
-        </el-button>
-      </el-form>
-    </PtPanel>
-
-    <PtPanel
-      title="质量档案"
-      icon="layers"
-      :count="profiles.length"
-      action="添加"
-      action-icon="plus"
-      @action="openProfile()">
-      <PtDataState
-        v-if="!profiles.length"
-        :state="profilesDS.state.value"
-        :title="profilesDS.state.value === 'empty' ? '还没有质量档案' : ''"
-        :sub="
-          profilesDS.errorText.value ||
-          (profilesDS.state.value === 'empty' ? '不建时按分辨率与来源从好到差挑' : '')
-        "
-        data-testid="ms-profiles-state" />
-      <el-table
-        v-else-if="!isMobile"
-        :data="profiles"
-        row-key="id"
-        class="pt-grid"
-        data-testid="ms-profiles">
-        <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
-        <el-table-column label="要求" min-width="320">
-          <template #default="{ row }">{{ profileSummary(row) }}</template>
-        </el-table-column>
-        <el-table-column label="" width="120" align="right">
-          <template #default="{ row }">
-            <el-button link :data-testid="`ms-profile-edit-${row.id}`" @click="openProfile(row)"
-              >修改</el-button
-            >
+            <div class="ms-row">
+              <el-form-item label="默认质量档案">
+                <el-select v-model="sform.default_profile_id" data-testid="ms-default-profile">
+                  <el-option :value="0" label="不限（按分辨率与来源从好到差挑）" />
+                  <el-option v-for="p in profiles" :key="p.id" :value="p.id" :label="p.name" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="默认下载器">
+                <el-select
+                  v-model="sform.default_downloader_id"
+                  data-testid="ms-default-downloader">
+                  <el-option :value="0" label="pt-tools 的默认下载器" />
+                  <el-option
+                    v-for="d in downloaders"
+                    :key="d.id"
+                    :value="d.id as number"
+                    :label="d.name" />
+                </el-select>
+              </el-form-item>
+            </div>
+            <div class="ms-row">
+              <el-form-item label="通知">
+                <el-select
+                  v-model="sform.notify_channels"
+                  multiple
+                  clearable
+                  placeholder="不通知"
+                  data-testid="ms-notify">
+                  <el-option v-for="c in channels" :key="c.id" :label="c.name" :value="c.id" />
+                </el-select>
+                <div class="field-tip">下载了订阅的资源、豆瓣想看连续拉取失败时通知</div>
+              </el-form-item>
+              <el-form-item label="洗版以后的旧种子">
+                <el-select v-model="sform.upgrade_old" data-testid="ms-upgrade-old">
+                  <el-option value="keep" label="继续做种" />
+                  <el-option value="delete" label="连数据删掉（有 H&R 要求的留着）" />
+                </el-select>
+              </el-form-item>
+            </div>
             <el-button
-              link
-              type="danger"
-              :data-testid="`ms-profile-del-${row.id}`"
-              @click="removeProfile(row)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else class="ms-cards">
-        <PtRowCard v-for="p in profiles" :key="p.id">
-          <template #title>{{ p.name }}</template>
-          <template #meta
-            ><span class="ms-full">{{ profileSummary(p) }}</span></template
-          >
-          <template #actions>
-            <el-button size="small" @click="openProfile(p)">修改</el-button>
-            <el-button size="small" type="danger" plain @click="removeProfile(p)">删除</el-button>
-          </template>
-        </PtRowCard>
+              type="primary"
+              :loading="savingSettings"
+              :disabled="!settings"
+              data-testid="ms-save-settings"
+              @click="saveSettings">
+              <PtIcon v-if="!savingSettings" name="save" :size="14" /><span>保存</span>
+            </el-button>
+          </el-form>
+        </PtPanel>
       </div>
-    </PtPanel>
 
-    <PtPanel
-      title="豆瓣想看"
-      icon="heart"
-      :count="sources.length"
-      action="添加"
-      action-icon="plus"
-      @action="openSource()">
-      <p class="ms-tip">
-        每 6 小时拉一次豆瓣用户公开的「收藏」RSS，给「想看」的电影与剧集建订阅；条目从 RSS
-        里消失时不删已经建的订阅。
-      </p>
-      <PtDataState
-        v-if="!sources.length"
-        :state="sourcesDS.state.value"
-        :title="sourcesDS.state.value === 'empty' ? '还没有豆瓣来源' : ''"
-        :sub="sourcesDS.errorText.value"
-        data-testid="ms-douban-state" />
-      <el-table
-        v-else-if="!isMobile"
-        :data="sources"
-        row-key="id"
-        class="pt-grid"
-        data-testid="ms-douban">
-        <el-table-column label="豆瓣用户" min-width="140">
-          <template #default="{ row }">
-            <div class="ms-strong">{{ row.name || row.user_id }}</div>
-            <div v-if="row.name" class="ms-sub">{{ row.user_id }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <PtStatusPill v-if="!row.enabled" tone="neutral" size="sm">停用</PtStatusPill>
-            <PtStatusPill v-else-if="row.abnormal" tone="dang" size="sm">异常</PtStatusPill>
-            <PtStatusPill v-else tone="ok" size="sm">正常</PtStatusPill>
-          </template>
-        </el-table-column>
-        <el-table-column label="建过的订阅" min-width="150">
-          <template #default="{ row }">
-            {{ row.subscribed || 0 }} 个<template v-if="row.unmatched">
-              · {{ row.unmatched }} 个没找到条目</template
-            >
-          </template>
-        </el-table-column>
-        <el-table-column
-          label="最近一次"
-          min-width="220"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip>
-          <template #default="{ row }">
-            <div v-if="row.last_error" class="ms-error">{{ row.last_error }}</div>
-            <div v-else>
-              {{ row.last_fetch_at ? formatShortDateTime(row.last_fetch_at) : "还没拉过" }}
-            </div>
-            <div v-if="row.enabled && row.next_fetch_at" class="ms-sub">
-              下次 {{ formatShortDateTime(row.next_fetch_at) }}
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="260" align="right">
-          <template #default="{ row }">
-            <el-button
-              link
-              :loading="fetching === row.id"
-              :data-testid="`ms-douban-fetch-${row.id}`"
-              @click="fetchSource(row)"
-              >立即拉取</el-button
-            >
-            <el-button link :data-testid="`ms-douban-items-${row.id}`" @click="showItems(row)"
-              >条目</el-button
-            >
-            <el-button link :data-testid="`ms-douban-edit-${row.id}`" @click="openSource(row)"
-              >修改</el-button
-            >
-            <el-button
-              link
-              type="danger"
-              :data-testid="`ms-douban-del-${row.id}`"
-              @click="removeSource(row)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else class="ms-cards">
-        <PtRowCard v-for="s in sources" :key="s.id">
-          <template #title>{{ s.name || s.user_id }}</template>
-          <template #meta>
-            <span
-              >{{ s.subscribed || 0 }} 个订阅<template v-if="s.unmatched">
-                · {{ s.unmatched }} 个没找到</template
-              ></span
-            >
-            <span v-if="s.last_error" class="ms-full ms-error">{{ s.last_error }}</span>
-          </template>
-          <template #status>
-            <PtStatusPill v-if="!s.enabled" dot tone="neutral" size="sm">停用</PtStatusPill>
-            <PtStatusPill v-else-if="s.abnormal" dot tone="dang" size="sm">异常</PtStatusPill>
-            <PtStatusPill v-else dot tone="ok" size="sm">正常</PtStatusPill>
-          </template>
-          <template #actions>
-            <el-button size="small" :loading="fetching === s.id" @click="fetchSource(s)"
-              >拉取</el-button
-            >
-            <el-button size="small" @click="showItems(s)">条目</el-button>
-            <el-button size="small" @click="openSource(s)">修改</el-button>
-            <el-button size="small" type="danger" plain @click="removeSource(s)">删除</el-button>
-          </template>
-        </PtRowCard>
+      <div class="pt-col">
+        <PtPanel
+          title="质量档案"
+          icon="layers"
+          :count="profiles.length"
+          action="添加"
+          action-icon="plus"
+          @action="openProfile()">
+          <PtDataState
+            v-if="!profiles.length"
+            :state="profilesDS.state.value"
+            :title="profilesDS.state.value === 'empty' ? '还没有质量档案' : ''"
+            :sub="
+              profilesDS.errorText.value ||
+              (profilesDS.state.value === 'empty' ? '不建时按分辨率与来源从好到差挑' : '')
+            "
+            data-testid="ms-profiles-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="profiles"
+            row-key="id"
+            class="pt-grid"
+            data-testid="ms-profiles">
+            <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
+            <el-table-column label="要求" min-width="320">
+              <template #default="{ row }">{{ profileSummary(row) }}</template>
+            </el-table-column>
+            <el-table-column label="" width="120" align="right">
+              <template #default="{ row }">
+                <el-button link :data-testid="`ms-profile-edit-${row.id}`" @click="openProfile(row)"
+                  >修改</el-button
+                >
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`ms-profile-del-${row.id}`"
+                  @click="removeProfile(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="ms-cards">
+            <PtRowCard v-for="p in profiles" :key="p.id">
+              <template #title>{{ p.name }}</template>
+              <template #meta
+                ><span class="ms-full">{{ profileSummary(p) }}</span></template
+              >
+              <template #actions>
+                <el-button size="small" @click="openProfile(p)">修改</el-button>
+                <el-button size="small" type="danger" plain @click="removeProfile(p)"
+                  >删除</el-button
+                >
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
+
+        <PtPanel
+          title="豆瓣想看"
+          icon="heart"
+          :count="sources.length"
+          action="添加"
+          action-icon="plus"
+          @action="openSource()">
+          <p class="ms-tip">
+            每 6 小时拉一次豆瓣用户公开的「收藏」RSS，给「想看」的电影与剧集建订阅；条目从 RSS
+            里消失时不删已经建的订阅。
+          </p>
+          <PtDataState
+            v-if="!sources.length"
+            :state="sourcesDS.state.value"
+            :title="sourcesDS.state.value === 'empty' ? '还没有豆瓣来源' : ''"
+            :sub="sourcesDS.errorText.value"
+            data-testid="ms-douban-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="sources"
+            row-key="id"
+            class="pt-grid"
+            data-testid="ms-douban">
+            <el-table-column label="豆瓣用户" min-width="140">
+              <template #default="{ row }">
+                <div class="ms-strong">{{ row.name || row.user_id }}</div>
+                <div v-if="row.name" class="ms-sub">{{ row.user_id }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="110">
+              <template #default="{ row }">
+                <PtStatusPill v-if="!row.enabled" tone="neutral" size="sm">停用</PtStatusPill>
+                <PtStatusPill v-else-if="row.abnormal" tone="dang" size="sm">异常</PtStatusPill>
+                <PtStatusPill v-else tone="ok" size="sm">正常</PtStatusPill>
+              </template>
+            </el-table-column>
+            <el-table-column label="建过的订阅" min-width="150">
+              <template #default="{ row }">
+                {{ row.subscribed || 0 }} 个<template v-if="row.unmatched">
+                  · {{ row.unmatched }} 个没找到条目</template
+                >
+              </template>
+            </el-table-column>
+            <el-table-column
+              label="最近一次"
+              min-width="220"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip>
+              <template #default="{ row }">
+                <div v-if="row.last_error" class="ms-error">{{ row.last_error }}</div>
+                <div v-else>
+                  {{ row.last_fetch_at ? formatShortDateTime(row.last_fetch_at) : "还没拉过" }}
+                </div>
+                <div v-if="row.enabled && row.next_fetch_at" class="ms-sub">
+                  下次 {{ formatShortDateTime(row.next_fetch_at) }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="260" align="right">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  :loading="fetching === row.id"
+                  :data-testid="`ms-douban-fetch-${row.id}`"
+                  @click="fetchSource(row)"
+                  >立即拉取</el-button
+                >
+                <el-button link :data-testid="`ms-douban-items-${row.id}`" @click="showItems(row)"
+                  >条目</el-button
+                >
+                <el-button link :data-testid="`ms-douban-edit-${row.id}`" @click="openSource(row)"
+                  >修改</el-button
+                >
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`ms-douban-del-${row.id}`"
+                  @click="removeSource(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="ms-cards">
+            <PtRowCard v-for="s in sources" :key="s.id">
+              <template #title>{{ s.name || s.user_id }}</template>
+              <template #meta>
+                <span
+                  >{{ s.subscribed || 0 }} 个订阅<template v-if="s.unmatched">
+                    · {{ s.unmatched }} 个没找到</template
+                  ></span
+                >
+                <span v-if="s.last_error" class="ms-full ms-error">{{ s.last_error }}</span>
+              </template>
+              <template #status>
+                <PtStatusPill v-if="!s.enabled" dot tone="neutral" size="sm">停用</PtStatusPill>
+                <PtStatusPill v-else-if="s.abnormal" dot tone="dang" size="sm">异常</PtStatusPill>
+                <PtStatusPill v-else dot tone="ok" size="sm">正常</PtStatusPill>
+              </template>
+              <template #actions>
+                <el-button size="small" :loading="fetching === s.id" @click="fetchSource(s)"
+                  >拉取</el-button
+                >
+                <el-button size="small" @click="showItems(s)">条目</el-button>
+                <el-button size="small" @click="openSource(s)">修改</el-button>
+                <el-button size="small" type="danger" plain @click="removeSource(s)"
+                  >删除</el-button
+                >
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
       </div>
-    </PtPanel>
+    </div>
 
     <SubscribeDialog v-model="editDialog" :sub="editing" @saved="loadSubs" />
     <SubscriptionDetailDialog v-model="detailDialog" :id="detailID" />

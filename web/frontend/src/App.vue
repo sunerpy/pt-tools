@@ -6,7 +6,7 @@ import AppNav from "./components/shell/AppNav.vue";
 import AppRail from "./components/shell/AppRail.vue";
 import AppStatusBar from "./components/shell/AppStatusBar.vue";
 import MobileChrome from "./components/shell/MobileChrome.vue";
-import V2DeprecationBanner from "./components/V2DeprecationBanner.vue";
+import RssTaskBanner from "./components/shell/RssTaskBanner.vue";
 import { activeNavPath, NAV_GROUPS, NAV_ITEMS } from "./config/navigation";
 import { useLogLevelStore } from "./stores/logLevel";
 import { useRuntimeStore } from "./stores/runtime";
@@ -344,7 +344,7 @@ watch(
 
       <div class="pt-shell__content">
         <div class="pt-shell__inner">
-          <V2DeprecationBanner />
+          <RssTaskBanner />
           <router-view v-slot="{ Component }">
             <transition name="fade" mode="out-in">
               <component :is="Component" />

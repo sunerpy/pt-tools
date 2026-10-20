@@ -21,7 +21,9 @@ import (
 )
 
 const (
-	loginProbeInterval     = 6 * time.Hour
+	loginProbeInterval = 6 * time.Hour
+	// firstProbeMaxDelay 是从没探测过的站点首轮探测最多等多久（见 RunDueProbes）
+	firstProbeMaxDelay     = 5 * time.Minute
 	loginProbeStartupDelay = 15 * time.Second
 	loginProbeTick         = time.Minute
 	loginReminderTickEvery = 1 * time.Minute
@@ -346,7 +348,8 @@ func (m *LoginReminderMonitor) reminderLoop() {
 }
 
 // RunDueProbes 逐个探测到期的 auto 模式站点。NextProbeAt 为空（升级后的老数据、新建的行）
-// 时只安排首轮时间「当前时间 + 固定抖动」，不立即探测，除非有人请求过探测。
+// 时只安排首轮时间「当前时间 + 固定抖动」，不立即探测，除非有人请求过探测；
+// 从没探测过、也没有活动数据的站点，首轮排在 firstProbeMaxDelay 以内。
 func (m *LoginReminderMonitor) RunDueProbes(ctx context.Context) {
 	if m.db == nil {
 		return
@@ -386,7 +389,14 @@ func (m *LoginReminderMonitor) RunDueProbes(ctx context.Context) {
 				jitter = m.newJitterSeconds()
 				cols["probe_jitter_seconds"] = jitter
 			}
-			cols["next_probe_at"] = now.Add(time.Duration(jitter) * time.Second)
+			delay := time.Duration(jitter) * time.Second
+			// 从没探测过、也没有任何活动数据的站点（刚加的站点、刚从旧版升级上来的库）几分钟内就探测：
+			// 按整个探测间隔抖动要等好几个小时，这期间界面上一直没有「最近活跃」（2026-10 升级后 M-Team 等了 4 小时）。
+			// 有过数据的照旧在一个间隔里分散开。
+			if neverProbed(state) {
+				delay = time.Duration(jitter%int(firstProbeMaxDelay/time.Second)+1) * time.Second
+			}
+			cols["next_probe_at"] = now.Add(delay)
 			if err := repo.UpdateColumns(site.Name, cols); err != nil {
 				m.logger.Warnw("login_probe_schedule_failed", "site", site.Name, "err", err)
 			}
@@ -771,6 +781,12 @@ func (m *LoginReminderMonitor) newJitterSeconds() int {
 		return 1
 	}
 	return 1 + rand.Intn(span-1)
+}
+
+// neverProbed 报告站点是否还没有任何探测结果与活动时间：界面上什么都显示不出来。
+func neverProbed(state *models.SiteLoginState) bool {
+	return state.LastProbeAt == nil && state.LastAccessAt == nil && state.LastLoginAt == nil &&
+		state.ApiLastLoginAt == nil && state.CookieLastLoginAt == nil
 }
 
 func effectiveProbeMode(mode string) string {

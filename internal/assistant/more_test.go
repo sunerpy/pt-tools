@@ -90,11 +90,18 @@ func TestHubResetAndSweep(t *testing.T) {
 	assert.Nil(t, events)
 	_, reset, _, _ = h.read(1, h.seq+100)
 	assert.True(t, reset, "比现在还大的序号（重启前、时钟回拨）也要重新读")
-	_, partial := h.snapshot(1)
+	_, partial, _ := h.snapshot(1)
 	assert.Len(t, partial, streamCap+5)
 	h.publish(1, Event{Type: EventDelta, Text: "全文", Replace: true, At: now})
-	_, partial = h.snapshot(1)
+	h.publish(1, Event{Type: EventReasoning, Text: "想", At: now})
+	h.publish(1, Event{Type: EventReasoning, Text: "一想", At: now})
+	_, partial, reasoning := h.snapshot(1)
 	assert.Equal(t, "全文", partial)
+	assert.Equal(t, "想一想", reasoning)
+	h.publish(1, Event{Type: EventMessage, Message: &MessageView{Role: "assistant"}, At: now})
+	_, partial, reasoning = h.snapshot(1)
+	assert.Empty(t, partial, "回答落库以后进行中的文字清掉")
+	assert.Empty(t, reasoning)
 
 	last := h.seq
 	h.publish(2, Event{Type: EventRunFinished, At: now})
@@ -113,7 +120,7 @@ func TestHubResetAndSweep(t *testing.T) {
 func TestHubWaitWakesOnPublish(t *testing.T) {
 	h := newHub(time.Now())
 	done := make(chan EventPage, 1)
-	go func() { done <- h.wait(context.Background(), 1, h.seq, 5*time.Second) }()
+	go func() { done <- h.wait(context.Background(), 1, h.seq, 5*time.Second, nil) }()
 	time.Sleep(20 * time.Millisecond)
 	h.publish(1, Event{Type: EventRunStarted, At: time.Now()})
 	select {
@@ -125,8 +132,34 @@ func TestHubWaitWakesOnPublish(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	page := h.wait(ctx, 1, h.seq, time.Minute)
+	page := h.wait(ctx, 1, h.seq, time.Minute, nil)
 	assert.Empty(t, page.Events)
+}
+
+func TestHubWaitSkipsFilteredEvents(t *testing.T) {
+	h := newHub(time.Now())
+	noReasoning := func(ev Event) bool { return ev.Type != EventReasoning }
+	start := h.seq
+	h.publish(1, Event{Type: EventReasoning, Text: "想", At: time.Now()})
+	page := h.wait(context.Background(), 1, start, 0, noReasoning)
+	assert.Empty(t, page.Events, "挑剩的事件不给")
+	assert.NotNil(t, page.Events)
+	assert.Equal(t, h.seq, page.Last, "挑剩的也算读过了")
+
+	done := make(chan EventPage, 1)
+	go func() { done <- h.wait(context.Background(), 1, start, 5*time.Second, noReasoning) }()
+	time.Sleep(20 * time.Millisecond)
+	h.publish(1, Event{Type: EventReasoning, Text: "再想", At: time.Now()})
+	time.Sleep(20 * time.Millisecond)
+	h.publish(1, Event{Type: EventDelta, Text: "答", At: time.Now()})
+	select {
+	case page := <-done:
+		require.Len(t, page.Events, 1, "只有挑剩的事件时接着等，等到要给的才回")
+		assert.Equal(t, EventDelta, page.Events[0].Type)
+		assert.Equal(t, h.seq, page.Last)
+	case <-time.After(3 * time.Second):
+		t.Fatal("等到要给的事件时要叫醒")
+	}
 }
 
 func TestNormalizeEdgeCases(t *testing.T) {
@@ -150,6 +183,13 @@ func TestSummarizeAndArgText(t *testing.T) {
 	})
 	assert.Equal(t, `删除种子：下载器 2，任务 abc，同时删除文件 是，extra ["a"]`, got)
 	assert.Equal(t, "custom_tool", summarize("custom_tool", map[string]any{}))
+	assert.Equal(t, "暂停订阅：编号 5", summarize("set_subscription_status", map[string]any{"id": float64(5), "status": "paused"}))
+	assert.Equal(t, "恢复订阅：编号 5", summarize("set_subscription_status", map[string]any{"id": float64(5), "status": "active"}))
+	assert.Equal(t, "整理进媒体库：下载器 1，种子 abc，类型 movie，TMDB 编号 278，媒体库 2",
+		summarize("organize_media", map[string]any{"downloader_id": float64(1), "hash": "abc", "media_type": "movie", "tmdb_id": float64(278), "library_id": float64(2)}))
+	assert.Equal(t, "整理进媒体库：下载器 1，种子 abc", summarize("organize_media",
+		map[string]any{"downloader_id": float64(1), "hash": "abc", "media_type": "", "tmdb_id": float64(0), "library_id": float64(0)}),
+		"自动识别、按类型选库时不写 0")
 	assert.Equal(t, "否", argText(false))
 	assert.Equal(t, "1.5", argText(1.5))
 	assert.Equal(t, "", argText(nil))

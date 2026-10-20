@@ -102,7 +102,7 @@ func (t UserInfoServiceTransport) FetchUserInfo(ctx context.Context, def *v2.Sit
 	case errors.Is(err, v2.ErrSiteNotFound):
 		return &ProbeResult{Status: NOT_CONFIGURED, Diagnostic: "站点没有注册到用户信息服务：凭证缺失或站点实例创建失败"}, nil
 	case errors.Is(err, v2.ErrEmptyUsername):
-		return &ProbeResult{Status: PARSE_ERROR, Diagnostic: "取回的用户信息没有用户名，可能不是登录后的页面"}, nil
+		return &ProbeResult{Status: PARSE_ERROR, Diagnostic: diagNoUsername}, nil
 	}
 	return ClassifyUserInfo(def, info, err, clock), nil
 }

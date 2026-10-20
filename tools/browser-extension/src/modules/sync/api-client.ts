@@ -79,7 +79,11 @@ export class PtToolsApiClient {
     return result?.success !== false;
   }
 
-  async syncSiteCredential(site: KnownSite, credential: string): Promise<void> {
+  /**
+   * 把凭据推给 pt-tools。成功时 pt-tools 可能带一句 warning：凭据存下了、但站点还缺别的凭据（HDDolby 还要
+   * API Key）所以暂不启用 —— 调用方要把它告诉用户，不能当成什么都没发生。
+   */
+  async syncSiteCredential(site: KnownSite, credential: string): Promise<{ warning?: string }> {
     const siteId = site.id.toLowerCase();
     const payload: SyncSiteCredentialPayload = {
       [site.syncField]: credential,
@@ -103,6 +107,10 @@ export class PtToolsApiClient {
       const text = await response.text().catch(() => "");
       classifyHttpResponse(response, text);
     }
+    const body = (await this.safeJson(response)) as { warning?: unknown } | null;
+    return typeof body?.warning === "string" && body.warning.trim()
+      ? { warning: body.warning }
+      : {};
   }
 
   async reportVisit(siteId: string, ts: number | Date): Promise<void> {
@@ -181,12 +189,13 @@ export class PtToolsApiClient {
     });
   }
 
-  async ping(): Promise<void> {
+  async ping(timeoutMs?: number): Promise<void> {
     const response = await fetchWithTimeout(`${this.baseUrl}/api/ping`, {
       method: "GET",
       headers: { Accept: "application/json" },
       credentials: "include",
       redirect: "manual",
+      timeoutMs,
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");

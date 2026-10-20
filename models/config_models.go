@@ -112,6 +112,16 @@ type SettingsGlobal struct {
 	// 只经 ConfigStore.SaveAttendanceWindow 写；SaveGlobalSettings 不改这两列。
 	AttendanceWindowStart string `json:"attendance_window_start" gorm:"size:5;default:'08:00'"`
 	AttendanceWindowEnd   string `json:"attendance_window_end" gorm:"size:5;default:'10:00'"`
+	// AttendanceAIEnabled 让 AI 过签到的验证码与答题（HDSky、OpenCD 识别验证码，CHDBits、52PT 答题），默认关闭。
+	// AttendanceVisionModel 是识别验证码用的模型（要能看图，用 AI 助手的服务商与 Key），空时用 AI 助手的模型。
+	// 只经 ConfigStore.SaveAttendanceAI 写；SaveGlobalSettings 不改这两列。
+	AttendanceAIEnabled   bool   `json:"attendance_ai_enabled" gorm:"default:false"`
+	AttendanceVisionModel string `json:"attendance_vision_model" gorm:"size:128"`
+	// AttendanceNotifyEnabled 每天所有站点签完后推一条签到结果，默认开（以前一直推给所有启用的通道）；
+	// AttendanceNotifyChannelIDs 是推到哪些通知通道（JSON 数组），空表示所有启用的通道。
+	// 只经 ConfigStore.SaveAttendanceNotify 写；SaveGlobalSettings 不改这两列。
+	AttendanceNotifyEnabled    bool   `json:"attendance_notify_enabled" gorm:"default:true"`
+	AttendanceNotifyChannelIDs string `json:"attendance_notify_channel_ids" gorm:"size:512;default:'[]'"`
 
 	// 每日战报：每天在设定时刻（HH:MM，进程时区）加上本安装固定的偏移后，把当天的数据增量发到选定的通道。
 	// 只经 ConfigStore.SaveDailyReportSettings 写；SaveGlobalSettings 不改这几列。

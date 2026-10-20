@@ -259,6 +259,7 @@ func NewDBWithVersionAndHooks(
 		&CloakSettings{},
 		&MonitorNotificationLog{},
 		&SiteAttendanceLog{},
+		&SiteAttendanceEvent{},
 		// 刷流（M3）
 		&BrushTask{},
 		&BrushTorrent{},
@@ -306,6 +307,7 @@ func NewDBWithVersionAndHooks(
 		&AssistantConversation{},
 		&AssistantMessage{},
 		&AssistantConfirmation{},
+		&AssistantAttachment{},
 		// 消息模板（M21）
 		&NotificationTemplate{},
 	); err != nil {

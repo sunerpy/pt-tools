@@ -1,9 +1,12 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -224,4 +227,82 @@ func TestAppTMDBImage(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusOK, call("w342", "poster.png").Code)
 	assert.Empty(t, appImageSlots, "取完图名额还回去了")
+}
+
+// 媒体库（App API，也是 MCP 的媒体工具走的路）：媒体库列表、识别、整理预览、整理、重试；参数不对回 400
+func TestAppMediaLibraryOrganize(t *testing.T) {
+	e := newOrganizeServer(t)
+	e.srv.SetMediaService(e.rec)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPut, "/api/media/organize/settings", `{"min_video_mb":1}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":`+jsonPath(e.dlDir)+`}`).Code)
+
+	w := appAs(t, e.srv.appMediaLibraries, http.MethodGet, "/api/app/v1/media/libraries")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var libs []AppMediaLibrary
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &libs))
+	require.Len(t, libs, 1)
+	assert.Equal(t, "电影", libs[0].Name)
+	assert.Equal(t, models.MediaKindMovie, libs[0].Kind)
+
+	w = appAsWith(t, e.srv.appMediaRecognize, http.MethodPost, "/api/app/v1/media/recognize", `{"title":"The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi"}`, "app:read")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assertNoSecrets(t, w.Body.Bytes())
+	var rec AppRecognition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rec))
+	require.NotNil(t, rec.Match)
+	assert.Equal(t, 278, rec.Match.ID)
+	assert.Equal(t, 1994, rec.Meta.Year)
+	assert.Equal(t, "1080p", rec.Meta.Resolution)
+	assert.Equal(t, http.StatusBadRequest, appAsWith(t, e.srv.appMediaRecognize, http.MethodPost, "/api/app/v1/media/recognize", `{}`, "app:read").Code)
+
+	body := `{"downloader_id":1,"hash":"hash1"}`
+	w = appAsWith(t, e.srv.appOrganizePreview, http.MethodPost, "/api/app/v1/media/organize/preview", body, "app:read")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var plan AppOrganizePlan
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &plan))
+	require.Empty(t, plan.Problem)
+	require.Len(t, plan.Items, 1)
+	target := filepath.Join(e.library, "肖申克的救赎 (1994)", "肖申克的救赎 (1994) - 1080p BluRay H.264.mkv")
+	assert.Equal(t, target, plan.Items[0].Target)
+	assert.Equal(t, "pending", plan.Items[0].Status)
+	require.NotNil(t, plan.Library)
+	assert.Equal(t, "电影", plan.Library.Name)
+	_, err := os.Stat(target)
+	assert.ErrorIs(t, err, os.ErrNotExist, "预览不动文件")
+
+	for _, bad := range []string{
+		`{"downloader_id":1}`, `{"downloader_id":0,"hash":"hash1"}`, `{"downloader_id":1,"hash":"hash1","tmdb_id":278}`,
+		`{"downloader_id":1,"hash":"hash1","media_type":"book","tmdb_id":1}`, `{"downloader_id":1,"hash":"hash1","x":1}`,
+	} {
+		assert.Equal(t, http.StatusBadRequest, appAsWith(t, e.srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", bad, "app:write").Code, bad)
+	}
+
+	w = appAsWith(t, e.srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", body, "app:write")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var res AppOrganizeResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+	assert.Equal(t, 1, res.Created)
+	_, err = os.Stat(target)
+	require.NoError(t, err)
+
+	page, err := e.srv.organizer.History(context.Background(), organize.HistoryQuery{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	w = appWithID(t, e.srv.appMediaHistoryRetry, http.MethodPost, "/api/app/v1/media/history/"+strconv.Itoa(int(page.Items[0].ID))+"/retry", strconv.Itoa(int(page.Items[0].ID)), "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+	assert.Equal(t, 1, res.Done, "库里已经有了")
+	assert.Equal(t, http.StatusNotFound, appWithID(t, e.srv.appMediaHistoryRetry, http.MethodPost, "/api/app/v1/media/history/99/retry", "99", "").Code)
+}
+
+// 没有整理入库或媒体识别服务时回 503
+func TestAppMediaLibraryUnavailable(t *testing.T) {
+	srv := setupServer(t)
+	srv.mgr.StopAll()
+	assert.Equal(t, http.StatusServiceUnavailable, appAs(t, srv.appMediaLibraries, http.MethodGet, "/api/app/v1/media/libraries").Code)
+	assert.Equal(t, http.StatusServiceUnavailable, appAsWith(t, srv.appMediaRecognize, http.MethodPost, "/api/app/v1/media/recognize", `{"title":"x"}`, "app:read").Code)
+	assert.Equal(t, http.StatusServiceUnavailable, appAsWith(t, srv.appOrganizePreview, http.MethodPost, "/api/app/v1/media/organize/preview", `{"downloader_id":1,"hash":"h"}`, "app:read").Code)
+	assert.Equal(t, http.StatusServiceUnavailable, appAsWith(t, srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", `{"downloader_id":1,"hash":"h"}`, "app:write").Code)
+	assert.Equal(t, http.StatusServiceUnavailable, appWithID(t, srv.appMediaHistoryRetry, http.MethodPost, "/api/app/v1/media/history/1/retry", "1", "").Code)
 }

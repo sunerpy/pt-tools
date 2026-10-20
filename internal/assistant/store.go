@@ -10,6 +10,8 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/mcp"
+	"github.com/sunerpy/pt-tools/internal/redact"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -32,17 +34,28 @@ type ConversationDetail struct {
 	RunID string `json:"run_id,omitempty"`
 	// Partial 是进行中的运行到现在的回答文字
 	Partial string `json:"partial,omitempty"`
+	// PartialReasoning 是进行中的运行这一步到现在的推理内容（思考过程）
+	PartialReasoning string `json:"partial_reasoning,omitempty"`
 	// LastSeq 是读事件的 after：从它接着读不会漏
 	LastSeq int64 `json:"last_seq"`
+	// Usage 是上下文用量（读不出来时没有）
+	Usage *UsageView `json:"usage,omitempty"`
 }
 
 // MessageView 是一条消息（脱敏以后的）。
 type MessageView struct {
-	ID        uint           `json:"id"`
-	RunID     string         `json:"run_id,omitempty"`
-	Role      string         `json:"role"`
-	Content   string         `json:"content"`
+	ID      uint   `json:"id"`
+	RunID   string `json:"run_id,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Reasoning 是模型的推理内容（思考过程，只有助手消息有）
+	Reasoning string `json:"reasoning,omitempty"`
+	// Model、Effort 是这一轮的模型与推理等级（为空是设置里的模型、不指定推理等级）
+	Model     string         `json:"model,omitempty"`
+	Effort    string         `json:"effort,omitempty"`
 	ToolCalls []ToolCallView `json:"tool_calls,omitempty"`
+	// Attachments 是用户消息带的附件
+	Attachments []AttachmentView `json:"attachments,omitempty"`
 	// ToolName、ToolCallID 是工具结果对应的调用
 	ToolName   string    `json:"tool_name,omitempty"`
 	ToolCallID string    `json:"tool_call_id,omitempty"`
@@ -65,14 +78,17 @@ type ConfirmationView struct {
 	RunID      string `json:"run_id"`
 	ToolCallID string `json:"tool_call_id"`
 	Tool       string `json:"tool"`
-	// Summary 是给人看的一句话（例如「暂停种子：下载器 #1，任务 abc」）
+	// Summary 是给人看的一句话（有预览时是预览写的，例如「暂停下载器「qb」里的「Dune」」）
 	Summary   string         `json:"summary"`
 	Arguments map[string]any `json:"arguments"`
-	Status    string         `json:"status"`
-	DecidedBy string         `json:"decided_by,omitempty"`
-	DecidedAt *time.Time     `json:"decided_at,omitempty"`
-	ExpiresAt time.Time      `json:"expires_at"`
-	CreatedAt time.Time      `json:"created_at"`
+	// Changes 是会改什么（改以前、改以后），Impact 是可能有什么影响：写工具的预览给的，没有时为空
+	Changes   []mcp.Change `json:"changes,omitempty"`
+	Impact    []string     `json:"impact,omitempty"`
+	Status    string       `json:"status"`
+	DecidedBy string       `json:"decided_by,omitempty"`
+	DecidedAt *time.Time   `json:"decided_at,omitempty"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 // 读会话的上限。
@@ -90,8 +106,12 @@ func (s *Service) conversationView(c models.AssistantConversation) ConversationV
 
 func messageView(m models.AssistantMessage) MessageView {
 	v := MessageView{
-		ID: m.ID, RunID: m.RunID, Role: m.Role, Content: m.Content, ToolName: m.ToolName, ToolCallID: m.ToolCallID,
-		IsError: m.IsError, CreatedAt: m.CreatedAt,
+		ID: m.ID, RunID: m.RunID, Role: m.Role, Content: m.Content, Model: m.Model, Effort: m.Effort, ToolName: m.ToolName,
+		ToolCallID: m.ToolCallID, IsError: m.IsError, CreatedAt: m.CreatedAt,
+	}
+	if m.Role == models.AssistantRoleAssistant {
+		// 落库的推理内容只遮了凭证（要原样回传给模型）；给人看的和回答一样全遮
+		v.Reasoning = redact.Text(m.Reasoning)
 	}
 	if m.ToolCalls != "" {
 		_ = json.Unmarshal([]byte(m.ToolCalls), &v.ToolCalls)
@@ -102,11 +122,19 @@ func messageView(m models.AssistantMessage) MessageView {
 func confirmationView(c models.AssistantConfirmation) ConfirmationView {
 	args := map[string]any{}
 	_ = json.Unmarshal([]byte(c.Arguments), &args)
-	return ConfirmationView{
+	v := ConfirmationView{
 		ID: c.ID, RunID: c.RunID, ToolCallID: c.ToolCallID, Tool: c.ToolName, Summary: summarize(c.ToolName, args),
 		Arguments: args, Status: c.Status, DecidedBy: c.DecidedBy, DecidedAt: c.DecidedAt, ExpiresAt: c.ExpiresAt,
 		CreatedAt: c.CreatedAt,
 	}
+	var pv mcp.Preview
+	if c.Preview != "" && json.Unmarshal([]byte(c.Preview), &pv) == nil {
+		if strings.TrimSpace(pv.Summary) != "" {
+			v.Summary = pv.Summary
+		}
+		v.Changes, v.Impact = pv.Changes, pv.Impact
+	}
+	return v
 }
 
 // conversation 按属主取会话；不是这个属主的当作不存在。
@@ -187,27 +215,47 @@ func (s *Service) Conversation(ctx context.Context, a Actor, id uint) (Conversat
 		return ConversationDetail{}, err
 	}
 	// 先取事件位置再读库：这之后的事件从 LastSeq 续读都拿得到
-	seq, partial := s.hub.snapshot(id)
+	seq, partial, partialReasoning := s.hub.snapshot(id)
 	var msgs []models.AssistantMessage
-	if err := s.db(ctx).Where("conversation_id = ?", id).Order("id desc").Limit(detailMessages).Find(&msgs).Error; err != nil {
+	if err = s.db(ctx).Where("conversation_id = ?", id).Order("id desc").Limit(detailMessages).Find(&msgs).Error; err != nil {
 		return ConversationDetail{}, fmt.Errorf("读取消息失败: %w", err)
 	}
 	var confs []models.AssistantConfirmation
-	if err := s.db(ctx).Where("conversation_id = ?", id).Order("id desc").Limit(detailConfirmations).Find(&confs).Error; err != nil {
+	if err = s.db(ctx).Where("conversation_id = ?", id).Order("id desc").Limit(detailConfirmations).Find(&confs).Error; err != nil {
 		return ConversationDetail{}, fmt.Errorf("读取待确认操作失败: %w", err)
 	}
 	d := ConversationDetail{
 		ConversationView: s.conversationView(c), LastSeq: seq,
 		Messages: make([]MessageView, 0, len(msgs)), Confirmations: make([]ConfirmationView, 0, len(confs)),
 	}
+	var userIDs []uint
+	for _, m := range msgs {
+		if m.Role == models.AssistantRoleUser {
+			userIDs = append(userIDs, m.ID)
+		}
+	}
+	atts, err := s.attachmentViews(ctx, userIDs)
+	if err != nil {
+		return ConversationDetail{}, err
+	}
 	for i := len(msgs) - 1; i >= 0; i-- {
-		d.Messages = append(d.Messages, messageView(msgs[i]))
+		v := messageView(msgs[i])
+		v.Attachments = atts[msgs[i].ID]
+		d.Messages = append(d.Messages, v)
 	}
 	for i := len(confs) - 1; i >= 0; i-- {
 		d.Confirmations = append(d.Confirmations, confirmationView(confs[i]))
 	}
 	if r := s.activeRun(id); r != nil {
-		d.RunID, d.Partial, d.Running = r.id, partial, true
+		d.RunID, d.Partial, d.PartialReasoning, d.Running = r.id, partial, partialReasoning, true
+	}
+	if set, ready, uerr := s.usageSettings(ctx); uerr == nil {
+		if ready && set.contextWindow == 0 {
+			s.refreshModelsSoon(set.llm)
+		}
+		if u, uerr := s.conversationUsage(ctx, c, set, ""); uerr == nil {
+			d.Usage = &u
+		}
 	}
 	return d, nil
 }
@@ -241,7 +289,7 @@ func (s *Service) endPurge(id uint) {
 	delete(s.purging, id)
 }
 
-// purge 在一个事务里删掉会话的消息、待确认记录与会话本身。before 不为零时只删 updated_at 早于它的（保留期清理）。
+// purge 在一个事务里删掉会话的消息、附件、待确认记录与会话本身。before 不为零时只删 updated_at 早于它的（保留期清理）。
 func (s *Service) purge(ctx context.Context, id uint, before time.Time) error {
 	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
 		q := tx.Where("id = ?", id)
@@ -258,6 +306,9 @@ func (s *Service) purge(ctx context.Context, id uint, before time.Time) error {
 		if err := tx.Where("conversation_id = ?", id).Delete(&models.AssistantMessage{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("conversation_id = ?", id).Delete(&models.AssistantAttachment{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("conversation_id = ?", id).Delete(&models.AssistantConfirmation{}).Error
 	})
 	if err != nil {
@@ -267,8 +318,12 @@ func (s *Service) purge(ctx context.Context, id uint, before time.Time) error {
 	return nil
 }
 
-// Cleanup 删掉保留期外（updated_at 早于现在减保留天数）、没有进行中运行的会话；保留天数为 0 时不清理。返回删了几个。
+// Cleanup 删掉传了一天还没发的附件，再删保留期外（updated_at 早于现在减保留天数）、没有进行中运行的会话；
+// 保留天数为 0 时不清理会话。返回删了几个会话。
 func (s *Service) Cleanup(ctx context.Context) (int, error) {
+	if err := s.cleanPendingAttachments(ctx); err != nil {
+		return 0, err
+	}
 	row, _, err := s.loadSettings(ctx)
 	if err != nil {
 		return 0, err

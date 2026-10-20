@@ -200,22 +200,52 @@ func TestRunDueProbes_FirstRoundIsSpreadAndNotImmediate(t *testing.T) {
 	}
 
 	m.RunDueProbes(context.Background())
-	assert.Equal(t, int32(0), site.calls.Load(), "upgraded rows without NextProbeAt are scheduled, not probed at once")
+	assert.Equal(t, int32(0), site.calls.Load(), "rows without NextProbeAt are scheduled, not probed at once")
 
 	distinct := map[int64]struct{}{}
 	for i := range 20 {
 		st := loadState(t, m, fmt.Sprintf("S%02d", i))
 		require.NotNil(t, st.NextProbeAt)
 		assert.True(t, st.NextProbeAt.After(t0), "first probe is in the future")
-		assert.False(t, st.NextProbeAt.After(t0.Add(6*time.Hour)), "first round fits in one 6h interval")
+		// 从没探测过的站点几分钟内就探测：不然界面要等好几个小时才有「最近活跃」
+		assert.False(t, st.NextProbeAt.After(t0.Add(firstProbeMaxDelay)), "never-probed sites are probed within minutes")
 		assert.Positive(t, st.ProbeJitterSeconds)
 		distinct[st.NextProbeAt.Unix()] = struct{}{}
 	}
 	assert.Greater(t, len(distinct), 1, "first probes are spread out, not aligned")
 
-	advanceClock(m, 6*time.Hour)
+	advanceClock(m, firstProbeMaxDelay)
 	m.RunDueProbes(context.Background())
-	assert.Equal(t, int32(20), site.calls.Load(), "every site is probed once within the first interval")
+	assert.Equal(t, int32(20), site.calls.Load(), "every never-probed site is probed within the first few minutes")
+}
+
+// 有过探测数据、只是没有 NextProbeAt 的行（旧版升级上来的）照旧在一个探测间隔里分散开，重启不补探。
+func TestRunDueProbes_RowsWithDataKeepIntervalJitter(t *testing.T) {
+	db := newReminderTestDB(t)
+	t0 := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	m := newReminderMonitorForTest(db, t0)
+	site := &countingSite{fakeReminderSite: fakeReminderSite{info: v2.UserInfo{LastAccess: t0.Unix()}}}
+	m.resolver = &fakeReminderResolver{def: nexusDef(), site: site}
+	probed := t0.Add(-3 * time.Hour)
+	for i := range 20 {
+		name := fmt.Sprintf("S%02d", i)
+		createSite(t, m, cookieSite(name))
+		// 抖动取 10 分钟以上：按整个间隔排时一定排在 firstProbeMaxDelay 之后
+		require.NoError(t, db.Create(&models.SiteLoginState{
+			SiteName: name, ProbeMode: ProbeModeAuto, LastProbeAt: &probed, LastAccessAt: &probed,
+			ProbeJitterSeconds: 600 + i*60,
+		}).Error)
+	}
+	m.RunDueProbes(context.Background())
+	assert.Equal(t, int32(0), site.calls.Load())
+	for i := range 20 {
+		st := loadState(t, m, fmt.Sprintf("S%02d", i))
+		require.NotNil(t, st.NextProbeAt)
+		assert.Equal(t, t0.Add(time.Duration(600+i*60)*time.Second), st.NextProbeAt.UTC(), "the stored per-site jitter is used as is")
+	}
+	advanceClock(m, firstProbeMaxDelay)
+	m.RunDueProbes(context.Background())
+	assert.Equal(t, int32(0), site.calls.Load(), "sites that already have data are not rushed")
 }
 
 func TestRunDueProbes_RestartDoesNotReprobe(t *testing.T) {

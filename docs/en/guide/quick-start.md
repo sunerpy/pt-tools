@@ -1,6 +1,6 @@
 # Quick start
 
-This page walks through the first setup in order: sign in, add a downloader, sign in to your sites, subscribe to an RSS feed and confirm the first automatic download. If pt-tools is not installed yet, start with [Install](install.md).
+This page walks through the first setup in order: sign in, add a downloader, sign in to your sites, subscribe to an RSS feed, start RSS tasks and confirm the first automatic download. If pt-tools is not installed yet, start with [Install](install.md).
 
 ## 1. Sign in and change the password
 
@@ -29,24 +29,34 @@ Where to find them is explained in [Cookies and API keys](get-cookie-apikey.md).
 
 1. On the site's page, open the RSS subscriptions (RSS 订阅) tab and add a feed.
 2. Enter a name and the RSS link and choose a downloader; you can also choose a download folder, a check interval and filter rules.
-3. After saving, the feed is fetched at that interval in the background.
+3. After saving, start RSS tasks as described in the next section; only then is the feed fetched at its interval.
 
 > [!WARNING]
 > A feed with no filter rules attached **downloads freeleech torrents only**. To follow a series or download torrents that are not free, create a filter rule first and turn off its Free only (仅免费) option if needed.
 
 How to find a site's RSS link and what each option does is covered in [RSS subscriptions](rss-subscription.md).
 
-## 5. Add filter rules if you need them
+## 5. Start RSS tasks and turn on auto-start
+
+RSS tasks fetch the feeds at their intervals and push torrents. Auto-start is off by default, so start them by hand the first time:
+
+1. Click RSS tasks (RSS 任务) at the left end of the status bar at the bottom (on a phone, the panel is under Me (我的) in the bottom tabs), then click Start (启动) in the panel that opens.
+2. In the same panel, turn on Start when the program starts (程序启动时自动运行). From then on RSS tasks run whenever the program starts, including after a container restart or an upgrade.
+
+While auto-start is off and RSS tasks are not running, a notice at the top of each page says RSS tasks are not running (RSS 任务没有运行), with Start RSS tasks (启动 RSS 任务) and Turn on auto-start (打开自动启动) buttons. What RSS tasks cover and when they do not run is explained in [Configuration](../configuration.md#starting-and-stopping-rss-tasks).
+
+## 6. Add filter rules if you need them
 
 Open Rules → Filter rules (规则 → 过滤规则), choose Add rule (添加规则), enter a keyword, wildcard or regular expression, then attach the rule to the RSS feed. The syntax and examples for TV series are in [Filter rules and TV series](filter-rules-tv-series.md). Downloading freeleech only needs no rules.
 
-## 6. Confirm the first automatic download
+## 7. Confirm the first automatic download
 
+- RSS tasks (RSS 任务) in the status bar shows whether they are running; when they are not, open it to see why.
 - Downloads → Task list (任务列表) lists every torrent that was pushed, with its freeleech end time and push status.
 - Downloads → Downloader web UI (下载器 Web UI) shows each torrent's progress in the downloader itself.
 - When a push fails, or nothing matched, System → Logs (运行日志) records the reason.
 
-## 7. Back up the key
+## 8. Back up the key
 
 Copy `secret.key` from the data folder, together with the database, to another device. Without the key, saved cookies cannot be decrypted. Backing up and restoring are covered in [Upgrades and backups](upgrade.md).
 

@@ -91,6 +91,8 @@ type Request struct {
 	Body any
 	// Write 为真时按写接口调用（要 mcp:write）
 	Write bool
+	// Preview 为真时是写工具的预览读现状：令牌有 mcp:write 就能读（没有 mcp:read 也行）
+	Preview bool
 }
 
 // Response 是 App API 的回应。
@@ -131,9 +133,11 @@ func NewServer(d Deps) *sdk.Server {
 		d.Caller = CallerFromRequest
 	}
 	s := sdk.NewServer(&sdk.Implementation{Name: "pt-tools", Title: "pt-tools", Version: d.Version}, &sdk.ServerOptions{
-		Instructions: "pt-tools manages private-tracker (PT) sites, downloaders (qBittorrent/Transmission) and media subscriptions. " +
-			"Use read tools freely. Write tools (pause/resume/delete/push torrents, add subscriptions) change the user's downloaders " +
-			"and require confirm=true: ask the user before calling them.",
+		Instructions: "pt-tools manages private-tracker (PT) sites, downloaders (qBittorrent/Transmission), media subscriptions and media libraries. " +
+			"Use read tools freely. Write tools (pause/resume/delete/push torrents, add, pause, search and delete subscriptions, organize into the library) " +
+			"change the user's downloaders, subscriptions or library. Called without confirm=true a write tool changes nothing and returns a preview " +
+			"(what would change, before and after, and the possible impact): show it to the user, and only after they agree call it again with confirm=true. " +
+			"get_config and change_config read and change pt-tools configuration (they need the app:config scope); call get_skill pt-tools-config first for how to use them.",
 	})
 	registerTools(s, &d)
 	return s
@@ -194,9 +198,21 @@ func toolSchema[In any](sp spec) *jsonschema.Schema {
 	return schema
 }
 
-// register 注册一个工具。参数的校验放在这里而不是交给 go-sdk：写工具每次调用都记审计，参数不对、没有确认被拒的也记。
-// 顺序是：取令牌、查权限范围、写工具看 confirm、按 schema 校验参数、换成 App API 的请求在进程内调用，把 JSON 回应交给客户端。
+// register 注册一个读工具（写工具用 registerWrite，要给预览）。
 func register[In any](s *sdk.Server, d *Deps, sp spec, build func(in In) (call, error)) {
+	registerTool(s, d, sp, build, nil)
+}
+
+// registerWrite 注册一个写工具：不带 confirm=true 时不执行，回 preview 写的预览。
+func registerWrite[In any](s *sdk.Server, d *Deps, sp spec, preview previewer[In], build func(in In) (call, error)) {
+	sp.write = true
+	registerTool(s, d, sp, build, preview)
+}
+
+// registerTool 注册一个工具。参数的校验放在这里而不是交给 go-sdk：写工具执行时都记审计，参数不对、权限不够被拒的也记。
+// 顺序是：取令牌、查权限范围、按 schema 校验参数；写工具没有 confirm=true 时回预览（只读，不记审计）；
+// 再换成 App API 的请求在进程内调用，把 JSON 回应交给客户端。
+func registerTool[In any](s *sdk.Server, d *Deps, sp spec, build func(in In) (call, error), preview previewer[In]) {
 	schema := toolSchema[In](sp)
 	resolved, err := schema.Resolve(nil)
 	if err != nil {
@@ -234,15 +250,25 @@ func register[In any](s *sdk.Server, d *Deps, sp spec, build func(in In) (call, 
 		if err := json.Unmarshal(raw, &args); err != nil {
 			return fail("error:invalid_argument", nil, fmt.Errorf("参数不是 JSON: %w", err))
 		}
-		if m, isObj := args.(map[string]any); sp.write && (!isObj || m["confirm"] != true) {
-			return fail("denied:confirm", nil, errConfirm)
-		}
+		m, isObj := args.(map[string]any)
+		confirmed := isObj && m["confirm"] == true
 		if err := resolved.Validate(args); err != nil {
 			return fail("error:invalid_argument", nil, fmt.Errorf("参数不对: %w", err))
 		}
 		var in In
 		if err := json.Unmarshal(raw, &in); err != nil {
 			return fail("error:invalid_argument", nil, fmt.Errorf("参数不对: %w", err))
+		}
+		if sp.write && !confirmed {
+			if preview == nil {
+				return fail("denied:confirm", nil, errConfirm)
+			}
+			// 只读现状、不改东西，不记审计
+			pv, err := preview(ctx, d, c, in)
+			if err != nil {
+				return toolError(err), nil
+			}
+			return previewResult(sp.name, pv), nil
 		}
 		cl, err := build(in)
 		if err != nil {
@@ -275,6 +301,21 @@ func register[In any](s *sdk.Server, d *Deps, sp spec, build func(in In) (call, 
 		text, _ := json.Marshal(out)
 		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(text)}}, StructuredContent: out}, nil
 	})
+}
+
+// previewResult 是写工具的预览结果：JSON（Preview），不是错误。
+func previewResult(tool string, pv Preview) *sdk.CallToolResult {
+	pv.Pending, pv.Tool, pv.Note = true, tool, previewNote
+	if pv.Changes == nil {
+		pv.Changes = []Change{}
+	}
+	if pv.Impact == nil {
+		pv.Impact = []string{}
+	}
+	buf, _ := json.Marshal(pv)
+	var out map[string]any
+	_ = json.Unmarshal(buf, &out)
+	return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(buf)}}, StructuredContent: out}
 }
 
 // toolError 是工具执行出错的结果（不是协议错误）：客户端与 AI 助手能看到原因。
