@@ -7,12 +7,12 @@
   <plot>豆瓣的简介 &amp; &lt;更多&gt;。</plot>
   <runtime>181</runtime>
   <ratings>
+    <rating name="themoviedb" max="10" default="false">
+      <value>8.1</value>
+    </rating>
     <rating name="douban" max="10" default="true">
       <value>8.8</value>
       <votes>850981</votes>
-    </rating>
-    <rating name="themoviedb" max="10" default="false">
-      <value>8.1</value>
     </rating>
   </ratings>
   <uniqueid type="tmdb" default="true">872585</uniqueid>

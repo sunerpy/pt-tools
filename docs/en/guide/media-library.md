@@ -2,7 +2,7 @@
 
 pt-tools can put finished movies and TV shows into your media library: it recognises the title, places the files in the library folder following the library's naming template (hard links by default, so no extra space is used and the torrent keeps seeding), writes NFO files and artwork, asks Emby, Jellyfin or Plex to scan, and sends a notification.
 
-Settings live under Media → Media library (媒体 → 媒体库) and results under Media → Organise history (媒体 → 整理历史). Recognition uses TMDB, so fill in the TMDB API key under [media recognition](media-recognize.md) first.
+Settings live under Media → Media library (媒体 → 媒体库) and results under Media → Organise history (媒体 → 整理历史). Recognition uses TMDB: released builds have a TMDB API key built in, so there is nothing to fill in; builds from source need a key under [media recognition](media-recognize.md#tmdb-api-key) first.
 
 ## Preparing the folders
 
@@ -175,7 +175,7 @@ The NFO files use the Kodi format, read by the NFO support of Emby, Jellyfin and
 
 Plot and rating (简介与评分) come from TMDB by default. With Douban (豆瓣) selected, pt-tools looks the title up on Douban by its Chinese name before writing the NFO, then by its original title. Among titles with a matching name, the same year wins; otherwise a title within one year is used only when it's the only one. When more than one title has the name and it's unclear which, TMDB's data is used.
 
-- For a movie, the plot is replaced with Douban's, Douban's rating becomes the main one (TMDB's is kept), and the Douban ID is added. When a torrent pushed by pt-tools carries a Douban ID from the site, that ID is tried first and used only when its name and year match.
+- For a movie, the plot is replaced with Douban's, Douban's rating becomes the main one (TMDB's is kept; the NFO lists Douban's last, because Jellyfin and Emby show the last rating), and the Douban ID is added. When a torrent pushed by pt-tools carries a Douban ID from the site, that ID is tried first and used only when its name and year match.
 - Douban lists each season of a series separately: `tvshow.nfo` uses season 1, and `season.nfo` uses that season's plot. Episode NFO files still come from TMDB.
 - Douban has no public API; pt-tools uses the two endpoints Douban's own web pages use (search and title details), doesn't log in, and doesn't go through the media recognition proxy. When nothing is found or Douban can't be reached, TMDB's data is used; a manual organise says so in its result, and background organising writes it to the log.
 - Douban is requested at most once every 2 seconds; search results are cached for a day and titles for a week. Lookups happen only for NFO files that will be written: existing ones that aren't overwritten aren't looked up, and they're replaced after turning on Overwrite existing NFO and images (覆盖已有的 NFO 与图片) and organising again.

@@ -239,7 +239,7 @@ One item per brush task: `id`, `name`, `enabled`, `site`, `site_enabled`, `downl
 
 ## Media
 
-These endpoints match Media (媒体) in the web interface; see [Subscriptions](../guide/media-subscribe.md) and [Media library organising](../guide/media-library.md). Creating subscriptions and Explore use TMDB; without an API key they respond with 400, see [Enter a TMDB API key](../guide/media-recognize.md#enter-a-tmdb-api-key).
+These endpoints match Media (媒体) in the web interface; see [Subscriptions](../guide/media-subscribe.md) and [Media library organising](../guide/media-library.md). Creating subscriptions and Explore use TMDB; without a usable API key they respond with 400, see [TMDB API key](../guide/media-recognize.md#tmdb-api-key).
 
 ### GET /media/history
 
@@ -259,7 +259,7 @@ One item per library: `id`, `name`, `kind` (`movie` or `tv`), `anime` (anime onl
 
 - `summary`: one readable line (name, year, season and episode); `meta`: what the title parsed into, such as `name_cn`, `name_en`, `year`, `type`, `season`, `episode`, `episode_end`, `resolution`, `source`, `video_codec`, `hdr`, `audio` and `group`;
 - `match`: the TMDB entry (`id`, `media_type`, `title`, `original_title`, `year`, `overview`, `poster_path`, `vote_average`, `imdb_id`), absent without a reliable match; `source`: `override` (corrected by hand), `imdb`, `search` or `none`; `score`;
-- `candidates`: up to 5 candidates (with `score`); `message`: a note (for example that without a TMDB API key only the title was parsed); `error`: why TMDB failed.
+- `candidates`: up to 5 candidates (with `score`); `message`: a note (for example that without a usable TMDB API key only the title was parsed); `error`: why TMDB failed.
 
 ### POST /media/organize/preview
 

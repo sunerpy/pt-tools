@@ -649,6 +649,14 @@ Edge 商店发布需要仓库 Secrets：
 
 `pt-tools version` 的 `Default relay:` 一行显示 `configured`、`none` 或 `invalid`（不打印地址）。`Release` workflow 在 GoReleaser 之后检查 linux-amd64 归档：Secret 设了却不是 `configured` 时这个 job 失败，draft 不发布。
 
+### 内置的 TMDB Key
+
+发版构建内置一个 TMDB API Key，用户不填自己的 Key 也能识别、整理与订阅（和 Jellyfin、tinyMediaManager 一样）：`.goreleaser.yaml` 从仓库 Secret `PT_TOOLS_TMDB_KEY`（v3 的 API Key 或 v4 的读取令牌）读入 `internal/media/tmdb.BuiltinKey`；`Dockerfile` 自己编译时用 BuildKit secret `tmdb_key`（`docker.yml` 从同一个 Secret 传），不用 build-arg，免得 Key 写进镜像历史与 provenance。没设时为空，用户要在「媒体识别」里填自己的 Key；本地 `make build` 不注入。
+
+Key 随二进制分发，能被取出来，不当作秘密；放在 Secret 里是为了不进仓库、能换。用户填了自己的 Key 时用自己的；用户把 TMDB 接口地址换成镜像或中转时不用内置的（内置的只发给 `api.themoviedb.org` 与 `api.tmdb.org`）。
+
+`pt-tools version` 的 `TMDB key:` 一行显示 `configured`、`none` 或 `invalid`（不打印 Key）。`Release` workflow 和默认 relay 一样检查 linux-amd64 归档：Secret 设了却不是 `configured` 时这个 job 失败，draft 不发布。
+
 ### 部署托管 relay
 
 托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。负载均衡器从别的机器连过来时（例如 AWS ALB），用 `--bind`（workflow 里是变量 `RELAY_BIND`）把端口绑到服务器的私网地址，安全组只放行负载均衡器；客户端 IP 取负载均衡器写的头（ALB 是 `X-Forwarded-For`，relay 取最后一个地址），`/metrics` 不要对外，在负载均衡器上挡掉。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。同一个容器名上的部署、收尾、回滚与看门狗用 `flock` 排队（锁文件 `/tmp/deploy-relay-<name>.lock`），服务器上要有 util-linux 的 `flock` 与 `setsid`。

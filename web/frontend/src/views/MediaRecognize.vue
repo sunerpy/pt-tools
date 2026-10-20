@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /*
  * 媒体识别（路线图 M9）：解析种子标题，再到 TMDB 找对应的电影或剧集；可以按 TMDB 编号手动纠正，
- * 也可以加识别词（屏蔽、替换、集数偏移）。TMDB 的 API Key 由用户自己申请，加密保存、只写不读。
+ * 也可以加识别词（屏蔽、替换、集数偏移）。发布的版本内置了 TMDB API Key，不填也能用；填了自己的就用自己的
+ * （加密保存、只写不读）。页面写明现在用的是哪个，并按 TMDB 的要求带上它的标志与声明。
  * 画板没有这一页，沿用站点组列表页的样式：页头 + 面板里的表单与表格，手机是行卡。
  */
 import {
@@ -15,6 +16,7 @@ import {
   type TMDBItem,
   mediaApi,
 } from "@/api";
+import tmdbLogo from "@/assets/tmdb-logo.svg";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -49,6 +51,27 @@ const form = ref({ key: "", language: "zh-CN", proxy: "", api: "", image: "" });
 const loadFailed = ref(false);
 const saving = ref(false);
 const testing = ref(false);
+/** 现在用的是哪个 Key（写在 API Key 输入框下面） */
+const keySourceText = computed(() => {
+  const s = settings.value;
+  if (!s) return "";
+  switch (s.key_source) {
+    case "user":
+      return s.builtin_key ? "正在用自己填的 Key；清除后改用内置的 Key。" : "正在用自己填的 Key。";
+    case "builtin":
+      return "正在用内置的 Key（发布的版本自带），不用填；想用自己的 Key 时填在上面。";
+  }
+  return s.builtin_key
+    ? "换了 TMDB 接口地址，内置的只发给 TMDB 官方地址：填自己的 Key，或清空接口地址改回官方的。"
+    : "这个版本没有内置的 Key（从源码编译的）：填自己的 Key 才能到 TMDB 查找。";
+});
+const keyPlaceholder = computed(() => {
+  const s = settings.value;
+  if (s?.has_tmdb_key) return "已设置；要更换时填写新的";
+  if (s?.key_source === "builtin")
+    return "留空用内置的 Key；也可以填自己的 v3 API Key 或 v4 读取令牌";
+  return "v3 的 API Key 或 v4 的读取令牌";
+});
 /** 网页用 https 打开、图片地址却是 http:// 时，浏览器会拦下网页上的海报（混合内容） */
 const imageBaseBlocked = computed(
   () => window.location.protocol === "https:" && /^http:\/\//i.test(form.value.image.trim()),
@@ -99,7 +122,10 @@ async function save(extra: Partial<MediaSettingsUpdate> = {}) {
 
 async function clearKey() {
   try {
-    await ElMessageBox.confirm("清除后只做标题解析，不再到 TMDB 查找。", "清除 TMDB API Key", {
+    const after = settings.value?.builtin_key
+      ? "清除后改用内置的 Key。"
+      : "清除后只做标题解析，不再到 TMDB 查找。";
+    await ElMessageBox.confirm(after, "清除 TMDB API Key", {
       type: "warning",
       confirmButtonText: "清除",
       cancelButtonText: "取消",
@@ -334,12 +360,17 @@ onMounted(refresh);
     </Teleport>
 
     <div class="pt-note" data-testid="media-attribution">
-      <PtIcon name="info" :size="14" class="pt-note__icon" />
+      <a
+        class="pt-note__icon md-tmdb"
+        href="https://www.themoviedb.org/"
+        target="_blank"
+        rel="noopener noreferrer"
+        ><img :src="tmdbLogo" alt="TMDB" class="md-tmdb__logo"
+      /></a>
       <span
-        >电影与剧集的数据来自
-        <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">TMDB</a
-        >。本产品使用 TMDB API，但未经 TMDB 认可或认证。API Key 需要自己在 TMDB
-        的账号设置里申请。</span
+        >电影与剧集的数据与图片来自 TMDB。pt-tools 使用 TMDB 与 TMDB API，但未经 TMDB
+        认可、认证或以其他方式批准（This application uses TMDB and the TMDB APIs but is not
+        endorsed, certified, or otherwise approved by TMDB.）</span
       >
     </div>
 
@@ -358,11 +389,7 @@ onMounted(refresh);
                   type="password"
                   show-password
                   autocomplete="new-password"
-                  :placeholder="
-                    settings?.has_tmdb_key
-                      ? '已设置；要更换时填写新的'
-                      : 'v3 的 API Key 或 v4 的读取令牌'
-                  "
+                  :placeholder="keyPlaceholder"
                   data-testid="media-key" />
                 <el-button
                   v-if="settings?.has_tmdb_key"
@@ -371,6 +398,13 @@ onMounted(refresh);
                   >清除</el-button
                 >
               </div>
+              <p
+                v-if="keySourceText"
+                class="md-key-source"
+                :class="{ 'md-key-source--none': settings?.key_source === 'none' }"
+                data-testid="media-key-source">
+                {{ keySourceText }}
+              </p>
             </el-form-item>
             <div class="md-row">
               <el-form-item label="语言">
@@ -422,7 +456,7 @@ onMounted(refresh);
               </el-button>
               <el-button
                 :loading="testing"
-                :disabled="!settings?.has_tmdb_key"
+                :disabled="!settings || settings.key_source === 'none'"
                 data-testid="media-test"
                 @click="testTMDB">
                 <PtIcon v-if="!testing" name="zap" :size="14" /><span>测试连接</span>
@@ -877,6 +911,30 @@ onMounted(refresh);
 
 .md-tip--top {
   margin: 0 0 12px;
+}
+
+.md-key-source {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--pt-t3);
+}
+
+.md-key-source--none {
+  color: var(--pt-warn);
+}
+
+/* TMDB 的标志：比 pt-tools 自己的标志小（TMDB 的署名要求），对齐正文第一行 */
+.md-tmdb {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.md-tmdb__logo {
+  display: block;
+  width: auto;
+  height: 11px;
 }
 
 .md-fail {

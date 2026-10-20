@@ -105,9 +105,19 @@ const recognized = {
   ],
 };
 
-async function mountPage(opts: { hasKey?: boolean; api?: string; image?: string } = {}) {
+async function mountPage(
+  opts: {
+    hasKey?: boolean;
+    keySource?: "user" | "builtin" | "none";
+    builtinKey?: boolean;
+    api?: string;
+    image?: string;
+  } = {},
+) {
   api.settings.mockResolvedValue({
     has_tmdb_key: opts.hasKey ?? false,
+    key_source: opts.keySource ?? (opts.hasKey ? "user" : "none"),
+    builtin_key: opts.builtinKey ?? false,
     language: "zh-CN",
     proxy_url: "",
     api_base_url: opts.api ?? "",
@@ -125,11 +135,18 @@ async function mountPage(opts: { hasKey?: boolean; api?: string; image?: string 
 describe("媒体识别", () => {
   it("设置：只在填了 Key 时发出；清除要确认；没有 Key 时不能测试连接", async () => {
     await mountPage();
-    expect(document.body.textContent).toContain("未经 TMDB 认可或认证");
+    const attribution = q("media-attribution")!;
+    expect(attribution.textContent, "TMDB 要求的署名原文").toContain(
+      "uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB",
+    );
+    expect(attribution.querySelector("img[alt=TMDB]"), "TMDB 的标志").not.toBeNull();
     expect((q("media-test") as HTMLButtonElement).disabled).toBe(true);
+    expect(q("media-key-source")!.textContent).toContain("没有内置的 Key");
 
     api.saveSettings.mockResolvedValue({
-      has_tmdb_key: true,
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
       language: "en-US",
       proxy_url: "http://127.0.0.1:7890",
     });
@@ -144,6 +161,13 @@ describe("媒体识别", () => {
     });
     await flush();
 
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: true,
+      key_source: "user",
+      builtin_key: false,
+      language: "en-US",
+      proxy_url: "http://127.0.0.1:7890",
+    });
     fill("media-key", " k-123456789012345 ");
     q("media-save")!.click();
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(2));
@@ -151,9 +175,16 @@ describe("媒体识别", () => {
     await flush();
     expect(inputOf("media-key").value, "保存后清空输入框，不回显").toBe("");
     expect((q("media-test") as HTMLButtonElement).disabled).toBe(false);
+    expect(q("media-key-source")!.textContent).toContain("正在用自己填的 Key");
 
     ui.confirm.mockResolvedValue("confirm");
-    api.saveSettings.mockResolvedValue({ has_tmdb_key: false, language: "en-US", proxy_url: "" });
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
+      language: "en-US",
+      proxy_url: "",
+    });
     q("media-clear-key")!.click();
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(3));
     expect(api.saveSettings.mock.calls[2]![0]).toMatchObject({ tmdb_api_key: "" });
@@ -162,6 +193,33 @@ describe("媒体识别", () => {
     await mountPage({ hasKey: true });
     q("media-test")!.click();
     await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("TMDB API Key 无效"));
+  });
+
+  it("设置：内置 Key —— 不填也能测试连接；清除自己的 Key 改用内置的；换了接口地址时写明用不了内置的", async () => {
+    await mountPage({ keySource: "builtin", builtinKey: true });
+    expect(q("media-key-source")!.textContent).toContain("正在用内置的 Key");
+    expect(inputOf("media-key").placeholder).toContain("留空用内置的 Key");
+    expect((q("media-test") as HTMLButtonElement).disabled, "内置的 Key 也能测试连接").toBe(false);
+    view?.unmount();
+
+    await mountPage({ hasKey: true, builtinKey: true });
+    expect(q("media-key-source")!.textContent).toContain("清除后改用内置的 Key");
+    ui.confirm.mockResolvedValue("confirm");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "builtin",
+      builtin_key: true,
+      language: "zh-CN",
+      proxy_url: "",
+    });
+    q("media-clear-key")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(ui.confirm.mock.calls[0]![0]).toContain("改用内置的 Key");
+    view?.unmount();
+
+    await mountPage({ keySource: "none", builtinKey: true, api: "https://tmdb.example.com/3" });
+    expect(q("media-key-source")!.textContent).toContain("内置的只发给 TMDB 官方地址");
+    expect((q("media-test") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("设置：TMDB 接口地址与图片地址回显、去掉首尾空格后保存", async () => {

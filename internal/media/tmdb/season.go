@@ -147,8 +147,10 @@ func fetchImage(ctx context.Context, hc *http.Client, base, path, size string) (
 	return body, nil
 }
 
-// Titles 是条目的英文名与别名（罗马音、各地译名）：种子名常用这些名字，中文搜索结果里只有中文名与原名。
-// 用 en-US 取详情并带上 alternative_titles，一次请求；去掉重复与空的。
+// Titles 是条目的英文名、别名（罗马音、各地译名）与各语言的译名：种子名常用这些名字，中文搜索结果里只有中文名与原名。
+// 英文名与别名有时都带着副标题（龙族的英文名是「Dragon Raja -The Blazing Dawn-」），种子名用的「Dragon Raja」
+// 只在法语、德语等的译名里，所以译名也要比。用 en-US 取详情并带上 alternative_titles 与 translations，一次请求；
+// 去掉重复与空的。
 func (c *Client) Titles(ctx context.Context, kind string, id int) ([]string, error) {
 	if err := checkKind(kind); err != nil {
 		return nil, err
@@ -157,7 +159,8 @@ func (c *Client) Titles(ctx context.Context, kind string, id int) ([]string, err
 		return nil, ErrNotFound
 	}
 	var out []string
-	err := c.cached(ctx, fmt.Sprintf("titles:%s:%d", kind, id), DetailsTTL, &out, func() (any, error) {
+	// titles2：加了译名，只有英文名与别名的旧缓存不再使用
+	err := c.cached(ctx, fmt.Sprintf("titles2:%s:%d", kind, id), DetailsTTL, &out, func() (any, error) {
 		var raw struct {
 			Title             string `json:"title"`
 			Name              string `json:"name"`
@@ -169,8 +172,16 @@ func (c *Client) Titles(ctx context.Context, kind string, id int) ([]string, err
 					Title string `json:"title"`
 				} `json:"results"`
 			} `json:"alternative_titles"`
+			Translations struct {
+				Translations []struct {
+					Data struct {
+						Title string `json:"title"`
+						Name  string `json:"name"`
+					} `json:"data"`
+				} `json:"translations"`
+			} `json:"translations"`
 		}
-		q := url.Values{"language": {"en-US"}, "append_to_response": {"alternative_titles"}}
+		q := url.Values{"language": {"en-US"}, "append_to_response": {"alternative_titles,translations"}}
 		if err := c.get(ctx, fmt.Sprintf("/%s/%d", kind, id), q, &raw); err != nil {
 			return nil, err
 		}
@@ -187,6 +198,10 @@ func (c *Client) Titles(ctx context.Context, kind string, id int) ([]string, err
 		}
 		for _, t := range raw.AlternativeTitles.Results {
 			add(t.Title)
+		}
+		for _, t := range raw.Translations.Translations {
+			add(t.Data.Title)
+			add(t.Data.Name)
 		}
 		return titles, nil
 	})
