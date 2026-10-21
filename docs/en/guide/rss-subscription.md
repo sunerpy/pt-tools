@@ -154,7 +154,12 @@ The syntax and examples for following a series are in [Filter rules and TV serie
 - **Cause**: the downloader cannot be reached, or the folder does not exist or is not writable.
 - **Fix**: check the downloader's connectivity; make sure the download folder exists on the machine the downloader runs on and is writable.
 
-### 4. The promotion status is not recognised
+### 4. Downloading the torrent file fails (connection reset, timeout)
+
+- **Cause**: the network to the site or its download node is briefly unavailable, which is common for sites behind Cloudflare.
+- **Fix**: pt-tools retries twice, a few seconds apart, after this kind of error or a server error (5xx). This applies to every site; for sites that first fetch a download address (M-Team, NexusPHP) only that address is fetched again. A retried error says how many times it was tried. If it still fails, check the proxy and the network; follows and subscriptions search again after 30 minutes, see [follows and subscriptions](media-subscribe.md).
+
+### 5. The promotion status is not recognised
 
 - **Cause**: some sites' feeds do not carry promotion information, or pt-tools does not yet handle the site's particular fields.
 - **Fix**: update pt-tools to the latest version, or rely on reading the torrent's details page, where the site supports it.

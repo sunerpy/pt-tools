@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -812,8 +813,17 @@ func TestMTorrentDriver_Execute_DoesNotPrintDownloadToken(t *testing.T) {
 	assert.NotContains(t, out, "genDlToken")
 }
 
+// quickDownloadRetry 把下载种子文件的重试间隔调到 1 毫秒（测试不等真的退避）。
+func quickDownloadRetry(t *testing.T) {
+	t.Helper()
+	old := downloadBackoff
+	downloadBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { downloadBackoff = old })
+}
+
 // 拉种子文件的第二段请求要有超时，签名地址卡住时不能一直挂着。
 func TestMTorrentDriver_ParseDownload_FetchTimesOut(t *testing.T) {
+	quickDownloadRetry(t)
 	old := mteamTorrentFetchTimeout
 	mteamTorrentFetchTimeout = 100 * time.Millisecond
 	t.Cleanup(func() { mteamTorrentFetchTimeout = old })
@@ -889,10 +899,128 @@ func TestMTorrentDriver_ParseDownload_BadData(t *testing.T) {
 }
 
 func TestMTorrentDriver_ParseDownload_FetchError(t *testing.T) {
+	quickDownloadRetry(t)
 	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
 	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"http://127.0.0.1:1/dl"`)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fetch torrent file")
+	assert.Contains(t, err.Error(), "(3 attempts)", "连不上是网络错误：重试两次")
+	assert.ErrorIs(t, err, ErrNetworkError)
+}
+
+// 下载节点断开连接、回 5xx 是一时的：隔一会儿重拉同一个签名地址（不再取下载令牌），拉到就成。
+func TestMTorrentDriver_ParseDownload_RetriesTransientFailures(t *testing.T) {
+	quickDownloadRetry(t)
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch hits.Add(1) {
+		case 1:
+			// 连接被重置：不回任何东西就断开
+			conn, _, err := w.(http.Hijacker).Hijack()
+			require.NoError(t, err)
+			_ = conn.Close()
+		case 2:
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			_, _ = w.Write(testTorrentBytes)
+		}
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	data, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl?sign=TOPSECRET"`)})
+	require.NoError(t, err)
+	assert.Equal(t, testTorrentBytes, data)
+	assert.Equal(t, int32(3), hits.Load())
+}
+
+// 403 这类回答、不是种子文件的内容不是一时的：不重试。
+func TestMTorrentDriver_ParseDownload_NoRetryOnRefusal(t *testing.T) {
+	quickDownloadRetry(t)
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"403", http.StatusForbidden, "", "HTTP 403"},
+		{"不是种子", http.StatusOK, "<html>下载次数超限</html>", "invalid torrent"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var hits atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer server.Close()
+			d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+			_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl"`)})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.want)
+			assert.NotContains(t, err.Error(), "attempts")
+			assert.Equal(t, int32(1), hits.Load())
+		})
+	}
+}
+
+// 签名地址跳到下载节点以后超时：错误里跳转后的地址也带签名（sign、playload），一样要脱敏。
+func TestMTorrentDriver_ParseDownload_RedactsRedirectTarget(t *testing.T) {
+	quickDownloadRetry(t)
+	old := mteamTorrentFetchTimeout
+	mteamTorrentFetchTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { mteamTorrentFetchTimeout = old })
+
+	release := make(chan struct{})
+	node := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer node.Close()
+	defer close(release)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, node.URL+"/?app_id=1&playload=NODEPAYLOAD&sign=NODESIGN&t=1", http.StatusFound)
+	}))
+	defer api.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + api.URL + `/api/rss/dlv2?sign=APISIGN&tid=1"`)})
+	require.Error(t, err)
+	for _, secret := range []string{"APISIGN", "NODEPAYLOAD", "NODESIGN"} {
+		assert.NotContains(t, err.Error(), secret)
+	}
+	assert.Contains(t, err.Error(), "(3 attempts)")
+	assert.ErrorIs(t, err, ErrNetworkError)
+}
+
+// 调用方取消了就不再重试：不等退避，马上返回。
+func TestMTorrentDriver_ParseDownloadContext_StopsWhenCanceled(t *testing.T) {
+	old, oldBackoff := mteamTorrentFetchTimeout, downloadBackoff
+	mteamTorrentFetchTimeout, downloadBackoff = 100*time.Millisecond, []time.Duration{10 * time.Second, 10 * time.Second}
+	t.Cleanup(func() { mteamTorrentFetchTimeout, downloadBackoff = old, oldBackoff })
+
+	release := make(chan struct{})
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := d.ParseDownloadContext(ctx, MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl"`)})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second, "不等 10 秒的退避")
+	assert.Equal(t, int32(1), hits.Load())
 }
 
 func TestMapMTorrentRole(t *testing.T) {

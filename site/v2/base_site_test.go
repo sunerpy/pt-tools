@@ -482,3 +482,32 @@ func TestBaseSite_DownloadWithHash_RateLimitCanceled(t *testing.T) {
 // ---------------------------------------------------------------------------
 // ParseSizeMB — TB and KB unit branches
 // ---------------------------------------------------------------------------
+
+// ctxParseDriver 是实现了 ContextDownloadParser 的驱动：记下解析下载时拿到的 ctx。
+type ctxParseDriver struct {
+	hashDriver
+	got context.Context
+}
+
+type ctxProbeKey struct{}
+
+func (c *ctxParseDriver) ParseDownload(string) ([]byte, error) {
+	return nil, errors.New("不该调这个")
+}
+
+func (c *ctxParseDriver) ParseDownloadContext(ctx context.Context, _ string) ([]byte, error) {
+	c.got = ctx
+	return []byte("data"), nil
+}
+
+// 两段式下载的驱动拿到调用方的 ctx（第二段请求跟着调用方取消）。
+func TestBaseSite_Download_PassesContextToParser(t *testing.T) {
+	d := &ctxParseDriver{}
+	site := NewBaseSite[string, string](d, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteMTorrent, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	ctx := context.WithValue(context.Background(), ctxProbeKey{}, "调用方")
+	data, err := site.Download(ctx, "7")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("data"), data)
+	require.NotNil(t, d.got)
+	assert.Equal(t, "调用方", d.got.Value(ctxProbeKey{}))
+}

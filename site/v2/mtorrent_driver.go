@@ -531,7 +531,7 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return result, &HTTPStatusError{Code: resp.StatusCode}
 	}
 
 	// Parse JSON response
@@ -734,6 +734,11 @@ func sanitizeRawURLs(raw string) string {
 
 // ParseDownload extracts torrent file data from the response
 func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
+	return d.ParseDownloadContext(context.Background(), res)
+}
+
+// ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消（BaseSite 下载时用它）。
+func (d *MTorrentDriver) ParseDownloadContext(ctx context.Context, res MTorrentResponse) ([]byte, error) {
 	if !res.Code.IsSuccess() {
 		// Log raw response for debugging
 		rawBody := string(res.RawBody)
@@ -753,27 +758,37 @@ func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 	if downloadURL == "" {
 		return nil, fmt.Errorf("empty download URL in response (data: %s)", sanitizeRawURLs(string(res.Data)))
 	}
+	return d.fetchTorrentFile(ctx, downloadURL)
+}
 
-	// 签名下载地址本身就是凭证（sign 参数），日志和错误信息里只出现脱敏后的地址。
+// mteamTorrentFetchTimeout 是取签名下载地址之后拉一次种子文件的超时；测试里会调小。
+var mteamTorrentFetchTimeout = 30 * time.Second
+
+// fetchTorrentFile 拉签名地址指向的种子文件：签名地址会跳到走 Cloudflare 的下载节点，连接被重置、超时时有发生，
+// 一时的错误隔几秒重拉同一个签名地址（见 retryDownload，不再调取下载令牌的接口），调用方取消时不再试。签名地址本身
+// 就是凭证（sign 参数），它跳转到的下载节点地址也带签名：日志和错误信息里只出现脱敏后的地址。
+func (d *MTorrentDriver) fetchTorrentFile(ctx context.Context, downloadURL string) ([]byte, error) {
 	safeURL := utils.SanitizeURL(downloadURL)
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG MTorrent] Download URL: %s\n", safeURL)
 	}
+	return retryDownload(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, safeURL) })
+}
 
-	// 第二段请求同样走驱动的 HTTP 客户端（代理设置一致），并设上限超时：
-	// ParseDownload 拿不到调用方 ctx，此前用 requests.Get 默认会话，没有超时，可能一直挂住。
-	ctx, cancel := context.WithTimeout(context.Background(), mteamTorrentFetchTimeout)
+// fetchTorrentOnce 拉一次种子文件。第二段请求同样走驱动的 HTTP 客户端（代理设置一致），每次设上限超时。
+func (d *MTorrentDriver) fetchTorrentOnce(ctx context.Context, downloadURL, safeURL string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, mteamTorrentFetchTimeout)
 	defer cancel()
 	resp, err := d.httpClient.Get(ctx, downloadURL, map[string]string{
 		"User-Agent": d.userAgent,
 		"Accept":     "application/x-bittorrent, */*",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("fetch torrent file from %s: %w", safeURL, redactURLInError(err, downloadURL, safeURL))
+		return nil, fmt.Errorf("fetch torrent file from %s: %w", safeURL, redactURLsInError(err))
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, safeURL)
+		return nil, fmt.Errorf("%w fetching torrent from %s", &HTTPStatusError{Code: resp.StatusCode}, safeURL)
 	}
 
 	data := resp.Body
@@ -783,29 +798,6 @@ func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 
 	return data, nil
 }
-
-// mteamTorrentFetchTimeout 是取签名下载地址之后拉种子文件的超时；测试里会调小。
-var mteamTorrentFetchTimeout = 30 * time.Second
-
-// redactURLInError 把错误文本里的原始地址换成脱敏地址，保留原错误链供 errors.Is 判断。
-func redactURLInError(err error, rawURL, safeURL string) error {
-	if err == nil || rawURL == safeURL || !strings.Contains(err.Error(), rawURL) {
-		return err
-	}
-	return &urlRedactedError{err: err, rawURL: rawURL, safeURL: safeURL}
-}
-
-type urlRedactedError struct {
-	err     error
-	rawURL  string
-	safeURL string
-}
-
-func (e *urlRedactedError) Error() string {
-	return strings.ReplaceAll(e.err.Error(), e.rawURL, e.safeURL)
-}
-
-func (e *urlRedactedError) Unwrap() error { return e.err }
 
 func torrentResponsePreview(data []byte) string {
 	preview := strings.ToValidUTF8(string(data), "")

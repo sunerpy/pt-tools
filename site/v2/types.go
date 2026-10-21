@@ -631,6 +631,12 @@ type HashDownloader interface {
 	DownloadWithHash(ctx context.Context, torrentID, hash string) ([]byte, error)
 }
 
+// ContextDownloadParser 是驱动可选实现的解析下载：带上调用方的 ctx。两段式下载（先取签名地址、再拉种子文件）的
+// 第二段请求要跟着调用方取消、受它的期限约束；BaseSite 下载时驱动实现了它就用它，不调 ParseDownload。
+type ContextDownloadParser[Res any] interface {
+	ParseDownloadContext(ctx context.Context, res Res) ([]byte, error)
+}
+
 // TorrentDetailFetcher is an optional interface for drivers that can fetch torrent details
 // from RSS item metadata. This is used by RSS processing to get discount info, size, etc.
 // Drivers that implement this interface can be used with GetTorrentDetails in unified_site.go.

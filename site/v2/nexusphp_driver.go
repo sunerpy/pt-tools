@@ -342,7 +342,7 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return result, &HTTPStatusError{Code: resp.StatusCode}
 	}
 
 	// Parse HTML document
@@ -1534,6 +1534,15 @@ func (d *NexusPHPDriver) PrepareDownload(torrentID string) (NexusPHPRequest, err
 // ParseDownload extracts torrent file data from the response
 // For NexusPHP, the response is a detail page - we need to extract the download URL and fetch the torrent
 func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
+	return d.ParseDownloadContext(context.Background(), res)
+}
+
+// nexusTorrentFetchTimeout 是从详情页取到下载地址以后拉一次种子文件的超时；测试里会调小。
+var nexusTorrentFetchTimeout = 30 * time.Second
+
+// ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消，一时的错误隔几秒重拉同一个下载地址
+// （见 retryDownload，不再重取详情页）。BaseSite 下载时用它。
+func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPResponse) ([]byte, error) {
 	if res.Document == nil {
 		// If we have raw body (torrent file directly), return it
 		if len(res.RawBody) > 0 {
@@ -1557,10 +1566,6 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 		return nil, err
 	}
 
-	// Fetch the actual torrent file
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	headers := map[string]string{
 		"User-Agent":      d.userAgent,
 		"Accept":          "application/x-bittorrent,*/*",
@@ -1572,14 +1577,21 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 	if sameSite {
 		headers["Cookie"] = d.Cookie
 	}
+	return retryDownload(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, headers) })
+}
+
+// fetchTorrentOnce 拉一次种子文件（每次设上限超时）。下载地址带 passkey：错误里的地址一律脱敏。
+func (d *NexusPHPDriver) fetchTorrentOnce(ctx context.Context, downloadURL string, headers map[string]string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, nexusTorrentFetchTimeout)
+	defer cancel()
 
 	resp, err := d.httpClient.Get(ctx, downloadURL, headers)
 	if err != nil {
-		return nil, fmt.Errorf("fetch torrent file: %w", err)
+		return nil, fmt.Errorf("fetch torrent file: %w", redactURLsInError(err))
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, utils.SanitizeURL(downloadURL))
+		return nil, fmt.Errorf("%w fetching torrent from %s", &HTTPStatusError{Code: resp.StatusCode}, utils.SanitizeURL(downloadURL))
 	}
 
 	if len(resp.Body) == 0 {

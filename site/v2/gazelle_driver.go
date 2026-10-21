@@ -227,7 +227,7 @@ func (d *GazelleDriver) Execute(ctx context.Context, req GazelleRequest) (Gazell
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return result, &HTTPStatusError{Code: resp.StatusCode}
 	}
 
 	if req.RawBody {

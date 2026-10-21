@@ -58,6 +58,35 @@ type runLog struct {
 	waiting bool
 	// changed：这是一次手动改动，不是搜索
 	changed bool
+	// fetchFailed 是种子文件没下载下来的次数，siteFetchFails 是每个站点这一轮连着没下载下来的次数（下载成一次就清零）
+	fetchFailed    int
+	siteFetchFails map[string]int
+	// unfinished 不为空时这一轮没推完就停了（时间用完了、推满了一轮的上限），是原因
+	unfinished string
+}
+
+// fetched 记下一次在 site 下载种子文件的结果（调用方持有 rl.mu，见 markRun）。
+func (rl *runLog) fetched(site string, ok bool) {
+	if ok {
+		delete(rl.siteFetchFails, site)
+		return
+	}
+	rl.fetchFailed++
+	if rl.siteFetchFails == nil {
+		rl.siteFetchFails = map[string]int{}
+	}
+	rl.siteFetchFails[site]++
+}
+
+// siteFetchDown 报告这一轮在 site 是不是已经连着 siteFetchFailLimit 次没下载到种子文件（ctx 里没有运行记录时为假）。
+func siteFetchDown(ctx context.Context, site string) bool {
+	rl := runOf(ctx)
+	if rl == nil {
+		return false
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return rl.siteFetchFails[site] >= siteFetchFailLimit
 }
 
 func (rl *runLog) add(kind, text string) {

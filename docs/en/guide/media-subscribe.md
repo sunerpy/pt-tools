@@ -51,7 +51,7 @@ How many hours after airing to start, how many hours between retries, and for ho
 
 With the version lock on, once the first release is downloaded its version (release group and resolution, such as `HHWEB 1080p`) is kept for the rest of the season, so one season never mixes several groups. Until that happens, a version already in the library or downloading becomes the locked one.
 
-- When the locked version still has not shown up after the retry days, the episode shows Waiting for the version (等版本). pt-tools keeps waiting rather than switching, and notifies once through the channels in the settings (then at most every 3 days).
+- When the locked version still has not shown up after the retry days, the episode shows Waiting for the version (等版本). pt-tools keeps waiting rather than switching, and notifies once through the channels in the settings (then at most every 3 days). An episode whose locked version was found on a site but whose torrent file could not be downloaded is not waiting: it shows Missing (缺) and is searched for again.
 - To take another version for one episode, click Use another version for this episode (这一集换版本) on that episode in the follow details, or send `/unlock <id> <episode>` to the bot. Only that episode is released from the lock and a search runs within a minute; the others stay as they are.
 - Under Edit you can turn the version lock off, or clear the locked version so that the next download decides it again. Replacing the season with a pack during an upgrade is not limited by the lock; the new version becomes the locked one.
 
@@ -59,13 +59,13 @@ With the version lock on, once the first release is downloaded its version (rele
 
 The follow details show one square per episode: in library, downloading, missing (aired but not there), waiting for the version, not aired, and not followed (before the start episode, or skipped). Click an episode to see its name, air date and current version, and to Skip this episode (跳过这一集; it no longer counts as missing or holds up completion) or Want this episode again (重新要这一集).
 
-Torrents for the show that are already in the subscription's downloader but were not pushed by it, such as ones you downloaded yourself, count too when their names match episodes of the season, so they are not downloaded twice. Such a torrent that is still not organised after 7 days counts as failed and the episodes are searched again: automatic organising only handles torrents pt-tools pushed, so organise it by hand or turn on the periodic scan under [library organising](media-library.md).
+Torrents for the show that are already in the subscription's downloader but were not pushed by it, such as ones you downloaded yourself, count too, so they are not downloaded twice. Their episodes come from the files selected in the torrent, so a torrent named after the whole season (some sites post one torrent per episode under the season's folder name) or a season pack with only a few episodes selected counts correctly; when the file list cannot be read the torrent name is used, and one naming the whole season is left out for now. Such a torrent that is still not organised after 7 days counts as failed and the episodes are searched again: automatic organising only handles torrents pt-tools pushed, so organise it by hand or turn on the periodic scan under [library organising](media-library.md).
 
 Under Edit you can change the episode to start from (earlier ones are not wanted), and enter the season's episode count when TMDB's is wrong.
 
 ### Variety show episodes
 
-Many variety shows split one issue into two TMDB episodes, while torrents on the sites number them by TMDB, write 第 1 期下 or E01 Part 2 (issue 1, part 2), or give only the air date (`20261002`, `1015期`). When pt-tools sees that a season is numbered by issue (its TMDB genre is reality or talk, or half or more of the episode names are 第几期), it converts the issue and part, or the air date, into the TMDB episode number. Anything it is unsure about is skipped, and the run history says the episode number does not match (集号对不上).
+Many variety shows split one issue into two TMDB episodes, while torrents on the sites number them by TMDB, write 第 1 期下 or E01 Part 2 (issue 1, part 2), or give only the air date (`20261002`, `1015期`). When pt-tools sees that a season is numbered by issue (its TMDB genre is reality or talk, or half or more of the episode names are 第几期), it converts the issue and part, or the air date, into the TMDB episode number. Anything it is unsure about is skipped, and the run history says the episode number does not match (集号对不上). When the title has an episode number and only the subtitle names the issue, the two have to agree (subtitles are often wrong); if they do not, the torrent is skipped too.
 
 When a release group's numbering is converted wrongly, give it a rule under Episode-number rules (集号规则) in the follow details: by the TMDB episode number, by issue and part, by air date, or an offset (TMDB episode = the number in the title + offset). A rule without a group applies to every group. A search under the new rule runs within a minute.
 
@@ -96,6 +96,8 @@ A torrent matches a subscription when:
 - for series, the season matches; a multi-season pack containing the season also counts. Anime that only gives an episode number (such as `- 05`) counts as season 1. Years are not compared for series: variety show torrents often give the broadcast year, which differs from the year of the season on TMDB.
 
 The chosen torrent goes through the same push as RSS: disk space protection and site seeding capacity still apply, and the torrent record shows the source Subscription (订阅). A torrent is pushed once per subscription; a failed push, including one stopped by disk space protection or site seeding capacity, is not recorded, so the next search tries again.
+
+Downloading the torrent file is retried twice, a few seconds apart, after a temporary network error (connection reset, timeout) or a server error (5xx). This applies to every site; for sites that first fetch a download address (M-Team, NexusPHP) only that address is fetched again. A site whose download fails twice in a row in one round is skipped for the rest of the round. A round pushes at most 10 torrents, failed ones included. When torrent files could not be downloaded, the limit was reached with episodes still missing, or a search by hand ran out of time, the next search moves up to 30 minutes later, doubling (1, 2, 4 hours) while runs keep failing; an earlier regular search time is kept. A torrent from RSS whose file could not be downloaded moves the next active search up the same way.
 
 ## Quality profiles
 
