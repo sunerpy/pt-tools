@@ -23,12 +23,23 @@ type job struct {
 	// 整理完了却没改写的清掉；租约没被改写时说明这次重试没做完（例如中途重启），租约到期以后还会再试
 	retryIDs []uint
 	lease    time.Time
+	// rescrape 不为 0 时这是重新刮削这条整理记录所在的电影或剧集（见 Rescrape），不是整理
+	rescrape uint
 	done     chan jobResult
 }
 
 type jobResult struct {
-	res *Result
-	err error
+	res    *Result
+	scrape *RescrapeResult
+	err    error
+}
+
+// key 是排队去重用的键（见 jobKey）。
+func (j job) key() string {
+	if j.rescrape > 0 {
+		return fmt.Sprintf("rescrape|%d", j.rescrape)
+	}
+	return jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash())
 }
 
 // backoffState 是补查与扫描时整理不了（还没写记录）的种子的退避：下次什么时候再试。
@@ -75,7 +86,7 @@ const (
 
 // put 把任务放进队列，报告是新放进去了、已经在队列里（这个任务没放），还是队列满了。
 func (s *Service) put(j job) int {
-	key := jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash())
+	key := j.key()
 	s.qmu.Lock()
 	if s.queued[key] && j.done == nil {
 		s.qmu.Unlock()
@@ -178,6 +189,13 @@ func (s *Service) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case j := <-s.jobs:
+			if j.rescrape > 0 {
+				res, err := s.handleRescrape(ctx, j)
+				if j.done != nil {
+					j.done <- jobResult{scrape: res, err: err}
+				}
+				continue
+			}
 			res, err := s.handle(ctx, j)
 			if j.done != nil {
 				j.done <- jobResult{res: res, err: err}
@@ -186,10 +204,24 @@ func (s *Service) worker(ctx context.Context) {
 	}
 }
 
+// handleRescrape 做队列里的一次重新刮削：先从去重表里拿掉。
+func (s *Service) handleRescrape(ctx context.Context, j job) (*RescrapeResult, error) {
+	s.qmu.Lock()
+	delete(s.queued, j.key())
+	s.qmu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.rescrape(ctx, j.rescrape)
+	if err != nil {
+		s.cfg.Logger.Warnf("[整理入库] 重新刮削失败 (记录 %d): %v", j.rescrape, err)
+	}
+	return res, err
+}
+
 // handle 整理从队列里取出的一个任务：先从去重表里拿掉，整理完清掉它带的重试标记。
 func (s *Service) handle(ctx context.Context, j job) (*Result, error) {
 	s.qmu.Lock()
-	delete(s.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.queueHash()))
+	delete(s.queued, j.key())
 	s.qmu.Unlock()
 	defer s.markRetrying(j.retryIDs, false)
 	if j.req.WatchDirID > 0 {

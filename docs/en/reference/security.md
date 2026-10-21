@@ -44,14 +44,15 @@ The notification channel list never returns credentials; they are decrypted and 
 
 ## What it connects to
 
-| Destination                          | Why                                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status                          |
-| The downloaders you configure        | Pushing torrents and reading tasks and free space                                                |
-| The notification channels you enable | Sending notifications; Telegram receives commands by long polling                                |
-| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                              |
-| A CloakBrowser Manager               | Only after you set its endpoint, token and profile ID, as a fallback for login checks            |
-| The relays you enter                 | Only with remote access on: an outgoing connection that forwards the app's encrypted connections |
+| Destination                          | Why                                                                                                                                                                                          |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status                                                                                                                      |
+| The downloaders you configure        | Pushing torrents and reading tasks and free space                                                                                                                                            |
+| The notification channels you enable | Sending notifications; Telegram receives commands by long polling                                                                                                                            |
+| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                                                                                                                          |
+| TMDB and other media data sources    | Recognition, subscriptions and scraping: TMDB; Douban and Bangumi only when a library's data sources choose them; Fanart.tv and OMDb only after you enter their keys under media recognition |
+| A CloakBrowser Manager               | Only after you set its endpoint, token and profile ID, as a fallback for login checks                                                                                                        |
+| The relays you enter                 | Only with remote access on: an outgoing connection that forwards the app's encrypted connections                                                                                             |
 
 The [CloakBrowser fallback](../guide/site-login-monitoring.md#cloakbrowser-fallback) hands the site's cookies to the CloakBrowser you deploy, which then opens the site's pages.
 

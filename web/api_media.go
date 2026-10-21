@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sunerpy/pt-tools/internal/media/fanart"
+	"github.com/sunerpy/pt-tools/internal/media/omdb"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
@@ -46,15 +48,16 @@ func (s *Server) mediaService(w http.ResponseWriter) (*recognize.Service, bool) 
 func writeMediaError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, recognize.ErrInvalid), errors.Is(err, tmdb.ErrNoKey), errors.Is(err, tmdb.ErrUnauthorized):
+	case errors.Is(err, recognize.ErrInvalid), errors.Is(err, tmdb.ErrNoKey), errors.Is(err, tmdb.ErrUnauthorized),
+		errors.Is(err, fanart.ErrNoKey), errors.Is(err, fanart.ErrUnauthorized), errors.Is(err, omdb.ErrNoKey), errors.Is(err, omdb.ErrUnauthorized):
 		status = http.StatusBadRequest
 	case errors.Is(err, recognize.ErrNotFound), errors.Is(err, tmdb.ErrNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, tmdb.ErrRateLimited):
+	case errors.Is(err, tmdb.ErrRateLimited), errors.Is(err, omdb.ErrRateLimited):
 		status = http.StatusTooManyRequests
 	case errors.Is(err, context.DeadlineExceeded):
 		status = http.StatusGatewayTimeout
-	case errors.Is(err, tmdb.ErrUnavailable):
+	case errors.Is(err, tmdb.ErrUnavailable), errors.Is(err, fanart.ErrUnavailable), errors.Is(err, omdb.ErrUnavailable):
 		status = http.StatusBadGateway
 	}
 	http.Error(w, err.Error(), status)
@@ -101,15 +104,26 @@ func (s *Server) apiMediaSettingsPut(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, got)
 }
 
-// apiMediaSettingsTest handles POST /api/media/settings/test
+// apiMediaSettingsTest handles POST /api/media/settings/test?source=tmdb|fanart|omdb（不带时是 TMDB）
 func (s *Server) apiMediaSettingsTest(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.mediaService(w)
 	if !ok {
 		return
 	}
+	test := svc.TestTMDB
+	switch r.URL.Query().Get("source") {
+	case "", "tmdb":
+	case "fanart":
+		test = svc.TestFanart
+	case "omdb":
+		test = svc.TestOMDb
+	default:
+		http.Error(w, "source 要选 tmdb、fanart 或 omdb", http.StatusBadRequest)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), mediaAPITimeout)
 	defer cancel()
-	if err := svc.TestTMDB(ctx); err != nil {
+	if err := test(ctx); err != nil {
 		writeMediaError(w, err)
 		return
 	}

@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/media/fanart"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/omdb"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -550,4 +552,79 @@ func TestMaskProxy(t *testing.T) {
 	assert.Equal(t, "socks5://u:***@1.2.3.4:1080", maskProxy("socks5://u:p@1.2.3.4:1080"))
 	assert.Equal(t, "http://127.0.0.1:7890", maskProxy("http://127.0.0.1:7890"))
 	assert.Equal(t, "http://u@h:1", maskProxy("http://u@h:1"))
+}
+
+// 刮削用的 Fanart.tv 与 OMDb 的 Key：加密保存、只说填了没有；没填时建不了客户端；测试按设置访问一次
+func TestSourceKeys(t *testing.T) {
+	var fanartKey, fanartClient, omdbKey atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/fanart/movies/550":
+			fanartKey.Store(r.Header.Get("api-key"))
+			fanartClient.Store(r.Header.Get("client-key"))
+			if r.Header.Get("api-key") != "fanartkey0123456789abcdef0123456" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"name":"Fight Club"}`))
+		case "/omdb/":
+			omdbKey.Store(r.URL.Query().Get("apikey"))
+			if r.URL.Query().Get("apikey") != "omdbkey1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"Response":"False","Error":"Invalid API key!"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"Response":"True","imdbID":"tt0137523","Title":"Fight Club","imdbRating":"8.8"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}))
+	s := New(Config{DB: db, Cipher: fakeCipher{}, FanartBaseURL: srv.URL + "/fanart", OMDbBaseURL: srv.URL + "/omdb/"})
+	ctx := context.Background()
+
+	_, err = s.Fanart(ctx)
+	assert.ErrorIs(t, err, fanart.ErrNoKey)
+	_, err = s.OMDb(ctx)
+	assert.ErrorIs(t, err, omdb.ErrNoKey)
+	assert.ErrorIs(t, s.TestFanart(ctx), fanart.ErrNoKey)
+
+	got, err := s.SaveSettings(ctx, SettingsInput{
+		FanartKey: ptr(" fanartkey0123456789abcdef0123456 "), FanartClientKey: ptr("personal0123456789"), OMDbKey: ptr("omdbkey1"),
+	})
+	require.NoError(t, err)
+	assert.True(t, got.HasFanartKey)
+	assert.True(t, got.HasFanartClientKey)
+	assert.True(t, got.HasOMDbKey)
+	var row models.MediaSetting
+	require.NoError(t, db.First(&row, 1).Error)
+	assert.NotContains(t, row.FanartKeyEncrypted, "fanartkey", "加密保存")
+	assert.NotContains(t, row.OMDbKeyEncrypted, "omdbkey1")
+	require.NoError(t, s.TestFanart(ctx))
+	require.NoError(t, s.TestOMDb(ctx))
+	assert.Equal(t, "fanartkey0123456789abcdef0123456", fanartKey.Load())
+	assert.Equal(t, "personal0123456789", fanartClient.Load(), "个人 Key 和项目的 Key 一起发")
+	assert.Equal(t, "omdbkey1", omdbKey.Load())
+
+	// 不带 Key 时不改；格式不对的不收
+	got, err = s.SaveSettings(ctx, SettingsInput{Language: "zh-CN"})
+	require.NoError(t, err)
+	assert.True(t, got.HasFanartKey)
+	for _, bad := range []SettingsInput{{FanartKey: ptr("has space key")}, {OMDbKey: ptr("abc")}, {OMDbKey: ptr("key;drop")}} {
+		_, err = s.SaveSettings(ctx, bad)
+		assert.ErrorIs(t, err, ErrInvalid)
+	}
+	_, err = s.SaveSettings(ctx, SettingsInput{OMDbKey: ptr("wrongkey")})
+	require.NoError(t, err)
+	assert.ErrorIs(t, s.TestOMDb(ctx), omdb.ErrUnauthorized)
+
+	got, err = s.SaveSettings(ctx, SettingsInput{FanartKey: ptr(""), FanartClientKey: ptr(""), OMDbKey: ptr("")})
+	require.NoError(t, err)
+	assert.False(t, got.HasFanartKey)
+	assert.False(t, got.HasFanartClientKey)
+	assert.False(t, got.HasOMDbKey)
 }

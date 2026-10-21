@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /*
- * 整理历史（路线图 M10）：每个视频文件一条记录，写明整理到哪里、用什么方式、成功还是失败。
- * 失败的可以重试（整个种子重新整理）；删除记录时可以连库里整理出的文件一起删。
+ * 整理历史（路线图 M10）：每个视频文件一条记录，写明整理到哪里、用什么方式、成功还是失败，以及刮削的结果。
+ * 失败的可以重试（整个种子重新整理）；整理好的可以重新刮削（整部电影或剧集）；删除记录时可以连库里整理出的文件一起删。
  * 画板没有这一页，沿用列表页的样式：页头 + 筛选 + 表格，手机是行卡。
  */
 import { type MediaHistoryItem, type MediaTransferStatus, organizeApi } from "@/api";
@@ -19,9 +19,10 @@ import {
   historyEntry,
   historyStatus,
   modeLabel,
+  scrapeStatus,
   triggerLabel,
 } from "@/utils/media";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
 const isMobile = useIsMobile();
@@ -71,6 +72,41 @@ async function retry(r: MediaHistoryItem) {
     ElMessage.error(errText(e, "重试失败"));
   } finally {
     retrying.value = null;
+  }
+}
+
+// ---- 重新刮削 ----
+const rescraping = ref<number | null>(null);
+const canRescrape = (r: MediaHistoryItem) => r.status === "done" && r.tmdb_id > 0;
+async function rescrape(r: MediaHistoryItem) {
+  const what =
+    r.media_type === "tv"
+      ? `「${r.title}」（这部剧在这个媒体库里整理好的每一集）`
+      : `「${r.title}」`;
+  try {
+    await ElMessageBox.confirm(
+      `按媒体库现在的刮削设置重写${what}的 NFO 与图片：pt-tools 写的、之后没被改过的文件换成新的，自己放的文件只在媒体库开着覆盖时换，媒体服务器里锁定了的 NFO 不动。`,
+      "重新刮削",
+      { confirmButtonText: "重新刮削", cancelButtonText: "取消" },
+    );
+  } catch {
+    return;
+  }
+  rescraping.value = r.id;
+  try {
+    const res = await organizeApi.rescrape(r.id);
+    const sources = res.sources ? `（${res.sources}）` : "";
+    if (res.queued) ElMessage.info("重新刮削还在后台进行，稍后刷新看结果");
+    else if (res.messages?.length)
+      ElMessage.warning(
+        `刮削了 ${res.records} 条记录，写了 ${res.written} 个文件${sources}；${res.messages.join("；")}`,
+      );
+    else ElMessage.success(`刮削了 ${res.records} 条记录，写了 ${res.written} 个文件${sources}`);
+    await load();
+  } catch (e) {
+    ElMessage.error(errText(e, "重新刮削失败"));
+  } finally {
+    rescraping.value = null;
   }
 }
 
@@ -207,13 +243,22 @@ onMounted(load);
               historyStatus(row.status).label
             }}</PtStatusPill>
             <span class="mh-sub mh-trigger">{{ triggerLabel(row.trigger) }}</span>
+            <PtStatusPill
+              v-if="scrapeStatus(row.scrape_status)"
+              class="mh-scrape"
+              :tone="scrapeStatus(row.scrape_status)!.tone"
+              size="sm"
+              :data-testid="`mh-scrape-${row.id}`"
+              >{{ scrapeStatus(row.scrape_status)!.label }}</PtStatusPill
+            >
             <div v-if="row.message" class="mh-sub">{{ row.message }}</div>
+            <div v-if="row.scrape_note" class="mh-sub">刮削：{{ row.scrape_note }}</div>
             <div v-if="row.next_retry_at" class="mh-sub">
               {{ formatShortDateTime(row.next_retry_at) }} 自动重试（第 {{ row.attempts }} 次失败）
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="" width="120" align="right">
+        <el-table-column label="" width="150" align="right">
           <template #default="{ row }">
             <el-button
               v-if="canRetry(row)"
@@ -222,6 +267,14 @@ onMounted(load);
               :data-testid="`mh-retry-${row.id}`"
               @click="retry(row)"
               >重试</el-button
+            >
+            <el-button
+              v-if="canRescrape(row)"
+              link
+              :loading="rescraping === row.id"
+              :data-testid="`mh-rescrape-${row.id}`"
+              @click="rescrape(row)"
+              >重新刮削</el-button
             >
             <el-button link type="danger" :data-testid="`mh-del-${row.id}`" @click="askDelete(row)"
               >删除</el-button
@@ -241,6 +294,10 @@ onMounted(load);
             >
             <span v-if="r.size">{{ formatBytes(r.size) }}</span>
             <span v-if="r.message" class="mh-full">{{ r.message }}</span>
+            <span v-if="scrapeStatus(r.scrape_status)" class="mh-full"
+              >{{ scrapeStatus(r.scrape_status)!.label
+              }}<template v-if="r.scrape_note">：{{ r.scrape_note }}</template></span
+            >
           </template>
           <template #status>
             <PtStatusPill dot :tone="historyStatus(r.status).tone" size="sm">{{
@@ -254,6 +311,13 @@ onMounted(load);
               :loading="retrying === r.id"
               @click="retry(r)"
               >重试</el-button
+            >
+            <el-button
+              v-if="canRescrape(r)"
+              size="small"
+              :loading="rescraping === r.id"
+              @click="rescrape(r)"
+              >重新刮削</el-button
             >
             <el-button size="small" type="danger" plain @click="askDelete(r)">删除</el-button>
           </template>
@@ -333,6 +397,10 @@ onMounted(load);
 }
 
 .mh-trigger {
+  margin-left: 6px;
+}
+
+.mh-scrape {
   margin-left: 6px;
 }
 

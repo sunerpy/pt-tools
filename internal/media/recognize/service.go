@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -19,7 +20,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/sunerpy/pt-tools/internal/media/fanart"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/omdb"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/media/words"
 	"github.com/sunerpy/pt-tools/models"
@@ -49,6 +52,10 @@ type Config struct {
 	ImageBaseURL string
 	// RatePerSecond 是 TMDB 请求的限速（为 0 时用客户端的默认值）。
 	RatePerSecond float64
+	// FanartBaseURL、OMDbBaseURL 是 Fanart.tv 与 OMDb 的接口地址；为空时用官方地址（测试与 qa 构建可指向假服务）。
+	FanartBaseURL, OMDbBaseURL string
+	// FanartImageHosts 是允许下载 Fanart.tv 图片的主机；为空时只认 fanart.tv 自己的（测试里换成假服务的）。
+	FanartImageHosts []string
 }
 
 // Service 是媒体识别服务。
@@ -114,16 +121,26 @@ type Settings struct {
 	ProxyURL     string `json:"proxy_url"`
 	APIBaseURL   string `json:"api_base_url"`
 	ImageBaseURL string `json:"image_base_url"`
+	// HasFanartKey、HasOMDbKey 说刮削用的 Fanart.tv（项目的 Key）与 OMDb 的 API Key 填了没有，HasFanartClientKey 说
+	// Fanart.tv 的个人 Key 填了没有
+	HasFanartKey       bool `json:"has_fanart_key"`
+	HasFanartClientKey bool `json:"has_fanart_client_key"`
+	HasOMDbKey         bool `json:"has_omdb_key"`
 }
 
-// SettingsInput 是保存设置的参数。TMDBKey、ProxyURL、APIBaseURL、ImageBaseURL 为 nil 时不改，为空串时清除
-// （两个地址清除以后用官方地址）。ProxyURL 与 Settings 返回的（密码换成 *** 的）地址相同时也不改。
+// SettingsInput 是保存设置的参数。TMDBKey、ProxyURL、APIBaseURL、ImageBaseURL、FanartKey、OMDbKey 为 nil 时不改，
+// 为空串时清除（两个地址清除以后用官方地址）。ProxyURL 与 Settings 返回的（密码换成 *** 的）地址相同时也不改。
 type SettingsInput struct {
 	TMDBKey      *string `json:"tmdb_api_key,omitempty"`
 	Language     string  `json:"language"`
 	ProxyURL     *string `json:"proxy_url,omitempty"`
 	APIBaseURL   *string `json:"api_base_url,omitempty"`
 	ImageBaseURL *string `json:"image_base_url,omitempty"`
+	// FanartKey、OMDbKey 是刮削用的 Fanart.tv（项目的 Key）与 OMDb 的 API Key，FanartClientKey 是 Fanart.tv 的个人 Key
+	// （可选；加上以后新上传的图片更快能用，见 Fanart、OMDb）
+	FanartKey       *string `json:"fanart_api_key,omitempty"`
+	FanartClientKey *string `json:"fanart_client_key,omitempty"`
+	OMDbKey         *string `json:"omdb_api_key,omitempty"`
 }
 
 func (s *Service) load(ctx context.Context) (models.MediaSetting, error) {
@@ -167,6 +184,7 @@ func (s *Service) view(row models.MediaSetting) Settings {
 	out := Settings{
 		HasTMDBKey: row.TMDBKeyEncrypted != "", KeySource: keySource(row), BuiltinKey: tmdb.Builtin() != "",
 		Language: row.Language, APIBaseURL: row.APIBaseURL, ImageBaseURL: row.ImageBaseURL,
+		HasFanartKey: row.FanartKeyEncrypted != "", HasFanartClientKey: row.FanartClientKeyEncrypted != "", HasOMDbKey: row.OMDbKeyEncrypted != "",
 	}
 	if out.Language == "" {
 		out.Language = Languages[0]
@@ -219,6 +237,32 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 			row.TMDBKeyEncrypted = enc
 		}
 	}
+	for _, k := range []struct {
+		in   *string
+		dst  *string
+		name string
+	}{
+		{in.FanartKey, &row.FanartKeyEncrypted, "Fanart.tv"},
+		{in.FanartClientKey, &row.FanartClientKeyEncrypted, "Fanart.tv 个人"},
+		{in.OMDbKey, &row.OMDbKeyEncrypted, "OMDb"},
+	} {
+		if k.in == nil {
+			continue
+		}
+		key := strings.TrimSpace(*k.in)
+		switch {
+		case key == "":
+			*k.dst = ""
+		case !plainKeyRe.MatchString(key):
+			return Settings{}, fmt.Errorf("%w: %s API Key 格式不对（只有字母与数字）", ErrInvalid, k.name)
+		default:
+			enc, err := s.cfg.Cipher.Encrypt(key)
+			if err != nil {
+				return Settings{}, fmt.Errorf("加密 %s API Key 失败: %w", k.name, err)
+			}
+			*k.dst = enc
+		}
+	}
 	if in.ProxyURL != nil {
 		proxy := strings.TrimSpace(*in.ProxyURL)
 		switch {
@@ -252,8 +296,11 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 		row.ImageBaseURL = u
 	}
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"tmdb_key_encrypted", "language", "proxy_encrypted", "api_base_url", "image_base_url", "updated_at"}),
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"tmdb_key_encrypted", "language", "proxy_encrypted", "api_base_url", "image_base_url",
+			"fanart_key_encrypted", "fanart_client_key_encrypted", "omdb_key_encrypted", "updated_at",
+		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存媒体识别设置失败: %w", err)
 	}
@@ -342,6 +389,86 @@ func (s *Service) Parse(ctx context.Context, title, subtitle string) (meta.Meta,
 // TestTMDB 用当前设置访问一次 TMDB，确认 API Key 与代理可用。
 func (s *Service) TestTMDB(ctx context.Context) error {
 	c, err := s.client(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Validate(ctx)
+}
+
+// plainKeyRe 是 Fanart.tv 与 OMDb 的 API Key 的样子（Fanart.tv 是 32 位十六进制，OMDb 是 8 位）。
+var plainKeyRe = regexp.MustCompile(`^[A-Za-z0-9]{6,64}$`)
+
+// sourceKey 解密一个刮削来源的 API Key；没填时返回空串。
+func (s *Service) sourceKey(enc, name string) (string, error) {
+	if enc == "" {
+		return "", nil
+	}
+	key, err := s.cfg.Cipher.Decrypt(enc)
+	if err != nil {
+		return "", fmt.Errorf("解密 %s API Key 失败: %w", name, err)
+	}
+	return key, nil
+}
+
+// Fanart 按当前设置建 Fanart.tv 客户端（刮削时取图片，走媒体识别的代理，和 TMDB 共用缓存）：项目的 Key，填了个人 Key 时一起发；
+// 没填项目的 Key 时返回 fanart.ErrNoKey。
+func (s *Service) Fanart(ctx context.Context) (*fanart.Client, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.sourceKey(row.FanartKeyEncrypted, "Fanart.tv")
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, fanart.ErrNoKey
+	}
+	client, err := s.sourceKey(row.FanartClientKeyEncrypted, "Fanart.tv 个人")
+	if err != nil {
+		return nil, err
+	}
+	hc, _, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return fanart.New(fanart.Options{
+		APIKey: key, ClientKey: client, BaseURL: s.cfg.FanartBaseURL, ImageHosts: s.cfg.FanartImageHosts, HTTP: hc, Cache: s.cache,
+	})
+}
+
+// OMDb 按当前设置建 OMDb 客户端（刮削时取 IMDb 等评分，走媒体识别的代理，和 TMDB 共用缓存）；没填 API Key 时返回 omdb.ErrNoKey。
+func (s *Service) OMDb(ctx context.Context) (*omdb.Client, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.sourceKey(row.OMDbKeyEncrypted, "OMDb")
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, omdb.ErrNoKey
+	}
+	hc, _, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return omdb.New(omdb.Options{APIKey: key, BaseURL: s.cfg.OMDbBaseURL, HTTP: hc, Cache: s.cache})
+}
+
+// TestFanart 用当前设置访问一次 Fanart.tv，确认 API Key 与代理可用。
+func (s *Service) TestFanart(ctx context.Context) error {
+	c, err := s.Fanart(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Validate(ctx)
+}
+
+// TestOMDb 用当前设置访问一次 OMDb，确认 API Key 与代理可用。
+func (s *Service) TestOMDb(ctx context.Context) error {
+	c, err := s.OMDb(ctx)
 	if err != nil {
 		return err
 	}

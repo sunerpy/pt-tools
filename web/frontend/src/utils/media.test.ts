@@ -7,6 +7,8 @@ import {
   MEDIA_LANGUAGES,
   MEDIA_WORD_KINDS,
   SCRAPE_ITEMS,
+  SCRAPE_SOURCE_FIELDS,
+  SCRAPE_SOURCE_OPTIONS,
   TMDB_GENRES,
   classifyRuleSummary,
   episodeText,
@@ -15,6 +17,8 @@ import {
   metaTags,
   posterURL,
   scrapeItemsFor,
+  scrapeStatus,
+  tmdbSources,
   setTmdbImageBase,
   setTmdbImageBasePending,
   tmdbPageURL,
@@ -41,6 +45,10 @@ describe("媒体识别的显示工具", () => {
       "poster",
       "fanart",
       "logo",
+      "clearart",
+      "banner",
+      "landscape",
+      "discart",
       "season_poster",
       "thumb",
     ]);
@@ -51,8 +59,32 @@ describe("媒体识别的显示工具", () => {
       "poster",
       "fanart",
       "logo",
+      "clearart",
+      "banner",
+      "landscape",
+      "discart",
     ]);
-    expect(scrapeItemsFor("tv")).toHaveLength(6);
+    expect(scrapeItemsFor("tv").map((i) => i.value)).not.toContain("discart");
+    expect(scrapeItemsFor("tv")).toHaveLength(9);
+    // 数据来源每一项可选的来源和后端 metadata 的 PlotSources 等一致
+    expect(SCRAPE_SOURCE_OPTIONS.plot.map((o) => o.value)).toEqual(["", "douban", "bangumi"]);
+    expect(SCRAPE_SOURCE_OPTIONS.rating.map((o) => o.value)).toEqual([
+      "",
+      "douban",
+      "bangumi",
+      "omdb",
+    ]);
+    expect(SCRAPE_SOURCE_OPTIONS.episode.map((o) => o.value)).toEqual(["", "bangumi"]);
+    expect(SCRAPE_SOURCE_OPTIONS.artwork.map((o) => o.value)).toEqual(["", "fanart"]);
+    expect(SCRAPE_SOURCE_FIELDS.map((f) => f.key)).toEqual([
+      "plot",
+      "rating",
+      "episode",
+      "artwork",
+    ]);
+    expect(tmdbSources()).toEqual({ plot: "", rating: "", episode: "", artwork: "" });
+    expect(scrapeStatus("partial")).toEqual({ label: "部分刮削", tone: "warn" });
+    expect(scrapeStatus(""), "没刮削过").toBeNull();
   });
 
   it("二级分类的条件写成一句话", () => {

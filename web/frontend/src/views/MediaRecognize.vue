@@ -148,6 +148,89 @@ async function testTMDB() {
   }
 }
 
+// ---- 刮削的其它来源：Fanart.tv 与 OMDb 的 Key（加密保存、只写不读） ----
+type SourceKey = "fanart" | "fanart_client" | "omdb";
+const SOURCE_KEYS: Record<
+  SourceKey,
+  { field: keyof MediaSettingsUpdate; has: keyof MediaSettings; name: string; after: string }
+> = {
+  fanart: {
+    field: "fanart_api_key",
+    has: "has_fanart_key",
+    name: "Fanart.tv 项目的 API Key",
+    after: "清除后不再用 Fanart.tv：只有它有的图片不写，图片来源选了它的媒体库用 TMDB 的。",
+  },
+  fanart_client: {
+    field: "fanart_client_key",
+    has: "has_fanart_client_key",
+    name: "Fanart.tv 个人 Key",
+    after: "清除后只用项目的 Key。",
+  },
+  omdb: {
+    field: "omdb_api_key",
+    has: "has_omdb_key",
+    name: "OMDb API Key",
+    after: "清除后不再写 IMDb、烂番茄与 Metacritic 的评分，评分来源选了 IMDb 的媒体库用 TMDB 的。",
+  },
+};
+const sourceForm = ref<Record<SourceKey, string>>({ fanart: "", fanart_client: "", omdb: "" });
+const sourceSaving = ref(false);
+const sourceTesting = ref<"" | "fanart" | "omdb">("");
+const hasKey = (k: SourceKey) => Boolean(settings.value?.[SOURCE_KEYS[k].has]);
+const sourcePlaceholder = (k: SourceKey, empty: string) =>
+  hasKey(k) ? "已设置；要更换时填写新的" : empty;
+
+/** 保存填了的 Key（clear 是要清除的那一个）；只换这几项，TMDB 那边没保存的修改不动 */
+async function saveSources(clear?: SourceKey) {
+  const s = settings.value;
+  if (!s) return;
+  const body: MediaSettingsUpdate = { language: s.language };
+  for (const k of Object.keys(SOURCE_KEYS) as SourceKey[]) {
+    const v = k === clear ? "" : sourceForm.value[k].trim();
+    if (k === clear || v) (body as unknown as Record<string, string>)[SOURCE_KEYS[k].field] = v;
+  }
+  if (Object.keys(body).length === 1) {
+    ElMessage.info("先填写要保存的 Key");
+    return;
+  }
+  sourceSaving.value = true;
+  try {
+    settings.value = await mediaApi.saveSettings(body);
+    sourceForm.value = { fanart: "", fanart_client: "", omdb: "" };
+    ElMessage.success(clear ? "已清除" : "已保存");
+  } catch (e) {
+    ElMessage.error(errText(e, "保存失败"));
+  } finally {
+    sourceSaving.value = false;
+  }
+}
+
+async function clearSourceKey(k: SourceKey) {
+  try {
+    await ElMessageBox.confirm(SOURCE_KEYS[k].after, `清除 ${SOURCE_KEYS[k].name}`, {
+      type: "warning",
+      confirmButtonText: "清除",
+      cancelButtonText: "取消",
+    });
+  } catch {
+    return;
+  }
+  await saveSources(k);
+}
+
+async function testSource(source: "fanart" | "omdb") {
+  sourceTesting.value = source;
+  const name = source === "fanart" ? "Fanart.tv" : "OMDb";
+  try {
+    await mediaApi.testSource(source);
+    ElMessage.success(`${name} 连接正常`);
+  } catch (e) {
+    ElMessage.error(errText(e, `连接 ${name} 失败`));
+  } finally {
+    sourceTesting.value = "";
+  }
+}
+
 // ---- 识别预览 ----
 const input = ref({ title: "", subtitle: "", imdb: "" });
 const result = ref<MediaRecognizeResult | null>(null);
@@ -470,6 +553,94 @@ onMounted(refresh);
             /3、/t/p/。刮削下载的图片、 通知里的海报，以及网页和 App
             上的海报都用这里的图片地址：刮削和 App 的海报由 pt-tools
             经上面的代理去取，网页上的海报由浏览器直接加载，通知里的海报由收到通知的设备打开。
+          </p>
+        </PtPanel>
+
+        <PtPanel title="刮削的其它来源" icon="layers" data-testid="media-sources">
+          <el-form class="pt-form md-form" label-position="top" @submit.prevent>
+            <el-form-item label="Fanart.tv 项目的 API Key">
+              <div class="md-inline">
+                <el-input
+                  v-model="sourceForm.fanart"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="sourcePlaceholder('fanart', '没填时不用 Fanart.tv')"
+                  data-testid="media-fanart-key" />
+                <el-button
+                  v-if="hasKey('fanart')"
+                  data-testid="media-clear-fanart"
+                  @click="clearSourceKey('fanart')"
+                  >清除</el-button
+                >
+                <el-button
+                  :disabled="!hasKey('fanart')"
+                  :loading="sourceTesting === 'fanart'"
+                  data-testid="media-test-fanart"
+                  @click="testSource('fanart')"
+                  >测试</el-button
+                >
+              </div>
+            </el-form-item>
+            <el-form-item label="Fanart.tv 个人 Key（可选）">
+              <div class="md-inline">
+                <el-input
+                  v-model="sourceForm.fanart_client"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="
+                    sourcePlaceholder('fanart_client', '和项目的 Key 一起发，新上传的图片更快能用')
+                  "
+                  data-testid="media-fanart-client-key" />
+                <el-button
+                  v-if="hasKey('fanart_client')"
+                  data-testid="media-clear-fanart-client"
+                  @click="clearSourceKey('fanart_client')"
+                  >清除</el-button
+                >
+              </div>
+            </el-form-item>
+            <el-form-item label="OMDb API Key">
+              <div class="md-inline">
+                <el-input
+                  v-model="sourceForm.omdb"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="sourcePlaceholder('omdb', '没填时不写 IMDb 等评分')"
+                  data-testid="media-omdb-key" />
+                <el-button
+                  v-if="hasKey('omdb')"
+                  data-testid="media-clear-omdb"
+                  @click="clearSourceKey('omdb')"
+                  >清除</el-button
+                >
+                <el-button
+                  :disabled="!hasKey('omdb')"
+                  :loading="sourceTesting === 'omdb'"
+                  data-testid="media-test-omdb"
+                  @click="testSource('omdb')"
+                  >测试</el-button
+                >
+              </div>
+            </el-form-item>
+            <div class="md-actions">
+              <el-button
+                type="primary"
+                :loading="sourceSaving"
+                :disabled="!settings"
+                data-testid="media-sources-save"
+                @click="saveSources()">
+                <PtIcon v-if="!sourceSaving" name="save" :size="14" /><span>保存</span>
+              </el-button>
+            </div>
+          </el-form>
+          <p class="md-tip">
+            刮削时除了 TMDB，还可以用这两个来源（在「媒体库」里按项选）：Fanart.tv 有高清 Logo、
+            clearart、横幅、横版海报与碟片图，在 fanart.tv 注册后到「Get an API Key」页面申请项目的
+            Key；OMDb 给 IMDb、烂番茄与 Metacritic 的评分，在 omdbapi.com 申请（免费的每天 1000
+            次）。两个都经上面的代理访问；Key 加密保存，只写不读。豆瓣与 Bangumi 不用 Key。
           </p>
         </PtPanel>
 

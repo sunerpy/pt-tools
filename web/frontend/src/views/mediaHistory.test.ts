@@ -1,18 +1,24 @@
 // @vitest-environment happy-dom
 /*
- * 钉子：整理历史。按状态与关键字筛选；失败与跳过的可以重试并写明结果；删除时可选连库里的文件一起删，
- * 移动整理的与没整理出文件的不能选；读不到时写明原因。
+ * 钉子：整理历史。按状态与关键字筛选；失败与跳过的可以重试并写明结果；整理好的写明刮削的结果，可以重新刮削（先确认）；
+ * 删除时可选连库里的文件一起删，移动整理的与没整理出文件的不能选；读不到时写明原因。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type MountedView, mountView } from "@/test-mount";
 
-const api = vi.hoisted(() => ({ history: vi.fn(), retry: vi.fn(), deleteHistory: vi.fn() }));
+const api = vi.hoisted(() => ({
+  history: vi.fn(),
+  retry: vi.fn(),
+  rescrape: vi.fn(),
+  deleteHistory: vi.fn(),
+}));
 const ui = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   warning: vi.fn(),
   info: vi.fn(),
+  confirm: vi.fn(),
 }));
 
 vi.mock("@/api", async (orig) => {
@@ -30,6 +36,7 @@ vi.mock("element-plus", async (orig) => {
       warning: ui.warning,
       info: ui.info,
     }),
+    ElMessageBox: { ...real.ElMessageBox, confirm: ui.confirm },
   };
 });
 
@@ -69,6 +76,8 @@ const row = (over: Record<string, unknown>) => ({
   trigger: "auto",
   subtitles: 1,
   has_files: true,
+  scrape_status: "",
+  scrape_note: "",
   created_at: "2026-10-07T12:00:00Z",
   updated_at: "2026-10-07T12:00:00Z",
   ...over,
@@ -79,7 +88,7 @@ async function mountPage(fail = false) {
   else
     api.history.mockResolvedValue({
       items: [
-        row({}),
+        row({ scrape_status: "partial", scrape_note: "fanart.jpg: boom" }),
         row({
           id: 2,
           status: "failed",
@@ -162,6 +171,49 @@ describe("整理历史", () => {
     });
     q("mh-retry-2")!.click();
     await vi.waitFor(() => expect(ui.warning).toHaveBeenCalledWith("没有启用的剧集媒体库"));
+  });
+
+  it("刮削：写明结果与说明；整理好的可以重新刮削，先确认", async () => {
+    await mountPage();
+    const text = q("mh-table")!.textContent ?? "";
+    expect(text).toContain("部分刮削");
+    expect(text).toContain("刮削：fanart.jpg: boom");
+    expect(q("mh-rescrape-1")).not.toBeNull();
+    expect(q("mh-rescrape-2"), "失败的不能重新刮削").toBeNull();
+
+    ui.confirm.mockRejectedValueOnce("cancel");
+    q("mh-rescrape-1")!.click();
+    await flush();
+    expect(api.rescrape).not.toHaveBeenCalled();
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.rescrape.mockResolvedValue({ records: 2, written: 5, sources: "简介 TMDB，评分 TMDB" });
+    q("mh-rescrape-1")!.click();
+    await vi.waitFor(() => expect(api.rescrape).toHaveBeenCalledWith(1));
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith(
+        "刮削了 2 条记录，写了 5 个文件（简介 TMDB，评分 TMDB）",
+      ),
+    );
+    expect(ui.confirm.mock.calls[1]![0]).toContain("这部剧在这个媒体库里整理好的每一集");
+    expect(api.history).toHaveBeenCalledTimes(2);
+
+    await vi.waitFor(() =>
+      expect(q("mh-rescrape-1")!.classList.contains("is-loading")).toBe(false),
+    );
+    api.rescrape.mockResolvedValue({ records: 1, written: 0, messages: ["Fanart.tv 不能用"] });
+    q("mh-rescrape-1")!.click();
+    await vi.waitFor(() =>
+      expect(ui.warning).toHaveBeenCalledWith("刮削了 1 条记录，写了 0 个文件；Fanart.tv 不能用"),
+    );
+    await vi.waitFor(() =>
+      expect(q("mh-rescrape-1")!.classList.contains("is-loading")).toBe(false),
+    );
+    api.rescrape.mockRejectedValue(new Error("媒体库「剧集」关着刮削：先在媒体库里打开"));
+    q("mh-rescrape-1")!.click();
+    await vi.waitFor(() =>
+      expect(ui.error).toHaveBeenCalledWith("媒体库「剧集」关着刮削：先在媒体库里打开"),
+    );
   });
 
   it("删除：可选连库里的文件一起删；移动整理的不能选", async () => {

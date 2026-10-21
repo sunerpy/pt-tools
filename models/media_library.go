@@ -35,8 +35,10 @@ type MediaLibrary struct {
 	ScrapeItems string `gorm:"size:128;not null;default:''" json:"-"`
 	// ScrapeImageLang 是海报与 Logo 优先用的语言：空串用 TMDB 给的那张；zh、en、ja；none 是没有文字的
 	ScrapeImageLang string `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
-	// ScrapeSource 是 NFO 里简介与评分的来源：空串用 TMDB 的；douban 用豆瓣的（找不到时用 TMDB 的）
+	// ScrapeSource 是旧版本的「简介与评分」：空串用 TMDB 的；douban 用豆瓣的（找不到时用 TMDB 的）。ScrapeSources 为空时还按它
 	ScrapeSource string `gorm:"size:16;not null;default:''" json:"scrape_source"`
+	// ScrapeSources 是每一项的数据来源（JSON，见 metadata.Sources：简介、评分、每一集、图片）；空串是都用 TMDB 的
+	ScrapeSources string `gorm:"size:256;not null;default:''" json:"-"`
 	// ClassifyDir 为真时按二级分类（MediaOrganizeSetting.ClassifyRules）放进库目录下的分类目录
 	ClassifyDir bool `gorm:"not null;default:false" json:"classify_dir"`
 	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办：空串不替换，larger 新文件更大时替换
@@ -149,6 +151,15 @@ const (
 	MediaTriggerWatch = "watch"
 )
 
+// 刮削的结果（整理记录的 ScrapeStatus）。空串是没刮削过（媒体库关着刮削，或升级前整理的）。
+const (
+	MediaScrapeOK = "ok"
+	// MediaScrapePartial 是有的文件没写成、或有来源出错（用了 TMDB 的），ScrapeNote 写明
+	MediaScrapePartial = "partial"
+	// MediaScrapeFailed 是出了错、什么也没写成
+	MediaScrapeFailed = "failed"
+)
+
 // MediaTransferHistory 是一个视频文件的整理记录。源文件（pt-tools 里的路径）唯一：同一个文件只整理一次，
 // 同一事件重复到达或几种触发方式碰到一起都不会重复整理。字幕跟着视频一起整理，目标路径记在 Extras 里。
 type MediaTransferHistory struct {
@@ -185,10 +196,17 @@ type MediaTransferHistory struct {
 	TargetFileID string `gorm:"size:64;not null;default:''" json:"-"`
 	// SourceFileID 是整理时源文件的编号（同 TargetFileID 的格式）：目录监控按它认同一个位置上是不是换成了另一个文件。
 	// 下载器的种子不记（种子按 info hash 认）
-	SourceFileID string    `gorm:"size:64;not null;default:''" json:"-"`
-	Trigger      string    `gorm:"size:16;not null;default:''" json:"trigger"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	SourceFileID string `gorm:"size:64;not null;default:''" json:"-"`
+	// RootPath 是整理时算剧集目录、电影有没有自己的目录的起点：库目录，按二级分类放进子目录时是分类目录（重新刮削用）。
+	// 升级前的记录为空
+	RootPath string `gorm:"size:2048;not null;default:''" json:"-"`
+	// ScrapeStatus 是上一次刮削的结果（MediaScrapeOK 等），ScrapeNote 是出的问题与说明，ScrapedAt 是刮削的时间
+	ScrapeStatus string     `gorm:"size:16;not null;default:''" json:"scrape_status"`
+	ScrapeNote   string     `gorm:"size:1024;not null;default:''" json:"scrape_note"`
+	ScrapedAt    *time.Time `json:"scraped_at,omitempty"`
+	Trigger      string     `gorm:"size:16;not null;default:''" json:"trigger"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 func (MediaTransferHistory) TableName() string { return "media_transfer_histories" }

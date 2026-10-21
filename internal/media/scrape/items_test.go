@@ -1,116 +1,82 @@
 package scrape
 
 import (
-	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/metadata"
 )
 
 func TestItems(t *testing.T) {
-	assert.Equal(t, DefaultItems, ParseItems("").List(), "没选过时 Logo 以外都写")
+	assert.Equal(t, DefaultItems, ParseItems("").List(), "没选过时 Logo 与只有 Fanart.tv 有的以外都写")
 	assert.False(t, ParseItems("").Logo)
-	assert.Equal(t, []string{ItemPoster, ItemLogo}, ParseItems("logo, poster,unknown").List(), "按界面顺序，不认识的忽略")
+	assert.False(t, ParseItems("").Clearart)
+	assert.Equal(t, []string{ItemPoster, ItemLogo, ItemBanner}, ParseItems("banner,logo, poster,unknown").List(), "按界面顺序，不认识的忽略")
 
-	got, err := NormalizeItems([]string{"thumb", " nfo", "thumb", "logo"})
+	got, err := NormalizeItems([]string{"thumb", " nfo", "thumb", "logo", "discart"})
 	require.NoError(t, err)
-	assert.Equal(t, "nfo,logo,thumb", got)
+	assert.Equal(t, "nfo,logo,discart,thumb", got)
 	got, err = NormalizeItems(nil)
 	require.NoError(t, err)
 	assert.Empty(t, got)
-	_, err = NormalizeItems([]string{"banner"})
+	_, err = NormalizeItems([]string{"trailer"})
 	require.Error(t, err)
 
 	assert.False(t, ParseItems("season_poster,thumb").Any(false), "电影没有季海报与集截图")
 	assert.True(t, ParseItems("season_poster,thumb").Any(true))
 	assert.True(t, ParseItems("logo").Any(false))
+	assert.True(t, ParseItems("discart").Any(false))
+	assert.False(t, ParseItems("discart").Any(true), "剧集没有碟片图")
 }
 
-func TestChooseArt(t *testing.T) {
-	r := tmdb.Result{PosterPath: "/default.jpg", BackdropPath: "/default-bd.jpg"}
-	imgs := &tmdb.Images{
-		Posters:   []tmdb.Image{{Path: "/en.jpg", Lang: "en"}, {Path: "/zh.jpg", Lang: "zh"}, {Path: "/none.jpg"}},
-		Backdrops: []tmdb.Image{{Path: "/bd-zh.jpg", Lang: "zh"}, {Path: "/bd-none.jpg"}},
-		Logos:     []tmdb.Image{{Path: "/logo-ja.png", Lang: "ja"}, {Path: "/logo-en.png", Lang: "en"}, {Path: "/logo-zh.png", Lang: "zh"}},
+func names(files []File) []string {
+	var out []string
+	for _, f := range files {
+		out = append(out, filepath.Base(f.Path))
 	}
-	cases := []struct {
-		name, lang, recog string
-		imgs              *tmdb.Images
-		want              Art
-	}{
-		{"没取图片列表：用 TMDB 给的、不写 Logo", ImageLangAuto, "zh-CN", nil, Art{Poster: "/default.jpg", Fanart: "/default-bd.jpg"}},
-		{"跟 TMDB：海报背景不换，Logo 用识别语言", ImageLangAuto, "zh-CN", imgs, Art{Poster: "/default.jpg", Fanart: "/default-bd.jpg", Logo: "/logo-zh.png"}},
-		{"英文海报，背景用没有文字的", "en", "zh-CN", imgs, Art{Poster: "/en.jpg", Fanart: "/bd-none.jpg", Logo: "/logo-en.png"}},
-		{"无文字：没有无文字的 Logo 时找识别语言的", ImageLangNone, "ja-JP", imgs, Art{Poster: "/none.jpg", Fanart: "/bd-none.jpg", Logo: "/logo-ja.png"}},
-		{"没有这种语言的海报时用 TMDB 给的", "ja", "zh-CN", imgs, Art{Poster: "/default.jpg", Fanart: "/bd-none.jpg", Logo: "/logo-ja.png"}},
-	}
-	for _, c := range cases {
-		assert.Equal(t, c.want, ChooseArt(r, c.imgs, c.lang, c.recog), c.name)
-	}
-
-	// Logo：识别语言与英文都没有时用没有文字的，再没有时用评分最高的一张
-	only := &tmdb.Images{Logos: []tmdb.Image{{Path: "/ko.png", Lang: "ko"}, {Path: "/plain.png"}}}
-	assert.Equal(t, "/plain.png", ChooseArt(r, only, ImageLangAuto, "zh-CN").Logo)
-	assert.Equal(t, "/plain.png", ChooseArt(r, &tmdb.Images{Logos: []tmdb.Image{{Path: "/zh.png", Lang: "zh"}, {Path: "/plain.png"}}}, ImageLangNone, "zh-CN").Logo,
-		"选了无文字时先找没有文字的 Logo")
-	only.Logos = only.Logos[:1]
-	assert.Equal(t, "/ko.png", ChooseArt(r, only, ImageLangAuto, "zh-CN").Logo)
-	assert.Empty(t, ChooseArt(r, &tmdb.Images{}, "zh", "zh-CN").Logo)
+	return out
 }
 
-// 只写选了的内容；Logo 写成 clearlogo.png（库目录根下的电影带上文件名）
-func TestWriterItems(t *testing.T) {
-	ctx := context.Background()
-	art := Art{Poster: "/p.jpg", Fanart: "/bd.jpg", Logo: "/logo.png"}
+// 文件名：电影有自己的目录时放在目录里，平铺时带上文件名；剧集的放在剧集目录里，季海报也是
+func TestFiles(t *testing.T) {
+	all := ParseItems("nfo,poster,fanart,logo,clearart,banner,landscape,discart,season_poster,thumb")
+	video := filepath.Join("/lib", "奥本海默 (2023)", "奥本海默 (2023).mkv")
+	assert.Equal(t, []string{
+		"奥本海默 (2023).nfo", "poster.jpg", "fanart.jpg", "clearlogo.png", "clearart.png", "banner.jpg", "landscape.jpg", "discart.png",
+	}, names(MovieFiles(video, true, all)))
+	flat := MovieFiles(filepath.Join("/lib", "M.mkv"), false, all)
+	assert.Equal(t, []string{
+		"M.nfo", "M-poster.jpg", "M-fanart.jpg", "M-clearlogo.png", "M-clearart.png", "M-banner.jpg", "M-landscape.jpg", "M-discart.png",
+	}, names(flat))
+	assert.Equal(t, NFOMovie, flat[0].NFO)
+	assert.Equal(t, metadata.ArtDisc, flat[7].Art)
 
-	root := t.TempDir()
-	img := &fakeImages{}
-	w := Writer{Images: img, Items: ParseItems("poster,logo")}
-	rep := w.Movie(ctx, filepath.Join(root, "M (2023)", "M.mkv"), true, movie, art)
-	assert.Empty(t, rep.Errors)
-	assert.Equal(t, []string{"M (2023)/clearlogo.png", "M (2023)/poster.jpg"}, listFiles(t, root))
-	assert.Equal(t, []string{"w780/p.jpg", "w500/logo.png"}, img.calls)
+	show := filepath.Join("/tv", "S (2023)")
+	assert.Equal(t, []string{"tvshow.nfo", "poster.jpg", "fanart.jpg", "clearlogo.png", "clearart.png", "banner.jpg", "landscape.jpg"},
+		names(ShowFiles(show, all)), "剧集没有碟片图")
+	season := SeasonFiles(show, filepath.Join(show, "Season 1"), 1, all)
+	assert.Equal(t, []string{"season.nfo", "season01-poster.jpg"}, names(season))
+	assert.Equal(t, filepath.Join(show, "season01-poster.jpg"), season[1].Path, "季海报放在剧集目录里")
+	assert.Equal(t, []string{"season-specials-poster.jpg"}, names(SeasonFiles(show, show, 0, all)), "没有季目录时不写 season.nfo")
+	ep := EpisodeFiles(filepath.Join(show, "Season 1", "S01E01.mkv"), 1, 1, 0, all)
+	assert.Equal(t, []string{"S01E01.nfo", "S01E01-thumb.jpg"}, names(ep))
+	assert.Equal(t, 1, ep[0].EpisodeEnd, "单集的 EpisodeEnd 是这一集")
+	assert.Empty(t, MovieFiles(video, true, Items{}))
 
-	flat := t.TempDir()
-	rep = Writer{Images: &fakeImages{}, Items: ParseItems("logo")}.Movie(ctx, filepath.Join(flat, "M.mkv"), false, movie, art)
-	assert.Empty(t, rep.Errors)
-	assert.Equal(t, []string{"M-clearlogo.png"}, listFiles(t, flat))
+	for _, n := range []string{"poster.jpg", "fanart.jpg", "clearlogo.png", "clearart.png", "banner.jpg", "landscape.jpg", "discart.png", "tvshow.nfo", "season.nfo", "season01-poster.jpg", "season-specials-poster.jpg"} {
+		assert.True(t, IsDirArtifact(n), n)
+	}
+	for _, n := range []string{"M-poster.jpg", "M.nfo", "S01E01-thumb.jpg", "season1-poster.png"} {
+		assert.False(t, IsDirArtifact(n), n)
+	}
+}
 
-	// 剧集：只要季海报与 Logo
-	tv := t.TempDir()
-	showDir := filepath.Join(tv, "S (2023)")
-	seasonDir := filepath.Join(showDir, "Season 1")
-	w = Writer{Images: &fakeImages{}, Items: ParseItems("season_poster,logo")}
-	var all Report
-	all.Merge(w.Show(ctx, showDir, show, art))
-	all.Merge(w.Season(ctx, showDir, seasonDir, 1, season1))
-	all.Merge(w.Episode(ctx, filepath.Join(seasonDir, "S01E01.mkv"), show, 1, 1, 0, season1))
-	assert.Empty(t, all.Errors)
-	assert.Equal(t, []string{"S (2023)/clearlogo.png", "S (2023)/season01-poster.jpg"}, listFiles(t, tv))
-
-	// 只要 NFO 与集截图：不下载海报
-	tv2 := t.TempDir()
-	img = &fakeImages{}
-	w = Writer{Images: img, Items: ParseItems("nfo,thumb")}
-	showDir = filepath.Join(tv2, "S")
-	seasonDir = filepath.Join(showDir, "Season 1")
-	all = Report{}
-	all.Merge(w.Show(ctx, showDir, show, art))
-	all.Merge(w.Season(ctx, showDir, seasonDir, 1, season1))
-	all.Merge(w.Episode(ctx, filepath.Join(seasonDir, "S01E02.mkv"), show, 1, 2, 0, season1))
-	assert.Empty(t, all.Errors)
-	assert.Equal(t, []string{"S/Season 1/S01E02-thumb.jpg", "S/Season 1/S01E02.nfo", "S/Season 1/season.nfo", "S/tvshow.nfo"}, listFiles(t, tv2))
-	assert.Equal(t, []string{"w300/e2.jpg"}, img.calls)
-
-	// 什么都没选：什么都不写
-	empty := t.TempDir()
-	rep = Writer{Images: &fakeImages{}}.Movie(ctx, filepath.Join(empty, "M", "M.mkv"), true, movie, art)
-	assert.Empty(t, rep.Written)
-	_, err := os.Stat(filepath.Join(empty, "M"))
-	assert.True(t, os.IsNotExist(err))
+func TestJoin(t *testing.T) {
+	assert.Equal(t, "来源里没有 Logo、集截图", Join("来源里没有", "Logo、集截图"))
+	assert.Equal(t, "Clearart 只有 Fanart.tv 有", Join("Clearart", "只有 Fanart.tv 有"))
+	assert.Equal(t, "海报、横幅只有 Fanart.tv 有", Join("海报、横幅", "只有 Fanart.tv 有"))
+	assert.Equal(t, "来源里没有横幅", Join("来源里没有", "横幅"))
 }

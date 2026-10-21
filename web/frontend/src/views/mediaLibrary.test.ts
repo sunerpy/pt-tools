@@ -33,6 +33,7 @@ const api = vi.hoisted(() => ({
   testServer: vi.fn(),
 }));
 const dl = vi.hoisted(() => ({ list: vi.fn() }));
+const media = vi.hoisted(() => ({ settings: vi.fn() }));
 const notifications = vi.hoisted(() => ({ list: vi.fn() }));
 const ui = vi.hoisted(() => ({
   success: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock("@/api", async (orig) => {
     ...real,
     organizeApi: api,
     downloadersApi: dl,
+    mediaApi: { ...real.mediaApi, settings: media.settings },
     chatopsApi: { ...real.chatopsApi, notifications },
   };
 });
@@ -115,6 +117,7 @@ const library = {
   scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
   scrape_image_lang: "",
   scrape_source: "",
+  scrape_sources: { plot: "", rating: "", episode: "", artwork: "" },
   classify_dir: false,
   overwrite_mode: "",
   enabled: true,
@@ -147,6 +150,11 @@ const server = {
 
 async function mountPage(opts: { libsFail?: boolean } = {}) {
   api.settings.mockResolvedValue(settings);
+  media.settings.mockResolvedValue({
+    key_source: "user",
+    has_fanart_key: false,
+    has_omdb_key: false,
+  });
   if (opts.libsFail) api.libraries.mockRejectedValue(new Error("读取媒体库失败"));
   else api.libraries.mockResolvedValue([library]);
   api.pathMaps.mockResolvedValue([
@@ -248,7 +256,7 @@ describe("媒体库", () => {
         scrape_overwrite: false,
         scrape_items: ["nfo", "poster", "fanart", "season_poster", "thumb"],
         scrape_image_lang: "",
-        scrape_source: "",
+        scrape_sources: { plot: "", rating: "", episode: "", artwork: "" },
         classify_dir: false,
         overwrite_mode: "",
         enabled: true,
@@ -276,6 +284,17 @@ describe("媒体库", () => {
     const box = (id: string) => q(id)!.querySelector("input")!;
     expect(box("ml-lib-item-poster").checked).toBe(true);
     expect(box("ml-lib-item-logo").checked, "没选过时不写 Logo").toBe(false);
+    // 值是空串的选项（TMDB、跟识别语言、不替换）照样显示出来，不是「请选择」
+    const shown = (id: string) =>
+      q(id)!.querySelector(".el-select__placeholder:not(.is-transparent)")?.textContent?.trim();
+    expect(shown("ml-lib-image-lang")).toBe("跟识别语言（TMDB 默认的那张）");
+    expect(shown("ml-lib-source-plot")).toBe("TMDB");
+    expect(shown("ml-lib-overwrite-mode")).toBe("不替换");
+    // 下拉框旁边只是一段文字：读屏软件靠 aria-label 读出它是什么
+    const named = (id: string) =>
+      q(id)!.querySelector("[role=combobox]")?.getAttribute("aria-label");
+    expect(named("ml-lib-image-lang")).toBe("图片语言");
+    expect(named("ml-lib-source-plot")).toBe("简介的数据来源");
 
     // 每点一下等一轮更新：选项组按上一次的值算下一次
     box("ml-lib-item-poster").click();
@@ -291,26 +310,41 @@ describe("媒体库", () => {
       expect(opt).toBeTruthy();
       opt!.click();
     });
-    const src = q("ml-lib-scrape-source")!;
-    (src.querySelector<HTMLElement>(".el-select__wrapper") ?? src).click();
-    await vi.waitFor(() => {
-      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
-        (o) => (o.textContent ?? "").trim().startsWith("豆瓣"),
-      );
-      expect(opt).toBeTruthy();
-      opt!.click();
-    });
+    // 数据来源按项选：电影没有「每一集」；评分选了 IMDb、没填 OMDb 的 Key 时提示
+    expect(q("ml-lib-source-episode"), "电影没有每一集").toBeNull();
+    const pick = async (id: string, text: string) => {
+      const sel = q(id)!;
+      (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+      await vi.waitFor(() => {
+        const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+          (o) => (o.textContent ?? "").trim().startsWith(text),
+        );
+        expect(opt).toBeTruthy();
+        opt!.click();
+      });
+      await flush();
+    };
+    await pick("ml-lib-source-plot", "豆瓣");
+    await pick("ml-lib-source-rating", "IMDb");
     await vi.waitFor(() =>
-      expect(document.body.textContent).toContain("按中文名与年份在豆瓣上找同一部"),
+      expect(q("ml-lib-source-warn")?.textContent).toContain("还没在「媒体识别」里填 OMDb 的 Key"),
+    );
+    box("ml-lib-item-clearart").click();
+    await flush();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain(
+        "Clearart 只有 Fanart.tv 有，还没在「媒体识别」里填 Fanart.tv 的 Key",
+      ),
     );
     api.updateLibrary.mockResolvedValue(library);
     q("ml-lib-save")!.click();
     await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
     expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
-      scrape_items: ["nfo", "fanart", "season_poster", "thumb", "logo"],
+      scrape_items: ["nfo", "fanart", "season_poster", "thumb", "logo", "clearart"],
       scrape_image_lang: "en",
-      scrape_source: "douban",
+      scrape_sources: { plot: "douban", rating: "omdb", episode: "", artwork: "" },
     });
+    expect(Object.keys(api.updateLibrary.mock.calls[0]![1])).not.toContain("scrape_source");
 
     // 电影能选的几项都去掉：不保存，提示关掉刮削
     q("ml-lib-edit-3")!.click();

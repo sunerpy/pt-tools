@@ -2664,16 +2664,28 @@ export interface MediaSettings {
   api_base_url: string;
   /** 换掉的 TMDB 图片地址（到 /t/p/ 为止）；空 = 官方地址 */
   image_base_url: string;
+  /** 刮削用的 Fanart.tv（项目的 Key）、Fanart.tv 个人 Key 与 OMDb 的 API Key 填了没有（只写不读） */
+  has_fanart_key: boolean;
+  has_fanart_client_key: boolean;
+  has_omdb_key: boolean;
 }
 
-/** 保存设置：tmdb_api_key、proxy_url、api_base_url、image_base_url 不传时不改，传空串时清除 */
+/** 保存设置：语言以外的项不传时不改，传空串时清除 */
 export interface MediaSettingsUpdate {
   tmdb_api_key?: string;
   language: string;
   proxy_url?: string;
   api_base_url?: string;
   image_base_url?: string;
+  /** Fanart.tv 项目的 API Key（填了才用 Fanart.tv） */
+  fanart_api_key?: string;
+  /** Fanart.tv 的个人 Key（可选，和项目的 Key 一起发，新上传的图片更快能用） */
+  fanart_client_key?: string;
+  omdb_api_key?: string;
 }
+
+/** 测试连接的来源：TMDB、Fanart.tv、OMDb */
+export type MediaTestSource = "tmdb" | "fanart" | "omdb";
 
 /** 标题解析结果（internal/media/meta）：没解析出来的字段不出现 */
 export interface MediaMeta {
@@ -2781,6 +2793,9 @@ export const mediaApi = {
   settings: () => api.get<MediaSettings>("/api/media/settings"),
   saveSettings: (data: MediaSettingsUpdate) => api.put<MediaSettings>("/api/media/settings", data),
   testTMDB: () => api.post<{ ok: boolean }>("/api/media/settings/test"),
+  /** 用当前设置访问一次这个来源，确认 API Key 与代理可用 */
+  testSource: (source: MediaTestSource) =>
+    api.post<{ ok: boolean }>(`/api/media/settings/test?source=${source}`),
   recognize: (data: { title: string; subtitle?: string; imdb_id?: string }) =>
     api.post<MediaRecognizeResult>("/api/media/recognize", data),
   overrides: () => api.get<MediaOverride[]>("/api/media/overrides"),
@@ -2830,11 +2845,33 @@ export interface OrganizeRunTimes {
 export type OrganizeSettingsInput = Omit<OrganizeSettings, "auto_since" | "runs">;
 
 /** 刮削内容（和后端 scrape.AllItems 一致） */
-export type MediaScrapeItem = "nfo" | "poster" | "fanart" | "logo" | "season_poster" | "thumb";
+export type MediaScrapeItem =
+  | "nfo"
+  | "poster"
+  | "fanart"
+  | "logo"
+  | "clearart"
+  | "banner"
+  | "landscape"
+  | "discart"
+  | "season_poster"
+  | "thumb";
 /** 海报与 Logo 优先用的语言：空串用 TMDB 给的那张；none 是没有文字的 */
 export type MediaImageLang = "" | "zh" | "en" | "ja" | "none";
-/** NFO 里简介与评分的来源：空串用 TMDB 的；douban 用豆瓣的（找不到时用 TMDB 的） */
+/** 旧版本的「简介与评分」：空串用 TMDB 的；douban 用豆瓣的。新的设置看 scrape_sources */
 export type MediaScrapeSource = "" | "douban";
+
+/** 每一项的数据来源（和后端 metadata.Sources 一致）：空串是 TMDB，选的来源找不到时用 TMDB 的 */
+export interface MediaScrapeSources {
+  /** 简介：TMDB、豆瓣、Bangumi（只用于动画） */
+  plot: "" | "douban" | "bangumi";
+  /** 主要的评分：TMDB、豆瓣、Bangumi、IMDb（经 OMDb，要填它的 Key） */
+  rating: "" | "douban" | "bangumi" | "omdb";
+  /** 每一集的标题与简介（只有剧集）：TMDB、Bangumi */
+  episode: "" | "bangumi";
+  /** 海报、背景、Logo 与季海报先用哪个来源的：TMDB、Fanart.tv（要填它的 Key） */
+  artwork: "" | "fanart";
+}
 
 export interface MediaLibraryInput {
   name: string;
@@ -2850,7 +2887,9 @@ export interface MediaLibraryInput {
   /** 刮削要写的内容；没选过的库是默认的那几项（Logo 以外） */
   scrape_items: MediaScrapeItem[];
   scrape_image_lang: MediaImageLang;
-  scrape_source: MediaScrapeSource;
+  /** 旧版本的「简介与评分」；带了 scrape_sources 时不看它 */
+  scrape_source?: MediaScrapeSource;
+  scrape_sources: MediaScrapeSources;
   /** 按二级分类放进库目录下的分类目录 */
   classify_dir: boolean;
   /** 目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时：空串不替换，larger 新文件更大时替换 */
@@ -3042,8 +3081,29 @@ export interface MediaHistoryItem {
   subtitles: number;
   /** 记录里记着 pt-tools 放进库的文件（跳过、失败的记录也可能有），可以连文件删 */
   has_files: boolean;
+  /** 上一次刮削的结果：空串是没刮削过（媒体库关着刮削，或升级前整理的） */
+  scrape_status: "" | MediaScrapeStatus;
+  /** 刮削出的问题与说明（用了 TMDB 代替的一类） */
+  scrape_note: string;
+  scraped_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+/** 刮削的结果：成功；部分成功（有的文件没写成，或有来源出错、用了 TMDB 的）；失败 */
+export type MediaScrapeStatus = "ok" | "partial" | "failed";
+
+/** 重新刮削的结果 */
+export interface RescrapeResult {
+  /** 刮削了的整理记录数（这个媒体库里同一部电影或剧集） */
+  records: number;
+  /** 写了的文件数（内容一样的不重写） */
+  written: number;
+  messages?: string[];
+  /** NFO 里文字的每一项用了哪个来源 */
+  sources?: string;
+  /** 还在后台刮削，稍后到整理历史里看 */
+  queued?: boolean;
 }
 
 export interface MediaHistoryPage {
@@ -3100,6 +3160,8 @@ export const organizeApi = {
     return api.get<MediaHistoryPage>(`/api/media/history${qs ? `?${qs}` : ""}`);
   },
   retry: (id: number) => api.post<OrganizeResult>(`/api/media/history/${id}/retry`),
+  /** 按媒体库现在的设置重新刮削这条记录所在的电影或剧集 */
+  rescrape: (id: number) => api.post<RescrapeResult>(`/api/media/history/${id}/scrape`),
   /** kept 是换掉或改过、没有删的文件的说明 */
   deleteHistory: (id: number, files = false) =>
     api.delete<{ ok: boolean; kept?: string[] }>(

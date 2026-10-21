@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/sunerpy/pt-tools/internal/media/cachectl"
 )
 
 // 默认的接口地址、请求间隔与缓存时间。
@@ -192,7 +194,7 @@ func (c *Client) suggest(ctx context.Context, name string) ([]suggestion, error)
 
 // getJSON 先看缓存，没有时请求 u 并把响应按 JSON 解析进 out；解析得了才写缓存。
 func (c *Client) getJSON(ctx context.Context, key string, ttl time.Duration, u, referer string, out any) error {
-	if c.cfg.Cache != nil {
+	if c.cfg.Cache != nil && !cachectl.Bypassed(ctx) {
 		if b, ok := c.cfg.Cache.Get(key); ok && json.Unmarshal(b, out) == nil {
 			return nil
 		}

@@ -22,6 +22,7 @@ import {
   type OrganizeSettingsInput,
   chatopsApi,
   downloadersApi,
+  mediaApi,
   organizeApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
@@ -43,7 +44,9 @@ import {
   MEDIA_MODES,
   MEDIA_SERVER_KINDS,
   OVERWRITE_MODES,
-  SCRAPE_SOURCES,
+  SCRAPE_ITEMS,
+  SCRAPE_SOURCE_FIELDS,
+  SCRAPE_SOURCE_OPTIONS,
   TEMPLATE_VARS,
   TMDB_GENRES,
   classifyRuleSummary,
@@ -52,6 +55,7 @@ import {
   scrapeItemsFor,
   serverKindLabel,
   templatePresets,
+  tmdbSources,
 } from "@/utils/media";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
@@ -173,7 +177,7 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   scrape_overwrite: false,
   scrape_items: [...DEFAULT_SCRAPE_ITEMS],
   scrape_image_lang: "",
-  scrape_source: "",
+  scrape_sources: tmdbSources(),
   classify_dir: false,
   overwrite_mode: "",
   enabled: true,
@@ -203,7 +207,7 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     scrape_overwrite: l.scrape_overwrite,
     scrape_items: [...(l.scrape_items ?? DEFAULT_SCRAPE_ITEMS)],
     scrape_image_lang: l.scrape_image_lang ?? "",
-    scrape_source: l.scrape_source ?? "",
+    scrape_sources: { ...tmdbSources(), ...l.scrape_sources },
     classify_dir: l.classify_dir ?? false,
     overwrite_mode: l.overwrite_mode ?? "",
     enabled: l.enabled,
@@ -218,7 +222,47 @@ function openLibrary(l?: MediaLibrary) {
   checkItems.value = [];
   libDialog.value = true;
   void refreshPreview();
+  void loadSourceKeys();
 }
+
+/** 「媒体识别」里填了 Fanart.tv 与 OMDb 的 Key 没有（读不到时为 null，不提示） */
+const sourceKeys = ref<{ fanart: boolean; omdb: boolean } | null>(null);
+async function loadSourceKeys() {
+  try {
+    const s = await mediaApi.settings();
+    sourceKeys.value = s ? { fanart: s.has_fanart_key, omdb: s.has_omdb_key } : null;
+  } catch {
+    sourceKeys.value = null;
+  }
+}
+
+/** 这种媒体库的数据来源项：电影没有「每一集」 */
+const sourceFields = computed(() =>
+  SCRAPE_SOURCE_FIELDS.filter((f) => libForm.value.kind === "tv" || !f.tvOnly),
+);
+
+/** 选了要 Key 的来源、却还没填 Key 时的提示 */
+const sourceWarnings = computed(() => {
+  const f = libForm.value;
+  const keys = sourceKeys.value;
+  if (!f.scrape || !keys) return [];
+  const out: string[] = [];
+  const fanartItems = SCRAPE_ITEMS.filter(
+    (i) => i.fanartOnly && f.scrape_items.includes(i.value) && (f.kind === "movie" || !i.movieOnly),
+  ).map((i) => i.label);
+  if (!keys.fanart && (f.scrape_sources.artwork === "fanart" || fanartItems.length)) {
+    // 最后一项是英文名（Clearart）时和后面的中文空一格
+    const items = fanartItems.join("、");
+    const lead = /[A-Za-z0-9]$/.test(items) ? `${items} ` : items;
+    out.push(
+      `${fanartItems.length ? `${lead}只有 Fanart.tv 有，` : "图片选了 Fanart.tv，"}还没在「媒体识别」里填 Fanart.tv 的 Key：${fanartItems.length ? "这几项不写" : "用 TMDB 的"}`,
+    );
+  }
+  if (!keys.omdb && f.scrape_sources.rating === "omdb") {
+    out.push("评分选了 IMDb，还没在「媒体识别」里填 OMDb 的 Key：用 TMDB 的");
+  }
+  return out;
+});
 
 let previewSeq = 0;
 /** 上一次预览的类型与模板：打开弹窗时已经预览过，watch 再触发一次时不重复请求 */
@@ -1459,6 +1503,7 @@ onMounted(refresh);
           <el-select
             v-model="libForm.overwrite_mode"
             class="ml-lang"
+            :empty-values="[null, undefined]"
             data-testid="ml-lib-overwrite-mode">
             <el-option
               v-for="m in OVERWRITE_MODES"
@@ -1504,6 +1549,8 @@ onMounted(refresh);
               <el-select
                 v-model="libForm.scrape_image_lang"
                 class="ml-lang"
+                :empty-values="[null, undefined]"
+                aria-label="图片语言"
                 data-testid="ml-lib-image-lang">
                 <el-option
                   v-for="l in IMAGE_LANGS"
@@ -1513,27 +1560,42 @@ onMounted(refresh);
               </el-select>
             </div>
             <div class="field-tip">
-              Logo 写成 clearlogo.png，Emby、Jellyfin 与 Kodi
-              都认。选了图片语言时，海报优先用这种语言的、背景优先用没有文字的，没有就用 TMDB
-              默认的那张；Logo 依次找这种语言（无文字是没有文字的）、识别语言与英文的。
+              Logo 写成 clearlogo.png，Clearart、横幅、横版海报与碟片图写成
+              clearart.png、banner.jpg、 landscape.jpg 与 discart.png，Emby、Jellyfin 与 Kodi
+              都认。选了图片语言时，海报优先用这种语言的、背景优先用没有文字的，没有就用来源默认的那张；Logo
+              依次找这种语言（无文字是没有文字的）、识别语言与英文的。
             </div>
-            <div class="ml-inline">
-              <span>简介与评分</span>
-              <el-select
-                v-model="libForm.scrape_source"
-                class="ml-lang"
-                data-testid="ml-lib-scrape-source">
-                <el-option
-                  v-for="o in SCRAPE_SOURCES"
-                  :key="o.value"
-                  :label="o.label"
-                  :value="o.value" />
-              </el-select>
+            <div class="ml-sources" data-testid="ml-lib-sources">
+              <div v-for="sf in sourceFields" :key="sf.key" class="ml-inline">
+                <span class="ml-source-label">{{ sf.label }}</span>
+                <el-select
+                  v-model="libForm.scrape_sources[sf.key]"
+                  class="ml-lang"
+                  :empty-values="[null, undefined]"
+                  :aria-label="`${sf.label}的数据来源`"
+                  :data-testid="`ml-lib-source-${sf.key}`">
+                  <el-option
+                    v-for="o in SCRAPE_SOURCE_OPTIONS[sf.key]"
+                    :key="o.value"
+                    :label="o.label"
+                    :value="o.value" />
+                </el-select>
+              </div>
             </div>
-            <div v-if="libForm.scrape_source === 'douban'" class="field-tip">
-              写 NFO
-              时按中文名与年份在豆瓣上找同一部（剧集按季找），简介换成豆瓣的，评分以豆瓣的为主；站点给了豆瓣编号的电影直接用编号。豆瓣没有开放的接口，找不到或暂时不能访问时用
-              TMDB 的。每 2 秒最多请求一次豆瓣，结果缓存一段时间。
+            <div class="field-tip">
+              数据来源按项选，选的来源找不到这部、或者没有这一项时用 TMDB
+              的；取到的其它来源的评分也写进
+              NFO，主要的评分写在最后（媒体服务器显示它）。豆瓣按中文名与年份找同一部（剧集按季找），站点给了豆瓣编号的电影直接用编号；豆瓣没有开放的接口，每
+              2 秒最多请求一次。Bangumi 只用于动画（TMDB 类型里有「动画」的），日文的简介不用。IMDb
+              的评分经 OMDb 取、Fanart.tv 的图片也要 Key，都在「媒体识别」里填。
+            </div>
+            <div
+              v-for="w in sourceWarnings"
+              :key="w"
+              class="pt-note pt-note--warn ml-source-warn"
+              data-testid="ml-lib-source-warn">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <span>{{ w }}</span>
             </div>
           </template>
           <el-checkbox
@@ -1836,6 +1898,26 @@ onMounted(refresh);
 .ml-lang {
   width: 240px;
   max-width: 100%;
+}
+
+.ml-sources {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  column-gap: 20px;
+}
+
+.ml-source-label {
+  min-width: 48px;
+}
+
+.ml-source-warn {
+  margin-top: 8px;
+}
+
+@media (max-width: 767px) {
+  .ml-sources {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .ml-classify {
