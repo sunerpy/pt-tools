@@ -2,9 +2,12 @@ package subscribe
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -13,7 +16,9 @@ import (
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/internal/reseed"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
@@ -73,9 +78,12 @@ func (s *Service) considerOffer(ctx context.Context, c Candidate) {
 		if _, ok := newMatcher(*sub).match(c.Meta, c.Item); !ok {
 			continue
 		}
+		rctx, run := s.startRun(ctx, sub, models.MediaRunRSS)
 		s.mu.Lock()
-		msg := s.evaluate(ctx, sub, []Candidate{c}, set)
+		msg := s.evaluate(rctx, sub, []Candidate{c}, set)
 		s.mu.Unlock()
+		// RSS 一天能送来很多个：只有真的做了什么（推送、拒绝、等版本）才留下这次的记录
+		s.finishRun(rctx, sub, run, "RSS 里的 "+c.Item.Title+"："+msg, true)
 		s.cfg.Logger.Infof("[订阅] RSS 里的 %s 对上了订阅「%s」：%s", c.Item.Title, sub.Title, msg)
 	}
 }
@@ -93,7 +101,7 @@ func (s *Service) searchDue(ctx context.Context, set Settings) {
 		if ctx.Err() != nil {
 			return
 		}
-		s.searchOne(ctx, &subs[i], set)
+		s.searchOne(ctx, &subs[i], set, models.MediaRunSchedule)
 	}
 }
 
@@ -110,10 +118,11 @@ func (s *Service) SearchNow(ctx context.Context, id uint) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.searchOne(ctx, &sub, set), nil
+	return s.searchOne(ctx, &sub, set, models.MediaRunManual), nil
 }
 
-// keywords 是主动搜索用的关键字：拉丁字母的名字（原名或英文别名）与中文名，剧集加季（S02），电影加年份；最多两个。
+// keywords 是主动搜索用的关键字：拉丁字母的名字（原名或英文别名）与中文名，最多两个。拉丁字母的名字剧集加季（S02）、
+// 电影加年份；中文名不加（中文标题多写成「第二季」「第2期」，加了 S02 搜不到）。
 func keywords(sub *models.MediaSubscription) []string {
 	latin := ""
 	for _, n := range append([]string{sub.OriginalTitle}, decodeList(sub.Aliases)...) {
@@ -129,9 +138,10 @@ func keywords(sub *models.MediaSubscription) []string {
 			continue
 		}
 		switch {
+		case !isLatin(n):
 		case sub.MediaType == models.MediaKindTV:
 			n = fmt.Sprintf("%s S%02d", n, sub.Season)
-		case sub.Year > 0 && isLatin(n):
+		case sub.Year > 0:
 			n = fmt.Sprintf("%s %d", n, sub.Year)
 		}
 		if !slices.Contains(out, n) {
@@ -168,15 +178,27 @@ func (s *Service) searchSites(sub *models.MediaSubscription, set Settings) []str
 	return out
 }
 
-// searchOne 搜一个订阅并评估结果；先把下次搜索的时间排好（出错也不会每一拍都搜）。返回结果说明并写进订阅。
-func (s *Service) searchOne(ctx context.Context, sub *models.MediaSubscription, set Settings) string {
+// searchOne 搜一个订阅并评估结果；先把下次搜索的时间排好（出错也不会每一拍都搜）。返回结果说明并写进订阅，
+// 这次运行写进运行记录（trigger 是怎么开始的）。按播出时间的追剧搜完以后按新的台账重排下次时间。
+func (s *Service) searchOne(ctx context.Context, sub *models.MediaSubscription, set Settings, trigger string) string {
 	now := s.cfg.Now()
-	next := now.Add(time.Duration(set.SearchIntervalHours)*time.Hour + s.cfg.Jitter(searchJitter))
+	var lg *ledger
+	if sub.MediaType == models.MediaKindTV && sub.ScheduleKind == models.MediaScheduleAirtime {
+		lg, _ = s.ledgerRows(ctx, sub)
+	}
+	next := s.nextSearch(sub, set, lg, now)
 	s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).
 		Updates(map[string]any{"last_search_at": now, "next_search_at": next})
-	msg := s.search(ctx, sub, set)
-	s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).
-		Updates(map[string]any{"message": truncate(msg, 1024), "updated_at": s.cfg.Now()})
+	rctx, run := s.startRun(ctx, sub, trigger)
+	msg := s.search(rctx, sub, set)
+	upd := map[string]any{"message": truncate(msg, 1024), "updated_at": s.cfg.Now()}
+	if sub.MediaType == models.MediaKindTV && sub.ScheduleKind == models.MediaScheduleAirtime {
+		if lg, err := s.ledgerRows(ctx, sub); err == nil {
+			upd["next_search_at"] = s.nextSearch(sub, set, lg, now)
+		}
+	}
+	s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).Updates(upd)
+	s.finishRun(rctx, sub, run, msg, false)
 	return msg
 }
 
@@ -198,10 +220,14 @@ func (s *Service) search(ctx context.Context, sub *models.MediaSubscription, set
 		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("搜索「%s」失败：%v", kw, err))
+			step(ctx, stepFail, "搜索「%s」失败：%v", kw, err)
+			markRun(ctx, func(rl *runLog) { rl.searchFailed++ })
 			continue
 		}
+		step(ctx, stepSearch, "搜索「%s」：%d 个结果", kw, len(res.Items))
 		for _, e := range res.Errors {
 			errs = append(errs, fmt.Sprintf("%s：%s", e.Site, e.Error))
+			step(ctx, stepFail, "%s 搜索出错：%s", e.Site, e.Error)
 		}
 		for _, it := range res.Items {
 			key := it.SourceSite + "|" + it.ID
@@ -228,7 +254,8 @@ type scored struct {
 	sp span
 }
 
-// evaluate 从候选种子里挑这个订阅要的并推送（调用方持有 s.mu），返回结果说明。
+// evaluate 从候选种子里挑这个订阅要的并推送（调用方持有 s.mu），返回结果说明。剧集先重建台账（认领下载器里已有的种子），
+// 候选的集号按集号映射对到 TMDB 的集。
 func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, cands []Candidate, set Settings) string {
 	fresh, err := s.subRow(ctx, sub.ID)
 	if err != nil || fresh.Status != models.MediaSubActive {
@@ -237,6 +264,13 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 	*sub = fresh
 	profile := s.profileFor(ctx, sub, set)
 	mt := newMatcher(*sub)
+	var lg *ledger
+	if sub.MediaType == models.MediaKindTV {
+		if lg, err = s.rebuildLedger(ctx, sub, rebuildOpts{set: set, adopt: true}); err != nil {
+			return "读不到这一季的分集：" + err.Error()
+		}
+		mt = mt.withMapper(s.mapperFor(ctx, sub, lg.season))
+	}
 	linked, err := s.torrents(ctx, sub.ID)
 	if err != nil {
 		return err.Error()
@@ -249,13 +283,18 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 		}) {
 			continue
 		}
-		sp, match := mt.match(c.Meta, c.Item)
+		sp, match, why := mt.matchMapped(c.Meta, c.Item)
 		if !match {
+			if why != "" {
+				rejects = append(rejects, c.Item.Title+"："+why)
+				step(ctx, stepReject, "%s：%s", c.Item.Title, why)
+			}
 			continue
 		}
 		v := profile.Score(c, sp.count(sub.TotalEpisodes))
 		if v.Reject != "" {
 			rejects = append(rejects, c.Item.Title+"："+v.Reject)
+			step(ctx, stepReject, "%s：%s", c.Item.Title, v.Reject)
 			continue
 		}
 		ok = append(ok, scored{c: c, v: v, sp: sp})
@@ -294,16 +333,22 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 		}
 		return s.pushOne(ctx, sub, ok[0], set)
 	}
-	return s.pickTV(ctx, sub, profile, ok, linked, set)
+	msg := s.pickTV(ctx, sub, profile, ok, set, lg)
+	// 推送了的话按新的种子重建台账（锁住的版本也可能刚写上）：详情与进度马上看得到这几集在下载
+	if after, err := s.torrents(ctx, sub.ID); err == nil && len(after) > len(linked) {
+		if fresh, err := s.subRow(ctx, sub.ID); err == nil {
+			*sub = fresh
+		}
+		if _, err := s.rebuildLedger(ctx, sub, rebuildOpts{set: set}); err != nil {
+			s.cfg.Logger.Debugf("[订阅] 推送以后重建「%s」的追剧台账失败: %v", sub.Title, err)
+		}
+	}
+	return msg
 }
 
-// pickTV 挑剧集的种子：这一季播完以后，缺一半以上或缺的集没有单集可补时下载整季包，否则一集一集补；
-// 洗版时（这一季都下载过了）只看比现在分数高的整季包。
-func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, profile Profile, ok []scored, linked []models.MediaSubscriptionTorrent, set Settings) string {
-	p, err := s.progress(ctx, sub, false)
-	if err != nil {
-		return "读不到这一季的分集：" + err.Error()
-	}
+// pickTV 挑剧集的种子：这一季（必需集）播完以后，缺一半以上或缺的集没有单集可补时下载整季包，否则一集一集补；
+// 洗版时（必需集都下载过了）只看比现在分数高的整季包。开着版本锁时补缺的集只要锁住的版本（见 lock.go）。
+func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, profile Profile, ok []scored, set Settings, lg *ledger) string {
 	var packs, eps []scored
 	for _, o := range ok {
 		if o.sp.Whole {
@@ -312,26 +357,38 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 			eps = append(eps, o)
 		}
 	}
-	airedAll := p.Total > 0 && p.Aired == p.Total
-	if len(p.Missing) == 0 {
-		if !sub.Upgrade || !airedAll || p.Downloading > 0 {
-			if p.Downloading > 0 {
+	airedAll := lg.requiredAired()
+	if len(lg.missing) == 0 {
+		downloadingN := 0
+		for _, n := range lg.required {
+			if r := lg.row(n); r != nil && r.State == models.MediaEpisodeDownloading {
+				downloadingN++
+			}
+		}
+		if !sub.Upgrade || !airedAll || downloadingN > 0 {
+			if downloadingN > 0 {
+				step(ctx, stepInfo, "缺的集都在下载")
 				return "缺的集都在下载"
 			}
 			return "没有缺的集"
 		}
-		// 剧集各集的版本可能有好有差：整季包只要能让一集变好就换（比它好的集入库以后留着）
+		// 剧集各集的版本可能有好有差：整季包只要能让一集变好就换（比它好的集入库以后留着）；洗版的整季包不受版本锁限制
 		vers, err := s.libraryVersions(ctx, sub)
 		if err != nil {
 			return err.Error()
 		}
-		if len(packs) == 0 || packs[0].v.Score <= s.episodeFloor(ctx, profile, vers, p.Total) {
+		if len(packs) == 0 || packs[0].v.Score <= s.episodeFloor(ctx, profile, vers, lg.required) {
 			return "洗版：没有比现在更好的整季包"
 		}
 		return s.pushOne(ctx, sub, packs[0], set)
 	}
+	if lg.listErr != "" {
+		step(ctx, stepWait, "这一轮不推缺的集（免得重复下载正在下载的集）：%s", lg.listErr)
+		markRun(ctx, func(rl *runLog) { rl.waiting = true })
+		return "读不到下载器里的种子，这一轮不推缺的集：" + lg.listErr
+	}
 	missing := map[int]bool{}
-	for _, n := range p.Missing {
+	for _, n := range lg.missing {
 		missing[n] = true
 	}
 	coversMissing := func(o scored) bool {
@@ -342,22 +399,108 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		}
 		return false
 	}
+	// 这一集换版本（用户放开了锁）：单集的候选只覆盖放开了的集时不受锁限制
+	unlockedOnly := func(o scored) bool {
+		if o.sp.Whole {
+			return false
+		}
+		hit := false
+		for n := range missing {
+			if !o.sp.covers(n) {
+				continue
+			}
+			if r := lg.row(n); r == nil || !r.ManualUnlock {
+				return false
+			}
+			hit = true
+		}
+		return hit
+	}
 	// 整季包只在这一季播完以后要（播出中的整季包多半不全）：缺一半以上，或者缺的集没有单集可补
-	epAvailable := slices.ContainsFunc(eps, coversMissing)
-	if len(packs) > 0 && airedAll && (len(p.Missing)*2 >= p.Aired || !epAvailable) {
-		return s.pushOne(ctx, sub, packs[0], set)
+	wantPack := func(packs, eps []scored) bool {
+		return len(packs) > 0 && airedAll && (len(missing)*2 >= lg.aired || !slices.ContainsFunc(eps, coversMissing))
+	}
+	var lockG, lockR string
+	locked, round := false, false
+	if sub.LockVersion {
+		s.ensureLock(ctx, sub)
+		lockG, lockR, locked = lockOf(sub)
+		if !locked {
+			// 还没有版本：按这一轮第一个会推送的候选定一个本轮锁（推成功以后才写进库）
+			var first *scored
+			if wantPack(packs, eps) {
+				first = &packs[0]
+			} else if i := slices.IndexFunc(eps, coversMissing); i >= 0 {
+				first = &eps[i]
+			}
+			if first != nil {
+				lockG, lockR, locked = versionOf(first.c.Meta)
+				round = locked
+			}
+		}
+	}
+	filterLock := func(list []scored, g, r string) []scored {
+		out := list[:0:0]
+		for _, o := range list {
+			if lockAllows(g, r, o.c.Meta) || unlockedOnly(o) {
+				out = append(out, o)
+				continue
+			}
+			if coversMissing(o) {
+				step(ctx, stepLock, "%s：版本锁，要 %s", o.c.Item.Title, lockText(g, r))
+			}
+		}
+		return out
+	}
+	if locked {
+		before := len(packs) + len(eps)
+		packs, eps = filterLock(packs, lockG, lockR), filterLock(eps, lockG, lockR)
+		if len(packs)+len(eps) == 0 && before > 0 {
+			markRun(ctx, func(rl *runLog) { rl.waiting = true })
+			return fmt.Sprintf("缺 %d 集，找到的都不是锁住的版本（%s），接着等", len(missing), lockText(lockG, lockR))
+		}
+	}
+	// pushed 推送成功以后：本轮锁写进库；之后推送前重读库里的锁（用户中途改了锁时立即生效）
+	pushed := func() {
+		if round {
+			s.writeLock(ctx, sub, lockG, lockR)
+			round = false
+		}
+	}
+	allowedNow := func(o scored) bool {
+		if !sub.LockVersion {
+			return true
+		}
+		s.reloadLock(ctx, sub)
+		g, r, ok := lockOf(sub)
+		if !ok {
+			return true
+		}
+		if lockAllows(g, r, o.c.Meta) || unlockedOnly(o) {
+			return true
+		}
+		step(ctx, stepLock, "%s：版本锁改成了 %s，不推这个", o.c.Item.Title, lockText(g, r))
+		return false
+	}
+	if wantPack(packs, eps) && allowedNow(packs[0]) {
+		msg := s.pushOne(ctx, sub, packs[0], set)
+		if strings.HasPrefix(msg, "下载了") {
+			pushed()
+		}
+		return msg
 	}
 	var msgs []string
 	for _, o := range eps {
 		if len(msgs) >= maxPushesPerRound || len(missing) == 0 {
 			break
 		}
-		if !coversMissing(o) {
+		if !coversMissing(o) || !allowedNow(o) {
 			continue
 		}
 		msg := s.pushOne(ctx, sub, o, set)
 		msgs = append(msgs, msg)
 		if strings.HasPrefix(msg, "下载了") {
+			pushed()
 			for n := range missing {
 				if o.sp.covers(n) {
 					delete(missing, n)
@@ -366,7 +509,7 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		}
 	}
 	if len(msgs) == 0 {
-		return fmt.Sprintf("缺 %d 集，没有找到这些集的资源", len(p.Missing))
+		return fmt.Sprintf("缺 %d 集，没有找到这些集的资源", len(lg.missing))
 	}
 	return strings.Join(msgs, "；")
 }
@@ -392,8 +535,20 @@ func (s *Service) downloaderFor(ctx context.Context, sub *models.MediaSubscripti
 	return ds.ID, nil
 }
 
-// pushOne 下载种子文件并推送到下载器，记下种子并发通知。返回结果说明（以「下载了」开头表示成功）。
+// pushOne 下载种子文件并推送到下载器，记下种子并发通知。返回结果说明（以「下载了」开头表示成功）；结果写进这次运行的步骤。
 func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings) string {
+	msg := s.pushTorrent(ctx, sub, o, set)
+	if strings.HasPrefix(msg, "下载了") {
+		step(ctx, stepPush, "%s", msg)
+		markRun(ctx, func(rl *runLog) { rl.pushed = append(rl.pushed, o.c.Item.Title) })
+	} else {
+		step(ctx, stepFail, "%s", msg)
+		markRun(ctx, func(rl *runLog) { rl.pushFailed++ })
+	}
+	return msg
+}
+
+func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings) string {
 	if s.cfg.Sites == nil || s.cfg.Push == nil {
 		return "推送服务没有启动"
 	}
@@ -469,11 +624,53 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 	if res.Skipped {
 		row.Message = "下载器里已经有这个种子"
 	}
+	if o.sp.Whole && sub.MediaType == models.MediaKindTV {
+		// 整季包按种子的文件列表核对实际有哪几集：缺的集下一轮照常一集一集补
+		if eps := s.packEpisodes(ctx, sub, data); len(eps) > 0 {
+			b, _ := json.Marshal(eps)
+			row.CoveredEpisodes = string(b)
+		}
+	}
 	if err := s.cfg.DB.WithContext(ctx).Create(&row).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 记下订阅的种子失败: %v", err)
 	}
 	s.notify(ctx, sub, o, set)
 	return "下载了 " + o.c.Item.Title
+}
+
+// packEpisodes 是整季包里实际有的集：按种子的文件列表里每个视频文件的文件名解析（含集号映射）。读不出时为空（按整季算）。
+func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscription, data []byte) []int {
+	files, err := reseed.TorrentFiles(data)
+	if err != nil {
+		return nil
+	}
+	var mp *episodeMapper
+	if season, serr := s.seasonFor(ctx, sub, false); serr == nil {
+		mp = s.mapperFor(ctx, sub, season)
+	}
+	got := map[int]bool{}
+	for _, f := range files {
+		if !transfer.IsVideo(f.Path) {
+			continue
+		}
+		name := path.Base(f.Path)
+		m := s.parse(ctx, name, "")
+		sp := span{Start: m.Episode, End: max(m.EpisodeEnd, m.Episode), Whole: m.Episode == 0}
+		if mp != nil {
+			mapped, ok, _ := mp.mapEpisodes(m, name, "", sp)
+			if !ok {
+				continue
+			}
+			sp = mapped
+		}
+		if sp.Whole || sp.Start <= 0 {
+			continue
+		}
+		for n := sp.Start; n <= max(sp.End, sp.Start); n++ {
+			got[n] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(got))
 }
 
 // fetchTorrent 经站点实例下载种子文件（走站点限速）；HDDolby 这类要 hash 的站点从下载地址里取 downhash。
@@ -520,18 +717,12 @@ func fetchTorrent(ctx context.Context, site v2.Site, it v2.TorrentItem) ([]byte,
 	return site.Download(ctx, it.ID)
 }
 
-// notify 下载了订阅的资源时发一条通知（设置里没选通道时不发）。
+// notify 下载了订阅的资源时发一条通知（设置里没选通道时不发）。追剧（剧集按自己的定时搜索的）发「追剧更新」，其余发「订阅下载」。
 func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings) {
 	if s.cfg.Notify == nil || len(set.NotifyChannels) == 0 {
 		return
 	}
-	title := sub.Title
-	if sub.Year > 0 {
-		title = fmt.Sprintf("%s (%d)", title, sub.Year)
-	}
-	if sub.MediaType == models.MediaKindTV {
-		title += fmt.Sprintf(" 第 %d 季", sub.Season)
-	}
+	title := subTitle(sub)
 	var b strings.Builder
 	fmt.Fprintf(&b, "种子：%s\n站点：%s", o.c.Item.Title, o.c.Site)
 	episodes := ""
@@ -562,10 +753,33 @@ func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o s
 			n.ImageURL = tmdb.PosterURL(sub.PosterPath, "w500")
 		}
 	}
-	n.Event = notify.NewEvent(notify.EventSubscribeDownloaded, s.cfg.Now(), map[string]any{
-		"subscription": title, "media_type": sub.MediaType, "year": sub.Year, "season": sub.Season, "episodes": episodes,
-		"torrent_title": o.c.Item.Title, "site": o.c.Site, "quality": q, "poster": n.ImageURL,
-	})
+	if isFollow(sub) {
+		version := ""
+		if g, r, ok := lockOf(sub); ok {
+			version = lockText(g, r)
+		}
+		var fb strings.Builder
+		if episodes != "" {
+			fb.WriteString(episodes + "\n")
+		}
+		fmt.Fprintf(&fb, "种子：%s\n站点：%s", o.c.Item.Title, o.c.Site)
+		if q != "" {
+			fmt.Fprintf(&fb, "\n质量：%s", q)
+		}
+		if version != "" {
+			fmt.Fprintf(&fb, "\n版本：%s", version)
+		}
+		n.Kind, n.Title, n.Body = NoticeFollowFound, "追剧更新："+title, fb.String()
+		n.Event = notify.NewEvent(notify.EventFollowFound, s.cfg.Now(), map[string]any{
+			"subscription": title, "season": sub.Season, "episodes": episodes, "torrent_title": o.c.Item.Title,
+			"site": o.c.Site, "quality": q, "version": version, "poster": n.ImageURL,
+		})
+	} else {
+		n.Event = notify.NewEvent(notify.EventSubscribeDownloaded, s.cfg.Now(), map[string]any{
+			"subscription": title, "media_type": sub.MediaType, "year": sub.Year, "season": sub.Season, "episodes": episodes,
+			"torrent_title": o.c.Item.Title, "site": o.c.Site, "quality": q, "poster": n.ImageURL,
+		})
+	}
 	if err := s.cfg.Notify(ctx, n); err != nil {
 		s.cfg.Logger.Warnf("[订阅] 发通知失败: %v", err)
 	}

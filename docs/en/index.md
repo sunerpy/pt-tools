@@ -133,8 +133,8 @@ home:
             link: /en/guide/qbit-compat
       - name: Media
         items:
-          - title: Subscriptions
-            body: Subscribe to a film or a season, search your sites on a schedule and pick it up from RSS; quality profiles choose the release, missing episodes are filled in, upgrades swap in better releases, and a Douban wish list subscribes for you.
+          - title: Follow and subscribe
+            body: Subscribe to a film or follow a season, search your sites and pick it up from RSS; a followed show is searched when each episode airs and keeps to one release, and variety shows split into parts match too; quality profiles choose the release, upgrades swap in better releases, and a Douban wish list subscribes for you.
             status: preview
             link: /en/guide/media-subscribe
           - title: Library organising

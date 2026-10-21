@@ -101,6 +101,9 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 | `rss.matched` RSS 命中过滤规则                      | 同上，再加 `subtitle`、`size`、`size_bytes`、`free`、`free_end`、`free_remaining`、`rule`、`seeders`、`leechers`、`has_hr` |
 | `rss.digest` RSS 合并通知                           | `count`，`items`（每项 `title`、`site`、`torrent_title`、`torrent_id`）                                                    |
 | `subscribe.downloaded` 订阅下载                     | `subscription`、`media_type`、`year`、`season`、`episodes`、`torrent_title`、`site`、`quality`、`poster`                   |
+| `media.followshow.found` 追剧更新                   | `subscription`、`season`、`episodes`、`torrent_title`、`site`、`quality`、`version`、`poster`                              |
+| `media.followshow.waiting` 追剧等版本               | `subscription`、`subscription_id`、`season`、`episodes`、`version`、`days`                                                 |
+| `media.followshow.failed` 追剧出错                  | `subscription`、`season`、`fails`、`error`                                                                                 |
 | `subscribe.douban_failed` 豆瓣想看拉取失败          | `source`、`fails`、`error`                                                                                                 |
 | `media.organized` 入库                              | `name`、`media_type`、`episodes`、`files`、`quality`、`library`、`torrent`、`poster`                                       |
 | `site.login_expiring` 站点即将被封号                | `site`、`tier`、`days_remaining`、`last_active`、`days_since_active`、`access_stale`                                       |
@@ -146,7 +149,7 @@ Telegram 按纯文本发，模板里写的 HTML、Markdown 标记会原样显示
 | `reply.signin` 签到        | `/signin`                                                                | `signed`、`failed`，`items`（`site`、`status`、`status_label`、`message`）                                                              |
 | `reply.version` 版本       | `/version`                                                               | `version`、`build`、`commit`、`update_checked`、`has_update`、`latest`                                                                  |
 | `reply.help` 命令列表      | `/help`                                                                  | `items`（`name`、`description`、`admin`）                                                                                               |
-| `reply.subs` 订阅列表      | `/subs`                                                                  | `count`，`items`（最多 20 个：`title`、`status`、`progress`），`items_more`                                                             |
+| `reply.subs` 订阅列表      | `/subs`                                                                  | `count`，`items`（最多 20 个：`id`、`title`、`status`、`progress`、`next_search`），`items_more`                                        |
 | `reply.other` 其他回复     | 其余的回复：别的命令的结果、命令出错，没绑定、权限不够、命令不认识的提示 | `command`（命令名，不带 `/`）、`ok`（做成了没有）                                                                                       |
 | `assistant.reply` AI 助手  | AI 助手发的消息                                                          | `kind`（`answer` 回答、`notice` 提示、`confirm` 要确认的操作、`timeout` 确认超时、`status` 收到消息时的即时答复）、`summary`、`expires` |
 

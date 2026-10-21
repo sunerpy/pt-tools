@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /*
- * 订阅（路线图 M11）：订阅列表（进度、最近一次搜索的结果、立即搜索、暂停与恢复、确认、修改、删除），
- * 订阅设置、质量档案与豆瓣想看来源。画板没有这一页，沿用媒体页的样式：页头 + 面板里的表格，手机是行卡。
+ * 追剧与订阅（路线图 M11，追剧见 state 里的方案）：订阅列表（进度、每一集的格子、定时与版本锁、最近一次搜索的结果、
+ * 立即搜索、暂停与恢复、确认、修改、删除），订阅设置、质量档案与豆瓣想看来源。画板没有这一页，沿用媒体页的样式：
+ * 页头 + 面板里的表格，手机是行卡。
  */
 import {
   type DoubanItem,
@@ -35,8 +36,12 @@ import { posterURL } from "@/utils/media";
 import {
   SUB_FILTERS,
   doubanItemState,
+  episodeState,
+  isFollow,
+  lockText,
   profileSummary,
   progressText,
+  scheduleText,
   sourceLabel,
   subName,
   subStatus,
@@ -129,6 +134,19 @@ const detailID = ref<number | null>(null);
 function showDetail(s: Subscription) {
   detailID.value = s.id;
   detailDialog.value = true;
+}
+
+// 每一集一个小格子：季太长时不画（行会太高），详情里有完整的
+const MAX_STRIP = 60;
+function strip(s: Subscription): string[] {
+  const states = s.media_type === "tv" ? (s.progress?.states ?? []) : [];
+  return states.length <= MAX_STRIP ? states : [];
+}
+
+/** 追剧的定时与版本锁写成一句话（电影与升级以前的订阅为空）。 */
+function followText(s: Subscription): string {
+  if (s.media_type !== "tv") return "";
+  return [isFollow(s) ? scheduleText(s.schedule) : "", lockText(s)].filter(Boolean).join(" · ");
 }
 
 // ---- 设置 ----
@@ -331,8 +349,8 @@ onMounted(() => {
 <template>
   <div class="pt-cards pt-cards--wide">
     <PtHeadSub
-      >订阅电影或剧集的一季：定时到各站点搜索，RSS
-      里出现时也会下载；剧集补缺的集，洗版时换成更好的版本</PtHeadSub
+      >追剧集、订阅电影：按播出时间或定时到各站点搜索，RSS
+      里出现时也会下载；剧集按集补齐、只要同一个版本，洗版时换成更好的版本</PtHeadSub
     >
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="ms-explore" @click="openExplore">
@@ -425,8 +443,22 @@ onMounted(() => {
             }}</PtStatusPill>
           </template>
         </el-table-column>
-        <el-table-column label="进度" min-width="170">
-          <template #default="{ row }">{{ progressText(row.media_type, row.progress) }}</template>
+        <el-table-column label="进度" min-width="200">
+          <template #default="{ row }">
+            <div>{{ progressText(row.media_type, row.progress) }}</div>
+            <div
+              v-if="strip(row).length"
+              class="ms-strip"
+              :data-testid="`ms-strip-${row.id}`"
+              aria-hidden="true">
+              <i
+                v-for="(st, i) in strip(row)"
+                :key="i"
+                class="ms-strip__cell"
+                :class="`ms-strip__cell--${st}`"
+                :title="`第 ${i + 1} 集 · ${episodeState(st).label}`" />
+            </div>
+          </template>
         </el-table-column>
         <el-table-column
           label="最近一次"
@@ -437,6 +469,9 @@ onMounted(() => {
             <div>{{ row.message || "还没搜过" }}</div>
             <div v-if="row.status === 'active' && row.next_search_at" class="ms-sub">
               下次搜索 {{ formatShortDateTime(row.next_search_at) }}
+            </div>
+            <div v-if="followText(row)" class="ms-sub" :data-testid="`ms-follow-${row.id}`">
+              {{ followText(row) }}
             </div>
           </template>
         </el-table-column>
@@ -487,9 +522,20 @@ onMounted(() => {
           <template #title>{{ subName(s) }}</template>
           <template #meta>
             <span>{{ progressText(s.media_type, s.progress) }}</span>
+            <span v-if="strip(s).length" class="ms-strip ms-full" aria-hidden="true">
+              <i
+                v-for="(st, i) in strip(s)"
+                :key="i"
+                class="ms-strip__cell"
+                :class="`ms-strip__cell--${st}`" />
+            </span>
             <span
               >{{ sourceLabel(s.source) }} · {{ profileName(s.profile_id)
               }}<template v-if="s.upgrade"> · 洗版</template></span
+            >
+            <span v-if="followText(s)" class="ms-full">{{ followText(s) }}</span>
+            <span v-if="s.status === 'active' && s.next_search_at"
+              >下次搜索 {{ formatShortDateTime(s.next_search_at) }}</span
             >
             <span class="ms-full">{{ s.message || "还没搜过" }}</span>
           </template>
@@ -805,7 +851,7 @@ onMounted(() => {
     </div>
 
     <SubscribeDialog v-model="editDialog" :sub="editing" @saved="loadSubs" />
-    <SubscriptionDetailDialog v-model="detailDialog" :id="detailID" />
+    <SubscriptionDetailDialog v-model="detailDialog" :id="detailID" @changed="loadSubs" />
     <QualityProfileDialog
       v-model="profileDialog"
       :profile="editingProfile"
@@ -901,6 +947,49 @@ onMounted(() => {
 .ms-full {
   flex-basis: 100%;
   word-break: break-all;
+}
+
+/* 每一集一个小格子，颜色同追剧详情里的格子 */
+.ms-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 240px;
+  margin-top: 4px;
+}
+
+.ms-strip__cell {
+  --c: var(--pt-t3);
+
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--c);
+}
+
+.ms-strip__cell--library {
+  --c: var(--pt-ok);
+}
+
+.ms-strip__cell--downloading {
+  --c: var(--pt-info);
+}
+
+.ms-strip__cell--missing {
+  --c: var(--pt-warn);
+}
+
+.ms-strip__cell--waiting_version {
+  --c: var(--pt-p);
+}
+
+.ms-strip__cell--upcoming {
+  background: color-mix(in srgb, var(--pt-t3) 30%, transparent);
+}
+
+.ms-strip__cell--skipped {
+  border: 1px dashed var(--pt-t4);
+  background: transparent;
 }
 
 .ms-form {

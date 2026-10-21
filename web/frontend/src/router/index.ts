@@ -131,7 +131,7 @@ const router = createRouter({
       path: "/media/subscriptions",
       name: "media-subscriptions",
       component: () => import("@/views/MediaSubscriptions.vue"),
-      meta: { title: "订阅" },
+      meta: { title: "追剧与订阅" },
     },
     {
       path: "/search",

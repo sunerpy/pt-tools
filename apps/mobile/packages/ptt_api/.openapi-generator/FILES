@@ -38,9 +38,14 @@ lib/model/app_downloader.dart
 lib/model/app_downloader_failure.dart
 lib/model/app_downloader_list.dart
 lib/model/app_episode.dart
+lib/model/app_episode_rule.dart
+lib/model/app_episode_rule_input.dart
+lib/model/app_episode_skip.dart
+lib/model/app_episode_unlock.dart
 lib/model/app_error.dart
 lib/model/app_explore_item.dart
 lib/model/app_explore_page.dart
+lib/model/app_from_torrent.dart
 lib/model/app_library_ref.dart
 lib/model/app_media_history.dart
 lib/model/app_media_history_page.dart
@@ -63,6 +68,8 @@ lib/model/app_recognition.dart
 lib/model/app_recognize_input.dart
 lib/model/app_release.dart
 lib/model/app_release_asset.dart
+lib/model/app_run_step.dart
+lib/model/app_schedule.dart
 lib/model/app_search_error.dart
 lib/model/app_search_item.dart
 lib/model/app_search_request.dart
@@ -76,8 +83,11 @@ lib/model/app_site_user.dart
 lib/model/app_subscription.dart
 lib/model/app_subscription_create.dart
 lib/model/app_subscription_detail.dart
+lib/model/app_subscription_run.dart
+lib/model/app_subscription_run_page.dart
 lib/model/app_subscription_status.dart
 lib/model/app_subscription_torrent.dart
+lib/model/app_subscription_update.dart
 lib/model/app_task.dart
 lib/model/app_task_page.dart
 lib/model/app_template.dart

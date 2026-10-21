@@ -2,9 +2,13 @@
  * 订阅（路线图 M11）页面共用的文字与小函数：订阅状态、来源、质量档案的选项、进度、单集与种子状态。
  */
 import type {
+  EpisodeRule,
+  FollowSchedule,
   QualityPref,
   Subscription,
   SubscriptionProgress,
+  SubscriptionRun,
+  SubscriptionRunStep,
   SubscriptionStatus,
   SubscriptionTorrent,
 } from "@/api";
@@ -56,8 +60,16 @@ export function progressText(kind: string, p: SubscriptionProgress | undefined):
   }
   const parts = [`已入库 ${p.in_library}/${p.total}`];
   if (p.downloading > 0) parts.push(`下载中 ${p.downloading}`);
-  if (p.missing?.length) parts.push(`缺 ${p.missing.length}`);
-  if (p.aired < p.total) parts.push(`${p.total - p.aired} 集还没播`);
+  if (p.missing?.length) {
+    // 在等锁住的版本的也算缺
+    parts.push(
+      p.waiting ? `缺 ${p.missing.length}（等版本 ${p.waiting}）` : `缺 ${p.missing.length}`,
+    );
+  }
+  if (p.skipped) parts.push(`不追 ${p.skipped}`);
+  // aired 只数要追的集（起始集以前的、跳过的不算）
+  const required = p.required ?? p.total;
+  if (p.aired < required) parts.push(`${required - p.aired} 集还没播`);
   return parts.join(" · ");
 }
 
@@ -65,8 +77,20 @@ const EPISODE_STATE: Record<string, { label: string; tone: Tone }> = {
   library: { label: "已入库", tone: "ok" },
   downloading: { label: "下载中", tone: "info" },
   missing: { label: "缺", tone: "warn" },
+  waiting_version: { label: "等版本", tone: "primary" },
   upcoming: { label: "还没播", tone: "neutral" },
+  skipped: { label: "不追", tone: "neutral" },
 };
+
+/** 台账格子的图例顺序。 */
+export const EPISODE_STATES = [
+  "library",
+  "downloading",
+  "missing",
+  "waiting_version",
+  "upcoming",
+  "skipped",
+] as const;
 
 export function episodeState(state: string): { label: string; tone: Tone } {
   return EPISODE_STATE[state] ?? { label: state, tone: "neutral" };
@@ -156,4 +180,120 @@ export function profileSummary(p: {
   }
   if (p.exclude_hr) parts.push("不要 H&R");
   return parts.join(" · ");
+}
+
+// ---- 追剧 ----
+
+/** 是不是追剧：剧集、按自己的定时搜索（升级以前的订阅定时为空，和以前一样按全局间隔）。 */
+export function isFollow(s: Pick<Subscription, "media_type" | "schedule">): boolean {
+  return s.media_type === "tv" && Boolean(s.schedule?.kind);
+}
+
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+export const SCHEDULE_KINDS: readonly { value: FollowSchedule["kind"]; label: string }[] = [
+  { value: "airtime", label: "按播出时间" },
+  { value: "daily", label: "每天" },
+  { value: "every_days", label: "每隔几天" },
+  { value: "weekly", label: "每周" },
+  { value: "monthly", label: "每月" },
+  { value: "", label: "按全局间隔" },
+];
+
+export const WEEKDAY_OPTIONS = WEEKDAYS.map((d, i) => ({ value: i, label: `周${d}` }));
+
+/** 定时写成一句话：按播出时间（20:00 播出，2 小时后开始搜）、每天 20:00、周六 21:00…… */
+export function scheduleText(sc: FollowSchedule | undefined): string {
+  const at = sc?.at || "20:00";
+  switch (sc?.kind) {
+    case "airtime":
+      return `按播出时间（${at} 播出，${sc.air_delay_hours || 2} 小时后开始搜）`;
+    case "daily":
+      return `每天 ${at}`;
+    case "every_days":
+      return `每 ${sc.every || 1} 天 ${at}`;
+    case "weekly":
+      return `${(sc.days ?? []).map((d) => `周${WEEKDAYS[d] ?? d}`).join("、")} ${at}`;
+    case "monthly":
+      return `每月 ${(sc.days ?? []).map((d) => `${d} 号`).join("、")} ${at}`;
+  }
+  return "按全局间隔";
+}
+
+/** 版本锁写成一句话：没开时为空串。 */
+export function lockText(
+  s: Pick<Subscription, "lock_version" | "lock_group" | "lock_resolution">,
+): string {
+  if (!s.lock_version) return "";
+  const v = [s.lock_group, s.lock_resolution].filter(Boolean).join(" ");
+  return v ? `版本锁 ${v}` : "版本锁（按第一个下载的版本定）";
+}
+
+const RUN_TRIGGER: Record<SubscriptionRun["trigger"], string> = {
+  create: "建立",
+  schedule: "定时搜索",
+  rss: "RSS",
+  manual: "手动",
+  ai: "AI",
+};
+
+export function runTrigger(trigger: string): string {
+  return RUN_TRIGGER[trigger as SubscriptionRun["trigger"]] ?? trigger;
+}
+
+const RUN_STATUS: Record<SubscriptionRun["status"], { label: string; tone: Tone }> = {
+  ok: { label: "成功", tone: "ok" },
+  nothing: { label: "没有新的", tone: "neutral" },
+  waiting: { label: "在等", tone: "primary" },
+  failed: { label: "失败", tone: "dang" },
+  partial: { label: "部分成功", tone: "warn" },
+  changed: { label: "改动", tone: "neutral" },
+};
+
+export function runStatus(status: string): { label: string; tone: Tone } {
+  return RUN_STATUS[status as SubscriptionRun["status"]] ?? { label: status, tone: "neutral" };
+}
+
+const STEP_KIND: Record<SubscriptionRunStep["kind"], string> = {
+  search: "搜索",
+  reject: "不要",
+  lock: "版本锁",
+  push: "推送",
+  fail: "失败",
+  adopt: "认领",
+  wait: "等",
+  info: "说明",
+};
+
+export function stepKind(kind: string): string {
+  return STEP_KIND[kind as SubscriptionRunStep["kind"]] ?? kind;
+}
+
+export const RULE_MODES: readonly { value: EpisodeRule["mode"]; label: string; tip: string }[] = [
+  {
+    value: "tmdb",
+    label: "按 TMDB 的集号",
+    tip: "标题里的集号就是 TMDB 的集号，不按期号与上下换算",
+  },
+  {
+    value: "period_part",
+    label: "按第几期与上下",
+    tip: "综艺把一期分上下：第 1 期下、E01 Part 2 是 TMDB 的第 2 集",
+  },
+  {
+    value: "date",
+    label: "按播出日期",
+    tip: "标题里写的是播出日期（20261002），按 TMDB 的播出日期对",
+  },
+  { value: "offset", label: "集号偏移", tip: "TMDB 的集号 = 标题里的集号 + 偏移" },
+];
+
+/** 一条集号规则写成一句话。 */
+export function ruleText(r: Pick<EpisodeRule, "mode" | "offset">): string {
+  if (r.mode === "offset") return `集号偏移 ${r.offset > 0 ? "+" : ""}${r.offset}`;
+  return RULE_MODES.find((m) => m.value === r.mode)?.label ?? r.mode;
+}
+
+export function ruleSource(source: string): string {
+  return { manual: "手动", ai: "AI", auto: "自动" }[source] ?? source;
 }

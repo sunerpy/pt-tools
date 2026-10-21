@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,31 +13,45 @@ import (
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
-// Progress 是订阅的进度。电影：Total 为 1，入了库 InLibrary 为 1。剧集按 TMDB 这一季的分集算，只算已经播出的。
+// Progress 是订阅的进度。电影：Total 为 1，入了库 InLibrary 为 1。剧集按追剧台账算：Total 是有效总集数，
+// Required 是要追的集（起始集以后、没有跳过的），Missing 是其中已播、不在库也不在下载的（含等版本的）。
 type Progress struct {
 	Total       int   `json:"total"`
+	Required    int   `json:"required"`
 	Aired       int   `json:"aired"`
 	InLibrary   int   `json:"in_library"`
 	Downloading int   `json:"downloading"`
+	Waiting     int   `json:"waiting"`
+	Skipped     int   `json:"skipped"`
 	Missing     []int `json:"missing,omitempty"`
+	// States 是每一集的状态（按集号，剧集才有）：列表里画格子用，不用另读详情
+	States []string `json:"states,omitempty"`
 	// Episodes 是每一集的情况（详情里才有）
 	Episodes []EpisodeState `json:"episodes,omitempty"`
 }
 
-// EpisodeState 是一集的情况：library 已入库、downloading 下载中、missing 缺、upcoming 还没播出。
+// EpisodeState 是一集的情况：library 已入库、downloading 下载中、missing 缺、waiting_version 等锁住的版本、
+// upcoming 还没播出、skipped 不追（起始集以前的或跳过的）。
 type EpisodeState struct {
 	Number  int    `json:"number"`
 	Name    string `json:"name,omitempty"`
 	AirDate string `json:"air_date,omitempty"`
 	State   string `json:"state"`
+	// Source 是状态从哪里来的（library、subscription、downloader）；Version 是这一集现在的版本（制作组与分辨率）
+	Source       string `json:"source,omitempty"`
+	Version      string `json:"version,omitempty"`
+	ManualSkip   bool   `json:"manual_skip,omitempty"`
+	ManualUnlock bool   `json:"manual_unlock,omitempty"`
 }
 
 // 一集的情况。
 const (
-	EpisodeLibrary     = "library"
-	EpisodeDownloading = "downloading"
-	EpisodeMissing     = "missing"
-	EpisodeUpcoming    = "upcoming"
+	EpisodeLibrary     = models.MediaEpisodeLibrary
+	EpisodeDownloading = models.MediaEpisodeDownloading
+	EpisodeMissing     = models.MediaEpisodeMissing
+	EpisodeUpcoming    = models.MediaEpisodeUpcoming
+	EpisodeWaiting     = models.MediaEpisodeWaitingVersion
+	EpisodeSkipped     = models.MediaEpisodeSkipped
 )
 
 func yearOf(date string) int {
@@ -47,23 +60,6 @@ func yearOf(date string) int {
 	}
 	y, _ := strconv.Atoi(date[:4])
 	return y
-}
-
-// libraryEpisodes 是整理记录里这一季已入库的集。
-func (s *Service) libraryEpisodes(ctx context.Context, sub *models.MediaSubscription) (map[int]bool, error) {
-	var rows []models.MediaTransferHistory
-	if err := s.cfg.DB.WithContext(ctx).Select("episode", "episode_end").
-		Where("status = ? AND media_type = ? AND tmdb_id = ? AND season = ?", models.MediaTransferDone, models.MediaKindTV, sub.TMDBID, sub.Season).
-		Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("读取整理记录失败: %w", err)
-	}
-	have := map[int]bool{}
-	for _, r := range rows {
-		for n := r.Episode; n > 0 && n <= max(r.EpisodeEnd, r.Episode); n++ {
-			have[n] = true
-		}
-	}
-	return have, nil
 }
 
 // movieInLibrary 报告电影有没有已整理的记录。
@@ -93,18 +89,18 @@ func spanOf(t models.MediaSubscriptionTorrent) span {
 	return span{Start: t.Episode, End: max(t.EpisodeEnd, t.Episode), Whole: t.Complete}
 }
 
-// progress 算订阅的进度（detail 为真时带上每一集）。
+// progress 算订阅的进度（detail 为真时带上每一集）：剧集读追剧台账（没有时重建一次）。
 func (s *Service) progress(ctx context.Context, sub *models.MediaSubscription, detail bool) (*Progress, error) {
-	downloading, err := s.torrents(ctx, sub.ID, models.MediaSubTorrentDownloading)
-	if err != nil {
-		return nil, err
-	}
 	if sub.MediaType == models.MediaKindMovie {
+		downloading, err := s.torrents(ctx, sub.ID, models.MediaSubTorrentDownloading)
+		if err != nil {
+			return nil, err
+		}
 		in, merr := s.movieInLibrary(ctx, sub)
 		if merr != nil {
 			return nil, merr
 		}
-		p := &Progress{Total: 1, Aired: 1}
+		p := &Progress{Total: 1, Required: 1, Aired: 1}
 		switch {
 		case in:
 			p.InLibrary = 1
@@ -115,42 +111,39 @@ func (s *Service) progress(ctx context.Context, sub *models.MediaSubscription, d
 		}
 		return p, nil
 	}
-	c, err := s.cfg.Recognizer.TMDB(ctx)
+	lg, err := s.ledgerRows(ctx, sub)
 	if err != nil {
 		return nil, err
 	}
-	season, err := c.Season(ctx, sub.TMDBID, sub.Season)
-	if err != nil {
-		return nil, err
+	return progressOf(lg, detail), nil
+}
+
+// progressOf 是台账的进度。
+func progressOf(lg *ledger, detail bool) *Progress {
+	p := &Progress{Total: len(lg.rows), Required: len(lg.required), Missing: lg.missing}
+	if lg.total > p.Total {
+		p.Total = lg.total
 	}
-	have, err := s.libraryEpisodes(ctx, sub)
-	if err != nil {
-		return nil, err
-	}
-	today := s.cfg.Now().Format(time.DateOnly)
-	p := &Progress{Total: len(season.Episodes)}
-	for _, e := range season.Episodes {
-		state := EpisodeUpcoming
-		aired := e.AirDate != "" && e.AirDate <= today
-		if aired {
-			p.Aired++
-		}
-		switch {
-		case have[e.Number]:
-			state = EpisodeLibrary
+	for _, r := range lg.rows {
+		p.States = append(p.States, r.State)
+		switch r.State {
+		case models.MediaEpisodeLibrary:
 			p.InLibrary++
-		case slices.ContainsFunc(downloading, func(t models.MediaSubscriptionTorrent) bool { return spanOf(t).covers(e.Number) }):
-			state = EpisodeDownloading
+		case models.MediaEpisodeDownloading:
 			p.Downloading++
-		case aired:
-			state = EpisodeMissing
-			p.Missing = append(p.Missing, e.Number)
+		case models.MediaEpisodeWaitingVersion:
+			p.Waiting++
+		case models.MediaEpisodeSkipped:
+			p.Skipped++
 		}
 		if detail {
-			p.Episodes = append(p.Episodes, EpisodeState{Number: e.Number, Name: e.Name, AirDate: e.AirDate, State: state})
+			e := EpisodeState{Number: r.Episode, Name: r.Name, AirDate: r.AirDate, State: r.State, Source: r.Source, ManualSkip: r.ManualSkip, ManualUnlock: r.ManualUnlock}
+			e.Version = strings.TrimSpace(r.VersionGroup + " " + r.VersionResolution)
+			p.Episodes = append(p.Episodes, e)
 		}
 	}
-	return p, nil
+	p.Aired = lg.aired
+	return p
 }
 
 // stuckAfter 是订阅下载的种子过了多久还没整理入库就算失败（这些集重新算缺的，之后的搜索会再找）。
@@ -164,7 +157,7 @@ func (s *Service) refresh(ctx context.Context) {
 		return
 	}
 	var rows []models.MediaSubscriptionTorrent
-	if err := s.cfg.DB.WithContext(ctx).Where("status = ?", models.MediaSubTorrentDownloading).Order("id").Find(&rows).Error; err != nil {
+	if err = s.cfg.DB.WithContext(ctx).Where("status = ?", models.MediaSubTorrentDownloading).Order("id").Find(&rows).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 读取下载中的种子失败: %v", err)
 		return
 	}
@@ -172,13 +165,28 @@ func (s *Service) refresh(ctx context.Context) {
 		s.refreshTorrent(ctx, &rows[i], set)
 	}
 	var subs []models.MediaSubscription
-	if err := s.cfg.DB.WithContext(ctx).Where("status = ?", models.MediaSubActive).Find(&subs).Error; err != nil {
+	if err = s.cfg.DB.WithContext(ctx).Where("status = ?", models.MediaSubActive).Find(&subs).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 读取订阅失败: %v", err)
 		return
 	}
 	for i := range subs {
-		s.checkDone(ctx, &subs[i], set)
+		sub := &subs[i]
+		var lg *ledger
+		if sub.MediaType == models.MediaKindTV {
+			// 追剧台账按 TMDB 现在的集列表重建（每 6 小时不读缓存地问一次），认领下载器里已有的种子
+			s.mu.Lock()
+			lg, err = s.rebuildLedger(ctx, sub, rebuildOpts{set: set, adopt: true, fresh: true})
+			s.mu.Unlock()
+			if err != nil {
+				s.cfg.Logger.Debugf("[订阅] 重建「%s」的追剧台账失败: %v", sub.Title, err)
+				continue
+			}
+			s.remindWaiting(ctx, sub, lg, set)
+		}
+		s.checkDone(ctx, sub, set, lg)
 	}
+	s.doneDue(ctx, set)
+	s.pruneRuns(ctx)
 }
 
 func (s *Service) setTorrent(ctx context.Context, id uint, status, msg string) {
@@ -267,11 +275,19 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 		s.setTorrent(ctx, t.ID, models.MediaSubTorrentDone, msg)
 		if sub.Upgrade {
 			s.replaceOlder(ctx, &sub, t, hist, set)
+			if t.Complete {
+				// 洗版的整季包整理成了：版本锁改成新的版本
+				s.relock(ctx, &sub, t)
+			}
 		}
 		return
 	}
 	if s.cfg.Now().Sub(t.CreatedAt) > stuckAfter {
-		s.setTorrent(ctx, t.ID, models.MediaSubTorrentFailed, "7 天还没整理入库，这些集重新算缺的")
+		msg := "7 天还没整理入库，这些集重新算缺的"
+		if t.Adopted && strings.HasPrefix(t.SiteName, models.MediaAdoptedSitePrefix) {
+			msg = "认领的下载器里的种子 7 天还没整理入库（不是 pt-tools 推送的，自动整理不处理它：可以手动整理，或打开定期扫描），这些集重新算缺的"
+		}
+		s.setTorrent(ctx, t.ID, models.MediaSubTorrentFailed, msg)
 	}
 }
 
@@ -478,9 +494,9 @@ func (s *Service) deleteOld(ctx context.Context, p *models.MediaSubscriptionTorr
 	return "旧种子连数据删掉了"
 }
 
-// episodeFloor 是这一季每一集现在的版本里最差的那一集的分数（一集有几个版本时按最好的算）：
+// episodeFloor 是必需集里每一集现在的版本里最差的那一集的分数（一集有几个版本时按最好的算）：
 // 整季包要比它高，也就是至少有一集会变好；比新版本好的集入库以后也留着，不会变差。
-func (s *Service) episodeFloor(ctx context.Context, p Profile, vers []version, total int) int {
+func (s *Service) episodeFloor(ctx context.Context, p Profile, vers []version, required []int) int {
 	best := map[int]int{}
 	for _, v := range vers {
 		pts := s.versionPoints(ctx, p, v.title, v.subtitle)
@@ -489,7 +505,7 @@ func (s *Service) episodeFloor(ctx context.Context, p Profile, vers []version, t
 		}
 	}
 	floor := -1
-	for n := 1; n <= total; n++ {
+	for _, n := range required {
 		if floor < 0 || best[n] < floor {
 			floor = best[n]
 		}
@@ -497,8 +513,8 @@ func (s *Service) episodeFloor(ctx context.Context, p Profile, vers []version, t
 	return max(floor, 0)
 }
 
-// targetReached 报告库里的版本是不是达到了洗版的目标：电影是有一个文件达到，剧集是这一季的每一集都有达到的文件。
-func (s *Service) targetReached(ctx context.Context, sub *models.MediaSubscription, prof Profile, total int) (bool, error) {
+// targetReached 报告库里的版本是不是达到了洗版的目标：电影是有一个文件达到，剧集是必需集的每一集都有达到的文件。
+func (s *Service) targetReached(ctx context.Context, sub *models.MediaSubscription, prof Profile, required []int) (bool, error) {
 	vers, err := s.libraryVersions(ctx, sub)
 	if err != nil {
 		return false, err
@@ -515,10 +531,10 @@ func (s *Service) targetReached(ctx context.Context, sub *models.MediaSubscripti
 			ok[n] = true
 		}
 	}
-	if sub.MediaType == models.MediaKindMovie || total <= 0 {
+	if sub.MediaType == models.MediaKindMovie || len(required) == 0 {
 		return false, nil
 	}
-	for n := 1; n <= total; n++ {
+	for _, n := range required {
 		if !ok[n] {
 			return false, nil
 		}
@@ -526,9 +542,10 @@ func (s *Service) targetReached(ctx context.Context, sub *models.MediaSubscripti
 	return true, nil
 }
 
-// checkDone 看订阅是不是完成了。
-func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, set Settings) {
-	done, total := false, 0
+// checkDone 看订阅是不是完成了：电影入了库；剧集是必需集都播出了、都入了库，而且 TMDB 已经列出了全部的集
+// （开着洗版时还要库里的版本达到目标）。lg 是剧集刚重建的台账。
+func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, set Settings, lg *ledger) {
+	done := false
 	if sub.MediaType == models.MediaKindMovie {
 		in, err := s.movieInLibrary(ctx, sub)
 		if err != nil {
@@ -539,11 +556,16 @@ func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, 
 		}
 		done = in
 	} else {
-		p, err := s.progress(ctx, sub, false)
-		if err != nil {
+		if lg == nil {
 			return
 		}
-		done, total = p.Total > 0 && p.Aired == p.Total && p.InLibrary == p.Total, p.Total
+		done = lg.requiredAired()
+		for _, n := range lg.required {
+			if r := lg.row(n); r == nil || r.State != models.MediaEpisodeLibrary {
+				done = false
+				break
+			}
+		}
 	}
 	if !done {
 		return
@@ -554,14 +576,19 @@ func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, 
 	}
 	if sub.Upgrade {
 		// 洗版要等库里的版本达到目标
-		reached, err := s.targetReached(ctx, sub, s.profileFor(ctx, sub, set), total)
+		var required []int
+		if lg != nil {
+			required = lg.required
+		}
+		reached, err := s.targetReached(ctx, sub, s.profileFor(ctx, sub, set), required)
 		if err != nil || !reached {
 			return
 		}
 		msg += "，达到了洗版的目标"
 	}
+	now := s.cfg.Now()
 	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ? AND status = ?", sub.ID, models.MediaSubActive).
-		Updates(map[string]any{"status": models.MediaSubDone, "message": msg, "updated_at": s.cfg.Now()}).Error; err != nil {
+		Updates(map[string]any{"status": models.MediaSubDone, "message": msg, "completed_at": now, "updated_at": now}).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 更新订阅状态失败: %v", err)
 	}
 }

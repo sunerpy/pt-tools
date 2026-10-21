@@ -295,6 +295,10 @@ func NewDBWithVersionAndHooks(
 		&MediaSubscribeSetting{},
 		&MediaDoubanSource{},
 		&MediaDoubanItem{},
+		// 一键追剧：台账、集号规则、运行记录
+		&MediaSubscriptionEpisode{},
+		&MediaEpisodeRule{},
+		&MediaSubscriptionRun{},
 		// M12：API 令牌
 		&APIToken{},
 		&QbitCompatSetting{},

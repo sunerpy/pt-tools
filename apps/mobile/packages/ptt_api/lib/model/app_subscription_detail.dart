@@ -30,6 +30,15 @@ class AppSubscriptionDetail {
     this.lastSearchAt,
     this.nextSearchAt,
     required this.createdAt,
+    this.schedule,
+    this.lockVersion,
+    this.lockGroup,
+    this.lockResolution,
+    this.startEpisode,
+    this.followNextSeason,
+    this.nextSeasonId,
+    this.libraryId,
+    this.completedAt,
     this.episodes = const [],
     this.torrents = const [],
   });
@@ -112,6 +121,86 @@ class AppSubscriptionDetail {
 
   int createdAt;
 
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  AppSchedule? schedule;
+
+  /// 版本锁：第一集选定以后只要同一个制作组、同一个分辨率
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? lockVersion;
+
+  /// 锁住的制作组（还没定时为空）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? lockGroup;
+
+  /// 锁住的分辨率（还没定时为空）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? lockResolution;
+
+  /// 从第几集开始追（0 与 1 是整季）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? startEpisode;
+
+  /// 追完以后自动追下一季
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? followNextSeason;
+
+  /// 自动建的下一季的订阅
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? nextSeasonId;
+
+  /// 整理进哪个媒体库（0 按类型自动选）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? libraryId;
+
+  /// 追完的时间
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? completedAt;
+
   List<AppEpisode> episodes;
 
   List<AppSubscriptionTorrent> torrents;
@@ -135,6 +224,15 @@ class AppSubscriptionDetail {
     other.lastSearchAt == lastSearchAt &&
     other.nextSearchAt == nextSearchAt &&
     other.createdAt == createdAt &&
+    other.schedule == schedule &&
+    other.lockVersion == lockVersion &&
+    other.lockGroup == lockGroup &&
+    other.lockResolution == lockResolution &&
+    other.startEpisode == startEpisode &&
+    other.followNextSeason == followNextSeason &&
+    other.nextSeasonId == nextSeasonId &&
+    other.libraryId == libraryId &&
+    other.completedAt == completedAt &&
     _deepEquality.equals(other.episodes, episodes) &&
     _deepEquality.equals(other.torrents, torrents);
 
@@ -158,11 +256,20 @@ class AppSubscriptionDetail {
     (lastSearchAt == null ? 0 : lastSearchAt!.hashCode) +
     (nextSearchAt == null ? 0 : nextSearchAt!.hashCode) +
     (createdAt.hashCode) +
+    (schedule == null ? 0 : schedule!.hashCode) +
+    (lockVersion == null ? 0 : lockVersion!.hashCode) +
+    (lockGroup == null ? 0 : lockGroup!.hashCode) +
+    (lockResolution == null ? 0 : lockResolution!.hashCode) +
+    (startEpisode == null ? 0 : startEpisode!.hashCode) +
+    (followNextSeason == null ? 0 : followNextSeason!.hashCode) +
+    (nextSeasonId == null ? 0 : nextSeasonId!.hashCode) +
+    (libraryId == null ? 0 : libraryId!.hashCode) +
+    (completedAt == null ? 0 : completedAt!.hashCode) +
     (episodes.hashCode) +
     (torrents.hashCode);
 
   @override
-  String toString() => 'AppSubscriptionDetail[id=$id, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, title=$title, originalTitle=$originalTitle, year=$year, posterPath=$posterPath, status=$status, upgrade=$upgrade, source_=$source_, totalEpisodes=$totalEpisodes, progress=$progress, message=$message, lastSearchAt=$lastSearchAt, nextSearchAt=$nextSearchAt, createdAt=$createdAt, episodes=$episodes, torrents=$torrents]';
+  String toString() => 'AppSubscriptionDetail[id=$id, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, title=$title, originalTitle=$originalTitle, year=$year, posterPath=$posterPath, status=$status, upgrade=$upgrade, source_=$source_, totalEpisodes=$totalEpisodes, progress=$progress, message=$message, lastSearchAt=$lastSearchAt, nextSearchAt=$nextSearchAt, createdAt=$createdAt, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, nextSeasonId=$nextSeasonId, libraryId=$libraryId, completedAt=$completedAt, episodes=$episodes, torrents=$torrents]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -211,6 +318,51 @@ class AppSubscriptionDetail {
       json[r'next_search_at'] = null;
     }
       json[r'created_at'] = this.createdAt;
+    if (this.schedule != null) {
+      json[r'schedule'] = this.schedule;
+    } else {
+      json[r'schedule'] = null;
+    }
+    if (this.lockVersion != null) {
+      json[r'lock_version'] = this.lockVersion;
+    } else {
+      json[r'lock_version'] = null;
+    }
+    if (this.lockGroup != null) {
+      json[r'lock_group'] = this.lockGroup;
+    } else {
+      json[r'lock_group'] = null;
+    }
+    if (this.lockResolution != null) {
+      json[r'lock_resolution'] = this.lockResolution;
+    } else {
+      json[r'lock_resolution'] = null;
+    }
+    if (this.startEpisode != null) {
+      json[r'start_episode'] = this.startEpisode;
+    } else {
+      json[r'start_episode'] = null;
+    }
+    if (this.followNextSeason != null) {
+      json[r'follow_next_season'] = this.followNextSeason;
+    } else {
+      json[r'follow_next_season'] = null;
+    }
+    if (this.nextSeasonId != null) {
+      json[r'next_season_id'] = this.nextSeasonId;
+    } else {
+      json[r'next_season_id'] = null;
+    }
+    if (this.libraryId != null) {
+      json[r'library_id'] = this.libraryId;
+    } else {
+      json[r'library_id'] = null;
+    }
+    if (this.completedAt != null) {
+      json[r'completed_at'] = this.completedAt;
+    } else {
+      json[r'completed_at'] = null;
+    }
       json[r'episodes'] = this.episodes;
       json[r'torrents'] = this.torrents;
     return json;
@@ -272,6 +424,15 @@ class AppSubscriptionDetail {
         lastSearchAt: mapValueOfType<int>(json, r'last_search_at'),
         nextSearchAt: mapValueOfType<int>(json, r'next_search_at'),
         createdAt: mapValueOfType<int>(json, r'created_at')!,
+        schedule: AppSchedule.fromJson(json[r'schedule']),
+        lockVersion: mapValueOfType<bool>(json, r'lock_version'),
+        lockGroup: mapValueOfType<String>(json, r'lock_group'),
+        lockResolution: mapValueOfType<String>(json, r'lock_resolution'),
+        startEpisode: mapValueOfType<int>(json, r'start_episode'),
+        followNextSeason: mapValueOfType<bool>(json, r'follow_next_season'),
+        nextSeasonId: mapValueOfType<int>(json, r'next_season_id'),
+        libraryId: mapValueOfType<int>(json, r'library_id'),
+        completedAt: mapValueOfType<int>(json, r'completed_at'),
         episodes: AppEpisode.listFromJson(json[r'episodes']),
         torrents: AppSubscriptionTorrent.listFromJson(json[r'torrents']),
       );

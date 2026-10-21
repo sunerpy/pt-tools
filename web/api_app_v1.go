@@ -74,7 +74,16 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/subscriptions", w, s.appSubscriptionCreate},
 		{http.MethodPost, "/subscriptions/{id}/status", w, s.appSubscriptionSetStatus},
 		{http.MethodPost, "/subscriptions/{id}/search", w, s.appSubscriptionSearch},
+		{http.MethodPut, "/subscriptions/{id}", w, s.appSubscriptionUpdate},
 		{http.MethodDelete, "/subscriptions/{id}", w, s.appSubscriptionDelete},
+		// 追剧：每一集、跳过与换版本、运行记录、集号规则
+		{http.MethodGet, "/subscriptions/{id}/episodes", r, s.appSubscriptionEpisodes},
+		{http.MethodPost, "/subscriptions/{id}/episodes/{n}/skip", w, s.appSubscriptionEpisodeSkip},
+		{http.MethodPost, "/subscriptions/{id}/episodes/{n}/unlock", w, s.appSubscriptionEpisodeUnlock},
+		{http.MethodGet, "/subscriptions/{id}/runs", r, s.appSubscriptionRuns},
+		{http.MethodGet, "/subscriptions/{id}/episode-rules", r, s.appEpisodeRules},
+		{http.MethodPut, "/subscriptions/{id}/episode-rules", w, s.appEpisodeRuleSave},
+		{http.MethodDelete, "/subscriptions/{id}/episode-rules", w, s.appEpisodeRuleDelete},
 		{http.MethodGet, "/explore", r, s.appExplore},
 		{http.MethodGet, "/images/tmdb/{size}/{file}", r, s.appTMDBImage},
 		// AI 助手（M19）：对话只要 app:read（改动类操作要另外确认）；确认要 app:write

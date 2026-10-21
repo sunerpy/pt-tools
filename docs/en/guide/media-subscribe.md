@@ -1,18 +1,18 @@
-# Subscriptions <Badge type="tip" text="1.0 preview" />
+# Follow and subscribe <Badge type="tip" text="1.0 preview" />
 
-Once you subscribe to a film or one season of a series, pt-tools searches your sites on a schedule and also picks it up from RSS: it chooses the best release for your quality profile, pushes it to a downloader, and once the download completes, [library organising](media-library.md) puts it into your media library. For series it fills in missing episodes from TMDB's episode list; with upgrades on, it keeps looking for a better release and replaces the old one after the new one is organised. A Douban "wish list" (想看) can create subscriptions automatically.
+Once you subscribe to a film or follow one season of a series, pt-tools searches your sites and also picks it up from RSS: it chooses the best release for your quality profile, pushes it to a downloader, and once the download completes, [library organising](media-library.md) puts it into your media library. A series is followed: pt-tools searches when each episode airs according to TMDB, fills in the season episode by episode and keeps to one release group and resolution; every search records what it found and why it skipped a torrent. With upgrades on, it keeps looking for a better release and replaces the old one after the new one is organised. A Douban "wish list" (想看) can create subscriptions automatically.
 
-The pages are Media → Explore (媒体 → 探索) and Media → Subscriptions (媒体 → 订阅). Subscriptions use TMDB: released builds have a TMDB API key built in, so there is nothing to enter; builds from source need a key under [media recognition](media-recognize.md#tmdb-api-key) first.
+The pages are Media → Explore (媒体 → 探索) and Media → Follow and subscribe (媒体 → 追剧与订阅); in the torrent search results, Follow (追剧) starts following a show from that torrent. Subscriptions use TMDB: released builds have a TMDB API key built in, so there is nothing to enter; builds from source need a key under [media recognition](media-recognize.md#tmdb-api-key) first.
 
 ## Before you start
 
-1. Turn on the Subscriptions (订阅) switch in Subscription settings (订阅设置) at the bottom of the Subscriptions page. While it is off nothing is searched, RSS items are not checked and Douban is not fetched; the subscription list says so at the top.
+1. Turn on the Subscriptions (订阅) switch in Subscription settings (订阅设置) at the bottom of the Follow and subscribe page. While it is off nothing is searched, RSS items are not checked and Douban is not fetched; the subscription list says so at the top.
 2. Active searches use each site's search, the same as the Torrent search (种子搜索) page: a site that finds nothing there finds nothing for subscriptions either.
 3. A subscription only counts as in the library once the files are organised: turn on automatic organising under Media → Media library (媒体 → 媒体库), see [library organising](media-library.md).
 
 ## Subscribing
 
-On the Explore page, browse TMDB's trending-this-week and popular lists, or search by name, and click Subscribe (订阅) under a title. Titles you have already subscribed to show Subscribed (已订阅); titles already in your library show In library (已入库). For a series, pick the season; leave it empty for the latest season. Each season can have one subscription; subscribe again for another season.
+On the Explore page, browse TMDB's trending-this-week and popular lists, or search by name, and click Subscribe (订阅) under a film or Follow (追剧) under a series. Titles you have already subscribed to show Subscribed (已订阅); titles already in your library show In library (已入库). For a series, pick the season; leave it empty for the latest season. Each season can have one subscription; follow again for another season. A series also has follow settings, see Following a series below.
 
 | Option                                   | Description                                                                                        |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -23,29 +23,83 @@ On the Explore page, browse TMDB's trending-this-week and popular lists, or sear
 | Save folder (保存目录)                   | As the downloader sees it; leave empty for the downloader's default folder                         |
 | Upgrade (洗版)                           | Keep looking for higher-scoring releases after the first download, see Upgrades below              |
 
-You can also subscribe from the bot: send `/sub <name>` and reply with a number from the list; for a series, add a season after the number, for example `2 3` subscribes to season 3 of the second title. `/subs` lists your subscriptions and their progress. `/sub` is admin-only, see the [ChatOps quick start](chatops-quickstart.md).
+You can also subscribe from the bot: send `/sub <name>` and reply with a number from the list; for a series, add a season after the number, for example `2 3` subscribes to season 3 of the second title. `/follow <show>` (or `/追剧`) lists series only and uses the follow defaults. `/subs` lists your subscriptions with their IDs, progress and next search, and `/runs <id>` shows the latest runs. `/sub` and `/follow` are admin-only, see the [ChatOps quick start](chatops-quickstart.md).
 
-The Subscriptions list shows each subscription's progress, the result of the latest search or download, and when the next search runs. Active subscriptions can Search now (立即搜索) or Pause (暂停); paused ones have Resume (恢复); subscriptions created from Douban as pending start searching after you click Confirm (确认). Details (详情) lists every episode of the season and the torrents downloaded for it. Deleting a subscription leaves the torrents in the downloader and the files in the library alone.
+The list shows each subscription's progress, the result of the latest search or download, and when the next search runs; a followed series also gets a small square per episode and its schedule and version lock. Active subscriptions can Search now (立即搜索) or Pause (暂停); paused ones have Resume (恢复); subscriptions created from Douban as pending start searching after you click Confirm (确认). Details (详情) lists every episode, the run history and the torrents downloaded. Deleting a subscription leaves the torrents in the downloader and the files in the library alone.
+
+## Following a series
+
+A series subscription is followed. Series created with Follow on the Explore page or in the search results, or with `/follow` in the bot, follow the air time with the version lock on by default. Series subscriptions created earlier, and those from `/sub` or Douban, keep searching at the global interval as before; switch them to the follow settings under Edit (修改).
+
+### Starting from a torrent
+
+Click Follow (追剧) on a torrent in the search results: pt-tools first recognises the show and season from the torrent's title and subtitle (pick another candidate in the dialog if it guessed wrong), creates the follow and pushes that torrent right away. The start episode defaults to the torrent's episode, so earlier episodes are not wanted. The torrent is not pushed when it fails the quality profile or those episodes are already there; the reason goes into the follow's message. A torrent recognised as a different show or season is not used. When the show cannot be recognised, correct it under [media recognition](media-recognize.md) first, or search for the show on the Explore page.
+
+### When to search
+
+| Schedule                  | Description                                                                                                                                                                                                                                                                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Air time (按播出时间)     | The default. Each episode's TMDB air date plus the air time (in the time zone of the machine pt-tools runs on, 20:00 by default): the search starts 2 hours after airing, runs again every 6 hours while nothing is found, and once a day after 7 days. With no episode to wait for, TMDB is checked once a day for new episodes |
+| Daily (每天)              | Searches once a day at the time                                                                                                                                                                                                                                                                                                  |
+| Every few days (每隔几天) | Every 1 to 30 days at the time, counted from the day it was created                                                                                                                                                                                                                                                              |
+| Weekly, monthly           | On the chosen weekdays or days of the month (a shorter month uses its last day) at the time                                                                                                                                                                                                                                      |
+| Global interval           | The interval in Subscription settings, like films                                                                                                                                                                                                                                                                                |
+
+How many hours after airing to start, how many hours between retries, and for how many days after airing to retry can all be changed under Edit. Scheduled searches get a few minutes of random offset, and two searches are at least 30 minutes apart. A followed season's episode list is read from TMDB again every 6 hours, so new episodes are picked up on their own.
+
+### Version lock
+
+With the version lock on, once the first release is downloaded its version (release group and resolution, such as `HHWEB 1080p`) is kept for the rest of the season, so one season never mixes several groups. Until that happens, a version already in the library or downloading becomes the locked one.
+
+- When the locked version still has not shown up after the retry days, the episode shows Waiting for the version (等版本). pt-tools keeps waiting rather than switching, and notifies once through the channels in the settings (then at most every 3 days).
+- To take another version for one episode, click Use another version for this episode (这一集换版本) on that episode in the follow details, or send `/unlock <id> <episode>` to the bot. Only that episode is released from the lock and a search runs within a minute; the others stay as they are.
+- Under Edit you can turn the version lock off, or clear the locked version so that the next download decides it again. Replacing the season with a pack during an upgrade is not limited by the lock; the new version becomes the locked one.
+
+### Episodes
+
+The follow details show one square per episode: in library, downloading, missing (aired but not there), waiting for the version, not aired, and not followed (before the start episode, or skipped). Click an episode to see its name, air date and current version, and to Skip this episode (跳过这一集; it no longer counts as missing or holds up completion) or Want this episode again (重新要这一集).
+
+Torrents for the show that are already in the subscription's downloader but were not pushed by it, such as ones you downloaded yourself, count too when their names match episodes of the season, so they are not downloaded twice. Such a torrent that is still not organised after 7 days counts as failed and the episodes are searched again: automatic organising only handles torrents pt-tools pushed, so organise it by hand or turn on the periodic scan under [library organising](media-library.md).
+
+Under Edit you can change the episode to start from (earlier ones are not wanted), and enter the season's episode count when TMDB's is wrong.
+
+### Variety show episodes
+
+Many variety shows split one issue into two TMDB episodes, while torrents on the sites number them by TMDB, write 第 1 期下 or E01 Part 2 (issue 1, part 2), or give only the air date (`20261002`, `1015期`). When pt-tools sees that a season is numbered by issue (its TMDB genre is reality or talk, or half or more of the episode names are 第几期), it converts the issue and part, or the air date, into the TMDB episode number. Anything it is unsure about is skipped, and the run history says the episode number does not match (集号对不上).
+
+When a release group's numbering is converted wrongly, give it a rule under Episode-number rules (集号规则) in the follow details: by the TMDB episode number, by issue and part, by air date, or an offset (TMDB episode = the number in the title + offset). A rule without a group applies to every group. A search under the new rule runs within a minute.
+
+### Run history
+
+Every active search, RSS match, creation and change by hand (marked Changed, 改动) records a run: how many torrents were found on which sites, which torrents were skipped and why (fails the quality profile, not the locked version, episode number does not match…), and what was pushed. Click a run in the follow details to see the steps, or send `/runs <id>` to the bot. Each subscription keeps its latest 100 runs for at most 90 days.
+
+### After the season is done
+
+Once every episode to follow (from the start episode on, not skipped) is in the library, the follow is done. If TMDB adds aired episodes to the season within 30 days after that (an extra episode or a special numbered into the season), it becomes active again. With Then follow the next season (追完以后接着追下一季) on, once TMDB has an air date for the next season within a year, a follow for the next season is created with this season's settings (the version lock stays on and the locked version is decided again).
+
+### Media library
+
+Under Edit you can pick the media library for a follow: torrents it pushed, and downloader torrents counted towards it, are organised into that library instead of one chosen by type. When the library has been deleted or switched off, or is not a TV library, organising fails with an explanation; pick another library in the follow.
 
 ## Finding releases
 
 Two sources feed every subscription, and the results are picked together:
 
 - **RSS**: items fetched by your existing [RSS subscriptions](rss-subscription.md) are also checked against your subscriptions once their details are fetched. This works independently of the RSS filter rules: a torrent that matches a subscription is pushed by the subscription.
-- **Active search**: each subscription is searched once per Search interval (主动搜索的间隔), 12 hours by default and at least 6, plus up to 30 minutes of random offset so that the subscriptions do not all search at once. It searches by the English or original title first (with the year for films and the season for series, such as `The Last of Us S02`), then by the Chinese title. A subscription limited to certain sites only searches those; sites under Sites skipped by active search (不参与主动搜索的站点) only contribute through RSS.
+- **Active search**: films and series on the global interval are searched once per Search interval (主动搜索的间隔), 12 hours by default and at least 6, plus up to 30 minutes of random offset so that the subscriptions do not all search at once; followed series search on their own schedule (see Following a series above). It searches by the English or original title first (with the year for films and the season for series, such as `The Last of Us S02`), then by the Chinese title. A subscription limited to certain sites only searches those; sites under Sites skipped by active search (不参与主动搜索的站点) only contribute through RSS.
 
 A torrent matches a subscription when:
 
 - both have an IMDb ID and the IDs are equal; when both have one, nothing else is compared;
 - otherwise the Chinese or English title parsed from the torrent equals the subscription's title, original title or one of its TMDB alternative titles (ignoring spaces, punctuation and case), with recognition words applied as usual;
 - for films, the years differ by one at most; when only the names are compared, the torrent's title or subtitle must state a year, since many films share a name. Anything with seasons and episodes is not a film;
-- for series, the season matches; a multi-season pack containing the season also counts. Anime that only gives an episode number (such as `- 05`) counts as season 1.
+- for series, the season matches; a multi-season pack containing the season also counts. Anime that only gives an episode number (such as `- 05`) counts as season 1. Years are not compared for series: variety show torrents often give the broadcast year, which differs from the year of the season on TMDB.
 
 The chosen torrent goes through the same push as RSS: disk space protection and site seeding capacity still apply, and the torrent record shows the source Subscription (订阅). A torrent is pushed once per subscription; a failed push, including one stopped by disk space protection or site seeding capacity, is not recorded, so the next search tries again.
 
 ## Quality profiles
 
-Add quality profiles under Quality profiles (质量档案) on the Subscriptions page. Each subscription uses one profile; without any profile, releases are compared by resolution and source from best to worst.
+Add quality profiles under Quality profiles (质量档案) on the Follow and subscribe page. Each subscription uses one profile; without any profile, releases are compared by resolution and source from best to worst.
 
 | Item                                 | Description                                                                                                                       |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -61,13 +115,13 @@ Scoring: the requirements above are checked first, then releases are compared by
 
 ## Series
 
-A series' progress follows TMDB's episode list for the season: episodes that are organised into the library, downloading, missing (aired but not in the library) or not aired yet.
+A series' progress follows TMDB's episode list for the season: episodes that are organised into the library, downloading, missing (aired but not in the library), waiting for the locked version, not aired yet, or not followed.
 
 - While the season airs, missing episodes are filled in one at a time, each with its highest-scoring release.
 - Once the season has finished airing, a season pack is downloaded when half or more of the episodes are missing, or when no single-episode release covers the missing ones. No season packs are taken while the season airs, since those are usually incomplete.
 - A downloaded torrent counts as organised once some of its files are in the library and the rest are no longer retried automatically; when a season pack leaves some episodes unorganised, the torrent says so, and those episodes count as missing for later searches.
 - A downloaded torrent that is still not organised after 7 days is marked failed; its episodes count as missing again and later searches look for them.
-- The subscription is done once the whole season has aired and every episode is in the library. A film is done once it is organised, or once a media server configured under Media library already has it. A film subscription without upgrades does not download anything when the film is already in the library.
+- The subscription is done once every episode to follow has aired and is in the library (for followed series, see After the season is done above). A film is done once it is organised, or once a media server configured under Media library already has it. A film subscription without upgrades does not download anything when the film is already in the library.
 
 ## Upgrades
 
@@ -81,7 +135,7 @@ With upgrades on, a subscription keeps looking for higher-scoring releases after
 
 ## Douban wish list
 
-Under Douban wish list (豆瓣想看) on the Subscriptions page, add a Douban user ID, the part after `douban.com/people/` in the profile address. The collection must be public: for the wish list, pt-tools only fetches Douban's public collection RSS, without logging in or calling any non-public API.
+Under Douban wish list (豆瓣想看) on the Follow and subscribe page, add a Douban user ID, the part after `douban.com/people/` in the profile address. The collection must be public: for the wish list, pt-tools only fetches Douban's public collection RSS, without logging in or calling any non-public API.
 
 - It is fetched every 6 hours (plus up to 30 minutes of random offset), and only films and series marked "wish" (想看) are taken; books, music, and items marked watching or watched are skipped.
 - Each item is looked up on TMDB by its name (and the original title Douban gives). For a series, the season written in the title is used (such as 第二季), otherwise season 1. Titles that already have a subscription are only recorded, not subscribed twice.
@@ -93,7 +147,7 @@ Under Douban wish list (豆瓣想看) on the Subscriptions page, add a Douban us
 
 ## Notifications
 
-After choosing channels in Subscription settings, a message is sent whenever a subscription downloads a release: the subscription (with the season for series), the torrent, the site, the episodes and the quality, followed by the TMDB poster address. A Douban source that becomes abnormal also notifies once. Notifications are delayed during the channel's quiet hours and retried automatically on failure.
+After choosing channels in Subscription settings, a message is sent whenever a subscription downloads a release: the subscription (with the season for series), the torrent, the site, the episodes and the quality, followed by the TMDB poster address. A followed series sends Followed show updated (追剧更新) with the locked version as well; Waiting for the version (追剧等版本, with the `/unlock` command) when the locked version takes too long; and Followed show failing (追剧出错) after 3 runs in a row could not search (for example every site timed out). A Douban source that becomes abnormal also notifies once. Notifications are delayed during the channel's quiet hours and retried automatically on failure; the text can be changed with [message templates](notify-channels.md).
 
 ## Troubleshooting
 
@@ -102,3 +156,7 @@ After choosing channels in Subscription settings, a message is sent whenever a s
 **Releases are found but not downloaded**: the Latest column names the torrents that did not meet the quality profile and why (for example 分辨率 1080p 不在档案里, resolution 1080p is not in the profile). Relax the profile, or give the subscription a different one.
 
 **Downloaded, but the subscription never completes**: a subscription waits for the files to be organised. Check Media → Organise history (媒体 → 整理历史) for the torrent; with automatic organising off, completed torrents are not organised.
+
+**A followed series keeps showing Waiting for the version**: the locked release group has not released the episode yet, or has stopped. Use another version for this episode in the follow details releases just that episode; to change the whole season, clear the locked version under Edit.
+
+**Variety show episodes do not match**: check why the run history skipped the torrents. For episode number does not match (集号对不上), give that release group an episode-number rule in the follow details (for example by issue and part).

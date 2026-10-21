@@ -38,8 +38,47 @@ func (fakeCipher) Decrypt(c string) (string, error) {
 
 const tmdbKey = "0123456789abcdef0123456789abcdef"
 
-// fakeTMDB：沙丘2（电影 693134）、最后生还者（剧集 100088，第 2 季 3 集，第 3 集 2026-12-01 播出）。
+// varietySeason4 是现在就出发（综艺 231620）第 4 季：一期拆成上下两集，第 3、4 集同一天播出，第 5 集是占位的集名，第 6 集还没有播出日期。
+const varietySeason4 = `{"season_number":4,"air_date":"2026-10-01","episodes":[
+	{"episode_number":1,"name":"第1期上：看见蔚蓝生机","air_date":"2026-10-01"},
+	{"episode_number":2,"name":"第1期下：神秘的热带雨林","air_date":"2026-10-02"},
+	{"episode_number":3,"name":"第2期上：哞哞来了！","air_date":"2026-10-08"},
+	{"episode_number":4,"name":"第2期下：热舞的哞哞","air_date":"2026-10-08"},
+	{"episode_number":5,"name":"第 5 集","air_date":"2026-10-15"},
+	{"episode_number":6,"name":"第 6 集"}]}`
+
+// tmdbOverride 按路径换掉假 TMDB 的回应（测试里改 TMDB 上的数据）；为空时用下面固定的。
+type tmdbOverride struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func (o *tmdbOverride) set(path, body string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.m == nil {
+		o.m = map[string]string{}
+	}
+	o.m[path] = body
+}
+
+func (o *tmdbOverride) get(path string) (string, bool) {
+	if o == nil {
+		return "", false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	b, ok := o.m[path]
+	return b, ok
+}
+
+// fakeTMDB：沙丘2（电影 693134）、最后生还者（剧集 100088，第 2 季 3 集，第 3 集 2026-12-01 播出）、
+// 现在就出发（综艺 231620，第 4 季见 varietySeason4）。
 func newFakeTMDB(t *testing.T) *httptest.Server {
+	return newFakeTMDBWith(t, nil)
+}
+
+func newFakeTMDBWith(t *testing.T, over *tmdbOverride) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("api_key") != tmdbKey {
@@ -48,6 +87,14 @@ func newFakeTMDB(t *testing.T) *httptest.Server {
 		}
 		q := r.URL.Query().Get("query")
 		en := r.URL.Query().Get("language") == "en-US"
+		if b, ok := over.get(r.URL.Path); ok {
+			if b == "404" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(b))
+			return
+		}
 		switch {
 		case r.URL.Path == "/3/search/movie" && (strings.Contains(q, "沙丘") || strings.Contains(q, "Dune")):
 			_, _ = w.Write([]byte(`{"results":[{"id":693134,"title":"沙丘2","original_title":"Dune: Part Two","release_date":"2024-02-27","popularity":300}]}`))
@@ -65,6 +112,14 @@ func newFakeTMDB(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"season_number":2,"air_date":"2025-04-13","episodes":[
 				{"episode_number":1,"name":"未来","air_date":"2025-04-13"},{"episode_number":2,"name":"穿越","air_date":"2025-04-20"},
 				{"episode_number":3,"name":"路","air_date":"2026-12-01"}]}`))
+		case r.URL.Path == "/3/search/tv" && (strings.Contains(q, "Natural High") || strings.Contains(q, "现在就出发")):
+			_, _ = w.Write([]byte(`{"results":[{"id":231620,"name":"现在就出发","original_name":"现在就出发","first_air_date":"2023-08-27","popularity":50,"genre_ids":[10764]}]}`))
+		case r.URL.Path == "/3/tv/231620" && en:
+			_, _ = w.Write([]byte(`{"id":231620,"name":"Natural High","alternative_titles":{"results":[]}}`))
+		case r.URL.Path == "/3/tv/231620":
+			_, _ = w.Write([]byte(`{"id":231620,"name":"现在就出发","original_name":"现在就出发","first_air_date":"2023-08-27","number_of_seasons":4,"poster_path":"/nh.jpg","genres":[{"id":10764,"name":"真人秀"}]}`))
+		case r.URL.Path == "/3/tv/231620/season/4":
+			_, _ = w.Write([]byte(varietySeason4))
 		case r.URL.Path == "/3/trending/movie/week":
 			_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"results":[{"id":693134,"title":"沙丘2","release_date":"2024-02-27"},{"id":1,"title":"别的电影","release_date":"2024-01-01"}]}`))
 		case strings.HasPrefix(r.URL.Path, "/3/search/"):
@@ -88,16 +143,34 @@ func newDB(t *testing.T) *gorm.DB {
 		&models.MediaTransferHistory{}, &models.TorrentInfo{}, &models.DownloaderSetting{},
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{},
 		&models.MediaSubscribeSetting{}, &models.MediaDoubanSource{}, &models.MediaDoubanItem{},
+		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{}, &models.MediaLibrary{},
 	))
 	return db
 }
 
-// fakeSearch 按关键字回种子，记下搜过的关键字。
+// fakeSearch 按关键字回种子，记下搜过的关键字；cached 是搜索缓存里的种子（一键追剧按站点与编号取）。
 type fakeSearch struct {
 	mu      sync.Mutex
 	items   []v2.TorrentItem
 	queries []v2.MultiSiteSearchQuery
 	err     error
+	cached  map[string]v2.TorrentItem
+}
+
+func (f *fakeSearch) CachedTorrent(site, id string) (v2.TorrentItem, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	it, ok := f.cached[strings.ToLower(site)+"|"+id]
+	return it, ok
+}
+
+func (f *fakeSearch) cache(it v2.TorrentItem) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cached == nil {
+		f.cached = map[string]v2.TorrentItem{}
+	}
+	f.cached[strings.ToLower(it.SourceSite)+"|"+it.ID] = it
 }
 
 func (f *fakeSearch) Search(_ context.Context, q v2.MultiSiteSearchQuery) (*v2.MultiSiteSearchResult, error) {
@@ -132,6 +205,17 @@ func (f *fakeSite) Download(_ context.Context, id string) ([]byte, error) {
 		return b, nil
 	}
 	return nil, errors.New("no such torrent")
+}
+
+// packBytes 是一个多文件的种子（整季包）：files 是包里的文件名。
+func packBytes(name string, files ...string) []byte {
+	var list strings.Builder
+	for _, f := range files {
+		fmt.Fprintf(&list, "d6:lengthi%de4:pathl%d:%see", int64(1)<<30, len(f), f)
+	}
+	info := fmt.Sprintf("d5:filesl%se4:name%d:%s12:piece lengthi16384e6:pieces20:%se", list.String(), len(name), name, strings.Repeat("y", 20))
+	ann := "http://tracker/announce"
+	return []byte(fmt.Sprintf("d8:announce%d:%s4:info%se", len(ann), ann, info))
 }
 
 func torrentBytes(name string) []byte {
@@ -187,6 +271,26 @@ type fakeDL struct {
 	downloader.Downloader
 	mu      sync.Mutex
 	removed []string
+	// torrents 是下载器里的种子（追剧认领用）；listErr 不为空时列不出来
+	torrents []downloader.Torrent
+	listErr  error
+	lists    int
+}
+
+func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lists++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return append([]downloader.Torrent(nil), f.torrents...), nil
+}
+
+func (f *fakeDL) setTorrents(list ...downloader.Torrent) {
+	f.mu.Lock()
+	f.torrents = list
+	f.mu.Unlock()
 }
 
 func (f *fakeDL) RemoveTorrent(id string, removeData bool) error {
@@ -206,6 +310,7 @@ type env struct {
 	t       *testing.T
 	ctx     context.Context
 	db      *gorm.DB
+	tmdb    *tmdbOverride
 	svc     *Service
 	search  *fakeSearch
 	site    *fakeSite
@@ -217,6 +322,8 @@ type env struct {
 	pushErr error
 	// pushRes 不为空时假推送返回它（例如闸门拒绝、下载器里已经有）
 	pushRes *ptinternal.PushTorrentResult
+	// onPush 在每次推送时调用（模拟推送期间改了设置）
+	onPush  func(req ptinternal.PushTorrentRequest)
 	notices []Notice
 }
 
@@ -241,14 +348,15 @@ func (e *env) gotPushes() []ptinternal.PushTorrentRequest {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	db := newDB(t)
-	tm := newFakeTMDB(t)
+	over := &tmdbOverride{}
+	tm := newFakeTMDBWith(t, over)
 	rec := recognize.New(recognize.Config{DB: db, Cipher: fakeCipher{}, BaseURL: tm.URL + "/3", ImageBaseURL: tm.URL + "/t/p/", RatePerSecond: 1000})
 	key := tmdbKey
 	_, err := rec.SaveSettings(context.Background(), recognize.SettingsInput{TMDBKey: &key})
 	require.NoError(t, err)
 	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://qb", Enabled: true, IsDefault: true}).Error)
 	e := &env{
-		t: t, ctx: context.Background(), db: db, search: &fakeSearch{}, site: &fakeSite{files: map[string][]byte{}},
+		t: t, ctx: context.Background(), db: db, tmdb: over, search: &fakeSearch{}, site: &fakeSite{files: map[string][]byte{}},
 		dl: &fakeDL{}, now: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC),
 	}
 	e.org = &fakeOrganizer{db: db}
@@ -256,6 +364,12 @@ func newEnv(t *testing.T) *env {
 		DB: db, Recognizer: rec, Search: e.search,
 		Sites: func(name string) (v2.Site, bool) { return e.site, name == "hdsky" || name == "mteam" },
 		Push: func(_ context.Context, req ptinternal.PushTorrentRequest) (*ptinternal.PushTorrentResult, error) {
+			e.mu.Lock()
+			hook := e.onPush
+			e.mu.Unlock()
+			if hook != nil {
+				hook(req)
+			}
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			if e.pushErr != nil {

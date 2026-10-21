@@ -17,6 +17,10 @@ class AppEpisode {
     this.name,
     this.airDate,
     required this.state,
+    this.source_,
+    this.version,
+    this.manualSkip,
+    this.manualUnlock,
   });
 
   int number;
@@ -37,15 +41,55 @@ class AppEpisode {
   ///
   String? airDate;
 
-  /// library、downloading、missing 或 upcoming
+  /// library、downloading、missing、waiting_version（在等锁住的版本）、upcoming 或 skipped（不追）
   String state;
+
+  /// 状态从哪里来：library（媒体库）、subscription（订阅推送的种子）、downloader（下载器里已有的种子）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? source_;
+
+  /// 现在的版本（制作组与分辨率）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? version;
+
+  /// 手动跳过的
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? manualSkip;
+
+  /// 这一集不受版本锁限制
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? manualUnlock;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppEpisode &&
     other.number == number &&
     other.name == name &&
     other.airDate == airDate &&
-    other.state == state;
+    other.state == state &&
+    other.source_ == source_ &&
+    other.version == version &&
+    other.manualSkip == manualSkip &&
+    other.manualUnlock == manualUnlock;
 
   @override
   int get hashCode =>
@@ -53,10 +97,14 @@ class AppEpisode {
     (number.hashCode) +
     (name == null ? 0 : name!.hashCode) +
     (airDate == null ? 0 : airDate!.hashCode) +
-    (state.hashCode);
+    (state.hashCode) +
+    (source_ == null ? 0 : source_!.hashCode) +
+    (version == null ? 0 : version!.hashCode) +
+    (manualSkip == null ? 0 : manualSkip!.hashCode) +
+    (manualUnlock == null ? 0 : manualUnlock!.hashCode);
 
   @override
-  String toString() => 'AppEpisode[number=$number, name=$name, airDate=$airDate, state=$state]';
+  String toString() => 'AppEpisode[number=$number, name=$name, airDate=$airDate, state=$state, source_=$source_, version=$version, manualSkip=$manualSkip, manualUnlock=$manualUnlock]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -72,6 +120,26 @@ class AppEpisode {
       json[r'air_date'] = null;
     }
       json[r'state'] = this.state;
+    if (this.source_ != null) {
+      json[r'source'] = this.source_;
+    } else {
+      json[r'source'] = null;
+    }
+    if (this.version != null) {
+      json[r'version'] = this.version;
+    } else {
+      json[r'version'] = null;
+    }
+    if (this.manualSkip != null) {
+      json[r'manual_skip'] = this.manualSkip;
+    } else {
+      json[r'manual_skip'] = null;
+    }
+    if (this.manualUnlock != null) {
+      json[r'manual_unlock'] = this.manualUnlock;
+    } else {
+      json[r'manual_unlock'] = null;
+    }
     return json;
   }
 
@@ -98,6 +166,10 @@ class AppEpisode {
         name: mapValueOfType<String>(json, r'name'),
         airDate: mapValueOfType<String>(json, r'air_date'),
         state: mapValueOfType<String>(json, r'state')!,
+        source_: mapValueOfType<String>(json, r'source'),
+        version: mapValueOfType<String>(json, r'version'),
+        manualSkip: mapValueOfType<bool>(json, r'manual_skip'),
+        manualUnlock: mapValueOfType<bool>(json, r'manual_unlock'),
       );
     }
     return null;

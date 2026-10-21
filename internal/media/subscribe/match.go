@@ -35,6 +35,24 @@ func (s span) covers(n int) bool {
 type matcher struct {
 	sub   models.MediaSubscription
 	names map[string]bool
+	// mapper 是追剧的集号映射（综艺的期上下、Part、日期）；为空时标题里的集号就是 TMDB 的集号
+	mapper *episodeMapper
+}
+
+// withMapper 带上集号映射。
+func (mt matcher) withMapper(mp *episodeMapper) matcher {
+	mt.mapper = mp
+	return mt
+}
+
+// matchMapped 和 match 一样对种子，剧集再按集号映射对到 TMDB 的集：对不上时第二个返回值为假、第三个写明原因
+// （名字、季对不上的不写原因，不是这个订阅的种子）。剧集的年份不参与（综艺常写播出的年份）。
+func (mt matcher) matchMapped(m meta.Meta, it v2.TorrentItem) (span, bool, string) {
+	sp, ok := mt.match(m, it)
+	if !ok || mt.sub.MediaType != models.MediaKindTV || mt.mapper == nil {
+		return sp, ok, ""
+	}
+	return mt.mapper.mapEpisodes(m, it.Title, it.Subtitle, sp)
 }
 
 func newMatcher(sub models.MediaSubscription) matcher {

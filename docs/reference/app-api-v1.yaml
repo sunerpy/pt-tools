@@ -409,6 +409,24 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppSubscriptionDetail" }
         default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateSubscription
+      tags: [App]
+      summary: 修改订阅的设置（只改给了的字段；条目与季不能改）
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppSubscriptionUpdate" }
+      responses:
+        "200":
+          description: 更新后的订阅
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSubscription" }
+        default: { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteSubscription
       tags: [App]
@@ -454,6 +472,137 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AppMessage" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/episodes:
+    get:
+      operationId: listSubscriptionEpisodes
+      tags: [App]
+      summary: 追剧每一集的情况（电影没有分集，回 400）
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppEpisode" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/episodes/{n}/skip:
+    post:
+      operationId: skipSubscriptionEpisode
+      tags: [App]
+      summary: 跳过这一集（不追），或重新要它
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+        - $ref: "#/components/parameters/EpisodeNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppEpisodeSkip" }
+      responses:
+        "200":
+          description: 改了以后每一集的情况
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppEpisode" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/episodes/{n}/unlock:
+    post:
+      operationId: unlockSubscriptionEpisode
+      tags: [App]
+      summary: 这一集不受版本锁限制（换别的组或分辨率，并马上搜一次），或恢复版本锁
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+        - $ref: "#/components/parameters/EpisodeNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppEpisodeUnlock" }
+      responses:
+        "200":
+          description: 改了以后每一集的情况
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppEpisode" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/runs:
+    get:
+      operationId: listSubscriptionRuns
+      tags: [App]
+      summary: 订阅的运行记录（新的在前）：每次搜索找到了什么、为什么没要、推送了哪个
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize100"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSubscriptionRunPage" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/episode-rules:
+    get:
+      operationId: listEpisodeRules
+      tags: [App]
+      summary: 追剧的集号规则（每个制作组一条；组为空的对所有组）
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppEpisodeRule" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: saveEpisodeRule
+      tags: [App]
+      summary: 设一个制作组的集号规则（这个组已有规则时替换）
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppEpisodeRuleInput" }
+      responses:
+        "200":
+          description: 改了以后的全部规则
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppEpisodeRule" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteEpisodeRule
+      tags: [App]
+      summary: 删掉一个制作组的集号规则
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+        - name: group
+          in: query
+          description: 制作组；不给是删对所有组的那条
+          schema: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: 删了以后的全部规则
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppEpisodeRule" }
         default: { $ref: "#/components/responses/Error" }
   /explore:
     get:
@@ -771,6 +920,12 @@ components:
       name: id
       in: path
       required: true
+      schema: { type: integer, minimum: 1 }
+    EpisodeNumber:
+      name: n
+      in: path
+      required: true
+      description: 集号（TMDB 这一季的第几集）
       schema: { type: integer, minimum: 1 }
     HistoryID:
       name: id
@@ -1486,9 +1641,17 @@ components:
       required: [total, aired, in_library, downloading, missing]
       properties:
         total: { type: integer }
+        required:
+          { type: integer, description: "要追的集数（起始集以后、没跳过的）；旧版本的服务端不给" }
         aired: { type: integer }
         in_library: { type: integer }
         downloading: { type: integer }
+        waiting:
+          {
+            type: integer,
+            description: "在等锁住的版本的集数（也算在 missing 里）；旧版本的服务端不给",
+          }
+        skipped: { type: integer, description: "不追的集数；旧版本的服务端不给" }
         missing:
           type: array
           items: { type: integer }
@@ -1515,6 +1678,37 @@ components:
         last_search_at: { type: integer, format: int64 }
         next_search_at: { type: integer, format: int64 }
         created_at: { type: integer, format: int64 }
+        # 以下是追剧（剧集）的设置；旧版本的服务端不给
+        schedule: { $ref: "#/components/schemas/AppSchedule" }
+        lock_version:
+          { type: boolean, description: "版本锁：第一集选定以后只要同一个制作组、同一个分辨率" }
+        lock_group: { type: string, description: "锁住的制作组（还没定时为空）" }
+        lock_resolution: { type: string, description: "锁住的分辨率（还没定时为空）" }
+        start_episode: { type: integer, description: "从第几集开始追（0 与 1 是整季）" }
+        follow_next_season: { type: boolean, description: "追完以后自动追下一季" }
+        next_season_id: { type: integer, description: "自动建的下一季的订阅" }
+        library_id: { type: integer, description: "整理进哪个媒体库（0 按类型自动选）" }
+        completed_at: { type: integer, format: int64, description: "追完的时间" }
+    AppSchedule:
+      type: object
+      required: [kind]
+      additionalProperties: false
+      description: >-
+        主动搜索的定时。kind 为空沿用全局间隔；airtime 按播出时间（at 是当地的播出时刻，空的按 20:00；
+        播出后 air_delay_hours 小时开始搜，没找到每隔 air_retry_hours 小时再搜，在播出后 air_window_days 天里集中重试，0 用默认的 2 小时、6 小时、7 天）；
+        daily、every_days、weekly、monthly 按 at 的钟点（every 是每隔几天，days 是星期几 0–6 或几号 1–31，短月按月末）。
+      properties:
+        kind:
+          type: string
+          description: "空的、airtime、daily、every_days、weekly 或 monthly（回应里不用枚举：以后加了新的种类，旧的 App 也读得了）"
+        at: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: "HH:MM" }
+        every: { type: integer, minimum: 1, maximum: 30 }
+        days:
+          type: array
+          items: { type: integer, minimum: 0, maximum: 31 }
+        air_delay_hours: { type: integer, minimum: 0, maximum: 72 }
+        air_retry_hours: { type: integer, minimum: 0, maximum: 48 }
+        air_window_days: { type: integer, minimum: 0, maximum: 60 }
     AppEpisode:
       type: object
       required: [number, state]
@@ -1522,7 +1716,17 @@ components:
         number: { type: integer }
         name: { type: string }
         air_date: { type: string }
-        state: { type: string, description: "library、downloading、missing 或 upcoming" }
+        state:
+          type: string
+          description: "library、downloading、missing、waiting_version（在等锁住的版本）、upcoming 或 skipped（不追）"
+        source:
+          {
+            type: string,
+            description: "状态从哪里来：library（媒体库）、subscription（订阅推送的种子）、downloader（下载器里已有的种子）",
+          }
+        version: { type: string, description: "现在的版本（制作组与分辨率）" }
+        manual_skip: { type: boolean, description: "手动跳过的" }
+        manual_unlock: { type: boolean, description: "这一集不受版本锁限制" }
     AppSubscriptionTorrent:
       type: object
       required: [site, torrent_id, title, status, complete, size, created_at]
@@ -1559,6 +1763,117 @@ components:
         season: { type: integer, minimum: 0 }
         profile_id: { type: integer, minimum: 0 }
         upgrade: { type: boolean }
+        # 以下只用于剧集（追剧）：不给的按播出时间搜索、开着版本锁
+        schedule: { $ref: "#/components/schemas/AppSchedule" }
+        lock_version: { type: boolean }
+        start_episode: { type: integer, minimum: 0, maximum: 2000 }
+        follow_next_season: { type: boolean }
+        library_id: { type: integer, minimum: 0 }
+        from_torrent: { $ref: "#/components/schemas/AppFromTorrent" }
+    AppFromTorrent:
+      type: object
+      required: [site, torrent_id]
+      additionalProperties: false
+      description: 从站点上的这个种子开始追：起始集默认取它的集号，建好以后马上推送它（不合质量档案或已有这几集时不推）
+      properties:
+        site: { type: string, minLength: 1, maxLength: 64 }
+        torrent_id: { type: string, minLength: 1, maxLength: 128 }
+        title:
+          type: string
+          maxLength: 512
+          description: 种子标题：只在搜索缓存里没有这个种子时，用作在这个站点上搜索的关键字
+    AppSubscriptionUpdate:
+      type: object
+      additionalProperties: false
+      description: 只改给了的字段；lock_group、lock_resolution 都给空串是清掉锁住的版本（按之后的版本重新定）
+      properties:
+        profile_id: { type: integer, minimum: 0 }
+        upgrade: { type: boolean }
+        schedule: { $ref: "#/components/schemas/AppSchedule" }
+        lock_version: { type: boolean }
+        lock_group: { type: string, maxLength: 64 }
+        lock_resolution: { type: string, maxLength: 16 }
+        start_episode: { type: integer, minimum: 0, maximum: 2000 }
+        follow_next_season: { type: boolean }
+        library_id: { type: integer, minimum: 0 }
+        total_episodes:
+          {
+            type: integer,
+            minimum: 0,
+            maximum: 2000,
+            description: "这一季的集数：大于 0 时以它为准，0 改回按 TMDB",
+          }
+    AppEpisodeSkip:
+      type: object
+      required: [skip]
+      additionalProperties: false
+      properties:
+        skip: { type: boolean, description: "true 跳过这一集，false 重新要" }
+    AppEpisodeUnlock:
+      type: object
+      required: [unlock]
+      additionalProperties: false
+      properties:
+        unlock: { type: boolean, description: "true 这一集不受版本锁限制，false 恢复" }
+    AppRunStep:
+      type: object
+      required: [kind, text]
+      properties:
+        kind: { type: string, description: "search、reject、lock、push、fail、adopt、wait 或 info" }
+        text: { type: string }
+    AppSubscriptionRun:
+      type: object
+      required: [id, trigger, started_at, status, summary, steps, steps_truncated]
+      properties:
+        id: { type: integer }
+        trigger: { type: string, description: "create、schedule、rss、manual 或 ai" }
+        started_at: { type: integer, format: int64 }
+        finished_at: { type: integer, format: int64 }
+        status:
+          type: string
+          description: "ok、nothing、waiting、failed、partial 或 changed（手动改动：改设置、跳过一集、换版本、集号规则，不是一次搜索）"
+        summary: { type: string }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/AppRunStep" }
+        steps_truncated: { type: boolean, description: "步骤太多，后面的没有记" }
+    AppSubscriptionRunPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppSubscriptionRun" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    AppEpisodeRule:
+      type: object
+      required: [group, mode, offset, source, updated_at]
+      properties:
+        group: { type: string, description: "制作组；空的对所有组" }
+        mode:
+          type: string
+          description: "tmdb（按 TMDB 的集号）、period_part（按第几期与上下）、date（按播出日期）或 offset（TMDB 的集号 = 标题里的集号 + offset）"
+        offset: { type: integer }
+        source: { type: string, description: "manual、ai 或 auto" }
+        note: { type: string }
+        updated_at: { type: integer, format: int64 }
+    AppEpisodeRuleInput:
+      type: object
+      required: [mode]
+      additionalProperties: false
+      properties:
+        group: { type: string, maxLength: 64 }
+        mode: { type: string, enum: [tmdb, period_part, date, offset] }
+        offset:
+          {
+            type: integer,
+            minimum: -2000,
+            maximum: 2000,
+            description: "mode 是 offset 时用，不能是 0",
+          }
+        note: { type: string, maxLength: 255 }
     AppSubscriptionStatus:
       type: object
       required: [status]

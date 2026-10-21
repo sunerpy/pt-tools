@@ -128,13 +128,34 @@ func (s *Server) appMediaHistory(w http.ResponseWriter, r *http.Request) {
 
 // ---- 订阅 ----
 
-// AppProgress 是订阅的进度。
+// AppProgress 是订阅的进度。剧集：Required 是要追的集（起始集以后、没跳过的），Waiting 是在等锁住的版本的（也算在 Missing 里），
+// Skipped 是不追的。
 type AppProgress struct {
 	Total       int   `json:"total"`
+	Required    int   `json:"required"`
 	Aired       int   `json:"aired"`
 	InLibrary   int   `json:"in_library"`
 	Downloading int   `json:"downloading"`
+	Waiting     int   `json:"waiting"`
+	Skipped     int   `json:"skipped"`
 	Missing     []int `json:"missing"`
+}
+
+// AppSchedule 是追剧主动搜索的定时：kind 为空时沿用全局间隔；airtime 按播出时间（at 是播出时刻，空的按 20:00）、
+// daily / every_days / weekly / monthly 按 at 的钟点（every 是每隔几天，days 是星期几 0–6 或几号 1–31）。
+type AppSchedule struct {
+	Kind          string `json:"kind"`
+	At            string `json:"at,omitempty"`
+	Every         int    `json:"every,omitempty"`
+	Days          []int  `json:"days,omitempty"`
+	AirDelayHours int    `json:"air_delay_hours,omitempty"`
+	AirRetryHours int    `json:"air_retry_hours,omitempty"`
+	AirWindowDays int    `json:"air_window_days,omitempty"`
+}
+
+func (a AppSchedule) schedule() *subscribe.Schedule {
+	sc := subscribe.Schedule(a)
+	return &sc
 }
 
 // AppSubscription 是一个订阅。
@@ -156,14 +177,36 @@ type AppSubscription struct {
 	LastSearchAt  *int64      `json:"last_search_at,omitempty"`
 	NextSearchAt  *int64      `json:"next_search_at,omitempty"`
 	CreatedAt     int64       `json:"created_at"`
+	// 以下是追剧（剧集）的设置
+	Schedule         AppSchedule `json:"schedule"`
+	LockVersion      bool        `json:"lock_version"`
+	LockGroup        string      `json:"lock_group,omitempty"`
+	LockResolution   string      `json:"lock_resolution,omitempty"`
+	StartEpisode     int         `json:"start_episode,omitempty"`
+	FollowNextSeason bool        `json:"follow_next_season"`
+	NextSeasonID     uint        `json:"next_season_id,omitempty"`
+	LibraryID        uint        `json:"library_id,omitempty"`
+	CompletedAt      *int64      `json:"completed_at,omitempty"`
 }
 
-// AppEpisode 是剧集一集的情况：library、downloading、missing 或 upcoming。
+// AppEpisode 是剧集一集的情况：library、downloading、missing、waiting_version（等锁住的版本）、upcoming 或 skipped（不追）。
 type AppEpisode struct {
 	Number  int    `json:"number"`
 	Name    string `json:"name,omitempty"`
 	AirDate string `json:"air_date,omitempty"`
 	State   string `json:"state"`
+	// Source 是状态从哪里来的（library、subscription、downloader），Version 是现在的版本（制作组与分辨率）
+	Source       string `json:"source,omitempty"`
+	Version      string `json:"version,omitempty"`
+	ManualSkip   bool   `json:"manual_skip,omitempty"`
+	ManualUnlock bool   `json:"manual_unlock,omitempty"`
+}
+
+func appEpisode(e subscribe.EpisodeState) AppEpisode {
+	return AppEpisode{
+		Number: e.Number, Name: e.Name, AirDate: e.AirDate, State: e.State, Source: e.Source, Version: e.Version,
+		ManualSkip: e.ManualSkip, ManualUnlock: e.ManualUnlock,
+	}
 }
 
 // AppSubscriptionTorrent 是订阅下载过的一个种子。
@@ -194,9 +237,18 @@ func appSubscription(v subscribe.SubscriptionView) AppSubscription {
 		Year: sub.Year, PosterPath: sub.PosterPath, Status: sub.Status, Upgrade: sub.Upgrade, Source: sub.Source,
 		TotalEpisodes: sub.TotalEpisodes, Message: appRedactAddr(sub.Message), LastSearchAt: unixPtr(sub.LastSearchAt),
 		NextSearchAt: unixPtr(sub.NextSearchAt), CreatedAt: sub.CreatedAt.Unix(), Progress: AppProgress{Missing: []int{}},
+		Schedule: AppSchedule(v.Schedule), LockVersion: sub.LockVersion, LockGroup: sub.LockGroup, LockResolution: sub.LockResolution,
+		StartEpisode: sub.StartEpisode, FollowNextSeason: sub.FollowNextSeason, NextSeasonID: sub.NextSeasonID, LibraryID: sub.LibraryID,
+		CompletedAt: unixPtr(sub.CompletedAt),
+	}
+	if len(out.Schedule.Days) == 0 {
+		out.Schedule.Days = nil
 	}
 	if p := v.Progress; p != nil {
-		out.Progress = AppProgress{Total: p.Total, Aired: p.Aired, InLibrary: p.InLibrary, Downloading: p.Downloading, Missing: append([]int{}, p.Missing...)}
+		out.Progress = AppProgress{
+			Total: p.Total, Required: p.Required, Aired: p.Aired, InLibrary: p.InLibrary, Downloading: p.Downloading,
+			Waiting: p.Waiting, Skipped: p.Skipped, Missing: append([]int{}, p.Missing...),
+		}
 	}
 	return out
 }
@@ -271,7 +323,7 @@ func (s *Server) appSubscriptionDetail(w http.ResponseWriter, r *http.Request) {
 	out := AppSubscriptionDetail{AppSubscription: appSubscription(d.SubscriptionView), Episodes: []AppEpisode{}, Torrents: []AppSubscriptionTorrent{}}
 	if d.Progress != nil {
 		for _, e := range d.Progress.Episodes {
-			out.Episodes = append(out.Episodes, AppEpisode{Number: e.Number, Name: e.Name, AirDate: e.AirDate, State: e.State})
+			out.Episodes = append(out.Episodes, appEpisode(e))
 		}
 	}
 	for _, t := range d.TorrentList {
@@ -284,13 +336,27 @@ func (s *Server) appSubscriptionDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 // AppSubscriptionCreate 是 POST /subscriptions：订阅一部电影或剧集的一季（Season 为 0 时订最新一季）。
-// ProfileID 为 0 时用设置里的默认质量档案。
+// ProfileID 为 0 时用设置里的默认质量档案。剧集是追剧：没给定时与版本锁时按播出时间搜索、开着版本锁；
+// FromTorrent 是从站点上的这个种子开始追（起始集默认取它的集号）。
 type AppSubscriptionCreate struct {
-	MediaType string `json:"media_type"`
-	TMDBID    int    `json:"tmdb_id"`
-	Season    int    `json:"season"`
-	ProfileID uint   `json:"profile_id"`
-	Upgrade   bool   `json:"upgrade"`
+	MediaType        string          `json:"media_type"`
+	TMDBID           int             `json:"tmdb_id"`
+	Season           int             `json:"season"`
+	ProfileID        uint            `json:"profile_id"`
+	Upgrade          bool            `json:"upgrade"`
+	Schedule         *AppSchedule    `json:"schedule,omitempty"`
+	LockVersion      *bool           `json:"lock_version,omitempty"`
+	StartEpisode     *int            `json:"start_episode,omitempty"`
+	FollowNextSeason *bool           `json:"follow_next_season,omitempty"`
+	LibraryID        *uint           `json:"library_id,omitempty"`
+	FromTorrent      *AppFromTorrent `json:"from_torrent,omitempty"`
+}
+
+// AppFromTorrent 是一键追剧时选中的种子：Title 可选，只在搜索缓存里没有这个种子时用作在这个站点搜索的关键字。
+type AppFromTorrent struct {
+	Site      string `json:"site"`
+	TorrentID string `json:"torrent_id"`
+	Title     string `json:"title,omitempty"`
 }
 
 func (s *Server) appSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
@@ -306,14 +372,31 @@ func (s *Server) appSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
 		appError(w, http.StatusBadRequest, "invalid_argument", "media_type 要选 movie 或 tv")
 		return
 	}
-	sub, err := svc.CreateSubscription(r.Context(), subscribe.SubscriptionInput{
+	input := subscribe.SubscriptionInput{
 		MediaType: in.MediaType, TMDBID: in.TMDBID, Season: in.Season, ProfileID: in.ProfileID, Upgrade: in.Upgrade,
-	}, models.MediaSubFromApp)
+		LockVersion: in.LockVersion, StartEpisode: in.StartEpisode, FollowNextSeason: in.FollowNextSeason, LibraryID: in.LibraryID,
+	}
+	if in.Schedule != nil {
+		input.Schedule = in.Schedule.schedule()
+	}
+	if in.FromTorrent != nil {
+		input.FromTorrent = &subscribe.FromTorrent{Site: in.FromTorrent.Site, TorrentID: in.FromTorrent.TorrentID, Title: in.FromTorrent.Title}
+	}
+	subscribe.FollowDefaults(&input)
+	sub, err := svc.CreateSubscription(r.Context(), input, models.MediaSubFromApp)
 	if err != nil {
 		appSubscribeError(w, err)
 		return
 	}
-	appJSON(w, appSubscription(subscribe.SubscriptionView{MediaSubscription: *sub}))
+	appJSON(w, s.appSubscriptionView(r, svc, sub))
+}
+
+// appSubscriptionView 是改动以后的订阅（带上定时；读不到进度时进度为空）。
+func (s *Server) appSubscriptionView(r *http.Request, svc *subscribe.Service, sub *models.MediaSubscription) AppSubscription {
+	if d, err := svc.Subscription(r.Context(), sub.ID); err == nil {
+		return appSubscription(d.SubscriptionView)
+	}
+	return appSubscription(subscribe.SubscriptionView{MediaSubscription: *sub, Schedule: subscribe.ScheduleOf(sub)})
 }
 
 // AppSubscriptionStatus 是 POST /subscriptions/{id}/status：active 开始（或接着）找，paused 暂停。
@@ -339,7 +422,7 @@ func (s *Server) appSubscriptionSetStatus(w http.ResponseWriter, r *http.Request
 		appSubscribeError(w, err)
 		return
 	}
-	appJSON(w, appSubscription(subscribe.SubscriptionView{MediaSubscription: *sub}))
+	appJSON(w, s.appSubscriptionView(r, svc, sub))
 }
 
 func (s *Server) appSubscriptionSearch(w http.ResponseWriter, r *http.Request) {

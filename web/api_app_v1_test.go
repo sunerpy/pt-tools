@@ -361,7 +361,8 @@ func TestAppAPI_MethodNotAllowed(t *testing.T) {
 		{http.MethodDelete, "/api/app/v1/meta", "GET"},
 		{http.MethodGet, "/api/app/v1/push", "POST"},
 		{http.MethodGet, "/api/app/v1/subscriptions/1/status", "POST"},
-		{http.MethodPut, "/api/app/v1/subscriptions/1", "DELETE, GET"},
+		{http.MethodPatch, "/api/app/v1/subscriptions/1", "DELETE, GET, PUT"},
+		{http.MethodPost, "/api/app/v1/subscriptions/1/episode-rules", "DELETE, GET, PUT"},
 		{http.MethodPatch, "/api/app/v1/subscriptions", "GET, POST"},
 	} {
 		w := e.do(appReq{method: c.method, path: c.path, bearer: read})

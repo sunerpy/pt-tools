@@ -34,6 +34,13 @@ func (s *Server) registerSubscribeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/media/subscriptions/{id}", s.auth(s.apiSubscriptionDelete))
 	mux.HandleFunc("POST /api/media/subscriptions/{id}/status", s.auth(s.apiSubscriptionStatus))
 	mux.HandleFunc("POST /api/media/subscriptions/{id}/search", s.auth(s.apiSubscriptionSearch))
+	mux.HandleFunc("GET /api/media/subscriptions/{id}/episodes", s.auth(s.apiSubscriptionEpisodes))
+	mux.HandleFunc("POST /api/media/subscriptions/{id}/episodes/{n}/skip", s.auth(s.apiSubscriptionEpisodeSkip))
+	mux.HandleFunc("POST /api/media/subscriptions/{id}/episodes/{n}/unlock", s.auth(s.apiSubscriptionEpisodeUnlock))
+	mux.HandleFunc("GET /api/media/subscriptions/{id}/runs", s.auth(s.apiSubscriptionRuns))
+	mux.HandleFunc("GET /api/media/subscriptions/{id}/episode-rules", s.auth(s.apiEpisodeRules))
+	mux.HandleFunc("PUT /api/media/subscriptions/{id}/episode-rules", s.auth(s.apiEpisodeRuleSave))
+	mux.HandleFunc("DELETE /api/media/subscriptions/{id}/episode-rules", s.auth(s.apiEpisodeRuleDelete))
 	mux.HandleFunc("GET /api/media/douban-sources", s.auth(s.apiDoubanSources))
 	mux.HandleFunc("POST /api/media/douban-sources", s.auth(s.apiDoubanSourceSave))
 	mux.HandleFunc("PUT /api/media/douban-sources/{id}", s.auth(s.apiDoubanSourceSave))
@@ -172,7 +179,8 @@ func (s *Server) apiSubscriptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// apiSubscriptionCreate handles POST /api/media/subscriptions
+// apiSubscriptionCreate handles POST /api/media/subscriptions：剧集没指定定时与版本锁时按追剧的默认设置（按播出时间、开着版本锁）。
+// 带 from_torrent 时从那个种子开始（要在各站点取种子并推送，时限同「立即搜索」）。
 func (s *Server) apiSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.subscribeService(w)
 	if !ok {
@@ -182,7 +190,10 @@ func (s *Server) apiSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrictBody(w, r, &in) {
 		return
 	}
-	got, err := svc.CreateSubscription(r.Context(), in, models.MediaSubFromManual)
+	subscribe.FollowDefaults(&in)
+	ctx, cancel := context.WithTimeout(r.Context(), subscribeSearchTimeout)
+	defer cancel()
+	got, err := svc.CreateSubscription(ctx, in, models.MediaSubFromManual)
 	if err != nil {
 		writeSubscribeError(w, err)
 		return
@@ -399,6 +410,190 @@ func (s *Server) apiMediaExplore(w http.ResponseWriter, r *http.Request) {
 		page = n
 	}
 	got, err := svc.Explore(r.Context(), q.Get("kind"), q.Get("list"), page, q.Get("q"))
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// episodeNumber 读路径里的集号。
+func episodeNumber(w http.ResponseWriter, r *http.Request) (int, bool) {
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil || n < 1 {
+		http.Error(w, "集号要是正整数", http.StatusBadRequest)
+		return 0, false
+	}
+	return n, true
+}
+
+// apiSubscriptionEpisodes handles GET /api/media/subscriptions/{id}/episodes：追剧每一集的情况。
+func (s *Server) apiSubscriptionEpisodes(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	got, err := svc.Episodes(r.Context(), id)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiSubscriptionEpisodeSkip handles POST /api/media/subscriptions/{id}/episodes/{n}/skip {skip: bool}：跳过或重新要这一集。
+func (s *Server) apiSubscriptionEpisodeSkip(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	n, ok := episodeNumber(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Skip *bool `json:"skip"`
+	}
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	if in.Skip == nil {
+		http.Error(w, "要给 skip（true 跳过、false 重新要）", http.StatusBadRequest)
+		return
+	}
+	got, err := svc.SkipEpisode(r.Context(), id, n, *in.Skip)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiSubscriptionEpisodeUnlock handles POST /api/media/subscriptions/{id}/episodes/{n}/unlock {unlock: bool}：这一集换版本（不受版本锁限制）。
+func (s *Server) apiSubscriptionEpisodeUnlock(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	n, ok := episodeNumber(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Unlock *bool `json:"unlock"`
+	}
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	if in.Unlock == nil {
+		http.Error(w, "要给 unlock（true 这一集换版本、false 恢复版本锁）", http.StatusBadRequest)
+		return
+	}
+	got, err := svc.UnlockEpisode(r.Context(), id, n, *in.Unlock)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiSubscriptionRuns handles GET /api/media/subscriptions/{id}/runs?limit=&offset=：运行记录（新的在前）。
+func (s *Server) apiSubscriptionRuns(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	limit, offset := 20, 0
+	q := r.URL.Query()
+	for _, v := range []struct {
+		name string
+		dst  *int
+		max  int
+	}{{"limit", &limit, 100}, {"offset", &offset, 100000}} {
+		if raw := q.Get(v.name); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 || n > v.max {
+				http.Error(w, v.name+" 不对", http.StatusBadRequest)
+				return
+			}
+			*v.dst = n
+		}
+	}
+	got, err := svc.Runs(r.Context(), id, limit, offset)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiEpisodeRules handles GET /api/media/subscriptions/{id}/episode-rules
+func (s *Server) apiEpisodeRules(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	got, err := svc.EpisodeRules(r.Context(), id)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiEpisodeRuleSave handles PUT /api/media/subscriptions/{id}/episode-rules：设一个制作组的集号规则（同组替换）。
+func (s *Server) apiEpisodeRuleSave(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in subscribe.EpisodeRuleInput
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	got, err := svc.SaveEpisodeRule(r.Context(), id, in)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiEpisodeRuleDelete handles DELETE /api/media/subscriptions/{id}/episode-rules?group=：删掉一个制作组的集号规则。
+func (s *Server) apiEpisodeRuleDelete(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	got, err := svc.DeleteEpisodeRule(r.Context(), id, r.URL.Query().Get("group"))
 	if err != nil {
 		writeSubscribeError(w, err)
 		return

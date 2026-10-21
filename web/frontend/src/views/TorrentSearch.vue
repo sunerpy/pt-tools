@@ -4,6 +4,7 @@ import {
   type DownloaderDirectory,
   downloadersApi,
   type DownloaderSetting,
+  mediaApi,
   type MultiSiteSearchRequest,
   searchApi,
   type SearchErrorItem,
@@ -12,9 +13,14 @@ import {
   type SiteCategoriesConfig,
   type SiteSearchParams,
   torrentPushApi,
+  type TMDBItem,
   type TorrentPushItem,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import SubscribeDialog, {
+  type FollowTorrent,
+  type SubscribeTarget,
+} from "@/components/media/SubscribeDialog.vue";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -994,6 +1000,56 @@ async function batchDownloadTorrents() {
   }
 }
 
+// ---- 一键追剧：先认出这个种子是哪部剧、哪一季，再打开追剧弹窗（带着这个种子） ----
+const followDialog = ref(false);
+const followTarget = ref<SubscribeTarget | null>(null);
+const followCandidates = ref<SubscribeTarget[]>([]);
+const followTorrent = ref<FollowTorrent | null>(null);
+const followSeason = ref<number | undefined>(undefined);
+const recognizing = ref<string | null>(null);
+
+const toTarget = (m: TMDBItem): SubscribeTarget => ({
+  kind: m.media_type,
+  tmdb_id: m.id,
+  title: m.title,
+  year: m.year,
+  poster_path: m.poster_path,
+});
+
+async function followShow(torrent: SearchTorrentItem) {
+  recognizing.value = rowKey(torrent);
+  try {
+    const res = await mediaApi.recognize({ title: torrent.title, subtitle: torrent.subtitle });
+    // 认出的条目在前，其余候选可以改选；只要剧集
+    const seen = new Set<number>();
+    const shows = [res.match, ...(res.candidates ?? [])].filter(
+      (m): m is TMDBItem =>
+        Boolean(m) && m!.media_type === "tv" && !seen.has(m!.id) && Boolean(seen.add(m!.id)),
+    );
+    if (!shows.length) {
+      ElMessage.warning(
+        res.error
+          ? `认不出这个种子：${res.error}`
+          : "认不出这个种子是哪部剧：可以先在「媒体识别」里纠正，或者去「探索」搜这部剧",
+      );
+      return;
+    }
+    followTarget.value = toTarget(shows[0]!);
+    followCandidates.value = shows.map(toTarget);
+    followTorrent.value = {
+      site: torrent.sourceSite,
+      torrent_id: torrent.id,
+      title: torrent.title,
+    };
+    followSeason.value = res.meta?.season || undefined;
+    followDialog.value = true;
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "识别失败");
+  } finally {
+    recognizing.value = null;
+  }
+}
+
 // 打开推送对话框（单个）
 function openPushDialog(torrent: SearchTorrentItem) {
   currentPushTorrent.value = torrent;
@@ -1723,7 +1779,7 @@ const footNote = computed(() => {
 
         <el-table-column
           label="操作"
-          width="132"
+          width="140"
           align="center"
           fixed="right"
           class-name="pt-cell-act">
@@ -1763,6 +1819,20 @@ const footNote = computed(() => {
                 @click="openPushDialog(row)">
                 <PtIcon name="upload" :size="15" />
               </el-button>
+            </el-tooltip>
+            <el-tooltip content="追剧：从这个种子开始追这部剧" placement="top">
+              <span class="act">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="追剧"
+                  :loading="recognizing === rowKey(row)"
+                  :data-testid="`ts-follow-${rowKey(row)}`"
+                  @click="followShow(row)">
+                  <PtIcon v-if="recognizing !== rowKey(row)" name="bookmark" :size="15" />
+                </el-button>
+              </span>
             </el-tooltip>
           </template>
         </el-table-column>
@@ -1844,6 +1914,14 @@ const footNote = computed(() => {
             </el-button>
             <el-button type="primary" size="small" @click="openPushDialog(torrent)">
               <PtIcon name="upload" :size="14" /><span>推送</span>
+            </el-button>
+            <el-button
+              size="small"
+              :loading="recognizing === rowKey(torrent)"
+              @click="followShow(torrent)">
+              <PtIcon v-if="recognizing !== rowKey(torrent)" name="bookmark" :size="14" /><span
+                >追剧</span
+              >
             </el-button>
           </template>
         </PtRowCard>
@@ -1960,6 +2038,14 @@ const footNote = computed(() => {
         <p class="hist__foot">存的是搜索条件（关键词、站点、排序、分类、仅免费），不含结果。</p>
       </PtPanel>
     </div>
+
+    <!-- 一键追剧：认出的剧集与季预先填好，带着选中的种子 -->
+    <SubscribeDialog
+      v-model="followDialog"
+      :target="followTarget"
+      :candidates="followCandidates"
+      :from-torrent="followTorrent"
+      :season="followSeason" />
 
     <!-- 单个推送对话框 -->
     <el-dialog

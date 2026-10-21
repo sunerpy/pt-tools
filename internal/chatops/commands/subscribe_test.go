@@ -12,11 +12,14 @@ import (
 )
 
 type fakeSubscribe struct {
-	found   []SubscribeCandidate
-	lines   []SubscribeLine
-	err     error
-	subbed  []string
-	keyword string
+	found    []SubscribeCandidate
+	lines    []SubscribeLine
+	runs     []RunLine
+	err      error
+	subbed   []string
+	followed []string
+	unlocked []string
+	keyword  string
 }
 
 func (f *fakeSubscribe) Search(_ context.Context, kw string) ([]SubscribeCandidate, error) {
@@ -33,6 +36,29 @@ func (f *fakeSubscribe) Subscribe(_ context.Context, kind string, id, season int
 }
 
 func (f *fakeSubscribe) List(context.Context) ([]SubscribeLine, error) { return f.lines, f.err }
+
+func (f *fakeSubscribe) Follow(_ context.Context, id, season int) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	f.followed = append(f.followed, itoa(id)+":"+itoa(season))
+	return "名字，按播出时间搜索", nil
+}
+
+func (f *fakeSubscribe) Runs(_ context.Context, id uint, limit int) (string, []RunLine, error) {
+	if f.err != nil {
+		return "", nil, f.err
+	}
+	return "名字#" + itoa(int(id)), f.runs[:min(limit, len(f.runs))], nil
+}
+
+func (f *fakeSubscribe) Unlock(_ context.Context, id uint, ep int) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	f.unlocked = append(f.unlocked, itoa(int(id))+":"+itoa(ep))
+	return "名字", nil
+}
 
 func itoa(n int) string {
 	return string(rune('0'+n/100%10)) + string(rune('0'+n/10%10)) + string(rune('0'+n%10))
@@ -119,11 +145,13 @@ func TestSubsList(t *testing.T) {
 	reply, err := handler(t, "subs")(context.Background(), nil, src)
 	require.NoError(t, err)
 	assert.Contains(t, reply.Text, "还没有订阅")
-	for range 25 {
-		fs.lines = append(fs.lines, SubscribeLine{Title: "最后生还者 第 2 季", Status: "在找", Progress: "已入库 1/3"})
+	for i := range 25 {
+		fs.lines = append(fs.lines, SubscribeLine{ID: uint(i + 1), Title: "最后生还者 第 2 季", Status: "在找", Progress: "已入库 1/3"})
 	}
+	fs.lines[0].Next = "10-22 20:00"
 	reply, err = handler(t, "subs")(context.Background(), nil, src)
 	require.NoError(t, err)
-	assert.Contains(t, reply.Text, "1. 最后生还者 第 2 季 · 在找 · 已入库 1/3")
+	assert.Contains(t, reply.Text, "#1 最后生还者 第 2 季 · 在找 · 已入库 1/3 · 下次 10-22 20:00\n")
+	assert.Contains(t, reply.Text, "#2 最后生还者 第 2 季 · 在找 · 已入库 1/3\n", "没有下次时间的不写")
 	assert.Contains(t, reply.Text, "还有 5 个")
 }

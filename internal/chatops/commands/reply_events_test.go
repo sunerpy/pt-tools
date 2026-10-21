@@ -175,9 +175,9 @@ func TestVersionAndHelpReplyEvents(t *testing.T) {
 func TestSubsReplyEvent(t *testing.T) {
 	lines := make([]SubscribeLine, 0, 22)
 	for i := range 22 {
-		lines = append(lines, SubscribeLine{Title: fmt.Sprintf("片%d", i), Status: "在找"})
+		lines = append(lines, SubscribeLine{ID: uint(i + 1), Title: fmt.Sprintf("片%d", i), Status: "在找"})
 	}
-	lines[0].Progress = "已入库 3/7"
+	lines[0].Progress, lines[0].Next = "已入库 3/7", "10-22 20:00"
 	setupSubscribe(t, &fakeSubscribe{lines: lines})
 	r := run(t, "subs")
 	f := eventOf(t, r, notify.EventReplySubs)
@@ -185,7 +185,7 @@ func TestSubsReplyEvent(t *testing.T) {
 	assert.Equal(t, int64(2), f["items_more"])
 	items := f["items"].([]any)
 	require.Len(t, items, maxSubLines)
-	assert.Equal(t, map[string]any{"title": "片0", "status": "在找", "progress": "已入库 3/7"}, items[0])
+	assert.Equal(t, map[string]any{"id": int64(1), "title": "片0", "status": "在找", "progress": "已入库 3/7", "next_search": "10-22 20:00"}, items[0])
 	assert.Contains(t, r.Text, "……还有 2 个")
 
 	setupSubscribe(t, &fakeSubscribe{})

@@ -85,6 +85,10 @@ type Notice struct {
 const (
 	NoticeDownloaded     = "subscribe_downloaded"
 	NoticeDoubanAbnormal = "douban_abnormal"
+	// 追剧（剧集按自己的定时搜索的）：下载了新的集、锁住的版本久等不到、连续几次没搜成
+	NoticeFollowFound   = "followshow_found"
+	NoticeFollowWaiting = "followshow_waiting"
+	NoticeFollowFailed  = "followshow_failed"
 )
 
 // Notifier 发通知（生产环境经监控通知投递器）。
@@ -124,6 +128,18 @@ type Service struct {
 	doubanMu   sync.Mutex
 	doubanBusy map[uint]bool
 
+	// seasonAt 记下每个追剧上次不读缓存地问 TMDB 这一季的时间
+	seasonMu sync.Mutex
+	seasonAt map[uint]time.Time
+	// dls 缓存下载器的种子列表（认领下载器里的种子用）
+	dls dlCache
+	// prunedAt 是上次清理运行记录的时间
+	pruneMu  sync.Mutex
+	prunedAt time.Time
+	// doneAt 记下每个完成的追剧上次看有没有新的集、下一季的时间
+	doneMu sync.Mutex
+	doneAt map[uint]time.Time
+
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -154,7 +170,10 @@ func New(cfg Config) *Service {
 	if cfg.DoubanBase == "" {
 		cfg.DoubanBase = "https://www.douban.com"
 	}
-	return &Service{cfg: cfg, offers: make(chan Candidate, offerQueue), cache: parseCache{m: map[string]parsed{}}, doubanBusy: map[uint]bool{}}
+	return &Service{
+		cfg: cfg, offers: make(chan Candidate, offerQueue), cache: parseCache{m: map[string]parsed{}}, doubanBusy: map[uint]bool{},
+		seasonAt: map[uint]time.Time{}, dls: dlCache{m: map[uint]dlList{}}, doneAt: map[uint]time.Time{},
+	}
 }
 
 // Offer 把 RSS 拉到的种子交给订阅（不阻塞；队列满时丢掉，主动搜索还会找到）。

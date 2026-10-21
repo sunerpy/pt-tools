@@ -94,6 +94,10 @@ type Config struct {
 	Bangumi metadata.BangumiAPI
 }
 
+// LibraryFor 是追剧指定的媒体库：按下载器里种子的编号找追剧（订阅）推送或认领的种子，回那个追剧的媒体库编号
+// （0 是没指定）。不是追剧的种子 found 为假；查不了时返回错误（这次整理不自动选库，稍后重试）。
+type LibraryFor func(ctx context.Context, downloaderID uint, hash string) (libraryID uint, found bool, err error)
+
 // Douban 在豆瓣上找条目（生产环境是 *douban.Client）。
 type Douban interface {
 	// Find 按名字与年份找同一部（剧集是同一季），没找到时返回 nil、nil
@@ -128,6 +132,23 @@ type Service struct {
 	scanAt, watchTick, watchAt time.Time
 	cancel                     context.CancelFunc
 	wg                         sync.WaitGroup
+
+	// libraryFor 是追剧指定的媒体库（订阅服务在整理服务之后建好，见 SetLibraryFor）
+	libraryMu  sync.RWMutex
+	libraryFor LibraryFor
+}
+
+// SetLibraryFor 接上追剧指定的媒体库的查询（为空时都按类型自动选库）。
+func (s *Service) SetLibraryFor(f LibraryFor) {
+	s.libraryMu.Lock()
+	s.libraryFor = f
+	s.libraryMu.Unlock()
+}
+
+func (s *Service) followLibrary() LibraryFor {
+	s.libraryMu.RLock()
+	defer s.libraryMu.RUnlock()
+	return s.libraryFor
 }
 
 // New 建一个服务（还没开始后台循环，见 Start）。

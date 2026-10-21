@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -336,7 +337,8 @@ func (s *Service) profileFor(ctx context.Context, sub *models.MediaSubscription,
 
 // ---- 订阅 ----
 
-// SubscriptionInput 是新建或修改订阅的内容。新建时要条目（类型、TMDB 编号，剧集还要季）；修改时这几项不能改。
+// SubscriptionInput 是新建或修改订阅的内容。新建时要条目（类型、TMDB 编号；剧集的季可以省略或为 0，取最新一季）；
+// 修改时这几项不能改。
 type SubscriptionInput struct {
 	MediaType    string   `json:"media_type"`
 	TMDBID       int      `json:"tmdb_id"`
@@ -350,14 +352,63 @@ type SubscriptionInput struct {
 	Upgrade      bool     `json:"upgrade"`
 	// Pending 为真时建成待确认
 	Pending bool `json:"pending"`
+
+	// 以下是追剧的设置：不传时新建用默认值（见 FollowDefaults），修改时不变。
+
+	// Schedule 是主动搜索的定时（kind 为空沿用全局间隔）
+	Schedule *Schedule `json:"schedule,omitempty"`
+	// LockVersion 是版本锁；LockGroup、LockResolution 改锁住的版本（都给空串是清掉，按之后的版本重新定）
+	LockVersion    *bool   `json:"lock_version,omitempty"`
+	LockGroup      *string `json:"lock_group,omitempty"`
+	LockResolution *string `json:"lock_resolution,omitempty"`
+	// StartEpisode 是从第几集开始追（0 与 1 是整季）
+	StartEpisode     *int  `json:"start_episode,omitempty"`
+	FollowNextSeason *bool `json:"follow_next_season,omitempty"`
+	// LibraryID 是整理进哪个媒体库（0 按类型自动选）
+	LibraryID *uint `json:"library_id,omitempty"`
+	// TotalEpisodes 是手动填的这一季的集数：大于 0 时以它为准，0 改回按 TMDB
+	TotalEpisodes *int `json:"total_episodes,omitempty"`
+	// FromTorrent 是「从这个种子开始追」：只在新建时用
+	FromTorrent *FromTorrent `json:"from_torrent,omitempty"`
 }
+
+// FromTorrent 是一键追剧时选中的站点上的种子。Title 可选，只在搜索缓存里找不到这个种子时用作在这个站点搜索的关键字，
+// 不参与任何判断（编号要完全相同）。
+type FromTorrent struct {
+	Site      string `json:"site"`
+	TorrentID string `json:"torrent_id"`
+	Title     string `json:"title,omitempty"`
+}
+
+// FollowDefaults 是新建追剧的默认设置：剧集没有指定时按播出时间搜索、开着版本锁（同组同分辨率）。电影不变。
+// 网页、App API 与 ChatOps 的 /follow 新建时用它；豆瓣想看与 /sub 建的保持原来的行为。
+func FollowDefaults(in *SubscriptionInput) {
+	if in.MediaType != models.MediaKindTV {
+		return
+	}
+	if in.Schedule == nil {
+		in.Schedule = &Schedule{Kind: models.MediaScheduleAirtime}
+	}
+	if in.LockVersion == nil {
+		on := true
+		in.LockVersion = &on
+	}
+}
+
+// maxEpisodes 是一季最多几集（起始集与手动集数的上限）。
+const maxEpisodes = 2000
 
 // SubscriptionView 是订阅加上进度与已下载的种子数。
 type SubscriptionView struct {
 	models.MediaSubscription
 	Sites    []string  `json:"sites"`
+	Schedule Schedule  `json:"schedule"`
 	Progress *Progress `json:"progress,omitempty"`
 	Torrents int       `json:"torrents"`
+}
+
+func viewOf(row models.MediaSubscription) SubscriptionView {
+	return SubscriptionView{MediaSubscription: row, Sites: orEmpty(decodeList(row.Sites)), Schedule: scheduleOf(&row)}
 }
 
 // SubscriptionDetail 是订阅详情：订阅、进度与下载过的种子。
@@ -379,6 +430,36 @@ func (in SubscriptionInput) check(s *Service, ctx context.Context) error {
 	}
 	if len(in.SavePath) > 1024 {
 		return fmt.Errorf("%w: 保存目录太长", ErrInvalid)
+	}
+	if in.StartEpisode != nil && (*in.StartEpisode < 0 || *in.StartEpisode > maxEpisodes) {
+		return fmt.Errorf("%w: 起始集要在 0 到 %d 之间", ErrInvalid, maxEpisodes)
+	}
+	if in.TotalEpisodes != nil && (*in.TotalEpisodes < 0 || *in.TotalEpisodes > maxEpisodes) {
+		return fmt.Errorf("%w: 集数要在 0 到 %d 之间", ErrInvalid, maxEpisodes)
+	}
+	if (in.LockGroup != nil && utf8.RuneCountInString(*in.LockGroup) > 64) || (in.LockResolution != nil && len(*in.LockResolution) > 16) {
+		return fmt.Errorf("%w: 锁住的版本太长", ErrInvalid)
+	}
+	if in.FromTorrent != nil {
+		f := in.FromTorrent
+		if strings.TrimSpace(f.Site) == "" || strings.TrimSpace(f.TorrentID) == "" || len(f.Site) > 64 || len(f.TorrentID) > 128 || utf8.RuneCountInString(f.Title) > 512 {
+			return fmt.Errorf("%w: from_torrent 要有站点与种子编号", ErrInvalid)
+		}
+	}
+	return nil
+}
+
+// checkLibrary 检查指定的媒体库：要存在、启用、类型与条目相同。
+func (s *Service) checkLibrary(ctx context.Context, kind string, id uint) error {
+	if id == 0 {
+		return nil
+	}
+	var lib models.MediaLibrary
+	if err := s.cfg.DB.WithContext(ctx).Where("id = ?", id).Limit(1).Find(&lib).Error; err != nil {
+		return fmt.Errorf("读取媒体库失败: %w", err)
+	}
+	if lib.ID == 0 || !lib.Enabled || lib.Kind != kind {
+		return fmt.Errorf("%w: 指定的媒体库不存在、没有启用，或类型与条目不同", ErrInvalid)
 	}
 	return nil
 }
@@ -440,6 +521,36 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 	if in.Pending {
 		row.Status = models.MediaSubPending
 	}
+	if in.Schedule != nil {
+		sc, err := in.Schedule.normalize(in.MediaType)
+		if err != nil {
+			return nil, err
+		}
+		sc.apply(&row)
+	}
+	if in.MediaType == models.MediaKindTV {
+		if in.LockVersion != nil {
+			row.LockVersion = *in.LockVersion
+		}
+		if in.LockGroup != nil {
+			row.LockGroup = strings.TrimSpace(*in.LockGroup)
+		}
+		if in.LockResolution != nil {
+			row.LockResolution = strings.TrimSpace(*in.LockResolution)
+		}
+		if in.StartEpisode != nil {
+			row.StartEpisode = *in.StartEpisode
+		}
+		if in.FollowNextSeason != nil {
+			row.FollowNextSeason = *in.FollowNextSeason
+		}
+	}
+	if in.LibraryID != nil {
+		if err := s.checkLibrary(ctx, in.MediaType, *in.LibraryID); err != nil {
+			return nil, err
+		}
+		row.LibraryID = *in.LibraryID
+	}
 	if titles, err := c.Titles(ctx, in.MediaType, in.TMDBID); err == nil {
 		row.Aliases = encodeList(titles)
 	}
@@ -456,6 +567,9 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 			return nil, fmt.Errorf("取 TMDB 季详情失败: %w", err)
 		}
 		row.TotalEpisodes = len(season.Episodes)
+		if in.TotalEpisodes != nil && *in.TotalEpisodes > 0 {
+			row.TotalEpisodes, row.TotalEpisodesManual = *in.TotalEpisodes, true
+		}
 		if y := yearOf(season.AirDate); y > 0 {
 			row.Year = y // 这一季的年份（种子标题里写的多半是它）
 		}
@@ -468,6 +582,7 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		}
 		return nil, fmt.Errorf("保存订阅失败: %w", err)
 	}
+	s.afterCreate(ctx, &row, in)
 	return &row, nil
 }
 
@@ -484,6 +599,9 @@ func (s *Service) UpdateSubscription(ctx context.Context, id uint, in Subscripti
 	if err != nil {
 		return nil, err
 	}
+	if in.FromTorrent != nil {
+		return nil, fmt.Errorf("%w: from_torrent 只在新建时用", ErrInvalid)
+	}
 	upd := map[string]any{
 		"profile_id": in.ProfileID, "sites": encodeList(sites), "downloader_id": in.DownloaderID,
 		"category": strings.TrimSpace(in.Category), "tags": strings.TrimSpace(in.Tags), "save_path": strings.TrimSpace(in.SavePath),
@@ -494,11 +612,90 @@ func (s *Service) UpdateSubscription(ctx context.Context, id uint, in Subscripti
 		upd["status"] = models.MediaSubActive
 		upd["next_search_at"] = s.cfg.Now()
 	}
+	// 只看真的改了的：改了版本锁、起始集或集数时重建台账、尽快搜一次（新的条件可能对得上了）；
+	// 只改了定时时重建台账、按新的定时排下次搜索
+	searchSoon, rescheduled := false, false
+	if in.Schedule != nil {
+		var sc Schedule
+		if sc, err = in.Schedule.normalize(row.MediaType); err != nil {
+			return nil, err
+		}
+		maps.Copy(upd, sc.columns())
+		rescheduled = !sameSchedule(sc, scheduleOf(&row))
+	}
+	if in.LibraryID != nil {
+		if err = s.checkLibrary(ctx, row.MediaType, *in.LibraryID); err != nil {
+			return nil, err
+		}
+		upd["library_id"] = *in.LibraryID
+	}
+	if row.MediaType == models.MediaKindTV {
+		if in.LockVersion != nil {
+			upd["lock_version"] = *in.LockVersion
+			searchSoon = searchSoon || *in.LockVersion != row.LockVersion
+		}
+		if in.LockGroup != nil {
+			g := strings.TrimSpace(*in.LockGroup)
+			upd["lock_group"] = g
+			searchSoon = searchSoon || g != row.LockGroup
+		}
+		if in.LockResolution != nil {
+			r := strings.TrimSpace(*in.LockResolution)
+			upd["lock_resolution"] = r
+			searchSoon = searchSoon || r != row.LockResolution
+		}
+		if in.StartEpisode != nil {
+			upd["start_episode"] = *in.StartEpisode
+			// 0 与 1 都是整季
+			searchSoon = searchSoon || max(*in.StartEpisode, 1) != max(row.StartEpisode, 1)
+		}
+		if in.FollowNextSeason != nil {
+			upd["follow_next_season"] = *in.FollowNextSeason
+		}
+		if in.TotalEpisodes != nil {
+			if *in.TotalEpisodes > 0 {
+				upd["total_episodes"], upd["total_episodes_manual"] = *in.TotalEpisodes, true
+				searchSoon = searchSoon || !row.TotalEpisodesManual || *in.TotalEpisodes != row.TotalEpisodes
+			} else {
+				upd["total_episodes_manual"] = false
+				searchSoon = searchSoon || row.TotalEpisodesManual
+			}
+		}
+	}
+	followChanged := searchSoon || rescheduled
+	if searchSoon && row.Status == models.MediaSubActive {
+		upd["next_search_at"] = s.cfg.Now()
+	}
 	if err = s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", id).Updates(upd).Error; err != nil {
 		return nil, fmt.Errorf("保存订阅失败: %w", err)
 	}
+	if row, err = s.subRow(ctx, id); err != nil || !followChanged {
+		return &row, err
+	}
+	set, _ := s.Settings(ctx)
+	var lg *ledger
+	if row.MediaType == models.MediaKindTV {
+		s.mu.Lock()
+		lg, _ = s.rebuildLedger(ctx, &row, rebuildOpts{set: set})
+		s.mu.Unlock()
+	}
+	if !searchSoon && row.Status == models.MediaSubActive {
+		s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", id).
+			Update("next_search_at", s.nextSearch(&row, set, lg, s.cfg.Now()))
+	}
+	if row, err = s.subRow(ctx, id); err != nil {
+		return &row, err
+	}
+	// 运行记录里看得到什么时候改了怎么搜
+	s.manualRun(ctx, &row, "改了设置："+describe(&row))
 	row, err = s.subRow(ctx, id)
 	return &row, err
+}
+
+// sameSchedule 报告两个定时是不是一样（星期几、几号按集合比）。
+func sameSchedule(a, b Schedule) bool {
+	return a.Kind == b.Kind && a.At == b.At && a.Every == b.Every && slices.Equal(a.Days, b.Days) &&
+		a.AirDelayHours == b.AirDelayHours && a.AirRetryHours == b.AirRetryHours && a.AirWindowDays == b.AirWindowDays
 }
 
 // SetStatus 暂停、恢复或确认订阅：status 要是 active 或 paused。
@@ -529,6 +726,11 @@ func (s *Service) DeleteSubscription(ctx context.Context, id uint) error {
 	return s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("subscription_id = ?", id).Delete(&models.MediaSubscriptionTorrent{}).Error; err != nil {
 			return fmt.Errorf("删除订阅的种子记录失败: %w", err)
+		}
+		for _, m := range []any{&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{}} {
+			if err := tx.Where("subscription_id = ?", id).Delete(m).Error; err != nil {
+				return fmt.Errorf("删除追剧的台账与记录失败: %w", err)
+			}
 		}
 		// 豆瓣想看建的订阅：条目改成「订阅已删除」（之后拉取也不会再建）
 		if err := tx.Model(&models.MediaDoubanItem{}).Where("subscription_id = ?", id).
@@ -581,7 +783,8 @@ func (s *Service) Subscriptions(ctx context.Context, q SubscriptionQuery) ([]Sub
 	}
 	out := make([]SubscriptionView, 0, len(rows))
 	for i := range rows {
-		v := SubscriptionView{MediaSubscription: rows[i], Sites: orEmpty(decodeList(rows[i].Sites)), Torrents: counts[rows[i].ID]}
+		v := viewOf(rows[i])
+		v.Torrents = counts[rows[i].ID]
 		if p, err := s.progress(ctx, &rows[i], false); err == nil {
 			v.Progress = p
 		}
@@ -600,7 +803,9 @@ func (s *Service) Subscription(ctx context.Context, id uint) (*SubscriptionDetai
 	if err := s.cfg.DB.WithContext(ctx).Where("subscription_id = ?", id).Order("id DESC").Find(&torrents).Error; err != nil {
 		return nil, fmt.Errorf("读取订阅的种子失败: %w", err)
 	}
-	d := &SubscriptionDetail{SubscriptionView: SubscriptionView{MediaSubscription: row, Sites: orEmpty(decodeList(row.Sites)), Torrents: len(torrents)}, TorrentList: orEmpty(torrents)}
+	v := viewOf(row)
+	v.Torrents = len(torrents)
+	d := &SubscriptionDetail{SubscriptionView: v, TorrentList: orEmpty(torrents)}
 	if p, err := s.progress(ctx, &row, true); err == nil {
 		d.Progress = p
 	}

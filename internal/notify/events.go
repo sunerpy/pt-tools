@@ -13,6 +13,9 @@ const (
 	EventRSSDigest           = "rss.digest"
 	EventSubscribeDownloaded = "subscribe.downloaded"
 	EventDoubanFailed        = "subscribe.douban_failed"
+	EventFollowFound         = "media.followshow.found"
+	EventFollowWaiting       = "media.followshow.waiting"
+	EventFollowFailed        = "media.followshow.failed"
 	EventMediaOrganized      = "media.organized"
 	EventLoginExpiring       = "site.login_expiring"
 	EventProbeFailed         = "site.probe_failed"
@@ -158,6 +161,45 @@ var notifyEvents = []EventSpec{
 		},
 		SampleTitle: "豆瓣想看拉取失败",
 		SampleText:  "我的豆瓣：连续 3 次没拉到（豆瓣返回 403），之后按退避继续重试",
+	},
+	{
+		Type: EventFollowFound, Name: "追剧更新", Desc: "追剧找到了新的集并推送到下载器",
+		Vars: []Var{
+			{Key: "subscription", Type: VarString, Desc: "追剧（带年份与季）", Sample: "现在就出发 (2023) 第 4 季"},
+			{Key: "season", Type: VarInt, Desc: "季", Sample: int64(4)},
+			{Key: "episodes", Type: VarString, Desc: "这次下的集（第 3 集、第 3–5 集、整季）", Sample: "第 3 集"},
+			{Key: "torrent_title", Type: VarString, Desc: "种子标题", Sample: "Natural.High.S04E03.2023.1080p.TX.WEB-DL.H.264.DDP2.0-HHWEB"},
+			{Key: "site", Type: VarString, Desc: "站点", Sample: "mteam"},
+			{Key: "quality", Type: VarString, Desc: "质量（分辨率、来源、编码）", Sample: "1080p WEB-DL H.264"},
+			{Key: "version", Type: VarString, Desc: "锁住的版本（制作组与分辨率；没开版本锁时是空）", Sample: "HHWEB 1080p"},
+			{Key: "poster", Type: VarString, Desc: "海报地址", Sample: "https://image.tmdb.org/t/p/w500/fake.jpg"},
+		},
+		SampleTitle: "追剧更新：现在就出发 (2023) 第 4 季",
+		SampleText:  "第 3 集\n种子：Natural.High.S04E03.2023.1080p.TX.WEB-DL.H.264.DDP2.0-HHWEB\n站点：mteam\n质量：1080p WEB-DL H.264\n版本：HHWEB 1080p",
+	},
+	{
+		Type: EventFollowWaiting, Name: "追剧等版本", Desc: "追剧锁住的版本，播出很久了还没有",
+		Vars: []Var{
+			{Key: "subscription", Type: VarString, Desc: "追剧（带年份与季）", Sample: "现在就出发 (2023) 第 4 季"},
+			{Key: "subscription_id", Type: VarInt, Desc: "追剧的编号（ChatOps 的 /unlock 要用）", Sample: int64(12)},
+			{Key: "season", Type: VarInt, Desc: "季", Sample: int64(4)},
+			{Key: "episodes", Type: VarString, Desc: "在等的集", Sample: "E05"},
+			{Key: "version", Type: VarString, Desc: "锁住的版本（制作组与分辨率）", Sample: "HHWEB 1080p"},
+			{Key: "days", Type: VarInt, Desc: "最早的那一集播出几天了", Sample: int64(7)},
+		},
+		SampleTitle: "追剧等版本：现在就出发 (2023) 第 4 季",
+		SampleText:  "E05 播出 7 天了，还没有 HHWEB 1080p 的版本，会接着等。要这一集换别的版本：/unlock 12 5",
+	},
+	{
+		Type: EventFollowFailed, Name: "追剧出错", Desc: "追剧连续几次没有搜成",
+		Vars: []Var{
+			{Key: "subscription", Type: VarString, Desc: "追剧（带年份与季）", Sample: "现在就出发 (2023) 第 4 季"},
+			{Key: "season", Type: VarInt, Desc: "季", Sample: int64(4)},
+			{Key: "fails", Type: VarInt, Desc: "连续失败次数", Sample: int64(3)},
+			{Key: "error", Type: VarString, Desc: "最近一次的结果", Sample: "搜索「Natural High S04」失败：站点超时"},
+		},
+		SampleTitle: "追剧出错：现在就出发 (2023) 第 4 季",
+		SampleText:  "连续 3 次没有搜成：搜索「Natural High S04」失败：站点超时",
 	},
 	{
 		Type: EventMediaOrganized, Name: "入库", Desc: "下载完的电影或剧集整理进了媒体库",
