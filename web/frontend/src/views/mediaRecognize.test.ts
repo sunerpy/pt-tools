@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /*
- * 钉子：媒体识别页。设置里 API Key 只在填了时才发出，清除要确认；识别结果显示解析出的各项、匹配条目与来源、
- * 候选；选候选或填编号纠正后重新识别；TMDB 出错时写明原因；识别词与纠正的增删改。
+ * 钉子：媒体识别页。设置里 API Key 只在填了时才发出，清除要确认；刮削的其它来源（Fanart.tv、OMDb）的 Key 也是；
+ * 识别结果显示解析出的各项、匹配条目与来源、候选；选候选或填编号纠正后重新识别；TMDB 出错时写明原因；识别词与纠正的增删改。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   settings: vi.fn(),
   saveSettings: vi.fn(),
   testTMDB: vi.fn(),
+  testSource: vi.fn(),
   recognize: vi.fn(),
   overrides: vi.fn(),
   setOverride: vi.fn(),
@@ -112,6 +113,7 @@ async function mountPage(
     builtinKey?: boolean;
     api?: string;
     image?: string;
+    fanart?: boolean;
   } = {},
 ) {
   api.settings.mockResolvedValue({
@@ -122,6 +124,9 @@ async function mountPage(
     proxy_url: "",
     api_base_url: opts.api ?? "",
     image_base_url: opts.image ?? "",
+    has_fanart_key: opts.fanart ?? false,
+    has_fanart_client_key: false,
+    has_omdb_key: false,
   });
   api.overrides.mockResolvedValue([]);
   api.words.mockResolvedValue([]);
@@ -193,6 +198,55 @@ describe("媒体识别", () => {
     await mountPage({ hasKey: true });
     q("media-test")!.click();
     await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("TMDB API Key 无效"));
+  });
+
+  it("刮削的其它来源：只发填了的 Key（不带 TMDB 那边的修改），测试与清除", async () => {
+    await mountPage();
+    expect((q("media-test-fanart") as HTMLButtonElement).disabled, "没填 Key 不能测试").toBe(true);
+    expect(q("media-clear-fanart")).toBeNull();
+    fill("media-proxy", "http://changed:1");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
+      language: "zh-CN",
+      proxy_url: "",
+      has_fanart_key: true,
+      has_fanart_client_key: false,
+      has_omdb_key: true,
+    });
+    fill("media-fanart-key", " fanartproject0123 ");
+    fill("media-omdb-key", "omdbkey1");
+    q("media-sources-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      language: "zh-CN",
+      fanart_api_key: "fanartproject0123",
+      omdb_api_key: "omdbkey1",
+    });
+    await flush();
+    expect(inputOf("media-fanart-key").value, "保存后清空，不回显").toBe("");
+    expect(inputOf("media-proxy").value, "TMDB 那边没保存的修改留着").toBe("http://changed:1");
+    expect((q("media-test-fanart") as HTMLButtonElement).disabled).toBe(false);
+
+    api.testSource.mockRejectedValue(new Error("Fanart.tv API Key 无效"));
+    q("media-test-fanart")!.click();
+    await vi.waitFor(() => expect(api.testSource).toHaveBeenCalledWith("fanart"));
+    await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("Fanart.tv API Key 无效"));
+    api.testSource.mockResolvedValue({ ok: true });
+    q("media-test-omdb")!.click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("OMDb 连接正常"));
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.saveSettings.mockResolvedValue({
+      language: "zh-CN",
+      key_source: "none",
+      has_omdb_key: true,
+    });
+    q("media-clear-fanart")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(2));
+    expect(api.saveSettings.mock.calls[1]![0]).toEqual({ language: "zh-CN", fanart_api_key: "" });
+    expect(ui.confirm.mock.calls[0]![1]).toBe("清除 Fanart.tv 项目的 API Key");
   });
 
   it("设置：内置 Key —— 不填也能测试连接；清除自己的 Key 改用内置的；换了接口地址时写明用不了内置的", async () => {

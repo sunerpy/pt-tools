@@ -50,6 +50,7 @@ func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/media/servers/test", s.auth(s.apiMediaServerTest))
 	mux.HandleFunc("GET /api/media/history", s.auth(s.apiMediaHistory))
 	mux.HandleFunc("POST /api/media/history/{id}/retry", s.auth(s.apiMediaHistoryRetry))
+	mux.HandleFunc("POST /api/media/history/{id}/scrape", s.auth(s.apiMediaHistoryScrape))
 	mux.HandleFunc("DELETE /api/media/history/{id}", s.auth(s.apiMediaHistoryDelete))
 }
 
@@ -507,6 +508,26 @@ func (s *Server) apiMediaHistoryRetry(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
 	defer cancel()
 	got, err := svc.Retry(ctx, id)
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiMediaHistoryScrape handles POST /api/media/history/{id}/scrape：重新刮削这条记录所在的电影或剧集
+func (s *Server) apiMediaHistoryScrape(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	got, err := svc.Rescrape(ctx, id)
 	if err != nil {
 		writeOrganizeError(w, err)
 		return

@@ -8,9 +8,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
+	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -192,8 +192,6 @@ func (s *Service) Retire(ctx context.Context, id uint, reason string) ([]string,
 	return kept, nil
 }
 
-var seasonPosterRe = regexp.MustCompile(`^season(\d+|-specials)-poster\.jpg$`)
-
 // fileIDOf 读文件编号（测试里换成会出错的）。
 var fileIDOf = transfer.FileID
 
@@ -203,14 +201,8 @@ var removeIfOurs = transfer.RemoveIfOurs
 // transferTemp 把替换用的新文件放到临时名（测试里换成会撞上的）。
 var transferTemp = transfer.Transfer
 
-// isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、Logo、tvshow.nfo、season.nfo、季海报）。
-func isDirArtifact(name string) bool {
-	switch name {
-	case "poster.jpg", "fanart.jpg", "clearlogo.png", "tvshow.nfo", "season.nfo":
-		return true
-	}
-	return seasonPosterRe.MatchString(name)
-}
+// isDirArtifact 报告文件名是不是刮削写在目录里、几个视频共用的文件（见 scrape.IsDirArtifact）。
+func isDirArtifact(name string) bool { return scrape.IsDirArtifact(name) }
 
 // hasVideo 报告目录里（含子目录）还有没有视频文件。读不了目录时当作有。
 func hasVideo(dir string) bool {

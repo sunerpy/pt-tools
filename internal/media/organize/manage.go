@@ -14,6 +14,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/media/metadata"
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/server"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
@@ -30,9 +31,11 @@ const (
 // LibraryView 是给界面看的媒体库：带上实际用的模板与示例渲染的结果，以及刮削要写的内容（没选过时是默认的那几项）。
 type LibraryView struct {
 	models.MediaLibrary
-	ScrapeItems       []string `json:"scrape_items"`
-	EffectiveTemplate string   `json:"effective_template"`
-	Preview           string   `json:"preview"`
+	ScrapeItems []string `json:"scrape_items"`
+	// ScrapeSources 是每一项的数据来源（空串是 TMDB；旧版本选了豆瓣的是简介与评分都用豆瓣）
+	ScrapeSources     metadata.Sources `json:"scrape_sources"`
+	EffectiveTemplate string           `json:"effective_template"`
+	Preview           string           `json:"preview"`
 }
 
 // LibraryInput 是新建或修改媒体库的请求。
@@ -49,8 +52,10 @@ type LibraryInput struct {
 	ScrapeItems []string `json:"scrape_items"`
 	// ScrapeImageLang 是海报与 Logo 优先用的语言（scrape.ImageLangs）
 	ScrapeImageLang string `json:"scrape_image_lang"`
-	// ScrapeSource 是 NFO 里简介与评分的来源（scrape.Sources）
+	// ScrapeSource 是旧版本的「简介与评分」（scrape.Sources）：不带 ScrapeSources 时按它，douban 是简介与评分都用豆瓣
 	ScrapeSource string `json:"scrape_source"`
+	// ScrapeSources 是每一项的数据来源（简介、评分、每一集、图片；空串或 tmdb 是 TMDB，见 metadata.Sources）
+	ScrapeSources *metadata.Sources `json:"scrape_sources,omitempty"`
 	// ClassifyDir 为真时按二级分类放进库目录下的分类目录
 	ClassifyDir bool `json:"classify_dir"`
 	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办（OverwriteNever、OverwriteLarger）
@@ -74,7 +79,10 @@ func effectiveTemplate(l models.MediaLibrary) string {
 }
 
 func viewLibrary(l models.MediaLibrary) LibraryView {
-	v := LibraryView{MediaLibrary: l, ScrapeItems: scrape.ParseItems(l.ScrapeItems).List(), EffectiveTemplate: effectiveTemplate(l)}
+	v := LibraryView{
+		MediaLibrary: l, ScrapeItems: scrape.ParseItems(l.ScrapeItems).List(), EffectiveTemplate: effectiveTemplate(l),
+		ScrapeSources: metadata.ParseSources(l.ScrapeSources, l.ScrapeSource).ForKind(l.Kind),
+	}
 	v.Preview, _ = transfer.Check(v.EffectiveTemplate, l.Kind)
 	return v
 }
@@ -142,13 +150,28 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 	if !slices.Contains(scrape.Sources, source) {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 简介与评分的来源要选 douban 或留空（TMDB）", ErrInvalid)
 	}
+	src := metadata.ParseSources("", source)
+	if in.ScrapeSources != nil {
+		src = in.ScrapeSources.Clean()
+	}
+	src = src.ForKind(in.Kind)
+	sources, err := src.Normalize()
+	if err != nil {
+		return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	// 旧版本只认 ScrapeSource：简介与评分都用豆瓣时也写上，换回旧版本时照样用豆瓣
+	source = ""
+	if src.Plot == metadata.SourceDouban && src.Rating == metadata.SourceDouban {
+		source = scrape.SourceDouban
+	}
 	overwrite := strings.TrimSpace(in.OverwriteMode)
 	if overwrite != OverwriteNever && overwrite != OverwriteLarger {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 同名文件要选 larger（新文件更大时替换）或留空（不替换）", ErrInvalid)
 	}
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
-		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang, ScrapeSource: source,
+		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
+		ScrapeSource: source, ScrapeSources: sources,
 		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, Enabled: in.Enabled,
 	}, nil
 }
@@ -207,6 +230,7 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 	}
 	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(
 		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang", "scrape_source",
+		"scrape_sources",
 		"classify_dir", "overwrite_mode", "enabled", "updated_at",
 	).Updates(&row)
 	if res.Error != nil {

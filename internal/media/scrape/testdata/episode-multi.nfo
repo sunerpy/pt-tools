@@ -7,7 +7,16 @@
   <plot>……</plot>
   <aired>2023-01-15</aired>
   <runtime>81</runtime>
+  <ratings>
+    <rating name="themoviedb" max="10" default="true">
+      <value>8.2</value>
+      <votes>120</votes>
+    </rating>
+  </ratings>
   <uniqueid type="tmdb" default="true">2181581</uniqueid>
+  <director>Craig Mazin</director>
+  <credits>Craig Mazin</credits>
+  <credits>Neil Druckmann</credits>
 </episodedetails>
 <episodedetails>
   <title>感染</title>

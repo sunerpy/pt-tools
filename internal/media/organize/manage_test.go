@@ -141,7 +141,7 @@ func TestLibraryScrapeItems(t *testing.T) {
 	assert.Equal(t, scrape.DefaultItems, upd.ScrapeItems)
 
 	for _, bad := range []LibraryInput{
-		{Name: "x", Kind: "movie", Path: e.movies, ScrapeItems: []string{"banner"}},
+		{Name: "x", Kind: "movie", Path: e.movies, ScrapeItems: []string{"trailer"}},
 		{Name: "x", Kind: "movie", Path: e.movies, Scrape: true, ScrapeItems: []string{}},
 		{Name: "x", Kind: "movie", Path: e.movies, Scrape: true, ScrapeItems: []string{"season_poster", "thumb"}},
 		{Name: "x", Kind: "movie", Path: e.movies, ScrapeImageLang: "fr"},

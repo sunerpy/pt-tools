@@ -3,13 +3,14 @@ import type {
   ClassifyRule,
   MediaHistoryItem,
   MediaImageLang,
-  MediaScrapeSource,
   MediaKind,
   MediaMeta,
   MediaMode,
   MediaOverwriteMode,
   MediaRecognizeResult,
   MediaScrapeItem,
+  MediaScrapeSources,
+  MediaScrapeStatus,
   MediaServerKind,
   MediaTransferStatus,
   MediaWordKind,
@@ -164,22 +165,47 @@ export function modeLabel(mode?: string): string {
   return MEDIA_MODES.find((m) => m.value === (mode || "hardlink"))?.label ?? mode ?? "";
 }
 
-/** 刮削内容（和后端 scrape.AllItems 一致，界面上的顺序）；tvOnly 的只有剧集有 */
+/**
+ * 刮削内容（和后端 scrape.AllItems 一致，界面上的顺序）：tvOnly 的只有剧集有，movieOnly 的只有电影有；
+ * fanartOnly 的只有 Fanart.tv 有，要在「媒体识别」里填它的 API Key 才写
+ */
 export const SCRAPE_ITEMS: readonly {
   value: MediaScrapeItem;
   label: string;
   file: string;
   tvOnly?: boolean;
+  movieOnly?: boolean;
+  fanartOnly?: boolean;
 }[] = [
   { value: "nfo", label: "NFO", file: "电影、剧集、季与每一集的 .nfo" },
   { value: "poster", label: "海报", file: "poster.jpg" },
   { value: "fanart", label: "背景图", file: "fanart.jpg" },
   { value: "logo", label: "Logo", file: "clearlogo.png" },
+  {
+    value: "clearart",
+    label: "Clearart",
+    file: "clearart.png（只有 Fanart.tv 有）",
+    fanartOnly: true,
+  },
+  { value: "banner", label: "横幅", file: "banner.jpg（只有 Fanart.tv 有）", fanartOnly: true },
+  {
+    value: "landscape",
+    label: "横版海报",
+    file: "landscape.jpg（只有 Fanart.tv 有）",
+    fanartOnly: true,
+  },
+  {
+    value: "discart",
+    label: "碟片图",
+    file: "discart.png（只有 Fanart.tv 有）",
+    movieOnly: true,
+    fanartOnly: true,
+  },
   { value: "season_poster", label: "季海报", file: "season01-poster.jpg", tvOnly: true },
   { value: "thumb", label: "集截图", file: "<文件名>-thumb.jpg", tvOnly: true },
 ];
 
-/** 没选过刮削内容时写的那几项（和后端 scrape.DefaultItems 一致）：Logo 以外都写 */
+/** 没选过刮削内容时写的那几项（和后端 scrape.DefaultItems 一致）：Logo 与只有 Fanart.tv 有的以外都写 */
 export const DEFAULT_SCRAPE_ITEMS: readonly MediaScrapeItem[] = [
   "nfo",
   "poster",
@@ -188,9 +214,9 @@ export const DEFAULT_SCRAPE_ITEMS: readonly MediaScrapeItem[] = [
   "thumb",
 ];
 
-/** 这种媒体库能选的刮削内容：电影没有季海报与集截图 */
+/** 这种媒体库能选的刮削内容：电影没有季海报与集截图，剧集没有碟片图 */
 export function scrapeItemsFor(kind: MediaKind): (typeof SCRAPE_ITEMS)[number][] {
-  return SCRAPE_ITEMS.filter((i) => kind === "tv" || !i.tvOnly);
+  return SCRAPE_ITEMS.filter((i) => (kind === "tv" ? !i.movieOnly : !i.tvOnly));
 }
 
 /** TMDB 的类型（编号与中文名），二级分类按它们分 */
@@ -300,10 +326,53 @@ export const IMAGE_LANGS: readonly { value: MediaImageLang; label: string }[] = 
   { value: "none", label: "无文字" },
 ];
 
-export const SCRAPE_SOURCES: readonly { value: MediaScrapeSource; label: string }[] = [
-  { value: "", label: "TMDB" },
-  { value: "douban", label: "豆瓣（找不到时用 TMDB 的）" },
+/** 数据来源的每一项（和后端 metadata.Sources 一致）：tvOnly 的只有剧集有 */
+export const SCRAPE_SOURCE_FIELDS: readonly {
+  key: keyof MediaScrapeSources;
+  label: string;
+  tvOnly?: boolean;
+}[] = [
+  { key: "plot", label: "简介" },
+  { key: "rating", label: "评分" },
+  { key: "episode", label: "每一集", tvOnly: true },
+  { key: "artwork", label: "图片" },
 ];
+
+/** 每一项可选的来源（和后端 metadata 的 PlotSources 等一致）；空串是 TMDB */
+export const SCRAPE_SOURCE_OPTIONS: {
+  readonly [K in keyof MediaScrapeSources]: readonly {
+    value: MediaScrapeSources[K];
+    label: string;
+  }[];
+} = {
+  plot: [
+    { value: "", label: "TMDB" },
+    { value: "douban", label: "豆瓣" },
+    { value: "bangumi", label: "Bangumi（只用于动画）" },
+  ],
+  rating: [
+    { value: "", label: "TMDB" },
+    { value: "douban", label: "豆瓣" },
+    { value: "bangumi", label: "Bangumi（只用于动画）" },
+    { value: "omdb", label: "IMDb（经 OMDb）" },
+  ],
+  episode: [
+    { value: "", label: "TMDB" },
+    { value: "bangumi", label: "Bangumi（只用于动画）" },
+  ],
+  artwork: [
+    { value: "", label: "TMDB" },
+    { value: "fanart", label: "Fanart.tv" },
+  ],
+};
+
+/** 全用 TMDB 的数据来源 */
+export const tmdbSources = (): MediaScrapeSources => ({
+  plot: "",
+  rating: "",
+  episode: "",
+  artwork: "",
+});
 
 /** 命名模板的预设：默认的三家都认；目录名里带上 TMDB 编号时按媒体服务器的写法 */
 export function templatePresets(kind: MediaKind): { label: string; template: string }[] {
@@ -352,6 +421,17 @@ const HISTORY_STATUS: Record<MediaTransferStatus, { label: string; tone: Tone }>
 
 export function historyStatus(status: string): { label: string; tone: Tone } {
   return HISTORY_STATUS[status as MediaTransferStatus] ?? { label: status, tone: "neutral" };
+}
+
+const SCRAPE_STATUS: Record<MediaScrapeStatus, { label: string; tone: Tone }> = {
+  ok: { label: "刮削成功", tone: "ok" },
+  partial: { label: "部分刮削", tone: "warn" },
+  failed: { label: "刮削失败", tone: "dang" },
+};
+
+/** 整理记录上一次刮削的结果；没刮削过（媒体库关着刮削、升级前整理的）时为 null */
+export function scrapeStatus(status: string): { label: string; tone: Tone } | null {
+  return SCRAPE_STATUS[status as MediaScrapeStatus] ?? null;
 }
 
 export const HISTORY_FILTERS: readonly { value: "" | MediaTransferStatus; label: string }[] = [

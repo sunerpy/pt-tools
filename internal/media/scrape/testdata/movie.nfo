@@ -5,10 +5,20 @@
   <year>2023</year>
   <premiered>2023-07-19</premiered>
   <plot>「原子弹之父」罗伯特·奥本海默的故事 &amp; &lt;曼哈顿计划&gt;。</plot>
+  <tagline>世界从此改变</tagline>
   <runtime>181</runtime>
+  <mpaa>R</mpaa>
   <ratings>
+    <rating name="imdb" max="10" default="false">
+      <value>8.3</value>
+      <votes>900000</votes>
+    </rating>
+    <rating name="tomatometerallcritics" max="100" default="false">
+      <value>93</value>
+    </rating>
     <rating name="themoviedb" max="10" default="true">
       <value>8.1</value>
+      <votes>9000</votes>
     </rating>
   </ratings>
   <uniqueid type="tmdb" default="true">872585</uniqueid>
@@ -17,4 +27,23 @@
   <imdbid>tt15398776</imdbid>
   <genre>剧情</genre>
   <genre>历史</genre>
+  <studio>Syncopy</studio>
+  <studio>Universal Pictures</studio>
+  <set tmdbcolid="1452">
+    <name>测试系列</name>
+  </set>
+  <director>Christopher Nolan</director>
+  <credits>Christopher Nolan</credits>
+  <credits>Kai Bird</credits>
+  <actor>
+    <name>Cillian Murphy</name>
+    <role>J. Robert Oppenheimer</role>
+    <order>0</order>
+    <thumb>https://image.tmdb.org/t/p/w185/c.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Emily Blunt</name>
+    <role>Kitty Oppenheimer</role>
+    <order>1</order>
+  </actor>
 </movie>

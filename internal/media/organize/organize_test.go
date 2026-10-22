@@ -773,3 +773,44 @@ func TestSubtitlesFollowRecordedMode(t *testing.T) {
 	assert.Len(t, decodeExtras(row.Extras), 1, "补上了字幕")
 	assert.True(t, exists(filepath.Join(e.dlDir, oppName, oppName+".chs.ass")), "按复制放，下载目录里的字幕还在")
 }
+
+// 季包里只下了几集：下载器里没选（没下载）的文件不整理，列在跳过里写明原因
+func TestOrganizeSkipsUnselectedFiles(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.lastOfUs()
+	ep1 := tlouName + "/The.Last.of.Us.S01E01.2160p.WEB-DL.DV.H.265-HHWEB.mkv"
+	sub1 := tlouName + "/The.Last.of.Us.S01E01.2160p.WEB-DL.DV.H.265-HHWEB.chs.srt"
+	e.dl.mu.Lock()
+	for i, f := range e.dl.files[tlouHash] {
+		if f.Name == ep1 || f.Name == sub1 {
+			e.dl.files[tlouHash][i].Progress, e.dl.files[tlouHash][i].Priority = 0, 0
+		}
+	}
+	e.dl.mu.Unlock()
+	require.NoError(t, os.Remove(filepath.Join(e.dlDir, filepath.FromSlash(ep1))))
+	require.NoError(t, os.Remove(filepath.Join(e.dlDir, filepath.FromSlash(sub1))))
+
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	require.Empty(t, p.Problem)
+	require.Len(t, p.Items, 1, "只整理下载了的那一集")
+	assert.Equal(t, 2, p.Items[0].Episode)
+	var unselected []string
+	for _, k := range p.Skipped {
+		if k.Reason == "在下载器里没选这个文件，没有下载" {
+			unselected = append(unselected, k.File.Rel)
+		}
+	}
+	assert.ElementsMatch(t, []string{ep1, sub1}, unselected)
+
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created)
+	assert.Equal(t, 0, res.Failed, "没下载的文件不算整理失败")
+	rows := e.history()
+	require.Len(t, rows, 1)
+	assert.Equal(t, models.MediaTransferDone, rows[0].Status)
+	assert.Equal(t, 2, rows[0].Episode)
+}

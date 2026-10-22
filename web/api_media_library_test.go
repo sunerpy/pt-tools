@@ -90,7 +90,7 @@ func newOrganizeServer(t *testing.T) *organizeTestEnv {
 	require.NoError(t, os.WriteFile(filepath.Join(e.dlDir, name, name+".mkv"), []byte("video"), 0o644))
 	e.dl = &fakeDownloader{
 		torrents: []downloader.Torrent{{ID: "hash1", InfoHash: "hash1", Name: name, Progress: 1, SavePath: "/downloads", State: downloader.TorrentSeeding}},
-		files:    []downloader.TorrentFile{{Name: name + "/" + name + ".mkv", Size: 100 << 20}},
+		files:    []downloader.TorrentFile{{Name: name + "/" + name + ".mkv", Size: 100 << 20, Progress: 1, Priority: 1}},
 	}
 	setting := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://qb", Enabled: true}
 	require.NoError(t, db.Create(&setting).Error)
@@ -133,6 +133,7 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 		{http.MethodPost, "/api/media/servers/test"},
 		{http.MethodGet, "/api/media/history"},
 		{http.MethodPost, "/api/media/history/1/retry"},
+		{http.MethodPost, "/api/media/history/1/scrape"},
 		{http.MethodDelete, "/api/media/history/1"},
 	}
 	for _, c := range routes {
@@ -313,6 +314,23 @@ func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"done":1`)
 	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodPost, "/api/media/history/99/retry", "").Code)
+
+	// 重新刮削：媒体库关着刮削时回 400；打开以后写 NFO
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/history/"+id+"/scrape", "")
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "关着刮削")
+	lib := strconv.Itoa(int(page.Items[0].LibraryID))
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPut, "/api/media/libraries/"+lib,
+		`{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true,"scrape":true,"scrape_items":["nfo"]}`).Code)
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/history/"+id+"/scrape", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"records":1`)
+	assert.Contains(t, w.Body.String(), `"written":1`)
+	_, err = os.Stat(strings.TrimSuffix(target, ".mkv") + ".nfo")
+	require.NoError(t, err)
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history?status=done", "")
+	assert.Contains(t, w.Body.String(), `"scrape_status":"ok"`)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodPost, "/api/media/history/99/scrape", "").Code)
 
 	w = serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id+"?files=1", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

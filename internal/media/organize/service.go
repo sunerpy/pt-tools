@@ -19,7 +19,10 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/sunerpy/pt-tools/internal/media/douban"
+	"github.com/sunerpy/pt-tools/internal/media/fanart"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/metadata"
+	"github.com/sunerpy/pt-tools/internal/media/omdb"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/notify"
@@ -40,11 +43,14 @@ type Cipher interface {
 	Decrypt(cipherText string) (string, error)
 }
 
-// Recognizer 是识别服务（生产环境是 *recognize.Service）。
+// Recognizer 是识别服务（生产环境是 *recognize.Service）。Fanart 与 OMDb 是刮削用的另外两个来源，没填 API Key 时
+// 返回 fanart.ErrNoKey、omdb.ErrNoKey。
 type Recognizer interface {
 	Recognize(ctx context.Context, in recognize.Input) (*recognize.Result, error)
 	Parse(ctx context.Context, title, subtitle string) (meta.Meta, error)
 	TMDB(ctx context.Context) (*tmdb.Client, error)
+	Fanart(ctx context.Context) (*fanart.Client, error)
+	OMDb(ctx context.Context) (*omdb.Client, error)
 }
 
 // Downloaders 取下载器（生产环境包装 DownloaderManager 与下载器设置表）。
@@ -82,8 +88,10 @@ type Config struct {
 	Now func() time.Time
 	// ServerHTTP 为空时用 server.NewHTTPClient（测试里换成 httptest 的）
 	ServerHTTP *http.Client
-	// Douban 是刮削时补充简介与评分用的豆瓣（媒体库选了豆瓣时才用）；为空时一律用 TMDB 的
+	// Douban 是刮削时补充简介与评分用的豆瓣（媒体库的数据来源选了豆瓣时才用）；为空时用 TMDB 的
 	Douban Douban
+	// Bangumi 是刮削动画时补充中文简介、评分与每一集标题用的 Bangumi（媒体库的数据来源选了它时才用）；为空时用 TMDB 的
+	Bangumi metadata.BangumiAPI
 }
 
 // Douban 在豆瓣上找条目（生产环境是 *douban.Client）。

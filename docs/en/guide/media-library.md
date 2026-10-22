@@ -25,16 +25,16 @@ When the downloader and pt-tools see different paths (for example when they run 
 
 Each library takes one kind of title. Create one for movies and one for TV shows; to keep animation apart, add a library with Animation only (只收动画) checked (titles with TMDB's "Animation" genre go there first, and to the regular library when there is no such library). When several libraries share a type, the first one is used.
 
-| Field           | Description                                                                                                                                     |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Type            | Movie or TV; with Animation only checked it takes animation only                                                                                |
-| Library folder  | The path as pt-tools sees it (absolute)                                                                                                         |
-| Mode            | Hard link (default), copy, symbolic link or move, see below                                                                                     |
-| Template        | Leave empty for the default, see [naming templates](#naming-templates)                                                                          |
-| Scraping        | Write NFO files and images; what to write and which image language to use, see [scraping](#scraping); turn it off to let the media server do it |
-| Overwrite       | Rewrite NFO files and images on every run; when off, existing files are left alone                                                              |
-| Same-name files | Whether to replace an old version pt-tools put into the library, see [files with the same name](#files-with-the-same-name)                      |
-| Categories      | With Organise by category checked, files go into `<library folder>/<category>/…`, see [secondary categories](#secondary-categories)             |
+| Field           | Description                                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type            | Movie or TV; with Animation only checked it takes animation only                                                                                                    |
+| Library folder  | The path as pt-tools sees it (absolute)                                                                                                                             |
+| Mode            | Hard link (default), copy, symbolic link or move, see below                                                                                                         |
+| Template        | Leave empty for the default, see [naming templates](#naming-templates)                                                                                              |
+| Scraping        | Write NFO files and images; what to write, which image language and which data sources to use, see [scraping](#scraping); turn it off to let the media server do it |
+| Overwrite       | Rewrite NFO files and images on every run; when off, existing files are left alone                                                                                  |
+| Same-name files | Whether to replace an old version pt-tools put into the library, see [files with the same name](#files-with-the-same-name)                                          |
+| Categories      | With Organise by category checked, files go into `<library folder>/<category>/…`, see [secondary categories](#secondary-categories)                                 |
 
 | Mode          | Description                                                                                                                              |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -154,31 +154,49 @@ Videos dropped into a monitored folder (not torrents in a downloader, for exampl
 
 ## Scraping
 
-With scraping on, Scraping content (刮削内容) lets you pick NFO, poster, background, logo, season posters and episode thumbnails one by one (the last two only exist for TV). A library you haven't changed writes everything except the logo.
+With scraping on, Scraping content (刮削内容) lets you pick NFO, poster, background, logo, clearart, banner, landscape, disc art (movies only), season posters and episode thumbnails (the last two only exist for TV) one by one. A library you haven't changed writes the NFO, poster, background, season posters and episode thumbnails. Clearart, banner, landscape and disc art only exist on Fanart.tv and are written only after you enter a Fanart.tv key under [media recognition](media-recognize.md#other-scraping-sources).
 
-| Title | Files written                                                                                                                                                                                                                                          |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Movie | `<file name>.nfo`; with its own folder, `poster.jpg`, `fanart.jpg` and `clearlogo.png`; directly in the library root, `<file name>-poster.jpg`, `<file name>-fanart.jpg` and `<file name>-clearlogo.png`                                               |
-| TV    | In the show folder: `tvshow.nfo`, `poster.jpg`, `fanart.jpg`, `clearlogo.png` and `season01-poster.jpg` (`season-specials-poster.jpg` for season 0); `season.nfo` in the season folder; `<file name>.nfo` and `<file name>-thumb.jpg` for each episode |
+| Title | Files written                                                                                                                                                                                                                                                                                         |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Movie | `<file name>.nfo`; with its own folder, `poster.jpg`, `fanart.jpg`, `clearlogo.png`, `clearart.png`, `banner.jpg`, `landscape.jpg` and `discart.png`; directly in the library root, the same images with the file name in front, for example `<file name>-poster.jpg`                                 |
+| TV    | In the show folder: `tvshow.nfo`, `poster.jpg`, `fanart.jpg`, `clearlogo.png`, `clearart.png`, `banner.jpg`, `landscape.jpg` and `season01-poster.jpg` (`season-specials-poster.jpg` for season 0); `season.nfo` in the season folder; `<file name>.nfo` and `<file name>-thumb.jpg` for each episode |
 
-The logo is the title artwork on a transparent background; Emby, Jellyfin and Kodi all read `clearlogo.png`. Image language (图片语言) decides which image is used:
+The logo is the title artwork on a transparent background, clearart shows characters and the title on a transparent background, and landscape is a wide image with the title; Emby, Jellyfin and Kodi all read these file names. Image language (图片语言) decides which image is used:
 
-| Image language                 | Poster                                              | Background           | Logo                                                       |
-| ------------------------------ | --------------------------------------------------- | -------------------- | ---------------------------------------------------------- |
-| Recognition language (default) | The one TMDB returns for the recognition language   | The one TMDB returns | Recognition language, then English, then without text      |
-| Chinese, English or Japanese   | That language first, otherwise the one TMDB returns | Without text first   | That language, then the recognition language, then English |
-| Without text                   | Without text first                                  | Without text first   | Without text, then the recognition language, then English  |
+| Image language                 | Poster                                                     | Background           | Logo and the rest                                          |
+| ------------------------------ | ---------------------------------------------------------- | -------------------- | ---------------------------------------------------------- |
+| Recognition language (default) | The source's default (TMDB's for the recognition language) | The source's default | Recognition language, then English, then without text      |
+| Chinese, English or Japanese   | That language first, otherwise the source's default        | Without text first   | That language, then the recognition language, then English |
+| Without text                   | Without text first                                         | Without text first   | Without text, then the recognition language, then English  |
 
-For the logo or a chosen image language, pt-tools fetches the title's image list once more (cached for a week). If that fails, the poster and background fall back to the ones TMDB returns, no logo is written, and the organize result says why. Season posters and episode thumbnails always use the ones TMDB returns.
+For the logo or a chosen image language, pt-tools fetches TMDB's image list once more (cached for a week). If that fails, the poster and background fall back to the ones TMDB returns, no logo is written, and the organise result says why. Episode thumbnails always use the ones TMDB returns.
 
-The NFO files use the Kodi format, read by the NFO support of Emby, Jellyfin and Plex, and include the TMDB and IMDb IDs. Images are downloaded from TMDB through the proxy set under media recognition. When the template puts episodes directly in the library root, the show and season files are not written.
+The NFO files use the Kodi format, read by the NFO support of Emby, Jellyfin and Plex. Besides the title, plot, genres and ratings they include the tagline, certification, studios (networks for TV), the collection a movie belongs to, a show's status, directors, writers and cast (with TMDB image links for the photos), and whichever TMDB, IMDb, TVDB, Douban and Bangumi IDs are known. Images are downloaded through the proxy set under media recognition, three at a time. When the template puts episodes directly in the library root, the show and season files are not written.
 
-Plot and rating (简介与评分) come from TMDB by default. With Douban (豆瓣) selected, pt-tools looks the title up on Douban by its Chinese name before writing the NFO, then by its original title. Among titles with a matching name, the same year wins; otherwise a title within one year is used only when it's the only one. When more than one title has the name and it's unclear which, TMDB's data is used.
+Existing files are left alone by default; turn on Overwrite existing NFO and images (覆盖已有的 NFO 与图片) to rewrite them:
 
-- For a movie, the plot is replaced with Douban's, Douban's rating becomes the main one (TMDB's is kept; the NFO lists Douban's last, because Jellyfin and Emby show the last rating), and the Douban ID is added. When a torrent pushed by pt-tools carries a Douban ID from the site, that ID is tried first and used only when its name and year match.
-- Douban lists each season of a series separately: `tvshow.nfo` uses season 1, and `season.nfo` uses that season's plot. Episode NFO files still come from TMDB.
-- Douban has no public API; pt-tools uses the two endpoints Douban's own web pages use (search and title details), doesn't log in, and doesn't go through the media recognition proxy. When nothing is found or Douban can't be reached, TMDB's data is used; a manual organise says so in its result, and background organising writes it to the log.
-- Douban is requested at most once every 2 seconds; search results are cached for a day and titles for a week. Lookups happen only for NFO files that will be written: existing ones that aren't overwritten aren't looked up, and they're replaced after turning on Overwrite existing NFO and images (覆盖已有的 NFO 与图片) and organising again.
+- Rewriting an NFO replaces only the parts pt-tools writes and keeps the rest as it is, such as the play history, date added, tags and media info a media server put there.
+- Items locked in Jellyfin or Emby (`<lockdata>true</lockdata>` in the NFO) are not changed, and locked fields (`<lockedfields>`, such as the plot, genres or cast) keep their old values.
+- A file whose content would not change is not rewritten, so the media server has no reason to read it again.
+- Each file is checked again right before it is written: if it was edited, added or locked while the data was being fetched, it is left alone.
+
+### Data sources
+
+NFO files and images come from TMDB by default. Data sources (数据来源) switches individual parts to another source; when that source has no match, lacks the part or can't be reached, TMDB's is used, and the organise result and the [organise history](#organise-history) say why:
+
+| Part     | Choices                     | Description                                                                                                                                                              |
+| -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Plot     | TMDB, Douban, Bangumi       | Plots of movies, shows and seasons. Douban and Bangumi list each season separately: `tvshow.nfo` uses season 1 and `season.nfo` uses that season's                       |
+| Rating   | TMDB, Douban, Bangumi, IMDb | The main rating. Ratings from the other sources that were fetched are written too, with the main one last: Jellyfin and Emby show the last one                           |
+| Episodes | TMDB, Bangumi               | Episode titles and plots (TV only). Episodes missing on TMDB are filled in from Bangumi                                                                                  |
+| Images   | TMDB, Fanart.tv             | Which source's poster, background, logo and season posters come first; when the first source has no such image or its image can't be downloaded, the other one's is used |
+
+- Douban: before writing the NFO, pt-tools looks the title up on Douban by its Chinese name, then by its original title. Among titles with a matching name, the same year wins; otherwise a title within one year is used only when it's the only one. When more than one title has the name and it's unclear which, TMDB's data is used. Shows are looked up per season, from season 2 by the year that season first aired. When a torrent pushed by pt-tools carries a Douban ID from the site, a movie is tried by that ID first and used only when its name and year match.
+- Douban has no public API; pt-tools uses the two endpoints Douban's own web pages use (search and title details), doesn't log in, and doesn't go through the media recognition proxy. Douban is requested at most once every 2 seconds; search results are cached for a day and titles for a week.
+- Bangumi: used only for anime (titles whose TMDB genres include Animation); other titles use TMDB's. A season is looked up by its original title and first air date, and Japanese plots and titles are skipped. pt-tools uses Bangumi's public API, needs no key, and sends at most one request a second.
+- IMDb: the rating comes through OMDb and needs an OMDb key under [media recognition](media-recognize.md#other-scraping-sources). Once the key is set, the IMDb, Rotten Tomatoes and Metacritic ratings are written whatever is chosen here (looked up by IMDb ID; titles without an IMDb ID on TMDB are skipped), and OMDb's certification is used when TMDB has none.
+- Fanart.tv: needs a Fanart.tv key under media recognition. Movies are looked up by TMDB ID and shows by TVDB ID (shows without a TVDB ID on TMDB use TMDB's images). Without Fanart.tv chosen, the logo comes from TMDB first and from Fanart.tv when TMDB has none.
+- Lookups happen only for files that will be written: Douban and Bangumi aren't asked about NFO files that already exist and aren't overwritten. After changing the data sources, click Rescrape (重新刮削) in the organise history to update titles that are already organised.
 
 ## Media servers
 
@@ -200,7 +218,7 @@ When channels are selected under Organise settings (整理设置), each run that
 
 ## Organise history
 
-There is one record per video file, showing where it went, how, which trigger organised it and whether it worked.
+There is one record per video file, showing where it went, how, which trigger organised it and whether it worked, plus the result of its last scrape: scraped (刮削成功), partly scraped (部分刮削: some selected items weren't written because the sources don't have them, a download failed or the Fanart.tv key is missing; or a source failed and TMDB's data was used) or scrape failed (刮削失败), with the reasons and notes on the line below.
 
 | Status           | Description                                                                                                                                                                                                                                                              |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -209,7 +227,17 @@ There is one record per video file, showing where it went, how, which trigger or
 | Skipped (跳过)   | Another file is at the target, or the torrent is a disc or has no video to organise                                                                                                                                                                                      |
 | Removed (已删除) | The files in the library have been deleted                                                                                                                                                                                                                               |
 
-Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): videos and subtitles are deleted only when still confirmed to be the files pt-tools created (hard links and copies by file ID: device, inode, size and modification time; symbolic links by their target); NFO files and images only when they are the copies pt-tools wrote, and the folder's posters, backgrounds, logos and NFO files only once no video is left; empty folders go last. Replaced or edited files stay and are listed after the deletion. When a record turns skipped or failed (for example because the video in the library was replaced with another file), the subtitles and scraped files organised earlier stay recorded on it and are cleaned up by the same rules when it is deleted. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
+Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries.
+
+Rescrape (重新刮削) rewrites the NFO files and images of the record's movie or show (every episode of it organised in this library) with the library's current scraping settings; use it after changing the scraping content, data sources or image language, or after entering a new key under media recognition:
+
+- Files pt-tools wrote while scraping and that haven't been edited since are replaced (even without Overwrite); files you placed or another tool wrote are replaced only with Overwrite existing NFO and images (覆盖已有的 NFO 与图片) on; locked NFO files are left alone; missing files are added. Files whose content is unchanged aren't rewritten; files kept because they were edited or locked are listed in the result.
+- No source answers from the cache: their current data is fetched (and cached again).
+- Only records whose video in the library is still the file pt-tools organised are scraped: when the video is gone or was replaced with another file, nothing is written and the record is marked scrape failed with the reason.
+- It is queued like organising and runs one at a time; if it takes a while, the page answers first and you can refresh later.
+- Records organised before this version don't remember which category folder they went into: when the library puts titles into category folders and the folder can't be worked out, the record isn't scraped and the result says so.
+
+When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): videos and subtitles are deleted only when still confirmed to be the files pt-tools created (hard links and copies by file ID: device, inode, size and modification time; symbolic links by their target); NFO files and images only when they are the copies pt-tools wrote, and the folder's posters, backgrounds, logos and NFO files only once no video is left; empty folders go last. Replaced or edited files stay and are listed after the deletion. When a record turns skipped or failed (for example because the video in the library was replaced with another file), the subtitles and scraped files organised earlier stay recorded on it and are cleaned up by the same rules when it is deleted. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
 
 ## Interaction with auto cleanup
 

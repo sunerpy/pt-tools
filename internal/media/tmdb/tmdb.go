@@ -21,6 +21,8 @@ import (
 
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/utils/httpclient"
+
+	"github.com/sunerpy/pt-tools/internal/media/cachectl"
 )
 
 // DefaultBaseURL 是 TMDB v3 接口地址；ImageBaseURL 是图片地址。
@@ -428,7 +430,7 @@ func (c *Client) details(ctx context.Context, kind string, id int, lang string) 
 func (c *Client) cached(ctx context.Context, key string, ttl time.Duration, out any, fetch func() (any, error)) error {
 	// v3：结果多了出品国家或地区（二级分类用），v2 的缓存不再使用；v2 加了类型、背景图与片长
 	key = "tmdb:v3:" + key
-	if c.cache != nil {
+	if c.cache != nil && !cachectl.Bypassed(ctx) {
 		if b, ok := c.cache.Get(key); ok && json.Unmarshal(b, out) == nil {
 			return nil
 		}

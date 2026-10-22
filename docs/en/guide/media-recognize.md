@@ -31,6 +31,24 @@ The proxy address may include a user name and password. The whole address is sto
 
 Images downloaded for scraping, the poster links in organizing and subscription notifications, and the posters shown in the web UI and the mobile app all use the image address. pt-tools fetches scraping images and the app's posters itself, through the proxy above; the browser loads the web UI's posters straight from the image address, and the device that receives a notification opens its poster. If you point the image address at a relay on your LAN, make sure the browser and those devices can reach it too. When you open the web UI over https, the image address must use https as well: browsers don't load http images on an https page (the settings page warns about this).
 
+## Other scraping sources
+
+When scraping, organising can use these sources besides TMDB; choose them part by part under the [library's data sources](media-library.md#data-sources):
+
+| Source    | What it adds                                                                                      | Key                                           |
+| --------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Douban    | Chinese plots of movies and seasons, Douban ratings                                               | None                                          |
+| Bangumi   | Chinese plots, ratings and episode titles for anime                                               | None                                          |
+| Fanart.tv | HD logos, clearart, banners, landscape and disc art, plus posters, backgrounds and season posters | A project API key; a personal key is optional |
+| OMDb      | IMDb, Rotten Tomatoes and Metacritic ratings, and certifications                                  | An API key                                    |
+
+Enter the Fanart.tv and OMDb keys under Other scraping sources (刮削的其它来源). They are stored encrypted, and the page only shows whether one is set; after saving, click Test (测试) to check it works:
+
+- Fanart.tv: sign in to fanart.tv, request a project API key on its Get an API Key page and enter it as the project API key. The personal key is optional; when set, it is sent along with the project key and newly uploaded images become available sooner.
+- OMDb: request a key at omdbapi.com; a free key allows 1,000 requests a day, and titles already looked up are cached for a while.
+
+Both go through the proxy above. Clearing a key stops using that source: images only Fanart.tv has are no longer written, and library parts that chose it use TMDB's.
+
 ## Recognition preview
 
 In Recognition preview (识别预览), enter a title (the subtitle and IMDb ID are optional) and click Recognize (识别).

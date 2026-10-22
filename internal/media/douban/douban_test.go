@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sunerpy/pt-tools/internal/media/cachectl"
 )
 
 // 豆瓣接口的样子（2026-10 实测的响应删减而来）。
@@ -128,6 +130,9 @@ func TestFindMovie(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, got, again)
 	assert.Len(t, f.requests(), 2, "走缓存")
+	_, err = c.Find(cachectl.Bypass(context.Background()), Query{Kind: KindMovie, Title: "奥本海默", OriginalTitle: "Oppenheimer", Year: 2023})
+	require.NoError(t, err)
+	assert.Len(t, f.requests(), 4, "重新刮削时不读缓存")
 }
 
 // 中文名搜不到时用原名（对上豆瓣给的原名）；年份差一年以内；种类不对、年份不对、名字不对的不要

@@ -6,14 +6,24 @@
   <premiered>2023-01-15</premiered>
   <plot>末日之后……</plot>
   <runtime>50</runtime>
+  <mpaa>TV-MA</mpaa>
+  <status>Continuing</status>
   <ratings>
     <rating name="themoviedb" max="10" default="true">
       <value>8.6</value>
+      <votes>5000</votes>
     </rating>
   </ratings>
   <uniqueid type="tmdb" default="true">100088</uniqueid>
   <uniqueid type="imdb">tt3581920</uniqueid>
+  <uniqueid type="tvdb">392256</uniqueid>
   <tmdbid>100088</tmdbid>
   <imdbid>tt3581920</imdbid>
   <genre>剧情</genre>
+  <studio>HBO</studio>
+  <actor>
+    <name>Pedro Pascal</name>
+    <role>Joel Miller</role>
+    <order>0</order>
+  </actor>
 </tvshow>

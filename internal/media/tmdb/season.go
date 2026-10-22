@@ -13,15 +13,19 @@ import (
 	"strings"
 )
 
-// Episode 是剧集一季里的一集。
+// Episode 是剧集一季里的一集。Directors 与 Writers 是这一集的导演与编剧。
 type Episode struct {
-	ID        int    `json:"id,omitempty"`
-	Number    int    `json:"episode_number"`
-	Name      string `json:"name,omitempty"`
-	Overview  string `json:"overview,omitempty"`
-	AirDate   string `json:"air_date,omitempty"`
-	StillPath string `json:"still_path,omitempty"`
-	Runtime   int    `json:"runtime,omitempty"`
+	ID          int      `json:"id,omitempty"`
+	Number      int      `json:"episode_number"`
+	Name        string   `json:"name,omitempty"`
+	Overview    string   `json:"overview,omitempty"`
+	AirDate     string   `json:"air_date,omitempty"`
+	StillPath   string   `json:"still_path,omitempty"`
+	Runtime     int      `json:"runtime,omitempty"`
+	VoteAverage float64  `json:"vote_average,omitempty"`
+	VoteCount   int      `json:"vote_count,omitempty"`
+	Directors   []string `json:"directors,omitempty"`
+	Writers     []string `json:"writers,omitempty"`
 }
 
 // Season 是剧集的一季（含各集）。
@@ -53,12 +57,26 @@ func (c *Client) Season(ctx context.Context, tvID, number int) (*Season, error) 
 		return nil, ErrNotFound
 	}
 	var out Season
-	err := c.cached(ctx, fmt.Sprintf("season:%d:%d:%s", tvID, number, c.language), DetailsTTL, &out, func() (any, error) {
-		var raw Season
+	// season2：每一集加了导演、编剧与评分，以前的缓存不再使用
+	err := c.cached(ctx, fmt.Sprintf("season2:%d:%d:%s", tvID, number, c.language), DetailsTTL, &out, func() (any, error) {
+		var raw struct {
+			Season
+			Episodes []struct {
+				Episode
+				Crew []rawCrew `json:"crew"`
+			} `json:"episodes"`
+		}
 		if err := c.get(ctx, fmt.Sprintf("/tv/%d/season/%d", tvID, number), url.Values{"language": {c.language}}, &raw); err != nil {
 			return nil, err
 		}
-		return raw, nil
+		season := raw.Season
+		season.Episodes = make([]Episode, 0, len(raw.Episodes))
+		for _, e := range raw.Episodes {
+			ep := e.Episode
+			ep.Directors, ep.Writers = crewNames(e.Crew)
+			season.Episodes = append(season.Episodes, ep)
+		}
+		return season, nil
 	})
 	if err != nil {
 		return nil, err

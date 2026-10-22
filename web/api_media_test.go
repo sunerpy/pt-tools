@@ -85,7 +85,20 @@ func TestMediaAPI_SettingsAndRecognize(t *testing.T) {
 	mux := newMediaServer(t)
 	w := serveAuthed(mux, http.MethodGet, "/api/media/settings", "")
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `{"has_tmdb_key":false,"key_source":"none","builtin_key":false,"language":"zh-CN","proxy_url":"","api_base_url":"","image_base_url":""}`, w.Body.String())
+	assert.JSONEq(t, `{"has_tmdb_key":false,"key_source":"none","builtin_key":false,"language":"zh-CN","proxy_url":"","api_base_url":"","image_base_url":"",
+		"has_fanart_key":false,"has_fanart_client_key":false,"has_omdb_key":false}`, w.Body.String())
+
+	// 刮削用的 Fanart.tv 与 OMDb 的 Key：只写不读；没填时测试回 400，来源写错回 400
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/settings/test?source=fanart", "").Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/settings/test?source=omdb", "").Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/settings/test?source=imdb", "").Code)
+	w = serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"fanart_api_key":"fanartsecret0123456789abcdef0123","omdb_api_key":"omdbsec1"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "fanartsecret")
+	assert.NotContains(t, w.Body.String(), "omdbsec1")
+	assert.Contains(t, w.Body.String(), `"has_fanart_key":true`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"omdb_api_key":"a b"}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"fanart_api_key":"","omdb_api_key":""}`).Code)
 
 	// TMDB 接口地址与图片地址：只写域名时补全；格式不对回 400；清空回到官方地址
 	w = serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"api_base_url":"api.tmdb.org","image_base_url":"static.example.com"}`)

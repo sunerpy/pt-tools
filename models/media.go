@@ -9,6 +9,11 @@ type MediaSetting struct {
 	TMDBKeyEncrypted string `gorm:"type:text;default:''" json:"-"`
 	Language         string `gorm:"size:16;default:''" json:"language"`
 	ProxyEncrypted   string `gorm:"type:text;default:''" json:"-"`
+	// FanartKeyEncrypted、OMDbKeyEncrypted 是刮削用的 Fanart.tv（项目的 Key）与 OMDb 的 API Key（加密保存，只写不读）；
+	// 空的不用这个来源。FanartClientKeyEncrypted 是 Fanart.tv 的个人 Key（可选，和项目的 Key 一起发）
+	FanartKeyEncrypted       string `gorm:"type:text;default:''" json:"-"`
+	FanartClientKeyEncrypted string `gorm:"type:text;default:''" json:"-"`
+	OMDbKeyEncrypted         string `gorm:"column:omdb_key_encrypted;type:text;default:''" json:"-"`
 	// APIBaseURL、ImageBaseURL 是换掉的 TMDB 接口地址与图片地址（镜像或自建中转），空 = 官方地址
 	APIBaseURL   string    `gorm:"size:512;default:''" json:"api_base_url"`
 	ImageBaseURL string    `gorm:"size:512;default:''" json:"image_base_url"`
