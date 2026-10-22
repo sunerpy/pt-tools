@@ -27,16 +27,26 @@ The snapshots, increments, trends and daily report were added in the 1.0 preview
 
 ## Where to look
 
-| Place                                | What it shows                                                                                                                           |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| User Stats → toolbar "Period"        | Today, this week (last 7 days), this month (last 30 days)                                                                               |
-| User Stats → KPI "Total upload"      | The upload increment for the selected period; the bars are the daily upload increments of the last 7 days                               |
-| User Stats → "Upload breakdown" card | The 6 sites with the largest upload increment in the period; ranked by current total upload until comparable snapshots exist            |
-| Site list (phone)                    | 8 bars on each site card: daily upload increments over the last 8 days                                                                  |
-| Site detail → "Site stats" card      | The 30-day upload increment and its daily trend                                                                                         |
-| User Stats → Export                  | The share image can include the period increments ("Include period increments" switch and period choice); masking options are unchanged |
+| Place                                | What it shows                                                                                                                                                     |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User Stats → toolbar "Period"        | Today, this week (last 7 days), this month (last 30 days)                                                                                                         |
+| User Stats → KPI "Total upload"      | The upload increment for the selected period; the bars are the daily upload increments of the last 7 days                                                         |
+| User Stats → "Upload breakdown" card | The 6 sites with the largest upload increment in the period; ranked by current total upload until comparable snapshots exist                                      |
+| Site list (phone)                    | 8 bars on each site card: daily upload increments over the last 8 days                                                                                            |
+| Site detail → "Site stats" card      | The 30-day upload increment and its daily trend                                                                                                                   |
+| Data export (数据导出)               | The share image can include the period increments ("Include period increments" switch and period choice); see [Exporting a share image](#exporting-a-share-image) |
 
 Right after installation there is no history yet; increments appear once a second snapshot exists, usually the next day.
+
+## Exporting a share image
+
+Overview → Data export (概览 → 数据导出) in the left navigation, or Export share (导出分享) on the User Stats toolbar, draws your statistics as an image to share.
+
+- Styles: Bento (便当, the default: tiles of different sizes, the most detail), Paper (素笺: paper background, thin rules and large serif figures), Night (夜幕: dark glass cards, with a ring showing upload against billed download), Wrapped (回顾: one large figure per sentence, the three sites with the most upload on a podium) and Receipt (小票: a thermal receipt with a red stamp and a barcode). Each style has two or three color schemes. The style and color scheme you pick are remembered in this browser.
+- The preview is the exported image. Download image (下载图片) saves a PNG at twice the size (1280 pixels wide); Copy image (复制图片) puts it on the clipboard, which needs pt-tools opened over HTTPS or on localhost. On a phone the preview is scaled down to fit the screen; the exported image is the same.
+- Masking: site names and site icons are masked by default, and usernames can be masked as well. A name keeps only its first character followed by a bar; an icon becomes a 4×4 block of its colors. The original text is not in the image and cannot be recovered.
+- The per-site details show the first 10 sites by default, or the sites you tick, sorted by upload. The period increments can be today, this week or this month, and are left out until comparable snapshots exist.
+- The ratio on the image is the average of the sites' ratios, the same figure as Average ratio (平均分享率) on the User Stats page.
 
 ## Daily report
 

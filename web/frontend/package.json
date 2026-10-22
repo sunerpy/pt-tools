@@ -17,10 +17,13 @@
     "dialog:scan": "node scripts/dialog-scan.mjs"
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@fontsource/source-serif-4": "5.3.1",
     "@vueuse/core": "^14.4.0",
     "dompurify": "^3.4.16",
     "element-plus": "^2.14.7",
     "marked": "^18.0.14",
+    "modern-screenshot": "4.7.0",
     "pinia": "^4.0.3",
     "vue": "^3.5.43",
     "vue-element-plus-x": "2.0.3",
