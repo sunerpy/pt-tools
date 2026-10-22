@@ -37,6 +37,13 @@ afterEach(() => {
 
 const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
 
+/*
+ * 后端回的是带时区的时间，弹窗按浏览器的时区显示。模拟的时间按本机时区造（月份从 1 起），
+ * 断言里的钟点在哪个时区跑都成立 —— CI 在 UTC 上跑，写死 +08:00 的话会差 8 小时。
+ */
+const at = (y: number, mon: number, d: number, hh: number, mm = 0) =>
+  new Date(y, mon - 1, d, hh, mm).toISOString();
+
 function openOptions(id: string): () => HTMLElement[] {
   const sel = q(id)!;
   (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
@@ -88,7 +95,7 @@ async function mountDialog(sub?: Record<string, unknown>) {
 describe("追剧定时：每隔一段时间与 cron", () => {
   it("每隔一段时间：数字 + 单位存成分钟，预览接下来几次", async () => {
     api.previewSchedule.mockResolvedValue({
-      next: ["2026-10-24T20:00:00+08:00", "2026-10-25T02:00:00+08:00"],
+      next: [at(2026, 10, 24, 20), at(2026, 10, 25, 2)],
     });
     await mountDialog();
     await pick("sd-schedule", "每隔一段时间");
@@ -113,7 +120,7 @@ describe("追剧定时：每隔一段时间与 cron", () => {
       async ({ schedule }: { schedule: { cron?: string } }) => {
         if (schedule.cron?.includes("25"))
           throw new ApiError(400, "参数不对: 第 2 段（小时）「25」不在 0 到 23 之间");
-        return { next: ["2026-10-23T22:00:00+08:00"] };
+        return { next: [at(2026, 10, 23, 22)] };
       },
     );
     api.create.mockResolvedValue({ id: 9 });
@@ -143,7 +150,7 @@ describe("追剧定时：每隔一段时间与 cron", () => {
   });
 
   it("修改已经完成的追剧：写明现在不会搜索，定时等它改回在找才用上", async () => {
-    api.previewSchedule.mockResolvedValue({ next: ["2026-10-23T22:00:00+08:00"] });
+    api.previewSchedule.mockResolvedValue({ next: [at(2026, 10, 23, 22)] });
     await mountDialog({
       id: 4,
       media_type: "tv",
