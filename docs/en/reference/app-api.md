@@ -47,60 +47,64 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 
 ## Endpoints
 
-| Method | Path                                      | Permission       | Purpose                                                                       |
-| ------ | ----------------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
-| GET    | `/meta`                                   | Read             | Version, compatibility level, feature groups and the caller's own permissions |
-| GET    | `/overview`                               | Read             | Totals across enabled sites and today's changes                               |
-| GET    | `/sites`                                  | Read             | Sites, login status, today's sign-in and your statistics on each site         |
-| POST   | `/sites/{site}/attend`                    | Operate          | Sign in now                                                                   |
-| GET    | `/favicon/{site}`                         | Read             | Site icon                                                                     |
-| GET    | `/torrents`                               | Read             | Torrents in the downloaders                                                   |
-| GET    | `/downloaders`                            | Read             | Downloaders with their current speed and free space                           |
-| POST   | `/torrents/actions`                       | Operate          | Pause, resume and delete torrents                                             |
-| POST   | `/search`                                 | Read             | Multi-site search                                                             |
-| POST   | `/push`                                   | Operate          | Push a search result to a downloader                                          |
-| GET    | `/tasks`                                  | Read             | Task list (push records)                                                      |
-| GET    | `/brush/tasks`                            | Read             | Brush tasks                                                                   |
-| GET    | `/media/history`                          | Read             | Organise history                                                              |
-| POST   | `/media/history/{id}/retry`               | Operate          | Organise the torrent of one history record again                              |
-| GET    | `/media/libraries`                        | Read             | Media libraries                                                               |
-| POST   | `/media/recognize`                        | Read             | Recognise a torrent title                                                     |
-| POST   | `/media/organize/preview`                 | Read             | Preview organising a torrent in a downloader                                  |
-| POST   | `/media/organize`                         | Operate          | Organise a torrent in a downloader into a media library                       |
-| GET    | `/subscriptions`                          | Read             | Subscriptions                                                                 |
-| GET    | `/subscriptions/{id}`                     | Read             | A subscription with its episodes and downloaded torrents                      |
-| POST   | `/subscriptions`                          | Operate          | Create a subscription                                                         |
-| POST   | `/subscriptions/{id}/status`              | Operate          | Pause or resume a subscription                                                |
-| POST   | `/subscriptions/{id}/search`              | Operate          | Search now                                                                    |
-| PUT    | `/subscriptions/{id}`                     | Operate          | Change a subscription's settings (follow schedule, version lock and so on)    |
-| DELETE | `/subscriptions/{id}`                     | Operate          | Delete a subscription                                                         |
-| GET    | `/subscriptions/{id}/episodes`            | Read             | Each episode of a followed show                                               |
-| POST   | `/subscriptions/{id}/episodes/{n}/skip`   | Operate          | Skip an episode, or want it again                                             |
-| POST   | `/subscriptions/{id}/episodes/{n}/unlock` | Operate          | Let one episode use another version (outside the version lock)                |
-| GET    | `/subscriptions/{id}/runs`                | Read             | A subscription's run history                                                  |
-| GET    | `/subscriptions/{id}/episode-rules`       | Read             | Episode-number rules of a followed show                                       |
-| PUT    | `/subscriptions/{id}/episode-rules`       | Operate          | Set the episode-number rule for a release group                               |
-| DELETE | `/subscriptions/{id}/episode-rules`       | Operate          | Delete the episode-number rule for a release group                            |
-| GET    | `/explore`                                | Read             | Explore: TMDB trending, popular and search                                    |
-| GET    | `/images/tmdb/{size}/{file}`              | Read             | A TMDB image (poster), fetched by pt-tools                                    |
-| GET    | `/updates`                                | Read             | Whether a newer release exists                                                |
-| GET    | `/assistant/status`                       | Read             | Whether the AI assistant is on, its model, and whether you can confirm        |
-| GET    | `/assistant/conversations`                | Read             | Your AI assistant conversations                                               |
-| POST   | `/assistant/conversations`                | Read             | Create a conversation, optionally sending the first message                   |
-| GET    | `/assistant/conversations/{id}`           | Read             | A conversation's messages and pending actions                                 |
-| DELETE | `/assistant/conversations/{id}`           | Read             | Delete a conversation                                                         |
-| POST   | `/assistant/conversations/{id}/messages`  | Read             | Send a message; the answer is generated in the background                     |
-| POST   | `/assistant/conversations/{id}/cancel`    | Read             | Stop the answer                                                               |
-| GET    | `/assistant/conversations/{id}/events`    | Read             | Long-poll a conversation's progress                                           |
-| POST   | `/assistant/confirmations/{id}`           | Operate          | Confirm or deny an action                                                     |
-| GET    | `/templates`                              | Read             | Message templates: events, variables and the current templates                |
-| POST   | `/templates/preview`                      | Read             | Render a template with sample data                                            |
-| PUT    | `/templates/{type}`                       | Operate          | Save the template for an event                                                |
-| DELETE | `/templates/{type}`                       | Operate          | Restore the default                                                           |
-| GET    | `/config`                                 | Config + Read    | Configuration catalog: what can be read and changed, operations and fields    |
-| GET    | `/config/{resource}`                      | Config + Read    | Current values of one kind of configuration (secrets masked)                  |
-| POST   | `/config/{resource}/preview`              | Config + Read    | Preview a change: before, after and impact                                    |
-| POST   | `/config/{resource}/changes`              | Config + Operate | Save a change                                                                 |
+| Method | Path                                          | Permission       | Purpose                                                                       |
+| ------ | --------------------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
+| GET    | `/meta`                                       | Read             | Version, compatibility level, feature groups and the caller's own permissions |
+| GET    | `/overview`                                   | Read             | Totals across enabled sites and today's changes                               |
+| GET    | `/sites`                                      | Read             | Sites, login status, today's sign-in and your statistics on each site         |
+| POST   | `/sites/{site}/attend`                        | Operate          | Sign in now                                                                   |
+| GET    | `/favicon/{site}`                             | Read             | Site icon                                                                     |
+| GET    | `/torrents`                                   | Read             | Torrents in the downloaders                                                   |
+| GET    | `/downloaders`                                | Read             | Downloaders with their current speed and free space                           |
+| POST   | `/torrents/actions`                           | Operate          | Pause, resume and delete torrents                                             |
+| POST   | `/search`                                     | Read             | Multi-site search                                                             |
+| POST   | `/push`                                       | Operate          | Push a search result to a downloader                                          |
+| GET    | `/tasks`                                      | Read             | Task list (push records)                                                      |
+| GET    | `/brush/tasks`                                | Read             | Brush tasks                                                                   |
+| GET    | `/media/history`                              | Read             | Organise history                                                              |
+| POST   | `/media/history/{id}/retry`                   | Operate          | Organise the torrent of one history record again                              |
+| POST   | `/media/history/{id}/scrape`                  | Operate          | Scrape the movie or show of one history record again                          |
+| GET    | `/media/libraries`                            | Read             | Media libraries                                                               |
+| POST   | `/media/recognize`                            | Read             | Recognise a torrent title                                                     |
+| POST   | `/media/organize/preview`                     | Read             | Preview organising a torrent in a downloader                                  |
+| POST   | `/media/organize`                             | Operate          | Organise a torrent in a downloader into a media library                       |
+| GET    | `/subscriptions`                              | Read             | Subscriptions                                                                 |
+| GET    | `/subscriptions/{id}`                         | Read             | A subscription with its episodes and downloaded torrents                      |
+| POST   | `/subscriptions`                              | Operate          | Create a subscription                                                         |
+| POST   | `/subscriptions/{id}/status`                  | Operate          | Pause or resume a subscription                                                |
+| POST   | `/subscriptions/{id}/search`                  | Operate          | Search now                                                                    |
+| PUT    | `/subscriptions/{id}`                         | Operate          | Change a subscription's settings (follow schedule, version lock and so on)    |
+| DELETE | `/subscriptions/{id}`                         | Operate          | Delete a subscription                                                         |
+| GET    | `/subscriptions/{id}/episodes`                | Read             | Each episode of a followed show                                               |
+| POST   | `/subscriptions/{id}/episodes/{n}/skip`       | Operate          | Skip an episode, or want it again                                             |
+| POST   | `/subscriptions/{id}/episodes/{n}/unlock`     | Operate          | Let one episode use another version (outside the version lock)                |
+| GET    | `/subscriptions/{id}/runs`                    | Read             | A subscription's run history                                                  |
+| POST   | `/subscriptions/{id}/torrents/{tid}/organize` | Operate          | Organise one torrent the subscription downloaded again                        |
+| POST   | `/subscriptions/{id}/torrents/{tid}/scrape`   | Operate          | Scrape one torrent the subscription downloaded again                          |
+| POST   | `/subscriptions/schedule/preview`             | Read             | When a schedule will search next                                              |
+| GET    | `/subscriptions/{id}/episode-rules`           | Read             | Episode-number rules of a followed show                                       |
+| PUT    | `/subscriptions/{id}/episode-rules`           | Operate          | Set the episode-number rule for a release group                               |
+| DELETE | `/subscriptions/{id}/episode-rules`           | Operate          | Delete the episode-number rule for a release group                            |
+| GET    | `/explore`                                    | Read             | Explore: TMDB trending, popular and search                                    |
+| GET    | `/images/tmdb/{size}/{file}`                  | Read             | A TMDB image (poster), fetched by pt-tools                                    |
+| GET    | `/updates`                                    | Read             | Whether a newer release exists                                                |
+| GET    | `/assistant/status`                           | Read             | Whether the AI assistant is on, its model, and whether you can confirm        |
+| GET    | `/assistant/conversations`                    | Read             | Your AI assistant conversations                                               |
+| POST   | `/assistant/conversations`                    | Read             | Create a conversation, optionally sending the first message                   |
+| GET    | `/assistant/conversations/{id}`               | Read             | A conversation's messages and pending actions                                 |
+| DELETE | `/assistant/conversations/{id}`               | Read             | Delete a conversation                                                         |
+| POST   | `/assistant/conversations/{id}/messages`      | Read             | Send a message; the answer is generated in the background                     |
+| POST   | `/assistant/conversations/{id}/cancel`        | Read             | Stop the answer                                                               |
+| GET    | `/assistant/conversations/{id}/events`        | Read             | Long-poll a conversation's progress                                           |
+| POST   | `/assistant/confirmations/{id}`               | Operate          | Confirm or deny an action                                                     |
+| GET    | `/templates`                                  | Read             | Message templates: events, variables and the current templates                |
+| POST   | `/templates/preview`                          | Read             | Render a template with sample data                                            |
+| PUT    | `/templates/{type}`                           | Operate          | Save the template for an event                                                |
+| DELETE | `/templates/{type}`                           | Operate          | Restore the default                                                           |
+| GET    | `/config`                                     | Config + Read    | Configuration catalog: what can be read and changed, operations and fields    |
+| GET    | `/config/{resource}`                          | Config + Read    | Current values of one kind of configuration (secrets masked)                  |
+| POST   | `/config/{resource}/preview`                  | Config + Read    | Preview a change: before, after and impact                                    |
+| POST   | `/config/{resource}/changes`                  | Config + Operate | Save a change                                                                 |
 
 Paths leave out the `/api/app/v1` prefix. Search, recognition, the organise preview, the template preview and the configuration preview send their content with POST but need only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
 
@@ -257,6 +261,10 @@ Organise history, most recently updated first. Parameters: `status` (`done`, `fa
 
 Organises the torrent of this record again (usually a failed one); an entry and library chosen by hand earlier are kept. Responds like `POST /media/organize`. A missing record gets 404.
 
+### POST /media/history/{id}/scrape
+
+Scrapes the movie or show of this record again (every history record of the same title in this library), writing the NFO and images the library's current scrape settings ask for; locked fields stay as they are. The response has `records` (history records scraped), `written` (files written), `messages` and `queued` (still running in the background; check the history later). It responds with 400 when the library has scraping turned off or the record is not organised, and 404 when the record is missing.
+
 ### GET /media/libraries
 
 One item per library: `id`, `name`, `kind` (`movie` or `tv`), `anime` (anime only), `path` (the library folder as pt-tools sees it), `mode` (organise mode; empty means the default from the organise settings), `scrape`, `classify_dir` (put files into sub-category folders), `overwrite_mode` (empty never replaces an old version, `larger` replaces it with a larger file) and `enabled`.
@@ -288,43 +296,55 @@ Parameters: `status` (`active`, `paused`, `pending`, `done`) and `q` (keyword). 
 - `id`, `media_type` (`movie` or `tv`), `tmdb_id`, `season`, `title`, `original_title`, `year`, `total_episodes`;
 - `poster_path`: the TMDB poster path; fetch the image with `GET /images/tmdb/w342/<the path without its leading />` (`w342` can also be one of the other sizes listed below), see below;
 - `status`, `upgrade` (whether to upgrade quality), `source` (`manual`, `explore`, `douban`, `chatops`, `app`), `message`, `last_search_at`, `next_search_at`, `created_at`;
+- where to look and where to push: `profile_id` (the quality profile; 0 uses the default from the settings), `sites` (search only these sites; empty means all), `downloader_id` (0 uses the one from the settings), `category`, `tags` (comma-separated) and `save_path` (empty uses the downloader's default);
 - `progress`: `total`, `required` (episodes to follow: from the start episode on, not skipped), `aired`, `in_library`, `downloading`, `waiting` (episodes waiting for the locked version, also counted in `missing`), `skipped` (episodes not followed) and `missing` (the missing episode numbers);
 - the follow settings of a TV show: `schedule` (see below), `lock_version` (the version lock), `lock_group` and `lock_resolution` (the locked release group and resolution, empty until decided), `start_episode` (the episode to start from; 0 and 1 mean the whole season), `follow_next_season` (follow the next season when this one is done), `next_season_id` (the subscription created for the next season), `library_id` (the media library to organise into; 0 picks one by type) and `completed_at` (when it was done).
 
-`required`, `waiting`, `skipped` and the follow settings were added in the 1.0 preview. Earlier versions leave them out, so the app has to cope with responses without them.
+`required`, `waiting`, `skipped`, the follow settings and the where-to-look fields were added in the 1.0 preview. Earlier versions leave them out, so the app has to cope with responses without them.
 
 #### Schedule
 
 `schedule` is when to search actively:
 
-| Field             | Description                                                                                                                                                                         |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kind`            | Empty uses the global search interval; `airtime` follows the air time; `daily` every day; `every_days` every few days; `weekly` on weekdays; `monthly` on days of the month         |
-| `at`              | The time `HH:MM` in the time zone of the machine pt-tools runs on. With `airtime` it is when the episode airs (TMDB only has the date); empty means 20:00, also for the other kinds |
-| `every`           | The number of days for `every_days`, 1 to 30                                                                                                                                        |
-| `days`            | The weekdays for `weekly` (0 to 6, 0 is Sunday) or the days of the month for `monthly` (1 to 31; a shorter month uses its last day)                                                 |
-| `air_delay_hours` | With `airtime`, how many hours after airing to start searching (0 to 72; 0 means 2 hours)                                                                                           |
-| `air_retry_hours` | With `airtime`, how many hours to wait before searching again when nothing was found (0 to 48; 0 means 6 hours)                                                                     |
-| `air_window_days` | With `airtime`, for how many days after airing to retry at that interval (0 to 60; 0 means 7 days); after that a missing episode is searched once a day                             |
+| Field              | Description                                                                                                                                                                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kind`             | Empty uses the global search interval; `airtime` follows the air time; `interval` every so often; `daily` every day; `every_days` every few days; `weekly` on weekdays; `monthly` on days of the month; `cron` by a cron expression                                |
+| `at`               | The time `HH:MM` in the time zone of the machine pt-tools runs on. With `airtime` it is when the episode airs (TMDB only has the date); empty means 20:00, also for the other kinds                                                                                |
+| `every`            | The number of days for `every_days`, 1 to 30                                                                                                                                                                                                                       |
+| `days`             | The weekdays for `weekly` (0 to 6, 0 is Sunday) or the days of the month for `monthly` (1 to 31; a shorter month uses its last day)                                                                                                                                |
+| `air_delay_hours`  | With `airtime`, how many hours after airing to start searching (0 to 72; 0 means 2 hours)                                                                                                                                                                          |
+| `air_retry_hours`  | With `airtime`, how many hours to wait before searching again when nothing was found (0 to 48; 0 means 6 hours)                                                                                                                                                    |
+| `air_window_days`  | With `airtime`, for how many days after airing to retry at that interval (0 to 60; 0 means 7 days); after that a missing episode is searched once a day                                                                                                            |
+| `interval_minutes` | With `interval`, the minutes between searches, 30 to 10080 (7 days), counted from the last search                                                                                                                                                                  |
+| `cron`             | With `cron`, the expression: 5 fields (minute hour day month weekday); separate several with semicolons and the earliest one due wins. See [Subscriptions and following](../guide/media-subscribe.md#when-to-search) for the syntax. The normalised form is stored |
 
-`airtime` is for TV only. A new TV subscription without a schedule follows the air time.
+`airtime` is for TV only. A new TV subscription without a schedule follows the air time. Scheduled searches get a few minutes of random offset, and two searches are at least 30 minutes apart.
+
+### POST /subscriptions/schedule/preview
+
+Shows when a schedule will search next (read-only, needs Read). The request is `{"schedule": {...}, "media_type": "tv", "subscription_id": 1, "count": 5}`: `schedule` is required; with `subscription_id`, that subscription's type and creation time are used (every few days counts from the day it was created); `count` is how many times to list (1 to 10, 5 by default). The response is `{"next": [Unix seconds…], "note": "…"}` without the random offset. A schedule that follows the air time has no times, and `note` explains how it is worked out. A wrong schedule gets 400 with a `message` saying what is wrong (for example which field of the cron expression).
 
 ### GET /subscriptions/{id}
 
 The subscription's own fields, plus:
 
 - `episodes`: each episode of a TV season, with `number`, `name`, `air_date`, `state` (`library`, `downloading`, `missing`, `waiting_version` (waiting for the locked version), `upcoming` or `skipped` (not followed)), `source` (where the state comes from: `library`, `subscription` for a torrent the subscription pushed, `downloader` for a torrent already in the downloader), `version` (the current version: release group and resolution), `manual_skip` (skipped by hand) and `manual_unlock` (this episode is outside the version lock);
-- `torrents`: the torrents it downloaded, with `site`, `torrent_id`, `title`, `status` (`downloading`, `done`, `failed`, `replaced`), `episode`, `episode_end`, `complete`, `size`, `message` and `created_at`.
+- `torrents`: the torrents it downloaded, with `id` (the `tid` of the two endpoints below), `site`, `torrent_id`, `title`, `status` (`downloading`, `done`, `failed`, `replaced`), `episode`, `episode_end`, `complete`, `size`, `message`, `created_at`, and:
+  - `files`: how the torrent was organised into the library, one item per video file: `id` (the history record, usable with `/media/history/{id}/…`), `name` (the file name), `episode`, `episode_end`, `status` (`done`, `failed`, `skipped`, `removed`), `message` (why it was not organised), `scrape_status` (`ok`, `partial`, `failed`; empty when never scraped), `scrape_note`, `next_retry_at` (when it is retried automatically) and `retrying` (the organise queue is retrying it now); an empty array before the torrent is organised;
+  - `can_organize`: it can be organised again (a file that was not organised and is not being retried, or the torrent was marked failed and has no history yet); `can_rescrape`: it can be scraped again (a file is organised). Both are `false` for an old version replaced by an upgrade.
 
 ### POST /subscriptions
 
-| Field        | Description                                                   |
-| ------------ | ------------------------------------------------------------- |
-| `media_type` | Required, `movie` or `tv`                                     |
-| `tmdb_id`    | Required, the TMDB ID                                         |
-| `season`     | The season number for TV; the latest season when empty        |
-| `profile_id` | The quality profile; the default from the settings when empty |
-| `upgrade`    | Whether to upgrade quality                                    |
+| Field                           | Description                                                                                               |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `media_type`                    | Required, `movie` or `tv`                                                                                 |
+| `tmdb_id`                       | Required, the TMDB ID                                                                                     |
+| `season`                        | The season number for TV; the latest season when empty                                                    |
+| `profile_id`                    | The quality profile; the default from the settings when empty                                             |
+| `upgrade`                       | Whether to upgrade quality                                                                                |
+| `sites`                         | Search only these sites; all sites when empty. They must be configured and enabled; unknown names get 400 |
+| `downloader_id`                 | The downloader to push to; the one from the settings when empty. An unknown ID gets 400                   |
+| `category`, `tags`, `save_path` | The category, tags (comma-separated) and save directory for pushes; the downloader's defaults when empty  |
 
 A TV subscription follows the show and can also carry:
 
@@ -341,7 +361,7 @@ The response is the new subscription, with the source `app`. It responds with 40
 
 ### PUT /subscriptions/{id}
 
-Changes a subscription's settings. Only the fields given change; the title and season cannot. It takes `profile_id`, `upgrade` and, for a followed show, `schedule`, `lock_version`, `lock_group`, `lock_resolution`, `start_episode`, `follow_next_season`, `library_id` and `total_episodes` (the number of episodes in the season: used when greater than 0; 0 goes back to TMDB's count). Giving empty strings for both `lock_group` and `lock_resolution` clears the locked version, which is then decided again by the next download.
+Changes a subscription's settings. Only the fields given change (a field left out or given as `null` stays as it is); the title and season cannot. It takes `profile_id`, `upgrade`, `sites` (an empty array means all sites; `null` leaves it unchanged), `downloader_id`, `category`, `tags`, `save_path` and, for a followed show, `schedule`, `lock_version`, `lock_group`, `lock_resolution`, `start_episode`, `follow_next_season`, `library_id` and `total_episodes` (the number of episodes in the season: used when greater than 0; 0 goes back to TMDB's count). Giving empty strings for both `lock_group` and `lock_resolution` clears the locked version, which is then decided again by the next download.
 
 When the schedule, version lock, start episode or episode count changes, every episode is worked out again under the new settings, a search runs soon, and the run history records the change. The response is the updated subscription.
 
@@ -360,6 +380,14 @@ Each episode of a followed show (the same as `episodes` in the subscription deta
 ### GET /subscriptions/{id}/runs
 
 The subscription's run history, newest first, with the parameters `page` and `page_size` (1 to 100). Each active search, RSS match, creation and change by hand records one run: `id`, `trigger` (`create`, `schedule`, `rss`, `manual`, `ai`), `started_at`, `finished_at`, `status` (`ok`, `nothing`, `waiting`, `failed`, `partial`; a change by hand is `changed`), `summary`, `steps` (each step's `kind` and `text`; `kind` is `search`, `reject`, `lock`, `push`, `fail`, `adopt`, `wait` or `info`) and `steps_truncated` (too many steps; the rest were not recorded). Each subscription keeps its latest 100 runs for at most 90 days. Downloader addresses are removed from the text.
+
+### POST /subscriptions/{id}/torrents/{tid}/organize
+
+Organises one torrent the subscription downloaded again (`tid` is the `id` in the detail's `torrents`; a season pack works the same as a single episode, one torrent at a time). It uses the subscription's title and library instead of recognising the name, and leaves files already organised alone. A torrent marked failed goes back to waiting for organising (the 7 days start again), and is marked in the library as soon as organising succeeds. Responds like `POST /media/organize` and records a run. A torrent of another subscription gets 404; a torrent without a recorded downloader or info hash, or an old version replaced by an upgrade (its files were removed from the library on purpose), gets 400.
+
+### POST /subscriptions/{id}/torrents/{tid}/scrape
+
+Scrapes the movie or show this torrent was organised into again. Responds like `POST /media/history/{id}/scrape` and records a run. It responds with 400 when no file of the torrent is organised yet (organise it again first), and for an old version replaced by an upgrade.
 
 ### GET, PUT and DELETE /subscriptions/{id}/episode-rules
 

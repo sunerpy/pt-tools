@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,6 +98,9 @@ var subscribeRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/media/subscriptions/1/episodes/1/skip"},
 	{http.MethodPost, "/api/media/subscriptions/1/episodes/1/unlock"},
 	{http.MethodGet, "/api/media/subscriptions/1/runs"},
+	{http.MethodPost, "/api/media/subscriptions/schedule-preview"},
+	{http.MethodPost, "/api/media/subscriptions/1/torrents/1/organize"},
+	{http.MethodPost, "/api/media/subscriptions/1/torrents/1/scrape"},
 	{http.MethodGet, "/api/media/subscriptions/1/episode-rules"},
 	{http.MethodPut, "/api/media/subscriptions/1/episode-rules"},
 	{http.MethodDelete, "/api/media/subscriptions/1/episode-rules"},
@@ -341,4 +345,41 @@ func TestSubscribeAPI_Follow(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"lock_version":false`)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/2/episodes", "").Code, "电影没有分集")
+}
+
+// 网页的定时预览：几次搜索的时间；按播出时间的不算，写明原因；表达式不对回 400
+func TestSubscribeAPI_SchedulePreview(t *testing.T) {
+	mux := newSubscribeServer(t)
+	w := serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/schedule-preview", `{"schedule":{"kind":"cron","cron":"0 20 * * 5"},"media_type":"tv","count":3}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var v SchedulePreviewView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &v))
+	require.Len(t, v.Next, 3)
+	for i, next := range v.Next {
+		local := next.In(time.Local)
+		assert.Equal(t, time.Friday, local.Weekday(), i)
+		assert.Equal(t, 20, local.Hour(), i)
+		if i > 0 {
+			assert.Equal(t, 7*24*time.Hour, next.Sub(v.Next[i-1]).Round(time.Hour), i)
+		}
+	}
+	w = serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/schedule-preview", `{"schedule":{"kind":"interval","interval_minutes":90}}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	v = SchedulePreviewView{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &v))
+	require.Len(t, v.Next, 5, "默认 5 次")
+	assert.Equal(t, 90*time.Minute, v.Next[1].Sub(v.Next[0]))
+	w = serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/schedule-preview", `{"schedule":{"kind":"airtime"},"media_type":"tv"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"next":[]`)
+	assert.Contains(t, w.Body.String(), "播出时间")
+	for _, body := range []string{
+		`{"schedule":{"kind":"cron","cron":"0 25 * * *"}}`,
+		`{"schedule":{"kind":"interval","interval_minutes":1}}`,
+		`{"schedule":{"kind":"cron","cron":"0 20 * * *"},"x":1}`,
+		`{"schedule":{"kind":"daily","at":"7:00"},"subscription_id":99}`,
+	} {
+		code := serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/schedule-preview", body).Code
+		assert.Contains(t, []int{http.StatusBadRequest, http.StatusNotFound}, code, body)
+	}
 }

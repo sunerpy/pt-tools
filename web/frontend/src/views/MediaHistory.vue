@@ -19,6 +19,8 @@ import {
   historyEntry,
   historyStatus,
   modeLabel,
+  organizeOutcome,
+  rescrapeOutcome,
   scrapeStatus,
   triggerLabel,
 } from "@/utils/media";
@@ -62,11 +64,8 @@ const retrying = ref<number | null>(null);
 async function retry(r: MediaHistoryItem) {
   retrying.value = r.id;
   try {
-    const res = await organizeApi.retry(r.id);
-    if (res.queued) ElMessage.info("整理还在后台进行，稍后刷新看结果");
-    else if (res.plan?.problem) ElMessage.warning(res.plan.problem);
-    else if (res.failed) ElMessage.warning(`新入库 ${res.created} 个，失败 ${res.failed} 个`);
-    else ElMessage.success(`新入库 ${res.created} 个，已在库里 ${res.done} 个`);
+    const out = organizeOutcome(await organizeApi.retry(r.id));
+    ElMessage[out.level](out.text);
     await load();
   } catch (e) {
     ElMessage.error(errText(e, "重试失败"));
@@ -94,14 +93,8 @@ async function rescrape(r: MediaHistoryItem) {
   }
   rescraping.value = r.id;
   try {
-    const res = await organizeApi.rescrape(r.id);
-    const sources = res.sources ? `（${res.sources}）` : "";
-    if (res.queued) ElMessage.info("重新刮削还在后台进行，稍后刷新看结果");
-    else if (res.messages?.length)
-      ElMessage.warning(
-        `刮削了 ${res.records} 条记录，写了 ${res.written} 个文件${sources}；${res.messages.join("；")}`,
-      );
-    else ElMessage.success(`刮削了 ${res.records} 条记录，写了 ${res.written} 个文件${sources}`);
+    const out = rescrapeOutcome(await organizeApi.rescrape(r.id));
+    ElMessage[out.level](out.text);
     await load();
   } catch (e) {
     ElMessage.error(errText(e, "重新刮削失败"));

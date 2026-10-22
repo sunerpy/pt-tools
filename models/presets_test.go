@@ -360,3 +360,14 @@ func TestMigrateCmctToSpringSunday_MergeCopiesEncryptedCookie(t *testing.T) {
 	require.NoError(t, db2.Where("name = ?", "springsunday").First(&spring).Error)
 	assert.Equal(t, "enc-spring", spring.CookieEncrypted)
 }
+
+func TestIsPlaceholderRSSHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"hdsky.xxx": true, "springxxx.xxx": true, "rss.m-team.xxx": true, "XXX.XXX.": true, "xxx": true,
+		"hdsky.me": false, "springsunday.net": false, "example.com": false, "xxx.example.com": false, "": false,
+	} {
+		if got := IsPlaceholderRSSHost(host); got != want {
+			t.Errorf("IsPlaceholderRSSHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}

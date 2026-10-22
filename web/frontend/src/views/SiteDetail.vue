@@ -33,6 +33,7 @@ import { useDataState } from "@/composables/useDataState";
 import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
 import { attendanceChallengeText, attendanceView } from "@/utils/attendanceStatus";
 import { formatShortDateTime } from "@/utils/format";
+import { isPlaceholderRssUrl, rssBelongsToSite, rssHost } from "@/utils/rss";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -196,6 +197,68 @@ const editingRss = reactive<RSSConfig>({
 });
 const editingRssIndex = ref(-1);
 const updatingRss = ref(false);
+
+/**
+ * RSS 链接的提醒：示例里的占位地址（hdsky.xxx 这类）取不到任何种子，保存时拦下；
+ * 域名不像是这个站点的只提醒（多半是贴错了站点的链接），不拦。
+ */
+function rssUrlProblem(raw: string): { block: boolean; text: string } | null {
+  const url = raw.trim();
+  if (!url) return null;
+  if (isPlaceholderRssUrl(url)) {
+    return {
+      block: true,
+      text: `这是示例里的占位地址（${rssHost(url)}），取不到任何种子：填站点 RSS 页上给你的链接`,
+    };
+  }
+  const siteUrls = [...(form.value.urls || []), form.value.api_url];
+  if (rssHost(url) && !rssBelongsToSite(url, siteUrls)) {
+    const site = siteUrls.map((u) => (u ? rssHost(u.includes("://") ? u : `https://${u}`) : ""));
+    const known = [...new Set(site.filter(Boolean))].join("、");
+    return {
+      block: false,
+      text: `链接的域名 ${rssHost(url)} 不像是这个站点的${known ? `（${known}）` : ""}，确认没贴错站点`,
+    };
+  }
+  return null;
+}
+
+const newRssProblem = computed(() => rssUrlProblem(newRss.url));
+const editRssProblem = computed(() => rssUrlProblem(editingRss.url));
+
+/** 「试一下」链接的结果：ok 时是取到几条，否则是说明哪一步出了问题；链接改了就清掉 */
+const rssLinkTest = reactive({ loading: false, url: "", ok: false, text: "" });
+
+async function testRssLink(raw: string) {
+  const url = raw.trim();
+  if (!url) {
+    ElMessage.error("先填链接");
+    return;
+  }
+  rssLinkTest.loading = true;
+  rssLinkTest.url = url;
+  rssLinkTest.text = "";
+  try {
+    const res = await sitesApi.testRssLink(url);
+    if (rssLinkTest.url !== url) return;
+    rssLinkTest.ok = true;
+    const latest = res.titles?.[0] ? `，最新一条「${res.titles[0]}」` : "";
+    rssLinkTest.text = `能用：取到 ${res.count} 条${latest}`;
+  } catch (e) {
+    if (rssLinkTest.url !== url) return;
+    rssLinkTest.ok = false;
+    rssLinkTest.text = ((e as Error)?.message || "试的时候出错了").trim();
+  } finally {
+    if (rssLinkTest.url === url) rssLinkTest.loading = false;
+  }
+}
+
+/** 这个链接的试验结果（链接改了以后不显示旧结果） */
+function rssLinkTestFor(raw: string) {
+  return rssLinkTest.url && rssLinkTest.url === raw.trim() && !rssLinkTest.loading
+    ? rssLinkTest
+    : null;
+}
 
 function parseConfIDs(raw: string | undefined): number[] {
   if (!raw) return [];
@@ -386,6 +449,10 @@ async function addRss() {
     ElMessage.error("链接必须以 http:// 或 https:// 开头");
     return;
   }
+  if (newRssProblem.value?.block) {
+    ElMessage.error(newRssProblem.value.text);
+    return;
+  }
 
   // 检查重复 RSS URL
   const normalizedUrl = newRss.url.trim().toLowerCase();
@@ -507,6 +574,12 @@ async function updateRss() {
   }
   if (!editingRss.url.startsWith("http://") && !editingRss.url.startsWith("https://")) {
     ElMessage.error("链接必须以 http:// 或 https:// 开头");
+    return;
+  }
+  // 地址没改时不拦（升级前照着示例建的那条，改别的设置照样能存）；改了的才按占位地址拦
+  const before = form.value.rss[editingRssIndex.value]?.url?.trim();
+  if (editRssProblem.value?.block && before !== editingRss.url.trim()) {
+    ElMessage.error(editRssProblem.value.text);
     return;
   }
 
@@ -1029,6 +1102,14 @@ function ruleNameOf(id: number): string {
               <header class="rss__head">
                 <span class="rss__name">{{ row.name }}</span>
                 <PtTag v-if="row.is_example">示例</PtTag>
+                <PtStatusPill
+                  v-else-if="isPlaceholderRssUrl(row.url)"
+                  tone="warn"
+                  size="sm"
+                  :data-testid="`rss-placeholder-${row.id}`"
+                  title="地址还是示例里的占位地址，RSS 任务不会去拉它：点编辑换成站点 RSS 页上给你的链接"
+                  >占位地址，不会去拉</PtStatusPill
+                >
                 <span class="rss__int">
                   <PtIcon name="timer" :size="12" />
                   {{ row.interval_minutes }} 分钟
@@ -1538,7 +1619,31 @@ function ruleNameOf(id: number): string {
           </el-form-item>
         </div>
         <el-form-item label="链接" required>
-          <el-input v-model="newRss.url" placeholder="https://..." />
+          <div class="rss-link">
+            <el-input v-model="newRss.url" placeholder="https://..." data-testid="rss-new-url" />
+            <!-- 占位地址取不到任何种子（下面已经写明），试也没用 -->
+            <el-button
+              :loading="rssLinkTest.loading && rssLinkTest.url === newRss.url.trim()"
+              :disabled="newRssProblem?.block"
+              data-testid="rss-new-test"
+              @click="testRssLink(newRss.url)"
+              >试一下</el-button
+            >
+          </div>
+          <div
+            v-if="newRssProblem"
+            class="field-tip"
+            :class="newRssProblem.block ? 'field-tip--dang' : 'field-tip--warn'"
+            data-testid="rss-new-problem">
+            {{ newRssProblem.text }}
+          </div>
+          <div
+            v-if="rssLinkTestFor(newRss.url)"
+            class="field-tip"
+            :class="rssLinkTestFor(newRss.url)!.ok ? 'field-tip--ok' : 'field-tip--dang'"
+            data-testid="rss-new-test-result">
+            {{ rssLinkTestFor(newRss.url)!.text }}
+          </div>
         </el-form-item>
         <div class="field-row">
           <el-form-item label="分类">
@@ -1711,7 +1816,33 @@ function ruleNameOf(id: number): string {
           </el-form-item>
         </div>
         <el-form-item label="链接" required>
-          <el-input v-model="editingRss.url" placeholder="https://..." />
+          <div class="rss-link">
+            <el-input
+              v-model="editingRss.url"
+              placeholder="https://..."
+              data-testid="rss-edit-url" />
+            <el-button
+              :loading="rssLinkTest.loading && rssLinkTest.url === editingRss.url.trim()"
+              :disabled="editRssProblem?.block"
+              data-testid="rss-edit-test"
+              @click="testRssLink(editingRss.url)"
+              >试一下</el-button
+            >
+          </div>
+          <div
+            v-if="editRssProblem"
+            class="field-tip"
+            :class="editRssProblem.block ? 'field-tip--dang' : 'field-tip--warn'"
+            data-testid="rss-edit-problem">
+            {{ editRssProblem.text }}
+          </div>
+          <div
+            v-if="rssLinkTestFor(editingRss.url)"
+            class="field-tip"
+            :class="rssLinkTestFor(editingRss.url)!.ok ? 'field-tip--ok' : 'field-tip--dang'"
+            data-testid="rss-edit-test-result">
+            {{ rssLinkTestFor(editingRss.url)!.text }}
+          </div>
         </el-form-item>
         <div class="field-row">
           <el-form-item label="分类">
@@ -1868,6 +1999,18 @@ function ruleNameOf(id: number): string {
 </template>
 
 <style scoped>
+/* RSS 链接：输入框占满，「试一下」跟在右边 */
+.rss-link {
+  display: flex;
+  gap: var(--pt-space-2);
+  width: 100%;
+}
+
+.rss-link .el-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* 站点统计卡里 30 天上传走势：标签在左、柱在右，与上面几行同一个 kv 节奏 */
 .sd-trend {
   align-items: flex-end;

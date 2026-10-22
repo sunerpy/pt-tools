@@ -107,6 +107,10 @@ func TestScheduleNormalize(t *testing.T) {
 		{Schedule{Kind: models.MediaScheduleDaily}, Schedule{Kind: models.MediaScheduleDaily, At: "20:00"}, models.MediaKindMovie},
 		{Schedule{Kind: models.MediaScheduleWeekly, At: "9:30", Days: []int{6, 0, 6}}, Schedule{Kind: models.MediaScheduleWeekly, At: "09:30", Days: []int{0, 6}}, models.MediaKindTV},
 		{Schedule{Kind: models.MediaScheduleEveryDays, At: "23:59", Every: 30, Days: []int{1}}, Schedule{Kind: models.MediaScheduleEveryDays, At: "23:59", Every: 30}, models.MediaKindTV},
+		// 按间隔：只留分钟数；电影也能用
+		{Schedule{Kind: models.MediaScheduleInterval, IntervalMinutes: 90, At: "08:00", Cron: "x"}, Schedule{Kind: models.MediaScheduleInterval, IntervalMinutes: 90}, models.MediaKindMovie},
+		// cron：存规整后的写法
+		{Schedule{Kind: models.MediaScheduleCron, Cron: " 0  22 * * fri ;\n0 9,13 * * 6 ", Every: 3}, Schedule{Kind: models.MediaScheduleCron, Cron: "0 22 * * fri; 0 9,13 * * 6"}, models.MediaKindTV},
 	}
 	for _, c := range ok {
 		got, err := c.in.normalize(c.media)
@@ -126,6 +130,10 @@ func TestScheduleNormalize(t *testing.T) {
 		{Schedule{Kind: models.MediaScheduleWeekly, Days: []int{7}}, models.MediaKindTV, "星期几"},
 		{Schedule{Kind: models.MediaScheduleMonthly}, models.MediaKindTV, "几号"},
 		{Schedule{Kind: "hourly"}, models.MediaKindTV, "定时要选"},
+		{Schedule{Kind: models.MediaScheduleInterval, IntervalMinutes: 29}, models.MediaKindTV, "30 分钟到 7 天"},
+		{Schedule{Kind: models.MediaScheduleInterval, IntervalMinutes: 7*24*60 + 1}, models.MediaKindTV, "30 分钟到 7 天"},
+		{Schedule{Kind: models.MediaScheduleCron}, models.MediaKindTV, "cron 表达式要填"},
+		{Schedule{Kind: models.MediaScheduleCron, Cron: "0 25 * * *"}, models.MediaKindTV, "第 2 段（小时）"},
 	} {
 		_, err := c.in.normalize(c.media)
 		require.ErrorIs(t, err, ErrInvalid, "%+v", c.in)
@@ -191,6 +199,23 @@ func TestNextSearch(t *testing.T) {
 	sameTime(t, want.Add(-scheduleJitter/2), got, "定时加前后 5 分钟的偏移（测试里偏移是 0，所以早 5 分钟）")
 	if want.Sub(now) < minNextSearch+scheduleJitter {
 		assert.False(t, got.Before(now.Add(minNextSearch)))
+	}
+
+	// 按间隔：从这次算起；偏移前后各最多 5 分钟（短间隔按十分之一）
+	interval := &models.MediaSubscription{MediaType: models.MediaKindTV, ScheduleKind: models.MediaScheduleInterval, ScheduleIntervalMinutes: 180, CreatedAt: now}
+	sameTime(t, now.Add(180*time.Minute-scheduleJitter/2), e.svc.nextSearch(interval, set, nil, now), "3 小时（测试里偏移是 0，所以早 5 分钟）")
+	short := &models.MediaSubscription{MediaType: models.MediaKindTV, ScheduleKind: models.MediaScheduleInterval, ScheduleIntervalMinutes: 30, CreatedAt: now}
+	sameTime(t, now.Add(minNextSearch), e.svc.nextSearch(short, set, nil, now), "最短 30 分钟一次")
+
+	// cron：按表达式下一个到点的时间（加偏移），几条取最早的
+	cron := &models.MediaSubscription{MediaType: models.MediaKindTV, ScheduleKind: models.MediaScheduleCron, ScheduleCron: "0 22 * * 5; 0 9 * * 6", CreatedAt: now}
+	wantCron, ok := schedule.Next(schedule.Spec{Kind: schedule.Cron, Expr: "0 22 * * 5; 0 9 * * 6"}, now, time.Local)
+	require.True(t, ok)
+	gotCron := e.svc.nextSearch(cron, set, nil, now)
+	if wantCron.Sub(now) > minNextSearch+scheduleJitter {
+		sameTime(t, wantCron.Add(-scheduleJitter/2), gotCron)
+	} else {
+		assert.False(t, gotCron.Before(now.Add(minNextSearch)))
 	}
 
 	// 按播出时间：台账里每一集各算一个时间，取最早的
@@ -623,6 +648,52 @@ func TestFromTorrent(t *testing.T) {
 	assert.Equal(t, "mteam", ev.Fields["site"])
 	assert.Equal(t, int64(4), ev.Fields["season"])
 	assert.Empty(t, e.noticesOf(NoticeDownloaded), "追剧不再发订阅下载")
+}
+
+// 选中的种子没推成（种子文件没下载下来）：版本锁按它的版本定下，重新搜索时推的还是这个版本，不会换成分数更高的
+// 别的版本（以前锁要等第一次推送成功才定，重新搜索的本轮锁按分数最高的候选定，用户选的版本就丢了）
+func TestFromTorrentPushFailedKeepsChosenVersion(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	chosen := e.item("mteam", "611", "Natural.High.S04E01.2023.1080p.WEB-DL.H.264-HHWEB", "", 1, 10)
+	file := e.site.files["611"]
+	delete(e.site.files, "611")
+	e.search.cache(chosen)
+	sub := e.follow(func(in *SubscriptionInput) { in.FromTorrent = &FromTorrent{Site: "mteam", TorrentID: "611"} })
+	assert.Empty(t, pushedIDs(e))
+	got := e.subRow(sub.ID)
+	assert.Equal(t, "HHWEB", got.LockGroup, "按选中的种子定了锁")
+	assert.Equal(t, "1080p", got.LockResolution)
+	runs := e.runs(sub.ID)
+	require.Len(t, runs, 1)
+	assert.Equal(t, models.MediaRunFailed, runs[0].Status)
+	assert.Contains(t, stepsOf(runs[0]), "选中的种子没推成：版本锁按它的版本（HHWEB 1080p）定下，重新搜索时还要这个版本")
+
+	// 种子文件能下载了：重新搜索推 HHWEB 1080p 的第 1、2 集；分数更高的 PTerWEB 2160p 是别的版本
+	e.site.files["611"] = file
+	e.search.set(
+		chosen,
+		e.item("mteam", "612", "Natural.High.S04E02.2023.1080p.WEB-DL.H.264-HHWEB", "", 1, 10),
+		e.item("mteam", "613", "Natural.High.S04E01.2023.2160p.WEB-DL.H.265-PTerWEB", "", 3, 10),
+	)
+	_, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"611", "612"}, pushedIDs(e))
+
+	// 没开版本锁：推送失败也不定锁
+	e2 := newEnv(t)
+	e2.enable(nil)
+	it := e2.item("mteam", "621", "Natural.High.S04E01.2023.1080p.WEB-DL.H.264-HHWEB", "", 1, 10)
+	delete(e2.site.files, "621")
+	e2.search.cache(it)
+	off := false
+	sub2 := e2.follow(func(in *SubscriptionInput) {
+		in.FromTorrent = &FromTorrent{Site: "mteam", TorrentID: "621"}
+		in.LockVersion = &off
+	})
+	got = e2.subRow(sub2.ID)
+	assert.Empty(t, got.LockGroup)
+	assert.Empty(t, got.LockResolution)
 }
 
 func TestFromTorrentFallbacks(t *testing.T) {

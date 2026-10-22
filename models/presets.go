@@ -220,6 +220,14 @@ func IsExampleURL(url string) bool {
 	return false
 }
 
+// IsPlaceholderRSSHost 判断 RSS 地址的主机是不是示例里的占位地址（hdsky.xxx、springxxx.xxx、rss.m-team.xxx 这类，
+// 顶级域都是 xxx）：照着示例填、忘了换成真实链接的 RSS 永远取不到，不去请求它。
+// 只看 .xxx 结尾（没有一个内置站点在 .xxx 顶级域上）；example.com 这类不算，测试与文档里常拿它当真实地址用。
+func IsPlaceholderRSSHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	return host == "xxx" || strings.HasSuffix(host, ".xxx")
+}
+
 // MigrateExampleRSS 迁移旧版本的示例 RSS 配置
 // 将 URL 包含示例模式的 RSS 订阅标记为 IsExample=true
 func MigrateExampleRSS(db *gorm.DB) error {

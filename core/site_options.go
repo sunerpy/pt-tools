@@ -152,6 +152,12 @@ func (s *ConfigStore) UpdateRSSInSite(siteName string, entry models.RSSConfig) (
 		if err != nil {
 			return err
 		}
+		// 地址没改时照样能保存别的设置（已经存着的占位地址不卡住），改了地址才检查是不是占位地址
+		if strings.TrimSpace(entry.URL) != strings.TrimSpace(row.URL) {
+			if err := rssPlaceholderError(entry.URL); err != nil {
+				return err
+			}
+		}
 		if normalized.DownloaderID != nil {
 			var downloader models.DownloaderSetting
 			if err := tx.First(&downloader, *normalized.DownloaderID).Error; err != nil {

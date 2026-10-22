@@ -437,8 +437,18 @@ export const attendanceApi = {
     ),
 };
 
+/** 试一下 RSS 链接（只拉一次，不存）的结果 */
+export interface RSSLinkTestResult {
+  title: string;
+  count: number;
+  /** 最新的几条标题 */
+  titles: string[];
+}
+
 export const sitesApi = {
   list: (signal?: AbortSignal) => api.get<Record<string, SiteConfig>>("/api/sites", { signal }),
+  /** 添加、编辑 RSS 时先试一下链接：失败时错误文本说清楚是哪一步出的问题 */
+  testRssLink: (url: string) => api.post<RSSLinkTestResult>("/api/rss/test", { url }),
   listLoginStates: () => api.get<SiteLoginState[]>("/api/sites/login-state"),
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
   save: (name: string, data: SiteConfig) => api.post<void>(`/api/sites/${name}`, data),
@@ -706,12 +716,20 @@ export interface FilterRuleTestMatch {
   decision?: "downloaded" | "skipped";
   reason?: string;
   source?: "filter_rule" | "free_download" | "";
+  /** RSS 试跑时这个种子的详情没取到：标题按 RSS 里的，免费状态不知道（按非免费算） */
+  detail_missing?: boolean;
 }
 
 export interface FilterRuleTestResponse {
   match_count: number;
   total_count: number;
   matches: FilterRuleTestMatch[];
+  /** 这次用的数据：history 是最近入库的种子记录，rss 是现拉的 RSS */
+  source?: "history" | "rss";
+  /** 数据源的说明：RSS 的名称与站点，或「最近入库的 N 条种子记录」 */
+  source_name?: string;
+  /** RSS 里详情没取到的条目数 */
+  detail_failed?: number;
 }
 
 // 过滤规则 API
@@ -3252,10 +3270,22 @@ export interface SubscriptionProgress {
 }
 
 /** 追剧主动搜索的定时：空的沿用全局间隔。 */
-export type FollowScheduleKind = "" | "airtime" | "daily" | "every_days" | "weekly" | "monthly";
+export type FollowScheduleKind =
+  | ""
+  | "airtime"
+  | "interval"
+  | "daily"
+  | "every_days"
+  | "weekly"
+  | "monthly"
+  | "cron";
 
 export interface FollowSchedule {
   kind: FollowScheduleKind;
+  /** interval：每隔几分钟（30 分钟到 7 天），从上次搜索算起 */
+  interval_minutes?: number;
+  /** cron：分 时 日 月 星期；几条用分号分开，到点的取最早的 */
+  cron?: string;
   /** HH:MM；按播出时间时是播出的时刻 */
   at?: string;
   /** every_days 的天数 */
@@ -3332,6 +3362,28 @@ export interface SubscriptionTorrent {
   status: "downloading" | "done" | "failed" | "replaced";
   message: string;
   created_at: string;
+  /** 这个种子整理进媒体库的情况：每个视频文件一条整理记录（还没整理过时为空） */
+  files?: SubscriptionTorrentFile[];
+  /** 能重新整理：有整理没成、也不在自动重试的文件，或者种子标成了失败、还没有整理记录 */
+  can_organize?: boolean;
+  /** 能重新刮削：有整理好的文件 */
+  can_rescrape?: boolean;
+}
+
+/** 订阅下载的种子里一个视频文件的整理记录 */
+export interface SubscriptionTorrentFile {
+  /** 整理记录的编号（整理历史里同一条） */
+  id: number;
+  name: string;
+  episode?: number;
+  episode_end?: number;
+  status: MediaTransferStatus;
+  message?: string;
+  scrape_status?: "" | MediaScrapeStatus;
+  scrape_note?: string;
+  next_retry_at?: string;
+  /** 整理队列正在重试它 */
+  retrying?: boolean;
 }
 
 export interface SubscriptionDetail extends Subscription {
@@ -3483,6 +3535,20 @@ export const subscribeApi = {
   setStatus: (id: number, status: "active" | "paused") =>
     api.post<Subscription>(`/api/media/subscriptions/${id}/status`, { status }),
   search: (id: number) => api.post<{ message: string }>(`/api/media/subscriptions/${id}/search`),
+  /** 重新整理订阅下载的一个种子（整季包与单集一样）：按订阅的条目与媒体库，已经整理好的文件不动 */
+  organizeTorrent: (id: number, tid: number) =>
+    api.post<OrganizeResult>(`/api/media/subscriptions/${id}/torrents/${tid}/organize`),
+  /** 重新刮削订阅下载的一个种子整理进的电影或剧集 */
+  rescrapeTorrent: (id: number, tid: number) =>
+    api.post<RescrapeResult>(`/api/media/subscriptions/${id}/torrents/${tid}/scrape`),
+  /** 定时接下来几次什么时候搜（只读）；定时不对时报错，错误文本说清楚哪里不对 */
+  previewSchedule: (data: {
+    schedule: FollowSchedule;
+    media_type?: MediaKind;
+    subscription_id?: number;
+    count?: number;
+  }) =>
+    api.post<{ next: string[]; note?: string }>("/api/media/subscriptions/schedule-preview", data),
   episodes: (id: number) =>
     api.get<SubscriptionEpisode[]>(`/api/media/subscriptions/${id}/episodes`),
   skipEpisode: (id: number, n: number, skip: boolean) =>
@@ -3579,6 +3645,23 @@ export const tokensApi = {
   list: () => api.get<ApiToken[]>("/api/tokens"),
   create: (data: ApiTokenInput) => api.post<ApiTokenCreated>("/api/tokens", data),
   revoke: (id: number) => api.delete<{ ok: boolean }>(`/api/tokens/${id}`),
+};
+
+/** MCP 接入的开关与路径：关着时外部的 AI 客户端连不上（内置 AI 助手不受影响） */
+export interface McpSettings {
+  enabled: boolean;
+  /** MCP 的路径（/mcp 这样） */
+  path: string;
+  default_path: string;
+  /** 现在能连 MCP 的令牌个数（没过期、有 MCP 权限）；读不到时是 -1 */
+  tokens: number;
+  updated_at?: string;
+}
+
+export const mcpApi = {
+  settings: () => api.get<McpSettings>("/api/mcp/settings"),
+  save: (data: { enabled: boolean; path: string }) =>
+    api.put<McpSettings>("/api/mcp/settings", data),
 };
 
 /** qB 兼容入口（路线图 M13）：监听地址是启动参数，这里只读 */

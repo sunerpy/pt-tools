@@ -26,12 +26,14 @@ import (
 // 令牌既没有 mcp:read 也没有 mcp:write 回 403；网页登录的 session 不收。工具在 internal/mcp，
 // 它们经 mcpBackend 在进程内调用 App API v1，所以字段与脱敏和 App API 完全一样。
 
-// mcpPath 是 MCP 的地址。
+// mcpPath 是 MCP 默认的地址；在「系统 → MCP 接入」里可以关掉或者换一个路径（见 mcp_setting.go）。
 const mcpPath = "/mcp"
 
-// registerMCPRoutes 挂上 /mcp。
+// registerMCPRoutes 建好 MCP 的处理与设置接口。MCP 的地址不挂在 mux 上：路径能在网页上改，由 mcpGate 在路由前面分发。
 func (s *Server) registerMCPRoutes(mux *http.ServeMux) {
-	mux.Handle(mcpPath, s.mcpHandler())
+	s.mcpHTTP = s.mcpHandler()
+	s.loadMCPAccess()
+	s.registerMCPSettingRoutes(mux)
 }
 
 // mcpHandler 校验令牌，再交给 go-sdk 的 streamable HTTP 处理。

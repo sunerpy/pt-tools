@@ -673,6 +673,25 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	}
 	// RSS 列表允许为空，只在有内容时进行校验
 	if len(sc.RSS) > 0 {
+		// 已经存着的占位地址照样能保存（只改站点的别的设置时不卡住），新填的或改过的不行
+		storedURL := map[uint]string{}
+		if existingSite.ID != 0 {
+			var rows []models.RSSSubscription
+			if err := s.db.DB.Where("site_id = ?", existingSite.ID).Find(&rows).Error; err != nil {
+				return err
+			}
+			for _, row := range rows {
+				storedURL[row.ID] = row.URL
+			}
+		}
+		for i, r := range sc.RSS {
+			if stored, ok := storedURL[r.ID]; ok && r.ID != 0 && strings.TrimSpace(stored) == strings.TrimSpace(r.URL) {
+				continue
+			}
+			if err := rssPlaceholderError(r.URL); err != nil {
+				return fmt.Errorf("第 %d 条 RSS「%s」：%w", i+1, r.Name, err)
+			}
+		}
 		// 检查重复 RSS URL
 		urlSet := make(map[string]bool)
 		for i, r := range sc.RSS {
@@ -793,6 +812,9 @@ func (s *ConfigStore) AppendRSSToSite(siteName string, entry models.RSSConfig) (
 
 		normalized, err := validateAndNormalizeRSS(existing, entry)
 		if err != nil {
+			return err
+		}
+		if err := rssPlaceholderError(normalized.URL); err != nil {
 			return err
 		}
 		if normalized.DownloaderID != nil {

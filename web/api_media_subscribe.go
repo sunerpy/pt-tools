@@ -29,11 +29,14 @@ func (s *Server) registerSubscribeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/media/quality-profiles/{id}", s.auth(s.apiQualityProfileDelete))
 	mux.HandleFunc("GET /api/media/subscriptions", s.auth(s.apiSubscriptions))
 	mux.HandleFunc("POST /api/media/subscriptions", s.auth(s.apiSubscriptionCreate))
+	mux.HandleFunc("POST /api/media/subscriptions/schedule-preview", s.auth(s.apiSchedulePreview))
 	mux.HandleFunc("GET /api/media/subscriptions/{id}", s.auth(s.apiSubscriptionGet))
 	mux.HandleFunc("PUT /api/media/subscriptions/{id}", s.auth(s.apiSubscriptionUpdate))
 	mux.HandleFunc("DELETE /api/media/subscriptions/{id}", s.auth(s.apiSubscriptionDelete))
 	mux.HandleFunc("POST /api/media/subscriptions/{id}/status", s.auth(s.apiSubscriptionStatus))
 	mux.HandleFunc("POST /api/media/subscriptions/{id}/search", s.auth(s.apiSubscriptionSearch))
+	mux.HandleFunc("POST /api/media/subscriptions/{id}/torrents/{tid}/organize", s.auth(s.apiSubscriptionTorrentOrganize))
+	mux.HandleFunc("POST /api/media/subscriptions/{id}/torrents/{tid}/scrape", s.auth(s.apiSubscriptionTorrentScrape))
 	mux.HandleFunc("GET /api/media/subscriptions/{id}/episodes", s.auth(s.apiSubscriptionEpisodes))
 	mux.HandleFunc("POST /api/media/subscriptions/{id}/episodes/{n}/skip", s.auth(s.apiSubscriptionEpisodeSkip))
 	mux.HandleFunc("POST /api/media/subscriptions/{id}/episodes/{n}/unlock", s.auth(s.apiSubscriptionEpisodeUnlock))
@@ -596,6 +599,139 @@ func (s *Server) apiEpisodeRuleDelete(w http.ResponseWriter, r *http.Request) {
 	got, err := svc.DeleteEpisodeRule(r.Context(), id, r.URL.Query().Get("group"))
 	if err != nil {
 		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// SchedulePreviewInput 是 POST /api/media/subscriptions/schedule-preview：改定时的时候看接下来几次什么时候搜。
+// SubscriptionID 给了时按那个订阅的类型与建立时间算（每隔几天从建立那天对齐）。
+type SchedulePreviewInput struct {
+	Schedule       subscribe.Schedule `json:"schedule"`
+	MediaType      string             `json:"media_type,omitempty"`
+	SubscriptionID uint               `json:"subscription_id,omitempty"`
+	Count          int                `json:"count,omitempty"`
+}
+
+// SchedulePreviewView 是预览的结果：接下来几次搜索的时间；按播出时间的不算，Note 说明为什么。
+type SchedulePreviewView struct {
+	Next []time.Time `json:"next"`
+	Note string      `json:"note,omitempty"`
+}
+
+// schedulePreview 算定时的预览（网页与 App API 共用）。
+func schedulePreview(ctx context.Context, svc *subscribe.Service, in SchedulePreviewInput) (SchedulePreviewView, error) {
+	var anchor time.Time
+	if in.SubscriptionID != 0 {
+		sub, err := svc.Subscription(ctx, in.SubscriptionID)
+		if err != nil {
+			return SchedulePreviewView{}, err
+		}
+		anchor = sub.CreatedAt
+		if in.MediaType == "" {
+			in.MediaType = sub.MediaType
+		}
+	}
+	count := in.Count
+	if count <= 0 {
+		count = 5
+	}
+	next, err := svc.SchedulePreview(ctx, in.Schedule, in.MediaType, anchor, count)
+	if err != nil {
+		return SchedulePreviewView{}, err
+	}
+	out := SchedulePreviewView{Next: next}
+	if out.Next == nil {
+		out.Next = []time.Time{}
+	}
+	if in.Schedule.Kind == models.MediaScheduleAirtime {
+		out.Note = "按每一集的播出时间算：播出前不搜，播出后隔一段再搜，具体时间看每集的播出日期"
+	}
+	return out, nil
+}
+
+// apiSchedulePreview handles POST /api/media/subscriptions/schedule-preview
+func (s *Server) apiSchedulePreview(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	var in SchedulePreviewInput
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	out, err := schedulePreview(r.Context(), svc, in)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// writeSubscribeOrganizeError 是订阅里整理、刮削的错误：订阅的错误按订阅的，整理入库回的按整理的。
+func writeSubscribeOrganizeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, subscribe.ErrInvalid) || errors.Is(err, subscribe.ErrNotFound) {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeOrganizeError(w, err)
+}
+
+// pathTorrentID 是路径里订阅种子的编号（订阅详情 torrent_list 里的 id）。
+func pathTorrentID(w http.ResponseWriter, r *http.Request) (uint, bool) {
+	id, err := strconv.ParseUint(r.PathValue("tid"), 10, 64)
+	if err != nil || id == 0 {
+		http.Error(w, "种子编号无效", http.StatusBadRequest)
+		return 0, false
+	}
+	return uint(id), true
+}
+
+// apiSubscriptionTorrentOrganize handles POST /api/media/subscriptions/{id}/torrents/{tid}/organize：
+// 重新整理订阅下载的一个种子（整季包与单集一样），按订阅的条目与媒体库。
+func (s *Server) apiSubscriptionTorrentOrganize(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	tid, ok := pathTorrentID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	got, err := svc.OrganizeTorrent(ctx, id, tid)
+	if err != nil {
+		writeSubscribeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiSubscriptionTorrentScrape handles POST /api/media/subscriptions/{id}/torrents/{tid}/scrape：
+// 重新刮削订阅下载的一个种子整理进的电影或剧集。
+func (s *Server) apiSubscriptionTorrentScrape(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	tid, ok := pathTorrentID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	got, err := svc.RescrapeTorrent(ctx, id, tid)
+	if err != nil {
+		writeSubscribeOrganizeError(w, err)
 		return
 	}
 	writeJSON(w, got)

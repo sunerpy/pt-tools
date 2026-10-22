@@ -2044,6 +2044,67 @@ class AppApi {
     return null;
   }
 
+  /// 重新整理订阅下载的一个种子（整季包与单集一样）：按订阅的条目与媒体库，已经整理好的文件不动
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] tid (required):
+  ///   订阅详情 torrents 里的 id
+  Future<Response> organizeSubscriptionTorrentWithHttpInfo(int id, int tid, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/torrents/{tid}/organize'
+      .replaceAll('{id}', id.toString())
+      .replaceAll('{tid}', tid.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 重新整理订阅下载的一个种子（整季包与单集一样）：按订阅的条目与媒体库，已经整理好的文件不动
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] tid (required):
+  ///   订阅详情 torrents 里的 id
+  Future<AppOrganizeResult?> organizeSubscriptionTorrent(int id, int tid, { Future<void>? abortTrigger, }) async {
+    final response = await organizeSubscriptionTorrentWithHttpInfo(id, tid, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizeResult',) as AppOrganizeResult;
+    
+    }
+    return null;
+  }
+
   /// 预览一次改动（要 app:config 与 app:read）：每个字段改以前、改以后与可能的影响，不保存
   ///
   /// Note: This method returns the HTTP [Response].
@@ -2152,6 +2213,59 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizePlan',) as AppOrganizePlan;
+    
+    }
+    return null;
+  }
+
+  /// 看一个追剧定时接下来几次什么时候搜（只读，不改订阅；定时不对时回 400 并写明哪里不对）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [AppSchedulePreviewInput] appSchedulePreviewInput (required):
+  Future<Response> previewScheduleWithHttpInfo(AppSchedulePreviewInput appSchedulePreviewInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/schedule/preview';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appSchedulePreviewInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 看一个追剧定时接下来几次什么时候搜（只读，不改订阅；定时不对时回 400 并写明哪里不对）
+  ///
+  /// Parameters:
+  ///
+  /// * [AppSchedulePreviewInput] appSchedulePreviewInput (required):
+  Future<AppSchedulePreview?> previewSchedule(AppSchedulePreviewInput appSchedulePreviewInput, { Future<void>? abortTrigger, }) async {
+    final response = await previewScheduleWithHttpInfo(appSchedulePreviewInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSchedulePreview',) as AppSchedulePreview;
     
     }
     return null;
@@ -2311,6 +2425,123 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppRecognition',) as AppRecognition;
+    
+    }
+    return null;
+  }
+
+  /// 重新刮削一条整理记录所在的电影或剧集（这个媒体库里同一部整理好的都刮削；媒体库要开着刮削）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   整理记录的编号（GET /media/history 的 id）
+  Future<Response> rescrapeMediaHistoryWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/media/history/{id}/scrape'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 重新刮削一条整理记录所在的电影或剧集（这个媒体库里同一部整理好的都刮削；媒体库要开着刮削）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   整理记录的编号（GET /media/history 的 id）
+  Future<AppRescrapeResult?> rescrapeMediaHistory(int id, { Future<void>? abortTrigger, }) async {
+    final response = await rescrapeMediaHistoryWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppRescrapeResult',) as AppRescrapeResult;
+    
+    }
+    return null;
+  }
+
+  /// 重新刮削订阅下载的一个种子整理进的电影或剧集（要有整理好的文件）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] tid (required):
+  ///   订阅详情 torrents 里的 id
+  Future<Response> rescrapeSubscriptionTorrentWithHttpInfo(int id, int tid, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/torrents/{tid}/scrape'
+      .replaceAll('{id}', id.toString())
+      .replaceAll('{tid}', tid.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 重新刮削订阅下载的一个种子整理进的电影或剧集（要有整理好的文件）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] tid (required):
+  ///   订阅详情 torrents 里的 id
+  Future<AppRescrapeResult?> rescrapeSubscriptionTorrent(int id, int tid, { Future<void>? abortTrigger, }) async {
+    final response = await rescrapeSubscriptionTorrentWithHttpInfo(id, tid, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppRescrapeResult',) as AppRescrapeResult;
     
     }
     return null;

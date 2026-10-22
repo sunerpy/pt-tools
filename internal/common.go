@@ -1044,7 +1044,7 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 		return errors.New(enableError)
 	}
 
-	feed, err := fetchRSSFeed(rssCfg.URL)
+	feed, err := FetchRSSFeed(ctx, rssCfg.URL)
 	if err != nil {
 		sLogger().Errorf("[RSS任务失败] 站点=%s, RSS=%s, 错误=%v", siteName, rssCfg.Name, err)
 		return err
@@ -1103,41 +1103,12 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 }
 
 func fetchRSSFeed(url string) (*gofeed.Feed, error) {
-	return fetchRSSFeedWithContext(context.Background(), url)
+	return FetchRSSFeed(context.Background(), url)
 }
 
-// fetchRSSFeedWithContext fetches an RSS feed with a real browser User-Agent so
-// Cloudflare-fronted PT trackers (e.g. gtkpw, agsvpt) don't drop the TLS handshake.
-// gofeed's default ParseURL sets a generic UA that is regularly RST'd by these CDNs.
+// fetchRSSFeedWithContext 同 FetchRSSFeed（见 rss_fetch.go）。
 func fetchRSSFeedWithContext(ctx context.Context, url string) (*gofeed.Feed, error) {
-	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("构造 RSS 请求失败: %w", err)
-	}
-	req.Header.Set("User-Agent", rssUserAgent)
-	req.Header.Set("Accept", "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.5")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("解析 RSS 失败: %w", utils.RedactURLError(err))
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("解析 RSS 失败: HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
-	}
-
-	parser := gofeed.NewParser()
-	feed, err := parser.Parse(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("解析 RSS 失败: %w", err)
-	}
-	return feed, nil
+	return FetchRSSFeed(ctx, url)
 }
 
 const rssUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

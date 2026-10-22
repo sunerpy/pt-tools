@@ -725,7 +725,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 行卡替代了展开行，详情放弹窗；桌面走表格展开，不会用到这里 -->
-    <el-dialog v-model="detailVisible" title="通知详情" width="92%" align-center>
+    <el-dialog v-model="detailVisible" class="pt-dialog" title="通知详情" width="92%" align-center>
       <div v-if="detailRow" class="detail">
         <div v-for="it in detailItems(detailRow)" :key="it.k" class="detail__kv">
           <span class="detail__k">{{ it.k }}</span>

@@ -224,8 +224,12 @@ func TestFetchRSSFeed_TransportErrorRedactsPasskey(t *testing.T) {
 	srv := closingServer(t)
 	_, err := fetchRSSFeedWithContext(context.Background(), srv.URL+"/torrentrss.php?passkey=TOPSECRET&rows=10")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "解析 RSS 失败")
+	// 连上以后被断开：说明里有主机名，没有查询串
+	assert.Contains(t, err.Error(), "127.0.0.1")
 	assert.NotContains(t, err.Error(), "TOPSECRET")
+	var fe *RSSFetchError
+	require.ErrorAs(t, err, &fe)
+	assert.NotContains(t, fe.Err.Error(), "TOPSECRET", "原错误链里的地址也要脱敏")
 }
 
 func TestAttemptDownloadWithContext_InvalidTorrent(t *testing.T) {

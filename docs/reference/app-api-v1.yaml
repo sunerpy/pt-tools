@@ -295,6 +295,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppOrganizeResult" }
         default: { $ref: "#/components/responses/Error" }
+  /media/history/{id}/scrape:
+    post:
+      operationId: rescrapeMediaHistory
+      tags: [App]
+      summary: 重新刮削一条整理记录所在的电影或剧集（这个媒体库里同一部整理好的都刮削；媒体库要开着刮削）
+      parameters:
+        - $ref: "#/components/parameters/HistoryID"
+      responses:
+        "200":
+          description: 这次刮削的结果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppRescrapeResult" }
+        default: { $ref: "#/components/responses/Error" }
   /media/libraries:
     get:
       operationId: listMediaLibraries
@@ -473,6 +487,36 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppMessage" }
         default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/torrents/{tid}/organize:
+    post:
+      operationId: organizeSubscriptionTorrent
+      tags: [App]
+      summary: 重新整理订阅下载的一个种子（整季包与单集一样）：按订阅的条目与媒体库，已经整理好的文件不动
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+        - $ref: "#/components/parameters/SubscriptionTorrentID"
+      responses:
+        "200":
+          description: 这次整理的结果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppOrganizeResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/torrents/{tid}/scrape:
+    post:
+      operationId: rescrapeSubscriptionTorrent
+      tags: [App]
+      summary: 重新刮削订阅下载的一个种子整理进的电影或剧集（要有整理好的文件）
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+        - $ref: "#/components/parameters/SubscriptionTorrentID"
+      responses:
+        "200":
+          description: 这次刮削的结果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppRescrapeResult" }
+        default: { $ref: "#/components/responses/Error" }
   /subscriptions/{id}/episodes:
     get:
       operationId: listSubscriptionEpisodes
@@ -548,6 +592,23 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AppSubscriptionRunPage" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/schedule/preview:
+    post:
+      operationId: previewSchedule
+      tags: [App]
+      summary: 看一个追剧定时接下来几次什么时候搜（只读，不改订阅；定时不对时回 400 并写明哪里不对）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppSchedulePreviewInput" }
+      responses:
+        "200":
+          description: 接下来几次搜索的时间
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSchedulePreview" }
         default: { $ref: "#/components/responses/Error" }
   /subscriptions/{id}/episode-rules:
     get:
@@ -920,6 +981,12 @@ components:
       name: id
       in: path
       required: true
+      schema: { type: integer, minimum: 1 }
+    SubscriptionTorrentID:
+      name: tid
+      in: path
+      required: true
+      description: 订阅详情 torrents 里的 id
       schema: { type: integer, minimum: 1 }
     EpisodeNumber:
       name: n
@@ -1636,6 +1703,16 @@ components:
           type: array
           items: { type: string }
         queued: { type: boolean, description: "还在后台进行（等不到结果就先回了），稍后看整理历史" }
+    AppRescrapeResult:
+      type: object
+      required: [records, written, messages, queued]
+      properties:
+        records: { type: integer, description: "刮削了的整理记录数（同一部在这个媒体库里的）" }
+        written: { type: integer, description: "写了的文件数（内容一样的不重写）" }
+        messages:
+          type: array
+          items: { type: string }
+        queued: { type: boolean, description: "还在后台刮削（等不到结果就先回了），稍后看整理历史" }
     AppProgress:
       type: object
       required: [total, aired, in_library, downloading, missing]
@@ -1678,6 +1755,16 @@ components:
         last_search_at: { type: integer, format: int64 }
         next_search_at: { type: integer, format: int64 }
         created_at: { type: integer, format: int64 }
+        # 在哪里找、推到哪里；旧版本的服务端不给
+        profile_id: { type: integer, description: "质量档案（0 用设置里的默认）" }
+        sites:
+          type: array
+          description: 只在这些站点找（空的是全部站点）
+          items: { type: string }
+        downloader_id: { type: integer, description: "推送到哪个下载器（0 用设置里的）" }
+        category: { type: string }
+        tags: { type: string, description: "推送时的标签，逗号分开" }
+        save_path: { type: string, description: "推送时的保存目录（空的按下载器的默认）" }
         # 以下是追剧（剧集）的设置；旧版本的服务端不给
         schedule: { $ref: "#/components/schemas/AppSchedule" }
         lock_version:
@@ -1696,11 +1783,13 @@ components:
       description: >-
         主动搜索的定时。kind 为空沿用全局间隔；airtime 按播出时间（at 是当地的播出时刻，空的按 20:00；
         播出后 air_delay_hours 小时开始搜，没找到每隔 air_retry_hours 小时再搜，在播出后 air_window_days 天里集中重试，0 用默认的 2 小时、6 小时、7 天）；
-        daily、every_days、weekly、monthly 按 at 的钟点（every 是每隔几天，days 是星期几 0–6 或几号 1–31，短月按月末）。
+        interval 每隔 interval_minutes 分钟搜一次（30 分钟到 7 天，从上次搜索算起）；
+        daily、every_days、weekly、monthly 按 at 的钟点（every 是每隔几天，days 是星期几 0–6 或几号 1–31，短月按月末）；
+        cron 按 cron 表达式（分 时 日 月 星期；几条用分号分开，到点的取最早的；两次搜索至少隔 30 分钟）。
       properties:
         kind:
           type: string
-          description: "空的、airtime、daily、every_days、weekly 或 monthly（回应里不用枚举：以后加了新的种类，旧的 App 也读得了）"
+          description: "空的、airtime、interval、daily、every_days、weekly、monthly 或 cron（回应里不用枚举：以后加了新的种类，旧的 App 也读得了）"
         at: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: "HH:MM" }
         every: { type: integer, minimum: 1, maximum: 30 }
         days:
@@ -1709,6 +1798,35 @@ components:
         air_delay_hours: { type: integer, minimum: 0, maximum: 72 }
         air_retry_hours: { type: integer, minimum: 0, maximum: 48 }
         air_window_days: { type: integer, minimum: 0, maximum: 60 }
+        interval_minutes:
+          { type: integer, minimum: 30, maximum: 10080, description: "interval：每隔几分钟" }
+        cron:
+          type: string
+          maxLength: 512
+          description: "cron：例如「0 20 * * *」（每天 20:00）、「0 22 * * 5; 0 9,13 * * 6」（周五 22:00 与周六 9:00、13:00）"
+    AppSchedulePreviewInput:
+      type: object
+      required: [schedule]
+      additionalProperties: false
+      properties:
+        schedule: { $ref: "#/components/schemas/AppSchedule" }
+        media_type:
+          {
+            type: string,
+            description: "tv 或 movie；不给时按 subscription_id 的订阅，都没有时按剧集",
+          }
+        subscription_id:
+          { type: integer, description: "按这个订阅的类型与建立时间算（每隔几天从建立那天对齐）" }
+        count: { type: integer, minimum: 0, maximum: 10, description: "给几次，默认 5" }
+    AppSchedulePreview:
+      type: object
+      required: [next]
+      properties:
+        next:
+          type: array
+          description: 接下来几次搜索的时间（Unix 秒，不算随机偏移；两次之间至少隔 30 分钟）
+          items: { type: integer, format: int64 }
+        note: { type: string, description: "按播出时间的不给时间，这里说明怎么算" }
     AppEpisode:
       type: object
       required: [number, state]
@@ -1731,6 +1849,7 @@ components:
       type: object
       required: [site, torrent_id, title, status, complete, size, created_at]
       properties:
+        id: { type: integer, description: "重新整理、重新刮削用的编号；旧版本的服务端不给" }
         site: { type: string }
         torrent_id: { type: string }
         title: { type: string }
@@ -1741,6 +1860,30 @@ components:
         size: { type: integer, format: int64 }
         message: { type: string }
         created_at: { type: integer, format: int64 }
+        files:
+          type: array
+          description: 每个视频文件的整理记录（还没整理过时为空）；旧版本的服务端不给
+          items: { $ref: "#/components/schemas/AppTorrentFile" }
+        can_organize:
+          {
+            type: boolean,
+            description: "能重新整理：有整理没成、不在自动重试的文件，或者种子标成了失败",
+          }
+        can_rescrape: { type: boolean, description: "能重新刮削：有整理好的文件" }
+    AppTorrentFile:
+      type: object
+      required: [id, name, status]
+      properties:
+        id: { type: integer, description: "整理记录的编号（/media/history 的 id）" }
+        name: { type: string, description: "源文件名" }
+        episode: { type: integer }
+        episode_end: { type: integer }
+        status: { type: string, description: "done、failed、skipped 或 removed" }
+        message: { type: string }
+        scrape_status: { type: string, description: "ok、partial、failed；空的是没刮削过" }
+        scrape_note: { type: string }
+        next_retry_at: { type: integer, format: int64, description: "失败后下次自动重试的时间" }
+        retrying: { type: boolean, description: "整理队列正在重试它" }
     AppSubscriptionDetail:
       allOf:
         - $ref: "#/components/schemas/AppSubscription"
@@ -1763,6 +1906,15 @@ components:
         season: { type: integer, minimum: 0 }
         profile_id: { type: integer, minimum: 0 }
         upgrade: { type: boolean }
+        sites:
+          type: array
+          description: 只在这些站点找（不给或空的是全部站点）
+          items: { type: string }
+        downloader_id:
+          { type: integer, minimum: 0, description: "推送到哪个下载器（0 用设置里的）" }
+        category: { type: string, maxLength: 128 }
+        tags: { type: string, maxLength: 128, description: "逗号分开" }
+        save_path: { type: string, maxLength: 512 }
         # 以下只用于剧集（追剧）：不给的按播出时间搜索、开着版本锁
         schedule: { $ref: "#/components/schemas/AppSchedule" }
         lock_version: { type: boolean }
@@ -1785,10 +1937,20 @@ components:
     AppSubscriptionUpdate:
       type: object
       additionalProperties: false
-      description: 只改给了的字段；lock_group、lock_resolution 都给空串是清掉锁住的版本（按之后的版本重新定）
+      description: 只改给了的字段（不给或给 null 的不变）；lock_group、lock_resolution 都给空串是清掉锁住的版本（按之后的版本重新定）
       properties:
         profile_id: { type: integer, minimum: 0 }
         upgrade: { type: boolean }
+        sites:
+          type: array
+          nullable: true
+          description: 只在这些站点找（空数组是全部站点；不给或 null 不变，生成的客户端没设时发 null）
+          items: { type: string }
+        downloader_id:
+          { type: integer, minimum: 0, description: "推送到哪个下载器（0 用设置里的）" }
+        category: { type: string, maxLength: 128 }
+        tags: { type: string, maxLength: 128, description: "逗号分开" }
+        save_path: { type: string, maxLength: 512 }
         schedule: { $ref: "#/components/schemas/AppSchedule" }
         lock_version: { type: boolean }
         lock_group: { type: string, maxLength: 64 }

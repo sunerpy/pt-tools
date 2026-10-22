@@ -303,6 +303,8 @@ func NewDBWithVersionAndHooks(
 		&APIToken{},
 		&QbitCompatSetting{},
 		&QbitCompatTorrent{},
+		// MCP 接入的开关与路径
+		&MCPSetting{},
 		// 远程访问（M15）
 		&RemoteSetting{},
 		&RemoteDevice{},

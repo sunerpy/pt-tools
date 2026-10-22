@@ -37,19 +37,36 @@ Click Follow (追剧) on a torrent in the search results: pt-tools first recogni
 
 ### When to search
 
-| Schedule                  | Description                                                                                                                                                                                                                                                                                                                      |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Air time (按播出时间)     | The default. Each episode's TMDB air date plus the air time (in the time zone of the machine pt-tools runs on, 20:00 by default): the search starts 2 hours after airing, runs again every 6 hours while nothing is found, and once a day after 7 days. With no episode to wait for, TMDB is checked once a day for new episodes |
-| Daily (每天)              | Searches once a day at the time                                                                                                                                                                                                                                                                                                  |
-| Every few days (每隔几天) | Every 1 to 30 days at the time, counted from the day it was created                                                                                                                                                                                                                                                              |
-| Weekly, monthly           | On the chosen weekdays or days of the month (a shorter month uses its last day) at the time                                                                                                                                                                                                                                      |
-| Global interval           | The interval in Subscription settings, like films                                                                                                                                                                                                                                                                                |
+| Schedule                      | Description                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Air time (按播出时间)         | The default. Each episode's TMDB air date plus the air time (in the time zone of the machine pt-tools runs on, 20:00 by default): the search starts 2 hours after airing, runs again every 6 hours while nothing is found, and once a day after 7 days. With no episode to wait for, TMDB is checked once a day for new episodes |
+| Every so often (每隔一段时间) | Every 30 minutes to 7 days (in minutes, hours or days), counted from the last search                                                                                                                                                                                                                                             |
+| Daily (每天)                  | Searches once a day at the time                                                                                                                                                                                                                                                                                                  |
+| Every few days (每隔几天)     | Every 1 to 30 days at the time, counted from the day it was created                                                                                                                                                                                                                                                              |
+| Weekly, monthly               | On the chosen weekdays or days of the month (a shorter month uses its last day) at the time                                                                                                                                                                                                                                      |
+| Cron expression (cron 表达式) | Write the times yourself, for shows such as variety programmes that air on fixed days and hours; see below                                                                                                                                                                                                                       |
+| Global interval               | The interval in Subscription settings, like films                                                                                                                                                                                                                                                                                |
+
+A cron expression has 5 space-separated fields: `minute hour day month weekday`. Each field takes `*` (any), a number, a range such as `1-5`, a step such as `*/2`, or a list such as `8,20`. Weekday 0 and 7 are both Sunday, and `MON`–`SUN` and `JAN`–`DEC` work too. Separate several expressions with semicolons (or new lines); the earliest one due wins. When both the day and the weekday are restricted, either one matching is enough, as in crontab. The shortcuts `@daily`, `@weekly`, `@monthly` and the like are accepted. Some examples:
+
+| Expression                 | Searches at                           |
+| -------------------------- | ------------------------------------- |
+| `0 20 * * *`               | 20:00 every day                       |
+| `0 8,22 * * *`             | 8:00 and 22:00 every day              |
+| `0 22 * * 5,6`             | 22:00 on Fridays and Saturdays        |
+| `0 22 * * 5; 0 9,13 * * 6` | 22:00 Friday, 9:00 and 13:00 Saturday |
+| `0 */2 * * 1-5`            | Every 2 hours on weekdays             |
+| `0 9 1 * *`                | 9:00 on the 1st of every month        |
+
+While you edit the schedule, the dialog works out the next few search times, and a wrong expression is reported with the field that is off.
 
 How many hours after airing to start, how many hours between retries, and for how many days after airing to retry can all be changed under Edit. Scheduled searches get a few minutes of random offset, and two searches are at least 30 minutes apart. A followed season's episode list is read from TMDB again every 6 hours, so new episodes are picked up on their own.
 
 ### Version lock
 
 With the version lock on, once the first release is downloaded its version (release group and resolution, such as `HHWEB 1080p`) is kept for the rest of the season, so one season never mixes several groups. Until that happens, a version already in the library or downloading becomes the locked one.
+
+When you click Follow (追剧) on a search result and that torrent cannot be pushed (for example, a Cloudflare challenge on the site blocks the torrent file), its version is still locked: Search again (重新搜索) keeps looking for that version instead of switching to a higher-scoring one.
 
 - When the locked version still has not shown up after the retry days, the episode shows Waiting for the version (等版本). pt-tools keeps waiting rather than switching, and notifies once through the channels in the settings (then at most every 3 days). An episode whose locked version was found on a site but whose torrent file could not be downloaded is not waiting: it shows Missing (缺) and is searched for again.
 - To take another version for one episode, click Use another version for this episode (这一集换版本) on that episode in the follow details, or send `/unlock <id> <episode>` to the bot. Only that episode is released from the lock and a search runs within a minute; the others stay as they are.
@@ -72,6 +89,17 @@ When a release group's numbering is converted wrongly, give it a rule under Epis
 ### Run history
 
 Every active search, RSS match, creation and change by hand (marked Changed, 改动) records a run: how many torrents were found on which sites, which torrents were skipped and why (fails the quality profile, not the locked version, episode number does not match…), and what was pushed. Click a run in the follow details to see the steps, or send `/runs <id>` to the bot. Each subscription keeps its latest 100 runs for at most 90 days.
+
+For an active subscription, Search now (立即搜索) sits above the run history. When the latest run did not succeed (it failed, or a torrent failed to push), the button reads Search again (重新搜索): a torrent that failed to push was not recorded, so searching again pushes it once more.
+
+### Downloaded torrents
+
+At the bottom of the follow details is every torrent the subscription downloaded, and under each torrent how each video file was organised and scraped: organised, failed (with the reason) or skipped, whether a failed file is being retried automatically, and whether an organised file was scraped fully or partly. A season pack works the same as a single episode, with one set of buttons per torrent:
+
+- Organise again (重新整理): shown when a file of the torrent was not organised and is not being retried, or the torrent was marked failed after 7 days without reaching the library. It organises the torrent with the subscription's title and library (no recognition) and leaves organised files alone; a torrent marked failed goes back to waiting, and is marked in the library as soon as organising succeeds.
+- Scrape again (重新刮削): shown when a file is organised. It rewrites the NFO and images of the show (or movie) with the library's current scrape settings, the same as Scrape again in the organise history.
+
+Both are recorded in the run history. An old version replaced by an upgrade has neither button. A single file can also be retried or scraped again under Media → Organise history (媒体 → 整理历史).
 
 ### After the season is done
 
@@ -157,7 +185,7 @@ After choosing channels in Subscription settings, a message is sent whenever a s
 
 **Releases are found but not downloaded**: the Latest column names the torrents that did not meet the quality profile and why (for example 分辨率 1080p 不在档案里, resolution 1080p is not in the profile). Relax the profile, or give the subscription a different one.
 
-**Downloaded, but the subscription never completes**: a subscription waits for the files to be organised. Check Media → Organise history (媒体 → 整理历史) for the torrent; with automatic organising off, completed torrents are not organised.
+**Downloaded, but the subscription never completes**: a subscription waits for the files to be organised. Downloaded torrents in the follow details shows how each file was organised, with the reason for any that were not; once that is fixed (for example a path mapping added or another library picked), use Organise again. With automatic organising off, completed torrents are not organised.
 
 **A followed series keeps showing Waiting for the version**: the locked release group has not released the episode yet, or has stopped. Use another version for this episode in the follow details releases only that episode; to change the whole season, clear the locked version under Edit.
 

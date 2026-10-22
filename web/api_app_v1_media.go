@@ -142,15 +142,19 @@ type AppProgress struct {
 }
 
 // AppSchedule 是追剧主动搜索的定时：kind 为空时沿用全局间隔；airtime 按播出时间（at 是播出时刻，空的按 20:00）、
-// daily / every_days / weekly / monthly 按 at 的钟点（every 是每隔几天，days 是星期几 0–6 或几号 1–31）。
+// interval 每隔 interval_minutes 分钟（30 分钟到 7 天，从上次搜索算起）、
+// daily / every_days / weekly / monthly 按 at 的钟点（every 是每隔几天，days 是星期几 0–6 或几号 1–31）、
+// cron 按 cron 表达式（分 时 日 月 星期，几条用分号分开）。字段和 subscribe.Schedule 一一对应。
 type AppSchedule struct {
-	Kind          string `json:"kind"`
-	At            string `json:"at,omitempty"`
-	Every         int    `json:"every,omitempty"`
-	Days          []int  `json:"days,omitempty"`
-	AirDelayHours int    `json:"air_delay_hours,omitempty"`
-	AirRetryHours int    `json:"air_retry_hours,omitempty"`
-	AirWindowDays int    `json:"air_window_days,omitempty"`
+	Kind            string `json:"kind"`
+	At              string `json:"at,omitempty"`
+	Every           int    `json:"every,omitempty"`
+	Days            []int  `json:"days,omitempty"`
+	AirDelayHours   int    `json:"air_delay_hours,omitempty"`
+	AirRetryHours   int    `json:"air_retry_hours,omitempty"`
+	AirWindowDays   int    `json:"air_window_days,omitempty"`
+	IntervalMinutes int    `json:"interval_minutes,omitempty"`
+	Cron            string `json:"cron,omitempty"`
 }
 
 func (a AppSchedule) schedule() *subscribe.Schedule {
@@ -177,6 +181,14 @@ type AppSubscription struct {
 	LastSearchAt  *int64      `json:"last_search_at,omitempty"`
 	NextSearchAt  *int64      `json:"next_search_at,omitempty"`
 	CreatedAt     int64       `json:"created_at"`
+	// ProfileID 是质量档案（0 用设置里的默认）；Sites 是只在这些站点找（空的是全部站点）；DownloaderID 是推送到哪个下载器
+	// （0 用设置里的）；Category、Tags、SavePath 是推送时的分类、标签与保存目录
+	ProfileID    uint     `json:"profile_id"`
+	Sites        []string `json:"sites"`
+	DownloaderID uint     `json:"downloader_id"`
+	Category     string   `json:"category,omitempty"`
+	Tags         string   `json:"tags,omitempty"`
+	SavePath     string   `json:"save_path,omitempty"`
 	// 以下是追剧（剧集）的设置
 	Schedule         AppSchedule `json:"schedule"`
 	LockVersion      bool        `json:"lock_version"`
@@ -209,18 +221,53 @@ func appEpisode(e subscribe.EpisodeState) AppEpisode {
 	}
 }
 
-// AppSubscriptionTorrent 是订阅下载过的一个种子。
+// AppSubscriptionTorrent 是订阅下载过的一个种子，带上每个视频文件整理、刮削得怎样。ID 是重新整理、重新刮削用的编号；
+// can_organize 为真时能重新整理（有整理没成、不在自动重试的文件，或者种子标成了失败），can_rescrape 为真时能重新刮削。
 type AppSubscriptionTorrent struct {
-	Site       string `json:"site"`
-	TorrentID  string `json:"torrent_id"`
-	Title      string `json:"title"`
-	Status     string `json:"status"`
-	Episode    int    `json:"episode,omitempty"`
-	EpisodeEnd int    `json:"episode_end,omitempty"`
-	Complete   bool   `json:"complete"`
-	Size       int64  `json:"size"`
-	Message    string `json:"message,omitempty"`
-	CreatedAt  int64  `json:"created_at"`
+	ID          uint             `json:"id"`
+	Site        string           `json:"site"`
+	TorrentID   string           `json:"torrent_id"`
+	Title       string           `json:"title"`
+	Status      string           `json:"status"`
+	Episode     int              `json:"episode,omitempty"`
+	EpisodeEnd  int              `json:"episode_end,omitempty"`
+	Complete    bool             `json:"complete"`
+	Size        int64            `json:"size"`
+	Message     string           `json:"message,omitempty"`
+	CreatedAt   int64            `json:"created_at"`
+	Files       []AppTorrentFile `json:"files"`
+	CanOrganize bool             `json:"can_organize"`
+	CanRescrape bool             `json:"can_rescrape"`
+}
+
+// AppTorrentFile 是种子里一个视频文件的整理记录：status 是 done、failed、skipped 或 removed，
+// scrape_status 是 ok、partial、failed 或空（没刮削过）；retrying 为真时整理队列正在重试它。
+type AppTorrentFile struct {
+	ID           uint   `json:"id"`
+	Name         string `json:"name"`
+	Episode      int    `json:"episode,omitempty"`
+	EpisodeEnd   int    `json:"episode_end,omitempty"`
+	Status       string `json:"status"`
+	Message      string `json:"message,omitempty"`
+	ScrapeStatus string `json:"scrape_status,omitempty"`
+	ScrapeNote   string `json:"scrape_note,omitempty"`
+	NextRetryAt  *int64 `json:"next_retry_at,omitempty"`
+	Retrying     bool   `json:"retrying,omitempty"`
+}
+
+func appSubscriptionTorrent(t subscribe.TorrentView) AppSubscriptionTorrent {
+	out := AppSubscriptionTorrent{
+		ID: t.ID, Site: t.SiteName, TorrentID: t.TorrentID, Title: t.Title, Status: t.Status, Episode: t.Episode, EpisodeEnd: t.EpisodeEnd,
+		Complete: t.Complete, Size: t.SizeBytes, Message: appRedactAddr(t.Message), CreatedAt: t.CreatedAt.Unix(),
+		Files: make([]AppTorrentFile, 0, len(t.Files)), CanOrganize: t.CanOrganize, CanRescrape: t.CanRescrape,
+	}
+	for _, f := range t.Files {
+		out.Files = append(out.Files, AppTorrentFile{
+			ID: f.ID, Name: f.Name, Episode: f.Episode, EpisodeEnd: f.EpisodeEnd, Status: f.Status, Message: appRedactAddr(f.Message),
+			ScrapeStatus: f.ScrapeStatus, ScrapeNote: appRedactAddr(f.ScrapeNote), NextRetryAt: unixPtr(f.NextRetryAt), Retrying: f.Retrying,
+		})
+	}
+	return out
 }
 
 // AppSubscriptionDetail 是 GET /subscriptions/{id}：订阅、每一集与下载过的种子。
@@ -239,7 +286,8 @@ func appSubscription(v subscribe.SubscriptionView) AppSubscription {
 		NextSearchAt: unixPtr(sub.NextSearchAt), CreatedAt: sub.CreatedAt.Unix(), Progress: AppProgress{Missing: []int{}},
 		Schedule: AppSchedule(v.Schedule), LockVersion: sub.LockVersion, LockGroup: sub.LockGroup, LockResolution: sub.LockResolution,
 		StartEpisode: sub.StartEpisode, FollowNextSeason: sub.FollowNextSeason, NextSeasonID: sub.NextSeasonID, LibraryID: sub.LibraryID,
-		CompletedAt: unixPtr(sub.CompletedAt),
+		CompletedAt: unixPtr(sub.CompletedAt), ProfileID: sub.ProfileID, Sites: append([]string{}, v.Sites...),
+		DownloaderID: sub.DownloaderID, Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath,
 	}
 	if len(out.Schedule.Days) == 0 {
 		out.Schedule.Days = nil
@@ -327,10 +375,7 @@ func (s *Server) appSubscriptionDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, t := range d.TorrentList {
-		out.Torrents = append(out.Torrents, AppSubscriptionTorrent{
-			Site: t.SiteName, TorrentID: t.TorrentID, Title: t.Title, Status: t.Status, Episode: t.Episode, EpisodeEnd: t.EpisodeEnd,
-			Complete: t.Complete, Size: t.SizeBytes, Message: appRedactAddr(t.Message), CreatedAt: t.CreatedAt.Unix(),
-		})
+		out.Torrents = append(out.Torrents, appSubscriptionTorrent(t))
 	}
 	appJSON(w, out)
 }
@@ -339,11 +384,18 @@ func (s *Server) appSubscriptionDetail(w http.ResponseWriter, r *http.Request) {
 // ProfileID 为 0 时用设置里的默认质量档案。剧集是追剧：没给定时与版本锁时按播出时间搜索、开着版本锁；
 // FromTorrent 是从站点上的这个种子开始追（起始集默认取它的集号）。
 type AppSubscriptionCreate struct {
-	MediaType        string          `json:"media_type"`
-	TMDBID           int             `json:"tmdb_id"`
-	Season           int             `json:"season"`
-	ProfileID        uint            `json:"profile_id"`
-	Upgrade          bool            `json:"upgrade"`
+	MediaType string `json:"media_type"`
+	TMDBID    int    `json:"tmdb_id"`
+	Season    int    `json:"season"`
+	ProfileID uint   `json:"profile_id"`
+	Upgrade   bool   `json:"upgrade"`
+	// Sites 是只在这些站点找（空的是全部站点）；DownloaderID 是推送到哪个下载器（0 用设置里的）；
+	// Category、Tags、SavePath 是推送时的分类、标签（逗号分开）与保存目录（空的按下载器的默认）
+	Sites            []string        `json:"sites,omitempty"`
+	DownloaderID     uint            `json:"downloader_id,omitempty"`
+	Category         string          `json:"category,omitempty"`
+	Tags             string          `json:"tags,omitempty"`
+	SavePath         string          `json:"save_path,omitempty"`
 	Schedule         *AppSchedule    `json:"schedule,omitempty"`
 	LockVersion      *bool           `json:"lock_version,omitempty"`
 	StartEpisode     *int            `json:"start_episode,omitempty"`
@@ -372,8 +424,16 @@ func (s *Server) appSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
 		appError(w, http.StatusBadRequest, "invalid_argument", "media_type 要选 movie 或 tv")
 		return
 	}
+	if bad := svc.UnknownSites(in.Sites); len(bad) > 0 {
+		appError(w, http.StatusBadRequest, "invalid_argument", "这些站点没有配置或没启用："+strings.Join(bad, "、"))
+		return
+	}
+	if !appCheckDownloader(w, r, svc, in.DownloaderID) {
+		return
+	}
 	input := subscribe.SubscriptionInput{
 		MediaType: in.MediaType, TMDBID: in.TMDBID, Season: in.Season, ProfileID: in.ProfileID, Upgrade: in.Upgrade,
+		Sites: in.Sites, DownloaderID: in.DownloaderID, Category: in.Category, Tags: in.Tags, SavePath: in.SavePath,
 		LockVersion: in.LockVersion, StartEpisode: in.StartEpisode, FollowNextSeason: in.FollowNextSeason, LibraryID: in.LibraryID,
 	}
 	if in.Schedule != nil {

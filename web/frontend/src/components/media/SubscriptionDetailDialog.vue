@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /*
  * 订阅详情。剧集（追剧）：每一集的格子（已入库、下载中、缺、等版本、还没播、不追），点一集可以跳过或让它换版本；
- * 集号规则（标题里的集号对不上 TMDB 时）；运行记录（每次搜索找到了什么、为什么没要、推送了哪个）；
- * 以及订阅下载过的种子（站点、集、分数、状态）。
+ * 集号规则（标题里的集号对不上 TMDB 时）；运行记录（每次搜索找到了什么、为什么没要、推送了哪个），可以立即搜索
+ * （推送失败、没找到时重试）；以及订阅下载过的种子（站点、集、分数、状态）与每个文件整理、刮削得怎样：
+ * 整理没成的种子能「重新整理」，整理好的能「重新刮削」（整季包与单集一样，一个种子一个按钮）。
  */
 import {
   type EpisodeRule,
@@ -10,6 +11,8 @@ import {
   type SubscriptionDetail,
   type SubscriptionEpisode,
   type SubscriptionRun,
+  type SubscriptionTorrent,
+  type SubscriptionTorrentFile,
   subscribeApi,
 } from "@/api";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -17,6 +20,13 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
+import {
+  historyStatus,
+  organizeOutcome,
+  rescrapeOutcome,
+  scrapeStatus,
+  seasonEpisode,
+} from "@/utils/media";
 import {
   EPISODE_STATES,
   RULE_MODES,
@@ -36,7 +46,7 @@ import {
   torrentSpan,
   torrentStatus,
 } from "@/utils/subscribe";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, ref, watch } from "vue";
 
 const props = defineProps<{ modelValue: boolean; id: number | null }>();
@@ -213,6 +223,90 @@ async function loadRuns(more = false) {
   } finally {
     loadingRuns.value = false;
   }
+}
+
+// ---- 立即搜索：推送失败、没找到时重试 ----
+const searching = ref(false);
+const canSearch = computed(() => detail.value?.status === "active");
+/** 最近一次运行没成（失败或部分推送失败）：按钮写成「重新搜索」 */
+const lastRunFailed = computed(() => ["failed", "partial"].includes(runs.value[0]?.status ?? ""));
+
+async function searchNow() {
+  if (!props.id) return;
+  searching.value = true;
+  try {
+    const res = await subscribeApi.search(props.id);
+    ElMessage.success(res?.message || "搜索完了");
+    await Promise.all([load(), loadRuns()]);
+    emit("changed");
+  } catch (e) {
+    ElMessage.error((e as Error)?.message || "搜索失败");
+  } finally {
+    searching.value = false;
+  }
+}
+
+// ---- 下载过的种子：重新整理、重新刮削 ----
+const torrentBusy = ref("");
+
+function fileEpisode(f: SubscriptionTorrentFile) {
+  return f.episode ? seasonEpisode(detail.value?.season, f.episode, f.episode_end) : "";
+}
+
+/** 整理好的文件上一次刮削得怎样（没刮削过时为 null） */
+function fileScrape(f: SubscriptionTorrentFile) {
+  return f.status === "done" ? scrapeStatus(f.scrape_status ?? "") : null;
+}
+
+async function torrentAct(key: string, run: () => Promise<void>, fallback: string) {
+  torrentBusy.value = key;
+  try {
+    await run();
+    await Promise.all([load(), loadRuns()]);
+    emit("changed");
+  } catch (e) {
+    ElMessage.error((e as Error)?.message || fallback);
+  } finally {
+    torrentBusy.value = "";
+  }
+}
+
+function organizeTorrent(t: SubscriptionTorrent) {
+  if (!props.id) return;
+  const id = props.id;
+  void torrentAct(
+    `organize-${t.id}`,
+    async () => {
+      const out = organizeOutcome(await subscribeApi.organizeTorrent(id, t.id));
+      ElMessage[out.level](out.text);
+    },
+    "重新整理失败",
+  );
+}
+
+async function rescrapeTorrent(t: SubscriptionTorrent) {
+  if (!props.id || !detail.value) return;
+  const id = props.id;
+  const what = isTV.value
+    ? `「${subName(detail.value)}」（这部剧在媒体库里整理好的每一集）`
+    : `「${subName(detail.value)}」`;
+  try {
+    await ElMessageBox.confirm(
+      `按媒体库现在的刮削设置重写${what}的 NFO 与图片：pt-tools 写的、之后没被改过的文件换成新的，自己放的文件只在媒体库开着覆盖时换，媒体服务器里锁定了的 NFO 不动。`,
+      "重新刮削",
+      { confirmButtonText: "重新刮削", cancelButtonText: "取消" },
+    );
+  } catch {
+    return;
+  }
+  void torrentAct(
+    `scrape-${t.id}`,
+    async () => {
+      const out = rescrapeOutcome(await subscribeApi.rescrapeTorrent(id, t.id));
+      ElMessage[out.level](out.text);
+    },
+    "重新刮削失败",
+  );
 }
 
 watch(
@@ -408,7 +502,25 @@ watch(
       </div>
 
       <div class="sdd__section">
-        <div class="sdd__label">运行记录</div>
+        <div class="sdd__label-row">
+          <div class="sdd__label">运行记录</div>
+          <el-button
+            v-if="canSearch"
+            size="small"
+            :type="lastRunFailed ? 'warning' : 'default'"
+            plain
+            :loading="searching"
+            data-testid="sub-search-now"
+            @click="searchNow"
+            >{{ lastRunFailed ? "重新搜索" : "立即搜索" }}</el-button
+          >
+        </div>
+        <p
+          v-if="lastRunFailed && canSearch"
+          class="field-tip field-tip--warn"
+          data-testid="sub-run-failed-tip">
+          上次没有成功（看下面第一条的步骤）：推送失败的种子会在重新搜索时再推一次
+        </p>
         <p v-if="runsFailed" class="sdd__sub">{{ runsFailed }}</p>
         <p v-else-if="!runs.length && !loadingRuns" class="sdd__sub">还没有运行记录</p>
         <div v-else class="sdd__runs" data-testid="sub-detail-runs">
@@ -462,6 +574,54 @@ watch(
               <span>{{ formatShortDateTime(t.created_at) }}</span>
             </div>
             <div v-if="t.message" class="sdd__sub">{{ t.message }}</div>
+            <ul
+              v-if="t.files?.length"
+              class="sdd__files"
+              :data-testid="`sub-torrent-files-${t.id}`">
+              <li v-for="f in t.files" :key="f.id" class="sdd__file">
+                <span class="sdd__fname" :title="f.name">{{ f.name }}</span>
+                <span v-if="fileEpisode(f)" class="sdd__muted">{{ fileEpisode(f) }}</span>
+                <PtStatusPill :tone="historyStatus(f.status).tone" size="sm">{{
+                  historyStatus(f.status).label
+                }}</PtStatusPill>
+                <PtStatusPill
+                  v-if="fileScrape(f)"
+                  :tone="fileScrape(f)?.tone ?? 'neutral'"
+                  size="sm"
+                  >{{ fileScrape(f)?.label }}</PtStatusPill
+                >
+                <span v-if="f.retrying" class="sdd__muted">正在自动重试</span>
+                <span v-else-if="f.next_retry_at && f.status === 'failed'" class="sdd__muted"
+                  >{{ formatShortDateTime(f.next_retry_at) }} 自动重试</span
+                >
+                <span v-if="f.message" class="sdd__fmsg">{{ f.message }}</span>
+                <span v-if="f.status === 'done' && f.scrape_note" class="sdd__fmsg">{{
+                  f.scrape_note
+                }}</span>
+              </li>
+            </ul>
+            <div v-if="t.can_organize || t.can_rescrape" class="sdd__tacts">
+              <el-button
+                v-if="t.can_organize"
+                size="small"
+                type="primary"
+                plain
+                :loading="torrentBusy === `organize-${t.id}`"
+                :disabled="Boolean(torrentBusy) && torrentBusy !== `organize-${t.id}`"
+                :data-testid="`sub-torrent-organize-${t.id}`"
+                @click="organizeTorrent(t)"
+                >重新整理</el-button
+              >
+              <el-button
+                v-if="t.can_rescrape"
+                size="small"
+                :loading="torrentBusy === `scrape-${t.id}`"
+                :disabled="Boolean(torrentBusy) && torrentBusy !== `scrape-${t.id}`"
+                :data-testid="`sub-torrent-scrape-${t.id}`"
+                @click="rescrapeTorrent(t)"
+                >重新刮削</el-button
+              >
+            </div>
           </div>
         </div>
       </div>
@@ -478,9 +638,6 @@ watch(
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-  max-height: min(70vh, 720px);
-  overflow-y: auto;
-  padding-right: 2px;
 }
 
 .sdd__head {
@@ -520,6 +677,13 @@ watch(
   font-size: 12px;
   font-weight: 600;
   color: var(--pt-t2);
+}
+
+.sdd__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .sdd__grid {
@@ -742,6 +906,53 @@ watch(
   font-size: 13px;
   color: var(--pt-t1);
   word-break: break-all;
+}
+
+/* 种子里每个视频文件一行：文件名、集、整理与刮削的状态、原因 */
+.sdd__files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--pt-hover);
+  list-style: none;
+}
+
+.sdd__file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: 12px;
+  color: var(--pt-t2);
+}
+
+.sdd__fname {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--pt-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sdd__fmsg {
+  flex-basis: 100%;
+  color: var(--pt-t3);
+  word-break: break-all;
+}
+
+.sdd__tacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.sdd__tacts .el-button + .el-button {
+  margin-left: 0;
 }
 
 @media (max-width: 767px) {

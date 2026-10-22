@@ -60,6 +60,10 @@ These newer sites usually use an API key or a dedicated RSS generator page.
 2. Switch to the RSS subscriptions (RSS 订阅) tab and click Add RSS (添加 RSS).
 3. Enter a name and the link, set the options below as needed, then save.
 
+Use the link the site's RSS page gives you. A link copied from an example that still has a placeholder address such as `https://hdsky.xxx/…` never fetches anything: pt-tools warns while you type it and refuses to save it. Ones saved earlier are marked Placeholder address, not fetched (占位地址，不会去拉) in the list and RSS tasks skip them (with a line in the logs); replace the link with the real one.
+
+Try it (试一下) next to the link fetches the feed once without saving. When it works it says how many items came back and the newest title; when it does not, it says which step failed: the domain does not resolve, the connection is refused, reset or times out, the site answers with an HTTP status (a Cloudflare challenge is named as such), or it returns a web page instead of RSS. The message never contains the passkey from the link.
+
 After saving, the subscription is fetched at its check interval while RSS tasks are running. While they are not running (auto-start is off by default, so they must be started by hand after each program start) the subscription is not fetched; the switch is RSS tasks (RSS 任务) at the left end of the status bar at the bottom, see [Starting and stopping RSS tasks](../configuration.md#starting-and-stopping-rss-tasks). Pushed torrents appear under Downloads → Task list (下载 → 任务列表); when nothing is pushed, System → Logs (系统 → 运行日志) records why.
 
 ## Subscription options
@@ -123,12 +127,14 @@ Filter rules are created under Rules → Filter rules (规则 → 过滤规则) 
 - **Free only**: when on, the rule lets through freeleech torrents only.
 - **Purpose**: the rule controls downloading, new-torrent notifications, or both.
 
+You can try a rule before using it: in Dry run (试跑) on the filter rules page pick a rule and a data source and click Run this rule (试跑这条) to see which torrents it would match (read-only: nothing is pushed or saved). With an RSS subscription as the source the feed is fetched once and each item's details are read, matching the item's RSS title and judging freeleech and size from the details, the same way RSS tasks do; without one, the most recently recorded torrents are used (offline). The result dialog names the data source, and changing it there runs the test again; Test match (测试匹配) in the rule editor works the same way.
+
 The syntax and examples for following a series are in [Filter rules and TV series](filter-rules-tv-series.md).
 
 ## Good practice
 
 1. **Choose a sensible interval.** Do not set a very short interval (under 5 minutes, for example): it puts load on the site's server and can get your account banned. `10` to `30` minutes is a good range.
-2. **Test before you automate.** Before attaching rules, try them with Test match (测试匹配) on the filter rules page, which fetches live data from a subscription; after turning the subscription on, watch the logs to confirm the results are what you expect.
+2. **Test before you automate.** Before attaching rules, try them in Dry run (试跑) on the filter rules page with a subscription as the data source, which fetches live data; after turning the subscription on, watch the logs to confirm the results are what you expect.
 3. **Use the site's own filters.** If the site's RSS generator lets you choose categories (films only, for example), filter there when you generate the link, so less has to be processed locally.
 4. **Keep categories apart.** Give the torrents downloaded through RSS their own downloader category, which makes it easier to automate a media library later (Jellyfin, for example).
 5. **Protect your passkey.** When you share a configuration or a screenshot, always hide the `passkey` or `apikey` parameter of the RSS link.
@@ -137,8 +143,8 @@ The syntax and examples for following a series are in [Filter rules and TV serie
 
 ### 1. Fetching the feed fails (HTTP 403/401)
 
-- **Cause**: the credentials have expired or the passkey is wrong.
-- **Fix**: check that the passkey in the link is correct; for a site that needs a cookie, make sure pt-tools has a valid cookie for it.
+- **Cause**: the credentials have expired or the passkey is wrong. Cloudflare in front of the site also answers 403 when it blocks the connection (the message then says a Cloudflare challenge blocked it).
+- **Fix**: check that the passkey in the link is correct; for a site that needs a cookie, make sure pt-tools has a valid cookie for it. A challenge is usually brief, so try again later; if it keeps happening, give pt-tools a proxy (the `HTTPS_PROXY` environment variable, see [Configuration](../configuration.md)).
 
 ### 2. The feed is fetched but nothing is downloaded
 
@@ -163,3 +169,8 @@ The syntax and examples for following a series are in [Filter rules and TV serie
 
 - **Cause**: some sites' feeds do not carry promotion information, or pt-tools does not yet handle the site's particular fields.
 - **Fix**: update pt-tools to the latest version, or rely on reading the torrent's details page, where the site supports it.
+
+### 6. The domain cannot be found (no such host)
+
+- **Cause**: the domain in the link does not resolve. Most often the link was copied from an example and still has a placeholder address such as `hdsky.xxx`, with the `xxx` part never replaced by the address the site gives you; the domain may also be mistyped, or DNS may not work on this machine.
+- **Fix**: copy the link again from the site's RSS page, edit this RSS on the site page, paste the link and click Try it (试一下) to confirm it fetches torrents.

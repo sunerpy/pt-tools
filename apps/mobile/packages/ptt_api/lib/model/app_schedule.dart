@@ -20,9 +20,11 @@ class AppSchedule {
     this.airDelayHours,
     this.airRetryHours,
     this.airWindowDays,
+    this.intervalMinutes,
+    this.cron,
   });
 
-  /// 空的、airtime、daily、every_days、weekly 或 monthly（回应里不用枚举：以后加了新的种类，旧的 App 也读得了）
+  /// 空的、airtime、interval、daily、every_days、weekly、monthly 或 cron（回应里不用枚举：以后加了新的种类，旧的 App 也读得了）
   String kind;
 
   /// HH:MM
@@ -76,6 +78,27 @@ class AppSchedule {
   ///
   int? airWindowDays;
 
+  /// interval：每隔几分钟
+  ///
+  /// Minimum value: 30
+  /// Maximum value: 10080
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? intervalMinutes;
+
+  /// cron：例如「0 20 * * *」（每天 20:00）、「0 22 * * 5; 0 9,13 * * 6」（周五 22:00 与周六 9:00、13:00）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? cron;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppSchedule &&
     other.kind == kind &&
@@ -84,7 +107,9 @@ class AppSchedule {
     _deepEquality.equals(other.days, days) &&
     other.airDelayHours == airDelayHours &&
     other.airRetryHours == airRetryHours &&
-    other.airWindowDays == airWindowDays;
+    other.airWindowDays == airWindowDays &&
+    other.intervalMinutes == intervalMinutes &&
+    other.cron == cron;
 
   @override
   int get hashCode =>
@@ -95,10 +120,12 @@ class AppSchedule {
     (days.hashCode) +
     (airDelayHours == null ? 0 : airDelayHours!.hashCode) +
     (airRetryHours == null ? 0 : airRetryHours!.hashCode) +
-    (airWindowDays == null ? 0 : airWindowDays!.hashCode);
+    (airWindowDays == null ? 0 : airWindowDays!.hashCode) +
+    (intervalMinutes == null ? 0 : intervalMinutes!.hashCode) +
+    (cron == null ? 0 : cron!.hashCode);
 
   @override
-  String toString() => 'AppSchedule[kind=$kind, at=$at, every=$every, days=$days, airDelayHours=$airDelayHours, airRetryHours=$airRetryHours, airWindowDays=$airWindowDays]';
+  String toString() => 'AppSchedule[kind=$kind, at=$at, every=$every, days=$days, airDelayHours=$airDelayHours, airRetryHours=$airRetryHours, airWindowDays=$airWindowDays, intervalMinutes=$intervalMinutes, cron=$cron]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -129,6 +156,16 @@ class AppSchedule {
     } else {
       json[r'air_window_days'] = null;
     }
+    if (this.intervalMinutes != null) {
+      json[r'interval_minutes'] = this.intervalMinutes;
+    } else {
+      json[r'interval_minutes'] = null;
+    }
+    if (this.cron != null) {
+      json[r'cron'] = this.cron;
+    } else {
+      json[r'cron'] = null;
+    }
     return json;
   }
 
@@ -158,6 +195,8 @@ class AppSchedule {
         airDelayHours: mapValueOfType<int>(json, r'air_delay_hours'),
         airRetryHours: mapValueOfType<int>(json, r'air_retry_hours'),
         airWindowDays: mapValueOfType<int>(json, r'air_window_days'),
+        intervalMinutes: mapValueOfType<int>(json, r'interval_minutes'),
+        cron: mapValueOfType<String>(json, r'cron'),
       );
     }
     return null;

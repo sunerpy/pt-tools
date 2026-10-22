@@ -119,7 +119,8 @@ async function create() {
     class="pt-dialog"
     title="转移到其他下载器"
     :width="isMobile ? '94%' : '820px'"
-    append-to-body>
+    append-to-body
+    align-center>
     <div class="tr-dlg__bar">
       <el-select
         v-model="targetId"

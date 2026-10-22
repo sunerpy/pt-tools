@@ -47,60 +47,64 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 ## 接口一览
 
-| 方法   | 路径                                      | 权限        | 用途                                         |
-| ------ | ----------------------------------------- | ----------- | -------------------------------------------- |
-| GET    | `/meta`                                   | 读取        | 版本、兼容级别、功能组与调用者自己的权限     |
-| GET    | `/overview`                               | 读取        | 已启用站点的合计与今天的增量                 |
-| GET    | `/sites`                                  | 读取        | 站点、登录状态、今天的签到与站点上的用户数据 |
-| POST   | `/sites/{site}/attend`                    | 操作        | 立即签到                                     |
-| GET    | `/favicon/{site}`                         | 读取        | 站点图标                                     |
-| GET    | `/torrents`                               | 读取        | 下载器里的种子                               |
-| GET    | `/downloaders`                            | 读取        | 下载器与它们现在的速度、剩余空间             |
-| POST   | `/torrents/actions`                       | 操作        | 暂停、继续、删除种子                         |
-| POST   | `/search`                                 | 读取        | 多站搜索                                     |
-| POST   | `/push`                                   | 操作        | 把搜索到的种子推送到下载器                   |
-| GET    | `/tasks`                                  | 读取        | 任务列表（推送记录）                         |
-| GET    | `/brush/tasks`                            | 读取        | 刷流任务                                     |
-| GET    | `/media/history`                          | 读取        | 整理历史                                     |
-| POST   | `/media/history/{id}/retry`               | 操作        | 重新整理一条整理记录对应的种子               |
-| GET    | `/media/libraries`                        | 读取        | 媒体库                                       |
-| POST   | `/media/recognize`                        | 读取        | 识别一个种子标题                             |
-| POST   | `/media/organize/preview`                 | 读取        | 预览整理下载器里的一个种子                   |
-| POST   | `/media/organize`                         | 操作        | 把下载器里的一个种子整理进媒体库             |
-| GET    | `/subscriptions`                          | 读取        | 订阅列表                                     |
-| GET    | `/subscriptions/{id}`                     | 读取        | 订阅详情：每一集与下载过的种子               |
-| POST   | `/subscriptions`                          | 操作        | 新建订阅                                     |
-| POST   | `/subscriptions/{id}/status`              | 操作        | 暂停或恢复订阅                               |
-| POST   | `/subscriptions/{id}/search`              | 操作        | 立即搜索                                     |
-| PUT    | `/subscriptions/{id}`                     | 操作        | 修改订阅的设置（追剧的定时、版本锁等）       |
-| DELETE | `/subscriptions/{id}`                     | 操作        | 删除订阅                                     |
-| GET    | `/subscriptions/{id}/episodes`            | 读取        | 追剧每一集的情况                             |
-| POST   | `/subscriptions/{id}/episodes/{n}/skip`   | 操作        | 跳过一集，或重新要它                         |
-| POST   | `/subscriptions/{id}/episodes/{n}/unlock` | 操作        | 这一集换版本（不受版本锁限制）               |
-| GET    | `/subscriptions/{id}/runs`                | 读取        | 订阅的运行记录                               |
-| GET    | `/subscriptions/{id}/episode-rules`       | 读取        | 追剧的集号规则                               |
-| PUT    | `/subscriptions/{id}/episode-rules`       | 操作        | 设一个制作组的集号规则                       |
-| DELETE | `/subscriptions/{id}/episode-rules`       | 操作        | 删掉一个制作组的集号规则                     |
-| GET    | `/explore`                                | 读取        | 探索：TMDB 的热门、流行与搜索                |
-| GET    | `/images/tmdb/{size}/{file}`              | 读取        | TMDB 图片（海报），由 pt-tools 去取          |
-| GET    | `/updates`                                | 读取        | 有没有新版本                                 |
-| GET    | `/assistant/status`                       | 读取        | AI 助手启用没有、用的模型、能不能确认        |
-| GET    | `/assistant/conversations`                | 读取        | AI 助手的会话                                |
-| POST   | `/assistant/conversations`                | 读取        | 新建会话，可以接着发第一条消息               |
-| GET    | `/assistant/conversations/{id}`           | 读取        | 一个会话的消息与待确认操作                   |
-| DELETE | `/assistant/conversations/{id}`           | 读取        | 删除会话                                     |
-| POST   | `/assistant/conversations/{id}/messages`  | 读取        | 发消息，在后台开始回答                       |
-| POST   | `/assistant/conversations/{id}/cancel`    | 读取        | 停止回答                                     |
-| GET    | `/assistant/conversations/{id}/events`    | 读取        | 长轮询会话的进度                             |
-| POST   | `/assistant/confirmations/{id}`           | 操作        | 确认或拒绝一个改动类操作                     |
-| GET    | `/templates`                              | 读取        | 消息模板：事件、变量与现在的模板             |
-| POST   | `/templates/preview`                      | 读取        | 用示例数据渲染一份模板                       |
-| PUT    | `/templates/{type}`                       | 操作        | 保存一种事件的模板                           |
-| DELETE | `/templates/{type}`                       | 操作        | 恢复默认                                     |
-| GET    | `/config`                                 | 配置 + 读取 | 配置目录：能读改的各类配置、操作与字段       |
-| GET    | `/config/{resource}`                      | 配置 + 读取 | 一类配置的现状（密钥遮住）                   |
-| POST   | `/config/{resource}/preview`              | 配置 + 读取 | 预览一次改动：改以前、改以后与影响           |
-| POST   | `/config/{resource}/changes`              | 配置 + 操作 | 保存一次改动                                 |
+| 方法   | 路径                                          | 权限        | 用途                                         |
+| ------ | --------------------------------------------- | ----------- | -------------------------------------------- |
+| GET    | `/meta`                                       | 读取        | 版本、兼容级别、功能组与调用者自己的权限     |
+| GET    | `/overview`                                   | 读取        | 已启用站点的合计与今天的增量                 |
+| GET    | `/sites`                                      | 读取        | 站点、登录状态、今天的签到与站点上的用户数据 |
+| POST   | `/sites/{site}/attend`                        | 操作        | 立即签到                                     |
+| GET    | `/favicon/{site}`                             | 读取        | 站点图标                                     |
+| GET    | `/torrents`                                   | 读取        | 下载器里的种子                               |
+| GET    | `/downloaders`                                | 读取        | 下载器与它们现在的速度、剩余空间             |
+| POST   | `/torrents/actions`                           | 操作        | 暂停、继续、删除种子                         |
+| POST   | `/search`                                     | 读取        | 多站搜索                                     |
+| POST   | `/push`                                       | 操作        | 把搜索到的种子推送到下载器                   |
+| GET    | `/tasks`                                      | 读取        | 任务列表（推送记录）                         |
+| GET    | `/brush/tasks`                                | 读取        | 刷流任务                                     |
+| GET    | `/media/history`                              | 读取        | 整理历史                                     |
+| POST   | `/media/history/{id}/retry`                   | 操作        | 重新整理一条整理记录对应的种子               |
+| POST   | `/media/history/{id}/scrape`                  | 操作        | 重新刮削一条整理记录所在的电影或剧集         |
+| GET    | `/media/libraries`                            | 读取        | 媒体库                                       |
+| POST   | `/media/recognize`                            | 读取        | 识别一个种子标题                             |
+| POST   | `/media/organize/preview`                     | 读取        | 预览整理下载器里的一个种子                   |
+| POST   | `/media/organize`                             | 操作        | 把下载器里的一个种子整理进媒体库             |
+| GET    | `/subscriptions`                              | 读取        | 订阅列表                                     |
+| GET    | `/subscriptions/{id}`                         | 读取        | 订阅详情：每一集与下载过的种子               |
+| POST   | `/subscriptions`                              | 操作        | 新建订阅                                     |
+| POST   | `/subscriptions/{id}/status`                  | 操作        | 暂停或恢复订阅                               |
+| POST   | `/subscriptions/{id}/search`                  | 操作        | 立即搜索                                     |
+| PUT    | `/subscriptions/{id}`                         | 操作        | 修改订阅的设置（追剧的定时、版本锁等）       |
+| DELETE | `/subscriptions/{id}`                         | 操作        | 删除订阅                                     |
+| GET    | `/subscriptions/{id}/episodes`                | 读取        | 追剧每一集的情况                             |
+| POST   | `/subscriptions/{id}/episodes/{n}/skip`       | 操作        | 跳过一集，或重新要它                         |
+| POST   | `/subscriptions/{id}/episodes/{n}/unlock`     | 操作        | 这一集换版本（不受版本锁限制）               |
+| GET    | `/subscriptions/{id}/runs`                    | 读取        | 订阅的运行记录                               |
+| POST   | `/subscriptions/{id}/torrents/{tid}/organize` | 操作        | 重新整理订阅下载的一个种子                   |
+| POST   | `/subscriptions/{id}/torrents/{tid}/scrape`   | 操作        | 重新刮削订阅下载的一个种子                   |
+| POST   | `/subscriptions/schedule/preview`             | 读取        | 定时接下来几次什么时候搜                     |
+| GET    | `/subscriptions/{id}/episode-rules`           | 读取        | 追剧的集号规则                               |
+| PUT    | `/subscriptions/{id}/episode-rules`           | 操作        | 设一个制作组的集号规则                       |
+| DELETE | `/subscriptions/{id}/episode-rules`           | 操作        | 删掉一个制作组的集号规则                     |
+| GET    | `/explore`                                    | 读取        | 探索：TMDB 的热门、流行与搜索                |
+| GET    | `/images/tmdb/{size}/{file}`                  | 读取        | TMDB 图片（海报），由 pt-tools 去取          |
+| GET    | `/updates`                                    | 读取        | 有没有新版本                                 |
+| GET    | `/assistant/status`                           | 读取        | AI 助手启用没有、用的模型、能不能确认        |
+| GET    | `/assistant/conversations`                    | 读取        | AI 助手的会话                                |
+| POST   | `/assistant/conversations`                    | 读取        | 新建会话，可以接着发第一条消息               |
+| GET    | `/assistant/conversations/{id}`               | 读取        | 一个会话的消息与待确认操作                   |
+| DELETE | `/assistant/conversations/{id}`               | 读取        | 删除会话                                     |
+| POST   | `/assistant/conversations/{id}/messages`      | 读取        | 发消息，在后台开始回答                       |
+| POST   | `/assistant/conversations/{id}/cancel`        | 读取        | 停止回答                                     |
+| GET    | `/assistant/conversations/{id}/events`        | 读取        | 长轮询会话的进度                             |
+| POST   | `/assistant/confirmations/{id}`               | 操作        | 确认或拒绝一个改动类操作                     |
+| GET    | `/templates`                                  | 读取        | 消息模板：事件、变量与现在的模板             |
+| POST   | `/templates/preview`                          | 读取        | 用示例数据渲染一份模板                       |
+| PUT    | `/templates/{type}`                           | 操作        | 保存一种事件的模板                           |
+| DELETE | `/templates/{type}`                           | 操作        | 恢复默认                                     |
+| GET    | `/config`                                     | 配置 + 读取 | 配置目录：能读改的各类配置、操作与字段       |
+| GET    | `/config/{resource}`                          | 配置 + 读取 | 一类配置的现状（密钥遮住）                   |
+| POST   | `/config/{resource}/preview`                  | 配置 + 读取 | 预览一次改动：改以前、改以后与影响           |
+| POST   | `/config/{resource}/changes`                  | 配置 + 操作 | 保存一次改动                                 |
 
 路径都省略了 `/api/app/v1` 前缀。搜索、识别、整理预览、模板预览与配置预览用 POST 传内容，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」；推送被拦下、批量动作有失败时，即使回应是 200 也记为出错。
 
@@ -257,6 +261,10 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 重新整理这条记录对应的种子（多半是失败的那条），手动整理时指定过的条目与媒体库照旧。回应同 `POST /media/organize`。记录不存在时回 404。
 
+### POST /media/history/{id}/scrape
+
+重新刮削这条记录所在的电影或剧集（同一部在这个媒体库里的整理记录都刮削），按媒体库现在的刮削设置写 NFO 与图片，锁定的字段不改。回应 `records`（刮削了几条整理记录）、`written`（写了几个文件）、`messages`、`queued`（还在后台进行，稍后看整理历史）。媒体库关着刮削或记录不是整理好的时回 400，记录不存在时回 404。
+
 ### GET /media/libraries
 
 每个媒体库一项：`id`、`name`、`kind`（`movie` 或 `tv`）、`anime`（只收动画）、`path`（pt-tools 里看到的库目录）、`mode`（整理方式，空的是整理设置里的默认方式）、`scrape`（刮削）、`classify_dir`（按二级分类放进子目录）、`overwrite_mode`（空的不替换旧版本，`larger` 新文件更大时替换）、`enabled`。
@@ -288,43 +296,55 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - `id`、`media_type`（`movie` 或 `tv`）、`tmdb_id`、`season`、`title`、`original_title`、`year`、`total_episodes`；
 - `poster_path`：TMDB 的海报路径，经 `GET /images/tmdb/w342/<去掉开头 / 的路径>` 取图（`w342` 也可以换成下文列出的其他尺寸），见下文；
 - `status`、`upgrade`（是否洗版）、`source`（`manual`、`explore`、`douban`、`chatops`、`app`）、`message`、`last_search_at`、`next_search_at`、`created_at`；
+- 在哪里找、推到哪里：`profile_id`（质量档案，0 用设置里的默认）、`sites`（只在这些站点找，空的是全部站点）、`downloader_id`（0 用设置里的）、`category`、`tags`（逗号分开）、`save_path`（空的按下载器的默认）；
 - `progress`：`total`、`required`（要追的集数：起始集以后、没跳过的）、`aired`、`in_library`、`downloading`、`waiting`（在等锁住的版本的集数，也算在 `missing` 里）、`skipped`（不追的集数）与 `missing`（缺的集号）；
 - 追剧（剧集）的设置：`schedule`（定时，见下文）、`lock_version`（版本锁）、`lock_group` 与 `lock_resolution`（锁住的制作组与分辨率，尚未定下时为空）、`start_episode`（从第几集开始追，0 与 1 是整季）、`follow_next_season`（追完以后自动追下一季）、`next_season_id`（自动建的下一季的订阅）、`library_id`（整理进哪个媒体库，0 按类型自动选）、`completed_at`（追完的时间）。
 
-`required`、`waiting`、`skipped` 与追剧的设置是 1.0 预览版加的，更早的版本不给，App 要能处理没有这些字段的回应。
+`required`、`waiting`、`skipped`、追剧的设置与在哪里找、推到哪里的字段是 1.0 预览版加的，更早的版本不给，App 要能处理没有这些字段的回应。
 
 #### 定时
 
 `schedule` 是主动搜索的定时：
 
-| 字段              | 说明                                                                                                                   |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `kind`            | 空的沿用全局的搜索间隔；`airtime` 按播出时间；`daily` 每天；`every_days` 每隔几天；`weekly` 每周几；`monthly` 每月几号 |
-| `at`              | 钟点 `HH:MM`（pt-tools 所在机器的时区）。按播出时间时是播出的时刻（TMDB 只有日期），空的按 20:00；其余的空的也按 20:00 |
-| `every`           | `every_days` 的天数，1 到 30                                                                                           |
-| `days`            | `weekly` 的星期几（0 到 6，0 是星期日），或 `monthly` 的几号（1 到 31，小月按月末）                                    |
-| `air_delay_hours` | 按播出时间时，播出后几小时开始搜（0 到 72，0 是 2 小时）                                                               |
-| `air_retry_hours` | 按播出时间时，没找到隔几小时再搜（0 到 48，0 是 6 小时）                                                               |
-| `air_window_days` | 按播出时间时，播出后几天里按上面的间隔集中重试（0 到 60，0 是 7 天）；过了这几天仍未找到的，每天搜一次                 |
+| 字段               | 说明                                                                                                                                                                   |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`             | 空的沿用全局的搜索间隔；`airtime` 按播出时间；`interval` 每隔一段时间；`daily` 每天；`every_days` 每隔几天；`weekly` 每周几；`monthly` 每月几号；`cron` 按 cron 表达式 |
+| `at`               | 钟点 `HH:MM`（pt-tools 所在机器的时区）。按播出时间时是播出的时刻（TMDB 只有日期），空的按 20:00；其余的空的也按 20:00                                                 |
+| `every`            | `every_days` 的天数，1 到 30                                                                                                                                           |
+| `days`             | `weekly` 的星期几（0 到 6，0 是星期日），或 `monthly` 的几号（1 到 31，小月按月末）                                                                                    |
+| `air_delay_hours`  | 按播出时间时，播出后几小时开始搜（0 到 72，0 是 2 小时）                                                                                                               |
+| `air_retry_hours`  | 按播出时间时，没找到隔几小时再搜（0 到 48，0 是 6 小时）                                                                                                               |
+| `air_window_days`  | 按播出时间时，播出后几天里按上面的间隔集中重试（0 到 60，0 是 7 天）；过了这几天仍未找到的，每天搜一次                                                                 |
+| `interval_minutes` | `interval` 的分钟数，30 到 10080（7 天），从上次搜索算起                                                                                                               |
+| `cron`             | `cron` 的表达式：5 段（分 时 日 月 星期），几条用分号分开，到点的取最早的；写法见[订阅与追剧](../guide/media-subscribe.md#什么时候搜索)。存的是规整后的写法            |
 
-按播出时间只用于剧集。新建剧集时不指定定时就按播出时间。
+按播出时间只用于剧集。新建剧集时不指定定时就按播出时间。定时到点的搜索前后有几分钟的随机偏移，两次搜索至少隔 30 分钟。
+
+### POST /subscriptions/schedule/preview
+
+看一个定时接下来几次什么时候搜（只读，要「读取」）。请求 `{"schedule": {...}, "media_type": "tv", "subscription_id": 1, "count": 5}`：`schedule` 必填；`subscription_id` 给了时按那个订阅的类型与建立时间算（每隔几天从建立那天对齐）；`count` 是几次（1 到 10，默认 5）。回应 `{"next": [Unix 秒…], "note": "…"}`：时间不算随机偏移；按播出时间的不给时间，`note` 说明怎么算。定时写得不对时回 400，`message` 写明哪里不对（例如 cron 的第几段）。
 
 ### GET /subscriptions/{id}
 
 订阅本身的字段，加上：
 
 - `episodes`：剧集的每一集，`number`、`name`、`air_date`、`state`（`library`、`downloading`、`missing`、`waiting_version`（在等锁住的版本）、`upcoming` 或 `skipped`（不追））、`source`（状态从哪里来：`library` 媒体库、`subscription` 订阅推送的种子、`downloader` 下载器里已有的种子）、`version`（现在的版本：制作组与分辨率）、`manual_skip`（手动跳过的）、`manual_unlock`（这一集不受版本锁限制）；
-- `torrents`：下载过的种子，`site`、`torrent_id`、`title`、`status`（`downloading`、`done`、`failed`、`replaced`）、`episode`、`episode_end`、`complete`、`size`、`message`、`created_at`。
+- `torrents`：下载过的种子，`id`（下面两个接口里的 `tid`）、`site`、`torrent_id`、`title`、`status`（`downloading`、`done`、`failed`、`replaced`）、`episode`、`episode_end`、`complete`、`size`、`message`、`created_at`，以及：
+  - `files`：这个种子整理进媒体库的情况，每个视频文件一项：`id`（整理记录，可以用于 `/media/history/{id}/…`）、`name`（文件名）、`episode`、`episode_end`、`status`（`done`、`failed`、`skipped`、`removed`）、`message`（没整理成的原因）、`scrape_status`（`ok`、`partial`、`failed`，空的是没刮削过）、`scrape_note`、`next_retry_at`（自动重试的时间）、`retrying`（整理队列正在重试它）；尚未整理过时是空数组；
+  - `can_organize`：能重新整理（有没整理成、也不在自动重试的文件，或者种子标成了失败、尚无整理记录）；`can_rescrape`：能重新刮削（有整理好的文件）。洗版换掉的旧版本两个都是 `false`。
 
 ### POST /subscriptions
 
-| 字段         | 说明                                   |
-| ------------ | -------------------------------------- |
-| `media_type` | 必填，`movie` 或 `tv`                  |
-| `tmdb_id`    | 必填，TMDB 编号                        |
-| `season`     | 剧集的季号；不填时订最新一季           |
-| `profile_id` | 质量档案；不填时用设置里的默认质量档案 |
-| `upgrade`    | 是否洗版                               |
+| 字段                            | 说明                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| `media_type`                    | 必填，`movie` 或 `tv`                                                    |
+| `tmdb_id`                       | 必填，TMDB 编号                                                          |
+| `season`                        | 剧集的季号；不填时订最新一季                                             |
+| `profile_id`                    | 质量档案；不填时用设置里的默认质量档案                                   |
+| `upgrade`                       | 是否洗版                                                                 |
+| `sites`                         | 只在这些站点找；不填时全部站点。站点要是配置了、启用了的，不认识的回 400 |
+| `downloader_id`                 | 推送到哪个下载器；不填时用设置里的。不存在时回 400                       |
+| `category`、`tags`、`save_path` | 推送时的分类、标签（逗号分开）与保存目录；不填时按下载器的默认           |
 
 剧集是追剧，还可以带：
 
@@ -341,7 +361,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 ### PUT /subscriptions/{id}
 
-修改订阅的设置，只改给了的字段，条目与季不能改。可以给 `profile_id`、`upgrade`，以及追剧的 `schedule`、`lock_version`、`lock_group`、`lock_resolution`、`start_episode`、`follow_next_season`、`library_id`、`total_episodes`（这一季的集数：大于 0 时以它为准，0 改回按 TMDB）。`lock_group` 与 `lock_resolution` 都给空串是清掉锁住的版本，之后按下一个下载的版本重新定。
+修改订阅的设置，只改给了的字段（没给或给 `null` 的不变），条目与季不能改。可以给 `profile_id`、`upgrade`、`sites`（空数组是全部站点，`null` 是不改）、`downloader_id`、`category`、`tags`、`save_path`，以及追剧的 `schedule`、`lock_version`、`lock_group`、`lock_resolution`、`start_episode`、`follow_next_season`、`library_id`、`total_episodes`（这一季的集数：大于 0 时以它为准，0 改回按 TMDB）。`lock_group` 与 `lock_resolution` 都给空串是清掉锁住的版本，之后按下一个下载的版本重新定。
 
 改了定时、版本锁、起始集或集数时，马上按新的设置重新算每一集、尽快搜索一次，运行记录里记一条。回应是更新后的订阅。
 
@@ -360,6 +380,14 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 ### GET /subscriptions/{id}/runs
 
 订阅的运行记录，新的在前，参数 `page`、`page_size`（1 到 100）。每次主动搜索、RSS 命中、建立、手动操作各一条：`id`、`trigger`（`create`、`schedule`、`rss`、`manual`、`ai`）、`started_at`、`finished_at`、`status`（`ok`、`nothing`、`waiting`、`failed`、`partial`；手动改动的记录是 `changed`）、`summary`、`steps`（每一步的 `kind` 与 `text`：`kind` 是 `search`、`reject`、`lock`、`push`、`fail`、`adopt`、`wait` 或 `info`）与 `steps_truncated`（步骤太多，后面的没有记）。每个订阅保留最近 100 条、不超过 90 天。说明里下载器的地址会去掉。
+
+### POST /subscriptions/{id}/torrents/{tid}/organize
+
+重新整理订阅下载的一个种子（`tid` 是订阅详情 `torrents` 里的 `id`；整季包与单集一样，一个种子一次）：按订阅的条目与媒体库整理，不靠识别；已经整理好的文件不动。标成失败的种子改回等整理（7 天从现在重新算），整理成了马上标成已入库。回应同 `POST /media/organize`，运行记录里记一条。不是这个订阅的种子回 404，种子没有记下下载器或 info hash、或者是洗版换掉的旧版本（它的文件是特意从库里删掉的）时回 400。
+
+### POST /subscriptions/{id}/torrents/{tid}/scrape
+
+重新刮削这个种子整理进的电影或剧集，回应同 `POST /media/history/{id}/scrape`，运行记录里记一条。尚无整理好的文件时回 400（先重新整理），洗版换掉的旧版本也回 400。
 
 ### GET、PUT、DELETE /subscriptions/{id}/episode-rules
 

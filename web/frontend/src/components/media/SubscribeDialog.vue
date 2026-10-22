@@ -20,9 +20,15 @@ import {
 import { useIsMobile } from "@/composables/useIsMobile";
 import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { posterURL } from "@/utils/media";
-import { SCHEDULE_KINDS, WEEKDAY_OPTIONS } from "@/utils/subscribe";
+import {
+  CRON_PRESETS,
+  SCHEDULE_KINDS,
+  WEEKDAY_OPTIONS,
+  intervalText,
+  previewTime,
+} from "@/utils/subscribe";
 import { ElMessage } from "element-plus";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 export interface SubscribeTarget {
   kind: MediaKind;
@@ -112,10 +118,105 @@ const scheduleTip = computed(() => {
   switch (sched.value.kind) {
     case "airtime":
       return "按 TMDB 上每一集的播出日期：播出后过一会儿开始搜，没找到隔几小时再搜，几天以后还没有就每天搜一次";
+    case "interval":
+      return "从上次搜索算起，每隔这么久搜一次（最短 30 分钟，最长 7 天）";
+    case "cron":
+      return "按 cron 表达式到点搜一次：适合综艺这类固定在某几天播的（前后有几分钟的随机偏移，两次至少隔 30 分钟）";
     case "":
       return "按订阅设置里的间隔定时搜索";
   }
   return "到点搜一次（前后有几分钟的随机偏移）";
+});
+
+// ---- 按间隔：数字 + 单位，存成分钟 ----
+const INTERVAL_UNITS = [
+  { value: 1, label: "分钟" },
+  { value: 60, label: "小时" },
+  { value: 1440, label: "天" },
+] as const;
+const intervalUnit = ref<number>(60);
+const intervalValue = ref<number>(6);
+
+/** 按存的分钟数选最合适的单位（整天用天、整小时用小时） */
+function splitInterval(minutes: number | undefined) {
+  const m = minutes && minutes > 0 ? minutes : 360;
+  intervalUnit.value = m % 1440 === 0 ? 1440 : m % 60 === 0 ? 60 : 1;
+  intervalValue.value = m / intervalUnit.value;
+}
+
+watch([intervalValue, intervalUnit], () => {
+  if (sched.value.kind === "interval") {
+    sched.value.interval_minutes = Math.round((intervalValue.value || 0) * intervalUnit.value);
+  }
+});
+
+const intervalBounds = computed(() => {
+  const u = intervalUnit.value;
+  return { min: Math.ceil(30 / u), max: Math.floor((7 * 1440) / u) };
+});
+
+function applyCron(cron: string) {
+  sched.value.cron = cron;
+}
+
+// ---- 接下来几次什么时候搜（改定时时现算，停手 400 毫秒以后再问） ----
+const preview = ref<{ loading: boolean; next: string[]; note: string; error: string }>({
+  loading: false,
+  next: [],
+  note: "",
+  error: "",
+});
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
+let previewSeq = 0;
+
+async function runPreview() {
+  const seq = ++previewSeq;
+  preview.value = { ...preview.value, loading: true };
+  try {
+    const res = await subscribeApi.previewSchedule({
+      schedule: scheduleInput(),
+      media_type: kind.value,
+      subscription_id: props.sub?.id,
+      count: 5,
+    });
+    if (seq !== previewSeq) return;
+    preview.value = { loading: false, next: res?.next ?? [], note: res?.note ?? "", error: "" };
+  } catch (e) {
+    if (seq !== previewSeq) return;
+    // 后端的「参数不对: 」是通用的前缀，这里直接说定时哪里写得不对
+    const msg = ((e as Error)?.message || "").trim().replace(/^参数不对[:：]\s*/, "");
+    preview.value = {
+      loading: false,
+      next: [],
+      note: "",
+      error: msg ? `定时写得不对：${msg}` : "算不出接下来什么时候搜",
+    };
+  }
+}
+
+watch(
+  sched,
+  () => {
+    if (!props.modelValue || !isTV.value) return;
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => void runPreview(), 400);
+  },
+  { deep: true },
+);
+onBeforeUnmount(() => clearTimeout(previewTimer));
+
+const previewText = computed(() => preview.value.next.map((t) => previewTime(t)).join("、"));
+/** 修改不在找的订阅时：它现在不搜索，定时等它开始找才用上 */
+const notSearchingTip = computed(() => {
+  switch (props.sub?.status) {
+    case "done":
+      return "这个订阅已经完成，现在不会搜索：TMDB 上这一季又有了新的集、改回在找以后按这个定时";
+    case "paused":
+      return "订阅暂停着：恢复以后按这个定时搜索";
+    case "pending":
+      return "订阅还没开始找：开始找以后按这个定时搜索";
+  }
+  return "";
 });
 const tvLibraries = computed(() => libraries.value.filter((l) => l.kind === "tv"));
 const monthDays = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -163,6 +264,8 @@ watch(
     // 修改时按订阅现在的设置；新建剧集按追剧的默认设置（按播出时间、开着版本锁）
     sched.value = s ? { kind: "", days: [], ...s.schedule } : { kind: "airtime", days: [] };
     if (!sched.value.days) sched.value.days = [];
+    splitInterval(sched.value.interval_minutes);
+    preview.value = { loading: false, next: [], note: "", error: "" };
     lockVersion.value = s ? Boolean(s.lock_version) : true;
     clearLock.value = false;
     startEpisode.value = s?.start_episode && s.start_episode > 1 ? s.start_episode : undefined;
@@ -203,6 +306,10 @@ function scheduleInput(): FollowSchedule {
     case "weekly":
     case "monthly":
       return { kind: sc.kind, at, days: [...(sc.days ?? [])].sort((a, b) => a - b) };
+    case "interval":
+      return { kind: "interval", interval_minutes: sc.interval_minutes || 0 };
+    case "cron":
+      return { kind: "cron", cron: (sc.cron ?? "").trim() };
   }
   return { kind: "" };
 }
@@ -349,7 +456,50 @@ async function save() {
             </el-select>
             <div class="field-tip">{{ scheduleTip }}</div>
           </el-form-item>
-          <div v-if="sched.kind" class="sd__row">
+          <el-form-item v-if="sched.kind === 'interval'" label="每隔多久搜一次">
+            <div class="sd__interval">
+              <el-input-number
+                v-model="intervalValue"
+                :min="intervalBounds.min"
+                :max="intervalBounds.max"
+                controls-position="right"
+                data-testid="sd-interval" />
+              <el-select v-model="intervalUnit" class="sd__unit" data-testid="sd-interval-unit">
+                <el-option
+                  v-for="u in INTERVAL_UNITS"
+                  :key="u.value"
+                  :value="u.value"
+                  :label="u.label" />
+              </el-select>
+            </div>
+            <div class="field-tip">现在是每隔 {{ intervalText(sched.interval_minutes) }}</div>
+          </el-form-item>
+          <el-form-item v-if="sched.kind === 'cron'" label="cron 表达式">
+            <el-input
+              v-model="sched.cron"
+              type="textarea"
+              :rows="2"
+              placeholder="0 20 * * *"
+              data-testid="sd-cron" />
+            <div class="sd__presets">
+              <button
+                v-for="p in CRON_PRESETS"
+                :key="p.cron"
+                type="button"
+                class="sd__preset"
+                :data-testid="`sd-cron-preset-${p.cron}`"
+                @click="applyCron(p.cron)">
+                {{ p.label }}
+              </button>
+            </div>
+            <div class="field-tip">
+              5 段用空格分开：分 时 日 月 星期（星期 0 和 7 是星期日，也可以写 MON–SUN）；可以写
+              */2、1-5、8,20；几条用分号分开，到点的取最早的。也认 @daily、@weekly 这类简写
+            </div>
+          </el-form-item>
+          <div
+            v-if="sched.kind && sched.kind !== 'interval' && sched.kind !== 'cron'"
+            class="sd__row">
             <el-form-item :label="sched.kind === 'airtime' ? '播出时刻' : '几点搜'">
               <el-time-select
                 v-model="sched.at"
@@ -414,6 +564,22 @@ async function save() {
                 placeholder="7"
                 data-testid="sd-air-window" />
             </el-form-item>
+          </div>
+          <div
+            v-if="notSearchingTip && !preview.error"
+            class="field-tip field-tip--warn sd__not-searching"
+            data-testid="sd-not-searching">
+            {{ notSearchingTip }}
+          </div>
+          <div class="sd__preview" data-testid="sd-schedule-preview" aria-live="polite">
+            <template v-if="preview.error">
+              <span class="sd__preview-err">{{ preview.error }}</span>
+            </template>
+            <template v-else-if="preview.next.length">
+              <span class="sd__preview-k">接下来</span>{{ previewText }}
+            </template>
+            <template v-else-if="preview.note">{{ preview.note }}</template>
+            <template v-else-if="preview.loading">在算接下来什么时候搜…</template>
           </div>
           <el-form-item label="版本锁">
             <div class="sd__switch">
@@ -531,15 +697,71 @@ async function save() {
 </template>
 
 <style scoped>
+.sd__interval {
+  display: flex;
+  gap: var(--pt-space-2);
+}
+
+.sd__unit {
+  width: 96px;
+}
+
+.sd__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* cron 常用写法：可点的动作用 button，键盘能聚焦 */
+.sd__preset {
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+}
+
+.sd__preset:hover,
+.sd__preset:focus-visible {
+  color: var(--pt-p);
+  border-color: var(--pt-p);
+}
+
+/* 不在找的订阅：定时等它开始找才用上（写在预览上面，和预览隔开一点） */
+.field-tip.sd__not-searching {
+  margin: -4px 0 8px;
+}
+
+.sd__preview {
+  margin: -4px 0 var(--pt-space-3);
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t3);
+}
+
+.sd__preview:empty {
+  display: none;
+}
+
+.sd__preview-k {
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--pt-t2);
+}
+
+.sd__preview-err {
+  color: var(--pt-dang);
+}
+
 .sd {
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-width: 0;
-  /* 剧集的表单长：正文自己滚，页头与页脚留在原地 */
-  max-height: min(68vh, 680px);
-  overflow-y: auto;
-  padding-right: 2px;
 }
 
 .sd__head {

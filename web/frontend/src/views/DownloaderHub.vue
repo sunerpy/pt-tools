@@ -2375,7 +2375,8 @@ function toggleSidebar() {
       v-model="locationDialogVisible"
       class="pt-dialog"
       title="批量修改存储路径"
-      width="480px">
+      width="480px"
+      align-center>
       <el-input v-model="newLocation" placeholder="例如 /downloads/tv" />
       <template #footer>
         <el-button @click="locationDialogVisible = false">取消</el-button>
@@ -2385,7 +2386,12 @@ function toggleSidebar() {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="addDialogVisible" class="pt-dialog" title="添加种子到下载器" width="620px">
+    <el-dialog
+      v-model="addDialogVisible"
+      class="pt-dialog"
+      title="添加种子到下载器"
+      width="620px"
+      align-center>
       <el-form class="pt-form" label-position="top">
         <el-form-item label="下载器">
           <el-select v-model="addForm.downloaderIds" multiple clearable collapse-tags>

@@ -282,7 +282,8 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 		}
 		return
 	}
-	if s.cfg.Now().Sub(t.CreatedAt) > stuckAfter {
+	// 7 天从推送（或者手动重新整理）那时算：手动重新整理会把种子改回等整理、记下更新时间
+	if s.cfg.Now().Sub(laterOf(t.CreatedAt, t.UpdatedAt)) > stuckAfter {
 		msg := "7 天还没整理入库，这些集重新算缺的"
 		if t.Adopted && strings.HasPrefix(t.SiteName, models.MediaAdoptedSitePrefix) {
 			msg = "认领的下载器里的种子 7 天还没整理入库（不是 pt-tools 推送的，自动整理不处理它：可以手动整理，或打开定期扫描），这些集重新算缺的"
@@ -601,4 +602,11 @@ func truncate(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }

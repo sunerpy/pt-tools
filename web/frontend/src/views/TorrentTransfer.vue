@@ -627,7 +627,8 @@ onBeforeUnmount(() => {
       class="pt-dialog"
       :title="ruleEditing ? '编辑规则' : '新建规则'"
       :width="isMobile ? '94%' : '560px'"
-      append-to-body>
+      append-to-body
+      align-center>
       <el-form class="pt-form" label-position="top" @submit.prevent>
         <el-form-item label="名称">
           <el-input v-model="ruleForm.name" maxlength="64" data-testid="tf-rule-name" />

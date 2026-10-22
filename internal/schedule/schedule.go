@@ -1,4 +1,4 @@
-// Package schedule 算定时的下次时间：每天、每隔几天、每周、每月与一次（追剧的主动搜索与定时 AI 任务共用）。
+// Package schedule 算定时的下次时间：每天、每隔几天、每周、每月、cron 表达式与一次（追剧的主动搜索与定时 AI 任务共用）。
 // 时间按给定的时区（通常是进程的时区）算墙上时间：夏令时切换的那天照样是那个钟点。
 package schedule
 
@@ -18,6 +18,8 @@ const (
 	Weekly    = "weekly"
 	Monthly   = "monthly"
 	Once      = "once"
+	// Cron 按 cron 表达式（见 cron.go）
+	Cron = "cron"
 )
 
 // MaxEvery 是「每隔几天」最多几天。
@@ -39,6 +41,8 @@ type Spec struct {
 	Anchor time.Time
 	// When 是一次的时间（Once）
 	When time.Time
+	// Expr 是 cron 表达式（Cron：一条或几条，分号或换行分开）
+	Expr string
 }
 
 // Clock 解析 HH:MM。
@@ -56,6 +60,10 @@ func Clock(at string) (hour, minute int, err error) {
 
 // Validate 检查定时写得对不对。
 func (s Spec) Validate() error {
+	if s.Kind == Cron {
+		_, err := ParseCron(s.Expr)
+		return err
+	}
 	if s.Kind == Once {
 		if s.When.IsZero() {
 			return fmt.Errorf("%w: 一次的时间要填", ErrInvalid)
@@ -80,7 +88,7 @@ func (s Spec) Validate() error {
 			return fmt.Errorf("%w: 每月要选几号（1 到 31）", ErrInvalid)
 		}
 	default:
-		return fmt.Errorf("%w: 定时方式要选 daily、every_days、weekly、monthly 或 once", ErrInvalid)
+		return fmt.Errorf("%w: 定时方式要选 daily、every_days、weekly、monthly、cron 或 once", ErrInvalid)
 	}
 	return nil
 }
@@ -95,6 +103,10 @@ func Next(s Spec, after time.Time, loc *time.Location) (time.Time, bool) {
 	}
 	if s.Kind == Once {
 		return s.When, s.When.After(after)
+	}
+	if s.Kind == Cron {
+		set, _ := ParseCron(s.Expr)
+		return set.Next(after, loc)
 	}
 	hour, minute, _ := Clock(s.At)
 	local := after.In(loc)

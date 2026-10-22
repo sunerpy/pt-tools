@@ -3,7 +3,7 @@
  * API 令牌（路线图 M12–M14）：给手机 App（走 /api/app/v1）、qB 兼容入口与 MCP 客户端（/mcp）用的令牌。新建时只显示一次明文；撤销立即生效。
  * 令牌访问不了网页的其他接口，那些仍然要登录。画板没有这一页，沿用媒体页的样式：页头 + 面板，手机上是行卡。
  */
-import { type ApiToken, type ApiTokenScope, tokensApi } from "@/api";
+import { type ApiToken, type ApiTokenScope, mcpApi, tokensApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -14,7 +14,7 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const isMobile = useIsMobile();
@@ -47,7 +47,7 @@ const SCOPES: readonly { value: ApiTokenScope; label: string; hint: string }[] =
   {
     value: "mcp:write",
     label: "MCP 操作",
-    hint: "AI 助手经 MCP 暂停、继续、删除、推送种子，添加订阅（每次都要确认）",
+    hint: "AI 助手经 MCP 暂停、继续、删除、推送种子，管理订阅与追剧，整理媒体库（每次都要确认）",
   },
 ];
 
@@ -91,13 +91,29 @@ function openCreate(preset?: { name: string; scopes: ApiTokenScope[] }) {
   createDialog.value = true;
 }
 
-// 从「qB 兼容入口」页点过来（?new=qbit）：直接打开新建，权限只选 qB 兼容
+// 从「qB 兼容入口」页点过来（?new=qbit）：直接打开新建，权限只选 qB 兼容；从「MCP 接入」页点过来（?new=mcp）选 MCP 读取与操作
 const route = useRoute();
 const router = useRouter();
 function openFromLink() {
-  if (route?.query.new !== "qbit") return;
-  openCreate({ name: "qB 兼容入口", scopes: ["qbit:compat"] });
+  const kind = route?.query.new;
+  if (kind === "qbit") openCreate({ name: "qB 兼容入口", scopes: ["qbit:compat"] });
+  else if (kind === "mcp")
+    openCreate({ name: "AI 客户端（MCP）", scopes: ["mcp:read", "mcp:write"] });
+  else return;
   void router?.replace({ query: {} });
+}
+
+// 选了 MCP 权限而 MCP 接入关着时提醒：令牌建好了客户端也连不上
+const mcpEnabled = ref<boolean | null>(null);
+const wantsMcp = computed(() =>
+  form.value.scopes.some((s) => s === "mcp:read" || s === "mcp:write"),
+);
+async function loadMcp() {
+  try {
+    mcpEnabled.value = (await mcpApi.settings()).enabled;
+  } catch {
+    mcpEnabled.value = null;
+  }
 }
 
 // ---- 明文只显示一次 ----
@@ -176,6 +192,7 @@ async function revoke(t: ApiToken) {
 
 onMounted(() => {
   void load();
+  void loadMcp();
   openFromLink();
 });
 </script>
@@ -300,6 +317,14 @@ onMounted(() => {
               <span class="tk-sub tk-hint">{{ s.hint }}</span>
             </el-checkbox>
           </el-checkbox-group>
+          <div
+            v-if="wantsMcp && mcpEnabled === false"
+            class="field-tip field-tip--warn"
+            data-testid="tk-mcp-off">
+            MCP 接入现在关着：令牌建好以后，到
+            <router-link to="/mcp">系统 → MCP 接入</router-link>
+            打开，AI 客户端才连得上。
+          </div>
         </el-form-item>
         <el-form-item label="有效期">
           <el-select v-model="form.expires_in_days" data-testid="tk-expiry">

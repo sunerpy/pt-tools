@@ -16,6 +16,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { isPlaceholderRssUrl } from "@/utils/rss";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
@@ -29,9 +30,23 @@ const loadingRss = ref(false);
 const rssFailed = ref(false);
 
 const rules = ref<FilterRule[]>([]);
-const rssList = ref<{ id: number; name: string; site_name: string }[]>([]);
+/** 试跑能选的 RSS：示例配置不列；地址还是示例里的占位地址的列出来但不能选（它取不到） */
+interface TestRss {
+  id: number;
+  name: string;
+  site_name: string;
+  placeholder: boolean;
+}
+const rssList = ref<TestRss[]>([]);
 const testResult = ref<FilterRuleTestResponse | null>(null);
+/** 这次试跑用的 RSS；undefined 是用最近入库的种子记录 */
 const selectedRssId = ref<number | undefined>(undefined);
+
+function rssLabel(rss: TestRss) {
+  return `${rss.name}（${rss.site_name}）${rss.placeholder ? " · 地址是示例里的占位地址，改成真实链接才能试" : ""}`;
+}
+
+const testableRss = computed(() => rssList.value.filter((r) => !r.placeholder).length);
 
 const TEST_ZERO_SUB = "没有种子命中这条规则，放宽模式或换个数据源";
 
@@ -231,14 +246,45 @@ const totalHits = computed(() => Object.values(ruleHits.value).reduce((n, v) => 
  * 所以这里选中一条规则后把它填进 form 再复用同一条路径 —— 不另写一份试跑逻辑。
  */
 const testRuleId = ref<number | undefined>(undefined);
+/** 试跑卡上选的数据源（undefined 是最近入库的种子记录）；和编辑弹窗里的分开记 */
+const panelRssId = ref<number | undefined>(undefined);
+/** 这次试跑是从哪里发起的：试跑卡上的，结果弹窗里换数据源时要同步回卡上的下拉 */
+const testOrigin = ref<"panel" | "dialog">("dialog");
 
 function testSelectedRule() {
   const rule = rules.value.find((r) => r.id === testRuleId.value);
   if (!rule) return;
   form.value = { ...rule };
-  selectedRssId.value = undefined;
+  selectedRssId.value = panelRssId.value;
+  testOrigin.value = "panel";
   testPattern();
 }
+
+/** 编辑弹窗里的「测试匹配」：用弹窗里选的数据源 */
+function testFromDialog() {
+  testOrigin.value = "dialog";
+  testPattern();
+}
+
+/** 结果弹窗里换了数据源：马上按新的数据源再试一次 */
+function onResultSourceChange() {
+  if (testOrigin.value === "panel") panelRssId.value = selectedRssId.value;
+  testPattern();
+}
+
+/** 结果弹窗顶上那句：这次用的是什么数据 */
+const testSourceText = computed(() => {
+  const r = testResult.value;
+  if (!r) return "";
+  if (r.source === "rss") {
+    const missing = r.detail_failed
+      ? `，其中 ${r.detail_failed} 条没取到详情（按 RSS 里的标题算，免费状态不确定）`
+      : "";
+    // 条数前面「共测试 N 条记录」已经写了
+    return `现拉的 RSS「${r.source_name ?? ""}」${missing}`;
+  }
+  return `${r.source_name || "最近入库的种子记录"} · 不联网`;
+});
 
 /**
  * 画板 20 在 gfoot 之后有四张卡：p-order 548（匹配顺序）、p-test 516（试跑）、
@@ -391,13 +437,19 @@ async function loadRssList() {
     const response = await fetch("/api/sites");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const sites = await response.json();
-    const list: { id: number; name: string; site_name: string }[] = [];
+    const list: TestRss[] = [];
     for (const [siteName, siteConfig] of Object.entries(sites)) {
       const config = siteConfig as { rss?: RSSConfig[] };
       if (config.rss) {
         for (const rss of config.rss) {
-          if (rss.id) {
-            list.push({ id: rss.id, name: rss.name, site_name: siteName });
+          // 示例配置不会去拉，不列
+          if (rss.id && !rss.is_example) {
+            list.push({
+              id: rss.id,
+              name: rss.name,
+              site_name: siteName,
+              placeholder: isPlaceholderRssUrl(rss.url || ""),
+            });
           }
         }
       }
@@ -897,35 +949,60 @@ function decisionText(decision: string | undefined): string {
         画板 p-test 516：试跑入口。完整试跑（选数据源、看命中清单）在对话框里，
         这张卡是入口加口径说明 —— 卡里塞不下一份命中清单。
       -->
-      <PtPanel v-if="rules.length > 0" title="试跑" icon="zap">
+      <PtPanel v-if="rules.length > 0" title="试跑" icon="zap" data-testid="rules-test-panel">
         <p class="rules-test__p">
-          挑一条规则，拿真实的 RSS 数据跑一遍，看它会命中哪些种子。只读，不推送不写库。
+          挑一条规则和一个数据源跑一遍，看它会命中哪些种子。只读，不推送不写库。
         </p>
-        <el-select
-          v-model="testRuleId"
-          class="rules-test__sel"
-          placeholder="选一条规则"
-          :disabled="rules.length === 0">
-          <el-option
-            v-for="r in rules"
-            :key="r.id"
-            :label="`${r.name}（${r.pattern_type}）`"
-            :value="r.id" />
-        </el-select>
+        <div class="rules-test__field">
+          <span class="rules-test__k">规则</span>
+          <el-select
+            v-model="testRuleId"
+            class="rules-test__sel"
+            aria-label="试跑的规则"
+            placeholder="选一条规则"
+            :disabled="rules.length === 0"
+            data-testid="rules-test-rule">
+            <el-option
+              v-for="r in rules"
+              :key="r.id"
+              :label="`${r.name}（${r.pattern_type}）`"
+              :value="r.id" />
+          </el-select>
+        </div>
+        <div class="rules-test__field">
+          <span class="rules-test__k">数据源</span>
+          <el-select
+            v-model="panelRssId"
+            class="rules-test__sel"
+            aria-label="试跑的数据源"
+            placeholder="最近入库的种子记录（不联网）"
+            clearable
+            :loading="loadingRss"
+            data-testid="rules-test-rss">
+            <el-option
+              v-for="rss in rssList"
+              :key="rss.id"
+              :label="rssLabel(rss)"
+              :value="rss.id"
+              :disabled="rss.placeholder" />
+          </el-select>
+        </div>
         <el-button
           type="primary"
           class="rules-test__btn"
           :disabled="!testRuleId"
           :loading="testing"
+          data-testid="rules-test-run"
           @click="testSelectedRule">
           <PtIcon v-if="!testing" name="zap" :size="15" /><span>试跑这条</span>
         </el-button>
         <p class="rules-test__foot">
-          数据源来自各站点的 RSS 配置；{{
+          不选数据源时用最近入库的种子记录；选一个 RSS 会现拉一次（每条种子取一次详情，和 RSS
+          任务看到的一样）。{{
             rssFailed
-              ? "这次没取到，试跑面板里的数据源下拉会是空的。"
-              : `当前有 ${rssList.length} 条可选。`
-          }}结果与命中清单在弹出的面板里。
+              ? "RSS 列表这次没取到，只能用入库记录试，点右上角刷新可重试。"
+              : `当前有 ${testableRss} 条 RSS 可选。`
+          }}
         </p>
       </PtPanel>
 
@@ -1062,18 +1139,20 @@ function decisionText(decision: string | undefined): string {
         <el-form-item label="数据源">
           <el-select
             v-model="selectedRssId"
-            placeholder="不选则用历史记录"
+            placeholder="不选则用最近入库的种子记录"
             clearable
             style="width: 100%"
-            :loading="loadingRss">
+            :loading="loadingRss"
+            data-testid="rules-dialog-rss">
             <el-option
               v-for="rss in rssList"
               :key="rss.id"
-              :label="`${rss.name}（${rss.site_name}）`"
-              :value="rss.id" />
+              :label="rssLabel(rss)"
+              :value="rss.id"
+              :disabled="rss.placeholder" />
           </el-select>
           <div v-if="rssFailed" class="field-tip field-tip--warn">
-            数据源列表没读到，这里会是空的；先不选也能用历史记录试跑
+            数据源列表没读到，这里会是空的；先不选也能用最近入库的种子记录试跑
           </div>
           <div v-else class="field-tip">选一个 RSS 会现拉一次实时数据来试</div>
         </el-form-item>
@@ -1118,7 +1197,7 @@ function decisionText(decision: string | undefined): string {
         </el-form-item>
 
         <el-form-item>
-          <el-button :loading="testing" @click="testPattern">
+          <el-button :loading="testing" data-testid="rules-dialog-test" @click="testFromDialog">
             <PtIcon name="target" :size="14" /><span>测试匹配</span>
           </el-button>
         </el-form-item>
@@ -1137,16 +1216,42 @@ function decisionText(decision: string | undefined): string {
       class="pt-dialog"
       title="匹配测试结果"
       width="760px"
-      align-center>
+      align-center
+      data-testid="rules-result">
+      <!-- 数据源一直在：试跑失败（比如 RSS 取不到）时也能换一个再试 -->
+      <div class="scope-row scope-row--src">
+        <span class="scope-row__label">数据源</span>
+        <el-select
+          v-model="selectedRssId"
+          class="scope-row__sel"
+          aria-label="试跑的数据源"
+          placeholder="最近入库的种子记录（不联网）"
+          clearable
+          :disabled="testing"
+          data-testid="rules-result-rss"
+          @change="onResultSourceChange">
+          <el-option
+            v-for="rss in rssList"
+            :key="rss.id"
+            :label="rssLabel(rss)"
+            :value="rss.id"
+            :disabled="rss.placeholder" />
+        </el-select>
+        <span class="scope-row__tip">换了马上重新试</span>
+      </div>
+
       <div v-if="testResult">
         <div class="pt-note" :class="testResult.match_count > 0 ? 'pt-note--ok' : 'pt-note--warn'">
           <PtIcon
             :name="testResult.match_count > 0 ? 'circle-check' : 'triangle-alert'"
             :size="14"
             class="pt-note__icon" />
-          <span>
+          <span data-testid="rules-result-summary">
             共测试 {{ testResult.total_count }} 条记录，命中
             <strong>{{ testResult.match_count }}</strong> 条
+            <span class="scope-row__from" data-testid="rules-result-source"
+              >· {{ testSourceText }}</span
+            >
           </span>
         </div>
 
@@ -1168,6 +1273,9 @@ function decisionText(decision: string | undefined): string {
               </PtStatusPill>
               <PtTag v-if="match.source === 'filter_rule'">过滤规则通道</PtTag>
               <PtTag v-else-if="match.source === 'free_download'">免费通道</PtTag>
+              <PtStatusPill v-if="match.detail_missing" tone="warn" size="sm"
+                >没取到详情</PtStatusPill
+              >
               <span v-if="match.size_gb" class="mrow__size">
                 {{ match.size_gb.toFixed(2) }} GB
               </span>
@@ -1235,9 +1343,23 @@ function decisionText(decision: string | undefined): string {
   }
 }
 
-/* 试跑卡：下拉与按钮各占一行，卡只有 516 宽 */
+/* 试跑卡：规则与数据源各一行（前面一个短标签），按钮再一行；卡只有 516 宽 */
+.rules-test__field {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  margin-top: var(--pt-space-2);
+}
+
+.rules-test__k {
+  flex: 0 0 3.5em;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
 .rules-test__sel {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .rules-test__btn {
@@ -1377,13 +1499,26 @@ function decisionText(decision: string | undefined): string {
   color: var(--pt-t3);
 }
 
-/* 命中列表自己滚：20 条结果不该把对话框顶到屏幕外 */
+/* 数据源那一行在最上面：下拉占满剩下的宽 */
+.pt-dialog .scope-row--src {
+  margin-top: 0;
+}
+
+.pt-dialog .scope-row__sel {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.pt-dialog .scope-row__from {
+  color: var(--pt-t3);
+}
+
+/* 命中列表：弹窗正文自己滚（.pt-dialog 有高度上限），这里不再另限高，免得两层滚动条 */
 .pt-dialog .mlist {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  max-height: 48vh;
-  overflow-y: auto;
 }
 
 .pt-dialog .mrow {

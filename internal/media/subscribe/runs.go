@@ -126,6 +126,17 @@ func step(ctx context.Context, kind, format string, args ...any) {
 	}
 }
 
+// pushFailures 是这次运行到现在推送失败了几次（ctx 里没有运行记录时为 0）。
+func pushFailures(ctx context.Context) int {
+	rl := runOf(ctx)
+	if rl == nil {
+		return 0
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return rl.pushFailed
+}
+
 // markRun 改一次运行的结果标记。
 func markRun(ctx context.Context, f func(rl *runLog)) {
 	if rl := runOf(ctx); rl != nil {

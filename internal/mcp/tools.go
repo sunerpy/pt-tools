@@ -18,8 +18,11 @@ var ToolNames = []string{
 	"get_site_userinfo", "check_updates",
 	"explore_media", "list_subscriptions", "add_subscription",
 	"get_subscription", "set_subscription_status", "search_subscription", "delete_subscription",
+	"update_subscription", "list_subscription_runs", "set_episode_skip", "unlock_episode",
+	"get_episode_rules", "save_episode_rule", "delete_episode_rule", "preview_schedule",
+	"reorganize_subscription_torrent", "rescrape_subscription_torrent",
 	"recognize_media", "list_media_libraries", "list_media_history", "preview_media_organize", "organize_media",
-	"retry_media_organize", "get_config", "change_config", "get_skill",
+	"retry_media_organize", "rescrape_media", "get_config", "change_config", "get_skill",
 }
 
 // withQuery 拼查询串（空值不放）。
@@ -139,11 +142,59 @@ type listSubsIn struct {
 }
 
 type addSubIn struct {
-	MediaType string `json:"media_type" jsonschema:"movie or tv"`
-	TMDBID    int    `json:"tmdb_id" jsonschema:"TMDB id from explore_media"`
-	Season    int    `json:"season,omitempty" jsonschema:"season number for tv; the latest season when omitted"`
-	Upgrade   bool   `json:"upgrade,omitempty" jsonschema:"keep looking for better releases after the first download"`
-	Confirm   bool   `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
+	MediaType    string   `json:"media_type" jsonschema:"movie or tv"`
+	TMDBID       int      `json:"tmdb_id" jsonschema:"TMDB id from explore_media"`
+	Season       int      `json:"season,omitempty" jsonschema:"season number for tv; the latest season when omitted"`
+	Upgrade      bool     `json:"upgrade,omitempty" jsonschema:"keep looking for better releases after the first download"`
+	ProfileID    uint     `json:"profile_id,omitempty" jsonschema:"quality profile id (get_config resource quality_profiles); the default profile when omitted"`
+	Sites        []string `json:"sites,omitempty" jsonschema:"only search these sites (site IDs); every enabled site when omitted"`
+	DownloaderID uint     `json:"downloader_id,omitempty" jsonschema:"downloader to push to (ids from get_downloader_stats); the subscription settings' default when omitted"`
+	Category     string   `json:"category,omitempty" jsonschema:"downloader category for pushes"`
+	Tags         string   `json:"tags,omitempty" jsonschema:"comma-separated downloader tags for pushes"`
+	SavePath     string   `json:"save_path,omitempty" jsonschema:"save directory in the downloader; the downloader's default when omitted"`
+	// 追剧（剧集）的设置
+	Schedule         *scheduleIn    `json:"schedule,omitempty" jsonschema:"TV: when to search actively (check it with preview_schedule); by each episode's air time when omitted"`
+	LockVersion      *bool          `json:"lock_version,omitempty" jsonschema:"TV: after the first episode only take the same release group and resolution (on when omitted)"`
+	StartEpisode     *int           `json:"start_episode,omitempty" jsonschema:"TV: follow from this episode on; earlier episodes are not wanted"`
+	FollowNextSeason *bool          `json:"follow_next_season,omitempty" jsonschema:"TV: follow the next season automatically when this one is done"`
+	LibraryID        *uint          `json:"library_id,omitempty" jsonschema:"media library to organize into (list_media_libraries); picked by type when omitted"`
+	FromTorrent      *fromTorrentIn `json:"from_torrent,omitempty" jsonschema:"TV: start following from this torrent (site and torrent_id from search_torrents): the start episode defaults to its episode and it is pushed right after creation"`
+	Confirm          bool           `json:"confirm,omitempty" jsonschema:"true to run it; without it nothing changes and you get a preview (changes and impact) to show the user first"`
+}
+
+// body 是新建订阅的请求体（App API 的 AppSubscriptionCreate）。
+func (in addSubIn) body() map[string]any {
+	b := map[string]any{"media_type": in.MediaType, "tmdb_id": in.TMDBID, "season": in.Season, "upgrade": in.Upgrade, "profile_id": in.ProfileID}
+	if len(in.Sites) > 0 {
+		b["sites"] = in.Sites
+	}
+	if in.DownloaderID != 0 {
+		b["downloader_id"] = in.DownloaderID
+	}
+	for k, v := range map[string]string{"category": in.Category, "tags": in.Tags, "save_path": in.SavePath} {
+		if strings.TrimSpace(v) != "" {
+			b[k] = v
+		}
+	}
+	if in.Schedule != nil {
+		b["schedule"] = *in.Schedule
+	}
+	if in.LockVersion != nil {
+		b["lock_version"] = *in.LockVersion
+	}
+	if in.StartEpisode != nil {
+		b["start_episode"] = *in.StartEpisode
+	}
+	if in.FollowNextSeason != nil {
+		b["follow_next_season"] = *in.FollowNextSeason
+	}
+	if in.LibraryID != nil {
+		b["library_id"] = *in.LibraryID
+	}
+	if in.FromTorrent != nil {
+		b["from_torrent"] = *in.FromTorrent
+	}
+	return b
 }
 
 type subIDIn struct {
@@ -440,8 +491,11 @@ func registerTools(s *sdk.Server, d *Deps) {
 
 	registerWrite(s, d, spec{
 		name: "add_subscription", title: "Subscribe to a movie or TV show", openWorld: true,
-		min: map[string]float64{"tmdb_id": 1, "season": 0},
+		min: map[string]float64{"tmdb_id": 1, "season": 0, "profile_id": 0, "downloader_id": 0, "start_episode": 0, "library_id": 0},
+		max: map[string]float64{"start_episode": 2000},
 		description: "Subscribe to a movie or a TV season by TMDB id (from explore_media): pt-tools then searches the user's sites and downloads it. " +
+			"A TV season is followed episode by episode: by default it searches by each episode's air time and locks the version (release group and resolution) " +
+			"of the first download; schedule, lock_version, start_episode, from_torrent and the other fields change that. " +
 			"Changes the user's setup: ask first and pass confirm=true.",
 		enums: map[string][]any{"media_type": {"movie", "tv"}},
 	}, func(_ context.Context, _ *Deps, _ Caller, in addSubIn) (Preview, error) {
@@ -456,13 +510,15 @@ func registerTools(s *sdk.Server, d *Deps) {
 		if in.TMDBID <= 0 {
 			return call{}, errors.New("tmdb_id 要填（从 explore_media 取）")
 		}
+		body := in.body()
 		return call{
-			req:   Request{Method: http.MethodPost, Path: "/subscriptions", Body: map[string]any{"media_type": in.MediaType, "tmdb_id": in.TMDBID, "season": in.Season, "upgrade": in.Upgrade}},
-			audit: map[string]any{"media_type": in.MediaType, "tmdb_id": in.TMDBID, "season": in.Season},
+			req:   Request{Method: http.MethodPost, Path: "/subscriptions", Body: body},
+			audit: map[string]any{"media_type": in.MediaType, "tmdb_id": in.TMDBID, "season": in.Season, "fields": sortedKeys(body)},
 		}, nil
 	})
 
 	registerMediaTools(s, d)
+	registerFollowTools(s, d)
 	registerConfigTools(s, d)
 }
 
@@ -470,8 +526,10 @@ func registerTools(s *sdk.Server, d *Deps) {
 func registerMediaTools(s *sdk.Server, d *Deps) {
 	register(s, d, spec{
 		name: "get_subscription", title: "Subscription details",
-		min:         map[string]float64{"id": 1},
-		description: "Show one subscription: progress, each episode's state (library, downloading, missing, upcoming) and the torrents it downloaded.",
+		min: map[string]float64{"id": 1},
+		description: "Show one subscription: its settings (schedule, version lock, sites, downloader, library), progress, each episode's state " +
+			"(library, downloading, missing, waiting_version, upcoming, skipped) and the torrents it downloaded with how each file was organized and scraped " +
+			"(can_organize and can_rescrape say whether reorganize_subscription_torrent and rescrape_subscription_torrent apply).",
 	}, func(in subIDIn) (call, error) {
 		return call{req: Request{Method: http.MethodGet, Path: "/subscriptions/" + utoa(in.ID)}}, nil
 	})

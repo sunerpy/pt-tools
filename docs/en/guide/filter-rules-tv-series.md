@@ -331,7 +331,7 @@ A: Check the following:
 
 A: Suggestions:
 
-1. When adding or editing a rule, choose an RSS subscription under Dry run (试跑) and click Test match (测试匹配) to see whether the results are what you expect
+1. In Dry run (试跑) on the filter rules page, pick the rule and an RSS subscription as the data source and click Run this rule (试跑这条), which fetches the feed once, to see whether the results are what you expect; when adding or editing a rule, choosing a data source in the dialog and clicking Test match (测试匹配) works the same way
 2. Start with a simple pattern and add complexity step by step
 3. Check pt-tools' logs to see what matched
 

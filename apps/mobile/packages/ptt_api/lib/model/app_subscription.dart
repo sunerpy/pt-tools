@@ -30,6 +30,12 @@ class AppSubscription {
     this.lastSearchAt,
     this.nextSearchAt,
     required this.createdAt,
+    this.profileId,
+    this.sites = const [],
+    this.downloaderId,
+    this.category,
+    this.tags,
+    this.savePath,
     this.schedule,
     this.lockVersion,
     this.lockGroup,
@@ -118,6 +124,53 @@ class AppSubscription {
   int? nextSearchAt;
 
   int createdAt;
+
+  /// 质量档案（0 用设置里的默认）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? profileId;
+
+  /// 只在这些站点找（空的是全部站点）
+  List<String> sites;
+
+  /// 推送到哪个下载器（0 用设置里的）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? downloaderId;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? category;
+
+  /// 推送时的标签，逗号分开
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? tags;
+
+  /// 推送时的保存目录（空的按下载器的默认）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? savePath;
 
   ///
   /// Please note: This property should have been non-nullable! Since the specification file
@@ -218,6 +271,12 @@ class AppSubscription {
     other.lastSearchAt == lastSearchAt &&
     other.nextSearchAt == nextSearchAt &&
     other.createdAt == createdAt &&
+    other.profileId == profileId &&
+    _deepEquality.equals(other.sites, sites) &&
+    other.downloaderId == downloaderId &&
+    other.category == category &&
+    other.tags == tags &&
+    other.savePath == savePath &&
     other.schedule == schedule &&
     other.lockVersion == lockVersion &&
     other.lockGroup == lockGroup &&
@@ -248,6 +307,12 @@ class AppSubscription {
     (lastSearchAt == null ? 0 : lastSearchAt!.hashCode) +
     (nextSearchAt == null ? 0 : nextSearchAt!.hashCode) +
     (createdAt.hashCode) +
+    (profileId == null ? 0 : profileId!.hashCode) +
+    (sites.hashCode) +
+    (downloaderId == null ? 0 : downloaderId!.hashCode) +
+    (category == null ? 0 : category!.hashCode) +
+    (tags == null ? 0 : tags!.hashCode) +
+    (savePath == null ? 0 : savePath!.hashCode) +
     (schedule == null ? 0 : schedule!.hashCode) +
     (lockVersion == null ? 0 : lockVersion!.hashCode) +
     (lockGroup == null ? 0 : lockGroup!.hashCode) +
@@ -259,7 +324,7 @@ class AppSubscription {
     (completedAt == null ? 0 : completedAt!.hashCode);
 
   @override
-  String toString() => 'AppSubscription[id=$id, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, title=$title, originalTitle=$originalTitle, year=$year, posterPath=$posterPath, status=$status, upgrade=$upgrade, source_=$source_, totalEpisodes=$totalEpisodes, progress=$progress, message=$message, lastSearchAt=$lastSearchAt, nextSearchAt=$nextSearchAt, createdAt=$createdAt, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, nextSeasonId=$nextSeasonId, libraryId=$libraryId, completedAt=$completedAt]';
+  String toString() => 'AppSubscription[id=$id, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, title=$title, originalTitle=$originalTitle, year=$year, posterPath=$posterPath, status=$status, upgrade=$upgrade, source_=$source_, totalEpisodes=$totalEpisodes, progress=$progress, message=$message, lastSearchAt=$lastSearchAt, nextSearchAt=$nextSearchAt, createdAt=$createdAt, profileId=$profileId, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, nextSeasonId=$nextSeasonId, libraryId=$libraryId, completedAt=$completedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -308,6 +373,32 @@ class AppSubscription {
       json[r'next_search_at'] = null;
     }
       json[r'created_at'] = this.createdAt;
+    if (this.profileId != null) {
+      json[r'profile_id'] = this.profileId;
+    } else {
+      json[r'profile_id'] = null;
+    }
+      json[r'sites'] = this.sites;
+    if (this.downloaderId != null) {
+      json[r'downloader_id'] = this.downloaderId;
+    } else {
+      json[r'downloader_id'] = null;
+    }
+    if (this.category != null) {
+      json[r'category'] = this.category;
+    } else {
+      json[r'category'] = null;
+    }
+    if (this.tags != null) {
+      json[r'tags'] = this.tags;
+    } else {
+      json[r'tags'] = null;
+    }
+    if (this.savePath != null) {
+      json[r'save_path'] = this.savePath;
+    } else {
+      json[r'save_path'] = null;
+    }
     if (this.schedule != null) {
       json[r'schedule'] = this.schedule;
     } else {
@@ -408,6 +499,14 @@ class AppSubscription {
         lastSearchAt: mapValueOfType<int>(json, r'last_search_at'),
         nextSearchAt: mapValueOfType<int>(json, r'next_search_at'),
         createdAt: mapValueOfType<int>(json, r'created_at')!,
+        profileId: mapValueOfType<int>(json, r'profile_id'),
+        sites: json[r'sites'] is Iterable
+            ? (json[r'sites'] as Iterable).cast<String>().toList(growable: false)
+            : const [],
+        downloaderId: mapValueOfType<int>(json, r'downloader_id'),
+        category: mapValueOfType<String>(json, r'category'),
+        tags: mapValueOfType<String>(json, r'tags'),
+        savePath: mapValueOfType<String>(json, r'save_path'),
         schedule: AppSchedule.fromJson(json[r'schedule']),
         lockVersion: mapValueOfType<bool>(json, r'lock_version'),
         lockGroup: mapValueOfType<String>(json, r'lock_group'),

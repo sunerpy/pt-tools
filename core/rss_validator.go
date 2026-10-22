@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/sunerpy/pt-tools/models"
@@ -27,4 +28,13 @@ func validateAndNormalizeRSS(existing []models.RSSConfig, entry models.RSSConfig
 		entry.IntervalMinutes = models.MinIntervalMinutes
 	}
 	return entry, nil
+}
+
+// rssPlaceholderError 拒绝示例里的占位地址（hdsky.xxx 这类）：照着示例填、忘了换成真实链接的 RSS 永远取不到。
+func rssPlaceholderError(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !models.IsPlaceholderRSSHost(u.Hostname()) {
+		return nil
+	}
+	return fmt.Errorf("RSS 地址是示例里的占位地址（%s）：填站点 RSS 页上给你的链接", u.Hostname())
 }

@@ -1,21 +1,66 @@
 <script setup lang="ts">
 /*
- * MCP 接入（路线图 M14）：AI 助手（Claude、Cursor、Cherry Studio 这类 MCP 客户端）经 /mcp 调 pt-tools 的工具。
- * 这页没有设置：地址就是这台 pt-tools 的 /mcp，用有 MCP 权限的 API 令牌，这里写明客户端怎么填、有哪些工具。
- * 画板没有这一页，沿用 qB 兼容入口页的形状。客户端的填法与工具清单在 config/mcp.ts。
+ * MCP 接入（路线图 M14）：AI 客户端（Claude、Cursor、Cherry Studio 这类 MCP 客户端）经 MCP 地址调 pt-tools 的工具。
+ * 设置是开关与路径：关着时外部的客户端连不上（地址回 404），内置 AI 助手在进程内调工具，不受影响；路径默认 /mcp，
+ * 保存后马上生效。下面写明客户端怎么填、有哪些工具。画板没有这一页，沿用 qB 兼容入口页的形状。
+ * 客户端的填法与工具清单在 config/mcp.ts。
  */
+import { type McpSettings, mcpApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
-import { MCP_TOOLS, mcpSnippets } from "@/config/mcp";
+import { MCP_DEFAULT_PATH, MCP_TOOLS, mcpSnippets } from "@/config/mcp";
+import { useDataState } from "@/composables/useDataState";
 import { ElMessage } from "element-plus";
+import { computed, onMounted, ref } from "vue";
 
 const origin = window.location.origin;
-const endpoint = `${origin}/mcp`;
-
-const SNIPPETS = mcpSnippets(origin);
 const TOOLS = MCP_TOOLS;
+
+const settings = ref<McpSettings | null>(null);
+const ds = useDataState();
+const form = ref({ enabled: false, path: MCP_DEFAULT_PATH });
+const saving = ref(false);
+
+/** 现在生效的路径（读不到设置时按默认的写） */
+const savedPath = computed(() => settings.value?.path || MCP_DEFAULT_PATH);
+const endpoint = computed(() => `${origin}${savedPath.value}`);
+const SNIPPETS = computed(() => mcpSnippets(origin, savedPath.value));
+const dirty = computed(
+  () =>
+    Boolean(settings.value) &&
+    (form.value.enabled !== settings.value!.enabled ||
+      (form.value.path.trim() || MCP_DEFAULT_PATH) !== settings.value!.path),
+);
+
+function fill(v: McpSettings) {
+  settings.value = v;
+  form.value = { enabled: v.enabled, path: v.path };
+}
+
+async function load() {
+  const pending = ds.run(() => mcpApi.settings());
+  const got = await pending;
+  if (ds.isStale(pending) || !got) return;
+  fill(got);
+}
+
+async function save() {
+  saving.value = true;
+  try {
+    const got = await mcpApi.save({ enabled: form.value.enabled, path: form.value.path.trim() });
+    fill(got);
+    ElMessage.success(
+      got.enabled ? `已打开 MCP 接入，地址 ${origin}${got.path}` : "已关闭 MCP 接入",
+    );
+  } catch (e) {
+    ElMessage.error((e as Error)?.message || "保存失败");
+  } finally {
+    saving.value = false;
+  }
+}
 
 async function copy(text: string) {
   try {
@@ -25,22 +70,82 @@ async function copy(text: string) {
     ElMessage.warning("浏览器不让复制：请手动选中复制");
   }
 }
+
+onMounted(load);
 </script>
 
 <template>
   <div class="pt-cards pt-cards--main">
     <PtHeadSub
-      >让 AI 助手（Claude、Cursor、Cherry Studio 这类 MCP 客户端）查看种子、下载器与站点数据，
-      并在你确认以后暂停、删除、推送种子</PtHeadSub
+      >让 AI 助手（Claude、Cursor、Cherry Studio 这类 MCP 客户端）查看种子、下载器、站点与追剧，
+      并在你确认以后推送种子、管理订阅与追剧、整理媒体库、改配置</PtHeadSub
     >
+
+    <PtPanel title="设置" icon="settings" data-testid="mcp-settings">
+      <PtDataState
+        v-if="!settings"
+        :state="ds.state.value"
+        :sub="ds.errorText.value"
+        data-testid="mcp-settings-state" />
+      <el-form v-else class="pt-form" label-position="top" @submit.prevent>
+        <el-form-item label="MCP 接入">
+          <el-switch v-model="form.enabled" data-testid="mcp-enabled" />
+          <div class="mcp-tip">
+            打开以后，AI 客户端用有 MCP 权限的 API 令牌经下面的地址连
+            pt-tools，能查看与（经你确认后）操作种子、订阅、追剧、媒体库与配置；关着时这个地址回
+            404。内置 AI 助手不经这个地址，不受影响。
+          </div>
+        </el-form-item>
+        <el-form-item label="路径">
+          <el-input
+            v-model="form.path"
+            :placeholder="MCP_DEFAULT_PATH"
+            aria-label="MCP 的路径"
+            data-testid="mcp-path">
+            <template #prepend>{{ origin }}</template>
+          </el-input>
+          <div class="mcp-tip">
+            默认 /mcp。可以换成别的路径（比如反向代理只转发某个前缀时），不能放在 /api、/assets
+            下面。保存后马上生效；换了以后旧地址回 404，客户端里的地址要跟着改。
+          </div>
+        </el-form-item>
+      </el-form>
+      <template v-if="settings" #footer>
+        <el-button
+          type="primary"
+          :loading="saving"
+          :disabled="!dirty"
+          data-testid="mcp-save"
+          @click="save">
+          <PtIcon name="save" :size="14" /><span>保存</span>
+        </el-button>
+      </template>
+    </PtPanel>
 
     <PtPanel title="地址与令牌" icon="link" data-testid="mcp-endpoint">
       <ul class="mcp-kv">
+        <li v-if="settings" data-testid="mcp-state">
+          <span class="mcp-k">状态</span>
+          <!-- 包一层：值那一列的 span 会撑满，药丸按自己的宽度 -->
+          <span>
+            <PtStatusPill v-if="settings.enabled" tone="ok" dot size="sm">开着</PtStatusPill>
+            <PtStatusPill v-else tone="warn" dot size="sm">关着</PtStatusPill>
+          </span>
+        </li>
         <li>
           <span class="mcp-k">MCP 地址</span>
           <code data-testid="mcp-url">{{ endpoint }}</code>
           <el-button link type="primary" data-testid="mcp-copy-url" @click="copy(endpoint)"
             >复制</el-button
+          >
+        </li>
+        <li v-if="settings && settings.tokens >= 0" data-testid="mcp-token-count">
+          <span class="mcp-k">能用的令牌</span>
+          <span v-if="settings.tokens > 0">{{ settings.tokens }} 个</span>
+          <span v-else
+            >还没有：<router-link to="/api-tokens?new=mcp" data-testid="mcp-new-token"
+              >新建一个</router-link
+            ></span
           >
         </li>
         <li><span class="mcp-k">传输方式</span><span>Streamable HTTP（无状态）</span></li>
@@ -49,8 +154,8 @@ async function copy(text: string) {
           <span
             >在
             <router-link to="/api-tokens" data-testid="mcp-tokens">系统 → API 令牌</router-link>
-            新建，选「MCP 读取」；要让它暂停、删除、推送种子或添加订阅，再选「MCP 操作」；要让它读改
-            pt-tools 的配置（get_config、change_config），再选「配置」</span
+            新建，选「MCP 读取」；要让它暂停、删除、推送种子，管理订阅与追剧，整理媒体库，再选「MCP
+            操作」；要让它读改 pt-tools 的配置（get_config、change_config），再选「配置」</span
           >
         </li>
       </ul>
@@ -58,7 +163,9 @@ async function copy(text: string) {
 
     <PtPanel title="安全" icon="shield-check" data-testid="mcp-safety">
       <ul class="mcp-list">
-        <li>只认 API 令牌，网页登录的会话不能用；令牌撤销以后马上失效。</li>
+        <li>
+          只认 API 令牌，网页登录的会话不能用；令牌撤销以后马上失效。不用的时候在上面关掉 MCP 接入。
+        </li>
         <li>
           会改动下载器、订阅、媒体库或配置的工具，不带确认调用时只回预览（改以前、改以后与可能的影响），AI
           要先向你确认才执行；执行的记在「操作审计」里，通道是「MCP」。
@@ -207,6 +314,12 @@ async function copy(text: string) {
   font-size: 12px;
   line-height: 1.6;
   color: var(--pt-t3);
+}
+
+/* 表单项里的说明紧跟在开关、输入框下面 */
+.pt-form .mcp-tip {
+  flex-basis: 100%;
+  margin-top: 6px;
 }
 
 .mcp-tools li {

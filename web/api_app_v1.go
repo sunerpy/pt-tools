@@ -65,6 +65,7 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodGet, "/brush/tasks", r, s.appBrushTasks},
 		{http.MethodGet, "/media/history", r, s.appMediaHistory},
 		{http.MethodPost, "/media/history/{id}/retry", w, s.appMediaHistoryRetry},
+		{http.MethodPost, "/media/history/{id}/scrape", w, s.appMediaHistoryScrape},
 		{http.MethodGet, "/media/libraries", r, s.appMediaLibraries},
 		{http.MethodPost, "/media/recognize", r, s.appMediaRecognize},
 		{http.MethodPost, "/media/organize/preview", r, s.appOrganizePreview},
@@ -81,6 +82,11 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/subscriptions/{id}/episodes/{n}/skip", w, s.appSubscriptionEpisodeSkip},
 		{http.MethodPost, "/subscriptions/{id}/episodes/{n}/unlock", w, s.appSubscriptionEpisodeUnlock},
 		{http.MethodGet, "/subscriptions/{id}/runs", r, s.appSubscriptionRuns},
+		// 定时预览用 POST 传定时，但只读
+		{http.MethodPost, "/subscriptions/schedule/preview", r, s.appSchedulePreview},
+		// 订阅下载的种子：重新整理、重新刮削（整季包与单集一样）
+		{http.MethodPost, "/subscriptions/{id}/torrents/{tid}/organize", w, s.appSubscriptionTorrentOrganize},
+		{http.MethodPost, "/subscriptions/{id}/torrents/{tid}/scrape", w, s.appSubscriptionTorrentScrape},
 		{http.MethodGet, "/subscriptions/{id}/episode-rules", r, s.appEpisodeRules},
 		{http.MethodPut, "/subscriptions/{id}/episode-rules", w, s.appEpisodeRuleSave},
 		{http.MethodDelete, "/subscriptions/{id}/episode-rules", w, s.appEpisodeRuleDelete},

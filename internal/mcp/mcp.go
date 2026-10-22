@@ -134,10 +134,11 @@ func NewServer(d Deps) *sdk.Server {
 	}
 	s := sdk.NewServer(&sdk.Implementation{Name: "pt-tools", Title: "pt-tools", Version: d.Version}, &sdk.ServerOptions{
 		Instructions: "pt-tools manages private-tracker (PT) sites, downloaders (qBittorrent/Transmission), media subscriptions and media libraries. " +
-			"Use read tools freely. Write tools (pause/resume/delete/push torrents, add, pause, search and delete subscriptions, organize into the library) " +
-			"change the user's downloaders, subscriptions or library. Called without confirm=true a write tool changes nothing and returns a preview " +
-			"(what would change, before and after, and the possible impact): show it to the user, and only after they agree call it again with confirm=true. " +
-			"get_config and change_config read and change pt-tools configuration (they need the app:config scope); call get_skill pt-tools-config first for how to use them.",
+			"Use read tools freely. Write tools (pause/resume/delete/push torrents; add, change, pause, search and delete subscriptions; episodes, episode rules; " +
+			"organize and scrape into the library) change the user's downloaders, subscriptions or library. Called without confirm=true a write tool changes nothing " +
+			"and returns a preview (what would change, before and after, and the possible impact): show it to the user, and only after they agree call it again with confirm=true. " +
+			"For following TV shows call get_skill " + SkillFollow + " first. get_config and change_config read and change pt-tools configuration " +
+			"(they need the app:config scope); call get_skill " + SkillConfig + " first for how to use them.",
 	})
 	registerTools(s, &d)
 	return s

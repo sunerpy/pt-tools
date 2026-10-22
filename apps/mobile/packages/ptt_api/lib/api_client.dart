@@ -301,10 +301,16 @@ class ApiClient {
           return AppRelease.fromJson(value);
         case 'AppReleaseAsset':
           return AppReleaseAsset.fromJson(value);
+        case 'AppRescrapeResult':
+          return AppRescrapeResult.fromJson(value);
         case 'AppRunStep':
           return AppRunStep.fromJson(value);
         case 'AppSchedule':
           return AppSchedule.fromJson(value);
+        case 'AppSchedulePreview':
+          return AppSchedulePreview.fromJson(value);
+        case 'AppSchedulePreviewInput':
+          return AppSchedulePreviewInput.fromJson(value);
         case 'AppSearchError':
           return AppSearchError.fromJson(value);
         case 'AppSearchItem':
@@ -367,6 +373,8 @@ class ApiClient {
           return AppTorrentActionsRequest.fromJson(value);
         case 'AppTorrentActionsResult':
           return AppTorrentActionsResult.fromJson(value);
+        case 'AppTorrentFile':
+          return AppTorrentFile.fromJson(value);
         case 'AppTorrentPage':
           return AppTorrentPage.fromJson(value);
         case 'AppTorrentTarget':

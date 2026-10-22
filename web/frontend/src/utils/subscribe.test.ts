@@ -94,3 +94,26 @@ describe("订阅的文字", () => {
     ).toBe("分辨率不限");
   });
 });
+
+describe("追剧定时的说法（每隔一段时间、cron）", () => {
+  it("间隔：整天写天、整小时写小时，其余写分钟", async () => {
+    const { intervalText, scheduleText } = await import("./subscribe");
+    expect(intervalText(30)).toBe("30 分钟");
+    expect(intervalText(90)).toBe("90 分钟");
+    expect(intervalText(120)).toBe("2 小时");
+    expect(intervalText(2880)).toBe("2 天");
+    expect(scheduleText({ kind: "interval", interval_minutes: 360 })).toBe("每隔 6 小时");
+    expect(scheduleText({ kind: "cron", cron: "0 22 * * 5; 0 9 * * 6" })).toBe(
+      "cron「0 22 * * 5; 0 9 * * 6」",
+    );
+  });
+
+  it("预览里的时间带星期，不是今年的带年份", async () => {
+    const { previewTime } = await import("./subscribe");
+    const now = new Date(2026, 9, 22, 10, 0);
+    expect(previewTime(new Date(2026, 9, 23, 22, 0).toISOString(), now)).toBe("10-23 周五 22:00");
+    expect(previewTime(new Date(2027, 0, 1, 0, 5).toISOString(), now)).toBe(
+      "2027-01-01 周五 00:05",
+    );
+  });
+});
