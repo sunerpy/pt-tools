@@ -74,7 +74,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "媒体",
     items: [
       { path: "/media/explore", label: "探索", icon: "compass" },
-      { path: "/media/subscriptions", label: "订阅", icon: "bookmark" },
+      { path: "/media/subscriptions", label: "追剧与订阅", icon: "bookmark" },
       { path: "/media/library", label: "媒体库", icon: "folder-open" },
       { path: "/media/history", label: "整理历史", icon: "history" },
       { path: "/media/recognize", label: "媒体识别", icon: "scan" },

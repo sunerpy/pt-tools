@@ -133,8 +133,8 @@ home:
             link: /guide/qbit-compat
       - name: 媒体
         items:
-          - title: 订阅
-            body: 订阅电影或剧集的一季，定时到各站点搜索，RSS 里出现时也下载；按质量档案挑资源，剧集补缺的集，洗版换更好的版本，豆瓣想看自动建订阅。
+          - title: 追剧与订阅
+            body: 订阅电影、追剧集的一季，到各站点搜索，RSS 里出现时也下载；追剧按播出时间去搜、只要同一个版本，综艺的上下期也对得上；按质量档案挑资源，洗版换更好的版本，豆瓣想看自动建订阅。
             status: preview
             link: /guide/media-subscribe
           - title: 整理入库

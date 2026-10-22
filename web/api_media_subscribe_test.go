@@ -38,6 +38,7 @@ func newSubscribeEnv(t *testing.T, opts ...func(*subscribe.Config)) (*Server, *h
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}, &models.MediaTransferHistory{},
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{}, &models.MediaSubscribeSetting{},
 		&models.MediaDoubanSource{}, &models.MediaDoubanItem{},
+		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{}, &models.MediaLibrary{},
 	))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -48,6 +49,12 @@ func newSubscribeEnv(t *testing.T, opts ...func(*subscribe.Config)) (*Server, *h
 			_, _ = w.Write([]byte(`{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23","imdb_id":"tt0111161","poster_path":"/s.jpg"}`))
 		case r.URL.Path == "/3/trending/movie/week":
 			_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"results":[{"id":278,"title":"肖申克的救赎","release_date":"1994-09-23"}]}`))
+		case r.URL.Path == "/3/tv/1001" && r.URL.Query().Get("language") == "en-US":
+			_, _ = w.Write([]byte(`{"id":1001,"name":"Fake Variety","alternative_titles":{"results":[]}}`))
+		case r.URL.Path == "/3/tv/1001":
+			_, _ = w.Write([]byte(`{"id":1001,"name":"假综艺","original_name":"假综艺","first_air_date":"2026-01-01","number_of_seasons":1,"genres":[{"id":10764,"name":"真人秀"}]}`))
+		case r.URL.Path == "/3/tv/1001/season/1":
+			_, _ = w.Write([]byte(`{"season_number":1,"air_date":"2026-01-01","episodes":[{"episode_number":1,"name":"第1期上","air_date":"2026-01-01"},{"episode_number":2,"name":"第1期下","air_date":"2026-01-01"}]}`))
 		case r.URL.Path == "/3/search/movie" && strings.Contains(r.URL.Query().Get("query"), "肖申克"):
 			_, _ = w.Write([]byte(`{"results":[{"id":278,"title":"肖申克的救赎","release_date":"1994-09-23"}]}`))
 		case strings.HasPrefix(r.URL.Path, "/3/search/"):
@@ -86,6 +93,13 @@ var subscribeRoutes = []struct{ method, path string }{
 	{http.MethodDelete, "/api/media/subscriptions/1"},
 	{http.MethodPost, "/api/media/subscriptions/1/status"},
 	{http.MethodPost, "/api/media/subscriptions/1/search"},
+	{http.MethodGet, "/api/media/subscriptions/1/episodes"},
+	{http.MethodPost, "/api/media/subscriptions/1/episodes/1/skip"},
+	{http.MethodPost, "/api/media/subscriptions/1/episodes/1/unlock"},
+	{http.MethodGet, "/api/media/subscriptions/1/runs"},
+	{http.MethodGet, "/api/media/subscriptions/1/episode-rules"},
+	{http.MethodPut, "/api/media/subscriptions/1/episode-rules"},
+	{http.MethodDelete, "/api/media/subscriptions/1/episode-rules"},
 	{http.MethodGet, "/api/media/douban-sources"},
 	{http.MethodPost, "/api/media/douban-sources"},
 	{http.MethodPut, "/api/media/douban-sources/1"},
@@ -263,4 +277,68 @@ func TestWriteSubscribeError(t *testing.T) {
 		writeSubscribeError(w, c.err)
 		assert.Equal(t, c.want, w.Code, c.err.Error())
 	}
+}
+
+func TestSubscribeAPI_Follow(t *testing.T) {
+	mux := newSubscribeServer(t)
+	w := serveAuthed(mux, http.MethodPost, "/api/media/subscriptions", `{"media_type":"tv","tmdb_id":1001,"season":1}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var sub struct {
+		ID          uint `json:"id"`
+		LockVersion bool `json:"lock_version"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sub))
+	assert.True(t, sub.LockVersion, "新建的剧集按追剧的默认设置")
+	id := strconv.Itoa(int(sub.ID))
+	w = serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/"+id, "")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"schedule":{"kind":"airtime"}`)
+	assert.Contains(t, w.Body.String(), `"required":2`)
+
+	w = serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/"+id+"/episodes", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	var eps []subscribe.EpisodeState
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &eps))
+	require.Len(t, eps, 2)
+	assert.Equal(t, "第1期上", eps[0].Name)
+
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/"+id+"/episodes/1/skip", `{}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/"+id+"/episodes/x/skip", `{"skip":true}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/"+id+"/episodes/9/skip", `{"skip":true}`).Code, "这一季没有第 9 集")
+	w = serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/"+id+"/episodes/1/skip", `{"skip":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"state":"skipped"`)
+	w = serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/"+id+"/episodes/2/unlock", `{"unlock":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"manual_unlock":true`)
+
+	w = serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/"+id+"/runs?limit=2", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	var runs subscribe.RunPage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &runs))
+	assert.Equal(t, int64(3), runs.Total, "建立、跳过、换版本各一条")
+	assert.Len(t, runs.Items, 2)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/"+id+"/runs?limit=x", "").Code)
+
+	w = serveAuthed(mux, http.MethodPut, "/api/media/subscriptions/"+id+"/episode-rules", `{"group":"XX","mode":"offset","offset":1}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"group":"XX"`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/media/subscriptions/"+id+"/episode-rules", `{"mode":"guess"}`).Code)
+	w = serveAuthed(mux, http.MethodDelete, "/api/media/subscriptions/"+id+"/episode-rules?group=XX", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "[]\n", w.Body.String())
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodDelete, "/api/media/subscriptions/"+id+"/episode-rules?group=XX", "").Code)
+
+	// 改定时：每周六 21:00
+	w = serveAuthed(mux, http.MethodPut, "/api/media/subscriptions/"+id, `{"schedule":{"kind":"weekly","days":[6],"at":"21:00"}}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/"+id, "")
+	assert.Contains(t, w.Body.String(), `"schedule":{"kind":"weekly","at":"21:00","days":[6]}`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/media/subscriptions/"+id, `{"schedule":{"kind":"hourly"}}`).Code)
+
+	// 电影没有追剧的设置
+	w = serveAuthed(mux, http.MethodPost, "/api/media/subscriptions", `{"media_type":"movie","tmdb_id":278}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"lock_version":false`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/2/episodes", "").Code, "电影没有分集")
 }

@@ -402,6 +402,73 @@ class AppApi {
     return null;
   }
 
+  /// 删掉一个制作组的集号规则
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [String] group:
+  ///   制作组；不给是删对所有组的那条
+  Future<Response> deleteEpisodeRuleWithHttpInfo(int id, { String? group, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/episode-rules'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (group != null) {
+      queryParams.addAll(_queryParams('', 'group', group));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'DELETE',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 删掉一个制作组的集号规则
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [String] group:
+  ///   制作组；不给是删对所有组的那条
+  Future<List<AppEpisodeRule>?> deleteEpisodeRule(int id, { String? group, Future<void>? abortTrigger, }) async {
+    final response = await deleteEpisodeRuleWithHttpInfo(id, group: group, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppEpisodeRule>') as List)
+        .cast<AppEpisodeRule>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
   /// 删除订阅（下载器里的种子与媒体库里的文件不动）
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1274,6 +1341,63 @@ class AppApi {
     return null;
   }
 
+  /// 追剧的集号规则（每个制作组一条；组为空的对所有组）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<Response> listEpisodeRulesWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/episode-rules'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 追剧的集号规则（每个制作组一条；组为空的对所有组）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<List<AppEpisodeRule>?> listEpisodeRules(int id, { Future<void>? abortTrigger, }) async {
+    final response = await listEpisodeRulesWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppEpisodeRule>') as List)
+        .cast<AppEpisodeRule>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
   /// 整理历史
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1440,6 +1564,132 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSiteList',) as AppSiteList;
+    
+    }
+    return null;
+  }
+
+  /// 追剧每一集的情况（电影没有分集，回 400）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<Response> listSubscriptionEpisodesWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/episodes'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 追剧每一集的情况（电影没有分集，回 400）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<List<AppEpisode>?> listSubscriptionEpisodes(int id, { Future<void>? abortTrigger, }) async {
+    final response = await listSubscriptionEpisodesWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppEpisode>') as List)
+        .cast<AppEpisode>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
+  /// 订阅的运行记录（新的在前）：每次搜索找到了什么、为什么没要、推送了哪个
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] page:
+  ///
+  /// * [int] pageSize:
+  Future<Response> listSubscriptionRunsWithHttpInfo(int id, { int? page, int? pageSize, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/runs'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (page != null) {
+      queryParams.addAll(_queryParams('', 'page', page));
+    }
+    if (pageSize != null) {
+      queryParams.addAll(_queryParams('', 'page_size', pageSize));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 订阅的运行记录（新的在前）：每次搜索找到了什么、为什么没要、推送了哪个
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] page:
+  ///
+  /// * [int] pageSize:
+  Future<AppSubscriptionRunPage?> listSubscriptionRuns(int id, { int? page, int? pageSize, Future<void>? abortTrigger, }) async {
+    final response = await listSubscriptionRunsWithHttpInfo(id, page: page, pageSize: pageSize, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscriptionRunPage',) as AppSubscriptionRunPage;
     
     }
     return null;
@@ -2178,6 +2428,67 @@ class AppApi {
     return null;
   }
 
+  /// 设一个制作组的集号规则（这个组已有规则时替换）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppEpisodeRuleInput] appEpisodeRuleInput (required):
+  Future<Response> saveEpisodeRuleWithHttpInfo(int id, AppEpisodeRuleInput appEpisodeRuleInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/episode-rules'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appEpisodeRuleInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'PUT',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 设一个制作组的集号规则（这个组已有规则时替换）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppEpisodeRuleInput] appEpisodeRuleInput (required):
+  Future<List<AppEpisodeRule>?> saveEpisodeRule(int id, AppEpisodeRuleInput appEpisodeRuleInput, { Future<void>? abortTrigger, }) async {
+    final response = await saveEpisodeRuleWithHttpInfo(id, appEpisodeRuleInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppEpisodeRule>') as List)
+        .cast<AppEpisodeRule>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
   /// 保存一种事件的模板（要 app:write；先用示例数据校验，不对时回 400；两项都空等于恢复默认）
   ///
   /// Note: This method returns the HTTP [Response].
@@ -2461,6 +2772,74 @@ class AppApi {
     return null;
   }
 
+  /// 跳过这一集（不追），或重新要它
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] n (required):
+  ///   集号（TMDB 这一季的第几集）
+  ///
+  /// * [AppEpisodeSkip] appEpisodeSkip (required):
+  Future<Response> skipSubscriptionEpisodeWithHttpInfo(int id, int n, AppEpisodeSkip appEpisodeSkip, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/episodes/{n}/skip'
+      .replaceAll('{id}', id.toString())
+      .replaceAll('{n}', n.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appEpisodeSkip;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 跳过这一集（不追），或重新要它
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] n (required):
+  ///   集号（TMDB 这一季的第几集）
+  ///
+  /// * [AppEpisodeSkip] appEpisodeSkip (required):
+  Future<List<AppEpisode>?> skipSubscriptionEpisode(int id, int n, AppEpisodeSkip appEpisodeSkip, { Future<void>? abortTrigger, }) async {
+    final response = await skipSubscriptionEpisodeWithHttpInfo(id, n, appEpisodeSkip, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppEpisode>') as List)
+        .cast<AppEpisode>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
   /// 暂停、继续、删除种子
   ///
   /// Note: This method returns the HTTP [Response].
@@ -2509,6 +2888,132 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTorrentActionsResult',) as AppTorrentActionsResult;
+    
+    }
+    return null;
+  }
+
+  /// 这一集不受版本锁限制（换别的组或分辨率，并马上搜一次），或恢复版本锁
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] n (required):
+  ///   集号（TMDB 这一季的第几集）
+  ///
+  /// * [AppEpisodeUnlock] appEpisodeUnlock (required):
+  Future<Response> unlockSubscriptionEpisodeWithHttpInfo(int id, int n, AppEpisodeUnlock appEpisodeUnlock, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}/episodes/{n}/unlock'
+      .replaceAll('{id}', id.toString())
+      .replaceAll('{n}', n.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appEpisodeUnlock;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 这一集不受版本锁限制（换别的组或分辨率，并马上搜一次），或恢复版本锁
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] n (required):
+  ///   集号（TMDB 这一季的第几集）
+  ///
+  /// * [AppEpisodeUnlock] appEpisodeUnlock (required):
+  Future<List<AppEpisode>?> unlockSubscriptionEpisode(int id, int n, AppEpisodeUnlock appEpisodeUnlock, { Future<void>? abortTrigger, }) async {
+    final response = await unlockSubscriptionEpisodeWithHttpInfo(id, n, appEpisodeUnlock, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppEpisode>') as List)
+        .cast<AppEpisode>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
+  /// 修改订阅的设置（只改给了的字段；条目与季不能改）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppSubscriptionUpdate] appSubscriptionUpdate (required):
+  Future<Response> updateSubscriptionWithHttpInfo(int id, AppSubscriptionUpdate appSubscriptionUpdate, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/{id}'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appSubscriptionUpdate;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'PUT',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 修改订阅的设置（只改给了的字段；条目与季不能改）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppSubscriptionUpdate] appSubscriptionUpdate (required):
+  Future<AppSubscription?> updateSubscription(int id, AppSubscriptionUpdate appSubscriptionUpdate, { Future<void>? abortTrigger, }) async {
+    final response = await updateSubscriptionWithHttpInfo(id, appSubscriptionUpdate, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscription',) as AppSubscription;
     
     }
     return null;

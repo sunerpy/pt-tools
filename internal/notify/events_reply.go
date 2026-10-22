@@ -192,16 +192,18 @@ var replyEvents = []EventSpec{
 		Vars: []Var{
 			{Key: "count", Type: VarInt, Desc: "订阅总数", Sample: int64(2)},
 			{Key: "items", Type: VarList, Desc: "订阅（最多 20 个）", Item: []Var{
+				{Key: "id", Type: VarInt, Desc: "订阅的编号（/runs、/unlock 用它）"},
 				{Key: "title", Type: VarString, Desc: "订阅（带年份与季）"},
 				{Key: "status", Type: VarString, Desc: "状态（在找、暂停、待确认、完成）"},
 				{Key: "progress", Type: VarString, Desc: "进度（可能是空）"},
+				{Key: "next_search", Type: VarString, Desc: "下次主动搜索的时间（暂停、完成的是空）"},
 			}, Sample: []map[string]any{
-				{"title": "沙丘 (2021)", "status": "完成", "progress": "已入库"},
-				{"title": "最后生还者 (2023) 第 2 季", "status": "在找", "progress": "已入库 3/7"},
+				{"id": int64(1), "title": "沙丘 (2021)", "status": "完成", "progress": "已入库", "next_search": ""},
+				{"id": int64(2), "title": "最后生还者 (2023) 第 2 季", "status": "在找", "progress": "已入库 3/7，缺 1", "next_search": "10-22 20:00"},
 			}},
 			{Key: "items_more", Type: VarInt, Desc: "没列出的订阅数", Sample: int64(0)},
 		},
-		SampleText: "1. 沙丘 (2021) · 完成 · 已入库\n2. 最后生还者 (2023) 第 2 季 · 在找 · 已入库 3/7",
+		SampleText: "#1 沙丘 (2021) · 完成 · 已入库\n#2 最后生还者 (2023) 第 2 季 · 在找 · 已入库 3/7，缺 1 · 下次 10-22 20:00",
 	},
 	{
 		Type: EventReplyOther, Name: "其他回复",

@@ -490,7 +490,8 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	return true
 }
 
-// pickLibrary 选媒体库：指定了就用指定的（要启用、类型相同）；否则在同类型里选，动画优先进只收动画的库。
+// pickLibrary 选媒体库：指定了就用指定的（要启用、类型相同）；追剧推送或认领的种子用追剧指定的库（同样当作指定的）；
+// 否则在同类型里选，动画优先进只收动画的库。
 func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	var libs []models.MediaLibrary
 	if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&libs).Error; err != nil {
@@ -498,15 +499,32 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 		return false
 	}
 	kind := p.Match.MediaType
+	wanted, follow := req.LibraryID, false
+	if wanted == 0 && p.WatchDirID == 0 {
+		if f := s.followLibrary(); f != nil {
+			id, found, err := f(ctx, p.DownloaderID, p.Hash)
+			if err != nil {
+				// 查不到时不自动选库：选错了库，追剧要的库里就缺了这一集
+				p.Problem, p.retryable = "查不到追剧指定的媒体库，稍后重试："+err.Error(), true
+				return false
+			}
+			if found && id > 0 {
+				wanted, follow = id, true
+			}
+		}
+	}
 	var lib *models.MediaLibrary
-	if req.LibraryID > 0 {
+	if wanted > 0 {
 		for i := range libs {
-			if libs[i].ID == req.LibraryID && libs[i].Kind == kind {
+			if libs[i].ID == wanted && libs[i].Kind == kind {
 				lib = &libs[i]
 			}
 		}
 		if lib == nil {
 			p.Problem = "指定的媒体库不存在、没有启用，或类型与条目不同"
+			if follow {
+				p.Problem = "追剧指定的媒体库不存在、没有启用，或类型与条目不同：在追剧里改选媒体库"
+			}
 			return false
 		}
 	} else {

@@ -14,13 +14,25 @@ class AppProgress {
   /// Returns a new [AppProgress] instance.
   AppProgress({
     required this.total,
+    this.required_,
     required this.aired,
     required this.inLibrary,
     required this.downloading,
+    this.waiting,
+    this.skipped,
     this.missing = const [],
   });
 
   int total;
+
+  /// 要追的集数（起始集以后、没跳过的）；旧版本的服务端不给
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? required_;
 
   int aired;
 
@@ -28,34 +40,73 @@ class AppProgress {
 
   int downloading;
 
+  /// 在等锁住的版本的集数（也算在 missing 里）；旧版本的服务端不给
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? waiting;
+
+  /// 不追的集数；旧版本的服务端不给
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? skipped;
+
   List<int> missing;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppProgress &&
     other.total == total &&
+    other.required_ == required_ &&
     other.aired == aired &&
     other.inLibrary == inLibrary &&
     other.downloading == downloading &&
+    other.waiting == waiting &&
+    other.skipped == skipped &&
     _deepEquality.equals(other.missing, missing);
 
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
     (total.hashCode) +
+    (required_ == null ? 0 : required_!.hashCode) +
     (aired.hashCode) +
     (inLibrary.hashCode) +
     (downloading.hashCode) +
+    (waiting == null ? 0 : waiting!.hashCode) +
+    (skipped == null ? 0 : skipped!.hashCode) +
     (missing.hashCode);
 
   @override
-  String toString() => 'AppProgress[total=$total, aired=$aired, inLibrary=$inLibrary, downloading=$downloading, missing=$missing]';
+  String toString() => 'AppProgress[total=$total, required_=$required_, aired=$aired, inLibrary=$inLibrary, downloading=$downloading, waiting=$waiting, skipped=$skipped, missing=$missing]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'total'] = this.total;
+    if (this.required_ != null) {
+      json[r'required'] = this.required_;
+    } else {
+      json[r'required'] = null;
+    }
       json[r'aired'] = this.aired;
       json[r'in_library'] = this.inLibrary;
       json[r'downloading'] = this.downloading;
+    if (this.waiting != null) {
+      json[r'waiting'] = this.waiting;
+    } else {
+      json[r'waiting'] = null;
+    }
+    if (this.skipped != null) {
+      json[r'skipped'] = this.skipped;
+    } else {
+      json[r'skipped'] = null;
+    }
       json[r'missing'] = this.missing;
     return json;
   }
@@ -86,9 +137,12 @@ class AppProgress {
 
       return AppProgress(
         total: mapValueOfType<int>(json, r'total')!,
+        required_: mapValueOfType<int>(json, r'required'),
         aired: mapValueOfType<int>(json, r'aired')!,
         inLibrary: mapValueOfType<int>(json, r'in_library')!,
         downloading: mapValueOfType<int>(json, r'downloading')!,
+        waiting: mapValueOfType<int>(json, r'waiting'),
+        skipped: mapValueOfType<int>(json, r'skipped'),
         missing: json[r'missing'] is Iterable
             ? (json[r'missing'] as Iterable).cast<int>().toList(growable: false)
             : const [],

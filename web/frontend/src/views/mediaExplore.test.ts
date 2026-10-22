@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /*
  * 钉子：探索页。打开时取电影的本周趋势；切到剧集、热门时重新取；搜索要填名字；已订阅的不再显示「订阅」；
- * 点「订阅」打开订阅弹窗，订阅后刷新列表；读不到时写明原因。
+ * 点「订阅」打开订阅弹窗，订阅后刷新列表；剧集点「追剧」，按追剧的默认设置建；读不到时写明原因。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
@@ -19,11 +19,24 @@ const sites = vi.hoisted(() => ({ list: vi.fn() }));
 const media = vi.hoisted(() => ({
   settings: vi.fn(async () => ({ image_base_url: "https://static.example.com/t/p/" })),
 }));
+const organize = vi.hoisted(() => ({
+  libraries: vi.fn(async () => [
+    { id: 4, name: "剧集库", kind: "tv" },
+    { id: 5, name: "电影库", kind: "movie" },
+  ]),
+}));
 const ui = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 
 vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
-  return { ...real, subscribeApi: api, downloadersApi: dl, sitesApi: sites, mediaApi: media };
+  return {
+    ...real,
+    subscribeApi: api,
+    downloadersApi: dl,
+    sitesApi: sites,
+    mediaApi: media,
+    organizeApi: organize,
+  };
 });
 
 vi.mock("element-plus", async (orig) => {
@@ -184,6 +197,48 @@ describe("探索", () => {
     });
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("已订阅：沙丘2"));
     await vi.waitFor(() => expect(api.explore).toHaveBeenCalledTimes(2));
+  });
+
+  it("剧集：点「追剧」，按追剧的默认设置建（按播出时间、开着版本锁）", async () => {
+    await mountPage();
+    const show = {
+      id: 231620,
+      media_type: "tv",
+      title: "现在就出发",
+      original_title: "现在就出发",
+      year: 2023,
+      in_library: false,
+      subscribed: false,
+    };
+    api.explore.mockResolvedValue(page([show]));
+    (q("ex-kind")!.querySelectorAll("input")[1] as HTMLInputElement).click();
+    await vi.waitFor(() => expect(q("ex-sub-231620")).not.toBeNull());
+    expect(q("ex-sub-231620")!.textContent).toContain("追剧");
+    api.create.mockResolvedValue({ id: 11, title: "现在就出发" });
+    q("ex-sub-231620")!.click();
+    await vi.waitFor(() => expect(q("subscribe-dialog")).not.toBeNull());
+    await vi.waitFor(() => expect(organize.libraries).toHaveBeenCalled());
+    expect(q("sd-schedule"), "剧集有追剧的设置").not.toBeNull();
+    expect(q("sd-season")).not.toBeNull();
+    q("sd-save")!.click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0]![0]).toEqual({
+      profile_id: 0,
+      sites: [],
+      downloader_id: 0,
+      category: "",
+      tags: "",
+      save_path: "",
+      upgrade: false,
+      schedule: { kind: "airtime", air_delay_hours: 0, air_retry_hours: 0, air_window_days: 0 },
+      lock_version: true,
+      follow_next_season: false,
+      library_id: 0,
+      media_type: "tv",
+      tmdb_id: 231620,
+      season: 0,
+    });
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("开始追剧：现在就出发"));
   });
 
   it("读不到时写明原因", async () => {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,7 +16,19 @@ type SearchCache struct {
 	entries map[string]*searchCacheEntry
 	ttl     time.Duration
 	maxSize int
+	// items 按（站点, 种子编号）索引缓存的结果里的每个种子，同样的过期时间（一键追剧按搜索结果里的种子取条目）
+	items map[string]itemCacheEntry
 }
+
+type itemCacheEntry struct {
+	item      TorrentItem
+	expiresAt time.Time
+}
+
+// maxCachedItems 是种子索引最多几条。
+const maxCachedItems = 50000
+
+func itemKey(site, id string) string { return strings.ToLower(site) + "\x00" + id }
 
 type searchCacheEntry struct {
 	result    *MultiSiteSearchResult
@@ -44,6 +57,7 @@ func NewSearchCache(config SearchCacheConfig) *SearchCache {
 		entries: make(map[string]*searchCacheEntry),
 		ttl:     config.TTL,
 		maxSize: config.MaxSize,
+		items:   make(map[string]itemCacheEntry),
 	}
 }
 
@@ -88,6 +102,39 @@ func (c *SearchCache) Set(query MultiSiteSearchQuery, result *MultiSiteSearchRes
 		expiresAt: now.Add(c.ttl),
 		createdAt: now,
 	}
+	if result == nil {
+		return
+	}
+	for _, it := range result.Items {
+		if it.SourceSite == "" || it.ID == "" {
+			continue
+		}
+		c.items[itemKey(it.SourceSite, it.ID)] = itemCacheEntry{item: it, expiresAt: now.Add(c.ttl)}
+	}
+	if len(c.items) > maxCachedItems {
+		for k, e := range c.items {
+			if now.After(e.expiresAt) {
+				delete(c.items, k)
+			}
+		}
+		for k := range c.items {
+			if len(c.items) <= maxCachedItems {
+				break
+			}
+			delete(c.items, k)
+		}
+	}
+}
+
+// Item 取缓存的搜索结果里的一个种子（按站点与种子编号；过期的不算）。
+func (c *SearchCache) Item(site, id string) (TorrentItem, bool) {
+	c.mu.RLock()
+	e, ok := c.items[itemKey(site, id)]
+	c.mu.RUnlock()
+	if !ok || time.Now().After(e.expiresAt) {
+		return TorrentItem{}, false
+	}
+	return e.item, true
 }
 
 // Delete removes a specific entry from the cache
@@ -106,6 +153,7 @@ func (c *SearchCache) Clear() {
 	defer c.mu.Unlock()
 
 	c.entries = make(map[string]*searchCacheEntry)
+	c.items = make(map[string]itemCacheEntry)
 }
 
 // Size returns the number of entries in the cache
@@ -128,6 +176,11 @@ func (c *SearchCache) Cleanup() int {
 		if now.After(entry.expiresAt) {
 			delete(c.entries, key)
 			removed++
+		}
+	}
+	for key, e := range c.items {
+		if now.After(e.expiresAt) {
+			delete(c.items, key)
 		}
 	}
 
@@ -192,6 +245,11 @@ func (c *CachedSearchOrchestrator) Search(ctx context.Context, query MultiSiteSe
 	}
 
 	return result, nil
+}
+
+// CachedTorrent 取最近搜索结果里的一个种子（按站点与种子编号，与搜索结果同样的过期时间）。
+func (c *CachedSearchOrchestrator) CachedTorrent(site, id string) (TorrentItem, bool) {
+	return c.cache.Item(site, id)
 }
 
 // ClearCache clears the search cache

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
@@ -13,6 +14,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/redact"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -56,6 +58,10 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 		cfg.Organizer, cfg.Library = organizer, organizer
 	}
 	svc := subscribe.New(cfg)
+	if organizer != nil {
+		// 追剧推送或认领的种子整理进追剧指定的媒体库
+		organizer.SetLibraryFor(svc.LibraryFor)
+	}
 	svc.Start(ctx)
 	internal.SetSubscriptionOffer(svc.Offer)
 	chatopscmds.SetSubscribeService(chatopsSubscribe{svc: svc})
@@ -103,18 +109,75 @@ func (c chatopsSubscribe) Subscribe(ctx context.Context, kind string, tmdbID, se
 	return subscriptionName(sub), nil
 }
 
+// Follow 建追剧：只认剧集，按追剧的默认设置（与网页、App 新建的一样）。
+func (c chatopsSubscribe) Follow(ctx context.Context, tmdbID, season int) (string, error) {
+	in := subscribe.SubscriptionInput{MediaType: models.MediaKindTV, TMDBID: tmdbID, Season: season}
+	subscribe.FollowDefaults(&in)
+	sub, err := c.svc.CreateSubscription(ctx, in, models.MediaSubFromChatOps)
+	if err != nil {
+		return "", err
+	}
+	return subscriptionName(sub) + "，" + subscribe.Describe(sub), nil
+}
+
 func (c chatopsSubscribe) List(ctx context.Context) ([]chatopscmds.SubscribeLine, error) {
 	subs, err := c.svc.Subscriptions(ctx, subscribe.SubscriptionQuery{})
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	out := make([]chatopscmds.SubscribeLine, 0, len(subs))
 	for i := range subs {
 		out = append(out, chatopscmds.SubscribeLine{
-			Title: subscriptionName(&subs[i].MediaSubscription), Status: subscriptionStatus(subs[i].Status), Progress: progressText(&subs[i]),
+			ID: subs[i].ID, Title: subscriptionName(&subs[i].MediaSubscription), Status: subscriptionStatus(subs[i].Status),
+			Progress: progressText(&subs[i]), Next: nextSearchText(&subs[i].MediaSubscription, now),
 		})
 	}
 	return out, nil
+}
+
+// Runs 是订阅的名字与最近几次运行；说明里的凭据去掉（回复会发到聊天软件）。
+func (c chatopsSubscribe) Runs(ctx context.Context, id uint, limit int) (string, []chatopscmds.RunLine, error) {
+	d, err := c.svc.Subscription(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+	page, err := c.svc.Runs(ctx, id, limit, 0)
+	if err != nil {
+		return "", nil, err
+	}
+	out := make([]chatopscmds.RunLine, 0, len(page.Items))
+	for _, r := range page.Items {
+		line := chatopscmds.RunLine{At: r.StartedAt, Trigger: r.Trigger, Status: r.Status, Summary: redact.Text(r.Summary)}
+		for _, st := range r.Steps {
+			line.Steps = append(line.Steps, redact.Text(st.Text))
+		}
+		out = append(out, line)
+	}
+	return subscriptionName(&d.MediaSubscription), out, nil
+}
+
+// Unlock 让追剧的一集不受版本锁限制，并尽快搜一次。
+func (c chatopsSubscribe) Unlock(ctx context.Context, id uint, episode int) (string, error) {
+	if _, err := c.svc.UnlockEpisode(ctx, id, episode, true); err != nil {
+		return "", err
+	}
+	d, err := c.svc.Subscription(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return subscriptionName(&d.MediaSubscription), nil
+}
+
+// nextSearchText 是下次主动搜索的时间（月-日 时:分）；暂停、完成、待确认的是空，已经到点的是「马上」。
+func nextSearchText(sub *models.MediaSubscription, now time.Time) string {
+	if sub.Status != models.MediaSubActive || sub.NextSearchAt == nil {
+		return ""
+	}
+	if !sub.NextSearchAt.After(now) {
+		return "马上"
+	}
+	return sub.NextSearchAt.Local().Format("01-02 15:04")
 }
 
 func subscriptionName(sub *models.MediaSubscription) string {
@@ -161,7 +224,15 @@ func progressText(v *subscribe.SubscriptionView) string {
 		parts = append(parts, fmt.Sprintf("下载中 %d", p.Downloading))
 	}
 	if len(p.Missing) > 0 {
-		parts = append(parts, fmt.Sprintf("缺 %d", len(p.Missing)))
+		miss := fmt.Sprintf("缺 %d", len(p.Missing))
+		if p.Waiting > 0 {
+			// 在等锁住的版本的也算缺
+			miss += fmt.Sprintf("（等版本 %d）", p.Waiting)
+		}
+		parts = append(parts, miss)
+	}
+	if p.Skipped > 0 {
+		parts = append(parts, fmt.Sprintf("不追 %d", p.Skipped))
 	}
 	return strings.Join(parts, "，")
 }

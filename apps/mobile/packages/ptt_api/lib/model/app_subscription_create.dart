@@ -18,6 +18,12 @@ class AppSubscriptionCreate {
     this.season,
     this.profileId,
     this.upgrade,
+    this.schedule,
+    this.lockVersion,
+    this.startEpisode,
+    this.followNextSeason,
+    this.libraryId,
+    this.fromTorrent,
   });
 
   AppSubscriptionCreateMediaTypeEnum mediaType;
@@ -51,13 +57,70 @@ class AppSubscriptionCreate {
   ///
   bool? upgrade;
 
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  AppSchedule? schedule;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? lockVersion;
+
+  /// Minimum value: 0
+  /// Maximum value: 2000
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? startEpisode;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? followNextSeason;
+
+  /// Minimum value: 0
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? libraryId;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  AppFromTorrent? fromTorrent;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppSubscriptionCreate &&
     other.mediaType == mediaType &&
     other.tmdbId == tmdbId &&
     other.season == season &&
     other.profileId == profileId &&
-    other.upgrade == upgrade;
+    other.upgrade == upgrade &&
+    other.schedule == schedule &&
+    other.lockVersion == lockVersion &&
+    other.startEpisode == startEpisode &&
+    other.followNextSeason == followNextSeason &&
+    other.libraryId == libraryId &&
+    other.fromTorrent == fromTorrent;
 
   @override
   int get hashCode =>
@@ -66,10 +129,16 @@ class AppSubscriptionCreate {
     (tmdbId.hashCode) +
     (season == null ? 0 : season!.hashCode) +
     (profileId == null ? 0 : profileId!.hashCode) +
-    (upgrade == null ? 0 : upgrade!.hashCode);
+    (upgrade == null ? 0 : upgrade!.hashCode) +
+    (schedule == null ? 0 : schedule!.hashCode) +
+    (lockVersion == null ? 0 : lockVersion!.hashCode) +
+    (startEpisode == null ? 0 : startEpisode!.hashCode) +
+    (followNextSeason == null ? 0 : followNextSeason!.hashCode) +
+    (libraryId == null ? 0 : libraryId!.hashCode) +
+    (fromTorrent == null ? 0 : fromTorrent!.hashCode);
 
   @override
-  String toString() => 'AppSubscriptionCreate[mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade]';
+  String toString() => 'AppSubscriptionCreate[mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, schedule=$schedule, lockVersion=$lockVersion, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -89,6 +158,36 @@ class AppSubscriptionCreate {
       json[r'upgrade'] = this.upgrade;
     } else {
       json[r'upgrade'] = null;
+    }
+    if (this.schedule != null) {
+      json[r'schedule'] = this.schedule;
+    } else {
+      json[r'schedule'] = null;
+    }
+    if (this.lockVersion != null) {
+      json[r'lock_version'] = this.lockVersion;
+    } else {
+      json[r'lock_version'] = null;
+    }
+    if (this.startEpisode != null) {
+      json[r'start_episode'] = this.startEpisode;
+    } else {
+      json[r'start_episode'] = null;
+    }
+    if (this.followNextSeason != null) {
+      json[r'follow_next_season'] = this.followNextSeason;
+    } else {
+      json[r'follow_next_season'] = null;
+    }
+    if (this.libraryId != null) {
+      json[r'library_id'] = this.libraryId;
+    } else {
+      json[r'library_id'] = null;
+    }
+    if (this.fromTorrent != null) {
+      json[r'from_torrent'] = this.fromTorrent;
+    } else {
+      json[r'from_torrent'] = null;
     }
     return json;
   }
@@ -117,6 +216,12 @@ class AppSubscriptionCreate {
         season: mapValueOfType<int>(json, r'season'),
         profileId: mapValueOfType<int>(json, r'profile_id'),
         upgrade: mapValueOfType<bool>(json, r'upgrade'),
+        schedule: AppSchedule.fromJson(json[r'schedule']),
+        lockVersion: mapValueOfType<bool>(json, r'lock_version'),
+        startEpisode: mapValueOfType<int>(json, r'start_episode'),
+        followNextSeason: mapValueOfType<bool>(json, r'follow_next_season'),
+        libraryId: mapValueOfType<int>(json, r'library_id'),
+        fromTorrent: AppFromTorrent.fromJson(json[r'from_torrent']),
       );
     }
     return null;

@@ -27,6 +27,7 @@ func TestNewSubscribeService(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{},
 		&models.MediaSubscribeSetting{}, &models.MediaDoubanSource{}, &models.MediaDoubanItem{},
+		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{},
 	))
 	store := core.NewConfigStore(global.GlobalDB)
 	mgr := scheduler.NewManager()
@@ -55,8 +56,16 @@ func TestChatOpsSubscribeAdapter(t *testing.T) {
 	assert.Equal(t, "待确认", subscriptionStatus(models.MediaSubPending))
 	tv := &subscribe.SubscriptionView{MediaSubscription: models.MediaSubscription{MediaType: models.MediaKindTV}, Progress: &subscribe.Progress{Total: 3, InLibrary: 1, Downloading: 1, Missing: []int{2}}}
 	assert.Equal(t, "已入库 1/3，下载中 1，缺 1", progressText(tv))
+	follow := &subscribe.SubscriptionView{MediaSubscription: models.MediaSubscription{MediaType: models.MediaKindTV}, Progress: &subscribe.Progress{Total: 6, InLibrary: 2, Missing: []int{3, 4}, Waiting: 1, Skipped: 1}}
+	assert.Equal(t, "已入库 2/6，缺 2（等版本 1），不追 1", progressText(follow))
 	movie := &subscribe.SubscriptionView{MediaSubscription: models.MediaSubscription{MediaType: models.MediaKindMovie}, Progress: &subscribe.Progress{Total: 1, Downloading: 1}}
 	assert.Equal(t, "下载中", progressText(movie))
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.Local)
+	later, earlier := now.Add(9*time.Hour), now.Add(-time.Minute)
+	assert.Equal(t, "10-21 21:00", nextSearchText(&models.MediaSubscription{Status: models.MediaSubActive, NextSearchAt: &later}, now))
+	assert.Equal(t, "马上", nextSearchText(&models.MediaSubscription{Status: models.MediaSubActive, NextSearchAt: &earlier}, now))
+	assert.Empty(t, nextSearchText(&models.MediaSubscription{Status: models.MediaSubPaused, NextSearchAt: &later}, now))
+	assert.Empty(t, nextSearchText(&models.MediaSubscription{Status: models.MediaSubActive}, now))
 	assert.Empty(t, progressText(&subscribe.SubscriptionView{}))
 	_, err := chatopsSubscribe{}.Subscribe(context.Background(), "book", 1, 0)
 	require.Error(t, err)
@@ -76,6 +85,7 @@ func TestChatOpsSubscribeAdapterFlow(t *testing.T) {
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{},
 		&models.MediaSubscribeSetting{}, &models.MediaDoubanSource{}, &models.MediaDoubanItem{},
+		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{},
 	))
 	const key = "0123456789abcdef0123456789abcdef"
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +100,12 @@ func TestChatOpsSubscribeAdapterFlow(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":278,"title":"The Shawshank Redemption","alternative_titles":{"titles":[]}}`))
 		case r.URL.Path == "/3/movie/278":
 			_, _ = w.Write([]byte(`{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23"}`))
+		case r.URL.Path == "/3/tv/1396" && en:
+			_, _ = w.Write([]byte(`{"id":1396,"name":"Breaking Bad","alternative_titles":{"results":[]}}`))
+		case r.URL.Path == "/3/tv/1396":
+			_, _ = w.Write([]byte(`{"id":1396,"name":"绝命毒师","original_name":"Breaking Bad","first_air_date":"2008-01-20","number_of_seasons":1}`))
+		case r.URL.Path == "/3/tv/1396/season/1":
+			_, _ = w.Write([]byte(`{"season_number":1,"air_date":"2008-01-20","episodes":[{"episode_number":1,"air_date":"2008-01-20"},{"episode_number":2,"air_date":"2008-01-27"}]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -120,6 +136,36 @@ func TestChatOpsSubscribeAdapterFlow(t *testing.T) {
 	assert.Equal(t, "还没下载", lines[0].Progress)
 	_, err = c.Subscribe(ctx, models.MediaKindMovie, 278, 0)
 	require.Error(t, err, "订阅过了")
+
+	// /follow 按追剧的默认设置建；/runs 看到建立的那次；/unlock 一集换版本
+	text, err := c.Follow(ctx, 1396, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "绝命毒师 (2008) 第 1 季，按播出时间搜索（20:00 播出，2 小时后开始搜），版本锁开（按第一个下载的版本定）", text)
+	lines, err = c.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, lines, 2)
+	assert.Equal(t, "绝命毒师 (2008) 第 1 季", lines[0].Title, "新的在前")
+	assert.NotZero(t, lines[0].ID)
+	assert.Equal(t, "马上", lines[0].Next, "建好以后马上搜")
+	assert.Equal(t, "已入库 0/2，缺 2", lines[0].Progress)
+	name, runs, err := c.Runs(ctx, lines[0].ID, 5)
+	require.NoError(t, err)
+	assert.Equal(t, "绝命毒师 (2008) 第 1 季", name)
+	require.Len(t, runs, 1)
+	assert.Equal(t, models.MediaRunCreate, runs[0].Trigger)
+	assert.Contains(t, runs[0].Summary, "建立了追剧")
+	name, err = c.Unlock(ctx, lines[0].ID, 2)
+	require.NoError(t, err)
+	assert.Equal(t, "绝命毒师 (2008) 第 1 季", name)
+	_, err = c.Unlock(ctx, lines[0].ID, 9)
+	require.Error(t, err, "这一季没有第 9 集")
+	_, err = c.Unlock(ctx, lines[1].ID, 1)
+	require.Error(t, err, "电影没有分集")
+	_, _, err = c.Runs(ctx, 999, 5)
+	require.Error(t, err)
+	_, runs, err = c.Runs(ctx, lines[0].ID, 5)
+	require.NoError(t, err)
+	assert.Len(t, runs, 2, "换版本记一条手动的运行")
 
 	// 搜索出错时写明
 	_, err = chatopsSubscribe{svc: subscribe.New(subscribe.Config{DB: db, Recognizer: noTMDB{rec}})}.Search(ctx, "x")

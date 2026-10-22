@@ -241,12 +241,22 @@ class ApiClient {
           return AppDownloaderList.fromJson(value);
         case 'AppEpisode':
           return AppEpisode.fromJson(value);
+        case 'AppEpisodeRule':
+          return AppEpisodeRule.fromJson(value);
+        case 'AppEpisodeRuleInput':
+          return AppEpisodeRuleInput.fromJson(value);
+        case 'AppEpisodeSkip':
+          return AppEpisodeSkip.fromJson(value);
+        case 'AppEpisodeUnlock':
+          return AppEpisodeUnlock.fromJson(value);
         case 'AppError':
           return AppError.fromJson(value);
         case 'AppExploreItem':
           return AppExploreItem.fromJson(value);
         case 'AppExplorePage':
           return AppExplorePage.fromJson(value);
+        case 'AppFromTorrent':
+          return AppFromTorrent.fromJson(value);
         case 'AppLibraryRef':
           return AppLibraryRef.fromJson(value);
         case 'AppMediaHistory':
@@ -291,6 +301,10 @@ class ApiClient {
           return AppRelease.fromJson(value);
         case 'AppReleaseAsset':
           return AppReleaseAsset.fromJson(value);
+        case 'AppRunStep':
+          return AppRunStep.fromJson(value);
+        case 'AppSchedule':
+          return AppSchedule.fromJson(value);
         case 'AppSearchError':
           return AppSearchError.fromJson(value);
         case 'AppSearchItem':
@@ -317,10 +331,16 @@ class ApiClient {
           return AppSubscriptionCreate.fromJson(value);
         case 'AppSubscriptionDetail':
           return AppSubscriptionDetail.fromJson(value);
+        case 'AppSubscriptionRun':
+          return AppSubscriptionRun.fromJson(value);
+        case 'AppSubscriptionRunPage':
+          return AppSubscriptionRunPage.fromJson(value);
         case 'AppSubscriptionStatus':
           return AppSubscriptionStatus.fromJson(value);
         case 'AppSubscriptionTorrent':
           return AppSubscriptionTorrent.fromJson(value);
+        case 'AppSubscriptionUpdate':
+          return AppSubscriptionUpdate.fromJson(value);
         case 'AppTask':
           return AppTask.fromJson(value);
         case 'AppTaskPage':

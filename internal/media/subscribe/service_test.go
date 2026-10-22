@@ -136,7 +136,7 @@ func TestKeywords(t *testing.T) {
 	movie := &models.MediaSubscription{MediaType: models.MediaKindMovie, Title: "沙丘2", OriginalTitle: "Dune: Part Two", Year: 2024}
 	assert.Equal(t, []string{"Dune  Part Two 2024", "沙丘2"}, keywords(movie))
 	tv := &models.MediaSubscription{MediaType: models.MediaKindTV, Title: "葬送的芙莉莲", OriginalTitle: "葬送のフリーレン", Season: 1, Aliases: encodeList([]string{"Sousou no Frieren"})}
-	assert.Equal(t, []string{"Sousou no Frieren S01", "葬送的芙莉莲 S01"}, keywords(tv), "原名不是拉丁字母时用英文别名")
+	assert.Equal(t, []string{"Sousou no Frieren S01", "葬送的芙莉莲"}, keywords(tv), "原名不是拉丁字母时用英文别名；中文名不加季")
 	same := &models.MediaSubscription{MediaType: models.MediaKindMovie, Title: "Heat", OriginalTitle: "Heat", Year: 1995}
 	assert.Equal(t, []string{"Heat 1995"}, keywords(same))
 }

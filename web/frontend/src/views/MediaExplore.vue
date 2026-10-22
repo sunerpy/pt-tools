@@ -97,7 +97,10 @@ onMounted(load);
 
 <template>
   <div class="pt-cards pt-cards--wide">
-    <PtHeadSub>TMDB 的本周趋势、热门与搜索，看到想看的点「订阅」，pt-tools 会帮你找资源</PtHeadSub>
+    <PtHeadSub
+      >TMDB 的本周趋势、热门与搜索，看到想看的电影点「订阅」、剧集点「追剧」，pt-tools
+      会帮你找资源</PtHeadSub
+    >
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="ex-refresh" @click="load">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
@@ -185,7 +188,7 @@ onMounted(load);
               text
               :data-testid="`ex-subscribed-${it.id}`"
               @click="openSubscriptions"
-              >查看订阅</el-button
+              >{{ it.media_type === "tv" ? "查看追剧" : "查看订阅" }}</el-button
             >
             <el-button
               v-else
@@ -194,7 +197,9 @@ onMounted(load);
               plain
               :data-testid="`ex-sub-${it.id}`"
               @click="subscribe(it)">
-              <PtIcon name="bookmark" :size="13" /><span>订阅</span>
+              <PtIcon name="bookmark" :size="13" /><span>{{
+                it.media_type === "tv" ? "追剧" : "订阅"
+              }}</span>
             </el-button>
           </div>
         </div>

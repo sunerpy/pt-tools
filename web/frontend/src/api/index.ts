@@ -3212,18 +3212,60 @@ export interface QualityProfileList {
   codecs: string[];
 }
 
+/** 剧集一集的情况：已入库、下载中、缺、在等锁住的版本、还没播、不追（起始集以前的或跳过的）。 */
+export type EpisodeStateKind =
+  | "library"
+  | "downloading"
+  | "missing"
+  | "waiting_version"
+  | "upcoming"
+  | "skipped";
+
+export interface SubscriptionEpisode {
+  number: number;
+  name?: string;
+  air_date?: string;
+  state: EpisodeStateKind;
+  /** 状态从哪里来：媒体库、订阅推送的种子、下载器里已有的种子 */
+  source?: "library" | "subscription" | "downloader";
+  /** 现在的版本（制作组与分辨率） */
+  version?: string;
+  manual_skip?: boolean;
+  /** 这一集不受版本锁限制 */
+  manual_unlock?: boolean;
+}
+
 export interface SubscriptionProgress {
   total: number;
+  /** 要追的集数（起始集以后、没跳过的） */
+  required?: number;
   aired: number;
   in_library: number;
   downloading: number;
+  /** 在等锁住的版本的集数（也算在 missing 里） */
+  waiting?: number;
+  skipped?: number;
   missing?: number[];
-  episodes?: {
-    number: number;
-    name?: string;
-    air_date?: string;
-    state: "library" | "downloading" | "missing" | "upcoming";
-  }[];
+  /** 每一集的状态（按集号，列表里画格子用） */
+  states?: EpisodeStateKind[];
+  episodes?: SubscriptionEpisode[];
+}
+
+/** 追剧主动搜索的定时：空的沿用全局间隔。 */
+export type FollowScheduleKind = "" | "airtime" | "daily" | "every_days" | "weekly" | "monthly";
+
+export interface FollowSchedule {
+  kind: FollowScheduleKind;
+  /** HH:MM；按播出时间时是播出的时刻 */
+  at?: string;
+  /** every_days 的天数 */
+  every?: number;
+  /** weekly 的星期几（0 是星期日）或 monthly 的几号 */
+  days?: number[];
+  /** 按播出时间：播出后几小时开始搜、没找到隔几小时再搜、播出后几天里集中重试（0 用默认的 2、6、7） */
+  air_delay_hours?: number;
+  air_retry_hours?: number;
+  air_window_days?: number;
 }
 
 export interface Subscription {
@@ -3254,6 +3296,21 @@ export interface Subscription {
   updated_at: string;
   progress?: SubscriptionProgress;
   torrents: number;
+  // 以下是追剧（剧集）的设置；更早的版本没有
+  schedule?: FollowSchedule;
+  /** 从第几集开始追（0 与 1 是整季） */
+  start_episode?: number;
+  /** 集数是手动填的 */
+  total_episodes_manual?: boolean;
+  /** 版本锁：同一个制作组、同一个分辨率 */
+  lock_version?: boolean;
+  lock_group?: string;
+  lock_resolution?: string;
+  follow_next_season?: boolean;
+  next_season_id?: number;
+  /** 整理进哪个媒体库（0 按类型自动选） */
+  library_id?: number;
+  completed_at?: string;
 }
 
 export interface SubscriptionTorrent {
@@ -3293,6 +3350,66 @@ export interface SubscriptionInput {
   save_path: string;
   upgrade: boolean;
   pending?: boolean;
+  // 追剧的设置：不给时新建按默认（按播出时间、开着版本锁），修改时不变
+  schedule?: FollowSchedule;
+  lock_version?: boolean;
+  /** lock_group 与 lock_resolution 都给空串是清掉锁住的版本 */
+  lock_group?: string;
+  lock_resolution?: string;
+  start_episode?: number;
+  follow_next_season?: boolean;
+  library_id?: number;
+  /** 这一季的集数：大于 0 时以它为准，0 改回按 TMDB（只在修改时用） */
+  total_episodes?: number;
+  /** 从站点上的这个种子开始追（只在新建时用） */
+  from_torrent?: { site: string; torrent_id: string; title?: string };
+}
+
+export interface SubscriptionRunStep {
+  kind: "search" | "reject" | "lock" | "push" | "fail" | "adopt" | "wait" | "info";
+  text: string;
+}
+
+/** 订阅的一次运行：主动搜索、RSS 命中、建立、手动操作。 */
+export interface SubscriptionRun {
+  id: number;
+  subscription_id: number;
+  trigger: "create" | "schedule" | "rss" | "manual" | "ai";
+  started_at: string;
+  finished_at?: string;
+  /** changed 是手动改动的记录（改设置、跳过一集、换版本、集号规则），不是一次搜索 */
+  status: "ok" | "nothing" | "waiting" | "failed" | "partial" | "changed";
+  summary: string;
+  steps: SubscriptionRunStep[];
+  steps_truncated: boolean;
+}
+
+export interface SubscriptionRunPage {
+  items: SubscriptionRun[];
+  total: number;
+}
+
+/** 集号规则：tmdb 按 TMDB 的集号、period_part 按第几期与上下、date 按播出日期、offset 加偏移。 */
+export type EpisodeRuleMode = "tmdb" | "period_part" | "date" | "offset";
+
+export interface EpisodeRule {
+  id: number;
+  subscription_id: number;
+  /** 制作组；空的对所有组 */
+  group: string;
+  mode: EpisodeRuleMode;
+  offset: number;
+  source: "manual" | "ai" | "auto";
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EpisodeRuleInput {
+  group: string;
+  mode: EpisodeRuleMode;
+  offset: number;
+  note: string;
 }
 
 export interface DoubanSource {
@@ -3366,6 +3483,29 @@ export const subscribeApi = {
   setStatus: (id: number, status: "active" | "paused") =>
     api.post<Subscription>(`/api/media/subscriptions/${id}/status`, { status }),
   search: (id: number) => api.post<{ message: string }>(`/api/media/subscriptions/${id}/search`),
+  episodes: (id: number) =>
+    api.get<SubscriptionEpisode[]>(`/api/media/subscriptions/${id}/episodes`),
+  skipEpisode: (id: number, n: number, skip: boolean) =>
+    api.post<SubscriptionEpisode[]>(`/api/media/subscriptions/${id}/episodes/${n}/skip`, { skip }),
+  unlockEpisode: (id: number, n: number, unlock: boolean) =>
+    api.post<SubscriptionEpisode[]>(`/api/media/subscriptions/${id}/episodes/${n}/unlock`, {
+      unlock,
+    }),
+  runs: (id: number, q: { limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.limit) params.set("limit", String(q.limit));
+    if (q.offset) params.set("offset", String(q.offset));
+    const qs = params.toString();
+    return api.get<SubscriptionRunPage>(`/api/media/subscriptions/${id}/runs${qs ? `?${qs}` : ""}`);
+  },
+  episodeRules: (id: number) =>
+    api.get<EpisodeRule[]>(`/api/media/subscriptions/${id}/episode-rules`),
+  saveEpisodeRule: (id: number, data: EpisodeRuleInput) =>
+    api.put<EpisodeRule[]>(`/api/media/subscriptions/${id}/episode-rules`, data),
+  deleteEpisodeRule: (id: number, group: string) =>
+    api.delete<EpisodeRule[]>(
+      `/api/media/subscriptions/${id}/episode-rules?group=${encodeURIComponent(group)}`,
+    ),
   doubanSources: () => api.get<DoubanSource[]>("/api/media/douban-sources"),
   createDouban: (data: DoubanSourceInput) =>
     api.post<DoubanSource>("/api/media/douban-sources", data),

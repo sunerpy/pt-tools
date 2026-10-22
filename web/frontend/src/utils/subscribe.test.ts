@@ -41,6 +41,17 @@ describe("订阅的文字", () => {
     expect(
       progressText("tv", { total: 10, aired: 6, in_library: 3, downloading: 1, missing: [5, 6] }),
     ).toBe("已入库 3/10 · 下载中 1 · 缺 2 · 4 集还没播");
+    // 跳过的集不在要追的里：还没播的按要追的数（6 集跳过 1 集，已播 3 集，还没播 2 集）
+    expect(
+      progressText("tv", {
+        total: 6,
+        required: 5,
+        aired: 3,
+        in_library: 0,
+        downloading: 3,
+        skipped: 1,
+      }),
+    ).toBe("已入库 0/6 · 下载中 3 · 不追 1 · 2 集还没播");
   });
 
   it("种子里的集", () => {
