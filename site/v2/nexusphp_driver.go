@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -940,8 +941,11 @@ func (d *NexusPHPDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 	return d.getUserInfoLegacy(ctx)
 }
 
-// getUserInfoWithDefinition fetches user info using site definition selectors
-// Uses concurrent requests where possible to improve performance
+// getUserInfoWithDefinition fetches user info using site definition selectors.
+// 先取不依赖别的页面的（index.php 这类），再取要用户 ID 的（userdetails.php）与做种情况。定义里写了 RequestDelay 的站点
+// 一页一页地取、中间隔 RequestDelay（几页同时请求容易招来 Cloudflare 质询），其余的并发。每一页一时的网络错误与质询先重试
+// （fetchUserInfoPage）；还是没取到的页面不让整次失败：用户名到手了就回取到的部分，错误是 *PartialUserInfoError，
+// 写明缺哪些字段（保存时沿用上一次的）。登录失效、要二次验证时整次失败。
 func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInfo, error) {
 	startTime := time.Now()
 	def := d.siteDefinition
@@ -954,9 +958,23 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 
 	// Store parsed values for use in subsequent requests
 	parsedValues := make(map[string]any)
-	var mu sync.Mutex // Protect parsedValues and info
-	// 第一个传输层失败：单页失败不让整次获取失败，但一页都没取到、连用户名都没有时按它报网络错误
-	var netErr error
+	var mu sync.Mutex // Protect parsedValues, info and the failures below
+	// 没取到的页面：缺的字段与第一个失败的原因；got 是别的页取到了的字段（几页都写了的字段，比如用户名，有一页取到就不算缺）
+	var missing []string
+	var firstErr error
+	got := make(map[string]bool)
+	fail := func(fields []string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, f := range fields {
+			if !slices.Contains(missing, f) {
+				missing = append(missing, f)
+			}
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	// First pass: identify which processes have dependencies
 	independentProcesses := []int{}
@@ -980,53 +998,54 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 		}
 	}
 
-	// Phase 1: Execute all independent processes in parallel using errgroup
+	delay := time.Duration(uiConfig.RequestDelay) * time.Millisecond
+	sequential := delay > 0
+	// processStep 取一页：取到的值并进 parsedValues 与 info；没取到时记下缺的字段，登录失效这类错误中止整次获取。
+	// 调用方的时限已经到了（或取消了）时不再请求，这一页算缺
+	processStep := func(idx int, params map[string]any) func(context.Context) error {
+		process := uiConfig.Process[idx]
+		return func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				fail(process.Fields, err)
+				return nil
+			}
+			values, err := d.executeProcess(ctx, uiConfig, process, params)
+			if err != nil {
+				if fatalUserInfoError(err) {
+					return err
+				}
+				fail(process.Fields, err)
+			}
+			mu.Lock()
+			for k, v := range values {
+				parsedValues[k] = v
+				d.setUserInfoField(&info, k, v)
+				got[k] = true
+			}
+			mu.Unlock()
+			return nil
+		}
+	}
+
+	// Phase 1: processes without dependencies
 	phase1Start := time.Now()
 	if len(independentProcesses) > 0 {
 		if DebugUserInfo {
-			fmt.Printf("[DEBUG] Phase 1: Executing %d independent processes in parallel\n", len(independentProcesses))
+			fmt.Printf("[DEBUG] Phase 1: Executing %d independent processes (sequential=%v)\n", len(independentProcesses), sequential)
 		}
-
-		g, gctx := errgroup.WithContext(ctx)
+		steps := make([]func(context.Context) error, 0, len(independentProcesses))
 		for _, idx := range independentProcesses {
-			idx := idx // capture loop variable
-			g.Go(func() error {
-				values, err := d.executeProcess(gctx, uiConfig, uiConfig.Process[idx], parsedValues)
-				if err != nil {
-					var partial partialFetchError
-					if !errors.As(err, &partial) {
-						return err // Return critical errors like session expired
-					}
-					mu.Lock()
-					if netErr == nil {
-						netErr = partial.err
-					}
-					mu.Unlock()
-				}
-				mu.Lock()
-				for k, v := range values {
-					parsedValues[k] = v
-					d.setUserInfoField(&info, k, v)
-				}
-				mu.Unlock()
-				return nil
-			})
+			steps = append(steps, processStep(idx, parsedValues))
 		}
-
-		if err := g.Wait(); err != nil {
-			return UserInfo{}, fmt.Errorf("phase 1 parallel execution failed: %w", err)
+		if err := runUserInfoSteps(ctx, sequential, delay, steps); err != nil {
+			return UserInfo{}, fmt.Errorf("phase 1 failed: %w", err)
 		}
 	}
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] Phase 1 completed in %v\n", time.Since(phase1Start))
 	}
 
-	// Apply RequestDelay between phases if configured
-	if uiConfig.RequestDelay > 0 {
-		time.Sleep(time.Duration(uiConfig.RequestDelay) * time.Millisecond)
-	}
-
-	// Phase 2: Execute dependent processes AND FetchSeedingStatus in parallel
+	// Phase 2: processes that need values from phase 1, and the seeding status
 	phase2Start := time.Now()
 	needSeedingStatus := false
 	if uiConfig.Selectors != nil {
@@ -1037,52 +1056,35 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 	}
 
 	if len(dependentProcesses) > 0 || (needSeedingStatus && info.UserID != "") {
-		if DebugUserInfo {
-			fmt.Printf("[DEBUG] Phase 2: Executing %d dependent processes", len(dependentProcesses))
-			if needSeedingStatus && info.UserID != "" {
-				fmt.Printf(" + seeding status fetch")
-			}
-			fmt.Printf(" in parallel\n")
+		// 第二轮的请求只读第一轮的结果：给一份拷贝，并发写 parsedValues 时不会和读撞上
+		params := make(map[string]any, len(parsedValues))
+		for k, v := range parsedValues {
+			params[k] = v
 		}
-
-		g, gctx := errgroup.WithContext(ctx)
-
-		// Launch dependent processes
+		steps := make([]func(context.Context) error, 0, len(dependentProcesses)+1)
 		for _, idx := range dependentProcesses {
-			idx := idx // capture loop variable
-			g.Go(func() error {
-				values, err := d.executeProcess(gctx, uiConfig, uiConfig.Process[idx], parsedValues)
-				if err != nil {
-					var partial partialFetchError
-					if !errors.As(err, &partial) {
-						return err // Return critical errors like session expired
-					}
-					mu.Lock()
-					if netErr == nil {
-						netErr = partial.err
-					}
-					mu.Unlock()
-				}
-				mu.Lock()
-				for k, v := range values {
-					parsedValues[k] = v
-					d.setUserInfoField(&info, k, v)
-				}
-				mu.Unlock()
-				return nil
-			})
+			steps = append(steps, processStep(idx, params))
 		}
-
-		// Launch seeding status fetch if needed (non-blocking error)
 		if needSeedingStatus && info.UserID != "" {
 			userID := info.UserID // capture
-			g.Go(func() error {
-				seeding, seedingSize, err := d.FetchSeedingStatus(gctx, userID)
+			steps = append(steps, func(ctx context.Context) error {
+				if err := ctx.Err(); err != nil {
+					fail([]string{"seederSize"}, err)
+					return nil
+				}
+				seeding, seedingSize, err := d.FetchSeedingStatus(ctx, userID)
 				if err != nil {
 					if DebugUserInfo {
 						fmt.Printf("[DEBUG] FetchSeedingStatus error: %v\n", err)
 					}
-					// Don't fail the whole operation for seeding status
+					if fatalUserInfoError(err) {
+						return err
+					}
+					// 做种体积一时没取到（质询、网络错误、站点出错、时限到了）：不让整次失败，保存时沿用上一次的。
+					// 站点没有做种列表这一页（404 这类）时和以前一样不管它
+					if temporaryFetchError(err) || ctx.Err() != nil {
+						fail([]string{"seederSize"}, withContextErr(ctx, err))
+					}
 					return nil
 				}
 				if seedingSize > 0 {
@@ -1100,17 +1102,21 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 				return nil
 			})
 		}
-
-		if err := g.Wait(); err != nil {
-			return UserInfo{}, fmt.Errorf("phase 2 parallel execution failed: %w", err)
+		// 两轮之间也隔 RequestDelay（时限到了就不等了：第二轮的每一页自己记下没取到）
+		if len(independentProcesses) > 0 && delay > 0 {
+			sleepContext(ctx, delay)
+		}
+		if err := runUserInfoSteps(ctx, sequential, delay, steps); err != nil {
+			return UserInfo{}, fmt.Errorf("phase 2 failed: %w", err)
 		}
 	}
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] Phase 2 completed in %v\n", time.Since(phase2Start))
 	}
 
-	if info.Username == "" && netErr != nil {
-		return UserInfo{}, fmt.Errorf("获取用户信息失败: %w", netErr)
+	if strings.TrimSpace(info.Username) == "" && firstErr != nil {
+		// 一页都没取到用户名：按第一个失败的原因报（质询、网络错误、HTTP 出错）
+		return UserInfo{}, fmt.Errorf("获取用户信息失败: %w", firstErr)
 	}
 
 	// Calculate ratio if not set
@@ -1122,14 +1128,86 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 		fmt.Printf("[DEBUG] getUserInfoWithDefinition total time: %v\n", time.Since(startTime))
 	}
 
+	missing = slices.DeleteFunc(missing, func(f string) bool { return got[f] })
+	if len(missing) > 0 {
+		return info, &PartialUserInfoError{Missing: missing, Err: firstErr}
+	}
 	return info, nil
 }
 
-// partialFetchError 是单个请求的传输层失败：不让整次获取失败，只在最后连用户名都没取到时作为结果报出去。
-type partialFetchError struct{ err error }
+// temporaryFetchError 是一时取不到：质询、网络错误、限流、站点出错（5xx）。
+func temporaryFetchError(err error) bool {
+	var status *HTTPStatusError
+	return errors.Is(err, ErrCloudflareChallenge) || errors.Is(err, ErrNetworkError) || errors.Is(err, ErrRateLimited) ||
+		(errors.As(err, &status) && status.Code >= 500)
+}
 
-func (e partialFetchError) Error() string { return e.err.Error() }
-func (e partialFetchError) Unwrap() error { return e.err }
+// fatalUserInfoError 是要中止整次获取的错误：登录失效、凭证无效、要二次验证（别的页面也一样取不到）。
+func fatalUserInfoError(err error) bool {
+	return errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, Err2FARequired)
+}
+
+// runUserInfoSteps 跑一组请求：sequential 时一个接一个、中间隔 delay，否则并发。返回第一个要中止整次获取的错误。
+// 调用方的时限到了不算中止：剩下的每一步自己记下没取到（见 processStep），用户名到手了照样回取到的部分。
+func runUserInfoSteps(ctx context.Context, sequential bool, delay time.Duration, steps []func(context.Context) error) error {
+	if !sequential {
+		g, gctx := errgroup.WithContext(ctx)
+		for _, step := range steps {
+			g.Go(func() error { return step(gctx) })
+		}
+		return g.Wait()
+	}
+	for i, step := range steps {
+		if i > 0 {
+			sleepContext(ctx, delay)
+		}
+		if err := step(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fetchUserInfoPage 取用户信息的一页：一次请求最多等 userInfoAttemptTimeout；一时的网络错误（连接被重置、断开、超时）
+// 隔一会儿再试（最多 userInfoNetRetries 次），Cloudflare 质询隔几秒再试一次。剩下的时间不够时不再试。
+func (d *NexusPHPDriver) fetchUserInfoPage(ctx context.Context, req NexusPHPRequest) (NexusPHPResponse, error) {
+	netTries, challengeTries := 0, 0
+	for {
+		actx, cancel := withAttemptTimeout(ctx)
+		res, err := d.Execute(actx, req)
+		cancel()
+		if err == nil || ctx.Err() != nil {
+			return res, withContextErr(ctx, err)
+		}
+		wait, again := retryWait(err, netTries, challengeTries)
+		if !again {
+			return res, err
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait+userInfoMinAttempt {
+			return res, err
+		}
+		if errors.Is(err, ErrCloudflareChallenge) {
+			challengeTries++
+		} else {
+			netTries++
+		}
+		if DebugUserInfo {
+			fmt.Printf("[DEBUG] %s: %v, retry in %v\n", req.Path, err, wait)
+		}
+		if !sleepContext(ctx, wait) {
+			return res, withContextErr(ctx, err)
+		}
+	}
+}
+
+// withContextErr 在调用方的时限到了（或取消了）时把 ctx 的错误并进 err：原因分类按超时算（FetchFailureReason）。
+func withContextErr(ctx context.Context, err error) error {
+	ctxErr := ctx.Err()
+	if err == nil || ctxErr == nil || errors.Is(err, ctxErr) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ctxErr, err)
+}
 
 // executeProcess executes a single process and returns the parsed values
 func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoConfig, process UserInfoProcess, parsedValues map[string]any) (map[string]string, error) {
@@ -1162,17 +1240,10 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 		Method: "GET",
 	}
 
-	res, err := d.Execute(ctx, req)
+	res, err := d.fetchUserInfoPage(ctx, req)
 	if err != nil {
-		// Return critical errors like session expired; a Cloudflare challenge blocks every page as well
-		if errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrCloudflareChallenge) {
-			return result, err
-		}
-		// 传输层失败交给调用方记下：少一页数据照样能用，全都取不到时才报网络错误
-		if errors.Is(err, ErrNetworkError) {
-			return result, partialFetchError{err: err}
-		}
-		return result, nil // Ignore other errors, return empty result
+		// 交给调用方：登录失效这类中止整次获取；别的（质询、网络错误、HTTP 出错）只是少了这一页的字段
+		return result, err
 	}
 
 	if res.Document == nil {
@@ -2100,7 +2171,7 @@ func (d *NexusPHPDriver) FetchSeedingStatus(ctx context.Context, userID string) 
 		fmt.Printf("[DEBUG] FetchSeedingStatus: requesting %s?%s\n", req.Path, req.Params.Encode())
 	}
 
-	res, err := d.Execute(ctx, req)
+	res, err := d.fetchUserInfoPage(ctx, req)
 	if err != nil {
 		if DebugUserInfo {
 			fmt.Printf("[DEBUG] FetchSeedingStatus: request error: %v\n", err)

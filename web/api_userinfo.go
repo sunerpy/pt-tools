@@ -12,6 +12,11 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
+// userInfoSiteTimeout 是同步一个站点的用户信息最多多久：一页一页地取（定义里写了 RequestDelay 的站点）、一时的网络错误
+// 与 Cloudflare 质询要重试，30 秒不够（2026-10-21 生产上 HDSky、SSD 一半的同步失败在这里）；线路慢时一页就要二三十秒，
+// 60 秒也取不完 SSD 的几页（2026-10-22 生产上的登录探测）。到时候还没取完的页算没取到，用户名到手了照样保存取到的部分。
+const userInfoSiteTimeout = 90 * time.Second
+
 // UserInfoResponse represents user info API response
 type UserInfoResponse struct {
 	Site       string  `json:"site"`
@@ -302,7 +307,12 @@ func (s *Server) apiUserInfoSiteDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// 读缓存或库 30 秒足够；同步要去站点取，和同步全部一样是站点时限（userInfoSiteTimeout）
+	timeout := 30 * time.Second
+	if r.Method == http.MethodPost {
+		timeout = userInfoSiteTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	switch r.Method {
@@ -326,7 +336,7 @@ func (s *Server) apiUserInfoSiteDetail(w http.ResponseWriter, r *http.Request) {
 		// Sync (fetch and save) user info for specific site
 		info, err := userInfoService.FetchAndSave(ctx, siteID)
 		if err != nil {
-			global.GetSlogger().Errorf("[UserInfo] Failed to sync user info for site %s: %v", siteID, err)
+			global.GetSlogger().Errorf("[UserInfo] Failed to sync user info for site %s（%s）: %v", siteID, v2.FetchFailureReason(err), err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -375,14 +385,14 @@ func (s *Server) apiUserInfoSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
 	defer cancel()
 
 	var response SyncResponse
 
 	if len(req.Sites) == 0 {
 		// Sync all sites with concurrency control
-		results, errors := userInfoService.FetchAndSaveAllWithConcurrency(ctx, 3, 30*time.Second)
+		results, errors := userInfoService.FetchAndSaveAllWithConcurrency(ctx, 3, userInfoSiteTimeout)
 		for _, info := range results {
 			response.Success = append(response.Success, info.Site)
 		}
@@ -393,10 +403,13 @@ func (s *Server) apiUserInfoSync(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	} else {
-		// Sync specific sites
+		// Sync specific sites（每个站点的时限和同步全部时一样；失败一站一行，带原因分类）
 		for _, siteID := range req.Sites {
-			_, err := userInfoService.FetchAndSave(ctx, siteID)
+			siteCtx, cancel := context.WithTimeout(ctx, userInfoSiteTimeout)
+			_, err := userInfoService.FetchAndSave(siteCtx, siteID)
+			cancel()
 			if err != nil {
+				global.GetSlogger().Warnf("[UserInfo] 同步 %s 的用户信息失败（%s）: %v", siteID, v2.FetchFailureReason(err), err)
 				response.Failed = append(response.Failed, SyncFailedEntry{
 					Site:  siteID,
 					Error: err.Error(),

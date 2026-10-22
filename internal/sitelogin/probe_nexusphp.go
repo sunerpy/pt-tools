@@ -13,7 +13,8 @@ import (
 // All I/O is delegated to the driver; this function performs only classification.
 func ProbeNexusPHP(ctx context.Context, site v2.Site, clock Clock, source ProbeSource) (*ProbeResult, error) {
 	info, err := site.GetUserInfo(ctx)
-	return classifyNexusPHPResult(info, err, clock, source)
+	// 只少了几页（质询、网络错误）而用户名到手了：登录是好的
+	return classifyNexusPHPResult(info, v2.IgnorePartial(info, err), clock, source)
 }
 
 func classifyNexusPHPResult(info v2.UserInfo, err error, _ Clock, source ProbeSource) (*ProbeResult, error) {

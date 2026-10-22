@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -112,13 +113,25 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 
 	s.logger.Debug("Fetching user info", zap.String("site", siteID))
 
+	// 失败的原因由调用方记（并发同步时一个站点一行，带原因分类，见 FetchAndSaveAllWithConcurrency）
 	info, err := site.GetUserInfo(ctx)
-	if err != nil {
-		s.logger.Error(
-			"Failed to fetch user info",
+	var partial *PartialUserInfoError
+	if errors.As(err, &partial) && strings.TrimSpace(info.Username) != "" {
+		// 只取到一部分：缺的字段沿用上一次的；连上传、下载量都缺、又没有上一次的时不保存（免得统计里冒出 0）
+		merged, kept, ok := s.fillMissing(ctx, siteID, info, partial.Missing)
+		if !ok {
+			return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, err)
+		}
+		s.logger.Warn(
+			"Partial user info, kept previous values",
 			zap.String("site", siteID),
-			zap.Error(err),
+			zap.String("reason", FetchFailureReason(partial.Err)),
+			zap.Strings("kept", kept),
+			zap.Error(partial.Err),
 		)
+		info, err = merged, nil
+	}
+	if err != nil {
 		return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, err)
 	}
 	if strings.TrimSpace(info.Username) == "" {
@@ -156,6 +169,22 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 	s.logger.Info("User info fetched and saved", fields...)
 
 	return info, nil
+}
+
+// fillMissing 用上一次保存的数据补上这次没取到的字段；补了哪些一并返回。上传、下载量缺了又没有上一次的时 ok 为假。
+func (s *UserInfoService) fillMissing(ctx context.Context, siteID string, info UserInfo, missing []string) (UserInfo, []string, bool) {
+	// 部分结果常常是时限到了才回来的：读上一次的记录不跟着这个已经结束的 ctx（和下面保存一样）
+	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	prev, err := s.repo.Get(getCtx, siteID)
+	if err != nil {
+		if missesCore(missing) {
+			return info, nil, false
+		}
+		return info, nil, true
+	}
+	merged, kept := mergeMissingUserInfo(info, prev, missing)
+	return merged, kept, true
 }
 
 // FetchAndSaveAll fetches user info from all registered sites
@@ -342,6 +371,7 @@ func (s *UserInfoService) FetchAndSaveAllWithConcurrency(
 				s.logger.Warn(
 					"Failed to fetch user info",
 					zap.String("site", siteID),
+					zap.String("reason", FetchFailureReason(err)),
 					zap.Duration("duration", time.Since(siteStartTime)),
 					zap.Error(err),
 				)

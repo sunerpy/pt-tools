@@ -489,9 +489,9 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		// 登录成功后异步触发用户数据同步
 		if userInfoService != nil {
 			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 				defer cancel()
-				results, errors := userInfoService.FetchAndSaveAllWithConcurrency(ctx, 3, 30*time.Second)
+				results, errors := userInfoService.FetchAndSaveAllWithConcurrency(ctx, 3, userInfoSiteTimeout)
 				global.GetSlogger().Infof("[Login] Async sync completed: %d success, %d failed", len(results), len(errors))
 			}()
 		}

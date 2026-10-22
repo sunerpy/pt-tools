@@ -1191,6 +1191,7 @@ func TestNexusPHPDriver_ParseDownload_Empty(t *testing.T) {
 }
 
 func TestNexusPHPDriver_FetchSeedingStatus_ExecuteError(t *testing.T) {
+	fastUserInfoRetries(t)
 	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "http://127.0.0.1:1", Cookie: "c=1"})
 	_, _, err := d.FetchSeedingStatus(context.Background(), "42")
 	require.Error(t, err)
