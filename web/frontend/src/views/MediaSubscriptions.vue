@@ -47,7 +47,7 @@ import {
   subStatus,
 } from "@/utils/subscribe";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 const isMobile = useIsMobile();
@@ -340,10 +340,21 @@ function openExplore() {
   void router.push("/media/explore");
 }
 
+// 进度、下次搜索与结果说明在后台每分钟更新（整理入库以后最多一分钟台账就是新的）：页面开着时每分钟静默刷新一次列表，
+// 切到别的标签页、开着修改或详情弹窗、上一次还没回来时这一拍不刷
+const AUTO_REFRESH_MS = 60_000;
+let autoTimer: ReturnType<typeof setInterval> | undefined;
+
 onMounted(() => {
   refresh();
   void loadOptions();
+  autoTimer = setInterval(() => {
+    if (document.hidden || editDialog.value || detailDialog.value || ds.loading.value) return;
+    void loadSubs();
+  }, AUTO_REFRESH_MS);
 });
+
+onBeforeUnmount(() => clearInterval(autoTimer));
 </script>
 
 <template>

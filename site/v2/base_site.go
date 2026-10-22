@@ -207,15 +207,20 @@ func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]
 		return nil, fmt.Errorf("prepare download: %w", err)
 	}
 
-	// Execute request
-	res, err := b.driver.Execute(ctx, req)
+	// Execute request：一时的错误（网络、5xx）隔几秒再发，每次重试先等限速的令牌（见 retryDownload）
+	res, err := retryDownload(ctx, b.limiter.Wait, func() (Res, error) { return b.driver.Execute(ctx, req) })
 	if err != nil {
 		b.logger.Error("Failed to execute download request", zap.Error(err))
 		return nil, fmt.Errorf("execute download: %w", err)
 	}
 
-	// Parse response
-	data, err := b.driver.ParseDownload(res)
+	// Parse response（两段式下载的驱动用带 ctx 的版本，第二段请求跟着调用方取消）
+	var data []byte
+	if p, ok := any(b.driver).(ContextDownloadParser[Res]); ok {
+		data, err = p.ParseDownloadContext(ctx, res)
+	} else {
+		data, err = b.driver.ParseDownload(res)
+	}
 	if err != nil {
 		b.logger.Error("Failed to parse download response", zap.Error(err))
 		return nil, fmt.Errorf("parse download: %w", err)
@@ -259,7 +264,8 @@ func (b *BaseSite[Req, Res]) DownloadWithHash(ctx context.Context, torrentID, ha
 	}
 
 	if hd, ok := any(b.driver).(HashDownloader); ok {
-		return hd.DownloadWithHash(ctx, torrentID, hash)
+		// 一时的错误（网络、5xx）隔几秒再下，每次重试先等限速的令牌
+		return retryDownload(ctx, b.limiter.Wait, func() ([]byte, error) { return hd.DownloadWithHash(ctx, torrentID, hash) })
 	}
 	// 上面已取过令牌，回退路径不能再走 Download，否则一次下载会等两次限速。
 	return b.download(ctx, torrentID)

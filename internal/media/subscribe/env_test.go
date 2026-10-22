@@ -275,6 +275,28 @@ type fakeDL struct {
 	torrents []downloader.Torrent
 	listErr  error
 	lists    int
+	// files 是种子的文件列表（按种子 ID）；没有的回空列表，filesErr 里有的读不出来
+	files    map[string][]downloader.TorrentFile
+	filesErr map[string]error
+}
+
+func (f *fakeDL) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.filesErr[id]; err != nil {
+		return nil, err
+	}
+	return append([]downloader.TorrentFile(nil), f.files[id]...), nil
+}
+
+// setFiles 设一个种子的文件列表（Priority 0 是没选，不下载）。
+func (f *fakeDL) setFiles(id string, files ...downloader.TorrentFile) {
+	f.mu.Lock()
+	if f.files == nil {
+		f.files = map[string][]downloader.TorrentFile{}
+	}
+	f.files[id] = files
+	f.mu.Unlock()
 }
 
 func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {

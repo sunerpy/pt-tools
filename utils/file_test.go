@@ -112,6 +112,11 @@ func TestSanitizeURL(t *testing.T) {
 			expected: "https://rss.m-team.cc/api/rss/fetch?sign=%2A%2A%2A",
 		},
 		{
+			name:     "M-Team download node",
+			input:    "https://fr1.halomt.com?app_id=1&playload=iKC6lo%2FKiJk%3D&sign=50643b91&t=1792588965&v=v2",
+			expected: "https://fr1.halomt.com?app_id=1&playload=%2A%2A%2A&sign=%2A%2A%2A&t=1792588965&v=v2",
+		},
+		{
 			name:     "multiple sensitive params",
 			input:    "https://example.com?passkey=secret&apikey=token123&normal=ok",
 			expected: "https://example.com?apikey=%2A%2A%2A&normal=ok&passkey=%2A%2A%2A",

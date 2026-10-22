@@ -94,6 +94,8 @@ var sensitiveParams = map[string]bool{
 	"rsskey":       true,
 	"torrent_pass": true,
 	"credential":   true,
+	// playload 是 M-Team 签名下载地址跳转到的下载节点地址里加密的下载凭证（拼法照原样）
+	"playload": true,
 }
 
 // SanitizeURL 对 URL 中的敏感查询参数进行脱敏处理

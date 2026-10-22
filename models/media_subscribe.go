@@ -189,6 +189,9 @@ type MediaSubscriptionEpisode struct {
 	VersionResolution string `gorm:"size:16;not null;default:''" json:"version_resolution"`
 	ManualSkip        bool   `gorm:"not null;default:false" json:"manual_skip"`
 	ManualUnlock      bool   `gorm:"not null;default:false" json:"manual_unlock"`
+	// VersionSeen 是在站点上找到过的这一集锁住的版本（写法同版本锁的说明，例如 MWeb 2160p）：找到过的不算等版本——
+	// 没下载成是下载的问题，按缺的接着找。版本锁改了以后对不上，重新算
+	VersionSeen string `gorm:"size:128;not null;default:''" json:"-"`
 	// WaitingSince 是开始等锁住的版本的时间；WaitingNotifiedAt 是最近一次提醒的时间
 	WaitingSince      *time.Time `json:"waiting_since,omitempty"`
 	WaitingNotifiedAt *time.Time `json:"-"`

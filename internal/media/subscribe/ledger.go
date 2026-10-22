@@ -1,6 +1,7 @@
 package subscribe
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -186,7 +187,8 @@ func adoptedSite(downloaderID uint) string {
 }
 
 // adopt 把下载器里别处加的、对得上这个追剧、有还缺的必需集的种子认领进订阅的种子表（Adopted），之后和订阅推送的种子一样
-// 参与入库判定、卡住检查、版本锁与媒体库路由；洗版时不删。返回认领的种子；读不到下载器时返回错误（这一轮不推缺的集）。
+// 参与入库判定、卡住检查、版本锁与媒体库路由；洗版时不删。种子里有哪几集按下载器里选中的文件认（见 selectedEpisodes），
+// 先加的先认领（没有锁住的版本时，锁跟着第一个下载的版本）。返回认领的种子；读不到下载器时返回错误（这一轮不推缺的集）。
 func (s *Service) adopt(ctx context.Context, sub *models.MediaSubscription, set Settings, mp *episodeMapper, need func(n int) bool, linked []models.MediaSubscriptionTorrent) ([]models.MediaSubscriptionTorrent, error) {
 	dlID, err := s.downloaderFor(ctx, sub, set)
 	if err != nil {
@@ -202,8 +204,17 @@ func (s *Service) adopt(ctx context.Context, sub *models.MediaSubscription, set 
 			known[strings.ToLower(t.InfoHash)] = true
 		}
 	}
+	var dl downloader.Downloader
+	if got, _, gerr := s.cfg.Downloaders.Get(ctx, dlID); gerr == nil {
+		dl = got
+	}
+	list = slices.Clone(list)
+	slices.SortStableFunc(list, func(a, b downloader.Torrent) int { return cmp.Compare(a.DateAdded, b.DateAdded) })
 	mt := newMatcher(*sub).withMapper(mp)
 	profile := s.profileFor(ctx, sub, set)
+	// taken 是这一轮已经认领的种子里有的集（两个种子都有同一集时只认领先加的）
+	taken := map[int]bool{}
+	still := func(n int) bool { return need(n) && !taken[n] }
 	var out []models.MediaSubscriptionTorrent
 	for _, t := range list {
 		hash := strings.ToLower(t.InfoHash)
@@ -215,9 +226,10 @@ func (s *Service) adopt(ctx context.Context, sub *models.MediaSubscription, set 
 		if !ok {
 			continue
 		}
+		// 先按种子名看有没有可能用得上，用得上再读文件列表
 		useful := false
 		for n := 1; n <= max(sub.TotalEpisodes, sp.End); n++ {
-			if sp.covers(n) && need(n) {
+			if sp.covers(n) && still(n) {
 				useful = true
 				break
 			}
@@ -225,10 +237,20 @@ func (s *Service) adopt(ctx context.Context, sub *models.MediaSubscription, set 
 		if !useful {
 			continue
 		}
+		eps, sure := s.selectedEpisodes(ctx, mp, dl, t, sp)
+		if !sure {
+			step(ctx, stepInfo, "%s：种子名写的是整季，读不到下载器里的文件列表，认不出有哪几集，这次不认领", t.Name)
+			continue
+		}
+		if !slices.ContainsFunc(eps, still) {
+			continue
+		}
+		b, _ := json.Marshal(eps)
 		now := s.cfg.Now()
 		row := models.MediaSubscriptionTorrent{
 			SubscriptionID: sub.ID, SiteName: adoptedSite(dlID), TorrentID: hash, InfoHash: hash, Title: truncate(t.Name, 512),
-			Score: profile.points(m), Episode: sp.Start, EpisodeEnd: sp.End, Complete: sp.Whole, SizeBytes: t.TotalSize,
+			Score: profile.points(m), Episode: eps[0], EpisodeEnd: eps[len(eps)-1], Complete: sp.Whole && len(eps) >= max(sub.TotalEpisodes, 1),
+			CoveredEpisodes: string(b), SizeBytes: t.TotalSize,
 			DownloaderID: dlID, Adopted: true, Status: models.MediaSubTorrentDownloading,
 			Message: "下载器里已经有这个种子（不是订阅推送的，认领进来）", CreatedAt: now, UpdatedAt: now,
 		}
@@ -237,10 +259,40 @@ func (s *Service) adopt(ctx context.Context, sub *models.MediaSubscription, set 
 			continue
 		}
 		known[hash] = true
-		step(ctx, stepAdopt, "认领了下载器里已有的 %s", t.Name)
+		for _, n := range eps {
+			taken[n] = true
+		}
+		step(ctx, stepAdopt, "认领了下载器里已有的 %s（%s）", t.Name, episodeList(eps))
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// selectedEpisodes 是下载器里一个种子实际要下的集：按文件列表里选中的视频文件认——种子名常写成整季（M-Team 上 HHWEB
+// 一集一个种子，种子名却是季的目录名），季包也可能只选了几集。文件对不出集时按种子名；种子名写的是整季的认不出（返回假）。
+func (s *Service) selectedEpisodes(ctx context.Context, mp *episodeMapper, dl downloader.Downloader, t downloader.Torrent, sp span) ([]int, bool) {
+	if dl != nil {
+		if files, err := dl.GetTorrentFiles(t.ID); err == nil {
+			paths := make([]string, 0, len(files))
+			for _, f := range files {
+				// 优先级 0 是不下载
+				if f.Priority != 0 {
+					paths = append(paths, f.Name)
+				}
+			}
+			if eps := s.fileEpisodes(ctx, mp, paths); len(eps) > 0 {
+				return eps, true
+			}
+		}
+	}
+	if sp.Whole || sp.Start <= 0 {
+		return nil, false
+	}
+	eps := make([]int, 0, max(sp.End, sp.Start)-sp.Start+1)
+	for n := sp.Start; n <= max(sp.End, sp.Start); n++ {
+		eps = append(eps, n)
+	}
+	return eps, true
 }
 
 // ---- 重建 ----
@@ -312,7 +364,8 @@ func (s *Service) rebuildLedger(ctx context.Context, sub *models.MediaSubscripti
 	}
 	today := s.cfg.Now().In(time.Local).Format(time.DateOnly)
 	now := s.cfg.Now()
-	_, _, locked := lockOf(sub)
+	lockG, lockR, locked := lockOf(sub)
+	seen := lockText(lockG, lockR)
 	window := airWindow(sub)
 	lg.rows = make([]models.MediaSubscriptionEpisode, 0, lg.total)
 	for n := 1; n <= lg.total; n++ {
@@ -348,8 +401,9 @@ func (s *Service) rebuildLedger(ctx context.Context, sub *models.MediaSubscripti
 			// 起始集以前的与跳过的：已经入库或在下载的照样显示（上面），其余不追
 			r.State = models.MediaEpisodeSkipped
 		case aired:
+			// 播出很久还没有锁住的版本才算等版本；站点上找到过锁住的版本（种子文件没下载下来）的按缺的接着找
 			r.State = models.MediaEpisodeMissing
-			if at, ok := airTime(sub, r.AirDate); ok && locked && !r.ManualUnlock && now.Sub(at) >= window {
+			if at, ok := airTime(sub, r.AirDate); ok && locked && !r.ManualUnlock && r.VersionSeen != seen && now.Sub(at) >= window {
 				r.State = models.MediaEpisodeWaitingVersion
 			}
 		default:

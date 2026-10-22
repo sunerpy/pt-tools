@@ -625,4 +625,33 @@ describe("订阅", () => {
     await mountPage({ listFail: true });
     expect(q("ms-state")!.textContent).toContain("读取订阅失败");
   });
+
+  it("页面开着时每分钟静默刷新列表；切到别的标签页、开着弹窗时不刷", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      await mountPage();
+      const n = api.list.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api.list.mock.calls.length, "一分钟刷新一次").toBe(n + 1);
+
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      try {
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(api.list.mock.calls.length, "切走了不刷").toBe(n + 1);
+      } finally {
+        delete (document as unknown as { hidden?: boolean }).hidden;
+      }
+
+      api.get.mockResolvedValue({
+        ...tv,
+        progress: { ...tv.progress, episodes: [] },
+        torrent_list: [],
+      });
+      q("ms-detail-2")!.click();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api.list.mock.calls.length, "开着详情不刷").toBe(n + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

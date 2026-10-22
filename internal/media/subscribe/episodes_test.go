@@ -65,6 +65,33 @@ func TestEpisodeMappingCorpus(t *testing.T) {
 	sp, ok, _ := mapTitle(t, mp, "Natural.High.S04.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB")
 	assert.True(t, ok)
 	assert.True(t, sp.Whole)
+
+	// 期号只在副标题里：要和标题的集号对得上。SpringSunday 上 HHWEB 的第 4 集副标题写成「第04期下」（其实是第2期下），
+	// 等 TMDB 列出第4期下（第 8 集）以后会被当成第 8 集；对不上的不要
+	title := "Natural.High.S04E04.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB"
+	_, ok, why = mapItem(t, mp, title, "现在就出发 / NATURAL HIGH 第四季 | 第04集 (第04期下)")
+	assert.False(t, ok, "TMDB 上还没有第4期下")
+	assert.Contains(t, why, "标题写的是第 4 集，副标题写的是第 4 期下")
+	sp, ok, why = mapItem(t, mp, title, "现在就出发 第四季 | 第04集（第2期下）")
+	require.True(t, ok, why)
+	assert.Equal(t, span{Start: 4, End: 4}, sp, "两边对得上")
+	_, ok, why = mapItem(t, mp, title, "现在就出发 第四季 | 第1期上")
+	assert.False(t, ok, "副标题说是第 1 集")
+	assert.Contains(t, why, "副标题写的是第 1 期上")
+	sp, ok, why = mapItem(t, mp, title, "现在就出发 / NATURAL HIGH 第四季 | 第04集 | 4K")
+	require.True(t, ok, why)
+	assert.Equal(t, span{Start: 4, End: 4}, sp, "副标题没写期号：按标题")
+	// 标题自己写了期号的（Part、第N期）照旧按期号
+	sp, ok, why = mapItem(t, mp, "Natural High S04E02 Part 1 2026 1080p WEB-DL H.264 AAC 2.0", "现在就出发 第四季 | 第二集上")
+	require.True(t, ok, why)
+	assert.Equal(t, span{Start: 3, End: 3}, sp)
+}
+
+// mapItem 是带副标题的 mapTitle。
+func mapItem(t *testing.T, mp *episodeMapper, title, subtitle string) (span, bool, string) {
+	t.Helper()
+	mt := newMatcher(varietySub()).withMapper(mp)
+	return mt.matchMapped(meta.Parse(title, subtitle), v2.TorrentItem{Title: title, Subtitle: subtitle})
 }
 
 func TestEpisodeMappingRules(t *testing.T) {

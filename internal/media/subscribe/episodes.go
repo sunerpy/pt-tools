@@ -56,6 +56,8 @@ type epHint struct {
 	// period、part：第几期、哪一部分（上中下加更会员；Part n 时是 n 的序号写法 "#n"）
 	period int
 	part   string
+	// periodInSubtitle：期号只在副标题里（标题里没有）
+	periodInSubtitle bool
 	// date 是完整日期（YYYY-MM-DD），monthDay 是只有月日（MM-DD）
 	date, monthDay string
 }
@@ -65,7 +67,7 @@ func (h epHint) empty() bool { return h.period == 0 && h.date == "" && h.monthDa
 // parseHint 从种子标题（与副标题）里找期号、部分与日期。
 func parseHint(title, subtitle string) epHint {
 	var h epHint
-	for _, s := range []string{title, subtitle} {
+	for i, s := range []string{title, subtitle} {
 		if s == "" {
 			continue
 		}
@@ -77,6 +79,7 @@ func parseHint(title, subtitle string) epHint {
 				h.period, _ = strconv.Atoi(m[1])
 				h.part = normPart(m[2])
 			}
+			h.periodInSubtitle = h.period > 0 && i == 1
 		}
 		if h.date == "" && h.monthDay == "" {
 			if m := dateHintRe.FindStringSubmatch(s); m != nil {
@@ -279,6 +282,14 @@ func (mp *episodeMapper) mapEpisodes(m meta.Meta, title, subtitle string, sp spa
 		if !ix.variety {
 			return sp, false, "集号对不上：标题写的是第几期，TMDB 上这一季不是按期编的"
 		}
+		// 期号只在副标题里、标题自己写了集号：两边要对得上（副标题是发布的人手写的，常有写错的），对不上的不要
+		if h.periodInSubtitle && !sp.Whole && sp.Start > 0 {
+			got, ok := mp.byPeriodHint(h)
+			if !ok || got != sp {
+				return sp, false, fmt.Sprintf("集号对不上：标题写的是第 %d 集，副标题写的是第 %d 期%s", sp.Start, h.period, partLabel(h.part))
+			}
+			return sp, true, ""
+		}
 		if h.part == "" {
 			eps := ix.periods[h.period]
 			switch len(eps) {
@@ -299,6 +310,19 @@ func (mp *episodeMapper) mapEpisodes(m meta.Meta, title, subtitle string, sp spa
 		return mp.byDateHint(h, sp)
 	}
 	return sp, true, ""
+}
+
+// byPeriodHint 按（期，部分）找 TMDB 的集：只写了第几期时是这一期的几集。
+func (mp *episodeMapper) byPeriodHint(h epHint) (span, bool) {
+	if h.part == "" {
+		eps := mp.index.periods[h.period]
+		if len(eps) == 0 {
+			return span{}, false
+		}
+		return span{Start: slices.Min(eps), End: slices.Max(eps)}, true
+	}
+	n, ok := mp.index.byPart(h.period, h.part)
+	return span{Start: n, End: n}, ok
 }
 
 func (mp *episodeMapper) byDateHint(h epHint, sp span) (span, bool, string) {

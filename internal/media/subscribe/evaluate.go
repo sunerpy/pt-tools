@@ -27,14 +27,22 @@ import (
 // pushSource 写进种子记录的下载来源。
 const pushSource = "subscription"
 
-// 每次评估最多推送几个种子（剧集一集一集补时）；主动搜索每一拍最多搜几个订阅；推送下载种子文件的超时。
+// maxPushesPerRound 是每次评估最多推送几个种子（剧集一集一集补时，没推成的也算）；测试里会调小。
+var maxPushesPerRound = 10
+
+// 主动搜索每一拍最多搜几个订阅；推送下载种子文件的超时（站点驱动遇到一时的网络错误会自己重试几次，留够时间）；
+// 同一站点这一轮连着几次没下载到种子文件以后，这一轮不再从它下载。
 const (
-	maxPushesPerRound = 10
-	maxSearchPerTick  = 5
-	fetchTimeout      = 60 * time.Second
-	searchTimeout     = 90 * time.Second
-	searchJitter      = 30 * time.Minute
+	maxSearchPerTick   = 5
+	fetchTimeout       = 2 * time.Minute
+	searchTimeout      = 90 * time.Second
+	searchJitter       = 30 * time.Minute
+	siteFetchFailLimit = 2
 )
+
+// retrySoonBase 是一轮没做完（有种子文件没下载下来、时间用完了、推满了一轮的上限）以后多久再搜：
+// 前面连着几次运行都没全成时翻倍，最多翻三次（4 小时）。平常的下次时间更早时按平常的。
+const retrySoonBase = 30 * time.Minute
 
 func siteHR(site string) (bool, *v2.SiteDefinition) {
 	def, ok := v2.GetDefinitionRegistry().Get(site)
@@ -82,6 +90,10 @@ func (s *Service) considerOffer(ctx context.Context, c Candidate) {
 		s.mu.Lock()
 		msg := s.evaluate(rctx, sub, []Candidate{c}, set)
 		s.mu.Unlock()
+		// 种子文件没下载下来：不等平常的下次搜索，提前主动搜一次
+		if soon, why := s.retrySoon(ctx, sub, runOf(rctx)); !soon.IsZero() && s.pullSearch(ctx, sub.ID, soon) {
+			step(rctx, stepInfo, "%s，%s 主动搜一次", why, soon.In(time.Local).Format("01-02 15:04"))
+		}
 		// RSS 一天能送来很多个：只有真的做了什么（推送、拒绝、等版本）才留下这次的记录
 		s.finishRun(rctx, sub, run, "RSS 里的 "+c.Item.Title+"："+msg, true)
 		s.cfg.Logger.Infof("[订阅] RSS 里的 %s 对上了订阅「%s」：%s", c.Item.Title, sub.Title, msg)
@@ -179,7 +191,8 @@ func (s *Service) searchSites(sub *models.MediaSubscription, set Settings) []str
 }
 
 // searchOne 搜一个订阅并评估结果；先把下次搜索的时间排好（出错也不会每一拍都搜）。返回结果说明并写进订阅，
-// 这次运行写进运行记录（trigger 是怎么开始的）。按播出时间的追剧搜完以后按新的台账重排下次时间。
+// 这次运行写进运行记录（trigger 是怎么开始的）。按播出时间的追剧搜完以后按新的台账重排下次时间；这一轮没做完的
+// （种子文件没下载下来、时间用完了、推满了上限）提前再搜。
 func (s *Service) searchOne(ctx context.Context, sub *models.MediaSubscription, set Settings, trigger string) string {
 	now := s.cfg.Now()
 	var lg *ledger
@@ -191,15 +204,62 @@ func (s *Service) searchOne(ctx context.Context, sub *models.MediaSubscription, 
 		Updates(map[string]any{"last_search_at": now, "next_search_at": next})
 	rctx, run := s.startRun(ctx, sub, trigger)
 	msg := s.search(rctx, sub, set)
+	// 手动搜索有期限：期限到了这次的结果照样记下
+	bctx := context.WithoutCancel(ctx)
 	upd := map[string]any{"message": truncate(msg, 1024), "updated_at": s.cfg.Now()}
 	if sub.MediaType == models.MediaKindTV && sub.ScheduleKind == models.MediaScheduleAirtime {
-		if lg, err := s.ledgerRows(ctx, sub); err == nil {
-			upd["next_search_at"] = s.nextSearch(sub, set, lg, now)
+		if lg, err := s.ledgerRows(bctx, sub); err == nil {
+			next = s.nextSearch(sub, set, lg, now)
+			upd["next_search_at"] = next
 		}
 	}
-	s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).Updates(upd)
+	if soon, why := s.retrySoon(bctx, sub, runOf(rctx)); !soon.IsZero() && soon.Before(next) {
+		upd["next_search_at"] = soon
+		step(rctx, stepInfo, "%s，%s 再搜一次", why, soon.In(time.Local).Format("01-02 15:04"))
+	}
+	s.cfg.DB.WithContext(bctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).Updates(upd)
 	s.finishRun(rctx, sub, run, msg, false)
 	return msg
+}
+
+// retrySoon 是这一轮没做完时提前的下次搜索时间与原因（retrySoonBase 起，前面连着没全成的运行每多一次翻一倍，最多翻三次）；
+// 做完了的返回零值。
+func (s *Service) retrySoon(ctx context.Context, sub *models.MediaSubscription, rl *runLog) (time.Time, string) {
+	if rl == nil {
+		return time.Time{}, ""
+	}
+	rl.mu.Lock()
+	why := rl.unfinished
+	if rl.fetchFailed > 0 {
+		why = fmt.Sprintf("%d 个种子文件没下载下来", rl.fetchFailed)
+	}
+	rl.mu.Unlock()
+	if why == "" {
+		return time.Time{}, ""
+	}
+	// 这一次还没写完（状态为空）；手动改动不是搜索
+	var last []models.MediaSubscriptionRun
+	n := 0
+	if err := s.cfg.DB.WithContext(ctx).Select("id", "status").
+		Where("subscription_id = ? AND status NOT IN ?", sub.ID, []string{"", models.MediaRunChanged}).
+		Order("id DESC").Limit(3).Find(&last).Error; err == nil {
+		for _, r := range last {
+			if r.Status != models.MediaRunFailed && r.Status != models.MediaRunPartial {
+				break
+			}
+			n++
+		}
+	}
+	return s.cfg.Now().Add(retrySoonBase << n), why
+}
+
+// pullSearch 把订阅的下次搜索提前到 at（已经更早的、马上要搜的不动），报告改了没有。时间按 julianday 比较
+// （库里的时间是带时区的文本）。
+func (s *Service) pullSearch(ctx context.Context, id uint, at time.Time) bool {
+	res := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).
+		Where("id = ? AND next_search_at IS NOT NULL AND julianday(next_search_at) > julianday(?)", id, at).
+		Update("next_search_at", at)
+	return res.Error == nil && res.RowsAffected > 0
 }
 
 func (s *Service) search(ctx context.Context, sub *models.MediaSubscription, set Settings) string {
@@ -455,6 +515,7 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 	if locked {
 		before := len(packs) + len(eps)
 		packs, eps = filterLock(packs, lockG, lockR), filterLock(eps, lockG, lockR)
+		s.markVersionSeen(ctx, sub, lockG, lockR, missing, packs, eps)
 		if len(packs)+len(eps) == 0 && before > 0 {
 			markRun(ctx, func(rl *runLog) { rl.waiting = true })
 			return fmt.Sprintf("缺 %d 集，找到的都不是锁住的版本（%s），接着等", len(missing), lockText(lockG, lockR))
@@ -490,11 +551,30 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		return msg
 	}
 	var msgs []string
+	down := map[string]bool{}
 	for _, o := range eps {
-		if len(msgs) >= maxPushesPerRound || len(missing) == 0 {
+		if len(missing) == 0 {
+			break
+		}
+		if len(msgs) >= maxPushesPerRound {
+			if slices.ContainsFunc(eps, coversMissing) {
+				markRun(ctx, func(rl *runLog) { rl.unfinished = fmt.Sprintf("这一轮推满了 %d 个", maxPushesPerRound) })
+			}
+			break
+		}
+		if ctx.Err() != nil {
+			step(ctx, stepWait, "这一轮的时间用完了，没推的集下次再推")
+			markRun(ctx, func(rl *runLog) { rl.unfinished = "这一轮的时间用完了" })
 			break
 		}
 		if !coversMissing(o) || !allowedNow(o) {
+			continue
+		}
+		if siteFetchDown(ctx, o.c.Site) {
+			if !down[o.c.Site] {
+				down[o.c.Site] = true
+				step(ctx, stepWait, "%s 连着 %d 次没下载到种子文件，这一轮先不从它下载", o.c.Site, siteFetchFailLimit)
+			}
 			continue
 		}
 		msg := s.pushOne(ctx, sub, o, set)
@@ -512,6 +592,28 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		return fmt.Sprintf("缺 %d 集，没有找到这些集的资源", len(lg.missing))
 	}
 	return strings.Join(msgs, "；")
+}
+
+// markVersionSeen 记下这一轮在站点上找到了锁住的版本的缺集（不算等版本，见 rebuildLedger）。
+func (s *Service) markVersionSeen(ctx context.Context, sub *models.MediaSubscription, g, r string, missing map[int]bool, lists ...[]scored) {
+	var eps []int
+	for n := range missing {
+		for _, list := range lists {
+			if slices.ContainsFunc(list, func(o scored) bool { return o.sp.covers(n) && lockAllows(g, r, o.c.Meta) }) {
+				eps = append(eps, n)
+				break
+			}
+		}
+	}
+	if len(eps) == 0 {
+		return
+	}
+	seen := lockText(g, r)
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscriptionEpisode{}).
+		Where("subscription_id = ? AND episode IN ? AND version_seen <> ?", sub.ID, eps, seen).
+		Update("version_seen", seen).Error; err != nil {
+		s.cfg.Logger.Warnf("[订阅] 记下找到的版本失败: %v", err)
+	}
 }
 
 // downloaderFor 是推送用的下载器：订阅自己选的，没有时用设置里的默认下载器，再没有时用 pt-tools 的默认下载器。
@@ -561,6 +663,7 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		return err.Error()
 	}
 	data, err := fetchTorrent(ctx, site, o.c.Item)
+	markRun(ctx, func(rl *runLog) { rl.fetched(o.c.Site, err == nil) })
 	if err != nil {
 		return fmt.Sprintf("下载 %s 的种子文件失败：%v", o.c.Item.Title, err)
 	}
@@ -648,12 +751,22 @@ func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscriptio
 	if season, serr := s.seasonFor(ctx, sub, false); serr == nil {
 		mp = s.mapperFor(ctx, sub, season)
 	}
-	got := map[int]bool{}
+	paths := make([]string, 0, len(files))
 	for _, f := range files {
-		if !transfer.IsVideo(f.Path) {
+		paths = append(paths, f.Path)
+	}
+	return s.fileEpisodes(ctx, mp, paths)
+}
+
+// fileEpisodes 是种子里这些文件（相对路径）对得上的集：只看视频文件，按文件名认集号（综艺经集号映射，mp 可以为空）；
+// 对不上的、写的是整季的不算。
+func (s *Service) fileEpisodes(ctx context.Context, mp *episodeMapper, paths []string) []int {
+	got := map[int]bool{}
+	for _, p := range paths {
+		if !transfer.IsVideo(p) {
 			continue
 		}
-		name := path.Base(f.Path)
+		name := path.Base(p)
 		m := s.parse(ctx, name, "")
 		sp := span{Start: m.Episode, End: max(m.EpisodeEnd, m.Episode), Whole: m.Episode == 0}
 		if mp != nil {

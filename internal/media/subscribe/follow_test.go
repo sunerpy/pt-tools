@@ -350,6 +350,65 @@ func TestLedgerAdoptsDownloaderTorrent(t *testing.T) {
 	assert.Equal(t, models.MediaRunWaiting, runs[0].Status)
 }
 
+// 种子名写的是整季、里面只有一集（M-Team 上 HHWEB 一集一个种子，种子名是季的目录名），季包也可能只选了几集：
+// 按下载器里选中的文件认集；先加的先认领，版本锁跟着第一个下载的版本；读不到文件列表的整季种子不认领
+func TestAdoptBySelectedFiles(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	sub := e.follow(nil)
+	file := func(name string, prio int) downloader.TorrentFile {
+		return downloader.TorrentFile{Name: name, Priority: prio, Size: 1 << 30}
+	}
+	e.dl.setTorrents(
+		downloader.Torrent{ID: "h03", InfoHash: "H03", Name: "Natural.High.S04.2023.1080p.TX.WEB-DL.H.264.DDP2.0-HHWEB", DateAdded: 200},
+		downloader.Torrent{ID: "h01", InfoHash: "H01", Name: "Natural.High.S04.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", DateAdded: 100},
+		downloader.Torrent{ID: "hpk", InfoHash: "HPK", Name: "Natural.High.S04.2023.1080p.WEB-DL.H.264-PTerWEB", DateAdded: 300},
+		downloader.Torrent{ID: "hno", InfoHash: "HNO", Name: "Natural.High.S04.2023.720p.WEB-DL.H.264-QAWEB", DateAdded: 50},
+	)
+	e.dl.setFiles("h03", file("Natural.High.S04.2023.1080p.TX.WEB-DL.H.264.DDP2.0-HHWEB/Natural.High.S04E03.2023.1080p.TX.WEB-DL.H.264.DDP2.0-HHWEB.mkv", 1))
+	e.dl.setFiles("h01", file("Natural.High.S04.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB/Natural.High.S04E01.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB.mkv", 1))
+	e.dl.setFiles("hpk",
+		file("pk/Natural.High.S04E01.2023.1080p.WEB-DL.H.264-PTerWEB.mkv", 1),
+		file("pk/Natural.High.S04E02.2023.1080p.WEB-DL.H.264-PTerWEB.mkv", 0),
+		file("pk/Natural.High.S04E04.2023.1080p.WEB-DL.H.264-PTerWEB.mkv", 1),
+		file("pk/readme.txt", 1),
+	)
+	e.dl.mu.Lock()
+	e.dl.filesErr = map[string]error{"hno": errors.New("连接超时")}
+	e.dl.mu.Unlock()
+
+	lg := e.ledger(sub)
+	assert.Equal(t, models.MediaEpisodeDownloading, lg.row(1).State)
+	assert.Equal(t, "HHWEB", lg.row(1).VersionGroup, "第 1 集按先加的种子")
+	assert.Equal(t, "2160p", lg.row(1).VersionResolution)
+	assert.Equal(t, models.MediaEpisodeMissing, lg.row(2).State, "没选的文件不算")
+	assert.Equal(t, models.MediaEpisodeDownloading, lg.row(3).State)
+	assert.Equal(t, models.MediaEpisodeDownloading, lg.row(4).State)
+	assert.Equal(t, models.MediaEpisodeUpcoming, lg.row(5).State, "种子名写整季也不把还没播的集算成在下载")
+	linked := e.linked(sub.ID)
+	ids := make([]string, 0, len(linked))
+	for _, l := range linked {
+		ids = append(ids, l.TorrentID)
+	}
+	assert.Equal(t, []string{"h01", "h03", "hpk"}, ids, "先加的先认领；读不到文件列表的整季种子不认领")
+	require.Len(t, linked, 3)
+	assert.Equal(t, `[1]`, linked[0].CoveredEpisodes)
+	assert.Equal(t, `[1,4]`, linked[2].CoveredEpisodes, "季包里选中的集")
+	assert.False(t, linked[2].Complete)
+
+	// 搜一次：锁跟着第一个下载的版本（HHWEB 2160p），推第 2 集
+	e.search.set(
+		e.item("mteam", "702", "Natural.High.S04E02.2023.1080p.TX.WEB-DL.H.264.DDP2.0-HHWEB", "", 1, 10),
+		e.item("mteam", "703", "Natural.High.S04E02.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "", 2, 10),
+	)
+	msg, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"703"}, pushedIDs(e), msg)
+	got := e.subRow(sub.ID)
+	assert.Equal(t, "HHWEB", got.LockGroup)
+	assert.Equal(t, "2160p", got.LockResolution)
+}
+
 func TestDownloaderListCached(t *testing.T) {
 	e := newEnv(t)
 	sub := e.follow(nil)
@@ -917,4 +976,135 @@ func TestUpdateReschedules(t *testing.T) {
 	sameTime(t, now, *got.NextSearchAt, "改了版本锁：马上搜")
 	require.Len(t, e.runs(sub.ID), runs+1)
 	assert.Equal(t, models.MediaRunChanged, e.runs(sub.ID)[0].Status, "手动改动标成 changed")
+}
+
+// stepsOf 是一次运行的步骤，一步一行。
+func stepsOf(run RunView) string {
+	var b strings.Builder
+	for _, st := range run.Steps {
+		b.WriteString(st.Text + "\n")
+	}
+	return b.String()
+}
+
+// 种子文件没下载下来：同一站点连着两次没下载到，这一轮不再从它下载（别的站点照常）；下次搜索提前到 30 分钟以后，
+// 接着没全成一次间隔翻一倍；都下载成了按平常的时间。
+func TestFetchFailureRetriesSooner(t *testing.T) {
+	e := newEnv(t)
+	sub := e.follow(func(in *SubscriptionInput) { in.LockVersion = off() })
+	e.enable(nil)
+	a := e.item("mteam", "961", "Natural.High.S04E01.2023.2160p.WEB-DL.H.265-HHWEB", "", 2, 90)
+	b := e.item("mteam", "962", "Natural.High.S04E01.2023.2160p.WEB-DL.H.265-PTerWEB", "", 2, 85)
+	c := e.item("mteam", "963", "Natural.High.S04E02.2023.2160p.WEB-DL.H.265-HHWEB", "", 2, 80)
+	d := e.item("hdsky", "964", "Natural.High.S04E02.2023.2160p.WEB-DL.H.265-PTerWEB", "", 2, 75)
+	delete(e.site.files, "961")
+	delete(e.site.files, "962")
+	e.search.set(a, b, c, d)
+	start := e.Now()
+
+	msg, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"964"}, pushedIDs(e), "M-Team 连着两次没下载到，第 2 集从别的站点下：%s", msg)
+	run := e.runs(sub.ID)[0]
+	assert.Equal(t, models.MediaRunPartial, run.Status)
+	steps := stepsOf(run)
+	assert.Contains(t, steps, "mteam 连着 2 次没下载到种子文件，这一轮先不从它下载")
+	assert.Contains(t, steps, "2 个种子文件没下载下来，")
+	sameTime(t, start.Add(30*time.Minute), *e.subRow(sub.ID).NextSearchAt)
+
+	// 接着没下载下来：间隔翻倍
+	_, err = e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.MediaRunFailed, e.runs(sub.ID)[0].Status)
+	sameTime(t, start.Add(time.Hour), *e.subRow(sub.ID).NextSearchAt)
+
+	// 站点好了：推上，按平常的时间（第 3、4 集播出以后）
+	e.site.files["961"] = torrentBytes(a.Title)
+	_, err = e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"964", "961"}, pushedIDs(e))
+	assert.Equal(t, models.MediaRunOK, e.runs(sub.ID)[0].Status)
+	next := *e.subRow(sub.ID).NextSearchAt
+	assert.True(t, next.After(start.Add(90*time.Minute)), "按平常的下次时间：%s", next)
+}
+
+// 推满了一轮的上限、还有缺的集：30 分钟以后接着推。
+func TestRoundCapRetriesSooner(t *testing.T) {
+	old := maxPushesPerRound
+	maxPushesPerRound = 1
+	t.Cleanup(func() { maxPushesPerRound = old })
+	e := newEnv(t)
+	sub := e.follow(func(in *SubscriptionInput) { in.LockVersion = off() })
+	e.enable(nil)
+	e.search.set(
+		e.item("mteam", "971", "Natural.High.S04E01.2023.2160p.WEB-DL.H.265-HHWEB", "", 2, 90),
+		e.item("mteam", "972", "Natural.High.S04E02.2023.2160p.WEB-DL.H.265-HHWEB", "", 2, 80),
+	)
+	start := e.Now()
+	_, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"971"}, pushedIDs(e))
+	run := e.runs(sub.ID)[0]
+	assert.Equal(t, models.MediaRunOK, run.Status)
+	assert.Contains(t, stepsOf(run), "这一轮推满了 1 个，")
+	sameTime(t, start.Add(30*time.Minute), *e.subRow(sub.ID).NextSearchAt)
+}
+
+// RSS 送来的种子的种子文件没下载下来：下次主动搜索提前到 30 分钟以后；已经更早的不动。
+func TestOfferFetchFailurePullsSearch(t *testing.T) {
+	e := newEnv(t)
+	sub := e.follow(func(in *SubscriptionInput) { in.LockVersion = off() })
+	e.enable(nil)
+	setNext := func(at time.Time) {
+		require.NoError(t, e.db.Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).Update("next_search_at", at).Error)
+	}
+	setNext(e.Now().Add(6 * time.Hour))
+	it := e.item("mteam", "981", "Natural.High.S04E01.2023.2160p.WEB-DL.H.265-HHWEB", "", 2, 90)
+	delete(e.site.files, "981")
+	e.svc.considerOffer(e.ctx, Candidate{Site: "mteam", Item: it, From: fromRSS, SeenAt: e.Now()})
+	assert.Empty(t, e.gotPushes())
+	sameTime(t, e.Now().Add(30*time.Minute), *e.subRow(sub.ID).NextSearchAt)
+	run := e.runs(sub.ID)[0]
+	assert.Equal(t, models.MediaRunRSS, run.Trigger)
+	assert.Contains(t, stepsOf(run), "1 个种子文件没下载下来，")
+
+	soon := e.Now().Add(10 * time.Minute)
+	setNext(soon)
+	e.svc.considerOffer(e.ctx, Candidate{Site: "mteam", Item: it, From: fromRSS, SeenAt: e.Now()})
+	sameTime(t, soon, *e.subRow(sub.ID).NextSearchAt, "已经更早的不动")
+	assert.NotContains(t, stepsOf(e.runs(sub.ID)[0]), "主动搜一次")
+}
+
+// 锁住的版本在站点上有、只是种子文件没下载下来：播出很久也不算等版本（不发「等版本」提醒），按缺的接着找；
+// 版本锁改了以后重新算。
+func TestVersionSeenIsNotWaiting(t *testing.T) {
+	e := newEnv(t)
+	group, res := "HHWEB", "2160p"
+	sub := e.follow(func(in *SubscriptionInput) { in.LockGroup, in.LockResolution = &group, &res })
+	e.enable(func(s *Settings) { s.NotifyChannels = []uint{1} })
+	e1, ok := airTime(sub, "2026-10-01")
+	require.True(t, ok)
+	e.setNow(e1.Add(8 * 24 * time.Hour))
+	it := e.item("mteam", "991", "Natural.High.S04E01.2023.2160p.WEB-DL.H.265-HHWEB", "", 2, 90)
+	delete(e.site.files, "991")
+	e.search.set(it)
+	e.svc.refresh(e.ctx)
+	require.Equal(t, models.MediaEpisodeWaitingVersion, e.state(sub, 1))
+
+	e.advance(time.Minute)
+	_, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	e.svc.refresh(e.ctx)
+	assert.Equal(t, models.MediaEpisodeMissing, e.state(sub, 1), "找到过锁住的版本：不是等版本")
+	assert.Equal(t, models.MediaEpisodeWaitingVersion, e.state(sub, 2), "第 2 集没找到过，照样等")
+	for _, n := range e.noticesOf(NoticeFollowWaiting) {
+		assert.NotContains(t, n.Event.Fields["episodes"], "E01")
+	}
+
+	// 版本锁改了：以前找到的不算，重新等
+	other := "PTerWEB"
+	_, err = e.svc.UpdateSubscription(e.ctx, sub.ID, SubscriptionInput{LockGroup: &other, LockResolution: &res})
+	require.NoError(t, err)
+	e.svc.refresh(e.ctx)
+	assert.Equal(t, models.MediaEpisodeWaitingVersion, e.state(sub, 1))
 }
