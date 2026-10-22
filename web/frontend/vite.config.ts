@@ -34,6 +34,10 @@ export default defineConfig({
             if (/[\\/](vue-element-plus-x|x-sender|virtua)[\\/]/.test(id)) {
               return "element-plus-x";
             }
+            // 海报转 PNG 只在数据导出页点「下载」「复制」时用：单独一块，按需加载，不进全站的 vendor
+            if (/[\\/]modern-screenshot[\\/]/.test(id)) {
+              return "modern-screenshot";
+            }
             if (id.includes("element-plus")) {
               return "element-plus";
             }

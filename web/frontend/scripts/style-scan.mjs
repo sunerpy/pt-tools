@@ -47,7 +47,7 @@ const INTENTIONAL = {
   "src/views/chatops/NotificationDetail.vue .notify-detail-page":
     "布局由同节点的 pt-cards--wide 给",
   "src/views/UserDataExport.vue .export-page":
-    "只用来挂 SVG 滤镜与 Teleport（文件内注释已说明），栏宽由里层 .export-cols pt-cards--main 给",
+    "只是页面根节点（挂 Teleport 的那一层），栏宽由里层 .export-cols pt-cards--main 给",
 
   /* BEM 的外层壳：间距与排布都在子元素上 */
   "src/components/ui/PtBreakdown.vue .bd": "排布在 .bd__list 上（flex/grid 都在那里）",

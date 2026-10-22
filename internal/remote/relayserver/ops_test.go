@@ -119,15 +119,21 @@ func TestConnectionLimit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	// 不对的 hostId 与不在线的主机：接受以后马上关掉，名额要还
+	// 客户端读到关闭帧时服务端的处理还没返回，名额要等它返回才还：每次关掉以后等名额回到 0 再连下一个，
+	// 否则上一轮的两个还占着名额，这一轮的第一个就被 503 挡掉（CI 上偶发过）
+	released := func() {
+		require.Eventually(t, func() bool { return srv.conns.Load() == 0 }, 5*time.Second, 10*time.Millisecond, "被拒绝的连接还了名额")
+	}
 	for range 3 {
 		code, ws, _ := dialStatus(t, ctx, u+"/v1/client/bad")
 		require.Equal(t, http.StatusSwitchingProtocols, code)
 		assert.Equal(t, websocket.StatusCode(remote.CloseProtocol), readClose(t, ctx, ws))
+		released()
 		code, ws, _ = dialStatus(t, ctx, u+"/v1/client/"+newHostKeys(t).HostID())
 		require.Equal(t, http.StatusSwitchingProtocols, code)
 		assert.Equal(t, websocket.StatusCode(remote.CloseHostOffline), readClose(t, ctx, ws))
+		released()
 	}
-	require.Eventually(t, func() bool { return srv.conns.Load() == 0 }, 5*time.Second, 10*time.Millisecond, "被拒绝的连接还了名额")
 
 	keys := newHostKeys(t)
 	authHost(t, ctx, u, keys)
