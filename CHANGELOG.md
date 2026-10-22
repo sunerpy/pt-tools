@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.37](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.36...v1.0.0-rc.37) (2026-10-22)
+
+
+### Features
+
+* **api:** 配置网关：经 MCP 工具与 App API 读改大部分配置，密钥只写不读，新增 app:config 权限 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **assistant:** AI 助手对话页改版：显示推理内容与工具调用，可选模型与推理等级，能带图片与文本附件，上下文到阈值自动压缩 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **assistant:** 会产生变更的工具先给差异预览，确认后才执行 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **assistant:** 语音输入（Voltip） ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **attendance:** 自动签到独立页与按天的签到详情，HDSky、OpenCD 的验证码与 PTCHDBits、52PT 的答题交给 AI，支持 Rousi Pro 签到 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **mcp:** MCP 接入开关与路径（新装默认关），补齐追剧、重新整理与重新刮削的工具 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **media:** 一键追剧：剧集订阅按播出时间或定时搜索，版本锁、每集台账、综艺集号与运行记录 ([#758](https://github.com/sunerpy/pt-tools/issues/758)) ([22f2dd8](https://github.com/sunerpy/pt-tools/commit/22f2dd8e2c60a531c76525938d94bf81665ac636))
+* **media:** 刮削按项选来源（TMDB、豆瓣、Bangumi、Fanart.tv、OMDb），整理历史记刮削结果、可以重新刮削 ([#757](https://github.com/sunerpy/pt-tools/issues/757)) ([bd5b2a1](https://github.com/sunerpy/pt-tools/commit/bd5b2a18c4ab3288a7e1e9a747edcf47d9e6e90d))
+* **media:** 识别比对 TMDB 各语言译名、NFO 主要评分写在最后、发布构建可以内置 TMDB Key ([0545474](https://github.com/sunerpy/pt-tools/commit/054547461ee9057671eb7473db6edb0d8a7c137d))
+* **media:** 追剧定时可按间隔或 cron，种子能重新整理与刮削，订阅可以带站点、下载器与保存路径 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **rss:** 「调度器」改名「RSS 任务」，加状态接口与没在运行时的提示条 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **rss:** 过滤规则试跑可以选一个 RSS 现拉实时数据，站点详情的 RSS 能先试一下 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **webui:** 宽屏两栏布局，浏览器扩展弹窗的主页改成「我的站点」 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **webui:** 数据导出海报五种样式（便当、素笺、夜幕、回顾、小票），预览就是导出的图 ([#762](https://github.com/sunerpy/pt-tools/issues/762)) ([17b676a](https://github.com/sunerpy/pt-tools/commit/17b676af15dd4366bf3e382c9f5b3358e279ef46))
+
+
+### Bug Fixes
+
+* **build:** Go 升到 1.26.10（标准库安全修复） ([#754](https://github.com/sunerpy/pt-tools/issues/754)) ([128c496](https://github.com/sunerpy/pt-tools/commit/128c496c44f40b9f0aabc29472a8fce697ab040b))
+* **media:** 追剧按真实下载修正：下载种子文件自动重试（所有站点）、没做完的提前重搜、认领按选中的文件认集 ([#759](https://github.com/sunerpy/pt-tools/issues/759)) ([fb6dfbc](https://github.com/sunerpy/pt-tools/commit/fb6dfbcee82d5362784a9c150722cf96b6a3ca29))
+* **rss:** 取 RSS 的错误分成中文提示、不再带完整地址，示例里的占位地址不开任务、不让保存 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **site:** 取用户信息时少了几页也回部分结果，HDSky、SSD 不再整次失败 ([#760](https://github.com/sunerpy/pt-tools/issues/760)) ([47d3ff7](https://github.com/sunerpy/pt-tools/commit/47d3ff7d291800db9db51bbb5e49e98a45c10420))
+* **webui:** 所有弹窗限高，页头页脚固定、正文滚动 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+
 ## [1.0.0-rc.36](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.35...v1.0.0-rc.36) (2026-10-17)
 
 
