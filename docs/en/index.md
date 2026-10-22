@@ -72,7 +72,7 @@ home:
             status: available
             link: /en/guide/site-login-monitoring
           - title: Daily sign-in
-            body: A Sign-in page of its own: sign in to supported sites within a time window you set, sign in to all with one click, see the history and push the results, or use the /signin command; captchas and quiz questions can be handed to AI. Off by default.
+            body: A Sign-in page of its own, where you sign in to supported sites within a time window you set, sign in to all with one click, see the history and push the results, or use the /signin command; captchas and quiz questions can be handed to AI. Off by default.
             status: preview
             link: /en/guide/site-login-monitoring#daily-sign-in
           - title: CookieCloud import
