@@ -30,7 +30,7 @@
 - **自动**：在站点页面打开弹窗，打开「自动同步 Cookie」开关后，重新登录或 Cookie 更新时会自动同步。
 - **保号**：点「打开站点」在后台标签页里打开这些站点，或者点某一行的「打开」。
 
-使用 API Key 或 Passkey 的站点（例如 M-Team、Rousi Pro）不能通过扩展同步，请在 pt-tools 的站点设置中填写，见[获取 Cookie 与 API Key](get-cookie-apikey.md)。HDDolby 这类要 Cookie 和 API Key 两样的站点，同步 Cookie 时 pt-tools 先把 Cookie 存下；还没填 API Key 的话站点先不启用，扩展会提示你去 pt-tools 里补上 API Key。
+使用 API Key 或 Passkey 的站点（例如 M-Team、Rousi Pro）不能通过扩展同步，请在 pt-tools 的站点设置中填写，见[获取 Cookie 与 API Key](get-cookie-apikey.md)。HDDolby 这类要 Cookie 和 API Key 两样的站点，同步 Cookie 时 pt-tools 先把 Cookie 存下；尚未填写 API Key 时站点先不启用，扩展会提示你去 pt-tools 里补上 API Key。
 
 ### 定时同步
 

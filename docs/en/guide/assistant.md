@@ -102,7 +102,7 @@ Two drop-downs under the input box apply to each message:
 
 ### Sending images and text files
 
-Click the paper clip under the input box, or paste or drop files into it. A message takes up to 4 attachments, and a message can be just attachments.
+Click the paper clip under the input box, or paste or drop files into it. A message takes up to 4 attachments, and a message can consist of attachments only.
 
 | Kind       | Formats                                                                                          | Size        |
 | ---------- | ------------------------------------------------------------------------------------------------ | ----------- |
