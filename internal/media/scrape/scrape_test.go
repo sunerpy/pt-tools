@@ -71,7 +71,8 @@ func TestNFOGolden(t *testing.T) {
 	require.NoError(t, err)
 	golden(t, "season-bare.nfo", b)
 
-	// 豆瓣补充：简介换成豆瓣的，评分以豆瓣的为主（TMDB 的留着），记下豆瓣编号；季的简介也换
+	// 豆瓣补充：简介换成豆瓣的，评分以豆瓣的为主（TMDB 的留着），记下豆瓣编号；季的简介也换。
+	// 主要的评分写在最后：Jellyfin（与 Emby）按顺序读每个 <rating>，最后一个生效，不看 default
 	db := &Douban{ID: "35593344", Intro: "豆瓣的简介 & <更多>。", Rating: 8.8, Votes: 850981}
 	b, err = MovieNFO(movie, db)
 	require.NoError(t, err)

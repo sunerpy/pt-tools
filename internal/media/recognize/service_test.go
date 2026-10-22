@@ -98,11 +98,11 @@ func TestSettings(t *testing.T) {
 	ctx := context.Background()
 	got, err := s.Settings(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, Settings{Language: "zh-CN"}, got)
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyNone}, got)
 
 	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(" " + goodKey + " "), Language: "en-US", ProxyURL: ptr("http://user:pw@127.0.0.1:7890")})
 	require.NoError(t, err)
-	assert.Equal(t, Settings{HasTMDBKey: true, Language: "en-US", ProxyURL: "http://user:***@127.0.0.1:7890"}, got)
+	assert.Equal(t, Settings{HasTMDBKey: true, KeySource: KeyUser, Language: "en-US", ProxyURL: "http://user:***@127.0.0.1:7890"}, got)
 	var row models.MediaSetting
 	require.NoError(t, db.First(&row, 1).Error)
 	assert.NotContains(t, row.TMDBKeyEncrypted, goodKey, "API Key 加密保存")
@@ -130,7 +130,60 @@ func TestSettings(t *testing.T) {
 
 	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(""), ProxyURL: ptr("")})
 	require.NoError(t, err)
-	assert.Equal(t, Settings{Language: "zh-CN"}, got, "清除 Key 与代理；语言留空时用默认值")
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyNone}, got, "清除 Key 与代理；语言留空时用默认值")
+	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrNoKey)
+}
+
+// 内置 Key：没填自己的 Key 时用它；填了自己的就用自己的；换成镜像或中转的接口地址时不用内置的（只发给官方地址）
+func TestBuiltinKey(t *testing.T) {
+	old := tmdb.BuiltinKey
+	t.Cleanup(func() { tmdb.BuiltinKey = old })
+	tmdb.BuiltinKey = goodKey
+	s, _ := newService(t)
+	ctx := context.Background()
+
+	got, err := s.Settings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyBuiltin, BuiltinKey: true}, got)
+	require.NoError(t, s.TestTMDB(ctx), "用内置 Key 访问（假服务只认 goodKey）")
+	res, err := s.Recognize(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p.BluRay.x264"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match, res.Message)
+	assert.Equal(t, 278, res.Match.ID)
+
+	// 自己的 Key 优先（这里故意填一个假服务不认的）
+	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr("fedcba9876543210fedcba9876543210")})
+	require.NoError(t, err)
+	assert.Equal(t, KeyUser, got.KeySource)
+	assert.True(t, got.HasTMDBKey)
+	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrUnauthorized)
+
+	// 清掉自己的 Key、接口地址换成中转：内置 Key 不发过去
+	var mirrorHits atomic.Int32
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mirrorHits.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(mirror.Close)
+	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(""), APIBaseURL: ptr(mirror.URL)})
+	require.NoError(t, err)
+	assert.Equal(t, KeyNone, got.KeySource)
+	assert.True(t, got.BuiltinKey)
+	err = s.TestTMDB(ctx)
+	require.ErrorIs(t, err, tmdb.ErrNoKey)
+	assert.Contains(t, err.Error(), "官方地址")
+	assert.Zero(t, mirrorHits.Load(), "内置 Key 没有发给中转")
+
+	// 换成 TMDB 官方的另一个域名：还能用内置的（这里不发请求）
+	got, err = s.SaveSettings(ctx, SettingsInput{APIBaseURL: ptr("api.tmdb.org")})
+	require.NoError(t, err)
+	assert.Equal(t, KeyBuiltin, got.KeySource)
+
+	// 没有内置 Key（从源码编译）
+	tmdb.BuiltinKey = ""
+	got, err = s.SaveSettings(ctx, SettingsInput{APIBaseURL: ptr("")})
+	require.NoError(t, err)
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyNone}, got)
 	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrNoKey)
 }
 

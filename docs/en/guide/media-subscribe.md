@@ -2,7 +2,7 @@
 
 Once you subscribe to a film or one season of a series, pt-tools searches your sites on a schedule and also picks it up from RSS: it chooses the best release for your quality profile, pushes it to a downloader, and once the download completes, [library organising](media-library.md) puts it into your media library. For series it fills in missing episodes from TMDB's episode list; with upgrades on, it keeps looking for a better release and replaces the old one after the new one is organised. A Douban "wish list" (想看) can create subscriptions automatically.
 
-The pages are Media → Explore (媒体 → 探索) and Media → Subscriptions (媒体 → 订阅). Subscriptions use TMDB, so enter a TMDB API key under [media recognition](media-recognize.md) first.
+The pages are Media → Explore (媒体 → 探索) and Media → Subscriptions (媒体 → 订阅). Subscriptions use TMDB: released builds have a TMDB API key built in, so there is nothing to enter; builds from source need a key under [media recognition](media-recognize.md#tmdb-api-key) first.
 
 ## Before you start
 
@@ -88,7 +88,7 @@ Under Douban wish list (豆瓣想看) on the Subscriptions page, add a Douban us
 - With Confirm first (先确认) on, the subscriptions it creates start as Pending (待确认) and only start searching after you click Confirm in the subscription list.
 - Items not found on TMDB are recorded as not found and not searched again; you can search and subscribe to them from the Explore page.
 - When you delete a subscription created from Douban, the item shows Subscription deleted (订阅已删除) and is not subscribed again; when an item disappears from Douban's RSS, the subscription it created is kept.
-- Failed fetches back off for 1, 2, 4… hours, up to 24 hours; after 3 failures in a row the source is marked Abnormal (异常) and one notification goes to the channels selected in the settings. Without a TMDB API key the whole fetch counts as failed, so no items are recorded as not found.
+- Failed fetches back off for 1, 2, 4… hours, up to 24 hours; after 3 failures in a row the source is marked Abnormal (异常) and one notification goes to the channels selected in the settings. Without a usable TMDB API key the whole fetch counts as failed, so no items are recorded as not found.
 - Fetch now (立即拉取) fetches right away (while the source is already being fetched, it asks you to try again later); Items (条目) lists the items seen and their results. Deleting a source keeps the subscriptions it created.
 
 ## Notifications

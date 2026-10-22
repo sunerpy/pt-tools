@@ -1,5 +1,6 @@
 // Package tmdb 是 TMDB v3 接口的客户端：搜索电影与剧集、按 IMDb 编号查找、取详情。
-// API Key 由用户自己填写（v3 的 API Key 或 v4 的读取令牌都可以）；默认中文，中文简介为空时取英文的。
+// API Key 用用户自己填的（v3 的 API Key 或 v4 的读取令牌都可以），没填时用构建时内置的（BuiltinKey）；
+// 默认中文，中文简介为空时取英文的。
 // 走设置里的代理，没有时用环境变量里的代理；响应缓存在 SQLite 里；自己限速。错误里不带请求地址（API Key 在地址里）。
 package tmdb
 
@@ -39,6 +40,37 @@ const (
 	SearchTTL  = 24 * time.Hour
 	DetailsTTL = 7 * 24 * time.Hour
 )
+
+// BuiltinKey 是构建时用 -ldflags 注入的 TMDB API Key（发布流程从仓库 secret PT_TOOLS_TMDB_KEY 来，源码里没有）：
+// 用户没填自己的 Key 时用它，像 Jellyfin、tinyMediaManager 那样装好就能识别。为空（从源码编译）时要自己填。
+var BuiltinKey = ""
+
+// Builtin 是能用的内置 Key：去掉首尾空白；格式不对（不到 16 个字符、超过 512 个、中间有空白）时当作没有。
+func Builtin() string {
+	key := strings.TrimSpace(BuiltinKey)
+	if !ValidKey(key) {
+		return ""
+	}
+	return key
+}
+
+// ValidKey 报告 key 像不像 TMDB 的 Key（v3 的 API Key 或 v4 的读取令牌）：16 到 512 个字符，中间没有空白。
+func ValidKey(key string) bool {
+	return len(key) >= 16 && len(key) <= 512 && !strings.ContainsAny(key, " \t\r\n")
+}
+
+// officialAPIHosts 是 TMDB 官方的接口域名：内置 Key 只发给它们。
+var officialAPIHosts = []string{"api.themoviedb.org", "api.tmdb.org"}
+
+// IsOfficialAPIBase 报告接口地址是不是 TMDB 官方的（https 加官方域名，不带端口）。内置 Key 是所有用户共用的，
+// 不发给镜像与自建的中转，免得被人收集了去滥用、连累大家。
+func IsOfficialAPIBase(base string) bool {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil || u.Scheme != "https" || u.Port() != "" {
+		return false
+	}
+	return slices.Contains(officialAPIHosts, strings.ToLower(u.Hostname()))
+}
 
 var (
 	ErrNoKey        = errors.New("没有填写 TMDB API Key")

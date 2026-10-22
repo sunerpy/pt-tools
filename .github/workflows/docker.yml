@@ -252,6 +252,9 @@ jobs:
             BUILD_TIME=${{ steps.buildmeta.outputs.build_time }}
             COMMIT_ID=${{ steps.buildmeta.outputs.commit_id }}
             RELAY_URL=${{ secrets.PT_TOOLS_RELAY_URL }}
+          # 内置的 TMDB Key 用 BuildKit secret（不进镜像历史与 provenance）；用发版归档的二进制时用不到
+          secrets: |
+            tmdb_key=${{ secrets.PT_TOOLS_TMDB_KEY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max

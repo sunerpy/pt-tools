@@ -20,9 +20,11 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/remote"
 	"github.com/sunerpy/pt-tools/version"
 )
@@ -40,7 +42,20 @@ Useful for debugging and support purposes.`,
 		fmt.Printf("Build Time: %s\n", version.BuildTime)
 		fmt.Printf("Commit:     %s\n", version.CommitID)
 		fmt.Printf("Default relay: %s\n", defaultRelayState())
+		fmt.Printf("TMDB key: %s\n", builtinTMDBState())
 	},
+}
+
+// builtinTMDBState 是构建时有没有注入 TMDB API Key（只说有没有，不打印 Key）：configured、none，
+// 或者注入了但格式不对时 invalid（发版流程据此断言 secret 注入成功）。
+func builtinTMDBState() string {
+	switch {
+	case strings.TrimSpace(tmdb.BuiltinKey) == "":
+		return "none"
+	case tmdb.Builtin() == "":
+		return "invalid"
+	}
+	return "configured"
 }
 
 // defaultRelayState 是构建时有没有注入托管 relay 的地址（只说有没有，不打印地址）：configured、none，

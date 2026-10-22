@@ -91,6 +91,38 @@ func TestNew(t *testing.T) {
 	assert.Equal(t, "zh-CN", c.language)
 }
 
+// 内置 Key：注入的值去掉首尾空白，格式不对时当作没有；只认 TMDB 官方的 https 接口地址
+func TestBuiltinKey(t *testing.T) {
+	old := BuiltinKey
+	t.Cleanup(func() { BuiltinKey = old })
+	for in, want := range map[string]string{
+		"":                                       "",
+		"short":                                  "",
+		"0123456789abcdef 0123":                  "",
+		" 0123456789abcdef0123456789abcdef\n":    "0123456789abcdef0123456789abcdef",
+		"eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ4In0.x": "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ4In0.x",
+	} {
+		BuiltinKey = in
+		assert.Equal(t, want, Builtin(), "%q", in)
+	}
+	BuiltinKey = strings.Repeat("k", 513)
+	assert.Empty(t, Builtin(), "超过 512 个字符")
+
+	for base, want := range map[string]bool{
+		"https://api.themoviedb.org/3":     true,
+		"https://API.TMDB.org/3":           true,
+		"https://api.tmdb.org":             true,
+		"http://api.themoviedb.org/3":      false,
+		"https://api.themoviedb.org:443/3": false,
+		"https://tmdb.example.com/3":       false,
+		"https://api.themoviedb.org.evil/": false,
+		"":                                 false,
+		"%zz":                              false,
+	} {
+		assert.Equal(t, want, IsOfficialAPIBase(base), base)
+	}
+}
+
 func TestSearchAndAuth(t *testing.T) {
 	f := newFake(t)
 	c := newClient(t, f, nil)

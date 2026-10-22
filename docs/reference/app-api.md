@@ -239,7 +239,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 ## 媒体
 
-这一组接口对应网页上的「媒体」，用法见[订阅](../guide/media-subscribe.md)与[整理入库](../guide/media-library.md)。新建订阅与探索要用到 TMDB，没有填写 API Key 时回 400，见[填写 TMDB API Key](../guide/media-recognize.md#填写-tmdb-api-key)。
+这一组接口对应网页上的「媒体」，用法见[订阅](../guide/media-subscribe.md)与[整理入库](../guide/media-library.md)。新建订阅与探索要用到 TMDB，没有能用的 API Key 时回 400，见 [TMDB API Key](../guide/media-recognize.md#tmdb-api-key)。
 
 ### GET /media/history
 
@@ -259,7 +259,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 - `summary`：给人看的一句话（名字、年份、季集）；`meta`：从标题解析出来的 `name_cn`、`name_en`、`year`、`type`、`season`、`episode`、`episode_end`、`resolution`、`source`、`video_codec`、`hdr`、`audio`、`group` 等；
 - `match`：TMDB 上对应的条目（`id`、`media_type`、`title`、`original_title`、`year`、`overview`、`poster_path`、`vote_average`、`imdb_id`），没有可靠的匹配时没有；`source`：`override`（手动纠正过）、`imdb`、`search` 或 `none`；`score`；
-- `candidates`：最多 5 个候选（带 `score`）；`message`：提示（例如没有填写 TMDB API Key，只做了标题解析）；`error`：TMDB 出错的原因。
+- `candidates`：最多 5 个候选（带 `score`）；`message`：提示（例如没有能用的 TMDB API Key，只做了标题解析）；`error`：TMDB 出错的原因。
 
 ### POST /media/organize/preview
 

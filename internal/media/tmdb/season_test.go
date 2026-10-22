@@ -165,12 +165,14 @@ func TestTitles(t *testing.T) {
 		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		assert.Equal(t, "en-US", r.URL.Query().Get("language"))
-		assert.Equal(t, "alternative_titles", r.URL.Query().Get("append_to_response"))
+		assert.Equal(t, "alternative_titles,translations", r.URL.Query().Get("append_to_response"))
 		switch r.URL.Path {
 		case "/3/movie/372058":
-			_, _ = w.Write([]byte(`{"id":372058,"title":"Your Name.","alternative_titles":{"titles":[{"iso_3166_1":"JP","title":"Kimi no Na wa."},{"title":"Your Name."},{"title":" "}]}}`))
+			_, _ = w.Write([]byte(`{"id":372058,"title":"Your Name.","alternative_titles":{"titles":[{"iso_3166_1":"JP","title":"Kimi no Na wa."},{"title":"Your Name."},{"title":" "}]},` +
+				`"translations":{"translations":[{"iso_639_1":"de","data":{"title":"Your Name. – Gestern, heute und für immer"}},{"iso_639_1":"fr","data":{"title":"Your Name."}},{"iso_639_1":"nl","data":{"title":""}}]}}`))
 		case "/3/tv/209867":
-			_, _ = w.Write([]byte(`{"id":209867,"name":"Frieren: Beyond Journey's End","alternative_titles":{"results":[{"iso_3166_1":"JP","title":"Sousou no Frieren","type":"romaji"}]}}`))
+			_, _ = w.Write([]byte(`{"id":209867,"name":"Frieren: Beyond Journey's End","alternative_titles":{"results":[{"iso_3166_1":"JP","title":"Sousou no Frieren","type":"romaji"}]},` +
+				`"translations":{"translations":[{"iso_639_1":"es","data":{"name":"Frieren"}}]}}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -182,10 +184,11 @@ func TestTitles(t *testing.T) {
 
 	got, err := c.Titles(ctx, KindMovie, 372058)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Your Name.", "Kimi no Na wa."}, got, "电影的别名在 titles 里；去掉重复与空的")
+	assert.Equal(t, []string{"Your Name.", "Kimi no Na wa.", "Your Name. – Gestern, heute und für immer"}, got,
+		"电影的别名在 titles 里，译名在 translations 的 data.title；去掉重复与空的")
 	got, err = c.Titles(ctx, KindTV, 209867)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Frieren: Beyond Journey's End", "Sousou no Frieren"}, got, "剧集的别名在 results 里")
+	assert.Equal(t, []string{"Frieren: Beyond Journey's End", "Sousou no Frieren", "Frieren"}, got, "剧集的别名在 results 里，译名在 data.name")
 	_, err = c.Titles(ctx, KindTV, 209867)
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), hits.Load(), "读缓存")

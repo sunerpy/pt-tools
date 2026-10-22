@@ -160,7 +160,7 @@ func (s *Server) configResources() []*configResource {
 		},
 		{
 			Name: "media", Title: "媒体识别（TMDB）", Kind: configObject, Path: "/api/media/settings", SetMethod: http.MethodPut,
-			Desc:   "识别种子标题对应的电影与剧集用的 TMDB：API Key、语言、代理与换掉的接口地址。",
+			Desc:   "识别种子标题对应的电影与剧集用的 TMDB：API Key（没填时用发布版本内置的，key_source 写着现在用哪个）、语言、代理与换掉的接口地址。",
 			Fields: jsonFields[recognize.SettingsInput]("tmdb_api_key"), Secrets: map[string]string{"tmdb_api_key": "has_tmdb_key"},
 			Ops:   []string{configOpSet},
 			Hints: map[string]string{"language": "例如 zh-CN", "api_base_url": "空着用官方地址", "image_base_url": "空着用官方地址"},

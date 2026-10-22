@@ -92,14 +92,24 @@ var Languages = []string{"zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP"}
 // 长度上限。
 const (
 	maxInputLen = 512
-	maxKeyLen   = 512
 	maxWords    = 500
 )
 
-// Settings 是给界面看的设置：API Key 只说有没有；代理地址里的密码换成 ***。
+// 识别现在用的 TMDB API Key（Settings.KeySource）。
+const (
+	KeyUser    = "user"    // 自己填的
+	KeyBuiltin = "builtin" // 没填，用构建时内置的
+	KeyNone    = "none"    // 没有能用的：没填，这个版本也没有内置的，或者换了接口地址（内置的只发给官方地址）
+)
+
+// Settings 是给界面看的设置：API Key 只说有没有（HasTMDBKey 是自己填的那个）；代理地址里的密码换成 ***。
 // APIBaseURL、ImageBaseURL 是换掉的地址，空 = 官方地址。
 type Settings struct {
-	HasTMDBKey   bool   `json:"has_tmdb_key"`
+	HasTMDBKey bool `json:"has_tmdb_key"`
+	// KeySource 是识别现在用哪个 Key（KeyUser、KeyBuiltin、KeyNone）
+	KeySource string `json:"key_source"`
+	// BuiltinKey 表示这个版本内置了 Key（发布的 Release 与 Docker 镜像有，从源码编译的没有）
+	BuiltinKey   bool   `json:"builtin_key"`
 	Language     string `json:"language"`
 	ProxyURL     string `json:"proxy_url"`
 	APIBaseURL   string `json:"api_base_url"`
@@ -136,8 +146,28 @@ func maskProxy(raw string) string {
 	return strings.Replace(u.String(), "%2A%2A%2A", "***", 1)
 }
 
+// keySource 是这份设置下识别用哪个 Key（见 KeyUser 等）。
+func keySource(row models.MediaSetting) string {
+	switch {
+	case row.TMDBKeyEncrypted != "":
+		return KeyUser
+	case tmdb.Builtin() != "" && builtinAllowed(row.APIBaseURL):
+		return KeyBuiltin
+	}
+	return KeyNone
+}
+
+// builtinAllowed 报告内置 Key 能不能发给用户换的接口地址：没换（官方地址；qa 构建是假服务），或者换成 TMDB
+// 官方的另一个域名。内置 Key 是所有用户共用的，不发给镜像与自建的中转。
+func builtinAllowed(apiBase string) bool {
+	return apiBase == "" || tmdb.IsOfficialAPIBase(apiBase)
+}
+
 func (s *Service) view(row models.MediaSetting) Settings {
-	out := Settings{HasTMDBKey: row.TMDBKeyEncrypted != "", Language: row.Language, APIBaseURL: row.APIBaseURL, ImageBaseURL: row.ImageBaseURL}
+	out := Settings{
+		HasTMDBKey: row.TMDBKeyEncrypted != "", KeySource: keySource(row), BuiltinKey: tmdb.Builtin() != "",
+		Language: row.Language, APIBaseURL: row.APIBaseURL, ImageBaseURL: row.ImageBaseURL,
+	}
 	if out.Language == "" {
 		out.Language = Languages[0]
 	}
@@ -179,7 +209,7 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 		switch {
 		case key == "":
 			row.TMDBKeyEncrypted = ""
-		case len(key) < 16 || len(key) > maxKeyLen || strings.ContainsAny(key, " \t\r\n"):
+		case !tmdb.ValidKey(key):
 			return Settings{}, fmt.Errorf("%w: TMDB API Key 格式不对（v3 的 API Key 或 v4 的读取令牌）", ErrInvalid)
 		default:
 			enc, err := s.cfg.Cipher.Encrypt(key)
@@ -230,18 +260,25 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 	return s.view(row), nil
 }
 
-// client 按当前设置建 TMDB 客户端；没有 API Key 时返回 tmdb.ErrNoKey。
+// client 按当前设置建 TMDB 客户端：用自己填的 Key，没填时用内置的；没有能用的 Key 时返回 tmdb.ErrNoKey。
 func (s *Service) client(ctx context.Context) (*tmdb.Client, error) {
 	row, err := s.load(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if row.TMDBKeyEncrypted == "" {
+	var key string
+	switch keySource(row) {
+	case KeyUser:
+		if key, err = s.cfg.Cipher.Decrypt(row.TMDBKeyEncrypted); err != nil {
+			return nil, fmt.Errorf("解密 TMDB API Key 失败: %w", err)
+		}
+	case KeyBuiltin:
+		key = tmdb.Builtin()
+	default:
+		if tmdb.Builtin() != "" {
+			return nil, fmt.Errorf("%w：换了 TMDB 接口地址时不用内置的 Key（内置的只发给 TMDB 官方地址），要填自己的", tmdb.ErrNoKey)
+		}
 		return nil, tmdb.ErrNoKey
-	}
-	key, err := s.cfg.Cipher.Decrypt(row.TMDBKeyEncrypted)
-	if err != nil {
-		return nil, fmt.Errorf("解密 TMDB API Key 失败: %w", err)
 	}
 	hc, imageBase, err := s.transport(row)
 	if err != nil {

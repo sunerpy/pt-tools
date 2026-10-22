@@ -61,15 +61,18 @@ func commonOf(r tmdb.Result, d *Douban) common {
 	if c.OriginalTitle == c.Title {
 		c.OriginalTitle = ""
 	}
-	var rs []rating
 	if d != nil && d.Intro != "" {
 		c.Plot = d.Intro
 	}
-	if d != nil && d.Rating > 0 {
-		rs = append(rs, rating{Name: "douban", Max: 10, Default: true, Value: strconv.FormatFloat(d.Rating, 'f', 1, 64), Votes: d.Votes})
-	}
+	// 主要的评分写在最后：Kodi 看 default，Jellyfin 与 Emby 按顺序读每个 <rating>、最后一个生效（不看 default），
+	// 豆瓣的写在前面时它们显示的是 TMDB 的分
+	var rs []rating
+	hasDouban := d != nil && d.Rating > 0
 	if r.VoteAverage > 0 {
-		rs = append(rs, rating{Name: "themoviedb", Max: 10, Default: len(rs) == 0, Value: strconv.FormatFloat(r.VoteAverage, 'f', 1, 64)})
+		rs = append(rs, rating{Name: "themoviedb", Max: 10, Default: !hasDouban, Value: strconv.FormatFloat(r.VoteAverage, 'f', 1, 64)})
+	}
+	if hasDouban {
+		rs = append(rs, rating{Name: "douban", Max: 10, Default: true, Value: strconv.FormatFloat(d.Rating, 'f', 1, 64), Votes: d.Votes})
 	}
 	if len(rs) > 0 {
 		c.Ratings = &ratings{Rating: rs}

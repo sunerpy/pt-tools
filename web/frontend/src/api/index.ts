@@ -2652,7 +2652,12 @@ export const cookieCloudApi = {
 
 // 媒体识别（M9）：TMDB 的 API Key 与代理地址只写不读（代理地址里的密码换成 ***）
 export interface MediaSettings {
+  /** 自己填了 API Key */
   has_tmdb_key: boolean;
+  /** 识别现在用哪个 Key：自己填的、内置的（没填时），或者没有能用的 */
+  key_source: "user" | "builtin" | "none";
+  /** 这个版本内置了 Key（发布的 Release 与 Docker 镜像有，从源码编译的没有） */
+  builtin_key: boolean;
   language: string;
   proxy_url: string;
   /** 换掉的 TMDB 接口地址（镜像或自建中转）；空 = 官方地址 */

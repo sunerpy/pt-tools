@@ -44,6 +44,8 @@ builds:
       - -X github.com/sunerpy/pt-tools/version.BuildArch={{ .Arch }}
       # 托管 relay 的地址：发版时来自 secret PT_TOOLS_RELAY_URL（不进仓库、能轮换；地址随二进制公开，不是秘密），没设时为空
       - -X github.com/sunerpy/pt-tools/internal/remote.DefaultRelayURL={{ envOrDefault "PT_TOOLS_RELAY_URL" "" }}
+      # 内置的 TMDB API Key：发版时来自 secret PT_TOOLS_TMDB_KEY（不进仓库、能轮换；Key 随二进制分发，取得出来），没设时为空，用户要自己填
+      - -X github.com/sunerpy/pt-tools/internal/media/tmdb.BuiltinKey={{ envOrDefault "PT_TOOLS_TMDB_KEY" "" }}
     hooks:
       # post hook 对每个 target 执行一次；.Path/.Os/.Arch 均为单 artifact 字段。
       post:

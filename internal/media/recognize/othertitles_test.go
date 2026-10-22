@@ -33,6 +33,14 @@ func TestRecognizeByEnglishAndAlternativeTitles(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":209867,"name":"Frieren: Beyond Journey's End","alternative_titles":{"results":[{"title":"Sousou no Frieren"}]}}`))
 		case r.URL.Path == "/3/tv/209867":
 			_, _ = w.Write([]byte(`{"id":209867,"name":"葬送的芙莉莲","original_name":"葬送のフリーレン","first_air_date":"2023-09-29","genres":[{"id":16,"name":"动画"}]}`))
+		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Dragon Raja"):
+			_, _ = w.Write([]byte(`{"results":[{"id":107255,"name":"龙族","original_name":"龙族","first_air_date":"2022-08-19","popularity":28}]}`))
+		case r.URL.Path == "/3/tv/107255" && lang == "en-US":
+			// 2026-10-20 真实数据的缩写：英文名和别名都带副标题，只有法语、德语等的译名是「Dragon Raja」
+			_, _ = w.Write([]byte(`{"id":107255,"name":"Dragon Raja -The Blazing Dawn-","alternative_titles":{"results":[{"title":"Long Zu"},{"title":"Dragon Raja - The Blazing Dawn"}]},` +
+				`"translations":{"translations":[{"iso_639_1":"zh","data":{"name":"龙族"}},{"iso_639_1":"fr","data":{"name":"Dragon Raja"}},{"iso_639_1":"nl","data":{"name":""}}]}}`))
+		case r.URL.Path == "/3/tv/107255":
+			_, _ = w.Write([]byte(`{"id":107255,"name":"龙族","original_name":"龙族","first_air_date":"2022-08-19","genres":[{"id":16,"name":"动画"}]}`))
 		case r.URL.Path == "/3/search/movie" && strings.Contains(q, "Kimi"):
 			// 名字对得上别名、年份差太多：不认
 			_, _ = w.Write([]byte(`{"results":[{"id":372058,"title":"你的名字。","original_title":"君の名は。","release_date":"2016-08-26","popularity":90}]}`))
@@ -61,6 +69,13 @@ func TestRecognizeByEnglishAndAlternativeTitles(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, res.Match, res.Message)
 	assert.Equal(t, 209867, res.Match.ID)
+
+	// 英文名与别名都对不上（带副标题），其他语言的译名对得上
+	res, err = s.Recognize(ctx, Input{Title: "Dragon.Raja.2022.S01E11.1080p.WEB-DL.H265.AAC-LeagueWEB.mkv"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match, res.Message)
+	assert.Equal(t, 107255, res.Match.ID)
+	assert.Equal(t, "龙族", res.Match.Title)
 
 	res, err = s.Recognize(ctx, Input{Title: "Kimi.no.Na.wa.1990.1080p.mkv"})
 	require.NoError(t, err)

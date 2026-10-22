@@ -29,6 +29,19 @@ GitHub Release、二进制、扩展、校验和与容器镜像属于发布门禁
 
 变量缺失或不是精确字符串 `false` 时保持默认启用。
 
+## 构建时内置的值（可选）
+
+| Secret               | 用途                                                                                                                             |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `PT_TOOLS_RELAY_URL` | 托管 relay 的地址（`wss://` 开头），写进二进制与镜像；没设时远程访问没有默认 relay                                               |
+| `PT_TOOLS_TMDB_KEY`  | 内置的 TMDB API Key（v3 的 API Key 或 v4 的读取令牌），用户没填自己的 Key 时用；没设时用户要自己填。Key 随二进制分发，能被取出来 |
+
+```bash
+gh secret set PT_TOOLS_TMDB_KEY --repo sunerpy/pt-tools < tmdb.key
+```
+
+两个值设了时，`Release` workflow 检查 linux-amd64 归档里的 `pt-tools version` 显示 `configured`，否则 job 失败、draft 不发布。细节见 `docs/development.md` 的「默认 relay 地址」与「内置的 TMDB Key」。
+
 ## 国内镜像（阿里云 ACR，可选）
 
 | Secret                     | 用途                                                 |
