@@ -4,6 +4,7 @@
  * 任何 OpenAI 兼容的接口都能接；选了预设会填好地址与常用模型，模型也可以手填，或者「获取模型列表」从服务商读
  * （M20：参照 Voltip，预设写明免费额度、申请 Key 的页面、隐私与要不要代理）。
  * 换了接口地址又没填新 Key 时，后端会清掉存着的 Key（Key 不会发到保存它时以外的地址），这里提前写明。
+ * 语音输入（Voltip）：填了 Voltip 本机服务的地址与访问令牌，对话页才有麦克风；令牌同 API Key，只写不读、换地址就清掉。
  * 画板没有这一页，沿用 qB 兼容入口页的形状：左边设置、右边说明。
  */
 import {
@@ -11,6 +12,7 @@ import {
   type AssistantSettings,
   type AssistantSettingsInput,
   type AssistantTestResult,
+  type AssistantVoiceTest,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -19,6 +21,7 @@ import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { ASSISTANT_PROVIDERS, providerOf } from "@/utils/assistant";
+import { voiceUnavailable } from "@/utils/voiceRecorder";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 
@@ -34,6 +37,12 @@ const form = ref({
   max_steps: 8,
   confirm_minutes: 10,
   retention_days: 30,
+  context_window: 0,
+  auto_compact: true,
+  compact_percent: 80,
+  voice_base_url: "",
+  voice_model: "",
+  voice_language: "zh",
 });
 /** 新填的 API Key；空串表示不改 */
 const newKey = ref("");
@@ -52,6 +61,23 @@ let listSeq = 0;
 const listed = ref<{ ok: true; total: number; count: number } | { ok: false; msg: string } | null>(
   null,
 );
+/** 新填的 Voltip 访问令牌；空串表示不改 */
+const newVoiceToken = ref("");
+/** 点了「清除」：保存时把令牌清掉 */
+const clearVoiceToken = ref(false);
+const voiceTesting = ref(false);
+const voiceTested = ref<{ ok: true; res: AssistantVoiceTest } | { ok: false; msg: string } | null>(
+  null,
+);
+/** 测试时 Voltip 列出的处理方式（换地址时清空） */
+const voiceModels = ref<AssistantVoiceTest["models"]>([]);
+/** 浏览器给不了麦克风的原因（不是 HTTPS 时） */
+const micBlocked = voiceUnavailable();
+const VOICE_LANGUAGES = [
+  { value: "zh", label: "中文（zh）" },
+  { value: "en", label: "英语（en）" },
+  { value: "auto", label: "自动判断（auto）" },
+];
 
 const provider = computed(() => providerOf(form.value.provider));
 /** 存着 Key，而且没有点「清除」 */
@@ -66,6 +92,24 @@ const keyWillDrop = computed(
     !clearKey.value &&
     form.value.base_url.trim().replace(/\/+$/, "") !== saved.value.base_url,
 );
+/** 存着 Voltip 的令牌，而且没有点「清除」 */
+const hasVoiceToken = computed(() => !!saved.value?.has_voice_token && !clearVoiceToken.value);
+/** 换了 Voltip 的地址又没填新令牌：保存时存着的令牌会被清掉 */
+const voiceTokenWillDrop = computed(
+  () =>
+    !!saved.value?.has_voice_token &&
+    !newVoiceToken.value.trim() &&
+    !clearVoiceToken.value &&
+    form.value.voice_base_url.trim().replace(/\/+$/, "") !== saved.value.voice_base_url,
+);
+/** 模型下拉框：Voltip 列出的处理方式，加上已经填的 */
+const voiceModelOptions = computed(() => {
+  const list = [...voiceModels.value];
+  // 下拉框点了清除时值是 undefined
+  const cur = (form.value.voice_model ?? "").trim();
+  if (cur && !list.some((m) => m.id === cur)) list.unshift({ id: cur, name: cur });
+  return list;
+});
 
 function fill(s: AssistantSettings) {
   saved.value = s;
@@ -79,10 +123,19 @@ function fill(s: AssistantSettings) {
     max_steps: s.max_steps,
     confirm_minutes: s.confirm_minutes,
     retention_days: s.retention_days,
+    context_window: s.context_window ?? 0,
+    auto_compact: s.auto_compact ?? true,
+    compact_percent: s.compact_percent || 80,
+    voice_base_url: s.voice_base_url ?? "",
+    voice_model: s.voice_model ?? "",
+    // 还没配过语音输入：语言先填中文（不填时 Voltip 按它自己的设置或场景）
+    voice_language: s.voice_language || (s.voice_base_url ? "" : "zh"),
   };
   if (!s.base_url) applyProvider(form.value.provider);
   newKey.value = "";
   clearKey.value = false;
+  newVoiceToken.value = "";
+  clearVoiceToken.value = false;
 }
 
 async function load() {
@@ -104,14 +157,23 @@ function applyProvider(key: string) {
   form.value.model = p.models[0] ?? "";
 }
 
-function input(): AssistantSettingsInput {
+/** 要提交的设置。测试大模型、读模型列表时不带语音输入的几项（语音那几项填错了不该挡住它们） */
+function input(withVoice = true): AssistantSettingsInput {
+  const { voice_base_url, voice_model, voice_language, ...rest } = form.value;
   const out: AssistantSettingsInput = {
-    ...form.value,
+    ...rest,
     base_url: form.value.base_url.trim(),
     model: form.value.model.trim(),
   };
   if (newKey.value.trim()) out.api_key = newKey.value.trim();
   else if (clearKey.value) out.api_key = "";
+  if (withVoice) {
+    out.voice_base_url = voice_base_url.trim();
+    out.voice_model = (voice_model ?? "").trim();
+    out.voice_language = voice_language ?? "";
+    if (newVoiceToken.value.trim()) out.voice_token = newVoiceToken.value.trim();
+    else if (clearVoiceToken.value) out.voice_token = "";
+  }
   return out;
 }
 
@@ -135,7 +197,7 @@ async function test() {
   testing.value = true;
   tested.value = null;
   try {
-    tested.value = { ok: true, res: await assistantApi.testSettings(input()) };
+    tested.value = { ok: true, res: await assistantApi.testSettings(input(false)) };
   } catch (e) {
     tested.value = { ok: false, msg: errText(e, "连接失败") };
   } finally {
@@ -159,7 +221,7 @@ async function listModels() {
   listing.value = true;
   listed.value = null;
   try {
-    const res = await assistantApi.listModels(input());
+    const res = await assistantApi.listModels(input(false));
     if (seq !== listSeq) return;
     fetched.value = res.models;
     listed.value = { ok: true, total: res.total, count: res.models.length };
@@ -170,6 +232,29 @@ async function listModels() {
     if (seq === listSeq) listing.value = false;
   }
 }
+
+async function testVoice() {
+  voiceTesting.value = true;
+  voiceTested.value = null;
+  try {
+    const res = await assistantApi.voiceTest(input());
+    voiceModels.value = res.models;
+    voiceTested.value = { ok: true, res };
+  } catch (e) {
+    voiceTested.value = { ok: false, msg: errText(e, "连不上 Voltip") };
+  } finally {
+    voiceTesting.value = false;
+  }
+}
+
+// 改了 Voltip 的地址：测出来的处理方式是旧地址的，丢掉
+watch(
+  () => form.value.voice_base_url,
+  () => {
+    voiceModels.value = [];
+    voiceTested.value = null;
+  },
+);
 
 onMounted(load);
 </script>
@@ -332,6 +417,141 @@ onMounted(load);
               data-testid="ass-retention" />
             <div class="ass-tip">更新时间早于这么多天的会话每天清理一次；0 表示不清理。</div>
           </el-form-item>
+          <h3 class="ass-sub">上下文与压缩</h3>
+          <el-form-item label="上下文窗口（token）">
+            <el-input-number
+              v-model="form.context_window"
+              :min="0"
+              :max="10000000"
+              :step="8192"
+              :step-strictly="false"
+              data-testid="ass-window" />
+            <div class="ass-tip">
+              0 表示自动：按服务商模型列表报的长度，没报的按模型名估计，最多按 128K
+              算（窗口很大的模型填满再压缩太费 token）。填小一点会更早压缩、每次请求更省。
+            </div>
+          </el-form-item>
+          <el-form-item label="自动压缩">
+            <el-switch v-model="form.auto_compact" data-testid="ass-compact" />
+            <div class="ass-tip">
+              上下文用到窗口的这个比例时，开始回答以前先让模型把前面的对话写成摘要；对话页上照旧能看到全部消息。关掉以后太长时从最早的消息丢起。
+            </div>
+          </el-form-item>
+          <el-form-item v-if="form.auto_compact" label="压缩阈值（%）">
+            <el-input-number
+              v-model="form.compact_percent"
+              :min="50"
+              :max="95"
+              :step="5"
+              data-testid="ass-compact-percent" />
+          </el-form-item>
+          <h3 class="ass-sub">语音输入（Voltip）</h3>
+          <div class="ass-tip ass-tip--lead">
+            填了 Voltip
+            本机服务的地址与访问令牌，对话页的输入框旁边会多一个麦克风：说完一段，文字填进输入框，改好再发。
+          </div>
+          <el-form-item label="Voltip 的地址">
+            <el-input
+              v-model="form.voice_base_url"
+              placeholder="http://127.0.0.1:47840/v1（Voltip「设置 → 本机服务」里的接口地址）"
+              data-testid="ass-voice-url" />
+            <div class="ass-tip">
+              Voltip 默认只接受同一台电脑的连接：pt-tools 跑在别的机器或者 Docker
+              里时，看文档「语音输入」一节。留空就不用语音输入。
+            </div>
+          </el-form-item>
+          <el-form-item label="访问令牌">
+            <el-input
+              v-model="newVoiceToken"
+              type="password"
+              show-password
+              autocomplete="off"
+              :placeholder="
+                hasVoiceToken
+                  ? '已保存（不显示）；要换就填新的'
+                  : 'Voltip 里「复制令牌」，或者 voltip-server --print-token'
+              "
+              data-testid="ass-voice-token" />
+            <div class="ass-keyrow">
+              <PtStatusPill :tone="hasVoiceToken ? 'ok' : 'neutral'" size="sm">{{
+                hasVoiceToken ? "已保存令牌" : "没有令牌"
+              }}</PtStatusPill>
+              <el-button
+                v-if="hasVoiceToken"
+                link
+                type="danger"
+                data-testid="ass-voice-token-clear"
+                @click="clearVoiceToken = true"
+                >清除</el-button
+              >
+              <el-button
+                v-if="clearVoiceToken"
+                link
+                data-testid="ass-voice-token-keep"
+                @click="clearVoiceToken = false"
+                >不清除</el-button
+              >
+            </div>
+            <div
+              v-if="voiceTokenWillDrop"
+              class="ass-tip ass-tip--warn"
+              data-testid="ass-voice-token-drop">
+              换了 Voltip 的地址：保存时会清掉现在的访问令牌，要用就重新填。
+            </div>
+          </el-form-item>
+          <el-form-item label="处理方式（模型）">
+            <el-select
+              v-model="form.voice_model"
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              placeholder="voltip：Voltip 里设的默认处理方式"
+              data-testid="ass-voice-model">
+              <el-option v-for="m in voiceModelOptions" :key="m.id" :value="m.id" :label="m.name">
+                <span>{{ m.name }}</span>
+                <span v-if="m.name !== m.id" class="ass-opt-id">{{ m.id }}</span>
+              </el-option>
+            </el-select>
+            <div class="ass-tip">
+              点「测试语音输入」读出 Voltip 里的预设与场景，比如「不使用 AI
+              润色」（voltip:raw）；留空用 Voltip 的默认处理方式。
+            </div>
+          </el-form-item>
+          <el-form-item label="识别语言">
+            <el-select
+              v-model="form.voice_language"
+              clearable
+              placeholder="不指定：按 Voltip 的设置或场景"
+              data-testid="ass-voice-lang">
+              <el-option
+                v-for="l in VOICE_LANGUAGES"
+                :key="l.value"
+                :value="l.value"
+                :label="l.label" />
+            </el-select>
+          </el-form-item>
+          <div class="ass-voicetest">
+            <el-button :loading="voiceTesting" data-testid="ass-voice-test" @click="testVoice">
+              <PtIcon name="mic" :size="14" /><span>测试语音输入</span>
+            </el-button>
+          </div>
+          <div v-if="voiceTested" class="ass-tested" data-testid="ass-voice-tested">
+            <template v-if="voiceTested.ok">
+              <PtStatusPill tone="ok" dot size="sm">连接正常</PtStatusPill>
+              <span
+                >Voltip 列出 {{ voiceTested.res.models.length }} 种处理方式，用时
+                {{ voiceTested.res.latency_ms }} 毫秒。保存以后对话页上就有麦克风。</span
+              >
+            </template>
+            <template v-else>
+              <PtStatusPill tone="dang" dot size="sm">没有连上</PtStatusPill>
+              <span>{{ voiceTested.msg }}</span>
+            </template>
+          </div>
+          <div v-if="micBlocked" class="ass-tip ass-tip--warn" data-testid="ass-voice-insecure">
+            {{ micBlocked }}。不然对话页上的麦克风用不了。
+          </div>
         </el-form>
         <div v-if="tested" class="ass-tested" data-testid="ass-tested">
           <template v-if="tested.ok">
@@ -362,14 +582,22 @@ onMounted(load);
             对话内容与工具查到的结果（站点数据、种子标题、下载器状态）会发给所选的模型服务商。
           </li>
           <li>
-            暂停、继续、删除、推送种子与添加订阅，每次都要你在对话里点「确认执行」；AI
+            改动类操作（暂停、删除、推送种子，管理订阅，整理入库，修改配置）每次都要你在对话里点「确认执行」，卡片上写明改以前、改以后与可能的影响；AI
             自己不能确认。这些操作记在「操作审计」里，通道是「AI 助手」。
+          </li>
+          <li>
+            AI 改配置时读不到密钥（密码、Cookie、令牌只显示有没有设置）；登录密码、API
+            令牌、远程访问与这一页的设置不能经 AI 改。
           </li>
           <li>
             种子下载地址里的 passkey、Cookie
             与密码不会交给模型；你贴的下载地址会先换成「站点与种子编号」。
           </li>
           <li>API Key 加密保存，只能改、不能读出来。</li>
+          <li>
+            语音输入的录音经 pt-tools 发给你填的 Voltip 服务，不发给大模型服务商；Voltip
+            的访问令牌同样加密保存、只能改不能读。
+          </li>
         </ul>
       </PtPanel>
     </template>
@@ -397,6 +625,21 @@ onMounted(load);
 
 .ass-tip--warn {
   color: var(--pt-warn);
+}
+
+/* 小节开头的一句说明：不在表单项里，自己留出下面的空 */
+.ass-tip--lead {
+  margin: -4px 0 12px;
+}
+
+.ass-voicetest {
+  margin-bottom: 8px;
+}
+
+.ass-opt-id {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--pt-t3);
 }
 
 .ass-tip--row {

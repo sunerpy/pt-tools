@@ -27,7 +27,7 @@ func classifyGazelleResult(info sitev2.UserInfo, err error) *ProbeResult {
 		return &ProbeResult{
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPCookie,
-			Diagnostic: "gazelle response missing stats.LastAccess",
+			Diagnostic: diagNoLastAccess,
 		}
 	}
 

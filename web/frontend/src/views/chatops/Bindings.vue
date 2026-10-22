@@ -140,7 +140,10 @@ function getCountdownClass(expiresAt?: string) {
 
 function formatDate(dateStr?: string) {
   if (!dateStr) return "-";
-  return new Date(dateStr).toLocaleString("zh-CN", { hour12: false });
+  const d = new Date(dateStr);
+  // 后端没有这个时间时回 Go 的零值 0001-01-01：以前显示成「1/1/1 08:05:43」
+  if (Number.isNaN(d.getTime()) || d.getFullYear() < 2000) return "-";
+  return d.toLocaleString("zh-CN", { hour12: false });
 }
 
 function maskUserId(userId?: string) {
@@ -265,11 +268,12 @@ function getConfNameByConfId(confId?: number) {
   <!--
     画板 24：head 64 之后是靠左的一栏 612 宽的卡（p-pending / p-active / p-note），
     右边那片空白上画的是发码弹窗的规格，不是页面内容。刷新与生成绑定码是页头动作。
-    落地偏离画板：卡宽用 1080（.pt-cards--form，宽屏也停在 1080）。两张表的列宽合计
-    840 / 946，612 的卡里只能横滚，「回复语言 / 管理员 / 最后活跃」挤在右边看不到，
-    列头「回复语言」还被固定的操作列盖住一半。
+    落地偏离画板：两张表的列宽合计 840 / 946，612 的卡里只能横滚，「回复语言 / 管理员 / 最后活跃」
+    挤在右边看不到，列头「回复语言」还被固定的操作列盖住一半，所以表格放在主栏。
+    宽屏（视口 ≥1600）说明挪到右边 400 宽的侧栏（.pt-cards--aside）；以前卡宽停在 1080，
+    2048 的屏上右边空出 680（用户反馈）。窄屏照旧一栏、说明在表格下面。
   -->
-  <div class="bindings-page pt-cards pt-cards--wide pt-cards--form">
+  <div class="bindings-page pt-cards pt-cards--wide pt-cards--aside">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button :loading="loading" @click="loadData">
@@ -280,262 +284,264 @@ function getConfNameByConfId(confId?: number) {
       </el-button>
     </Teleport>
 
-    <!-- 部分失败（§5 partial）：绑定拿到了、渠道配置没拿到，说清缺的是什么而不是静默降级 -->
-    <div v-if="showPartialNote" class="pt-note pt-note--warn">
-      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-      <span>
-        渠道配置没取到：通道名称只能显示为编号，发码对话框里的通道下拉也会是空的。
-        <el-button link type="primary" @click="loadData">重试</el-button>
-      </span>
-    </div>
+    <div class="pt-cards pt-cards--wide">
+      <!-- 部分失败（§5 partial）：绑定拿到了、渠道配置没拿到，说清缺的是什么而不是静默降级 -->
+      <div v-if="showPartialNote" class="pt-note pt-note--warn">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>
+          渠道配置没取到：通道名称只能显示为编号，发码对话框里的通道下拉也会是空的。
+          <el-button link type="primary" @click="loadData">重试</el-button>
+        </span>
+      </div>
 
-    <PtPanel
-      v-loading="loading"
-      title="待绑定绑定码"
-      icon="key-round"
-      :count="`${pendingBindings.length} 条`"
-      padding="none">
-      <el-table
-        v-if="!isMobile"
-        :data="pendingBindings"
-        class="pt-grid"
-        row-key="code"
-        style="width: 100%">
-        <template #empty>
-          <PtDataState :state="state" dense :sub="pendingSub">
-            <template v-if="state === 'error'" #action>
-              <el-button size="small" @click="loadData">
-                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-              </el-button>
+      <PtPanel
+        v-loading="loading"
+        title="待绑定绑定码"
+        icon="key-round"
+        :count="`${pendingBindings.length} 条`"
+        padding="none">
+        <el-table
+          v-if="!isMobile"
+          :data="pendingBindings"
+          class="pt-grid"
+          row-key="code"
+          style="width: 100%">
+          <template #empty>
+            <PtDataState :state="state" dense :sub="pendingSub">
+              <template v-if="state === 'error'" #action>
+                <el-button size="small" @click="loadData">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+            </PtDataState>
+          </template>
+
+          <el-table-column prop="code" label="绑定码" width="220" class-name="pt-cell-strong">
+            <template #default="{ row }">
+              <span class="code-cell">
+                <code class="code">{{ row.code }}</code>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="复制绑定码"
+                  @click="copyToClipboard(row.code)">
+                  <PtIcon name="copy" :size="14" />
+                </el-button>
+              </span>
             </template>
-          </PtDataState>
-        </template>
+          </el-table-column>
 
-        <el-table-column prop="code" label="绑定码" width="220" class-name="pt-cell-strong">
-          <template #default="{ row }">
-            <span class="code-cell">
-              <code class="code">{{ row.code }}</code>
-              <el-button
-                link
-                type="primary"
-                size="small"
-                aria-label="复制绑定码"
-                @click="copyToClipboard(row.code)">
-                <PtIcon name="copy" :size="14" />
-              </el-button>
-            </span>
-          </template>
-        </el-table-column>
+          <el-table-column label="关联通道" width="170">
+            <template #default="{ row }">
+              <PtTag>{{ getConfNameByConfId(row.conf_id) }}</PtTag>
+            </template>
+          </el-table-column>
 
-        <el-table-column label="关联通道" width="170">
-          <template #default="{ row }">
-            <PtTag>{{ getConfNameByConfId(row.conf_id) }}</PtTag>
-          </template>
-        </el-table-column>
+          <el-table-column prop="label" label="备注" min-width="140" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ row.label || "-" }}</template>
+          </el-table-column>
 
-        <el-table-column prop="label" label="备注" min-width="140" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ row.label || "-" }}</template>
-        </el-table-column>
+          <el-table-column label="创建时间" width="170" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+          </el-table-column>
 
-        <el-table-column label="创建时间" width="170" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
-        </el-table-column>
+          <el-table-column
+            label="剩余有效时间"
+            min-width="140"
+            class-name="pt-cell-num"
+            label-class-name="pt-cell-num">
+            <template #default="{ row }">
+              <span :class="getCountdownClass(row.expires_at)">
+                {{ getCountdown(row.expires_at) }}
+              </span>
+            </template>
+          </el-table-column>
+        </el-table>
 
-        <el-table-column
-          label="剩余有效时间"
-          min-width="140"
-          class-name="pt-cell-num"
-          label-class-name="pt-cell-num">
-          <template #default="{ row }">
-            <span :class="getCountdownClass(row.expires_at)">
-              {{ getCountdown(row.expires_at) }}
-            </span>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!--
+        <!--
         移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
         卡上留的是真正要做的事：把码复制走。所以码本身当标题，
         倒计时进 status（红字表示快过期了），复制做成一个撑满的主操作 —— 表格里那个
         16px 的链接图标在手机上根本点不准。
       -->
-      <div v-else class="cards">
-        <PtDataState v-if="!pendingBindings.length" :state="state" :sub="pendingSub">
-          <template v-if="state === 'error'" #action>
-            <el-button size="small" @click="loadData">
-              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-            </el-button>
-          </template>
-        </PtDataState>
-
-        <PtRowCard v-for="row in pendingBindings" :key="row.code ?? row.id">
-          <template #title>
-            <code class="code">{{ row.code }}</code>
-          </template>
-
-          <template #meta>
-            <PtTag>{{ getConfNameByConfId(row.conf_id) }}</PtTag>
-            <span v-if="row.label">{{ row.label }}</span>
-            <span v-if="row.created_at">
-              <PtIcon name="clock" :size="11" />
-              {{ formatDate(row.created_at) }}
-            </span>
-          </template>
-
-          <template #status>
-            <span :class="getCountdownClass(row.expires_at)">
-              {{ getCountdown(row.expires_at) }}
-            </span>
-          </template>
-
-          <template #actions>
-            <el-button size="small" @click="copyToClipboard(row.code ?? '')">
-              <PtIcon name="copy" :size="14" /><span>复制绑定码</span>
-            </el-button>
-          </template>
-        </PtRowCard>
-      </div>
-
-      <template v-if="pendingBindings.length > 0" #footer>
-        <span class="pt-foot-note">绑定码一次有效，过期或用掉后会从这里消失</span>
-      </template>
-    </PtPanel>
-
-    <PtPanel
-      v-loading="loading"
-      title="已绑定用户"
-      icon="user-check"
-      :count="`${activeBindings.length} 个`"
-      padding="none">
-      <el-table
-        v-if="!isMobile"
-        :data="activeBindings"
-        class="pt-grid"
-        row-key="id"
-        style="width: 100%">
-        <template #empty>
-          <PtDataState :state="state" dense :sub="activeSub">
+        <div v-else class="cards">
+          <PtDataState v-if="!pendingBindings.length" :state="state" :sub="pendingSub">
             <template v-if="state === 'error'" #action>
               <el-button size="small" @click="loadData">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
               </el-button>
             </template>
           </PtDataState>
+
+          <PtRowCard v-for="row in pendingBindings" :key="row.code ?? row.id">
+            <template #title>
+              <code class="code">{{ row.code }}</code>
+            </template>
+
+            <template #meta>
+              <PtTag>{{ getConfNameByConfId(row.conf_id) }}</PtTag>
+              <span v-if="row.label">{{ row.label }}</span>
+              <span v-if="row.created_at">
+                <PtIcon name="clock" :size="11" />
+                {{ formatDate(row.created_at) }}
+              </span>
+            </template>
+
+            <template #status>
+              <span :class="getCountdownClass(row.expires_at)">
+                {{ getCountdown(row.expires_at) }}
+              </span>
+            </template>
+
+            <template #actions>
+              <el-button size="small" @click="copyToClipboard(row.code ?? '')">
+                <PtIcon name="copy" :size="14" /><span>复制绑定码</span>
+              </el-button>
+            </template>
+          </PtRowCard>
+        </div>
+
+        <template v-if="pendingBindings.length > 0" #footer>
+          <span class="pt-foot-note">绑定码一次有效，过期或用掉后会从这里消失</span>
         </template>
+      </PtPanel>
 
-        <el-table-column prop="channel_type" label="渠道" width="120">
-          <template #default="{ row }">
-            <PtTag>{{ row.channel_type }}</PtTag>
+      <PtPanel
+        v-loading="loading"
+        title="已绑定用户"
+        icon="user-check"
+        :count="`${activeBindings.length} 个`"
+        padding="none">
+        <el-table
+          v-if="!isMobile"
+          :data="activeBindings"
+          class="pt-grid"
+          row-key="id"
+          style="width: 100%">
+          <template #empty>
+            <PtDataState :state="state" dense :sub="activeSub">
+              <template v-if="state === 'error'" #action>
+                <el-button size="small" @click="loadData">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+            </PtDataState>
           </template>
-        </el-table-column>
 
-        <el-table-column label="渠道用户 ID" width="160" class-name="pt-cell-strong">
-          <template #default="{ row }">
-            <code class="uid">{{ maskUserId(row.channel_user_id) }}</code>
-          </template>
-        </el-table-column>
+          <el-table-column prop="channel_type" label="渠道" width="120">
+            <template #default="{ row }">
+              <PtTag>{{ row.channel_type }}</PtTag>
+            </template>
+          </el-table-column>
 
-        <el-table-column prop="label" label="备注" min-width="140" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ row.label || "-" }}</template>
-        </el-table-column>
+          <el-table-column label="渠道用户 ID" width="160" class-name="pt-cell-strong">
+            <template #default="{ row }">
+              <code class="uid">{{ maskUserId(row.channel_user_id) }}</code>
+            </template>
+          </el-table-column>
 
-        <el-table-column prop="reply_lang" label="回复语言" width="110">
-          <template #default="{ row }">
-            <PtTag>{{ row.reply_lang === "zh" ? "中文" : "English" }}</PtTag>
-          </template>
-        </el-table-column>
+          <el-table-column prop="label" label="备注" min-width="140" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ row.label || "-" }}</template>
+          </el-table-column>
 
-        <el-table-column prop="admin" label="管理员" width="96">
-          <template #default="{ row }">
-            <PtStatusPill :tone="row.admin ? 'warn' : 'neutral'" size="sm">
-              {{ row.admin ? "是" : "否" }}
-            </PtStatusPill>
-          </template>
-        </el-table-column>
+          <el-table-column prop="reply_lang" label="回复语言" width="110">
+            <template #default="{ row }">
+              <PtTag>{{ row.reply_lang === "zh" ? "中文" : "English" }}</PtTag>
+            </template>
+          </el-table-column>
 
-        <el-table-column label="最后活跃" width="170" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ formatDate(row.last_active) }}</template>
-        </el-table-column>
+          <el-table-column prop="admin" label="管理员" width="96">
+            <template #default="{ row }">
+              <PtStatusPill :tone="row.admin ? 'warn' : 'neutral'" size="sm">
+                {{ row.admin ? "是" : "否" }}
+              </PtStatusPill>
+            </template>
+          </el-table-column>
 
-        <!-- 操作列只放图标（与站点列表 / 暂停任务一致），aria-label 带上被操作的用户 -->
-        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
-          <template #default="{ row }">
-            <el-tooltip content="切换回复语言" placement="top">
-              <el-button
-                link
-                type="primary"
-                size="small"
-                :aria-label="`切换 ${maskUserId(row.channel_user_id)} 的回复语言`"
-                @click="handleToggleLang(row)">
-                <PtIcon name="globe" :size="15" />
-              </el-button>
-            </el-tooltip>
-            <el-tooltip content="撤销绑定" placement="top">
-              <el-button
-                link
-                type="danger"
-                size="small"
-                :aria-label="`撤销 ${maskUserId(row.channel_user_id)} 的绑定`"
-                @click="handleDelete(row.id)">
-                <PtIcon name="trash-2" :size="15" />
-              </el-button>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-      </el-table>
+          <el-table-column label="最后活跃" width="170" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ formatDate(row.last_active) }}</template>
+          </el-table-column>
 
-      <!--
+          <!-- 操作列只放图标（与站点列表 / 暂停任务一致），aria-label 带上被操作的用户 -->
+          <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
+            <template #default="{ row }">
+              <el-tooltip content="切换回复语言" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :aria-label="`切换 ${maskUserId(row.channel_user_id)} 的回复语言`"
+                  @click="handleToggleLang(row)">
+                  <PtIcon name="globe" :size="15" />
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="撤销绑定" placement="top">
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  :aria-label="`撤销 ${maskUserId(row.channel_user_id)} 的绑定`"
+                  @click="handleDelete(row.id)">
+                  <PtIcon name="trash-2" :size="15" />
+                </el-button>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!--
         移动端行卡。管理员那一栏在卡上不能沿用表格的「是 / 否」—— 卡片没有列头，
         脱离表头的「否」读不出是在说什么，所以换成自解释的「管理员 / 普通」。
       -->
-      <div v-else class="cards">
-        <PtDataState v-if="!activeBindings.length" :state="state" :sub="activeSub">
-          <template v-if="state === 'error'" #action>
-            <el-button size="small" @click="loadData">
-              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-            </el-button>
-          </template>
-        </PtDataState>
+        <div v-else class="cards">
+          <PtDataState v-if="!activeBindings.length" :state="state" :sub="activeSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadData">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
 
-        <PtRowCard v-for="row in activeBindings" :key="row.id">
-          <template #title>
-            <code class="uid uid--card">{{ maskUserId(row.channel_user_id) }}</code>
-          </template>
+          <PtRowCard v-for="row in activeBindings" :key="row.id">
+            <template #title>
+              <code class="uid uid--card">{{ maskUserId(row.channel_user_id) }}</code>
+            </template>
 
-          <template #meta>
-            <PtTag>{{ row.channel_type }}</PtTag>
-            <PtTag>{{ row.reply_lang === "zh" ? "中文" : "English" }}</PtTag>
-            <span v-if="row.label">{{ row.label }}</span>
-            <span v-if="row.last_active">
-              <PtIcon name="clock" :size="11" />
-              {{ formatDate(row.last_active) }}
-            </span>
-          </template>
+            <template #meta>
+              <PtTag>{{ row.channel_type }}</PtTag>
+              <PtTag>{{ row.reply_lang === "zh" ? "中文" : "English" }}</PtTag>
+              <span v-if="row.label">{{ row.label }}</span>
+              <span v-if="row.last_active">
+                <PtIcon name="clock" :size="11" />
+                {{ formatDate(row.last_active) }}
+              </span>
+            </template>
 
-          <template #status>
-            <PtStatusPill :tone="row.admin ? 'warn' : 'neutral'" size="sm">
-              {{ row.admin ? "管理员" : "普通" }}
-            </PtStatusPill>
-          </template>
+            <template #status>
+              <PtStatusPill :tone="row.admin ? 'warn' : 'neutral'" size="sm">
+                {{ row.admin ? "管理员" : "普通" }}
+              </PtStatusPill>
+            </template>
 
-          <template #actions>
-            <el-button size="small" @click="handleToggleLang(row)">
-              <PtIcon name="globe" :size="14" /><span>切换语言</span>
-            </el-button>
-            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">
-              <PtIcon name="trash-2" :size="14" /><span>撤销</span>
-            </el-button>
-          </template>
-        </PtRowCard>
-      </div>
+            <template #actions>
+              <el-button size="small" @click="handleToggleLang(row)">
+                <PtIcon name="globe" :size="14" /><span>切换语言</span>
+              </el-button>
+              <el-button size="small" type="danger" plain @click="handleDelete(row.id)">
+                <PtIcon name="trash-2" :size="14" /><span>撤销</span>
+              </el-button>
+            </template>
+          </PtRowCard>
+        </div>
 
-      <template v-if="activeBindings.length > 0" #footer>
-        <span class="pt-foot-note">
-          绑定时一律写入管理员身份，这一列只做展示；不再需要的绑定请撤销
-        </span>
-      </template>
-    </PtPanel>
+        <template v-if="activeBindings.length > 0" #footer>
+          <span class="pt-foot-note">
+            绑定时一律写入管理员身份，这一列只做展示；不再需要的绑定请撤销
+          </span>
+        </template>
+      </PtPanel>
+    </div>
 
     <!--
       画板 p-note 612：绑定流程说明。内容按代码核过 ——
@@ -657,7 +663,7 @@ function getConfNameByConfId(confId?: number) {
   border-radius: var(--pt-r-sm);
 }
 
-/* 栏宽 1080、内缩 16、卡间 16 都由 .pt-cards--wide / --form 给 */
+/* 内缩 16、卡间 16 由 .pt-cards--wide 给，宽屏的主栏 + 侧栏由 .pt-cards--aside 给 */
 
 /* 码 + 复制按钮是一个整体，别让复制按钮掉到第二行 */
 .code-cell {

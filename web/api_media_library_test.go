@@ -45,6 +45,8 @@ func (d organizeTestDLs) List(context.Context) ([]models.DownloaderSetting, erro
 
 type organizeTestEnv struct {
 	mux     *http.ServeMux
+	srv     *Server
+	rec     *recognize.Service
 	dl      *fakeDownloader
 	dlDir   string
 	library string
@@ -81,7 +83,7 @@ func newOrganizeServer(t *testing.T) *organizeTestEnv {
 	require.NoError(t, err)
 
 	root := t.TempDir()
-	e := &organizeTestEnv{dlDir: filepath.Join(root, "downloads"), library: filepath.Join(root, "movies")}
+	e := &organizeTestEnv{srv: srv, rec: rec, dlDir: filepath.Join(root, "downloads"), library: filepath.Join(root, "movies")}
 	require.NoError(t, os.MkdirAll(e.library, 0o755))
 	name := "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi"
 	require.NoError(t, os.MkdirAll(filepath.Join(e.dlDir, name), 0o755))

@@ -5,40 +5,22 @@ import { useRuntimeStore } from "../../stores/runtime";
 import { useVersionStore } from "../../stores/version";
 import VersionChecker from "../VersionChecker.vue";
 import PtIcon from "../PtIcon";
-import PtStatusPill from "../ui/PtStatusPill.vue";
+import RssTaskPanel from "./RssTaskPanel.vue";
 import { type HeldVersion, nextHeldVersion, versionFor } from "./statusBarVersion";
 
 /**
  * 底部深色状态条（设计稿 G 的 `statusbar`，高 28）。
- * 板 41 的落位表把两件事放在这里：调度器的启停，和版本/更新入口。
+ * 板 41 的落位表把两件事放在这里：RSS 任务（原「调度器」）的启停，和版本/更新入口。
  * 其余格子是背景信息，数字全部来自 runtimeStore 的真实拉取。
  */
 const runtimeStore = useRuntimeStore();
 const versionStore = useVersionStore();
 
-const schedulerIcon = computed(() => {
-  if (runtimeStore.schedulerHint === "running") return "circle-check";
-  if (runtimeStore.schedulerHint === "stopped") return "circle-pause";
-  return "activity";
-});
-
-/** 浮层里那枚胶囊的文案：只说状态本身 */
-const schedulerStateText = computed(() => {
-  if (runtimeStore.schedulerHint === "running") return "运行中";
-  if (runtimeStore.schedulerHint === "stopped") return "已停止";
-  return "状态未知";
-});
-
-/** 浮层里那枚状态胶囊的语义色（画板 41 的 sched-pop 顶部 pill） */
-const schedulerTone = computed<"ok" | "warn" | "neutral">(() => {
-  if (runtimeStore.schedulerHint === "running") return "ok";
-  if (runtimeStore.schedulerHint === "stopped") return "warn";
-  return "neutral";
-});
-
-const schedulerColor = computed(() => {
-  if (runtimeStore.schedulerHint === "running") return "var(--pt-ok)";
-  if (runtimeStore.schedulerHint === "stopped") return "var(--pt-warn)";
+/** RSS 任务格子的图标色：运行中是 ok 绿（画板 statusbar 的规格），没在跑是警示色，其余跟随外壳次级字色 */
+const rssColor = computed(() => {
+  const tone = runtimeStore.rssView.tone;
+  if (tone === "ok") return "var(--pt-ok)";
+  if (tone === "warn") return "var(--pt-warn)";
   return "var(--pt-shell-t2)";
 });
 
@@ -189,49 +171,23 @@ const year = computed(() => {
 <template>
   <footer class="pt-status" aria-label="运行状态">
     <!--
-      调度器开关的浮层。画板 41 的 sched-pop 是 300 宽、176 高：
-      「调度器」小标题 + 状态胶囊 + 分隔线 + 「最后同步 … · 间隔 N 分钟」+ 两个按钮。
-      原来只有两个按钮、200 宽 —— 点开之后看不出当前是什么状态，也看不出上次同步在什么时候，
-      而这两件事正是决定「要不要按停止」的依据。
-      画板还注明两个动作都先弹确认框：runtimeStore 的 confirmAnd 已经这么做了。
+      RSS 任务（原「调度器」）的浮层，画板 41 的 sched-pop 300 宽：小标题 + 状态胶囊，
+      下面是真实状态的说明、作用范围、自动启动开关和停止 / 启动（两个动作都先弹确认框）。
+      用户反馈「调度器」看不出管什么，重启容器后不会自己运行也没察觉，所以改名并写明原因。
     -->
     <el-popover placement="top-start" trigger="click" :width="300" :offset="10">
       <template #reference>
-        <button type="button" class="pt-status__cell pt-status__cell--btn">
-          <PtIcon :name="schedulerIcon" :size="13" :style="{ color: schedulerColor }" />
-          <span>{{ runtimeStore.schedulerText }}</span>
+        <button
+          type="button"
+          class="pt-status__cell pt-status__cell--btn"
+          data-testid="rss-task-cell"
+          :aria-label="`RSS 任务：${runtimeStore.rssView.pill}`">
+          <PtIcon :name="runtimeStore.rssView.icon" :size="13" :style="{ color: rssColor }" />
+          <span>{{ runtimeStore.rssView.label }}</span>
           <PtIcon name="chevron-up" :size="12" class="pt-status__caret" />
         </button>
       </template>
-      <div class="pt-status__menu">
-        <div class="pt-status__menu-head">
-          <span class="pt-status__menu-t">调度器</span>
-          <!--
-            胶囊里只放状态，不放 schedulerText —— 后者在「还没拿到」时就是「调度器」四个字，
-            和左边的小标题一字不差，点开看到的是「调度器 调度器」。
-          -->
-          <PtStatusPill :tone="schedulerTone" size="sm">{{ schedulerStateText }}</PtStatusPill>
-        </div>
-        <p class="pt-status__menu-sync">
-          最后同步 {{ runtimeStore.lastSyncText }} · 间隔 {{ runtimeStore.pollMinutes }} 分钟
-        </p>
-        <el-button
-          size="small"
-          type="danger"
-          plain
-          :loading="runtimeStore.stopLoading"
-          @click="runtimeStore.stopAll()">
-          停止所有任务
-        </el-button>
-        <el-button
-          size="small"
-          type="primary"
-          plain
-          :loading="runtimeStore.startLoading"
-          @click="runtimeStore.startAll()">
-          启动所有任务
-        </el-button>
-      </div>
+      <RssTaskPanel />
     </el-popover>
 
     <el-tooltip :content="`每 ${runtimeStore.pollMinutes} 分钟自动刷新`" placement="top">

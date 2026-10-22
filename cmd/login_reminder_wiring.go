@@ -147,16 +147,19 @@ func wireLoginReminderMonitor(
 
 	// 每日签到与登录探测共用单站锁和通知投递器。
 	var window scheduler.AttendanceWindowSource
+	var notifySettings scheduler.AttendanceNotifySource
 	if store != nil {
 		window = store
+		notifySettings = store
 	}
 	att := scheduler.NewAttendanceMonitor(scheduler.AttendanceMonitorConfig{
-		DB:       db,
-		Sites:    attendanceSites(userInfo),
-		Window:   window,
-		Locker:   mon,
-		Notifier: notifier,
-		Logger:   global.GetSlogger(),
+		DB:             db,
+		Sites:          attendanceSites(userInfo),
+		Window:         window,
+		Locker:         mon,
+		Notifier:       notifier,
+		NotifySettings: notifySettings,
+		Logger:         global.GetSlogger(),
 	})
 	mgr.SetAttendanceMonitor(att)
 	att.Start()

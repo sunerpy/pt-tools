@@ -43,7 +43,7 @@ func classifyUnit3DResult(info v2.UserInfo, err error) *ProbeResult {
 		return &ProbeResult{
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPCookie,
-			Diagnostic: "Unit3D driver returned UserInfo without last_login or last_action",
+			Diagnostic: "个人主页上没有读到最近登录和最近活动时间，可能是站点改了页面；请反馈站点名",
 		}
 	}
 

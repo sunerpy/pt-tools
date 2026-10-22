@@ -37,7 +37,11 @@ func newAppAssistantEnv(t *testing.T) (*appEnv, *fakeChatLLM) {
 		defer cancel()
 		_ = svc.Close(ctx)
 	})
-	_, err := svc.SaveSettings(context.Background(), assistant.SettingsInput{Enabled: true, BaseURL: srv.URL + "/v1", Model: "fake"})
+	// 也配上语音输入：App API 的状态里不回它（识别接口只认网页登录），见 TestAppAssistant_ReadOnlyTokenChats
+	voiceURL, voiceToken := "http://127.0.0.1:47840/v1", "voltip-app-test-000000"
+	_, err := svc.SaveSettings(context.Background(), assistant.SettingsInput{
+		Enabled: true, BaseURL: srv.URL + "/v1", Model: "fake", VoiceBaseURL: &voiceURL, VoiceToken: &voiceToken,
+	})
 	require.NoError(t, err)
 	e.srv.SetAssistantService(svc)
 	return e, llm
@@ -150,7 +154,8 @@ func TestAppAssistant_ReadOnlyTokenChats(t *testing.T) {
 func TestAppAssistant_WriteTokenConfirms(t *testing.T) {
 	e, llm := newAppAssistantEnv(t)
 	tok := e.token("app:read", "app:write")
-	llm.push(fakeChatReply{tool: "pause_torrent", args: `{"downloader_id":1,"task_id":"abc"}`}, fakeChatReply{text: "处理完了。"})
+	// 写工具建确认前先取预览（读现状）；添加订阅的预览只看参数，这里不用准备下载器
+	llm.push(fakeChatReply{tool: "add_subscription", args: `{"media_type":"movie","tmdb_id":438631}`}, fakeChatReply{text: "处理完了。"})
 	w := e.do(appReq{method: http.MethodGet, path: "/api/app/v1/assistant/status", bearer: tok})
 	assert.Contains(t, w.Body.String(), `"can_confirm":true`)
 
@@ -175,7 +180,7 @@ func TestAppAssistant_WriteTokenConfirms(t *testing.T) {
 	var toolAudit, routeAudit bool
 	for _, a := range e.audit.all() {
 		switch {
-		case a.ChannelType == "assistant" && a.Command == "pause_torrent":
+		case a.ChannelType == "assistant" && a.Command == "add_subscription":
 			toolAudit = true
 			assert.True(t, strings.HasPrefix(a.ChannelUserID, "token:"), a.ChannelUserID)
 		case a.ChannelType == middleware.KindAPIToken && strings.Contains(a.Command, "/assistant/confirmations/"):
@@ -232,7 +237,7 @@ func TestAppAssistant_ArgumentsAndAvailability(t *testing.T) {
 func TestAppAssistant_BusyAndDenyAreReported(t *testing.T) {
 	e, llm := newAppAssistantEnv(t)
 	tok := e.token("app:read", "app:write")
-	llm.push(fakeChatReply{tool: "pause_torrent", args: `{"downloader_id":1,"task_id":"abc"}`}, fakeChatReply{text: "好的，不暂停。"})
+	llm.push(fakeChatReply{tool: "add_subscription", args: `{"media_type":"movie","tmdb_id":438631}`}, fakeChatReply{text: "好的，不订阅。"})
 	w := e.do(appReq{method: http.MethodPost, path: "/api/app/v1/assistant/conversations", body: `{"message":"暂停 abc"}`, bearer: tok})
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 	var created assistantCreateResult
@@ -257,7 +262,7 @@ func TestAppAssistant_BusyAndDenyAreReported(t *testing.T) {
 			denied = true
 			assert.Equal(t, "denied:user", a.Result, "拒绝记成 denied:user，不是 success")
 		}
-		assert.False(t, a.ChannelType == "assistant" && a.Command == "pause_torrent", "拒绝以后不执行")
+		assert.False(t, a.ChannelType == "assistant" && a.Command == "add_subscription", "拒绝以后不执行")
 	}
 	assert.True(t, denied)
 }
@@ -374,4 +379,38 @@ func TestAppAssistantActor(t *testing.T) {
 			assert.Equal(t, models.AssistantEntryApp, a.Entry)
 		}
 	}
+}
+
+// App API 不给推理内容的增量（装着旧版本的 App 认不得新的事件种类），推理内容在消息里；模型与推理等级照收
+func TestAppAssistant_ReasoningOnlyInMessages(t *testing.T) {
+	e, llm := newAppAssistantEnv(t)
+	tok := e.token("app:read")
+	llm.push(fakeChatReply{text: "你好。", reasoning: "用户在打招呼"})
+	w := e.do(appReq{method: http.MethodPost, path: "/api/app/v1/assistant/conversations", body: `{"message":"你好","model":"fake-2","effort":"medium"}`, bearer: tok})
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	var created assistantCreateResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	require.NotNil(t, created.Run)
+	assert.Equal(t, "fake-2", created.Run.Message.Model)
+	events := pollRun(t, e, tok, created.Conversation.ID, created.Run.RunID)
+	for _, ev := range events {
+		assert.NotEqual(t, assistant.EventReasoning, ev.Type, "App API 不给 reasoning 事件")
+	}
+	llm.mu.Lock()
+	body := llm.bodies[len(llm.bodies)-1]
+	llm.mu.Unlock()
+	assert.Contains(t, body, `"model":"fake-2"`)
+	assert.Contains(t, body, `"reasoning_effort":"medium"`)
+	w = e.do(appReq{method: http.MethodGet, path: fmt.Sprintf("/api/app/v1/assistant/conversations/%d", created.Conversation.ID), bearer: tok})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var d assistant.ConversationDetail
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &d))
+	require.Len(t, d.Messages, 2)
+	assert.Equal(t, "用户在打招呼", d.Messages[1].Reasoning)
+	assert.Equal(t, "medium", d.Messages[1].Effort)
+
+	w = e.do(appReq{method: http.MethodPost, path: fmt.Sprintf("/api/app/v1/assistant/conversations/%d/messages", created.Conversation.ID), body: `{"text":"x","attachment_ids":[1]}`, bearer: tok})
+	assert.Equal(t, http.StatusBadRequest, w.Code, "App API 不收附件")
+	w = e.do(appReq{method: http.MethodPost, path: fmt.Sprintf("/api/app/v1/assistant/conversations/%d/messages", created.Conversation.ID), body: `{"text":"x","effort":"max"}`, bearer: tok})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

@@ -19,7 +19,7 @@ func TestSettingsDefaultsAndKeyIsWriteOnly(t *testing.T) {
 	ctx := context.Background()
 	got, err := svc.Settings(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, Settings{MaxSteps: DefaultMaxSteps, ConfirmMinutes: DefaultConfirmMinutes, RetentionDays: DefaultRetentionDays}, got)
+	assert.Equal(t, Settings{MaxSteps: DefaultMaxSteps, ConfirmMinutes: DefaultConfirmMinutes, RetentionDays: DefaultRetentionDays, AutoCompact: true, CompactPercent: DefaultCompactPercent}, got)
 
 	got, err = svc.SaveSettings(ctx, SettingsInput{
 		Enabled: true, Provider: "deepseek", BaseURL: " https://api.deepseek.com/ ", Model: "deepseek-flash",

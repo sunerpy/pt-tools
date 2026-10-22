@@ -651,9 +651,9 @@ const EXPECT = {
         })()`,
       },
       {
-        desc: "状态栏调度器浮层 = 画板 41 的 sched-pop（300 宽，含状态与同步口径）",
-        /* 胶囊里是状态本身（运行中 / 已停止 / 状态未知），不是又一遍「调度器」 */
-        want: "宽 300|调度器|状态未知|最后同步|停止所有任务|启动所有任务",
+        desc: "状态栏 RSS 任务浮层 = 画板 41 的 sched-pop（300 宽：状态与原因、作用范围、自动启动开关、停止 / 启动）",
+        /* 2026-10「调度器」改名「RSS 任务」：状态取 /api/control/status，「最后同步 · 间隔」那行换成了状态说明 */
+        want: "宽 300|RSS 任务|刷流、辅种|程序启动时自动运行|停止|启动",
         js: `(async () => {
           const cell = document.querySelector('.pt-status__cell--btn');
           if (!cell) return 'no-cell';
@@ -1604,14 +1604,6 @@ await goto(`${BASE}/`);
 await ev(
   `fetch('/login', { method: 'POST', body: new URLSearchParams({ username: ${JSON.stringify(USER)}, password: ${JSON.stringify(PASS)} }) })`,
 );
-/*
- * v2 升级横幅不在任何画板的构成里，关掉它才能量到画板的坐标。
- *
- * **代价要说清**：关掉它之后，这份验收就完全看不见它对首屏的影响了 ——
- * 一次评审正是指出「开场那 252px」一路绿灯，原因就在这一行。所以下面单独量一次
- * 它在首屏的高度（`bannerCost`），让这笔账出现在报告里，而不是被这一行悄悄抹掉。
- */
-await ev(`localStorage.setItem('pt_tools_v2_banner_dismissed_v1', '1')`);
 /*
  * 喂假数据 —— 画板的页脚带、多选条和一部分卡片只有有数据时才渲染，
  * 空库量出来的「没有页脚带」是没数据而不是没实现，不喂就分不开这两件事。
@@ -2851,36 +2843,6 @@ if (emptyRoutes.length > 0) {
   }
 }
 
-/*
- * 单独量一次 v2 横幅的首屏代价。
- *
- * 上面为了对齐画板坐标把它关掉了，代价是这份验收完全看不见它 —— 而真实的首次访问
- * 是带着它的。这里把 localStorage 那把开关放回去、重进一次 /userinfo，量两个数：
- * 横幅自己多高、表格带因此被推到哪里。只报数不判失败：它是一条已登记的偏离，
- * 但数字必须出现在报告里，不能被那一行 setItem 抹掉。
- */
-let bannerCost = null;
-if (!wanted.length || wanted.includes("/userinfo")) {
-  await ev(`localStorage.removeItem('pt_tools_v2_banner_dismissed_v1')`);
-  await goto(`${BASE}/#/userinfo`);
-  /*
-   * 必须真的重载：横幅的 visible 是在 onMounted 里读 localStorage 定的，
-   * 而 hash 导航不会重新挂载 App.vue —— 只清掉那个键、不重载，量到的永远是 0。
-   */
-  await cdp.send("Page.reload", {}, sessionId);
-  await waitReady();
-  await sleep(2600);
-  bannerCost = await ev(`(() => {
-    const b = document.querySelector('.v2-deprecation-banner');
-    const grid = document.querySelector('.pt-band--grid');
-    return {
-      banner: b ? Math.round(b.getBoundingClientRect().height) : 0,
-      firstContentTop: grid ? Math.round(grid.getBoundingClientRect().top) : null,
-    };
-  })()`);
-  await ev(`localStorage.setItem('pt_tools_v2_banner_dismissed_v1', '1')`);
-}
-
 // ------------------------------------------------- 登录页（画板 43）
 
 /*
@@ -2981,12 +2943,6 @@ const stale = Object.keys(ALLOWED_GAPS).filter(
 
 for (const f of failures) {
   console.log(`✗ ${f.route.padEnd(28)} [画板 ${f.board}] ${f.key}: ${f.msg}`);
-}
-if (bannerCost) {
-  console.log(
-    `· v2 横幅的首屏代价：横幅 ${bannerCost.banner}px，表格带被推到 ` +
-      `${bannerCost.firstContentTop}（画板 104）。上面的几何是在关掉它之后量的。`,
-  );
 }
 /*
  * 同一条原因会被很多路由触发（rail 那条外壳级偏离每页都量得到），逐条打出来是 21 行

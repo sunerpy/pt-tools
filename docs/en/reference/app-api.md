@@ -1,6 +1,6 @@
 # App API <Badge type="tip" text="1.0 preview" />
 
-The App API is the interface for the mobile app and for scripts; every address starts with `/api/app/v1`. It exposes only what an app needs: responses never contain site cookies, API keys, passkeys, passwords, RSS addresses or download links, and addresses inside error messages have their query strings removed.
+The App API is the interface for the mobile app and for scripts; every address starts with `/api/app/v1`. It exposes only what an app needs: responses never contain site cookies, API keys, passkeys, passwords, RSS addresses or download links, and addresses inside error messages have their query strings removed. The [configuration endpoints](#configuration) are the exception: their field names follow the web endpoints (so keys such as `password` and `cookie` appear), secret values are replaced by `<已设置>` or an empty string, and they need the extra Config permission.
 
 ## Authentication
 
@@ -11,9 +11,9 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 ```
 
 - No token, or a token that is wrong, expired or revoked: 401.
-- A token without the permission the endpoint needs: 403. Below, Read is the permission `app:read` and Operate is `app:write`.
+- A token without the permission the endpoint needs: 403. Below, Read is the permission `app:read`, Operate is `app:write` and Config is `app:config` (the configuration endpoints also need it).
 - Tokens work only for the App API: the rest of the web interface (settings, sites, downloaders, notification channels, token management and so on) does not accept them and responds with 401 without a sign-in.
-- A device paired through [remote access](../guide/remote-access.md) calls these endpoints inside an encrypted tunnel, without a token; its permissions are the ones chosen when it was paired, Full control (Read and Operate) or Read only (Read). The tunnel carries only the App API; the rest of the web interface does not exist there.
+- A device paired through [remote access](../guide/remote-access.md) calls these endpoints inside an encrypted tunnel, without a token; its permissions are the ones chosen when it was paired, Full control (Read and Operate) or Read only (Read), neither of which includes Config. The tunnel carries only the App API; the rest of the web interface does not exist there.
 
 ## Conventions
 
@@ -28,63 +28,73 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 An error responds with `{"error": "code", "message": "explanation"}`. `message` is a human-readable explanation in Chinese; clients should act on `error`.
 
-| `error`                                                         | Status   | Meaning                                                                                                              |
-| --------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
-| `invalid_body`                                                  | 400      | The body is not valid JSON, or has a field that is unknown                                                           |
-| `invalid_argument`                                              | 400      | A parameter is wrong; `message` says which                                                                           |
-| `unauthorized`                                                  | 401      | No valid token                                                                                                       |
-| `forbidden`                                                     | 403      | The token lacks this permission                                                                                      |
-| `not_found`                                                     | 404      | The endpoint, site or subscription does not exist                                                                    |
-| `method_not_allowed`                                            | 405      | The endpoint exists but not with this method; the `Allow` header lists the accepted ones                             |
-| `busy`                                                          | 409, 503 | The same thing is in progress (409, such as signing in to a site); too many image requests (503, with `Retry-After`) |
-| `rate_limited`                                                  | 429      | TMDB is rate limiting; try again later                                                                               |
-| `internal`                                                      | 500      | An internal error in pt-tools                                                                                        |
-| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502      | Searching, downloading the torrent file, signing in or reaching TMDB failed                                          |
-| `unavailable`                                                   | 503      | The service behind the endpoint is not running                                                                       |
-| `assistant_disabled`, `decided`                                 | 409      | The AI assistant is not enabled; this pending action has already been decided                                        |
-| `too_many`                                                      | 429      | The AI assistant is answering too many questions at once                                                             |
+| `error`                                                         | Status   | Meaning                                                                                                                           |
+| --------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_body`                                                  | 400      | The body is not valid JSON, or has a field that is unknown                                                                        |
+| `invalid_argument`                                              | 400      | A parameter is wrong; `message` says which                                                                                        |
+| `unauthorized`                                                  | 401      | No valid token                                                                                                                    |
+| `forbidden`                                                     | 403      | The token lacks this permission                                                                                                   |
+| `not_found`                                                     | 404      | The endpoint, site or subscription does not exist                                                                                 |
+| `method_not_allowed`                                            | 405      | The endpoint exists but not with this method; the `Allow` header lists the accepted ones                                          |
+| `busy`                                                          | 409, 503 | The same thing is in progress (409, such as signing in to a site); too many image requests (503, with `Retry-After`)              |
+| `conflict`                                                      | 409      | When changing configuration, the endpoint that saves it reported a conflict (such as a brush task running a round)                |
+| `rate_limited`                                                  | 429      | TMDB is rate limiting; try again later                                                                                            |
+| `internal`                                                      | 500      | An internal error in pt-tools                                                                                                     |
+| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502      | Searching, downloading the torrent file, signing in or reaching TMDB failed, or the endpoint saving a configuration change failed |
+| `unavailable`                                                   | 503      | The service behind the endpoint is not running                                                                                    |
+| `assistant_disabled`, `decided`                                 | 409      | The AI assistant is not enabled; this pending action has already been decided                                                     |
+| `too_many`                                                      | 429      | The AI assistant is answering too many questions at once                                                                          |
 
 ## Endpoints
 
-| Method | Path                                     | Permission | Purpose                                                                       |
-| ------ | ---------------------------------------- | ---------- | ----------------------------------------------------------------------------- |
-| GET    | `/meta`                                  | Read       | Version, compatibility level, feature groups and the caller's own permissions |
-| GET    | `/overview`                              | Read       | Totals across enabled sites and today's changes                               |
-| GET    | `/sites`                                 | Read       | Sites, login status, today's sign-in and your statistics on each site         |
-| POST   | `/sites/{site}/attend`                   | Operate    | Sign in now                                                                   |
-| GET    | `/favicon/{site}`                        | Read       | Site icon                                                                     |
-| GET    | `/torrents`                              | Read       | Torrents in the downloaders                                                   |
-| GET    | `/downloaders`                           | Read       | Downloaders with their current speed and free space                           |
-| POST   | `/torrents/actions`                      | Operate    | Pause, resume and delete torrents                                             |
-| POST   | `/search`                                | Read       | Multi-site search                                                             |
-| POST   | `/push`                                  | Operate    | Push a search result to a downloader                                          |
-| GET    | `/tasks`                                 | Read       | Task list (push records)                                                      |
-| GET    | `/brush/tasks`                           | Read       | Brush tasks                                                                   |
-| GET    | `/media/history`                         | Read       | Organise history                                                              |
-| GET    | `/subscriptions`                         | Read       | Subscriptions                                                                 |
-| GET    | `/subscriptions/{id}`                    | Read       | A subscription with its episodes and downloaded torrents                      |
-| POST   | `/subscriptions`                         | Operate    | Create a subscription                                                         |
-| POST   | `/subscriptions/{id}/status`             | Operate    | Pause or resume a subscription                                                |
-| POST   | `/subscriptions/{id}/search`             | Operate    | Search now                                                                    |
-| DELETE | `/subscriptions/{id}`                    | Operate    | Delete a subscription                                                         |
-| GET    | `/explore`                               | Read       | Explore: TMDB trending, popular and search                                    |
-| GET    | `/images/tmdb/{size}/{file}`             | Read       | A TMDB image (poster), fetched by pt-tools                                    |
-| GET    | `/updates`                               | Read       | Whether a newer release exists                                                |
-| GET    | `/assistant/status`                      | Read       | Whether the AI assistant is on, its model, and whether you can confirm        |
-| GET    | `/assistant/conversations`               | Read       | Your AI assistant conversations                                               |
-| POST   | `/assistant/conversations`               | Read       | Create a conversation, optionally sending the first message                   |
-| GET    | `/assistant/conversations/{id}`          | Read       | A conversation's messages and pending actions                                 |
-| DELETE | `/assistant/conversations/{id}`          | Read       | Delete a conversation                                                         |
-| POST   | `/assistant/conversations/{id}/messages` | Read       | Send a message; the answer is generated in the background                     |
-| POST   | `/assistant/conversations/{id}/cancel`   | Read       | Stop the answer                                                               |
-| GET    | `/assistant/conversations/{id}/events`   | Read       | Long-poll a conversation's progress                                           |
-| POST   | `/assistant/confirmations/{id}`          | Operate    | Confirm or deny an action                                                     |
-| GET    | `/templates`                             | Read       | Message templates: events, variables and the current templates                |
-| POST   | `/templates/preview`                     | Read       | Render a template with sample data                                            |
-| PUT    | `/templates/{type}`                      | Operate    | Save the template for an event                                                |
-| DELETE | `/templates/{type}`                      | Operate    | Restore the default                                                           |
+| Method | Path                                     | Permission       | Purpose                                                                       |
+| ------ | ---------------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
+| GET    | `/meta`                                  | Read             | Version, compatibility level, feature groups and the caller's own permissions |
+| GET    | `/overview`                              | Read             | Totals across enabled sites and today's changes                               |
+| GET    | `/sites`                                 | Read             | Sites, login status, today's sign-in and your statistics on each site         |
+| POST   | `/sites/{site}/attend`                   | Operate          | Sign in now                                                                   |
+| GET    | `/favicon/{site}`                        | Read             | Site icon                                                                     |
+| GET    | `/torrents`                              | Read             | Torrents in the downloaders                                                   |
+| GET    | `/downloaders`                           | Read             | Downloaders with their current speed and free space                           |
+| POST   | `/torrents/actions`                      | Operate          | Pause, resume and delete torrents                                             |
+| POST   | `/search`                                | Read             | Multi-site search                                                             |
+| POST   | `/push`                                  | Operate          | Push a search result to a downloader                                          |
+| GET    | `/tasks`                                 | Read             | Task list (push records)                                                      |
+| GET    | `/brush/tasks`                           | Read             | Brush tasks                                                                   |
+| GET    | `/media/history`                         | Read             | Organise history                                                              |
+| POST   | `/media/history/{id}/retry`              | Operate          | Organise the torrent of one history record again                              |
+| GET    | `/media/libraries`                       | Read             | Media libraries                                                               |
+| POST   | `/media/recognize`                       | Read             | Recognise a torrent title                                                     |
+| POST   | `/media/organize/preview`                | Read             | Preview organising a torrent in a downloader                                  |
+| POST   | `/media/organize`                        | Operate          | Organise a torrent in a downloader into a media library                       |
+| GET    | `/subscriptions`                         | Read             | Subscriptions                                                                 |
+| GET    | `/subscriptions/{id}`                    | Read             | A subscription with its episodes and downloaded torrents                      |
+| POST   | `/subscriptions`                         | Operate          | Create a subscription                                                         |
+| POST   | `/subscriptions/{id}/status`             | Operate          | Pause or resume a subscription                                                |
+| POST   | `/subscriptions/{id}/search`             | Operate          | Search now                                                                    |
+| DELETE | `/subscriptions/{id}`                    | Operate          | Delete a subscription                                                         |
+| GET    | `/explore`                               | Read             | Explore: TMDB trending, popular and search                                    |
+| GET    | `/images/tmdb/{size}/{file}`             | Read             | A TMDB image (poster), fetched by pt-tools                                    |
+| GET    | `/updates`                               | Read             | Whether a newer release exists                                                |
+| GET    | `/assistant/status`                      | Read             | Whether the AI assistant is on, its model, and whether you can confirm        |
+| GET    | `/assistant/conversations`               | Read             | Your AI assistant conversations                                               |
+| POST   | `/assistant/conversations`               | Read             | Create a conversation, optionally sending the first message                   |
+| GET    | `/assistant/conversations/{id}`          | Read             | A conversation's messages and pending actions                                 |
+| DELETE | `/assistant/conversations/{id}`          | Read             | Delete a conversation                                                         |
+| POST   | `/assistant/conversations/{id}/messages` | Read             | Send a message; the answer is generated in the background                     |
+| POST   | `/assistant/conversations/{id}/cancel`   | Read             | Stop the answer                                                               |
+| GET    | `/assistant/conversations/{id}/events`   | Read             | Long-poll a conversation's progress                                           |
+| POST   | `/assistant/confirmations/{id}`          | Operate          | Confirm or deny an action                                                     |
+| GET    | `/templates`                             | Read             | Message templates: events, variables and the current templates                |
+| POST   | `/templates/preview`                     | Read             | Render a template with sample data                                            |
+| PUT    | `/templates/{type}`                      | Operate          | Save the template for an event                                                |
+| DELETE | `/templates/{type}`                      | Operate          | Restore the default                                                           |
+| GET    | `/config`                                | Config + Read    | Configuration catalog: what can be read and changed, operations and fields    |
+| GET    | `/config/{resource}`                     | Config + Read    | Current values of one kind of configuration (secrets masked)                  |
+| POST   | `/config/{resource}/preview`             | Config + Read    | Preview a change: before, after and impact                                    |
+| POST   | `/config/{resource}/changes`             | Config + Operate | Save a change                                                                 |
 
-Paths leave out the `/api/app/v1` prefix. Search and the template preview send their content with POST but need only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
+Paths leave out the `/api/app/v1` prefix. Search, recognition, the organise preview, the template preview and the configuration preview send their content with POST but need only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
 
 ## Basics
 
@@ -235,6 +245,34 @@ These endpoints match Media (媒体) in the web interface; see [Subscriptions](.
 
 Organise history, most recently updated first. Parameters: `status` (`done`, `failed`, `skipped`, `removed`), `q` (keyword), `page` and `page_size` (at most 100). Each item has `id`, `media_type`, `tmdb_id`, `title`, `year`, `season`, `episode`, `episode_end`, `torrent_name`, `library`, `target_path`, `mode`, `size`, `status`, `message` and `created_at`.
 
+### POST /media/history/{id}/retry
+
+Organises the torrent of this record again (usually a failed one); an entry and library chosen by hand earlier are kept. Responds like `POST /media/organize`. A missing record gets 404.
+
+### GET /media/libraries
+
+One item per library: `id`, `name`, `kind` (`movie` or `tv`), `anime` (anime only), `path` (the library folder as pt-tools sees it), `mode` (organise mode; empty means the default from the organise settings), `scrape`, `classify_dir` (put files into sub-category folders), `overwrite_mode` (empty never replaces an old version, `larger` replaces it with a larger file) and `enabled`.
+
+### POST /media/recognize
+
+`{"title": "…", "subtitle": "…", "imdb_id": "tt…"}`: give at least one of the torrent title and subtitle (up to 512 characters each); `imdb_id` is the IMDb ID the site gives, optional. Recognition follows the rules of [Media recognition](../guide/media-recognize.md) (corrections, recognition words, IMDb ID, then a search by name) and changes nothing. Responds with:
+
+- `summary`: one readable line (name, year, season and episode); `meta`: what the title parsed into, such as `name_cn`, `name_en`, `year`, `type`, `season`, `episode`, `episode_end`, `resolution`, `source`, `video_codec`, `hdr`, `audio` and `group`;
+- `match`: the TMDB entry (`id`, `media_type`, `title`, `original_title`, `year`, `overview`, `poster_path`, `vote_average`, `imdb_id`), absent without a reliable match; `source`: `override` (corrected by hand), `imdb`, `search` or `none`; `score`;
+- `candidates`: up to 5 candidates (with `score`); `message`: a note (for example that without a TMDB API key only the title was parsed); `error`: why TMDB failed.
+
+### POST /media/organize/preview
+
+`{"downloader_id": 1, "hash": "…"}`: a torrent in a downloader; use `info_hash` from `GET /torrents` as `hash` (`task_id` when there is no `info_hash`). Add `media_type` and `tmdb_id` together to choose the TMDB entry, and `library_id` to choose the library; without them pt-tools recognises the torrent and picks the library by type. Only the plan is computed; nothing changes. Responds with:
+
+- `downloader_id`, `downloader`, `hash`, `name` (the torrent name), `match` (as above), `library` (`id`, `name`), `category` (the sub-category) and `mode`;
+- `items`: one per video, with `rel` (path inside the torrent), `size`, `target` (where it goes in the library), `season`, `episode`, `episode_end`, `status` (`pending` to organise, `done` already in the library, `exists` the target is taken by another file, `replace` replaces an older version pt-tools put there, `failed` cannot be organised) and `message`;
+- `skipped`: how many files are left out (samples, too small, not video); `problem`: when set, the whole torrent cannot be organised (for example the files are not found and a path mapping is needed).
+
+### POST /media/organize
+
+Same parameters as the preview. Organises the torrent the library's way (hard link, copy or move), scrapes and asks the media servers to scan, like organising by hand on the web page. Responds with `plan` (as in the preview), `created` (files organised this time), `done`, `skipped`, `failed`, `messages` and `queued` (still running in the background; check the history later). When everything fails the response is still 200 and the audit log records an error. Organising waits at most 60 seconds; after that it responds with 504 (`timeout`) and keeps going in the background.
+
 ### GET /subscriptions
 
 Parameters: `status` (`active`, `paused`, `pending`, `done`) and `q` (keyword). Each item has:
@@ -304,19 +342,20 @@ The caller's own conversations, most recently updated first, at most 100. Each h
 
 ### POST /assistant/conversations
 
-`{"title": "…", "message": "…"}`, both optional. Creating only a conversation responds with 201; with `message` it also sends that message and responds with 202, where `run` has the run's `run_id` and the stored user message. If the AI assistant is not enabled it responds with 409 (`assistant_disabled`) and leaves no empty conversation behind.
+`{"title": "…", "message": "…"}`, both optional; with `message` you can also give `model` and `effort` (as when sending a message). Creating only a conversation responds with 201; with `message` it also sends that message and responds with 202, where `run` has the run's `run_id` and the stored user message. If the AI assistant is not enabled it responds with 409 (`assistant_disabled`) and leaves no empty conversation behind.
 
 ### GET /assistant/conversations/{id}
 
 The conversation's own fields, plus:
 
-- `messages`: the latest 200 messages, oldest first. Each has `id`, `run_id`, `role` (`user`, `assistant`, `tool` or `notice`), `content` and `created_at`; assistant messages carry `tool_calls` (`id`, `name`, `arguments`, `write`), tool results carry `tool_name`, `tool_call_id` and `is_error`. A `notice` is pt-tools' own note (stopped, failed, step limit reached).
-- `confirmations`: pending actions with `id`, `run_id`, `tool_call_id`, `tool`, `summary` (one readable sentence), `arguments`, `status` (`pending`, `approved`, `denied` or `expired`), `decided_by`, `decided_at`, `expires_at` and `created_at`. Match them to the calls in the messages by `run_id` and `tool_call_id`.
-- `run_id` and `partial`: the run in progress and its answer so far; `last_seq`: read events from here.
+- `messages`: the latest 200 messages, oldest first. Each has `id`, `run_id`, `role` (`user`, `assistant`, `tool` or `notice`), `content` and `created_at`; assistant messages carry `tool_calls` (`id`, `name`, `arguments`, `write`) and, when the model returned its reasoning, `reasoning` (redacted); tool results carry `tool_name`, `tool_call_id` and `is_error`. User and assistant messages carry the `model` and `effort` of that turn (absent: the model from the settings, no effort given); user messages sent on the web with attachments have `attachments` (`id`, `name`, `kind` (`image` or `text`), `mime`, `size`; the contents are not available through the App API). A `notice` is pt-tools' own note (stopped, failed, step limit reached, the model does not take the reasoning effort, earlier messages were compacted into a summary).
+- `confirmations`: pending actions with `id`, `run_id`, `tool_call_id`, `tool`, `summary` (one readable sentence), `arguments`, `status` (`pending`, `approved`, `denied` or `expired`), `decided_by`, `decided_at`, `expires_at` and `created_at`, plus the write tool's preview: `changes` (each item's `label`, `before` and `after`; `secret` is true for secrets, which never show their value) and `impact` (the possible impact). Match them to the calls in the messages by `run_id` and `tool_call_id`.
+- `run_id`, `partial` and `partial_reasoning`: the run in progress and the answer and reasoning of its current step so far; `last_seq`: read events from here.
+- `usage`: context usage, `context` (about how many tokens the next request carries), `estimated` (estimated from the text), `window` (the context window), `window_source` (`setting`, `provider`, `table` or `default`), `auto_compact`, `compact_percent`, `input` and `output` (the input and output tokens the provider reported for this conversation) and `compacted` (it was compacted). See [Context and compaction](../guide/assistant.md#context-and-compaction).
 
 ### POST /assistant/conversations/{id}/messages
 
-`{"text": "…"}`, up to 4000 characters. Responds with 202, the run's `run_id` and the stored user message. If the conversation is already answering it responds with 409 (`busy`).
+`{"text": "…"}`, up to 4000 characters. Optional: `model` (the model for this turn, no spaces, at most 128 characters; the model from the settings when absent) and `effort` (`none`, `minimal`, `low`, `medium`, `high` or `xhigh`, sent to the model service as `reasoning_effort`; none when absent). When the model service rejects the request because of the effort, pt-tools retries once without it and adds a notice to the conversation. Responds with 202, the run's `run_id` and the stored user message. If the conversation is already answering it responds with 409 (`busy`). The App API takes no attachments (they can only be sent on the web).
 
 ### POST /assistant/conversations/{id}/cancel
 
@@ -336,6 +375,8 @@ Every event has `seq`, `type` and `at`, and depending on its type:
 | `tool_started` | `tool`: the tool call that started                                          |
 | `confirmation` | `confirmation`: a new pending action, or its decision                       |
 | `run_finished` | `status` (`done`, `canceled` or `failed`), with `error` on failure          |
+
+These are the only types. The web event stream also carries reasoning deltas (`reasoning`), usage (`usage`) and compaction starting (`compacting`); the App API leaves them out (installed older apps do not know the types). `last` still moves past them; the reasoning is in the message's `reasoning` once the answer is stored, and the usage is in the conversation's `usage`.
 
 ### POST /assistant/confirmations/{id}
 
@@ -364,3 +405,29 @@ Responds with `groups`, `common_vars` and `events`:
 ### DELETE /templates/{type}
 
 Restores the built-in text and responds with `{"ok": true}`; an unknown event gets 404.
+
+## Configuration
+
+These endpoints read and change pt-tools' configuration through the configuration gateway, the same one behind MCP's `get_config` and `change_config` and the AI assistant's [configuration changes](../guide/assistant.md#changing-the-configuration). A change goes to the endpoint the web settings use, so validation, encryption and hot reload are the same. All of them need Config (`app:config`); reading and previewing also need Read, saving needs Operate. A web login has every permission; paired devices have no Config and get 403.
+
+Not available here: the login password, API tokens, remote access, the encryption key, the AI assistant's own settings (including voice input), ChatOps bindings and admins, and the qB-compatible entrance.
+
+### GET /config
+
+The catalog: `resources` lists what can be read and changed, each with `name`, `title`, `description`, `kind` (`object` is one set of settings, `list` a collection), `id_field` (the list items' ID field), `ops`, `fields` (writable fields; `config.<key>` means every field starting with it), `required` (needed when adding), `secrets` (secret fields) and `hints` (field notes). It also has `excluded` (what cannot be changed here) and `secret_placeholder` (`<已设置>`).
+
+### GET /config/{resource}
+
+The current values: `resource` and `kind`; `item` for objects, `items` and `id_field` for lists. The query parameter `id` returns one list item (404 when there is none). Field names are the web endpoints' ones; secrets read as `<已设置>` (set) or an empty string, and user info and query strings of addresses in other fields are masked too.
+
+### POST /config/{resource}/preview
+
+```json
+{ "op": "update", "id": "2", "values": { "enabled": false } }
+```
+
+`op` is `set` (objects), `add`, `update` or `delete` (lists; update and delete need `id`); `values` holds only the fields to change. Numbers and switches use the current types; numbers written as strings are converted to match the current value. A new value changes a secret, giving back `<已设置>` keeps it and an empty string clears it. Responds with `resource`, `op`, `id`, `summary` (one sentence), `changes` (each item's `label`, `field`, `before`, `after` and `secret`), `impact` and `applied` (false). Unknown fields, values equal to the current ones and missing required fields get 400 (`invalid_argument`) with the writable fields in `message`; an unknown resource or ID gets 404.
+
+### POST /config/{resource}/changes
+
+The same body as the preview. The change is worked out again from the current state (changes made elsewhere after the preview are taken into account) and saved; the response is like the preview with `applied` true, `item` as it is now (absent after a deletion) and a new item's ID in `id`. When the saving endpoint refuses, its reason comes back as it is: 400 for validation, 409 (`conflict`) for a conflict, 503 when the service is not running. Saves by tokens and devices are recorded in the audit log with the resource, operation, ID and the changed field names, not their values.

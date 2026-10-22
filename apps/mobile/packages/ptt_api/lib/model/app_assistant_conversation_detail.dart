@@ -23,7 +23,9 @@ class AppAssistantConversationDetail {
     this.confirmations = const [],
     this.runId,
     this.partial,
+    this.partialReasoning,
     required this.lastSeq,
+    this.usage,
   });
 
   int id;
@@ -60,8 +62,25 @@ class AppAssistantConversationDetail {
   ///
   String? partial;
 
+  /// 进行中的运行这一步到现在的推理内容（思考过程）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? partialReasoning;
+
   /// 读事件的 after：从它接着读不会漏
   int lastSeq;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  AppAssistantUsage? usage;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppAssistantConversationDetail &&
@@ -75,7 +94,9 @@ class AppAssistantConversationDetail {
     _deepEquality.equals(other.confirmations, confirmations) &&
     other.runId == runId &&
     other.partial == partial &&
-    other.lastSeq == lastSeq;
+    other.partialReasoning == partialReasoning &&
+    other.lastSeq == lastSeq &&
+    other.usage == usage;
 
   @override
   int get hashCode =>
@@ -90,10 +111,12 @@ class AppAssistantConversationDetail {
     (confirmations.hashCode) +
     (runId == null ? 0 : runId!.hashCode) +
     (partial == null ? 0 : partial!.hashCode) +
-    (lastSeq.hashCode);
+    (partialReasoning == null ? 0 : partialReasoning!.hashCode) +
+    (lastSeq.hashCode) +
+    (usage == null ? 0 : usage!.hashCode);
 
   @override
-  String toString() => 'AppAssistantConversationDetail[id=$id, title=$title, entry=$entry, running=$running, createdAt=$createdAt, updatedAt=$updatedAt, messages=$messages, confirmations=$confirmations, runId=$runId, partial=$partial, lastSeq=$lastSeq]';
+  String toString() => 'AppAssistantConversationDetail[id=$id, title=$title, entry=$entry, running=$running, createdAt=$createdAt, updatedAt=$updatedAt, messages=$messages, confirmations=$confirmations, runId=$runId, partial=$partial, partialReasoning=$partialReasoning, lastSeq=$lastSeq, usage=$usage]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -115,7 +138,17 @@ class AppAssistantConversationDetail {
     } else {
       json[r'partial'] = null;
     }
+    if (this.partialReasoning != null) {
+      json[r'partial_reasoning'] = this.partialReasoning;
+    } else {
+      json[r'partial_reasoning'] = null;
+    }
       json[r'last_seq'] = this.lastSeq;
+    if (this.usage != null) {
+      json[r'usage'] = this.usage;
+    } else {
+      json[r'usage'] = null;
+    }
     return json;
   }
 
@@ -162,7 +195,9 @@ class AppAssistantConversationDetail {
         confirmations: AppAssistantConfirmation.listFromJson(json[r'confirmations']),
         runId: mapValueOfType<String>(json, r'run_id'),
         partial: mapValueOfType<String>(json, r'partial'),
+        partialReasoning: mapValueOfType<String>(json, r'partial_reasoning'),
         lastSeq: mapValueOfType<int>(json, r'last_seq')!,
+        usage: AppAssistantUsage.fromJson(json[r'usage']),
       );
     }
     return null;

@@ -183,6 +183,10 @@ class ApiClient {
           return valueString == 'true' || valueString == '1';
         case 'DateTime':
           return value is DateTime ? value : DateTime.tryParse(value);
+        case 'AppAssistantAttachment':
+          return AppAssistantAttachment.fromJson(value);
+        case 'AppAssistantChange':
+          return AppAssistantChange.fromJson(value);
         case 'AppAssistantConfirmation':
           return AppAssistantConfirmation.fromJson(value);
         case 'AppAssistantConversation':
@@ -209,10 +213,24 @@ class ApiClient {
           return AppAssistantStatus.fromJson(value);
         case 'AppAssistantToolCall':
           return AppAssistantToolCall.fromJson(value);
+        case 'AppAssistantUsage':
+          return AppAssistantUsage.fromJson(value);
         case 'AppBrushStat':
           return AppBrushStat.fromJson(value);
         case 'AppBrushTask':
           return AppBrushTask.fromJson(value);
+        case 'AppConfigCatalog':
+          return AppConfigCatalog.fromJson(value);
+        case 'AppConfigChange':
+          return AppConfigChange.fromJson(value);
+        case 'AppConfigDiff':
+          return AppConfigDiff.fromJson(value);
+        case 'AppConfigResource':
+          return AppConfigResource.fromJson(value);
+        case 'AppConfigResult':
+          return AppConfigResult.fromJson(value);
+        case 'AppConfigState':
+          return AppConfigState.fromJson(value);
         case 'AppDelta':
           return AppDelta.fromJson(value);
         case 'AppDownloader':
@@ -229,16 +247,32 @@ class ApiClient {
           return AppExploreItem.fromJson(value);
         case 'AppExplorePage':
           return AppExplorePage.fromJson(value);
+        case 'AppLibraryRef':
+          return AppLibraryRef.fromJson(value);
         case 'AppMediaHistory':
           return AppMediaHistory.fromJson(value);
         case 'AppMediaHistoryPage':
           return AppMediaHistoryPage.fromJson(value);
+        case 'AppMediaLibrary':
+          return AppMediaLibrary.fromJson(value);
+        case 'AppMediaMatch':
+          return AppMediaMatch.fromJson(value);
+        case 'AppMediaMeta':
+          return AppMediaMeta.fromJson(value);
         case 'AppMessage':
           return AppMessage.fromJson(value);
         case 'AppMeta':
           return AppMeta.fromJson(value);
         case 'AppOK':
           return AppOK.fromJson(value);
+        case 'AppOrganizeInput':
+          return AppOrganizeInput.fromJson(value);
+        case 'AppOrganizeItem':
+          return AppOrganizeItem.fromJson(value);
+        case 'AppOrganizePlan':
+          return AppOrganizePlan.fromJson(value);
+        case 'AppOrganizeResult':
+          return AppOrganizeResult.fromJson(value);
         case 'AppOverview':
           return AppOverview.fromJson(value);
         case 'AppPrincipal':
@@ -249,6 +283,10 @@ class ApiClient {
           return AppPushRequest.fromJson(value);
         case 'AppPushResult':
           return AppPushResult.fromJson(value);
+        case 'AppRecognition':
+          return AppRecognition.fromJson(value);
+        case 'AppRecognizeInput':
+          return AppRecognizeInput.fromJson(value);
         case 'AppRelease':
           return AppRelease.fromJson(value);
         case 'AppReleaseAsset':

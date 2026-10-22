@@ -263,104 +263,113 @@ onBeforeUnmount(() => {
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
         <span>设置没读到，点刷新重试。</span>
       </div>
-      <el-form class="pt-form rs-form" label-position="top" @submit.prevent>
-        <el-form-item label="开启辅种">
-          <el-switch v-model="form.enabled" data-testid="rs-enabled" />
-        </el-form-item>
-        <el-form-item label="IYUU token">
-          <div class="rs-token">
-            <el-input
-              v-model="form.token"
-              type="password"
-              show-password
-              autocomplete="off"
-              :placeholder="settings?.has_token ? '已设置；要更换时填写新的' : '按 IYUU 的说明获取'"
-              data-testid="rs-token" />
-            <el-button v-if="settings?.has_token" data-testid="rs-clear-token" @click="clearToken"
-              >清除</el-button
-            >
-          </div>
-          <div class="field-tip" data-testid="rs-token-tip">
-            在 IYUU 官网
-            <a href="https://iyuu.cn/" target="_blank" rel="noopener noreferrer">iyuu.cn</a>
-            点「开始使用」，用微信扫码登录后拿到 token。
-          </div>
-        </el-form-item>
-        <div class="rs-row">
-          <el-form-item label="运行间隔（小时）">
-            <el-input-number
-              v-model="form.interval_hours"
-              :min="1"
-              :max="168"
-              controls-position="right"
-              data-testid="rs-interval" />
-            <div class="field-tip">开着时按这个间隔自动运行；关着时只能「立即运行」</div>
+      <!-- 宽屏（视口 ≥1600）表单在左、运行情况在右；以前表单停在 640，右边空出一大半 -->
+      <div class="pt-cols">
+        <el-form class="pt-form rs-form" label-position="top" @submit.prevent>
+          <el-form-item label="开启辅种">
+            <el-switch v-model="form.enabled" data-testid="rs-enabled" />
           </el-form-item>
-          <el-form-item label="每站每天最多（个）">
-            <el-input-number
-              v-model="form.max_per_site_per_day"
-              :min="1"
-              :max="500"
-              controls-position="right"
-              data-testid="rs-max" />
-            <div class="field-tip">
-              每个站点每天最多尝试多少个辅种（下载失败、核对没通过的也算），一次不给站点太多请求
+          <el-form-item label="IYUU token">
+            <div class="rs-token">
+              <el-input
+                v-model="form.token"
+                type="password"
+                show-password
+                autocomplete="off"
+                :placeholder="
+                  settings?.has_token ? '已设置；要更换时填写新的' : '按 IYUU 的说明获取'
+                "
+                data-testid="rs-token" />
+              <el-button v-if="settings?.has_token" data-testid="rs-clear-token" @click="clearToken"
+                >清除</el-button
+              >
+            </div>
+            <div class="field-tip" data-testid="rs-token-tip">
+              在 IYUU 官网
+              <a href="https://iyuu.cn/" target="_blank" rel="noopener noreferrer">iyuu.cn</a>
+              点「开始使用」，用微信扫码登录后拿到 token。
             </div>
           </el-form-item>
+          <div class="rs-row">
+            <el-form-item label="运行间隔（小时）">
+              <el-input-number
+                v-model="form.interval_hours"
+                :min="1"
+                :max="168"
+                controls-position="right"
+                data-testid="rs-interval" />
+              <div class="field-tip">开着时按这个间隔自动运行；关着时只能「立即运行」</div>
+            </el-form-item>
+            <el-form-item label="每站每天最多（个）">
+              <el-input-number
+                v-model="form.max_per_site_per_day"
+                :min="1"
+                :max="500"
+                controls-position="right"
+                data-testid="rs-max" />
+              <div class="field-tip">
+                每个站点每天最多尝试多少个辅种（下载失败、核对没通过的也算），一次不给站点太多请求
+              </div>
+            </el-form-item>
+          </div>
+          <el-form-item label="参与的下载器">
+            <el-select
+              v-model="form.downloader_ids"
+              multiple
+              clearable
+              placeholder="全部启用的下载器"
+              data-testid="rs-downloaders">
+              <el-option v-for="d in downloaders" :key="d.id" :label="d.name" :value="d.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="参与的站点">
+            <el-select
+              v-model="form.site_names"
+              multiple
+              clearable
+              :placeholder="
+                sitesLoaded ? '全部已配置、IYUU 也支持的站点' : '填写 token 后在「站点」里查看'
+              "
+              data-testid="rs-sites">
+              <el-option
+                v-for="s in configuredSites"
+                :key="s.site_name"
+                :label="`${s.nickname || s.iyuu_site}（${s.site_name}）`"
+                :value="s.site_name!" />
+            </el-select>
+          </el-form-item>
+          <el-button type="primary" :loading="saving" data-testid="rs-save" @click="save()">
+            <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
+          </el-button>
+        </el-form>
+        <div class="pt-col">
+          <ul class="rs-status" data-testid="rs-status">
+            <li>
+              <span class="rs-k">上次运行</span>
+              <span v-if="settings?.last_run_at"
+                >{{ formatShortDateTime(settings.last_run_at) }}：{{ settings.last_result }}</span
+              >
+              <span v-else class="rs-sub">还没运行过</span>
+            </li>
+            <li>
+              <span class="rs-k">下次运行</span>
+              <span v-if="settings?.running">正在运行</span>
+              <span v-else-if="settings?.next_run_at"
+                >大约 {{ formatShortDateTime(settings.next_run_at) }}</span
+              >
+              <span v-else class="rs-sub">{{
+                settings?.has_token
+                  ? "没开启：只能「立即运行」"
+                  : "填写 token 并开启以后按间隔自动运行"
+              }}</span>
+            </li>
+          </ul>
+          <p class="rs-tip">
+            只辅种文件完全一样（路径和大小逐个相同）的种子；核对没通过的不再尝试，下载不到种子的过 7
+            天再试。
+          </p>
         </div>
-        <el-form-item label="参与的下载器">
-          <el-select
-            v-model="form.downloader_ids"
-            multiple
-            clearable
-            placeholder="全部启用的下载器"
-            data-testid="rs-downloaders">
-            <el-option v-for="d in downloaders" :key="d.id" :label="d.name" :value="d.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="参与的站点">
-          <el-select
-            v-model="form.site_names"
-            multiple
-            clearable
-            :placeholder="
-              sitesLoaded ? '全部已配置、IYUU 也支持的站点' : '填写 token 后在「站点」里查看'
-            "
-            data-testid="rs-sites">
-            <el-option
-              v-for="s in configuredSites"
-              :key="s.site_name"
-              :label="`${s.nickname || s.iyuu_site}（${s.site_name}）`"
-              :value="s.site_name!" />
-          </el-select>
-        </el-form-item>
-        <el-button type="primary" :loading="saving" data-testid="rs-save" @click="save()">
-          <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
-        </el-button>
-      </el-form>
-      <ul class="rs-status" data-testid="rs-status">
-        <li>
-          <span class="rs-k">上次运行</span>
-          <span v-if="settings?.last_run_at"
-            >{{ formatShortDateTime(settings.last_run_at) }}：{{ settings.last_result }}</span
-          >
-          <span v-else class="rs-sub">还没运行过</span>
-        </li>
-        <li>
-          <span class="rs-k">下次运行</span>
-          <span v-if="settings?.running">正在运行</span>
-          <span v-else-if="settings?.next_run_at"
-            >大约 {{ formatShortDateTime(settings.next_run_at) }}</span
-          >
-          <span v-else class="rs-sub">{{
-            settings?.has_token ? "没开启：只能「立即运行」" : "填写 token 并开启以后按间隔自动运行"
-          }}</span>
-        </li>
-      </ul>
-      <p class="rs-tip">
-        只辅种文件完全一样（路径和大小逐个相同）的种子；核对没通过的不再尝试，下载不到种子的过 7
-        天再试。
-      </p>
+      </div>
     </PtPanel>
 
     <!-- 站点 -->
@@ -512,7 +521,7 @@ onBeforeUnmount(() => {
 }
 
 .rs-tip {
-  margin: 12px 0 0;
+  margin: 0;
   font-size: 12px;
   line-height: 1.6;
   color: var(--pt-t3);
@@ -543,7 +552,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   font-size: 13px;

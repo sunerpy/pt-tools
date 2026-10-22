@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -53,6 +54,8 @@ type Actor struct {
 	Name string
 	// CanWrite 为假时模型拿不到写工具，也不能确认写操作
 	CanWrite bool
+	// CanConfig 为真时模型拿得到配置工具（get_config；能写时还有 change_config）：网页登录、管理员绑定、有 app:config 的令牌
+	CanConfig bool
 	// Notify 不为空时，运行把消息、待确认、确认结论与结束交给它（ChatOps 经它异步回复）；文字增量不给。
 	// 关机取消的运行不再调用它。
 	Notify func(ctx context.Context, ev Event)
@@ -85,6 +88,8 @@ type Config struct {
 	Now func() time.Time
 	// HTTPClient 不为空时用它调模型（测试用；设置里的代理不再生效）
 	HTTPClient *http.Client
+	// VoiceHTTPClient 不为空时调 Voltip 用它（测试里接假服务）；为空时用不走代理的客户端
+	VoiceHTTPClient *http.Client
 }
 
 // Service 是 AI 助手服务。
@@ -93,6 +98,17 @@ type Service struct {
 	hub *hub
 
 	settingsMu sync.Mutex
+
+	// models 是对话页的模型列表缓存（ChatModels）
+	modelsMu sync.Mutex
+	models   modelCache
+	// modelsLoading 是后台正在读模型列表（refreshModelsSoon）
+	modelsLoading bool
+	// toolsTokens 是上次连工具时工具定义估算的 token（算上下文用量用，见 toolsOverhead）
+	toolsTokens atomic.Int64
+	// noUsage 是不认 stream_options 的接口地址（这个进程里试过，见 callModel）
+	noUsageMu sync.Mutex
+	noUsage   map[string]bool
 
 	mu      sync.Mutex
 	runs    map[uint]*run
@@ -108,6 +124,8 @@ type Service struct {
 	confirmUnit time.Duration
 	// firstClean 是启动以后第一次清理的延迟（一分钟；测试里调小）
 	firstClean time.Duration
+	// newCaptchaText 是「测试看图」画的验证码内容（为空时随机；测试里固定）
+	newCaptchaText func() string
 }
 
 // 运行的上限。

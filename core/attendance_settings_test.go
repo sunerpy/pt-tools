@@ -86,3 +86,38 @@ func TestAttendanceSettings_StoredValuesAndErrors(t *testing.T) {
 	require.NoError(t, db.DB.Migrator().DropTable(&models.SiteSetting{}))
 	assert.Error(t, s.SetSiteAttendanceEnabled("hdtime", true))
 }
+
+// AI 签到：默认关闭；只写这两列，保存全局设置不会把它们清掉；模型名不能有空白。
+func TestAttendanceAI_SaveAndKeep(t *testing.T) {
+	db, err := OpenTestDB(t)
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	on, model, err := s.AttendanceAI()
+	require.NoError(t, err)
+	assert.False(t, on)
+	assert.Empty(t, model)
+	assert.Error(t, s.SaveAttendanceAI(true, "gemini-flash"), "还没有全局设置行")
+
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{DownloadDir: "downloads"}).Error)
+	require.NoError(t, s.SaveAttendanceAI(true, "  gemini-3.5-flash-lite  "))
+	on, model, err = s.AttendanceAI()
+	require.NoError(t, err)
+	assert.True(t, on)
+	assert.Equal(t, "gemini-3.5-flash-lite", model)
+
+	gs, err := s.GetGlobalSettings()
+	require.NoError(t, err)
+	require.NoError(t, s.SaveGlobalSettings(gs))
+	on, model, err = s.AttendanceAI()
+	require.NoError(t, err)
+	assert.True(t, on, "保存全局设置不改 AI 签到")
+	assert.Equal(t, "gemini-3.5-flash-lite", model)
+
+	assert.Error(t, s.SaveAttendanceAI(true, "bad model"))
+	require.NoError(t, s.SaveAttendanceAI(false, ""))
+	on, model, err = s.AttendanceAI()
+	require.NoError(t, err)
+	assert.False(t, on)
+	assert.Empty(t, model)
+}

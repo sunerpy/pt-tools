@@ -14,25 +14,53 @@ class AppAssistantSend {
   /// Returns a new [AppAssistantSend] instance.
   AppAssistantSend({
     required this.text,
+    this.model,
+    this.effort,
   });
 
   String text;
 
+  /// 这一轮用的模型（不能有空格）；不给时用设置里的模型
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? model;
+
+  /// 推理等级（reasoning_effort）；不给时不指定。模型服务不认时去掉它重试一次，会话里多一条提示
+  AppAssistantSendEffortEnum? effort;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppAssistantSend &&
-    other.text == text;
+    other.text == text &&
+    other.model == model &&
+    other.effort == effort;
 
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
-    (text.hashCode);
+    (text.hashCode) +
+    (model == null ? 0 : model!.hashCode) +
+    (effort == null ? 0 : effort!.hashCode);
 
   @override
-  String toString() => 'AppAssistantSend[text=$text]';
+  String toString() => 'AppAssistantSend[text=$text, model=$model, effort=$effort]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'text'] = this.text;
+    if (this.model != null) {
+      json[r'model'] = this.model;
+    } else {
+      json[r'model'] = null;
+    }
+    if (this.effort != null) {
+      json[r'effort'] = this.effort;
+    } else {
+      json[r'effort'] = null;
+    }
     return json;
   }
 
@@ -54,6 +82,8 @@ class AppAssistantSend {
 
       return AppAssistantSend(
         text: mapValueOfType<String>(json, r'text')!,
+        model: mapValueOfType<String>(json, r'model'),
+        effort: AppAssistantSendEffortEnum.fromJson(json[r'effort']),
       );
     }
     return null;
@@ -104,4 +134,90 @@ class AppAssistantSend {
     'text',
   };
 }
+
+/// 推理等级（reasoning_effort）；不给时不指定。模型服务不认时去掉它重试一次，会话里多一条提示
+enum AppAssistantSendEffortEnum {
+  none._(r'none'),
+  minimal._(r'minimal'),
+  low._(r'low'),
+  medium._(r'medium'),
+  high._(r'high'),
+  xhigh._(r'xhigh'),
+  ;
+
+  /// Instantiate a new enum with the provided value.
+  const AppAssistantSendEffortEnum._(this._value);
+
+  /// The underlying value of this enum member.
+  final String _value;
+
+  @override
+  String toString() => _value;
+
+  /// Encodes this enum as a value suitable for JSON.
+  String toJson() => _value;
+
+  /// Returns the instance of [AppAssistantSendEffortEnum] that was successfully decoded
+  /// from the passed [value] on success, null otherwise.
+  static AppAssistantSendEffortEnum? fromJson(dynamic value) => AppAssistantSendEffortEnumTypeTransformer().decode(value);
+
+  /// Returns a [List] containing instances of [AppAssistantSendEffortEnum]
+  /// that were successfully decoded from the passed [JSON][json].
+  static List<AppAssistantSendEffortEnum> listFromJson(dynamic json, {bool growable = false,}) {
+    final result = <AppAssistantSendEffortEnum>[];
+    if (json is List && json.isNotEmpty) {
+      for (final row in json) {
+        final value = AppAssistantSendEffortEnum.fromJson(row);
+        if (value != null) {
+          result.add(value);
+        }
+      }
+    }
+    return result.toList(growable: growable);
+  }
+}
+
+/// Transformation class that can [encode] an instance of [AppAssistantSendEffortEnum] to String,
+/// and [decode] dynamic data back to [AppAssistantSendEffortEnum].
+class AppAssistantSendEffortEnumTypeTransformer {
+  factory AppAssistantSendEffortEnumTypeTransformer() => _instance ??= const AppAssistantSendEffortEnumTypeTransformer._();
+
+  const AppAssistantSendEffortEnumTypeTransformer._();
+
+  String encode(AppAssistantSendEffortEnum data) => data._value;
+
+  /// Returns the instance of [AppAssistantSendEffortEnum] that was successfully decoded
+  /// from the passed [data] value on success, null otherwise.
+  ///
+  /// If [allowNull] is true and the [dynamic value][data] cannot be decoded successfully,
+  /// then null is returned. However, if [allowNull] is false and the [dynamic value][data]
+  /// cannot be decoded successfully, then an [UnimplementedError] is thrown.
+  ///
+  /// The [allowNull] is very handy when an API changes and a new enum value is added or removed,
+  /// and users are still using an old app with the old code.
+  AppAssistantSendEffortEnum? decode(dynamic data, {bool allowNull = true}) {
+    if (data is AppAssistantSendEffortEnum) {
+      return data;
+    }
+    if (data != null) {
+      switch (data) {
+        case r'none': return AppAssistantSendEffortEnum.none;
+        case r'minimal': return AppAssistantSendEffortEnum.minimal;
+        case r'low': return AppAssistantSendEffortEnum.low;
+        case r'medium': return AppAssistantSendEffortEnum.medium;
+        case r'high': return AppAssistantSendEffortEnum.high;
+        case r'xhigh': return AppAssistantSendEffortEnum.xhigh;
+        default:
+          if (!allowNull) {
+            throw ArgumentError('Unknown enum value to decode: $data');
+          }
+      }
+    }
+    return null;
+  }
+
+  /// The singleton instance of this transformer.
+  static AppAssistantSendEffortEnumTypeTransformer? _instance;
+}
+
 

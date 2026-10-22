@@ -239,6 +239,46 @@ func (s *ConfigStore) GetGlobalOnly() (models.SettingsGlobal, error) {
 	return out, nil
 }
 
+// SetAutoStart 只改全局设置里的「自动启动 RSS 任务」，其余设置不动；值没变时什么也不做。
+// 改了就发布配置变更，和在全局设置页保存一样：RSS 任务没在运行、也没被手动停止时，打开它会马上按配置启动。
+func (s *ConfigStore) SetAutoStart(enabled bool) error {
+	db := s.db.DB
+	var cur models.SettingsGlobal
+	if err := db.First(&cur).Error; err != nil {
+		return fmt.Errorf("读取全局设置失败: %w", err)
+	}
+	if cur.AutoStart == enabled {
+		return nil
+	}
+	if err := db.Model(&models.SettingsGlobal{}).Where("id = ?", cur.ID).Update("auto_start", enabled).Error; err != nil {
+		return fmt.Errorf("保存自动启动失败: %w", err)
+	}
+	sLogger().Infof("[全局配置已更新] 自动启动=%v", enabled)
+	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "global", At: time.Now()})
+	return nil
+}
+
+// EnabledRSS 返回已启用站点下的全部 RSS 订阅（含示例订阅，由调用方按 ShouldSkip 剔除）。
+// 只读站点的 id、enabled 与订阅表，不经过 Load：不解密 Cookie，密钥缺失时 RSS 任务的状态查询照样能用。
+func (s *ConfigStore) EnabledRSS() ([]models.RSSConfig, error) {
+	var siteIDs []uint
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("enabled = ?", true).Pluck("id", &siteIDs).Error; err != nil {
+		return nil, fmt.Errorf("读取已启用站点失败: %w", err)
+	}
+	if len(siteIDs) == 0 {
+		return nil, nil
+	}
+	var rows []models.RSSSubscription
+	if err := s.db.DB.Where("site_id IN ?", siteIDs).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取 RSS 订阅失败: %w", err)
+	}
+	out := make([]models.RSSConfig, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, IsExample: r.IsExample})
+	}
+	return out, nil
+}
+
 // Unified API structures: use models.SettingsGlobal for external I/O
 func (s *ConfigStore) GetGlobalSettings() (models.SettingsGlobal, error) {
 	var gs models.SettingsGlobal

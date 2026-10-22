@@ -123,6 +123,12 @@ func TestRemoteTunnel_ScopeMatrix(t *testing.T) {
 		path := appPrefix + concretePath(rt.Path)
 		gotRead, _ := tunnel(t, readC, rt.Method, path, "{}", nil)
 		gotFull, _ := tunnel(t, fullC, rt.Method, path, "{}", nil)
+		if appConfigRoute(rt.Path) {
+			// 设备没有 app:config：完全控制的设备也读改不了 pt-tools 的配置
+			assert.Equal(t, http.StatusForbidden, gotRead, "%s %s 只读", rt.Method, rt.Path)
+			assert.Equal(t, http.StatusForbidden, gotFull, "%s %s 完全控制", rt.Method, rt.Path)
+			continue
+		}
 		assert.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, gotFull, "%s %s 完全控制", rt.Method, rt.Path)
 		if rt.Scope == apitoken.ScopeAppRead {
 			assert.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, gotRead, "%s %s 只读", rt.Method, rt.Path)

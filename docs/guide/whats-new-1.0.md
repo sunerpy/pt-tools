@@ -23,11 +23,11 @@
 - [手机 App](./mobile-app.md)：Android App 在外面也能看概览、种子、站点与订阅，按配对时给的权限暂停、删除、推送种子或管理订阅，也能和 AI 助手对话；从 1.0.0-rc.28 起，安装包和服务端发布在同一个 Release 里。
 - [远程访问](./remote-access.md)：手机扫网页上的二维码配对，App 先试直连，连不上再经 relay 连回 pt-tools；连接端到端加密，relay 只转发。默认用内置的托管 relay，也可以自建或关掉 relay 只用直连。
 - [API 令牌](./api-tokens.md)与 [App API](../reference/app-api.md)：脚本和客户端带令牌访问 `/api/app/v1/`，按权限范围读取或修改，不用保存网页的登录密码。
-- [MCP](./mcp.md)：Claude、Cursor、Cherry Studio 这类 MCP 客户端里的 AI 助手可以查看种子、下载器、站点数据与订阅，在你确认以后执行改动。
+- [MCP](./mcp.md)：Claude、Cursor、Cherry Studio 这类 MCP 客户端里的 AI 助手可以查看种子、下载器、站点数据、订阅与媒体库，识别种子标题，在你确认以后执行改动（包括管理订阅、整理入库）；改动先回预览（改以前、改以后与影响）。令牌勾了「配置」时还能读改 pt-tools 的配置，内置的 `pt-tools-config` 技能写明怎么改。
 
 ## 通知与 AI 助手
 
-- [AI 助手](./assistant.md)：接一个 OpenAI 兼容的大模型（也支持 Groq 与 Google AI Studio），在网页、手机 App 或 Telegram、QQ 里用自然语言查数据、搜索与推送种子、添加订阅；改动类操作每次都要你确认。
+- [AI 助手](./assistant.md)：接一个 OpenAI 兼容的大模型（也支持 Groq 与 Google AI Studio），在网页、手机 App 或 Telegram、QQ 里用自然语言查数据、搜索与推送种子、管理订阅、整理入库；改动类操作每次都要你确认。网页上显示思考过程与工具调用（回答完自动折起来），每条消息可以换模型与推理等级，可以发图片与文本文件。确认卡片列出每一项改以前、改以后与可能的影响；输入框旁显示上下文用量，到了阈值（默认 80%）自动把前面的对话压缩成摘要；可以[让助手改配置](./assistant.md#改配置)（下载器、站点、RSS、通知通道等大部分设置，密钥只写不读）；接上 Voltip 以后可以[用语音输入](./assistant.md#语音输入)。
 - [更多通知通道](./notify-channels.md)：钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；「最近的通知」列出 RSS 与后台通知，投递统计按来源写明。
 - [消息模板](./notify-channels.md#消息模板)：按事件自定义通知的标题与正文，命令回复与 AI 助手的回复也可以套用。
 - [自定义 Webhook](./notify-channels.md#自定义-webhook)：自定义请求方法、格式与请求体模板，内置 Discord、Slack、Gotify 等预设，可以按响应内容判断是否发送成功。
@@ -35,8 +35,9 @@
 ## 站点与数据
 
 - [数据统计与每日战报](./user-stats.md)：成功获取站点数据的当天存一份快照，按今日、本周、本月看增量和走势；每日战报（默认关闭）可以每天把当天的增量发到选定的通知通道。
-- [每日签到](./site-login-monitoring.md#每日签到)：在设定的时间窗里给支持签到的站点签到，也可以用 `/signin` 命令；HDArea 等站点使用各自的签到接口。
+- [每日签到](./site-login-monitoring.md#每日签到)：左侧导航「站点 → 自动签到」一页里看每个站点今天签到了没有、开关、立即签到与一键签到，最近两周的签到记录，以及签到时间窗、AI 与结果推送的设置；也可以用 `/signin` 命令；「签到详情」按天列出每个站点签得怎么样，是直接签到还是借助 AI、AI 调了几次、用了多少 token。HDArea、Rousi Pro 等站点使用各自的签到接口；HDSky、OpenCD 的验证码和 PTCHDBits、52PT 的签到题可以[交给 AI](./site-login-monitoring.md#用-ai-识别验证码与答题)。
 - [CookieCloud 导入](./cookiecloud.md)：从自建的 CookieCloud 取回浏览器同步的 Cookie，在本机解密，预览后写进站点，也可以定时同步；浏览器扩展可以定时同步 Cookie，并加密上传到 CookieCloud。
+- [浏览器扩展](./browser-extension.md)：弹窗的主页面是「我的站点」，只列浏览器里有 Cookie 或 pt-tools 里启用了的站点，每行是 Cookie 状态和保号状态，行尾直接同步、打开；同步全部和一键打开放在列表上方，地址、定时同步和 CookieCloud 挪到右上角的「设置」里。打开弹窗时先显示列表，连接状态单独检查，不再等好几秒。
 - [NAS 部署](./install.md#nas)：1Panel、Unraid 与飞牛 fnOS 的应用定义。
 - 站点解析：CrabPT、GameGamePT、HDArea、OpenCD 的积分、分享率与时魔，以及多个站点在分享率不到 1 时的取值都已修正；没有 H&R 做种时长的站点可以在站点设置里填写做种要求。
 

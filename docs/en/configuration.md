@@ -106,15 +106,24 @@ environment:
 
 These options are on the System → Global settings (系统 → 全局设置) page of the web interface:
 
-| Setting                                                     | Meaning                                                            | Default     | Suggested           |
-| ----------------------------------------------------------- | ------------------------------------------------------------------ | ----------- | ------------------- |
-| **Default interval in minutes (默认间隔（分钟）)**          | The default interval for RSS tasks                                 | 10          | 15-30 minutes       |
-| **Torrent file folder (种子下载目录)**                      | The folder where `.torrent` files are saved                        | `downloads` | As you need         |
-| **Download speed check (启用下载限速判断)**                 | Used to decide whether a torrent can finish within its free period | Off         | On if you need it   |
-| **Estimated download speed in MB/s (预估下载速度（MB/s）)** | Your actual average download speed                                 | -           | Your real bandwidth |
-| **Maximum torrent size in GB (最大种子大小（GB）)**         | Torrents larger than this are skipped                              | No limit    | 50-100 GB           |
-| **Minimum free time in minutes (最短免费时间（分钟）)**     | Torrents with less freeleech time left than this are skipped       | 30          | 20-60 minutes       |
-| **Start tasks automatically (自动启动任务)**                | Whether RSS tasks start when the program starts                    | No          | Yes                 |
+| Setting                                                     | Meaning                                                                                                  | Default     | Suggested           |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------- | ------------------- |
+| **Default interval in minutes (默认间隔（分钟）)**          | The default interval for RSS tasks                                                                       | 10          | 15-30 minutes       |
+| **Torrent file folder (种子下载目录)**                      | The folder where `.torrent` files are saved                                                              | `downloads` | As you need         |
+| **Download speed check (启用下载限速判断)**                 | Used to decide whether a torrent can finish within its free period                                       | Off         | On if you need it   |
+| **Estimated download speed in MB/s (预估下载速度（MB/s）)** | Your actual average download speed                                                                       | -           | Your real bandwidth |
+| **Maximum torrent size in GB (最大种子大小（GB）)**         | Torrents larger than this are skipped                                                                    | No limit    | 50-100 GB           |
+| **Minimum free time in minutes (最短免费时间（分钟）)**     | Torrents with less freeleech time left than this are skipped                                             | 30          | 20-60 minutes       |
+| **Start RSS tasks automatically (自动启动 RSS 任务)**       | Whether RSS tasks run when the program starts, including after a container restart; see the next section | No          | Yes                 |
+
+### Starting and stopping RSS tasks
+
+RSS tasks fetch the RSS feeds of enabled sites at their check intervals and push torrents to the downloader according to the download mode and filter rules; RSS new-item notifications come from them too. Brush tasks, cross-seeding, torrent transfer, auto-delete, freeleech-end handling, sign-in, login reminders and media library organising run on their own and are not affected by starting or stopping RSS tasks. Media subscriptions still search the sites on schedule; only "also download when it appears in RSS" waits for RSS tasks to be running.
+
+- **Where**: click RSS tasks (RSS 任务) at the left end of the status bar at the bottom to open a panel (on a phone, the panel is under Me (我的) in the bottom tabs, and the status row above the tabs shows the state). The panel shows whether RSS tasks are running and how many feeds are running; when they are not running it says why, for example auto-start is off, they were stopped by hand, there is no default downloader, or the default downloader cannot be reached.
+- **Start and Stop**: Start (启动) runs all RSS feeds with the current settings; Stop (停止) stops them until they are started again. Stopping lasts only until the program restarts; after that the auto-start setting decides whether they run.
+- **Auto-start**: Start when the program starts (程序启动时自动运行) in the panel and Start RSS tasks automatically (自动启动 RSS 任务) on the Global settings (全局设置) page are the same switch, off by default. While it is off, RSS tasks must be started by hand every time the program starts, including after a container restart or an upgrade, and a notice at the top of each page says RSS tasks are not running (RSS 任务没有运行). Turning it on starts them right away with the current settings (unless they were stopped by hand) and makes them start whenever the program starts.
+- **After a settings change**: when sites, RSS feeds, global settings or other settings change, running RSS tasks restart with the new settings; tasks stopped by hand are not started. As at program start, the default downloader must be reachable first; if it is not, RSS tasks do not run and the status bar says why. Click Start once the downloader is back.
 
 ### Download speed and the free period
 

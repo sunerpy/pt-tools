@@ -2,21 +2,30 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"time"
 
+	"github.com/sunerpy/pt-tools/internal/mcp"
+	"github.com/sunerpy/pt-tools/internal/redact"
 	"github.com/sunerpy/pt-tools/models"
 )
 
 // confirmThenCall 给写操作建一条待确认记录，等结论：批准了才带 confirm=true 调用一次，拒绝、超时、停止都不执行，
 // 把原因当工具结果交回模型。
 func (s *Service) confirmThenCall(r *run, tb *toolbox, set effective, pc pendingCall) toolResult {
+	// 先要预览：不带 confirm 调一次写工具，只读现状，回会改什么、可能有什么影响。执行不了的（找不到种子、订阅这类）
+	// 直接把原因交回模型，不问用户
+	preview, failed := s.previewCall(r, tb, pc)
+	if failed != nil {
+		return *failed
+	}
 	timeout := time.Duration(set.confirmMinutes) * s.confirmUnit
 	now := s.now()
 	c := models.AssistantConfirmation{
-		ConversationID: r.conv, RunID: r.id, ToolCallID: pc.id, ToolName: pc.name, Arguments: pc.display,
+		ConversationID: r.conv, RunID: r.id, ToolCallID: pc.id, ToolName: pc.name, Arguments: pc.display, Preview: preview,
 		Status: models.AssistantConfirmPending, ExpiresAt: now.Add(timeout), CreatedAt: now,
 	}
 	if err := s.db(context.WithoutCancel(r.ctx)).Create(&c).Error; err != nil {
@@ -44,6 +53,23 @@ func (s *Service) confirmThenCall(r *run, tb *toolbox, set effective, pc pending
 		return toolResult{text: fmt.Sprintf("用户没有在 %d 分钟内确认，操作没有执行。", set.confirmMinutes)}
 	}
 	return toolResult{text: "运行已停止，操作没有执行。", isError: true}
+}
+
+// previewCall 取写工具的预览（JSON，过一遍凭证脱敏）。工具回错误时返回这个错误（不建确认）；回的不是预览时预览为空。
+func (s *Service) previewCall(r *run, tb *toolbox, pc pendingCall) (string, *toolResult) {
+	res := tb.call(r.ctx, pc.name, maps.Clone(pc.args))
+	if res.isError {
+		return "", &res
+	}
+	var pv mcp.Preview
+	if json.Unmarshal([]byte(res.text), &pv) != nil || !pv.Pending {
+		return "", nil
+	}
+	buf, err := json.Marshal(pv)
+	if err != nil {
+		return "", nil
+	}
+	return redact.Credentials(string(buf)), nil
 }
 
 // 待确认记录在没有人定的时候 decided_by 记的原因。

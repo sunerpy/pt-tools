@@ -1271,6 +1271,15 @@ function decisionText(decision: string | undefined): string {
   color: var(--pt-t2);
 }
 
+/* 宽屏两栏：四条说明一行一条时右边空出一半多 */
+@media (min-width: 1600px) {
+  .rules-hint {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--pt-space-2) var(--pt-space-6);
+  }
+}
+
 .rules-hint code {
   padding: 1px 5px;
   font-family: var(--pt-font-mono);

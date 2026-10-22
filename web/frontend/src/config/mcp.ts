@@ -71,6 +71,25 @@ export const MCP_TOOLS: readonly McpTool[] = [
   { name: "check_updates", write: false, desc: "有没有新版本（只看，不升级）" },
   { name: "explore_media", write: false, desc: "按片名找电影与剧集，或者看本周趋势、热门" },
   { name: "list_subscriptions", write: false, desc: "订阅与进度（已播、已入库、下载中、缺的集）" },
+  { name: "get_subscription", write: false, desc: "一个订阅的详情：每一集的情况、下载过的种子" },
+  {
+    name: "recognize_media",
+    write: false,
+    desc: "识别种子标题：解析名字、季集与规格，到 TMDB 找对应的条目",
+  },
+  { name: "list_media_libraries", write: false, desc: "媒体库：类型、目录、整理方式与刮削" },
+  { name: "list_media_history", write: false, desc: "整理历史：每个视频放进了哪里、失败的原因" },
+  {
+    name: "preview_media_organize",
+    write: false,
+    desc: "预览整理一个种子：认出的条目、媒体库与每个视频的目标位置",
+  },
+  {
+    name: "get_config",
+    write: false,
+    desc: "读 pt-tools 的配置（令牌另要「配置」权限）；不带资源名时是配置目录，密钥只显示有没有设置",
+  },
+  { name: "get_skill", write: false, desc: "内置技能：pt-tools-config 讲怎么读改配置，附配置目录" },
   { name: "pause_torrent", write: true, desc: "暂停一个种子" },
   { name: "resume_torrent", write: true, desc: "继续一个暂停的种子" },
   { name: "delete_torrent", write: true, desc: "删除一个种子，可以连数据一起删" },
@@ -80,4 +99,22 @@ export const MCP_TOOLS: readonly McpTool[] = [
     desc: "把搜到的种子推到下载器，照常经过磁盘空间与站点做种容量检查",
   },
   { name: "add_subscription", write: true, desc: "订阅一部电影或一季剧集" },
+  { name: "set_subscription_status", write: true, desc: "暂停或恢复一个订阅" },
+  { name: "search_subscription", write: true, desc: "立即搜索一个订阅，搜到就下载" },
+  {
+    name: "delete_subscription",
+    write: true,
+    desc: "删除一个订阅（下载过的种子与库里的文件不动）",
+  },
+  {
+    name: "organize_media",
+    write: true,
+    desc: "把下载完的种子整理进媒体库：按命名模板放好、刮削、通知媒体服务器扫描",
+  },
+  { name: "retry_media_organize", write: true, desc: "重新整理一条整理记录（多半是失败的）" },
+  {
+    name: "change_config",
+    write: true,
+    desc: "改 pt-tools 的配置（令牌另要「配置」权限）：先预览改前改后与影响，确认以后才保存",
+  },
 ];

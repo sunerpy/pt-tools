@@ -24,6 +24,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { type ReminderTier, useLoginState } from "@/composables/useLoginState";
 import { useSiteLevelsStore } from "@/stores/siteLevels";
+import { isInteractiveClick, ROW_LINK_CLASS } from "@/utils/rowClick";
 import {
   formatBytes,
   formatDate,
@@ -91,6 +92,16 @@ const taskStats = ref<TaskStatsResponse | null>(null);
 const sitesByName = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
 const isMobile = useIsMobile();
+
+/** 点行（手机上点卡片）进站点详情；点到行里的头像、按钮这些控件时照旧做它们自己的事 */
+function openSiteDetail(site: string, event?: Event) {
+  if (isInteractiveClick(event)) return;
+  router.push(`/sites/${site}`);
+}
+
+function onSiteRowClick(row: { site: string }, _column: unknown, event: Event) {
+  openSiteDetail(row.site, event);
+}
 const { effectiveLastActive, daysRemaining, reminderTier, tierLabel } = useLoginState(loginStates);
 
 /**
@@ -1212,8 +1223,10 @@ onUnmounted(() => {
           style="width: 100%"
           :style="siteTableStyle"
           :default-sort="{ prop: rowSort, order: SORT_ORDER[rowSort] }"
+          :row-class-name="() => ROW_LINK_CLASS"
           highlight-current-row
-          @sort-change="onTableSortChange">
+          @sort-change="onTableSortChange"
+          @row-click="onSiteRowClick">
           <!-- 站点列：带消息徽章和悬停效果 -->
           <el-table-column
             prop="site"
@@ -1602,7 +1615,11 @@ onUnmounted(() => {
           </template>
         </PtDataState>
 
-        <article v-for="row in siteRows" :key="row.site" class="card">
+        <article
+          v-for="row in siteRows"
+          :key="row.site"
+          class="card is-link"
+          @click="openSiteDetail(row.site, $event)">
           <header class="card__head">
             <div class="site">
               <el-badge
@@ -2285,6 +2302,10 @@ onUnmounted(() => {
   /* 卡间距跟画板 30 / 31 一样是 8；这里原来是 12，全站十二个行卡列表里只有它一个不一样 */
   gap: var(--pt-space-2);
   padding: var(--pt-pad) 0;
+}
+
+.card.is-link {
+  cursor: pointer;
 }
 
 .card {

@@ -43,7 +43,7 @@ const INTENTIONAL = {
   "src/views/CloakBrowserConfig.vue .cloak-page": "布局由同节点的 pt-cards--main 给",
   "src/views/DownloaderSettings.vue .downloader-page": "布局由同节点的 pt-cards--wide 给",
   "src/views/DownloaderSettings.vue .dl-cards": "布局由同节点的 pt-cards--2 给",
-  "src/views/chatops/Bindings.vue .bindings-page": "布局由同节点的 pt-cards--lead 给",
+  "src/views/chatops/Bindings.vue .bindings-page": "布局由同节点的 pt-cards--wide / --aside 给",
   "src/views/chatops/NotificationDetail.vue .notify-detail-page":
     "布局由同节点的 pt-cards--wide 给",
   "src/views/UserDataExport.vue .export-page":
@@ -66,8 +66,6 @@ const INTENTIONAL = {
   /* 其余 */
   "src/components/VersionChecker.vue .initial": "默认态，样式由 .status-state 给，不需要单独一条",
   "src/views/LogViewer.vue .virtual-spacer": "高度是虚拟滚动算出来的行内样式，没有静态样式",
-  "src/components/V2DeprecationBanner.vue .v2-deprecation-alert":
-    "外观由同节点的 pt-note 给，这个名字只用于定位",
 };
 
 function walk(dir) {

@@ -30,6 +30,8 @@ type NexusPHPRequest struct {
 	Params url.Values
 	// Method is the HTTP method (default: GET)
 	Method string
+	// Referer 不为空时作为 Referer 请求头；以 / 开头的按站点地址补全（签到的验证码接口会看它）
+	Referer string
 }
 
 // NexusPHPResponse wraps a goquery document for parsing
@@ -295,6 +297,12 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		"User-Agent":      d.userAgent,
 		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+	}
+	if ref := req.Referer; ref != "" {
+		if strings.HasPrefix(ref, "/") {
+			ref = baseURL + ref
+		}
+		headers["Referer"] = ref
 	}
 
 	// Print curl command for debugging

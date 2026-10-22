@@ -60,7 +60,7 @@ These newer sites usually use an API key or a dedicated RSS generator page.
 2. Switch to the RSS subscriptions (RSS 订阅) tab and click Add RSS (添加 RSS).
 3. Enter a name and the link, set the options below as needed, then save.
 
-After saving, the subscription runs in the background at its check interval. Pushed torrents appear under Downloads → Task list (下载 → 任务列表); when nothing is pushed, System → Logs (系统 → 运行日志) records why.
+After saving, the subscription is fetched at its check interval while RSS tasks are running. While they are not running (auto-start is off by default, so they must be started by hand after each program start) the subscription is not fetched; the switch is RSS tasks (RSS 任务) at the left end of the status bar at the bottom, see [Starting and stopping RSS tasks](../configuration.md#starting-and-stopping-rss-tasks). Pushed torrents appear under Downloads → Task list (下载 → 任务列表); when nothing is pushed, System → Logs (系统 → 运行日志) records why.
 
 ## Subscription options
 

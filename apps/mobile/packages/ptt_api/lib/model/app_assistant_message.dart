@@ -17,7 +17,11 @@ class AppAssistantMessage {
     this.runId,
     required this.role,
     required this.content,
+    this.reasoning,
+    this.model,
+    this.effort,
     this.toolCalls = const [],
+    this.attachments = const [],
     this.toolName,
     this.toolCallId,
     this.isError,
@@ -39,7 +43,37 @@ class AppAssistantMessage {
   /// 脱敏以后的文字；tool 是工具返回的 JSON 文本
   String content;
 
+  /// 模型的推理内容（思考过程，脱敏以后的）：只有助手消息有，模型没给时没有
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? reasoning;
+
+  /// 这一轮的模型：用户消息是发的时候选的，助手消息是实际请求的；没有时是设置里的模型
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? model;
+
+  /// 这一轮的推理等级（none、minimal、low、medium、high、xhigh）；没有时是不指定
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? effort;
+
   List<AppAssistantToolCall> toolCalls;
+
+  /// 用户消息带的附件（在网页上传的；内容不经 App API 给）
+  List<AppAssistantAttachment> attachments;
 
   ///
   /// Please note: This property should have been non-nullable! Since the specification file
@@ -73,7 +107,11 @@ class AppAssistantMessage {
     other.runId == runId &&
     other.role == role &&
     other.content == content &&
+    other.reasoning == reasoning &&
+    other.model == model &&
+    other.effort == effort &&
     _deepEquality.equals(other.toolCalls, toolCalls) &&
+    _deepEquality.equals(other.attachments, attachments) &&
     other.toolName == toolName &&
     other.toolCallId == toolCallId &&
     other.isError == isError &&
@@ -86,14 +124,18 @@ class AppAssistantMessage {
     (runId == null ? 0 : runId!.hashCode) +
     (role.hashCode) +
     (content.hashCode) +
+    (reasoning == null ? 0 : reasoning!.hashCode) +
+    (model == null ? 0 : model!.hashCode) +
+    (effort == null ? 0 : effort!.hashCode) +
     (toolCalls.hashCode) +
+    (attachments.hashCode) +
     (toolName == null ? 0 : toolName!.hashCode) +
     (toolCallId == null ? 0 : toolCallId!.hashCode) +
     (isError == null ? 0 : isError!.hashCode) +
     (createdAt.hashCode);
 
   @override
-  String toString() => 'AppAssistantMessage[id=$id, runId=$runId, role=$role, content=$content, toolCalls=$toolCalls, toolName=$toolName, toolCallId=$toolCallId, isError=$isError, createdAt=$createdAt]';
+  String toString() => 'AppAssistantMessage[id=$id, runId=$runId, role=$role, content=$content, reasoning=$reasoning, model=$model, effort=$effort, toolCalls=$toolCalls, attachments=$attachments, toolName=$toolName, toolCallId=$toolCallId, isError=$isError, createdAt=$createdAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -105,7 +147,23 @@ class AppAssistantMessage {
     }
       json[r'role'] = this.role;
       json[r'content'] = this.content;
+    if (this.reasoning != null) {
+      json[r'reasoning'] = this.reasoning;
+    } else {
+      json[r'reasoning'] = null;
+    }
+    if (this.model != null) {
+      json[r'model'] = this.model;
+    } else {
+      json[r'model'] = null;
+    }
+    if (this.effort != null) {
+      json[r'effort'] = this.effort;
+    } else {
+      json[r'effort'] = null;
+    }
       json[r'tool_calls'] = this.toolCalls;
+      json[r'attachments'] = this.attachments;
     if (this.toolName != null) {
       json[r'tool_name'] = this.toolName;
     } else {
@@ -152,7 +210,11 @@ class AppAssistantMessage {
         runId: mapValueOfType<String>(json, r'run_id'),
         role: AppAssistantMessageRoleEnum.fromJson(json[r'role'])!,
         content: mapValueOfType<String>(json, r'content')!,
+        reasoning: mapValueOfType<String>(json, r'reasoning'),
+        model: mapValueOfType<String>(json, r'model'),
+        effort: mapValueOfType<String>(json, r'effort'),
         toolCalls: AppAssistantToolCall.listFromJson(json[r'tool_calls']),
+        attachments: AppAssistantAttachment.listFromJson(json[r'attachments']),
         toolName: mapValueOfType<String>(json, r'tool_name'),
         toolCallId: mapValueOfType<String>(json, r'tool_call_id'),
         isError: mapValueOfType<bool>(json, r'is_error'),

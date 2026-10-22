@@ -24,6 +24,8 @@ class AppAssistantConfirmation {
     this.decidedAt,
     required this.expiresAt,
     required this.createdAt,
+    this.changes = const [],
+    this.impact = const [],
   });
 
   int id;
@@ -62,6 +64,12 @@ class AppAssistantConfirmation {
 
   DateTime createdAt;
 
+  /// 写工具的预览：会改什么（改以前、改以后）；密钥两边都不写原文
+  List<AppAssistantChange> changes;
+
+  /// 写工具的预览：可能的影响
+  List<String> impact;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppAssistantConfirmation &&
     other.id == id &&
@@ -74,7 +82,9 @@ class AppAssistantConfirmation {
     other.decidedBy == decidedBy &&
     other.decidedAt == decidedAt &&
     other.expiresAt == expiresAt &&
-    other.createdAt == createdAt;
+    other.createdAt == createdAt &&
+    _deepEquality.equals(other.changes, changes) &&
+    _deepEquality.equals(other.impact, impact);
 
   @override
   int get hashCode =>
@@ -89,10 +99,12 @@ class AppAssistantConfirmation {
     (decidedBy == null ? 0 : decidedBy!.hashCode) +
     (decidedAt == null ? 0 : decidedAt!.hashCode) +
     (expiresAt.hashCode) +
-    (createdAt.hashCode);
+    (createdAt.hashCode) +
+    (changes.hashCode) +
+    (impact.hashCode);
 
   @override
-  String toString() => 'AppAssistantConfirmation[id=$id, runId=$runId, toolCallId=$toolCallId, tool=$tool, summary=$summary, arguments=$arguments, status=$status, decidedBy=$decidedBy, decidedAt=$decidedAt, expiresAt=$expiresAt, createdAt=$createdAt]';
+  String toString() => 'AppAssistantConfirmation[id=$id, runId=$runId, toolCallId=$toolCallId, tool=$tool, summary=$summary, arguments=$arguments, status=$status, decidedBy=$decidedBy, decidedAt=$decidedAt, expiresAt=$expiresAt, createdAt=$createdAt, changes=$changes, impact=$impact]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -115,6 +127,8 @@ class AppAssistantConfirmation {
     }
       json[r'expires_at'] = this.expiresAt.toUtc().toIso8601String();
       json[r'created_at'] = this.createdAt.toUtc().toIso8601String();
+      json[r'changes'] = this.changes;
+      json[r'impact'] = this.impact;
     return json;
   }
 
@@ -162,6 +176,10 @@ class AppAssistantConfirmation {
         decidedAt: mapDateTime(json, r'decided_at', r''),
         expiresAt: mapDateTime(json, r'expires_at', r'')!,
         createdAt: mapDateTime(json, r'created_at', r'')!,
+        changes: AppAssistantChange.listFromJson(json[r'changes']),
+        impact: json[r'impact'] is Iterable
+            ? (json[r'impact'] as Iterable).cast<String>().toList(growable: false)
+            : const [],
       );
     }
     return null;

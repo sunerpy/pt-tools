@@ -37,6 +37,7 @@ func encryptFixed(t *testing.T, uuid, password string, plain []byte) string {
 }
 
 type cookieCloudAPIEnv struct {
+	srv     *Server
 	mux     *http.ServeMux
 	server  *httptest.Server
 	mu      sync.Mutex
@@ -54,7 +55,7 @@ func newCookieCloudServer(t *testing.T) *cookieCloudAPIEnv {
 	}})
 	require.NoError(t, err)
 	enc := encryptFixed(t, "u1", "pw", plain)
-	e := &cookieCloudAPIEnv{}
+	e := &cookieCloudAPIEnv{srv: srv}
 	e.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/get/u1" {
 			http.NotFound(w, r)

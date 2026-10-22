@@ -10,6 +10,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/mcp"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -69,7 +70,7 @@ func (h *ChatOpsHandler) actor(msg notify.InboundMessage, src chatops.Source) Ac
 	if name == "" {
 		name = src.ChannelUserID
 	}
-	a := Actor{Owner: chatopsOwner(src), Entry: models.AssistantEntryChatOps, Name: name, CanWrite: src.PtAdmin}
+	a := Actor{Owner: chatopsOwner(src), Entry: models.AssistantEntryChatOps, Name: name, CanWrite: src.PtAdmin, CanConfig: src.PtAdmin}
 	lang := src.ReplyLang
 	a.Notify = func(ctx context.Context, ev Event) {
 		text, fields := chatopsEventText(ev, lang)
@@ -208,16 +209,51 @@ func chatopsEventText(ev Event, lang string) (string, map[string]any) {
 		switch {
 		case c.Status == models.AssistantConfirmPending:
 			expires := c.ExpiresAt.Local().Format("15:04")
+			changes, impact := changeLines(c.Changes), impactLines(c.Impact)
+			zh, en := "需要你确认："+c.Summary, "Please confirm: "+c.Summary
+			if changes != "" {
+				zh, en = zh+"\n改动：\n"+changes, en+"\nChanges:\n"+changes
+			}
+			if impact != "" {
+				zh, en = zh+"\n影响：\n"+impact, en+"\nImpact:\n"+impact
+			}
 			return tr(lang,
-					fmt.Sprintf("需要你确认：%s\n回复「确认」执行，回复别的内容取消（%s 以前有效）。", c.Summary, expires),
-					fmt.Sprintf("Please confirm: %s\nReply \"yes\" to run it; anything else cancels (valid until %s).", c.Summary, expires)),
-				map[string]any{"kind": "confirm", "summary": c.Summary, "expires": expires}
+					zh+fmt.Sprintf("\n回复「确认」执行，回复别的内容取消（%s 以前有效）。", expires),
+					en+fmt.Sprintf("\nReply \"yes\" to run it; anything else cancels (valid until %s).", expires)),
+				map[string]any{"kind": "confirm", "summary": c.Summary, "expires": expires, "changes": changes, "impact": impact}
 		case c.Status == models.AssistantConfirmExpired && c.DecidedBy == decidedByTimeout:
 			return tr(lang, "确认超时，没有执行："+c.Summary, "Confirmation timed out, not run: "+c.Summary),
 				map[string]any{"kind": "timeout", "summary": c.Summary}
 		}
 	}
 	return "", nil
+}
+
+// changeLines 把改动写成几行「- 状态：做种中 → 已暂停」；密钥只写改了。
+func changeLines(changes []mcp.Change) string {
+	lines := make([]string, 0, len(changes))
+	for _, ch := range changes {
+		switch {
+		case ch.Secret:
+			lines = append(lines, "- "+ch.Label+"：已更新（不显示）")
+		case ch.Before != "" && ch.After != "":
+			lines = append(lines, "- "+ch.Label+"："+ch.Before+" → "+ch.After)
+		case ch.After != "":
+			lines = append(lines, "- "+ch.Label+"："+ch.After)
+		default:
+			lines = append(lines, "- "+ch.Label+"："+ch.Before+" → （删除）")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// impactLines 把影响写成几行「- …」。
+func impactLines(impact []string) string {
+	lines := make([]string, 0, len(impact))
+	for _, it := range impact {
+		lines = append(lines, "- "+it)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // plainText 去掉回答里常见的 Markdown 记号（通知渠道按纯文本发）。

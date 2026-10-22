@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,7 +26,13 @@ func (s *Server) registerAssistantRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/assistant/settings", s.auth(s.apiAssistantSettingsPut))
 	mux.HandleFunc("POST /api/assistant/settings/test", s.auth(s.apiAssistantSettingsTest))
 	mux.HandleFunc("POST /api/assistant/settings/models", s.auth(s.apiAssistantSettingsModels))
+	mux.HandleFunc("POST /api/assistant/settings/voice-test", s.auth(s.apiAssistantVoiceTest))
+	mux.HandleFunc("POST /api/assistant/transcribe", s.auth(s.apiAssistantTranscribe))
 	mux.HandleFunc("GET /api/assistant/status", s.auth(s.apiAssistantStatus))
+	mux.HandleFunc("GET /api/assistant/models", s.auth(s.apiAssistantModels))
+	mux.HandleFunc("POST /api/assistant/attachments", s.auth(s.apiAssistantUpload))
+	mux.HandleFunc("GET /api/assistant/attachments/{id}", s.auth(s.apiAssistantAttachment))
+	mux.HandleFunc("DELETE /api/assistant/attachments/{id}", s.auth(s.apiAssistantAttachmentDelete))
 	mux.HandleFunc("GET /api/assistant/conversations", s.auth(s.apiAssistantConversations))
 	mux.HandleFunc("POST /api/assistant/conversations", s.auth(s.apiAssistantConversationCreate))
 	mux.HandleFunc("GET /api/assistant/conversations/{id}", s.auth(s.apiAssistantConversation))
@@ -53,7 +61,7 @@ func (s *Server) assistantWebActor(w http.ResponseWriter, r *http.Request) (assi
 		http.Error(w, "session 无效或已过期，请重新登录", http.StatusUnauthorized)
 		return assistant.Actor{}, false
 	}
-	return assistant.Actor{Owner: "web:" + user, Entry: models.AssistantEntryWeb, Name: user, CanWrite: true}, true
+	return assistant.Actor{Owner: "web:" + user, Entry: models.AssistantEntryWeb, Name: user, CanWrite: true, CanConfig: true}, true
 }
 
 // aiErrorStatus 是 AI 助手的错误对应的状态码。
@@ -129,6 +137,51 @@ func (s *Server) apiAssistantSettingsTest(w http.ResponseWriter, r *http.Request
 	writeJSON(w, got)
 }
 
+// apiAssistantVoiceTest 按输入（还没保存的也行）读一次 Voltip 的模型列表，看语音输入的地址与令牌能不能用。令牌的规则同 API Key。
+func (s *Server) apiAssistantVoiceTest(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.assistantService(w)
+	if !ok {
+		return
+	}
+	var in assistant.SettingsInput
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	got, err := svc.TestVoice(r.Context(), in)
+	if err != nil {
+		writeAIError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiAssistantTranscribe 把一段录音（请求体是 WAV，最多 MaxVoiceBytes）交给 Voltip 识别，回 {"text": "…"}。
+// ?language= 不为空时用它。只认网页登录：访问令牌只在后端。
+func (s *Server) apiAssistantTranscribe(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.assistantService(w)
+	if !ok {
+		return
+	}
+	wav, err := io.ReadAll(http.MaxBytesReader(w, r.Body, assistant.MaxVoiceBytes))
+	if err != nil {
+		http.Error(w, "录音太长：最多约 10 分钟", http.StatusRequestEntityTooLarge)
+		return
+	}
+	text, err := svc.Transcribe(r.Context(), wav, r.URL.Query().Get("language"))
+	switch {
+	case errors.Is(err, assistant.ErrVoiceDisabled):
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	case errors.Is(err, assistant.ErrInvalid):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]string{"text": text})
+}
+
 // apiAssistantSettingsModels 按输入读服务商的模型列表（GET {接口地址}/models），给设置页的模型下拉框。Key 的规则同测试连接。
 func (s *Server) apiAssistantSettingsModels(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.assistantService(w)
@@ -164,6 +217,136 @@ func (s *Server) apiAssistantStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, got)
 }
 
+// apiAssistantModels 是对话页的模型下拉框：设置里的模型在第一个，后面是服务商列出的（读不到时 error 写明原因）。
+func (s *Server) apiAssistantModels(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.assistantService(w)
+	if !ok {
+		return
+	}
+	if _, ok := s.assistantWebActor(w, r); !ok {
+		return
+	}
+	got, err := svc.ChatModels(r.Context())
+	if err != nil {
+		writeAIError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiAssistantUpload 收一个附件（multipart 的 file 字段）：图片或文本文件，传了还没发的只有自己看得到。
+func (s *Server) apiAssistantUpload(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.assistantService(w)
+	if !ok {
+		return
+	}
+	a, ok := s.assistantWebActor(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, assistant.MaxUploadBytes)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		http.Error(w, "要用 multipart/form-data 上传（字段名 file）", http.StatusBadRequest)
+		return
+	}
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				http.Error(w, "文件太大：图片最大 5 MB，文本文件最大 200 KB", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "没有收到文件（字段名 file）", http.StatusBadRequest)
+			return
+		}
+		if part.FormName() != "file" {
+			_ = part.Close()
+			continue
+		}
+		data, err := io.ReadAll(part)
+		_ = part.Close()
+		if err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				http.Error(w, "文件太大：图片最大 5 MB，文本文件最大 200 KB", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "读取上传的文件失败", http.StatusBadRequest)
+			return
+		}
+		got, err := svc.Upload(r.Context(), a, part.FileName(), data)
+		if err != nil {
+			writeAIError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(got)
+		return
+	}
+}
+
+// apiAssistantAttachment 回一个附件的内容：图片按原类型在页面上显示，文本文件按纯文本下载。
+// 只有白名单里的类型，不让浏览器猜类型，回应在沙箱里（就算内容是 HTML 也不会当网页跑）。
+func (s *Server) apiAssistantAttachment(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.assistantService(w)
+	if !ok {
+		return
+	}
+	a, ok := s.assistantWebActor(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	att, err := svc.Attachment(r.Context(), a, id)
+	if err != nil {
+		writeAIError(w, err)
+		return
+	}
+	h := w.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self'")
+	h.Set("Cache-Control", "private, max-age=86400")
+	disposition := "inline"
+	if att.Kind == models.AssistantAttachImage {
+		h.Set("Content-Type", att.MIME)
+	} else {
+		h.Set("Content-Type", "text/plain; charset=utf-8")
+		disposition = "attachment"
+	}
+	if cd := mime.FormatMediaType(disposition, map[string]string{"filename": att.Name}); cd != "" {
+		h.Set("Content-Disposition", cd)
+	} else {
+		h.Set("Content-Disposition", disposition)
+	}
+	_, _ = w.Write(att.Data)
+}
+
+func (s *Server) apiAssistantAttachmentDelete(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.assistantService(w)
+	if !ok {
+		return
+	}
+	a, ok := s.assistantWebActor(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := svc.DeleteAttachment(r.Context(), a, id); err != nil {
+		writeAIError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
 func (s *Server) apiAssistantConversations(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.assistantService(w)
 	if !ok {
@@ -181,10 +364,18 @@ func (s *Server) apiAssistantConversations(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, list)
 }
 
-// assistantCreateInput 是建会话的参数：Message 不为空时建好以后接着发这一条。
+// assistantCreateInput 是建会话的参数（网页与 App API 共用）：Message 不为空时建好以后接着发这一条，Model、Effort 同发消息。
 type assistantCreateInput struct {
 	Title   string `json:"title"`
 	Message string `json:"message"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+}
+
+// assistantWebCreateInput 是网页建会话的参数：还可以带附件（先 POST /api/assistant/attachments 传）。
+type assistantWebCreateInput struct {
+	assistantCreateInput
+	AttachmentIDs []uint `json:"attachment_ids,omitempty"`
 }
 
 // assistantCreateResult 是建会话的结果：带了消息时还有这次运行。
@@ -202,11 +393,11 @@ func (s *Server) apiAssistantConversationCreate(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	var in assistantCreateInput
+	var in assistantWebCreateInput
 	if !decodeStrictBody(w, r, &in) {
 		return
 	}
-	res, status, err := createAndSend(r.Context(), svc, a, in)
+	res, status, err := createAndSend(r.Context(), svc, a, in.assistantCreateInput, in.AttachmentIDs)
 	if err != nil {
 		writeAIError(w, err)
 		return
@@ -216,8 +407,8 @@ func (s *Server) apiAssistantConversationCreate(w http.ResponseWriter, r *http.R
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// createAndSend 建会话，带了消息时接着发（回 202）；网页与 App API 共用。
-func createAndSend(ctx context.Context, svc *assistant.Service, a assistant.Actor, in assistantCreateInput) (assistantCreateResult, int, error) {
+// createAndSend 建会话，带了消息或附件时接着发（回 202）；网页与 App API 共用（App API 不带附件）。
+func createAndSend(ctx context.Context, svc *assistant.Service, a assistant.Actor, in assistantCreateInput, attachments []uint) (assistantCreateResult, int, error) {
 	title := in.Title
 	if title == "" {
 		title = in.Message
@@ -227,10 +418,12 @@ func createAndSend(ctx context.Context, svc *assistant.Service, a assistant.Acto
 		return assistantCreateResult{}, 0, err
 	}
 	res := assistantCreateResult{Conversation: conv}
-	if in.Message == "" {
+	if in.Message == "" && len(attachments) == 0 {
 		return res, http.StatusCreated, nil
 	}
-	sent, err := svc.Send(ctx, a, conv.ID, in.Message)
+	sent, err := svc.SendWith(ctx, a, conv.ID, assistant.SendOptions{
+		Text: in.Message, Model: in.Model, Effort: in.Effort, Attachments: attachments,
+	})
 	if err != nil {
 		_ = svc.DeleteConversation(context.WithoutCancel(ctx), a, conv.ID)
 		return assistantCreateResult{}, 0, err
@@ -281,9 +474,21 @@ func (s *Server) apiAssistantConversationDelete(w http.ResponseWriter, r *http.R
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// assistantSendInput 是发消息的参数。
+// assistantSendInput 是发消息的参数（网页与 App API 共用）：Model 为空用设置里的模型，Effort 为空不指定推理等级。
 type assistantSendInput struct {
-	Text string `json:"text"`
+	Text   string `json:"text"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+}
+
+func (in assistantSendInput) options(attachments []uint) assistant.SendOptions {
+	return assistant.SendOptions{Text: in.Text, Model: in.Model, Effort: in.Effort, Attachments: attachments}
+}
+
+// assistantWebSendInput 是网页发消息的参数：还可以带附件。
+type assistantWebSendInput struct {
+	assistantSendInput
+	AttachmentIDs []uint `json:"attachment_ids,omitempty"`
 }
 
 func (s *Server) apiAssistantSend(w http.ResponseWriter, r *http.Request) {
@@ -299,11 +504,11 @@ func (s *Server) apiAssistantSend(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var in assistantSendInput
+	var in assistantWebSendInput
 	if !decodeStrictBody(w, r, &in) {
 		return
 	}
-	res, err := svc.Send(r.Context(), a, id, in.Text)
+	res, err := svc.SendWith(r.Context(), a, id, in.options(in.AttachmentIDs))
 	if err != nil {
 		writeAIError(w, err)
 		return

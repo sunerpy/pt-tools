@@ -9,15 +9,16 @@ Open System → API tokens (系统 → API 令牌).
 1. Click New (新建), enter a name (for example "My phone"), and choose the permissions and how long the token stays valid.
 2. The dialog that opens shows the token itself, starting with `ptt_`. It is shown only this once: copy it into the client before closing the dialog. If you lose it, revoke it and create another.
 
-| Permission              | What it allows                                                                                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Read (读取)             | Overview, sites, torrents in the downloaders, RSS push records, search, brush tasks, organise history, subscriptions and Explore                                |
-| Operate (操作)          | Pause, resume and delete torrents, push torrents, sign in to sites, create, pause, resume, search and delete subscriptions                                      |
-| qB compatible (qB 兼容) | Signing in to the [qB-compatible entrance](qbit-compat.md), for tools that only work with qBittorrent such as MoviePilot and IYUU; independent of the other two |
-| MCP read (MCP 读取)     | Read-only [MCP](mcp.md) tools for AI assistants: torrents, downloaders, site statistics, subscriptions and search                                               |
-| MCP write (MCP 操作)    | MCP tools that pause, resume, delete and push torrents and add subscriptions; the assistant has to ask you each time                                            |
+| Permission              | What it allows                                                                                                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Read (读取)             | Overview, sites, torrents in the downloaders, RSS push records, search, brush tasks, organise history, subscriptions and Explore                                                                                                                        |
+| Operate (操作)          | Pause, resume and delete torrents, push torrents, sign in to sites, create, pause, resume, search and delete subscriptions                                                                                                                              |
+| Config (配置)           | Read and change pt-tools' configuration (the [App API configuration endpoints](../reference/app-api.md#configuration) and the MCP configuration tools); secrets are write-only. Also needs Read or Operate, and MCP read or MCP write for the MCP tools |
+| qB compatible (qB 兼容) | Signing in to the [qB-compatible entrance](qbit-compat.md), for tools that only work with qBittorrent such as MoviePilot and IYUU; independent of the other two                                                                                         |
+| MCP read (MCP 读取)     | Read-only [MCP](mcp.md) tools for AI assistants: torrents, downloaders, site statistics, subscriptions and search                                                                                                                                       |
+| MCP write (MCP 操作)    | MCP tools that pause, resume, delete and push torrents and add subscriptions; the assistant has to ask you each time                                                                                                                                    |
 
-A token with only Operate cannot read anything, so clients such as the app usually need both; a token for the qB-compatible entrance needs only qB compatible; a token for an AI assistant needs MCP read, plus MCP write if it may change your downloaders. Validity can be 30 days, 90 days, 1 year or no expiry; an expired token stops working on its own. You can create up to 50 tokens.
+A token with only Operate cannot read anything, so clients such as the app usually need both; add Config for a script or assistant that should read or change the configuration (existing tokens do not get it automatically); a token for the qB-compatible entrance needs only qB compatible; a token for an AI assistant needs MCP read, plus MCP write if it may change your downloaders. Validity can be 30 days, 90 days, 1 year or no expiry; an expired token stops working on its own. You can create up to 50 tokens.
 
 ## Using a token
 
@@ -39,4 +40,4 @@ See the [App API](../reference/app-api.md) for the endpoints.
 
 - pt-tools stores only the SHA-256 digest of each token, not the token itself, so the database alone cannot be used to recover a token.
 - Keep tokens as safe as passwords. When reaching pt-tools over the internet, use HTTPS (for example behind a reverse proxy); otherwise the token crosses the network in plain text.
-- Settings, site cookies, downloaders and notification channels are only available to a web login: tokens cannot reach them and cannot create other tokens.
+- The settings endpoints the web pages use only accept a web login; tokens cannot reach them. A token with Config can change most settings through the configuration endpoints, but cannot read secrets (cookies, passwords and tokens only show whether they are set), cannot change the login password, API tokens, remote access, the encryption key or the AI assistant's own settings, and cannot create other tokens.

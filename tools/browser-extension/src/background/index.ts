@@ -339,7 +339,10 @@ const pushLock = createLock();
  * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器。手动同步总是推。
  * 读 Cookie、比指纹、推送、记指纹都在 pushLock 里。
  */
-function syncKnownSite(site: KnownSite, opts: { skipUnchanged?: boolean } = {}): Promise<boolean> {
+function syncKnownSite(
+  site: KnownSite,
+  opts: { skipUnchanged?: boolean } = {},
+): Promise<{ pushed: boolean; warning?: string }> {
   return pushLock(async () => {
     if (site.syncField !== "cookie") {
       throw new Error(t("error.authSyncUnsupported", site.name, site.syncField));
@@ -358,18 +361,18 @@ function syncKnownSite(site: KnownSite, opts: { skipUnchanged?: boolean } = {}):
 
     const hash = await pushFingerprint(baseUrl, health.cookieString);
     if (opts.skipUnchanged && (await getSyncHashMap())[site.id] === hash) {
-      return false;
+      return { pushed: false };
     }
 
     const api = new PtToolsApiClient(baseUrl);
-    await api.syncSiteCredential(site, health.cookieString);
+    const { warning } = await api.syncSiteCredential(site, health.cookieString);
 
     const syncedAt = new Date().toISOString();
     await setLastSync(site.id, syncedAt);
     await setSyncHash(site.id, hash);
     // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
     await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
-    return true;
+    return { pushed: true, warning };
   });
 }
 
@@ -396,11 +399,18 @@ async function maybeAutoSyncByDomain(domain: string): Promise<void> {
   autoSyncThrottle.set(matched.id, now);
 
   try {
-    if (!(await syncKnownSite(matched, { skipUnchanged: true }))) {
+    const result = await syncKnownSite(matched, { skipUnchanged: true });
+    if (!result.pushed) {
       return;
     }
     logger.info("Auto-sync completed", { siteId: matched.id });
-    notifyAutoSync("success", matched.name, t("notification.autoSyncSuccessBody", matched.name));
+    notifyAutoSync(
+      "success",
+      matched.name,
+      result.warning
+        ? t("notification.autoSyncWarnBody", matched.name, result.warning)
+        : t("notification.autoSyncSuccessBody", matched.name),
+    );
     const [activeTab, map] = await Promise.all([getActiveTab(), getTabStatusMap()]);
     if (activeTab?.id && map[String(activeTab.id)]?.mode === "known") {
       await resolveCurrentTabStatus();
@@ -496,12 +506,42 @@ onMessage("GET_STATUS", async () => getStatusPayload());
 
 onMessage("GET_TAB_STATUS", async () => resolveCurrentTabStatus());
 
-onMessage("GET_ALL_SITES_STATUS", async () => {
-  const statuses: KnownSiteStatus[] = [];
-  for (const site of KNOWN_SITES) {
-    statuses.push(await buildKnownSiteStatus(site));
+// 六十多个站点并行读：以前逐个站点串行读 Cookie 和两份存储，弹窗要等它全部读完才显示，打开要好几秒
+onMessage("GET_ALL_SITES_STATUS", async (): Promise<KnownSiteStatus[]> => {
+  const [autoSyncMap, lastSyncMap] = await Promise.all([getAutoSyncMap(), getLastSyncMap()]);
+  return Promise.all(
+    KNOWN_SITES.map(async (site) => {
+      const health = await checkCookieHealth(site);
+      return {
+        site,
+        cookieStatus: health.status,
+        cookieExpireDays: health.expireDays,
+        hasCookie: health.hasCookie,
+        lastSync: lastSyncMap[site.id] ?? null,
+        autoSync: autoSyncMap[site.id] ?? false,
+      };
+    }),
+  );
+});
+
+// 弹窗打开时单独问一次 pt-tools 在不在线（最多等 4 秒），页头的连接状态不用等站点列表
+const CONNECTION_CHECK_TIMEOUT_MS = 4000;
+
+onMessage("CHECK_CONNECTION", async (): Promise<PtToolsConnection> => {
+  const connection = await getConnection();
+  const baseUrl = connection.baseUrl?.trim();
+  if (!baseUrl) {
+    return { ...connection, connected: false };
   }
-  return statuses;
+  let connected = false;
+  try {
+    await new PtToolsApiClient(baseUrl).ping(CONNECTION_CHECK_TIMEOUT_MS);
+    connected = true;
+  } catch (error: unknown) {
+    logger.warn("connection check failed", { error });
+  }
+  await updateConnection(baseUrl, { connected });
+  return { ...connection, connected };
 });
 
 onMessage("GET_SITE_LOGIN_STATE", async (): Promise<SiteLoginStateRecord[]> => {
@@ -520,11 +560,12 @@ onMessage("SYNC_SITE_COOKIES", async ({ siteId }) => {
     throw new Error(t("error.unknownSite"));
   }
 
-  await syncKnownSite(site);
+  const { warning } = await syncKnownSite(site);
   const refreshed = await resolveCurrentTabStatus();
   return {
     ok: true,
     status: refreshed,
+    warning,
   };
 });
 
@@ -541,6 +582,7 @@ onMessage("TOGGLE_AUTO_SYNC", async ({ siteId, enabled }) => {
 onMessage("BATCH_SYNC_SITES", async ({ siteIds }) => {
   const synced: string[] = [];
   const failed: Array<{ siteId: string; error: string }> = [];
+  const warnings: Array<{ siteId: string; warning: string }> = [];
 
   for (const siteId of siteIds) {
     const site = KNOWN_SITES.find((item) => item.id === siteId);
@@ -550,8 +592,9 @@ onMessage("BATCH_SYNC_SITES", async ({ siteIds }) => {
     }
 
     try {
-      await syncKnownSite(site);
+      const { warning } = await syncKnownSite(site);
       synced.push(siteId);
+      if (warning) warnings.push({ siteId, warning });
     } catch (error: unknown) {
       failed.push({
         siteId,
@@ -561,7 +604,7 @@ onMessage("BATCH_SYNC_SITES", async ({ siteIds }) => {
   }
 
   await publishStatus();
-  return { synced, failed };
+  return { synced, failed, warnings };
 });
 
 onMessage("BATCH_OPEN_TABS", async ({ siteIds, timeoutMs }) => {

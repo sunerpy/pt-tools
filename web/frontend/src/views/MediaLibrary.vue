@@ -777,578 +777,603 @@ onMounted(refresh);
     </Teleport>
     <TmdbKeyNotice class="pt-cards__full" usage="整理入库的识别与刮削" />
 
-    <PtPanel title="整理设置" icon="sliders-horizontal">
-      <div v-if="settingsFailed" class="pt-note pt-note--warn">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>设置没读到，点刷新重试。</span>
-      </div>
-      <el-form class="pt-form ml-form" label-position="top" @submit.prevent>
-        <el-form-item label="自动整理">
-          <div class="ml-switch">
-            <el-switch v-model="sform.auto_enabled" data-testid="ml-auto" />
-            <span>pt-tools 推送的种子下载完成后自动整理</span>
+    <div class="pt-cols">
+      <div class="pt-col">
+        <PtPanel title="整理设置" icon="sliders-horizontal">
+          <div v-if="settingsFailed" class="pt-note pt-note--warn">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>设置没读到，点刷新重试。</span>
           </div>
-          <div v-if="settings?.auto_since && sform.auto_enabled" class="field-tip">
-            只整理 {{ formatShortDateTime(settings.auto_since) }} 以后下载完成的种子
-          </div>
-        </el-form-item>
-        <el-form-item label="定期扫描下载器">
-          <div class="ml-switch">
-            <el-switch v-model="sform.scan_enabled" data-testid="ml-scan" />
-            <span>按下面的范围整理下载器里已完成的种子（不是 pt-tools 推送的也整理）</span>
-          </div>
-          <div v-if="sform.scan_enabled" class="ml-inline">
-            <span>每</span>
-            <el-input-number
-              v-model="sform.scan_interval_min"
-              :min="10"
-              :max="1440"
-              controls-position="right"
-              data-testid="ml-scan-interval"
-              aria-label="扫描间隔（分钟）" />
-            <span>分钟一次</span>
-          </div>
-          <div
-            v-if="sform.scan_enabled && scanRunText"
-            class="field-tip"
-            data-testid="ml-scan-runs">
-            {{ scanRunText }}
-          </div>
-        </el-form-item>
-        <el-form-item label="目录监控">
-          <div class="ml-inline ml-inline--grow">
-            <span>每</span>
-            <el-input-number
-              v-model="sform.watch_interval_min"
-              :min="1"
-              :max="1440"
-              controls-position="right"
-              data-testid="ml-watch-interval"
-              aria-label="目录监控的扫描间隔（分钟）" />
-            <span>分钟扫一次下面「目录监控」里开着的目录</span>
-          </div>
-          <div
-            v-if="watchDirs.some((d) => d.enabled) && watchRunText"
-            class="field-tip"
-            data-testid="ml-watch-runs">
-            {{ watchRunText }}
-          </div>
-        </el-form-item>
-        <div class="ml-row">
-          <el-form-item label="范围：下载器（不选时不限）">
-            <el-select
-              v-model="sform.downloaders"
-              multiple
-              clearable
-              placeholder="全部下载器"
-              data-testid="ml-scope-dl">
-              <el-option
-                v-for="d in downloaders"
-                :key="d.id"
-                :label="d.name"
-                :value="d.id as number" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="范围：分类（不填时不限）">
-            <el-select
-              v-model="sform.categories"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              :reserve-keyword="false"
-              placeholder="输入后回车，如 movies"
-              data-testid="ml-scope-cat" />
-          </el-form-item>
-          <el-form-item label="范围：标签（不填时不限）">
-            <el-select
-              v-model="sform.tags"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              :reserve-keyword="false"
-              placeholder="输入后回车"
-              data-testid="ml-scope-tag" />
-          </el-form-item>
-          <el-form-item label="范围：保存路径（下载器里看到的，一行一个）">
-            <el-input
-              v-model="savePathsText"
-              type="textarea"
-              :rows="2"
-              placeholder="/downloads/movies"
-              data-testid="ml-scope-path" />
-          </el-form-item>
-        </div>
-        <div class="ml-row">
-          <el-form-item label="视频最小体积（MB）">
-            <el-input-number
-              v-model="sform.min_video_mb"
-              :min="1"
-              :max="10240"
-              controls-position="right"
-              data-testid="ml-min-mb" />
-            <div class="field-tip">更小的视频当作样片、花絮，不整理</div>
-          </el-form-item>
-          <el-form-item label="入库通知">
-            <el-select
-              v-model="sform.notify_channels"
-              multiple
-              clearable
-              placeholder="不通知"
-              data-testid="ml-notify">
-              <el-option v-for="c in channels" :key="c.id" :label="c.name" :value="c.id" />
-            </el-select>
-            <div class="field-tip">新入库时发标题、季集、画质与海报链接</div>
-          </el-form-item>
-        </div>
-        <el-form-item label="删种时一并删除入库链接">
-          <div class="ml-switch">
-            <el-switch v-model="sform.delete_links_on_remove" data-testid="ml-delete-links" />
-            <span>种子连数据一起删掉以后，把从它整理出的硬链接与软链接也删掉</span>
-          </div>
-          <div class="field-tip">
-            默认关闭：删种后库里的文件照样能看。打开后硬链接入库的种子才能被低空间紧急清理挑中（删掉以后空间才腾得出来）；复制与移动的文件不删。
-          </div>
-        </el-form-item>
-        <el-button
-          type="primary"
-          :loading="savingSettings"
-          data-testid="ml-save-settings"
-          @click="saveSettings">
-          <PtIcon v-if="!savingSettings" name="save" :size="14" /><span>保存</span>
-        </el-button>
-      </el-form>
-    </PtPanel>
-
-    <PtPanel
-      title="媒体库"
-      icon="folder-open"
-      :count="libraries.length"
-      action="添加"
-      action-icon="plus"
-      @action="openLibrary()">
-      <p class="ml-tip ml-tip--top">
-        每个库收一类条目：电影或剧集，可以只收动画（动画优先进只收动画的库）。目录要填 pt-tools
-        里看到的路径， Docker 里要把媒体库挂进容器。
-      </p>
-      <div
-        v-if="libraries.length && librariesDS.error.value"
-        class="pt-note pt-note--warn ml-stale"
-        data-testid="ml-libs-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>刷新失败：{{ librariesDS.errorText.value }}。下面是上次读到的。</span>
-      </div>
-      <PtDataState
-        v-if="!libraries.length"
-        :state="librariesDS.state.value"
-        :title="librariesDS.state.value === 'empty' ? '还没有媒体库' : ''"
-        :sub="
-          librariesDS.errorText.value ||
-          (librariesDS.state.value === 'empty' ? '点右上角「添加」，电影与剧集各建一个' : '')
-        "
-        data-testid="ml-libs-state" />
-      <el-table
-        v-else-if="!isMobile"
-        :data="libraries"
-        row-key="id"
-        class="pt-grid"
-        data-testid="ml-libs">
-        <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
-        <el-table-column label="类型" width="130">
-          <template #default="{ row }">{{ libKindText(row) }}</template>
-        </el-table-column>
-        <el-table-column
-          label="目录与命名"
-          min-width="300"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip>
-          <template #default="{ row }">
-            <div class="ml-path">{{ row.path }}</div>
-            <div class="ml-sub">{{ row.preview }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="整理方式" width="96">
-          <template #default="{ row }">{{ modeLabel(row.mode) }}</template>
-        </el-table-column>
-        <el-table-column label="刮削" width="80">
-          <template #default="{ row }">
-            <PtTag v-if="row.scrape">{{ row.scrape_overwrite ? "覆盖" : "开" }}</PtTag>
-            <span v-else class="ml-sub">关</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="启用" width="76">
-          <template #default="{ row }">
-            <el-switch
-              :model-value="row.enabled"
-              :aria-label="`启用媒体库 ${row.name}`"
-              :data-testid="`ml-lib-enabled-${row.id}`"
-              @update:model-value="
-                (v: string | number | boolean) => toggleLibrary(row, Boolean(v))
-              " />
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="120" align="right">
-          <template #default="{ row }">
-            <el-button link :data-testid="`ml-lib-edit-${row.id}`" @click="openLibrary(row)"
-              >编辑</el-button
-            >
-            <el-button
-              link
-              type="danger"
-              :data-testid="`ml-lib-del-${row.id}`"
-              @click="removeLibrary(row)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else class="ml-cards">
-        <PtRowCard v-for="l in libraries" :key="l.id">
-          <template #title>{{ l.name }}</template>
-          <template #meta>
-            <span
-              >{{ libKindText(l) }} · {{ modeLabel(l.mode) }}{{ l.scrape ? " · 刮削" : "" }}</span
-            >
-            <span class="ml-full">{{ l.path }}</span>
-            <span class="ml-full">{{ l.preview }}</span>
-          </template>
-          <template #status>
-            <el-switch
-              :model-value="l.enabled"
-              :aria-label="`启用媒体库 ${l.name}`"
-              @update:model-value="
-                (v: string | number | boolean) => toggleLibrary(l, Boolean(v))
-              " />
-          </template>
-          <template #actions>
-            <el-button size="small" @click="openLibrary(l)">编辑</el-button>
-            <el-button size="small" type="danger" plain @click="removeLibrary(l)">删除</el-button>
-          </template>
-        </PtRowCard>
-      </div>
-    </PtPanel>
-
-    <PtPanel
-      title="二级分类"
-      icon="tags"
-      :count="classify.movie.length + classify.tv.length"
-      action="填入常用分类"
-      action-icon="sparkles"
-      @action="fillClassifyPresets">
-      <p class="ml-tip ml-tip--top">
-        媒体库勾选「按二级分类放进子目录」以后，条目按这里的规则放进库目录下的分类目录，例如「电影/华语电影/…」。从上往下取第一条对得上的：一条里的几个条件都要满足，一个条件里选了几个时满足其中一个就行；都对不上时直接放进库目录。
-      </p>
-      <div
-        v-if="classifyDS.error.value"
-        class="pt-note pt-note--warn ml-stale"
-        data-testid="ml-classify-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>读取失败：{{ classifyDS.errorText.value }}</span>
-      </div>
-      <div class="ml-classify" data-testid="ml-classify">
-        <section
-          v-for="k in CLASSIFY_KINDS"
-          :key="k.kind"
-          class="ml-classify__kind"
-          :data-testid="`ml-classify-${k.kind}`">
-          <div class="ml-classify__head">
-            <span class="ml-classify__title">{{ k.label }}</span>
-            <el-button
-              link
-              type="primary"
-              :data-testid="`ml-classify-add-${k.kind}`"
-              @click="openRule(k.kind)"
-              >添加</el-button
-            >
-          </div>
-          <div v-if="!classify[k.kind].length" class="ml-sub">没有规则：{{ k.label }}不分类</div>
-          <ol v-else class="ml-classify__list">
-            <li
-              v-for="(r, i) in classify[k.kind]"
-              :key="r.name"
-              class="ml-classify__row"
-              :data-testid="`ml-rule-${k.kind}-${i}`">
-              <div class="ml-classify__text">
-                <span class="ml-classify__name">{{ r.name }}</span>
-                <span class="ml-sub">{{ classifyRuleSummary(k.kind, r) }}</span>
+          <el-form class="pt-form ml-form" label-position="top" @submit.prevent>
+            <el-form-item label="自动整理">
+              <div class="ml-switch">
+                <el-switch v-model="sform.auto_enabled" data-testid="ml-auto" />
+                <span>pt-tools 推送的种子下载完成后自动整理</span>
               </div>
-              <div class="ml-classify__acts">
-                <el-button
-                  link
-                  :disabled="i === 0 || classifySaving"
-                  :aria-label="`上移 ${r.name}`"
-                  @click="moveRule(k.kind, i, -1)"
-                  >上移</el-button
-                >
-                <el-button
-                  link
-                  :disabled="i === classify[k.kind].length - 1 || classifySaving"
-                  :aria-label="`下移 ${r.name}`"
-                  :data-testid="`ml-rule-down-${k.kind}-${i}`"
-                  @click="moveRule(k.kind, i, 1)"
-                  >下移</el-button
-                >
-                <el-button
-                  link
-                  :data-testid="`ml-rule-edit-${k.kind}-${i}`"
-                  @click="openRule(k.kind, i)"
+              <div v-if="settings?.auto_since && sform.auto_enabled" class="field-tip">
+                只整理 {{ formatShortDateTime(settings.auto_since) }} 以后下载完成的种子
+              </div>
+            </el-form-item>
+            <el-form-item label="定期扫描下载器">
+              <div class="ml-switch">
+                <el-switch v-model="sform.scan_enabled" data-testid="ml-scan" />
+                <span>按下面的范围整理下载器里已完成的种子（不是 pt-tools 推送的也整理）</span>
+              </div>
+              <div v-if="sform.scan_enabled" class="ml-inline">
+                <span>每</span>
+                <el-input-number
+                  v-model="sform.scan_interval_min"
+                  :min="10"
+                  :max="1440"
+                  controls-position="right"
+                  data-testid="ml-scan-interval"
+                  aria-label="扫描间隔（分钟）" />
+                <span>分钟一次</span>
+              </div>
+              <div
+                v-if="sform.scan_enabled && scanRunText"
+                class="field-tip"
+                data-testid="ml-scan-runs">
+                {{ scanRunText }}
+              </div>
+            </el-form-item>
+            <el-form-item label="目录监控">
+              <div class="ml-inline ml-inline--grow">
+                <span>每</span>
+                <el-input-number
+                  v-model="sform.watch_interval_min"
+                  :min="1"
+                  :max="1440"
+                  controls-position="right"
+                  data-testid="ml-watch-interval"
+                  aria-label="目录监控的扫描间隔（分钟）" />
+                <span>分钟扫一次下面「目录监控」里开着的目录</span>
+              </div>
+              <div
+                v-if="watchDirs.some((d) => d.enabled) && watchRunText"
+                class="field-tip"
+                data-testid="ml-watch-runs">
+                {{ watchRunText }}
+              </div>
+            </el-form-item>
+            <div class="ml-row">
+              <el-form-item label="范围：下载器（不选时不限）">
+                <el-select
+                  v-model="sform.downloaders"
+                  multiple
+                  clearable
+                  placeholder="全部下载器"
+                  data-testid="ml-scope-dl">
+                  <el-option
+                    v-for="d in downloaders"
+                    :key="d.id"
+                    :label="d.name"
+                    :value="d.id as number" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="范围：分类（不填时不限）">
+                <el-select
+                  v-model="sform.categories"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  :reserve-keyword="false"
+                  placeholder="输入后回车，如 movies"
+                  data-testid="ml-scope-cat" />
+              </el-form-item>
+              <el-form-item label="范围：标签（不填时不限）">
+                <el-select
+                  v-model="sform.tags"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  :reserve-keyword="false"
+                  placeholder="输入后回车"
+                  data-testid="ml-scope-tag" />
+              </el-form-item>
+              <el-form-item label="范围：保存路径（下载器里看到的，一行一个）">
+                <el-input
+                  v-model="savePathsText"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="/downloads/movies"
+                  data-testid="ml-scope-path" />
+              </el-form-item>
+            </div>
+            <div class="ml-row">
+              <el-form-item label="视频最小体积（MB）">
+                <el-input-number
+                  v-model="sform.min_video_mb"
+                  :min="1"
+                  :max="10240"
+                  controls-position="right"
+                  data-testid="ml-min-mb" />
+                <div class="field-tip">更小的视频当作样片、花絮，不整理</div>
+              </el-form-item>
+              <el-form-item label="入库通知">
+                <el-select
+                  v-model="sform.notify_channels"
+                  multiple
+                  clearable
+                  placeholder="不通知"
+                  data-testid="ml-notify">
+                  <el-option v-for="c in channels" :key="c.id" :label="c.name" :value="c.id" />
+                </el-select>
+                <div class="field-tip">新入库时发标题、季集、画质与海报链接</div>
+              </el-form-item>
+            </div>
+            <el-form-item label="删种时一并删除入库链接">
+              <div class="ml-switch">
+                <el-switch v-model="sform.delete_links_on_remove" data-testid="ml-delete-links" />
+                <span>种子连数据一起删掉以后，把从它整理出的硬链接与软链接也删掉</span>
+              </div>
+              <div class="field-tip">
+                默认关闭：删种后库里的文件照样能看。打开后硬链接入库的种子才能被低空间紧急清理挑中（删掉以后空间才腾得出来）；复制与移动的文件不删。
+              </div>
+            </el-form-item>
+            <el-button
+              type="primary"
+              :loading="savingSettings"
+              data-testid="ml-save-settings"
+              @click="saveSettings">
+              <PtIcon v-if="!savingSettings" name="save" :size="14" /><span>保存</span>
+            </el-button>
+          </el-form>
+        </PtPanel>
+
+        <PtPanel
+          title="媒体库"
+          icon="folder-open"
+          :count="libraries.length"
+          action="添加"
+          action-icon="plus"
+          @action="openLibrary()">
+          <p class="ml-tip ml-tip--top">
+            每个库收一类条目：电影或剧集，可以只收动画（动画优先进只收动画的库）。目录要填 pt-tools
+            里看到的路径， Docker 里要把媒体库挂进容器。
+          </p>
+          <div
+            v-if="libraries.length && librariesDS.error.value"
+            class="pt-note pt-note--warn ml-stale"
+            data-testid="ml-libs-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>刷新失败：{{ librariesDS.errorText.value }}。下面是上次读到的。</span>
+          </div>
+          <PtDataState
+            v-if="!libraries.length"
+            :state="librariesDS.state.value"
+            :title="librariesDS.state.value === 'empty' ? '还没有媒体库' : ''"
+            :sub="
+              librariesDS.errorText.value ||
+              (librariesDS.state.value === 'empty' ? '点右上角「添加」，电影与剧集各建一个' : '')
+            "
+            data-testid="ml-libs-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="libraries"
+            row-key="id"
+            class="pt-grid"
+            data-testid="ml-libs">
+            <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
+            <el-table-column label="类型" width="130">
+              <template #default="{ row }">{{ libKindText(row) }}</template>
+            </el-table-column>
+            <el-table-column
+              label="目录与命名"
+              min-width="300"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip>
+              <template #default="{ row }">
+                <div class="ml-path">{{ row.path }}</div>
+                <div class="ml-sub">{{ row.preview }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="整理方式" width="96">
+              <template #default="{ row }">{{ modeLabel(row.mode) }}</template>
+            </el-table-column>
+            <el-table-column label="刮削" width="80">
+              <template #default="{ row }">
+                <PtTag v-if="row.scrape">{{ row.scrape_overwrite ? "覆盖" : "开" }}</PtTag>
+                <span v-else class="ml-sub">关</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="启用" width="76">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="row.enabled"
+                  :aria-label="`启用媒体库 ${row.name}`"
+                  :data-testid="`ml-lib-enabled-${row.id}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleLibrary(row, Boolean(v))
+                  " />
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="120" align="right">
+              <template #default="{ row }">
+                <el-button link :data-testid="`ml-lib-edit-${row.id}`" @click="openLibrary(row)"
                   >编辑</el-button
                 >
                 <el-button
                   link
                   type="danger"
-                  :data-testid="`ml-rule-del-${k.kind}-${i}`"
-                  @click="removeRule(k.kind, i)"
+                  :data-testid="`ml-lib-del-${row.id}`"
+                  @click="removeLibrary(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="ml-cards">
+            <PtRowCard v-for="l in libraries" :key="l.id">
+              <template #title>{{ l.name }}</template>
+              <template #meta>
+                <span
+                  >{{ libKindText(l) }} · {{ modeLabel(l.mode)
+                  }}{{ l.scrape ? " · 刮削" : "" }}</span
+                >
+                <span class="ml-full">{{ l.path }}</span>
+                <span class="ml-full">{{ l.preview }}</span>
+              </template>
+              <template #status>
+                <el-switch
+                  :model-value="l.enabled"
+                  :aria-label="`启用媒体库 ${l.name}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleLibrary(l, Boolean(v))
+                  " />
+              </template>
+              <template #actions>
+                <el-button size="small" @click="openLibrary(l)">编辑</el-button>
+                <el-button size="small" type="danger" plain @click="removeLibrary(l)"
+                  >删除</el-button
+                >
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
+      </div>
+
+      <div class="pt-col">
+        <PtPanel
+          title="二级分类"
+          icon="tags"
+          :count="classify.movie.length + classify.tv.length"
+          action="填入常用分类"
+          action-icon="sparkles"
+          @action="fillClassifyPresets">
+          <p class="ml-tip ml-tip--top">
+            媒体库勾选「按二级分类放进子目录」以后，条目按这里的规则放进库目录下的分类目录，例如「电影/华语电影/…」。从上往下取第一条对得上的：一条里的几个条件都要满足，一个条件里选了几个时满足其中一个就行；都对不上时直接放进库目录。
+          </p>
+          <div
+            v-if="classifyDS.error.value"
+            class="pt-note pt-note--warn ml-stale"
+            data-testid="ml-classify-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>读取失败：{{ classifyDS.errorText.value }}</span>
+          </div>
+          <div class="ml-classify" data-testid="ml-classify">
+            <section
+              v-for="k in CLASSIFY_KINDS"
+              :key="k.kind"
+              class="ml-classify__kind"
+              :data-testid="`ml-classify-${k.kind}`">
+              <div class="ml-classify__head">
+                <span class="ml-classify__title">{{ k.label }}</span>
+                <el-button
+                  link
+                  type="primary"
+                  :data-testid="`ml-classify-add-${k.kind}`"
+                  @click="openRule(k.kind)"
+                  >添加</el-button
+                >
+              </div>
+              <div v-if="!classify[k.kind].length" class="ml-sub">
+                没有规则：{{ k.label }}不分类
+              </div>
+              <ol v-else class="ml-classify__list">
+                <li
+                  v-for="(r, i) in classify[k.kind]"
+                  :key="r.name"
+                  class="ml-classify__row"
+                  :data-testid="`ml-rule-${k.kind}-${i}`">
+                  <div class="ml-classify__text">
+                    <span class="ml-classify__name">{{ r.name }}</span>
+                    <span class="ml-sub">{{ classifyRuleSummary(k.kind, r) }}</span>
+                  </div>
+                  <div class="ml-classify__acts">
+                    <el-button
+                      link
+                      :disabled="i === 0 || classifySaving"
+                      :aria-label="`上移 ${r.name}`"
+                      @click="moveRule(k.kind, i, -1)"
+                      >上移</el-button
+                    >
+                    <el-button
+                      link
+                      :disabled="i === classify[k.kind].length - 1 || classifySaving"
+                      :aria-label="`下移 ${r.name}`"
+                      :data-testid="`ml-rule-down-${k.kind}-${i}`"
+                      @click="moveRule(k.kind, i, 1)"
+                      >下移</el-button
+                    >
+                    <el-button
+                      link
+                      :data-testid="`ml-rule-edit-${k.kind}-${i}`"
+                      @click="openRule(k.kind, i)"
+                      >编辑</el-button
+                    >
+                    <el-button
+                      link
+                      type="danger"
+                      :data-testid="`ml-rule-del-${k.kind}-${i}`"
+                      @click="removeRule(k.kind, i)"
+                      >删除</el-button
+                    >
+                  </div>
+                </li>
+              </ol>
+            </section>
+          </div>
+        </PtPanel>
+
+        <PtPanel
+          title="目录监控"
+          icon="eye"
+          :count="watchDirs.length"
+          action="添加"
+          action-icon="plus"
+          @action="openWatchDir()">
+          <p class="ml-tip ml-tip--top">
+            放进这些目录的视频（不是下载器里的种子，例如手动拷进来的、别的工具下载的）按媒体库整理：目录下的每一项（一个文件，或一个文件夹）当作一个种子，按名字识别。最近
+            2
+            分钟里还在改动的先不整理；文件夹里后来多了几集时再整理新的那几集。不要监控下载器的下载目录（那里的种子由上面的自动整理与定期扫描处理），也不能是媒体库的目录。
+          </p>
+          <div
+            v-if="watchDS.error.value"
+            class="pt-note pt-note--warn ml-stale"
+            data-testid="ml-watch-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>读取失败：{{ watchDS.errorText.value }}</span>
+          </div>
+          <div v-if="!watchDirs.length" class="ml-sub" data-testid="ml-watch-empty">
+            还没有监控的目录
+          </div>
+          <ul v-else class="ml-watch" data-testid="ml-watch">
+            <li
+              v-for="d in watchDirs"
+              :key="d.id"
+              class="ml-classify__row"
+              :data-testid="`ml-watch-${d.id}`">
+              <div class="ml-classify__text">
+                <span class="ml-path">{{ d.path }}</span>
+              </div>
+              <div class="ml-classify__acts">
+                <el-switch
+                  :model-value="d.enabled"
+                  :aria-label="`监控 ${d.path}`"
+                  :data-testid="`ml-watch-enabled-${d.id}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleWatchDir(d, Boolean(v))
+                  " />
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`ml-watch-del-${d.id}`"
+                  @click="removeWatchDir(d)"
                   >删除</el-button
                 >
               </div>
             </li>
-          </ol>
-        </section>
-      </div>
-    </PtPanel>
+          </ul>
+        </PtPanel>
 
-    <PtPanel
-      title="目录监控"
-      icon="eye"
-      :count="watchDirs.length"
-      action="添加"
-      action-icon="plus"
-      @action="openWatchDir()">
-      <p class="ml-tip ml-tip--top">
-        放进这些目录的视频（不是下载器里的种子，例如手动拷进来的、别的工具下载的）按媒体库整理：目录下的每一项（一个文件，或一个文件夹）当作一个种子，按名字识别。最近
-        2
-        分钟里还在改动的先不整理；文件夹里后来多了几集时再整理新的那几集。不要监控下载器的下载目录（那里的种子由上面的自动整理与定期扫描处理），也不能是媒体库的目录。
-      </p>
-      <div
-        v-if="watchDS.error.value"
-        class="pt-note pt-note--warn ml-stale"
-        data-testid="ml-watch-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>读取失败：{{ watchDS.errorText.value }}</span>
-      </div>
-      <div v-if="!watchDirs.length" class="ml-sub" data-testid="ml-watch-empty">
-        还没有监控的目录
-      </div>
-      <ul v-else class="ml-watch" data-testid="ml-watch">
-        <li
-          v-for="d in watchDirs"
-          :key="d.id"
-          class="ml-classify__row"
-          :data-testid="`ml-watch-${d.id}`">
-          <div class="ml-classify__text">
-            <span class="ml-path">{{ d.path }}</span>
+        <PtPanel
+          title="路径映射"
+          icon="route"
+          :count="pathMaps.length"
+          action="添加"
+          action-icon="plus"
+          @action="openPathMap()">
+          <p class="ml-tip ml-tip--top">
+            下载器与 pt-tools 看到的路径不同时（比如两者在不同的容器里）要加：下载器里的 /downloads
+            在 pt-tools 里是哪个目录。 路径相同时不用加。
+          </p>
+          <div v-if="pathMaps.length && mapsDS.error.value" class="pt-note pt-note--warn ml-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>刷新失败：{{ mapsDS.errorText.value }}。下面是上次读到的。</span>
           </div>
-          <div class="ml-classify__acts">
-            <el-switch
-              :model-value="d.enabled"
-              :aria-label="`监控 ${d.path}`"
-              :data-testid="`ml-watch-enabled-${d.id}`"
-              @update:model-value="
-                (v: string | number | boolean) => toggleWatchDir(d, Boolean(v))
-              " />
-            <el-button
-              link
-              type="danger"
-              :data-testid="`ml-watch-del-${d.id}`"
-              @click="removeWatchDir(d)"
-              >删除</el-button
-            >
+          <PtDataState
+            v-if="!pathMaps.length"
+            :state="mapsDS.state.value"
+            :title="mapsDS.state.value === 'empty' ? '没有路径映射' : ''"
+            :sub="
+              mapsDS.errorText.value ||
+              (mapsDS.state.value === 'empty' ? '下载器与 pt-tools 看到的路径相同时不用加' : '')
+            "
+            data-testid="ml-maps-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="pathMaps"
+            row-key="id"
+            class="pt-grid"
+            data-testid="ml-maps">
+            <el-table-column label="下载器" width="160">
+              <template #default="{ row }">{{ downloaderName(row.downloader_id) }}</template>
+            </el-table-column>
+            <el-table-column
+              label="下载器里的路径"
+              min-width="200"
+              prop="downloader_prefix"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip />
+            <el-table-column
+              label="pt-tools 里的路径"
+              min-width="200"
+              prop="local_prefix"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip />
+            <el-table-column label="" width="120" align="right">
+              <template #default="{ row }">
+                <el-button link :data-testid="`ml-map-edit-${row.id}`" @click="openPathMap(row)"
+                  >编辑</el-button
+                >
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`ml-map-del-${row.id}`"
+                  @click="removePathMap(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="ml-cards">
+            <PtRowCard v-for="m in pathMaps" :key="m.id">
+              <template #title>{{ downloaderName(m.downloader_id) }}</template>
+              <template #meta>
+                <span class="ml-full">{{ m.downloader_prefix }}</span>
+                <span class="ml-full">→ {{ m.local_prefix }}</span>
+              </template>
+              <template #actions>
+                <el-button size="small" @click="openPathMap(m)">编辑</el-button>
+                <el-button size="small" type="danger" plain @click="removePathMap(m)"
+                  >删除</el-button
+                >
+              </template>
+            </PtRowCard>
           </div>
-        </li>
-      </ul>
-    </PtPanel>
+        </PtPanel>
 
-    <PtPanel
-      title="路径映射"
-      icon="route"
-      :count="pathMaps.length"
-      action="添加"
-      action-icon="plus"
-      @action="openPathMap()">
-      <p class="ml-tip ml-tip--top">
-        下载器与 pt-tools 看到的路径不同时（比如两者在不同的容器里）要加：下载器里的 /downloads 在
-        pt-tools 里是哪个目录。 路径相同时不用加。
-      </p>
-      <div v-if="pathMaps.length && mapsDS.error.value" class="pt-note pt-note--warn ml-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>刷新失败：{{ mapsDS.errorText.value }}。下面是上次读到的。</span>
+        <PtPanel
+          title="媒体服务器"
+          icon="server"
+          :count="servers.length"
+          action="添加"
+          action-icon="plus"
+          @action="openServer()">
+          <p class="ml-tip ml-tip--top">
+            整理完通知 Emby、Jellyfin 或 Plex 扫描新目录。媒体服务器看到的路径与 pt-tools
+            不同时，填上两边的路径前缀。
+          </p>
+          <div
+            v-if="servers.length && serversDS.error.value"
+            class="pt-note pt-note--warn ml-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>刷新失败：{{ serversDS.errorText.value }}。下面是上次读到的。</span>
+          </div>
+          <PtDataState
+            v-if="!servers.length"
+            :state="serversDS.state.value"
+            :title="serversDS.state.value === 'empty' ? '还没有媒体服务器' : ''"
+            :sub="
+              serversDS.errorText.value ||
+              (serversDS.state.value === 'empty'
+                ? '不加也能整理，媒体服务器会按自己的计划扫描'
+                : '')
+            "
+            data-testid="ml-servers-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="servers"
+            row-key="id"
+            class="pt-grid"
+            data-testid="ml-servers">
+            <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
+            <el-table-column label="种类" width="96">
+              <template #default="{ row }">{{ serverKindLabel(row.kind) }}</template>
+            </el-table-column>
+            <el-table-column
+              label="地址"
+              min-width="200"
+              prop="url"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip />
+            <el-table-column label="刷新" width="150">
+              <template #default="{ row }">{{ refreshText(row.refresh_mode) }}</template>
+            </el-table-column>
+            <el-table-column
+              label="最近一次"
+              min-width="160"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip>
+              <template #default="{ row }">
+                <PtStatusPill v-if="row.last_error" tone="dang" size="sm">失败</PtStatusPill>
+                <PtStatusPill v-else-if="row.last_refresh_at" tone="ok" size="sm"
+                  >正常</PtStatusPill
+                >
+                <span class="ml-sub">
+                  {{
+                    row.last_error ||
+                    (row.last_refresh_at ? formatShortDateTime(row.last_refresh_at) : "还没通知过")
+                  }}</span
+                >
+              </template>
+            </el-table-column>
+            <el-table-column label="启用" width="76">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="row.enabled"
+                  :aria-label="`启用媒体服务器 ${row.name}`"
+                  :data-testid="`ml-server-enabled-${row.id}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleServer(row, Boolean(v))
+                  " />
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="160" align="right">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  :loading="serverTesting"
+                  :data-testid="`ml-server-test-${row.id}`"
+                  @click="testServer(row)"
+                  >测试</el-button
+                >
+                <el-button link :data-testid="`ml-server-edit-${row.id}`" @click="openServer(row)"
+                  >编辑</el-button
+                >
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`ml-server-del-${row.id}`"
+                  @click="removeServer(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="ml-cards">
+            <PtRowCard v-for="s in servers" :key="s.id">
+              <template #title>{{ s.name }}</template>
+              <template #meta>
+                <span>{{ serverKindLabel(s.kind) }} · {{ refreshText(s.refresh_mode) }}</span>
+                <span class="ml-full">{{ s.url }}</span>
+                <span v-if="s.last_error" class="ml-full ml-err">{{ s.last_error }}</span>
+              </template>
+              <template #status>
+                <el-switch
+                  :model-value="s.enabled"
+                  :aria-label="`启用媒体服务器 ${s.name}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleServer(s, Boolean(v))
+                  " />
+              </template>
+              <template #actions>
+                <el-button size="small" :loading="serverTesting" @click="testServer(s)"
+                  >测试</el-button
+                >
+                <el-button size="small" @click="openServer(s)">编辑</el-button>
+                <el-button size="small" type="danger" plain @click="removeServer(s)"
+                  >删除</el-button
+                >
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
       </div>
-      <PtDataState
-        v-if="!pathMaps.length"
-        :state="mapsDS.state.value"
-        :title="mapsDS.state.value === 'empty' ? '没有路径映射' : ''"
-        :sub="
-          mapsDS.errorText.value ||
-          (mapsDS.state.value === 'empty' ? '下载器与 pt-tools 看到的路径相同时不用加' : '')
-        "
-        data-testid="ml-maps-state" />
-      <el-table
-        v-else-if="!isMobile"
-        :data="pathMaps"
-        row-key="id"
-        class="pt-grid"
-        data-testid="ml-maps">
-        <el-table-column label="下载器" width="160">
-          <template #default="{ row }">{{ downloaderName(row.downloader_id) }}</template>
-        </el-table-column>
-        <el-table-column
-          label="下载器里的路径"
-          min-width="200"
-          prop="downloader_prefix"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip />
-        <el-table-column
-          label="pt-tools 里的路径"
-          min-width="200"
-          prop="local_prefix"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip />
-        <el-table-column label="" width="120" align="right">
-          <template #default="{ row }">
-            <el-button link :data-testid="`ml-map-edit-${row.id}`" @click="openPathMap(row)"
-              >编辑</el-button
-            >
-            <el-button
-              link
-              type="danger"
-              :data-testid="`ml-map-del-${row.id}`"
-              @click="removePathMap(row)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else class="ml-cards">
-        <PtRowCard v-for="m in pathMaps" :key="m.id">
-          <template #title>{{ downloaderName(m.downloader_id) }}</template>
-          <template #meta>
-            <span class="ml-full">{{ m.downloader_prefix }}</span>
-            <span class="ml-full">→ {{ m.local_prefix }}</span>
-          </template>
-          <template #actions>
-            <el-button size="small" @click="openPathMap(m)">编辑</el-button>
-            <el-button size="small" type="danger" plain @click="removePathMap(m)">删除</el-button>
-          </template>
-        </PtRowCard>
-      </div>
-    </PtPanel>
-
-    <PtPanel
-      title="媒体服务器"
-      icon="server"
-      :count="servers.length"
-      action="添加"
-      action-icon="plus"
-      @action="openServer()">
-      <p class="ml-tip ml-tip--top">
-        整理完通知 Emby、Jellyfin 或 Plex 扫描新目录。媒体服务器看到的路径与 pt-tools
-        不同时，填上两边的路径前缀。
-      </p>
-      <div v-if="servers.length && serversDS.error.value" class="pt-note pt-note--warn ml-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>刷新失败：{{ serversDS.errorText.value }}。下面是上次读到的。</span>
-      </div>
-      <PtDataState
-        v-if="!servers.length"
-        :state="serversDS.state.value"
-        :title="serversDS.state.value === 'empty' ? '还没有媒体服务器' : ''"
-        :sub="
-          serversDS.errorText.value ||
-          (serversDS.state.value === 'empty' ? '不加也能整理，媒体服务器会按自己的计划扫描' : '')
-        "
-        data-testid="ml-servers-state" />
-      <el-table
-        v-else-if="!isMobile"
-        :data="servers"
-        row-key="id"
-        class="pt-grid"
-        data-testid="ml-servers">
-        <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
-        <el-table-column label="种类" width="96">
-          <template #default="{ row }">{{ serverKindLabel(row.kind) }}</template>
-        </el-table-column>
-        <el-table-column
-          label="地址"
-          min-width="200"
-          prop="url"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip />
-        <el-table-column label="刷新" width="150">
-          <template #default="{ row }">{{ refreshText(row.refresh_mode) }}</template>
-        </el-table-column>
-        <el-table-column
-          label="最近一次"
-          min-width="160"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip>
-          <template #default="{ row }">
-            <PtStatusPill v-if="row.last_error" tone="dang" size="sm">失败</PtStatusPill>
-            <PtStatusPill v-else-if="row.last_refresh_at" tone="ok" size="sm">正常</PtStatusPill>
-            <span class="ml-sub">
-              {{
-                row.last_error ||
-                (row.last_refresh_at ? formatShortDateTime(row.last_refresh_at) : "还没通知过")
-              }}</span
-            >
-          </template>
-        </el-table-column>
-        <el-table-column label="启用" width="76">
-          <template #default="{ row }">
-            <el-switch
-              :model-value="row.enabled"
-              :aria-label="`启用媒体服务器 ${row.name}`"
-              :data-testid="`ml-server-enabled-${row.id}`"
-              @update:model-value="
-                (v: string | number | boolean) => toggleServer(row, Boolean(v))
-              " />
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="160" align="right">
-          <template #default="{ row }">
-            <el-button
-              link
-              :loading="serverTesting"
-              :data-testid="`ml-server-test-${row.id}`"
-              @click="testServer(row)"
-              >测试</el-button
-            >
-            <el-button link :data-testid="`ml-server-edit-${row.id}`" @click="openServer(row)"
-              >编辑</el-button
-            >
-            <el-button
-              link
-              type="danger"
-              :data-testid="`ml-server-del-${row.id}`"
-              @click="removeServer(row)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else class="ml-cards">
-        <PtRowCard v-for="s in servers" :key="s.id">
-          <template #title>{{ s.name }}</template>
-          <template #meta>
-            <span>{{ serverKindLabel(s.kind) }} · {{ refreshText(s.refresh_mode) }}</span>
-            <span class="ml-full">{{ s.url }}</span>
-            <span v-if="s.last_error" class="ml-full ml-err">{{ s.last_error }}</span>
-          </template>
-          <template #status>
-            <el-switch
-              :model-value="s.enabled"
-              :aria-label="`启用媒体服务器 ${s.name}`"
-              @update:model-value="(v: string | number | boolean) => toggleServer(s, Boolean(v))" />
-          </template>
-          <template #actions>
-            <el-button size="small" :loading="serverTesting" @click="testServer(s)">测试</el-button>
-            <el-button size="small" @click="openServer(s)">编辑</el-button>
-            <el-button size="small" type="danger" plain @click="removeServer(s)">删除</el-button>
-          </template>
-        </PtRowCard>
-      </div>
-    </PtPanel>
+    </div>
 
     <el-dialog
       v-model="libDialog"

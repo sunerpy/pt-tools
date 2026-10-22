@@ -15,21 +15,26 @@ The extension follows the browser's language; the labels below are its English o
 
 ## Connecting it to pt-tools
 
-Under Global Settings (全局设置) at the bottom of the extension, enter the pt-tools URL (for example `http://192.168.1.100:8080`), add your pt-tools user name and password if needed, and choose 🔗 Test Connection (连接测试). The address must be reachable from the browser you are using.
+Choose ⚙ Settings (设置) at the top right of the popup, enter the pt-tools URL (for example `http://192.168.1.100:8080`), add your pt-tools user name and password if needed, and choose 🔗 Test Connection (连接测试). The address must be reachable from the browser you are using.
+
+The top of the popup shows whether pt-tools is reachable. When the popup opens it shows the site list right away and asks pt-tools at the same time, waiting at most 4 seconds.
 
 ## Syncing cookies
 
 For sites pt-tools already supports that sign in with a cookie.
 
-- **One site**: sign in to the site, click the extension's icon, check that it names the site and shows the cookie as Valid (有效), then choose 🔄 Sync Cookie to pt-tools (同步 Cookie 到 pt-tools).
-- **Several sites**: tick them under Batch Cookie Sync (批量同步 Cookie) in Global Settings and choose 🔄 Sync Selected (同步已选).
-- **Automatically**: turn on Auto-sync Cookie (自动同步 Cookie), and the cookie is synced whenever you sign in again or it changes.
+The popup's main page is My sites (我的站点): every site with a cookie in this browser or enabled in pt-tools is listed (the other built-in sites appear after Show all (显示全部)). Each row shows the cookie's state in the browser and the site's keep-alive state in pt-tools (days left, about to expire); sites that need attention come first.
 
-Sites that use an API key or a passkey (M-Team, Rousi Pro) cannot be synced by the extension; enter their credentials in pt-tools' site settings instead, as described in [Cookies and API keys](get-cookie-apikey.md).
+- **One site**: choose Sync (同步) on its row; when the current tab is that site, the top of the popup also offers 🔄 Sync Cookie to pt-tools (同步 Cookie 到 pt-tools).
+- **All sites**: choose Sync all (同步全部) above the list to sync every site whose cookie is valid.
+- **Automatically**: open the popup on the site's page and turn on Auto-sync Cookie (自动同步 Cookie); the cookie is then synced whenever you sign in again or it changes.
+- **Keeping accounts active**: Open sites (打开站点) opens the sites in background tabs; Open (打开) on a row opens one.
+
+Sites that use an API key or a passkey (M-Team, Rousi Pro) cannot be synced by the extension; enter their credentials in pt-tools' site settings instead, as described in [Cookies and API keys](get-cookie-apikey.md). For sites such as HDDolby that need both a cookie and an API key, pt-tools stores the synced cookie first; until the API key is filled in the site stays disabled, and the extension reminds you to add the API key in pt-tools.
 
 ### Scheduled sync
 
-Scheduled sync (定时同步) in Global Settings syncs on an interval (10–1440 minutes, 60 by default) while the browser is open, without opening the sites:
+Scheduled sync (定时同步) in Settings syncs on an interval (10–1440 minutes, 60 by default) while the browser is open, without opening the sites:
 
 - By default it syncs only the sites with Auto-sync Cookie turned on. With Sync every site enabled in pt-tools (同步 pt-tools 里已启用的全部站点) ticked, every cookie site already enabled in pt-tools is synced. A scheduled sync never enables a new site for you.
 - Only sites whose cookies changed are pushed: every push makes pt-tools refresh the site and check its sign-in once, so unchanged cookies are not pushed again. Choosing Sync always pushes.
@@ -42,7 +47,7 @@ Scheduled sync (定时同步) in Global Settings syncs on an interval (10–1440
 
 When pt-tools is not reachable from the browser (for example the browser is at work and pt-tools runs on a NAS at home), or other tools need the same cookies, the extension can encrypt the cookies and upload them to your own [CookieCloud](https://github.com/easychen/CookieCloud) server, and pt-tools fetches them from there as described in [CookieCloud import](cookiecloud.md). You do not need the CookieCloud extension as well.
 
-1. Under CookieCloud in Global Settings, enter the server URL, the user KEY (UUID) and the end-to-end encryption password, pick the encryption (`aes-128-cbc-fixed` is recommended) and choose Save (保存). The first save asks you to let the extension reach that server.
+1. Under CookieCloud in Settings, enter the server URL, the user KEY (UUID) and the end-to-end encryption password, pick the encryption (`aes-128-cbc-fixed` is recommended) and choose Save (保存). The first save asks you to let the extension reach that server.
 2. Choose Test (测试): it tells you whether it connected, and whether the server has no data yet or has data it can decrypt.
 3. Choose Upload now (立即上传) to upload once. With Upload to CookieCloud on scheduled sync ticked, every scheduled run uploads too (nothing is sent when the cookies have not changed).
 4. In pt-tools, enter the same server URL, UUID and password under Sites → CookieCloud import.
@@ -57,7 +62,7 @@ For sites pt-tools does not support yet, and for reporting a parsing problem on 
 
 ## Privacy
 
-- The extension sends cookies only to the pt-tools address you entered in Global Settings and, when it is turned on, to the CookieCloud server you entered. What goes to CookieCloud is encrypted with your password, which is used only in the browser and never sent.
+- The extension sends cookies only to the pt-tools address you entered in Settings and, when it is turned on, to the CookieCloud server you entered. What goes to CookieCloud is encrypted with your password, which is used only in the browser and never sent.
 - Like the CookieCloud extension, the extension keeps the CookieCloud password in the browser's extension storage; the popup never shows it, only that it is set.
 - The pt-tools user name and password you enter are kept in the browser's extension storage. On a shared computer, do not save the password, and remove the extension when you are done.
 - The exported ZIP is already redacted, but it is still worth opening it and checking before you submit it.

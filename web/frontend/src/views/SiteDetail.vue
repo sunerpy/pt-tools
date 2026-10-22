@@ -31,7 +31,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
 import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
-import { attendanceView } from "@/utils/attendanceStatus";
+import { attendanceChallengeText, attendanceView } from "@/utils/attendanceStatus";
 import { formatShortDateTime } from "@/utils/format";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, reactive, ref, watch } from "vue";
@@ -1357,6 +1357,17 @@ function ruleNameOf(id: number): string {
                 {{ probeStatusLabel(loginState.last_probe_status) }}
               </span>
             </li>
+            <!-- 探测没通过时写明原因：只写「解析失败 (PARSE_ERROR)」看不出是 Cookie 失效、站点改版还是别的 -->
+            <li
+              v-if="
+                loginState.last_probe_status &&
+                !isProbeSuccess(loginState.last_probe_status) &&
+                loginState.last_probe_error?.trim()
+              "
+              class="sd-kv__note"
+              data-testid="sd-probe-error">
+              {{ loginState.last_probe_error?.trim() }}
+            </li>
             <li class="sd-kv__row">
               <span class="sd-kv__k">判定依据</span>
               <span class="sd-kv__v" data-testid="sd-active-source">
@@ -1383,14 +1394,17 @@ function ruleNameOf(id: number): string {
             </li>
             <li v-if="siteAttendance" class="sd-kv__row">
               <span class="sd-kv__k">每日签到</span>
-              <span class="sd-kv__v" data-testid="sd-attendance-enabled">
+              <span
+                class="sd-kv__v"
+                :title="attendanceChallengeText(siteAttendance.challenge)"
+                data-testid="sd-attendance-enabled">
                 {{
                   !siteAttendance.supported
                     ? "不支持"
                     : siteAttendance.attendance_enabled
                       ? "已开启"
                       : "未开启"
-                }}
+                }}{{ siteAttendance.challenge && siteAttendance.supported ? "（用 AI）" : "" }}
               </span>
             </li>
             <li v-if="siteAttendance" class="sd-kv__row">
@@ -1559,20 +1573,22 @@ function ruleNameOf(id: number): string {
               v-if="!newRssUseCustomPath"
               v-model="newRss.download_path"
               placeholder="使用下载器默认路径"
-              clearable
-              style="flex: 1">
+              clearable>
               <el-option value="" label="使用下载器默认路径" />
               <el-option
                 v-for="dir in getDirectoriesForDownloader(newRss.downloader_id)"
                 :key="dir.id"
                 :label="`${dir.alias || dir.path}${dir.is_default ? '（默认）' : ''}`"
-                :value="dir.path" />
+                :value="dir.path">
+                <span class="path-opt">
+                  <span>{{ dir.alias || dir.path }}{{ dir.is_default ? "（默认）" : "" }}</span>
+                  <span v-if="dir.alias && dir.alias !== dir.path" class="path-opt__path">{{
+                    dir.path
+                  }}</span>
+                </span>
+              </el-option>
             </el-select>
-            <el-input
-              v-else
-              v-model="newRss.download_path"
-              placeholder="如 /downloads/movies"
-              style="flex: 1" />
+            <el-input v-else v-model="newRss.download_path" placeholder="如 /downloads/movies" />
             <el-button
               :type="newRssUseCustomPath ? 'primary' : 'default'"
               @click="toggleNewRssCustomPath">
@@ -1730,20 +1746,25 @@ function ruleNameOf(id: number): string {
               v-if="!editRssUseCustomPath"
               v-model="editingRss.download_path"
               placeholder="使用下载器默认路径"
-              clearable
-              style="flex: 1">
+              clearable>
               <el-option value="" label="使用下载器默认路径" />
               <el-option
                 v-for="dir in getDirectoriesForDownloader(editingRss.downloader_id)"
                 :key="dir.id"
                 :label="`${dir.alias || dir.path}${dir.is_default ? '（默认）' : ''}`"
-                :value="dir.path" />
+                :value="dir.path">
+                <span class="path-opt">
+                  <span>{{ dir.alias || dir.path }}{{ dir.is_default ? "（默认）" : "" }}</span>
+                  <span v-if="dir.alias && dir.alias !== dir.path" class="path-opt__path">{{
+                    dir.path
+                  }}</span>
+                </span>
+              </el-option>
             </el-select>
             <el-input
               v-else
               v-model="editingRss.download_path"
-              placeholder="如 /downloads/movies"
-              style="flex: 1" />
+              placeholder="如 /downloads/movies" />
             <el-button
               :type="editRssUseCustomPath ? 'primary' : 'default'"
               @click="toggleEditRssCustomPath">
@@ -1921,6 +1942,14 @@ function ruleNameOf(id: number): string {
   color: var(--pt-warn);
 }
 
+/* 探测失败的原因：一整行、可以折行，跟在「探测结果」下面 */
+.sd-kv__note {
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+  word-break: break-word;
+}
+
 .sd-list {
   display: flex;
   flex-direction: column;
@@ -2051,9 +2080,37 @@ function ruleNameOf(id: number): string {
 }
 
 /* 自定义路径的输入框和「切换来源」按钮必须同一行，不然读起来像两个独立字段 */
+/*
+ * 下载路径：下拉框（或自定义输入框）占满一行，右边是切换按钮。
+ * 外层要给 width:100%：el-form-item 的内容区是可换行的 flex，不给宽度时这一块按内容收缩，
+ * 下拉框的 flex:1 分不到空间，被挤得只剩后缀图标，选了目录也看不见。
+ */
 .path-pick {
   display: flex;
   gap: var(--pt-space-2);
+  align-items: center;
+  width: 100%;
+}
+
+.path-pick > .el-select,
+.path-pick > .el-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 有别名的目录：左边别名，右边灰色写真实路径，免得只看到别名不知道落在哪 */
+.path-opt {
+  display: flex;
+  gap: var(--pt-space-3);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.path-opt__path {
+  overflow: hidden;
+  color: var(--pt-t3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /*

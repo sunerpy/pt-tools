@@ -26,6 +26,9 @@ var MTeamDefinition = &v2.SiteDefinition{
 	LegacyURLs:     []string{"https://xp.m-team.io/", "https://pt.m-team.cc/", "https://tp.m-team.cc/"},
 	FaviconURL:     "https://kp.m-team.cc/favicon.ico",
 	TimezoneOffset: "+0800",
+	// M-Team 没有签到。它的保号接口 /member/updateLastBrowse 在站方「不允许第三方调用清单」里（馒头 wiki，
+	// 见 jxxghp/MoviePilot#1991），用 API Key 或网页登录令牌去调都有封号风险，所以不做，只提示用户用浏览器登录。
+	Attendance: &v2.AttendanceConfig{Unsupported: "M-Team 没有签到；保号要定期用浏览器登录（站方不允许第三方工具调用更新访问时间的接口）"},
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id", "name", "joinTime"},
 		RequestDelay: 300,

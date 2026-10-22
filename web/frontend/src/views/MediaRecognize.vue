@@ -343,418 +343,443 @@ onMounted(refresh);
       >
     </div>
 
-    <PtPanel title="TMDB 设置" icon="key-round">
-      <div v-if="loadFailed" class="pt-note pt-note--warn">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>设置没读到，点刷新重试。</span>
-      </div>
-      <el-form class="pt-form md-form" label-position="top" @submit.prevent>
-        <el-form-item label="API Key">
-          <div class="md-inline">
-            <el-input
-              v-model="form.key"
-              type="password"
-              show-password
-              autocomplete="new-password"
-              :placeholder="
-                settings?.has_tmdb_key
-                  ? '已设置；要更换时填写新的'
-                  : 'v3 的 API Key 或 v4 的读取令牌'
-              "
-              data-testid="media-key" />
-            <el-button v-if="settings?.has_tmdb_key" data-testid="media-clear-key" @click="clearKey"
-              >清除</el-button
-            >
+    <div class="pt-cols">
+      <div class="pt-col">
+        <PtPanel title="TMDB 设置" icon="key-round">
+          <div v-if="loadFailed" class="pt-note pt-note--warn">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>设置没读到，点刷新重试。</span>
           </div>
-        </el-form-item>
-        <div class="md-row">
-          <el-form-item label="语言">
-            <el-select v-model="form.language" data-testid="media-language">
-              <el-option
-                v-for="l in MEDIA_LANGUAGES"
-                :key="l.value"
-                :label="l.label"
-                :value="l.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="代理地址（可选）">
-            <el-input
-              v-model="form.proxy"
-              placeholder="http://127.0.0.1:7890"
-              autocomplete="off"
-              data-testid="media-proxy" />
-          </el-form-item>
-        </div>
-        <div class="md-row">
-          <el-form-item label="TMDB 接口地址（可选）">
-            <el-input
-              v-model="form.api"
-              placeholder="留空用官方地址 https://api.themoviedb.org/3"
-              autocomplete="off"
-              data-testid="media-api-base" />
-          </el-form-item>
-          <el-form-item label="TMDB 图片地址（可选）">
-            <el-input
-              v-model="form.image"
-              placeholder="留空用官方地址 https://image.tmdb.org/t/p/"
-              autocomplete="off"
-              data-testid="media-image-base" />
-          </el-form-item>
-        </div>
-        <div v-if="imageBaseBlocked" class="pt-note pt-note--warn" data-testid="media-image-mixed">
-          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span
-            >网页是用 https 打开的，浏览器不会加载 http:// 图片地址上的海报（刮削和手机 App
-            不受影响）。要在网页上显示海报，请换成 https 地址。</span
-          >
-        </div>
-        <div class="md-actions">
-          <el-button type="primary" :loading="saving" data-testid="media-save" @click="save()">
-            <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
-          </el-button>
-          <el-button
-            :loading="testing"
-            :disabled="!settings?.has_tmdb_key"
-            data-testid="media-test"
-            @click="testTMDB">
-            <PtIcon v-if="!testing" name="zap" :size="14" /><span>测试连接</span>
-          </el-button>
-        </div>
-      </el-form>
-      <p class="md-tip">
-        代理地址留空时用环境变量里的代理（HTTP_PROXY、HTTPS_PROXY、ALL_PROXY），与访问站点相同；
-        支持 http、https 与 socks5。官方地址连不上或很慢时，可以把接口地址换成 api.tmdb.org
-        或自建的中转，图片地址换成镜像；只写域名时自动补上 https:// 与 /3、/t/p/。刮削下载的图片、
-        通知里的海报，以及网页和 App 上的海报都用这里的图片地址：刮削和 App 的海报由 pt-tools
-        经上面的代理去取，网页上的海报由浏览器直接加载，通知里的海报由收到通知的设备打开。
-      </p>
-    </PtPanel>
-
-    <PtPanel title="识别预览" icon="scan">
-      <el-form class="pt-form md-form" label-position="top" @submit.prevent>
-        <el-form-item label="标题">
-          <el-input
-            v-model="input.title"
-            placeholder="The.Last.of.Us.S01E01.2023.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX"
-            data-testid="media-title"
-            @keyup.enter="recognize" />
-        </el-form-item>
-        <div class="md-row">
-          <el-form-item label="副标题（可选）">
-            <el-input
-              v-model="input.subtitle"
-              placeholder="最后生还者 第一季 第01集 | 中英字幕"
-              data-testid="media-subtitle" />
-          </el-form-item>
-          <el-form-item label="IMDb 编号或链接（可选）">
-            <el-input v-model="input.imdb" placeholder="tt3581920" data-testid="media-imdb" />
-          </el-form-item>
-        </div>
-        <el-button
-          type="primary"
-          :loading="recognizing"
-          data-testid="media-recognize"
-          @click="recognize">
-          <PtIcon v-if="!recognizing" name="scan" :size="14" /><span>识别</span>
-        </el-button>
-      </el-form>
-
-      <div
-        v-if="recognizeError"
-        class="pt-note pt-note--warn md-fail"
-        data-testid="media-recognize-error">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>识别失败：{{ recognizeError }}。改一下标题或稍后再点「识别」。</span>
-      </div>
-      <div v-if="result" class="md-result" data-testid="media-result">
-        <div class="md-section">
-          <div class="md-label">解析结果</div>
-          <div class="md-summary" data-testid="media-summary">
-            {{ result.summary || "没解析出名字" }}
-            <span v-if="result.meta.name_cn && result.meta.name_en" class="md-sub">{{
-              result.meta.name_cn
-            }}</span>
-          </div>
-          <div class="md-tags" data-testid="media-tags">
-            <PtTag v-for="t in tags" :key="t">{{ t }}</PtTag>
-          </div>
-          <p v-if="result.rule_hits?.length" class="md-tip" data-testid="media-rule-hits">
-            套用了 {{ result.rule_hits.length }} 条识别词
-          </p>
-        </div>
-
-        <div v-if="result.error" class="pt-note pt-note--warn" data-testid="media-error">
-          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span>TMDB 没查成：{{ result.error }}</span>
-        </div>
-        <div v-else-if="result.message" class="pt-note" data-testid="media-message">
-          <PtIcon name="info" :size="14" class="pt-note__icon" />
-          <span>{{ result.message }}</span>
-        </div>
-
-        <div v-if="result.match" class="md-match" data-testid="media-match">
-          <img
-            v-if="posterURL(result.match.poster_path)"
-            class="md-poster"
-            :src="posterURL(result.match.poster_path)"
-            :alt="`${result.match.title} 的海报`"
-            loading="lazy" />
-          <div class="md-match__body">
-            <div class="md-match__title">
-              <a
-                :href="tmdbPageURL(result.match.media_type, result.match.id)"
-                target="_blank"
-                rel="noopener noreferrer"
-                >{{ itemTitle(result.match) }}</a
+          <el-form class="pt-form md-form" label-position="top" @submit.prevent>
+            <el-form-item label="API Key">
+              <div class="md-inline">
+                <el-input
+                  v-model="form.key"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="
+                    settings?.has_tmdb_key
+                      ? '已设置；要更换时填写新的'
+                      : 'v3 的 API Key 或 v4 的读取令牌'
+                  "
+                  data-testid="media-key" />
+                <el-button
+                  v-if="settings?.has_tmdb_key"
+                  data-testid="media-clear-key"
+                  @click="clearKey"
+                  >清除</el-button
+                >
+              </div>
+            </el-form-item>
+            <div class="md-row">
+              <el-form-item label="语言">
+                <el-select v-model="form.language" data-testid="media-language">
+                  <el-option
+                    v-for="l in MEDIA_LANGUAGES"
+                    :key="l.value"
+                    :label="l.label"
+                    :value="l.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="代理地址（可选）">
+                <el-input
+                  v-model="form.proxy"
+                  placeholder="http://127.0.0.1:7890"
+                  autocomplete="off"
+                  data-testid="media-proxy" />
+              </el-form-item>
+            </div>
+            <div class="md-row">
+              <el-form-item label="TMDB 接口地址（可选）">
+                <el-input
+                  v-model="form.api"
+                  placeholder="留空用官方地址 https://api.themoviedb.org/3"
+                  autocomplete="off"
+                  data-testid="media-api-base" />
+              </el-form-item>
+              <el-form-item label="TMDB 图片地址（可选）">
+                <el-input
+                  v-model="form.image"
+                  placeholder="留空用官方地址 https://image.tmdb.org/t/p/"
+                  autocomplete="off"
+                  data-testid="media-image-base" />
+              </el-form-item>
+            </div>
+            <div
+              v-if="imageBaseBlocked"
+              class="pt-note pt-note--warn"
+              data-testid="media-image-mixed">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <span
+                >网页是用 https 打开的，浏览器不会加载 http:// 图片地址上的海报（刮削和手机 App
+                不受影响）。要在网页上显示海报，请换成 https 地址。</span
               >
             </div>
-            <div class="md-match__meta">
-              <PtStatusPill tone="ok" size="sm">{{ mediaSourceLabel(result.source) }}</PtStatusPill>
-              <span>{{ mediaKindLabel(result.match.media_type) }}</span>
-              <span v-if="result.match.year">{{ result.match.year }}</span>
-              <span>TMDB {{ result.match.id }}</span>
-              <span v-if="result.match.imdb_id">{{ result.match.imdb_id }}</span>
+            <div class="md-actions">
+              <el-button type="primary" :loading="saving" data-testid="media-save" @click="save()">
+                <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
+              </el-button>
+              <el-button
+                :loading="testing"
+                :disabled="!settings?.has_tmdb_key"
+                data-testid="media-test"
+                @click="testTMDB">
+                <PtIcon v-if="!testing" name="zap" :size="14" /><span>测试连接</span>
+              </el-button>
             </div>
-            <p v-if="result.match.overview" class="md-overview">{{ result.match.overview }}</p>
-          </div>
-        </div>
+          </el-form>
+          <p class="md-tip">
+            代理地址留空时用环境变量里的代理（HTTP_PROXY、HTTPS_PROXY、ALL_PROXY），与访问站点相同；
+            支持 http、https 与 socks5。官方地址连不上或很慢时，可以把接口地址换成 api.tmdb.org
+            或自建的中转，图片地址换成镜像；只写域名时自动补上 https:// 与
+            /3、/t/p/。刮削下载的图片、 通知里的海报，以及网页和 App
+            上的海报都用这里的图片地址：刮削和 App 的海报由 pt-tools
+            经上面的代理去取，网页上的海报由浏览器直接加载，通知里的海报由收到通知的设备打开。
+          </p>
+        </PtPanel>
 
-        <div v-if="result.candidates?.length" class="md-section">
-          <div class="md-label">候选（按匹配程度排序）</div>
-          <div class="md-cands" data-testid="media-candidates">
-            <div v-for="c in result.candidates" :key="`${c.media_type}-${c.id}`" class="md-cand">
+        <PtPanel title="识别预览" icon="scan">
+          <el-form class="pt-form md-form" label-position="top" @submit.prevent>
+            <el-form-item label="标题">
+              <el-input
+                v-model="input.title"
+                placeholder="The.Last.of.Us.S01E01.2023.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX"
+                data-testid="media-title"
+                @keyup.enter="recognize" />
+            </el-form-item>
+            <div class="md-row">
+              <el-form-item label="副标题（可选）">
+                <el-input
+                  v-model="input.subtitle"
+                  placeholder="最后生还者 第一季 第01集 | 中英字幕"
+                  data-testid="media-subtitle" />
+              </el-form-item>
+              <el-form-item label="IMDb 编号或链接（可选）">
+                <el-input v-model="input.imdb" placeholder="tt3581920" data-testid="media-imdb" />
+              </el-form-item>
+            </div>
+            <el-button
+              type="primary"
+              :loading="recognizing"
+              data-testid="media-recognize"
+              @click="recognize">
+              <PtIcon v-if="!recognizing" name="scan" :size="14" /><span>识别</span>
+            </el-button>
+          </el-form>
+
+          <div
+            v-if="recognizeError"
+            class="pt-note pt-note--warn md-fail"
+            data-testid="media-recognize-error">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>识别失败：{{ recognizeError }}。改一下标题或稍后再点「识别」。</span>
+          </div>
+          <div v-if="result" class="md-result" data-testid="media-result">
+            <div class="md-section">
+              <div class="md-label">解析结果</div>
+              <div class="md-summary" data-testid="media-summary">
+                {{ result.summary || "没解析出名字" }}
+                <span v-if="result.meta.name_cn && result.meta.name_en" class="md-sub">{{
+                  result.meta.name_cn
+                }}</span>
+              </div>
+              <div class="md-tags" data-testid="media-tags">
+                <PtTag v-for="t in tags" :key="t">{{ t }}</PtTag>
+              </div>
+              <p v-if="result.rule_hits?.length" class="md-tip" data-testid="media-rule-hits">
+                套用了 {{ result.rule_hits.length }} 条识别词
+              </p>
+            </div>
+
+            <div v-if="result.error" class="pt-note pt-note--warn" data-testid="media-error">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <span>TMDB 没查成：{{ result.error }}</span>
+            </div>
+            <div v-else-if="result.message" class="pt-note" data-testid="media-message">
+              <PtIcon name="info" :size="14" class="pt-note__icon" />
+              <span>{{ result.message }}</span>
+            </div>
+
+            <div v-if="result.match" class="md-match" data-testid="media-match">
               <img
-                v-if="posterURL(c.poster_path, 'w92')"
-                class="md-poster md-poster--sm"
-                :src="posterURL(c.poster_path, 'w92')"
-                :alt="`${c.title} 的海报`"
+                v-if="posterURL(result.match.poster_path)"
+                class="md-poster"
+                :src="posterURL(result.match.poster_path)"
+                :alt="`${result.match.title} 的海报`"
                 loading="lazy" />
-              <div class="md-cand__body">
-                <a
-                  :href="tmdbPageURL(c.media_type, c.id)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  >{{ itemTitle(c) }}</a
-                >
-                <div class="md-sub">
-                  {{ mediaKindLabel(c.media_type)
-                  }}<template v-if="c.year"> · {{ c.year }}</template> · {{ c.score.toFixed(2) }} 分
+              <div class="md-match__body">
+                <div class="md-match__title">
+                  <a
+                    :href="tmdbPageURL(result.match.media_type, result.match.id)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >{{ itemTitle(result.match) }}</a
+                  >
+                </div>
+                <div class="md-match__meta">
+                  <PtStatusPill tone="ok" size="sm">{{
+                    mediaSourceLabel(result.source)
+                  }}</PtStatusPill>
+                  <span>{{ mediaKindLabel(result.match.media_type) }}</span>
+                  <span v-if="result.match.year">{{ result.match.year }}</span>
+                  <span>TMDB {{ result.match.id }}</span>
+                  <span v-if="result.match.imdb_id">{{ result.match.imdb_id }}</span>
+                </div>
+                <p v-if="result.match.overview" class="md-overview">{{ result.match.overview }}</p>
+              </div>
+            </div>
+
+            <div v-if="result.candidates?.length" class="md-section">
+              <div class="md-label">候选（按匹配程度排序）</div>
+              <div class="md-cands" data-testid="media-candidates">
+                <div
+                  v-for="c in result.candidates"
+                  :key="`${c.media_type}-${c.id}`"
+                  class="md-cand">
+                  <img
+                    v-if="posterURL(c.poster_path, 'w92')"
+                    class="md-poster md-poster--sm"
+                    :src="posterURL(c.poster_path, 'w92')"
+                    :alt="`${c.title} 的海报`"
+                    loading="lazy" />
+                  <div class="md-cand__body">
+                    <a
+                      :href="tmdbPageURL(c.media_type, c.id)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >{{ itemTitle(c) }}</a
+                    >
+                    <div class="md-sub">
+                      {{ mediaKindLabel(c.media_type)
+                      }}<template v-if="c.year"> · {{ c.year }}</template> ·
+                      {{ c.score.toFixed(2) }} 分
+                    </div>
+                  </div>
+                  <el-button
+                    size="small"
+                    :disabled="
+                      correcting ||
+                      (result.match?.id === c.id && result.match?.media_type === c.media_type)
+                    "
+                    :data-testid="`media-pick-${c.media_type}-${c.id}`"
+                    @click="correct(c.id, c.media_type)"
+                    >选这个</el-button
+                  >
                 </div>
               </div>
-              <el-button
-                size="small"
-                :disabled="
-                  correcting ||
-                  (result.match?.id === c.id && result.match?.media_type === c.media_type)
-                "
-                :data-testid="`media-pick-${c.media_type}-${c.id}`"
-                @click="correct(c.id, c.media_type)"
-                >选这个</el-button
-              >
+            </div>
+
+            <div class="md-section">
+              <div class="md-label">按 TMDB 编号纠正</div>
+              <div class="md-inline">
+                <el-select v-model="manual.type" class="md-kind" data-testid="media-manual-type">
+                  <el-option label="电影" value="movie" />
+                  <el-option label="剧集" value="tv" />
+                </el-select>
+                <el-input-number
+                  v-model="manual.id"
+                  :min="1"
+                  :controls="false"
+                  placeholder="TMDB 编号"
+                  data-testid="media-manual-id" />
+                <el-button
+                  :loading="correcting"
+                  data-testid="media-manual-save"
+                  @click="correct(manual.id, manual.type)"
+                  >纠正</el-button
+                >
+              </div>
+              <p class="md-tip">
+                编号在 TMDB 网页地址里，如 themoviedb.org/movie/278 的 278。纠正按解析出的名字生效：
+                同名的其它标题（换了分辨率、制作组）也会识别成这一条。
+              </p>
             </div>
           </div>
-        </div>
+        </PtPanel>
+      </div>
 
-        <div class="md-section">
-          <div class="md-label">按 TMDB 编号纠正</div>
-          <div class="md-inline">
-            <el-select v-model="manual.type" class="md-kind" data-testid="media-manual-type">
-              <el-option label="电影" value="movie" />
-              <el-option label="剧集" value="tv" />
-            </el-select>
-            <el-input-number
-              v-model="manual.id"
-              :min="1"
-              :controls="false"
-              placeholder="TMDB 编号"
-              data-testid="media-manual-id" />
-            <el-button
-              :loading="correcting"
-              data-testid="media-manual-save"
-              @click="correct(manual.id, manual.type)"
-              >纠正</el-button
-            >
+      <div class="pt-col">
+        <PtPanel title="手动纠正" icon="pencil" :count="overrides.length">
+          <div
+            v-if="overrides.length && overridesDS.error.value"
+            class="pt-note pt-note--warn md-stale"
+            data-testid="media-overrides-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>刷新失败：{{ overridesDS.errorText.value }}。下面是上次读到的。</span>
           </div>
-          <p class="md-tip">
-            编号在 TMDB 网页地址里，如 themoviedb.org/movie/278 的 278。纠正按解析出的名字生效：
-            同名的其它标题（换了分辨率、制作组）也会识别成这一条。
+          <PtDataState
+            v-if="!overrides.length"
+            :state="overridesDS.state.value"
+            :title="overridesDS.state.value === 'empty' ? '还没有纠正' : ''"
+            :sub="
+              overridesDS.errorText.value ||
+              (overridesDS.state.value === 'empty'
+                ? '识别不对时，在识别预览里选候选或填 TMDB 编号'
+                : '')
+            "
+            data-testid="media-overrides-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="overrides"
+            row-key="id"
+            class="pt-grid"
+            data-testid="media-overrides">
+            <el-table-column
+              label="解析结果"
+              min-width="240"
+              class-name="pt-cell-strong"
+              prop="label" />
+            <el-table-column label="识别成" min-width="240">
+              <template #default="{ row }">
+                <a
+                  :href="tmdbPageURL(row.media_type, row.tmdb_id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >{{ row.title || row.tmdb_id }}</a
+                >
+                <span class="md-sub">
+                  · {{ mediaKindLabel(row.media_type) }} · TMDB {{ row.tmdb_id }}</span
+                >
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="90" align="right">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`media-override-del-${row.id}`"
+                  @click="removeOverride(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="md-cards">
+            <PtRowCard v-for="o in overrides" :key="o.id">
+              <template #title>{{ o.label }}</template>
+              <template #meta>
+                <span class="md-full">识别成 {{ o.title || o.tmdb_id }}</span>
+                <span>{{ mediaKindLabel(o.media_type) }} · TMDB {{ o.tmdb_id }}</span>
+              </template>
+              <template #actions>
+                <el-button size="small" type="danger" plain @click="removeOverride(o)"
+                  >删除</el-button
+                >
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
+
+        <PtPanel
+          title="识别词"
+          icon="tags"
+          :count="wordList.length"
+          action="添加"
+          action-icon="plus"
+          @action="openWord()">
+          <p class="md-tip md-tip--top">
+            解析标题之前按顺序套用：屏蔽去掉文字，替换换成另一段文字；集数偏移在解析之后给集数加上偏移量（可为负），
+            用于按总集数编号的剧集。纯文字不分大小写；勾选正则时按 Go 的正则写法。
           </p>
-        </div>
+          <div
+            v-if="wordList.length && wordsDS.error.value"
+            class="pt-note pt-note--warn md-stale"
+            data-testid="media-words-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>刷新失败：{{ wordsDS.errorText.value }}。下面是上次读到的。</span>
+          </div>
+          <PtDataState
+            v-if="!wordList.length"
+            :state="wordsDS.state.value"
+            :title="wordsDS.state.value === 'empty' ? '还没有识别词' : ''"
+            :sub="
+              wordsDS.errorText.value || (wordsDS.state.value === 'empty' ? '点右上角「添加」' : '')
+            "
+            data-testid="media-words-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="wordList"
+            row-key="id"
+            class="pt-grid"
+            data-testid="media-words">
+            <el-table-column label="种类" width="110">
+              <template #default="{ row }">{{ wordKindLabel(row.kind) }}</template>
+            </el-table-column>
+            <el-table-column
+              label="匹配"
+              min-width="200"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip>
+              <template #default="{ row }">
+                <code>{{ row.pattern }}</code
+                ><PtTag v-if="row.is_regex" class="md-regex">正则</PtTag>
+              </template>
+            </el-table-column>
+            <el-table-column
+              label="效果"
+              min-width="200"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip>
+              <template #default="{ row }">{{ wordEffect(row) }}</template>
+            </el-table-column>
+            <el-table-column
+              label="备注"
+              min-width="140"
+              prop="note"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip />
+            <el-table-column label="启用" width="80">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="row.enabled"
+                  :aria-label="`启用识别词 ${row.pattern}`"
+                  :data-testid="`media-word-enabled-${row.id}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleWord(row, Boolean(v))
+                  " />
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="120" align="right">
+              <template #default="{ row }">
+                <el-button link :data-testid="`media-word-edit-${row.id}`" @click="openWord(row)"
+                  >编辑</el-button
+                >
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`media-word-del-${row.id}`"
+                  @click="removeWord(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="md-cards">
+            <PtRowCard v-for="r in wordList" :key="r.id">
+              <template #title>{{ r.pattern }}</template>
+              <template #meta>
+                <span>{{ wordKindLabel(r.kind) }}{{ r.is_regex ? " · 正则" : "" }}</span>
+                <span class="md-full">{{ wordEffect(r) }}</span>
+                <span v-if="r.note" class="md-full">{{ r.note }}</span>
+              </template>
+              <template #status>
+                <el-switch
+                  :model-value="r.enabled"
+                  :aria-label="`启用识别词 ${r.pattern}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleWord(r, Boolean(v))
+                  " />
+              </template>
+              <template #actions>
+                <el-button size="small" @click="openWord(r)">编辑</el-button>
+                <el-button size="small" type="danger" plain @click="removeWord(r)">删除</el-button>
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
       </div>
-    </PtPanel>
-
-    <PtPanel title="手动纠正" icon="pencil" :count="overrides.length">
-      <div
-        v-if="overrides.length && overridesDS.error.value"
-        class="pt-note pt-note--warn md-stale"
-        data-testid="media-overrides-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>刷新失败：{{ overridesDS.errorText.value }}。下面是上次读到的。</span>
-      </div>
-      <PtDataState
-        v-if="!overrides.length"
-        :state="overridesDS.state.value"
-        :title="overridesDS.state.value === 'empty' ? '还没有纠正' : ''"
-        :sub="
-          overridesDS.errorText.value ||
-          (overridesDS.state.value === 'empty'
-            ? '识别不对时，在识别预览里选候选或填 TMDB 编号'
-            : '')
-        "
-        data-testid="media-overrides-state" />
-      <el-table
-        v-else-if="!isMobile"
-        :data="overrides"
-        row-key="id"
-        class="pt-grid"
-        data-testid="media-overrides">
-        <el-table-column
-          label="解析结果"
-          min-width="240"
-          class-name="pt-cell-strong"
-          prop="label" />
-        <el-table-column label="识别成" min-width="240">
-          <template #default="{ row }">
-            <a
-              :href="tmdbPageURL(row.media_type, row.tmdb_id)"
-              target="_blank"
-              rel="noopener noreferrer"
-              >{{ row.title || row.tmdb_id }}</a
-            >
-            <span class="md-sub">
-              · {{ mediaKindLabel(row.media_type) }} · TMDB {{ row.tmdb_id }}</span
-            >
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="90" align="right">
-          <template #default="{ row }">
-            <el-button
-              link
-              type="danger"
-              :data-testid="`media-override-del-${row.id}`"
-              @click="removeOverride(row)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else class="md-cards">
-        <PtRowCard v-for="o in overrides" :key="o.id">
-          <template #title>{{ o.label }}</template>
-          <template #meta>
-            <span class="md-full">识别成 {{ o.title || o.tmdb_id }}</span>
-            <span>{{ mediaKindLabel(o.media_type) }} · TMDB {{ o.tmdb_id }}</span>
-          </template>
-          <template #actions>
-            <el-button size="small" type="danger" plain @click="removeOverride(o)">删除</el-button>
-          </template>
-        </PtRowCard>
-      </div>
-    </PtPanel>
-
-    <PtPanel
-      title="识别词"
-      icon="tags"
-      :count="wordList.length"
-      action="添加"
-      action-icon="plus"
-      @action="openWord()">
-      <p class="md-tip md-tip--top">
-        解析标题之前按顺序套用：屏蔽去掉文字，替换换成另一段文字；集数偏移在解析之后给集数加上偏移量（可为负），
-        用于按总集数编号的剧集。纯文字不分大小写；勾选正则时按 Go 的正则写法。
-      </p>
-      <div
-        v-if="wordList.length && wordsDS.error.value"
-        class="pt-note pt-note--warn md-stale"
-        data-testid="media-words-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>刷新失败：{{ wordsDS.errorText.value }}。下面是上次读到的。</span>
-      </div>
-      <PtDataState
-        v-if="!wordList.length"
-        :state="wordsDS.state.value"
-        :title="wordsDS.state.value === 'empty' ? '还没有识别词' : ''"
-        :sub="
-          wordsDS.errorText.value || (wordsDS.state.value === 'empty' ? '点右上角「添加」' : '')
-        "
-        data-testid="media-words-state" />
-      <el-table
-        v-else-if="!isMobile"
-        :data="wordList"
-        row-key="id"
-        class="pt-grid"
-        data-testid="media-words">
-        <el-table-column label="种类" width="110">
-          <template #default="{ row }">{{ wordKindLabel(row.kind) }}</template>
-        </el-table-column>
-        <el-table-column
-          label="匹配"
-          min-width="200"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip>
-          <template #default="{ row }">
-            <code>{{ row.pattern }}</code
-            ><PtTag v-if="row.is_regex" class="md-regex">正则</PtTag>
-          </template>
-        </el-table-column>
-        <el-table-column
-          label="效果"
-          min-width="200"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip>
-          <template #default="{ row }">{{ wordEffect(row) }}</template>
-        </el-table-column>
-        <el-table-column
-          label="备注"
-          min-width="140"
-          prop="note"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip />
-        <el-table-column label="启用" width="80">
-          <template #default="{ row }">
-            <el-switch
-              :model-value="row.enabled"
-              :aria-label="`启用识别词 ${row.pattern}`"
-              :data-testid="`media-word-enabled-${row.id}`"
-              @update:model-value="(v: string | number | boolean) => toggleWord(row, Boolean(v))" />
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="120" align="right">
-          <template #default="{ row }">
-            <el-button link :data-testid="`media-word-edit-${row.id}`" @click="openWord(row)"
-              >编辑</el-button
-            >
-            <el-button
-              link
-              type="danger"
-              :data-testid="`media-word-del-${row.id}`"
-              @click="removeWord(row)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-else class="md-cards">
-        <PtRowCard v-for="r in wordList" :key="r.id">
-          <template #title>{{ r.pattern }}</template>
-          <template #meta>
-            <span>{{ wordKindLabel(r.kind) }}{{ r.is_regex ? " · 正则" : "" }}</span>
-            <span class="md-full">{{ wordEffect(r) }}</span>
-            <span v-if="r.note" class="md-full">{{ r.note }}</span>
-          </template>
-          <template #status>
-            <el-switch
-              :model-value="r.enabled"
-              :aria-label="`启用识别词 ${r.pattern}`"
-              @update:model-value="(v: string | number | boolean) => toggleWord(r, Boolean(v))" />
-          </template>
-          <template #actions>
-            <el-button size="small" @click="openWord(r)">编辑</el-button>
-            <el-button size="small" type="danger" plain @click="removeWord(r)">删除</el-button>
-          </template>
-        </PtRowCard>
-      </div>
-    </PtPanel>
+    </div>
 
     <el-dialog
       v-model="wordDialog"

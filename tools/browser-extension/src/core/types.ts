@@ -164,6 +164,7 @@ export type MessageType =
   | "GET_TAB_STATUS"
   | "GET_ALL_SITES_STATUS"
   | "GET_SITE_LOGIN_STATE"
+  | "CHECK_CONNECTION"
   | "EXPORT_ZIP"
   | "CREATE_ISSUE"
   | "GET_STATUS"
@@ -219,6 +220,8 @@ export interface BatchSyncSitesPayload {
 export interface BatchSyncResult {
   synced: string[];
   failed: Array<{ siteId: string; error: string }>;
+  /** 同步成功、但 pt-tools 说还要处理的站点（比如 HDDolby 还缺 API Key，Cookie 已存下、站点暂不启用） */
+  warnings?: Array<{ siteId: string; warning: string }>;
 }
 
 export interface BatchOpenTabsPayload {
@@ -291,6 +294,7 @@ export interface MessagePayloadMap {
   GET_TAB_STATUS: Record<string, never>;
   GET_ALL_SITES_STATUS: Record<string, never>;
   GET_SITE_LOGIN_STATE: Record<string, never>;
+  CHECK_CONNECTION: Record<string, never>;
   EXPORT_ZIP: ExportZipPayload;
   CREATE_ISSUE: CreateIssuePayload;
   GET_STATUS: Record<string, never>;

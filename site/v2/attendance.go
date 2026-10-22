@@ -14,8 +14,8 @@ import (
 )
 
 // AttendanceConfig 描述站点的每日签到：按 Method 请求 Path，按返回页面的文字判断结果。
-// NexusPHP 站点不配置时使用 DefaultNexusPHPAttendance；没有签到、签到要验证码或答题的站点
-// 设置 Unsupported，值是界面上显示的原因。
+// NexusPHP 站点不配置时使用 DefaultNexusPHPAttendance；签到要识别验证码或答题、而 pt-tools 写好了流程的站点
+// 设置 Challenge（要有 AI，见 attendance_challenge.go）；没有签到或流程没写的站点设置 Unsupported，值是界面上显示的原因。
 type AttendanceConfig struct {
 	// Path 是签到请求的路径，可以带查询参数（如 /attendance-ajax.php?act=sign）。
 	Path string `json:"path,omitempty"`
@@ -27,6 +27,8 @@ type AttendanceConfig struct {
 	AlreadyPatterns []string `json:"alreadyPatterns,omitempty"`
 	// Unsupported 非空表示该站不支持自动签到，值是原因。
 	Unsupported string `json:"unsupported,omitempty"`
+	// Challenge 非空表示签到要先过一关（识别验证码或答题），按这一关的流程签到，不用 Path 与 Patterns。
+	Challenge AttendanceChallenge `json:"challenge,omitempty"`
 }
 
 const defaultAttendancePath = "/attendance.php"
@@ -246,6 +248,9 @@ func (d *NexusPHPDriver) Attend(ctx context.Context) (AttendResult, error) {
 	}
 	if cfg.Unsupported != "" {
 		return AttendResult{}, fmt.Errorf("%w: %s", ErrAttendanceUnsupported, cfg.Unsupported)
+	}
+	if cfg.Challenge != "" {
+		return d.attendWithChallenge(ctx, cfg.Challenge)
 	}
 	req, err := attendanceRequest(cfg)
 	if err != nil {

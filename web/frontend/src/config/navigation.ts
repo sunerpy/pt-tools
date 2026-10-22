@@ -39,6 +39,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "站点",
     items: [
       { path: "/sites", label: "站点列表", icon: "globe", badge: "sites", rail: true },
+      /* 第三批：签到的开关、结果与设置原来散在站点列表和全局设置里，单独成页 */
+      { path: "/attendance", label: "自动签到", icon: "calendar-check" },
       { path: "/supported-sites", label: "已支持站点", icon: "badge-check" },
       /* 路线图 M7：画板没有这一页，沿用站点组列表页的样式 */
       { path: "/cookiecloud", label: "CookieCloud 导入", icon: "cloud-download" },
@@ -170,6 +172,7 @@ const ROUTE_NAME_TO_NAV: Record<string, string> = {
   "assistant-settings": "/assistant/settings",
   sites: "/sites",
   "site-detail": "/sites",
+  attendance: "/attendance",
   cookiecloud: "/cookiecloud",
   "supported-sites": "/supported-sites",
   search: "/search",

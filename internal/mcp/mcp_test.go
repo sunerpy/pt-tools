@@ -119,7 +119,7 @@ func (e *env) call(name string, args map[string]any) (string, bool, map[string]a
 	return text, res.IsError, structured
 }
 
-// 工具清单：13 个，名字和 ToolNames 一样；只读工具标 readOnly，删除标 destructive；参数的取值范围写进了 schema
+// 工具清单：名字和 ToolNames 一样；只读工具标 readOnly，删除标 destructive；参数的取值范围写进了 schema
 func TestToolList(t *testing.T) {
 	e := newEnv(t)
 	res, err := e.session.ListTools(context.Background(), nil)
@@ -136,11 +136,17 @@ func TestToolList(t *testing.T) {
 	for _, name := range []string{"list_tasks", "search_torrents", "get_downloader_stats", "check_updates"} {
 		assert.True(t, byName[name].Annotations.ReadOnlyHint, name)
 	}
-	for _, name := range []string{"pause_torrent", "resume_torrent", "delete_torrent", "push_torrent", "add_subscription"} {
+	for _, name := range []string{"get_subscription", "recognize_media", "list_media_libraries", "list_media_history", "preview_media_organize"} {
+		assert.True(t, byName[name].Annotations.ReadOnlyHint, name)
+	}
+	for _, name := range []string{
+		"pause_torrent", "resume_torrent", "delete_torrent", "push_torrent", "add_subscription",
+		"set_subscription_status", "search_subscription", "delete_subscription", "organize_media", "retry_media_organize",
+	} {
 		ann := byName[name].Annotations
 		assert.False(t, ann.ReadOnlyHint, name)
 		require.NotNil(t, ann.DestructiveHint, name)
-		assert.Equal(t, name == "delete_torrent", *ann.DestructiveHint, name)
+		assert.Equal(t, name == "delete_torrent" || name == "delete_subscription", *ann.DestructiveHint, name)
 	}
 	schema, _ := json.Marshal(byName["list_downloader_torrents"].InputSchema)
 	assert.Contains(t, string(schema), `"seeding"`, "state 的取值范围")
@@ -254,16 +260,29 @@ func TestWriteTools(t *testing.T) {
 	assert.Equal(t, "delete_torrent", a[2].Command)
 	assert.Equal(t, "delete_with_files", a[2].Args["action"])
 
-	// 没有 confirm：不调，审计记 denied:confirm
-	text, isErr, _ := e.call("pause_torrent", map[string]any{"downloader_id": 1, "task_id": "abc", "confirm": false})
-	assert.True(t, isErr)
+	// 没有 confirm：不执行，回预览（只读现状，不记审计）
+	e.backend.reply = func(req Request) Response {
+		if strings.HasPrefix(req.Path, "/torrents?") {
+			return Response{Status: http.StatusOK, Body: []byte(`{"items":[{"downloader_id":1,"downloader":"qb","task_id":"abc","title":"Dune","progress":1,"size":1073741824,"state":"seeding","ratio":1.5}]}`)}
+		}
+		return Response{Status: http.StatusOK, Body: []byte(`{}`)}
+	}
+	text, isErr, out := e.call("pause_torrent", map[string]any{"downloader_id": 1, "task_id": "abc", "confirm": false})
+	require.False(t, isErr, text)
+	assert.Equal(t, true, out["pending"])
 	assert.Contains(t, text, "confirm=true")
-	assert.Len(t, e.backend.got(), 3)
-	assert.Equal(t, "denied:confirm", e.audit.all()[3].Result)
+	assert.Contains(t, out["summary"], "暂停下载器「qb」里的「Dune」")
+	assert.Equal(t, []any{map[string]any{"label": "状态", "before": "做种中", "after": "已暂停"}}, out["changes"])
+	reads := e.backend.got()[3:]
+	require.Len(t, reads, 1)
+	assert.Equal(t, http.MethodGet, reads[0].Method)
+	assert.True(t, reads[0].Preview)
+	assert.False(t, reads[0].Write)
+	assert.Len(t, e.audit.all(), 3, "预览不记审计")
 	// 没给种子：不调，审计记 error:invalid_argument
 	_, isErr, _ = e.call("resume_torrent", map[string]any{"downloader_id": 0, "task_id": "", "confirm": true})
 	assert.True(t, isErr)
-	assert.Equal(t, "error:invalid_argument", e.audit.all()[4].Result)
+	assert.Equal(t, "error:invalid_argument", e.audit.all()[3].Result)
 }
 
 // 权限范围：只有 mcp:read 的令牌调写工具被拒（记 denied:scope），只有 mcp:write 的调只读工具被拒；没有令牌时一律拒绝
@@ -380,7 +399,7 @@ func TestCallerRoundTrip(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// 参数的校验在工具里做：写工具没带 confirm、带了多余的字段、取值不在范围里都不调用 App API，并且记审计；
+// 参数的校验在工具里做：写工具带了多余的字段、取值不在范围里都不调用 App API，并且记审计（没带 confirm 的回预览，见 TestWriteTools）；
 // 只读工具的参数不对也不调用（不记审计）；会访问站点、GitHub、TMDB 的工具标 openWorld
 func TestArgumentValidation(t *testing.T) {
 	e := newEnv(t)
@@ -389,7 +408,6 @@ func TestArgumentValidation(t *testing.T) {
 		args   map[string]any
 		result string
 	}{
-		{"pause_torrent", map[string]any{"downloader_id": 1, "task_id": "abc"}, "denied:confirm"},
 		{"pause_torrent", map[string]any{"downloader_id": 1, "task_id": "abc", "confirm": true, "extra": 1}, "error:invalid_argument"},
 		{"delete_torrent", map[string]any{"downloader_id": 0, "task_id": "abc", "confirm": true}, "error:invalid_argument"},
 		{"add_subscription", map[string]any{"media_type": "book", "tmdb_id": 1, "confirm": true}, "error:invalid_argument"},
@@ -465,4 +483,110 @@ func TestAuditChannelAndSubjectForAssistant(t *testing.T) {
 	assert.Equal(t, "web:admin", entries[0].ChannelUserID)
 	assert.Equal(t, "pause_torrent", entries[0].Command)
 	assert.Equal(t, "success", entries[0].Result)
+}
+
+// 媒体库的工具：订阅详情、暂停与恢复、立即搜索、删除；识别、媒体库、整理历史、整理预览、整理与重试。写的要 confirm=true、记审计
+func TestMediaTools(t *testing.T) {
+	e := newEnv(t)
+	reads := []struct {
+		tool         string
+		args         map[string]any
+		method, path string
+		body         string
+	}{
+		{"get_subscription", map[string]any{"id": 5}, http.MethodGet, "/subscriptions/5", ""},
+		{"list_media_libraries", nil, http.MethodGet, "/media/libraries", ""},
+		{"list_media_history", map[string]any{"status": "failed", "keyword": "沙丘", "page": 2}, http.MethodGet, "/media/history?page=2&q=%E6%B2%99%E4%B8%98&status=failed", ""},
+		{
+			"recognize_media",
+			map[string]any{"title": "Dune.2021.2160p", "imdb_id": "tt1160419"},
+			http.MethodPost, "/media/recognize",
+			`{"title":"Dune.2021.2160p","subtitle":"","imdb_id":"tt1160419"}`,
+		},
+		{
+			"preview_media_organize",
+			map[string]any{"downloader_id": 1, "hash": " abc "},
+			http.MethodPost, "/media/organize/preview",
+			`{"downloader_id":1,"hash":"abc","media_type":"","tmdb_id":0,"library_id":0}`,
+		},
+	}
+	for _, c := range reads {
+		text, isErr, _ := e.call(c.tool, c.args)
+		require.False(t, isErr, "%s: %s", c.tool, text)
+		got := e.backend.got()
+		req := got[len(got)-1]
+		assert.Equal(t, c.method, req.Method, c.tool)
+		assert.Equal(t, c.path, req.Path, c.tool)
+		assert.False(t, req.Write, c.tool)
+		if c.body != "" {
+			body, _ := json.Marshal(req.Body)
+			assert.JSONEq(t, c.body, string(body), c.tool)
+		}
+	}
+	assert.Empty(t, e.audit.all(), "只读工具不记审计")
+
+	writes := []struct {
+		tool         string
+		args         map[string]any
+		method, path string
+		body         string
+	}{
+		{"set_subscription_status", map[string]any{"id": 5, "status": "paused"}, http.MethodPost, "/subscriptions/5/status", `{"status":"paused"}`},
+		{"search_subscription", map[string]any{"id": 5}, http.MethodPost, "/subscriptions/5/search", ""},
+		{"delete_subscription", map[string]any{"id": 5}, http.MethodDelete, "/subscriptions/5", ""},
+		{
+			"organize_media",
+			map[string]any{"downloader_id": 1, "hash": "abc", "media_type": "movie", "tmdb_id": 278, "library_id": 2},
+			http.MethodPost, "/media/organize",
+			`{"downloader_id":1,"hash":"abc","media_type":"movie","tmdb_id":278,"library_id":2}`,
+		},
+		{"retry_media_organize", map[string]any{"id": 9}, http.MethodPost, "/media/history/9/retry", ""},
+	}
+	for i, c := range writes {
+		args := map[string]any{"confirm": false}
+		for k, v := range c.args {
+			args[k] = v
+		}
+		before := len(e.backend.got())
+		e.call(c.tool, args)
+		for _, r := range e.backend.got()[before:] {
+			assert.True(t, r.Preview && !r.Write, "%s 没确认只读现状，不改", c.tool)
+		}
+		assert.Len(t, e.audit.all(), i, "%s 的预览不记审计", c.tool)
+
+		args["confirm"] = true
+		text, isErr, _ := e.call(c.tool, args)
+		require.False(t, isErr, "%s: %s", c.tool, text)
+		got := e.backend.got()
+		req := got[len(got)-1]
+		assert.Equal(t, c.method, req.Method, c.tool)
+		assert.Equal(t, c.path, req.Path, c.tool)
+		assert.True(t, req.Write, c.tool)
+		if c.body != "" {
+			body, _ := json.Marshal(req.Body)
+			assert.JSONEq(t, c.body, string(body), c.tool)
+		}
+		a := e.audit.all()
+		require.Len(t, a, i+1, c.tool)
+		assert.Equal(t, c.tool, a[i].Command)
+		assert.Equal(t, "success", a[i].Result, c.tool)
+	}
+
+	// 参数不对的不调
+	before := len(e.backend.got())
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"recognize_media", map[string]any{"title": " "}},
+		{"preview_media_organize", map[string]any{"downloader_id": 1, "hash": ""}},
+		{"preview_media_organize", map[string]any{"downloader_id": 1, "hash": "abc", "tmdb_id": 278}},
+		{"organize_media", map[string]any{"downloader_id": 1, "hash": "abc", "media_type": "book", "confirm": true}},
+		{"set_subscription_status", map[string]any{"id": 5, "status": "done", "confirm": true}},
+		{"get_subscription", map[string]any{"id": 0}},
+	} {
+		_, isErr, _ := e.call(c.tool, c.args)
+		assert.True(t, isErr, "%s %v", c.tool, c.args)
+	}
+	assert.Len(t, e.backend.got(), before)
 }

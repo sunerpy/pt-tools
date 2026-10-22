@@ -34,10 +34,13 @@ const (
 	ScopeMCPRead    = "mcp:read"
 	ScopeMCPWrite   = "mcp:write"
 	ScopeQbitCompat = "qbit:compat"
+	// ScopeAppConfig 是读、改 pt-tools 的配置（App API 的 /config 与 MCP 的配置工具都要它，另外还要读或写的权限）。
+	// 已有的令牌不会因为升级多出这一项
+	ScopeAppConfig = "app:config"
 )
 
 // Scopes 是所有权限范围，也是令牌里 scope 的排列顺序。
-var Scopes = []string{ScopeAppRead, ScopeAppWrite, ScopeMCPRead, ScopeMCPWrite, ScopeQbitCompat}
+var Scopes = []string{ScopeAppRead, ScopeAppWrite, ScopeAppConfig, ScopeMCPRead, ScopeMCPWrite, ScopeQbitCompat}
 
 var (
 	ErrInvalid      = errors.New("参数不对")

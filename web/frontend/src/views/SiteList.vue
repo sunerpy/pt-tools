@@ -25,8 +25,9 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { formatShortDateTime, formatTimeAgo } from "@/utils/format";
+import { isInteractiveClick, ROW_LINK_CLASS } from "@/utils/rowClick";
 import { isProbeSuccess, probeStatusLabel, probeStatusSeverity } from "@/utils/probeStatus";
-import { attendanceView } from "@/utils/attendanceStatus";
+import { attendanceChallengeText, attendanceView } from "@/utils/attendanceStatus";
 import { type DataStateKey, useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { useLoginState } from "@/composables/useLoginState";
@@ -435,6 +436,12 @@ function openAllEnabled() {
 
 function manageSite(name: string) {
   router.push(`/sites/${name}`);
+}
+
+/** 点行进站点详情；点到行里的开关、按钮时照旧做它们自己的事 */
+function onSiteRowClick(row: [string, SiteConfig], _column: unknown, event: Event) {
+  if (isInteractiveClick(event)) return;
+  manageSite(row[0]);
 }
 
 /**
@@ -1256,8 +1263,10 @@ async function saveLoginConfig() {
         v-if="!isMobile"
         :data="visibleEntries"
         :row-key="(row: [string, SiteConfig]) => row[0]"
+        :row-class-name="() => ROW_LINK_CLASS"
         class="pt-grid"
-        style="width: 100%">
+        style="width: 100%"
+        @row-click="onSiteRowClick">
         <template #empty>
           <PtDataState :state="tableState" dense :title="stateTitle" :sub="stateSub">
             <template v-if="tableState === 'error' || tableState === 'partial'" #action>
@@ -2043,6 +2052,12 @@ async function saveLoginConfig() {
                 ? configAttendance.unsupported_reason
                 : "每天在签到时间窗内随机签到一次，失败最多重试 2 次"
             }}
+            <template v-if="attendanceChallengeText(configAttendance?.challenge)">
+              <span data-testid="login-config-attendance-ai"
+                >{{ attendanceChallengeText(configAttendance?.challenge) }}：要在「全局设置 →
+                每日签到」打开「用 AI 签到」。</span
+              >
+            </template>
             <router-link
               v-if="!configAttendance || configAttendance.supported"
               to="/global"
