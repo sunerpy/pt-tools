@@ -314,7 +314,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | `days`             | `weekly` 的星期几（0 到 6，0 是星期日），或 `monthly` 的几号（1 到 31，小月按月末）                                                                                    |
 | `air_delay_hours`  | 按播出时间时，播出后几小时开始搜（0 到 72，0 是 2 小时）                                                                                                               |
 | `air_retry_hours`  | 按播出时间时，没找到隔几小时再搜（0 到 48，0 是 6 小时）                                                                                                               |
-| `air_window_days`  | 按播出时间时，播出后几天里按上面的间隔集中重试（0 到 60，0 是 7 天）；过了这几天仍未找到的，每天搜一次                                                               |
+| `air_window_days`  | 按播出时间时，播出后几天里按上面的间隔集中重试（0 到 60，0 是 7 天）；过了这几天仍未找到的，每天搜一次                                                                 |
 | `interval_minutes` | `interval` 的分钟数，30 到 10080（7 天），从上次搜索算起                                                                                                               |
 | `cron`             | `cron` 的表达式：5 段（分 时 日 月 星期），几条用分号分开，到点的取最早的；写法见[订阅与追剧](../guide/media-subscribe.md#什么时候搜索)。存的是规整后的写法            |
 
@@ -330,8 +330,8 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 - `episodes`：剧集的每一集，`number`、`name`、`air_date`、`state`（`library`、`downloading`、`missing`、`waiting_version`（在等锁住的版本）、`upcoming` 或 `skipped`（不追））、`source`（状态从哪里来：`library` 媒体库、`subscription` 订阅推送的种子、`downloader` 下载器里已有的种子）、`version`（现在的版本：制作组与分辨率）、`manual_skip`（手动跳过的）、`manual_unlock`（这一集不受版本锁限制）；
 - `torrents`：下载过的种子，`id`（下面两个接口里的 `tid`）、`site`、`torrent_id`、`title`、`status`（`downloading`、`done`、`failed`、`replaced`）、`episode`、`episode_end`、`complete`、`size`、`message`、`created_at`，以及：
-  - `files`：这个种子整理进媒体库的情况，每个视频文件一项：`id`（整理记录，可以用于 `/media/history/{id}/…`）、`name`（文件名）、`episode`、`episode_end`、`status`（`done`、`failed`、`skipped`、`removed`）、`message`（没整理成的原因）、`scrape_status`（`ok`、`partial`、`failed`，空的是没刮削过）、`scrape_note`、`next_retry_at`（自动重试的时间）、`retrying`（整理队列正在重试它）；还没整理过时是空数组；
-  - `can_organize`：能重新整理（有没整理成、也不在自动重试的文件，或者种子标成了失败、还没有整理记录）；`can_rescrape`：能重新刮削（有整理好的文件）。洗版换掉的旧版本两个都是 `false`。
+  - `files`：这个种子整理进媒体库的情况，每个视频文件一项：`id`（整理记录，可以用于 `/media/history/{id}/…`）、`name`（文件名）、`episode`、`episode_end`、`status`（`done`、`failed`、`skipped`、`removed`）、`message`（没整理成的原因）、`scrape_status`（`ok`、`partial`、`failed`，空的是没刮削过）、`scrape_note`、`next_retry_at`（自动重试的时间）、`retrying`（整理队列正在重试它）；尚未整理过时是空数组；
+  - `can_organize`：能重新整理（有没整理成、也不在自动重试的文件，或者种子标成了失败、尚无整理记录）；`can_rescrape`：能重新刮削（有整理好的文件）。洗版换掉的旧版本两个都是 `false`。
 
 ### POST /subscriptions
 
@@ -387,7 +387,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 ### POST /subscriptions/{id}/torrents/{tid}/scrape
 
-重新刮削这个种子整理进的电影或剧集，回应同 `POST /media/history/{id}/scrape`，运行记录里记一条。还没有整理好的文件时回 400（先重新整理），洗版换掉的旧版本也回 400。
+重新刮削这个种子整理进的电影或剧集，回应同 `POST /media/history/{id}/scrape`，运行记录里记一条。尚无整理好的文件时回 400（先重新整理），洗版换掉的旧版本也回 400。
 
 ### GET、PUT、DELETE /subscriptions/{id}/episode-rules
 

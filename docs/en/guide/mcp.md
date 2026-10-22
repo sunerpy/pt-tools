@@ -126,7 +126,7 @@ When the assistant follows a show for you, it first reads the built-in skill `pt
 
 - "Follow season 4 of 现在就出发, searching Friday at 10 pm and Saturday morning": `explore_media` finds the TMDB ID, then `add_subscription` with a `schedule` (`{"kind":"cron","cron":"0 22 * * 5; 0 10 * * 6"}`) returns a preview for you to confirm.
 - "Search every 3 hours instead": `update_subscription` changes the `schedule` (`{"kind":"interval","interval_minutes":180}`); the preview lists the next few search times.
-- "Episode 5 never shows up from HHWEB": `unlock_episode` releases just that episode.
+- "Episode 5 never shows up from HHWEB": `unlock_episode` releases only that episode.
 - "Why was nothing downloaded": `list_subscription_runs` shows each search; an episode number that does not match gets a rule with `save_episode_rule`, a failed push is retried with `search_subscription`, and a download that never reached the library is organized again with `reorganize_subscription_torrent`.
 
 For the schedule options see [Follow and subscribe · When to search](media-subscribe.md#when-to-search). The subscription master switch, global search interval, default quality profile and downloader, and the Douban wish list are the `subscribe`, `quality_profiles` and `douban_sources` resources under Changing the configuration.
