@@ -37,6 +37,7 @@ var configExcluded = []string{
 	"AI 助手自己的设置（服务商、接口地址、API Key、模型、代理、ChatOps 开关、语音输入）",
 	"ChatOps 绑定与管理员",
 	"qB 兼容入口（另开的监听端口与权限）",
+	"MCP 接入（开关与地址）",
 }
 
 const (

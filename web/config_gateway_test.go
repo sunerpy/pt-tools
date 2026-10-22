@@ -39,6 +39,7 @@ func newConfigEnv(t *testing.T) *appEnv {
 		TemplateSvc: app.NewTemplateService(global.GlobalDB.DB, notify.NewTemplates(nil)),
 	})
 	srv.sessions.put("sess-app", "admin")
+	enableMCPForTest(t)
 	e.handler = srv.buildHandler()
 	return e
 }

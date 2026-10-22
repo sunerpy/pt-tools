@@ -68,8 +68,11 @@ lib/model/app_recognition.dart
 lib/model/app_recognize_input.dart
 lib/model/app_release.dart
 lib/model/app_release_asset.dart
+lib/model/app_rescrape_result.dart
 lib/model/app_run_step.dart
 lib/model/app_schedule.dart
+lib/model/app_schedule_preview.dart
+lib/model/app_schedule_preview_input.dart
 lib/model/app_search_error.dart
 lib/model/app_search_item.dart
 lib/model/app_search_request.dart
@@ -101,6 +104,7 @@ lib/model/app_torrent.dart
 lib/model/app_torrent_action_result.dart
 lib/model/app_torrent_actions_request.dart
 lib/model/app_torrent_actions_result.dart
+lib/model/app_torrent_file.dart
 lib/model/app_torrent_page.dart
 lib/model/app_torrent_target.dart
 lib/model/app_totals.dart

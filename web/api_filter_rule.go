@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmcdole/gofeed"
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
@@ -81,6 +81,8 @@ type FilterRuleTestMatch struct {
 	Decision string  `json:"decision"` // 完整决策结果: downloaded / skipped
 	Reason   string  `json:"reason"`   // 跳过原因（如果有）
 	Source   string  `json:"source"`   // 下载通道: filter_rule / free_download / ""
+	// DetailMissing 是这个种子的详情没取到（RSS 试跑）：标题按 RSS 里的，免费状态不知道（按非免费算）
+	DetailMissing bool `json:"detail_missing,omitempty"`
 }
 
 // FilterRuleTestResponse 过滤规则测试响应
@@ -88,6 +90,12 @@ type FilterRuleTestResponse struct {
 	MatchCount int                   `json:"match_count"`
 	TotalCount int                   `json:"total_count"` // 总种子数
 	Matches    []FilterRuleTestMatch `json:"matches"`     // 匹配的种子详情
+	// Source 是这次试跑用的数据：history（最近入库的种子记录）或 rss（现拉的 RSS）
+	Source string `json:"source"`
+	// SourceName 是数据源的说明：RSS 的名称与站点，或「最近入库的种子记录（最多 N 条）」
+	SourceName string `json:"source_name"`
+	// DetailFailed 是 RSS 里详情没取到的条目数：它们按 RSS 里的标题算，免费状态不知道
+	DetailFailed int `json:"detail_failed,omitempty"`
 }
 
 // apiFilterRules 处理过滤规则列表和创建
@@ -444,72 +452,58 @@ func (s *Server) testFilterRule(w http.ResponseWriter, r *http.Request) {
 		matchField = models.MatchFieldBoth
 	}
 
-	// 如果指定了 RSS ID，从 RSS 订阅获取种子
+	rt := ruleTest{
+		matcher:    matcher,
+		matchField: matchField,
+		rule: &models.FilterRule{
+			Pattern:     req.Pattern,
+			PatternType: models.PatternType(patternType),
+			MatchField:  matchField,
+			RequireFree: req.RequireFree,
+			MinSizeGB:   sanitizeRuleSize(req.MinSizeGB),
+			MaxSizeGB:   sanitizeRuleSize(req.MaxSizeGB),
+			Enabled:     true,
+		},
+		mode:       models.NormalizeFilterMode(models.FilterMode(req.FilterMode)),
+		globalSize: req.GlobalSize,
+		testSizeGB: req.TestSizeGB,
+		testIsFree: req.TestIsFree,
+		limit:      limit,
+	}
+
+	// 指定了 RSS 时现拉一次这个 RSS 来试
 	if req.RSSID != nil {
-		s.testFilterRuleWithRSS(w, matcher, matchField, req.RequireFree, *req.RSSID, limit)
+		s.testFilterRuleWithRSS(w, r.Context(), rt, *req.RSSID)
 		return
 	}
 
-	// 否则从数据库获取种子列表进行匹配测试
+	// 否则用最近入库的种子记录来试
 	db := global.GlobalDB.DB
 	tx := db.Model(&models.TorrentInfo{})
+	sourceName := fmt.Sprintf("最近入库的种子记录（最多 %d 条）", historyTestRows)
 
 	if req.SiteID != nil {
 		var site models.SiteSetting
 		if err := db.First(&site, *req.SiteID).Error; err == nil {
 			tx = tx.Where("site_name = ?", site.Name)
+			sourceName = fmt.Sprintf("%s 最近入库的种子记录（最多 %d 条）", site.Name, historyTestRows)
 		}
 	}
 
 	var torrents []models.TorrentInfo
-	if err := tx.Order("created_at DESC").Limit(500).Find(&torrents).Error; err != nil {
+	if err := tx.Order("created_at DESC").Limit(historyTestRows).Find(&torrents).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 匹配种子
-	var matches []FilterRuleTestMatch
 	global.GetSlogger().Debugf("[FilterRuleTest] 开始匹配种子，总数: %d", len(torrents))
-
-	testRule := &models.FilterRule{
-		Pattern:     req.Pattern,
-		PatternType: models.PatternType(patternType),
-		MatchField:  matchField,
-		RequireFree: req.RequireFree,
-		MinSizeGB:   sanitizeRuleSize(req.MinSizeGB),
-		MaxSizeGB:   sanitizeRuleSize(req.MaxSizeGB),
-		Enabled:     true,
-	}
-	mode := models.NormalizeFilterMode(models.FilterMode(req.FilterMode))
-
+	matches := []FilterRuleTestMatch{}
 	for _, t := range torrents {
-		isMatch := matchesField(matcher, matchField, t.Title, t.Tag)
-		global.GetSlogger().Debugf("[FilterRuleTest] 尝试匹配: title=%s, tag=%s, matched=%v", t.Title, t.Tag, isMatch)
-		if !isMatch {
+		m, ok := rt.evaluate(t.Title, t.Tag, t.TorrentSize, t.IsFree)
+		if !ok {
 			continue
 		}
-
-		// 用当前种子数据评估完整决策（模拟 filter.Decide 流程）
-		torrentSizeGB := bytesToGB(t.TorrentSize)
-		if req.TestSizeGB > 0 {
-			torrentSizeGB = req.TestSizeGB
-		}
-		isFree := t.IsFree
-		if req.TestIsFree != nil {
-			isFree = *req.TestIsFree
-		}
-		decision := evaluateTestDecision(testRule, mode, req.GlobalSize, torrentSizeGB, isFree)
-
-		match := FilterRuleTestMatch{
-			Title:    t.Title,
-			Tag:      t.Tag,
-			IsFree:   isFree,
-			SizeGB:   torrentSizeGB,
-			Decision: decisionLabel(decision.ShouldDownload),
-			Reason:   decision.Reason,
-			Source:   decision.Source,
-		}
-		matches = append(matches, match)
+		matches = append(matches, m)
 		if len(matches) >= limit {
 			break
 		}
@@ -520,136 +514,159 @@ func (s *Server) testFilterRule(w http.ResponseWriter, r *http.Request) {
 		MatchCount: len(matches),
 		TotalCount: len(torrents),
 		Matches:    matches,
+		Source:     testSourceHistory,
+		SourceName: sourceName,
 	})
 }
 
-// testFilterRuleWithRSS 使用 RSS 订阅测试过滤规则
-func (s *Server) testFilterRuleWithRSS(w http.ResponseWriter, matcher filter.PatternMatcher, matchField models.MatchField, requireFree bool, rssID uint, limit int) {
+// historyTestRows 是用历史记录试跑时看最近多少条入库记录。
+const historyTestRows = 500
+
+// 试跑用的数据。
+const (
+	testSourceHistory = "history"
+	testSourceRSS     = "rss"
+)
+
+// rssTestDetailTimeout 是 RSS 试跑取种子详情的总时限：到点还没取到的按 RSS 里的信息算。
+const rssTestDetailTimeout = 2 * time.Minute
+
+// rssTestConcurrency 是 RSS 试跑同时取几个种子的详情。
+const rssTestConcurrency = 8
+
+// ruleTest 是一次试跑：规则、模拟的条件与最多返回几条命中。历史记录与 RSS 两条路用同一套判断。
+type ruleTest struct {
+	matcher    filter.PatternMatcher
+	matchField models.MatchField
+	rule       *models.FilterRule
+	mode       models.FilterMode
+	globalSize int
+	testSizeGB float64
+	testIsFree *bool
+	limit      int
+}
+
+// evaluate 看一个种子：没命中模式时第二个返回值为假；命中时按完整决策（大小、免费、下载模式、全局上限）给出下不下与原因。
+func (t ruleTest) evaluate(title, tag string, sizeBytes int64, isFree bool) (FilterRuleTestMatch, bool) {
+	if !matchesField(t.matcher, t.matchField, title, tag) {
+		return FilterRuleTestMatch{}, false
+	}
+	sizeGB := bytesToGB(sizeBytes)
+	if t.testSizeGB > 0 {
+		sizeGB = t.testSizeGB
+	}
+	if t.testIsFree != nil {
+		isFree = *t.testIsFree
+	}
+	decision := evaluateTestDecision(t.rule, t.mode, t.globalSize, sizeGB, isFree)
+	return FilterRuleTestMatch{
+		Title:    title,
+		Tag:      tag,
+		IsFree:   isFree,
+		SizeGB:   sizeGB,
+		Decision: decisionLabel(decision.ShouldDownload),
+		Reason:   decision.Reason,
+		Source:   decision.Source,
+	}, true
+}
+
+// testFilterRuleWithRSS 现拉一次 RSS 来试：每个条目取一次详情（标题、副标题、免费、大小），和 RSS 任务看到的一样；
+// 取不到详情的按 RSS 里的标题算，免费状态不知道（按非免费），并在结果里标出来。只读，不推送不写库。
+// rssTestDetail 取试跑用的种子详情（测试里换掉）。
+var rssTestDetail = internal.GetTorrentDetailForTest
+
+func (s *Server) testFilterRuleWithRSS(w http.ResponseWriter, ctx context.Context, rt ruleTest, rssID uint) {
 	db := global.GlobalDB.DB
 
-	// 获取 RSS 订阅
 	var rss models.RSSSubscription
 	if err := db.First(&rss, rssID).Error; err != nil {
 		http.Error(w, "RSS 订阅不存在", http.StatusNotFound)
 		return
 	}
-
-	// 获取站点信息用于解析
 	var site models.SiteSetting
 	if err := db.First(&site, rss.SiteID).Error; err != nil {
 		http.Error(w, "站点不存在", http.StatusNotFound)
 		return
 	}
-
-	// 获取 RSS feed
-	feed, err := fetchRSSFeedForTest(rss.URL)
-	if err != nil {
-		http.Error(w, "获取 RSS 失败: "+err.Error(), http.StatusInternalServerError)
+	if rss.IsExample {
+		http.Error(w, "这是示例 RSS，不会真的去拉：到站点页添加你自己的 RSS 链接再试", http.StatusBadRequest)
 		return
 	}
 
-	// 根据站点类型获取种子详情并匹配
-	siteName := models.SiteGroup(site.Name)
-	totalCount := len(feed.Items)
-
-	global.GetSlogger().Debugf("[FilterRuleTest] 站点: %s, RSS: %s, 总条目数: %d, requireFree: %v", siteName, rss.Name, totalCount, requireFree)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// 使用并发获取种子详情
-	type detailResult struct {
-		item   *gofeed.Item
-		detail *internal.TorrentDetailForTest
-		err    error
+	feed, err := internal.FetchRSSFeed(ctx, rss.URL)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, internal.ErrRSSPlaceholder) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, "获取 RSS「"+rss.Name+"」失败："+err.Error(), status)
+		return
 	}
 
-	resultChan := make(chan detailResult)
-	matchChan := make(chan FilterRuleTestMatch, limit)
-	var wg, processingWg sync.WaitGroup
+	siteName := models.SiteGroup(site.Name)
+	global.GetSlogger().Debugf("[FilterRuleTest] 站点: %s, RSS: %s, 总条目数: %d", siteName, rss.Name, len(feed.Items))
 
-	// 控制并发数，避免过多请求
-	maxConcurrent := 10
-	semaphore := make(chan struct{}, maxConcurrent)
-
-	// 启动结果处理 goroutine
-	processingWg.Add(1)
-	go func() {
-		defer processingWg.Done()
-		matchCount := 0
-		for result := range resultChan {
-			if result.err != nil {
-				global.GetSlogger().Debugf("[FilterRuleTest] 获取种子详情失败: %v", result.err)
-				continue
+	detailCtx, cancel := context.WithTimeout(ctx, rssTestDetailTimeout)
+	defer cancel()
+	details := make([]*internal.TorrentDetailForTest, len(feed.Items))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, rssTestConcurrency)
+	for i, item := range feed.Items {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-detailCtx.Done():
+				return
 			}
-
-			title := result.detail.Title
-			tag := result.detail.Tag
-			isFree := result.detail.IsFree
-
-			global.GetSlogger().Debugf("[FilterRuleTest] 种子: GUID=%s, Title=%s, Tag=%s, IsFree=%v", result.item.GUID, title, tag, isFree)
-
-			// 检查模式匹配
-			if !matchesField(matcher, matchField, title, tag) {
-				continue
+			defer func() { <-sem }()
+			d, err := rssTestDetail(detailCtx, siteName, item)
+			if err == nil {
+				details[i] = d
 			}
+		}()
+	}
+	wg.Wait()
 
-			// 检查免费筛选
-			if requireFree && !isFree {
-				global.GetSlogger().Debugf("[FilterRuleTest] 跳过非免费种子: %s", title)
-				continue
-			}
-
-			if matchCount < limit {
-				matchChan <- FilterRuleTestMatch{
-					Title:    title,
-					Tag:      tag,
-					IsFree:   isFree,
-					Decision: decisionLabel(true),
-					Source:   filter.SourceFilterRule,
-				}
-				matchCount++
+	// 按 RSS 里的顺序（站点给的通常是新的在前）给出命中
+	matches := []FilterRuleTestMatch{}
+	missing := 0
+	for i, item := range feed.Items {
+		d := details[i]
+		if d == nil {
+			d = &internal.TorrentDetailForTest{Title: item.Title, DetailMissing: true}
+			if len(item.Categories) > 0 {
+				d.Tag = strings.Join(item.Categories, ",")
 			}
 		}
-		close(matchChan)
-	}()
-
-	// 启动种子详情获取
-	for _, item := range feed.Items {
-		wg.Add(1)
-		go func(item *gofeed.Item) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // 获取信号量
-			defer func() { <-semaphore }() // 释放信号量
-
-			detail, err := internal.GetTorrentDetailForTest(ctx, siteName, item)
-			resultChan <- detailResult{
-				item:   item,
-				detail: detail,
-				err:    err,
-			}
-		}(item)
+		if d.DetailMissing {
+			missing++
+		}
+		if len(matches) >= rt.limit {
+			continue
+		}
+		// 和 RSS 任务一样按 RSS 条目的标题匹配（详情页上的标题有的站点取不到、有的是另一种写法），副标题、免费与大小按详情
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			title = d.Title
+		}
+		m, ok := rt.evaluate(title, d.Tag, d.SizeBytes, d.IsFree)
+		if !ok {
+			continue
+		}
+		m.DetailMissing = d.DetailMissing
+		matches = append(matches, m)
 	}
 
-	// 等待所有详情获取完成
-	wg.Wait()
-	close(resultChan)
-
-	// 等待处理完成
-	processingWg.Wait()
-
-	// 收集匹配结果
-	var matches []FilterRuleTestMatch
-	for match := range matchChan {
-		matches = append(matches, match)
-	}
-
-	global.GetSlogger().Debugf("[FilterRuleTest] 匹配结果: %d/%d", len(matches), totalCount)
-
+	global.GetSlogger().Debugf("[FilterRuleTest] 匹配结果: %d/%d，详情没取到 %d 条", len(matches), len(feed.Items), missing)
 	writeJSON(w, FilterRuleTestResponse{
-		MatchCount: len(matches),
-		TotalCount: totalCount,
-		Matches:    matches,
+		MatchCount:   len(matches),
+		TotalCount:   len(feed.Items),
+		Matches:      matches,
+		Source:       testSourceRSS,
+		SourceName:   fmt.Sprintf("%s（%s）", rss.Name, site.Name),
+		DetailFailed: missing,
 	})
 }
 
@@ -665,16 +682,6 @@ func matchesField(matcher filter.PatternMatcher, matchField models.MatchField, t
 	default:
 		return matcher.Match(title) || matcher.Match(tag)
 	}
-}
-
-// fetchRSSFeedForTest 获取 RSS feed 用于测试
-func fetchRSSFeedForTest(url string) (*gofeed.Feed, error) {
-	parser := gofeed.NewParser()
-	feed, err := parser.ParseURL(url)
-	if err != nil {
-		return nil, fmt.Errorf("解析 RSS 失败: %v", err)
-	}
-	return feed, nil
 }
 
 // validatePattern 验证模式是否有效
@@ -770,4 +777,46 @@ func bytesToGB(n int64) float64 {
 		return 0
 	}
 	return float64(n) / 1024 / 1024 / 1024
+}
+
+// RSSLinkTestRequest 是 POST /api/rss/test：添加、编辑 RSS 时先试一下链接（只拉一次，不存）。
+type RSSLinkTestRequest struct {
+	URL string `json:"url"`
+}
+
+// RSSLinkTestResponse 是试的结果：RSS 的标题、条目数与最新的几条标题。
+type RSSLinkTestResponse struct {
+	Title  string   `json:"title"`
+	Count  int      `json:"count"`
+	Titles []string `json:"titles"`
+}
+
+// rssLinkTestTitles 是试链接时回给页面看的标题条数。
+const rssLinkTestTitles = 5
+
+func (s *Server) apiRSSLinkTest(w http.ResponseWriter, r *http.Request) {
+	var req RSSLinkTestRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		http.Error(w, "请求格式不对: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	feed, err := internal.FetchRSSFeed(r.Context(), req.URL)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, internal.ErrRSSPlaceholder) || errors.Is(err, internal.ErrRSSInvalidURL) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	titles := make([]string, 0, rssLinkTestTitles)
+	for _, it := range feed.Items {
+		if len(titles) == rssLinkTestTitles {
+			break
+		}
+		if t := strings.TrimSpace(it.Title); t != "" {
+			titles = append(titles, t)
+		}
+	}
+	writeJSON(w, RSSLinkTestResponse{Title: strings.TrimSpace(feed.Title), Count: len(feed.Items), Titles: titles})
 }

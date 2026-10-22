@@ -119,6 +119,10 @@ type MediaSubscription struct {
 	ScheduleEvery int `gorm:"not null;default:0" json:"-"`
 	// ScheduleDays 是每周的星期几（0–6，0 是星期日）或每月的几号（1–31，短月按月末），JSON 数组
 	ScheduleDays string `gorm:"type:text;not null;default:''" json:"-"`
+	// ScheduleIntervalMinutes 是按间隔时每隔几分钟搜一次（30 分钟到 7 天）
+	ScheduleIntervalMinutes int `gorm:"not null;default:0" json:"-"`
+	// ScheduleCron 是按 cron 表达式时的表达式（一条或几条，用「; 」分开）
+	ScheduleCron string `gorm:"size:512;not null;default:''" json:"-"`
 	// AirDelayHours、AirRetryHours、AirWindowDays 用在按播出时间：播出后多久开始搜（0 = 2 小时）、
 	// 没找到时隔多久再搜（0 = 6 小时）、播出后几天里集中重试（0 = 7 天）
 	AirDelayHours int `gorm:"not null;default:0" json:"-"`
@@ -153,6 +157,10 @@ const (
 	MediaScheduleEveryDays = "every_days"
 	MediaScheduleWeekly    = "weekly"
 	MediaScheduleMonthly   = "monthly"
+	// MediaScheduleInterval 是每隔一段时间（分钟）搜一次，从上次搜索算起
+	MediaScheduleInterval = "interval"
+	// MediaScheduleCron 是按 cron 表达式（分 时 日 月 星期）
+	MediaScheduleCron = "cron"
 )
 
 // 追剧台账里一集的状态。

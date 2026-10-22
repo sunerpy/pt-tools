@@ -1711,3 +1711,51 @@ func TestSetSiteCookies(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// 示例里的占位地址（hdsky.xxx 这类）永远取不到：新填或改成它时拒绝并说清楚；已经存着的照样能保存站点的别的设置
+func TestRSSPlaceholderRejected(t *testing.T) {
+	db, err := OpenTestDB(t)
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "c", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "HDSky", URL: "https://hdsky.xxx/torrentrss.php?xxx", IntervalMinutes: 10}}}
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "第 1 条 RSS「HDSky」")
+	assert.Contains(t, err.Error(), "占位地址（hdsky.xxx）")
+
+	// 库里已经有一条占位地址的（升级前照着示例建的）：只改站点的别的设置时照样能保存
+	sc.RSS = []models.RSSConfig{{Name: "真的", URL: "https://springsunday.net/torrentrss.php?passkey=k", IntervalMinutes: 10}}
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc))
+	var site models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "springsunday").First(&site).Error)
+	stale := models.RSSSubscription{SiteID: site.ID, Name: "CMCT", URL: "https://springxxx.xxx", IntervalMinutes: 5}
+	require.NoError(t, db.DB.Create(&stale).Error)
+	cfg, err := s.Load()
+	require.NoError(t, err)
+	sc = cfg.Sites[models.SiteGroup("springsunday")]
+	sc.Cookie = "c2"
+	require.Len(t, sc.RSS, 2)
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc), "存着的占位地址没改：不卡住")
+
+	// 单条加、单条改：加占位地址拒绝；改别的字段可以，改成占位地址拒绝
+	_, err = s.AppendRSSToSite("springsunday", models.RSSConfig{Name: "又一个", URL: "https://rss.m-team.xxx/api/rss/xxx", IntervalMinutes: 10})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "占位地址")
+	cfg, err = s.Load()
+	require.NoError(t, err)
+	var cmct models.RSSConfig
+	for _, r := range cfg.Sites[models.SiteGroup("springsunday")].RSS {
+		if r.Name == "CMCT" {
+			cmct = r
+		}
+	}
+	require.NotZero(t, cmct.ID)
+	cmct.Name = "CMCT 改名"
+	_, err = s.UpdateRSSInSite("springsunday", cmct)
+	require.NoError(t, err)
+	real := cfg.Sites[models.SiteGroup("springsunday")].RSS[0]
+	real.URL = "https://hdsky.xxx/torrentrss.php"
+	_, err = s.UpdateRSSInSite("springsunday", real)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "占位地址（hdsky.xxx）")
+}

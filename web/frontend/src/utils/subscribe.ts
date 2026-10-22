@@ -193,12 +193,32 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 export const SCHEDULE_KINDS: readonly { value: FollowSchedule["kind"]; label: string }[] = [
   { value: "airtime", label: "按播出时间" },
+  { value: "interval", label: "每隔一段时间" },
   { value: "daily", label: "每天" },
   { value: "every_days", label: "每隔几天" },
   { value: "weekly", label: "每周" },
   { value: "monthly", label: "每月" },
+  { value: "cron", label: "cron 表达式（自定义）" },
   { value: "", label: "按全局间隔" },
 ];
+
+/** cron 的常用写法：点一下填进去（综艺按播出的那几天、一天几次） */
+export const CRON_PRESETS: readonly { label: string; cron: string }[] = [
+  { label: "每天 20:00", cron: "0 20 * * *" },
+  { label: "每天 8:00 与 22:00", cron: "0 8,22 * * *" },
+  { label: "周五、周六 22:00", cron: "0 22 * * 5,6" },
+  { label: "周五晚上 + 周六白天", cron: "0 22 * * 5; 0 9,13 * * 6" },
+  { label: "工作日每 2 小时", cron: "0 */2 * * 1-5" },
+  { label: "每月 1 号 9:00", cron: "0 9 1 * *" },
+];
+
+/** 间隔的说法：整天写天、整小时写小时，其余写分钟（和后端 intervalText 一样） */
+export function intervalText(minutes: number | undefined): string {
+  const m = minutes || 0;
+  if (m >= 1440 && m % 1440 === 0) return `${m / 1440} 天`;
+  if (m >= 60 && m % 60 === 0) return `${m / 60} 小时`;
+  return `${m} 分钟`;
+}
 
 export const WEEKDAY_OPTIONS = WEEKDAYS.map((d, i) => ({ value: i, label: `周${d}` }));
 
@@ -216,8 +236,23 @@ export function scheduleText(sc: FollowSchedule | undefined): string {
       return `${(sc.days ?? []).map((d) => `周${WEEKDAYS[d] ?? d}`).join("、")} ${at}`;
     case "monthly":
       return `每月 ${(sc.days ?? []).map((d) => `${d} 号`).join("、")} ${at}`;
+    case "interval":
+      return `每隔 ${intervalText(sc.interval_minutes)}`;
+    case "cron":
+      return `cron「${sc.cron ?? ""}」`;
   }
   return "按全局间隔";
+}
+
+const PREVIEW_WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+/** 预览里的一个时间：10-24 周五 20:00（不是今年的带上年份） */
+export function previewTime(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  const md = `${p(d.getMonth() + 1)}-${p(d.getDate())} 周${PREVIEW_WEEKDAYS[d.getDay()]} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}-${md}`;
 }
 
 /** 版本锁写成一句话：没开时为空串。 */

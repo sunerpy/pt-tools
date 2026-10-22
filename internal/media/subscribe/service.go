@@ -60,12 +60,17 @@ type Library interface {
 	InLibrary(ctx context.Context, kind string, tmdbID int, imdbID, title string) (bool, error)
 }
 
-// Organizer 是整理入库里洗版要用的两个动作（生产环境是 *organize.Service）。
+// Organizer 是订阅要用的整理入库的动作（生产环境是 *organize.Service）：洗版换掉旧版本、重新整理，
+// 以及追剧详情里的「重新整理」「重新刮削」。
 type Organizer interface {
 	Retire(ctx context.Context, id uint, reason string) ([]string, error)
 	Retry(ctx context.Context, id uint) (*organize.Result, error)
 	// Retrying 报告失败的记录是不是正在重试（排上队以后记录里的重试时间是空的）
 	Retrying(id uint) bool
+	// Organize 整理下载器里的一个种子（按手动整理处理：指定了条目时用那个条目）
+	Organize(ctx context.Context, req organize.Request) (*organize.Result, error)
+	// Rescrape 重新刮削一条整理记录所在的电影或剧集
+	Rescrape(ctx context.Context, id uint) (*organize.RescrapeResult, error)
 }
 
 // Notice 是一条订阅的通知：下载了订阅的资源，或豆瓣想看拉取连续失败。

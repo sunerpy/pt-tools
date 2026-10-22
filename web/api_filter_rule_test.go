@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/mmcdole/gofeed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -19,6 +21,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/filter"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -449,7 +452,7 @@ func TestTestFilterRuleWithRSS_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
-	server.testFilterRuleWithRSS(w, m, models.MatchFieldBoth, false, 999, 20)
+	server.testFilterRuleWithRSS(w, context.Background(), testRuleFor(m, models.MatchFieldBoth, false, 20), 999)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -549,7 +552,7 @@ func TestTestFilterRuleWithRSS_RequireFreeAndMatch(t *testing.T) {
 
 	t.Run("require free filters out non-free", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		server.testFilterRuleWithRSS(w, m, models.MatchFieldTitle, true, rss.ID, 20)
+		server.testFilterRuleWithRSS(w, context.Background(), testRuleFor(m, models.MatchFieldTitle, true, 20), rss.ID)
 		require.Equal(t, http.StatusOK, w.Code)
 	})
 
@@ -557,7 +560,7 @@ func TestTestFilterRuleWithRSS_RequireFreeAndMatch(t *testing.T) {
 		mb, err := filter.NewMatcher(filter.PatternWildcard, "*")
 		require.NoError(t, err)
 		w := httptest.NewRecorder()
-		server.testFilterRuleWithRSS(w, mb, models.MatchFieldBoth, false, rss.ID, 1)
+		server.testFilterRuleWithRSS(w, context.Background(), testRuleFor(mb, models.MatchFieldBoth, false, 1), rss.ID)
 		require.Equal(t, http.StatusOK, w.Code)
 	})
 
@@ -566,7 +569,7 @@ func TestTestFilterRuleWithRSS_RequireFreeAndMatch(t *testing.T) {
 			Name: "orphan", URL: ts.URL, SiteID: 9999, IntervalMinutes: 10,
 		}).Error)
 		w := httptest.NewRecorder()
-		server.testFilterRuleWithRSS(w, m, models.MatchFieldTitle, false, 2, 20)
+		server.testFilterRuleWithRSS(w, context.Background(), testRuleFor(m, models.MatchFieldTitle, false, 20), 2)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }
@@ -609,13 +612,13 @@ func TestTestFilterRuleWithRSS_Cov(t *testing.T) {
 
 	t.Run("rss not found", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		server.testFilterRuleWithRSS(w, m, models.MatchFieldTitle, false, 999, 20)
+		server.testFilterRuleWithRSS(w, context.Background(), testRuleFor(m, models.MatchFieldTitle, false, 20), 999)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 
 	t.Run("matches feed items", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		server.testFilterRuleWithRSS(w, m, models.MatchFieldTitle, false, rss.ID, 20)
+		server.testFilterRuleWithRSS(w, context.Background(), testRuleFor(m, models.MatchFieldTitle, false, 20), rss.ID)
 		require.Equal(t, http.StatusOK, w.Code)
 
 		var resp FilterRuleTestResponse
@@ -624,18 +627,12 @@ func TestTestFilterRuleWithRSS_Cov(t *testing.T) {
 	})
 }
 
-func TestFetchRSSFeedForTest(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(rssFeedXML))
-	}))
-	defer ts.Close()
-
-	feed, err := fetchRSSFeedForTest(ts.URL)
-	require.NoError(t, err)
-	assert.Len(t, feed.Items, 2)
-
-	_, err = fetchRSSFeedForTest("http://127.0.0.1:1/nope")
-	assert.Error(t, err)
+// testRuleFor 是直接调 testFilterRuleWithRSS 用的试跑：只看模式与「仅免费」，其余按默认（自动免费 + 过滤规则、不限大小）。
+func testRuleFor(m filter.PatternMatcher, field models.MatchField, requireFree bool, limit int) ruleTest {
+	return ruleTest{
+		matcher: m, matchField: field, limit: limit, mode: models.FilterModeAutoFree,
+		rule: &models.FilterRule{RequireFree: requireFree, MatchField: field, Enabled: true},
+	}
 }
 
 // ==== merged from api_filter_rule_test.go ====
@@ -1573,4 +1570,169 @@ func TestFilterRulePurposeRoundTrip(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, stored)
 		assert.Equal(t, "download", back.Purpose)
 	}
+}
+
+// RSS 试跑和历史记录一样走完整决策：要求免费而种子不免费的列成「跳过」并给原因；详情没取到的标出来；回应说明用的哪个数据源
+func TestTestFilterRuleWithRSS_FullDecisionAndSource(t *testing.T) {
+	server, cleanup := setupFilterRuleTestServer(t)
+	defer cleanup()
+
+	feedXML := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>test</title>
+<item><title>Cool Movie 1080p</title><guid>1</guid><link>http://e/1</link><category>movie</category>` +
+		`<enclosure url="http://e/1.torrent" length="3221225472" type="application/x-bittorrent"/></item>
+<item><title>Another Show</title><guid>2</guid><link>http://e/2</link><category>tv</category></item>
+</channel></rss>`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(feedXML))
+	}))
+	defer ts.Close()
+
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.RSSSubscription{}))
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "unknownrss", Enabled: true, BaseURL: "http://e"}).Error)
+	rss := models.RSSSubscription{Name: "电影", URL: ts.URL, SiteID: 1, IntervalMinutes: 10}
+	require.NoError(t, global.GlobalDB.DB.Create(&rss).Error)
+
+	post := func(req FilterRuleTestRequest) (int, FilterRuleTestResponse, string) {
+		body, _ := json.Marshal(req)
+		w := httptest.NewRecorder()
+		server.testFilterRule(w, httptest.NewRequest(http.MethodPost, "/api/filter-rules/test", bytes.NewReader(body)))
+		var resp FilterRuleTestResponse
+		if w.Code == http.StatusOK {
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		}
+		return w.Code, resp, w.Body.String()
+	}
+
+	code, resp, _ := post(FilterRuleTestRequest{Pattern: "Cool", PatternType: "keyword", RequireFree: true, RSSID: &rss.ID})
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "rss", resp.Source)
+	assert.Equal(t, "电影（unknownrss）", resp.SourceName)
+	assert.Equal(t, 2, resp.TotalCount)
+	assert.Equal(t, 2, resp.DetailFailed, "这个站点不取详情：两条都按 RSS 里的信息算")
+	require.Len(t, resp.Matches, 1)
+	m := resp.Matches[0]
+	assert.Equal(t, "Cool Movie 1080p", m.Title)
+	assert.Equal(t, "skipped", m.Decision)
+	assert.Contains(t, m.Reason, "要求免费")
+	assert.True(t, m.DetailMissing)
+	assert.InDelta(t, 3.0, m.SizeGB, 0.001, "大小取 RSS 附件的长度")
+
+	// 模拟免费、规则大小上限 2 GB：命中但大小不符
+	free := true
+	code, resp, _ = post(FilterRuleTestRequest{Pattern: "Cool", PatternType: "keyword", MaxSizeGB: 2, TestIsFree: &free, RSSID: &rss.ID})
+	require.Equal(t, http.StatusOK, code)
+	require.Len(t, resp.Matches, 1)
+	assert.Equal(t, "skipped", resp.Matches[0].Decision)
+	assert.Contains(t, resp.Matches[0].Reason, "大小")
+
+	// 历史记录：数据源写明是最近入库的记录
+	code, resp, _ = post(FilterRuleTestRequest{Pattern: "Cool", PatternType: "keyword"})
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "history", resp.Source)
+	assert.Contains(t, resp.SourceName, "最近入库")
+	assert.NotNil(t, resp.Matches)
+
+	// 示例 RSS 与占位地址：不去请求，说清楚怎么改
+	example := models.RSSSubscription{Name: "示例", URL: ts.URL, SiteID: 1, IntervalMinutes: 10, IsExample: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&example).Error)
+	code, _, text := post(FilterRuleTestRequest{Pattern: "Cool", RSSID: &example.ID})
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Contains(t, text, "示例 RSS")
+
+	placeholder := models.RSSSubscription{Name: "HDSky", URL: "https://hdsky.xxx/torrentrss.php?xxx", SiteID: 1, IntervalMinutes: 10}
+	require.NoError(t, global.GlobalDB.DB.Create(&placeholder).Error)
+	code, _, text = post(FilterRuleTestRequest{Pattern: "Cool", RSSID: &placeholder.ID})
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Contains(t, text, "获取 RSS「HDSky」失败")
+	assert.Contains(t, text, "占位地址（hdsky.xxx）")
+
+	// 站点那边出错：502，带上站点回的状态
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+	defer bad.Close()
+	denied := models.RSSSubscription{Name: "失效", URL: bad.URL + "/torrentrss.php?passkey=TOPSECRET", SiteID: 1, IntervalMinutes: 10}
+	require.NoError(t, global.GlobalDB.DB.Create(&denied).Error)
+	code, _, text = post(FilterRuleTestRequest{Pattern: "Cool", RSSID: &denied.ID})
+	assert.Equal(t, http.StatusBadGateway, code)
+	assert.Contains(t, text, "HTTP 403")
+	assert.NotContains(t, text, "TOPSECRET")
+}
+
+// RSS 试跑和 RSS 任务一样按 RSS 条目的标题匹配：详情页上的标题取不到（空的）或写法不同时照样命中，结果里也是 RSS 的标题；
+// 副标题、免费与大小按详情（以前按详情页的标题匹配，NexusPHP 站点详情页的标题取不到时一条都不命中）
+func TestTestFilterRuleWithRSS_MatchesRSSTitle(t *testing.T) {
+	server, cleanup := setupFilterRuleTestServer(t)
+	defer cleanup()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>t</title>
+<item><title>Natural.High.S04E01.2026.1080p.WEB-DL-HHWEB</title><guid>1</guid><link>http://e/details.php?id=1</link></item>
+<item><title>Natural.High.S04E02.2026.1080p.WEB-DL-HHWEB</title><guid>2</guid><link>http://e/details.php?id=2</link></item>
+<item><title>Other.Show.S01E01.1080p-QA</title><guid>3</guid><link>http://e/details.php?id=3</link></item>
+</channel></rss>`))
+	}))
+	defer ts.Close()
+	orig := rssTestDetail
+	t.Cleanup(func() { rssTestDetail = orig })
+	rssTestDetail = func(_ context.Context, _ models.SiteGroup, item *gofeed.Item) (*internal.TorrentDetailForTest, error) {
+		title := ""
+		if item.GUID == "2" {
+			title = "现在就出发 第四季 第1期下"
+		}
+		return &internal.TorrentDetailForTest{Title: title, Tag: "现在就出发 第四季", IsFree: true, SizeBytes: 2 << 30}, nil
+	}
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.RSSSubscription{}))
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "hdtime", Enabled: true, BaseURL: "http://e"}).Error)
+	rss := models.RSSSubscription{Name: "HDTime", URL: ts.URL, SiteID: 1, IntervalMinutes: 10}
+	require.NoError(t, global.GlobalDB.DB.Create(&rss).Error)
+
+	body, _ := json.Marshal(FilterRuleTestRequest{Pattern: "HHWEB", PatternType: "keyword", MatchField: "both", RSSID: &rss.ID})
+	w := httptest.NewRecorder()
+	server.testFilterRule(w, httptest.NewRequest(http.MethodPost, "/api/filter-rules/test", bytes.NewReader(body)))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp FilterRuleTestResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 3, resp.TotalCount)
+	require.Equal(t, 2, resp.MatchCount)
+	assert.Equal(t, "Natural.High.S04E01.2026.1080p.WEB-DL-HHWEB", resp.Matches[0].Title)
+	assert.Equal(t, "Natural.High.S04E02.2026.1080p.WEB-DL-HHWEB", resp.Matches[1].Title, "结果里是 RSS 的标题")
+	assert.Equal(t, "现在就出发 第四季", resp.Matches[0].Tag)
+	assert.True(t, resp.Matches[0].IsFree)
+	assert.InDelta(t, 2.0, resp.Matches[0].SizeGB, 0.001)
+}
+
+// 添加、编辑 RSS 时试一下链接：能用时给条目数与最新几条标题；占位地址与不是链接的回 400，站点那边的错回 502
+func TestApiRSSLinkTest(t *testing.T) {
+	server, cleanup := setupFilterRuleTestServer(t)
+	defer cleanup()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(rssFeedXML))
+	}))
+	defer ts.Close()
+
+	call := func(url string) (int, string) {
+		body, _ := json.Marshal(RSSLinkTestRequest{URL: url})
+		w := httptest.NewRecorder()
+		server.apiRSSLinkTest(w, httptest.NewRequest(http.MethodPost, "/api/rss/test", bytes.NewReader(body)))
+		return w.Code, w.Body.String()
+	}
+	code, text := call(ts.URL + "/torrentrss.php?passkey=k")
+	require.Equal(t, http.StatusOK, code)
+	var resp RSSLinkTestResponse
+	require.NoError(t, json.Unmarshal([]byte(text), &resp))
+	assert.Equal(t, "test", resp.Title)
+	assert.Equal(t, 2, resp.Count)
+	assert.Equal(t, []string{"Cool Movie 1080p", "Another Show"}, resp.Titles)
+
+	code, text = call("https://hdsky.xxx/torrentrss.php?xxx")
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Contains(t, text, "占位地址")
+	code, _ = call("hdsky.me/torrentrss.php")
+	assert.Equal(t, http.StatusBadRequest, code)
+
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
+	defer bad.Close()
+	code, text = call(bad.URL + "/rss?passkey=TOPSECRET")
+	assert.Equal(t, http.StatusBadGateway, code)
+	assert.Contains(t, text, "HTTP 404")
+	assert.NotContains(t, text, "TOPSECRET")
 }

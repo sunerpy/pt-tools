@@ -13,6 +13,7 @@ part of openapi.api;
 class AppSubscriptionTorrent {
   /// Returns a new [AppSubscriptionTorrent] instance.
   AppSubscriptionTorrent({
+    this.id,
     required this.site,
     required this.torrentId,
     required this.title,
@@ -23,7 +24,19 @@ class AppSubscriptionTorrent {
     required this.size,
     this.message,
     required this.createdAt,
+    this.files = const [],
+    this.canOrganize,
+    this.canRescrape,
   });
+
+  /// 重新整理、重新刮削用的编号；旧版本的服务端不给
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? id;
 
   String site;
 
@@ -63,8 +76,30 @@ class AppSubscriptionTorrent {
 
   int createdAt;
 
+  /// 每个视频文件的整理记录（还没整理过时为空）；旧版本的服务端不给
+  List<AppTorrentFile> files;
+
+  /// 能重新整理：有整理没成、不在自动重试的文件，或者种子标成了失败
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? canOrganize;
+
+  /// 能重新刮削：有整理好的文件
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? canRescrape;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppSubscriptionTorrent &&
+    other.id == id &&
     other.site == site &&
     other.torrentId == torrentId &&
     other.title == title &&
@@ -74,11 +109,15 @@ class AppSubscriptionTorrent {
     other.complete == complete &&
     other.size == size &&
     other.message == message &&
-    other.createdAt == createdAt;
+    other.createdAt == createdAt &&
+    _deepEquality.equals(other.files, files) &&
+    other.canOrganize == canOrganize &&
+    other.canRescrape == canRescrape;
 
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (id == null ? 0 : id!.hashCode) +
     (site.hashCode) +
     (torrentId.hashCode) +
     (title.hashCode) +
@@ -88,13 +127,21 @@ class AppSubscriptionTorrent {
     (complete.hashCode) +
     (size.hashCode) +
     (message == null ? 0 : message!.hashCode) +
-    (createdAt.hashCode);
+    (createdAt.hashCode) +
+    (files.hashCode) +
+    (canOrganize == null ? 0 : canOrganize!.hashCode) +
+    (canRescrape == null ? 0 : canRescrape!.hashCode);
 
   @override
-  String toString() => 'AppSubscriptionTorrent[site=$site, torrentId=$torrentId, title=$title, status=$status, episode=$episode, episodeEnd=$episodeEnd, complete=$complete, size=$size, message=$message, createdAt=$createdAt]';
+  String toString() => 'AppSubscriptionTorrent[id=$id, site=$site, torrentId=$torrentId, title=$title, status=$status, episode=$episode, episodeEnd=$episodeEnd, complete=$complete, size=$size, message=$message, createdAt=$createdAt, files=$files, canOrganize=$canOrganize, canRescrape=$canRescrape]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+    if (this.id != null) {
+      json[r'id'] = this.id;
+    } else {
+      json[r'id'] = null;
+    }
       json[r'site'] = this.site;
       json[r'torrent_id'] = this.torrentId;
       json[r'title'] = this.title;
@@ -117,6 +164,17 @@ class AppSubscriptionTorrent {
       json[r'message'] = null;
     }
       json[r'created_at'] = this.createdAt;
+      json[r'files'] = this.files;
+    if (this.canOrganize != null) {
+      json[r'can_organize'] = this.canOrganize;
+    } else {
+      json[r'can_organize'] = null;
+    }
+    if (this.canRescrape != null) {
+      json[r'can_rescrape'] = this.canRescrape;
+    } else {
+      json[r'can_rescrape'] = null;
+    }
     return json;
   }
 
@@ -149,6 +207,7 @@ class AppSubscriptionTorrent {
       }());
 
       return AppSubscriptionTorrent(
+        id: mapValueOfType<int>(json, r'id'),
         site: mapValueOfType<String>(json, r'site')!,
         torrentId: mapValueOfType<String>(json, r'torrent_id')!,
         title: mapValueOfType<String>(json, r'title')!,
@@ -159,6 +218,9 @@ class AppSubscriptionTorrent {
         size: mapValueOfType<int>(json, r'size')!,
         message: mapValueOfType<String>(json, r'message'),
         createdAt: mapValueOfType<int>(json, r'created_at')!,
+        files: AppTorrentFile.listFromJson(json[r'files']),
+        canOrganize: mapValueOfType<bool>(json, r'can_organize'),
+        canRescrape: mapValueOfType<bool>(json, r'can_rescrape'),
       );
     }
     return null;

@@ -1,8 +1,11 @@
 package web
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
 	"github.com/sunerpy/pt-tools/models"
@@ -12,8 +15,14 @@ import (
 
 // AppSubscriptionUpdate 是 PUT /subscriptions/{id}：只改给了的字段（没给的不变）。条目与季不能改。
 type AppSubscriptionUpdate struct {
-	ProfileID        *uint        `json:"profile_id,omitempty"`
-	Upgrade          *bool        `json:"upgrade,omitempty"`
+	ProfileID *uint `json:"profile_id,omitempty"`
+	Upgrade   *bool `json:"upgrade,omitempty"`
+	// Sites（空数组是全部站点）、DownloaderID（0 用设置里的）、Category、Tags、SavePath 是在哪里找、推到哪里
+	Sites            *[]string    `json:"sites,omitempty"`
+	DownloaderID     *uint        `json:"downloader_id,omitempty"`
+	Category         *string      `json:"category,omitempty"`
+	Tags             *string      `json:"tags,omitempty"`
+	SavePath         *string      `json:"save_path,omitempty"`
 	Schedule         *AppSchedule `json:"schedule,omitempty"`
 	LockVersion      *bool        `json:"lock_version,omitempty"`
 	LockGroup        *string      `json:"lock_group,omitempty"`
@@ -56,6 +65,28 @@ func (s *Server) appSubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 	if in.Upgrade != nil {
 		input.Upgrade = *in.Upgrade
 	}
+	if in.Sites != nil {
+		if bad := svc.UnknownSites(*in.Sites); len(bad) > 0 {
+			appError(w, http.StatusBadRequest, "invalid_argument", "这些站点没有配置或没启用："+strings.Join(bad, "、"))
+			return
+		}
+		input.Sites = *in.Sites
+	}
+	if in.DownloaderID != nil {
+		if !appCheckDownloader(w, r, svc, *in.DownloaderID) {
+			return
+		}
+		input.DownloaderID = *in.DownloaderID
+	}
+	if in.Category != nil {
+		input.Category = *in.Category
+	}
+	if in.Tags != nil {
+		input.Tags = *in.Tags
+	}
+	if in.SavePath != nil {
+		input.SavePath = *in.SavePath
+	}
 	if in.Schedule != nil {
 		input.Schedule = in.Schedule.schedule()
 	}
@@ -65,6 +96,20 @@ func (s *Server) appSubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	appJSON(w, s.appSubscriptionView(r, svc, sub))
+}
+
+// appCheckDownloader 查给的下载器编号存在（0 是用设置里的）；不存在时回 400。
+func appCheckDownloader(w http.ResponseWriter, r *http.Request, svc *subscribe.Service, id uint) bool {
+	bad, err := svc.UnknownDownloader(r.Context(), id)
+	if err != nil {
+		appError(w, http.StatusInternalServerError, "internal", "读取下载器失败")
+		return false
+	}
+	if bad {
+		appError(w, http.StatusBadRequest, "invalid_argument", "下载器不存在："+strconv.Itoa(int(id)))
+		return false
+	}
+	return true
 }
 
 func appEpisodes(eps []subscribe.EpisodeState) []AppEpisode {
@@ -309,4 +354,113 @@ func (s *Server) appEpisodeRuleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	appJSON(w, appEpisodeRules(rows))
+}
+
+// AppSchedulePreviewInput 是 POST /subscriptions/schedule/preview：看一个定时接下来几次什么时候搜（只读，不改订阅）。
+// subscription_id 给了时按那个订阅的类型与建立时间算（每隔几天从建立那天对齐）；count 是几次（1–10，默认 5）。
+type AppSchedulePreviewInput struct {
+	Schedule       AppSchedule `json:"schedule"`
+	MediaType      string      `json:"media_type,omitempty"`
+	SubscriptionID uint        `json:"subscription_id,omitempty"`
+	Count          int         `json:"count,omitempty"`
+}
+
+// AppSchedulePreview 是预览：接下来几次搜索的时间（Unix 秒，不算随机偏移）；按播出时间的不算，note 说明。
+type AppSchedulePreview struct {
+	Next []int64 `json:"next"`
+	Note string  `json:"note,omitempty"`
+}
+
+func (s *Server) appSchedulePreview(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	var in AppSchedulePreviewInput
+	if !appDecode(w, r, &in) {
+		return
+	}
+	if in.Count < 0 || in.Count > subscribe.PreviewMax {
+		appError(w, http.StatusBadRequest, "invalid_argument", "count 要在 1 到 10 之间")
+		return
+	}
+	got, err := schedulePreview(r.Context(), svc, SchedulePreviewInput{
+		Schedule: *in.Schedule.schedule(), MediaType: in.MediaType, SubscriptionID: in.SubscriptionID, Count: in.Count,
+	})
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	out := AppSchedulePreview{Next: make([]int64, 0, len(got.Next)), Note: got.Note}
+	for _, t := range got.Next {
+		out.Next = append(out.Next, t.Unix())
+	}
+	appJSON(w, out)
+}
+
+// appSubscriptionTorrentAction 是订阅种子的重新整理、重新刮削：读路径里的订阅与种子编号。
+func (s *Server) appSubscriptionTorrentIDs(w http.ResponseWriter, r *http.Request) (*subscribe.Service, uint, uint, bool) {
+	if !appNoBody(w, r) {
+		return nil, 0, 0, false
+	}
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return nil, 0, 0, false
+	}
+	id, ok := appID(w, r)
+	if !ok {
+		return nil, 0, 0, false
+	}
+	tid, err := strconv.ParseUint(r.PathValue("tid"), 10, 64)
+	if err != nil || tid == 0 {
+		appError(w, http.StatusBadRequest, "invalid_argument", "种子编号要是正整数（订阅详情 torrents 里的 id）")
+		return nil, 0, 0, false
+	}
+	appSetAuditArgs(r, map[string]any{"torrent": tid})
+	return svc, id, uint(tid), true
+}
+
+// appSubscribeOrganizeError 是订阅里整理、刮削的错误：订阅的按订阅的，整理入库回的按整理的。
+func appSubscribeOrganizeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, subscribe.ErrInvalid) || errors.Is(err, subscribe.ErrNotFound) {
+		appSubscribeError(w, err)
+		return
+	}
+	appOrganizeError(w, err)
+}
+
+// appSubscriptionTorrentOrganize 重新整理订阅下载的一个种子（整季包与单集一样）：按订阅的条目与媒体库，已经整理好的文件不动。
+func (s *Server) appSubscriptionTorrentOrganize(w http.ResponseWriter, r *http.Request) {
+	svc, id, tid, ok := s.appSubscriptionTorrentIDs(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	res, err := svc.OrganizeTorrent(ctx, id, tid)
+	if err != nil {
+		appSubscribeOrganizeError(w, err)
+		return
+	}
+	out := appResultOf(res)
+	if out.Failed > 0 && out.Created == 0 && out.Done == 0 {
+		appSetOutcome(r, "error:organize_failed")
+	}
+	appJSON(w, out)
+}
+
+// appSubscriptionTorrentScrape 重新刮削订阅下载的一个种子整理进的电影或剧集。
+func (s *Server) appSubscriptionTorrentScrape(w http.ResponseWriter, r *http.Request) {
+	svc, id, tid, ok := s.appSubscriptionTorrentIDs(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	res, err := svc.RescrapeTorrent(ctx, id, tid)
+	if err != nil {
+		appSubscribeOrganizeError(w, err)
+		return
+	}
+	appJSON(w, appRescrapeOf(res))
 }

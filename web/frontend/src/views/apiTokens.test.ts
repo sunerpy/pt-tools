@@ -8,6 +8,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type MountedView, mountView } from "@/test-mount";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), revoke: vi.fn() }));
+const mcp = vi.hoisted(() => ({
+  settings: vi.fn(async () => ({ enabled: true, path: "/mcp", default_path: "/mcp", tokens: 0 })),
+  save: vi.fn(),
+}));
 const ui = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -17,7 +21,7 @@ const ui = vi.hoisted(() => ({
 
 vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
-  return { ...real, tokensApi: api };
+  return { ...real, tokensApi: api, mcpApi: mcp };
 });
 
 vi.mock("element-plus", async (orig) => {
@@ -140,6 +144,48 @@ describe("API 令牌", () => {
       expires_in_days: 90,
     });
     await vi.waitFor(() => expect(router.currentRoute.value.query.new).toBeUndefined());
+  });
+
+  it("从 MCP 接入页点过来：选好 MCP 读取与操作；MCP 接入关着时提醒去打开", async () => {
+    api.list.mockResolvedValue([]);
+    mcp.settings.mockResolvedValueOnce({
+      enabled: false,
+      path: "/mcp",
+      default_path: "/mcp",
+      tokens: 0,
+    });
+    const { createMemoryHistory, createRouter } = await import("vue-router");
+    const Page = (await import("./ApiTokens.vue")).default;
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/api-tokens", component: Page },
+        { path: "/mcp", component: { template: "<div />" } },
+      ],
+    });
+    await router.push("/api-tokens?new=mcp");
+    view = mountView(Page, { router });
+    await vi.waitFor(() => expect(q("token-dialog")).not.toBeNull());
+    await vi.waitFor(() => expect(q("tk-mcp-off")).not.toBeNull());
+    expect(q("tk-mcp-off")!.textContent).toContain("MCP 接入现在关着");
+    api.create.mockResolvedValue({ token: { ...phone, id: 5 }, plaintext: "ptt_5_x" });
+    q("tk-save")!.click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0]![0]).toEqual({
+      name: "AI 客户端（MCP）",
+      scopes: ["mcp:read", "mcp:write"],
+      expires_in_days: 90,
+    });
+  });
+
+  it("MCP 接入开着时不提醒；没选 MCP 权限时也不提醒", async () => {
+    await mountPage();
+    const add = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
+      (b.textContent ?? "").includes("新建"),
+    )!;
+    add.click();
+    await vi.waitFor(() => expect(q("token-dialog")).not.toBeNull());
+    expect(q("tk-mcp-off")).toBeNull();
   });
 
   it("新建：名字没填时不发", async () => {

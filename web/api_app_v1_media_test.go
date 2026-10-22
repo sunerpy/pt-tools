@@ -294,6 +294,23 @@ func TestAppMediaLibraryOrganize(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
 	assert.Equal(t, 1, res.Done, "库里已经有了")
 	assert.Equal(t, http.StatusNotFound, appWithID(t, e.srv.appMediaHistoryRetry, http.MethodPost, "/api/app/v1/media/history/99/retry", "99", "").Code)
+
+	// 重新刮削：媒体库关着刮削时回 400 说明原因，打开以后写 NFO
+	hid := strconv.Itoa(int(page.Items[0].ID))
+	w = appWithID(t, e.srv.appMediaHistoryScrape, http.MethodPost, "/api/app/v1/media/history/"+hid+"/scrape", hid, "")
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "关着刮削")
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPut, "/api/media/libraries/"+strconv.Itoa(int(page.Items[0].LibraryID)),
+		`{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true,"scrape":true,"scrape_items":["nfo"]}`).Code)
+	w = appWithID(t, e.srv.appMediaHistoryScrape, http.MethodPost, "/api/app/v1/media/history/"+hid+"/scrape", hid, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var sr AppRescrapeResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sr))
+	assert.Equal(t, 1, sr.Records)
+	assert.Equal(t, 1, sr.Written)
+	_, err = os.Stat(strings.TrimSuffix(target, ".mkv") + ".nfo")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, appWithID(t, e.srv.appMediaHistoryScrape, http.MethodPost, "/api/app/v1/media/history/99/scrape", "99", "").Code)
 }
 
 // 没有整理入库或媒体识别服务时回 503
@@ -305,4 +322,5 @@ func TestAppMediaLibraryUnavailable(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, appAsWith(t, srv.appOrganizePreview, http.MethodPost, "/api/app/v1/media/organize/preview", `{"downloader_id":1,"hash":"h"}`, "app:read").Code)
 	assert.Equal(t, http.StatusServiceUnavailable, appAsWith(t, srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", `{"downloader_id":1,"hash":"h"}`, "app:write").Code)
 	assert.Equal(t, http.StatusServiceUnavailable, appWithID(t, srv.appMediaHistoryRetry, http.MethodPost, "/api/app/v1/media/history/1/retry", "1", "").Code)
+	assert.Equal(t, http.StatusServiceUnavailable, appWithID(t, srv.appMediaHistoryScrape, http.MethodPost, "/api/app/v1/media/history/1/scrape", "1", "").Code)
 }

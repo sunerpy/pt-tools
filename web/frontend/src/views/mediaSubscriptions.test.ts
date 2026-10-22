@@ -36,6 +36,9 @@ const api = vi.hoisted(() => ({
   episodeRules: vi.fn(async (): Promise<unknown[]> => []),
   saveEpisodeRule: vi.fn(),
   deleteEpisodeRule: vi.fn(),
+  previewSchedule: vi.fn(async () => ({ next: [] as string[] })),
+  organizeTorrent: vi.fn(),
+  rescrapeTorrent: vi.fn(),
 }));
 const organize = vi.hoisted(() => ({
   libraries: vi.fn(async () => [{ id: 4, name: "剧集库", kind: "tv" }]),
@@ -331,6 +334,185 @@ describe("订阅", () => {
     expect(ts).toContain("The.Last.of.Us.S02E02.2160p");
     expect(ts).toContain("第 2 集");
     expect(ts).toContain("5300 分");
+  });
+
+  it("详情：整理没成的种子重新整理、整理好的重新刮削，上次没成时重新搜索", async () => {
+    await mountPage({ subs: [follow] });
+    const torrent = (id: number, title: string, extra: Record<string, unknown>) => ({
+      id,
+      subscription_id: 3,
+      site_name: "hdsky",
+      torrent_id: String(id),
+      info_hash: `h${id}`,
+      title,
+      subtitle: "",
+      score: 5000,
+      episode: 0,
+      episode_end: 0,
+      complete: true,
+      size_bytes: 1,
+      downloader_id: 1,
+      has_hr: false,
+      adopted: false,
+      status: "downloading",
+      message: "",
+      created_at: "2026-10-20T10:00:00Z",
+      files: [],
+      can_organize: false,
+      can_rescrape: false,
+      ...extra,
+    });
+    const detail = {
+      ...follow,
+      progress: { ...follow.progress, episodes: [] },
+      torrent_list: [
+        // 整季包：一个文件整理好了（部分刮削），一个失败、一个在自动重试
+        torrent(8, "Show.S04.Complete.1080p.WEB-DL-HHWEB", {
+          status: "done",
+          files: [
+            {
+              id: 31,
+              name: "E01.mkv",
+              episode: 1,
+              status: "done",
+              scrape_status: "partial",
+              scrape_note: "豆瓣没取到",
+            },
+            { id: 32, name: "E02.mkv", episode: 2, status: "failed", message: "目标已有同名文件" },
+            { id: 33, name: "E03.mkv", episode: 3, status: "failed", retrying: true },
+          ],
+          can_organize: true,
+          can_rescrape: true,
+        }),
+        // 单集：7 天没入库标成失败，还没有整理记录
+        torrent(9, "Show.S04E05.1080p.WEB-DL-HHWEB", {
+          status: "failed",
+          episode: 5,
+          episode_end: 5,
+          message: "7 天没入库",
+          can_organize: true,
+        }),
+        // 洗版换掉的旧版本：两个按钮都没有
+        torrent(10, "Show.S04E04.720p", {
+          status: "replaced",
+          files: [{ id: 34, name: "E04.mkv", status: "removed" }],
+        }),
+      ],
+    };
+    api.get.mockResolvedValue(detail);
+    api.runs.mockResolvedValue({
+      items: [
+        {
+          id: 21,
+          subscription_id: 3,
+          trigger: "schedule",
+          started_at: "2026-10-21T12:05:00Z",
+          status: "partial",
+          summary: "推送了第 6 集，1 个推送失败",
+          steps: [{ kind: "fail", text: "下载种子文件失败：HTTP 502" }],
+          steps_truncated: false,
+        },
+      ],
+      total: 1,
+    });
+    q("ms-detail-3")!.click();
+    await vi.waitFor(() => expect(q("sub-detail-torrents")).not.toBeNull());
+
+    const files = q("sub-torrent-files-8")!.textContent ?? "";
+    expect(files).toContain("E01.mkv");
+    expect(files).toContain("S04E01");
+    expect(files).toContain("部分刮削");
+    expect(files).toContain("豆瓣没取到");
+    expect(files).toContain("目标已有同名文件");
+    expect(files).toContain("正在自动重试");
+    expect(q("sub-torrent-organize-8")).not.toBeNull();
+    expect(q("sub-torrent-scrape-8")).not.toBeNull();
+    expect(q("sub-torrent-organize-9")).not.toBeNull();
+    expect(q("sub-torrent-scrape-9"), "还没有整理好的文件").toBeNull();
+    expect(q("sub-torrent-organize-10")).toBeNull();
+    expect(q("sub-torrent-scrape-10")).toBeNull();
+
+    // 重新整理：提示结果，重新读详情与运行记录，列表重新读进度
+    api.organizeTorrent.mockResolvedValue({ created: 1, done: 1, skipped: 0, failed: 0 });
+    q("sub-torrent-organize-9")!.click();
+    await vi.waitFor(() => expect(api.organizeTorrent).toHaveBeenCalledWith(3, 9));
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("新入库 1 个，已在库里 1 个"));
+    await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+
+    // 整理不了的原因写在提示里
+    api.organizeTorrent.mockResolvedValue({
+      created: 0,
+      done: 0,
+      skipped: 0,
+      failed: 0,
+      plan: { problem: "找不到文件，要设路径映射" },
+    });
+    q("sub-torrent-organize-8")!.click();
+    await vi.waitFor(() => expect(ui.warning).toHaveBeenCalledWith("找不到文件，要设路径映射"));
+
+    // 重新刮削：先确认，取消就不发
+    ui.confirm.mockRejectedValueOnce("cancel");
+    q("sub-torrent-scrape-8")!.click();
+    await flush();
+    expect(api.rescrapeTorrent).not.toHaveBeenCalled();
+    ui.confirm.mockResolvedValue("confirm");
+    api.rescrapeTorrent.mockResolvedValue({ records: 3, written: 4 });
+    q("sub-torrent-scrape-8")!.click();
+    await vi.waitFor(() => expect(api.rescrapeTorrent).toHaveBeenCalledWith(3, 8));
+    expect(ui.confirm.mock.calls.at(-1)![0]).toContain("这部剧在媒体库里整理好的每一集");
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith("刮削了 3 条记录，写了 4 个文件"),
+    );
+
+    // 出错时写明原因
+    api.organizeTorrent.mockRejectedValue(new Error("整理入库没有启动"));
+    q("sub-torrent-organize-9")!.click();
+    await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("整理入库没有启动"));
+
+    // 上次部分推送失败：按钮写成「重新搜索」，并写明会再推一次
+    expect(q("sub-run-failed-tip")).not.toBeNull();
+    expect(q("sub-search-now")!.textContent).toContain("重新搜索");
+    api.search.mockResolvedValue({ message: "推送了 1 个" });
+    q("sub-search-now")!.click();
+    await vi.waitFor(() => expect(api.search).toHaveBeenCalledWith(3));
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("推送了 1 个"));
+  });
+
+  it("详情：暂停的订阅没有立即搜索；上次成功时写「立即搜索」", async () => {
+    await mountPage({ subs: [follow, tv] });
+    api.get.mockResolvedValue({ ...tv, status: "paused", torrent_list: [] });
+    q("ms-detail-2")!.click();
+    await vi.waitFor(() => expect(q("sub-detail-name")).not.toBeNull());
+    expect(q("sub-search-now")).toBeNull();
+    view?.unmount();
+    view = null;
+    document.body.innerHTML = "";
+    await mountPage({ subs: [follow] });
+    api.get.mockResolvedValue({
+      ...follow,
+      progress: { ...follow.progress, episodes: [] },
+      torrent_list: [],
+    });
+    api.runs.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          subscription_id: 3,
+          trigger: "schedule",
+          started_at: "2026-10-21T12:05:00Z",
+          status: "ok",
+          summary: "没有新的",
+          steps: [],
+          steps_truncated: false,
+        },
+      ],
+      total: 1,
+    });
+    q("ms-detail-3")!.click();
+    await vi.waitFor(() => expect(q("sub-search-now")).not.toBeNull());
+    expect(q("sub-search-now")!.textContent).toContain("立即搜索");
+    expect(q("sub-run-failed-tip")).toBeNull();
   });
 
   it("设置：只发接口认的字段", async () => {

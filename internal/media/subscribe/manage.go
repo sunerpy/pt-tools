@@ -414,7 +414,8 @@ func viewOf(row models.MediaSubscription) SubscriptionView {
 // SubscriptionDetail 是订阅详情：订阅、进度与下载过的种子。
 type SubscriptionDetail struct {
 	SubscriptionView
-	TorrentList []models.MediaSubscriptionTorrent `json:"torrent_list"`
+	// TorrentList 是下载过的种子，带上每个文件整理、刮削得怎样（见 torrents.go）
+	TorrentList []TorrentView `json:"torrent_list"`
 }
 
 func (in SubscriptionInput) check(s *Service, ctx context.Context) error {
@@ -695,7 +696,8 @@ func (s *Service) UpdateSubscription(ctx context.Context, id uint, in Subscripti
 // sameSchedule 报告两个定时是不是一样（星期几、几号按集合比）。
 func sameSchedule(a, b Schedule) bool {
 	return a.Kind == b.Kind && a.At == b.At && a.Every == b.Every && slices.Equal(a.Days, b.Days) &&
-		a.AirDelayHours == b.AirDelayHours && a.AirRetryHours == b.AirRetryHours && a.AirWindowDays == b.AirWindowDays
+		a.AirDelayHours == b.AirDelayHours && a.AirRetryHours == b.AirRetryHours && a.AirWindowDays == b.AirWindowDays &&
+		a.IntervalMinutes == b.IntervalMinutes && a.Cron == b.Cron
 }
 
 // SetStatus 暂停、恢复或确认订阅：status 要是 active 或 paused。
@@ -800,12 +802,16 @@ func (s *Service) Subscription(ctx context.Context, id uint) (*SubscriptionDetai
 		return nil, err
 	}
 	var torrents []models.MediaSubscriptionTorrent
-	if err := s.cfg.DB.WithContext(ctx).Where("subscription_id = ?", id).Order("id DESC").Find(&torrents).Error; err != nil {
+	if err = s.cfg.DB.WithContext(ctx).Where("subscription_id = ?", id).Order("id DESC").Find(&torrents).Error; err != nil {
 		return nil, fmt.Errorf("读取订阅的种子失败: %w", err)
 	}
 	v := viewOf(row)
 	v.Torrents = len(torrents)
-	d := &SubscriptionDetail{SubscriptionView: v, TorrentList: orEmpty(torrents)}
+	views, err := s.torrentViews(ctx, torrents)
+	if err != nil {
+		return nil, err
+	}
+	d := &SubscriptionDetail{SubscriptionView: v, TorrentList: views}
 	if p, err := s.progress(ctx, &row, true); err == nil {
 		d.Progress = p
 	}

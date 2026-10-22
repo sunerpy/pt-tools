@@ -18,6 +18,11 @@ class AppSubscriptionCreate {
     this.season,
     this.profileId,
     this.upgrade,
+    this.sites = const [],
+    this.downloaderId,
+    this.category,
+    this.tags,
+    this.savePath,
     this.schedule,
     this.lockVersion,
     this.startEpisode,
@@ -56,6 +61,45 @@ class AppSubscriptionCreate {
   /// Consider adding a "default:" property in the specification file to hide this note.
   ///
   bool? upgrade;
+
+  /// 只在这些站点找（不给或空的是全部站点）
+  List<String> sites;
+
+  /// 推送到哪个下载器（0 用设置里的）
+  ///
+  /// Minimum value: 0
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? downloaderId;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? category;
+
+  /// 逗号分开
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? tags;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? savePath;
 
   ///
   /// Please note: This property should have been non-nullable! Since the specification file
@@ -115,6 +159,11 @@ class AppSubscriptionCreate {
     other.season == season &&
     other.profileId == profileId &&
     other.upgrade == upgrade &&
+    _deepEquality.equals(other.sites, sites) &&
+    other.downloaderId == downloaderId &&
+    other.category == category &&
+    other.tags == tags &&
+    other.savePath == savePath &&
     other.schedule == schedule &&
     other.lockVersion == lockVersion &&
     other.startEpisode == startEpisode &&
@@ -130,6 +179,11 @@ class AppSubscriptionCreate {
     (season == null ? 0 : season!.hashCode) +
     (profileId == null ? 0 : profileId!.hashCode) +
     (upgrade == null ? 0 : upgrade!.hashCode) +
+    (sites.hashCode) +
+    (downloaderId == null ? 0 : downloaderId!.hashCode) +
+    (category == null ? 0 : category!.hashCode) +
+    (tags == null ? 0 : tags!.hashCode) +
+    (savePath == null ? 0 : savePath!.hashCode) +
     (schedule == null ? 0 : schedule!.hashCode) +
     (lockVersion == null ? 0 : lockVersion!.hashCode) +
     (startEpisode == null ? 0 : startEpisode!.hashCode) +
@@ -138,7 +192,7 @@ class AppSubscriptionCreate {
     (fromTorrent == null ? 0 : fromTorrent!.hashCode);
 
   @override
-  String toString() => 'AppSubscriptionCreate[mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, schedule=$schedule, lockVersion=$lockVersion, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
+  String toString() => 'AppSubscriptionCreate[mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -158,6 +212,27 @@ class AppSubscriptionCreate {
       json[r'upgrade'] = this.upgrade;
     } else {
       json[r'upgrade'] = null;
+    }
+      json[r'sites'] = this.sites;
+    if (this.downloaderId != null) {
+      json[r'downloader_id'] = this.downloaderId;
+    } else {
+      json[r'downloader_id'] = null;
+    }
+    if (this.category != null) {
+      json[r'category'] = this.category;
+    } else {
+      json[r'category'] = null;
+    }
+    if (this.tags != null) {
+      json[r'tags'] = this.tags;
+    } else {
+      json[r'tags'] = null;
+    }
+    if (this.savePath != null) {
+      json[r'save_path'] = this.savePath;
+    } else {
+      json[r'save_path'] = null;
     }
     if (this.schedule != null) {
       json[r'schedule'] = this.schedule;
@@ -216,6 +291,13 @@ class AppSubscriptionCreate {
         season: mapValueOfType<int>(json, r'season'),
         profileId: mapValueOfType<int>(json, r'profile_id'),
         upgrade: mapValueOfType<bool>(json, r'upgrade'),
+        sites: json[r'sites'] is Iterable
+            ? (json[r'sites'] as Iterable).cast<String>().toList(growable: false)
+            : const [],
+        downloaderId: mapValueOfType<int>(json, r'downloader_id'),
+        category: mapValueOfType<String>(json, r'category'),
+        tags: mapValueOfType<String>(json, r'tags'),
+        savePath: mapValueOfType<String>(json, r'save_path'),
         schedule: AppSchedule.fromJson(json[r'schedule']),
         lockVersion: mapValueOfType<bool>(json, r'lock_version'),
         startEpisode: mapValueOfType<int>(json, r'start_episode'),

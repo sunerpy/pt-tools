@@ -400,6 +400,47 @@ func addSubscriptionPreview(in addSubIn) Preview {
 		p.Changes = append(p.Changes, Change{Label: "洗版", After: "开"})
 		p.Impact = append(p.Impact, "开着洗版：下完以后还会找更好的版本，找到就替换媒体库里的文件")
 	}
+	if in.ProfileID != 0 {
+		p.Changes = append(p.Changes, Change{Label: "质量档案", After: "质量档案 " + utoa(in.ProfileID)})
+	}
+	if len(in.Sites) > 0 {
+		p.Changes = append(p.Changes, Change{Label: "在哪些站点找", After: sitesLabel(in.Sites)})
+	}
+	if in.DownloaderID != 0 {
+		p.Changes = append(p.Changes, Change{Label: "推送到", After: "下载器 " + utoa(in.DownloaderID)})
+	}
+	for _, f := range []struct{ label, v string }{{"分类", in.Category}, {"标签", in.Tags}, {"保存目录", in.SavePath}} {
+		if strings.TrimSpace(f.v) != "" {
+			p.Changes = append(p.Changes, Change{Label: f.label, After: f.v})
+		}
+	}
+	if in.MediaType == "tv" {
+		sc := "按每一集的播出时间"
+		if in.Schedule != nil {
+			sc = scheduleLabel(*in.Schedule)
+		}
+		lock := true
+		if in.LockVersion != nil {
+			lock = *in.LockVersion
+		}
+		p.Changes = append(p.Changes, Change{Label: "定时", After: sc}, Change{Label: "版本锁", After: onOff(lock)})
+		if in.StartEpisode != nil && *in.StartEpisode > 1 {
+			p.Changes = append(p.Changes, Change{Label: "起始集", After: startLabel(*in.StartEpisode)})
+		}
+		if in.FollowNextSeason != nil && *in.FollowNextSeason {
+			p.Changes = append(p.Changes, Change{Label: "追完以后追下一季", After: "开"})
+		}
+		if lock {
+			p.Impact = append(p.Impact, "开着版本锁：第一集定下的制作组与分辨率以后只要同一个版本（等不到就等，可以用 unlock_episode 放开一集）")
+		}
+	}
+	if in.LibraryID != nil && *in.LibraryID != 0 {
+		p.Changes = append(p.Changes, Change{Label: "整理进的媒体库", After: "媒体库 " + utoa(*in.LibraryID)})
+	}
+	if in.FromTorrent != nil {
+		p.Changes = append(p.Changes, Change{Label: "从这个种子开始追", After: "站点 " + in.FromTorrent.Site + " 的种子 " + in.FromTorrent.TorrentID})
+		p.Impact = append(p.Impact, "建好以后马上推送这个种子（不合质量档案或已经有这几集时不推，原因写在订阅里），起始集默认是它的集号")
+	}
 	return p
 }
 

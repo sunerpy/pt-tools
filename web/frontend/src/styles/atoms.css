@@ -263,6 +263,19 @@
   color: var(--pt-t3);
 }
 
+/* 字段说明的提醒色：警告（只提醒）、错误（保存时会拦）、成功（试过能用） */
+.pt-form .field-tip.field-tip--warn {
+  color: var(--pt-warn);
+}
+
+.pt-form .field-tip.field-tip--dang {
+  color: var(--pt-dang);
+}
+
+.pt-form .field-tip.field-tip--ok {
+  color: var(--pt-ok);
+}
+
 /* 字段组之间的分隔发丝线，替代 el-divider 的 24 上下外边距 */
 .pt-form .field-rule {
   height: 1px;
@@ -424,14 +437,32 @@
   --el-dialog-border-radius: var(--pt-r-lg);
   --el-dialog-padding-primary: var(--pt-pad);
   --el-dialog-title-font-size: var(--pt-fz-body);
+  /* 弹窗离可视区上下边的距离 */
+  --pt-dialog-gap: 48px;
 
+  /*
+   * 高度不超过可视区（上下各留 --pt-dialog-gap），页头、页脚固定，正文自己滚。
+   * 以前没有上限：长表单（编辑过滤规则、订阅、站点设置）把弹窗撑得和整页一样高，
+   * 页头页脚跟着滚出屏幕。全站弹窗都用 align-center（垂直居中），所以上下留同样的边。
+   */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2 * var(--pt-dialog-gap));
+  max-height: calc(100dvh - 2 * var(--pt-dialog-gap));
   padding: 0;
   border: 1px solid var(--pt-border);
   box-shadow: var(--pt-shadow-xl);
 }
 
+@media (max-width: 768px) {
+  .pt-dialog.el-dialog {
+    --pt-dialog-gap: 16px;
+  }
+}
+
 .pt-dialog.el-dialog .el-dialog__header {
   display: flex;
+  flex: none;
   align-items: center;
   height: 42px;
   margin: 0;
@@ -452,6 +483,10 @@
 }
 
 .pt-dialog.el-dialog .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--pt-pad);
   font-size: var(--pt-fz-body);
   line-height: var(--pt-lh-body);
@@ -460,6 +495,7 @@
 
 .pt-dialog.el-dialog .el-dialog__footer {
   display: flex;
+  flex: none;
   gap: var(--pt-space-2);
   align-items: center;
   justify-content: flex-end;

@@ -29,4 +29,20 @@ java -jar "$jar" generate \
   --additional-properties=pubName=ptt_api,pubVersion=1.0.0,pubAuthor=pt-tools,pubHomepage=https://github.com/sunerpy/pt-tools,pubDescription="pt-tools App API v1 client (generated from docs/reference/app-api-v1.yaml)" \
   --global-property=apiTests=false,modelTests=false,apiDocs=false,modelDocs=false \
   >/dev/null
+# 契约里写了 nullable: true 的数组、对象（例如 AppSubscriptionUpdate.sites：不给是不改，空数组是全部站点），生成器照样在
+# 构造函数里默认成 const []、const {}：只改别的字段时也会发出 "sites": []，把站点限制清掉。去掉这些默认值，没设时是 null，
+# toJson 发 null（服务端当成不改）。
+python3 - "$out/lib/model" <<'PY'
+import pathlib
+import re
+import sys
+
+for f in sorted(pathlib.Path(sys.argv[1]).glob("*.dart")):
+    src = f.read_text(encoding="utf-8")
+    out = src
+    for name in re.findall(r"^  (?:List|Map|Set)<[^;]*>\? (\w+);$", src, re.M):
+        out = re.sub(rf"^(    this\.{name}) = const (?:\[\]|\{{\}}),$", r"\1,", out, flags=re.M)
+    if out != src:
+        f.write_text(out, encoding="utf-8")
+PY
 echo "已生成 $out"

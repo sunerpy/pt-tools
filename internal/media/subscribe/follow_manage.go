@@ -53,6 +53,10 @@ func describe(sub *models.MediaSubscription) string {
 			days = append(days, fmt.Sprintf("%d 号", d))
 		}
 		parts = append(parts, "每月 "+strings.Join(days, "、")+" "+sc.At+" 搜索")
+	case models.MediaScheduleInterval:
+		parts = append(parts, "每隔 "+intervalText(sc.IntervalMinutes)+"搜索一次")
+	case models.MediaScheduleCron:
+		parts = append(parts, "按 cron「"+sc.Cron+"」搜索")
 	}
 	if sub.MediaType == models.MediaKindTV {
 		if sub.LockVersion {
@@ -151,8 +155,12 @@ func (s *Service) fromTorrent(ctx context.Context, sub *models.MediaSubscription
 	}
 	hr, _ := siteHR(item.SourceSite)
 	c := Candidate{Site: item.SourceSite, Item: item, Meta: m, From: fromSearch, SiteHR: hr, SeenAt: s.cfg.Now()}
+	failed := pushFailures(ctx)
 	s.mu.Lock()
 	msg := s.evaluate(ctx, sub, []Candidate{c}, set)
+	if pushFailures(ctx) > failed {
+		s.lockChosen(ctx, sub, m)
+	}
 	s.mu.Unlock()
 	return "从这个种子开始追：" + msg
 }
@@ -375,4 +383,15 @@ func (s *Service) LibraryFor(ctx context.Context, downloaderID uint, hash string
 		return 0, false, nil
 	}
 	return sub.LibraryID, true, nil
+}
+
+// intervalText 是间隔的说法：整小时的写小时（整天的写天），其余写分钟。
+func intervalText(minutes int) string {
+	switch {
+	case minutes >= 24*60 && minutes%(24*60) == 0:
+		return fmt.Sprintf("%d 天", minutes/(24*60))
+	case minutes >= 60 && minutes%60 == 0:
+		return fmt.Sprintf("%d 小时", minutes/60)
+	}
+	return fmt.Sprintf("%d 分钟", minutes)
 }

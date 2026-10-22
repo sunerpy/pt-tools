@@ -60,8 +60,16 @@ func newAppEnv(t *testing.T) *appEnv {
 		return &version.VersionCheckResult{CurrentVersion: "v1.0.0-test"}, nil
 	}
 	srv.sessions.put("sess-app", "admin")
+	enableMCPForTest(t)
 	e.handler = srv.buildHandler()
 	return e
+}
+
+// enableMCPForTest 让 MCP 接入开着（新装默认关着，见 mcp_setting.go）；要在 buildHandler 之前调。
+func enableMCPForTest(t *testing.T) {
+	t.Helper()
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.MCPSetting{}))
+	require.NoError(t, global.GlobalDB.DB.Save(&models.MCPSetting{ID: 1, Enabled: true, Path: mcpPath}).Error)
 }
 
 func (e *appEnv) token(scopes ...string) string {
@@ -170,6 +178,8 @@ var appReadPosts = map[string]bool{
 	// 识别与整理预览只算结果，不改动任何东西
 	"POST /media/recognize":        true,
 	"POST /media/organize/preview": true,
+	// 定时预览只算接下来几次什么时候搜
+	"POST /subscriptions/schedule/preview": true,
 	// AI 助手的对话只动调用者自己的会话：只要 app:read；改动类操作另要确认（POST /assistant/confirmations/{id} 要 app:write）
 	"POST /assistant/conversations":               true,
 	"DELETE /assistant/conversations/{id}":        true,

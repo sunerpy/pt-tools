@@ -16,6 +16,8 @@ import type {
   MediaWordKind,
   MediaWordRule,
   OrganizeItemStatus,
+  OrganizeResult,
+  RescrapeResult,
 } from "@/api";
 
 /** TMDB 的语言（与后端 recognize.Languages 一致，第一个是默认值） */
@@ -493,4 +495,29 @@ export function historyEntry(
   return r.media_type === "tv"
     ? `${name} ${seasonEpisode(r.season, r.episode, r.episode_end)}`
     : name;
+}
+
+/** 提示的级别与文字（ElMessage 的 success、warning、info） */
+export interface Outcome {
+  level: "success" | "warning" | "info";
+  text: string;
+}
+
+/** 重新整理一个种子的结果写成一句提示（整理历史与订阅详情共用） */
+export function organizeOutcome(res: OrganizeResult): Outcome {
+  if (res.queued) return { level: "info", text: "整理还在后台进行，稍后刷新看结果" };
+  if (res.plan?.problem) return { level: "warning", text: res.plan.problem };
+  if (res.failed)
+    return { level: "warning", text: `新入库 ${res.created} 个，失败 ${res.failed} 个` };
+  return { level: "success", text: `新入库 ${res.created} 个，已在库里 ${res.done} 个` };
+}
+
+/** 重新刮削的结果写成一句提示（整理历史与订阅详情共用） */
+export function rescrapeOutcome(res: RescrapeResult): Outcome {
+  if (res.queued) return { level: "info", text: "重新刮削还在后台进行，稍后刷新看结果" };
+  const sources = res.sources ? `（${res.sources}）` : "";
+  const text = `刮削了 ${res.records} 条记录，写了 ${res.written} 个文件${sources}`;
+  if (res.messages?.length)
+    return { level: "warning", text: `${text}；${res.messages.join("；")}` };
+  return { level: "success", text };
 }

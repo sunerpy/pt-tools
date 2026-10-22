@@ -292,7 +292,7 @@ func (m *Manager) Reload(cfg *models.Config) {
 					continue
 				}
 				if !validRSS(r.URL) {
-					global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
+					global.GetSlogger().Warnf("跳过无效RSS（地址不对或是示例里的占位地址）: %s %s", string(site), r.Name)
 					continue
 				}
 				rr := r
@@ -548,10 +548,8 @@ func validRSS(raw string) bool {
 	if host == "" {
 		return false
 	}
-	if host == "rss.m-team.xxx" {
-		return false
-	}
-	return true
+	// 示例里的占位地址（hdsky.xxx 这类）永远取不到：不为它开任务
+	return !models.IsPlaceholderRSSHost(host)
 }
 
 // cancelJobsAndWait 取消全部 RSS 任务，等它们退出（最多 30 秒）后清空任务表。
@@ -675,6 +673,10 @@ func (m *Manager) StartAll(cfg *models.Config) {
 			for _, r := range sc.RSS {
 				if r.ShouldSkip() {
 					global.GetSlogger().Debugf("跳过RSS配置: %s %s (示例或空URL)", string(site), r.Name)
+					continue
+				}
+				if !validRSS(r.URL) {
+					global.GetSlogger().Warnf("跳过无效RSS（地址不对或是示例里的占位地址）: %s %s", string(site), r.Name)
 					continue
 				}
 				rr := r

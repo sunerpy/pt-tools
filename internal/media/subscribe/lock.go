@@ -14,7 +14,8 @@ import (
 // 版本锁（同组同分辨率）：追剧开着版本锁时，一季里各集只要同一个制作组、同一个分辨率的版本——更新时间不一定，
 // 宁可等，也不自动换版本。锁住的版本来自已有的版本（库里这一季的文件优先，其次订阅推送或认领的种子）；都没有时
 // 这一轮按第一个会推送的候选定一个「本轮锁」，只用来过滤这一轮，第一次推送成功以后才写进库：一个也没推成时
-// 库里不会留下没有实际版本的锁。用户改了锁时以库里的为准（每次推送前重读）。
+// 库里不会留下没有实际版本的锁。例外是「从这个种子开始追」选中的种子没推成（lockChosen）：用户选的就是那个版本，
+// 锁按它定，重新搜索时还要它。用户改了锁时以库里的为准（每次推送前重读）。
 
 // lockOf 是订阅现在锁住的版本：没开版本锁或还没定下来时 ok 为假。
 func lockOf(sub *models.MediaSubscription) (group, res string, ok bool) {
@@ -106,6 +107,24 @@ func (s *Service) ensureLock(ctx context.Context, sub *models.MediaSubscription)
 	if g, r, ok := s.existingVersion(ctx, sub); ok {
 		s.writeLock(ctx, sub, g, r)
 	}
+}
+
+// lockChosen 在「从这个种子开始追」选中的种子没推成（种子文件没下载下来、下载器没接收）时按它的版本定锁：开着版本锁、
+// 锁还空着时才定。不定的话下次搜索的本轮锁按分数最高的候选定，用户选的版本就丢了。
+func (s *Service) lockChosen(ctx context.Context, sub *models.MediaSubscription, m meta.Meta) {
+	if !sub.LockVersion || sub.MediaType != models.MediaKindTV {
+		return
+	}
+	s.reloadLock(ctx, sub)
+	if _, _, ok := lockOf(sub); ok {
+		return
+	}
+	g, r, ok := versionOf(m)
+	if !ok {
+		return
+	}
+	step(ctx, stepInfo, "选中的种子没推成：版本锁按它的版本（%s）定下，重新搜索时还要这个版本", lockText(g, r))
+	s.writeLock(ctx, sub, g, r)
 }
 
 // relock 在洗版换成了更好的整季包以后把锁改成新的版本（洗版推送的整季包不受锁限制）。

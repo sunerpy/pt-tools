@@ -21,11 +21,18 @@ import (
 // ConfigTools 是要 app:config 的工具：内置 AI 助手在入口没有配置权限时不把它们交给模型。
 var ConfigTools = []string{"get_config", "change_config"}
 
-// SkillConfig 是配置技能的名字；SkillTool 是取技能的工具。
+// SkillConfig 是配置技能的名字，SkillFollow 是追剧技能的名字；SkillTool 是取技能的工具。
 const (
 	SkillConfig = "pt-tools-config"
+	SkillFollow = "pt-tools-follow"
 	SkillTool   = "get_skill"
 )
+
+// skillList 是内置技能的清单（get_skill 不带 name 时回它）。
+var skillList = []map[string]string{
+	{"name": SkillConfig, "description": "读、改 pt-tools 的配置（get_config、change_config）：步骤、规则、例子与配置目录"},
+	{"name": SkillFollow, "description": "追剧与订阅：建订阅、定时（间隔、每天、每周、cron）、版本锁、每一集、综艺的集号规则、失败以后怎么重试"},
+}
 
 type getConfigIn struct {
 	Resource string `json:"resource,omitempty" jsonschema:"configuration resource name from the catalog; omit it to get the catalog (every resource, its fields, operations and secrets)"`
@@ -94,7 +101,8 @@ func registerConfigTools(s *sdk.Server, d *Deps) {
 	s.AddTool(&sdk.Tool{
 		Name: SkillTool, Title: "Built-in skill",
 		Description: "Get a built-in skill: instructions for doing a kind of task with these tools. Without name: the list of skills. " +
-			SkillConfig + " explains how to read and change pt-tools configuration with get_config and change_config, with the catalog of resources.",
+			SkillConfig + " explains how to read and change pt-tools configuration with get_config and change_config, with the catalog of resources; " +
+			SkillFollow + " explains following TV shows and subscriptions (schedules, version lock, episodes, episode rules, retries).",
 		InputSchema: toolSchema[getSkillIn](spec{name: SkillTool}),
 		Annotations: &sdk.ToolAnnotations{Title: "Built-in skill", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(bool)},
 	}, func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -112,18 +120,22 @@ func registerConfigTools(s *sdk.Server, d *Deps) {
 			}
 		}
 		name := strings.TrimSpace(in.Name)
-		if name == "" {
-			out := map[string]any{"skills": []map[string]string{{"name": SkillConfig, "description": "读、改 pt-tools 的配置（get_config、change_config）：步骤、规则、例子与配置目录"}}}
+		var text string
+		switch name {
+		case "":
+			out := map[string]any{"skills": skillList}
 			text, _ := json.Marshal(out)
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(text)}}, StructuredContent: out}, nil
-		}
-		if name != SkillConfig {
+		case SkillConfig:
+			text = configSkill(ctx, d, c)
+		case SkillFollow:
+			text = followSkillGuide
+		default:
 			return toolError(fmt.Errorf("没有这个技能：%s（不带 name 调用列出全部）", name)), nil
 		}
-		text := configSkill(ctx, d, c)
 		return &sdk.CallToolResult{
 			Content:           []sdk.Content{&sdk.TextContent{Text: text}},
-			StructuredContent: map[string]any{"name": SkillConfig, "content": text},
+			StructuredContent: map[string]any{"name": name, "content": text},
 		}, nil
 	})
 }

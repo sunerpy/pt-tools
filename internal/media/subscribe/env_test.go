@@ -232,6 +232,11 @@ type fakeOrganizer struct {
 	// retryOK 为真时重新整理把记录改成已整理（模拟整理成了）
 	retryOK bool
 	db      *gorm.DB
+	// organized、rescraped 是追剧详情里「重新整理」「重新刮削」的调用
+	organized []organize.Request
+	rescraped []uint
+	// onOrganize 在「重新整理」时调用（模拟整理写下记录）
+	onOrganize func(organize.Request)
 }
 
 func (f *fakeOrganizer) setRetrying(id uint, on bool) {
@@ -265,6 +270,24 @@ func (f *fakeOrganizer) Retry(_ context.Context, id uint) (*organize.Result, err
 		return &organize.Result{}, f.db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).Update("status", models.MediaTransferDone).Error
 	}
 	return &organize.Result{}, nil
+}
+
+func (f *fakeOrganizer) Organize(_ context.Context, req organize.Request) (*organize.Result, error) {
+	f.mu.Lock()
+	f.organized = append(f.organized, req)
+	hook := f.onOrganize
+	f.mu.Unlock()
+	if hook != nil {
+		hook(req)
+	}
+	return &organize.Result{Created: 1}, nil
+}
+
+func (f *fakeOrganizer) Rescrape(_ context.Context, id uint) (*organize.RescrapeResult, error) {
+	f.mu.Lock()
+	f.rescraped = append(f.rescraped, id)
+	f.mu.Unlock()
+	return &organize.RescrapeResult{Records: 1, Written: 2}, nil
 }
 
 type fakeDL struct {

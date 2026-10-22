@@ -363,3 +363,47 @@ func (s *Server) appMediaHistoryRetry(w http.ResponseWriter, r *http.Request) {
 	}
 	appJSON(w, out)
 }
+
+// AppRescrapeResult 是 POST /media/history/{id}/scrape 与 /subscriptions/{id}/torrents/{tid}/scrape 的结果：
+// records 是刮削了的整理记录数（同一部在这个媒体库里的），written 是写了的文件数；queued 为真时还在后台刮削。
+type AppRescrapeResult struct {
+	Records  int      `json:"records"`
+	Written  int      `json:"written"`
+	Messages []string `json:"messages"`
+	Queued   bool     `json:"queued"`
+}
+
+func appRescrapeOf(r *organize.RescrapeResult) AppRescrapeResult {
+	out := AppRescrapeResult{Messages: []string{}}
+	if r == nil {
+		return out
+	}
+	out.Records, out.Written, out.Queued = r.Records, r.Written, r.Queued
+	for _, m := range r.Messages {
+		out.Messages = append(out.Messages, appRedactAddr(m))
+	}
+	return out
+}
+
+// appMediaHistoryScrape 重新刮削一条整理记录所在的电影或剧集（同网页的整理历史里的「重新刮削」）。
+func (s *Server) appMediaHistoryScrape(w http.ResponseWriter, r *http.Request) {
+	if !appNoBody(w, r) {
+		return
+	}
+	svc, ok := s.appOrganizer(w)
+	if !ok {
+		return
+	}
+	id, ok := appID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	res, err := svc.Rescrape(ctx, id)
+	if err != nil {
+		appOrganizeError(w, err)
+		return
+	}
+	appJSON(w, appRescrapeOf(res))
+}

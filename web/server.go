@@ -96,6 +96,9 @@ type Server struct {
 
 	// configMux 是 buildHandler 建出的路由：配置网关在进程内经它调网页用的接口（见 config_gateway.go）
 	configMux atomic.Pointer[http.ServeMux]
+	// mcpHTTP 是 MCP 的处理；mcpAccess 是开关与路径，mcpGate 按它分发（见 mcp_setting.go）
+	mcpHTTP   http.Handler
+	mcpAccess atomic.Pointer[mcpAccessState]
 }
 
 // goBackground 在后台执行 fn，并计入 background。
@@ -206,6 +209,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("/api/filter-rules/", s.auth(s.apiFilterRuleDetail))
 	// RSS-Filter association API
 	mux.HandleFunc("/api/rss/", s.auth(s.apiRSSFilterAssociation))
+	mux.HandleFunc("POST /api/rss/test", s.auth(s.apiRSSLinkTest))
 	// Log level API
 	mux.HandleFunc("/api/log-level", s.auth(s.apiLogLevel))
 	// Maintenance clean API (destructive; authenticated only)
@@ -317,7 +321,7 @@ func (s *Server) buildHandler() http.Handler {
 		http.ServeFileFS(w, r, distFS, "index.html")
 	})
 	s.configMux.Store(mux)
-	return logMiddleware(mux)
+	return logMiddleware(s.mcpGate(mux))
 }
 
 // Shutdown gracefully stops the underlying http.Server so Serve returns.
