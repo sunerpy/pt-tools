@@ -289,7 +289,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - `poster_path`：TMDB 的海报路径，经 `GET /images/tmdb/w342/<去掉开头 / 的路径>` 取图（`w342` 也可以换成下文列出的其他尺寸），见下文；
 - `status`、`upgrade`（是否洗版）、`source`（`manual`、`explore`、`douban`、`chatops`、`app`）、`message`、`last_search_at`、`next_search_at`、`created_at`；
 - `progress`：`total`、`required`（要追的集数：起始集以后、没跳过的）、`aired`、`in_library`、`downloading`、`waiting`（在等锁住的版本的集数，也算在 `missing` 里）、`skipped`（不追的集数）与 `missing`（缺的集号）；
-- 追剧（剧集）的设置：`schedule`（定时，见下文）、`lock_version`（版本锁）、`lock_group` 与 `lock_resolution`（锁住的制作组与分辨率，还没定时为空）、`start_episode`（从第几集开始追，0 与 1 是整季）、`follow_next_season`（追完以后自动追下一季）、`next_season_id`（自动建的下一季的订阅）、`library_id`（整理进哪个媒体库，0 按类型自动选）、`completed_at`（追完的时间）。
+- 追剧（剧集）的设置：`schedule`（定时，见下文）、`lock_version`（版本锁）、`lock_group` 与 `lock_resolution`（锁住的制作组与分辨率，尚未定下时为空）、`start_episode`（从第几集开始追，0 与 1 是整季）、`follow_next_season`（追完以后自动追下一季）、`next_season_id`（自动建的下一季的订阅）、`library_id`（整理进哪个媒体库，0 按类型自动选）、`completed_at`（追完的时间）。
 
 `required`、`waiting`、`skipped` 与追剧的设置是 1.0 预览版加的，更早的版本不给，App 要能处理没有这些字段的回应。
 
@@ -305,7 +305,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | `days`            | `weekly` 的星期几（0 到 6，0 是星期日），或 `monthly` 的几号（1 到 31，小月按月末）                                    |
 | `air_delay_hours` | 按播出时间时，播出后几小时开始搜（0 到 72，0 是 2 小时）                                                               |
 | `air_retry_hours` | 按播出时间时，没找到隔几小时再搜（0 到 48，0 是 6 小时）                                                               |
-| `air_window_days` | 按播出时间时，播出后几天里按上面的间隔集中重试（0 到 60，0 是 7 天）；过了这几天、还没找到的，每天搜一次               |
+| `air_window_days` | 按播出时间时，播出后几天里按上面的间隔集中重试（0 到 60，0 是 7 天）；过了这几天仍未找到的，每天搜一次                 |
 
 按播出时间只用于剧集。新建剧集时不指定定时就按播出时间。
 

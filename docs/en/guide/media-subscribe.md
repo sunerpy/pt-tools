@@ -157,6 +157,6 @@ After choosing channels in Subscription settings, a message is sent whenever a s
 
 **Downloaded, but the subscription never completes**: a subscription waits for the files to be organised. Check Media → Organise history (媒体 → 整理历史) for the torrent; with automatic organising off, completed torrents are not organised.
 
-**A followed series keeps showing Waiting for the version**: the locked release group has not released the episode yet, or has stopped. Use another version for this episode in the follow details releases just that episode; to change the whole season, clear the locked version under Edit.
+**A followed series keeps showing Waiting for the version**: the locked release group has not released the episode yet, or has stopped. Use another version for this episode in the follow details releases only that episode; to change the whole season, clear the locked version under Edit.
 
 **Variety show episodes do not match**: check why the run history skipped the torrents. For episode number does not match (集号对不上), give that release group an episode-number rule in the follow details (for example by issue and part).
