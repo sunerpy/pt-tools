@@ -47,7 +47,7 @@ Enabled sites whose probe mode is Auto are probed in the background:
 
 Probe now is not bound by this table; after it runs, the next probe is rescheduled by its result.
 
-A single probe takes at most 150 seconds, of which the request to the site takes at most 60 seconds. A timeout is recorded as a failure and does not hold up the other sites.
+A single probe takes at most 150 seconds, of which the requests to the site take at most 90 seconds (the same per-site limit as a user info sync). A timeout is recorded as a failure and does not hold up the other sites.
 
 Two checks run before a probe, without sending any request:
 

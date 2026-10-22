@@ -31,6 +31,8 @@ func (HTTPTransport) FetchUserInfo(ctx context.Context, def *v2.SiteDefinition, 
 	switch def.Schema {
 	case v2.SchemaNexusPHP:
 		info, err := site.GetUserInfo(ctx)
+		// 只少了几页（质询、网络错误）而用户名到手了：登录是好的，按取到的部分判断
+		err = v2.IgnorePartial(info, err)
 		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)
 		return withNexusPHPAccessFallback(result, info, err, clock), nil
 	case v2.SchemaHDDolby:
@@ -53,6 +55,7 @@ func ClassifyUserInfo(def *v2.SiteDefinition, info v2.UserInfo, err error, clock
 	if def == nil {
 		return &ProbeResult{Status: UNKNOWN, Diagnostic: "nil site definition"}
 	}
+	err = v2.IgnorePartial(info, err)
 	switch def.Schema {
 	case v2.SchemaNexusPHP:
 		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)

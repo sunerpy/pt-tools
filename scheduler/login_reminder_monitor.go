@@ -28,9 +28,10 @@ const (
 	loginProbeTick         = time.Minute
 	loginReminderTickEvery = 1 * time.Minute
 
-	// 单次探测的总预算与 HTTP 主通道的上限；剩余部分留给 CloakBrowser 后备。
+	// 单次探测的总预算与 HTTP 主通道的上限；剩余部分留给 CloakBrowser 后备。HTTP 主通道与同步用户信息的站点时限一样
+	// （web 的 userInfoSiteTimeout）：线路慢时 60 秒取不完一个站点的几页。
 	loginProbeBudget         = 150 * time.Second
-	loginProbePrimaryTimeout = 60 * time.Second
+	loginProbePrimaryTimeout = 90 * time.Second
 
 	// 非凭证类失败持续满这么久才提醒一次，之后每隔这么久至多一次。
 	failureNoticeAfter = 24 * time.Hour

@@ -73,6 +73,7 @@ func TestDrivers_429IsRateLimited(t *testing.T) {
 // 按站点定义取用户信息时，每一页都连不上：报网络错误（探测据此判为 NETWORK_ERROR、可走后备），
 // 而不是拿一份空的用户信息回去、被当成「没有用户名」的解析失败。
 func TestNexusPHPDefinitionUserInfo_AllPagesUnreachableIsNetworkError(t *testing.T) {
+	fastUserInfoRetries(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	closed := "http://" + ln.Addr().String()
@@ -124,14 +125,24 @@ func TestNexusPHPDefinitionUserInfo_DependentPageFailureKeepsPartialData(t *test
 	}
 	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
 	d.SetSiteDefinition(def)
+	fastUserInfoRetries(t)
 
 	info, err := d.GetUserInfo(context.Background())
-	require.NoError(t, err)
 	assert.Equal(t, "tester", info.Username)
 	assert.Equal(t, "888", info.UserID)
 	assert.Zero(t, info.Uploaded, "掐断的那一页没有数据")
+	// 少了一页：错误写明缺哪些字段（保存时沿用上一次的，见 UserInfoService），不是整次失败
+	var partial *PartialUserInfoError
+	require.ErrorAs(t, err, &partial)
+	assert.Equal(t, []string{"uploaded"}, partial.Missing)
+	assert.ErrorIs(t, err, ErrNetworkError)
+	assert.NoError(t, IgnorePartial(info, err), "用户名到手了：登录探测照样当成取到了")
+}
 
-	pe := partialFetchError{err: ErrNetworkError}
-	assert.Equal(t, ErrNetworkError.Error(), pe.Error())
-	assert.ErrorIs(t, pe, ErrNetworkError)
+// fastUserInfoRetries 把取用户信息时重试前的等待调成几毫秒（测试结束时还原）。
+func fastUserInfoRetries(t *testing.T) {
+	t.Helper()
+	base, challenge, minAttempt := userInfoRetryBase, userInfoChallengeWait, userInfoMinAttempt
+	userInfoRetryBase, userInfoChallengeWait, userInfoMinAttempt = time.Millisecond, time.Millisecond, 0
+	t.Cleanup(func() { userInfoRetryBase, userInfoChallengeWait, userInfoMinAttempt = base, challenge, minAttempt })
 }

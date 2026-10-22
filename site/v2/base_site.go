@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -163,8 +164,11 @@ func (b *BaseSite[Req, Res]) GetUserInfo(ctx context.Context) (UserInfo, error) 
 
 	// Delegate to driver which handles all API calls
 	info, err := b.driver.GetUserInfo(ctx)
-	if err != nil {
-		b.logger.Error("Failed to fetch user info", zap.Error(err))
+	// 只取到一部分（*PartialUserInfoError）时把取到的部分一起交回去，由 UserInfoService 补上缺的字段再保存；
+	// 失败的原因由调用方记（UserInfoService 一次失败只记一行）
+	var partial *PartialUserInfoError
+	if err != nil && !errors.As(err, &partial) {
+		b.logger.Debug("Failed to fetch user info", zap.Error(err))
 		return UserInfo{}, fmt.Errorf("get user info: %w", err)
 	}
 
@@ -176,9 +180,13 @@ func (b *BaseSite[Req, Res]) GetUserInfo(ctx context.Context) (UserInfo, error) 
 		"User info fetched",
 		zap.String("site", b.name),
 		zap.String("username", info.Username),
+		zap.Bool("partial", partial != nil),
 		zap.Duration("duration", time.Since(startTime)),
 	)
 
+	if partial != nil {
+		return info, fmt.Errorf("get user info: %w", err)
+	}
 	return info, nil
 }
 

@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -722,6 +723,35 @@ func TestApiUserInfoSiteDetail_PostSync(t *testing.T) {
 	s.apiUserInfoSiteDetail(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "site1")
+}
+
+// 用户统计页一个站点的「同步」和同步全部一样有 userInfoSiteTimeout（90 秒）：线路慢的站点 30 秒取不完几页
+func TestApiUserInfoSiteDetail_PostSyncUsesSiteBudget(t *testing.T) {
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{CacheTTL: time.Minute})
+	site := &deadlineSite{mockSite: mockSite{id: "slow", name: "Slow", kind: v2.SiteNexusPHP, userInfo: v2.UserInfo{Site: "slow", Username: "u", Uploaded: 1}}}
+	svc.RegisterSite(site)
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	w := httptest.NewRecorder()
+	(&Server{}).apiUserInfoSiteDetail(w, httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/sites/slow", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotZero(t, site.left, "取用户信息时带着时限")
+	assert.Greater(t, site.left, userInfoSiteTimeout-5*time.Second, "和同步全部一样是站点时限，不是 30 秒")
+	assert.LessOrEqual(t, site.left, userInfoSiteTimeout)
+}
+
+// deadlineSite 记下取用户信息时 ctx 还剩多久
+type deadlineSite struct {
+	mockSite
+	left time.Duration
+}
+
+func (d *deadlineSite) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
+	if dl, ok := ctx.Deadline(); ok {
+		d.left = time.Until(dl)
+	}
+	return d.mockSite.GetUserInfo(ctx)
 }
 
 // ==== merged from api_favicon_site_cov6_test.go ====
