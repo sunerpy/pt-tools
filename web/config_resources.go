@@ -256,6 +256,7 @@ func (s *Server) configResources() []*configResource {
 			Hints: map[string]string{
 				"discounts": "逗号分隔的优惠类型，例如 FREE,2XFREE", "remove_with_data": "删种时连数据一起删",
 				"interval_min": "多久挑一轮（分钟）",
+				"section":      "只对 M-Team：normal 综合区、adult 成人区、all 两个都读；空着等于 normal",
 			},
 			Impact: []string{"开着的任务会按间隔往下载器里加种子、按条件删种", "任务正在运行一轮时不能保存，稍后再试"},
 		},

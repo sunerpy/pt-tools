@@ -415,7 +415,17 @@ func (d *MTorrentDriver) GetSiteDefinition() *SiteDefinition {
 	return d.siteDefinition
 }
 
-// PrepareSearch converts a SearchQuery to an M-Team request
+// MTeamSectionNormal、MTeamSectionAdult 是 M-Team 搜索接口的 mode：综合区与成人区。
+const (
+	MTeamSectionNormal = "normal"
+	MTeamSectionAdult  = "adult"
+)
+
+// PrepareSearch converts a SearchQuery to an M-Team request.
+//
+// mode 取 query.Section，只认 normal 和 adult，空值或别的值都用 normal（综合区）。
+// 有意忽略 FreeOnly，不往请求里加 discount 筛选：单种免费（mallSingleFree）的种子本身的优惠不是 FREE，
+// 交给服务端按 discount 筛会把它漏掉；免费与否由 evaluateMTorrentDiscount 在本地判断。
 func (d *MTorrentDriver) PrepareSearch(query SearchQuery) (MTorrentRequest, error) {
 	pageSize := query.PageSize
 	if pageSize <= 0 {
@@ -427,8 +437,12 @@ func (d *MTorrentDriver) PrepareSearch(query SearchQuery) (MTorrentRequest, erro
 		pageNumber = 1
 	}
 
+	mode := MTeamSectionNormal
+	if query.Section == MTeamSectionAdult {
+		mode = MTeamSectionAdult
+	}
 	body := MTorrentSearchRequest{
-		Mode:       "normal",
+		Mode:       mode,
 		Keyword:    query.Keyword,
 		PageNumber: pageNumber,
 		PageSize:   pageSize,

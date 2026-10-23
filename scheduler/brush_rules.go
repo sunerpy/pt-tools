@@ -19,6 +19,43 @@ var BrushDiscountLevels = []v2.DiscountLevel{
 	v2.DiscountPercent70, v2.Discount2xUp, v2.Discount2x50,
 }
 
+// 刷流任务的分区（BrushTask.Section），只对 M-Team：综合区、成人区、两个都读；空值等于综合区。
+const (
+	BrushSectionNormal = v2.MTeamSectionNormal
+	BrushSectionAdult  = v2.MTeamSectionAdult
+	BrushSectionAll    = "all"
+)
+
+// BrushSections 是分区的全部取值（含空值）。
+var BrushSections = []string{"", BrushSectionNormal, BrushSectionAdult, BrushSectionAll}
+
+// brushSections 是这一轮要读的分区：M-Team 按任务设置（两个都读时先综合区、后成人区），
+// 别的站点只读一次、不带分区（库里留着旧值也一样，不会把同一张列表读两遍）。
+func brushSections(task models.BrushTask, kind v2.SiteKind) []string {
+	if kind != v2.SiteMTorrent {
+		return []string{""}
+	}
+	switch task.Section {
+	case BrushSectionAdult:
+		return []string{BrushSectionAdult}
+	case BrushSectionAll:
+		return []string{BrushSectionNormal, BrushSectionAdult}
+	default:
+		return []string{BrushSectionNormal}
+	}
+}
+
+// brushSectionLabel 是分区的中文名；别的站点（空值）为空。
+func brushSectionLabel(section string) string {
+	switch section {
+	case BrushSectionNormal:
+		return "综合区"
+	case BrushSectionAdult:
+		return "成人区"
+	}
+	return ""
+}
+
 // brushAllowedDiscounts 解析任务的 Discounts；为空时只收免费（FREE、2XFREE）。
 func brushAllowedDiscounts(task models.BrushTask) map[v2.DiscountLevel]bool {
 	out := map[v2.DiscountLevel]bool{}

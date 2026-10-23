@@ -30,6 +30,7 @@ vi.mock("@/api", async (orig) => {
       list: vi.fn(() =>
         Promise.resolve({
           hdsky: { enabled: true, is_builtin: true },
+          mteam: { enabled: true, is_builtin: true },
           ourbits: { enabled: false, is_builtin: true },
         }),
       ),
@@ -166,6 +167,45 @@ describe("刷流任务页", () => {
     expect(body.discounts).toBe("FREE,2XFREE");
     expect(body.name).toBe("hdsky 刷流");
     expect(body).not.toHaveProperty("id");
+  });
+
+  it("分区只对 M-Team：别的站点不显示、保存为空；M-Team 老任务的空值按综合区显示与保存", async () => {
+    await mountPage([
+      task(),
+      task({ id: 2, name: "MT 成人区", site_name: "mteam", section: "adult" }),
+      task({ id: 3, name: "MT 老任务", site_name: "mteam", section: "" }),
+    ]);
+    api.update.mockImplementation((_id: number, body: unknown) =>
+      Promise.resolve({ ...task(), ...(body as object) }),
+    );
+    const save = async (name: string) => {
+      await vi.waitFor(() =>
+        expect(document.querySelector(`[aria-label='编辑 ${name}']`)).not.toBeNull(),
+      );
+      document.querySelector<HTMLButtonElement>(`[aria-label='编辑 ${name}']`)!.click();
+      await vi.waitFor(() =>
+        expect(document.querySelector("[data-testid=brush-save]")).not.toBeNull(),
+      );
+      await flush();
+      const shown = document.querySelector("[data-testid=brush-section]") !== null;
+      const text = document.querySelector("[data-testid=brush-section]")?.textContent ?? "";
+      document.querySelector<HTMLButtonElement>("[data-testid=brush-save]")!.click();
+      await vi.waitFor(() => expect(api.update).toHaveBeenCalled());
+      const body = api.update.mock.calls.at(-1)![1];
+      api.update.mockClear();
+      // 对话框关上时内容还留在页面里：等保存走完（提示「已保存」）再开下一个
+      await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("已保存"));
+      ui.success.mockClear();
+      return { shown, text, section: body.section };
+    };
+
+    expect(await save("HDSky 刷流")).toEqual({ shown: false, text: "", section: "" });
+    const adult = await save("MT 成人区");
+    expect(adult.shown).toBe(true);
+    expect(adult.section).toBe("adult");
+    const old = await save("MT 老任务");
+    expect(old.text).toContain("综合区");
+    expect(old.section).toBe("normal");
   });
 
   it("开关只翻 enabled，其余配置原样带回", async () => {

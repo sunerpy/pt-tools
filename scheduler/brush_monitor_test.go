@@ -43,19 +43,37 @@ type fakeBrushSite struct {
 	searchErr error
 	searches  []v2.SearchQuery
 	downloads []string
+	// kind 为空时是 NexusPHP。sectionItems / sectionErr 不为空时按 SearchQuery.Section 返回（模拟 M-Team 的分区）
+	kind         v2.SiteKind
+	sectionItems map[string][]v2.TorrentItem
+	sectionErr   map[string]error
+	// onSearch 在每次搜索时调用（测试用来推进时钟）
+	onSearch func()
 }
 
 func (s *fakeBrushSite) ID() string                                       { return "hdsky" }
 func (s *fakeBrushSite) Name() string                                     { return "HDSky" }
-func (s *fakeBrushSite) Kind() v2.SiteKind                                { return v2.SiteNexusPHP }
 func (s *fakeBrushSite) Login(context.Context, v2.Credentials) error      { return nil }
 func (s *fakeBrushSite) GetUserInfo(context.Context) (v2.UserInfo, error) { return v2.UserInfo{}, nil }
 func (s *fakeBrushSite) Close() error                                     { return nil }
+
+func (s *fakeBrushSite) Kind() v2.SiteKind {
+	if s.kind != "" {
+		return s.kind
+	}
+	return v2.SiteNexusPHP
+}
 
 func (s *fakeBrushSite) Search(_ context.Context, q v2.SearchQuery) ([]v2.TorrentItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.searches = append(s.searches, q)
+	if s.onSearch != nil {
+		s.onSearch()
+	}
+	if s.sectionItems != nil || s.sectionErr != nil {
+		return s.sectionItems[q.Section], s.sectionErr[q.Section]
+	}
 	return s.items, s.searchErr
 }
 
@@ -72,12 +90,14 @@ func (s *fakeBrushSite) Download(_ context.Context, id string) ([]byte, error) {
 
 // brushRig 是一套刷流测试环境：真实的库（含全部表）、假站点、假下载器、记录推送请求的假推送。
 type brushRig struct {
-	db     *models.TorrentDB
-	site   *fakeBrushSite
-	dl     *schedFakeDownloader
-	clock  *sitelogin.FakeClock
-	mon    *BrushMonitor
-	pushes []ptinternal.PushTorrentRequest
+	db *models.TorrentDB
+	// siteName 是假站点认的站点名，默认 hdsky
+	siteName string
+	site     *fakeBrushSite
+	dl       *schedFakeDownloader
+	clock    *sitelogin.FakeClock
+	mon      *BrushMonitor
+	pushes   []ptinternal.PushTorrentRequest
 	// pushResult 不为空时推送直接返回它（模拟闸门拒绝）；为空时把种子加进假下载器
 	pushResult *ptinternal.PushTorrentResult
 	pushErr    error
@@ -89,15 +109,16 @@ func newBrushRig(t *testing.T) *brushRig {
 	t.Cleanup(func() { global.GlobalDB = nil })
 	require.NoError(t, db.DB.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}))
 	r := &brushRig{
-		db:    db,
-		site:  &fakeBrushSite{files: map[string][]byte{}},
-		dl:    newSchedFakeDownloader("qb"),
-		clock: sitelogin.NewFakeClock(time.Date(2026, 10, 6, 4, 0, 0, 0, time.UTC)),
+		db:       db,
+		siteName: "hdsky",
+		site:     &fakeBrushSite{files: map[string][]byte{}},
+		dl:       newSchedFakeDownloader("qb"),
+		clock:    sitelogin.NewFakeClock(time.Date(2026, 10, 6, 4, 0, 0, 0, time.UTC)),
 	}
 	r.mon = NewBrushMonitor(BrushMonitorConfig{
 		DB: db.DB,
 		Sites: BrushSitesFunc(func(name string) (v2.Site, bool) {
-			return r.site, name == "hdsky"
+			return r.site, name == r.siteName
 		}),
 		Downloaders: BrushDownloadersFunc(func(id uint) (downloader.Downloader, string, error) {
 			if id != 1 {

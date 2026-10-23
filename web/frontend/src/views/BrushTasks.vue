@@ -25,9 +25,12 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import {
   BRUSH_DISCOUNTS,
+  BRUSH_SECTIONS,
+  brushSectionFor,
   configOf,
   defaultBrushConfig,
   discountLabel,
+  hasBrushSection,
   limitSummary,
   nextRunAt,
   removalSummary,
@@ -272,6 +275,13 @@ const showDialog = ref(false);
 const editingId = ref<number | null>(null);
 const form = ref<BrushTaskConfig>(defaultBrushConfig());
 const formDiscounts = ref<string[]>(taskDiscounts(form.value.discounts));
+// 分区下拉：老任务存的空值按综合区显示（下拉把空值当成没选）
+const formSection = computed({
+  get: () => brushSectionFor(form.value.site_name, form.value.section),
+  set: (v: string) => {
+    form.value.section = v;
+  },
+});
 const saving = ref(false);
 
 function openCreate() {
@@ -297,7 +307,11 @@ function openEdit(task: BrushTask) {
 
 async function saveTask() {
   if (saving.value) return;
-  const body: BrushTaskConfig = { ...form.value, discounts: formDiscounts.value.join(",") };
+  const body: BrushTaskConfig = {
+    ...form.value,
+    section: brushSectionFor(form.value.site_name, form.value.section),
+    discounts: formDiscounts.value.join(","),
+  };
   if (!body.name.trim()) {
     ElMessage.warning("填一个任务名称");
     return;
@@ -708,6 +722,18 @@ function progressText(t: BrushTorrent): string {
             </el-select>
           </el-form-item>
         </div>
+        <el-form-item v-if="hasBrushSection(form.site_name)" label="分区">
+          <el-select v-model="formSection" style="width: 100%" data-testid="brush-section">
+            <el-option
+              v-for="o in BRUSH_SECTIONS"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value" />
+          </el-select>
+          <div class="field-tip">
+            M-Team 的综合区和成人区是两张列表；每个分区每轮读第一页（100 个，置顶的在前）
+          </div>
+        </el-form-item>
         <div class="field-row">
           <el-form-item label="保存路径">
             <el-input v-model="form.save_path" placeholder="留空用下载器的默认路径" />
@@ -729,7 +755,8 @@ function progressText(t: BrushTorrent): string {
             }}</el-checkbox>
           </el-checkbox-group>
           <div class="field-tip">
-            按搜索结果里的优惠类型判断（M-Team 的列表会混入普通种，同样在这里拦下）
+            按搜索结果里的优惠类型判断。M-Team 的列表会混入普通种，同样在这里拦下；M-Team
+            的单种免费、覆盖到这个种子的促销也算免费
           </div>
         </el-form-item>
         <div class="field-row field-row--3">

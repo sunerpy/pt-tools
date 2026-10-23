@@ -310,6 +310,8 @@ type SearchQuery struct {
 	SortBy string `json:"sortBy,omitempty"`
 	// OrderDesc specifies descending order when true
 	OrderDesc bool `json:"orderDesc,omitempty"`
+	// Section 是站点分区：M-Team 取 normal（综合区）或 adult（成人区），空值按 normal；其他站点忽略
+	Section string `json:"section,omitempty"`
 }
 
 // Validate validates the search query

@@ -8,27 +8,30 @@ Brushing adds requests to the site and keeps torrents moving in and out of your 
 
 Open **Download → Brush tasks** in the navigation and click **New task**. One task covers one site and one downloader:
 
-| Setting             | Meaning                                                                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------- |
-| Site                | Built-in sites only. Configure the site's credentials and enable it under **Sites** first         |
-| Downloader          | Where torrents are pushed. An empty save path or category uses the downloader's default           |
-| Extra tags          | Optional. The site name, `pt-tools-brush`, and the task tag `pt-brush-<task id>` are always added |
-| Check interval      | How often a round runs. At least 5 minutes, 10 by default                                         |
-| Enable after saving | New tasks are off by default; turn the task on once you have checked the settings                 |
+| Setting             | Meaning                                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Site                | Built-in sites only. Configure the site's credentials and enable it under **Sites** first                                                           |
+| Section             | M-Team only. The general and adult sections are two separate lists: choose General (综合区), Adult (成人区), or Both (两个都读). General by default |
+| Downloader          | Where torrents are pushed. An empty save path or category uses the downloader's default                                                             |
+| Extra tags          | Optional. The site name, `pt-tools-brush`, and the task tag `pt-brush-<task id>` are always added                                                   |
+| Check interval      | How often a round runs. At least 5 minutes, 10 by default                                                                                           |
+| Enable after saving | New tasks are off by default; turn the task on once you have checked the settings                                                                   |
 
 Each round of an enabled task does three things in order: samples the task's torrents (records upload and download), removes torrents by the removal rules, and adds new torrents within the limits.
 
 ## Entry conditions
 
-Each round requests the site's torrent list once (subject to the site's own rate limit) and checks every item locally:
+Each round requests the first page of the site's torrent list once (subject to the site's own rate limit) and checks every item locally. An M-Team page holds 100 torrents, pinned ones first. With Both, the general and adult sections are requested once each, a torrent listed in both counts once, and when one section cannot be read the other is still used and the run result gives the reason.
 
-- **Discount types**: "Free" and "2x free" by default; you can add 50%, 2x 50%, and others. Some sites (such as M-Team) mix normal torrents into the list; they are filtered out here as well.
+- **Discount types**: "Free" and "2x free" by default; you can add 50%, 2x 50%, and others. Some sites (such as M-Team) mix normal torrents into the list; they are filtered out here as well. M-Team single-torrent free (单种免费) and promotions that cover the torrent also count as free: such a torrent's own discount in the list can be 50%, so pt-tools judges it by the start and end time of the single-torrent free or the promotion instead of asking the site to filter by discount (filtering by the torrent's own discount would miss them).
 - **Discount remaining**: How long the discount must still last, at least 60 minutes by default. Permanent free torrents without an end time are not limited.
 - **Size**: Minimum and maximum size in GB; 0 means no limit. When a size limit is set, torrents whose size the list does not show are skipped.
 - **At most N seeders** and **at least N leechers**: pick busy torrents with little competition.
 - **Published within**: only take recent torrents; 0 means no limit.
 - **Title includes / excludes**: one per line or comma separated, case-insensitive, matched against the title and subtitle.
 - **Exclude H&R**: on by default. When the site has site-wide H&R enabled, every torrent from it counts as H&R (the same rule RSS downloads use). With the option off, only H&R torrents whose required seeding time is known are taken: when the site's built-in rules have no seeding time, fill in H&R seeding requirement (hours) (H&R 做种要求（小时）) in the site's settings. Until it is filled in, such torrents are not taken (the removal rules cannot tell when a torrent may go), and the run result says how many were skipped because the H&R seeding time is unknown (H&R 要求的做种时长未知).
+
+For M-Team tasks, the run result starts with the sections that were read, for example "M-Team 综合区、成人区第 1 页：列表 200 个、符合条件 3 个、加入 2 个" (general and adult sections, page 1: 200 listed, 3 eligible, 2 added). It sums up both lists; it is not the verdict on any single torrent.
 
 Matching torrents are added in order of most leechers, then fewest seeders. A torrent any brush task has pushed from this site before (including ones already removed) is never added again, so two tasks never add the same torrent; torrents already in the downloader are skipped too.
 

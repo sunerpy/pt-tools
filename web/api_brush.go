@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ type BrushTaskRequest struct {
 	Category                    string  `json:"category"`
 	Tags                        string  `json:"tags"`
 	IntervalMin                 int     `json:"interval_min"`
+	Section                     string  `json:"section"`
 	Discounts                   string  `json:"discounts"`
 	MinFreeRemainMin            int     `json:"min_free_remain_min"`
 	MinSizeGB                   float64 `json:"min_size_gb"`
@@ -464,6 +466,7 @@ func decodeBrushTask(r *http.Request, into *models.BrushTask) (*models.BrushTask
 	t := into
 	t.Name, t.Enabled, t.SiteName, t.DownloaderID = req.Name, req.Enabled, req.SiteName, req.DownloaderID
 	t.SavePath, t.Category, t.Tags, t.IntervalMin = req.SavePath, req.Category, req.Tags, req.IntervalMin
+	t.Section = req.Section
 	t.Discounts, t.MinFreeRemainMin, t.MinSizeGB, t.MaxSizeGB = req.Discounts, req.MinFreeRemainMin, req.MinSizeGB, req.MaxSizeGB
 	t.MaxSeeders, t.MinLeechers, t.MaxPublishAgeMin, t.ExcludeHR = req.MaxSeeders, req.MinLeechers, req.MaxPublishAgeMin, req.ExcludeHR
 	t.IncludeKeywords, t.ExcludeKeywords = req.IncludeKeywords, req.ExcludeKeywords
@@ -494,8 +497,16 @@ func validateBrushTask(req *BrushTaskRequest) (int, error) {
 	if req.SiteName == "" {
 		return bad("请选择站点")
 	}
-	if _, ok := v2.GetDefinitionRegistry().Get(req.SiteName); !ok {
+	def, ok := v2.GetDefinitionRegistry().Get(req.SiteName)
+	if !ok {
 		return bad("站点 %s 没有内置定义，刷流只支持内置站点", req.SiteName)
+	}
+	// 分区只对 M-Team 有意义；别的站点一律存成空
+	req.Section = strings.ToLower(strings.TrimSpace(req.Section))
+	if def.Schema != v2.SchemaMTorrent {
+		req.Section = ""
+	} else if !slices.Contains(scheduler.BrushSections, req.Section) {
+		return bad("不认识的分区 %s（normal 综合区、adult 成人区、all 两个都读）", req.Section)
 	}
 	var site models.SiteSetting
 	if err := global.GlobalDB.DB.Select("id", "enabled").Where("name = ?", req.SiteName).First(&site).Error; err != nil {

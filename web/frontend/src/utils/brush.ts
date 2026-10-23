@@ -13,6 +13,23 @@ export const BRUSH_DISCOUNTS: readonly { value: string; label: string }[] = [
 
 const DISCOUNT_LABEL = new Map(BRUSH_DISCOUNTS.map((d) => [d.value, d.label]));
 
+/** M-Team 的分区：综合区和成人区是两张列表（与 scheduler.BrushSections 一致） */
+export const BRUSH_SECTIONS: readonly { value: string; label: string }[] = [
+  { value: "normal", label: "综合区" },
+  { value: "adult", label: "成人区" },
+  { value: "all", label: "两个都读" },
+];
+
+/** 只有 M-Team 分区读列表；别的站点不显示「分区」，保存为空 */
+export function hasBrushSection(siteName: string): boolean {
+  return siteName.toLowerCase() === "mteam";
+}
+
+/** 保存时的分区：M-Team 空值按综合区，别的站点一律为空 */
+export function brushSectionFor(siteName: string, section: string): string {
+  return hasBrushSection(siteName) ? section || "normal" : "";
+}
+
 /** 优惠类型的中文名；不认识的原样返回 */
 export function discountLabel(value: string): string {
   return DISCOUNT_LABEL.get(value.toUpperCase()) ?? value;
@@ -38,6 +55,7 @@ export function defaultBrushConfig(): BrushTaskConfig {
     category: "",
     tags: "",
     interval_min: 10,
+    section: "",
     discounts: "FREE,2XFREE",
     min_free_remain_min: 60,
     min_size_gb: 0,
