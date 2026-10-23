@@ -86,7 +86,7 @@ Effective activity is the time the days left and the inactivity reminders are ba
 
 What the time is based on is shown as Site last access (站点最近访问), Site last sign-in (站点最近登录) or Browser visit (浏览器访问).
 
-Since Rousi Pro moved to its new system, the last-active time in its API no longer updates (checked in 2026-10: it stayed at 2026-08-11 after a web login and a sign-in that day), so on its own it would always say the account is about to be banned. pt-tools therefore counts a Rousi Pro sign-in today as activity at midnight of the day (UTC+8) and takes the newer of that and the API's value; turning on [daily sign-in](#daily-sign-in) for Rousi Pro keeps it moving forward.
+Rousi Pro updates its last-active time only when you visit the website in a browser. Reading the profile and signing in with the API key do not refresh it (checked in 2026-10), and a sign-in does not count as activity either. So sign in to Rousi Pro in a browser now and then. After the visit, the next probe, or the probe before the next reminder, reads the new time.
 
 When the probe is OK but the last-access time the site returns is the same as last time and already more than 48 hours old, the automatic probe is not refreshing that site's access time. The site list then marks Access not taking effect (访问未生效) next to Days left, and the inactivity reminder adds a sentence saying so. Sign in to such a site by hand; the mark disappears once the site's last-access time moves forward again.
 
@@ -98,6 +98,7 @@ Reminders start once the days left are no more than Days ahead to remind:
 
 - They are sent at the times of the Reminder cron, at most once per cron slot.
 - When the days left drop into a more urgent band than the previous reminder (14, 7, 3 and 1 days), a reminder goes out at once instead of waiting for the cron.
+- Before a reminder goes out, a site in automatic probe mode whose last probe is more than 30 minutes old is probed once more and judged again, so a reminder based on a result from hours ago does not reach you right after you signed in to the site in a browser. When the site is being probed or signed in at that moment, the reminder does not wait and uses the existing result.
 - The reminder gives the last activity time, what it is based on and the days left.
 
 ### Probe failure and recovery reminders
@@ -130,7 +131,7 @@ Daily sign-in was added in the 1.0 preview. pt-tools can sign in to a site once 
 - Sign in to all (一键签到): the button at the top right of the Sign-in page signs in once to every site with automatic sign-in turned on that has no result today. It runs in the background and the page shows the progress; a site that needs a captcha can take a few minutes, so you can leave the page.
 - Signing in by hand: Sign in now (立即签到) on a row of the Sign-in page, Sign in now (the calendar icon) on the site's row in the site list, Sign in now on the Keep-alive rules (保号规则) card of the site's detail page, and the ChatOps command `/signin [site]` (without a site, it signs in every site with automatic sign-in turned on that has no result today). Signing in by hand does not require automatic sign-in to be turned on, and a failure does not use up the automatic retries.
 
-Signing in to HDSky, OpenCD, PTCHDBits and 52PT requires a captcha or a quiz answer and uses AI; see the next section. Rousi Pro signs in with the passkey (personal API key) in its site settings, and the key needs the sign-in permission (`attendance:claim`); without it the sign-in fails and the reason says so. These built-in sites do not support automatic sign-in:
+Signing in to HDSky, OpenCD, PTCHDBits and 52PT requires a captcha or a quiz answer and uses AI; see the next section. Rousi Pro signs in with the personal API key entered in the Passkey field of its site settings; the key needs the Sign in (执行签到) permission (`attendance:claim`). Without it the sign-in fails and the reason says so. These built-in sites do not support automatic sign-in:
 
 | Site            | Reason                                                                                                                                          |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |

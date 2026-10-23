@@ -657,6 +657,9 @@ function toggleEditRssCustomPath() {
   }
 }
 
+/** Rousi Pro 的 Passkey 一栏填的是个人 API Key（站点 API Key 页的说明），表单里写明 */
+const isRousi = computed(() => siteName.value.toLowerCase() === "rousipro");
+
 const authMethodLabel = computed(() => {
   switch (form.value.auth_method) {
     case "api_key":
@@ -1341,13 +1344,27 @@ function ruleNameOf(id: number): string {
               </el-form-item>
             </template>
 
-            <el-form-item v-if="form.auth_method === 'passkey'" label="Passkey">
+            <el-form-item
+              v-if="form.auth_method === 'passkey'"
+              :label="isRousi ? 'Passkey（个人 API Key）' : 'Passkey'">
               <el-input
                 v-model="form.passkey"
                 type="password"
                 show-password
-                placeholder="从站点个人设置中获取 Passkey" />
-              <div class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
+                :placeholder="
+                  isRousi
+                    ? '粘贴 Rousi「账户 → API Key」页创建的 Key'
+                    : '从站点个人设置中获取 Passkey'
+                "
+                data-testid="sd-passkey" />
+              <!-- Rousi 的 API Key 页写明：外部工具填这把个人 API Key，不要填 Tracker Passkey；每个工具只能用授予的权限 -->
+              <div v-if="isRousi" class="field-tip" data-testid="sd-passkey-tip">
+                填 Rousi「<a href="https://rousi.pro/account/api-key" target="_blank" rel="noopener"
+                  >账户 → API Key</a
+                >」页创建的个人 API Key，不是 Tracker
+                Passkey。权限勾选读取账户资料、读取与搜索种子、下载种子； 要自动签到再勾选执行签到。
+              </div>
+              <div v-else class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
             </el-form-item>
           </el-form>
           <!--

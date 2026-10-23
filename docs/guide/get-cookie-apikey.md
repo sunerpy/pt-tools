@@ -10,7 +10,7 @@ pt-tools 支持三种站点认证方式：
 | ----------- | ------------------------------------ | -------------------- | --------------------- |
 | **Cookie**  | HDSky, SpringSunday, HDDolby, NovaHD | 传统方式，需定期更新 | ✅ 浏览器扩展自动同步 |
 | **API Key** | M-Team                               | 长期有效             | 手动配置              |
-| **Passkey** | Rousi Pro                            | 长期有效             | 手动配置              |
+| **Passkey** | Rousi Pro（填个人 API Key）          | 长期有效             | 手动配置              |
 
 **Cookie 鉴权站点强烈推荐使用浏览器扩展**，可省去手动复制粘贴的繁琐操作，并在 Cookie 过期时自动更新。
 
@@ -212,6 +212,17 @@ API Key 是站点为用户生成的专用访问令牌，相比 Cookie 具有以�
 ```
 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
+
+### Rousi Pro 个人 API Key 获取方法
+
+Rousi Pro 在 pt-tools 里是 Passkey 认证，但这一栏要填站点的个人 API Key，不是 Tracker Passkey：
+
+1. 用浏览器登录 Rousi Pro，打开「账户 → API Key」（`https://rousi.pro/account/api-key`）。
+2. 授予权限：「读取账户资料」「读取与搜索种子」「下载种子」；要自动签到再勾选「执行签到」。
+3. 点「创建 API Key」，原文只显示这一次，复制下来。
+4. 填到 pt-tools 站点详情里 Rousi Pro 的 Passkey 一栏。
+
+每个账户只有一把个人 API Key，MoviePilot 等别的工具共用它。轮换会让所有工具里的旧 Key 立即失效，要在 pt-tools 里换成新 Key；已有的 Key 改权限，要轮换以后才生效。
 
 ### API Key 安全注意事项
 

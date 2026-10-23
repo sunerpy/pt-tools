@@ -21,7 +21,7 @@ Open Sites → Site list (站点 → 站点列表), choose a site and fill in it
 
 - **Cookie**: most NexusPHP sites. The [PT Tools Helper browser extension](browser-extension.md) syncs the cookie in one click once you are signed in to the site.
 - **API key**: M-Team, for example.
-- **Passkey**: Rousi Pro, for example.
+- **Passkey**: Rousi Pro, for example (enter the site's personal API key; see [Cookies and API keys](get-cookie-apikey.md#getting-a-rousi-pro-personal-api-key)).
 
 Where to find them is explained in [Cookies and API keys](get-cookie-apikey.md). After saving, the Status (状态) column of the site list shows whether the site can be reached.
 
