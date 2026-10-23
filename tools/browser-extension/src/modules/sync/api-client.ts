@@ -12,7 +12,12 @@ interface LoginResponse {
 interface PingResponse {
   status?: string;
   version?: string;
+  /** 这个 pt-tools 认得的可选能力（rc.38 起）；旧版本没有这个字段 */
+  features?: unknown;
 }
+
+/** pt-tools 认得 PUT /api/sites/{id} 的 keep_enabled：停用的站点只存凭据、不启用（见 web/api_credential.go） */
+export const FEATURE_CREDENTIAL_KEEP_ENABLED = "site_credential_keep_enabled";
 
 interface SiteConfigEntry {
   enabled?: boolean;
@@ -83,11 +88,19 @@ export class PtToolsApiClient {
    * 把凭据推给 pt-tools。成功时 pt-tools 可能带一句 warning：凭据存下了、但站点还缺别的凭据（HDDolby 还要
    * API Key）所以暂不启用 —— 调用方要把它告诉用户，不能当成什么都没发生。
    */
-  async syncSiteCredential(site: KnownSite, credential: string): Promise<{ warning?: string }> {
+  async syncSiteCredential(
+    site: KnownSite,
+    credential: string,
+    opts: { keepEnabled?: boolean } = {},
+  ): Promise<{ warning?: string }> {
     const siteId = site.id.toLowerCase();
     const payload: SyncSiteCredentialPayload = {
       [site.syncField]: credential,
     };
+    // 定时同步推没启用的站点时带上：只存 Cookie，不替用户启用（旧版 pt-tools 不认，调用方先看 features）
+    if (opts.keepEnabled) {
+      payload.keep_enabled = true;
+    }
 
     const visitMap = await getLastVisitMap();
     const lastVisitAt = visitMap[siteId];
@@ -187,6 +200,25 @@ export class PtToolsApiClient {
       const obj = item as Record<string, unknown>;
       return typeof obj.site_name === "string";
     });
+  }
+
+  /** features 读 /api/ping 里这个 pt-tools 认得的可选能力；读不到、旧版本没有这个字段时返回空数组 */
+  async features(timeoutMs?: number): Promise<string[]> {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/ping`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      credentials: "include",
+      redirect: "manual",
+      timeoutMs,
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const result = (await this.safeJson(response)) as PingResponse | null;
+    const features = result?.features;
+    return Array.isArray(features)
+      ? features.filter((f): f is string => typeof f === "string")
+      : [];
   }
 
   async ping(timeoutMs?: number): Promise<void> {

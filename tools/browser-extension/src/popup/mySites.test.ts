@@ -77,6 +77,21 @@ describe("buildMySites", () => {
     expect(byId.hdsky!.syncable).toBe(true);
     expect(byId.ssd!.syncable).toBe(false);
   });
+
+  it("pt-tools 里没启用、扩展推过 Cookie 的站点标成「Cookie 已存，待启用」", () => {
+    const pushed = { ...status(site("audiences"), "valid"), lastSync: "2026-10-23T08:00:00Z" };
+    const neverPushed = status(site("hdtime"), "valid");
+    const enabledPushed = { ...status(site("hdsky"), "valid"), lastSync: "2026-10-23T08:00:00Z" };
+    const rows = buildMySites(
+      [pushed, neverPushed, enabledPushed],
+      [login("audiences", "none", false), login("hdtime", "none", false), login("hdsky", "none")],
+      false,
+    );
+    const byId = Object.fromEntries(rows.map((r) => [r.status.site.id, r]));
+    expect(byId.audiences!.savedNotEnabled).toBe(true);
+    expect(byId.hdtime!.savedNotEnabled).toBe(false); // 没推过
+    expect(byId.hdsky!.savedNotEnabled).toBe(false); // 已启用
+  });
 });
 
 describe("loginTone", () => {

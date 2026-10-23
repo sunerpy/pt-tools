@@ -41,6 +41,8 @@ const openableIds = computed(() =>
 
 function loginText(row: MySiteRow): string {
   const l = row.login;
+  // 定时同步只存了 Cookie、没替用户启用：写明下一步是到 pt-tools 里启用
+  if (row.savedNotEnabled) return t("mySites.savedNotEnabled");
   if (!l || !row.configured) return t("mySites.notInPtTools");
   if (l.tier === "unknown" || !l.tier) return t("loginStatus.tier.unknown");
   if (l.tier === "none" || l.tier === "30d")
@@ -121,7 +123,8 @@ function openOne(row: MySiteRow): void {
             compact />
           <span
             class="my-site__login"
-            :class="`tone-${loginTone(row.configured ? row.login : undefined)}`">
+            :class="`tone-${loginTone(row.configured ? row.login : undefined)}`"
+            :title="row.savedNotEnabled ? t('mySites.savedNotEnabledHint') : undefined">
             {{ loginText(row) }}
           </span>
         </div>

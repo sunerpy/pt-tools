@@ -222,9 +222,9 @@ export default {
   "schedule.title": "定时同步",
   "schedule.enable": "按间隔自动同步",
   "schedule.interval": "间隔（分钟，{0}–{1}）",
-  "schedule.allSites": "同步 pt-tools 里已启用的全部站点",
+  "schedule.allSites": "同步浏览器里登录着的全部站点",
   "schedule.allSitesHint":
-    "关掉时只同步打开了「自动同步 Cookie」的站点。Cookie 没有变化的站点不会重复同步。",
+    "关掉时只同步打开了「自动同步 Cookie」的站点。pt-tools 里没启用的站点只保存 Cookie，不会替你启用，到 pt-tools 的站点列表里启用以后就能用。Cookie 没有变化的站点不会重复同步。",
   "schedule.save": "保存",
   "schedule.runNow": "立即同步一次",
   "schedule.saved": "已保存定时同步的设置",
@@ -301,6 +301,9 @@ export default {
   "mySites.sync": "同步",
   "mySites.open": "打开",
   "mySites.notInPtTools": "pt-tools 未启用",
+  "mySites.savedNotEnabled": "Cookie 已存，待启用",
+  "mySites.savedNotEnabledHint":
+    "Cookie 已经存进 pt-tools，站点没有启用：到 pt-tools 的站点列表里启用它",
   "mySites.daysLeft": "剩 {0} 天",
   "mySites.loginUnavailable": "没连上 pt-tools，登录状态暂时看不到：{0}",
   "mySites.synced": "{0}同步",

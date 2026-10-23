@@ -45,6 +45,7 @@ import type {
   UnknownSiteStatus,
 } from "../core/types";
 import {
+  FEATURE_CREDENTIAL_KEEP_ENABLED,
   PtToolsApiClient,
   PtToolsApiError,
   checkCookieHealth,
@@ -737,21 +738,29 @@ const scheduledSyncDeps: ScheduledSyncDeps = {
     const baseUrl = connection.baseUrl?.trim();
     return connection.connected && baseUrl ? baseUrl : null;
   },
-  enabledSites: async (baseUrl) => {
+  ptToolsSites: async (baseUrl) => {
     try {
       const sites = await new PtToolsApiClient(baseUrl).getSites();
-      return sites.filter((site) => site.enabled).map((site) => site.name.toLowerCase());
+      return sites.map((site) => ({ name: site.name.toLowerCase(), enabled: site.enabled }));
     } catch (error: unknown) {
       throw asAuthExpired(error);
+    }
+  },
+  keepEnabledSupported: async (baseUrl) => {
+    try {
+      const features = await new PtToolsApiClient(baseUrl).features();
+      return features.includes(FEATURE_CREDENTIAL_KEEP_ENABLED);
+    } catch {
+      return false;
     }
   },
   readCookie: async (site) => {
     const health = await checkCookieHealth(site);
     return health.status === "valid" || health.status === "expiring" ? health.cookieString : "";
   },
-  pushCookie: async (baseUrl, site, cookie) => {
+  pushCookie: async (baseUrl, site, cookie, opts) => {
     try {
-      await new PtToolsApiClient(baseUrl).syncSiteCredential(site, cookie);
+      await new PtToolsApiClient(baseUrl).syncSiteCredential(site, cookie, opts);
     } catch (error: unknown) {
       throw asAuthExpired(error);
     }

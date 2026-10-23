@@ -39,6 +39,8 @@ const CC_OFF: CookieCloudConfig = {
 interface Harness {
   deps: ScheduledSyncDeps;
   pushed: string[];
+  /** 每个推出去的站点带没带 keep_enabled */
+  keepEnabled: Record<string, boolean>;
   hashes: Record<string, string>;
   ccState: CookieCloudState | null;
 }
@@ -47,16 +49,21 @@ function harness(opts: {
   schedule?: Partial<SyncSchedule>;
   autoSync?: Record<string, boolean>;
   enabled?: string[] | Error;
+  /** pt-tools 列出的停用站点；默认是 SITES 里没启用的全部（pt-tools 会列出全部内置站点） */
+  disabled?: string[];
   cookies?: Record<string, string>;
   pushError?: Record<string, Error>;
   connected?: boolean;
   baseUrl?: string;
   cc?: CookieCloudConfig;
   upload?: ScheduledSyncDeps["upload"];
+  /** pt-tools 认不认 keep_enabled（rc.38 起认）；默认认 */
+  keepEnabledSupported?: boolean;
 }): Harness {
   const h: Harness = {
     deps: undefined as unknown as ScheduledSyncDeps,
     pushed: [],
+    keepEnabled: {},
     hashes: {},
     ccState: null,
   };
@@ -68,15 +75,23 @@ function harness(opts: {
     getHash: async (siteId) => h.hashes[siteId],
     withPushLock: createLock(),
     ptTools: async () => (opts.connected === false ? null : (opts.baseUrl ?? "http://pt.example")),
-    enabledSites: async () => {
+    ptToolsSites: async () => {
       if (opts.enabled instanceof Error) throw opts.enabled;
-      return opts.enabled ?? [];
+      const enabled = (opts.enabled ?? []).map((name) => name.toLowerCase());
+      const disabled =
+        opts.disabled ?? SITES.map((s) => s.id).filter((id) => !enabled.includes(id));
+      return [
+        ...enabled.map((name) => ({ name, enabled: true })),
+        ...disabled.map((name) => ({ name, enabled: false })),
+      ];
     },
+    keepEnabledSupported: async () => opts.keepEnabledSupported !== false,
     readCookie: async (s) => opts.cookies?.[s.id] ?? "",
-    pushCookie: async (_base, s) => {
+    pushCookie: async (_base, s, _cookie, pushOpts) => {
       const err = opts.pushError?.[s.id];
       if (err) throw err;
       h.pushed.push(s.id);
+      h.keepEnabled[s.id] = pushOpts.keepEnabled;
     },
     recordPushed: async (siteId, hash) => {
       h.hashes[siteId] = hash;
@@ -120,14 +135,36 @@ describe("pickSites", () => {
     const schedule = normalizeSchedule({ enabled: true, allSites: true });
     expect(
       pickSites(SITES, schedule, { hdtime: true, mteam: true }, ["HDSKY", "mteam"]).map(
-        (s) => s.id,
+        (p) => p.site.id,
       ),
     ).toEqual(["hdsky", "hdtime"]);
     expect(
       pickSites(SITES, { ...schedule, allSites: false }, { hdtime: true }, ["hdsky"]).map(
-        (s) => s.id,
+        (p) => p.site.id,
       ),
     ).toEqual(["hdtime"]);
+  });
+
+  it("给了停用列表时「全部站点」也带上 pt-tools 里停用的 Cookie 站点，标成不是必须的", () => {
+    const schedule = normalizeSchedule({ enabled: true, allSites: true });
+    expect(
+      pickSites(SITES, schedule, { ourbits: true }, ["hdsky"], ["HDTIME", "ourbits", "mteam"]),
+    ).toEqual([
+      { site: SITES[0], required: true },
+      { site: SITES[1], required: false },
+      { site: SITES[2], required: true },
+    ]);
+    // pt-tools 列表里没有的站点（扩展比 pt-tools 新）不带
+    expect(pickSites(SITES, schedule, {}, ["hdsky"], ["ourbits"])).toEqual([
+      { site: SITES[0], required: true },
+      { site: SITES[2], required: false },
+    ]);
+    // 读不到站点列表时不知道哪些停用：不带
+    expect(pickSites(SITES, schedule, {}, null, null)).toEqual([]);
+    // 没勾「全部站点」：只有打开了自动同步的
+    expect(
+      pickSites(SITES, { ...schedule, allSites: false }, { hdtime: true }, ["hdsky"], ["ourbits"]),
+    ).toEqual([{ site: SITES[1], required: true }]);
   });
 });
 
@@ -208,19 +245,66 @@ describe("runSync", () => {
     expect(runHadProblems(null)).toBe(false);
   });
 
-  it("没连上 pt-tools 时跳过；「全部站点」不会推 pt-tools 里没启用的站点", async () => {
+  it("没连上 pt-tools 时跳过；pt-tools 不认 keep_enabled（旧版本）时「全部站点」不推没启用的站点", async () => {
     const off = harness({ connected: false, autoSync: { hdsky: true }, cookies: { hdsky: "a=1" } });
     const run = await runSync(off.deps, "schedule");
     expect(run.ptTools.skipped).toBeTruthy();
     expect(off.pushed).toEqual([]);
 
+    // 旧版 pt-tools 收到凭据就把站点启用：不能推没启用的站点
+    const h = harness({
+      schedule: { allSites: true },
+      enabled: ["hdtime"],
+      cookies: { hdsky: "a=1", hdtime: "b=2" },
+      keepEnabledSupported: false,
+    });
+    await runSync(h.deps, "schedule");
+    expect(h.pushed).toEqual(["hdtime"]);
+    expect(h.keepEnabled.hdtime).toBe(false);
+  });
+
+  it("「全部站点」：pt-tools 里没启用、浏览器里登录着的站点也推，带 keep_enabled；没启用又没 Cookie 的不算缺", async () => {
+    // 以前只推 pt-tools 里已启用的站点，而 pt-tools 启用 Cookie 站点要先有 Cookie：新站点两头都等着对方
     const h = harness({
       schedule: { allSites: true },
       enabled: ["hdtime"],
       cookies: { hdsky: "a=1", hdtime: "b=2" },
     });
-    await runSync(h.deps, "schedule");
-    expect(h.pushed).toEqual(["hdtime"]);
+    const run = await runSync(h.deps, "schedule");
+    expect(h.pushed).toEqual(["hdsky", "hdtime"]);
+    expect(h.keepEnabled).toEqual({ hdsky: true, hdtime: false });
+    expect(run.ptTools.synced).toEqual(["hdsky", "hdtime"]);
+    // ourbits 没启用、浏览器里也没有 Cookie：不推，也不列成缺失
+    expect(run.ptTools.missing).toEqual([]);
+    expect(runHadProblems(run)).toBe(false);
+
+    // 推过的没启用站点下一轮 Cookie 没变：不再推
+    const again = await runSync(h.deps, "schedule");
+    expect(h.pushed).toEqual(["hdsky", "hdtime"]);
+    expect(again.ptTools.unchanged).toBe(2);
+
+    // 已启用的站点照旧：没有 Cookie 时列成缺失
+    const missing = harness({ schedule: { allSites: true }, enabled: ["hdtime"], cookies: {} });
+    expect((await runSync(missing.deps, "schedule")).ptTools.missing).toEqual(["HDTIME"]);
+
+    // pt-tools 站点列表里没有的站点（扩展比 pt-tools 新）：有 Cookie 也不推，不然每轮都推失败
+    const newer = harness({
+      schedule: { allSites: true },
+      enabled: [],
+      disabled: ["hdsky"],
+      cookies: { hdsky: "a=1", ourbits: "c=3" },
+    });
+    const newerRun = await runSync(newer.deps, "schedule");
+    expect(newer.pushed).toEqual(["hdsky"]);
+    expect(newerRun.ptTools.failed).toEqual([]);
+  });
+
+  it("只挑到没启用、浏览器里又都没有 Cookie 的站点：写明没有要同步的站点，不当成一次成功", async () => {
+    const h = harness({ schedule: { allSites: true }, enabled: [], cookies: {} });
+    const run = await runSync(h.deps, "manual");
+    expect(h.pushed).toEqual([]);
+    expect(run.ptTools.skipped).toBeTruthy();
+    expect(runHadProblems(run)).toBe(true);
   });
 
   it("读站点列表失败时只同步单独打开了自动同步的；登录过期时停下并把连接标成断开", async () => {

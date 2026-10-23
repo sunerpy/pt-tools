@@ -222,7 +222,7 @@ export default {
   "sync.problemSkipped": "pt-tools was not synced this run: {0}",
   "sync.problemCookieCloud": "CookieCloud: {0}",
   "sync.enabledSitesFailed":
-    "Could not read the pt-tools site list, so this run synced only the sites with “Auto-sync cookies” on: {0}",
+    "Could not read the pt-tools site list, so this run synced only the sites with “Auto-sync Cookie” on: {0}",
   "sync.skipNotConnected": "Not connected to pt-tools",
   "sync.skipAuthExpired": "The pt-tools sign-in expired; reconnect in the extension settings",
   "sync.skipNoSites": "No sites to sync",
@@ -230,9 +230,9 @@ export default {
   "schedule.title": "Scheduled sync",
   "schedule.enable": "Sync on a schedule",
   "schedule.interval": "Interval (minutes, {0}–{1})",
-  "schedule.allSites": "Sync every site enabled in pt-tools",
+  "schedule.allSites": "Sync every site signed in on this browser",
   "schedule.allSitesHint":
-    "When off, only sites with “Auto-sync cookies” on are synced. Sites whose cookies have not changed are not synced again.",
+    "When off, only sites with “Auto-sync Cookie” on are synced. For sites not enabled in pt-tools only the cookie is saved; they are not enabled for you, so enable them in the pt-tools site list to use them. Sites whose cookies have not changed are not synced again.",
   "schedule.save": "Save",
   "schedule.runNow": "Sync now",
   "schedule.saved": "Schedule saved",
@@ -314,6 +314,9 @@ export default {
   "mySites.sync": "Sync",
   "mySites.open": "Open",
   "mySites.notInPtTools": "Not enabled in pt-tools",
+  "mySites.savedNotEnabled": "Cookie saved, not enabled",
+  "mySites.savedNotEnabledHint":
+    "The cookie is saved in pt-tools, but the site is not enabled; enable it in the pt-tools site list",
   "mySites.daysLeft": "{0} days left",
   "mySites.loginUnavailable": "Cannot reach pt-tools, login status unavailable: {0}",
   "mySites.synced": "synced {0}",

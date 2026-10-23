@@ -19,7 +19,15 @@ type credentialUpdateRequest struct {
 	Passkey *string `json:"passkey,omitempty"`
 	// LastVisitAt 是浏览器扩展同步凭证时附带的最近访问时间（RFC3339），可选。
 	LastVisitAt *string `json:"last_visit_at,omitempty"`
+	// KeepEnabled 为 true 时不改站点的启用状态：停用的站点只把凭据存下、保持停用，不刷新站点、不探测、不重载调度。
+	// 给浏览器扩展的定时同步用 —— 它会推浏览器里登录着、但 pt-tools 里还没启用的站点，不能替用户把站点启用。
+	// 不带这个字段时照旧：推了凭据就启用站点（扩展里手动点的同步）。
+	KeepEnabled *bool `json:"keep_enabled,omitempty"`
 }
+
+// FeatureCredentialKeepEnabled 写在 /api/ping 的 features 里：扩展看到它才会让定时同步推没启用的站点。
+// 旧版 pt-tools 不认 keep_enabled，照样会把站点启用，所以扩展要先确认。
+const FeatureCredentialKeepEnabled = "site_credential_keep_enabled"
 
 func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg models.SiteGroup) {
 	var req credentialUpdateRequest
@@ -48,9 +56,22 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 	if req.Passkey != nil {
 		sc.Passkey = *req.Passkey
 	}
+	enabled := sc.Enabled != nil && *sc.Enabled
+	// 调用方要求不改启用状态、站点又是停用的：只存凭据，站点照旧停用。
+	if req.KeepEnabled != nil && *req.KeepEnabled && !enabled {
+		if err := s.store.SaveSiteCredentials(sg, req.Cookie, req.APIKey, req.Passkey); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		global.GetSlogger().Infof("[Site] 凭据已保存，按请求保持停用: site=%s", string(sg))
+		if req.LastVisitAt != nil {
+			recordExtensionVisit(string(sg), *req.LastVisitAt)
+		}
+		writeJSON(w, map[string]any{"success": true, "site": string(sg), "enabled": false})
+		return
+	}
 	// 凭据还没配齐的停用站点（HDDolby 要 Cookie 和 API Key，扩展只同步来了 Cookie）：先把这次的凭据存下，
 	// 站点保持停用，告诉调用方还缺什么；不再走完整校验回 500，免得扩展每次同步都报失败、Cookie 也存不进去。
-	enabled := sc.Enabled != nil && *sc.Enabled
 	if missing := core.MissingCredential(sc.AuthMethod, sc.Cookie, sc.APIKey, sc.Passkey); missing != "" && !enabled && credentialProvided(req) {
 		if err := s.store.SaveSiteCredentials(sg, req.Cookie, req.APIKey, req.Passkey); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

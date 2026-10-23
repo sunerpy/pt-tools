@@ -266,3 +266,58 @@ func TestMissingCredential(t *testing.T) {
 	assert.Equal(t, "", core.MissingCredential("cookie_and_api_key", "a=1", "k", ""))
 	assert.Equal(t, "passkey", core.MissingCredential("passkey", "", "", ""))
 }
+
+// 扩展的定时同步会推浏览器里登录着、但 pt-tools 里还没启用的站点，带 keep_enabled：停用的站点只存凭据、保持停用，
+// 不回传 Cookie；启用中的站点照旧更新。以前「全部站点」只推已启用的站点，而启用又要先有 Cookie —— 新站点两头都等着对方。
+func TestUpdateSiteCredential_KeepEnabled(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	require.NoError(t, srv.store.SaveGlobalSettings(models.SettingsGlobal{
+		DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, AutoStart: true,
+	}))
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", DisplayName: "hdsky", AuthMethod: "cookie", IsBuiltin: true}).Error)
+	keep := true
+
+	put := func(site string, body credentialUpdateRequest) (*httptest.ResponseRecorder, map[string]any) {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		srv.updateSiteCredential(w, httptest.NewRequest(http.MethodPut, "/api/sites/"+site, bytes.NewReader(raw)), models.SiteGroup(site))
+		var resp map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		return w, resp
+	}
+
+	w, resp := put("hdsky", credentialUpdateRequest{Cookie: credStrPtr("uid=1; pass=2"), KeepEnabled: &keep})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, true, resp["success"])
+	assert.Equal(t, false, resp["enabled"])
+	assert.Nil(t, resp["warning"], "按请求不启用，不是缺凭据")
+	assert.NotContains(t, w.Body.String(), "pass=2", "响应里不回传 Cookie")
+
+	sc, err := srv.store.GetSiteConf(models.SiteGroup("hdsky"))
+	require.NoError(t, err)
+	assert.Equal(t, "uid=1; pass=2", sc.Cookie, "Cookie 存下了")
+	require.NotNil(t, sc.Enabled)
+	assert.False(t, *sc.Enabled, "站点保持停用")
+	var row models.SiteSetting
+	require.NoError(t, db.Where("name = ?", "hdsky").First(&row).Error)
+	assert.Empty(t, row.Cookie, "不写旧的明文列")
+	assert.NotEmpty(t, row.CookieEncrypted)
+
+	// 启用中的站点带 keep_enabled：照旧更新凭据，站点仍是启用
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdtime"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "old=1", APIUrl: "https://hdtime.org",
+	}))
+	w, resp = put("hdtime", credentialUpdateRequest{Cookie: credStrPtr("new=2"), KeepEnabled: &keep})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, true, resp["success"])
+	sc, err = srv.store.GetSiteConf(models.SiteGroup("hdtime"))
+	require.NoError(t, err)
+	assert.Equal(t, "new=2", sc.Cookie)
+	require.NotNil(t, sc.Enabled)
+	assert.True(t, *sc.Enabled)
+	settleCredentialReload(t, srv)
+}

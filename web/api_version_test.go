@@ -26,6 +26,8 @@ func TestApiPing(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, "ok", resp["status"])
 		assert.Contains(t, resp, "version")
+		// 浏览器扩展看 features 决定定时同步能不能推没启用的站点（旧版 pt-tools 没有这个字段）
+		assert.Contains(t, resp["features"], FeatureCredentialKeepEnabled)
 	})
 
 	t.Run("POST not allowed", func(t *testing.T) {

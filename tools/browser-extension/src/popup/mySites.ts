@@ -13,6 +13,11 @@ export interface MySiteRow {
   syncable: boolean;
   /** pt-tools 里启用了这个站点 */
   configured: boolean;
+  /**
+   * pt-tools 里有这个站点、没启用，扩展推过它的 Cookie（定时同步只存 Cookie、不替用户启用）：
+   * 行上写「Cookie 已存，待启用」，下一步是到 pt-tools 里启用它。
+   */
+  savedNotEnabled: boolean;
   /** 要注意：Cookie 过期 / 快过期，或保号快到期 */
   attention: boolean;
 }
@@ -54,6 +59,7 @@ export function buildMySites(
       status,
       login,
       configured,
+      savedNotEnabled: Boolean(login) && !configured && Boolean(status.lastSync),
       syncable:
         status.site.syncField === "cookie" &&
         (status.cookieStatus === "valid" || status.cookieStatus === "expiring"),
