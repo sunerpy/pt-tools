@@ -276,6 +276,7 @@ func TestUpdateSiteCredential_KeepEnabled(t *testing.T) {
 		DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, AutoStart: true,
 	}))
 	db := global.GlobalDB.DB
+	require.NoError(t, db.AutoMigrate(&models.SiteLoginState{}))
 	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", DisplayName: "hdsky", AuthMethod: "cookie", IsBuiltin: true}).Error)
 	keep := true
 
@@ -305,6 +306,25 @@ func TestUpdateSiteCredential_KeepEnabled(t *testing.T) {
 	require.NoError(t, db.Where("name = ?", "hdsky").First(&row).Error)
 	assert.Empty(t, row.Cookie, "不写旧的明文列")
 	assert.NotEmpty(t, row.CookieEncrypted)
+
+	// 保持停用时扩展带来的访问时间照样记下（保号提醒按它算）
+	visit := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	w, _ = put("hdsky", credentialUpdateRequest{Cookie: credStrPtr("uid=1; pass=3"), KeepEnabled: &keep, LastVisitAt: credStrPtr(visit.Format(time.RFC3339))})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	state, err := models.NewSiteLoginStateRepository(db).GetLoginState("hdsky")
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.LastVisitAt)
+	assert.True(t, visit.Equal(*state.LastVisitAt), "last visit = %v", *state.LastVisitAt)
+
+	// 库拒绝写入时回 500，不当成存好了
+	require.NoError(t, db.Exec("CREATE TRIGGER deny_site_update BEFORE UPDATE ON site_settings BEGIN SELECT RAISE(ABORT, 'denied'); END").Error)
+	w, _ = put("hdsky", credentialUpdateRequest{Cookie: credStrPtr("uid=1; pass=4"), KeepEnabled: &keep})
+	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	require.NoError(t, db.Exec("DROP TRIGGER deny_site_update").Error)
+	sc, err = srv.store.GetSiteConf(models.SiteGroup("hdsky"))
+	require.NoError(t, err)
+	assert.Equal(t, "uid=1; pass=3", sc.Cookie, "失败的那次没有写进去")
 
 	// 启用中的站点带 keep_enabled：照旧更新凭据，站点仍是启用
 	enabled := true
