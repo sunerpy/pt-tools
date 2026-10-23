@@ -98,7 +98,7 @@ Reminders start once the days left are no more than Days ahead to remind:
 
 - They are sent at the times of the Reminder cron, at most once per cron slot.
 - When the days left drop into a more urgent band than the previous reminder (14, 7, 3 and 1 days), a reminder goes out at once instead of waiting for the cron.
-- Before a reminder goes out, a site in automatic probe mode whose last probe is more than 30 minutes old is probed once more and judged again, so a reminder based on a result from hours ago does not reach you right after you signed in to the site in a browser. When the site is being probed or signed in at that moment, the reminder does not wait and uses the existing result.
+- Before a reminder goes out, a site in automatic probe mode is probed once more and judged again if its last probe succeeded more than 30 minutes ago (or it has never been probed), so a reminder based on a result from hours ago does not reach you right after you signed in to the site in a browser. When the last probe failed (expired credentials, rate limiting and so on), or the site is being probed or signed in at that moment, there is no extra probe and the reminder uses the existing result.
 - The reminder gives the last activity time, what it is based on and the days left.
 
 ### Probe failure and recovery reminders

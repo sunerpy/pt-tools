@@ -93,7 +93,8 @@ func TestReminderStillSentWhenProbeAgrees(t *testing.T) {
 	assert.True(t, now.Equal(*st.LastProbeAt), "这次提醒前探测过")
 }
 
-// 不补探测的情况：刚探测过（30 分钟内）、不是自动探测的站点、单站锁被占用（正在探测或签到）。
+// 不补探测的情况：刚探测过（30 分钟内）、不是自动探测的站点、单站锁被占用（正在探测或签到）、
+// 上一次探测失败（照失败后的重试间隔再探测，凭证失效的不必为提醒再请求站点）。
 func TestReminderRefreshSkipped(t *testing.T) {
 	now := time.Date(2026, 10, 23, 2, 0, 0, 0, time.UTC)
 	stale := time.Date(2026, 8, 11, 15, 59, 59, 0, time.UTC)
@@ -101,12 +102,16 @@ func TestReminderRefreshSkipped(t *testing.T) {
 		name     string
 		probedAt time.Time
 		mode     string
+		status   sitelogin.ProbeStatus
 		lock     bool
 	}{
-		{name: "刚探测过", probedAt: now.Add(-10 * time.Minute), mode: ProbeModeAuto},
-		{name: "手动探测的站点", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeManual},
-		{name: "不探测的站点", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeDisabled},
-		{name: "单站锁被占用", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeAuto, lock: true},
+		{name: "刚探测过", probedAt: now.Add(-10 * time.Minute), mode: ProbeModeAuto, status: sitelogin.OK},
+		{name: "手动探测的站点", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeManual, status: sitelogin.OK},
+		{name: "不探测的站点", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeDisabled, status: sitelogin.OK},
+		{name: "单站锁被占用", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeAuto, status: sitelogin.OK, lock: true},
+		{name: "上次探测凭证失效", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeAuto, status: sitelogin.SESSION_EXPIRED},
+		{name: "上次探测密钥错误", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeAuto, status: sitelogin.KEY_ERROR},
+		{name: "上次探测被限流", probedAt: now.Add(-5 * time.Hour), mode: ProbeModeAuto, status: sitelogin.RATE_LIMITED},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -115,7 +120,7 @@ func TestReminderRefreshSkipped(t *testing.T) {
 			probedAt := c.probedAt
 			require.NoError(t, m.db.Create(&models.SiteLoginState{
 				SiteName: "rousipro", BanThresholdDays: 30, RemindBeforeDays: 10, ReminderCron: "0 2,14 * * *",
-				LastReminderTier: tierImminent, LastAccessAt: &stale, LastProbeAt: &probedAt, LastProbeStatus: "OK", ProbeMode: c.mode,
+				LastReminderTier: tierImminent, LastAccessAt: &stale, LastProbeAt: &probedAt, LastProbeStatus: string(c.status), ProbeMode: c.mode,
 			}).Error)
 			if c.lock {
 				release, ok := m.TryAcquireProbeLock("rousipro")
@@ -130,6 +135,24 @@ func TestReminderRefreshSkipped(t *testing.T) {
 			assert.Equal(t, int32(1), sender.count.Load(), "按存下的状态照常提醒")
 		})
 	}
+}
+
+// 从未探测过的站点（只有迁移或扩展记下的时间）到了提醒时刻也先探测一次。
+func TestReminderRefreshesNeverProbedSite(t *testing.T) {
+	now := time.Date(2026, 10, 23, 2, 0, 0, 0, time.UTC)
+	site := &countingReminderSite{fakeReminderSite: fakeReminderSite{info: v2.UserInfo{Username: "u", LastAccess: now.Add(-time.Hour).Unix()}}}
+	m, sender := newRefreshMonitor(t, now, site)
+	stale := time.Date(2026, 8, 11, 15, 59, 59, 0, time.UTC)
+	require.NoError(t, m.db.Create(&models.SiteLoginState{
+		SiteName: "rousipro", BanThresholdDays: 30, RemindBeforeDays: 10, ReminderCron: "0 2,14 * * *",
+		LastReminderTier: tierImminent, LastAccessAt: &stale,
+	}).Error)
+
+	m.RunReminderOnce(context.Background())
+	m.notifier.DeliverDue(context.Background())
+
+	assert.Equal(t, 1, site.calls, "提醒前探测了一次")
+	assert.Zero(t, sender.count.Load(), "探测后已经不危险：不发提醒")
 }
 
 // 不到提醒时刻、也没有升档时不探测：补探测只发生在真要发提醒的那一刻，不会每分钟都请求站点。

@@ -1084,10 +1084,14 @@ func (m *LoginReminderMonitor) reminderDue(site string, state *models.SiteLoginS
 	return effective, tier, escalated, true
 }
 
-// refreshBeforeReminder 在发封号提醒前补探测一次，返回探测后重读的状态。只对自动探测的站点、上一次探测在
-// reminderRefreshAfter 以前时做；单站锁被占用（正在探测或签到）时不等，照旧按存下的状态提醒。
+// refreshBeforeReminder 在发封号提醒前补探测一次，返回探测后重读的状态。只对自动探测的站点、上一次探测成功
+// （或从未探测过）而且在 reminderRefreshAfter 以前时做；单站锁被占用（正在探测或签到）时不等，照旧按存下的状态提醒。
 func (m *LoginReminderMonitor) refreshBeforeReminder(ctx context.Context, setting models.SiteSetting, state *models.SiteLoginState, now time.Time) (*models.SiteLoginState, bool) {
 	if m.reminderRefreshAfter <= 0 || effectiveProbeMode(state.ProbeMode) != ProbeModeAuto {
+		return nil, false
+	}
+	// 上一次探测失败的（凭证失效、被限流、网络错误等）照失败后的重试间隔再探测，不为提醒多请求一次站点。
+	if status := sitelogin.ProbeStatus(state.LastProbeStatus); status != sitelogin.OK && status != "" {
 		return nil, false
 	}
 	if state.LastProbeAt != nil && now.Sub(*state.LastProbeAt) < m.reminderRefreshAfter {
