@@ -14,7 +14,12 @@ func (s *Server) apiPing(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, map[string]any{"status": "ok", "version": version.GetVersionInfo().Version})
+	// features：这个 pt-tools 认得的可选能力，浏览器扩展据此决定能不能用新行为（旧版本没有这个字段）
+	writeJSON(w, map[string]any{
+		"status":   "ok",
+		"version":  version.GetVersionInfo().Version,
+		"features": []string{FeatureCredentialKeepEnabled},
+	})
 }
 
 func (s *Server) apiVersion(w http.ResponseWriter, r *http.Request) {

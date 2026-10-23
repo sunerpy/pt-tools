@@ -2,9 +2,12 @@
  * 定时同步（M22）：按设置的间隔把 Cookie 同步到 pt-tools，并上传到 CookieCloud（打开了的话）。
  *
  * pt-tools：只推 Cookie 有变化的站点（按上次推送的指纹判断，指纹带着 pt-tools 的地址，见 pushFingerprint）。
- * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器，没变的不推。「全部站点」只推 pt-tools 里
- * 已经启用的站点，不替用户启用新站点；单独打开了「自动同步」的站点照旧算在里面。浏览器里没有可用 Cookie 的站点不推，
- * 按站点记在结果的 missing 里（结果里列出来，也会发通知），不悄悄跳过。
+ * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器，没变的不推。
+ * 「全部站点」推浏览器里登录着的 Cookie 站点：pt-tools 里已启用的照旧推；没启用的带 keep_enabled 推，
+ * pt-tools 只把 Cookie 存下、站点保持停用（不替用户启用）。以前只推已启用的，而 pt-tools 启用 Cookie 站点要先有 Cookie，
+ * 新站点两头都等着对方。旧版 pt-tools 不认 keep_enabled（会把站点启用），所以先看 /api/ping 的 features，不认就照旧只推已启用的。
+ * 单独打开了「自动同步」的站点照旧算在里面。要同步（已启用或打开了自动同步）、但浏览器里没有可用 Cookie 的站点不推，
+ * 按站点记在结果的 missing 里（结果里列出来，也会发通知），不悄悄跳过；没启用的站点没有 Cookie 不算缺。
  * 推 Cookie 的各条路共用一把锁（withPushLock）：读 Cookie、比指纹、推送、记指纹在锁里一起做。
  * CookieCloud：Cookie 与目标都没变时不传（见 modules/cookiecloud/upload）。
  *
@@ -85,12 +88,19 @@ export interface ScheduledSyncDeps {
   withPushLock<T>(fn: () => Promise<T>): Promise<T>;
   /** ptTools 返回连着的 pt-tools 地址；没配地址或没连上时返回 null */
   ptTools(): Promise<string | null>;
-  /** enabledSites 返回 pt-tools 里已启用的站点名（小写）；登录过期时抛 AuthExpiredError */
-  enabledSites(baseUrl: string): Promise<string[]>;
+  /** ptToolsSites 返回 pt-tools 里的站点名（小写）与启用状态；登录过期时抛 AuthExpiredError */
+  ptToolsSites(baseUrl: string): Promise<Array<{ name: string; enabled: boolean }>>;
+  /** keepEnabledSupported：这个 pt-tools 认不认推送时的 keep_enabled（看 /api/ping 的 features）；读不到时为 false */
+  keepEnabledSupported(baseUrl: string): Promise<boolean>;
   /** readCookie 返回可以同步的 Cookie；不齐全、没有时返回空串 */
   readCookie(site: KnownSite): Promise<string>;
-  /** pushCookie 把 Cookie 推给 pt-tools；登录过期时抛 AuthExpiredError */
-  pushCookie(baseUrl: string, site: KnownSite, cookie: string): Promise<void>;
+  /** pushCookie 把 Cookie 推给 pt-tools；keepEnabled 时停用的站点只存 Cookie、不启用。登录过期时抛 AuthExpiredError */
+  pushCookie(
+    baseUrl: string,
+    site: KnownSite,
+    cookie: string,
+    opts: { keepEnabled: boolean },
+  ): Promise<void>;
   /** recordPushed 记下推送成功：指纹与时间 */
   recordPushed(siteId: string, hash: string, at: string): Promise<void>;
   /** authExpired 在 pt-tools 登录过期时调用（把连接标成断开） */
@@ -107,19 +117,41 @@ export interface ScheduledSyncDeps {
   now(): Date;
 }
 
-/** pickSites 是这一轮要推给 pt-tools 的站点：用 Cookie 登录的站点里，打开了「自动同步」的，以及 allSites 时 pt-tools 里已启用的。 */
+/**
+ * PickedSite 是这一轮要推的一个站点。required：要同步的（打开了「自动同步」，或 allSites 时 pt-tools 里已启用的），
+ * 浏览器里没有可用 Cookie 时记进 missing；不是 required 的是 allSites 时 pt-tools 里没启用的，有 Cookie 才推、
+ * 推的时候带 keep_enabled（只存 Cookie，不启用），没有 Cookie 不算缺 —— 不然六十多个内置站点会全列成缺失。
+ */
+export interface PickedSite {
+  site: KnownSite;
+  required: boolean;
+}
+
+/**
+ * pickSites 是这一轮要推给 pt-tools 的站点（只看用 Cookie 登录的站点）。
+ * disabled：allSites 时也带上的、pt-tools 站点列表里停用的站点（pt-tools 认 keep_enabled 时才传）。
+ * 只认列表里明确停用的：扩展比 pt-tools 新、多认得的站点，pt-tools 那边没有，推过去只会失败。
+ */
 export function pickSites(
   sites: KnownSite[],
   schedule: SyncSchedule,
   autoSync: Record<string, boolean>,
   enabled: string[] | null,
-): KnownSite[] {
+  disabled: string[] | null = null,
+): PickedSite[] {
   const enabledSet = new Set((enabled ?? []).map((name) => name.toLowerCase()));
-  return sites.filter(
-    (site) =>
-      site.syncField === "cookie" &&
-      (autoSync[site.id] === true || (schedule.allSites && enabledSet.has(site.id.toLowerCase()))),
-  );
+  const disabledSet = new Set((disabled ?? []).map((name) => name.toLowerCase()));
+  const picked: PickedSite[] = [];
+  for (const site of sites) {
+    if (site.syncField !== "cookie") continue;
+    const id = site.id.toLowerCase();
+    if (autoSync[site.id] === true || (schedule.allSites && enabledSet.has(id))) {
+      picked.push({ site, required: true });
+    } else if (schedule.allSites && disabledSet.has(id)) {
+      picked.push({ site, required: false });
+    }
+  }
+  return picked;
 }
 
 type PushOutcome = "none" | "unchanged" | "pushed";
@@ -137,9 +169,12 @@ async function syncPtTools(
   }
   const autoSync = await deps.getAutoSyncMap();
   let enabled: string[] | null = null;
+  let disabled: string[] | null = null;
   if (schedule.allSites) {
     try {
-      enabled = await deps.enabledSites(baseUrl);
+      const ptSites = await deps.ptToolsSites(baseUrl);
+      enabled = ptSites.filter((s) => s.enabled).map((s) => s.name);
+      disabled = ptSites.filter((s) => !s.enabled).map((s) => s.name);
     } catch (error: unknown) {
       if (error instanceof AuthExpiredError) {
         await deps.authExpired(baseUrl);
@@ -149,16 +184,21 @@ async function syncPtTools(
       // 读不到站点列表：这一轮只同步单独打开了「自动同步」的站点，并写明原因（结果里看得到，也会发通知）
       out.error = t("sync.enabledSitesFailed", deps.errorText(error));
       enabled = null;
+      disabled = null;
     }
   }
-  const sites = pickSites(deps.sites, schedule, autoSync, enabled);
+  // 推没启用的站点要 pt-tools 认 keep_enabled：旧版本会把站点启用，那就照旧只推已启用的
+  if (disabled !== null && disabled.length > 0 && !(await deps.keepEnabledSupported(baseUrl))) {
+    disabled = null;
+  }
+  const sites = pickSites(deps.sites, schedule, autoSync, enabled, disabled);
   if (sites.length === 0) {
     if (!out.error) {
       out.skipped = t("sync.skipNoSites");
     }
     return out;
   }
-  for (const site of sites) {
+  for (const { site, required } of sites) {
     let outcome: PushOutcome;
     try {
       outcome = await deps.withPushLock(async (): Promise<PushOutcome> => {
@@ -170,7 +210,7 @@ async function syncPtTools(
         if ((await deps.getHash(site.id)) === hash) {
           return "unchanged";
         }
-        await deps.pushCookie(baseUrl, site, cookie);
+        await deps.pushCookie(baseUrl, site, cookie, { keepEnabled: !required });
         await deps.recordPushed(site.id, hash, deps.now().toISOString());
         return "pushed";
       });
@@ -187,9 +227,19 @@ async function syncPtTools(
       out.unchanged += 1;
     } else if (outcome === "pushed") {
       out.synced.push(site.id);
-    } else {
+    } else if (required) {
       missing.push(site.name);
     }
+  }
+  // 挑出来的只有没启用、浏览器里又都没有 Cookie 的站点：和「没有要同步的站点」一样写明，不当成一次成功的同步
+  if (
+    out.synced.length === 0 &&
+    out.unchanged === 0 &&
+    out.failed.length === 0 &&
+    missing.length === 0 &&
+    !out.error
+  ) {
+    out.skipped = t("sync.skipNoSites");
   }
   return out;
 }

@@ -211,6 +211,8 @@ export interface SyncSiteCredentialPayload {
   api_key?: string;
   passkey?: string;
   last_visit_at?: string;
+  /** true：不改站点的启用状态，停用的站点只存凭据（定时同步推没启用的站点时用） */
+  keep_enabled?: boolean;
 }
 
 export interface BatchSyncSitesPayload {

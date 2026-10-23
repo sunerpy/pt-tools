@@ -36,10 +36,10 @@ Sites that use an API key or a passkey (M-Team, Rousi Pro) cannot be synced by t
 
 Scheduled sync (定时同步) in Settings syncs on an interval (10–1440 minutes, 60 by default) while the browser is open, without opening the sites:
 
-- By default it syncs only the sites with Auto-sync Cookie turned on. With Sync every site enabled in pt-tools (同步 pt-tools 里已启用的全部站点) ticked, every cookie site already enabled in pt-tools is synced. A scheduled sync never enables a new site for you.
+- By default it syncs only the sites with Auto-sync Cookie turned on. With Sync every site signed in on this browser (同步浏览器里登录着的全部站点) ticked, every site with a usable cookie in this browser is synced. For a site that is not enabled in pt-tools, only the cookie is saved and the site stays disabled: a scheduled sync never enables a site for you. In My sites the row reads Cookie saved, not enabled (Cookie 已存，待启用); enable the site in the pt-tools site list to use it. When the connected pt-tools is an older version, only the sites already enabled in pt-tools are synced.
 - Only sites whose cookies changed are pushed: every push makes pt-tools refresh the site and check its sign-in once, so unchanged cookies are not pushed again. Choosing Sync always pushes.
 - With CookieCloud below turned on, the same run also uploads to CookieCloud.
-- Sites that should be synced but have no usable cookie in this browser (signed out, incomplete or expired) are not pushed, and the result lists them by name. Sign in to them in the browser and the next run syncs them.
+- Sites that should be synced but have no usable cookie in this browser (signed out, incomplete or expired) are not pushed, and the result lists them by name. Sign in to them in the browser and the next run syncs them. Sites that are disabled in pt-tools and have no cookie in this browser are not listed.
 - The result of each run is shown under the settings, and the extension shows a system notification when a run has a problem the previous one did not have (for example the pt-tools sign-in expired, a site could not be pushed, or a site has no usable cookie).
 - Sync now (立即同步一次) runs once right away with the same rules. When a site was not synced, has no usable cookie, or pt-tools is not connected, the message says the run had problems; the result below has the details.
 
