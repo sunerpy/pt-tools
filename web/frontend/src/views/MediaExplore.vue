@@ -151,14 +151,33 @@ onMounted(load);
             : ds.state.value === 'zero'
               ? '没有搜到'
               : ds.state.value === 'empty'
-                ? '列表是空的'
+                ? 'TMDB 这一页没有内容'
                 : ''
         "
         :sub="
           ds.errorText.value ||
-          (ds.state.value === 'zero' ? '换个名字试试，中文名、英文名都可以' : '')
+          (list === 'search' && !searched
+            ? '电影或剧集的名字都行，中文名、英文名都可以'
+            : ds.state.value === 'zero'
+              ? '换个名字试试，中文名、英文名都可以'
+              : ds.state.value === 'empty'
+                ? 'TMDB 暂时没有返回内容，可以过一会儿再刷新，或者换成搜索'
+                : '')
         "
-        data-testid="ex-state" />
+        data-testid="ex-state">
+        <!--
+          趋势、热门是 TMDB 给的只读列表：空了不是「添加第一条记录」能解决的，给一个刷新。
+          组件默认的副标题是给增删改列表写的，这里不能漏到页面上。
+        -->
+        <template
+          v-if="ds.state.value === 'error' || (list !== 'search' && ds.state.value === 'empty')"
+          #action>
+          <el-button size="small" data-testid="ex-reload" @click="load">
+            <PtIcon name="refresh-cw" :size="14" />
+            <span>{{ ds.state.value === "error" ? "重试" : "刷新" }}</span>
+          </el-button>
+        </template>
+      </PtDataState>
       <div v-else class="ex-grid" data-testid="ex-grid">
         <div v-for="it in items" :key="it.id" class="ex-card" :data-testid="`ex-item-${it.id}`">
           <div class="ex-card__poster">

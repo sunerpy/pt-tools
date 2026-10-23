@@ -264,6 +264,26 @@ describe("命令回复与助手回复", () => {
     expect(q("nt-group-reply")!.textContent).toContain("/status 状态概览");
   });
 
+  it("事件目录能按名称或类型搜：只留匹配的事件和它们的组，搜不到时给清空", async () => {
+    await mountPage();
+    typeInto("nt-event-search", "status");
+    await vi.waitFor(() => expect(q("nt-group-notify")).toBeNull());
+    expect(q("nt-group-reply")!.textContent).toContain("/status 状态概览");
+
+    typeInto("nt-event-search", "合并");
+    await vi.waitFor(() => expect(q("nt-group-reply")).toBeNull());
+    expect(q("nt-group-notify")!.textContent).toContain("RSS 合并通知");
+    expect(q("nt-group-notify")!.textContent).not.toContain("RSS 命中过滤规则");
+
+    typeInto("nt-event-search", "没有这个事件");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("没有匹配的事件"));
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent?.trim() === "清空")!
+      .click();
+    await vi.waitFor(() => expect(q("nt-group-notify")).not.toBeNull());
+    expect(q("nt-group-reply")).not.toBeNull();
+  });
+
   it("只有正文的回复：没有标题框、标题变量与预览里的标题，保存只交正文", async () => {
     await mountPage();
     q("nt-event-reply.status")!.click();

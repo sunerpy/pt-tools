@@ -66,22 +66,20 @@ const ALL_COLUMN_KEYS = [
   "category",
   "tags",
 ];
+/*
+ * 默认只开判断一个任务要不要动手时真正要看的几列。以前十五列全开，表宽两千多，
+ * 1440 屏上右栏只看得到「标题 · 进度 · 做种数 · 连接数 · 大小」，速率、分享率、状态都要横着滚才找得到。
+ * 其余列还在「显示列」里，勾上就回来；已经改过列的用户按他们存下的来（只有改过才会存）。
+ */
 const DEFAULT_VISIBLE_COLUMNS = [
   "status_bar",
   "title",
   "progress",
-  "seeds",
-  "connections",
   "size",
   "upload_speed",
   "download_speed",
-  "added_at",
-  "completed_at",
   "ratio",
   "state",
-  "eta",
-  "category",
-  "tags",
 ];
 
 const isMobile = useIsMobile();
@@ -478,8 +476,8 @@ const densityOptions = [
 ];
 
 const detailModeOptions = [
-  { label: "侧边", value: "drawer" },
-  { label: "下方", value: "inline" },
+  { label: "侧边抽屉", value: "drawer" },
+  { label: "表格下方", value: "inline" },
 ];
 
 /* 视图范围与渲染方式原先是侧栏里的两个 el-switch，收起侧栏就摸不到，
@@ -491,7 +489,7 @@ const scopeOptions = [
 
 const renderOptions = [
   { label: "常规", value: false },
-  { label: "虚拟", value: true },
+  { label: "虚拟列表", value: true },
 ];
 
 function clearFilters() {
@@ -1679,22 +1677,62 @@ function toggleSidebar() {
       </el-tooltip>
 
       <template #right>
-        <el-tooltip content="行高" placement="bottom">
-          <el-segmented v-model="tableDensity" class="pt-seg" :options="densityOptions" />
-        </el-tooltip>
-        <el-tooltip content="详情展示位置" placement="bottom">
-          <el-segmented v-model="detailMode" class="pt-seg" :options="detailModeOptions" />
-        </el-tooltip>
-        <el-tooltip content="数据范围" placement="bottom">
-          <el-segmented v-model="showAllTasks" class="pt-seg" :options="scopeOptions" />
-        </el-tooltip>
-        <el-tooltip content="列表渲染方式，仅全部范围可选" placement="bottom">
-          <el-segmented
-            v-model="useVirtualList"
-            class="pt-seg"
-            :options="renderOptions"
-            :disabled="!showAllTasks" />
-        </el-tooltip>
+        <!--
+          画板 18 的 bar-64 上是一枚 chip「视图」。以前这里平铺四组没有组名的分段
+          （紧凑/标准、侧边/下方、分页/全部、常规/虚拟），要悬停才知道各管什么；
+          分页时「虚拟」还亮着选中色，可它只在「全部」下才起作用。现在收进一个面板，每组带名字，
+          渲染方式只在「全部」下出现。
+        -->
+        <el-popover placement="bottom-end" trigger="click" :width="276">
+          <template #reference>
+            <el-button size="small" data-testid="hub-view-btn">
+              <PtIcon name="sliders-horizontal" :size="14" /><span>视图</span>
+            </el-button>
+          </template>
+          <div class="hub__view" data-testid="hub-view-panel">
+            <div class="hub__view-row">
+              <span class="hub__view-k">行高</span>
+              <el-segmented
+                v-model="tableDensity"
+                class="pt-seg"
+                size="small"
+                :options="densityOptions" />
+            </div>
+            <div class="hub__view-row">
+              <span class="hub__view-k">任务详情</span>
+              <el-segmented
+                v-model="detailMode"
+                class="pt-seg"
+                size="small"
+                :options="detailModeOptions" />
+            </div>
+            <div class="hub__view-row">
+              <span class="hub__view-k">数据范围</span>
+              <el-segmented
+                v-model="showAllTasks"
+                class="pt-seg"
+                size="small"
+                :options="scopeOptions"
+                data-testid="hub-scope-seg" />
+            </div>
+            <div v-if="showAllTasks" class="hub__view-row">
+              <span class="hub__view-k">渲染方式</span>
+              <el-segmented
+                v-model="useVirtualList"
+                class="pt-seg"
+                size="small"
+                :options="renderOptions"
+                data-testid="hub-render-seg" />
+            </div>
+            <p class="hub__view-tip">
+              {{
+                showAllTasks
+                  ? "「全部」一次取回所有任务；任务多时用虚拟列表，滚动更顺"
+                  : "「分页」按页取任务；要一次看全部时切到「全部」"
+              }}
+            </p>
+          </div>
+        </el-popover>
         <!-- 画板 38 的 pop-col 是 260 宽（原来写成 264） -->
         <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
         <el-tooltip content="导出本页为 CSV" placement="bottom">
@@ -1707,43 +1745,47 @@ function toggleSidebar() {
             <PtIcon name="file-down" :size="15" />
           </button>
         </el-tooltip>
-        <el-popover placement="bottom-end" :width="260" trigger="click">
-          <template #reference>
-            <button type="button" class="hub__ico" aria-label="显示列">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="hub__cols-head">
-            <span>显示列</span>
-            <el-button text type="primary" size="small" @click="restoreDefaultColumns">
-              恢复默认
-            </el-button>
-          </div>
-          <el-checkbox-group v-model="visibleColumns" class="hub__cols">
-            <el-checkbox
-              v-for="item in columnOptions"
-              :key="item.value"
-              :value="item.value"
-              :label="item.label" />
-          </el-checkbox-group>
-          <div class="hub__cols-head">
-            <span>拖拽排序</span>
-          </div>
-          <div class="hub__order">
-            <div
-              v-for="columnKey in columnOrder"
-              :key="columnKey"
-              class="hub__order-item"
-              :class="{ 'is-off': !visibleColumns.includes(columnKey) }"
-              draggable="true"
-              @dragstart="onColumnDragStart(columnKey)"
-              @dragover.prevent
-              @drop="onColumnDrop(columnKey)">
-              <PtIcon name="grip-vertical" :size="13" />
-              <span>{{ getColumnLabel(columnKey) }}</span>
-            </div>
-          </div>
-        </el-popover>
+        <el-tooltip content="显示列" placement="bottom">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" :width="260" trigger="click">
+              <template #reference>
+                <button type="button" class="hub__ico" aria-label="显示列">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="hub__cols-head">
+                <span>显示列</span>
+                <el-button text type="primary" size="small" @click="restoreDefaultColumns">
+                  恢复默认
+                </el-button>
+              </div>
+              <el-checkbox-group v-model="visibleColumns" class="hub__cols">
+                <el-checkbox
+                  v-for="item in columnOptions"
+                  :key="item.value"
+                  :value="item.value"
+                  :label="item.label" />
+              </el-checkbox-group>
+              <div class="hub__cols-head">
+                <span>拖拽排序</span>
+              </div>
+              <div class="hub__order">
+                <div
+                  v-for="columnKey in columnOrder"
+                  :key="columnKey"
+                  class="hub__order-item"
+                  :class="{ 'is-off': !visibleColumns.includes(columnKey) }"
+                  draggable="true"
+                  @dragstart="onColumnDragStart(columnKey)"
+                  @dragover.prevent
+                  @drop="onColumnDrop(columnKey)">
+                  <PtIcon name="grip-vertical" :size="13" />
+                  <span>{{ getColumnLabel(columnKey) }}</span>
+                </div>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
       </template>
     </PtToolbar>
 
@@ -2251,14 +2293,19 @@ function toggleSidebar() {
                     </span>
                   </template>
                 </span>
+                <!--
+                  任务不到最小的一页（50）时不画分页：只有一条任务也摆出每页条数、页码与跳页，比数据本身还占地方。
+                  手机上收成「上一页 · 页码 · 下一页」，整套放不下 390 宽。
+                -->
                 <el-pagination
-                  v-if="!showAllTasks"
+                  v-if="!showAllTasks && total > 50"
                   v-model:current-page="page"
                   v-model:page-size="pageSize"
                   class="pt-pager"
                   :total="total"
                   :page-sizes="[50, 100, 200]"
-                  layout="sizes, prev, pager, next, jumper"
+                  :pager-count="isMobile ? 5 : 7"
+                  :layout="isMobile ? 'prev, pager, next' : 'sizes, prev, pager, next, jumper'"
                   @size-change="loadTorrents"
                   @current-change="loadTorrents" />
               </div>
@@ -2609,10 +2656,15 @@ function toggleSidebar() {
   background: var(--pt-p);
 }
 
-/* 内缩已经由 .hub__layout 给了，这里再加一层 padding 会让 p-grid 缩到 788 以内 */
+/*
+ * 内缩已经由 .hub__layout 给了，这里再加一层 padding 会让 p-grid 缩到 788 以内。
+ * 高度按内容来，不再 flex: 1 撑满：左栏三张卡把这一栏拉到一屏多高，只有一条任务时
+ * 任务卡也被拉成半屏空白，「速率」「这一页的口径」被挤到首屏下沿。任务多时表格自己有
+ * max-height（按视口算），卡的高度照样到屏底。
+ */
 .hub__main {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: var(--pt-space-3);
   min-width: 0;
@@ -2849,9 +2901,36 @@ function toggleSidebar() {
   overflow-wrap: anywhere;
 }
 
+/* 「视图」面板：一组一行，左边组名、右边分段 */
+.hub__view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.hub__view-row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hub__view-k {
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t2);
+}
+
+.hub__view-tip {
+  margin: var(--pt-space-1) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t3);
+}
+
 /* ---------- 表格区 ---------- */
 .hub__panel {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
 }
 

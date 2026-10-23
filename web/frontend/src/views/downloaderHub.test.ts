@@ -105,8 +105,12 @@ vi.mock("element-plus", async (orig) => {
 
 let view: MountedView | null = null;
 
-async function mountHub() {
+async function mountHub(opts: { columns?: string[] } = {}) {
   localStorage.clear();
+  // 默认列只开常看的几列；要测的列不在默认里时，像用户在「显示列」里勾过一样存一份
+  if (opts.columns) {
+    localStorage.setItem("downloader-hub-visible-columns-v1", JSON.stringify(opts.columns));
+  }
   api.list.mockResolvedValue({
     items: [row("a1", "任务甲"), row("b2", "任务乙")],
     total: 2,
@@ -214,7 +218,7 @@ describe("下载器 Web UI：删除先确认", () => {
  */
 describe("下载器 Web UI：未完成任务的完成日期", () => {
   it("completed_at = -1 显示「-」，不显示 1970；添加日期照常显示", async () => {
-    await mountHub();
+    await mountHub({ columns: ["title", "progress", "added_at", "completed_at"] });
     const body = document.querySelector(".el-table__body")!;
     expect(body.textContent).not.toContain("1970");
     expect(body.textContent).not.toContain("1969");
@@ -228,5 +232,40 @@ describe("下载器 Web UI：未完成任务的完成日期", () => {
     };
     expect(cell("添加日期")).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(cell("完成日期")).toBe("-");
+  });
+});
+
+describe("下载器 Web UI：默认列与视图面板", () => {
+  it("没改过列时只开常看的几列：速率、分享率、状态在，做种数、连接数、日期不在", async () => {
+    await mountHub();
+    const heads = [...document.querySelectorAll<HTMLElement>(".el-table__header th")].map(
+      (th) => th.textContent?.trim() ?? "",
+    );
+    for (const want of ["标题", "进度", "大小", "上传速度", "下载速度", "分享率", "状态", "操作"]) {
+      expect(heads).toContain(want);
+    }
+    for (const gone of ["做种数", "连接数", "添加日期", "完成日期", "ETA", "分类", "标签"]) {
+      expect(heads).not.toContain(gone);
+    }
+  });
+
+  it("「视图」面板里每组带名字；分页时没有渲染方式，切到「全部」才出现", async () => {
+    await mountHub();
+    buttonByText("视图").click();
+    const panel = await vi.waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-testid=hub-view-panel]");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    for (const k of ["行高", "任务详情", "数据范围"]) expect(panel.textContent).toContain(k);
+    expect(document.querySelector("[data-testid=hub-render-seg]")).toBeNull();
+
+    const all = [...panel.querySelectorAll<HTMLElement>(".el-segmented__item")].find(
+      (el) => el.textContent?.trim() === "全部",
+    )!;
+    all.querySelector<HTMLInputElement>("input")?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=hub-render-seg]")).toBeTruthy(),
+    );
   });
 });

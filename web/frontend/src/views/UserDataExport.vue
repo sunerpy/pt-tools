@@ -56,7 +56,8 @@ const exportConfig = ref({
   title: "我的 PT 数据统计",
   showSiteDetails: true,
   selectedSites: [] as string[],
-  blurUsernames: false,
+  /* 用户名也默认打码：只遮站点名、图标而用户名明文，看上去像已经脱敏了，其实图上还写着你在各站的名字 */
+  blurUsernames: true,
   blurSiteNames: true,
   blurLogos: true,
   maxSitesToShow: 10,
@@ -67,7 +68,7 @@ const exportConfig = ref({
 
 /*
  * 样式与配色记在浏览器里（每个样式记住自己上次用的配色），下次打开导出页还是这一套。
- * 打码开关不记：每次都从默认的「站点名与图标打码」开始，免得上次关掉的打码这次被忘了。
+ * 打码开关不记：每次都从默认的「站点名、图标与用户名都打码」开始，免得上次关掉的打码这次被忘了。
  */
 const posterPrefs = useStorage<{ style: PosterStyleId; colorways: Record<string, string> }>(
   "pt-tools:export-poster",
@@ -122,14 +123,20 @@ const allSites = computed(() => {
   return aggregatedStats.value.perSiteStats.map((s) => s.site);
 });
 
+/*
+ * 入图的站点就是勾上的那些。以前一个都不勾时悄悄换成前 10 个：计数写着 0 / N、点的是「清空」，
+ * 导出的图上却照样列着十个站 —— 界面说的和图上画的不一致。现在不勾就是不列。
+ */
 const selectedSiteStats = computed(() => {
   if (!aggregatedStats.value) return [];
   const sites = exportConfig.value.selectedSites;
-  if (sites.length === 0) {
-    return aggregatedStats.value.perSiteStats.slice(0, exportConfig.value.maxSitesToShow);
-  }
   return aggregatedStats.value.perSiteStats.filter((s) => sites.includes(s.site));
 });
+
+/** 回到打开页面时的默认：上传最多的前 N 个 */
+function selectTopSites() {
+  exportConfig.value.selectedSites = allSites.value.slice(0, exportConfig.value.maxSitesToShow);
+}
 
 /* 打码开关摘要挂在区块条右端：三个开关折起来时也能一眼看出隐私档位 */
 const maskNote = computed(() => {
@@ -199,9 +206,7 @@ async function loadData() {
   }
   aggregatedStats.value = data;
   void loadIncrements();
-  if (exportConfig.value.selectedSites.length === 0) {
-    exportConfig.value.selectedSites = allSites.value.slice(0, exportConfig.value.maxSitesToShow);
-  }
+  if (exportConfig.value.selectedSites.length === 0) selectTopSites();
   logos.value = await loadPosterLogos(allSites.value);
 }
 
@@ -423,10 +428,19 @@ onMounted(() => {
                 <el-button size="small" @click="exportConfig.selectedSites = [...allSites]">
                   全选
                 </el-button>
-                <el-button size="small" @click="exportConfig.selectedSites = []">清空</el-button>
+                <el-button size="small" data-testid="ex-sites-top" @click="selectTopSites">
+                  前 {{ exportConfig.maxSitesToShow }} 个
+                </el-button>
+                <el-button
+                  size="small"
+                  data-testid="ex-sites-clear"
+                  @click="exportConfig.selectedSites = []">
+                  清空
+                </el-button>
               </div>
               <div class="field-tip">
-                一个都不选时按默认取前 {{ exportConfig.maxSitesToShow }} 个；图上按上传从多到少排
+                一个都不勾时图上不列逐站明细；打开页面时默认勾上传最多的前
+                {{ exportConfig.maxSitesToShow }} 个，图上按上传从多到少排
               </div>
             </div>
           </template>

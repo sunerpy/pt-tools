@@ -255,6 +255,7 @@ watch(
       class="pt-grid"
       :class="tableClassName()"
       :max-height="props.maxHeight"
+      scrollbar-always-on
       :row-key="(row: DownloaderTorrentItem) => `${row.downloader_id}:${row.task_id}`"
       :row-class-name="rowClassName"
       @cell-mouse-enter="onCellMouseEnter"
@@ -303,7 +304,7 @@ watch(
           v-else-if="columnKey === 'progress' && isVisible('progress')"
           label="进度"
           prop="progress"
-          width="170"
+          width="150"
           sortable="custom">
           <template #default="{ row }">
             <div class="pg">
@@ -330,7 +331,7 @@ watch(
           v-else-if="columnKey === 'size' && isVisible('size')"
           label="大小"
           prop="size"
-          width="120"
+          width="104"
           align="right"
           sortable="custom">
           <template #default="{ row }">{{ formatSize(row.size) }}</template>
@@ -339,7 +340,7 @@ watch(
           v-else-if="columnKey === 'upload_speed' && isVisible('upload_speed')"
           label="上传速度"
           prop="upload_speed"
-          width="130"
+          width="112"
           align="right"
           sortable="custom">
           <template #default="{ row }">{{ formatSize(row.upload_speed) }}/s</template>
@@ -348,7 +349,7 @@ watch(
           v-else-if="columnKey === 'download_speed' && isVisible('download_speed')"
           label="下载速度"
           prop="download_speed"
-          width="130"
+          width="112"
           align="right"
           sortable="custom">
           <template #default="{ row }">{{ formatSize(row.download_speed) }}/s</template>
@@ -357,7 +358,7 @@ watch(
           v-else-if="columnKey === 'added_at' && isVisible('added_at')"
           label="添加日期"
           prop="added_at"
-          width="170"
+          width="136"
           sortable="custom"
           class-name="pt-cell-muted">
           <template #default="{ row }">
@@ -370,7 +371,7 @@ watch(
           v-else-if="columnKey === 'completed_at' && isVisible('completed_at')"
           label="完成日期"
           prop="completed_at"
-          width="170"
+          width="136"
           sortable="custom"
           class-name="pt-cell-muted">
           <template #default="{ row }">
@@ -392,7 +393,7 @@ watch(
           v-else-if="columnKey === 'state' && isVisible('state')"
           label="状态"
           prop="state"
-          width="120"
+          width="104"
           sortable="custom"
           class-name="pt-cell-1line"
           :show-overflow-tooltip="false" />
@@ -418,7 +419,8 @@ watch(
           sortable="custom"
           :show-overflow-tooltip="false" />
       </template>
-      <el-table-column label="操作" width="92" class-name="action-column pt-cell-act">
+      <!-- 列多时表格要横着滚：操作列钉在右边，滚到哪都点得到「详情」 -->
+      <el-table-column label="操作" width="92" fixed="right" class-name="action-column pt-cell-act">
         <template #default="{ row }">
           <el-button link type="primary" @click="emitDetail(row)">
             <PtIcon name="info" :size="14" /><span>详情</span>

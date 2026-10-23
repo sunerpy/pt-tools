@@ -296,9 +296,9 @@ function getConfNameByConfId(confId?: number) {
 
       <PtPanel
         v-loading="loading"
-        title="待绑定绑定码"
+        title="待绑定"
         icon="key-round"
-        :count="`${pendingBindings.length} 条`"
+        :count="`${pendingBindings.length} 个绑定码`"
         padding="none">
         <el-table
           v-if="!isMobile"
@@ -307,7 +307,11 @@ function getConfNameByConfId(confId?: number) {
           row-key="code"
           style="width: 100%">
           <template #empty>
-            <PtDataState :state="state" dense :sub="pendingSub">
+            <PtDataState
+              :state="state"
+              dense
+              :title="state === 'empty' ? '没有待使用的绑定码' : ''"
+              :sub="pendingSub">
               <template v-if="state === 'error'" #action>
                 <el-button size="small" @click="loadData">
                   <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
@@ -366,7 +370,11 @@ function getConfNameByConfId(confId?: number) {
         16px 的链接图标在手机上根本点不准。
       -->
         <div v-else class="cards">
-          <PtDataState v-if="!pendingBindings.length" :state="state" :sub="pendingSub">
+          <PtDataState
+            v-if="!pendingBindings.length"
+            :state="state"
+            :title="state === 'empty' ? '没有待使用的绑定码' : ''"
+            :sub="pendingSub">
             <template v-if="state === 'error'" #action>
               <el-button size="small" @click="loadData">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
@@ -420,7 +428,11 @@ function getConfNameByConfId(confId?: number) {
           row-key="id"
           style="width: 100%">
           <template #empty>
-            <PtDataState :state="state" dense :sub="activeSub">
+            <PtDataState
+              :state="state"
+              dense
+              :title="state === 'empty' ? '还没有已绑定的用户' : ''"
+              :sub="activeSub">
               <template v-if="state === 'error'" #action>
                 <el-button size="small" @click="loadData">
                   <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
@@ -495,7 +507,11 @@ function getConfNameByConfId(confId?: number) {
         脱离表头的「否」读不出是在说什么，所以换成自解释的「管理员 / 普通」。
       -->
         <div v-else class="cards">
-          <PtDataState v-if="!activeBindings.length" :state="state" :sub="activeSub">
+          <PtDataState
+            v-if="!activeBindings.length"
+            :state="state"
+            :title="state === 'empty' ? '还没有已绑定的用户' : ''"
+            :sub="activeSub">
             <template v-if="state === 'error'" #action>
               <el-button size="small" @click="loadData">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>

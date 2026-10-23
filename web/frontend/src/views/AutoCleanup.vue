@@ -872,8 +872,16 @@ async function executeClean() {
 
       <div class="pt-col">
         <PtPanel title="做种竞争度监控" icon="users" padding="none">
+          <!-- 和「自动删种」同一套：状态徽标写明开没开，开关有自己的名字（读屏也读得出来） -->
           <template #actions>
-            <el-switch v-model="form.peer_ratio_enabled" size="small" />
+            <PtStatusPill :tone="form.peer_ratio_enabled ? 'ok' : 'neutral'" size="sm">
+              {{ form.peer_ratio_enabled ? "运行中" : "未启用" }}
+            </PtStatusPill>
+            <el-switch
+              v-model="form.peer_ratio_enabled"
+              size="small"
+              aria-label="启用做种竞争度监控"
+              data-testid="ac-peer-switch" />
           </template>
 
           <el-form label-position="top" class="pt-form" :disabled="!form.peer_ratio_enabled">
@@ -907,7 +915,9 @@ async function executeClean() {
           </el-form>
 
           <template #footer>
-            <span class="pt-foot-note">与自动删种共用同一个保存按钮的配置表</span>
+            <span class="pt-foot-note"
+              >和自动删种存在同一份设置里：哪个「保存设置」都会把两张卡的修改一起保存</span
+            >
             <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
               <PtIcon name="save" :size="14" /><span>保存设置</span>
             </el-button>

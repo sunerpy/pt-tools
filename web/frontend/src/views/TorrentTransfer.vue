@@ -33,8 +33,11 @@ import {
 } from "@/utils/transfer";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
 type Tab = "jobs" | "maps" | "rules";
+const router = useRouter();
+
 const TABS: { label: string; value: Tab }[] = [
   { label: "任务", value: "jobs" },
   { label: "路径映射", value: "maps" },
@@ -378,7 +381,30 @@ onBeforeUnmount(() => {
         v-if="!jobs.length"
         :state="jobsDS.state.value"
         :title="jobsDS.error.value ? '' : '还没有转移任务'"
-        :sub="jobsDS.errorText.value || '在「下载器 Web UI」里勾选种子，点「转移到…」'" />
+        :sub="
+          jobsDS.errorText.value ||
+          (downloaders.length < 2 && !downloadersFailed
+            ? '至少要有两台启用的下载器：先到「下载器设置」加上第二台'
+            : '在「下载器 Web UI」里勾选种子，点「转移到…」')
+        ">
+        <!-- 下一步直接给入口：只有一台下载器时去加第二台，够两台时去勾种子 -->
+        <template v-if="!jobsDS.error.value" #action>
+          <el-button
+            v-if="downloaders.length < 2 && !downloadersFailed"
+            size="small"
+            data-testid="tf-go-downloaders"
+            @click="router.push('/downloaders')">
+            <PtIcon name="server" :size="14" /><span>去下载器设置</span>
+          </el-button>
+          <el-button
+            v-else
+            size="small"
+            data-testid="tf-go-hub"
+            @click="router.push('/downloader-hub')">
+            <PtIcon name="layout-grid" :size="14" /><span>去下载器 Web UI</span>
+          </el-button>
+        </template>
+      </PtDataState>
       <el-table
         v-else-if="!isMobile"
         :data="jobs"

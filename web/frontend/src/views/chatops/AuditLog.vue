@@ -11,6 +11,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { useSearchInput } from "@/composables/useSearchInput";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -261,7 +262,10 @@ const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataSta
 const stateSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return errorText.value;
   if (state.value === "partial") return "统计读数没拿到，日志列表本身确实是空的";
-  return hasFilter.value ? "换个时间段或清掉筛选再看" : "机器人执行过的每条命令都会记录在这里";
+  // 记的不只是机器人命令：API 令牌、qB 兼容入口、MCP、远程设备、AI 助手的写操作也在这里（见 CHANNEL_LABELS）
+  return hasFilter.value
+    ? "换个时间段或清掉筛选再看"
+    : "经 ChatOps、API 令牌、qB 兼容入口、MCP、远程设备与 AI 助手做的操作（包括被拒绝的）都会记在这里";
 });
 
 /** 「09-18 12:03」这种短时间：摘要行要在一行里放下两个时间点，整段日期太长 */
@@ -409,6 +413,9 @@ function handleFilterChange() {
   fetchAuditLogs();
 }
 
+/* 搜索框：停下 400ms 自动查，回车或清空立刻查（以前只认回车） */
+const commandSearch = useSearchInput(() => filters.command, handleFilterChange);
+
 function handlePageChange(page: number) {
   pagination.page = page;
   fetchAuditLogs();
@@ -543,8 +550,8 @@ function exportCsv() {
         placeholder="筛选命令、触发用户…"
         clearable
         class="f-search"
-        @keyup.enter="handleFilterChange"
-        @clear="handleFilterChange">
+        @keyup.enter="commandSearch.now"
+        @clear="commandSearch.now">
         <template #prefix>
           <PtIcon name="search" :size="14" />
         </template>
@@ -871,7 +878,7 @@ function exportCsv() {
       <PtPanel class="pt-cards__full" title="保留与清理" icon="archive">
         <ul class="audit-keep">
           <li>
-            审计记录写在本机库的 <code>action_audit</code> 表里，<strong>没有自动清理</strong>：
+            审计记录写在本机数据库的 <code>action_audit</code> 表里，<strong>没有自动清理</strong>：
             <code>pt-tools clean</code> 只清日志轮转备份、暂存目录与旧备份，不动这张表。
           </li>
           <li>

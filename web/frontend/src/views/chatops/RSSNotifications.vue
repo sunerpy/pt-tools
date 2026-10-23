@@ -11,6 +11,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { useSearchInput } from "@/composables/useSearchInput";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
@@ -62,6 +63,8 @@ const filters = reactive({
 
 /** 导出当前这一页（画板 bar-64 的 bi-file-down）。接口分页，手上只有这一页的行 */
 function exportCsv() {
+  // 按钮在空页时已置灰；这里再挡一次，免得下载一个只有表头的 CSV
+  if (!logs.value.length) return;
   const head = ["时间", "站点", "种子 ID", "类型", "通道", "结果", "尝试"];
   const lines = [head.join(",")];
   for (const l of logs.value) {
@@ -328,6 +331,10 @@ function handleFilterChange() {
   fetchLogs();
 }
 
+/* 两个文本筛选：停下 400ms 自动查，回车或清空立刻查（以前只认回车） */
+const qSearch = useSearchInput(() => filters.q, handleFilterChange);
+const rssIdSearch = useSearchInput(() => String(filters.rss_id ?? ""), handleFilterChange);
+
 function handlePageChange(p: number) {
   pagination.page = p;
   fetchLogs();
@@ -376,8 +383,8 @@ onBeforeUnmount(() => {
         clearable
         class="f-q"
         data-testid="rssnotify-search"
-        @keyup.enter="handleFilterChange"
-        @clear="handleFilterChange">
+        @keyup.enter="qSearch.now"
+        @clear="qSearch.now">
         <template #prefix>
           <PtIcon name="search" :size="14" />
         </template>
@@ -402,8 +409,8 @@ onBeforeUnmount(() => {
               placeholder="RSS ID"
               clearable
               size="small"
-              @keyup.enter="handleFilterChange"
-              @clear="handleFilterChange" />
+              @keyup.enter="rssIdSearch.now"
+              @clear="rssIdSearch.now" />
           </label>
           <label class="rn-more__row">
             <span class="rn-more__k">类型</span>
@@ -444,12 +451,16 @@ onBeforeUnmount(() => {
 
       <template #right>
         <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
-        <el-tooltip content="导出本页为 CSV" placement="top">
+        <!-- 与操作审计页同一做法：这一页没有记录时置灰 -->
+        <el-tooltip
+          :content="logs.length ? '导出本页为 CSV' : '这一页没有可导出的记录'"
+          placement="top">
           <button
             type="button"
             class="pt-band__iconbtn"
             aria-label="导出"
             data-testid="rssnotify-export-btn"
+            :disabled="!logs.length"
             @click="exportCsv">
             <PtIcon name="file-down" :size="15" />
           </button>

@@ -482,9 +482,19 @@ const EXPECT = {
             if (raw.includes('/api/downloader-torrents/')) seen.push(raw);
             return realFetch(input, init);
           };
-          const pickMode = (label) => {
-            const el = [...document.querySelectorAll('.el-segmented__item')]
+          /*
+           * 行高、详情位置、数据范围收进了工具栏的「视图」面板（以前是四组没有组名的分段平铺在带上）。
+           * 面板第一次点开才渲染，所以找不到档位时先点开它再找。
+           */
+          const pickMode = async (label) => {
+            const find = () => [...document.querySelectorAll('.el-segmented__item')]
               .find((b) => (b.textContent ?? '').trim() === label);
+            let el = find();
+            if (!el) {
+              document.querySelector('[data-testid=hub-view-btn]')?.click();
+              await wait(400);
+              el = find();
+            }
             if (!el) return false;
             el.click();
             return true;
@@ -500,7 +510,7 @@ const EXPECT = {
           const esc = () => document.dispatchEvent(
             new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
           );
-          if (!pickMode('侧边')) { window.fetch = realFetch; return 'no-mode-seg'; }
+          if (!(await pickMode('侧边抽屉'))) { window.fetch = realFetch; return 'no-mode-seg'; }
           await wait(400);
           if (!(await openRow())) { window.fetch = realFetch; return 'no-detail-btn'; }
           const drawer = document.querySelector('.hub__drawer');
@@ -508,7 +518,7 @@ const EXPECT = {
           const dtext = drawer ? (drawer.textContent ?? '').replace(/\\s+/g, ' ') : '';
           esc();
           await wait(500);
-          if (!pickMode('下方')) { window.fetch = realFetch; return 'no-mode-seg-2'; }
+          if (!(await pickMode('表格下方'))) { window.fetch = realFetch; return 'no-mode-seg-2'; }
           await wait(400);
           if (!(await openRow())) { window.fetch = realFetch; return 'no-detail-btn-2'; }
           const inline = document.querySelector('.hub__detail');
@@ -1357,7 +1367,7 @@ const ALLOWED_GAPS = {
     "画板 30 的筛选是一排 26 高的 chip（全部/正常/异常/已禁用 各带计数）。" +
     "落地现在是「已启用/全部」分段 + 三枚状态 chip（正常/异常/已禁用，带计数）+ 搜索 + " +
     "「批量」菜单 + 新增站点，两行共 81 —— 比画板高，但已经从 240 压下来，且入口一个没少。" +
-    "还高的那部分是画板移动稿上根本没画的三个入口（探测已启用 / 打开已启用 / 新增站点）；" +
+    "还高的那部分是画板移动稿上根本没画的三个入口（探测启用站点 / 打开启用站点 / 新增站点）；" +
     "「全部」两边也不是一回事：画板那张图是 14 个已配置站点，这个产品的 /api/sites 回的是" +
     "全部 66 个内置定义，所以状态做成可叠加的 chip 而不是画板那种四档互斥分段。",
   "/tasks@375 filterRow":

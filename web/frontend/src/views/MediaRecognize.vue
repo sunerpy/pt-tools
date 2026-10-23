@@ -459,6 +459,169 @@ onMounted(refresh);
 
     <div class="pt-cols">
       <div class="pt-col">
+        <!--
+          识别预览（这一页要做的事）放最前面：1600 以下是单栏，TMDB 与其它来源两张设置卡排在前面时，
+          要先滚过一屏设置才看得到输入框。设置一般只填一次，放后面。
+        -->
+        <PtPanel title="识别预览" icon="scan">
+          <el-form class="pt-form md-form" label-position="top" @submit.prevent>
+            <el-form-item label="标题">
+              <el-input
+                v-model="input.title"
+                placeholder="The.Last.of.Us.S01E01.2023.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX"
+                data-testid="media-title"
+                @keyup.enter="recognize" />
+            </el-form-item>
+            <div class="md-row">
+              <el-form-item label="副标题（可选）">
+                <el-input
+                  v-model="input.subtitle"
+                  placeholder="最后生还者 第一季 第01集 | 中英字幕"
+                  data-testid="media-subtitle" />
+              </el-form-item>
+              <el-form-item label="IMDb 编号或链接（可选）">
+                <el-input v-model="input.imdb" placeholder="tt3581920" data-testid="media-imdb" />
+              </el-form-item>
+            </div>
+            <el-button
+              type="primary"
+              :loading="recognizing"
+              data-testid="media-recognize"
+              @click="recognize">
+              <PtIcon v-if="!recognizing" name="scan" :size="14" /><span>识别</span>
+            </el-button>
+          </el-form>
+
+          <div
+            v-if="recognizeError"
+            class="pt-note pt-note--warn md-fail"
+            data-testid="media-recognize-error">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>识别失败：{{ recognizeError }}。改一下标题或稍后再点「识别」。</span>
+          </div>
+          <div v-if="result" class="md-result" data-testid="media-result">
+            <div class="md-section">
+              <div class="md-label">解析结果</div>
+              <div class="md-summary" data-testid="media-summary">
+                {{ result.summary || "没解析出名字" }}
+                <span v-if="result.meta.name_cn && result.meta.name_en" class="md-sub">{{
+                  result.meta.name_cn
+                }}</span>
+              </div>
+              <div class="md-tags" data-testid="media-tags">
+                <PtTag v-for="t in tags" :key="t">{{ t }}</PtTag>
+              </div>
+              <p v-if="result.rule_hits?.length" class="md-tip" data-testid="media-rule-hits">
+                套用了 {{ result.rule_hits.length }} 条识别词
+              </p>
+            </div>
+
+            <div v-if="result.error" class="pt-note pt-note--warn" data-testid="media-error">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <span>TMDB 没查成：{{ result.error }}</span>
+            </div>
+            <div v-else-if="result.message" class="pt-note" data-testid="media-message">
+              <PtIcon name="info" :size="14" class="pt-note__icon" />
+              <span>{{ result.message }}</span>
+            </div>
+
+            <div v-if="result.match" class="md-match" data-testid="media-match">
+              <img
+                v-if="posterURL(result.match.poster_path)"
+                class="md-poster"
+                :src="posterURL(result.match.poster_path)"
+                :alt="`${result.match.title} 的海报`"
+                loading="lazy" />
+              <div class="md-match__body">
+                <div class="md-match__title">
+                  <a
+                    :href="tmdbPageURL(result.match.media_type, result.match.id)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >{{ itemTitle(result.match) }}</a
+                  >
+                </div>
+                <div class="md-match__meta">
+                  <PtStatusPill tone="ok" size="sm">{{
+                    mediaSourceLabel(result.source)
+                  }}</PtStatusPill>
+                  <span>{{ mediaKindLabel(result.match.media_type) }}</span>
+                  <span v-if="result.match.year">{{ result.match.year }}</span>
+                  <span>TMDB {{ result.match.id }}</span>
+                  <span v-if="result.match.imdb_id">{{ result.match.imdb_id }}</span>
+                </div>
+                <p v-if="result.match.overview" class="md-overview">{{ result.match.overview }}</p>
+              </div>
+            </div>
+
+            <div v-if="result.candidates?.length" class="md-section">
+              <div class="md-label">候选（按匹配程度排序）</div>
+              <div class="md-cands" data-testid="media-candidates">
+                <div
+                  v-for="c in result.candidates"
+                  :key="`${c.media_type}-${c.id}`"
+                  class="md-cand">
+                  <img
+                    v-if="posterURL(c.poster_path, 'w92')"
+                    class="md-poster md-poster--sm"
+                    :src="posterURL(c.poster_path, 'w92')"
+                    :alt="`${c.title} 的海报`"
+                    loading="lazy" />
+                  <div class="md-cand__body">
+                    <a
+                      :href="tmdbPageURL(c.media_type, c.id)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >{{ itemTitle(c) }}</a
+                    >
+                    <div class="md-sub">
+                      {{ mediaKindLabel(c.media_type)
+                      }}<template v-if="c.year"> · {{ c.year }}</template> ·
+                      {{ c.score.toFixed(2) }} 分
+                    </div>
+                  </div>
+                  <el-button
+                    size="small"
+                    :disabled="
+                      correcting ||
+                      (result.match?.id === c.id && result.match?.media_type === c.media_type)
+                    "
+                    :data-testid="`media-pick-${c.media_type}-${c.id}`"
+                    @click="correct(c.id, c.media_type)"
+                    >选这个</el-button
+                  >
+                </div>
+              </div>
+            </div>
+
+            <div class="md-section">
+              <div class="md-label">按 TMDB 编号纠正</div>
+              <div class="md-inline">
+                <el-select v-model="manual.type" class="md-kind" data-testid="media-manual-type">
+                  <el-option label="电影" value="movie" />
+                  <el-option label="剧集" value="tv" />
+                </el-select>
+                <el-input-number
+                  v-model="manual.id"
+                  :min="1"
+                  :controls="false"
+                  placeholder="TMDB 编号"
+                  data-testid="media-manual-id" />
+                <el-button
+                  :loading="correcting"
+                  data-testid="media-manual-save"
+                  @click="correct(manual.id, manual.type)"
+                  >纠正</el-button
+                >
+              </div>
+              <p class="md-tip">
+                编号在 TMDB 网页地址里，如 themoviedb.org/movie/278 的 278。纠正按解析出的名字生效：
+                同名的其它标题（换了分辨率、制作组）也会识别成这一条。
+              </p>
+            </div>
+          </div>
+        </PtPanel>
+
         <PtPanel title="TMDB 设置" icon="key-round">
           <div v-if="loadFailed" class="pt-note pt-note--warn">
             <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
@@ -642,165 +805,6 @@ onMounted(refresh);
             Key；OMDb 给 IMDb、烂番茄与 Metacritic 的评分，在 omdbapi.com 申请（免费的每天 1000
             次）。两个都经上面的代理访问；Key 加密保存，只写不读。豆瓣与 Bangumi 不用 Key。
           </p>
-        </PtPanel>
-
-        <PtPanel title="识别预览" icon="scan">
-          <el-form class="pt-form md-form" label-position="top" @submit.prevent>
-            <el-form-item label="标题">
-              <el-input
-                v-model="input.title"
-                placeholder="The.Last.of.Us.S01E01.2023.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX"
-                data-testid="media-title"
-                @keyup.enter="recognize" />
-            </el-form-item>
-            <div class="md-row">
-              <el-form-item label="副标题（可选）">
-                <el-input
-                  v-model="input.subtitle"
-                  placeholder="最后生还者 第一季 第01集 | 中英字幕"
-                  data-testid="media-subtitle" />
-              </el-form-item>
-              <el-form-item label="IMDb 编号或链接（可选）">
-                <el-input v-model="input.imdb" placeholder="tt3581920" data-testid="media-imdb" />
-              </el-form-item>
-            </div>
-            <el-button
-              type="primary"
-              :loading="recognizing"
-              data-testid="media-recognize"
-              @click="recognize">
-              <PtIcon v-if="!recognizing" name="scan" :size="14" /><span>识别</span>
-            </el-button>
-          </el-form>
-
-          <div
-            v-if="recognizeError"
-            class="pt-note pt-note--warn md-fail"
-            data-testid="media-recognize-error">
-            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-            <span>识别失败：{{ recognizeError }}。改一下标题或稍后再点「识别」。</span>
-          </div>
-          <div v-if="result" class="md-result" data-testid="media-result">
-            <div class="md-section">
-              <div class="md-label">解析结果</div>
-              <div class="md-summary" data-testid="media-summary">
-                {{ result.summary || "没解析出名字" }}
-                <span v-if="result.meta.name_cn && result.meta.name_en" class="md-sub">{{
-                  result.meta.name_cn
-                }}</span>
-              </div>
-              <div class="md-tags" data-testid="media-tags">
-                <PtTag v-for="t in tags" :key="t">{{ t }}</PtTag>
-              </div>
-              <p v-if="result.rule_hits?.length" class="md-tip" data-testid="media-rule-hits">
-                套用了 {{ result.rule_hits.length }} 条识别词
-              </p>
-            </div>
-
-            <div v-if="result.error" class="pt-note pt-note--warn" data-testid="media-error">
-              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-              <span>TMDB 没查成：{{ result.error }}</span>
-            </div>
-            <div v-else-if="result.message" class="pt-note" data-testid="media-message">
-              <PtIcon name="info" :size="14" class="pt-note__icon" />
-              <span>{{ result.message }}</span>
-            </div>
-
-            <div v-if="result.match" class="md-match" data-testid="media-match">
-              <img
-                v-if="posterURL(result.match.poster_path)"
-                class="md-poster"
-                :src="posterURL(result.match.poster_path)"
-                :alt="`${result.match.title} 的海报`"
-                loading="lazy" />
-              <div class="md-match__body">
-                <div class="md-match__title">
-                  <a
-                    :href="tmdbPageURL(result.match.media_type, result.match.id)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    >{{ itemTitle(result.match) }}</a
-                  >
-                </div>
-                <div class="md-match__meta">
-                  <PtStatusPill tone="ok" size="sm">{{
-                    mediaSourceLabel(result.source)
-                  }}</PtStatusPill>
-                  <span>{{ mediaKindLabel(result.match.media_type) }}</span>
-                  <span v-if="result.match.year">{{ result.match.year }}</span>
-                  <span>TMDB {{ result.match.id }}</span>
-                  <span v-if="result.match.imdb_id">{{ result.match.imdb_id }}</span>
-                </div>
-                <p v-if="result.match.overview" class="md-overview">{{ result.match.overview }}</p>
-              </div>
-            </div>
-
-            <div v-if="result.candidates?.length" class="md-section">
-              <div class="md-label">候选（按匹配程度排序）</div>
-              <div class="md-cands" data-testid="media-candidates">
-                <div
-                  v-for="c in result.candidates"
-                  :key="`${c.media_type}-${c.id}`"
-                  class="md-cand">
-                  <img
-                    v-if="posterURL(c.poster_path, 'w92')"
-                    class="md-poster md-poster--sm"
-                    :src="posterURL(c.poster_path, 'w92')"
-                    :alt="`${c.title} 的海报`"
-                    loading="lazy" />
-                  <div class="md-cand__body">
-                    <a
-                      :href="tmdbPageURL(c.media_type, c.id)"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      >{{ itemTitle(c) }}</a
-                    >
-                    <div class="md-sub">
-                      {{ mediaKindLabel(c.media_type)
-                      }}<template v-if="c.year"> · {{ c.year }}</template> ·
-                      {{ c.score.toFixed(2) }} 分
-                    </div>
-                  </div>
-                  <el-button
-                    size="small"
-                    :disabled="
-                      correcting ||
-                      (result.match?.id === c.id && result.match?.media_type === c.media_type)
-                    "
-                    :data-testid="`media-pick-${c.media_type}-${c.id}`"
-                    @click="correct(c.id, c.media_type)"
-                    >选这个</el-button
-                  >
-                </div>
-              </div>
-            </div>
-
-            <div class="md-section">
-              <div class="md-label">按 TMDB 编号纠正</div>
-              <div class="md-inline">
-                <el-select v-model="manual.type" class="md-kind" data-testid="media-manual-type">
-                  <el-option label="电影" value="movie" />
-                  <el-option label="剧集" value="tv" />
-                </el-select>
-                <el-input-number
-                  v-model="manual.id"
-                  :min="1"
-                  :controls="false"
-                  placeholder="TMDB 编号"
-                  data-testid="media-manual-id" />
-                <el-button
-                  :loading="correcting"
-                  data-testid="media-manual-save"
-                  @click="correct(manual.id, manual.type)"
-                  >纠正</el-button
-                >
-              </div>
-              <p class="md-tip">
-                编号在 TMDB 网页地址里，如 themoviedb.org/movie/278 的 278。纠正按解析出的名字生效：
-                同名的其它标题（换了分辨率、制作组）也会识别成这一条。
-              </p>
-            </div>
-          </div>
         </PtPanel>
       </div>
 

@@ -206,6 +206,10 @@ describe("AI 助手对话页", () => {
     await mountPage(false);
     expect(q("as-disabled")!.textContent).toContain("AI 助手设置");
     expect(q("as-chat")).toBeNull();
+    // 没启用时「新对话」点了也没用：页头不放按钮，唯一的入口是正文里的「去 AI 助手设置」
+    expect(q("as-new")).toBeNull();
+    expect(q("as-settings")).toBeNull();
+    expect(q("as-go-settings")).not.toBeNull();
   });
 
   it("打开最近的会话，按 last_seq 接事件流；增量、推理内容、回答、确认都跟着事件更新", async () => {

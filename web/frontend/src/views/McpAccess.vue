@@ -128,8 +128,9 @@ onMounted(load);
           <span class="mcp-k">状态</span>
           <!-- 包一层：值那一列的 span 会撑满，药丸按自己的宽度 -->
           <span>
-            <PtStatusPill v-if="settings.enabled" tone="ok" dot size="sm">开着</PtStatusPill>
-            <PtStatusPill v-else tone="warn" dot size="sm">关着</PtStatusPill>
+            <!-- 用户自己关掉的功能是正常状态：灰色「已关闭」，与远程访问、自动删种同一套说法；橙色留给出了问题的时候 -->
+            <PtStatusPill v-if="settings.enabled" tone="ok" dot size="sm">已开启</PtStatusPill>
+            <PtStatusPill v-else tone="neutral" dot size="sm">已关闭</PtStatusPill>
           </span>
         </li>
         <li>

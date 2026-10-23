@@ -415,3 +415,26 @@ describe("自动签到页", () => {
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe("/sites/hdsky"));
   });
 });
+
+describe("自动签到：签到记录的空态与读失败", () => {
+  it("一条签到记录都没有时只留「还没有签到记录」，不再叠一块一样的「签到详情」空态", async () => {
+    api.list.mockResolvedValue([site("hdsky"), site("ourbits")]);
+    api.history.mockResolvedValue({ days: [today], rows: [] });
+    await mountPage();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("还没有签到记录"));
+    expect(document.querySelector("[data-testid=att-detail]")).toBeNull();
+  });
+
+  it("签到记录读失败：说读失败、给重试，不说成「还没有签到记录」", async () => {
+    api.history.mockRejectedValueOnce(new Error("HTTP 500"));
+    await mountPage();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("签到记录没读出来"));
+    expect(document.body.textContent).not.toContain("还没有签到记录");
+
+    buttonByText("重试").click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=att-history]")).toBeTruthy(),
+    );
+    expect(document.querySelector("[data-testid=att-detail]")).toBeTruthy();
+  });
+});

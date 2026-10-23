@@ -117,7 +117,7 @@ describe("MCP 接入", () => {
 
   it("开关与路径：只发接口认的字段，保存后地址与填法跟着变", async () => {
     await mountPage();
-    expect(q("mcp-state")!.textContent).toContain("开着");
+    expect(q("mcp-state")!.textContent).toContain("已开启");
     expect(q("mcp-token-count")!.textContent).toContain("2 个");
     const save = q("mcp-save") as HTMLButtonElement;
     expect(save.disabled, "没改动时不能保存").toBe(true);
@@ -154,7 +154,7 @@ describe("MCP 接入", () => {
     await vi.waitFor(() =>
       expect(api.save).toHaveBeenLastCalledWith({ enabled: false, path: "/agent/mcp" }),
     );
-    await vi.waitFor(() => expect(q("mcp-state")!.textContent).toContain("关着"));
+    await vi.waitFor(() => expect(q("mcp-state")!.textContent).toContain("已关闭"));
     expect(ui.success).toHaveBeenLastCalledWith("已关闭 MCP 接入");
 
     // 保存失败写明原因

@@ -461,11 +461,18 @@ onBeforeUnmount(closeStream);
       >用自然语言查站点数据、下载器与种子，搜索、推送、订阅、整理入库、改配置；改动类操作每次都要你确认才执行</PtHeadSub
     >
     <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <!--
+        没启用时页头不放按钮：以前「新对话」照样是醒目的主按钮，点了只重置本地状态、页面纹丝不动；
+        那时唯一能做的事是去设置，入口就是正文中间那颗「去 AI 助手设置」，页头再放一颗是重复。
+      -->
       <div v-show="!isMobile || !showChat" class="as-acts">
-        <el-button data-testid="as-settings" @click="$router.push('/assistant/settings')">
+        <el-button
+          v-if="!status || status.enabled"
+          data-testid="as-settings"
+          @click="$router.push('/assistant/settings')">
           <PtIcon name="settings" :size="15" /><span>设置</span>
         </el-button>
-        <el-button type="primary" data-testid="as-new" @click="newChat">
+        <el-button v-if="status?.enabled" type="primary" data-testid="as-new" @click="newChat">
           <PtIcon name="square-pen" :size="15" /><span>新对话</span>
         </el-button>
       </div>
@@ -478,16 +485,23 @@ onBeforeUnmount(closeStream);
       :sub="ds.errorText.value"
       data-testid="as-state" />
 
-    <div v-else-if="!status.enabled" class="pt-note pt-note--warn as-off" data-testid="as-disabled">
-      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-      <span
-        >AI 助手没有启用：先到
-        <router-link to="/assistant/settings" data-testid="as-go-settings"
-          >系统 → AI 助手设置</router-link
-        >
-        选服务商、填 API Key 并打开。</span
-      >
-    </div>
+    <!-- 没启用：以前整屏只有一条警告横幅，下面全空；现在是一块居中的引导，下一步就是那颗按钮 -->
+    <PtDataState
+      v-else-if="!status.enabled"
+      class="as-off"
+      state="empty"
+      title="AI 助手还没有启用"
+      sub="到 AI 助手设置里选服务商、填 API Key，再打开开关。改动类操作每次都要你确认才执行"
+      data-testid="as-disabled">
+      <template #action>
+        <el-button
+          type="primary"
+          data-testid="as-go-settings"
+          @click="$router.push('/assistant/settings')">
+          <PtIcon name="settings" :size="14" /><span>去 AI 助手设置</span>
+        </el-button>
+      </template>
+    </PtDataState>
 
     <div v-else class="as-split">
       <AssistantConvList
