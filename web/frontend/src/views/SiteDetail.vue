@@ -1055,9 +1055,10 @@ function ruleNameOf(id: number): string {
                   站点规则里已经写了 H&amp;R 做种要求，按站点规则算，这里不用填
                 </div>
                 <div v-else class="field-tip">
-                  站点有 H&amp;R、要求做种多久 pt-tools
-                  不知道时填写：刷流按它决定收不收、什么时候能删，自动删种做满之前不删。 没填时有
-                  H&amp;R 的种子刷流不收，自动删种也不删
+                  站点有 H&amp;R、但 pt-tools
+                  不知道要做种多久时，填站点要求的做种时长：刷流按它决定收不收 H&amp;R
+                  种子、什么时候能删，自动删种在做满之前不删。保持 0 时，刷流不收 H&amp;R
+                  种子，自动删种也不删它们。
                 </div>
               </el-form-item>
             </div>
@@ -1389,7 +1390,7 @@ function ruleNameOf(id: number): string {
             </li>
           </ul>
           <p class="sd-foot">
-            凭据在本机库里以 AES-GCM 加密存放，页面不回显已存的值。要改就去
+            凭据在本机数据库里以 AES-GCM 加密存放，页面不回显已存的值。要改就去
             <el-button link type="primary" @click="tab = 'cred'">凭据分区</el-button>。
           </p>
         </PtPanel>

@@ -97,7 +97,8 @@ async function changeReportTime() {
 
 async function mountLoaded() {
   api.getGlobal.mockResolvedValue(structuredClone(SETTINGS));
-  api.getReport.mockResolvedValue({ enabled: false, time: "22:00", channel_ids: [] });
+  // 战报得是开着的：关着的时候「发送时刻」不可改（跟着开关走）
+  api.getReport.mockResolvedValue({ enabled: true, time: "22:00", channel_ids: [1] });
   await mountPage();
   await vi.waitFor(() => expect(api.getReport).toHaveBeenCalled());
   await vi.waitFor(() => saveButton());
@@ -146,7 +147,7 @@ describe("系统设置：两步保存分开报告", () => {
 
     saveButton().click();
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalledTimes(1));
-    expect(api.saveReport).toHaveBeenCalledWith({ enabled: false, time: "00:00", channel_ids: [] });
+    expect(api.saveReport).toHaveBeenCalledWith({ enabled: true, time: "00:00", channel_ids: [1] });
 
     await vi.waitFor(() => saveButton());
     saveButton().click();
@@ -173,5 +174,44 @@ describe("系统设置：免费结束提前量", () => {
     await vi.waitFor(() =>
       expect(document.querySelector("[data-testid=gs-advance-zero]")).toBeNull(),
     );
+  });
+});
+
+describe("系统设置：页头摘要与每日战报的从属字段", () => {
+  it("页头摘要写的是已生效的配置：改了下载模式没保存时不变，保存成功后才更新", async () => {
+    await mountLoaded();
+    const head = () => document.querySelector("#pt-head-sub")?.textContent ?? "";
+    await vi.waitFor(() => expect(head()).toContain("智能模式"));
+
+    const radio = [...document.querySelectorAll<HTMLInputElement>("input[type=radio]")].find(
+      (r) => r.value === "free_only",
+    )!;
+    radio.click();
+    await vi.waitFor(() => expect(radio.checked).toBe(true));
+    expect(head()).toContain("智能模式");
+    expect(head()).not.toContain("仅免费");
+
+    api.saveGlobal.mockResolvedValue(undefined);
+    saveButton().click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalled());
+    await vi.waitFor(() => expect(head()).toContain("仅免费"));
+    expect(api.saveGlobal.mock.calls[0]![0]).toMatchObject({ default_filter_mode: "free_only" });
+  });
+
+  it("战报没开时发送时刻与接收通道不可改，打开开关后可改", async () => {
+    api.getGlobal.mockResolvedValue(structuredClone(SETTINGS));
+    api.getReport.mockResolvedValue({ enabled: false, time: "22:00", channel_ids: [] });
+    await mountPage();
+    await vi.waitFor(() => saveButton());
+    const disabled = (id: string) => {
+      const el = document.querySelector(`[data-testid=${id}]`)!;
+      return el.classList.contains("is-disabled") || el.querySelector(".is-disabled") !== null;
+    };
+    await vi.waitFor(() => expect(disabled("daily-report-time")).toBe(true));
+    expect(disabled("daily-report-channels")).toBe(true);
+
+    document.querySelector<HTMLElement>("[data-testid=daily-report-enabled]")!.click();
+    await vi.waitFor(() => expect(disabled("daily-report-time")).toBe(false));
+    expect(disabled("daily-report-channels")).toBe(false);
   });
 });

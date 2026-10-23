@@ -38,6 +38,7 @@ import {
   matchesCategory,
   verdictOfItem,
 } from "@/utils/category";
+import { formatShortDateTime } from "@/utils/format";
 import {
   loadSavedSearches,
   SAVED_MAX,
@@ -92,6 +93,12 @@ const failedSitesText = computed(() => {
 });
 
 /** 状态块的副标题：失败时给真实原因，空态时给下一步动作 */
+/** 空态标题：「还没有数据」放在搜索页上不知所云 —— 没搜过和搜了没结果是两回事 */
+const stateTitle = computed(() => {
+  if (state.value !== "empty" && state.value !== "zero") return "";
+  return searchedKeyword.value ? "没有搜到种子" : "还没有搜索";
+});
+
 const stateSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return errorText.value;
   if (state.value === "partial") return failedSitesText.value;
@@ -768,13 +775,10 @@ function formatSize(bytes: number): string {
   return (bytes / Math.pow(1024, i)).toFixed(2) + " " + units[i];
 }
 
+/** 发布时间：全站统一的短格式（今年省掉年份、不带秒），与任务列表、暂停任务这些页一致 */
 function formatTime(timestamp?: number): string {
   if (!timestamp) return "-";
-  try {
-    return new Date(timestamp * 1000).toLocaleString("zh-CN");
-  } catch {
-    return "-";
-  }
+  return formatShortDateTime(timestamp * 1000);
 }
 
 function getDiscountTag(torrent: SearchTorrentItem): {
@@ -1452,21 +1456,10 @@ const footNote = computed(() => {
           </el-select>
         </el-tooltip>
 
-        <!-- 排序：选项自带「按」字，这样 40 高的带里不用再多一个「排序」标签 -->
-        <el-select v-model="sortBy" class="tb__ctl tb__ctl--sort">
-          <el-option label="按站点" value="sourceSite" />
-          <el-option label="按发布时间" value="publishTime" />
-          <el-option label="按大小" value="size" />
-          <el-option label="按做种数" value="seeders" />
-          <el-option label="按下载数" value="leechers" />
-          <el-option label="按完成数" value="snatched" />
-        </el-select>
-
-        <el-button class="tb__dir" @click="orderDesc = !orderDesc">
-          <PtIcon name="arrow-up-down" :size="14" />
-          <span>{{ orderDesc ? "降序" : "升序" }}</span>
-        </el-button>
-
+        <!--
+          这一排以前还有一组「按站点 + 升序」，和下面工具栏带上的「排序: 站点 + ↑」绑的是同一份状态，
+          两组一模一样的控件上下摆着。排序留在工具栏带（画板 bar-88 的 chip-0），这里只管搜哪些站点。
+        -->
         <!-- 画板 hint 11/400 t4：把这一页的两条操作前提说清楚 -->
         <span class="pt-band__hint">⌘K 聚焦 · Enter 搜索 · 站点超时不阻塞其余结果</span>
       </div>
@@ -1575,23 +1568,29 @@ const footNote = computed(() => {
 
       <template #right>
         <!-- 画板 bar-88 右端的 bi-columns-3 -->
-        <el-popover placement="bottom-end" trigger="click" :width="170">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="search-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="sc-cols">
-            <label v-for="c in OPTIONAL_SEARCH_COLS" :key="c.key" class="sc-cols__row">
-              <el-checkbox :model-value="searchColShown(c.key)" @change="toggleSearchCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="170">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="search-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="sc-cols">
+                <label v-for="c in OPTIONAL_SEARCH_COLS" :key="c.key" class="sc-cols__row">
+                  <el-checkbox
+                    :model-value="searchColShown(c.key)"
+                    @change="toggleSearchCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <!-- 画板 bar-88 右端的 bi-refresh-cw：按当前条件重搜一次 -->
         <el-tooltip content="按当前条件重新搜索" placement="top">
@@ -1667,7 +1666,7 @@ const footNote = computed(() => {
         @selection-change="handleSelectionChange"
         @sort-change="handleSortChange">
         <template #empty>
-          <PtDataState :state="state" dense :sub="stateSub">
+          <PtDataState :state="state" dense :title="stateTitle" :sub="stateSub">
             <!-- perm 不给重试：没权限点重试没有意义，只会让用户一直点 -->
             <template v-if="state === 'error' || state === 'partial'" #action>
               <el-button size="small" @click="doSearch">
@@ -1685,7 +1684,12 @@ const footNote = computed(() => {
           </template>
         </el-table-column>
 
-        <el-table-column label="标题" min-width="400">
+        <!--
+          列宽按 1440 展开侧栏时的主区（1176）排：以前九列加起来 1256，表格右边越出视口，
+          「发布时间」被固定的操作列压住。标题列是弹性的，剩下的宽度都给它。
+          上传 / 下载 / 完成三列不能再窄：76 时表头的排序箭头被挤到第二行。
+        -->
+        <el-table-column label="标题" min-width="296">
           <template #default="{ row }">
             <div class="ti">
               <el-tooltip :content="row.title" placement="top" :show-after="500">
@@ -1769,7 +1773,7 @@ const footNote = computed(() => {
           v-if="searchColShown('published')"
           label="发布时间"
           prop="uploadedAt"
-          width="152"
+          width="136"
           sortable="custom"
           class-name="pt-cell-muted">
           <template #default="{ row }">
@@ -1846,7 +1850,11 @@ const footNote = computed(() => {
         排序仍然走上面搜索条里的「排序 / 方向」，所以表头的 sortable 不算丢功能。
       -->
       <div v-else class="cards">
-        <PtDataState v-if="!pagedTorrents.length" :state="state" :sub="stateSub">
+        <PtDataState
+          v-if="!pagedTorrents.length"
+          :state="state"
+          :title="stateTitle"
+          :sub="stateSub">
           <template v-if="state === 'error' || state === 'partial'" #action>
             <el-button size="small" @click="doSearch">
               <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
@@ -2196,7 +2204,7 @@ const footNote = computed(() => {
 }
 
 /*
- * 页头下排的三枚筛选 chip（画板 facet-0..3 是 24 高）。高度与底色由 atoms.css 的
+ * 页头下排的站点筛选（画板 facet 是 24 高）。高度与底色由 atoms.css 的
  * `.pt-band__row--facet` 统管，这里只定宽度：站点是多选，收窄了会只剩一个 +N。
  */
 .tb__ctl {
@@ -2205,14 +2213,6 @@ const footNote = computed(() => {
 
 .tb__ctl--sites {
   width: 208px;
-}
-
-.tb__ctl--sort {
-  width: 132px;
-}
-
-.tb__dir {
-  flex: 0 0 auto;
 }
 
 .site-head {
@@ -2493,8 +2493,7 @@ const footNote = computed(() => {
 
 @media (max-width: 768px) {
   /* 页头带在手机上照样在（它是页面自己的，不是被外壳藏掉的那条），只是要换行 */
-  .tb__ctl--sites,
-  .tb__ctl--sort {
+  .tb__ctl--sites {
     width: 140px;
   }
 }

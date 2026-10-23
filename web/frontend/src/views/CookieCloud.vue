@@ -201,91 +201,103 @@ onMounted(loadSettings);
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
         <span>设置没读到，点刷新重试。</span>
       </div>
-      <el-form class="pt-form cc-form" label-position="top" @submit.prevent>
-        <el-form-item label="服务地址">
-          <el-input
-            v-model="form.server_url"
-            placeholder="https://cookiecloud.example.com"
-            autocomplete="off"
-            data-testid="cc-server" />
-          <div class="field-tip">
-            自建的 CookieCloud 服务的地址，和浏览器扩展里的「服务器地址」一样
-          </div>
-        </el-form-item>
-        <el-form-item label="用户 KEY（UUID）">
-          <el-input
-            v-model="form.uuid"
-            placeholder="浏览器扩展里的用户 KEY"
-            autocomplete="off"
-            data-testid="cc-uuid" />
-          <div class="field-tip">
-            浏览器扩展里的「用户KEY · UUID」，用来在服务上找到你同步的那一份
-          </div>
-        </el-form-item>
-        <el-form-item label="端对端加密密码">
-          <div class="cc-password">
-            <el-input
-              v-model="form.password"
-              type="password"
-              show-password
-              autocomplete="new-password"
-              :placeholder="
-                settings?.has_password ? '已设置；要更换时填写新的' : '浏览器扩展里的密码'
-              "
-              data-testid="cc-password" />
-            <el-button
-              v-if="settings?.has_password"
-              data-testid="cc-clear-password"
-              @click="clearPassword"
-              >清除</el-button
-            >
-          </div>
-          <div class="field-tip">
-            浏览器扩展里的「端对端加密密码」：只用来在本机解密，不发给 CookieCloud
-            服务，加密保存、页面上不显示
-          </div>
-        </el-form-item>
-        <div class="cc-row">
-          <el-form-item label="定时同步">
-            <el-switch v-model="form.auto_sync" data-testid="cc-auto-sync" />
-          </el-form-item>
-          <el-form-item label="同步间隔（小时）">
-            <el-input-number
-              v-model="form.interval_hours"
-              :min="1"
-              :max="168"
-              controls-position="right"
-              data-testid="cc-interval" />
-          </el-form-item>
+      <!-- 卡够宽时表单在左、同步情况在右（按卡宽判）；以前表单停在 640，右边空着半张卡 -->
+      <div class="pt-formaside">
+        <div class="pt-formaside__grid">
+          <el-form class="pt-form" label-position="top" @submit.prevent>
+            <el-form-item label="服务地址">
+              <el-input
+                v-model="form.server_url"
+                placeholder="https://cookiecloud.example.com"
+                autocomplete="off"
+                data-testid="cc-server" />
+              <div class="field-tip">
+                自建的 CookieCloud 服务的地址，和浏览器扩展里的「服务器地址」一样
+              </div>
+            </el-form-item>
+            <el-form-item label="用户 KEY（UUID）">
+              <el-input
+                v-model="form.uuid"
+                placeholder="浏览器扩展里的用户 KEY"
+                autocomplete="off"
+                data-testid="cc-uuid" />
+              <div class="field-tip">
+                浏览器扩展里的「用户KEY · UUID」，用来在服务上找到你同步的那一份
+              </div>
+            </el-form-item>
+            <el-form-item label="端对端加密密码">
+              <div class="cc-password">
+                <el-input
+                  v-model="form.password"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="
+                    settings?.has_password ? '已设置；要更换时填写新的' : '浏览器扩展里的密码'
+                  "
+                  data-testid="cc-password" />
+                <el-button
+                  v-if="settings?.has_password"
+                  data-testid="cc-clear-password"
+                  @click="clearPassword"
+                  >清除</el-button
+                >
+              </div>
+              <div class="field-tip">
+                浏览器扩展里的「端对端加密密码」：只用来在本机解密，不发给 CookieCloud
+                服务，加密保存、页面上不显示
+              </div>
+            </el-form-item>
+            <div class="cc-row">
+              <el-form-item label="定时同步">
+                <el-switch v-model="form.auto_sync" data-testid="cc-auto-sync" />
+              </el-form-item>
+              <el-form-item label="同步间隔（小时）">
+                <el-input-number
+                  v-model="form.interval_hours"
+                  :min="1"
+                  :max="168"
+                  :disabled="!form.auto_sync"
+                  controls-position="right"
+                  data-testid="cc-interval" />
+              </el-form-item>
+            </div>
+            <el-button type="primary" :loading="saving" data-testid="cc-save" @click="save()">
+              <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
+            </el-button>
+          </el-form>
+          <aside class="pt-formaside__aside">
+            <h3 class="pt-formaside__title">同步情况</h3>
+            <ul class="cc-status" data-testid="cc-status">
+              <li>
+                <span class="cc-k">上次同步</span>
+                <span v-if="settings?.last_sync_at"
+                  >{{ formatShortDateTime(settings.last_sync_at) }}：{{
+                    settings.last_result
+                  }}</span
+                >
+                <span v-else class="cc-sub">还没同步过</span>
+              </li>
+              <li>
+                <span class="cc-k">下次同步</span>
+                <span v-if="settings?.next_sync_at"
+                  >大约 {{ formatShortDateTime(settings.next_sync_at) }}</span
+                >
+                <span v-else class="cc-sub">{{
+                  configured
+                    ? "定时同步没打开：在下面手动导入"
+                    : "填写服务地址、用户 KEY 与密码，打开定时同步以后按间隔同步"
+                }}</span>
+              </li>
+            </ul>
+            <p class="cc-tip">
+              定时同步只更新已经启用、Cookie
+              有变化的站点，不会启用新站点。保存以后可以点下面的「读取
+              CookieCloud」试一下：能列出站点，说明地址、用户 KEY 与密码都对。
+            </p>
+          </aside>
         </div>
-        <el-button type="primary" :loading="saving" data-testid="cc-save" @click="save()">
-          <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
-        </el-button>
-      </el-form>
-      <ul class="cc-status" data-testid="cc-status">
-        <li>
-          <span class="cc-k">上次同步</span>
-          <span v-if="settings?.last_sync_at"
-            >{{ formatShortDateTime(settings.last_sync_at) }}：{{ settings.last_result }}</span
-          >
-          <span v-else class="cc-sub">还没同步过</span>
-        </li>
-        <li>
-          <span class="cc-k">下次同步</span>
-          <span v-if="settings?.next_sync_at"
-            >大约 {{ formatShortDateTime(settings.next_sync_at) }}</span
-          >
-          <span v-else class="cc-sub">{{
-            configured
-              ? "定时同步没打开：在下面手动导入"
-              : "填写服务地址、用户 KEY 与密码，打开定时同步以后按间隔同步"
-          }}</span>
-        </li>
-      </ul>
-      <p class="cc-tip">
-        定时同步只更新已经启用、Cookie 有变化的站点，不会启用新站点。保存以后可以点下面的「读取
-        CookieCloud」试一下：能列出站点，说明地址、用户 KEY 与密码都对。
-      </p>
+      </div>
     </PtPanel>
 
     <PtPanel
@@ -395,10 +407,6 @@ onMounted(loadSettings);
 </template>
 
 <style scoped>
-.cc-form {
-  max-width: 640px;
-}
-
 .cc-password {
   display: flex;
   gap: 8px;
@@ -416,6 +424,12 @@ onMounted(loadSettings);
   font-size: 12px;
   line-height: 1.6;
   color: var(--pt-t3);
+}
+
+/* 放进右边那块「同步情况」以后，间距由那块的 gap 给 */
+.pt-formaside__aside .cc-status,
+.pt-formaside__aside .cc-tip {
+  margin: 0;
 }
 
 .cc-actions {

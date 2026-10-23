@@ -224,7 +224,12 @@ onMounted(() => {
         v-if="!tokens.length"
         :state="ds.state.value"
         :title="ds.state.value === 'empty' ? '还没有令牌' : ''"
-        :sub="ds.errorText.value || (ds.state.value === 'empty' ? '新建一个，填进手机 App 里' : '')"
+        :sub="
+          ds.errorText.value ||
+          (ds.state.value === 'empty'
+            ? '新建一个，填进手机 App、qB 兼容客户端或 MCP 客户端；新建时勾选对应的权限'
+            : '')
+        "
         data-testid="tk-state" />
       <el-table
         v-else-if="!isMobile"
@@ -288,10 +293,16 @@ onMounted(() => {
           </template>
         </PtRowCard>
       </div>
-      <p class="tk-tip">
-        App 里填 pt-tools
-        的地址和令牌；令牌只在新建时显示一次，丢了就撤销再建一个。令牌做的操作记在「操作审计」里。
-      </p>
+      <!-- 三种用途各一句：只写 App 的话，配 qB 客户端或 MCP 的人会以为这里没他们的事 -->
+      <ul class="tk-tip">
+        <li>手机 App：填 pt-tools 的地址和令牌，权限选「读取」「操作」。</li>
+        <li>qB 兼容客户端：用户名随意、密码填令牌，权限选「qB 兼容」，见「qB 兼容入口」页。</li>
+        <li>
+          MCP 客户端：请求头写 <code>Authorization: Bearer 令牌</code>，权限选「MCP 读取」「MCP
+          操作」，见「MCP 接入」页。
+        </li>
+        <li>令牌只在新建时显示一次，丢了就撤销再建一个；令牌做的操作记在「操作审计」里。</li>
+      </ul>
     </PtPanel>
 
     <el-dialog
@@ -398,9 +409,16 @@ onMounted(() => {
 
 .tk-tip {
   margin: 12px 0 0;
+  padding-left: 1.2em;
   font-size: 12px;
   line-height: 1.6;
   color: var(--pt-t3);
+}
+
+.tk-tip code {
+  font-family: var(--pt-font-mono);
+  font-size: 11px;
+  color: var(--pt-t2);
 }
 
 .tk-scope-list {

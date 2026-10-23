@@ -497,25 +497,36 @@ function matchesSearch(name: string, site: SiteConfig, q: string): boolean {
  *
  * 状态的判定口径（都用本页已经有的两份数据，没有新接口）：
  *   已禁用  !site.enabled
- *   异常    启用中，且「站点暂不可用」或最近一次探测不是 OK（含从未探测成功过）
- *   正常    启用中且不异常
+ *   异常    启用中，且「站点暂不可用」或最近一次探测失败（未配置凭证、会话过期、网络错误等）
+ *   未探测  启用中，还没有探测结果：从未探测过，或探测对它不适用 / 暂不支持
+ *   正常    启用中，最近一次探测成功
  * 画板把状态画成四档分段（全部/正常/异常/已禁用），这里做成**可选的 chip**，
  * 因为两边的「全部」不是一回事：画板那张图是 14 个已配置站点（12+2=14，已禁用另算 1），
  * 而这个产品的 `/api/sites` 回的是**全部 66 个内置定义**（新装时一个都没启用）。
  * 把「全部」改成 66 会让默认视图变成 66 行，所以保留原来的「已启用 / 全部」作视图范围，
  * 状态与认证、探测一起做成叠加筛选。
  */
-type SiteStatus = "ok" | "bad" | "off";
+type SiteStatus = "ok" | "none" | "bad" | "off";
 
 function statusOf(name: string, site: SiteConfig): SiteStatus {
   if (!site.enabled) return "off";
   if (site.unavailable) return "bad";
   const st = loginState(name)?.last_probe_status;
-  /* 从未探测过不算异常：那是「还不知道」，不是「坏了」。
-     中性档（不适用、动态站点暂不支持探测）同理，它们不是故障。 */
-  if (st !== undefined && st !== "" && !isProbeSuccess(st) && probeStatusSeverity(st) !== "info")
-    return "bad";
-  return "ok";
+  /*
+   * 从未探测过不算异常：那是「还不知道」，不是「坏了」。中性档（不适用、动态站点暂不支持探测）同理。
+   * 但它也不是「正常」—— 以前这两种都画成绿色的「正常」，新装时一个都没探测过的站点整列都是绿的。
+   */
+  if (!st || probeStatusSeverity(st) === "info") return "none";
+  return isProbeSuccess(st) ? "ok" : "bad";
+}
+
+/** 状态胶囊上的说明：失败给探测结果；还没有结果时说清为什么、下一步是什么 */
+function statusNote(name: string, site: SiteConfig): string {
+  if (statusOf(name, site) !== "none" || loginState(name)?.last_probe_status)
+    return probeNote(name);
+  return probeModeOf(name) === "disabled"
+    ? "这个站点设成了不探测登录状态"
+    : "还没有探测过登录状态：自动探测会按计划进行，也可以点这一行的「立即探测」";
 }
 
 /**
@@ -640,12 +651,17 @@ const authFilter = ref("");
 const probeFilter = ref("");
 
 const statusCounts = computed(() => {
-  const counts: Record<SiteStatus, number> = { ok: 0, bad: 0, off: 0 };
+  const counts: Record<SiteStatus, number> = { ok: 0, none: 0, bad: 0, off: 0 };
   for (const [name, site] of allEntries.value) counts[statusOf(name, site)] += 1;
   return counts;
 });
 
-const STATUS_LABEL: Record<SiteStatus, string> = { ok: "正常", bad: "异常", off: "已禁用" };
+const STATUS_LABEL: Record<SiteStatus, string> = {
+  ok: "正常",
+  none: "未探测",
+  bad: "异常",
+  off: "已禁用",
+};
 
 /** 状态列与工具栏 chip 共用同一套语义色 */
 function statusTone(k: SiteStatus): "ok" | "dang" | "neutral" {
@@ -654,12 +670,15 @@ function statusTone(k: SiteStatus): "ok" | "dang" | "neutral" {
   return "neutral";
 }
 
+/* 「未探测」那枚只在有这种站点（或正在按它筛）时出现：平常它是 0，摆着只占工具栏的位置 */
 const statusChips = computed(() =>
-  (["ok", "bad", "off"] as const).map((k) => ({
-    key: k,
-    label: `${STATUS_LABEL[k]} ${statusCounts.value[k]}`,
-    active: statusFilter.value.has(k),
-  })),
+  (["ok", "bad", "none", "off"] as const)
+    .filter((k) => k !== "none" || statusCounts.value.none > 0 || statusFilter.value.has(k))
+    .map((k) => ({
+      key: k,
+      label: `${STATUS_LABEL[k]} ${statusCounts.value[k]}`,
+      active: statusFilter.value.has(k),
+    })),
 );
 
 function toggleStatus(k: SiteStatus) {
@@ -688,10 +707,10 @@ const visibleEntries = computed(() => {
   /*
    * 状态 chip 比「已启用 / 全部」那个视图开关更具体，所以一旦按状态筛，基集取全部站点。
    *
-   * 不这样做就是个假筛选：`statusOf` 里 `off` ⟺ 未启用、`ok`/`bad` ⟺ 已启用，
+   * 不这样做就是个假筛选：`statusOf` 里 `off` ⟺ 未启用、`ok`/`none`/`bad` ⟺ 已启用，
    * 而 chip 上的计数从**全部**站点算。基集若停在「已启用」，点那枚非零的
    * 「已禁用 N」必定筛出 0 行 —— 数字写着 N，表里一行都没有。
-   * 反过来也不会多筛：off 只可能是未启用的站点，ok/bad 只可能是已启用的。
+   * 反过来也不会多筛：off 只可能是未启用的站点，ok/none/bad 只可能是已启用的。
    */
   let base =
     statusFilter.value.size > 0 || viewMode.value === "all"
@@ -1142,23 +1161,27 @@ async function saveLoginConfig() {
         <span v-if="isFiltered" class="pt-band__note">筛出 {{ visibleEntries.length }} 个</span>
 
         <!-- 画板 bar-64 右端的 bi-columns-3：列设置（偏好存本地） -->
-        <el-popover placement="bottom-end" trigger="click" :width="180">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="sites-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="cols">
-            <label v-for="c in OPTIONAL_COLS" :key="c.key" class="cols__row">
-              <el-checkbox :model-value="colShown(c.key)" @change="toggleCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="180">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="sites-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="cols">
+                <label v-for="c in OPTIONAL_COLS" :key="c.key" class="cols__row">
+                  <el-checkbox :model-value="colShown(c.key)" @change="toggleCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <!-- 画板 bar-64 右端的 bi-file-down：导出当前筛选出的这批行 -->
         <el-tooltip content="按当前筛选导出 CSV" placement="top">
@@ -1213,13 +1236,13 @@ async function saveLoginConfig() {
                   command="probe"
                   :disabled="loading || enabledCount === 0 || bulkProbing"
                   data-testid="probe-all-enabled-button">
-                  <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测已启用</span>
+                  <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测启用站点</span>
                 </el-dropdown-item>
                 <el-dropdown-item
                   command="open"
                   :disabled="enabledCount === 0"
                   data-testid="open-all-sites-btn">
-                  <PtIcon name="external-link" :size="14" class="dd-ico" /><span>打开已启用</span>
+                  <PtIcon name="external-link" :size="14" class="dd-ico" /><span>打开启用站点</span>
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -1235,16 +1258,20 @@ async function saveLoginConfig() {
                 :disabled="loading || enabledCount === 0"
                 data-testid="probe-all-enabled-button"
                 @click="probeAllEnabled">
-                <PtIcon name="activity" :size="15" /><span>探测已启用</span>
+                <PtIcon name="activity" :size="15" /><span>探测启用站点</span>
               </el-button>
             </el-tooltip>
-            <el-button
-              size="small"
-              :disabled="enabledCount === 0"
-              data-testid="open-all-sites-btn"
-              @click="openAllEnabled">
-              <PtIcon name="external-link" :size="15" /><span>打开已启用</span>
-            </el-button>
+            <el-tooltip
+              content="在新标签页里逐个打开已启用站点的首页；浏览器拦截弹窗时要先允许"
+              placement="bottom">
+              <el-button
+                size="small"
+                :disabled="enabledCount === 0"
+                data-testid="open-all-sites-btn"
+                @click="openAllEnabled">
+                <PtIcon name="external-link" :size="15" /><span>打开启用站点</span>
+              </el-button>
+            </el-tooltip>
           </template>
 
           <el-button
@@ -1307,15 +1334,15 @@ async function saveLoginConfig() {
 
         <!--
           画板 12 的 th-2「状态」：把「暂不可用」那枚胶囊从站点列独立出来，
-          并把它扩成三态（正常 / 异常 / 已禁用）—— 和工具栏那排状态 chip 同一套口径
+          并把它扩成四态（正常 / 异常 / 未探测 / 已禁用）—— 和工具栏那排状态 chip 同一套口径
           （statusOf），否则筛选与显示会各说一套。
         -->
         <el-table-column label="状态" width="96" align="center">
           <template #default="{ row }">
-            <!-- 「异常」「正常」背后的探测结果（如未配置凭证、暂不支持探测）放在 tooltip 里 -->
+            <!-- 「异常」「未探测」背后的原因（如未配置凭证、暂不支持探测、还没探测过）放在 tooltip 里 -->
             <el-tooltip
-              :disabled="!probeNote(row[0])"
-              :content="probeNote(row[0])"
+              :disabled="!statusNote(row[0], row[1])"
+              :content="statusNote(row[0], row[1])"
               placement="top"
               :show-after="200">
               <span :data-testid="`site-status-${row[0]}`">

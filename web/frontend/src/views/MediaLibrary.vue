@@ -823,6 +823,121 @@ onMounted(refresh);
 
     <div class="pt-cols">
       <div class="pt-col">
+        <!--
+          媒体库（这一页的主角与「添加」入口）放在整理设置前面：1600 以下是单栏，整理设置那张长表单
+          排在前面时，进页面要先滚过一屏设置才看得到有哪些库。
+        -->
+        <PtPanel
+          title="媒体库"
+          icon="folder-open"
+          :count="libraries.length"
+          action="添加"
+          action-icon="plus"
+          @action="openLibrary()">
+          <p class="ml-tip ml-tip--top">
+            每个库收一类条目：电影或剧集，可以只收动画（动画优先进只收动画的库）。目录要填 pt-tools
+            里看到的路径， Docker 里要把媒体库挂进容器。
+          </p>
+          <div
+            v-if="libraries.length && librariesDS.error.value"
+            class="pt-note pt-note--warn ml-stale"
+            data-testid="ml-libs-stale">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>刷新失败：{{ librariesDS.errorText.value }}。下面是上次读到的。</span>
+          </div>
+          <PtDataState
+            v-if="!libraries.length"
+            :state="librariesDS.state.value"
+            :title="librariesDS.state.value === 'empty' ? '还没有媒体库' : ''"
+            :sub="
+              librariesDS.errorText.value ||
+              (librariesDS.state.value === 'empty' ? '点右上角「添加」，电影与剧集各建一个' : '')
+            "
+            data-testid="ml-libs-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="libraries"
+            row-key="id"
+            class="pt-grid"
+            data-testid="ml-libs">
+            <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
+            <el-table-column label="类型" width="130">
+              <template #default="{ row }">{{ libKindText(row) }}</template>
+            </el-table-column>
+            <el-table-column
+              label="目录与命名"
+              min-width="300"
+              class-name="pt-cell-1line"
+              show-overflow-tooltip>
+              <template #default="{ row }">
+                <div class="ml-path">{{ row.path }}</div>
+                <div class="ml-sub">{{ row.preview }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="整理方式" width="96">
+              <template #default="{ row }">{{ modeLabel(row.mode) }}</template>
+            </el-table-column>
+            <el-table-column label="刮削" width="80">
+              <template #default="{ row }">
+                <PtTag v-if="row.scrape">{{ row.scrape_overwrite ? "覆盖" : "开" }}</PtTag>
+                <span v-else class="ml-sub">关</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="启用" width="76">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="row.enabled"
+                  :aria-label="`启用媒体库 ${row.name}`"
+                  :data-testid="`ml-lib-enabled-${row.id}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleLibrary(row, Boolean(v))
+                  " />
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="120" align="right">
+              <template #default="{ row }">
+                <el-button link :data-testid="`ml-lib-edit-${row.id}`" @click="openLibrary(row)"
+                  >编辑</el-button
+                >
+                <el-button
+                  link
+                  type="danger"
+                  :data-testid="`ml-lib-del-${row.id}`"
+                  @click="removeLibrary(row)"
+                  >删除</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="ml-cards">
+            <PtRowCard v-for="l in libraries" :key="l.id">
+              <template #title>{{ l.name }}</template>
+              <template #meta>
+                <span
+                  >{{ libKindText(l) }} · {{ modeLabel(l.mode)
+                  }}{{ l.scrape ? " · 刮削" : "" }}</span
+                >
+                <span class="ml-full">{{ l.path }}</span>
+                <span class="ml-full">{{ l.preview }}</span>
+              </template>
+              <template #status>
+                <el-switch
+                  :model-value="l.enabled"
+                  :aria-label="`启用媒体库 ${l.name}`"
+                  @update:model-value="
+                    (v: string | number | boolean) => toggleLibrary(l, Boolean(v))
+                  " />
+              </template>
+              <template #actions>
+                <el-button size="small" @click="openLibrary(l)">编辑</el-button>
+                <el-button size="small" type="danger" plain @click="removeLibrary(l)"
+                  >删除</el-button
+                >
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
+
         <PtPanel title="整理设置" icon="sliders-horizontal">
           <div v-if="settingsFailed" class="pt-note pt-note--warn">
             <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
@@ -956,6 +1071,16 @@ onMounted(refresh);
               <div class="field-tip">
                 默认关闭：删种后库里的文件照样能看。打开后硬链接入库的种子才能被低空间紧急清理挑中（删掉以后空间才腾得出来）；复制与移动的文件不删。
               </div>
+              <!-- 打开以后会删媒体库里的文件：后果写在开关旁边，用警示色，不和普通开关混在一起 -->
+              <div
+                v-if="sform.delete_links_on_remove"
+                class="pt-note pt-note--warn ml-delete-warn"
+                data-testid="ml-delete-links-warn">
+                <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                <span
+                  >已打开：之后删种（连数据一起删）时，媒体库里从这个种子整理出来的硬链接、软链接也会被删掉，媒体服务器里对应的条目随之消失。</span
+                >
+              </div>
             </el-form-item>
             <el-button
               type="primary"
@@ -965,117 +1090,6 @@ onMounted(refresh);
               <PtIcon v-if="!savingSettings" name="save" :size="14" /><span>保存</span>
             </el-button>
           </el-form>
-        </PtPanel>
-
-        <PtPanel
-          title="媒体库"
-          icon="folder-open"
-          :count="libraries.length"
-          action="添加"
-          action-icon="plus"
-          @action="openLibrary()">
-          <p class="ml-tip ml-tip--top">
-            每个库收一类条目：电影或剧集，可以只收动画（动画优先进只收动画的库）。目录要填 pt-tools
-            里看到的路径， Docker 里要把媒体库挂进容器。
-          </p>
-          <div
-            v-if="libraries.length && librariesDS.error.value"
-            class="pt-note pt-note--warn ml-stale"
-            data-testid="ml-libs-stale">
-            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-            <span>刷新失败：{{ librariesDS.errorText.value }}。下面是上次读到的。</span>
-          </div>
-          <PtDataState
-            v-if="!libraries.length"
-            :state="librariesDS.state.value"
-            :title="librariesDS.state.value === 'empty' ? '还没有媒体库' : ''"
-            :sub="
-              librariesDS.errorText.value ||
-              (librariesDS.state.value === 'empty' ? '点右上角「添加」，电影与剧集各建一个' : '')
-            "
-            data-testid="ml-libs-state" />
-          <el-table
-            v-else-if="!isMobile"
-            :data="libraries"
-            row-key="id"
-            class="pt-grid"
-            data-testid="ml-libs">
-            <el-table-column label="名称" min-width="120" prop="name" class-name="pt-cell-strong" />
-            <el-table-column label="类型" width="130">
-              <template #default="{ row }">{{ libKindText(row) }}</template>
-            </el-table-column>
-            <el-table-column
-              label="目录与命名"
-              min-width="300"
-              class-name="pt-cell-1line"
-              show-overflow-tooltip>
-              <template #default="{ row }">
-                <div class="ml-path">{{ row.path }}</div>
-                <div class="ml-sub">{{ row.preview }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column label="整理方式" width="96">
-              <template #default="{ row }">{{ modeLabel(row.mode) }}</template>
-            </el-table-column>
-            <el-table-column label="刮削" width="80">
-              <template #default="{ row }">
-                <PtTag v-if="row.scrape">{{ row.scrape_overwrite ? "覆盖" : "开" }}</PtTag>
-                <span v-else class="ml-sub">关</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="启用" width="76">
-              <template #default="{ row }">
-                <el-switch
-                  :model-value="row.enabled"
-                  :aria-label="`启用媒体库 ${row.name}`"
-                  :data-testid="`ml-lib-enabled-${row.id}`"
-                  @update:model-value="
-                    (v: string | number | boolean) => toggleLibrary(row, Boolean(v))
-                  " />
-              </template>
-            </el-table-column>
-            <el-table-column label="" width="120" align="right">
-              <template #default="{ row }">
-                <el-button link :data-testid="`ml-lib-edit-${row.id}`" @click="openLibrary(row)"
-                  >编辑</el-button
-                >
-                <el-button
-                  link
-                  type="danger"
-                  :data-testid="`ml-lib-del-${row.id}`"
-                  @click="removeLibrary(row)"
-                  >删除</el-button
-                >
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-else class="ml-cards">
-            <PtRowCard v-for="l in libraries" :key="l.id">
-              <template #title>{{ l.name }}</template>
-              <template #meta>
-                <span
-                  >{{ libKindText(l) }} · {{ modeLabel(l.mode)
-                  }}{{ l.scrape ? " · 刮削" : "" }}</span
-                >
-                <span class="ml-full">{{ l.path }}</span>
-                <span class="ml-full">{{ l.preview }}</span>
-              </template>
-              <template #status>
-                <el-switch
-                  :model-value="l.enabled"
-                  :aria-label="`启用媒体库 ${l.name}`"
-                  @update:model-value="
-                    (v: string | number | boolean) => toggleLibrary(l, Boolean(v))
-                  " />
-              </template>
-              <template #actions>
-                <el-button size="small" @click="openLibrary(l)">编辑</el-button>
-                <el-button size="small" type="danger" plain @click="removeLibrary(l)"
-                  >删除</el-button
-                >
-              </template>
-            </PtRowCard>
-          </div>
         </PtPanel>
       </div>
 
@@ -1181,9 +1195,20 @@ onMounted(refresh);
             <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
             <span>读取失败：{{ watchDS.errorText.value }}</span>
           </div>
-          <div v-if="!watchDirs.length" class="ml-sub" data-testid="ml-watch-empty">
-            还没有监控的目录
-          </div>
+          <!-- 和同页的媒体库、路径映射、媒体服务器一样用状态块，不再是一行灰字 -->
+          <PtDataState
+            v-if="!watchDirs.length"
+            state="empty"
+            dense
+            title="还没有监控的目录"
+            sub="手动拷进来的、别的工具下载的视频，所在的目录加进来以后会按媒体库整理"
+            data-testid="ml-watch-empty">
+            <template #action>
+              <el-button size="small" @click="openWatchDir()">
+                <PtIcon name="plus" :size="14" /><span>添加目录</span>
+              </el-button>
+            </template>
+          </PtDataState>
           <ul v-else class="ml-watch" data-testid="ml-watch">
             <li
               v-for="d in watchDirs"
@@ -1999,6 +2024,10 @@ onMounted(refresh);
 .ml-path {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ml-delete-warn {
+  margin-top: var(--pt-space-2);
 }
 
 .ml-sub {

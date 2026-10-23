@@ -353,6 +353,10 @@ function clearFilters() {
             <div class="site-card__name">
               <span>{{ def.name }}</span>
               <PtStatusPill v-if="def.unavailable" tone="dang" size="sm">不可用</PtStatusPill>
+              <!-- 「全部」视图里也要一眼看出哪些已经在用：筛选条能按「已添加」筛，卡上却一直不写 -->
+              <PtStatusPill v-else-if="isAdded(def.id, def.name)" tone="ok" size="sm">
+                已添加
+              </PtStatusPill>
             </div>
             <div v-if="def.aka && def.aka.length > 0" class="site-card__aka">
               {{ def.aka.join(" / ") }}
@@ -464,14 +468,48 @@ function clearFilters() {
   width: 180px;
 }
 
-/* 紧凑列表：一栏 + 卡内边距收一档，一屏能看完更多定义 */
-.site-grid.is-rows :deep(.pt-panel__body),
-.site-grid.is-rows :deep(.def) {
-  padding-block: var(--pt-space-2);
+/*
+ * 紧凑列表：每个定义一行（头像 + 名称 · 标签 · 网址），不显示简介，一屏能看十几个。
+ * 之前这里写的是 `.def` / `.def__desc` —— 早先的类名，卡片改名为 `.site-card` 以后一直没跟上，
+ * 切到紧凑列表只是把两栏变成一栏，每张卡照样带简介，页面反而更长。
+ */
+.site-grid.is-rows {
+  row-gap: var(--pt-space-2);
 }
 
-.site-grid.is-rows :deep(.def__desc) {
+.site-grid.is-rows .site-card {
+  flex-flow: row wrap;
+  gap: var(--pt-space-2) var(--pt-space-4);
+  align-items: center;
+  padding: var(--pt-space-2) var(--pt-pad);
+  border-radius: var(--pt-r-md);
+}
+
+.site-grid.is-rows .site-card__head {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.site-grid.is-rows .site-card__desc {
   display: none;
+}
+
+.site-grid.is-rows .site-card__tags {
+  flex: 0 1 auto;
+}
+
+.site-grid.is-rows .site-card__urls {
+  flex: 0 1 240px;
+  min-width: 0;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* 不可用的原因换到下一行整宽显示，不挤进同一行 */
+.site-grid.is-rows .site-card .pt-note {
+  flex-basis: 100%;
+  order: 10;
 }
 
 /* 栏宽与间隔由 .pt-cards--2 给（画板 548 / 516 两栏，1181 以下退回单栏） */

@@ -534,17 +534,22 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
       否则刷新入口会连着页头一起消失。
     -->
     <Teleport v-if="!isMobile" to="#pt-head-acts">
-      <button
-        type="button"
-        class="tl-headico"
-        :disabled="loading"
-        aria-label="刷新任务列表"
-        @click="loadTasks">
-        <PtIcon
-          :name="loading ? 'loader-circle' : 'refresh-cw'"
-          :size="16"
-          :class="loading ? 'pt-spin' : undefined" />
-      </button>
+      <el-tooltip content="刷新任务列表" placement="bottom">
+        <!-- 包一层：加载中按钮是 disabled 的，禁用的按钮不发 mouseenter -->
+        <span class="pt-tip-anchor">
+          <button
+            type="button"
+            class="tl-headico"
+            :disabled="loading"
+            aria-label="刷新任务列表"
+            @click="loadTasks">
+            <PtIcon
+              :name="loading ? 'loader-circle' : 'refresh-cw'"
+              :size="16"
+              :class="loading ? 'pt-spin' : undefined" />
+          </button>
+        </span>
+      </el-tooltip>
     </Teleport>
 
     <!--
@@ -604,23 +609,27 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
       <template #right>
         <!-- 画板 bar-64 右端的 bi-columns-3 -->
-        <el-popover placement="bottom-end" trigger="click" :width="180">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="tasks-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="tb__cols">
-            <label v-for="c in OPTIONAL_TASK_COLS" :key="c.key" class="tb__cols-row">
-              <el-checkbox :model-value="taskColShown(c.key)" @change="toggleTaskCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="180">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="tasks-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="tb__cols">
+                <label v-for="c in OPTIONAL_TASK_COLS" :key="c.key" class="tb__cols-row">
+                  <el-checkbox :model-value="taskColShown(c.key)" @change="toggleTaskCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
         <el-tooltip content="按当前筛选导出本页 CSV" placement="top">
@@ -711,7 +720,14 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
         <el-table-column label="标题" min-width="216" class-name="pt-cell-strong">
           <template #default="{ row }">
             <div class="title-cell">
-              <span class="title-text">{{ row.title || "-" }}</span>
+              <!-- 标题是认出这条任务的依据，单行截断以后悬停看完整的 -->
+              <el-tooltip
+                :content="row.title"
+                :disabled="!row.title"
+                placement="top"
+                :show-after="400">
+                <span class="title-text">{{ row.title || "-" }}</span>
+              </el-tooltip>
               <span v-if="row.category || row.tag" class="title-meta">
                 <PtTag v-if="row.category">{{ row.category }}</PtTag>
                 <PtTag v-if="row.tag">{{ row.tag }}</PtTag>

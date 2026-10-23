@@ -47,6 +47,8 @@ const listDS = useDataState({ filtered: () => scope.value !== "all" });
 const sites = ref<SiteAttendance[]>([]);
 const loaded = ref(false);
 const history = ref<AttendanceHistory | null>(null);
+/** 签到记录没读出来：和「还没有记录」分开说，否则读失败时看上去像从来没签过 */
+const historyFailed = ref(false);
 const run = ref<AttendanceRunStatus | null>(null);
 const starting = ref(false);
 const signing = ref<Record<string, boolean>>({});
@@ -122,8 +124,10 @@ async function loadList() {
 async function loadHistory() {
   try {
     history.value = await attendanceApi.history(HISTORY_DAYS);
+    historyFailed.value = false;
   } catch {
     history.value = null;
+    historyFailed.value = true;
   }
   // 签到记录变了，签到详情跟着刷新（第一次由它自己读）
   void dayDetail.value?.reload();
@@ -225,11 +229,21 @@ function toggleTip(s: SiteAttendance): string {
 }
 
 /** 时间列：签过的写签到时间，还在等的写计划时间 */
+/** 这张表是「今天的签到」：今天的时刻只写时分，日期写出来是重复；跨了天（时区边界）才带上日期 */
+function clockText(sec: number): string {
+  const d = new Date(sec * 1000);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (!sameDay) return formatShortDateTime(sec * 1000);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 function timeText(s: SiteAttendance): string {
-  if (s.last_attempt_at) return formatShortDateTime(s.last_attempt_at * 1000);
-  if (s.status === "pending" && s.scheduled_at) {
-    return `计划 ${formatShortDateTime(s.scheduled_at * 1000)}`;
-  }
+  if (s.last_attempt_at) return clockText(s.last_attempt_at);
+  if (s.status === "pending" && s.scheduled_at) return `计划 ${clockText(s.scheduled_at)}`;
   return "-";
 }
 
@@ -310,7 +324,7 @@ onBeforeUnmount(stopPoll);
     </Teleport>
 
     <!-- 左栏：今天的签到与最近两周的记录 -->
-    <div class="pt-cards pt-cards--wide">
+    <div class="pt-cards pt-cards--wide att-left">
       <PtPanel title="今天的签到" icon="calendar-check" :count="rows.length" padding="none">
         <template #actions>
           <el-segmented
@@ -351,6 +365,11 @@ onBeforeUnmount(stopPoll);
           :row-class-name="() => ROW_LINK_CLASS"
           data-testid="att-table"
           @row-click="onRowClick">
+          <!--
+            列宽按左栏的实际宽度排（1440 下约 734）：以前六列加起来 884，「操作」整列挤出首屏，
+            逐站的「立即签到」要横向滚动才看得到。现在说明列吃剩下的宽度，时间只写时分（今天的表），
+            操作列固定在右边：170 + 80 + 88 + 176 + 100 + 104 = 718。
+          -->
           <el-table-column label="站点" min-width="170" class-name="pt-cell-strong">
             <template #default="{ row }">
               <span class="att-site">
@@ -369,7 +388,7 @@ onBeforeUnmount(stopPoll);
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="自动签到" width="96" align="center">
+          <el-table-column label="自动签到" width="80" align="center">
             <template #default="{ row }">
               <el-tooltip :content="toggleTip(row)" placement="top">
                 <span class="att-sw">
@@ -384,7 +403,7 @@ onBeforeUnmount(stopPoll);
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="今天" width="104">
+          <el-table-column label="今天" width="88">
             <template #default="{ row }">
               <PtStatusPill :tone="attendanceView(row).tone" size="sm">
                 {{ attendanceView(row).label }}
@@ -393,15 +412,20 @@ onBeforeUnmount(stopPoll);
           </el-table-column>
           <el-table-column
             label="说明"
-            min-width="260"
+            min-width="176"
             class-name="pt-cell-1line"
             show-overflow-tooltip>
             <template #default="{ row }">{{ attendanceView(row).detail }}</template>
           </el-table-column>
-          <el-table-column label="时间" width="150" class-name="pt-cell-muted">
+          <el-table-column label="时间" width="100" class-name="pt-cell-muted">
             <template #default="{ row }">{{ timeText(row) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="104" align="center" class-name="pt-cell-act">
+          <el-table-column
+            label="操作"
+            width="104"
+            align="center"
+            fixed="right"
+            class-name="pt-cell-act">
             <template #default="{ row }">
               <el-button
                 size="small"
@@ -462,8 +486,15 @@ onBeforeUnmount(stopPoll);
       </PtPanel>
 
       <PtPanel title="签到记录" icon="history" :count="`最近 ${HISTORY_DAYS} 天`" padding="none">
+        <PtDataState v-if="historyFailed" dense state="error" sub="签到记录没读出来，可以重试">
+          <template #action>
+            <el-button size="small" @click="loadHistory">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
         <PtDataState
-          v-if="!historyRows.length"
+          v-else-if="!historyRows.length"
           dense
           state="empty"
           title="还没有签到记录"
@@ -514,7 +545,16 @@ onBeforeUnmount(stopPoll);
         </div>
       </PtPanel>
 
-      <PtPanel title="签到详情" icon="list-checks" padding="none" data-testid="att-detail">
+      <!--
+        没有任何签到记录时不画「签到详情」：它和上面那张卡是同一个前提，
+        两块一样的空态叠在一起只是重复（第一次有记录以后它就出来）。
+      -->
+      <PtPanel
+        v-if="historyRows.length"
+        title="签到详情"
+        icon="list-checks"
+        padding="none"
+        data-testid="att-detail">
         <AttendanceDayDetail ref="dayDetail" v-model:day="detailDay" :days="history?.days ?? []" />
       </PtPanel>
     </div>
@@ -527,6 +567,14 @@ onBeforeUnmount(stopPoll);
 </template>
 
 <style scoped>
+/*
+ * 左栏两张卡按自己的内容高。外层两栏的行高跟着右边那张长的「签到设置」走，
+ * 左栏这层栅格不顶对齐的话，多出来的高度会摊进两张卡里，表格底下空出一大块。
+ */
+.att-left {
+  align-self: start;
+}
+
 .att-site {
   display: inline-flex;
   gap: var(--pt-space-2);

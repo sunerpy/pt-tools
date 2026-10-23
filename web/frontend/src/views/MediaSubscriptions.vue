@@ -471,13 +471,19 @@ onBeforeUnmount(() => clearInterval(autoTimer));
             </div>
           </template>
         </el-table-column>
-        <el-table-column
-          label="最近一次"
-          min-width="240"
-          class-name="pt-cell-1line"
-          show-overflow-tooltip>
+        <!--
+          「最近一次」以前整格单行截断：下载到的种子名只剩前半截（实测可见 246 / 实际 487），
+          下次搜索、追更这几行也跟着挤成一行。现在结果最多两行，完整内容在悬停提示里。
+        -->
+        <el-table-column label="最近一次" min-width="280">
           <template #default="{ row }">
-            <div>{{ row.message || "还没搜过" }}</div>
+            <el-tooltip
+              :content="row.message"
+              :disabled="!row.message"
+              placement="top"
+              :show-after="300">
+              <div class="ms-msg">{{ row.message || "还没搜过" }}</div>
+            </el-tooltip>
             <div v-if="row.status === 'active' && row.next_search_at" class="ms-sub">
               下次搜索 {{ formatShortDateTime(row.next_search_at) }}
             </div>
@@ -486,7 +492,11 @@ onBeforeUnmount(() => clearInterval(autoTimer));
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="" width="300" align="right">
+        <!--
+          操作列以前是 300 宽的无标题列，五个文字按钮并排（立即搜索 / 暂停 / 详情 / 修改 / 删除），
+          把「最近一次」挤窄。常用的留在外面，修改、删除收进「更多」。
+        -->
+        <el-table-column label="操作" width="232" align="right" class-name="ms-acts">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'active'"
@@ -521,10 +531,28 @@ onBeforeUnmount(() => clearInterval(autoTimer));
             <el-button link :data-testid="`ms-detail-${row.id}`" @click="showDetail(row)"
               >详情</el-button
             >
-            <el-button link :data-testid="`ms-edit-${row.id}`" @click="edit(row)">修改</el-button>
-            <el-button link type="danger" :data-testid="`ms-del-${row.id}`" @click="removeSub(row)"
-              >删除</el-button
-            >
+            <el-dropdown
+              class="ms-more"
+              trigger="click"
+              @command="(c: unknown) => (c === 'edit' ? edit(row) : removeSub(row))">
+              <el-button link :aria-label="`${subName(row)} 的更多操作`">
+                <PtIcon name="ellipsis" :size="16" />
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="edit" :data-testid="`ms-edit-${row.id}`">
+                    <PtIcon name="pencil" :size="14" class="ms-dd-ico" /><span>修改</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    command="del"
+                    divided
+                    class="ms-dd-danger"
+                    :data-testid="`ms-del-${row.id}`">
+                    <PtIcon name="trash-2" :size="14" class="ms-dd-ico" /><span>删除</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -943,6 +971,35 @@ onBeforeUnmount(() => clearInterval(autoTimer));
 .ms-sub {
   font-size: 12px;
   color: var(--pt-t3);
+}
+
+/* 最近一次的结果：最多两行；种子名没有空格，要允许在任意处断行 */
+.ms-msg {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 操作排成一行：窄了「更多」会被挤到第二行（td 是 el-table 渲染的，没有本组件的 scoped 属性，要 :deep） */
+:deep(td.ms-acts .cell) {
+  white-space: nowrap;
+}
+
+/* 「更多」与左边的文字按钮同一节奏（link 按钮之间是 12 的间距） */
+.ms-more {
+  margin-left: 12px;
+  vertical-align: middle;
+}
+
+/* 下拉项：图标与文字的间距；删除用危险色。菜单 teleport 到 body，scoped 的属性选择器照样生效 */
+.ms-dd-ico {
+  margin-right: 6px;
+}
+
+.ms-dd-danger {
+  color: var(--pt-dang);
 }
 
 .ms-error {

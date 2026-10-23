@@ -44,8 +44,8 @@ Overview → Data export (概览 → 数据导出) in the left navigation, or Ex
 
 - Styles: Bento (便当, the default: tiles of different sizes, the most detail), Paper (素笺: paper background, thin rules and large serif figures), Night (夜幕: dark glass cards, with a ring showing upload against billed download), Wrapped (回顾: one large figure per sentence, the three sites with the most upload on a podium) and Receipt (小票: a thermal receipt with a red stamp and a barcode). Each style has two or three color schemes. The style and color scheme you pick are remembered in this browser.
 - The preview is the exported image. Download image (下载图片) saves a PNG at twice the size (1280 pixels wide); Copy image (复制图片) puts it on the clipboard, which needs pt-tools opened over HTTPS or on localhost. On a phone the preview is scaled down to fit the screen; the exported image is the same.
-- Masking: site names and site icons are masked by default, and usernames can be masked as well. A name keeps only its first character followed by a bar; an icon becomes a 4×4 block of its colors. The original text is not in the image and cannot be recovered.
-- The per-site details show the first 10 sites by default, or the sites you tick, sorted by upload. The period increments can be today, this week or this month, and are left out until comparable snapshots exist.
+- Masking: site names, site icons and usernames are all masked by default; each can be turned off on its own. A name keeps only its first character followed by a bar; an icon becomes a 4×4 block of its colors. The original text is not in the image and cannot be recovered.
+- The per-site details start with the 10 sites with the most upload ticked; tick the sites you want, and with none ticked the image has no per-site details. Sites are sorted by upload. The period increments can be today, this week or this month, and are left out until comparable snapshots exist.
 - The ratio on the image is the average of the sites' ratios, the same figure as Average ratio (平均分享率) on the User Stats page.
 
 ## Daily report

@@ -1128,23 +1128,27 @@ onUnmounted(() => {
 
       <template #right>
         <!-- 画板 bar-64 右端的 bi-columns-3：十四列里哪几列要看，自己定 -->
-        <el-popover placement="bottom-end" trigger="click" :width="180">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="userinfo-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="ui-cols">
-            <label v-for="c in OPTIONAL_USERINFO_COLS" :key="c.key" class="ui-cols__row">
-              <el-checkbox :model-value="colShown(c.key)" @change="toggleUserinfoCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="180">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="userinfo-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="ui-cols">
+                <label v-for="c in OPTIONAL_USERINFO_COLS" :key="c.key" class="ui-cols__row">
+                  <el-checkbox :model-value="colShown(c.key)" @change="toggleUserinfoCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <!-- 画板 bar-64 右端的 bi-file-down -->
         <el-tooltip content="按当前筛选导出 CSV" placement="top">
@@ -1187,7 +1191,8 @@ onUnmounted(() => {
           </template>
         </el-dropdown>
 
-        <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
+        <!-- 次要动作用默认钮：type="info" 是一块实心灰，在这一排里比主操作「同步全部」还抢眼 -->
+        <el-button size="small" @click="$router.push('/userinfo/export')">
           <PtIcon name="share-2" :size="14" />
           <span>导出分享</span>
         </el-button>

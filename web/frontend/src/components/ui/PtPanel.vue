@@ -23,8 +23,22 @@ const props = withDefaults(
     padding?: "none" | "md" | "lg";
     /** 关掉阴影，用于嵌套在别的面板里 */
     flat?: boolean;
+    /**
+     * 页脚贴住可视区底部（position: sticky）。给比一屏还长的表单用：改了上面的字段，
+     * 不用滚到卡底才点得到「保存」。卡底进入视野时页脚回到原位，不会出现两套按钮。
+     */
+    stickyFoot?: boolean;
   }>(),
-  { title: "", icon: "", count: undefined, action: "", actionIcon: "", padding: "md", flat: false },
+  {
+    title: "",
+    icon: "",
+    count: undefined,
+    action: "",
+    actionIcon: "",
+    padding: "md",
+    flat: false,
+    stickyFoot: false,
+  },
 );
 
 const emit = defineEmits<{ action: [] }>();
@@ -39,7 +53,7 @@ const hasCount = computed(() => props.count !== undefined && props.count !== "")
 </script>
 
 <template>
-  <section class="pt-panel" :class="{ 'is-flat': flat }">
+  <section class="pt-panel" :class="{ 'is-flat': flat, 'is-sticky-foot': stickyFoot }">
     <header v-if="hasHead" class="pt-panel__head">
       <PtIcon v-if="icon" :name="icon" :size="16" class="pt-panel__icon" />
       <h2 class="pt-panel__title">
@@ -207,6 +221,20 @@ const hasCount = computed(() => props.count !== undefined && props.count !== "")
   font-size: var(--pt-fz-sm);
   color: var(--pt-t3);
   border-top: 1px solid var(--pt-border);
+}
+
+/*
+ * 贴底页脚：滚动容器是外壳的内容区（.pt-shell__content），卡片一路往上都没有裁切，sticky 才生效。
+ * 底色要实心（不然下面的字段透上来），圆角跟着卡；z-index 压过表单里 Element 的定位元素。
+ * 手机上不用另算 tab 栏：sticky 按滚动容器的内容框贴，内容区给 tab 栏让出的 padding-bottom 已经把它托到 tab 栏上沿
+ * （实测 390×844：内容区底 844、padding 72、tab 栏顶 772，bottom: 0 时页脚底正好 772）。
+ */
+.pt-panel.is-sticky-foot .pt-panel__foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--pt-surface);
+  border-radius: 0 0 calc(var(--pt-r-lg) - 1px) calc(var(--pt-r-lg) - 1px);
 }
 
 /* 正文贴边时，圆角要靠面板自己裁掉，否则表格首行会盖住左上角。

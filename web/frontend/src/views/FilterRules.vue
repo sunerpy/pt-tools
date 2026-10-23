@@ -683,23 +683,27 @@ function decisionText(decision: string | undefined): string {
 
       <template #right>
         <!-- 画板 bar-64 右端的 bi-columns-3 / bi-file-down -->
-        <el-popover placement="bottom-end" trigger="click" :width="180">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="rules-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="rules-cols">
-            <label v-for="c in OPTIONAL_RULE_COLS" :key="c.key" class="rules-cols__row">
-              <el-checkbox :model-value="ruleColShown(c.key)" @change="toggleRuleCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="180">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="rules-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="rules-cols">
+                <label v-for="c in OPTIONAL_RULE_COLS" :key="c.key" class="rules-cols__row">
+                  <el-checkbox :model-value="ruleColShown(c.key)" @change="toggleRuleCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <el-tooltip content="按当前筛选导出 CSV" placement="top">
           <button
@@ -712,16 +716,10 @@ function decisionText(decision: string | undefined): string {
           </button>
         </el-tooltip>
 
-        <el-tooltip content="重新拉取规则与数据源" placement="bottom">
-          <button
-            type="button"
-            class="pt-band__iconbtn"
-            aria-label="刷新"
-            :disabled="loading"
-            @click="reloadAll">
-            <PtIcon name="refresh-cw" :size="15" />
-          </button>
-        </el-tooltip>
+        <!--
+          画板这一端画的是三枚钮，第三枚是刷新。不放：页头右侧已经有一颗「刷新」，调的是同一个 reloadAll，
+          两颗隔着一行摆着 —— 同一屏两个一样的入口正是用户验收退回过的那类重复。
+        -->
       </template>
     </PtToolbar>
 

@@ -58,6 +58,11 @@ const form = ref<GlobalSettings>({
  */
 const reportForm = ref<DailyReportSettings>({ enabled: false, time: "22:00", channel_ids: [] });
 const reportSaved = ref<DailyReportSettings | null>(null);
+/**
+ * 最后一次读回 / 保存成功的全局配置。页头摘要按它算 —— 摘要的口径是「当前生效」，
+ * 之前直接跟着表单走：改了间隔还没点保存，页头就已经写成新值，读起来像已经生效了。
+ */
+const savedForm = ref<GlobalSettings | null>(null);
 const reportChannels = ref<NotificationConfig[]>([]);
 /** 同上：战报设置读不回来时整段禁用 */
 const reportLoadFailed = ref(false);
@@ -105,11 +110,11 @@ const activeFilterMode = computed(() =>
  * 全部取自读回来的配置，没读回来就返回空串（外壳里 :empty 会把这行收掉）。
  */
 const headSub = computed(() => {
-  if (!loaded.value) return "";
-  const f = form.value;
+  const f = savedForm.value;
+  if (!loaded.value || !f) return "";
   const parts = [
     `间隔 ${f.default_interval_minutes} 分钟`,
-    activeFilterMode.value?.short ?? "",
+    filterModeOptions.find((o) => o.value === f.default_filter_mode)?.short ?? "",
     f.torrent_min_size_gb > 0
       ? `种子 ${f.torrent_min_size_gb}–${f.torrent_size_gb} GB`
       : `种子上限 ${f.torrent_size_gb} GB`,
@@ -134,6 +139,7 @@ async function loadData() {
     ...data,
     default_interval_minutes: Math.max(5, data.default_interval_minutes || 10),
   };
+  savedForm.value = { ...form.value };
   loaded.value = true;
   showWarning.value = !form.value.download_dir;
   const [report, channels] = await Promise.all([
@@ -168,10 +174,12 @@ async function save() {
   saving.value = true;
   try {
     try {
-      await globalApi.save({
+      const next = {
         ...form.value,
         default_interval_minutes: Math.max(5, form.value.default_interval_minutes),
-      });
+      };
+      await globalApi.save(next);
+      savedForm.value = next;
     } catch (e: unknown) {
       ElMessage.error((e as Error).message || "保存失败");
       return;
@@ -305,13 +313,12 @@ async function save() {
                   </el-radio-button>
                 </el-radio-group>
                 <div v-if="activeFilterMode" class="field-tip">{{ activeFilterMode.desc }}</div>
-                <div class="pt-note pt-note--warn mode-note">
-                  <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-                  <span>
-                    v0.26.0 起：智能模式下，为 RSS 关联过滤规则 =
-                    精准下载，不再附带自动下载免费种子。RSS
-                    订阅级别可覆盖此默认值，全局大小上限对所有模式都生效。
-                  </span>
+                <!--
+                  这里以前是一条橙色警告「v0.26.0 起：智能模式下……」—— 那是版本沿革，不是风险，
+                  前半句和上面选中模式的说明重复。留下后半句（订阅可覆盖、大小上限都生效）当说明。
+                -->
+                <div class="field-tip">
+                  每个 RSS 订阅可以单独选下载模式，覆盖这里的默认值；种子大小上下限对所有模式都生效
                 </div>
               </el-form-item>
 
@@ -444,7 +451,7 @@ async function save() {
                 <el-form-item label="发送时刻">
                   <el-time-select
                     v-model="reportForm.time"
-                    :disabled="reportLoadFailed"
+                    :disabled="reportLoadFailed || !reportForm.enabled"
                     start="00:00"
                     step="00:15"
                     end="23:45"
@@ -455,7 +462,7 @@ async function save() {
                 <el-form-item label="接收通道">
                   <el-select
                     v-model="reportForm.channel_ids"
-                    :disabled="reportLoadFailed"
+                    :disabled="reportLoadFailed || !reportForm.enabled"
                     multiple
                     collapse-tags
                     placeholder="选择通知通道"

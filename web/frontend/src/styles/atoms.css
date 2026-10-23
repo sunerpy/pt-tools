@@ -254,11 +254,15 @@
   color: var(--pt-t2);
 }
 
-/* 字段说明：跟在控件下方，11 号 t3，不占 el-form-item 的错误位 */
+/*
+ * 字段说明：跟在控件下方，12 号 t3，不占 el-form-item 的错误位。
+ * 以前是 11 号（表头、状态栏那一档）：设置页上这些说明讲的是安全边界、删除后果、填法，
+ * 一整页 11 号的长句读起来太吃力（宽屏上尤其明显）。11 号留给表头与很短的元数据。
+ */
 .pt-form .field-tip {
   width: 100%;
   margin-top: 4px;
-  font-size: var(--pt-fz-label);
+  font-size: var(--pt-fz-sm);
   line-height: var(--pt-lh-body);
   color: var(--pt-t3);
 }
@@ -392,6 +396,15 @@
    只靠颜色分辨哪一档选中，在 12px 上读起来很弱 */
 .pt-seg.el-segmented .el-segmented__item.is-selected {
   font-weight: 600;
+}
+
+/* 手机上档位多的分段（已支持站点的六种架构、签到的三档范围）比屏宽：在自己里面横着滚，不把页面撑出横向滚动 */
+@media (max-width: 768px) {
+  .pt-seg.el-segmented {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
 }
 
 /*
@@ -635,6 +648,17 @@
 .pt-band__iconbtn:disabled:hover {
   color: var(--pt-t2);
   background: var(--pt-hover);
+}
+
+/*
+ * el-tooltip 的触发锚点：tooltip 要一个真实的 DOM 元素来挂 hover。
+ * 两种情况必须垫这一层 span —— ① 触发按钮本身是 el-popover 的 reference（popover 已经占了按钮的事件）；
+ * ② 按钮是 disabled 的（禁用按钮不发 mouseenter，提示「为什么不能点」就永远出不来）。
+ */
+.pt-tip-anchor {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
 
 /*
@@ -1042,6 +1066,46 @@
 
 .pt-cards__full {
   grid-column: 1 / -1;
+}
+
+/*
+ * 表单 + 运行情况（IYUU 辅种、CookieCloud）：表单停在 640，卡够宽时运行状态与说明放到右边，
+ * 不够宽就堆到表单下面。以前表单下面才是状态，1440 屏上右边空着半张卡。
+ * 按卡自己的宽度判（容器查询），不按视口：导航展开与收起时卡宽差两百多。
+ *   .pt-formaside > .pt-formaside__grid > (表单, .pt-formaside__aside)
+ */
+.pt-formaside {
+  container-type: inline-size;
+}
+
+.pt-formaside__grid {
+  display: grid;
+  gap: var(--pt-space-4);
+}
+
+@container (min-width: 900px) {
+  .pt-formaside__grid {
+    grid-template-columns: minmax(0, 640px) minmax(240px, 1fr);
+    gap: var(--pt-space-6);
+    align-items: start;
+  }
+}
+
+.pt-formaside__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-3);
+  min-width: 0;
+  padding: var(--pt-space-3) var(--pt-pad);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-md);
+}
+
+.pt-formaside__title {
+  margin: 0;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t2);
 }
 
 /*

@@ -54,13 +54,22 @@ const dirty = computed(
 /** 命令回复与助手回复只有正文：不显示标题框、标题变量与预览里的标题 */
 const noTitle = computed(() => !!current.value?.no_title);
 
-/** 按组排好的事件，组的顺序以目录给的为准；没有事件的组不显示 */
+/** 事件目录的搜索词：三十个事件排成两千多高的一列，找后面的命令回复、助手回复要一路滚到底 */
+const eventQuery = ref("");
+
+/** 按组排好的事件，组的顺序以目录给的为准；没有事件的组不显示（搜索时按名称与类型筛） */
 const grouped = computed(() => {
   const cat = catalog.value;
   if (!cat) return [];
+  const q = eventQuery.value.trim().toLowerCase();
+  const hit = (e: NotifyTemplateView) =>
+    !q || e.name.toLowerCase().includes(q) || e.type.toLowerCase().includes(q);
   const groups = cat.groups?.length ? cat.groups : [{ key: "notify", name: "通知", desc: "" }];
   return groups
-    .map((g) => ({ ...g, events: cat.events.filter((e) => (e.group || "notify") === g.key) }))
+    .map((g) => ({
+      ...g,
+      events: cat.events.filter((e) => (e.group || "notify") === g.key && hit(e)),
+    }))
     .filter((g) => g.events.length > 0);
 });
 
@@ -279,6 +288,28 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
         icon="bell"
         :count="catalog.events.length"
         data-testid="nt-events">
+        <el-input
+          v-model="eventQuery"
+          class="nt-search"
+          size="small"
+          clearable
+          placeholder="搜索事件名称或类型"
+          aria-label="搜索事件"
+          data-testid="nt-event-search">
+          <template #prefix><PtIcon name="search" :size="13" /></template>
+        </el-input>
+        <PtDataState
+          v-if="!grouped.length"
+          dense
+          state="zero"
+          title="没有匹配的事件"
+          sub="换个关键词，名称和类型（例如 rss_pushed）都能搜">
+          <template #action>
+            <el-button size="small" @click="eventQuery = ''">
+              <PtIcon name="x" :size="14" /><span>清空</span>
+            </el-button>
+          </template>
+        </PtDataState>
         <section
           v-for="g in grouped"
           :key="g.key"
@@ -307,7 +338,17 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
         </section>
       </PtPanel>
 
-      <PtPanel v-if="current" :title="current.name" icon="file-text" data-testid="nt-editor">
+      <!--
+        编辑卡按自己的内容高，不跟着左边的长目录拉成两千多高：以前「恢复默认 / 保存」被顶到整页最底下。
+        卡比一屏长时页脚贴住可视区底部。
+      -->
+      <PtPanel
+        v-if="current"
+        class="nt-editor"
+        :title="current.name"
+        icon="file-text"
+        sticky-foot
+        data-testid="nt-editor">
         <template #actions>
           <PtStatusPill
             :tone="current.customized ? 'primary' : 'neutral'"
@@ -442,6 +483,14 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
 </template>
 
 <style scoped>
+.nt-search {
+  margin-bottom: var(--pt-space-3);
+}
+
+.nt-editor {
+  align-self: start;
+}
+
 .nt-group + .nt-group {
   margin-top: 12px;
   padding-top: 12px;

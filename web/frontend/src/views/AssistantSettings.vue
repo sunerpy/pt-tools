@@ -273,7 +273,8 @@ onMounted(load);
       data-testid="ass-state" />
 
     <template v-else>
-      <PtPanel title="设置" icon="sparkles" data-testid="ass-settings">
+      <!-- 这张表单比一屏长（服务商、上限、压缩、语音……）：保存与测试贴在可视区底部 -->
+      <PtPanel title="设置" icon="sparkles" sticky-foot data-testid="ass-settings">
         <el-form class="pt-form" label-position="top" @submit.prevent>
           <el-form-item label="启用 AI 助手">
             <el-switch v-model="form.enabled" data-testid="ass-enabled" />
@@ -576,7 +577,7 @@ onMounted(load);
         </template>
       </PtPanel>
 
-      <PtPanel title="安全" icon="shield-check" data-testid="ass-safety">
+      <PtPanel title="安全" icon="shield-check" class="ass-aside" data-testid="ass-safety">
         <ul class="ass-list">
           <li>
             对话内容与工具查到的结果（站点数据、种子标题、下载器状态）会发给所选的模型服务商。
@@ -699,6 +700,11 @@ onMounted(load);
   font-size: 13px;
   color: var(--pt-t1);
   word-break: break-all;
+}
+
+/* 右栏窄卡自己顶对齐：以前被左边那张一屏多高的表单拉到整页高，下面大半是空白 */
+.ass-aside {
+  align-self: start;
 }
 
 .ass-list {

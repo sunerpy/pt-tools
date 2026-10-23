@@ -207,7 +207,7 @@ async function submit() {
            PtIcon 找不到就画一个空 svg，开发环境只有一句 console 警告 -->
       <PtPanel title="忘记密码怎么办" icon="rotate-ccw">
         <ul class="pw-list">
-          <li>Web 端没有找回入口：账号只存在本机库里，没有邮箱可以发信。</li>
+          <li>Web 端没有找回入口：账号只存在本机数据库里，没有邮箱可以发信。</li>
           <li>
             带 <code>PT_ADMIN_RESET=1</code> 与 <code>PT_ADMIN_USER</code> /
             <code>PT_ADMIN_PASS</code> 重启一次，启动时会把该用户的口令改成

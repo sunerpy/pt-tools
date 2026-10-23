@@ -32,6 +32,16 @@ const resultTone = computed<"ok" | "warn" | "dang">(() => {
 });
 
 /**
+ * 端点和 token 都有了才能测：缺一样时请求注定失败，按钮直接置灰，旁边说缺的是哪一样，
+ * 不再让人点了以后读一条错误提示才知道。
+ */
+const testBlocker = computed(() => {
+  if (!config.value.endpoint.trim()) return "先填 Manager 端点";
+  if (!config.value.has_token && !tokenInput.value.trim()) return "先填 auth token";
+  return "";
+});
+
+/**
  * 画板 p-life 1080「页面状态」：这一页可能处在哪几种状态、各自下一步做什么。
  * 判定只用本页已有的事实（端点填了没、token 存了没、测过没、测的结果），不猜后端。
  */
@@ -258,9 +268,18 @@ async function save() {
         <span class="pt-foot-note">
           为开启了反爬虫（Cloudflare / ja3 指纹）的站点提供后备探测路径
         </span>
-        <el-button data-testid="cloak-test-btn" :loading="testing" @click="testConnection">
-          <PtIcon name="signal" :size="14" /><span>测试连接</span>
-        </el-button>
+        <el-tooltip :content="testBlocker" :disabled="!testBlocker" placement="top">
+          <!-- 包一层：禁用的按钮不发鼠标事件，tooltip 挂在外层才显示得出来 -->
+          <span class="pt-tip-anchor">
+            <el-button
+              data-testid="cloak-test-btn"
+              :loading="testing"
+              :disabled="!!testBlocker"
+              @click="testConnection">
+              <PtIcon name="signal" :size="14" /><span>测试连接</span>
+            </el-button>
+          </span>
+        </el-tooltip>
         <el-button type="primary" data-testid="cloak-save-btn" :loading="saving" @click="save">
           <PtIcon name="save" :size="14" /><span>保存配置</span>
         </el-button>
