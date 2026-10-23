@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.39](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.38...v1.0.0-rc.39) (2026-10-23)
+
+
+### Bug Fixes
+
+* **login:** 发封号提醒前先探测一次；Rousi 最近活跃只认站点记录，凭据写明是个人 API Key ([#767](https://github.com/sunerpy/pt-tools/issues/767)) ([a064718](https://github.com/sunerpy/pt-tools/commit/a064718fad5359c29e459025ef8f2cac7db58f36))
+
 ## [1.0.0-rc.38](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.37...v1.0.0-rc.38) (2026-10-23)
 
 
