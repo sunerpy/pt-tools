@@ -73,41 +73,25 @@ func TestRousiDriver_Attend(t *testing.T) {
 	}
 }
 
-// 站点的 last_active_at 停在旧值时，今天签到过就按今天零点（东八区）算最近活跃；没签到时照旧用 last_active_at。
-func TestRousiDriver_GetUserInfo_LastAccessFromAttendance(t *testing.T) {
-	today := time.Now().In(rousiDayZone).Format("2006-01-02")
-	profile := `{"code":0,"message":"success","data":{"id":1,"username":"t","last_active_at":"2026-08-11T15:59:59Z"}}`
-	run := func(t *testing.T, stats string) int64 {
-		t.Helper()
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/api/v1/profile":
-				_, _ = w.Write([]byte(profile))
-			case "/api/points/attendance/stats":
-				if stats == "" {
-					w.WriteHeader(http.StatusForbidden)
-					return
-				}
-				_, _ = w.Write([]byte(stats))
-			default:
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}))
-		defer server.Close()
-		info, err := newTestRousiDriverWithURL(server.URL).GetUserInfo(context.Background())
-		require.NoError(t, err)
-		return info.LastAccess
-	}
-	stale := time.Date(2026, 8, 11, 15, 59, 59, 0, time.UTC).Unix()
-	start, err := time.ParseInLocation("2006-01-02", today, rousiDayZone)
+// 最近活跃只认站点的 last_active_at：今天签到过也不算（签到不刷新站点的记录，保号要用浏览器登录），也不再去查签到统计。
+func TestRousiDriver_GetUserInfo_LastAccessIsSiteValue(t *testing.T) {
+	statsCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/profile":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"id":1,"username":"t","last_active_at":"2026-08-11T15:59:59Z"}}`))
+		case "/api/points/attendance/stats":
+			statsCalls++
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"claimed_today":true,"today":"2026-10-24","current_streak":1}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	info, err := newTestRousiDriverWithURL(server.URL).GetUserInfo(context.Background())
 	require.NoError(t, err)
-
-	claimed, _ := json.Marshal(map[string]any{"code": 0, "message": "success", "data": map[string]any{"claimed_today": true, "today": today, "current_streak": 1}})
-	assert.Equal(t, start.Unix(), run(t, string(claimed)), "今天签到过：按今天零点算")
-
-	notClaimed, _ := json.Marshal(map[string]any{"code": 0, "message": "success", "data": map[string]any{"claimed_today": false, "today": today}})
-	assert.Equal(t, stale, run(t, string(notClaimed)), "今天没签到：照旧用站点的 last_active_at")
-	assert.Equal(t, stale, run(t, ""), "统计查不到：不影响用户信息")
+	assert.Equal(t, time.Date(2026, 8, 11, 15, 59, 59, 0, time.UTC).Unix(), info.LastAccess)
+	assert.Zero(t, statsCalls, "不查签到统计")
 }
 
 // Rousi 走自己的签到接口，站点定义里标出支持签到；基于 BaseSite 包出来的站点也能签到。

@@ -10,7 +10,7 @@ pt-tools supports three ways of authenticating with a site:
 | ----------- | ------------------------------------ | ---------------------------------------------- | ------------------------------------------------ |
 | **Cookie**  | HDSky, SpringSunday, HDDolby, NovaHD | The traditional way; expires from time to time | ✅ Synced automatically by the browser extension |
 | **API key** | M-Team                               | Valid for a long time                          | Entered by hand                                  |
-| **Passkey** | Rousi Pro                            | Valid for a long time                          | Entered by hand                                  |
+| **Passkey** | Rousi Pro (personal API key)         | Valid for a long time                          | Entered by hand                                  |
 
 **For sites that use a cookie, the browser extension is strongly recommended.** It saves you copying and pasting by hand, and updates the cookie when it expires.
 
@@ -214,6 +214,17 @@ The API key is shown only once after it is generated. Copy it straight away and 
 ```
 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
+
+### Getting a Rousi Pro personal API key
+
+Rousi Pro uses passkey authentication in pt-tools, but the field takes the site's personal API key, not the tracker passkey:
+
+1. Sign in to Rousi Pro in a browser and open Account → API Key (账户 → API Key, `https://rousi.pro/account/api-key`).
+2. Grant Read account profile (读取账户资料), Read and search torrents (读取与搜索种子) and Download torrents (下载种子); for automatic sign-in, also grant Sign in (执行签到).
+3. Click Create API Key (创建 API Key). The key is shown only once, so copy it.
+4. Enter it in the Passkey field of Rousi Pro's site details in pt-tools.
+
+Each account has one personal API key, which other tools such as MoviePilot share. Rotating it revokes the old key in every tool at once, so replace it in pt-tools as well; changed permissions on an existing key take effect only after rotating it.
 
 ### Keeping an API key safe
 

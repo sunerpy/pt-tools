@@ -21,7 +21,7 @@
 
 - **Cookie**：大多数 NexusPHP 站点。推荐安装 [PT Tools Helper 浏览器扩展](browser-extension.md)，登录站点后一键同步 Cookie。
 - **API Key**：例如 M-Team。
-- **Passkey**：例如 Rousi Pro。
+- **Passkey**：例如 Rousi Pro（填站点的个人 API Key，见[获取 Cookie 与 API Key](get-cookie-apikey.md#rousi-pro-个人-api-key-获取方法)）。
 
 获取方法见[获取 Cookie 与 API Key](get-cookie-apikey.md)。保存后，站点列表的「状态」一列会显示能否正常访问。
 

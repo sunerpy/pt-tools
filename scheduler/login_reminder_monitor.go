@@ -37,6 +37,8 @@ const (
 	failureNoticeAfter = 24 * time.Hour
 	// 探测成功但站点的 last_access 超过这么久没有前进，记为「访问未生效」。
 	accessStaleAfter = 48 * time.Hour
+	// 要发封号提醒时，上一次探测比这更早就先再探测一次（见 refreshBeforeReminder）。
+	loginReminderRefreshAfter = 30 * time.Minute
 	// 凭证类失败（会话过期、密钥错误）后隔这么久再探，失效的凭证不必每 6 小时请求一次站点。
 	credentialRetryDelay = 24 * time.Hour
 	// 动态站点（没有内置定义）隔这么久复查一次，期间不发请求。
@@ -140,6 +142,7 @@ type LoginReminderMonitor struct {
 	reminderTick         time.Duration
 	probeBudget          time.Duration
 	primaryTimeout       time.Duration
+	reminderRefreshAfter time.Duration // 发封号提醒前，上一次探测比它更早就先探测一次；0 不补探测
 	lookupDefinition     func(siteName string) (*v2.SiteDefinition, bool)
 	migrationCompletedAt time.Time
 	testSeq              atomic.Int64
@@ -210,23 +213,24 @@ func NewLoginReminderMonitor(cfg LoginReminderConfig) *LoginReminderMonitor {
 		cfg.DefinitionLookup = defaultDefinitionLookup
 	}
 	return &LoginReminderMonitor{
-		ctx:              ctx,
-		cancel:           cancel,
-		db:               cfg.DB,
-		notifier:         cfg.Notifier,
-		userInfo:         cfg.UserInfo,
-		fallback:         cfg.Fallback,
-		resolver:         cfg.Resolver,
-		decryptor:        cfg.Decryptor,
-		clock:            cfg.Clock,
-		logger:           cfg.Logger,
-		probeEvery:       cfg.ProbeEvery,
-		probeTick:        cfg.ProbeTick,
-		reminderTick:     cfg.ReminderTick,
-		probeBudget:      loginProbeBudget,
-		primaryTimeout:   loginProbePrimaryTimeout,
-		lookupDefinition: cfg.DefinitionLookup,
-		probeLocks:       make(map[string]*probeSlot),
+		ctx:                  ctx,
+		cancel:               cancel,
+		db:                   cfg.DB,
+		notifier:             cfg.Notifier,
+		userInfo:             cfg.UserInfo,
+		fallback:             cfg.Fallback,
+		resolver:             cfg.Resolver,
+		decryptor:            cfg.Decryptor,
+		clock:                cfg.Clock,
+		logger:               cfg.Logger,
+		probeEvery:           cfg.ProbeEvery,
+		probeTick:            cfg.ProbeTick,
+		reminderTick:         cfg.ReminderTick,
+		probeBudget:          loginProbeBudget,
+		primaryTimeout:       loginProbePrimaryTimeout,
+		reminderRefreshAfter: loginReminderRefreshAfter,
+		lookupDefinition:     cfg.DefinitionLookup,
+		probeLocks:           make(map[string]*probeSlot),
 	}
 }
 
@@ -985,31 +989,19 @@ func (m *LoginReminderMonitor) evaluateReminder(ctx context.Context, setting mod
 		m.logger.Warnw("login_reminder_invalid_cron", "site", setting.Name, "cron", cron, "err", err)
 		return
 	}
-	effective := EffectiveLastActive(state, now)
-	if effective.IsZero() {
+	effective, tier, tierEscalated, due := m.reminderDue(setting.Name, state, expr, now)
+	if !due {
 		return
 	}
-	tier := ComputeTier(state, effective, now)
-	if tier == tierNone {
-		return
+	// 存下的状态是最多 6 小时前的探测结果：用户可能刚用浏览器登录过站点。先探测一次，按新的结果再判断一次。
+	if fresh, ok := m.refreshBeforeReminder(ctx, setting, state, now); ok {
+		state = fresh
+		if effective, tier, tierEscalated, due = m.reminderDue(setting.Name, state, expr, now); !due {
+			m.logger.Infow("login_reminder_skipped_after_probe", "site", setting.Name, "tier", tier)
+			return
+		}
 	}
-	if m.inMigrationSilenceWindow(now) && tier != tierImminent {
-		m.logger.Debugw("login_reminder_migration_silence_skip", "site", setting.Name, "tier", tier)
-		return
-	}
-
 	windowStart := expr.WindowStart(now)
-	tierEscalated := tierIsHigher(tier, state.LastReminderTier)
-	if !tierEscalated {
-		if !expr.Match(now) {
-			m.logger.Debugw("login_reminder_window_skip", "site", setting.Name, "tier", tier, "reason", "cron_not_matched")
-			return
-		}
-		if state.LastReminderSentAt != nil && !state.LastReminderSentAt.Before(windowStart) {
-			m.logger.Debugw("login_reminder_window_skip", "site", setting.Name, "tier", tier, "reason", "already_sent_in_window")
-			return
-		}
-	}
 
 	daysRemaining := DaysRemaining(state, effective, now)
 	daysSinceActive := int(now.Sub(effective) / (24 * time.Hour))
@@ -1061,6 +1053,63 @@ func (m *LoginReminderMonitor) evaluateReminder(ctx context.Context, setting mod
 	} else {
 		m.logger.Infow("login_reminder_fired", "site", setting.Name, "tier", tier)
 	}
+}
+
+// reminderDue 按状态算出判定活跃时间与档位，并判断这一刻是否该发封号提醒：档位比上一次提醒更紧急时立即发，
+// 否则只在提醒 cron 的时刻发、同一个时段只发一次。
+func (m *LoginReminderMonitor) reminderDue(site string, state *models.SiteLoginState, expr *CronExpr, now time.Time) (effective time.Time, tier string, escalated, due bool) {
+	effective = EffectiveLastActive(state, now)
+	if effective.IsZero() {
+		return effective, "", false, false
+	}
+	tier = ComputeTier(state, effective, now)
+	if tier == tierNone {
+		return effective, tier, false, false
+	}
+	if m.inMigrationSilenceWindow(now) && tier != tierImminent {
+		m.logger.Debugw("login_reminder_migration_silence_skip", "site", site, "tier", tier)
+		return effective, tier, false, false
+	}
+	escalated = tierIsHigher(tier, state.LastReminderTier)
+	if !escalated {
+		if !expr.Match(now) {
+			m.logger.Debugw("login_reminder_window_skip", "site", site, "tier", tier, "reason", "cron_not_matched")
+			return effective, tier, false, false
+		}
+		if state.LastReminderSentAt != nil && !state.LastReminderSentAt.Before(expr.WindowStart(now)) {
+			m.logger.Debugw("login_reminder_window_skip", "site", site, "tier", tier, "reason", "already_sent_in_window")
+			return effective, tier, false, false
+		}
+	}
+	return effective, tier, escalated, true
+}
+
+// refreshBeforeReminder 在发封号提醒前补探测一次，返回探测后重读的状态。只对自动探测的站点、上一次探测成功
+// （或从未探测过）而且在 reminderRefreshAfter 以前时做；单站锁被占用（正在探测或签到）时不等，照旧按存下的状态提醒。
+func (m *LoginReminderMonitor) refreshBeforeReminder(ctx context.Context, setting models.SiteSetting, state *models.SiteLoginState, now time.Time) (*models.SiteLoginState, bool) {
+	if m.reminderRefreshAfter <= 0 || effectiveProbeMode(state.ProbeMode) != ProbeModeAuto {
+		return nil, false
+	}
+	// 上一次探测失败的（凭证失效、被限流、网络错误等）照失败后的重试间隔再探测，不为提醒多请求一次站点。
+	if status := sitelogin.ProbeStatus(state.LastProbeStatus); status != sitelogin.OK && status != "" {
+		return nil, false
+	}
+	if state.LastProbeAt != nil && now.Sub(*state.LastProbeAt) < m.reminderRefreshAfter {
+		return nil, false
+	}
+	release, ok := m.TryAcquireProbeLock(setting.Name)
+	if !ok {
+		m.logger.Debugw("login_reminder_refresh_skipped_busy", "site", setting.Name)
+		return nil, false
+	}
+	m.probeSiteInternal(ctx, setting, false)
+	release()
+	fresh, err := m.loadOrInitState(setting.Name)
+	if err != nil {
+		m.logger.Warnw("login_reminder_load_state_failed", "site", setting.Name, "err", err)
+		return nil, false
+	}
+	return fresh, true
 }
 
 // evaluateProbeNotices 判断探测失败与恢复提醒：

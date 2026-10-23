@@ -258,8 +258,10 @@ func TestAppScheduleIntervalCronAndPreview(t *testing.T) {
 	code, got, _ = preview(`{"schedule":{"kind":"daily","at":"20:00"},"subscription_id":` + id + `}`)
 	require.Equal(t, http.StatusOK, code)
 	require.Len(t, got.Next, 5)
-	assert.Equal(t, int64(24*3600), got.Next[1]-got.Next[0])
-	assert.Equal(t, 20, time.Unix(got.Next[0], 0).In(time.Local).Hour())
+	// 第一次可能被「离现在至少 30 分钟」推后（测试正好在 19:30–20:00 跑时），从第二次起是每天 20:00
+	assert.Equal(t, int64(24*3600), got.Next[2]-got.Next[1])
+	assert.Equal(t, 20, time.Unix(got.Next[1], 0).In(time.Local).Hour())
+	assert.Zero(t, time.Unix(got.Next[1], 0).In(time.Local).Minute())
 
 	code, got, _ = preview(`{"schedule":{"kind":"airtime"}}`)
 	require.Equal(t, http.StatusOK, code)

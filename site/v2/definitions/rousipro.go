@@ -23,7 +23,7 @@ var RousiProDefinition = &v2.SiteDefinition{
 	ID:          "rousipro",
 	Name:        "Rousi Pro",
 	Aka:         []string{"Rousi", "肉丝"},
-	Description: "综合性PT站点，使用Bearer Token认证",
+	Description: "综合性PT站点，使用个人 API Key 认证",
 	Schema:      v2.SchemaRousi,
 	AuthMethod:  v2.AuthMethodPasskey,
 	RateLimit:   2.0,
@@ -51,7 +51,7 @@ func createRousiDriver(config v2.SiteConfig, logger *zap.Logger) (v2.Site, error
 	}
 
 	if opts.Passkey == "" {
-		return nil, fmt.Errorf("Rousi 站点需要配置 Passkey（从站点账户设置-Passkey中获取）")
+		return nil, fmt.Errorf("Rousi 站点需要配置个人 API Key（在 Rousi 的「账户 → API Key」页面创建，不是 Tracker Passkey）")
 	}
 
 	siteDef := v2.GetDefinitionRegistry().GetOrDefault(config.ID)
@@ -464,6 +464,8 @@ func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 		}
 	}
 
+	// last_active_at 是保号依据：Rousi 只在网页访问时更新它（2026-10-23 实测），用 API Key 取资料、签到都不会刷新。
+	// 签到不算活跃（用户的选择）：只认站点自己的记录，保号要定期用浏览器登录。
 	if userData.LastActiveAt != "" {
 		if accessTime, err := time.Parse(time.RFC3339, userData.LastActiveAt); err == nil {
 			info.LastAccess = accessTime.Unix()
@@ -471,48 +473,16 @@ func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 			info.LastAccess = accessTime.Unix()
 		}
 	}
-	// 站点换到新系统以后 last_active_at 不再更新（2026-10 实测：当天网页登录、签到之后仍停在 2026-08-11），
-	// 只看它保号提醒会一直报「即将封禁」。今天签到过就说明账号今天还在用，取两者中较新的。
-	if signed := d.attendanceDay(ctx); signed > info.LastAccess {
-		info.LastAccess = signed
-	}
 
 	return info, nil
 }
 
-// rousiAttendanceEndpoint 是 Rousi 的签到接口。个人 API Key 放在 api-token 头里，要有签到（attendance:claim）权限；
+// rousiAttendanceEndpoint 是 Rousi 的签到接口。个人 API Key 放在 api-token 头里，要有「执行签到」（attendance:claim）权限；
 // 请求体 {"mode":"fixed"} 是固定奖励。返回 200 + code 0 是签到成功，400 + code 1 +「今日已签到」是今天签过了
-// （2026-10-19 用真实 Key 验证过已签到的返回）。出处：MoviePilot-Plugins 的 plugins.v2/autosignin/sites/rousipro.py
-// 与 jxxghp/MoviePilot-Plugins#1067。
+// （2026-10-24 用真实 Key 验证过这两种返回）。Rousi 的「账户 → API Key」页写明同一把 Key 可以给外部工具签到；
+// 网页自己的签到接口 /api/v1/me/attendance 只认登录会话，API Key 用不了。出处还有 MoviePilot-Plugins 的
+// plugins.v2/autosignin/sites/rousipro.py。
 const rousiAttendanceEndpoint = "/api/points/attendance"
-
-// rousiDayZone 是 Rousi 划分签到日的时区（新接口返回 day_boundary_timezone=Asia/Shanghai），固定东八区，不依赖系统时区库。
-var rousiDayZone = time.FixedZone("CST", 8*3600)
-
-type rousiAttendanceStats struct {
-	ClaimedToday  bool   `json:"claimed_today"`
-	Today         string `json:"today"`
-	CurrentStreak int    `json:"current_streak"`
-	TotalDays     int    `json:"total_days"`
-}
-
-// attendanceDay 查签到统计：今天签到过时返回今天零点（东八区）的时间戳，没签或查不到时返回 0。
-// 只是给最近活跃时间补一个依据，查不到不影响用户信息本身。
-func (d *rousiDriver) attendanceDay(ctx context.Context) int64 {
-	res, err := d.Execute(ctx, rousiRequest{Endpoint: rousiAttendanceEndpoint + "/stats", Method: http.MethodGet})
-	if err != nil || !res.IsSuccess() {
-		return 0
-	}
-	var stats rousiAttendanceStats
-	if json.Unmarshal(res.Data, &stats) != nil || !stats.ClaimedToday {
-		return 0
-	}
-	day, err := time.ParseInLocation("2006-01-02", stats.Today, rousiDayZone)
-	if err != nil {
-		return 0
-	}
-	return day.Unix()
-}
 
 type rousiAttendanceReward struct {
 	BaseReward    json.Number `json:"base_reward"`
@@ -536,7 +506,7 @@ func (d *rousiDriver) Attend(ctx context.Context) (v2.AttendResult, error) {
 	case res.StatusCode == http.StatusBadRequest && res.Code == 1 && strings.Contains(res.Message, "已签到"):
 		return v2.AttendResult{Status: v2.AttendAlready, Message: res.Message}, nil
 	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
-		return v2.AttendResult{}, fmt.Errorf("%w: Rousi 拒绝了签到：API Key 已失效或没有签到权限。在 Rousi 的个人 API Key 里勾上签到权限（attendance:claim），再把 Key 填到 pt-tools 的站点设置",
+		return v2.AttendResult{}, fmt.Errorf("%w: Rousi 拒绝了签到：API Key 已失效或没有签到权限。在 Rousi「账户 → API Key」勾上「执行签到」（attendance:claim）并轮换 Key（已有的 Key 改权限要轮换后才生效），再把新 Key 填到 pt-tools 的站点设置",
 			v2.ErrInvalidCredentials)
 	case err != nil:
 		return v2.AttendResult{}, fmt.Errorf("Rousi 签到失败: %w", err)
