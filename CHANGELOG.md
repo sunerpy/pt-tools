@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.38](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.37...v1.0.0-rc.38) (2026-10-23)
+
+
+### Bug Fixes
+
+* **brush:** M-Team 刷流可选读综合区、成人区或两个都读，单种免费的种子不再扫不到 ([#765](https://github.com/sunerpy/pt-tools/issues/765)) ([8c484e4](https://github.com/sunerpy/pt-tools/commit/8c484e4a7e5deb25fe8feae6770a31c1e60a8969))
+* **extension:** 定时同步「全部站点」也推 pt-tools 里停用的站点，只存 Cookie、不替用户启用 ([#764](https://github.com/sunerpy/pt-tools/issues/764)) ([0014015](https://github.com/sunerpy/pt-tools/commit/0014015ca9346284e37c4df628f70c3304dae455))
+* **webui:** 走查修页面缺陷：表格列宽、下载器视图面板、长表单贴底保存、站点「未探测」、导出默认打码用户名 ([#763](https://github.com/sunerpy/pt-tools/issues/763)) ([057399f](https://github.com/sunerpy/pt-tools/commit/057399f7333a9de89c8512ed2e4d971e0ae9ebed))
+
 ## [1.0.0-rc.37](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.36...v1.0.0-rc.37) (2026-10-22)
 
 
