@@ -150,6 +150,49 @@ func TestBrushAPI_Validation(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+// 分区只对 M-Team：取值规整成小写、不认识的拒收；别的站点（包括从 M-Team 改成别的站点）一律存成空。
+func TestBrushAPI_Section(t *testing.T) {
+	_, mux, ds := newBrushServer(t)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIKey: "k", IsBuiltin: true}).Error)
+	create := func(name, site, section string) (int, BrushTaskView, string) {
+		w := serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody(name, ds.ID, func(m map[string]any) {
+			m["site_name"], m["section"] = site, section
+		}))
+		var v BrushTaskView
+		_ = json.Unmarshal(w.Body.Bytes(), &v)
+		return w.Code, v, w.Body.String()
+	}
+
+	code, adult, body := create("成人区", "mteam", " ADULT ")
+	require.Equal(t, http.StatusCreated, code, body)
+	assert.Equal(t, "adult", adult.Section)
+
+	code, both, body := create("两个都读", "mteam", "all")
+	require.Equal(t, http.StatusCreated, code, body)
+	assert.Equal(t, "all", both.Section)
+
+	code, old, body := create("老任务", "mteam", "")
+	require.Equal(t, http.StatusCreated, code, body)
+	assert.Empty(t, old.Section, "空值等于综合区")
+
+	code, _, body = create("不认识", "mteam", "music")
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Contains(t, body, "不认识的分区 music")
+
+	code, other, body := create("hdsky", "hdsky", "adult")
+	require.Equal(t, http.StatusCreated, code, body)
+	assert.Empty(t, other.Section, "别的站点存成空")
+
+	w := serveAuthed(mux, http.MethodPut, fmt.Sprintf("/api/brush/tasks/%d", both.ID), brushBody("两个都读", ds.ID, func(m map[string]any) {
+		m["site_name"], m["section"] = "hdsky", "all"
+	}))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var moved BrushTaskView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &moved))
+	assert.Equal(t, "hdsky", moved.SiteName)
+	assert.Empty(t, moved.Section, "改成别的站点时清空")
+}
+
 type brushStubSite struct{ items []v2.TorrentItem }
 
 func (s brushStubSite) ID() string { return "hdsky" }

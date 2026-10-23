@@ -2196,6 +2196,8 @@ export interface BrushTaskConfig {
   /** 额外标签，逗号分隔；站点名、pt-tools-brush 与任务标签总会带上 */
   tags: string;
   interval_min: number;
+  /** 读哪个分区的列表，只对 M-Team：normal 综合区、adult 成人区、all 两个都读；空 = 综合区。别的站点为空 */
+  section: string;
   /** 允许的优惠类型，逗号分隔（FREE,2XFREE…）；空 = 只收免费 */
   discounts: string;
   min_free_remain_min: number;

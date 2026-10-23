@@ -64,6 +64,18 @@ func TestMTorrentDriver_PrepareSearch(t *testing.T) {
 			wantKey:  "",
 			wantPage: 1,
 		},
+		{
+			name:     "adult section",
+			query:    SearchQuery{Section: "adult"},
+			wantMode: "adult",
+			wantPage: 1,
+		},
+		{
+			name:     "unknown section falls back to normal",
+			query:    SearchQuery{Section: "all"},
+			wantMode: "normal",
+			wantPage: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1502,11 +1514,14 @@ func TestMTorrentDriver_ParseSearch_StrictDiscount(t *testing.T) {
 		{"id":"110","name":"J","size":"1024","category":"402",
 		 "status":{"discount":"PERCENT_50","discountEndTime":"2026-10-18 12:00:00",
 		  "promotionRule":{"categories":[402],"teams":[],"discount":"FREE","startTime":"2026-10-01 00:00:00","endTime":"2026-10-20 12:00:00"},
-		  "mallSingleFree":{"status":"ONGOING","startDate":"2026-10-01 00:00:00","endDate":"","isAdult":true}}}
-	],"total":10}`
+		  "mallSingleFree":{"status":"ONGOING","startDate":"2026-10-01 00:00:00","endDate":"","isAdult":true}}},
+		{"id":"111","size":"1024","category":"429",
+		 "status":{"discount":"PERCENT_50",
+		  "mallSingleFree":{"status":"ONGOING","startDate":"2026-10-16 07:47:39","endDate":"2026-10-19 07:47:39"}}}
+	],"total":11}`
 	items, err := driver.ParseSearch(MTorrentResponse{Code: "0", Message: "success", Data: json.RawMessage(raw)})
 	require.NoError(t, err)
-	require.Len(t, items, 10)
+	require.Len(t, items, 11)
 	byID := make(map[string]TorrentItem, len(items))
 	for _, it := range items {
 		byID[it.ID] = it
@@ -1530,6 +1545,7 @@ func TestMTorrentDriver_ParseSearch_StrictDiscount(t *testing.T) {
 		{"108", DiscountNone, "", FreeNotFree, "", ""},                                  // 分类覆盖但制作组不覆盖
 		{"109", DiscountNone, "", FreeNotFree, "", "promotionRule.categories: 格式无法解析"},  // 范围不是数组
 		{"110", DiscountFree, "2026-10-20 12:00:00", FreeUntil, "promotion_rule", ""},   // 可信的促销优先于没有结束时间的商城单种免费
+		{"111", DiscountFree, "2026-10-19 07:47:39", FreeUntil, "mall_single_free", ""}, // 成人区：种子本身 50%，单种免费进行中
 	}
 	for _, c := range cases {
 		t.Run(c.id, func(t *testing.T) {

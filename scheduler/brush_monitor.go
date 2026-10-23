@@ -93,6 +93,9 @@ type BrushRunResult struct {
 	Rejected []BrushReject `json:"rejected,omitempty"`
 	// Stopped 说明这一轮为什么没有继续加种（限额已满、推送被闸门拒绝等）；为空表示列表里能加的都加了。
 	Stopped string `json:"stopped,omitempty"`
+	// Scope 是这一轮读了哪些列表（只对 M-Team，例如「M-Team 综合区、成人区第 1 页」），写在 Summary 前面，
+	// 免得把整张列表的汇总读成某一个种子的判定；别的站点为空。
+	Scope string `json:"scope,omitempty"`
 }
 
 // BrushReject 是这一轮不符合入场条件的一类原因与个数。
@@ -128,6 +131,9 @@ func (r BrushRunResult) rejectSummary() string {
 // Summary 是写进任务 last_result 的一句话。
 func (r BrushRunResult) Summary() string {
 	parts := []string{fmt.Sprintf("列表 %d 个、符合条件 %d 个、加入 %d 个", r.Listed, r.Eligible, r.Added)}
+	if r.Scope != "" {
+		parts[0] = r.Scope + "：" + parts[0]
+	}
 	if s := r.rejectSummary(); s != "" {
 		parts = append(parts, s)
 	}
@@ -533,6 +539,53 @@ func withProgress(bt models.BrushTorrent, t downloader.Torrent) models.BrushTorr
 	return bt
 }
 
+// listBrushItems 读这一轮的种子列表。M-Team 按任务的分区读（两个都读时各读一次第一页、按种子编号去重）；
+// 只有一个分区读失败时另一个照常用，错误记进本轮结果；全都读失败才让这一轮失败。别的站点读一次。
+func (m *BrushMonitor) listBrushItems(ctx context.Context, site v2.Site, task models.BrushTask, res *BrushRunResult) ([]v2.TorrentItem, error) {
+	sections := brushSections(task, site.Kind())
+	var items []v2.TorrentItem
+	var read []string
+	var failed []error
+	seen := map[string]bool{}
+	for _, section := range sections {
+		searchCtx, cancel := context.WithTimeout(ctx, brushSearchTimeout)
+		got, err := site.Search(searchCtx, v2.SearchQuery{FreeOnly: true, Section: section})
+		cancel()
+		if err != nil {
+			if len(sections) > 1 {
+				err = fmt.Errorf("%s: %w", brushSectionLabel(section), err)
+			}
+			failed = append(failed, err)
+			continue
+		}
+		read = append(read, brushSectionLabel(section))
+		for _, it := range got {
+			if seen[it.ID] {
+				continue
+			}
+			seen[it.ID] = true
+			items = append(items, it)
+		}
+	}
+	if len(read) == 0 {
+		if len(failed) == 1 {
+			return nil, fmt.Errorf("读取 %s 的种子列表失败: %w", task.SiteName, failed[0])
+		}
+		msgs := make([]string, 0, len(failed))
+		for _, err := range failed {
+			msgs = append(msgs, err.Error())
+		}
+		return nil, fmt.Errorf("读取 %s 的种子列表失败: %s", task.SiteName, strings.Join(msgs, "；"))
+	}
+	for _, err := range failed {
+		res.Errors = append(res.Errors, fmt.Sprintf("读取 %s 的种子列表失败（%v），这一轮只用读到的分区", task.SiteName, err))
+	}
+	if site.Kind() == v2.SiteMTorrent {
+		res.Scope = "M-Team " + strings.Join(read, "、") + "第 1 页"
+	}
+	return items, nil
+}
+
 // admit 在限额之内从站点的免费列表里加种。
 func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl downloader.Downloader, active []models.BrushTorrent, byHash map[string]downloader.Torrent, res *BrushRunResult) error {
 	downloading := 0
@@ -561,14 +614,13 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 	if !ok || site == nil {
 		return fmt.Errorf("站点 %s 未启用或未注册", task.SiteName)
 	}
-	// 这一轮列表的读取时间：只收免费的任务推送时以它为资格的「本次尝试」（直接问站点，不经搜索缓存）
+	// 这一轮列表的读取时间：只收免费的任务推送时以它为资格的「本次尝试」（直接问站点，不经搜索缓存）。
+	// 读两个分区时也只取一次、在读第一个之前：快照不能早于它，各取各的会让先读的分区的种子被闸门拒掉。
 	searchAt := m.cfg.Clock.Now()
 	requireFree := brushRequiresFree(*task)
-	searchCtx, cancel := context.WithTimeout(ctx, brushSearchTimeout)
-	items, err := site.Search(searchCtx, v2.SearchQuery{FreeOnly: true})
-	cancel()
+	items, err := m.listBrushItems(ctx, site, *task, res)
 	if err != nil {
-		return fmt.Errorf("读取 %s 的种子列表失败: %w", task.SiteName, err)
+		return err
 	}
 	res.Listed = len(items)
 

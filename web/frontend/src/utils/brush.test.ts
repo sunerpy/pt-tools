@@ -3,15 +3,27 @@ import { describe, expect, it } from "vitest";
 import type { BrushTask } from "@/api";
 
 import {
+  brushSectionFor,
   configOf,
   defaultBrushConfig,
   discountLabel,
+  hasBrushSection,
   limitSummary,
   nextRunAt,
   removalSummary,
   runMessage,
   taskDiscounts,
 } from "./brush";
+
+describe("brushSectionFor", () => {
+  it("只有 M-Team 有分区：空值按综合区，别的站点一律为空", () => {
+    expect(hasBrushSection("mteam")).toBe(true);
+    expect(hasBrushSection("hdsky")).toBe(false);
+    expect(brushSectionFor("mteam", "")).toBe("normal");
+    expect(brushSectionFor("mteam", "all")).toBe("all");
+    expect(brushSectionFor("hdsky", "adult")).toBe("");
+  });
+});
 
 describe("brush utils", () => {
   it("默认配置：关闭、只收免费、排除 H&R、免费到期未完成就删", () => {

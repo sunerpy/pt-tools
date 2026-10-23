@@ -41,6 +41,9 @@ type BrushTask struct {
 	// Tags 是用户额外加的标签（逗号分隔）；站点名、pt-tools-brush 和任务标签总会带上。
 	Tags        string `gorm:"size:256;default:''" json:"tags"`
 	IntervalMin int    `gorm:"not null;default:0" json:"interval_min"`
+	// Section 是读哪个分区的种子列表，只对 M-Team：normal 综合区、adult 成人区、all 两个都读；空值等于 normal。
+	// 别的站点保存为空。
+	Section string `gorm:"size:16;default:''" json:"section"`
 
 	// 入场条件
 	// Discounts 是允许的优惠类型（逗号分隔的 DiscountLevel，如 FREE,2XFREE）；为空时只收免费（FREE、2XFREE）。
