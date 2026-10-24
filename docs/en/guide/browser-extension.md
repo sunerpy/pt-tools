@@ -25,6 +25,10 @@ For sites pt-tools already supports that sign in with a cookie.
 
 The popup's main page is My sites (我的站点): every site with a cookie in this browser or enabled in pt-tools is listed (the other built-in sites appear after Show all (显示全部)). Each row shows the cookie's state in the browser and the site's keep-alive state in pt-tools (days left, about to expire); sites that need attention come first.
 
+When the popup opens it first shows the results read last time, with Updating… (更新中…) next to the title, and replaces them once they are read again, without waiting for pt-tools. When the login status cannot be read from pt-tools (for example after pt-tools restarted and the extension's session is gone), the list keeps showing the keep-alive state read last time and the note above says when it was read; if it has never been read, each row reads Status unknown (状态未知). Choose Log in (去登录) above the list to sign in to pt-tools again in the settings.
+
+When a cookie shows Missing (缺失), the row names the sign-in cookies that are missing (for example Missing c_secure_pass); usually you are not signed in to that site, and Sync (同步) appears once you sign in. Cookies that a site sets on its parent domain (such as XingYunGe's on `.xingyungept.org`) are recognized too.
+
 - **One site**: choose Sync (同步) on its row; when the current tab is that site, the top of the popup also offers 🔄 Sync Cookie to pt-tools (同步 Cookie 到 pt-tools).
 - **All sites**: choose Sync all (同步全部) above the list to sync every site whose cookie is valid.
 - **Automatically**: open the popup on the site's page and turn on Auto-sync Cookie (自动同步 Cookie); the cookie is then synced whenever you sign in again or it changes.

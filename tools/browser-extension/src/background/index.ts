@@ -3,6 +3,7 @@ import { t } from "../core/i18n";
 import { logger } from "../core/logger";
 import { createMessage, onMessage, sendToContent, sendToPopup } from "../core/messages";
 import { hasWebNavigationPermission } from "../core/permissions";
+import { saveLoginSnapshot, saveSitesSnapshot } from "../core/snapshots";
 import {
   get,
   getActiveSession,
@@ -161,6 +162,7 @@ async function buildKnownSiteStatus(site: KnownSite): Promise<KnownSiteStatus> {
     cookieStatus: health.status,
     cookieExpireDays: health.expireDays,
     hasCookie: health.hasCookie,
+    missingCookies: health.missingCookies,
     lastSync: lastSyncMap[site.id] ?? null,
     autoSync: autoSyncMap[site.id] ?? false,
   };
@@ -510,7 +512,7 @@ onMessage("GET_TAB_STATUS", async () => resolveCurrentTabStatus());
 // 六十多个站点并行读：以前逐个站点串行读 Cookie 和两份存储，弹窗要等它全部读完才显示，打开要好几秒
 onMessage("GET_ALL_SITES_STATUS", async (): Promise<KnownSiteStatus[]> => {
   const [autoSyncMap, lastSyncMap] = await Promise.all([getAutoSyncMap(), getLastSyncMap()]);
-  return Promise.all(
+  const statuses = await Promise.all(
     KNOWN_SITES.map(async (site) => {
       const health = await checkCookieHealth(site);
       return {
@@ -518,11 +520,17 @@ onMessage("GET_ALL_SITES_STATUS", async (): Promise<KnownSiteStatus[]> => {
         cookieStatus: health.status,
         cookieExpireDays: health.expireDays,
         hasCookie: health.hasCookie,
+        missingCookies: health.missingCookies,
         lastSync: lastSyncMap[site.id] ?? null,
         autoSync: autoSyncMap[site.id] ?? false,
       };
     }),
   );
+  // 下次打开弹窗先显示这一份（core/snapshots.ts）；存不下不影响这次的结果
+  void saveSitesSnapshot(statuses).catch((error: unknown) =>
+    logger.warn("save sites snapshot failed", { error }),
+  );
+  return statuses;
 });
 
 // 弹窗打开时单独问一次 pt-tools 在不在线（最多等 4 秒），页头的连接状态不用等站点列表
@@ -552,7 +560,11 @@ onMessage("GET_SITE_LOGIN_STATE", async (): Promise<SiteLoginStateRecord[]> => {
     throw new Error(t("error.configurePtToolsUrl"));
   }
   const api = new PtToolsApiClient(baseUrl);
-  return api.getSiteLoginStatus();
+  const logins = await api.getSiteLoginStatus();
+  void saveLoginSnapshot(baseUrl, logins).catch((error: unknown) =>
+    logger.warn("save login snapshot failed", { error }),
+  );
+  return logins;
 });
 
 onMessage("SYNC_SITE_COOKIES", async ({ siteId }) => {

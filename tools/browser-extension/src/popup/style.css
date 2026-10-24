@@ -690,6 +690,10 @@ body {
   margin-right: auto;
 }
 
+.my-site__missing {
+  color: #8a6b18;
+}
+
 .link-btn {
   padding: 0;
   font-size: 11px;

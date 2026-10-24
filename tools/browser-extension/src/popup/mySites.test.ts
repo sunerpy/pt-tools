@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { KnownSite } from "../core/constants";
 import type { KnownSiteStatus } from "../core/types";
 import type { SiteLoginStateRecord } from "../modules/sync";
-import { buildMySites, countMine, loginTone } from "./mySites";
+import { buildMySites, countMine, loginLabel, loginTone, missingCookieNames } from "./mySites";
 
 function site(id: string, syncField: KnownSite["syncField"] = "cookie"): KnownSite {
   return {
@@ -102,5 +102,37 @@ describe("loginTone", () => {
     expect(loginTone(login("a", "14d"))).toBe("warn");
     expect(loginTone(login("a", "banned-imminent"))).toBe("bad");
     expect(loginTone(login("a", "unknown"))).toBe("muted");
+  });
+});
+
+describe("loginLabel", () => {
+  const hdsky = site("hdsky");
+  const [enabled] = buildMySites([status(hdsky, "valid")], [login("hdsky", "none")], false);
+  const [absent] = buildMySites([status(hdsky, "valid")], [], false);
+
+  it("没读到过 pt-tools 的登录状态时是状态未知，不写「pt-tools 未启用」", () => {
+    expect(loginLabel(absent!, false)).toEqual({ kind: "unknown" });
+    expect(loginLabel(enabled!, false)).toEqual({ kind: "unknown" });
+  });
+
+  it("读到了、pt-tools 里没有这个站点时才是未启用", () => {
+    expect(loginLabel(absent!, true)).toEqual({ kind: "notInPtTools" });
+    expect(loginLabel(enabled!, true)).toMatchObject({ kind: "tier" });
+  });
+});
+
+describe("missingCookieNames", () => {
+  const s = site("xingyunge");
+  it("缺失、浏览器里又有这个站的 Cookie 时给出还差的", () => {
+    expect(
+      missingCookieNames({ ...status(s, "missing", true), missingCookies: ["c_secure_pass"] }),
+    ).toEqual(["c_secure_pass"]);
+  });
+  it("一个 Cookie 也没有、或者不缺时为空", () => {
+    expect(
+      missingCookieNames({ ...status(s, "missing", false), missingCookies: ["c_secure_uid"] }),
+    ).toEqual([]);
+    expect(missingCookieNames({ ...status(s, "valid"), missingCookies: [] })).toEqual([]);
+    expect(missingCookieNames(status(s, "missing", true))).toEqual([]);
   });
 });
