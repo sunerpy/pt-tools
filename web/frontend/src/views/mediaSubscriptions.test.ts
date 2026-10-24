@@ -750,9 +750,14 @@ describe("订阅", () => {
     await vi.waitFor(() => expect(q("subscribe-dialog")).not.toBeNull());
     await vi.waitFor(() => expect(organize.libraries).toHaveBeenCalled());
     expect(q("sd-locked")!.textContent).toContain("HHWEB 1080p");
+    expect(q("sd-locked")!.textContent).toContain("原来的制作组不更新了就清掉");
+    expect(q("sd-lock-cleared")).toBeNull();
     q("sd-clear-lock")!.click();
     await flush();
     expect(q("sd-locked")).toBeNull();
+    // 清掉以后写明保存后会怎样：已入库的集不动，也不再按它们定锁
+    expect(q("sd-lock-cleared")!.textContent).toContain("下一个下载成功的版本成为新的锁");
+    expect(q("sd-lock-cleared")!.textContent).toContain("已入库的集不动");
     q("sd-save")!.click();
     await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
     expect(api.update.mock.calls[0]).toEqual([
