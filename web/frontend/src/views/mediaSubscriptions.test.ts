@@ -752,6 +752,10 @@ describe("订阅", () => {
     expect(q("sd-locked")!.textContent).toContain("HHWEB 1080p");
     expect(q("sd-lock-edit")!.textContent).toContain("改成");
     expect(q("subscribe-dialog")!.textContent).toContain("原来的制作组不更新了");
+    // 还没搜过：没有可点的版本，提示里不说「点上面搜到的版本」，写明搜索一次以后才有
+    expect(q("sd-seen-versions")).toBeNull();
+    expect(q("sd-lock-tip")!.textContent).not.toContain("点上面搜到的版本");
+    expect(q("sd-lock-tip")!.textContent).toContain("立即搜索");
     expect(q("sd-lock-cleared")).toBeNull();
     q("sd-clear-lock")!.click();
     await flush();
@@ -808,6 +812,8 @@ describe("订阅", () => {
     expect(q("sd-seen-0")!.textContent).toContain("MWeb 2160p");
     expect(q("sd-seen-0")!.textContent).toContain("第 4、5 集");
     expect(q("sd-seen-1")!.getAttribute("title")).toBe("hdsky、mteam");
+    expect(q("sd-lock-tip")!.textContent).toContain("点上面搜到的版本");
+    expect(q("sd-seen-none")).toBeNull();
     q("sd-seen-0")!.click();
     await flush();
     expect(q("sd-lock-cleared")).toBeNull();
@@ -817,6 +823,20 @@ describe("订阅", () => {
       lock_group: "MWeb",
       lock_resolution: "2160p",
     });
+  });
+
+  it("修改追剧：最近一次搜索没有找到能补上缺集的版本时写明", async () => {
+    const none = {
+      ...follow,
+      seen_versions: { at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), versions: [] },
+    };
+    await mountPage({ subs: [none] });
+    q("ms-edit-3")!.click();
+    await vi.waitFor(() => expect(q("sd-seen-none")).not.toBeNull());
+    expect(q("sd-seen-none")!.textContent).toContain("最近一次搜索（2小时前）没有找到");
+    expect(q("sd-seen-versions")).toBeNull();
+    expect(q("sd-lock-tip")!.textContent).not.toContain("点上面搜到的版本");
+    expect(q("sd-lock-tip")!.textContent).not.toContain("立即搜索");
   });
 
   it("修改追剧：没改锁时不发锁的字段", async () => {
