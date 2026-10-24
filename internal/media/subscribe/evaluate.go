@@ -677,9 +677,10 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		return fmt.Sprintf("%s 的种子文件无法解析：%v", o.c.Item.Title, err)
 	}
 	hash = strings.ToLower(hash)
-	// 种子里有几集（整季包、多集）时：视频都对得出集、却没有一集是要的，不推；推送以后把不要的集设成不下载
+	// 种子里有几集（整季包、多集）时：视频都对得出集、却没有一集是要的，不推；推送以后把不要的集设成不下载。
+	// 开着洗版的订阅整个下：库里已有的集也按每一集比版本，好的换掉旧版本
 	var plan *filePlan
-	if want != nil && sub.MediaType == models.MediaKindTV && (o.sp.Whole || o.sp.End > o.sp.Start) {
+	if want != nil && !sub.Upgrade && sub.MediaType == models.MediaKindTV && (o.sp.Whole || o.sp.End > o.sp.Start) {
 		if plan = s.planFiles(ctx, sub, data, want); plan != nil && plan.none() {
 			return fmt.Sprintf("%s%s：种子里没有缺的集（种子里是 %s）", noWantedPrefix, o.c.Item.Title, episodeList(plan.all))
 		}

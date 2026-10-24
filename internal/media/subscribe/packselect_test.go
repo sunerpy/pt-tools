@@ -146,6 +146,16 @@ func TestPackSelectFallsBackToWholeTorrent(t *testing.T) {
 		assert.Contains(t, runSteps(e, sub.ID), "没能把不缺的集设成不下载（HTTP 500），整个种子都会下载")
 		assert.Equal(t, "[1,2,3,4]", e.linked(sub.ID)[0].CoveredEpisodes)
 	})
+	t.Run("开着洗版", func(t *testing.T) {
+		e, sub, _ := packEnv(t, []int{1, 2})
+		_, err := e.svc.UpdateSubscription(e.ctx, sub.ID, SubscriptionInput{Upgrade: true})
+		require.NoError(t, err)
+		msg, err := e.svc.SearchNow(e.ctx, sub.ID)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"801"}, pushedIDs(e), msg)
+		assert.NotContains(t, msg, "只下", "洗版按每一集比版本，整季包整个下")
+		assert.Empty(t, e.dl.prioCalls())
+	})
 	t.Run("下载器里本来就有", func(t *testing.T) {
 		e, sub, _ := packEnv(t, []int{1, 2})
 		e.pushRes = &ptinternal.PushTorrentResult{Success: true, Skipped: true}
