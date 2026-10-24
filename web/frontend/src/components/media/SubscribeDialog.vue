@@ -594,6 +594,13 @@ async function save() {
               <el-button link type="primary" data-testid="sd-clear-lock" @click="clearLock = true"
                 >清掉，按下一个下载的版本重新定</el-button
               >
+              <span>原来的制作组不更新了就清掉</span>
+            </div>
+            <div
+              v-else-if="lockVersion && clearLock"
+              class="sd__locked"
+              data-testid="sd-lock-cleared">
+              保存以后，下一个下载成功的版本成为新的锁；已入库的集不动，也不再按它们定
             </div>
           </el-form-item>
           <div class="sd__row">

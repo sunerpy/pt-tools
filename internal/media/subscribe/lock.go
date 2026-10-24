@@ -15,7 +15,8 @@ import (
 // 宁可等，也不自动换版本。锁住的版本来自已有的版本（库里这一季的文件优先，其次订阅推送或认领的种子）；都没有时
 // 这一轮按第一个会推送的候选定一个「本轮锁」，只用来过滤这一轮，第一次推送成功以后才写进库：一个也没推成时
 // 库里不会留下没有实际版本的锁。例外是「从这个种子开始追」选中的种子没推成（lockChosen）：用户选的就是那个版本，
-// 锁按它定，重新搜索时还要它。用户改了锁时以库里的为准（每次推送前重读）。
+// 锁按它定，重新搜索时还要它。用户改了锁时以库里的为准（每次推送前重读）。用户清掉锁（LockFromNext）以后不再按已有的
+// 版本定：前几集多半就是要换掉的那个版本（例如原来的制作组不更新了），下一个推送成功的版本成为新锁。
 
 // lockOf 是订阅现在锁住的版本：没开版本锁或还没定下来时 ok 为假。
 func lockOf(sub *models.MediaSubscription) (group, res string, ok bool) {
@@ -78,7 +79,7 @@ func (s *Service) existingVersion(ctx context.Context, sub *models.MediaSubscrip
 func (s *Service) writeLock(ctx context.Context, sub *models.MediaSubscription, group, res string) {
 	res2 := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).
 		Where("id = ? AND lock_version = ? AND lock_group = '' AND lock_resolution = ''", sub.ID, true).
-		Updates(map[string]any{"lock_group": group, "lock_resolution": res})
+		Updates(map[string]any{"lock_group": group, "lock_resolution": res, "lock_from_next": false})
 	if res2.Error != nil {
 		s.cfg.Logger.Warnf("[订阅] 写版本锁失败: %v", res2.Error)
 	}
@@ -91,14 +92,14 @@ func (s *Service) writeLock(ctx context.Context, sub *models.MediaSubscription, 
 // reloadLock 重读库里的锁（推送前：用户中途改了锁时立即生效）。
 func (s *Service) reloadLock(ctx context.Context, sub *models.MediaSubscription) {
 	var row models.MediaSubscription
-	if err := s.cfg.DB.WithContext(ctx).Select("lock_version", "lock_group", "lock_resolution").Where("id = ?", sub.ID).Limit(1).Find(&row).Error; err == nil {
-		sub.LockVersion, sub.LockGroup, sub.LockResolution = row.LockVersion, row.LockGroup, row.LockResolution
+	if err := s.cfg.DB.WithContext(ctx).Select("lock_version", "lock_group", "lock_resolution", "lock_from_next").Where("id = ?", sub.ID).Limit(1).Find(&row).Error; err == nil {
+		sub.LockVersion, sub.LockGroup, sub.LockResolution, sub.LockFromNext = row.LockVersion, row.LockGroup, row.LockResolution, row.LockFromNext
 	}
 }
 
-// ensureLock 在开着版本锁、锁还空着时按已有的版本定锁（写进库）。
+// ensureLock 在开着版本锁、锁还空着时按已有的版本定锁（写进库）；用户清掉的锁不按已有的版本定，等下一次推送。
 func (s *Service) ensureLock(ctx context.Context, sub *models.MediaSubscription) {
-	if !sub.LockVersion {
+	if !sub.LockVersion || sub.LockFromNext {
 		return
 	}
 	if _, _, ok := lockOf(sub); ok {
@@ -137,11 +138,11 @@ func (s *Service) relock(ctx context.Context, sub *models.MediaSubscription, t *
 		return
 	}
 	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).
-		Updates(map[string]any{"lock_group": g, "lock_resolution": r}).Error; err != nil {
+		Updates(map[string]any{"lock_group": g, "lock_resolution": r, "lock_from_next": false}).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 洗版后改版本锁失败: %v", err)
 		return
 	}
-	sub.LockGroup, sub.LockResolution = g, r
+	sub.LockGroup, sub.LockResolution, sub.LockFromNext = g, r, false
 }
 
 // waitingRemind 是等版本的提醒间隔：第一次提醒以后每 3 天最多再提醒一次。

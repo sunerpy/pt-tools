@@ -566,6 +566,72 @@ func TestVersionLockFromLibrary(t *testing.T) {
 	assert.Equal(t, "1080p", got.LockResolution)
 }
 
+// 原来的制作组不更新了：库里第 1 集是 MWeb 2160p，锁跟着它；站点上只有 HHWEB 的第 2 集。
+func clearedLockEnv(t *testing.T) (*env, *models.MediaSubscription) {
+	t.Helper()
+	e := newEnv(t)
+	sub := e.follow(nil)
+	e.enable(nil)
+	e.organized("h1", models.MediaKindTV, 231620, 4, 1, "/lib/nh/E01.mkv")
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", "h1").
+		Update("torrent_name", "Natural.High.S04E01.2023.2160p.WEB-DL.H.265-MWeb").Error)
+	e.search.set(e.item("mteam", "401", "Natural.High.S04E02.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "", 2, 90))
+	msg, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	require.Empty(t, pushedIDs(e), msg)
+	require.Equal(t, "MWeb", e.subRow(sub.ID).LockGroup, "锁跟着库里的第 1 集")
+
+	empty := ""
+	_, err = e.svc.UpdateSubscription(e.ctx, sub.ID, SubscriptionInput{LockGroup: &empty, LockResolution: &empty})
+	require.NoError(t, err)
+	got := e.subRow(sub.ID)
+	require.Empty(t, got.LockGroup)
+	require.Empty(t, got.LockResolution)
+	require.True(t, got.LockFromNext)
+	return e, sub
+}
+
+// 清掉锁以后不按库里前几集的版本锁回去：下一个推送成功的版本成为新锁。
+func TestVersionLockClearedTakesNextDownload(t *testing.T) {
+	e, sub := clearedLockEnv(t)
+	msg, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"401"}, pushedIDs(e), msg)
+	got := e.subRow(sub.ID)
+	assert.Equal(t, "HHWEB", got.LockGroup, "下一个推送成功的版本成为新锁")
+	assert.Equal(t, "2160p", got.LockResolution)
+	assert.False(t, got.LockFromNext, "写进锁以后不再等下一次下载")
+}
+
+// 清掉以后这一轮一个也没推成：锁仍空着，下一轮还按那时推送成功的版本定，不按库里的 MWeb；改成具体版本时按用户填的。
+func TestVersionLockClearedStaysOpenUntilPushed(t *testing.T) {
+	e, sub := clearedLockEnv(t)
+	e.pushErr = errors.New("下载器断开")
+	_, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	got := e.subRow(sub.ID)
+	assert.Empty(t, got.LockGroup, "没推成：不留下锁，也不锁回库里的版本")
+	assert.True(t, got.LockFromNext)
+
+	g, r := "ADWeb", "1080p"
+	_, err = e.svc.UpdateSubscription(e.ctx, sub.ID, SubscriptionInput{LockGroup: &g, LockResolution: &r})
+	require.NoError(t, err)
+	got = e.subRow(sub.ID)
+	assert.Equal(t, "ADWeb", got.LockGroup)
+	assert.False(t, got.LockFromNext, "改成了具体的版本")
+}
+
+// 洗版换成整季包以后改锁：清掉锁时留下的标记一起清掉。
+func TestRelockClearsLockFromNext(t *testing.T) {
+	e, sub := clearedLockEnv(t)
+	row := e.subRow(sub.ID)
+	e.svc.relock(e.ctx, &row, &models.MediaSubscriptionTorrent{Title: "Natural.High.S04.2023.2160p.WEB-DL.H.265-FRDS"})
+	got := e.subRow(sub.ID)
+	assert.Equal(t, "FRDS", got.LockGroup)
+	assert.False(t, got.LockFromNext)
+	assert.False(t, row.LockFromNext)
+}
+
 func TestWaitingVersionRemindAndUnlock(t *testing.T) {
 	e := newEnv(t)
 	group, res := "HHWEB", "2160p"

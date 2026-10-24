@@ -70,7 +70,7 @@ When you click Follow (追剧) on a search result and that torrent cannot be pus
 
 - When the locked version still has not shown up after the retry days, the episode shows Waiting for the version (等版本). pt-tools keeps waiting rather than switching, and notifies once through the channels in the settings (then at most every 3 days). An episode whose locked version was found on a site but whose torrent file could not be downloaded is not waiting: it shows Missing (缺) and is searched for again.
 - To take another version for one episode, click Use another version for this episode (这一集换版本) on that episode in the follow details, or send `/unlock <id> <episode>` to the bot. Only that episode is released from the lock and a search runs within a minute; the others stay as they are.
-- Under Edit you can turn the version lock off, or clear the locked version so that the next download decides it again. Replacing the season with a pack during an upgrade is not limited by the lock; the new version becomes the locked one.
+- Under Edit you can turn the version lock off, or clear the locked version (清掉), for example when the original release group stops releasing: the episodes already in the library stay and no longer decide the lock, and the next successful download becomes the locked version. Replacing the season with a pack during an upgrade is not limited by the lock; the new version becomes the locked one.
 
 ### Episodes
 

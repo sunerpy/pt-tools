@@ -357,7 +357,8 @@ type SubscriptionInput struct {
 
 	// Schedule 是主动搜索的定时（kind 为空沿用全局间隔）
 	Schedule *Schedule `json:"schedule,omitempty"`
-	// LockVersion 是版本锁；LockGroup、LockResolution 改锁住的版本（都给空串是清掉，按之后的版本重新定）
+	// LockVersion 是版本锁；LockGroup、LockResolution 改锁住的版本（改完都是空串是清掉：不再按库里已有的文件定，
+	// 下一个推送成功的版本成为新锁）
 	LockVersion    *bool   `json:"lock_version,omitempty"`
 	LockGroup      *string `json:"lock_group,omitempty"`
 	LockResolution *string `json:"lock_resolution,omitempty"`
@@ -635,15 +636,19 @@ func (s *Service) UpdateSubscription(ctx context.Context, id uint, in Subscripti
 			upd["lock_version"] = *in.LockVersion
 			searchSoon = searchSoon || *in.LockVersion != row.LockVersion
 		}
-		if in.LockGroup != nil {
-			g := strings.TrimSpace(*in.LockGroup)
-			upd["lock_group"] = g
-			searchSoon = searchSoon || g != row.LockGroup
-		}
-		if in.LockResolution != nil {
-			r := strings.TrimSpace(*in.LockResolution)
-			upd["lock_resolution"] = r
-			searchSoon = searchSoon || r != row.LockResolution
+		if in.LockGroup != nil || in.LockResolution != nil {
+			g, r := row.LockGroup, row.LockResolution
+			if in.LockGroup != nil {
+				g = strings.TrimSpace(*in.LockGroup)
+				upd["lock_group"] = g
+			}
+			if in.LockResolution != nil {
+				r = strings.TrimSpace(*in.LockResolution)
+				upd["lock_resolution"] = r
+			}
+			searchSoon = searchSoon || g != row.LockGroup || r != row.LockResolution
+			// 改完锁是空的（清掉）：不再按库里已有的文件定（前几集多半就是要换掉的那个版本），下一个推送成功的版本成为新锁
+			upd["lock_from_next"] = g == "" && r == ""
 		}
 		if in.StartEpisode != nil {
 			upd["start_episode"] = *in.StartEpisode
