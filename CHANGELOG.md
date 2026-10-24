@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.40](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.39...v1.0.0-rc.40) (2026-10-24)
+
+
+### Features
+
+* **follow:** 修改追剧时直接改锁住的版本，可以从最近一次搜索找到的版本里选 ([#772](https://github.com/sunerpy/pt-tools/issues/772)) ([837a2a8](https://github.com/sunerpy/pt-tools/commit/837a2a8309c1ed9b4df09a1e1ac7ebd87018b4a1))
+
+
+### Bug Fixes
+
+* **extension:** 弹窗先显示上次的结果；读不到登录状态时不再写未启用；认出上一级域名的 Cookie ([#771](https://github.com/sunerpy/pt-tools/issues/771)) ([4504f74](https://github.com/sunerpy/pt-tools/commit/4504f7456f981f48784018983f2ad4e3ffbf57a5))
+* **follow:** 清掉版本锁以后不再按库里已有的集锁回去，下一个下载成功的版本成为新锁 ([#769](https://github.com/sunerpy/pt-tools/issues/769)) ([b0708be](https://github.com/sunerpy/pt-tools/commit/b0708bef7cd350031dbb91fbb94b2dbae429c28a))
+
 ## [1.0.0-rc.39](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.38...v1.0.0-rc.39) (2026-10-23)
 
 
