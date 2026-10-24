@@ -223,3 +223,35 @@ func TestQbitAddTorrentFileExContextCancels(t *testing.T) {
 	require.Error(t, err)
 	assert.Less(t, time.Since(start), 3*time.Second)
 }
+
+// 只下种子里的部分文件：torrents/filePrio，id 是文件列表里的 index，用 | 分隔；没有文件时不发请求
+func TestQbitSetFilePriority(t *testing.T) {
+	var path, hash, ids, prio string
+	calls := 0
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		calls++
+		path, hash, ids, prio = r.URL.Path, r.Form.Get("hash"), r.Form.Get("id"), r.Form.Get("priority")
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.FileSelector = c
+	require.NoError(t, c.SetFilePriority(context.Background(), "abc", []int{0, 3, 7}, 0))
+	assert.Equal(t, "/api/v2/torrents/filePrio", path)
+	assert.Equal(t, "abc", hash)
+	assert.Equal(t, "0|3|7", ids)
+	assert.Equal(t, "0", prio)
+
+	require.NoError(t, c.SetFilePriority(context.Background(), "abc", nil, 0))
+	assert.Equal(t, 1, calls, "没有文件时不发请求")
+
+	status = http.StatusNotFound
+	assert.ErrorIs(t, c.SetFilePriority(context.Background(), "gone", []int{1}, 0), downloader.ErrTorrentNotFound)
+	status = http.StatusConflict
+	assert.ErrorContains(t, c.SetFilePriority(context.Background(), "abc", []int{99}, 0), "文件编号")
+	status = http.StatusBadRequest
+	assert.Error(t, c.SetFilePriority(context.Background(), "abc", []int{1}, 0))
+}

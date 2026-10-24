@@ -301,7 +301,36 @@ type fakeDL struct {
 	// files 是种子的文件列表（按种子 ID）；没有的回空列表，filesErr 里有的读不出来
 	files    map[string][]downloader.TorrentFile
 	filesErr map[string]error
+	// priorities 是 SetFilePriority 的调用；prioErr 不为空时设置失败；noSelect 为真时下载器不支持只下部分文件
+	priorities []prioCall
+	prioErr    error
+	noSelect   bool
 }
+
+type prioCall struct {
+	ID       string
+	Indexes  []int
+	Priority int
+}
+
+func (f *fakeDL) SetFilePriority(_ context.Context, id string, indexes []int, priority int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prioErr != nil {
+		return f.prioErr
+	}
+	f.priorities = append(f.priorities, prioCall{ID: id, Indexes: append([]int(nil), indexes...), Priority: priority})
+	return nil
+}
+
+func (f *fakeDL) prioCalls() []prioCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]prioCall(nil), f.priorities...)
+}
+
+// plainDL 只有 Downloader 接口的方法（没有只下部分文件的能力）。
+type plainDL struct{ downloader.Downloader }
 
 func (f *fakeDL) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
 	f.mu.Lock()
@@ -348,6 +377,12 @@ func (f *fakeDL) RemoveTorrent(id string, removeData bool) error {
 type fakeDLs struct{ dl *fakeDL }
 
 func (f fakeDLs) Get(_ context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error) {
+	f.dl.mu.Lock()
+	plain := f.dl.noSelect
+	f.dl.mu.Unlock()
+	if plain {
+		return plainDL{f.dl}, models.DownloaderSetting{ID: id, Name: "qb"}, nil
+	}
 	return f.dl, models.DownloaderSetting{ID: id, Name: "qb"}, nil
 }
 

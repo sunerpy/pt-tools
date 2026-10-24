@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ var (
 	_ downloader.TorrentTagRemover = (*QbitClient)(nil)
 	_ downloader.CategoryCreator   = (*QbitClient)(nil)
 	_ downloader.ContextAdder      = (*QbitClient)(nil)
+	_ downloader.FileSelector      = (*QbitClient)(nil)
 )
 
 // RemoveTorrentTags 从这些种子上去掉标签（tags 逗号分隔；为空时去掉全部），别的种子不动。
@@ -157,6 +159,34 @@ func (q *QbitClient) EditTracker(ctx context.Context, hash, oldURL, newURL strin
 	case !q.isSuccessStatus(resp.StatusCode):
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("修改 tracker 失败: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// SetFilePriority 经 torrents/filePrio 设文件的优先级（0 不下载，1 普通，6 高，7 最高）；indexes 是文件列表里的 index。
+// qBittorrent 在种子不存在时回 404，文件编号不对（或磁力链接还没取到元数据）时回 409。
+func (q *QbitClient) SetFilePriority(ctx context.Context, id string, indexes []int, priority int) error {
+	if len(indexes) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(indexes))
+	for _, i := range indexes {
+		ids = append(ids, strconv.Itoa(i))
+	}
+	form := url.Values{"hash": {strings.TrimSpace(id)}, "id": {strings.Join(ids, "|")}, "priority": {strconv.Itoa(priority)}}
+	resp, err := q.postFormContext(ctx, "/api/v2/torrents/filePrio", form)
+	if err != nil {
+		return fmt.Errorf("设置文件优先级失败: %w", err)
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return fmt.Errorf("%w：%s", downloader.ErrTorrentNotFound, id)
+	case resp.StatusCode == http.StatusConflict:
+		return fmt.Errorf("设置文件优先级失败：种子里没有这些文件编号，或者还没取到种子的元数据")
+	case !q.isSuccessStatus(resp.StatusCode):
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("设置文件优先级失败: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }
