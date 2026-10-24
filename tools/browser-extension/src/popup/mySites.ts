@@ -76,3 +76,26 @@ export function buildMySites(
 export function countMine(sites: KnownSiteStatus[], logins: SiteLoginStateRecord[]): number {
   return buildMySites(sites, logins, false).length;
 }
+
+/**
+ * 一行的登录状态写什么。loginsKnown 为假（会话过期或连不上 pt-tools，也没有上次存下的登录状态）时是 unknown：
+ * 不知道 pt-tools 里启没启用，不能写「pt-tools 未启用」——以前就这么写，已经启用的站点也显示未启用。
+ */
+export type LoginLabel =
+  | { kind: "unknown" }
+  | { kind: "savedNotEnabled" }
+  | { kind: "notInPtTools" }
+  | { kind: "tier"; login: SiteLoginStateRecord };
+
+export function loginLabel(row: MySiteRow, loginsKnown: boolean): LoginLabel {
+  if (!loginsKnown) return { kind: "unknown" };
+  // 定时同步只存了 Cookie、没替用户启用：写明下一步是到 pt-tools 里启用
+  if (row.savedNotEnabled) return { kind: "savedNotEnabled" };
+  if (!row.login || !row.configured) return { kind: "notInPtTools" };
+  return { kind: "tier", login: row.login };
+}
+
+/** Cookie 缺失、浏览器里又有这个站的 Cookie 时还差哪几个必需 Cookie（多半是没登录，或者站点换了 Cookie）；其他情况为空 */
+export function missingCookieNames(s: KnownSiteStatus): string[] {
+  return s.cookieStatus === "missing" && s.hasCookie ? (s.missingCookies ?? []) : [];
+}

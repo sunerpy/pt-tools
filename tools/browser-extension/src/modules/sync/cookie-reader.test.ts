@@ -3,8 +3,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KnownSite } from "../../core/constants";
 import { checkCookieHealth } from "./cookie-reader";
 
-/** 按域名装好 Cookie 的 chrome.cookies 替身 */
+/**
+ * 按 Cookie 的域装好 Cookie 的 chrome.cookies 替身：键是 Cookie 自己的域，只给这个主机的写主机名（如 old.example），
+ * 设在某一级域名上的写带点的（如 .example）。getAll({ url }) 和浏览器一样：主机名相同，或者网址的主机在那个域名之下。
+ */
 let jar: Record<string, chrome.cookies.Cookie[]> = {};
+
+function sentTo(url: string): chrome.cookies.Cookie[] {
+  const host = new URL(url).hostname;
+  return Object.entries(jar).flatMap(([domain, list]) =>
+    domain === host ||
+    (domain.startsWith(".") && (host === domain.slice(1) || host.endsWith(domain)))
+      ? list
+      : [],
+  );
+}
+
+/** getAll({ domain }) 的语义：只认这个域名和它的子域名（Chromium 的 MatchFilter::MatchesDomain），不含上一级域名的 */
+function underDomain(filter: string): chrome.cookies.Cookie[] {
+  const f = filter.replace(/^\./, "");
+  return Object.entries(jar).flatMap(([domain, list]) => {
+    const d = domain.replace(/^\./, "");
+    return d === f || d.endsWith(`.${f}`) ? list : [];
+  });
+}
 
 function cookie(name: string, value: string, expiresInDays = 30): chrome.cookies.Cookie {
   return {
@@ -35,7 +57,11 @@ const SITE: KnownSite = {
 beforeEach(() => {
   jar = {};
   vi.stubGlobal("chrome", {
-    cookies: { getAll: vi.fn(async ({ domain }: { domain: string }) => jar[domain] ?? []) },
+    cookies: {
+      getAll: vi.fn(async ({ url, domain }: { url?: string; domain?: string }) =>
+        url ? sentTo(url) : underDomain(domain ?? ""),
+      ),
+    },
   });
 });
 
@@ -84,5 +110,54 @@ describe("checkCookieHealth: 多域站点", () => {
     expect(health.expireDays).toBeGreaterThanOrEqual(19);
     expect(health.cookieString).toContain("c_secure_uid=2");
     expect(health.cookieString).not.toContain("c_secure_uid=1");
+  });
+});
+
+/*
+ * 星陨阁这类站点把登录 Cookie 设在上一级域名（.xingyungept.org）上：以前按 domain 过滤只认本域名和子域名，
+ * 登录着也显示「缺失」、没有同步按钮。现在按网址取，和浏览器实际发给站点的一致。
+ */
+describe("checkCookieHealth: Cookie 设在上一级域名上", () => {
+  const SUB: KnownSite = { ...SITE, id: "sub", domains: ["pt.example"] } as KnownSite;
+
+  it("算作这个站点的 Cookie，可以同步", async () => {
+    jar[".example"] = [cookie("c_secure_uid", "1"), cookie("c_secure_pass", "p")];
+    jar["pt.example"] = [cookie("cf_clearance", "cf")];
+    jar["other.example2"] = [cookie("c_secure_pass", "x")];
+
+    const health = await checkCookieHealth(SUB);
+
+    expect(health.status).toBe("valid");
+    expect(health.cookieString).toContain("c_secure_uid=1");
+    expect(health.cookieString).toContain("c_secure_pass=p");
+    expect(health.cookieString).toContain("cf_clearance=cf");
+    expect(health.cookieString).not.toContain("=x");
+    expect(health.missingCookies).toEqual([]);
+  });
+
+  it("不算别的网站同名后缀的 Cookie", async () => {
+    jar[".ample"] = [cookie("c_secure_uid", "1"), cookie("c_secure_pass", "p")];
+    const health = await checkCookieHealth({ ...SUB, domains: ["pt.example"] } as KnownSite);
+    expect(health.status).toBe("missing");
+  });
+});
+
+describe("checkCookieHealth: 缺失时写明缺哪几个", () => {
+  it("按凑得最多的那个域名说还差的", async () => {
+    jar["old.example"] = [cookie("_ga", "GA1.2.3")];
+    jar["new.example"] = [cookie("c_secure_uid", "1"), cookie("cf_clearance", "cf")];
+
+    const health = await checkCookieHealth(SITE);
+
+    expect(health.status).toBe("missing");
+    expect(health.hasCookie).toBe(true);
+    expect(health.missingCookies).toEqual(["c_secure_pass"]);
+    expect(health.cookieString).toBe("");
+  });
+
+  it("一个必需 Cookie 也没有时列出全部", async () => {
+    jar["old.example"] = [cookie("_ga", "GA1.2.3")];
+    const health = await checkCookieHealth(SITE);
+    expect(health.missingCookies).toEqual(["c_secure_uid", "c_secure_pass"]);
   });
 });

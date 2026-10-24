@@ -4,6 +4,8 @@ import { computed, onMounted, ref } from "vue";
 import { initI18n, t, type MessageKey } from "../core/i18n";
 import { createMessage, sendToBackground } from "../core/messages";
 import { hasRequiredPermissions, requestCorePermissions } from "../core/permissions";
+import { loadLoginSnapshot, loadSitesSnapshot } from "../core/snapshots";
+import { getConnection } from "../core/storage";
 import type {
   AutoCollectPayload,
   BatchOpenTabsResult,
@@ -72,6 +74,11 @@ const sitesLoading = ref(true);
 const connChecking = ref(true);
 const logins = ref<SiteLoginStateRecord[]>([]);
 const loginError = ref("");
+/** 这次打开已经读到新的站点状态 / 登录状态；在那之前显示的是上次存下的（core/snapshots.ts） */
+const sitesFresh = ref(false);
+const loginsFresh = ref(false);
+/** 显示的登录状态是上次存下的那份时，读到它的时间（ISO） */
+const loginsAt = ref("");
 const syncingId = ref("");
 
 const busySync = ref(false);
@@ -95,13 +102,15 @@ const knownStatus = computed(() =>
 const unknownStatus = computed(() =>
   tabStatus.value.mode === "unknown" ? (tabStatus.value.unknown ?? null) : null,
 );
+/** 上次连上过的，检查期间先照旧显示已连接，检查完再改；没连上过的才显示「连接中」 */
+const connPending = computed(() => connChecking.value && !connection.value.connected);
 const connLabel = computed(() => {
   if (!connection.value.baseUrl?.trim()) return t("conn.notConfigured");
-  if (connChecking.value) return t("conn.checking");
+  if (connPending.value) return t("conn.checking");
   return connection.value.connected ? t("conn.connected") : t("conn.disconnected");
 });
 const connTone = computed(() =>
-  connChecking.value ? "muted" : connection.value.connected ? "ok" : "bad",
+  connPending.value ? "muted" : connection.value.connected ? "ok" : "bad",
 );
 const connHost = computed(() => {
   try {
@@ -139,8 +148,29 @@ async function loadSites(): Promise<void> {
       "GET_ALL_SITES_STATUS",
       {},
     );
+    sitesFresh.value = true;
   } finally {
     sitesLoading.value = false;
+  }
+}
+
+/**
+ * 先显示上次的结果：站点状态、登录状态、连接状态都直接从存储里读，不等 service worker 和网络；
+ * 这次读到的回来以后就不再用它。以前每次打开都要等 ping 完再取登录状态，网络慢时空等好几秒。
+ */
+async function restoreSnapshot(): Promise<void> {
+  const [stored, sites] = await Promise.all([getConnection(), loadSitesSnapshot()]);
+  if (sites && !sitesFresh.value) {
+    allSites.value = sites.data;
+    sitesLoading.value = false;
+  }
+  if (connChecking.value) {
+    connection.value = { ...stored };
+  }
+  const cached = await loadLoginSnapshot(stored.baseUrl);
+  if (cached && !loginsFresh.value) {
+    logins.value = cached.data;
+    loginsAt.value = cached.at;
   }
 }
 
@@ -171,8 +201,11 @@ async function loadLogins(): Promise<void> {
       "GET_SITE_LOGIN_STATE",
       {},
     );
+    loginsFresh.value = true;
+    loginsAt.value = "";
     loginError.value = "";
   } catch (error: unknown) {
+    // 读不到时留着上次的登录状态（若有），横幅写明是什么时候的
     loginError.value = error instanceof Error ? friendlyErrorMessage(error.message) : "";
   }
 }
@@ -443,6 +476,7 @@ onMounted(async () => {
   if (permissionsGranted.value) {
     // 各读各的：连接状态、当前页、站点列表谁先回来先显示谁
     const fail = (error: unknown) => showError(error, "feedback.initFailed");
+    void restoreSnapshot().catch(() => undefined);
     void loadStatus().catch(fail);
     void loadTab().catch(fail);
     void loadSites().catch(fail);
@@ -479,7 +513,7 @@ onMounted(async () => {
         :title="connection.baseUrl"
         data-testid="conn-chip">
         <i class="conn-dot" />{{ connLabel
-        }}<template v-if="connHost && !connChecking"> · {{ connHost }}</template>
+        }}<template v-if="connHost && !connPending"> · {{ connHost }}</template>
       </span>
       <button
         type="button"
@@ -537,13 +571,17 @@ onMounted(async () => {
       <MySites
         :sites="allSites"
         :sites-loading="sitesLoading"
+        :refreshing="!sitesFresh && allSites.length > 0"
         :logins="logins"
+        :logins-known="loginsFresh || loginsAt !== ''"
+        :logins-at="loginsAt"
         :login-error="loginError"
         :busy="busySync || busySettings"
         :syncing-id="syncingId"
         @sync="handleSyncSite"
         @sync-all="handleBatchSync"
-        @open-all="handleBatchOpen" />
+        @open-all="handleBatchOpen"
+        @login="view = 'settings'" />
 
       <section
         v-if="activeSession && activeSession.pages.length > 0"

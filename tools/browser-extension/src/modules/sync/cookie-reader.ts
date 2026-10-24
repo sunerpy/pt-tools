@@ -9,6 +9,8 @@ interface CookieHealthResult {
   expireDays: number | null;
   cookieString: string;
   hasCookie: boolean;
+  /** 缺失时还差哪几个必需 Cookie（按最接近凑齐的那个域名算）；其他状态为空 */
+  missingCookies: string[];
 }
 
 function ensureCookiesApi(): void {
@@ -21,11 +23,20 @@ function toCookieString(cookies: chrome.cookies.Cookie[]): string {
   return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
 }
 
+/**
+ * 浏览器访问这个域名时会带上的 Cookie。按网址取，和浏览器实际发给站点的一致：包括设在上一级域名上的
+ * （例如星陨阁的 Cookie 在 .xingyungept.org 上）。以前按 domain 过滤，只认这个域名和它的子域名，
+ * 这类站点登录着也显示「缺失」、没有同步按钮。
+ */
+async function siteCookies(domain: string): Promise<chrome.cookies.Cookie[]> {
+  return chrome.cookies.getAll({ url: `https://${domain}/` });
+}
+
 async function getCookiesAcrossDomains(site: KnownSite): Promise<chrome.cookies.Cookie[]> {
   ensureCookiesApi();
   const results: chrome.cookies.Cookie[] = [];
   for (const domain of site.domains) {
-    const cookies = await chrome.cookies.getAll({ domain });
+    const cookies = await siteCookies(domain);
     results.push(...cookies);
   }
   return results;
@@ -53,23 +64,29 @@ function requiredCookies(
  */
 async function pickDomainCookies(
   site: KnownSite,
-): Promise<{ cookies: chrome.cookies.Cookie[]; complete: boolean }> {
+): Promise<{ cookies: chrome.cookies.Cookie[]; complete: boolean; missing: string[] }> {
   ensureCookiesApi();
   let firstNonEmpty: chrome.cookies.Cookie[] = [];
+  // 没有哪个域名凑齐时，按凑得最多的那个域名说还差哪几个
+  let missing = [...site.cookieNames];
   let best: { cookies: chrome.cookies.Cookie[]; minExpiry: number } | null = null;
   for (const domain of site.domains) {
-    const cookies = await chrome.cookies.getAll({ domain });
+    const cookies = await siteCookies(domain);
     if (cookies.length === 0) {
       continue;
     }
     if (site.cookieNames.length === 0) {
-      return { cookies, complete: true };
+      return { cookies, complete: true, missing: [] };
     }
     if (firstNonEmpty.length === 0) {
       firstNonEmpty = cookies;
     }
     const required = requiredCookies(cookies, site.cookieNames);
     if (required.size !== site.cookieNames.length) {
+      const lacking = site.cookieNames.filter((name) => !required.has(name));
+      if (lacking.length < missing.length) {
+        missing = lacking;
+      }
       continue;
     }
     // 会话 Cookie 没有过期时间，按永不过期算
@@ -81,8 +98,8 @@ async function pickDomainCookies(
     }
   }
   return best
-    ? { cookies: best.cookies, complete: true }
-    : { cookies: firstNonEmpty, complete: false };
+    ? { cookies: best.cookies, complete: true, missing: [] }
+    : { cookies: firstNonEmpty, complete: false, missing };
 }
 
 export async function readSiteCookies(domain: string): Promise<string> {
@@ -108,6 +125,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
       expireDays: null,
       cookieString: toCookieString(picked.cookies),
       hasCookie: crossDomainHasCookie,
+      missingCookies: [],
     };
   }
 
@@ -118,6 +136,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
       expireDays: null,
       cookieString: "",
       hasCookie,
+      missingCookies: picked.missing,
     };
   }
 
@@ -137,6 +156,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
       expireDays,
       cookieString,
       hasCookie,
+      missingCookies: [],
     };
   }
 
@@ -146,6 +166,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
       expireDays,
       cookieString,
       hasCookie,
+      missingCookies: [],
     };
   }
 
@@ -154,6 +175,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
     expireDays,
     cookieString,
     hasCookie,
+    missingCookies: [],
   };
 }
 

@@ -662,6 +662,9 @@ export const STORAGE_KEYS = {
   syncRun: "pt_tools_sync_run",
   cookieCloudConfig: "pt_tools_cookiecloud_config",
   cookieCloudState: "pt_tools_cookiecloud_state",
+  // 弹窗打开时先显示的上次结果（见 core/snapshots.ts）
+  sitesSnapshot: "pt_tools_sites_snapshot",
+  loginSnapshot: "pt_tools_login_snapshot",
 } as const;
 
 /**

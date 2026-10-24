@@ -9,13 +9,26 @@ import { computed, ref } from "vue";
 import { t } from "../../core/i18n";
 import type { KnownSiteStatus } from "../../core/types";
 import type { SiteLoginStateRecord } from "../../modules/sync";
-import { buildMySites, countMine, loginTone, type MySiteRow } from "../mySites";
+import {
+  buildMySites,
+  countMine,
+  loginLabel,
+  loginTone,
+  missingCookieNames,
+  type MySiteRow,
+} from "../mySites";
 import CookieStatus from "./CookieStatus.vue";
 
 const props = defineProps<{
   sites: KnownSiteStatus[];
   sitesLoading: boolean;
+  /** 显示的是上次的站点状态、这次的还没读完 */
+  refreshing: boolean;
   logins: SiteLoginStateRecord[];
+  /** 有 pt-tools 的登录状态可用（这次读到的，或上次存下的）；否则每行写「状态未知」，不写「pt-tools 未启用」 */
+  loginsKnown: boolean;
+  /** 登录状态是上次存下的那份时，读到它的时间（ISO）；这次读到的为空 */
+  loginsAt: string;
   loginError: string;
   busy: boolean;
   syncingId: string;
@@ -25,6 +38,7 @@ const emit = defineEmits<{
   sync: [siteId: string];
   syncAll: [siteIds: string[]];
   openAll: [siteIds: string[]];
+  login: [];
 }>();
 
 const showAll = ref(false);
@@ -39,27 +53,43 @@ const openableIds = computed(() =>
   rows.value.filter((r) => r.configured || r.status.hasCookie).map((r) => r.status.site.id),
 );
 
+/** 读不到 pt-tools 时的说明：有上次的登录状态就写明是什么时候的 */
+const loginNote = computed(() =>
+  props.loginsAt
+    ? t("mySites.loginStale", ago(props.loginsAt), props.loginError)
+    : t("mySites.loginUnavailable", props.loginError),
+);
+
 function loginText(row: MySiteRow): string {
-  const l = row.login;
-  // 定时同步只存了 Cookie、没替用户启用：写明下一步是到 pt-tools 里启用
-  if (row.savedNotEnabled) return t("mySites.savedNotEnabled");
-  if (!l || !row.configured) return t("mySites.notInPtTools");
+  const label = loginLabel(row, props.loginsKnown);
+  if (label.kind === "unknown") return t("mySites.loginUnknown");
+  if (label.kind === "savedNotEnabled") return t("mySites.savedNotEnabled");
+  if (label.kind === "notInPtTools") return t("mySites.notInPtTools");
+  const l = label.login;
   if (l.tier === "unknown" || !l.tier) return t("loginStatus.tier.unknown");
   if (l.tier === "none" || l.tier === "30d")
     return t("mySites.daysLeft", Math.max(0, l.days_remaining));
   const key = `loginStatus.tier.${l.tier}` as Parameters<typeof t>[0];
-  const label = t(key);
-  return label === key ? l.tier : label;
+  const text = t(key);
+  return text === key ? l.tier : text;
+}
+
+function ago(iso: string): string {
+  const diffMin = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (diffMin < 1) return t("loginStatus.justNow");
+  if (diffMin < 60) return t("loginStatus.minutesAgo", diffMin);
+  const h = Math.floor(diffMin / 60);
+  if (h < 24) return t("loginStatus.hoursAgo", h);
+  return t("loginStatus.daysAgo", Math.floor(h / 24));
 }
 
 function syncedText(iso: string | null): string {
-  if (!iso) return "";
-  const diffMin = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
-  if (diffMin < 1) return t("mySites.synced", t("loginStatus.justNow"));
-  if (diffMin < 60) return t("mySites.synced", t("loginStatus.minutesAgo", diffMin));
-  const h = Math.floor(diffMin / 60);
-  if (h < 24) return t("mySites.synced", t("loginStatus.hoursAgo", h));
-  return t("mySites.synced", t("loginStatus.daysAgo", Math.floor(h / 24)));
+  return iso ? t("mySites.synced", ago(iso)) : "";
+}
+
+function missingText(row: MySiteRow): string {
+  const names = missingCookieNames(row.status);
+  return names.length > 0 ? t("mySites.missingCookies", names.join(", ")) : "";
 }
 
 function openOne(row: MySiteRow): void {
@@ -75,6 +105,9 @@ function openOne(row: MySiteRow): void {
     <header class="my-sites__head">
       <h2>{{ t("mySites.title") }}</h2>
       <span class="my-sites__count">{{ rows.length }}</span>
+      <span v-if="refreshing" class="my-sites__count" data-testid="my-sites-refreshing">{{
+        t("mySites.updating")
+      }}</span>
       <span class="my-sites__gap" />
       <button
         type="button"
@@ -95,8 +128,11 @@ function openOne(row: MySiteRow): void {
       </button>
     </header>
 
-    <p v-if="loginError" class="my-sites__note" role="status">
-      {{ t("mySites.loginUnavailable", loginError) }}
+    <p v-if="loginError" class="my-sites__note" role="status" data-testid="my-sites-login-note">
+      {{ loginNote }}
+      <button type="button" class="link-btn" data-testid="my-sites-login" @click="emit('login')">
+        {{ t("mySites.goLogin") }}
+      </button>
     </p>
 
     <p v-if="sitesLoading && sites.length === 0" class="muted-line">{{ t("mySites.loading") }}</p>
@@ -129,7 +165,12 @@ function openOne(row: MySiteRow): void {
           </span>
         </div>
         <div class="my-site__meta">
-          <span class="my-site__synced">{{ syncedText(row.status.lastSync) }}</span>
+          <span
+            class="my-site__synced"
+            :class="{ 'my-site__missing': missingText(row) }"
+            :data-testid="`synced-${row.status.site.id}`"
+            >{{ missingText(row) || syncedText(row.status.lastSync) }}</span
+          >
           <button type="button" class="link-btn" @click="openOne(row)">
             {{ t("mySites.open") }}
           </button>

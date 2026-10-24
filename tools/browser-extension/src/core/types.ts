@@ -37,6 +37,8 @@ export interface KnownSiteStatus {
   cookieStatus: "valid" | "expiring" | "expired" | "missing";
   cookieExpireDays: number | null;
   hasCookie: boolean;
+  /** Cookie 缺失时还差哪几个必需 Cookie（旧快照里没有这个字段） */
+  missingCookies?: string[];
   lastSync: string | null;
   autoSync: boolean;
 }
