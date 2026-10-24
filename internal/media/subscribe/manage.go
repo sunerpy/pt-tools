@@ -406,10 +406,15 @@ type SubscriptionView struct {
 	Schedule Schedule  `json:"schedule"`
 	Progress *Progress `json:"progress,omitempty"`
 	Torrents int       `json:"torrents"`
+	// SeenVersions 是最近一次搜索找到的、能补上缺的集的版本（剧集；没搜过时没有）
+	SeenVersions *SeenVersions `json:"seen_versions,omitempty"`
 }
 
 func viewOf(row models.MediaSubscription) SubscriptionView {
-	return SubscriptionView{MediaSubscription: row, Sites: orEmpty(decodeList(row.Sites)), Schedule: scheduleOf(&row)}
+	return SubscriptionView{
+		MediaSubscription: row, Sites: orEmpty(decodeList(row.Sites)), Schedule: scheduleOf(&row),
+		SeenVersions: seenVersionsView(&row),
+	}
 }
 
 // SubscriptionDetail 是订阅详情：订阅、进度与下载过的种子。

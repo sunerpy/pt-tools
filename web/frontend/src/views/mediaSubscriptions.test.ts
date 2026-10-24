@@ -750,12 +750,12 @@ describe("订阅", () => {
     await vi.waitFor(() => expect(q("subscribe-dialog")).not.toBeNull());
     await vi.waitFor(() => expect(organize.libraries).toHaveBeenCalled());
     expect(q("sd-locked")!.textContent).toContain("HHWEB 1080p");
-    expect(q("sd-locked")!.textContent).toContain("原来的制作组不更新了就清掉");
+    expect(q("sd-lock-edit")!.textContent).toContain("改成");
+    expect(q("subscribe-dialog")!.textContent).toContain("原来的制作组不更新了");
     expect(q("sd-lock-cleared")).toBeNull();
     q("sd-clear-lock")!.click();
     await flush();
-    expect(q("sd-locked")).toBeNull();
-    // 清掉以后写明保存后会怎样：已入库的集不动，也不再按它们定锁
+    // 清空以后写明保存后会怎样：已入库的集不动，也不再按它们定锁
     expect(q("sd-lock-cleared")!.textContent).toContain("下一个下载成功的版本成为新的锁");
     expect(q("sd-lock-cleared")!.textContent).toContain("已入库的集不动");
     q("sd-save")!.click();
@@ -786,6 +786,50 @@ describe("订阅", () => {
       },
     ]);
     expect(ui.success).toHaveBeenCalledWith("已保存追剧");
+  });
+
+  it("修改追剧：点最近一次搜索找到的版本改锁，只发改了的锁", async () => {
+    const seen = {
+      ...follow,
+      seen_versions: {
+        at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+        versions: [
+          { group: "MWeb", resolution: "2160p", episodes: [4, 5], sites: ["mteam"] },
+          { group: "ADWeb", resolution: "1080p", episodes: [4], sites: ["hdsky", "mteam"] },
+        ],
+      },
+    };
+    await mountPage({ subs: [seen] });
+    api.update.mockResolvedValue(seen);
+    q("ms-edit-3")!.click();
+    await vi.waitFor(() => expect(q("sd-seen-versions")).not.toBeNull());
+    await vi.waitFor(() => expect(organize.libraries).toHaveBeenCalled());
+    expect(q("sd-seen-versions")!.textContent).toContain("2小时前");
+    expect(q("sd-seen-0")!.textContent).toContain("MWeb 2160p");
+    expect(q("sd-seen-0")!.textContent).toContain("第 4、5 集");
+    expect(q("sd-seen-1")!.getAttribute("title")).toBe("hdsky、mteam");
+    q("sd-seen-0")!.click();
+    await flush();
+    expect(q("sd-lock-cleared")).toBeNull();
+    q("sd-save")!.click();
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+    expect(api.update.mock.calls[0]![1]).toMatchObject({
+      lock_group: "MWeb",
+      lock_resolution: "2160p",
+    });
+  });
+
+  it("修改追剧：没改锁时不发锁的字段", async () => {
+    await mountPage({ subs: [follow] });
+    api.update.mockResolvedValue(follow);
+    q("ms-edit-3")!.click();
+    await vi.waitFor(() => expect(q("subscribe-dialog")).not.toBeNull());
+    await vi.waitFor(() => expect(organize.libraries).toHaveBeenCalled());
+    expect(q("sd-seen-versions")).toBeNull();
+    q("sd-save")!.click();
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+    expect(api.update.mock.calls[0]![1]).not.toHaveProperty("lock_group");
+    expect(api.update.mock.calls[0]![1]).not.toHaveProperty("lock_resolution");
   });
 
   it("修改追剧：每周没选星期几时不保存", async () => {

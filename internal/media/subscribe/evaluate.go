@@ -451,6 +451,8 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 	for _, n := range lg.missing {
 		missing[n] = true
 	}
+	// 「修改」里改锁时给用户看：这次搜到的哪些版本能补上缺的集（锁住的版本等不到时选一个）
+	s.recordSeenVersions(ctx, sub, ok, missing)
 	coversMissing := func(o scored) bool {
 		for n := range missing {
 			if o.sp.covers(n) {

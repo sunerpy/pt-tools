@@ -10,6 +10,7 @@ import {
   type MediaKind,
   type MediaLibrary,
   type QualityProfile,
+  type SeenVersion,
   type Subscription,
   type SubscriptionInput,
   downloadersApi,
@@ -19,6 +20,7 @@ import {
 } from "@/api";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
+import { formatTimeAgo } from "@/utils/format";
 import { posterURL } from "@/utils/media";
 import {
   CRON_PRESETS,
@@ -102,18 +104,60 @@ const libraries = ref<MediaLibrary[]>([]);
 // ---- 追剧 ----
 const sched = ref<FollowSchedule>({ kind: "airtime" });
 const lockVersion = ref(true);
-const clearLock = ref(false);
+// 修改时锁住的制作组与分辨率：一个留空是不限这一项，两个都空是清空（下一个下载成功的版本成为新锁）
+const lockGroup = ref("");
+const lockRes = ref("");
 const startEpisode = ref<number | undefined>(undefined);
 const followNext = ref(false);
 const libraryID = ref(0);
 const totalEpisodes = ref<number | undefined>(undefined);
 const totalBefore = ref<number | undefined>(undefined);
-// 修改时现在锁住的版本（还没定、或者点了清掉时为空）
+// 修改时现在保存着的锁（还没定时为空）
 const lockedNow = computed(() =>
-  props.sub && !clearLock.value
-    ? [props.sub.lock_group, props.sub.lock_resolution].filter(Boolean).join(" ")
-    : "",
+  props.sub ? [props.sub.lock_group, props.sub.lock_resolution].filter(Boolean).join(" ") : "",
 );
+const lockChanged = computed(
+  () =>
+    Boolean(props.sub) &&
+    (lockGroup.value.trim() !== (props.sub?.lock_group ?? "") ||
+      lockRes.value.trim() !== (props.sub?.lock_resolution ?? "")),
+);
+const lockEmpty = computed(() => !lockGroup.value.trim() && !lockRes.value.trim());
+// 最近一次搜索找到的、能补上缺的集的版本：原来的组不更新了时点一个改锁（2026-10-24 用户：「清理了如何重新设置条件」）
+const seenVersions = computed(() => props.sub?.seen_versions?.versions ?? []);
+const seenAt = computed(() => {
+  const at = props.sub?.seen_versions?.at;
+  return at ? formatTimeAgo(Date.parse(at) / 1000) : "";
+});
+const resolutionOptions = computed(() => [
+  ...new Set(
+    [
+      "2160p",
+      "1080p",
+      "720p",
+      ...seenVersions.value.map((v) => v.resolution),
+      lockRes.value.trim(),
+    ].filter(Boolean),
+  ),
+]);
+
+function pickVersion(v: SeenVersion) {
+  lockGroup.value = v.group;
+  lockRes.value = v.resolution;
+}
+
+function isPicked(v: SeenVersion): boolean {
+  return (
+    v.group.toLowerCase() === lockGroup.value.trim().toLowerCase() &&
+    v.resolution.toLowerCase() === lockRes.value.trim().toLowerCase()
+  );
+}
+
+function versionEpisodes(eps: number[]): string {
+  return eps.length > 6
+    ? `第 ${eps.slice(0, 6).join("、")} 等 ${eps.length} 集`
+    : `第 ${eps.join("、")} 集`;
+}
 const scheduleTip = computed(() => {
   switch (sched.value.kind) {
     case "airtime":
@@ -267,7 +311,8 @@ watch(
     splitInterval(sched.value.interval_minutes);
     preview.value = { loading: false, next: [], note: "", error: "" };
     lockVersion.value = s ? Boolean(s.lock_version) : true;
-    clearLock.value = false;
+    lockGroup.value = s?.lock_group ?? "";
+    lockRes.value = s?.lock_resolution ?? "";
     startEpisode.value = s?.start_episode && s.start_episode > 1 ? s.start_episode : undefined;
     followNext.value = Boolean(s?.follow_next_season);
     libraryID.value = s?.library_id ?? 0;
@@ -326,9 +371,10 @@ function followInput(): Partial<SubscriptionInput> {
   if (editing.value) {
     // 修改时 0 是整季
     out.start_episode = startEpisode.value ?? 0;
-    if (clearLock.value) {
-      out.lock_group = "";
-      out.lock_resolution = "";
+    // 只在改了锁时带上：两个都空是清空锁
+    if (lockChanged.value) {
+      out.lock_group = lockGroup.value.trim();
+      out.lock_resolution = lockRes.value.trim();
     }
     if (totalEpisodes.value !== totalBefore.value) out.total_episodes = totalEpisodes.value ?? 0;
   } else if (startEpisode.value) {
@@ -589,19 +635,63 @@ async function save() {
             <div class="field-tip">
               锁住的版本等不到时接着等，不换别的版本；某一集要换，在追剧详情里点那一集「换版本」
             </div>
-            <div v-if="lockVersion && lockedNow" class="sd__locked" data-testid="sd-locked">
-              <span>现在锁住：{{ lockedNow }}</span>
-              <el-button link type="primary" data-testid="sd-clear-lock" @click="clearLock = true"
-                >清掉，按下一个下载的版本重新定</el-button
-              >
-              <span>原来的制作组不更新了就清掉</span>
-            </div>
-            <div
-              v-else-if="lockVersion && clearLock"
-              class="sd__locked"
-              data-testid="sd-lock-cleared">
-              保存以后，下一个下载成功的版本成为新的锁；已入库的集不动，也不再按它们定
-            </div>
+            <template v-if="lockVersion && editing">
+              <div v-if="lockedNow" class="sd__locked" data-testid="sd-locked">
+                现在锁住：{{ lockedNow }}
+              </div>
+              <div class="sd__lockedit" data-testid="sd-lock-edit">
+                <span class="sd__lockedit-k">{{ lockedNow ? "改成" : "锁住" }}</span>
+                <el-input
+                  v-model="lockGroup"
+                  class="sd__lockedit-group"
+                  maxlength="64"
+                  clearable
+                  placeholder="制作组（留空不限）"
+                  data-testid="sd-lock-group" />
+                <el-select
+                  v-model="lockRes"
+                  class="sd__lockedit-res"
+                  filterable
+                  allow-create
+                  clearable
+                  placeholder="分辨率（不限）"
+                  data-testid="sd-lock-res">
+                  <el-option v-for="r in resolutionOptions" :key="r" :label="r" :value="r" />
+                </el-select>
+                <el-button
+                  link
+                  type="primary"
+                  :disabled="lockEmpty"
+                  data-testid="sd-clear-lock"
+                  @click="
+                    lockGroup = '';
+                    lockRes = '';
+                  "
+                  >清空</el-button
+                >
+              </div>
+              <div v-if="seenVersions.length" class="sd__seen" data-testid="sd-seen-versions">
+                <span class="sd__seen-k">最近一次搜索（{{ seenAt }}）找到：</span>
+                <el-button
+                  v-for="(v, i) in seenVersions"
+                  :key="`${v.group}-${v.resolution}`"
+                  size="small"
+                  :type="isPicked(v) ? 'primary' : 'default'"
+                  :plain="!isPicked(v)"
+                  :title="v.sites.join('、')"
+                  :data-testid="`sd-seen-${i}`"
+                  @click="pickVersion(v)"
+                  >{{ [v.group, v.resolution].filter(Boolean).join(" ") }} ·
+                  {{ versionEpisodes(v.episodes) }}</el-button
+                >
+              </div>
+              <div v-if="lockChanged && lockEmpty" class="sd__locked" data-testid="sd-lock-cleared">
+                保存以后，下一个下载成功的版本成为新的锁；已入库的集不动，也不再按它们定
+              </div>
+              <div v-else class="field-tip">
+                原来的制作组不更新了：点上面搜到的版本，或者填制作组和分辨率；清空则下一个下载成功的版本成为新的锁。已入库的集不动
+              </div>
+            </template>
           </el-form-item>
           <div class="sd__row">
             <el-form-item label="从第几集开始追">
@@ -859,5 +949,28 @@ async function save() {
   margin-top: 4px;
   font-size: 12px;
   color: var(--pt-t2);
+}
+.sd__lockedit,
+.sd__seen {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 6px;
+  width: 100%;
+}
+.sd__lockedit-k,
+.sd__seen-k {
+  font-size: 12px;
+  color: var(--pt-t2);
+}
+.sd__lockedit-group {
+  width: 180px;
+}
+.sd__lockedit-res {
+  width: 140px;
+}
+.sd__seen .el-button + .el-button {
+  margin-left: 0;
 }
 </style>
