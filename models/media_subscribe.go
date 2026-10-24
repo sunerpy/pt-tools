@@ -138,6 +138,8 @@ type MediaSubscription struct {
 	LockResolution string `gorm:"size:16;not null;default:''" json:"lock_resolution"`
 	// LockFromNext 为真时锁住的版本是用户清掉的：不再按库里已有的文件定，下一个推送成功的版本成为新锁（写锁时清掉）
 	LockFromNext bool `gorm:"not null;default:false" json:"-"`
+	// SeenVersions 是最近一次搜索找到的、能补上缺的集的版本（JSON，见 subscribe.SeenVersions）：「修改」里改锁时给用户选
+	SeenVersions string `gorm:"type:text;not null;default:''" json:"-"`
 	// FollowNextSeason 为真时这一季完成以后自动给下一季建追剧；NextSeasonID 是已经建好的那个
 	FollowNextSeason bool `gorm:"not null;default:false" json:"follow_next_season"`
 	NextSeasonID     uint `gorm:"not null;default:0" json:"next_season_id"`

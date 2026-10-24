@@ -3338,11 +3338,21 @@ export interface Subscription {
   lock_version?: boolean;
   lock_group?: string;
   lock_resolution?: string;
+  /** 最近一次搜索找到的、能补上缺的集的版本（剧集；没搜过时没有）：「修改」里改锁时给用户选 */
+  seen_versions?: { at: string; versions: SeenVersion[] };
   follow_next_season?: boolean;
   next_season_id?: number;
   /** 整理进哪个媒体库（0 按类型自动选） */
   library_id?: number;
   completed_at?: string;
+}
+
+/** 最近一次搜索找到的一个版本：能补上哪几个缺的集、在哪些站点上 */
+export interface SeenVersion {
+  group: string;
+  resolution: string;
+  episodes: number[];
+  sites: string[];
 }
 
 export interface SubscriptionTorrent {
