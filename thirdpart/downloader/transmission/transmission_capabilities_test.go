@@ -212,3 +212,27 @@ func TestTransmissionAddTorrentFileExContextCancels(t *testing.T) {
 	require.Error(t, err)
 	assert.Less(t, time.Since(start), 3*time.Second)
 }
+
+// 只下种子里的部分文件：torrent-set 的 files-unwanted（优先级 0）与 files-wanted；先按 hash 找到种子
+func TestTransmissionSetFilePriority(t *testing.T) {
+	f := &fakeTrackerRPC{torrent: map[string]any{"id": 7, "hashString": "abc"}}
+	srv := f.server(t)
+	defer srv.Close()
+	c := newCapabilityClient(t, srv.URL)
+	var _ downloader.FileSelector = c
+
+	require.NoError(t, c.SetFilePriority(context.Background(), "abc", []int{0, 2}, 0))
+	require.NoError(t, c.SetFilePriority(context.Background(), "abc", []int{1}, 1))
+	require.Len(t, f.sets, 2)
+	assert.Equal(t, []any{float64(7)}, f.sets[0]["ids"])
+	assert.Equal(t, []any{float64(0), float64(2)}, f.sets[0]["files-unwanted"])
+	assert.NotContains(t, f.sets[0], "files-wanted")
+	assert.Equal(t, []any{float64(1)}, f.sets[1]["files-wanted"])
+	assert.NotContains(t, f.sets[1], "files-unwanted")
+
+	require.NoError(t, c.SetFilePriority(context.Background(), "abc", nil, 0))
+	assert.Len(t, f.sets, 2, "没有文件时不发请求")
+
+	f.torrent = nil
+	assert.ErrorIs(t, c.SetFilePriority(context.Background(), "gone", []int{1}, 0), downloader.ErrTorrentNotFound)
+}

@@ -279,9 +279,13 @@ func TestUpgradeMixedSeasonTakesPack(t *testing.T) {
 	e2 := e.libraryFile("e2", "The.Last.of.Us.S02E02.1080p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 2, 0, "/lib/tlou/s02e02.old.mkv")
 	e3 := e.libraryFile("e3", "The.Last.of.Us.S02E03.1080p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 3, 0, "/lib/tlou/s02e03.old.mkv")
 	e.search.set(e.item("hdsky", "m1", "The.Last.of.Us.S02.2160p.WEB-DL.H265-X", "", 30, 10))
+	e.site.files["m1"] = packBytes("The.Last.of.Us.S02.2160p.WEB-DL.H265-X",
+		"The.Last.of.Us.S02E01.2160p.WEB-DL.H265-X.mkv", "The.Last.of.Us.S02E02.2160p.WEB-DL.H265-X.mkv", "The.Last.of.Us.S02E03.2160p.WEB-DL.H265-X.mkv")
 	msg, err := e.svc.SearchNow(e.ctx, tv.ID)
 	require.NoError(t, err)
 	require.Contains(t, msg, "下载了 The.Last.of.Us.S02.2160p", "后两集会变好")
+	assert.NotContains(t, msg, "只下", "洗版要整个包，按每一集比版本")
+	assert.Empty(t, e.dl.prioCalls())
 	for ep := 1; ep <= 3; ep++ {
 		e.organized(e.hashOf("m1"), models.MediaKindTV, 100088, 2, ep, fmt.Sprintf("/lib/tlou/s02e0%d.mkv", ep))
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
-	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -16,11 +15,11 @@ import (
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
-	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/reseed"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
@@ -382,7 +381,7 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 			if len(vers) > 0 {
 				return "库里已经有了"
 			}
-			return s.pushOne(ctx, sub, ok[0], set)
+			return s.pushOne(ctx, sub, ok[0], set, nil)
 		}
 		if downloading {
 			return "洗版：上一个版本还在下载"
@@ -391,7 +390,7 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 		if base, has := s.baseline(ctx, profile, linked, vers); has && ok[0].v.Score <= base {
 			return "洗版：没有比现在更好的版本"
 		}
-		return s.pushOne(ctx, sub, ok[0], set)
+		return s.pushOne(ctx, sub, ok[0], set, nil)
 	}
 	msg := s.pickTV(ctx, sub, profile, ok, set, lg)
 	// 推送了的话按新的种子重建台账（锁住的版本也可能刚写上）：详情与进度马上看得到这几集在下载
@@ -440,7 +439,7 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		if len(packs) == 0 || packs[0].v.Score <= s.episodeFloor(ctx, profile, vers, lg.required) {
 			return "洗版：没有比现在更好的整季包"
 		}
-		return s.pushOne(ctx, sub, packs[0], set)
+		return s.pushOne(ctx, sub, packs[0], set, nil)
 	}
 	if lg.listErr != "" {
 		step(ctx, stepWait, "这一轮不推缺的集（免得重复下载正在下载的集）：%s", lg.listErr)
@@ -546,7 +545,7 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		return false
 	}
 	if wantPack(packs, eps) && allowedNow(packs[0]) {
-		msg := s.pushOne(ctx, sub, packs[0], set)
+		msg := s.pushOne(ctx, sub, packs[0], set, missing)
 		if strings.HasPrefix(msg, "下载了") {
 			pushed()
 		}
@@ -579,7 +578,7 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 			}
 			continue
 		}
-		msg := s.pushOne(ctx, sub, o, set)
+		msg := s.pushOne(ctx, sub, o, set, missing)
 		msgs = append(msgs, msg)
 		if strings.HasPrefix(msg, "下载了") {
 			pushed()
@@ -640,19 +639,23 @@ func (s *Service) downloaderFor(ctx context.Context, sub *models.MediaSubscripti
 }
 
 // pushOne 下载种子文件并推送到下载器，记下种子并发通知。返回结果说明（以「下载了」开头表示成功）；结果写进这次运行的步骤。
-func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings) string {
-	msg := s.pushTorrent(ctx, sub, o, set)
-	if strings.HasPrefix(msg, "下载了") {
+// pushOne 推送一个候选。want 是这一轮要的集（补缺的集时）：种子里有几集时只下这些集；为 nil 时整个种子都下（电影、洗版）。
+func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings, want map[int]bool) string {
+	msg := s.pushTorrent(ctx, sub, o, set, want)
+	switch {
+	case strings.HasPrefix(msg, "下载了"):
 		step(ctx, stepPush, "%s", msg)
 		markRun(ctx, func(rl *runLog) { rl.pushed = append(rl.pushed, o.c.Item.Title) })
-	} else {
+	case strings.HasPrefix(msg, noWantedPrefix):
+		step(ctx, stepReject, "%s", msg)
+	default:
 		step(ctx, stepFail, "%s", msg)
 		markRun(ctx, func(rl *runLog) { rl.pushFailed++ })
 	}
 	return msg
 }
 
-func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings) string {
+func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings, want map[int]bool) string {
 	if s.cfg.Sites == nil || s.cfg.Push == nil {
 		return "推送服务没有启动"
 	}
@@ -674,6 +677,13 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		return fmt.Sprintf("%s 的种子文件无法解析：%v", o.c.Item.Title, err)
 	}
 	hash = strings.ToLower(hash)
+	// 种子里有几集（整季包、多集）时：视频都对得出集、却没有一集是要的，不推；推送以后把不要的集设成不下载
+	var plan *filePlan
+	if want != nil && sub.MediaType == models.MediaKindTV && (o.sp.Whole || o.sp.End > o.sp.Start) {
+		if plan = s.planFiles(ctx, sub, data, want); plan != nil && plan.none() {
+			return fmt.Sprintf("%s%s：种子里没有缺的集（种子里是 %s）", noWantedPrefix, o.c.Item.Title, episodeList(plan.all))
+		}
+	}
 	size := o.c.Item.SizeBytes
 	if size <= 0 {
 		if n, serr := qbit.ComputeTorrentSize(data); serr == nil {
@@ -719,6 +729,19 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		}
 		return fmt.Sprintf("推送 %s 失败：%s", o.c.Item.Title, reason)
 	}
+	var kept []int
+	if plan != nil && len(plan.unwanted) > 0 && !res.Skipped {
+		got, n, serr := s.selectFiles(ctx, dlID, hash, plan.mp, want)
+		switch {
+		case serr == nil && n > 0:
+			kept = got
+			step(ctx, stepInfo, "只下缺的 %s：种子里另外 %d 个视频文件（%s）设成了不下载", episodeList(got), n, episodeList(plan.unwanted))
+		case errors.Is(serr, downloader.ErrCapabilityUnsupported):
+			step(ctx, stepInfo, "下载器不支持只下种子里的部分文件，整个种子都会下载（%s 不缺）", episodeList(plan.unwanted))
+		case serr != nil:
+			step(ctx, stepWait, "没能把不缺的集设成不下载（%v），整个种子都会下载", serr)
+		}
+	}
 	now := s.cfg.Now()
 	row := models.MediaSubscriptionTorrent{
 		SubscriptionID: sub.ID, SiteName: o.c.Site, TorrentID: o.c.Item.ID, InfoHash: hash, Title: truncate(o.c.Item.Title, 512),
@@ -729,9 +752,20 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 	if res.Skipped {
 		row.Message = "下载器里已经有这个种子"
 	}
-	if o.sp.Whole && sub.MediaType == models.MediaKindTV {
+	switch {
+	case len(kept) > 0:
+		// 只下了缺的集：种子里只算这几集
+		b, _ := json.Marshal(kept)
+		row.CoveredEpisodes = string(b)
+	case o.sp.Whole && sub.MediaType == models.MediaKindTV:
 		// 整季包按种子的文件列表核对实际有哪几集：缺的集下一轮照常一集一集补
-		if eps := s.packEpisodes(ctx, sub, data); len(eps) > 0 {
+		eps := []int(nil)
+		if plan != nil {
+			eps = plan.all
+		} else {
+			eps = s.packEpisodes(ctx, sub, data)
+		}
+		if len(eps) > 0 {
 			b, _ := json.Marshal(eps)
 			row.CoveredEpisodes = string(b)
 		}
@@ -739,7 +773,10 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 	if err := s.cfg.DB.WithContext(ctx).Create(&row).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 记下订阅的种子失败: %v", err)
 	}
-	s.notify(ctx, sub, o, set)
+	s.notify(ctx, sub, o, set, kept)
+	if len(kept) > 0 {
+		return "下载了 " + o.c.Item.Title + "（只下 " + episodeList(kept) + "）"
+	}
 	return "下载了 " + o.c.Item.Title
 }
 
@@ -749,10 +786,7 @@ func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscriptio
 	if err != nil {
 		return nil
 	}
-	var mp *episodeMapper
-	if season, serr := s.seasonFor(ctx, sub, false); serr == nil {
-		mp = s.mapperFor(ctx, sub, season)
-	}
+	mp := s.fileMapper(ctx, sub)
 	paths := make([]string, 0, len(files))
 	for _, f := range files {
 		paths = append(paths, f.Path)
@@ -765,23 +799,8 @@ func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscriptio
 func (s *Service) fileEpisodes(ctx context.Context, mp *episodeMapper, paths []string) []int {
 	got := map[int]bool{}
 	for _, p := range paths {
-		if !transfer.IsVideo(p) {
-			continue
-		}
-		name := path.Base(p)
-		m := s.parse(ctx, name, "")
-		sp := span{Start: m.Episode, End: max(m.EpisodeEnd, m.Episode), Whole: m.Episode == 0}
-		if mp != nil {
-			mapped, ok, _ := mp.mapEpisodes(m, name, "", sp)
-			if !ok {
-				continue
-			}
-			sp = mapped
-		}
-		if sp.Whole || sp.Start <= 0 {
-			continue
-		}
-		for n := sp.Start; n <= max(sp.End, sp.Start); n++ {
+		eps, _ := s.videoEpisodes(ctx, mp, p)
+		for _, n := range eps {
 			got[n] = true
 		}
 	}
@@ -833,7 +852,8 @@ func fetchTorrent(ctx context.Context, site v2.Site, it v2.TorrentItem) ([]byte,
 }
 
 // notify 下载了订阅的资源时发一条通知（设置里没选通道时不发）。追剧（剧集按自己的定时搜索的）发「追剧更新」，其余发「订阅下载」。
-func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings) {
+// notify 发下载了的通知；kept 不为空时是种子里只下了这几集。
+func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings, kept []int) {
 	if s.cfg.Notify == nil || len(set.NotifyChannels) == 0 {
 		return
 	}
@@ -842,6 +862,10 @@ func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o s
 	fmt.Fprintf(&b, "种子：%s\n站点：%s", o.c.Item.Title, o.c.Site)
 	episodes := ""
 	switch {
+	case len(kept) > 0 && o.sp.Whole:
+		episodes = episodesText(kept) + "（整季包里只下这几集）"
+	case len(kept) > 0:
+		episodes = episodesText(kept) + "（种子里只下这几集）"
 	case o.sp.Whole:
 		episodes = "整季"
 	case o.sp.Start > 0 && o.sp.End > o.sp.Start:

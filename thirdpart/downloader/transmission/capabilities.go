@@ -14,7 +14,42 @@ var (
 	_ downloader.TrackerReader     = (*TransmissionClient)(nil)
 	_ downloader.BulkTrackerReader = (*TransmissionClient)(nil)
 	_ downloader.ContextAdder      = (*TransmissionClient)(nil)
+	_ downloader.FileSelector      = (*TransmissionClient)(nil)
 )
+
+// SetFilePriority 经 torrent-set 设文件要不要下载：priority 为 0 时放进 files-unwanted，大于 0 时放进 files-wanted。
+// Transmission 对不存在的种子不报错，所以先按 hash 找到种子。
+func (t *TransmissionClient) SetFilePriority(ctx context.Context, id string, indexes []int, priority int) error {
+	if len(indexes) == 0 {
+		return nil
+	}
+	resp, err := t.doRequestContext(ctx, "torrent-get", torrentGetArgs{
+		IDs:    normalizeTransmissionIDs([]string{id}),
+		Fields: []string{"id"},
+	})
+	if err != nil {
+		return fmt.Errorf("读取种子失败: %w", err)
+	}
+	var got struct {
+		Torrents []struct {
+			ID int `json:"id"`
+		} `json:"torrents"`
+	}
+	if err := json.Unmarshal(resp.Arguments, &got); err != nil {
+		return fmt.Errorf("解析种子失败: %w", err)
+	}
+	if len(got.Torrents) == 0 {
+		return fmt.Errorf("%w：%s", downloader.ErrTorrentNotFound, id)
+	}
+	key := "files-wanted"
+	if priority == 0 {
+		key = "files-unwanted"
+	}
+	if _, err := t.doRequestContext(ctx, "torrent-set", map[string]any{"ids": []int{got.Torrents[0].ID}, key: indexes}); err != nil {
+		return fmt.Errorf("设置文件要不要下载失败: %w", err)
+	}
+	return nil
+}
 
 // GetTorrentTrackersContext 读取一个种子的 tracker 列表；请求受 ctx 约束。
 func (t *TransmissionClient) GetTorrentTrackersContext(ctx context.Context, id string) ([]downloader.TorrentTracker, error) {

@@ -57,6 +57,13 @@ type ContextAdder interface {
 	AddTorrentFileExContext(ctx context.Context, fileData []byte, opt AddTorrentOptions) (AddTorrentResult, error)
 }
 
+// FileSelector 设种子里一些文件的优先级（按下载器文件列表里的 Index）：0 是不下载，大于 0 是下载。
+// 追剧推整季包补几集时用它只下缺的集。qBittorrent 用 torrents/filePrio；Transmission 用 torrent-set 的
+// files-unwanted / files-wanted（只分要不要，不改文件的高低优先级）。
+type FileSelector interface {
+	SetFilePriority(ctx context.Context, id string, indexes []int, priority int) error
+}
+
 // BulkTrackerReader 一次读出全部种子的 tracker 列表（键是小写 info hash）。
 // Transmission 的 torrent-get 能一次带回 trackerStats；qBittorrent 只能逐个读，不实现。
 type BulkTrackerReader interface {
