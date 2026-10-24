@@ -129,6 +129,14 @@ const seenAt = computed(() => {
   const at = props.sub?.seen_versions?.at;
   return at ? formatTimeAgo(Date.parse(at) / 1000) : "";
 });
+// 改锁的提示：有搜到的版本时让点它们；还没搜过时写明搜索一次以后这里才有
+const lockTip = computed(() =>
+  seenVersions.value.length
+    ? "原来的制作组不更新了：点上面搜到的版本，或者填制作组和分辨率；清空则下一个下载成功的版本成为新的锁。已入库的集不动"
+    : seenAt.value
+      ? "原来的制作组不更新了：填制作组和分辨率（留空一项就不限这一项）；清空则下一个下载成功的版本成为新的锁。已入库的集不动"
+      : "原来的制作组不更新了：填制作组和分辨率（留空一项就不限这一项）；清空则下一个下载成功的版本成为新的锁。已入库的集不动。下一次搜索以后（也可以在列表里点「立即搜索」），这里列出搜到的版本，点一个就改成它",
+);
 const resolutionOptions = computed(() => [
   ...new Set(
     [
@@ -685,12 +693,13 @@ async function save() {
                   {{ versionEpisodes(v.episodes) }}</el-button
                 >
               </div>
+              <div v-else-if="seenAt" class="field-tip" data-testid="sd-seen-none">
+                最近一次搜索（{{ seenAt }}）没有找到能补上缺的集的版本
+              </div>
               <div v-if="lockChanged && lockEmpty" class="sd__locked" data-testid="sd-lock-cleared">
                 保存以后，下一个下载成功的版本成为新的锁；已入库的集不动，也不再按它们定
               </div>
-              <div v-else class="field-tip">
-                原来的制作组不更新了：点上面搜到的版本，或者填制作组和分辨率；清空则下一个下载成功的版本成为新的锁。已入库的集不动
-              </div>
+              <div v-else class="field-tip" data-testid="sd-lock-tip">{{ lockTip }}</div>
             </template>
           </el-form-item>
           <div class="sd__row">
@@ -968,7 +977,8 @@ async function save() {
   width: 180px;
 }
 .sd__lockedit-res {
-  width: 140px;
+  /* 放得下占位「分辨率（不限）」 */
+  width: 160px;
 }
 .sd__seen .el-button + .el-button {
   margin-left: 0;
