@@ -114,8 +114,8 @@ describe("checkCookieHealth: 多域站点", () => {
 });
 
 /*
- * 星陨阁这类站点把登录 Cookie 设在上一级域名（.xingyungept.org）上：以前按 domain 过滤只认本域名和子域名，
- * 登录着也显示「缺失」、没有同步按钮。现在按网址取，和浏览器实际发给站点的一致。
+ * 把登录 Cookie 设在上一级域名上的站点：以前按 domain 过滤只认本域名和子域名，登录着也显示「缺失」、
+ * 没有同步按钮。现在按网址取，和浏览器实际发给站点的一致。
  */
 describe("checkCookieHealth: Cookie 设在上一级域名上", () => {
   const SUB: KnownSite = { ...SITE, id: "sub", domains: ["pt.example"] } as KnownSite;
@@ -159,5 +159,51 @@ describe("checkCookieHealth: 缺失时写明缺哪几个", () => {
     jar["old.example"] = [cookie("_ga", "GA1.2.3")];
     const health = await checkCookieHealth(SITE);
     expect(health.missingCookies).toEqual(["c_secure_uid", "c_secure_pass"]);
+  });
+});
+
+/*
+ * 新版 NexusPHP（xiaomlove，include/functions.php 的 logincookie）登录只设一个 c_secure_pass：
+ * 值是 base64 的 {"user_id":…,"expires":…}.签名，没有 c_secure_uid、c_secure_tracker_ssl。星陨阁就是这样，
+ * 2026-10-25 用户：「缺 c_secure_uid, c_secure_tracker_ssl」「实际上 chrome 中我已登录星陨阁啊」。
+ */
+describe("checkCookieHealth: 新版 NexusPHP 只有一个 c_secure_pass", () => {
+  const NEXUS: KnownSite = {
+    ...SITE,
+    id: "xingyunge",
+    domains: ["pt.example"],
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+  } as KnownSite;
+  // PHP 的 setcookie 会把 base64 里的 = + / 编成 %3D %2B %2F
+  const token = encodeURIComponent(
+    btoa('{"user_id":12345,"expires":1792000000}.') + "0f".repeat(32),
+  );
+
+  it("c_secure_pass 是签名令牌时只要它一个，可以同步", async () => {
+    jar[".example"] = [cookie("c_secure_pass", token, 300), cookie("c_lang_folder", "chs")];
+
+    const health = await checkCookieHealth(NEXUS);
+
+    expect(health.status).toBe("valid");
+    expect(health.missingCookies).toEqual([]);
+    expect(health.cookieString).toContain(`c_secure_pass=${token}`);
+    expect(health.expireDays).toBeGreaterThanOrEqual(299);
+  });
+
+  it("旧版的 c_secure_pass（md5）单独在时仍算缺失，不拿残缺的一组去同步", async () => {
+    jar[".example"] = [cookie("c_secure_pass", "0123456789abcdef0123456789abcdef")];
+
+    const health = await checkCookieHealth(NEXUS);
+
+    expect(health.status).toBe("missing");
+    expect(health.missingCookies).toEqual(["c_secure_uid", "c_secure_tracker_ssl"]);
+    expect(health.cookieString).toBe("");
+  });
+
+  it("令牌解不开、不是 JSON 开头时按旧版算", async () => {
+    jar[".example"] = [cookie("c_secure_pass", "%E0%A4%A")];
+    expect((await checkCookieHealth(NEXUS)).status).toBe("missing");
+    jar[".example"] = [cookie("c_secure_pass", btoa("not a token"))];
+    expect((await checkCookieHealth(NEXUS)).status).toBe("missing");
   });
 });
