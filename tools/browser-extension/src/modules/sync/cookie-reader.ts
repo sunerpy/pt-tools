@@ -24,9 +24,8 @@ function toCookieString(cookies: chrome.cookies.Cookie[]): string {
 }
 
 /**
- * 浏览器访问这个域名时会带上的 Cookie。按网址取，和浏览器实际发给站点的一致：包括设在上一级域名上的
- * （例如星陨阁的 Cookie 在 .xingyungept.org 上）。以前按 domain 过滤，只认这个域名和它的子域名，
- * 这类站点登录着也显示「缺失」、没有同步按钮。
+ * 浏览器访问这个域名时会带上的 Cookie。按网址取，和浏览器实际发给站点的一致：包括设在上一级域名上的。
+ * 以前按 domain 过滤，只认这个域名和它的子域名，把 Cookie 设在上一级域名上的站点登录着也显示「缺失」。
  */
 async function siteCookies(domain: string): Promise<chrome.cookies.Cookie[]> {
   return chrome.cookies.getAll({ url: `https://${domain}/` });
@@ -40,6 +39,36 @@ async function getCookiesAcrossDomains(site: KnownSite): Promise<chrome.cookies.
     results.push(...cookies);
   }
   return results;
+}
+
+/**
+ * 新版 NexusPHP（xiaomlove，include/functions.php 的 logincookie）登录只设一个 c_secure_pass：值是 base64 的
+ * {"user_id":…,"expires":…}.签名（PHP 写 Cookie 时把 = + / 编成 %XX），没有 c_secure_uid、c_secure_tracker_ssl（星陨阁）。
+ * 旧版的 c_secure_pass 是 md5，单独在时仍算缺失。
+ */
+function isNexusAuthToken(value: string): boolean {
+  let raw = value;
+  try {
+    raw = decodeURIComponent(value);
+  } catch {
+    // 不是合法的 %XX 编码：按原样解
+  }
+  try {
+    return atob(raw).startsWith('{"user_id":');
+  } catch {
+    return false;
+  }
+}
+
+/** 这一组 Cookie 要凑齐的名字：c_secure_pass 是新版 NexusPHP 的签名令牌时只要它一个，否则按站点的必需名单 */
+function namesFor(site: KnownSite, cookies: chrome.cookies.Cookie[]): string[] {
+  if (site.cookieNames.includes("c_secure_pass")) {
+    const pass = cookies.find((cookie) => cookie.name === "c_secure_pass");
+    if (pass && isNexusAuthToken(pass.value)) {
+      return ["c_secure_pass"];
+    }
+  }
+  return site.cookieNames;
 }
 
 /** 一组 Cookie 里每个必需名字的第一条 */
@@ -81,9 +110,10 @@ async function pickDomainCookies(
     if (firstNonEmpty.length === 0) {
       firstNonEmpty = cookies;
     }
-    const required = requiredCookies(cookies, site.cookieNames);
-    if (required.size !== site.cookieNames.length) {
-      const lacking = site.cookieNames.filter((name) => !required.has(name));
+    const names = namesFor(site, cookies);
+    const required = requiredCookies(cookies, names);
+    if (required.size !== names.length) {
+      const lacking = names.filter((name) => !required.has(name));
       if (lacking.length < missing.length) {
         missing = lacking;
       }
@@ -141,7 +171,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
   }
 
   const cookieString = toCookieString(picked.cookies);
-  const required = requiredCookies(picked.cookies, site.cookieNames);
+  const required = requiredCookies(picked.cookies, namesFor(site, picked.cookies));
   const nowSeconds = Date.now() / 1000;
   const remainingDays = Array.from(required.values())
     .map((cookie) => cookie.expirationDate)
