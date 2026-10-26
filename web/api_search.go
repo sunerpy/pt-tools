@@ -115,7 +115,15 @@ func (s *Server) apiMultiSiteSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enabledSites := s.getEnabledSiteIDs()
+	requested := req.Sites
 	req.Sites = filterEnabledSites(req.Sites, enabledSites)
+	// 指定了站点时只搜它们：没启用的不搜、写进 errors；一个都没启用时直接返回，
+	// 不能变成搜所有站点（空的站点列表在搜索里是全部）
+	skipped := skippedSites(requested, req.Sites)
+	if len(requested) > 0 && len(req.Sites) == 0 {
+		writeJSON(w, MultiSiteSearchResponse{Items: []TorrentItemResponse{}, SiteResults: map[string]int{}, Errors: skipped})
+		return
+	}
 
 	timeout := 30 * time.Second
 	if req.TimeoutSecs > 0 {
@@ -153,6 +161,7 @@ func (s *Server) apiMultiSiteSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to response
 	response := toMultiSiteSearchResponse(result)
+	response.Errors = append(response.Errors, skipped...)
 
 	global.GetSlogger().Infof("[Search] Multi-site search completed: keyword=%s, results=%d, duration=%dms",
 		req.Keyword, len(response.Items), response.DurationMs)
@@ -282,6 +291,22 @@ func (s *Server) getEnabledSiteIDs() map[string]bool {
 		}
 	}
 	return enabled
+}
+
+// skippedSites 是指定了、却因为没启用而没搜的站点（每个只记一次）。
+func skippedSites(requested, kept []string) []SearchErrorResponse {
+	keep := make(map[string]bool, len(kept))
+	for _, id := range kept {
+		keep[id] = true
+	}
+	var out []SearchErrorResponse
+	for _, id := range requested {
+		if !keep[id] {
+			keep[id] = true
+			out = append(out, SearchErrorResponse{Site: id, Error: "站点没有启用，没有搜索"})
+		}
+	}
+	return out
 }
 
 func filterEnabledSites(requested []string, enabled map[string]bool) []string {
