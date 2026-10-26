@@ -196,12 +196,17 @@ const down30 = computed(() => (stats.value?.totals ?? []).reduce((n, p) => n + p
 
 /* ------------------------------------------------------------------ 列表操作 */
 
-const builtinSites = computed(() =>
-  Object.entries(sites.value)
-    .filter(([, s]) => s.is_builtin !== false)
-    .map(([name, s]) => ({ name, enabled: s.enabled }))
-    .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name)),
-);
+// 站点下拉框只列启用的内置站点（2026-10-26 用户：不该展示未启用的站点）。编辑的任务的站点后来停用了时
+// 仍列出它、标「未启用」，免得选择框里只剩一个站点名；保存时要开启任务，后端会要求先启用站点。
+const siteOptions = computed(() => {
+  const opts = Object.entries(sites.value)
+    .filter(([, s]) => s.is_builtin !== false && s.enabled)
+    .map(([name]) => ({ name, enabled: true }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const cur = form.value.site_name;
+  if (cur && !opts.some((o) => o.name === cur)) opts.push({ name: cur, enabled: false });
+  return opts;
+});
 
 const running = reactive<Record<number, boolean>>({});
 
@@ -287,7 +292,7 @@ const saving = ref(false);
 function openCreate() {
   editingId.value = null;
   form.value = defaultBrushConfig();
-  const firstSite = builtinSites.value.find((s) => s.enabled);
+  const firstSite = siteOptions.value.find((s) => s.enabled);
   if (firstSite) form.value.site_name = firstSite.name;
   const dl =
     downloaders.value.find((d) => d.is_default && d.enabled) ??
@@ -699,10 +704,11 @@ function progressText(t: BrushTorrent): string {
               v-model="form.site_name"
               filterable
               placeholder="选择站点"
+              no-data-text="没有启用的站点，先在站点列表里启用"
               style="width: 100%"
               data-testid="brush-site">
               <el-option
-                v-for="s in builtinSites"
+                v-for="s in siteOptions"
                 :key="s.name"
                 :label="s.enabled ? s.name : `${s.name}（未启用）`"
                 :value="s.name" />

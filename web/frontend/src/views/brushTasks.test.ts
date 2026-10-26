@@ -131,6 +131,18 @@ function button(text: string): HTMLButtonElement {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+/** 打开刷流任务对话框里的站点下拉框，给出它自己的选项文字 */
+async function siteOptions(): Promise<string[]> {
+  const sel = document.querySelector<HTMLElement>("[data-testid=brush-site]")!;
+  (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+  const listId = sel.querySelector("input")?.getAttribute("aria-controls");
+  const read = () => [
+    ...(document.getElementById(listId ?? "")?.querySelectorAll(".el-select-dropdown__item") ?? []),
+  ];
+  await vi.waitFor(() => expect(read().length).toBeGreaterThan(0));
+  return read().map((o) => (o.textContent ?? "").trim());
+}
+
 describe("刷流任务页", () => {
   it("列表按 DTO 画出站点、在做数、今日收益与上次运行结果；KPI 与 30 天收益来自统计接口", async () => {
     await mountPage([task()]);
@@ -146,6 +158,31 @@ describe("刷流任务页", () => {
   it("没有任务时给出新建入口", async () => {
     await mountPage([]);
     await vi.waitFor(() => expect(document.body.textContent).toContain("任务默认关闭"));
+  });
+
+  // 2026-10-26 用户：「刷流任务的站点下拉框中，不应展示未启用的站点」
+  it("站点下拉框只列启用的站点", async () => {
+    await mountPage([]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("任务默认关闭"));
+    await flush();
+    button("新建任务").click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-site]")).not.toBeNull(),
+    );
+    expect(await siteOptions()).toEqual(["hdsky", "mteam"]);
+  });
+
+  it("编辑的任务的站点后来停用了：仍列出它并标未启用，别的未启用站点不列", async () => {
+    await mountPage([task({ id: 4, name: "OB 刷流", site_name: "ourbits", site_enabled: false })]);
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='编辑 OB 刷流']")).not.toBeNull(),
+    );
+    await flush();
+    document.querySelector<HTMLButtonElement>("[aria-label='编辑 OB 刷流']")!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-site]")).not.toBeNull(),
+    );
+    expect(await siteOptions()).toEqual(["hdsky", "mteam", "ourbits（未启用）"]);
   });
 
   it("新建：默认关闭，优惠类型合成逗号串，站点与下载器预选", async () => {

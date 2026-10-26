@@ -8,14 +8,14 @@ Brushing adds requests to the site and keeps torrents moving in and out of your 
 
 Open **Download → Brush tasks** in the navigation and click **New task**. One task covers one site and one downloader:
 
-| Setting             | Meaning                                                                                                                                             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Site                | Built-in sites only. Configure the site's credentials and enable it under **Sites** first                                                           |
-| Section             | M-Team only. The general and adult sections are two separate lists: choose General (综合区), Adult (成人区), or Both (两个都读). General by default |
-| Downloader          | Where torrents are pushed. An empty save path or category uses the downloader's default                                                             |
-| Extra tags          | Optional. The site name, `pt-tools-brush`, and the task tag `pt-brush-<task id>` are always added                                                   |
-| Check interval      | How often a round runs. At least 5 minutes, 10 by default                                                                                           |
-| Enable after saving | New tasks are off by default; turn the task on once you have checked the settings                                                                   |
+| Setting             | Meaning                                                                                                                                                                                                                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Site                | Built-in sites only, and the list shows enabled sites only: configure the site's credentials and enable it under **Sites** first. Brushing reads the torrent list and downloads torrents with the site credentials, so it needs no RSS link and works even when your account class cannot generate one yet |
+| Section             | M-Team only. The general and adult sections are two separate lists: choose General (综合区), Adult (成人区), or Both (两个都读). General by default                                                                                                                                                        |
+| Downloader          | Where torrents are pushed. An empty save path or category uses the downloader's default                                                                                                                                                                                                                    |
+| Extra tags          | Optional. The site name, `pt-tools-brush`, and the task tag `pt-brush-<task id>` are always added                                                                                                                                                                                                          |
+| Check interval      | How often a round runs. At least 5 minutes, 10 by default                                                                                                                                                                                                                                                  |
+| Enable after saving | New tasks are off by default; turn the task on once you have checked the settings                                                                                                                                                                                                                          |
 
 Each round of an enabled task does three things in order: samples the task's torrents (records upload and download), removes torrents by the removal rules, and adds new torrents within the limits.
 
