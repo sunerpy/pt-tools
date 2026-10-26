@@ -1785,9 +1785,20 @@ func parseDiscountFromElement(elem *goquery.Selection, customMapping map[string]
 	alt = strings.ToLower(alt)
 
 	combined := class + " " + src + " " + alt
-	for keyword, level := range customMapping {
+	// 长的关键词先比：twoupfree 同时包含 free 与 twoup，按 map 的随机顺序会时而当成免费、时而当成 2x 上传
+	keywords := make([]string, 0, len(customMapping))
+	for keyword := range customMapping {
+		keywords = append(keywords, keyword)
+	}
+	slices.SortFunc(keywords, func(a, b string) int {
+		if len(a) != len(b) {
+			return len(b) - len(a)
+		}
+		return strings.Compare(a, b)
+	})
+	for _, keyword := range keywords {
 		if strings.Contains(combined, strings.ToLower(keyword)) {
-			return level
+			return customMapping[keyword]
 		}
 	}
 

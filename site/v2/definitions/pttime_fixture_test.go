@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,9 +30,9 @@ const pttimeSearchFixture = `<html><body>
   <td class="rowfollow">
     <table class="torrentname"><tr>
       <td class="embedded">
-        <a class="torrentname_title" href="details.php?id=50639"><b>Test.Movie.2025.2160p.UHD.BluRay</b></a>
-        <font class="promotion halfdown">50%</font>
-        <br/><font title="测试电影">测试电影 / Test Movie / 2025</font>
+        <a class="torrentname_title" href="details.php?id=50639"><b title="Test.Movie.2025.2160p.UHD.BluRay-50639">Test.Movie.2025.2160p.UHD.BluRay</b></a>
+        <font class="promotion halfdown">50%</font> <span title="2025-01-12 08:00:00">2天</span>
+        <br/><a class="dib cp" href="/torrents.php?tags=zz"><span class="tags zz">中字</span></a><font title="测试电影">测试电影 / Test Movie / 2025</font>
       </td>
       <td class="embedded"><a href="download.php?id=50639"><img src="pic/dl.gif" alt="dl"/></a></td>
     </tr></table>
@@ -52,10 +53,11 @@ const pttimeSearchFixture = `<html><body>
   <td class="rowfollow">
     <table class="torrentname"><tr>
       <td class="embedded">
-        <a class="torrentname_title" href="details.php?id=50640"><b>Test.Show.S01.1080p</b></a>
-        <font class="promotion free">免费</font>
+        <a class="torrentname_title" href="details.php?id=50640"><b title="Test.Show.S01.1080p-50640">Test.Show.S01.1080p</b></a>
+        <font class="promotion free">免费</font> <span title="2025-01-11 20:00:00">1天</span><font class="promotion bb">字幕/附件(1)</font>
         <br/><font title="测试剧集">测试剧集</font>
       </td>
+      <td class="embedded"><span title="豆瓣id:1001">7.0</span> <span title="IMDb:tt0000001">7.1</span></td>
       <td class="embedded"><a href="download.php?id=50640"><img src="pic/dl.gif" alt="dl"/></a></td>
     </tr></table>
   </td>
@@ -66,6 +68,50 @@ const pttimeSearchFixture = `<html><body>
   <td class="rowfollow"><a href="#seeders">80</a></td>
   <td class="rowfollow"><a href="#leechers">5</a></td>
   <td class="rowfollow"><a href="viewsnatches.php">200</a></td>
+  <td class="rowfollow">-</td>
+  <td class="rowfollow">-</td>
+  <td class="rowfollow"></td>
+</tr>
+<tr>
+  <td class="rowfollow"><span class="category dib c_movies" title="电影">Movies</span></td>
+  <td class="rowfollow">
+    <table class="torrentname"><tr>
+      <td class="embedded">
+        <a class="torrentname_title" href="details.php?id=50641"><b title="Test.Twoupfree.2025.1080p-50641">Test.Twoupfree.2025.1080p</b></a>
+        <font class="promotion twoupfree">2X免费</font> <span title="2025-01-13 09:30:00">3天</span>
+        <br/><font title="测试 2X 免费">测试 2X 免费</font>
+      </td>
+    </tr></table>
+  </td>
+  <td class="rowfollow dn" style="display:none">PTR</td>
+  <td class="rowfollow dn" style="display:none">0</td>
+  <td class="rowfollow"><span title="2025-01-09 10:00:00">4天前</span></td>
+  <td class="rowfollow">8.00 GB</td>
+  <td class="rowfollow"><a href="#seeders">3</a></td>
+  <td class="rowfollow"><a href="#leechers">9</a></td>
+  <td class="rowfollow"><a href="viewsnatches.php">20</a></td>
+  <td class="rowfollow">-</td>
+  <td class="rowfollow">-</td>
+  <td class="rowfollow"></td>
+</tr>
+<tr>
+  <td class="rowfollow"><span class="category dib c_movies" title="电影">Movies</span></td>
+  <td class="rowfollow">
+    <table class="torrentname"><tr>
+      <td class="embedded">
+        <a class="torrentname_title" href="details.php?id=50642"><b title="Test.Plain.2025.1080p-50642">Test.Plain.2025.1080p</b></a>
+        <font class="promotion bb">字幕/附件(1)</font> <span title="豆瓣id:1002">6.6</span>
+        <br/><font title="没有优惠">没有优惠</font>
+      </td>
+    </tr></table>
+  </td>
+  <td class="rowfollow dn" style="display:none">PTR</td>
+  <td class="rowfollow dn" style="display:none">0</td>
+  <td class="rowfollow"><span title="2025-01-08 10:00:00">5天前</span></td>
+  <td class="rowfollow">4.00 GB</td>
+  <td class="rowfollow"><a href="#seeders">30</a></td>
+  <td class="rowfollow"><a href="#leechers">1</a></td>
+  <td class="rowfollow"><a href="viewsnatches.php">40</a></td>
   <td class="rowfollow">-</td>
   <td class="rowfollow">-</td>
   <td class="rowfollow"></td>
@@ -162,7 +208,8 @@ func testPTTimeSearch(t *testing.T) {
 	require.NoError(t, err)
 	items, err := driver.ParseSearch(res)
 	require.NoError(t, err)
-	require.Len(t, items, 2, "should parse 2 torrent rows")
+	require.Len(t, items, 4, "should parse 4 torrent rows")
+	cst := time.FixedZone("CST", 8*3600)
 
 	half := items[0]
 	assert.Equal(t, "50639", half.ID)
@@ -172,9 +219,21 @@ func testPTTimeSearch(t *testing.T) {
 	assert.Equal(t, 10, half.Leechers)
 	assert.Equal(t, 500, half.Snatched)
 
+	// 结束时间在优惠角标后面的 span[title] 里（文字是剩余时间）：以前没读到，刷流全按「免费结束时间未知」拒掉（2026-10-26）
+	assert.True(t, half.DiscountEndTime.Equal(time.Date(2025, 1, 12, 8, 0, 0, 0, cst)), half.DiscountEndTime)
+
 	free := items[1]
 	assert.Equal(t, "50640", free.ID)
 	assert.Equal(t, v2.DiscountFree, free.DiscountLevel, "free class should map to Free")
+	assert.True(t, free.DiscountEndTime.Equal(time.Date(2025, 1, 11, 20, 0, 0, 0, cst)), free.DiscountEndTime)
+
+	two := items[2]
+	assert.Equal(t, v2.Discount2xFree, two.DiscountLevel, "twoupfree 不能被 free / twoup 先匹配走")
+	assert.True(t, two.DiscountEndTime.Equal(time.Date(2025, 1, 13, 9, 30, 0, 0, cst)), two.DiscountEndTime)
+
+	plain := items[3]
+	assert.Equal(t, v2.DiscountNone, plain.DiscountLevel, "字幕/附件角标（promotion bb）不是优惠")
+	assert.True(t, plain.DiscountEndTime.IsZero(), "评分的 span[title] 不是结束时间")
 }
 
 func testPTTimeDetail(t *testing.T) {

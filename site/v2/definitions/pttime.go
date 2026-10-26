@@ -165,8 +165,12 @@ var PTTimeDefinition = &v2.SiteDefinition{
 		Seeders:    "td.rowfollow:nth-child(7)",
 		Leechers:   "td.rowfollow:nth-child(8)",
 		Snatched:   "td.rowfollow:nth-child(9)",
-		// PTT-NP uses <font class="promotion <type>"> instead of <img class="pro_<type>">
-		DiscountIcon: "table.torrentname font.promotion, td.embedded font.promotion, table.torrentname img.pro_free, table.torrentname img.pro_free2up, table.torrentname img.pro_50pctdown, table.torrentname img.pro_30pctdown, table.torrentname img.pro_2up, table.torrentname img.pro_50pctdown2up",
+		// PTT-NP uses <font class="promotion <type>"> instead of <img class="pro_<type>">;
+		// <font class="promotion bb"> 是「字幕/附件(1)」角标，不是优惠
+		DiscountIcon: "table.torrentname font.promotion:not(.bb), td.embedded font.promotion:not(.bb), table.torrentname img.pro_free, table.torrentname img.pro_free2up, table.torrentname img.pro_50pctdown, table.torrentname img.pro_30pctdown, table.torrentname img.pro_2up, table.torrentname img.pro_50pctdown2up",
+		// 优惠的结束时间在角标后面紧跟的 <span title="2026-10-26 18:46:52">1小时34分钟</span>（title 是结束时间，文字是剩余时间）。
+		// 2026-10-26 从站点免费列表核对：没有这一项时刷流把免费种子全按「免费结束时间未知」拒掉
+		DiscountEndTime: "table.torrentname font.promotion:not(.bb) + span[title]",
 		// Explicit mapping required: parseDiscountFromElement's default switch doesn't know "halfdown"/"twouphalfdown" keywords
 		DiscountMapping: map[string]v2.DiscountLevel{
 			"free":           v2.DiscountFree,
