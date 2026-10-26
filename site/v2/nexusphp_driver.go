@@ -467,9 +467,9 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		endTimeElem := s.Find(d.Selectors.DiscountEndTime)
 		if endTimeElem.Length() > 0 {
 			if title, exists := endTimeElem.Attr("title"); exists {
-				item.DiscountEndTime = parseTime(title)
+				item.DiscountEndTime = d.parseDiscountTime(title)
 			} else {
-				item.DiscountEndTime = parseTime(endTimeElem.Text())
+				item.DiscountEndTime = d.parseDiscountTime(endTimeElem.Text())
 			}
 		}
 
@@ -478,7 +478,10 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		// Format: domTT_activate(..., '<span title="2026-01-18 22:37:47">1时19分</span>', ...)
 		if item.DiscountEndTime.IsZero() && discountElem.Length() > 0 {
 			if onmouseover, exists := discountElem.Attr("onmouseover"); exists && onmouseover != "" {
-				item.DiscountEndTime = parseDiscountEndTimeFromOnmouseover(onmouseover)
+				matches := discountEndTimeInOnmouseoverRegex.FindStringSubmatch(onmouseover)
+				if len(matches) >= 2 {
+					item.DiscountEndTime = d.parseDiscountTime(matches[1])
+				}
 			}
 		}
 
@@ -1534,6 +1537,21 @@ func parseDiscountEndTimeFromOnmouseover(onmouseover string) time.Time {
 
 // parseTime parses various time formats
 func parseTime(timeStr string) time.Time {
+	return parseTimeInLocation(timeStr, time.UTC)
+}
+
+// parseDiscountTime interprets unzoned expiry times in the site's timezone.
+func (d *NexusPHPDriver) parseDiscountTime(value string) time.Time {
+	loc := time.UTC
+	if d.siteDefinition != nil && d.siteDefinition.TimezoneOffset != "" {
+		if zone, err := time.Parse("-0700", d.siteDefinition.TimezoneOffset); err == nil {
+			loc = zone.Location()
+		}
+	}
+	return parseTimeInLocation(value, loc)
+}
+
+func parseTimeInLocation(timeStr string, loc *time.Location) time.Time {
 	timeStr = strings.TrimSpace(timeStr)
 	if timeStr == "" {
 		return time.Time{}
@@ -1550,7 +1568,7 @@ func parseTime(timeStr string) time.Time {
 	}
 
 	for _, format := range formats {
-		if t, err := time.Parse(format, timeStr); err == nil {
+		if t, err := time.ParseInLocation(format, timeStr, loc); err == nil {
 			return t
 		}
 	}

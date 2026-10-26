@@ -167,6 +167,8 @@ var PTTimeDefinition = &v2.SiteDefinition{
 		Snatched:   "td.rowfollow:nth-child(9)",
 		// PTT-NP uses <font class="promotion <type>"> instead of <img class="pro_<type>">
 		DiscountIcon: "table.torrentname font.promotion, td.embedded font.promotion, table.torrentname img.pro_free, table.torrentname img.pro_free2up, table.torrentname img.pro_50pctdown, table.torrentname img.pro_30pctdown, table.torrentname img.pro_2up, table.torrentname img.pro_50pctdown2up",
+		// PTT places the expiry in a plain span immediately after the promotion.
+		DiscountEndTime: "table.torrentname font.promotion + span[title]",
 		// Explicit mapping required: parseDiscountFromElement's default switch doesn't know "halfdown"/"twouphalfdown" keywords
 		DiscountMapping: map[string]v2.DiscountLevel{
 			"free":           v2.DiscountFree,
