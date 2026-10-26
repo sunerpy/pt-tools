@@ -36,6 +36,11 @@ vi.mock("@/api", async (orig) => {
     sitesApi: sites,
     mediaApi: media,
     organizeApi: organize,
+    // 追剧对话框的保存目录会读下载器的预设目录
+    downloaderDirectoriesApi: {
+      ...real.downloaderDirectoriesApi,
+      listAll: vi.fn(async () => ({})),
+    },
   };
 });
 

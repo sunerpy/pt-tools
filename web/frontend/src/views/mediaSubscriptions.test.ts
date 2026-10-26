@@ -64,6 +64,11 @@ vi.mock("@/api", async (orig) => {
     chatopsApi: { ...real.chatopsApi, notifications },
     mediaApi: { ...real.mediaApi, settings: vi.fn(async () => ({ image_base_url: "" })) },
     organizeApi: organize,
+    // 追剧对话框的保存目录会读下载器的预设目录
+    downloaderDirectoriesApi: {
+      ...real.downloaderDirectoriesApi,
+      listAll: vi.fn(async () => ({})),
+    },
   };
 });
 

@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   previewSchedule: vi.fn(),
+  settings: vi.fn(async () => ({})),
 }));
 
 vi.mock("@/api", async (orig) => {
@@ -21,6 +22,11 @@ vi.mock("@/api", async (orig) => {
     ...real,
     subscribeApi: { ...real.subscribeApi, ...api },
     downloadersApi: { list: vi.fn(async () => []) },
+    // 保存目录的输入框会读下载器的预设目录
+    downloaderDirectoriesApi: {
+      ...real.downloaderDirectoriesApi,
+      listAll: vi.fn(async () => ({})),
+    },
     sitesApi: { list: vi.fn(async () => ({})) },
     organizeApi: { ...real.organizeApi, libraries: vi.fn(async () => []) },
     mediaApi: { ...real.mediaApi, settings: vi.fn(async () => ({ image_base_url: "" })) },
