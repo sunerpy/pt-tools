@@ -76,7 +76,7 @@ After saving, the subscription is fetched at its check interval while RSS tasks 
 | **Category (分类)**                       | The category set when the torrent is pushed to the downloader                                                                       | Empty              |
 | **Tag (标签)**                            | The tag added when the torrent is pushed to the downloader                                                                          | Empty              |
 | **Downloader (下载器)**                   | Which downloader to push to; a downloader that is not enabled cannot be chosen                                                      | Default downloader |
-| **Download folder (下载路径)**            | One of the downloader's preset folders, or a path you type after switching to Custom (自定义); empty means the downloader's default | Empty              |
+| **Download folder (下载路径)**            | Pick one of the downloader's preset folders from the list, or type any path; empty means the downloader's default                   | Empty              |
 | **Filter rules (过滤规则)**               | The filter rules attached to the subscription; you can choose several                                                               | None               |
 | **Download mode (下载模式)**              | Follow global, Smart, Filter rules only or Free only; see below                                                                     | Follow global      |
 | **Pause at freeleech end (免费结束暂停)** | Pauses the torrent automatically if it has not finished when its freeleech period ends; see Freeleech eligibility and pausing below | Off                |

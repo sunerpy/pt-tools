@@ -9,6 +9,7 @@ import {
   type DownloaderTorrentItem,
   type TorrentActionTarget,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import DownloaderTorrentDetail from "@/components/downloader/DownloaderTorrentDetail.vue";
 import DownloaderTorrentTable from "@/components/downloader/DownloaderTorrentTable.vue";
 import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTorrentVirtualTable.vue";
@@ -2475,7 +2476,11 @@ function toggleSidebar() {
         </el-form-item>
         <div class="field-row">
           <el-form-item label="保存路径">
-            <el-input v-model="addForm.savePath" placeholder="可选" />
+            <DownloaderPathInput
+              v-model="addForm.savePath"
+              :downloader-ids="addForm.downloaderIds"
+              placeholder="可选"
+              data-testid="hub-add-save-path" />
           </el-form-item>
           <el-form-item label="分类">
             <el-input v-model="addForm.category" placeholder="可选" />

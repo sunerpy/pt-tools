@@ -105,7 +105,7 @@ export function removalSummary(c: BrushTaskConfig): string {
 /** 限额的一句话说明 */
 export function limitSummary(c: BrushTaskConfig): string {
   const parts = [`同时下载 ${c.max_downloading} 个`];
-  if (c.max_total_size_gb > 0) parts.push(`总体积 ${c.max_total_size_gb} GB`);
+  if (c.max_total_size_gb > 0) parts.push(`任务总体积 ${c.max_total_size_gb} GB`);
   if (c.max_daily_download_gb > 0) parts.push(`每天加入 ${c.max_daily_download_gb} GB`);
   return parts.join(" · ");
 }

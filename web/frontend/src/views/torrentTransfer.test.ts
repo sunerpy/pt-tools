@@ -68,6 +68,11 @@ vi.mock("@/api", async (orig) => {
         ]),
       ),
     },
+    // 路径映射的输入框会读下载器的预设目录
+    downloaderDirectoriesApi: {
+      ...real.downloaderDirectoriesApi,
+      listAll: vi.fn(() => Promise.resolve({})),
+    },
   };
 });
 

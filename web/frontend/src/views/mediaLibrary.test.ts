@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /*
- * 钉子：媒体库页。整理设置只发接口认的字段（保存路径按行拆开，不带 auto_since）；媒体库、路径映射、媒体服务器的
+ * 钉子：媒体库页。整理设置只发接口认的字段（保存路径可从下载器的预设目录选、也可输入，不带 auto_since）；媒体库、路径映射、媒体服务器的
  * 增删改只发输入字段（严格解析）；编辑媒体服务器时不填 Token 就不带 Token；列表读不到时留在页面上。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +33,7 @@ const api = vi.hoisted(() => ({
   testServer: vi.fn(),
 }));
 const dl = vi.hoisted(() => ({ list: vi.fn() }));
+const dirs = vi.hoisted(() => ({ listAll: vi.fn() }));
 const media = vi.hoisted(() => ({ settings: vi.fn() }));
 const notifications = vi.hoisted(() => ({ list: vi.fn() }));
 const ui = vi.hoisted(() => ({
@@ -48,6 +49,7 @@ vi.mock("@/api", async (orig) => {
     ...real,
     organizeApi: api,
     downloadersApi: dl,
+    downloaderDirectoriesApi: { ...real.downloaderDirectoriesApi, listAll: dirs.listAll },
     mediaApi: { ...real.mediaApi, settings: media.settings },
     chatopsApi: { ...real.chatopsApi, notifications },
   };
@@ -187,6 +189,9 @@ async function mountPage(opts: { libsFail?: boolean } = {}) {
   notifications.list.mockResolvedValue([
     { id: 2, channel_type: "telegram", name: "TG", enabled: true },
   ]);
+  dirs.listAll.mockResolvedValue({
+    1: [{ id: 5, downloader_id: 1, path: "/data/tv", alias: "剧集", is_default: false }],
+  });
   const Page = (await import("./MediaLibrary.vue")).default;
   view = mountView(Page);
   await vi.waitFor(() => expect(api.settings).toHaveBeenCalled());
@@ -195,11 +200,32 @@ async function mountPage(opts: { libsFail?: boolean } = {}) {
 }
 
 describe("媒体库", () => {
-  it("整理设置：只发输入字段，保存路径按行拆开", async () => {
+  it("整理设置：只发输入字段，保存路径可选下载器的预设目录、也可输入", async () => {
     await mountPage();
     expect(document.body.textContent).toContain("以后下载完成的种子");
     api.saveSettings.mockResolvedValue(settings);
-    fill("ml-scope-path", " /downloads \n\n/data/tv ");
+    // 从下拉里选下载器预设的目录（显示别名与路径）
+    const sel = q("ml-scope-path")!;
+    (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+    const listId = sel.querySelector("input")?.getAttribute("aria-controls");
+    await vi.waitFor(() => {
+      const opt = [
+        ...(document
+          .getElementById(listId ?? "")
+          ?.querySelectorAll<HTMLElement>(".el-select-dropdown__item") ?? []),
+      ].find((o) => (o.textContent ?? "").trim() === "剧集（/data/tv）");
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    // 列表里没有的路径输入后回车
+    const input = inputOf("ml-scope-path") as HTMLInputElement;
+    input.value = " /custom/x ";
+    input.dispatchEvent(new Event("input"));
+    await flush();
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }),
+    );
+    await flush();
     q("ml-save-settings")!.click();
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
     expect(api.saveSettings.mock.calls[0]![0]).toEqual({
@@ -209,7 +235,7 @@ describe("媒体库", () => {
       downloaders: [],
       categories: ["movies"],
       tags: [],
-      save_paths: ["/downloads", "/data/tv"],
+      save_paths: ["/downloads", "/data/tv", "/custom/x"],
       min_video_mb: 50,
       notify_channels: [],
       delete_links_on_remove: false,

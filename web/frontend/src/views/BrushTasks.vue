@@ -11,6 +11,7 @@ import {
   type SiteConfig,
   sitesApi,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -742,7 +743,11 @@ function progressText(t: BrushTorrent): string {
         </el-form-item>
         <div class="field-row">
           <el-form-item label="保存路径">
-            <el-input v-model="form.save_path" placeholder="留空用下载器的默认路径" />
+            <DownloaderPathInput
+              v-model="form.save_path"
+              :downloader-ids="form.downloader_id"
+              placeholder="留空用下载器的默认路径"
+              data-testid="brush-save-path" />
           </el-form-item>
           <el-form-item label="分类">
             <el-input v-model="form.category" placeholder="可选" />
@@ -845,6 +850,7 @@ function progressText(t: BrushTorrent): string {
               :precision="0"
               :step="50"
               style="width: 100%" />
+            <div class="field-tip">只算这个任务加入、还在做的种子；0 = 不限</div>
           </el-form-item>
           <el-form-item label="每天加入（GB）">
             <el-input-number

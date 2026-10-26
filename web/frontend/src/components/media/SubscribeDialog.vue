@@ -18,6 +18,7 @@ import {
   sitesApi,
   subscribeApi,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { formatTimeAgo } from "@/utils/format";
@@ -273,13 +274,21 @@ const notSearchingTip = computed(() => {
 const tvLibraries = computed(() => libraries.value.filter((l) => l.kind === "tv"));
 const monthDays = Array.from({ length: 31 }, (_, i) => i + 1);
 
+// 保存目录的下拉列这台下载器的预设目录：订阅没选下载器时按订阅设置里的默认下载器（再没有时输入框用 pt-tools 的默认下载器）
+const settingsDownloaderID = ref(0);
+const pathDownloaderID = computed(() => form.value.downloader_id || settingsDownloaderID.value);
+
 async function loadOptions() {
-  const [ps, dls, ss, libs] = await Promise.allSettled([
+  const [ps, dls, ss, libs, set] = await Promise.allSettled([
     subscribeApi.profiles(),
     downloadersApi.list(),
     sitesApi.list(),
     organizeApi.libraries(),
+    // 读不到设置时只是下拉少了默认下载器的目录，别的选项照常
+    Promise.resolve().then(() => subscribeApi.settings()),
   ]);
+  if (set.status === "fulfilled")
+    settingsDownloaderID.value = set.value?.default_downloader_id ?? 0;
   if (ps.status === "fulfilled") profiles.value = ps.value?.items ?? [];
   if (dls.status === "fulfilled") downloaders.value = dls.value ?? [];
   if (ss.status === "fulfilled") {
@@ -777,8 +786,9 @@ async function save() {
           </el-form-item>
         </div>
         <el-form-item label="保存目录（下载器里看到的）">
-          <el-input
+          <DownloaderPathInput
             v-model="form.save_path"
+            :downloader-ids="pathDownloaderID"
             placeholder="不填时用下载器的默认目录"
             data-testid="sd-save-path" />
         </el-form-item>

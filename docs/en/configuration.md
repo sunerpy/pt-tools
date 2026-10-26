@@ -192,7 +192,7 @@ Each downloader can have several download folders:
 
 - The path must be valid on the machine the downloader runs on.
 - In Docker, make sure the path is mapped correctly.
-- Aliases make it quicker to choose a folder when you push a torrent.
+- Wherever a downloader path is entered (RSS subscriptions, brush tasks, follows, pushing a torrent, transfer path mappings, media library path mappings and organising scope), the field lists this downloader's folders when you open it: pick one, or type another path. Folders with an alias show the alias and the path.
 
 **Example folders**:
 

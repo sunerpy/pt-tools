@@ -14,14 +14,14 @@ The pages are Media → Explore (媒体 → 探索) and Media → Follow and sub
 
 On the Explore page, browse TMDB's trending-this-week and popular lists, or search by name, and click Subscribe (订阅) under a film or Follow (追剧) under a series. Titles you have already subscribed to show Subscribed (已订阅); titles already in your library show In library (已入库). For a series, pick the season; leave it empty for the latest season. Each season can have one subscription; follow again for another season. A series also has follow settings, see Following a series below.
 
-| Option                                   | Description                                                                                        |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Quality profile (质量档案)               | Which profile picks the release; Use the default profile (用设置里的默认档案) follows the settings |
-| Only search these sites (只在这些站点找) | Leave empty for all enabled sites                                                                  |
-| Downloader (下载器)                      | Leave empty for the default in the settings, then pt-tools' default downloader                     |
-| Category, Tags (分类、标签)              | Sent to the downloader with the torrent                                                            |
-| Save folder (保存目录)                   | As the downloader sees it; leave empty for the downloader's default folder                         |
-| Upgrade (洗版)                           | Keep looking for higher-scoring releases after the first download, see Upgrades below              |
+| Option                                   | Description                                                                                                                            |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Quality profile (质量档案)               | Which profile picks the release; Use the default profile (用设置里的默认档案) follows the settings                                     |
+| Only search these sites (只在这些站点找) | Leave empty for all enabled sites                                                                                                      |
+| Downloader (下载器)                      | Leave empty for the default in the settings, then pt-tools' default downloader                                                         |
+| Category, Tags (分类、标签)              | Sent to the downloader with the torrent                                                                                                |
+| Save folder (保存目录)                   | As the downloader sees it; pick one of the downloader's preset folders or type a path; leave empty for the downloader's default folder |
+| Upgrade (洗版)                           | Keep looking for higher-scoring releases after the first download, see Upgrades below                                                  |
 
 You can also subscribe from the bot: send `/sub <name>` and reply with a number from the list; for a series, add a season after the number, for example `2 3` subscribes to season 3 of the second title. `/follow <show>` (or `/追剧`) lists series only and uses the follow defaults. `/subs` lists your subscriptions with their IDs, progress and next search, and `/runs <id>` shows the latest runs. `/sub` and `/follow` are admin-only, see the [ChatOps quick start](chatops-quickstart.md).
 

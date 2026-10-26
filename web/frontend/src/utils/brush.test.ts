@@ -51,7 +51,7 @@ describe("brush utils", () => {
     c.remove_low_speed_kbs = 50;
     expect(removalSummary(c)).toBe("分享率到 3、30 分钟平均上传低于 50 KB/s");
     c.max_total_size_gb = 500;
-    expect(limitSummary(c)).toBe("同时下载 3 个 · 总体积 500 GB");
+    expect(limitSummary(c)).toBe("同时下载 3 个 · 任务总体积 500 GB");
   });
 
   it("运行结果的提示：出错时优先报错误", () => {
