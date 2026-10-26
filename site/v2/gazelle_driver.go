@@ -116,6 +116,7 @@ type GazelleDriver struct {
 	Cookie     string
 	httpClient *SiteHTTPClient
 	userAgent  string
+	siteID     string
 }
 
 // GazelleDriverConfig holds configuration for creating a Gazelle driver
@@ -125,6 +126,8 @@ type GazelleDriverConfig struct {
 	Cookie     string
 	HTTPClient *SiteHTTPClient // Use SiteHTTPClient instead of *http.Client
 	UserAgent  string
+	// SiteID 是站点在 pt-tools 里注册的 ID：搜索结果的代理下载地址 /api/site/{id}/… 按它找站点
+	SiteID string
 }
 
 // NewGazelleDriver creates a new Gazelle driver
@@ -151,6 +154,7 @@ func NewGazelleDriver(config GazelleDriverConfig) *GazelleDriver {
 		Cookie:     config.Cookie,
 		httpClient: httpClient,
 		userAgent:  userAgent,
+		siteID:     config.SiteID,
 	}
 }
 
@@ -287,8 +291,13 @@ func (d *GazelleDriver) ParseSearch(res GazelleResponse) ([]TorrentItem, error) 
 				}
 			}
 
-			// Build download URL
-			item.DownloadURL = fmt.Sprintf("%s/torrents.php?action=download&id=%d", d.BaseURL, t.TorrentID)
+			// 搜索页下载、推送都走 pt-tools 的代理地址（由服务端带 API Key 或 Cookie 取种子）：
+			// 站点页面上的链接网页里跨站取不到，推送也只认代理地址（2026-10-26）
+			if d.siteID != "" {
+				item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%d/download", d.siteID, t.TorrentID)
+			} else {
+				item.DownloadURL = fmt.Sprintf("%s/torrents.php?action=download&id=%d", d.BaseURL, t.TorrentID)
+			}
 
 			items = append(items, item)
 		}
@@ -579,6 +588,7 @@ func createGazelleSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 		BaseURL: config.BaseURL,
 		APIKey:  opts.APIKey,
 		Cookie:  opts.Cookie,
+		SiteID:  config.ID,
 	})
 
 	return NewBaseSite(driver, BaseSiteConfig{

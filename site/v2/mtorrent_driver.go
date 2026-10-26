@@ -601,7 +601,7 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 		// Build download URL
 		// For M-Team sites, direct download is not possible, we set a proxy download URL
 		// The frontend should call /api/site/{siteId}/torrent/{id}/download for actual download
-		item.DownloadURL = fmt.Sprintf("/api/site/mteam/torrent/%s/download", t.ID)
+		item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%s/download", d.getSiteID(), t.ID)
 		// Build detail URL using web URL (not API URL)
 		item.URL = fmt.Sprintf("%s/detail/%s", d.WebURL, t.ID)
 
