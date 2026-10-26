@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,6 +55,7 @@ const pttimeSearchFixture = `<html><body>
       <td class="embedded">
         <a class="torrentname_title" href="details.php?id=50640"><b>Test.Show.S01.1080p</b></a>
         <font class="promotion free">免费</font>
+        <span title="2026-10-26 18:46:52">1小时37分钟</span>
         <br/><font title="测试剧集">测试剧集</font>
       </td>
       <td class="embedded"><a href="download.php?id=50640"><img src="pic/dl.gif" alt="dl"/></a></td>
@@ -175,6 +177,8 @@ func testPTTimeSearch(t *testing.T) {
 	free := items[1]
 	assert.Equal(t, "50640", free.ID)
 	assert.Equal(t, v2.DiscountFree, free.DiscountLevel, "free class should map to Free")
+	assert.Equal(t, time.Date(2026, 10, 26, 10, 46, 52, 0, time.UTC), free.DiscountEndTime.UTC())
+	assert.True(t, half.DiscountEndTime.IsZero(), "missing expiry must not fall back to upload time")
 }
 
 func testPTTimeDetail(t *testing.T) {
