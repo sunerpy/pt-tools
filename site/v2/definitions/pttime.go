@@ -104,12 +104,14 @@ var PTTimeDefinition = &v2.SiteDefinition{
 					{Name: "parseNumber"},
 				},
 			},
-			// Level embedded as text: "[(初中)Elite User]" — capture the Chinese tier name
+			// 等级紧跟在 UID 后面：「[UID=117144][(幼儿园)User]」，取括号里的中文等级名。
+			// 只认 UID 后面这一处：同一块里还有「私人邀请：2[(小学)Power User及以上可用]」，
+			// 原来按「(…)…User」在整块里找，User 等级（幼儿园）对不上、取到了邀请说明里的「小学」
 			"levelName": {
 				Selector: []string{"#info_block"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`\(([^)]+)\)\s*[A-Za-z][A-Za-z ]+User`}},
+					{Name: "regex", Args: []any{`\[UID=\d+\]\s*\[(?:<[^>]+>)*\(([^)<]+)\)`}},
 				},
 			},
 			"joinTime": {
@@ -203,6 +205,66 @@ var PTTimeDefinition = &v2.SiteDefinition{
 		// which contains inline "大小：136.99 GB" — matched by SizeRegex
 		SizeSelector: "td.rowhead:contains('基本信息')",
 		SizeRegex:    `大小[：:]\s*(?:</?b>)*\s*([\d.]+)\s*(GB|MB|KB|TB)`,
+	},
+	LevelRequirements: pttimeLevelRequirements,
+}
+
+// pttimeLevelRequirements 按站点「校验用户等级」页（action.php?type=vertify_class，2026-10-26 读）的等级规则：
+// 每个等级都要同时满足注册时长、下载量、分享率，符合后 24 小时内自动升级；ID 沿用站点的「N级」。
+// 下载量小于 100G 的用户不参与升降级，保持 User(幼儿园)。页面上的 G 按原样写成 GB。
+var pttimeLevelRequirements = []v2.SiteLevelRequirement{
+	{
+		ID: 0, Name: "Peasant(婴儿)", NameAka: []string{"婴儿", "Peasant"},
+		Privilege: "降级用户：下载超 100G 且分享率低于 0.4（超 200G 低于 0.5、超 400G 低于 0.6、超 800G 低于 0.7、超 1600G 低于 0.8）降到这一级，要在 7 天内改善分享率，否则封禁",
+	},
+	{
+		ID: 1, Name: "User(幼儿园)", NameAka: []string{"幼儿园", "User"},
+		Privilege: "注册默认等级。新人考核：注册后 30 天内上传 30GB、下载 30GB、魔力 3000（也可捐赠直接通过）。0–6 级要在 200 天内至少登录或访问一次网站，只用脚本签到不算；每天页面访问上限 500 次（客户端辅种不算）",
+	},
+	{
+		ID: 2, Name: "Power User(小学)", NameAka: []string{"小学", "Power User"},
+		Interval: "P4W", Downloaded: "512GB", Ratio: 1.05,
+		Privilege: "分享率低于 0.95 自动降级；首次升到这一级送 2 个邀请，可以用私人邀请和开注邀请码",
+	},
+	{
+		ID: 3, Name: "Elite User(初中)", NameAka: []string{"初中", "Elite User"},
+		Interval: "P8W", Downloaded: "2048GB", Ratio: 1.55,
+		Privilege: "分享率低于 1.45 自动降级；首次升到这一级送 2 个邀请",
+	},
+	{
+		ID: 4, Name: "Crazy User(高中)", NameAka: []string{"高中", "Crazy User"},
+		Interval: "P15W", Downloaded: "4096GB", Ratio: 2.05,
+		Privilege: "分享率低于 1.95 自动降级；首次升到这一级送 2 个邀请",
+	},
+	{
+		ID: 5, Name: "Insane User(专科)", NameAka: []string{"专科", "Insane User"},
+		Interval: "P25W", Downloaded: "8192GB", Ratio: 2.55,
+		Privilege: "分享率低于 2.45 自动降级；首次升到这一级送 2 个邀请",
+	},
+	{
+		ID: 6, Name: "Veteran User(本科)", NameAka: []string{"本科", "Veteran User"},
+		Interval: "P52W", Downloaded: "16384GB", Ratio: 3.05,
+		Privilege: "分享率低于 2.95 自动降级；首次升到这一级送 2 个邀请",
+	},
+	{
+		ID: 7, Name: "Extreme User(研究生)", NameAka: []string{"研究生", "Extreme User"},
+		Interval: "P80W", Downloaded: "25000GB", Ratio: 3.55,
+		Privilege: "分享率低于 3.45 自动降级；首次升到这一级送 2 个邀请；从这一级起不再要求 200 天内登录一次",
+	},
+	{
+		ID: 8, Name: "Ultimate User(博士生)", NameAka: []string{"博士生", "Ultimate User"},
+		Interval: "P104W", Downloaded: "45000GB", Ratio: 4.05,
+		Privilege: "分享率低于 3.95 自动降级；首次升到这一级送 5 个邀请",
+	},
+	{
+		ID: 9, Name: "Nexus Master(博士后)", NameAka: []string{"博士后", "Nexus Master"},
+		Interval: "P130W", Downloaded: "90000GB", Ratio: 4.55,
+		Privilege: "分享率低于 4.45 自动降级；首次升到这一级送 10 个邀请",
+	},
+	{
+		ID: v2.MinVipLevelID, Name: "VIP(贵宾)", NameAka: []string{"贵宾", "临时贵宾", "永久贵宾", "VIP"},
+		GroupType: v2.LevelGroupVIP,
+		Privilege: "临时贵宾、永久贵宾，捐赠获得，权限见站点的贵宾特权说明",
 	},
 }
 

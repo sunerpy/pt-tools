@@ -133,6 +133,22 @@ const pttimeIndexFixture = `<html><body>
 </div>
 </body></html>`
 
+// 新注册的 User（幼儿园）账号的 info_block，结构照 2026-10-26 的站点页面（用户名、UID 换成假的）：
+// 等级紧跟在 UID 后面，后面还有「私人邀请」「开注邀请码」写着「[(小学)Power User及以上可用]」
+const pttimeIndexUserFixture = `<html><body>
+<table id="info_block"><tr><td class="bottom clearfix" align="left">
+  <span class="medium left">嗨,
+    <a href="userdetails.php?id=50640" class="User_Name"><b>NewUser</b></a><b title="发布者：0级">🎈</b>[UID=50640][(幼儿园)User][<a href="userdetails.php?id=50640" class="fcb User">个人中心</a>]
+    [<a href="logout.php"><b>退出</b></a>]
+    <font class="ml10"><b>私人邀请：</b>2</font><font class="fc8">[(小学)Power User及以上可用]</font><span class="ml10"><b>开注邀请码：</b><font class="fc8">******[(小学)Power User及以上可用]</font></span>
+  </span>
+  <font class="color_ratio">分享率:</font>无数据
+  <font class="fcg">上传:</font>0B
+  <font class="fcr">下载:</font>0B
+  魔力值(0魔力/小时) [<a href="mybonus.php">使用&amp;说明</a>]：0.0
+</td></tr></table>
+</body></html>`
+
 const pttimeUserdetailsFixture = `<html><body>
 <div id="outer">
   魔力值(84.36魔力/小时) [<a href="mybonus.php">使用</a>]: 1889134.7
@@ -264,6 +280,7 @@ func testPTTimeUserInfo(t *testing.T) {
 		doc := FixtureDoc(t, "pttime_index", pttimeIndexFixture)
 		assert.Equal(t, "50639", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["id"]))
 		assert.Equal(t, "TestUser", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["name"]))
+		assert.Equal(t, "初中", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["levelName"]))
 		notEmpty := []string{"uploaded", "downloaded", "ratio", "seeding", "leeching", "bonus"}
 		for _, field := range notEmpty {
 			t.Run(field, func(t *testing.T) {
@@ -273,6 +290,15 @@ func testPTTimeUserInfo(t *testing.T) {
 				assert.NotEmpty(t, got, "field %q should be parsed", field)
 			})
 		}
+	})
+
+	// 2026-10-26 生产里新注册的 User 账号显示成「小学」：取到了邀请说明「[(小学)Power User及以上可用]」
+	t.Run("IndexPage_UserLevelBesideInviteNote", func(t *testing.T) {
+		doc := FixtureDoc(t, "pttime_index_user", pttimeIndexUserFixture)
+		assert.Equal(t, "50640", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["id"]))
+		level := driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["levelName"])
+		assert.Equal(t, "幼儿园", level)
+		assert.Equal(t, 1, v2.GuessUserLevelID(&v2.UserInfo{LevelName: level}, def.LevelRequirements))
 	})
 
 	t.Run("UserdetailsPage", func(t *testing.T) {
@@ -292,6 +318,7 @@ func TestPTTime_Fixtures_NoSecrets(t *testing.T) {
 	fixtures := map[string]string{
 		"search":      pttimeSearchFixture,
 		"index":       pttimeIndexFixture,
+		"index_user":  pttimeIndexUserFixture,
 		"userdetails": pttimeUserdetailsFixture,
 		"detail":      pttimeDetailFixture,
 		"detail_free": pttimeDetailFreeFixture,
@@ -301,4 +328,32 @@ func TestPTTime_Fixtures_NoSecrets(t *testing.T) {
 			RequireNoSecrets(t, name, data)
 		})
 	}
+}
+
+// 等级表照站点「校验用户等级」页：信息栏里括号中的中文等级名对得上站点的「N级」，要求按页面上的数写
+func TestPTTimeLevelRequirements(t *testing.T) {
+	def := getPTTimeDef(t)
+	require.Len(t, def.LevelRequirements, 11)
+
+	for name, want := range map[string]int{
+		"婴儿": 0, "幼儿园": 1, "小学": 2, "初中": 3, "高中": 4, "专科": 5,
+		"本科": 6, "研究生": 7, "博士生": 8, "博士后": 9, "临时贵宾": 100, "永久贵宾": 100,
+	} {
+		assert.Equal(t, want, v2.GuessUserLevelID(&v2.UserInfo{LevelName: name}, def.LevelRequirements), name)
+	}
+
+	byID := map[int]v2.SiteLevelRequirement{}
+	for _, req := range def.LevelRequirements {
+		byID[req.ID] = req
+	}
+	power := byID[2]
+	assert.Equal(t, "Power User(小学)", power.Name)
+	assert.Equal(t, "P4W", power.Interval)
+	assert.Equal(t, "512GB", power.Downloaded)
+	assert.InDelta(t, 1.05, power.Ratio, 1e-9)
+	master := byID[9]
+	assert.Equal(t, "P130W", master.Interval)
+	assert.Equal(t, "90000GB", master.Downloaded)
+	assert.InDelta(t, 4.55, master.Ratio, 1e-9)
+	assert.Equal(t, v2.LevelGroupVIP, byID[v2.MinVipLevelID].GroupType)
 }
