@@ -20,6 +20,7 @@ import {
   type UserInfoResponse,
   userInfoApi,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import { dailyUploadSeries } from "@/utils/dailySeries";
@@ -72,10 +73,6 @@ const filterRules = ref<FilterRule[]>([]);
 const allFilterRules = ref<FilterRule[]>([]);
 const availableConfs = ref<NotificationConfig[]>([]);
 const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
-
-// 新增：是否使用自定义路径
-const newRssUseCustomPath = ref(false);
-const editRssUseCustomPath = ref(false);
 
 /** 详情读回来之前的默认空表单（首次加载与切站时用） */
 function emptySiteForm(): SiteConfig {
@@ -343,12 +340,6 @@ function getDirectoriesForDownloader(downloaderId: number | undefined): Download
   return downloaderDirectories.value[downloaderId] || [];
 }
 
-// 检查路径是否为预设目录
-function isPresetDirectory(path: string, downloaderId: number | undefined): boolean {
-  const dirs = getDirectoriesForDownloader(downloaderId);
-  return dirs.some((d) => d.path === path);
-}
-
 // 获取路径的显示名称（优先显示别名）
 function getPathDisplayName(path: string, downloaderId: number | undefined): string {
   const dirs = getDirectoriesForDownloader(downloaderId);
@@ -435,7 +426,6 @@ function openAddRssDialog() {
     notify_conf_ids: "[]",
     max_notifications_per_hour: 100,
   });
-  newRssUseCustomPath.value = false;
   rssDialogVisible.value = true;
 }
 
@@ -559,10 +549,6 @@ function openEditRssDialog(index: number) {
     notify_conf_ids: rss.notify_conf_ids || "[]",
     max_notifications_per_hour: rss.max_notifications_per_hour ?? 100,
   });
-  // 检查当前路径是否为预设目录，如果不是则启用自定义输入
-  editRssUseCustomPath.value = rss.download_path
-    ? !isPresetDirectory(rss.download_path, rss.downloader_id)
-    : false;
   editRssDialogVisible.value = true;
 }
 
@@ -641,20 +627,6 @@ async function updateRss() {
 
 function goBack() {
   router.push("/sites");
-}
-
-function toggleNewRssCustomPath() {
-  newRssUseCustomPath.value = !newRssUseCustomPath.value;
-  if (!newRssUseCustomPath.value) {
-    newRss.download_path = "";
-  }
-}
-
-function toggleEditRssCustomPath() {
-  editRssUseCustomPath.value = !editRssUseCustomPath.value;
-  if (!editRssUseCustomPath.value) {
-    editingRss.download_path = "";
-  }
 }
 
 /** Rousi Pro 的 Passkey 一栏填的是个人 API Key（站点 API Key 页的说明），表单里写明 */
@@ -1691,40 +1663,12 @@ function ruleNameOf(id: number): string {
           <div class="field-tip">留空用默认下载器；灰色项表示该下载器未启用</div>
         </el-form-item>
         <el-form-item label="下载路径">
-          <div class="path-pick">
-            <el-select
-              v-if="!newRssUseCustomPath"
-              v-model="newRss.download_path"
-              placeholder="使用下载器默认路径"
-              clearable>
-              <el-option value="" label="使用下载器默认路径" />
-              <el-option
-                v-for="dir in getDirectoriesForDownloader(newRss.downloader_id)"
-                :key="dir.id"
-                :label="`${dir.alias || dir.path}${dir.is_default ? '（默认）' : ''}`"
-                :value="dir.path">
-                <span class="path-opt">
-                  <span>{{ dir.alias || dir.path }}{{ dir.is_default ? "（默认）" : "" }}</span>
-                  <span v-if="dir.alias && dir.alias !== dir.path" class="path-opt__path">{{
-                    dir.path
-                  }}</span>
-                </span>
-              </el-option>
-            </el-select>
-            <el-input v-else v-model="newRss.download_path" placeholder="如 /downloads/movies" />
-            <el-button
-              :type="newRssUseCustomPath ? 'primary' : 'default'"
-              @click="toggleNewRssCustomPath">
-              <PtIcon :name="newRssUseCustomPath ? 'check' : 'pencil'" :size="14" />
-              <span>{{ newRssUseCustomPath ? "选预设" : "自定义" }}</span>
-            </el-button>
-          </div>
-          <div class="field-tip">
-            <template v-if="getDirectoriesForDownloader(newRss.downloader_id).length > 0">
-              可以挑下载器里预设的目录，也可以切到「自定义」手输
-            </template>
-            <template v-else>当前下载器没设目录，切「自定义」手输，或留空用默认路径</template>
-          </div>
+          <DownloaderPathInput
+            v-model="newRss.download_path"
+            :downloader-ids="newRss.downloader_id"
+            placeholder="留空用下载器的默认路径"
+            data-testid="rss-new-path" />
+          <div class="field-tip">点开可以选下载器里预设的目录，也可以直接输入路径</div>
         </el-form-item>
 
         <div class="field-head">过滤与暂停</div>
@@ -1890,43 +1834,12 @@ function ruleNameOf(id: number): string {
           <div class="field-tip">留空用默认下载器；灰色项表示该下载器未启用</div>
         </el-form-item>
         <el-form-item label="下载路径">
-          <div class="path-pick">
-            <el-select
-              v-if="!editRssUseCustomPath"
-              v-model="editingRss.download_path"
-              placeholder="使用下载器默认路径"
-              clearable>
-              <el-option value="" label="使用下载器默认路径" />
-              <el-option
-                v-for="dir in getDirectoriesForDownloader(editingRss.downloader_id)"
-                :key="dir.id"
-                :label="`${dir.alias || dir.path}${dir.is_default ? '（默认）' : ''}`"
-                :value="dir.path">
-                <span class="path-opt">
-                  <span>{{ dir.alias || dir.path }}{{ dir.is_default ? "（默认）" : "" }}</span>
-                  <span v-if="dir.alias && dir.alias !== dir.path" class="path-opt__path">{{
-                    dir.path
-                  }}</span>
-                </span>
-              </el-option>
-            </el-select>
-            <el-input
-              v-else
-              v-model="editingRss.download_path"
-              placeholder="如 /downloads/movies" />
-            <el-button
-              :type="editRssUseCustomPath ? 'primary' : 'default'"
-              @click="toggleEditRssCustomPath">
-              <PtIcon :name="editRssUseCustomPath ? 'check' : 'pencil'" :size="14" />
-              <span>{{ editRssUseCustomPath ? "选预设" : "自定义" }}</span>
-            </el-button>
-          </div>
-          <div class="field-tip">
-            <template v-if="getDirectoriesForDownloader(editingRss.downloader_id).length > 0">
-              可以挑下载器里预设的目录，也可以切到「自定义」手输
-            </template>
-            <template v-else>当前下载器没设目录，切「自定义」手输，或留空用默认路径</template>
-          </div>
+          <DownloaderPathInput
+            v-model="editingRss.download_path"
+            :downloader-ids="editingRss.downloader_id"
+            placeholder="留空用下载器的默认路径"
+            data-testid="rss-edit-path" />
+          <div class="field-tip">点开可以选下载器里预设的目录，也可以直接输入路径</div>
         </el-form-item>
 
         <div class="field-head">过滤与暂停</div>
@@ -2238,40 +2151,6 @@ function ruleNameOf(id: number): string {
 
 .urls a:hover {
   text-decoration: underline;
-}
-
-/* 自定义路径的输入框和「切换来源」按钮必须同一行，不然读起来像两个独立字段 */
-/*
- * 下载路径：下拉框（或自定义输入框）占满一行，右边是切换按钮。
- * 外层要给 width:100%：el-form-item 的内容区是可换行的 flex，不给宽度时这一块按内容收缩，
- * 下拉框的 flex:1 分不到空间，被挤得只剩后缀图标，选了目录也看不见。
- */
-.path-pick {
-  display: flex;
-  gap: var(--pt-space-2);
-  align-items: center;
-  width: 100%;
-}
-
-.path-pick > .el-select,
-.path-pick > .el-input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* 有别名的目录：左边别名，右边灰色写真实路径，免得只看到别名不知道落在哪 */
-.path-opt {
-  display: flex;
-  gap: var(--pt-space-3);
-  justify-content: space-between;
-  min-width: 0;
-}
-
-.path-opt__path {
-  overflow: hidden;
-  color: var(--pt-t3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /*

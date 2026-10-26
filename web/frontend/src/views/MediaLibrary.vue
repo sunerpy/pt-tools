@@ -25,6 +25,7 @@ import {
   mediaApi,
   organizeApi,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
 import TmdbKeyNotice from "@/components/media/TmdbKeyNotice.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -34,6 +35,7 @@ import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
+import { useDownloaderPaths } from "@/composables/useDownloaderPaths";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
 import {
@@ -97,7 +99,16 @@ const blankSettings = (): OrganizeSettingsInput => ({
   watch_interval_min: 10,
 });
 const sform = ref<OrganizeSettingsInput>(blankSettings());
-const savePathsText = ref("");
+const savePaths = ref<string[]>([]);
+// 整理范围的保存路径可以从下载器的预设目录里选：范围里选了下载器时列它们的，没选时列全部下载器的
+const { pathOptionsFor, allPathOptions } = useDownloaderPaths();
+const scopePathOptions = computed(() => {
+  const seen = new Set<string>();
+  const opts = sform.value.downloaders?.length
+    ? pathOptionsFor(sform.value.downloaders)
+    : allPathOptions();
+  return opts.filter((o) => !seen.has(o.path) && seen.add(o.path));
+});
 const downloaders = ref<DownloaderSetting[]>([]);
 const channels = ref<NotificationConfig[]>([]);
 
@@ -106,7 +117,7 @@ function fillSettings(s: OrganizeSettings) {
   // 只读的字段不进表单：保存时按严格解析，带上会被拒
   const { auto_since: _since, runs: _runs, ...rest } = s;
   sform.value = { ...rest };
-  savePathsText.value = s.save_paths.join("\n");
+  savePaths.value = [...(s.save_paths ?? [])];
 }
 
 /** 只刷新扫描的上次与下次（例如开关了监控目录以后）：不动表单里还没保存的改动 */
@@ -143,10 +154,7 @@ async function saveSettings() {
   try {
     const body: OrganizeSettingsInput = {
       ...sform.value,
-      save_paths: savePathsText.value
-        .split("\n")
-        .map((p) => p.trim())
-        .filter(Boolean),
+      save_paths: savePaths.value.map((p) => p.trim()).filter(Boolean),
     };
     fillSettings(await organizeApi.saveSettings(body));
     ElMessage.success("已保存整理设置");
@@ -1032,13 +1040,22 @@ onMounted(refresh);
                   placeholder="输入后回车"
                   data-testid="ml-scope-tag" />
               </el-form-item>
-              <el-form-item label="范围：保存路径（下载器里看到的，一行一个）">
-                <el-input
-                  v-model="savePathsText"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="/downloads/movies"
-                  data-testid="ml-scope-path" />
+              <el-form-item label="范围：保存路径（下载器里看到的，不填时不限）">
+                <el-select
+                  v-model="savePaths"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  :reserve-keyword="false"
+                  placeholder="选预设目录，或输入后回车"
+                  data-testid="ml-scope-path">
+                  <el-option
+                    v-for="o in scopePathOptions"
+                    :key="o.path"
+                    :label="o.alias && o.alias !== o.path ? `${o.alias}（${o.path}）` : o.path"
+                    :value="o.path" />
+                </el-select>
               </el-form-item>
             </div>
             <div class="ml-row">
@@ -1771,8 +1788,9 @@ onMounted(refresh);
           </el-select>
         </el-form-item>
         <el-form-item label="下载器里的路径" required>
-          <el-input
+          <DownloaderPathInput
             v-model="mapForm.downloader_prefix"
+            :downloader-ids="mapForm.downloader_id"
             placeholder="/downloads"
             data-testid="ml-map-from" />
         </el-form-item>

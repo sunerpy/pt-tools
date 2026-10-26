@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import {
-  downloaderDirectoriesApi,
-  type DownloaderDirectory,
   downloadersApi,
   type DownloaderSetting,
   mediaApi,
@@ -16,6 +14,7 @@ import {
   type TMDBItem,
   type TorrentPushItem,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
 import SubscribeDialog, {
   type FollowTorrent,
@@ -124,7 +123,6 @@ const tableRef = ref<{ clearSelection: () => void } | null>(null);
 
 // 下载器相关
 const downloaders = ref<DownloaderSetting[]>([]);
-const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
 
 // 推送对话框
 const pushDialogVisible = ref(false);
@@ -515,11 +513,6 @@ const defaultDownloader = computed(() => {
   return downloaders.value.find((d) => d.is_default && d.enabled);
 });
 
-// 获取下载器目录选项
-function getDirectoryOptions(downloaderId: number): DownloaderDirectory[] {
-  return downloaderDirectories.value[downloaderId] || [];
-}
-
 // 保存搜索结果到缓存
 function saveToCache() {
   const cacheData = {
@@ -614,17 +607,8 @@ async function loadDownloaders() {
     if (defaultDownloader.value && pushForm.value.downloaderIds.length === 0) {
       pushForm.value.downloaderIds = [defaultDownloader.value.id!];
     }
-    await loadAllDirectories();
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "加载下载器列表失败");
-  }
-}
-
-async function loadAllDirectories() {
-  try {
-    downloaderDirectories.value = await downloaderDirectoriesApi.listAll();
-  } catch (e: unknown) {
-    console.error("加载下载器目录失败:", e);
   }
 }
 
@@ -2085,23 +2069,11 @@ const footNote = computed(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="保存路径">
-          <el-select
+          <DownloaderPathInput
             v-model="pushForm.savePath"
+            :downloader-ids="pushForm.downloaderIds"
             placeholder="使用默认路径"
-            clearable
-            style="width: 100%">
-            <template v-for="downloaderId in pushForm.downloaderIds" :key="downloaderId">
-              <el-option-group
-                v-if="getDirectoryOptions(downloaderId).length > 0"
-                :label="downloaders.find((d) => d.id === downloaderId)?.name">
-                <el-option
-                  v-for="dir in getDirectoryOptions(downloaderId)"
-                  :key="dir.id"
-                  :label="`${dir.alias || dir.path}${dir.is_default ? ' [默认]' : ''}`"
-                  :value="dir.path" />
-              </el-option-group>
-            </template>
-          </el-select>
+            data-testid="push-save-path" />
         </el-form-item>
         <div class="field-row">
           <el-form-item label="分类">
@@ -2153,23 +2125,11 @@ const footNote = computed(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="保存路径">
-          <el-select
+          <DownloaderPathInput
             v-model="pushForm.savePath"
+            :downloader-ids="pushForm.downloaderIds"
             placeholder="使用默认路径"
-            clearable
-            style="width: 100%">
-            <template v-for="downloaderId in pushForm.downloaderIds" :key="downloaderId">
-              <el-option-group
-                v-if="getDirectoryOptions(downloaderId).length > 0"
-                :label="downloaders.find((d) => d.id === downloaderId)?.name">
-                <el-option
-                  v-for="dir in getDirectoryOptions(downloaderId)"
-                  :key="dir.id"
-                  :label="`${dir.alias || dir.path}${dir.is_default ? ' [默认]' : ''}`"
-                  :value="dir.path" />
-              </el-option-group>
-            </template>
-          </el-select>
+            data-testid="push-save-path" />
         </el-form-item>
         <div class="field-row">
           <el-form-item label="分类">

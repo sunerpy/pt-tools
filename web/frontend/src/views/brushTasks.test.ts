@@ -35,6 +35,17 @@ vi.mock("@/api", async (orig) => {
         }),
       ),
     },
+    downloaderDirectoriesApi: {
+      ...real.downloaderDirectoriesApi,
+      listAll: vi.fn(() =>
+        Promise.resolve({
+          2: [
+            { id: 1, downloader_id: 2, path: "/downloads", alias: "", is_default: true },
+            { id: 2, downloader_id: 2, path: "/downloads/brush", alias: "刷流", is_default: false },
+          ],
+        }),
+      ),
+    },
     downloadersApi: {
       ...real.downloadersApi,
       list: vi.fn(() =>
@@ -183,6 +194,54 @@ describe("刷流任务页", () => {
       expect(document.querySelector("[data-testid=brush-site]")).not.toBeNull(),
     );
     expect(await siteOptions()).toEqual(["hdsky", "mteam", "ourbits（未启用）"]);
+  });
+
+  // 2026-10-26 用户：「下载器设置了下载目录，就可以直接选择而不是必须要输入」
+  it("保存路径：列出所选下载器预设的目录，也能直接输入", async () => {
+    await mountPage([]);
+    api.create.mockResolvedValue(task({ id: 9, enabled: false }));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("任务默认关闭"));
+    await flush();
+    button("新建任务").click();
+    const field = () => {
+      const el = document.querySelector<HTMLElement>("[data-testid=brush-save-path]")!;
+      return (el instanceof HTMLInputElement ? el : el.querySelector("input")) as HTMLInputElement;
+    };
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-save-path]")).not.toBeNull(),
+    );
+    field().focus();
+    field().dispatchEvent(new Event("focus"));
+    let items: HTMLElement[] = [];
+    await vi.waitFor(() => {
+      items = [...document.querySelectorAll<HTMLElement>(".pt-path-input__popper li")];
+      expect(items).toHaveLength(2);
+    });
+    items.find((li) => (li.textContent ?? "").includes("刷流"))!.click();
+    document.querySelector<HTMLButtonElement>("[data-testid=brush-save]")!.click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0][0].save_path).toBe("/downloads/brush");
+  });
+
+  it("保存路径：列表里没有的路径直接输入", async () => {
+    await mountPage([]);
+    api.create.mockResolvedValue(task({ id: 9, enabled: false }));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("任务默认关闭"));
+    await flush();
+    button("新建任务").click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-save-path]")).not.toBeNull(),
+    );
+    const el = document.querySelector<HTMLElement>("[data-testid=brush-save-path]")!;
+    const input = (
+      el instanceof HTMLInputElement ? el : el.querySelector("input")
+    ) as HTMLInputElement;
+    input.value = "/mnt/brush-other";
+    input.dispatchEvent(new Event("input"));
+    await flush();
+    document.querySelector<HTMLButtonElement>("[data-testid=brush-save]")!.click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0][0].save_path).toBe("/mnt/brush-other");
   });
 
   it("新建：默认关闭，优惠类型合成逗号串，站点与下载器预选", async () => {

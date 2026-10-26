@@ -13,6 +13,7 @@ import {
   type TransferRuleConfig,
   transferApi,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -513,13 +514,15 @@ onBeforeUnmount(() => {
         v-loading="mapsLoading"
         class="tf-maps">
         <div v-for="(m, i) in maps" :key="i" class="tf-map">
-          <el-input
+          <DownloaderPathInput
             v-model="m.source_prefix"
+            :downloader-ids="mapSource"
             :placeholder="`${downloaderName(mapSource)} 里的路径，如 /downloads`"
             :aria-label="`第 ${i + 1} 条的源路径`" />
           <PtIcon name="arrow-right" :size="14" class="tf-arrow" />
-          <el-input
+          <DownloaderPathInput
             v-model="m.target_prefix"
+            :downloader-ids="mapTarget"
             :placeholder="`${downloaderName(mapTarget)} 里的路径，如 /data`"
             :aria-label="`第 ${i + 1} 条的目标路径`" />
           <el-button link :aria-label="`删除第 ${i + 1} 条`" @click="removeMap(i)">
