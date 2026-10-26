@@ -145,6 +145,7 @@ type NexusPHPDriver struct {
 	userAgent      string
 	useFailover    bool
 	siteName       SiteName
+	siteID         string
 	siteDefinition *SiteDefinition
 }
 
@@ -157,6 +158,8 @@ type NexusPHPDriverConfig struct {
 	UserAgent   string
 	UseFailover bool     // Enable multi-URL failover
 	SiteName    SiteName // Site name for failover URL lookup
+	// SiteID 是站点在 pt-tools 里注册的 ID：搜索结果的代理下载地址 /api/site/{id}/… 按它找站点
+	SiteID string
 }
 
 // NewNexusPHPDriver creates a new NexusPHP driver
@@ -190,6 +193,7 @@ func NewNexusPHPDriver(config NexusPHPDriverConfig) *NexusPHPDriver {
 		userAgent:   userAgent,
 		useFailover: config.UseFailover,
 		siteName:    config.SiteName,
+		siteID:      config.SiteID,
 	}
 
 	// Initialize failover client if enabled and site name is provided
@@ -532,13 +536,7 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		// Parse download link - use proxy URL instead of direct link for authentication handling
 		// The backend proxy will handle cookie/passkey authentication
 		if item.ID != "" {
-			// Use proxy download URL that handles authentication
-			siteID := string(d.siteName)
-			if siteID == "" {
-				// Fallback to extracting site ID from BaseURL
-				siteID = extractSiteIDFromURL(d.BaseURL)
-			}
-			item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%s/download", siteID, item.ID)
+			item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%s/download", d.getSiteID(), item.ID)
 		} else {
 			// If no ID, try to get direct link (may not work without passkey)
 			downloadElem := s.Find(d.Selectors.DownloadLink)
@@ -2294,9 +2292,17 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 	return item, nil
 }
 
+// getSiteID 是站点在 pt-tools 里的 ID。从域名猜只是最后的办法：不少站点的域名与 ID 对不上
+// （pt.xingyungept.org 是 xingyunge、open.cd 是 opencd），按猜的 ID 拼的下载地址找不到站点（2026-10-26）。
 func (d *NexusPHPDriver) getSiteID() string {
+	if d.siteID != "" {
+		return d.siteID
+	}
 	if d.siteDefinition != nil {
 		return d.siteDefinition.ID
+	}
+	if d.siteName != "" {
+		return string(d.siteName)
 	}
 	return extractSiteIDFromURL(d.BaseURL)
 }
@@ -2349,6 +2355,7 @@ func createNexusPHPSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 		BaseURL:   config.BaseURL,
 		Cookie:    opts.Cookie,
 		Selectors: &selectors,
+		SiteID:    config.ID,
 	})
 
 	if siteDef != nil {
