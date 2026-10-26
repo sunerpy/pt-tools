@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.40](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.39...v1.0.0-rc.40) (2026-10-26)
+
+
+### Features
+
+* **follow:** 修改追剧时直接改锁住的版本，可以从最近一次搜索找到的版本里选 ([#772](https://github.com/sunerpy/pt-tools/issues/772)) ([837a2a8](https://github.com/sunerpy/pt-tools/commit/837a2a8309c1ed9b4df09a1e1ac7ebd87018b4a1))
+* **sites:** PTTime 补上等级要求，用户统计里的等级不再错成「小学」 ([#782](https://github.com/sunerpy/pt-tools/issues/782)) ([f267065](https://github.com/sunerpy/pt-tools/commit/f267065e1eec53dfe2f80bad3bbcf49b1ddedc3b))
+* **ui:** 填下载器路径的地方都能选预设目录，也能直接输入 ([#781](https://github.com/sunerpy/pt-tools/issues/781)) ([04b78d2](https://github.com/sunerpy/pt-tools/commit/04b78d2870432a3d7c28ff0f18f62ae09cd5209d))
+
+
+### Bug Fixes
+
+* **brush:** 刷流任务的站点下拉框只列启用的站点 ([#778](https://github.com/sunerpy/pt-tools/issues/778)) ([b0a1159](https://github.com/sunerpy/pt-tools/commit/b0a1159177c7439621df48474a2cb20f92e4548f))
+* **extension:** 弹窗先显示上次的结果；读不到登录状态时不再写未启用；认出上一级域名的 Cookie ([#771](https://github.com/sunerpy/pt-tools/issues/771)) ([4504f74](https://github.com/sunerpy/pt-tools/commit/4504f7456f981f48784018983f2ad4e3ffbf57a5))
+* **extension:** 新版 NexusPHP 只有一个 c_secure_pass 时也算登录着 ([#775](https://github.com/sunerpy/pt-tools/issues/775)) ([25119f0](https://github.com/sunerpy/pt-tools/commit/25119f008f9ef90be2b4262137fc72b040f7d20b))
+* **follow:** 改锁的提示按有没有搜到的版本来写；分辨率框放得下占位 ([#773](https://github.com/sunerpy/pt-tools/issues/773)) ([a2b77da](https://github.com/sunerpy/pt-tools/commit/a2b77da8ae1758b7fd7c9de6b455e971e756070a))
+* **follow:** 整季包补缺的集时只下缺的集，库里已有的设成不下载 ([#774](https://github.com/sunerpy/pt-tools/issues/774)) ([86164b4](https://github.com/sunerpy/pt-tools/commit/86164b4b8d528790aa6fdca490cc3fe1ada589e7))
+* **follow:** 清掉版本锁以后不再按库里已有的集锁回去，下一个下载成功的版本成为新锁 ([#769](https://github.com/sunerpy/pt-tools/issues/769)) ([b0708be](https://github.com/sunerpy/pt-tools/commit/b0708bef7cd350031dbb91fbb94b2dbae429c28a))
+* **search:** 指定的站点都没有启用时不再变成搜所有站点 ([#776](https://github.com/sunerpy/pt-tools/issues/776)) ([8a2fd04](https://github.com/sunerpy/pt-tools/commit/8a2fd0433e128d78cf09e017eaeb8056235397e3))
+* **search:** 搜索结果的下载地址用站点注册的 ID，星陨阁等站点下载不再 404 ([#777](https://github.com/sunerpy/pt-tools/issues/777)) ([9c7d29c](https://github.com/sunerpy/pt-tools/commit/9c7d29c0e24a147e920c2740bad7ba51f8426004))
+* **sites:** PTTime 读出免费结束时间；优惠映射按最长的关键词匹配 ([#780](https://github.com/sunerpy/pt-tools/issues/780)) ([5aa7341](https://github.com/sunerpy/pt-tools/commit/5aa734120d510771963bdf91711e5cf5c48f7a25))
+
 ## [1.0.0-rc.39](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.38...v1.0.0-rc.39) (2026-10-23)
 
 
