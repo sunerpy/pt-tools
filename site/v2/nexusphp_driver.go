@@ -432,22 +432,42 @@ func isLoginPage(doc *goquery.Document) bool {
 }
 
 // is2FAPage checks if the HTML document is a 2FA verification page
-// 只认二次验证页自己的特征：跳到 take2fa.php 的脚本、提交到 2FA 地址的表单、标题写着二次验证（2FA 要是单独的词）。
-// 以前脚本里出现「2fa」三个字母就算：随机串、哈希、种子名里常有这三个字母，HDSky 的免费列表因此时不时被当成
-// 二次验证页，刷流报「please check cookie or 2FA settings」（2026-10-27，01:58 以后 24 轮里有 10 轮）。
+// 只认二次验证页自己的特征：跳到 take2fa.php 的脚本、提交到 2FA 地址的表单（只看地址的路径）、标题写着二次验证
+// （2FA 要是单独的词）。以前脚本里、表单地址里出现「2fa」三个字母就算：HDSky 的列表里每个种子有两个下载表单，地址带
+// 32 位十六进制的 sign 参数（每次打开都换），一页 100 个 sign 里有「2fa」的机会约一半，免费列表因此时常被当成二次验证页，
+// 刷流报「please check cookie or 2FA settings」（2026-10-27，01:58 以后 24 轮里有 10 轮）。
 func is2FAPage(doc *goquery.Document) bool {
 	if strings.Contains(doc.Find("script").Text(), "take2fa.php") {
 		return true
 	}
-	if doc.Find("form[action*='2fa'], form[action*='2FA']").Length() > 0 {
+	found := false
+	doc.Find("form[action]").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		action, _ := s.Attr("action")
+		found = is2FAAction(action)
+		return !found
+	})
+	if found {
 		return true
 	}
 	title := doc.Find("title").First().Text()
-	return strings.Contains(title, "二次验证") || strings.Contains(title, "两步验证") || title2FAWord.MatchString(title)
+	return strings.Contains(title, "二次验证") || strings.Contains(title, "两步验证") || word2FA.MatchString(title)
 }
 
-// title2FAWord 匹配标题里单独的「2FA」（前后不是字母或数字），种子名里的「2Fast」这类不算。
-var title2FAWord = regexp.MustCompile(`(?i)(^|[^a-z0-9])2fa([^a-z0-9]|$)`)
+// is2FAAction 报告表单是不是提交到二次验证的地址：路径里有 2fa 这个词（take2fa.php、/2fa/verify），查询参数不算。
+func is2FAAction(action string) bool {
+	u, err := url.Parse(strings.TrimSpace(action))
+	if err != nil {
+		return false
+	}
+	return path2FA.MatchString(u.Path)
+}
+
+// word2FA 匹配标题里单独的「2FA」（前后不是字母或数字），种子名里的「2Fast」这类不算；path2FA 匹配路径里的
+// 2fa、take2fa 这一段（前后是开头、结尾、斜杠或点）。
+var (
+	word2FA = regexp.MustCompile(`(?i)(^|[^a-z0-9])2fa([^a-z0-9]|$)`)
+	path2FA = regexp.MustCompile(`(?i)(^|[/.])(take)?2fa([/.]|$)`)
+)
 
 // buildCurlCommand generates a curl command string for debugging
 func buildCurlCommand(method, url string, headers map[string]string) string {

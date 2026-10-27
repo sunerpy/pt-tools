@@ -20,24 +20,28 @@ func detectDoc(t *testing.T, html string) *goquery.Document {
 	return doc
 }
 
-// 登录以后的 HDSky 免费列表：脚本里有带「2fa」三个字母的随机串（哈希、令牌），不是二次验证页（2026-10-27 生产误判）。
+// 登录以后的 HDSky 免费列表：脚本里有带「2fa」三个字母的随机串（哈希、令牌），每个种子的下载表单地址带 32 位十六进制的
+// sign 参数，也常有这三个字母，都不是二次验证页（2026-10-27 生产误判的真因是下载表单的 sign）。
 const listWith2faInScripts = `<html><head><title>HDSky :: 种子 高清视界</title>
 <script>var token = "e3b0c442a2fa98fc1c149afbf4c8996f";</script>
 <script src="/js/a2fa.js"></script></head><body>
 <div id="info_block"><a href="userdetails.php?id=1">me</a> <a href="logout.php">退出</a></div>
 <script>var maxpage=19; var h="1d2fa3";</script>
+<form action="https://hdsky.me/download.php?id=639787&t=1793091029&sign=0d1e2fa3b4c5d6e7f8091a2b3c4d5e6f" method="post"></form>
+<form action="download.php?id=639787&type=zip&sign=aa2faa2faa2faa2faa2faa2faa2faa2f"></form>
 <table class="torrents"><tbody><tr><td>头</td></tr>
 <tr><td><img alt="Movies"></td><td><a href="details.php?id=5"><b>Some.Movie.2Fast.2026</b></a></td></tr>
 </tbody></table></body></html>`
 
 func TestIs2FAPage_OnlyRealMarkers(t *testing.T) {
-	assert.False(t, is2FAPage(detectDoc(t, listWith2faInScripts)), "脚本里的 2fa 三个字母不算")
+	assert.False(t, is2FAPage(detectDoc(t, listWith2faInScripts)), "脚本里、下载表单 sign 参数里的 2fa 三个字母不算")
 	assert.False(t, is2FAPage(detectDoc(t, `<html><head><title>2Fast 2Furious 1080p</title></head></html>`)), "标题里的 2Fast 不算")
 
 	for name, html := range map[string]string{
 		"跳到 take2fa":   `<html><head><title>x</title><script>location.href='take2fa.php?returnto=/'</script></head></html>`,
 		"2FA 表单":       `<html><body><form action="take2fa.php" method="post"><input name="code"></form></body></html>`,
-		"表单大写":         `<html><body><form action="/verify2FA" method="post"></form></body></html>`,
+		"表单在 2fa 目录":   `<html><body><form action="/2fa/verify" method="post"></form></body></html>`,
+		"表单 TAKE2FA":   `<html><body><form action="https://x.test/TAKE2FA.php"></form></body></html>`,
 		"标题二次验证":       `<html><head><title>二次验证 - HDSky</title></head></html>`,
 		"标题两步验证":       `<html><head><title>两步验证</title></head></html>`,
 		"标题 2FA":       `<html><head><title>2FA Verification</title></head></html>`,
