@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.41](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.40...v1.0.0-rc.41) (2026-10-27)
+
+
+### Features
+
+* **brush:** 刷流任务的运行记录：每一轮的结果、步骤与错误 ([#785](https://github.com/sunerpy/pt-tools/issues/785)) ([f47e9d9](https://github.com/sunerpy/pt-tools/commit/f47e9d92a37c18c2ca325090adadbfd145e76eee))
+
+
+### Bug Fixes
+
+* **sites:** OurBits 扩展同步认 ourbits_jwt，列表认出文字促销、H&R、副标题 ([#783](https://github.com/sunerpy/pt-tools/issues/783)) ([4abb62e](https://github.com/sunerpy/pt-tools/commit/4abb62e07501ebf1cfff4985ce485908b0147cde))
+
 ## [1.0.0-rc.40](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.39...v1.0.0-rc.40) (2026-10-26)
 
 
