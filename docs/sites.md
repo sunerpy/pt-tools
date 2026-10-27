@@ -41,7 +41,7 @@
 | **HDVideo**           | Cookie   | RSS、搜索、用户信息           | ✅       | HD视频（hdvideo.top）                                                        |
 | **GTKPW**             | Cookie   | RSS、搜索、用户信息           | ✅       | 多镜像（pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com）             |
 | **NicePT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 好趣（www.nicept.net，繁体）                                                 |
-| **OurBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ourbits.club，issue #329）                                           |
+| **OurBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ourbits.club，issue #329），促销种子显示方式选图标或文字             |
 | **Mua**               | Cookie   | RSS、搜索、用户信息           | ✅       | 二次元站点（mua.xloli.cc，userdetails 走 uuid，issue #339）                  |
 | **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
 | **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
