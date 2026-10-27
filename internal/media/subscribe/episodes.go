@@ -104,8 +104,9 @@ type episodeIndex struct {
 	// byPeriod：（期号，部分）→ TMDB 集号；periods：期号 → 这一期的各集（按部分排好）
 	byPeriod map[periodKey]int
 	periods  map[int][]int
-	// byDate：播出日期 → 那天播出的集
+	// byDate：播出日期 → 那天播出的集；airOf：集号 → 播出日期（没有日期的不在里面）
 	byDate  map[string][]int
+	airOf   map[int]string
 	partOf  map[int]string
 	numbers map[int]bool
 }
@@ -113,7 +114,8 @@ type episodeIndex struct {
 // newEpisodeIndex 按 TMDB 这一季的集列表建索引。genres 是剧集的类型编号（判断是不是综艺）。
 func newEpisodeIndex(season *tmdb.Season, genres []int) *episodeIndex {
 	ix := &episodeIndex{
-		byPeriod: map[periodKey]int{}, periods: map[int][]int{}, byDate: map[string][]int{}, partOf: map[int]string{}, numbers: map[int]bool{},
+		byPeriod: map[periodKey]int{}, periods: map[int][]int{}, byDate: map[string][]int{}, airOf: map[int]string{}, partOf: map[int]string{},
+		numbers: map[int]bool{},
 	}
 	if season == nil {
 		return ix
@@ -123,6 +125,7 @@ func newEpisodeIndex(season *tmdb.Season, genres []int) *episodeIndex {
 		ix.numbers[e.Number] = true
 		if e.AirDate != "" {
 			ix.byDate[e.AirDate] = append(ix.byDate[e.AirDate], e.Number)
+			ix.airOf[e.Number] = e.AirDate
 		}
 		if e.Name == "" || placeholderRe.MatchString(e.Name) {
 			continue
@@ -212,6 +215,8 @@ type episodeMapper struct {
 	index *episodeIndex
 	// rules：制作组（小写，空 = 所有组）→ 规则
 	rules map[string]models.MediaEpisodeRule
+	// today 是今天（YYYY-MM-DD，和 TMDB 的播出日期比）；为空时不按播出进度判断副标题写错的期号
+	today string
 }
 
 func newEpisodeMapper(ix *episodeIndex, rules []models.MediaEpisodeRule) *episodeMapper {
@@ -282,13 +287,15 @@ func (mp *episodeMapper) mapEpisodes(m meta.Meta, title, subtitle string, sp spa
 		if !ix.variety {
 			return sp, false, "集号对不上：标题写的是第几期，TMDB 上这一季不是按期编的"
 		}
-		// 期号只在副标题里、标题自己写了集号：两边要对得上（副标题是发布的人手写的，常有写错的），对不上的不要
+		// 期号只在副标题里、标题自己写了集号：两边要对得上（副标题是发布的人手写的，常有写错的），对不上的不要。
+		// 副标题写的那一期 TMDB 上还没有、按播出进度也还不可能播出时，是副标题写错了（常见的是把集号写成了期号），按标题的集号
 		if h.periodInSubtitle && !sp.Whole && sp.Start > 0 {
 			got, ok := mp.byPeriodHint(h)
-			if !ok || got != sp {
-				return sp, false, fmt.Sprintf("集号对不上：标题写的是第 %d 集，副标题写的是第 %d 期%s", sp.Start, h.period, partLabel(h.part))
+			if (ok && got == sp) || (!ok && mp.periodNotAiredYet(h.period, sp)) {
+				return sp, true, ""
 			}
-			return sp, true, ""
+			return sp, false, fmt.Sprintf("集号对不上：标题写的是第 %d 集，副标题写的是第 %d 期%s；标题的集号对的话，在集号规则里给这个组设「按 TMDB 的集号」",
+				sp.Start, h.period, partLabel(h.part))
 		}
 		if h.part == "" {
 			eps := ix.periods[h.period]
@@ -310,6 +317,34 @@ func (mp *episodeMapper) mapEpisodes(m meta.Meta, title, subtitle string, sp spa
 		return mp.byDateHint(h, sp)
 	}
 	return sp, true, ""
+}
+
+// periodNotAiredYet 报告第 period 期按 TMDB 的播出进度还不可能播出，而标题写的那几集已经播出：这一季到今天播出的集数
+// 连上一期的第一集都排不到（每期几集按 TMDB 已列出的期里最少的算，没列出时当作一集）。留一期的余量，是因为会员常常提前几天看到、
+// TMDB 的日期也会差几天。不知道今天、标题的集没有播出日期时为假。
+func (mp *episodeMapper) periodNotAiredYet(period int, sp span) bool {
+	ix := mp.index
+	if mp.today == "" || period <= 0 {
+		return false
+	}
+	for n := sp.Start; n <= sp.End; n++ {
+		if d, ok := ix.airOf[n]; !ok || d > mp.today {
+			return false
+		}
+	}
+	perPeriod := 0
+	for _, eps := range ix.periods {
+		if perPeriod == 0 || len(eps) < perPeriod {
+			perPeriod = len(eps)
+		}
+	}
+	aired := 0
+	for _, d := range ix.airOf {
+		if d <= mp.today {
+			aired++
+		}
+	}
+	return aired < (period-2)*max(perPeriod, 1)+1
 }
 
 // byPeriodHint 按（期，部分）找 TMDB 的集：只写了第几期时是这一期的几集。
