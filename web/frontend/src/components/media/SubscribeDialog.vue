@@ -93,6 +93,8 @@ const blank = (): SubscriptionInput => ({
   tags: "",
   save_path: "",
   upgrade: false,
+  include_keywords: "",
+  exclude_keywords: "",
 });
 const form = ref<SubscriptionInput>(blank());
 const season = ref<number | undefined>(undefined);
@@ -319,6 +321,8 @@ watch(
           tags: s.tags,
           save_path: s.save_path,
           upgrade: s.upgrade,
+          include_keywords: s.include_keywords ?? "",
+          exclude_keywords: s.exclude_keywords ?? "",
         }
       : blank();
     season.value = s?.media_type === "tv" ? s.season : props.season || undefined;
@@ -763,6 +767,26 @@ async function save() {
             data-testid="sd-sites">
             <el-option v-for="s in sites" :key="s" :value="s" :label="s" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="标题包含（任一）">
+          <el-input
+            v-model="form.include_keywords"
+            type="textarea"
+            :rows="2"
+            placeholder="每行或逗号分隔，留空不限"
+            data-testid="sd-include" />
+          <div class="field-tip">
+            对种子标题与副标题，不分大小写，空格、点、下划线当作一样。只要某个制作组的版本时填它的名字，例如
+            CHDWEB；要同时满足几个词时写标题里连着的一段，例如「3Audio Atmos-CHDWEB」。
+          </div>
+        </el-form-item>
+        <el-form-item label="标题排除">
+          <el-input
+            v-model="form.exclude_keywords"
+            type="textarea"
+            :rows="2"
+            placeholder="每行或逗号分隔，留空不限"
+            data-testid="sd-exclude" />
         </el-form-item>
         <el-form-item label="下载器">
           <el-select v-model="form.downloader_id" data-testid="sd-downloader">

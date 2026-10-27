@@ -32,6 +32,7 @@ import {
   RULE_MODES,
   episodeState,
   isFollow,
+  keywordLines,
   lockText,
   progressText,
   ruleSource,
@@ -85,6 +86,7 @@ const followLine = computed(() => {
   if (d.follow_next_season) out.push("追完以后追下一季");
   return out;
 });
+const keywordLine = computed(() => (detail.value ? keywordLines(detail.value) : []));
 
 async function load() {
   if (!props.id) return;
@@ -356,6 +358,9 @@ watch(
         </div>
         <div v-if="followLine.length" class="sdd__sub" data-testid="sub-detail-follow">
           <span v-for="t in followLine" :key="t">{{ t }}</span>
+        </div>
+        <div v-if="keywordLine.length" class="sdd__sub" data-testid="sub-detail-keywords">
+          <span v-for="t in keywordLine" :key="t">{{ t }}</span>
         </div>
         <div v-if="detail.message" class="sdd__sub" data-testid="sub-detail-message">
           {{ detail.message }}

@@ -336,6 +336,7 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 	}
 	var ok []scored
 	var rejects []string
+	byKeywords := false
 	for _, c := range cands {
 		if slices.ContainsFunc(linked, func(t models.MediaSubscriptionTorrent) bool {
 			return strings.EqualFold(t.SiteName, c.Site) && t.TorrentID == c.Item.ID
@@ -350,6 +351,12 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 			}
 			continue
 		}
+		if why := keywordReject(sub, c.Item); why != "" {
+			byKeywords = true
+			rejects = append(rejects, c.Item.Title+"："+why)
+			step(ctx, stepReject, "%s：%s", c.Item.Title, why)
+			continue
+		}
 		v := profile.Score(c, sp.count(sub.TotalEpisodes))
 		if v.Reject != "" {
 			rejects = append(rejects, c.Item.Title+"："+v.Reject)
@@ -360,7 +367,11 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 	}
 	if len(ok) == 0 {
 		if len(rejects) > 0 {
-			return fmt.Sprintf("找到 %d 个，都不符合质量档案：%s", len(rejects), strings.Join(rejects[:min(len(rejects), 3)], "；"))
+			what := "质量档案"
+			if byKeywords {
+				what = "质量档案或标题关键词"
+			}
+			return fmt.Sprintf("找到 %d 个，都不符合%s：%s", len(rejects), what, strings.Join(rejects[:min(len(rejects), 3)], "；"))
 		}
 		return "没有找到对得上的资源"
 	}
