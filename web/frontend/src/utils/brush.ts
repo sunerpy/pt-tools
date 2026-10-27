@@ -1,4 +1,4 @@
-import type { BrushRunResult, BrushTask, BrushTaskConfig } from "@/api";
+import type { BrushRun, BrushRunResult, BrushRunStep, BrushTask, BrushTaskConfig } from "@/api";
 
 /** 刷流入场可选的优惠类型（与 site/v2 的 DiscountLevel 一致），按常用程度排 */
 export const BRUSH_DISCOUNTS: readonly { value: string; label: string }[] = [
@@ -142,4 +142,57 @@ export function nextRunAt(task: Pick<BrushTask, "last_run_at" | "interval_min">)
   const t = Date.parse(task.last_run_at);
   if (Number.isNaN(t)) return null;
   return t + task.interval_min * 60_000;
+}
+
+type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
+
+const RUN_STATUS: Record<BrushRun["status"], { label: string; tone: Tone }> = {
+  running: { label: "进行中", tone: "primary" },
+  ok: { label: "成功", tone: "ok" },
+  partial: { label: "部分失败", tone: "warn" },
+  failed: { label: "失败", tone: "dang" },
+  interrupted: { label: "没跑完", tone: "warn" },
+};
+
+/** 运行记录的状态与颜色；不认识的原样显示 */
+export function brushRunStatus(status: string): { label: string; tone: Tone } {
+  return RUN_STATUS[status as BrushRun["status"]] ?? { label: status, tone: "neutral" };
+}
+
+export function brushRunTrigger(trigger: string): string {
+  if (trigger === "manual") return "手动";
+  if (trigger === "schedule") return "定时";
+  return trigger;
+}
+
+const STEP_KIND: Record<BrushRunStep["kind"], string> = {
+  list: "列表",
+  reject: "不符合",
+  add: "加入",
+  remove: "删除",
+  gone: "已不在",
+  skip: "跳过",
+  stop: "停下",
+  error: "出错",
+  info: "说明",
+};
+
+export function brushStepKind(kind: string): string {
+  return STEP_KIND[kind as BrushRunStep["kind"]] ?? kind;
+}
+
+/**
+ * 这一轮用了多久：「8 秒」「2 分 5 秒」；还在跑、没记下结束时间时为空。
+ * 没跑完的一轮也为空：它的结束时间是下次启动补记的时刻，不是这一轮真的停下的时刻。
+ */
+export function brushRunDuration(
+  run: Pick<BrushRun, "started_at" | "finished_at"> & { status?: BrushRun["status"] },
+): string {
+  if (!run.finished_at || run.status === "interrupted") return "";
+  const ms = Date.parse(run.finished_at) - Date.parse(run.started_at);
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec} 秒`;
+  const min = Math.floor(sec / 60);
+  return sec % 60 ? `${min} 分 ${sec % 60} 秒` : `${min} 分`;
 }

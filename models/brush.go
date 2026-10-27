@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -157,6 +158,64 @@ type BrushDailyStat struct {
 	LastUpdated time.Time
 }
 
+// 刷流运行的触发方式。
+const (
+	BrushRunSchedule = "schedule"
+	BrushRunManual   = "manual"
+)
+
+// 刷流运行的结果。
+const (
+	BrushRunRunning = "running"
+	BrushRunOK      = "ok"
+	// BrushRunPartial 是这一轮跑完了，但有个别种子下载、推送、删除或记录失败
+	BrushRunPartial = "partial"
+	BrushRunFailed  = "failed"
+	// BrushRunInterrupted 是这一轮没跑完进程就退出了（重启时补记）
+	BrushRunInterrupted = "interrupted"
+)
+
+// BrushRun 是刷流任务的一轮运行（定时或手动「立即运行」）：先写一条进行中的记录，跑完再补上结果与步骤。
+// 每个任务保留最近 500 条，且不超过 14 天（见 scheduler 的 brushRunKeep*）。
+type BrushRun struct {
+	ID         uint       `gorm:"primaryKey" json:"id"`
+	TaskID     uint       `gorm:"not null;index" json:"task_id"`
+	Trigger    string     `gorm:"size:16;not null;default:''" json:"trigger"`
+	StartedAt  time.Time  `gorm:"not null;index" json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Status     string     `gorm:"size:16;not null;default:''" json:"status"`
+	Summary    string     `gorm:"size:1024;not null;default:''" json:"summary"`
+	Error      string     `gorm:"size:1024;not null;default:''" json:"error"`
+	Listed     int        `gorm:"not null;default:0" json:"listed"`
+	Eligible   int        `gorm:"not null;default:0" json:"eligible"`
+	Added      int        `gorm:"not null;default:0" json:"added"`
+	Removed    int        `gorm:"not null;default:0" json:"removed"`
+	Gone       int        `gorm:"not null;default:0" json:"gone"`
+	// Steps 是这一轮的步骤（BrushRunStep 的 JSON 数组，最多 16 KiB；超出时后面的不记，StepsTruncated 为真）
+	Steps          string `gorm:"type:text;not null;default:''" json:"-"`
+	StepsTruncated bool   `gorm:"not null;default:false" json:"steps_truncated"`
+}
+
+func (BrushRun) TableName() string { return "brush_runs" }
+
+// BrushRunStep 是一轮运行里的一步：Kind 是种类（list、reject、add、remove、gone、skip、stop、error、info），Text 给人看。
+type BrushRunStep struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
+
+// StepList 解出这一轮的步骤；没有记下或解不开时为空。
+func (r BrushRun) StepList() []BrushRunStep {
+	if r.Steps == "" {
+		return []BrushRunStep{}
+	}
+	var steps []BrushRunStep
+	if err := json.Unmarshal([]byte(r.Steps), &steps); err != nil || steps == nil {
+		return []BrushRunStep{}
+	}
+	return steps
+}
+
 // BrushRepository 封装刷流相关表的读写。
 type BrushRepository struct {
 	db *gorm.DB
@@ -205,7 +264,7 @@ func (r *BrushRepository) SaveTask(task *BrushTask) error {
 	return nil
 }
 
-// DeleteTask 删除任务和它的统计、采样与种子记录。下载器里的种子不动。
+// DeleteTask 删除任务和它的统计、采样、种子与运行记录。下载器里的种子不动。
 func (r *BrushRepository) DeleteTask(id uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var ids []uint
@@ -221,6 +280,9 @@ func (r *BrushRepository) DeleteTask(id uint) error {
 			return err
 		}
 		if err := tx.Where("task_id = ?", id).Delete(&BrushDailyStat{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("task_id = ?", id).Delete(&BrushRun{}).Error; err != nil {
 			return err
 		}
 		res := tx.Delete(&BrushTask{}, id)
@@ -458,6 +520,100 @@ func (r *BrushRepository) SamplesSince(brushTorrentID uint, since time.Time) ([]
 func (r *BrushRepository) PruneSamples(before time.Time) (int64, error) {
 	res := r.db.Where("at < ?", before.UTC()).Delete(&BrushTorrentSample{})
 	return res.RowsAffected, res.Error
+}
+
+// StartRun 写一条进行中的运行记录（进程中途退出时也看得到这一轮开始过）。
+func (r *BrushRepository) StartRun(taskID uint, trigger string, at time.Time) (*BrushRun, error) {
+	run := &BrushRun{TaskID: taskID, Trigger: trigger, StartedAt: at.UTC(), Status: BrushRunRunning}
+	if err := r.db.Create(run).Error; err != nil {
+		return nil, fmt.Errorf("记录刷流运行失败: %w", err)
+	}
+	return run, nil
+}
+
+// FinishRun 补上一轮运行的结果、计数与步骤。
+func (r *BrushRepository) FinishRun(run *BrushRun) error {
+	var finished *time.Time
+	if run.FinishedAt != nil {
+		at := run.FinishedAt.UTC()
+		finished = &at
+	}
+	err := r.db.Model(&BrushRun{}).Where("id = ?", run.ID).Updates(map[string]any{
+		"finished_at":     finished,
+		"status":          run.Status,
+		"summary":         truncateRunes(run.Summary, 1000),
+		"error":           truncateRunes(run.Error, 1000),
+		"listed":          run.Listed,
+		"eligible":        run.Eligible,
+		"added":           run.Added,
+		"removed":         run.Removed,
+		"gone":            run.Gone,
+		"steps":           run.Steps,
+		"steps_truncated": run.StepsTruncated,
+	}).Error
+	if err != nil {
+		return fmt.Errorf("记录刷流运行结果失败: %w", err)
+	}
+	return nil
+}
+
+// ListRuns 分页列出任务的运行记录，新的在前；同时给出总条数。
+func (r *BrushRepository) ListRuns(taskID uint, limit, offset int) ([]BrushRun, int64, error) {
+	q := r.db.Model(&BrushRun{}).Where("task_id = ?", taskID)
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("读取刷流运行记录失败: %w", err)
+	}
+	var rows []BrushRun
+	if err := q.Order("id DESC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("读取刷流运行记录失败: %w", err)
+	}
+	return rows, total, nil
+}
+
+// MarkInterruptedRuns 把 before 以前开始、还写着「进行中」的运行记成没跑完（启动时调用：上一个进程在一轮中途退出了）。
+// before 取这个进程的刷流监控建好的时刻，这个进程里刚开始的一轮不受影响。
+func (r *BrushRepository) MarkInterruptedRuns(before, at time.Time) (int64, error) {
+	res := r.db.Model(&BrushRun{}).Where("status = ? AND julianday(started_at) < julianday(?)", BrushRunRunning, before.UTC()).Updates(map[string]any{
+		"status":      BrushRunInterrupted,
+		"finished_at": at.UTC(),
+		"error":       "pt-tools 在这一轮中途退出了，这一轮没有跑完",
+	})
+	return res.RowsAffected, res.Error
+}
+
+// PruneRuns 删掉 before 以前开始的运行记录，并且每个任务只留最新的 keepPerTask 条；返回删掉的行数。
+// 时间按时刻比较（julianday），不按文本，存的时区不同也不会差几个小时。
+func (r *BrushRepository) PruneRuns(before time.Time, keepPerTask int) (int64, error) {
+	res := r.db.Where("julianday(started_at) < julianday(?)", before.UTC()).Delete(&BrushRun{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("清理刷流运行记录失败: %w", res.Error)
+	}
+	removed := res.RowsAffected
+	if keepPerTask <= 0 {
+		return removed, nil
+	}
+	var over []struct {
+		TaskID uint
+		N      int64
+	}
+	if err := r.db.Model(&BrushRun{}).Select("task_id, COUNT(*) AS n").Group("task_id").
+		Having("COUNT(*) > ?", keepPerTask).Scan(&over).Error; err != nil {
+		return removed, fmt.Errorf("清理刷流运行记录失败: %w", err)
+	}
+	for _, o := range over {
+		// 第 keepPerTask+1 新的那一条及更旧的都删（编号按开始顺序递增）
+		var cut BrushRun
+		if err := r.db.Where("task_id = ?", o.TaskID).Order("id DESC").Offset(keepPerTask).Limit(1).Take(&cut).Error; err != nil {
+			return removed, fmt.Errorf("清理刷流运行记录失败: %w", err)
+		}
+		res := r.db.Where("task_id = ? AND id <= ?", o.TaskID, cut.ID).Delete(&BrushRun{})
+		if res.Error != nil {
+			return removed, fmt.Errorf("清理刷流运行记录失败: %w", res.Error)
+		}
+		removed += res.RowsAffected
+	}
+	return removed, nil
 }
 
 // DailyStats 返回 [fromDay, toDay] 的每日统计；taskID 为 0 时返回全部任务。

@@ -61,6 +61,16 @@ A download counts as complete when it is at 100% and not in a checking or error 
 
 Brushing only touches torrents that carry the task's tag and were added by the task. If you remove the task tag from a torrent, it is handed back to you and brushing stops removing it; torrents removed by hand or by other means are marked "no longer in the downloader". After you switch a task to another downloader, the torrents it already added are still sampled and removed in their original downloader; if that downloader is temporarily unreachable, those torrents are left alone for the round.
 
+## Run history
+
+Each task's actions include **Run history** (运行记录; **History** (记录) on phones), and clicking the result or error in the **Last run** (上次运行) cell opens it too. Every round, scheduled or started with **Run now**, adds one entry; the newest is at the top and expanded:
+
+- Start time, scheduled or manual, duration, and status: Succeeded (成功); Partly failed (部分失败: the round finished but some torrents failed to download, push, remove, or record); Failed (失败: for example the site's torrent list could not be read or the downloader was unreachable); Not finished (没跑完: pt-tools exited in the middle of the round, recorded at the next start); Running (进行中).
+- The round's summary and errors, the same as the task list's **Last run**.
+- Expand an entry for its steps: how many torrents the task had and how much it had added today; how many torrents the list had; how many were added before, already in the downloader, or did not meet the conditions, with the reasons summarized and the first 30 of those torrents listed with their reason; which torrents were added (discount, size, when the discount ends, H&R seeding requirement); which were removed and why; which were no longer in the downloader; and why the round stopped adding (for example the concurrent download limit was reached or disk protection rejected a push).
+
+Each task keeps its latest 500 entries from the last 14 days, and they are deleted with the task. When a round has a very long list of steps, the rest is not recorded and the entry says so.
+
 ## Relation to auto cleanup
 
 All brush torrents carry the `pt-tools-brush` tag. The regular **Auto cleanup** rules (seeding time, ratio, and so on) skip them and leave them to the task's own removal rules, so the two sets of rules never compete. The emergency cleanup that runs when free disk space drops below the minimum still covers every torrent, brush torrents included.
@@ -68,7 +78,7 @@ All brush torrents carry the `pt-tools-brush` tag. The regular **Auto cleanup** 
 ## Turning off and deleting a task
 
 - **Turn off**: no new torrents are added. Torrents already added keep being handled by the removal rules until they are all gone.
-- **Delete**: the task, its statistics, and its torrent records are deleted. The torrents stay in the downloader and are no longer managed by brushing (the regular auto cleanup rules still skip them; handle them by hand if needed).
+- **Delete**: the task, its statistics, its torrent records, and its run history are deleted. The torrents stay in the downloader and are no longer managed by brushing (the regular auto cleanup rules still skip them; handle them by hand if needed).
 - A task cannot be deleted or edited while a round is running; try again shortly (a round uses the settings read when it started).
 
 ## Earnings and the daily report
@@ -98,6 +108,7 @@ pt-tools does not support Vertex's custom script rules. For more complex conditi
 | `GET` / `POST /api/brush/tasks`                                  | List tasks (with active torrents and earnings) / create a task                                                       |
 | `GET` / `PUT` / `DELETE /api/brush/tasks/<id>`                   | Read, update, or delete a task                                                                                       |
 | `POST /api/brush/tasks/<id>/run`                                 | Run one round now and return its result; returns 502 when the site or downloader failed and the round did not finish |
+| `GET /api/brush/tasks/<id>/runs?limit=<1–100>&offset=`           | Run history, newest first, with each round's steps                                                                   |
 | `GET /api/brush/tasks/<id>/torrents?state=active\|removed\|gone` | The task's torrents                                                                                                  |
 | `GET /api/brush/stats?days=<1–90>`                               | Daily earnings per task and in total for recent days                                                                 |
 

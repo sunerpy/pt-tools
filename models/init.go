@@ -265,6 +265,7 @@ func NewDBWithVersionAndHooks(
 		&BrushTorrent{},
 		&BrushTorrentSample{},
 		&BrushDailyStat{},
+		&BrushRun{},
 		// 转移做种（M5）
 		&TorrentTransferJob{},
 		&DownloaderPathMap{},

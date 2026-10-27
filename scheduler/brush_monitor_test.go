@@ -107,7 +107,7 @@ func newBrushRig(t *testing.T) *brushRig {
 	t.Helper()
 	db := setupTestDB(t)
 	t.Cleanup(func() { global.GlobalDB = nil })
-	require.NoError(t, db.DB.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}))
+	require.NoError(t, db.DB.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}, &models.BrushRun{}))
 	r := &brushRig{
 		db:       db,
 		siteName: "hdsky",

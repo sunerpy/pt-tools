@@ -11,7 +11,7 @@ import (
 
 func newBrushTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	return newMemDB(t, &BrushTask{}, &BrushTorrent{}, &BrushTorrentSample{}, &BrushDailyStat{})
+	return newMemDB(t, &BrushTask{}, &BrushTorrent{}, &BrushTorrentSample{}, &BrushDailyStat{}, &BrushRun{})
 }
 
 func TestBrushTask_TagList(t *testing.T) {
@@ -161,8 +161,11 @@ func TestBrushRepository_DeleteTaskCascades(t *testing.T) {
 	require.NoError(t, repo.RecordAdded(bt, "2026-10-06"))
 	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: time.Now(), Uploaded: 1}, 0, 0, 0, time.UTC))
 
+	_, err := repo.StartRun(task.ID, BrushRunSchedule, time.Now())
+	require.NoError(t, err)
+
 	require.NoError(t, repo.DeleteTask(task.ID))
-	for _, model := range []any{&BrushTask{}, &BrushTorrent{}, &BrushTorrentSample{}, &BrushDailyStat{}} {
+	for _, model := range []any{&BrushTask{}, &BrushTorrent{}, &BrushTorrentSample{}, &BrushDailyStat{}, &BrushRun{}} {
 		var n int64
 		require.NoError(t, db.Model(model).Count(&n).Error)
 		assert.Zero(t, n)
@@ -304,4 +307,98 @@ func TestBrushRepository_ReturnsDatabaseErrors(t *testing.T) {
 		assert.Error(t, err)
 		assert.Error(t, repo.DeleteTask(task.ID))
 	})
+}
+
+// 运行记录：先记进行中，跑完补结果与步骤；列出时新的在前、可以分页；启动时把没跑完的记成中途退出
+func TestBrushRepository_RunsLifecycle(t *testing.T) {
+	repo := NewBrushRepository(newBrushTestDB(t))
+	task := &BrushTask{Name: "a", SiteName: "hdsky", DownloaderID: 1}
+	require.NoError(t, repo.SaveTask(task))
+	base := time.Date(2026, 10, 27, 1, 0, 0, 0, time.UTC)
+
+	var ids []uint
+	for i := range 3 {
+		run, err := repo.StartRun(task.ID, BrushRunSchedule, base.Add(time.Duration(i)*time.Minute))
+		require.NoError(t, err)
+		assert.Equal(t, BrushRunRunning, run.Status)
+		ids = append(ids, run.ID)
+	}
+	done := base.Add(90 * time.Second)
+	require.NoError(t, repo.FinishRun(&BrushRun{
+		ID: ids[1], FinishedAt: &done, Status: BrushRunPartial, Summary: "列表 50 个、符合条件 3 个、加入 2 个", Error: "下载 x 的种子文件失败",
+		Listed: 50, Eligible: 3, Added: 2, Removed: 1, Gone: 1,
+		Steps: `[{"kind":"add","text":"加入 A（FREE，1.00 GB）"},{"kind":"error","text":"下载 x 的种子文件失败"}]`, StepsTruncated: true,
+	}))
+
+	rows, total, err := repo.ListRuns(task.ID, 2, 0)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, total)
+	require.Len(t, rows, 2)
+	assert.Equal(t, []uint{ids[2], ids[1]}, []uint{rows[0].ID, rows[1].ID}, "新的在前")
+	got := rows[1]
+	assert.Equal(t, BrushRunPartial, got.Status)
+	assert.Equal(t, 50, got.Listed)
+	assert.Equal(t, 2, got.Added)
+	assert.True(t, got.StepsTruncated)
+	require.NotNil(t, got.FinishedAt)
+	assert.True(t, got.FinishedAt.Equal(done))
+	assert.Equal(t, []BrushRunStep{{Kind: "add", Text: "加入 A（FREE，1.00 GB）"}, {Kind: "error", Text: "下载 x 的种子文件失败"}}, got.StepList())
+	assert.Equal(t, []BrushRunStep{}, rows[0].StepList(), "还没跑完的没有步骤")
+
+	rows, _, err = repo.ListRuns(task.ID, 2, 2)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, ids[0], rows[0].ID)
+
+	// ids[2] 在 before 之后开始：算这个进程的，不动
+	n, err := repo.MarkInterruptedRuns(base.Add(2*time.Minute), base.Add(time.Hour))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n, "只改 before 以前开始、还在进行中的")
+	rows, _, err = repo.ListRuns(task.ID, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, BrushRunRunning, rows[0].Status)
+	assert.Equal(t, BrushRunInterrupted, rows[2].Status)
+	n, err = repo.MarkInterruptedRuns(base.Add(time.Hour), base.Add(time.Hour))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	rows, _, err = repo.ListRuns(task.ID, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, BrushRunInterrupted, rows[0].Status)
+	assert.NotEmpty(t, rows[0].Error)
+	assert.Equal(t, BrushRunPartial, rows[1].Status, "跑完的不动")
+}
+
+// 清理：超过保留时长的删掉；每个任务只留最新的 N 条，别的任务不受影响
+func TestBrushRepository_PruneRuns(t *testing.T) {
+	repo := NewBrushRepository(newBrushTestDB(t))
+	a := &BrushTask{Name: "a", SiteName: "hdsky", DownloaderID: 1}
+	b := &BrushTask{Name: "b", SiteName: "pttime", DownloaderID: 1}
+	require.NoError(t, repo.SaveTask(a))
+	require.NoError(t, repo.SaveTask(b))
+	now := time.Date(2026, 10, 27, 1, 0, 0, 0, time.UTC)
+
+	_, err := repo.StartRun(b.ID, BrushRunSchedule, now.Add(-20*24*time.Hour))
+	require.NoError(t, err)
+	var aIDs []uint
+	for i := range 5 {
+		run, startErr := repo.StartRun(a.ID, BrushRunSchedule, now.Add(time.Duration(i-5)*time.Hour))
+		require.NoError(t, startErr)
+		aIDs = append(aIDs, run.ID)
+	}
+	for i := range 2 {
+		_, err = repo.StartRun(b.ID, BrushRunManual, now.Add(time.Duration(i-2)*time.Hour))
+		require.NoError(t, err)
+	}
+
+	n, err := repo.PruneRuns(now.Add(-14*24*time.Hour), 3)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, n, "b 的一条过期，a 多出的两条")
+
+	rows, total, err := repo.ListRuns(a.ID, 10, 0)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, total)
+	assert.Equal(t, []uint{aIDs[4], aIDs[3], aIDs[2]}, []uint{rows[0].ID, rows[1].ID, rows[2].ID})
+	_, total, err = repo.ListRuns(b.ID, 10, 0)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
 }

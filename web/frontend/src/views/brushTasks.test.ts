@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 /*
  * 钉子：刷流任务页。列表按真实 DTO 画；新建时优惠类型合成逗号串、默认关闭；开关只翻 enabled；
- * 「立即运行」把结果说清楚；种子抽屉按标签取对应状态的种子，晚到的旧请求不覆盖新标签。
+ * 「立即运行」把结果说清楚；种子抽屉按标签取对应状态的种子，晚到的旧请求不覆盖新标签；
+ * 运行记录抽屉列出每一轮（最新一条展开、可以接着往下读），「上次运行」那格点了也打开它。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { BrushTask } from "@/api";
+import type { BrushRun, BrushTask } from "@/api";
 import { type MountedView, mountView } from "@/test-mount";
 import { defaultBrushConfig } from "@/utils/brush";
 
@@ -15,6 +16,7 @@ const api = vi.hoisted(() => ({
   update: vi.fn(),
   remove: vi.fn(),
   run: vi.fn(),
+  runs: vi.fn(),
   torrents: vi.fn(),
   stats: vi.fn(),
 }));
@@ -98,6 +100,27 @@ function task(over: Partial<BrushTask> = {}): BrushTask {
     active_size_bytes: 3 * 1024 ** 3,
     today: { uploaded: 5 * 1024 ** 3, downloaded: 1024 ** 3, added: 2, removed: 1 },
     total: { uploaded: 50 * 1024 ** 3, downloaded: 10 * 1024 ** 3, added: 9, removed: 6 },
+    ...over,
+  };
+}
+
+function brushRun(over: Partial<BrushRun> = {}): BrushRun {
+  return {
+    id: 1,
+    task_id: 1,
+    trigger: "schedule",
+    started_at: "2026-10-06T10:00:00Z",
+    finished_at: "2026-10-06T10:00:08Z",
+    status: "ok",
+    summary: "列表 40 个、符合条件 3 个、加入 2 个",
+    error: "",
+    listed: 40,
+    eligible: 3,
+    added: 2,
+    removed: 0,
+    gone: 0,
+    steps: [],
+    steps_truncated: false,
     ...over,
   };
 }
@@ -346,6 +369,120 @@ describe("刷流任务页", () => {
     await vi.waitFor(() =>
       expect(ui.error).toHaveBeenCalledWith(expect.stringContaining("站点 502")),
     );
+  });
+
+  it("运行记录：按钮打开抽屉，最新一条展开、错误与步骤都在；再看 N 条接着往下读", async () => {
+    await mountPage([task()]);
+    api.runs
+      .mockResolvedValueOnce({
+        items: [
+          brushRun({
+            id: 3,
+            trigger: "manual",
+            status: "failed",
+            summary: "列表 0 个、符合条件 0 个、加入 0 个",
+            error: "读取 hdsky 的种子列表失败: authentication failed",
+            steps: [
+              {
+                kind: "info",
+                text: "任务名下在做 1 个种子（下载中 0 个，共 4.00 GB），今天已加入 0.00 GB",
+              },
+              { kind: "error", text: "读取 hdsky 的种子列表失败: authentication failed" },
+            ],
+          }),
+          brushRun({
+            id: 2,
+            status: "partial",
+            steps: [{ kind: "add", text: "Demo.One（免费，4.00 GB）" }],
+            steps_truncated: true,
+          }),
+        ],
+        total: 3,
+      })
+      .mockResolvedValueOnce({ items: [brushRun({ id: 1 })], total: 3 });
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='HDSky 刷流 的运行记录']")).not.toBeNull(),
+    );
+    document.querySelector<HTMLButtonElement>("[aria-label='HDSky 刷流 的运行记录']")!.click();
+    await vi.waitFor(() => expect(api.runs).toHaveBeenCalledWith(1, { limit: 20, offset: 0 }));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-runs]")).not.toBeNull(),
+    );
+
+    const drawer = () => document.querySelector("[data-testid=brush-runs]")!.textContent ?? "";
+    expect(drawer()).toContain("手动");
+    expect(drawer()).toContain("失败");
+    expect(drawer()).toContain("部分失败");
+    expect(drawer()).toContain("用时 8 秒");
+    expect(drawer()).toContain("authentication failed");
+    // 最新一条展开，第二条收着
+    expect(document.querySelector("[data-testid=brush-run-steps-3]")?.textContent).toContain(
+      "今天已加入 0.00 GB",
+    );
+    expect(document.querySelector("[data-testid=brush-run-steps-2]")).toBeNull();
+
+    document.querySelector<HTMLButtonElement>("[data-testid=brush-run-2]")!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-run-steps-2]")?.textContent).toContain(
+        "Demo.One（免费，4.00 GB）",
+      ),
+    );
+    expect(document.querySelector("[data-testid=brush-run-steps-2]")?.textContent).toContain(
+      "步骤太多",
+    );
+
+    const more = document.querySelector<HTMLButtonElement>("[data-testid=brush-runs-more]")!;
+    expect(more.textContent).toContain("再看 1 条");
+    more.click();
+    await vi.waitFor(() => expect(api.runs).toHaveBeenLastCalledWith(1, { limit: 20, offset: 2 }));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-run-1]")).not.toBeNull(),
+    );
+    expect(document.querySelector("[data-testid=brush-runs-more]")).toBeNull();
+  });
+
+  it("「上次运行」的摘要点了也打开运行记录；立即运行之后开着的记录重新读", async () => {
+    await mountPage([task()]);
+    api.runs.mockResolvedValue({ items: [brushRun()], total: 1 });
+    await vi.waitFor(() => expect(document.querySelector(".brush-lastrun")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".brush-lastrun")!.click();
+    await vi.waitFor(() => expect(api.runs).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-run-1]")).not.toBeNull(),
+    );
+
+    api.run.mockResolvedValueOnce({
+      result: { task_id: 1, sampled: 0, removed: 0, gone: 0, listed: 10, eligible: 0, added: 0 },
+    });
+    document.querySelector<HTMLButtonElement>("[aria-label='立即运行 HDSky 刷流']")!.click();
+    await vi.waitFor(() => expect(api.runs).toHaveBeenCalledTimes(2));
+  });
+
+  it("运行记录：换了任务时旧请求晚到不覆盖", async () => {
+    await mountPage([task(), task({ id: 2, name: "MT 刷流", site_name: "mteam" })]);
+    let releaseFirst!: (v: unknown) => void;
+    api.runs.mockImplementation((id: number) =>
+      id === 1
+        ? new Promise((resolve) => {
+            releaseFirst = resolve;
+          })
+        : Promise.resolve({
+            items: [brushRun({ id: 20, task_id: 2, summary: "MT 的一轮" })],
+            total: 1,
+          }),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='MT 刷流 的运行记录']")).not.toBeNull(),
+    );
+    document.querySelector<HTMLButtonElement>("[aria-label='HDSky 刷流 的运行记录']")!.click();
+    await vi.waitFor(() => expect(api.runs).toHaveBeenCalledWith(1, { limit: 20, offset: 0 }));
+    document.querySelector<HTMLButtonElement>("[aria-label='MT 刷流 的运行记录']")!.click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("MT 的一轮"));
+
+    releaseFirst({ items: [brushRun({ id: 10, summary: "HDSky 的旧一轮" })], total: 1 });
+    await flush();
+    expect(document.body.textContent).not.toContain("HDSky 的旧一轮");
+    expect(document.body.textContent).toContain("MT 的一轮");
   });
 
   it("种子抽屉按标签取数据；切标签时旧请求晚到不覆盖", async () => {

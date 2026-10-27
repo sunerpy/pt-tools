@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { BrushTask } from "@/api";
 
 import {
+  brushRunDuration,
+  brushRunStatus,
+  brushRunTrigger,
   brushSectionFor,
+  brushStepKind,
   configOf,
   defaultBrushConfig,
   discountLabel,
@@ -106,5 +110,34 @@ describe("brush utils", () => {
     expect(configOf(task)).not.toHaveProperty("id");
     expect(nextRunAt(task)).toBe(Date.parse("2026-10-06T10:10:00Z"));
     expect(nextRunAt({ ...task, last_run_at: undefined })).toBeNull();
+  });
+});
+
+describe("运行记录", () => {
+  it("状态、触发方式与步骤种类的中文名；不认识的原样显示", () => {
+    expect(brushRunStatus("ok")).toEqual({ label: "成功", tone: "ok" });
+    expect(brushRunStatus("partial").label).toBe("部分失败");
+    expect(brushRunStatus("failed").tone).toBe("dang");
+    expect(brushRunStatus("interrupted").label).toBe("没跑完");
+    expect(brushRunStatus("running").label).toBe("进行中");
+    expect(brushRunStatus("weird")).toEqual({ label: "weird", tone: "neutral" });
+    expect(brushRunTrigger("manual")).toBe("手动");
+    expect(brushRunTrigger("schedule")).toBe("定时");
+    expect(brushStepKind("reject")).toBe("不符合");
+    expect(brushStepKind("gone")).toBe("已不在");
+    expect(brushStepKind("other")).toBe("other");
+  });
+
+  it("用时：秒、分秒、整分；没跑完或时间不对时为空", () => {
+    const at = (s: number) => new Date(Date.UTC(2026, 9, 6, 10, 0, s)).toISOString();
+    expect(brushRunDuration({ started_at: at(0), finished_at: at(8) })).toBe("8 秒");
+    expect(brushRunDuration({ started_at: at(0), finished_at: at(125) })).toBe("2 分 5 秒");
+    expect(brushRunDuration({ started_at: at(0), finished_at: at(180) })).toBe("3 分");
+    expect(brushRunDuration({ started_at: at(0) })).toBe("");
+    expect(brushRunDuration({ started_at: at(9), finished_at: at(0) })).toBe("");
+    // 没跑完的一轮：结束时间是下次启动补记的，不算用时
+    expect(
+      brushRunDuration({ started_at: at(0), finished_at: at(1251), status: "interrupted" }),
+    ).toBe("");
   });
 });

@@ -20,11 +20,14 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
-// 刷流任务接口：任务的增删改查、立即运行一轮、任务名下的种子与每日收益。全部只认 session（s.auth）。
+// 刷流任务接口：任务的增删改查、立即运行一轮、运行记录、任务名下的种子与每日收益。全部只认 session（s.auth）。
 
 const (
 	brushRunAPITimeout = 6 * time.Minute
 	maxBrushStatDays   = 90
+	// 运行记录一页默认 20 条、最多 100 条
+	defaultBrushRunPage = 20
+	maxBrushRunPage     = 100
 )
 
 // BrushTaskRequest 是新建 / 修改刷流任务的请求体；字段含义见 models.BrushTask。
@@ -165,7 +168,7 @@ func (s *Server) apiBrushTasks(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// apiBrushTaskDetail handles /api/brush/tasks/{id}、/{id}/run、/{id}/torrents
+// apiBrushTaskDetail handles /api/brush/tasks/{id}、/{id}/run、/{id}/runs、/{id}/torrents
 func (s *Server) apiBrushTaskDetail(w http.ResponseWriter, r *http.Request) {
 	repo, ok := brushRepo(w)
 	if !ok {
@@ -188,6 +191,12 @@ func (s *Server) apiBrushTaskDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.runBrushTask(w, r, repo, id)
+	case "runs":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		listBrushRuns(w, r, repo, id)
 	case "torrents":
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -270,7 +279,7 @@ func (s *Server) runBrushTask(w http.ResponseWriter, r *http.Request, repo *mode
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), brushRunAPITimeout)
 	defer cancel()
-	res, err := mon.RunTask(ctx, id)
+	res, err := mon.RunTaskManual(ctx, id)
 	switch {
 	case errors.Is(err, scheduler.ErrBrushBusy):
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -288,6 +297,54 @@ func (s *Server) runBrushTask(w http.ResponseWriter, r *http.Request, repo *mode
 	}
 	// 跑完了：个别种子下载或删除失败记在 result.errors 里
 	writeJSON(w, BrushRunResponse{Result: res})
+}
+
+// BrushRunView 是一轮运行记录，带上解开的步骤。
+type BrushRunView struct {
+	models.BrushRun
+	Steps []models.BrushRunStep `json:"steps"`
+}
+
+// BrushRunPage 是运行记录的一页（新的在前）。
+type BrushRunPage struct {
+	Items []BrushRunView `json:"items"`
+	Total int64          `json:"total"`
+}
+
+// listBrushRuns handles GET /api/brush/tasks/{id}/runs?limit=&offset=
+func listBrushRuns(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
+	if _, err := repo.GetTask(id); err != nil {
+		http.Error(w, err.Error(), brushLookupStatus(err))
+		return
+	}
+	q := r.URL.Query()
+	limit, offset := defaultBrushRunPage, 0
+	if raw := q.Get("limit"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > maxBrushRunPage {
+			http.Error(w, fmt.Sprintf("limit 应为 1–%d 的整数", maxBrushRunPage), http.StatusBadRequest)
+			return
+		}
+		limit = v
+	}
+	if raw := q.Get("offset"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 0 {
+			http.Error(w, "offset 应为不小于 0 的整数", http.StatusBadRequest)
+			return
+		}
+		offset = v
+	}
+	rows, total, err := repo.ListRuns(id, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	page := BrushRunPage{Items: make([]BrushRunView, 0, len(rows)), Total: total}
+	for _, row := range rows {
+		page.Items = append(page.Items, BrushRunView{BrushRun: row, Steps: row.StepList()})
+	}
+	writeJSON(w, page)
 }
 
 func listBrushTorrents(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
