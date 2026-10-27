@@ -3,7 +3,7 @@ description: "pt-tools 的手机 App：扫码配对以后经直连或 relay 远�
 publish_to: "none"
 # 版本由 release-please 随 pt-tools 发版改写（release-please-config.json 的 extra-files）；发版时的构建号由
 # .github/scripts/mobile-build-number.sh 按版本算出，经 --build-number 传入，这里不写。
-version: 1.0.0-rc.42 # x-release-please-version
+version: 1.0.0-rc.43 # x-release-please-version
 
 environment:
   sdk: ^3.13.5
