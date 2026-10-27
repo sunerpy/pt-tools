@@ -828,9 +828,9 @@ func TestMTorrentDriver_Execute_DoesNotPrintDownloadToken(t *testing.T) {
 // quickDownloadRetry 把下载种子文件的重试间隔调到 1 毫秒（测试不等真的退避）。
 func quickDownloadRetry(t *testing.T) {
 	t.Helper()
-	old := downloadBackoff
-	downloadBackoff = []time.Duration{time.Millisecond, time.Millisecond}
-	t.Cleanup(func() { downloadBackoff = old })
+	oldBase, oldMin := siteRetryBase, siteRetryMinAttempt
+	siteRetryBase, siteRetryMinAttempt = time.Millisecond, 0
+	t.Cleanup(func() { siteRetryBase, siteRetryMinAttempt = oldBase, oldMin })
 }
 
 // 拉种子文件的第二段请求要有超时，签名地址卡住时不能一直挂着。
@@ -1009,9 +1009,9 @@ func TestMTorrentDriver_ParseDownload_RedactsRedirectTarget(t *testing.T) {
 
 // 调用方取消了就不再重试：不等退避，马上返回。
 func TestMTorrentDriver_ParseDownloadContext_StopsWhenCanceled(t *testing.T) {
-	old, oldBackoff := mteamTorrentFetchTimeout, downloadBackoff
-	mteamTorrentFetchTimeout, downloadBackoff = 100*time.Millisecond, []time.Duration{10 * time.Second, 10 * time.Second}
-	t.Cleanup(func() { mteamTorrentFetchTimeout, downloadBackoff = old, oldBackoff })
+	old, oldBase, oldMin := mteamTorrentFetchTimeout, siteRetryBase, siteRetryMinAttempt
+	mteamTorrentFetchTimeout, siteRetryBase, siteRetryMinAttempt = 100*time.Millisecond, 10*time.Second, 0
+	t.Cleanup(func() { mteamTorrentFetchTimeout, siteRetryBase, siteRetryMinAttempt = old, oldBase, oldMin })
 
 	release := make(chan struct{})
 	var hits atomic.Int32

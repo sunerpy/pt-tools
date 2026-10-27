@@ -137,6 +137,8 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 	if strings.TrimSpace(info.Username) == "" {
 		return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, ErrEmptyUsername)
 	}
+	// 无穷分享率统一记成 InfiniteRatio（站点写「无限」没认出来的、以前记成 -1 的），见 normalizeRatio
+	normalizeRatio(&info)
 
 	// Save to repository
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

@@ -26,8 +26,10 @@ const (
 	brushTick         = time.Minute
 	brushStartupDelay = 45 * time.Second
 	// 一轮运行（列种子、搜索、逐个下载推送、删种）的总预算
-	brushRunTimeout    = 5 * time.Minute
-	brushSearchTimeout = 60 * time.Second
+	brushRunTimeout = 5 * time.Minute
+	// brushSearchTimeout 是读一次种子列表的时限：一时的网络错误按指数退避重试（site/v2 的 retryTransient），
+	// 三次各 30 秒加上中间的等待要一百秒上下
+	brushSearchTimeout = 2 * time.Minute
 	brushFetchTimeout  = 60 * time.Second
 	// 采样只为低速规则保留；窗口最长 24 小时，留两倍
 	brushSampleRetention = 48 * time.Hour

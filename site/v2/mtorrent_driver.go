@@ -779,14 +779,14 @@ func (d *MTorrentDriver) ParseDownloadContext(ctx context.Context, res MTorrentR
 var mteamTorrentFetchTimeout = 30 * time.Second
 
 // fetchTorrentFile 拉签名地址指向的种子文件：签名地址会跳到走 Cloudflare 的下载节点，连接被重置、超时时有发生，
-// 一时的错误隔几秒重拉同一个签名地址（见 retryDownload，不再调取下载令牌的接口），调用方取消时不再试。签名地址本身
+// 一时的错误按指数退避重拉同一个签名地址（见 retryTransient，不再调取下载令牌的接口），调用方取消时不再试。签名地址本身
 // 就是凭证（sign 参数），它跳转到的下载节点地址也带签名：日志和错误信息里只出现脱敏后的地址。
 func (d *MTorrentDriver) fetchTorrentFile(ctx context.Context, downloadURL string) ([]byte, error) {
 	safeURL := utils.SanitizeURL(downloadURL)
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG MTorrent] Download URL: %s\n", safeURL)
 	}
-	return retryDownload(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, safeURL) })
+	return retryTransient(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, safeURL) })
 }
 
 // fetchTorrentOnce 拉一次种子文件。第二段请求同样走驱动的 HTTP 客户端（代理设置一致），每次设上限超时。
