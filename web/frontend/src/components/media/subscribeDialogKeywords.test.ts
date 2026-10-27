@@ -43,7 +43,9 @@ afterEach(() => {
 const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
 const area = (id: string) => {
   const el = q(id)!;
-  return (el instanceof HTMLTextAreaElement ? el : el.querySelector("textarea")) as HTMLTextAreaElement;
+  return (
+    el instanceof HTMLTextAreaElement ? el : el.querySelector("textarea")
+  ) as HTMLTextAreaElement;
 };
 
 function fill(id: string, v: string) {
