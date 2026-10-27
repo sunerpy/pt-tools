@@ -105,7 +105,9 @@ func (s *Service) mapperFor(ctx context.Context, sub *models.MediaSubscription, 
 	if err := s.cfg.DB.WithContext(ctx).Where("subscription_id = ?", sub.ID).Find(&rules).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 读取集号规则失败: %v", err)
 	}
-	return newEpisodeMapper(newEpisodeIndex(season, s.genresFor(ctx, sub)), rules)
+	mp := newEpisodeMapper(newEpisodeIndex(season, s.genresFor(ctx, sub)), rules)
+	mp.today = s.cfg.Now().In(time.Local).Format(time.DateOnly)
+	return mp
 }
 
 // libraryRows 是整理记录里这一季已入库的集（一集有几个文件时取最新的那条）。

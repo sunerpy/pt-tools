@@ -164,3 +164,55 @@ func TestTVYearIgnored(t *testing.T) {
 	_, ok := newMatcher(sub).match(meta.Parse(title, ""), v2.TorrentItem{Title: title})
 	assert.True(t, ok)
 }
+
+// productionSeason4 是 2026-10-27 生产上 TMDB 的现在就出发第 4 季：第 1–3 期（6 集）有名字、已播出，后面是占位的集名。
+const productionSeason4 = `{"season_number":4,"episodes":[
+	{"episode_number":1,"name":"第1期上：看见蔚蓝生机","air_date":"2026-10-10"},
+	{"episode_number":2,"name":"第1期下：神秘的热带雨林","air_date":"2026-10-11"},
+	{"episode_number":3,"name":"第2期上：哞哞来了！","air_date":"2026-10-17"},
+	{"episode_number":4,"name":"第2期下：热舞的哞哞","air_date":"2026-10-18"},
+	{"episode_number":5,"name":"第3期上：神奇的九寨","air_date":"2026-10-24"},
+	{"episode_number":6,"name":"第3期下：松潘之旅","air_date":"2026-10-25"},
+	{"episode_number":7,"name":"第 7 集","air_date":"2026-10-31"},
+	{"episode_number":8,"name":"第 8 集","air_date":"2026-11-01"},
+	{"episode_number":9,"name":"第 9 集","air_date":"2026-11-07"}]}`
+
+// SpringSunday 上 HHWEB 的单集副标题把集号写成了期号（第 5 集写「第5期上」，其实是第3期上）。副标题写的那一期按 TMDB 的
+// 播出进度还不可能播出时（才播到第 3 期），当作副标题写错了、按标题的集号算；能核对的（TMDB 上有那一期）照旧要对得上。
+func TestSubtitlePeriodTooNewTrustsTitle(t *testing.T) {
+	var season tmdb.Season
+	require.NoError(t, json.Unmarshal([]byte(productionSeason4), &season))
+	mp := newEpisodeMapper(newEpisodeIndex(&season, []int{genreReality}), nil)
+	mp.today = "2026-10-27"
+	cases := []struct {
+		title, subtitle string
+		ep              int
+	}{
+		{"Natural.High.S04E05.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第05集（第5期上）", 5},
+		{"Natural.High.S04E06.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第06集（第6期下）", 6},
+		{"Natural.High.S04E05.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第3期上", 5},
+	}
+	for _, c := range cases {
+		sp, ok, why := mapItem(t, mp, c.title, c.subtitle)
+		require.True(t, ok, "%s / %s：%s", c.title, c.subtitle, why)
+		assert.Equal(t, span{Start: c.ep, End: c.ep}, sp, c.subtitle)
+	}
+
+	// TMDB 上有那一期、和标题对不上：拿不准，照旧不要，并提示可以设集号规则
+	_, ok, why := mapItem(t, mp, "Natural.High.S04E05.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第2期上")
+	assert.False(t, ok)
+	assert.Contains(t, why, "标题写的是第 5 集，副标题写的是第 2 期上")
+	assert.Contains(t, why, "集号规则")
+	// 副标题写的是下一期（第 4 期，会员可能已经提前看到）：拿不准，不要
+	_, ok, _ = mapItem(t, mp, "Natural.High.S04E06.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第4期上")
+	assert.False(t, ok)
+	_, ok, _ = mapItem(t, mp, "Natural.High.S04E04.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第04集（第4期下）")
+	assert.False(t, ok, "第 4 期离播出进度只差一期，留着余量")
+	// 标题的那一集还没播出：不要
+	_, ok, _ = mapItem(t, mp, "Natural.High.S04E07.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第07集（第7期上）")
+	assert.False(t, ok)
+	// 不知道今天是哪天时不判断（照旧不要）
+	mp.today = ""
+	_, ok, _ = mapItem(t, mp, "Natural.High.S04E05.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第05集（第5期上）")
+	assert.False(t, ok)
+}

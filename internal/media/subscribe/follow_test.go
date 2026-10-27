@@ -1245,3 +1245,20 @@ func TestVersionSeenIsNotWaiting(t *testing.T) {
 	e.svc.refresh(e.ctx)
 	assert.Equal(t, models.MediaEpisodeWaitingVersion, e.state(sub, 1))
 }
+
+// 生产上的现在就出发（2026-10-27）：SpringSunday 的 HHWEB 单集副标题把集号写成了期号，第 5、6 集按标题的集号下载。
+func TestFollowSubtitlePeriodWrittenAsEpisode(t *testing.T) {
+	e := newEnv(t)
+	e.now = time.Date(2026, 10, 27, 12, 26, 0, 0, time.UTC)
+	e.tmdb.set("/3/tv/231620/season/4", productionSeason4)
+	start := 5
+	sub := e.follow(func(in *SubscriptionInput) { in.StartEpisode = &start; in.LockVersion = off() })
+	e.enable(nil)
+	e.search.set(
+		e.item("hdsky", "905", "Natural.High.S04E05.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第05集（第5期上）", 3, 10),
+		e.item("hdsky", "906", "Natural.High.S04E06.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第06集（第6期下）", 3, 10),
+	)
+	_, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"905", "906"}, pushedIDs(e))
+}
