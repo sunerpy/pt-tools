@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { KnownSite } from "../../core/constants";
+import { KNOWN_SITES, type KnownSite } from "../../core/constants";
 import { checkCookieHealth } from "./cookie-reader";
 
 /**
@@ -205,5 +205,37 @@ describe("checkCookieHealth: 新版 NexusPHP 只有一个 c_secure_pass", () => 
     expect((await checkCookieHealth(NEXUS)).status).toBe("missing");
     jar[".example"] = [cookie("c_secure_pass", btoa("not a token"))];
     expect((await checkCookieHealth(NEXUS)).status).toBe("missing");
+  });
+});
+
+/*
+ * OurBits 现在登录只设一个 ourbits_jwt（JWT，HS256，30 天到期），没有 c_secure_* 三件套；另有 Cloudflare 的 cf_clearance。
+ * 2026-10-27 用户：「OurBits 缺失 … 缺 c_secure_uid, c_secure_pass, c_secure_tracker_ssl」「ourbits通过扩展无法同步cookie」。
+ * 带上 ourbits_jwt 的请求不会被 Cloudflare 质询（2026-10-27 在服务器上试过：没有它是 403 质询页，有它 200 并且登录着）。
+ */
+describe("checkCookieHealth: OurBits 只有 ourbits_jwt", () => {
+  const OURBITS = KNOWN_SITES.find((site) => site.id === "ourbits") as KnownSite;
+
+  it("有 ourbits_jwt 就算登录着，可以同步（连同 cf_clearance 一起）", async () => {
+    jar["ourbits.club"] = [cookie("ourbits_jwt", "header.payload.signature", 30)];
+    jar[".ourbits.club"] = [cookie("cf_clearance", "clearance", 365)];
+
+    const health = await checkCookieHealth(OURBITS);
+
+    expect(health.status).toBe("valid");
+    expect(health.missingCookies).toEqual([]);
+    expect(health.cookieString).toContain("ourbits_jwt=header.payload.signature");
+    expect(health.cookieString).toContain("cf_clearance=clearance");
+    expect(health.expireDays).toBeGreaterThanOrEqual(29);
+  });
+
+  it("只有 Cloudflare 的 Cookie 时算缺失，写明缺 ourbits_jwt", async () => {
+    jar[".ourbits.club"] = [cookie("cf_clearance", "clearance", 365)];
+
+    const health = await checkCookieHealth(OURBITS);
+
+    expect(health.status).toBe("missing");
+    expect(health.missingCookies).toEqual(["ourbits_jwt"]);
+    expect(health.cookieString).toBe("");
   });
 });

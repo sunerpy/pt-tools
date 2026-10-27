@@ -424,7 +424,9 @@ export const KNOWN_SITES: KnownSite[] = [
     domains: ["ourbits.club"],
     schema: "NexusPHP",
     authMethod: "cookie",
-    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    // OurBits 登录只设一个 ourbits_jwt（JWT，30 天到期），不再下发 c_secure_* 三件套；
+    // 另有 Cloudflare 的 cf_clearance，同步时一起带上，但不算登录 Cookie。
+    cookieNames: ["ourbits_jwt"],
     syncField: "cookie",
   },
   {

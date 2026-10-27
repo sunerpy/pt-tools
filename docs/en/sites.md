@@ -41,7 +41,7 @@
 | **HDVideo**           | Cookie  | RSS, search, user info                     | ✅     | HD视频 (hdvideo.top)                                                                                                      |
 | **GTKPW**             | Cookie  | RSS, search, user info                     | ✅     | Several mirrors (pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com)                                                  |
 | **NicePT**            | Cookie  | RSS, search, user info                     | ✅     | 好趣 (www.nicept.net, Traditional Chinese)                                                                                |
-| **OurBits**           | Cookie  | RSS, search, user info                     | ✅     | Supported (ourbits.club, issue #329)                                                                                      |
+| **OurBits**           | Cookie  | RSS, search, user info                     | ✅     | Supported (ourbits.club, issue #329); set the site's 促销种子显示方式 (promotion display) to icon (图标) or text (文字)   |
 | **Mua**               | Cookie  | RSS, search, user info                     | ✅     | Anime site (mua.xloli.cc; user details are addressed by UUID; issue #339)                                                 |
 | **1PTBar**            | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **lajidui**           | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
