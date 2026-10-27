@@ -42,6 +42,8 @@ var (
 	// ErrTorrentDetailUnavailable 表示读不到这个种子的详情（站点上找不到，或缓存里没有）。
 	// 调用方要当作取详情失败处理，不能当成「不是免费」，也不能沿用旧数据。
 	ErrTorrentDetailUnavailable = errors.New("torrent detail unavailable")
+	// ErrUnexpectedPage 表示站点回的不是种子列表：一个种子都没有，页面也不像登录以后的站点页面（拦截、维护、验证页等）。
+	ErrUnexpectedPage = errors.New("站点返回的不是种子列表页面")
 )
 
 // SiteKind represents the type of PT site architecture

@@ -181,9 +181,10 @@ var (
 	// （2026-10-22 从生产的 truenas 请求 SSD、HDSky 的登录页要 6 到 25 秒），等得太短会把回得慢的页面掐断再重试、
 	// 越试越慢；一页卡住时也留出重试的时间
 	userInfoAttemptTimeout = 30 * time.Second
-	// userInfoNetRetries 是一时的网络错误再试几次；userInfoRetryBase 是第一次重试前等多久（之后加倍，另加随机的一点）
+	// userInfoNetRetries 是一时的网络错误再试几次；userInfoRetryBase 是第一次重试前等多久（之后加倍，另加随机的一点），
+	// 和请求站点的其它重试一样（siteRetryBase）
 	userInfoNetRetries = 2
-	userInfoRetryBase  = time.Second
+	userInfoRetryBase  = 2 * time.Second
 	// userInfoChallengeWait 是遇到 Cloudflare 质询以后等多久再试一次（质询多是瞬时的风控）
 	userInfoChallengeWait = 3 * time.Second
 	// userInfoMinAttempt 是重试前剩下的时间至少要有多少，不够就不试了（线路慢时几秒钟取不完一页）

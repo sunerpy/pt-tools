@@ -123,8 +123,8 @@ func (b *BaseSite[Req, Res]) Search(ctx context.Context, query SearchQuery) ([]T
 		return nil, fmt.Errorf("prepare search: %w", err)
 	}
 
-	// Execute request
-	res, err := b.driver.Execute(ctx, req)
+	// Execute request：一时的错误（网络、5xx）按指数退避再发，每次重试先等限速的令牌（见 retryTransient）
+	res, err := retryTransient(ctx, b.limiter.Wait, func() (Res, error) { return b.driver.Execute(ctx, req) })
 	if err != nil {
 		b.logger.Error("Failed to execute search request", zap.Error(err))
 		return nil, fmt.Errorf("execute search: %w", err)
@@ -163,7 +163,7 @@ func (b *BaseSite[Req, Res]) GetUserInfo(ctx context.Context) (UserInfo, error) 
 	b.logger.Debug("Fetching user info", zap.String("site", b.name))
 
 	// Delegate to driver which handles all API calls
-	info, err := b.driver.GetUserInfo(ctx)
+	info, err := b.getUserInfo(ctx)
 	// 只取到一部分（*PartialUserInfoError）时把取到的部分一起交回去，由 UserInfoService 补上缺的字段再保存；
 	// 失败的原因由调用方记（UserInfoService 一次失败只记一行）
 	var partial *PartialUserInfoError
@@ -188,6 +188,20 @@ func (b *BaseSite[Req, Res]) GetUserInfo(ctx context.Context) (UserInfo, error) 
 		return info, fmt.Errorf("get user info: %w", err)
 	}
 	return info, nil
+}
+
+// userInfoPageRetrier 是取用户信息时自己按页重试的驱动（有站点定义的 NexusPHP 站点，见 fetchUserInfoPage）。
+type userInfoPageRetrier interface {
+	retriesUserInfoPages() bool
+}
+
+// getUserInfo 交给驱动取用户信息。自己按页重试的驱动直接取；别的驱动（M-Team、Rousi 等走 API 的站点）一次取完，
+// 遇到一时的错误时整次按指数退避重试，每次重试先等限速的令牌（见 retryTransient）。
+func (b *BaseSite[Req, Res]) getUserInfo(ctx context.Context) (UserInfo, error) {
+	if r, ok := any(b.driver).(userInfoPageRetrier); ok && r.retriesUserInfoPages() {
+		return b.driver.GetUserInfo(ctx)
+	}
+	return retryTransient(ctx, b.limiter.Wait, func() (UserInfo, error) { return b.driver.GetUserInfo(ctx) })
 }
 
 // Download downloads a torrent file by ID
@@ -215,8 +229,8 @@ func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]
 		return nil, fmt.Errorf("prepare download: %w", err)
 	}
 
-	// Execute request：一时的错误（网络、5xx）隔几秒再发，每次重试先等限速的令牌（见 retryDownload）
-	res, err := retryDownload(ctx, b.limiter.Wait, func() (Res, error) { return b.driver.Execute(ctx, req) })
+	// Execute request：一时的错误（网络、5xx）按指数退避再发，每次重试先等限速的令牌（见 retryTransient）
+	res, err := retryTransient(ctx, b.limiter.Wait, func() (Res, error) { return b.driver.Execute(ctx, req) })
 	if err != nil {
 		b.logger.Error("Failed to execute download request", zap.Error(err))
 		return nil, fmt.Errorf("execute download: %w", err)
@@ -272,8 +286,8 @@ func (b *BaseSite[Req, Res]) DownloadWithHash(ctx context.Context, torrentID, ha
 	}
 
 	if hd, ok := any(b.driver).(HashDownloader); ok {
-		// 一时的错误（网络、5xx）隔几秒再下，每次重试先等限速的令牌
-		return retryDownload(ctx, b.limiter.Wait, func() ([]byte, error) { return hd.DownloadWithHash(ctx, torrentID, hash) })
+		// 一时的错误（网络、5xx）按指数退避再下，每次重试先等限速的令牌
+		return retryTransient(ctx, b.limiter.Wait, func() ([]byte, error) { return hd.DownloadWithHash(ctx, torrentID, hash) })
 	}
 	// 上面已取过令牌，回退路径不能再走 Download，否则一次下载会等两次限速。
 	return b.download(ctx, torrentID)

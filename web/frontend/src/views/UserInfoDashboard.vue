@@ -369,7 +369,8 @@ const kpiItems = computed<KpiRow[]>(() => {
       label: "平均分享率",
       value: formatRatio(stats.averageRatio),
       icon: "gauge",
-      series: topN((r) => r.ratio),
+      // 无穷（只上传、没下载，记成 9999999）不画柱子：平均分享率也不计入它，画进来别的柱子全被压扁
+      series: topN((r) => (r.ratio < 1000 ? r.ratio : 0)),
       seriesHint: "每根一个站点：分享率构成",
       ...ratioPill,
     },

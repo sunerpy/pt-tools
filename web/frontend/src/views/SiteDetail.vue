@@ -33,7 +33,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
 import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
 import { attendanceChallengeText, attendanceView } from "@/utils/attendanceStatus";
-import { formatShortDateTime } from "@/utils/format";
+import { formatRatio, formatShortDateTime } from "@/utils/format";
 import { isPlaceholderRssUrl, rssBelongsToSite, rssHost } from "@/utils/rss";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, reactive, ref, watch } from "vue";
@@ -1534,7 +1534,7 @@ function ruleNameOf(id: number): string {
               <span
                 class="sd-kv__v"
                 :class="{ 'is-warn': (siteStats.ratio ?? 0) > 0 && (siteStats.ratio ?? 0) < 1 }">
-                {{ (siteStats.ratio ?? 0).toFixed(2) }}
+                {{ formatRatio(siteStats.ratio ?? 0) }}
               </span>
             </li>
             <li class="sd-kv__row">

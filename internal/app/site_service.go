@@ -155,8 +155,8 @@ func classOf(info v2.UserInfo) string {
 	return info.Rank
 }
 
-// formatRatio 的阈值和网页的 formatRatio 一致：极大（站点写「无限」时记成 9999999）显示 ∞，
-// 负数（「Inf」解析成 -1）显示 -；其余保留 ChatOps 原来的三位小数。
+// formatRatio 的阈值和网页的 formatRatio 一致：极大（无穷分享率记成 v2.InfiniteRatio）显示 ∞，
+// 负数（取不到）显示 -；其余保留 ChatOps 原来的三位小数。
 func formatRatio(r float64) string {
 	switch {
 	case r > 999999:

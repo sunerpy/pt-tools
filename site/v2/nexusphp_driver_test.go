@@ -510,9 +510,12 @@ func TestParseRatio(t *testing.T) {
 	}{
 		{"1.5", 1.5},
 		{"0.5", 0.5},
-		{"inf", -1},
-		{"Inf", -1},
-		{"∞", -1},
+		{"inf", InfiniteRatio},
+		{"Inf.", InfiniteRatio},
+		{"∞", InfiniteRatio},
+		{"无限", InfiniteRatio},
+		{"無限", InfiniteRatio},
+		{"---", 0},
 		{"invalid", 0},
 		{"", 0},
 	}

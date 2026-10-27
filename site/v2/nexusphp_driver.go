@@ -17,6 +17,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
+	"golang.org/x/net/html"
 	"golang.org/x/net/publicsuffix"
 	"golang.org/x/sync/errgroup"
 
@@ -357,17 +358,43 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	}
 	result.Document = doc
 
-	// Check if we're on a login page (cookie expired or invalid)
+	// Check if we're on a login page (cookie expired or invalid)；错误里写上返回页面的标题，看得出站点回的是哪一页
 	if isLoginPage(doc) {
-		return result, ErrSessionExpired
+		return result, withPageTitle(ErrSessionExpired, doc)
 	}
 
 	// Check if 2FA verification is required
 	if is2FAPage(doc) {
-		return result, Err2FARequired
+		return result, withPageTitle(Err2FARequired, doc)
 	}
 
 	return result, nil
+}
+
+// pageTitleLimit 是错误里写的页面标题最多多少个字。
+const pageTitleLimit = 60
+
+// pageTitle 是页面的标题（空白合并、截到 pageTitleLimit 个字）。
+func pageTitle(doc *goquery.Document) string {
+	return truncateRunes(strings.Join(strings.Fields(doc.Find("title").First().Text()), " "), pageTitleLimit)
+}
+
+// withPageTitle 在 err 后面写上返回页面的标题；errors.Is 照样认 err。页面没有标题时原样返回。
+func withPageTitle(err error, doc *goquery.Document) error {
+	title := pageTitle(doc)
+	if title == "" {
+		return err
+	}
+	return fmt.Errorf("%w（页面标题：%s）", err, title)
+}
+
+// truncateRunes 把 s 截到 n 个字，截掉了就在后面加「…」。
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // isLoginPage checks if the HTML document is a login page
@@ -405,26 +432,22 @@ func isLoginPage(doc *goquery.Document) bool {
 }
 
 // is2FAPage checks if the HTML document is a 2FA verification page
+// 只认二次验证页自己的特征：跳到 take2fa.php 的脚本、提交到 2FA 地址的表单、标题写着二次验证（2FA 要是单独的词）。
+// 以前脚本里出现「2fa」三个字母就算：随机串、哈希、种子名里常有这三个字母，HDSky 的免费列表因此时不时被当成
+// 二次验证页，刷流报「please check cookie or 2FA settings」（2026-10-27，01:58 以后 24 轮里有 10 轮）。
 func is2FAPage(doc *goquery.Document) bool {
-	// Check for 2FA redirect script
-	scripts := doc.Find("script").Text()
-	if strings.Contains(scripts, "take2fa.php") || strings.Contains(scripts, "2fa") {
+	if strings.Contains(doc.Find("script").Text(), "take2fa.php") {
 		return true
 	}
-
-	// Check for 2FA form
-	if doc.Find("form[action*='2fa']").Length() > 0 || doc.Find("form[action*='take2fa']").Length() > 0 {
+	if doc.Find("form[action*='2fa'], form[action*='2FA']").Length() > 0 {
 		return true
 	}
-
-	// Check title for 2FA keywords
-	title := strings.ToLower(doc.Find("title").Text())
-	if strings.Contains(title, "二次验证") || strings.Contains(title, "2fa") || strings.Contains(title, "两步验证") {
-		return true
-	}
-
-	return false
+	title := doc.Find("title").First().Text()
+	return strings.Contains(title, "二次验证") || strings.Contains(title, "两步验证") || title2FAWord.MatchString(title)
 }
+
+// title2FAWord 匹配标题里单独的「2FA」（前后不是字母或数字），种子名里的「2Fast」这类不算。
+var title2FAWord = regexp.MustCompile(`(?i)(^|[^a-z0-9])2fa([^a-z0-9]|$)`)
 
 // buildCurlCommand generates a curl command string for debugging
 func buildCurlCommand(method, url string, headers map[string]string) string {
@@ -578,7 +601,73 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		items = append(items, item)
 	})
 
+	// 一个种子都没读到、没有列表的行、页面又不像登录以后的站点页面：站点回的是别的页面（拦截、维护、验证……），
+	// 报出来并写上标题，不当成「列表是空的」（刷流会记成成功、列表 0 个，看不出出了什么事）。搜不到东西的正常页面
+	// 照样有顶部的用户信息栏，不受影响
+	if len(items) == 0 && res.Document.Find(d.Selectors.TableRows).Length() == 0 && !looksSignedIn(res.Document) {
+		return nil, unexpectedPageError(res.Document)
+	}
 	return items, nil
+}
+
+// looksSignedIn 报告页面像不像登录以后的站点页面：有退出登录、个人信息、控制面板、站内信的链接，或者顶部的用户信息栏。
+func looksSignedIn(doc *goquery.Document) bool {
+	return doc.Find("a[href*='logout'], a[href*='userdetails.php'], a[href*='usercp.php'], a[href*='messages.php'], #info_block").Length() > 0
+}
+
+// unexpectedPageTextLimit 是错误里写的页面开头文字最多多少个字。
+const unexpectedPageTextLimit = 80
+
+// unexpectedPageError 说明站点回了别的页面：写上标题与正文开头的一段文字（不含脚本与样式，都截短），
+// 看得出是拦截、维护还是验证页。
+func unexpectedPageError(doc *goquery.Document) error {
+	var text string
+	if body := doc.Find("body").First(); body.Length() > 0 {
+		text = visibleText(body.Nodes[0], unexpectedPageTextLimit)
+	}
+	var parts []string
+	if title := pageTitle(doc); title != "" {
+		parts = append(parts, "页面标题："+title)
+	}
+	if text != "" {
+		parts = append(parts, "开头："+text)
+	}
+	if len(parts) == 0 {
+		return ErrUnexpectedPage
+	}
+	return fmt.Errorf("%w（%s）", ErrUnexpectedPage, strings.Join(parts, "；"))
+}
+
+// visibleText 是 n 下面看得见的文字（跳过脚本、样式），各段之间空一格，截到 limit 个字。
+func visibleText(n *html.Node, limit int) string {
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		// 一个字最多 4 个字节：攒够 4·limit 个字节就一定够 limit 个字了
+		if b.Len() > 4*limit {
+			return
+		}
+		switch n.Type {
+		case html.TextNode:
+			if f := strings.Fields(n.Data); len(f) > 0 {
+				if b.Len() > 0 {
+					b.WriteByte(' ')
+				}
+				b.WriteString(strings.Join(f, " "))
+			}
+			return
+		case html.ElementNode:
+			switch n.Data {
+			case "script", "style", "noscript", "template":
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return truncateRunes(b.String(), limit)
 }
 
 // TorrentDetail contains detailed information from a torrent detail page
@@ -937,6 +1026,12 @@ func (d *NexusPHPDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 
 	// Fall back to legacy parsing
 	return d.getUserInfoLegacy(ctx)
+}
+
+// retriesUserInfoPages 报告取用户信息时是不是按页重试（有站点定义时一页一页地取、每页自己重试，见 fetchUserInfoPage）：
+// 是的话 BaseSite 不再整次重试。
+func (d *NexusPHPDriver) retriesUserInfoPages() bool {
+	return d.siteDefinition != nil && d.siteDefinition.UserInfo != nil
 }
 
 // getUserInfoWithDefinition fetches user info using site definition selectors.
@@ -1609,8 +1704,8 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 // nexusTorrentFetchTimeout 是从详情页取到下载地址以后拉一次种子文件的超时；测试里会调小。
 var nexusTorrentFetchTimeout = 30 * time.Second
 
-// ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消，一时的错误隔几秒重拉同一个下载地址
-// （见 retryDownload，不再重取详情页）。BaseSite 下载时用它。
+// ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消，一时的错误按指数退避重拉同一个下载地址
+// （见 retryTransient，不再重取详情页）。BaseSite 下载时用它。
 func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPResponse) ([]byte, error) {
 	if res.Document == nil {
 		// If we have raw body (torrent file directly), return it
@@ -1646,7 +1741,7 @@ func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPR
 	if sameSite {
 		headers["Cookie"] = d.Cookie
 	}
-	return retryDownload(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, headers) })
+	return retryTransient(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, headers) })
 }
 
 // fetchTorrentOnce 拉一次种子文件（每次设上限超时）。下载地址带 passkey：错误里的地址一律脱敏。
@@ -1892,9 +1987,10 @@ func parseRatio(ratioStr string) float64 {
 	ratioStr = strings.TrimSpace(ratioStr)
 	ratioStr = strings.ReplaceAll(ratioStr, ",", "")
 
-	// Handle special cases
-	if strings.Contains(strings.ToLower(ratioStr), "inf") || strings.Contains(ratioStr, "∞") {
-		return -1 // Infinite ratio
+	// 无穷（只上传、没下载）：NexusPHP 写「无限」「無限」「Inf.」，也有站写 ∞
+	if strings.Contains(strings.ToLower(ratioStr), "inf") || strings.Contains(ratioStr, "∞") ||
+		strings.Contains(ratioStr, "无限") || strings.Contains(ratioStr, "無限") {
+		return InfiniteRatio
 	}
 
 	value, _ := strconv.ParseFloat(ratioStr, 64)

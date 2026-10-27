@@ -115,5 +115,14 @@ describe("站点详情：站点统计卡的下载量口径", () => {
 
     await vi.waitFor(() => expect(statRows()["上传 / 下载（计费）"]).toBe("3.00 TB / 1.00 TB"));
     expect(document.querySelector("[data-testid=site-true-transfer]")).toBeNull();
+    expect(statRows()["分享率"]).toBe("3.00");
+  });
+
+  // 只上传、没下载：后端把无穷分享率记成 9999999，这里显示 ∞（以前写成 9999999.00）
+  it("无穷分享率显示 ∞", async () => {
+    api.getUserInfo.mockResolvedValue(stats({ downloaded: 0, ratio: 9999999 }));
+    await mountDetail();
+
+    await vi.waitFor(() => expect(statRows()["分享率"]).toBe("∞"));
   });
 });
