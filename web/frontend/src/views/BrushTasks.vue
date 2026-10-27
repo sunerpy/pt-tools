@@ -11,6 +11,7 @@ import {
   type SiteConfig,
   sitesApi,
 } from "@/api";
+import BrushRunsDrawer from "@/components/brush/BrushRunsDrawer.vue";
 import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
@@ -45,6 +46,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 /*
  * 刷流任务页（路线图 M3）：一个任务 = 一个站点的免费列表 + 一个下载器 + 入场条件 + 删种规则 + 限额。
  * 任务默认关闭；开启后后台按间隔一轮轮运行（scheduler/brush_monitor.go），这一页只做配置与查看。
+ * 每一轮的步骤在「运行记录」抽屉里（BrushRunsDrawer），「上次运行」那格点了也打开它。
  */
 
 const isMobile = useIsMobile();
@@ -228,7 +230,17 @@ async function runNow(task: BrushTask) {
     void loadAll();
   } finally {
     running[task.id] = false;
+    // 运行记录开着的正是这个任务：把刚跑完的这一轮读进来
+    if (runsTask.value?.id === task.id) void runsDrawer.value?.reload();
   }
+}
+
+/* 运行记录抽屉 */
+const runsTask = ref<BrushTask | null>(null);
+const runsDrawer = ref<InstanceType<typeof BrushRunsDrawer> | null>(null);
+
+function openRuns(task: BrushTask) {
+  runsTask.value = task;
 }
 
 async function toggleEnabled(task: BrushTask) {
@@ -505,12 +517,15 @@ function progressText(t: BrushTorrent): string {
               <span>{{ lastRunText(row) }}</span>
               <span class="brush-sub">下次 {{ nextRunText(row) }}</span>
             </div>
-            <div v-if="row.last_error" class="brush-err" :title="row.last_error">
-              {{ row.last_error }}
-            </div>
-            <div v-else-if="row.last_result" class="brush-sub brush-1line" :title="row.last_result">
-              {{ row.last_result }}
-            </div>
+            <button
+              v-if="row.last_error || row.last_result"
+              type="button"
+              class="brush-lastrun"
+              :title="`${row.last_error || row.last_result}（点开看每一轮的记录）`"
+              @click="openRuns(row)">
+              <span v-if="row.last_error" class="brush-err">{{ row.last_error }}</span>
+              <span v-else class="brush-sub brush-1line">{{ row.last_result }}</span>
+            </button>
           </template>
         </el-table-column>
         <el-table-column label="开启" width="70">
@@ -522,7 +537,7 @@ function progressText(t: BrushTorrent): string {
               @change="toggleEnabled(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="184" fixed="right" class-name="pt-cell-act">
+        <el-table-column label="操作" width="214" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
             <el-tooltip content="立即运行一轮" placement="top">
               <el-button
@@ -533,6 +548,16 @@ function progressText(t: BrushTorrent): string {
                 :aria-label="`立即运行 ${row.name}`"
                 @click="runNow(row)">
                 <PtIcon v-if="!running[row.id]" name="play" :size="15" />
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="运行记录" placement="top">
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :aria-label="`${row.name} 的运行记录`"
+                @click="openRuns(row)">
+                <PtIcon name="history" :size="15" />
               </el-button>
             </el-tooltip>
             <el-tooltip content="种子" placement="top">
@@ -612,6 +637,9 @@ function progressText(t: BrushTorrent): string {
               <PtIcon :name="task.enabled ? 'pause' : 'play'" :size="14" />
               <span>{{ task.enabled ? "关闭" : "开启" }}</span>
             </el-button>
+            <el-button size="small" @click="openRuns(task)">
+              <PtIcon name="history" :size="14" /><span>记录</span>
+            </el-button>
             <el-button size="small" @click="openTorrents(task)">
               <PtIcon name="list" :size="14" /><span>种子</span>
             </el-button>
@@ -673,6 +701,10 @@ function progressText(t: BrushTorrent): string {
           </li>
           <li>
             关闭任务只是停止加种，已加入的种子继续按删种规则处理。刷流会增加站点请求，开启前请确认站点规则允许。
+          </li>
+          <li>
+            每一轮做了什么记在「运行记录」里：读到的列表、不符合条件的种子与原因、加入与删除的种子、为什么停下。保留
+            14 天。
           </li>
         </ul>
       </PtPanel>
@@ -978,6 +1010,8 @@ function progressText(t: BrushTorrent): string {
         </p>
       </div>
     </el-drawer>
+
+    <BrushRunsDrawer ref="runsDrawer" :task="runsTask" @close="runsTask = null" />
   </div>
 </template>
 
@@ -1033,6 +1067,26 @@ function progressText(t: BrushTorrent): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.brush-lastrun {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.brush-lastrun > span {
+  display: block;
+}
+
+.brush-lastrun:hover span,
+.brush-lastrun:focus-visible span {
+  text-decoration: underline;
 }
 
 .brush-row-full {

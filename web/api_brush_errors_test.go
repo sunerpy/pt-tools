@@ -112,7 +112,7 @@ func TestBrushAPI_RunNotFoundAndStopped(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	require.NoError(t, other.DB.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}))
+	require.NoError(t, other.DB.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}, &models.BrushRun{}))
 	mon := scheduler.NewBrushMonitor(scheduler.BrushMonitorConfig{DB: other.DB})
 	srv.mgr.SetBrushMonitor(mon)
 	w := serveAuthed(mux, http.MethodPost, path+"/run", "")

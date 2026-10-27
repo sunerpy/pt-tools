@@ -114,7 +114,7 @@ func TestAppSubscriptions(t *testing.T) {
 // 刷流任务：名字、站点、下载器、在刷的种子数与收益
 func TestAppBrushTasks(t *testing.T) {
 	srv, db := setupTestServer(t)
-	require.NoError(t, db.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}, &models.DownloaderSetting{}))
+	require.NoError(t, db.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}, &models.BrushRun{}, &models.DownloaderSetting{}))
 	ds := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
 	require.NoError(t, db.Create(&ds).Error)
 	require.NoError(t, models.NewBrushRepository(db).SaveTask(&models.BrushTask{Name: "刷 hdsky", SiteName: "hdsky", DownloaderID: ds.ID, IntervalMin: 30}))

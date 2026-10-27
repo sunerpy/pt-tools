@@ -2285,6 +2285,36 @@ export interface BrushRunResult {
   rejected?: { reason: string; count: number }[];
 }
 
+export interface BrushRunStep {
+  kind: "list" | "reject" | "add" | "remove" | "gone" | "skip" | "stop" | "error" | "info";
+  text: string;
+}
+
+/** 刷流任务的一轮运行（定时或「立即运行」）：每个任务保留最近 500 条、不超过 14 天 */
+export interface BrushRun {
+  id: number;
+  task_id: number;
+  trigger: "schedule" | "manual";
+  started_at: string;
+  finished_at?: string;
+  /** running 还在跑；partial 跑完了但个别种子出错；interrupted 是这一轮没跑完 pt-tools 就退出了 */
+  status: "running" | "ok" | "partial" | "failed" | "interrupted";
+  summary: string;
+  error: string;
+  listed: number;
+  eligible: number;
+  added: number;
+  removed: number;
+  gone: number;
+  steps: BrushRunStep[];
+  steps_truncated: boolean;
+}
+
+export interface BrushRunPage {
+  items: BrushRun[];
+  total: number;
+}
+
 export interface BrushStatsPoint extends BrushStat {
   date: string;
 }
@@ -2306,6 +2336,14 @@ export const brushApi = {
   remove: (id: number) => api.delete<{ success: boolean }>(`/api/brush/tasks/${id}`),
   run: (id: number) =>
     api.post<{ result: BrushRunResult; error?: string }>(`/api/brush/tasks/${id}/run`),
+  /** 运行记录，新的在前 */
+  runs: (id: number, q: { limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.limit) params.set("limit", String(q.limit));
+    if (q.offset) params.set("offset", String(q.offset));
+    const qs = params.toString();
+    return api.get<BrushRunPage>(`/api/brush/tasks/${id}/runs${qs ? `?${qs}` : ""}`);
+  },
   torrents: (id: number, state: BrushTorrentState | "" = "", page = 1, pageSize = 50) =>
     api.get<{ items: BrushTorrent[]; total: number; page: number; page_size: number }>(
       `/api/brush/tasks/${id}/torrents?state=${state}&page=${page}&page_size=${pageSize}`,

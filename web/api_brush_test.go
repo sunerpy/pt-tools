@@ -25,7 +25,7 @@ func newBrushServer(t *testing.T) (*Server, *http.ServeMux, models.DownloaderSet
 	srv := setupServer(t)
 	srv.mgr.StopAll()
 	db := global.GlobalDB.DB
-	require.NoError(t, db.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}))
+	require.NoError(t, db.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}, &models.BrushRun{}))
 	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", Enabled: true, AuthMethod: "cookie", Cookie: "c=1", IsBuiltin: true}).Error)
 	ds := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
 	require.NoError(t, db.Create(&ds).Error)
@@ -50,7 +50,7 @@ func brushBody(name string, dlID uint, mod func(map[string]any)) string {
 
 func TestBrushAPI_RequiresSession(t *testing.T) {
 	_, mux, _ := newBrushServer(t)
-	for _, path := range []string{"/api/brush/tasks", "/api/brush/tasks/1", "/api/brush/stats"} {
+	for _, path := range []string{"/api/brush/tasks", "/api/brush/tasks/1", "/api/brush/tasks/1/runs", "/api/brush/stats"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
@@ -324,6 +324,88 @@ func TestBrushAPI_RunTorrentsAndStats(t *testing.T) {
 	w = serveAuthed(mux, http.MethodPost, runPath, "")
 	assert.Equal(t, http.StatusBadGateway, w.Code)
 	assert.Contains(t, w.Body.String(), "下载器不可用")
+}
+
+// 运行记录：「立即运行」记成手动，新的在前，带步骤；可以分页；参数不对回 400，任务不存在回 404。
+func TestBrushAPI_Runs(t *testing.T) {
+	srv, mux, ds := newBrushServer(t)
+	w := serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody("t", ds.ID, func(m map[string]any) { m["enabled"] = true }))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var task BrushTaskView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &task))
+	runPath := fmt.Sprintf("/api/brush/tasks/%d/run", task.ID)
+	runsPath := fmt.Sprintf("/api/brush/tasks/%d/runs", task.ID)
+
+	w = serveAuthed(mux, http.MethodGet, runsPath, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"items":[],"total":0}`, w.Body.String(), "还没运行过")
+
+	srv.mgr.SetBrushMonitor(scheduler.NewBrushMonitor(scheduler.BrushMonitorConfig{
+		DB:    global.GlobalDB.DB,
+		Sites: scheduler.BrushSitesFunc(func(string) (v2.Site, bool) { return brushStubSite{}, true }),
+		Downloaders: scheduler.BrushDownloadersFunc(func(uint) (downloader.Downloader, string, error) {
+			return brushListDL{}, "qb", nil
+		}),
+	}))
+	w = serveAuthed(mux, http.MethodPost, runPath, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	srv.mgr.SetBrushMonitor(scheduler.NewBrushMonitor(scheduler.BrushMonitorConfig{
+		DB:    global.GlobalDB.DB,
+		Sites: scheduler.BrushSitesFunc(func(string) (v2.Site, bool) { return brushStubSite{}, true }),
+		Downloaders: scheduler.BrushDownloadersFunc(func(uint) (downloader.Downloader, string, error) {
+			return nil, "", fmt.Errorf("connection refused")
+		}),
+	}))
+	w = serveAuthed(mux, http.MethodPost, runPath, "")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+
+	w = serveAuthed(mux, http.MethodGet, runsPath, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page BrushRunPage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.EqualValues(t, 2, page.Total)
+	require.Len(t, page.Items, 2)
+	latest, first := page.Items[0], page.Items[1]
+	assert.Greater(t, latest.ID, first.ID, "新的在前")
+	assert.Equal(t, models.BrushRunManual, latest.Trigger)
+	assert.Equal(t, models.BrushRunFailed, latest.Status)
+	assert.Contains(t, latest.Error, "connection refused")
+	require.NotEmpty(t, latest.Steps)
+	assert.Equal(t, "error", latest.Steps[len(latest.Steps)-1].Kind)
+	assert.Equal(t, models.BrushRunOK, first.Status)
+	assert.NotNil(t, first.FinishedAt)
+	assert.NotEmpty(t, first.Summary)
+	// 原始 JSON 里步骤是数组、steps 字符串不外露
+	var raw struct {
+		Items []map[string]any `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	assert.IsType(t, []any{}, raw.Items[0]["steps"])
+	assert.Contains(t, raw.Items[0], "steps_truncated")
+
+	w = serveAuthed(mux, http.MethodGet, runsPath+"?limit=1&offset=1", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	page = BrushRunPage{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	assert.EqualValues(t, 2, page.Total)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, first.ID, page.Items[0].ID)
+
+	for _, q := range []string{"?limit=0", "?limit=101", "?limit=x", "?offset=-1", "?offset=x"} {
+		w = serveAuthed(mux, http.MethodGet, runsPath+q, "")
+		assert.Equal(t, http.StatusBadRequest, w.Code, q)
+	}
+	w = serveAuthed(mux, http.MethodGet, "/api/brush/tasks/999/runs", "")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	w = serveAuthed(mux, http.MethodPost, runsPath, "")
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+
+	// 删任务连带删它的运行记录
+	w = serveAuthed(mux, http.MethodDelete, fmt.Sprintf("/api/brush/tasks/%d", task.ID), "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var n int64
+	require.NoError(t, global.GlobalDB.DB.Model(&models.BrushRun{}).Count(&n).Error)
+	assert.Zero(t, n)
 }
 
 // 开启的任务要求站点与下载器都已启用；关闭的任务可以先存成草稿。读库失败回 500。

@@ -146,6 +146,8 @@ const NOT_ON_BOARD = {
     "远程访问页（路线图 M15）晚于画板 40 定稿：添加设备（二维码与倒计时）的弹窗不在那张清点图里",
   "views/BrushTasks.vue":
     "刷流任务页（路线图 M3）晚于画板 40 定稿：任务编辑弹窗与种子抽屉都不在那张清点图里",
+  "components/brush/BrushRunsDrawer.vue":
+    "刷流任务的运行记录抽屉（2026-10-27）晚于画板 40 定稿：每一轮的状态与步骤，与种子抽屉同一种样式",
   "views/TorrentTransfer.vue":
     "转移做种页（路线图 M5）晚于画板 40 定稿：定时规则的编辑弹窗不在那张清点图里",
   "views/MediaRecognize.vue":
