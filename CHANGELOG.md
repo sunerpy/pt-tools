@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.42](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.41...v1.0.0-rc.42) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sites:** 请求站点按指数退避重试，二次验证不再误判，无穷分享率统一显示 ∞ ([#786](https://github.com/sunerpy/pt-tools/issues/786)) ([3b11395](https://github.com/sunerpy/pt-tools/commit/3b1139591bd51311a821223ac5f5f4b60c7dd6ef))
+
 ## [1.0.0-rc.41](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.40...v1.0.0-rc.41) (2026-10-27)
 
 
