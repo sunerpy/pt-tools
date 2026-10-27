@@ -3356,6 +3356,9 @@ export interface Subscription {
   save_path: string;
   status: SubscriptionStatus;
   upgrade: boolean;
+  /** 标题（连同副标题）的包含词、排除词：按行或逗号分开；更早的版本没有 */
+  include_keywords?: string;
+  exclude_keywords?: string;
   source: SubscriptionSource;
   douban_id: string;
   total_episodes: number;
@@ -3452,6 +3455,9 @@ export interface SubscriptionInput {
   save_path: string;
   upgrade: boolean;
   pending?: boolean;
+  /** 标题的包含词（含其中任一个才要）与排除词（含任何一个都不要）：按行或逗号分开；不给时修改不变 */
+  include_keywords?: string;
+  exclude_keywords?: string;
   // 追剧的设置：不给时新建按默认（按播出时间、开着版本锁），修改时不变
   schedule?: FollowSchedule;
   lock_version?: boolean;

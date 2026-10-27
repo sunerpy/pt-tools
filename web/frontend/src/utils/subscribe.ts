@@ -256,6 +256,23 @@ export function previewTime(iso: string, now = new Date()): string {
 }
 
 /** 版本锁写成一句话：没开时为空串。 */
+/** 订阅的标题包含词、排除词（和服务端一样按行或逗号拆开）；都没填时是空数组。 */
+export function keywordLines(
+  s: Pick<Subscription, "include_keywords" | "exclude_keywords">,
+): string[] {
+  const split = (v?: string) =>
+    (v ?? "")
+      .split(/[\n,，]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  const out: string[] = [];
+  const inc = split(s.include_keywords);
+  if (inc.length) out.push(`标题包含 ${inc.join(" 或 ")}`);
+  const exc = split(s.exclude_keywords);
+  if (exc.length) out.push(`标题排除 ${exc.join("、")}`);
+  return out;
+}
+
 export function lockText(
   s: Pick<Subscription, "lock_version" | "lock_group" | "lock_resolution">,
 ): string {

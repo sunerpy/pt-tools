@@ -352,6 +352,9 @@ type SubscriptionInput struct {
 	Upgrade      bool     `json:"upgrade"`
 	// Pending 为真时建成待确认
 	Pending bool `json:"pending"`
+	// IncludeKeywords、ExcludeKeywords 是标题的包含词与排除词（见 models.MediaSubscription）：不传时新建为空、修改时不变
+	IncludeKeywords *string `json:"include_keywords,omitempty"`
+	ExcludeKeywords *string `json:"exclude_keywords,omitempty"`
 
 	// 以下是追剧的设置：不传时新建用默认值（见 FollowDefaults），修改时不变。
 
@@ -437,6 +440,14 @@ func (in SubscriptionInput) check(s *Service, ctx context.Context) error {
 	}
 	if len(in.SavePath) > 1024 {
 		return fmt.Errorf("%w: 保存目录太长", ErrInvalid)
+	}
+	for _, v := range []struct {
+		name string
+		v    *string
+	}{{"标题包含", in.IncludeKeywords}, {"标题排除", in.ExcludeKeywords}} {
+		if v.v != nil && len(strings.TrimSpace(*v.v)) > maxKeywordsLen {
+			return fmt.Errorf("%w: %s的关键词太长", ErrInvalid, v.name)
+		}
 	}
 	if in.StartEpisode != nil && (*in.StartEpisode < 0 || *in.StartEpisode > maxEpisodes) {
 		return fmt.Errorf("%w: 起始集要在 0 到 %d 之间", ErrInvalid, maxEpisodes)
@@ -527,6 +538,12 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 	}
 	if in.Pending {
 		row.Status = models.MediaSubPending
+	}
+	if in.IncludeKeywords != nil {
+		row.IncludeKeywords = strings.TrimSpace(*in.IncludeKeywords)
+	}
+	if in.ExcludeKeywords != nil {
+		row.ExcludeKeywords = strings.TrimSpace(*in.ExcludeKeywords)
 	}
 	if in.Schedule != nil {
 		sc, err := in.Schedule.normalize(in.MediaType)
@@ -635,6 +652,17 @@ func (s *Service) UpdateSubscription(ctx context.Context, id uint, in Subscripti
 			return nil, err
 		}
 		upd["library_id"] = *in.LibraryID
+	}
+	// 改了标题的包含词、排除词时尽快搜一次：以前不要的种子可能对得上了
+	if in.IncludeKeywords != nil {
+		v := strings.TrimSpace(*in.IncludeKeywords)
+		upd["include_keywords"] = v
+		searchSoon = searchSoon || v != row.IncludeKeywords
+	}
+	if in.ExcludeKeywords != nil {
+		v := strings.TrimSpace(*in.ExcludeKeywords)
+		upd["exclude_keywords"] = v
+		searchSoon = searchSoon || v != row.ExcludeKeywords
 	}
 	if row.MediaType == models.MediaKindTV {
 		if in.LockVersion != nil {

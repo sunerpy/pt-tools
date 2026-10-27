@@ -98,6 +98,10 @@ type MediaSubscription struct {
 	Tags         string `gorm:"size:255;not null;default:''" json:"tags"`
 	SavePath     string `gorm:"size:1024;not null;default:''" json:"save_path"`
 	Status       string `gorm:"size:16;not null;default:'';index" json:"status"`
+	// IncludeKeywords、ExcludeKeywords 是对种子标题（连同副标题）的包含词与排除词：按行或逗号分开，不分大小写，
+	// 空格、点、下划线当作一样；有包含词时至少含一个才要，含任何一个排除词的不要。空串不限
+	IncludeKeywords string `gorm:"size:1024;not null;default:''" json:"include_keywords"`
+	ExcludeKeywords string `gorm:"size:1024;not null;default:''" json:"exclude_keywords"`
 	// Upgrade 是洗版：下载过以后还接着找分数更高的，档案里排第一的分辨率与来源都达到才停
 	Upgrade  bool   `gorm:"not null;default:false" json:"upgrade"`
 	Source   string `gorm:"size:16;not null;default:''" json:"source"`

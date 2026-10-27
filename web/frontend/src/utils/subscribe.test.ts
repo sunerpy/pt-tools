@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   episodeState,
+  keywordLines,
   prefOptions,
   profileSummary,
   progressText,
@@ -115,5 +116,15 @@ describe("追剧定时的说法（每隔一段时间、cron）", () => {
     expect(previewTime(new Date(2027, 0, 1, 0, 5).toISOString(), now)).toBe(
       "2027-01-01 周五 00:05",
     );
+  });
+});
+
+describe("标题包含与排除的说法", () => {
+  it("按行或逗号拆开；都没填时没有", () => {
+    expect(
+      keywordLines({ include_keywords: "CHDWEB\nHHWEB", exclude_keywords: "DV，60fps" }),
+    ).toEqual(["标题包含 CHDWEB 或 HHWEB", "标题排除 DV、60fps"]);
+    expect(keywordLines({ include_keywords: " , ", exclude_keywords: "" })).toEqual([]);
+    expect(keywordLines({})).toEqual([]);
   });
 });

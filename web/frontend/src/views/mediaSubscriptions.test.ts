@@ -779,6 +779,8 @@ describe("订阅", () => {
         tags: "",
         save_path: "",
         upgrade: false,
+        include_keywords: "",
+        exclude_keywords: "",
         schedule: {
           kind: "airtime",
           at: "20:00",

@@ -73,6 +73,12 @@ func describe(sub *models.MediaSubscription) string {
 			parts = append(parts, "完成后跟下一季")
 		}
 	}
+	if kws := splitKeywords(sub.IncludeKeywords); len(kws) > 0 {
+		parts = append(parts, "标题包含 "+strings.Join(kws, " 或 "))
+	}
+	if kws := splitKeywords(sub.ExcludeKeywords); len(kws) > 0 {
+		parts = append(parts, "标题排除 "+strings.Join(kws, "、"))
+	}
 	return strings.Join(parts, "，")
 }
 
