@@ -66,6 +66,10 @@ export function mcpSnippets(origin: string, path: string = MCP_DEFAULT_PATH): Mc
 
 /** 工具清单（和 internal/mcp 的 ToolNames 一致） */
 export const MCP_TOOLS: readonly McpTool[] = [
+  { name: "list_brush_tasks", write: false, desc: "刷流任务、状态与收益" },
+  { name: "get_brush_task", write: false, desc: "刷流任务的配置" },
+  { name: "list_brush_runs", write: false, desc: "刷流每轮运行记录与步骤" },
+  { name: "change_brush_task", write: true, desc: "预览并确认新增、修改、启停或删除刷流任务" },
   { name: "list_tasks", write: false, desc: "推送记录：RSS、订阅、App 与 MCP 推过的种子" },
   { name: "list_downloader_torrents", write: false, desc: "下载器里的种子，分页，可以按状态筛选" },
   { name: "get_downloader_stats", write: false, desc: "各台下载器的速度、累计量与剩余空间" },

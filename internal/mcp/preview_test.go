@@ -17,7 +17,8 @@ import (
 var writeTools = map[string]bool{
 	"pause_torrent": true, "resume_torrent": true, "delete_torrent": true, "push_torrent": true,
 	"add_subscription": true, "set_subscription_status": true, "search_subscription": true, "delete_subscription": true,
-	"organize_media": true, "retry_media_organize": true, "change_config": true,
+	"organize_media": true, "retry_media_organize": true, "change_brush_task": true,
+	"change_config":       true,
 	"update_subscription": true, "set_episode_skip": true, "unlock_episode": true, "save_episode_rule": true,
 	"delete_episode_rule": true, "reorganize_subscription_torrent": true, "rescrape_subscription_torrent": true, "rescrape_media": true,
 }

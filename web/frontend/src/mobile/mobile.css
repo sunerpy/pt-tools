@@ -1,0 +1,119 @@
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+  background: var(--pt-canvas);
+  color: var(--pt-t1);
+  font-family: var(--pt-font-family);
+}
+* {
+  box-sizing: border-box;
+}
+.mobile-page {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  overflow-wrap: anywhere;
+}
+.mobile-page .el-form-item {
+  margin-bottom: 20px;
+}
+.mobile-page .el-input,
+.mobile-page .el-select,
+.mobile-page .el-input-number {
+  width: 100%;
+}
+.mobile-page .el-input__wrapper,
+.mobile-page .el-select__wrapper,
+.mobile-page .el-button,
+.mobile-page .el-checkbox,
+.mobile-page .el-switch {
+  min-height: 44px;
+}
+.mobile-page .el-textarea__inner {
+  min-height: 88px;
+}
+.mobile-state {
+  padding: 24px 0;
+  text-align: center;
+}
+.mobile-error {
+  padding: 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--pt-dang);
+  color: var(--pt-dang);
+  border-radius: var(--pt-r-sm);
+  white-space: pre-wrap;
+}
+.mobile-note {
+  color: var(--pt-t3);
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  margin: 8px 0 16px;
+}
+.mobile-actions {
+  display: flex;
+  gap: 12px;
+  padding: 16px 0 max(16px, env(safe-area-inset-bottom));
+}
+.mobile-actions .el-button {
+  flex: 1;
+  margin: 0;
+}
+.mobile-section {
+  margin-bottom: 20px;
+  border: 1px solid var(--pt-border);
+  background: var(--pt-surface);
+  border-radius: var(--pt-r-md);
+  padding: 16px;
+  min-width: 0;
+}
+.mobile-section h2 {
+  margin: 0 0 16px;
+  font-size: var(--pt-fz-h2);
+}
+.mobile-checks {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 16px;
+}
+.mobile-checks .el-checkbox {
+  margin: 0;
+  max-width: 100%;
+}
+.mobile-checks .el-checkbox__label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.mobile-page .el-collapse-item__content {
+  padding: 8px;
+}
+.mobile-preview {
+  margin-top: 12px;
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+  padding: 8px;
+  overflow: hidden;
+}
+.mobile-preview-fit {
+  overflow: hidden;
+}
+.mobile-preview-poster {
+  width: 640px;
+  transform-origin: top left;
+}
+/* Element Plus poppers are teleported to body, outside the page container. */
+.el-select-dropdown__item {
+  min-height: 44px;
+  height: auto;
+  line-height: 24px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.el-select-dropdown__list {
+  max-width: min(640px, calc(100vw - 24px));
+}

@@ -160,7 +160,8 @@ class _BrokenStore extends MemoryHostStore {
 }
 
 class _World {
-  _World(this.scopes, {this.mode = 'device'});
+  _World(this.scopes, {this.mode = 'device', this.mobileFeatures = false});
+  final bool mobileFeatures;
   List<String> scopes;
   final String mode;
   final hosts = <FakeHost>[];
@@ -192,9 +193,58 @@ class _World {
     requests.add('$method $path');
     final p = Uri.parse(path).path;
     return switch (p) {
-      '/api/app/v1/meta' => _meta(scopes),
+      '/api/app/v1/meta' =>
+        _meta(scopes)
+          ..['features'] = [
+            'overview',
+            'assistant',
+            if (mobileFeatures) ...[
+              'mobile_editors',
+              'brush_manage',
+              'stats_export',
+            ],
+          ],
       '/api/app/v1/overview' => _overview,
       '/api/app/v1/downloaders' => {'items': []},
+      '/api/app/v1/stats/summary' => {
+        'totalUploaded': 1073741824,
+        'totalDownloaded': 1024,
+        'totalBonus': 12,
+        'sites': [
+          {'site': 'hdsky', 'hasBaseline': true},
+        ],
+      },
+      '/api/app/v1/brush/tasks' => [
+        {
+          'id': 1,
+          'name': '测试刷流',
+          'enabled': true,
+          'site': 'hdsky',
+          'site_enabled': true,
+          'downloader': 'qb',
+          'active': 1,
+          'downloading': 0,
+          'active_size': 0,
+          'today': {'uploaded': 0, 'downloaded': 0, 'added': 0, 'removed': 0},
+          'total': {'uploaded': 0, 'downloaded': 0, 'added': 0, 'removed': 0},
+        },
+      ],
+      '/api/app/v1/brush/tasks/1' => {'id': 1, 'name': '测试刷流', 'enabled': true},
+      '/api/app/v1/brush/tasks/1/runs' => {
+        'total': 1,
+        'items': [
+          {
+            'id': 1,
+            'status': 'partial',
+            'summary': '一轮结束',
+            'error': '下载器暂不可用',
+            'started_at': _at,
+            'steps': [
+              {'kind': 'error', 'text': '磁盘查询失败'},
+            ],
+          },
+        ],
+      },
       '/api/app/v1/sites' => _sites,
       '/api/app/v1/favicon/hdsky' => const ApiReply(404, {
         'error': 'not_found',
@@ -301,6 +351,7 @@ Future<_World> _pumpApp(
   List<String> scopes = const ['app:read', 'app:write'],
   bool paired = true,
   String mode = 'device',
+  bool mobileFeatures = false,
   HostStore? store,
   Future<void>? hostLoaded,
 }) async {
@@ -309,7 +360,7 @@ Future<_World> _pumpApp(
   tester.view.physicalSize = const Size(1170, 2532);
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
-  final w = _World([...scopes], mode: mode);
+  final w = _World([...scopes], mode: mode, mobileFeatures: mobileFeatures);
   late HostRecord rec;
   await tester.runAsync(() async {
     w.hostKey = await DhKey.generate();
@@ -355,6 +406,42 @@ Future<void> _settle(WidgetTester tester, [int rounds = 8]) async {
 }
 
 void main() {
+  testWidgets('站点周期选择通过加密通道请求正确周期，海报有入口', (tester) async {
+    final w = await _pumpApp(tester, mobileFeatures: true);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.text('站点'));
+    await _settle(tester);
+    expect(w.requests, contains('GET /api/app/v1/stats/summary?range=today'));
+    await tester.tap(find.text('本周'));
+    await _settle(tester);
+    expect(w.requests, contains('GET /api/app/v1/stats/summary?range=7d'));
+    expect(find.byTooltip('分享统计海报'), findsOneWidget);
+    expect(find.textContaining('1.0 GiB'), findsOneWidget);
+  });
+  testWidgets('刷流显示运行错误与步骤，取消删除不会写入', (tester) async {
+    final w = await _pumpApp(tester, mobileFeatures: true);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.text('刷流'));
+    await _settle(tester);
+    await tester.tap(find.text('测试刷流'));
+    await _settle(tester);
+    expect(find.textContaining('下载器暂不可用'), findsOneWidget);
+    await tester.tap(find.textContaining('一轮结束'));
+    await tester.pumpAndSettle();
+    expect(find.text('磁盘查询失败'), findsOneWidget);
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(w.requests.where((r) => r.startsWith('DELETE')), isEmpty);
+  });
+
   testWidgets('概览：显示主机的合计数字与站内信未读', (tester) async {
     final w = await _pumpApp(tester);
     await _settle(tester);

@@ -267,6 +267,7 @@ func displayArgs(args map[string]any) string {
 
 // 写工具在确认卡片与 ChatOps 提示里的名字。
 var toolTitles = map[string]string{
+	"change_brush_task":       "修改刷流任务",
 	"pause_torrent":           "暂停种子",
 	"resume_torrent":          "继续种子",
 	"delete_torrent":          "删除种子",

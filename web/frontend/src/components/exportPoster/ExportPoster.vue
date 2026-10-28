@@ -2,7 +2,8 @@
 /**
  * 按选中的样式画海报。导出页拿 posterEl() 去转 PNG：预览与导出是同一个节点。
  */
-import { ref } from "vue";
+import { computed, provide, ref } from "vue";
+import { PosterLocale } from "./locale";
 
 import "./poster.css";
 import type { PosterModel } from "./model";
@@ -14,7 +15,16 @@ import PosterReceipt from "./PosterReceipt.vue";
 import PosterWrapped from "./PosterWrapped.vue";
 import type { PosterStyleId } from "./styles";
 
-const props = defineProps<{ model: PosterModel; styleId: PosterStyleId; colorway: string }>();
+const props = defineProps<{
+  model: PosterModel;
+  styleId: PosterStyleId;
+  colorway: string;
+  locale?: string;
+}>();
+provide(
+  PosterLocale,
+  computed(() => props.locale ?? "zh"),
+);
 
 const host = ref<HTMLElement | null>(null);
 

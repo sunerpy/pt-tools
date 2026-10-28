@@ -24,3 +24,6 @@ __pycache__/
 
 # relay 的 Cloudflare 版：wrangler 的本地状态
 relay/cloudflare/.wrangler/
+
+# Vue editors are rebuilt for every mobile test/build/release.
+/apps/mobile/assets/mobile/

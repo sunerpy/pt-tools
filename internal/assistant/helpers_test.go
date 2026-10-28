@@ -362,6 +362,8 @@ func (b *fakeBackend) Call(_ context.Context, c mcp.Caller, req mcp.Request) (mc
 		body = `{"results":[{"ok":true}]}`
 	case req.Path == "/push":
 		body = `{"ok":true,"downloader":"qb"}`
+	case req.Path == "/brush/tasks/preview":
+		body = `{"summary":"暂停刷流任务 9","changes":[{"label":"启用","before":"是","after":"否"}],"impact":["停止自动挑种"],"applied":false}`
 	case req.Path == "/config":
 		body = `{"resources":[{"name":"downloaders","title":"下载器","description":"下载器","kind":"list","id_field":"id","ops":["add","update","delete"],"fields":["enabled","name","password"],"secrets":["password"]}],"excluded":["登录密码"],"secret_placeholder":"<已设置>"}`
 	case strings.HasPrefix(req.Path, "/config/") && strings.HasSuffix(req.Path, "/preview"):

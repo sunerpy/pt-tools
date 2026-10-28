@@ -26,6 +26,7 @@ dependencies:
   ptt_api:
     path: packages/ptt_api
   web_socket_channel: 3.0.3
+  webview_flutter: 4.14.1
 
 dev_dependencies:
   flutter_test:
@@ -34,4 +35,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/mobile/
+    - assets/mobile/assets/
   generate: true

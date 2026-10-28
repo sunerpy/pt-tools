@@ -71,7 +71,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigResult',) as AppConfigResult;
-    
+
     }
     return null;
   }
@@ -125,7 +125,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSiteAttendance',) as AppSiteAttendance;
-    
+
     }
     return null;
   }
@@ -179,7 +179,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
-    
+
     }
     return null;
   }
@@ -232,7 +232,55 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantCreateResult',) as AppAssistantCreateResult;
-    
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'POST /brush/tasks' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [AppBrushInput] appBrushInput (required):
+  Future<Response> createBrushTaskWithHttpInfo(AppBrushInput appBrushInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/tasks';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appBrushInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [AppBrushInput] appBrushInput (required):
+  Future<AppBrushConfig?> createBrushTask(AppBrushInput appBrushInput, { Future<void>? abortTrigger, }) async {
+    final response = await createBrushTaskWithHttpInfo(appBrushInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppBrushConfig',) as AppBrushConfig;
+
     }
     return null;
   }
@@ -285,7 +333,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscription',) as AppSubscription;
-    
+
     }
     return null;
   }
@@ -343,7 +391,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantConfirmation',) as AppAssistantConfirmation;
-    
+
     }
     return null;
   }
@@ -397,7 +445,56 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
-    
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'DELETE /brush/tasks/{id}' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<Response> deleteBrushTaskWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/tasks/{id}'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'DELETE',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<AppOK?> deleteBrushTask(int id, { Future<void>? abortTrigger, }) async {
+    final response = await deleteBrushTaskWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
+
     }
     return null;
   }
@@ -518,7 +615,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
-    
+
     }
     return null;
   }
@@ -594,7 +691,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppExplorePage',) as AppExplorePage;
-    
+
     }
     return null;
   }
@@ -648,7 +745,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantConversationDetail',) as AppAssistantConversationDetail;
-    
+
     }
     return null;
   }
@@ -721,7 +818,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantEventPage',) as AppAssistantEventPage;
-    
+
     }
     return null;
   }
@@ -766,7 +863,56 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantStatus',) as AppAssistantStatus;
-    
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'GET /brush/tasks/{id}' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<Response> getBrushTaskWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/tasks/{id}'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<AppBrushConfig?> getBrushTask(int id, { Future<void>? abortTrigger, }) async {
+    final response = await getBrushTaskWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppBrushConfig',) as AppBrushConfig;
+
     }
     return null;
   }
@@ -832,7 +978,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigState',) as AppConfigState;
-    
+
     }
     return null;
   }
@@ -877,7 +1023,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigCatalog',) as AppConfigCatalog;
-    
+
     }
     return null;
   }
@@ -931,7 +1077,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MultipartFile',) as MultipartFile;
-    
+
     }
     return null;
   }
@@ -976,7 +1122,49 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppMeta',) as AppMeta;
-    
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'GET /mobile/options' operation and returns the [Response].
+  Future<Response> getMobileOptionsWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/mobile/options';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  Future<AppMobileOptions?> getMobileOptions({ Future<void>? abortTrigger, }) async {
+    final response = await getMobileOptionsWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppMobileOptions',) as AppMobileOptions;
+
     }
     return null;
   }
@@ -1021,7 +1209,101 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOverview',) as AppOverview;
-    
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'GET /stats/aggregated' operation and returns the [Response].
+  Future<Response> getStatsAggregatedWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/stats/aggregated';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  Future<AppStatsAggregated?> getStatsAggregated({ Future<void>? abortTrigger, }) async {
+    final response = await getStatsAggregatedWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppStatsAggregated',) as AppStatsAggregated;
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'GET /stats/summary' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [String] range:
+  Future<Response> getStatsSummaryWithHttpInfo({ String? range, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/stats/summary';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (range != null) {
+      queryParams.addAll(_queryParams('', 'range', range));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [String] range:
+  Future<AppStatsSummary?> getStatsSummary({ String? range, Future<void>? abortTrigger, }) async {
+    final response = await getStatsSummaryWithHttpInfo(range: range, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppStatsSummary',) as AppStatsSummary;
+
     }
     return null;
   }
@@ -1075,7 +1357,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscriptionDetail',) as AppSubscriptionDetail;
-    
+
     }
     return null;
   }
@@ -1138,7 +1420,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MultipartFile',) as MultipartFile;
-    
+
     }
     return null;
   }
@@ -1195,7 +1477,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppUpdates',) as AppUpdates;
-    
+
     }
     return null;
   }
@@ -1243,6 +1525,70 @@ class AppApi {
       return (await apiClient.deserializeAsync(responseBody, 'List<AppAssistantConversation>') as List)
         .cast<AppAssistantConversation>()
         .toList(growable: false);
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'GET /brush/tasks/{id}/runs' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] limit:
+  ///
+  /// * [int] offset:
+  Future<Response> listBrushTaskRunsWithHttpInfo(int id, { int? limit, int? offset, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/tasks/{id}/runs'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (limit != null) {
+      queryParams.addAll(_queryParams('', 'limit', limit));
+    }
+    if (offset != null) {
+      queryParams.addAll(_queryParams('', 'offset', offset));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] limit:
+  ///
+  /// * [int] offset:
+  Future<AppBrushRunPage?> listBrushTaskRuns(int id, { int? limit, int? offset, Future<void>? abortTrigger, }) async {
+    final response = await listBrushTaskRunsWithHttpInfo(id, limit: limit, offset: offset, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppBrushRunPage',) as AppBrushRunPage;
 
     }
     return null;
@@ -1336,7 +1682,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppDownloaderList',) as AppDownloaderList;
-    
+
     }
     return null;
   }
@@ -1471,7 +1817,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppMediaHistoryPage',) as AppMediaHistoryPage;
-    
+
     }
     return null;
   }
@@ -1564,7 +1910,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSiteList',) as AppSiteList;
-    
+
     }
     return null;
   }
@@ -1690,7 +2036,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscriptionRunPage',) as AppSubscriptionRunPage;
-    
+
     }
     return null;
   }
@@ -1842,7 +2188,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTaskPage',) as AppTaskPage;
-    
+
     }
     return null;
   }
@@ -1887,7 +2233,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTemplateCatalog',) as AppTemplateCatalog;
-    
+
     }
     return null;
   }
@@ -1986,7 +2332,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTorrentPage',) as AppTorrentPage;
-    
+
     }
     return null;
   }
@@ -2039,7 +2385,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizeResult',) as AppOrganizeResult;
-    
+
     }
     return null;
   }
@@ -2100,7 +2446,55 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizeResult',) as AppOrganizeResult;
-    
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'POST /brush/tasks/preview' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [AppConfigChange] appConfigChange (required):
+  Future<Response> previewBrushTaskWithHttpInfo(AppConfigChange appConfigChange, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/tasks/preview';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appConfigChange;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [AppConfigChange] appConfigChange (required):
+  Future<AppConfigResult?> previewBrushTask(AppConfigChange appConfigChange, { Future<void>? abortTrigger, }) async {
+    final response = await previewBrushTaskWithHttpInfo(appConfigChange, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigResult',) as AppConfigResult;
+
     }
     return null;
   }
@@ -2160,7 +2554,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppConfigResult',) as AppConfigResult;
-    
+
     }
     return null;
   }
@@ -2213,7 +2607,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizePlan',) as AppOrganizePlan;
-    
+
     }
     return null;
   }
@@ -2266,7 +2660,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSchedulePreview',) as AppSchedulePreview;
-    
+
     }
     return null;
   }
@@ -2319,7 +2713,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTemplatePreview',) as AppTemplatePreview;
-    
+
     }
     return null;
   }
@@ -2372,7 +2766,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppPushResult',) as AppPushResult;
-    
+
     }
     return null;
   }
@@ -2425,7 +2819,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppRecognition',) as AppRecognition;
-    
+
     }
     return null;
   }
@@ -2481,7 +2875,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppRescrapeResult',) as AppRescrapeResult;
-    
+
     }
     return null;
   }
@@ -2542,7 +2936,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppRescrapeResult',) as AppRescrapeResult;
-    
+
     }
     return null;
   }
@@ -2598,7 +2992,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
-    
+
     }
     return null;
   }
@@ -2654,7 +3048,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOrganizeResult',) as AppOrganizeResult;
-    
+
     }
     return null;
   }
@@ -2775,7 +3169,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTemplate',) as AppTemplate;
-    
+
     }
     return null;
   }
@@ -2828,7 +3222,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSearchResult',) as AppSearchResult;
-    
+
     }
     return null;
   }
@@ -2882,7 +3276,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppMessage',) as AppMessage;
-    
+
     }
     return null;
   }
@@ -2940,7 +3334,60 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantSendResult',) as AppAssistantSendResult;
-    
+
+    }
+    return null;
+  }
+
+  /// Performs an HTTP 'POST /brush/tasks/{id}/status' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppBrushStatus] appBrushStatus (required):
+  Future<Response> setBrushTaskStatusWithHttpInfo(int id, AppBrushStatus appBrushStatus, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/tasks/{id}/status'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appBrushStatus;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppBrushStatus] appBrushStatus (required):
+  Future<AppBrushConfig?> setBrushTaskStatus(int id, AppBrushStatus appBrushStatus, { Future<void>? abortTrigger, }) async {
+    final response = await setBrushTaskStatusWithHttpInfo(id, appBrushStatus, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppBrushConfig',) as AppBrushConfig;
+
     }
     return null;
   }
@@ -2998,7 +3445,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscription',) as AppSubscription;
-    
+
     }
     return null;
   }
@@ -3119,7 +3566,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTorrentActionsResult',) as AppTorrentActionsResult;
-    
+
     }
     return null;
   }
@@ -3192,6 +3639,59 @@ class AppApi {
     return null;
   }
 
+  /// Performs an HTTP 'PUT /brush/tasks/{id}' operation and returns the [Response].
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppBrushInput] appBrushInput (required):
+  Future<Response> updateBrushTaskWithHttpInfo(int id, AppBrushInput appBrushInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/tasks/{id}'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appBrushInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'PUT',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppBrushInput] appBrushInput (required):
+  Future<AppBrushConfig?> updateBrushTask(int id, AppBrushInput appBrushInput, { Future<void>? abortTrigger, }) async {
+    final response = await updateBrushTaskWithHttpInfo(id, appBrushInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppBrushConfig',) as AppBrushConfig;
+
+    }
+    return null;
+  }
+
   /// 修改订阅的设置（只改给了的字段；条目与季不能改）
   ///
   /// Note: This method returns the HTTP [Response].
@@ -3245,7 +3745,7 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscription',) as AppSubscription;
-    
+
     }
     return null;
   }

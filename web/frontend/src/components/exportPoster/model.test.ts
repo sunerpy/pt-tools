@@ -209,3 +209,37 @@ describe("打码", () => {
     expect(hueOf("not-a-color")).toBe(210);
   });
 });
+
+describe("英文海报数字与逐站指标", () => {
+  it("使用 K/M/B 单位，同时保留默认中文格式", () => {
+    expect(countNumber(12_345, "en")).toEqual({ text: "12.35K", value: "12.35", unit: "K" });
+    expect(countNumber(3_284_500, "en").text).toBe("3.28M");
+    expect(countNumber(-2_500_000_000, "en").text).toBe("-2.50B");
+    expect(countNumber(12_345).text).toBe("1.23万");
+  });
+  it("英文 model 同时覆盖逐站魔力、时魔、增量与入站时长", () => {
+    const per = [site("springsunday", 100, 10, { bonusPerHour: 12_345, joinDate: 1_552_521_600 })];
+    const m = buildPosterModel(
+      input({
+        locale: "en",
+        stats: stats(per),
+        sites: per,
+        increments: {
+          range: "7d",
+          from: "2026-10-15",
+          to: "2026-10-22",
+          sites: [],
+          totalUploaded: 1,
+          totalDownloaded: 0,
+          totalBonus: 12345,
+        },
+      }),
+    );
+    expect(m.sites[0]!.bonusName).toBe("Bonus");
+    expect(m.sites[0]!.bonus.text).toBe("12.35K");
+    expect(m.sites[0]!.bph).toBe("12.35K");
+    expect(m.inc!.bonus).toBe("+12.35K");
+    expect(m.joinDur).not.toMatch(/[年月天]/);
+    expect(m.sites[0]!.joinDur).not.toMatch(/[年月天]/);
+  });
+});

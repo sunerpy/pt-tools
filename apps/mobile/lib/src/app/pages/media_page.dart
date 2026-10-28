@@ -9,6 +9,7 @@ import '../../../l10n/app_localizations.dart';
 import '../format.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
+import 'mobile_editor_page.dart';
 
 /// 媒体：订阅、最近入库、探索（TMDB 的热门、流行与搜索，可以直接订阅）。
 class MediaPage extends ConsumerWidget {
@@ -22,6 +23,18 @@ class MediaPage extends ConsumerWidget {
       child: Scaffold(
         appBar: AppBar(
           title: Text(s.navMedia),
+          actions: [
+            if (ref.watch(canWriteProvider))
+              IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: s.mobileAdd,
+                onPressed: () async {
+                  if (await openMobileEditor(context, ref, 'subscription')) {
+                    ref.invalidate(subscriptionsProvider);
+                  }
+                },
+              ),
+          ],
           bottom: TabBar(
             tabs: [
               Tab(text: s.tabSubscriptions),
@@ -212,14 +225,27 @@ class _ExploreState extends ConsumerState<_Explore> {
     final s = S.of(context);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await ref
-          .read(apiProvider)!
-          .createSubscription(
-            AppSubscriptionCreate(
-              mediaType: AppSubscriptionCreateMediaTypeEnum.fromJson(_kind)!,
-              tmdbId: it.id,
-            ),
-          );
+      final meta = await ref.read(metaProvider.future);
+      if (!mounted) return;
+      if (meta.features.contains('mobile_editors')) {
+        final saved = await openMobileEditor(
+          context,
+          ref,
+          'subscription',
+          values: {'tmdb_id': '${it.id}', 'media_type': _kind},
+        );
+        if (!saved) return;
+      } else {
+        // Older hosts retain their existing quick subscription flow.
+        await ref
+            .read(apiProvider)!
+            .createSubscription(
+              AppSubscriptionCreate(
+                mediaType: AppSubscriptionCreateMediaTypeEnum.fromJson(_kind)!,
+                tmdbId: it.id,
+              ),
+            );
+      }
       messenger.showSnackBar(SnackBar(content: Text(s.subscribeOk(it.title))));
       ref.invalidate(exploreProvider);
       ref.invalidate(subscriptionsProvider);

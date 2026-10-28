@@ -7,6 +7,8 @@ on:
     branches: [main, v1.0.0-rc]
     paths:
       - "apps/mobile/**"
+      - "web/frontend/**"
+      - ".github/actions/build-mobile-web/**"
       - "internal/remote/**"
       - "go.mod"
       - "go.sum"
@@ -17,6 +19,8 @@ on:
     branches: [main, v1.0.0-rc]
     paths:
       - "apps/mobile/**"
+      - "web/frontend/**"
+      - ".github/actions/build-mobile-web/**"
       - "internal/remote/**"
       - "go.mod"
       - "go.sum"
@@ -50,6 +54,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+
+      - name: Build mobile web assets
+        uses: ./.github/actions/build-mobile-web
 
       - name: Set up Flutter
         uses: ./.github/actions/setup-flutter
@@ -115,6 +122,9 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Build mobile web assets
+        uses: ./.github/actions/build-mobile-web
+
       - name: Set up Flutter
         uses: ./.github/actions/setup-flutter
 
@@ -142,6 +152,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Build mobile web assets
+        uses: ./.github/actions/build-mobile-web
 
       - name: Set up Flutter
         uses: ./.github/actions/setup-flutter

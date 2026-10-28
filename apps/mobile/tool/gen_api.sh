@@ -45,4 +45,14 @@ for f in sorted(pathlib.Path(sys.argv[1]).glob("*.dart")):
     if out != src:
         f.write_text(out, encoding="utf-8")
 PY
+# 生成器在部分 API 方法的空行里留下空格；所有 Dart 源码统一去掉行尾空白，保证可重复生成与 diff-check。
+python3 - "$out/lib" <<'PY_NORMALIZE'
+import pathlib
+import sys
+for f in pathlib.Path(sys.argv[1]).rglob("*.dart"):
+    src = f.read_text(encoding="utf-8")
+    normalized = "\n".join(line.rstrip() for line in src.splitlines()) + "\n"
+    if normalized != src:
+        f.write_text(normalized, encoding="utf-8")
+PY_NORMALIZE
 echo "已生成 $out"

@@ -13,6 +13,8 @@ part of openapi.api;
 class AppSubscription {
   /// Returns a new [AppSubscription] instance.
   AppSubscription({
+    this.includeKeywords,
+    this.excludeKeywords,
     required this.id,
     required this.mediaType,
     required this.tmdbId,
@@ -46,6 +48,22 @@ class AppSubscription {
     this.libraryId,
     this.completedAt,
   });
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? includeKeywords;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? excludeKeywords;
 
   int id;
 
@@ -254,6 +272,8 @@ class AppSubscription {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppSubscription &&
+    other.includeKeywords == includeKeywords &&
+    other.excludeKeywords == excludeKeywords &&
     other.id == id &&
     other.mediaType == mediaType &&
     other.tmdbId == tmdbId &&
@@ -290,6 +310,8 @@ class AppSubscription {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (includeKeywords == null ? 0 : includeKeywords!.hashCode) +
+    (excludeKeywords == null ? 0 : excludeKeywords!.hashCode) +
     (id.hashCode) +
     (mediaType.hashCode) +
     (tmdbId.hashCode) +
@@ -324,10 +346,20 @@ class AppSubscription {
     (completedAt == null ? 0 : completedAt!.hashCode);
 
   @override
-  String toString() => 'AppSubscription[id=$id, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, title=$title, originalTitle=$originalTitle, year=$year, posterPath=$posterPath, status=$status, upgrade=$upgrade, source_=$source_, totalEpisodes=$totalEpisodes, progress=$progress, message=$message, lastSearchAt=$lastSearchAt, nextSearchAt=$nextSearchAt, createdAt=$createdAt, profileId=$profileId, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, nextSeasonId=$nextSeasonId, libraryId=$libraryId, completedAt=$completedAt]';
+  String toString() => 'AppSubscription[includeKeywords=$includeKeywords, excludeKeywords=$excludeKeywords, id=$id, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, title=$title, originalTitle=$originalTitle, year=$year, posterPath=$posterPath, status=$status, upgrade=$upgrade, source_=$source_, totalEpisodes=$totalEpisodes, progress=$progress, message=$message, lastSearchAt=$lastSearchAt, nextSearchAt=$nextSearchAt, createdAt=$createdAt, profileId=$profileId, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, nextSeasonId=$nextSeasonId, libraryId=$libraryId, completedAt=$completedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+    if (this.includeKeywords != null) {
+      json[r'include_keywords'] = this.includeKeywords;
+    } else {
+      json[r'include_keywords'] = null;
+    }
+    if (this.excludeKeywords != null) {
+      json[r'exclude_keywords'] = this.excludeKeywords;
+    } else {
+      json[r'exclude_keywords'] = null;
+    }
       json[r'id'] = this.id;
       json[r'media_type'] = this.mediaType;
       json[r'tmdb_id'] = this.tmdbId;
@@ -482,6 +514,8 @@ class AppSubscription {
       }());
 
       return AppSubscription(
+        includeKeywords: mapValueOfType<String>(json, r'include_keywords'),
+        excludeKeywords: mapValueOfType<String>(json, r'exclude_keywords'),
         id: mapValueOfType<int>(json, r'id')!,
         mediaType: mapValueOfType<String>(json, r'media_type')!,
         tmdbId: mapValueOfType<int>(json, r'tmdb_id')!,

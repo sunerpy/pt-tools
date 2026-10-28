@@ -36,6 +36,8 @@ type fromTorrentIn struct {
 }
 
 type updateSubIn struct {
+	IncludeKeywords  *string     `json:"include_keywords,omitempty" jsonschema:"title inclusion keywords; empty clears, omitted keeps"`
+	ExcludeKeywords  *string     `json:"exclude_keywords,omitempty" jsonschema:"title exclusion keywords; empty clears, omitted keeps"`
 	ID               uint        `json:"id" jsonschema:"subscription id from list_subscriptions"`
 	ProfileID        *uint       `json:"profile_id,omitempty" jsonschema:"quality profile id (get_config resource quality_profiles); 0 uses the default profile"`
 	Upgrade          *bool       `json:"upgrade,omitempty" jsonschema:"keep looking for better releases after the first download"`
@@ -116,6 +118,8 @@ func (in updateSubIn) body() map[string]any {
 			b[k] = v
 		}
 	}
+	set("include_keywords", ptrValue(in.IncludeKeywords), in.IncludeKeywords != nil)
+	set("exclude_keywords", ptrValue(in.ExcludeKeywords), in.ExcludeKeywords != nil)
 	set("profile_id", ptrValue(in.ProfileID), in.ProfileID != nil)
 	set("upgrade", ptrValue(in.Upgrade), in.Upgrade != nil)
 	if in.Sites != nil {

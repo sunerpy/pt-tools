@@ -13,6 +13,8 @@ part of openapi.api;
 class AppSubscriptionCreate {
   /// Returns a new [AppSubscriptionCreate] instance.
   AppSubscriptionCreate({
+    this.includeKeywords,
+    this.excludeKeywords,
     required this.mediaType,
     required this.tmdbId,
     this.season,
@@ -30,6 +32,22 @@ class AppSubscriptionCreate {
     this.libraryId,
     this.fromTorrent,
   });
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? includeKeywords;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? excludeKeywords;
 
   AppSubscriptionCreateMediaTypeEnum mediaType;
 
@@ -154,6 +172,8 @@ class AppSubscriptionCreate {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppSubscriptionCreate &&
+    other.includeKeywords == includeKeywords &&
+    other.excludeKeywords == excludeKeywords &&
     other.mediaType == mediaType &&
     other.tmdbId == tmdbId &&
     other.season == season &&
@@ -174,6 +194,8 @@ class AppSubscriptionCreate {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (includeKeywords == null ? 0 : includeKeywords!.hashCode) +
+    (excludeKeywords == null ? 0 : excludeKeywords!.hashCode) +
     (mediaType.hashCode) +
     (tmdbId.hashCode) +
     (season == null ? 0 : season!.hashCode) +
@@ -192,10 +214,20 @@ class AppSubscriptionCreate {
     (fromTorrent == null ? 0 : fromTorrent!.hashCode);
 
   @override
-  String toString() => 'AppSubscriptionCreate[mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
+  String toString() => 'AppSubscriptionCreate[includeKeywords=$includeKeywords, excludeKeywords=$excludeKeywords, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+    if (this.includeKeywords != null) {
+      json[r'include_keywords'] = this.includeKeywords;
+    } else {
+      json[r'include_keywords'] = null;
+    }
+    if (this.excludeKeywords != null) {
+      json[r'exclude_keywords'] = this.excludeKeywords;
+    } else {
+      json[r'exclude_keywords'] = null;
+    }
       json[r'media_type'] = this.mediaType;
       json[r'tmdb_id'] = this.tmdbId;
     if (this.season != null) {
@@ -286,6 +318,8 @@ class AppSubscriptionCreate {
       }());
 
       return AppSubscriptionCreate(
+        includeKeywords: mapValueOfType<String>(json, r'include_keywords'),
+        excludeKeywords: mapValueOfType<String>(json, r'exclude_keywords'),
         mediaType: AppSubscriptionCreateMediaTypeEnum.fromJson(json[r'media_type'])!,
         tmdbId: mapValueOfType<int>(json, r'tmdb_id')!,
         season: mapValueOfType<int>(json, r'season'),

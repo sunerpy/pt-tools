@@ -6,23 +6,75 @@ import '../../../l10n/app_localizations.dart';
 import '../format.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
+import '../hybrid/mobile_api.dart';
+import 'mobile_editor_page.dart';
 
 /// 站点：登录状态（离封号阈值还有几天）、今天的签到、站点上的用户数据与站内信未读数；完全控制的设备可以立即签到。
-class SitesPage extends ConsumerWidget {
+class SitesPage extends ConsumerStatefulWidget {
   const SitesPage({super.key});
+  @override
+  ConsumerState<SitesPage> createState() => _SitesPageState();
+}
+
+class _SitesPageState extends ConsumerState<SitesPage> {
+  String _range = 'today';
+  Map<String, dynamic>? _summary;
+  String? _statsError;
+  bool _statsLoading = false;
+  int _statsGeneration = 0;
+  @override
+  void initState() {
+    super.initState();
+    _loadSummary();
+  }
+
+  Future<void> _loadSummary() async {
+    final generation = ++_statsGeneration;
+    setState(() => _statsLoading = true);
+    try {
+      final meta = await ref.read(metaProvider.future);
+      if (!mounted || generation != _statsGeneration) return;
+      if (!meta.features.contains('stats_export')) return;
+      final summary = await mobileApi(ref, '/stats/summary?range=$_range');
+      if (mounted && generation == _statsGeneration) {
+        setState(() {
+          _summary = summary as Map<String, dynamic>;
+          _statsError = null;
+        });
+      }
+    } on Object catch (error) {
+      if (mounted && generation == _statsGeneration) {
+        setState(() => _statsError = describeError(error, S.of(context)));
+      }
+    } finally {
+      if (mounted && generation == _statsGeneration) {
+        setState(() => _statsLoading = false);
+      }
+    }
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final s = S.of(context);
     final list = ref.watch(sitesProvider);
     final canWrite = ref.watch(canWriteProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(s.moreSites)),
+      appBar: AppBar(
+        title: Text(s.moreSites),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.ios_share),
+            tooltip: s.mobileShare,
+            onPressed: () => openMobileEditor(context, ref, 'poster'),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
           try {
             ref.invalidate(sitesProvider);
             await ref.read(sitesProvider.future);
+            await _loadSummary();
           } on Object {
             // 页面显示错误
           }
@@ -37,6 +89,76 @@ class SitesPage extends ConsumerWidget {
             return ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
+                if (ref
+                        .watch(metaProvider)
+                        .value
+                        ?.features
+                        .contains('stats_export') ==
+                    true)
+                  Card(
+                    margin: const EdgeInsets.all(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SegmentedButton<String>(
+                            segments: [
+                              ButtonSegment(
+                                value: 'today',
+                                label: Text(s.todayTitle),
+                              ),
+                              ButtonSegment(
+                                value: '7d',
+                                label: Text(s.mobileWeek),
+                              ),
+                              ButtonSegment(
+                                value: '30d',
+                                label: Text(s.mobileMonth),
+                              ),
+                            ],
+                            selected: {_range},
+                            onSelectionChanged: (v) {
+                              setState(() {
+                                _range = v.first;
+                                _summary = null;
+                              });
+                              _loadSummary();
+                            },
+                          ),
+                          if (_statsLoading) const LinearProgressIndicator(),
+                          if (_statsError != null) ...[
+                            Text(_statsError!),
+                            TextButton(
+                              onPressed: _loadSummary,
+                              child: Text(s.retry),
+                            ),
+                          ],
+                          if (_summary != null &&
+                              !(_summary!['sites'] as List? ?? []).any(
+                                (item) => item['hasBaseline'] == true,
+                              ))
+                            Text(s.mobileNoBaseline),
+                          if (_summary != null &&
+                              (_summary!['sites'] as List? ?? []).any(
+                                (item) => item['hasBaseline'] == true,
+                              )) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              '↑${formatBytes((_summary!['totalUploaded'] as num?)?.toInt() ?? 0)}  ${s.billedDownloaded(formatBytes((_summary!['totalDownloaded'] as num?)?.toInt() ?? 0))}',
+                            ),
+                            Text(
+                              '${s.kpiBonus} ${formatNumber((_summary!['totalBonus'] as num?)?.toDouble() ?? 0)}',
+                            ),
+                            Text(
+                              s.todayBilledNote,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 if (l.userError != null && l.userError!.isNotEmpty)
                   ListTile(
                     leading: const Icon(Icons.warning_amber),

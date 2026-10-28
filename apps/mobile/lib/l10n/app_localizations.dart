@@ -97,6 +97,132 @@ abstract class S {
     Locale('zh'),
   ];
 
+  /// No description provided for @mobileNoBaseline.
+  ///
+  /// In zh, this message translates to:
+  /// **'此周期暂无可比较的快照'**
+  String get mobileNoBaseline;
+
+  /// No description provided for @mobileEditor.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑'**
+  String get mobileEditor;
+
+  /// No description provided for @mobileAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'新增'**
+  String get mobileAdd;
+
+  /// No description provided for @mobileUpgrade.
+  ///
+  /// In zh, this message translates to:
+  /// **'此功能需要升级主机，请先更新 pt-tools'**
+  String get mobileUpgrade;
+
+  /// No description provided for @mobileDiscard.
+  ///
+  /// In zh, this message translates to:
+  /// **'放弃修改'**
+  String get mobileDiscard;
+
+  /// No description provided for @mobileDiscardBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'还有未保存的修改，要离开吗？'**
+  String get mobileDiscardBody;
+
+  /// No description provided for @mobileKeep.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续编辑'**
+  String get mobileKeep;
+
+  /// No description provided for @mobileUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此功能仅支持 Android'**
+  String get mobileUnsupported;
+
+  /// No description provided for @mobileSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'图片已保存'**
+  String get mobileSaved;
+
+  /// No description provided for @mobileShare.
+  ///
+  /// In zh, this message translates to:
+  /// **'分享统计海报'**
+  String get mobileShare;
+
+  /// No description provided for @mobilePeriod.
+  ///
+  /// In zh, this message translates to:
+  /// **'统计周期'**
+  String get mobilePeriod;
+
+  /// No description provided for @mobileWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'本周'**
+  String get mobileWeek;
+
+  /// No description provided for @mobileMonth.
+  ///
+  /// In zh, this message translates to:
+  /// **'本月'**
+  String get mobileMonth;
+
+  /// No description provided for @mobileRuns.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行记录'**
+  String get mobileRuns;
+
+  /// No description provided for @mobileEnable.
+  ///
+  /// In zh, this message translates to:
+  /// **'启用'**
+  String get mobileEnable;
+
+  /// No description provided for @mobileDisable.
+  ///
+  /// In zh, this message translates to:
+  /// **'停用'**
+  String get mobileDisable;
+
+  /// No description provided for @mobileDeleteBrush.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除这个刷流任务？'**
+  String get mobileDeleteBrush;
+
+  /// No description provided for @mobileSkipped.
+  ///
+  /// In zh, this message translates to:
+  /// **'跳过此集'**
+  String get mobileSkipped;
+
+  /// No description provided for @mobileUnlock.
+  ///
+  /// In zh, this message translates to:
+  /// **'解锁版本'**
+  String get mobileUnlock;
+
+  /// No description provided for @mobileRestore.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复追更'**
+  String get mobileRestore;
+
+  /// No description provided for @mobileRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新数据'**
+  String get mobileRefresh;
+
   /// No description provided for @appTitle.
   ///
   /// In zh, this message translates to:

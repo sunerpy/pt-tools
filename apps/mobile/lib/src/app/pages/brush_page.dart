@@ -6,6 +6,8 @@ import '../../../l10n/app_localizations.dart';
 import '../format.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
+import 'brush_details_page.dart';
+import 'mobile_editor_page.dart';
 
 /// 刷流任务：在刷的种子数、今天与累计的收益。
 class BrushPage extends ConsumerWidget {
@@ -16,7 +18,21 @@ class BrushPage extends ConsumerWidget {
     final s = S.of(context);
     final list = ref.watch(brushTasksProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(s.moreBrush)),
+      appBar: AppBar(
+        title: Text(s.moreBrush),
+        actions: [
+          if (ref.watch(canWriteProvider))
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: s.mobileAdd,
+              onPressed: () async {
+                if (await openMobileEditor(context, ref, 'brush')) {
+                  ref.invalidate(brushTasksProvider);
+                }
+              },
+            ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
           try {
@@ -38,6 +54,23 @@ class BrushPage extends ConsumerWidget {
                       Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
+                          onTap: () async {
+                            final meta = await ref.read(metaProvider.future);
+                            if (!context.mounted) return;
+                            if (!meta.features.contains('brush_manage')) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(s.mobileUpgrade)),
+                              );
+                              return;
+                            }
+                            await Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    BrushDetailsPage(id: b.id, name: b.name),
+                              ),
+                            );
+                            ref.invalidate(brushTasksProvider);
+                          },
                           leading: SiteIcon(b.site, size: 32),
                           title: Text(b.name),
                           subtitle: Text(

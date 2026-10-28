@@ -6,6 +6,28 @@ import json, re, pathlib
 INT = {"count", "ok", "failed", "days", "level", "supported", "ms", "inLibrary", "aired"}
 
 S = [
+    ("mobileNoBaseline", "此周期暂无可比较的快照", "No comparable snapshots for this period yet"),
+    ('mobileEditor', '编辑', 'Edit'),
+    ('mobileAdd', '新增', 'Add'),
+    ('mobileUpgrade', '此功能需要升级主机，请先更新 pt-tools', 'Update pt-tools on the host to use this feature'),
+    ('mobileDiscard', '放弃修改', 'Discard changes'),
+    ('mobileDiscardBody', '还有未保存的修改，要离开吗？', 'You have unsaved changes. Leave this page?'),
+    ('mobileKeep', '继续编辑', 'Keep editing'),
+    ('mobileUnsupported', '此功能仅支持 Android', 'This feature is available on Android'),
+    ('mobileSaved', '图片已保存', 'Image saved'),
+    ('mobileShare', '分享统计海报', 'Share stats poster'),
+    ('mobilePeriod', '统计周期', 'Period'),
+    ('mobileWeek', '本周', 'This week'),
+    ('mobileMonth', '本月', 'This month'),
+    ('mobileRuns', '运行记录', 'Run history'),
+    ('mobileEnable', '启用', 'Enable'),
+    ('mobileDisable', '停用', 'Disable'),
+    ('mobileDeleteBrush', '删除这个刷流任务？', 'Delete this brush task?'),
+    ('mobileSkipped', '跳过此集', 'Skip episode'),
+    ('mobileUnlock', '解锁版本', 'Unlock version'),
+    ('mobileRestore', '恢复追更', 'Resume tracking'),
+    ('mobileRefresh', '刷新数据', 'Refresh data'),
+
     ("appTitle", "pt-tools", "pt-tools"),
     ("retry", "重试", "Retry"),
     ("cancel", "取消", "Cancel"),

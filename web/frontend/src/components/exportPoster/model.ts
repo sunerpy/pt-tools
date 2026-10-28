@@ -113,6 +113,8 @@ export interface PosterMaskOptions {
 }
 
 export interface PosterInput {
+  /** Defaults to the desktop Chinese format. */
+  locale?: string;
   stats: AggregatedStatsResponse;
   /** 入图的站点（顺序不限，这里按上传排） */
   sites: UserInfoResponse[];
@@ -136,7 +138,22 @@ export function bytesNumber(bytes: number): PosterNumber {
 }
 
 /** 「328.45万」→ 数与单位；formatNumber 的单位是紧跟在数后面的 K、万、亿 */
-export function countNumber(n: number): PosterNumber {
+export function countNumber(n: number, locale = "zh"): PosterNumber {
+  if (locale.startsWith("en")) {
+    const abs = Math.abs(n);
+    const scale =
+      abs >= 1e12
+        ? ([1e12, "T"] as const)
+        : abs >= 1e9
+          ? ([1e9, "B"] as const)
+          : abs >= 1e6
+            ? ([1e6, "M"] as const)
+            : abs >= 1e3
+              ? ([1e3, "K"] as const)
+              : ([1, ""] as const);
+    const value = (n / scale[0]).toFixed(scale[0] === 1 ? 0 : 2);
+    return { text: value + scale[1], value, unit: scale[1] };
+  }
   const text = formatNumber(n);
   const m = /^(-?[\d.]+)(K|万|亿)?$/.exec(text);
   return m ? { text, value: m[1]!, unit: m[2] ?? "" } : { text, value: text, unit: "" };
@@ -204,6 +221,15 @@ export function fallbackCells(siteId: string, color: string): string[] {
 
 export function buildPosterModel(input: PosterInput): PosterModel {
   const { stats, now } = input;
+  const locale = input.locale ?? "zh";
+  const english = locale.startsWith("en");
+  const count = (n: number) => countNumber(n, locale);
+  const duration = (timestamp: number) => {
+    const value = formatJoinDuration(timestamp);
+    return english
+      ? value.replace(/年/g, "y ").replace(/月/g, "mo ").replace(/天/g, "d").trim()
+      : value;
+  };
   const joinTs = stats.perSiteStats
     .map((s) => s.joinDate ?? 0)
     .filter((t) => t > 0)
@@ -225,11 +251,11 @@ export function buildPosterModel(input: PosterInput): PosterModel {
       up: bytesNumber(s.uploaded),
       down: bytesNumber(s.downloaded),
       ratio: formatRatio(s.ratio),
-      bonus: countNumber(s.bonus ?? 0),
-      bonusName: getSiteBonusName(s.site),
-      bph: s.bonusPerHour && s.bonusPerHour > 0 ? formatNumber(s.bonusPerHour) : "",
+      bonus: count(s.bonus ?? 0),
+      bonusName: english ? "Bonus" : getSiteBonusName(s.site),
+      bph: s.bonusPerHour && s.bonusPerHour > 0 ? count(s.bonusPerHour).text : "",
       join: s.joinDate && s.joinDate > 0 ? formatDate(s.joinDate) : "",
-      joinDur: s.joinDate && s.joinDate > 0 ? formatJoinDuration(s.joinDate) : "",
+      joinDur: s.joinDate && s.joinDate > 0 ? duration(s.joinDate) : "",
       upShare: maxUp > 0 ? Math.max(0, s.uploaded) / maxUp : 0,
       upFrac: frac(s.uploaded, s.downloaded),
       color,
@@ -246,18 +272,18 @@ export function buildPosterModel(input: PosterInput): PosterModel {
     serial: `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}-${String(stats.siteCount).padStart(4, "0")}`,
     siteCount: stats.siteCount,
     join: joinTs > 0 ? formatDate(joinTs) : "",
-    joinDur: joinTs > 0 ? formatJoinDuration(joinTs) : "",
+    joinDur: joinTs > 0 ? duration(joinTs) : "",
     up: bytesNumber(stats.totalUploaded),
     down: bytesNumber(stats.totalDownloaded),
     ratio: formatRatio(stats.averageRatio),
     upFrac: frac(stats.totalUploaded, stats.totalDownloaded),
-    bonus: countNumber(stats.totalBonus),
-    bph: countNumber(stats.totalBonusPerHour ?? 0),
+    bonus: count(stats.totalBonus),
+    bph: count(stats.totalBonusPerHour ?? 0),
     seeding: stats.totalSeeding.toLocaleString("en-US"),
     seedSize: bytesNumber(stats.totalSeederSize ?? 0),
     seedBonus:
       stats.totalSeedingBonus && stats.totalSeedingBonus > 0
-        ? countNumber(stats.totalSeedingBonus)
+        ? count(stats.totalSeedingBonus)
         : null,
     avgUp: bytesNumber(stats.siteCount > 0 ? stats.totalUploaded / stats.siteCount : 0),
     inc: inc
@@ -265,7 +291,7 @@ export function buildPosterModel(input: PosterInput): PosterModel {
           label: input.incrementLabel,
           up: signed(formatBytes(inc.totalUploaded)),
           down: signed(formatBytes(inc.totalDownloaded)),
-          bonus: signed(formatNumber(Math.round(inc.totalBonus))),
+          bonus: signed(count(Math.round(inc.totalBonus)).text),
           upFrac: frac(inc.totalUploaded, inc.totalDownloaded),
         }
       : null,

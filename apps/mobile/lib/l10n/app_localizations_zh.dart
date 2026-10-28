@@ -10,6 +10,69 @@ class SZh extends S {
   SZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get mobileNoBaseline => '此周期暂无可比较的快照';
+
+  @override
+  String get mobileEditor => '编辑';
+
+  @override
+  String get mobileAdd => '新增';
+
+  @override
+  String get mobileUpgrade => '此功能需要升级主机，请先更新 pt-tools';
+
+  @override
+  String get mobileDiscard => '放弃修改';
+
+  @override
+  String get mobileDiscardBody => '还有未保存的修改，要离开吗？';
+
+  @override
+  String get mobileKeep => '继续编辑';
+
+  @override
+  String get mobileUnsupported => '此功能仅支持 Android';
+
+  @override
+  String get mobileSaved => '图片已保存';
+
+  @override
+  String get mobileShare => '分享统计海报';
+
+  @override
+  String get mobilePeriod => '统计周期';
+
+  @override
+  String get mobileWeek => '本周';
+
+  @override
+  String get mobileMonth => '本月';
+
+  @override
+  String get mobileRuns => '运行记录';
+
+  @override
+  String get mobileEnable => '启用';
+
+  @override
+  String get mobileDisable => '停用';
+
+  @override
+  String get mobileDeleteBrush => '删除这个刷流任务？';
+
+  @override
+  String get mobileSkipped => '跳过此集';
+
+  @override
+  String get mobileUnlock => '解锁版本';
+
+  @override
+  String get mobileRestore => '恢复追更';
+
+  @override
+  String get mobileRefresh => '刷新数据';
+
+  @override
   String get appTitle => 'pt-tools';
 
   @override

@@ -87,10 +87,14 @@ describe("MCP 接入", () => {
     expect(q("mcp-tokens")!.getAttribute("href")).toContain("api-tokens");
   });
 
-  it("工具清单：37 个（含订阅与追剧、媒体库与配置），写工具标 MCP 操作", async () => {
+  it("工具清单：41 个（含订阅与追剧、媒体库、刷流与配置），写工具标 MCP 操作", async () => {
     await mountPage();
     const rows = document.querySelectorAll("[data-testid^=mcp-tool-]");
-    expect(rows).toHaveLength(37);
+    expect(rows).toHaveLength(41);
+    expect(q("mcp-tool-list_brush_tasks")!.textContent).toContain("MCP 读取");
+    expect(q("mcp-tool-get_brush_task")!.textContent).toContain("MCP 读取");
+    expect(q("mcp-tool-list_brush_runs")!.textContent).toContain("MCP 读取");
+    expect(q("mcp-tool-change_brush_task")!.textContent).toContain("MCP 操作");
     expect(q("mcp-tool-update_subscription")!.textContent).toContain("MCP 操作");
     expect(q("mcp-tool-preview_schedule")!.textContent).toContain("MCP 读取");
     expect(q("mcp-tool-reorganize_subscription_torrent")!.textContent).toContain("MCP 操作");

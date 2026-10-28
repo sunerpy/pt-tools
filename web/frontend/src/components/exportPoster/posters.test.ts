@@ -77,12 +77,17 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function render(styleId: PosterStyleId, colorway: string, over: Partial<PosterInput> = {}) {
+function render(
+  styleId: PosterStyleId,
+  colorway: string,
+  over: Partial<PosterInput> = {},
+  locale = "zh",
+) {
   unmount?.();
   const el = document.createElement("div");
   document.body.appendChild(el);
-  const model = buildPosterModel(input(over));
-  const app = createApp({ render: () => h(ExportPoster, { model, styleId, colorway }) });
+  const model = buildPosterModel(input({ ...over, locale }));
+  const app = createApp({ render: () => h(ExportPoster, { model, styleId, colorway, locale }) });
   app.mount(el);
   unmount = () => app.unmount();
   const poster = el.querySelector<HTMLElement>(".poster");
@@ -188,5 +193,18 @@ describe("各样式的收起与补位", () => {
     const p = render("receipt", "white");
     expect(p.textContent).toContain("THIS WEEK");
     expect(p.querySelector(".pr-stamp")?.textContent).toContain("8.04");
+  });
+});
+
+describe("英文海报完整内容", () => {
+  it.each(POSTER_STYLES.map((style) => style.id))("%s：逐站标签和数字单位不残留中文", (styleId) => {
+    const p = render(
+      styleId,
+      POSTER_STYLES.find((s) => s.id === styleId)!.colorways[0]!.id,
+      { title: "My PT statistics", incrementLabel: "7 days" },
+      "en",
+    );
+    expect(p.textContent).not.toMatch(/[\u3400-\u9fff]/);
+    expect(p.textContent).toContain("3.28");
   });
 });

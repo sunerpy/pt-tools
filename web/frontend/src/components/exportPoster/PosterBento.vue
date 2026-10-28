@@ -5,6 +5,7 @@
  * 其余的补位。
  */
 import { computed } from "vue";
+import { usePosterWords } from "./locale";
 
 import PtIcon from "@/components/PtIcon";
 
@@ -13,6 +14,7 @@ import PosterLogo from "./PosterLogo.vue";
 import PosterMask from "./PosterMask.vue";
 
 const props = defineProps<{ model: PosterModel; colorway: string }>();
+const t = usePosterWords();
 
 /** 上传柱：最多 12 根，太多了一根根细得看不出 */
 const cols = computed(() =>
@@ -24,12 +26,12 @@ const upPct = computed(() => Math.round(props.model.upFrac * 100));
 const mini = computed(() => {
   const m = props.model;
   const items: { k: string; v: string; c: string }[] = [
-    { k: "站点", v: `${m.siteCount} 个`, c: "sites" },
+    { k: t("站点"), v: `${m.siteCount}${t(" 个")}`, c: "sites" },
   ];
-  if (m.join) items.push({ k: "最早入站", v: m.join, c: "join" });
-  if (m.seedBonus) items.push({ k: "做种积分", v: m.seedBonus.text, c: "sb" });
-  items.push({ k: "平均每站上传", v: m.avgUp.text, c: "up" });
-  if (items.length % 2 === 1) items.push({ k: "做种量", v: m.seedSize.text, c: "size" });
+  if (m.join) items.push({ k: t("最早入站"), v: m.join, c: "join" });
+  if (m.seedBonus) items.push({ k: t("做种积分"), v: m.seedBonus.text, c: "sb" });
+  items.push({ k: t("平均每站上传"), v: m.avgUp.text, c: "up" });
+  if (items.length % 2 === 1) items.push({ k: t("做种量"), v: m.seedSize.text, c: "size" });
   return items;
 });
 </script>
@@ -39,17 +41,19 @@ const mini = computed(() => {
     <div class="pb-head">
       <div>
         <h1 class="pb-title">{{ model.title }}</h1>
-        <div class="pb-sub">{{ model.siteCount }} 个站点 · 更新于 {{ model.date }}</div>
+        <div class="pb-sub">{{ model.siteCount }}{{ t(" 个站点 · 更新于 ") }}{{ model.date }}</div>
       </div>
       <span v-if="model.joinDur" class="pb-badge">
-        <PtIcon name="calendar" :size="14" />已入站 {{ model.joinDur }}
+        <PtIcon name="calendar" :size="14" />{{ t("已入站 ") }}{{ model.joinDur }}
       </span>
     </div>
 
     <div class="pb-grid">
       <div class="pb-tile pb-s4 pb-hero">
         <div class="pb-lab">
-          <PtIcon name="upload" :size="15" class="pb-ic" style="color: var(--c-up)" />总上传
+          <PtIcon name="upload" :size="15" class="pb-ic" style="color: var(--c-up)" />{{
+            t("总上传\n        ")
+          }}
         </div>
         <div class="pb-v" style="color: var(--c-up)">
           {{ model.up.value }}<small>{{ model.up.unit }}</small>
@@ -57,12 +61,14 @@ const mini = computed(() => {
         <div v-if="cols.length > 1" class="pb-cols">
           <i v-for="(h, i) in cols" :key="i" :style="{ height: `${h.toFixed(1)}%` }" />
         </div>
-        <div v-else class="pb-hint">{{ model.siteCount }} 个站点合计</div>
+        <div v-else class="pb-hint">{{ model.siteCount }}{{ t(" 个站点合计") }}</div>
       </div>
 
       <div class="pb-tile pb-s2">
         <div class="pb-lab">
-          <PtIcon name="gauge" :size="15" class="pb-ic" style="color: var(--c-ratio)" />平均分享率
+          <PtIcon name="gauge" :size="15" class="pb-ic" style="color: var(--c-ratio)" />{{
+            t("平均分享率\n        ")
+          }}
         </div>
         <div class="pb-v pb-v--ratio" style="color: var(--c-ratio)">{{ model.ratio }}</div>
         <div class="pb-split">
@@ -70,68 +76,77 @@ const mini = computed(() => {
           <i :style="{ flex: 1, background: 'var(--c-down)' }" />
         </div>
         <div class="pb-legend">
-          <span>上传 {{ upPct }}%</span><span>下载 {{ 100 - upPct }}%</span>
+          <span>{{ t("上传 ") }}{{ upPct }}%</span><span>{{ t("下载 ") }}{{ 100 - upPct }}%</span>
         </div>
       </div>
 
       <div class="pb-tile pb-s2">
         <div class="pb-lab">
-          <PtIcon
-            name="download"
-            :size="15"
-            class="pb-ic"
-            style="color: var(--c-down)" />下载（计费）
+          <PtIcon name="download" :size="15" class="pb-ic" style="color: var(--c-down)" />{{
+            t("下载（计费）\n        ")
+          }}
         </div>
         <div class="pb-v" style="color: var(--c-down)">
           {{ model.down.value }}<small>{{ model.down.unit }}</small>
         </div>
-        <div class="pb-hint">按免费、折扣折算以后</div>
+        <div class="pb-hint">{{ t("按免费、折扣折算以后") }}</div>
       </div>
 
       <div class="pb-tile pb-s2">
         <div class="pb-lab">
-          <PtIcon name="coins" :size="15" class="pb-ic" style="color: var(--c-bonus)" />总魔力
+          <PtIcon name="coins" :size="15" class="pb-ic" style="color: var(--c-bonus)" />{{
+            t("总魔力\n        ")
+          }}
         </div>
         <div class="pb-v" style="color: var(--c-bonus)">
           {{ model.bonus.value }}<small>{{ model.bonus.unit }}</small>
         </div>
         <div class="pb-hint">
-          时魔 <b style="color: var(--c-bph)">{{ model.bph.text }}</b
+          {{ t("\n          时魔 ") }}<b style="color: var(--c-bph)">{{ model.bph.text }}</b
           >/h
         </div>
       </div>
 
       <div class="pb-tile pb-s2">
         <div class="pb-lab">
-          <PtIcon name="leaf" :size="15" class="pb-ic" style="color: var(--c-seed)" />做种
+          <PtIcon name="leaf" :size="15" class="pb-ic" style="color: var(--c-seed)" />{{
+            t("做种\n        ")
+          }}
         </div>
-        <div class="pb-v" style="color: var(--c-seed)">{{ model.seeding }}<small>个</small></div>
+        <div class="pb-v" style="color: var(--c-seed)">
+          {{ model.seeding }}<small>{{ t("个") }}</small>
+        </div>
         <div class="pb-hint">
-          共 <b style="color: var(--c-size)">{{ model.seedSize.text }}</b>
+          {{ t("\n          共 ") }}<b style="color: var(--c-size)">{{ model.seedSize.text }}</b>
         </div>
       </div>
 
       <div v-if="model.inc" class="pb-tile pb-s3">
         <div class="pb-lab">
           <PtIcon name="trending-up" :size="15" class="pb-ic" style="color: var(--c-sb)" />
-          {{ model.inc.label }}增量
+          {{ model.inc.label }}{{ t("增量\n        ") }}
         </div>
         <div class="pb-inc">
           <div>
-            <span>上传</span><b style="color: var(--c-up)">{{ model.inc.up }}</b>
+            <span>{{ t("上传") }}</span
+            ><b style="color: var(--c-up)">{{ model.inc.up }}</b>
           </div>
           <div>
-            <span>下载</span><b style="color: var(--c-down)">{{ model.inc.down }}</b>
+            <span>{{ t("下载") }}</span
+            ><b style="color: var(--c-down)">{{ model.inc.down }}</b>
           </div>
           <div>
-            <span>魔力</span><b style="color: var(--c-bonus)">{{ model.inc.bonus }}</b>
+            <span>{{ t("魔力") }}</span
+            ><b style="color: var(--c-bonus)">{{ model.inc.bonus }}</b>
           </div>
         </div>
       </div>
 
       <div class="pb-tile" :class="model.inc ? 'pb-s3' : 'pb-s6'">
         <div class="pb-lab">
-          <PtIcon name="layers" :size="15" class="pb-ic" style="color: var(--c-join)" />账号
+          <PtIcon name="layers" :size="15" class="pb-ic" style="color: var(--c-join)" />{{
+            t("账号\n        ")
+          }}
         </div>
         <div class="pb-mini" :class="{ 'is-wide': !model.inc }">
           <div v-for="it in mini" :key="it.k">
@@ -142,7 +157,9 @@ const mini = computed(() => {
       </div>
 
       <div v-if="model.sites.length" class="pb-tile pb-s6">
-        <div class="pb-lab">逐站明细<span class="pb-lab__end">按上传排序</span></div>
+        <div class="pb-lab">
+          {{ t("逐站明细") }}<span class="pb-lab__end">{{ t("按上传排序") }}</span>
+        </div>
         <div class="pb-sites">
           <div v-for="s in model.sites" :key="s.id" class="pb-site" :style="{ '--hue': s.color }">
             <div class="pb-site__top">
@@ -161,11 +178,11 @@ const mini = computed(() => {
             </div>
             <div class="pb-site__nums">
               <div>
-                <div class="pb-site__k">上传</div>
+                <div class="pb-site__k">{{ t("上传") }}</div>
                 <div class="pb-site__n" style="color: var(--c-up)">{{ s.up.text }}</div>
               </div>
               <div>
-                <div class="pb-site__k">分享率</div>
+                <div class="pb-site__k">{{ t("分享率") }}</div>
                 <div class="pb-site__n" style="color: var(--c-ratio)">{{ s.ratio }}</div>
               </div>
               <div>
@@ -181,7 +198,7 @@ const mini = computed(() => {
     </div>
 
     <div class="pb-foot">
-      <b>PT-TOOLS</b><span>生成于 {{ model.generated }}</span>
+      <b>PT-TOOLS</b><span>{{ t("生成于 ") }}{{ model.generated }}</span>
     </div>
   </div>
 </template>

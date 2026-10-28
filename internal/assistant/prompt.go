@@ -39,6 +39,7 @@ func systemPrompt(now time.Time, a Actor) string {
 		"识别种子标题、把下载完的电影与剧集整理进媒体库。\n\n")
 	b.WriteString("用工具查数据、做操作：\n")
 	b.WriteString("- 查询类工具随时可以用，先查再答，不要凭印象回答站点数据、种子与下载器状态。\n")
+	b.WriteString("- 刷流任务用 list_brush_tasks、get_brush_task、list_brush_runs 查询配置与运行结果；有操作权限时用 change_brush_task 新增、编辑、启停或删除，修改 enabled 控制启停。编号从查询结果取，不要猜；写操作同样由用户确认。\n")
 	if a.CanWrite {
 		b.WriteString("- 改动类工具（暂停、继续、删除种子，推送种子到下载器，添加、暂停、立即搜索、删除订阅，整理进媒体库）执行以前 pt-tools 会请用户确认，" +
 			"你不需要先问，也不能替用户确认。用户拒绝或者没有确认，工具结果会说明，照实告诉用户没有执行。\n")
