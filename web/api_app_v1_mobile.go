@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
 )
 
 // AppMobileOption is an editor choice. It deliberately contains no credentials or addresses.
@@ -32,32 +35,38 @@ func (s *Server) appMobileOptions(w http.ResponseWriter, r *http.Request) {
 			out.Errors[source] = appRedactAddr(err.Error())
 			continue
 		}
-		for _, item := range state.Items {
-			name, _ := item["name"].(string)
-			if source == "sites" {
-				if enabled, ok := item["enabled"].(bool); ok && !enabled {
-					continue
-				}
-				display, _ := item["display_name"].(string)
-				if display == "" {
-					display = name
-				}
-				out.Sites = append(out.Sites, AppMobileSiteOption{Name: name, DisplayName: display})
-				continue
-			}
-			id, _ := strconv.ParseUint(configIDText(item["id"]), 10, 64)
-			option := AppMobileOption{ID: uint(id), Name: name}
-			switch source {
-			case "downloaders":
-				out.Downloaders = append(out.Downloaders, option)
-			case "quality_profiles":
-				out.Profiles = append(out.Profiles, option)
-			case "libraries":
-				out.Libraries = append(out.Libraries, option)
-			}
-		}
+		out.add(source, state.Items)
 	}
 	appJSON(w, out)
+}
+
+// add puts one configuration resource's items into the choices: only enabled sites (named by
+// their display name, or their name when it is empty); other resources keep just ID and name.
+func (o *AppMobileOptions) add(source string, items []map[string]any) {
+	for _, item := range items {
+		name, _ := item["name"].(string)
+		if source == "sites" {
+			if enabled, ok := item["enabled"].(bool); ok && !enabled {
+				continue
+			}
+			display, _ := item["display_name"].(string)
+			if display == "" {
+				display = name
+			}
+			o.Sites = append(o.Sites, AppMobileSiteOption{Name: name, DisplayName: display})
+			continue
+		}
+		id, _ := strconv.ParseUint(configIDText(item["id"]), 10, 64)
+		option := AppMobileOption{ID: uint(id), Name: name}
+		switch source {
+		case "downloaders":
+			o.Downloaders = append(o.Downloaders, option)
+		case "quality_profiles":
+			o.Profiles = append(o.Profiles, option)
+		case "libraries":
+			o.Libraries = append(o.Libraries, option)
+		}
+	}
 }
 
 // Only this named configuration resource is exposed; devices cannot select arbitrary resources.
@@ -182,10 +191,12 @@ func (s *Server) appBrushRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	repo, ok := brushRepo(w)
-	if !ok {
+	// brushRepo answers in plain text; App API errors are JSON
+	if global.GlobalDB == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")
 		return
 	}
+	repo := models.NewBrushRepository(global.GlobalDB.DB)
 	appMobileJSON(w, r, func(w http.ResponseWriter, r *http.Request) { listBrushRuns(w, r, repo, id) })
 }
 

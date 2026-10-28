@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -115,4 +116,97 @@ func TestAppMobileSubscriptionKeywords(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sub))
 	assert.Equal(t, "2160p", sub.IncludeKeywords)
 	assert.Empty(t, sub.ExcludeKeywords)
+}
+
+func TestAppMobileOptionsAdd(t *testing.T) {
+	var o AppMobileOptions
+	o.add("sites", []map[string]any{
+		{"name": "hdsky", "display_name": "HDSky", "enabled": true},
+		{"name": "plain", "enabled": true},
+		{"name": "off", "display_name": "Off", "enabled": false},
+		{"name": "unknown"},
+	})
+	o.add("downloaders", []map[string]any{{"id": "3", "name": "qb"}})
+	o.add("quality_profiles", []map[string]any{{"id": float64(5), "name": "4K"}})
+	o.add("libraries", []map[string]any{{"id": json.Number("7"), "name": "电影"}})
+	assert.Equal(t, []AppMobileSiteOption{
+		{Name: "hdsky", DisplayName: "HDSky"},
+		{Name: "plain", DisplayName: "plain"},
+		{Name: "unknown", DisplayName: "unknown"},
+	}, o.Sites, "disabled sites are left out; a missing display name falls back to the name")
+	assert.Equal(t, []AppMobileOption{{ID: 3, Name: "qb"}}, o.Downloaders)
+	assert.Equal(t, []AppMobileOption{{ID: 5, Name: "4K"}}, o.Profiles)
+	assert.Equal(t, []AppMobileOption{{ID: 7, Name: "电影"}}, o.Libraries)
+}
+
+func TestAppMobileOptionsListsEnabledChoicesWithoutSecrets(t *testing.T) {
+	e := newAppEnv(t)
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", Enabled: true, AuthMethod: "cookie", Cookie: "secret-cookie", IsBuiltin: true}).Error)
+	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Username: "secret-user", Password: "secret-password", Enabled: true}).Error)
+	w := e.do(appReq{method: http.MethodGet, path: appPrefix + "/mobile/options", bearer: e.token(apitoken.ScopeAppRead)})
+	require.Equal(t, 200, w.Code, w.Body.String())
+	assertNoSecrets(t, w.Body.Bytes())
+	assert.NotContains(t, w.Body.String(), "secret-")
+	var got AppMobileOptions
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.NotEmpty(t, got.Downloaders)
+	assert.Equal(t, "qb", got.Downloaders[0].Name)
+	assert.NotZero(t, got.Downloaders[0].ID)
+}
+
+func TestAppMobileBrushRejectsBadRequests(t *testing.T) {
+	e := newAppEnv(t)
+	db := global.GlobalDB.DB
+	require.NoError(t, db.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}, &models.BrushRun{}))
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", Enabled: true, AuthMethod: "cookie", Cookie: "secret-cookie", IsBuiltin: true}).Error)
+	dl := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
+	require.NoError(t, db.Create(&dl).Error)
+	read := e.token(apitoken.ScopeAppRead)
+	full := e.token(apitoken.ScopeAppRead, apitoken.ScopeAppWrite)
+	for _, q := range []appReq{
+		{method: http.MethodGet, path: appPrefix + "/brush/tasks/abc", bearer: read},
+		{method: http.MethodGet, path: appPrefix + "/brush/tasks/0/runs", bearer: read},
+		{method: http.MethodPut, path: appPrefix + "/brush/tasks/abc", body: `{"name":"x"}`, bearer: full},
+		{method: http.MethodPost, path: appPrefix + "/brush/tasks/preview", body: `{`, bearer: read},
+		{method: http.MethodPost, path: appPrefix + "/brush/tasks", body: `{`, bearer: full},
+		{method: http.MethodPost, path: appPrefix + "/brush/tasks/1/status", body: `{`, bearer: full},
+		{method: http.MethodDelete, path: appPrefix + "/brush/tasks/1", body: `{"id":1}`, bearer: full},
+	} {
+		w := e.do(q)
+		assert.Equal(t, 400, w.Code, "%s %s: %s", q.method, q.path, w.Body.String())
+	}
+	var stored int64
+	require.NoError(t, db.Model(&models.BrushTask{}).Count(&stored).Error)
+	assert.Zero(t, stored, "rejected requests change nothing")
+
+	// null clears nothing: the field is dropped and keeps its stored value
+	w := e.do(appReq{method: http.MethodPost, path: appPrefix + "/brush/tasks", body: brushBody("phone", dl.ID, nil), bearer: full})
+	require.Equal(t, 200, w.Code, w.Body.String())
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	id := strconv.Itoa(int(got["id"].(float64)))
+	w = e.do(appReq{method: http.MethodPut, path: appPrefix + "/brush/tasks/" + id, body: `{"name":"renamed","site_name":null}`, bearer: full})
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "renamed", got["name"])
+	assert.Equal(t, "hdsky", got["site_name"])
+}
+
+func TestAppMobileJSONRejectsNonJSON(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, appPrefix+"/stats/summary", nil)
+	w := httptest.NewRecorder()
+	appMobileJSON(w, r, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("not json")) })
+	assert.Equal(t, 500, w.Code)
+	assert.Contains(t, w.Body.String(), `"error":"internal"`)
+}
+
+func TestAppBrushRunsWithoutDatabase(t *testing.T) {
+	srv := setupServer(t)
+	saved := global.GlobalDB
+	global.GlobalDB = nil
+	t.Cleanup(func() { global.GlobalDB = saved })
+	w := appWithID(t, srv.appBrushRuns, http.MethodGet, appPrefix+"/brush/tasks/1/runs", "1", "")
+	assert.Equal(t, 503, w.Code)
+	assert.Contains(t, w.Body.String(), `"error":"unavailable"`)
 }
