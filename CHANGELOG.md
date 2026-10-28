@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.44](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.43...v1.0.0-rc.44) (2026-10-28)
+
+
+### Features
+
+* **mobile:** App 改成黑白主色，加入四套主题与描边图标 ([6b2e885](https://github.com/sunerpy/pt-tools/commit/6b2e8854cfcf87ce1f0a0c798afb2faa39468d38))
+* **mobile:** App 里可以编辑追剧与刷流任务、分享统计海报 ([6b2e885](https://github.com/sunerpy/pt-tools/commit/6b2e8854cfcf87ce1f0a0c798afb2faa39468d38))
+
 ## [1.0.0-rc.43](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.42...v1.0.0-rc.43) (2026-10-27)
 
 
