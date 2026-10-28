@@ -4,6 +4,7 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../icons.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
 
@@ -31,13 +32,13 @@ class DownloadersPage extends ConsumerWidget {
           value: list,
           onRetry: () => ref.invalidate(downloadersProvider),
           data: (l) => l.items.isEmpty
-              ? EmptyState(icon: Icons.dns_outlined, message: s.noDownloaders)
+              ? EmptyState(icon: PtGlyph.server, message: s.noDownloaders)
               : ListView(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   children: [
                     for (final d in l.items)
                       Card(
-                        margin: const EdgeInsets.only(bottom: 8),
+                        margin: const EdgeInsets.only(bottom: 10),
                         child: Padding(
                           padding: const EdgeInsets.all(14),
                           child: Column(
@@ -45,18 +46,35 @@ class DownloadersPage extends ConsumerWidget {
                             children: [
                               Row(
                                 children: [
+                                  PtIcon(
+                                    d.reachable
+                                        ? PtGlyph.server
+                                        : PtGlyph.serverOff,
+                                    size: 20,
+                                    color: d.reachable
+                                        ? Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant
+                                        : Theme.of(context).colorScheme.error,
+                                  ),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
                                       d.name,
                                       style: Theme.of(context)
                                           .textTheme
-                                          .titleMedium,
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                     ),
                                   ),
                                   if (d.default_)
-                                    Chip(
-                                      label: Text(s.defaultBadge),
-                                      visualDensity: VisualDensity.compact,
+                                    StatusPill(
+                                      text: s.defaultBadge,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
                                     ),
                                 ],
                               ),

@@ -4,6 +4,7 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../icons.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
 import 'brush_details_page.dart';
@@ -23,7 +24,7 @@ class BrushPage extends ConsumerWidget {
         actions: [
           if (ref.watch(canWriteProvider))
             IconButton(
-              icon: const Icon(Icons.add),
+              icon: const PtIcon(PtGlyph.plus),
               tooltip: s.mobileAdd,
               onPressed: () async {
                 if (await openMobileEditor(context, ref, 'brush')) {
@@ -46,14 +47,21 @@ class BrushPage extends ConsumerWidget {
           value: list,
           onRetry: () => ref.invalidate(brushTasksProvider),
           data: (items) => items.isEmpty
-              ? EmptyState(icon: Icons.autorenew, message: s.noBrush)
+              ? EmptyState(icon: PtGlyph.cycle, message: s.noBrush)
               : ListView(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   children: [
                     for (final b in items)
                       Card(
-                        margin: const EdgeInsets.only(bottom: 8),
+                        margin: const EdgeInsets.only(bottom: 10),
+                        clipBehavior: Clip.antiAlias,
                         child: ListTile(
+                          contentPadding: const EdgeInsets.fromLTRB(
+                            14,
+                            8,
+                            14,
+                            8,
+                          ),
                           onTap: () async {
                             final meta = await ref.read(metaProvider.future);
                             if (!context.mounted) return;

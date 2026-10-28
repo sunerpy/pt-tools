@@ -2,7 +2,19 @@
 
 ## Tokens
 
-沿用 web/frontend/src/styles/theme.scss、atoms.css、shell.css 中的 CSS 变量；不新增品牌配色、字体或阴影体系。Flutter 沿用 app.dart 的 Material 3 与 brandTeal / brandOrange。
+沿用 web/frontend/src/styles/theme.scss、atoms.css、shell.css 中的 CSS 变量；不新增品牌配色、字体或阴影体系。
+
+Flutter 的配色与组件样式在 apps/mobile/lib/src/app/theme.dart，照 Voltip 手机端的四套经典主题（色值取 Voltip 的 packages/ui/src/tokens.css）：
+
+- 主题：明亮·白瓷（默认）、暗黑·夜灯、暖纸·手稿、石墨·仪表，另有「跟随系统」（浅色用明亮、深色用暗黑），在「更多 → 外观」里选，存在本机。
+- 主色是墨色：浅色主题近黑、深色主题近白。主要按钮、选中的分段与筛选芯片、勾选框、聚焦的输入框边都用它；强调色（蓝，暖纸是赭石）只用在开关、进度条与链接上。
+- 面与线：浅灰页面，白色的顶栏与卡片加 1 dp 细线，不用阴影；底栏是白面加顶部细线，当前页是浅灰胶囊与墨色的图标和字。列表的每一项是一张卡片，设置类的行收进带小标题的卡片组。
+- 状态色（PtColors）：成功、警告、危险、信息，以及数值卡片用的紫、粉。状态标签是状态色的字压在它 12% 的淡染底上（StatusPill）；数值卡片按 Voltip 的写法把各自的色相淡淡混进卡片面与边框，每张卡一个色相。
+- 图标：apps/mobile/lib/src/app/icons.dart 的描边图标（24 的画布、1.75 的线宽、圆头圆角），路径照 Voltip 的 Icon.tsx，pt-tools 才有的几个按同样的画法补；不用 Material 的图标。
+- 圆角：卡片 14、按钮与输入框 12、对话框与底部面板 20；按钮至少 46 高，图标按钮与分段按钮的可点区域至少 44。
+- 对比度：每套主题的正文、次要文字、链接、墨色按钮上的字与状态色，在它们实际所在的底上都不低于 4.5:1，开关的轨道不低于 3:1；test/app/theme_test.dart 守着，改色值先跑它。
+
+手机嵌入页（web/frontend/src/mobile/mobile.css）跟着 App 的主题走：App 用 ?theme= 传主题名，编辑页换成同一组面、线、字、主色与圆角。
 
 ## Primitives
 

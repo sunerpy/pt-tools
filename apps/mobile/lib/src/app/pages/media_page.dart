@@ -7,7 +7,9 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import 'mobile_editor_page.dart';
 
@@ -26,7 +28,7 @@ class MediaPage extends ConsumerWidget {
           actions: [
             if (ref.watch(canWriteProvider))
               IconButton(
-                icon: const Icon(Icons.add),
+                icon: const PtIcon(PtGlyph.plus),
                 tooltip: s.mobileAdd,
                 onPressed: () async {
                   if (await openMobileEditor(context, ref, 'subscription')) {
@@ -79,48 +81,49 @@ class _Subscriptions extends ConsumerWidget {
         value: list,
         onRetry: () => ref.invalidate(subscriptionsProvider),
         data: (items) => items.isEmpty
-            ? EmptyState(
-                icon: Icons.bookmark_border,
-                message: s.noSubscriptions,
-              )
+            ? EmptyState(icon: PtGlyph.bookmark, message: s.noSubscriptions)
             : ListView.separated(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 itemCount: items.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 4),
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, i) {
                   final sub = items[i];
                   final p = sub.progress;
-                  return ListTile(
-                    onTap: () => context.go('/media/subscriptions/${sub.id}'),
-                    leading: Poster(sub.posterPath, width: 44, size: 'w185'),
-                    title: Text(
-                      sub.mediaType == 'tv' && sub.season > 0
-                          ? '${sub.title} S${sub.season.toString().padLeft(2, '0')}'
-                          : sub.title,
+                  return Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+                      onTap: () => context.go('/media/subscriptions/${sub.id}'),
+                      leading: Poster(sub.posterPath, width: 44, size: 'w185'),
+                      title: Text(
+                        sub.mediaType == 'tv' && sub.season > 0
+                            ? '${sub.title} S${sub.season.toString().padLeft(2, '0')}'
+                            : sub.title,
+                      ),
+                      subtitle: Text(
+                        [
+                          subStatusLabel(s, sub.status),
+                          if (sub.year != null && sub.year! > 0) '${sub.year}',
+                          if (sub.mediaType == 'tv') ...[
+                            s.subProgress(
+                              p.inLibrary,
+                              p.aired == 0 ? p.total : p.aired,
+                            ),
+                            if (p.missing.isNotEmpty)
+                              s.subMissing(p.missing.take(6).join(', ')),
+                          ] else
+                            p.inLibrary > 0 ? s.inLibrary : s.movieNotInLibrary,
+                        ].join(' · '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: sub.upgrade
+                          ? Tooltip(
+                              message: s.subUpgrade,
+                              child: const PtIcon(PtGlyph.sparkles, size: 20),
+                            )
+                          : null,
                     ),
-                    subtitle: Text(
-                      [
-                        subStatusLabel(s, sub.status),
-                        if (sub.year != null && sub.year! > 0) '${sub.year}',
-                        if (sub.mediaType == 'tv') ...[
-                          s.subProgress(
-                            p.inLibrary,
-                            p.aired == 0 ? p.total : p.aired,
-                          ),
-                          if (p.missing.isNotEmpty)
-                            s.subMissing(p.missing.take(6).join(', ')),
-                        ] else
-                          p.inLibrary > 0 ? s.inLibrary : s.movieNotInLibrary,
-                      ].join(' · '),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: sub.upgrade
-                        ? Tooltip(
-                            message: s.subUpgrade,
-                            child: const Icon(Icons.high_quality_outlined),
-                          )
-                        : null,
                   );
                 },
               ),
@@ -149,50 +152,47 @@ class _History extends ConsumerWidget {
         value: page,
         onRetry: () => ref.invalidate(mediaHistoryProvider),
         data: (p) => p.items.isEmpty
-            ? EmptyState(
-                icon: Icons.video_library_outlined,
-                message: s.noHistory,
-              )
+            ? EmptyState(icon: PtGlyph.library, message: s.noHistory)
             : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 itemCount: p.items.length,
-                separatorBuilder: (_, _) =>
-                    const Divider(height: 1, indent: 16),
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, i) {
                   final h = p.items[i];
                   final ep = h.season != null && h.season! > 0
                       ? ' S${h.season.toString().padLeft(2, '0')}${h.episode != null && h.episode! > 0 ? 'E${h.episode.toString().padLeft(2, '0')}' : ''}'
                       : '';
                   final (icon, color) = switch (h.status) {
-                    'done' => (
-                      Icons.check_circle_outline,
-                      const Color(0xFF10B981),
-                    ),
+                    'done' => (PtGlyph.checkCircle, context.pt.ok),
                     'failed' => (
-                      Icons.error_outline,
+                      PtGlyph.errorCircle,
                       Theme.of(context).colorScheme.error,
                     ),
                     _ => (
-                      Icons.remove_circle_outline,
-                      Theme.of(context).colorScheme.outline,
+                      PtGlyph.minusCircle,
+                      Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   };
-                  return ListTile(
-                    leading: Icon(icon, color: color),
-                    title: Text(
-                      '${h.title}$ep',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      [
-                        h.library_,
-                        formatBytes(h.size),
-                        formatTime(h.createdAt),
-                        if (h.message != null && h.message!.isNotEmpty)
-                          h.message!,
-                      ].whereType<String>().join(' · '),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                  return Card(
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+                      leading: PtIcon(icon, size: 22, color: color),
+                      title: Text(
+                        '${h.title}$ep',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        [
+                          h.library_,
+                          formatBytes(h.size),
+                          formatTime(h.createdAt),
+                          if (h.message != null && h.message!.isNotEmpty)
+                            h.message!,
+                        ].whereType<String>().join(' · '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   );
                 },
@@ -273,14 +273,14 @@ class _ExploreState extends ConsumerState<_Explore> {
           child: SearchBar(
             controller: _search,
             hintText: s.exploreSearchHint,
-            leading: const Icon(Icons.search),
+            leading: const PtIcon(PtGlyph.search, size: 20),
             elevation: const WidgetStatePropertyAll(0),
             onSubmitted: (v) =>
                 setState(() => _q = v.trim().isEmpty ? null : v.trim()),
             trailing: [
               if (_q != null)
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const PtIcon(PtGlyph.x, size: 20),
                   onPressed: () => setState(() {
                     _q = null;
                     _search.clear();
@@ -294,6 +294,7 @@ class _ExploreState extends ConsumerState<_Explore> {
           child: Row(
             children: [
               SegmentedButton<String>(
+                showSelectedIcon: false,
                 segments: [
                   ButtonSegment(value: 'movie', label: Text(s.exploreMovie)),
                   ButtonSegment(value: 'tv', label: Text(s.exploreTv)),
@@ -328,7 +329,7 @@ class _ExploreState extends ConsumerState<_Explore> {
             data: (p) => p.items.isEmpty
                 ? EmptyState(message: s.searchNoResults)
                 : GridView.builder(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                     gridDelegate:
                         const SliverGridDelegateWithMaxCrossAxisExtent(
                           maxCrossAxisExtent: 170,
@@ -387,9 +388,18 @@ class _ExploreCard extends StatelessWidget {
         ),
         const Spacer(),
         if (item.inLibrary)
-          Chip(label: Text(s.inLibrary), visualDensity: VisualDensity.compact)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: StatusPill(text: s.inLibrary, color: context.pt.ok),
+          )
         else if (item.subscribed)
-          Chip(label: Text(s.subscribed), visualDensity: VisualDensity.compact)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: StatusPill(
+              text: s.subscribed,
+              color: t.colorScheme.onSurfaceVariant,
+            ),
+          )
         else if (canWrite)
           FilledButton.tonal(
             onPressed: onSubscribe,

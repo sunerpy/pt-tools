@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../format.dart';
 import '../hybrid/mobile_api.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import 'mobile_editor_page.dart';
 
@@ -64,6 +67,10 @@ class _BrushDetailsPageState extends ConsumerState<BrushDetailsPage> {
               child: Text(s.cancel),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(c).colorScheme.error,
+                foregroundColor: Theme.of(c).colorScheme.onError,
+              ),
               onPressed: () => Navigator.pop(c, true),
               child: Text(s.actionDelete),
             ),
@@ -113,6 +120,7 @@ class _BrushDetailsPageState extends ConsumerState<BrushDetailsPage> {
           if (writable && _config != null)
             PopupMenuButton<String>(
               enabled: !_busy,
+              icon: const PtIcon(PtGlyph.moreVertical),
               onSelected: _change,
               itemBuilder: (_) => [
                 PopupMenuItem(value: 'edit', child: Text(s.mobileEditor)),
@@ -124,7 +132,15 @@ class _BrushDetailsPageState extends ConsumerState<BrushDetailsPage> {
                         : s.mobileEnable,
                   ),
                 ),
-                PopupMenuItem(value: 'delete', child: Text(s.actionDelete)),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text(
+                    s.actionDelete,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
               ],
             ),
         ],
@@ -142,32 +158,69 @@ class _BrushDetailsPageState extends ConsumerState<BrushDetailsPage> {
               ),
               TextButton(onPressed: () => _load(), child: Text(s.retry)),
             ],
-            Text(s.mobileRuns, style: Theme.of(context).textTheme.titleLarge),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                s.mobileRuns,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
             if (!_loading && _runs.isEmpty && _error == null)
               Padding(padding: const EdgeInsets.all(24), child: Text(s.empty)),
             for (final item in _runs)
               Builder(
                 builder: (context) {
                   final r = item as Map;
-                  return Card(
-                    child: ExpansionTile(
-                      title: Text(
-                        '${r['status'] ?? ''} · ${r['summary'] ?? ''}',
-                      ),
-                      subtitle: Text(
-                        '${r['started_at'] ?? ''}${r['error'] == null || r['error'] == '' ? '' : '\n${r['error']}'}',
-                      ),
-                      children: [
-                        for (final step in (r['steps'] as List? ?? []))
-                          ListTile(
-                            title: Text(
-                              '${step['text'] ?? step['message'] ?? step['step'] ?? step['name'] ?? ''}',
-                            ),
-                            subtitle: Text(
-                              '${step['kind'] ?? step['error'] ?? step['status'] ?? ''}',
-                            ),
+                  final (label, color) = _runStatus(
+                    context,
+                    '${r['status'] ?? ''}',
+                  );
+                  final error = '${r['error'] ?? ''}';
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: ExpansionTile(
+                        title: Text('${r['summary'] ?? ''}'),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              StatusPill(text: label, color: color),
+                              Text(_startedAt(r['started_at'])),
+                              if (error.isNotEmpty)
+                                Text(
+                                  error,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                            ],
                           ),
-                      ],
+                        ),
+                        children: [
+                          for (final step in (r['steps'] as List? ?? []))
+                            ListTile(
+                              dense: true,
+                              title: Text(
+                                '${step['text'] ?? step['message'] ?? step['step'] ?? step['name'] ?? ''}',
+                              ),
+                              subtitle: Text(
+                                _stepKind(
+                                  s,
+                                  '${step['kind'] ?? step['error'] ?? step['status'] ?? ''}',
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -182,4 +235,39 @@ class _BrushDetailsPageState extends ConsumerState<BrushDetailsPage> {
       ),
     );
   }
+}
+
+/// 一轮运行的结果：名字与颜色（与网页的刷流运行记录一致）。
+(String, Color) _runStatus(BuildContext context, String status) {
+  final s = S.of(context);
+  final pt = context.pt;
+  return switch (status) {
+    'running' => (s.brushRunRunning, Theme.of(context).colorScheme.primary),
+    'ok' => (s.brushRunOk, pt.ok),
+    'partial' => (s.brushRunPartial, pt.warn),
+    'failed' => (s.brushRunFailed, pt.danger),
+    'interrupted' => (s.brushRunInterrupted, pt.warn),
+    _ => (status, Theme.of(context).colorScheme.onSurfaceVariant),
+  };
+}
+
+/// 一步的种类（list、add……）的名字；不认识的原样显示。
+String _stepKind(S s, String kind) => switch (kind) {
+  'list' => s.brushStepList,
+  'reject' => s.brushStepReject,
+  'add' => s.brushStepAdd,
+  'remove' => s.brushStepRemove,
+  'gone' => s.brushStepGone,
+  'skip' => s.brushStepSkip,
+  'stop' => s.brushStepStop,
+  'error' => s.brushStepError,
+  'info' => s.brushStepInfo,
+  _ => kind,
+};
+
+/// 开始时间（接口给的是 RFC 3339）按本地时间显示；读不出来时原样显示。
+String _startedAt(Object? v) {
+  final t = DateTime.tryParse('${v ?? ''}');
+  if (t == null) return '${v ?? ''}';
+  return formatTime(t.millisecondsSinceEpoch ~/ 1000);
 }

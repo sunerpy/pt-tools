@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 
 /// 对话页：打开最近的会话（没有就从空白开始）；进度经 GET /assistant/conversations/{id}/events 长轮询。
@@ -342,10 +344,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     if (status.hasValue && (st == null || !st.enabled)) {
       return Scaffold(
         appBar: AppBar(title: Text(s.assistantTitle)),
-        body: EmptyState(
-          message: s.assistantDisabled,
-          icon: Icons.smart_toy_outlined,
-        ),
+        body: EmptyState(message: s.assistantDisabled, icon: PtGlyph.sparkles),
       );
     }
     final canConfirm = st?.canConfirm ?? false;
@@ -354,8 +353,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
         title: Text(_title.isEmpty ? s.assistantTitle : _title),
         actions: [
           IconButton(
+            key: const Key('assistant-new'),
             tooltip: s.assistantNew,
-            icon: const Icon(Icons.add_comment_outlined),
+            icon: const PtIcon(PtGlyph.chatPlus),
             // 发送中也不能换：回应回来时要落在发出它的会话上
             onPressed: _running || _sending ? null : _newChat,
           ),
@@ -478,13 +478,20 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: const BoxConstraints(maxWidth: 320),
+        // 自己的话是浅灰的底，助手的回答是白卡片加细线（与页面上的卡片一样）
         decoration: BoxDecoration(
           color: mine
               ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(10),
+              : theme.colorScheme.surface,
+          border: mine ? null : Border.all(color: context.pt.hairline),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(mine ? 16 : 6),
+            bottomRight: Radius.circular(mine ? 6 : 16),
+          ),
         ),
         child: SelectableText(text),
       ),
@@ -500,33 +507,49 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     final s = S.of(context);
     final theme = Theme.of(context);
     final status = c?.status;
-    final label = switch (status) {
-      AppAssistantConfirmationStatusEnum.pending => s.assistantPending,
-      AppAssistantConfirmationStatusEnum.approved => s.assistantApproved,
-      AppAssistantConfirmationStatusEnum.denied => s.assistantDenied,
-      AppAssistantConfirmationStatusEnum.expired => s.assistantExpired,
-      _ => null,
+    final pt = context.pt;
+    final (label, tone) = switch (status) {
+      AppAssistantConfirmationStatusEnum.pending => (
+        s.assistantPending,
+        pt.warn,
+      ),
+      AppAssistantConfirmationStatusEnum.approved => (
+        s.assistantApproved,
+        pt.ok,
+      ),
+      AppAssistantConfirmationStatusEnum.denied => (
+        s.assistantDenied,
+        theme.colorScheme.error,
+      ),
+      AppAssistantConfirmationStatusEnum.expired => (
+        s.assistantExpired,
+        theme.colorScheme.onSurfaceVariant,
+      ),
+      _ => (null, theme.colorScheme.onSurfaceVariant),
     };
     return Card(
       key: c == null ? null : Key('assistant-confirm-${c.id}'),
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.build_outlined, size: 14),
-                const SizedBox(width: 6),
+                PtIcon(
+                  PtGlyph.terminal,
+                  size: 16,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     c?.summary ?? call.name,
                     style: theme.textTheme.bodyMedium,
                   ),
                 ),
-                if (label != null)
-                  Text(label, style: theme.textTheme.labelSmall),
+                if (label != null) StatusPill(text: label, color: tone),
               ],
             ),
             if (status == AppAssistantConfirmationStatusEnum.pending &&
@@ -577,7 +600,6 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                   decoration: InputDecoration(
                     hintText: s.assistantHint,
                     counterText: '',
-                    border: const OutlineInputBorder(),
                     isDense: true,
                   ),
                 ),
@@ -587,13 +609,13 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                   ? IconButton.outlined(
                       key: const Key('assistant-stop'),
                       tooltip: s.assistantStop,
-                      icon: const Icon(Icons.stop),
+                      icon: const PtIcon(PtGlyph.stop, size: 20),
                       onPressed: _cancel,
                     )
                   : IconButton.filled(
                       key: const Key('assistant-send'),
                       tooltip: s.assistantSend,
-                      icon: const Icon(Icons.send),
+                      icon: const PtIcon(PtGlyph.send, size: 20),
                       onPressed: _sending ? null : _send,
                     ),
             ],

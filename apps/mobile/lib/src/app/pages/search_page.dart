@@ -4,7 +4,9 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 
 /// 搜索：多站搜索种子；完全控制的设备可以把结果推送到下载器（经磁盘空间与站点做种容量的检查）。
@@ -76,7 +78,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ),
             for (final d in downloaders)
               ListTile(
-                leading: const Icon(Icons.dns_outlined),
+                leading: PtIcon(
+                  d.reachable ? PtGlyph.server : PtGlyph.serverOff,
+                  size: 20,
+                ),
                 title: Text(d.name),
                 subtitle: Text(
                   [
@@ -143,12 +148,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   key: const Key('search-input'),
                   controller: _q,
                   hintText: s.searchHint,
-                  leading: const Icon(Icons.search),
+                  leading: const PtIcon(PtGlyph.search, size: 20),
                   elevation: const WidgetStatePropertyAll(0),
                   onSubmitted: (_) => _search(),
                   trailing: [
                     IconButton(
-                      icon: const Icon(Icons.arrow_forward),
+                      icon: const PtIcon(PtGlyph.arrowRight, size: 20),
                       tooltip: s.navSearch,
                       onPressed: _busy ? null : _search,
                     ),
@@ -179,25 +184,28 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           : _error != null
           ? ErrorState(message: _error!, onRetry: _search)
           : r == null
-          ? EmptyState(icon: Icons.travel_explore, message: s.searchIntro)
+          ? EmptyState(icon: PtGlyph.search, message: s.searchIntro)
           : r.items.isEmpty
           ? EmptyState(message: s.searchNoResults)
           : ListView.separated(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               itemCount: r.items.length + (r.errors.isEmpty ? 0 : 1),
-              separatorBuilder: (_, _) => const Divider(height: 1, indent: 64),
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 if (r.errors.isNotEmpty && i == 0) {
-                  return ListTile(
-                    leading: Icon(
-                      Icons.warning_amber,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                    title: Text(s.searchErrors(r.errors.length)),
-                    subtitle: Text(
-                      r.errors.map((e) => '${e.site}：${e.error}').join('\n'),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
+                  return Card(
+                    child: ListTile(
+                      leading: PtIcon(
+                        PtGlyph.alert,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      title: Text(s.searchErrors(r.errors.length)),
+                      subtitle: Text(
+                        r.errors.map((e) => '${e.site}：${e.error}').join('\n'),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   );
                 }
@@ -227,53 +235,68 @@ class _ResultTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = S.of(context);
     final t = Theme.of(context);
-    return ListTile(
-      leading: SiteIcon(item.site, size: 32),
-      title: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Column(
+    final muted = t.textTheme.bodySmall?.copyWith(
+      color: t.colorScheme.onSurfaceVariant,
+      fontSize: 12.5,
+    );
+    return RowCard(
+      padding: EdgeInsets.fromLTRB(14, 12, canWrite ? 4 : 14, 12),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (item.subtitle != null && item.subtitle!.isNotEmpty)
-            Text(item.subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 2),
-          Wrap(
-            spacing: 8,
-            children: [
-              Text(item.site, style: t.textTheme.labelSmall),
-              Text(formatBytes(item.size)),
-              Text('↑${item.seeders} ↓${item.leechers}'),
-              if (item.free)
+          SiteIcon(item.site, size: 32),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  s.free,
-                  style: const TextStyle(
-                    color: Color(0xFF10B981),
-                    fontWeight: FontWeight.w600,
+                  item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.textTheme.bodyLarge?.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-              if (item.hasHr)
-                Text(
-                  s.hr,
-                  style: TextStyle(
-                    color: t.colorScheme.error,
-                    fontWeight: FontWeight.w600,
+                if (item.subtitle != null && item.subtitle!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      item.subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: muted,
+                    ),
                   ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (item.free)
+                      StatusPill(text: s.free, color: context.pt.ok),
+                    if (item.hasHr)
+                      StatusPill(text: s.hr, color: t.colorScheme.error),
+                    Text(item.site, style: muted),
+                    Text(formatBytes(item.size), style: muted),
+                    Text('↑${item.seeders} ↓${item.leechers}', style: muted),
+                    if (item.uploadedAt != null && item.uploadedAt! > 0)
+                      Text(formatTime(item.uploadedAt!), style: muted),
+                  ],
                 ),
-              if (item.uploadedAt != null && item.uploadedAt! > 0)
-                Text(
-                  formatTime(item.uploadedAt!),
-                  style: t.textTheme.bodySmall,
-                ),
-            ],
+              ],
+            ),
           ),
-        ],
-      ),
-      trailing: canWrite
-          ? IconButton(
-              icon: const Icon(Icons.download_for_offline_outlined),
+          if (canWrite)
+            IconButton(
+              icon: const PtIcon(PtGlyph.download, size: 22),
               tooltip: s.pushTitle,
               onPressed: onPush,
-            )
-          : null,
+            ),
+        ],
+      ),
     );
   }
 }

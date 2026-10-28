@@ -3,6 +3,8 @@ export interface NativeConfig {
   canWrite: boolean;
   lang: string;
   dark: boolean;
+  /** App 现在显示的主题（light / dark / warm / graphite）；旧版 App 不传。 */
+  theme?: string;
 }
 interface NativeReply {
   id: string;

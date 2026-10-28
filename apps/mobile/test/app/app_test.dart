@@ -7,9 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pt_tools_app/src/app/app.dart';
+import 'package:pt_tools_app/src/app/appearance.dart';
 import 'package:pt_tools_app/src/app/pages/assistant_page.dart';
 import 'package:pt_tools_app/src/app/providers.dart';
 import 'package:pt_tools_app/src/app/storage.dart';
+import 'package:pt_tools_app/src/app/theme.dart';
 import 'package:pt_tools_app/src/remote/bytes.dart';
 import 'package:pt_tools_app/src/remote/host_record.dart';
 import 'package:pt_tools_app/src/remote/noise.dart';
@@ -354,6 +356,7 @@ Future<_World> _pumpApp(
   bool mobileFeatures = false,
   HostStore? store,
   Future<void>? hostLoaded,
+  AppearanceStore? appearance,
 }) async {
   tester.platformDispatcher.localesTestValue = const [Locale('zh')];
   addTearDown(tester.platformDispatcher.clearLocalesTestValue);
@@ -388,6 +391,9 @@ Future<_World> _pumpApp(
         ),
         channelFactoryProvider.overrideWithValue(w.dial),
         refreshIntervalProvider.overrideWithValue(const Duration(days: 1)),
+        appearanceStoreProvider.overrideWithValue(
+          appearance ?? MemoryAppearanceStore(),
+        ),
       ],
       child: const PtToolsApp(),
     ),
@@ -440,6 +446,33 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(w.requests.where((r) => r.startsWith('DELETE')), isEmpty);
+  });
+
+  testWidgets('外观：点一套主题马上换上并存下来，打开跟随系统又回到明亮与暗黑', (tester) async {
+    final store = MemoryAppearanceStore();
+    await _pumpApp(tester, appearance: store);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    expect(find.text('跟随系统'), findsOneWidget, reason: '外观那一行写着现在的选择');
+    await tester.tap(find.byKey(const Key('more-appearance')));
+    await _settle(tester);
+    expect(find.text('暖纸'), findsOneWidget);
+    expect(find.text('石墨'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('theme-warm')));
+    await _settle(tester);
+    MaterialApp app() => tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app().themeMode, ThemeMode.light);
+    expect(app().theme!.scaffoldBackgroundColor, PtPalette.warm.canvas);
+    expect(store.choice, ThemeChoice.warm);
+    final follow = find.byKey(const Key('appearance-follow-system'));
+    expect(tester.widget<SwitchListTile>(follow).value, isFalse);
+    await tester.tap(follow);
+    await _settle(tester);
+    expect(store.choice, ThemeChoice.system);
+    expect(app().themeMode, ThemeMode.system);
+    expect(app().theme!.scaffoldBackgroundColor, PtPalette.light.canvas);
+    expect(app().darkTheme!.scaffoldBackgroundColor, PtPalette.dark.canvas);
   });
 
   testWidgets('概览：显示主机的合计数字与站内信未读', (tester) async {
@@ -646,9 +679,8 @@ void main() {
     await _settle(tester);
     await tester.tap(find.byKey(const Key('more-assistant')));
     await _settle(tester);
-    IconButton newChat() => tester.widget<IconButton>(
-      find.widgetWithIcon(IconButton, Icons.add_comment_outlined),
-    );
+    IconButton newChat() =>
+        tester.widget<IconButton>(find.byKey(const Key('assistant-new')));
     expect(newChat().onPressed, isNotNull);
     await tester.enterText(find.byKey(const Key('assistant-input')), '再问一句');
     await tester.tap(find.byKey(const Key('assistant-send')));

@@ -4,9 +4,10 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../hybrid/mobile_api.dart';
+import '../icons.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
-import '../hybrid/mobile_api.dart';
 import 'mobile_editor_page.dart';
 
 /// 站点：登录状态（离封号阈值还有几天）、今天的签到、站点上的用户数据与站内信未读数；完全控制的设备可以立即签到。
@@ -63,7 +64,7 @@ class _SitesPageState extends ConsumerState<SitesPage> {
         title: Text(s.moreSites),
         actions: [
           IconButton(
-            icon: const Icon(Icons.ios_share),
+            icon: const PtIcon(PtGlyph.share),
             tooltip: s.mobileShare,
             onPressed: () => openMobileEditor(context, ref, 'poster'),
           ),
@@ -87,7 +88,7 @@ class _SitesPageState extends ConsumerState<SitesPage> {
             final on = l.items.where((x) => x.enabled).toList();
             final off = l.items.where((x) => !x.enabled).toList();
             return ListView(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
                 if (ref
                         .watch(metaProvider)
@@ -96,13 +97,14 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                         .contains('stats_export') ==
                     true)
                   Card(
-                    margin: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           SegmentedButton<String>(
+                            showSelectedIcon: false,
                             segments: [
                               ButtonSegment(
                                 value: 'today',
@@ -126,7 +128,11 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                               _loadSummary();
                             },
                           ),
-                          if (_statsLoading) const LinearProgressIndicator(),
+                          if (_statsLoading)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 12),
+                              child: LinearProgressIndicator(),
+                            ),
                           if (_statsError != null) ...[
                             Text(_statsError!),
                             TextButton(
@@ -146,6 +152,8 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                             const SizedBox(height: 12),
                             Text(
                               '↑${formatBytes((_summary!['totalUploaded'] as num?)?.toInt() ?? 0)}  ${s.billedDownloaded(formatBytes((_summary!['totalDownloaded'] as num?)?.toInt() ?? 0))}',
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                             Text(
                               '${s.kpiBonus} ${formatNumber((_summary!['totalBonus'] as num?)?.toDouble() ?? 0)}',
@@ -160,28 +168,39 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                     ),
                   ),
                 if (l.userError != null && l.userError!.isNotEmpty)
-                  ListTile(
-                    leading: const Icon(Icons.warning_amber),
-                    title: Text(s.siteUserError(l.userError!)),
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: ListTile(
+                      leading: PtIcon(
+                        PtGlyph.alert,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      title: Text(s.siteUserError(l.userError!)),
+                    ),
                   ),
                 if (on.isEmpty) ListTile(title: Text(s.noEnabledSites)),
                 for (final site in on)
                   _SiteTile(site: site, canWrite: canWrite),
                 if (off.isNotEmpty)
-                  ExpansionTile(
-                    title: Text(s.disabledSites(off.length)),
-                    children: [
-                      for (final site in off)
-                        ListTile(
-                          dense: true,
-                          leading: SiteIcon(site.name, size: 24),
-                          title: Text(
-                            site.displayName.isEmpty
-                                ? site.name
-                                : site.displayName,
+                  Card(
+                    margin: const EdgeInsets.only(top: 12),
+                    clipBehavior: Clip.antiAlias,
+                    child: ExpansionTile(
+                      title: Text(s.disabledSites(off.length)),
+                      children: [
+                        for (final site in off)
+                          ListTile(
+                            dense: true,
+                            leading: SiteIcon(site.name, size: 24),
+                            title: Text(
+                              site.displayName.isEmpty
+                                  ? site.name
+                                  : site.displayName,
+                            ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
               ],
             );
@@ -248,10 +267,14 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
       '3d',
       'banned-imminent',
     ].contains(site.login.tier);
+    final muted = t.textTheme.bodySmall?.copyWith(
+      color: t.colorScheme.onSurfaceVariant,
+      fontSize: 12.5,
+    );
     return Card(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -265,13 +288,14 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
                     children: [
                       Text(
                         site.displayName.isEmpty ? site.name : site.displayName,
-                        style: t.textTheme.titleMedium,
+                        style: t.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       Text(
                         site.enabled ? login : s.siteDisabled,
-                        style: TextStyle(
+                        style: muted?.copyWith(
                           color: warn ? t.colorScheme.error : null,
-                          fontSize: 12,
                         ),
                       ),
                     ],
@@ -304,13 +328,16 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
                 children: [
                   Text(
                     '${u.username}${u.level != null && u.level!.isNotEmpty ? ' · ${u.level}' : ''}',
-                    style: t.textTheme.bodySmall,
+                    style: muted,
                   ),
-                  Text('↑${formatBytes(u.uploaded)}'),
-                  Text(s.billedDownloaded(formatBytes(u.downloaded))),
-                  Text('${s.kpiRatio} ${formatRatio(u.ratio)}'),
-                  Text('${s.kpiBonus} ${formatNumber(u.bonus)}'),
-                  Text('${s.kpiSeeding} ${u.seeding}'),
+                  Text('↑${formatBytes(u.uploaded)}', style: muted),
+                  Text(
+                    s.billedDownloaded(formatBytes(u.downloaded)),
+                    style: muted,
+                  ),
+                  Text('${s.kpiRatio} ${formatRatio(u.ratio)}', style: muted),
+                  Text('${s.kpiBonus} ${formatNumber(u.bonus)}', style: muted),
+                  Text('${s.kpiSeeding} ${u.seeding}', style: muted),
                 ],
               ),
             ],

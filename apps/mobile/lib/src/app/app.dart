@@ -1,10 +1,12 @@
-// App 的外壳：主题、路由（没有配对时去配对页）、前后台切换时连上与断开。
+// App 的外壳：主题（见 theme.dart）、路由（没有配对时去配对页）、前后台切换时连上与断开。
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../l10n/app_localizations.dart';
+import 'appearance.dart';
+import 'pages/appearance_page.dart';
 import 'pages/assistant_page.dart';
 import 'pages/brush_page.dart';
 import 'pages/downloaders_page.dart';
@@ -20,27 +22,7 @@ import 'pages/subscription_page.dart';
 import 'pages/tasks_page.dart';
 import 'pages/torrents_page.dart';
 import 'providers.dart';
-
-/// 品牌色（与网页的 logo 一致）。
-const brandTeal = Color(0xFF14B8A6);
-const brandOrange = Color(0xFFF97316);
-
-ThemeData buildTheme(Brightness b) {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: brandTeal,
-    brightness: b,
-    secondary: brandOrange,
-  );
-  return ThemeData(
-    colorScheme: scheme,
-    useMaterial3: true,
-    visualDensity: VisualDensity.standard,
-    cardTheme: const CardThemeData(elevation: 0, margin: EdgeInsets.zero),
-    listTileTheme: const ListTileThemeData(
-      contentPadding: EdgeInsets.symmetric(horizontal: 16),
-    ),
-  );
-}
+import 'theme.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier<int>(0);
@@ -122,6 +104,10 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'settings',
                     builder: (_, _) => const SettingsPage(),
                   ),
+                  GoRoute(
+                    path: 'appearance',
+                    builder: (_, _) => const AppearancePage(),
+                  ),
                 ],
               ),
             ],
@@ -160,10 +146,12 @@ class _PtToolsAppState extends ConsumerState<PtToolsApp> {
 
   @override
   Widget build(BuildContext context) {
+    final choice = ref.watch(themeChoiceProvider);
     return MaterialApp.router(
       onGenerateTitle: (context) => S.of(context).appTitle,
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
+      theme: buildTheme(choice.lightTheme),
+      darkTheme: buildTheme(choice.darkTheme),
+      themeMode: choice.mode,
       routerConfig: ref.watch(routerProvider),
       localizationsDelegates: const [
         S.delegate,

@@ -8,9 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../l10n/app_localizations.dart';
-import '../hybrid/mobile_bridge.dart';
+import '../appearance.dart';
 import '../hybrid/mobile_assets.dart';
+import '../hybrid/mobile_bridge.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 
 Future<bool> openMobileEditor(
@@ -109,6 +111,7 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
                 'canWrite': ref.read(canWriteProvider),
                 'lang': Localizations.localeOf(context).languageCode,
                 'dark': Theme.of(context).brightness == Brightness.dark,
+                'theme': _theme.name,
               };
               await _controller?.runJavaScript(
                 'window.ptMobileConfig=${jsonEncode(config)};window.dispatchEvent(new Event("ptMobileReady"));',
@@ -127,6 +130,11 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
         );
     }
   }
+
+  /// 现在显示的主题。
+  PtTheme get _theme => ref
+      .read(themeChoiceProvider)
+      .shown(MediaQuery.platformBrightnessOf(context));
 
   bool _started = false;
   @override
@@ -153,6 +161,8 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
           if (widget.id != null) 'id': '${widget.id}',
           'lang': Localizations.localeOf(context).languageCode,
           'dark': Theme.of(context).brightness == Brightness.dark ? '1' : '0',
+          // 编辑页按 App 的主题换面、线、字与主色（见 web/frontend/src/mobile/mobile.css）
+          'theme': _theme.name,
           ...widget.values,
         },
       );

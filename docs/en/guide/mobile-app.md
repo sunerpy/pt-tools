@@ -39,6 +39,7 @@ After pairing, the window in the web UI shows that the device is paired and the 
 | More → Sites               | Login status (days left before the inactivity limit), today's check-in, user data and unread messages; check in now                                      |
 | More → Tasks, Brush        | Send history, and brush tasks with their active torrents and totals                                                                                      |
 | More → Downloaders         | Downloader speeds, free space and versions                                                                                                               |
+| More → Appearance          | Four themes (Light, Dark, Warm, Graphite) or follow the system (Light when it is light, Dark when it is dark); saved on this phone only                  |
 | More → Connection & device | Connection method and address, host, this device's name and permissions; reconnect, forget this host                                                     |
 
 The download figures on Overview and under More → Sites are the billed download (what the sites count toward your ratio after free and discount promotions), not the amount actually transferred. See [Two kinds of download figures](user-stats.md#two-kinds-of-download-figures).

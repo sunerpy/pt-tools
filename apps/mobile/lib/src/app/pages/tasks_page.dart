@@ -4,6 +4,7 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../icons.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
 
@@ -30,36 +31,40 @@ class TasksPage extends ConsumerWidget {
           value: page,
           onRetry: () => ref.invalidate(tasksProvider),
           data: (p) => p.items.isEmpty
-              ? EmptyState(icon: Icons.rss_feed, message: s.noTasks)
+              ? EmptyState(icon: PtGlyph.rss, message: s.noTasks)
               : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   itemCount: p.items.length,
-                  separatorBuilder: (_, _) =>
-                      const Divider(height: 1, indent: 64),
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {
                     final t = p.items[i];
                     final status = t.completed
                         ? s.taskCompleted
                         : (t.pushed ? s.taskPushed : s.taskNotPushed);
-                    return ListTile(
-                      leading: SiteIcon(t.site, size: 32),
-                      title: Text(
-                        t.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        [
-                          status,
-                          formatBytes(t.size),
-                          if (t.free) s.free,
-                          if (t.hasHr) s.hr,
-                          if (t.pushed && !t.completed)
-                            '${t.progress.toStringAsFixed(0)}%',
-                          formatTime(t.createdAt),
-                          if (t.error != null && t.error!.isNotEmpty) t.error!,
-                        ].join(' · '),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                    return Card(
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+                        leading: SiteIcon(t.site, size: 32),
+                        title: Text(
+                          t.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          [
+                            status,
+                            formatBytes(t.size),
+                            if (t.free) s.free,
+                            if (t.hasHr) s.hr,
+                            if (t.pushed && !t.completed)
+                              '${t.progress.toStringAsFixed(0)}%',
+                            formatTime(t.createdAt),
+                            if (t.error != null && t.error!.isNotEmpty)
+                              t.error!,
+                          ].join(' · '),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     );
                   },

@@ -52,6 +52,48 @@ class SEn extends S {
   String get mobileRuns => 'Run history';
 
   @override
+  String get brushRunRunning => 'Running';
+
+  @override
+  String get brushRunOk => 'Succeeded';
+
+  @override
+  String get brushRunPartial => 'Partly failed';
+
+  @override
+  String get brushRunFailed => 'Failed';
+
+  @override
+  String get brushRunInterrupted => 'Interrupted';
+
+  @override
+  String get brushStepList => 'List';
+
+  @override
+  String get brushStepReject => 'Rejected';
+
+  @override
+  String get brushStepAdd => 'Added';
+
+  @override
+  String get brushStepRemove => 'Removed';
+
+  @override
+  String get brushStepGone => 'Gone';
+
+  @override
+  String get brushStepSkip => 'Skipped';
+
+  @override
+  String get brushStepStop => 'Stopped';
+
+  @override
+  String get brushStepError => 'Error';
+
+  @override
+  String get brushStepInfo => 'Info';
+
+  @override
   String get mobileEnable => 'Enable';
 
   @override
@@ -500,6 +542,52 @@ class SEn extends S {
 
   @override
   String get moreSettings => 'Connection & device';
+
+  @override
+  String get moreAppearance => 'Appearance';
+
+  @override
+  String get moreGroupTools => 'Features';
+
+  @override
+  String get moreGroupApp => 'This phone';
+
+  @override
+  String get appearanceTheme => 'Theme';
+
+  @override
+  String get appearanceFollowSystem => 'Follow system';
+
+  @override
+  String get appearanceFollowSystemHelp =>
+      'Light when the system is light, Dark when it is dark';
+
+  @override
+  String get appearanceFollowing => 'Following the system';
+
+  @override
+  String get themeLight => 'Light';
+
+  @override
+  String get themeLightSub => 'Porcelain';
+
+  @override
+  String get themeDark => 'Dark';
+
+  @override
+  String get themeDarkSub => 'Night';
+
+  @override
+  String get themeWarm => 'Warm';
+
+  @override
+  String get themeWarmSub => 'Manuscript';
+
+  @override
+  String get themeGraphite => 'Graphite';
+
+  @override
+  String get themeGraphiteSub => 'Instrument';
 
   @override
   String get siteDisabled => 'Disabled';

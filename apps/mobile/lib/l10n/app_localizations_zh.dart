@@ -52,6 +52,48 @@ class SZh extends S {
   String get mobileRuns => '运行记录';
 
   @override
+  String get brushRunRunning => '进行中';
+
+  @override
+  String get brushRunOk => '成功';
+
+  @override
+  String get brushRunPartial => '部分失败';
+
+  @override
+  String get brushRunFailed => '失败';
+
+  @override
+  String get brushRunInterrupted => '没跑完';
+
+  @override
+  String get brushStepList => '列表';
+
+  @override
+  String get brushStepReject => '不符合';
+
+  @override
+  String get brushStepAdd => '加入';
+
+  @override
+  String get brushStepRemove => '删除';
+
+  @override
+  String get brushStepGone => '已不在';
+
+  @override
+  String get brushStepSkip => '跳过';
+
+  @override
+  String get brushStepStop => '停下';
+
+  @override
+  String get brushStepError => '出错';
+
+  @override
+  String get brushStepInfo => '说明';
+
+  @override
   String get mobileEnable => '启用';
 
   @override
@@ -493,6 +535,51 @@ class SZh extends S {
 
   @override
   String get moreSettings => '连接与设备';
+
+  @override
+  String get moreAppearance => '外观';
+
+  @override
+  String get moreGroupTools => '功能';
+
+  @override
+  String get moreGroupApp => '本机';
+
+  @override
+  String get appearanceTheme => '主题';
+
+  @override
+  String get appearanceFollowSystem => '跟随系统';
+
+  @override
+  String get appearanceFollowSystemHelp => '系统是浅色时用「明亮」，深色时用「暗黑」';
+
+  @override
+  String get appearanceFollowing => '正在跟随系统';
+
+  @override
+  String get themeLight => '明亮';
+
+  @override
+  String get themeLightSub => '白瓷';
+
+  @override
+  String get themeDark => '暗黑';
+
+  @override
+  String get themeDarkSub => '夜灯';
+
+  @override
+  String get themeWarm => '暖纸';
+
+  @override
+  String get themeWarmSub => '手稿';
+
+  @override
+  String get themeGraphite => '石墨';
+
+  @override
+  String get themeGraphiteSub => '仪表';
 
   @override
   String get siteDisabled => '未启用';
