@@ -1,0 +1,222 @@
+/*
+ * App 内嵌页跟着 App 的主题走（apps/mobile/lib/src/app/theme.dart，照 Voltip 的四套经典主题）：
+ * App 用 ?theme= 传来 light / dark / warm / graphite，main.ts 写到 html[data-app-theme]。
+ * 面、线、字与圆角与 App 的外壳相同；主色是墨色（Element Plus 的主要按钮、选中、勾选都是墨色），
+ * 开关是各主题的强调色。状态色与 App 的同一组，都按 WCAG AA 校过。
+ */
+html[data-app-theme="light"] {
+  --pt-canvas: #f2f3f6;
+  --pt-surface: #ffffff;
+  --pt-raised: #ffffff;
+  --pt-hover: #eef0f3;
+  --pt-border: #e1e4ea;
+  --pt-border-strong: #d6dae1;
+  --pt-t1: #1b1d22;
+  --pt-t2: #5f6570;
+  --pt-t3: #5f6570;
+  --pt-t4: #8a9099;
+  --pt-p: #1b1d22;
+  --pt-p-hover: #353840;
+  --pt-p-active: #000000;
+  --pt-on-p: #ffffff;
+  --pt-ok: #00773a;
+  --pt-warn: #995700;
+  --pt-dang: #b32318;
+  --pt-info: #1260d7;
+  --app-accent: #1677ff;
+}
+html[data-app-theme="dark"] {
+  --pt-canvas: #0c0d11;
+  --pt-surface: #14161b;
+  --pt-raised: #1c1f26;
+  --pt-hover: #22252d;
+  --pt-border: #2a2e37;
+  --pt-border-strong: #363b45;
+  --pt-t1: #f1f2f4;
+  --pt-t2: #9aa1ac;
+  --pt-t3: #9aa1ac;
+  --pt-t4: #6b7280;
+  --pt-p: #f1f2f4;
+  --pt-p-hover: #d9dce1;
+  --pt-p-active: #ffffff;
+  --pt-on-p: #0c0d11;
+  --pt-ok: #4ccb93;
+  --pt-warn: #ffb224;
+  --pt-dang: #f26d63;
+  --pt-info: #48a3fd;
+  --app-accent: #339cff;
+}
+html[data-app-theme="warm"] {
+  --pt-canvas: #f5efe4;
+  --pt-surface: #fdfaf4;
+  --pt-raised: #fdfaf4;
+  --pt-hover: #eee6d8;
+  --pt-border: #ded4c4;
+  --pt-border-strong: #c9bfaf;
+  --pt-t1: #2a2521;
+  --pt-t2: #6d6359;
+  --pt-t3: #6d6359;
+  --pt-t4: #8a8078;
+  --pt-p: #2a2521;
+  --pt-p-hover: #453d36;
+  --pt-p-active: #14110f;
+  --pt-on-p: #fdfaf4;
+  --pt-ok: #3b7355;
+  --pt-warn: #8d5e16;
+  --pt-dang: #b23a30;
+  --pt-info: #0165c4;
+  --app-accent: #b85c38;
+}
+html[data-app-theme="graphite"] {
+  --pt-canvas: #22252b;
+  --pt-surface: #2a2e35;
+  --pt-raised: #333840;
+  --pt-hover: #3a4048;
+  --pt-border: #414750;
+  --pt-border-strong: #4c535d;
+  --pt-t1: #eceef1;
+  --pt-t2: #a5acb6;
+  --pt-t3: #a5acb6;
+  --pt-t4: #7b838e;
+  --pt-p: #eceef1;
+  --pt-p-hover: #d4d8de;
+  --pt-p-active: #ffffff;
+  --pt-on-p: #22252b;
+  --pt-ok: #3eddb2;
+  --pt-warn: #f2c14e;
+  --pt-dang: #f28780;
+  --pt-info: #7bbafe;
+  --app-accent: #339cff;
+}
+html.light,
+html.dark {
+  --pt-r-sm: 8px;
+  --pt-r-md: 12px;
+  --pt-r-lg: 14px;
+}
+html .el-switch {
+  --el-switch-on-color: var(--app-accent, var(--pt-p));
+}
+/* 开关打开时的滑块与 App 一样是白的（theme.scss 用 --pt-on-p，深色主题里那是墨色） */
+html .el-switch.is-checked .el-switch__core .el-switch__action {
+  background-color: #ffffff;
+}
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+  background: var(--pt-canvas);
+  color: var(--pt-t1);
+  font-family: var(--pt-font-family);
+}
+* {
+  box-sizing: border-box;
+}
+.mobile-page {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  overflow-wrap: anywhere;
+}
+.mobile-page .el-form-item {
+  margin-bottom: 20px;
+}
+.mobile-page .el-input,
+.mobile-page .el-select,
+.mobile-page .el-input-number {
+  width: 100%;
+}
+.mobile-page .el-input__wrapper,
+.mobile-page .el-select__wrapper,
+.mobile-page .el-button,
+.mobile-page .el-checkbox,
+.mobile-page .el-switch {
+  min-height: 44px;
+}
+.mobile-page .el-textarea__inner {
+  min-height: 88px;
+}
+.mobile-state {
+  padding: 24px 0;
+  text-align: center;
+}
+.mobile-error {
+  padding: 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--pt-dang);
+  color: var(--pt-dang);
+  border-radius: var(--pt-r-sm);
+  white-space: pre-wrap;
+}
+.mobile-note {
+  color: var(--pt-t3);
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  margin: 8px 0 16px;
+}
+.mobile-actions {
+  display: flex;
+  gap: 12px;
+  padding: 16px 0 max(16px, env(safe-area-inset-bottom));
+}
+.mobile-actions .el-button {
+  flex: 1;
+  margin: 0;
+}
+.mobile-section {
+  margin-bottom: 20px;
+  border: 1px solid var(--pt-border);
+  background: var(--pt-surface);
+  border-radius: var(--pt-r-lg);
+  padding: 16px;
+  min-width: 0;
+}
+.mobile-section h2 {
+  margin: 0 0 16px;
+  font-size: var(--pt-fz-h2);
+}
+.mobile-checks {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 16px;
+}
+.mobile-checks .el-checkbox {
+  margin: 0;
+  max-width: 100%;
+}
+.mobile-checks .el-checkbox__label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.mobile-page .el-collapse-item__content {
+  padding: 8px;
+}
+.mobile-preview {
+  margin-top: 12px;
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+  padding: 8px;
+  overflow: hidden;
+}
+.mobile-preview-fit {
+  overflow: hidden;
+}
+.mobile-preview-poster {
+  width: 640px;
+  transform-origin: top left;
+}
+/* Element Plus poppers are teleported to body, outside the page container. */
+.el-select-dropdown__item {
+  min-height: 44px;
+  height: auto;
+  line-height: 24px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.el-select-dropdown__list {
+  max-width: min(640px, calc(100vw - 24px));
+}

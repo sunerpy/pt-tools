@@ -9,7 +9,9 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../remote/link.dart';
 import '../../remote/pairing.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 
 /// 配对：扫网页上的二维码，或者粘贴链接；填设备名；配对成功以后存下主机，进入概览。
 class PairPage extends ConsumerStatefulWidget {
@@ -116,8 +118,18 @@ class _PairPageState extends ConsumerState<PairPage> {
           children: [
             Row(
               children: [
-                Icon(Icons.qr_code_2, size: 40, color: t.colorScheme.primary),
-                const SizedBox(width: 12),
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: t.colorScheme.surface,
+                    border: Border.all(color: context.pt.hairline),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  alignment: Alignment.center,
+                  child: const PtIcon(PtGlyph.qr, size: 26),
+                ),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Text(s.pairIntro, style: t.textTheme.bodyMedium),
                 ),
@@ -127,10 +139,10 @@ class _PairPageState extends ConsumerState<PairPage> {
             if (canScan) ...[
               FilledButton.icon(
                 onPressed: _busy ? null : _scan,
-                icon: const Icon(Icons.qr_code_scanner),
+                icon: const PtIcon(PtGlyph.scan, size: 20),
                 label: Text(s.pairScan),
                 style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
+                  minimumSize: const Size.fromHeight(50),
                 ),
               ),
               const SizedBox(height: 20),
@@ -144,10 +156,9 @@ class _PairPageState extends ConsumerState<PairPage> {
               decoration: InputDecoration(
                 labelText: s.pairLinkLabel,
                 hintText: 'pttools://pair?v=1&…',
-                border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
                   tooltip: s.paste,
-                  icon: const Icon(Icons.content_paste),
+                  icon: const PtIcon(PtGlyph.paste, size: 20),
                   onPressed: _busy ? null : _paste,
                 ),
               ),
@@ -161,7 +172,6 @@ class _PairPageState extends ConsumerState<PairPage> {
               decoration: InputDecoration(
                 labelText: s.pairNameLabel,
                 hintText: s.pairNameDefault,
-                border: const OutlineInputBorder(),
               ),
             ),
             if (_error != null) ...[
@@ -177,7 +187,7 @@ class _PairPageState extends ConsumerState<PairPage> {
               key: const Key('pair-submit'),
               onPressed: _busy ? null : _pair,
               style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
+                minimumSize: const Size.fromHeight(50),
               ),
               child: _busy
                   ? Row(

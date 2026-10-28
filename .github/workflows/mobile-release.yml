@@ -16,6 +16,9 @@ on:
       - ".github/scripts/mobile-build-number.sh"
       - ".github/scripts/mobile-build-number.test.sh"
       - "apps/mobile/android/**"
+      - "apps/mobile/tool/build_web.sh"
+      - "web/frontend/**"
+      - ".github/actions/build-mobile-web/**"
       - "apps/mobile/pubspec.yaml"
 
 permissions:

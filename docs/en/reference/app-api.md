@@ -529,3 +529,24 @@ The current values: `resource` and `kind`; `item` for objects, `items` and `id_f
 ### POST /config/{resource}/changes
 
 The same body as the preview. The change is worked out again from the current state (changes made elsewhere after the preview are taken into account) and saved; the response is like the preview with `applied` true, `item` as it is now (absent after a deletion) and a new item's ID in `id`. When the saving endpoint refuses, its reason comes back as it is: 400 for validation, 409 (`conflict`) for a conflict, 503 when the service is not running. Saves by tokens and devices are recorded in the audit log with the resource, operation, ID and the changed field names, not their values.
+
+## Mobile editors and statistics export
+
+The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` and `stats_export`. Clients prompt for an upgrade when a required feature is absent rather than falling back to session-only endpoints. The API compatibility level remains 1.
+
+| Method | Path                         | Permission | Purpose                                                                                                       |
+| ------ | ---------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| GET    | `/mobile/options`            | Read       | IDs and names for enabled sites, downloaders, quality profiles and libraries; `errors` reports failed sources |
+| GET    | `/brush/tasks/{id}`          | Read       | Safe brush editor configuration                                                                               |
+| POST   | `/brush/tasks/preview`       | Read       | Preview a `ConfigChange`, restricted to brush tasks                                                           |
+| POST   | `/brush/tasks`               | Write      | Create a brush task                                                                                           |
+| PUT    | `/brush/tasks/{id}`          | Write      | Update a brush task                                                                                           |
+| DELETE | `/brush/tasks/{id}`          | Write      | Delete a brush task                                                                                           |
+| POST   | `/brush/tasks/{id}/status`   | Write      | Enable or disable with `{"enabled": true}` or `false`                                                         |
+| GET    | `/brush/tasks/{id}/runs`     | Read       | Paginated run records                                                                                         |
+| GET    | `/stats/aggregated`          | Read       | Aggregated site statistics using the web statistics fields and billed download semantics                      |
+| GET    | `/stats/summary?range=today` | Read       | Period deltas; `range` accepts `today`, `7d` and `30d`                                                        |
+
+Run records use `limit` (default 20, maximum 100) and `offset`, returning `items` and `total`.
+
+Brush create and update bodies use the web brush configuration fields. These endpoints do not grant general `app:config` access, site credential management or device administration. Writes use the existing App API audit chain. Subscription creation, editing and details also support `include_keywords` and `exclude_keywords`, with the same title matching semantics as the web UI.

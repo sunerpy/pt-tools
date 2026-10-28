@@ -10,6 +10,111 @@ class SEn extends S {
   SEn([String locale = 'en']) : super(locale);
 
   @override
+  String get mobileNoBaseline => 'No comparable snapshots for this period yet';
+
+  @override
+  String get mobileEditor => 'Edit';
+
+  @override
+  String get mobileAdd => 'Add';
+
+  @override
+  String get mobileUpgrade => 'Update pt-tools on the host to use this feature';
+
+  @override
+  String get mobileDiscard => 'Discard changes';
+
+  @override
+  String get mobileDiscardBody => 'You have unsaved changes. Leave this page?';
+
+  @override
+  String get mobileKeep => 'Keep editing';
+
+  @override
+  String get mobileUnsupported => 'This feature is available on Android';
+
+  @override
+  String get mobileSaved => 'Image saved';
+
+  @override
+  String get mobileShare => 'Share stats poster';
+
+  @override
+  String get mobilePeriod => 'Period';
+
+  @override
+  String get mobileWeek => 'This week';
+
+  @override
+  String get mobileMonth => 'This month';
+
+  @override
+  String get mobileRuns => 'Run history';
+
+  @override
+  String get brushRunRunning => 'Running';
+
+  @override
+  String get brushRunOk => 'Succeeded';
+
+  @override
+  String get brushRunPartial => 'Partly failed';
+
+  @override
+  String get brushRunFailed => 'Failed';
+
+  @override
+  String get brushRunInterrupted => 'Interrupted';
+
+  @override
+  String get brushStepList => 'List';
+
+  @override
+  String get brushStepReject => 'Rejected';
+
+  @override
+  String get brushStepAdd => 'Added';
+
+  @override
+  String get brushStepRemove => 'Removed';
+
+  @override
+  String get brushStepGone => 'Gone';
+
+  @override
+  String get brushStepSkip => 'Skipped';
+
+  @override
+  String get brushStepStop => 'Stopped';
+
+  @override
+  String get brushStepError => 'Error';
+
+  @override
+  String get brushStepInfo => 'Info';
+
+  @override
+  String get mobileEnable => 'Enable';
+
+  @override
+  String get mobileDisable => 'Disable';
+
+  @override
+  String get mobileDeleteBrush => 'Delete this brush task?';
+
+  @override
+  String get mobileSkipped => 'Skip episode';
+
+  @override
+  String get mobileUnlock => 'Unlock version';
+
+  @override
+  String get mobileRestore => 'Resume tracking';
+
+  @override
+  String get mobileRefresh => 'Refresh data';
+
+  @override
   String get appTitle => 'pt-tools';
 
   @override
@@ -437,6 +542,52 @@ class SEn extends S {
 
   @override
   String get moreSettings => 'Connection & device';
+
+  @override
+  String get moreAppearance => 'Appearance';
+
+  @override
+  String get moreGroupTools => 'Features';
+
+  @override
+  String get moreGroupApp => 'This phone';
+
+  @override
+  String get appearanceTheme => 'Theme';
+
+  @override
+  String get appearanceFollowSystem => 'Follow system';
+
+  @override
+  String get appearanceFollowSystemHelp =>
+      'Light when the system is light, Dark when it is dark';
+
+  @override
+  String get appearanceFollowing => 'Following the system';
+
+  @override
+  String get themeLight => 'Light';
+
+  @override
+  String get themeLightSub => 'Porcelain';
+
+  @override
+  String get themeDark => 'Dark';
+
+  @override
+  String get themeDarkSub => 'Night';
+
+  @override
+  String get themeWarm => 'Warm';
+
+  @override
+  String get themeWarmSub => 'Manuscript';
+
+  @override
+  String get themeGraphite => 'Graphite';
+
+  @override
+  String get themeGraphiteSub => 'Instrument';
 
   @override
   String get siteDisabled => 'Disabled';

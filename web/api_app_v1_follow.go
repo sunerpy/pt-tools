@@ -15,8 +15,10 @@ import (
 
 // AppSubscriptionUpdate 是 PUT /subscriptions/{id}：只改给了的字段（没给的不变）。条目与季不能改。
 type AppSubscriptionUpdate struct {
-	ProfileID *uint `json:"profile_id,omitempty"`
-	Upgrade   *bool `json:"upgrade,omitempty"`
+	IncludeKeywords *string `json:"include_keywords,omitempty"`
+	ExcludeKeywords *string `json:"exclude_keywords,omitempty"`
+	ProfileID       *uint   `json:"profile_id,omitempty"`
+	Upgrade         *bool   `json:"upgrade,omitempty"`
 	// Sites（空数组是全部站点）、DownloaderID（0 用设置里的）、Category、Tags、SavePath 是在哪里找、推到哪里
 	Sites            *[]string    `json:"sites,omitempty"`
 	DownloaderID     *uint        `json:"downloader_id,omitempty"`
@@ -54,6 +56,7 @@ func (s *Server) appSubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	// 修改接口按整份设置保存：没给的字段用现在的
 	input := subscribe.SubscriptionInput{
+		IncludeKeywords: in.IncludeKeywords, ExcludeKeywords: in.ExcludeKeywords,
 		ProfileID: cur.ProfileID, Sites: cur.Sites, DownloaderID: cur.DownloaderID, Category: cur.Category, Tags: cur.Tags,
 		SavePath: cur.SavePath, Upgrade: cur.Upgrade,
 		LockVersion: in.LockVersion, LockGroup: in.LockGroup, LockResolution: in.LockResolution, StartEpisode: in.StartEpisode,

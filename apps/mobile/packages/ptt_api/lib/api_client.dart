@@ -215,8 +215,20 @@ class ApiClient {
           return AppAssistantToolCall.fromJson(value);
         case 'AppAssistantUsage':
           return AppAssistantUsage.fromJson(value);
+        case 'AppBrushConfig':
+          return AppBrushConfig.fromJson(value);
+        case 'AppBrushInput':
+          return AppBrushInput.fromJson(value);
+        case 'AppBrushRun':
+          return AppBrushRun.fromJson(value);
+        case 'AppBrushRunPage':
+          return AppBrushRunPage.fromJson(value);
+        case 'AppBrushRunStep':
+          return AppBrushRunStep.fromJson(value);
         case 'AppBrushStat':
           return AppBrushStat.fromJson(value);
+        case 'AppBrushStatus':
+          return AppBrushStatus.fromJson(value);
         case 'AppBrushTask':
           return AppBrushTask.fromJson(value);
         case 'AppConfigCatalog':
@@ -273,6 +285,12 @@ class ApiClient {
           return AppMessage.fromJson(value);
         case 'AppMeta':
           return AppMeta.fromJson(value);
+        case 'AppMobileOption':
+          return AppMobileOption.fromJson(value);
+        case 'AppMobileOptions':
+          return AppMobileOptions.fromJson(value);
+        case 'AppMobileSiteOption':
+          return AppMobileSiteOption.fromJson(value);
         case 'AppOK':
           return AppOK.fromJson(value);
         case 'AppOrganizeInput':
@@ -331,6 +349,14 @@ class ApiClient {
           return AppSiteLogin.fromJson(value);
         case 'AppSiteUser':
           return AppSiteUser.fromJson(value);
+        case 'AppStatsAggregated':
+          return AppStatsAggregated.fromJson(value);
+        case 'AppStatsSite':
+          return AppStatsSite.fromJson(value);
+        case 'AppStatsSiteDelta':
+          return AppStatsSiteDelta.fromJson(value);
+        case 'AppStatsSummary':
+          return AppStatsSummary.fromJson(value);
         case 'AppSubscription':
           return AppSubscription.fromJson(value);
         case 'AppSubscriptionCreate':

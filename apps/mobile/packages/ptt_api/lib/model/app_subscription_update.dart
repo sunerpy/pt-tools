@@ -13,6 +13,8 @@ part of openapi.api;
 class AppSubscriptionUpdate {
   /// Returns a new [AppSubscriptionUpdate] instance.
   AppSubscriptionUpdate({
+    this.includeKeywords,
+    this.excludeKeywords,
     this.profileId,
     this.upgrade,
     this.sites,
@@ -29,6 +31,22 @@ class AppSubscriptionUpdate {
     this.libraryId,
     this.totalEpisodes,
   });
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? includeKeywords;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? excludeKeywords;
 
   /// Minimum value: 0
   ///
@@ -159,6 +177,8 @@ class AppSubscriptionUpdate {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppSubscriptionUpdate &&
+    other.includeKeywords == includeKeywords &&
+    other.excludeKeywords == excludeKeywords &&
     other.profileId == profileId &&
     other.upgrade == upgrade &&
     _deepEquality.equals(other.sites, sites) &&
@@ -178,6 +198,8 @@ class AppSubscriptionUpdate {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (includeKeywords == null ? 0 : includeKeywords!.hashCode) +
+    (excludeKeywords == null ? 0 : excludeKeywords!.hashCode) +
     (profileId == null ? 0 : profileId!.hashCode) +
     (upgrade == null ? 0 : upgrade!.hashCode) +
     (sites == null ? 0 : sites!.hashCode) +
@@ -195,10 +217,20 @@ class AppSubscriptionUpdate {
     (totalEpisodes == null ? 0 : totalEpisodes!.hashCode);
 
   @override
-  String toString() => 'AppSubscriptionUpdate[profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, totalEpisodes=$totalEpisodes]';
+  String toString() => 'AppSubscriptionUpdate[includeKeywords=$includeKeywords, excludeKeywords=$excludeKeywords, profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, totalEpisodes=$totalEpisodes]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+    if (this.includeKeywords != null) {
+      json[r'include_keywords'] = this.includeKeywords;
+    } else {
+      json[r'include_keywords'] = null;
+    }
+    if (this.excludeKeywords != null) {
+      json[r'exclude_keywords'] = this.excludeKeywords;
+    } else {
+      json[r'exclude_keywords'] = null;
+    }
     if (this.profileId != null) {
       json[r'profile_id'] = this.profileId;
     } else {
@@ -292,6 +324,8 @@ class AppSubscriptionUpdate {
       }());
 
       return AppSubscriptionUpdate(
+        includeKeywords: mapValueOfType<String>(json, r'include_keywords'),
+        excludeKeywords: mapValueOfType<String>(json, r'exclude_keywords'),
         profileId: mapValueOfType<int>(json, r'profile_id'),
         upgrade: mapValueOfType<bool>(json, r'upgrade'),
         sites: json[r'sites'] is Iterable

@@ -46,6 +46,9 @@ runs:
         distribution: temurin
         java-version: "21"
 
+    - name: Build mobile web assets
+      uses: ./.github/actions/build-mobile-web
+
     - name: Set up Flutter
       uses: ./.github/actions/setup-flutter
 

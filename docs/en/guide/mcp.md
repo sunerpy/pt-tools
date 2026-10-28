@@ -112,6 +112,10 @@ Clients such as Claude Desktop only start a local program and talk to it over st
 | `retry_media_organize`            | MCP write  | Organize the torrent of one organize record again (usually a failed one)                                                                     |
 | `rescrape_media`                  | MCP write  | Scrape the movie or show of one organize record again                                                                                        |
 | `change_config`                   | MCP write  | Change pt-tools configuration (also needs the Config scope): returns a preview first, saves only after confirmation                          |
+| `list_brush_tasks`                | MCP read   | Brush tasks, status and gains                                                                                                                |
+| `get_brush_task`                  | MCP read   | Brush configuration                                                                                                                          |
+| `list_brush_runs`                 | MCP read   | Recent executions and steps                                                                                                                  |
+| `change_brush_task`               | MCP write  | Preview and confirm create, edit, enable, pause or delete                                                                                    |
 
 - A tool that changes your downloaders, subscriptions, libraries or configuration does nothing when called without `confirm=true` and returns a preview instead: what would change (each item before and after) and the possible impact. The client's assistant shows you the preview and calls again with `confirm=true` only after you agree.
 - `organize_media` and `preview_media_organize` take the downloader ID and `info_hash` from `list_downloader_torrents`. When the entry is recognized wrongly, pass `media_type` and `tmdb_id` (from `recognize_media` or `explore_media`); pass `library_id` to choose the library. The rules are the same as organizing by hand on the web page, see [Media library organising](media-library.md).

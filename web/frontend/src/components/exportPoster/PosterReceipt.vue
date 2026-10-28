@@ -4,12 +4,14 @@
  * （只是装饰）。等宽字用打包进来的 JetBrains Mono（只有拉丁字符），中文照旧用系统字体。
  */
 import { computed } from "vue";
+import { usePosterWords } from "./locale";
 
 import type { PosterModel } from "./model";
 import PosterLogo from "./PosterLogo.vue";
 import PosterMask from "./PosterMask.vue";
 
 const props = defineProps<{ model: PosterModel; colorway: string }>();
+const t = usePosterWords();
 
 const PERIOD_EN: Record<string, string> = {
   今日: "TODAY",
@@ -35,45 +37,52 @@ const incEn = computed(() => PERIOD_EN[props.model.inc?.label ?? ""] ?? "");
 
         <div class="pr-cut" />
         <div class="pr-li">
-          <span class="pr-k">站点</span><span class="pr-dots" /><span class="pr-v"
-            >{{ model.siteCount }} 个</span
-          >
+          <span class="pr-k">{{ t("站点") }}</span
+          ><span class="pr-dots" /><span class="pr-v">{{ model.siteCount }}{{ t(" 个") }}</span>
         </div>
         <div v-if="model.join" class="pr-li">
-          <span class="pr-k">入站</span><span class="pr-dots" />
-          <span class="pr-v">{{ model.joinDur }}（{{ model.join }} 起）</span>
+          <span class="pr-k">{{ t("入站") }}</span
+          ><span class="pr-dots" />
+          <span class="pr-v">{{ model.joinDur }}（{{ model.join }}{{ t(" 起）") }}</span>
         </div>
 
         <div class="pr-cut" />
         <div class="pr-li is-big">
-          <span class="pr-k">总上传</span><span class="pr-dots" />
+          <span class="pr-k">{{ t("总上传") }}</span
+          ><span class="pr-dots" />
           <span class="pr-v" style="color: var(--c-up)">{{ model.up.text }}</span>
         </div>
         <div class="pr-li is-big">
-          <span class="pr-k">下载（计费）</span><span class="pr-dots" />
+          <span class="pr-k">{{ t("下载（计费）") }}</span
+          ><span class="pr-dots" />
           <span class="pr-v" style="color: var(--c-down)">{{ model.down.text }}</span>
         </div>
         <div class="pr-li is-big">
-          <span class="pr-k">平均分享率</span><span class="pr-dots" />
+          <span class="pr-k">{{ t("平均分享率") }}</span
+          ><span class="pr-dots" />
           <span class="pr-v" style="color: var(--c-ratio)">{{ model.ratio }}</span>
         </div>
 
         <div class="pr-cut" />
         <div class="pr-li">
-          <span class="pr-k">总魔力</span><span class="pr-dots" />
+          <span class="pr-k">{{ t("总魔力") }}</span
+          ><span class="pr-dots" />
           <span class="pr-v" style="color: var(--c-bonus)">{{ model.bonus.text }}</span>
         </div>
         <div class="pr-li">
-          <span class="pr-k">时魔</span><span class="pr-dots" />
+          <span class="pr-k">{{ t("时魔") }}</span
+          ><span class="pr-dots" />
           <span class="pr-v" style="color: var(--c-bonus)">{{ model.bph.text }}/h</span>
         </div>
         <div v-if="model.seedBonus" class="pr-li">
-          <span class="pr-k">做种积分</span><span class="pr-dots" />
+          <span class="pr-k">{{ t("做种积分") }}</span
+          ><span class="pr-dots" />
           <span class="pr-v">{{ model.seedBonus.text }}</span>
         </div>
         <div class="pr-li">
-          <span class="pr-k">做种</span><span class="pr-dots" />
-          <span class="pr-v">{{ model.seeding }} 个 / {{ model.seedSize.text }}</span>
+          <span class="pr-k">{{ t("做种") }}</span
+          ><span class="pr-dots" />
+          <span class="pr-v">{{ model.seeding }}{{ t(" 个 / ") }}{{ model.seedSize.text }}</span>
         </div>
 
         <template v-if="model.inc">
@@ -82,22 +91,25 @@ const incEn = computed(() => PERIOD_EN[props.model.inc?.label ?? ""] ?? "");
             {{ model.inc.label }}<template v-if="incEn"> · {{ incEn }}</template>
           </div>
           <div class="pr-li">
-            <span class="pr-k">上传</span><span class="pr-dots" />
+            <span class="pr-k">{{ t("上传") }}</span
+            ><span class="pr-dots" />
             <span class="pr-v" style="color: var(--c-up)">{{ model.inc.up }}</span>
           </div>
           <div class="pr-li">
-            <span class="pr-k">下载</span><span class="pr-dots" />
+            <span class="pr-k">{{ t("下载") }}</span
+            ><span class="pr-dots" />
             <span class="pr-v" style="color: var(--c-down)">{{ model.inc.down }}</span>
           </div>
           <div class="pr-li">
-            <span class="pr-k">魔力</span><span class="pr-dots" />
+            <span class="pr-k">{{ t("魔力") }}</span
+            ><span class="pr-dots" />
             <span class="pr-v" style="color: var(--c-bonus)">{{ model.inc.bonus }}</span>
           </div>
         </template>
 
         <template v-if="model.sites.length">
           <div class="pr-dbl" />
-          <div class="pr-sec">逐站明细 · {{ model.sites.length }} ITEMS</div>
+          <div class="pr-sec">{{ t("逐站明细 · ") }}{{ model.sites.length }} ITEMS</div>
           <div v-for="(s, i) in model.sites" :key="s.id" class="pr-site">
             <div class="pr-site__l1">
               <span class="pr-site__i">{{ String(i + 1).padStart(2, "0") }}</span>
@@ -133,7 +145,7 @@ const incEn = computed(() => PERIOD_EN[props.model.inc?.label ?? ""] ?? "");
 
         <div class="pr-dbl" />
         <div class="pr-barcode" />
-        <div class="pr-c pr-thanks">感谢做种 · THANK YOU FOR SEEDING</div>
+        <div class="pr-c pr-thanks">{{ t("感谢做种 · THANK YOU FOR SEEDING") }}</div>
       </div>
     </div>
     <div class="pr-foot">Generated by pt-tools</div>

@@ -1,4 +1,4 @@
-// 页面里通用的小部件：加载与出错、空状态、数值卡片、站点图标、海报、连接条。
+// 页面里通用的小部件：加载与出错、空状态、数值卡片、行组与行卡片、站点图标、海报、连接条。
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -10,7 +10,9 @@ import '../../remote/connection.dart';
 import '../../remote/frames.dart';
 import '../../remote/session.dart';
 import '../../remote/transport.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import 'tunnel_image.dart';
 
 /// 按 AsyncValue 显示：加载中转圈，出错给原因与重试，有数据时用 [data]。
@@ -59,12 +61,15 @@ class ErrorState extends ConsumerWidget {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(32),
       children: [
-        Icon(
-          problem == null ? Icons.cloud_off : Icons.link_off,
-          size: 48,
-          color: Theme.of(context).colorScheme.outline,
+        Center(
+          child: PtIcon(
+            problem == null ? PtGlyph.cloudOff : PtGlyph.linkOff,
+            size: 40,
+            weight: 1.5,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         Text(problem ?? s.errorPrefix(message), textAlign: TextAlign.center),
         if (problem == null) ...[
           const SizedBox(height: 12),
@@ -116,25 +121,49 @@ String describeError(Object e, S s) {
 }
 
 class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, this.message, this.icon = Icons.inbox_outlined});
+  const EmptyState({super.key, this.message, this.icon = PtGlyph.inbox});
   final String? message;
-  final IconData icon;
+  final PtGlyph icon;
 
   @override
   Widget build(BuildContext context) {
+    final t = Theme.of(context);
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(48),
       children: [
-        Icon(icon, size: 48, color: Theme.of(context).colorScheme.outline),
-        const SizedBox(height: 12),
-        Text(message ?? S.of(context).empty, textAlign: TextAlign.center),
+        Center(
+          child: Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: t.colorScheme.surface,
+              border: Border.all(color: context.pt.hairline),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            alignment: Alignment.center,
+            child: PtIcon(
+              icon,
+              size: 28,
+              color: t.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          message ?? S.of(context).empty,
+          textAlign: TextAlign.center,
+          style: t.textTheme.bodyMedium?.copyWith(
+            color: t.colorScheme.onSurfaceVariant,
+          ),
+        ),
       ],
     );
   }
 }
 
-/// 一个数值：名字、值与可选的说明，带一条彩色的边（概览的 KPI 用）。
+/// 一个数值：名字、值与可选的说明（概览的 KPI 用）。照 Voltip 的数值卡片：每张卡把自己的色相
+/// 淡淡地混进卡片面与边框，图标放在同色的小方块里——一眼分得出是哪个数。
 class MetricTile extends StatelessWidget {
   const MetricTile({
     super.key,
@@ -148,20 +177,22 @@ class MetricTile extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
-  final IconData? icon;
+  final PtGlyph? icon;
   final String? note;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: color, width: 4)),
-        ),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+    final dark = t.brightness == Brightness.dark;
+    final surface = t.colorScheme.surface;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: tint(color, surface, dark ? 0.08 : 0.05),
+        border: Border.all(color: tint(color, surface, dark ? 0.28 : 0.22)),
+        borderRadius: BorderRadius.circular(cardRadius),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -169,39 +200,182 @@ class MetricTile extends StatelessWidget {
             Row(
               children: [
                 if (icon != null) ...[
-                  Icon(icon, size: 16, color: color),
-                  const SizedBox(width: 6),
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: tint(color, surface, dark ? 0.2 : 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    alignment: Alignment.center,
+                    child: PtIcon(icon!, size: 15, weight: 2, color: color),
+                  ),
+                  const SizedBox(width: 8),
                 ],
                 Flexible(
                   child: Text(
                     label,
-                    style: t.textTheme.labelMedium,
+                    style: t.textTheme.labelMedium?.copyWith(
+                      fontSize: 12.5,
+                      color: t.colorScheme.onSurfaceVariant,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Text(
               value,
               style: t.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
+                fontSize: 21,
+                fontWeight: FontWeight.w700,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
             if (note != null)
-              Text(
-                note!,
-                style: t.textTheme.bodySmall,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  note!,
+                  style: t.textTheme.bodySmall?.copyWith(
+                    color: t.colorScheme.onSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
           ],
         ),
       ),
     );
   }
+}
+
+/// 一组行：白卡片加细线，行与行之间一条分隔线（Voltip 手机端的设置列表）；可带一个小标题。
+class RowGroup extends StatelessWidget {
+  const RowGroup({super.key, this.title, required this.children});
+  final String? title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (title != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+            child: Text(
+              title!,
+              style: t.textTheme.labelLarge?.copyWith(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: t.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0) const Divider(height: 1),
+                children[i],
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 打开一页的行：图标、名字、说明、行尾的箭头（或 [trailing]），整行可点。
+class NavRow extends StatelessWidget {
+  const NavRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.danger = false,
+  });
+
+  final PtGlyph icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  /// 危险的操作（忘掉这台主机）：图标与名字用危险色，没有箭头。
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final color = danger ? t.colorScheme.error : null;
+    return ListTile(
+      minTileHeight: 56,
+      leading: PtIcon(icon, size: 20, color: color),
+      title: Text(title, style: color == null ? null : TextStyle(color: color)),
+      subtitle: subtitle == null ? null : Text(subtitle!),
+      trailing:
+          trailing ??
+          (onTap == null || danger
+              ? null
+              : PtIcon(
+                  PtGlyph.chevronRight,
+                  size: 18,
+                  color: context.pt.subtle,
+                )),
+      onTap: onTap,
+    );
+  }
+}
+
+/// 列表里的一张行卡片（种子、搜索结果、任务……）：白卡片加细线，14 的内边距，整张可点。
+class RowCard extends StatelessWidget {
+  const RowCard({super.key, required this.child, this.onTap, this.padding});
+  final Widget child;
+  final VoidCallback? onTap;
+  final EdgeInsetsGeometry? padding;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: padding ?? const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: child,
+      ),
+    ),
+  );
+}
+
+/// 状态的小标签：状态色的字压在它自己 12% 的淡染底上（[PtColors] 的状态色按这个底校过对比度）。
+class StatusPill extends StatelessWidget {
+  const StatusPill({super.key, required this.text, required this.color});
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+    ),
+  );
 }
 
 /// 站点图标（经隧道）；取不到时显示首字母。
@@ -213,11 +387,22 @@ class SiteIcon extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = ref.watch(connectionProvider);
-    final fallback = CircleAvatar(
-      radius: size / 2,
+    final scheme = Theme.of(context).colorScheme;
+    final fallback = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(size / 4),
+      ),
       child: Text(
         site.isEmpty ? '?' : site.substring(0, 1).toUpperCase(),
-        style: TextStyle(fontSize: size * 0.45),
+        style: TextStyle(
+          fontSize: size * 0.45,
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurfaceVariant,
+        ),
       ),
     );
     if (c == null) return fallback;
@@ -255,9 +440,11 @@ class Poster extends ConsumerWidget {
     final path = tmdbImagePath(posterPath, size: size);
     final placeholder = Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Icon(
-        Icons.movie_outlined,
-        color: Theme.of(context).colorScheme.outline,
+      alignment: Alignment.center,
+      child: PtIcon(
+        PtGlyph.film,
+        size: 22,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
     );
     return ClipRRect(
@@ -333,7 +520,7 @@ class ConnectionBanner extends ConsumerWidget {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               else
-                const Icon(Icons.info_outline, size: 18),
+                const PtIcon(PtGlyph.info, size: 18),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),

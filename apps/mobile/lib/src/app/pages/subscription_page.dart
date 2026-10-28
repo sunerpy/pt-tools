@@ -5,9 +5,13 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../hybrid/mobile_api.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import 'media_page.dart';
+import 'mobile_editor_page.dart';
 
 /// 订阅详情：海报、进度、每一集的状态、下载过的种子；完全控制的设备可以暂停/恢复、立即搜索、删除。
 class SubscriptionPage extends ConsumerWidget {
@@ -45,8 +49,19 @@ class SubscriptionPage extends ConsumerWidget {
         actions: [
           if (canWrite && d != null)
             PopupMenuButton<String>(
+              icon: const PtIcon(PtGlyph.moreVertical),
               onSelected: (v) async {
                 switch (v) {
+                  case 'edit':
+                    if (await openMobileEditor(
+                      context,
+                      ref,
+                      'subscription',
+                      id: id,
+                    )) {
+                      ref.invalidate(subscriptionProvider(id));
+                      ref.invalidate(subscriptionsProvider);
+                    }
                   case 'toggle':
                     await _run(context, ref, (api) async {
                       await api.setSubscriptionStatus(
@@ -78,6 +93,10 @@ class SubscriptionPage extends ConsumerWidget {
                             child: Text(s.cancel),
                           ),
                           FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Theme.of(c).colorScheme.error,
+                              foregroundColor: Theme.of(c).colorScheme.onError,
+                            ),
                             onPressed: () => Navigator.pop(c, true),
                             child: Text(s.actionDelete),
                           ),
@@ -94,13 +113,22 @@ class SubscriptionPage extends ConsumerWidget {
                 }
               },
               itemBuilder: (_) => [
+                PopupMenuItem(value: 'edit', child: Text(s.mobileEditor)),
                 PopupMenuItem(
                   value: 'toggle',
                   child: Text(d.status == 'paused' ? s.subResume : s.subPause),
                 ),
                 if (d.status != 'paused')
                   PopupMenuItem(value: 'search', child: Text(s.subSearchNow)),
-                PopupMenuItem(value: 'delete', child: Text(s.subDelete)),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text(
+                    s.subDelete,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
               ],
             ),
         ],
@@ -131,7 +159,8 @@ class SubscriptionPage extends ConsumerWidget {
                       children: [
                         Text(
                           d.title,
-                          style: Theme.of(context).textTheme.titleLarge,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         if (d.originalTitle != null &&
                             d.originalTitle != d.title)
@@ -144,21 +173,27 @@ class SubscriptionPage extends ConsumerWidget {
                           spacing: 6,
                           runSpacing: 6,
                           children: [
-                            Chip(
-                              label: Text(subStatusLabel(s, d.status)),
-                              visualDensity: VisualDensity.compact,
+                            StatusPill(
+                              text: subStatusLabel(s, d.status),
+                              color: switch (d.status) {
+                                'active' => context.pt.ok,
+                                'pending' => context.pt.warn,
+                                _ => Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              },
                             ),
                             if (d.mediaType == 'tv' && d.season > 0)
-                              Chip(
-                                label: Text(
-                                  'S${d.season.toString().padLeft(2, '0')}',
-                                ),
-                                visualDensity: VisualDensity.compact,
+                              StatusPill(
+                                text: 'S${d.season.toString().padLeft(2, '0')}',
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                             if (d.upgrade)
-                              Chip(
-                                label: Text(s.subUpgrade),
-                                visualDensity: VisualDensity.compact,
+                              StatusPill(
+                                text: s.subUpgrade,
+                                color: context.pt.violet,
                               ),
                           ],
                         ),
@@ -188,40 +223,45 @@ class SubscriptionPage extends ConsumerWidget {
               ),
               if (d.episodes.isNotEmpty) ...[
                 const SizedBox(height: 20),
-                Text(
-                  s.episodesTitle,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [for (final e in d.episodes) _EpisodeChip(e)],
+                RowGroup(
+                  title: s.episodesTitle,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final e in d.episodes) _EpisodeChip(e, id),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
               if (d.torrents.isNotEmpty) ...[
                 const SizedBox(height: 20),
-                Text(
-                  s.subTorrentsTitle,
-                  style: Theme.of(context).textTheme.titleMedium,
+                RowGroup(
+                  title: s.subTorrentsTitle,
+                  children: [
+                    for (final t in d.torrents)
+                      ListTile(
+                        leading: SiteIcon(t.site, size: 28),
+                        title: Text(
+                          t.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          [
+                            t.status,
+                            formatBytes(t.size),
+                            formatTime(t.createdAt),
+                          ].join(' · '),
+                        ),
+                      ),
+                  ],
                 ),
-                for (final t in d.torrents)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: SiteIcon(t.site, size: 28),
-                    title: Text(
-                      t.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      [
-                        t.status,
-                        formatBytes(t.size),
-                        formatTime(t.createdAt),
-                      ].join(' · '),
-                    ),
-                  ),
               ],
             ],
           ),
@@ -231,34 +271,91 @@ class SubscriptionPage extends ConsumerWidget {
   }
 }
 
-class _EpisodeChip extends StatelessWidget {
-  const _EpisodeChip(this.e);
+class _EpisodeChip extends ConsumerStatefulWidget {
+  const _EpisodeChip(this.e, this.id);
   final AppEpisode e;
+  final int id;
+  @override
+  ConsumerState<_EpisodeChip> createState() => _EpisodeChipState();
+}
+
+class _EpisodeChipState extends ConsumerState<_EpisodeChip> {
+  bool _busy = false;
+  Future<void> _action() async {
+    if (_busy || !ref.read(canWriteProvider)) return;
+    final s = S.of(context);
+    final e = widget.e;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                e.manualSkip == true ? s.mobileRestore : s.mobileSkipped,
+              ),
+              onTap: () => Navigator.pop(c, 'skip'),
+            ),
+            ListTile(
+              title: Text(s.mobileUnlock),
+              onTap: () => Navigator.pop(c, 'unlock'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await mobileApi(
+        ref,
+        '/subscriptions/${widget.id}/episodes/${e.number}/$action',
+        verb: 'POST',
+        body: action == 'skip'
+            ? {'skip': e.manualSkip != true}
+            : {'unlock': true},
+      );
+      ref.invalidate(subscriptionProvider(widget.id));
+      ref.invalidate(subscriptionsProvider);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(describeError(error, s))));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = S.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final e = widget.e;
     final (bg, label) = switch (e.state) {
-      'library' => (const Color(0xFF10B981), s.epLibrary),
-      'downloading' => (const Color(0xFF3B82F6), s.epDownloading),
+      'library' => (context.pt.ok, s.epLibrary),
+      'downloading' => (context.pt.info, s.epDownloading),
       'missing' => (scheme.error, s.epMissing),
-      _ => (scheme.outline, s.epUpcoming),
+      _ => (scheme.onSurfaceVariant, s.epUpcoming),
     };
     return Tooltip(
       message: '${e.name ?? ''} ${e.airDate ?? ''} $label'.trim(),
-      child: Container(
-        width: 40,
-        height: 32,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: bg.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: bg.withValues(alpha: 0.6)),
-        ),
-        child: Text(
-          '${e.number}',
-          style: TextStyle(color: bg, fontWeight: FontWeight.w600),
+      child: InkWell(
+        onTap: ref.watch(canWriteProvider) && !_busy ? _action : null,
+        child: Container(
+          width: 48,
+          height: 44,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bg.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: bg.withValues(alpha: 0.35)),
+          ),
+          child: Text(
+            _busy ? '…' : '${e.number}',
+            style: TextStyle(color: bg, fontWeight: FontWeight.w600),
+          ),
         ),
       ),
     );

@@ -112,6 +112,10 @@ Claude Desktop 这类客户端只会启动一个本地程序，经标准输入�
 | `retry_media_organize`            | MCP 操作 | 重新整理一条整理记录对应的种子（多半是失败的那条）                                   |
 | `rescrape_media`                  | MCP 操作 | 重新刮削一条整理记录所在的电影或剧集                                                 |
 | `change_config`                   | MCP 操作 | 改 pt-tools 的配置（另要「配置」权限）：先回预览，确认以后才保存                     |
+| `list_brush_tasks`                | MCP 读取 | 刷流任务、状态与收益                                                                 |
+| `get_brush_task`                  | MCP 读取 | 刷流配置                                                                             |
+| `list_brush_runs`                 | MCP 读取 | 最近运行记录与步骤                                                                   |
+| `change_brush_task`               | MCP 操作 | 先预览再确认新增、编辑、启停或删除                                                   |
 
 - 会改动下载器、订阅、媒体库或配置的工具，不带 `confirm=true` 调用时不执行，回一份预览：会改什么（每一项改以前、改以后）与可能的影响。客户端的 AI 把预览给你看，你同意以后它再带 `confirm=true` 调一次才执行。
 - `organize_media` 与 `preview_media_organize` 的种子用 `list_downloader_torrents` 里的下载器编号与 `info_hash`；认错了条目时给 `media_type` 与 `tmdb_id`（从 `recognize_media` 或 `explore_media` 取）指定，给 `library_id` 指定媒体库。整理的规则和网页上手动整理一样，见[整理入库](media-library.md)。

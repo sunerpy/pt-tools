@@ -152,16 +152,25 @@ function pixelCells(img: HTMLImageElement): string[] | null {
  * 取一个站点的图标。后端取不到图标时回 1×1 的透明占位（响应头 X-Favicon-Placeholder: 1），
  * 这时与网络出错一样用首字母与站点颜色的色块。
  */
-export async function loadPosterLogo(site: string): Promise<PosterLogoData> {
+export async function loadPosterLogo(
+  site: string,
+  readDataUrl?: (site: string) => Promise<string>,
+): Promise<PosterLogoData> {
   const fallback: PosterLogoData = { src: null, cells: fallbackCells(site, getAvatarColor(site)) };
   try {
-    const res = await fetch(`/api/favicon/${encodeURIComponent(site.toLowerCase())}`, {
-      credentials: "same-origin",
-    });
-    if (!res.ok || res.headers.get("X-Favicon-Placeholder") === "1") return fallback;
-    const blob = await res.blob();
-    if (!blob.type.startsWith("image/")) return fallback;
-    const src = await blobToDataUrl(blob);
+    let src: string;
+    if (readDataUrl) {
+      src = await readDataUrl(site.toLowerCase());
+      if (!src.startsWith("data:image/")) return fallback;
+    } else {
+      const res = await fetch(`/api/favicon/${encodeURIComponent(site.toLowerCase())}`, {
+        credentials: "same-origin",
+      });
+      if (!res.ok || res.headers.get("X-Favicon-Placeholder") === "1") return fallback;
+      const blob = await res.blob();
+      if (!blob.type.startsWith("image/")) return fallback;
+      src = await blobToDataUrl(blob);
+    }
     const img = await loadImage(src);
     if (img.naturalWidth === 1 && img.naturalHeight === 1) return fallback;
     return { src, cells: pixelCells(img) ?? fallback.cells };
@@ -170,9 +179,12 @@ export async function loadPosterLogo(site: string): Promise<PosterLogoData> {
   }
 }
 
-export async function loadPosterLogos(sites: string[]): Promise<Map<string, PosterLogoData>> {
+export async function loadPosterLogos(
+  sites: string[],
+  readDataUrl?: (site: string) => Promise<string>,
+): Promise<Map<string, PosterLogoData>> {
   const entries = await Promise.all(
-    sites.map(async (s) => [s.toLowerCase(), await loadPosterLogo(s)] as const),
+    sites.map(async (s) => [s.toLowerCase(), await loadPosterLogo(s, readDataUrl)] as const),
   );
   return new Map(entries);
 }

@@ -6,7 +6,9 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 
 /// 种子：下载器里的种子，按状态筛选、按标题搜；完全控制的设备可以暂停、继续、删除（删除要确认）。每 5 秒刷新一次。
@@ -124,7 +126,7 @@ class _TorrentsPageState extends ConsumerState<TorrentsPage> {
                 child: SearchBar(
                   controller: _search,
                   hintText: s.searchTorrentsHint,
-                  leading: const Icon(Icons.filter_list),
+                  leading: const PtIcon(PtGlyph.filter, size: 20),
                   elevation: const WidgetStatePropertyAll(0),
                   onChanged: (v) {
                     _debounce?.cancel();
@@ -175,24 +177,27 @@ class _TorrentsPageState extends ConsumerState<TorrentsPage> {
           onRetry: () => ref.invalidate(torrentsProvider(query)),
           data: (p) {
             if (p.items.isEmpty && p.failures.isEmpty) {
-              return EmptyState(icon: Icons.swap_vert, message: s.noTorrents);
+              return EmptyState(icon: PtGlyph.torrents, message: s.noTorrents);
             }
             return ListView.separated(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               itemCount: p.items.length + (p.failures.isEmpty ? 0 : 1),
-              separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 if (p.failures.isNotEmpty && i == 0) {
-                  return ListTile(
-                    leading: Icon(
-                      Icons.warning_amber,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                    title: Text(s.torrentFailures(p.failures.length)),
-                    subtitle: Text(
-                      p.failures
-                          .map((f) => '${f.downloader}：${f.error}')
-                          .join('\n'),
+                  return Card(
+                    child: ListTile(
+                      leading: PtIcon(
+                        PtGlyph.alert,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      title: Text(s.torrentFailures(p.failures.length)),
+                      subtitle: Text(
+                        p.failures
+                            .map((f) => '${f.downloader}：${f.error}')
+                            .join('\n'),
+                      ),
                     ),
                   );
                 }
@@ -230,44 +235,68 @@ class _TorrentTile extends StatelessWidget {
     final theme = Theme.of(context);
     final paused = t.state == 'paused' || t.state == 'stopped';
     final color = switch (t.state) {
-      'downloading' => const Color(0xFF3B82F6),
-      'seeding' => const Color(0xFF10B981),
+      'downloading' => context.pt.info,
+      'seeding' => context.pt.ok,
       'error' => theme.colorScheme.error,
-      _ => theme.colorScheme.outline,
+      _ => theme.colorScheme.onSurfaceVariant,
     };
-    return ListTile(
-      title: Text(t.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Column(
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontSize: 12.5,
+    );
+    return RowCard(
+      padding: EdgeInsets.fromLTRB(14, 12, canWrite ? 2 : 14, 12),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 6),
-          LinearProgressIndicator(
-            value: (t.progress / 100).clamp(0, 1),
-            color: color,
-            minHeight: 4,
-            borderRadius: BorderRadius.circular(2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  t.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                LinearProgressIndicator(
+                  value: (t.progress / 100).clamp(0, 1),
+                  color: color,
+                  minHeight: 4,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    StatusPill(text: stateLabel, color: color),
+                    Text(
+                      '${t.progress.toStringAsFixed(t.progress >= 100 ? 0 : 1)}% · ${formatBytes(t.size)}',
+                      style: muted,
+                    ),
+                    if (t.uploadSpeed > 0)
+                      Text('↑${formatSpeed(t.uploadSpeed)}', style: muted),
+                    if (t.downloadSpeed > 0)
+                      Text('↓${formatSpeed(t.downloadSpeed)}', style: muted),
+                    if (t.state == 'downloading')
+                      Text(s.etaLabel(formatEta(t.eta)), style: muted),
+                    Text('${s.kpiRatio} ${formatRatio(t.ratio)}', style: muted),
+                    Text(t.downloader, style: muted),
+                  ],
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 10,
-            runSpacing: 2,
-            children: [
-              _Pill(text: stateLabel, color: color),
-              Text(
-                '${t.progress.toStringAsFixed(t.progress >= 100 ? 0 : 1)}% · ${formatBytes(t.size)}',
-              ),
-              if (t.uploadSpeed > 0) Text('↑${formatSpeed(t.uploadSpeed)}'),
-              if (t.downloadSpeed > 0) Text('↓${formatSpeed(t.downloadSpeed)}'),
-              if (t.state == 'downloading') Text(s.etaLabel(formatEta(t.eta))),
-              Text('${s.kpiRatio} ${formatRatio(t.ratio)}'),
-              Text(t.downloader, style: theme.textTheme.bodySmall),
-            ],
-          ),
-        ],
-      ),
-      trailing: canWrite
-          ? PopupMenuButton<String>(
+          if (canWrite)
+            PopupMenuButton<String>(
               tooltip: s.actions,
+              icon: const PtIcon(PtGlyph.moreVertical, size: 20),
               onSelected: onAction,
               itemBuilder: (_) => [
                 if (paused)
@@ -282,29 +311,11 @@ class _TorrentTile extends StatelessWidget {
                   ),
                 ),
               ],
-            )
-          : null,
+            ),
+        ],
+      ),
     );
   }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.text, required this.color});
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(4),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
-    ),
-  );
 }
 
 /// 删除确认：返回 true 表示连同数据一起删。
@@ -347,6 +358,7 @@ class _DeleteDialogState extends State<_DeleteDialog> {
         FilledButton(
           style: FilledButton.styleFrom(
             backgroundColor: Theme.of(context).colorScheme.error,
+            foregroundColor: Theme.of(context).colorScheme.onError,
           ),
           onPressed: () => Navigator.pop(context, _withFiles),
           child: Text(s.actionDelete),

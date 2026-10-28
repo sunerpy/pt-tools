@@ -4,12 +4,14 @@
  * 其余的列在下面。入图的站点不到三个时不画领奖台，直接列表。
  */
 import { computed } from "vue";
+import { usePosterWords } from "./locale";
 
 import type { PosterModel, PosterSite } from "./model";
 import PosterLogo from "./PosterLogo.vue";
 import PosterMask from "./PosterMask.vue";
 
 const props = defineProps<{ model: PosterModel; colorway: string }>();
+const t = usePosterWords();
 
 /** 领奖台的摆法：左第二、中第一、右第三 */
 const podium = computed<{ s: PosterSite; rank: number; h: number }[]>(() => {
@@ -34,61 +36,67 @@ const rest = computed(() =>
       <span>PT-TOOLS</span><span>{{ model.date }}</span>
     </div>
     <div class="pw-lead">
-      {{ model.title }} · <template v-if="model.joinDur">入站 {{ model.joinDur }}，</template>在
-      {{ model.siteCount }} 个站点一共上传了
+      {{ model.title }} ·
+      <template v-if="model.joinDur">{{ t("入站 ") }}{{ model.joinDur }}，</template
+      >{{ t("在\n      ") }}{{ model.siteCount }}{{ t(" 个站点一共上传了\n    ") }}
     </div>
     <div class="pw-mega">
       {{ model.up.value }}<small>{{ model.up.unit }}</small>
     </div>
     <div class="pw-say">
-      平均分享率 <b style="color: var(--c-ratio)">{{ model.ratio }}</b
-      >，计费下载 <b style="color: var(--c-down)">{{ model.down.text }}</b
+      {{ t("\n      平均分享率 ") }}<b style="color: var(--c-ratio)">{{ model.ratio }}</b
+      >{{ t("，计费下载 ") }}<b style="color: var(--c-down)">{{ model.down.text }}</b
       >。
       <template v-if="model.join">
-        <br />最早的账号从 <b>{{ model.join }}</b> 开始，到今天 <b>{{ model.joinDur }}</b
+        <br />{{ t("最早的账号从 ") }}<b>{{ model.join }}</b
+        >{{ t(" 开始，到今天 ") }}<b>{{ model.joinDur }}</b
         >。
       </template>
     </div>
 
     <div class="pw-trio">
       <div>
-        <div class="pw-trio__k">总魔力</div>
+        <div class="pw-trio__k">{{ t("总魔力") }}</div>
         <div class="pw-trio__n" style="color: var(--c-bonus)">
           {{ model.bonus.value }}<small>{{ model.bonus.unit }}</small>
         </div>
-        <div class="pw-trio__h">每小时 +{{ model.bph.text }}</div>
+        <div class="pw-trio__h">{{ t("每小时 +") }}{{ model.bph.text }}</div>
       </div>
       <div>
-        <div class="pw-trio__k">正在做种</div>
-        <div class="pw-trio__n">{{ model.seeding }}<small>个</small></div>
-        <div class="pw-trio__h">共 {{ model.seedSize.text }}</div>
+        <div class="pw-trio__k">{{ t("正在做种") }}</div>
+        <div class="pw-trio__n">
+          {{ model.seeding }}<small>{{ t("个") }}</small>
+        </div>
+        <div class="pw-trio__h">{{ t("共 ") }}{{ model.seedSize.text }}</div>
       </div>
       <div v-if="model.seedBonus">
-        <div class="pw-trio__k">做种积分</div>
+        <div class="pw-trio__k">{{ t("做种积分") }}</div>
         <div class="pw-trio__n">
           {{ model.seedBonus.value }}<small>{{ model.seedBonus.unit }}</small>
         </div>
-        <div class="pw-trio__h">{{ model.siteCount }} 个站点合计</div>
+        <div class="pw-trio__h">{{ model.siteCount }}{{ t(" 个站点合计") }}</div>
       </div>
       <div v-else>
-        <div class="pw-trio__k">平均每站上传</div>
+        <div class="pw-trio__k">{{ t("平均每站上传") }}</div>
         <div class="pw-trio__n">
           {{ model.avgUp.value }}<small>{{ model.avgUp.unit }}</small>
         </div>
-        <div class="pw-trio__h">按 {{ model.siteCount }} 个站点平均</div>
+        <div class="pw-trio__h">{{ t("按 ") }}{{ model.siteCount }}{{ t(" 个站点平均") }}</div>
       </div>
     </div>
 
     <div v-if="model.inc" class="pw-week">
       <span>
         <span class="pw-week__k">{{ model.inc.label }}</span
-        >又上传了 <b>{{ model.inc.up }}</b>
+        >{{ t("又上传了 ") }}<b>{{ model.inc.up }}</b>
       </span>
-      <span class="pw-week__r">下载 {{ model.inc.down }} · 魔力 {{ model.inc.bonus }}</span>
+      <span class="pw-week__r"
+        >{{ t("下载 ") }}{{ model.inc.down }}{{ t(" · 魔力 ") }}{{ model.inc.bonus }}</span
+      >
     </div>
 
     <template v-if="model.sites.length">
-      <h2 class="pw-h2">上传最多的站</h2>
+      <h2 class="pw-h2">{{ t("上传最多的站") }}</h2>
       <div v-if="podium.length" class="pw-podium">
         <div v-for="p in podium" :key="p.s.id" class="pw-pd">
           <PosterLogo
@@ -100,7 +108,7 @@ const rest = computed(() =>
             :radius="11" />
           <span class="pw-pd__nm"><PosterMask :text="p.s.name" :on="model.mask.names" /></span>
           <span class="pw-pd__up">{{ p.s.up.text }}</span>
-          <span class="pw-pd__lv">分享率 {{ p.s.ratio }}</span>
+          <span class="pw-pd__lv">{{ t("分享率 ") }}{{ p.s.ratio }}</span>
           <span v-if="p.s.user || p.s.level" class="pw-pd__lv">
             <PosterMask v-if="p.s.user" :text="p.s.user" :on="model.mask.users" prefix="@" />
             <span v-if="p.s.user && p.s.level"> · </span>{{ p.s.level }}
@@ -133,7 +141,7 @@ const rest = computed(() =>
       </div>
     </template>
 
-    <div class="pw-foot"><b>PT-TOOLS</b> · 生成于 {{ model.generated }}</div>
+    <div class="pw-foot"><b>PT-TOOLS</b>{{ t(" · 生成于 ") }}{{ model.generated }}</div>
   </div>
 </template>
 

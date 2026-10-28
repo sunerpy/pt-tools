@@ -174,7 +174,8 @@ func TestAppAPI_TokensCannotReachSessionAPIs(t *testing.T) {
 
 // 只读但用 POST 传条件的路由
 var appReadPosts = map[string]bool{
-	"POST /search": true,
+	"POST /brush/tasks/preview": true,
+	"POST /search":              true,
 	// 识别与整理预览只算结果，不改动任何东西
 	"POST /media/recognize":        true,
 	"POST /media/organize/preview": true,

@@ -529,3 +529,24 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 ### POST /config/{resource}/changes
 
 同预览的请求体。按现状重新算一遍再保存（预览以后别处改过的照新的算），回应同预览，`applied` 为真，`item` 是改完的样子（删除时没有），新增出来的编号在 `id`。保存它的接口拒绝时照原样回原因：校验不过 400，冲突 409（`conflict`），服务没有启动 503。令牌与设备的保存记在操作审计里，参数记资源、操作、编号与改了哪些字段，不记值。
+
+## 手机编辑与统计导出
+
+`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
+
+| 方法   | 路径                         | 权限 | 用途                                                                           |
+| ------ | ---------------------------- | ---- | ------------------------------------------------------------------------------ |
+| GET    | `/mobile/options`            | 读取 | 已启用站点、下载器、质量档案与媒体库的编号和名称；部分来源失败由 `errors` 报告 |
+| GET    | `/brush/tasks/{id}`          | 读取 | 安全的刷流编辑配置                                                             |
+| POST   | `/brush/tasks/preview`       | 读取 | 预览刷流改动；请求为 `ConfigChange`，固定资源为刷流任务                        |
+| POST   | `/brush/tasks`               | 操作 | 新建刷流任务                                                                   |
+| PUT    | `/brush/tasks/{id}`          | 操作 | 修改刷流任务                                                                   |
+| DELETE | `/brush/tasks/{id}`          | 操作 | 删除刷流任务                                                                   |
+| POST   | `/brush/tasks/{id}/status`   | 操作 | 启停任务，请求为 `{"enabled": true}` 或 `false`                                |
+| GET    | `/brush/tasks/{id}/runs`     | 读取 | 分页读取任务运行记录                                                           |
+| GET    | `/stats/aggregated`          | 读取 | 站点聚合统计，使用与网页统计相同的字段与计费下载口径                           |
+| GET    | `/stats/summary?range=today` | 读取 | 周期增量，`range` 接受 `today`、`7d`、`30d`                                    |
+
+运行记录接口使用 `limit`（默认 20，上限 100）和 `offset` 分页，返回 `items` 与 `total`。
+
+刷流新建、修改的请求字段与网页刷流配置一致，仅公开任务配置；这些入口不会授予设备通用的 `app:config` 权限，也不能更改站点凭据或设备权限。写入沿用 App API 的审计。订阅的新建、修改和详情增加 `include_keywords`、`exclude_keywords`，语义与网页的标题包含、标题排除一致。

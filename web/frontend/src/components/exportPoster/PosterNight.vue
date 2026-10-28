@@ -10,6 +10,7 @@ let ringSeq = 0;
  * 玻璃不用 backdrop-filter：导出时画进 SVG 的内容不认它，预览与 PNG 会对不上。
  */
 import { computed } from "vue";
+import { usePosterWords } from "./locale";
 
 import PtIcon from "@/components/PtIcon";
 
@@ -18,6 +19,7 @@ import PosterLogo from "./PosterLogo.vue";
 import PosterMask from "./PosterMask.vue";
 
 const props = defineProps<{ model: PosterModel; colorway: string }>();
+const t = usePosterWords();
 
 const gradId = `pn-ring-${++ringSeq}`;
 
@@ -44,15 +46,15 @@ interface Tile {
 const tiles = computed<Tile[]>(() => {
   const m = props.model;
   const all: (Tile | null)[] = [
-    { c: "bph", icon: "clock", k: "时魔", v: m.bph.value, u: `${m.bph.unit}/h` },
-    { c: "seed", icon: "leaf", k: "做种数", v: m.seeding, u: "" },
-    { c: "size", icon: "hard-drive", k: "做种量", v: m.seedSize.value, u: m.seedSize.unit },
+    { c: "bph", icon: "clock", k: t("时魔"), v: m.bph.value, u: `${m.bph.unit}/h` },
+    { c: "seed", icon: "leaf", k: t("做种数"), v: m.seeding, u: "" },
+    { c: "size", icon: "hard-drive", k: t("做种量"), v: m.seedSize.value, u: m.seedSize.unit },
     m.seedBonus
-      ? { c: "sb", icon: "sparkles", k: "做种积分", v: m.seedBonus.value, u: m.seedBonus.unit }
+      ? { c: "sb", icon: "sparkles", k: t("做种积分"), v: m.seedBonus.value, u: m.seedBonus.unit }
       : null,
-    m.join ? { c: "join", icon: "calendar", k: "最早入站", v: m.join, u: "" } : null,
-    { c: "sites", icon: "layers", k: "站点", v: String(m.siteCount), u: "个" },
-    { c: "up", icon: "upload", k: "平均每站上传", v: m.avgUp.value, u: m.avgUp.unit },
+    m.join ? { c: "join", icon: "calendar", k: t("最早入站"), v: m.join, u: "" } : null,
+    { c: "sites", icon: "layers", k: t("站点"), v: String(m.siteCount), u: t("个") },
+    { c: "up", icon: "upload", k: t("平均每站上传"), v: m.avgUp.value, u: m.avgUp.unit },
   ];
   return all.filter((t): t is Tile => t !== null).slice(0, 6);
 });
@@ -66,8 +68,9 @@ const tiles = computed<Tile[]>(() => {
     </div>
     <h1 class="pn-title">{{ model.title }}</h1>
     <div class="pn-sub">
-      {{ model.siteCount }} 个站点<template v-if="model.join">
-        · 入站 {{ model.joinDur }}（{{ model.join }} 起）</template
+      {{ model.siteCount }}{{ t(" 个站点")
+      }}<template v-if="model.join"
+        >{{ t("\n        · 入站 ") }}{{ model.joinDur }}（{{ model.join }}{{ t(" 起）") }}</template
       >
     </div>
 
@@ -102,25 +105,27 @@ const tiles = computed<Tile[]>(() => {
         </svg>
         <div class="pn-ring__c">
           <b>{{ model.ratio }}</b
-          ><span>平均分享率</span>
+          ><span>{{ t("平均分享率") }}</span>
         </div>
       </div>
       <div class="pn-big">
-        <div class="pn-big__lab">总上传</div>
+        <div class="pn-big__lab">{{ t("总上传") }}</div>
         <div class="pn-big__v" style="color: var(--c-up)">
           {{ model.up.value }}<small>{{ model.up.unit }}</small>
         </div>
         <div class="pn-big__row">
           <div>
-            下载（计费）<b style="color: var(--c-down)">{{ model.down.text }}</b>
+            {{ t("\n            下载（计费）")
+            }}<b style="color: var(--c-down)">{{ model.down.text }}</b>
           </div>
           <div>
-            总魔力<b style="color: var(--c-bonus)">{{ model.bonus.text }}</b>
+            {{ t("\n            总魔力")
+            }}<b style="color: var(--c-bonus)">{{ model.bonus.text }}</b>
           </div>
         </div>
         <div class="pn-legend">
-          <span><i style="background: var(--c-up)" />上传 {{ upPct }}%</span>
-          <span><i style="background: var(--c-down)" />计费下载 {{ 100 - upPct }}%</span>
+          <span><i style="background: var(--c-up)" />{{ t("上传 ") }}{{ upPct }}%</span>
+          <span><i style="background: var(--c-down)" />{{ t("计费下载 ") }}{{ 100 - upPct }}%</span>
         </div>
       </div>
     </div>
@@ -146,20 +151,21 @@ const tiles = computed<Tile[]>(() => {
 
     <div v-if="model.inc" class="pn-inc pn-glass">
       <span class="pn-inc__k">{{ model.inc.label }}</span>
-      <span class="pn-chip" style="background: color-mix(in srgb, var(--c-up) 14%, transparent)">
-        上传<b style="color: var(--c-up)">{{ model.inc.up }}</b>
+      <span class="pn-chip" style="background: color-mix(in srgb, var(--c-up) 14%, transparent)"
+        >{{ t("\n        上传") }}<b style="color: var(--c-up)">{{ model.inc.up }}</b>
       </span>
-      <span class="pn-chip" style="background: color-mix(in srgb, var(--c-down) 14%, transparent)">
-        下载<b style="color: var(--c-down)">{{ model.inc.down }}</b>
+      <span class="pn-chip" style="background: color-mix(in srgb, var(--c-down) 14%, transparent)"
+        >{{ t("\n        下载") }}<b style="color: var(--c-down)">{{ model.inc.down }}</b>
       </span>
-      <span class="pn-chip" style="background: color-mix(in srgb, var(--c-bonus) 14%, transparent)">
-        魔力<b style="color: var(--c-bonus)">{{ model.inc.bonus }}</b>
+      <span class="pn-chip" style="background: color-mix(in srgb, var(--c-bonus) 14%, transparent)"
+        >{{ t("\n        魔力") }}<b style="color: var(--c-bonus)">{{ model.inc.bonus }}</b>
       </span>
     </div>
 
     <div v-if="model.sites.length" class="pn-sites pn-glass">
       <div class="pn-sites__hd">
-        <span>逐站明细 · 条长是上传，绿红是上传与计费下载</span><span>上传 · 分享率 · 魔力</span>
+        <span>{{ t("逐站明细 · 条长是上传，绿红是上传与计费下载") }}</span
+        ><span>{{ t("上传 · 分享率 · 魔力") }}</span>
       </div>
       <div v-for="s in model.sites" :key="s.id" class="pn-row">
         <PosterLogo

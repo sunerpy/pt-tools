@@ -4,12 +4,14 @@
  * 大数字用打包进来的 Source Serif 4（只有拉丁字符），中文照旧用系统字体。
  */
 import { computed } from "vue";
+import { usePosterWords } from "./locale";
 
 import type { PosterModel, PosterNumber } from "./model";
 import PosterLogo from "./PosterLogo.vue";
 import PosterMask from "./PosterMask.vue";
 
 const props = defineProps<{ model: PosterModel; colorway: string }>();
+const t = usePosterWords();
 
 interface Cell {
   c: string;
@@ -24,18 +26,18 @@ const num = (n: PosterNumber) => ({ v: n.value, u: n.unit });
 const cells = computed<Cell[]>(() => {
   const m = props.model;
   const out: Cell[] = [
-    { c: "down", k: "下载（计费）", ...num(m.down) },
-    { c: "bonus", k: "总魔力", ...num(m.bonus) },
-    { c: "bph", k: "时魔", v: m.bph.value, u: `${m.bph.unit}/h` },
+    { c: "down", k: t("下载（计费）"), ...num(m.down) },
+    { c: "bonus", k: t("总魔力"), ...num(m.bonus) },
+    { c: "bph", k: t("时魔"), v: m.bph.value, u: `${m.bph.unit}/h` },
   ];
-  if (m.seedBonus) out.push({ c: "sb", k: "做种积分", ...num(m.seedBonus) });
+  if (m.seedBonus) out.push({ c: "sb", k: t("做种积分"), ...num(m.seedBonus) });
   out.push(
-    { c: "seed", k: "做种数", v: m.seeding, u: "" },
-    { c: "size", k: "做种量", ...num(m.seedSize) },
-    { c: "sites", k: "站点", v: String(m.siteCount), u: "个" },
+    { c: "seed", k: t("做种数"), v: m.seeding, u: "" },
+    { c: "size", k: t("做种量"), ...num(m.seedSize) },
+    { c: "sites", k: t("站点"), v: String(m.siteCount), u: t("个") },
   );
-  if (m.joinDur) out.push({ c: "join", k: "入站", v: m.joinDur, u: "" });
-  if (out.length === 7) out.push({ c: "up", k: "平均每站上传", ...num(m.avgUp) });
+  if (m.joinDur) out.push({ c: "join", k: t("入站"), v: m.joinDur, u: "" });
+  if (out.length === 7) out.push({ c: "up", k: t("平均每站上传"), ...num(m.avgUp) });
   return out;
 });
 const cols = computed(() => (cells.value.length % 4 === 0 ? 4 : 3));
@@ -48,26 +50,30 @@ const cols = computed(() => (cells.value.length % 4 === 0 ? 4 : 3));
     </div>
     <h1 class="pp-title">{{ model.title }}</h1>
     <div class="pp-sub">
-      {{ model.siteCount }} 个站点<template v-if="model.join">
-        · 自 {{ model.join }} 入站，已经 {{ model.joinDur }}</template
+      {{ model.siteCount }}{{ t(" 个站点")
+      }}<template v-if="model.join"
+        >{{ t("\n        · 自 ") }}{{ model.join }}{{ t(" 入站，已经 ")
+        }}{{ model.joinDur }}</template
       >
     </div>
     <div class="pp-rule" />
 
     <div class="pp-hero">
       <div>
-        <div class="pp-lab"><span class="pp-dot" style="background: var(--c-up)" />总上传</div>
+        <div class="pp-lab">
+          <span class="pp-dot" style="background: var(--c-up)" />{{ t("总上传") }}
+        </div>
         <div class="pp-v pp-num">
           {{ model.up.value }}<span class="pp-u">{{ model.up.unit }}</span>
         </div>
-        <div class="pp-note">{{ model.siteCount }} 个站点合计</div>
+        <div class="pp-note">{{ model.siteCount }}{{ t(" 个站点合计") }}</div>
       </div>
       <div>
         <div class="pp-lab">
-          <span class="pp-dot" style="background: var(--c-ratio)" />平均分享率
+          <span class="pp-dot" style="background: var(--c-ratio)" />{{ t("平均分享率\n        ") }}
         </div>
         <div class="pp-v pp-num">{{ model.ratio }}</div>
-        <div class="pp-note">各站分享率的平均</div>
+        <div class="pp-note">{{ t("各站分享率的平均") }}</div>
       </div>
     </div>
 
@@ -89,20 +95,20 @@ const cols = computed(() => (cells.value.length % 4 === 0 ? 4 : 3));
     <div v-if="model.inc" class="pp-inc">
       <span class="pp-inc__tag">{{ model.inc.label }}</span>
       <span
-        >上传<b style="color: var(--c-up)">{{ model.inc.up }}</b></span
+        >{{ t("上传") }}<b style="color: var(--c-up)">{{ model.inc.up }}</b></span
       >
       <span
-        >下载<b style="color: var(--c-down)">{{ model.inc.down }}</b></span
+        >{{ t("下载") }}<b style="color: var(--c-down)">{{ model.inc.down }}</b></span
       >
       <span
-        >魔力<b style="color: var(--c-bonus)">{{ model.inc.bonus }}</b></span
+        >{{ t("魔力") }}<b style="color: var(--c-bonus)">{{ model.inc.bonus }}</b></span
       >
     </div>
 
     <template v-if="model.sites.length">
       <div class="pp-sec">
-        <h2>逐站明细</h2>
-        <span>按上传排序 · 上传 / 分享率 / 魔力</span>
+        <h2>{{ t("逐站明细") }}</h2>
+        <span>{{ t("按上传排序 · 上传 / 分享率 / 魔力") }}</span>
       </div>
       <div v-for="(s, i) in model.sites" :key="s.id" class="pp-row">
         <span class="pp-idx pp-num">{{ String(i + 1).padStart(2, "0") }}</span>
@@ -130,7 +136,7 @@ const cols = computed(() => (cells.value.length % 4 === 0 ? 4 : 3));
     </template>
 
     <div class="pp-foot">
-      <span class="pp-brand">PT-TOOLS</span><span>生成于 {{ model.generated }}</span>
+      <span class="pp-brand">PT-TOOLS</span><span>{{ t("生成于 ") }}{{ model.generated }}</span>
     </div>
   </div>
 </template>

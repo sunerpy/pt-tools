@@ -97,6 +97,216 @@ abstract class S {
     Locale('zh'),
   ];
 
+  /// No description provided for @mobileNoBaseline.
+  ///
+  /// In zh, this message translates to:
+  /// **'此周期暂无可比较的快照'**
+  String get mobileNoBaseline;
+
+  /// No description provided for @mobileEditor.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑'**
+  String get mobileEditor;
+
+  /// No description provided for @mobileAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'新增'**
+  String get mobileAdd;
+
+  /// No description provided for @mobileUpgrade.
+  ///
+  /// In zh, this message translates to:
+  /// **'此功能需要升级主机，请先更新 pt-tools'**
+  String get mobileUpgrade;
+
+  /// No description provided for @mobileDiscard.
+  ///
+  /// In zh, this message translates to:
+  /// **'放弃修改'**
+  String get mobileDiscard;
+
+  /// No description provided for @mobileDiscardBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'还有未保存的修改，要离开吗？'**
+  String get mobileDiscardBody;
+
+  /// No description provided for @mobileKeep.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续编辑'**
+  String get mobileKeep;
+
+  /// No description provided for @mobileUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此功能仅支持 Android'**
+  String get mobileUnsupported;
+
+  /// No description provided for @mobileSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'图片已保存'**
+  String get mobileSaved;
+
+  /// No description provided for @mobileShare.
+  ///
+  /// In zh, this message translates to:
+  /// **'分享统计海报'**
+  String get mobileShare;
+
+  /// No description provided for @mobilePeriod.
+  ///
+  /// In zh, this message translates to:
+  /// **'统计周期'**
+  String get mobilePeriod;
+
+  /// No description provided for @mobileWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'本周'**
+  String get mobileWeek;
+
+  /// No description provided for @mobileMonth.
+  ///
+  /// In zh, this message translates to:
+  /// **'本月'**
+  String get mobileMonth;
+
+  /// No description provided for @mobileRuns.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行记录'**
+  String get mobileRuns;
+
+  /// No description provided for @brushRunRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'进行中'**
+  String get brushRunRunning;
+
+  /// No description provided for @brushRunOk.
+  ///
+  /// In zh, this message translates to:
+  /// **'成功'**
+  String get brushRunOk;
+
+  /// No description provided for @brushRunPartial.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分失败'**
+  String get brushRunPartial;
+
+  /// No description provided for @brushRunFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'失败'**
+  String get brushRunFailed;
+
+  /// No description provided for @brushRunInterrupted.
+  ///
+  /// In zh, this message translates to:
+  /// **'没跑完'**
+  String get brushRunInterrupted;
+
+  /// No description provided for @brushStepList.
+  ///
+  /// In zh, this message translates to:
+  /// **'列表'**
+  String get brushStepList;
+
+  /// No description provided for @brushStepReject.
+  ///
+  /// In zh, this message translates to:
+  /// **'不符合'**
+  String get brushStepReject;
+
+  /// No description provided for @brushStepAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'加入'**
+  String get brushStepAdd;
+
+  /// No description provided for @brushStepRemove.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除'**
+  String get brushStepRemove;
+
+  /// No description provided for @brushStepGone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已不在'**
+  String get brushStepGone;
+
+  /// No description provided for @brushStepSkip.
+  ///
+  /// In zh, this message translates to:
+  /// **'跳过'**
+  String get brushStepSkip;
+
+  /// No description provided for @brushStepStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停下'**
+  String get brushStepStop;
+
+  /// No description provided for @brushStepError.
+  ///
+  /// In zh, this message translates to:
+  /// **'出错'**
+  String get brushStepError;
+
+  /// No description provided for @brushStepInfo.
+  ///
+  /// In zh, this message translates to:
+  /// **'说明'**
+  String get brushStepInfo;
+
+  /// No description provided for @mobileEnable.
+  ///
+  /// In zh, this message translates to:
+  /// **'启用'**
+  String get mobileEnable;
+
+  /// No description provided for @mobileDisable.
+  ///
+  /// In zh, this message translates to:
+  /// **'停用'**
+  String get mobileDisable;
+
+  /// No description provided for @mobileDeleteBrush.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除这个刷流任务？'**
+  String get mobileDeleteBrush;
+
+  /// No description provided for @mobileSkipped.
+  ///
+  /// In zh, this message translates to:
+  /// **'跳过此集'**
+  String get mobileSkipped;
+
+  /// No description provided for @mobileUnlock.
+  ///
+  /// In zh, this message translates to:
+  /// **'解锁版本'**
+  String get mobileUnlock;
+
+  /// No description provided for @mobileRestore.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复追更'**
+  String get mobileRestore;
+
+  /// No description provided for @mobileRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新数据'**
+  String get mobileRefresh;
+
   /// No description provided for @appTitle.
   ///
   /// In zh, this message translates to:
@@ -846,6 +1056,96 @@ abstract class S {
   /// In zh, this message translates to:
   /// **'连接与设备'**
   String get moreSettings;
+
+  /// No description provided for @moreAppearance.
+  ///
+  /// In zh, this message translates to:
+  /// **'外观'**
+  String get moreAppearance;
+
+  /// No description provided for @moreGroupTools.
+  ///
+  /// In zh, this message translates to:
+  /// **'功能'**
+  String get moreGroupTools;
+
+  /// No description provided for @moreGroupApp.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机'**
+  String get moreGroupApp;
+
+  /// No description provided for @appearanceTheme.
+  ///
+  /// In zh, this message translates to:
+  /// **'主题'**
+  String get appearanceTheme;
+
+  /// No description provided for @appearanceFollowSystem.
+  ///
+  /// In zh, this message translates to:
+  /// **'跟随系统'**
+  String get appearanceFollowSystem;
+
+  /// No description provided for @appearanceFollowSystemHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统是浅色时用「明亮」，深色时用「暗黑」'**
+  String get appearanceFollowSystemHelp;
+
+  /// No description provided for @appearanceFollowing.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在跟随系统'**
+  String get appearanceFollowing;
+
+  /// No description provided for @themeLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'明亮'**
+  String get themeLight;
+
+  /// No description provided for @themeLightSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'白瓷'**
+  String get themeLightSub;
+
+  /// No description provided for @themeDark.
+  ///
+  /// In zh, this message translates to:
+  /// **'暗黑'**
+  String get themeDark;
+
+  /// No description provided for @themeDarkSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'夜灯'**
+  String get themeDarkSub;
+
+  /// No description provided for @themeWarm.
+  ///
+  /// In zh, this message translates to:
+  /// **'暖纸'**
+  String get themeWarm;
+
+  /// No description provided for @themeWarmSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'手稿'**
+  String get themeWarmSub;
+
+  /// No description provided for @themeGraphite.
+  ///
+  /// In zh, this message translates to:
+  /// **'石墨'**
+  String get themeGraphite;
+
+  /// No description provided for @themeGraphiteSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'仪表'**
+  String get themeGraphiteSub;
 
   /// No description provided for @siteDisabled.
   ///

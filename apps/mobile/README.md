@@ -16,6 +16,9 @@ Flutter（3.47.7）写的 Android / iOS App：扫网页上的二维码配对，�
 ## 常用命令
 
 ```bash
+# 首先安装网页依赖并生成 APK 内的 Vue 页面
+pnpm --dir ../../web/frontend install --frozen-lockfile
+bash tool/build_web.sh
 flutter pub get
 flutter analyze
 flutter test
@@ -32,3 +35,9 @@ flutter build apk --debug
 ```
 
 CI 在 `.github/workflows/mobile.yml`：生成代码与文案没有漂移、格式、静态检查、单测、互通、debug APK 与 iOS（不签名）构建。
+
+## 混合页面
+
+追剧与刷流编辑、统计海报复用 Vue；源码在 `web/frontend/src/mobile/`，构建到忽略的 `assets/mobile/`。发布与 CI 必须先运行 `tool/build_web.sh`；不能用桌面构建或占位资源替代。Flutter 的桥只接受明确列出的 App API，不携带网页登录凭据，设备私钥始终由 Dart 的连接层管理。
+
+Android 真机验收包含配对、直连与 relay、前后台恢复、返回键与未保存提示、只读权限、海报保存和系统分享。浏览器测试、APK 构建与模拟器测试不能替代正式版的真机验收。

@@ -4,7 +4,9 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../icons.dart';
 import '../providers.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 
 /// 概览：已启用站点的合计（上传、计费下载、分享率、魔力、做种、站内信）、今天的增量、下载器的速度。
@@ -91,30 +93,31 @@ class _Totals extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = S.of(context);
+    final pt = context.pt;
     final tiles = [
       MetricTile(
         label: s.kpiUploaded,
         value: formatBytes(t.uploaded),
-        color: const Color(0xFF10B981),
-        icon: Icons.arrow_upward,
+        color: pt.ok,
+        icon: PtGlyph.arrowUp,
       ),
       MetricTile(
         label: s.kpiDownloaded,
         value: formatBytes(t.downloaded),
-        color: const Color(0xFF3B82F6),
-        icon: Icons.arrow_downward,
+        color: pt.info,
+        icon: PtGlyph.arrowDown,
       ),
       MetricTile(
         label: s.kpiRatio,
         value: formatRatio(t.ratio),
-        color: const Color(0xFF8B5CF6),
-        icon: Icons.balance,
+        color: pt.violet,
+        icon: PtGlyph.scale,
       ),
       MetricTile(
         label: s.kpiBonus,
         value: formatNumber(t.bonus),
-        color: const Color(0xFFF59E0B),
-        icon: Icons.stars_outlined,
+        color: pt.warn,
+        icon: PtGlyph.star,
         note: t.bonusPerHour > 0
             ? s.perHour(formatNumber(t.bonusPerHour))
             : null,
@@ -122,17 +125,15 @@ class _Totals extends StatelessWidget {
       MetricTile(
         label: s.kpiSeeding,
         value: '${t.seeding}',
-        color: const Color(0xFF14B8A6),
-        icon: Icons.cloud_upload_outlined,
+        color: pt.pink,
+        icon: PtGlyph.cloudUp,
         note: formatBytes(t.seedingSize),
       ),
       MetricTile(
         label: s.kpiUnread,
         value: '${t.unreadMessages}',
-        color: t.unreadMessages > 0
-            ? const Color(0xFFEF4444)
-            : const Color(0xFF94A3B8),
-        icon: Icons.mail_outline,
+        color: t.unreadMessages > 0 ? pt.danger : pt.subtle,
+        icon: PtGlyph.mail,
         note: s.siteCount(t.siteCount),
       ),
     ];
@@ -179,22 +180,22 @@ class _Today extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _Delta(
-                      icon: Icons.arrow_upward,
-                      color: const Color(0xFF10B981),
+                      icon: PtGlyph.arrowUp,
+                      color: context.pt.ok,
                       text: formatBytes(d.uploaded),
                     ),
                   ),
                   Expanded(
                     child: _Delta(
-                      icon: Icons.arrow_downward,
-                      color: const Color(0xFF3B82F6),
+                      icon: PtGlyph.arrowDown,
+                      color: context.pt.info,
                       text: formatBytes(d.downloaded),
                     ),
                   ),
                   Expanded(
                     child: _Delta(
-                      icon: Icons.stars_outlined,
-                      color: const Color(0xFFF59E0B),
+                      icon: PtGlyph.star,
+                      color: context.pt.warn,
                       text: '+${formatNumber(d.bonus)}',
                     ),
                   ),
@@ -229,14 +230,14 @@ class _Today extends StatelessWidget {
 
 class _Delta extends StatelessWidget {
   const _Delta({required this.icon, required this.color, required this.text});
-  final IconData icon;
+  final PtGlyph icon;
   final Color color;
   final String text;
 
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Icon(icon, size: 16, color: color),
+      PtIcon(icon, size: 16, weight: 2, color: color),
       const SizedBox(width: 4),
       Flexible(
         child: Text(
@@ -270,10 +271,11 @@ class _Downloaders extends ConsumerWidget {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
-                leading: Icon(
-                  d.reachable ? Icons.dns_outlined : Icons.portable_wifi_off,
+                leading: PtIcon(
+                  d.reachable ? PtGlyph.server : PtGlyph.serverOff,
+                  size: 20,
                   color: d.reachable
-                      ? t.colorScheme.primary
+                      ? t.colorScheme.onSurfaceVariant
                       : t.colorScheme.error,
                 ),
                 title: Text(d.name),

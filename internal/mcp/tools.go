@@ -13,6 +13,7 @@ import (
 
 // ToolNames 是全部工具的名字（文档与测试用）。
 var ToolNames = []string{
+	"list_brush_tasks", "get_brush_task", "list_brush_runs", "change_brush_task",
 	"list_tasks", "list_downloader_torrents", "get_downloader_stats", "search_torrents",
 	"pause_torrent", "resume_torrent", "delete_torrent", "push_torrent",
 	"get_site_userinfo", "check_updates",
@@ -142,16 +143,18 @@ type listSubsIn struct {
 }
 
 type addSubIn struct {
-	MediaType    string   `json:"media_type" jsonschema:"movie or tv"`
-	TMDBID       int      `json:"tmdb_id" jsonschema:"TMDB id from explore_media"`
-	Season       int      `json:"season,omitempty" jsonschema:"season number for tv; the latest season when omitted"`
-	Upgrade      bool     `json:"upgrade,omitempty" jsonschema:"keep looking for better releases after the first download"`
-	ProfileID    uint     `json:"profile_id,omitempty" jsonschema:"quality profile id (get_config resource quality_profiles); the default profile when omitted"`
-	Sites        []string `json:"sites,omitempty" jsonschema:"only search these sites (site IDs); every enabled site when omitted"`
-	DownloaderID uint     `json:"downloader_id,omitempty" jsonschema:"downloader to push to (ids from get_downloader_stats); the subscription settings' default when omitted"`
-	Category     string   `json:"category,omitempty" jsonschema:"downloader category for pushes"`
-	Tags         string   `json:"tags,omitempty" jsonschema:"comma-separated downloader tags for pushes"`
-	SavePath     string   `json:"save_path,omitempty" jsonschema:"save directory in the downloader; the downloader's default when omitted"`
+	IncludeKeywords *string  `json:"include_keywords,omitempty" jsonschema:"title must contain every comma or newline separated keyword"`
+	ExcludeKeywords *string  `json:"exclude_keywords,omitempty" jsonschema:"reject titles containing any of these comma or newline separated keywords"`
+	MediaType       string   `json:"media_type" jsonschema:"movie or tv"`
+	TMDBID          int      `json:"tmdb_id" jsonschema:"TMDB id from explore_media"`
+	Season          int      `json:"season,omitempty" jsonschema:"season number for tv; the latest season when omitted"`
+	Upgrade         bool     `json:"upgrade,omitempty" jsonschema:"keep looking for better releases after the first download"`
+	ProfileID       uint     `json:"profile_id,omitempty" jsonschema:"quality profile id (get_config resource quality_profiles); the default profile when omitted"`
+	Sites           []string `json:"sites,omitempty" jsonschema:"only search these sites (site IDs); every enabled site when omitted"`
+	DownloaderID    uint     `json:"downloader_id,omitempty" jsonschema:"downloader to push to (ids from get_downloader_stats); the subscription settings' default when omitted"`
+	Category        string   `json:"category,omitempty" jsonschema:"downloader category for pushes"`
+	Tags            string   `json:"tags,omitempty" jsonschema:"comma-separated downloader tags for pushes"`
+	SavePath        string   `json:"save_path,omitempty" jsonschema:"save directory in the downloader; the downloader's default when omitted"`
 	// 追剧（剧集）的设置
 	Schedule         *scheduleIn    `json:"schedule,omitempty" jsonschema:"TV: when to search actively (check it with preview_schedule); by each episode's air time when omitted"`
 	LockVersion      *bool          `json:"lock_version,omitempty" jsonschema:"TV: after the first episode only take the same release group and resolution (on when omitted)"`
@@ -165,6 +168,12 @@ type addSubIn struct {
 // body 是新建订阅的请求体（App API 的 AppSubscriptionCreate）。
 func (in addSubIn) body() map[string]any {
 	b := map[string]any{"media_type": in.MediaType, "tmdb_id": in.TMDBID, "season": in.Season, "upgrade": in.Upgrade, "profile_id": in.ProfileID}
+	if in.IncludeKeywords != nil {
+		b["include_keywords"] = *in.IncludeKeywords
+	}
+	if in.ExcludeKeywords != nil {
+		b["exclude_keywords"] = *in.ExcludeKeywords
+	}
 	if len(in.Sites) > 0 {
 		b["sites"] = in.Sites
 	}
@@ -521,6 +530,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 	registerMediaTools(s, d)
 	registerFollowTools(s, d)
 	registerConfigTools(s, d)
+	registerBrushTools(s, d)
 }
 
 // registerMediaTools 注册订阅管理、媒体识别与整理入库的工具。

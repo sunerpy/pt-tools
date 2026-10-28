@@ -7,9 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pt_tools_app/src/app/app.dart';
+import 'package:pt_tools_app/src/app/appearance.dart';
 import 'package:pt_tools_app/src/app/pages/assistant_page.dart';
 import 'package:pt_tools_app/src/app/providers.dart';
 import 'package:pt_tools_app/src/app/storage.dart';
+import 'package:pt_tools_app/src/app/theme.dart';
 import 'package:pt_tools_app/src/remote/bytes.dart';
 import 'package:pt_tools_app/src/remote/host_record.dart';
 import 'package:pt_tools_app/src/remote/noise.dart';
@@ -160,7 +162,8 @@ class _BrokenStore extends MemoryHostStore {
 }
 
 class _World {
-  _World(this.scopes, {this.mode = 'device'});
+  _World(this.scopes, {this.mode = 'device', this.mobileFeatures = false});
+  final bool mobileFeatures;
   List<String> scopes;
   final String mode;
   final hosts = <FakeHost>[];
@@ -192,9 +195,58 @@ class _World {
     requests.add('$method $path');
     final p = Uri.parse(path).path;
     return switch (p) {
-      '/api/app/v1/meta' => _meta(scopes),
+      '/api/app/v1/meta' =>
+        _meta(scopes)
+          ..['features'] = [
+            'overview',
+            'assistant',
+            if (mobileFeatures) ...[
+              'mobile_editors',
+              'brush_manage',
+              'stats_export',
+            ],
+          ],
       '/api/app/v1/overview' => _overview,
       '/api/app/v1/downloaders' => {'items': []},
+      '/api/app/v1/stats/summary' => {
+        'totalUploaded': 1073741824,
+        'totalDownloaded': 1024,
+        'totalBonus': 12,
+        'sites': [
+          {'site': 'hdsky', 'hasBaseline': true},
+        ],
+      },
+      '/api/app/v1/brush/tasks' => [
+        {
+          'id': 1,
+          'name': '测试刷流',
+          'enabled': true,
+          'site': 'hdsky',
+          'site_enabled': true,
+          'downloader': 'qb',
+          'active': 1,
+          'downloading': 0,
+          'active_size': 0,
+          'today': {'uploaded': 0, 'downloaded': 0, 'added': 0, 'removed': 0},
+          'total': {'uploaded': 0, 'downloaded': 0, 'added': 0, 'removed': 0},
+        },
+      ],
+      '/api/app/v1/brush/tasks/1' => {'id': 1, 'name': '测试刷流', 'enabled': true},
+      '/api/app/v1/brush/tasks/1/runs' => {
+        'total': 1,
+        'items': [
+          {
+            'id': 1,
+            'status': 'partial',
+            'summary': '一轮结束',
+            'error': '下载器暂不可用',
+            'started_at': _at,
+            'steps': [
+              {'kind': 'error', 'text': '磁盘查询失败'},
+            ],
+          },
+        ],
+      },
       '/api/app/v1/sites' => _sites,
       '/api/app/v1/favicon/hdsky' => const ApiReply(404, {
         'error': 'not_found',
@@ -301,15 +353,17 @@ Future<_World> _pumpApp(
   List<String> scopes = const ['app:read', 'app:write'],
   bool paired = true,
   String mode = 'device',
+  bool mobileFeatures = false,
   HostStore? store,
   Future<void>? hostLoaded,
+  AppearanceStore? appearance,
 }) async {
   tester.platformDispatcher.localesTestValue = const [Locale('zh')];
   addTearDown(tester.platformDispatcher.clearLocalesTestValue);
   tester.view.physicalSize = const Size(1170, 2532);
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
-  final w = _World([...scopes], mode: mode);
+  final w = _World([...scopes], mode: mode, mobileFeatures: mobileFeatures);
   late HostRecord rec;
   await tester.runAsync(() async {
     w.hostKey = await DhKey.generate();
@@ -337,6 +391,9 @@ Future<_World> _pumpApp(
         ),
         channelFactoryProvider.overrideWithValue(w.dial),
         refreshIntervalProvider.overrideWithValue(const Duration(days: 1)),
+        appearanceStoreProvider.overrideWithValue(
+          appearance ?? MemoryAppearanceStore(),
+        ),
       ],
       child: const PtToolsApp(),
     ),
@@ -355,6 +412,69 @@ Future<void> _settle(WidgetTester tester, [int rounds = 8]) async {
 }
 
 void main() {
+  testWidgets('站点周期选择通过加密通道请求正确周期，海报有入口', (tester) async {
+    final w = await _pumpApp(tester, mobileFeatures: true);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.text('站点'));
+    await _settle(tester);
+    expect(w.requests, contains('GET /api/app/v1/stats/summary?range=today'));
+    await tester.tap(find.text('本周'));
+    await _settle(tester);
+    expect(w.requests, contains('GET /api/app/v1/stats/summary?range=7d'));
+    expect(find.byTooltip('分享统计海报'), findsOneWidget);
+    expect(find.textContaining('1.0 GiB'), findsOneWidget);
+  });
+  testWidgets('刷流显示运行错误与步骤，取消删除不会写入', (tester) async {
+    final w = await _pumpApp(tester, mobileFeatures: true);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.text('刷流'));
+    await _settle(tester);
+    await tester.tap(find.text('测试刷流'));
+    await _settle(tester);
+    expect(find.textContaining('下载器暂不可用'), findsOneWidget);
+    await tester.tap(find.textContaining('一轮结束'));
+    await tester.pumpAndSettle();
+    expect(find.text('磁盘查询失败'), findsOneWidget);
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(w.requests.where((r) => r.startsWith('DELETE')), isEmpty);
+  });
+
+  testWidgets('外观：点一套主题马上换上并存下来，打开跟随系统又回到明亮与暗黑', (tester) async {
+    final store = MemoryAppearanceStore();
+    await _pumpApp(tester, appearance: store);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    expect(find.text('跟随系统'), findsOneWidget, reason: '外观那一行写着现在的选择');
+    await tester.tap(find.byKey(const Key('more-appearance')));
+    await _settle(tester);
+    expect(find.text('暖纸'), findsOneWidget);
+    expect(find.text('石墨'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('theme-warm')));
+    await _settle(tester);
+    MaterialApp app() => tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app().themeMode, ThemeMode.light);
+    expect(app().theme!.scaffoldBackgroundColor, PtPalette.warm.canvas);
+    expect(store.choice, ThemeChoice.warm);
+    final follow = find.byKey(const Key('appearance-follow-system'));
+    expect(tester.widget<SwitchListTile>(follow).value, isFalse);
+    await tester.tap(follow);
+    await _settle(tester);
+    expect(store.choice, ThemeChoice.system);
+    expect(app().themeMode, ThemeMode.system);
+    expect(app().theme!.scaffoldBackgroundColor, PtPalette.light.canvas);
+    expect(app().darkTheme!.scaffoldBackgroundColor, PtPalette.dark.canvas);
+  });
+
   testWidgets('概览：显示主机的合计数字与站内信未读', (tester) async {
     final w = await _pumpApp(tester);
     await _settle(tester);
@@ -559,9 +679,8 @@ void main() {
     await _settle(tester);
     await tester.tap(find.byKey(const Key('more-assistant')));
     await _settle(tester);
-    IconButton newChat() => tester.widget<IconButton>(
-      find.widgetWithIcon(IconButton, Icons.add_comment_outlined),
-    );
+    IconButton newChat() =>
+        tester.widget<IconButton>(find.byKey(const Key('assistant-new')));
     expect(newChat().onPressed, isNotNull);
     await tester.enterText(find.byKey(const Key('assistant-input')), '再问一句');
     await tester.tap(find.byKey(const Key('assistant-send')));

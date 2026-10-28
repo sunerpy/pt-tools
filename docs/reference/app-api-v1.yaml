@@ -249,6 +249,21 @@ paths:
               schema: { $ref: "#/components/schemas/AppTaskPage" }
         default: { $ref: "#/components/responses/Error" }
   /brush/tasks:
+    post:
+      operationId: createBrushTask
+      tags: [App]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppBrushInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppBrushConfig" }
+        default: { $ref: "#/components/responses/Error" }
     get:
       operationId: listBrushTasks
       tags: [App]
@@ -964,6 +979,138 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AppConfigResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /mobile/options:
+    get:
+      operationId: getMobileOptions
+      tags: [App]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppMobileOptions" }
+        default: { $ref: "#/components/responses/Error" }
+  /brush/tasks/{id}:
+    get:
+      operationId: getBrushTask
+      tags: [App]
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppBrushConfig" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateBrushTask
+      tags: [App]
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppBrushInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppBrushConfig" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteBrushTask
+      tags: [App]
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppOK" }
+        default: { $ref: "#/components/responses/Error" }
+  /brush/tasks/preview:
+    post:
+      operationId: previewBrushTask
+      tags: [App]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppConfigChange" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppConfigResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /brush/tasks/{id}/status:
+    post:
+      operationId: setBrushTaskStatus
+      tags: [App]
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppBrushStatus" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppBrushConfig" }
+        default: { $ref: "#/components/responses/Error" }
+  /brush/tasks/{id}/runs:
+    get:
+      operationId: listBrushTaskRuns
+      tags: [App]
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppBrushRunPage" }
+        default: { $ref: "#/components/responses/Error" }
+  /stats/aggregated:
+    get:
+      operationId: getStatsAggregated
+      tags: [App]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStatsAggregated" }
+        default: { $ref: "#/components/responses/Error" }
+  /stats/summary:
+    get:
+      operationId: getStatsSummary
+      tags: [App]
+      parameters:
+        - name: range
+          in: query
+          schema: { type: string, enum: [today, 7d, 30d] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStatsSummary" }
         default: { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
@@ -1737,6 +1884,8 @@ components:
       required:
         [id, media_type, tmdb_id, season, title, status, upgrade, source, progress, created_at]
       properties:
+        include_keywords: { type: string, maxLength: 1024 }
+        exclude_keywords: { type: string, maxLength: 1024 }
         id: { type: integer }
         media_type: { type: string, description: "movie 或 tv" }
         tmdb_id: { type: integer }
@@ -1901,6 +2050,8 @@ components:
       required: [media_type, tmdb_id]
       additionalProperties: false
       properties:
+        include_keywords: { type: string, maxLength: 1024 }
+        exclude_keywords: { type: string, maxLength: 1024 }
         media_type: { type: string, enum: [movie, tv] }
         tmdb_id: { type: integer, minimum: 1 }
         season: { type: integer, minimum: 0 }
@@ -1939,6 +2090,8 @@ components:
       additionalProperties: false
       description: 只改给了的字段（不给或给 null 的不变）；lock_group、lock_resolution 都给空串是清掉锁住的版本（按之后的版本重新定）
       properties:
+        include_keywords: { type: string, maxLength: 1024 }
+        exclude_keywords: { type: string, maxLength: 1024 }
         profile_id: { type: integer, minimum: 0 }
         upgrade: { type: boolean }
         sites:
@@ -2477,3 +2630,214 @@ components:
           type: object
           description: 改完的样子（删除时没有）
           additionalProperties: true
+
+    AppMobileOption:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+    AppMobileSiteOption:
+      type: object
+      required: [name, display_name]
+      properties:
+        name: { type: string }
+        display_name: { type: string }
+    AppMobileOptions:
+      type: object
+      required: [sites, downloaders, profiles, libraries]
+      properties:
+        sites:
+          type: array
+          items: { $ref: "#/components/schemas/AppMobileSiteOption" }
+        downloaders:
+          type: array
+          items: { $ref: "#/components/schemas/AppMobileOption" }
+        profiles:
+          type: array
+          items: { $ref: "#/components/schemas/AppMobileOption" }
+        libraries:
+          type: array
+          items: { $ref: "#/components/schemas/AppMobileOption" }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+    AppBrushConfig:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        enabled: { type: boolean }
+        site_name: { type: string }
+        downloader_id: { type: integer }
+        save_path: { type: string }
+        category: { type: string }
+        tags: { type: string }
+        interval_min: { type: integer }
+        section: { type: string }
+        discounts: { type: string }
+        min_free_remain_min: { type: integer }
+        min_size_gb: { type: number }
+        max_size_gb: { type: number }
+        max_seeders: { type: integer }
+        min_leechers: { type: integer }
+        max_publish_age_min: { type: integer }
+        exclude_hr: { type: boolean }
+        include_keywords: { type: string }
+        exclude_keywords: { type: string }
+        max_downloading: { type: integer }
+        max_total_size_gb: { type: number }
+        max_daily_download_gb: { type: number }
+        remove_seed_time_h: { type: number }
+        remove_ratio: { type: number }
+        remove_low_speed_kbs: { type: number }
+        remove_low_speed_window_min: { type: integer }
+        remove_inactive_h: { type: number }
+        remove_free_expired_incomplete: { type: boolean }
+        remove_with_data: { type: boolean }
+    AppBrushStatus:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean }
+    AppBrushRunPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppBrushRun" }
+        total: { type: integer, format: int64 }
+    AppStatsAggregated:
+      type: object
+      required: [totalUploaded, totalDownloaded, perSiteStats]
+      properties:
+        totalUploaded: { type: integer, format: int64 }
+        totalDownloaded: { type: integer, format: int64 }
+        averageRatio: { type: number }
+        totalSeeding: { type: integer }
+        totalLeeching: { type: integer }
+        totalBonus: { type: number }
+        siteCount: { type: integer }
+        lastUpdate: { type: integer, format: int64 }
+        perSiteStats:
+          type: array
+          items: { $ref: "#/components/schemas/AppStatsSite" }
+    AppStatsSummary:
+      type: object
+      required: [range, from, to, sites, totalUploaded, totalDownloaded, totalBonus]
+      properties:
+        range: { type: string }
+        from: { type: string }
+        to: { type: string }
+        totalUploaded: { type: integer, format: int64 }
+        totalDownloaded: { type: integer, format: int64 }
+        totalBonus: { type: number }
+        sites:
+          type: array
+          items: { $ref: "#/components/schemas/AppStatsSiteDelta" }
+    AppStatsSiteDelta:
+      type: object
+      required: [site, from, to, uploaded, downloaded, bonus, hasBaseline, negative]
+      properties:
+        site: { type: string }
+        from: { type: string }
+        to: { type: string }
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        bonus: { type: number }
+        hasBaseline: { type: boolean }
+        negative: { type: boolean }
+    AppStatsSite:
+      type: object
+      required: [site, username, uploaded, downloaded, ratio, bonus, seeding, leeching, lastUpdate]
+      properties:
+        site: { type: string }
+        username: { type: string }
+        userId: { type: string }
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        ratio: { type: number }
+        bonus: { type: number }
+        seeding: { type: integer }
+        leeching: { type: integer }
+        rank: { type: string }
+        joinDate: { type: integer, format: int64 }
+        lastAccess: { type: integer, format: int64 }
+        lastUpdate: { type: integer, format: int64 }
+        levelName: { type: string }
+        levelId: { type: integer }
+        bonusPerHour: { type: number }
+        seedingBonus: { type: number }
+        seedingBonusPerHour: { type: number }
+        unreadMessageCount: { type: integer }
+        totalMessageCount: { type: integer }
+        seederCount: { type: integer }
+        seederSize: { type: integer, format: int64 }
+        leecherCount: { type: integer }
+        leecherSize: { type: integer, format: int64 }
+        hnrUnsatisfied: { type: integer }
+        hnrPreWarning: { type: integer }
+        trueUploaded: { type: integer, format: int64 }
+        trueDownloaded: { type: integer, format: int64 }
+        uploads: { type: integer }
+    AppBrushRun:
+      type: object
+      required: [id, task_id, trigger, started_at, status, summary, error, steps]
+      properties:
+        id: { type: integer }
+        task_id: { type: integer }
+        trigger: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        status: { type: string }
+        summary: { type: string }
+        error: { type: string }
+        listed: { type: integer }
+        eligible: { type: integer }
+        added: { type: integer }
+        removed: { type: integer }
+        gone: { type: integer }
+        steps_truncated: { type: boolean }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/AppBrushRunStep" }
+    AppBrushRunStep:
+      type: object
+      required: [kind, text]
+      properties:
+        kind: { type: string }
+        text: { type: string }
+    AppBrushInput:
+      type: object
+      properties:
+        name: { type: string }
+        enabled: { type: boolean }
+        site_name: { type: string }
+        downloader_id: { type: integer }
+        save_path: { type: string }
+        category: { type: string }
+        tags: { type: string }
+        interval_min: { type: integer }
+        section: { type: string }
+        discounts: { type: string }
+        min_free_remain_min: { type: integer }
+        min_size_gb: { type: number }
+        max_size_gb: { type: number }
+        max_seeders: { type: integer }
+        min_leechers: { type: integer }
+        max_publish_age_min: { type: integer }
+        exclude_hr: { type: boolean }
+        include_keywords: { type: string }
+        exclude_keywords: { type: string }
+        max_downloading: { type: integer }
+        max_total_size_gb: { type: number }
+        max_daily_download_gb: { type: number }
+        remove_seed_time_h: { type: number }
+        remove_ratio: { type: number }
+        remove_low_speed_kbs: { type: number }
+        remove_low_speed_window_min: { type: integer }
+        remove_inactive_h: { type: number }
+        remove_free_expired_incomplete: { type: boolean }
+        remove_with_data: { type: boolean }

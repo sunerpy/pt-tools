@@ -14,7 +14,8 @@
     "test": "vitest run && node scripts/style-scan.mjs && node scripts/dialog-scan.mjs",
     "test:watch": "vitest",
     "style:scan": "node scripts/style-scan.mjs",
-    "dialog:scan": "node scripts/dialog-scan.mjs"
+    "dialog:scan": "node scripts/dialog-scan.mjs",
+    "build:mobile": "vue-tsc -b && vite build --config vite.mobile.config.ts"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "5.3.0",

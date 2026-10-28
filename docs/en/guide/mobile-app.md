@@ -39,11 +39,24 @@ After pairing, the window in the web UI shows that the device is paired and the 
 | More → Sites               | Login status (days left before the inactivity limit), today's check-in, user data and unread messages; check in now                                      |
 | More → Tasks, Brush        | Send history, and brush tasks with their active torrents and totals                                                                                      |
 | More → Downloaders         | Downloader speeds, free space and versions                                                                                                               |
+| More → Appearance          | Four themes (Light, Dark, Warm, Graphite) or follow the system (Light when it is light, Dark when it is dark); saved on this phone only                  |
 | More → Connection & device | Connection method and address, host, this device's name and permissions; reconnect, forget this host                                                     |
 
 The download figures on Overview and under More → Sites are the billed download (what the sites count toward your ratio after free and discount promotions), not the amount actually transferred. See [Two kinds of download figures](user-stats.md#two-kinds-of-download-figures).
 
 Read-only devices don't see write actions (pause, delete, send, check in, subscribe).
+
+## Following shows, brush tasks and statistics sharing
+
+Subscription lists and details use the app interface. Creating or editing opens an editor bundled with the app, with site, downloader, quality profile, schedule, version lock, starting episode and title include/exclude settings. Saving refreshes the original page; leaving an unsaved form asks whether to discard changes.
+
+More → Brush supports creating, editing, enabling, disabling and deleting tasks, and viewing run records. Deleting requires confirmation. These editors can manage brush tasks without opening the full web administration interface.
+
+More → Sites provides statistics and period deltas, with an entry to statistics posters. Posters reuse the web styles, palettes and site selection. Usernames, site names and logos are masked by default, and masking resets whenever the editor opens. Export a PNG to storage or open the Android system share sheet; cancelling sharing does not automatically send or save the image.
+
+Vue editors and poster resources ship inside the APK. Business data still comes from the host through the encrypted connection. The app does not require a browser login or pass device private keys to the page. Unsupported features prompt an upgrade on older hosts while existing features remain available. Read-only devices may view data and export posters, but cannot save subscription or brush configuration.
+
+The built-in assistant uses the model configured on the host. Changes require an explicit confirmation card before execution; cancellation and repeated confirmations do not repeat the action. Configure and enable the assistant in the web UI first.
 
 ## Privacy
 

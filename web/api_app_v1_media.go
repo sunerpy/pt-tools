@@ -164,23 +164,25 @@ func (a AppSchedule) schedule() *subscribe.Schedule {
 
 // AppSubscription 是一个订阅。
 type AppSubscription struct {
-	ID            uint        `json:"id"`
-	MediaType     string      `json:"media_type"`
-	TMDBID        int         `json:"tmdb_id"`
-	Season        int         `json:"season"`
-	Title         string      `json:"title"`
-	OriginalTitle string      `json:"original_title,omitempty"`
-	Year          int         `json:"year,omitempty"`
-	PosterPath    string      `json:"poster_path,omitempty"`
-	Status        string      `json:"status"`
-	Upgrade       bool        `json:"upgrade"`
-	Source        string      `json:"source"`
-	TotalEpisodes int         `json:"total_episodes,omitempty"`
-	Progress      AppProgress `json:"progress"`
-	Message       string      `json:"message,omitempty"`
-	LastSearchAt  *int64      `json:"last_search_at,omitempty"`
-	NextSearchAt  *int64      `json:"next_search_at,omitempty"`
-	CreatedAt     int64       `json:"created_at"`
+	IncludeKeywords string      `json:"include_keywords"`
+	ExcludeKeywords string      `json:"exclude_keywords"`
+	ID              uint        `json:"id"`
+	MediaType       string      `json:"media_type"`
+	TMDBID          int         `json:"tmdb_id"`
+	Season          int         `json:"season"`
+	Title           string      `json:"title"`
+	OriginalTitle   string      `json:"original_title,omitempty"`
+	Year            int         `json:"year,omitempty"`
+	PosterPath      string      `json:"poster_path,omitempty"`
+	Status          string      `json:"status"`
+	Upgrade         bool        `json:"upgrade"`
+	Source          string      `json:"source"`
+	TotalEpisodes   int         `json:"total_episodes,omitempty"`
+	Progress        AppProgress `json:"progress"`
+	Message         string      `json:"message,omitempty"`
+	LastSearchAt    *int64      `json:"last_search_at,omitempty"`
+	NextSearchAt    *int64      `json:"next_search_at,omitempty"`
+	CreatedAt       int64       `json:"created_at"`
 	// ProfileID 是质量档案（0 用设置里的默认）；Sites 是只在这些站点找（空的是全部站点）；DownloaderID 是推送到哪个下载器
 	// （0 用设置里的）；Category、Tags、SavePath 是推送时的分类、标签与保存目录
 	ProfileID    uint     `json:"profile_id"`
@@ -280,6 +282,7 @@ type AppSubscriptionDetail struct {
 func appSubscription(v subscribe.SubscriptionView) AppSubscription {
 	sub := v.MediaSubscription
 	out := AppSubscription{
+		IncludeKeywords: sub.IncludeKeywords, ExcludeKeywords: sub.ExcludeKeywords,
 		ID: sub.ID, MediaType: sub.MediaType, TMDBID: sub.TMDBID, Season: sub.Season, Title: sub.Title, OriginalTitle: sub.OriginalTitle,
 		Year: sub.Year, PosterPath: sub.PosterPath, Status: sub.Status, Upgrade: sub.Upgrade, Source: sub.Source,
 		TotalEpisodes: sub.TotalEpisodes, Message: appRedactAddr(sub.Message), LastSearchAt: unixPtr(sub.LastSearchAt),
@@ -384,11 +387,13 @@ func (s *Server) appSubscriptionDetail(w http.ResponseWriter, r *http.Request) {
 // ProfileID 为 0 时用设置里的默认质量档案。剧集是追剧：没给定时与版本锁时按播出时间搜索、开着版本锁；
 // FromTorrent 是从站点上的这个种子开始追（起始集默认取它的集号）。
 type AppSubscriptionCreate struct {
-	MediaType string `json:"media_type"`
-	TMDBID    int    `json:"tmdb_id"`
-	Season    int    `json:"season"`
-	ProfileID uint   `json:"profile_id"`
-	Upgrade   bool   `json:"upgrade"`
+	IncludeKeywords *string `json:"include_keywords,omitempty"`
+	ExcludeKeywords *string `json:"exclude_keywords,omitempty"`
+	MediaType       string  `json:"media_type"`
+	TMDBID          int     `json:"tmdb_id"`
+	Season          int     `json:"season"`
+	ProfileID       uint    `json:"profile_id"`
+	Upgrade         bool    `json:"upgrade"`
 	// Sites 是只在这些站点找（空的是全部站点）；DownloaderID 是推送到哪个下载器（0 用设置里的）；
 	// Category、Tags、SavePath 是推送时的分类、标签（逗号分开）与保存目录（空的按下载器的默认）
 	Sites            []string        `json:"sites,omitempty"`
@@ -433,6 +438,7 @@ func (s *Server) appSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	input := subscribe.SubscriptionInput{
 		MediaType: in.MediaType, TMDBID: in.TMDBID, Season: in.Season, ProfileID: in.ProfileID, Upgrade: in.Upgrade,
+		IncludeKeywords: in.IncludeKeywords, ExcludeKeywords: in.ExcludeKeywords,
 		Sites: in.Sites, DownloaderID: in.DownloaderID, Category: in.Category, Tags: in.Tags, SavePath: in.SavePath,
 		LockVersion: in.LockVersion, StartEpisode: in.StartEpisode, FollowNextSeason: in.FollowNextSeason, LibraryID: in.LibraryID,
 	}

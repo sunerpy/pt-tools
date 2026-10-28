@@ -4,25 +4,78 @@ import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../format.dart';
+import '../hybrid/mobile_api.dart';
+import '../icons.dart';
 import '../providers.dart';
 import '../widgets/common.dart';
+import 'mobile_editor_page.dart';
 
 /// 站点：登录状态（离封号阈值还有几天）、今天的签到、站点上的用户数据与站内信未读数；完全控制的设备可以立即签到。
-class SitesPage extends ConsumerWidget {
+class SitesPage extends ConsumerStatefulWidget {
   const SitesPage({super.key});
+  @override
+  ConsumerState<SitesPage> createState() => _SitesPageState();
+}
+
+class _SitesPageState extends ConsumerState<SitesPage> {
+  String _range = 'today';
+  Map<String, dynamic>? _summary;
+  String? _statsError;
+  bool _statsLoading = false;
+  int _statsGeneration = 0;
+  @override
+  void initState() {
+    super.initState();
+    _loadSummary();
+  }
+
+  Future<void> _loadSummary() async {
+    final generation = ++_statsGeneration;
+    setState(() => _statsLoading = true);
+    try {
+      final meta = await ref.read(metaProvider.future);
+      if (!mounted || generation != _statsGeneration) return;
+      if (!meta.features.contains('stats_export')) return;
+      final summary = await mobileApi(ref, '/stats/summary?range=$_range');
+      if (mounted && generation == _statsGeneration) {
+        setState(() {
+          _summary = summary as Map<String, dynamic>;
+          _statsError = null;
+        });
+      }
+    } on Object catch (error) {
+      if (mounted && generation == _statsGeneration) {
+        setState(() => _statsError = describeError(error, S.of(context)));
+      }
+    } finally {
+      if (mounted && generation == _statsGeneration) {
+        setState(() => _statsLoading = false);
+      }
+    }
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final s = S.of(context);
     final list = ref.watch(sitesProvider);
     final canWrite = ref.watch(canWriteProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(s.moreSites)),
+      appBar: AppBar(
+        title: Text(s.moreSites),
+        actions: [
+          IconButton(
+            icon: const PtIcon(PtGlyph.share),
+            tooltip: s.mobileShare,
+            onPressed: () => openMobileEditor(context, ref, 'poster'),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
           try {
             ref.invalidate(sitesProvider);
             await ref.read(sitesProvider.future);
+            await _loadSummary();
           } on Object {
             // 页面显示错误
           }
@@ -35,31 +88,119 @@ class SitesPage extends ConsumerWidget {
             final on = l.items.where((x) => x.enabled).toList();
             final off = l.items.where((x) => !x.enabled).toList();
             return ListView(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
+                if (ref
+                        .watch(metaProvider)
+                        .value
+                        ?.features
+                        .contains('stats_export') ==
+                    true)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SegmentedButton<String>(
+                            showSelectedIcon: false,
+                            segments: [
+                              ButtonSegment(
+                                value: 'today',
+                                label: Text(s.todayTitle),
+                              ),
+                              ButtonSegment(
+                                value: '7d',
+                                label: Text(s.mobileWeek),
+                              ),
+                              ButtonSegment(
+                                value: '30d',
+                                label: Text(s.mobileMonth),
+                              ),
+                            ],
+                            selected: {_range},
+                            onSelectionChanged: (v) {
+                              setState(() {
+                                _range = v.first;
+                                _summary = null;
+                              });
+                              _loadSummary();
+                            },
+                          ),
+                          if (_statsLoading)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 12),
+                              child: LinearProgressIndicator(),
+                            ),
+                          if (_statsError != null) ...[
+                            Text(_statsError!),
+                            TextButton(
+                              onPressed: _loadSummary,
+                              child: Text(s.retry),
+                            ),
+                          ],
+                          if (_summary != null &&
+                              !(_summary!['sites'] as List? ?? []).any(
+                                (item) => item['hasBaseline'] == true,
+                              ))
+                            Text(s.mobileNoBaseline),
+                          if (_summary != null &&
+                              (_summary!['sites'] as List? ?? []).any(
+                                (item) => item['hasBaseline'] == true,
+                              )) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              '↑${formatBytes((_summary!['totalUploaded'] as num?)?.toInt() ?? 0)}  ${s.billedDownloaded(formatBytes((_summary!['totalDownloaded'] as num?)?.toInt() ?? 0))}',
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              '${s.kpiBonus} ${formatNumber((_summary!['totalBonus'] as num?)?.toDouble() ?? 0)}',
+                            ),
+                            Text(
+                              s.todayBilledNote,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 if (l.userError != null && l.userError!.isNotEmpty)
-                  ListTile(
-                    leading: const Icon(Icons.warning_amber),
-                    title: Text(s.siteUserError(l.userError!)),
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: ListTile(
+                      leading: PtIcon(
+                        PtGlyph.alert,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      title: Text(s.siteUserError(l.userError!)),
+                    ),
                   ),
                 if (on.isEmpty) ListTile(title: Text(s.noEnabledSites)),
                 for (final site in on)
                   _SiteTile(site: site, canWrite: canWrite),
                 if (off.isNotEmpty)
-                  ExpansionTile(
-                    title: Text(s.disabledSites(off.length)),
-                    children: [
-                      for (final site in off)
-                        ListTile(
-                          dense: true,
-                          leading: SiteIcon(site.name, size: 24),
-                          title: Text(
-                            site.displayName.isEmpty
-                                ? site.name
-                                : site.displayName,
+                  Card(
+                    margin: const EdgeInsets.only(top: 12),
+                    clipBehavior: Clip.antiAlias,
+                    child: ExpansionTile(
+                      title: Text(s.disabledSites(off.length)),
+                      children: [
+                        for (final site in off)
+                          ListTile(
+                            dense: true,
+                            leading: SiteIcon(site.name, size: 24),
+                            title: Text(
+                              site.displayName.isEmpty
+                                  ? site.name
+                                  : site.displayName,
+                            ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
               ],
             );
@@ -126,10 +267,14 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
       '3d',
       'banned-imminent',
     ].contains(site.login.tier);
+    final muted = t.textTheme.bodySmall?.copyWith(
+      color: t.colorScheme.onSurfaceVariant,
+      fontSize: 12.5,
+    );
     return Card(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -143,13 +288,14 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
                     children: [
                       Text(
                         site.displayName.isEmpty ? site.name : site.displayName,
-                        style: t.textTheme.titleMedium,
+                        style: t.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       Text(
                         site.enabled ? login : s.siteDisabled,
-                        style: TextStyle(
+                        style: muted?.copyWith(
                           color: warn ? t.colorScheme.error : null,
-                          fontSize: 12,
                         ),
                       ),
                     ],
@@ -182,13 +328,16 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
                 children: [
                   Text(
                     '${u.username}${u.level != null && u.level!.isNotEmpty ? ' · ${u.level}' : ''}',
-                    style: t.textTheme.bodySmall,
+                    style: muted,
                   ),
-                  Text('↑${formatBytes(u.uploaded)}'),
-                  Text(s.billedDownloaded(formatBytes(u.downloaded))),
-                  Text('${s.kpiRatio} ${formatRatio(u.ratio)}'),
-                  Text('${s.kpiBonus} ${formatNumber(u.bonus)}'),
-                  Text('${s.kpiSeeding} ${u.seeding}'),
+                  Text('↑${formatBytes(u.uploaded)}', style: muted),
+                  Text(
+                    s.billedDownloaded(formatBytes(u.downloaded)),
+                    style: muted,
+                  ),
+                  Text('${s.kpiRatio} ${formatRatio(u.ratio)}', style: muted),
+                  Text('${s.kpiBonus} ${formatNumber(u.bonus)}', style: muted),
+                  Text('${s.kpiSeeding} ${u.seeding}', style: muted),
                 ],
               ),
             ],
