@@ -99,7 +99,7 @@ describe("绑定页：通道一栏", () => {
     expect(text).toContain("通知发给默认 Chat ID 12***7890，不用绑定也收得到");
     expect(text).toContain("管理员");
     expect(text).toContain("未绑定");
-    expect(text).toContain("/help 被拒：还没绑定 · 10-21 21:41");
+    expect(text).toContain("/help 被拒：没有绑定 · 10-21 21:41");
     const titles = [...document.querySelectorAll(".pt-panel__title")].map((h) =>
       (h.textContent ?? "").trim(),
     );

@@ -27,7 +27,7 @@ export function roleTexts(roles: string[] | undefined): string[] {
 
 const RESULT_TEXT: Record<string, string> = {
   success: "成功",
-  "denied:not_bound": "被拒：还没绑定",
+  "denied:not_bound": "被拒：没有绑定",
   "denied:not_allowed": "被拒：绑定已禁用",
   "denied:not_admin": "被拒：要管理员",
   "denied:rate_limit": "被拒：太频繁",

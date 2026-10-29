@@ -17,7 +17,7 @@ describe("绑定页「通道」一栏的读法", () => {
       "/unbind 成功 · 10-21 20:57",
     );
     expect(activityText({ command: "help", result: "denied:not_bound", at })).toBe(
-      "/help 被拒：还没绑定 · 10-21 20:57",
+      "/help 被拒：没有绑定 · 10-21 20:57",
     );
     expect(activityText({ command: "pause", result: "error:handler", at })).toBe(
       "/pause 出错 · 10-21 20:57",
