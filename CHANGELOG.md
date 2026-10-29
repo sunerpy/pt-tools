@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.45](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.44...v1.0.0-rc.45) (2026-10-29)
+
+
+### Features
+
+* **brush:** 刷流收益按日、周、月、季、年分段查看（网页与 App） ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **chatops:** 后台通知的每一次投递记进操作审计，通知设置里显示最近一次失败的原因 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **chatops:** 绑定页列出通道与收件人，名单里的账号可以在网页上直接绑定，没用掉的绑定码可以作废 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+
+
+### Bug Fixes
+
+* **extension:** 扩展通用识别站点的登录 Cookie，认不出格式时交给 pt-tools 先验证再保存 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **notify:** QQ 与 Telegram 的每日战报、签到、追剧等通知补上收件人 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **site:** BYR 续期换发的登录令牌接着用并存回设置 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+
 ## [1.0.0-rc.44](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.43...v1.0.0-rc.44) (2026-10-28)
 
 
