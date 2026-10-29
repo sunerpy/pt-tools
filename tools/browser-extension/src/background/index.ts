@@ -12,6 +12,7 @@ import {
   getLastSyncMap,
   getLastSyncRun,
   getSyncHashMap,
+  getSyncRejectedMap,
   getSyncSchedule,
   getTabStatus,
   getTabStatusMap,
@@ -26,6 +27,7 @@ import {
   setLastSyncRun,
   setLastVisit,
   setSyncHash,
+  setSyncRejected,
   setSyncSchedule,
   setTabStatus,
   updateConnection,
@@ -47,6 +49,7 @@ import type {
 } from "../core/types";
 import {
   FEATURE_CREDENTIAL_KEEP_ENABLED,
+  FEATURE_CREDENTIAL_VERIFY,
   PtToolsApiClient,
   PtToolsApiError,
   checkCookieHealth,
@@ -162,7 +165,6 @@ async function buildKnownSiteStatus(site: KnownSite): Promise<KnownSiteStatus> {
     cookieStatus: health.status,
     cookieExpireDays: health.expireDays,
     hasCookie: health.hasCookie,
-    missingCookies: health.missingCookies,
     lastSync: lastSyncMap[site.id] ?? null,
     autoSync: autoSyncMap[site.id] ?? false,
   };
@@ -341,6 +343,8 @@ const pushLock = createLock();
  * syncKnownSite 把站点的 Cookie 推给 pt-tools，返回推了没有。skipUnchanged 时（自动同步）和上次推给同一个 pt-tools 的一样就不推：
  * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器。手动同步总是推。
  * 读 Cookie、比指纹、推送、记指纹都在 pushLock 里。
+ * 格式认不出的 Cookie（unverified）带 verify_cookie 推，pt-tools 先拿它登录一次、登录上了才保存；pt-tools 不认时不推。
+ * 被拒绝的那组记下指纹：自动同步时 Cookie 没变就不再推，手动同步照推（用户点了就再验证一次）。
  */
 function syncKnownSite(
   site: KnownSite,
@@ -361,18 +365,38 @@ function syncKnownSite(
     if (!health.cookieString || health.status === "missing") {
       throw new Error(t("error.cookieMissingCannotSync", site.name));
     }
+    const verify = health.status === "unverified";
 
     const hash = await pushFingerprint(baseUrl, health.cookieString);
-    if (opts.skipUnchanged && (await getSyncHashMap())[site.id] === hash) {
-      return { pushed: false };
+    if (opts.skipUnchanged) {
+      if ((await getSyncHashMap())[site.id] === hash) {
+        return { pushed: false };
+      }
+      if (verify && (await getSyncRejectedMap())[site.id]?.hash === hash) {
+        return { pushed: false };
+      }
     }
 
     const api = new PtToolsApiClient(baseUrl);
-    const { warning } = await api.syncSiteCredential(site, health.cookieString);
+    if (verify && !(await api.features()).includes(FEATURE_CREDENTIAL_VERIFY)) {
+      throw new Error(t("error.cookieVerifyUnsupported", site.name));
+    }
+    let warning: string | undefined;
+    try {
+      ({ warning } = await api.syncSiteCredential(site, health.cookieString, {
+        verifyCookie: verify,
+      }));
+    } catch (error: unknown) {
+      if (verify && isVerifyRejection(error)) {
+        await setSyncRejected(site.id, { hash, reason: errorText(error) });
+      }
+      throw error;
+    }
 
     const syncedAt = new Date().toISOString();
     await setLastSync(site.id, syncedAt);
     await setSyncHash(site.id, hash);
+    await setSyncRejected(site.id, null);
     // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
     await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
     return { pushed: true, warning };
@@ -520,7 +544,6 @@ onMessage("GET_ALL_SITES_STATUS", async (): Promise<KnownSiteStatus[]> => {
         cookieStatus: health.status,
         cookieExpireDays: health.expireDays,
         hasCookie: health.hasCookie,
-        missingCookies: health.missingCookies,
         lastSync: lastSyncMap[site.id] ?? null,
         autoSync: autoSyncMap[site.id] ?? false,
       };
@@ -739,6 +762,11 @@ function errorText(error: unknown): string {
   return error instanceof Error ? friendlyErrorMessage(error.message) : String(error);
 }
 
+/** pt-tools 验证后拒绝保存（422：这组 Cookie 没登录上）；409（正在做登录检查）过一会儿会好，不算 */
+function isVerifyRejection(error: unknown): boolean {
+  return error instanceof PtToolsApiError && error.code === "verify_failed" && error.status === 422;
+}
+
 const scheduledSyncDeps: ScheduledSyncDeps = {
   sites: KNOWN_SITES,
   getSchedule,
@@ -766,13 +794,27 @@ const scheduledSyncDeps: ScheduledSyncDeps = {
       return false;
     }
   },
+  verifySupported: async (baseUrl) => {
+    try {
+      const features = await new PtToolsApiClient(baseUrl).features();
+      return features.includes(FEATURE_CREDENTIAL_VERIFY);
+    } catch {
+      return false;
+    }
+  },
   readCookie: async (site) => {
     const health = await checkCookieHealth(site);
-    return health.status === "valid" || health.status === "expiring" ? health.cookieString : "";
+    if (health.status === "valid" || health.status === "expiring") {
+      return { cookie: health.cookieString, verify: false };
+    }
+    return health.status === "unverified" ? { cookie: health.cookieString, verify: true } : null;
   },
   pushCookie: async (baseUrl, site, cookie, opts) => {
     try {
-      await new PtToolsApiClient(baseUrl).syncSiteCredential(site, cookie, opts);
+      await new PtToolsApiClient(baseUrl).syncSiteCredential(site, cookie, {
+        keepEnabled: opts.keepEnabled,
+        verifyCookie: opts.verify,
+      });
     } catch (error: unknown) {
       throw asAuthExpired(error);
     }
@@ -780,7 +822,11 @@ const scheduledSyncDeps: ScheduledSyncDeps = {
   recordPushed: async (siteId, hash, at) => {
     await setSyncHash(siteId, hash);
     await setLastSync(siteId, at);
+    await setSyncRejected(siteId, null);
   },
+  getRejected: async (siteId) => (await getSyncRejectedMap())[siteId],
+  recordRejected: (siteId, rejected) => setSyncRejected(siteId, rejected),
+  isRejection: isVerifyRejection,
   authExpired: async (baseUrl) => {
     await updateConnection(baseUrl, { connected: false });
     await clearPollAlarm();

@@ -392,6 +392,13 @@ body {
   background: #cb4b3f14;
 }
 
+/* 待验证：格式认不出，同步时由 pt-tools 先验证，不是坏了 */
+.cookie-status.info {
+  color: var(--muted);
+  border-color: var(--line);
+  background: var(--bg-accent);
+}
+
 .quick-cookie-label {
   font-size: 12px;
   color: var(--muted);

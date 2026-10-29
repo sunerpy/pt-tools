@@ -6,17 +6,21 @@ import { checkCookieHealth } from "./cookie-reader";
 /**
  * 按 Cookie 的域装好 Cookie 的 chrome.cookies 替身：键是 Cookie 自己的域，只给这个主机的写主机名（如 old.example），
  * 设在某一级域名上的写带点的（如 .example）。getAll({ url }) 和浏览器一样：主机名相同，或者网址的主机在那个域名之下。
+ * 键前面写 http: 的是在 http 下设的、按协议区分时只发给 http 网址的 Cookie（如 http:open.example）。
  */
 let jar: Record<string, chrome.cookies.Cookie[]> = {};
 
 function sentTo(url: string): chrome.cookies.Cookie[] {
-  const host = new URL(url).hostname;
-  return Object.entries(jar).flatMap(([domain, list]) =>
-    domain === host ||
-    (domain.startsWith(".") && (host === domain.slice(1) || host.endsWith(domain)))
+  const { hostname: host, protocol } = new URL(url);
+  return Object.entries(jar).flatMap(([key, list]) => {
+    const httpOnly = key.startsWith("http:");
+    const domain = httpOnly ? key.slice("http:".length) : key;
+    if (httpOnly && protocol !== "http:") return [];
+    return domain === host ||
+      (domain.startsWith(".") && (host === domain.slice(1) || host.endsWith(domain)))
       ? list
-      : [],
-  );
+      : [];
+  });
 }
 
 /** getAll({ domain }) 的语义：只认这个域名和它的子域名（Chromium 的 MatchFilter::MatchesDomain），不含上一级域名的 */
@@ -28,11 +32,16 @@ function underDomain(filter: string): chrome.cookies.Cookie[] {
   });
 }
 
-function cookie(name: string, value: string, expiresInDays = 30): chrome.cookies.Cookie {
+function cookie(
+  name: string,
+  value: string,
+  expiresInDays = 30,
+  domain = "",
+): chrome.cookies.Cookie {
   return {
     name,
     value,
-    domain: "",
+    domain,
     path: "/",
     secure: true,
     httpOnly: true,
@@ -90,14 +99,14 @@ describe("checkCookieHealth: 多域站点", () => {
     expect(health.cookieString).not.toContain("_ga");
   });
 
-  it("必需 Cookie 分散在不同域时判为缺失，不拼凑、不给出可同步的 Cookie", async () => {
+  it("必需 Cookie 分散在不同域时不拼凑：认不出格式，只给出一个域的，要 pt-tools 验证过才保存", async () => {
     jar["old.example"] = [cookie("c_secure_uid", "1")];
     jar["new.example"] = [cookie("c_secure_pass", "p")];
 
     const health = await checkCookieHealth(SITE);
 
-    expect(health.status).toBe("missing");
-    expect(health.cookieString).toBe("");
+    expect(health.status).toBe("unverified");
+    expect(health.cookieString).toBe("c_secure_uid=1");
   });
 
   it("几个域都齐全时选最晚过期的那个，剩余天数也按它算", async () => {
@@ -132,7 +141,7 @@ describe("checkCookieHealth: Cookie 设在上一级域名上", () => {
     expect(health.cookieString).toContain("c_secure_pass=p");
     expect(health.cookieString).toContain("cf_clearance=cf");
     expect(health.cookieString).not.toContain("=x");
-    expect(health.missingCookies).toEqual([]);
+    expect(health.format).toBe("declared");
   });
 
   it("不算别的网站同名后缀的 Cookie", async () => {
@@ -142,23 +151,149 @@ describe("checkCookieHealth: Cookie 设在上一级域名上", () => {
   });
 });
 
-describe("checkCookieHealth: 缺失时写明缺哪几个", () => {
-  it("按凑得最多的那个域名说还差的", async () => {
-    jar["old.example"] = [cookie("_ga", "GA1.2.3")];
-    jar["new.example"] = [cookie("c_secure_uid", "1"), cookie("cf_clearance", "cf")];
+/*
+ * 认不出格式时不再报「缺 c_secure_uid…」：有像登录用的 Cookie 就整组交给 pt-tools 验证；只有统计、Cloudflare、偏好这类的算没登录。
+ * 2026-10-29 用户：「byrbt 中扩展显示缺 c_secure_uid, c_secure_pass, c_secure_tracker_ssl…不能做一个通用适配处理吗」。
+ * BYR 现在登录后是 auth_token（JWT，15 分钟）、refresh_token、session_id，都在 .byr.pt 上。
+ */
+describe("checkCookieHealth: 认不出格式", () => {
+  const BYR: KnownSite = {
+    ...SITE,
+    id: "byrpt",
+    domains: ["byr.example"],
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+  } as KnownSite;
+
+  it("有像登录用的 Cookie：待验证，整组可以同步，不算剩余天数", async () => {
+    jar[".byr.example"] = [
+      cookie("auth_token", "header.payload.sig", 30),
+      cookie("refresh_token", "f".repeat(64), 30),
+      cookie("session_id", "0b1c2d3e-0000-4000-8000-000000000000", 30),
+      cookie("_ga", "GA1.2.3"),
+    ];
+
+    const health = await checkCookieHealth(BYR);
+
+    expect(health.status).toBe("unverified");
+    expect(health.format).toBeNull();
+    expect(health.expireDays).toBeNull();
+    expect(health.hasCookie).toBe(true);
+    for (const name of ["auth_token", "refresh_token", "session_id", "_ga"]) {
+      expect(health.cookieString).toContain(`${name}=`);
+    }
+  });
+
+  it("几个域都认不出时取像登录用的 Cookie 最多的那个", async () => {
+    jar["old.example"] = [cookie("PHPSESSID", "s1"), cookie("_ga", "GA1.2.3")];
+    jar["new.example"] = [cookie("auth_token", "t"), cookie("refresh_token", "r")];
+
+    const health = await checkCookieHealth(SITE);
+
+    expect(health.status).toBe("unverified");
+    expect(health.cookieString).toBe("auth_token=t; refresh_token=r");
+  });
+
+  it("认得格式的域优先于认不出的", async () => {
+    jar["old.example"] = [
+      cookie("auth_token", "t"),
+      cookie("refresh_token", "r"),
+      cookie("x", "1"),
+    ];
+    jar["new.example"] = [cookie("c_secure_uid", "1"), cookie("c_secure_pass", "p")];
+
+    const health = await checkCookieHealth(SITE);
+
+    expect(health.status).toBe("valid");
+    expect(health.cookieString).toBe("c_secure_uid=1; c_secure_pass=p");
+  });
+
+  it("只有统计、Cloudflare、偏好这类 Cookie 时算没登录，不给出可同步的 Cookie", async () => {
+    jar["old.example"] = [
+      cookie("_ga", "GA1.2.3"),
+      cookie("_ga_ABC123", "GS1"),
+      cookie("Hm_lvt_abc", "1"),
+      cookie("cf_clearance", "cf"),
+      cookie("c_lang_folder", "chs"),
+      cookie("c_secure_tracker_ssl", "bm9wZQ%3D%3D"),
+    ];
 
     const health = await checkCookieHealth(SITE);
 
     expect(health.status).toBe("missing");
     expect(health.hasCookie).toBe(true);
-    expect(health.missingCookies).toEqual(["c_secure_pass"]);
     expect(health.cookieString).toBe("");
   });
 
-  it("一个必需 Cookie 也没有时列出全部", async () => {
-    jar["old.example"] = [cookie("_ga", "GA1.2.3")];
+  it("浏览器里一个 Cookie 都没有时 hasCookie 为假", async () => {
     const health = await checkCookieHealth(SITE);
-    expect(health.missingCookies).toEqual(["c_secure_uid", "c_secure_pass"]);
+    expect(health.status).toBe("missing");
+    expect(health.hasCookie).toBe(false);
+  });
+});
+
+/*
+ * 旧版 NexusPHP 登录要的是 c_secure_uid 和 c_secure_pass；c_secure_tracker_ssl 只是「tracker 用 https」的偏好。
+ * 以前六十个站点都要三件套，少了它就显示缺失、不能同步。
+ */
+describe("checkCookieHealth: 旧版 NexusPHP 只要 uid 和 pass", () => {
+  const NEXUS: KnownSite = {
+    ...SITE,
+    domains: ["pt.example"],
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+  } as KnownSite;
+
+  it("没有 c_secure_tracker_ssl 也算登录着，剩余天数按 uid、pass 算", async () => {
+    jar["pt.example"] = [
+      cookie("c_secure_uid", "MTIz", 100),
+      cookie("c_secure_pass", "0123456789abcdef0123456789abcdef", 100),
+      cookie("c_secure_ssl", "eWVhaA%3D%3D", 1),
+    ];
+
+    const health = await checkCookieHealth(NEXUS);
+
+    expect(health.status).toBe("valid");
+    expect(health.format).toBe("nexus");
+    expect(health.expireDays).toBeGreaterThanOrEqual(99);
+    expect(health.cookieString).toContain("c_secure_ssl=");
+  });
+
+  it("三件套齐全时按站点声明的算", async () => {
+    jar["pt.example"] = [
+      cookie("c_secure_uid", "MTIz"),
+      cookie("c_secure_pass", "0123456789abcdef0123456789abcdef"),
+      cookie("c_secure_tracker_ssl", "eWVhaA%3D%3D"),
+    ];
+    expect((await checkCookieHealth(NEXUS)).format).toBe("declared");
+  });
+});
+
+/*
+ * 有的站点（OpenCD）没登录时把 https 跳到 http，登录 Cookie 是在 http 下设的；浏览器按协议区分 Cookie 时，
+ * 只按 https 取会漏掉。现在 https、http 两边都取，同一条 Cookie 不重复。
+ */
+describe("checkCookieHealth: http 下设的 Cookie", () => {
+  const OPEN: KnownSite = { ...SITE, domains: ["open.example"] } as KnownSite;
+
+  it("只在 http 下有的登录 Cookie 也取得到", async () => {
+    jar["http:open.example"] = [cookie("c_secure_uid", "1"), cookie("c_secure_pass", "p")];
+    jar[".open.example"] = [cookie("cf_clearance", "cf")];
+
+    const health = await checkCookieHealth(OPEN);
+
+    expect(health.status).toBe("valid");
+    expect(health.cookieString).toContain("c_secure_uid=1");
+    expect(health.cookieString).toContain("cf_clearance=cf");
+  });
+
+  it("两边都取得到的同一条 Cookie 只算一次", async () => {
+    jar["open.example"] = [
+      cookie("c_secure_uid", "1", 30, "open.example"),
+      cookie("c_secure_pass", "p", 30, "open.example"),
+    ];
+
+    const health = await checkCookieHealth(OPEN);
+
+    expect(health.cookieString).toBe("c_secure_uid=1; c_secure_pass=p");
   });
 });
 
@@ -185,26 +320,25 @@ describe("checkCookieHealth: 新版 NexusPHP 只有一个 c_secure_pass", () => 
     const health = await checkCookieHealth(NEXUS);
 
     expect(health.status).toBe("valid");
-    expect(health.missingCookies).toEqual([]);
+    expect(health.format).toBe("nexus-token");
     expect(health.cookieString).toContain(`c_secure_pass=${token}`);
     expect(health.expireDays).toBeGreaterThanOrEqual(299);
   });
 
-  it("旧版的 c_secure_pass（md5）单独在时仍算缺失，不拿残缺的一组去同步", async () => {
+  it("旧版的 c_secure_pass（md5）单独在时认不出：不直接同步，要 pt-tools 验证过才保存", async () => {
     jar[".example"] = [cookie("c_secure_pass", "0123456789abcdef0123456789abcdef")];
 
     const health = await checkCookieHealth(NEXUS);
 
-    expect(health.status).toBe("missing");
-    expect(health.missingCookies).toEqual(["c_secure_uid", "c_secure_tracker_ssl"]);
-    expect(health.cookieString).toBe("");
+    expect(health.status).toBe("unverified");
+    expect(health.format).toBeNull();
   });
 
   it("令牌解不开、不是 JSON 开头时按旧版算", async () => {
     jar[".example"] = [cookie("c_secure_pass", "%E0%A4%A")];
-    expect((await checkCookieHealth(NEXUS)).status).toBe("missing");
+    expect((await checkCookieHealth(NEXUS)).status).toBe("unverified");
     jar[".example"] = [cookie("c_secure_pass", btoa("not a token"))];
-    expect((await checkCookieHealth(NEXUS)).status).toBe("missing");
+    expect((await checkCookieHealth(NEXUS)).status).toBe("unverified");
   });
 });
 
@@ -223,19 +357,41 @@ describe("checkCookieHealth: OurBits 只有 ourbits_jwt", () => {
     const health = await checkCookieHealth(OURBITS);
 
     expect(health.status).toBe("valid");
-    expect(health.missingCookies).toEqual([]);
+    expect(health.format).toBe("declared");
     expect(health.cookieString).toContain("ourbits_jwt=header.payload.signature");
     expect(health.cookieString).toContain("cf_clearance=clearance");
     expect(health.expireDays).toBeGreaterThanOrEqual(29);
   });
 
-  it("只有 Cloudflare 的 Cookie 时算缺失，写明缺 ourbits_jwt", async () => {
+  it("只有 Cloudflare 的 Cookie 时算没登录", async () => {
     jar[".ourbits.club"] = [cookie("cf_clearance", "clearance", 365)];
 
     const health = await checkCookieHealth(OURBITS);
 
     expect(health.status).toBe("missing");
-    expect(health.missingCookies).toEqual(["ourbits_jwt"]);
+    expect(health.hasCookie).toBe(true);
     expect(health.cookieString).toBe("");
+  });
+});
+
+/*
+ * BYR 2026-10 起登录后是 auth_token / refresh_token / session_id（都在 .byr.pt 上、30 天），扩展按站点声明的认，
+ * 剩余天数按这三个算。2026-10-29 用户：「byrbt 中，扩展显示：缺 c_secure_uid, c_secure_pass, c_secure_tracker_ssl」。
+ */
+describe("checkCookieHealth: BYR 的登录 Cookie", () => {
+  const BYR = KNOWN_SITES.find((site) => site.id === "byrpt") as KnownSite;
+
+  it("三个都在就算登录着，可以直接同步", async () => {
+    jar[".byr.pt"] = [
+      cookie("auth_token", "header.payload.sig", 30),
+      cookie("refresh_token", "f".repeat(64), 30),
+      cookie("session_id", "0b1c2d3e-0000-4000-8000-000000000000", 30),
+    ];
+
+    const health = await checkCookieHealth(BYR);
+
+    expect(health.status).toBe("valid");
+    expect(health.format).toBe("declared");
+    expect(health.expireDays).toBeGreaterThanOrEqual(29);
   });
 });

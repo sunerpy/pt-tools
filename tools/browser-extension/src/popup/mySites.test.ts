@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { KnownSite } from "../core/constants";
 import type { KnownSiteStatus } from "../core/types";
 import type { SiteLoginStateRecord } from "../modules/sync";
-import { buildMySites, countMine, loginLabel, loginTone, missingCookieNames } from "./mySites";
+import { buildMySites, cookieHint, countMine, loginLabel, loginTone } from "./mySites";
 
 function site(id: string, syncField: KnownSite["syncField"] = "cookie"): KnownSite {
   return {
@@ -71,11 +71,13 @@ describe("buildMySites", () => {
     expect(countMine(sites, logins)).toBe(3);
   });
 
-  it("只有 Cookie 有效或快过期、并且按 Cookie 同步的站点能同步", () => {
-    const rows = buildMySites(sites, logins, true);
+  it("只有 Cookie 有效、快过期或待验证、并且按 Cookie 同步的站点能同步", () => {
+    const rows = buildMySites([...sites, status(site("byrpt"), "unverified")], logins, true);
     const byId = Object.fromEntries(rows.map((r) => [r.status.site.id, r]));
     expect(byId.hdsky!.syncable).toBe(true);
     expect(byId.ssd!.syncable).toBe(false);
+    expect(byId.byrpt!.syncable).toBe(true);
+    expect(byId.byrpt!.attention).toBe(false);
   });
 
   it("pt-tools 里没启用、扩展推过 Cookie 的站点标成「Cookie 已存，待启用」", () => {
@@ -121,18 +123,21 @@ describe("loginLabel", () => {
   });
 });
 
-describe("missingCookieNames", () => {
-  const s = site("xingyunge");
-  it("缺失、浏览器里又有这个站的 Cookie 时给出还差的", () => {
-    expect(
-      missingCookieNames({ ...status(s, "missing", true), missingCookies: ["c_secure_pass"] }),
-    ).toEqual(["c_secure_pass"]);
+/*
+ * 行上不再写「缺 c_secure_uid…」：站点换了登录 Cookie 的格式（BYR）也这么写，看着像扩展坏了。
+ * 2026-10-29 用户：「不能做一个通用适配处理吗…而不是报其缺少 id 之类的」。
+ */
+describe("cookieHint", () => {
+  const s = site("byrpt");
+  it("格式认不出时说同步时由 pt-tools 验证", () => {
+    expect(cookieHint(status(s, "unverified", true))).toBe("unverified");
   });
-  it("一个 Cookie 也没有、或者不缺时为空", () => {
-    expect(
-      missingCookieNames({ ...status(s, "missing", false), missingCookies: ["c_secure_uid"] }),
-    ).toEqual([]);
-    expect(missingCookieNames({ ...status(s, "valid"), missingCookies: [] })).toEqual([]);
-    expect(missingCookieNames(status(s, "missing", true))).toEqual([]);
+  it("有 Cookie、没有登录用的时说多半没登录；一个 Cookie 也没有时不说", () => {
+    expect(cookieHint(status(s, "missing", true))).toBe("noLogin");
+    expect(cookieHint(status(s, "missing", false))).toBeNull();
+  });
+  it("Cookie 正常、或者不是按 Cookie 同步的站点不说", () => {
+    expect(cookieHint(status(s, "valid"))).toBeNull();
+    expect(cookieHint(status(site("mteam", "api_key"), "missing", true))).toBeNull();
   });
 });

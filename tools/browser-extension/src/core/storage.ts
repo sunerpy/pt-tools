@@ -2,6 +2,7 @@ import { STORAGE_KEYS } from "./constants";
 import type {
   CollectionSession,
   PtToolsConnection,
+  RejectedPush,
   SyncRunSummary,
   SyncSchedule,
   TabSiteStatus,
@@ -235,6 +236,26 @@ export async function setSyncHash(siteId: string, hash: string): Promise<void> {
     ...map,
     [siteId]: hash,
   }));
+}
+
+export async function getSyncRejectedMap(): Promise<Record<string, RejectedPush>> {
+  return (await get<Record<string, RejectedPush>>(STORAGE_KEYS.syncRejectedMap)) ?? {};
+}
+
+/** setSyncRejected 记下或清掉（rejected 为 null）一个站点被拒绝的那组 Cookie */
+export async function setSyncRejected(
+  siteId: string,
+  rejected: RejectedPush | null,
+): Promise<void> {
+  await updateKey<Record<string, RejectedPush>>(STORAGE_KEYS.syncRejectedMap, (map) => {
+    const next = { ...map };
+    if (rejected) {
+      next[siteId] = rejected;
+    } else {
+      delete next[siteId];
+    }
+    return next;
+  });
 }
 
 export async function getLastSyncRun(): Promise<SyncRunSummary | null> {

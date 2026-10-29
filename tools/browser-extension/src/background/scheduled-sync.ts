@@ -9,13 +9,16 @@
  * 单独打开了「自动同步」的站点照旧算在里面。要同步（已启用或打开了自动同步）、但浏览器里没有可用 Cookie 的站点不推，
  * 按站点记在结果的 missing 里（结果里列出来，也会发通知），不悄悄跳过；没启用的站点没有 Cookie 不算缺。
  * 推 Cookie 的各条路共用一把锁（withPushLock）：读 Cookie、比指纹、推送、记指纹在锁里一起做。
+ * 格式认不出的 Cookie（见 modules/sync/cookie-reader 的 unverified）带 verify_cookie 推：pt-tools 先拿它登录一次，登录上了才保存。
+ * 只替要同步的站点这么做（没启用的站点不替用户去访问），pt-tools 不认 verify_cookie 时记成失败、写明要更新；
+ * 被拒绝的那组记下指纹与原因，Cookie 没变就不再推，原因照样写进结果。
  * CookieCloud：Cookie 与目标都没变时不传（见 modules/cookiecloud/upload）。
  *
  * 依赖都从外面传进来（chrome API、存储、网络），这里只有挑站点与判断的逻辑，好测。
  */
 import { t } from "../core/i18n";
 import type { KnownSite } from "../core/constants";
-import type { SyncRunSummary, SyncSchedule } from "../core/types";
+import type { RejectedPush, SyncRunSummary, SyncSchedule } from "../core/types";
 import type {
   CookieCloudConfig,
   CookieCloudState,
@@ -78,6 +81,20 @@ export class AuthExpiredError extends Error {
   }
 }
 
+/** SiteCookie 是一个站点可以同步的 Cookie；verify 为 true 时格式认不出，要 pt-tools 验证过才保存 */
+export interface SiteCookie {
+  cookie: string;
+  verify: boolean;
+}
+
+/** RejectedAgainError：这组 Cookie 上次已经被 pt-tools 拒绝、没变，这次不推；消息是上次的原因 */
+class RejectedAgainError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "RejectedAgainError";
+  }
+}
+
 export interface ScheduledSyncDeps {
   sites: KnownSite[];
   getSchedule(): Promise<SyncSchedule>;
@@ -92,17 +109,28 @@ export interface ScheduledSyncDeps {
   ptToolsSites(baseUrl: string): Promise<Array<{ name: string; enabled: boolean }>>;
   /** keepEnabledSupported：这个 pt-tools 认不认推送时的 keep_enabled（看 /api/ping 的 features）；读不到时为 false */
   keepEnabledSupported(baseUrl: string): Promise<boolean>;
-  /** readCookie 返回可以同步的 Cookie；不齐全、没有时返回空串 */
-  readCookie(site: KnownSite): Promise<string>;
-  /** pushCookie 把 Cookie 推给 pt-tools；keepEnabled 时停用的站点只存 Cookie、不启用。登录过期时抛 AuthExpiredError */
+  /** verifySupported：这个 pt-tools 认不认推送时的 verify_cookie（看 /api/ping 的 features）；读不到时为 false */
+  verifySupported(baseUrl: string): Promise<boolean>;
+  /** readCookie 返回可以同步的 Cookie；没有登录 Cookie 时返回 null */
+  readCookie(site: KnownSite): Promise<SiteCookie | null>;
+  /**
+   * pushCookie 把 Cookie 推给 pt-tools；keepEnabled 时停用的站点只存 Cookie、不启用；verify 时 pt-tools 先验证、登录上了才保存。
+   * 登录过期时抛 AuthExpiredError
+   */
   pushCookie(
     baseUrl: string,
     site: KnownSite,
     cookie: string,
-    opts: { keepEnabled: boolean },
+    opts: { keepEnabled: boolean; verify: boolean },
   ): Promise<void>;
-  /** recordPushed 记下推送成功：指纹与时间 */
+  /** recordPushed 记下推送成功：指纹与时间（同时清掉这个站点被拒绝的记录） */
   recordPushed(siteId: string, hash: string, at: string): Promise<void>;
+  /** getRejected 是这个站点上次被 pt-tools 验证拒绝的那组 Cookie */
+  getRejected(siteId: string): Promise<RejectedPush | undefined>;
+  /** recordRejected 记下 pt-tools 验证后拒绝保存的那组 Cookie */
+  recordRejected(siteId: string, rejected: RejectedPush): Promise<void>;
+  /** isRejection 判断推送失败是不是 pt-tools 验证后拒绝保存（没登录上），而不是网络、正在探测这类过一会儿会好的 */
+  isRejection(error: unknown): boolean;
   /** authExpired 在 pt-tools 登录过期时调用（把连接标成断开） */
   authExpired(baseUrl: string): Promise<void>;
   getCookieCloudConfig(): Promise<CookieCloudConfig>;
@@ -198,19 +226,42 @@ async function syncPtTools(
     }
     return out;
   }
+  // 这一轮第一次要验证时才问 pt-tools 认不认 verify_cookie
+  let verifyOk: Promise<boolean> | null = null;
   for (const { site, required } of sites) {
     let outcome: PushOutcome;
     try {
       outcome = await deps.withPushLock(async (): Promise<PushOutcome> => {
-        const cookie = await deps.readCookie(site);
-        if (!cookie) {
+        const read = await deps.readCookie(site);
+        // 格式认不出的 Cookie 要 pt-tools 去站点验证：没启用、没打开自动同步的站点不替用户这么做
+        if (!read?.cookie || (read.verify && !required)) {
           return "none";
         }
-        const hash = await pushFingerprint(baseUrl, cookie);
+        const hash = await pushFingerprint(baseUrl, read.cookie);
         if ((await deps.getHash(site.id)) === hash) {
           return "unchanged";
         }
-        await deps.pushCookie(baseUrl, site, cookie, { keepEnabled: !required });
+        if (read.verify) {
+          const rejected = await deps.getRejected(site.id);
+          if (rejected?.hash === hash) {
+            throw new RejectedAgainError(rejected.reason);
+          }
+          verifyOk ??= deps.verifySupported(baseUrl);
+          if (!(await verifyOk)) {
+            throw new Error(t("error.cookieVerifyUnsupported", site.name));
+          }
+        }
+        try {
+          await deps.pushCookie(baseUrl, site, read.cookie, {
+            keepEnabled: !required,
+            verify: read.verify,
+          });
+        } catch (error: unknown) {
+          if (read.verify && deps.isRejection(error)) {
+            await deps.recordRejected(site.id, { hash, reason: deps.errorText(error) });
+          }
+          throw error;
+        }
         await deps.recordPushed(site.id, hash, deps.now().toISOString());
         return "pushed";
       });

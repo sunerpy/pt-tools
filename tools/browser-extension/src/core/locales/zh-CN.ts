@@ -83,6 +83,9 @@ export default {
   "cookie.expiringDays": "即将过期 ({0} 天)",
   "cookie.expired": "已过期",
   "cookie.missing": "缺失",
+  "cookie.unverified": "待验证",
+  "cookie.unverifiedHint":
+    "这个站点的登录 Cookie 格式扩展没认出，同步时整组交给 pt-tools，由它先用这组 Cookie 登录一次，登录上了才保存，原来的 Cookie 不会被换掉",
 
   "feedback.permissionGranted": "权限已授予，功能已激活。",
   "feedback.requestFailed": "请求失败",
@@ -127,7 +130,9 @@ export default {
   "error.invalidResponse": "响应数据无效",
   "error.invalidResponseFromPtTools": "pt-tools 返回了无法解析的响应",
   "error.configurePtToolsUrl": "请先配置 pt-tools 地址",
-  "error.cookieMissingCannotSync": "{0} Cookie 缺失，无法同步",
+  "error.cookieMissingCannotSync": "浏览器里没有 {0} 的登录 Cookie，先在浏览器里登录 {0}",
+  "error.cookieVerifyUnsupported":
+    "{0} 的登录 Cookie 格式扩展没认出，要由 pt-tools 验证后才能保存，这个版本的 pt-tools 还不支持：请更新 pt-tools",
   "error.ptToolsLoginFailed": "pt-tools 登录失败，请检查用户名密码",
   "error.networkUnreachable": "无法连接 pt-tools 服务，请检查地址是否正确以及 pt-tools 是否已启动",
   "error.timeout": "请求超时，pt-tools 可能未响应",
@@ -309,7 +314,8 @@ export default {
   "mySites.loginUnknown": "状态未知",
   "mySites.loginStale": "登录状态是{0}读到的，现在读不到：{1}",
   "mySites.goLogin": "去登录",
-  "mySites.missingCookies": "缺 {0}",
+  "mySites.cookieUnverified": "同步时由 pt-tools 验证",
+  "mySites.cookieNoLogin": "没有登录 Cookie，多半没登录",
   "mySites.updating": "更新中…",
   "mySites.synced": "{0}同步",
   "mySites.apiKey": "API Key",

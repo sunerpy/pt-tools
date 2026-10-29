@@ -19,6 +19,12 @@ interface PingResponse {
 /** pt-tools 认得 PUT /api/sites/{id} 的 keep_enabled：停用的站点只存凭据、不启用（见 web/api_credential.go） */
 export const FEATURE_CREDENTIAL_KEEP_ENABLED = "site_credential_keep_enabled";
 
+/**
+ * pt-tools 认得 PUT /api/sites/{id} 的 verify_cookie：先拿这组 Cookie 实际登录一次，登录上了才保存（见 web/credential_verify.go）。
+ * 扩展认不出格式的 Cookie 只推给认得它的 pt-tools：旧版本会不验证直接保存，可能换掉能用的那组。
+ */
+export const FEATURE_CREDENTIAL_VERIFY = "site_credential_verify";
+
 interface SiteConfigEntry {
   enabled?: boolean;
   auth_method?: string;
@@ -91,7 +97,7 @@ export class PtToolsApiClient {
   async syncSiteCredential(
     site: KnownSite,
     credential: string,
-    opts: { keepEnabled?: boolean } = {},
+    opts: { keepEnabled?: boolean; verifyCookie?: boolean } = {},
   ): Promise<{ warning?: string }> {
     const siteId = site.id.toLowerCase();
     const payload: SyncSiteCredentialPayload = {
@@ -100,6 +106,10 @@ export class PtToolsApiClient {
     // 定时同步推没启用的站点时带上：只存 Cookie，不替用户启用（旧版 pt-tools 不认，调用方先看 features）
     if (opts.keepEnabled) {
       payload.keep_enabled = true;
+    }
+    // 格式认不出的 Cookie：要 pt-tools 先验证、登录上了才保存（调用方先看 features）
+    if (opts.verifyCookie) {
+      payload.verify_cookie = true;
     }
 
     const visitMap = await getLastVisitMap();
@@ -118,6 +128,13 @@ export class PtToolsApiClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
+      if (opts.verifyCookie && (response.status === 409 || response.status === 422)) {
+        throw new PtToolsApiError(
+          "verify_failed",
+          text.trim() || `HTTP ${response.status}`,
+          response.status,
+        );
+      }
       classifyHttpResponse(response, text);
     }
     const body = (await this.safeJson(response)) as { warning?: unknown } | null;

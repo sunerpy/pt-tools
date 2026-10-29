@@ -5,7 +5,7 @@ import { t } from "../../core/i18n";
 
 const props = withDefaults(
   defineProps<{
-    status: "valid" | "expiring" | "expired" | "missing";
+    status: "valid" | "expiring" | "expired" | "unverified" | "missing";
     days: number | null;
     compact?: boolean;
   }>(),
@@ -30,6 +30,10 @@ const text = computed(() => {
     return t("cookie.expired");
   }
 
+  if (props.status === "unverified") {
+    return t("cookie.unverified");
+  }
+
   return t("cookie.missing");
 });
 
@@ -40,10 +44,18 @@ const tone = computed(() => {
   if (props.status === "expiring") {
     return "warn";
   }
+  if (props.status === "unverified") {
+    return "info";
+  }
   return "bad";
 });
 </script>
 
 <template>
-  <span class="cookie-status" :class="[tone, { compact: props.compact }]">{{ text }}</span>
+  <span
+    class="cookie-status"
+    :class="[tone, { compact: props.compact }]"
+    :title="props.status === 'unverified' ? t('cookie.unverifiedHint') : undefined"
+    >{{ text }}</span
+  >
 </template>

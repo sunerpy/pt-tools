@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { KnownSite } from "../core/constants";
-import type { SyncSchedule } from "../core/types";
+import { t } from "../core/i18n";
+import type { RejectedPush, SyncSchedule } from "../core/types";
 import type { CookieCloudConfig, CookieCloudState } from "../modules/cookiecloud/upload";
 import {
   AuthExpiredError,
@@ -39,9 +40,16 @@ const CC_OFF: CookieCloudConfig = {
 interface Harness {
   deps: ScheduledSyncDeps;
   pushed: string[];
+  /** 每次调了 pushCookie 的站点（含失败的） */
+  attempts: string[];
   /** 每个推出去的站点带没带 keep_enabled */
   keepEnabled: Record<string, boolean>;
+  /** 每个推出去的站点带没带 verify_cookie */
+  verify: Record<string, boolean>;
   hashes: Record<string, string>;
+  rejected: Record<string, RejectedPush>;
+  /** verifySupported 问了几次 */
+  verifyAsked: number;
   ccState: CookieCloudState | null;
 }
 
@@ -52,6 +60,8 @@ function harness(opts: {
   /** pt-tools 列出的停用站点；默认是 SITES 里没启用的全部（pt-tools 会列出全部内置站点） */
   disabled?: string[];
   cookies?: Record<string, string>;
+  /** 格式认不出、要 pt-tools 验证的 Cookie */
+  unverified?: Record<string, string>;
   pushError?: Record<string, Error>;
   connected?: boolean;
   baseUrl?: string;
@@ -59,12 +69,18 @@ function harness(opts: {
   upload?: ScheduledSyncDeps["upload"];
   /** pt-tools 认不认 keep_enabled（rc.38 起认）；默认认 */
   keepEnabledSupported?: boolean;
+  /** pt-tools 认不认 verify_cookie；默认认 */
+  verifySupported?: boolean;
 }): Harness {
   const h: Harness = {
     deps: undefined as unknown as ScheduledSyncDeps,
     pushed: [],
+    attempts: [],
     keepEnabled: {},
+    verify: {},
     hashes: {},
+    rejected: {},
+    verifyAsked: 0,
     ccState: null,
   };
   h.deps = {
@@ -86,16 +102,33 @@ function harness(opts: {
       ];
     },
     keepEnabledSupported: async () => opts.keepEnabledSupported !== false,
-    readCookie: async (s) => opts.cookies?.[s.id] ?? "",
+    verifySupported: async () => {
+      h.verifyAsked += 1;
+      return opts.verifySupported !== false;
+    },
+    readCookie: async (s) => {
+      const unverified = opts.unverified?.[s.id];
+      if (unverified) return { cookie: unverified, verify: true };
+      const cookie = opts.cookies?.[s.id];
+      return cookie ? { cookie, verify: false } : null;
+    },
     pushCookie: async (_base, s, _cookie, pushOpts) => {
+      h.attempts.push(s.id);
       const err = opts.pushError?.[s.id];
       if (err) throw err;
       h.pushed.push(s.id);
       h.keepEnabled[s.id] = pushOpts.keepEnabled;
+      h.verify[s.id] = pushOpts.verify;
     },
     recordPushed: async (siteId, hash) => {
       h.hashes[siteId] = hash;
+      delete h.rejected[siteId];
     },
+    getRejected: async (siteId) => h.rejected[siteId],
+    recordRejected: async (siteId, rejected) => {
+      h.rejected[siteId] = rejected;
+    },
+    isRejection: (e) => e instanceof Error && e.message.startsWith("rejected:"),
     authExpired: vi.fn(async () => {}),
     getCookieCloudConfig: async () => opts.cc ?? CC_OFF,
     getCookieCloudState: async () => h.ccState,
@@ -455,7 +488,7 @@ describe("runSync", () => {
     let cookie = "a=1";
     const h = harness({ autoSync: { hdsky: true }, cookies: {} });
     h.deps.withPushLock = lock;
-    h.deps.readCookie = async () => cookie;
+    h.deps.readCookie = async () => ({ cookie, verify: false });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -479,5 +512,90 @@ describe("runSync", () => {
     // 定时同步等手动的做完才读：读到的是 b，和刚推的一样，不再推旧的 a
     expect(run.ptTools.unchanged).toBe(1);
     expect(h.pushed).toEqual([]);
+  });
+});
+
+/*
+ * 格式认不出的 Cookie（BYR 现在是 auth_token / refresh_token）：带 verify_cookie 推，pt-tools 先拿它登录一次、登录上了才保存。
+ * 2026-10-29 用户：「不能做一个通用适配处理吗…站点检测到哪种就推送到 pt-tools，而不是报其缺少 id 之类的」。
+ */
+describe("runSync：格式认不出的 Cookie", () => {
+  it("要同步的站点带 verify_cookie 推；认得格式的照旧不带", async () => {
+    const h = harness({
+      autoSync: { hdsky: true, hdtime: true },
+      cookies: { hdsky: "c_secure_uid=1; c_secure_pass=2" },
+      unverified: { hdtime: "auth_token=a; refresh_token=r" },
+    });
+    const run = await runSync(h.deps, "schedule");
+    expect(run.ptTools.synced).toEqual(["hdsky", "hdtime"]);
+    expect(h.verify).toEqual({ hdsky: false, hdtime: true });
+    expect(h.keepEnabled.hdtime).toBe(false);
+    expect(h.verifyAsked).toBe(1);
+  });
+
+  it("没启用、没打开自动同步的站点不替用户去验证：不推、不算缺", async () => {
+    const h = harness({ schedule: { allSites: true }, unverified: { hdtime: "auth_token=a" } });
+    const run = await runSync(h.deps, "schedule");
+    expect(h.attempts).toEqual([]);
+    expect(h.verifyAsked).toBe(0);
+    expect(run.ptTools.missing).toEqual([]);
+    expect(run.ptTools.skipped).toBe(t("sync.skipNoSites"));
+  });
+
+  it("pt-tools 不认 verify_cookie 时不推，记成失败、写明要更新 pt-tools", async () => {
+    const h = harness({
+      autoSync: { hdtime: true },
+      unverified: { hdtime: "auth_token=a" },
+      verifySupported: false,
+    });
+    const run = await runSync(h.deps, "schedule");
+    expect(h.attempts).toEqual([]);
+    expect(run.ptTools.failed).toHaveLength(1);
+    expect(run.ptTools.failed[0]?.error).toBe(t("error.cookieVerifyUnsupported", "HDTIME"));
+  });
+
+  it("被 pt-tools 拒绝的那组记下来：Cookie 没变就不再推、原因照样写进结果，变了再推", async () => {
+    const reason = "rejected: 没有保存：用这组 Cookie 没能登录 HDTIME";
+    const opts = {
+      autoSync: { hdtime: true },
+      unverified: { hdtime: "auth_token=a" },
+      pushError: { hdtime: new Error(reason) },
+    };
+    const h = harness(opts);
+    let run = await runSync(h.deps, "schedule");
+    expect(run.ptTools.failed).toEqual([{ siteId: "hdtime", error: reason }]);
+    expect(h.rejected.hdtime?.hash).toBe(
+      await pushFingerprint("http://pt.example", "auth_token=a"),
+    );
+    expect(h.attempts).toEqual(["hdtime"]);
+
+    run = await runSync(h.deps, "schedule");
+    expect(run.ptTools.failed).toEqual([{ siteId: "hdtime", error: reason }]);
+    expect(h.attempts).toEqual(["hdtime"]);
+
+    opts.unverified.hdtime = "auth_token=b";
+    run = await runSync(h.deps, "schedule");
+    expect(h.attempts).toEqual(["hdtime", "hdtime"]);
+  });
+
+  it("不是拒绝（正在做登录检查、网络）不记，下一轮照推；推成功了清掉拒绝记录", async () => {
+    const opts: {
+      autoSync: Record<string, boolean>;
+      unverified: Record<string, string>;
+      pushError: Record<string, Error>;
+    } = {
+      autoSync: { hdtime: true },
+      unverified: { hdtime: "auth_token=a" },
+      pushError: { hdtime: new Error("这个站点正在做登录检查，过一会儿再同步一次") },
+    };
+    const h = harness(opts);
+    await runSync(h.deps, "schedule");
+    expect(h.rejected).toEqual({});
+    h.rejected.hdtime = { hash: "old", reason: "rejected: 旧的" };
+    delete opts.pushError.hdtime;
+    const run = await runSync(h.deps, "schedule");
+    expect(run.ptTools.synced).toEqual(["hdtime"]);
+    expect(h.attempts).toEqual(["hdtime", "hdtime"]);
+    expect(h.rejected).toEqual({});
   });
 });

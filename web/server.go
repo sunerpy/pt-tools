@@ -91,6 +91,9 @@ type Server struct {
 	// attendanceRun 是网页「一键签到」的进度（见 apiAttendanceRun）
 	attendanceRun attendanceRunState
 
+	// verifyCookie 是扩展推来认不出格式的 Cookie 时验证它的方法（见 credential_verify.go）；为空时用 probeSiteCookie，测试里替换
+	verifyCookie cookieVerifier
+
 	// checkUpdates 是 App API 的 /updates 查新版本用的（version.Checker；测试里换成假的，不访问 GitHub）
 	checkUpdates func(ctx context.Context, opts version.CheckOptions) (*version.VersionCheckResult, error)
 

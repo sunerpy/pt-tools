@@ -83,6 +83,9 @@ export default {
   "cookie.expiringDays": "Expiring Soon ({0} days)",
   "cookie.expired": "Expired",
   "cookie.missing": "Missing",
+  "cookie.unverified": "Unverified",
+  "cookie.unverifiedHint":
+    "The extension doesn't recognize this site's login cookies. Syncing sends them all to pt-tools, which signs in with them once and saves them only if that works; the cookies pt-tools already has are not replaced otherwise",
 
   "feedback.permissionGranted": "Permissions granted. Features are now enabled.",
   "feedback.requestFailed": "Request failed",
@@ -129,7 +132,9 @@ export default {
   "error.invalidResponse": "Invalid response",
   "error.invalidResponseFromPtTools": "pt-tools returned an unparseable response",
   "error.configurePtToolsUrl": "Configure the pt-tools URL first",
-  "error.cookieMissingCannotSync": "{0} cookie is missing and cannot be synced",
+  "error.cookieMissingCannotSync": "No {0} login cookies in the browser. Sign in to {0} first",
+  "error.cookieVerifyUnsupported":
+    "The extension doesn't recognize {0}'s login cookies, so pt-tools has to verify them before saving, and this pt-tools version can't. Update pt-tools",
   "error.ptToolsLoginFailed": "pt-tools login failed. Check username and password.",
   "error.networkUnreachable":
     "Cannot reach pt-tools. Verify the URL and that the pt-tools service is running.",
@@ -322,7 +327,8 @@ export default {
   "mySites.loginUnknown": "Status unknown",
   "mySites.loginStale": "Login status from {0}; cannot refresh it now: {1}",
   "mySites.goLogin": "Log in",
-  "mySites.missingCookies": "Missing {0}",
+  "mySites.cookieUnverified": "pt-tools verifies on sync",
+  "mySites.cookieNoLogin": "No login cookies; probably signed out",
   "mySites.updating": "Updating…",
   "mySites.synced": "synced {0}",
   "mySites.apiKey": "API Key",
