@@ -210,3 +210,45 @@ func TestAppBrushRunsWithoutDatabase(t *testing.T) {
 	assert.Equal(t, 503, w.Code)
 	assert.Contains(t, w.Body.String(), `"error":"unavailable"`)
 }
+
+// App 的刷流页与网页一样能按日、周、月、季度、年看收益（2026-10-28 用户：「手机端也要同步」）。
+func TestAppBrushStatsByPeriod(t *testing.T) {
+	e := newAppEnv(t)
+	db := global.GlobalDB.DB
+	require.NoError(t, db.AutoMigrate(&models.BrushTask{}, &models.BrushTorrent{}, &models.BrushTorrentSample{}, &models.BrushDailyStat{}, &models.BrushRun{}))
+	require.NoError(t, db.Create(&models.BrushTask{Name: "phone", SiteName: "hdsky", DownloaderID: 1}).Error)
+	var task models.BrushTask
+	require.NoError(t, db.First(&task).Error)
+	today := time.Now().Format("2006-01-02")
+	require.NoError(t, db.Create(&models.BrushDailyStat{TaskID: task.ID, Day: today, Uploaded: 5 << 30, Downloaded: 1 << 20, Added: 2}).Error)
+	read := e.token(apitoken.ScopeAppRead)
+
+	assert.Equal(t, 401, e.do(appReq{method: http.MethodGet, path: appPrefix + "/brush/stats"}).Code)
+	w := e.do(appReq{method: http.MethodGet, path: appPrefix + "/brush/stats?granularity=week&periods=4", bearer: read})
+	require.Equal(t, 200, w.Code, w.Body.String())
+	assertNoSecrets(t, w.Body.Bytes())
+	var got AppBrushStats
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "week", got.Granularity)
+	require.Len(t, got.Totals, 4)
+	last := got.Totals[3]
+	assert.EqualValues(t, 5<<30, last.Uploaded, "今天的收益落在本周")
+	assert.Equal(t, 2, last.Added)
+	assert.LessOrEqual(t, last.Start, today)
+	assert.GreaterOrEqual(t, last.End, today)
+	require.Len(t, got.Tasks, 1)
+	assert.Equal(t, "phone", got.Tasks[0].Name)
+	assert.Equal(t, got.Totals, got.Tasks[0].Periods)
+
+	w = e.do(appReq{method: http.MethodGet, path: appPrefix + "/brush/stats", bearer: read})
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "day", got.Granularity)
+	assert.Len(t, got.Totals, 30)
+
+	for _, q := range []string{"?granularity=hour", "?granularity=year&periods=21", "?days=7"} {
+		w = e.do(appReq{method: http.MethodGet, path: appPrefix + "/brush/stats" + q, bearer: read})
+		assert.Equal(t, 400, w.Code, q)
+		assert.Contains(t, w.Body.String(), `"error":"bad_request"`, q)
+	}
+}

@@ -868,6 +868,74 @@ class AppApi {
     return null;
   }
 
+  /// 刷流收益按日、周、月、季度或年分段
+  ///
+  /// 最近 periods 段全部刷流任务的合计与每个任务的收益（主机时区，周从周一开始）。 最后一段是当前这一段（今天、本周、本月、本季度、今年），只算到今天。 periods 默认 day 30、week 12、month 12、quarter 8、year 5，最多 366、104、60、40、20。 主机的 GET /meta 的 features 里有 brush_stats 时才提供这个接口。
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] granularity:
+  ///
+  /// * [int] periods:
+  Future<Response> getBrushStatsWithHttpInfo({ String? granularity, int? periods, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/brush/stats';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (granularity != null) {
+      queryParams.addAll(_queryParams('', 'granularity', granularity));
+    }
+    if (periods != null) {
+      queryParams.addAll(_queryParams('', 'periods', periods));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 刷流收益按日、周、月、季度或年分段
+  ///
+  /// 最近 periods 段全部刷流任务的合计与每个任务的收益（主机时区，周从周一开始）。 最后一段是当前这一段（今天、本周、本月、本季度、今年），只算到今天。 periods 默认 day 30、week 12、month 12、quarter 8、year 5，最多 366、104、60、40、20。 主机的 GET /meta 的 features 里有 brush_stats 时才提供这个接口。
+  ///
+  /// Parameters:
+  ///
+  /// * [String] granularity:
+  ///
+  /// * [int] periods:
+  Future<AppBrushStats?> getBrushStats({ String? granularity, int? periods, Future<void>? abortTrigger, }) async {
+    final response = await getBrushStatsWithHttpInfo(granularity: granularity, periods: periods, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppBrushStats',) as AppBrushStats;
+
+    }
+    return null;
+  }
+
   /// Performs an HTTP 'GET /brush/tasks/{id}' operation and returns the [Response].
   /// Parameters:
   ///

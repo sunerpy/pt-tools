@@ -12,9 +12,9 @@ import {
   sitesApi,
 } from "@/api";
 import BrushRunsDrawer from "@/components/brush/BrushRunsDrawer.vue";
+import BrushTrendChart, { type TrendPoint } from "@/components/brush/BrushTrendChart.vue";
 import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
-import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtKpiBar from "@/components/ui/PtKpiBar.vue";
@@ -39,9 +39,18 @@ import {
   runMessage,
   taskDiscounts,
 } from "@/utils/brush";
+import {
+  BRUSH_PERIODS,
+  type BrushPeriod,
+  brushPeriodLong,
+  brushPeriodMeta,
+  brushPeriodShort,
+  loadBrushPeriod,
+  saveBrushPeriod,
+} from "@/utils/brushPeriods";
 import { formatBytes, formatRatio, formatShortDateTime } from "@/utils/format";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 
 /*
  * 刷流任务页（路线图 M3）：一个任务 = 一个站点的免费列表 + 一个下载器 + 入场条件 + 删种规则 + 限额。
@@ -55,8 +64,10 @@ const tasks = ref<BrushTask[]>([]);
 const stats = ref<BrushStatsResponse | null>(null);
 const sites = ref<Record<string, SiteConfig>>({});
 const downloaders = ref<DownloaderSetting[]>([]);
-/** 站点、下载器、收益这三个次要数据源没取到的个数；任务表本身取到了就算 partial */
+/** 站点、下载器这两个次要数据源没取到的个数；任务表本身取到了就算 partial */
 const sideFailed = ref(0);
+/** 收益统计没取到（单独记：换周期时会重新读它） */
+const statsFailed = ref(false);
 
 type StatusFilter = "all" | "on" | "off";
 const STATUS_SEG: { label: string; value: StatusFilter }[] = [
@@ -69,7 +80,7 @@ const query = ref("");
 const filterOn = computed(() => statusFilter.value !== "all" || Boolean(query.value.trim()));
 
 const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
-  failed: () => sideFailed.value,
+  failed: () => sideFailed.value + (statsFailed.value ? 1 : 0),
   filtered: () => filterOn.value,
 });
 
@@ -103,25 +114,67 @@ const stateAction = computed(() => {
 const enabledCount = computed(() => tasks.value.filter((t) => t.enabled).length);
 const headSub = computed(() => {
   if (!tasks.value.length) return "从站点的免费列表里挑种子做种，按规则删除";
-  const today = tasks.value.reduce((n, t) => n + t.today.uploaded, 0);
-  return `${tasks.value.length} 个任务 · 开启 ${enabledCount.value} 个 · 今日上传 ${formatBytes(today)}`;
+  return `${tasks.value.length} 个任务 · 开启 ${enabledCount.value} 个 · ${period.value.current}上传 ${formatBytes(curUp.value)}`;
+});
+
+/* ------------------------------------------------------------------ 统计周期 */
+
+/*
+ * 统计周期：日 / 周 / 月 / 季 / 年（2026-10-28 用户要按这几种范围看）。它管这一页所有的收益数字：
+ * KPI 带（本期上传、下载与最近 7 段的柱子）、任务表里「本期 上传 / 下载」那一列和下面的收益图，
+ * 所以放在页头，在它们所有人的上面。选过的记在这台浏览器里。
+ */
+const periodValue = ref<BrushPeriod>(loadBrushPeriod());
+/** 正在读的统计周期（发请求用） */
+const requested = computed(() => brushPeriodMeta(periodValue.value));
+/**
+ * 页面上显示的数字是哪个周期的：按统计自己的 granularity 写叫法。换周期时新的一份还在路上，
+ * 图与数字保持上一份、叫法也还是上一份的（不会出现「本周上传」底下是今天的数）；没读到统计时按选的周期。
+ */
+const shownValue = computed<BrushPeriod>(() =>
+  stats.value ? brushPeriodMeta(stats.value.granularity).value : periodValue.value,
+);
+const period = computed(() => brushPeriodMeta(shownValue.value));
+/** 收益统计正在按新的周期重新读：页头的统计图标转起来，数字不压暗（压暗会让文字的对比度不够） */
+const statsLoading = ref(false);
+let statsSeq = 0;
+
+async function loadStats() {
+  const seq = ++statsSeq;
+  statsLoading.value = true;
+  try {
+    const res = await brushApi.stats(requested.value.value, requested.value.periods);
+    if (seq !== statsSeq) return;
+    stats.value = res;
+    statsFailed.value = false;
+  } catch {
+    if (seq !== statsSeq) return;
+    stats.value = null;
+    statsFailed.value = true;
+  } finally {
+    if (seq === statsSeq) statsLoading.value = false;
+  }
+}
+
+watch(periodValue, (v) => {
+  saveBrushPeriod(v);
+  void loadStats();
 });
 
 async function loadAll() {
   const pending = run(async () => {
-    const [taskRes, statRes, siteRes, dlRes] = await Promise.allSettled([
+    const [taskRes, siteRes, dlRes] = await Promise.allSettled([
       brushApi.list(),
-      brushApi.stats(30),
       sitesApi.list(),
       downloadersApi.list(),
+      loadStats(),
     ]);
     if (taskRes.status === "rejected") throw taskRes.reason;
     return {
       tasks: taskRes.value,
-      stats: statRes.status === "fulfilled" ? statRes.value : null,
       sites: siteRes.status === "fulfilled" ? siteRes.value : null,
       downloaders: dlRes.status === "fulfilled" ? dlRes.value : null,
-      failed: [statRes, siteRes, dlRes].filter((r) => r.status === "rejected").length,
+      failed: [siteRes, dlRes].filter((r) => r.status === "rejected").length,
     };
   });
   const data = await pending;
@@ -131,7 +184,6 @@ async function loadAll() {
     return;
   }
   tasks.value = data.tasks ?? [];
-  stats.value = data.stats;
   if (data.sites) sites.value = data.sites;
   if (data.downloaders) downloaders.value = data.downloaders;
   sideFailed.value = data.failed;
@@ -141,14 +193,38 @@ onMounted(() => void loadAll());
 
 /* ------------------------------------------------------------------ KPI 与收益 */
 
-/** 7 天的每日上传 / 下载：KPI 柱用 */
-const last7 = computed(() => (stats.value?.totals ?? []).slice(-7));
+const totals = computed(() => stats.value?.totals ?? []);
+/** 当前这一段与上一段（读不到统计时为空） */
+const curPoint = computed(() => totals.value.at(-1) ?? null);
+const prevPoint = computed(() => (totals.value.length > 1 ? totals.value.at(-2)! : null));
+/** KPI 带的柱子：最近 7 段 */
+const last7 = computed(() => totals.value.slice(-7));
 const totalActive = computed(() => tasks.value.reduce((n, t) => n + t.active_count, 0));
 const totalDownloading = computed(() => tasks.value.reduce((n, t) => n + t.downloading_count, 0));
-const todayUp = computed(() => tasks.value.reduce((n, t) => n + t.today.uploaded, 0));
-const todayDown = computed(() => tasks.value.reduce((n, t) => n + t.today.downloaded, 0));
 const allUp = computed(() => tasks.value.reduce((n, t) => n + t.total.uploaded, 0));
 const allDown = computed(() => tasks.value.reduce((n, t) => n + t.total.downloaded, 0));
+
+/*
+ * 当前这一段的合计。按日时统计没取到也有任务列表里的「今日」；别的周期没有统计就是不知道（null），
+ * 写「—」而不是 0。
+ */
+const curUp = computed(() => {
+  if (curPoint.value) return curPoint.value.uploaded;
+  return shownValue.value === "day" ? tasks.value.reduce((n, t) => n + t.today.uploaded, 0) : 0;
+});
+const curKnown = computed(() => Boolean(curPoint.value) || shownValue.value === "day");
+const curDown = computed(() => {
+  if (curPoint.value) return curPoint.value.downloaded;
+  return shownValue.value === "day" ? tasks.value.reduce((n, t) => n + t.today.downloaded, 0) : 0;
+});
+
+function prevText(v: number | undefined): string {
+  return v === undefined ? "" : `${period.value.previous} ${formatBytes(v)}`;
+}
+
+/** KPI 柱子的说明：「最近 7 天每天的刷流上传」「最近 5 年每年加入的种子数」 */
+const seriesHint = (what: string) =>
+  `最近 ${last7.value.length || 7} ${period.value.unit}${period.value.each}${what}`;
 
 const kpiItems = computed(() => [
   {
@@ -158,44 +234,93 @@ const kpiItems = computed(() => [
     delta: `下载中 ${totalDownloading.value}`,
     deltaTone: "neutral" as const,
     series: last7.value.map((p) => p.added),
-    seriesHint: "每根一天：最近 7 天每天加入的种子数",
+    seriesHint: seriesHint("加入的种子数"),
     seriesBaseline: "zero" as const,
   },
   {
-    label: "今日上传",
-    value: formatBytes(todayUp.value),
+    label: `${period.value.current}上传`,
+    value: curKnown.value ? formatBytes(curUp.value) : "—",
     icon: "upload",
-    delta: `累计 ${formatBytes(allUp.value)}`,
-    deltaTone: todayUp.value > 0 ? ("ok" as const) : ("neutral" as const),
+    delta: prevText(prevPoint.value?.uploaded),
+    deltaTone: curUp.value > 0 ? ("ok" as const) : ("neutral" as const),
     series: last7.value.map((p) => p.uploaded),
-    seriesHint: "每根一天：最近 7 天每天的刷流上传",
+    seriesHint: seriesHint("的刷流上传"),
     seriesBaseline: "zero" as const,
   },
   {
-    label: "今日下载",
-    value: formatBytes(todayDown.value),
+    label: `${period.value.current}下载`,
+    value: curKnown.value ? formatBytes(curDown.value) : "—",
     icon: "download",
-    delta: `累计 ${formatBytes(allDown.value)}`,
+    delta: prevText(prevPoint.value?.downloaded),
     deltaTone: "neutral" as const,
     series: last7.value.map((p) => p.downloaded),
-    seriesHint: "每根一天：最近 7 天每天的刷流下载",
+    seriesHint: seriesHint("的刷流下载"),
     seriesBaseline: "zero" as const,
   },
   {
     label: "累计分享率",
     value: allDown.value > 0 ? formatRatio(allUp.value / allDown.value) : "—",
     icon: "trending-up",
-    delta: `开启 ${enabledCount.value} / ${tasks.value.length}`,
-    deltaTone: enabledCount.value > 0 ? ("ok" as const) : ("neutral" as const),
+    delta: `累计上传 ${formatBytes(allUp.value)}`,
+    deltaTone: allUp.value > 0 ? ("ok" as const) : ("neutral" as const),
     series: last7.value.map((p) => p.removed),
-    seriesHint: "每根一天：最近 7 天每天删掉的种子数",
+    seriesHint: seriesHint("删掉的种子数"),
     seriesBaseline: "zero" as const,
   },
 ]);
 
-const series30 = computed(() => (stats.value?.totals ?? []).map((p) => p.uploaded));
-const up30 = computed(() => series30.value.reduce((n, v) => n + v, 0));
-const down30 = computed(() => (stats.value?.totals ?? []).reduce((n, p) => n + p.downloaded, 0));
+/** 每个任务当前这一段的收益（任务表那一列用）；按日时统计没取到也有任务自己的「今日」 */
+const taskCurrent = computed(() => {
+  const out = new Map<number, { uploaded: number; downloaded: number }>();
+  for (const t of stats.value?.tasks ?? []) {
+    const p = t.series.at(-1);
+    if (p) out.set(t.task_id, { uploaded: p.uploaded, downloaded: p.downloaded });
+  }
+  return out;
+});
+
+function taskPeriodText(t: BrushTask): string {
+  const p = taskCurrent.value.get(t.id) ?? (shownValue.value === "day" ? t.today : null);
+  return p ? `${formatBytes(p.uploaded)} / ${formatBytes(p.downloaded)}` : "—";
+}
+
+function taskPeriodShort(t: BrushTask): string {
+  const p = taskCurrent.value.get(t.id) ?? (shownValue.value === "day" ? t.today : null);
+  return p ? `↑${formatBytes(p.uploaded)} ↓${formatBytes(p.downloaded)}` : "—";
+}
+
+const windowUp = computed(() => totals.value.reduce((n, p) => n + p.uploaded, 0));
+const windowDown = computed(() => totals.value.reduce((n, p) => n + p.downloaded, 0));
+
+/** 收益卡下面的说明：合计与口径；周从周一开始，当前这一段只算到今天 */
+const trendFoot = computed(() => {
+  let text = `合计上传 ${formatBytes(windowUp.value)}、下载 ${formatBytes(windowDown.value)}。口径是刷流种子在下载器里的累计值相邻两次采样之差，按服务器时区分段`;
+  if (shownValue.value === "week") text += "，周从周一开始";
+  if (shownValue.value !== "day") text += `；${period.value.current}只算到今天`;
+  return `${text}。`;
+});
+
+/** 收益图的柱子：每一段的上传；读数里写下载、加入与删除 */
+const trendPoints = computed<TrendPoint[]>(() => {
+  const gran = shownValue.value;
+  const n = totals.value.length;
+  return totals.value.map((p, i) => {
+    const end = p.end ?? p.date;
+    const tag = i === n - 1 ? `（${period.value.current}）` : "";
+    return {
+      short: brushPeriodShort(gran, p.date),
+      long: `${brushPeriodLong(gran, p.date, end)}${tag}`,
+      value: p.uploaded,
+      valueText: `上传 ${formatBytes(p.uploaded)}`,
+      detail: `下载 ${formatBytes(p.downloaded)} · 加入 ${p.added} 个 · 删除 ${p.removed} 个`,
+    };
+  });
+});
+const hasTrend = computed(() => totals.value.some((p) => p.uploaded > 0 || p.downloaded > 0));
+/** 「明细」表：新的在前 */
+const showDetail = ref(false);
+const detailRows = computed(() => [...trendPoints.value].reverse());
+const detailData = computed(() => [...totals.value].reverse());
 
 /* ------------------------------------------------------------------ 列表操作 */
 
@@ -419,15 +544,35 @@ function progressText(t: BrushTorrent): string {
   <div class="brush-page">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
-      <el-button :loading="loading" @click="loadAll">
-        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
-      </el-button>
-      <el-button type="primary" data-testid="brush-create" @click="openCreate">
-        <PtIcon name="plus" :size="15" /><span>新建任务</span>
-      </el-button>
+      <div class="brush-acts">
+        <!-- 统计周期管下面所有的收益数字（KPI 带、任务表的「本期」列、收益图），所以放在它们上面 -->
+        <div class="brush-period" role="group" aria-label="收益统计周期">
+          <span class="brush-period__label" aria-hidden="true">
+            <PtIcon
+              :name="statsLoading ? 'loader-circle' : 'calendar-days'"
+              :size="14"
+              :class="{ 'brush-spin': statsLoading }" />统计
+          </span>
+          <el-segmented
+            v-model="periodValue"
+            class="pt-seg brush-period__seg"
+            :block="isMobile"
+            :options="BRUSH_PERIODS"
+            :props="{ label: 'label', value: 'value' }"
+            data-testid="brush-period" />
+        </div>
+        <div class="brush-acts__btns">
+          <el-button :loading="loading" @click="loadAll">
+            <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
+          </el-button>
+          <el-button type="primary" data-testid="brush-create" @click="openCreate">
+            <PtIcon name="plus" :size="15" /><span>新建任务</span>
+          </el-button>
+        </div>
+      </div>
     </Teleport>
 
-    <PtKpiBar :items="kpiItems" band />
+    <PtKpiBar :items="kpiItems" band :aria-busy="statsLoading" />
 
     <PtToolbar band>
       <el-segmented
@@ -496,13 +641,11 @@ function progressText(t: BrushTorrent): string {
           </template>
         </el-table-column>
         <el-table-column
-          label="今日 上传 / 下载"
+          :label="`${period.current} 上传 / 下载`"
           width="170"
           class-name="pt-cell-num"
           label-class-name="pt-cell-num">
-          <template #default="{ row }">
-            {{ formatBytes(row.today.uploaded) }} / {{ formatBytes(row.today.downloaded) }}
-          </template>
+          <template #default="{ row }">{{ taskPeriodText(row) }}</template>
         </el-table-column>
         <el-table-column
           label="累计上传"
@@ -614,11 +757,7 @@ function progressText(t: BrushTorrent): string {
             <PtTag>{{ task.site_name }}</PtTag>
             <span>{{ task.downloader_name || "下载器已删除" }}</span>
             <span>在做 {{ task.downloading_count }} / {{ task.active_count }}</span>
-            <span
-              >今日 ↑{{ formatBytes(task.today.uploaded) }} ↓{{
-                formatBytes(task.today.downloaded)
-              }}</span
-            >
+            <span>{{ period.current }} {{ taskPeriodShort(task) }}</span>
             <span>上次 {{ lastRunText(task) }}</span>
             <span v-if="task.last_error" class="brush-err brush-row-full">{{
               task.last_error
@@ -655,28 +794,59 @@ function progressText(t: BrushTorrent): string {
     </div>
 
     <div class="pt-cards pt-cards--2">
-      <PtPanel title="30 天收益" icon="chart-column" :count="`上传 ${formatBytes(up30)}`">
-        <div class="brush-trend" data-testid="brush-trend">
-          <PtBars
-            v-if="series30.some((v) => v > 0)"
-            :values="series30"
-            baseline="zero"
-            :count="30"
-            :bar-width="6"
-            :gap="3"
-            :height="48"
-            hue="var(--pt-kpi-2)"
-            role="img"
-            aria-label="最近 30 天每天全部刷流任务的上传量" />
+      <PtPanel
+        :title="`${period.window}收益`"
+        icon="chart-column"
+        :count="stats && !isMobile ? `上传 ${formatBytes(windowUp)}` : undefined"
+        data-testid="brush-trend-panel">
+        <template #actions>
+          <el-button
+            v-if="hasTrend"
+            link
+            size="small"
+            :aria-expanded="showDetail"
+            data-testid="brush-trend-detail-toggle"
+            @click="showDetail = !showDetail">
+            <PtIcon :name="showDetail ? 'chart-column' : 'table-2'" :size="14" />
+            <span>{{ showDetail ? "看图" : "明细" }}</span>
+          </el-button>
+        </template>
+        <div class="brush-trend" :aria-busy="statsLoading" data-testid="brush-trend">
+          <template v-if="hasTrend">
+            <BrushTrendChart
+              v-if="!showDetail"
+              :points="trendPoints"
+              :label="`${period.window}${period.each}全部刷流任务的上传量`" />
+            <div v-else class="brush-detail" data-testid="brush-trend-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">时段</th>
+                    <th scope="col">上传</th>
+                    <th scope="col">下载</th>
+                    <th scope="col">加入</th>
+                    <th scope="col">删除</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(p, i) in detailData" :key="p.date">
+                    <th scope="row">{{ detailRows[i]!.long }}</th>
+                    <td>{{ formatBytes(p.uploaded) }}</td>
+                    <td>{{ formatBytes(p.downloaded) }}</td>
+                    <td>{{ p.added }}</td>
+                    <td>{{ p.removed }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+          <p v-else-if="statsFailed" class="brush-hint">收益统计没有读到，点刷新可重试。</p>
           <p v-else class="brush-hint">
-            最近 30 天还没有刷流收益。开启任务后，每一轮采样都会记进当天。
+            {{ period.window }}还没有刷流收益。开启任务后，每一轮采样都会记进当时那一段。
           </p>
         </div>
-        <p class="brush-foot">
-          30 天合计上传 {{ formatBytes(up30) }}、下载
-          {{
-            formatBytes(down30)
-          }}。口径是刷流种子在下载器里的累计值相邻两次采样之差，按服务器时区分天。
+        <p v-if="stats" class="brush-foot">
+          {{ trendFoot }}
         </p>
       </PtPanel>
 
@@ -1031,6 +1201,77 @@ function progressText(t: BrushTorrent): string {
   }
 }
 
+/*
+ * 页头右端：统计周期 + 刷新 + 新建任务。宽屏送进页头一行；手机上页头不显示，就地放在页面最上面：
+ * 周期占满一行（五档等宽），两个按钮在下面一行平分。
+ */
+.brush-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2) var(--pt-space-3);
+  align-items: center;
+}
+
+.brush-acts__btns {
+  display: flex;
+  gap: var(--pt-space-2);
+}
+
+.brush-acts__btns .el-button {
+  margin: 0;
+}
+
+.brush-period {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+.brush-period__label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .brush-acts {
+    margin-bottom: var(--pt-space-3);
+  }
+
+  .brush-period,
+  .brush-acts__btns {
+    flex: 1 1 100%;
+  }
+
+  .brush-period__seg {
+    flex: 1 1 auto;
+  }
+
+  .brush-acts__btns .el-button {
+    flex: 1 1 0;
+  }
+}
+
+/* 换周期时统计在重新读：统计图标转起来；数字与图保持上一份（叫法也是上一份的），不压暗 */
+.brush-spin {
+  animation: brush-spin 0.9s linear infinite;
+}
+
+@keyframes brush-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brush-spin {
+    animation: none;
+  }
+}
+
 .brush-partial {
   margin: var(--pt-space-3) var(--pt-space-3) 0;
 }
@@ -1102,9 +1343,75 @@ function progressText(t: BrushTorrent): string {
 }
 
 .brush-trend {
-  display: flex;
-  align-items: flex-end;
   min-height: 56px;
+}
+
+/* 收益明细表：图的另一种看法（每一段的数字都在这里），新的在前 */
+.brush-detail {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+}
+
+.brush-detail table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--pt-fz-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.brush-detail th,
+.brush-detail td {
+  padding: 6px 10px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.brush-detail thead th {
+  position: sticky;
+  top: 0;
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t3);
+  background: var(--pt-surface);
+}
+
+.brush-detail th:first-child {
+  text-align: left;
+}
+
+.brush-detail tbody th {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+/* 手机上表比面板宽，在框里横着滚；「时段」那一列钉在左边，滚到加入、删除时还看得见是哪一段 */
+.brush-detail th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--pt-surface);
+}
+
+.brush-detail thead th:first-child {
+  z-index: 2;
+}
+
+@media (max-width: 768px) {
+  .brush-detail th,
+  .brush-detail td {
+    padding: 6px 8px;
+  }
+}
+
+.brush-detail td {
+  color: var(--pt-t2);
+}
+
+.brush-detail tbody tr:last-child > * {
+  border-bottom: 0;
 }
 
 .brush-hint,

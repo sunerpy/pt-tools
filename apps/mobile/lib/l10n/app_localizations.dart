@@ -1285,6 +1285,198 @@ abstract class S {
   /// **'累计 ↑{up} ↓{down}'**
   String brushTotal(String up, String down);
 
+  /// No description provided for @brushPeriodDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'日'**
+  String get brushPeriodDay;
+
+  /// No description provided for @brushPeriodWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'周'**
+  String get brushPeriodWeek;
+
+  /// No description provided for @brushPeriodMonth.
+  ///
+  /// In zh, this message translates to:
+  /// **'月'**
+  String get brushPeriodMonth;
+
+  /// No description provided for @brushPeriodQuarter.
+  ///
+  /// In zh, this message translates to:
+  /// **'季'**
+  String get brushPeriodQuarter;
+
+  /// No description provided for @brushPeriodYear.
+  ///
+  /// In zh, this message translates to:
+  /// **'年'**
+  String get brushPeriodYear;
+
+  /// No description provided for @brushCurDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'今日'**
+  String get brushCurDay;
+
+  /// No description provided for @brushPrevDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'昨日'**
+  String get brushPrevDay;
+
+  /// No description provided for @brushCurWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'本周'**
+  String get brushCurWeek;
+
+  /// No description provided for @brushPrevWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'上周'**
+  String get brushPrevWeek;
+
+  /// No description provided for @brushCurMonth.
+  ///
+  /// In zh, this message translates to:
+  /// **'本月'**
+  String get brushCurMonth;
+
+  /// No description provided for @brushPrevMonth.
+  ///
+  /// In zh, this message translates to:
+  /// **'上月'**
+  String get brushPrevMonth;
+
+  /// No description provided for @brushCurQuarter.
+  ///
+  /// In zh, this message translates to:
+  /// **'本季度'**
+  String get brushCurQuarter;
+
+  /// No description provided for @brushPrevQuarter.
+  ///
+  /// In zh, this message translates to:
+  /// **'上季度'**
+  String get brushPrevQuarter;
+
+  /// No description provided for @brushCurYear.
+  ///
+  /// In zh, this message translates to:
+  /// **'今年'**
+  String get brushCurYear;
+
+  /// No description provided for @brushPrevYear.
+  ///
+  /// In zh, this message translates to:
+  /// **'去年'**
+  String get brushPrevYear;
+
+  /// No description provided for @brushWindowDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近 {count} 天'**
+  String brushWindowDay(int count);
+
+  /// No description provided for @brushWindowWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近 {count} 周'**
+  String brushWindowWeek(int count);
+
+  /// No description provided for @brushWindowMonth.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近 {count} 个月'**
+  String brushWindowMonth(int count);
+
+  /// No description provided for @brushWindowQuarter.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近 {count} 个季度'**
+  String brushWindowQuarter(int count);
+
+  /// No description provided for @brushWindowYear.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近 {count} 年'**
+  String brushWindowYear(int count);
+
+  /// No description provided for @brushUpIn.
+  ///
+  /// In zh, this message translates to:
+  /// **'{period}上传'**
+  String brushUpIn(String period);
+
+  /// No description provided for @brushDownIn.
+  ///
+  /// In zh, this message translates to:
+  /// **'{period}下载'**
+  String brushDownIn(String period);
+
+  /// No description provided for @brushPrevValue.
+  ///
+  /// In zh, this message translates to:
+  /// **'{period} {value}'**
+  String brushPrevValue(String period, String value);
+
+  /// No description provided for @brushPeriodRow.
+  ///
+  /// In zh, this message translates to:
+  /// **'{period} ↑{up} ↓{down}'**
+  String brushPeriodRow(String period, String up, String down);
+
+  /// No description provided for @brushTrendTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'{window}收益'**
+  String brushTrendTitle(String window);
+
+  /// No description provided for @brushTrendTotal.
+  ///
+  /// In zh, this message translates to:
+  /// **'合计上传 {up}、下载 {down}'**
+  String brushTrendTotal(String up, String down);
+
+  /// No description provided for @brushTrendUp.
+  ///
+  /// In zh, this message translates to:
+  /// **'上传 {value}'**
+  String brushTrendUp(String value);
+
+  /// No description provided for @brushTrendDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载 {down} · 加入 {added} 个 · 删除 {removed} 个'**
+  String brushTrendDetail(String down, int added, int removed);
+
+  /// No description provided for @brushTrendCurrent.
+  ///
+  /// In zh, this message translates to:
+  /// **'{when}（{period}）'**
+  String brushTrendCurrent(String when, String period);
+
+  /// No description provided for @brushTrendEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'{window}没有刷流收益'**
+  String brushTrendEmpty(String window);
+
+  /// No description provided for @brushTrendHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'点柱子或左右拖动，看每一段'**
+  String get brushTrendHint;
+
+  /// No description provided for @brushStatsFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'收益统计读取失败'**
+  String get brushStatsFailed;
+
   /// No description provided for @noDownloaders.
   ///
   /// In zh, this message translates to:

@@ -63,6 +63,7 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/push", w, s.appPush},
 		{http.MethodPost, "/sites/{site}/attend", w, s.appAttend},
 		{http.MethodGet, "/brush/tasks", r, s.appBrushTasks},
+		{http.MethodGet, "/brush/stats", r, s.appBrushStats},
 		{http.MethodGet, "/mobile/options", r, s.appMobileOptions},
 		{http.MethodGet, "/brush/tasks/{id}", r, s.appBrushConfig},
 		{http.MethodPost, "/brush/tasks/preview", r, s.appBrushPreview},
@@ -353,7 +354,7 @@ type AppPrincipalV struct {
 }
 
 // appFeatures 是这个版本的 App API 提供的功能组。
-var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export"}
+var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export", "brush_stats"}
 
 func (s *Server) appMeta(w http.ResponseWriter, r *http.Request) {
 	p := middleware.PrincipalFrom(r.Context())

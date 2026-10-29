@@ -3,7 +3,7 @@
 占位符写成 {name}；数字占位符在 INT 里列出。"""
 import json, re, pathlib
 
-INT = {"count", "ok", "failed", "days", "level", "supported", "ms", "inLibrary", "aired"}
+INT = {"count", "ok", "failed", "days", "level", "supported", "ms", "inLibrary", "aired", "added", "removed"}
 
 S = [
     ("mobileNoBaseline", "此周期暂无可比较的快照", "No comparable snapshots for this period yet"),
@@ -205,6 +205,39 @@ S = [
     ("brushActive", "在刷 {count} 个", "{count} active"),
     ("brushToday", "今天 ↑{up} ↓{down}", "Today ↑{up} ↓{down}"),
     ("brushTotal", "累计 ↑{up} ↓{down}", "Total ↑{up} ↓{down}"),
+    # 刷流收益的统计周期（GET /brush/stats）：分段按钮、当前与上一段的叫法、整个窗口
+    ("brushPeriodDay", "日", "Day"),
+    ("brushPeriodWeek", "周", "Week"),
+    ("brushPeriodMonth", "月", "Month"),
+    ("brushPeriodQuarter", "季", "Quarter"),
+    ("brushPeriodYear", "年", "Year"),
+    ("brushCurDay", "今日", "Today"),
+    ("brushPrevDay", "昨日", "Yesterday"),
+    ("brushCurWeek", "本周", "This week"),
+    ("brushPrevWeek", "上周", "Last week"),
+    ("brushCurMonth", "本月", "This month"),
+    ("brushPrevMonth", "上月", "Last month"),
+    ("brushCurQuarter", "本季度", "This quarter"),
+    ("brushPrevQuarter", "上季度", "Last quarter"),
+    ("brushCurYear", "今年", "This year"),
+    ("brushPrevYear", "去年", "Last year"),
+    ("brushWindowDay", "最近 {count} 天", "the last {count} days"),
+    ("brushWindowWeek", "最近 {count} 周", "the last {count} weeks"),
+    ("brushWindowMonth", "最近 {count} 个月", "the last {count} months"),
+    ("brushWindowQuarter", "最近 {count} 个季度", "the last {count} quarters"),
+    ("brushWindowYear", "最近 {count} 年", "the last {count} years"),
+    ("brushUpIn", "{period}上传", "Upload · {period}"),
+    ("brushDownIn", "{period}下载", "Download · {period}"),
+    ("brushPrevValue", "{period} {value}", "{period} {value}"),
+    ("brushPeriodRow", "{period} ↑{up} ↓{down}", "{period} ↑{up} ↓{down}"),
+    ("brushTrendTitle", "{window}收益", "Upload in {window}"),
+    ("brushTrendTotal", "合计上传 {up}、下载 {down}", "Total {up} up, {down} down"),
+    ("brushTrendUp", "上传 {value}", "Upload {value}"),
+    ("brushTrendDetail", "下载 {down} · 加入 {added} 个 · 删除 {removed} 个", "Download {down} · {added} added · {removed} removed"),
+    ("brushTrendCurrent", "{when}（{period}）", "{when} ({period})"),
+    ("brushTrendEmpty", "{window}没有刷流收益", "No brush upload in {window}"),
+    ("brushTrendHint", "点柱子或左右拖动，看每一段", "Tap or drag across the bars to see each period"),
+    ("brushStatsFailed", "收益统计读取失败", "Could not load the statistics"),
     ("noDownloaders", "没有启用的下载器", "No downloaders enabled"),
     ("settingsConnection", "连接", "Connection"),
     ("settingsVia", "方式", "Via"),

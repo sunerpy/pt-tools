@@ -3,6 +3,7 @@
  * 钉子：刷流任务页。列表按真实 DTO 画；新建时优惠类型合成逗号串、默认关闭；开关只翻 enabled；
  * 「立即运行」把结果说清楚；种子抽屉按标签取对应状态的种子，晚到的旧请求不覆盖新标签；
  * 运行记录抽屉列出每一轮（最新一条展开、可以接着往下读），「上次运行」那格点了也打开它。
+ * 收益统计按日、周、月、季、年切换（2026-10-28 用户要的），KPI、任务表的「本期」列与收益图一起换。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -125,26 +126,70 @@ function brushRun(over: Partial<BrushRun> = {}): BrushRun {
   };
 }
 
+const GB = 1024 ** 3;
+
+/** 按日 30 段：只有最后一天（今天）有 5 GB 上传 */
 const STATS = {
+  granularity: "day",
+  periods: 30,
   days: 30,
   from: "2026-09-07",
   to: "2026-10-06",
   dates: [],
   tasks: [],
-  totals: Array.from({ length: 30 }, (_, i) => ({
-    date: `d${i}`,
-    uploaded: i === 29 ? 5 * 1024 ** 3 : 0,
-    downloaded: 0,
-    added: i === 29 ? 2 : 0,
-    removed: 0,
-  })),
+  totals: Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(2026, 8, 7 + i);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return {
+      date: day,
+      end: day,
+      uploaded: i === 29 ? 5 * GB : 0,
+      downloaded: 0,
+      added: i === 29 ? 2 : 0,
+      removed: 0,
+    };
+  }),
 };
+
+/** 按周 12 段：上周 20 GB、本周 30 GB / 4 GB；任务 1 本周 7 GB / 2 GB */
+function weekStats() {
+  const mondays = Array.from({ length: 12 }, (_, i) => new Date(2026, 7, 17 + i * 7));
+  const ymd = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const point = (d: Date, i: number, up: number, down: number) => ({
+    date: ymd(d),
+    end: ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 6)),
+    uploaded: up,
+    downloaded: down,
+    added: i,
+    removed: 0,
+  });
+  return {
+    granularity: "week",
+    periods: 12,
+    days: 80,
+    from: ymd(mondays[0]!),
+    to: "2026-11-04",
+    dates: mondays.map(ymd),
+    tasks: [
+      {
+        task_id: 1,
+        name: "HDSky 刷流",
+        series: mondays.map((d, i) => point(d, 0, i === 11 ? 7 * GB : 0, i === 11 ? 2 * GB : 0)),
+      },
+    ],
+    totals: mondays.map((d, i) =>
+      point(d, i, i === 11 ? 30 * GB : i === 10 ? 20 * GB : 0, i === 11 ? 4 * GB : 0),
+    ),
+  };
+}
 
 let view: MountedView | null = null;
 afterEach(() => {
   view?.unmount();
   view = null;
   vi.clearAllMocks();
+  localStorage.clear();
 });
 
 async function mountPage(tasks: BrushTask[]) {
@@ -181,12 +226,159 @@ describe("刷流任务页", () => {
   it("列表按 DTO 画出站点、在做数、今日收益与上次运行结果；KPI 与 30 天收益来自统计接口", async () => {
     await mountPage([task()]);
     await vi.waitFor(() => expect(document.body.textContent).toContain("HDSky 刷流"));
+    expect(api.stats).toHaveBeenCalledWith("day", 30);
     const text = document.body.textContent ?? "";
     expect(text).toContain("1 / 3");
     expect(text).toContain("5 GB / 1 GB");
     expect(text).toContain("列表 40 个、符合条件 3 个、加入 2 个");
     expect(text).toContain("今日上传");
-    expect(document.querySelector("[data-testid=brush-trend] .pt-bars")).not.toBeNull();
+    expect(text).toContain("最近 30 天收益");
+    // 读数默认是当前这一段（今天）
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-trend-readout]")?.textContent).toContain(
+        "上传 5 GB",
+      ),
+    );
+    expect(document.querySelector("[data-testid=brush-trend-readout]")?.textContent).toContain(
+      "10月6日（今日）",
+    );
+    expect(document.querySelectorAll("[data-testid=brush-trend] .btc__col")).toHaveLength(30);
+  });
+
+  /** 点统计周期里的一档 */
+  async function pickPeriod(label: string) {
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-period]")).not.toBeNull(),
+    );
+    const item = [
+      ...document.querySelectorAll<HTMLElement>("[data-testid=brush-period] .el-segmented__item"),
+    ].find((e) => (e.textContent ?? "").trim() === label);
+    if (!item) throw new Error(`找不到周期「${label}」`);
+    item.click();
+  }
+
+  it("换成按周：重新读统计，KPI、任务表的本期列与收益图一起换，记住选的周期", async () => {
+    await mountPage([task()]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("最近 30 天收益"));
+    api.stats.mockResolvedValue(weekStats());
+    await pickPeriod("周");
+    await vi.waitFor(() => expect(api.stats).toHaveBeenLastCalledWith("week", 12));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("最近 12 周收益"));
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("本周上传");
+    expect(text).toContain("30 GB");
+    expect(text).toContain("上周 20 GB");
+    expect(text).toContain("本周 上传 / 下载");
+    // 任务这一列是它本周的收益，不再是今天的
+    expect(text).toContain("7 GB / 2 GB");
+    expect(text).not.toContain("5 GB / 1 GB");
+    expect(text).toContain("周从周一开始");
+    expect(document.querySelector("[data-testid=brush-trend-readout]")?.textContent).toContain(
+      "11月2日–11月8日（本周）",
+    );
+    expect(localStorage.getItem("pt-brush-period")).toBe("week");
+
+    // 重新打开这一页还是按周
+    view?.unmount();
+    api.stats.mockClear();
+    api.stats.mockResolvedValue(weekStats());
+    const Page = (await import("./BrushTasks.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() => expect(api.stats).toHaveBeenCalledWith("week", 12));
+  });
+
+  it("新周期的统计还在路上：数字与叫法都还是上一份的，统计图标在转", async () => {
+    await mountPage([task()]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("最近 30 天收益"));
+    let release!: (v: unknown) => void;
+    api.stats.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await pickPeriod("周");
+    await vi.waitFor(() => expect(api.stats).toHaveBeenLastCalledWith("week", 12));
+    await vi.waitFor(() => expect(document.querySelector(".brush-spin")).not.toBeNull());
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("今日上传");
+    expect(text).not.toContain("本周上传");
+    expect(text).toContain("最近 30 天收益");
+    release(weekStats());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("本周上传"));
+    expect(document.querySelector(".brush-spin")).toBeNull();
+  });
+
+  it("换了周期统计没读到：本期数字写「—」，不拿今天的冒充本周", async () => {
+    await mountPage([task()]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("最近 30 天收益"));
+    api.stats.mockRejectedValue(new Error("boom"));
+    await pickPeriod("月");
+    await vi.waitFor(() => expect(api.stats).toHaveBeenLastCalledWith("month", 12));
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("收益统计没有读到，点刷新可重试"),
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("本月 上传 / 下载");
+    expect(text).not.toContain("5 GB / 1 GB");
+    expect(text).toContain("站点、下载器或收益统计有没读到的");
+  });
+
+  it("快速连点两个周期：先发的请求晚到不覆盖后选的", async () => {
+    await mountPage([task()]);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("最近 30 天收益"));
+    let releaseWeek!: (v: unknown) => void;
+    api.stats.mockImplementation((gran: string) =>
+      gran === "week"
+        ? new Promise((resolve) => {
+            releaseWeek = resolve;
+          })
+        : Promise.resolve({
+            ...weekStats(),
+            granularity: "year",
+            periods: 5,
+            totals: weekStats()
+              .totals.slice(-5)
+              .map((p, i) => ({
+                ...p,
+                date: `${2022 + i}-01-01`,
+                end: `${2022 + i}-12-31`,
+              })),
+          }),
+    );
+    await pickPeriod("周");
+    await vi.waitFor(() => expect(api.stats).toHaveBeenLastCalledWith("week", 12));
+    await pickPeriod("年");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("最近 5 年收益"));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-trend-readout]")?.textContent).toContain(
+        "2026年（今年）",
+      ),
+    );
+    releaseWeek(weekStats());
+    await flush();
+    expect(document.body.textContent).toContain("最近 5 年收益");
+    expect(document.querySelector("[data-testid=brush-trend-readout]")?.textContent).toContain(
+      "2026年（今年）",
+    );
+    expect(document.querySelectorAll("[data-testid=brush-trend] .btc__col")).toHaveLength(5);
+  });
+
+  it("收益明细：表里每一段的数字都有，新的在前", async () => {
+    await mountPage([task()]);
+    api.stats.mockResolvedValue(weekStats());
+    await pickPeriod("周");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("最近 12 周收益"));
+    document.querySelector<HTMLButtonElement>("[data-testid=brush-trend-detail-toggle]")!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-trend-table]")).not.toBeNull(),
+    );
+    const rows = [...document.querySelectorAll("[data-testid=brush-trend-table] tbody tr")].map(
+      (r) => [...r.children].map((c) => (c.textContent ?? "").trim()),
+    );
+    expect(rows).toHaveLength(12);
+    expect(rows[0]).toEqual(["11月2日–11月8日（本周）", "30 GB", "4 GB", "11", "0"]);
+    expect(rows[1]).toEqual(["10月26日–11月1日", "20 GB", "0 B", "10", "0"]);
   });
 
   it("没有任务时给出新建入口", async () => {

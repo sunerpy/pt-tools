@@ -1097,6 +1097,30 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppStatsAggregated" }
         default: { $ref: "#/components/responses/Error" }
+  /brush/stats:
+    get:
+      operationId: getBrushStats
+      tags: [App]
+      summary: 刷流收益按日、周、月、季度或年分段
+      description: >-
+        最近 periods 段全部刷流任务的合计与每个任务的收益（主机时区，周从周一开始）。
+        最后一段是当前这一段（今天、本周、本月、本季度、今年），只算到今天。
+        periods 默认 day 30、week 12、month 12、quarter 8、year 5，最多 366、104、60、40、20。
+        主机的 GET /meta 的 features 里有 brush_stats 时才提供这个接口。
+      parameters:
+        - name: granularity
+          in: query
+          schema: { type: string, enum: [day, week, month, quarter, year], default: day }
+        - name: periods
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 366 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppBrushStats" }
+        default: { $ref: "#/components/responses/Error" }
   /stats/summary:
     get:
       operationId: getStatsSummary
@@ -1639,6 +1663,39 @@ components:
         downloaded: { type: integer, format: int64 }
         added: { type: integer }
         removed: { type: integer }
+    AppBrushPeriod:
+      type: object
+      required: [start, end, uploaded, downloaded, added, removed]
+      properties:
+        start: { type: string, description: 这一段的第一天（yyyy-mm-dd） }
+        end: { type: string, description: 这一段的最后一天；最后一段可能在今天以后 }
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        added: { type: integer }
+        removed: { type: integer }
+    AppBrushTaskPeriods:
+      type: object
+      required: [id, name, periods]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        periods:
+          type: array
+          items: { $ref: "#/components/schemas/AppBrushPeriod" }
+    AppBrushStats:
+      type: object
+      required: [granularity, periods, from, to, totals, tasks]
+      properties:
+        granularity: { type: string, enum: [day, week, month, quarter, year] }
+        periods: { type: integer }
+        from: { type: string }
+        to: { type: string }
+        totals:
+          type: array
+          items: { $ref: "#/components/schemas/AppBrushPeriod" }
+        tasks:
+          type: array
+          items: { $ref: "#/components/schemas/AppBrushTaskPeriods" }
     AppBrushTask:
       type: object
       required:

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -427,4 +428,104 @@ func TestBrushAPI_EnabledRequiresEnabledDeps(t *testing.T) {
 	require.NoError(t, db.Migrator().DropTable(&models.DownloaderSetting{}))
 	w = serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody("x", ds.ID, nil))
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "读库失败不是参数错误")
+}
+
+// 2026-10-28 用户：刷流任务页要能按天、周、月、季度、年看统计，「30 天收益」也能切换范围。
+// 分段按进程时区，周从周一开始；最后一段是当前这一段，只算到今天。
+func TestBuildBrushStats_Granularity(t *testing.T) {
+	newBrushServer(t)
+	db := global.GlobalDB.DB
+	repo := models.NewBrushRepository(db)
+	require.NoError(t, db.Create(&models.BrushTask{Name: "a", SiteName: "hdsky", DownloaderID: 1}).Error)
+	var task models.BrushTask
+	require.NoError(t, db.First(&task).Error)
+	for _, st := range []models.BrushDailyStat{
+		{TaskID: task.ID, Day: "2025-12-31", Uploaded: 1},
+		{TaskID: task.ID, Day: "2026-06-30", Uploaded: 2},
+		{TaskID: task.ID, Day: "2026-07-01", Uploaded: 4},
+		{TaskID: task.ID, Day: "2026-09-30", Uploaded: 8, Downloaded: 1},
+		{TaskID: task.ID, Day: "2026-10-01", Uploaded: 16, Added: 1},
+		{TaskID: task.ID, Day: "2026-10-25", Uploaded: 32},
+		{TaskID: task.ID, Day: "2026-10-26", Uploaded: 64, Removed: 2},
+		{TaskID: task.ID, Day: "2026-10-29", Uploaded: 128, Downloaded: 3},
+	} {
+		require.NoError(t, db.Create(&st).Error)
+	}
+	// 2026-10-29 是周四
+	now := time.Date(2026, 10, 29, 15, 0, 0, 0, time.Local)
+	type seg struct {
+		date, end string
+		up        int64
+	}
+	cases := []struct {
+		gran    string
+		periods int
+		want    []seg
+		days    int
+	}{
+		{BrushGranDay, 3, []seg{{"2026-10-27", "2026-10-27", 0}, {"2026-10-28", "2026-10-28", 0}, {"2026-10-29", "2026-10-29", 128}}, 3},
+		{BrushGranWeek, 2, []seg{{"2026-10-19", "2026-10-25", 32}, {"2026-10-26", "2026-11-01", 192}}, 11},
+		{BrushGranMonth, 2, []seg{{"2026-09-01", "2026-09-30", 8}, {"2026-10-01", "2026-10-31", 240}}, 59},
+		{BrushGranQuarter, 2, []seg{{"2026-04-01", "2026-06-30", 2}, {"2026-07-01", "2026-09-30", 12}}, 0},
+		{BrushGranYear, 2, []seg{{"2025-01-01", "2025-12-31", 1}, {"2026-01-01", "2026-12-31", 254}}, 0},
+	}
+	cases[3].periods = 3
+	cases[3].want = append(cases[3].want, seg{"2026-10-01", "2026-12-31", 240})
+	for _, tc := range cases {
+		t.Run(tc.gran, func(t *testing.T) {
+			resp, err := buildBrushStats(repo, now, tc.gran, tc.periods)
+			require.NoError(t, err)
+			assert.Equal(t, tc.gran, resp.Granularity)
+			assert.Equal(t, tc.periods, resp.Periods)
+			assert.Equal(t, "2026-10-29", resp.To, "只算到今天")
+			require.Len(t, resp.Totals, len(tc.want))
+			for i, w := range tc.want {
+				assert.Equal(t, w.date, resp.Totals[i].Date, "段 %d 的第一天", i)
+				assert.Equal(t, w.end, resp.Totals[i].End, "段 %d 的最后一天", i)
+				assert.Equal(t, w.up, resp.Totals[i].Uploaded, "段 %d 的上传", i)
+				assert.Equal(t, w.date, resp.Dates[i])
+			}
+			require.Len(t, resp.Tasks, 1)
+			assert.Equal(t, resp.Totals, resp.Tasks[0].Series, "只有一个任务时与合计相同")
+			if tc.days > 0 {
+				assert.Equal(t, tc.days, resp.Days)
+			}
+			assert.Equal(t, tc.want[0].date, resp.From)
+		})
+	}
+	// 周日也属于这一周（周一开始）
+	sunday := time.Date(2026, 11, 1, 9, 0, 0, 0, time.Local)
+	resp, err := buildBrushStats(repo, sunday, BrushGranWeek, 1)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-10-26", resp.Totals[0].Date)
+	assert.EqualValues(t, 192, resp.Totals[0].Uploaded)
+	assert.EqualValues(t, 3, resp.Totals[0].Downloaded)
+	assert.Equal(t, 2, resp.Totals[0].Removed)
+}
+
+func TestBrushStatsAPI_GranularityParams(t *testing.T) {
+	_, mux, _ := newBrushServer(t)
+	w := serveAuthed(mux, http.MethodGet, "/api/brush/stats?granularity=month&periods=6", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var stats BrushStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &stats))
+	assert.Equal(t, "month", stats.Granularity)
+	require.Len(t, stats.Totals, 6)
+	assert.True(t, strings.HasSuffix(stats.Totals[5].Date, "-01"), "每月的第一天")
+
+	w = serveAuthed(mux, http.MethodGet, "/api/brush/stats?granularity=year", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &stats))
+	assert.Equal(t, 5, stats.Periods, "年默认 5 段")
+
+	w = serveAuthed(mux, http.MethodGet, "/api/brush/stats", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &stats))
+	assert.Equal(t, "day", stats.Granularity)
+	assert.Equal(t, 30, stats.Periods, "默认还是最近 30 天")
+
+	for _, q := range []string{"?granularity=hour", "?granularity=week&periods=0", "?granularity=week&periods=105", "?granularity=year&periods=x"} {
+		w = serveAuthed(mux, http.MethodGet, "/api/brush/stats"+q, "")
+		assert.Equal(t, http.StatusBadRequest, w.Code, q)
+	}
 }

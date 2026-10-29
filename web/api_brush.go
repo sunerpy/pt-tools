@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -89,27 +90,110 @@ type BrushRunResponse struct {
 	Error  string                   `json:"error,omitempty"`
 }
 
-// BrushStatsSeriesPoint 是某天的收益。
+// BrushStatsSeriesPoint 是一段时间（一天、一周、一个月、一个季度或一年）的收益。
 type BrushStatsSeriesPoint struct {
+	// Date 是这一段的第一天，End 是最后一天（按天时两者相同；最后一段的 End 可能在今天以后）
 	Date string `json:"date"`
+	End  string `json:"end"`
 	BrushStatView
 }
 
-// BrushStatsTask 是一个任务最近若干天每天的收益。
+// BrushStatsTask 是一个任务最近若干段的收益。
 type BrushStatsTask struct {
 	TaskID uint                    `json:"task_id"`
 	Name   string                  `json:"name"`
 	Series []BrushStatsSeriesPoint `json:"series"`
 }
 
-// BrushStatsResponse 是最近若干天各任务与合计的每日收益（按进程时区分天）。
+// BrushStatsResponse 是最近若干段各任务与合计的收益（按进程时区分天，周从周一开始）。
+// 最后一段是当前这一段（今天、本周、本月、本季度、今年），只算到今天。
 type BrushStatsResponse struct {
+	// Granularity 是分段：day、week、month、quarter、year；Periods 是几段
+	Granularity string `json:"granularity"`
+	Periods     int    `json:"periods"`
+	// Days 是从第一段的第一天到今天一共几天
 	Days   int                     `json:"days"`
 	From   string                  `json:"from"`
 	To     string                  `json:"to"`
 	Dates  []string                `json:"dates"`
 	Tasks  []BrushStatsTask        `json:"tasks"`
 	Totals []BrushStatsSeriesPoint `json:"totals"`
+}
+
+// 刷流收益的分段与每种分段默认、最多几段。
+const (
+	BrushGranDay     = "day"
+	BrushGranWeek    = "week"
+	BrushGranMonth   = "month"
+	BrushGranQuarter = "quarter"
+	BrushGranYear    = "year"
+)
+
+var brushGranularities = map[string]struct{ def, max int }{
+	BrushGranDay:     {30, 366},
+	BrushGranWeek:    {12, 104},
+	BrushGranMonth:   {12, 60},
+	BrushGranQuarter: {8, 40},
+	BrushGranYear:    {5, 20},
+}
+
+// parseBrushStatsQuery 读分段与段数：granularity（默认 day）、periods（默认按分段，见 brushGranularities）；
+// 老的 days=N（1–90）等于按天的 N 段。不认识的值返回给用户看的错误。
+func parseBrushStatsQuery(q interface{ Get(string) string }) (string, int, error) {
+	gran := strings.TrimSpace(q.Get("granularity"))
+	if gran == "" {
+		gran = BrushGranDay
+	}
+	lim, ok := brushGranularities[gran]
+	if !ok {
+		return "", 0, errors.New("granularity 只能是 day、week、month、quarter、year")
+	}
+	periods := lim.def
+	if raw := q.Get("periods"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > lim.max {
+			return "", 0, fmt.Errorf("periods 应为 1–%d 的整数", lim.max)
+		}
+		periods = v
+	} else if raw := q.Get("days"); raw != "" && gran == BrushGranDay {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > maxBrushStatDays {
+			return "", 0, fmt.Errorf("days 应为 1–%d 的整数", maxBrushStatDays)
+		}
+		periods = v
+	}
+	return gran, periods, nil
+}
+
+// brushPeriodStart 是 t 所在那一段的第一天（零点，t 的时区）：周从周一开始，季度从 1、4、7、10 月开始。
+func brushPeriodStart(t time.Time, gran string) time.Time {
+	d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	switch gran {
+	case BrushGranWeek:
+		return d.AddDate(0, 0, -((int(d.Weekday()) + 6) % 7))
+	case BrushGranMonth:
+		return time.Date(d.Year(), d.Month(), 1, 0, 0, 0, 0, d.Location())
+	case BrushGranQuarter:
+		return time.Date(d.Year(), time.Month((int(d.Month())-1)/3*3+1), 1, 0, 0, 0, 0, d.Location())
+	case BrushGranYear:
+		return time.Date(d.Year(), 1, 1, 0, 0, 0, 0, d.Location())
+	}
+	return d
+}
+
+// brushPeriodAdd 是从 start（某一段的第一天）往后 n 段的第一天（n 可以是负数）。
+func brushPeriodAdd(start time.Time, gran string, n int) time.Time {
+	switch gran {
+	case BrushGranWeek:
+		return start.AddDate(0, 0, 7*n)
+	case BrushGranMonth:
+		return start.AddDate(0, n, 0)
+	case BrushGranQuarter:
+		return start.AddDate(0, 3*n, 0)
+	case BrushGranYear:
+		return start.AddDate(n, 0, 0)
+	}
+	return start.AddDate(0, 0, n)
 }
 
 func (s *Server) registerBrushRoutes(mux *http.ServeMux) {
@@ -386,16 +470,12 @@ func (s *Server) apiBrushStats(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	days := 30
-	if raw := r.URL.Query().Get("days"); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 || v > maxBrushStatDays {
-			http.Error(w, fmt.Sprintf("days 应为 1–%d 的整数", maxBrushStatDays), http.StatusBadRequest)
-			return
-		}
-		days = v
+	gran, periods, err := parseBrushStatsQuery(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	resp, err := buildBrushStats(repo, time.Now(), days)
+	resp, err := buildBrushStats(repo, time.Now(), gran, periods)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -403,15 +483,27 @@ func (s *Server) apiBrushStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-func buildBrushStats(repo *models.BrushRepository, now time.Time, days int) (BrushStatsResponse, error) {
-	to := now.Format("2006-01-02")
-	from := now.AddDate(0, 0, -(days - 1)).Format("2006-01-02")
-	dates := make([]string, 0, days)
-	index := make(map[string]int, days)
-	for i := range days {
-		d := now.AddDate(0, 0, -(days - 1 - i)).Format("2006-01-02")
-		index[d] = i
-		dates = append(dates, d)
+// buildBrushStats 按分段汇总每日收益：最近 periods 段，最后一段是 now 所在的那一段（只算到今天）。
+func buildBrushStats(repo *models.BrushRepository, now time.Time, gran string, periods int) (BrushStatsResponse, error) {
+	const dayFmt = "2006-01-02"
+	first := brushPeriodAdd(brushPeriodStart(now, gran), gran, -(periods - 1))
+	starts := make([]time.Time, periods)
+	for i := range periods {
+		starts[i] = brushPeriodAdd(first, gran, i)
+	}
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	from, to := first.Format(dayFmt), today.Format(dayFmt)
+	dates := make([]string, periods)
+	blank := func() []BrushStatsSeriesPoint {
+		out := make([]BrushStatsSeriesPoint, periods)
+		for i, st := range starts {
+			out[i].Date = st.Format(dayFmt)
+			out[i].End = brushPeriodAdd(st, gran, 1).AddDate(0, 0, -1).Format(dayFmt)
+		}
+		return out
+	}
+	for i, st := range starts {
+		dates[i] = st.Format(dayFmt)
 	}
 	tasks, err := repo.ListTasks()
 	if err != nil {
@@ -421,22 +513,23 @@ func buildBrushStats(repo *models.BrushRepository, now time.Time, days int) (Bru
 	if err != nil {
 		return BrushStatsResponse{}, err
 	}
-	blank := func() []BrushStatsSeriesPoint {
-		out := make([]BrushStatsSeriesPoint, len(dates))
-		for i, d := range dates {
-			out[i].Date = d
-		}
-		return out
+	resp := BrushStatsResponse{
+		Granularity: gran, Periods: periods, Days: int(today.Sub(first).Round(24*time.Hour)/(24*time.Hour)) + 1,
+		From: from, To: to, Dates: dates, Totals: blank(), Tasks: make([]BrushStatsTask, 0, len(tasks)),
 	}
-	resp := BrushStatsResponse{Days: days, From: from, To: to, Dates: dates, Totals: blank(), Tasks: make([]BrushStatsTask, 0, len(tasks))}
 	byTask := make(map[uint]int, len(tasks))
 	for _, t := range tasks {
 		byTask[t.ID] = len(resp.Tasks)
 		resp.Tasks = append(resp.Tasks, BrushStatsTask{TaskID: t.ID, Name: t.Name, Series: blank()})
 	}
 	for _, st := range stats {
-		i, ok := index[st.Day]
-		if !ok {
+		d, err := time.ParseInLocation(dayFmt, st.Day, now.Location())
+		if err != nil {
+			continue
+		}
+		// 这一天落在哪一段：第一个起点晚于它的那一段的前一段
+		i := sort.Search(len(starts), func(k int) bool { return starts[k].After(d) }) - 1
+		if i < 0 {
 			continue
 		}
 		add := func(p *BrushStatsSeriesPoint) {

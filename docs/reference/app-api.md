@@ -61,6 +61,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | POST   | `/push`                                       | 操作        | 把搜索到的种子推送到下载器                   |
 | GET    | `/tasks`                                      | 读取        | 任务列表（推送记录）                         |
 | GET    | `/brush/tasks`                                | 读取        | 刷流任务                                     |
+| GET    | `/brush/stats`                                | 读取        | 刷流收益按日、周、月、季度或年分段           |
 | GET    | `/media/history`                              | 读取        | 整理历史                                     |
 | POST   | `/media/history/{id}/retry`                   | 操作        | 重新整理一条整理记录对应的种子               |
 | POST   | `/media/history/{id}/scrape`                  | 操作        | 重新刮削一条整理记录所在的电影或剧集         |
@@ -248,6 +249,14 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 ### GET /brush/tasks
 
 每个刷流任务一项：`id`、`name`、`enabled`、`site`、`site_enabled`、`downloader`、`active`（在刷的种子数）、`downloading`（其中还在下载的）、`active_size`，以及 `today` 与 `total` 的收益（`uploaded`、`downloaded`、`added`、`removed`）。
+
+### GET /brush/stats
+
+最近若干段全部刷流任务的合计与每个任务的收益，口径与网页的[收益与战报](../guide/brush.md#收益与战报)相同（主机时区，周从周一开始）。`GET /meta` 的 `features` 里有 `brush_stats` 时才有这个接口。
+
+参数 `granularity` 是 `day`、`week`、`month`、`quarter`、`year`，默认 `day`；`periods` 默认 30、12、12、8、5 段，最多 366、104、60、40、20 段，超出范围回 400。不接受网页接口的 `days`。
+
+回应有 `granularity`、`periods`、`from`、`to`，`totals` 是合计的每一段，`tasks` 是每个任务的 `id`、`name` 与 `periods`。每一段有 `start`、`end`（这一段的第一天与最后一天）和 `uploaded`、`downloaded`、`added`、`removed`。最后一段是当前这一段：`end` 是它自然的结束日，可能在今天以后，收益只算到今天。
 
 ## 媒体
 
@@ -532,7 +541,7 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 
 ## 手机编辑与统计导出
 
-`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
+`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`；按周期分段的刷流收益（[`GET /brush/stats`](#get-brushstats)）是 `brush_stats`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
 
 | 方法   | 路径                         | 权限 | 用途                                                                           |
 | ------ | ---------------------------- | ---- | ------------------------------------------------------------------------------ |

@@ -2316,13 +2316,24 @@ export interface BrushRunPage {
 }
 
 export interface BrushStatsPoint extends BrushStat {
+  /** 这一段的第一天（YYYY-MM-DD） */
   date: string;
+  /** 这一段的最后一天（自然的结束日：当前这一段可能晚于今天，收益只算到今天） */
+  end?: string;
 }
 
+/** 收益统计的分段：按日、周（周一开始）、月、季度、年，主机时区 */
+export type BrushStatsGranularity = "day" | "week" | "month" | "quarter" | "year";
+
 export interface BrushStatsResponse {
+  granularity: BrushStatsGranularity;
+  /** 段数；最后一段是当前这一段 */
+  periods: number;
+  /** 窗口覆盖的天数 */
   days: number;
   from: string;
   to: string;
+  /** 每一段的第一天 */
   dates: string[];
   tasks: { task_id: number; name: string; series: BrushStatsPoint[] }[];
   totals: BrushStatsPoint[];
@@ -2348,7 +2359,12 @@ export const brushApi = {
     api.get<{ items: BrushTorrent[]; total: number; page: number; page_size: number }>(
       `/api/brush/tasks/${id}/torrents?state=${state}&page=${page}&page_size=${pageSize}`,
     ),
-  stats: (days = 30) => api.get<BrushStatsResponse>(`/api/brush/stats?days=${days}`),
+  /** 最近 periods 段的收益；不传 periods 时按周期的默认段数（日 30、周 12、月 12、季度 8、年 5） */
+  stats: (granularity: BrushStatsGranularity = "day", periods?: number) => {
+    const params = new URLSearchParams({ granularity });
+    if (periods) params.set("periods", String(periods));
+    return api.get<BrushStatsResponse>(`/api/brush/stats?${params.toString()}`);
+  },
 };
 
 /** 下载器助手：缺站点标签的种子（按 tracker 认出了站点） */

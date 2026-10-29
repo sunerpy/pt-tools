@@ -673,6 +673,132 @@ class SEn extends S {
   }
 
   @override
+  String get brushPeriodDay => 'Day';
+
+  @override
+  String get brushPeriodWeek => 'Week';
+
+  @override
+  String get brushPeriodMonth => 'Month';
+
+  @override
+  String get brushPeriodQuarter => 'Quarter';
+
+  @override
+  String get brushPeriodYear => 'Year';
+
+  @override
+  String get brushCurDay => 'Today';
+
+  @override
+  String get brushPrevDay => 'Yesterday';
+
+  @override
+  String get brushCurWeek => 'This week';
+
+  @override
+  String get brushPrevWeek => 'Last week';
+
+  @override
+  String get brushCurMonth => 'This month';
+
+  @override
+  String get brushPrevMonth => 'Last month';
+
+  @override
+  String get brushCurQuarter => 'This quarter';
+
+  @override
+  String get brushPrevQuarter => 'Last quarter';
+
+  @override
+  String get brushCurYear => 'This year';
+
+  @override
+  String get brushPrevYear => 'Last year';
+
+  @override
+  String brushWindowDay(int count) {
+    return 'the last $count days';
+  }
+
+  @override
+  String brushWindowWeek(int count) {
+    return 'the last $count weeks';
+  }
+
+  @override
+  String brushWindowMonth(int count) {
+    return 'the last $count months';
+  }
+
+  @override
+  String brushWindowQuarter(int count) {
+    return 'the last $count quarters';
+  }
+
+  @override
+  String brushWindowYear(int count) {
+    return 'the last $count years';
+  }
+
+  @override
+  String brushUpIn(String period) {
+    return 'Upload · $period';
+  }
+
+  @override
+  String brushDownIn(String period) {
+    return 'Download · $period';
+  }
+
+  @override
+  String brushPrevValue(String period, String value) {
+    return '$period $value';
+  }
+
+  @override
+  String brushPeriodRow(String period, String up, String down) {
+    return '$period ↑$up ↓$down';
+  }
+
+  @override
+  String brushTrendTitle(String window) {
+    return 'Upload in $window';
+  }
+
+  @override
+  String brushTrendTotal(String up, String down) {
+    return 'Total $up up, $down down';
+  }
+
+  @override
+  String brushTrendUp(String value) {
+    return 'Upload $value';
+  }
+
+  @override
+  String brushTrendDetail(String down, int added, int removed) {
+    return 'Download $down · $added added · $removed removed';
+  }
+
+  @override
+  String brushTrendCurrent(String when, String period) {
+    return '$when ($period)';
+  }
+
+  @override
+  String brushTrendEmpty(String window) {
+    return 'No brush upload in $window';
+  }
+
+  @override
+  String get brushTrendHint => 'Tap or drag across the bars to see each period';
+
+  @override
+  String get brushStatsFailed => 'Could not load the statistics';
+
+  @override
   String get noDownloaders => 'No downloaders enabled';
 
   @override
