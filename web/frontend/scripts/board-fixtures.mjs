@@ -376,28 +376,73 @@ const CHANNELS = [
   },
 ];
 
-const BINDINGS = [
-  {
-    id: 1,
-    channel_user_id: "123456",
-    channel_type: "telegram",
-    label: "我自己",
-    admin: true,
-    allowed: true,
-    bind_code: "",
-    bound_at: "2026-09-10T00:00:00Z",
-  },
-  {
-    id: 2,
-    channel_user_id: "",
-    channel_type: "qq_onebot",
-    label: "",
-    admin: false,
-    allowed: false,
-    bind_code: "K3F9Q2",
-    expires_at: "2026-09-19T12:00:00Z",
-  },
-];
+/* 照真实接口（web/api_chatops.go 的 listBindings）：已绑定的行与没用掉的绑定码分两组 */
+const BINDINGS = {
+  bindings: [
+    {
+      id: 1,
+      conf_id: 1,
+      channel_user_id: "123456",
+      channel_type: "telegram",
+      label: "我自己",
+      reply_lang: "zh",
+      admin: true,
+      allowed: true,
+      created_at: "2026-09-10T00:00:00Z",
+      last_active: "2026-09-18T09:30:00Z",
+    },
+  ],
+  pending: [
+    {
+      id: 7,
+      code: "K3F9Q2MX",
+      conf_id: 2,
+      label: "",
+      created_at: "2026-09-18T11:55:00Z",
+      expires_at: "2099-09-19T12:00:00Z",
+    },
+  ],
+};
+
+/* 绑定页「通道」一栏（internal/app/binding_channels.go 的 ChannelBindingView） */
+const BINDING_CHANNELS = {
+  channels: [
+    {
+      conf_id: 1,
+      name: "主 Telegram",
+      channel_type: "telegram",
+      enabled: true,
+      runtime_state: "connected",
+      notify_target: "123456",
+      notify_via: "default_chat_id",
+      users: [
+        {
+          user_id: "123456",
+          roles: ["admin"],
+          bound: true,
+          binding_id: 1,
+          last: { command: "status", result: "success", at: "2026-09-18T09:30:00Z" },
+        },
+        {
+          user_id: "7788990011",
+          roles: ["allowed"],
+          bound: false,
+          last: { command: "help", result: "denied:not_bound", at: "2026-09-18T10:02:00Z" },
+        },
+      ],
+    },
+    {
+      conf_id: 2,
+      name: "QQ 小号",
+      channel_type: "qq_onebot",
+      enabled: true,
+      runtime_state: "running",
+      notify_target: "10001",
+      notify_via: "admin",
+      users: [{ user_id: "10001", roles: ["admin"], bound: false }],
+    },
+  ],
+};
 
 const DOWNLOADERS = [
   {
@@ -738,6 +783,8 @@ export const FIXTURES = [
   ["/api/chatops/notifications/recent", { items: NOTIFY_RECENT }],
   ["/api/chatops/notifications/1", CHANNELS[0]],
   ["/api/chatops/notifications", CHANNELS],
+  /* 子路径排在 /api/chatops/bindings 之前：前缀匹配，先命中先用 */
+  ["/api/chatops/bindings/channels", BINDING_CHANNELS],
   ["/api/chatops/bindings", BINDINGS],
   /* 必须排在 /api/filter-rules 之前：前缀匹配第一个命中即用 */
   ["/api/filter-rules/hits", { hits: { 1: 128, 2: 46, 3: 12, 4: 3, 6: 1 } }],
@@ -977,7 +1024,8 @@ export function emptyStubScript() {
     ["/api/chatops/notifications/stats", { since: "2026-09-12T00:00:00Z", days: 7, channels: [] }],
     ["/api/chatops/notifications/recent", { items: [] }],
     ["/api/chatops/notifications", []],
-    ["/api/chatops/bindings", []],
+    ["/api/chatops/bindings/channels", { channels: [] }],
+    ["/api/chatops/bindings", { bindings: [], pending: [] }],
     ["/api/chatops/audit", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/chatops/rss-notifications", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/filter-rules", []],

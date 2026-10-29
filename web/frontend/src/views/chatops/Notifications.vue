@@ -18,6 +18,7 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { NOTIFY_SOURCE_LABELS } from "@/utils/notifySource";
 
 import {
   OUTBOUND_CHANNELS,
@@ -215,16 +216,8 @@ async function loadStats() {
   }
 }
 
-/** 通知来源的叫法：RSS 以外都是后台监控发的 */
-const SOURCE_LABELS: Record<string, string> = {
-  rss: "RSS",
-  login: "保号提醒",
-  attendance: "签到",
-  daily_report: "每日战报",
-  downloader_assistant: "失效种子",
-  media: "订阅与入库",
-  remote: "远程访问",
-};
+/** 通知来源的叫法：RSS 以外都是后台监控发的（与操作审计里的叫法同一份） */
+const SOURCE_LABELS = NOTIFY_SOURCE_LABELS;
 
 /**
  * p-stat：每个通道近 7 天发了多少；小字写来源，再写没发出的是失败、在等、取消还是超出上限，
@@ -715,6 +708,7 @@ function getChannelLabel(type: string) {
                 {{ resultOf(n.result).label }} · {{ channelNameOf(n.conf_id) }} · {{ sourceOf(n)
                 }}<template v-if="n.attempts > 1"> · 第 {{ n.attempts }} 次</template>
               </span>
+              <span v-if="n.error && n.result !== 'sent'" class="recm__err">{{ n.error }}</span>
             </span>
             <span class="recm__when">{{ formatWhen(n.created_at) }}</span>
           </li>
@@ -740,9 +734,18 @@ function getChannelLabel(type: string) {
                 <span class="rec__what" :title="contentOf(n)">{{ contentOf(n) }}</span>
               </td>
               <td>
-                <PtStatusPill :tone="resultOf(n.result).tone" size="sm">
-                  {{ resultOf(n.result).label }}
-                </PtStatusPill>
+                <!-- 没发出去的写上原因（最近一次失败）：悬停看全文，手机列表里直接铺一行 -->
+                <el-tooltip
+                  :content="n.error"
+                  placement="top"
+                  :disabled="!n.error || n.result === 'sent'">
+                  <PtStatusPill
+                    :tone="resultOf(n.result).tone"
+                    size="sm"
+                    :title="n.error && n.result !== 'sent' ? n.error : undefined">
+                    {{ resultOf(n.result).label }}
+                  </PtStatusPill>
+                </el-tooltip>
               </td>
               <td class="rec__num">{{ n.attempts }}</td>
             </tr>
@@ -1086,6 +1089,13 @@ function getChannelLabel(type: string) {
 .recm__l2 {
   font-size: var(--pt-fz-label);
   color: var(--pt-t3);
+}
+
+/* 没发出去的原因：长原因可以断行 */
+.recm__err {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-dang);
+  overflow-wrap: anywhere;
 }
 
 .recm__when {

@@ -723,6 +723,24 @@ type stubBindingSvc struct {
 	lastRevokeID uint
 	lastLangID   uint
 	lastLang     string
+
+	channels     []app.ChannelBindingView
+	channelsErr  error
+	bindCalls    int32
+	bindErr      error
+	lastBindConf uint
+	lastBindUser string
+
+	revokeCodeErr    error
+	lastRevokeCodeID uint
+}
+
+func (s *stubBindingSvc) RevokeCode(ctx context.Context, id uint) (app.BindCodeDTO, error) {
+	s.lastRevokeCodeID = id
+	if s.revokeCodeErr != nil {
+		return app.BindCodeDTO{}, s.revokeCodeErr
+	}
+	return app.BindCodeDTO{ID: id, ConfID: 1}, nil
 }
 
 func (s *stubBindingSvc) IssueCode(ctx context.Context, confID uint, label string, ttl time.Duration) (app.BindCodeDTO, error) {
@@ -751,6 +769,23 @@ func (s *stubBindingSvc) Revoke(ctx context.Context, id uint) error {
 	return s.revokeErr
 }
 
+func (s *stubBindingSvc) ListChannels(context.Context) ([]app.ChannelBindingView, error) {
+	return s.channels, s.channelsErr
+}
+
+func (s *stubBindingSvc) BindDirect(_ context.Context, confID uint, userID string) (app.BindingDTO, error) {
+	atomic.AddInt32(&s.bindCalls, 1)
+	s.lastBindConf, s.lastBindUser = confID, userID
+	if s.bindErr != nil {
+		// 和真的服务一样：通道存在时拒绝的结果里也有通道
+		if errors.Is(s.bindErr, app.ErrConfNotFound) || errors.Is(s.bindErr, app.ErrBindUnsupportedChannel) {
+			return app.BindingDTO{}, s.bindErr
+		}
+		return app.BindingDTO{ConfID: confID, ChannelType: "telegram", ChannelUserID: userID}, s.bindErr
+	}
+	return app.BindingDTO{ID: 9, ConfID: confID, ChannelType: "telegram", ChannelUserID: userID, PtAdmin: true, Allowed: true}, nil
+}
+
 func (s *stubBindingSvc) SetReplyLang(ctx context.Context, id uint, lang string) error {
 	atomic.AddInt32(&s.langCalls, 1)
 	s.lastLangID = id
@@ -766,9 +801,13 @@ type stubAuditSvc struct {
 	statsResp  app.AuditStatsDTO
 	statsErr   error
 	statsCalls int32
+	recorded   []app.AuditEntry
 }
 
-func (s *stubAuditSvc) Record(ctx context.Context, e app.AuditEntry) error { return nil }
+func (s *stubAuditSvc) Record(ctx context.Context, e app.AuditEntry) error {
+	s.recorded = append(s.recorded, e)
+	return nil
+}
 
 func (s *stubAuditSvc) Query(ctx context.Context, q app.AuditQuery) ([]app.AuditDTO, int, error) {
 	s.lastQuery = q
@@ -1204,6 +1243,22 @@ func TestAudit_QueryWithFilter(t *testing.T) {
 	require.False(t, audit.lastQuery.Until.IsZero())
 }
 
+func TestAudit_CategoryFilter(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	audit := deps.AuditSvc.(*stubAuditSvc)
+
+	resp := chatopsReq(t, srv, "GET", "/api/chatops/audit?category=notify", tok, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+	require.Equal(t, "notify", audit.lastQuery.Category)
+
+	resp = chatopsReq(t, srv, "GET", "/api/chatops/audit?category=bogus", tok, nil)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
 func TestAudit_InvalidTime(t *testing.T) {
 	srv, _, store, cleanup := newTestChatOpsServer(t)
 	defer cleanup()
@@ -1352,4 +1407,91 @@ func TestGetNotification_Unauth(t *testing.T) {
 func TestErrConfNotFoundSentinel(t *testing.T) {
 	require.Error(t, app.ErrConfNotFound)
 	assert.True(t, errors.Is(app.ErrConfNotFound, app.ErrConfNotFound))
+}
+
+// 绑定页的「通道」一栏：运行状态从通道列表补上；网页直接绑定记一条审计（成功与被拒都记）。
+func TestBindingChannelsAndDirectBind(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	bind := deps.BindingSvc.(*stubBindingSvc)
+	notif := deps.NotificationSvc.(*stubNotificationSvc)
+	audit := deps.AuditSvc.(*stubAuditSvc)
+	bind.channels = []app.ChannelBindingView{{
+		ConfID: 1, Name: "bot", ChannelType: "telegram", Enabled: true,
+		Users: []app.ChannelBindingUser{{UserID: "1234567890", Roles: []string{"admin"}}},
+	}}
+	notif.listResp = []app.NotificationConfDTO{{ID: 1, RuntimeState: app.ChannelStateConnected}}
+
+	resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/bindings/channels", tok, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var out struct {
+		Channels []app.ChannelBindingView `json:"channels"`
+	}
+	decodeBody(t, resp, &out)
+	require.Len(t, out.Channels, 1)
+	assert.Equal(t, app.ChannelStateConnected, out.Channels[0].RuntimeState)
+	assert.Equal(t, "1234567890", out.Channels[0].Users[0].UserID)
+
+	resp = chatopsReq(t, srv, http.MethodPost, "/api/chatops/bindings", tok, map[string]any{"conf_id": 1, "channel_user_id": " 1234567890 "})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+	assert.Equal(t, "1234567890", bind.lastBindUser, "去掉两边的空白")
+	require.Len(t, audit.recorded, 1)
+	assert.Equal(t, "bind", audit.recorded[0].Command)
+	assert.Equal(t, "success", audit.recorded[0].Result)
+	assert.Equal(t, "telegram", audit.recorded[0].ChannelType)
+	assert.Equal(t, map[string]any{"via": "web"}, audit.recorded[0].Args)
+
+	for _, tc := range []struct {
+		err    error
+		status int
+		result string
+	}{
+		{app.ErrBindNotInWhitelist, http.StatusBadRequest, "denied:not_in_whitelist"},
+		{app.ErrAlreadyBound, http.StatusConflict, "denied:already_bound"},
+	} {
+		bind.bindErr = tc.err
+		resp = chatopsReq(t, srv, http.MethodPost, "/api/chatops/bindings", tok, map[string]any{"conf_id": 1, "channel_user_id": "9"})
+		assert.Equal(t, tc.status, resp.StatusCode)
+		resp.Body.Close()
+		assert.Equal(t, tc.result, audit.recorded[len(audit.recorded)-1].Result)
+	}
+	bind.bindErr = app.ErrConfNotFound
+	resp = chatopsReq(t, srv, http.MethodPost, "/api/chatops/bindings", tok, map[string]any{"conf_id": 1, "channel_user_id": "9"})
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = chatopsReq(t, srv, http.MethodPost, "/api/chatops/bindings", tok, map[string]any{"conf_id": 1})
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+	resp = chatopsReq(t, srv, http.MethodGet, "/api/chatops/bindings/channels", "", nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "只认网页登录")
+	resp.Body.Close()
+}
+
+// 待绑定里没用掉的绑定码可以作废：只认网页登录，按编号作废，不存在时 404。
+func TestRevokeBindCode(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	bind := deps.BindingSvc.(*stubBindingSvc)
+
+	resp := chatopsReq(t, srv, http.MethodDelete, "/api/chatops/bindings/codes/7", tok, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+	assert.Equal(t, uint(7), bind.lastRevokeCodeID)
+
+	bind.revokeCodeErr = gorm.ErrRecordNotFound
+	resp = chatopsReq(t, srv, http.MethodDelete, "/api/chatops/bindings/codes/8", tok, nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = chatopsReq(t, srv, http.MethodDelete, "/api/chatops/bindings/codes/abc", tok, nil)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = chatopsReq(t, srv, http.MethodDelete, "/api/chatops/bindings/codes/7", "", nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	resp.Body.Close()
 }

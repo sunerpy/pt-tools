@@ -44,9 +44,15 @@ type AuditQuery struct {
 	// handler 压根没读这个参数，那枚通道筛选是个空控件。
 	Result      string
 	ChannelType string
-	Page        int
-	PageSize    int
+	// Category 是记录的种类：notify 只要后台通知的投递（命令以 notify: 开头，签到、追剧、每日战报…），
+	// action 只要命令与接口的调用，空串两种都要。
+	Category string
+	Page     int
+	PageSize int
 }
+
+// NotifyCommandPrefix 是后台通知投递写进审计时命令的前缀（notify:<来源>:<种类>）。
+const NotifyCommandPrefix = "notify:"
 
 /*
  * channelTypeAliases 把短名归一到**生产里真实写入的通道 ID**。
@@ -224,6 +230,12 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 			normalized = append(normalized, canonicalChannelType(v))
 		}
 		tx = tx.Where("channel_type IN ?", normalized)
+	}
+	switch q.Category {
+	case "notify":
+		tx = tx.Where("command LIKE ?", NotifyCommandPrefix+"%")
+	case "action":
+		tx = tx.Where("command NOT LIKE ?", NotifyCommandPrefix+"%")
 	}
 	// Keyword 是画板 25 的 q「筛选命令、触发用户…」：同时匹配命令与触发用户，模糊匹配。
 	//

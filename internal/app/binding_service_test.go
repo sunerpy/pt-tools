@@ -474,3 +474,49 @@ func TestRevoke_DBError(t *testing.T) {
 	err := svc.Revoke(context.Background(), 1)
 	require.Error(t, err)
 }
+
+// 钉子（2026-10-29 用户：「为什么我绑定了之后待绑定里还有一个绑定码」）：在通道栏直接绑定不消耗绑定码，
+// 永久的码只有用掉才消失，以前又没有作废的入口，没用掉的码就一直挂在「待绑定」里。
+func TestRevokeCode_RemovesUnusedCodeOnly(t *testing.T) {
+	svc, db := newBindingService(t)
+	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
+
+	keep, err := svc.IssueCode(ctx, 1, "保留", 0)
+	require.NoError(t, err)
+	drop, err := svc.IssueCode(ctx, 1, "", 0)
+	require.NoError(t, err)
+	require.NotZero(t, drop.ID, "签发时带上编号，页面按编号作废（码本身不进地址）")
+
+	pending, err := svc.ListPendingCodes(ctx)
+	require.NoError(t, err)
+	ids := map[uint]bool{}
+	for _, p := range pending {
+		ids[p.ID] = true
+	}
+	assert.True(t, ids[keep.ID] && ids[drop.ID], "待绑定列表带编号")
+
+	got, err := svc.RevokeCode(ctx, drop.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), got.ConfID)
+	pending, err = svc.ListPendingCodes(ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, keep.Code, pending[0].Code)
+
+	// 作废了的码不能再兑换
+	_, err = svc.ConsumeCode(ctx, drop.Code, 1, "telegram", "u1")
+	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
+
+	// 再作废一次、作废不存在的码：not found
+	_, err = svc.RevokeCode(ctx, drop.ID)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	_, err = svc.RevokeCode(ctx, 9999)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+	// 已经用掉的码是绑定的来历，不能作废
+	_, err = svc.ConsumeCode(ctx, keep.Code, 1, "telegram", "u2")
+	require.NoError(t, err)
+	_, err = svc.RevokeCode(ctx, keep.ID)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+}

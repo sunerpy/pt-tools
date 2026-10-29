@@ -95,6 +95,21 @@ func TestNotifyRecent(t *testing.T) {
 	assert.Equal(t, "failure", b.Items[1].Kind)
 	assert.Equal(t, 2, b.Items[1].Attempts)
 	assert.Empty(t, b.Items[1].Site)
+	assert.Empty(t, b.Items[1].Error)
+
+	// 失败过的带上原因（遮掉凭证）：每日战报为什么没收到，在这张小表里就看得到
+	require.NoError(t, db.Create(&models.MonitorNotificationLog{
+		Source: "daily_report", Subject: "*", Kind: "daily", EventKey: "2026-10-28", NotificationConfID: 2,
+		Result: "pending", Attempts: 1, PayloadJSON: `{"title":"每日战报"}`, CreatedAt: at(9),
+		LastError: `Post "https://api.telegram.org/bot1234567890:AAH_kx-Yz9Q8wE7rT6yU5iO4pA3sD2fG1hJ/sendMessage": i/o timeout`,
+	}).Error)
+	code, b, _ = get("?limit=1")
+	require.Equal(t, http.StatusOK, code)
+	require.Len(t, b.Items, 1)
+	assert.Equal(t, "daily_report", b.Items[0].Source)
+	assert.Contains(t, b.Items[0].Error, "i/o timeout")
+	assert.NotContains(t, b.Items[0].Error, "AAH_kx")
+	require.NoError(t, db.Where("source = ?", "daily_report").Delete(&models.MonitorNotificationLog{}).Error)
 
 	code, b, _ = get("?limit=2")
 	require.Equal(t, http.StatusOK, code)

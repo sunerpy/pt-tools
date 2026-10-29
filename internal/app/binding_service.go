@@ -26,6 +26,8 @@ var (
 )
 
 type BindCodeDTO struct {
+	// ID 是绑定码那一行的编号：作废时按它找（码本身不进地址）
+	ID        uint       `json:"id"`
 	Code      string     `json:"code"`
 	ConfID    uint       `json:"conf_id"`
 	Label     string     `json:"label"`
@@ -53,6 +55,12 @@ type BindingService interface {
 	ListBindings(ctx context.Context) ([]BindingDTO, error)
 	Revoke(ctx context.Context, bindingID uint) error
 	SetReplyLang(ctx context.Context, bindingID uint, lang string) error
+	// RevokeCode 作废一个还没用掉的绑定码（用掉的码是绑定的来历，不作废）
+	RevokeCode(ctx context.Context, id uint) (BindCodeDTO, error)
+	// ListChannels 是绑定页的「通道」一栏（见 binding_channels.go）
+	ListChannels(ctx context.Context) ([]ChannelBindingView, error)
+	// BindDirect 在网页上直接绑定通道名单里的账号
+	BindDirect(ctx context.Context, confID uint, channelUserID string) (BindingDTO, error)
 }
 
 type bindingService struct {
@@ -107,6 +115,7 @@ func (s *bindingService) IssueCode(ctx context.Context, confID uint, label strin
 	}
 
 	return BindCodeDTO{
+		ID:        row.ID,
 		Code:      code,
 		ConfID:    confID,
 		Label:     label,
@@ -130,6 +139,7 @@ func (s *bindingService) ListPendingCodes(ctx context.Context) ([]BindCodeDTO, e
 	for _, r := range rows {
 		confID, label := parseBindScope(r.Scope)
 		dto := BindCodeDTO{
+			ID:        r.ID,
 			Code:      r.CodeOrTokenHash,
 			ConfID:    confID,
 			Label:     label,
@@ -233,6 +243,30 @@ func (s *bindingService) Revoke(ctx context.Context, bindingID uint) error {
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// RevokeCode 作废一个没用掉的绑定码：永久的码只有用掉才会从「待绑定」里消失，在通道栏直接绑定也不消耗它
+// （2026-10-29 用户绑定以后「待绑定」里还挂着 10-21 生成、一直没用的永久码）。删掉那一行，之后谁也不能再拿它绑定；
+// 找不到或已经用掉时回 gorm.ErrRecordNotFound。
+func (s *bindingService) RevokeCode(ctx context.Context, id uint) (BindCodeDTO, error) {
+	var row models.BotToken
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND kind = ? AND used_at IS NULL", id, "bind_code").
+		First(&row).Error; err != nil {
+		return BindCodeDTO{}, err
+	}
+	res := s.db.WithContext(ctx).
+		Where("id = ? AND kind = ? AND used_at IS NULL", id, "bind_code").
+		Delete(&models.BotToken{})
+	if res.Error != nil {
+		return BindCodeDTO{}, fmt.Errorf("revoke bind code: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		// 查到以后、删之前被人用掉了
+		return BindCodeDTO{}, gorm.ErrRecordNotFound
+	}
+	confID, label := parseBindScope(row.Scope)
+	return BindCodeDTO{ID: row.ID, ConfID: confID, Label: label, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt}, nil
 }
 
 func (s *bindingService) SetReplyLang(ctx context.Context, bindingID uint, lang string) error {

@@ -9,6 +9,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/internal/cloakdriver/transport"
+	"github.com/sunerpy/pt-tools/internal/redact"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
@@ -29,6 +30,43 @@ func loginReminderSender(bs *chatopsBootstrap) scheduler.MonitorSender {
 	return scheduler.MonitorSenderFunc(func(ctx context.Context, confID uint, msg scheduler.MonitorMessage) error {
 		return svc.PushSync(ctx, app.Notification{Event: msg.Event, Title: msg.Title, Text: msg.Text, SourceConfID: confID})
 	})
+}
+
+// monitorDeliveryAudit 把后台通知（签到、追剧、每日战报、登录提醒…）的每一次投递写进操作审计，
+// 让用户看得到通知没收到的原因：命令是 notify:<来源>:<种类>，触发用户留空（系统发的），
+// 参数里有标题、第几次投递；失败时还有原因（遮掉凭证：telego 的错误会带出 bot token）与下一次重试的时间，放弃时 final。
+type monitorDeliveryAudit struct {
+	svc app.AuditService
+}
+
+func (a monitorDeliveryAudit) RecordDelivery(ctx context.Context, d scheduler.MonitorDelivery) {
+	args := map[string]any{"attempt": d.Attempt}
+	if d.Title != "" {
+		args["title"] = d.Title
+	}
+	if d.Subject != "" && d.Subject != "*" {
+		args["subject"] = d.Subject
+	}
+	result := "success"
+	if d.Err != nil {
+		result = "error:send_failed"
+		args["error"] = redact.Secrets(d.Err.Error())
+		if d.Final {
+			args["final"] = true
+		} else if !d.NextRetryAt.IsZero() {
+			args["next_retry_at"] = d.NextRetryAt.Local().Format(time.RFC3339)
+		}
+	}
+	if err := a.svc.Record(ctx, app.AuditEntry{
+		NotificationConfID: d.ConfID,
+		ChannelType:        d.ChannelType,
+		Command:            "notify:" + d.Source + ":" + d.Kind,
+		Args:               args,
+		Result:             result,
+		LatencyMs:          d.Latency.Milliseconds(),
+	}); err != nil {
+		global.GetSlogger().Warnf("通知投递审计写入失败 source=%s kind=%s conf_id=%d: %v", d.Source, d.Kind, d.ConfID, err)
+	}
 }
 
 type loginReminderDecryptor struct {
@@ -127,6 +165,9 @@ func wireLoginReminderMonitor(
 	notifier := scheduler.NewMonitorNotifier(db, loginReminderSender(bs), nil, global.GetSlogger())
 	if !notifier.Enabled() {
 		global.GetSlogger().Warn("登录提醒监控器：ChatOps 通知服务不可用，提醒只记录决策、不发送")
+	}
+	if bs != nil && bs.deps != nil && bs.deps.AuditSvc != nil {
+		notifier.SetAuditor(monitorDeliveryAudit{svc: bs.deps.AuditSvc})
 	}
 
 	decryptor := loginReminderDecryptor{store: store}

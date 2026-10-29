@@ -62,7 +62,7 @@ Each day at the send time, plus a fixed per-installation offset of up to 10 minu
 
 Only enabled sites are counted. A site whose probe mode is "Disabled" is no longer probed, so its last probe status is not reported as a login problem. When there is no snapshot from before today and nothing can be compared yet, the report says so instead of listing zeros.
 
-Each channel receives it at most once per day, including across restarts. If a channel is in its quiet hours, the report waits until the quiet hours end; failed deliveries are retried after 1, 5 and 30 minutes. If pt-tools starts after the send time but before the day ends, it still sends that day's report; a day on which it was not running at any point between the send time and midnight is skipped, and the next day's report only covers the next day.
+Each channel receives it at most once per day, including across restarts. If a channel is in its quiet hours, the report waits until the quiet hours end; failed deliveries are retried after 1, 5 and 30 minutes. Every delivery is recorded in the ChatOps [audit log](chatops-quickstart.md#viewing-the-audit-log), with the reason when it failed. On QQ and Telegram channels the report goes to the recipient from the channel settings: the first Admin QQ number on QQ (see [the QQ lists](chatops-qq-napcat.md#q-what-is-the-difference-between-admin_qq_users-and-allowed_qq_users)) and the default chat ID on Telegram (see [the Telegram fields](chatops-telegram.md#what-the-fields-mean)). If pt-tools starts after the send time but before the day ends, it still sends that day's report; a day on which it was not running at any point between the send time and midnight is skipped, and the next day's report only covers the next day.
 
 ## API
 

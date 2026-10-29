@@ -40,6 +40,34 @@ func (f MonitorSenderFunc) Send(ctx context.Context, confID uint, msg MonitorMes
 	return f(ctx, confID, msg)
 }
 
+// MonitorDelivery 是一次投递的结果，交给 MonitorAuditor（生产实现写进操作审计）。
+// 静默时段顺延不算投递，不报。
+type MonitorDelivery struct {
+	Source  string
+	Subject string
+	Kind    string
+	ConfID  uint
+	// ChannelType 是通道类型（telegram、qq_onebot…）；通道已经删掉时为空
+	ChannelType string
+	// Title 是通知的内置标题（例如「每日战报 2026-10-28」）
+	Title string
+	// Attempt 是这是第几次投递（从 1 起）
+	Attempt int
+	// Err 为 nil 表示已送达
+	Err error
+	// Final 表示这条失败了、不会再重试（重试用完、通道停用或删掉、内容损坏）
+	Final bool
+	// NextRetryAt 是失败后下一次重试的时间；Final 时为零值
+	NextRetryAt time.Time
+	// Latency 是交给通道到通道返回用的时间（没有交给通道时为 0）
+	Latency time.Duration
+}
+
+// MonitorAuditor 记下每一次投递的结果（成功、失败与原因），让用户在操作审计里看得到通知为什么没收到。
+type MonitorAuditor interface {
+	RecordDelivery(ctx context.Context, d MonitorDelivery)
+}
+
 // MonitorNotifyEntry 是一次「决定发送」。同一个 (Source, Subject, Kind, EventKey) 重复写入不会重复发送。
 type MonitorNotifyEntry struct {
 	Source   string
@@ -78,6 +106,8 @@ type MonitorNotifier struct {
 	clock  sitelogin.Clock
 	logger *zap.SugaredLogger
 	tick   time.Duration
+	// auditor 记下每次投递的结果；在 Start 以前用 SetAuditor 接上，为 nil 时不记
+	auditor MonitorAuditor
 
 	// deliverMu 串行化所有投递（后台循环与测试提醒的即时投递），同一行不会被发两次。
 	deliverMu sync.Mutex
@@ -97,6 +127,13 @@ func NewMonitorNotifier(db *gorm.DB, sender MonitorSender, clock sitelogin.Clock
 		logger = zap.NewNop().Sugar()
 	}
 	return &MonitorNotifier{db: db, sender: sender, clock: clock, logger: logger, tick: monitorNotifyTick}
+}
+
+// SetAuditor 接上投递审计（在 Start 与第一次投递以前调用）。
+func (n *MonitorNotifier) SetAuditor(a MonitorAuditor) {
+	if n != nil {
+		n.auditor = a
+	}
 }
 
 // Enabled 报告投递器是否可用（有数据库也有发送方）。
@@ -232,9 +269,10 @@ func (n *MonitorNotifier) DeliverNow(ctx context.Context, e MonitorNotifyEntry) 
 var errDeferredQuiet = errors.New("通道处于静默时段，已顺延")
 
 func (n *MonitorNotifier) deliverRow(ctx context.Context, row models.MonitorNotificationLog, now time.Time) error {
+	attempt := row.Attempts + 1
 	var conf models.NotificationConf
 	err := n.db.WithContext(ctx).
-		Select("id", "enabled", "quiet_hours_start", "quiet_hours_end").
+		Select("id", "channel_type", "enabled", "quiet_hours_start", "quiet_hours_end").
 		First(&conf, row.NotificationConfID).Error
 	if err != nil || !conf.Enabled {
 		reason := "通知通道不存在或已停用"
@@ -242,6 +280,7 @@ func (n *MonitorNotifier) deliverRow(ctx context.Context, row models.MonitorNoti
 			"result":     models.MonitorNotifyFailed,
 			"last_error": reason,
 		})
+		n.audit(ctx, row, conf.ChannelType, attempt, errors.New(reason), true, time.Time{}, 0)
 		return errors.New(reason)
 	}
 	// 实际发送前再判断一次静默：静默开始前写入、静默期间才轮到的行，以及重试落进静默时段的行都在这里顺延，不计尝试。
@@ -258,35 +297,58 @@ func (n *MonitorNotifier) deliverRow(ctx context.Context, row models.MonitorNoti
 			"result":     models.MonitorNotifyFailed,
 			"last_error": "通知内容损坏",
 		})
+		n.audit(ctx, row, conf.ChannelType, attempt, errors.New("通知内容损坏"), true, time.Time{}, 0)
 		return fmt.Errorf("解析通知内容失败: %w", err)
 	}
 
+	started := n.clock.Now()
 	sendErr := n.sender.Send(ctx, conf.ID, MonitorMessage(payload))
-	attempts := row.Attempts + 1
+	latency := n.clock.Now().Sub(started)
 	if sendErr == nil {
 		n.finishRow(ctx, row.ID, map[string]any{
 			"result":       models.MonitorNotifySent,
-			"attempts":     attempts,
+			"attempts":     attempt,
 			"last_error":   "",
 			"delivered_at": now.UTC(),
 		})
+		n.audit(ctx, row, conf.ChannelType, attempt, nil, false, time.Time{}, latency)
 		return nil
 	}
 
 	updates := map[string]any{
-		"attempts":   attempts,
+		"attempts":   attempt,
 		"last_error": truncateNotifyError(sendErr.Error()),
 	}
-	if attempts > len(monitorNotifyBackoff) {
+	final := attempt > len(monitorNotifyBackoff)
+	var next time.Time
+	if final {
 		updates["result"] = models.MonitorNotifyFailed
 	} else {
-		updates["next_retry_at"] = now.Add(monitorNotifyBackoff[attempts-1]).UTC()
+		next = now.Add(monitorNotifyBackoff[attempt-1])
+		updates["next_retry_at"] = next.UTC()
 	}
 	n.finishRow(ctx, row.ID, updates)
+	n.audit(ctx, row, conf.ChannelType, attempt, sendErr, final, next, latency)
 	n.logger.Warnw("monitor_notify_send_failed",
 		"source", row.Source, "subject", row.Subject, "kind", row.Kind,
-		"conf_id", row.NotificationConfID, "attempts", attempts, "err", sendErr)
+		"conf_id", row.NotificationConfID, "attempts", attempt, "err", sendErr)
 	return sendErr
+}
+
+// audit 把这次投递交给审计（没有接审计时不做事）；标题从存下的内容里取，取不到就留空。
+func (n *MonitorNotifier) audit(ctx context.Context, row models.MonitorNotificationLog, channelType string, attempt int,
+	err error, final bool, next time.Time, latency time.Duration,
+) {
+	if n.auditor == nil {
+		return
+	}
+	var p monitorNotifyPayload
+	_ = json.Unmarshal([]byte(row.PayloadJSON), &p)
+	n.auditor.RecordDelivery(context.WithoutCancel(ctx), MonitorDelivery{
+		Source: row.Source, Subject: row.Subject, Kind: row.Kind,
+		ConfID: row.NotificationConfID, ChannelType: channelType, Title: p.Title,
+		Attempt: attempt, Err: err, Final: final, NextRetryAt: next, Latency: latency,
+	})
 }
 
 func (n *MonitorNotifier) finishRow(ctx context.Context, id uint, updates map[string]any) {

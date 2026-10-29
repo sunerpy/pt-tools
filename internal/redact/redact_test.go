@@ -50,3 +50,19 @@ func TestTextKeepsIDsButMasksCredentials(t *testing.T) {
 		t.Errorf("路径里像密钥的段落要遮：%q", got)
 	}
 }
+
+// telego 的错误把 Bot API 的整个地址带出来，路径里就是 bot token：写进操作审计与日志以前要遮掉。
+func TestCredentialsMasksTelegramBotToken(t *testing.T) {
+	in := `telegram: sendMessage 失败: Post "https://api.telegram.org/bot1234567890:AAH_kx-Yz9Q8wE7rT6yU5iO4pA3sD2fG1hJ/sendMessage": dial tcp 149.154.167.220:443: i/o timeout`
+	for _, f := range []func(string) string{Credentials, Secrets, Text} {
+		out := f(in)
+		assert.NotContains(t, out, "AAH_kx")
+		assert.NotContains(t, out, "1234567890:")
+		assert.Contains(t, out, "api.telegram.org/bot***/sendMessage")
+		assert.Contains(t, out, "i/o timeout")
+	}
+	// 只有一个 token、没有地址时也遮
+	assert.Equal(t, "token ***", Credentials("token 1234567890:AAH_kx-Yz9Q8wE7rT6yU5iO4pA3sD2fG1hJ"))
+	// 时间、端口之类带冒号的数字不受影响
+	assert.Equal(t, "2026-10-28 16:06:47 172.21.0.1:35110", Credentials("2026-10-28 16:06:47 172.21.0.1:35110"))
+}

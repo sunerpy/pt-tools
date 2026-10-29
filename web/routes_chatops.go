@@ -40,7 +40,10 @@ func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth fu
 	mux.Handle("POST /api/chatops/webhook/preview", wrap(h.previewWebhook))
 
 	mux.Handle("GET /api/chatops/bindings", wrap(h.listBindings))
+	mux.Handle("GET /api/chatops/bindings/channels", wrap(h.listBindingChannels))
+	mux.Handle("POST /api/chatops/bindings", wrap(h.bindDirect))
 	mux.Handle("POST /api/chatops/bindings/issue-code", wrap(h.issueBindCode))
+	mux.Handle("DELETE /api/chatops/bindings/codes/{id}", wrap(h.revokeBindCode))
 	mux.Handle("DELETE /api/chatops/bindings/{id}", wrap(h.revokeBinding))
 	mux.Handle("PATCH /api/chatops/bindings/{id}", wrap(h.patchBinding))
 

@@ -479,6 +479,18 @@ func (m *mockBindingService) ListBindings(_ context.Context) ([]app.BindingDTO, 
 	return nil, nil
 }
 
+func (m *mockBindingService) ListChannels(_ context.Context) ([]app.ChannelBindingView, error) {
+	return nil, nil
+}
+
+func (m *mockBindingService) BindDirect(_ context.Context, _ uint, _ string) (app.BindingDTO, error) {
+	return app.BindingDTO{}, nil
+}
+
+func (m *mockBindingService) RevokeCode(context.Context, uint) (app.BindCodeDTO, error) {
+	return app.BindCodeDTO{}, nil
+}
+
 func (m *mockBindingService) Revoke(_ context.Context, id uint) error {
 	m.revokeCalls = append(m.revokeCalls, id)
 	return nil

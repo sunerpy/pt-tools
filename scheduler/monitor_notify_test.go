@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,4 +242,108 @@ func TestMonitorNotifier_QuietRecheckedPerRowWithinBatch(t *testing.T) {
 	assert.Equal(t, models.MonitorNotifyPending, deferred.Result)
 	assert.Equal(t, 0, deferred.Attempts)
 	assert.True(t, deferred.NextRetryAt.Equal(time.Date(2026, 5, 19, 8, 0, 0, 0, time.UTC)), "got %v", deferred.NextRetryAt)
+}
+
+// captureAuditor 记下交给审计的每一次投递。
+type captureAuditor struct {
+	mu   sync.Mutex
+	list []MonitorDelivery
+}
+
+func (a *captureAuditor) RecordDelivery(_ context.Context, d MonitorDelivery) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.list = append(a.list, d)
+}
+
+func (a *captureAuditor) all() []MonitorDelivery {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]MonitorDelivery(nil), a.list...)
+}
+
+// 2026-10-28 用户：签到、追剧、每日战报这些通知不在操作审计里，每日战报发送失败了也不知道为什么。
+// 每次投递都交给审计：送达、失败（原因、第几次、下一次重试）与放弃；静默顺延不是投递，不报。
+func TestMonitorNotifier_AuditsEveryDelivery(t *testing.T) {
+	now := time.Date(2026, 10, 28, 22, 0, 0, 0, time.UTC)
+	qq := quietConf(1, "", "")
+	qq.ChannelType = "qq_onebot"
+	n, sender, clock, _ := newNotifierForTest(t, now, qq)
+	aud := &captureAuditor{}
+	n.SetAuditor(aud)
+	sender.err = errors.New("QQ 适配器: 缺少目标 chat_id")
+	_, err := n.Enqueue(context.Background(), MonitorNotifyEntry{
+		Source: "daily_report", Subject: "*", Kind: "daily", EventKey: "2026-10-28", Title: "每日战报 2026-10-28", Text: "x",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, n.DeliverDue(context.Background()))
+	got := aud.all()
+	require.Len(t, got, 1)
+	first := got[0]
+	assert.Equal(t, "daily_report", first.Source)
+	assert.Equal(t, "daily", first.Kind)
+	assert.Equal(t, uint(1), first.ConfID)
+	assert.Equal(t, "qq_onebot", first.ChannelType)
+	assert.Equal(t, "每日战报 2026-10-28", first.Title)
+	assert.Equal(t, 1, first.Attempt)
+	require.Error(t, first.Err)
+	assert.Contains(t, first.Err.Error(), "缺少目标 chat_id")
+	assert.False(t, first.Final)
+	assert.True(t, first.NextRetryAt.Equal(now.Add(time.Minute)), "第一次失败 1 分钟后重试")
+
+	clock.Advance(time.Minute)
+	sender.err = nil
+	assert.Equal(t, 1, n.DeliverDue(context.Background()))
+	got = aud.all()
+	require.Len(t, got, 2)
+	assert.NoError(t, got[1].Err)
+	assert.Equal(t, 2, got[1].Attempt)
+	assert.False(t, got[1].Final)
+}
+
+func TestMonitorNotifier_AuditsGiveUpAndBrokenRows(t *testing.T) {
+	now := time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
+	n, sender, clock, db := newNotifierForTest(t, now, quietConf(1, "", ""), quietConf(2, "", ""))
+	aud := &captureAuditor{}
+	n.SetAuditor(aud)
+	sender.err = errors.New("boom")
+	e := sampleEntry()
+	e.ConfIDs = []uint{1}
+	_, err := n.Enqueue(context.Background(), e)
+	require.NoError(t, err)
+	for _, wait := range []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 0} {
+		n.DeliverDue(context.Background())
+		clock.Advance(wait)
+	}
+	got := aud.all()
+	require.Len(t, got, 4)
+	assert.True(t, got[3].Final, "第 4 次失败后放弃")
+	assert.True(t, got[3].NextRetryAt.IsZero())
+	assert.Equal(t, 4, got[3].Attempt)
+
+	// 通道在投递前被停用：放弃并说明原因
+	e2 := sampleEntry()
+	e2.EventKey, e2.ConfIDs = "tier:7d:9", []uint{2}
+	_, err = n.Enqueue(context.Background(), e2)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&models.NotificationConf{}).Where("id = ?", 2).Update("enabled", false).Error)
+	n.DeliverDue(context.Background())
+	got = aud.all()
+	require.Len(t, got, 5)
+	assert.True(t, got[4].Final)
+	assert.EqualError(t, got[4].Err, "通知通道不存在或已停用")
+	assert.Zero(t, got[4].Latency)
+}
+
+func TestMonitorNotifier_QuietDeferralIsNotAudited(t *testing.T) {
+	start := time.Date(2026, 5, 18, 22, 59, 0, 0, time.UTC)
+	n, _, clock, _ := newNotifierForTest(t, start, quietConf(1, "23:00", "08:00"))
+	aud := &captureAuditor{}
+	n.SetAuditor(aud)
+	_, err := n.Enqueue(context.Background(), sampleEntry())
+	require.NoError(t, err)
+	clock.Advance(2 * time.Minute)
+	assert.Equal(t, 0, n.DeliverDue(context.Background()))
+	assert.Empty(t, aud.all())
 }
