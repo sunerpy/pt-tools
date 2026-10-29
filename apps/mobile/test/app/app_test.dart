@@ -80,6 +80,64 @@ Map<String, Object?> _assistantDetail(String status) => {
   ],
 }..removeWhere((k, v) => v == null);
 
+const _gib = 1024 * 1024 * 1024;
+
+String _ymd(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+/// GET /brush/stats 的罐头：按日 30 段（今天 5 GiB），按周 12 段（8 月 17 日那一周起，上周 20 GiB、本周 30 GiB）；
+/// 任务 1 本期按日 5 GiB / 1 GiB、按周 7 GiB / 2 GiB。
+Map<String, Object?> _brushStats(String gran) {
+  final week = gran == 'week';
+  final n = week ? 12 : 30;
+  Map<String, Object?> point(int i, int up, int down) {
+    final start = week
+        ? DateTime(2026, 8, 17 + i * 7)
+        : DateTime(2026, 9, 30 + i);
+    final end = week ? start.add(const Duration(days: 6)) : start;
+    return {
+      'start': _ymd(start),
+      'end': _ymd(end),
+      'uploaded': up,
+      'downloaded': down,
+      'added': i,
+      'removed': 0,
+    };
+  }
+
+  final last = n - 1;
+  return {
+    'granularity': week ? 'week' : 'day',
+    'periods': n,
+    'from': point(0, 0, 0)['start'],
+    'to': '2026-10-29',
+    'totals': [
+      for (var i = 0; i < n; i++)
+        point(
+          i,
+          i == last
+              ? (week ? 30 : 5) * _gib
+              : (i == last - 1 ? (week ? 20 : 4) * _gib : 0),
+          i == last ? 4 * _gib : 0,
+        ),
+    ],
+    'tasks': [
+      {
+        'id': 1,
+        'name': '测试刷流',
+        'periods': [
+          for (var i = 0; i < n; i++)
+            point(
+              i,
+              i == last ? (week ? 7 : 5) * _gib : 0,
+              i == last ? (week ? 2 : 1) * _gib : 0,
+            ),
+        ],
+      },
+    ],
+  };
+}
+
 final _overview = {
   'totals': {
     'uploaded': 11544872091648,
@@ -162,8 +220,19 @@ class _BrokenStore extends MemoryHostStore {
 }
 
 class _World {
-  _World(this.scopes, {this.mode = 'device', this.mobileFeatures = false});
+  _World(
+    this.scopes, {
+    this.mode = 'device',
+    this.mobileFeatures = false,
+    this.brushStats = false,
+  });
   final bool mobileFeatures;
+
+  /// 主机提供按周期分段的刷流统计（features 里有 brush_stats）
+  final bool brushStats;
+
+  /// 这些周期的 GET /brush/stats 回 502
+  final Set<String> failStats = {};
   List<String> scopes;
   final String mode;
   final hosts = <FakeHost>[];
@@ -205,6 +274,7 @@ class _World {
               'brush_manage',
               'stats_export',
             ],
+            if (brushStats) 'brush_stats',
           ],
       '/api/app/v1/overview' => _overview,
       '/api/app/v1/downloaders' => {'items': []},
@@ -231,6 +301,14 @@ class _World {
           'total': {'uploaded': 0, 'downloaded': 0, 'added': 0, 'removed': 0},
         },
       ],
+      '/api/app/v1/brush/stats'
+          when failStats.contains(
+            Uri.parse(path).queryParameters['granularity'],
+          ) =>
+        const ApiReply(502, {'error': 'unavailable', 'message': '主机在重启'}),
+      '/api/app/v1/brush/stats' => _brushStats(
+        Uri.parse(path).queryParameters['granularity'] ?? 'day',
+      ),
       '/api/app/v1/brush/tasks/1' => {'id': 1, 'name': '测试刷流', 'enabled': true},
       '/api/app/v1/brush/tasks/1/runs' => {
         'total': 1,
@@ -354,6 +432,7 @@ Future<_World> _pumpApp(
   bool paired = true,
   String mode = 'device',
   bool mobileFeatures = false,
+  bool brushStats = false,
   HostStore? store,
   Future<void>? hostLoaded,
   AppearanceStore? appearance,
@@ -363,7 +442,12 @@ Future<_World> _pumpApp(
   tester.view.physicalSize = const Size(1170, 2532);
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
-  final w = _World([...scopes], mode: mode, mobileFeatures: mobileFeatures);
+  final w = _World(
+    [...scopes],
+    mode: mode,
+    mobileFeatures: mobileFeatures,
+    brushStats: brushStats,
+  );
   late HostRecord rec;
   await tester.runAsync(() async {
     w.hostKey = await DhKey.generate();
@@ -446,6 +530,86 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(w.requests.where((r) => r.startsWith('DELETE')), isEmpty);
+  });
+
+  /// 打开「更多」里的刷流页
+  Future<void> openBrush(WidgetTester tester) async {
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.text('刷流'));
+    await _settle(tester);
+  }
+
+  String subtitleOf(WidgetTester tester, String title) {
+    final tile = tester.widget<ListTile>(
+      find.ancestor(of: find.text(title), matching: find.byType(ListTile)),
+    );
+    return (tile.subtitle! as Text).data!;
+  }
+
+  String readout(WidgetTester tester) => tester
+      .widget<Text>(find.byKey(const ValueKey('brush-trend-readout')))
+      .textSpan!
+      .toPlainText();
+
+  // 2026-10-28 用户：刷流任务要能按天、周、月、季度、年看统计，手机端也要同步
+  testWidgets('刷流：按周期看收益，换成按周时重新请求，本期数字与任务的本期收益跟着换', (tester) async {
+    final w = await _pumpApp(tester, mobileFeatures: true, brushStats: true);
+    await openBrush(tester);
+    expect(
+      w.requests,
+      contains('GET /api/app/v1/brush/stats?granularity=day&periods=30'),
+    );
+    expect(find.text('今日上传'), findsOneWidget);
+    expect(find.text('昨日 4.0 GiB'), findsOneWidget);
+    expect(subtitleOf(tester, '测试刷流'), contains('今日 ↑5.0 GiB ↓1.0 GiB'));
+    expect(readout(tester), contains('（今日）'));
+
+    await tester.tap(find.text('周'));
+    await _settle(tester);
+    expect(
+      w.requests,
+      contains('GET /api/app/v1/brush/stats?granularity=week&periods=12'),
+    );
+    expect(find.text('本周上传'), findsOneWidget);
+    expect(find.text('30.0 GiB'), findsOneWidget);
+    expect(find.text('上周 20.0 GiB'), findsOneWidget);
+    expect(find.text('最近 12 周收益'), findsOneWidget);
+    expect(subtitleOf(tester, '测试刷流'), contains('本周 ↑7.0 GiB ↓2.0 GiB'));
+    expect(readout(tester), contains('11月2日–11月8日（本周）'));
+
+    // 点第一根柱子：读数换成那一周
+    final plot = tester.getTopLeft(
+      find.byKey(const ValueKey('brush-trend-plot')),
+    );
+    await tester.tapAt(plot + const Offset(3, 40));
+    await tester.pump();
+    expect(readout(tester), contains('8月17日–8月23日'));
+  });
+
+  testWidgets('刷流：统计读取失败时说明并能重试，不拿今天的冒充本周', (tester) async {
+    final w = await _pumpApp(tester, mobileFeatures: true, brushStats: true);
+    w.failStats.add('week');
+    await openBrush(tester);
+    await tester.tap(find.text('周'));
+    await _settle(tester);
+    expect(find.text('收益统计读取失败'), findsOneWidget);
+    expect(subtitleOf(tester, '测试刷流'), contains('本周 ↑— ↓—'));
+
+    w.failStats.clear();
+    await tester.tap(find.text('重试'));
+    await _settle(tester);
+    expect(find.text('收益统计读取失败'), findsNothing);
+    expect(subtitleOf(tester, '测试刷流'), contains('本周 ↑7.0 GiB ↓2.0 GiB'));
+  });
+
+  testWidgets('刷流：主机没有分段统计时不显示周期，任务照旧写今天', (tester) async {
+    final w = await _pumpApp(tester, mobileFeatures: true);
+    await openBrush(tester);
+    expect(find.byKey(const ValueKey('brush-period')), findsNothing);
+    expect(subtitleOf(tester, '测试刷流'), contains('今天 ↑0 B ↓0 B'));
+    expect(w.requests.where((r) => r.contains('/brush/stats')), isEmpty);
   });
 
   testWidgets('外观：点一套主题马上换上并存下来，打开跟随系统又回到明亮与暗黑', (tester) async {

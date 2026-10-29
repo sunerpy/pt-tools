@@ -376,6 +376,11 @@ type SiteDefinition struct {
 	// Attendance 是每日签到配置；为空时 NexusPHP 站点用 DefaultNexusPHPAttendance，其他架构不支持签到。
 	Attendance *AttendanceConfig `json:"attendance,omitempty"`
 
+	// SessionCookies 是站点会续期换发的登录 Cookie（BYR：auth_token 15 分钟过期，过期后站点用 refresh_token 换发一对新的，
+	// refresh_token 也换）。写了的 NexusPHP 站点：同一个实例的请求排队发，响应里换了这些 Cookie 就用新值接着请求，
+	// 并经 SessionCookieSink 存回站点设置（见 session_cookies.go）。没写的站点照旧只用存着的那组。
+	SessionCookies []string `json:"sessionCookies,omitempty"`
+
 	// CreateDriver is an optional custom driver factory for this site.
 	// If nil, the driver is created based on Schema field.
 	// This allows sites with unique APIs to provide custom driver logic.

@@ -1806,6 +1806,32 @@ export interface ChatOpBinding {
   expires_at?: string;
 }
 
+/** 绑定页「通道」一栏里的一个账号（internal/app/binding_channels.go 的 ChannelBindingUser） */
+export interface ChatOpsChannelUser {
+  user_id: string;
+  /** 在通道名单里的身份：admin、allowed；不在名单里时为空数组 */
+  roles: string[];
+  bound: boolean;
+  binding_id?: number;
+  /** 最近一次和机器人的往来（操作审计里最近的一条命令） */
+  last?: { command: string; result: string; at: string };
+}
+
+/** 绑定页「通道」一栏里的一个能收命令的通道（ChannelBindingView） */
+export interface ChatOpsBindingChannel {
+  conf_id: number;
+  name: string;
+  channel_type: string;
+  enabled: boolean;
+  runtime_state?: "connected" | "running" | "error" | "disabled";
+  /** 没有指定收件人的通知（每日战报、签到…）发给谁；没有时看 notify_error */
+  notify_target?: string;
+  notify_via?: "default_chat_id" | "admin" | "allowed" | "binding";
+  notify_error?: string;
+  users: ChatOpsChannelUser[];
+  config_error?: string;
+}
+
 export interface AuditLog {
   id: number;
   command: string;
@@ -1869,6 +1895,8 @@ export interface RecentNotification {
   kind: string;
   result: "sent" | "failed" | "pending" | "canceled" | "throttled";
   attempts: number;
+  /** 最近一次投递失败的原因（遮掉凭证）；没失败过时没有 */
+  error?: string;
   created_at: string;
 }
 
@@ -2009,6 +2037,16 @@ export const chatopsApi = {
         body: JSON.stringify(data),
       }),
     delete: (id: number) => api.delete<void>(`/api/chatops/bindings/${id}`),
+    /** 作废一个没用掉的绑定码（按待绑定列表里的编号） */
+    revokeCode: (id: number) => api.delete<{ status: string }>(`/api/chatops/bindings/codes/${id}`),
+    channels: () =>
+      api.get<{ channels: ChatOpsBindingChannel[] }>("/api/chatops/bindings/channels"),
+    /** 在网页上直接绑定通道名单里的账号（效果与绑定码相同） */
+    bindDirect: (confId: number, channelUserId: string) =>
+      api.post<ChatOpBinding>("/api/chatops/bindings", {
+        conf_id: confId,
+        channel_user_id: channelUserId,
+      }),
   },
   audit: {
     list: (params: URLSearchParams) =>
@@ -2316,13 +2354,24 @@ export interface BrushRunPage {
 }
 
 export interface BrushStatsPoint extends BrushStat {
+  /** 这一段的第一天（YYYY-MM-DD） */
   date: string;
+  /** 这一段的最后一天（自然的结束日：当前这一段可能晚于今天，收益只算到今天） */
+  end?: string;
 }
 
+/** 收益统计的分段：按日、周（周一开始）、月、季度、年，主机时区 */
+export type BrushStatsGranularity = "day" | "week" | "month" | "quarter" | "year";
+
 export interface BrushStatsResponse {
+  granularity: BrushStatsGranularity;
+  /** 段数；最后一段是当前这一段 */
+  periods: number;
+  /** 窗口覆盖的天数 */
   days: number;
   from: string;
   to: string;
+  /** 每一段的第一天 */
   dates: string[];
   tasks: { task_id: number; name: string; series: BrushStatsPoint[] }[];
   totals: BrushStatsPoint[];
@@ -2348,7 +2397,12 @@ export const brushApi = {
     api.get<{ items: BrushTorrent[]; total: number; page: number; page_size: number }>(
       `/api/brush/tasks/${id}/torrents?state=${state}&page=${page}&page_size=${pageSize}`,
     ),
-  stats: (days = 30) => api.get<BrushStatsResponse>(`/api/brush/stats?days=${days}`),
+  /** 最近 periods 段的收益；不传 periods 时按周期的默认段数（日 30、周 12、月 12、季度 8、年 5） */
+  stats: (granularity: BrushStatsGranularity = "day", periods?: number) => {
+    const params = new URLSearchParams({ granularity });
+    if (periods) params.set("periods", String(periods));
+    return api.get<BrushStatsResponse>(`/api/brush/stats?${params.toString()}`);
+  },
 };
 
 /** 下载器助手：缺站点标签的种子（按 tracker 认出了站点） */

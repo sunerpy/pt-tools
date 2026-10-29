@@ -6,6 +6,7 @@ import 'package:ptt_api/api.dart';
 
 import '../remote/connection.dart';
 import '../remote/host_record.dart';
+import 'brush_periods.dart';
 import 'storage.dart';
 
 /// App 的名字与版本（握手时告诉主机）。
@@ -181,6 +182,28 @@ final brushTasksProvider = FutureProvider.autoDispose<List<AppBrushTask>>((
   ref.watch(onlineEpochProvider);
   return _need(await requireApi(ref).listBrushTasks());
 });
+
+/// 刷流页的统计周期：这次运行里一直记着（换页回来还是同一个），默认按日。
+final brushPeriodProvider = NotifierProvider<BrushPeriodChoice, BrushPeriod>(
+  BrushPeriodChoice.new,
+);
+
+class BrushPeriodChoice extends Notifier<BrushPeriod> {
+  @override
+  BrushPeriod build() => BrushPeriod.day;
+
+  void set(BrushPeriod p) => state = p;
+}
+
+/// 按周期分段的刷流收益（主机 features 里有 brush_stats 时才有这个接口）。
+final brushStatsProvider = FutureProvider.autoDispose
+    .family<AppBrushStats, BrushPeriod>((ref, p) async {
+      ref.watch(onlineEpochProvider);
+      return _need(
+        await requireApi(ref)
+            .getBrushStats(granularity: p.api, periods: p.periods),
+      );
+    });
 
 final subscriptionsProvider = FutureProvider.autoDispose<List<AppSubscription>>(
   (ref) async {

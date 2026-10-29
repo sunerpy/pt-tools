@@ -68,6 +68,70 @@ func (s *Server) appBrushTasks(w http.ResponseWriter, r *http.Request) {
 	appJSON(w, out)
 }
 
+// AppBrushPeriod 是一段时间（一天、一周、一个月、一个季度或一年）的刷流收益。
+type AppBrushPeriod struct {
+	// Start 是这一段的第一天，End 是最后一天（yyyy-mm-dd，主机时区；最后一段的 End 可能在今天以后）
+	Start string `json:"start"`
+	End   string `json:"end"`
+	AppBrushStat
+}
+
+// AppBrushTaskPeriods 是一个任务各段的收益。
+type AppBrushTaskPeriods struct {
+	ID      uint             `json:"id"`
+	Name    string           `json:"name"`
+	Periods []AppBrushPeriod `json:"periods"`
+}
+
+// AppBrushStats 是 GET /brush/stats：最近若干段全部刷流任务的合计与每个任务的收益，最后一段是当前这一段（只算到今天）。
+type AppBrushStats struct {
+	Granularity string                `json:"granularity"`
+	Periods     int                   `json:"periods"`
+	From        string                `json:"from"`
+	To          string                `json:"to"`
+	Totals      []AppBrushPeriod      `json:"totals"`
+	Tasks       []AppBrushTaskPeriods `json:"tasks"`
+}
+
+func appBrushPeriods(series []BrushStatsSeriesPoint) []AppBrushPeriod {
+	out := make([]AppBrushPeriod, 0, len(series))
+	for _, p := range series {
+		out = append(out, AppBrushPeriod{Start: p.Date, End: p.End, AppBrushStat: AppBrushStat(p.BrushStatView)})
+	}
+	return out
+}
+
+// appBrushStats 是 GET /brush/stats?granularity=day|week|month|quarter|year&periods=N（与网页刷流任务页的统计同一份数据）。
+func (s *Server) appBrushStats(w http.ResponseWriter, r *http.Request) {
+	if global.GlobalDB == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")
+		return
+	}
+	q := r.URL.Query()
+	if q.Has("days") {
+		appError(w, http.StatusBadRequest, "bad_request", "用 granularity 与 periods 选范围")
+		return
+	}
+	gran, periods, err := parseBrushStatsQuery(q)
+	if err != nil {
+		appError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	resp, err := buildBrushStats(models.NewBrushRepository(global.GlobalDB.DB), time.Now(), gran, periods)
+	if err != nil {
+		appError(w, http.StatusInternalServerError, "internal", "读取刷流统计失败: "+err.Error())
+		return
+	}
+	out := AppBrushStats{
+		Granularity: resp.Granularity, Periods: resp.Periods, From: resp.From, To: resp.To,
+		Totals: appBrushPeriods(resp.Totals), Tasks: make([]AppBrushTaskPeriods, 0, len(resp.Tasks)),
+	}
+	for _, t := range resp.Tasks {
+		out.Tasks = append(out.Tasks, AppBrushTaskPeriods{ID: t.TaskID, Name: t.Name, Periods: appBrushPeriods(t.Series)})
+	}
+	appJSON(w, out)
+}
+
 // ---- 整理历史 ----
 
 // AppMediaHistory 是 GET /media/history 的一项。

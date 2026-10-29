@@ -83,7 +83,23 @@ All brush torrents carry the `pt-tools-brush` tag. The regular **Auto cleanup** 
 
 ## Earnings and the daily report
 
-The top of the brush page shows active torrents, today's upload and download, and the overall ratio; the **30-day earnings** card plots the daily upload of all tasks. Earnings are the difference between two consecutive samples of each brush torrent's total upload and download in the downloader, grouped by day in the server time zone; when two samples straddle midnight, the increment is split between the two days by duration.
+The page header of the brush page has a **Statistics** switch with five steps: day, week, month, quarter, and year. It controls every earnings figure on the page, and the choice is remembered in the browser.
+
+| Step    | Range           | Current period |
+| ------- | --------------- | -------------- |
+| Day     | Last 30 days    | Today          |
+| Week    | Last 12 weeks   | This week      |
+| Month   | Last 12 months  | This month     |
+| Quarter | Last 8 quarters | This quarter   |
+| Year    | Last 5 years    | This year      |
+
+- The number band at the top shows active torrents, the current period's upload and download (with the previous period next to it, for example **last week 77.14 GB**), and the overall ratio; the small bars in each cell are the last 7 periods.
+- The task table's **current period upload / download** column (**today** when the step is day) is each task's earnings in the current period.
+- The earnings card (for example **earnings over the last 12 weeks**) draws one bar per period for the upload. The readout above it shows the selected period's upload, download, added, and removed counts, and starts on the current period; hover a bar, or click the chart and use the left and right arrow keys, to see another period. **Details** lists every period as a table, newest first.
+
+Earnings are the difference between two consecutive samples of each brush torrent's total upload and download in the downloader, grouped by day in the server time zone; when two samples straddle midnight, the increment is split between the two days by duration. Weeks start on Monday and quarters in January, April, July, and October. The current period only counts up to today, so this week or this month is usually lower than the previous one.
+
+The brush page of the [mobile app](mobile-app.md) has the same five steps; tap or drag across the bars there.
 
 With the [daily report](user-stats.md#daily-report) on, a report sent on a day with brush earnings gains a "Brush today" section: total upload, download, added, and removed, plus one line per task when there is more than one.
 
@@ -110,6 +126,8 @@ pt-tools does not support Vertex's custom script rules. For more complex conditi
 | `POST /api/brush/tasks/<id>/run`                                 | Run one round now and return its result; returns 502 when the site or downloader failed and the round did not finish |
 | `GET /api/brush/tasks/<id>/runs?limit=<1–100>&offset=`           | Run history, newest first, with each round's steps                                                                   |
 | `GET /api/brush/tasks/<id>/torrents?state=active\|removed\|gone` | The task's torrents                                                                                                  |
-| `GET /api/brush/stats?days=<1–90>`                               | Daily earnings per task and in total for recent days                                                                 |
+| `GET /api/brush/stats?granularity=<period>&periods=<count>`      | Earnings per task and in total, grouped by period; see below                                                         |
 
 All of these require a logged-in session.
+
+`granularity` is `day`, `week`, `month`, `quarter`, or `year` (default `day`); `periods` defaults to 30, 12, 12, 8, and 5 and is capped at 366, 104, 60, 40, and 20. Every period has its first day in `date` and its last day in `end`; the last period is the current one (`end` is its natural end date, while earnings only count up to today). The old `?days=<1–90>` still works and equals that many day periods.

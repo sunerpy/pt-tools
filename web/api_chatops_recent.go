@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/redact"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -24,15 +25,17 @@ const (
 // 几条 RSS 合并成一条发出时这里仍逐条列出。没有存下内容的（例如超出每小时上限没发的）为空。
 // Result 是 sent（已发出，含发出后点了「忽略」的）、failed、pending、canceled（取消或被取代）、throttled（超出每小时上限）。
 type RecentNotification struct {
-	Source    string    `json:"source"`
-	LogID     uint      `json:"log_id"`
-	ConfID    uint      `json:"conf_id"`
-	Title     string    `json:"title"`
-	Site      string    `json:"site,omitempty"`
-	TorrentID string    `json:"torrent_id,omitempty"`
-	Kind      string    `json:"kind"`
-	Result    string    `json:"result"`
-	Attempts  int       `json:"attempts"`
+	Source    string `json:"source"`
+	LogID     uint   `json:"log_id"`
+	ConfID    uint   `json:"conf_id"`
+	Title     string `json:"title"`
+	Site      string `json:"site,omitempty"`
+	TorrentID string `json:"torrent_id,omitempty"`
+	Kind      string `json:"kind"`
+	Result    string `json:"result"`
+	Attempts  int    `json:"attempts"`
+	// Error 是最近一次投递失败的原因（遮掉凭证）；没有失败过时为空
+	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -53,13 +56,13 @@ func (h *chatopsHandlers) notifyRecent(w http.ResponseWriter, r *http.Request) {
 	}
 	db := global.GlobalDB.DB.WithContext(r.Context())
 	var rss []models.RSSNotificationLog
-	if err := db.Select("id, site_name, torrent_id, notify_kind, notification_conf_id, result, attempts, payload_json, delivered_at, created_at").
+	if err := db.Select("id, site_name, torrent_id, notify_kind, notification_conf_id, result, attempts, last_error, payload_json, delivered_at, created_at").
 		Order("created_at DESC, id DESC").Limit(limit).Find(&rss).Error; err != nil {
 		writeChatopsErr(w, http.StatusInternalServerError, "query_failed", "读取 RSS 通知日志失败")
 		return
 	}
 	var mon []models.MonitorNotificationLog
-	if err := db.Select("id, source, kind, notification_conf_id, result, attempts, payload_json, created_at").
+	if err := db.Select("id, source, kind, notification_conf_id, result, attempts, last_error, payload_json, created_at").
 		Order("created_at DESC, id DESC").Limit(limit).Find(&mon).Error; err != nil {
 		writeChatopsErr(w, http.StatusInternalServerError, "query_failed", "读取监控通知日志失败")
 		return
@@ -77,13 +80,13 @@ func (h *chatopsHandlers) notifyRecent(w http.ResponseWriter, r *http.Request) {
 		items = append(items, RecentNotification{
 			Source: "rss", LogID: row.ID, ConfID: row.NotificationConfID, Title: payloadTitle(row.PayloadJSON),
 			Site: row.SiteName, TorrentID: row.TorrentID, Kind: row.NotifyKind, Result: result,
-			Attempts: row.Attempts, CreatedAt: row.CreatedAt,
+			Attempts: row.Attempts, Error: redact.Secrets(row.LastError), CreatedAt: row.CreatedAt,
 		})
 	}
 	for _, row := range mon {
 		items = append(items, RecentNotification{
 			Source: row.Source, LogID: row.ID, ConfID: row.NotificationConfID, Title: payloadTitle(row.PayloadJSON),
-			Kind: row.Kind, Result: row.Result, Attempts: row.Attempts, CreatedAt: row.CreatedAt,
+			Kind: row.Kind, Result: row.Result, Attempts: row.Attempts, Error: redact.Secrets(row.LastError), CreatedAt: row.CreatedAt,
 		})
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })

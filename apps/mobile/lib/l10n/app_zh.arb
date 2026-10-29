@@ -429,6 +429,164 @@
       }
     }
   },
+  "brushPeriodDay": "日",
+  "brushPeriodWeek": "周",
+  "brushPeriodMonth": "月",
+  "brushPeriodQuarter": "季",
+  "brushPeriodYear": "年",
+  "brushCurDay": "今日",
+  "brushPrevDay": "昨日",
+  "brushCurWeek": "本周",
+  "brushPrevWeek": "上周",
+  "brushCurMonth": "本月",
+  "brushPrevMonth": "上月",
+  "brushCurQuarter": "本季度",
+  "brushPrevQuarter": "上季度",
+  "brushCurYear": "今年",
+  "brushPrevYear": "去年",
+  "brushWindowDay": "最近 {count} 天",
+  "@brushWindowDay": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "brushWindowWeek": "最近 {count} 周",
+  "@brushWindowWeek": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "brushWindowMonth": "最近 {count} 个月",
+  "@brushWindowMonth": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "brushWindowQuarter": "最近 {count} 个季度",
+  "@brushWindowQuarter": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "brushWindowYear": "最近 {count} 年",
+  "@brushWindowYear": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "brushUpIn": "{period}上传",
+  "@brushUpIn": {
+    "placeholders": {
+      "period": {
+        "type": "String"
+      }
+    }
+  },
+  "brushDownIn": "{period}下载",
+  "@brushDownIn": {
+    "placeholders": {
+      "period": {
+        "type": "String"
+      }
+    }
+  },
+  "brushPrevValue": "{period} {value}",
+  "@brushPrevValue": {
+    "placeholders": {
+      "period": {
+        "type": "String"
+      },
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "brushPeriodRow": "{period} ↑{up} ↓{down}",
+  "@brushPeriodRow": {
+    "placeholders": {
+      "period": {
+        "type": "String"
+      },
+      "up": {
+        "type": "String"
+      },
+      "down": {
+        "type": "String"
+      }
+    }
+  },
+  "brushTrendTitle": "{window}收益",
+  "@brushTrendTitle": {
+    "placeholders": {
+      "window": {
+        "type": "String"
+      }
+    }
+  },
+  "brushTrendTotal": "合计上传 {up}、下载 {down}",
+  "@brushTrendTotal": {
+    "placeholders": {
+      "up": {
+        "type": "String"
+      },
+      "down": {
+        "type": "String"
+      }
+    }
+  },
+  "brushTrendUp": "上传 {value}",
+  "@brushTrendUp": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "brushTrendDetail": "下载 {down} · 加入 {added} 个 · 删除 {removed} 个",
+  "@brushTrendDetail": {
+    "placeholders": {
+      "down": {
+        "type": "String"
+      },
+      "added": {
+        "type": "int"
+      },
+      "removed": {
+        "type": "int"
+      }
+    }
+  },
+  "brushTrendCurrent": "{when}（{period}）",
+  "@brushTrendCurrent": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      },
+      "period": {
+        "type": "String"
+      }
+    }
+  },
+  "brushTrendEmpty": "{window}没有刷流收益",
+  "@brushTrendEmpty": {
+    "placeholders": {
+      "window": {
+        "type": "String"
+      }
+    }
+  },
+  "brushTrendHint": "点柱子或左右拖动，看每一段",
+  "brushStatsFailed": "收益统计读取失败",
   "noDownloaders": "没有启用的下载器",
   "settingsConnection": "连接",
   "settingsVia": "方式",

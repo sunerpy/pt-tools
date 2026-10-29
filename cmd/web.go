@@ -115,6 +115,8 @@ var webCmd = &cobra.Command{
 			global.GetSlogger().Info("SearchOrchestrator 初始化成功")
 
 			web.InitSiteRegistry(siteRegistry)
+			// 会续期的站点（BYR）换发的 Cookie 存回站点设置，重启以后接着用（见 site/v2/session_cookies.go）
+			v2.SetSessionCookieSink(renewedCookieSink(store))
 			sites, siteErr := store.ListSites()
 			if siteErr != nil {
 				global.GetSlogger().Warnf("读取站点配置失败: %v", siteErr)

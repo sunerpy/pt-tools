@@ -27,10 +27,14 @@ The popup's main page is My sites (我的站点): every site with a cookie in th
 
 When the popup opens it first shows the results read last time, with Updating… (更新中…) next to the title, and replaces them once they are read again, without waiting for pt-tools. When the login status cannot be read from pt-tools (for example after pt-tools restarted and the extension's session is gone), the list keeps showing the keep-alive state read last time and the note above says when it was read; if it has never been read, each row reads Status unknown (状态未知). Choose Log in (去登录) above the list to sign in to pt-tools again in the settings.
 
-When a cookie shows Missing (缺失), the row names the sign-in cookies that are missing (for example Missing c_secure_pass); usually you are not signed in to that site, and Sync (同步) appears once you sign in. Cookies that a site sets on its parent domain are recognized too. Sites on newer NexusPHP releases (such as XingYunGe) set only `c_secure_pass` when you sign in, and that counts as signed in; OurBits sets only `ourbits_jwt`.
+The extension first recognizes the format of the sign-in cookies: the site's own set (`ourbits_jwt` on OurBits, `SPRINGID` on SpringSunday, `auth_token` and friends on BYR, and so on), NexusPHP's `c_secure_uid` plus `c_secure_pass` (`c_secure_tracker_ssl` is only a preference, so a missing one still counts as signed in), and newer NexusPHP releases (such as XingYunGe) that set only `c_secure_pass`. A recognized set shows Valid (有效) with the days left, and syncing sends it to pt-tools directly. Cookies that a site sets on its parent domain, or over http (for example OpenCD), are recognized too.
+
+When the format is not recognized but there are cookies that look like sign-in cookies, the row shows Unverified (待验证) and can still be synced: the extension sends every cookie the browser sends to that site, pt-tools signs in to the site with them once, and saves them only if that works. If it does not, nothing is saved, the cookies pt-tools already has stay as they are, and the extension shows why (not signed in, stopped by a human-verification challenge, pt-tools cannot reach the site, and so on). This needs pt-tools 1.0.0-rc.45 or later; older versions are not sent such cookies. Scheduled sync does this only for sites that are enabled in pt-tools or have automatic sync turned on, and once a set of cookies is rejected it is not retried until the cookies change.
+
+When there are only analytics, Cloudflare or language-preference cookies, the row shows Missing (缺失) and says No login cookies; probably signed out (没有登录 Cookie，多半没登录). Sync (同步) appears once you sign in.
 
 - **One site**: choose Sync (同步) on its row; when the current tab is that site, the top of the popup also offers 🔄 Sync Cookie to pt-tools (同步 Cookie 到 pt-tools).
-- **All sites**: choose Sync all (同步全部) above the list to sync every site whose cookie is valid.
+- **All sites**: choose Sync all (同步全部) above the list to sync every site whose cookie is valid or unverified.
 - **Automatically**: open the popup on the site's page and turn on Auto-sync Cookie (自动同步 Cookie); the cookie is then synced whenever you sign in again or it changes.
 - **Keeping accounts active**: Open sites (打开站点) opens the sites in background tabs; Open (打开) on a row opens one.
 

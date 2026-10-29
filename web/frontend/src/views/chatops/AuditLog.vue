@@ -12,6 +12,12 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { useSearchInput } from "@/composables/useSearchInput";
+import {
+  isNotifyCommand,
+  notifyAuditArgs,
+  notifyCommandLabel,
+  notifyFailureText,
+} from "@/utils/notifySource";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -100,7 +106,12 @@ const cmdRows = computed<BreakdownRow[]>(() => {
   }
   return [...buckets.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "primary" as const }));
+    .map(([name, n]) => ({
+      key: name,
+      label: commandText(name),
+      value: n,
+      tone: "primary" as const,
+    }));
 });
 
 const channelRows = computed<BreakdownRow[]>(() => {
@@ -132,10 +143,10 @@ const failRows = computed<BreakdownRow[]>(() =>
     .slice(0, 8)
     .map((log) => {
       const denied = resultKind(log.result) === "denied";
-      const reason = (log.result ?? "").split(":").slice(1).join(":");
+      const reason = failureReason(log);
       return {
         key: String(log.id),
-        label: log.command || "(空命令)",
+        label: commandText(log.command) || "(空命令)",
         value: denied ? "被拒" : "出错",
         weight: 1,
         tone: denied ? ("warn" as const) : ("dang" as const),
@@ -157,6 +168,8 @@ const filters = reactive({
   channelType: [] as string[],
   result: [] as string[],
   command: "",
+  /** 记录的种类：notify 只看后台通知的投递，action 只看命令与接口的调用，空串都看 */
+  category: "",
 });
 
 const hasFilter = computed(
@@ -165,6 +178,7 @@ const hasFilter = computed(
     timeQuick.value !== "" ||
     filters.channelType.length > 0 ||
     filters.result.length > 0 ||
+    Boolean(filters.category) ||
     Boolean(filters.command),
 );
 
@@ -200,6 +214,24 @@ const channelChip = computed({
   set: (v: string | undefined) => {
     /* el-select 点清除给的是 undefined 不是 ""：之前那样写会存成 [undefined]，页面误判为「已筛选」 */
     filters.channelType = v ? [v] : [];
+    handleFilterChange();
+  },
+});
+
+/*
+ * 「类型」chip：签到、追剧、每日战报这些后台通知的投递也记在审计里（命令 notify:…），
+ * 量多的时候和机器人命令混在一起不好找，所以可以只看其中一种。
+ */
+const CATEGORY_CHIP = [
+  { label: "类型: 全部", value: "" },
+  { label: "命令与接口", value: "action" },
+  { label: "消息通知", value: "notify" },
+] as const;
+
+const categoryChip = computed({
+  get: () => filters.category,
+  set: (v: string | undefined) => {
+    filters.category = v ?? "";
     handleFilterChange();
   },
 });
@@ -265,7 +297,7 @@ const stateSub = computed(() => {
   // 记的不只是机器人命令：API 令牌、qB 兼容入口、MCP、远程设备、AI 助手的写操作也在这里（见 CHANNEL_LABELS）
   return hasFilter.value
     ? "换个时间段或清掉筛选再看"
-    : "经 ChatOps、API 令牌、qB 兼容入口、MCP、远程设备与 AI 助手做的操作（包括被拒绝的）都会记在这里";
+    : "经 ChatOps、API 令牌、qB 兼容入口、MCP、远程设备与 AI 助手做的操作（包括被拒绝的），以及签到、追剧、每日战报等通知的每次投递，都会记在这里";
 });
 
 /** 「09-18 12:03」这种短时间：摘要行要在一行里放下两个时间点，整段日期太长 */
@@ -352,6 +384,9 @@ async function fetchAuditLogs() {
   }
   if (filters.result.length > 0) {
     params.append("result", filters.result.join(","));
+  }
+  if (filters.category) {
+    params.append("category", filters.category);
   }
   if (filters.command) {
     /*
@@ -449,6 +484,22 @@ function channelLabel(type: string) {
 
 function channelShort(type: string) {
   return CHANNEL_SHORT[type] ?? channelLabel(type);
+}
+
+/** 命令一列的写法：后台通知的投递写成通知的叫法（每日战报、签到…），别的命令原样 */
+function commandText(command: string): string {
+  return isNotifyCommand(command) ? notifyCommandLabel(command) : command;
+}
+
+/**
+ * 没成功的原因：后台通知的投递写参数里记下的原因、第几次与什么时候再试；
+ * 别的记录写结果冒号后面那段（not_bound 之类）。
+ */
+function failureReason(row: AuditLog): string {
+  if (isNotifyCommand(row.command)) {
+    return notifyFailureText(notifyAuditArgs(row.args_json)) || resultReason(row.result);
+  }
+  return resultReason(row.result);
 }
 
 function resultTone(result: string) {
@@ -571,6 +622,15 @@ function exportCsv() {
           :key="value"
           :label="`通道: ${label}`"
           :value="value" />
+      </el-select>
+
+      <el-select
+        v-model="categoryChip"
+        class="f-chip"
+        size="small"
+        placeholder="类型: 全部"
+        data-testid="audit-category-chip">
+        <el-option v-for="c in CATEGORY_CHIP" :key="c.value" :label="c.label" :value="c.value" />
       </el-select>
 
       <!-- 画板 chip「时间」：快捷档；「自定义…」才露出区间选择器 -->
@@ -700,7 +760,8 @@ function exportCsv() {
           min-width="140"
           class-name="pt-cell-1line">
           <template #default="{ row }">
-            <span class="uid">{{ row.channel_user_id || "-" }}</span>
+            <span v-if="isNotifyCommand(row.command)" class="sys">系统通知</span>
+            <span v-else class="uid">{{ row.channel_user_id || "-" }}</span>
           </template>
         </el-table-column>
 
@@ -710,7 +771,16 @@ function exportCsv() {
           min-width="140"
           class-name="pt-cell-strong pt-cell-1line">
           <template #default="{ row }">
-            <span class="cmd">{{ row.command }}</span>
+            <template v-if="isNotifyCommand(row.command)">
+              <span class="cmd cmd--notify" :title="row.command">{{
+                commandText(row.command)
+              }}</span>
+              <!-- 通知没发出去的原因直接写在这一行：每日战报为什么没收到，不用再展开 -->
+              <span v-if="failureReason(row)" class="cmd-reason" :title="failureReason(row)">{{
+                failureReason(row)
+              }}</span>
+            </template>
+            <span v-else class="cmd">{{ row.command }}</span>
           </template>
         </el-table-column>
 
@@ -727,7 +797,10 @@ function exportCsv() {
               所以同时给 `title`（读屏与键盘都读得到）并在胶囊上标 `aria-label` ——
               一次评审指出这一点，判得对。展开那一行也能看到完整参数。
             -->
-            <el-tooltip :content="row.result" placement="top" :disabled="!resultReason(row.result)">
+            <el-tooltip
+              :content="failureReason(row) || row.result"
+              placement="top"
+              :disabled="!failureReason(row)">
               <PtStatusPill
                 :tone="resultTone(row.result)"
                 size="sm"
@@ -768,7 +841,10 @@ function exportCsv() {
 
         <PtRowCard v-for="row in auditLogs" :key="row.id">
           <template #title>
-            <code class="cmd">{{ row.command }}</code>
+            <span v-if="isNotifyCommand(row.command)" class="cmd--notify">{{
+              commandText(row.command)
+            }}</span>
+            <code v-else class="cmd">{{ row.command }}</code>
           </template>
 
           <template #meta>
@@ -777,7 +853,8 @@ function exportCsv() {
               {{ formatDate(row.created_at) }}
             </span>
             <PtTag>{{ channelLabel(row.channel_type) }}</PtTag>
-            <span>
+            <span v-if="isNotifyCommand(row.command)" class="sys">系统通知</span>
+            <span v-else>
               <PtIcon name="user" :size="11" />
               <code class="uid">{{ row.channel_user_id || "-" }}</code>
             </span>
@@ -790,9 +867,9 @@ function exportCsv() {
               tooltip 在触屏上也打不开），手机上卡片本来就是纵向的，直接铺一行最省事 ——
               不然移动端只剩「被拒」两个字，为什么被拒无处可查。
             -->
-            <span v-if="resultReason(row.result)" class="card-reason">
+            <span v-if="failureReason(row)" class="card-reason">
               <PtIcon name="info" :size="11" />
-              <code class="uid">{{ resultReason(row.result) }}</code>
+              <code class="uid">{{ failureReason(row) }}</code>
             </span>
           </template>
 
@@ -1000,6 +1077,22 @@ function exportCsv() {
 .cmd {
   font-family: var(--pt-font-mono);
   color: var(--pt-t1);
+}
+
+/* 后台通知的投递：写通知的叫法（不是命令），用正文字体；原因跟在后面，单行放不下时省略、悬停看全文 */
+.cmd--notify {
+  color: var(--pt-t1);
+}
+
+.cmd-reason {
+  margin-left: 8px;
+  color: var(--pt-dang);
+  font-size: var(--pt-fz-label);
+}
+
+/* 触发用户一列：系统发的通知没有触发用户 */
+.sys {
+  color: var(--pt-t3);
 }
 
 /* 手机卡片的标题：App API 的命令是一长串路径，中间没有空格，不按字符折行会被截掉一截 */

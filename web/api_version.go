@@ -18,7 +18,7 @@ func (s *Server) apiPing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"status":   "ok",
 		"version":  version.GetVersionInfo().Version,
-		"features": []string{FeatureCredentialKeepEnabled},
+		"features": []string{FeatureCredentialKeepEnabled, FeatureCredentialVerify},
 	})
 }
 

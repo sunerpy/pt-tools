@@ -41,7 +41,6 @@ function statusOf(index: number, cookieStatus: KnownSiteStatus["cookieStatus"]):
     cookieStatus,
     cookieExpireDays: cookieStatus === "valid" ? 30 : null,
     hasCookie: true,
-    missingCookies: cookieStatus === "missing" ? ["c_secure_pass"] : [],
     lastSync: null,
     autoSync: false,
   };
@@ -50,16 +49,13 @@ function statusOf(index: number, cookieStatus: KnownSiteStatus["cookieStatus"]):
 describe("站点状态快照", () => {
   it("存下以后按现在的站点定义还原，带着读到的时间", async () => {
     const at = new Date("2026-10-24T12:00:00Z");
-    await saveSitesSnapshot([statusOf(0, "valid"), statusOf(1, "missing")], at);
+    await saveSitesSnapshot([statusOf(0, "valid"), statusOf(1, "unverified")], at);
 
     const got = await loadSitesSnapshot();
 
     expect(got?.at).toBe(at.toISOString());
     expect(got?.data.map((s) => s.site.id)).toEqual([KNOWN_SITES[0]!.id, KNOWN_SITES[1]!.id]);
-    expect(got?.data[1]).toMatchObject({
-      cookieStatus: "missing",
-      missingCookies: ["c_secure_pass"],
-    });
+    expect(got?.data[1]).toMatchObject({ cookieStatus: "unverified", hasCookie: true });
     expect(got?.data[0]!.site, "站点定义用扩展现在的，不用存下的").toBe(KNOWN_SITES[0]);
   });
 

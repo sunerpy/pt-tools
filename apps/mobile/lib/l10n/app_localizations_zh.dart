@@ -665,6 +665,132 @@ class SZh extends S {
   }
 
   @override
+  String get brushPeriodDay => '日';
+
+  @override
+  String get brushPeriodWeek => '周';
+
+  @override
+  String get brushPeriodMonth => '月';
+
+  @override
+  String get brushPeriodQuarter => '季';
+
+  @override
+  String get brushPeriodYear => '年';
+
+  @override
+  String get brushCurDay => '今日';
+
+  @override
+  String get brushPrevDay => '昨日';
+
+  @override
+  String get brushCurWeek => '本周';
+
+  @override
+  String get brushPrevWeek => '上周';
+
+  @override
+  String get brushCurMonth => '本月';
+
+  @override
+  String get brushPrevMonth => '上月';
+
+  @override
+  String get brushCurQuarter => '本季度';
+
+  @override
+  String get brushPrevQuarter => '上季度';
+
+  @override
+  String get brushCurYear => '今年';
+
+  @override
+  String get brushPrevYear => '去年';
+
+  @override
+  String brushWindowDay(int count) {
+    return '最近 $count 天';
+  }
+
+  @override
+  String brushWindowWeek(int count) {
+    return '最近 $count 周';
+  }
+
+  @override
+  String brushWindowMonth(int count) {
+    return '最近 $count 个月';
+  }
+
+  @override
+  String brushWindowQuarter(int count) {
+    return '最近 $count 个季度';
+  }
+
+  @override
+  String brushWindowYear(int count) {
+    return '最近 $count 年';
+  }
+
+  @override
+  String brushUpIn(String period) {
+    return '$period上传';
+  }
+
+  @override
+  String brushDownIn(String period) {
+    return '$period下载';
+  }
+
+  @override
+  String brushPrevValue(String period, String value) {
+    return '$period $value';
+  }
+
+  @override
+  String brushPeriodRow(String period, String up, String down) {
+    return '$period ↑$up ↓$down';
+  }
+
+  @override
+  String brushTrendTitle(String window) {
+    return '$window收益';
+  }
+
+  @override
+  String brushTrendTotal(String up, String down) {
+    return '合计上传 $up、下载 $down';
+  }
+
+  @override
+  String brushTrendUp(String value) {
+    return '上传 $value';
+  }
+
+  @override
+  String brushTrendDetail(String down, int added, int removed) {
+    return '下载 $down · 加入 $added 个 · 删除 $removed 个';
+  }
+
+  @override
+  String brushTrendCurrent(String when, String period) {
+    return '$when（$period）';
+  }
+
+  @override
+  String brushTrendEmpty(String window) {
+    return '$window没有刷流收益';
+  }
+
+  @override
+  String get brushTrendHint => '点柱子或左右拖动，看每一段';
+
+  @override
+  String get brushStatsFailed => '收益统计读取失败';
+
+  @override
   String get noDownloaders => '没有启用的下载器';
 
   @override

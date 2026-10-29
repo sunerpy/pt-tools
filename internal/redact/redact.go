@@ -10,6 +10,8 @@ import (
 var (
 	// urlQueryRe 是文本里带查询串的地址（不分大小写，含 udp）：passkey、签名之类多在查询串里，整段去掉。
 	urlQueryRe = regexp.MustCompile(`(?i)\b((?:https?|udp)://[^\s?#"'<>]+)\?[^\s"'<>]*`)
+	// botTokenRe 是 Telegram 的 bot token（<数字>:<密钥>）：Bot API 把它写在地址的路径里，telego 的错误会原样带上整个地址。
+	botTokenRe = regexp.MustCompile(`\b(bot)?\d{6,}:[A-Za-z0-9_-]{20,}`)
 	// urlUserinfoRe 是地址里的用户名与密码。
 	urlUserinfoRe = regexp.MustCompile(`(?i)\b((?:https?|udp)://)[^/\s@"'<>]+@`)
 	// jsonSecretRe 是上游回应体里 JSON 形式的凭证字段。
@@ -28,9 +30,10 @@ var (
 	infoHashRe = regexp.MustCompile(`^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$`)
 )
 
-// Credentials 去掉地址的用户信息与整段查询串，遮 JSON 与 key=value 形式的凭证字段。不碰别的长串：
+// Credentials 去掉地址的用户信息与整段查询串，遮 JSON 与 key=value 形式的凭证字段与 Telegram 的 bot token。不碰别的长串：
 // 种子的 info hash 之类的编号原样留着（AI 助手存下来的工具结果要靠它们接着对话）。
 func Credentials(s string) string {
+	s = botTokenRe.ReplaceAllString(s, "${1}***")
 	s = urlUserinfoRe.ReplaceAllString(s, "$1***@")
 	s = urlQueryRe.ReplaceAllString(s, "$1?…")
 	s = jsonSecretRe.ReplaceAllString(s, `"$1":"***"`)

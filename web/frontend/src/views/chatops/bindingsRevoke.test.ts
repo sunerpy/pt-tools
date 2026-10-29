@@ -26,7 +26,12 @@ vi.mock("@/api", async (orig) => {
   return {
     ...real,
     chatopsApi: {
-      bindings: { list: api.listBindings, delete: api.deleteBinding, update: vi.fn() },
+      bindings: {
+        list: api.listBindings,
+        delete: api.deleteBinding,
+        update: vi.fn(),
+        channels: vi.fn(() => Promise.resolve({ channels: [] })),
+      },
       notifications: { list: vi.fn(() => Promise.resolve([])) },
     },
   };

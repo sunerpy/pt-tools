@@ -10,7 +10,6 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 type credentialUpdateRequest struct {
@@ -23,6 +22,9 @@ type credentialUpdateRequest struct {
 	// 给浏览器扩展的定时同步用 —— 它会推浏览器里登录着、但 pt-tools 里还没启用的站点，不能替用户把站点启用。
 	// 不带这个字段时照旧：推了凭据就启用站点（扩展里手动点的同步）。
 	KeepEnabled *bool `json:"keep_enabled,omitempty"`
+	// VerifyCookie 为 true 时先用这次的 Cookie 实际访问站点一次（与登录探测同一套），登录上了才保存；
+	// 没登录上不保存、原来的凭据不动，回 422 和原因（见 verifyCookieOrReject）。给浏览器扩展同步它认不出格式的 Cookie 用。
+	VerifyCookie *bool `json:"verify_cookie,omitempty"`
 }
 
 // FeatureCredentialKeepEnabled 写在 /api/ping 的 features 里：扩展看到它才会让定时同步推没启用的站点。
@@ -55,6 +57,20 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 	}
 	if req.Passkey != nil {
 		sc.Passkey = *req.Passkey
+	}
+	// 要验证的 Cookie 先拿它登录一次，登录上了才往下走到任何一条保存的路
+	if req.VerifyCookie != nil && *req.VerifyCookie {
+		if req.Cookie == nil || strings.TrimSpace(*req.Cookie) == "" {
+			http.Error(w, "verify_cookie 要和 cookie 一起提供", http.StatusBadRequest)
+			return
+		}
+		cookie, ok := s.verifyCookieOrReject(r.Context(), w, string(sg), sc)
+		if !ok {
+			return
+		}
+		// 验证那次访问要是续了期（BYR 换发令牌、refresh_token 也换），原来那组已经用掉了：存换发后的
+		sc.Cookie = cookie
+		req.Cookie = &cookie
 	}
 	enabled := sc.Enabled != nil && *sc.Enabled
 	// 调用方要求不改启用状态、站点又是停用的：只存凭据，站点照旧停用。
@@ -120,10 +136,7 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 
 // incompleteCredentialWarning 说明凭据存下了、站点还缺哪一项才能启用。
 func incompleteCredentialWarning(siteName, missing string) string {
-	name := siteName
-	if def, ok := v2.GetDefinitionRegistry().Get(siteName); ok && def.Name != "" {
-		name = def.Name
-	}
+	name := siteLabel(siteName)
 	label := map[string]string{"cookie": "Cookie", "api_key": "API Key", "passkey": "Passkey"}[missing]
 	return fmt.Sprintf("已保存，但 %s 还需要 %s 才能启用：在 pt-tools 的「站点列表」里编辑 %s，填上 %s", name, label, name, label)
 }

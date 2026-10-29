@@ -13,8 +13,8 @@ import {
   buildMySites,
   countMine,
   loginLabel,
+  cookieHint,
   loginTone,
-  missingCookieNames,
   type MySiteRow,
 } from "../mySites";
 import CookieStatus from "./CookieStatus.vue";
@@ -87,9 +87,12 @@ function syncedText(iso: string | null): string {
   return iso ? t("mySites.synced", ago(iso)) : "";
 }
 
-function missingText(row: MySiteRow): string {
-  const names = missingCookieNames(row.status);
-  return names.length > 0 ? t("mySites.missingCookies", names.join(", ")) : "";
+/** 没登录 Cookie 时总写出来；格式认不出时没同步过才写（同步过一次就说明 pt-tools 验证通过了，写同步时间） */
+function hintText(row: MySiteRow): string {
+  const hint = cookieHint(row.status);
+  if (hint === "noLogin") return t("mySites.cookieNoLogin");
+  if (hint === "unverified" && !row.status.lastSync) return t("mySites.cookieUnverified");
+  return "";
 }
 
 function openOne(row: MySiteRow): void {
@@ -167,9 +170,9 @@ function openOne(row: MySiteRow): void {
         <div class="my-site__meta">
           <span
             class="my-site__synced"
-            :class="{ 'my-site__missing': missingText(row) }"
+            :class="{ 'my-site__missing': cookieHint(row.status) === 'noLogin' }"
             :data-testid="`synced-${row.status.site.id}`"
-            >{{ missingText(row) || syncedText(row.status.lastSync) }}</span
+            >{{ hintText(row) || syncedText(row.status.lastSync) }}</span
           >
           <button type="button" class="link-btn" @click="openOne(row)">
             {{ t("mySites.open") }}

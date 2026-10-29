@@ -2,15 +2,24 @@ import { KNOWN_SITES, type KnownSite } from "../../core/constants";
 import { t } from "../../core/i18n";
 import type { SiteCookieData } from "../../core/types";
 
-type CookieHealthStatus = "valid" | "expiring" | "expired" | "missing";
+/**
+ * Cookie 状态：valid / expiring / expired 是认出了登录 Cookie 的格式（站点自己声明的、NexusPHP 新旧两种），可以直接同步；
+ * unverified 是有像登录用的 Cookie、格式认不出（BYR 现在是 auth_token / refresh_token），整组推给 pt-tools，
+ * 由它先拿这组 Cookie 实际登录一次、登录上了才保存；missing 是没有登录 Cookie（只有统计、Cloudflare 这类）。
+ */
+export type CookieHealthStatus = "valid" | "expiring" | "expired" | "unverified" | "missing";
+
+/** 认出的登录格式：declared 是站点自己声明的一组，nexus-token 是新版 NexusPHP 的签名令牌，nexus 是旧版的 uid + pass */
+export type CookieFormat = "declared" | "nexus-token" | "nexus";
 
 interface CookieHealthResult {
   status: CookieHealthStatus;
   expireDays: number | null;
+  /** 可以推给 pt-tools 的 Cookie；missing 时为空 */
   cookieString: string;
   hasCookie: boolean;
-  /** 缺失时还差哪几个必需 Cookie（按最接近凑齐的那个域名算）；其他状态为空 */
-  missingCookies: string[];
+  /** 认出的登录格式；unverified、missing 时为空 */
+  format: CookieFormat | null;
 }
 
 function ensureCookiesApi(): void {
@@ -26,9 +35,32 @@ function toCookieString(cookies: chrome.cookies.Cookie[]): string {
 /**
  * 浏览器访问这个域名时会带上的 Cookie。按网址取，和浏览器实际发给站点的一致：包括设在上一级域名上的。
  * 以前按 domain 过滤，只认这个域名和它的子域名，把 Cookie 设在上一级域名上的站点登录着也显示「缺失」。
+ * https 和 http 两边都取：有的站点（OpenCD）没登录时把 https 跳到 http，登录 Cookie 是在 http 下设的，
+ * 浏览器按协议区分 Cookie 时只按 https 取会漏掉。同名、同域、同路径的取 https 那一条。
  */
 async function siteCookies(domain: string): Promise<chrome.cookies.Cookie[]> {
-  return chrome.cookies.getAll({ url: `https://${domain}/` });
+  const [secure, plain] = await Promise.all([
+    chrome.cookies.getAll({ url: `https://${domain}/` }),
+    chrome.cookies.getAll({ url: `http://${domain}/` }),
+  ]);
+  const seen = new Set<string>();
+  return [...secure, ...plain].filter((cookie) => {
+    const key = `${cookie.name}\u0000${cookie.domain}\u0000${cookie.path}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** 第一个有 Cookie 的域名下的全部 Cookie（passkey / api_key 站点用，它们不同步 Cookie） */
+async function firstDomainCookies(site: KnownSite): Promise<chrome.cookies.Cookie[]> {
+  for (const domain of site.domains) {
+    const cookies = await siteCookies(domain);
+    if (cookies.length > 0) {
+      return cookies;
+    }
+  }
+  return [];
 }
 
 async function getCookiesAcrossDomains(site: KnownSite): Promise<chrome.cookies.Cookie[]> {
@@ -44,7 +76,6 @@ async function getCookiesAcrossDomains(site: KnownSite): Promise<chrome.cookies.
 /**
  * 新版 NexusPHP（xiaomlove，include/functions.php 的 logincookie）登录只设一个 c_secure_pass：值是 base64 的
  * {"user_id":…,"expires":…}.签名（PHP 写 Cookie 时把 = + / 编成 %XX），没有 c_secure_uid、c_secure_tracker_ssl（星陨阁）。
- * 旧版的 c_secure_pass 是 md5，单独在时仍算缺失。
  */
 function isNexusAuthToken(value: string): boolean {
   let raw = value;
@@ -60,76 +91,118 @@ function isNexusAuthToken(value: string): boolean {
   }
 }
 
-/** 这一组 Cookie 要凑齐的名字：c_secure_pass 是新版 NexusPHP 的签名令牌时只要它一个，否则按站点的必需名单 */
-function namesFor(site: KnownSite, cookies: chrome.cookies.Cookie[]): string[] {
-  if (site.cookieNames.includes("c_secure_pass")) {
-    const pass = cookies.find((cookie) => cookie.name === "c_secure_pass");
-    if (pass && isNexusAuthToken(pass.value)) {
-      return ["c_secure_pass"];
-    }
-  }
-  return site.cookieNames;
+/**
+ * 没登录也会有的 Cookie：统计（Google、百度、友盟、Clarity、Matomo）、Cloudflare、语言与主题偏好，
+ * 以及 NexusPHP 的 c_secure_ssl / c_secure_tracker_ssl / c_secure_login（只是偏好，单独在时说明不了登录着）。
+ * 只剩这些的站点算没登录；别的 Cookie 都可能是登录用的。
+ */
+const NON_LOGIN_COOKIE =
+  /^(?:_ga|_gid|_gat|__utm[a-z]|_pk_(?:id|ses|ref)|Hm_l(?:vt|pvt)_|HMACCOUNT|CNZZDATA|UM_distinctid|_clck|_clsk|cf_clearance$|__cf_bm$|__cfduid$|_cfuvid$|cf_chl_|__cflb$|cf_use_ob$|c_lang_folder$|c_secure_(?:ssl|tracker_ssl|login)$|lang$|language$|locale$|theme$|timezone$)/i;
+
+function loginCandidates(cookies: chrome.cookies.Cookie[]): chrome.cookies.Cookie[] {
+  return cookies.filter((cookie) => !NON_LOGIN_COOKIE.test(cookie.name));
 }
 
-/** 一组 Cookie 里每个必需名字的第一条 */
-function requiredCookies(
+/** 一组 Cookie 里每个名字的第一条 */
+function firstByName(
   cookies: chrome.cookies.Cookie[],
   names: string[],
 ): Map<string, chrome.cookies.Cookie> {
-  const required = new Map<string, chrome.cookies.Cookie>();
+  const found = new Map<string, chrome.cookies.Cookie>();
   for (const cookie of cookies) {
-    if (names.includes(cookie.name) && !required.has(cookie.name)) {
-      required.set(cookie.name, cookie);
+    if (names.includes(cookie.name) && !found.has(cookie.name)) {
+      found.set(cookie.name, cookie);
     }
   }
-  return required;
+  return found;
 }
 
 /**
- * 选出要同步的那个域的 Cookie：必须在**同一个域**里凑齐全部必需 Cookie，几个域都齐全时取必需 Cookie
- * 最晚过期的那个。原来健康检查把各个域的必需 Cookie 合在一起判定，发送的却是「第一个有任意 Cookie 的域」，
- * 旧域只剩统计 Cookie 时状态显示有效，同步却把统计 Cookie 写进后端、替换掉原来有效的凭证。
- * 没有必需名单的站点（passkey / api_key）取第一个有 Cookie 的域。
+ * 认登录 Cookie 的格式，返回格式和登录用的那几条（剩余天数按它们算）；都不是时返回 null。
+ * 先认站点自己声明的一组，再认 NexusPHP：新版只有一个签名令牌 c_secure_pass；旧版要 c_secure_uid 和 c_secure_pass，
+ * c_secure_tracker_ssl 这些是偏好，不强求（以前六十个站点都要三件套，少一个就不能同步）。
  */
-async function pickDomainCookies(
+function recognize(
   site: KnownSite,
-): Promise<{ cookies: chrome.cookies.Cookie[]; complete: boolean; missing: string[] }> {
+  cookies: chrome.cookies.Cookie[],
+): { format: CookieFormat; login: chrome.cookies.Cookie[] } | null {
+  if (site.cookieNames.length > 0) {
+    const declared = firstByName(cookies, site.cookieNames);
+    if (declared.size === site.cookieNames.length) {
+      return { format: "declared", login: [...declared.values()] };
+    }
+  }
+  const nexus = firstByName(cookies, ["c_secure_uid", "c_secure_pass"]);
+  const pass = nexus.get("c_secure_pass");
+  if (pass && isNexusAuthToken(pass.value)) {
+    return { format: "nexus-token", login: [pass] };
+  }
+  const uid = nexus.get("c_secure_uid");
+  if (uid && pass) {
+    return { format: "nexus", login: [uid, pass] };
+  }
+  return null;
+}
+
+/** 会话 Cookie 没有过期时间，按永不过期算 */
+function minExpiry(cookies: chrome.cookies.Cookie[]): number {
+  return Math.min(...cookies.map((cookie) => cookie.expirationDate ?? Infinity));
+}
+
+interface PickedCookies {
+  /** 要同步的那个域名下浏览器会带的全部 Cookie */
+  cookies: chrome.cookies.Cookie[];
+  format: CookieFormat | null;
+  /** 认出格式时登录用的那几条 */
+  login: chrome.cookies.Cookie[];
+  /** 有没有像登录用的 Cookie（认不出格式时据此判 unverified 还是 missing） */
+  candidate: boolean;
+  /** 哪个域名下有任意 Cookie */
+  any: boolean;
+}
+
+/**
+ * 选出要同步的那个域的 Cookie。认得格式的域优先，必须在**同一个域**里认出来，几个域都认得时取登录 Cookie 最晚过期的那个：
+ * 原来健康检查把各个域的 Cookie 合在一起判定，发送的却是「第一个有任意 Cookie 的域」，旧域只剩统计 Cookie 时状态显示有效，
+ * 同步却把统计 Cookie 写进后端、替换掉原来有效的凭证。都认不出时取像登录用的 Cookie 最多的域（一样多取靠前的），
+ * 这一组要 pt-tools 验证过才保存。
+ */
+async function pickDomainCookies(site: KnownSite): Promise<PickedCookies> {
   ensureCookiesApi();
-  let firstNonEmpty: chrome.cookies.Cookie[] = [];
-  // 没有哪个域名凑齐时，按凑得最多的那个域名说还差哪几个
-  let missing = [...site.cookieNames];
-  let best: { cookies: chrome.cookies.Cookie[]; minExpiry: number } | null = null;
+  let best: {
+    cookies: chrome.cookies.Cookie[];
+    format: CookieFormat;
+    login: chrome.cookies.Cookie[];
+    expiry: number;
+  } | null = null;
+  let fallback: { cookies: chrome.cookies.Cookie[]; count: number } | null = null;
+  let any = false;
   for (const domain of site.domains) {
     const cookies = await siteCookies(domain);
     if (cookies.length === 0) {
       continue;
     }
-    if (site.cookieNames.length === 0) {
-      return { cookies, complete: true, missing: [] };
-    }
-    if (firstNonEmpty.length === 0) {
-      firstNonEmpty = cookies;
-    }
-    const names = namesFor(site, cookies);
-    const required = requiredCookies(cookies, names);
-    if (required.size !== names.length) {
-      const lacking = names.filter((name) => !required.has(name));
-      if (lacking.length < missing.length) {
-        missing = lacking;
+    any = true;
+    const found = recognize(site, cookies);
+    if (found) {
+      const expiry = minExpiry(found.login);
+      if (!best || expiry > best.expiry) {
+        best = { cookies, format: found.format, login: found.login, expiry };
       }
       continue;
     }
-    // 会话 Cookie 没有过期时间，按永不过期算
-    const minExpiry = Math.min(
-      ...Array.from(required.values(), (cookie) => cookie.expirationDate ?? Infinity),
-    );
-    if (!best || minExpiry > best.minExpiry) {
-      best = { cookies, minExpiry };
+    const count = loginCandidates(cookies).length;
+    if (count > 0 && (!fallback || count > fallback.count)) {
+      fallback = { cookies, count };
     }
   }
-  return best
-    ? { cookies: best.cookies, complete: true, missing: [] }
-    : { cookies: firstNonEmpty, complete: false, missing };
+  if (best) {
+    return { cookies: best.cookies, format: best.format, login: best.login, candidate: true, any };
+  }
+  if (fallback) {
+    return { cookies: fallback.cookies, format: null, login: [], candidate: true, any };
+  }
+  return { cookies: [], format: null, login: [], candidate: false, any };
 }
 
 export async function readSiteCookies(domain: string): Promise<string> {
@@ -142,9 +215,6 @@ export async function readSiteCookies(domain: string): Promise<string> {
 }
 
 export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthResult> {
-  const picked = await pickDomainCookies(site);
-  const hasCookie = picked.cookies.length > 0;
-
   // 对于 passkey / api_key 站点（cookieNames 为空），保号仍依赖浏览器登录态，
   // 因此只要检测到跨域的任意 cookie 即视为已获取，否则标记 missing。
   if (site.cookieNames.length === 0) {
@@ -153,60 +223,38 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
     return {
       status: crossDomainHasCookie ? "valid" : "missing",
       expireDays: null,
-      cookieString: toCookieString(picked.cookies),
+      cookieString: toCookieString(await firstDomainCookies(site)),
       hasCookie: crossDomainHasCookie,
-      missingCookies: [],
+      format: null,
     };
   }
 
-  if (!picked.complete) {
-    // 没有哪个域凑齐必需 Cookie：不给出可同步的 Cookie，免得拿残缺的一组覆盖后端
+  const picked = await pickDomainCookies(site);
+  if (!picked.format) {
+    // 认不出格式：有像登录用的 Cookie 就整组交给 pt-tools 验证；一个都没有就是没登录，不给出可同步的 Cookie
     return {
-      status: "missing",
+      status: picked.candidate ? "unverified" : "missing",
       expireDays: null,
-      cookieString: "",
-      hasCookie,
-      missingCookies: picked.missing,
+      cookieString: picked.candidate ? toCookieString(picked.cookies) : "",
+      hasCookie: picked.any,
+      format: null,
     };
   }
 
   const cookieString = toCookieString(picked.cookies);
-  const required = requiredCookies(picked.cookies, namesFor(site, picked.cookies));
   const nowSeconds = Date.now() / 1000;
-  const remainingDays = Array.from(required.values())
+  const remainingDays = picked.login
     .map((cookie) => cookie.expirationDate)
     .filter((value): value is number => typeof value === "number")
     .map((expiration) => Math.floor((expiration - nowSeconds) / 86400));
-
   const expireDays = remainingDays.length > 0 ? Math.min(...remainingDays) : null;
-
-  if (expireDays !== null && expireDays < 0) {
-    return {
-      status: "expired",
-      expireDays,
-      cookieString,
-      hasCookie,
-      missingCookies: [],
-    };
-  }
-
-  if (expireDays !== null && expireDays <= 7) {
-    return {
-      status: "expiring",
-      expireDays,
-      cookieString,
-      hasCookie,
-      missingCookies: [],
-    };
-  }
-
-  return {
-    status: "valid",
-    expireDays,
-    cookieString,
-    hasCookie,
-    missingCookies: [],
-  };
+  const status: CookieHealthStatus =
+    expireDays !== null && expireDays < 0
+      ? "expired"
+      : expireDays !== null && expireDays <= 7
+        ? "expiring"
+        : "valid";
+  return { status, expireDays, cookieString, hasCookie: true, format: picked.format };
 }
 
 export async function readAllPtSiteCookies(): Promise<SiteCookieData[]> {

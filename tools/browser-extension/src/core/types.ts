@@ -34,11 +34,10 @@ export interface SiteInfo {
 
 export interface KnownSiteStatus {
   site: KnownSite;
-  cookieStatus: "valid" | "expiring" | "expired" | "missing";
+  /** unverified：有像登录用的 Cookie、格式认不出，同步时由 pt-tools 先验证再保存（见 modules/sync/cookie-reader） */
+  cookieStatus: "valid" | "expiring" | "expired" | "unverified" | "missing";
   cookieExpireDays: number | null;
   hasCookie: boolean;
-  /** Cookie 缺失时还差哪几个必需 Cookie（旧快照里没有这个字段） */
-  missingCookies?: string[];
   lastSync: string | null;
   autoSync: boolean;
 }
@@ -215,6 +214,8 @@ export interface SyncSiteCredentialPayload {
   last_visit_at?: string;
   /** true：不改站点的启用状态，停用的站点只存凭据（定时同步推没启用的站点时用） */
   keep_enabled?: boolean;
+  /** true：pt-tools 先拿这组 Cookie 实际登录一次，登录上了才保存（格式认不出的 Cookie 用） */
+  verify_cookie?: boolean;
 }
 
 export interface BatchSyncSitesPayload {
@@ -315,4 +316,13 @@ export interface MessageSender {
   tabId?: number;
   frameId?: number;
   url?: string;
+}
+
+/**
+ * RejectedPush 是 pt-tools 验证后拒绝保存的那组 Cookie：指纹（同 pushFingerprint，不是 Cookie 本身）和 pt-tools 给的原因。
+ * 指纹没变就不再推（不再让 pt-tools 去访问站点），原因照样写进同步结果。
+ */
+export interface RejectedPush {
+  hash: string;
+  reason: string;
 }

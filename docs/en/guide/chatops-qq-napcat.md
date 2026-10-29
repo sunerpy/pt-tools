@@ -129,12 +129,12 @@ Open the pt-tools web UI, go to ChatOps → Notifications (消息通知) and cli
 2. In the channel list, click the new channel to open its details.
 3. Under **Credentials and connection (凭证与连接)**, fill in the fields below and click **Save credentials (保存凭证)**. The channel reconnects with the new settings as soon as they are saved.
 
-| Field                                  | Value                               | Notes                                                                                                            |
-| -------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Listen address (监听地址, listen_addr) | `0.0.0.0:6701`                      | The address the reverse WebSocket listens on; the port must match NapCat's                                       |
-| Access Token                           | `ptqa_2026_secret`                  | Exactly the same token as in NapCat; required when the listen address is not a loopback address                  |
-| Admin QQ (管理员 QQ, admin_qq_users)   | `your QQ number`                    | QQ numbers separated by commas; they may talk to the bot, and the test message goes to the first one (see below) |
-| Allowed QQ (允许 QQ, allowed_qq_users) | Empty, or other people's QQ numbers | QQ numbers separated by commas; they may talk to the bot as well (see below)                                     |
+| Field                                  | Value                               | Notes                                                                                                                            |
+| -------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Listen address (监听地址, listen_addr) | `0.0.0.0:6701`                      | The address the reverse WebSocket listens on; the port must match NapCat's                                                       |
+| Access Token                           | `ptqa_2026_secret`                  | Exactly the same token as in NapCat; required when the listen address is not a loopback address                                  |
+| Admin QQ (管理员 QQ, admin_qq_users)   | `your QQ number`                    | QQ numbers separated by commas; they may talk to the bot, and the test message and notifications go to the first one (see below) |
+| Allowed QQ (允许 QQ, allowed_qq_users) | Empty, or other people's QQ numbers | QQ numbers separated by commas; they may talk to the bot as well (see below)                                                     |
 
 The WebSocket path is always `/onebot/v11/ws`; make sure the path in NapCat's URL is the same.
 
@@ -184,6 +184,8 @@ In the web UI, open ChatOps → ChatOps binding (ChatOps 绑定) and click **Gen
 > When generating a binding code, you choose the channel it is for and how long it is valid (5 minutes, 1 hour, 1 day, 30 days or no expiry).
 
 The code appears in the Pending (待绑定) list: an 8-character string such as `A3F7KP2M`.
+
+If you would rather skip the code, the **Channels** panel (通道) at the top of the ChatOps bindings page lists every number in Admin QQ and Allowed QQ and whether it is linked. A number that is not linked has a **Link** button (绑定); after you confirm, it has the same effect as a binding code and is recorded in the audit log. Linking this way does not use up a binding code; void codes you no longer need in the Pending list with **Void** (作废). The panel also shows whether the bot is connected and where notifications without their own recipient go.
 
 ### Linking in QQ
 
@@ -257,7 +259,9 @@ ufw allow 6701/tcp
 
 ### Q: What is the difference between `admin_qq_users` and `allowed_qq_users`?
 
-For incoming messages there is no difference: a QQ number in either list may talk to the bot, messages from numbers in neither list are ignored, and with both lists empty nobody can use the bot. Neither list grants admin rights. The only difference is the test message: it goes to the first Admin QQ number; if there is none, to the first Allowed QQ number; if both are empty, to the first linked account.
+For incoming messages there is no difference: a QQ number in either list may talk to the bot, messages from numbers in neither list are ignored, and with both lists empty nobody can use the bot. Neither list grants admin rights. The only difference is who receives messages: the test message and notifications without their own recipient (daily report, sign-in, followed shows, login reminders, RSS push notifications and so on) go to the first Admin QQ number as a private message; if there is none, to the first Allowed QQ number; if both are empty, to the first linked account. With none of them the notification cannot be delivered, and the reason (QQ 通道无可用收件人, no recipient on the QQ channel) is recorded in the audit log.
+
+> Preview releases up to 1.0.0-rc.44 looked up a recipient only for the test message, so notifications such as the daily report failed on QQ channels (the log said QQ 适配器: 缺少目标 chat_id, missing target chat_id) while the test message got through. Later versions fix this.
 
 - When a listed QQ number that is not linked sends a command, the bot replies 请先 /bind <绑定码> 完成绑定 ("link first with /bind followed by the code") and runs nothing.
 - A linked QQ number can run every command, including the admin commands.

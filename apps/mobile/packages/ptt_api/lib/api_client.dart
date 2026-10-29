@@ -219,6 +219,8 @@ class ApiClient {
           return AppBrushConfig.fromJson(value);
         case 'AppBrushInput':
           return AppBrushInput.fromJson(value);
+        case 'AppBrushPeriod':
+          return AppBrushPeriod.fromJson(value);
         case 'AppBrushRun':
           return AppBrushRun.fromJson(value);
         case 'AppBrushRunPage':
@@ -227,10 +229,14 @@ class ApiClient {
           return AppBrushRunStep.fromJson(value);
         case 'AppBrushStat':
           return AppBrushStat.fromJson(value);
+        case 'AppBrushStats':
+          return AppBrushStats.fromJson(value);
         case 'AppBrushStatus':
           return AppBrushStatus.fromJson(value);
         case 'AppBrushTask':
           return AppBrushTask.fromJson(value);
+        case 'AppBrushTaskPeriods':
+          return AppBrushTaskPeriods.fromJson(value);
         case 'AppConfigCatalog':
           return AppConfigCatalog.fromJson(value);
         case 'AppConfigChange':

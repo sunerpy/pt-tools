@@ -61,6 +61,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | POST   | `/push`                                       | Operate          | Push a search result to a downloader                                          |
 | GET    | `/tasks`                                      | Read             | Task list (push records)                                                      |
 | GET    | `/brush/tasks`                                | Read             | Brush tasks                                                                   |
+| GET    | `/brush/stats`                                | Read             | Brush earnings by day, week, month, quarter or year                           |
 | GET    | `/media/history`                              | Read             | Organise history                                                              |
 | POST   | `/media/history/{id}/retry`                   | Operate          | Organise the torrent of one history record again                              |
 | POST   | `/media/history/{id}/scrape`                  | Operate          | Scrape the movie or show of one history record again                          |
@@ -248,6 +249,14 @@ Each item has `id`, `site`, `torrent_id`, `title`, `size`, `category`, `tags`, `
 ### GET /brush/tasks
 
 One item per brush task: `id`, `name`, `enabled`, `site`, `site_enabled`, `downloader`, `active` (torrents being brushed), `downloading` (of those, the ones still downloading), `active_size`, and the results for `today` and `total` (`uploaded`, `downloaded`, `added`, `removed`).
+
+### GET /brush/stats
+
+Earnings of all brush tasks in total and per task over recent periods, counted the same way as on the web page; see [Earnings and the daily report](../guide/brush.md#earnings-and-the-daily-report) (host time zone, weeks start on Monday). The endpoint exists when `features` from `GET /meta` contains `brush_stats`.
+
+`granularity` is `day`, `week`, `month`, `quarter` or `year` (default `day`); `periods` defaults to 30, 12, 12, 8 and 5 and is capped at 366, 104, 60, 40 and 20; values out of range return 400. The web endpoint's `days` is not accepted.
+
+The response has `granularity`, `periods`, `from` and `to`; `totals` holds each period of the total, and `tasks` holds each task's `id`, `name` and `periods`. Every period has `start` and `end` (its first and last day) plus `uploaded`, `downloaded`, `added` and `removed`. The last period is the current one: `end` is its natural end date and may be after today, while earnings only count up to today.
 
 ## Media
 
@@ -532,7 +541,7 @@ The same body as the preview. The change is worked out again from the current st
 
 ## Mobile editors and statistics export
 
-The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` and `stats_export`. Clients prompt for an upgrade when a required feature is absent rather than falling back to session-only endpoints. The API compatibility level remains 1.
+The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` and `stats_export`; period-based brush earnings ([`GET /brush/stats`](#get-brushstats)) are `brush_stats`. Clients prompt for an upgrade when a required feature is absent rather than falling back to session-only endpoints. The API compatibility level remains 1.
 
 | Method | Path                         | Permission | Purpose                                                                                                       |
 | ------ | ---------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |

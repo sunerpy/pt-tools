@@ -615,7 +615,7 @@ func TestPush_SyncSuccess(t *testing.T) {
 	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
 		ChannelType: "telegram",
 		Name:        "test",
-		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx"}`),
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx","default_chat_id":"100"}`),
 		Enabled:     true,
 	})
 	require.NoError(t, err)
@@ -647,7 +647,7 @@ func TestPush_FallbackOutbox(t *testing.T) {
 	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
 		ChannelType: "telegram",
 		Name:        "test",
-		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx"}`),
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx","default_chat_id":"100"}`),
 		Enabled:     true,
 	})
 	require.NoError(t, err)
@@ -712,7 +712,7 @@ func TestPush_ManagerError_FallbackOutbox(t *testing.T) {
 	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
 		ChannelType: "telegram",
 		Name:        "test",
-		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx"}`),
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx","default_chat_id":"100"}`),
 		Enabled:     true,
 	})
 	require.NoError(t, err)
@@ -738,7 +738,7 @@ func TestPushSync_ManagerError_NoOutbox(t *testing.T) {
 	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
 		ChannelType: "telegram",
 		Name:        "test",
-		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx"}`),
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx","default_chat_id":"100"}`),
 		Enabled:     true,
 	})
 	require.NoError(t, err)
@@ -765,7 +765,7 @@ func TestPushSync_Timeout_NoOutbox(t *testing.T) {
 	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
 		ChannelType: "telegram",
 		Name:        "test",
-		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx"}`),
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx","default_chat_id":"100"}`),
 		Enabled:     true,
 	})
 	require.NoError(t, err)
@@ -1078,4 +1078,121 @@ func TestListConfs_RuntimeStateEmptyWithoutStater(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	assert.Empty(t, list[0].RuntimeState)
+}
+
+// 2026-10-28 用户反馈：QQ 通道的每日战报报「QQ 适配器: 缺少目标 chat_id」，测试消息却能发。
+// 每日战报、签到、追剧、登录提醒与 RSS 推送都不带收件人，要按测试消息的规则补上。
+func TestPushSync_FillsDefaultRecipient(t *testing.T) {
+	setupTestKey(t)
+	cases := []struct {
+		name     string
+		typ      string
+		config   string
+		binding  string
+		want     map[string]string
+		wantFail string
+	}{
+		{
+			name: "QQ 第一个管理员", typ: "qq_onebot", config: `{"listen_addr":"127.0.0.1:6700","admin_qq_users":[454196976,2],"allowed_qq_users":[3]}`,
+			want: map[string]string{"chat_id": "454196976", "message_type": "private"},
+		},
+		{
+			name: "QQ 没有管理员时第一个允许", typ: "qq_onebot", config: `{"allowed_qq_users":[3,4]}`,
+			want: map[string]string{"chat_id": "3", "message_type": "private"},
+		},
+		{
+			name: "QQ 名单都空时第一个绑定的账号", typ: "qq_onebot", config: `{}`, binding: "9001",
+			want: map[string]string{"chat_id": "9001", "message_type": "private"},
+		},
+		{name: "QQ 没有收件人", typ: "qq_onebot", config: `{}`, wantFail: "QQ 通道无可用收件人"},
+		{
+			name: "Telegram 默认 Chat ID", typ: "telegram", config: `{"bot_token":"t","default_chat_id":"-100123","admin_users":[7]}`,
+			want: map[string]string{"chat_id": "-100123"},
+		},
+		{
+			name: "Telegram 没有默认 Chat ID 时第一个管理员", typ: "telegram", config: `{"bot_token":"t","admin_users":[7,8]}`,
+			want: map[string]string{"chat_id": "7"},
+		},
+		{name: "Telegram 没有收件人", typ: "telegram", config: `{"bot_token":"t"}`, wantFail: "Telegram 通道无可用收件人"},
+		{name: "Webhook 不需要收件人", typ: "webhook", config: `{"url":"https://example.com/hook"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+			cipher, err := crypto.Encrypt([]byte(tc.config))
+			require.NoError(t, err)
+			row := models.NotificationConf{ChannelType: tc.typ, Name: tc.typ, ConfigJSON: cipher, Enabled: true}
+			require.NoError(t, db.Create(&row).Error)
+			if tc.binding != "" {
+				require.NoError(t, db.Create(&models.ChannelBinding{
+					NotificationConfID: row.ID, ChannelType: tc.typ, ChannelUserID: tc.binding, PtAdmin: true, Allowed: true,
+				}).Error)
+			}
+			mgr := &mockNotifyManager{}
+			svc := NewNotificationService(db, mgr, time.Second)
+			err = svc.PushSync(context.Background(), Notification{Title: "每日战报", Text: "今日上传 1 GB", SourceConfID: row.ID})
+			if tc.wantFail != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantFail)
+				assert.Zero(t, mgr.callCount(), "没有收件人时不交给通道")
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, mgr.sent, 1)
+			assert.Equal(t, tc.want, mgr.sent[0].Targets)
+		})
+	}
+}
+
+// 调用方指定了收件人（ChatOps 回复、测试消息）时原样发，不换成默认收件人。
+func TestPushSync_KeepsExplicitRecipient(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+	cipher, err := crypto.Encrypt([]byte(`{"admin_qq_users":[111]}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "qq_onebot", Name: "qq", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+	mgr := &mockNotifyManager{}
+	svc := NewNotificationService(db, mgr, time.Second)
+	targets := map[string]string{"chat_id": "222", "message_type": "group"}
+	require.NoError(t, svc.PushSync(context.Background(), Notification{Text: "hi", SourceConfID: row.ID, Targets: targets}))
+	require.NoError(t, svc.PushSync(context.Background(), Notification{Text: "hi", SourceConfID: row.ID, UserID: "333"}))
+	require.Len(t, mgr.sent, 2)
+	assert.Equal(t, targets, mgr.sent[0].Targets)
+	assert.Nil(t, mgr.sent[1].Targets)
+	assert.Equal(t, "333", mgr.sent[1].UserID)
+}
+
+// Push 在入队以前补上收件人：outbox 的重试直接交给通道，不再经过 withRecipient。
+// 没有收件人时不入队（排进去也只会一直失败），把原因交给调用方（RSS 通知记进失败原因）。
+func TestPush_RecipientBeforeOutbox(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+	cipher, err := crypto.Encrypt([]byte(`{"admin_qq_users":[454196976]}`))
+	require.NoError(t, err)
+	qq := models.NotificationConf{ChannelType: "qq_onebot", Name: "qq", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&qq).Error)
+	empty, err := crypto.Encrypt([]byte(`{}`))
+	require.NoError(t, err)
+	none := models.NotificationConf{ChannelType: "qq_onebot", Name: "qq-none", ConfigJSON: empty, Enabled: true}
+	require.NoError(t, db.Create(&none).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{returnErr: errors.New("QQ 通道未连接 (NapCat 尚未握手)")}, time.Second)
+	require.NoError(t, svc.Push(context.Background(), Notification{Title: "RSS", Text: "x", SourceConfID: qq.ID}))
+	var rows []models.NotificationOutbox
+	require.NoError(t, db.Find(&rows).Error)
+	require.Len(t, rows, 1)
+	var queued Notification
+	require.NoError(t, json.Unmarshal([]byte(rows[0].PayloadJSON), &queued))
+	assert.Equal(t, map[string]string{"chat_id": "454196976", "message_type": "private"}, queued.Targets)
+
+	err = svc.Push(context.Background(), Notification{Title: "RSS", Text: "x", SourceConfID: none.ID})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "无可用收件人")
+	var count int64
+	require.NoError(t, db.Model(&models.NotificationOutbox{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count, "没有收件人的通知不进 outbox")
 }

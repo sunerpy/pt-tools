@@ -9,7 +9,7 @@ import type { SiteLoginStateRecord } from "../modules/sync";
 export interface MySiteRow {
   status: KnownSiteStatus;
   login?: SiteLoginStateRecord;
-  /** 浏览器里有可同步的 Cookie（Cookie 站点、Cookie 有效或快过期） */
+  /** 浏览器里有可同步的 Cookie（Cookie 站点、Cookie 有效、快过期，或格式认不出、同步时由 pt-tools 验证） */
   syncable: boolean;
   /** pt-tools 里启用了这个站点 */
   configured: boolean;
@@ -62,7 +62,9 @@ export function buildMySites(
       savedNotEnabled: Boolean(login) && !configured && Boolean(status.lastSync),
       syncable:
         status.site.syncField === "cookie" &&
-        (status.cookieStatus === "valid" || status.cookieStatus === "expiring"),
+        (status.cookieStatus === "valid" ||
+          status.cookieStatus === "expiring" ||
+          status.cookieStatus === "unverified"),
       attention: needsAttention(status, login),
     });
   }
@@ -95,7 +97,14 @@ export function loginLabel(row: MySiteRow, loginsKnown: boolean): LoginLabel {
   return { kind: "tier", login: row.login };
 }
 
-/** Cookie 缺失、浏览器里又有这个站的 Cookie 时还差哪几个必需 Cookie（多半是没登录，或者站点换了 Cookie）；其他情况为空 */
-export function missingCookieNames(s: KnownSiteStatus): string[] {
-  return s.cookieStatus === "missing" && s.hasCookie ? (s.missingCookies ?? []) : [];
+/**
+ * 行上 Cookie 状态旁的说明：格式认不出时说同步时由 pt-tools 先验证；浏览器里有这个站的 Cookie、但没有登录用的时说多半没登录。
+ * 以前写「缺 c_secure_uid…」：站点换了登录 Cookie 的格式（BYR 现在是 auth_token / refresh_token）也这么写，看着像扩展坏了。
+ */
+export type CookieHint = "unverified" | "noLogin" | null;
+
+export function cookieHint(s: KnownSiteStatus): CookieHint {
+  if (s.site.syncField !== "cookie") return null;
+  if (s.cookieStatus === "unverified") return "unverified";
+  return s.cookieStatus === "missing" && s.hasCookie ? "noLogin" : null;
 }

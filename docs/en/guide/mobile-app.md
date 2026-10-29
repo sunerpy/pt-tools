@@ -52,6 +52,8 @@ Subscription lists and details use the app interface. Creating or editing opens 
 
 More → Brush supports creating, editing, enabling, disabling and deleting tasks, and viewing run records. Deleting requires confirmation. These editors can manage brush tasks without opening the full web administration interface.
 
+The top of the brush page shows earnings by day, week, month, quarter, or year: the current and previous period's upload and download, a chart with one bar per period (tap or drag across it to see that period's upload, download, added and removed counts), and each task's earnings in the current period. The figures are the same as on the web page; see [Earnings and the daily report](brush.md#earnings-and-the-daily-report). On older hosts without period statistics this section is hidden and tasks keep showing today's earnings.
+
 More → Sites provides statistics and period deltas, with an entry to statistics posters. Posters reuse the web styles, palettes and site selection. Usernames, site names and logos are masked by default, and masking resets whenever the editor opens. Export a PNG to storage or open the Android system share sheet; cancelling sharing does not automatically send or save the image.
 
 Vue editors and poster resources ship inside the APK. Business data still comes from the host through the encrypted connection. The app does not require a browser login or pass device private keys to the page. Unsupported features prompt an upgrade on older hosts while existing features remain available. Read-only devices may view data and export posters, but cannot save subscription or brush configuration.

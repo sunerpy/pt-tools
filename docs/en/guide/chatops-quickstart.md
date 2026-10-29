@@ -106,6 +106,14 @@ Once it is set up, open the audit log page of the web UI (`/chatops/audit`) to c
 
 > Web UI → ChatOps → Audit log (操作审计) shows today's command count, the success rate and the latest records.
 
+### Viewing the audit log
+
+Besides commands and write operations from the app and MCP, the audit log records every delivery of a background notification: the daily report, sign-in, followed shows and subscriptions, login reminders, dead torrents, remote access and so on, with the channel, whether it was delivered, and why it failed (for example "QQ 通道无可用收件人", no recipient on the QQ channel, or a Telegram network timeout). A failed notification is retried with backoff; every attempt gets its own record and the last one says that it will not be retried. Credentials in the reason, such as a bot token or a cookie, are masked.
+
+- The **Type** filter in the toolbar (类型) shows only notifications (消息通知) or only commands and API calls (命令与接口); the command column of a notification shows its source, such as daily report (每日战报), sign-in (签到) or followed show (追剧).
+- The **Recent notifications** panel (最近的通知) on the Notifications page also shows why the undelivered ones failed.
+- API: `GET /api/chatops/audit?category=notify|action` (`notify` returns only notification deliveries, `action` everything else).
+
 ---
 
 ## Notifications for new RSS items

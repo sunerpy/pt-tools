@@ -199,7 +199,9 @@ export const KNOWN_SITES: KnownSite[] = [
     domains: ["byr.pt"],
     schema: "NexusPHP",
     authMethod: "cookie",
-    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    // 2026-10 起 BYR 登录后是 auth_token（JWT，15 分钟）、refresh_token、session_id，没有 c_secure_* 三件套；
+    // auth_token 过期后站点换发一对新的，pt-tools 那边会接着用换发后的（site/v2 的 SessionCookies）
+    cookieNames: ["auth_token", "refresh_token", "session_id"],
     syncField: "cookie",
   },
   {
@@ -661,6 +663,8 @@ export const STORAGE_KEYS = {
   // 定时同步与 CookieCloud（M22）
   syncSchedule: "pt_tools_sync_schedule",
   syncHashMap: "pt_tools_sync_hash_map",
+  // 被 pt-tools 验证拒绝的那组 Cookie 的指纹与原因：Cookie 没变就不再推（见 background/scheduled-sync）
+  syncRejectedMap: "pt_tools_sync_rejected_map",
   syncRun: "pt_tools_sync_run",
   cookieCloudConfig: "pt_tools_cookiecloud_config",
   cookieCloudState: "pt_tools_cookiecloud_state",

@@ -219,6 +219,79 @@ func (h *chatopsHandlers) listBindings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// listBindingChannels 是绑定页的「通道」一栏：每个能收命令的通道名单里有谁、谁已经绑定、最近一次往来，
+// 以及没有指定收件人的通知发给谁（见 app.ChannelBindingView）。运行状态取自通知通道列表，取不到时留空。
+func (h *chatopsHandlers) listBindingChannels(w http.ResponseWriter, r *http.Request) {
+	items, err := h.deps.BindingSvc.ListChannels(r.Context())
+	if err != nil {
+		mapServiceErr(w, err)
+		return
+	}
+	if items == nil {
+		items = []app.ChannelBindingView{}
+	}
+	if h.deps.NotificationSvc != nil {
+		if confs, err := h.deps.NotificationSvc.ListConfs(r.Context()); err == nil {
+			state := make(map[uint]string, len(confs))
+			for _, c := range confs {
+				state[c.ID] = c.RuntimeState
+			}
+			for i := range items {
+				items[i].RuntimeState = state[items[i].ConfID]
+			}
+		}
+	}
+	writeJSON(w, map[string]any{"channels": items})
+}
+
+type bindDirectBody struct {
+	ConfID        uint   `json:"conf_id"`
+	ChannelUserID string `json:"channel_user_id"`
+}
+
+// bindDirect 在网页上直接绑定通道名单里的账号（效果与绑定码相同），并记一条审计（命令 bind，参数 via=web）。
+func (h *chatopsHandlers) bindDirect(w http.ResponseWriter, r *http.Request) {
+	var body bindDirectBody
+	if err := decodeJSONBody(r, &body); err != nil {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	body.ChannelUserID = strings.TrimSpace(body.ChannelUserID)
+	if body.ConfID == 0 || body.ChannelUserID == "" {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_argument", "conf_id 与 channel_user_id 都要填")
+		return
+	}
+	dto, err := h.deps.BindingSvc.BindDirect(r.Context(), body.ConfID, body.ChannelUserID)
+	result := "success"
+	switch {
+	case errors.Is(err, app.ErrBindNotInWhitelist):
+		result = "denied:not_in_whitelist"
+	case errors.Is(err, app.ErrAlreadyBound):
+		result = "denied:already_bound"
+	case err != nil:
+		result = "error:bind_failed"
+	}
+	// 通道不存在或不收命令时没有可记的通道；其余（成功、名单外、已经绑定）都记一条
+	if h.deps.AuditSvc != nil && dto.ChannelType != "" && !errors.Is(err, app.ErrBindUnsupportedChannel) {
+		_ = h.deps.AuditSvc.Record(r.Context(), app.AuditEntry{
+			NotificationConfID: body.ConfID, ChannelType: dto.ChannelType, ChannelUserID: body.ChannelUserID,
+			Command: "bind", Args: map[string]any{"via": "web"}, Result: result,
+		})
+	}
+	switch {
+	case err == nil:
+		writeJSON(w, dto)
+	case errors.Is(err, app.ErrConfNotFound):
+		writeChatopsErr(w, http.StatusNotFound, "not_found", "通知通道不存在")
+	case errors.Is(err, app.ErrBindUnsupportedChannel), errors.Is(err, app.ErrBindNotInWhitelist):
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_argument", err.Error())
+	case errors.Is(err, app.ErrAlreadyBound):
+		writeChatopsErr(w, http.StatusConflict, "already_bound", err.Error())
+	default:
+		mapServiceErr(w, err)
+	}
+}
+
 type issueCodeBody struct {
 	ConfID     uint   `json:"conf_id"`
 	Label      string `json:"label"`
@@ -269,6 +342,20 @@ func (h *chatopsHandlers) revokeBinding(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := h.deps.BindingSvc.Revoke(r.Context(), id); err != nil {
+		mapServiceErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// revokeBindCode 作废「待绑定」里一个没用掉的绑定码（按编号；码本身不进地址，免得进访问日志）。
+func (h *chatopsHandlers) revokeBindCode(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUintPathValue(r, "id")
+	if err != nil {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_id", err.Error())
+		return
+	}
+	if _, err := h.deps.BindingSvc.RevokeCode(r.Context(), id); err != nil {
 		mapServiceErr(w, err)
 		return
 	}
@@ -347,6 +434,10 @@ func (h *chatopsHandlers) queryAudit(w http.ResponseWriter, r *http.Request) {
 		writeChatopsErr(w, http.StatusBadRequest, "invalid_argument", "page_size: "+err.Error())
 		return
 	}
+	if c := q.Get("category"); c != "" && c != "notify" && c != "action" {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_argument", "category 只能是 notify 或 action")
+		return
+	}
 
 	items, total, err := h.deps.AuditSvc.Query(r.Context(), app.AuditQuery{
 		Since:         since,
@@ -356,6 +447,7 @@ func (h *chatopsHandlers) queryAudit(w http.ResponseWriter, r *http.Request) {
 		Keyword:       q.Get("q"),
 		Result:        q.Get("result"),
 		ChannelType:   q.Get("channel_type"),
+		Category:      q.Get("category"),
 		Page:          page,
 		PageSize:      pageSize,
 	})
