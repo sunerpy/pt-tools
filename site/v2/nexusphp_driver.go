@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -148,6 +149,8 @@ type NexusPHPDriver struct {
 	siteName       SiteName
 	siteID         string
 	siteDefinition *SiteDefinition
+	// session 是会续期的登录会话（定义里写了 SessionCookies 才有，见 session_cookies.go）：请求排队发，续期换发的 Cookie 换进来
+	session *sessionCookies
 }
 
 // NexusPHPDriverConfig holds configuration for creating a NexusPHP driver
@@ -231,6 +234,35 @@ func NewNexusPHPDriverWithFailover(siteName SiteName, cookie string) *NexusPHPDr
 // SetSiteDefinition sets the site definition for custom parsing
 func (d *NexusPHPDriver) SetSiteDefinition(def *SiteDefinition) {
 	d.siteDefinition = def
+	d.session = nil
+	if def != nil && len(def.SessionCookies) > 0 {
+		id := d.siteID
+		if id == "" {
+			id = def.ID
+		}
+		d.session = joinSessionCookies(id, def.SessionCookies, d.Cookie)
+	}
+}
+
+// CurrentCookie 是现在用的那组 Cookie（续期过就是换发后的）；站点没有续期会话时 ok 为假。
+func (d *NexusPHPDriver) CurrentCookie() (string, bool) {
+	if d.session == nil {
+		return "", false
+	}
+	return d.session.current(), true
+}
+
+// sendWithCookie 发一个带站点 Cookie 的请求。会续期的站点（定义里写了 SessionCookies）排队发、用续期换发的 Cookie。
+func (d *NexusPHPDriver) sendWithCookie(headers map[string]string, do func(headers map[string]string) (*HTTPResponse, error)) (*HTTPResponse, error) {
+	if d.session == nil {
+		headers["Cookie"] = d.Cookie
+		return do(headers)
+	}
+	return d.session.send(func(cookie string) (*HTTPResponse, error) {
+		withCookie := maps.Clone(headers)
+		withCookie["Cookie"] = cookie
+		return do(withCookie)
+	})
 }
 
 // GetSiteDefinition returns the site definition
@@ -299,7 +331,6 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	}
 
 	headers := map[string]string{
-		"Cookie":          d.Cookie,
 		"User-Agent":      d.userAgent,
 		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -316,15 +347,16 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		fmt.Printf("\n[CURL] %s\n", buildCurlCommand(method, fullURL, headers))
 	}
 
-	var resp *HTTPResponse
-	var err error
 	if post {
 		// POST 时参数作为表单提交（目前只有配置了 POST 的签到会走这里）。
 		headers["Content-Type"] = "application/x-www-form-urlencoded"
-		resp, err = d.httpClient.Post(ctx, fullURL, []byte(req.Params.Encode()), headers)
-	} else {
-		resp, err = d.httpClient.Get(ctx, fullURL, headers)
 	}
+	resp, err := d.sendWithCookie(headers, func(h map[string]string) (*HTTPResponse, error) {
+		if post {
+			return d.httpClient.Post(ctx, fullURL, []byte(req.Params.Encode()), h)
+		}
+		return d.httpClient.Get(ctx, fullURL, h)
+	})
 	if err != nil {
 		return NexusPHPResponse{}, fmt.Errorf("execute request: %w", err)
 	}
@@ -1758,18 +1790,22 @@ func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPR
 	}
 	// 链接取自详情页，简介等区域是用户内容；只有指向站点自己的域名时才附带 Cookie，
 	// 外域链接照常请求（passkey 下载链接不依赖 Cookie），但不把站点 Cookie 交给第三方。
-	if sameSite {
-		headers["Cookie"] = d.Cookie
-	}
-	return retryTransient(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, headers) })
+	return retryTransient(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, headers, sameSite) })
 }
 
 // fetchTorrentOnce 拉一次种子文件（每次设上限超时）。下载地址带 passkey：错误里的地址一律脱敏。
-func (d *NexusPHPDriver) fetchTorrentOnce(ctx context.Context, downloadURL string, headers map[string]string) ([]byte, error) {
+func (d *NexusPHPDriver) fetchTorrentOnce(ctx context.Context, downloadURL string, headers map[string]string, withCookie bool) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, nexusTorrentFetchTimeout)
 	defer cancel()
 
-	resp, err := d.httpClient.Get(ctx, downloadURL, headers)
+	get := func(h map[string]string) (*HTTPResponse, error) { return d.httpClient.Get(ctx, downloadURL, h) }
+	var resp *HTTPResponse
+	var err error
+	if withCookie {
+		resp, err = d.sendWithCookie(maps.Clone(headers), get)
+	} else {
+		resp, err = get(headers)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("fetch torrent file: %w", redactURLsInError(err))
 	}

@@ -5,14 +5,16 @@ import (
 )
 
 var BYRPTDefinition = &v2.SiteDefinition{
-	ID:             "byrpt",
-	Name:           "BYRPT",
-	Aka:            []string{"BYR", "北邮人"},
-	Description:    "BYRPT 教育网综合资源站",
-	Schema:         v2.SchemaNexusPHP,
-	URLs:           []string{"https://byr.pt/"},
-	FaviconURL:     "https://byr.pt/favicon.ico",
-	AuthMethod:     v2.AuthMethodCookie,
+	ID:          "byrpt",
+	Name:        "BYRPT",
+	Aka:         []string{"BYR", "北邮人"},
+	Description: "BYRPT 教育网综合资源站",
+	Schema:      v2.SchemaNexusPHP,
+	URLs:        []string{"https://byr.pt/"},
+	FaviconURL:  "https://byr.pt/favicon.ico",
+	AuthMethod:  v2.AuthMethodCookie,
+	// 2026-10 起登录是 auth_token（JWT，15 分钟）+ refresh_token + session_id，过期后站点换发一对新令牌，refresh_token 也换
+	SessionCookies: []string{"auth_token", "refresh_token", "session_id"},
 	TimezoneOffset: "+0800",
 	RateLimit:      0.5,
 	RateBurst:      2,

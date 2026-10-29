@@ -269,6 +269,14 @@ func (b *BaseSite[Req, Res]) Close() error {
 	return nil
 }
 
+// CurrentCookie 是驱动现在用的那组 Cookie（续期过就是换发后的，见 session_cookies.go）；驱动没有续期会话时 ok 为假。
+func (b *BaseSite[Req, Res]) CurrentCookie() (string, bool) {
+	if h, ok := any(b.driver).(SessionCookieHolder); ok {
+		return h.CurrentCookie()
+	}
+	return "", false
+}
+
 // GetDriver returns the underlying driver (for testing purposes)
 func (b *BaseSite[Req, Res]) GetDriver() Driver[Req, Res] {
 	return b.driver
