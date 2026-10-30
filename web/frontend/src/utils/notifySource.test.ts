@@ -21,6 +21,8 @@ describe("后台通知的投递在审计里的读法", () => {
     expect(notifyCommandLabel("notify:something_new:x")).toBe("something_new");
     expect(notifyCommandLabel("pause")).toBe("pause");
     expect(notifySourceLabel("free_end")).toBe("免费到期");
+    expect(notifyCommandLabel("notify:reseed:round")).toBe("辅种结果");
+    expect(notifySourceLabel("reseed")).toBe("辅种");
   });
 
   it("失败原因带上第几次与什么时候再试；送达的没有", () => {

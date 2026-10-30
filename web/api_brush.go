@@ -19,6 +19,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // 刷流任务接口：任务的增删改查、立即运行一轮、运行记录、任务名下的种子与每日收益。全部只认 session（s.auth）。
@@ -120,39 +121,31 @@ type BrushStatsResponse struct {
 	Totals []BrushStatsSeriesPoint `json:"totals"`
 }
 
-// 刷流收益的分段与每种分段默认、最多几段。
+// 刷流收益的分段与每种分段默认、最多几段（与辅种统计共用 utils 里的分段）。
 const (
-	BrushGranDay     = "day"
-	BrushGranWeek    = "week"
-	BrushGranMonth   = "month"
-	BrushGranQuarter = "quarter"
-	BrushGranYear    = "year"
+	BrushGranDay     = utils.PeriodDay
+	BrushGranWeek    = utils.PeriodWeek
+	BrushGranMonth   = utils.PeriodMonth
+	BrushGranQuarter = utils.PeriodQuarter
+	BrushGranYear    = utils.PeriodYear
 )
 
-var brushGranularities = map[string]struct{ def, max int }{
-	BrushGranDay:     {30, 366},
-	BrushGranWeek:    {12, 104},
-	BrushGranMonth:   {12, 60},
-	BrushGranQuarter: {8, 40},
-	BrushGranYear:    {5, 20},
-}
-
-// parseBrushStatsQuery 读分段与段数：granularity（默认 day）、periods（默认按分段，见 brushGranularities）；
+// parseBrushStatsQuery 读分段与段数：granularity（默认 day）、periods（默认按分段，见 utils.PeriodLimits）；
 // 老的 days=N（1–90）等于按天的 N 段。不认识的值返回给用户看的错误。
 func parseBrushStatsQuery(q interface{ Get(string) string }) (string, int, error) {
 	gran := strings.TrimSpace(q.Get("granularity"))
 	if gran == "" {
 		gran = BrushGranDay
 	}
-	lim, ok := brushGranularities[gran]
+	lim, ok := utils.PeriodLimits[gran]
 	if !ok {
 		return "", 0, errors.New("granularity 只能是 day、week、month、quarter、year")
 	}
-	periods := lim.def
+	periods := lim.Default
 	if raw := q.Get("periods"); raw != "" {
 		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 || v > lim.max {
-			return "", 0, fmt.Errorf("periods 应为 1–%d 的整数", lim.max)
+		if err != nil || v < 1 || v > lim.Max {
+			return "", 0, fmt.Errorf("periods 应为 1–%d 的整数", lim.Max)
 		}
 		periods = v
 	} else if raw := q.Get("days"); raw != "" && gran == BrushGranDay {
@@ -163,37 +156,6 @@ func parseBrushStatsQuery(q interface{ Get(string) string }) (string, int, error
 		periods = v
 	}
 	return gran, periods, nil
-}
-
-// brushPeriodStart 是 t 所在那一段的第一天（零点，t 的时区）：周从周一开始，季度从 1、4、7、10 月开始。
-func brushPeriodStart(t time.Time, gran string) time.Time {
-	d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	switch gran {
-	case BrushGranWeek:
-		return d.AddDate(0, 0, -((int(d.Weekday()) + 6) % 7))
-	case BrushGranMonth:
-		return time.Date(d.Year(), d.Month(), 1, 0, 0, 0, 0, d.Location())
-	case BrushGranQuarter:
-		return time.Date(d.Year(), time.Month((int(d.Month())-1)/3*3+1), 1, 0, 0, 0, 0, d.Location())
-	case BrushGranYear:
-		return time.Date(d.Year(), 1, 1, 0, 0, 0, 0, d.Location())
-	}
-	return d
-}
-
-// brushPeriodAdd 是从 start（某一段的第一天）往后 n 段的第一天（n 可以是负数）。
-func brushPeriodAdd(start time.Time, gran string, n int) time.Time {
-	switch gran {
-	case BrushGranWeek:
-		return start.AddDate(0, 0, 7*n)
-	case BrushGranMonth:
-		return start.AddDate(0, n, 0)
-	case BrushGranQuarter:
-		return start.AddDate(0, 3*n, 0)
-	case BrushGranYear:
-		return start.AddDate(n, 0, 0)
-	}
-	return start.AddDate(0, 0, n)
 }
 
 func (s *Server) registerBrushRoutes(mux *http.ServeMux) {
@@ -486,10 +448,10 @@ func (s *Server) apiBrushStats(w http.ResponseWriter, r *http.Request) {
 // buildBrushStats 按分段汇总每日收益：最近 periods 段，最后一段是 now 所在的那一段（只算到今天）。
 func buildBrushStats(repo *models.BrushRepository, now time.Time, gran string, periods int) (BrushStatsResponse, error) {
 	const dayFmt = "2006-01-02"
-	first := brushPeriodAdd(brushPeriodStart(now, gran), gran, -(periods - 1))
+	first := utils.PeriodAdd(utils.PeriodStart(now, gran), gran, -(periods - 1))
 	starts := make([]time.Time, periods)
 	for i := range periods {
-		starts[i] = brushPeriodAdd(first, gran, i)
+		starts[i] = utils.PeriodAdd(first, gran, i)
 	}
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	from, to := first.Format(dayFmt), today.Format(dayFmt)
@@ -498,7 +460,7 @@ func buildBrushStats(repo *models.BrushRepository, now time.Time, gran string, p
 		out := make([]BrushStatsSeriesPoint, periods)
 		for i, st := range starts {
 			out[i].Date = st.Format(dayFmt)
-			out[i].End = brushPeriodAdd(st, gran, 1).AddDate(0, 0, -1).Format(dayFmt)
+			out[i].End = utils.PeriodAdd(st, gran, 1).AddDate(0, 0, -1).Format(dayFmt)
 		}
 		return out
 	}

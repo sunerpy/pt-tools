@@ -2655,12 +2655,225 @@ export interface ReseedSettings {
   interval_hours: number;
   downloader_ids: number[];
   site_names: string[];
+  /** 站点范围：all 是全部已配置、IYUU 也支持的站点（以后新配置的也算），selected 是只算 site_names */
+  site_mode: ReseedSiteMode;
   max_per_site_per_day: number;
   last_run_at?: string;
   last_result: string;
   /** 下一轮大约什么时候（开着、有 token 时才有） */
   next_run_at?: string;
   running: boolean;
+  /** 正在跑（或暂停中）的那一轮 */
+  current_run?: ReseedCurrentRun;
+  /** 两次请求 IYUU 之间至少隔几秒（没设置过是默认的 3） */
+  iyuu_min_interval_seconds: number;
+  /** 每天最多请求 IYUU 几次，0 是不限 */
+  iyuu_max_calls_per_day: number;
+  /** 限流冷却到什么时候（冷却中才有） */
+  iyuu_cooldown_until?: string;
+  /** 最近一次限流 */
+  iyuu_last_limit?: ReseedIYUULimit;
+  /** 今天各接口的请求计数 */
+  iyuu_today: ReseedIYUUCalls[];
+  /** 每轮结果推送：关闭、每一轮、只在有变化时 */
+  notify_mode: ReseedNotifyMode;
+  /** 接收每轮结果的通知通道 */
+  notify_channel_ids: number[];
+  /** 每日战报里带不带今天的辅种 */
+  daily_report: boolean;
+}
+
+export type ReseedNotifyMode = "off" | "always" | "changes";
+
+export type ReseedIYUUEndpoint = "sites" | "report" | "query";
+
+/** 一天里一个 IYUU 接口的请求计数（calls = ok + rate_limited + failed） */
+export interface ReseedIYUUCalls {
+  day: string;
+  endpoint: ReseedIYUUEndpoint;
+  calls: number;
+  ok: number;
+  rate_limited: number;
+  failed: number;
+  /** 查询的 info hash 数（只有 query 有） */
+  hashes: number;
+  last_at?: string;
+}
+
+/** 最近一次 IYUU 限流：retry_after 是 IYUU 给的秒数，reset_at、limit 是 X-RateLimit-Reset 与 X-RateLimit-Limit */
+export interface ReseedIYUULimit {
+  at: string;
+  endpoint: ReseedIYUUEndpoint;
+  message: string;
+  retry_after: number;
+  reset_at?: string;
+  limit?: number;
+  /** 冷却到什么时候 */
+  until: string;
+}
+
+/** 一段时间里的辅种计数：尝试按开始的那一天，任务结果按完成的那一天，跳过与 IYUU 请求按天 */
+export interface ReseedStatsCounts {
+  /** 建成的辅种任务 */
+  created: number;
+  /** 下载或核对没通过 */
+  failed: number;
+  /** 站点上已经删了 */
+  gone: number;
+  /** 已有进行中的任务（下载、核对以后才发现，算跳过） */
+  active: number;
+  /** 校验通过、开始做种 */
+  succeeded: number;
+  rolled_back: number;
+  job_failed: number;
+  canceled: number;
+  skip_present: number;
+  skip_tried: number;
+  skip_daily_limit: number;
+  skip_not_selected: number;
+  iyuu_calls: number;
+  iyuu_rate_limited: number;
+  iyuu_failed: number;
+  iyuu_hashes: number;
+}
+
+export interface ReseedStatsPoint extends ReseedStatsCounts {
+  /** 这一段的第一天与最后一天（自定义范围时裁到范围以内） */
+  date: string;
+  end: string;
+}
+
+/** 一个站点在范围内的合计；site_name 为空的是不在辅种范围的 IYUU 站点 */
+export interface ReseedStatsSite extends ReseedStatsCounts {
+  site_name: string;
+}
+
+export interface ReseedStatsIYUU {
+  endpoint: ReseedIYUUEndpoint;
+  calls: number;
+  ok: number;
+  rate_limited: number;
+  failed: number;
+  hashes: number;
+}
+
+export interface ReseedStats {
+  granularity: "day" | "week" | "month" | "quarter" | "year";
+  custom: boolean;
+  from: string;
+  to: string;
+  series: ReseedStatsPoint[];
+  totals: ReseedStatsCounts;
+  sites: ReseedStatsSite[];
+  iyuu: ReseedStatsIYUU[];
+  /** 最近一次请求 IYUU 的时间（不限范围） */
+  last_iyuu_at?: string;
+  /** 最早有数据的那天 */
+  first_day?: string;
+}
+
+/** 统计的范围：最近 periods 段，或者自定义的 from、to（YYYY-MM-DD，含两头） */
+export interface ReseedStatsQuery {
+  granularity: string;
+  periods?: number;
+  from?: string;
+  to?: string;
+}
+
+export type ReseedRunTrigger = "schedule" | "manual" | "retry" | "continue";
+
+export type ReseedRunStatus =
+  | "running"
+  | "paused"
+  | "ok"
+  | "partial"
+  | "stopped"
+  | "limited"
+  | "failed"
+  | "interrupted";
+
+/** 正在跑的那一轮的实时进度 */
+export interface ReseedCurrentRun {
+  id: number;
+  trigger: ReseedRunTrigger;
+  continued_from?: number;
+  status: "running" | "paused";
+  started_at: string;
+  paused_at?: string;
+  hashes: number;
+  batches: number;
+  batches_done: number;
+  candidates: number;
+  created: number;
+  failed: number;
+  gone: number;
+  skipped: number;
+}
+
+/** 一轮辅种（轮次列表的一行） */
+export interface ReseedRun {
+  id: number;
+  trigger: ReseedRunTrigger;
+  started_at: string;
+  finished_at?: string;
+  status: ReseedRunStatus;
+  summary: string;
+  error: string;
+  downloaders: number;
+  hashes: number;
+  batches: number;
+  batches_done: number;
+  candidates: number;
+  created: number;
+  failed: number;
+  gone: number;
+  interrupted: number;
+  skipped: number;
+  skipped_detail?: Record<string, number>;
+  iyuu_calls: number;
+  continued_from?: number;
+  paused_at?: string;
+  paused_seconds: number;
+  steps_truncated: boolean;
+  /** 最近一个提前停下的轮次（重试的除外）可以接着往下查 */
+  continuable?: boolean;
+}
+
+export interface ReseedRunStep {
+  kind: "list" | "query" | "add" | "fail" | "gone" | "skip" | "stop" | "error" | "info";
+  text: string;
+}
+
+export interface ReseedRunDetail extends ReseedRun {
+  steps: ReseedRunStep[];
+}
+
+/** 一次辅种尝试（只追加：每站每天的名额、轮次里的尝试与统计都按它算） */
+export interface ReseedAttempt {
+  id: number;
+  run_id?: number;
+  started_at: string;
+  finished_at?: string;
+  site_name: string;
+  info_hash: string;
+  torrent_id: string;
+  name: string;
+  downloader_id: number;
+  outcome: "running" | "created" | "failed" | "gone" | "active" | "interrupted";
+  message: string;
+  job_id?: number;
+  job_state?: TransferState;
+  job_message?: string;
+  job_finished_at?: string;
+  job_missing?: boolean;
+  backfilled: boolean;
+}
+
+export interface ReseedPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface ReseedSettingsUpdate {
@@ -2669,8 +2882,25 @@ export interface ReseedSettingsUpdate {
   token?: string;
   interval_hours: number;
   downloader_ids: number[];
-  site_names: string[];
+  /** 不传时不动站点范围（站点在「站点」页用开关改） */
+  site_names?: string[];
   max_per_site_per_day: number;
+  /** 不传时保留原来的；0 是不隔 */
+  iyuu_min_interval_seconds?: number;
+  /** 0 是不限 */
+  iyuu_max_calls_per_day: number;
+  /** 以下三项不传时保留原来的；推送开着时至少要选一个通道 */
+  notify_mode?: ReseedNotifyMode;
+  notify_channel_ids?: number[];
+  daily_report?: boolean;
+}
+
+export type ReseedSiteMode = "all" | "selected";
+
+/** 站点开关的结果：all 是全部站点，selected 是只算 site_names */
+export interface ReseedSiteSelection {
+  site_mode: ReseedSiteMode;
+  site_names: string[];
 }
 
 export interface ReseedSiteMapItem {
@@ -2682,6 +2912,16 @@ export interface ReseedSiteMapItem {
   configured: boolean;
   selected: boolean;
 }
+
+/** 记录在页面上的结果（服务端按它筛选）：记录自己的状态说了算的直接用，建了任务的看任务现在的状态 */
+export type ReseedRecordResult =
+  | "active"
+  | "done"
+  | "failed"
+  | "rolled_back"
+  | "canceled"
+  | "gone"
+  | "missing";
 
 export interface ReseedRecord {
   id: number;
@@ -2699,9 +2939,22 @@ export interface ReseedRecord {
   job_message?: string;
   /** 记录指向的任务已经不在了，结果不知道 */
   job_missing?: boolean;
+  result: ReseedRecordResult;
   created_at: string;
   /** 最后一次尝试的时间 */
   updated_at: string;
+}
+
+/** 记录列表的筛选（都可以不填）：q 匹配种子名或 info hash */
+export interface ReseedRecordFilter {
+  result?: ReseedRecordResult | "";
+  site?: string;
+  q?: string;
+}
+
+export interface ReseedRecordPage extends ReseedPage<ReseedRecord> {
+  /** 记录里出现过的站点（筛选用） */
+  sites: string[];
 }
 
 // ---------- CookieCloud 导入（路线图 M7） ----------
@@ -3709,8 +3962,51 @@ export const reseedApi = {
   saveSettings: (data: ReseedSettingsUpdate) =>
     api.put<ReseedSettings>("/api/reseed/settings", data),
   sites: () => api.get<{ items: ReseedSiteMapItem[] }>("/api/reseed/sites"),
-  run: () => api.post<{ started: boolean }>("/api/reseed/run", {}),
-  records: () => api.get<{ items: ReseedRecord[] }>("/api/reseed/records"),
+  /** 打开或关掉一个站点 */
+  setSite: (site: string, selected: boolean) =>
+    api.put<ReseedSiteSelection>(`/api/reseed/sites/${encodeURIComponent(site)}`, { selected }),
+  /** 全部打开（以后新配置的站点也自动参与）或全部关掉 */
+  setAllSites: (selected: boolean) =>
+    api.put<ReseedSiteSelection>("/api/reseed/sites", { selected }),
+  run: () => api.post<{ started: boolean; run_id: number }>("/api/reseed/run", {}),
+  runs: (page = 1, pageSize = 20) =>
+    api.get<ReseedPage<ReseedRun>>(`/api/reseed/runs?page=${page}&page_size=${pageSize}`),
+  runDetail: (id: number) => api.get<ReseedRunDetail>(`/api/reseed/runs/${id}`),
+  runAttempts: (id: number, page = 1, pageSize = 50) =>
+    api.get<ReseedPage<ReseedAttempt>>(
+      `/api/reseed/runs/${id}/attempts?page=${page}&page_size=${pageSize}`,
+    ),
+  pauseRun: (id: number) =>
+    api.post<{ ok: boolean; current_run?: ReseedCurrentRun }>(`/api/reseed/runs/${id}/pause`, {}),
+  resumeRun: (id: number) =>
+    api.post<{ ok: boolean; current_run?: ReseedCurrentRun }>(`/api/reseed/runs/${id}/resume`, {}),
+  /** cancelPending：这一轮结束以后一起取消它建的、还没加入下载器的任务 */
+  stopRun: (id: number, cancelPending = false) =>
+    api.post<{ ok: boolean }>(`/api/reseed/runs/${id}/stop`, { cancel_pending: cancelPending }),
+  continueRun: (id: number) =>
+    api.post<{ started: boolean; run_id: number }>(`/api/reseed/runs/${id}/continue`, {}),
+  records: (filter: ReseedRecordFilter = {}, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (filter.result) params.set("result", filter.result);
+    if (filter.site) params.set("site", filter.site);
+    if (filter.q) params.set("q", filter.q);
+    return api.get<ReseedRecordPage>(`/api/reseed/records?${params}`);
+  },
+  /** 在后台重试选中的记录（一轮触发方式为「重试」的轮次） */
+  retryRecords: (ids: number[]) =>
+    api.post<{ started: boolean; run_id: number }>("/api/reseed/records/retry", { ids }),
+  /** 删除记录；任务还没结束的不删（active 是没删的条数） */
+  deleteRecords: (ids: number[]) =>
+    api.post<{ deleted: number; active: number }>("/api/reseed/records/delete", { ids }),
+  stats: (q: ReseedStatsQuery) => {
+    const params = new URLSearchParams({ granularity: q.granularity });
+    if (q.periods) params.set("periods", String(q.periods));
+    if (q.from) params.set("from", q.from);
+    if (q.to) params.set("to", q.to);
+    return api.get<ReseedStats>(`/api/reseed/stats?${params}`);
+  },
+  /** 取消记录对应的、还在等待加入下载器的任务 */
+  cancelRecord: (id: number) => api.post<{ ok: boolean }>(`/api/reseed/records/${id}/cancel`, {}),
   jobs: (status: "" | "active" | "finished" = "") =>
     api.get<{ items: TransferJob[] }>(
       `/api/reseed/jobs${status ? `?status=${encodeURIComponent(status)}` : ""}`,

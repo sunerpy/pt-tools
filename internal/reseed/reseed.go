@@ -16,14 +16,11 @@ import (
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/sunerpy/pt-tools/internal/iyuu"
 	"github.com/sunerpy/pt-tools/internal/transfer"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
-	"github.com/sunerpy/pt-tools/thirdpart/downloader"
-	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 const (
@@ -31,8 +28,6 @@ const (
 	siteListTTL = 12 * time.Hour
 	// maxRateLimitWait 是限流时愿意原地等待的最长时间；更长就停下这一轮，下次再来。
 	maxRateLimitWait = time.Minute
-	// maxRecordsListed 是记录列表最多返回的条数。
-	maxRecordsListed = 200
 )
 
 var (
@@ -77,6 +72,9 @@ type Service struct {
 	sites     []iyuu.Site
 	sitesAt   time.Time
 	sitesFrom string // 缓存属于哪个 token（换 token 时作废）
+
+	// gate 是 IYUU 调用口（最小间隔、每天的上限，见 iyuu_gate.go）
+	gate iyuuGate
 }
 
 // New 构造 Service。
@@ -110,26 +108,48 @@ func New(cfg Config) *Service {
 
 // Settings 是接口里的辅种设置：token 只说有没有设置，不返回内容。
 type Settings struct {
-	Enabled          bool       `json:"enabled"`
-	HasToken         bool       `json:"has_token"`
-	IntervalHours    int        `json:"interval_hours"`
-	DownloaderIDs    []uint     `json:"downloader_ids"`
-	SiteNames        []string   `json:"site_names"`
+	Enabled       bool     `json:"enabled"`
+	HasToken      bool     `json:"has_token"`
+	IntervalHours int      `json:"interval_hours"`
+	DownloaderIDs []uint   `json:"downloader_ids"`
+	SiteNames     []string `json:"site_names"`
+	// SiteMode 是站点范围：all（全部已配置、IYUU 也支持的站点）或 selected（只算 SiteNames）
+	SiteMode         string     `json:"site_mode"`
 	MaxPerSitePerDay int        `json:"max_per_site_per_day"`
 	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
 	LastResult       string     `json:"last_result"`
 	// NextRunAt 是下一轮大约什么时候（开着、有 token 时才有；到点以后在下一次检查时跑）
 	NextRunAt *time.Time `json:"next_run_at,omitempty"`
+	// IYUUMinIntervalSeconds 是两次请求 IYUU 之间至少隔几秒（没设置时是默认的 3）；IYUUMaxCallsPerDay 是每天最多请求几次，0 是不限
+	IYUUMinIntervalSeconds int `json:"iyuu_min_interval_seconds"`
+	IYUUMaxCallsPerDay     int `json:"iyuu_max_calls_per_day"`
+	// IYUUCooldownUntil 是限流冷却到什么时候（冷却中才有）；IYUULastLimit 是最近一次限流的情况
+	IYUUCooldownUntil *time.Time `json:"iyuu_cooldown_until,omitempty"`
+	IYUULastLimit     *IYUULimit `json:"iyuu_last_limit,omitempty"`
+	// IYUUToday 是今天各接口的请求计数
+	IYUUToday []models.ReseedIYUUDaily `json:"iyuu_today"`
+	// NotifyMode 是每轮结果推送（off、always、changes），NotifyChannelIDs 是接收的通知通道；DailyReport 是每日战报里带不带辅种
+	NotifyMode       string `json:"notify_mode"`
+	NotifyChannelIDs []uint `json:"notify_channel_ids"`
+	DailyReport      bool   `json:"daily_report"`
 }
 
 // SettingsUpdate 是保存设置的请求。Token 为 nil 时保留原来的；为空串时清除。
+// SiteNames 为 nil 时保留原来的站点范围（网页在「站点」页用开关改，见 SetSiteSelected）；给了就按名单保存，空名单是全部站点。
 type SettingsUpdate struct {
-	Enabled          bool     `json:"enabled"`
-	Token            *string  `json:"token,omitempty"`
-	IntervalHours    int      `json:"interval_hours"`
-	DownloaderIDs    []uint   `json:"downloader_ids"`
-	SiteNames        []string `json:"site_names"`
-	MaxPerSitePerDay int      `json:"max_per_site_per_day"`
+	Enabled          bool      `json:"enabled"`
+	Token            *string   `json:"token,omitempty"`
+	IntervalHours    int       `json:"interval_hours"`
+	DownloaderIDs    []uint    `json:"downloader_ids"`
+	SiteNames        *[]string `json:"site_names,omitempty"`
+	MaxPerSitePerDay int       `json:"max_per_site_per_day"`
+	// IYUUMinIntervalSeconds 为 nil 时保留原来的（没设置过就是默认的 3 秒）；0 是不隔
+	IYUUMinIntervalSeconds *int `json:"iyuu_min_interval_seconds,omitempty"`
+	IYUUMaxCallsPerDay     int  `json:"iyuu_max_calls_per_day"`
+	// NotifyMode、NotifyChannelIDs、DailyReport 为 nil 时保留原来的（旧页面保存时不会把推送关掉）
+	NotifyMode       *string `json:"notify_mode,omitempty"`
+	NotifyChannelIDs *[]uint `json:"notify_channel_ids,omitempty"`
+	DailyReport      *bool   `json:"daily_report,omitempty"`
 }
 
 func (s *Service) row(ctx context.Context) (models.ReseedSetting, error) {
@@ -151,7 +171,16 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		return Settings{}, err
 	}
 	out := view(r)
-	out.NextRunAt = nextRun(r.Enabled && r.TokenEncrypted != "", r.LastRunAt, out.IntervalHours, s.cfg.Now())
+	now := s.cfg.Now()
+	out.NextRunAt = nextRun(r.Enabled && r.TokenEncrypted != "", r.LastRunAt, out.IntervalHours, now)
+	if ce := cooling(r, now); ce != nil {
+		until := ce.Until
+		out.IYUUCooldownUntil = &until
+	}
+	out.IYUULastLimit = lastLimit(r)
+	if out.IYUUToday, err = s.IYUUCallsToday(ctx); err != nil {
+		return Settings{}, err
+	}
 	return out, nil
 }
 
@@ -174,7 +203,10 @@ func view(r models.ReseedSetting) Settings {
 		Enabled: r.Enabled, HasToken: r.TokenEncrypted != "", IntervalHours: r.IntervalHours,
 		DownloaderIDs: decodeUints(r.DownloaderIDs), SiteNames: decodeStrings(r.SiteNames),
 		MaxPerSitePerDay: r.MaxPerSitePerDay, LastRunAt: r.LastRunAt, LastResult: r.LastResult,
+		IYUUMinIntervalSeconds: int(minInterval(r) / time.Second), IYUUMaxCallsPerDay: r.IYUUMaxCallsPerDay,
+		NotifyMode: notifyModeOf(r.NotifyMode), NotifyChannelIDs: decodeUints(r.NotifyChannelIDs), DailyReport: r.DailyReport,
 	}
+	out.SiteMode = models.ReseedSiteModeOf(r.SiteMode, out.SiteNames)
 	if out.IntervalHours == 0 {
 		out.IntervalHours = models.ReseedDefaultIntervalHours
 	}
@@ -192,6 +224,10 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 		return Settings{}, fmt.Errorf("%w：间隔要在 %d 到 %d 小时之间", ErrInvalid, models.ReseedMinIntervalHours, models.ReseedMaxIntervalHours)
 	case u.MaxPerSitePerDay < 0 || u.MaxPerSitePerDay > models.ReseedMaxPerSitePerDay:
 		return Settings{}, fmt.Errorf("%w：每站每天最多 %d 个", ErrInvalid, models.ReseedMaxPerSitePerDay)
+	case u.IYUUMinIntervalSeconds != nil && (*u.IYUUMinIntervalSeconds < 0 || *u.IYUUMinIntervalSeconds > models.ReseedMaxIYUUMinInterval):
+		return Settings{}, fmt.Errorf("%w：两次请求 IYUU 之间隔 0 到 %d 秒", ErrInvalid, models.ReseedMaxIYUUMinInterval)
+	case u.IYUUMaxCallsPerDay < 0 || u.IYUUMaxCallsPerDay > models.ReseedMaxIYUUCallsPerDay:
+		return Settings{}, fmt.Errorf("%w：每天最多请求 IYUU %d 次（0 是不限）", ErrInvalid, models.ReseedMaxIYUUCallsPerDay)
 	}
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
@@ -200,11 +236,21 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 		return Settings{}, err
 	}
 	cols := map[string]any{
-		"enabled":              u.Enabled,
-		"interval_hours":       u.IntervalHours,
-		"max_per_site_per_day": u.MaxPerSitePerDay,
-		"downloader_ids":       encode(dedupeUints(u.DownloaderIDs)),
-		"site_names":           encode(dedupeStrings(u.SiteNames)),
+		"enabled":                u.Enabled,
+		"interval_hours":         u.IntervalHours,
+		"max_per_site_per_day":   u.MaxPerSitePerDay,
+		"downloader_ids":         encode(dedupeUints(u.DownloaderIDs)),
+		"iyuu_max_calls_per_day": u.IYUUMaxCallsPerDay,
+	}
+	if u.IYUUMinIntervalSeconds != nil {
+		cols["iyuu_min_interval_seconds"] = *u.IYUUMinIntervalSeconds
+	}
+	if u.SiteNames != nil {
+		names := dedupeStrings(*u.SiteNames)
+		cols["site_names"], cols["site_mode"] = encode(names), models.ReseedSiteModeOf("", names)
+	}
+	if err = s.notifyCols(ctx, r, u, cols); err != nil {
+		return Settings{}, err
 	}
 	tokenEnc := r.TokenEncrypted
 	if u.Token != nil {
@@ -219,6 +265,8 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 		}
 		cols["token_encrypted"] = tokenEnc
 		cols["sid_sha1"], cols["sid_key"], cols["sid_at"] = "", "", nil
+		// 限流是按 token 算的：换了 token 不再冷却
+		cols["iyuu_cooldown_until"] = nil
 	}
 	if u.Enabled && tokenEnc == "" {
 		return Settings{}, fmt.Errorf("%w：开启辅种前要先填写 IYUU token", ErrInvalid)
@@ -266,13 +314,17 @@ func (s *Service) Due(ctx context.Context) bool {
 		return false
 	}
 	if r.LastRunAt == nil {
-		return true
+		return s.IYUUReady(ctx) == nil
 	}
 	interval := r.IntervalHours
 	if interval == 0 {
 		interval = models.ReseedDefaultIntervalHours
 	}
-	return !s.cfg.Now().Before(r.LastRunAt.Add(time.Duration(interval) * time.Hour))
+	if s.cfg.Now().Before(r.LastRunAt.Add(time.Duration(interval) * time.Hour)) {
+		return false
+	}
+	// 限流冷却中、今天的请求到了上限：不开始（开始了也是马上停下）
+	return s.IYUUReady(ctx) == nil
 }
 
 // RecordRun 记下这一轮的时间和结果。
@@ -301,16 +353,28 @@ type SiteMapItem struct {
 	Selected   bool   `json:"selected"`
 }
 
-func (s *Service) iyuuSites(ctx context.Context, client *iyuu.Client, token string) ([]iyuu.Site, error) {
+// iyuuSites 返回 IYUU 支持的站点（缓存 12 小时）。限流冷却中、到了每天的上限时，有旧的缓存就用旧的。
+func (s *Service) iyuuSites(ctx context.Context, res *RunResult, client *iyuu.Client, token string) ([]iyuu.Site, error) {
 	s.mu.Lock()
-	if s.sites != nil && s.sitesFrom == token && s.cfg.Now().Sub(s.sitesAt) < siteListTTL {
-		out := s.sites
+	cached := s.sites
+	if s.sitesFrom != token {
+		cached = nil
+	}
+	if cached != nil && s.cfg.Now().Sub(s.sitesAt) < siteListTTL {
 		s.mu.Unlock()
-		return out, nil
+		return cached, nil
 	}
 	s.mu.Unlock()
-	sites, err := client.Sites(ctx)
+	var sites []iyuu.Site
+	err := s.callIYUU(ctx, res, models.IYUUEndpointSites, 0, func(ctx context.Context) error {
+		var cerr error
+		sites, cerr = client.Sites(ctx)
+		return cerr
+	})
 	if err != nil {
+		if cached != nil && IYUULimited(err) {
+			return cached, nil
+		}
 		return nil, err
 	}
 	s.mu.Lock()
@@ -329,20 +393,104 @@ func (s *Service) SiteMap(ctx context.Context) ([]SiteMapItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	sites, err := s.iyuuSites(ctx, s.cfg.NewClient(token), token)
+	sites, err := s.iyuuSites(ctx, nil, s.cfg.NewClient(token), token)
 	if err != nil {
-		return nil, err
+		return nil, s.limitErr(ctx, err)
 	}
-	return s.mapSites(sites, decodeStrings(r.SiteNames)), nil
+	return s.mapSites(sites, r), nil
 }
 
-func (s *Service) mapSites(sites []iyuu.Site, selected []string) []SiteMapItem {
-	configured := map[string]bool{}
+// SiteSelection 是站点范围：Mode 为 all 时全部已配置、IYUU 也支持的站点都参与（以后新配置的也算），为 selected 时只算 SiteNames。
+type SiteSelection struct {
+	Mode      string   `json:"site_mode"`
+	SiteNames []string `json:"site_names"`
+}
+
+// SetSiteSelected 打开或关掉一个站点。从「全部站点」关掉一个时，名单换成现在已配置的站点去掉它（以后新配置的站点默认不参与）；
+// 打开的站点必须已经在 pt-tools 里配置。只写站点范围的两列，与保存设置互斥。
+func (s *Service) SetSiteSelected(ctx context.Context, site string, selected bool) (SiteSelection, error) {
+	site = strings.TrimSpace(site)
+	if site == "" {
+		return SiteSelection{}, fmt.Errorf("%w：缺少站点", ErrInvalid)
+	}
+	configured := s.configuredSites()
+	if selected && !configured[site] {
+		return SiteSelection{}, fmt.Errorf("%w：站点 %s 还没有在 pt-tools 里配置", ErrInvalid, site)
+	}
+	return s.updateSites(ctx, func(mode string, names []string) (string, []string) {
+		if mode == models.ReseedSitesAll {
+			if selected {
+				return mode, names
+			}
+			names = names[:0]
+			for id := range configured {
+				if id != site {
+					names = append(names, id)
+				}
+			}
+			return models.ReseedSitesSelected, names
+		}
+		out := make([]string, 0, len(names)+1)
+		for _, n := range names {
+			if n != site {
+				out = append(out, n)
+			}
+		}
+		if selected {
+			out = append(out, site)
+		}
+		return models.ReseedSitesSelected, out
+	})
+}
+
+// SetAllSitesSelected 全部打开（以后新配置的站点也自动参与）或全部关掉。
+func (s *Service) SetAllSitesSelected(ctx context.Context, selected bool) (SiteSelection, error) {
+	return s.updateSites(ctx, func(string, []string) (string, []string) {
+		if selected {
+			return models.ReseedSitesAll, []string{}
+		}
+		return models.ReseedSitesSelected, []string{}
+	})
+}
+
+func (s *Service) configuredSites() map[string]bool {
+	out := map[string]bool{}
 	if s.cfg.SiteIDs != nil {
 		for _, id := range s.cfg.SiteIDs() {
-			configured[id] = true
+			out[id] = true
 		}
 	}
+	return out
+}
+
+// updateSites 在 saveMu 下读出站点范围、按 change 改、写回（只写 site_mode 与 site_names 两列）。
+func (s *Service) updateSites(ctx context.Context, change func(mode string, names []string) (string, []string)) (SiteSelection, error) {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	r, err := s.row(ctx)
+	if err != nil {
+		return SiteSelection{}, err
+	}
+	names := decodeStrings(r.SiteNames)
+	mode, names := change(models.ReseedSiteModeOf(r.SiteMode, names), names)
+	names = dedupeStrings(names)
+	sort.Strings(names)
+	db := s.cfg.DB.WithContext(context.WithoutCancel(ctx))
+	if err := ensureRow(db); err != nil {
+		return SiteSelection{}, fmt.Errorf("保存辅种站点失败: %w", err)
+	}
+	if err := db.Model(&models.ReseedSetting{}).Where("id = 1").
+		Updates(map[string]any{"site_mode": mode, "site_names": encode(names)}).Error; err != nil {
+		return SiteSelection{}, fmt.Errorf("保存辅种站点失败: %w", err)
+	}
+	return SiteSelection{Mode: mode, SiteNames: names}, nil
+}
+
+// mapSites 按设置里的站点范围标出每个 IYUU 站点在不在辅种范围。
+func (s *Service) mapSites(sites []iyuu.Site, r models.ReseedSetting) []SiteMapItem {
+	selected := decodeStrings(r.SiteNames)
+	all := models.ReseedSiteModeOf(r.SiteMode, selected) == models.ReseedSitesAll
+	configured := s.configuredSites()
 	pick := map[string]bool{}
 	for _, n := range selected {
 		pick[n] = true
@@ -357,7 +505,7 @@ func (s *Service) mapSites(sites []iyuu.Site, selected []string) []SiteMapItem {
 		name, _ := s.cfg.Resolver.Resolve(raw)
 		item := SiteMapItem{SID: st.SID, IYUUSite: st.Site, Nickname: st.Nickname, Host: host, SiteName: name}
 		item.Configured = name != "" && configured[name]
-		item.Selected = item.Configured && (len(pick) == 0 || pick[name])
+		item.Selected = item.Configured && (all || pick[name])
 		out = append(out, item)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -367,498 +515,6 @@ func (s *Service) mapSites(sites []iyuu.Site, selected []string) []SiteMapItem {
 		return out[i].IYUUSite < out[j].IYUUSite
 	})
 	return out
-}
-
-// ---------- 运行 ----------
-
-// RunResult 是一轮辅种的结果。
-type RunResult struct {
-	Downloaders int            `json:"downloaders"`
-	Hashes      int            `json:"hashes"`
-	Candidates  int            `json:"candidates"`
-	Created     int            `json:"created"`
-	Failed      int            `json:"failed"`
-	Skipped     map[string]int `json:"skipped,omitempty"`
-	Errors      []string       `json:"errors,omitempty"`
-	// Stopped 说明这一轮为什么提前停下（限流等）。
-	Stopped string `json:"stopped,omitempty"`
-}
-
-// 跳过的原因。
-const (
-	SkipNotSelected = "站点不在辅种范围"
-	SkipExists      = "下载器里已经有"
-	SkipTried       = "已经尝试过"
-	SkipDailyLimit  = "今天这个站点已经加满"
-	SkipActive      = "已有进行中的任务"
-	// SkipGone 是站点上已经删了的种子（下载时站点回「种子未找到」），记下来以后不再试
-	SkipGone = "站点上已经没有这个种子"
-)
-
-func (r *RunResult) skip(why string) {
-	if r.Skipped == nil {
-		r.Skipped = map[string]int{}
-	}
-	r.Skipped[why]++
-}
-
-// Summary 是写进设置 last_result 的一句话。
-func (r RunResult) Summary() string {
-	parts := []string{fmt.Sprintf("查询 %d 个种子，找到 %d 个可辅种，加入 %d 个", r.Hashes, r.Candidates, r.Created)}
-	if r.Failed > 0 {
-		parts = append(parts, fmt.Sprintf("失败 %d 个", r.Failed))
-	}
-	if n := r.skippedTotal(); n > 0 {
-		parts = append(parts, fmt.Sprintf("跳过 %d 个", n))
-	}
-	if r.Stopped != "" {
-		parts = append(parts, r.Stopped)
-	}
-	if len(r.Errors) > 0 {
-		parts = append(parts, r.Errors[0])
-	}
-	return strings.Join(parts, "，")
-}
-
-func (r RunResult) skippedTotal() int {
-	n := 0
-	for _, v := range r.Skipped {
-		n += v
-	}
-	return n
-}
-
-// source 是下载器里一个已经下完的种子。
-type source struct {
-	dlID    uint
-	dl      downloader.Downloader
-	torrent downloader.Torrent
-}
-
-// Run 运行一轮辅种。返回的错误是这一轮根本没法开始（没有 token、没有站点等）；单个下载器或站点的问题记在结果里。
-func (s *Service) Run(ctx context.Context) (RunResult, error) {
-	res := RunResult{}
-	r, err := s.row(ctx)
-	if err != nil {
-		return res, err
-	}
-	token, err := s.token(ctx, r)
-	if err != nil {
-		return res, err
-	}
-	client := s.cfg.NewClient(token)
-	sites, err := s.iyuuSites(ctx, client, token)
-	if err != nil {
-		return res, fmt.Errorf("读取 IYUU 站点列表失败: %w", err)
-	}
-	bySID := map[int]string{}
-	sids := make([]int, 0)
-	for _, it := range s.mapSites(sites, decodeStrings(r.SiteNames)) {
-		if it.Selected {
-			bySID[it.SID] = it.SiteName
-			sids = append(sids, it.SID)
-		}
-	}
-	if len(sids) == 0 {
-		return res, ErrNoSites
-	}
-	sort.Ints(sids)
-	sidSha1, err := s.sidSha1(ctx, client, &r, sids, false)
-	if err != nil {
-		return res, fmt.Errorf("向 IYUU 报告站点失败: %w", err)
-	}
-
-	sources, present := s.collect(ctx, r, &res)
-	hashes := make([]string, 0, len(sources))
-	for h := range sources {
-		hashes = append(hashes, h)
-	}
-	sort.Strings(hashes)
-	res.Hashes = len(hashes)
-
-	limit := r.MaxPerSitePerDay
-	if limit == 0 {
-		limit = models.ReseedDefaultMaxPerSitePerDay
-	}
-	today, err := s.todayCounts(ctx)
-	if err != nil {
-		return res, err
-	}
-	refreshed := false
-	for start := 0; start < len(hashes); start += iyuu.MaxBatch {
-		if ctx.Err() != nil {
-			res.Stopped = "这一轮超过时限，已停下"
-			break
-		}
-		// token 在这一轮里被清除或更换时停下，不再用旧 token 发送 info hash
-		if cur, err := s.row(ctx); err != nil {
-			res.Errors = append(res.Errors, err.Error())
-			break
-		} else if cur.TokenEncrypted != r.TokenEncrypted {
-			res.Stopped = "IYUU token 已清除或更换，这一轮停下"
-			break
-		}
-		batch := hashes[start:min(start+iyuu.MaxBatch, len(hashes))]
-		found, err := s.query(ctx, client, batch, &sidSha1, &r, sids, &refreshed)
-		if err != nil {
-			var rl *iyuu.RateLimitError
-			if errors.As(err, &rl) {
-				res.Stopped = rl.Error()
-			} else {
-				res.Errors = append(res.Errors, "查询 IYUU 失败: "+err.Error())
-			}
-			break
-		}
-		s.handle(ctx, found, sources, present, bySID, today, limit, &res)
-	}
-	return res, nil
-}
-
-// collect 读出范围内各下载器里已经下完的种子（按小写 info hash），以及全部下载器里已经有的 info hash。
-func (s *Service) collect(ctx context.Context, r models.ReseedSetting, res *RunResult) (map[string]source, map[string]bool) {
-	ids := decodeUints(r.DownloaderIDs)
-	if len(ids) == 0 {
-		var rows []models.DownloaderSetting
-		if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&rows).Error; err != nil {
-			res.Errors = append(res.Errors, "读取下载器失败: "+err.Error())
-		}
-		for _, d := range rows {
-			ids = append(ids, d.ID)
-		}
-	}
-	sources := map[string]source{}
-	present := map[string]bool{}
-	for _, id := range ids {
-		dl, set, err := s.cfg.Downloaders.TransferDownloader(ctx, id)
-		if err != nil {
-			res.Errors = append(res.Errors, fmt.Sprintf("下载器 %d 不可用: %v", id, err))
-			continue
-		}
-		torrents, err := dl.GetAllTorrents()
-		if err != nil {
-			res.Errors = append(res.Errors, fmt.Sprintf("读取 %s 的种子失败: %v", set.Name, err))
-			continue
-		}
-		res.Downloaders++
-		for _, t := range torrents {
-			h := strings.ToLower(t.InfoHash)
-			if h == "" {
-				continue
-			}
-			present[h] = true
-			if !(t.IsCompleted || t.Progress >= 1) || t.State == downloader.TorrentError || t.State == downloader.TorrentChecking {
-				continue
-			}
-			if _, ok := sources[h]; !ok {
-				sources[h] = source{dlID: id, dl: dl, torrent: t}
-			}
-		}
-	}
-	return sources, present
-}
-
-// sidSha1 返回查询要带的站点哈希：报告的站点没变、7 天之内就用缓存的；force 时重新报告。
-func (s *Service) sidSha1(ctx context.Context, client *iyuu.Client, r *models.ReseedSetting, sids []int, force bool) (string, error) {
-	key := joinInts(sids)
-	now := s.cfg.Now()
-	if !force && r.SidSha1 != "" && r.SidKey == key && r.SidAt != nil && now.Sub(*r.SidAt) < models.ReseedSidTTL {
-		return r.SidSha1, nil
-	}
-	sum, err := client.ReportExisting(ctx, sids)
-	if err != nil {
-		return "", err
-	}
-	r.SidSha1, r.SidKey, r.SidAt = sum, key, &now
-	// 只写缓存列，并且只在 token 没换过时写：这一轮读出设置之后，token 可能已经被清除或更换
-	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Model(&models.ReseedSetting{}).
-		Where("id = 1 AND token_encrypted = ?", r.TokenEncrypted).
-		Updates(map[string]any{"sid_sha1": sum, "sid_key": key, "sid_at": now}).Error; err != nil {
-		s.cfg.Logger.Warnf("[辅种] 保存 sid_sha1 失败: %v", err)
-	}
-	return sum, nil
-}
-
-// query 查询一批：限流且等待不长时等一次再查；IYUU 报错时重新报告站点、再查一次（每轮最多一次）。
-func (s *Service) query(ctx context.Context, client *iyuu.Client, batch []string, sidSha1 *string,
-	r *models.ReseedSetting, sids []int, refreshed *bool,
-) (map[string][]iyuu.Candidate, error) {
-	found, err := client.Query(ctx, batch, *sidSha1)
-	var rl *iyuu.RateLimitError
-	if errors.As(err, &rl) && rl.RetryAfter <= maxRateLimitWait {
-		if serr := s.cfg.Sleep(ctx, rl.RetryAfter); serr != nil {
-			return nil, err
-		}
-		found, err = client.Query(ctx, batch, *sidSha1)
-	}
-	var apiErr *iyuu.APIError
-	if errors.As(err, &apiErr) && !*refreshed {
-		*refreshed = true
-		sum, rerr := s.sidSha1(ctx, client, r, sids, true)
-		if rerr != nil {
-			return nil, err
-		}
-		*sidSha1 = sum
-		found, err = client.Query(ctx, batch, *sidSha1)
-	}
-	return found, err
-}
-
-// todayCounts 返回今天（进程时区）每个站点已经尝试过的个数。
-func (s *Service) todayCounts(ctx context.Context) (map[string]int, error) {
-	now := s.cfg.Now()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	var rows []struct {
-		SiteName string
-		N        int
-	}
-	if err := s.cfg.DB.WithContext(ctx).Model(&models.ReseedRecord{}).Select("site_name, COUNT(*) AS n").
-		Where("updated_at >= ?", start).Group("site_name").Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("统计今天的辅种失败: %w", err)
-	}
-	out := map[string]int{}
-	for _, r := range rows {
-		out[r.SiteName] = r.N
-	}
-	return out, nil
-}
-
-// handle 处理一批查询结果：逐个可辅种的种子判断、下载、核对，然后建任务或记下失败。
-func (s *Service) handle(ctx context.Context, found map[string][]iyuu.Candidate, sources map[string]source, present map[string]bool,
-	bySID map[int]string, today map[string]int, limit int, res *RunResult,
-) {
-	srcHashes := make([]string, 0, len(found))
-	for h := range found {
-		srcHashes = append(srcHashes, h)
-	}
-	sort.Strings(srcHashes)
-	for _, srcHash := range srcHashes {
-		src, ok := sources[srcHash]
-		if !ok {
-			continue
-		}
-		for _, c := range found[srcHash] {
-			if ctx.Err() != nil {
-				return
-			}
-			res.Candidates++
-			site, ok := bySID[c.SID]
-			switch {
-			case !ok:
-				res.skip(SkipNotSelected)
-				continue
-			case c.InfoHash == "" || present[c.InfoHash]:
-				res.skip(SkipExists)
-				continue
-			case s.tried(ctx, c.InfoHash, site):
-				res.skip(SkipTried)
-				continue
-			case today[site] >= limit:
-				res.skip(SkipDailyLimit)
-				continue
-			}
-			today[site]++
-			present[c.InfoHash] = true
-			s.attempt(ctx, src, c, site, res)
-		}
-	}
-}
-
-// tried 报告这个站点的这个种子是不是已经尝试过、这次不该再试：暂时失败的过了 ReseedRetryAfter 可以再试。
-func (s *Service) tried(ctx context.Context, hash, site string) bool {
-	var rec models.ReseedRecord
-	err := s.cfg.DB.WithContext(ctx).Where("info_hash = ? AND site_name = ?", hash, site).First(&rec).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		return false
-	case err != nil:
-		return true // 读不到就当尝试过，不冒险重复
-	}
-	retryNow := rec.State == models.ReseedFailed && rec.Retryable && s.cfg.Now().Sub(rec.UpdatedAt) >= models.ReseedRetryAfter
-	return !retryNow
-}
-
-// attempt 下载一个可辅种的种子，核对 info hash 与文件列表，通过就建任务；结果记进 ReseedRecord。
-func (s *Service) attempt(ctx context.Context, src source, c iyuu.Candidate, site string, res *RunResult) {
-	rec := models.ReseedRecord{
-		InfoHash: c.InfoHash, SiteName: site, TorrentID: c.TorrentID, SourceHash: strings.ToLower(src.torrent.InfoHash),
-		DownloaderID: src.dlID, Name: src.torrent.Name,
-	}
-	fail := func(why string) {
-		res.Failed++
-		rec.State, rec.Message = models.ReseedFailed, why
-		s.saveRecord(ctx, &rec)
-	}
-	// 站点不可用、下载不到种子、读不到原种子的文件列表是暂时的：记为可重试，过一段时间再试
-	retryLater := func(why string) {
-		rec.Retryable = true
-		fail(why)
-	}
-	inst, ok := s.cfg.Sites(site)
-	if !ok {
-		retryLater("站点 " + site + " 不可用")
-		return
-	}
-	data, err := inst.Download(ctx, c.TorrentID)
-	if errors.Is(err, v2.ErrTorrentNotFound) {
-		// 站点上删了（IYUU 的索引里还有）：不是失败，也不会过几天就有，记下来不再试
-		res.skip(SkipGone)
-		rec.State, rec.Message = models.ReseedGone, "站点上已经没有这个种子（多半已被删除）"
-		s.saveRecord(ctx, &rec)
-		return
-	}
-	if err != nil {
-		retryLater("下载种子失败: " + err.Error())
-		return
-	}
-	if h, hashErr := qbit.ComputeTorrentHash(data); hashErr != nil || !strings.EqualFold(h, c.InfoHash) {
-		fail("下载到的种子与 IYUU 给的 info hash 不符")
-		return
-	}
-	newFiles, err := TorrentFiles(data)
-	if err != nil {
-		fail(err.Error())
-		return
-	}
-	oldFiles, err := src.dl.GetTorrentFiles(src.torrent.ID)
-	if err != nil {
-		// 下载器暂时读不到（重启中、连不上）：还没核对，过一段时间再试
-		retryLater("读取原种子的文件列表失败: " + err.Error())
-		return
-	}
-	if same, why := SameFiles(newFiles, DownloaderFiles(oldFiles)); !same {
-		fail("文件列表与原种子不一致：" + why)
-		return
-	}
-	job := models.TorrentTransferJob{
-		TargetDownloaderID: src.dlID, InfoHash: c.InfoHash, Name: src.torrent.Name, TotalSize: src.torrent.TotalSize,
-		SiteName: site, TorrentID: c.TorrentID, SourceSavePath: src.torrent.SavePath, TargetSavePath: src.torrent.SavePath,
-		Category: src.torrent.Category, Tags: site, TorrentData: data,
-	}
-	if err := s.cfg.Transfer.EnqueueReseed(ctx, &job); err != nil {
-		if errors.Is(err, transfer.ErrJobActive) {
-			res.skip(SkipActive)
-			return
-		}
-		if errors.Is(err, transfer.ErrInvalid) {
-			fail(err.Error())
-		} else {
-			retryLater("建辅种任务失败: " + err.Error()) // 写库失败等暂时的问题
-		}
-		return
-	}
-	res.Created++
-	rec.State, rec.JobID = models.ReseedQueued, &job.ID
-	s.saveRecord(ctx, &rec)
-}
-
-// saveRecord 写入（或在重试时更新）这个站点这个种子的记录。
-func (s *Service) saveRecord(ctx context.Context, rec *models.ReseedRecord) {
-	now := s.cfg.Now()
-	rec.CreatedAt, rec.UpdatedAt = now, now
-	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "info_hash"}, {Name: "site_name"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"torrent_id", "source_hash", "downloader_id", "name", "state", "message", "retryable", "job_id", "updated_at",
-		}),
-	}).Create(rec).Error; err != nil {
-		s.cfg.Logger.Warnf("[辅种] 记录 %s@%s 失败: %v", rec.InfoHash, rec.SiteName, err)
-	}
-}
-
-// ---------- 记录 ----------
-
-// RecordView 是记录列表里的一项：记录加上任务的状态。JobMissing 表示记录指向的任务已经不在了（结果不知道）。
-type RecordView struct {
-	models.ReseedRecord
-	JobState   string `json:"job_state,omitempty"`
-	JobMessage string `json:"job_message,omitempty"`
-	JobMissing bool   `json:"job_missing,omitempty"`
-}
-
-// Records 返回最近尝试的辅种记录（重试过的按最后一次尝试的时间排）。
-func (s *Service) Records(ctx context.Context) ([]RecordView, error) {
-	var recs []models.ReseedRecord
-	if err := s.cfg.DB.WithContext(ctx).Order("updated_at DESC, id DESC").Limit(maxRecordsListed).Find(&recs).Error; err != nil {
-		return nil, fmt.Errorf("读取辅种记录失败: %w", err)
-	}
-	ids := make([]uint, 0)
-	for _, r := range recs {
-		if r.JobID != nil {
-			ids = append(ids, *r.JobID)
-		}
-	}
-	jobs := map[uint]models.TorrentTransferJob{}
-	if len(ids) > 0 {
-		var rows []models.TorrentTransferJob
-		if err := s.cfg.DB.WithContext(ctx).Omit("torrent_data").Where("id IN ?", ids).Find(&rows).Error; err != nil {
-			return nil, fmt.Errorf("读取辅种任务失败: %w", err)
-		}
-		for _, j := range rows {
-			jobs[j.ID] = j
-		}
-	}
-	out := make([]RecordView, 0, len(recs))
-	for _, r := range recs {
-		v := RecordView{ReseedRecord: r}
-		if r.JobID != nil {
-			if j, ok := jobs[*r.JobID]; ok {
-				v.JobState, v.JobMessage = j.State, j.Message
-			} else {
-				v.JobMissing = true
-			}
-		}
-		out = append(out, v)
-	}
-	return out, nil
-}
-
-// finalJobStates 是辅种任务结束时的状态。
-var finalJobStates = []string{models.TransferDone, models.TransferRolledBack, models.TransferFailed, models.TransferCanceled}
-
-// ClearFinishedJobs 删除已经结束的辅种任务，返回删除的条数。删除前把任务的结果写进引用它的辅种记录，
-// 记录不再指向任务；不改记录的更新时间（重试间隔和每天的上限按它算）。
-func (s *Service) ClearFinishedJobs(ctx context.Context) (int64, error) {
-	var n int64
-	err := s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var jobs []models.TorrentTransferJob
-		if err := tx.Omit("torrent_data").Where("kind = ? AND state IN ?", models.JobKindReseed, finalJobStates).
-			Find(&jobs).Error; err != nil {
-			return err
-		}
-		if len(jobs) == 0 {
-			return nil
-		}
-		ids := make([]uint, 0, len(jobs))
-		for _, j := range jobs {
-			ids = append(ids, j.ID)
-			state, msg := recordResult(j)
-			if err := tx.Model(&models.ReseedRecord{}).Where("job_id = ?", j.ID).
-				UpdateColumns(map[string]any{"state": state, "message": msg, "job_id": nil}).Error; err != nil {
-				return err
-			}
-		}
-		res := tx.Where("id IN ? AND state IN ?", ids, finalJobStates).Delete(&models.TorrentTransferJob{})
-		n = res.RowsAffected
-		return res.Error
-	})
-	if err != nil {
-		return 0, fmt.Errorf("清除已结束的辅种任务失败: %w", err)
-	}
-	return n, nil
-}
-
-// recordResult 是结束的辅种任务写进记录里的结果和说明。
-func recordResult(j models.TorrentTransferJob) (string, string) {
-	switch j.State {
-	case models.TransferDone:
-		return models.ReseedDone, j.Message
-	case models.TransferRolledBack:
-		return models.ReseedRolledBack, j.Message
-	case models.TransferCanceled:
-		return models.ReseedCanceled, j.Message
-	default:
-		return models.ReseedFailed, j.Message
-	}
 }
 
 // ---------- 小工具 ----------

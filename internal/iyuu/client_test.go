@@ -36,7 +36,7 @@ func (f *fakeIYUU) server() *httptest.Server {
 		require.NoError(f.t, r.ParseForm())
 		f.lastForm = r.PostForm
 		if f.code == 429 {
-			write(429, "请求太频繁", map[string]any{"Retry-After": 12, "X-RateLimit-Limit": 10})
+			write(429, "请求太频繁", map[string]any{"Retry-After": 12, "X-RateLimit-Limit": 10, "X-RateLimit-Reset": "1793000000"})
 			return
 		}
 		if f.code != 0 {
@@ -133,6 +133,15 @@ func TestClientErrors(t *testing.T) {
 	require.ErrorAs(t, err, &rl)
 	assert.Equal(t, 12*time.Second, rl.RetryAfter)
 	assert.Contains(t, rl.Error(), "12 秒后再试")
+	assert.Equal(t, int64(1793000000), rl.ResetAt.Unix(), "X-RateLimit-Reset 是 Unix 秒（字符串也认）")
+	assert.Equal(t, 10, rl.Limit)
+
+	// 没给的字段是零值；Retry-After 没给时按 30 秒
+	plain := rateLimit("x", []byte(`{}`))
+	assert.Equal(t, 30*time.Second, plain.RetryAfter)
+	assert.True(t, plain.ResetAt.IsZero())
+	assert.Zero(t, plain.Limit)
+	assert.Equal(t, 30*time.Second, rateLimit("x", []byte(`[]`)).RetryAfter)
 
 	f.code = 500
 	_, err = c.ReportExisting(ctx, []int{1})

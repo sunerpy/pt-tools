@@ -58,6 +58,7 @@ Each day at the send time, plus a fixed per-installation offset of up to 10 minu
 - upload, billed download and bonus increments per site and in total, listing up to 10 sites by upload;
 - sites whose login state is abnormal (session expired, key error, challenged, network error and so on);
 - today's check-in results (how many sites signed in, were already signed in, or failed);
+- with In the daily report (写进每日战报) on in the IYUU cross-seeding settings, today's cross-seeds created, succeeded, failed and deleted on site (see [IYUU cross-seeding notifications](reseed.md#notifications));
 - sites whose numbers went backwards and were counted as 0.
 
 Only enabled sites are counted. A site whose probe mode is "Disabled" is no longer probed, so its last probe status is not reported as a login problem. When there is no snapshot from before today and nothing can be compared yet, the report says so instead of listing zeros.

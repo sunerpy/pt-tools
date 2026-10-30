@@ -476,3 +476,26 @@ func TestDailyReport_BrushLinesEdgeCases(t *testing.T) {
 	cancel()
 	assert.Nil(t, job.brushLines(cancelled, day), "读库失败时这一节不出")
 }
+
+// 辅种一行：ReseedLine 给了内容时写在最后，按战报的日期取；空串时不写。
+func TestDailyReport_IncludesReseed(t *testing.T) {
+	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	var asked string
+	f.cfg.ReseedLine = func(_ context.Context, day string) string {
+		asked = day
+		return "🌱 今日辅种：建成 2 · 成功 1 · 失败 0 · 站点已删除 1"
+	}
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "2026-10-06", asked)
+	assert.True(t, strings.HasSuffix(reportText(t, rows[0]), "\n🌱 今日辅种：建成 2 · 成功 1 · 失败 0 · 站点已删除 1"))
+
+	g := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	g.cfg.ReseedLine = func(context.Context, string) string { return "" }
+	NewDailyReportJob(g.cfg).RunOnce(context.Background())
+	rows = reportRows(t, g.db)
+	require.Len(t, rows, 1)
+	assert.NotContains(t, reportText(t, rows[0]), "辅种")
+}

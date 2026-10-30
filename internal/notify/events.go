@@ -25,6 +25,7 @@ const (
 	EventReportDaily         = "report.daily"
 	EventDeadTorrents        = "downloader.dead_torrents"
 	EventFreeEndPauseFailed  = "downloader.free_end_pause_failed"
+	EventReseedRound         = "reseed.round"
 	EventRemotePaired        = "remote.paired"
 	EventTest                = "test"
 )
@@ -283,7 +284,7 @@ var notifyEvents = []EventSpec{
 		SampleText:  "· hdtime：签到成功（获得 10 魔力）\n· hdsky：签到失败（站点超时）",
 	},
 	{
-		Type: EventReportDaily, Name: "每日战报", Desc: "每天定时发的上传、下载（计费）与魔力统计（登录异常、签到、刷流几段只在 text 里）",
+		Type: EventReportDaily, Name: "每日战报", Desc: "每天定时发的上传、下载（计费）与魔力统计（登录异常、签到、刷流、辅种几段只在 text 里）",
 		Vars: []Var{
 			{Key: "day", Type: VarString, Desc: "日期", Sample: "2026-10-12"},
 			{Key: "uploaded", Type: VarString, Desc: "今天合计上传", Sample: "120.00 GB"},
@@ -339,6 +340,29 @@ var notifyEvents = []EventSpec{
 		},
 		SampleTitle: "免费结束暂停失败",
 		SampleText:  "「Dune.Part.Two.2024.2160p」（hdsky）的免费期在 2026-10-16 20:00 结束，已经连续 3 次没能在下载器 家里的 qB 里暂停：暂停接口返回成功，但下载器里的状态仍是 downloading。pt-tools 会继续重试；也请到下载器里手动暂停，避免产生计费下载量。",
+	},
+	{
+		Type: EventReseedRound, Name: "辅种结果", Desc: "IYUU 辅种的一轮结束（辅种设置里开了每轮结果推送；pt-tools 退出时被打断的轮次不发）",
+		Vars: []Var{
+			{Key: "run_id", Type: VarInt, Desc: "轮次编号", Sample: int64(12)},
+			{Key: "trigger", Type: VarString, Desc: "怎么开始的（schedule、manual、continue、retry）", Sample: "schedule"},
+			{Key: "trigger_label", Type: VarString, Desc: "怎么开始的（定时、立即运行、继续、重试）", Sample: "定时"},
+			{Key: "status", Type: VarString, Desc: "结果（ok、partial、limited、stopped、failed）", Sample: "ok"},
+			{Key: "status_label", Type: VarString, Desc: "结果说明", Sample: "完成"},
+			{Key: "hashes", Type: VarInt, Desc: "查询的种子数（重试轮次是选中的记录数）", Sample: int64(1200)},
+			{Key: "candidates", Type: VarInt, Desc: "找到的可辅种数", Sample: int64(35)},
+			{Key: "created", Type: VarInt, Desc: "加入的辅种（建成的任务）数", Sample: int64(3)},
+			{Key: "failed", Type: VarInt, Desc: "下载或核对没通过的个数", Sample: int64(1)},
+			{Key: "gone", Type: VarInt, Desc: "站点上已经删了的种子数", Sample: int64(0)},
+			{Key: "skipped", Type: VarInt, Desc: "跳过的个数", Sample: int64(31)},
+			{Key: "iyuu_calls", Type: VarInt, Desc: "这一轮请求 IYUU 的次数", Sample: int64(3)},
+			{Key: "duration", Type: VarString, Desc: "用了多久（不含暂停的时间）", Sample: "4 分钟"},
+			{Key: "duration_seconds", Type: VarInt, Desc: "用了多久（秒，不含暂停的时间）", Sample: int64(250)},
+			{Key: "stopped", Type: VarString, Desc: "没跑完的原因（提前停下、被停止、未能开始时才有）", Sample: ""},
+			{Key: "summary", Type: VarString, Desc: "一句话结果", Sample: "查询 1200 个种子，找到 35 个可辅种，加入 3 个，失败 1 个，跳过 31 个"},
+		},
+		SampleTitle: "辅种：第 12 轮完成（定时）",
+		SampleText:  "查询 1200 个种子，找到 35 个可辅种，加入 3 个，失败 1 个，跳过 31 个。\n用时 4 分钟，请求 IYUU 3 次。",
 	},
 	{
 		Type: EventRemotePaired, Name: "新设备配对", Desc: "手机 App 扫码配对成功",

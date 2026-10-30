@@ -1,5 +1,5 @@
 /*
- * 后台通知（签到、追剧、每日战报、保号提醒…）的叫法，以及它们的投递写进操作审计时的读法。
+ * 后台通知（签到、追剧、每日战报、保号提醒、辅种结果…）的叫法，以及它们的投递写进操作审计时的读法。
  *
  * 来源是 scheduler.MonitorNotifyEntry 的 Source；投递写进审计时命令是 `notify:<来源>:<种类>`，
  * 参数里有标题、第几次投递，失败时还有原因、下一次重试的时间或 final（不再重试），
@@ -16,6 +16,7 @@ export const NOTIFY_SOURCE_LABELS: Record<string, string> = {
   free_end: "免费到期",
   media: "订阅与入库",
   remote: "远程访问",
+  reseed: "辅种",
 };
 
 /** 同一来源下要分开叫的种类（来源:种类）；没列的用来源的叫法 */
@@ -31,6 +32,7 @@ const KIND_LABELS: Record<string, string> = {
   "media:followshow_found": "追剧：下载了新的集",
   "media:followshow_waiting": "追剧：锁定的版本久等不到",
   "media:followshow_failed": "追剧：连续几次没搜成",
+  "reseed:round": "辅种结果",
 };
 
 export const NOTIFY_COMMAND_PREFIX = "notify:";

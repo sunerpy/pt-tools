@@ -148,6 +148,10 @@ const NOT_ON_BOARD = {
     "刷流任务页（路线图 M3）晚于画板 40 定稿：任务编辑弹窗与种子抽屉都不在那张清点图里",
   "components/brush/BrushRunsDrawer.vue":
     "刷流任务的运行记录抽屉（2026-10-27）晚于画板 40 定稿：每一轮的状态与步骤，与种子抽屉同一种样式",
+  "components/reseed/ReseedRunDrawer.vue":
+    "辅种轮次的详情抽屉（2026-10-30）晚于画板 40 定稿：每一轮的计数、步骤与尝试，与刷流运行记录抽屉同一种样式",
+  "views/Reseed.vue":
+    "IYUU 辅种页（路线图 M6）晚于画板 40 定稿：停止一轮的确认弹窗（可勾选一起取消等待中的任务）不在那张清点图里",
   "views/TorrentTransfer.vue":
     "转移做种页（路线图 M5）晚于画板 40 定稿：定时规则的编辑弹窗不在那张清点图里",
   "views/MediaRecognize.vue":

@@ -273,6 +273,10 @@ func NewDBWithVersionAndHooks(
 		// IYUU 辅种（M6）
 		&ReseedSetting{},
 		&ReseedRecord{},
+		&ReseedRun{},
+		&ReseedAttempt{},
+		&ReseedIYUUDaily{},
+		&ReseedDailySkip{},
 		// CookieCloud 导入（M7）
 		&CookieCloudSetting{},
 		// 媒体识别（M9）
