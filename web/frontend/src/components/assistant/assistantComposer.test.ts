@@ -59,9 +59,14 @@ vi.mock("element-plus", async (orig) => {
 });
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
-/** x-sender 的 setText、clear 有一段放在 setImmediate 里做：等它做完再卸载，免得卸载以后才跑 */
+/** 等一帧（happy-dom 的 requestAnimationFrame 是 setImmediate） */
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+/**
+ * x-sender 的 setText、clear 有几段放在下一帧做，clear 要连等两帧：都做完再卸载，免得卸载以后才跑
+ * （卸载以后再跑会读到已经销毁的编辑器，报 Cannot read properties of undefined (reading 'maxLength')）
+ */
 const settle = async () => {
-  await new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 3; i++) await frame();
   await flush();
 };
 const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid=${id}]`);
