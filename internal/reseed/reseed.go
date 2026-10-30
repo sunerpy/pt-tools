@@ -128,6 +128,10 @@ type Settings struct {
 	IYUULastLimit     *IYUULimit `json:"iyuu_last_limit,omitempty"`
 	// IYUUToday 是今天各接口的请求计数
 	IYUUToday []models.ReseedIYUUDaily `json:"iyuu_today"`
+	// NotifyMode 是每轮结果推送（off、always、changes），NotifyChannelIDs 是接收的通知通道；DailyReport 是每日战报里带不带辅种
+	NotifyMode       string `json:"notify_mode"`
+	NotifyChannelIDs []uint `json:"notify_channel_ids"`
+	DailyReport      bool   `json:"daily_report"`
 }
 
 // SettingsUpdate 是保存设置的请求。Token 为 nil 时保留原来的；为空串时清除。
@@ -142,6 +146,10 @@ type SettingsUpdate struct {
 	// IYUUMinIntervalSeconds 为 nil 时保留原来的（没设置过就是默认的 3 秒）；0 是不隔
 	IYUUMinIntervalSeconds *int `json:"iyuu_min_interval_seconds,omitempty"`
 	IYUUMaxCallsPerDay     int  `json:"iyuu_max_calls_per_day"`
+	// NotifyMode、NotifyChannelIDs、DailyReport 为 nil 时保留原来的（旧页面保存时不会把推送关掉）
+	NotifyMode       *string `json:"notify_mode,omitempty"`
+	NotifyChannelIDs *[]uint `json:"notify_channel_ids,omitempty"`
+	DailyReport      *bool   `json:"daily_report,omitempty"`
 }
 
 func (s *Service) row(ctx context.Context) (models.ReseedSetting, error) {
@@ -196,6 +204,7 @@ func view(r models.ReseedSetting) Settings {
 		DownloaderIDs: decodeUints(r.DownloaderIDs), SiteNames: decodeStrings(r.SiteNames),
 		MaxPerSitePerDay: r.MaxPerSitePerDay, LastRunAt: r.LastRunAt, LastResult: r.LastResult,
 		IYUUMinIntervalSeconds: int(minInterval(r) / time.Second), IYUUMaxCallsPerDay: r.IYUUMaxCallsPerDay,
+		NotifyMode: notifyModeOf(r.NotifyMode), NotifyChannelIDs: decodeUints(r.NotifyChannelIDs), DailyReport: r.DailyReport,
 	}
 	out.SiteMode = models.ReseedSiteModeOf(r.SiteMode, out.SiteNames)
 	if out.IntervalHours == 0 {
@@ -239,6 +248,9 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 	if u.SiteNames != nil {
 		names := dedupeStrings(*u.SiteNames)
 		cols["site_names"], cols["site_mode"] = encode(names), models.ReseedSiteModeOf("", names)
+	}
+	if err = s.notifyCols(ctx, r, u, cols); err != nil {
+		return Settings{}, err
 	}
 	tokenEnc := r.TokenEncrypted
 	if u.Token != nil {

@@ -2675,7 +2675,15 @@ export interface ReseedSettings {
   iyuu_last_limit?: ReseedIYUULimit;
   /** 今天各接口的请求计数 */
   iyuu_today: ReseedIYUUCalls[];
+  /** 每轮结果推送：关闭、每一轮、只在有变化时 */
+  notify_mode: ReseedNotifyMode;
+  /** 接收每轮结果的通知通道 */
+  notify_channel_ids: number[];
+  /** 每日战报里带不带今天的辅种 */
+  daily_report: boolean;
 }
+
+export type ReseedNotifyMode = "off" | "always" | "changes";
 
 export type ReseedIYUUEndpoint = "sites" | "report" | "query";
 
@@ -2881,6 +2889,10 @@ export interface ReseedSettingsUpdate {
   iyuu_min_interval_seconds?: number;
   /** 0 是不限 */
   iyuu_max_calls_per_day: number;
+  /** 以下三项不传时保留原来的；推送开着时至少要选一个通道 */
+  notify_mode?: ReseedNotifyMode;
+  notify_channel_ids?: number[];
+  daily_report?: boolean;
 }
 
 export type ReseedSiteMode = "all" | "selected";

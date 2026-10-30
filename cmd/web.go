@@ -239,7 +239,7 @@ var webCmd = &cobra.Command{
 		monitorNotifier := wireLoginReminderMonitor(mgr, store, siteRegistry, bs, userInfoService)
 		wireBrushMonitor(mgr, userInfoService)
 		wireTransferWorker(mgr, userInfoService)
-		wireReseedWorker(mgr, userInfoService, store)
+		wireReseedWorker(mgr, userInfoService, store, monitorNotifier)
 		wireCookieCloudWorker(mgr, store, siteRegistry)
 
 		srv := web.NewServer(store, mgr)

@@ -42,6 +42,18 @@ vi.mock("@/api", async (orig) => {
   return {
     ...real,
     reseedApi: api,
+    chatopsApi: {
+      ...real.chatopsApi,
+      notifications: {
+        ...real.chatopsApi.notifications,
+        list: vi.fn(() =>
+          Promise.resolve([
+            { id: 1, channel_type: "telegram", name: "我的 TG", enabled: true },
+            { id: 2, channel_type: "qq", name: "QQ 群", enabled: false },
+          ]),
+        ),
+      },
+    },
     downloadersApi: {
       ...real.downloadersApi,
       list: vi.fn(() =>
@@ -740,6 +752,56 @@ describe("IYUU 请求", () => {
     await chooseTab("设置");
     expect(testid("rs-iyuu-status").textContent).toContain("还没有请求 IYUU");
     expect(document.querySelector("[data-testid=rs-iyuu-cooldown]")).toBeNull();
+  });
+});
+
+describe("辅种通知", () => {
+  it("读回推送方式、接收通道与每日战报；保存时一起带上", async () => {
+    await mountPage(
+      settings({
+        has_token: true,
+        notify_mode: "changes",
+        notify_channel_ids: [7],
+        daily_report: true,
+      }),
+    );
+    await chooseTab("设置");
+    await vi.waitFor(() =>
+      expect(testid("rs-notify-channels").textContent).toContain("已删除的通道（#7）"),
+    );
+    expect(testid("rs-daily-report").classList.contains("is-checked")).toBe(true);
+    api.saveSettings.mockResolvedValue(settings({ has_token: true }));
+    testid("rs-save").click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalled());
+    expect(api.saveSettings.mock.calls[0][0]).toMatchObject({
+      notify_mode: "changes",
+      notify_channel_ids: [7],
+      daily_report: true,
+    });
+  });
+
+  it("推送开着却没选通道时不保存", async () => {
+    await mountPage(settings({ has_token: true, notify_mode: "always", notify_channel_ids: [] }));
+    await chooseTab("设置");
+    testid("rs-save").click();
+    await flush();
+    expect(ui.warning).toHaveBeenCalledWith("推送每轮结果至少要选一个通知通道");
+    expect(api.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("停用的通道写明；旧数据没有这几项时按关闭", async () => {
+    await mountPage(settings({ has_token: true, notify_channel_ids: [2] }));
+    await chooseTab("设置");
+    await vi.waitFor(() =>
+      expect(testid("rs-notify-channels").textContent).toContain("QQ 群（已停用）"),
+    );
+    api.saveSettings.mockResolvedValue(settings({ has_token: true }));
+    testid("rs-save").click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalled());
+    expect(api.saveSettings.mock.calls[0][0]).toMatchObject({
+      notify_mode: "off",
+      daily_report: false,
+    });
   });
 });
 

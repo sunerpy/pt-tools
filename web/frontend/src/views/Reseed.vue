@@ -5,8 +5,11 @@
  * 画板没有这一页，沿用下载组列表页的样式：页头 + 带形工具栏 + 面板里的表单与表格，手机是行卡。
  */
 import {
+  chatopsApi,
   type DownloaderSetting,
   downloadersApi,
+  type NotificationConfig,
+  type ReseedNotifyMode,
   type ReseedRecord,
   type ReseedRecordResult,
   type ReseedRun,
@@ -77,6 +80,9 @@ const form = ref({
   max_per_site_per_day: 20,
   iyuu_min_interval_seconds: 3,
   iyuu_max_calls_per_day: 0,
+  notify_mode: "off" as ReseedNotifyMode,
+  notify_channel_ids: [] as number[],
+  daily_report: false,
 });
 const loadFailed = ref(false);
 const saving = ref(false);
@@ -150,6 +156,9 @@ function fill(s: ReseedSettings, resetForm = true) {
     max_per_site_per_day: s.max_per_site_per_day,
     iyuu_min_interval_seconds: s.iyuu_min_interval_seconds ?? 3,
     iyuu_max_calls_per_day: s.iyuu_max_calls_per_day ?? 0,
+    notify_mode: s.notify_mode ?? "off",
+    notify_channel_ids: [...(s.notify_channel_ids ?? [])],
+    daily_report: Boolean(s.daily_report),
   };
 }
 
@@ -173,6 +182,42 @@ async function loadDownloaders() {
     downloaders.value = [];
   }
 }
+
+// ---- 通知 ----
+const NOTIFY_MODES: { label: string; value: ReseedNotifyMode }[] = [
+  { label: "不推送", value: "off" },
+  { label: "每一轮都推送", value: "always" },
+  { label: "只在有变化时推送", value: "changes" },
+];
+const channels = ref<NotificationConfig[]>([]);
+const channelsLoaded = ref(false);
+
+async function loadChannels() {
+  try {
+    channels.value = (await chatopsApi.notifications.list()) ?? [];
+    channelsLoaded.value = true;
+  } catch {
+    channels.value = [];
+    channelsLoaded.value = false;
+  }
+}
+
+/** 接收通道的选项：停用的写明；选过、现在没有了的通道单列出来（保存时会被拒，要重新选） */
+const notifyChannelOptions = computed(() => {
+  const opts = channels.value.map((c) => ({
+    value: c.id,
+    label: c.enabled ? c.name : `${c.name}（已停用）`,
+  }));
+  for (const id of form.value.notify_channel_ids) {
+    if (!channels.value.some((c) => c.id === id)) {
+      opts.push({
+        value: id,
+        label: channelsLoaded.value ? `已删除的通道（#${id}）` : `通道 #${id}`,
+      });
+    }
+  }
+  return opts;
+});
 
 async function loadSites() {
   if (!settings.value?.has_token) return;
@@ -326,6 +371,10 @@ function scheduleRefresh() {
 }
 
 async function save(clearToken = false) {
+  if (form.value.notify_mode !== "off" && form.value.notify_channel_ids.length === 0) {
+    ElMessage.warning("推送每轮结果至少要选一个通知通道");
+    return;
+  }
   saving.value = true;
   try {
     const token = form.value.token.trim();
@@ -337,6 +386,9 @@ async function save(clearToken = false) {
       max_per_site_per_day: form.value.max_per_site_per_day,
       iyuu_min_interval_seconds: form.value.iyuu_min_interval_seconds,
       iyuu_max_calls_per_day: form.value.iyuu_max_calls_per_day,
+      notify_mode: form.value.notify_mode,
+      notify_channel_ids: form.value.notify_channel_ids,
+      daily_report: form.value.daily_report,
     });
     if (s) fill(s);
     ElMessage.success("已保存");
@@ -461,6 +513,7 @@ async function continueRun(id: number) {
 function refresh() {
   void loadSettings();
   void loadDownloaders();
+  void loadChannels();
   if (tab.value === "stats") void statsView.value?.reload();
   if (tab.value === "sites") void loadSites();
   if (tab.value === "records") void loadRecords();
@@ -484,7 +537,7 @@ watch(
 );
 
 onMounted(async () => {
-  await Promise.all([loadSettings(), loadDownloaders()]);
+  await Promise.all([loadSettings(), loadDownloaders(), loadChannels()]);
   // 填了 token 以后先看统计；还没填时先看设置
   if (settings.value?.has_token && !tabPicked.value) tab.value = "stats";
   void loadRecords();
@@ -650,6 +703,43 @@ onBeforeUnmount(() => {
                 <div class="field-tip">0 是不限；到了上限，这一轮提前停下，第二天接着往下查</div>
               </el-form-item>
             </div>
+            <h3 class="rs-form-title">通知</h3>
+            <div class="rs-row">
+              <el-form-item label="每轮结果">
+                <el-select v-model="form.notify_mode" data-testid="rs-notify-mode">
+                  <el-option
+                    v-for="m in NOTIFY_MODES"
+                    :key="m.value"
+                    :label="m.label"
+                    :value="m.value" />
+                </el-select>
+                <div class="field-tip">
+                  「有变化」是这一轮加入了辅种、有失败，或者没跑完（部分出错、提前停下、被停止、没能开始）。只发计数，不列种子名
+                </div>
+              </el-form-item>
+              <el-form-item label="接收通道">
+                <el-select
+                  v-model="form.notify_channel_ids"
+                  multiple
+                  collapse-tags
+                  :disabled="form.notify_mode === 'off'"
+                  placeholder="选择通知通道"
+                  data-testid="rs-notify-channels">
+                  <el-option
+                    v-for="c in notifyChannelOptions"
+                    :key="c.value"
+                    :label="c.label"
+                    :value="c.value" />
+                </el-select>
+                <div class="field-tip">推送时至少选一个；没有通道时先去「消息通知」里添加</div>
+              </el-form-item>
+            </div>
+            <el-form-item label="写进每日战报">
+              <el-switch v-model="form.daily_report" data-testid="rs-daily-report" />
+              <div class="field-tip">
+                战报里加一行今天的建成、成功、失败与站点已删除；每日战报要先在「全局设置」里开启
+              </div>
+            </el-form-item>
             <el-button type="primary" :loading="saving" data-testid="rs-save" @click="save()">
               <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
             </el-button>

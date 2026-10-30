@@ -44,6 +44,8 @@ type ReseedWorkerConfig struct {
 	MaxPause   time.Duration
 	// NewTimer 是计时器（测试里换成可控的），默认 time.NewTimer。
 	NewTimer func(d time.Duration) reseed.Timer
+	// Notifier 推送每一轮的结果（辅种设置里开了才发）；为空时不推送。
+	Notifier *MonitorNotifier
 }
 
 // ReseedWorker 按设置的间隔运行辅种；「立即运行」「继续」「重试」在后台跑一轮，同一时间只有一轮。
@@ -353,6 +355,7 @@ func (w *ReseedWorker) execute(ctx context.Context, a *reseedActive, after strin
 			w.cfg.Logger.Warnf("[辅种] 记录结果失败: %v", rerr)
 		}
 	}
+	w.notifyRound(done, a, res, status, errText, summary, paused)
 	w.mu.Lock()
 	cancelPending := a.cancelPending
 	w.mu.Unlock()

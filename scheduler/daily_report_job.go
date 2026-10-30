@@ -42,9 +42,11 @@ type DailyReportJobConfig struct {
 	History v2.UserInfoHistoryRepo
 	// Notifier 为空时不发。
 	Notifier *MonitorNotifier
-	Clock    sitelogin.Clock
-	Logger   *zap.SugaredLogger
-	Tick     time.Duration
+	// ReseedLine 返回今天的辅种那一行（辅种设置里没开「每日战报」或今天没有辅种时为空串）；为空时不写这一行。
+	ReseedLine func(ctx context.Context, day string) string
+	Clock      sitelogin.Clock
+	Logger     *zap.SugaredLogger
+	Tick       time.Duration
 	// Location 是计算日期与发送时刻的时区，默认进程时区；须与 History 的时区一致。
 	Location *time.Location
 }
@@ -330,6 +332,12 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 	if lines := j.brushLines(ctx, today); len(lines) > 0 {
 		b.WriteString("\n")
 		b.WriteString(strings.Join(lines, "\n"))
+	}
+	if j.cfg.ReseedLine != nil {
+		if line := j.cfg.ReseedLine(ctx, today); line != "" {
+			b.WriteString("\n")
+			b.WriteString(line)
+		}
 	}
 	return title, b.String(), fields, nil
 }

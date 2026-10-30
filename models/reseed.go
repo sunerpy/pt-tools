@@ -58,9 +58,22 @@ type ReseedSetting struct {
 	// IYUUCooldownUntil 是 IYUU 限流以后冷却到什么时候：这之前不发请求、不跑定时轮次。
 	IYUUCooldownUntil *time.Time `gorm:"column:iyuu_cooldown_until" json:"-"`
 	// IYUULastLimit 是最近一次限流的情况（JSON）。
-	IYUULastLimit string    `gorm:"column:iyuu_last_limit;type:text;default:''" json:"-"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	IYUULastLimit string `gorm:"column:iyuu_last_limit;type:text;default:''" json:"-"`
+	// NotifyMode 是每轮结果推送：ReseedNotifyOff（空串也是关闭）、ReseedNotifyAlways（每一轮）、ReseedNotifyChanges（只在有变化时）。
+	NotifyMode string `gorm:"size:16;not null;default:''" json:"-"`
+	// NotifyChannelIDs 是接收每轮结果的通知通道（JSON 数组）；推送开着时至少一个，不沿用「空表示全部通道」。
+	NotifyChannelIDs string `gorm:"type:text;default:''" json:"-"`
+	// DailyReport 为 true 时每日战报里加一行今天的辅种。
+	DailyReport bool      `gorm:"not null;default:false" json:"-"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+// 每轮结果推送。
+const (
+	ReseedNotifyOff     = "off"
+	ReseedNotifyAlways  = "always"
+	ReseedNotifyChanges = "changes"
+)
 
 // TableName 指定表名。
 func (ReseedSetting) TableName() string { return "reseed_settings" }

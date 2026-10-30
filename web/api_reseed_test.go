@@ -39,7 +39,8 @@ func newReseedServer(t *testing.T) (*Server, *http.ServeMux) {
 	srv.mgr.StopAll()
 	db := global.GlobalDB.DB
 	require.NoError(t, db.AutoMigrate(&models.TorrentTransferJob{}, &models.DownloaderPathMap{}, &models.TransferRule{},
-		&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{}, &models.ReseedDailySkip{}))
+		&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{}, &models.ReseedDailySkip{},
+		&models.NotificationConf{}))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"sites": []map[string]any{
 			{"id": 1, "site": "hdsky", "nickname": "天空", "base_url": "hdsky.me"},
@@ -153,6 +154,32 @@ func TestReseedAPI_SettingsSitesRun(t *testing.T) {
 	} {
 		assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, c.method, c.path, "").Code, c.path)
 	}
+}
+
+// 推送设置：开着时至少一个通道、通道要存在（400）；保存以后读回来是生效的值，旧页面不带这几项时保留原来的。
+func TestReseedAPI_NotifySettings(t *testing.T) {
+	_, mux := newReseedServer(t)
+	conf := models.NotificationConf{ChannelType: "telegram", Name: "tg", Enabled: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&conf).Error)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"notify_mode":"always"}`).Code, "没选通道")
+	w := serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"notify_mode":"always","notify_channel_ids":[99999]}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "不存在")
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"notify_mode":"hourly","notify_channel_ids":[1]}`).Code)
+
+	w = serveAuthed(mux, http.MethodPut, "/api/reseed/settings", fmt.Sprintf(`{"notify_mode":"changes","notify_channel_ids":[%d],"daily_report":true}`, conf.ID))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got ReseedSettingsView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "changes", got.NotifyMode)
+	assert.Equal(t, []uint{conf.ID}, got.NotifyChannelIDs)
+	assert.True(t, got.DailyReport)
+
+	w = serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"interval_hours":6}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "changes", got.NotifyMode, "没带的项保留原来的")
+	assert.True(t, got.DailyReport)
 }
 
 func TestWriteReseedError(t *testing.T) {

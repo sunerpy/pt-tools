@@ -275,6 +275,7 @@ func wireDailyReportJob(mgr *scheduler.Manager, store *core.ConfigStore, userInf
 		EnabledSites: store.EnabledSiteNames,
 		History:      history,
 		Notifier:     notifier,
+		ReseedLine:   reseedReportLine(mgr),
 		Logger:       global.GetSlogger(),
 	})
 	mgr.SetDailyReportJob(job)
