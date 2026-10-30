@@ -99,6 +99,9 @@ function settings(extra: Record<string, unknown> = {}) {
     max_per_site_per_day: 20,
     last_result: "",
     running: false,
+    iyuu_min_interval_seconds: 3,
+    iyuu_max_calls_per_day: 0,
+    iyuu_today: [],
     ...extra,
   };
 }
@@ -635,5 +638,62 @@ describe("辅种记录", () => {
       testid("rs-record-retry-1").hasAttribute("disabled") ||
         testid("rs-record-retry-1").classList.contains("is-disabled"),
     ).toBe(true);
+  });
+});
+
+describe("IYUU 请求", () => {
+  it("保存时带上最小间隔与每天的上限；写明今天的请求、冷却与上次限流", async () => {
+    await mountPage(
+      settings({
+        has_token: true,
+        iyuu_min_interval_seconds: 5,
+        iyuu_max_calls_per_day: 30,
+        iyuu_today: [
+          {
+            day: "2026-10-30",
+            endpoint: "sites",
+            calls: 1,
+            ok: 1,
+            rate_limited: 0,
+            failed: 0,
+            hashes: 0,
+          },
+          {
+            day: "2026-10-30",
+            endpoint: "query",
+            calls: 3,
+            ok: 2,
+            rate_limited: 1,
+            failed: 0,
+            hashes: 600,
+          },
+        ],
+        iyuu_cooldown_until: "2026-10-30T12:00:00Z",
+        iyuu_last_limit: {
+          at: "2026-10-30T11:00:00Z",
+          endpoint: "query",
+          message: "请求太频繁",
+          retry_after: 3600,
+          until: "2026-10-30T12:00:00Z",
+        },
+      }),
+    );
+    const status = testid("rs-iyuu-status").textContent ?? "";
+    expect(status).toContain("查询 3 次（600 个种子，限流 1 次） · 站点列表 1 次");
+    expect(testid("rs-iyuu-cooldown").textContent).toContain("以前不请求");
+    expect(status).toContain("请求太频繁");
+    api.saveSettings.mockResolvedValue(settings({ has_token: true }));
+    testid("rs-save").click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalled());
+    expect(api.saveSettings.mock.calls[0][0]).toMatchObject({
+      iyuu_min_interval_seconds: 5,
+      iyuu_max_calls_per_day: 30,
+    });
+  });
+
+  it("没请求过时写明", async () => {
+    await mountPage(settings({ has_token: true }));
+    expect(testid("rs-iyuu-status").textContent).toContain("还没有请求 IYUU");
+    expect(document.querySelector("[data-testid=rs-iyuu-cooldown]")).toBeNull();
   });
 });

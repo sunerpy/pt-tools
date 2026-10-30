@@ -9,6 +9,8 @@ import {
   reseedRecordMessage,
   reseedRecordResult,
   reseedRecordRetryable,
+  reseedIYUUCallsText,
+  reseedIYUUEndpoint,
   reseedRunDuration,
   reseedRunProgress,
   reseedRunStatus,
@@ -151,5 +153,19 @@ describe("reseed utils", () => {
     expect(reseedAttemptResult({ outcome: "created", job_state: "checking" }).label).toBe("校验中");
     expect(reseedAttemptResult({ outcome: "created", job_missing: true }).label).toBe("任务已删除");
     expect(reseedAttemptResult({ outcome: "created" }).label).toBe("已建任务");
+  });
+
+  it("describes IYUU calls", () => {
+    expect(reseedIYUUEndpoint("report")).toBe("报告站点");
+    expect(reseedIYUUEndpoint("x")).toBe("x");
+    const row = { day: "2026-10-30", ok: 0, rate_limited: 0, failed: 0, hashes: 0 };
+    expect(reseedIYUUCallsText([])).toBe("");
+    expect(
+      reseedIYUUCallsText([
+        { ...row, endpoint: "sites", calls: 1 },
+        { ...row, endpoint: "report", calls: 0 },
+        { ...row, endpoint: "query", calls: 2, hashes: 400, failed: 1 },
+      ]),
+    ).toBe("查询 2 次（400 个种子，失败 1 次） · 站点列表 1 次");
   });
 });

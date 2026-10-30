@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -39,7 +40,7 @@ func newReseedWorkerForTest(t *testing.T) (*ReseedWorker, *reseed.Service, *gorm
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "r.db")+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() { closeTestGorm(db) })
-	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{},
+	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{},
 		&models.TorrentTransferJob{}, &models.DownloaderSetting{}))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"sites": []any{}}})
@@ -55,6 +56,7 @@ func newReseedWorkerForTest(t *testing.T) (*ReseedWorker, *reseed.Service, *gorm
 			c.BaseURL = srv.URL
 			return c
 		},
+		Sleep: func(context.Context, time.Duration) error { return nil },
 	})
 	w := NewReseedWorker(ReseedWorkerConfig{Service: svc, StartupDelay: 10 * time.Millisecond, Tick: 20 * time.Millisecond})
 	t.Cleanup(w.Stop)
@@ -321,4 +323,34 @@ func TestReseedWorker_Retry(t *testing.T) {
 	var nilWorker *ReseedWorker
 	_, err = nilWorker.Retry([]uint{1})
 	assert.Error(t, err)
+}
+
+// IYUU 限流冷却中：立即运行、继续不开始（返回冷却的错误），定时轮次不到期；读站点列表时就被限流的一轮记为提前停下。
+func TestReseedWorker_IYUUCooling(t *testing.T) {
+	w, svc, db := newReseedWorkerForTest(t)
+	ctx := context.Background()
+	tok := "tok"
+	_, err := svc.SaveSettings(ctx, reseed.SettingsUpdate{Enabled: true, Token: &tok})
+	require.NoError(t, err)
+	until := time.Now().Add(time.Hour)
+	require.NoError(t, db.Model(&models.ReseedSetting{}).Where("id = 1").Update("iyuu_cooldown_until", until).Error)
+	stopped := models.ReseedRun{Trigger: models.ReseedTriggerManual, StartedAt: time.Now().Add(-time.Hour), Status: models.ReseedRunStopped}
+	require.NoError(t, db.Create(&stopped).Error)
+
+	var ce *reseed.CoolingError
+	_, err = w.RunNow()
+	require.ErrorAs(t, err, &ce)
+	_, err = w.Continue(stopped.ID)
+	require.ErrorAs(t, err, &ce)
+	assert.False(t, w.Running())
+	var n int64
+	require.NoError(t, db.Model(&models.ReseedRun{}).Count(&n).Error)
+	assert.EqualValues(t, 1, n, "没有开始新的一轮")
+	assert.False(t, svc.Due(ctx), "冷却中不跑定时轮次")
+
+	status, text := reseedRunStatus(ctx, reseed.RunResult{}, fmt.Errorf("读取 IYUU 站点列表失败: %w", &reseed.CoolingError{Until: until}))
+	assert.Equal(t, models.ReseedRunLimited, status)
+	assert.Contains(t, text, "冷却中")
+	status, _ = reseedRunStatus(ctx, reseed.RunResult{}, fmt.Errorf("向 IYUU 报告站点失败: %w", reseed.ErrIYUUDailyCap))
+	assert.Equal(t, models.ReseedRunLimited, status)
 }

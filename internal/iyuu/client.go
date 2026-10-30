@@ -43,10 +43,13 @@ type APIError struct {
 
 func (e *APIError) Error() string { return fmt.Sprintf("IYUU 返回错误 %d: %s", e.Code, e.Msg) }
 
-// RateLimitError 是 IYUU 返回的 429：RetryAfter 之后再试。
+// RateLimitError 是 IYUU 返回的 429：RetryAfter 之后再试。ResetAt 是限额重置的时刻（429 数据里的 X-RateLimit-Reset，
+// Unix 秒），Limit 是 X-RateLimit-Limit；没给时为零值（与 iyuuplus-dev 的 TooManyRequestsException 读的是同几个字段）。
 type RateLimitError struct {
 	Msg        string
 	RetryAfter time.Duration
+	ResetAt    time.Time
+	Limit      int
 }
 
 func (e *RateLimitError) Error() string {
@@ -172,19 +175,34 @@ func (c *Client) do(ctx context.Context, method, path string, form url.Values) (
 	case 0:
 		return env.Data, nil
 	case http.StatusTooManyRequests:
-		return nil, &RateLimitError{Msg: env.Msg, RetryAfter: retryAfter(env.Data)}
+		return nil, rateLimit(env.Msg, env.Data)
 	}
 	return nil, &APIError{Code: env.Code, Msg: env.Msg}
 }
 
-func retryAfter(data json.RawMessage) time.Duration {
-	var m map[string]json.Number
-	if json.Unmarshal(data, &m) == nil {
-		if n, err := strconv.Atoi(m["Retry-After"].String()); err == nil && n > 0 {
-			return time.Duration(n) * time.Second
-		}
+// rateLimit 解析 429 的数据：{"Retry-After": 秒, "X-RateLimit-Limit": 次数, "X-RateLimit-Reset": Unix 秒}，数字或数字字符串都认。
+func rateLimit(msg string, data json.RawMessage) *RateLimitError {
+	e := &RateLimitError{Msg: msg, RetryAfter: defaultRetryAfter}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(data, &m) != nil {
+		return e
 	}
-	return defaultRetryAfter
+	num := func(key string) int64 {
+		raw := strings.Trim(strings.TrimSpace(string(m[key])), `"`)
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || n <= 0 {
+			return 0
+		}
+		return n
+	}
+	if n := num("Retry-After"); n > 0 {
+		e.RetryAfter = time.Duration(n) * time.Second
+	}
+	if n := num("X-RateLimit-Reset"); n > 0 {
+		e.ResetAt = time.Unix(n, 0)
+	}
+	e.Limit = int(num("X-RateLimit-Limit"))
+	return e
 }
 
 // Sites 返回 IYUU 支持的站点。

@@ -67,7 +67,8 @@ func (s *Service) FinishRun(ctx context.Context, id uint, res RunResult, status,
 		"downloaders": res.Downloaders, "hashes": res.Hashes, "batches": res.Batches, "batches_done": res.BatchesDone,
 		"candidates": res.Candidates, "created": res.Created, "failed": res.Failed, "gone": res.Gone,
 		"interrupted": res.Interrupted, "skipped": res.SkippedTotal(), "skipped_detail": detail, "cursor": res.Cursor,
-		"paused_at": nil, "paused_seconds": int(paused.Seconds()), "steps": steps, "steps_truncated": truncated,
+		"iyuu_calls": res.IYUUCalls,
+		"paused_at":  nil, "paused_seconds": int(paused.Seconds()), "steps": steps, "steps_truncated": truncated,
 	}
 	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Model(&models.ReseedRun{}).Where("id = ?", id).
 		Updates(cols).Error; err != nil {

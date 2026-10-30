@@ -72,6 +72,9 @@ type Service struct {
 	sites     []iyuu.Site
 	sitesAt   time.Time
 	sitesFrom string // 缓存属于哪个 token（换 token 时作废）
+
+	// gate 是 IYUU 调用口（最小间隔、每天的上限，见 iyuu_gate.go）
+	gate iyuuGate
 }
 
 // New 构造 Service。
@@ -117,6 +120,14 @@ type Settings struct {
 	LastResult       string     `json:"last_result"`
 	// NextRunAt 是下一轮大约什么时候（开着、有 token 时才有；到点以后在下一次检查时跑）
 	NextRunAt *time.Time `json:"next_run_at,omitempty"`
+	// IYUUMinIntervalSeconds 是两次请求 IYUU 之间至少隔几秒（没设置时是默认的 3）；IYUUMaxCallsPerDay 是每天最多请求几次，0 是不限
+	IYUUMinIntervalSeconds int `json:"iyuu_min_interval_seconds"`
+	IYUUMaxCallsPerDay     int `json:"iyuu_max_calls_per_day"`
+	// IYUUCooldownUntil 是限流冷却到什么时候（冷却中才有）；IYUULastLimit 是最近一次限流的情况
+	IYUUCooldownUntil *time.Time `json:"iyuu_cooldown_until,omitempty"`
+	IYUULastLimit     *IYUULimit `json:"iyuu_last_limit,omitempty"`
+	// IYUUToday 是今天各接口的请求计数
+	IYUUToday []models.ReseedIYUUDaily `json:"iyuu_today"`
 }
 
 // SettingsUpdate 是保存设置的请求。Token 为 nil 时保留原来的；为空串时清除。
@@ -128,6 +139,9 @@ type SettingsUpdate struct {
 	DownloaderIDs    []uint    `json:"downloader_ids"`
 	SiteNames        *[]string `json:"site_names,omitempty"`
 	MaxPerSitePerDay int       `json:"max_per_site_per_day"`
+	// IYUUMinIntervalSeconds 为 nil 时保留原来的（没设置过就是默认的 3 秒）；0 是不隔
+	IYUUMinIntervalSeconds *int `json:"iyuu_min_interval_seconds,omitempty"`
+	IYUUMaxCallsPerDay     int  `json:"iyuu_max_calls_per_day"`
 }
 
 func (s *Service) row(ctx context.Context) (models.ReseedSetting, error) {
@@ -149,7 +163,16 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		return Settings{}, err
 	}
 	out := view(r)
-	out.NextRunAt = nextRun(r.Enabled && r.TokenEncrypted != "", r.LastRunAt, out.IntervalHours, s.cfg.Now())
+	now := s.cfg.Now()
+	out.NextRunAt = nextRun(r.Enabled && r.TokenEncrypted != "", r.LastRunAt, out.IntervalHours, now)
+	if ce := cooling(r, now); ce != nil {
+		until := ce.Until
+		out.IYUUCooldownUntil = &until
+	}
+	out.IYUULastLimit = lastLimit(r)
+	if out.IYUUToday, err = s.IYUUCallsToday(ctx); err != nil {
+		return Settings{}, err
+	}
 	return out, nil
 }
 
@@ -172,6 +195,7 @@ func view(r models.ReseedSetting) Settings {
 		Enabled: r.Enabled, HasToken: r.TokenEncrypted != "", IntervalHours: r.IntervalHours,
 		DownloaderIDs: decodeUints(r.DownloaderIDs), SiteNames: decodeStrings(r.SiteNames),
 		MaxPerSitePerDay: r.MaxPerSitePerDay, LastRunAt: r.LastRunAt, LastResult: r.LastResult,
+		IYUUMinIntervalSeconds: int(minInterval(r) / time.Second), IYUUMaxCallsPerDay: r.IYUUMaxCallsPerDay,
 	}
 	out.SiteMode = models.ReseedSiteModeOf(r.SiteMode, out.SiteNames)
 	if out.IntervalHours == 0 {
@@ -191,6 +215,10 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 		return Settings{}, fmt.Errorf("%w：间隔要在 %d 到 %d 小时之间", ErrInvalid, models.ReseedMinIntervalHours, models.ReseedMaxIntervalHours)
 	case u.MaxPerSitePerDay < 0 || u.MaxPerSitePerDay > models.ReseedMaxPerSitePerDay:
 		return Settings{}, fmt.Errorf("%w：每站每天最多 %d 个", ErrInvalid, models.ReseedMaxPerSitePerDay)
+	case u.IYUUMinIntervalSeconds != nil && (*u.IYUUMinIntervalSeconds < 0 || *u.IYUUMinIntervalSeconds > models.ReseedMaxIYUUMinInterval):
+		return Settings{}, fmt.Errorf("%w：两次请求 IYUU 之间隔 0 到 %d 秒", ErrInvalid, models.ReseedMaxIYUUMinInterval)
+	case u.IYUUMaxCallsPerDay < 0 || u.IYUUMaxCallsPerDay > models.ReseedMaxIYUUCallsPerDay:
+		return Settings{}, fmt.Errorf("%w：每天最多请求 IYUU %d 次（0 是不限）", ErrInvalid, models.ReseedMaxIYUUCallsPerDay)
 	}
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
@@ -199,10 +227,14 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 		return Settings{}, err
 	}
 	cols := map[string]any{
-		"enabled":              u.Enabled,
-		"interval_hours":       u.IntervalHours,
-		"max_per_site_per_day": u.MaxPerSitePerDay,
-		"downloader_ids":       encode(dedupeUints(u.DownloaderIDs)),
+		"enabled":                u.Enabled,
+		"interval_hours":         u.IntervalHours,
+		"max_per_site_per_day":   u.MaxPerSitePerDay,
+		"downloader_ids":         encode(dedupeUints(u.DownloaderIDs)),
+		"iyuu_max_calls_per_day": u.IYUUMaxCallsPerDay,
+	}
+	if u.IYUUMinIntervalSeconds != nil {
+		cols["iyuu_min_interval_seconds"] = *u.IYUUMinIntervalSeconds
 	}
 	if u.SiteNames != nil {
 		names := dedupeStrings(*u.SiteNames)
@@ -221,6 +253,8 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 		}
 		cols["token_encrypted"] = tokenEnc
 		cols["sid_sha1"], cols["sid_key"], cols["sid_at"] = "", "", nil
+		// 限流是按 token 算的：换了 token 不再冷却
+		cols["iyuu_cooldown_until"] = nil
 	}
 	if u.Enabled && tokenEnc == "" {
 		return Settings{}, fmt.Errorf("%w：开启辅种前要先填写 IYUU token", ErrInvalid)
@@ -268,13 +302,17 @@ func (s *Service) Due(ctx context.Context) bool {
 		return false
 	}
 	if r.LastRunAt == nil {
-		return true
+		return s.IYUUReady(ctx) == nil
 	}
 	interval := r.IntervalHours
 	if interval == 0 {
 		interval = models.ReseedDefaultIntervalHours
 	}
-	return !s.cfg.Now().Before(r.LastRunAt.Add(time.Duration(interval) * time.Hour))
+	if s.cfg.Now().Before(r.LastRunAt.Add(time.Duration(interval) * time.Hour)) {
+		return false
+	}
+	// 限流冷却中、今天的请求到了上限：不开始（开始了也是马上停下）
+	return s.IYUUReady(ctx) == nil
 }
 
 // RecordRun 记下这一轮的时间和结果。
@@ -303,16 +341,28 @@ type SiteMapItem struct {
 	Selected   bool   `json:"selected"`
 }
 
-func (s *Service) iyuuSites(ctx context.Context, client *iyuu.Client, token string) ([]iyuu.Site, error) {
+// iyuuSites 返回 IYUU 支持的站点（缓存 12 小时）。限流冷却中、到了每天的上限时，有旧的缓存就用旧的。
+func (s *Service) iyuuSites(ctx context.Context, res *RunResult, client *iyuu.Client, token string) ([]iyuu.Site, error) {
 	s.mu.Lock()
-	if s.sites != nil && s.sitesFrom == token && s.cfg.Now().Sub(s.sitesAt) < siteListTTL {
-		out := s.sites
+	cached := s.sites
+	if s.sitesFrom != token {
+		cached = nil
+	}
+	if cached != nil && s.cfg.Now().Sub(s.sitesAt) < siteListTTL {
 		s.mu.Unlock()
-		return out, nil
+		return cached, nil
 	}
 	s.mu.Unlock()
-	sites, err := client.Sites(ctx)
+	var sites []iyuu.Site
+	err := s.callIYUU(ctx, res, models.IYUUEndpointSites, 0, func(ctx context.Context) error {
+		var cerr error
+		sites, cerr = client.Sites(ctx)
+		return cerr
+	})
 	if err != nil {
+		if cached != nil && IYUULimited(err) {
+			return cached, nil
+		}
 		return nil, err
 	}
 	s.mu.Lock()
@@ -331,7 +381,7 @@ func (s *Service) SiteMap(ctx context.Context) ([]SiteMapItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	sites, err := s.iyuuSites(ctx, s.cfg.NewClient(token), token)
+	sites, err := s.iyuuSites(ctx, nil, s.cfg.NewClient(token), token)
 	if err != nil {
 		return nil, err
 	}

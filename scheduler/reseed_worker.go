@@ -215,12 +215,16 @@ func (w *ReseedWorker) loop() {
 	}
 }
 
-// RunNow 在后台马上从头跑一轮（不等它结束），返回轮次编号；已经有一轮在跑时返回 ErrReseedBusy。
+// RunNow 在后台马上从头跑一轮（不等它结束），返回轮次编号；已经有一轮在跑时返回 ErrReseedBusy，
+// IYUU 限流冷却中或今天的请求到了上限时返回对应的错误（不开始）。
 func (w *ReseedWorker) RunNow() (uint, error) {
 	if w == nil || w.cfg.Service == nil {
 		return 0, errors.New("辅种服务没有启动")
 	}
-	return w.start(models.ReseedTriggerManual, func(context.Context) (string, *uint, error) { return "", nil, nil }, w.cfg.Service.Run)
+	svc := w.cfg.Service
+	return w.start(models.ReseedTriggerManual, func(ctx context.Context) (string, *uint, error) {
+		return "", nil, svc.IYUUReady(ctx)
+	}, svc.Run)
 }
 
 // Continue 接着 id 这一轮往下查（只有最近一个提前停下的轮次可以），返回新轮次的编号。
@@ -231,6 +235,9 @@ func (w *ReseedWorker) Continue(id uint) (uint, error) {
 	return w.start(models.ReseedTriggerContinue, func(ctx context.Context) (string, *uint, error) {
 		after, err := w.cfg.Service.CanContinue(ctx, id)
 		if err != nil {
+			return "", nil, err
+		}
+		if err := w.cfg.Service.IYUUReady(ctx); err != nil {
 			return "", nil, err
 		}
 		from := id
@@ -328,6 +335,9 @@ func (w *ReseedWorker) execute(ctx context.Context, a *reseedActive, after strin
 	summary := res.Summary()
 	if err != nil {
 		summary = "运行失败：" + errText
+		if status == models.ReseedRunLimited {
+			summary = "提前停下：" + errText
+		}
 		w.cfg.Logger.Warnf("[辅种] 第 %d 轮：%s", a.id, errText)
 	} else {
 		w.cfg.Logger.Infof("[辅种] 第 %d 轮：%s", a.id, summary)
@@ -373,6 +383,10 @@ func reseedRunStatus(ctx context.Context, res reseed.RunResult, err error) (stri
 		}
 	}
 	if err != nil {
+		if reseed.IYUULimited(err) {
+			// 读站点列表、报告站点时遇到限流：提前停下，下一轮接着从这一轮的起点查
+			return models.ReseedRunLimited, err.Error()
+		}
 		return models.ReseedRunFailed, err.Error()
 	}
 	switch res.End {

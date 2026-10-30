@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,7 +39,7 @@ func newReseedServer(t *testing.T) (*Server, *http.ServeMux) {
 	srv.mgr.StopAll()
 	db := global.GlobalDB.DB
 	require.NoError(t, db.AutoMigrate(&models.TorrentTransferJob{}, &models.DownloaderPathMap{}, &models.TransferRule{},
-		&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}))
+		&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{}))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"sites": []map[string]any{
 			{"id": 1, "site": "hdsky", "nickname": "天空", "base_url": "hdsky.me"},
@@ -56,6 +57,7 @@ func newReseedServer(t *testing.T) (*Server, *http.ServeMux) {
 			c.BaseURL = fake.URL
 			return c
 		},
+		Sleep: func(context.Context, time.Duration) error { return nil },
 	})
 	srv.mgr.SetReseedWorker(scheduler.NewReseedWorker(scheduler.ReseedWorkerConfig{Service: svc, Transfer: tw}))
 	mux := http.NewServeMux()
@@ -164,6 +166,8 @@ func TestWriteReseedError(t *testing.T) {
 		reseed.ErrRecordNotFound:            http.StatusNotFound,
 		reseed.ErrNothingToRetry:            http.StatusBadRequest,
 		&iyuu.RateLimitError{Msg: "x"}:      http.StatusTooManyRequests,
+		&reseed.CoolingError{}:              http.StatusTooManyRequests,
+		reseed.ErrIYUUDailyCap:              http.StatusTooManyRequests,
 		&iyuu.APIError{Code: 500, Msg: "x"}: http.StatusBadGateway,
 		errors.New("boom"):                  http.StatusInternalServerError,
 	} {

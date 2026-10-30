@@ -1,6 +1,8 @@
 import type {
   ReseedAttempt,
   ReseedCurrentRun,
+  ReseedIYUUCalls,
+  ReseedIYUUEndpoint,
   ReseedRecord,
   ReseedRecordResult,
   ReseedRun,
@@ -188,4 +190,32 @@ export function reseedAttemptResult(
     default:
       return { label: transferStateLabel(a.job_state), tone: "info" };
   }
+}
+
+const IYUU_ENDPOINT: Record<ReseedIYUUEndpoint, string> = {
+  query: "查询",
+  report: "报告站点",
+  sites: "站点列表",
+};
+
+export function reseedIYUUEndpoint(endpoint: string): string {
+  return IYUU_ENDPOINT[endpoint as ReseedIYUUEndpoint] ?? endpoint;
+}
+
+/** 一天里请求 IYUU 的一句话：「查询 3 次（600 个种子）· 报告站点 1 次」；没请求过时为空 */
+export function reseedIYUUCallsText(rows: ReseedIYUUCalls[]): string {
+  const order: ReseedIYUUEndpoint[] = ["query", "report", "sites"];
+  return [...rows]
+    .filter((r) => r.calls > 0)
+    .sort((a, b) => order.indexOf(a.endpoint) - order.indexOf(b.endpoint))
+    .map((r) => {
+      let text = `${reseedIYUUEndpoint(r.endpoint)} ${r.calls} 次`;
+      const extra: string[] = [];
+      if (r.endpoint === "query" && r.hashes) extra.push(`${r.hashes} 个种子`);
+      if (r.rate_limited) extra.push(`限流 ${r.rate_limited} 次`);
+      if (r.failed) extra.push(`失败 ${r.failed} 次`);
+      if (extra.length) text += `（${extra.join("，")}）`;
+      return text;
+    })
+    .join(" · ");
 }

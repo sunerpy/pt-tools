@@ -72,7 +72,7 @@ func writeReseedError(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	case errors.Is(err, reseed.ErrRunNotFound), errors.Is(err, reseed.ErrRecordNotFound):
 		status = http.StatusNotFound
-	case errors.As(err, &rl):
+	case errors.As(err, &rl), reseed.IYUULimited(err):
 		status = http.StatusTooManyRequests
 	case errors.As(err, &apiErr):
 		status = http.StatusBadGateway

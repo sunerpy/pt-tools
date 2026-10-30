@@ -2665,6 +2665,43 @@ export interface ReseedSettings {
   running: boolean;
   /** 正在跑（或暂停中）的那一轮 */
   current_run?: ReseedCurrentRun;
+  /** 两次请求 IYUU 之间至少隔几秒（没设置过是默认的 3） */
+  iyuu_min_interval_seconds: number;
+  /** 每天最多请求 IYUU 几次，0 是不限 */
+  iyuu_max_calls_per_day: number;
+  /** 限流冷却到什么时候（冷却中才有） */
+  iyuu_cooldown_until?: string;
+  /** 最近一次限流 */
+  iyuu_last_limit?: ReseedIYUULimit;
+  /** 今天各接口的请求计数 */
+  iyuu_today: ReseedIYUUCalls[];
+}
+
+export type ReseedIYUUEndpoint = "sites" | "report" | "query";
+
+/** 一天里一个 IYUU 接口的请求计数（calls = ok + rate_limited + failed） */
+export interface ReseedIYUUCalls {
+  day: string;
+  endpoint: ReseedIYUUEndpoint;
+  calls: number;
+  ok: number;
+  rate_limited: number;
+  failed: number;
+  /** 查询的 info hash 数（只有 query 有） */
+  hashes: number;
+  last_at?: string;
+}
+
+/** 最近一次 IYUU 限流：retry_after 是 IYUU 给的秒数，reset_at、limit 是 X-RateLimit-Reset 与 X-RateLimit-Limit */
+export interface ReseedIYUULimit {
+  at: string;
+  endpoint: ReseedIYUUEndpoint;
+  message: string;
+  retry_after: number;
+  reset_at?: string;
+  limit?: number;
+  /** 冷却到什么时候 */
+  until: string;
 }
 
 export type ReseedRunTrigger = "schedule" | "manual" | "retry" | "continue";
@@ -2772,6 +2809,10 @@ export interface ReseedSettingsUpdate {
   /** 不传时不动站点范围（站点在「站点」页用开关改） */
   site_names?: string[];
   max_per_site_per_day: number;
+  /** 不传时保留原来的；0 是不隔 */
+  iyuu_min_interval_seconds?: number;
+  /** 0 是不限 */
+  iyuu_max_calls_per_day: number;
 }
 
 export type ReseedSiteMode = "all" | "selected";

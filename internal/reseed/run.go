@@ -36,9 +36,11 @@ type RunResult struct {
 	// Gone 是站点上已经没有的种子（不算失败，以后不再试）
 	Gone int `json:"gone"`
 	// Interrupted 是被停止、超时或退出打断的尝试（不记失败，以后照常再试）
-	Interrupted int            `json:"interrupted"`
-	Skipped     map[string]int `json:"skipped,omitempty"`
-	Errors      []string       `json:"errors,omitempty"`
+	Interrupted int `json:"interrupted"`
+	// IYUUCalls 是这一轮请求 IYUU 的次数
+	IYUUCalls int            `json:"iyuu_calls"`
+	Skipped   map[string]int `json:"skipped,omitempty"`
+	Errors    []string       `json:"errors,omitempty"`
 	// Stopped 说明这一轮为什么提前停下（限流、被停止等）。
 	Stopped string `json:"stopped,omitempty"`
 	// End 是提前停下的种类（EndStopped、EndLimited、EndShutdown），跑完时为空。
@@ -210,7 +212,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 		return res, err
 	}
 	client := s.cfg.NewClient(token)
-	sites, err := s.iyuuSites(ctx, client, token)
+	sites, err := s.iyuuSites(ctx, &res, client, token)
 	if err != nil {
 		return res, fmt.Errorf("读取 IYUU 站点列表失败: %w", err)
 	}
@@ -226,7 +228,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 		return res, ErrNoSites
 	}
 	sort.Ints(sids)
-	sidSha1, err := s.sidSha1(ctx, client, &r, sids, false)
+	sidSha1, err := s.sidSha1(ctx, &res, client, &r, sids, false)
 	if err != nil {
 		return res, fmt.Errorf("向 IYUU 报告站点失败: %w", err)
 	}
@@ -268,14 +270,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 			break
 		}
 		batch := hashes[start:min(start+iyuu.MaxBatch, len(hashes))]
-		found, err := s.query(ctx, client, batch, &sidSha1, &r, sids, &refreshed)
+		found, err := s.query(ctx, &res, client, batch, &sidSha1, &r, sids, &refreshed)
 		if err != nil {
-			var rl *iyuu.RateLimitError
 			switch {
 			case ctx.Err() != nil:
 				res.endWith(ctx)
-			case errors.As(err, &rl):
-				res.End, res.Stopped = EndLimited, rl.Error()
+			case IYUULimited(err):
+				// 限流、冷却中或到了每天的上限：停下，下一轮接着这里往下查
+				res.End, res.Stopped = EndLimited, err.Error()
 				res.log.add(stepStop, "%s", res.Stopped)
 			default:
 				res.addError("查询 IYUU 失败: " + err.Error())
@@ -360,16 +362,22 @@ func addTorrents(id uint, dl downloader.Downloader, torrents []downloader.Torren
 }
 
 // sidSha1 返回查询要带的站点哈希：报告的站点没变、7 天之内就用缓存的；force 时重新报告。
-func (s *Service) sidSha1(ctx context.Context, client *iyuu.Client, r *models.ReseedSetting, sids []int, force bool) (string, error) {
+func (s *Service) sidSha1(ctx context.Context, res *RunResult, client *iyuu.Client, r *models.ReseedSetting, sids []int, force bool) (string, error) {
 	key := joinInts(sids)
 	now := s.cfg.Now()
 	if !force && r.SidSha1 != "" && r.SidKey == key && r.SidAt != nil && now.Sub(*r.SidAt) < models.ReseedSidTTL {
 		return r.SidSha1, nil
 	}
-	sum, err := client.ReportExisting(ctx, sids)
+	var sum string
+	err := s.callIYUU(ctx, res, models.IYUUEndpointReport, 0, func(ctx context.Context) error {
+		var cerr error
+		sum, cerr = client.ReportExisting(ctx, sids)
+		return cerr
+	})
 	if err != nil {
 		return "", err
 	}
+	now = s.cfg.Now()
 	r.SidSha1, r.SidKey, r.SidAt = sum, key, &now
 	// 只写缓存列，并且只在 token 没换过时写：这一轮读出设置之后，token 可能已经被清除或更换
 	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Model(&models.ReseedSetting{}).
@@ -380,27 +388,38 @@ func (s *Service) sidSha1(ctx context.Context, client *iyuu.Client, r *models.Re
 	return sum, nil
 }
 
-// query 查询一批：限流且等待不长时等一次再查；IYUU 报错时重新报告站点、再查一次（每轮最多一次）。
-func (s *Service) query(ctx context.Context, client *iyuu.Client, batch []string, sidSha1 *string,
+// query 查询一批：限流且冷却不长（不超过 1 分钟）时等冷却结束再查一次；IYUU 报错时重新报告站点、再查一次（每轮最多一次）。
+func (s *Service) query(ctx context.Context, res *RunResult, client *iyuu.Client, batch []string, sidSha1 *string,
 	r *models.ReseedSetting, sids []int, refreshed *bool,
 ) (map[string][]iyuu.Candidate, error) {
-	found, err := client.Query(ctx, batch, *sidSha1)
+	once := func() (map[string][]iyuu.Candidate, error) {
+		var found map[string][]iyuu.Candidate
+		err := s.callIYUU(ctx, res, models.IYUUEndpointQuery, len(batch), func(ctx context.Context) error {
+			var cerr error
+			found, cerr = client.Query(ctx, batch, *sidSha1)
+			return cerr
+		})
+		return found, err
+	}
+	found, err := once()
 	var rl *iyuu.RateLimitError
-	if errors.As(err, &rl) && rl.RetryAfter <= maxRateLimitWait {
-		if serr := s.cfg.Sleep(ctx, rl.RetryAfter); serr != nil {
-			return nil, err
+	if errors.As(err, &rl) {
+		if wait := s.cooldownLeft(ctx); wait > 0 && wait <= maxRateLimitWait {
+			if serr := s.cfg.Sleep(ctx, wait); serr != nil {
+				return nil, err
+			}
+			found, err = once()
 		}
-		found, err = client.Query(ctx, batch, *sidSha1)
 	}
 	var apiErr *iyuu.APIError
 	if errors.As(err, &apiErr) && !*refreshed {
 		*refreshed = true
-		sum, rerr := s.sidSha1(ctx, client, r, sids, true)
+		sum, rerr := s.sidSha1(ctx, res, client, r, sids, true)
 		if rerr != nil {
 			return nil, err
 		}
 		*sidSha1 = sum
-		found, err = client.Query(ctx, batch, *sidSha1)
+		found, err = once()
 	}
 	return found, err
 }

@@ -84,6 +84,7 @@ const counts = computed(() => {
   else {
     out.push({ label: "查询的种子", value: `${r.hashes} 个` });
     out.push({ label: "IYUU 批数", value: `${r.batches_done}/${r.batches}` });
+    out.push({ label: "IYUU 请求", value: `${r.iyuu_calls} 次` });
     out.push({ label: "可辅种", value: `${r.candidates} 个` });
   }
   out.push({ label: "加入", value: `${r.created} 个` });

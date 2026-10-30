@@ -35,6 +35,8 @@ import {
   reseedRecordMessage,
   reseedRecordResult,
   reseedRecordRetryable,
+  reseedIYUUCallsText,
+  reseedIYUUEndpoint,
   reseedRunDuration,
   reseedRunProgress,
   reseedRunStatus,
@@ -69,6 +71,8 @@ const form = ref({
   interval_hours: 12,
   downloader_ids: [] as number[],
   max_per_site_per_day: 20,
+  iyuu_min_interval_seconds: 3,
+  iyuu_max_calls_per_day: 0,
 });
 const loadFailed = ref(false);
 const saving = ref(false);
@@ -139,8 +143,13 @@ function fill(s: ReseedSettings, resetForm = true) {
     interval_hours: s.interval_hours,
     downloader_ids: [...(s.downloader_ids ?? [])],
     max_per_site_per_day: s.max_per_site_per_day,
+    iyuu_min_interval_seconds: s.iyuu_min_interval_seconds ?? 3,
+    iyuu_max_calls_per_day: s.iyuu_max_calls_per_day ?? 0,
   };
 }
+
+/** 今天请求 IYUU 的情况 */
+const iyuuToday = computed(() => reseedIYUUCallsText(settings.value?.iyuu_today ?? []));
 
 async function loadSettings(resetForm = true) {
   try {
@@ -321,6 +330,8 @@ async function save(clearToken = false) {
       interval_hours: form.value.interval_hours,
       downloader_ids: form.value.downloader_ids,
       max_per_site_per_day: form.value.max_per_site_per_day,
+      iyuu_min_interval_seconds: form.value.iyuu_min_interval_seconds,
+      iyuu_max_calls_per_day: form.value.iyuu_max_calls_per_day,
     });
     if (s) fill(s);
     ElMessage.success("已保存");
@@ -605,6 +616,27 @@ onBeforeUnmount(() => {
               </el-select>
             </el-form-item>
             <div class="field-tip rs-sites-tip">参与辅种的站点在「站点」里用开关设置。</div>
+            <h3 class="rs-form-title">IYUU 请求</h3>
+            <div class="rs-row">
+              <el-form-item label="两次请求至少隔（秒）">
+                <el-input-number
+                  v-model="form.iyuu_min_interval_seconds"
+                  :min="0"
+                  :max="300"
+                  controls-position="right"
+                  data-testid="rs-iyuu-gap" />
+                <div class="field-tip">默认 3 秒；0 是不隔</div>
+              </el-form-item>
+              <el-form-item label="每天最多请求（次）">
+                <el-input-number
+                  v-model="form.iyuu_max_calls_per_day"
+                  :min="0"
+                  :max="10000"
+                  controls-position="right"
+                  data-testid="rs-iyuu-cap" />
+                <div class="field-tip">0 是不限；到了上限，这一轮提前停下，第二天接着往下查</div>
+              </el-form-item>
+            </div>
             <el-button type="primary" :loading="saving" data-testid="rs-save" @click="save()">
               <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
             </el-button>
@@ -632,9 +664,36 @@ onBeforeUnmount(() => {
                 }}</span>
               </li>
             </ul>
+            <ul class="rs-status" data-testid="rs-iyuu-status">
+              <li>
+                <span class="rs-k">今天请求</span>
+                <span v-if="iyuuToday">{{ iyuuToday }}</span>
+                <span v-else class="rs-sub">还没有请求 IYUU</span>
+              </li>
+              <li v-if="settings?.iyuu_cooldown_until" class="rs-warn">
+                <span class="rs-k">限流冷却</span>
+                <span data-testid="rs-iyuu-cooldown"
+                  >{{ formatShortDateTime(settings.iyuu_cooldown_until) }} 以前不请求
+                  IYUU，也不跑定时轮次</span
+                >
+              </li>
+              <li v-if="settings?.iyuu_last_limit">
+                <span class="rs-k">上次限流</span>
+                <span
+                  >{{ formatShortDateTime(settings.iyuu_last_limit.at) }}
+                  {{ reseedIYUUEndpoint(settings.iyuu_last_limit.endpoint) }}：{{
+                    settings.iyuu_last_limit.message || "请求太频繁"
+                  }}</span
+                >
+              </li>
+            </ul>
             <p class="rs-tip">
               只辅种文件完全一样（路径和大小逐个相同）的种子；核对没通过的不再尝试，下载不到种子的过
               7 天再试。
+            </p>
+            <p class="rs-tip">
+              IYUU 推荐每天辅种一次，短时间内多次运行会被拒绝（辅种太频繁）。被限流以后按 IYUU
+              给的时间冷却。
             </p>
           </aside>
         </div>
@@ -792,6 +851,11 @@ onBeforeUnmount(() => {
           class-name="pt-cell-1line"
           show-overflow-tooltip>
           <template #default="{ row }">{{ row.summary || row.error || "—" }}</template>
+        </el-table-column>
+        <el-table-column label="IYUU 请求" width="90" align="right">
+          <template #default="{ row }">{{
+            row.trigger === "retry" ? "—" : `${row.iyuu_calls} 次`
+          }}</template>
         </el-table-column>
         <el-table-column label="用时" width="100">
           <template #default="{ row }">{{ reseedRunDuration(row) || "—" }}</template>
@@ -1155,6 +1219,17 @@ onBeforeUnmount(() => {
 
 .rs-sites-tip {
   margin: -6px 0 16px;
+}
+
+.rs-form-title {
+  margin: 4px 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.rs-warn {
+  color: var(--pt-warn);
 }
 
 .rs-tip {

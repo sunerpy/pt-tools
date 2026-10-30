@@ -50,8 +50,16 @@ type ReseedSetting struct {
 	SidAt     *time.Time `json:"-"`
 	LastRunAt *time.Time `json:"last_run_at,omitempty"`
 	// LastResult 是上一轮的一句话结果。
-	LastResult string    `gorm:"type:text;default:''" json:"last_result"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	LastResult string `gorm:"type:text;default:''" json:"last_result"`
+	// IYUUMinIntervalSeconds 是两次请求 IYUU 之间至少隔几秒：NULL 是没设置、按 ReseedDefaultIYUUMinInterval；0 是不隔。
+	IYUUMinIntervalSeconds *int `gorm:"column:iyuu_min_interval_seconds" json:"-"`
+	// IYUUMaxCallsPerDay 是每天最多请求 IYUU 几次，0 是不限。
+	IYUUMaxCallsPerDay int `gorm:"column:iyuu_max_calls_per_day;not null;default:0" json:"-"`
+	// IYUUCooldownUntil 是 IYUU 限流以后冷却到什么时候：这之前不发请求、不跑定时轮次。
+	IYUUCooldownUntil *time.Time `gorm:"column:iyuu_cooldown_until" json:"-"`
+	// IYUULastLimit 是最近一次限流的情况（JSON）。
+	IYUULastLimit string    `gorm:"column:iyuu_last_limit;type:text;default:''" json:"-"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // TableName 指定表名。
@@ -87,7 +95,37 @@ const (
 	ReseedSidTTL = 7 * 24 * time.Hour
 	// ReseedRetryAfter 是暂时失败（下载不到种子等）之后多久再试。
 	ReseedRetryAfter = 7 * 24 * time.Hour
+	// ReseedDefaultIYUUMinInterval 是没设置时两次请求 IYUU 之间至少隔几秒。
+	ReseedDefaultIYUUMinInterval = 3
+	ReseedMaxIYUUMinInterval     = 300
+	ReseedMaxIYUUCallsPerDay     = 10000
+	// ReseedMaxIYUUCooldown 是一次限流最多冷却多久（IYUU 给的重置时间离谱时不照它等）。
+	ReseedMaxIYUUCooldown = 24 * time.Hour
 )
+
+// IYUU 的接口（请求计数按它分）。
+const (
+	IYUUEndpointSites  = "sites"
+	IYUUEndpointReport = "report"
+	IYUUEndpointQuery  = "query"
+)
+
+// ReseedIYUUDaily 是每天每个 IYUU 接口的请求计数（Day 是进程时区的 YYYY-MM-DD）。
+// Calls = OK + RateLimited + Failed；Hashes 是查询的 info hash 数（只有 query 有）。
+type ReseedIYUUDaily struct {
+	ID          uint       `gorm:"primaryKey" json:"-"`
+	Day         string     `gorm:"size:10;not null;uniqueIndex:idx_reseed_iyuu_day_ep" json:"day"`
+	Endpoint    string     `gorm:"size:16;not null;uniqueIndex:idx_reseed_iyuu_day_ep" json:"endpoint"`
+	Calls       int        `gorm:"not null;default:0" json:"calls"`
+	OK          int        `gorm:"column:ok;not null;default:0" json:"ok"`
+	RateLimited int        `gorm:"not null;default:0" json:"rate_limited"`
+	Failed      int        `gorm:"not null;default:0" json:"failed"`
+	Hashes      int        `gorm:"not null;default:0" json:"hashes"`
+	LastAt      *time.Time `json:"last_at,omitempty"`
+}
+
+// TableName 指定表名。
+func (ReseedIYUUDaily) TableName() string { return "reseed_iyuu_daily" }
 
 // 辅种记录的结果。
 const (

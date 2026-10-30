@@ -38,8 +38,10 @@ type fakeIYUU struct {
 	// queryCodes 依次作为 /reseed/index/index 的 code 返回（用完后返回 0）
 	queryCodes []int
 	retryAfter int
-	reports    int
-	queries    int
+	// resetAt 不为 0 时，429 的数据里带 X-RateLimit-Reset（Unix 秒）与 X-RateLimit-Limit
+	resetAt int64
+	reports int
+	queries int
 	// onReport 在 reportExisting 请求里调用（模拟这一轮运行中用户改了设置）
 	onReport func()
 }
@@ -67,7 +69,11 @@ func (f *fakeIYUU) server(t *testing.T) *httptest.Server {
 				code := f.queryCodes[0]
 				f.queryCodes = f.queryCodes[1:]
 				if code != 0 {
-					write(code, map[string]any{"Retry-After": f.retryAfter})
+					data := map[string]any{"Retry-After": f.retryAfter}
+					if f.resetAt != 0 {
+						data["X-RateLimit-Reset"], data["X-RateLimit-Limit"] = f.resetAt, 100
+					}
+					write(code, data)
 					return
 				}
 			}
@@ -182,7 +188,7 @@ func newEnv(t *testing.T) *env {
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "r.db")+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() { closeTestGorm(db) })
-	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.TorrentTransferJob{},
+	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{}, &models.TorrentTransferJob{},
 		&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.DownloaderPathMap{}, &models.TransferRule{}))
 	require.NoError(t, db.Create(&models.DownloaderSetting{ID: 1, Name: "qb", Type: "qbittorrent", URL: "http://x", Enabled: true}).Error)
 	e := &env{t: t, db: db, now: time.Date(2026, 10, 7, 10, 0, 0, 0, time.Local), site: &fakeSite{data: map[string][]byte{}}, siteIDs: []string{"hdsky"}}
@@ -233,18 +239,21 @@ func newEnv(t *testing.T) *env {
 			return c
 		},
 		Now: func() time.Time { return e.now },
+		// 等待只记下来、把假时钟往前拨，不真等
 		Sleep: func(_ context.Context, d time.Duration) error {
 			e.slept = append(e.slept, d)
+			e.now = e.now.Add(d)
 			return nil
 		},
 	})
 	return e
 }
 
+// enable 开启辅种；两次请求 IYUU 之间默认不隔（测 IYUU 调用口的用例自己设）。
 func (e *env) enable(mod func(*SettingsUpdate)) {
 	e.t.Helper()
-	tok := "tok"
-	u := SettingsUpdate{Enabled: true, Token: &tok}
+	tok, gap := "tok", 0
+	u := SettingsUpdate{Enabled: true, Token: &tok, IYUUMinIntervalSeconds: &gap}
 	if mod != nil {
 		mod(&u)
 	}
