@@ -29,6 +29,10 @@ func TestWireReseedWorker(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	// 内存库每个连接各是一份：辅种后台一启动就读库（把上次没跑完的轮次记为被打断），只留一个连接才看得到建好的表
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&models.TorrentTransferJob{}, &models.TransferRule{}, &models.DownloaderSetting{}, &models.ReseedSetting{}, &models.ReseedRecord{}))
 	global.GlobalDB = &models.TorrentDB{DB: db}
 	store := core.NewConfigStore(global.GlobalDB)
