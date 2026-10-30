@@ -12,6 +12,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/iyuu"
 	"github.com/sunerpy/pt-tools/internal/reseed"
+	"github.com/sunerpy/pt-tools/internal/transfer"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 )
@@ -30,6 +31,7 @@ func (s *Server) registerReseedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/reseed/runs", s.auth(s.apiReseedRuns))
 	mux.HandleFunc("/api/reseed/runs/", s.auth(s.apiReseedRunDetail))
 	mux.HandleFunc("/api/reseed/records", s.auth(s.apiReseedRecords))
+	mux.HandleFunc("/api/reseed/records/", s.auth(s.apiReseedRecordAction))
 	mux.HandleFunc("/api/reseed/jobs", s.auth(s.apiReseedJobs))
 }
 
@@ -65,9 +67,10 @@ func writeReseedError(w http.ResponseWriter, err error) {
 	case errors.Is(err, reseed.ErrInvalid), errors.Is(err, iyuu.ErrNoToken), errors.Is(err, reseed.ErrNoSites):
 		status = http.StatusBadRequest
 	case errors.Is(err, scheduler.ErrReseedBusy), errors.Is(err, scheduler.ErrReseedNotCurrent),
-		errors.Is(err, reseed.ErrNotContinuable):
+		errors.Is(err, reseed.ErrNotContinuable), errors.Is(err, reseed.ErrNoPendingJob),
+		errors.Is(err, transfer.ErrNotCancelable):
 		status = http.StatusConflict
-	case errors.Is(err, reseed.ErrRunNotFound):
+	case errors.Is(err, reseed.ErrRunNotFound), errors.Is(err, reseed.ErrRecordNotFound):
 		status = http.StatusNotFound
 	case errors.As(err, &rl):
 		status = http.StatusTooManyRequests
@@ -342,7 +345,8 @@ func (s *Server) apiReseedRunDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "current_run": worker.Current()})
 }
 
-// apiReseedRecords handles GET /api/reseed/records：最新的辅种尝试与对应任务的状态。
+// apiReseedRecords handles GET /api/reseed/records?result=&site=&q=&page=&page_size=：辅种记录（按最后一次尝试从新到旧）
+// 与对应任务的状态。result 是页面上的结果分组，q 匹配种子名或 info hash。
 func (s *Server) apiReseedRecords(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -352,12 +356,73 @@ func (s *Server) apiReseedRecords(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	recs, err := svc.Records(r.Context())
+	page, size := reseedPage(r)
+	q := r.URL.Query()
+	got, err := svc.Records(r.Context(), reseed.RecordFilter{Result: q.Get("result"), Site: q.Get("site"), Query: q.Get("q")}, page, size)
 	if err != nil {
 		writeReseedError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"items": recs})
+	writeJSON(w, got)
+}
+
+// reseedIDsRequest 是对一批记录的操作。
+type reseedIDsRequest struct {
+	IDs []uint `json:"ids"`
+}
+
+// apiReseedRecordAction handles POST /api/reseed/records/retry {"ids"}（在后台重试，返回 202 与轮次编号）、
+// POST /api/reseed/records/delete {"ids"}（任务还没结束的不删）与 POST /api/reseed/records/{id}/cancel
+// （取消还在等待加入下载器的任务）。
+func (s *Server) apiReseedRecordAction(w http.ResponseWriter, r *http.Request) {
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/reseed/records/"), "/")
+	var cancelID uint
+	switch rest {
+	case "retry", "delete":
+	default:
+		idPart, action, _ := strings.Cut(rest, "/")
+		id64, err := strconv.ParseUint(idPart, 10, 64)
+		if err != nil || id64 == 0 || action != "cancel" {
+			http.NotFound(w, r)
+			return
+		}
+		cancelID = uint(id64)
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	worker, svc, ok := s.reseedWorker(w)
+	if !ok {
+		return
+	}
+	if cancelID != 0 {
+		if err := svc.CancelRecordJob(r.Context(), cancelID); err != nil {
+			writeReseedError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
+	var req reseedIDsRequest
+	if !decodeStrictBody(w, r, &req) {
+		return
+	}
+	if rest == "retry" {
+		id, err := worker.Retry(req.IDs)
+		if err != nil {
+			writeReseedError(w, err)
+			return
+		}
+		writeReseedStarted(w, id)
+		return
+	}
+	got, err := svc.DeleteRecords(r.Context(), req.IDs)
+	if err != nil {
+		writeReseedError(w, err)
+		return
+	}
+	writeJSON(w, got)
 }
 
 // apiReseedJobs handles GET（列表）/ DELETE（清除已结束的）/api/reseed/jobs：辅种任务（转移任务里种类为 reseed 的）。

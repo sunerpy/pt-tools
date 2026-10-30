@@ -247,10 +247,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	res.Hashes = len(hashes)
 	res.Batches = (len(hashes) + iyuu.MaxBatch - 1) / iyuu.MaxBatch
 
-	p := &pass{opts: opts, res: &res, limit: r.MaxPerSitePerDay}
-	if p.limit == 0 {
-		p.limit = models.ReseedDefaultMaxPerSitePerDay
-	}
+	p := &pass{opts: opts, res: &res, limit: dailyLimit(r)}
 	if p.today, err = s.todayCounts(ctx); err != nil {
 		return res, err
 	}
@@ -316,7 +313,7 @@ func (s *Service) collect(ctx context.Context, r models.ReseedSetting, res *RunR
 	sources := map[string]source{}
 	present := map[string]bool{}
 	for _, id := range ids {
-		dl, set, err := s.cfg.Downloaders.TransferDownloader(ctx, id)
+		dl, set, err := s.downloader(ctx, id)
 		if err != nil {
 			res.addError(fmt.Sprintf("下载器 %d 不可用: %v", id, err))
 			continue
@@ -327,24 +324,39 @@ func (s *Service) collect(ctx context.Context, r models.ReseedSetting, res *RunR
 			continue
 		}
 		res.Downloaders++
-		done := 0
-		for _, t := range torrents {
-			h := strings.ToLower(t.InfoHash)
-			if h == "" {
-				continue
-			}
-			present[h] = true
-			if !(t.IsCompleted || t.Progress >= 1) || t.State == downloader.TorrentError || t.State == downloader.TorrentChecking {
-				continue
-			}
-			if _, ok := sources[h]; !ok {
-				sources[h] = source{dlID: id, dl: dl, torrent: t}
-				done++
-			}
-		}
+		done := addTorrents(id, dl, torrents, sources, present)
 		res.log.add(stepList, "读取下载器 %s：%d 个种子，%d 个已经下完", set.Name, len(torrents), done)
 	}
 	return sources, present
+}
+
+// downloader 取一台下载器；没有配置下载器来源时（测试里）返回错误。
+func (s *Service) downloader(ctx context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error) {
+	if s.cfg.Downloaders == nil {
+		return nil, models.DownloaderSetting{}, errors.New("没有可用的下载器")
+	}
+	return s.cfg.Downloaders.TransferDownloader(ctx, id)
+}
+
+// addTorrents 把一台下载器里的种子记进 present（全部）与 sources（已经下完的，按小写 info hash，先读到的为准），
+// 返回新记进 sources 的个数。
+func addTorrents(id uint, dl downloader.Downloader, torrents []downloader.Torrent, sources map[string]source, present map[string]bool) int {
+	done := 0
+	for _, t := range torrents {
+		h := strings.ToLower(t.InfoHash)
+		if h == "" {
+			continue
+		}
+		present[h] = true
+		if !(t.IsCompleted || t.Progress >= 1) || t.State == downloader.TorrentError || t.State == downloader.TorrentChecking {
+			continue
+		}
+		if _, ok := sources[h]; !ok {
+			sources[h] = source{dlID: id, dl: dl, torrent: t}
+			done++
+		}
+	}
+	return done
 }
 
 // sidSha1 返回查询要带的站点哈希：报告的站点没变、7 天之内就用缓存的；force 时重新报告。
@@ -391,6 +403,14 @@ func (s *Service) query(ctx context.Context, client *iyuu.Client, batch []string
 		found, err = client.Query(ctx, batch, *sidSha1)
 	}
 	return found, err
+}
+
+// dailyLimit 是每个站点每天最多尝试几次。
+func dailyLimit(r models.ReseedSetting) int {
+	if r.MaxPerSitePerDay == 0 {
+		return models.ReseedDefaultMaxPerSitePerDay
+	}
+	return r.MaxPerSitePerDay
 }
 
 // todayCounts 返回今天（进程时区）每个站点已经开始的尝试次数（尝试行只追加：删除或重试记录不会让它变小）。

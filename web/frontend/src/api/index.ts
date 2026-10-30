@@ -2727,7 +2727,7 @@ export interface ReseedRun {
 }
 
 export interface ReseedRunStep {
-  kind: "list" | "query" | "add" | "fail" | "gone" | "stop" | "error" | "info";
+  kind: "list" | "query" | "add" | "fail" | "gone" | "skip" | "stop" | "error" | "info";
   text: string;
 }
 
@@ -2792,6 +2792,16 @@ export interface ReseedSiteMapItem {
   selected: boolean;
 }
 
+/** 记录在页面上的结果（服务端按它筛选）：记录自己的状态说了算的直接用，建了任务的看任务现在的状态 */
+export type ReseedRecordResult =
+  | "active"
+  | "done"
+  | "failed"
+  | "rolled_back"
+  | "canceled"
+  | "gone"
+  | "missing";
+
 export interface ReseedRecord {
   id: number;
   info_hash: string;
@@ -2808,9 +2818,22 @@ export interface ReseedRecord {
   job_message?: string;
   /** 记录指向的任务已经不在了，结果不知道 */
   job_missing?: boolean;
+  result: ReseedRecordResult;
   created_at: string;
   /** 最后一次尝试的时间 */
   updated_at: string;
+}
+
+/** 记录列表的筛选（都可以不填）：q 匹配种子名或 info hash */
+export interface ReseedRecordFilter {
+  result?: ReseedRecordResult | "";
+  site?: string;
+  q?: string;
+}
+
+export interface ReseedRecordPage extends ReseedPage<ReseedRecord> {
+  /** 记录里出现过的站点（筛选用） */
+  sites: string[];
 }
 
 // ---------- CookieCloud 导入（路线图 M7） ----------
@@ -3841,7 +3864,21 @@ export const reseedApi = {
     api.post<{ ok: boolean }>(`/api/reseed/runs/${id}/stop`, { cancel_pending: cancelPending }),
   continueRun: (id: number) =>
     api.post<{ started: boolean; run_id: number }>(`/api/reseed/runs/${id}/continue`, {}),
-  records: () => api.get<{ items: ReseedRecord[] }>("/api/reseed/records"),
+  records: (filter: ReseedRecordFilter = {}, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (filter.result) params.set("result", filter.result);
+    if (filter.site) params.set("site", filter.site);
+    if (filter.q) params.set("q", filter.q);
+    return api.get<ReseedRecordPage>(`/api/reseed/records?${params}`);
+  },
+  /** 在后台重试选中的记录（一轮触发方式为「重试」的轮次） */
+  retryRecords: (ids: number[]) =>
+    api.post<{ started: boolean; run_id: number }>("/api/reseed/records/retry", { ids }),
+  /** 删除记录；任务还没结束的不删（active 是没删的条数） */
+  deleteRecords: (ids: number[]) =>
+    api.post<{ deleted: number; active: number }>("/api/reseed/records/delete", { ids }),
+  /** 取消记录对应的、还在等待加入下载器的任务 */
+  cancelRecord: (id: number) => api.post<{ ok: boolean }>(`/api/reseed/records/${id}/cancel`, {}),
   jobs: (status: "" | "active" | "finished" = "") =>
     api.get<{ items: TransferJob[] }>(
       `/api/reseed/jobs${status ? `?status=${encodeURIComponent(status)}` : ""}`,

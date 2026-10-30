@@ -2,6 +2,7 @@ import type {
   ReseedAttempt,
   ReseedCurrentRun,
   ReseedRecord,
+  ReseedRecordResult,
   ReseedRun,
   ReseedRunStatus,
   ReseedRunStep,
@@ -13,39 +14,36 @@ import { transferStateLabel } from "@/utils/transfer";
 
 type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
-/** 一条辅种记录的结果：没建成任务的是失败；建成的看任务状态（任务记录清除后看记录里留下的结果） */
-export function reseedRecordResult(r: Pick<ReseedRecord, "state" | "job_state" | "job_missing">): {
+const RECORD_RESULT: Record<ReseedRecordResult, { label: string; tone: Tone }> = {
+  active: { label: "已建任务", tone: "info" },
+  done: { label: "已辅种", tone: "ok" },
+  failed: { label: "失败", tone: "dang" },
+  rolled_back: { label: "已撤回", tone: "warn" },
+  canceled: { label: "已取消", tone: "neutral" },
+  // 站点上删了这个种子（IYUU 的索引里还有）：不是失败，不再尝试
+  gone: { label: "站点已删除", tone: "neutral" },
+  missing: { label: "任务已删除", tone: "neutral" },
+};
+
+/** 记录列表按结果筛选的选项（与服务端的结果分组相同） */
+export const RECORD_RESULT_OPTIONS: { label: string; value: ReseedRecordResult }[] = [
+  { label: "进行中", value: "active" },
+  { label: "已辅种", value: "done" },
+  { label: "失败", value: "failed" },
+  { label: "已撤回", value: "rolled_back" },
+  { label: "已取消", value: "canceled" },
+  { label: "站点已删除", value: "gone" },
+  { label: "任务已删除", value: "missing" },
+];
+
+/** 一条辅种记录的结果；任务还没结束的写任务现在走到哪一步 */
+export function reseedRecordResult(r: Pick<ReseedRecord, "result" | "job_state">): {
   label: string;
   tone: Tone;
 } {
-  switch (r.state) {
-    case "failed":
-      return { label: "失败", tone: "dang" };
-    case "gone":
-      // 站点上删了这个种子（IYUU 的索引里还有）：不是失败，不再尝试
-      return { label: "站点已删除", tone: "neutral" };
-    case "done":
-      return { label: "已辅种", tone: "ok" };
-    case "rolled_back":
-      return { label: "已撤回", tone: "warn" };
-    case "canceled":
-      return { label: "已取消", tone: "neutral" };
-  }
-  if (r.job_missing) return { label: "任务已删除", tone: "neutral" };
-  switch (r.job_state) {
-    case "source_removed":
-      return { label: "已辅种", tone: "ok" };
-    case "rolled_back":
-      return { label: "已撤回", tone: "warn" };
-    case "failed":
-      return { label: "失败", tone: "dang" };
-    case "canceled":
-      return { label: "已取消", tone: "neutral" };
-    case undefined:
-      return { label: "已建任务", tone: "info" };
-    default:
-      return { label: transferStateLabel(r.job_state), tone: "info" };
-  }
+  if (r.result === "active" && r.job_state)
+    return { label: transferStateLabel(r.job_state), tone: "info" };
+  return RECORD_RESULT[r.result] ?? { label: r.result, tone: "neutral" };
 }
 
 /** 记录的说明：失败原因，或者任务的消息 */
@@ -53,12 +51,19 @@ export function reseedRecordMessage(r: Pick<ReseedRecord, "message" | "job_messa
   return r.message || r.job_message || "";
 }
 
-/** 记录对应的任务还没结束（任务已经不在了的不算） */
-export function reseedRecordActive(
-  r: Pick<ReseedRecord, "state" | "job_state" | "job_missing">,
-): boolean {
-  if (r.state !== "queued" || r.job_missing) return false;
-  return !["source_removed", "rolled_back", "failed", "canceled"].includes(r.job_state ?? "");
+/** 记录对应的任务还没结束（任务已经不在了的不算）：不能重试也不能删除 */
+export function reseedRecordActive(r: Pick<ReseedRecord, "result">): boolean {
+  return r.result === "active";
+}
+
+/** 失败、站点已删除、已撤回、已取消、任务已删除的记录可以重试 */
+export function reseedRecordRetryable(r: Pick<ReseedRecord, "result">): boolean {
+  return ["failed", "gone", "rolled_back", "canceled", "missing"].includes(r.result);
+}
+
+/** 任务还在等待加入下载器时可以取消 */
+export function reseedRecordCancelable(r: Pick<ReseedRecord, "result" | "job_state">): boolean {
+  return r.result === "active" && (r.job_state === "pending" || r.job_state === "exported");
 }
 
 /** IYUU 站点在 pt-tools 里的情况 */
@@ -115,6 +120,7 @@ const STEP_KIND: Record<ReseedRunStep["kind"], string> = {
   add: "加入",
   fail: "失败",
   gone: "已删除",
+  skip: "跳过",
   stop: "停下",
   error: "出错",
   info: "说明",

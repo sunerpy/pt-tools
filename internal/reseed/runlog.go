@@ -23,6 +23,7 @@ const (
 	stepAdd   = "add"
 	stepFail  = "fail"
 	stepGone  = "gone"
+	stepSkip  = "skip"
 	stepStop  = "stop"
 	stepError = "error"
 	stepInfo  = "info"

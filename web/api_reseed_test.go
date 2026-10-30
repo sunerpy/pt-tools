@@ -66,7 +66,10 @@ func newReseedServer(t *testing.T) (*Server, *http.ServeMux) {
 
 func TestReseedAPI_RequiresSession(t *testing.T) {
 	_, mux := newReseedServer(t)
-	for _, path := range []string{"/api/reseed/settings", "/api/reseed/sites", "/api/reseed/run", "/api/reseed/records", "/api/reseed/jobs", "/api/reseed/runs", "/api/reseed/runs/1", "/api/reseed/sites/hdsky"} {
+	for _, path := range []string{
+		"/api/reseed/settings", "/api/reseed/sites", "/api/reseed/run", "/api/reseed/records", "/api/reseed/jobs", "/api/reseed/runs", "/api/reseed/runs/1", "/api/reseed/sites/hdsky",
+		"/api/reseed/records/retry", "/api/reseed/records/delete", "/api/reseed/records/1/cancel",
+	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
@@ -156,6 +159,10 @@ func TestWriteReseedError(t *testing.T) {
 		iyuu.ErrNoToken:                     http.StatusBadRequest,
 		reseed.ErrNoSites:                   http.StatusBadRequest,
 		scheduler.ErrReseedBusy:             http.StatusConflict,
+		reseed.ErrNoPendingJob:              http.StatusConflict,
+		transfer.ErrNotCancelable:           http.StatusConflict,
+		reseed.ErrRecordNotFound:            http.StatusNotFound,
+		reseed.ErrNothingToRetry:            http.StatusBadRequest,
 		&iyuu.RateLimitError{Msg: "x"}:      http.StatusTooManyRequests,
 		&iyuu.APIError{Code: 500, Msg: "x"}: http.StatusBadGateway,
 		errors.New("boom"):                  http.StatusInternalServerError,
@@ -245,4 +252,65 @@ func TestReseedAPI_Runs(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodPost, path+"/explode", "").Code)
 	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodGet, path+"/pause", "").Code)
 	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodPost, "/api/reseed/runs", "").Code)
+}
+
+// 记录：分页与筛选、批量重试（后台跑一轮，返回 202）、删除（进行中的不删）、取消等待加入的任务。
+func TestReseedAPI_Records(t *testing.T) {
+	srv, mux := newReseedServer(t)
+	db := global.GlobalDB.DB
+	pending := models.TorrentTransferJob{Kind: models.JobKindReseed, TargetDownloaderID: 1, InfoHash: "cc", State: models.TransferPending}
+	require.NoError(t, db.Create(&pending).Error)
+	failed := models.ReseedRecord{InfoHash: "aa", SiteName: "hdsky", TorrentID: "1", Name: "Alpha", DownloaderID: 1, State: models.ReseedFailed}
+	gone := models.ReseedRecord{InfoHash: "bb", SiteName: "ourbits", TorrentID: "2", Name: "Bravo", DownloaderID: 1, State: models.ReseedGone}
+	active := models.ReseedRecord{InfoHash: "cc", SiteName: "hdsky", TorrentID: "3", Name: "Charlie", DownloaderID: 1, State: models.ReseedQueued, JobID: &pending.ID}
+	for _, r := range []*models.ReseedRecord{&failed, &gone, &active} {
+		require.NoError(t, db.Create(r).Error)
+	}
+
+	w := serveAuthed(mux, http.MethodGet, "/api/reseed/records?result=failed&page=1&page_size=10", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page reseed.RecordPage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.EqualValues(t, 1, page.Total)
+	assert.Equal(t, "Alpha", page.Items[0].Name)
+	assert.Equal(t, reseed.RecordFailed, page.Items[0].Result)
+	assert.Equal(t, []string{"hdsky", "ourbits"}, page.Sites)
+	assert.Equal(t, 10, page.PageSize)
+	w = serveAuthed(mux, http.MethodGet, "/api/reseed/records?site=hdsky&q=char", "")
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, reseed.RecordActive, page.Items[0].Result)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/reseed/records?result=nope", "").Code)
+
+	// 取消：等待加入的可以；再取消一次就没有等待中的任务了
+	path := fmt.Sprintf("/api/reseed/records/%d/cancel", active.ID)
+	require.Equal(t, http.StatusOK, serveAuthed(mux, http.MethodPost, path, "").Code)
+	assert.Equal(t, http.StatusConflict, serveAuthed(mux, http.MethodPost, path, "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodPost, "/api/reseed/records/999/cancel", "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodPost, "/api/reseed/records/abc/cancel", "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodPost, "/api/reseed/records/1/explode", "").Code)
+
+	// 重试：选中的都不能重试时 400；能重试的在后台跑一轮
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/reseed/records/retry", `{"ids":[]}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/reseed/records/retry", `{"ids":[1],"x":1}`).Code)
+	w = serveAuthed(mux, http.MethodPost, "/api/reseed/records/retry", fmt.Sprintf(`{"ids":[%d]}`, failed.ID))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	var started struct {
+		RunID uint `json:"run_id"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &started))
+	require.NotZero(t, started.RunID)
+	worker := srv.mgr.GetReseedWorker()
+	require.Eventually(t, func() bool { return !worker.Running() }, 5*time.Second, 10*time.Millisecond)
+	var run models.ReseedRun
+	require.NoError(t, db.First(&run, started.RunID).Error)
+	assert.Equal(t, models.ReseedTriggerRetry, run.Trigger)
+	assert.Contains(t, run.Summary, "重试 1 条记录")
+
+	// 删除：一起删，跳过进行中的（这里已经取消了，所以都删）
+	w = serveAuthed(mux, http.MethodPost, "/api/reseed/records/delete", fmt.Sprintf(`{"ids":[%d,%d,%d]}`, failed.ID, gone.ID, active.ID))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"deleted":3,"active":0}`, w.Body.String())
+	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodGet, "/api/reseed/records/delete", "").Code)
+	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodPost, "/api/reseed/records", "").Code)
 }

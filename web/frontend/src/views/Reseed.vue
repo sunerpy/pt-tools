@@ -8,6 +8,7 @@ import {
   type DownloaderSetting,
   downloadersApi,
   type ReseedRecord,
+  type ReseedRecordResult,
   type ReseedRun,
   type ReseedSettings,
   type ReseedSiteMapItem,
@@ -24,12 +25,16 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { useSearchInput } from "@/composables/useSearchInput";
 import { formatShortDateTime } from "@/utils/format";
 import {
   applySiteSelection,
+  RECORD_RESULT_OPTIONS,
   reseedRecordActive,
+  reseedRecordCancelable,
   reseedRecordMessage,
   reseedRecordResult,
+  reseedRecordRetryable,
   reseedRunDuration,
   reseedRunProgress,
   reseedRunStatus,
@@ -37,7 +42,7 @@ import {
   reseedSiteStatus,
 } from "@/utils/reseed";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 type Tab = "settings" | "sites" | "runs" | "records";
 const TABS: { label: string; value: Tab }[] = [
@@ -46,8 +51,9 @@ const TABS: { label: string; value: Tab }[] = [
   { label: "轮次", value: "runs" },
   { label: "记录", value: "records" },
 ];
-/** 轮次列表每页几条 */
+/** 轮次、记录列表每页几条 */
 const RUNS_PAGE = 20;
+const RECORDS_PAGE = 20;
 /** 正在运行或有任务没结束时多久刷新一次 */
 const REFRESH_MS = 5000;
 
@@ -79,7 +85,19 @@ const siteMode = computed(() => settings.value?.site_mode ?? "all");
 // ---- 记录 ----
 const recordsDS = useDataState();
 const records = ref<ReseedRecord[]>([]);
+const recordsTotal = ref(0);
+const recordsPage = ref(1);
 const recordsLoaded = ref(false);
+/** 记录里出现过的站点（筛选用） */
+const recordSites = ref<string[]>([]);
+const recordFilter = reactive({ result: "" as ReseedRecordResult | "", site: "", q: "" });
+const recordFiltered = computed(() =>
+  Boolean(recordFilter.result || recordFilter.site || recordFilter.q.trim()),
+);
+/** 勾选的记录：只在当前这一页里（换页、筛选时清掉；任务没结束的不能勾） */
+const picked = ref<number[]>([]);
+/** 正在重试、删除或取消 */
+const recordBusy = ref(false);
 
 // ---- 轮次 ----
 const runsDS = useDataState();
@@ -153,13 +171,116 @@ async function loadSites() {
   }
 }
 
-async function loadRecords() {
-  const pending = recordsDS.run(() => reseedApi.records());
+async function loadRecords(page = recordsPage.value): Promise<void> {
+  const filter = { ...recordFilter, q: recordFilter.q.trim() };
+  const pending = recordsDS.run(() => reseedApi.records(filter, page, RECORDS_PAGE));
   const data = await pending;
   if (recordsDS.isStale(pending)) return;
-  if (data) {
-    records.value = data.items ?? [];
-    recordsLoaded.value = true;
+  if (!data) return;
+  const total = data.total ?? 0;
+  const last = Math.max(1, Math.ceil(total / RECORDS_PAGE));
+  // 删掉了最后一页的全部记录：回到现在的最后一页
+  if (!data.items?.length && page > last) return loadRecords(last);
+  records.value = data.items ?? [];
+  recordsTotal.value = total;
+  recordsPage.value = page;
+  recordSites.value = data.sites ?? [];
+  recordsLoaded.value = true;
+  const can = new Set(records.value.filter((r) => !reseedRecordActive(r)).map((r) => r.id));
+  picked.value = picked.value.filter((id) => can.has(id));
+}
+
+function applyRecordFilter() {
+  picked.value = [];
+  void loadRecords(1);
+}
+const recordSearch = useSearchInput(() => recordFilter.q, applyRecordFilter);
+
+function changeRecordsPage(page: number) {
+  picked.value = [];
+  void loadRecords(page);
+}
+
+const recordsNote = computed(() => {
+  const from = (recordsPage.value - 1) * RECORDS_PAGE + 1;
+  const to = Math.min(recordsPage.value * RECORDS_PAGE, recordsTotal.value);
+  return `第 ${from}–${to} 条，共 ${recordsTotal.value} 条`;
+});
+
+/** 这一页能勾的记录（任务还没结束的不能重试也不能删除） */
+const pickable = computed(() => records.value.filter((r) => !reseedRecordActive(r)));
+const allPicked = computed(
+  () => pickable.value.length > 0 && pickable.value.every((r) => picked.value.includes(r.id)),
+);
+const pickedRecords = computed(() => records.value.filter((r) => picked.value.includes(r.id)));
+const pickedRetryable = computed(() => pickedRecords.value.filter(reseedRecordRetryable));
+
+function pickAll(on: boolean) {
+  picked.value = on ? pickable.value.map((r) => r.id) : [];
+}
+
+function togglePick(id: number, on: boolean) {
+  picked.value = on ? [...new Set([...picked.value, id])] : picked.value.filter((v) => v !== id);
+}
+
+/** 重试选中的记录（只发能重试的）：在后台跑一轮，进度在页头 */
+async function retryRecords(rows: ReseedRecord[]) {
+  const ids = rows.filter(reseedRecordRetryable).map((r) => r.id);
+  if (!ids.length) return;
+  recordBusy.value = true;
+  try {
+    await reseedApi.retryRecords(ids);
+    ElMessage.success(`已开始重试 ${ids.length} 条，进度在页头，结果写在「轮次」里`);
+    picked.value = [];
+    await loadSettings(false);
+    scheduleRefresh();
+  } catch (e) {
+    ElMessage.error((e as Error).message || "重试失败");
+  } finally {
+    recordBusy.value = false;
+  }
+}
+
+async function deleteRecords(rows: ReseedRecord[]) {
+  const ids = rows.filter((r) => !reseedRecordActive(r)).map((r) => r.id);
+  if (!ids.length) return;
+  try {
+    await ElMessageBox.confirm(
+      `删除 ${ids.length} 条记录？删除以后，这些种子在以后的轮次里会再试一次；今天已经用掉的名额和统计不变。`,
+      "删除记录",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
+    );
+  } catch {
+    return;
+  }
+  recordBusy.value = true;
+  try {
+    const res = await reseedApi.deleteRecords(ids);
+    ElMessage.success(
+      res.active
+        ? `已删除 ${res.deleted} 条；${res.active} 条的任务还没结束，没有删`
+        : `已删除 ${res.deleted} 条`,
+    );
+    picked.value = picked.value.filter((id) => !ids.includes(id));
+    await loadRecords();
+  } catch (e) {
+    ElMessage.error((e as Error).message || "删除失败");
+  } finally {
+    recordBusy.value = false;
+  }
+}
+
+/** 取消还在等待加入下载器的任务（取消以后可以再重试） */
+async function cancelRecord(r: ReseedRecord) {
+  recordBusy.value = true;
+  try {
+    await reseedApi.cancelRecord(r.id);
+    ElMessage.success("已取消；要再试时点「重试」");
+    await loadRecords();
+  } catch (e) {
+    ElMessage.error((e as Error).message || "取消失败");
+  } finally {
+    recordBusy.value = false;
   }
 }
 
@@ -732,25 +853,93 @@ onBeforeUnmount(() => {
       v-else
       title="辅种记录"
       icon="list-checks"
-      :count="recordsLoaded ? records.length : undefined">
-      <div
-        v-if="records.length && recordsDS.error.value"
-        class="pt-note pt-note--warn"
-        data-testid="rs-records-stale">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>刷新失败：{{ recordsDS.errorText.value }}。下面是上次读到的。</span>
+      padding="none"
+      :count="recordsLoaded ? recordsTotal : undefined">
+      <PtToolbar>
+        <el-select
+          v-model="recordFilter.result"
+          placeholder="全部结果"
+          clearable
+          class="rs-filter"
+          data-testid="rs-record-result"
+          @change="applyRecordFilter">
+          <el-option
+            v-for="o in RECORD_RESULT_OPTIONS"
+            :key="o.value"
+            :label="o.label"
+            :value="o.value" />
+        </el-select>
+        <el-select
+          v-model="recordFilter.site"
+          placeholder="全部站点"
+          clearable
+          filterable
+          class="rs-filter"
+          data-testid="rs-record-site"
+          @change="applyRecordFilter">
+          <el-option v-for="name in recordSites" :key="name" :label="name" :value="name" />
+        </el-select>
+        <el-input
+          v-model="recordFilter.q"
+          placeholder="种子名或 info hash"
+          clearable
+          class="rs-filter-q"
+          data-testid="rs-record-q"
+          @keyup.enter="recordSearch.now"
+          @clear="recordSearch.now">
+          <template #prefix>
+            <PtIcon name="search" :size="14" />
+          </template>
+        </el-input>
+      </PtToolbar>
+      <div v-if="(records.length && recordsDS.error.value) || !records.length" class="rs-inset">
+        <div
+          v-if="records.length && recordsDS.error.value"
+          class="pt-note pt-note--warn"
+          data-testid="rs-records-stale">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span>刷新失败：{{ recordsDS.errorText.value }}。下面是上次读到的。</span>
+        </div>
+        <PtDataState
+          v-if="!records.length"
+          :state="recordsDS.state.value"
+          :title="
+            recordsDS.error.value ? '' : recordFiltered ? '没有符合条件的记录' : '还没有辅种记录'
+          "
+          :sub="
+            recordsDS.errorText.value ||
+            (recordFiltered
+              ? '换一个结果、站点或关键词试试'
+              : '开启辅种并运行一轮后，这里列出每次尝试')
+          " />
       </div>
-      <PtDataState
-        v-if="!records.length"
-        :state="recordsDS.state.value"
-        :title="recordsDS.error.value ? '' : '还没有辅种记录'"
-        :sub="recordsDS.errorText.value || '开启辅种并运行一轮后，这里列出每次尝试'" />
       <el-table
-        v-else-if="!isMobile"
+        v-if="records.length && !isMobile"
         :data="records"
         class="pt-grid"
         row-key="id"
         data-testid="rs-records">
+        <el-table-column width="46" align="center">
+          <template #header>
+            <el-checkbox
+              :model-value="allPicked"
+              :indeterminate="picked.length > 0 && !allPicked"
+              :disabled="!pickable.length"
+              aria-label="选择这一页能操作的记录"
+              data-testid="rs-record-pick-all"
+              @update:model-value="(v: string | number | boolean) => pickAll(Boolean(v))" />
+          </template>
+          <template #default="{ row }">
+            <el-checkbox
+              v-if="!reseedRecordActive(row)"
+              :model-value="picked.includes(row.id)"
+              :aria-label="`选择 ${row.name || row.info_hash}`"
+              :data-testid="`rs-record-pick-${row.id}`"
+              @update:model-value="
+                (v: string | number | boolean) => togglePick(row.id, Boolean(v))
+              " />
+          </template>
+        </el-table-column>
         <el-table-column label="种子" min-width="220" class-name="pt-cell-strong">
           <template #default="{ row }">
             <div class="rs-name">{{ row.name || row.info_hash }}</div>
@@ -774,9 +963,47 @@ onBeforeUnmount(() => {
         <el-table-column label="时间" width="120">
           <template #default="{ row }">{{ formatShortDateTime(row.updated_at) }}</template>
         </el-table-column>
+        <el-table-column label="" width="140" align="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="reseedRecordRetryable(row)"
+              link
+              type="primary"
+              :disabled="recordBusy || Boolean(settings?.running)"
+              :data-testid="`rs-record-retry-${row.id}`"
+              @click="retryRecords([row])"
+              >重试</el-button
+            >
+            <el-button
+              v-if="reseedRecordCancelable(row)"
+              link
+              :disabled="recordBusy"
+              :data-testid="`rs-record-cancel-${row.id}`"
+              @click="cancelRecord(row)"
+              >取消</el-button
+            >
+            <el-button
+              v-if="!reseedRecordActive(row)"
+              link
+              type="danger"
+              :disabled="recordBusy"
+              :data-testid="`rs-record-delete-${row.id}`"
+              @click="deleteRecords([row])"
+              >删除</el-button
+            >
+          </template>
+        </el-table-column>
       </el-table>
-      <div v-else class="rs-cards">
+      <div v-else-if="records.length" class="rs-cards rs-inset">
         <PtRowCard v-for="r in records" :key="r.id">
+          <template v-if="!reseedRecordActive(r)" #lead>
+            <el-checkbox
+              :model-value="picked.includes(r.id)"
+              :aria-label="`选择 ${r.name || r.info_hash}`"
+              @update:model-value="
+                (v: string | number | boolean) => togglePick(r.id, Boolean(v))
+              " />
+          </template>
           <template #title>{{ r.name || r.info_hash }}</template>
           <template #meta>
             <span
@@ -790,8 +1017,73 @@ onBeforeUnmount(() => {
               reseedRecordResult(r).label
             }}</PtStatusPill>
           </template>
+          <template
+            v-if="reseedRecordRetryable(r) || reseedRecordCancelable(r) || !reseedRecordActive(r)"
+            #actions>
+            <el-button
+              v-if="reseedRecordRetryable(r)"
+              size="small"
+              type="primary"
+              :disabled="recordBusy || Boolean(settings?.running)"
+              @click="retryRecords([r])"
+              >重试</el-button
+            >
+            <el-button
+              v-if="reseedRecordCancelable(r)"
+              size="small"
+              :disabled="recordBusy"
+              @click="cancelRecord(r)"
+              >取消</el-button
+            >
+            <el-button
+              v-if="!reseedRecordActive(r)"
+              size="small"
+              type="danger"
+              plain
+              :disabled="recordBusy"
+              @click="deleteRecords([r])"
+              >删除</el-button
+            >
+          </template>
         </PtRowCard>
       </div>
+      <!-- 画板 selband：勾选以后列表下方那条横幅，批量操作放在这里 -->
+      <div v-if="picked.length" class="pt-band--sel" data-testid="rs-record-selband">
+        <PtIcon name="square-check" :size="15" />
+        <span>已选 {{ picked.length }} 条</span>
+        <span class="pt-band__spacer" />
+        <el-button @click="picked = []">
+          <PtIcon name="x" :size="14" /><span>取消选择</span>
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!pickedRetryable.length || recordBusy || Boolean(settings?.running)"
+          data-testid="rs-record-retry-picked"
+          @click="retryRecords(pickedRecords)">
+          <PtIcon name="rotate-ccw" :size="14" /><span>重试 {{ pickedRetryable.length }} 条</span>
+        </el-button>
+        <el-button
+          type="danger"
+          plain
+          :disabled="recordBusy"
+          data-testid="rs-record-delete-picked"
+          @click="deleteRecords(pickedRecords)">
+          <PtIcon name="trash-2" :size="14" /><span>删除</span>
+        </el-button>
+      </div>
+      <template v-if="recordsTotal > 0" #footer>
+        <span class="pt-foot-note" data-testid="rs-records-note">{{ recordsNote }}</span>
+        <el-pagination
+          v-if="recordsTotal > RECORDS_PAGE"
+          class="pt-pager"
+          layout="prev, pager, next"
+          :total="recordsTotal"
+          :page-size="RECORDS_PAGE"
+          :current-page="recordsPage"
+          :pager-count="5"
+          data-testid="rs-records-pager"
+          @current-change="changeRecordsPage" />
+      </template>
     </PtPanel>
 
     <el-dialog v-model="stopDialog" title="停止这一轮" width="440px" append-to-body>
@@ -831,6 +1123,27 @@ onBeforeUnmount(() => {
 .rs-pager {
   justify-content: flex-end;
   margin-top: var(--pt-space-3);
+}
+
+/* 记录面板贴边（表格、多选条、页脚贴着卡边），提示、空状态与手机行卡自己留白 */
+.rs-inset {
+  padding: var(--pt-pad);
+}
+
+.rs-filter {
+  width: 150px;
+}
+
+.rs-filter-q {
+  width: 220px;
+}
+
+@media (max-width: 768px) {
+  .rs-filter,
+  .rs-filter-q {
+    flex: 1 1 140px;
+    width: auto;
+  }
 }
 
 .rs-dialog-text {

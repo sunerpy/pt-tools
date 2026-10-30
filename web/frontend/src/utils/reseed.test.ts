@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   applySiteSelection,
+  RECORD_RESULT_OPTIONS,
   reseedAttemptResult,
   reseedRecordActive,
+  reseedRecordCancelable,
   reseedRecordMessage,
   reseedRecordResult,
+  reseedRecordRetryable,
   reseedRunDuration,
   reseedRunProgress,
   reseedRunStatus,
@@ -15,35 +18,52 @@ import {
 } from "./reseed";
 
 describe("reseed utils", () => {
-  it("labels records by their job", () => {
-    expect(reseedRecordResult({ state: "failed" }).label).toBe("失败");
+  it("labels records by the server's result", () => {
+    expect(reseedRecordResult({ result: "failed" }).label).toBe("失败");
     // 站点上已经删了的种子不算失败
-    expect(reseedRecordResult({ state: "gone" })).toEqual({ label: "站点已删除", tone: "neutral" });
-    expect(reseedRecordResult({ state: "queued", job_state: "source_removed" })).toEqual({
+    expect(reseedRecordResult({ result: "gone" })).toEqual({
+      label: "站点已删除",
+      tone: "neutral",
+    });
+    expect(reseedRecordResult({ result: "done", job_state: "source_removed" })).toEqual({
       label: "已辅种",
       tone: "ok",
     });
-    expect(reseedRecordResult({ state: "queued", job_state: "rolled_back" }).tone).toBe("warn");
-    expect(reseedRecordResult({ state: "queued", job_state: "failed" }).tone).toBe("dang");
-    expect(reseedRecordResult({ state: "queued", job_state: "canceled" }).label).toBe("已取消");
-    expect(reseedRecordResult({ state: "queued", job_state: "checking" }).label).toBe("校验中");
-    expect(reseedRecordResult({ state: "queued" }).label).toBe("已建任务");
-    // 任务记录清除后留下的结果
-    expect(reseedRecordResult({ state: "done" })).toEqual({ label: "已辅种", tone: "ok" });
-    expect(reseedRecordResult({ state: "rolled_back" }).label).toBe("已撤回");
-    expect(reseedRecordResult({ state: "canceled" }).label).toBe("已取消");
-    expect(reseedRecordResult({ state: "queued", job_missing: true }).label).toBe("任务已删除");
+    expect(reseedRecordResult({ result: "rolled_back" }).tone).toBe("warn");
+    expect(reseedRecordResult({ result: "canceled" }).label).toBe("已取消");
+    expect(reseedRecordResult({ result: "missing" }).label).toBe("任务已删除");
+    // 任务还没结束：写走到哪一步
+    expect(reseedRecordResult({ result: "active", job_state: "checking" })).toEqual({
+      label: "校验中",
+      tone: "info",
+    });
+    expect(reseedRecordResult({ result: "active" }).label).toBe("已建任务");
+    expect(RECORD_RESULT_OPTIONS.map((o) => o.value)).toEqual([
+      "active",
+      "done",
+      "failed",
+      "rolled_back",
+      "canceled",
+      "gone",
+      "missing",
+    ]);
   });
 
-  it("tells messages and activity", () => {
+  it("tells messages and which actions a record allows", () => {
     expect(reseedRecordMessage({ message: "文件不一致", job_message: "x" })).toBe("文件不一致");
     expect(reseedRecordMessage({ message: "", job_message: "正在校验" })).toBe("正在校验");
-    expect(reseedRecordActive({ state: "queued", job_state: "checking" })).toBe(true);
-    expect(reseedRecordActive({ state: "queued", job_state: "source_removed" })).toBe(false);
-    expect(reseedRecordActive({ state: "failed" })).toBe(false);
-    expect(reseedRecordActive({ state: "done" })).toBe(false);
-    // 任务不在了不再轮询
-    expect(reseedRecordActive({ state: "queued", job_missing: true })).toBe(false);
+    expect(reseedRecordActive({ result: "active" })).toBe(true);
+    expect(reseedRecordActive({ result: "done" })).toBe(false);
+    expect(reseedRecordActive({ result: "missing" })).toBe(false);
+    for (const result of ["failed", "gone", "rolled_back", "canceled", "missing"] as const)
+      expect(reseedRecordRetryable({ result })).toBe(true);
+    expect(reseedRecordRetryable({ result: "done" })).toBe(false);
+    expect(reseedRecordRetryable({ result: "active" })).toBe(false);
+    // 只有还没加入下载器的任务能取消
+    expect(reseedRecordCancelable({ result: "active", job_state: "pending" })).toBe(true);
+    expect(reseedRecordCancelable({ result: "active", job_state: "exported" })).toBe(true);
+    expect(reseedRecordCancelable({ result: "active", job_state: "checking" })).toBe(false);
+    expect(reseedRecordCancelable({ result: "failed" })).toBe(false);
   });
 
   it("applies a site selection like the server does", () => {
@@ -91,6 +111,7 @@ describe("reseed utils", () => {
     expect(reseedRunTrigger("continue")).toBe("继续");
     expect(reseedRunTrigger("retry")).toBe("重试");
     expect(reseedStepKind("query")).toBe("查询");
+    expect(reseedStepKind("skip")).toBe("跳过");
     // 用时不含暂停的时间；没跑完的（被打断）不写
     expect(
       reseedRunDuration({

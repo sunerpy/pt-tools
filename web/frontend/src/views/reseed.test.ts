@@ -22,6 +22,9 @@ const api = vi.hoisted(() => ({
   stopRun: vi.fn(),
   continueRun: vi.fn(),
   records: vi.fn(),
+  retryRecords: vi.fn(),
+  deleteRecords: vi.fn(),
+  cancelRecord: vi.fn(),
   jobs: vi.fn(),
   clearFinished: vi.fn(),
 }));
@@ -102,7 +105,7 @@ function settings(extra: Record<string, unknown> = {}) {
 
 async function mountPage(s = settings()) {
   api.settings.mockResolvedValue(s);
-  api.records.mockResolvedValue({ items: [] });
+  api.records.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, sites: [] });
   api.runs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
   api.sites.mockResolvedValue({
     items: [
@@ -173,11 +176,16 @@ describe("IYUU 辅种", () => {
           downloader_id: 1,
           name: "Movie",
           state: "done",
+          result: "done",
           message: "",
           created_at: "2026-10-07T10:00:00Z",
           updated_at: "2026-10-07T10:00:00Z",
         },
       ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      sites: ["hdsky"],
     });
     await chooseTab("记录");
     await vi.waitFor(() => expect(document.body.textContent).toContain("已辅种"));
@@ -292,6 +300,7 @@ describe("IYUU 辅种", () => {
           downloader_id: 1,
           name: "Movie",
           state: "queued",
+          result: "done",
           message: "",
           job_id: 5,
           job_state: "source_removed",
@@ -306,10 +315,15 @@ describe("IYUU 辅种", () => {
           downloader_id: 1,
           name: "Movie",
           state: "failed",
+          result: "failed",
           message: "文件列表与原种子不一致：文件数不同（1 与 2）",
           created_at: "2026-10-07T10:00:00Z",
         },
       ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      sites: ["hdsky"],
     });
     await chooseTab("记录");
     await vi.waitFor(() => expect(document.body.textContent).toContain("已辅种"));
@@ -483,5 +497,143 @@ describe("辅种轮次", () => {
     api.continueRun.mockResolvedValue({ started: true, run_id: 8 });
     testid("rs-run-continue").click();
     await vi.waitFor(() => expect(api.continueRun).toHaveBeenCalledWith(7));
+  });
+});
+
+function record(extra: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    info_hash: "a",
+    site_name: "hdsky",
+    torrent_id: "11",
+    source_hash: "s",
+    downloader_id: 1,
+    name: "Movie",
+    state: "failed",
+    result: "failed",
+    message: "下载种子失败: 404",
+    created_at: "2026-10-30T10:00:00Z",
+    updated_at: "2026-10-30T10:00:00Z",
+    ...extra,
+  };
+}
+
+describe("辅种记录", () => {
+  const page1 = () => ({
+    items: [
+      record(),
+      record({
+        id: 2,
+        name: "Show",
+        state: "queued",
+        result: "active",
+        message: "",
+        job_id: 9,
+        job_state: "exported",
+      }),
+      record({ id: 3, name: "Doc", state: "done", result: "done", message: "" }),
+    ],
+    total: 45,
+    page: 1,
+    page_size: 20,
+    sites: ["hdsky", "ourbits"],
+  });
+
+  it("服务端筛选与分页；每行按结果给出重试、取消、删除", async () => {
+    await mountPage(settings({ has_token: true }));
+    api.records.mockResolvedValue(page1());
+    await chooseTab("记录");
+    await vi.waitFor(() => expect(testid("rs-records").textContent).toContain("Show"));
+    expect(testid("rs-records-note").textContent).toContain("共 45 条");
+    expect(testid("rs-records").textContent).toContain("等待加入");
+    // 进行中的不能重试、不能删除，等待加入的可以取消；已辅种的只能删除
+    expect(document.querySelector("[data-testid=rs-record-retry-1]")).not.toBeNull();
+    expect(document.querySelector("[data-testid=rs-record-retry-2]")).toBeNull();
+    expect(document.querySelector("[data-testid=rs-record-delete-2]")).toBeNull();
+    expect(document.querySelector("[data-testid=rs-record-cancel-2]")).not.toBeNull();
+    expect(document.querySelector("[data-testid=rs-record-retry-3]")).toBeNull();
+    expect(document.querySelector("[data-testid=rs-record-delete-3]")).not.toBeNull();
+
+    // 关键词：回车立刻按服务端筛选，从第一页开始
+    api.records.mockClear();
+    const qEl = testid("rs-record-q");
+    const q = (
+      qEl instanceof HTMLInputElement ? qEl : qEl.querySelector("input")
+    ) as HTMLInputElement;
+    q.value = "Mov";
+    q.dispatchEvent(new Event("input"));
+    q.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter" }));
+    await vi.waitFor(() =>
+      expect(api.records).toHaveBeenCalledWith({ result: "", site: "", q: "Mov" }, 1, 20),
+    );
+
+    // 换页
+    api.records.mockClear();
+    const next = document.querySelector<HTMLElement>("[data-testid=rs-records-pager] .btn-next")!;
+    next.click();
+    await vi.waitFor(() => expect(api.records).toHaveBeenCalledWith(expect.anything(), 2, 20));
+
+    api.cancelRecord.mockResolvedValue({ ok: true });
+    testid("rs-record-cancel-2").click();
+    await vi.waitFor(() => expect(api.cancelRecord).toHaveBeenCalledWith(2));
+    // 取消做完（按钮不再置灰）以后再点下一个
+    await vi.waitFor(() =>
+      expect(testid("rs-record-retry-1").hasAttribute("disabled")).toBe(false),
+    );
+
+    api.retryRecords.mockResolvedValue({ started: true, run_id: 12 });
+    testid("rs-record-retry-1").click();
+    await vi.waitFor(() => expect(api.retryRecords).toHaveBeenCalledWith([1]));
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith(expect.stringContaining("重试 1 条")),
+    );
+    await vi.waitFor(() =>
+      expect(testid("rs-record-delete-3").hasAttribute("disabled")).toBe(false),
+    );
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.deleteRecords.mockResolvedValue({ deleted: 1, active: 0 });
+    testid("rs-record-delete-3").click();
+    await vi.waitFor(() => expect(api.deleteRecords).toHaveBeenCalledWith([3]));
+    expect(ui.confirm.mock.calls[0][0]).toContain("以后的轮次里会再试一次");
+  });
+
+  it("勾选这一页（进行中的不能勾）：多选条上重试能重试的、删除勾选的", async () => {
+    await mountPage(settings({ has_token: true }));
+    api.records.mockResolvedValue(page1());
+    await chooseTab("记录");
+    await vi.waitFor(() => expect(testid("rs-records").textContent).toContain("Show"));
+    expect(document.querySelector("[data-testid=rs-record-pick-2]")).toBeNull();
+    testid("rs-record-pick-all").querySelector("input")!.click();
+    await vi.waitFor(() => expect(testid("rs-record-selband").textContent).toContain("已选 2 条"));
+    expect(testid("rs-record-retry-picked").textContent).toContain("重试 1 条");
+
+    api.retryRecords.mockResolvedValue({ started: true, run_id: 12 });
+    testid("rs-record-retry-picked").click();
+    await vi.waitFor(() => expect(api.retryRecords).toHaveBeenCalledWith([1]));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=rs-record-selband]")).toBeNull(),
+    );
+
+    testid("rs-record-pick-3").querySelector("input")!.click();
+    await vi.waitFor(() => expect(testid("rs-record-selband").textContent).toContain("已选 1 条"));
+    ui.confirm.mockResolvedValue("confirm");
+    api.deleteRecords.mockResolvedValue({ deleted: 0, active: 1 });
+    testid("rs-record-delete-picked").click();
+    await vi.waitFor(() => expect(api.deleteRecords).toHaveBeenCalledWith([3]));
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith(expect.stringContaining("没有删")),
+    );
+  });
+
+  it("有一轮在跑时不能重试", async () => {
+    await mountPage(settings({ has_token: true, running: true, current_run: currentRun() }));
+    api.records.mockResolvedValue(page1());
+    await chooseTab("记录");
+    await vi.waitFor(() => expect(testid("rs-records").textContent).toContain("Show"));
+    expect(
+      testid("rs-record-retry-1").hasAttribute("disabled") ||
+        testid("rs-record-retry-1").classList.contains("is-disabled"),
+    ).toBe(true);
   });
 });

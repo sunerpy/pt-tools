@@ -238,6 +238,20 @@ func (w *ReseedWorker) Continue(id uint) (uint, error) {
 	}, w.cfg.Service.Run)
 }
 
+// Retry 在后台重试选中的辅种记录（触发方式为 retry 的一轮，不查 IYUU），返回轮次编号。
+// 选中的记录都不能重试时返回 reseed.ErrNothingToRetry；已经有一轮在跑时返回 ErrReseedBusy。
+func (w *ReseedWorker) Retry(ids []uint) (uint, error) {
+	if w == nil || w.cfg.Service == nil {
+		return 0, errors.New("辅种服务没有启动")
+	}
+	svc := w.cfg.Service
+	return w.start(models.ReseedTriggerRetry, func(ctx context.Context) (string, *uint, error) {
+		return "", nil, svc.CheckRetry(ctx, ids)
+	}, func(ctx context.Context, opts reseed.RunOptions) (reseed.RunResult, error) {
+		return svc.Retry(ctx, opts, ids)
+	})
+}
+
 // reseedPlan 在占住「正在跑」以后算出这一轮的起点（与别的轮次不会交错）。
 type reseedPlan func(ctx context.Context) (after string, from *uint, err error)
 
@@ -323,8 +337,11 @@ func (w *ReseedWorker) execute(ctx context.Context, a *reseedActive, after strin
 	if ferr := svc.FinishRun(done, a.id, res, status, errText, paused); ferr != nil {
 		w.cfg.Logger.Warnf("[辅种] %v", ferr)
 	}
-	if rerr := svc.RecordRun(done, w.cfg.Clock.Now(), summary); rerr != nil {
-		w.cfg.Logger.Warnf("[辅种] 记录结果失败: %v", rerr)
+	// 重试轮次不查 IYUU：不算进定时运行的间隔，「上次运行」也只写普通轮次
+	if a.trigger != models.ReseedTriggerRetry {
+		if rerr := svc.RecordRun(done, w.cfg.Clock.Now(), summary); rerr != nil {
+			w.cfg.Logger.Warnf("[辅种] 记录结果失败: %v", rerr)
+		}
 	}
 	w.mu.Lock()
 	cancelPending := a.cancelPending

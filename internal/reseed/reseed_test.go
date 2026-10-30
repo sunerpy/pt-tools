@@ -259,6 +259,14 @@ func (e *env) candidate(id string, files map[string]int64) string {
 	return h
 }
 
+// records 是第一页（最多 100 条）记录。
+func (e *env) records(f RecordFilter) []RecordView {
+	e.t.Helper()
+	page, err := e.svc.Records(context.Background(), f, 1, 100)
+	require.NoError(e.t, err)
+	return page.Items
+}
+
 func (e *env) setResults(cands ...map[string]any) {
 	e.iyuu.results[e.srcHash] = map[string]any{"torrent": cands}
 }
@@ -372,8 +380,7 @@ func TestRun(t *testing.T) {
 	assert.Equal(t, "hdsky", j.Tags)
 	assert.Equal(t, "11", j.TorrentID)
 
-	recs, err := e.svc.Records(ctx)
-	require.NoError(t, err)
+	recs := e.records(RecordFilter{})
 	require.Len(t, recs, 3)
 	states := map[string]RecordView{}
 	for _, r := range recs {
@@ -606,8 +613,7 @@ func TestClearFinishedJobs(t *testing.T) {
 
 	// 任务被别的途径删掉了：标出来
 	require.NoError(t, e.db.Where("id = ?", *after[1].JobID).Delete(&models.TorrentTransferJob{}).Error)
-	views, err := e.svc.Records(ctx)
-	require.NoError(t, err)
+	views := e.records(RecordFilter{})
 	byID := map[string]RecordView{}
 	for _, v := range views {
 		byID[v.TorrentID] = v
@@ -638,8 +644,7 @@ func TestRecordsOrderByLastAttempt(t *testing.T) {
 	e.now = e.now.Add(8 * 24 * time.Hour)
 	_, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
-	views, err := e.svc.Records(ctx)
-	require.NoError(t, err)
+	views := e.records(RecordFilter{})
 	require.Len(t, views, 2)
 	assert.Equal(t, "81", views[0].TorrentID, "刚重试过的在前面")
 	assert.Equal(t, models.ReseedQueued, views[0].State)

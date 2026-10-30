@@ -20,6 +20,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/reseed"
 	"github.com/sunerpy/pt-tools/internal/transfer"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 type testCipher struct{}
@@ -46,6 +47,9 @@ func newReseedWorkerForTest(t *testing.T) (*ReseedWorker, *reseed.Service, *gorm
 	t.Cleanup(srv.Close)
 	svc := reseed.New(reseed.Config{
 		DB: db, Cipher: testCipher{}, Transfer: transfer.New(transfer.Config{DB: db}),
+		Downloaders: transfer.DownloadersFunc(func(context.Context, uint) (downloader.Downloader, models.DownloaderSetting, error) {
+			return nil, models.DownloaderSetting{}, errors.New("下载器未启用")
+		}),
 		NewClient: func(token string) *iyuu.Client {
 			c := iyuu.New(token)
 			c.BaseURL = srv.URL
@@ -281,4 +285,40 @@ func TestReseedWorker_InterruptedAndContinue(t *testing.T) {
 
 	_, err = w.Continue(stale.ID)
 	assert.ErrorIs(t, err, reseed.ErrNotContinuable, "已经不是最近一轮了")
+}
+
+// 重试在后台跑一轮（触发方式 retry），不改「上次运行」与定时间隔；选中的记录都不能重试时不开始。
+func TestReseedWorker_Retry(t *testing.T) {
+	w, _, db := newReseedWorkerForTest(t)
+	failed := models.ReseedRecord{InfoHash: "aa", SiteName: "hdsky", TorrentID: "1", SourceHash: "src", DownloaderID: 1, State: models.ReseedFailed}
+	done := models.ReseedRecord{InfoHash: "bb", SiteName: "hdsky", TorrentID: "2", SourceHash: "src", DownloaderID: 1, State: models.ReseedDone}
+	require.NoError(t, db.Create(&failed).Error)
+	require.NoError(t, db.Create(&done).Error)
+
+	_, err := w.Retry([]uint{done.ID})
+	require.ErrorIs(t, err, reseed.ErrNothingToRetry)
+	var n int64
+	require.NoError(t, db.Model(&models.ReseedRun{}).Count(&n).Error)
+	assert.Zero(t, n, "没有开始就不记轮次")
+	assert.False(t, w.Running())
+
+	id, err := w.Retry([]uint{failed.ID, done.ID})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return !w.Running() }, 5*time.Second, 10*time.Millisecond)
+	row := reseedRunRow(t, db, id)
+	assert.Equal(t, models.ReseedTriggerRetry, row.Trigger)
+	assert.Equal(t, models.ReseedRunPartial, row.Status, "下载器不可用")
+	assert.Equal(t, 2, row.Hashes)
+	assert.Contains(t, row.Summary, "重试 2 条记录")
+	assert.Contains(t, row.SkippedDetail, reseed.SkipNoDownloader)
+	assert.Contains(t, row.SkippedDetail, reseed.SkipNotRetryable)
+	var sets []models.ReseedSetting
+	require.NoError(t, db.Find(&sets).Error)
+	for _, set := range sets {
+		assert.Nil(t, set.LastRunAt, "重试不算进定时运行的间隔")
+	}
+
+	var nilWorker *ReseedWorker
+	_, err = nilWorker.Retry([]uint{1})
+	assert.Error(t, err)
 }
