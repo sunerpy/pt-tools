@@ -33,6 +33,7 @@ func (s *Server) registerReseedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/reseed/records", s.auth(s.apiReseedRecords))
 	mux.HandleFunc("/api/reseed/records/", s.auth(s.apiReseedRecordAction))
 	mux.HandleFunc("/api/reseed/jobs", s.auth(s.apiReseedJobs))
+	mux.HandleFunc("/api/reseed/stats", s.auth(s.apiReseedStats))
 }
 
 // ReseedSettingsView 是设置加上「是否正在运行」与正在跑的那一轮。
@@ -418,6 +419,35 @@ func (s *Server) apiReseedRecordAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	got, err := svc.DeleteRecords(r.Context(), req.IDs)
+	if err != nil {
+		writeReseedError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiReseedStats handles GET /api/reseed/stats?granularity=&periods= 或 ?granularity=&from=&to=：
+// 最近几段（最后一段是当前这一段），或者自定义范围（YYYY-MM-DD，含两头）的辅种统计。
+func (s *Server) apiReseedStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	_, svc, ok := s.reseedWorker(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	query := reseed.StatsQuery{Granularity: q.Get("granularity"), From: q.Get("from"), To: q.Get("to")}
+	if raw := q.Get("periods"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			http.Error(w, "periods 应为正整数", http.StatusBadRequest)
+			return
+		}
+		query.Periods = n
+	}
+	got, err := svc.Stats(r.Context(), query)
 	if err != nil {
 		writeReseedError(w, err)
 		return

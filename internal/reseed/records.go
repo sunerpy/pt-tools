@@ -403,8 +403,9 @@ func (s *Service) retryDownloader(ctx context.Context, cache map[uint]*retryDown
 	return d
 }
 
-// ClearFinishedJobs 删除已经结束的辅种任务，返回删除的条数。删除前把任务的结果写进引用它的辅种记录，
-// 记录不再指向任务；不改记录的更新时间（重试间隔按它算）。
+// ClearFinishedJobs 删除已经结束的辅种任务，返回删除的条数。删除前把任务的结果写进引用它的辅种记录
+// （记录不再指向任务；不改记录的更新时间，重试间隔按它算），并把结果与完成时间抄进建成它的尝试行（统计按它算）。
+// 都在同一个事务里：不会出现任务删了、结果没抄上。
 func (s *Service) ClearFinishedJobs(ctx context.Context) (int64, error) {
 	var n int64
 	err := s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -422,6 +423,15 @@ func (s *Service) ClearFinishedJobs(ctx context.Context) (int64, error) {
 			state, msg := jobRecordState(j)
 			if err := tx.Model(&models.ReseedRecord{}).Where("job_id = ?", j.ID).
 				UpdateColumns(map[string]any{"state": state, "message": msg, "job_id": nil}).Error; err != nil {
+				return err
+			}
+			finished := j.FinishedAt
+			if finished == nil {
+				at := j.UpdatedAt
+				finished = &at
+			}
+			if err := tx.Model(&models.ReseedAttempt{}).Where("job_id = ? AND job_state = ''", j.ID).
+				UpdateColumns(map[string]any{"job_state": j.State, "job_finished_at": finished}).Error; err != nil {
 				return err
 			}
 		}

@@ -51,6 +51,8 @@ type RunResult struct {
 	Retry bool `json:"-"`
 
 	log *runLog
+	// daySkips 是按站点记的、下载以前就跳过的个数（这一轮结束时写进 reseed_daily_skips）
+	daySkips map[string]*models.ReseedDailySkip
 }
 
 // 提前停下的种类。
@@ -79,6 +81,29 @@ func (r *RunResult) skip(why string) {
 		r.Skipped = map[string]int{}
 	}
 	r.Skipped[why]++
+}
+
+// skipAt 记一个下载以前就跳过的候选，并按站点计进每天的跳过统计（site 为空串是不在辅种范围的 IYUU 站点）。
+func (r *RunResult) skipAt(site, why string) {
+	r.skip(why)
+	if r.daySkips == nil {
+		r.daySkips = map[string]*models.ReseedDailySkip{}
+	}
+	c := r.daySkips[site]
+	if c == nil {
+		c = &models.ReseedDailySkip{SiteName: site}
+		r.daySkips[site] = c
+	}
+	switch why {
+	case SkipExists:
+		c.Present++
+	case SkipTried:
+		c.Tried++
+	case SkipDailyLimit:
+		c.DailyLimit++
+	case SkipNotSelected:
+		c.NotSelected++
+	}
 }
 
 func (r *RunResult) addError(text string) {
@@ -143,7 +168,7 @@ func (r RunResult) snapshot() RunResult {
 	out := r
 	out.Skipped = maps.Clone(r.Skipped)
 	out.Errors = append([]string(nil), r.Errors...)
-	out.log = nil
+	out.log, out.daySkips = nil, nil
 	return out
 }
 
@@ -253,6 +278,8 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	if p.today, err = s.todayCounts(ctx); err != nil {
 		return res, err
 	}
+	// 跳过的个数这一轮结束时写一次（停止、超时时也写）；进程在一轮中间退出时这一轮的不记
+	defer func() { s.saveDailySkips(ctx, res.daySkips) }()
 	p.progress()
 	refreshed := false
 	for start := 0; start < len(hashes); start += iyuu.MaxBatch {
@@ -474,16 +501,16 @@ func (s *Service) handle(ctx context.Context, p *pass, found map[string][]iyuu.C
 			site, ok := bySID[c.SID]
 			switch {
 			case !ok:
-				res.skip(SkipNotSelected)
+				res.skipAt("", SkipNotSelected)
 				continue
 			case c.InfoHash == "" || present[c.InfoHash]:
-				res.skip(SkipExists)
+				res.skipAt(site, SkipExists)
 				continue
 			case s.tried(ctx, c.InfoHash, site):
-				res.skip(SkipTried)
+				res.skipAt(site, SkipTried)
 				continue
 			case p.today[site] >= p.limit:
-				res.skip(SkipDailyLimit)
+				res.skipAt(site, SkipDailyLimit)
 				continue
 			}
 			present[c.InfoHash] = true
@@ -622,6 +649,29 @@ func (s *Service) attempt(ctx context.Context, p *pass, src source, c iyuu.Candi
 	}
 	res.Created++
 	res.log.add(stepAdd, "%s：已建辅种任务（任务 %d）", label, job.ID)
+}
+
+// saveDailySkips 把这一轮按站点记的跳过个数加进今天的统计。
+func (s *Service) saveDailySkips(ctx context.Context, skips map[string]*models.ReseedDailySkip) {
+	if len(skips) == 0 {
+		return
+	}
+	day := iyuuDay(s.cfg.Now())
+	db := s.cfg.DB.WithContext(context.WithoutCancel(ctx))
+	for site, c := range skips {
+		row := models.ReseedDailySkip{Day: day, SiteName: site, Present: c.Present, Tried: c.Tried, DailyLimit: c.DailyLimit, NotSelected: c.NotSelected}
+		if err := db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "day"}, {Name: "site_name"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"present":      gorm.Expr("reseed_daily_skips.present + ?", c.Present),
+				"tried":        gorm.Expr("reseed_daily_skips.tried + ?", c.Tried),
+				"daily_limit":  gorm.Expr("reseed_daily_skips.daily_limit + ?", c.DailyLimit),
+				"not_selected": gorm.Expr("reseed_daily_skips.not_selected + ?", c.NotSelected),
+			}),
+		}).Create(&row).Error; err != nil {
+			s.cfg.Logger.Warnf("[辅种] 记录跳过的统计失败: %v", err)
+		}
+	}
 }
 
 // finishAttempt 写尝试的结局（只从 running 改一次）。

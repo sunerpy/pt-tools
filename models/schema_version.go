@@ -21,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 14
+const CurrentSchemaVersion = 15
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -171,6 +171,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     14,
 		Description: "torrent_infos, torrent_info_archives: backfill pushed_filter_rule_id from filter_rule_id for pushed rows",
 		Up:          sm.migrateV13ToV14,
+	})
+
+	// v14 -> v15: 升级前的辅种记录补上尝试行（统计面板与每站每天的名额按尝试行算）
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     15,
+		Description: "reseed_attempts: backfill one attempt per existing reseed_records row",
+		Up:          sm.migrateV14ToV15,
 	})
 }
 
@@ -811,6 +818,42 @@ func (sm *SchemaManager) migrateV13ToV14(db *gorm.DB) error {
 				WHERE is_pushed = 1 AND pushed_filter_rule_id IS NULL AND filter_rule_id IS NOT NULL`).Error; err != nil {
 				return fmt.Errorf("v13→v14: backfill %s.pushed_filter_rule_id: %w", table, err)
 			}
+		}
+		return nil
+	})
+}
+
+// migrateV14ToV15 给升级前的每条辅种记录补一行尝试（backfilled = 1，没有轮次，开始与结束时间取记录的更新时间）：
+// 统计面板按尝试行与任务结果算，每站每天的名额也按尝试行算，补上以后升级当天已经试过的个数不变。
+// 失败、站点已删除照抄；有任务的记为建成、任务编号照抄（任务还在时结果从任务表读）；任务已经清除、记录写着
+// 已辅种、已撤回、已取消的记为建成，任务结果按记录，完成时间取记录的更新时间（真正的完成时间已经不知道，近似）。
+// 整个回填在一个事务里，事务开头先查有没有回填行，有就什么都不做：执行器先提交 Up 再另写版本号，
+// 两步之间退出时下次会再跑一次 v15，回填全有或全无，所以有回填行就说明已经做完。
+func (sm *SchemaManager) migrateV14ToV15(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&ReseedRecord{}) || !db.Migrator().HasTable(&ReseedAttempt{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		var done int64
+		if err := tx.Model(&ReseedAttempt{}).Where("backfilled = ?", true).Count(&done).Error; err != nil {
+			return fmt.Errorf("v14→v15: check reseed_attempts: %w", err)
+		}
+		if done > 0 {
+			return nil
+		}
+		if err := tx.Exec(`INSERT INTO reseed_attempts
+			(run_id, started_at, finished_at, site_name, info_hash, torrent_id, name, downloader_id,
+			 outcome, message, job_id, job_state, job_finished_at, backfilled)
+			SELECT NULL, updated_at, updated_at, site_name, info_hash, torrent_id, name, downloader_id,
+				CASE state WHEN 'failed' THEN 'failed' WHEN 'gone' THEN 'gone' ELSE 'created' END,
+				CASE WHEN state IN ('failed', 'gone') THEN message ELSE '' END,
+				job_id,
+				CASE state WHEN 'done' THEN 'source_removed' WHEN 'rolled_back' THEN 'rolled_back'
+					WHEN 'canceled' THEN 'canceled' ELSE '' END,
+				CASE WHEN state IN ('done', 'rolled_back', 'canceled') THEN updated_at ELSE NULL END,
+				1
+			FROM reseed_records ORDER BY id`).Error; err != nil {
+			return fmt.Errorf("v14→v15: backfill reseed_attempts: %w", err)
 		}
 		return nil
 	})

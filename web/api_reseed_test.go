@@ -39,7 +39,7 @@ func newReseedServer(t *testing.T) (*Server, *http.ServeMux) {
 	srv.mgr.StopAll()
 	db := global.GlobalDB.DB
 	require.NoError(t, db.AutoMigrate(&models.TorrentTransferJob{}, &models.DownloaderPathMap{}, &models.TransferRule{},
-		&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{}))
+		&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{}, &models.ReseedDailySkip{}))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"sites": []map[string]any{
 			{"id": 1, "site": "hdsky", "nickname": "天空", "base_url": "hdsky.me"},
@@ -70,7 +70,7 @@ func TestReseedAPI_RequiresSession(t *testing.T) {
 	_, mux := newReseedServer(t)
 	for _, path := range []string{
 		"/api/reseed/settings", "/api/reseed/sites", "/api/reseed/run", "/api/reseed/records", "/api/reseed/jobs", "/api/reseed/runs", "/api/reseed/runs/1", "/api/reseed/sites/hdsky",
-		"/api/reseed/records/retry", "/api/reseed/records/delete", "/api/reseed/records/1/cancel",
+		"/api/reseed/records/retry", "/api/reseed/records/delete", "/api/reseed/records/1/cancel", "/api/reseed/stats",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
@@ -317,4 +317,26 @@ func TestReseedAPI_Records(t *testing.T) {
 	assert.JSONEq(t, `{"deleted":3,"active":0}`, w.Body.String())
 	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodGet, "/api/reseed/records/delete", "").Code)
 	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodPost, "/api/reseed/records", "").Code)
+}
+
+// 统计：默认最近 30 天；自定义范围；参数不对时 400。
+func TestReseedAPI_Stats(t *testing.T) {
+	_, mux := newReseedServer(t)
+	w := serveAuthed(mux, http.MethodGet, "/api/reseed/stats", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got reseed.Stats
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "day", got.Granularity)
+	assert.Len(t, got.Series, 30)
+
+	w = serveAuthed(mux, http.MethodGet, "/api/reseed/stats?granularity=month&from=2026-01-01&to=2026-03-31", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.True(t, got.Custom)
+	assert.Len(t, got.Series, 3)
+
+	for _, q := range []string{"?granularity=hour", "?periods=abc", "?periods=0", "?from=2026-01-01", "?granularity=day&from=2020-01-01&to=2026-01-01"} {
+		assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/reseed/stats"+q, "").Code, q)
+	}
+	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodPost, "/api/reseed/stats", "").Code)
 }

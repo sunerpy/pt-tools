@@ -276,6 +276,7 @@ func NewDBWithVersionAndHooks(
 		&ReseedRun{},
 		&ReseedAttempt{},
 		&ReseedIYUUDaily{},
+		&ReseedDailySkip{},
 		// CookieCloud 导入（M7）
 		&CookieCloudSetting{},
 		// 媒体识别（M9）

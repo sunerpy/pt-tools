@@ -3,6 +3,7 @@ import type {
   ReseedCurrentRun,
   ReseedIYUUCalls,
   ReseedIYUUEndpoint,
+  ReseedStatsCounts,
   ReseedRecord,
   ReseedRecordResult,
   ReseedRun,
@@ -203,7 +204,9 @@ export function reseedIYUUEndpoint(endpoint: string): string {
 }
 
 /** 一天里请求 IYUU 的一句话：「查询 3 次（600 个种子）· 报告站点 1 次」；没请求过时为空 */
-export function reseedIYUUCallsText(rows: ReseedIYUUCalls[]): string {
+export function reseedIYUUCallsText(
+  rows: Pick<ReseedIYUUCalls, "endpoint" | "calls" | "hashes" | "rate_limited" | "failed">[],
+): string {
   const order: ReseedIYUUEndpoint[] = ["query", "report", "sites"];
   return [...rows]
     .filter((r) => r.calls > 0)
@@ -218,4 +221,31 @@ export function reseedIYUUCallsText(rows: ReseedIYUUCalls[]): string {
       return text;
     })
     .join(" · ");
+}
+
+/** 失败（含撤回与任务失败） */
+export function reseedStatsFailed(c: ReseedStatsCounts): number {
+  return c.failed + c.rolled_back + c.job_failed;
+}
+
+/** 跳过的总数：下载以前就跳过的，加上「已有进行中的任务」 */
+export function reseedStatsSkipped(c: ReseedStatsCounts): number {
+  return c.skip_present + c.skip_tried + c.skip_daily_limit + c.skip_not_selected + c.active;
+}
+
+/** 「2026-10-30」→ 本地的那一天 */
+function localDay(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+/** 自定义范围按什么分段：62 天以内按天，一年以内按周，更长按月（服务端每种分段有段数上限） */
+export function reseedCustomGranularity(from: string, to: string): "day" | "week" | "month" {
+  const a = localDay(from);
+  const b = localDay(to);
+  if (!a || !b) return "day";
+  const days = Math.round((b.getTime() - a.getTime()) / 86400000) + 1;
+  if (days <= 62) return "day";
+  if (days <= 366) return "week";
+  return "month";
 }

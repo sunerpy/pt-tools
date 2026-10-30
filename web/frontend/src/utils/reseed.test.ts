@@ -9,8 +9,11 @@ import {
   reseedRecordMessage,
   reseedRecordResult,
   reseedRecordRetryable,
+  reseedCustomGranularity,
   reseedIYUUCallsText,
   reseedIYUUEndpoint,
+  reseedStatsFailed,
+  reseedStatsSkipped,
   reseedRunDuration,
   reseedRunProgress,
   reseedRunStatus,
@@ -167,5 +170,32 @@ describe("reseed utils", () => {
         { ...row, endpoint: "query", calls: 2, hashes: 400, failed: 1 },
       ]),
     ).toBe("查询 2 次（400 个种子，失败 1 次） · 站点列表 1 次");
+  });
+
+  it("sums stats and picks a granularity for custom ranges", () => {
+    const c = {
+      created: 0,
+      failed: 1,
+      gone: 0,
+      active: 2,
+      succeeded: 0,
+      rolled_back: 3,
+      job_failed: 4,
+      canceled: 9,
+      skip_present: 1,
+      skip_tried: 1,
+      skip_daily_limit: 1,
+      skip_not_selected: 1,
+      iyuu_calls: 0,
+      iyuu_rate_limited: 0,
+      iyuu_failed: 0,
+      iyuu_hashes: 0,
+    };
+    expect(reseedStatsFailed(c)).toBe(8);
+    expect(reseedStatsSkipped(c)).toBe(6);
+    expect(reseedCustomGranularity("2026-09-01", "2026-10-30")).toBe("day");
+    expect(reseedCustomGranularity("2026-01-01", "2026-10-30")).toBe("week");
+    expect(reseedCustomGranularity("2024-01-01", "2026-10-30")).toBe("month");
+    expect(reseedCustomGranularity("x", "2026-10-30")).toBe("day");
   });
 });

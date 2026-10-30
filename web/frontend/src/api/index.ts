@@ -2704,6 +2704,74 @@ export interface ReseedIYUULimit {
   until: string;
 }
 
+/** 一段时间里的辅种计数：尝试按开始的那一天，任务结果按完成的那一天，跳过与 IYUU 请求按天 */
+export interface ReseedStatsCounts {
+  /** 建成的辅种任务 */
+  created: number;
+  /** 下载或核对没通过 */
+  failed: number;
+  /** 站点上已经删了 */
+  gone: number;
+  /** 已有进行中的任务（下载、核对以后才发现，算跳过） */
+  active: number;
+  /** 校验通过、开始做种 */
+  succeeded: number;
+  rolled_back: number;
+  job_failed: number;
+  canceled: number;
+  skip_present: number;
+  skip_tried: number;
+  skip_daily_limit: number;
+  skip_not_selected: number;
+  iyuu_calls: number;
+  iyuu_rate_limited: number;
+  iyuu_failed: number;
+  iyuu_hashes: number;
+}
+
+export interface ReseedStatsPoint extends ReseedStatsCounts {
+  /** 这一段的第一天与最后一天（自定义范围时裁到范围以内） */
+  date: string;
+  end: string;
+}
+
+/** 一个站点在范围内的合计；site_name 为空的是不在辅种范围的 IYUU 站点 */
+export interface ReseedStatsSite extends ReseedStatsCounts {
+  site_name: string;
+}
+
+export interface ReseedStatsIYUU {
+  endpoint: ReseedIYUUEndpoint;
+  calls: number;
+  ok: number;
+  rate_limited: number;
+  failed: number;
+  hashes: number;
+}
+
+export interface ReseedStats {
+  granularity: "day" | "week" | "month" | "quarter" | "year";
+  custom: boolean;
+  from: string;
+  to: string;
+  series: ReseedStatsPoint[];
+  totals: ReseedStatsCounts;
+  sites: ReseedStatsSite[];
+  iyuu: ReseedStatsIYUU[];
+  /** 最近一次请求 IYUU 的时间（不限范围） */
+  last_iyuu_at?: string;
+  /** 最早有数据的那天 */
+  first_day?: string;
+}
+
+/** 统计的范围：最近 periods 段，或者自定义的 from、to（YYYY-MM-DD，含两头） */
+export interface ReseedStatsQuery {
+  granularity: string;
+  periods?: number;
+  from?: string;
+  to?: string;
+}
+
 export type ReseedRunTrigger = "schedule" | "manual" | "retry" | "continue";
 
 export type ReseedRunStatus =
@@ -3918,6 +3986,13 @@ export const reseedApi = {
   /** 删除记录；任务还没结束的不删（active 是没删的条数） */
   deleteRecords: (ids: number[]) =>
     api.post<{ deleted: number; active: number }>("/api/reseed/records/delete", { ids }),
+  stats: (q: ReseedStatsQuery) => {
+    const params = new URLSearchParams({ granularity: q.granularity });
+    if (q.periods) params.set("periods", String(q.periods));
+    if (q.from) params.set("from", q.from);
+    if (q.to) params.set("to", q.to);
+    return api.get<ReseedStats>(`/api/reseed/stats?${params}`);
+  },
   /** 取消记录对应的、还在等待加入下载器的任务 */
   cancelRecord: (id: number) => api.post<{ ok: boolean }>(`/api/reseed/records/${id}/cancel`, {}),
   jobs: (status: "" | "active" | "finished" = "") =>

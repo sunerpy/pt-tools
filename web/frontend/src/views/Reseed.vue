@@ -17,6 +17,7 @@ import {
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import ReseedRunDrawer from "@/components/reseed/ReseedRunDrawer.vue";
+import ReseedStats from "@/components/reseed/ReseedStats.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -46,8 +47,9 @@ import {
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-type Tab = "settings" | "sites" | "runs" | "records";
+type Tab = "stats" | "settings" | "sites" | "runs" | "records";
 const TABS: { label: string; value: Tab }[] = [
+  { label: "统计", value: "stats" },
   { label: "设置", value: "settings" },
   { label: "站点", value: "sites" },
   { label: "轮次", value: "runs" },
@@ -61,6 +63,8 @@ const REFRESH_MS = 5000;
 
 const isMobile = useIsMobile();
 const tab = ref<Tab>("settings");
+/** 用户自己点过标签：读到设置以后不再替他换到「统计」 */
+const tabPicked = ref(false);
 const downloaders = ref<DownloaderSetting[]>([]);
 
 // ---- 设置 ----
@@ -112,6 +116,7 @@ const runsLoaded = ref(false);
 /** 抽屉里看的那一轮 */
 const drawerRun = ref<number | null>(null);
 const runDrawer = ref<InstanceType<typeof ReseedRunDrawer> | null>(null);
+const statsView = ref<InstanceType<typeof ReseedStats> | null>(null);
 /** 正在跑（或暂停中）的那一轮 */
 const current = computed(() => settings.value?.current_run ?? null);
 /** 正在暂停、继续或停止 */
@@ -456,6 +461,7 @@ async function continueRun(id: number) {
 function refresh() {
   void loadSettings();
   void loadDownloaders();
+  if (tab.value === "stats") void statsView.value?.reload();
   if (tab.value === "sites") void loadSites();
   if (tab.value === "records") void loadRecords();
   if (tab.value === "runs") void loadRuns();
@@ -467,17 +473,20 @@ watch(tab, (t) => {
   if (t === "runs") void loadRuns();
 });
 watch(busy, () => scheduleRefresh());
-/* 一轮结束（或开始）时刷新轮次列表与抽屉 */
+/* 一轮结束（或开始）时刷新轮次列表、抽屉与统计 */
 watch(
   () => current.value?.id,
   () => {
     if (tab.value === "runs") void loadRuns();
     void runDrawer.value?.reload();
+    void statsView.value?.reload();
   },
 );
 
 onMounted(async () => {
   await Promise.all([loadSettings(), loadDownloaders()]);
+  // 填了 token 以后先看统计；还没填时先看设置
+  if (settings.value?.has_token && !tabPicked.value) tab.value = "stats";
   void loadRecords();
   if (settings.value?.has_token) void loadSites();
 });
@@ -534,7 +543,8 @@ onBeforeUnmount(() => {
         class="pt-seg"
         :options="TABS"
         :props="{ label: 'label', value: 'value' }"
-        data-testid="rs-tabs" />
+        data-testid="rs-tabs"
+        @change="tabPicked = true" />
       <template v-if="current" #note>
         <span data-testid="rs-progress"
           >{{ current.status === "paused" ? "已暂停" : "正在运行" }}：{{
@@ -545,8 +555,11 @@ onBeforeUnmount(() => {
       <template v-else-if="settings?.running && !isMobile" #note>正在运行</template>
     </PtToolbar>
 
+    <!-- 统计 -->
+    <ReseedStats v-if="tab === 'stats'" ref="statsView" :settings="settings" />
+
     <!-- 设置 -->
-    <PtPanel v-if="tab === 'settings'" title="辅种设置" icon="share-2">
+    <PtPanel v-else-if="tab === 'settings'" title="辅种设置" icon="share-2">
       <div v-if="loadFailed" class="pt-note pt-note--warn">
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
         <span>设置没读到，点刷新重试。</span>

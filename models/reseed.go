@@ -127,6 +127,23 @@ type ReseedIYUUDaily struct {
 // TableName 指定表名。
 func (ReseedIYUUDaily) TableName() string { return "reseed_iyuu_daily" }
 
+// ReseedDailySkip 是每天每个站点在下载以前就跳过的个数（按原因）。每一轮都会重新查一遍，同一个种子在每一轮都算一次。
+// SiteName 为空串的是 IYUU 那边、不在辅种范围的站点。Day 是进程时区的 YYYY-MM-DD；一轮按站点累计，结束时写一次。
+// 「已有进行中的任务」与「站点已删除」是下载以后才知道的，记在尝试行里，不在这里。
+type ReseedDailySkip struct {
+	ID       uint   `gorm:"primaryKey" json:"-"`
+	Day      string `gorm:"size:10;not null;uniqueIndex:idx_reseed_skip_day_site" json:"day"`
+	SiteName string `gorm:"size:64;not null;default:'';uniqueIndex:idx_reseed_skip_day_site" json:"site_name"`
+	// Present 是下载器里已经有，Tried 是已经尝试过，DailyLimit 是今天这个站点已经加满，NotSelected 是站点不在辅种范围
+	Present     int `gorm:"not null;default:0" json:"present"`
+	Tried       int `gorm:"not null;default:0" json:"tried"`
+	DailyLimit  int `gorm:"not null;default:0" json:"daily_limit"`
+	NotSelected int `gorm:"not null;default:0" json:"not_selected"`
+}
+
+// TableName 指定表名。
+func (ReseedDailySkip) TableName() string { return "reseed_daily_skips" }
+
 // 辅种记录的结果。
 const (
 	// ReseedQueued 是已经建成辅种任务，结果看任务的状态。

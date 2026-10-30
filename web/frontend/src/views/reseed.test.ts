@@ -25,6 +25,7 @@ const api = vi.hoisted(() => ({
   retryRecords: vi.fn(),
   deleteRecords: vi.fn(),
   cancelRecord: vi.fn(),
+  stats: vi.fn(),
   jobs: vi.fn(),
   clearFinished: vi.fn(),
 }));
@@ -88,6 +89,42 @@ const testid = (id: string) => {
   return el;
 };
 
+function counts(extra: Record<string, number> = {}) {
+  return {
+    created: 0,
+    failed: 0,
+    gone: 0,
+    active: 0,
+    succeeded: 0,
+    rolled_back: 0,
+    job_failed: 0,
+    canceled: 0,
+    skip_present: 0,
+    skip_tried: 0,
+    skip_daily_limit: 0,
+    skip_not_selected: 0,
+    iyuu_calls: 0,
+    iyuu_rate_limited: 0,
+    iyuu_failed: 0,
+    iyuu_hashes: 0,
+    ...extra,
+  };
+}
+
+function emptyStats(extra: Record<string, unknown> = {}) {
+  return {
+    granularity: "day",
+    custom: false,
+    from: "2026-10-01",
+    to: "2026-10-30",
+    series: [{ date: "2026-10-30", end: "2026-10-30", ...counts() }],
+    totals: counts(),
+    sites: [],
+    iyuu: [],
+    ...extra,
+  };
+}
+
 function settings(extra: Record<string, unknown> = {}) {
   return {
     enabled: false,
@@ -110,6 +147,7 @@ async function mountPage(s = settings()) {
   api.settings.mockResolvedValue(s);
   api.records.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, sites: [] });
   api.runs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
+  api.stats.mockResolvedValue(emptyStats());
   api.sites.mockResolvedValue({
     items: [
       {
@@ -227,6 +265,7 @@ describe("IYUU 辅种", () => {
 
   it("已有 token：不填就不带 token；清除要确认并关闭辅种", async () => {
     await mountPage(settings({ has_token: true, enabled: true }));
+    await chooseTab("设置");
     expect((testid("rs-run") as HTMLButtonElement).disabled).toBe(false);
     api.saveSettings.mockResolvedValue(settings({ has_token: true, enabled: true }));
     testid("rs-save").click();
@@ -276,6 +315,7 @@ describe("IYUU 辅种", () => {
 
   it("设置里不再保存站点名单（站点在「站点」页用开关改）", async () => {
     await mountPage(settings({ has_token: true, site_mode: "selected", site_names: ["hdsky"] }));
+    await chooseTab("设置");
     expect(document.querySelector("[data-testid=rs-sites]")).toBeNull();
     api.saveSettings.mockResolvedValue(settings({ has_token: true }));
     testid("rs-save").click();
@@ -291,6 +331,7 @@ describe("IYUU 辅种", () => {
         last_result: "查询 3 个种子，找到 1 个可辅种，加入 1 个",
       }),
     );
+    await chooseTab("设置");
     expect(document.body.textContent).toContain("查询 3 个种子");
     api.records.mockResolvedValue({
       items: [
@@ -349,6 +390,7 @@ describe("IYUU 辅种", () => {
         next_run_at: "2026-10-15T22:00:00Z",
       }),
     );
+    await chooseTab("设置");
     expect(testid("rs-token-tip").querySelector("a")!.getAttribute("href")).toBe(
       "https://iyuu.cn/",
     );
@@ -359,6 +401,7 @@ describe("IYUU 辅种", () => {
 
   it("有 token、没开启：写明只能立即运行", async () => {
     await mountPage(settings({ has_token: true }));
+    await chooseTab("设置");
     expect(testid("rs-status").textContent).toContain("没开启：只能「立即运行」");
     expect(testid("rs-status").textContent).toContain("还没运行过");
   });
@@ -678,6 +721,7 @@ describe("IYUU 请求", () => {
         },
       }),
     );
+    await chooseTab("设置");
     const status = testid("rs-iyuu-status").textContent ?? "";
     expect(status).toContain("查询 3 次（600 个种子，限流 1 次） · 站点列表 1 次");
     expect(testid("rs-iyuu-cooldown").textContent).toContain("以前不请求");
@@ -693,7 +737,97 @@ describe("IYUU 请求", () => {
 
   it("没请求过时写明", async () => {
     await mountPage(settings({ has_token: true }));
+    await chooseTab("设置");
     expect(testid("rs-iyuu-status").textContent).toContain("还没有请求 IYUU");
     expect(document.querySelector("[data-testid=rs-iyuu-cooldown]")).toBeNull();
+  });
+});
+
+describe("辅种统计", () => {
+  it("有 token 时先看统计：KPI、按段的成功数与明细、按站点、跳过的原因与 IYUU 请求", async () => {
+    await mountPage(settings({ has_token: true }));
+    api.stats.mockResolvedValue(
+      emptyStats({
+        series: [
+          {
+            date: "2026-10-29",
+            end: "2026-10-29",
+            ...counts({ created: 2, succeeded: 1, skip_present: 3 }),
+          },
+          {
+            date: "2026-10-30",
+            end: "2026-10-30",
+            ...counts({
+              created: 1,
+              succeeded: 2,
+              failed: 1,
+              rolled_back: 1,
+              gone: 1,
+              iyuu_calls: 4,
+            }),
+          },
+        ],
+        totals: counts({
+          created: 3,
+          succeeded: 3,
+          failed: 1,
+          rolled_back: 1,
+          gone: 1,
+          skip_present: 3,
+          active: 1,
+          iyuu_calls: 4,
+          iyuu_rate_limited: 1,
+        }),
+        sites: [
+          { site_name: "hdsky", ...counts({ created: 3, succeeded: 3, failed: 1 }) },
+          { site_name: "", ...counts({ skip_not_selected: 2 }) },
+        ],
+        iyuu: [{ endpoint: "query", calls: 4, ok: 3, rate_limited: 1, failed: 0, hashes: 800 }],
+        last_iyuu_at: "2026-10-30T09:00:00Z",
+        first_day: "2026-10-01",
+      }),
+    );
+    testid("rs-refresh").click();
+    await vi.waitFor(() => expect(testid("rs-stats-kpi").textContent).toContain("撤回 1"));
+    expect(api.stats).toHaveBeenCalledWith({ granularity: "day", periods: 30 });
+    const kpi = testid("rs-stats-kpi").textContent ?? "";
+    expect(kpi).toContain("撤回 1");
+    expect(kpi).toContain("限流 1");
+    expect(testid("brush-trend-readout").textContent).toContain("成功 2 个");
+    expect(testid("brush-trend-readout").textContent).toContain("失败 2");
+    expect(testid("rs-stats-sites").textContent).toContain("不在辅种范围的站点");
+    expect(testid("rs-stats-skips").textContent).toContain("下载器里已经有");
+    expect(testid("rs-stats-iyuu").textContent).toContain("查询 4 次（800 个种子，限流 1 次）");
+    expect(testid("rs-stats-trend").textContent).toContain("最早的数据是 2026-10-01");
+
+    testid("rs-stats-detail-toggle").click();
+    await vi.waitFor(() => expect(testid("rs-stats-table").textContent).toContain("10月30日"));
+
+    // 换成按周
+    api.stats.mockClear();
+    const week = [
+      ...document.querySelectorAll<HTMLElement>("[data-testid=rs-stats-range] .el-segmented__item"),
+    ].find((el) => (el.textContent ?? "").trim() === "周")!;
+    week.click();
+    await vi.waitFor(() =>
+      expect(api.stats).toHaveBeenCalledWith({ granularity: "week", periods: 12 }),
+    );
+
+    // 自定义：先选日期
+    const custom = [
+      ...document.querySelectorAll<HTMLElement>("[data-testid=rs-stats-range] .el-segmented__item"),
+    ].find((el) => (el.textContent ?? "").trim() === "自定义")!;
+    custom.click();
+    await vi.waitFor(() => expect(document.querySelector(".rst-dates")).not.toBeNull());
+  });
+
+  it("没有数据时写明；没有 token 时先看设置", async () => {
+    await mountPage(settings({ has_token: true }));
+    await vi.waitFor(() => expect(testid("rs-stats-trend").textContent).toContain("还没有辅种"));
+    view?.unmount();
+    view = null;
+    await mountPage();
+    expect(document.querySelector("[data-testid=rs-stats]")).toBeNull();
+    expect(document.querySelector("[data-testid=rs-save]")).not.toBeNull();
   });
 });
