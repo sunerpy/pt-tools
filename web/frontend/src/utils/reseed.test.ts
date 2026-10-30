@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   applySiteSelection,
+  reseedAttemptResult,
   reseedRecordActive,
   reseedRecordMessage,
   reseedRecordResult,
+  reseedRunDuration,
+  reseedRunProgress,
+  reseedRunStatus,
+  reseedRunTrigger,
   reseedSiteStatus,
+  reseedStepKind,
 } from "./reseed";
 
 describe("reseed utils", () => {
@@ -76,5 +82,53 @@ describe("reseed utils", () => {
     expect(
       reseedSiteStatus({ ...base, site_name: "hdsky", configured: true, selected: true }).tone,
     ).toBe("ok");
+  });
+
+  it("describes runs and attempts", () => {
+    expect(reseedRunStatus("limited")).toEqual({ label: "提前停下", tone: "warn" });
+    expect(reseedRunStatus("paused").label).toBe("已暂停");
+    expect(reseedRunStatus("weird").label).toBe("weird");
+    expect(reseedRunTrigger("continue")).toBe("继续");
+    expect(reseedRunTrigger("retry")).toBe("重试");
+    expect(reseedStepKind("query")).toBe("查询");
+    // 用时不含暂停的时间；没跑完的（被打断）不写
+    expect(
+      reseedRunDuration({
+        started_at: "2026-10-30T10:00:00Z",
+        finished_at: "2026-10-30T10:05:00Z",
+        status: "ok",
+        paused_seconds: 60,
+      }),
+    ).toBe("4 分");
+    expect(
+      reseedRunDuration({
+        started_at: "2026-10-30T10:00:00Z",
+        finished_at: "2026-10-30T10:05:00Z",
+        status: "interrupted",
+        paused_seconds: 0,
+      }),
+    ).toBe("");
+    const cur = {
+      id: 1,
+      trigger: "manual" as const,
+      status: "running" as const,
+      started_at: "",
+      hashes: 10,
+      batches: 3,
+      batches_done: 3,
+      candidates: 2,
+      created: 1,
+      failed: 1,
+      gone: 0,
+      skipped: 0,
+    };
+    expect(reseedRunProgress(cur)).toBe("第 3/3 批 · 加入 1 · 失败 1");
+    expect(reseedRunProgress({ ...cur, trigger: "retry", batches: 0 })).toBe(
+      "重试 10 条 · 加入 1 · 失败 1",
+    );
+    expect(reseedAttemptResult({ outcome: "active" }).label).toBe("已有任务");
+    expect(reseedAttemptResult({ outcome: "created", job_state: "checking" }).label).toBe("校验中");
+    expect(reseedAttemptResult({ outcome: "created", job_missing: true }).label).toBe("任务已删除");
+    expect(reseedAttemptResult({ outcome: "created" }).label).toBe("已建任务");
   });
 });

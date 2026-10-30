@@ -8,12 +8,14 @@ import {
   type DownloaderSetting,
   downloadersApi,
   type ReseedRecord,
+  type ReseedRun,
   type ReseedSettings,
   type ReseedSiteMapItem,
   type ReseedSiteSelection,
   reseedApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import ReseedRunDrawer from "@/components/reseed/ReseedRunDrawer.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -28,17 +30,24 @@ import {
   reseedRecordActive,
   reseedRecordMessage,
   reseedRecordResult,
+  reseedRunDuration,
+  reseedRunProgress,
+  reseedRunStatus,
+  reseedRunTrigger,
   reseedSiteStatus,
 } from "@/utils/reseed";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-type Tab = "settings" | "sites" | "records";
+type Tab = "settings" | "sites" | "runs" | "records";
 const TABS: { label: string; value: Tab }[] = [
   { label: "设置", value: "settings" },
   { label: "站点", value: "sites" },
+  { label: "轮次", value: "runs" },
   { label: "记录", value: "records" },
 ];
+/** 轮次列表每页几条 */
+const RUNS_PAGE = 20;
 /** 正在运行或有任务没结束时多久刷新一次 */
 const REFRESH_MS = 5000;
 
@@ -72,9 +81,28 @@ const recordsDS = useDataState();
 const records = ref<ReseedRecord[]>([]);
 const recordsLoaded = ref(false);
 
+// ---- 轮次 ----
+const runsDS = useDataState();
+const runs = ref<ReseedRun[]>([]);
+const runsTotal = ref(0);
+const runsPage = ref(1);
+const runsLoaded = ref(false);
+/** 抽屉里看的那一轮 */
+const drawerRun = ref<number | null>(null);
+const runDrawer = ref<InstanceType<typeof ReseedRunDrawer> | null>(null);
+/** 正在跑（或暂停中）的那一轮 */
+const current = computed(() => settings.value?.current_run ?? null);
+/** 正在暂停、继续或停止 */
+const controlling = ref(false);
+const stopDialog = ref(false);
+const stopCancelPending = ref(false);
+
 let timer: ReturnType<typeof setInterval> | undefined;
 const busy = computed(
-  () => Boolean(settings.value?.running) || records.value.some((r) => reseedRecordActive(r)),
+  () =>
+    Boolean(settings.value?.running) ||
+    Boolean(current.value) ||
+    records.value.some((r) => reseedRecordActive(r)),
 );
 
 const headSub = computed(() => {
@@ -83,8 +111,10 @@ const headSub = computed(() => {
   return "用 IYUU 找出其他站点上数据相同的种子，暂停加入同一台下载器，校验到 100% 才开始做种";
 });
 
-function fill(s: ReseedSettings) {
+/** resetForm 为 false 时只更新运行情况（轮询时不能把正在填的表单改回去） */
+function fill(s: ReseedSettings, resetForm = true) {
   settings.value = s;
+  if (!resetForm) return;
   form.value = {
     enabled: s.enabled,
     token: "",
@@ -94,10 +124,10 @@ function fill(s: ReseedSettings) {
   };
 }
 
-async function loadSettings() {
+async function loadSettings(resetForm = true) {
   try {
     const s = await reseedApi.settings();
-    if (s) fill(s);
+    if (s) fill(s, resetForm);
     loadFailed.value = false;
   } catch {
     loadFailed.value = true;
@@ -133,13 +163,26 @@ async function loadRecords() {
   }
 }
 
+async function loadRuns(page = runsPage.value) {
+  const pending = runsDS.run(() => reseedApi.runs(page, RUNS_PAGE));
+  const data = await pending;
+  if (runsDS.isStale(pending)) return;
+  if (data) {
+    runs.value = data.items ?? [];
+    runsTotal.value = data.total ?? 0;
+    runsPage.value = page;
+    runsLoaded.value = true;
+  }
+}
+
 /** 正在运行或有任务没结束时每 5 秒刷新；都停了就不刷 */
 function scheduleRefresh() {
   if (busy.value) {
     if (!timer)
       timer = setInterval(() => {
-        void loadSettings();
+        void loadSettings(false);
         void loadRecords();
+        if (tab.value === "runs") void loadRuns();
       }, REFRESH_MS);
   } else if (timer) {
     clearInterval(timer);
@@ -212,8 +255,8 @@ async function runNow() {
   starting.value = true;
   try {
     await reseedApi.run();
-    ElMessage.success("已开始，这一轮的结果会写在「上次运行」里");
-    await loadSettings();
+    ElMessage.success("已开始，进度在页头，结果写在「轮次」里");
+    await loadSettings(false);
     scheduleRefresh();
   } catch (e) {
     ElMessage.error((e as Error).message || "运行失败");
@@ -222,18 +265,84 @@ async function runNow() {
   }
 }
 
+/** 暂停或继续正在跑的那一轮 */
+async function togglePause() {
+  const cur = current.value;
+  if (!cur) return;
+  controlling.value = true;
+  try {
+    if (cur.status === "paused") {
+      await reseedApi.resumeRun(cur.id);
+      ElMessage.success("已继续");
+    } else {
+      await reseedApi.pauseRun(cur.id);
+      ElMessage.success("已暂停：正在下载的那一个做完以后停下");
+    }
+  } catch (e) {
+    ElMessage.error((e as Error).message || "操作失败");
+  } finally {
+    controlling.value = false;
+    await loadSettings(false);
+  }
+}
+
+function askStop() {
+  stopCancelPending.value = false;
+  stopDialog.value = true;
+}
+
+async function confirmStop() {
+  const cur = current.value;
+  stopDialog.value = false;
+  if (!cur) return;
+  controlling.value = true;
+  try {
+    await reseedApi.stopRun(cur.id, stopCancelPending.value);
+    ElMessage.success("已停止；没查完的部分可以在「轮次」里继续");
+  } catch (e) {
+    ElMessage.error((e as Error).message || "停止失败");
+  } finally {
+    controlling.value = false;
+    await loadSettings(false);
+  }
+}
+
+/** 接着一轮提前停下的往下查 */
+async function continueRun(id: number) {
+  try {
+    await reseedApi.continueRun(id);
+    ElMessage.success("已开始，接着这一轮没查完的部分往下查");
+    drawerRun.value = null;
+    await loadSettings(false);
+    void loadRuns(1);
+    scheduleRefresh();
+  } catch (e) {
+    ElMessage.error((e as Error).message || "继续失败");
+  }
+}
+
 function refresh() {
   void loadSettings();
   void loadDownloaders();
   if (tab.value === "sites") void loadSites();
   if (tab.value === "records") void loadRecords();
+  if (tab.value === "runs") void loadRuns();
 }
 
 watch(tab, (t) => {
   if (t === "sites" && !sitesLoaded.value) void loadSites();
   if (t === "records") void loadRecords();
+  if (t === "runs") void loadRuns();
 });
 watch(busy, () => scheduleRefresh());
+/* 一轮结束（或开始）时刷新轮次列表与抽屉 */
+watch(
+  () => current.value?.id,
+  () => {
+    if (tab.value === "runs") void loadRuns();
+    void runDrawer.value?.reload();
+  },
+);
 
 onMounted(async () => {
   await Promise.all([loadSettings(), loadDownloaders()]);
@@ -252,7 +361,23 @@ onBeforeUnmount(() => {
       <el-button data-testid="rs-refresh" @click="refresh">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
+      <template v-if="current">
+        <el-button
+          :type="current.status === 'paused' ? 'primary' : 'default'"
+          :loading="controlling"
+          :data-testid="current.status === 'paused' ? 'rs-resume' : 'rs-pause'"
+          @click="togglePause">
+          <PtIcon
+            v-if="!controlling"
+            :name="current.status === 'paused' ? 'play' : 'pause'"
+            :size="15" /><span>{{ current.status === "paused" ? "继续" : "暂停" }}</span>
+        </el-button>
+        <el-button :disabled="controlling" data-testid="rs-stop" @click="askStop">
+          <PtIcon name="square" :size="15" /><span>停止</span>
+        </el-button>
+      </template>
       <el-button
+        v-else
         type="primary"
         :loading="starting"
         :disabled="!settings?.has_token || settings?.running"
@@ -278,7 +403,14 @@ onBeforeUnmount(() => {
         :options="TABS"
         :props="{ label: 'label', value: 'value' }"
         data-testid="rs-tabs" />
-      <template v-if="settings?.running && !isMobile" #note>正在运行</template>
+      <template v-if="current" #note>
+        <span data-testid="rs-progress"
+          >{{ current.status === "paused" ? "已暂停" : "正在运行" }}：{{
+            reseedRunProgress(current)
+          }}</span
+        >
+      </template>
+      <template v-else-if="settings?.running && !isMobile" #note>正在运行</template>
     </PtToolbar>
 
     <!-- 设置 -->
@@ -493,6 +625,108 @@ onBeforeUnmount(() => {
       </div>
     </PtPanel>
 
+    <!-- 轮次 -->
+    <PtPanel
+      v-else-if="tab === 'runs'"
+      title="辅种轮次"
+      icon="history"
+      :count="runsLoaded ? runsTotal : undefined">
+      <div
+        v-if="runs.length && runsDS.error.value"
+        class="pt-note pt-note--warn"
+        data-testid="rs-runs-stale">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>刷新失败：{{ runsDS.errorText.value }}。下面是上次读到的。</span>
+      </div>
+      <PtDataState
+        v-if="!runs.length"
+        :state="runsDS.state.value"
+        :title="runsDS.error.value ? '' : '还没有轮次'"
+        :sub="
+          runsDS.errorText.value || '每一轮（定时、立即运行、继续或重试）记一条，保留 180 天'
+        " />
+      <el-table
+        v-else-if="!isMobile"
+        :data="runs"
+        class="pt-grid"
+        row-key="id"
+        data-testid="rs-runs"
+        @row-click="(row: ReseedRun) => (drawerRun = row.id)">
+        <el-table-column label="开始" width="130">
+          <template #default="{ row }">{{ formatShortDateTime(row.started_at) }}</template>
+        </el-table-column>
+        <el-table-column label="方式" width="90">
+          <template #default="{ row }">{{ reseedRunTrigger(row.trigger) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <PtStatusPill :tone="reseedRunStatus(row.status).tone" size="sm">{{
+              reseedRunStatus(row.status).label
+            }}</PtStatusPill>
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="结果"
+          min-width="260"
+          class-name="pt-cell-1line"
+          show-overflow-tooltip>
+          <template #default="{ row }">{{ row.summary || row.error || "—" }}</template>
+        </el-table-column>
+        <el-table-column label="用时" width="100">
+          <template #default="{ row }">{{ reseedRunDuration(row) || "—" }}</template>
+        </el-table-column>
+        <el-table-column label="" width="120" align="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.continuable && !current"
+              link
+              type="primary"
+              :data-testid="`rs-run-continue-${row.id}`"
+              @click.stop="continueRun(row.id)"
+              >继续</el-button
+            >
+            <el-button link :data-testid="`rs-run-open-${row.id}`" @click.stop="drawerRun = row.id"
+              >详情</el-button
+            >
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-else class="rs-cards">
+        <PtRowCard v-for="r in runs" :key="r.id" interactive @click="drawerRun = r.id">
+          <template #title>{{ r.summary || r.error || "—" }}</template>
+          <template #meta>
+            <span
+              >{{ formatShortDateTime(r.started_at) }} · {{ reseedRunTrigger(r.trigger)
+              }}<template v-if="reseedRunDuration(r)"> · {{ reseedRunDuration(r) }}</template></span
+            >
+          </template>
+          <template #status>
+            <PtStatusPill :tone="reseedRunStatus(r.status).tone" size="sm">{{
+              reseedRunStatus(r.status).label
+            }}</PtStatusPill>
+          </template>
+          <template #actions>
+            <el-button
+              v-if="r.continuable && !current"
+              size="small"
+              type="primary"
+              @click.stop="continueRun(r.id)"
+              >继续</el-button
+            >
+            <el-button size="small" @click.stop="drawerRun = r.id">详情</el-button>
+          </template>
+        </PtRowCard>
+      </div>
+      <el-pagination
+        v-if="runsTotal > RUNS_PAGE"
+        class="rs-pager"
+        layout="prev, pager, next"
+        :total="runsTotal"
+        :page-size="RUNS_PAGE"
+        :current-page="runsPage"
+        @current-change="(p: number) => loadRuns(p)" />
+    </PtPanel>
+
     <!-- 记录 -->
     <PtPanel
       v-else
@@ -559,6 +793,25 @@ onBeforeUnmount(() => {
         </PtRowCard>
       </div>
     </PtPanel>
+
+    <el-dialog v-model="stopDialog" title="停止这一轮" width="440px" append-to-body>
+      <p class="rs-dialog-text">
+        正在下载的那一个会被打断（不记失败，以后照常再试）。已经建好的辅种任务照常加入和校验；没查完的部分可以在「轮次」里继续。
+      </p>
+      <el-checkbox v-model="stopCancelPending" data-testid="rs-stop-cancel-pending"
+        >同时取消这一轮建的、还没加入下载器的任务</el-checkbox
+      >
+      <template #footer>
+        <el-button @click="stopDialog = false">取消</el-button>
+        <el-button type="danger" data-testid="rs-stop-confirm" @click="confirmStop">停止</el-button>
+      </template>
+    </el-dialog>
+
+    <ReseedRunDrawer
+      ref="runDrawer"
+      :run-id="drawerRun"
+      @close="drawerRun = null"
+      @continue="continueRun" />
   </div>
 </template>
 
@@ -573,6 +826,18 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 0 16px;
+}
+
+.rs-pager {
+  justify-content: flex-end;
+  margin-top: var(--pt-space-3);
+}
+
+.rs-dialog-text {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--pt-t2);
 }
 
 .rs-sites-tip {

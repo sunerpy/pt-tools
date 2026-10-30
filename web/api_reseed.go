@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,14 +27,22 @@ func (s *Server) registerReseedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/reseed/sites", s.auth(s.apiReseedSites))
 	mux.HandleFunc("/api/reseed/sites/", s.auth(s.apiReseedSite))
 	mux.HandleFunc("/api/reseed/run", s.auth(s.apiReseedRun))
+	mux.HandleFunc("/api/reseed/runs", s.auth(s.apiReseedRuns))
+	mux.HandleFunc("/api/reseed/runs/", s.auth(s.apiReseedRunDetail))
 	mux.HandleFunc("/api/reseed/records", s.auth(s.apiReseedRecords))
 	mux.HandleFunc("/api/reseed/jobs", s.auth(s.apiReseedJobs))
 }
 
-// ReseedSettingsView 是设置加上「是否正在运行」。
+// ReseedSettingsView 是设置加上「是否正在运行」与正在跑的那一轮。
 type ReseedSettingsView struct {
 	reseed.Settings
-	Running bool `json:"running"`
+	Running    bool                        `json:"running"`
+	CurrentRun *scheduler.ReseedCurrentRun `json:"current_run,omitempty"`
+}
+
+func reseedSettingsView(worker *scheduler.ReseedWorker, got reseed.Settings) ReseedSettingsView {
+	cur := worker.Current()
+	return ReseedSettingsView{Settings: got, Running: worker.Running() || cur != nil, CurrentRun: cur}
 }
 
 func (s *Server) reseedWorker(w http.ResponseWriter) (*scheduler.ReseedWorker, *reseed.Service, bool) {
@@ -55,8 +64,11 @@ func writeReseedError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, reseed.ErrInvalid), errors.Is(err, iyuu.ErrNoToken), errors.Is(err, reseed.ErrNoSites):
 		status = http.StatusBadRequest
-	case errors.Is(err, scheduler.ErrReseedBusy):
+	case errors.Is(err, scheduler.ErrReseedBusy), errors.Is(err, scheduler.ErrReseedNotCurrent),
+		errors.Is(err, reseed.ErrNotContinuable):
 		status = http.StatusConflict
+	case errors.Is(err, reseed.ErrRunNotFound):
+		status = http.StatusNotFound
 	case errors.As(err, &rl):
 		status = http.StatusTooManyRequests
 	case errors.As(err, &apiErr):
@@ -96,7 +108,7 @@ func (s *Server) apiReseedSettings(w http.ResponseWriter, r *http.Request) {
 			writeReseedError(w, err)
 			return
 		}
-		writeJSON(w, ReseedSettingsView{Settings: got, Running: worker.Running()})
+		writeJSON(w, reseedSettingsView(worker, got))
 	case http.MethodPut:
 		var req reseed.SettingsUpdate
 		if !decodeStrictBody(w, r, &req) {
@@ -107,7 +119,7 @@ func (s *Server) apiReseedSettings(w http.ResponseWriter, r *http.Request) {
 			writeReseedError(w, err)
 			return
 		}
-		writeJSON(w, ReseedSettingsView{Settings: got, Running: worker.Running()})
+		writeJSON(w, reseedSettingsView(worker, got))
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -192,7 +204,7 @@ func (s *Server) apiReseedSite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, got)
 }
 
-// apiReseedRun handles POST /api/reseed/run：在后台马上跑一轮，不等它结束（结果写进设置的 last_result）。
+// apiReseedRun handles POST /api/reseed/run：在后台马上从头跑一轮，不等它结束（结果写进轮次记录与设置的 last_result）。
 func (s *Server) apiReseedRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -202,13 +214,132 @@ func (s *Server) apiReseedRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := worker.RunNow(); err != nil {
+	id, err := worker.RunNow()
+	if err != nil {
 		writeReseedError(w, err)
 		return
 	}
+	writeReseedStarted(w, id)
+}
+
+func writeReseedStarted(w http.ResponseWriter, id uint) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, map[string]any{"started": true})
+	writeJSON(w, map[string]any{"started": true, "run_id": id})
+}
+
+// reseedPage 读分页参数（page 从 1 起，page_size 最多 100）。
+func reseedPage(r *http.Request) (int, int) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	size, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 100 {
+		size = 20
+	}
+	return page, size
+}
+
+// apiReseedRuns handles GET /api/reseed/runs?page=&page_size=：轮次列表（新的在前，不带步骤）。
+func (s *Server) apiReseedRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	_, svc, ok := s.reseedWorker(w)
+	if !ok {
+		return
+	}
+	page, size := reseedPage(r)
+	items, total, err := svc.Runs(r.Context(), page, size)
+	if err != nil {
+		writeReseedError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
+}
+
+// reseedStopRequest 是停止一轮的请求：cancel_pending 时这一轮结束以后一起取消它建的、还没加入下载器的任务。
+type reseedStopRequest struct {
+	CancelPending bool `json:"cancel_pending"`
+}
+
+// apiReseedRunDetail handles /api/reseed/runs/{id}：GET 详情（带步骤）、GET {id}/attempts（这一轮的尝试），
+// POST {id}/pause、{id}/resume、{id}/stop（正在跑的那一轮）与 {id}/continue（接着最近一个提前停下的轮次往下查）。
+func (s *Server) apiReseedRunDetail(w http.ResponseWriter, r *http.Request) {
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/reseed/runs/"), "/")
+	idPart, action, _ := strings.Cut(rest, "/")
+	id64, err := strconv.ParseUint(idPart, 10, 64)
+	if err != nil || id64 == 0 || strings.Contains(action, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	id := uint(id64)
+	worker, svc, ok := s.reseedWorker(w)
+	if !ok {
+		return
+	}
+	switch action {
+	case "":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		d, gerr := svc.GetRun(r.Context(), id)
+		if gerr != nil {
+			writeReseedError(w, gerr)
+			return
+		}
+		writeJSON(w, d)
+		return
+	case "attempts":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		page, size := reseedPage(r)
+		items, total, aerr := svc.RunAttempts(r.Context(), id, page, size)
+		if aerr != nil {
+			writeReseedError(w, aerr)
+			return
+		}
+		writeJSON(w, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
+		return
+	case "pause", "resume", "stop", "continue":
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	switch action {
+	case "pause":
+		err = worker.Pause(id)
+	case "resume":
+		err = worker.Resume(id)
+	case "stop":
+		var req reseedStopRequest
+		if r.ContentLength != 0 && !decodeStrictBody(w, r, &req) {
+			return
+		}
+		err = worker.StopRun(id, req.CancelPending)
+	case "continue":
+		newID, cerr := worker.Continue(id)
+		if cerr != nil {
+			writeReseedError(w, cerr)
+			return
+		}
+		writeReseedStarted(w, newID)
+		return
+	}
+	if err != nil {
+		writeReseedError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "current_run": worker.Current()})
 }
 
 // apiReseedRecords handles GET /api/reseed/records：最新的辅种尝试与对应任务的状态。

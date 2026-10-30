@@ -17,7 +17,9 @@ var ErrJobActive = errors.New("这个种子已经有进行中的任务")
 
 // EnqueueReseed 建一个辅种任务：种子文件已经下好并核对过（TorrentData），直接从「等待加入」开始，
 // 加入下载器时暂停、保存路径用原种子的路径，校验到 100% 才开始做种，不到就移除；不移除任何原有的种子。
-func (s *Service) EnqueueReseed(ctx context.Context, j *models.TorrentTransferJob) error {
+// link 不为 nil 时在建任务的同一个事务里执行（任务已经有 ID、还没提交）：辅种在这里写尝试与记录，
+// 出错时任务一起回滚，不会出现「任务建成了、记录没写上」。已有进行中的任务时不执行。
+func (s *Service) EnqueueReseed(ctx context.Context, j *models.TorrentTransferJob, link func(tx *gorm.DB) error) error {
 	j.InfoHash = strings.ToLower(strings.TrimSpace(j.InfoHash))
 	switch {
 	case j.InfoHash == "" || len(j.TorrentData) == 0:
@@ -39,6 +41,11 @@ func (s *Service) EnqueueReseed(ctx context.Context, j *models.TorrentTransferJo
 		}
 		if err := tx.Create(j).Error; err != nil {
 			return fmt.Errorf("保存辅种任务失败: %w", err)
+		}
+		if link != nil {
+			if err := link(tx); err != nil {
+				return fmt.Errorf("记录辅种任务失败: %w", err)
+			}
 		}
 		return nil
 	})

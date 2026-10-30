@@ -14,6 +14,13 @@ const api = vi.hoisted(() => ({
   setSite: vi.fn(),
   setAllSites: vi.fn(),
   run: vi.fn(),
+  runs: vi.fn(),
+  runDetail: vi.fn(),
+  runAttempts: vi.fn(),
+  pauseRun: vi.fn(),
+  resumeRun: vi.fn(),
+  stopRun: vi.fn(),
+  continueRun: vi.fn(),
   records: vi.fn(),
   jobs: vi.fn(),
   clearFinished: vi.fn(),
@@ -96,6 +103,7 @@ function settings(extra: Record<string, unknown> = {}) {
 async function mountPage(s = settings()) {
   api.settings.mockResolvedValue(s);
   api.records.mockResolvedValue({ items: [] });
+  api.runs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
   api.sites.mockResolvedValue({
     items: [
       {
@@ -336,5 +344,144 @@ describe("IYUU 辅种", () => {
     await mountPage(settings({ has_token: true }));
     expect(testid("rs-status").textContent).toContain("没开启：只能「立即运行」");
     expect(testid("rs-status").textContent).toContain("还没运行过");
+  });
+});
+
+function currentRun(extra: Record<string, unknown> = {}) {
+  return {
+    id: 7,
+    trigger: "manual",
+    status: "running",
+    started_at: "2026-10-30T10:00:00Z",
+    hashes: 450,
+    batches: 3,
+    batches_done: 1,
+    candidates: 4,
+    created: 1,
+    failed: 0,
+    gone: 0,
+    skipped: 2,
+    ...extra,
+  };
+}
+
+function run(extra: Record<string, unknown> = {}) {
+  return {
+    id: 7,
+    trigger: "schedule",
+    started_at: "2026-10-30T10:00:00Z",
+    finished_at: "2026-10-30T10:05:00Z",
+    status: "stopped",
+    summary: "查询 450 个种子，找到 4 个可辅种，加入 1 个，这一轮被停止",
+    error: "这一轮被停止",
+    downloaders: 1,
+    hashes: 450,
+    batches: 3,
+    batches_done: 1,
+    candidates: 4,
+    created: 1,
+    failed: 0,
+    gone: 0,
+    interrupted: 1,
+    skipped: 2,
+    skipped_detail: { 下载器里已经有: 2 },
+    iyuu_calls: 3,
+    paused_seconds: 60,
+    steps_truncated: false,
+    continuable: true,
+    ...extra,
+  };
+}
+
+describe("辅种轮次", () => {
+  it("正在跑的一轮：页头可以暂停、继续、停止，停止前确认能一起取消等待中的任务", async () => {
+    await mountPage(settings({ has_token: true, running: true, current_run: currentRun() }));
+    expect(document.querySelector("[data-testid=rs-run]")).toBeNull();
+    expect(testid("rs-progress").textContent).toContain("第 2/3 批");
+
+    api.pauseRun.mockResolvedValue({ ok: true });
+    api.settings.mockResolvedValue(
+      settings({ has_token: true, running: true, current_run: currentRun({ status: "paused" }) }),
+    );
+    testid("rs-pause").click();
+    await vi.waitFor(() => expect(api.pauseRun).toHaveBeenCalledWith(7));
+    await vi.waitFor(() => expect(testid("rs-progress").textContent).toContain("已暂停"));
+
+    api.resumeRun.mockResolvedValue({ ok: true });
+    api.settings.mockResolvedValue(
+      settings({ has_token: true, running: true, current_run: currentRun() }),
+    );
+    testid("rs-resume").click();
+    await vi.waitFor(() => expect(api.resumeRun).toHaveBeenCalledWith(7));
+    await vi.waitFor(() => expect(document.querySelector("[data-testid=rs-pause]")).not.toBeNull());
+
+    testid("rs-stop").click();
+    await vi.waitFor(() => expect(testid("rs-stop-confirm")).toBeTruthy());
+    testid("rs-stop-cancel-pending").querySelector("input")!.click();
+    api.stopRun.mockResolvedValue({ ok: true });
+    api.settings.mockResolvedValue(settings({ has_token: true }));
+    testid("rs-stop-confirm").click();
+    await vi.waitFor(() => expect(api.stopRun).toHaveBeenCalledWith(7, true));
+    await vi.waitFor(() => expect(document.querySelector("[data-testid=rs-run]")).not.toBeNull());
+  });
+
+  it("轮次列表：提前停下的最近一轮可以继续；详情里有计数、步骤与尝试", async () => {
+    await mountPage(settings({ has_token: true }));
+    api.runs.mockResolvedValue({ items: [run()], total: 1, page: 1, page_size: 20 });
+    await chooseTab("轮次");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("这一轮被停止"));
+    expect(document.body.textContent).toContain("已停止");
+
+    api.runDetail.mockResolvedValue({
+      ...run(),
+      steps: [
+        { kind: "query", text: "查询第 1/3 批（200 个种子）：2 个种子在别的站点上有可辅种的" },
+        { kind: "stop", text: "这一轮被停止" },
+      ],
+    });
+    api.runAttempts.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          run_id: 7,
+          started_at: "2026-10-30T10:01:00Z",
+          site_name: "hdsky",
+          info_hash: "a",
+          torrent_id: "11",
+          name: "Movie",
+          downloader_id: 1,
+          outcome: "created",
+          message: "",
+          job_id: 3,
+          job_state: "source_removed",
+          backfilled: false,
+        },
+        {
+          id: 2,
+          run_id: 7,
+          started_at: "2026-10-30T10:02:00Z",
+          site_name: "hdsky",
+          info_hash: "b",
+          torrent_id: "12",
+          name: "Show",
+          downloader_id: 1,
+          outcome: "interrupted",
+          message: "这一轮被打断，没有试完",
+          backfilled: false,
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 50,
+    });
+    testid("rs-run-open-7").click();
+    await vi.waitFor(() => expect(testid("rs-run-steps").textContent).toContain("查询第 1/3 批"));
+    expect(testid("rs-run-counts").textContent).toContain("1/3");
+    expect(testid("rs-run-attempts").textContent).toContain("已辅种");
+    expect(testid("rs-run-attempts").textContent).toContain("被打断");
+
+    api.continueRun.mockResolvedValue({ started: true, run_id: 8 });
+    testid("rs-run-continue").click();
+    await vi.waitFor(() => expect(api.continueRun).toHaveBeenCalledWith(7));
   });
 });

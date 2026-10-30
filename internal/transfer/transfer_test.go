@@ -1031,13 +1031,13 @@ func TestReseedJob(t *testing.T) {
 		TargetDownloaderID: dstID, InfoHash: strings.ToUpper(h), Name: "Movie.Reseed", TotalSize: 1 << 30,
 		SiteName: "hdsky", TorrentID: "321", TargetSavePath: "/data/movies", SourceSavePath: "/data/movies", Category: "movies", Tags: "hdsky", TorrentData: data,
 	}
-	require.NoError(t, e.svc.EnqueueReseed(ctx, &j))
+	require.NoError(t, e.svc.EnqueueReseed(ctx, &j, nil))
 	assert.Equal(t, models.TransferExported, j.State)
 	assert.Equal(t, uint(dstID), j.SourceDownloaderID)
 	dup := j
 	dup.ID = 0
-	assert.ErrorIs(t, e.svc.EnqueueReseed(ctx, &dup), ErrJobActive)
-	assert.ErrorIs(t, e.svc.EnqueueReseed(ctx, &models.TorrentTransferJob{TargetDownloaderID: dstID}), ErrInvalid)
+	assert.ErrorIs(t, e.svc.EnqueueReseed(ctx, &dup, nil), ErrJobActive)
+	assert.ErrorIs(t, e.svc.EnqueueReseed(ctx, &models.TorrentTransferJob{TargetDownloaderID: dstID}, nil), ErrInvalid)
 
 	e.svc.RunOnce(ctx) // 加入
 	require.Len(t, e.pushes, 1)
@@ -1071,7 +1071,7 @@ func TestReseedJob(t *testing.T) {
 	// 同一种子已在下载器里、却没有 pt-tools-reseed 标签：不接管
 	e2 := newEnv(t)
 	j2 := models.TorrentTransferJob{TargetDownloaderID: dstID, InfoHash: h, TorrentData: data, State: models.TransferAdding}
-	require.NoError(t, e2.svc.EnqueueReseed(ctx, &j2))
+	require.NoError(t, e2.svc.EnqueueReseed(ctx, &j2, nil))
 	require.NoError(t, e2.db.Model(&j2).Update("state", models.TransferAdding).Error)
 	e2.dst.put(downloader.Torrent{InfoHash: h, Tags: models.TransferTag})
 	e2.svc.RunOnce(ctx)
@@ -1091,7 +1091,7 @@ func TestReseedJobRetriesRecord(t *testing.T) {
 		TargetDownloaderID: dstID, InfoHash: h, Name: "Movie.Record", TotalSize: 1 << 30,
 		SiteName: "hdsky", TorrentID: "654", TargetSavePath: "/data/movies", SourceSavePath: "/data/movies", TorrentData: data,
 	}
-	require.NoError(t, e.svc.EnqueueReseed(ctx, &j))
+	require.NoError(t, e.svc.EnqueueReseed(ctx, &j, nil))
 	e.svc.RunOnce(ctx) // 加入
 	e.svc.RunOnce(ctx) // 校验
 	e.dst.finishCheck(h)
@@ -1110,4 +1110,41 @@ func TestReseedJobRetriesRecord(t *testing.T) {
 	var rec models.TorrentInfo
 	require.NoError(t, e.db.Where("site_name = ? AND torrent_id = ?", "hdsky", "654").First(&rec).Error)
 	assert.Equal(t, ReseedSource, rec.DownloadSource)
+}
+
+// EnqueueReseed 的回调在建任务的同一个事务里：回调写的行与任务一起提交；回调出错时任务也不存在；
+// 已有进行中的任务时回调不执行。
+func TestEnqueueReseedLinkSameTransaction(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	require.NoError(t, e.db.AutoMigrate(&models.ReseedRecord{}))
+	data := torrentFile(t, "Movie.Link")
+	h, err := qbit.ComputeTorrentHash(data)
+	require.NoError(t, err)
+	job := func() models.TorrentTransferJob {
+		return models.TorrentTransferJob{TargetDownloaderID: dstID, InfoHash: h, Name: "Movie.Link", SiteName: "hdsky", TorrentID: "9", TorrentData: data}
+	}
+
+	bad := job()
+	err = e.svc.EnqueueReseed(ctx, &bad, func(*gorm.DB) error { return errors.New("磁盘满了") })
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "磁盘满了")
+	var n int64
+	require.NoError(t, e.db.Model(&models.TorrentTransferJob{}).Count(&n).Error)
+	assert.Zero(t, n, "回调出错时任务一起回滚")
+
+	ok := job()
+	calls := 0
+	require.NoError(t, e.svc.EnqueueReseed(ctx, &ok, func(tx *gorm.DB) error {
+		calls++
+		require.NotZero(t, ok.ID, "回调里任务已经有 ID")
+		return tx.Create(&models.ReseedRecord{InfoHash: h, SiteName: "hdsky", State: models.ReseedQueued, JobID: &ok.ID}).Error
+	}))
+	var rec models.ReseedRecord
+	require.NoError(t, e.db.First(&rec).Error)
+	assert.Equal(t, ok.ID, *rec.JobID, "回调写的行与任务一起提交")
+
+	dup := job()
+	assert.ErrorIs(t, e.svc.EnqueueReseed(ctx, &dup, func(*gorm.DB) error { calls++; return nil }), ErrJobActive)
+	assert.Equal(t, 1, calls, "已有进行中的任务时不执行回调")
 }

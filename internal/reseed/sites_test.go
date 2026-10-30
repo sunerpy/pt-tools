@@ -47,7 +47,7 @@ func TestSiteSelection(t *testing.T) {
 	sel, err = e.svc.SetAllSitesSelected(ctx, false)
 	require.NoError(t, err)
 	assert.Equal(t, SiteSelection{Mode: models.ReseedSitesSelected, SiteNames: []string{}}, sel)
-	_, err = e.svc.Run(ctx)
+	_, err = e.svc.Run(ctx, RunOptions{})
 	require.ErrorIs(t, err, ErrNoSites, "全部关掉以后没有站点可以辅种")
 	items, err := e.svc.SiteMap(ctx)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestSiteSelectionLegacyRows(t *testing.T) {
 	got, err := e.svc.Settings(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, models.ReseedSitesSelected, got.SiteMode)
-	_, err = e.svc.Run(ctx)
+	_, err = e.svc.Run(ctx, RunOptions{})
 	require.ErrorIs(t, err, ErrNoSites, "旧名单里只有没配置的站点")
 
 	require.NoError(t, e.db.Model(&models.ReseedSetting{}).Where("id = 1").Update("site_names", "").Error)

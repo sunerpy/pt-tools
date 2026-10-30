@@ -2663,6 +2663,104 @@ export interface ReseedSettings {
   /** 下一轮大约什么时候（开着、有 token 时才有） */
   next_run_at?: string;
   running: boolean;
+  /** 正在跑（或暂停中）的那一轮 */
+  current_run?: ReseedCurrentRun;
+}
+
+export type ReseedRunTrigger = "schedule" | "manual" | "retry" | "continue";
+
+export type ReseedRunStatus =
+  | "running"
+  | "paused"
+  | "ok"
+  | "partial"
+  | "stopped"
+  | "limited"
+  | "failed"
+  | "interrupted";
+
+/** 正在跑的那一轮的实时进度 */
+export interface ReseedCurrentRun {
+  id: number;
+  trigger: ReseedRunTrigger;
+  continued_from?: number;
+  status: "running" | "paused";
+  started_at: string;
+  paused_at?: string;
+  hashes: number;
+  batches: number;
+  batches_done: number;
+  candidates: number;
+  created: number;
+  failed: number;
+  gone: number;
+  skipped: number;
+}
+
+/** 一轮辅种（轮次列表的一行） */
+export interface ReseedRun {
+  id: number;
+  trigger: ReseedRunTrigger;
+  started_at: string;
+  finished_at?: string;
+  status: ReseedRunStatus;
+  summary: string;
+  error: string;
+  downloaders: number;
+  hashes: number;
+  batches: number;
+  batches_done: number;
+  candidates: number;
+  created: number;
+  failed: number;
+  gone: number;
+  interrupted: number;
+  skipped: number;
+  skipped_detail?: Record<string, number>;
+  iyuu_calls: number;
+  continued_from?: number;
+  paused_at?: string;
+  paused_seconds: number;
+  steps_truncated: boolean;
+  /** 最近一个提前停下的轮次（重试的除外）可以接着往下查 */
+  continuable?: boolean;
+}
+
+export interface ReseedRunStep {
+  kind: "list" | "query" | "add" | "fail" | "gone" | "stop" | "error" | "info";
+  text: string;
+}
+
+export interface ReseedRunDetail extends ReseedRun {
+  steps: ReseedRunStep[];
+}
+
+/** 一次辅种尝试（只追加：每站每天的名额、轮次里的尝试与统计都按它算） */
+export interface ReseedAttempt {
+  id: number;
+  run_id?: number;
+  started_at: string;
+  finished_at?: string;
+  site_name: string;
+  info_hash: string;
+  torrent_id: string;
+  name: string;
+  downloader_id: number;
+  outcome: "running" | "created" | "failed" | "gone" | "active" | "interrupted";
+  message: string;
+  job_id?: number;
+  job_state?: TransferState;
+  job_message?: string;
+  job_finished_at?: string;
+  job_missing?: boolean;
+  backfilled: boolean;
+}
+
+export interface ReseedPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface ReseedSettingsUpdate {
@@ -3726,7 +3824,23 @@ export const reseedApi = {
   /** 全部打开（以后新配置的站点也自动参与）或全部关掉 */
   setAllSites: (selected: boolean) =>
     api.put<ReseedSiteSelection>("/api/reseed/sites", { selected }),
-  run: () => api.post<{ started: boolean }>("/api/reseed/run", {}),
+  run: () => api.post<{ started: boolean; run_id: number }>("/api/reseed/run", {}),
+  runs: (page = 1, pageSize = 20) =>
+    api.get<ReseedPage<ReseedRun>>(`/api/reseed/runs?page=${page}&page_size=${pageSize}`),
+  runDetail: (id: number) => api.get<ReseedRunDetail>(`/api/reseed/runs/${id}`),
+  runAttempts: (id: number, page = 1, pageSize = 50) =>
+    api.get<ReseedPage<ReseedAttempt>>(
+      `/api/reseed/runs/${id}/attempts?page=${page}&page_size=${pageSize}`,
+    ),
+  pauseRun: (id: number) =>
+    api.post<{ ok: boolean; current_run?: ReseedCurrentRun }>(`/api/reseed/runs/${id}/pause`, {}),
+  resumeRun: (id: number) =>
+    api.post<{ ok: boolean; current_run?: ReseedCurrentRun }>(`/api/reseed/runs/${id}/resume`, {}),
+  /** cancelPending：这一轮结束以后一起取消它建的、还没加入下载器的任务 */
+  stopRun: (id: number, cancelPending = false) =>
+    api.post<{ ok: boolean }>(`/api/reseed/runs/${id}/stop`, { cancel_pending: cancelPending }),
+  continueRun: (id: number) =>
+    api.post<{ started: boolean; run_id: number }>(`/api/reseed/runs/${id}/continue`, {}),
   records: () => api.get<{ items: ReseedRecord[] }>("/api/reseed/records"),
   jobs: (status: "" | "active" | "finished" = "") =>
     api.get<{ items: TransferJob[] }>(

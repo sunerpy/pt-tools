@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,7 +38,7 @@ func newReseedServer(t *testing.T) (*Server, *http.ServeMux) {
 	srv.mgr.StopAll()
 	db := global.GlobalDB.DB
 	require.NoError(t, db.AutoMigrate(&models.TorrentTransferJob{}, &models.DownloaderPathMap{}, &models.TransferRule{},
-		&models.ReseedSetting{}, &models.ReseedRecord{}))
+		&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"sites": []map[string]any{
 			{"id": 1, "site": "hdsky", "nickname": "天空", "base_url": "hdsky.me"},
@@ -65,7 +66,7 @@ func newReseedServer(t *testing.T) (*Server, *http.ServeMux) {
 
 func TestReseedAPI_RequiresSession(t *testing.T) {
 	_, mux := newReseedServer(t)
-	for _, path := range []string{"/api/reseed/settings", "/api/reseed/sites", "/api/reseed/run", "/api/reseed/records", "/api/reseed/jobs"} {
+	for _, path := range []string{"/api/reseed/settings", "/api/reseed/sites", "/api/reseed/run", "/api/reseed/records", "/api/reseed/jobs", "/api/reseed/runs", "/api/reseed/runs/1", "/api/reseed/sites/hdsky"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
@@ -191,4 +192,57 @@ func TestReseedAPI_SiteToggles(t *testing.T) {
 	var got ReseedSettingsView
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, "all", got.SiteMode)
+}
+
+// 轮次：立即运行返回轮次编号；列表、详情与尝试；不是正在跑的那一轮不能暂停、继续或停止；不能继续的轮次返回 409。
+func TestReseedAPI_Runs(t *testing.T) {
+	_, mux := newReseedServer(t)
+	w := serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"enabled":true,"token":"tok"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = serveAuthed(mux, http.MethodPost, "/api/reseed/run", "")
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	var started struct {
+		Started bool `json:"started"`
+		RunID   uint `json:"run_id"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &started))
+	require.NotZero(t, started.RunID)
+	require.Eventually(t, func() bool {
+		resp := serveAuthed(mux, http.MethodGet, "/api/reseed/settings", "")
+		var v ReseedSettingsView
+		_ = json.Unmarshal(resp.Body.Bytes(), &v)
+		return !v.Running && v.CurrentRun == nil && v.LastResult != ""
+	}, 5*time.Second, 20*time.Millisecond)
+
+	w = serveAuthed(mux, http.MethodGet, "/api/reseed/runs?page=1&page_size=5", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page struct {
+		Items []reseed.RunView `json:"items"`
+		Total int64            `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.EqualValues(t, 1, page.Total)
+	assert.Equal(t, started.RunID, page.Items[0].ID)
+	assert.Equal(t, models.ReseedTriggerManual, page.Items[0].Trigger)
+	assert.NotContains(t, w.Body.String(), `"steps"`, "列表不带步骤")
+
+	path := fmt.Sprintf("/api/reseed/runs/%d", started.RunID)
+	w = serveAuthed(mux, http.MethodGet, path, "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"steps":[]`)
+	w = serveAuthed(mux, http.MethodGet, path+"/attempts", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"total":0`)
+
+	for _, a := range []string{"pause", "resume", "stop"} {
+		assert.Equal(t, http.StatusConflict, serveAuthed(mux, http.MethodPost, path+"/"+a, "").Code, a+"：不是正在跑的那一轮")
+	}
+	assert.Equal(t, http.StatusConflict, serveAuthed(mux, http.MethodPost, path+"/continue", "").Code, "没能开始的轮次不能继续")
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, path+"/stop", `{"x":1}`).Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodGet, "/api/reseed/runs/999", "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodGet, "/api/reseed/runs/999/attempts", "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodGet, "/api/reseed/runs/abc", "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodPost, path+"/explode", "").Code)
+	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodGet, path+"/pause", "").Code)
+	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodPost, "/api/reseed/runs", "").Code)
 }

@@ -111,13 +111,20 @@ type fakeSite struct {
 	// gone 是站点上已经删了的种子：下载时站点回「种子未找到」
 	gone      map[string]bool
 	downloads map[string]int
+	// onDownload 在下载时调用（模拟下载中途这一轮被停止）；返回错误时下载失败
+	onDownload func(ctx context.Context) error
 }
 
-func (s *fakeSite) Download(_ context.Context, id string) ([]byte, error) {
+func (s *fakeSite) Download(ctx context.Context, id string) ([]byte, error) {
 	if s.downloads == nil {
 		s.downloads = map[string]int{}
 	}
 	s.downloads[id]++
+	if s.onDownload != nil {
+		if err := s.onDownload(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if s.gone[id] {
 		return nil, fmt.Errorf("parse download: %w（M-Team：種子未找到）", v2.ErrTorrentNotFound)
 	}
@@ -175,7 +182,7 @@ func newEnv(t *testing.T) *env {
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "r.db")+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() { closeTestGorm(db) })
-	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.TorrentTransferJob{},
+	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.TorrentTransferJob{},
 		&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.DownloaderPathMap{}, &models.TransferRule{}))
 	require.NoError(t, db.Create(&models.DownloaderSetting{ID: 1, Name: "qb", Type: "qbittorrent", URL: "http://x", Enabled: true}).Error)
 	e := &env{t: t, db: db, now: time.Date(2026, 10, 7, 10, 0, 0, 0, time.Local), site: &fakeSite{data: map[string][]byte{}}, siteIDs: []string{"hdsky"}}
@@ -343,7 +350,7 @@ func TestRun(t *testing.T) {
 		map[string]any{"sid": 1, "torrent_id": 14, "info_hash": "partial"},
 		map[string]any{"sid": 1, "torrent_id": 15, "info_hash": "eeee"},
 	)
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Downloaders)
 	assert.Equal(t, 1, res.Hashes, "只查已经下完的种子")
@@ -377,7 +384,7 @@ func TestRun(t *testing.T) {
 	assert.Contains(t, states["12"].Message, "文件列表与原种子不一致")
 	assert.Contains(t, states["15"].Message, "下载种子失败")
 
-	res, err = e.svc.Run(ctx)
+	res, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Zero(t, res.Created)
 	assert.Equal(t, 3, res.Skipped[SkipTried], "同一站点同一种子只尝试一次")
@@ -392,12 +399,12 @@ func TestRunDailyLimit(t *testing.T) {
 	a := e.candidate("21", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
 	b := e.candidate("22", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 21, "info_hash": a}, map[string]any{"sid": 1, "torrent_id": 22, "info_hash": b})
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Created)
 	assert.Equal(t, 1, res.Skipped[SkipDailyLimit])
 	e.now = e.now.Add(24 * time.Hour)
-	res, err = e.svc.Run(ctx)
+	res, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Created, "第二天接着加")
 }
@@ -410,7 +417,7 @@ func TestRunRateLimitAndRefresh(t *testing.T) {
 	good := e.candidate("31", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 31, "info_hash": good})
 	e.iyuu.queryCodes, e.iyuu.retryAfter = []int{429}, 5
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, []time.Duration{5 * time.Second}, e.slept)
 	assert.Equal(t, 1, res.Created)
@@ -418,7 +425,7 @@ func TestRunRateLimitAndRefresh(t *testing.T) {
 	e2 := newEnv(t)
 	e2.enable(nil)
 	e2.iyuu.queryCodes, e2.iyuu.retryAfter = []int{429}, 600
-	res, err = e2.svc.Run(ctx)
+	res, err = e2.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Contains(t, res.Stopped, "600 秒后再试")
 	assert.Empty(t, e2.slept, "等太久就不等")
@@ -428,7 +435,7 @@ func TestRunRateLimitAndRefresh(t *testing.T) {
 	g3 := e3.candidate("41", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
 	e3.setResults(map[string]any{"sid": 1, "torrent_id": 41, "info_hash": g3})
 	e3.iyuu.queryCodes = []int{400}
-	res, err = e3.svc.Run(ctx)
+	res, err = e3.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 2, e3.iyuu.reports, "报错后重新报告一次站点")
 	assert.Equal(t, 1, res.Created)
@@ -436,7 +443,7 @@ func TestRunRateLimitAndRefresh(t *testing.T) {
 	e4 := newEnv(t)
 	e4.enable(nil)
 	e4.iyuu.queryCodes = []int{400, 400}
-	res, err = e4.svc.Run(ctx)
+	res, err = e4.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	require.Len(t, res.Errors, 1)
 	assert.Contains(t, res.Errors[0], "查询 IYUU 失败")
@@ -445,15 +452,15 @@ func TestRunRateLimitAndRefresh(t *testing.T) {
 func TestRunPreconditions(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
-	_, err := e.svc.Run(ctx)
+	_, err := e.svc.Run(ctx, RunOptions{})
 	assert.ErrorIs(t, err, iyuu.ErrNoToken)
 	e.enable(func(u *SettingsUpdate) { u.SiteNames = &[]string{"ourbits"} })
-	_, err = e.svc.Run(ctx)
+	_, err = e.svc.Run(ctx, RunOptions{})
 	assert.ErrorIs(t, err, ErrNoSites, "选中的站点 pt-tools 里没配置")
 
 	e2 := newEnv(t)
 	e2.enable(func(u *SettingsUpdate) { u.DownloaderIDs = []uint{1, 9} })
-	res, err := e2.svc.Run(ctx)
+	res, err := e2.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	require.Len(t, res.Errors, 1)
 	assert.Contains(t, res.Errors[0], "下载器 9 不可用")
@@ -499,17 +506,17 @@ func TestRunRetriesDownloadFailuresLater(t *testing.T) {
 	delete(e.site.data, "51") // 站点暂时下载不到
 	bad := e.candidate("52", map[string]int64{"a.mkv": 100})
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 51, "info_hash": good}, map[string]any{"sid": 1, "torrent_id": 52, "info_hash": bad})
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 2, res.Failed)
 
 	e.site.data["51"] = data
-	res, err = e.svc.Run(ctx)
+	res, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 2, res.Skipped[SkipTried], "7 天之内不重试")
 
 	e.now = e.now.Add(8 * 24 * time.Hour)
-	res, err = e.svc.Run(ctx)
+	res, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Created, "下载失败的过了 7 天再试，这次成功")
 	assert.Equal(t, 1, res.Skipped[SkipTried], "文件不一致的不再试")
@@ -533,7 +540,7 @@ func TestRunTokenClearedMidRun(t *testing.T) {
 		_, err := e.svc.SaveSettings(ctx, SettingsUpdate{Token: &empty, IntervalHours: 8})
 		assert.NoError(t, err)
 	}
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Contains(t, res.Stopped, "token 已清除或更换")
 	assert.Zero(t, e.iyuu.queries, "不再用旧 token 查询")
@@ -572,7 +579,7 @@ func TestClearFinishedJobs(t *testing.T) {
 	a := e.candidate("71", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
 	b := e.candidate("72", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 71, "info_hash": a}, map[string]any{"sid": 1, "torrent_id": 72, "info_hash": b})
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, 2, res.Created)
 	var recs []models.ReseedRecord
@@ -619,17 +626,17 @@ func TestRecordsOrderByLastAttempt(t *testing.T) {
 	data := e.site.data["81"]
 	delete(e.site.data, "81")
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 81, "info_hash": good})
-	_, err := e.svc.Run(ctx)
+	_, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	e.now = e.now.Add(time.Hour)
 	other := e.candidate("82", map[string]int64{"a.mkv": 100})
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 81, "info_hash": good}, map[string]any{"sid": 1, "torrent_id": 82, "info_hash": other})
-	_, err = e.svc.Run(ctx)
+	_, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 
 	e.site.data["81"] = data
 	e.now = e.now.Add(8 * 24 * time.Hour)
-	_, err = e.svc.Run(ctx)
+	_, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	views, err := e.svc.Records(ctx)
 	require.NoError(t, err)
@@ -647,7 +654,7 @@ func TestRunRetriesWhenSourceFilesUnavailable(t *testing.T) {
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 91, "info_hash": good})
 	files := e.dl.files[e.srcHash]
 	delete(e.dl.files, e.srcHash)
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Failed)
 	var rec models.ReseedRecord
@@ -657,7 +664,7 @@ func TestRunRetriesWhenSourceFilesUnavailable(t *testing.T) {
 
 	e.dl.files[e.srcHash] = files
 	e.now = e.now.Add(8 * 24 * time.Hour)
-	res, err = e.svc.Run(ctx)
+	res, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Created, "过了 7 天再试，这次读到了")
 }
@@ -695,10 +702,11 @@ func TestRunSkipsTorrentGoneFromSite(t *testing.T) {
 	e.site.gone = map[string]bool{"61": true}
 	e.setResults(map[string]any{"sid": 1, "torrent_id": 61, "info_hash": gone})
 
-	res, err := e.svc.Run(ctx)
+	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Zero(t, res.Failed, "站点上删了不算失败")
-	assert.Equal(t, 1, res.Skipped[SkipGone])
+	assert.Equal(t, 1, res.Gone)
+	assert.Contains(t, res.Summary(), "站点已删除 1 个")
 	var rec models.ReseedRecord
 	require.NoError(t, e.db.Where("info_hash = ?", gone).First(&rec).Error)
 	assert.Equal(t, models.ReseedGone, rec.State)
@@ -706,7 +714,7 @@ func TestRunSkipsTorrentGoneFromSite(t *testing.T) {
 	assert.Contains(t, rec.Message, "站点上已经没有这个种子")
 
 	e.now = e.now.Add(8 * 24 * time.Hour)
-	res, err = e.svc.Run(ctx)
+	res, err = e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Skipped[SkipTried], "过了重试间隔也不再试")
 	assert.Equal(t, 1, e.site.downloads["61"], "只下过一次")
