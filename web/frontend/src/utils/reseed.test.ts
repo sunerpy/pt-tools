@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applySiteSelection,
   reseedRecordActive,
   reseedRecordMessage,
   reseedRecordResult,
@@ -37,6 +38,28 @@ describe("reseed utils", () => {
     expect(reseedRecordActive({ state: "done" })).toBe(false);
     // 任务不在了不再轮询
     expect(reseedRecordActive({ state: "queued", job_missing: true })).toBe(false);
+  });
+
+  it("applies a site selection like the server does", () => {
+    const base = { iyuu_site: "x", nickname: "x", host: "x", selected: false };
+    const items = [
+      { ...base, sid: 1, site_name: "hdsky", configured: true },
+      { ...base, sid: 2, site_name: "ourbits", configured: true },
+      { ...base, sid: 3, site_name: "mteam", configured: false },
+      { ...base, sid: 4, configured: false },
+    ];
+    expect(
+      applySiteSelection(items, { site_mode: "all", site_names: [] }).map((i) => i.selected),
+    ).toEqual([true, true, false, false]);
+    expect(
+      applySiteSelection(items, { site_mode: "selected", site_names: ["ourbits", "mteam"] }).map(
+        (i) => i.selected,
+      ),
+    ).toEqual([false, true, false, false]);
+    // 全部关掉：空名单不是「全部」
+    expect(
+      applySiteSelection(items, { site_mode: "selected", site_names: [] }).some((i) => i.selected),
+    ).toBe(false);
   });
 
   it("describes site status", () => {

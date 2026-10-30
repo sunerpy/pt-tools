@@ -164,3 +164,31 @@ func TestWriteReseedError(t *testing.T) {
 		assert.Equal(t, want, w.Code, err.Error())
 	}
 }
+
+// 站点开关：PUT /api/reseed/sites 全部打开或关掉，PUT /api/reseed/sites/{site} 打开或关掉一个；要写明 selected。
+func TestReseedAPI_SiteToggles(t *testing.T) {
+	_, mux := newReseedServer(t)
+	w := serveAuthed(mux, http.MethodPut, "/api/reseed/sites/hdsky", `{"selected":false}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"site_mode":"selected","site_names":[]}`, w.Body.String())
+
+	w = serveAuthed(mux, http.MethodPut, "/api/reseed/sites/hdsky", `{"selected":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"site_mode":"selected","site_names":["hdsky"]}`, w.Body.String())
+
+	w = serveAuthed(mux, http.MethodPut, "/api/reseed/sites/ourbits", `{"selected":true}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "没配置的站点不能打开")
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/reseed/sites/hdsky", `{}`).Code, "缺少 selected")
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/reseed/sites/hdsky", `{"selected":true,"x":1}`).Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodPut, "/api/reseed/sites/a/b", `{"selected":true}`).Code)
+	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodGet, "/api/reseed/sites/hdsky", "").Code)
+
+	w = serveAuthed(mux, http.MethodPut, "/api/reseed/sites", `{"selected":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"site_mode":"all","site_names":[]}`, w.Body.String())
+
+	w = serveAuthed(mux, http.MethodGet, "/api/reseed/settings", "")
+	var got ReseedSettingsView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "all", got.SiteMode)
+}

@@ -110,11 +110,13 @@ func New(cfg Config) *Service {
 
 // Settings 是接口里的辅种设置：token 只说有没有设置，不返回内容。
 type Settings struct {
-	Enabled          bool       `json:"enabled"`
-	HasToken         bool       `json:"has_token"`
-	IntervalHours    int        `json:"interval_hours"`
-	DownloaderIDs    []uint     `json:"downloader_ids"`
-	SiteNames        []string   `json:"site_names"`
+	Enabled       bool     `json:"enabled"`
+	HasToken      bool     `json:"has_token"`
+	IntervalHours int      `json:"interval_hours"`
+	DownloaderIDs []uint   `json:"downloader_ids"`
+	SiteNames     []string `json:"site_names"`
+	// SiteMode 是站点范围：all（全部已配置、IYUU 也支持的站点）或 selected（只算 SiteNames）
+	SiteMode         string     `json:"site_mode"`
 	MaxPerSitePerDay int        `json:"max_per_site_per_day"`
 	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
 	LastResult       string     `json:"last_result"`
@@ -123,13 +125,14 @@ type Settings struct {
 }
 
 // SettingsUpdate 是保存设置的请求。Token 为 nil 时保留原来的；为空串时清除。
+// SiteNames 为 nil 时保留原来的站点范围（网页在「站点」页用开关改，见 SetSiteSelected）；给了就按名单保存，空名单是全部站点。
 type SettingsUpdate struct {
-	Enabled          bool     `json:"enabled"`
-	Token            *string  `json:"token,omitempty"`
-	IntervalHours    int      `json:"interval_hours"`
-	DownloaderIDs    []uint   `json:"downloader_ids"`
-	SiteNames        []string `json:"site_names"`
-	MaxPerSitePerDay int      `json:"max_per_site_per_day"`
+	Enabled          bool      `json:"enabled"`
+	Token            *string   `json:"token,omitempty"`
+	IntervalHours    int       `json:"interval_hours"`
+	DownloaderIDs    []uint    `json:"downloader_ids"`
+	SiteNames        *[]string `json:"site_names,omitempty"`
+	MaxPerSitePerDay int       `json:"max_per_site_per_day"`
 }
 
 func (s *Service) row(ctx context.Context) (models.ReseedSetting, error) {
@@ -175,6 +178,7 @@ func view(r models.ReseedSetting) Settings {
 		DownloaderIDs: decodeUints(r.DownloaderIDs), SiteNames: decodeStrings(r.SiteNames),
 		MaxPerSitePerDay: r.MaxPerSitePerDay, LastRunAt: r.LastRunAt, LastResult: r.LastResult,
 	}
+	out.SiteMode = models.ReseedSiteModeOf(r.SiteMode, out.SiteNames)
 	if out.IntervalHours == 0 {
 		out.IntervalHours = models.ReseedDefaultIntervalHours
 	}
@@ -204,7 +208,10 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 		"interval_hours":       u.IntervalHours,
 		"max_per_site_per_day": u.MaxPerSitePerDay,
 		"downloader_ids":       encode(dedupeUints(u.DownloaderIDs)),
-		"site_names":           encode(dedupeStrings(u.SiteNames)),
+	}
+	if u.SiteNames != nil {
+		names := dedupeStrings(*u.SiteNames)
+		cols["site_names"], cols["site_mode"] = encode(names), models.ReseedSiteModeOf("", names)
 	}
 	tokenEnc := r.TokenEncrypted
 	if u.Token != nil {
@@ -333,16 +340,100 @@ func (s *Service) SiteMap(ctx context.Context) ([]SiteMapItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.mapSites(sites, decodeStrings(r.SiteNames)), nil
+	return s.mapSites(sites, r), nil
 }
 
-func (s *Service) mapSites(sites []iyuu.Site, selected []string) []SiteMapItem {
-	configured := map[string]bool{}
+// SiteSelection 是站点范围：Mode 为 all 时全部已配置、IYUU 也支持的站点都参与（以后新配置的也算），为 selected 时只算 SiteNames。
+type SiteSelection struct {
+	Mode      string   `json:"site_mode"`
+	SiteNames []string `json:"site_names"`
+}
+
+// SetSiteSelected 打开或关掉一个站点。从「全部站点」关掉一个时，名单换成现在已配置的站点去掉它（以后新配置的站点默认不参与）；
+// 打开的站点必须已经在 pt-tools 里配置。只写站点范围的两列，与保存设置互斥。
+func (s *Service) SetSiteSelected(ctx context.Context, site string, selected bool) (SiteSelection, error) {
+	site = strings.TrimSpace(site)
+	if site == "" {
+		return SiteSelection{}, fmt.Errorf("%w：缺少站点", ErrInvalid)
+	}
+	configured := s.configuredSites()
+	if selected && !configured[site] {
+		return SiteSelection{}, fmt.Errorf("%w：站点 %s 还没有在 pt-tools 里配置", ErrInvalid, site)
+	}
+	return s.updateSites(ctx, func(mode string, names []string) (string, []string) {
+		if mode == models.ReseedSitesAll {
+			if selected {
+				return mode, names
+			}
+			names = names[:0]
+			for id := range configured {
+				if id != site {
+					names = append(names, id)
+				}
+			}
+			return models.ReseedSitesSelected, names
+		}
+		out := make([]string, 0, len(names)+1)
+		for _, n := range names {
+			if n != site {
+				out = append(out, n)
+			}
+		}
+		if selected {
+			out = append(out, site)
+		}
+		return models.ReseedSitesSelected, out
+	})
+}
+
+// SetAllSitesSelected 全部打开（以后新配置的站点也自动参与）或全部关掉。
+func (s *Service) SetAllSitesSelected(ctx context.Context, selected bool) (SiteSelection, error) {
+	return s.updateSites(ctx, func(string, []string) (string, []string) {
+		if selected {
+			return models.ReseedSitesAll, []string{}
+		}
+		return models.ReseedSitesSelected, []string{}
+	})
+}
+
+func (s *Service) configuredSites() map[string]bool {
+	out := map[string]bool{}
 	if s.cfg.SiteIDs != nil {
 		for _, id := range s.cfg.SiteIDs() {
-			configured[id] = true
+			out[id] = true
 		}
 	}
+	return out
+}
+
+// updateSites 在 saveMu 下读出站点范围、按 change 改、写回（只写 site_mode 与 site_names 两列）。
+func (s *Service) updateSites(ctx context.Context, change func(mode string, names []string) (string, []string)) (SiteSelection, error) {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	r, err := s.row(ctx)
+	if err != nil {
+		return SiteSelection{}, err
+	}
+	names := decodeStrings(r.SiteNames)
+	mode, names := change(models.ReseedSiteModeOf(r.SiteMode, names), names)
+	names = dedupeStrings(names)
+	sort.Strings(names)
+	db := s.cfg.DB.WithContext(context.WithoutCancel(ctx))
+	if err := ensureRow(db); err != nil {
+		return SiteSelection{}, fmt.Errorf("保存辅种站点失败: %w", err)
+	}
+	if err := db.Model(&models.ReseedSetting{}).Where("id = 1").
+		Updates(map[string]any{"site_mode": mode, "site_names": encode(names)}).Error; err != nil {
+		return SiteSelection{}, fmt.Errorf("保存辅种站点失败: %w", err)
+	}
+	return SiteSelection{Mode: mode, SiteNames: names}, nil
+}
+
+// mapSites 按设置里的站点范围标出每个 IYUU 站点在不在辅种范围。
+func (s *Service) mapSites(sites []iyuu.Site, r models.ReseedSetting) []SiteMapItem {
+	selected := decodeStrings(r.SiteNames)
+	all := models.ReseedSiteModeOf(r.SiteMode, selected) == models.ReseedSitesAll
+	configured := s.configuredSites()
 	pick := map[string]bool{}
 	for _, n := range selected {
 		pick[n] = true
@@ -357,7 +448,7 @@ func (s *Service) mapSites(sites []iyuu.Site, selected []string) []SiteMapItem {
 		name, _ := s.cfg.Resolver.Resolve(raw)
 		item := SiteMapItem{SID: st.SID, IYUUSite: st.Site, Nickname: st.Nickname, Host: host, SiteName: name}
 		item.Configured = name != "" && configured[name]
-		item.Selected = item.Configured && (len(pick) == 0 || pick[name])
+		item.Selected = item.Configured && (all || pick[name])
 		out = append(out, item)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -453,7 +544,7 @@ func (s *Service) Run(ctx context.Context) (RunResult, error) {
 	}
 	bySID := map[int]string{}
 	sids := make([]int, 0)
-	for _, it := range s.mapSites(sites, decodeStrings(r.SiteNames)) {
+	for _, it := range s.mapSites(sites, r) {
 		if it.Selected {
 			bySID[it.SID] = it.SiteName
 			sids = append(sids, it.SID)

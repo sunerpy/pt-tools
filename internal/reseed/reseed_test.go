@@ -165,6 +165,8 @@ type env struct {
 	slept []time.Duration
 	// 源种子
 	srcHash string
+	// siteIDs 是 pt-tools 里已配置的站点（默认只有 hdsky）
+	siteIDs []string
 }
 
 func newEnv(t *testing.T) *env {
@@ -176,7 +178,7 @@ func newEnv(t *testing.T) *env {
 	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.TorrentTransferJob{},
 		&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.DownloaderPathMap{}, &models.TransferRule{}))
 	require.NoError(t, db.Create(&models.DownloaderSetting{ID: 1, Name: "qb", Type: "qbittorrent", URL: "http://x", Enabled: true}).Error)
-	e := &env{t: t, db: db, now: time.Date(2026, 10, 7, 10, 0, 0, 0, time.Local), site: &fakeSite{data: map[string][]byte{}}}
+	e := &env{t: t, db: db, now: time.Date(2026, 10, 7, 10, 0, 0, 0, time.Local), site: &fakeSite{data: map[string][]byte{}}, siteIDs: []string{"hdsky"}}
 	e.iyuu = &fakeIYUU{sites: []map[string]any{
 		{"id": 1, "site": "hdsky", "nickname": "天空", "base_url": "hdsky.me"},
 		{"id": 2, "site": "ourbits", "nickname": "我堡", "base_url": "ourbits.club"},
@@ -216,7 +218,7 @@ func newEnv(t *testing.T) *env {
 			}
 			return nil, false
 		},
-		SiteIDs:  func() []string { return []string{"hdsky"} },
+		SiteIDs:  func() []string { return e.siteIDs },
 		Resolver: resolver,
 		NewClient: func(token string) *iyuu.Client {
 			c := iyuu.New(token)
@@ -274,11 +276,12 @@ func TestSettings(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalid)
 
 	tok := " tok "
-	got, err = e.svc.SaveSettings(ctx, SettingsUpdate{Enabled: true, Token: &tok, IntervalHours: 6, DownloaderIDs: []uint{1, 1, 0}, SiteNames: []string{"hdsky", " hdsky"}, MaxPerSitePerDay: 3})
+	got, err = e.svc.SaveSettings(ctx, SettingsUpdate{Enabled: true, Token: &tok, IntervalHours: 6, DownloaderIDs: []uint{1, 1, 0}, SiteNames: &[]string{"hdsky", " hdsky"}, MaxPerSitePerDay: 3})
 	require.NoError(t, err)
 	assert.True(t, got.HasToken)
 	assert.Equal(t, []uint{1}, got.DownloaderIDs)
 	assert.Equal(t, []string{"hdsky"}, got.SiteNames)
+	assert.Equal(t, models.ReseedSitesSelected, got.SiteMode)
 	var row models.ReseedSetting
 	require.NoError(t, e.db.First(&row, 1).Error)
 	assert.Equal(t, "enc:tok", row.TokenEncrypted, "token 加密保存")
@@ -320,7 +323,7 @@ func TestSiteMap(t *testing.T) {
 	assert.False(t, byName["ourbits"].Configured, "pt-tools 里没配置")
 	assert.Empty(t, byName["nowhere"].SiteName)
 
-	e.enable(func(u *SettingsUpdate) { u.SiteNames = []string{"ourbits"} })
+	e.enable(func(u *SettingsUpdate) { u.SiteNames = &[]string{"ourbits"} })
 	items, err = e.svc.SiteMap(ctx)
 	require.NoError(t, err)
 	assert.False(t, items[0].Selected, "选了别的站点时 hdsky 不在范围内")
@@ -444,7 +447,7 @@ func TestRunPreconditions(t *testing.T) {
 	e := newEnv(t)
 	_, err := e.svc.Run(ctx)
 	assert.ErrorIs(t, err, iyuu.ErrNoToken)
-	e.enable(func(u *SettingsUpdate) { u.SiteNames = []string{"ourbits"} })
+	e.enable(func(u *SettingsUpdate) { u.SiteNames = &[]string{"ourbits"} })
 	_, err = e.svc.Run(ctx)
 	assert.ErrorIs(t, err, ErrNoSites, "选中的站点 pt-tools 里没配置")
 

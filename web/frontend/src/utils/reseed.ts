@@ -1,4 +1,4 @@
-import type { ReseedRecord, ReseedSiteMapItem } from "@/api";
+import type { ReseedRecord, ReseedSiteMapItem, ReseedSiteSelection } from "@/api";
 import { transferStateLabel } from "@/utils/transfer";
 
 type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
@@ -57,4 +57,16 @@ export function reseedSiteStatus(s: ReseedSiteMapItem): { label: string; tone: T
   if (!s.configured) return { label: "没有配置", tone: "warn" };
   if (!s.selected) return { label: "没有选中", tone: "neutral" };
   return { label: "参与辅种", tone: "ok" };
+}
+
+/** 按站点开关的结果重算每个 IYUU 站点在不在辅种范围（与服务端 mapSites 同一规则：只有已配置的站点能参与） */
+export function applySiteSelection(
+  items: ReseedSiteMapItem[],
+  sel: ReseedSiteSelection,
+): ReseedSiteMapItem[] {
+  const pick = new Set(sel.site_names);
+  return items.map((it) => ({
+    ...it,
+    selected: it.configured && (sel.site_mode === "all" || pick.has(it.site_name ?? "")),
+  }));
 }

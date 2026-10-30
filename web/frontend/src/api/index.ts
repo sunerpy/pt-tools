@@ -2655,6 +2655,8 @@ export interface ReseedSettings {
   interval_hours: number;
   downloader_ids: number[];
   site_names: string[];
+  /** 站点范围：all 是全部已配置、IYUU 也支持的站点（以后新配置的也算），selected 是只算 site_names */
+  site_mode: ReseedSiteMode;
   max_per_site_per_day: number;
   last_run_at?: string;
   last_result: string;
@@ -2669,8 +2671,17 @@ export interface ReseedSettingsUpdate {
   token?: string;
   interval_hours: number;
   downloader_ids: number[];
-  site_names: string[];
+  /** 不传时不动站点范围（站点在「站点」页用开关改） */
+  site_names?: string[];
   max_per_site_per_day: number;
+}
+
+export type ReseedSiteMode = "all" | "selected";
+
+/** 站点开关的结果：all 是全部站点，selected 是只算 site_names */
+export interface ReseedSiteSelection {
+  site_mode: ReseedSiteMode;
+  site_names: string[];
 }
 
 export interface ReseedSiteMapItem {
@@ -3709,6 +3720,12 @@ export const reseedApi = {
   saveSettings: (data: ReseedSettingsUpdate) =>
     api.put<ReseedSettings>("/api/reseed/settings", data),
   sites: () => api.get<{ items: ReseedSiteMapItem[] }>("/api/reseed/sites"),
+  /** 打开或关掉一个站点 */
+  setSite: (site: string, selected: boolean) =>
+    api.put<ReseedSiteSelection>(`/api/reseed/sites/${encodeURIComponent(site)}`, { selected }),
+  /** 全部打开（以后新配置的站点也自动参与）或全部关掉 */
+  setAllSites: (selected: boolean) =>
+    api.put<ReseedSiteSelection>("/api/reseed/sites", { selected }),
   run: () => api.post<{ started: boolean }>("/api/reseed/run", {}),
   records: () => api.get<{ items: ReseedRecord[] }>("/api/reseed/records"),
   jobs: (status: "" | "active" | "finished" = "") =>

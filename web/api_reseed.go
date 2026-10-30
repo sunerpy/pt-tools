@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/iyuu"
@@ -23,6 +24,7 @@ const reseedAPITimeout = time.Minute
 func (s *Server) registerReseedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/reseed/settings", s.auth(s.apiReseedSettings))
 	mux.HandleFunc("/api/reseed/sites", s.auth(s.apiReseedSites))
+	mux.HandleFunc("/api/reseed/sites/", s.auth(s.apiReseedSite))
 	mux.HandleFunc("/api/reseed/run", s.auth(s.apiReseedRun))
 	mux.HandleFunc("/api/reseed/records", s.auth(s.apiReseedRecords))
 	mux.HandleFunc("/api/reseed/jobs", s.auth(s.apiReseedJobs))
@@ -111,14 +113,46 @@ func (s *Server) apiReseedSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// apiReseedSites handles GET /api/reseed/sites：IYUU 支持的站点与 pt-tools 站点的对照。
-func (s *Server) apiReseedSites(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
+// reseedSiteToggle 是打开或关掉站点的请求。
+type reseedSiteToggle struct {
+	Selected *bool `json:"selected"`
+}
+
+func decodeSiteToggle(w http.ResponseWriter, r *http.Request) (bool, bool) {
+	var req reseedSiteToggle
+	if !decodeStrictBody(w, r, &req) {
+		return false, false
 	}
+	if req.Selected == nil {
+		http.Error(w, "请求格式错误: 缺少 selected", http.StatusBadRequest)
+		return false, false
+	}
+	return *req.Selected, true
+}
+
+// apiReseedSites handles GET /api/reseed/sites（IYUU 支持的站点与 pt-tools 站点的对照）
+// 与 PUT /api/reseed/sites {"selected": bool}（全部打开或全部关掉）。
+func (s *Server) apiReseedSites(w http.ResponseWriter, r *http.Request) {
 	_, svc, ok := s.reseedWorker(w)
 	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+	case http.MethodPut:
+		selected, ok := decodeSiteToggle(w, r)
+		if !ok {
+			return
+		}
+		got, err := svc.SetAllSitesSelected(r.Context(), selected)
+		if err != nil {
+			writeReseedError(w, err)
+			return
+		}
+		writeJSON(w, got)
+		return
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), reseedAPITimeout)
@@ -129,6 +163,33 @@ func (s *Server) apiReseedSites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"items": items})
+}
+
+// apiReseedSite handles PUT /api/reseed/sites/{site} {"selected": bool}：打开或关掉一个站点。
+func (s *Server) apiReseedSite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	site := strings.TrimPrefix(r.URL.Path, "/api/reseed/sites/")
+	if site == "" || strings.Contains(site, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	_, svc, ok := s.reseedWorker(w)
+	if !ok {
+		return
+	}
+	selected, ok := decodeSiteToggle(w, r)
+	if !ok {
+		return
+	}
+	got, err := svc.SetSiteSelected(r.Context(), site, selected)
+	if err != nil {
+		writeReseedError(w, err)
+		return
+	}
+	writeJSON(w, got)
 }
 
 // apiReseedRun handles POST /api/reseed/run：在后台马上跑一轮，不等它结束（结果写进设置的 last_result）。

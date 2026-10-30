@@ -37,8 +37,11 @@ type ReseedSetting struct {
 	IntervalHours int `gorm:"not null;default:0" json:"interval_hours"`
 	// DownloaderIDs 是参与辅种的下载器（JSON 数组，空表示全部启用的下载器）。
 	DownloaderIDs string `gorm:"type:text;default:''" json:"-"`
-	// SiteNames 是允许辅种的站点（JSON 数组，空表示全部已配置、IYUU 也支持的站点）。
+	// SiteNames 是允许辅种的站点（JSON 数组）；SiteMode 为 ReseedSitesSelected 时只辅种这些站点。
 	SiteNames string `gorm:"type:text;default:''" json:"-"`
+	// SiteMode 是站点范围：ReseedSitesAll（全部已配置、IYUU 也支持的站点，以后新配置的也算）或 ReseedSitesSelected（只算 SiteNames）。
+	// 旧数据为空串：SiteNames 为空时是全部，不为空时只算 SiteNames（见 ReseedSiteModeOf）。
+	SiteMode string `gorm:"size:16;not null;default:''" json:"-"`
 	// MaxPerSitePerDay 是每个站点每天最多加几个辅种（0 时按 ReseedDefaultMaxPerSitePerDay）。
 	MaxPerSitePerDay int `gorm:"not null;default:0" json:"max_per_site_per_day"`
 	// SidSha1 是 IYUU 的 reportExisting 返回的站点哈希，SidKey 是当时报告的站点 sid 列表；7 天内站点没变时复用。
@@ -53,6 +56,25 @@ type ReseedSetting struct {
 
 // TableName 指定表名。
 func (ReseedSetting) TableName() string { return "reseed_settings" }
+
+// 辅种的站点范围。
+const (
+	ReseedSitesAll      = "all"
+	ReseedSitesSelected = "selected"
+)
+
+// ReseedSiteModeOf 是设置里生效的站点范围：SiteMode 为空（旧数据）时，名单为空是全部，不为空是只算名单。
+// siteNames 是解出来的名单。
+func ReseedSiteModeOf(mode string, siteNames []string) string {
+	switch mode {
+	case ReseedSitesAll, ReseedSitesSelected:
+		return mode
+	}
+	if len(siteNames) == 0 {
+		return ReseedSitesAll
+	}
+	return ReseedSitesSelected
+}
 
 // 辅种设置的默认值与范围。
 const (

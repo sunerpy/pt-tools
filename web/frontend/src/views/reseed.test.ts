@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
   settings: vi.fn(),
   saveSettings: vi.fn(),
   sites: vi.fn(),
+  setSite: vi.fn(),
+  setAllSites: vi.fn(),
   run: vi.fn(),
   records: vi.fn(),
   jobs: vi.fn(),
@@ -83,6 +85,7 @@ function settings(extra: Record<string, unknown> = {}) {
     interval_hours: 12,
     downloader_ids: [],
     site_names: [],
+    site_mode: "all",
     max_per_site_per_day: 20,
     last_result: "",
     running: false,
@@ -226,6 +229,39 @@ describe("IYUU 辅种", () => {
     expect(text).toContain("参与辅种");
     expect(text).toContain("没有配置");
     expect(text).toContain("pt-tools 不支持");
+  });
+
+  it("站点用开关打开或关掉；全部关掉以后写明新站点默认不参与", async () => {
+    await mountPage(settings({ has_token: true }));
+    await chooseTab("站点");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("hdsky.me"));
+    expect(document.querySelector("[data-testid=rs-site-switch-ourbits]")).toBeNull();
+    expect(document.querySelector("[data-testid=rs-sites-mode-note]")).toBeNull();
+
+    api.setSite.mockResolvedValue({ site_mode: "selected", site_names: [] });
+    testid("rs-site-switch-hdsky").click();
+    await vi.waitFor(() => expect(api.setSite).toHaveBeenCalledWith("hdsky", false));
+    await vi.waitFor(() =>
+      expect(testid("rs-sites-mode-note").textContent).toContain("默认不参与"),
+    );
+    expect(testid("rs-site-switch-hdsky").classList.contains("is-checked")).toBe(false);
+
+    api.setAllSites.mockResolvedValue({ site_mode: "all", site_names: [] });
+    testid("rs-sites-all-on").click();
+    await vi.waitFor(() => expect(api.setAllSites).toHaveBeenCalledWith(true));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=rs-sites-mode-note]")).toBeNull(),
+    );
+    expect(testid("rs-site-switch-hdsky").classList.contains("is-checked")).toBe(true);
+  });
+
+  it("设置里不再保存站点名单（站点在「站点」页用开关改）", async () => {
+    await mountPage(settings({ has_token: true, site_mode: "selected", site_names: ["hdsky"] }));
+    expect(document.querySelector("[data-testid=rs-sites]")).toBeNull();
+    api.saveSettings.mockResolvedValue(settings({ has_token: true }));
+    testid("rs-save").click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalled());
+    expect(api.saveSettings.mock.calls[0][0]).not.toHaveProperty("site_names");
   });
 
   it("记录写明结果与原因；立即运行在后台跑", async () => {

@@ -10,6 +10,7 @@ import {
   type ReseedRecord,
   type ReseedSettings,
   type ReseedSiteMapItem,
+  type ReseedSiteSelection,
   reseedApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
@@ -23,6 +24,7 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
 import {
+  applySiteSelection,
   reseedRecordActive,
   reseedRecordMessage,
   reseedRecordResult,
@@ -51,7 +53,6 @@ const form = ref({
   token: "",
   interval_hours: 12,
   downloader_ids: [] as number[],
-  site_names: [] as string[],
   max_per_site_per_day: 20,
 });
 const loadFailed = ref(false);
@@ -62,7 +63,9 @@ const starting = ref(false);
 const sitesDS = useDataState();
 const sites = ref<ReseedSiteMapItem[]>([]);
 const sitesLoaded = ref(false);
-const configuredSites = computed(() => sites.value.filter((s) => s.configured));
+/** 正在保存开关的站点（site_name；全部开关时是 *） */
+const siteSaving = ref<string | null>(null);
+const siteMode = computed(() => settings.value?.site_mode ?? "all");
 
 // ---- 记录 ----
 const recordsDS = useDataState();
@@ -87,7 +90,6 @@ function fill(s: ReseedSettings) {
     token: "",
     interval_hours: s.interval_hours,
     downloader_ids: [...(s.downloader_ids ?? [])],
-    site_names: [...(s.site_names ?? [])],
     max_per_site_per_day: s.max_per_site_per_day,
   };
 }
@@ -154,7 +156,6 @@ async function save(clearToken = false) {
       ...(clearToken ? { token: "" } : token ? { token } : {}),
       interval_hours: form.value.interval_hours,
       downloader_ids: form.value.downloader_ids,
-      site_names: form.value.site_names,
       max_per_site_per_day: form.value.max_per_site_per_day,
     });
     if (s) fill(s);
@@ -167,6 +168,29 @@ async function save(clearToken = false) {
     ElMessage.error((e as Error).message || "保存失败");
   } finally {
     saving.value = false;
+  }
+}
+
+function applySelection(sel: ReseedSiteSelection) {
+  if (settings.value) {
+    settings.value = { ...settings.value, site_mode: sel.site_mode, site_names: sel.site_names };
+  }
+  sites.value = applySiteSelection(sites.value, sel);
+}
+
+/** 打开或关掉一个站点（name 为 * 时是全部） */
+async function toggleSite(name: string, selected: boolean) {
+  siteSaving.value = name;
+  try {
+    const sel =
+      name === "*"
+        ? await reseedApi.setAllSites(selected)
+        : await reseedApi.setSite(name, selected);
+    if (sel) applySelection(sel);
+  } catch (e) {
+    ElMessage.error((e as Error).message || "保存失败");
+  } finally {
+    siteSaving.value = null;
   }
 }
 
@@ -327,22 +351,7 @@ onBeforeUnmount(() => {
                 <el-option v-for="d in downloaders" :key="d.id" :label="d.name" :value="d.id" />
               </el-select>
             </el-form-item>
-            <el-form-item label="参与的站点">
-              <el-select
-                v-model="form.site_names"
-                multiple
-                clearable
-                :placeholder="
-                  sitesLoaded ? '全部已配置、IYUU 也支持的站点' : '填写 token 后在「站点」里查看'
-                "
-                data-testid="rs-sites">
-                <el-option
-                  v-for="s in configuredSites"
-                  :key="s.site_name"
-                  :label="`${s.nickname || s.iyuu_site}（${s.site_name}）`"
-                  :value="s.site_name!" />
-              </el-select>
-            </el-form-item>
+            <div class="field-tip rs-sites-tip">参与辅种的站点在「站点」里用开关设置。</div>
             <el-button type="primary" :loading="saving" data-testid="rs-save" @click="save()">
               <PtIcon v-if="!saving" name="save" :size="14" /><span>保存</span>
             </el-button>
@@ -385,6 +394,33 @@ onBeforeUnmount(() => {
       title="IYUU 站点"
       icon="globe"
       :count="sitesLoaded ? sites.length : undefined">
+      <template v-if="sites.some((s) => s.configured)" #actions>
+        <el-button
+          link
+          size="small"
+          :disabled="siteSaving !== null"
+          data-testid="rs-sites-all-on"
+          @click="toggleSite('*', true)">
+          全部开启
+        </el-button>
+        <el-button
+          link
+          size="small"
+          :disabled="siteSaving !== null"
+          data-testid="rs-sites-all-off"
+          @click="toggleSite('*', false)">
+          全部关闭
+        </el-button>
+      </template>
+      <div
+        v-if="sitesLoaded && siteMode === 'selected'"
+        class="pt-note"
+        data-testid="rs-sites-mode-note">
+        <PtIcon name="info" :size="14" class="pt-note__icon" />
+        <span
+          >只辅种打开了开关的站点；以后新配置的站点默认不参与，要在这里打开。点「全部开启」恢复为全部站点（以后新配置的也自动参与）。</span
+        >
+      </div>
       <div
         v-if="sites.length && sitesDS.error.value"
         class="pt-note pt-note--warn"
@@ -416,9 +452,17 @@ onBeforeUnmount(() => {
         <el-table-column label="pt-tools 站点" min-width="140">
           <template #default="{ row }">{{ row.site_name || "—" }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="130">
+        <el-table-column label="参与辅种" width="130">
           <template #default="{ row }">
-            <PtStatusPill :tone="reseedSiteStatus(row).tone" size="sm">{{
+            <el-switch
+              v-if="row.configured"
+              :model-value="row.selected"
+              :loading="siteSaving === row.site_name"
+              :disabled="siteSaving !== null"
+              :aria-label="`${row.nickname || row.iyuu_site}参与辅种`"
+              :data-testid="`rs-site-switch-${row.site_name}`"
+              @change="(v: string | number | boolean) => toggleSite(row.site_name, Boolean(v))" />
+            <PtStatusPill v-else :tone="reseedSiteStatus(row).tone" size="sm">{{
               reseedSiteStatus(row).label
             }}</PtStatusPill>
           </template>
@@ -433,7 +477,15 @@ onBeforeUnmount(() => {
             >
           </template>
           <template #status>
-            <PtStatusPill :tone="reseedSiteStatus(s).tone" size="sm">{{
+            <el-switch
+              v-if="s.configured"
+              :model-value="s.selected"
+              :loading="siteSaving === s.site_name"
+              :disabled="siteSaving !== null"
+              :aria-label="`${s.nickname || s.iyuu_site}参与辅种`"
+              :data-testid="`rs-site-switch-${s.site_name}`"
+              @change="(v: string | number | boolean) => toggleSite(s.site_name!, Boolean(v))" />
+            <PtStatusPill v-else :tone="reseedSiteStatus(s).tone" size="sm">{{
               reseedSiteStatus(s).label
             }}</PtStatusPill>
           </template>
@@ -521,6 +573,10 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 0 16px;
+}
+
+.rs-sites-tip {
+  margin: -6px 0 16px;
 }
 
 .rs-tip {
