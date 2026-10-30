@@ -11,6 +11,9 @@ export function reseedRecordResult(r: Pick<ReseedRecord, "state" | "job_state" |
   switch (r.state) {
     case "failed":
       return { label: "失败", tone: "dang" };
+    case "gone":
+      // 站点上删了这个种子（IYUU 的索引里还有）：不是失败，不再尝试
+      return { label: "站点已删除", tone: "neutral" };
     case "done":
       return { label: "已辅种", tone: "ok" };
     case "rolled_back":

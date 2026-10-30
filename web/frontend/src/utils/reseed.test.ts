@@ -10,6 +10,8 @@ import {
 describe("reseed utils", () => {
   it("labels records by their job", () => {
     expect(reseedRecordResult({ state: "failed" }).label).toBe("失败");
+    // 站点上已经删了的种子不算失败
+    expect(reseedRecordResult({ state: "gone" })).toEqual({ label: "站点已删除", tone: "neutral" });
     expect(reseedRecordResult({ state: "queued", job_state: "source_removed" })).toEqual({
       label: "已辅种",
       tone: "ok",
