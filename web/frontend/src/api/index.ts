@@ -2691,8 +2691,8 @@ export interface ReseedRecord {
   source_hash: string;
   downloader_id: number;
   name: string;
-  /** queued 时结果看任务；done / rolled_back / canceled 是任务记录清除后留下的结果 */
-  state: "queued" | "failed" | "done" | "rolled_back" | "canceled";
+  /** queued 时结果看任务；done / rolled_back / canceled 是任务记录清除后留下的结果；gone 是站点上已经删了这个种子（不再尝试） */
+  state: "queued" | "failed" | "gone" | "done" | "rolled_back" | "canceled";
   message: string;
   job_id?: number;
   job_state?: TransferState;

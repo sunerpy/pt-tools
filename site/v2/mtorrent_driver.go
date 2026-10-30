@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -754,6 +755,9 @@ func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 // ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消（BaseSite 下载时用它）。
 func (d *MTorrentDriver) ParseDownloadContext(ctx context.Context, res MTorrentResponse) ([]byte, error) {
 	if !res.Code.IsSuccess() {
+		if mteamTorrentMissing(res.Message) {
+			return nil, fmt.Errorf("%w（M-Team：%s）", ErrTorrentNotFound, strings.TrimSpace(res.Message))
+		}
 		// Log raw response for debugging
 		rawBody := string(res.RawBody)
 		if len(rawBody) > 500 {
@@ -807,10 +811,43 @@ func (d *MTorrentDriver) fetchTorrentOnce(ctx context.Context, downloadURL, safe
 
 	data := resp.Body
 	if err := ValidateTorrentFile(data); err != nil {
+		if apiErr := mteamDownloadAPIError(data); apiErr != nil {
+			return nil, apiErr
+		}
 		return nil, fmt.Errorf("invalid torrent response from %s: size=%d, preview=%q, err=%w", safeURL, len(data), torrentResponsePreview(data), err)
 	}
 
 	return data, nil
+}
+
+// mteamDownloadAPIError 认出下载节点在种子文件的位置上回的 API 错误，例如种子删了以后的
+// {"code":"1","data":null,"message":"種子未找到"}（2026-10-30 生产，IYUU 辅种）。种子不在了是 ErrTorrentNotFound：
+// 辅种不再为它重试；别的错误带上站点的原话与 code。不是这种回应时返回 nil。错误里不写下载地址（里面有账号的 uid）。
+func mteamDownloadAPIError(data []byte) error {
+	body := bytes.TrimSpace(data)
+	if len(body) == 0 || body[0] != '{' {
+		return nil
+	}
+	var r MTorrentResponse
+	if json.Unmarshal(body, &r) != nil || r.Code == "" || r.Code.IsSuccess() {
+		return nil
+	}
+	msg := strings.TrimSpace(r.Message)
+	if mteamTorrentMissing(msg) {
+		return fmt.Errorf("%w（M-Team：%s）", ErrTorrentNotFound, msg)
+	}
+	return fmt.Errorf("M-Team 没有给种子文件（code %s：%s）", r.Code.String(), sanitizeRawURLs(msg))
+}
+
+// mteamTorrentMissing 报告 M-Team 的回应是不是说这个种子不在了（繁体、简体与英文的说法）。
+func mteamTorrentMissing(message string) bool {
+	m := strings.ToLower(strings.TrimSpace(message))
+	for _, s := range []string{"種子未找到", "种子未找到", "種子不存在", "种子不存在", "torrent not found"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func torrentResponsePreview(data []byte) string {

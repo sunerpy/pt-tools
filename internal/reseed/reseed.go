@@ -391,6 +391,8 @@ const (
 	SkipTried       = "已经尝试过"
 	SkipDailyLimit  = "今天这个站点已经加满"
 	SkipActive      = "已有进行中的任务"
+	// SkipGone 是站点上已经删了的种子（下载时站点回「种子未找到」），记下来以后不再试
+	SkipGone = "站点上已经没有这个种子"
 )
 
 func (r *RunResult) skip(why string) {
@@ -697,6 +699,13 @@ func (s *Service) attempt(ctx context.Context, src source, c iyuu.Candidate, sit
 		return
 	}
 	data, err := inst.Download(ctx, c.TorrentID)
+	if errors.Is(err, v2.ErrTorrentNotFound) {
+		// 站点上删了（IYUU 的索引里还有）：不是失败，也不会过几天就有，记下来不再试
+		res.skip(SkipGone)
+		rec.State, rec.Message = models.ReseedGone, "站点上已经没有这个种子（多半已被删除）"
+		s.saveRecord(ctx, &rec)
+		return
+	}
 	if err != nil {
 		retryLater("下载种子失败: " + err.Error())
 		return

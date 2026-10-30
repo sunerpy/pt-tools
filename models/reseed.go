@@ -73,6 +73,8 @@ const (
 	ReseedQueued = "queued"
 	// ReseedFailed 是下载种子、核对 info hash 或文件列表失败；同一对不再尝试。
 	ReseedFailed = "failed"
+	// ReseedGone 是站点上已经没有这个种子（删了，IYUU 的索引里还有）：同一对不再尝试，也不算失败。
+	ReseedGone = "gone"
 	// 下面几个是清除已结束的辅种任务时，写进记录里的任务结果（任务失败的记为 ReseedFailed）。
 	ReseedDone       = "done"
 	ReseedRolledBack = "rolled_back"

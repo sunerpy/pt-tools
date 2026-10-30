@@ -244,7 +244,12 @@ func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]
 		data, err = b.driver.ParseDownload(res)
 	}
 	if err != nil {
-		b.logger.Error("Failed to parse download response", zap.Error(err))
+		// 站点上已经没有这个种子（删了；IYUU 辅种常遇到）：是站点的状态不是故障，记警告
+		if errors.Is(err, ErrTorrentNotFound) {
+			b.logger.Warn("Torrent not found on site", zap.String("torrentID", torrentID), zap.Error(err))
+		} else {
+			b.logger.Error("Failed to parse download response", zap.String("torrentID", torrentID), zap.Error(err))
+		}
 		return nil, fmt.Errorf("parse download: %w", err)
 	}
 

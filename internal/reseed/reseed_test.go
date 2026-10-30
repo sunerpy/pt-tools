@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -107,9 +108,19 @@ func (f *fakeDL) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
 type fakeSite struct {
 	v2.Site
 	data map[string][]byte
+	// gone 是站点上已经删了的种子：下载时站点回「种子未找到」
+	gone      map[string]bool
+	downloads map[string]int
 }
 
 func (s *fakeSite) Download(_ context.Context, id string) ([]byte, error) {
+	if s.downloads == nil {
+		s.downloads = map[string]int{}
+	}
+	s.downloads[id]++
+	if s.gone[id] {
+		return nil, fmt.Errorf("parse download: %w（M-Team：種子未找到）", v2.ErrTorrentNotFound)
+	}
 	if d, ok := s.data[id]; ok {
 		return d, nil
 	}
@@ -668,4 +679,32 @@ func TestSettingsNextRun(t *testing.T) {
 	got, err = e.svc.Settings(ctx)
 	require.NoError(t, err)
 	assert.WithinDuration(t, e.now, *got.NextRunAt, 0, "已经到点：下一次检查时跑")
+}
+
+// IYUU 的索引里还有、站点上已经删了的种子（2026-10-30 生产：M-Team 回「種子未找到」）：不算失败，记为「站点上已删除」，
+// 过了重试间隔也不再去下（以前记为可重试，7 天后又下一次，每次都报错）。
+func TestRunSkipsTorrentGoneFromSite(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	gone := e.candidate("61", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	delete(e.site.data, "61")
+	e.site.gone = map[string]bool{"61": true}
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 61, "info_hash": gone})
+
+	res, err := e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Zero(t, res.Failed, "站点上删了不算失败")
+	assert.Equal(t, 1, res.Skipped[SkipGone])
+	var rec models.ReseedRecord
+	require.NoError(t, e.db.Where("info_hash = ?", gone).First(&rec).Error)
+	assert.Equal(t, models.ReseedGone, rec.State)
+	assert.False(t, rec.Retryable)
+	assert.Contains(t, rec.Message, "站点上已经没有这个种子")
+
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Skipped[SkipTried], "过了重试间隔也不再试")
+	assert.Equal(t, 1, e.site.downloads["61"], "只下过一次")
 }
