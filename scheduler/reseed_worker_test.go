@@ -262,12 +262,12 @@ func TestReseedWorker_InterruptedAndContinue(t *testing.T) {
 	}).Error)
 	w.cfg.StartupDelay = time.Hour
 	w.Start()
+	// 轮次与尝试是先后两条 UPDATE：两个都改完才算补记完
 	require.Eventually(t, func() bool {
-		return reseedRunRow(t, db, stale.ID).Status == models.ReseedRunInterrupted
+		var att models.ReseedAttempt
+		return reseedRunRow(t, db, stale.ID).Status == models.ReseedRunInterrupted &&
+			db.First(&att).Error == nil && att.Outcome == models.ReseedAttemptInterrupted
 	}, 5*time.Second, 10*time.Millisecond)
-	var att models.ReseedAttempt
-	require.NoError(t, db.First(&att).Error)
-	assert.Equal(t, models.ReseedAttemptInterrupted, att.Outcome)
 
 	after, from, err := svc.ContinuePoint(ctx)
 	require.NoError(t, err)
