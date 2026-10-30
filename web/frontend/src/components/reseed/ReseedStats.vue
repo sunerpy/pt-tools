@@ -18,7 +18,6 @@ import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue"
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtKpiBar from "@/components/ui/PtKpiBar.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
-import { useIsMobile } from "@/composables/useIsMobile";
 import {
   BRUSH_PERIODS,
   type BrushPeriod,
@@ -46,7 +45,6 @@ const RANGES: { label: string; value: Range }[] = [
 /** 自定义范围最长 5 年（尝试行保留 5 年） */
 const MAX_DAYS = 5 * 366;
 
-const isMobile = useIsMobile();
 const range = ref<Range>("day");
 /** 自定义的两天（YYYY-MM-DD，含两头） */
 const customDays = ref<[string, string] | null>(null);
@@ -217,10 +215,10 @@ const iyuuRange = computed(() => reseedIYUUCallsText(stats.value?.iyuu ?? []));
 <template>
   <div class="rst" :aria-busy="loading" data-testid="rs-stats">
     <div class="rst-range" role="group" aria-label="统计范围">
+      <!-- 不用 block：六档等宽时「自定义」在手机上放不下、被省略成「自.」 -->
       <el-segmented
         v-model="range"
         class="pt-seg"
-        :block="isMobile"
         :options="RANGES"
         :props="{ label: 'label', value: 'value' }"
         data-testid="rs-stats-range" />
