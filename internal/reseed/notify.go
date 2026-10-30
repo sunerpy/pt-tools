@@ -71,7 +71,7 @@ func (s *Service) NotifyTarget(ctx context.Context) (mode string, channels []uin
 	return notifyModeOf(r.NotifyMode), decodeUints(r.NotifyChannelIDs), nil
 }
 
-// RoundChanged 报告这一轮算不算「有变化」：加入了辅种、有失败，或者没跑完（部分出错、提前停下、被停止、没能开始）。
+// RoundChanged 报告这一轮算不算「有变化」：加入了辅种、有失败，或者没跑完（部分出错、提前停下、被停止、未能开始）。
 func RoundChanged(res RunResult, status string) bool {
 	return res.Created > 0 || res.Failed > 0 || status != models.ReseedRunOK
 }
@@ -83,7 +83,7 @@ var (
 		models.ReseedRunPartial: "完成，部分出错",
 		models.ReseedRunLimited: "提前停下",
 		models.ReseedRunStopped: "已停止",
-		models.ReseedRunFailed:  "没能开始",
+		models.ReseedRunFailed:  "未能开始",
 	}
 	roundTriggerText = map[string]string{
 		models.ReseedTriggerSchedule: "定时",

@@ -96,7 +96,7 @@ const RUN_STATUS: Record<ReseedRunStatus, { label: string; tone: Tone }> = {
   partial: { label: "部分出错", tone: "warn" },
   stopped: { label: "已停止", tone: "neutral" },
   limited: { label: "提前停下", tone: "warn" },
-  failed: { label: "没能开始", tone: "dang" },
+  failed: { label: "未能开始", tone: "dang" },
   interrupted: { label: "被打断", tone: "neutral" },
 };
 

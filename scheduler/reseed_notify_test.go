@@ -65,7 +65,7 @@ func TestReseedWorker_NotifyRound(t *testing.T) {
 	assert.EqualValues(t, 1, payload.Event.Fields["created"])
 	assert.Equal(t, "ok", payload.Event.Fields["status"])
 
-	// 只在有变化时：跑完、没有加入也没有失败的不发；提前停下、没能开始的发
+	// 只在有变化时：跑完、没有加入也没有失败的不发；提前停下、未能开始的发
 	setMode(models.ReseedNotifyChanges, 1)
 	round(reseed.RunResult{Hashes: 5, Candidates: 1, Gone: 1}, nil)
 	assert.Len(t, rows(), 1, "没有变化")
@@ -77,7 +77,7 @@ func TestReseedWorker_NotifyRound(t *testing.T) {
 	assert.Contains(t, payload.Title, "提前停下")
 	assert.Contains(t, payload.Text, "里点「继续」")
 	payload = decodeReseedPayload(t, got[2])
-	assert.Equal(t, fmt.Sprintf("辅种：第 %d 轮没能开始（立即运行）", failedID), payload.Title)
+	assert.Equal(t, fmt.Sprintf("辅种：第 %d 轮未能开始（立即运行）", failedID), payload.Title)
 	assert.Equal(t, "读取站点列表失败", payload.Event.Fields["stopped"])
 
 	// 退出时被打断的不发

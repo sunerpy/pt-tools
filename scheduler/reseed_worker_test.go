@@ -98,7 +98,7 @@ func TestReseedWorker_RunsWhenDue(t *testing.T) {
 	require.NoError(t, db.Find(&runs).Error)
 	require.NotEmpty(t, runs)
 	assert.Equal(t, models.ReseedTriggerSchedule, runs[0].Trigger)
-	assert.Equal(t, models.ReseedRunFailed, runs[0].Status, "没能开始：没有站点")
+	assert.Equal(t, models.ReseedRunFailed, runs[0].Status, "未能开始：没有站点")
 	assert.Contains(t, runs[0].Error, "没有可以辅种的站点")
 	assert.NotNil(t, runs[0].FinishedAt)
 }

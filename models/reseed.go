@@ -214,7 +214,7 @@ const (
 	ReseedRunStopped = "stopped"
 	// ReseedRunLimited 是超时、IYUU 限流或到了每天的请求上限而提前停下
 	ReseedRunLimited = "limited"
-	// ReseedRunFailed 是没能开始（没有 token、没有站点等）
+	// ReseedRunFailed 是未能开始（没有 token、没有站点等）
 	ReseedRunFailed = "failed"
 	// ReseedRunInterrupted 是 pt-tools 退出时这一轮还没跑完（启动时补记）
 	ReseedRunInterrupted = "interrupted"

@@ -715,7 +715,7 @@ onBeforeUnmount(() => {
                     :value="m.value" />
                 </el-select>
                 <div class="field-tip">
-                  「有变化」是这一轮加入了辅种、有失败，或者没跑完（部分出错、提前停下、被停止、没能开始）。只发计数，不列种子名
+                  「有变化」是这一轮加入了辅种、有失败，或者没跑完（部分出错、提前停下、被停止、未能开始）。只发计数，不列种子名
                 </div>
               </el-form-item>
               <el-form-item label="接收通道">
@@ -1259,7 +1259,7 @@ onBeforeUnmount(() => {
         正在下载的那一个会被打断（不记失败，以后照常再试）。已经建好的辅种任务照常加入和校验；没查完的部分可以在「轮次」里继续。
       </p>
       <el-checkbox v-model="stopCancelPending" data-testid="rs-stop-cancel-pending"
-        >同时取消这一轮建的、还没加入下载器的任务</el-checkbox
+        >同时取消这一轮建的、尚未加入下载器的任务</el-checkbox
       >
       <template #footer>
         <el-button @click="stopDialog = false">取消</el-button>

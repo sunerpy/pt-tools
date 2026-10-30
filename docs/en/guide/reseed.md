@@ -55,7 +55,7 @@ The Rounds (轮次) tab keeps one entry per round (scheduled, Run now, continued
 While a round runs, the page header has Pause (暂停) and Stop (停止):
 
 - Pause: the round stops after the torrent it is downloading and waits until you click Continue (继续); time spent paused does not count towards the 30 minutes. A pause longer than 24 hours stops the round, so a forgotten pause does not hold up the scheduled rounds.
-- Stop: the torrent being downloaded is interrupted, is not recorded as failed, and is tried again as usual later; cross-seeding jobs already created are added and checked as usual. With Also cancel the jobs this round created that are not in the downloader yet (同时取消这一轮建的、还没加入下载器的任务) ticked, those jobs are cancelled when the round ends.
+- Stop: the torrent being downloaded is interrupted, is not recorded as failed, and is tried again as usual later; cross-seeding jobs already created are added and checked as usual. With Also cancel the jobs this round created that are not in the downloader yet (同时取消这一轮建的、尚未加入下载器的任务) ticked, those jobs are cancelled when the round ends.
 - Continue: a round that stopped early (stopped, out of time, rate-limited by IYUU, or unfinished when pt-tools exited) can be continued from the Rounds tab, which queries only the part it had not finished; only the latest round can be continued. The next scheduled round also carries on from there, and the round after it reaches the end starts from the beginning again.
 
 ## IYUU requests and rate limits

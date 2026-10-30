@@ -108,7 +108,7 @@ func TestNewRoundNotice(t *testing.T) {
 	assert.NotContains(t, n.Text, "继续", "重试轮次不能继续")
 
 	n = NewRoundNotice(Round{ID: 15, Trigger: models.ReseedTriggerContinue, Status: models.ReseedRunFailed, Reason: "读取站点列表失败。", Summary: "运行失败：读取站点列表失败。"})
-	assert.Equal(t, "辅种：第 15 轮没能开始（继续）", n.Title)
+	assert.Equal(t, "辅种：第 15 轮未能开始（继续）", n.Title)
 	assert.Equal(t, "运行失败：读取站点列表失败。\n用时 0 秒。", n.Text, "不重复句号")
 	assert.Equal(t, "读取站点列表失败。", n.Fields["stopped"])
 }

@@ -275,7 +275,7 @@ func TestReseedAPI_Runs(t *testing.T) {
 	for _, a := range []string{"pause", "resume", "stop"} {
 		assert.Equal(t, http.StatusConflict, serveAuthed(mux, http.MethodPost, path+"/"+a, "").Code, a+"：不是正在跑的那一轮")
 	}
-	assert.Equal(t, http.StatusConflict, serveAuthed(mux, http.MethodPost, path+"/continue", "").Code, "没能开始的轮次不能继续")
+	assert.Equal(t, http.StatusConflict, serveAuthed(mux, http.MethodPost, path+"/continue", "").Code, "未能开始的轮次不能继续")
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, path+"/stop", `{"x":1}`).Code)
 	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodGet, "/api/reseed/runs/999", "").Code)
 	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodGet, "/api/reseed/runs/999/attempts", "").Code)

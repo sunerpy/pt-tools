@@ -358,7 +358,7 @@ var notifyEvents = []EventSpec{
 			{Key: "iyuu_calls", Type: VarInt, Desc: "这一轮请求 IYUU 的次数", Sample: int64(3)},
 			{Key: "duration", Type: VarString, Desc: "用了多久（不含暂停的时间）", Sample: "4 分钟"},
 			{Key: "duration_seconds", Type: VarInt, Desc: "用了多久（秒，不含暂停的时间）", Sample: int64(250)},
-			{Key: "stopped", Type: VarString, Desc: "没跑完的原因（提前停下、被停止、没能开始时才有）", Sample: ""},
+			{Key: "stopped", Type: VarString, Desc: "没跑完的原因（提前停下、被停止、未能开始时才有）", Sample: ""},
 			{Key: "summary", Type: VarString, Desc: "一句话结果", Sample: "查询 1200 个种子，找到 35 个可辅种，加入 3 个，失败 1 个，跳过 31 个"},
 		},
 		SampleTitle: "辅种：第 12 轮完成（定时）",
