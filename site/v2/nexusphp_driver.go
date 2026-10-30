@@ -403,6 +403,25 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	return result, nil
 }
 
+// nexusMissingTorrentTexts 是种子不在了时详情页上的话：上游 NexusPHP 的 details.php 查不到种子时
+// stderr(std_error, std_no_torrent_id)，lang/chs、cht、en 的 lang_details.php 依次是这三句。
+var nexusMissingTorrentTexts = []string{"没有该ID的种子", "沒有該ID的種子", "No torrent with this ID"}
+
+// nexusTorrentMissing 报告详情页是不是「没有该ID的种子」这类页面，返回页面上的那句话（站点删了这个种子）。
+func nexusTorrentMissing(doc *goquery.Document) (string, bool) {
+	if doc == nil {
+		return "", false
+	}
+	text := strings.Join(strings.Fields(doc.Find("body").Text()), " ")
+	lower := strings.ToLower(text)
+	for _, s := range nexusMissingTorrentTexts {
+		if strings.Contains(lower, strings.ToLower(s)) {
+			return s, true
+		}
+	}
+	return "", false
+}
+
 // pageTitleLimit 是错误里写的页面标题最多多少个字。
 const pageTitleLimit = 60
 
@@ -1774,7 +1793,10 @@ func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPR
 	}
 
 	if detail.DownloadURL == "" {
-		return nil, fmt.Errorf("no download URL found in detail page")
+		if text, ok := nexusTorrentMissing(res.Document); ok {
+			return nil, fmt.Errorf("%w（详情页：%s）", ErrTorrentNotFound, text)
+		}
+		return nil, withPageTitle(errors.New("no download URL found in detail page"), res.Document)
 	}
 
 	downloadURL, sameSite, err := d.resolveDetailDownloadURL(detail.DownloadURL)
