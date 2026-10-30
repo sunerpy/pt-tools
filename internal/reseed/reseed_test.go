@@ -443,7 +443,7 @@ func TestRunRateLimitAndRefresh(t *testing.T) {
 	e2.iyuu.queryCodes, e2.iyuu.retryAfter = []int{429}, 600
 	res, err = e2.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
-	assert.Contains(t, res.Stopped, "600 秒后再试")
+	assert.Contains(t, res.Stopped, e2.now.Add(600*time.Second).Format("01-02 15:04:05")+" 以后再试", "写冷却到什么时候")
 	assert.Empty(t, e2.slept, "等太久就不等")
 
 	e3 := newEnv(t)

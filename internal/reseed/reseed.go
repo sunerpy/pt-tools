@@ -395,7 +395,7 @@ func (s *Service) SiteMap(ctx context.Context) ([]SiteMapItem, error) {
 	}
 	sites, err := s.iyuuSites(ctx, nil, s.cfg.NewClient(token), token)
 	if err != nil {
-		return nil, err
+		return nil, s.limitErr(ctx, err)
 	}
 	return s.mapSites(sites, r), nil
 }

@@ -13,6 +13,7 @@ import { formatShortDateTime } from "@/utils/format";
 import {
   reseedAttemptResult,
   reseedRunDuration,
+  reseedRunLive,
   reseedRunStatus,
   reseedRunTrigger,
   reseedStepKind,
@@ -76,9 +77,12 @@ watch(
   { immediate: true },
 );
 
+/** 还在跑（或暂停中）：各项计数要等这一轮结束才写进记录，跑的时候看页面上方的进度 */
+const live = computed(() => Boolean(run.value && reseedRunLive(run.value.status)));
+
 const counts = computed(() => {
   const r = run.value;
-  if (!r) return [];
+  if (!r || live.value) return [];
   const out: { label: string; value: string }[] = [];
   if (r.trigger === "retry") out.push({ label: "重试的记录", value: `${r.hashes} 条` });
   else {
@@ -141,7 +145,9 @@ defineExpose({ reload: () => load() });
       </div>
       <template v-if="run">
         <p class="rrd-summary" data-testid="rs-run-summary">
-          {{ run.summary || (run.status === "running" ? "这一轮还在跑" : "—") }}
+          {{
+            run.summary || (live ? "这一轮还在跑，进度见页面上方；跑完以后写出各项计数与步骤" : "—")
+          }}
         </p>
         <p v-if="run.error" class="rrd-error">{{ run.error }}</p>
         <dl class="rrd-counts" data-testid="rs-run-counts">
@@ -159,11 +165,7 @@ defineExpose({ reload: () => load() });
             <span class="rrd-step__text">{{ st.text }}</span>
           </li>
           <li v-if="!run.steps.length" class="rrd-muted">
-            {{
-              run.status === "running" || run.status === "paused"
-                ? "这一轮跑完以后列出每一步"
-                : "没有记下步骤"
-            }}
+            {{ live ? "这一轮跑完以后列出每一步" : "没有记下步骤" }}
           </li>
           <li v-if="run.steps_truncated" class="rrd-muted">步骤太多，后面的没有记</li>
         </ul>

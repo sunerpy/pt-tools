@@ -100,6 +100,11 @@ const RUN_STATUS: Record<ReseedRunStatus, { label: string; tone: Tone }> = {
   interrupted: { label: "被打断", tone: "neutral" },
 };
 
+/** 这一轮还在跑（或暂停中）：计数、用时与步骤要等它结束才写进记录 */
+export function reseedRunLive(status: string): boolean {
+  return status === "running" || status === "paused";
+}
+
 /** 轮次的状态 */
 export function reseedRunStatus(status: string): { label: string; tone: Tone } {
   return RUN_STATUS[status as ReseedRunStatus] ?? { label: status, tone: "neutral" };

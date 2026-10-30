@@ -42,6 +42,7 @@ import {
   reseedIYUUCallsText,
   reseedIYUUEndpoint,
   reseedRunDuration,
+  reseedRunLive,
   reseedRunProgress,
   reseedRunStatus,
   reseedRunTrigger,
@@ -957,7 +958,7 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column label="IYUU 请求" width="90" align="right">
           <template #default="{ row }">{{
-            row.trigger === "retry" ? "—" : `${row.iyuu_calls} 次`
+            row.trigger === "retry" || reseedRunLive(row.status) ? "—" : `${row.iyuu_calls} 次`
           }}</template>
         </el-table-column>
         <el-table-column label="用时" width="100">

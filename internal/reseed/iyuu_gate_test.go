@@ -85,7 +85,7 @@ func TestIYUUCooldown(t *testing.T) {
 	res, err := e.svc.Run(ctx, RunOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, EndLimited, res.End)
-	assert.Contains(t, res.Stopped, "600 秒后再试")
+	assert.Contains(t, res.Stopped, reset.Format("01-02 15:04:05")+" 以后再试", "按冷却到的时间写，不照 Retry-After 的秒数")
 	steps, _ := res.log.encoded()
 	assert.Contains(t, steps, "之前不再请求")
 

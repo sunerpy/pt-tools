@@ -239,7 +239,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	client := s.cfg.NewClient(token)
 	sites, err := s.iyuuSites(ctx, &res, client, token)
 	if err != nil {
-		return res, fmt.Errorf("读取 IYUU 站点列表失败: %w", err)
+		return res, fmt.Errorf("读取 IYUU 站点列表失败: %w", s.limitErr(ctx, err))
 	}
 	bySID := map[int]string{}
 	sids := make([]int, 0)
@@ -255,7 +255,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	sort.Ints(sids)
 	sidSha1, err := s.sidSha1(ctx, &res, client, &r, sids, false)
 	if err != nil {
-		return res, fmt.Errorf("向 IYUU 报告站点失败: %w", err)
+		return res, fmt.Errorf("向 IYUU 报告站点失败: %w", s.limitErr(ctx, err))
 	}
 
 	sources, present := s.collect(ctx, r, &res)
@@ -304,7 +304,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 				res.endWith(ctx)
 			case IYUULimited(err):
 				// 限流、冷却中或到了每天的上限：停下，下一轮接着这里往下查
-				res.End, res.Stopped = EndLimited, err.Error()
+				res.End, res.Stopped = EndLimited, s.limitErr(ctx, err).Error()
 				res.log.add(stepStop, "%s", res.Stopped)
 			default:
 				res.addError("查询 IYUU 失败: " + err.Error())

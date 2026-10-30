@@ -556,6 +556,35 @@ describe("辅种轮次", () => {
     testid("rs-run-continue").click();
     await vi.waitFor(() => expect(api.continueRun).toHaveBeenCalledWith(7));
   });
+
+  it("还在跑的一轮：IYUU 请求与各项计数不写 0，等这一轮结束", async () => {
+    await mountPage(settings({ has_token: true }));
+    const live = run({
+      id: 9,
+      status: "paused",
+      summary: "",
+      error: "",
+      finished_at: null,
+      paused_at: "2026-10-30T10:01:00Z",
+      iyuu_calls: 0,
+      created: 0,
+      continuable: false,
+    });
+    api.runs.mockResolvedValue({ items: [live], total: 1, page: 1, page_size: 20 });
+    await chooseTab("轮次");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("已暂停"));
+    const row = [...document.querySelectorAll<HTMLElement>("[data-testid=rs-runs] tr")].find((tr) =>
+      (tr.textContent ?? "").includes("已暂停"),
+    );
+    expect(row?.textContent).not.toContain("0 次");
+
+    api.runDetail.mockResolvedValue({ ...live, steps: [] });
+    api.runAttempts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 });
+    testid("rs-run-open-9").click();
+    await vi.waitFor(() => expect(testid("rs-run-summary").textContent).toContain("这一轮还在跑"));
+    expect(testid("rs-run-counts").textContent?.trim()).toBe("");
+    expect(testid("rs-run-steps").textContent).toContain("这一轮跑完以后列出每一步");
+  });
 });
 
 function record(extra: Record<string, unknown> = {}) {

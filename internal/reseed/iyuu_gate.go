@@ -41,6 +41,36 @@ func IYUULimited(err error) bool {
 	return errors.As(err, &rl) || errors.As(err, &ce) || errors.Is(err, ErrIYUUDailyCap)
 }
 
+// limitError 是 IYUU 回 429 以后的错误：消息写冷却到什么时候（Retry-After 与 X-RateLimit-Reset 里晚的那个，见 coolDown），
+// 不照 Retry-After 写秒数；errors.As 仍然取得到原来的 *iyuu.RateLimitError。
+type limitError struct {
+	rl    *iyuu.RateLimitError
+	until time.Time
+}
+
+func (e *limitError) Error() string {
+	return fmt.Sprintf("IYUU 限流（%s），%s 以后再试", e.rl.Msg, e.until.Local().Format("01-02 15:04:05"))
+}
+
+func (e *limitError) Unwrap() error { return e.rl }
+
+// limitErr 把 IYUU 的 429 换成写明冷却时间的错误（冷却已经记下时）；别的错误原样返回。
+func (s *Service) limitErr(ctx context.Context, err error) error {
+	var rl *iyuu.RateLimitError
+	if !errors.As(err, &rl) {
+		return err
+	}
+	r, rerr := s.row(ctx)
+	if rerr != nil {
+		return err
+	}
+	ce := cooling(r, s.cfg.Now())
+	if ce == nil {
+		return err
+	}
+	return &limitError{rl: rl, until: ce.Until}
+}
+
 // IYUULimit 是最近一次限流的情况。
 type IYUULimit struct {
 	At       time.Time `json:"at"`
