@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.46](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.45...v1.0.0-rc.46) (2026-10-30)
+
+
+### Features
+
+* **notify:** 辅种每轮结果推送到通知通道，也可以写进每日战报 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** IYUU 请求计数、每天上限与请求间隔，被限流以后按 IYUU 给的时间冷却 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种的站点用开关打开或关掉，全部关闭不再等于全部站点 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种统计面板，按日、周、月、季、年或自定义范围查看 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种记录可以筛选、分页、重试、删除与取消 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种轮次可以暂停、停止与继续，提前停下的由下一轮接着查 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+
+
+### Bug Fixes
+
+* **reseed:** IYUU 辅种遇到站点上已经删了的种子记为「站点已删除」，不再每 7 天重试 ([fed8867](https://github.com/sunerpy/pt-tools/commit/fed8867a11d61779b33445e87b2788a56b7e4604))
+* **site:** 站点上已经删了的种子不再报「种子格式不对」：认出 M-Team 的「種子未找到」与 NexusPHP 的「没有该ID的种子」，日志记警告 ([fed8867](https://github.com/sunerpy/pt-tools/commit/fed8867a11d61779b33445e87b2788a56b7e4604))
+
 ## [1.0.0-rc.45](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.44...v1.0.0-rc.45) (2026-10-29)
 
 
