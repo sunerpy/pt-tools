@@ -106,8 +106,6 @@ type session struct {
 	mu       sync.Mutex
 	reqs     map[uint32]*tunnelReq
 	buffered int
-	// closeAfter 不为空时，处理完当前请求以后用这个原因关掉会话（配对完成）
-	closeAfter string
 
 	closeOnce sync.Once
 	handlers  sync.WaitGroup
@@ -341,13 +339,9 @@ func (s *session) finish(id uint32) {
 		s.buffered -= len(r.body)
 		delete(s.reqs, id)
 	}
-	reason := s.closeAfter
 	s.mu.Unlock()
 	if r != nil && r.cancel != nil {
 		r.cancel()
-	}
-	if reason != "" {
-		s.shutdown(reason)
 	}
 }
 
@@ -369,13 +363,18 @@ func (s *session) dispatch(ctx context.Context, id uint32, r *tunnelReq) {
 		w.finish()
 		return
 	}
+	closeAfter := ""
 	switch s.mode {
 	case ModePairing:
-		s.servePair(w, req)
+		closeAfter = s.servePair(w, req)
 	case ModeDevice:
 		s.h.cfg.Dispatcher.ServeRemote(w, req, Peer{Device: s.device, Via: s.via})
 	}
 	w.finish()
+	if closeAfter != "" {
+		// 由要关会话的这个请求在回应发完以后关：别的请求收尾时去关，会截掉这个请求还没发完的回应
+		s.shutdown(closeAfter)
+	}
 }
 
 // buildRequest 由隧道里的请求建出 http.Request：只带白名单里的头，Host 是 remote。
@@ -516,27 +515,26 @@ const (
 )
 
 // servePair 处理配对：核对配对密钥，记下设备，回设备信息；之后会话用 GOAWAY paired 关掉，设备重连成正常会话。
-// 每个结果都记审计（还没有设备时设备编号是 0）。
-func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
+// 每个结果都记审计（还没有设备时设备编号是 0）。返回不为空时，这个请求的回应发完以后用它作原因关掉会话。
+func (s *session) servePair(w http.ResponseWriter, r *http.Request) string {
 	if !s.h.pairings.isOpen(s.pairGen) {
 		s.h.audit(r.Context(), 0, "remote:pair", auditPairClosed)
 		writeJSONError(w, http.StatusGone, "pairing_closed", ErrPairingClosed.Error())
-		s.setCloseAfter(GoAwayPairingClosed)
-		return
+		return GoAwayPairingClosed
 	}
 	var in pairRequest
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxPairBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil || !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
-		s.pairFailed(r, auditPairBadBody)
+		closeAfter := s.pairFailed(r, auditPairBadBody)
 		writeJSONError(w, http.StatusBadRequest, "invalid_body", "请求格式错误")
-		return
+		return closeAfter
 	}
 	name, err := NormalizeDeviceName(in.Name)
 	if err != nil {
-		s.pairFailed(r, auditPairBadName)
+		closeAfter := s.pairFailed(r, auditPairBadName)
 		writeJSONError(w, http.StatusBadRequest, "invalid_name", err.Error())
-		return
+		return closeAfter
 	}
 	// 格式不对的密钥也算输错一次
 	secret, _ := DecodeKey(in.Secret)
@@ -552,45 +550,40 @@ func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusUnauthorized, "invalid_secret", err.Error())
 		if closedNow {
 			// 输错到了上限：窗口作废，这条与别的配对会话都关掉
-			s.setCloseAfter(GoAwayPairingClosed)
 			s.h.closePairingSessions(s)
+			return GoAwayPairingClosed
 		}
-		return
+		return ""
 	case errors.Is(err, ErrPairingClosed):
 		s.h.audit(r.Context(), 0, "remote:pair", auditPairClosed)
 		writeJSONError(w, http.StatusGone, "pairing_closed", err.Error())
-		s.setCloseAfter(GoAwayPairingClosed)
-		return
+		return GoAwayPairingClosed
 	case errors.Is(err, ErrInvalid):
 		s.h.audit(r.Context(), 0, "remote:pair", auditPairRejected)
 		writeJSONError(w, http.StatusConflict, "rejected", err.Error())
-		return
+		return ""
 	case err != nil:
 		s.h.logf("[远程访问] 保存配对的设备失败: %v", err)
 		s.h.audit(r.Context(), 0, "remote:pair", auditPairSaveFailed)
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "保存设备失败")
-		return
+		return ""
 	}
 	s.h.audit(r.Context(), dev.ID, "remote:pair", auditPairOK)
 	s.h.paired(dev, s)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"device": dev})
-	s.setCloseAfter(GoAwayPaired)
+	return GoAwayPaired
 }
 
-// pairFailed 记下一次请求体或设备名不对的配对请求：计入窗口的失败次数（到 5 次窗口作废，配对会话全部关掉）并记审计。
-func (s *session) pairFailed(r *http.Request, result string) {
+// pairFailed 记下一次请求体或设备名不对的配对请求：计入窗口的失败次数并记审计。到 5 次窗口作废，
+// 别的配对会话当场关掉，返回 GoAwayPairingClosed（这条会话回完这个请求再关）。
+func (s *session) pairFailed(r *http.Request, result string) string {
 	s.h.audit(r.Context(), 0, "remote:pair", result)
 	if s.h.pairings.fail(s.pairGen) {
-		s.setCloseAfter(GoAwayPairingClosed)
 		s.h.closePairingSessions(s)
+		return GoAwayPairingClosed
 	}
-}
-
-func (s *session) setCloseAfter(reason string) {
-	s.mu.Lock()
-	s.closeAfter = reason
-	s.mu.Unlock()
+	return ""
 }
 
 // shutdown 关掉会话：reason 不为空时先尽力发 GOAWAY（最多等 2 秒），再关连接。可以重复调用。
