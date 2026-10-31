@@ -61,7 +61,26 @@ docker run -d \
 
 ## Proxy settings
 
-pt-tools reads the standard proxy environment variables, whether it runs in Docker, under systemd or as a binary you start yourself.
+There are two ways to set a proxy. In Global settings you can send chosen sites through a proxy; a change takes effect as soon as you save it, without a restart. The standard environment variables work whether pt-tools runs in Docker, under systemd or as a binary you start yourself, and need a restart after a change. You can use both: once the site proxy is on, site requests follow Global settings and all other requests follow the environment variables.
+
+### Site proxy in Global settings
+
+In the Site proxy (站点代理) part of the Global settings page:
+
+1. Turn on Send site requests through a proxy (站点请求走代理) and enter the proxy address, for example `http://192.168.1.2:7890` or `socks5://user:password@host:1080`. http, https, socks5 and socks5h are supported.
+2. Under Which sites use the proxy (哪些站点走代理), choose All sites (全部站点), Only the selected sites (只有选中的站点) or All except the selected sites (除了选中的站点). For the last two, pick the sites in the list below. The list holds every site pt-tools supports; sites you have not enabled are marked Not enabled (未启用). All except the selected sites with nothing selected means all sites.
+3. Click Save settings (保存设置). The change takes effect at once, without a restart.
+
+Notes:
+
+- It covers the requests pt-tools sends to sites: searches and torrent lists, RSS feeds, torrent downloads (from RSS, cross-seeding or by hand), sign-in, user info and site icons. An RSS subscription follows the site it belongs to.
+- While it is on, site requests follow only this setting: the selected sites go through this proxy, the other sites connect directly, and the proxy environment variables no longer apply to sites. While it is off, site requests follow the environment variables as before.
+- It does not cover downloaders, IYUU, notification channels, TMDB and the other media data sources, the AI assistant and so on; they follow their own settings or the environment variables. CloakBrowser has its own proxy setting.
+- The proxy address is stored encrypted in the database. The page shows it with the password replaced by `***`; leaving it unchanged keeps the stored address.
+- Sites that go through the proxy see the proxy's exit IP. If a site's rules care about your IP (HDSky's seedbox rules, for example), check them before sending it through the proxy.
+- Only the web interface can change this setting; the App API and MCP can neither read nor change it.
+
+### Proxy environment variables
 
 | Variable                      | Meaning                                              | Example                    |
 | ----------------------------- | ---------------------------------------------------- | -------------------------- |
@@ -74,7 +93,10 @@ Notes:
 
 - Set both `HTTP_PROXY` and `HTTPS_PROXY`.
 - When neither `HTTP_PROXY` nor `HTTPS_PROXY` is set, site access and downloader connections fall back to `ALL_PROXY`. Fetching RSS feeds and the Telegram channel currently read only `HTTP_PROXY`/`HTTPS_PROXY`, so set those two when they need a proxy (a Telegram channel can also have its own proxy URL).
+- Torrent files that RSS tasks download used to bypass the proxy. They now follow these variables the same way site access does, `ALL_PROXY` included.
 - `NO_PROXY` is useful for local addresses: it keeps requests to local services and the LAN off the proxy.
+- Once the site proxy in Global settings is on, site requests no longer read these variables; see the previous section.
+- Restart pt-tools after changing the environment variables.
 
 ### Proxy examples
 
@@ -106,15 +128,16 @@ environment:
 
 These options are on the System → Global settings (系统 → 全局设置) page of the web interface:
 
-| Setting                                                     | Meaning                                                                                                  | Default     | Suggested           |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------- | ------------------- |
-| **Default interval in minutes (默认间隔（分钟）)**          | The default interval for RSS tasks                                                                       | 10          | 15-30 minutes       |
-| **Torrent file folder (种子下载目录)**                      | The folder where `.torrent` files are saved                                                              | `downloads` | As you need         |
-| **Download speed check (启用下载限速判断)**                 | Used to decide whether a torrent can finish within its free period                                       | Off         | On if you need it   |
-| **Estimated download speed in MB/s (预估下载速度（MB/s）)** | Your actual average download speed                                                                       | -           | Your real bandwidth |
-| **Maximum torrent size in GB (最大种子大小（GB）)**         | Torrents larger than this are skipped                                                                    | No limit    | 50-100 GB           |
-| **Minimum free time in minutes (最短免费时间（分钟）)**     | Torrents with less freeleech time left than this are skipped                                             | 30          | 20-60 minutes       |
-| **Start RSS tasks automatically (自动启动 RSS 任务)**       | Whether RSS tasks run when the program starts, including after a container restart; see the next section | No          | Yes                 |
+| Setting                                                     | Meaning                                                                                                                                      | Default     | Suggested                        |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------------- |
+| **Default interval in minutes (默认间隔（分钟）)**          | The default interval for RSS tasks                                                                                                           | 10          | 15-30 minutes                    |
+| **Torrent file folder (种子下载目录)**                      | The folder where `.torrent` files are saved                                                                                                  | `downloads` | As you need                      |
+| **Download speed check (启用下载限速判断)**                 | Used to decide whether a torrent can finish within its free period                                                                           | Off         | On if you need it                |
+| **Estimated download speed in MB/s (预估下载速度（MB/s）)** | Your actual average download speed                                                                                                           | -           | Your real bandwidth              |
+| **Maximum torrent size in GB (最大种子大小（GB）)**         | Torrents larger than this are skipped                                                                                                        | No limit    | 50-100 GB                        |
+| **Minimum free time in minutes (最短免费时间（分钟）)**     | Torrents with less freeleech time left than this are skipped                                                                                 | 30          | 20-60 minutes                    |
+| **Start RSS tasks automatically (自动启动 RSS 任务)**       | Whether RSS tasks run when the program starts, including after a container restart; see the next section                                     | No          | Yes                              |
+| **Site proxy (站点代理)**                                   | Sends the selected sites through a proxy and takes effect when you save; see [Site proxy in Global settings](#site-proxy-in-global-settings) | Off         | On when a site cannot be reached |
 
 ### Starting and stopping RSS tasks
 

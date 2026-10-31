@@ -20,6 +20,7 @@ These are encrypted with AES-256-GCM, using the key in `secret.key`, before they
 - site cookies;
 - notification channel credentials, such as a Telegram bot token or a OneBot access token;
 - the CloakBrowser access token;
+- the proxy address of the site proxy in Global settings, which may include a user name and password;
 - the host keys of [remote access](../guide/remote-access.md).
 
 The key is generated on first start. You can also supply a base64 key in the environment variable `PT_TOOLS_SECRET_KEY`, which takes precedence over the `secret.key` file.
@@ -56,7 +57,7 @@ The notification channel list never returns credentials; they are decrypted and 
 
 The [CloakBrowser fallback](../guide/site-login-monitoring.md#cloakbrowser-fallback) hands the site's cookies to the CloakBrowser you deploy, which then opens the site's pages.
 
-When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; `ALL_PROXY` applies only to site access and downloader connections. pt-tools has no analytics or telemetry and sends no usage data to anyone.
+When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; `ALL_PROXY` applies only to site access and downloader connections. When the [site proxy](../configuration.md#site-proxy-in-global-settings) in Global settings is on, requests to sites follow that setting instead: the selected sites go through that proxy, the other sites connect directly, and the environment variables no longer apply to them. pt-tools has no analytics or telemetry and sends no usage data to anyone.
 
 ## Which ports it listens on
 

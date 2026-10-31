@@ -144,7 +144,7 @@ RSS (Really Simple Syndication) 是一种网络内容聚合格式。在 PT (Priv
 ### 1. RSS 获取失败 (HTTP 403/401)
 
 - **原因**：认证失效或 Passkey 错误；站点前面的 Cloudflare 拦了这条线路时也回 403（提示里写明「被 Cloudflare 的质询拦了」）。
-- **解决**：检查链接中的 passkey 是否正确；如果是需要 Cookie 的站点，确认 pt-tools 中是否配置了有效的站点 Cookie。质询多是一时的，稍后再试；一直这样时给 pt-tools 设代理（环境变量 `HTTPS_PROXY`，见[配置说明](../configuration.md)）。
+- **解决**：检查链接中的 passkey 是否正确；如果是需要 Cookie 的站点，确认 pt-tools 中是否配置了有效的站点 Cookie。质询多是一时的，稍后再试；一直这样时在「全局设置」的「站点代理」里让这个站点走代理，见[配置说明](../configuration.md#在全局设置里按站点设代理)。
 
 ### 2. 获取成功但无种子
 

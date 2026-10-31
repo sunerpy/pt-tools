@@ -144,7 +144,7 @@ The syntax and examples for following a series are in [Filter rules and TV serie
 ### 1. Fetching the feed fails (HTTP 403/401)
 
 - **Cause**: the credentials have expired or the passkey is wrong. Cloudflare in front of the site also answers 403 when it blocks the connection (the message then says a Cloudflare challenge blocked it).
-- **Fix**: check that the passkey in the link is correct; for a site that needs a cookie, make sure pt-tools has a valid cookie for it. A challenge is usually brief, so try again later; if it keeps happening, give pt-tools a proxy (the `HTTPS_PROXY` environment variable, see [Configuration](../configuration.md)).
+- **Fix**: check that the passkey in the link is correct; for a site that needs a cookie, make sure pt-tools has a valid cookie for it. A challenge is usually brief, so try again later; if it keeps happening, send this site through a proxy in the Site proxy (站点代理) part of Global settings, see [Configuration](../configuration.md#site-proxy-in-global-settings).
 
 ### 2. The feed is fetched but nothing is downloaded
 

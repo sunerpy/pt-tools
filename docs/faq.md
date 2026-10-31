@@ -234,13 +234,15 @@
 
 ## 系统管理相关
 
-### 代理环境变量如何配置
+### 怎么给 pt-tools 设代理
 
 **现象**：站点请求超时、连接失败，怀疑需要代理访问。
 
 **配置方法**：
 
-pt-tools 支持 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 环境变量（大小写均可）。其中 `ALL_PROXY` 只用于站点访问和下载器连接，RSS 拉取和 Telegram 通道需要设置 `HTTP_PROXY`/`HTTPS_PROXY`。
+站点连不上时，先在「全局设置」的「站点代理」里让这些站点走代理：可以选全部站点、只有选中的站点或除了选中的站点，保存后立即生效，不用重启，见[配置说明 - 在全局设置里按站点设代理](./configuration.md#在全局设置里按站点设代理)。
+
+下载器、通知通道等其他请求用环境变量：pt-tools 支持 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（大小写均可）。其中 `ALL_PROXY` 只用于站点访问和下载器连接，RSS 拉取和 Telegram 通道需要设置 `HTTP_PROXY`/`HTTPS_PROXY`。开了站点代理以后，站点请求不再看这些变量。
 
 详细说明和配置示例请参考 [配置说明 - 代理配置](./configuration.md#代理配置)。
 
