@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.48](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.47...v1.0.0-rc.48) (2026-10-31)
+
+
+### Features
+
+* **notify:** 每日战报可以选统计前一天（默认）或当天截至发送时刻，标题写明统计的是哪一天 ([26f9588](https://github.com/sunerpy/pt-tools/commit/26f958891a33022321f2aeba1d83077aaaec10ed))
+* **settings:** 全局设置加「站点代理」，选哪些站点走代理，保存后立即生效不用重启 ([ceaa04f](https://github.com/sunerpy/pt-tools/commit/ceaa04f0563dab74dc2fecc7d08fc9389febcf7e))
+* **site:** BYR 补上等级规则，时魔从魔力值页读 ([#805](https://github.com/sunerpy/pt-tools/issues/805)) ([555dc2c](https://github.com/sunerpy/pt-tools/commit/555dc2c45c7f8391ebe1b804bc14d4dfbd2808fe))
+
+
+### Bug Fixes
+
+* **remote:** 配对会话关闭时不再截掉回应，修好远程访问的偶发测试失败 ([#802](https://github.com/sunerpy/pt-tools/issues/802)) ([0f59363](https://github.com/sunerpy/pt-tools/commit/0f593639abb372b891105417883e25a7e97ea640))
+* **rss:** RSS 下载种子也按环境变量里的代理走，以前一直直连 ([ceaa04f](https://github.com/sunerpy/pt-tools/commit/ceaa04f0563dab74dc2fecc7d08fc9389febcf7e))
+
 ## [1.0.0-rc.47](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.46...v1.0.0-rc.47) (2026-10-31)
 
 
