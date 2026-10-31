@@ -137,6 +137,7 @@ Signing in to HDSky, OpenCD, PTCHDBits and 52PT requires a captcha or a quiz ans
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | M-Team          | It has no sign-in; keep the account alive by signing in with a browser; the site forbids third-party tools from calling its keep-alive endpoint |
 | SpringSunday    | It has no sign-in; the site has no sign-in page                                                                                                 |
+| BYRPT           | It has no sign-in; the site has no sign-in page                                                                                                 |
 | U2              | Signing in requires picking an anime title from an animated image captcha                                                                       |
 | BTSCHOOL        | Signing in works differently from usual NexusPHP sites                                                                                          |
 | HD Dolby, MooKo | Not NexusPHP sites; sign-in is not supported yet                                                                                                |

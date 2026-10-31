@@ -18,6 +18,8 @@ var BYRPTDefinition = &v2.SiteDefinition{
 	TimezoneOffset: "+0800",
 	RateLimit:      0.5,
 	RateBurst:      2,
+	// BYR 没有签到：attendance.php 回 404（2026-10-31 生产上手动签到的一次请求）。
+	Attendance: &v2.AttendanceConfig{Unsupported: "BYRPT 没有签到（站点上没有签到页）"},
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id"},
 		RequestDelay: 500,
@@ -29,7 +31,8 @@ var BYRPTDefinition = &v2.SiteDefinition{
 			{
 				RequestConfig: v2.RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
 				Assertion:     map[string]string{"id": "params.id"},
-				Fields:        []string{"name", "uploaded", "downloaded", "ratio", "levelName", "bonus", "joinTime"},
+				// 魔力值只从首页顶栏读：详情页那一格是「50058.4 魔力值历史」，按顶栏的规则读出 0，又读在首页之后，会把顶栏的值盖掉
+				Fields: []string{"name", "uploaded", "downloaded", "ratio", "levelName", "joinTime"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -69,8 +72,9 @@ var BYRPTDefinition = &v2.SiteDefinition{
 				Selector: []string{"td.rowhead:contains('等级') + td img", "td.rowhead:contains('Class') + td img"},
 				Attr:     "title",
 			},
+			// 顶栏写法：「魔力值 [明细]: 50,058.4」
 			"bonus": {
-				Selector: []string{"td.rowhead:contains('魔力值') + td", "td.navbar-user-data", ".navbar-user-data", "body"},
+				Selector: []string{"td.navbar-user-data", ".navbar-user-data", "body"},
 				Attr:     "html",
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`(?s)(?:魔力值|Bonus).*?:\s*([\d.,]+)`}},
