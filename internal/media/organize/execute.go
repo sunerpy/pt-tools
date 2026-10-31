@@ -76,7 +76,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		if it.otherFile {
 			// 记录管着库里的文件，不改成这个新文件的（见 markOtherFiles）
 			res.Skipped++
-			s.noteOtherFile(ctx, it, otherFileNote)
+			s.noteOtherFile(ctx, it, p.otherNote())
 			continue
 		}
 		switch it.Status {
@@ -249,7 +249,7 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 		}
 		if it.otherFile {
 			res.Skipped++
-			s.noteOtherFile(ctx, it, otherFileNote)
+			s.noteOtherFile(ctx, it, p.otherNote())
 			continue
 		}
 		it.Status, it.Message = ItemFailed, p.Problem

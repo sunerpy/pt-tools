@@ -302,8 +302,14 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	res, err := s.organize(ctx, j.req, j.trigger)
 	s.mu.Unlock()
 	if err != nil {
-		s.fail(ctx, j)
-		s.cfg.Logger.Warnf("[整理入库] 整理失败 (下载器 %d, %s): %v", j.req.DownloaderID, firstNonEmpty(j.req.Hash, j.req.Entry), err)
+		if j.req.SourcePath != "" && (errors.Is(err, ErrInvalid) || errors.Is(err, ErrNotFound)) {
+			// 指定的路径不在了、变成了库里的路径，或者转成的种子已经不在下载器里：再自动重试也不会好，
+			// 清掉停在租约上的重试（记录留着，手动「重试」照样能点）
+			s.releaseLease(ctx, j, time.Time{})
+		} else {
+			s.fail(ctx, j)
+		}
+		s.cfg.Logger.Warnf("[整理入库] 整理失败 (下载器 %d, %s): %v", j.req.DownloaderID, firstNonEmpty(j.req.Hash, j.req.Entry, j.req.SourcePath), err)
 		return nil, err
 	}
 	// 这次整理没有改写的重试记录（例如它的文件已经不在种子里）不再重试
@@ -411,14 +417,20 @@ func (s *Service) backedOff(dlID uint, hash string) bool {
 	return ok && s.cfg.Now().Before(b.next)
 }
 
-// Organize 手动整理一个种子：排进队列，等最多 20 秒；没等到时 Result.Queued 为真，整理在后台继续。
-// 后台循环没在跑时（例如测试）直接整理。
+// Organize 手动整理一个种子（或监控目录里的一项、指定的一个路径）：排进队列，等最多 20 秒；没等到时 Result.Queued 为真，
+// 整理在后台继续。请求本身不对时在排队以前就返回错误。后台循环没在跑时（例如测试）直接整理。
 func (s *Service) Organize(ctx context.Context, req Request) (*Result, error) {
-	if req.WatchDirID == 0 && (req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "") {
-		return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
+	req, err := req.normalized()
+	if err != nil {
+		return nil, err
 	}
-	if req.WatchDirID > 0 && strings.TrimSpace(req.Entry) == "" {
-		return nil, fmt.Errorf("%w: 要指定监控目录里的哪一项", ErrInvalid)
+	if req.SourcePath == "" {
+		if req.WatchDirID == 0 && (req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "") {
+			return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
+		}
+		if req.WatchDirID > 0 && strings.TrimSpace(req.Entry) == "" {
+			return nil, fmt.Errorf("%w: 要指定监控目录里的哪一项", ErrInvalid)
+		}
 	}
 	if !s.isRunning() {
 		s.mu.Lock()

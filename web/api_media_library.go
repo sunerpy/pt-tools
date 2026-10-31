@@ -159,6 +159,9 @@ func (s *Server) apiOrganizeSettingsPut(w http.ResponseWriter, r *http.Request) 
 }
 
 // apiOrganizePreview handles POST /api/media/organize/preview
+//
+// 请求里的 source_path（手动指定一个文件或目录整理）只在这里与 POST /api/media/organize 两个 session 路由收：
+// 让 pt-tools 读一个任意路径只给网页会话；App API 的 AppOrganizeInput 没有这个字段（严格解析，令牌与远程设备传不进来）。
 func (s *Server) apiOrganizePreview(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.organizeService(w)
 	if !ok {

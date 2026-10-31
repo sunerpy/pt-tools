@@ -429,9 +429,9 @@ func untouched(rep scrape.Report) []string {
 	return out
 }
 
-// siteDoubanID 是站点给这条记录的种子的豆瓣编号（pt-tools 推送的种子才有）。
+// siteDoubanID 是站点给这条记录的种子的豆瓣编号（pt-tools 推送的种子才有；目录监控的一项与指定的路径没有）。
 func (s *Service) siteDoubanID(ctx context.Context, row models.MediaTransferHistory) string {
-	if row.WatchDirID > 0 || row.InfoHash == "" {
+	if row.WatchDirID > 0 || row.InfoHash == "" || pathRow(row) {
 		return ""
 	}
 	var info models.TorrentInfo

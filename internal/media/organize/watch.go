@@ -465,11 +465,11 @@ func sameSource(row *models.MediaTransferHistory, id string, size int64) bool {
 	return row.Size == size
 }
 
-// markOtherFiles 处理监控目录里同一个位置上换成了另一个文件（见 sameSource，例如移动整理以后又放进来一个同名的）：
+// markOtherFiles 处理监控目录里（或指定的路径上）同一个位置上换成了另一个文件（见 sameSource，例如移动整理以后又放进来一个同名的）：
 // 记录不管库里的文件时当成新的整理（记录改成新文件的）；管着时不整理，免得那条记录改成新文件以后库里的文件没人管了。
 // 一个位置只能有一条整理记录：要整理新文件，先删除那条记录。
 func markOtherFiles(p *Plan) {
-	if p.WatchDirID == 0 {
+	if p.WatchDirID == 0 && p.SourcePath == "" {
 		return
 	}
 	for i := range p.Items {
@@ -484,7 +484,7 @@ func markOtherFiles(p *Plan) {
 		it.otherFile = true
 		it.Status, it.Target, it.Subtitles = ItemExists, it.row.TargetPath, nil
 		it.Message = fmt.Sprintf("%s（换成了另一个文件或改过，现在 %s，记录里是 %s），没有整理：一个位置只能有一条整理记录，要整理它先删除这条记录（库里的文件可以留着）",
-			otherFileNote, utils.FormatBytes(it.Size), utils.FormatBytes(it.row.Size))
+			p.otherNote(), utils.FormatBytes(it.Size), utils.FormatBytes(it.row.Size))
 	}
 }
 
