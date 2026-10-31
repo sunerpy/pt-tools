@@ -236,7 +236,8 @@ async function testRssLink(raw: string) {
   rssLinkTest.url = url;
   rssLinkTest.text = "";
   try {
-    const res = await sitesApi.testRssLink(url);
+    // 带上当前站点：站点代理按 RSS 所属的站点判定走不走代理
+    const res = await sitesApi.testRssLink(url, siteName.value);
     if (rssLinkTest.url !== url) return;
     rssLinkTest.ok = true;
     const latest = res.titles?.[0] ? `，最新一条「${res.titles[0]}」` : "";

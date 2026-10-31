@@ -56,6 +56,20 @@ vi.mock("@/api", async (orig) => {
       getDailyReport: api.getReport,
       saveDailyReport: api.saveReport,
     },
+    // 站点代理：读到默认值（没有设置），没改就不写
+    siteProxyApi: {
+      get: vi.fn(() =>
+        Promise.resolve({
+          enabled: false,
+          proxy_url: "",
+          mode: "all",
+          sites: [],
+          updated_at: null,
+          site_options: [],
+        }),
+      ),
+      save: vi.fn(),
+    },
   };
 });
 

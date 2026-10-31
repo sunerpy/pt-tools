@@ -208,10 +208,42 @@ export interface DeleteTasksResponse {
   failed_errors: string[];
 }
 
+/** 站点代理的模式：全部站点、只有选中的站点、除了选中的站点 */
+export type SiteProxyMode = "all" | "include" | "exclude";
+
+/** 站点多选里的一项（注册表里能发请求的站点）：id 是小写的站点 ID */
+export interface SiteProxyOption {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+/** 保存站点代理的参数：proxy_url 与读到的（密码换成 *** 的）地址相同表示不改，空串表示清除 */
+export interface SiteProxyInput {
+  enabled: boolean;
+  proxy_url: string;
+  mode: SiteProxyMode;
+  sites: string[];
+}
+
+/** 读到的站点代理设置：proxy_url 里的密码换成了 ***；site_options 是站点多选的唯一来源 */
+export interface SiteProxySettings extends SiteProxyInput {
+  updated_at: string | null;
+  site_options: SiteProxyOption[];
+  /** 存着的代理地址解不开（加密密钥换过），要重新填 */
+  proxy_unreadable?: boolean;
+}
+
 // API 方法
 export const globalApi = {
   get: () => api.get<GlobalSettings>("/api/global"),
   save: (data: GlobalSettings) => api.post<void>("/api/global", data),
+};
+
+/** 全局设置里的「站点代理」：保存后立即生效，不用重启 */
+export const siteProxyApi = {
+  get: () => api.get<SiteProxySettings>("/api/site-proxy"),
+  save: (data: SiteProxyInput) => api.put<SiteProxySettings>("/api/site-proxy", data),
 };
 
 export const qbitApi = {
@@ -448,7 +480,9 @@ export interface RSSLinkTestResult {
 export const sitesApi = {
   list: (signal?: AbortSignal) => api.get<Record<string, SiteConfig>>("/api/sites", { signal }),
   /** 添加、编辑 RSS 时先试一下链接：失败时错误文本说清楚是哪一步出的问题 */
-  testRssLink: (url: string) => api.post<RSSLinkTestResult>("/api/rss/test", { url }),
+  /** site 是这条 RSS 所属的站点：站点代理按它判定走不走代理 */
+  testRssLink: (url: string, site?: string) =>
+    api.post<RSSLinkTestResult>("/api/rss/test", site ? { url, site } : { url }),
   listLoginStates: () => api.get<SiteLoginState[]>("/api/sites/login-state"),
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
   save: (name: string, data: SiteConfig) => api.post<void>(`/api/sites/${name}`, data),
