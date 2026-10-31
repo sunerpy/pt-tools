@@ -113,6 +113,7 @@ func TestDailyReportSettingsAPI(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, core.DefaultDailyReportTime, got.Time)
 	assert.False(t, got.Enabled)
+	assert.Equal(t, core.DailyReportScopePreviousDay, got.Scope, "默认统计前一天")
 
 	put := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -127,7 +128,17 @@ func TestDailyReportSettingsAPI(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	got, err := srv.store.DailyReportSettings()
 	require.NoError(t, err)
-	assert.Equal(t, core.DailyReportSettings{Enabled: true, Time: "21:00", ChannelIDs: []uint{conf.ID}}, got)
+	assert.Equal(t, core.DailyReportSettings{Enabled: true, Time: "21:00", ChannelIDs: []uint{conf.ID}, Scope: core.DailyReportScopePreviousDay}, got,
+		"不带统计范围：按前一天")
+
+	w = put(`{"enabled":true,"time":"21:00","channel_ids":[` + itoaUint(conf.ID) + `],"scope":"today"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, core.DailyReportScopeToday, got.Scope, "回应里是存好的统计范围")
+
+	w = put(`{"enabled":true,"time":"21:00","channel_ids":[` + itoaUint(conf.ID) + `],"scope":"weekly"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "不认识的统计范围被拒绝")
+	assert.Contains(t, w.Body.String(), "统计范围")
 
 	w = httptest.NewRecorder()
 	srv.apiDailyReportSettings(w, httptest.NewRequest(http.MethodDelete, "/api/v2/userinfo/daily-report", nil))

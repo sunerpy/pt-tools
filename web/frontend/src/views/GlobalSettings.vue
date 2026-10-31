@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   chatopsApi,
+  type DailyReportScope,
   type DailyReportSettings,
   globalApi,
   type GlobalSettings,
@@ -58,10 +59,15 @@ const form = ref<GlobalSettings>({
 });
 
 /**
- * 每日战报走自己的接口（只写这三列），和全局配置一起读、一起保存，是保存的第二步（和站点代理各存各的）。
+ * 每日战报走自己的接口（只写战报这几列），和全局配置一起读、一起保存，是保存的第二步（和站点代理各存各的）。
  * 读不回来时不当成「改过」去保存。通道下拉只给启用的通道。
  */
-const reportForm = ref<DailyReportSettings>({ enabled: false, time: "22:00", channel_ids: [] });
+const reportForm = ref<DailyReportSettings>({
+  enabled: false,
+  time: "22:00",
+  channel_ids: [],
+  scope: "previous_day",
+});
 const reportSaved = ref<DailyReportSettings | null>(null);
 /**
  * 最后一次读回 / 保存成功的全局配置。页头摘要按它算 —— 摘要的口径是「当前生效」，
@@ -76,9 +82,28 @@ function sameReport(a: DailyReportSettings, b: DailyReportSettings): boolean {
   return (
     a.enabled === b.enabled &&
     a.time === b.time &&
+    (a.scope ?? "previous_day") === (b.scope ?? "previous_day") &&
     [...a.channel_ids].sort().join(",") === [...b.channel_ids].sort().join(",")
   );
 }
+
+/** 统计范围：当天的数据要到 23:59 才完整，所以默认发前一天的 */
+const reportScopeOptions: { value: DailyReportScope; label: string; desc: string }[] = [
+  {
+    value: "previous_day",
+    label: "前一天（推荐）",
+    desc: "发前一天整天的数据（按前一天最后一次同步算），发送时刻只决定什么时候收到；登录状态写的是发送时的",
+  },
+  {
+    value: "today",
+    label: "当天截至发送时刻",
+    desc: "发今天 0 点到发送时刻的数据，之后的上传、签到、刷流算不进去；想要完整的一天就选「前一天」",
+  },
+];
+
+const activeReportScope = computed(() =>
+  reportScopeOptions.find((o) => o.value === (reportForm.value.scope ?? "previous_day")),
+);
 
 /**
  * 站点代理也走自己的接口，和全局配置、每日战报一起读、一起保存。
@@ -208,8 +233,9 @@ async function loadData() {
   ]);
   reportChannels.value = (channels ?? []).filter((c) => c.enabled);
   if (report) {
-    reportForm.value = { ...report, channel_ids: [...(report.channel_ids ?? [])] };
-    reportSaved.value = { ...report, channel_ids: [...(report.channel_ids ?? [])] };
+    const scope = report.scope ?? "previous_day";
+    reportForm.value = { ...report, scope, channel_ids: [...(report.channel_ids ?? [])] };
+    reportSaved.value = { ...report, scope, channel_ids: [...(report.channel_ids ?? [])] };
     reportLoadFailed.value = false;
   } else {
     reportSaved.value = null;
@@ -548,8 +574,22 @@ async function save() {
                   :disabled="reportLoadFailed"
                   data-testid="daily-report-enabled" />
                 <div class="field-tip">
-                  每天在设定时刻（再错开几分钟）把当天各站的上传、下载（计费）、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道
+                  每天在设定时刻（再错开几分钟）把各站的上传、下载（计费）、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道；统计哪一天看下面的「统计范围」
                 </div>
+              </el-form-item>
+              <el-form-item label="统计范围">
+                <el-radio-group
+                  v-model="reportForm.scope"
+                  :disabled="reportLoadFailed || !reportForm.enabled"
+                  data-testid="daily-report-scope">
+                  <el-radio-button
+                    v-for="opt in reportScopeOptions"
+                    :key="opt.value"
+                    :value="opt.value">
+                    {{ opt.label }}
+                  </el-radio-button>
+                </el-radio-group>
+                <div v-if="activeReportScope" class="field-tip">{{ activeReportScope.desc }}</div>
               </el-form-item>
               <div class="field-row">
                 <el-form-item label="发送时刻">

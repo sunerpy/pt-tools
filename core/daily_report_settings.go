@@ -20,6 +20,26 @@ type DailyReportSettings struct {
 	Time string `json:"time"`
 	// ChannelIDs 是接收战报的通知通道。开启时至少一个：不沿用「空列表即全部通道」。
 	ChannelIDs []uint `json:"channel_ids"`
+	// Scope 是统计范围：DailyReportScopePreviousDay（前一天整天）或 DailyReportScopeToday（当天截至发送时刻）。
+	// 保存时空值按前一天。
+	Scope string `json:"scope"`
+}
+
+// 每日战报的统计范围。当天的数据要到 23:59 才完整，所以默认发前一天的。
+const (
+	DailyReportScopePreviousDay = "previous_day"
+	DailyReportScopeToday       = "today"
+)
+
+// ErrDailyReportScope 表示统计范围不认识。
+var ErrDailyReportScope = errors.New("统计范围应为 previous_day（前一天）或 today（当天截至发送时刻）")
+
+// NormalizeDailyReportScope 把统计范围规范化：today 以外（包括空值、不认识的旧值）都按前一天。
+func NormalizeDailyReportScope(v string) string {
+	if strings.TrimSpace(v) == DailyReportScopeToday {
+		return DailyReportScopeToday
+	}
+	return DailyReportScopePreviousDay
 }
 
 // DefaultDailyReportTime 是战报默认的发送时刻。
@@ -53,11 +73,11 @@ func parseChannelIDs(raw string) []uint {
 	return ids
 }
 
-// DailyReportSettings 读出战报配置；全局设置行还不存在时返回默认值（关闭、22:00、无通道）。
+// DailyReportSettings 读出战报配置；全局设置行还不存在时返回默认值（关闭、22:00、无通道、前一天）。
 func (s *ConfigStore) DailyReportSettings() (DailyReportSettings, error) {
-	out := DailyReportSettings{Time: DefaultDailyReportTime, ChannelIDs: []uint{}}
+	out := DailyReportSettings{Time: DefaultDailyReportTime, ChannelIDs: []uint{}, Scope: DailyReportScopePreviousDay}
 	var gs models.SettingsGlobal
-	err := s.db.DB.Select("daily_report_enabled", "daily_report_time", "daily_report_channel_ids").First(&gs).Error
+	err := s.db.DB.Select("daily_report_enabled", "daily_report_time", "daily_report_channel_ids", "daily_report_scope").First(&gs).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return out, nil
 	}
@@ -69,13 +89,22 @@ func (s *ConfigStore) DailyReportSettings() (DailyReportSettings, error) {
 		out.Time = gs.DailyReportTime
 	}
 	out.ChannelIDs = parseChannelIDs(gs.DailyReportChannelIDs)
+	out.Scope = NormalizeDailyReportScope(gs.DailyReportScope)
 	return out, nil
 }
 
-// SaveDailyReportSettings 保存战报配置，只写这三列。开启时必须选了通道，且通道都存在。
+// SaveDailyReportSettings 保存战报配置，只写战报这几列。开启时必须选了通道，且通道都存在；统计范围空值按前一天。
 func (s *ConfigStore) SaveDailyReportSettings(in DailyReportSettings) error {
 	if err := ValidateDailyReportTime(in.Time); err != nil {
 		return err
+	}
+	switch strings.TrimSpace(in.Scope) {
+	case "":
+		in.Scope = DailyReportScopePreviousDay
+	case DailyReportScopePreviousDay, DailyReportScopeToday:
+		in.Scope = strings.TrimSpace(in.Scope)
+	default:
+		return ErrDailyReportScope
 	}
 	if in.ChannelIDs == nil {
 		in.ChannelIDs = []uint{}
@@ -107,6 +136,7 @@ func (s *ConfigStore) SaveDailyReportSettings(in DailyReportSettings) error {
 		"daily_report_enabled":     in.Enabled,
 		"daily_report_time":        in.Time,
 		"daily_report_channel_ids": string(raw),
+		"daily_report_scope":       in.Scope,
 	}).Error; err != nil {
 		return fmt.Errorf("保存每日战报设置失败: %w", err)
 	}

@@ -189,7 +189,7 @@ func (s *Server) apiDailyReportSettings(w http.ResponseWriter, r *http.Request) 
 
 // isDailyReportValidationError 区分用户输入错误（400）与存储故障（500）。
 func isDailyReportValidationError(err error) bool {
-	if errors.Is(err, core.ErrDailyReportNoChannel) {
+	if errors.Is(err, core.ErrDailyReportNoChannel) || errors.Is(err, core.ErrDailyReportScope) {
 		return true
 	}
 	msg := err.Error()

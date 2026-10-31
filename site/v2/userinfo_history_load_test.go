@@ -62,6 +62,38 @@ func TestLoadDeltaSummary(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 }
 
+// 某一天的增量：只算那天的快照（后一天的不算进来），基线是它之前最近的一份。
+func TestLoadDaySummary(t *testing.T) {
+	ctx := context.Background()
+	repo := stubHistoryRepo{
+		today:     "2026-10-07",
+		baselines: map[string]UserInfoDailySnapshot{"hdsky": snap("hdsky", "2026-10-05", 100, 10, 1)},
+		snaps: []UserInfoDailySnapshot{
+			snap("hdsky", "2026-10-06", 300, 30, 5),
+			snap("hdsky", "2026-10-07", 900, 90, 9),
+		},
+	}
+	sum, err := LoadDaySummary(ctx, repo, "2026-10-06")
+	require.NoError(t, err)
+	assert.Equal(t, "2026-10-06", sum.From)
+	assert.Equal(t, "2026-10-06", sum.To)
+	assert.EqualValues(t, 200, sum.TotalUploaded, "10-07 的快照不算进 10-06")
+	assert.EqualValues(t, 20, sum.TotalDownloaded)
+
+	_, err = LoadDaySummary(ctx, repo, "10-06")
+	require.Error(t, err, "日期格式不对")
+
+	boom := errors.New("boom")
+	bad := repo
+	bad.baselineErr = boom
+	_, err = LoadDaySummary(ctx, bad, "2026-10-06")
+	require.ErrorIs(t, err, boom)
+	bad = repo
+	bad.listErr = boom
+	_, err = LoadDaySummary(ctx, bad, "2026-10-06")
+	require.ErrorIs(t, err, boom)
+}
+
 func TestLoadTrends(t *testing.T) {
 	ctx := context.Background()
 	repo := stubHistoryRepo{

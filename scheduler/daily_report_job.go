@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
@@ -28,11 +29,21 @@ const (
 	dailyReportMaxSites = 10
 )
 
+// DailyReportSchedule 是战报的配置（core.ConfigStore.DailyReportSettings 的那几项）。
+type DailyReportSchedule struct {
+	Enabled bool
+	// Time 是发送时刻（HH:MM，Location 时区）
+	Time       string
+	ChannelIDs []uint
+	// Scope 是统计范围：core.DailyReportScopeToday 是当天截至发送时刻，其余（包括空值）是前一天整天
+	Scope string
+}
+
 // DailyReportJobConfig 是 DailyReportJob 的依赖。
 type DailyReportJobConfig struct {
 	DB *gorm.DB
-	// Settings 返回战报配置：是否开启、发送时刻（HH:MM，Location 时区）与接收通道（core.ConfigStore.DailyReportSettings）。
-	Settings func() (enabled bool, hhmm string, channelIDs []uint, err error)
+	// Settings 返回战报配置。
+	Settings func() (DailyReportSchedule, error)
 	// Offset 返回本安装固定的发送偏移（core.ConfigStore.DailyReportOffset）。
 	Offset func() (time.Duration, error)
 	// EnabledSites 返回已启用站点名（小写）。战报只算这些站点：已禁用站点的增量、残留的登录状态与签到结果都不出现。
@@ -42,8 +53,9 @@ type DailyReportJobConfig struct {
 	History v2.UserInfoHistoryRepo
 	// Notifier 为空时不发。
 	Notifier *MonitorNotifier
-	// ReseedLine 返回今天的辅种那一行（辅种设置里没开「每日战报」或今天没有辅种时为空串）；为空时不写这一行。
-	ReseedLine func(ctx context.Context, day string) string
+	// ReseedLine 返回 day 那天的辅种那一行，label（「今日」「昨日」）写在行首；辅种设置里没开「每日战报」
+	// 或那天没有辅种时为空串。为空时不写这一行。
+	ReseedLine func(ctx context.Context, day, label string) string
 	Clock      sitelogin.Clock
 	Logger     *zap.SugaredLogger
 	Tick       time.Duration
@@ -51,9 +63,9 @@ type DailyReportJobConfig struct {
 	Location *time.Location
 }
 
-// DailyReportJob 每分钟检查一次：到了设定时刻加本安装固定的偏移后，若当天还没发，就读当天的快照算出增量，
-// 连同登录状态异常的站点与签到结果写成一条战报，经 MonitorNotifier 按通道写日志行（同一天每个通道只一行，
-// 重启也不重发），由投递器发送并按通道静默时段顺延。每天还顺带清理一次 400 天以前的快照。
+// DailyReportJob 每分钟检查一次：到了设定时刻加本安装固定的偏移后，若当天还没发，就按统计范围（前一天整天，
+// 或当天截至发送时刻）读快照算出增量，连同登录状态异常的站点与签到结果写成一条战报，经 MonitorNotifier 按通道
+// 写日志行（同一天每个通道只一行，重启也不重发），由投递器发送并按通道静默时段顺延。每天还顺带清理一次 400 天以前的快照。
 type DailyReportJob struct {
 	cfg DailyReportJobConfig
 
@@ -152,15 +164,15 @@ func (j *DailyReportJob) RunOnce(ctx context.Context) {
 	if done {
 		return
 	}
-	enabled, hhmm, channels, err := j.cfg.Settings()
+	sched, err := j.cfg.Settings()
 	if err != nil {
 		j.cfg.Logger.Warnf("读取每日战报设置失败: %v", err)
 		return
 	}
-	if !enabled || len(channels) == 0 {
+	if !sched.Enabled || len(sched.ChannelIDs) == 0 {
 		return
 	}
-	due, err := j.dueAt(now, hhmm)
+	due, err := j.dueAt(now, sched.Time)
 	if err != nil {
 		j.cfg.Logger.Warnf("计算每日战报发送时刻失败: %v", err)
 		return
@@ -176,7 +188,7 @@ func (j *DailyReportJob) RunOnce(ctx context.Context) {
 		}
 	}
 
-	title, text, fields, err := j.buildReport(ctx, today, enabledSites)
+	title, text, fields, err := j.buildReport(ctx, now, sched.Scope, enabledSites)
 	if err != nil {
 		j.cfg.Logger.Warnf("生成每日战报失败: %v", err)
 		return
@@ -188,7 +200,7 @@ func (j *DailyReportJob) RunOnce(ctx context.Context) {
 		EventKey: today,
 		Title:    title,
 		Text:     text,
-		ConfIDs:  channels,
+		ConfIDs:  sched.ChannelIDs,
 		Event:    notify.NewEvent(notify.EventReportDaily, now, fields),
 	}); err != nil {
 		j.cfg.Logger.Warnf("写入每日战报失败: %v", err)
@@ -267,26 +279,59 @@ func formatBonus(v float64) string {
 	return fmt.Sprintf("+%.0f", v)
 }
 
-// buildReport 生成当天的战报与事件变量；enabled 不为 nil 时只算其中的站点。
-func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled map[string]bool) (string, string, map[string]any, error) {
-	sum, err := v2.LoadDeltaSummary(ctx, j.cfg.History, "today")
+// reportPeriod 是战报统计的那一天：today 是当天截至发送时刻，否则是前一天整天。
+type reportPeriod struct {
+	scope string
+	day   string
+	// label 写在各行前面：「今日」「昨日」
+	label string
+}
+
+func dailyReportPeriod(now time.Time, scope string) (reportPeriod, error) {
+	today := now.Format("2006-01-02")
+	if core.NormalizeDailyReportScope(scope) == core.DailyReportScopeToday {
+		return reportPeriod{scope: core.DailyReportScopeToday, day: today, label: "今日"}, nil
+	}
+	day, err := v2.AddDays(today, -1)
+	if err != nil {
+		return reportPeriod{}, err
+	}
+	return reportPeriod{scope: core.DailyReportScopePreviousDay, day: day, label: "昨日"}, nil
+}
+
+// buildReport 按统计范围生成战报与事件变量；enabled 不为 nil 时只算其中的站点。
+// 标题写明统计的是哪一天、到什么时候；登录状态是发送时的，不分范围。
+func (j *DailyReportJob) buildReport(ctx context.Context, now time.Time, scope string, enabled map[string]bool) (string, string, map[string]any, error) {
+	p, err := dailyReportPeriod(now, scope)
+	if err != nil {
+		return "", "", nil, err
+	}
+	sum, err := v2.LoadDaySummary(ctx, j.cfg.History, p.day)
 	if err != nil {
 		return "", "", nil, err
 	}
 	sum = sum.Filter(enabled)
-	title := fmt.Sprintf("📊 每日战报 %s", today)
-	fields := map[string]any{"day": today}
+	isToday := p.scope == core.DailyReportScopeToday
+	title := fmt.Sprintf("📊 每日战报 %s（前一天）", p.day)
+	if isToday {
+		title = fmt.Sprintf("📊 每日战报 %s（截至 %s）", p.day, now.Format("15:04"))
+	}
+	fields := map[string]any{"day": p.day, "scope": p.scope}
 	var b strings.Builder
 
 	// 账号的下载量写明「计费」：站点按免费、折扣折算以后计入分享率的数，每日快照只存这个口径，
 	// 免费种子的实际传输不在里面。下面刷流那几行是下载器里的实际传输，不加这个标注。
 	switch {
-	case len(sum.Sites) == 0:
+	case len(sum.Sites) == 0 && isToday:
 		b.WriteString("今天还没有同步到站点数据（登录探测成功或手动同步之后才有）。")
-	case countWithBaseline(sum.Sites) == 0:
+	case len(sum.Sites) == 0:
+		b.WriteString("昨天没有同步到站点数据（登录探测成功或手动同步之后才有）。")
+	case countWithBaseline(sum.Sites) == 0 && isToday:
 		b.WriteString("今天暂无可比的数据：站点要有今天之前的一份快照才算得出增量，明天起就有。")
+	case countWithBaseline(sum.Sites) == 0:
+		b.WriteString("昨天暂无可比的数据：站点要有昨天之前的一份快照才算得出增量，明天起就有。")
 	default:
-		fmt.Fprintf(&b, "今日合计：上传 %s · 下载（计费）%s · 魔力 %s",
+		fmt.Fprintf(&b, "%s合计：上传 %s · 下载（计费）%s · 魔力 %s", p.label,
 			utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded), formatBonus(sum.TotalBonus))
 		fields["uploaded"], fields["downloaded"] = utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded)
 		fields["uploaded_bytes"], fields["downloaded_bytes"], fields["bonus"] = sum.TotalUploaded, sum.TotalDownloaded, sum.TotalBonus
@@ -323,18 +368,23 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 	}
 
 	if abnormal := j.abnormalSites(ctx, enabled); len(abnormal) > 0 {
-		fmt.Fprintf(&b, "\n⚠️ 登录状态异常：%s", strings.Join(abnormal, "、"))
+		// 前一天的战报里写明登录状态是现在的，不是昨天的
+		prefix := "当前登录状态异常"
+		if isToday {
+			prefix = "登录状态异常"
+		}
+		fmt.Fprintf(&b, "\n⚠️ %s：%s", prefix, strings.Join(abnormal, "、"))
 	}
-	if line := j.attendanceLine(ctx, today, enabled); line != "" {
+	if line := j.attendanceLine(ctx, p, enabled); line != "" {
 		b.WriteString("\n")
 		b.WriteString(line)
 	}
-	if lines := j.brushLines(ctx, today); len(lines) > 0 {
+	if lines := j.brushLines(ctx, p); len(lines) > 0 {
 		b.WriteString("\n")
 		b.WriteString(strings.Join(lines, "\n"))
 	}
 	if j.cfg.ReseedLine != nil {
-		if line := j.cfg.ReseedLine(ctx, today); line != "" {
+		if line := j.cfg.ReseedLine(ctx, p.day, p.label); line != "" {
 			b.WriteString("\n")
 			b.WriteString(line)
 		}
@@ -383,12 +433,12 @@ func (j *DailyReportJob) abnormalSites(ctx context.Context, enabled map[string]b
 	return out
 }
 
-func (j *DailyReportJob) attendanceLine(ctx context.Context, today string, enabled map[string]bool) string {
+func (j *DailyReportJob) attendanceLine(ctx context.Context, p reportPeriod, enabled map[string]bool) string {
 	if j.cfg.DB == nil || !j.cfg.DB.Migrator().HasTable(&models.SiteAttendanceLog{}) {
 		return ""
 	}
 	var logs []models.SiteAttendanceLog
-	if err := j.cfg.DB.WithContext(ctx).Where("day = ?", today).Find(&logs).Error; err != nil {
+	if err := j.cfg.DB.WithContext(ctx).Where("day = ?", p.day).Find(&logs).Error; err != nil {
 		j.cfg.Logger.Warnf("每日战报读取签到结果失败: %v", err)
 		return ""
 	}
@@ -401,20 +451,20 @@ func (j *DailyReportJob) attendanceLine(ctx context.Context, today string, enabl
 	if counts[models.AttendanceSigned]+counts[models.AttendanceAlready]+counts[models.AttendanceFailed] == 0 {
 		return ""
 	}
-	return fmt.Sprintf("✅ 今日签到：成功 %d · 已签 %d · 失败 %d",
+	return fmt.Sprintf("✅ %s签到：成功 %d · 已签 %d · 失败 %d", p.label,
 		counts[models.AttendanceSigned], counts[models.AttendanceAlready], counts[models.AttendanceFailed])
 }
 
 // dailyReportMaxBrushTasks 是战报里逐个列出的刷流任务数（按上传排序），其余只算进合计。
 const dailyReportMaxBrushTasks = 5
 
-// brushLines 是当天刷流的收益：合计一行，任务多于一个时再逐个列出（最多 5 个）。没有刷流表或当天没有收益时为空。
-func (j *DailyReportJob) brushLines(ctx context.Context, today string) []string {
+// brushLines 是统计那天刷流的收益：合计一行，任务多于一个时再逐个列出（最多 5 个）。没有刷流表或那天没有收益时为空。
+func (j *DailyReportJob) brushLines(ctx context.Context, p reportPeriod) []string {
 	if j.cfg.DB == nil || !j.cfg.DB.Migrator().HasTable(&models.BrushDailyStat{}) {
 		return nil
 	}
 	var stats []models.BrushDailyStat
-	if err := j.cfg.DB.WithContext(ctx).Where("day = ?", today).Find(&stats).Error; err != nil {
+	if err := j.cfg.DB.WithContext(ctx).Where("day = ?", p.day).Find(&stats).Error; err != nil {
 		j.cfg.Logger.Warnf("每日战报读取刷流收益失败: %v", err)
 		return nil
 	}
@@ -433,7 +483,7 @@ func (j *DailyReportJob) brushLines(ctx context.Context, today string) []string 
 	if len(active) == 0 {
 		return nil
 	}
-	lines := []string{fmt.Sprintf("🚀 今日刷流：上传 %s · 下载 %s · 加入 %d · 删除 %d",
+	lines := []string{fmt.Sprintf("🚀 %s刷流：上传 %s · 下载 %s · 加入 %d · 删除 %d", p.label,
 		utils.FormatBytes(total.Uploaded), utils.FormatBytes(total.Downloaded), total.Added, total.Removed)}
 	if len(active) < 2 {
 		return lines

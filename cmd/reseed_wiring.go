@@ -60,8 +60,8 @@ func wireReseedWorker(mgr *scheduler.Manager, svc *v2.UserInfoService, store *co
 
 // reseedReportLine 是每日战报里今天的辅种那一行：战报任务比辅种后台先接线，到发战报时才取辅种服务；
 // 辅种没有启动或读不到统计时不写这一行。
-func reseedReportLine(mgr *scheduler.Manager) func(ctx context.Context, day string) string {
-	return func(ctx context.Context, day string) string {
+func reseedReportLine(mgr *scheduler.Manager) func(ctx context.Context, day, label string) string {
+	return func(ctx context.Context, day, label string) string {
 		if mgr == nil {
 			return ""
 		}
@@ -69,7 +69,7 @@ func reseedReportLine(mgr *scheduler.Manager) func(ctx context.Context, day stri
 		if svc == nil {
 			return ""
 		}
-		line, err := svc.DailyReportLine(ctx, day)
+		line, err := svc.DailyReportLine(ctx, day, label)
 		if err != nil {
 			global.GetSlogger().Warnf("每日战报读取辅种统计失败，这一行不写: %v", err)
 			return ""
