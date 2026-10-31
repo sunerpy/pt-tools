@@ -29,6 +29,7 @@ import (
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 	"github.com/sunerpy/pt-tools/utils"
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 // SkipRecheckHours defines how long a skipped non-free torrent should remain skipped before re-checking
@@ -332,13 +333,21 @@ func processSingleTorrentWithDownloader(
 	return sp.processFile(ctx, filePath)
 }
 
-func attemptDownload(url, title, downloadDir string) (string, error) {
-	return attemptDownloadWithContext(context.Background(), url, title, downloadDir)
+func attemptDownload(siteID, url, title, downloadDir string) (string, error) {
+	return attemptDownloadWithContext(context.Background(), siteID, url, title, downloadDir)
 }
 
-func attemptDownloadWithContext(ctx context.Context, url, title, downloadDir string) (string, error) {
-	// 使用 requests 库下载，支持 context
-	resp, err := requests.Get(url, requests.WithContext(ctx), requests.WithTimeout(30*time.Second))
+// attemptDownloadWithContext 下载站点 siteID 的一个种子文件。全局设置的「站点代理」开着时按站点判定走不走代理，
+// 关着时按环境变量（以前用 requests.Get 的默认 Session，一直直连，不认 HTTPS_PROXY）。
+func attemptDownloadWithContext(ctx context.Context, siteID, url, title, downloadDir string) (string, error) {
+	// 无论走不走代理都显式 WithProxy：清掉 Transport 池里可能残留的代理（见 httpclient.NewSession）
+	session := httpclient.NewSession().WithTimeout(30 * time.Second).WithProxy(httpclient.ResolveSiteProxyOrEnv(siteID, url))
+	defer func() { _ = session.Close() }()
+	req, err := requests.NewGet(url).Build()
+	if err != nil {
+		return "", fmt.Errorf("下载种子失败: %v", utils.RedactURLError(err))
+	}
+	resp, err := session.DoWithContext(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("下载种子失败: %v", utils.RedactURLError(err))
 	}
@@ -392,13 +401,13 @@ func invalidTorrentPreview(data []byte) string {
 }
 
 // 下载种子文件，包含重试机制
-func downloadTorrent(url, title, downloadDir string, maxRetries int, retryDelay time.Duration) (string, error) {
+func downloadTorrent(siteID, url, title, downloadDir string, maxRetries int, retryDelay time.Duration) (string, error) {
 	if err := os.MkdirAll(downloadDir, os.ModePerm); err != nil {
 		return "", fmt.Errorf("创建下载目录失败: %v", err)
 	}
 	var lastError error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		hash, err := attemptDownload(url, title, downloadDir)
+		hash, err := attemptDownload(siteID, url, title, downloadDir)
 		if err == nil {
 			return hash, nil
 		}
@@ -1044,7 +1053,7 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 		return errors.New(enableError)
 	}
 
-	feed, err := FetchRSSFeed(ctx, rssCfg.URL)
+	feed, err := FetchRSSFeed(ctx, string(siteName), rssCfg.URL)
 	if err != nil {
 		sLogger().Errorf("[RSS任务失败] 站点=%s, RSS=%s, 错误=%v", siteName, rssCfg.Name, err)
 		return err
@@ -1102,13 +1111,13 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 	return nil
 }
 
-func fetchRSSFeed(url string) (*gofeed.Feed, error) {
-	return FetchRSSFeed(context.Background(), url)
+func fetchRSSFeed(siteID, url string) (*gofeed.Feed, error) {
+	return FetchRSSFeed(context.Background(), siteID, url)
 }
 
 // fetchRSSFeedWithContext 同 FetchRSSFeed（见 rss_fetch.go）。
 func fetchRSSFeedWithContext(ctx context.Context, url string) (*gofeed.Feed, error) {
-	return FetchRSSFeed(ctx, url)
+	return FetchRSSFeed(ctx, "", url)
 }
 
 const rssUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -1133,7 +1142,7 @@ func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName mod
 		return errors.New(enableError)
 	}
 	// DownloadSubPath 前端移除，允许为空；使用 Tag 作为子目录
-	feed, err := fetchRSSFeed(rssCfg.URL)
+	feed, err := fetchRSSFeed(string(siteName), rssCfg.URL)
 	if err != nil {
 		return err
 	}

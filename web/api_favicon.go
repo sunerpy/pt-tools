@@ -199,7 +199,8 @@ func (fs *FaviconService) fetchAndSave(siteID, siteName, faviconURL string) erro
 	// 复用 *http.Transport，若仅在有代理时调用 WithProxy，池中残留的代理配置
 	// 会污染后续对 NO_PROXY 主机（如 127.0.0.1）的请求，导致其错误地走代理。
 	// 显式传入解析结果（空字符串会清空代理）可保证每次请求的代理配置与当前目标一致。
-	session = session.WithProxy(httpclient.ResolveProxyFromEnvironment(faviconURL))
+	// 全局设置的「站点代理」开着时按站点判定，关着时按环境变量。
+	session = session.WithProxy(httpclient.ResolveSiteProxyOrEnv(siteID, faviconURL))
 	defer func() { _ = session.Close() }()
 
 	req, err := requests.NewGet(faviconURL).Build()

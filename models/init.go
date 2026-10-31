@@ -321,6 +321,8 @@ func NewDBWithVersionAndHooks(
 		&AssistantAttachment{},
 		// 消息模板（M21）
 		&NotificationTemplate{},
+		// 站点代理（全局设置）
+		&SiteProxySetting{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

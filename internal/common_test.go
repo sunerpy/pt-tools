@@ -179,7 +179,7 @@ func TestAttemptDownloadWithContext_Success(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	dir := t.TempDir()
-	hash, err := attemptDownloadWithContext(context.Background(), srv.URL, "My Title", dir)
+	hash, err := attemptDownloadWithContext(context.Background(), "", srv.URL, "My Title", dir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, hash)
 	_, statErr := os.Stat(filepath.Join(dir, "My Title.torrent"))
@@ -191,7 +191,7 @@ func TestAttemptDownloadWithContext_HTTPError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	_, err := attemptDownloadWithContext(context.Background(), srv.URL, "t", t.TempDir())
+	_, err := attemptDownloadWithContext(context.Background(), "", srv.URL, "t", t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 状态码错误")
 }
@@ -213,7 +213,7 @@ func closingServer(t *testing.T) *httptest.Server {
 // 种子下载地址常带 passkey，连接失败时错误文本（会写进日志）不能带出来。
 func TestAttemptDownloadWithContext_TransportErrorRedactsPasskey(t *testing.T) {
 	srv := closingServer(t)
-	_, err := attemptDownloadWithContext(context.Background(), srv.URL+"/download.php?id=1&passkey=TOPSECRET", "t", t.TempDir())
+	_, err := attemptDownloadWithContext(context.Background(), "", srv.URL+"/download.php?id=1&passkey=TOPSECRET", "t", t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "下载种子失败")
 	assert.NotContains(t, err.Error(), "TOPSECRET")
@@ -238,7 +238,7 @@ func TestAttemptDownloadWithContext_InvalidTorrent(t *testing.T) {
 		_, _ = w.Write([]byte("<html>not a torrent</html>"))
 	}))
 	t.Cleanup(srv.Close)
-	_, err := attemptDownloadWithContext(context.Background(), srv.URL, "t", t.TempDir())
+	_, err := attemptDownloadWithContext(context.Background(), "", srv.URL, "t", t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "不是有效种子文件")
 }
@@ -248,7 +248,7 @@ func TestDownloadTorrent_RetryThenFail(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	_, err := downloadTorrent(srv.URL, "t", t.TempDir(), 2, time.Millisecond)
+	_, err := downloadTorrent("", srv.URL, "t", t.TempDir(), 2, time.Millisecond)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "下载失败")
 }
@@ -260,7 +260,7 @@ func TestDownloadTorrent_Success(t *testing.T) {
 		_, _ = w.Write(buf.Bytes())
 	}))
 	t.Cleanup(srv.Close)
-	hash, err := downloadTorrent(srv.URL, "ok", t.TempDir(), 2, time.Millisecond)
+	hash, err := downloadTorrent("", srv.URL, "ok", t.TempDir(), 2, time.Millisecond)
 	require.NoError(t, err)
 	assert.NotEmpty(t, hash)
 }
@@ -284,7 +284,7 @@ func TestAttemptDownload_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK); _, _ = w.Write(data) }))
 	defer srv.Close()
 	dir := t.TempDir()
-	hash, err := attemptDownload(srv.URL, "a/b:c*?", dir)
+	hash, err := attemptDownload("", srv.URL, "a/b:c*?", dir)
 	require.NoError(t, err)
 	require.NotEmpty(t, hash)
 	p := filepath.Join(dir, "abc.torrent")
@@ -308,7 +308,7 @@ func TestDownloadTorrent_RetryThenSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
-	hash, err := downloadTorrent(srv.URL, "title", dir, 2, time.Millisecond*10)
+	hash, err := downloadTorrent("", srv.URL, "title", dir, 2, time.Millisecond*10)
 	require.NoError(t, err)
 	require.NotEmpty(t, hash)
 }
@@ -321,7 +321,7 @@ func TestSanitizeTitle(t *testing.T) {
 func TestAttemptDownload_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer srv.Close()
-	if _, err := attemptDownload(srv.URL, "bad", t.TempDir()); err == nil {
+	if _, err := attemptDownload("", srv.URL, "bad", t.TempDir()); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -329,7 +329,7 @@ func TestAttemptDownload_HTTPError(t *testing.T) {
 func TestDownloadTorrent_FailAllRetries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer srv.Close()
-	if _, err := downloadTorrent(srv.URL, "bad", t.TempDir(), 2, 0); err == nil {
+	if _, err := downloadTorrent("", srv.URL, "bad", t.TempDir(), 2, 0); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -922,7 +922,7 @@ func TestAttemptDownloadWithContext(t *testing.T) {
 
 	dir := t.TempDir()
 	ctx := context.Background()
-	hash, err := attemptDownloadWithContext(ctx, srv.URL, "test-title", dir)
+	hash, err := attemptDownloadWithContext(ctx, "", srv.URL, "test-title", dir)
 	require.NoError(t, err)
 	require.NotEmpty(t, hash)
 }
@@ -939,7 +939,7 @@ func TestAttemptDownloadWithContext_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 立即取消
 
-	_, err := attemptDownloadWithContext(ctx, srv.URL, "test-title", dir)
+	_, err := attemptDownloadWithContext(ctx, "", srv.URL, "test-title", dir)
 	require.Error(t, err)
 }
 
@@ -958,7 +958,7 @@ func TestFetchRSSFeed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	result, err := fetchRSSFeed(srv.URL)
+	result, err := fetchRSSFeed("", srv.URL)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "Test Feed", result.Title)
@@ -977,14 +977,14 @@ func TestFetchRSSFeed_BrowserUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchRSSFeed(srv.URL)
+	_, err := fetchRSSFeed("", srv.URL)
 	require.NoError(t, err)
 	require.Contains(t, gotUA, "Mozilla/5.0", "RSS fetcher must send a browser-like UA")
 }
 
 // TestFetchRSSFeed_InvalidURL 测试无效 URL
 func TestFetchRSSFeed_InvalidURL(t *testing.T) {
-	_, err := fetchRSSFeed("://invalid")
+	_, err := fetchRSSFeed("", "://invalid")
 	require.Error(t, err)
 }
 
@@ -996,7 +996,7 @@ func TestFetchRSSFeed_InvalidContent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchRSSFeed(srv.URL)
+	_, err := fetchRSSFeed("", srv.URL)
 	require.Error(t, err)
 }
 

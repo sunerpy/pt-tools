@@ -136,7 +136,7 @@ func (u *UnifiedSiteImpl) RetryDelay() time.Duration {
 
 // DownloadTorrent 下载种子文件，返回 torrent hash
 func (u *UnifiedSiteImpl) DownloadTorrent(url, title, downloadDir string) (string, error) {
-	return downloadTorrent(url, title, downloadDir, u.maxRetries, u.retryDelay)
+	return downloadTorrent(u.siteID, url, title, downloadDir, u.maxRetries, u.retryDelay)
 }
 
 // waitForRateLimit 等待速率限制，返回等待时间

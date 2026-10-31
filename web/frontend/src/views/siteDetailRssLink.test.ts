@@ -157,6 +157,11 @@ describe("站点详情：RSS 链接检查", () => {
         "能用：取到 30 条，最新一条「最新的一部」",
       ),
     );
+    // 带上站点：站点代理按这个站点判定
+    expect(api.testRssLink).toHaveBeenCalledWith(
+      "https://springsunday.net/torrentrss.php?passkey=k",
+      "hdsky",
+    );
     // 链接改了：旧结果不显示
     fill('[data-testid="rss-new-url"]', "https://hdsky.example/torrentrss.php?passkey=k");
     await vi.waitFor(() => expect(q("rss-new-test-result")).toBeNull());

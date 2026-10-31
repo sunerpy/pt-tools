@@ -73,6 +73,7 @@ func NewTempDBDir(dir string) (*models.TorrentDB, error) {
 		&models.AssistantConfirmation{},
 		&models.AssistantAttachment{},
 		&models.NotificationTemplate{},
+		&models.SiteProxySetting{},
 	); err != nil {
 		return nil, err
 	}

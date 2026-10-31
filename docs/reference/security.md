@@ -20,6 +20,7 @@
 - 站点 Cookie；
 - 通知通道的凭证，例如 Telegram Bot Token 和 OneBot Access Token；
 - CloakBrowser 的访问令牌；
+- 「全局设置」里站点代理的代理地址（可能带用户名和密码）；
 - [远程访问](../guide/remote-access.md)的主机密钥。
 
 密钥在首次启动时自动生成；也可以通过环境变量 `PT_TOOLS_SECRET_KEY` 提供 base64 形式的密钥，它的优先级高于 `secret.key` 文件。
@@ -56,7 +57,7 @@
 
 [CloakBrowser 后备](../guide/site-login-monitoring.md#cloakbrowser-后备)会把站点 Cookie 交给你部署的 CloakBrowser，由它打开站点页面。
 
-设置了 `HTTP_PROXY` 或 `HTTPS_PROXY` 时，这些请求按代理设置发出；`ALL_PROXY` 只对站点访问和下载器连接生效。pt-tools 不包含统计或遥测，不向任何第三方发送使用数据。
+设置了 `HTTP_PROXY` 或 `HTTPS_PROXY` 时，这些请求按代理设置发出；`ALL_PROXY` 只对站点访问和下载器连接生效。在「全局设置」里开了[站点代理](../configuration.md#在全局设置里按站点设代理)时，发给站点的请求按那里的设置：选中的站点经那个代理发出，其余站点直连，不再看环境变量。pt-tools 不包含统计或遥测，不向任何第三方发送使用数据。
 
 ## 会监听哪些端口
 

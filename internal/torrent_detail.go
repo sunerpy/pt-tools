@@ -111,10 +111,8 @@ func fetchMTorrentDetail(ctx context.Context, siteName models.SiteGroup, item *g
 	// API 路径需要加上 /api 前缀
 	apiPath := fmt.Sprintf("%s/api/torrent/detail", sc.APIUrl)
 
-	session := httpclient.NewSession().WithTimeout(30 * time.Second)
-	if proxyURL := httpclient.ResolveProxyFromEnvironment(apiPath); proxyURL != "" {
-		session = session.WithProxy(proxyURL)
-	}
+	// 站点代理开着时按站点判定，关着时按环境变量；无论走不走代理都显式 WithProxy（清掉 Transport 池里残留的代理）
+	session := httpclient.NewSession().WithTimeout(30 * time.Second).WithProxy(httpclient.ResolveSiteProxyOrEnv(string(siteName), apiPath))
 	defer func() { _ = session.Close() }()
 
 	req, err := requests.NewPost(apiPath).WithBody(strings.NewReader(data)).Build()

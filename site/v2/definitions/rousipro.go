@@ -65,6 +65,7 @@ func createRousiDriver(config v2.SiteConfig, logger *zap.Logger) (v2.Site, error
 		BaseURL:     baseURL,
 		Passkey:     opts.Passkey,
 		LoginCookie: opts.Cookie,
+		SiteID:      config.ID,
 	})
 
 	if siteDef != nil {
@@ -174,6 +175,8 @@ type rousiDriverConfig struct {
 	LoginCookie string
 	HTTPClient  *v2.SiteHTTPClient
 	UserAgent   string
+	// SiteID 是站点在 pt-tools 里注册的 ID：全局设置里的「站点代理」按它判定走不走代理
+	SiteID string
 }
 
 func newRousiDriver(config rousiDriverConfig) *rousiDriver {
@@ -191,6 +194,7 @@ func newRousiDriver(config rousiDriverConfig) *rousiDriver {
 		httpClient = v2.NewSiteHTTPClient(v2.SiteHTTPClientConfig{
 			Timeout:   30 * time.Second,
 			UserAgent: userAgent,
+			SiteID:    config.SiteID,
 		})
 	}
 

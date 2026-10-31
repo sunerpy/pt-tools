@@ -593,7 +593,7 @@ func (s *Server) testFilterRuleWithRSS(w http.ResponseWriter, ctx context.Contex
 		return
 	}
 
-	feed, err := internal.FetchRSSFeed(ctx, rss.URL)
+	feed, err := internal.FetchRSSFeed(ctx, site.Name, rss.URL)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, internal.ErrRSSPlaceholder) {
@@ -782,6 +782,8 @@ func bytesToGB(n int64) float64 {
 // RSSLinkTestRequest 是 POST /api/rss/test：添加、编辑 RSS 时先试一下链接（只拉一次，不存）。
 type RSSLinkTestRequest struct {
 	URL string `json:"url"`
+	// Site 是这条 RSS 所属的站点（站点页上试的时候带上）：全局设置的「站点代理」按它判定；不带时按环境变量
+	Site string `json:"site,omitempty"`
 }
 
 // RSSLinkTestResponse 是试的结果：RSS 的标题、条目数与最新的几条标题。
@@ -800,7 +802,7 @@ func (s *Server) apiRSSLinkTest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请求格式不对: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	feed, err := internal.FetchRSSFeed(r.Context(), req.URL)
+	feed, err := internal.FetchRSSFeed(r.Context(), req.Site, req.URL)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, internal.ErrRSSPlaceholder) || errors.Is(err, internal.ErrRSSInvalidURL) {

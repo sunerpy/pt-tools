@@ -157,6 +157,8 @@ func TestAppAPI_TokensCannotReachSessionAPIs(t *testing.T) {
 		{http.MethodGet, "/api/qbit"},
 		{http.MethodGet, "/api/sites"},
 		{http.MethodGet, "/api/global"},
+		{http.MethodGet, "/api/site-proxy"},
+		{http.MethodPut, "/api/site-proxy"},
 		{http.MethodGet, "/api/tokens"},
 		{http.MethodPost, "/api/tokens"},
 		{http.MethodDelete, "/api/tokens/1"},

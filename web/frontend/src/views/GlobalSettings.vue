@@ -5,6 +5,11 @@ import {
   globalApi,
   type GlobalSettings,
   type NotificationConfig,
+  type SiteProxyInput,
+  type SiteProxyMode,
+  type SiteProxyOption,
+  type SiteProxySettings,
+  siteProxyApi,
   userInfoApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
@@ -53,7 +58,7 @@ const form = ref<GlobalSettings>({
 });
 
 /**
- * 每日战报走自己的接口（只写这三列），和全局配置一起读、一起保存，是保存的第二步。
+ * 每日战报走自己的接口（只写这三列），和全局配置一起读、一起保存，是保存的第二步（和站点代理各存各的）。
  * 读不回来时不当成「改过」去保存。通道下拉只给启用的通道。
  */
 const reportForm = ref<DailyReportSettings>({ enabled: false, time: "22:00", channel_ids: [] });
@@ -73,6 +78,59 @@ function sameReport(a: DailyReportSettings, b: DailyReportSettings): boolean {
     a.time === b.time &&
     [...a.channel_ids].sort().join(",") === [...b.channel_ids].sort().join(",")
   );
+}
+
+/**
+ * 站点代理也走自己的接口，和全局配置、每日战报一起读、一起保存。
+ * proxy_url 里是读回来的打码地址（密码换成 ***），原样交回表示不改。
+ * 读不回来时和每日战报一样整段禁用、不参与保存；站点多选的选项只来自接口给的 site_options。
+ */
+const proxyForm = ref<SiteProxyInput>({ enabled: false, proxy_url: "", mode: "all", sites: [] });
+const proxySaved = ref<SiteProxyInput | null>(null);
+const proxyOptions = ref<SiteProxyOption[]>([]);
+const proxyLoadFailed = ref(false);
+/** 存着的代理地址解不开（加密密钥换过）：后端按关闭处理，要重新填 */
+const proxyUnreadable = ref(false);
+
+function toProxyInput(p: SiteProxySettings): SiteProxyInput {
+  return { enabled: p.enabled, proxy_url: p.proxy_url, mode: p.mode, sites: [...(p.sites ?? [])] };
+}
+
+function sameProxy(a: SiteProxyInput, b: SiteProxyInput): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.proxy_url.trim() === b.proxy_url.trim() &&
+    a.mode === b.mode &&
+    [...a.sites].sort().join(",") === [...b.sites].sort().join(",")
+  );
+}
+
+/** 读回来（或保存成功）的站点代理：已保存的基线、选项与「解不开」标记跟着换 */
+function applyProxySaved(p: SiteProxySettings) {
+  proxySaved.value = toProxyInput(p);
+  proxyOptions.value = p.site_options ?? [];
+  proxyUnreadable.value = !!p.proxy_unreadable;
+}
+
+const proxyModeOptions: { value: SiteProxyMode; label: string; desc: string }[] = [
+  { value: "all", label: "全部站点", desc: "所有站点的请求都经这个代理" },
+  { value: "include", label: "只有选中的站点", desc: "选中的站点经代理，其余站点直连" },
+  {
+    value: "exclude",
+    label: "除了选中的站点",
+    desc: "选中的站点直连，其余站点经代理；一个都不选等于全部站点",
+  },
+];
+
+const activeProxyMode = computed(() =>
+  proxyModeOptions.find((o) => o.value === proxyForm.value.mode),
+);
+
+/** 页头摘要里站点代理那一项：只在开着的时候出现 */
+function proxySummary(p: SiteProxyInput): string {
+  if (p.mode === "include") return `站点代理：${p.sites.length} 个站点`;
+  if (p.mode === "exclude" && p.sites.length > 0) return `站点代理：除 ${p.sites.length} 个站点`;
+  return "站点代理：全部站点";
 }
 
 /** short 是给页头摘要用的短名：摘要行是单行截断的，装不下带括号的完整标签 */
@@ -124,6 +182,7 @@ const headSub = computed(() => {
   ].filter(Boolean);
   // 免费期结束自动删数据是不可恢复的，开着就一定要在摘要里露出来
   if (f.auto_delete_on_free_end) parts.push("免费结束自动删除");
+  if (proxySaved.value?.enabled) parts.push(proxySummary(proxySaved.value));
   return parts.join(" · ");
 });
 
@@ -142,9 +201,10 @@ async function loadData() {
   savedForm.value = { ...form.value };
   loaded.value = true;
   showWarning.value = !form.value.download_dir;
-  const [report, channels] = await Promise.all([
+  const [report, channels, proxy] = await Promise.all([
     userInfoApi.getDailyReport().catch(() => null),
     chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
+    siteProxyApi.get().catch(() => null),
   ]);
   reportChannels.value = (channels ?? []).filter((c) => c.enabled);
   if (report) {
@@ -154,6 +214,14 @@ async function loadData() {
   } else {
     reportSaved.value = null;
     reportLoadFailed.value = true;
+  }
+  if (proxy) {
+    applyProxySaved(proxy);
+    proxyForm.value = toProxyInput(proxy);
+    proxyLoadFailed.value = false;
+  } else {
+    proxySaved.value = null;
+    proxyLoadFailed.value = true;
   }
 }
 
@@ -168,6 +236,21 @@ async function save() {
   const report = reportForm.value;
   if (report.enabled && report.channel_ids.length === 0) {
     ElMessage.error("开启每日战报至少要选一个通知通道");
+    return;
+  }
+  // 站点代理读不回来时 proxySaved 是 null：不算改动，不参与保存
+  const proxy: SiteProxyInput = {
+    ...proxyForm.value,
+    proxy_url: proxyForm.value.proxy_url.trim(),
+    sites: [...proxyForm.value.sites],
+  };
+  const proxyChanged = proxySaved.value !== null && !sameProxy(proxySaved.value, proxy);
+  if (proxyChanged && proxy.enabled && !proxy.proxy_url) {
+    ElMessage.error("开启站点代理要填代理地址");
+    return;
+  }
+  if (proxyChanged && proxy.mode === "include" && proxy.sites.length === 0) {
+    ElMessage.error("选了「只有选中的站点」，至少选一个站点");
     return;
   }
 
@@ -185,20 +268,41 @@ async function save() {
       return;
     }
     showWarning.value = false;
-    /* 每日战报是第二步：全局配置已经落库，失败时说清哪些保存了 */
+    /*
+     * 全局配置落库以后，每日战报与站点代理各自有改动才存，两个都试、互不影响：
+     * 成功的更新自己的已保存基线，失败的留着表单里的改动（下次保存再试），一条提示说清哪些没保存。
+     */
+    const steps: { label: string; run: () => Promise<void> }[] = [];
     const savedReport = reportSaved.value;
     if (savedReport && !sameReport(savedReport, report)) {
-      try {
-        reportSaved.value = await userInfoApi.saveDailyReport({
-          ...report,
-          channel_ids: [...report.channel_ids],
-        });
-      } catch (e: unknown) {
-        ElMessage.warning(
-          `全局配置已保存，每日战报设置没有保存：${(e as Error).message || "请求失败"}`,
-        );
-        return;
-      }
+      const next = { ...report, channel_ids: [...report.channel_ids] };
+      steps.push({
+        label: "每日战报设置",
+        run: async () => {
+          reportSaved.value = await userInfoApi.saveDailyReport(next);
+        },
+      });
+    }
+    if (proxyChanged) {
+      steps.push({
+        label: "站点代理",
+        run: async () => {
+          const saved = await siteProxyApi.save(proxy);
+          applyProxySaved(saved);
+          // 保存期间没再改过：换成读回来的打码地址，密码不留在页面上；改过就留着新改动
+          if (sameProxy(proxyForm.value, proxy)) proxyForm.value = toProxyInput(saved);
+        },
+      });
+    }
+    const results = await Promise.allSettled(steps.map((step) => step.run()));
+    const failed = results.flatMap((r, i) =>
+      r.status === "rejected"
+        ? [`${steps[i]!.label}没有保存：${(r.reason as Error)?.message || "请求失败"}`]
+        : [],
+    );
+    if (failed.length > 0) {
+      ElMessage.warning(`全局配置已保存，${failed.join("；")}`);
+      return;
     }
     ElMessage.success("保存成功");
   } finally {
@@ -477,6 +581,88 @@ async function save() {
                 </el-form-item>
               </div>
             </div>
+
+            <div class="pt-strip">
+              <PtIcon name="network" :size="13" />
+              <span>站点代理</span>
+            </div>
+            <div class="settings-body">
+              <div
+                v-if="proxyLoadFailed"
+                class="pt-note pt-note--warn proxy-note"
+                data-testid="site-proxy-load-failed">
+                <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                <span>站点代理设置读取失败，这一段暂时不能修改；刷新页面重试</span>
+              </div>
+              <div
+                v-else-if="proxyUnreadable"
+                class="pt-note pt-note--warn proxy-note"
+                data-testid="site-proxy-unreadable">
+                <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                <span
+                  >存着的代理地址解不开（加密密钥换过），现在按关闭处理；重新填写代理地址后保存</span
+                >
+              </div>
+              <el-form-item label="站点请求走代理">
+                <el-switch
+                  v-model="proxyForm.enabled"
+                  :disabled="proxyLoadFailed"
+                  data-testid="site-proxy-enabled" />
+                <div class="field-tip">
+                  开启后，发给站点的请求（搜索与种子列表、取
+                  RSS、下载种子、签到、取用户信息、辅种）按这里走，环境变量里的代理（HTTPS_PROXY）不再管站点；关闭时照旧按环境变量。保存后立即生效，不用重启
+                </div>
+              </el-form-item>
+              <el-form-item label="代理地址">
+                <el-input
+                  v-model="proxyForm.proxy_url"
+                  :disabled="proxyLoadFailed || !proxyForm.enabled"
+                  placeholder="http://192.168.1.2:7890 或 socks5://用户名:密码@主机:1080"
+                  data-testid="site-proxy-url" />
+                <div class="field-tip">
+                  支持 http、https、socks5、socks5h。密码加密保存，读出来显示成 ***，不改就原样保留
+                </div>
+              </el-form-item>
+              <el-form-item label="哪些站点走代理">
+                <el-radio-group
+                  v-model="proxyForm.mode"
+                  :disabled="proxyLoadFailed || !proxyForm.enabled"
+                  data-testid="site-proxy-mode">
+                  <el-radio-button
+                    v-for="opt in proxyModeOptions"
+                    :key="opt.value"
+                    :value="opt.value">
+                    {{ opt.label }}
+                  </el-radio-button>
+                </el-radio-group>
+                <div v-if="activeProxyMode" class="field-tip">{{ activeProxyMode.desc }}</div>
+              </el-form-item>
+              <el-form-item
+                v-if="proxyForm.mode !== 'all'"
+                :label="proxyForm.mode === 'include' ? '走代理的站点' : '直连的站点'">
+                <el-select
+                  v-model="proxyForm.sites"
+                  :disabled="proxyLoadFailed || !proxyForm.enabled"
+                  multiple
+                  filterable
+                  collapse-tags
+                  collapse-tags-tooltip
+                  placeholder="选择站点"
+                  data-testid="site-proxy-sites">
+                  <el-option
+                    v-for="o in proxyOptions"
+                    :key="o.id"
+                    :label="o.enabled ? o.name : `${o.name}（未启用）`"
+                    :value="o.id" />
+                </el-select>
+                <div class="field-tip">列出的是 pt-tools 支持的全部站点，没启用的也能先选上</div>
+              </el-form-item>
+              <p class="field-tip proxy-tip">
+                不影响下载器、IYUU、通知通道、TMDB、AI 助手等，它们按各自的设置；CloakBrowser
+                在它自己的配置里设代理。走代理的站点看到的是代理出口的 IP，站点规则对 IP
+                有要求的（例如 HDSky 的盒子规则）先确认再选
+              </p>
+            </div>
           </div>
         </div>
       </el-form>
@@ -531,8 +717,17 @@ async function save() {
   margin-top: 6px;
 }
 
-/* 每日签到挪走以后留的一句指路：段尾补上 16 的留白（这一段没有字段自带的下外边距） */
-.moved-tip {
+/*
+ * 每日签到挪走以后留的一句指路、站点代理段尾的说明：不在字段里，段尾补上 16 的留白
+ * （字段自带的下外边距这里没有）
+ */
+.moved-tip,
+.proxy-tip {
   margin: 0 0 var(--pt-pad);
+}
+
+/* 读取失败 / 解不开的提醒与下面第一个字段隔开 */
+.proxy-note {
+  margin-bottom: var(--pt-pad);
 }
 </style>

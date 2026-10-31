@@ -234,13 +234,15 @@ It also helps to turn on Download speed check (启用下载限速判断) and ent
 
 ## System administration
 
-### Setting the proxy environment variables
+### Giving pt-tools a proxy
 
 **Symptom**: requests to sites time out or fail to connect, and you suspect a proxy is needed.
 
-**How to set them**:
+**How to set it**:
 
-pt-tools reads the `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` environment variables, in upper or lower case. `ALL_PROXY` is used only for site access and downloader connections; fetching RSS feeds and the Telegram channel need `HTTP_PROXY`/`HTTPS_PROXY`.
+When sites cannot be reached, first send them through a proxy in the Site proxy (站点代理) part of Global settings. You can choose all sites, only the selected sites or all except the selected sites, and the change takes effect when you save, without a restart; see [Configuration: Site proxy in Global settings](configuration.md#site-proxy-in-global-settings).
+
+Downloaders, notification channels and other requests use the environment variables: pt-tools reads `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`, in upper or lower case. `ALL_PROXY` is used only for site access and downloader connections; fetching RSS feeds and the Telegram channel need `HTTP_PROXY`/`HTTPS_PROXY`. Once the site proxy is on, site requests no longer read these variables.
 
 The details and examples are in [Configuration: Proxy settings](configuration.md#proxy-settings).
 

@@ -19,6 +19,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/utils"
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 // 取 RSS：RSS 任务与过滤规则的试跑共用。带浏览器的 User-Agent（Cloudflare 后面的站点会掐掉通用 UA 的握手），
@@ -46,9 +47,10 @@ type RSSFetchError struct {
 func (e *RSSFetchError) Error() string { return e.Message }
 func (e *RSSFetchError) Unwrap() error { return e.Err }
 
-// FetchRSSFeed 取一个 RSS 并解析。
-func FetchRSSFeed(ctx context.Context, rawURL string) (*gofeed.Feed, error) {
-	return fetchRSS(ctx, rawURL, &http.Client{Timeout: rssFetchTimeout})
+// FetchRSSFeed 取站点 siteID 的一个 RSS 并解析。全局设置的「站点代理」开着时按 RSS 绑定的站点判定走不走代理，
+// 关着（或者 siteID 为空）时和以前一样按环境变量（HTTP_PROXY/HTTPS_PROXY）。
+func FetchRSSFeed(ctx context.Context, siteID, rawURL string) (*gofeed.Feed, error) {
+	return fetchRSS(httpclient.WithSiteID(ctx, siteID), rawURL, &http.Client{Timeout: rssFetchTimeout, Transport: httpclient.SiteTransport()})
 }
 
 func fetchRSS(ctx context.Context, rawURL string, client *http.Client) (*gofeed.Feed, error) {
@@ -126,9 +128,9 @@ func rssTransportError(host string, err error) error {
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return msg("连不上 %s（连接被拒绝）：检查 RSS 链接的域名与端口", host)
 	case errors.Is(err, syscall.ECONNRESET), strings.Contains(err.Error(), "connection reset"):
-		return msg("%s 断开了连接（connection reset）：站点或它前面的 Cloudflare 拒绝了这条线路，稍后再试；一直这样时给 pt-tools 设代理（环境变量 HTTPS_PROXY）", host)
+		return msg("%s 断开了连接（connection reset）：站点或它前面的 Cloudflare 拒绝了这条线路，稍后再试；一直这样时在全局设置的「站点代理」里让这个站点走代理", host)
 	case errors.Is(err, context.DeadlineExceeded), isTimeout(err):
-		return msg("连接 %s 超时（%d 秒没有回应）：站点慢或这条线路不通，稍后再试；一直这样时给 pt-tools 设代理（环境变量 HTTPS_PROXY）", host, int(rssFetchTimeout/time.Second))
+		return msg("连接 %s 超时（%d 秒没有回应）：站点慢或这条线路不通，稍后再试；一直这样时在全局设置的「站点代理」里让这个站点走代理", host, int(rssFetchTimeout/time.Second))
 	case errors.Is(err, context.Canceled):
 		return msg("取 RSS 被取消了")
 	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
@@ -150,7 +152,7 @@ func rssStatusError(host string, code int, header http.Header, body []byte) erro
 		bytes.Contains(body, []byte("cf_chl_opt")) || bytes.Contains(body, []byte("/cdn-cgi/challenge-platform/"))
 	switch {
 	case cloudflare:
-		hint = "：被 Cloudflare 的质询拦了，稍后再试；一直这样时给 pt-tools 设代理（环境变量 HTTPS_PROXY）"
+		hint = "：被 Cloudflare 的质询拦了，稍后再试；一直这样时在全局设置的「站点代理」里让这个站点走代理"
 	case code == http.StatusUnauthorized || code == http.StatusForbidden:
 		hint = "：站点拒绝了这个链接，RSS 链接里的 passkey 可能失效了，去站点的 RSS 页重新生成一个"
 	case code == http.StatusNotFound:

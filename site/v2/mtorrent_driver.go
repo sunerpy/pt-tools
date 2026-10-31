@@ -347,6 +347,8 @@ type MTorrentDriverConfig struct {
 	HTTPClient  *SiteHTTPClient // Use SiteHTTPClient instead of *http.Client
 	UserAgent   string
 	UseFailover bool // Enable multi-URL failover
+	// SiteID 是站点在 pt-tools 里注册的 ID：全局设置里的「站点代理」按它判定走不走代理
+	SiteID string
 }
 
 // NewMTorrentDriver creates a new M-Team driver
@@ -364,6 +366,7 @@ func NewMTorrentDriver(config MTorrentDriverConfig) *MTorrentDriver {
 			IdleConnTimeout:   30 * time.Second,
 			DisableKeepAlives: true,
 			UserAgent:         userAgent,
+			SiteID:            config.SiteID,
 		})
 	}
 
@@ -1419,6 +1422,7 @@ func createMTorrentSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 		BaseURL:     config.BaseURL,
 		APIKey:      opts.APIKey,
 		LoginCookie: opts.Cookie,
+		SiteID:      config.ID,
 	})
 
 	if siteDef != nil {
