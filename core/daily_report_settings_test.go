@@ -23,21 +23,42 @@ func TestDailyReportSettings_DefaultsAndRoundTrip(t *testing.T) {
 	store := newDailyReportStore(t)
 	got, err := store.DailyReportSettings()
 	require.NoError(t, err)
-	assert.Equal(t, DailyReportSettings{Enabled: false, Time: DefaultDailyReportTime, ChannelIDs: []uint{}}, got)
+	assert.Equal(t, DailyReportSettings{Enabled: false, Time: DefaultDailyReportTime, ChannelIDs: []uint{}, Scope: DailyReportScopePreviousDay}, got,
+		"默认发前一天的数据")
 
 	conf := models.NotificationConf{ChannelType: "webhook", Name: "w", Enabled: true}
 	require.NoError(t, store.db.DB.Create(&conf).Error)
-	require.NoError(t, store.SaveDailyReportSettings(DailyReportSettings{Enabled: true, Time: "21:30", ChannelIDs: []uint{conf.ID}}))
+	require.NoError(t, store.SaveDailyReportSettings(DailyReportSettings{Enabled: true, Time: "21:30", ChannelIDs: []uint{conf.ID}, Scope: DailyReportScopeToday}))
 
 	got, err = store.DailyReportSettings()
 	require.NoError(t, err)
-	assert.Equal(t, DailyReportSettings{Enabled: true, Time: "21:30", ChannelIDs: []uint{conf.ID}}, got)
+	assert.Equal(t, DailyReportSettings{Enabled: true, Time: "21:30", ChannelIDs: []uint{conf.ID}, Scope: DailyReportScopeToday}, got)
 
 	// 保存全局设置不会改动战报的几列
 	require.NoError(t, store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 15}))
 	got, err = store.DailyReportSettings()
 	require.NoError(t, err)
 	assert.True(t, got.Enabled)
+	assert.Equal(t, DailyReportScopeToday, got.Scope, "统计范围也不被全局设置改掉")
+
+	// 不带统计范围保存（旧的客户端）：按前一天
+	require.NoError(t, store.SaveDailyReportSettings(DailyReportSettings{Enabled: true, Time: "21:30", ChannelIDs: []uint{conf.ID}}))
+	got, err = store.DailyReportSettings()
+	require.NoError(t, err)
+	assert.Equal(t, DailyReportScopePreviousDay, got.Scope)
+}
+
+// 已有的安装加列以后是「前一天」；库里是不认识的值时也按前一天读出。
+func TestDailyReportSettings_ScopeColumnDefaults(t *testing.T) {
+	store := newDailyReportStore(t)
+	var gs models.SettingsGlobal
+	require.NoError(t, store.db.DB.First(&gs).Error)
+	assert.Equal(t, DailyReportScopePreviousDay, gs.DailyReportScope, "列的默认值")
+
+	require.NoError(t, store.db.DB.Model(&models.SettingsGlobal{}).Where("id = ?", gs.ID).Update("daily_report_scope", "weekly").Error)
+	got, err := store.DailyReportSettings()
+	require.NoError(t, err)
+	assert.Equal(t, DailyReportScopePreviousDay, got.Scope)
 }
 
 // 开启战报至少要选一个通道：不沿用「空列表即全部通道」。时间格式与通道是否存在也要校验。
@@ -49,6 +70,7 @@ func TestSaveDailyReportSettings_Validation(t *testing.T) {
 	require.Error(t, store.SaveDailyReportSettings(DailyReportSettings{Enabled: true, Time: "22:00", ChannelIDs: []uint{999}}),
 		"不存在的通道")
 	require.NoError(t, store.SaveDailyReportSettings(DailyReportSettings{Enabled: false, Time: "07:05"}), "关闭时可以不选通道")
+	assert.ErrorIs(t, store.SaveDailyReportSettings(DailyReportSettings{Time: "22:00", Scope: "weekly"}), ErrDailyReportScope)
 }
 
 // 偏移首次用到时分配并持久化，之后固定不变。

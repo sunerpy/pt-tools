@@ -86,7 +86,7 @@ func (s *Server) configResources() []*configResource {
 			Hidden: []string{
 				"id", "created_at", "updated_at", "attendance_window_start", "attendance_window_end", "attendance_ai_enabled",
 				"attendance_vision_model", "attendance_notify_enabled", "attendance_notify_channel_ids", "daily_report_enabled",
-				"daily_report_time", "daily_report_channel_ids", "dead_torrent_scan_enabled", "dead_torrent_scan_interval_h",
+				"daily_report_time", "daily_report_channel_ids", "daily_report_scope", "dead_torrent_scan_enabled", "dead_torrent_scan_interval_h",
 				"dead_torrent_scan_channel_ids",
 			},
 			Hints: map[string]string{
@@ -123,7 +123,10 @@ func (s *Server) configResources() []*configResource {
 			Name: "daily_report", Title: "每日战报", Kind: configObject, Path: "/api/v2/userinfo/daily-report", SetMethod: http.MethodPut,
 			Desc:   "每天定时把各站点的上传、下载、魔力汇总发到通知通道。",
 			Fields: jsonFields[core.DailyReportSettings](), Ops: []string{configOpSet},
-			Hints: map[string]string{"time": "HH:MM", "channel_ids": "开启时至少一个通知通道（notify_channels 的 id）"},
+			Hints: map[string]string{
+				"time": "HH:MM", "channel_ids": "开启时至少一个通知通道（notify_channels 的 id）",
+				"scope": "previous_day（前一天整天，默认）或 today（当天截至发送时刻）",
+			},
 		},
 		{
 			Name: "dead_scan", Title: "失效种子扫描", Kind: configObject, Path: "/api/downloader-assistant/dead-scan", SetMethod: http.MethodPut,
