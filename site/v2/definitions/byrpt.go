@@ -35,8 +35,9 @@ var BYRPTDefinition = &v2.SiteDefinition{
 				Fields: []string{"name", "uploaded", "downloaded", "ratio", "levelName", "joinTime"},
 			},
 			{
-				// 时魔：魔力值页（顶栏「明细」的链接）写「你当前每小时能获取98.481个魔力值 (A = 2228.5)」
-				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
+				// 时魔在魔力值页的「做种详情」（?show=seed）：「你当前每小时能获取98.481个魔力值 (A = 2228.5)」；
+				// 不带参数的魔力值页上没有这一句（2026-10-31 在站点上核对）
+				RequestConfig: v2.RequestConfig{URL: "/mybonus.php?show=seed", ResponseType: "document"},
 				Fields:        []string{"bonusPerHour"},
 			},
 		},

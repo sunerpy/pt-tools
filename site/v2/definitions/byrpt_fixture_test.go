@@ -71,12 +71,16 @@ const byrptUserdetailsFixture = `<html><body>
 </table>
 </body></html>`
 
-// 魔力值页：时魔那一句（2026-10-31 用户贴来的原文），数字可能包在标签里
+// 魔力值页的「做种详情」（mybonus.php?show=seed）：时魔那一句的写法照站点（2026-10-31 核对），前面是计算公式的说明
 const byrptBonusFixture = `<html><body>
-<table width="97%" border="1" cellspacing="0" cellpadding="5"><tr><td class="text" align="left">
-<div>你当前每小时能获取<b>98.481</b>个魔力值 (A = 2228.5)</div>
-<div>系统每小时根据你做种的种子计算一次魔力值。</div>
-</td></tr></table>
+<ul><li><b>B0</b>为参数，代表用户1小时获得魔力值的上限。<b>B0</b> = 100</li><li><b>L</b>为参数。<b>L</b> = 300</li></ul>
+<div style="text-align: center" class="big bold">你当前每小时能获取98.481个魔力值 (A = 2228.5)</div>
+<table style="width: 400px"><tbody><tr><td class="loadbarbg" style="border: none; padding: 0"><img class="loadbargreen" src="pic/trans.gif" /></td></tr></tbody></table>
+</body></html>`
+
+// 不带参数的魔力值页：兑换列表，没有时魔那一句
+const byrptBonusShopFixture = `<html><body>
+<table><tr><td class="colhead">项目</td><td class="colhead">价格</td></tr><tr><td>1.0 GB 上传量</td><td>300</td></tr></table>
 </body></html>`
 
 const byrptDetailFixture = `<html><body>
@@ -168,10 +172,10 @@ func testBYRPTUserInfo(t *testing.T) {
 	assert.Equal(t, "Ultimate User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "1618308304", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 
-	bonusDoc := FixtureDoc(t, "byrpt_mybonus", byrptBonusFixture)
-	assert.Equal(t, "98.481", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]), "不是括号里的 A 值")
-	plain := FixtureDoc(t, "byrpt_mybonus_plain", `<html><body><div>你当前每小时能获取98.481个魔力值 (A = 2228.5)</div></body></html>`)
-	assert.Equal(t, "98.481", driver.ExtractFieldValuePublic(plain, def.UserInfo.Selectors["bonusPerHour"]))
+	bonusDoc := FixtureDoc(t, "byrpt_mybonus_seed", byrptBonusFixture)
+	assert.Equal(t, "98.481", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]), "不是括号里的 A 值，也不是公式里的数")
+	tagged := FixtureDoc(t, "byrpt_mybonus_tagged", `<html><body><div>你当前每小时能获取<b>98.481</b>个魔力值 (A = 2228.5)</div></body></html>`)
+	assert.Equal(t, "98.481", driver.ExtractFieldValuePublic(tagged, def.UserInfo.Selectors["bonusPerHour"]), "数字包在标签里也取得到")
 }
 
 // 魔力值从首页顶栏读。用户详情页的「魔力值」一格是「1192520.0 魔力值历史」，没有冒号，按顶栏写法的规则读出 0；
@@ -186,7 +190,12 @@ func TestBYRPTUserInfo_BonusSurvivesUserdetails(t *testing.T) {
 		case "/userdetails.php":
 			_, _ = w.Write([]byte(byrptUserdetailsFixture))
 		case "/mybonus.php":
-			_, _ = w.Write([]byte(byrptBonusFixture))
+			// 时魔只在「做种详情」里
+			if r.URL.Query().Get("show") == "seed" {
+				_, _ = w.Write([]byte(byrptBonusFixture))
+			} else {
+				_, _ = w.Write([]byte(byrptBonusShopFixture))
+			}
 		default:
 			_, _ = w.Write([]byte(`<html><body></body></html>`))
 		}
@@ -210,6 +219,7 @@ func TestBYRPT_Fixtures_NoSecrets(t *testing.T) {
 		"index":    byrptIndexFixture,
 		"userinfo": byrptUserdetailsFixture,
 		"mybonus":  byrptBonusFixture,
+		"shop":     byrptBonusShopFixture,
 		"detail":   byrptDetailFixture,
 		"halfdown": byrptDetailWithHalfDownFixture,
 	}
