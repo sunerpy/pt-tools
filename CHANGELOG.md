@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.47](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.46...v1.0.0-rc.47) (2026-10-31)
+
+
+### Bug Fixes
+
+* **site:** BYR 标为不支持签到，站点上没有签到页 ([d983d48](https://github.com/sunerpy/pt-tools/commit/d983d48e2db90c727efd33ab2ebca98f460a217f))
+* **site:** BYR 的魔力值不再被用户详情页那一格盖成 0 ([d983d48](https://github.com/sunerpy/pt-tools/commit/d983d48e2db90c727efd33ab2ebca98f460a217f))
+
 ## [1.0.0-rc.46](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.45...v1.0.0-rc.46) (2026-10-30)
 
 
