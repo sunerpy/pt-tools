@@ -23,7 +23,7 @@ func TestFetchRSSFeed_PlaceholderNotRequested(t *testing.T) {
 		"https://springxxx.xxx",
 		"https://rss.m-team.xxx/api/rss/xxx",
 	} {
-		_, err := FetchRSSFeed(context.Background(), raw)
+		_, err := FetchRSSFeed(context.Background(), "", raw)
 		require.Error(t, err, raw)
 		assert.ErrorIs(t, err, ErrRSSPlaceholder, raw)
 		assert.Contains(t, err.Error(), "占位地址", raw)
@@ -33,7 +33,7 @@ func TestFetchRSSFeed_PlaceholderNotRequested(t *testing.T) {
 
 func TestFetchRSSFeed_BadScheme(t *testing.T) {
 	for _, raw := range []string{"", "ftp://hdsky.me/rss", "hdsky.me/torrentrss.php", "://x"} {
-		_, err := FetchRSSFeed(context.Background(), raw)
+		_, err := FetchRSSFeed(context.Background(), "", raw)
 		require.Error(t, err, raw)
 		assert.Contains(t, err.Error(), "http:// 或 https://", raw)
 	}
@@ -79,7 +79,7 @@ func TestFetchRSSFeed_StatusAndContentErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := rssServer(t, tc.h)
-			_, err := FetchRSSFeed(context.Background(), srv.URL+"/torrentrss.php?passkey=TOPSECRET")
+			_, err := FetchRSSFeed(context.Background(), "", srv.URL+"/torrentrss.php?passkey=TOPSECRET")
 			require.Error(t, err)
 			for _, w := range tc.want {
 				assert.Contains(t, err.Error(), w)
@@ -98,7 +98,7 @@ func TestFetchRSSFeed_OK(t *testing.T) {
 			`<item><title>A</title><guid>1</guid><enclosure url="http://e/1" length="1073741824" type="application/x-bittorrent"/></item>` +
 			`</channel></rss>`))
 	})
-	feed, err := FetchRSSFeed(context.Background(), srv.URL)
+	feed, err := FetchRSSFeed(context.Background(), "", srv.URL)
 	require.NoError(t, err)
 	require.Len(t, feed.Items, 1)
 	assert.Equal(t, int64(1<<30), rssEnclosureSize(feed.Items[0]))

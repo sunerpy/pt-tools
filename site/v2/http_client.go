@@ -60,6 +60,8 @@ type SiteHTTPClient struct {
 	maxIdle   int
 	keepAlive bool
 	logger    *zap.Logger
+	// siteID 是这个客户端所属的站点：全局设置里的「站点代理」按它判定走不走代理
+	siteID string
 }
 
 // SiteHTTPClientConfig holds configuration for SiteHTTPClient
@@ -71,6 +73,8 @@ type SiteHTTPClientConfig struct {
 	ProxyURL          string
 	UserAgent         string
 	Logger            *zap.Logger
+	// SiteID 是这个客户端所属站点的注册表 ID：全局设置里的「站点代理」按它判定走不走代理，为空时按环境变量
+	SiteID string
 }
 
 // DefaultSiteHTTPClientConfig returns default configuration
@@ -109,6 +113,7 @@ func NewSiteHTTPClient(config SiteHTTPClientConfig) *SiteHTTPClient {
 		maxIdle:   config.MaxIdleConns,
 		keepAlive: !config.DisableKeepAlives,
 		logger:    config.Logger,
+		siteID:    config.SiteID,
 	}
 }
 
@@ -176,14 +181,14 @@ func (c *SiteHTTPClient) DoRequest(ctx context.Context, method, url string, body
 
 	activeSession := c.session
 	if c.proxyURL == "" {
-		envProxyURL := httpclient.ResolveProxyFromEnvironment(url)
-		if envProxyURL != "" {
+		// 站点代理开着时按这个客户端所属的站点判定（没选中的站点直连），关着时按环境变量；每个请求判定一次，换了设置不用重建客户端
+		if proxyURL := httpclient.ResolveSiteProxyOrEnv(c.siteID, url); proxyURL != "" {
 			activeSession = httpclient.NewSession().
 				WithTimeout(c.timeout).
 				WithIdleTimeout(c.idleTime).
 				WithMaxIdleConns(c.maxIdle).
 				WithKeepAlive(c.keepAlive).
-				WithProxy(envProxyURL)
+				WithProxy(proxyURL)
 			defer func() { _ = activeSession.Close() }()
 		}
 	}

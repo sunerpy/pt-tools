@@ -186,6 +186,7 @@ func NewNexusPHPDriver(config NexusPHPDriverConfig) *NexusPHPDriver {
 			IdleConnTimeout:   30 * time.Second,
 			DisableKeepAlives: true,
 			UserAgent:         userAgent,
+			SiteID:            config.SiteID,
 		})
 	}
 

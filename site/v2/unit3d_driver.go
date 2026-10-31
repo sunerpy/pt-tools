@@ -97,6 +97,8 @@ type Unit3DDriverConfig struct {
 	APIKey     string
 	HTTPClient *SiteHTTPClient // Use SiteHTTPClient instead of *http.Client
 	UserAgent  string
+	// SiteID 是站点在 pt-tools 里注册的 ID：全局设置里的「站点代理」按它判定走不走代理
+	SiteID string
 }
 
 // NewUnit3DDriver creates a new Unit3D driver
@@ -114,6 +116,7 @@ func NewUnit3DDriver(config Unit3DDriverConfig) *Unit3DDriver {
 			IdleConnTimeout:   30 * time.Second,
 			DisableKeepAlives: true,
 			UserAgent:         userAgent,
+			SiteID:            config.SiteID,
 		})
 	}
 
@@ -404,6 +407,7 @@ func createUnit3DSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 	driver := NewUnit3DDriver(Unit3DDriverConfig{
 		BaseURL: config.BaseURL,
 		APIKey:  opts.APIKey,
+		SiteID:  config.ID,
 	})
 
 	return NewBaseSite(driver, BaseSiteConfig{
