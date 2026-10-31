@@ -31,6 +31,8 @@ const api = vi.hoisted(() => ({
   updateServer: vi.fn(),
   deleteServer: vi.fn(),
   testServer: vi.fn(),
+  preview: vi.fn(),
+  organize: vi.fn(),
 }));
 const dl = vi.hoisted(() => ({ list: vi.fn() }));
 const dirs = vi.hoisted(() => ({ listAll: vi.fn() }));
@@ -427,6 +429,19 @@ describe("媒体库", () => {
     api.deleteWatchDir.mockResolvedValue({ ok: true });
     q("ml-watch-del-4")!.click();
     await vi.waitFor(() => expect(api.deleteWatchDir).toHaveBeenCalledWith(4));
+  });
+
+  it("页头的「手动整理」打开指定路径的弹窗，不发预览请求；目录监控的说明指向它", async () => {
+    await mountPage();
+    const watchTip = q("ml-watch")!.closest(".pt-panel")?.textContent ?? "";
+    expect(watchTip).toContain(
+      "要马上整理某个文件或文件夹（不用加监控目录），点页面上方的「手动整理」。",
+    );
+    q("ml-manual")!.click();
+    await vi.waitFor(() => expect(q("organize-source")).not.toBeNull());
+    await flush();
+    expect(document.querySelector(".el-dialog__title")?.textContent).toBe("手动整理");
+    expect(api.preview).not.toHaveBeenCalled();
   });
 
   it("二级分类：填入常用分类、调整顺序、添加与删除，每次整份保存", async () => {

@@ -3,7 +3,7 @@
  * 钉子：整理入库弹窗。打开时预览（条目、媒体库、每个文件放到哪里）；识别不对时填 TMDB 编号、换库后重新预览，
  * 请求里只带填了的字段；整个种子整理不了时不能点整理；整理后写明结果，后台还在跑时说明稍后看历史。
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, ref } from "vue";
 
 import { type MountedView, mountView } from "@/test-mount";
@@ -222,5 +222,210 @@ describe("整理入库弹窗", () => {
     await vi.waitFor(() => expect(q("organize-error")).not.toBeNull());
     expect(q("organize-error")!.textContent).toContain("没有这个种子");
     expect((q("organize-run") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+/*
+ * 钉子：手动整理（指定一个文件或目录）。打开时不预览，等填了路径点「预览」；从整理历史带着路径打开时立即预览；
+ * 请求里只带填了的字段；改了路径要重新预览才能整理；写明链接放到哪个库、刮不刮削，移动整理时提醒源文件会搬走。
+ */
+const pathPlan = {
+  ...plan,
+  downloader_id: 0,
+  downloader_name: "指定路径",
+  hash: "path:0123456789abcdef",
+  task_id: "",
+  save_path: "/data/in",
+  local_path: "/data/in",
+  mapped: false,
+  source_path: "/data/in/Oppenheimer.2023.2160p.BluRay-FRDS",
+  items: [{ ...plan.items[0], source: "/data/in/Oppenheimer.2023.2160p.BluRay-FRDS/a.mkv" }],
+};
+
+function inputOf(id: string): HTMLInputElement {
+  const el = q(id);
+  if (!el) throw new Error(`找不到 ${id}`);
+  return (el instanceof HTMLInputElement ? el : el.querySelector("input")) as HTMLInputElement;
+}
+
+function fill(id: string, v: string) {
+  const i = inputOf(id);
+  i.value = v;
+  i.dispatchEvent(new Event("input"));
+}
+
+const button = (id: string) => q(id) as HTMLButtonElement;
+
+async function mountPathDialog(sourcePath: string) {
+  api.libraries.mockResolvedValue([
+    { ...library, effective_template: "", preview: "", created_at: "", updated_at: "" },
+  ]);
+  const OrganizeDialog = (await import("./OrganizeDialog.vue")).default;
+  const done = vi.fn();
+  const Host = defineComponent({
+    setup() {
+      const open = ref(true);
+      return () =>
+        h(OrganizeDialog, {
+          modelValue: open.value,
+          "onUpdate:modelValue": (v: boolean) => (open.value = v),
+          target: { source_path: sourcePath },
+          onDone: done,
+        });
+    },
+  });
+  view = mountView(Host);
+  await vi.waitFor(() => expect(q("organize-source")).not.toBeNull());
+  await flush();
+  return done;
+}
+
+describe("手动整理（指定路径）", () => {
+  // 每个用例自己定预览与整理回什么（排着的 mockResolvedValueOnce 不留给下一个用例）
+  beforeEach(() => {
+    api.preview.mockReset();
+    api.organize.mockReset();
+  });
+
+  it("打开时不预览；路径为空时不能预览；请求只带源路径，填了 TMDB 编号再带条目", async () => {
+    await mountPathDialog("");
+    expect(document.querySelector(".el-dialog__title")?.textContent).toBe("手动整理");
+    expect(api.preview).not.toHaveBeenCalled();
+    expect(button("organize-source-preview").disabled, "路径为空").toBe(true);
+    expect(button("organize-run").disabled).toBe(true);
+    expect(document.body.textContent).toContain("Docker 里填容器里的路径");
+    expect(document.body.textContent).toContain("要放到别的目录，先在「媒体库」里加一个库");
+
+    api.preview.mockResolvedValue(pathPlan);
+    fill("organize-source", " /data/in/Oppenheimer.2023.2160p.BluRay-FRDS ");
+    await flush();
+    expect(button("organize-source-preview").disabled).toBe(false);
+    button("organize-source-preview").click();
+    await vi.waitFor(() => expect(api.preview).toHaveBeenCalledTimes(1));
+    expect(api.preview.mock.calls[0]![0]).toEqual({
+      source_path: "/data/in/Oppenheimer.2023.2160p.BluRay-FRDS",
+    });
+    await vi.waitFor(() => expect(q("organize-match")).not.toBeNull());
+    expect(document.body.textContent).toContain("指定路径 · /data/in");
+
+    fill("organize-tmdb-id", "872585");
+    inputOf("organize-tmdb-id").dispatchEvent(new Event("change"));
+    await flush();
+    q("organize-repreview")!.click();
+    await vi.waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2));
+    expect(api.preview.mock.calls[1]![0]).toEqual({
+      source_path: "/data/in/Oppenheimer.2023.2160p.BluRay-FRDS",
+      media_type: "movie",
+      tmdb_id: 872585,
+    });
+  });
+
+  it("带着路径打开时立即预览；改了路径要重新预览才能整理，整理的请求是源路径", async () => {
+    api.preview.mockResolvedValue(pathPlan);
+    const done = await mountPathDialog("/data/in/Oppenheimer.2023.2160p.BluRay-FRDS");
+    await vi.waitFor(() => expect(q("organize-match")).not.toBeNull());
+    expect(api.preview).toHaveBeenCalledWith({
+      source_path: "/data/in/Oppenheimer.2023.2160p.BluRay-FRDS",
+    });
+    expect(inputOf("organize-source").value).toBe("/data/in/Oppenheimer.2023.2160p.BluRay-FRDS");
+    expect(button("organize-run").disabled).toBe(false);
+
+    fill("organize-source", "/data/in/Other");
+    await flush();
+    expect(button("organize-run").disabled, "路径改了，计划还是旧的").toBe(true);
+    expect(q("organize-stale")).not.toBeNull();
+
+    button("organize-source-preview").click();
+    await vi.waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(button("organize-run").disabled).toBe(false));
+    expect(q("organize-stale")).toBeNull();
+
+    api.organize.mockResolvedValue({
+      plan: { ...pathPlan, items: [{ ...pathPlan.items[0], status: "done" }] },
+      created: 1,
+      done: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    button("organize-run").click();
+    await vi.waitFor(() => expect(q("organize-result")).not.toBeNull());
+    expect(api.organize).toHaveBeenCalledWith({ source_path: "/data/in/Other" });
+    expect(q("organize-result")!.textContent).toContain("新入库 1 个");
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it("先发的预览晚回来时不覆盖后发的结果", async () => {
+    let first!: (v: unknown) => void;
+    api.preview
+      .mockImplementationOnce(() => new Promise((r) => (first = r)))
+      .mockResolvedValueOnce({ ...pathPlan, name: "后发的" });
+    await mountPathDialog("/data/in/a");
+    // 第一次预览还没回来时「预览」按钮在转圈，改了路径直接按回车再预览一次
+    fill("organize-source", "/data/in/b");
+    await flush();
+    inputOf("organize-source").dispatchEvent(new KeyboardEvent("keyup", { key: "Enter" }));
+    await vi.waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2));
+    expect(api.preview.mock.calls[1]![0]).toEqual({ source_path: "/data/in/b" });
+    await vi.waitFor(() => expect(q("organize-name")?.textContent).toContain("后发的"));
+    first({ ...pathPlan, name: "先发的" });
+    await flush();
+    await flush();
+    expect(q("organize-name")!.textContent).toContain("后发的");
+    expect(button("organize-run").disabled).toBe(false);
+  });
+
+  it("下载器里的种子按种子整理：写明说明，不提醒移动", async () => {
+    api.preview.mockResolvedValue({
+      ...plan,
+      mode: "move",
+      notes: ["「x」是下载器「qb」里的种子「x」：按种子整理（整理记录记在这个种子下）"],
+    });
+    await mountPathDialog("/data/downloads/x");
+    await vi.waitFor(() => expect(q("organize-notes")).not.toBeNull());
+    expect(q("organize-notes")!.textContent).toContain("按种子整理");
+    expect(q("organize-move-warn")).toBeNull();
+    expect(document.body.textContent).toContain("qb · /downloads");
+  });
+
+  it("指定路径用移动整理时提醒源文件会搬进媒体库", async () => {
+    api.preview.mockResolvedValue({
+      ...pathPlan,
+      mode: "move",
+      library: { ...library, mode: "move" },
+    });
+    await mountPathDialog("/data/in/x");
+    await vi.waitFor(() => expect(q("organize-move-warn")).not.toBeNull());
+    expect(q("organize-move-warn")!.textContent).toContain("源文件会搬进媒体库");
+  });
+
+  it("路径不对（400）时写明原因，不能整理", async () => {
+    api.preview.mockRejectedValue(
+      new Error("pt-tools 里找不到 /data/in/x：Docker 里要把它所在的目录挂进容器"),
+    );
+    await mountPathDialog("/data/in/x");
+    await vi.waitFor(() => expect(q("organize-error")).not.toBeNull());
+    expect(q("organize-error")!.textContent).toContain("找不到");
+    expect(button("organize-run").disabled).toBe(true);
+  });
+
+  it("媒体库写明整理方式、目录与刮不刮削；整理失败时说明会记进整理历史", async () => {
+    api.preview.mockResolvedValue(pathPlan);
+    await mountPathDialog("/data/in/x");
+    await vi.waitFor(() => expect(q("organize-library")).not.toBeNull());
+    expect(q("organize-library")!.textContent).toContain("写 NFO 与图片");
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("电影（硬链接 · /media/movies）"),
+    );
+
+    api.organize.mockResolvedValue({ created: 0, done: 0, skipped: 0, failed: 1 });
+    button("organize-run").click();
+    await vi.waitFor(() => expect(q("organize-result")).not.toBeNull());
+    expect(q("organize-result")!.textContent).toContain("失败的文件已记进「整理历史」");
+
+    view?.unmount();
+    api.preview.mockResolvedValue({ ...pathPlan, library: { ...library, scrape: false } });
+    await mountPathDialog("/data/in/x");
+    await vi.waitFor(() => expect(q("organize-library")).not.toBeNull());
+    expect(q("organize-library")!.textContent).toContain("不刮削（媒体库关着刮削）");
   });
 });
