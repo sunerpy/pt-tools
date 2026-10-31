@@ -21,7 +21,7 @@ IYUU cross-seeding (IYUU 辅种), under Download (下载), uses [IYUU](https://d
 | Requests per day (每天最多请求)       | IYUU requests per day, 0 (no limit) by default, up to 10000; at the limit the round stops early and the next day carries on from there                                                 |
 | Round results (每轮结果)              | Send a notification when a round ends: never (不推送, the default), every round (每一轮都推送), or only when something changed (只在有变化时推送); see [Notifications](#notifications) |
 | Channels (接收通道)                   | The notification channels for round results; at least one while notifications are on                                                                                                   |
-| In the daily report (写进每日战报)    | Add a line about today's cross-seeding to the daily report; off by default                                                                                                             |
+| In the daily report (写进每日战报)    | Add a line about cross-seeding on the day the report covers; off by default                                                                                                            |
 
 The sites that take part are set with the switches on the Sites tab.
 
@@ -116,7 +116,7 @@ With Round results set to every round or only when something changed, a notifica
 
 In message templates and custom webhooks this event is `reseed.round` (辅种结果); see [Message templates](notify-channels.md#message-templates) for its variables.
 
-With In the daily report on, the [daily report](user-stats.md) gets the line 🌱 今日辅种：建成 x · 成功 y · 失败 z · 站点已删除 w (created, succeeded, failed, deleted on site), counted the same way as the statistics (failed includes withdrawn; skips are left out); the line is left out on days without these. The daily report itself has to be turned on in Global settings (全局设置) first.
+With In the daily report on, the [daily report](user-stats.md) gets the line 🌱 昨日辅种：建成 x · 成功 y · 失败 z · 站点已删除 w (created, succeeded, failed, deleted on site; 今日辅种 when the report covers today), counted for the day the report covers and the same way as the statistics (failed includes withdrawn; skips are left out); the line is left out on days without these. The daily report itself has to be turned on in Global settings (全局设置) first.
 
 ## Upgrading and rolling back
 

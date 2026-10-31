@@ -1,6 +1,6 @@
 # Statistics and daily report
 
-The User Stats page summarizes upload, download, ratio, bonus and seeding data across your sites. pt-tools stores a snapshot for a site on each day its data is fetched successfully, and uses the snapshots to compute daily, weekly and monthly increments, draw trends on the page, and optionally send each day's increments to a notification channel (the daily report, off by default).
+The User Stats page summarizes upload, download, ratio, bonus and seeding data across your sites. pt-tools stores a snapshot for a site on each day its data is fetched successfully, and uses the snapshots to compute daily, weekly and monthly increments, draw trends on the page, and optionally send the previous day's increments (or today's up to the send time) to a notification channel (the daily report, off by default).
 
 The snapshots, increments, trends and daily report were added in the 1.0 preview; the Statistics (用户统计) page itself was already in 0.48.0.
 
@@ -51,19 +51,28 @@ Overview → Data export (概览 → 数据导出) in the left navigation, or Ex
 
 ## Daily report
 
-Turn it on under "Daily report" in System Settings, then set the send time (default `22:00`, server time zone) and the receiving channels. At least one notification channel is required when it is enabled; it is never sent to all channels by default.
+Turn it on under "Daily report" in System Settings, then set the send time (default `22:00`, server time zone), the period and the receiving channels. At least one notification channel is required when it is enabled; it is never sent to all channels by default.
 
-Each day at the send time, plus a fixed per-installation offset of up to 10 minutes (picked at random the first time it is needed and then kept, no later than 23:59), pt-tools sends one report for the day:
+There are two periods (统计范围):
+
+- **Previous day** (前一天, the default): the report covers the whole previous day. The send time only decides when you receive it, so a morning send time still gives a complete day.
+- **Today up to the send time** (当天截至发送时刻): the report covers today from midnight to the send time. Uploads, check-ins and brushing after the send time are not counted, so today's numbers are complete only when the send time is close to midnight (the latest send time you can pick is 23:45).
+
+The title says which day the report covers: 📊 每日战报 2026-10-30（前一天） for the previous day and 📊 每日战报 2026-10-31（截至 22:03） for today up to 22:03, and the lines start with 昨日 (yesterday) or 今日 (today). Earlier 1.0 preview builds only had the today period; after upgrading, a daily report that is already on covers the previous day, and choosing Today up to the send time brings back the old behaviour.
+
+Each day at the send time, plus a fixed per-installation offset of up to 10 minutes (picked at random the first time it is needed and then kept, no later than 23:59), pt-tools sends one report:
 
 - upload, billed download and bonus increments per site and in total, listing up to 10 sites by upload;
-- sites whose login state is abnormal (session expired, key error, challenged, network error and so on);
-- today's check-in results (how many sites signed in, were already signed in, or failed);
-- with In the daily report (写进每日战报) on in the IYUU cross-seeding settings, today's cross-seeds created, succeeded, failed and deleted on site (see [IYUU cross-seeding notifications](reseed.md#notifications));
+- sites whose login state is abnormal (session expired, key error, challenged, network error and so on), as it is at the send time, also when the report covers the previous day;
+- check-in results (how many sites signed in, were already signed in, or failed);
+- with In the daily report (写进每日战报) on in the IYUU cross-seeding settings, cross-seeds created, succeeded, failed and deleted on site (see [IYUU cross-seeding notifications](reseed.md#notifications));
 - sites whose numbers went backwards and were counted as 0.
 
-Only enabled sites are counted. A site whose probe mode is "Disabled" is no longer probed, so its last probe status is not reported as a login problem. When there is no snapshot from before today and nothing can be compared yet, the report says so instead of listing zeros.
+Increments, check-ins, brushing and cross-seeding are all counted for the day the report covers. A day's increment is that day's last snapshot minus the latest one before it, the same numbers the User Stats page shows per day: uploads after that day's last sync are counted on the next day.
 
-Each channel receives it at most once per day, including across restarts. If a channel is in its quiet hours, the report waits until the quiet hours end; failed deliveries are retried after 1, 5 and 30 minutes. Every delivery is recorded in the ChatOps [audit log](chatops-quickstart.md#viewing-the-audit-log), with the reason when it failed. On QQ and Telegram channels the report goes to the recipient from the channel settings: the first Admin QQ number on QQ (see [the QQ lists](chatops-qq-napcat.md#q-what-is-the-difference-between-admin_qq_users-and-allowed_qq_users)) and the default chat ID on Telegram (see [the Telegram fields](chatops-telegram.md#what-the-fields-mean)). If pt-tools starts after the send time but before the day ends, it still sends that day's report; a day on which it was not running at any point between the send time and midnight is skipped, and the next day's report only covers the next day.
+Only enabled sites are counted. A site whose probe mode is "Disabled" is no longer probed, so its last probe status is not reported as a login problem. When there is no snapshot from before the day the report covers and nothing can be compared yet, the report says so instead of listing zeros.
+
+Each channel receives it at most once per day, including across restarts. If a channel is in its quiet hours, the report waits until the quiet hours end; failed deliveries are retried after 1, 5 and 30 minutes. Every delivery is recorded in the ChatOps [audit log](chatops-quickstart.md#viewing-the-audit-log), with the reason when it failed. On QQ and Telegram channels the report goes to the recipient from the channel settings: the first Admin QQ number on QQ (see [the QQ lists](chatops-qq-napcat.md#q-what-is-the-difference-between-admin_qq_users-and-allowed_qq_users)) and the default chat ID on Telegram (see [the Telegram fields](chatops-telegram.md#what-the-fields-mean)). If pt-tools starts after the send time but before the day ends, it still sends that day's report; a day on which it was not running at any point between the send time and midnight is skipped, and the next day sends its own report as usual (covering the previous day or that day, depending on the period).
 
 ## API
 
