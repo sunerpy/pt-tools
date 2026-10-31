@@ -27,6 +27,7 @@ func TestNewDB_InitializesAndMigrates(t *testing.T) {
 		t.Fatalf("db nil")
 	}
 	t.Cleanup(func() { closeTestGorm(db.DB) })
+	assert.True(t, db.DB.Migrator().HasTable(&SiteProxySetting{}), "站点代理的表要建出来")
 }
 
 func TestTorrentInfo_GetExpired_IsExpiredFlag(t *testing.T) {

@@ -38,6 +38,7 @@ var configExcluded = []string{
 	"ChatOps 绑定与管理员",
 	"qB 兼容入口（另开的监听端口与权限）",
 	"MCP 接入（开关与地址）",
+	"站点代理（代理地址与走代理的站点）",
 }
 
 const (

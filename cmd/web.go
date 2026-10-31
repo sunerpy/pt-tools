@@ -79,6 +79,10 @@ var webCmd = &cobra.Command{
 		if err := store.SyncSites(registeredSites); err != nil {
 			global.GetSlogger().Warnf("同步站点到数据库失败: %v", err)
 		}
+		// 站点代理（全局设置）要在站点实例、调度器发出第一个站点请求之前装上
+		if err := store.LoadSiteProxyPolicy(); err != nil {
+			global.GetSlogger().Warnf("[站点代理] %v", err)
+		}
 
 		gl, _ := store.GetGlobalOnly()
 		if strings.TrimSpace(gl.DownloadDir) == "" {

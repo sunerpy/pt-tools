@@ -181,6 +181,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("/api/ping", s.apiPing)
 	// JSON APIs
 	mux.HandleFunc("/api/global", s.auth(s.apiGlobal))
+	mux.HandleFunc("/api/site-proxy", s.auth(s.apiSiteProxy))
 	mux.HandleFunc("/api/qbit", s.auth(s.apiQbit))
 	mux.HandleFunc("/api/sites", s.auth(s.apiSites))
 	mux.HandleFunc("/api/sites/", s.auth(s.apiSiteDetail))
