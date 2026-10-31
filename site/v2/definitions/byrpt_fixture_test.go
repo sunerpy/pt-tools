@@ -51,7 +51,8 @@ const byrptSearchFixture = `<html><body>
 const byrptIndexFixture = `<html><body>
 <td class="bottom navbar-user-data">
 欢迎, <span class='nowrap'><a class='ExtremeUser_Name' href='/userdetails.php?id=308953'><span style='font-weight: bold'>nav_user</span></a></span>
-<span class='color_bonus'>魔力值 </span>[<a href="mybonus.php">明细</a>]: 1424274.9
+<span class='color_bonus'>魔力值 </span>
+                                [<a href="mybonus.php">明细</a>]: 1,424,274.9
 <span class="color_ratio">分享率：</span>8.26
 <span class='color_uploaded'>上传量：</span>8.610 TiB
 <span class='color_downloaded'> 下载量：</span>1.042 TiB
@@ -65,7 +66,7 @@ const byrptUserdetailsFixture = `<html><body>
 <tr><td class="rowhead nowrap">加入日期</td><td class="rowfollow">2021-04-13 18:05:04 (<span title='2021-04-13 18:05:04'>4年 11月前</span>)</td></tr>
 <tr><td class="rowhead nowrap">传输</td><td class="rowfollow"><table class='block-left'><tr><td class="embedded"><strong>分享率</strong>: <span>165.662</span></td></tr><tr><td class="embedded"><strong>上传量</strong>: 113.666 TiB</td><td class="embedded">&nbsp;&nbsp;<strong>下载量</strong>: 702.60 GiB</td></tr></table></td></tr>
 <tr><td class="rowhead nowrap">等级</td><td class="rowfollow"><img alt="Ultimate User" title="Ultimate User" src="pic/ultimate.gif" /></td></tr>
-<tr><td class="rowhead nowrap">魔力值</td><td class="rowfollow">1192520.0</td></tr>
+<tr><td class="rowhead nowrap">魔力值</td><td class="rowfollow">1192520.0&nbsp;&nbsp;&nbsp;<a class="altlink" href="/mybonus.php">魔力值历史</a></td></tr>
 </table>
 </body></html>`
 
@@ -157,6 +158,33 @@ func testBYRPTUserInfo(t *testing.T) {
 	assert.Equal(t, "165.662", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "Ultimate User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "1618308304", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+}
+
+// 魔力值从首页顶栏读。用户详情页的「魔力值」一格是「1192520.0 魔力值历史」，没有冒号，按顶栏写法的规则读出 0；
+// 详情页又读在首页之后，以前把首页读到的值盖成 0（生产上 BYR 的魔力值一直是 0，2026-10-31）。
+func TestBYRPTUserInfo_BonusSurvivesUserdetails(t *testing.T) {
+	def := getBYRPTDef(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/index.php":
+			_, _ = w.Write([]byte(byrptIndexFixture))
+		case "/userdetails.php":
+			_, _ = w.Write([]byte(byrptUserdetailsFixture))
+		default:
+			_, _ = w.Write([]byte(`<html><body></body></html>`))
+		}
+	}))
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1"})
+	driver.SetSiteDefinition(def)
+
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 1424274.9, info.Bonus, 0.01, "首页顶栏的魔力值不能被详情页那一格盖掉")
+	assert.Equal(t, int64(124977088682786), info.Uploaded)
+	assert.Equal(t, 10, info.Seeding)
 }
 
 func TestBYRPT_Fixtures_NoSecrets(t *testing.T) {

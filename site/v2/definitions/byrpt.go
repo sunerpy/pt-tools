@@ -29,7 +29,8 @@ var BYRPTDefinition = &v2.SiteDefinition{
 			{
 				RequestConfig: v2.RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
 				Assertion:     map[string]string{"id": "params.id"},
-				Fields:        []string{"name", "uploaded", "downloaded", "ratio", "levelName", "bonus", "joinTime"},
+				// 魔力值只从首页顶栏读：详情页那一格是「50058.4 魔力值历史」，按顶栏的规则读出 0，又读在首页之后，会把顶栏的值盖掉
+				Fields: []string{"name", "uploaded", "downloaded", "ratio", "levelName", "joinTime"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -69,8 +70,9 @@ var BYRPTDefinition = &v2.SiteDefinition{
 				Selector: []string{"td.rowhead:contains('等级') + td img", "td.rowhead:contains('Class') + td img"},
 				Attr:     "title",
 			},
+			// 顶栏写法：「魔力值 [明细]: 50,058.4」
 			"bonus": {
-				Selector: []string{"td.rowhead:contains('魔力值') + td", "td.navbar-user-data", ".navbar-user-data", "body"},
+				Selector: []string{"td.navbar-user-data", ".navbar-user-data", "body"},
 				Attr:     "html",
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`(?s)(?:魔力值|Bonus).*?:\s*([\d.,]+)`}},
