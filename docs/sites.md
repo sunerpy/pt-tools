@@ -19,7 +19,7 @@
 | **HDFans**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
 | **LemonHD**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **BTSCHOOL**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
-| **BYRPT**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
+| **BYRPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
 | **Audiences**         | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **CarPT**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **52PT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |

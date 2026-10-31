@@ -19,7 +19,7 @@
 | **HDFans**            | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **LemonHD**           | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **BTSCHOOL**          | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
-| **BYRPT**             | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
+| **BYRPT**             | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **Audiences**         | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **CarPT**             | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **52PT**              | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
