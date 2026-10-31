@@ -19,7 +19,8 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 )
 
-// memConn 是内存里的 MsgConn：一对 memConn 互为两端，关掉任意一端两边都读写不了（像一条断开的连接）。
+// memConn 是内存里的 MsgConn：一对 memConn 互为两端，关掉任意一端以后两边都写不了；关之前写进去的消息照样读得到，
+// 读完才报连接已经关闭（像正常关闭的 WebSocket：主机发完 GOAWAY 马上关连接，设备照样收得到 GOAWAY）。
 type memConn struct {
 	in     chan []byte
 	out    chan []byte
@@ -48,6 +49,12 @@ func (c *memConn) ReadMsg(ctx context.Context) ([]byte, error) {
 	case b := <-c.in:
 		return b, nil
 	case <-c.closed:
+		// 两个分支同时就绪时 select 随机挑一个：消息在上面那次检查之后、关连接之前才写进来，这里还要再读一次
+		select {
+		case b := <-c.in:
+			return b, nil
+		default:
+		}
 		return nil, errMemClosed
 	case <-ctx.Done():
 		c.Close(1000, "")
