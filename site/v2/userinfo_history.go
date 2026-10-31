@@ -244,6 +244,23 @@ func LoadDeltaSummary(ctx context.Context, repo UserInfoHistoryRepo, rangeName s
 	return SummarizeDeltas(rangeName, from, to, baselines, inRange), nil
 }
 
+// LoadDaySummary 是某一天（YYYY-MM-DD）各站的增量：那天最后一份快照减它之前最近的一份，
+// 与 LoadDeltaSummary 的 today 是同一个算法，只是日期由调用方给（每日战报的「前一天」用它）。
+func LoadDaySummary(ctx context.Context, repo UserInfoHistoryRepo, day string) (DeltaSummary, error) {
+	if _, err := time.Parse(dateLayout, day); err != nil {
+		return DeltaSummary{}, fmt.Errorf("日期 %q 无效，应为 YYYY-MM-DD", day)
+	}
+	baselines, err := repo.SnapshotBaselines(ctx, day)
+	if err != nil {
+		return DeltaSummary{}, err
+	}
+	inDay, err := repo.ListSnapshots(ctx, "", day, day)
+	if err != nil {
+		return DeltaSummary{}, err
+	}
+	return SummarizeDeltas("day", day, day, baselines, inDay), nil
+}
+
 // TrendPoint 是某天的增量。
 type TrendPoint struct {
 	Date       string  `json:"date"`
