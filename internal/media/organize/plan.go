@@ -277,6 +277,7 @@ func priorEntry(p *Plan) (string, int) {
 	return "", 0
 }
 
+// buildPlan 检查请求，按来源分给目录监控的一项或下载器里的种子。
 func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 	if req.TMDBID < 0 || (req.TMDBID > 0 && req.MediaType != tmdb.KindMovie && req.MediaType != tmdb.KindTV) {
 		return nil, fmt.Errorf("%w: 指定条目时要写明类型（movie 或 tv）与 TMDB 编号", ErrInvalid)
@@ -284,6 +285,11 @@ func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 	if req.WatchDirID > 0 {
 		return s.buildWatchPlan(ctx, req)
 	}
+	return s.buildTorrentPlan(ctx, req)
+}
+
+// buildTorrentPlan 是下载器里一个种子的整理计划：读种子与文件列表，按路径映射换成 pt-tools 里的路径。
+func (s *Service) buildTorrentPlan(ctx context.Context, req Request) (*Plan, error) {
 	if req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "" {
 		return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
 	}

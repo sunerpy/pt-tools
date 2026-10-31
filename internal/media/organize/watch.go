@@ -287,48 +287,71 @@ func (s *Service) watchDir(ctx context.Context, id uint) (models.MediaWatchDir, 
 	return dir, nil
 }
 
-// watchTorrent 报告监控目录里的这一项（pt-tools 里的路径 path，名字 entry）是不是下载器里的种子：种子的内容就是它、
-// 在它里面或包含它（按路径映射换成 pt-tools 里的路径，见 overlaps）。种子的路径在 pt-tools 里找不到（没配路径映射，
-// 或者下载器在别的机器上）时比不了路径，按名字认：同名的（不分大小写）当成是它。是的话返回「下载器：种子名」；
-// 读不了哪个开着的下载器时返回错误（确认不了）。
+// watchTorrent 报告监控目录里的这一项（pt-tools 里的路径 path，名字 entry）是不是下载器里的种子（见 torrentAt）：
+// 是的话返回「下载器：种子名」；读不了哪个开着的下载器时返回错误（确认不了）。
 func (s *Service) watchTorrent(ctx context.Context, path, entry string) (string, error) {
+	hit, err := s.torrentAt(ctx, path, entry)
+	if err != nil || hit == nil {
+		return "", err
+	}
+	return hit.DownloaderName + "：" + hit.Name, nil
+}
+
+// torrentHit 是 pt-tools 里的一个路径和下载器里某个种子的关系（见 torrentAt）。
+type torrentHit struct {
+	DownloaderID   uint
+	DownloaderName string
+	TaskID         string // 种子在下载器里的编号（t.ID，空时用 InfoHash）
+	Name           string // 种子名
+	Exact          bool   // 种子的内容就是这个路径（字面相同，或解开软链接后相同）
+	ByName         bool   // 种子的路径在 pt-tools 里找不到，按名字认的
+}
+
+// torrentAt 找 pt-tools 里的路径 path（名字 entry）对应的下载器里的种子：种子的内容就是它、在它里面或包含它
+// （按路径映射换成 pt-tools 里的路径，见 overlaps）。种子的路径在 pt-tools 里找不到（没配路径映射，或者下载器在别的机器上）
+// 时比不了路径，按名字认：同名的（不分大小写）当成是它。按下载器的顺序找，第一个对上的就返回；都对不上时返回 nil；
+// 读不了哪个开着的下载器时返回错误（确认不了）。
+func (s *Service) torrentAt(ctx context.Context, path, entry string) (*torrentHit, error) {
 	settings, err := s.cfg.Downloaders.List(ctx)
 	if err != nil {
-		return "", fmt.Errorf("读取下载器失败: %w", err)
+		return nil, fmt.Errorf("读取下载器失败: %w", err)
 	}
 	for _, ds := range settings {
 		dl, _, err := s.cfg.Downloaders.Get(ctx, ds.ID)
 		if err != nil {
-			return "", fmt.Errorf("连不上下载器「%s」: %w", ds.Name, err)
+			return nil, fmt.Errorf("连不上下载器「%s」: %w", ds.Name, err)
 		}
 		all, err := dl.GetAllTorrents()
 		if err != nil {
-			return "", fmt.Errorf("读取下载器「%s」的种子失败: %w", ds.Name, err)
+			return nil, fmt.Errorf("读取下载器「%s」的种子失败: %w", ds.Name, err)
 		}
 		maps, err := s.pathMaps(ctx, ds.ID)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		for _, t := range all {
 			content := t.ContentPath
 			if content == "" {
 				content = strings.TrimRight(t.SavePath, `/\`) + "/" + t.Name
 			}
+			hit := &torrentHit{DownloaderID: ds.ID, DownloaderName: ds.Name, TaskID: firstNonEmpty(t.ID, t.InfoHash), Name: t.Name}
 			local, mapped := models.MapTransferPath(maps, content)
 			if !mapped {
 				if _, err := os.Lstat(local); err != nil {
 					if strings.EqualFold(t.Name, entry) || strings.EqualFold(baseName(content), entry) {
-						return ds.Name + "：" + t.Name, nil
+						hit.ByName = true
+						return hit, nil
 					}
 					continue
 				}
 			}
 			if overlaps(local, path) {
-				return ds.Name + "：" + t.Name, nil
+				hit.Exact = samePath(local, path) || samePath(realPath(local), realPath(path))
+				return hit, nil
 			}
 		}
 	}
-	return "", nil
+	return nil, nil
 }
 
 // watchScan 扫描开着的监控目录，把有还没整理过的视频的项排进队列（例如新放进来的，或剧集文件夹里多了几集）。
@@ -465,9 +488,9 @@ func markOtherFiles(p *Plan) {
 	}
 }
 
-// noteOtherFile 把 markOtherFiles 的说明写在那条整理记录的消息前面（写过了不再写）。
-func (s *Service) noteOtherFile(ctx context.Context, it *PlanItem) {
-	if it.row == nil || strings.HasPrefix(it.row.Message, otherFileNote) {
+// noteOtherFile 把 markOtherFiles 的说明写在那条整理记录的消息前面（消息已经以 note 开头时不再写）。
+func (s *Service) noteOtherFile(ctx context.Context, it *PlanItem, note string) {
+	if it.row == nil || strings.HasPrefix(it.row.Message, note) {
 		return
 	}
 	msg := it.Message

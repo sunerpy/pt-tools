@@ -406,6 +406,57 @@ func TestWatchTorrentAliases(t *testing.T) {
 	assert.Empty(t, owner)
 }
 
+// 认种子时报告是不是同一个路径：种子的内容就是这个路径（照写的相同，或解开软链接后相同）；在种子里、包含种子的也认得出，
+// 但不是同一个路径；种子的路径在 pt-tools 里找不到时按名字认；无关的路径不算
+func TestTorrentAtFlags(t *testing.T) {
+	e := newEnv(t)
+	name := "Oppenheimer.2023.2160p.BluRay.x265-FRDS"
+	e.addTorrent("h1", name, map[string]int{name + "/" + name + ".mkv": 5}, nil)
+	content := filepath.Join(e.dlDir, name)
+
+	hit, err := e.svc.torrentAt(e.ctx, content, name)
+	require.NoError(t, err)
+	require.NotNil(t, hit)
+	assert.True(t, hit.Exact, "种子的内容就是这个路径")
+	assert.False(t, hit.ByName)
+	assert.Equal(t, e.dls.setting.ID, hit.DownloaderID)
+	assert.Equal(t, "qb", hit.DownloaderName)
+	assert.Equal(t, "h1", hit.TaskID)
+	assert.Equal(t, name, hit.Name)
+
+	for _, p := range []string{filepath.Join(content, name+".mkv"), e.dlDir} {
+		hit, err = e.svc.torrentAt(e.ctx, p, filepath.Base(p))
+		require.NoError(t, err)
+		require.NotNil(t, hit, "在种子里或包含种子："+p)
+		assert.False(t, hit.Exact, p)
+		assert.False(t, hit.ByName, p)
+	}
+
+	alias := filepath.Join(e.root, "alias")
+	if os.Symlink(e.dlDir, alias) == nil {
+		hit, err = e.svc.torrentAt(e.ctx, filepath.Join(alias, name), name)
+		require.NoError(t, err)
+		require.NotNil(t, hit)
+		assert.True(t, hit.Exact, "经软链接的另一个名字，解开以后是同一个路径")
+	}
+
+	// 没配路径映射、路径在 pt-tools 里不存在的种子：同名（不分大小写）就当成是它
+	e.addTorrent("h2", "Some.Show.S01", map[string]int{"Some.Show.S01/a.mkv": 2}, func(tr *downloader.Torrent) {
+		tr.SavePath, tr.ContentPath = `D:\Downloads`, `D:\Downloads\Some.Show.S01`
+	})
+	hit, err = e.svc.torrentAt(e.ctx, filepath.Join(e.root, "incoming", "some.show.s01"), "some.show.s01")
+	require.NoError(t, err)
+	require.NotNil(t, hit)
+	assert.True(t, hit.ByName)
+	assert.False(t, hit.Exact)
+	assert.Equal(t, "Some.Show.S01", hit.Name)
+	assert.Equal(t, "h2", hit.TaskID)
+
+	hit, err = e.svc.torrentAt(e.ctx, filepath.Join(e.root, "incoming", "Other"), "Other")
+	require.NoError(t, err)
+	assert.Nil(t, hit, "无关的路径")
+}
+
 // 监控目录的路径不能改（排着的整理和记录只记着目录编号）；开关可以改
 func TestSaveWatchDirPathFixed(t *testing.T) {
 	e, d := watchEnv(t)
