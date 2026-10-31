@@ -164,6 +164,9 @@ func TestAppAPI_TokensCannotReachSessionAPIs(t *testing.T) {
 		{http.MethodDelete, "/api/tokens/1"},
 		{http.MethodGet, "/api/chatops/tokens"},
 		{http.MethodGet, "/api/media/subscriptions"},
+		// 这两个收 source_path（让 pt-tools 读一个任意路径）：只给网页会话
+		{http.MethodPost, "/api/media/organize"},
+		{http.MethodPost, "/api/media/organize/preview"},
 		{http.MethodGet, "/api/downloader-torrents"},
 		{http.MethodPost, "/api/v2/torrents/push"},
 	} {
