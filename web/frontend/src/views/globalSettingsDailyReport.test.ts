@@ -141,11 +141,58 @@ describe("系统设置：每日战报", () => {
         enabled: false,
         time: "22:00",
         channel_ids: [7],
+        scope: "previous_day",
       }),
     );
     await vi.waitFor(() => expect(ui.warning).toHaveBeenCalled());
     expect(String(ui.warning.mock.calls[0]![0])).toContain("每日战报设置没有保存：磁盘只读");
     expect(ui.success).not.toHaveBeenCalled();
+  });
+
+  it("统计范围：读不到时按前一天并写明；改成当天截至发送时刻时保存这一项，说明跟着换", async () => {
+    api.getReport.mockResolvedValue({ enabled: true, time: "22:00", channel_ids: [7] });
+    api.saveGlobal.mockResolvedValue(undefined);
+    api.saveReport.mockImplementation((v: Record<string, unknown>) => Promise.resolve({ ...v }));
+    await mountPage();
+    const group = document.querySelector<HTMLElement>("[data-testid=daily-report-scope]")!;
+    const radio = (v: string) => group.querySelector<HTMLInputElement>(`input[value=${v}]`)!;
+    expect(radio("previous_day").checked).toBe(true);
+    const tip = () => group.parentElement!.querySelector(".field-tip")?.textContent ?? "";
+    expect(tip()).toContain("前一天整天");
+
+    radio("today").click();
+    await vi.waitFor(() => expect(radio("today").checked).toBe(true));
+    expect(tip()).toContain("今天 0 点到发送时刻");
+
+    saveButton().click();
+    await vi.waitFor(() =>
+      expect(api.saveReport).toHaveBeenCalledWith({
+        enabled: true,
+        time: "22:00",
+        channel_ids: [7],
+        scope: "today",
+      }),
+    );
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("保存成功"));
+
+    // 已保存的基线换成了当天：再点一次不重复写
+    await vi.waitFor(() => saveButton());
+    saveButton().click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledTimes(2));
+    expect(api.saveReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("战报没开时统计范围不可改", async () => {
+    api.getReport.mockResolvedValue({
+      enabled: false,
+      time: "22:00",
+      channel_ids: [],
+      scope: "today",
+    });
+    await mountPage();
+    const group = document.querySelector<HTMLElement>("[data-testid=daily-report-scope]")!;
+    expect(group.querySelector<HTMLInputElement>("input[value=today]")!.checked).toBe(true);
+    expect(group.querySelector(".is-disabled")).not.toBeNull();
   });
 
   it("没改战报设置：不发第三步请求", async () => {

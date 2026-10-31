@@ -957,11 +957,16 @@ export interface UserInfoTrendsResponse {
 }
 
 /** 每日战报设置 */
+/** 每日战报的统计范围：前一天整天，或当天截至发送时刻 */
+export type DailyReportScope = "previous_day" | "today";
+
 export interface DailyReportSettings {
   enabled: boolean;
   /** HH:MM，服务器时区 */
   time: string;
   channel_ids: number[];
+  /** 旧版本的后端不回这一项，按前一天 */
+  scope?: DailyReportScope;
 }
 
 export const userInfoApi = {

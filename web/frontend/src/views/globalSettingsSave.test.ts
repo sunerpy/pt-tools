@@ -161,7 +161,12 @@ describe("系统设置：两步保存分开报告", () => {
 
     saveButton().click();
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalledTimes(1));
-    expect(api.saveReport).toHaveBeenCalledWith({ enabled: true, time: "00:00", channel_ids: [1] });
+    expect(api.saveReport).toHaveBeenCalledWith({
+      enabled: true,
+      time: "00:00",
+      channel_ids: [1],
+      scope: "previous_day",
+    });
 
     await vi.waitFor(() => saveButton());
     saveButton().click();
