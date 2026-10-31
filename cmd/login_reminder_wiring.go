@@ -265,9 +265,9 @@ func wireDailyReportJob(mgr *scheduler.Manager, store *core.ConfigStore, userInf
 	}
 	job := scheduler.NewDailyReportJob(scheduler.DailyReportJobConfig{
 		DB: global.GlobalDB.DB,
-		Settings: func() (bool, string, []uint, error) {
+		Settings: func() (scheduler.DailyReportSchedule, error) {
 			s, err := store.DailyReportSettings()
-			return s.Enabled, s.Time, s.ChannelIDs, err
+			return scheduler.DailyReportSchedule{Enabled: s.Enabled, Time: s.Time, ChannelIDs: s.ChannelIDs, Scope: s.Scope}, err
 		},
 		Offset: func() (time.Duration, error) {
 			return store.DailyReportOffset(scheduler.DailyReportRand)

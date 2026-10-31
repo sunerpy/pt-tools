@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
@@ -25,10 +26,12 @@ type dailyReportFixture struct {
 	clock  *sitelogin.FakeClock
 	sender *captureSender
 	cfg    DailyReportJobConfig
-	// settings 可以在用例里改
+	// settings 可以在用例里改。scope 默认是当天截至发送时刻（这些用例写的时候战报只有这一种）；
+	// 「前一天」的用例自己设 core.DailyReportScopePreviousDay。
 	enabled  bool
 	at       string
 	channels []uint
+	scope    string
 }
 
 func newDailyReportFixture(t *testing.T, now time.Time, confs ...models.NotificationConf) *dailyReportFixture {
@@ -43,11 +46,11 @@ func newDailyReportFixture(t *testing.T, now time.Time, confs ...models.Notifica
 	clock := sitelogin.NewFakeClock(now)
 	repo.SetClock(clock.Now, time.UTC)
 	sender := &captureSender{}
-	f := &dailyReportFixture{db: db, repo: repo, clock: clock, sender: sender, enabled: true, at: "22:00", channels: []uint{1}}
+	f := &dailyReportFixture{db: db, repo: repo, clock: clock, sender: sender, enabled: true, at: "22:00", channels: []uint{1}, scope: core.DailyReportScopeToday}
 	f.cfg = DailyReportJobConfig{
 		DB: db,
-		Settings: func() (bool, string, []uint, error) {
-			return f.enabled, f.at, f.channels, nil
+		Settings: func() (DailyReportSchedule, error) {
+			return DailyReportSchedule{Enabled: f.enabled, Time: f.at, ChannelIDs: f.channels, Scope: f.scope}, nil
 		},
 		Offset:   func() (time.Duration, error) { return 5 * time.Minute, nil },
 		History:  repo,
@@ -177,6 +180,83 @@ func TestDailyReport_Content(t *testing.T) {
 	items := p.Event.Fields["items"].([]any)
 	require.NotEmpty(t, items)
 	assert.Equal(t, "HDSky", items[0].(map[string]any)["site"])
+	assert.Equal(t, "📊 每日战报 2026-10-06（截至 22:30）", p.Title, "当天截至发送时刻：标题写到几点")
+	assert.Equal(t, core.DailyReportScopeToday, p.Event.Fields["scope"])
+	assert.Contains(t, text, "⚠️ 登录状态异常：pter（会话过期）")
+}
+
+// 统计前一天（默认）：早上发昨天整天的数，今天已有的快照、签到、刷流都不算进来；登录状态写明是现在的。
+func TestDailyReport_PreviousDay(t *testing.T) {
+	now := time.Date(2026, 10, 7, 9, 30, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	f.scope = core.DailyReportScopePreviousDay
+	f.at = "09:00"
+	gib := int64(1 << 30)
+	day := func(d, h int) time.Time { return time.Date(2026, 10, d, h, 0, 0, 0, time.UTC) }
+	f.saveAt(t, day(5, 23), "hdsky", 10*gib, 2*gib, 1000)
+	f.saveAt(t, day(6, 23), "hdsky", 15*gib, 3*gib, 1500)
+	f.saveAt(t, day(7, 8), "hdsky", 40*gib, 9*gib, 9000) // 今天早上的快照不算进昨天
+	require.NoError(t, f.db.Create(&models.SiteLoginState{SiteName: "pter", LastProbeStatus: "SESSION_EXPIRED"}).Error)
+	for _, a := range []models.SiteAttendanceLog{
+		{SiteName: "hdsky", Day: "2026-10-06", Status: models.AttendanceSigned},
+		{SiteName: "pter", Day: "2026-10-07", Status: models.AttendanceFailed},
+	} {
+		require.NoError(t, f.db.Create(&a).Error)
+	}
+	require.NoError(t, f.db.AutoMigrate(&models.BrushTask{}, &models.BrushDailyStat{}))
+	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 1, Day: "2026-10-06", Uploaded: 3 * gib, Added: 2}).Error)
+	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 1, Day: "2026-10-07", Uploaded: 50 * gib}).Error)
+	var asked, askedLabel string
+	f.cfg.ReseedLine = func(_ context.Context, d, label string) string {
+		asked, askedLabel = d, label
+		return "🌱 昨日辅种：建成 1 · 成功 1 · 失败 0 · 站点已删除 0"
+	}
+
+	job := NewDailyReportJob(f.cfg)
+	job.RunOnce(context.Background())
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "2026-10-07", rows[0].EventKey, "一天发一次按发送的那天算")
+	text := reportText(t, rows[0])
+	assert.True(t, strings.HasPrefix(text, "📊 每日战报 2026-10-06（前一天）\n"), text)
+	assert.Contains(t, text, "昨日合计：上传 5.00 GiB · 下载（计费）1.00 GiB · 魔力 +500", "10-06 减 10-05，今天的快照不算")
+	assert.Contains(t, text, "⚠️ 当前登录状态异常：pter（会话过期）")
+	assert.Contains(t, text, "✅ 昨日签到：成功 1 · 已签 0 · 失败 0", "只算昨天的签到")
+	assert.Contains(t, text, "🚀 昨日刷流：上传 3.00 GiB · 下载 0 B · 加入 2 · 删除 0", "只算昨天的刷流")
+	assert.Equal(t, "2026-10-06", asked)
+	assert.Equal(t, "昨日", askedLabel)
+	assert.NotContains(t, text, "今日")
+	var payload monitorNotifyPayload
+	require.NoError(t, json.Unmarshal([]byte(rows[0].PayloadJSON), &payload))
+	require.NotNil(t, payload.Event)
+	assert.Equal(t, "2026-10-06", payload.Event.Fields["day"], "day 是统计的那天")
+	assert.Equal(t, core.DailyReportScopePreviousDay, payload.Event.Fields["scope"])
+	assert.Equal(t, 5*gib, payload.Event.Fields["uploaded_bytes"])
+
+	job.RunOnce(context.Background())
+	assert.Len(t, reportRows(t, f.db), 1, "同一天不重发")
+}
+
+// 统计范围没设（空值、旧数据）按前一天；昨天没有快照、或者昨天之前没有可比的快照时写明。
+func TestDailyReport_PreviousDayNoData(t *testing.T) {
+	now := time.Date(2026, 10, 7, 22, 30, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	f.scope = ""
+	f.saveAt(t, now.Add(-time.Hour), "hdsky", 1<<30, 0, 0) // 只有今天的快照
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	text := reportText(t, rows[0])
+	assert.Contains(t, text, "📊 每日战报 2026-10-06（前一天）")
+	assert.Contains(t, text, "昨天没有同步到站点数据")
+
+	g := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	g.scope = core.DailyReportScopePreviousDay
+	g.saveAt(t, time.Date(2026, 10, 6, 20, 0, 0, 0, time.UTC), "hdsky", 1<<30, 0, 0) // 昨天是第一份快照
+	NewDailyReportJob(g.cfg).RunOnce(context.Background())
+	rows = reportRows(t, g.db)
+	require.Len(t, rows, 1)
+	assert.Contains(t, reportText(t, rows[0]), "昨天暂无可比的数据")
 }
 
 func TestDailyReport_NoDataStillReports(t *testing.T) {
@@ -358,15 +438,19 @@ func TestDailyReport_ErrorsSkipRound(t *testing.T) {
 	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
 	f := newDailyReportFixture(t, now, models.NotificationConf{ChannelType: "webhook", Name: "w", Enabled: true})
 
-	f.cfg.Settings = func() (bool, string, []uint, error) { return false, "", nil, errors.New("db locked") }
+	f.cfg.Settings = func() (DailyReportSchedule, error) { return DailyReportSchedule{}, errors.New("db locked") }
 	NewDailyReportJob(f.cfg).RunOnce(context.Background())
 	assert.Empty(t, reportRows(t, f.db))
 
-	f.cfg.Settings = func() (bool, string, []uint, error) { return true, "25:99", []uint{1}, nil }
+	f.cfg.Settings = func() (DailyReportSchedule, error) {
+		return DailyReportSchedule{Enabled: true, Time: "25:99", ChannelIDs: []uint{1}}, nil
+	}
 	NewDailyReportJob(f.cfg).RunOnce(context.Background())
 	assert.Empty(t, reportRows(t, f.db))
 
-	f.cfg.Settings = func() (bool, string, []uint, error) { return true, "21:00", []uint{1}, nil }
+	f.cfg.Settings = func() (DailyReportSchedule, error) {
+		return DailyReportSchedule{Enabled: true, Time: "21:00", ChannelIDs: []uint{1}}, nil
+	}
 	f.cfg.History = stubHistory{today: "2026-10-06", listErr: errors.New("disk I/O error")}
 	j := NewDailyReportJob(f.cfg)
 	j.RunOnce(context.Background())
@@ -453,47 +537,49 @@ func TestDailyReport_BrushLinesEdgeCases(t *testing.T) {
 	f := newDailyReportFixture(t, now)
 	job := NewDailyReportJob(f.cfg)
 	ctx, day := context.Background(), "2026-10-06"
-	assert.Nil(t, job.brushLines(ctx, day), "没有刷流表")
+	p := reportPeriod{scope: core.DailyReportScopeToday, day: day, label: "今日"}
+	assert.Nil(t, job.brushLines(ctx, p), "没有刷流表")
 
 	require.NoError(t, f.db.AutoMigrate(&models.BrushTask{}, &models.BrushDailyStat{}))
 	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 1, Day: day}).Error)
-	assert.Nil(t, job.brushLines(ctx, day), "当天全是零")
+	assert.Nil(t, job.brushLines(ctx, p), "当天全是零")
 
 	gib := int64(1 << 30)
 	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 2, Day: day, Uploaded: gib}).Error)
-	assert.Equal(t, []string{"🚀 今日刷流：上传 1.00 GiB · 下载 0 B · 加入 0 · 删除 0"}, job.brushLines(ctx, day),
+	assert.Equal(t, []string{"🚀 今日刷流：上传 1.00 GiB · 下载 0 B · 加入 0 · 删除 0"}, job.brushLines(ctx, p),
 		"只有一个任务有收益时不逐个列出")
 
 	for id := uint(3); id <= 7; id++ {
 		require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: id, Day: day, Uploaded: int64(id) * gib}).Error)
 	}
-	lines := job.brushLines(ctx, day)
+	lines := job.brushLines(ctx, p)
 	require.Len(t, lines, 1+5+1)
 	assert.Equal(t, "· 任务 7：上传 7.00 GiB · 下载 0 B", lines[1], "没有任务名时写编号")
 	assert.Equal(t, "· 其余 1 个刷流任务省略", lines[6])
 
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	assert.Nil(t, job.brushLines(cancelled, day), "读库失败时这一节不出")
+	assert.Nil(t, job.brushLines(cancelled, p), "读库失败时这一节不出")
 }
 
 // 辅种一行：ReseedLine 给了内容时写在最后，按战报的日期取；空串时不写。
 func TestDailyReport_IncludesReseed(t *testing.T) {
 	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
 	f := newDailyReportFixture(t, now, quietConf(1, "", ""))
-	var asked string
-	f.cfg.ReseedLine = func(_ context.Context, day string) string {
-		asked = day
+	var asked, askedLabel string
+	f.cfg.ReseedLine = func(_ context.Context, day, label string) string {
+		asked, askedLabel = day, label
 		return "🌱 今日辅种：建成 2 · 成功 1 · 失败 0 · 站点已删除 1"
 	}
 	NewDailyReportJob(f.cfg).RunOnce(context.Background())
 	rows := reportRows(t, f.db)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "2026-10-06", asked)
+	assert.Equal(t, "今日", askedLabel)
 	assert.True(t, strings.HasSuffix(reportText(t, rows[0]), "\n🌱 今日辅种：建成 2 · 成功 1 · 失败 0 · 站点已删除 1"))
 
 	g := newDailyReportFixture(t, now, quietConf(1, "", ""))
-	g.cfg.ReseedLine = func(context.Context, string) string { return "" }
+	g.cfg.ReseedLine = func(context.Context, string, string) string { return "" }
 	NewDailyReportJob(g.cfg).RunOnce(context.Background())
 	rows = reportRows(t, g.db)
 	require.Len(t, rows, 1)

@@ -286,12 +286,13 @@ var notifyEvents = []EventSpec{
 	{
 		Type: EventReportDaily, Name: "每日战报", Desc: "每天定时发的上传、下载（计费）与魔力统计（登录异常、签到、刷流、辅种几段只在 text 里）",
 		Vars: []Var{
-			{Key: "day", Type: VarString, Desc: "日期", Sample: "2026-10-12"},
-			{Key: "uploaded", Type: VarString, Desc: "今天合计上传", Sample: "120.00 GB"},
-			{Key: "downloaded", Type: VarString, Desc: "今天合计下载（计费）", Sample: "30.00 GB"},
-			{Key: "uploaded_bytes", Type: VarInt, Desc: "今天合计上传（字节）", Sample: int64(128849018880)},
-			{Key: "downloaded_bytes", Type: VarInt, Desc: "今天合计下载（计费，字节）", Sample: int64(32212254720)},
-			{Key: "bonus", Type: VarFloat, Desc: "今天合计魔力", Sample: float64(1234.5)},
+			{Key: "day", Type: VarString, Desc: "统计的日期（统计范围是前一天时是昨天）", Sample: "2026-10-12"},
+			{Key: "scope", Type: VarString, Desc: "统计范围：previous_day（前一天整天）或 today（当天截至发送时刻）", Sample: "previous_day"},
+			{Key: "uploaded", Type: VarString, Desc: "合计上传", Sample: "120.00 GB"},
+			{Key: "downloaded", Type: VarString, Desc: "合计下载（计费）", Sample: "30.00 GB"},
+			{Key: "uploaded_bytes", Type: VarInt, Desc: "合计上传（字节）", Sample: int64(128849018880)},
+			{Key: "downloaded_bytes", Type: VarInt, Desc: "合计下载（计费，字节）", Sample: int64(32212254720)},
+			{Key: "bonus", Type: VarFloat, Desc: "合计魔力", Sample: float64(1234.5)},
 			{Key: "items", Type: VarList, Desc: "各站点（按上传从多到少）", Item: []Var{
 				{Key: "site", Type: VarString, Desc: "站点"},
 				{Key: "uploaded", Type: VarString, Desc: "上传"},
@@ -305,8 +306,8 @@ var notifyEvents = []EventSpec{
 			}},
 			more("省略的站点数"),
 		},
-		SampleTitle: "📊 每日战报 2026-10-12",
-		SampleText:  "今日合计：上传 120.00 GB · 下载（计费）30.00 GB · 魔力 1234.5\n· HDTime：上传 100.00 GB · 下载（计费）20.00 GB · 魔力 1000\n· HDSky：上传 20.00 GB · 下载（计费）10.00 GB · 魔力 234.5",
+		SampleTitle: "📊 每日战报 2026-10-12（前一天）",
+		SampleText:  "昨日合计：上传 120.00 GB · 下载（计费）30.00 GB · 魔力 1234.5\n· HDTime：上传 100.00 GB · 下载（计费）20.00 GB · 魔力 1000\n· HDSky：上传 20.00 GB · 下载（计费）10.00 GB · 魔力 234.5",
 	},
 	{
 		Type: EventDeadTorrents, Name: "失效种子", Desc: "下载器助手扫到 tracker 报告未注册或不存在的种子",

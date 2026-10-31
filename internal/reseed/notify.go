@@ -13,7 +13,7 @@ import (
 // ---------- 通知 ----------
 //
 // 2026-10-30 用户：「辅种任务相关统计也可以通过开关加入到 chatops 消息通知渠道中」。
-// 两处：每一轮结束以后推送这一轮的结果（关闭、每一轮、只在有变化时），每日战报里加一行今天的辅种。
+// 两处：每一轮结束以后推送这一轮的结果（关闭、每一轮、只在有变化时），每日战报里加一行统计那天的辅种。
 
 // notifyModeOf 是生效的推送方式：空串（旧数据）与不认识的都是关闭。
 func notifyModeOf(mode string) string {
@@ -152,9 +152,10 @@ func NewRoundNotice(r Round) RoundNotice {
 	}
 }
 
-// DailyReportLine 是每日战报里今天的辅种那一行：设置里没开「每日战报」、或者这天没有建成、成功、失败与站点已删除时为空串。
-// day 是战报的日期（YYYY-MM-DD，进程时区）；数字与统计面板同一套算法。不写跳过：每一轮都会把同一个种子再算一次。
-func (s *Service) DailyReportLine(ctx context.Context, day string) (string, error) {
+// DailyReportLine 是每日战报里辅种那一行：设置里没开「每日战报」、或者这天没有建成、成功、失败与站点已删除时为空串。
+// day 是战报统计的日期（YYYY-MM-DD，进程时区），label 是写在行首的「今日」「昨日」（空串按「今日」）；
+// 数字与统计面板同一套算法。不写跳过：每一轮都会把同一个种子再算一次。
+func (s *Service) DailyReportLine(ctx context.Context, day, label string) (string, error) {
 	r, err := s.row(ctx)
 	if err != nil || !r.DailyReport {
 		return "", err
@@ -168,5 +169,8 @@ func (s *Service) DailyReportLine(ctx context.Context, day string) (string, erro
 	if t.Created+t.Succeeded+failed+t.Gone == 0 {
 		return "", nil
 	}
-	return fmt.Sprintf("🌱 今日辅种：建成 %d · 成功 %d · 失败 %d · 站点已删除 %d", t.Created, t.Succeeded, failed, t.Gone), nil
+	if label == "" {
+		label = "今日"
+	}
+	return fmt.Sprintf("🌱 %s辅种：建成 %d · 成功 %d · 失败 %d · 站点已删除 %d", label, t.Created, t.Succeeded, failed, t.Gone), nil
 }

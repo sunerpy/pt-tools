@@ -113,13 +113,13 @@ func TestNewRoundNotice(t *testing.T) {
 	assert.Equal(t, "读取站点列表失败。", n.Fields["stopped"])
 }
 
-// 每日战报里今天的辅种：没开或者今天没有数据时没有这一行；数字与统计同一套算法，不写跳过。
+// 每日战报里辅种那一行：没开或者那天没有数据时没有这一行；数字与统计同一套算法，不写跳过；行首按战报的统计范围写今日或昨日。
 func TestDailyReportLine(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	e.now = dayAt(t, "2026-10-30", 21)
 	today := "2026-10-30"
-	line, err := e.svc.DailyReportLine(ctx, today)
+	line, err := e.svc.DailyReportLine(ctx, today, "")
 	require.NoError(t, err)
 	assert.Empty(t, line, "没开")
 
@@ -127,7 +127,7 @@ func TestDailyReportLine(t *testing.T) {
 	_, err = e.svc.SaveSettings(ctx, SettingsUpdate{DailyReport: &yes})
 	require.NoError(t, err)
 	require.NoError(t, e.db.Create(&models.ReseedDailySkip{Day: today, SiteName: "hdsky", Present: 40}).Error)
-	line, err = e.svc.DailyReportLine(ctx, today)
+	line, err = e.svc.DailyReportLine(ctx, today, "")
 	require.NoError(t, err)
 	assert.Empty(t, line, "只有跳过时不写")
 
@@ -145,7 +145,11 @@ func TestDailyReportLine(t *testing.T) {
 		a.InfoHash = "h"
 		require.NoError(t, e.db.Create(&a).Error)
 	}
-	line, err = e.svc.DailyReportLine(ctx, today)
+	line, err = e.svc.DailyReportLine(ctx, today, "")
 	require.NoError(t, err)
-	assert.Equal(t, "🌱 今日辅种：建成 2 · 成功 1 · 失败 2 · 站点已删除 1", line, "失败含撤回；昨天的不算")
+	assert.Equal(t, "🌱 今日辅种：建成 2 · 成功 1 · 失败 2 · 站点已删除 1", line, "失败含撤回；昨天的不算；不给说法时是今日")
+
+	line, err = e.svc.DailyReportLine(ctx, "2026-10-29", "昨日")
+	require.NoError(t, err)
+	assert.Equal(t, "🌱 昨日辅种：建成 0 · 成功 0 · 失败 1 · 站点已删除 0", line, "统计前一天的战报：按那天取数，行首写昨日")
 }
