@@ -550,7 +550,7 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 | POST   | `/brush/tasks/preview`       | 读取 | 预览刷流改动；请求为 `ConfigChange`，固定资源为刷流任务                        |
 | POST   | `/brush/tasks`               | 操作 | 新建刷流任务                                                                   |
 | PUT    | `/brush/tasks/{id}`          | 操作 | 修改刷流任务                                                                   |
-| DELETE | `/brush/tasks/{id}`          | 操作 | 删除刷流任务                                                                   |
+| DELETE | `/brush/tasks/{id}`          | 操作 | 删除刷流任务；留下的种子交给自动删种                                           |
 | POST   | `/brush/tasks/{id}/status`   | 操作 | 启停任务，请求为 `{"enabled": true}` 或 `false`                                |
 | GET    | `/brush/tasks/{id}/runs`     | 读取 | 分页读取任务运行记录                                                           |
 | GET    | `/stats/aggregated`          | 读取 | 站点聚合统计，使用与网页统计相同的字段与计费下载口径                           |
