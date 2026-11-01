@@ -21,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 16
+const CurrentSchemaVersion = 17
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -185,6 +185,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     16,
 		Description: "settings_globals: merge the peer ratio monitor into cleanup for installs that only enabled peer ratio",
 		Up:          sm.migrateV15ToV16,
+	})
+
+	// v16 -> v17: 免费结束时删除还是暂停改成每条 RSS 自己选，沿用升级前的全局「免费结束自动删除」
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     17,
+		Description: "rss_subscriptions/torrent_infos: per-RSS free_end_delete carried over from the global auto_delete_on_free_end",
+		Up:          sm.migrateV16ToV17,
 	})
 }
 
@@ -910,6 +917,41 @@ func (sm *SchemaManager) migrateV15ToV16(db *gorm.DB) error {
 		"cleanup_emergency":        false,
 	}).Error; err != nil {
 		return fmt.Errorf("v15→v16: merge peer ratio into cleanup: %w", err)
+	}
+	return nil
+}
+
+// migrateV16ToV17 把免费结束时的处理从全局开关改成每条 RSS 自己选（free_end_delete，只在 pause_on_free_end 开着时有意义）：
+// 升级前开着全局「免费结束自动删除」时，开着免费结束处理的 RSS 与已推送的种子记录都记成删除，升级前已经在等到期处理的种子
+// 处理方式不变；没开时都是暂停（新列的默认值）。只写新加的列，原有的列（含全局 auto_delete_on_free_end）不动，回退到旧版时
+// 旧版读到的仍是升级前的值，所以不用备份。重跑结果一样。
+func (sm *SchemaManager) migrateV16ToV17(db *gorm.DB) error {
+	mig := db.Migrator()
+	tables := []any{&RSSSubscription{}, &TorrentInfo{}}
+	for _, model := range tables {
+		if mig.HasTable(model) && !mig.HasColumn(model, "FreeEndDelete") {
+			if err := mig.AddColumn(model, "FreeEndDelete"); err != nil {
+				return fmt.Errorf("v16→v17: add free_end_delete: %w", err)
+			}
+		}
+	}
+	if !mig.HasTable(&SettingsGlobal{}) {
+		return nil
+	}
+	var n int64
+	if err := db.Model(&SettingsGlobal{}).Where("auto_delete_on_free_end = ?", true).Count(&n).Error; err != nil {
+		return fmt.Errorf("v16→v17: query settings_globals: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	for _, model := range tables {
+		if !mig.HasTable(model) {
+			continue
+		}
+		if err := db.Model(model).Where("pause_on_free_end = ?", true).Update("free_end_delete", true).Error; err != nil {
+			return fmt.Errorf("v16→v17: carry over free_end_delete: %w", err)
+		}
 	}
 	return nil
 }

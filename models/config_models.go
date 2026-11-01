@@ -95,8 +95,9 @@ type SettingsGlobal struct {
 	CleanupMinRetainH  int    `json:"cleanup_min_retain_h" gorm:"default:24"`
 	CleanupProtectTags string `json:"cleanup_protect_tags" gorm:"size:256"`
 
-	// 免费结束自动删除
-	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"` // 免费期结束时自动删除未完成的种子及数据
+	// 免费结束自动删除：v17 起不再生效，免费结束时删除还是暂停每条 RSS 自己选（RSSSubscription.FreeEndDelete）。
+	// 列留着升级前的值，只给迁移换算与回退到旧版用，保存全局设置时不改它
+	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"`
 
 	// 免费期结束前提前处理的安全余量（分钟）。>0 时暂停/删除提前 N 分钟触发，规避删除延迟与
 	// tracker 汇报滞后导致的超额下载量；0 = 到点处理（旧行为）。生效范围 [0,60]。
@@ -265,6 +266,7 @@ type RSSSubscription struct {
 	DownloaderID    *uint      `gorm:"index" json:"downloader_id"`    // 指定下载器，nil 表示使用默认下载器
 	IsExample       bool       `json:"is_example"`                    // 是否为示例配置，示例配置不会被执行
 	PauseOnFreeEnd  bool       `gorm:"default:false" json:"pause_on_free_end"`
+	FreeEndDelete   bool       `gorm:"default:false" json:"free_end_delete"`  // 免费结束时删除而不是暂停：只在 PauseOnFreeEnd 为真时有意义，推送时写进种子记录
 	FilterMode      FilterMode `gorm:"size:16;default:''" json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
 
 	NotifyMode              string `gorm:"column:notify_mode;default:''" json:"notify_mode"`
@@ -290,7 +292,8 @@ type RSSConfig struct {
 	FilterRuleIDs   []uint     `json:"filter_rule_ids"` // 关联的过滤规则 ID 列表
 	IsExample       bool       `json:"is_example"`      // 是否为示例配置，示例配置不会被执行
 	PauseOnFreeEnd  bool       `json:"pause_on_free_end"`
-	FilterMode      FilterMode `json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
+	FreeEndDelete   bool       `json:"free_end_delete"` // 免费结束时删除而不是暂停，只在 PauseOnFreeEnd 为真时有意义
+	FilterMode      FilterMode `json:"filter_mode"`     // 空字符串表示使用全局 DefaultFilterMode
 
 	NotifyMode              string `json:"notify_mode"`
 	NotifyConfIDs           string `json:"notify_conf_ids"`
