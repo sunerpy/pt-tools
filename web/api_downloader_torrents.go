@@ -96,6 +96,8 @@ type DownloaderCapability struct {
 	CanExportTorrent bool `json:"can_export_torrent"`
 	// CanEditTrackers 表示能修改种子的 tracker 地址（qBittorrent 与 Transmission 都支持）。
 	CanEditTrackers bool `json:"can_edit_trackers"`
+	// CanKeep 表示能一键加、去「保留」标签（pt-tools-keep）：qBittorrent 用标签，Transmission 用 labels。
+	CanKeep bool `json:"can_keep"`
 }
 
 type DownloaderCapabilitiesResponse struct {
@@ -596,12 +598,12 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 
 var errUnsupportedAction = errors.New("不支持的 action")
 
-// runTorrentActions 对一批种子做同一个操作（暂停、继续、删除、连数据删除、改保存目录、重新校验），按下载器分组，
+// runTorrentActions 对一批种子做同一个操作（暂停、继续、删除、连数据删除、改保存目录、重新校验、保留、取消保留），按下载器分组，
 // 整批失败时逐个重试，返回每个种子的结果。不认识的操作返回 errUnsupportedAction。
 func (s *Server) runTorrentActions(ctx context.Context, req BatchTorrentActionRequest) (BatchTorrentActionResponse, error) {
 	action := strings.TrimSpace(req.Action)
 	switch action {
-	case "pause", "resume", "delete", "delete_with_files", "set_location", "recheck":
+	case "pause", "resume", "delete", "delete_with_files", "set_location", "recheck", "keep", "unkeep":
 	default:
 		return BatchTorrentActionResponse{}, errUnsupportedAction
 	}
@@ -658,6 +660,8 @@ func (s *Server) runTorrentActions(ctx context.Context, req BatchTorrentActionRe
 		}
 
 		switch action {
+		case "keep", "unkeep":
+			keepTorrents(dl, rec, targets, action == "keep", &resp)
 		case "pause", "resume", "delete", "delete_with_files":
 			var batchErr error
 			switch action {
@@ -1029,6 +1033,7 @@ func downloaderCapabilityFromRecord(rec downloaderRecord) DownloaderCapability {
 		CanViewTrackers:   true,
 		CanExportTorrent:  rec.Type == string(downloader.DownloaderQBittorrent),
 		CanEditTrackers:   true,
+		CanKeep:           rec.Type == string(downloader.DownloaderQBittorrent) || rec.Type == string(downloader.DownloaderTransmission),
 	}
 }
 
