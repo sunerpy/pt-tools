@@ -687,6 +687,7 @@ type torrentFullInfo struct {
 	ETA                int64    `json:"eta"`
 	SecondsSeeding     int64    `json:"secondsSeeding"`
 	DoneDate           int64    `json:"doneDate"`
+	ActivityDate       int64    `json:"activityDate"` // 最后一次上传或下载数据的时间（没有过活动时为 0）
 	PeersSendingToUs   int      `json:"peersSendingToUs"`
 	PeersGettingFromUs int      `json:"peersGettingFromUs"`
 	PeersConnected     int      `json:"peersConnected"`
@@ -725,7 +726,7 @@ func (t *TransmissionClient) GetAllTorrents() ([]downloader.Torrent, error) {
 			"id", "name", "hashString", "status", "percentDone",
 			"rateDownload", "rateUpload", "totalSize", "leftUntilDone", "uploadedEver",
 			"downloadedEver", "uploadRatio", "addedDate", "downloadDir", "labels",
-			"eta", "secondsSeeding", "trackers", "doneDate", "peersSendingToUs",
+			"eta", "secondsSeeding", "trackers", "doneDate", "activityDate", "peersSendingToUs",
 			"peersGettingFromUs", "peersConnected", "desiredAvailable",
 		},
 	}
@@ -769,6 +770,7 @@ func (t *TransmissionClient) mapTransmissionTorrent(tt torrentFullInfo) download
 		ETA:             tt.ETA,
 		SeedingTime:     tt.SecondsSeeding,
 		CompletionOn:    tt.DoneDate,
+		LastActivity:    max(tt.ActivityDate, 0),
 		NumSeeds:        tt.PeersGettingFromUs,
 		NumPeers:        tt.PeersSendingToUs,
 		Availability:    tt.DesiredAvailable,

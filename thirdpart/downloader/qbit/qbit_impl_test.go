@@ -1214,9 +1214,9 @@ func TestQbitGetAllTorrentsAndMapping(t *testing.T) {
 				"downloaded": float64(4096), "eta": float64(0), "seeding_time": float64(3600),
 				"tracker": "http://t.example", "completion_on": float64(1600001000),
 				"num_seeds": float64(5), "num_leechs": float64(3), "availability": float64(1.5),
-				"content_path": "/downloads/torrent-one",
+				"content_path": "/downloads/torrent-one", "last_activity": float64(1600002000),
 			},
-			{"hash": "h2", "name": "torrent-two", "progress": float64(0.5), "state": "downloading"},
+			{"hash": "h2", "name": "torrent-two", "progress": float64(0.5), "state": "downloading", "last_activity": float64(-1)},
 		})
 	}))
 	defer srv.Close()
@@ -1246,8 +1246,10 @@ func TestQbitGetAllTorrentsAndMapping(t *testing.T) {
 	assert.Equal(t, 5, first.NumSeeds)
 	assert.Equal(t, 3, first.NumPeers)
 	assert.Equal(t, "test-qbit", first.ClientID)
+	assert.Equal(t, int64(1600002000), first.LastActivity, "last_activity 是最后一次上传或下载的时间")
 
 	assert.False(t, torrents[1].IsCompleted)
+	assert.Zero(t, torrents[1].LastActivity, "没有过活动（qB 给负数）时当作不知道")
 	assert.Equal(t, downloader.TorrentDownloading, torrents[1].State)
 }
 

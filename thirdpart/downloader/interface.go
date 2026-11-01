@@ -70,6 +70,7 @@ type Torrent struct {
 	SeedingTime     int64        // 做种时间(秒)
 	Tracker         string       // 主 Tracker URL
 	CompletionOn    int64        // 完成时间 (Unix timestamp), 0=未完成
+	LastActivity    int64        // 最后一次上传或下载数据的时间 (Unix timestamp), 0=下载器没给
 	NumSeeds        int          // 种子数
 	NumPeers        int          // 下载者数
 	Availability    float64      // 可用性 (0.0-1.0+)

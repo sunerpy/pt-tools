@@ -48,12 +48,15 @@ Three modes decide which torrents auto-delete manages:
 
 A torrent that meets the configured conditions is marked for deletion.
 
-| Condition                                                                                 | Meaning                                                                               | Example  |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------- |
-| **Seeding time over (做种时间超过（小时）)**                                              | Can be deleted after seeding for N hours                                              | 72 hours |
-| **Ratio reached (分享率达到)**                                                            | Can be deleted once the ratio is ≥ N                                                  | 2.0      |
-| **Inactive for over (不活跃超过（小时）)**                                                | Can be deleted once it has seeded for over N hours and is not uploading at the moment | 48 hours |
-| **Delete torrents still unfinished when freeleech ends (免费到期仍未下完的种子自动删除)** | Torrents whose free period has ended before they finished downloading                 | On/Off   |
+| Condition                                                                                 | Meaning                                                                                     | Example       |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------- |
+| **Seeding time over (做种时间超过（小时）)**                                              | Can be deleted after seeding for N hours                                                    | 72 hours      |
+| **Ratio reached (分享率达到)**                                                            | Can be deleted once the ratio is ≥ N                                                        | 2.0           |
+| **Inactive for over (不活跃超过（小时）)**                                                | Can be deleted once it is seeding and has not uploaded or downloaded anything for N hours   | 48 hours      |
+| **Low-efficiency seeding (低效做种)**                                                     | Can be deleted once it has finished, seeded for over N hours and its ratio is still below M | 3 hours / 0.5 |
+| **Delete torrents still unfinished when freeleech ends (免费到期仍未下完的种子自动删除)** | Torrents whose free period has ended before they finished downloading                       | On/Off        |
+
+Inactivity is judged by the time the downloader recorded for the torrent's last upload or download (qBittorrent and Transmission both record it), not by the speed at the moment of the check: a torrent that usually uploads but happens to be at 0 when checked is kept, and a torrent that has uploaded nothing since it finished is deleted N hours after it finished. When the downloader does not report that time, pt-tools uses the time the torrent finished, then the time it was added. A torrent that is uploading or downloading at the moment of the check is not inactive, and neither is a paused one. Low-efficiency seeding only applies when both of its values are filled in.
 
 **Condition logic (条件关系)**:
 
@@ -93,8 +96,10 @@ These torrents are not deleted, even when they meet the deletion conditions:
 | --------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
 | **Protect downloading torrents (保护下载中的种子)** | Off      | Torrents that are downloading or being checked are not deleted                                 |
 | **Protect H&R torrents (保护 H&R 种子)**            | On       | Torrents that have not yet met the site's H&R seeding time are not deleted                     |
-| **Minimum keep time (最短保种时间（小时）)**        | 24 hours | Torrents added less than N hours ago are not deleted                                           |
+| **Minimum keep time (最短保种时间（小时）)**        | 24 hours | Torrents added to the downloader less than N hours ago are not deleted                         |
 | **Protected tags (保护标签)**                       | Empty    | Torrents with these tags are not deleted (type a tag and press Enter; add as many as you like) |
+
+Protection rules win over the deletion conditions, and emergency cleanup does not delete protected torrents either. For example, with a minimum keep time of 24 hours and low-efficiency seeding set to 3 hours with a ratio below 0.5, a torrent added to the downloader less than 24 hours ago is kept however low its ratio is, and is deleted only once it has been there for 24 hours. To have such torrents deleted sooner, lower the minimum keep time. Preview what would be deleted (预览会删哪些) lists the protected torrents and the rule each one hits (for example how many hours of the minimum keep time are left).
 
 ## How it runs
 
@@ -126,7 +131,8 @@ These torrents are not deleted, even when they meet the deletion conditions:
 
 ### Preview and the last run
 
-- Preview what would be deleted (预览会删哪些) runs the flow above with the rules on the page (unsaved ones too) without deleting anything. For each downloader it shows how many torrents are in scope, how many are protected, which ones would be deleted, and why each one would go (the condition it meets, or low disk space and emergency cleanup). Torrents whose data other torrents still use are marked as deleting the torrent only and keeping the data. An actual run works with the torrents in the downloader at that time.
+- Preview what would be deleted (预览会删哪些) runs the flow above with the rules on the page (unsaved ones too) without deleting anything. For each downloader it shows how many torrents the downloader has in total, how many are in scope, how many are protected, which ones would be deleted, and why each one would go (the condition it meets, or low disk space and emergency cleanup). Torrents whose data other torrents still use are marked as deleting the torrent only and keeping the data. An actual run works with the torrents in the downloader at that time.
+- The protected torrents this round keeps can be expanded in the preview, each with the protection rule it hits: downloading or being checked, how many hours of the minimum keep time are left, the H&R seeding time required and done so far (always protected when the site gives no requirement), or the protected tag it carries. Brush task torrents are deleted by the brush task's own rules, and torrents paused by the seeding competition monitor (做种竞争度监控) are not deleted by the regular rules either; the preview shows how many of each there are.
 - Below the card is the last run's result (how many each downloader deleted, and why a downloader couldn't be checked or a deletion failed) and roughly when the next run is. These start over when pt-tools restarts.
 
 ## H&R protection

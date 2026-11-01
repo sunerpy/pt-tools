@@ -1073,6 +1073,10 @@ func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 	if completionOn, ok := qt["completion_on"].(float64); ok {
 		t.CompletionOn = int64(completionOn)
 	}
+	// last_activity 是最后一次上传或下载数据的时间；没有过活动时 qB 给 0 或负数，当作不知道
+	if lastActivity, ok := qt["last_activity"].(float64); ok && lastActivity > 0 {
+		t.LastActivity = int64(lastActivity)
+	}
 	if numSeeds, ok := qt["num_seeds"].(float64); ok {
 		t.NumSeeds = int(numSeeds)
 	}

@@ -49,6 +49,6 @@ The preview releases are for testing and are not recommended for production yet.
 ## Reliability and security
 
 - [Free status](../configuration.md#global-settings): pushes that require free torrents use the free status read in the same run; an unknown status does not count as free, and a torrent without enough free time left is not pushed. A torrent whose free end time is unknown is not started automatically, and unfinished torrents can be paused or deleted a few minutes before the free period ends.
-- [Auto-delete](./auto-cleanup.md): preview which torrents a run would delete, and see the result of the last run on the page; torrents with H&R whose seeding requirement is unknown are protected.
+- [Auto-delete](./auto-cleanup.md): preview which torrents a run would delete, along with the protected ones and the protection rule each hits, and see the result of the last run on the page; torrents with H&R whose seeding requirement is unknown are protected; inactivity is judged by the time the downloader recorded for the last upload or download, not by the speed at the moment of the check.
 - Credentials: site cookies are stored only encrypted, and plaintext left by older versions is removed on upgrade; a damaged key file is no longer overwritten, and pt-tools refuses to start when the key does not match the stored ciphertext.
 - Upgrades: self-upgrade checks the downloaded file against the same version's `checksums.txt`; update checks no longer report older previews as new versions.

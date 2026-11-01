@@ -249,12 +249,18 @@ const cpResults = ref<CleanupResult[]>([]);
 const cpTotal = computed(() =>
   cpResults.value.reduce(
     (acc, r) => ({
-      n: acc.n + r.items.length,
-      size: acc.size + r.items.reduce((a, i) => a + i.size, 0),
+      n: acc.n + (r.items ?? []).length,
+      size: acc.size + (r.items ?? []).reduce((a, i) => a + i.size, 0),
     }),
     { n: 0, size: 0 },
   ),
 );
+
+/** 预览里一台下载器的个数一句：有总数时写下载器里共几个（管理范围以外的也算） */
+function cpCounts(r: CleanupResult): string {
+  const head = r.total != null ? `下载器里共 ${r.total} 个，` : "";
+  return `${head}管理范围里 ${r.managed} 个，受保护 ${r.protected} 个，会删 ${(r.items ?? []).length} 个`;
+}
 
 function cpSize(bytes: number): string {
   const gb = bytes / 1024 ** 3;
@@ -694,7 +700,10 @@ async function executeClean() {
                   </el-form-item>
                   <el-form-item label="不活跃超过（小时）">
                     <el-input-number v-model="form.cleanup_max_inactive_h" :min="0" :step="1" />
-                    <div class="field-tip">0 表示不限制</div>
+                    <div class="field-tip">
+                      做种中的种子连续这么久没有上传或下载就删（看下载器记的最后活动时间）；0
+                      表示不限制
+                    </div>
                   </el-form-item>
                 </div>
 
@@ -717,7 +726,11 @@ async function executeClean() {
                   <PtIcon name="info" :size="14" class="pt-note__icon" />
                   <span>
                     做种超过 {{ form.cleanup_slow_seed_time_h }} 小时、分享率仍低于
-                    {{ form.cleanup_slow_max_ratio }} 的已完成种子会被删除。
+                    {{ form.cleanup_slow_max_ratio }} 的已完成种子会被删除{{
+                      form.cleanup_min_retain_h > 0
+                        ? `；加进下载器不满 ${form.cleanup_min_retain_h} 小时的受「最短保种时间」保护，不删`
+                        : ""
+                    }}。
                   </span>
                 </div>
                 <div v-else class="field-tip slow-note">
@@ -772,7 +785,9 @@ async function executeClean() {
                 <div class="field-row">
                   <el-form-item label="最短保种时间（小时）">
                     <el-input-number v-model="form.cleanup_min_retain_h" :min="0" />
-                    <div class="field-tip">加进下载器还不够这么久的种子不删</div>
+                    <div class="field-tip">
+                      加进下载器还不够这么久的种子不删，删除条件对上了也不删
+                    </div>
                   </el-form-item>
                   <el-form-item label="保护标签">
                     <div class="tagbox">
@@ -839,10 +854,17 @@ async function executeClean() {
           <div class="ac-pv__head">
             <strong>{{ r.downloader }}</strong>
             <span v-if="r.error" class="ac-pv__err">{{ r.error }}</span>
-            <span v-else class="pt-foot-note"
-              >管理范围里 {{ r.managed }} 个，受保护 {{ r.protected }} 个，会删
-              {{ r.items.length }} 个</span
-            >
+            <span v-else class="pt-foot-note">{{ cpCounts(r) }}</span>
+          </div>
+          <div v-if="r.brush || r.peer_paused" class="pt-foot-note">
+            {{
+              [
+                r.brush ? `${r.brush} 个刷流任务的种子按刷流任务的规则删` : "",
+                r.peer_paused ? `${r.peer_paused} 个被竞争度监控暂停着，常规规则不删` : "",
+              ]
+                .filter(Boolean)
+                .join("；")
+            }}
           </div>
           <div v-if="r.emergency" class="pt-note pt-note--warn">
             <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
@@ -852,7 +874,7 @@ async function executeClean() {
             <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
             <span>{{ n }}</span>
           </div>
-          <ul v-if="r.items.length" class="ac-pv__list">
+          <ul v-if="r.items?.length" class="ac-pv__list">
             <li v-for="it in r.items" :key="it.info_hash">
               <span class="ac-pv__name">{{ it.name }}</span>
               <span class="pt-foot-note"
@@ -863,6 +885,22 @@ async function executeClean() {
               <span class="ac-pv__why">{{ it.reasons.join("；") }}</span>
             </li>
           </ul>
+          <details
+            v-if="r.protected_items?.length"
+            class="ac-pv__protected"
+            :data-testid="`ac-pv-protected-${r.downloader}`">
+            <summary>受保护、这一轮不删的 {{ r.protected_items.length }} 个</summary>
+            <ul class="ac-pv__list">
+              <li v-for="it in r.protected_items" :key="it.info_hash">
+                <span class="ac-pv__name">{{ it.name }}</span>
+                <span class="pt-foot-note"
+                  >{{ cpSize(it.size) }} · 做种 {{ it.seeding_h.toFixed(1) }} 小时 · 分享率
+                  {{ it.ratio.toFixed(2) }}</span
+                >
+                <span class="ac-pv__keep">{{ it.reasons.join("；") }}</span>
+              </li>
+            </ul>
+          </details>
         </div>
         <div v-if="!cpResults.length" class="field-tip">没有下载器</div>
         <template #footer>
@@ -1429,5 +1467,23 @@ async function executeClean() {
 .ac-pv__why {
   font-size: 12px;
   color: var(--pt-warn);
+}
+
+.ac-pv__protected {
+  font-size: 12px;
+  color: var(--pt-t3);
+}
+
+.ac-pv__protected summary {
+  cursor: pointer;
+}
+
+.ac-pv__protected .ac-pv__list {
+  margin-top: 8px;
+}
+
+.ac-pv__keep {
+  font-size: 12px;
+  color: var(--pt-t2);
 }
 </style>
