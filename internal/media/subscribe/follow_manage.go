@@ -345,6 +345,39 @@ func (s *Service) DeleteEpisodeRule(ctx context.Context, id uint, group string) 
 	return s.EpisodeRules(ctx, id)
 }
 
+// learnTitleNumbering 在因为副标题写错了期号、按标题的集号收下的种子推送成功以后，给这个追剧记一条这个组「按 TMDB 的集号」
+// 的集号规则（来源「自动」，用户可以删）。以后这个组都按标题的集号，不再靠 TMDB 的集名与播出进度判断：副标题写的期离播出进度
+// 只差一期（季初），或者 TMDB 列出了副标题写的那一期（季末补缺）时，那个判断会把这个组的种子判成集号对不上。
+// 认不出组名、已经有这个组（不分大小写）的规则时不记。
+func (s *Service) learnTitleNumbering(ctx context.Context, sub *models.MediaSubscription, o scored) {
+	group := strings.TrimSpace(o.c.Meta.Group)
+	if group == "" || utf8.RuneCountInString(group) > 64 {
+		return
+	}
+	db := s.cfg.DB.WithContext(context.WithoutCancel(ctx))
+	var n int64
+	if err := db.Model(&models.MediaEpisodeRule{}).Where("subscription_id = ? AND lower(group_name) = lower(?)", sub.ID, group).
+		Count(&n).Error; err != nil || n > 0 {
+		return
+	}
+	h := parseHint(o.c.Item.Title, o.c.Item.Subtitle)
+	note := fmt.Sprintf("副标题把集号写成了期号：第 %d 集写的是第 %d 期%s", o.sp.Start, h.period, partLabel(h.part))
+	now := s.cfg.Now()
+	row := models.MediaEpisodeRule{
+		SubscriptionID: sub.ID, Group: group, Mode: models.MediaEpisodeRuleTMDB, Source: models.MediaRuleFromAuto, Note: note,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	res := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if res.Error != nil {
+		s.cfg.Logger.Warnf("[订阅] 给「%s」记集号规则失败: %v", sub.Title, res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		step(ctx, stepInfo, "记下集号规则：%s 按 TMDB 的集号（%s；不对的话在集号规则里删掉）", group, note)
+		s.cfg.Logger.Infof("[订阅] 「%s」记下集号规则：%s 按 TMDB 的集号（%s）", sub.Title, group, note)
+	}
+}
+
 // ruleText 是给人看的集号规则。
 func ruleText(r models.MediaEpisodeRule) string {
 	switch r.Mode {

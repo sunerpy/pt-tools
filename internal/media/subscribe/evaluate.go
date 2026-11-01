@@ -311,6 +311,8 @@ type scored struct {
 	c  Candidate
 	v  Verdict
 	sp span
+	// titleOverSubtitle：副标题写错了期号，按标题的集号收下的（推送成功以后给这个组记集号规则）
+	titleOverSubtitle bool
 }
 
 // evaluate 从候选种子里挑这个订阅要的并推送（调用方持有 s.mu），返回结果说明。剧集先重建台账（认领下载器里已有的种子），
@@ -363,7 +365,7 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 			step(ctx, stepReject, "%s：%s", c.Item.Title, v.Reject)
 			continue
 		}
-		ok = append(ok, scored{c: c, v: v, sp: sp})
+		ok = append(ok, scored{c: c, v: v, sp: sp, titleOverSubtitle: mt.mapper.titleOverSubtitle(c.Meta, c.Item.Title, c.Item.Subtitle, sp)})
 	}
 	if len(ok) == 0 {
 		if len(rejects) > 0 {
@@ -593,6 +595,9 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		msgs = append(msgs, msg)
 		if strings.HasPrefix(msg, "下载了") {
 			pushed()
+			if o.titleOverSubtitle {
+				s.learnTitleNumbering(ctx, sub, o)
+			}
 			for n := range missing {
 				if o.sp.covers(n) {
 					delete(missing, n)
