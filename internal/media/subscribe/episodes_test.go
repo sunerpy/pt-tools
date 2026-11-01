@@ -2,8 +2,10 @@ package subscribe
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -270,6 +272,84 @@ func TestSubtitlePeriodTooNewWithTwoHalfListedPeriods(t *testing.T) {
 	// 第 6 期离播出进度只差一期（第 5 期已经开播），照旧不要
 	_, ok, _ = mapItem(t, mp, "Natural.High.S04E09.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第6期上")
 	assert.False(t, ok)
+}
+
+// season4Through 是现在就出发第 4 季播到第 n 集时的 TMDB 集列表：每周六播上、周日播下（从 2026-10-10 起），
+// 前 n 集按「第N期上/下」命名，后面一集还是占位的集名。
+func season4Through(n int) string {
+	day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	var eps []string
+	for i := 1; i <= n+1; i++ {
+		period, part := (i+1)/2, "上"
+		d := day.AddDate(0, 0, 7*(period-1))
+		if i%2 == 0 {
+			part, d = "下", d.AddDate(0, 0, 1)
+		}
+		name := fmt.Sprintf("第%d期%s", period, part)
+		if i > n {
+			name = fmt.Sprintf("第 %d 集", i)
+		}
+		eps = append(eps, fmt.Sprintf(`{"episode_number":%d,"name":%q,"air_date":%q}`, i, name, d.Format(time.DateOnly)))
+	}
+	return `{"season_number":4,"episodes":[` + strings.Join(eps, ",") + `]}`
+}
+
+// 副标题写错了期号、按标题的集号收下的才算 titleOverSubtitle（推送成功以后给这个组记集号规则）：
+// 副标题对得上的、没写期号的、这个组已经有规则的都不算。
+func TestTitleOverSubtitle(t *testing.T) {
+	var season tmdb.Season
+	require.NoError(t, json.Unmarshal([]byte(productionSeason4Nov01), &season))
+	ix := newEpisodeIndex(&season, []int{genreReality})
+	over := func(mp *episodeMapper, title, subtitle string) bool {
+		t.Helper()
+		sp, ok, why := mapItem(t, mp, title, subtitle)
+		require.True(t, ok, "%s / %s：%s", title, subtitle, why)
+		return mp.titleOverSubtitle(meta.Parse(title, subtitle), title, subtitle, sp)
+	}
+	mp := newEpisodeMapper(ix, nil)
+	mp.today = "2026-11-01"
+	e07 := "Natural.High.S04E07.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB"
+	assert.True(t, over(mp, e07, "现在就出发 第四季 | 第07集 (第07期上) | 4K"))
+	assert.False(t, over(mp, e07, "现在就出发 第四季 | 第4期上"), "副标题对得上")
+	assert.False(t, over(mp, e07, "现在就出发 第四季 | 第07集 | 4K"), "副标题没写期号")
+	ruled := newEpisodeMapper(ix, []models.MediaEpisodeRule{{Group: "hhweb", Mode: models.MediaEpisodeRuleTMDB}})
+	ruled.today = mp.today
+	assert.False(t, over(ruled, e07, "现在就出发 第四季 | 第07集 (第07期上) | 4K"), "这个组已经有规则")
+	var nilMapper *episodeMapper
+	assert.False(t, nilMapper.titleOverSubtitle(meta.Parse(e07, ""), e07, "", span{Start: 7, End: 7}), "电影没有集号映射")
+}
+
+// 副标题对不上时的提示写出制作组，并说明加标题包含词没有用（集号映射在关键词之前）。
+func TestSubtitlePeriodMismatchHintNamesGroup(t *testing.T) {
+	var season tmdb.Season
+	require.NoError(t, json.Unmarshal([]byte(productionSeason4Nov01), &season))
+	mp := newEpisodeMapper(newEpisodeIndex(&season, []int{genreReality}), nil)
+	mp.today = "2026-11-01"
+	_, ok, why := mapItem(t, mp, "Natural.High.S04E04.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第04集（第04期下）")
+	require.False(t, ok)
+	assert.Contains(t, why, "标题写的是第 4 集，副标题写的是第 4 期下")
+	assert.Contains(t, why, "在集号规则里给 HHWEB 设「按 TMDB 的集号」")
+	assert.Contains(t, why, "加标题包含词没有用")
+	assert.Equal(t, "所有制作组（组名不填）", ruleTarget(" "))
+}
+
+// 季末补缺：TMDB 列出了第7期上（第 13 集）以后，HHWEB 写「第07期上」的第 7 集按期号对得上第 13 集、和标题对不上，
+// 不靠规则就不要；给 HHWEB 记了「按 TMDB 的集号」以后按标题的集号。
+func TestLateSeasonSubtitlePeriodNeedsRule(t *testing.T) {
+	var season tmdb.Season
+	require.NoError(t, json.Unmarshal([]byte(season4Through(14)), &season))
+	ix := newEpisodeIndex(&season, []int{genreReality})
+	title, subtitle := "Natural.High.S04E07.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第07集（第07期上）"
+	mp := newEpisodeMapper(ix, nil)
+	mp.today = "2026-11-22"
+	_, ok, why := mapItem(t, mp, title, subtitle)
+	assert.False(t, ok)
+	assert.Contains(t, why, "副标题写的是第 7 期上")
+	ruled := newEpisodeMapper(ix, []models.MediaEpisodeRule{{Group: "HHWEB", Mode: models.MediaEpisodeRuleTMDB, Source: models.MediaRuleFromAuto}})
+	ruled.today = mp.today
+	sp, ok, why := mapItem(t, ruled, title, subtitle)
+	require.True(t, ok, why)
+	assert.Equal(t, span{Start: 7, End: 7}, sp)
 }
 
 // 每期几集：最常见的集数，一样多时取少的，最新的那一期不算（只列出一期时就按它）；没列出时当作一集。

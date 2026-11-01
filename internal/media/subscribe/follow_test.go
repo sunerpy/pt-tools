@@ -1262,3 +1262,83 @@ func TestFollowSubtitlePeriodWrittenAsEpisode(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"905", "906"}, pushedIDs(e))
 }
+
+// stepTexts 是一次运行的全部步骤文字。
+func stepTexts(r RunView) string {
+	var b strings.Builder
+	for _, st := range r.Steps {
+		b.WriteString(st.Text)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// 副标题写错了期号、按标题的集号下载成功以后，给这个组记一条「按 TMDB 的集号」（来源「自动」）：到了季末 TMDB 列出了副标题写的
+// 那一期（第7期上是第 13 集），这个组写「第07期上」的第 7 集照样按标题的集号要。没有记下规则时同样的第 7 集对不上；推送失败的不记。
+func TestFollowLearnsTitleNumberingFromWrongSubtitlePeriod(t *testing.T) {
+	e07 := func(e *env) v2.TorrentItem {
+		return e.item("hdsky", "907", "Natural.High.S04E07.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第07集（第07期上）", 3, 10)
+	}
+	lateSeason := func(e *env, sub *models.MediaSubscription) {
+		t.Helper()
+		e.setNow(time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC))
+		e.tmdb.set("/3/tv/231620/season/4", season4Through(14))
+		row := e.subRow(sub.ID)
+		_, err := e.svc.rebuildLedger(e.ctx, &row, rebuildOpts{fresh: true})
+		require.NoError(t, err)
+	}
+	early := func(e *env) *models.MediaSubscription {
+		e.now = time.Date(2026, 10, 27, 12, 26, 0, 0, time.UTC)
+		e.tmdb.set("/3/tv/231620/season/4", productionSeason4)
+		start := 5
+		sub := e.follow(func(in *SubscriptionInput) { in.StartEpisode = &start; in.LockVersion = off() })
+		e.enable(nil)
+		e.search.set(e.item("hdsky", "905", "Natural.High.S04E05.2026.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "现在就出发 第四季 | 第05集（第5期上）", 3, 10))
+		return sub
+	}
+
+	e := newEnv(t)
+	sub := early(e)
+	_, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"905"}, pushedIDs(e))
+	rules, err := e.svc.EpisodeRules(e.ctx, sub.ID)
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	assert.Equal(t, "HHWEB", rules[0].Group)
+	assert.Equal(t, models.MediaEpisodeRuleTMDB, rules[0].Mode)
+	assert.Equal(t, models.MediaRuleFromAuto, rules[0].Source)
+	assert.Contains(t, rules[0].Note, "第 5 集写的是第 5 期上")
+	assert.Contains(t, stepTexts(e.runs(sub.ID)[0]), "记下集号规则：HHWEB 按 TMDB 的集号")
+	lateSeason(e, sub)
+	e.search.set(e07(e))
+	_, err = e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"905", "907"}, pushedIDs(e))
+	rules, err = e.svc.EpisodeRules(e.ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Len(t, rules, 1, "已经有这个组的规则：不再记")
+
+	// 对照：没有记下规则（从第 7 集开始追，到季末才搜到），同一个第 7 集对不上
+	c := newEnv(t)
+	c.tmdb.set("/3/tv/231620/season/4", season4Through(14))
+	c.now = time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	start := 7
+	csub := c.follow(func(in *SubscriptionInput) { in.StartEpisode = &start; in.LockVersion = off() })
+	c.enable(nil)
+	c.search.set(e07(c))
+	msg, err := c.svc.SearchNow(c.ctx, csub.ID)
+	require.NoError(t, err)
+	assert.Empty(t, pushedIDs(c))
+	assert.Contains(t, msg, "集号对不上")
+
+	// 推送失败：不记规则
+	f := newEnv(t)
+	fsub := early(f)
+	f.pushErr = errors.New("下载器连不上")
+	_, err = f.svc.SearchNow(f.ctx, fsub.ID)
+	require.NoError(t, err)
+	rules, err = f.svc.EpisodeRules(f.ctx, fsub.ID)
+	require.NoError(t, err)
+	assert.Empty(t, rules)
+}

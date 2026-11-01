@@ -288,14 +288,14 @@ func (mp *episodeMapper) mapEpisodes(m meta.Meta, title, subtitle string, sp spa
 			return sp, false, "集号对不上：标题写的是第几期，TMDB 上这一季不是按期编的"
 		}
 		// 期号只在副标题里、标题自己写了集号：两边要对得上（副标题是发布的人手写的，常有写错的），对不上的不要。
-		// 副标题写的那一期 TMDB 上还没有、按播出进度也还不可能播出时，是副标题写错了（常见的是把集号写成了期号），按标题的集号
+		// 副标题写错了期号的（见 subtitlePeriodWrong）按标题的集号
 		if h.periodInSubtitle && !sp.Whole && sp.Start > 0 {
-			got, ok := mp.byPeriodHint(h)
-			if (ok && got == sp) || (!ok && mp.periodNotAiredYet(h.period, sp)) {
+			if got, ok := mp.byPeriodHint(h); (ok && got == sp) || mp.subtitlePeriodWrong(h, sp) {
 				return sp, true, ""
 			}
-			return sp, false, fmt.Sprintf("集号对不上：标题写的是第 %d 集，副标题写的是第 %d 期%s；标题的集号对的话，在集号规则里给这个组设「按 TMDB 的集号」",
-				sp.Start, h.period, partLabel(h.part))
+			// 集号映射在标题关键词之前：加包含词收不下这个种子，要设集号规则
+			return sp, false, fmt.Sprintf("集号对不上：标题写的是第 %d 集，副标题写的是第 %d 期%s；标题的集号对的话，在集号规则里给%s设「按 TMDB 的集号」（加标题包含词没有用）",
+				sp.Start, h.period, partLabel(h.part), ruleTarget(m.Group))
 		}
 		if h.part == "" {
 			eps := ix.periods[h.period]
@@ -317,6 +317,38 @@ func (mp *episodeMapper) mapEpisodes(m meta.Meta, title, subtitle string, sp spa
 		return mp.byDateHint(h, sp)
 	}
 	return sp, true, ""
+}
+
+// subtitlePeriodWrong 报告副标题写的期号是写错了（常见的是把集号写成了期号）：期号只在副标题里、标题写了集号，
+// 副标题写的那一期 TMDB 上还没有、按播出进度也还不可能播出。
+func (mp *episodeMapper) subtitlePeriodWrong(h epHint, sp span) bool {
+	if !h.periodInSubtitle || sp.Whole || sp.Start == 0 {
+		return false
+	}
+	if _, ok := mp.byPeriodHint(h); ok {
+		return false
+	}
+	return mp.periodNotAiredYet(h.period, sp)
+}
+
+// titleOverSubtitle 报告这个种子是因为副标题写错了期号才按标题的集号收下的（这个组没有集号规则时才会这样）：
+// 推送成功以后给这个组记一条「按 TMDB 的集号」（见 Service.learnTitleNumbering）。
+func (mp *episodeMapper) titleOverSubtitle(m meta.Meta, title, subtitle string, sp span) bool {
+	if mp == nil || mp.index == nil || !mp.index.variety {
+		return false
+	}
+	if _, ok := mp.rule(m.Group); ok {
+		return false
+	}
+	return mp.subtitlePeriodWrong(parseHint(title, subtitle), sp)
+}
+
+// ruleTarget 是提示里设集号规则的对象：认得出制作组时是这个组，认不出时是组名不填的那条（对所有组）。
+func ruleTarget(group string) string {
+	if group = strings.TrimSpace(group); group == "" {
+		return "所有制作组（组名不填）"
+	}
+	return " " + group + " "
 }
 
 // periodNotAiredYet 报告第 period 期按 TMDB 的播出进度还不可能播出，而标题写的那几集已经播出：这一季到今天播出的集数
