@@ -78,7 +78,7 @@ func TestDeleteReasonsModes(t *testing.T) {
 	cfg.CleanupMaxInactiveH = 12
 	idle := seedingTorrent("c", "hc", "Idle", 20, 2)
 	idle.UploadSpeed = 0
-	assert.Contains(t, cm.deleteReasons(cfg, idle, "qb1"), "做种超过 12 小时、现在没有上传")
+	assert.Contains(t, cm.deleteReasons(cfg, idle, "qb1"), "做种中，最近 12 小时没有上传或下载")
 }
 
 // 剩余空间低于下限：紧急清理多挑的写明原因；没打开连数据一起删时写明腾不出空间

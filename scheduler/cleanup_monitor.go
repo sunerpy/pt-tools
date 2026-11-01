@@ -660,8 +660,8 @@ func (c *CleanupMonitor) deleteReasons(cfg *models.SettingsGlobal, t downloader.
 		},
 		{
 			cfg.CleanupMaxInactiveH > 0,
-			t.UploadSpeed == 0 && t.State == downloader.TorrentSeeding && t.SeedingTime > int64(cfg.CleanupMaxInactiveH)*3600,
-			fmt.Sprintf("做种超过 %d 小时、现在没有上传", cfg.CleanupMaxInactiveH),
+			t.State == downloader.TorrentSeeding && idleAtLeast(t, time.Now(), time.Duration(cfg.CleanupMaxInactiveH)*time.Hour),
+			fmt.Sprintf("做种中，最近 %d 小时没有上传或下载", cfg.CleanupMaxInactiveH),
 		},
 		{
 			cfg.CleanupSlowSeedTimeH > 0 && cfg.CleanupSlowMaxRatio > 0,
@@ -684,6 +684,23 @@ func (c *CleanupMonitor) deleteReasons(cfg *models.SettingsGlobal, t downloader.
 		return nil
 	}
 	return hit
+}
+
+// idleAtLeast 报告种子至少 d 这么久没有上传或下载数据了：按下载器给的最后活动时间（qB 的 last_activity、
+// Transmission 的 activityDate）；没给时按下完的时间，再没有按加进下载器的时间。这一刻正在传的不算（最后活动时间可能还没跟上），
+// 时间都不知道时也不算。
+func idleAtLeast(t downloader.Torrent, now time.Time, d time.Duration) bool {
+	if t.UploadSpeed > 0 || t.DownloadSpeed > 0 {
+		return false
+	}
+	last := t.LastActivity
+	if last <= 0 {
+		last = t.CompletionOn
+	}
+	if last <= 0 {
+		last = t.DateAdded
+	}
+	return last > 0 && now.Sub(time.Unix(last, 0)) >= d
 }
 
 func (c *CleanupMonitor) isPausedForPeerRatio(infoHash string) bool {

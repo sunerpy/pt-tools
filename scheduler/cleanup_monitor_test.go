@@ -402,6 +402,48 @@ func TestShouldDelete_OR_Inactive(t *testing.T) {
 	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
+// 「不活跃」按下载器给的最后一次上传或下载的时间判，不看检查那一刻的速度：平时有上传、这一刻恰好是 0 的不删；
+// 没给最后活动时间时依次按下完的时间、加进下载器的时间算；正在传的、暂停的、排队的不算不活跃。
+func TestShouldDelete_InactiveByLastActivity(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMaxInactiveH = 12
+	now := time.Now()
+	ago := func(h float64) int64 { return now.Add(-time.Duration(h * float64(time.Hour))).Unix() }
+
+	recent := seedingTorrent("1", "h1", "Recent", 100, 0.5)
+	recent.LastActivity = ago(1)
+	assert.False(t, cm.shouldDelete(cfg, recent, cleanupTestDL), "一小时前还有上传，不算不活跃")
+
+	idle := seedingTorrent("2", "h2", "Idle", 100, 0.5)
+	idle.LastActivity = ago(13)
+	assert.Equal(t, []string{"做种中，最近 12 小时没有上传或下载"}, cm.deleteReasons(cfg, idle, cleanupTestDL))
+
+	busy := seedingTorrent("3", "h3", "Busy", 100, 0.5)
+	busy.LastActivity, busy.UploadSpeed = ago(13), 512
+	assert.False(t, cm.shouldDelete(cfg, busy, cleanupTestDL), "这一刻正在上传：最后活动时间还没跟上也算活跃")
+
+	byDone := seedingTorrent("4", "h4", "ByDone", 100, 0.5)
+	byDone.CompletionOn = ago(13)
+	assert.True(t, cm.shouldDelete(cfg, byDone, cleanupTestDL), "没给最后活动时间时按下完的时间")
+	byDone.CompletionOn = ago(2)
+	assert.False(t, cm.shouldDelete(cfg, byDone, cleanupTestDL), "两小时前才下完")
+
+	byAdded := seedingTorrent("5", "h5", "ByAdded", 100, 0.5)
+	byAdded.DateAdded = ago(13)
+	assert.True(t, cm.shouldDelete(cfg, byAdded, cleanupTestDL), "也没有下完的时间时按加进下载器的时间")
+
+	unknown := seedingTorrent("6", "h6", "Unknown", 100, 0.5)
+	unknown.DateAdded = 0
+	assert.False(t, cm.shouldDelete(cfg, unknown, cleanupTestDL), "时间都不知道时不算不活跃")
+
+	for _, st := range []downloader.TorrentState{downloader.TorrentPaused, downloader.TorrentStopped, downloader.TorrentQueued, downloader.TorrentDownloading} {
+		other := seedingTorrent("7", "h7", "Other", 100, 0.5)
+		other.State, other.LastActivity = st, ago(100)
+		assert.False(t, cm.shouldDelete(cfg, other, cleanupTestDL), "只算正在做种的：%s 不算", st)
+	}
+}
+
 func TestShouldDelete_OR_AnyConditionSufficient(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
 	cfg := baseCfg()
