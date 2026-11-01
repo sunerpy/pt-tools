@@ -74,6 +74,12 @@ func NewTempDBDir(dir string) (*models.TorrentDB, error) {
 		&models.AssistantAttachment{},
 		&models.NotificationTemplate{},
 		&models.SiteProxySetting{},
+		// 自动删种、做种竞争度、免费结束监控与下载器页的「保留」按刷流记录认刷流任务的种子
+		&models.BrushTask{},
+		&models.BrushTorrent{},
+		&models.BrushTorrentSample{},
+		&models.BrushDailyStat{},
+		&models.BrushRun{},
 	); err != nil {
 		return nil, err
 	}

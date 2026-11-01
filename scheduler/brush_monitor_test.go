@@ -199,7 +199,7 @@ func TestBrushMonitor_AdmitsWithinLimits(t *testing.T) {
 	p := r.pushes[0]
 	assert.Equal(t, "brush", p.Source)
 	assert.Equal(t, fmt.Sprintf("hdsky,pt-tools-brush,pt-brush-%d,我的刷流", task.ID), p.Tags,
-		"站点名让站点容量闸门计入，pt-tools-brush 让全局自动清理避开，任务标签限定删种范围")
+		"站点名让站点容量闸门计入，pt-tools-brush 方便在下载器里认出刷流种子，任务标签限定删种范围")
 	require.NotNil(t, p.Meta)
 	assert.EqualValues(t, 4*gib, p.Meta.SizeBytes)
 	assert.True(t, p.Meta.IsFree)

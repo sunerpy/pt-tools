@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  type BatchTorrentActionResult,
   type DownloaderCapability,
   type DownloaderFailure,
   downloaderTorrentsApi,
@@ -27,6 +28,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { hasKeepTag, KEEP_TIP } from "@/utils/keepTag";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
@@ -1350,8 +1352,21 @@ function capabilityByDownloader(downloaderId: number): DownloaderCapability | un
   return capabilities.value.find((item) => item.downloader_id === downloaderId);
 }
 
+/** 选中的种子都带保留标签：批量条那枚按钮是「取消保留」 */
+const selectedAllKept = computed(
+  () => selectedRows.value.length > 0 && selectedRows.value.every((row) => hasKeepTag(row.tags)),
+);
+
 function selectedCanUse(
-  action: "pause" | "resume" | "delete" | "delete_with_files" | "set_location" | "recheck",
+  action:
+    | "pause"
+    | "resume"
+    | "delete"
+    | "delete_with_files"
+    | "set_location"
+    | "recheck"
+    | "keep"
+    | "unkeep",
 ): boolean {
   if (selectedRows.value.length === 0) return false;
   return selectedRows.value.every((row) => {
@@ -1370,6 +1385,9 @@ function selectedCanUse(
         return cap.can_set_location;
       case "recheck":
         return cap.can_recheck;
+      case "keep":
+      case "unkeep":
+        return Boolean(cap.can_keep);
       default:
         return false;
     }
@@ -1407,8 +1425,26 @@ async function confirmDelete(
   }
 }
 
+/**
+ * 保留、取消保留的结果提示：失败的写出原因（种子已经不在了、刷流记录没改等），不只报个数 ——
+ * 「已加保留标签，刷流记录没改」这类部分失败要让人看见。
+ */
+function reportKeepResult(
+  action: "keep" | "unkeep",
+  resp: { success_count: number; failed_count: number; results?: BatchTorrentActionResult[] },
+) {
+  const label = action === "keep" ? "保留" : "取消保留";
+  if (resp.failed_count === 0) {
+    ElMessage.success(`${label}：成功 ${resp.success_count} 个`);
+    return;
+  }
+  const failed = (resp.results ?? []).find((r) => !r.success);
+  const why = failed?.message ? `（${failed.message}）` : "";
+  ElMessage.warning(`${label}：成功 ${resp.success_count}，失败 ${resp.failed_count}${why}`);
+}
+
 async function batchAction(
-  action: "pause" | "resume" | "delete" | "delete_with_files" | "recheck",
+  action: "pause" | "resume" | "delete" | "delete_with_files" | "recheck" | "keep" | "unkeep",
 ) {
   if (selectedCount.value === 0) {
     ElMessage.warning("请先选择任务");
@@ -1431,7 +1467,11 @@ async function batchAction(
       action,
       targets,
     });
-    ElMessage.success(`完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    if (action === "keep" || action === "unkeep") {
+      reportKeepResult(action, resp);
+    } else {
+      ElMessage.success(`完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    }
     await loadTorrents();
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "批量操作失败");
@@ -1582,7 +1622,9 @@ async function handleContextAction(payload: {
     | "detail"
     | "set_category"
     | "set_tags"
-    | "organize";
+    | "organize"
+    | "keep"
+    | "unkeep";
   row: DownloaderTorrentItem;
 }) {
   if (payload.action === "organize") {
@@ -1613,7 +1655,11 @@ async function handleContextAction(payload: {
       action: payload.action,
       targets: [{ downloader_id: payload.row.downloader_id, task_id: payload.row.task_id }],
     });
-    ElMessage.success(`右键操作完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    if (payload.action === "keep" || payload.action === "unkeep") {
+      reportKeepResult(payload.action, resp);
+    } else {
+      ElMessage.success(`右键操作完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    }
     await loadTorrents();
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "右键操作失败");
@@ -2048,7 +2094,7 @@ function toggleSidebar() {
 
             <div v-show="selectedCount > 0" class="pt-strip hub__bulk">
               <PtIcon name="check-check" :size="14" />
-              <span>已选 {{ selectedCount }} 项</span>
+              <span class="hub__bulk-n">已选 {{ selectedCount }} 项</span>
               <span class="pt-strip__end hub__bulk-acts">
                 <el-button
                   size="small"
@@ -2096,6 +2142,20 @@ function toggleSidebar() {
                       data-testid="hub-organize"
                       @click="openOrganize(organizeRow)">
                       <PtIcon name="folder-open" :size="13" /><span>整理入库</span>
+                    </el-button>
+                  </span>
+                </el-tooltip>
+                <!-- 选中的都保留着时是「取消保留」，否则是「保留」：一枚按钮，批量条已经很挤 -->
+                <el-tooltip :content="KEEP_TIP" placement="top" :show-after="400">
+                  <span>
+                    <el-button
+                      size="small"
+                      :loading="actionLoading"
+                      :disabled="!selectedCanUse(selectedAllKept ? 'unkeep' : 'keep')"
+                      data-testid="hub-keep"
+                      @click="batchAction(selectedAllKept ? 'unkeep' : 'keep')">
+                      <PtIcon :name="selectedAllKept ? 'shield' : 'shield-check'" :size="13" />
+                      <span>{{ selectedAllKept ? "取消保留" : "保留" }}</span>
                     </el-button>
                   </span>
                 </el-tooltip>
@@ -2222,6 +2282,13 @@ function toggleSidebar() {
                   <template #title>{{ row.title || "-" }}</template>
 
                   <template #meta>
+                    <PtTag
+                      v-if="hasKeepTag(row.tags)"
+                      :title="KEEP_TIP"
+                      data-testid="hub-keep-mark">
+                      <template #icon><PtIcon name="shield-check" :size="11" /></template>
+                      保留
+                    </PtTag>
                     <PtTag>{{ row.downloader_name }}</PtTag>
                     <span>{{ formatSize(row.size) }}</span>
                     <span v-if="row.category">
@@ -2870,15 +2937,28 @@ function toggleSidebar() {
 
 /* ---------- 批量操作条 ---------- */
 /* 紧贴工具条下方，所以去掉 .pt-strip 自带的上沿，改在下沿分隔表头 */
+/* 按钮放不下一行时折到下一行（靠右），不把「已选 N 项」挤成一竖条、也不把删除按钮挤出面板 */
 .hub__bulk {
+  height: auto;
+  min-height: var(--pt-row-head-h);
+  padding-block: var(--pt-space-1);
   border-top: 0;
   border-bottom: 1px solid var(--pt-border);
 }
 
+.hub__bulk-n {
+  flex: none;
+  white-space: nowrap;
+}
+
 .hub__bulk-acts {
-  display: inline-flex;
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   gap: var(--pt-space-1);
   align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 /* ---------- 部分失败提示条 ---------- */

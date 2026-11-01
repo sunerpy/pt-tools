@@ -35,6 +35,9 @@ type schedFakeDownloader struct {
 
 	// per-torrent GetTorrent override keyed by id
 	torrentByID map[string]downloader.Torrent
+	// beforeSecondList 在第二次读种子列表前调用一次（自动删种判断以后、删除锁里复查以前），模拟这期间种子变了
+	beforeSecondList func()
+	listCalls        int
 
 	// recorded side effects
 	removedBatch    [][]string
@@ -74,6 +77,10 @@ func (f *schedFakeDownloader) GetIncompletePendingBytes(_ context.Context) (int6
 }
 
 func (f *schedFakeDownloader) GetAllTorrents() ([]downloader.Torrent, error) {
+	f.listCalls++
+	if f.listCalls == 2 && f.beforeSecondList != nil {
+		f.beforeSecondList()
+	}
 	return f.torrents, f.getAllErr
 }
 

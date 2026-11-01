@@ -1560,8 +1560,19 @@ export interface DownloaderCapability {
   can_add_torrent: boolean;
   can_export_torrent: boolean;
   can_edit_trackers: boolean;
+  /** 能一键加、去「保留」标签（pt-tools-keep）；老后端不返回这个字段，当作不能 */
+  can_keep?: boolean;
   categories: string[];
   tags: string[];
+}
+
+/** 批量操作里一个种子的结果（对应后端 BatchTorrentActionResult）。 */
+export interface BatchTorrentActionResult {
+  downloader_id: number;
+  downloader_name: string;
+  task_id: string;
+  success: boolean;
+  message?: string;
 }
 
 export interface DownloaderMeta {
@@ -1615,10 +1626,11 @@ export const downloaderTorrentsApi = {
     save_path?: string;
     delete_files?: boolean;
   }) =>
-    api.post<{ success_count: number; failed_count: number }>(
-      "/api/downloader-torrents/batch-action",
-      payload,
-    ),
+    api.post<{
+      success_count: number;
+      failed_count: number;
+      results?: BatchTorrentActionResult[];
+    }>("/api/downloader-torrents/batch-action", payload),
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   add: (payload: Record<string, any>) =>

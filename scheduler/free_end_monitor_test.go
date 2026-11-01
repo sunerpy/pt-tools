@@ -307,7 +307,7 @@ func TestMarkFuncs_DBErrorNoPanic(t *testing.T) {
 	tor.ID = 1
 	require.NotPanics(t, func() {
 		m.markCompleted(tor, 100)
-		m.markPaused(tor, 50, 100, false)
+		m.markPaused(tor, 50, 100, false, "")
 		m.markAutoDeleted(tor, 50, 100, true)
 		m.markRemovedFromDownloader(tor)
 	})
@@ -1408,7 +1408,7 @@ func TestFreeEndMonitor_MarkPaused(t *testing.T) {
 	err := db.DB.Create(&torrent).Error
 	require.NoError(t, err)
 
-	monitor.markPaused(torrent, 50.0, 1073741824, false)
+	monitor.markPaused(torrent, 50.0, 1073741824, false, "")
 
 	var updated models.TorrentInfo
 	err = db.DB.First(&updated, torrent.ID).Error
@@ -2230,7 +2230,7 @@ func TestMarkPaused_AdvancedReason(t *testing.T) {
 	tor := models.TorrentInfo{SiteName: "s", TorrentID: "mp-adv", Title: "T"}
 	require.NoError(t, db.DB.Create(&tor).Error)
 
-	m.markPaused(tor, 40.0, 100, true)
+	m.markPaused(tor, 40.0, 100, true, "")
 	var got models.TorrentInfo
 	require.NoError(t, db.DB.First(&got, tor.ID).Error)
 	assert.Equal(t, "免费期临近结束，已暂停（未完成）", got.PauseReason)

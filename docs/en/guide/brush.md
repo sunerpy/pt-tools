@@ -59,7 +59,7 @@ H&R torrents are never removed before they reach the site's required seeding tim
 
 A download counts as complete when it is at 100% and not in a checking or error state; torrents being checked or with missing files are not complete.
 
-Brushing only touches torrents that carry the task's tag and were added by the task. If you remove the task tag from a torrent, it is handed back to you and brushing stops removing it; torrents removed by hand or by other means are marked "no longer in the downloader". After you switch a task to another downloader, the torrents it already added are still sampled and removed in their original downloader; if that downloader is temporarily unreachable, those torrents are left alone for the round.
+Brushing only touches torrents that carry the task's tag and were added by the task. If you remove the task tag from a torrent, or give it the keep tag (click Keep (保留) in the torrent list on the Downloader page; see [Keeping torrents](./auto-cleanup.md#keeping-torrents)) or one of the auto cleanup protected tags, it is handed back to you: brushing stops removing it and never adds the same torrent again, and auto-delete handles it by its rules from then on (it is not deleted while it has the keep tag or a protected tag). Torrents removed by hand or by other means are marked "no longer in the downloader". After you switch a task to another downloader, the torrents it already added are still sampled and removed in their original downloader; if that downloader is temporarily unreachable, those torrents are left alone for the round.
 
 ## Run history
 
@@ -73,12 +73,12 @@ Each task keeps its latest 500 entries from the last 14 days, and they are delet
 
 ## Relation to auto cleanup
 
-All brush torrents carry the `pt-tools-brush` tag. The regular **Auto cleanup** rules (seeding time, ratio, and so on) skip them and leave them to the task's own removal rules, so the two sets of rules never compete. The emergency cleanup that runs when free disk space drops below the minimum still covers every torrent, brush torrents included.
+The torrents a brush task is managing are handled by the task's own removal rules; the regular **Auto cleanup** rules (seeding time, ratio, and so on) and the seeding competition monitor skip them, so the two sets of rules never compete. Ownership is recognised by the brush task's records, not by the `pt-tools-brush` tag: once the task is deleted or a torrent is handed back to you (task tag removed, or kept), auto-delete handles it by its rules even if it still carries `pt-tools-brush`. The emergency cleanup that runs when free disk space drops below the minimum still covers every torrent, brush torrents included, except those with the keep tag or a protected tag.
 
 ## Turning off and deleting a task
 
 - **Turn off**: no new torrents are added. Torrents already added keep being handled by the removal rules until they are all gone.
-- **Delete**: the task, its statistics, its torrent records, and its run history are deleted. The torrents stay in the downloader and are no longer managed by brushing (the regular auto cleanup rules still skip them; handle them by hand if needed).
+- **Delete**: the task, its statistics, its torrent records, and its run history are deleted. The torrents stay in the downloader and are no longer managed by brushing; auto-delete handles them by its rules. To keep some of them, click Keep (保留) on them in the torrent list on the Downloader page first.
 - A task cannot be deleted or edited while a round is running; try again shortly (a round uses the settings read when it started).
 
 ## Earnings and the daily report

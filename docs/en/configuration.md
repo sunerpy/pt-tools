@@ -165,10 +165,10 @@ Set it to 0 to turn the check off.
 
 ### When freeleech ends
 
-| Setting                                                                     | Meaning                                                                                                    | Default          | Suggested         |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
-| **Delete when freeleech ends (免费结束自动删除)**                           | When the free period ends, unfinished torrents are deleted with their data; when off, they are only paused | Off              | On if you need it |
-| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag          | 5 (new installs) | 5 minutes or more |
+| Setting                                                                     | Meaning                                                                                                                                                                                                                                      | Default          | Suggested         |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| **Delete when freeleech ends (免费结束自动删除)**                           | When the free period ends, unfinished torrents are deleted with their data; when off, they are only paused. Torrents with the [keep tag](guide/auto-cleanup.md#keeping-torrents), a protected tag or unmet H&R are paused instead of deleted | Off              | On if you need it |
+| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag                                                                                                                                            | 5 (new installs) | 5 minutes or more |
 
 Acting early adds a safety margin: the pause or deletion runs at `freeleech end time - N minutes`. That absorbs the delay of the deletion itself and the lag before the downloader reports to the tracker, so that no non-free download is counted after the free period has ended.
 

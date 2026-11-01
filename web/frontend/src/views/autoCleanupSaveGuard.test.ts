@@ -99,3 +99,25 @@ describe("自动清理：配置没读回来时不许保存", () => {
     expect(payload.cleanup_protect_tags).toBe("keep");
   });
 });
+
+describe("自动清理：内置的保留标签", () => {
+  it("保护标签前面固定显示 pt-tools-keep，保存时不记进保护标签", async () => {
+    api.getGlobal.mockResolvedValue(structuredClone(SETTINGS));
+    api.saveGlobal.mockResolvedValue(undefined);
+    await mountPage();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="ac-keep-tag"]')).not.toBeNull(),
+    );
+    const keep = document.querySelector('[data-testid="ac-keep-tag"]')!;
+    expect(keep.textContent).toContain("pt-tools-keep");
+    expect(keep.querySelector(".el-tag__close")).toBeNull();
+
+    await vi.waitFor(() => {
+      for (const b of saveButtons()) expect(b.disabled).toBe(false);
+    });
+    saveButtons()[0]!.click();
+    await vi.waitFor(() => expect(api.saveGlobal).toHaveBeenCalledTimes(1));
+    expect(api.saveGlobal.mock.calls[0]![0].cleanup_protect_tags).toBe("keep");
+  });
+});

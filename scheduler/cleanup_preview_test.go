@@ -112,19 +112,21 @@ func TestCleanupPreviewProtectedReasons(t *testing.T) {
 	record("hunk", models.TorrentInfo{HasHR: true})
 	unknown := tagged("unk", "Unknown", "pt")
 	kept := tagged("kept", "Kept", "pt,keep")
+	keep := tagged("pin", "Pinned", "pt,"+models.KeepTag)
 	downloading := tagged("dl", "Downloading", "pt")
 	downloading.State = downloader.TorrentDownloading
 	brush := tagged("brush", "Brush", "pt,"+models.BrushTagAll)
+	addActiveBrush(t, cm.db, "qb1", "hbrush")
 	record("hpeer", models.TorrentInfo{IsPausedBySystem: true, PauseReason: PauseReasonPeerRatio})
 	peer := tagged("peer", "Peer", "pt")
 	del := tagged("del", "Delete", "pt")
 	outside := seedingTorrent("out", "hout", "Outside", 30, 0.1)
-	fake.torrents = []downloader.Torrent{young, hr, unknown, kept, downloading, brush, peer, del, outside}
+	fake.torrents = []downloader.Torrent{young, hr, unknown, kept, keep, downloading, brush, peer, del, outside}
 
 	r := cm.Preview(t.Context(), cfg)[0]
-	assert.Equal(t, 9, r.Total, "下载器里一共几个（管理范围外的也算）")
-	assert.Equal(t, 8, r.Managed)
-	assert.Equal(t, 5, r.Protected)
+	assert.Equal(t, 10, r.Total, "下载器里一共几个（管理范围外的也算）")
+	assert.Equal(t, 9, r.Managed)
+	assert.Equal(t, 6, r.Protected)
 	assert.Equal(t, 1, r.Brush, "刷流任务的种子由刷流规则管")
 	assert.Equal(t, 1, r.PeerPaused, "竞争度监控暂停着的不删")
 	why := map[string]string{}
@@ -135,6 +137,7 @@ func TestCleanupPreviewProtectedReasons(t *testing.T) {
 	assert.Equal(t, "H&R：要求做种 72 小时，已做 10.0 小时", why["HR"])
 	assert.Equal(t, "H&R：站点没有给出做种要求，一直保护（可以在站点设置里填「H&R 做种要求」）", why["Unknown"])
 	assert.Equal(t, "带保护标签「keep」", why["Kept"])
+	assert.Equal(t, "带保留标签（pt-tools-keep）", why["Pinned"])
 	assert.Equal(t, "正在下载或校验（打开了「保护下载中的种子」）", why["Downloading"])
 	require.Len(t, r.Items, 1)
 	assert.Equal(t, "Delete", r.Items[0].Name)

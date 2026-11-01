@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { DownloaderTorrentItem } from "@/api";
+import PtIcon from "@/components/PtIcon";
 import { formatShortDateTime } from "@/utils/format";
+import { hasKeepTag, KEEP_TIP } from "@/utils/keepTag";
 import { computed, ref, watch } from "vue";
 
 type RowAction =
@@ -12,7 +14,9 @@ type RowAction =
   | "detail"
   | "set_category"
   | "set_tags"
-  | "organize";
+  | "organize"
+  | "keep"
+  | "unkeep";
 
 const props = defineProps<{
   data: DownloaderTorrentItem[];
@@ -307,6 +311,16 @@ watch(
         <template v-if="column.key === 'status_bar'">
           <div class="status-bar" :class="rowStateClass(row)" />
         </template>
+        <template v-else-if="column.key === 'title'">
+          <span
+            v-if="hasKeepTag(row.tags)"
+            class="keep-mark"
+            :title="KEEP_TIP"
+            data-testid="row-keep-mark">
+            <PtIcon name="shield-check" :size="11" />保留
+          </span>
+          {{ cellValue(row, column.key) }}
+        </template>
         <template v-else-if="column.key === 'progress'">
           <div class="progress-cell">
             <div class="progress-track">
@@ -345,6 +359,15 @@ watch(
       <div class="menu-group-title">分类/标签</div>
       <button type="button" @click="emitContextAction('set_category')">设置分类</button>
       <button type="button" @click="emitContextAction('set_tags')">设置标签</button>
+      <button
+        v-if="contextRow && hasKeepTag(contextRow.tags)"
+        type="button"
+        @click="emitContextAction('unkeep')">
+        取消保留
+      </button>
+      <button v-else type="button" :title="KEEP_TIP" @click="emitContextAction('keep')">
+        保留
+      </button>
       <div class="menu-group-title">危险操作</div>
       <button type="button" class="danger" @click="emitContextAction('delete')">删除任务</button>
       <button type="button" class="danger" @click="emitContextAction('delete_with_files')">
@@ -528,6 +551,22 @@ html.dark .progress-track {
   border: 1px solid var(--pt-border);
   border-radius: var(--pt-r-lg);
   box-shadow: var(--pt-shadow-lg);
+}
+
+.keep-mark {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  margin-right: 6px;
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t2);
+  white-space: nowrap;
+  vertical-align: 1px;
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
 }
 
 .menu-group-title {

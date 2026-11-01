@@ -183,6 +183,27 @@ func TestTrSetters(t *testing.T) {
 	assert.Contains(t, methods, "torrent-verify")
 }
 
+// 去掉全部标签时发空数组，不发 null。
+func TestTrSetTorrentTagsClearsWithEmptyArray(t *testing.T) {
+	var labels []json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Arguments map[string]json.RawMessage `json:"arguments"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		labels = append(labels, req.Arguments["labels"])
+		_ = json.NewEncoder(w).Encode(rpcResponse{Result: "success"})
+	}))
+	defer srv.Close()
+	c := covClient(srv.URL)
+
+	require.NoError(t, c.SetTorrentTags("1", ""))
+	require.NoError(t, c.SetTorrentTags("1", "a, b"))
+	require.Len(t, labels, 2)
+	assert.JSONEq(t, `[]`, string(labels[0]))
+	assert.JSONEq(t, `["a","b"]`, string(labels[1]))
+}
+
 func TestTrEnsureTorrentStarted(t *testing.T) {
 	t.Run("no autostart", func(t *testing.T) {
 		c := covClient("http://unused")

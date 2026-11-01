@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
+	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/redact"
@@ -678,30 +679,15 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(scheduled models.TorrentInfo) {
 		return
 	}
 
+	protectedWhy := ""
 	if m.isAutoDeleteEnabled() {
-		global.GetSlogger().Infof("[FreeEndMonitor] 准备自动删除种子: %s (进度:%.1f%%, TaskID:%s)", torrent.Title, progress, torrent.DownloaderTaskID)
-
-		// 数据还被别的种子用着（如辅种）时只删种子、保留数据；读不到种子列表就下次再试
-		withData, err := dataNotShared(dl, torrent.DownloaderTaskID)
-		if err != nil {
-			global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除前读取种子列表失败 (种子:%s): %v", torrent.Title, err)
-			m.markRetry(torrent, fmt.Sprintf("自动删除失败: %v", err))
+		why, handled := m.autoDeleteFreeEnded(dl, torrent, progress, totalSize, advanced)
+		if handled {
 			return
 		}
-		if !withData {
-			global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 的数据还被别的种子用着，只删种子、保留数据", torrent.Title)
-		}
-		if err := dl.RemoveTorrent(torrent.DownloaderTaskID, withData); err != nil {
-			if !errors.Is(err, downloader.ErrTorrentNotFound) {
-				global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除种子失败 (种子:%s): %v", torrent.Title, err)
-				m.markRetry(torrent, fmt.Sprintf("自动删除失败: %v", err))
-				return
-			}
-		}
-
-		m.markAutoDeleted(torrent, progress, totalSize, advanced)
-		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已自动删除 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
-		return
+		// 受保护（保留、保护标签或 H&R 没做满），或者读不出保护信息：不删，改成暂停
+		protectedWhy = why
+		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 受保护，不删除、改成暂停：%s", torrent.Title, why)
 	}
 
 	global.GetSlogger().Infof("[FreeEndMonitor] 准备暂停种子: %s (进度:%.1f%%, TaskID:%s)", torrent.Title, progress, torrent.DownloaderTaskID)
@@ -712,8 +698,68 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(scheduled models.TorrentInfo) {
 		return
 	}
 
-	m.markPaused(torrent, progress, totalSize, advanced)
+	m.markPaused(torrent, progress, totalSize, advanced, protectedWhy)
 	global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已暂停 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
+}
+
+// autoDeleteFreeEnded 在删除锁里删免费期结束、还没下完的种子（打开了「免费结束自动删除」时，见 internal.RemovalMutex）：
+// 先重新读这个种子，带保留、保护标签或 H&R 没做满（打开了「保护 H&R 种子」时）的不删，返回原因由调用方改成暂停；
+// 读不出这些信息时同样不删。handled 为真时已经处理完：删掉了、种子已经不在了，或者失败了、已经安排重试。
+func (m *FreeEndMonitor) autoDeleteFreeEnded(dl downloader.Downloader, torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool) (protectedWhy string, handled bool) {
+	mu := ptinternal.RemovalMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	fresh, err := dl.GetTorrent(torrent.DownloaderTaskID)
+	if errors.Is(err, downloader.ErrTorrentNotFound) {
+		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已不在下载器里，不再监控", torrent.Title)
+		m.markRemovedFromDownloader(torrent)
+		return "", true
+	}
+	if err != nil {
+		global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除前读取种子失败 (种子:%s): %v", torrent.Title, err)
+		m.markRetry(torrent, fmt.Sprintf("自动删除前读取种子失败: %v", err))
+		return "", true
+	}
+	if why := m.freeEndProtection(fresh); why != "" {
+		return why, false
+	}
+
+	global.GetSlogger().Infof("[FreeEndMonitor] 准备自动删除种子: %s (进度:%.1f%%, TaskID:%s)", torrent.Title, progress, torrent.DownloaderTaskID)
+	// 数据还被别的种子用着（如辅种）时只删种子、保留数据；读不到种子列表就下次再试
+	withData, err := dataNotShared(dl, torrent.DownloaderTaskID)
+	if err != nil {
+		global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除前读取种子列表失败 (种子:%s): %v", torrent.Title, err)
+		m.markRetry(torrent, fmt.Sprintf("自动删除失败: %v", err))
+		return "", true
+	}
+	if !withData {
+		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 的数据还被别的种子用着，只删种子、保留数据", torrent.Title)
+	}
+	if err := dl.RemoveTorrent(torrent.DownloaderTaskID, withData); err != nil {
+		if !errors.Is(err, downloader.ErrTorrentNotFound) {
+			global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除种子失败 (种子:%s): %v", torrent.Title, err)
+			m.markRetry(torrent, fmt.Sprintf("自动删除失败: %v", err))
+			return "", true
+		}
+	}
+
+	m.markAutoDeleted(torrent, progress, totalSize, advanced)
+	global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已自动删除 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
+	return "", true
+}
+
+// freeEndProtection 是免费结束时不删这个种子的原因，空串表示可以删：保留标签、保护标签、H&R 没做满（打开了「保护 H&R 种子」时），
+// 与自动删种的 hard 保护相同（见 hardProtection）。读不出全局设置或 H&R 信息时也不删（宁可暂停也不删掉受保护的种子）。
+func (m *FreeEndMonitor) freeEndProtection(t downloader.Torrent) string {
+	var cfg models.SettingsGlobal
+	if err := m.db.First(&cfg).Error; err != nil {
+		return "读不到全局设置"
+	}
+	hr, err := loadHRInfo(m.db)
+	if err != nil {
+		return "读不到 H&R 信息"
+	}
+	return hardProtection(&cfg, t, hr, splitTags(cfg.CleanupProtectTags))
 }
 
 // dataNotShared 报告删除下载器里的这个种子时能不能连数据一起删：没有别的种子用着它的数据。
@@ -856,11 +902,17 @@ func publishCompleted(t models.TorrentInfo, hash string) {
 	}
 }
 
-func (m *FreeEndMonitor) markPaused(torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool) {
+// markPaused 记下免费结束暂停了这个种子。protectedWhy 不为空时是打开了「免费结束自动删除」、但种子受保护而改成暂停的原因。
+func (m *FreeEndMonitor) markPaused(torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool, protectedWhy string) {
 	now := time.Now()
 	reason := "免费期结束，下载未完成"
-	if advanced {
+	switch {
+	case advanced && protectedWhy != "":
+		reason = "免费期临近结束，已暂停（未完成；受保护，没有删除：" + protectedWhy + "）"
+	case advanced:
 		reason = "免费期临近结束，已暂停（未完成）"
+	case protectedWhy != "":
+		reason = "免费期结束，下载未完成（受保护，没有删除：" + protectedWhy + "）"
 	}
 	updates := map[string]any{
 		"is_paused_by_system": true,

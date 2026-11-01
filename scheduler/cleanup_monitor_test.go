@@ -306,7 +306,8 @@ func TestGetHRInfoMap_ReadsHRRows(t *testing.T) {
 		HRSeedTimeH: 120, Title: "HR",
 	}).Error)
 
-	m := cm.getHRInfoMap()
+	m, err := loadHRInfo(cm.db)
+	require.NoError(t, err)
 	info, ok := m["hrhashupper"]
 	require.True(t, ok, "hash should be lowercased in map")
 	assert.True(t, info.HasHR)
@@ -1274,7 +1275,8 @@ func TestGetHRInfoMap_FromDefinitionAndDB(t *testing.T) {
 		SiteName: "agsvpt", TorrentID: "t2", TorrentHash: &h2, HasHR: false, TorrentSize: 10 << 30,
 	}).Error)
 
-	m := cm.getHRInfoMap()
+	m, err := loadHRInfo(cm.db)
+	require.NoError(t, err)
 	require.Contains(t, m, "aaaa1111")
 	assert.Equal(t, 96, m["aaaa1111"].HRSeedTimeH)
 	if _, ok := m["bbbb2222"]; ok {
@@ -1282,7 +1284,7 @@ func TestGetHRInfoMap_FromDefinitionAndDB(t *testing.T) {
 	}
 }
 
-// 刷流种子（带 pt-tools-brush 标签）由刷流任务自己的规则删除，全局自动清理的常规规则不碰它们；
+// 刷流任务正在管的种子（有进行中的刷流记录）由刷流任务自己的规则删除，全局自动清理的常规规则不碰它们；
 // 低空间紧急清理仍然覆盖全部种子。
 func TestProcessDownloader_BrushTorrentsOnlyInEmergency(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
@@ -1296,12 +1298,19 @@ func TestProcessDownloader_BrushTorrentsOnlyInEmergency(t *testing.T) {
 
 	brush := seedingTorrent("b1", "hashbrush", "Brush", 100, 1.0)
 	brush.Tags = "hdsky,pt-tools-brush,pt-brush-1"
+	addActiveBrush(t, cm.db, "qb1", "hashbrush")
+	// 带刷流标签、但刷流任务已经不管了（记录结束了，或者是手动打的标签）：按常规规则删
+	ended := seedingTorrent("e1", "hashended", "Ended", 100, 1.0)
+	ended.Tags = "hdsky,pt-tools-brush,pt-brush-2"
+	bt := addActiveBrush(t, cm.db, "qb1", "hashended")
+	require.NoError(t, cm.db.Model(&models.BrushTorrent{}).Where("id = ?", bt.ID).Update("state", models.BrushTorrentGone).Error)
 	plain := seedingTorrent("p1", "hashplain", "Plain", 100, 1.0)
-	fake.torrents = []downloader.Torrent{brush, plain}
+	fake.torrents = []downloader.Torrent{brush, ended, plain}
 
-	cm.processDownloader(cfg, fake, "qb1")
+	res := cm.processDownloader(cfg, fake, "qb1")
+	assert.Equal(t, 1, res.Brush)
 	require.Len(t, fake.removedBatch, 1)
-	assert.Equal(t, []string{"p1"}, fake.removedBatch[0], "刷流种子不进常规规则")
+	assert.ElementsMatch(t, []string{"e1", "p1"}, fake.removedBatch[0], "刷流任务正在管的种子不进常规规则（按刷流记录认，不按标签）")
 
 	// 低空间紧急清理：刷流种子也在候选里
 	fake.removedBatch = nil
