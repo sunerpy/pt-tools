@@ -785,3 +785,172 @@ describe("刷流任务页", () => {
     expect(document.body.textContent).not.toContain("旧请求失败");
   });
 });
+
+/*
+ * 删除任务时选留下的种子怎么办（2026-11-01 用户决定）：交给自动删种（默认），或者保留（加 pt-tools-keep）。
+ * 保留时有种子保留失败，接口回 502 和保留失败的种子：对话框不关，列出是哪几个。
+ */
+describe("删除刷流任务", () => {
+  const dialog = () => document.querySelector<HTMLElement>("[data-testid=brush-delete-dialog]");
+  const choice = (value: string) =>
+    dialog()!.querySelector<HTMLInputElement>(`input[type=radio][value=${value}]`);
+  const confirmBtn = () =>
+    document.querySelector<HTMLButtonElement>("[data-testid=brush-delete-confirm]")!;
+  /** 对话框开着：它的遮罩没有被 v-show 藏起来 */
+  const dialogOpen = () => {
+    const overlay = dialog()?.closest<HTMLElement>(".el-overlay");
+    return Boolean(overlay) && overlay!.style.display !== "none";
+  };
+
+  async function openDelete(name = "HDSky 刷流") {
+    const sel = `[aria-label='删除 ${name}']`;
+    await vi.waitFor(() => expect(document.querySelector(sel)).not.toBeNull());
+    await flush();
+    document.querySelector<HTMLButtonElement>(sel)!.click();
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    await vi.waitFor(() => expect(dialogOpen()).toBe(true));
+  }
+
+  it("两个选项写明后果，默认交给自动删种：发出 torrents=handover", async () => {
+    await mountPage([task()]);
+    api.remove.mockResolvedValue({ success: true });
+    await openDelete();
+    const text = dialog()!.textContent ?? "";
+    expect(text).toContain("名下 3 个在做的种子");
+    expect(text).toContain("交给自动删种");
+    expect(text).toContain("按自动删种的规则处理");
+    expect(text).toContain("保留这些种子（加 pt-tools-keep，自动删除都跳过它们）");
+    expect(text).toContain("任务不删");
+    expect(choice("handover")!.checked).toBe(true);
+    expect(choice("keep")!.checked).toBe(false);
+
+    confirmBtn().click();
+    await vi.waitFor(() => expect(api.remove).toHaveBeenCalledWith(1, "handover"));
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith("已删除，留下的 3 个种子交给自动删种"),
+    );
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(dialogOpen()).toBe(false));
+  });
+
+  it("选保留：发出 torrents=keep，成功后写明保留了几个", async () => {
+    await mountPage([task()]);
+    api.remove.mockResolvedValue({ success: true, kept: 2, missing: 1 });
+    await openDelete();
+    choice("keep")!.click();
+    await vi.waitFor(() => expect(choice("keep")!.checked).toBe(true));
+    confirmBtn().click();
+    await vi.waitFor(() => expect(api.remove).toHaveBeenCalledWith(1, "keep"));
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith("已删除，2 个种子已保留，1 个已不在下载器里"),
+    );
+  });
+
+  it("保留时有种子保留失败：对话框不关，列出是哪几个，任务列表刷新", async () => {
+    const { ApiError } = await import("@/api");
+    await mountPage([task()]);
+    api.remove.mockRejectedValue(
+      new ApiError(
+        502,
+        JSON.stringify({
+          success: false,
+          error: "有 1 个种子保留失败，任务没有删除",
+          kept: 2,
+          failed: [
+            {
+              title: "Fake.Movie.2026",
+              info_hash: "abc",
+              downloader_id: 2,
+              downloader_name: "qb-main",
+              message: "加保留标签失败: boom",
+            },
+          ],
+        }),
+      ),
+    );
+    await openDelete();
+    choice("keep")!.click();
+    await vi.waitFor(() => expect(choice("keep")!.checked).toBe(true));
+    confirmBtn().click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=brush-delete-failed]")).not.toBeNull(),
+    );
+    const failed = document.querySelector("[data-testid=brush-delete-failed]")!.textContent ?? "";
+    expect(failed).toContain("有 1 个种子保留失败，任务没有删除");
+    expect(failed).toContain("已经加上保留标签的 2 个保持保留");
+    expect(failed).toContain("改选「交给自动删种」");
+    expect(failed).toContain("Fake.Movie.2026（qb-main）：加保留标签失败: boom");
+    expect(ui.error).not.toHaveBeenCalled();
+    expect(ui.success).not.toHaveBeenCalled();
+    expect(dialogOpen()).toBe(true);
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+
+    // 改选交给自动删种：删掉，失败列表不再留着
+    api.remove.mockResolvedValue({ success: true });
+    choice("handover")!.click();
+    await vi.waitFor(() => expect(choice("handover")!.checked).toBe(true));
+    confirmBtn().click();
+    await vi.waitFor(() => expect(api.remove).toHaveBeenLastCalledWith(1, "handover"));
+    await vi.waitFor(() => expect(dialogOpen()).toBe(false));
+  });
+
+  it("等回应时关掉对话框、打开了另一个任务的：晚到的保留失败不落到另一个任务的对话框里", async () => {
+    const { ApiError } = await import("@/api");
+    await mountPage([task(), task({ id: 2, name: "MT 刷流", site_name: "mteam" })]);
+    let reject!: (e: unknown) => void;
+    api.remove.mockImplementation(
+      () =>
+        new Promise((_resolve, rej) => {
+          reject = rej;
+        }),
+    );
+    await openDelete();
+    choice("keep")!.click();
+    await vi.waitFor(() => expect(choice("keep")!.checked).toBe(true));
+    confirmBtn().click();
+    await vi.waitFor(() => expect(api.remove).toHaveBeenCalledWith(1, "keep"));
+    [...dialog()!.querySelectorAll("button")]
+      .find((b) => b.textContent?.trim() === "取消")!
+      .click();
+    await vi.waitFor(() => expect(dialogOpen()).toBe(false));
+    await openDelete("MT 刷流");
+    expect(dialog()!.textContent).toContain("删除任务「MT 刷流」");
+
+    reject(
+      new ApiError(
+        502,
+        JSON.stringify({
+          success: false,
+          kept: 0,
+          failed: [{ title: "x", info_hash: "x", downloader_id: 2, message: "boom" }],
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(document.querySelector("[data-testid=brush-delete-failed]")).toBeNull();
+    expect(dialogOpen()).toBe(true);
+    expect(dialog()!.textContent).toContain("删除任务「MT 刷流」");
+  });
+
+  it("别的错误（例如任务正在运行一轮）：照接口的话提示", async () => {
+    const { ApiError } = await import("@/api");
+    await mountPage([task()]);
+    api.remove.mockRejectedValue(new ApiError(409, "刷流任务正在运行，请稍后再试"));
+    await openDelete();
+    confirmBtn().click();
+    await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("刷流任务正在运行，请稍后再试"));
+    expect(document.querySelector("[data-testid=brush-delete-failed]")).toBeNull();
+  });
+
+  it("名下没有在做的种子：不给选项，直接删", async () => {
+    await mountPage([task({ active_count: 0, downloading_count: 0, active_size_bytes: 0 })]);
+    api.remove.mockResolvedValue({ success: true });
+    await openDelete();
+    expect(dialog()!.querySelector("input[type=radio]")).toBeNull();
+    expect(dialog()!.textContent).toContain("名下现在没有在做的种子");
+    confirmBtn().click();
+    await vi.waitFor(() => expect(api.remove).toHaveBeenCalledWith(1, "handover"));
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("已删除"));
+  });
+});

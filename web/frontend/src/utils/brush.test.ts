@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { BrushTask } from "@/api";
+import { ApiError, type BrushTask } from "@/api";
 
 import {
+  brushDeletedText,
+  brushDeleteFailure,
   brushRunDuration,
   brushRunStatus,
   brushRunTrigger,
@@ -139,5 +141,34 @@ describe("运行记录", () => {
     expect(
       brushRunDuration({ started_at: at(0), finished_at: at(1251), status: "interrupted" }),
     ).toBe("");
+  });
+});
+
+describe("删除任务", () => {
+  it("选了保留、有种子保留失败：502 且正文带 failed 才算，别的错误不算", () => {
+    const body = {
+      success: false,
+      error: "有 1 个种子保留失败，任务没有删除",
+      kept: 1,
+      failed: [],
+    };
+    expect(brushDeleteFailure(new ApiError(502, JSON.stringify(body)))).toEqual(body);
+    expect(brushDeleteFailure(new ApiError(502, "Bad Gateway"))).toBeNull();
+    expect(brushDeleteFailure(new ApiError(502, "null"))).toBeNull();
+    expect(brushDeleteFailure(new ApiError(502, JSON.stringify({ success: false })))).toBeNull();
+    expect(brushDeleteFailure(new ApiError(409, JSON.stringify(body)))).toBeNull();
+    expect(brushDeleteFailure(new Error(JSON.stringify(body)))).toBeNull();
+  });
+
+  it("删掉以后的提示：交给自动删种写个数，保留写保留了几个、几个已不在下载器里", () => {
+    expect(brushDeletedText("handover", { success: true }, 3)).toBe(
+      "已删除，留下的 3 个种子交给自动删种",
+    );
+    expect(brushDeletedText("handover", { success: true }, 0)).toBe("已删除");
+    expect(brushDeletedText("keep", { success: true, kept: 2, missing: 1 }, 3)).toBe(
+      "已删除，2 个种子已保留，1 个已不在下载器里",
+    );
+    expect(brushDeletedText("keep", { success: true, kept: 3 }, 3)).toBe("已删除，3 个种子已保留");
+    expect(brushDeletedText("keep", undefined, 0)).toBe("已删除");
   });
 });
