@@ -129,7 +129,7 @@ client free space
   >= configured reserve threshold
 ```
 
-`internal.PushMutex()` serializes check + reserve + push. The site seeding-capacity gate runs before the downloader mutation. Disk-space reads fail closed when protection is enabled. Failed pushes release reservations; cleanup resets stale reservations under the same mutex.
+`internal.PushMutex()` serializes check + reserve + push. The site seeding-capacity gate runs before the downloader mutation. Disk-space reads fail closed when protection is enabled. Failed pushes release reservations; a reservation is dropped once its torrent shows up in that downloader's list (`internal.PendingForGate`, same snapshot as the pending bytes) or after 15 minutes; cleanup resets stale reservations under the same mutex.
 
 ### API tokens and the App API
 

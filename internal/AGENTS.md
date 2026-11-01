@@ -72,6 +72,7 @@ When disk protection is enabled:
 - Failure to read free space is a rejection, not permission to proceed.
 - A torrent that would cross the reserve threshold is skipped while later feed items may continue.
 - A failed add releases its reservation.
+- Read pending bytes through `PendingForGate`: it drops the reservations of torrents already listed in that downloader, from the same torrent list the pending bytes come from, so nothing is counted twice or missed. Reservations nobody sees expire after 15 minutes.
 - Site `SeedingCapacityGB` is another fail-closed mutation gate.
 
 Do not call a downloader add method from new RSS/Web paths merely because the interface permits it. Route mutations through the safe push service.
