@@ -1256,7 +1256,14 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).First(&rssToDelete).Error; err == nil {
 			global.GetSlogger().Infof("[RSS] 删除 RSS 详情: name=%s, url=%s", rssToDelete.Name, utils.SanitizeURL(rssToDelete.URL))
 		}
-		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{}).Error; err != nil {
+		// 和它与过滤规则的关联一起删；编号不是这个站点的 RSS 时什么都不删
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			res := tx.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{})
+			if res.Error != nil || res.RowsAffected == 0 {
+				return res.Error
+			}
+			return models.NewRSSFilterAssociationDB(tx).DeleteByRSSID(uint(rid))
+		}); err != nil {
 			global.GetSlogger().Errorf("[RSS] 删除 RSS 失败: site=%s, rss_id=%d, err=%v", name, rid, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
