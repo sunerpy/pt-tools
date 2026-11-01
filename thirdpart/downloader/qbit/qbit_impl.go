@@ -1019,7 +1019,8 @@ func (q *QbitClient) GetAllTorrents() ([]downloader.Torrent, error) {
 // mapQbitTorrent 将 qBittorrent 种子信息映射到通用 Torrent 结构
 func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 	t := downloader.Torrent{
-		ClientID: q.name,
+		ClientID:   q.name,
+		SwarmSeeds: -1, SwarmLeechers: -1,
 	}
 
 	if hash, ok := qt["hash"].(string); ok {
@@ -1091,6 +1092,13 @@ func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 	}
 	if numLeechs, ok := qt["num_leechs"].(float64); ok {
 		t.NumPeers = int(numLeechs)
+	}
+	// num_complete、num_incomplete 是 tracker 报的整个种子群的做种与下载人数；qB 不知道时给 -1
+	if v, ok := qt["num_complete"].(float64); ok {
+		t.SwarmSeeds = max(int(v), -1)
+	}
+	if v, ok := qt["num_incomplete"].(float64); ok {
+		t.SwarmLeechers = max(int(v), -1)
 	}
 	if availability, ok := qt["availability"].(float64); ok {
 		t.Availability = availability
