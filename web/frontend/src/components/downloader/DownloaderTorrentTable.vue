@@ -4,6 +4,7 @@ import PtIcon from "@/components/PtIcon";
 import PtProgress from "@/components/ui/PtProgress.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { formatShortDateTime } from "@/utils/format";
+import { hasKeepTag, KEEP_TIP } from "@/utils/keepTag";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 type SortChangePayload = {
@@ -38,7 +39,9 @@ const emit = defineEmits<{
         | "detail"
         | "set_category"
         | "set_tags"
-        | "organize";
+        | "organize"
+        | "keep"
+        | "unkeep";
       row: DownloaderTorrentItem;
     },
   ): void;
@@ -152,7 +155,9 @@ function emitContextAction(
     | "detail"
     | "set_category"
     | "set_tags"
-    | "organize",
+    | "organize"
+    | "keep"
+    | "unkeep",
 ) {
   if (!contextRow.value) return;
   emit("context-action", { action, row: contextRow.value });
@@ -297,7 +302,14 @@ watch(
           :show-overflow-tooltip="false"
           class-name="title-cell pt-cell-strong">
           <template #default="{ row }">
-            <span class="title-text">{{ row.title }}</span>
+            <span v-if="hasKeepTag(row.tags)" class="title-line">
+              <PtTag class="keep-mark" :title="KEEP_TIP" data-testid="row-keep-mark">
+                <template #icon><PtIcon name="shield-check" :size="11" /></template>
+                保留
+              </PtTag>
+              <span class="title-text">{{ row.title }}</span>
+            </span>
+            <span v-else class="title-text">{{ row.title }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -449,6 +461,15 @@ watch(
         <div class="menu-group-title">分类/标签</div>
         <button type="button" @click="emitContextAction('set_category')">设置分类</button>
         <button type="button" @click="emitContextAction('set_tags')">设置标签</button>
+        <button
+          v-if="contextRow && hasKeepTag(contextRow.tags)"
+          type="button"
+          @click="emitContextAction('unkeep')">
+          取消保留
+        </button>
+        <button v-else type="button" :title="KEEP_TIP" @click="emitContextAction('keep')">
+          保留
+        </button>
         <div class="menu-group-title">危险操作</div>
         <button type="button" class="danger" @click="emitContextAction('delete')">删除任务</button>
         <button type="button" class="danger" @click="emitContextAction('delete_with_files')">
@@ -566,6 +587,23 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 带保留标记的标题：标记在前、不压缩，标题照旧单行截断 */
+.pt-grid :deep(.title-line) {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.pt-grid :deep(.title-line .keep-mark) {
+  flex: none;
+}
+
+.pt-grid :deep(.title-line .title-text) {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 行左缘的状态渐变：让下载/做种/错误三种行在长列表里能被扫出来 */

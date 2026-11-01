@@ -17,6 +17,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
+import { hasKeepTag, KEEP_TAG } from "@/utils/keepTag";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 
@@ -159,7 +160,8 @@ function addScopeTag() {
 
 function addProtectTag() {
   const val = protectTagInput.value.trim();
-  if (val && !form.value.cleanup_protect_tags.includes(val)) {
+  // 保留标签是内置的，总是生效，不用再记进保护标签
+  if (val && !hasKeepTag(val) && !form.value.cleanup_protect_tags.includes(val)) {
     form.value.cleanup_protect_tags.push(val);
   }
   protectTagInput.value = "";
@@ -791,6 +793,9 @@ async function executeClean() {
                   </el-form-item>
                   <el-form-item label="保护标签">
                     <div class="tagbox">
+                      <el-tag size="small" type="info" data-testid="ac-keep-tag">
+                        {{ KEEP_TAG }}（内置）
+                      </el-tag>
                       <el-tag
                         v-for="(tag, i) in form.cleanup_protect_tags"
                         :key="tag"
@@ -806,7 +811,10 @@ async function executeClean() {
                         placeholder="输入标签后回车"
                         @keyup.enter="addProtectTag()" />
                     </div>
-                    <div class="field-tip">带这些标签的种子一律不删</div>
+                    <div class="field-tip">
+                      带这些标签的种子一律不删。{{ KEEP_TAG }}
+                      是内置的保留标签，去不掉：在「下载器」页的种子列表里点「保留」就会加上它，做种竞争度、免费结束时的删除和刷流删种也都跳过它
+                    </div>
                   </el-form-item>
                 </div>
               </div>
