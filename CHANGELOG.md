@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.50](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.49...v1.0.0-rc.50) (2026-11-01)
+
+
+### Features
+
+* **brush:** 删除刷流任务时可选保留种子，不活跃按下载器时间判断 ([#819](https://github.com/sunerpy/pt-tools/issues/819)) ([b78f637](https://github.com/sunerpy/pt-tools/commit/b78f63791d90b6b66a27b862d4e4682e8ac98269))
+* **cleanup:** 一键保留种子，自动删除统一遵守保留与保护规则 ([#818](https://github.com/sunerpy/pt-tools/issues/818)) ([6b6b974](https://github.com/sunerpy/pt-tools/commit/6b6b9746c80c043a10b960839544d7d1eafe3dc8))
+* **cleanup:** 做种竞争度并进自动删种，加「空间低于下限时紧急清理」 ([#820](https://github.com/sunerpy/pt-tools/issues/820)) ([2fc8dd7](https://github.com/sunerpy/pt-tools/commit/2fc8dd794f53d1c8003c8f4a3784088c45788cd6))
+* **rss:** 免费结束时没下完改成每条 RSS 选不处理、暂停或删除，去掉全局的免费结束自动删除 ([#821](https://github.com/sunerpy/pt-tools/issues/821)) ([6008945](https://github.com/sunerpy/pt-tools/commit/6008945a679f783e7f9fafed25e83b9ddd4d9916))
+
+
+### Bug Fixes
+
+* **core:** 保存站点时按编号原地更新 RSS，不再删掉重建 ([#816](https://github.com/sunerpy/pt-tools/issues/816)) ([8fe753c](https://github.com/sunerpy/pt-tools/commit/8fe753c9c8dadfbbe39fad9f855a4765a7ce5b2b))
+* **site:** 做种体积不再把标题读成几千 PB，M-Team 做种统计改从 myPeerStatus 与做种列表取，取到 0 的计数存成 0 ([#822](https://github.com/sunerpy/pt-tools/issues/822)) ([829ba55](https://github.com/sunerpy/pt-tools/commit/829ba552b191a207c7abc2588a0942a3e93983c7))
+* **subscribe:** 综艺副标题把集号写成期号时按标题的集号要，下载成功后自动记集号规则 ([#815](https://github.com/sunerpy/pt-tools/issues/815)) ([050f9e1](https://github.com/sunerpy/pt-tools/commit/050f9e1721e7aee4ceb6ed13c7bc5104a9eae56a))
+* **web:** 删除单条 RSS 时一起删过滤规则关联，全局设置不再返回新版不用的两个字段，迁移备份文件名带上真实版本 ([#823](https://github.com/sunerpy/pt-tools/issues/823)) ([24d6294](https://github.com/sunerpy/pt-tools/commit/24d6294fcf3adac010172c8fa66dcd1196d6930f))
+
 ## [1.0.0-rc.49](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.48...v1.0.0-rc.49) (2026-11-01)
 
 
