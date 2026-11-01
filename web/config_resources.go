@@ -88,10 +88,6 @@ func (s *Server) configResources() []*configResource {
 				"attendance_vision_model", "attendance_notify_enabled", "attendance_notify_channel_ids", "daily_report_enabled",
 				"daily_report_time", "daily_report_channel_ids", "daily_report_scope", "dead_torrent_scan_enabled", "dead_torrent_scan_interval_h",
 				"dead_torrent_scan_channel_ids",
-				// 原来竞争度监控的检查间隔：v16 起竞争度跟着自动删种的间隔，不再收这一项
-				"peer_ratio_interval_min",
-				// 原来全局的免费结束自动删除：v17 起每条 RSS 自己选（rss 的 free_end_delete），不再收这一项
-				"auto_delete_on_free_end",
 			},
 			Hints: map[string]string{
 				"default_filter_mode":      "auto_free（免费的自动下、命中规则的也下）、filter_only（只下命中规则的）、free_only（只下来得及下完的免费种子）",

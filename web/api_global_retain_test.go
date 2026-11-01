@@ -187,3 +187,28 @@ func TestAPIGlobal_IgnoresLegacyAutoDeleteOnFreeEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got.AutoDeleteOnFreeEnd)
 }
+
+// GET /api/global 不再给新版不读写的两项：竞争度原来的检查间隔（v16）与全局的免费结束自动删除（v17）。
+// 两列留在库里给回退到旧版用，读设置不改它们。
+func TestAPIGlobal_GetOmitsLegacyKeys(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, srv.store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir()}))
+	require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).Where("1 = 1").
+		Updates(map[string]any{"auto_delete_on_free_end": true, "peer_ratio_interval_min": 20}).Error)
+
+	w := httptest.NewRecorder()
+	srv.apiGlobal(w, httptest.NewRequest(http.MethodGet, "/api/global", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.NotContains(t, body, "auto_delete_on_free_end")
+	assert.NotContains(t, body, "peer_ratio_interval_min")
+	assert.Contains(t, body, "download_dir")
+	assert.Contains(t, body, "cleanup_interval_min")
+	assert.Contains(t, body, "peer_ratio_max_sl")
+
+	got, err := srv.store.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.True(t, got.AutoDeleteOnFreeEnd)
+	assert.Equal(t, 20, got.PeerRatioIntervalMin)
+}

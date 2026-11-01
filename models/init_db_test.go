@@ -42,7 +42,7 @@ func TestNewDBWithVersionAndHooks_PersistsTorrent(t *testing.T) {
 		t.Setenv("USERPROFILE", home)
 	}
 
-	backup := func(db *gorm.DB, table string) (string, error) { return "backup/" + table, nil }
+	backup := func(db *gorm.DB, table string, _, _ int) (string, error) { return "backup/" + table, nil }
 	enc := func(plain string) (string, error) { return "enc:" + plain, nil }
 	dec := func(cipher string) (string, error) { return cipher[4:], nil }
 

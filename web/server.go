@@ -817,6 +817,15 @@ const loginHTML = `{{define "login"}}
 </body>
 </html>{{end}}`
 
+// globalSettingsView 是 GET /api/global 的返回，去掉新版不再读写的两项：竞争度原来的检查间隔
+// （v16 起跟着自动删种的间隔）与全局的免费结束自动删除（v17 起每条 RSS 自己选）。两列留在库里给回退到旧版用。
+// 外层同名的 JSON 键盖过内嵌结构里的，nil 时 omitempty 不输出。
+type globalSettingsView struct {
+	models.SettingsGlobal
+	PeerRatioIntervalMin *struct{} `json:"peer_ratio_interval_min,omitempty"`
+	AutoDeleteOnFreeEnd  *struct{} `json:"auto_delete_on_free_end,omitempty"`
+}
+
 // JSON APIs
 func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -827,7 +836,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, gs)
+		writeJSON(w, globalSettingsView{SettingsGlobal: gs})
 	case http.MethodPost:
 		var req struct {
 			DefaultIntervalMinutes int32   `json:"default_interval_minutes"`
@@ -1256,7 +1265,14 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).First(&rssToDelete).Error; err == nil {
 			global.GetSlogger().Infof("[RSS] 删除 RSS 详情: name=%s, url=%s", rssToDelete.Name, utils.SanitizeURL(rssToDelete.URL))
 		}
-		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{}).Error; err != nil {
+		// 和它与过滤规则的关联一起删；编号不是这个站点的 RSS 时什么都不删
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			res := tx.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{})
+			if res.Error != nil || res.RowsAffected == 0 {
+				return res.Error
+			}
+			return models.NewRSSFilterAssociationDB(tx).DeleteByRSSID(uint(rid))
+		}); err != nil {
 			global.GetSlogger().Errorf("[RSS] 删除 RSS 失败: site=%s, rss_id=%d, err=%v", name, rid, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

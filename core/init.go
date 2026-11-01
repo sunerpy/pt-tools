@@ -21,6 +21,11 @@ import (
 
 var once sync.Once
 
+// backupMigrationTable 是迁移改表前的备份：整张表写到 ~/.pt-tools/backups，文件名带这一步迁移的版本。
+func backupMigrationTable(db *gorm.DB, table string, fromVer, toVer int) (string, error) {
+	return migration.DumpTableJSON(db, table, "", fromVer, toVer)
+}
+
 // 取消 viper 文件读取，统一改为 DB 初始化与迁移（保留 once 初始化）
 // InitViper 改造为：初始化日志、数据库，然后优先从 DB 加载全局配置；若 DB 为空且提供了文件，则允许后续迁移命令将文件写入 DB
 func InitRuntime() (*zap.Logger, error) {
@@ -51,13 +56,10 @@ func InitRuntime() (*zap.Logger, error) {
 			SlowThreshold: 0,
 		}
 		cookieStore := NewConfigStore(&models.TorrentDB{})
-		backupTable := func(db *gorm.DB, table string) (string, error) {
-			return migration.DumpTableJSON(db, table, "", 8, 9)
-		}
 		global.GlobalDB, err = models.NewDBWithVersionAndHooks(
 			gormLg,
 			version.Version,
-			backupTable,
+			backupMigrationTable,
 			cookieStore.EncryptCookie,
 			cookieStore.DecryptCookie,
 		)
