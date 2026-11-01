@@ -185,14 +185,15 @@ const form = ref({
   cleanup_slow_max_ratio: 0,
   cleanup_del_free_expired: true,
   cleanup_disk_protect: true,
+  cleanup_emergency: true,
   cleanup_min_disk_space_gb: 50,
   cleanup_protect_dl: false,
   cleanup_protect_hr: true,
   cleanup_min_retain_h: 24,
   cleanup_protect_tags: [] as string[],
+  // 做种竞争度：一条删除条件，超过上限时删除（peer_ratio_remove_data）或只暂停
   peer_ratio_enabled: false,
   peer_ratio_max_sl: 30,
-  peer_ratio_interval_min: 10,
   peer_ratio_remove_data: false,
 });
 
@@ -224,16 +225,21 @@ async function loadCleanupStatus() {
   }
 }
 
-/** 上次运行的一句话：每台下载器删了几个、出了什么错 */
+/** 上次运行的一句话：每台下载器删了几个、因做种竞争度暂停了几个、出了什么错 */
 const lastRunText = computed(() => {
   const run = cleanupStatus.value?.last_run;
   if (!run) return "";
   const parts = run.results.map((r) => {
-    // 两批删除（连数据、保留数据）可能一批成了、一批失败：删了的个数与失败的原因都要写
-    if (r.deleted > 0 && r.error)
-      return `${r.downloader} 删了 ${r.deleted} 个，另有删除失败：${r.error}`;
+    const done = [
+      r.deleted > 0 ? `删了 ${r.deleted} 个` : "",
+      (r.paused ?? 0) > 0 ? `暂停了 ${r.paused} 个` : "",
+    ]
+      .filter(Boolean)
+      .join("、");
+    // 几批（连数据删、保留数据删、暂停）可能有的成了、有的失败：做了的个数与失败的原因都要写
+    if (done && r.error) return `${r.downloader} ${done}，另有失败：${r.error}`;
     if (r.error) return `${r.downloader}：${r.error}`;
-    if (r.deleted > 0) return `${r.downloader} 删了 ${r.deleted} 个`;
+    if (done) return `${r.downloader} ${done}`;
     return `${r.downloader} 没有要删的`;
   });
   return `上次 ${formatShortDateTime(run.at)}：${parts.join("；") || "没有下载器"}`;
@@ -248,20 +254,30 @@ const cpDialog = ref(false);
 const cpLoading = ref(false);
 const cpResults = ref<CleanupResult[]>([]);
 
+/** 预览里要删的与要暂停的（做种竞争度过高、设置成只暂停） */
+function cpDeletes(r: CleanupResult) {
+  return (r.items ?? []).filter((i) => i.action !== "pause");
+}
+function cpPauses(r: CleanupResult) {
+  return (r.items ?? []).filter((i) => i.action === "pause");
+}
+
 const cpTotal = computed(() =>
   cpResults.value.reduce(
     (acc, r) => ({
-      n: acc.n + (r.items ?? []).length,
-      size: acc.size + (r.items ?? []).reduce((a, i) => a + i.size, 0),
+      n: acc.n + cpDeletes(r).length,
+      size: acc.size + cpDeletes(r).reduce((a, i) => a + i.size, 0),
+      paused: acc.paused + cpPauses(r).length,
     }),
-    { n: 0, size: 0 },
+    { n: 0, size: 0, paused: 0 },
   ),
 );
 
-/** 预览里一台下载器的个数一句：有总数时写下载器里共几个（管理范围以外的也算） */
+/** 预览里一台下载器的个数一句：有总数时写下载器里共几个（管理范围以外的也算），有要暂停的写几个 */
 function cpCounts(r: CleanupResult): string {
   const head = r.total != null ? `下载器里共 ${r.total} 个，` : "";
-  return `${head}管理范围里 ${r.managed} 个，受保护 ${r.protected} 个，会删 ${(r.items ?? []).length} 个`;
+  const paused = cpPauses(r).length;
+  return `${head}管理范围里 ${r.managed} 个，受保护 ${r.protected} 个，会删 ${cpDeletes(r).length} 个${paused ? `，会暂停 ${paused} 个` : ""}`;
 }
 
 function cpSize(bytes: number): string {
@@ -286,11 +302,15 @@ async function runCleanupPreview() {
       cleanup_slow_max_ratio: f.cleanup_slow_max_ratio,
       cleanup_del_free_expired: f.cleanup_del_free_expired,
       cleanup_disk_protect: f.cleanup_disk_protect,
+      cleanup_emergency: f.cleanup_emergency,
       cleanup_min_disk_space_gb: f.cleanup_min_disk_space_gb,
       cleanup_protect_dl: f.cleanup_protect_dl,
       cleanup_protect_hr: f.cleanup_protect_hr,
       cleanup_min_retain_h: f.cleanup_min_retain_h,
       cleanup_protect_tags: f.cleanup_protect_tags.join(","),
+      peer_ratio_enabled: f.peer_ratio_enabled,
+      peer_ratio_max_sl: f.peer_ratio_max_sl,
+      peer_ratio_remove_data: f.peer_ratio_remove_data,
     });
     cpResults.value = res.results;
     cpDialog.value = true;
@@ -530,7 +550,7 @@ async function executeClean() {
   <!--
     画板 21（p-main 344,84 1080×882）与画板 36（p-workdir 1080×570）都是通栏卡：
     head 之后直接进卡片层，左右各内缩 16，卡片之间间隔 16。本页没有表格带。
-    宽屏（视口 ≥1600）分两栏：左边自动删种，右边竞争度监控与清理工作目录；以前卡宽停在 1080，
+    宽屏（视口 ≥1600）分两栏：左边自动删种（做种竞争度是它的一条删除条件），右边清理工作目录；以前卡宽停在 1080，
     2048 的屏上右边空出 680（用户反馈）。窄屏照旧一栏。
   -->
   <div class="cleanup-page pt-cards pt-cards--wide">
@@ -563,6 +583,18 @@ async function executeClean() {
               @click="loadSettings">
               <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
             </el-button>
+          </div>
+
+          <!-- 三种自动删除各管哪些种子：一处写清楚，免得以为几个功能会抢着删同一个种子 -->
+          <div class="pt-note ac-rules" data-testid="ac-rules">
+            <PtIcon name="info" :size="14" class="pt-note__icon" />
+            <ul class="ac-rules__list">
+              <li>pt-tools 推送的种子，按下面「自动删种」的规则处理。</li>
+              <li>刷流任务正在管的种子，按刷流任务自己的规则处理。</li>
+              <li>
+                带 {{ KEEP_TAG }} 或保护标签的种子、H&amp;R 没做满的种子，哪个自动功能都不删。
+              </li>
+            </ul>
           </div>
 
           <el-form :model="form" label-position="top" class="pt-form settings-form">
@@ -747,6 +779,38 @@ async function executeClean() {
                     只对本应用推送、且记录了免费结束时间的种子有效，与上面的管理范围无关
                   </div>
                 </el-form-item>
+
+                <!-- 做种竞争度和免费到期一样单独判断，不参与上面的「条件关系」 -->
+                <el-form-item>
+                  <el-checkbox v-model="form.peer_ratio_enabled" data-testid="ac-peer-switch">
+                    做种竞争度过高时处理
+                  </el-checkbox>
+                  <div class="field-tip">
+                    正在做种的本应用推送的种子，整个种子群的做种人数比下载人数（S/L）超过上限就处理；不参与上面的条件关系，单独判断
+                  </div>
+                </el-form-item>
+                <div v-if="form.peer_ratio_enabled" class="field-row">
+                  <el-form-item label="S/L 上限">
+                    <el-input-number
+                      v-model="form.peer_ratio_max_sl"
+                      data-testid="ac-peer-max"
+                      :min="1"
+                      :step="5"
+                      :precision="1" />
+                    <div class="field-tip">没有人在下载时按做种人数算，最小 1</div>
+                  </el-form-item>
+                  <el-form-item label="超标时">
+                    <el-radio-group
+                      v-model="form.peer_ratio_remove_data"
+                      data-testid="ac-peer-action">
+                      <el-radio-button :value="false">只暂停</el-radio-button>
+                      <el-radio-button :value="true">删除</el-radio-button>
+                    </el-radio-group>
+                    <div class="field-tip">
+                      暂停的可以在「暂停任务」页恢复，手动开始以后不再暂停它；删除时连不连数据跟着「删除时连数据文件一起删」
+                    </div>
+                  </el-form-item>
+                </div>
               </div>
 
               <div class="pt-strip">
@@ -757,13 +821,23 @@ async function executeClean() {
                 <el-form-item>
                   <el-checkbox v-model="form.cleanup_disk_protect">启用磁盘空间保护</el-checkbox>
                 </el-form-item>
-                <el-form-item v-if="form.cleanup_disk_protect" label="最低剩余空间（GB）">
-                  <el-input-number v-model="form.cleanup_min_disk_space_gb" :min="1" :max="10000" />
-                  <div class="field-tip">
-                    低于这个值时：RSS
-                    停止推送新种子，同时按优先级强制删种腾空间（需开启「删除时连数据文件一起删」，只移除任务不会释放空间）
-                  </div>
-                </el-form-item>
+                <template v-if="form.cleanup_disk_protect">
+                  <el-form-item label="最低剩余空间（GB）">
+                    <el-input-number
+                      v-model="form.cleanup_min_disk_space_gb"
+                      :min="1"
+                      :max="10000" />
+                    <div class="field-tip">低于这个值时，RSS 停止推送新种子</div>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-checkbox v-model="form.cleanup_emergency" data-testid="ac-emergency">
+                      空间低于下限时紧急清理
+                    </el-checkbox>
+                    <div class="field-tip">
+                      按优先级多删种子腾出空间，推送遇到空间不足时提前开始一轮检查；需开启「删除时连数据文件一起删」，只移除任务不会释放空间
+                    </div>
+                  </el-form-item>
+                </template>
               </div>
 
               <div class="pt-strip">
@@ -851,8 +925,11 @@ async function executeClean() {
         :width="isMobile ? '94%' : '760px'"
         align-center>
         <p class="field-tip" data-testid="ac-preview-sum">
-          只是算一遍，没有删。按页面上的规则（还没保存的也算）共会删
-          {{ cpTotal.n }} 个，{{ cpSize(cpTotal.size) }}；真的删的时候以那时下载器里的种子为准。
+          只是算一遍，没有删。按页面上的规则（还没保存的也算）共会删 {{ cpTotal.n }} 个，{{
+            cpSize(cpTotal.size)
+          }}{{
+            cpTotal.paused ? `；会暂停 ${cpTotal.paused} 个（做种竞争度过高）` : ""
+          }}；真的执行的时候以那时下载器里的种子为准。
         </p>
         <div
           v-for="r in cpResults"
@@ -864,15 +941,8 @@ async function executeClean() {
             <span v-if="r.error" class="ac-pv__err">{{ r.error }}</span>
             <span v-else class="pt-foot-note">{{ cpCounts(r) }}</span>
           </div>
-          <div v-if="r.brush || r.peer_paused" class="pt-foot-note">
-            {{
-              [
-                r.brush ? `${r.brush} 个刷流任务的种子按刷流任务的规则删` : "",
-                r.peer_paused ? `${r.peer_paused} 个被竞争度监控暂停着，常规规则不删` : "",
-              ]
-                .filter(Boolean)
-                .join("；")
-            }}
+          <div v-if="r.brush" class="pt-foot-note">
+            {{ r.brush }} 个刷流任务的种子按刷流任务的规则删
           </div>
           <div v-if="r.emergency" class="pt-note pt-note--warn">
             <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
@@ -890,7 +960,9 @@ async function executeClean() {
                 {{ it.ratio.toFixed(2)
                 }}{{ it.keep_data ? " · 数据还被别的种子用着，只删种子" : "" }}</span
               >
-              <span class="ac-pv__why">{{ it.reasons.join("；") }}</span>
+              <span class="ac-pv__why"
+                >{{ it.action === "pause" ? "只暂停：" : "" }}{{ it.reasons.join("；") }}</span
+              >
             </li>
           </ul>
           <details
@@ -917,59 +989,6 @@ async function executeClean() {
       </el-dialog>
 
       <div class="pt-col">
-        <PtPanel title="做种竞争度监控" icon="users" padding="none">
-          <!-- 和「自动删种」同一套：状态徽标写明开没开，开关有自己的名字（读屏也读得出来） -->
-          <template #actions>
-            <PtStatusPill :tone="form.peer_ratio_enabled ? 'ok' : 'neutral'" size="sm">
-              {{ form.peer_ratio_enabled ? "运行中" : "未启用" }}
-            </PtStatusPill>
-            <el-switch
-              v-model="form.peer_ratio_enabled"
-              size="small"
-              aria-label="启用做种竞争度监控"
-              data-testid="ac-peer-switch" />
-          </template>
-
-          <el-form label-position="top" class="pt-form" :disabled="!form.peer_ratio_enabled">
-            <div class="settings-body settings-body--lead">
-              <div class="field-tip field-tip--lead">
-                盯着做种中种子的 Seeder/Leecher 比值，竞争度过高时自动暂停或删除。
-              </div>
-
-              <div class="field-row">
-                <el-form-item label="S/L 比值上限">
-                  <el-input-number
-                    v-model="form.peer_ratio_max_sl"
-                    :min="1"
-                    :step="5"
-                    :precision="1" />
-                  <div class="field-tip">比值超过这个数就触发，最小 1</div>
-                </el-form-item>
-                <el-form-item label="检查间隔（分钟）">
-                  <el-input-number v-model="form.peer_ratio_interval_min" :min="5" :step="5" />
-                  <div class="field-tip">从 Tracker 拿 Swarm 级别的做种/下载人数来判断</div>
-                </el-form-item>
-              </div>
-
-              <el-form-item>
-                <el-checkbox v-model="form.peer_ratio_remove_data">直接删除种子及数据</el-checkbox>
-                <div class="field-tip">
-                  开启则超标种子连文件一起删；关闭只暂停，可以在「暂停任务」页手动恢复
-                </div>
-              </el-form-item>
-            </div>
-          </el-form>
-
-          <template #footer>
-            <span class="pt-foot-note"
-              >和自动删种存在同一份设置里：哪个「保存设置」都会把两张卡的修改一起保存</span
-            >
-            <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
-              <PtIcon name="save" :size="14" /><span>保存设置</span>
-            </el-button>
-          </template>
-        </PtPanel>
-
         <PtPanel title="清理工作目录" icon="folder" count=".pt-tools" padding="none">
           <div class="settings-body settings-body--lead">
             <div class="field-tip field-tip--lead">
@@ -1374,6 +1393,19 @@ async function executeClean() {
     min-height: var(--pt-m-touch);
     margin: 0;
   }
+}
+
+/* 三种自动删除各管哪些种子：面板 padding="none"，左右留白自己给 */
+.ac-rules {
+  margin: var(--pt-space-3) var(--pt-pad);
+}
+
+.ac-rules__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1.2em;
 }
 
 /* 配置读失败的提示：面板 padding="none"，左右留白自己给 */
