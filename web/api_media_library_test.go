@@ -341,6 +341,60 @@ func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id, "").Code)
 }
 
+// 手动整理时选整理方式：网页会话的预览与整理按选的方式（这里媒体库是硬链接、选了复制），整理历史写明选的方式；
+// 认不得的整理方式回 400
+func TestOrganizeAPI_ChosenMode(t *testing.T) {
+	e := newOrganizeServer(t)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPut, "/api/media/organize/settings", `{"min_video_mb":1}`).Code)
+	in := filepath.Join(t.TempDir(), "incoming")
+	require.NoError(t, os.MkdirAll(in, 0o755))
+	src := filepath.Join(in, "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi.mkv")
+	require.NoError(t, os.WriteFile(src, make([]byte, 2<<20), 0o644))
+	old := time.Now().Add(-10 * time.Minute)
+	require.NoError(t, os.Chtimes(src, old, old))
+	body := `{"source_path":` + jsonPath(src) + `,"mode":"copy"}`
+
+	w := serveAuthed(e.mux, http.MethodPost, "/api/media/organize/preview", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var plan struct {
+		Mode    string `json:"mode"`
+		Problem string `json:"problem"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &plan))
+	require.Empty(t, plan.Problem)
+	assert.Equal(t, "copy", plan.Mode)
+
+	for _, route := range []string{"/api/media/organize/preview", "/api/media/organize"} {
+		w = serveAuthed(e.mux, http.MethodPost, route, `{"source_path":`+jsonPath(src)+`,"mode":"rename"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code, route+" "+w.Body.String())
+		assert.Contains(t, w.Body.String(), "整理方式", route)
+	}
+
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/organize", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"created":1`)
+
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history?q=Shawshank", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page struct {
+		Items []struct {
+			Mode       string `json:"mode"`
+			ChosenMode string `json:"chosen_mode"`
+			TargetPath string `json:"target_path"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, "copy", page.Items[0].Mode)
+	assert.Equal(t, "copy", page.Items[0].ChosenMode)
+	si, err := os.Stat(src)
+	require.NoError(t, err)
+	ti, err := os.Stat(page.Items[0].TargetPath)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(si, ti), "复制出的是另一个文件，不是媒体库的硬链接")
+}
+
 // 手动指定一个文件整理：网页会话的预览与整理两个路由收 source_path；整理历史带上当时填的路径，重试照常；
 // 路径不对、来源不止一种时回 400
 func TestOrganizeAPI_SourcePath(t *testing.T) {

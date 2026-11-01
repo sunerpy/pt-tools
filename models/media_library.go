@@ -177,8 +177,10 @@ type MediaTransferHistory struct {
 	SaveRoot   string `gorm:"size:2048;not null;default:''" json:"-"`
 	TargetPath string `gorm:"size:2048;not null;default:''" json:"target_path"`
 	// Extras 是一起整理的字幕与刮削写的文件（JSON 数组，带文件编号）：删除库里的文件时只删这些
-	Extras     string `gorm:"type:text;not null;default:''" json:"-"`
-	Mode       string `gorm:"size:16;not null;default:''" json:"mode"`
+	Extras string `gorm:"type:text;not null;default:''" json:"-"`
+	Mode   string `gorm:"size:16;not null;default:''" json:"mode"`
+	// ChosenMode 是手动整理时选的整理方式（空串是跟媒体库）：重试按它整理，Mode 是实际用的方式
+	ChosenMode string `gorm:"size:16;not null;default:''" json:"chosen_mode"`
 	MediaType  string `gorm:"size:8;not null;default:''" json:"media_type"`
 	TMDBID     int    `gorm:"column:tmdb_id;not null;default:0" json:"tmdb_id"`
 	Title      string `gorm:"size:255;not null;default:''" json:"title"`

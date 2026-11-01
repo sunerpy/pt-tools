@@ -274,6 +274,8 @@ func TestAppMediaLibraryOrganize(t *testing.T) {
 	for _, bad := range []string{
 		`{"downloader_id":1}`, `{"downloader_id":0,"hash":"hash1"}`, `{"downloader_id":1,"hash":"hash1","tmdb_id":278}`,
 		`{"downloader_id":1,"hash":"hash1","media_type":"book","tmdb_id":1}`, `{"downloader_id":1,"hash":"hash1","x":1}`,
+		// 选整理方式只在网页的手动整理里：App API 不收 mode
+		`{"downloader_id":1,"hash":"hash1","mode":"copy"}`,
 	} {
 		assert.Equal(t, http.StatusBadRequest, appAsWith(t, e.srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", bad, "app:write").Code, bad)
 	}

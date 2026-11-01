@@ -33,6 +33,18 @@ afterEach(() => {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid=${id}]`);
 
+/** 打开下拉框 id，点文字是 label 的选项 */
+async function pick(id: string, label: string) {
+  q(id)!.click();
+  await flush();
+  const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+    (el) => el.textContent?.trim() === label,
+  );
+  if (!opt) throw new Error(`下拉框 ${id} 里没有「${label}」`);
+  opt.click();
+  await flush();
+}
+
 const library = {
   id: 1,
   name: "电影",
@@ -189,6 +201,28 @@ describe("整理入库弹窗", () => {
     expect((q("organize-run") as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("选整理方式：重新预览并带上 mode，整理也按它；没选时写明跟媒体库的哪种方式", async () => {
+    await mountDialog();
+    expect(q("organize-mode")).not.toBeNull();
+    expect(q("organize-mode")!.textContent, "没选时写明库的方式").toContain("跟媒体库（硬链接）");
+    expect(api.preview.mock.calls[0]![0], "没选时不带 mode").toEqual({
+      downloader_id: 1,
+      hash: "abc",
+    });
+
+    api.preview.mockResolvedValue({ ...plan, mode: "copy" });
+    await pick("organize-mode", "复制");
+    await vi.waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2));
+    expect(api.preview.mock.calls[1]![0]).toEqual({ downloader_id: 1, hash: "abc", mode: "copy" });
+    await vi.waitFor(() => expect(q("organize-library")!.textContent).toContain("复制"));
+    expect(q("organize-mode-hint")!.textContent).toContain("多占一份空间");
+
+    api.organize.mockResolvedValue({ created: 1, done: 0, skipped: 0, failed: 0 });
+    q("organize-run")!.click();
+    await vi.waitFor(() => expect(api.organize).toHaveBeenCalledTimes(1));
+    expect(api.organize.mock.calls[0]![0]).toEqual({ downloader_id: 1, hash: "abc", mode: "copy" });
+  });
+
   it("沿用之前整理用的条目时写明来源", async () => {
     api.preview.mockResolvedValue({
       ...plan,
@@ -256,7 +290,10 @@ function fill(id: string, v: string) {
 
 const button = (id: string) => q(id) as HTMLButtonElement;
 
-async function mountPathDialog(sourcePath: string) {
+async function mountPathDialog(
+  sourcePath: string,
+  mode?: "hardlink" | "copy" | "symlink" | "move",
+) {
   api.libraries.mockResolvedValue([
     { ...library, effective_template: "", preview: "", created_at: "", updated_at: "" },
   ]);
@@ -269,7 +306,7 @@ async function mountPathDialog(sourcePath: string) {
         h(OrganizeDialog, {
           modelValue: open.value,
           "onUpdate:modelValue": (v: boolean) => (open.value = v),
-          target: { source_path: sourcePath },
+          target: mode ? { source_path: sourcePath, mode } : { source_path: sourcePath },
           onDone: done,
         });
     },
@@ -396,6 +433,16 @@ describe("手动整理（指定路径）", () => {
     await mountPathDialog("/data/in/x");
     await vi.waitFor(() => expect(q("organize-move-warn")).not.toBeNull());
     expect(q("organize-move-warn")!.textContent).toContain("源文件会搬进媒体库");
+  });
+
+  it("带着选过的整理方式打开（整理历史里重新整理）：预览带上它；选了移动时提醒「这次用移动整理」", async () => {
+    api.preview.mockResolvedValue({ ...pathPlan, mode: "move" });
+    await mountPathDialog("/data/in/x", "move");
+    await vi.waitFor(() => expect(q("organize-move-warn")).not.toBeNull());
+    expect(api.preview).toHaveBeenCalledWith({ source_path: "/data/in/x", mode: "move" });
+    expect(q("organize-move-warn")!.textContent).toContain("这次用移动整理");
+    expect(q("organize-mode")!.textContent).toContain("移动");
+    expect(q("organize-mode-hint"), "提醒已经写明，不再写讲种子的那句").toBeNull();
   });
 
   it("路径不对（400）时写明原因，不能整理", async () => {

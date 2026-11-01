@@ -2,11 +2,13 @@
 /*
  * 整理入库（路线图 M10）：任务列表与下载器 Web UI 整理一个种子，整理历史与媒体库页手动整理一个文件或目录（指定路径）。
  * 打开时先预览（识别出的条目、选中的媒体库、每个文件放到哪里），确认后再整理；识别不对时可以填 TMDB 编号、
- * 换媒体库后重新预览。指定路径时先填路径再预览，改了路径要重新预览才能整理。
+ * 换媒体库后重新预览；这一次的整理方式可以另选（不改媒体库的设置），选了马上重新预览。
+ * 指定路径时先填路径再预览，改了路径要重新预览才能整理。
  */
 import {
   type MediaKind,
   type MediaLibrary,
+  type MediaMode,
   type OrganizePlan,
   type OrganizeRequest,
   type OrganizeResult,
@@ -17,6 +19,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import {
+  MEDIA_MODES,
   itemStatus,
   mediaKindLabel,
   mediaSourceLabel,
@@ -27,10 +30,13 @@ import {
 } from "@/utils/media";
 import { computed, ref, watch } from "vue";
 
-/** 整理什么：下载器里的一个种子，或 pt-tools 里看到的一个文件或文件夹（source_path 为空时等用户填） */
+/**
+ * 整理什么：下载器里的一个种子，或 pt-tools 里看到的一个文件或文件夹（source_path 为空时等用户填）；
+ * mode 是整理历史里重新整理时带上的、上次选的整理方式
+ */
 export type OrganizeTarget =
   | { downloader_id: number; hash: string; name?: string }
-  | { source_path: string; name?: string };
+  | { source_path: string; name?: string; mode?: MediaMode };
 
 const props = defineProps<{ target: OrganizeTarget | null }>();
 const visible = defineModel<boolean>({ default: false });
@@ -47,10 +53,17 @@ const result = ref<OrganizeResult | null>(null);
 const libraries = ref<MediaLibrary[]>([]);
 /** 海报从 TMDB 的图片服务器取：浏览器连不上时不留一块破图 */
 const posterFailed = ref(false);
-const override = ref<{ type: MediaKind; id: number | undefined; library: number | undefined }>({
+/** 改的条目、媒体库与这一次的整理方式（mode 为空时跟媒体库） */
+const override = ref<{
+  type: MediaKind;
+  id: number | undefined;
+  library: number | undefined;
+  mode: MediaMode | undefined;
+}>({
   type: "movie",
   id: undefined,
   library: undefined,
+  mode: undefined,
 });
 
 /** 指定路径：输入框里的路径，与上次预览用的路径（改了路径要重新预览才能整理） */
@@ -76,6 +89,7 @@ function request(): OrganizeRequest | null {
     req.tmdb_id = override.value.id;
   }
   if (override.value.library) req.library_id = override.value.library;
+  if (override.value.mode) req.mode = override.value.mode;
   return req;
 }
 
@@ -112,8 +126,13 @@ watch(
     // 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载（打开时才读，页面上没打开就不发请求）
     void loadTmdbImageBase();
     result.value = null;
-    override.value = { type: "movie", id: undefined, library: undefined };
     const t = props.target;
+    override.value = {
+      type: "movie",
+      id: undefined,
+      library: undefined,
+      mode: t && "source_path" in t ? t.mode : undefined,
+    };
     if (t && "source_path" in t) {
       // 从页头打开时路径是空的，等用户填了再预览；从整理历史打开时带着当时填的路径，马上预览
       previewSeq++;
@@ -149,10 +168,27 @@ const libraryOptions = computed(() => {
   return libraries.value.filter((l) => l.enabled && l.kind === kind);
 });
 const libraryLabel = (l: MediaLibrary) => `${l.name}（${modeLabel(l.mode)} · ${l.path}）`;
-/** 指定路径用移动整理：源文件会搬进媒体库 */
-const moveWarning = computed(
-  () => pathMode.value && plan.value?.downloader_id === 0 && plan.value?.mode === "move",
+/** 指定路径用移动整理：源文件会搬进媒体库（这次选的移动，或者媒体库用移动） */
+const moveWarning = computed(() => {
+  if (!pathMode.value || plan.value?.downloader_id !== 0 || plan.value?.mode !== "move") return "";
+  const who = override.value.mode === "move" ? "这次用移动整理" : "这个媒体库用移动整理";
+  return `${who}：源文件会搬进媒体库、不再留在原处。别的下载器还在做种的文件不要用移动。`;
+});
+/** 没选整理方式时跟媒体库：预览过的写明库用的是哪种 */
+const modeFollowLabel = computed(() =>
+  plan.value?.library ? `跟媒体库（${modeLabel(plan.value.library.mode)}）` : "跟媒体库",
 );
+/** 这一次用的方式的说明（没选、也还不知道是哪个库时不写；指定路径移动时上面的提醒已经写明，不再写讲种子的那句） */
+const modeHint = computed(() => {
+  const lib = plan.value?.library;
+  if ((!override.value.mode && !lib) || moveWarning.value) return "";
+  const mode = override.value.mode || lib?.mode || "hardlink";
+  return MEDIA_MODES.find((m) => m.value === mode)?.hint ?? "";
+});
+/** 换了整理方式马上重新预览：目标与提醒（例如移动）跟着变，免得按旧的预览点了整理 */
+function onModeChange() {
+  void preview();
+}
 
 function planSource(source: NonNullable<OrganizePlan["source"]>): string {
   if (source === "manual") return "手动指定";
@@ -275,9 +311,7 @@ const resultHint = computed(() =>
         </div>
         <div v-if="moveWarning" class="pt-note pt-note--warn" data-testid="organize-move-warn">
           <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span
-            >这个媒体库用移动整理：源文件会搬进媒体库、不再留在原处。别的下载器还在做种的文件不要用移动。</span
-          >
+          <span>{{ moveWarning }}</span>
         </div>
 
         <div v-if="plan.match" class="od__match" data-testid="organize-match">
@@ -388,6 +422,21 @@ const resultHint = computed(() =>
             >重新预览</el-button
           >
         </div>
+      </div>
+
+      <div v-if="plan || pathMode" class="od__mode">
+        <div class="od__label">整理方式（只管这一次，不改媒体库的设置）</div>
+        <el-select
+          v-model="override.mode"
+          clearable
+          :placeholder="modeFollowLabel"
+          class="od__mode-select"
+          data-testid="organize-mode"
+          aria-label="整理方式"
+          @change="onModeChange">
+          <el-option v-for="m in MEDIA_MODES" :key="m.value" :label="m.label" :value="m.value" />
+        </el-select>
+        <div v-if="modeHint" class="od__sub" data-testid="organize-mode-hint">{{ modeHint }}</div>
       </div>
 
       <div
@@ -606,5 +655,15 @@ const resultHint = computed(() =>
 
 .od__lib {
   width: 180px;
+}
+
+.od__mode {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.od__mode-select {
+  width: 200px;
 }
 </style>
