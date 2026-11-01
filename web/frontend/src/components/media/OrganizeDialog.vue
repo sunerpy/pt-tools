@@ -178,10 +178,10 @@ const moveWarning = computed(() => {
 const modeFollowLabel = computed(() =>
   plan.value?.library ? `跟媒体库（${modeLabel(plan.value.library.mode)}）` : "跟媒体库",
 );
-/** 这一次用的方式的说明（没选、也还不知道是哪个库时不写） */
+/** 这一次用的方式的说明（没选、也还不知道是哪个库时不写；指定路径移动时上面的提醒已经写明，不再写讲种子的那句） */
 const modeHint = computed(() => {
   const lib = plan.value?.library;
-  if (!override.value.mode && !lib) return "";
+  if ((!override.value.mode && !lib) || moveWarning.value) return "";
   const mode = override.value.mode || lib?.mode || "hardlink";
   return MEDIA_MODES.find((m) => m.value === mode)?.hint ?? "";
 });

@@ -442,6 +442,7 @@ describe("手动整理（指定路径）", () => {
     expect(api.preview).toHaveBeenCalledWith({ source_path: "/data/in/x", mode: "move" });
     expect(q("organize-move-warn")!.textContent).toContain("这次用移动整理");
     expect(q("organize-mode")!.textContent).toContain("移动");
+    expect(q("organize-mode-hint"), "提醒已经写明，不再写讲种子的那句").toBeNull();
   });
 
   it("路径不对（400）时写明原因，不能整理", async () => {
