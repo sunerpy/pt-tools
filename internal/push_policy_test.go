@@ -338,3 +338,42 @@ func TestSnapshotColumnsUseLocalTime(t *testing.T) {
 	assert.Equal(t, time.Local, got.Location())
 	assert.Equal(t, time.Local, cols["free_verified_at"].(*time.Time).Location())
 }
+
+// 免费结束时删除还是暂停在推送时写进种子记录（免费结束监控之后只读记录，不读 RSS 当时的设置）：
+// 只在承诺了到期处理时记成删除；记账没写成、先写推送标记的那条也带上。
+func TestPush_RecordsFreeEndDelete(t *testing.T) {
+	push := func(t *testing.T, r *rssRig, id string, policy AdmissionPolicy) {
+		t.Helper()
+		now := time.Now()
+		policy.SourceKind, policy.AttemptStart = SourceKindManual, now
+		res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+			SiteID: "springsunday", TorrentID: id, TorrentData: roundTorrentBytes(id), DownloaderID: r.dlID("qb"),
+			Policy: policy, Snapshot: untilSnap(now, now.Add(3*time.Hour)),
+		})
+		require.NoError(t, err)
+		require.True(t, res.Success, res.Message)
+	}
+	r := pushRig(t)
+	push(t, r, "fd1", AdmissionPolicy{PauseOnFreeEnd: true, FreeEndDelete: true})
+	push(t, r, "fd2", AdmissionPolicy{PauseOnFreeEnd: true})
+	push(t, r, "fd3", AdmissionPolicy{FreeEndDelete: true})
+	assert.True(t, r.record("fd1").FreeEndDelete, "到期删除")
+	assert.False(t, r.record("fd2").FreeEndDelete, "到期暂停")
+	assert.False(t, r.record("fd3").FreeEndDelete, "没承诺到期处理时不记删除")
+
+	failBookkeeping(t, r.db.DB)
+	push(t, r, "fd4", AdmissionPolicy{PauseOnFreeEnd: true, FreeEndDelete: true})
+	ti := r.record("fd4")
+	assert.NotNil(t, ti.PushPendingAt)
+	assert.True(t, ti.FreeEndDelete, "推送标记随策略一起写下，对账补记账以后照它处理")
+}
+
+// RSS 的暂存推送：免费结束时删除的选择跟着本 RSS，只在开着免费结束处理时生效。
+func TestStagedPolicy_FreeEndDelete(t *testing.T) {
+	for _, c := range []struct{ pause, del, want bool }{{true, true, true}, {true, false, false}, {false, true, false}} {
+		sp := &stagedPush{rss: models.RSSConfig{ID: 3, PauseOnFreeEnd: c.pause, FreeEndDelete: c.del}}
+		p := sp.policyFor(models.TorrentInfo{}, 5)
+		assert.Equal(t, c.pause, p.PauseOnFreeEnd)
+		assert.Equal(t, c.want, p.FreeEndDelete, "pause=%v del=%v", c.pause, c.del)
+	}
+}
