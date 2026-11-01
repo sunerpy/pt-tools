@@ -1578,24 +1578,25 @@ func hdskySeedingPage(titles, sizes []string) string {
 	return b.String()
 }
 
-// 第一行标题里有「1940 Blu-ray」「10bit」这类字样时，按第一行猜体积列会猜成标题列；标题「Name.2023.2160p」又会被当成 2023 PiB，
+// 第一行标题里有「1940 Blu-ray」「10bit」这类字样时，按第一行猜体积列会猜成标题列；标题「The Movie 2160p UHD」又会被当成 2160 PiB，
 // 合计出几千 PB。体积列要按表头「大小」找，只加真是体积的格子。
 func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnFromHeader(t *testing.T) {
 	titles := []string{
 		"Casablanca 1940 Blu-ray 1080p AVC REMUX",
 		"Some.Show.2023.2160p.WEB-DL.H265.10bit.DDP5.1-HDSWEB",
 		"Another.Movie.2024.2160p.UHD.BluRay.x265-HDS",
+		"The Movie 2160p UHD Blu-ray HEVC DTS-HD MA 5.1-HDSky",
 	}
-	sizes := []string{"90.55 GB", "12.50 GB", "1.25 TB"}
+	sizes := []string{"90.55 GB", "12.50 GB", "1.25 TB", "60.00 GB"}
 	html := hdskySeedingPage(titles, sizes)
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	require.NoError(t, err)
 	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
 	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
 	require.NoError(t, err)
-	assert.Equal(t, 3, seeding)
+	assert.Equal(t, 4, seeding)
 	gib := float64(1 << 30)
-	want := int64(90.55*gib) + int64(12.50*gib) + int64(1.25*1024*gib)
+	want := int64(90.55*gib) + int64(12.50*gib) + int64(1.25*1024*gib) + int64(60*gib)
 	assert.Equal(t, want, size, "体积列是表头写着「大小」的第 3 列，不是标题列")
 }
 
@@ -1613,17 +1614,44 @@ func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnWholeCellFallback(t *testin
 	assert.Equal(t, int64(5)<<30, size)
 }
 
-// 找不到体积列（表头没有、第一行也没有整格的体积）时不猜：体积按没取到（0），保存时沿用上一次的。
-func TestNexusPHPDriver_ParseSeedingStatus_NoSizeColumn(t *testing.T) {
-	html := `<table><tr><td>a</td><td>b</td><td>c</td></tr>` +
-		`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>-</td></tr></table>`
+// 找不到体积列（表头没有、第一行也没有整格的体积），或者体积列一格也读不出来时不猜：做种数照样报，
+// 体积报 ErrSeedingSizeUnknown（按没取到算，保存时沿用上一次的），不当成 0。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeUnknown(t *testing.T) {
+	cases := map[string]string{
+		"no size column": `<table><tr><td>a</td><td>b</td><td>c</td></tr>` +
+			`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>-</td></tr></table>`,
+		"size column without a size": `<table><tr><td>类型</td><td>标题</td><td>大小</td></tr>` +
+			`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>-</td></tr></table>`,
+		"malformed size": `<table><tr><td>类型</td><td>标题</td><td>大小</td></tr>` +
+			`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>1.2.3<br />GB</td></tr></table>`,
+	}
+	for name, html := range cases {
+		t.Run(name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			require.NoError(t, err)
+			d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+			seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+			require.ErrorIs(t, err, ErrSeedingSizeUnknown)
+			assert.Equal(t, 1, seeding)
+			assert.Zero(t, size)
+		})
+	}
+}
+
+// 上游 NexusPHP 的表头是图标（<img class="size" alt="size" title="大小" />），没有文字：按图标的 title、alt、class 认。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnFromHeaderImage(t *testing.T) {
+	html := `<table border="1" cellspacing="0" cellpadding="5"><tr><td class="colhead">类型</td>` +
+		`<td class="colhead" align="center">标题</td><td class="colhead" align="center"><img class="size" src="pic/trans.gif" alt="size" title="大小" /></td>` +
+		`<td class="colhead" align="center"><img class="seeders" src="pic/trans.gif" alt="seeders" title="种子数" /></td></tr>` +
+		`<tr><td class="rowfollow">Movie</td><td class="rowfollow">Casablanca 1940 Blu-ray 1080p</td><td class="rowfollow">1.50<br />GB</td><td class="rowfollow">12</td></tr>` +
+		`<tr><td class="rowfollow">TV</td><td class="rowfollow">The Show 2160p UHD</td><td class="rowfollow">512.00<br />MB</td><td class="rowfollow">3</td></tr></table>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	require.NoError(t, err)
 	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
 	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
 	require.NoError(t, err)
-	assert.Equal(t, 1, seeding)
-	assert.Zero(t, size)
+	assert.Equal(t, 2, seeding)
+	assert.Equal(t, int64(1.5*float64(1<<30))+int64(512)<<20, size)
 }
 
 func TestNexusPHPDriver_ParseSeedingStatus_NilDoc(t *testing.T) {

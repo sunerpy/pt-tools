@@ -189,3 +189,43 @@ func TestNewDBUserInfoRepo_Success(t *testing.T) {
 // ---------------------------------------------------------------------------
 // mtorrent_driver.go — executeDirectly form-urlencoded body + string body
 // ---------------------------------------------------------------------------
+
+// 会合法变成 0 的计数（做种、下载中、两种体积、未读消息、H&R、时魔）这次取到 0 时要存成 0：
+// 原来按结构体更新，GORM 跳过零值，记录一直停在上一次的非零值（M-Team 记录里下载中 149，站点上是 1）。
+// 别的字段这次是零值时照旧不动（比如加入时间）。
+func TestDBUserInfoRepo_SaveWritesZeroCounters(t *testing.T) {
+	repo := newDBRepo(t)
+	ctx := context.Background()
+	first := sampleUserInfo("mteam")
+	first.Seeding, first.SeederCount, first.SeederSize = 257, 257, 12888616364822
+	first.Leeching, first.LeecherCount, first.LeecherSize = 149, 149, 3872265847223
+	first.UnreadMessageCount, first.TotalMessageCount = 15, 67
+	first.HnRUnsatisfied, first.HnRPreWarning = 2, 1
+	first.BonusPerHour, first.SeedingBonusPerHour = 92.2, 3.5
+	require.NoError(t, repo.Save(ctx, first))
+
+	second := sampleUserInfo("mteam")
+	second.Seeding, second.SeederCount, second.SeederSize = 0, 0, 0
+	second.Leeching, second.LeecherCount, second.LeecherSize = 0, 0, 0
+	second.UnreadMessageCount, second.TotalMessageCount = 0, 0
+	second.HnRUnsatisfied, second.HnRPreWarning = 0, 0
+	second.BonusPerHour, second.SeedingBonusPerHour = 0, 0
+	second.JoinDate = 0
+	require.NoError(t, repo.Save(ctx, second))
+
+	got, err := repo.Get(ctx, "mteam")
+	require.NoError(t, err)
+	assert.Zero(t, got.Seeding)
+	assert.Zero(t, got.SeederCount)
+	assert.Zero(t, got.SeederSize)
+	assert.Zero(t, got.Leeching)
+	assert.Zero(t, got.LeecherCount)
+	assert.Zero(t, got.LeecherSize)
+	assert.Zero(t, got.UnreadMessageCount)
+	assert.Zero(t, got.TotalMessageCount)
+	assert.Zero(t, got.HnRUnsatisfied)
+	assert.Zero(t, got.HnRPreWarning)
+	assert.Zero(t, got.BonusPerHour)
+	assert.Zero(t, got.SeedingBonusPerHour)
+	assert.Equal(t, first.JoinDate, got.JoinDate, "不在计数里的字段这次是零值时照旧不动")
+}

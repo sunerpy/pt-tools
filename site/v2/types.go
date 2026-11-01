@@ -589,6 +589,8 @@ var (
 	ErrBonusInfoUnavailable    = errors.New("bonus info unavailable")
 	ErrMessageCountUnavailable = errors.New("message count unavailable")
 	ErrPeerStatsUnavailable    = errors.New("peer statistics unavailable")
+	// ErrSeedingSizeUnknown 是做种列表里认不出体积列：做种数照样有，体积按没取到算（保存时沿用上一次的），不当成 0
+	ErrSeedingSizeUnknown = errors.New("seeding size column not found")
 )
 
 // Site is the core interface for interacting with a PT site

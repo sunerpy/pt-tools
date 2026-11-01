@@ -1239,6 +1239,24 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 					return nil
 				}
 				seeding, seedingSize, err := d.FetchSeedingStatus(ctx, userID)
+				mu.Lock()
+				indexSeeding := info.Seeding
+				mu.Unlock()
+				if err == nil && seedingSize == 0 && seeding == 0 && indexSeeding > 0 {
+					// 首页说在做种、列表却什么都没读到（限流提示、出错页，没有表格）：不当成真的 0
+					err = fmt.Errorf("%w: seeding list is empty while %d torrents are seeding", ErrSeedingSizeUnknown, indexSeeding)
+				}
+				if errors.Is(err, ErrSeedingSizeUnknown) {
+					// 做种列表认不出体积列：做种数照样用，体积算没取到（保存时沿用上一次的），不存成 0
+					fail([]string{"seederSize"}, err)
+					mu.Lock()
+					if seeding > 0 && info.Seeding == 0 {
+						info.Seeding = seeding
+						info.SeederCount = seeding
+					}
+					mu.Unlock()
+					return nil
+				}
 				if err != nil {
 					if DebugUserInfo {
 						fmt.Printf("[DEBUG] FetchSeedingStatus error: %v\n", err)
@@ -2316,17 +2334,18 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 	seeding = rows.Length()
 
 	// 体积列按表头找，找不到再看第一行里整格就是体积的格子。不按「第一行里第一个像体积的格子」猜：
-	// 标题里的「1940 Blu-ray」「10bit」也像，猜成标题列以后「Name.2023.2160p」会被读成 2023 PiB
+	// 标题里的「1940 Blu-ray」「10bit」也像，猜成标题列以后「The Movie 2160p UHD」会被读成 2160 PiB
 	sizeIndex := seedingSizeColumn(allRows.First(), rows.First())
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] ParseSeedingStatus Method2: detected sizeIndex=%d, rowCount=%d\n", sizeIndex, seeding)
 	}
 	if sizeIndex < 0 {
-		// 找不到体积列：只报做种数，体积按没取到（调用方不更新它）
-		return seeding, 0, nil
+		// 找不到体积列：做种数照样报，体积按没取到（保存时沿用上一次的）
+		return seeding, 0, ErrSeedingSizeUnknown
 	}
 
 	// 只加真是体积的格子
+	parsed := 0
 	rows.Each(func(i int, row *goquery.Selection) {
 		cells := row.ChildrenFiltered("td, th")
 		if cells.Length() <= sizeIndex {
@@ -2336,11 +2355,16 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 		size, ok := parseSizeCell(sizeText)
 		if ok {
 			seedingSize += size
+			parsed++
 		}
 		if DebugUserInfo && i < 3 { // Only log first 3 rows for debugging
 			fmt.Printf("[DEBUG]   Row %d: sizeText=%q, parsed=%d\n", i, sizeText, size)
 		}
 	})
+	if parsed == 0 {
+		// 体积列一格也读不出来：同样按没取到算，不当成 0
+		return seeding, 0, ErrSeedingSizeUnknown
+	}
 
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] ParseSeedingStatus Method2: total seeding=%d, seedingSize=%d\n", seeding, seedingSize)
