@@ -29,6 +29,8 @@ type HistoryItem struct {
 	LibraryName string `json:"library_name,omitempty"`
 	Subtitles   int    `json:"subtitles"`
 	HasFiles    bool   `json:"has_files"`
+	// ManualPath 是手动指定路径整理的记录当时填的路径（别的记录没有）：网页上带着它重新打开「手动整理」
+	ManualPath string `json:"manual_path,omitempty"`
 }
 
 // HistoryPage 是一页整理记录。
@@ -90,7 +92,11 @@ func (s *Service) History(ctx context.Context, q HistoryQuery) (HistoryPage, err
 				subs++
 			}
 		}
-		page.Items = append(page.Items, HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: subs, HasFiles: hasLibraryFiles(&r)})
+		item := HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: subs, HasFiles: hasLibraryFiles(&r)}
+		if pathRow(r) {
+			item.ManualPath = requestOf(r).SourcePath
+		}
+		page.Items = append(page.Items, item)
 	}
 	return page, nil
 }
@@ -106,8 +112,12 @@ func (s *Service) historyRow(ctx context.Context, id uint) (models.MediaTransfer
 	return row, nil
 }
 
-// requestOf 是重新整理这条记录所在的种子（或目录监控的那一项）的请求。
+// requestOf 是重新整理这条记录所在的种子（或目录监控的那一项、手动指定的那个路径）的请求。
 func requestOf(r models.MediaTransferHistory) Request {
+	if pathRow(r) {
+		// 指定的路径记成上级目录（SaveRoot）与最后一段（TorrentName）：规整过的路径 Join 回来还是它
+		return Request{SourcePath: filepath.Join(r.SaveRoot, r.TorrentName)}
+	}
 	if r.WatchDirID > 0 {
 		return Request{WatchDirID: r.WatchDirID, Entry: r.TorrentName}
 	}

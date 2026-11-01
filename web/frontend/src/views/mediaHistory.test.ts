@@ -12,6 +12,9 @@ const api = vi.hoisted(() => ({
   retry: vi.fn(),
   rescrape: vi.fn(),
   deleteHistory: vi.fn(),
+  preview: vi.fn(),
+  organize: vi.fn(),
+  libraries: vi.fn(),
 }));
 const ui = vi.hoisted(() => ({
   success: vi.fn(),
@@ -23,7 +26,12 @@ const ui = vi.hoisted(() => ({
 
 vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
-  return { ...real, organizeApi: api };
+  return {
+    ...real,
+    organizeApi: api,
+    // 「手动整理」弹窗打开时读 TMDB 图片地址
+    mediaApi: { ...real.mediaApi, settings: vi.fn(async () => ({ image_base_url: "" })) },
+  };
 });
 
 vi.mock("element-plus", async (orig) => {
@@ -83,11 +91,12 @@ const row = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-async function mountPage(fail = false) {
+async function mountPage(fail = false, extra: ReturnType<typeof row>[] = []) {
   if (fail) api.history.mockRejectedValue(new Error("读取整理记录失败"));
   else
     api.history.mockResolvedValue({
       items: [
+        ...extra,
         row({ scrape_status: "partial", scrape_note: "fanart.jpg: boom" }),
         row({
           id: 2,
@@ -270,4 +279,112 @@ describe("整理历史", () => {
     expect(state).toContain("读取整理记录失败");
     expect(state).not.toContain("还没有整理记录");
   });
+
+  it("还没有记录时说明可以点「手动整理」", async () => {
+    api.history.mockResolvedValue({ items: [], total: 0 });
+    const Page = (await import("./MediaHistory.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() => expect(api.history).toHaveBeenCalled());
+    await flush();
+    await flush();
+    const state = q("mh-state")!.textContent ?? "";
+    expect(state).toContain("还没有整理记录");
+    expect(state).toContain("点「手动整理」指定一个文件或目录");
+  });
+
+  it("页头的「手动整理」打开指定路径的弹窗；预览、整理以后重新读列表", async () => {
+    await mountPage();
+    api.libraries.mockResolvedValue([]);
+    q("mh-manual")!.click();
+    await vi.waitFor(() => expect(q("organize-source")).not.toBeNull());
+    expect(api.preview, "路径还没填：不预览").not.toHaveBeenCalled();
+
+    api.preview.mockResolvedValue(manualPlan);
+    const el = q("organize-source")!;
+    const input = (el instanceof HTMLInputElement ? el : el.querySelector("input"))!;
+    input.value = "/data/in/my-download-01";
+    input.dispatchEvent(new Event("input"));
+    await flush();
+    q("organize-source-preview")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({ source_path: "/data/in/my-download-01" }),
+    );
+    await vi.waitFor(() => expect((q("organize-run") as HTMLButtonElement).disabled).toBe(false));
+
+    api.organize.mockResolvedValue({ created: 1, done: 0, skipped: 0, failed: 0 });
+    q("organize-run")!.click();
+    await vi.waitFor(() =>
+      expect(api.organize).toHaveBeenCalledWith({ source_path: "/data/in/my-download-01" }),
+    );
+    await vi.waitFor(() => expect(api.history).toHaveBeenCalledTimes(2));
+  });
+
+  it("指定路径的失败、跳过的记录有「手动整理」，带着原路径打开并立即预览；整理好的与种子的记录没有", async () => {
+    const manual = {
+      downloader_id: 0,
+      downloader_name: "指定路径",
+      info_hash: "path:0123456789abcdef",
+      task_id: "",
+      torrent_name: "my-download-01",
+      trigger: "manual",
+      manual_path: "/data/in/my-download-01",
+    };
+    await mountPage(false, [
+      row({
+        ...manual,
+        id: 5,
+        status: "failed",
+        message: "没有识别出来",
+        target_path: "",
+        has_files: false,
+      }),
+      row({ ...manual, id: 6, status: "done" }),
+      row({ ...manual, id: 7, status: "skipped", message: "目标位置已经有同名文件" }),
+    ]);
+    expect(q("mh-manual-5")).not.toBeNull();
+    expect(q("mh-manual-7")).not.toBeNull();
+    expect(q("mh-manual-6"), "整理好的不用再手动整理").toBeNull();
+    expect(q("mh-manual-2"), "按种子整理的记录没有源路径").toBeNull();
+    const text = q("mh-table")!.textContent ?? "";
+    expect(text).toContain("手动（指定路径）");
+
+    api.libraries.mockResolvedValue([]);
+    api.preview.mockResolvedValue(manualPlan);
+    q("mh-manual-5")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({ source_path: "/data/in/my-download-01" }),
+    );
+  });
 });
+
+const manualPlan = {
+  downloader_id: 0,
+  downloader_name: "指定路径",
+  hash: "path:0123456789abcdef",
+  task_id: "",
+  name: "my-download-01",
+  save_path: "/data/in",
+  local_path: "/data/in",
+  mapped: false,
+  source_path: "/data/in/my-download-01",
+  match: { id: 872585, media_type: "movie", title: "奥本海默", year: 2023 },
+  source: "manual",
+  library: {
+    id: 1,
+    name: "电影",
+    kind: "movie",
+    path: "/media/movies",
+    mode: "hardlink",
+    scrape: true,
+  },
+  mode: "hardlink",
+  items: [
+    {
+      rel: "my-download-01/video.mkv",
+      source: "/data/in/my-download-01/video.mkv",
+      size: 1,
+      target: "/media/movies/奥本海默 (2023)/奥本海默 (2023).mkv",
+      status: "pending",
+    },
+  ],
+};

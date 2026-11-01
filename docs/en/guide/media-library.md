@@ -124,12 +124,13 @@ Recognition uses the torrent name (and the site title as a subtitle when it diff
 
 ## When organising runs
 
-| Trigger       | Description                                                                                                                                                                                      |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Automatic     | Torrents pushed by pt-tools are organised when they finish downloading. Only torrents finished after you turn it on; missed ones are picked up every 10 minutes                                  |
-| Periodic scan | Finished torrents in the downloaders are scanned at the interval, including ones pt-tools did not push. Up to 50 per round; torrents that already have records are skipped                       |
-| Monitoring    | Monitored folders that are switched on are scanned at the interval, and videos dropped there (not torrents) are organised, see [directory monitoring](#directory-monitoring)                     |
-| Manual        | The organise icon in the Status (状态) column of the task list (整理入库 on mobile cards); in the downloader web UI, select one finished torrent and click 整理入库, or use the right-click menu |
+| Trigger       | Description                                                                                                                                                                                                 |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Automatic     | Torrents pushed by pt-tools are organised when they finish downloading. Only torrents finished after you turn it on; missed ones are picked up every 10 minutes                                             |
+| Periodic scan | Finished torrents in the downloaders are scanned at the interval, including ones pt-tools did not push. Up to 50 per round; torrents that already have records are skipped                                  |
+| Monitoring    | Monitored folders that are switched on are scanned at the interval, and videos dropped there (not torrents) are organised, see [directory monitoring](#directory-monitoring)                                |
+| Manual        | The organise icon in the Status (状态) column of the task list (整理入库 on mobile cards); in the downloader web UI, select one finished torrent and click 整理入库, or use the right-click menu            |
+| By path       | Manual organise (手动整理) on the organise history and media library pages: enter a file or folder, preview, then organise, see [organising a file or folder by hand](#organising-a-file-or-folder-by-hand) |
 
 The organise settings show when the periodic scan and directory monitoring last ran and roughly when they run next (these times start over when pt-tools restarts, and the first round after start runs within a minute).
 
@@ -151,6 +152,35 @@ Videos dropped into a monitored folder (not torrents in a downloader, for exampl
 - When the library moves files, pt-tools first checks that the item isn't a torrent in a downloader (moving it away would stop the torrent from seeding). If it is, the item isn't organised and the record says why; when a downloader can't be reached to check, it's tried again later. Torrent paths are converted with the path mappings before comparing; torrents whose paths pt-tools can't see (no path mapping, or a downloader on another machine) are matched by name, so a torrent with the same name as the item counts as that item.
 - There's no site title or IMDb ID, only the name. When the recognition is wrong, add a correction or recognition word under media recognition, then retry from organise history.
 - Delete links when torrents are removed doesn't touch files organised from monitored folders: deleting the source file in the monitored folder leaves the library file in place.
+
+## Organising a file or folder by hand
+
+Videos that aren't in a downloader pt-tools manages (for example ones downloaded by another client or copied from another machine) can be organised into a library by entering their path, without adding a monitored folder first. Click Manual organise (手动整理) at the top of the organise history (整理历史) or media library (媒体库) page:
+
+1. **Enter the source path**: a file or folder as pt-tools sees it, for example the folder of one movie or one season, or a single video file. In Docker, mount the folder that holds it into the container first and enter the path inside the container.
+2. **Preview**: click Preview (预览) or press Enter. The dialog shows the recognised title, the library it goes into, the organise mode, whether NFO files and images are written, and where each file goes in the library. When the match is wrong, choose the type (movie or TV), enter a TMDB ID and click Preview again (重新预览); you can also pick another library of the same type. Leaving the TMDB ID empty recognises the title by name.
+3. **Organise**: the files go into the library folder with the library's mode, NFO files and images are written when the library scrapes, the media servers are asked to scan and a notification is sent, the same as for torrents. After changing the source path, preview again before organising.
+
+**Where the links go**: into the chosen library's folder (into its category folder when Organise by category is checked), named by the library's naming template. To put them somewhere else, add a library for that folder under Media library first. Hard links need the source and the library on the same file system, see [preparing the folders](#preparing-the-folders).
+
+Rules:
+
+- The source path can't be a library folder, be inside one or contain one, and the path itself can't be a symbolic link: enter the path it points to.
+- A path changed within the last 2 minutes isn't organised (it may still be copying), and neither is a folder more than 6 levels deep or with more than 5000 files: choose the folder of one movie or one season instead. Neither case writes an organise record.
+- A single video file is organised on its own, without the subtitles next to it; to include them, choose the folder that holds them.
+- When the source path is exactly a torrent in a downloader, it's organised as that torrent instead (the preview says so): the records belong to the torrent, so deleting library links on torrent removal and the periodic scan recognise it. When it only partly overlaps a torrent (inside one, or containing one), it isn't organised.
+- When the library moves files, the source files move into the library and don't stay where they were: a path with the same name as a torrent in a downloader isn't organised, and neither is one that can't be checked because a downloader can't be reached; those are tried again later. Don't move files that are still seeding.
+- You can also enter an item in a monitored folder to organise it now instead of waiting for the next scan.
+
+Failures and retries:
+
+- Each video gets one organise record, with the trigger shown as 手动（指定路径） (manual, by path).
+- Temporary problems such as TMDB being unreachable are retried after 10 minutes, 30 minutes, 1 hour, 3 hours and 12 hours, up to 5 times; when the record has a title, both the automatic retries and Retry (重试) keep that title and the library used at the time.
+- Failed or skipped records of this kind also have Manual organise (手动整理): it opens the dialog with the path entered back then, so you can change the title or library and organise again.
+- Records whose source path is gone (deleted or moved away) are not retried automatically.
+- The mobile app and MCP can retry these records but can't organise a new path.
+
+When a torrent you downloaded by hand is in a downloader pt-tools manages, you can also select it in the downloader web UI and click 整理入库. To have such torrents organised automatically from now on, give them a category or tag in the downloader, add it to the scope in the organise settings (整理设置) and turn on Periodic downloader scan (定期扫描下载器).
 
 ## Scraping
 
@@ -227,7 +257,7 @@ There is one record per video file, showing where it went, how, which trigger or
 | Skipped (跳过)   | Another file is at the target, or the torrent is a disc or has no video to organise                                                                                                                                                                                      |
 | Removed (已删除) | The files in the library have been deleted                                                                                                                                                                                                                               |
 
-Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries.
+Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. Failed or skipped records shown as 手动（指定路径） (manual, by path) also have Manual organise (手动整理): it opens the dialog with the path entered back then, so you can change the title or library and organise again.
 
 Rescrape (重新刮削) rewrites the NFO files and images of the record's movie or show (every episode of it organised in this library) with the library's current scraping settings; use it after changing the scraping content, data sources or image language, or after entering a new key under media recognition:
 
@@ -254,3 +284,5 @@ Delete library links when torrents are deleted (删种时一并删除入库链�
 **No match**: preview the torrent name under [media recognition](media-recognize.md), pick a candidate or enter a TMDB ID, then click Retry (重试) in the history; or enter the TMDB ID directly when organising by hand.
 
 **Another file is at the target**: pt-tools does not overwrite other files. If you no longer need the file in the library, delete it and retry.
+
+**How do I organise a movie I downloaded by hand, and where do the links go**: see [organising a file or folder by hand](#organising-a-file-or-folder-by-hand).

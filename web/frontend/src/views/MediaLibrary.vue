@@ -27,6 +27,7 @@ import {
 } from "@/api";
 import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
+import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import TmdbKeyNotice from "@/components/media/TmdbKeyNotice.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -814,6 +815,14 @@ function refresh() {
   ]);
 }
 
+// ---- 手动整理：指定一个文件或目录（不用加监控目录），放进所选的媒体库 ----
+const organizeVisible = ref(false);
+const organizeTarget = ref<OrganizeTarget | null>(null);
+function openManual() {
+  organizeTarget.value = { source_path: "" };
+  organizeVisible.value = true;
+}
+
 onMounted(refresh);
 </script>
 
@@ -823,6 +832,9 @@ onMounted(refresh);
       >把下载完的电影与剧集按模板放进媒体库，写好 NFO 与海报，再通知媒体服务器扫描</PtHeadSub
     >
     <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button data-testid="ml-manual" @click="openManual">
+        <PtIcon name="folder-open" :size="15" /><span>手动整理</span>
+      </el-button>
       <el-button data-testid="ml-refresh" @click="refresh">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
@@ -1203,7 +1215,7 @@ onMounted(refresh);
           <p class="ml-tip ml-tip--top">
             放进这些目录的视频（不是下载器里的种子，例如手动拷进来的、别的工具下载的）按媒体库整理：目录下的每一项（一个文件，或一个文件夹）当作一个种子，按名字识别。最近
             2
-            分钟里还在改动的先不整理；文件夹里后来多了几集时再整理新的那几集。不要监控下载器的下载目录（那里的种子由上面的自动整理与定期扫描处理），也不能是媒体库的目录。
+            分钟里还在改动的先不整理；文件夹里后来多了几集时再整理新的那几集。不要监控下载器的下载目录（那里的种子由上面的自动整理与定期扫描处理），也不能是媒体库的目录。要马上整理某个文件或文件夹（不用加监控目录），点页面上方的「手动整理」。
           </p>
           <div
             v-if="watchDS.error.value"
@@ -1900,6 +1912,8 @@ onMounted(refresh);
         >
       </template>
     </el-dialog>
+
+    <OrganizeDialog v-model="organizeVisible" :target="organizeTarget" />
   </div>
 </template>
 

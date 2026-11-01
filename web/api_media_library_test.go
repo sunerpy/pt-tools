@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -338,4 +339,82 @@ func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {
 	_, err = os.Stat(target)
 	assert.ErrorIs(t, err, os.ErrNotExist, "连库里的文件一起删")
 	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id, "").Code)
+}
+
+// 手动指定一个文件整理：网页会话的预览与整理两个路由收 source_path；整理历史带上当时填的路径，重试照常；
+// 路径不对、来源不止一种时回 400
+func TestOrganizeAPI_SourcePath(t *testing.T) {
+	e := newOrganizeServer(t)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPut, "/api/media/organize/settings", `{"min_video_mb":1}`).Code)
+	in := filepath.Join(t.TempDir(), "incoming")
+	require.NoError(t, os.MkdirAll(in, 0o755))
+	src := filepath.Join(in, "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi.mkv")
+	require.NoError(t, os.WriteFile(src, make([]byte, 2<<20), 0o644))
+	// 最近 2 分钟里还在改动的不整理（可能还在复制）
+	old := time.Now().Add(-10 * time.Minute)
+	require.NoError(t, os.Chtimes(src, old, old))
+	body := `{"source_path":` + jsonPath(src) + `}`
+
+	w := serveAuthed(e.mux, http.MethodPost, "/api/media/organize/preview", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var plan struct {
+		SourcePath     string `json:"source_path"`
+		DownloaderID   uint   `json:"downloader_id"`
+		DownloaderName string `json:"downloader_name"`
+		Problem        string `json:"problem"`
+		Items          []struct {
+			Target string `json:"target"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &plan))
+	require.Empty(t, plan.Problem)
+	assert.Equal(t, src, plan.SourcePath)
+	assert.Zero(t, plan.DownloaderID)
+	assert.Equal(t, "指定路径", plan.DownloaderName)
+	require.Len(t, plan.Items, 1)
+	target := filepath.Join(e.library, "肖申克的救赎 (1994)", "肖申克的救赎 (1994) - 1080p BluRay H.264.mkv")
+	assert.Equal(t, target, plan.Items[0].Target)
+	_, err := os.Stat(target)
+	assert.ErrorIs(t, err, os.ErrNotExist, "预览不动文件")
+
+	missing := `{"source_path":` + jsonPath(filepath.Join(in, "nope.mkv")) + `}`
+	for _, bad := range []string{
+		`{"source_path":"rel"}`,
+		missing,
+		`{"downloader_id":1,"hash":"hash1","source_path":` + jsonPath(src) + `}`,
+		`{"source_path":` + jsonPath(e.library) + `}`,
+	} {
+		for _, route := range []string{"/api/media/organize/preview", "/api/media/organize"} {
+			w = serveAuthed(e.mux, http.MethodPost, route, bad)
+			assert.Equal(t, http.StatusBadRequest, w.Code, route+" "+bad+" "+w.Body.String())
+		}
+	}
+	assert.Contains(t, serveAuthed(e.mux, http.MethodPost, "/api/media/organize/preview", missing).Body.String(), "找不到")
+
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/organize", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"created":1`)
+	_, err = os.Stat(target)
+	require.NoError(t, err)
+
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history?q=Shawshank", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page struct {
+		Items []struct {
+			ID             uint   `json:"id"`
+			ManualPath     string `json:"manual_path"`
+			DownloaderName string `json:"downloader_name"`
+			Trigger        string `json:"trigger"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, src, page.Items[0].ManualPath, "带上当时填的路径")
+	assert.Equal(t, "指定路径", page.Items[0].DownloaderName)
+	assert.Equal(t, "manual", page.Items[0].Trigger)
+
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/history/"+strconv.Itoa(int(page.Items[0].ID))+"/retry", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"done":1`, "已经在库里")
 }

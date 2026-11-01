@@ -3395,13 +3395,25 @@ export interface MediaServerInfo {
   libraries?: number;
 }
 
-export interface OrganizeRequest {
-  downloader_id: number;
-  hash: string;
+/** 两种整理请求共用的可选项：指定条目（类型与 TMDB 编号一起给）与媒体库；不给时自动识别、按类型选库 */
+interface OrganizeRequestOptions {
   media_type?: MediaKind;
   tmdb_id?: number;
   library_id?: number;
 }
+
+/** 整理下载器里的一个种子 */
+export interface TorrentOrganizeRequest extends OrganizeRequestOptions {
+  downloader_id: number;
+  hash: string;
+}
+
+/** 手动整理 pt-tools 里看到的一个文件或文件夹（只有网页会话能用，App API 不收） */
+export interface PathOrganizeRequest extends OrganizeRequestOptions {
+  source_path: string;
+}
+
+export type OrganizeRequest = TorrentOrganizeRequest | PathOrganizeRequest;
 
 export type OrganizeItemStatus = "pending" | "done" | "exists" | "replace" | "failed";
 
@@ -3440,6 +3452,10 @@ export interface OrganizePlan {
   skipped?: { file: { rel: string; path: string; size: number }; reason: string }[];
   /** 整个种子整理不了的原因 */
   problem?: string;
+  /** 手动指定路径整理时是规整后的路径（改成按种子整理时没有） */
+  source_path?: string;
+  /** 不挡整理的说明（例如指定的路径是下载器里的种子，改成了按种子整理） */
+  notes?: string[];
 }
 
 export interface OrganizeResult {
@@ -3482,6 +3498,8 @@ export interface MediaHistoryItem {
   trigger: "auto" | "scan" | "manual" | "watch";
   /** 目录监控的目录（不是下载器里的种子时） */
   watch_dir_id?: number;
+  /** 手动指定路径整理的记录当时填的路径（别的记录没有） */
+  manual_path?: string;
   subtitles: number;
   /** 记录里记着 pt-tools 放进库的文件（跳过、失败的记录也可能有），可以连文件删 */
   has_files: boolean;

@@ -277,6 +277,22 @@ func TestAppMediaLibraryOrganize(t *testing.T) {
 	} {
 		assert.Equal(t, http.StatusBadRequest, appAsWith(t, e.srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", bad, "app:write").Code, bad)
 	}
+	// 手动指定路径整理只给网页会话：App API（也是 MCP 与远程设备走的路）不收 source_path，令牌不能让 pt-tools 读一个任意路径
+	for _, bad := range []string{`{"source_path":"/tmp/x"}`, `{"downloader_id":1,"hash":"hash1","source_path":"/tmp/x"}`} {
+		for _, c := range []struct {
+			h     http.HandlerFunc
+			path  string
+			scope string
+		}{
+			{e.srv.appOrganizePreview, "/api/app/v1/media/organize/preview", "app:read"},
+			{e.srv.appOrganize, "/api/app/v1/media/organize", "app:write"},
+		} {
+			bw := appAsWith(t, c.h, http.MethodPost, c.path, bad, c.scope)
+			require.Equal(t, http.StatusBadRequest, bw.Code, c.path+" "+bad)
+			assert.Equal(t, "invalid_body", errorCode(t, bw), c.path+" "+bad)
+			assertNoSecrets(t, bw.Body.Bytes())
+		}
+	}
 
 	w = appAsWith(t, e.srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", body, "app:write")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

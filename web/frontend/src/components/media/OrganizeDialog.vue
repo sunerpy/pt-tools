@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /*
- * 整理入库（路线图 M10）：任务列表与下载器 Web UI 共用。打开时先预览（识别出的条目、选中的媒体库、
- * 每个文件放到哪里），确认后再整理；识别不对时可以填 TMDB 编号、换媒体库后重新预览。
+ * 整理入库（路线图 M10）：任务列表与下载器 Web UI 整理一个种子，整理历史与媒体库页手动整理一个文件或目录（指定路径）。
+ * 打开时先预览（识别出的条目、选中的媒体库、每个文件放到哪里），确认后再整理；识别不对时可以填 TMDB 编号、
+ * 换媒体库后重新预览。指定路径时先填路径再预览，改了路径要重新预览才能整理。
  */
 import {
   type MediaKind,
@@ -26,11 +27,10 @@ import {
 } from "@/utils/media";
 import { computed, ref, watch } from "vue";
 
-export interface OrganizeTarget {
-  downloader_id: number;
-  hash: string;
-  name?: string;
-}
+/** 整理什么：下载器里的一个种子，或 pt-tools 里看到的一个文件或文件夹（source_path 为空时等用户填） */
+export type OrganizeTarget =
+  | { downloader_id: number; hash: string; name?: string }
+  | { source_path: string; name?: string };
 
 const props = defineProps<{ target: OrganizeTarget | null }>();
 const visible = defineModel<boolean>({ default: false });
@@ -53,12 +53,24 @@ const override = ref<{ type: MediaKind; id: number | undefined; library: number 
   library: undefined,
 });
 
+/** 指定路径：输入框里的路径，与上次预览用的路径（改了路径要重新预览才能整理） */
+const pathMode = computed(() => Boolean(props.target && "source_path" in props.target));
+const sourcePath = ref("");
+const previewedPath = ref<string | null>(null);
+/** 预览的序号：先发的预览晚回来时不覆盖后发的（指定路径时可能连着改几次路径预览） */
+let previewSeq = 0;
+
 function request(): OrganizeRequest | null {
-  if (!props.target) return null;
-  const req: OrganizeRequest = {
-    downloader_id: props.target.downloader_id,
-    hash: props.target.hash,
-  };
+  const t = props.target;
+  if (!t) return null;
+  let req: OrganizeRequest;
+  if ("source_path" in t) {
+    const p = sourcePath.value.trim();
+    if (!p) return null;
+    req = { source_path: p };
+  } else {
+    req = { downloader_id: t.downloader_id, hash: t.hash };
+  }
   if (override.value.id && override.value.id > 0) {
     req.media_type = override.value.type;
     req.tmdb_id = override.value.id;
@@ -70,28 +82,50 @@ function request(): OrganizeRequest | null {
 async function preview() {
   const req = request();
   if (!req) return;
+  const seq = ++previewSeq;
   loading.value = true;
   loadError.value = "";
   plan.value = null;
   posterFailed.value = false;
+  previewedPath.value = "source_path" in req ? req.source_path : null;
   try {
-    plan.value = await organizeApi.preview(req);
+    const got = await organizeApi.preview(req);
+    if (seq === previewSeq) plan.value = got;
   } catch (e) {
-    loadError.value = errText(e, "预览失败");
+    if (seq === previewSeq) loadError.value = errText(e, "预览失败");
   } finally {
-    loading.value = false;
+    if (seq === previewSeq) loading.value = false;
   }
 }
 
+/** 换了要整理的东西时重新开始（种子按下载器与编号，指定路径按路径） */
+const targetKey = computed(() => {
+  const t = props.target;
+  if (!t) return "";
+  return "source_path" in t ? `path|${t.source_path}` : `${t.downloader_id}|${t.hash}`;
+});
+
 watch(
-  () => [visible.value, props.target?.downloader_id, props.target?.hash] as const,
+  () => [visible.value, targetKey.value] as const,
   ([open]) => {
     if (!open) return;
     // 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载（打开时才读，页面上没打开就不发请求）
     void loadTmdbImageBase();
     result.value = null;
     override.value = { type: "movie", id: undefined, library: undefined };
-    void preview();
+    const t = props.target;
+    if (t && "source_path" in t) {
+      // 从页头打开时路径是空的，等用户填了再预览；从整理历史打开时带着当时填的路径，马上预览
+      previewSeq++;
+      plan.value = null;
+      loadError.value = "";
+      loading.value = false;
+      previewedPath.value = null;
+      sourcePath.value = t.source_path;
+      if (sourcePath.value.trim()) void preview();
+    } else {
+      void preview();
+    }
     organizeApi
       .libraries()
       .then((l) => (libraries.value = l ?? []))
@@ -101,13 +135,23 @@ watch(
 );
 
 const pending = computed(() => plan.value?.items.filter((i) => i.status === "pending").length ?? 0);
-const canRun = computed(() => Boolean(plan.value && !plan.value.problem && pending.value > 0));
-const libraryOptions = computed(() =>
-  libraries.value.filter(
-    (l) =>
-      l.enabled &&
-      l.kind === (override.value.id ? override.value.type : plan.value?.match?.media_type),
-  ),
+/** 指定路径时输入框里的路径改过了、还没重新预览 */
+const pathChanged = computed(
+  () => pathMode.value && plan.value !== null && sourcePath.value.trim() !== previewedPath.value,
+);
+const canRun = computed(() =>
+  Boolean(plan.value && !plan.value.problem && pending.value > 0 && !pathChanged.value),
+);
+const libraryOptions = computed(() => {
+  const kind = override.value.id ? override.value.type : plan.value?.match?.media_type;
+  // 指定路径还没预览、也没填条目时不知道是电影还是剧集：列出所有启用的库（类型不对时预览会说明）
+  if (!kind && pathMode.value) return libraries.value.filter((l) => l.enabled);
+  return libraries.value.filter((l) => l.enabled && l.kind === kind);
+});
+const libraryLabel = (l: MediaLibrary) => `${l.name}（${modeLabel(l.mode)} · ${l.path}）`;
+/** 指定路径用移动整理：源文件会搬进媒体库 */
+const moveWarning = computed(
+  () => pathMode.value && plan.value?.downloader_id === 0 && plan.value?.mode === "move",
 );
 
 function planSource(source: NonNullable<OrganizePlan["source"]>): string {
@@ -151,19 +195,56 @@ const resultText = computed(() => {
   if (r.failed) parts.push(`失败 ${r.failed} 个`);
   return parts.join("，");
 });
+/** 指定路径整理有失败时说明去哪里看、怎么重来 */
+const resultHint = computed(() =>
+  pathMode.value && result.value?.failed && !result.value.queued
+    ? "失败的文件已记进「整理历史」：暂时的问题会自动重试，也可以在那里点「重试」。"
+    : "",
+);
 </script>
 
 <template>
   <el-dialog
     v-model="visible"
     class="pt-dialog"
-    title="整理入库"
+    :title="pathMode ? '手动整理' : '整理入库'"
     :width="isMobile ? '94%' : '760px'"
     append-to-body
     align-center
     data-testid="organize-dialog">
     <div class="od">
-      <div class="od__torrent">
+      <div v-if="pathMode" class="od__source">
+        <div class="od__label">源路径</div>
+        <div class="od__inline">
+          <el-input
+            v-model="sourcePath"
+            class="od__source-input"
+            clearable
+            placeholder="例如 /data/downloads/Oppenheimer.2023.2160p.BluRay.x265-FRDS"
+            data-testid="organize-source"
+            aria-label="源路径"
+            @keyup.enter="preview" />
+          <el-button
+            :loading="loading"
+            :disabled="!sourcePath.trim()"
+            data-testid="organize-source-preview"
+            @click="preview"
+            >预览</el-button
+          >
+        </div>
+        <div class="od__sub">
+          pt-tools 里看到的文件或文件夹：一部电影或一季剧集的文件夹，或单个视频文件。Docker
+          里填容器里的路径。
+        </div>
+        <div class="od__sub">
+          文件放进所选媒体库的目录，文件名按库的命名模板；要放到别的目录，先在「媒体库」里加一个库。
+        </div>
+        <div v-if="pathChanged" class="od__stale" data-testid="organize-stale">
+          路径改过了：点「预览」看新的计划，再整理
+        </div>
+      </div>
+
+      <div v-if="!pathMode || plan" class="od__torrent">
         <div class="od__name" data-testid="organize-name">
           {{ plan?.name || target?.name || "-" }}
         </div>
@@ -185,6 +266,18 @@ const resultText = computed(() => {
         <div v-if="plan.problem" class="pt-note pt-note--warn" data-testid="organize-problem">
           <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
           <span>{{ plan.problem }}</span>
+        </div>
+        <div v-if="plan.notes?.length" class="od__notes" data-testid="organize-notes">
+          <div v-for="n in plan.notes" :key="n" class="pt-note">
+            <PtIcon name="info" :size="14" class="pt-note__icon" />
+            <span>{{ n }}</span>
+          </div>
+        </div>
+        <div v-if="moveWarning" class="pt-note pt-note--warn" data-testid="organize-move-warn">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span
+            >这个媒体库用移动整理：源文件会搬进媒体库、不再留在原处。别的下载器还在做种的文件不要用移动。</span
+          >
         </div>
 
         <div v-if="plan.match" class="od__match" data-testid="organize-match">
@@ -215,6 +308,7 @@ const resultText = computed(() => {
                 >分类：{{ plan.category }}</span
               >
               <span>{{ modeLabel(plan.mode) }}</span>
+              <span>{{ plan.library.scrape ? "写 NFO 与图片" : "不刮削（媒体库关着刮削）" }}</span>
               <span class="od__path">{{ plan.library.path }}</span>
             </div>
           </div>
@@ -248,40 +342,53 @@ const resultText = computed(() => {
             <li v-for="s in plan.skipped" :key="s.file.rel">{{ s.file.rel }}：{{ s.reason }}</li>
           </ul>
         </details>
-
-        <div class="od__override">
-          <div class="od__label">识别不对、想换媒体库时</div>
-          <div class="od__inline">
-            <el-select
-              v-model="override.type"
-              class="od__kind"
-              data-testid="organize-type"
-              aria-label="类型">
-              <el-option label="电影" value="movie" />
-              <el-option label="剧集" value="tv" />
-            </el-select>
-            <el-input-number
-              v-model="override.id"
-              :min="1"
-              :controls="false"
-              placeholder="TMDB 编号"
-              data-testid="organize-tmdb-id"
-              aria-label="TMDB 编号" />
-            <el-select
-              v-model="override.library"
-              clearable
-              placeholder="按类型自动选库"
-              class="od__lib"
-              data-testid="organize-library-select"
-              aria-label="媒体库">
-              <el-option v-for="l in libraryOptions" :key="l.id" :label="l.name" :value="l.id" />
-            </el-select>
-            <el-button :loading="loading" data-testid="organize-repreview" @click="preview"
-              >重新预览</el-button
-            >
-          </div>
-        </div>
       </template>
+
+      <!-- 指定路径时没有预览结果也显示：先填条目再预览 -->
+      <div v-if="plan || pathMode" class="od__override">
+        <div class="od__label">
+          {{
+            pathMode ? "条目与媒体库（TMDB 编号留空时按名字自动识别）" : "识别不对、想换媒体库时"
+          }}
+        </div>
+        <div class="od__inline">
+          <el-select
+            v-model="override.type"
+            class="od__kind"
+            data-testid="organize-type"
+            aria-label="类型">
+            <el-option label="电影" value="movie" />
+            <el-option label="剧集" value="tv" />
+          </el-select>
+          <el-input-number
+            v-model="override.id"
+            :min="1"
+            :controls="false"
+            placeholder="TMDB 编号"
+            data-testid="organize-tmdb-id"
+            aria-label="TMDB 编号" />
+          <el-select
+            v-model="override.library"
+            clearable
+            placeholder="按类型自动选库"
+            class="od__lib"
+            data-testid="organize-library-select"
+            aria-label="媒体库">
+            <el-option
+              v-for="l in libraryOptions"
+              :key="l.id"
+              :label="libraryLabel(l)"
+              :value="l.id" />
+          </el-select>
+          <el-button
+            :loading="loading"
+            :disabled="pathMode && !sourcePath.trim()"
+            data-testid="organize-repreview"
+            @click="preview"
+            >重新预览</el-button
+          >
+        </div>
+      </div>
 
       <div
         v-if="result"
@@ -294,7 +401,8 @@ const resultText = computed(() => {
           class="pt-note__icon" />
         <span
           >{{ resultText
-          }}<template v-for="m in result.messages ?? []" :key="m"><br />{{ m }}</template></span
+          }}<template v-for="m in result.messages ?? []" :key="m"><br />{{ m }}</template
+          ><template v-if="resultHint"><br />{{ resultHint }}</template></span
         >
       </div>
     </div>
@@ -327,6 +435,28 @@ const resultText = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.od__source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.od__source-input {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.od__stale {
+  font-size: 12px;
+  color: var(--pt-warn);
+}
+
+.od__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .od__name {

@@ -2,7 +2,7 @@ package organize
 
 import (
 	"context"
-	"crypto/sha1" //nolint:gosec // 只用来给目录监控的一项取个短标识，不涉及安全
+	"crypto/sha1" //nolint:gosec // 只用来给目录监控的一项与指定的路径取个短标识，不涉及安全
 	"errors"
 	"fmt"
 	"os"
@@ -26,13 +26,18 @@ type Request struct {
 	// WatchDirID 与 Entry 是目录监控里的一项（目录下的一个文件或文件夹）：不为 0 时不看下载器与种子
 	WatchDirID uint   `json:"watch_dir_id,omitempty"`
 	Entry      string `json:"entry,omitempty"`
+	// SourcePath 是手动指定的路径：pt-tools 里看到的文件或文件夹；给了它就不看下载器与监控目录
+	SourcePath string `json:"source_path,omitempty"`
 	MediaType  string `json:"media_type,omitempty"`
 	TMDBID     int    `json:"tmdb_id,omitempty"`
 	LibraryID  uint   `json:"library_id,omitempty"`
 }
 
-// queueHash 是排队去重、退避与重试分组用的种子标识：目录监控的一项用 watchHash。
+// queueHash 是排队去重、退避与重试分组用的种子标识：目录监控的一项用 watchHash，指定的路径用 pathHash。
 func (r Request) queueHash() string {
+	if r.SourcePath != "" {
+		return pathHash(r.SourcePath)
+	}
 	if r.WatchDirID > 0 {
 		return watchHash(r.WatchDirID, r.Entry)
 	}
@@ -43,6 +48,42 @@ func (r Request) queueHash() string {
 func watchHash(dirID uint, entry string) string {
 	sum := sha1.Sum([]byte(entry))
 	return fmt.Sprintf("watch:%d:%x", dirID, sum[:8])
+}
+
+// pathHash 是手动指定的路径（规整过的）的标识：记在整理记录的 InfoHash 里（不是种子的 info hash），重试、去重按它分组。
+func pathHash(p string) string {
+	sum := sha1.Sum([]byte(p))
+	return fmt.Sprintf("%s%x", pathHashPrefix, sum[:8])
+}
+
+// normalized 检查并规整请求：指定条目时类型与编号要对得上；来源（下载器里的种子、监控目录里的一项、一个路径）只能有一种；
+// 源路径按 cleanSource 检查，写回规整后的路径。
+func (r Request) normalized() (Request, error) {
+	if r.TMDBID < 0 || (r.TMDBID > 0 && r.MediaType != tmdb.KindMovie && r.MediaType != tmdb.KindTV) {
+		return r, fmt.Errorf("%w: 指定条目时要写明类型（movie 或 tv）与 TMDB 编号", ErrInvalid)
+	}
+	r.SourcePath = strings.TrimSpace(r.SourcePath)
+	sources := 0
+	if r.DownloaderID != 0 || strings.TrimSpace(r.Hash) != "" {
+		sources++
+	}
+	if r.WatchDirID != 0 || strings.TrimSpace(r.Entry) != "" {
+		sources++
+	}
+	if r.SourcePath != "" {
+		sources++
+	}
+	if sources > 1 {
+		return r, fmt.Errorf("%w: 整理的来源只能选一种：下载器里的种子、监控目录里的一项，或一个路径", ErrInvalid)
+	}
+	if r.SourcePath != "" {
+		p, err := cleanSource(r.SourcePath)
+		if err != nil {
+			return r, err
+		}
+		r.SourcePath = p
+	}
+	return r, nil
 }
 
 // 计划里每个文件的状态。
@@ -107,7 +148,9 @@ type Plan struct {
 	LocalPath      string `json:"local_path"`
 	Mapped         bool   `json:"mapped"`
 	// WatchDirID 是目录监控的目录（这次整理的不是下载器里的种子时）
-	WatchDirID uint                 `json:"watch_dir_id,omitempty"`
+	WatchDirID uint `json:"watch_dir_id,omitempty"`
+	// SourcePath 是手动指定的路径（规整过的；这次整理的是一个路径、不是下载器里的种子或监控目录里的一项时）
+	SourcePath string               `json:"source_path,omitempty"`
 	Match      *tmdb.Result         `json:"match,omitempty"`
 	Source     string               `json:"source,omitempty"`
 	Library    *models.MediaLibrary `json:"library,omitempty"`
@@ -117,9 +160,15 @@ type Plan struct {
 	Items    []PlanItem      `json:"items"`
 	Skipped  []transfer.Skip `json:"skipped,omitempty"`
 	Problem  string          `json:"problem,omitempty"`
+	// Notes 是不挡整理的说明（例如指定的路径是下载器里的种子、改成了按种子整理）
+	Notes []string `json:"notes,omitempty"`
 
 	// retryable 表示过一会儿再试可能就好了（TMDB 暂时不能访问、文件操作失败）
 	retryable bool
+	// nameHit 是和指定的路径同名的下载器里的种子（pt-tools 看不到那个种子的文件，按名字认的）；
+	// torrentErr 是认不了的原因（读不了某个下载器）。移动整理时看它们，见 finishPlan
+	nameHit    *torrentHit
+	torrentErr error
 	// noRecord 表示不写整理记录（种子没下载完）
 	noRecord   bool
 	contentSrc string
@@ -130,6 +179,14 @@ type Plan struct {
 	tmdbClient *tmdb.Client
 	// root 是这次整理放进的目录：库目录，按二级分类放进子目录时是库目录下的分类目录
 	root string
+}
+
+// otherNote 是同一个位置上换了文件时写在整理记录消息前面的说明（见 markOtherFiles）。
+func (p *Plan) otherNote() string {
+	if p.SourcePath != "" {
+		return pathOtherFileNote
+	}
+	return otherFileNote
 }
 
 // base 是这次整理放进的目录（见 root）。
@@ -277,13 +334,23 @@ func priorEntry(p *Plan) (string, int) {
 	return "", 0
 }
 
+// buildPlan 检查请求，按来源分给指定的路径、目录监控的一项或下载器里的种子。
 func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
-	if req.TMDBID < 0 || (req.TMDBID > 0 && req.MediaType != tmdb.KindMovie && req.MediaType != tmdb.KindTV) {
-		return nil, fmt.Errorf("%w: 指定条目时要写明类型（movie 或 tv）与 TMDB 编号", ErrInvalid)
+	req, err := req.normalized()
+	if err != nil {
+		return nil, err
 	}
-	if req.WatchDirID > 0 {
+	switch {
+	case req.SourcePath != "":
+		return s.buildPathPlan(ctx, req)
+	case req.WatchDirID > 0:
 		return s.buildWatchPlan(ctx, req)
 	}
+	return s.buildTorrentPlan(ctx, req)
+}
+
+// buildTorrentPlan 是下载器里一个种子的整理计划：读种子与文件列表，按路径映射换成 pt-tools 里的路径。
+func (s *Service) buildTorrentPlan(ctx context.Context, req Request) (*Plan, error) {
 	if req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "" {
 		return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
 	}
@@ -344,7 +411,7 @@ func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 	return s.finishPlan(ctx, p, req, t, tfs, settings)
 }
 
-// finishPlan 是下载器的种子与目录监控的一项共用的部分：选出视频、读整理记录、识别、选媒体库、算目标。
+// finishPlan 是下载器的种子、目录监控的一项与指定的路径共用的部分：选出视频、读整理记录、识别、选媒体库、算目标。
 func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downloader.Torrent, tfs []transfer.File, settings Settings) (*Plan, error) {
 	sel := transfer.Select(tfs, int64(settings.MinVideoMB)<<20)
 	p.Skipped = append(p.Skipped, sel.Skipped...)
@@ -358,8 +425,8 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 	}
 	for _, v := range sel.Videos {
 		it := PlanItem{Rel: v.Rel, Source: v.Path, Size: v.Size, Status: ItemPending}
-		if p.WatchDirID > 0 {
-			// 目录监控按源文件的编号认同一个位置上是不是换了文件（见 markOtherFiles）；移动整理以后就读不到了，先读
+		if p.WatchDirID > 0 || p.SourcePath != "" {
+			// 目录监控与指定的路径按源文件的编号认同一个位置上是不是换了文件（见 markOtherFiles）；移动整理以后就读不到了，先读
 			it.sourceID, _ = transfer.FileID(v.Path)
 		}
 		p.Items = append(p.Items, it)
@@ -397,9 +464,30 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 			p.Problem = "「" + p.Name + "」是下载器里的种子（" + owner + "），目录监控不移动下载器里的种子：把媒体库改用硬链接，或不要监控下载目录"
 			return p, nil
 		}
+	case p.SourcePath != "":
+		// 指定的路径认种子时只剩按名字认出的或确认不了的（见 buildPathPlan）：可能就是下载器里的种子，移走了没法做种
+		if p.torrentErr != nil {
+			p.Problem, p.retryable = "移动整理以前要确认「"+p.Name+"」不是下载器里的种子："+p.torrentErr.Error(), true
+			return p, nil
+		}
+		if p.nameHit != nil {
+			p.Problem = fmt.Sprintf("「%s」和下载器里的种子同名（%s：%s），可能就是它：移动整理会让它没法做种。把媒体库改用硬链接，或配好路径映射后在「下载器 Web UI」里按种子整理",
+				p.Name, p.nameHit.DownloaderName, p.nameHit.Name)
+			return p, nil
+		}
 	case t.State != downloader.TorrentPaused && t.State != downloader.TorrentStopped:
 		p.Problem = "种子还在做种，不能用移动整理：暂停种子后再整理，或把媒体库改用硬链接"
 		return p, nil
+	}
+	if p.SourcePath != "" && p.Mode != models.MediaModeMove {
+		// 不移动时照常整理，写明可能是下载器里的种子
+		if p.torrentErr != nil {
+			p.Notes = append(p.Notes, fmt.Sprintf("没能确认「%s」是不是下载器里的种子（%v）：是的话建议在「下载器 Web UI」里按种子整理", p.Name, p.torrentErr))
+		}
+		if p.nameHit != nil {
+			p.Notes = append(p.Notes, fmt.Sprintf("「%s」和下载器「%s」里的种子「%s」同名（pt-tools 里看不到那个种子的文件，按名字认的）：如果是同一份数据，建议配好路径映射后按种子整理",
+				p.Name, p.nameHit.DownloaderName, p.nameHit.Name))
+		}
 	}
 	s.planItems(ctx, p, sel.Subtitles)
 	return p, nil
@@ -437,8 +525,8 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 		p.tmdbClient = c
 	}
 	var info models.TorrentInfo
-	if p.WatchDirID == 0 {
-		// 目录监控的一项不是种子：没有站点给的标题与 IMDb 编号
+	if p.WatchDirID == 0 && p.SourcePath == "" {
+		// 目录监控的一项与指定的路径不是种子：没有站点给的标题与 IMDb 编号
 		_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", p.Hash).Order("id DESC").Limit(1).Find(&info).Error
 	}
 	p.siteName, p.doubanID = info.SiteName, info.DoubanID
@@ -500,7 +588,7 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	}
 	kind := p.Match.MediaType
 	wanted, follow := req.LibraryID, false
-	if wanted == 0 && p.WatchDirID == 0 {
+	if wanted == 0 && p.WatchDirID == 0 && p.SourcePath == "" {
 		if f := s.followLibrary(); f != nil {
 			id, found, err := f(ctx, p.DownloaderID, p.Hash)
 			if err != nil {

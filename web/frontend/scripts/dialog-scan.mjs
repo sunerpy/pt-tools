@@ -161,7 +161,7 @@ const NOT_ON_BOARD = {
   "views/MediaHistory.vue":
     "整理历史页（路线图 M10）晚于画板 40 定稿：删除记录（可连库里的文件一起删）的确认弹窗不在那张清点图里",
   "components/media/OrganizeDialog.vue":
-    "「整理入库」（路线图 M10）晚于画板 40 定稿：任务列表与下载器 Web UI 共用这个弹窗",
+    "「整理入库」（路线图 M10）晚于画板 40 定稿：任务列表与下载器 Web UI 共用这个弹窗；整理历史与媒体库页用它手动整理一个文件或目录（标题是「手动整理」）",
   "views/MediaSubscriptions.vue":
     "订阅页（路线图 M11）晚于画板 40 定稿：豆瓣想看的条目弹窗不在那张清点图里",
   "components/media/SubscribeDialog.vue":

@@ -2,10 +2,12 @@
 /*
  * 整理历史（路线图 M10）：每个视频文件一条记录，写明整理到哪里、用什么方式、成功还是失败，以及刮削的结果。
  * 失败的可以重试（整个种子重新整理）；整理好的可以重新刮削（整部电影或剧集）；删除记录时可以连库里整理出的文件一起删。
+ * 页头的「手动整理」指定一个文件或目录整理；指定路径整理失败或跳过的记录可以带着当时的路径再手动整理（换条目或库）。
  * 画板没有这一页，沿用列表页的样式：页头 + 筛选 + 表格，手机是行卡。
  */
 import { type MediaHistoryItem, type MediaTransferStatus, organizeApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -139,6 +141,19 @@ async function confirmDelete() {
 
 const canRetry = (r: MediaHistoryItem) => r.status === "failed" || r.status === "skipped";
 
+// ---- 手动整理（指定一个文件或目录） ----
+const organizeVisible = ref(false);
+const organizeTarget = ref<OrganizeTarget | null>(null);
+/** 打开「手动整理」：从页头打开时路径是空的；从一条记录打开时带上当时填的路径 */
+function openManual(path = "") {
+  organizeTarget.value = { source_path: path };
+  organizeVisible.value = true;
+}
+/** 指定路径整理失败或跳过的记录：可以带着原路径重新打开，换条目或库 */
+const canManual = (r: MediaHistoryItem) => canRetry(r) && Boolean(r.manual_path);
+const rowTrigger = (r: MediaHistoryItem) =>
+  r.manual_path ? "手动（指定路径）" : triggerLabel(r.trigger);
+
 onMounted(load);
 </script>
 
@@ -146,6 +161,9 @@ onMounted(load);
   <div class="pt-cards pt-cards--wide">
     <PtHeadSub>每个视频文件一条记录：整理到哪里、用什么方式、成功还是失败</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button data-testid="mh-manual" @click="openManual()">
+        <PtIcon name="folder-open" :size="15" /><span>手动整理</span>
+      </el-button>
       <el-button data-testid="mh-refresh" @click="load">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
@@ -184,7 +202,7 @@ onMounted(load);
         :sub="
           ds.errorText.value ||
           (ds.state.value === 'empty'
-            ? '在「媒体库」里打开自动整理，或在任务列表、下载器 Web UI 里手动整理'
+            ? '在「媒体库」里打开自动整理，或点「手动整理」指定一个文件或目录，也可以在任务列表、下载器 Web UI 里整理种子'
             : '')
         "
         data-testid="mh-state" />
@@ -235,7 +253,7 @@ onMounted(load);
             <PtStatusPill :tone="historyStatus(row.status).tone" size="sm">{{
               historyStatus(row.status).label
             }}</PtStatusPill>
-            <span class="mh-sub mh-trigger">{{ triggerLabel(row.trigger) }}</span>
+            <span class="mh-sub mh-trigger">{{ rowTrigger(row) }}</span>
             <PtStatusPill
               v-if="scrapeStatus(row.scrape_status)"
               class="mh-scrape"
@@ -251,7 +269,7 @@ onMounted(load);
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="" width="150" align="right">
+        <el-table-column label="" width="190" align="right">
           <template #default="{ row }">
             <el-button
               v-if="canRetry(row)"
@@ -260,6 +278,13 @@ onMounted(load);
               :data-testid="`mh-retry-${row.id}`"
               @click="retry(row)"
               >重试</el-button
+            >
+            <el-button
+              v-if="canManual(row)"
+              link
+              :data-testid="`mh-manual-${row.id}`"
+              @click="openManual(row.manual_path)"
+              >手动整理</el-button
             >
             <el-button
               v-if="canRescrape(row)"
@@ -282,7 +307,7 @@ onMounted(load);
             <span class="mh-full">{{ fileName(r.source_path) }}</span>
             <span v-if="r.target_path" class="mh-full">→ {{ r.target_path }}</span>
             <span
-              >{{ modeLabel(r.mode) }} · {{ triggerLabel(r.trigger) }} ·
+              >{{ modeLabel(r.mode) }} · {{ rowTrigger(r) }} ·
               {{ formatShortDateTime(r.updated_at) }}</span
             >
             <span v-if="r.size">{{ formatBytes(r.size) }}</span>
@@ -304,6 +329,9 @@ onMounted(load);
               :loading="retrying === r.id"
               @click="retry(r)"
               >重试</el-button
+            >
+            <el-button v-if="canManual(r)" size="small" @click="openManual(r.manual_path)"
+              >手动整理</el-button
             >
             <el-button
               v-if="canRescrape(r)"
@@ -358,6 +386,8 @@ onMounted(load);
         >
       </template>
     </el-dialog>
+
+    <OrganizeDialog v-model="organizeVisible" :target="organizeTarget" @done="load" />
   </div>
 </template>
 

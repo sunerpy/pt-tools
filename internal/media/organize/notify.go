@@ -82,9 +82,12 @@ func noticeText(p *Plan, created []*PlanItem) (string, string) {
 	if q := vars(m, created[0].meta, p.meta).Quality; q != "" {
 		lines = append(lines, "画质："+q)
 	}
-	if p.WatchDirID > 0 {
+	switch {
+	case p.SourcePath != "":
+		lines = append(lines, "媒体库："+p.Library.Name, "手动整理："+p.Name)
+	case p.WatchDirID > 0:
 		lines = append(lines, "媒体库："+p.Library.Name, "来自目录监控："+p.Name)
-	} else {
+	default:
 		lines = append(lines, "媒体库："+p.Library.Name, "种子："+p.Name)
 	}
 	if poster := p.posterURL(m.PosterPath); poster != "" {
