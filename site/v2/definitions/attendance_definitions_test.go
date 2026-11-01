@@ -20,6 +20,7 @@ var attendanceUnsupported = map[string]string{
 	"mteam":        "没有签到",
 	"springsunday": "没有签到",
 	"byrpt":        "没有签到",
+	"tjupt":        "禁止用脚本或程序签到",
 }
 
 // 不是 NexusPHP、但驱动自己实现了签到的站点（走站点的签到接口）。
