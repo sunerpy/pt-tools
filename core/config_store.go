@@ -609,7 +609,9 @@ func (s *ConfigStore) AdminCount() (int64, error) {
 	return cnt, err
 }
 
-// UpsertSiteWithRSS 原子性保存站点与 RSS，并进行严格校验
+// UpsertSiteWithRSS 原子性保存站点与 RSS，并进行严格校验。
+// sc.RSS 是这个站点保存以后的全部 RSS：带着这个站点编号的原地更新（编号不变），编号为 0 或不是这个站点的新建，
+// 库里有、sc.RSS 里没有的连同过滤规则关联一起删掉；同一个编号出现两次时报错，什么都不保存。
 func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteConfig) error {
 	// 严格校验：
 	// 1) 认证方式必填且合法；
@@ -747,16 +749,59 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			return err
 		}
 
-		// 替换 RSS
-		if err := tx.Where("site_id = ?", row.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
+		// 按编号原地更新 RSS，不删掉重建：暂存记录的所有者、通知里的按钮都按编号认 RSS，保存以后编号不能变。
+		// 编号为 0 或不是这个站点的新建一行；库里有、这次没传的连同它的过滤规则关联一起删掉。
+		var stored []models.RSSSubscription
+		if err := tx.Where("site_id = ?", row.ID).Find(&stored).Error; err != nil {
 			return err
+		}
+		storedByID := make(map[uint]*models.RSSSubscription, len(stored))
+		for i := range stored {
+			storedByID[stored[i].ID] = &stored[i]
+		}
+		passed := make(map[uint]bool, len(sc.RSS))
+		for i, r := range sc.RSS {
+			if r.ID == 0 {
+				continue
+			}
+			if passed[r.ID] {
+				return fmt.Errorf("第 %d 条 RSS 的编号与之前的重复: %d", i+1, r.ID)
+			}
+			passed[r.ID] = true
 		}
 
 		assocDB := models.NewRSSFilterAssociationDB(tx)
 
+		for _, cur := range stored {
+			if passed[cur.ID] {
+				continue
+			}
+			if err := assocDB.DeleteByRSSID(cur.ID); err != nil {
+				return err
+			}
+			if err := tx.Where("site_id = ? AND id = ?", row.ID, cur.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
+				return err
+			}
+		}
+
 		for _, r := range sc.RSS {
 			if r.IntervalMinutes < models.MinIntervalMinutes {
 				r.IntervalMinutes = models.MinIntervalMinutes
+			}
+			if cur, ok := storedByID[r.ID]; ok {
+				// 改的字段与新建时写的相同；示例标记沿用库里的
+				cur.Name, cur.URL, cur.Category, cur.Tag = r.Name, r.URL, r.Category, r.Tag
+				cur.IntervalMinutes, cur.DownloaderID, cur.DownloadPath = r.IntervalMinutes, r.DownloaderID, r.DownloadPath
+				cur.PauseOnFreeEnd, cur.FilterMode = r.PauseOnFreeEnd, r.FilterMode
+				cur.NotifyMode, cur.NotifyConfIDs, cur.MaxNotificationsPerHour = r.NotifyMode, r.NotifyConfIDs, r.MaxNotificationsPerHour
+				if err := tx.Save(cur).Error; err != nil {
+					return err
+				}
+				// 过滤规则关联整体换成这次传的，空列表就清空
+				if err := assocDB.SetFilterRulesForRSS(cur.ID, r.FilterRuleIDs); err != nil {
+					return err
+				}
+				continue
 			}
 			rr := models.RSSSubscription{
 				SiteID:                  row.ID,
