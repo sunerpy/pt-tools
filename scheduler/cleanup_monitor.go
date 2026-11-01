@@ -15,7 +15,6 @@ import (
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
-	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -333,17 +332,27 @@ func (c *CleanupMonitor) decide(cfg *models.SettingsGlobal, dl downloader.Downlo
 		return res, cleanupPlan{}
 	}
 
-	protected, candidates := c.splitProtectedWhy(cfg, managed)
+	protected, candidates, err := c.splitProtectedWhy(cfg, managed)
+	if err != nil {
+		// 读不到 H&R 信息时分不清哪些种子受保护：这一轮不删
+		res.Error = err.Error() + "，这一轮不删"
+		return res, cleanupPlan{}
+	}
 	res.Protected, res.Candidates = len(protected), len(candidates)
 	for _, p := range protected {
 		res.ProtectedItems = append(res.ProtectedItems, itemOf(p.t, []string{p.why}))
+	}
+	brushOwned, err := c.brushOwned(dlName)
+	if err != nil {
+		res.Error = err.Error() + "，这一轮不删"
+		return res, cleanupPlan{}
 	}
 
 	reasons := map[string][]string{}
 	var toDelete []downloader.Torrent
 	for _, t := range candidates {
-		// 刷流种子由刷流任务自己的删种规则管，常规规则不碰，免得两套规则争抢；紧急清理仍然覆盖它们
-		if hasTag(t, models.BrushTagAll) {
+		// 刷流任务正在管的种子（按刷流记录认）由任务自己的删种规则管，常规规则不碰，免得两套规则争抢；紧急清理仍然覆盖它们
+		if brushOwned[strings.ToLower(t.InfoHash)] {
 			res.Brush++
 			continue
 		}
@@ -434,6 +443,24 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 			it.Name, it.SeedingH, it.Ratio, it.UploadKBs, strings.Join(it.Reasons, "；"))
 	}
 
+	// 删除锁里按重新读到的种子列表复查（见 internal.RemovalMutex）：判断之后刚点了「保留」的种子不删
+	mu := ptinternal.RemovalMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	fresh, err := dl.GetAllTorrents()
+	if err != nil {
+		res.Error = "删除前重新读种子列表失败: " + err.Error() + "，这一轮不删"
+		c.logger.Errorf("[自动删种] %s: %s", dlName, res.Error)
+		return res
+	}
+	plan, skipped := c.recheck(cfg, dl, plan, fresh)
+	if skipped > 0 {
+		note := fmt.Sprintf("%d 个种子删除前不在下载器里了，或者带上了保留、保护标签，没有删", skipped)
+		res.Notes = append(res.Notes, note)
+		c.logger.Infof("[自动删种] %s: %s", dlName, note)
+	}
+	res.Items = itemsOfPlan(res.Items, plan)
+
 	var errs []string
 	deleted := make([]downloader.Torrent, 0, len(plan.withData)+len(plan.keepData))
 	if len(plan.withData) > 0 {
@@ -462,6 +489,52 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 	c.updateDatabase(deleted, dlName)
 	c.logger.Infof("[自动删种] %s: 成功删除 %d 个种子", dlName, len(deleted))
 	return res
+}
+
+// recheck 在删除锁里按重新读到的种子列表 fresh 复查要删的种子：不在下载器里的、带上了保留或保护标签的不删。
+// 剩下的重新按共用数据分成连数据删与只删种子：复查去掉的种子可能正和要删的共用数据，不能连它的数据一起删。返回新的计划与去掉的个数。
+func (c *CleanupMonitor) recheck(cfg *models.SettingsGlobal, dl downloader.Downloader, plan cleanupPlan, fresh []downloader.Torrent) (cleanupPlan, int) {
+	byID := make(map[string]downloader.Torrent, len(fresh))
+	for _, t := range fresh {
+		byID[t.ID] = t
+	}
+	protectTags := splitTags(cfg.CleanupProtectTags)
+	var keep []downloader.Torrent
+	skipped := 0
+	for _, t := range append(append([]downloader.Torrent{}, plan.withData...), plan.keepData...) {
+		ft, ok := byID[t.ID]
+		if !ok || tagProtection(ft, protectTags) != "" {
+			skipped++
+			continue
+		}
+		keep = append(keep, ft)
+	}
+	out := cleanupPlan{withData: keep}
+	if cfg.CleanupRemoveData && len(keep) > 0 {
+		out.withData, out.keepData = downloader.NewDataSharing(fresh, downloader.FilesOf(dl)).KeepSharedData(keep)
+	}
+	return out, skipped
+}
+
+// itemsOfPlan 是复查以后还要删的条目：去掉复查拿掉的种子，按新的计划重新标「只删种子、保留数据」。
+func itemsOfPlan(items []CleanupItem, plan cleanupPlan) []CleanupItem {
+	inPlan := map[string]bool{}
+	keepData := map[string]bool{}
+	for _, t := range plan.withData {
+		inPlan[strings.ToLower(t.InfoHash)] = true
+	}
+	for _, t := range plan.keepData {
+		h := strings.ToLower(t.InfoHash)
+		inPlan[h], keepData[h] = true, true
+	}
+	out := []CleanupItem{}
+	for _, it := range items {
+		if inPlan[it.InfoHash] {
+			it.KeepData = keepData[it.InfoHash]
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func (c *CleanupMonitor) filterManagedTorrents(cfg *models.SettingsGlobal, torrents []downloader.Torrent, dlName string) []downloader.Torrent {
@@ -523,8 +596,13 @@ func (c *CleanupMonitor) getManagedHashes(dlName string) map[string]struct{} {
 
 // downloaderID 是叫这个名字的下载器在设置里的编号；查不到时为 nil。
 func (c *CleanupMonitor) downloaderID(dlName string) *uint {
+	return downloaderIDByName(c.db, dlName)
+}
+
+// downloaderIDByName 是叫这个名字的下载器在设置里的编号；查不到时为 nil。
+func downloaderIDByName(db *gorm.DB, dlName string) *uint {
 	var ds models.DownloaderSetting
-	if err := c.db.Select("id").Where("name = ?", dlName).Take(&ds).Error; err != nil {
+	if err := db.Select("id").Where("name = ?", dlName).Take(&ds).Error; err != nil {
 		return nil
 	}
 	return &ds.ID
@@ -540,8 +618,12 @@ func recordsOn(q *gorm.DB, dlID *uint, dlName string) *gorm.DB {
 	return q.Where("downloader_id = ?", *dlID)
 }
 
+// splitProtected 同 splitProtectedWhy，不带原因；读不到 H&R 信息时全部算受保护（宁可不删）。
 func (c *CleanupMonitor) splitProtected(cfg *models.SettingsGlobal, torrents []downloader.Torrent) (protected, candidates []downloader.Torrent) {
-	pt, candidates := c.splitProtectedWhy(cfg, torrents)
+	pt, candidates, err := c.splitProtectedWhy(cfg, torrents)
+	if err != nil {
+		return torrents, nil
+	}
 	for _, p := range pt {
 		protected = append(protected, p.t)
 	}
@@ -554,125 +636,34 @@ type protectedTorrent struct {
 	why string
 }
 
-// splitProtectedWhy 把种子分成受保护的（带原因）与剩下的候选。
-func (c *CleanupMonitor) splitProtectedWhy(cfg *models.SettingsGlobal, torrents []downloader.Torrent) ([]protectedTorrent, []downloader.Torrent) {
+// splitProtectedWhy 把种子分成受保护的（带命中的第一条保护规则，先 hard 后 soft，见 protection.go）与剩下的候选。
+// 读不到 H&R 信息时返回错误，调用方这一轮不删。
+func (c *CleanupMonitor) splitProtectedWhy(cfg *models.SettingsGlobal, torrents []downloader.Torrent) ([]protectedTorrent, []downloader.Torrent, error) {
+	hr, err := loadHRInfo(c.db)
+	if err != nil {
+		return nil, nil, err
+	}
 	protectTags := splitTags(cfg.CleanupProtectTags)
 	now := time.Now().Unix()
-	hrInfoMap := c.getHRInfoMap()
 	var protected []protectedTorrent
 	var candidates []downloader.Torrent
 	for _, t := range torrents {
-		if why := c.protection(cfg, t, hrInfoMap, protectTags, now); why != "" {
+		why := hardProtection(cfg, t, hr, protectTags)
+		if why == "" {
+			why = softProtection(cfg, t, now)
+		}
+		if why != "" {
 			protected = append(protected, protectedTorrent{t: t, why: why})
 			continue
 		}
 		candidates = append(candidates, t)
 	}
-	return protected, candidates
+	return protected, candidates, nil
 }
 
-// protection 是种子命中的第一条保护规则（空串表示不受保护）：下载中、最短保种时间、H&R、保护标签。
-func (c *CleanupMonitor) protection(cfg *models.SettingsGlobal, t downloader.Torrent, hrInfoMap map[string]hrInfo, protectTags []string, now int64) string {
-	if cfg.CleanupProtectDL && (t.State == downloader.TorrentDownloading || t.State == downloader.TorrentChecking) {
-		return "正在下载或校验（打开了「保护下载中的种子」）"
-	}
-	if cfg.CleanupMinRetainH > 0 && t.DateAdded > 0 {
-		retainUntil := t.DateAdded + int64(cfg.CleanupMinRetainH*3600)
-		if now < retainUntil {
-			return fmt.Sprintf("加进下载器不到 %d 小时（最短保种时间），还差 %.1f 小时", cfg.CleanupMinRetainH, float64(retainUntil-now)/3600)
-		}
-	}
-	if cfg.CleanupProtectHR {
-		if hr, ok := hrInfoMap[strings.ToLower(t.InfoHash)]; ok && hr.HasHR {
-			requiredSeedTimeS := int64(hr.HRSeedTimeH) * 3600
-			// 要求未知（站点定义里没有、站点设置也没填）时按没做满处理，一律保护（#727，和刷流的删种规则一致）
-			if requiredSeedTimeS <= 0 || t.SeedingTime < requiredSeedTimeS {
-				c.logger.Debugf("[自动删种] H&R 保护: %s (需做种%dh（0 为要求未知）, 已做种%.1fh)",
-					t.Name, hr.HRSeedTimeH, float64(t.SeedingTime)/3600)
-				if requiredSeedTimeS <= 0 {
-					return "H&R：站点没有给出做种要求，一直保护（可以在站点设置里填「H&R 做种要求」）"
-				}
-				return fmt.Sprintf("H&R：要求做种 %d 小时，已做 %.1f 小时", hr.HRSeedTimeH, float64(t.SeedingTime)/3600)
-			}
-		}
-	}
-	if len(protectTags) > 0 {
-		tTags := splitTags(t.Tags + "," + t.Category + "," + t.Label)
-		for _, pt := range protectTags {
-			if containsIgnoreCase(tTags, pt) {
-				return "带保护标签「" + pt + "」"
-			}
-		}
-	}
-	return ""
-}
-
-type hrInfo struct {
-	HasHR       bool
-	HRSeedTimeH int
-}
-
-func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
-	result := make(map[string]hrInfo)
-
-	defs := make(map[string]*v2.SiteDefinition)
-	for _, def := range v2.GetDefinitionRegistry().GetAll() {
-		defs[def.ID] = def
-	}
-	// 站点设置里填的 H&R 做种要求（#727）：站点定义里没有时用它
-	settingH := make(map[string]int)
-	var settings []struct {
-		Name        string
-		HRSeedTimeH int
-	}
-	c.db.Model(&models.SiteSetting{}).Select("name, hr_seed_time_h").Where("hr_seed_time_h > 0").Scan(&settings)
-	for _, s := range settings {
-		settingH[s.Name] = s.HRSeedTimeH
-	}
-
-	type hrRecord struct {
-		TorrentHash string
-		SiteName    string
-		HasHR       bool
-		HRSeedTimeH int
-		TorrentSize int64
-	}
-	// 活动表与归档表都看：记录归档以后，下载器里的种子照样要按 H&R 保护
-	var records, archived []hrRecord
-	const cols = "torrent_hash, site_name, has_hr, hr_seed_time_h, torrent_size"
-	c.db.Model(&models.TorrentInfo{}).Select(cols).Where("torrent_hash IS NOT NULL AND torrent_hash != ''").Find(&records)
-	c.db.Model(&models.TorrentInfoArchive{}).Select(cols).Where("torrent_hash IS NOT NULL AND torrent_hash != ''").Find(&archived)
-
-	for _, r := range append(records, archived...) {
-		hash := strings.ToLower(r.TorrentHash)
-		def := defs[r.SiteName]
-		var info hrInfo
-		switch {
-		case r.HasHR:
-			h := r.HRSeedTimeH
-			if h <= 0 {
-				// 记录上没记下要求：按站点定义算，定义里没有时用站点设置（记录写成以后才填的设置也算）
-				h = v2.ResolveHRSeedTimeH(def, r.TorrentSize, settingH[r.SiteName])
-			}
-			info = hrInfo{HasHR: true, HRSeedTimeH: h}
-		case def != nil && def.HREnabled:
-			// 整站 H&R：按体积算要求
-			info = hrInfo{HasHR: true, HRSeedTimeH: v2.ResolveHRSeedTimeH(def, r.TorrentSize, settingH[r.SiteName])}
-		default:
-			continue
-		}
-		cur, seen := result[hash]
-		switch {
-		case !seen:
-			result[hash] = info
-		case cur.HRSeedTimeH <= 0 || info.HRSeedTimeH <= 0:
-			// 同一个哈希有几条记录（跨站辅种等）：取最严的——有一条要求未知就按未知保护
-			result[hash] = hrInfo{HasHR: true}
-		default:
-			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: max(cur.HRSeedTimeH, info.HRSeedTimeH)}
-		}
-	}
-	return result
+// brushOwned 是这台下载器上刷流任务正在管的种子（见 brushOwnedHashes）。
+func (c *CleanupMonitor) brushOwned(dlName string) (map[string]bool, error) {
+	return brushOwnedHashes(c.db, c.downloaderID(dlName))
 }
 
 func (c *CleanupMonitor) shouldDelete(cfg *models.SettingsGlobal, t downloader.Torrent, dlName string) bool {
@@ -945,12 +936,14 @@ func (c *CleanupMonitor) calcPriority(t downloader.Torrent) float64 {
 	return score
 }
 
+// updateDatabase 把删掉的种子在这台下载器上的记录标成已过期（按下载器编号认，见 recordsOn）。
 func (c *CleanupMonitor) updateDatabase(deleted []downloader.Torrent, dlName string) {
+	dlID := c.downloaderID(dlName)
 	for _, t := range deleted {
 		hash := strings.ToLower(t.InfoHash)
 		now := time.Now()
-		c.db.Model(&models.TorrentInfo{}).
-			Where("LOWER(torrent_hash) = ? AND downloader_name = ?", hash, dlName).
+		recordsOn(c.db.Model(&models.TorrentInfo{}), dlID, dlName).
+			Where("LOWER(torrent_hash) = ?", hash).
 			Updates(map[string]any{
 				"is_expired":      true,
 				"last_check_time": &now,

@@ -175,6 +175,8 @@ type BrushMonitor struct {
 	lastPrune time.Time
 	// created 是监控建好的时刻：早于它开始、还写着进行中的运行是上一个进程留下的
 	created time.Time
+	// beforeRemoveLock 是测试钩子：决定删一个种子以后、拿删除锁以前调用（模拟这期间网页点了保留、取消保留）
+	beforeRemoveLock func(bt models.BrushTorrent)
 }
 
 // ErrBrushStopped 表示刷流监控已经停止（进程正在退出）。
@@ -425,6 +427,11 @@ func (m *BrushMonitor) run(ctx context.Context, task *models.BrushTask, res *Bru
 	if err != nil {
 		return err
 	}
+	// 保护标签每轮读一次；读不出来时分不清哪些种子受保护，这一轮不删种
+	protectTags, tagErr := m.protectTags()
+	if tagErr != nil {
+		res.addError(tagErr.Error() + "，这一轮不删种")
+	}
 	// 种子按它们各自加入时的下载器管理：任务换了下载器之后，旧下载器里的种子照样采样、按规则删除。
 	// 有种子的下载器按 ID 顺序逐个处理，哪个连不上都不影响其他的；任务当前的下载器只在加种时才需要。
 	groups := map[uint][]models.BrushTorrent{}
@@ -477,7 +484,7 @@ func (m *BrushMonitor) run(ctx context.Context, task *models.BrushTask, res *Bru
 			active = append(active, groups[id]...)
 			continue
 		}
-		active = append(active, m.sampleAndRemove(task, l.dl, groups[id], l.byHash, res)...)
+		active = append(active, m.sampleAndRemove(task, l.dl, groups[id], l.byHash, protectTags, tagErr == nil, res)...)
 	}
 	if !task.Enabled {
 		res.stop("任务已关闭，不加种")
@@ -491,7 +498,9 @@ func (m *BrushMonitor) run(ctx context.Context, task *models.BrushTask, res *Bru
 }
 
 // sampleAndRemove 给一个下载器里的刷流种子采样并按规则删除；返回删完之后仍在做的种子（含这轮没法判断的）。
-func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Downloader, rows []models.BrushTorrent, byHash map[string]downloader.Torrent, res *BrushRunResult) []models.BrushTorrent {
+// 带保留标签（pt-tools-keep）或保护标签的种子交还给用户（终态，刷流不再管它，也不会再加回来），不删。
+// canRemove 为假（读不出保护标签）时只采样、不删。
+func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Downloader, rows []models.BrushTorrent, byHash map[string]downloader.Torrent, protectTags []string, canRemove bool, res *BrushRunResult) []models.BrushTorrent {
 	taskTag := models.BrushTaskTag(task.ID)
 	kept := make([]models.BrushTorrent, 0, len(rows))
 	all := make([]downloader.Torrent, 0, len(byHash))
@@ -503,23 +512,18 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 	for i := range rows {
 		bt := rows[i]
 		now := m.cfg.Clock.Now()
-		day := m.dayOf(now)
 		t, ok := byHash[bt.InfoHash]
 		switch {
 		case !ok:
-			res.Gone++
-			res.step(brushStepGone, "%s：下载器里已经没有这个种子", bt.Title)
-			if markErr := m.repo.MarkEnded(&bt, models.BrushTorrentGone, "下载器里已经没有这个种子", now, day); markErr != nil {
-				res.addError(markErr.Error())
-			}
+			m.endGone(&bt, "下载器里已经没有这个种子", now, res)
 			continue
 		case !hasTag(t, taskTag):
 			// 用户摘掉了任务标签：不再归这个任务管，删种规则也不再作用于它
-			res.Gone++
-			res.step(brushStepGone, "%s：种子不再带任务标签，交还给用户", bt.Title)
-			if markErr := m.repo.MarkEnded(&bt, models.BrushTorrentGone, "种子不再带任务标签，交还给用户", now, day); markErr != nil {
-				res.addError(markErr.Error())
-			}
+			m.endGone(&bt, "种子不再带任务标签，交还给用户", now, res)
+			continue
+		}
+		if why := tagProtection(t, protectTags); why != "" {
+			m.endGone(&bt, "种子"+why+"，交还给用户", now, res)
 			continue
 		}
 		sample := models.BrushTorrentSample{At: now, Uploaded: t.TotalUploaded, Downloaded: t.TotalDownloaded}
@@ -537,7 +541,7 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 			}
 		}
 		remove, reason := brushRemoval(*task, bt, t, samples, now)
-		if !remove {
+		if !remove || !canRemove {
 			kept = append(kept, withProgress(bt, t))
 			continue
 		}
@@ -546,20 +550,87 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 		if task.RemoveWithData && !withData {
 			reason += "；数据还被别的种子用着，保留数据"
 		}
-		if err := dl.RemoveTorrent(t.ID, withData); err != nil {
-			res.addError(fmt.Sprintf("删除 %s 失败: %v", bt.Title, err))
-			kept = append(kept, withProgress(bt, t))
-			continue
+		done, keep := m.removeLocked(task, dl, &bt, t, withData, reason, protectTags, res)
+		if done {
+			removed[downloader.TorrentKey(t)] = true
 		}
-		removed[downloader.TorrentKey(t)] = true
-		res.Removed++
-		res.step(brushStepRemove, "%s：%s", bt.Title, reason)
-		m.cfg.Logger.Infof("[刷流] %s 删除 %s：%s", task.Name, bt.Title, reason)
-		if markErr := m.repo.MarkEnded(&bt, models.BrushTorrentRemoved, reason, now, day); markErr != nil {
-			res.addError(markErr.Error())
+		if keep {
+			kept = append(kept, withProgress(bt, t))
 		}
 	}
 	return kept
+}
+
+// endGone 把刷流记录记成 gone（终态）：种子不在了，或者交还给了用户。
+func (m *BrushMonitor) endGone(bt *models.BrushTorrent, why string, now time.Time, res *BrushRunResult) {
+	res.Gone++
+	res.step(brushStepGone, "%s：%s", bt.Title, why)
+	if err := m.repo.MarkEnded(bt, models.BrushTorrentGone, why, now, m.dayOf(now)); err != nil {
+		res.addError(err.Error())
+	}
+}
+
+// removeLocked 在删除锁里删一个刷流种子（见 internal.RemovalMutex）。一轮开头读进内存的记录可能已经被「保留」交还，
+// 所以先按编号重新读刷流记录，已经不是 active 就不删；再重新读下载器里的种子，刚摘掉任务标签、带上保留或保护标签的交还给用户，
+// 不删；最后才删，记成刷流删掉的。返回 done（删掉了）与 keep（仍归这个任务管、记录不变，下一轮再看）。
+func (m *BrushMonitor) removeLocked(task *models.BrushTask, dl downloader.Downloader, bt *models.BrushTorrent, t downloader.Torrent, withData bool, reason string, protectTags []string, res *BrushRunResult) (done, keep bool) {
+	if m.beforeRemoveLock != nil {
+		m.beforeRemoveLock(*bt)
+	}
+	mu := ptinternal.RemovalMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	now := m.cfg.Clock.Now()
+	active, err := m.repo.IsActive(bt.ID)
+	switch {
+	case err != nil:
+		res.addError(fmt.Sprintf("删除 %s 前复查刷流记录失败: %v", bt.Title, err))
+		return false, true
+	case !active:
+		// 已经交还给用户（例如刚点了保留，又马上取消了保留）：不删，也不再归这个任务管
+		res.step(brushStepSkip, "%s：已经交还给用户，不删", bt.Title)
+		return false, false
+	}
+	fresh, err := dl.GetTorrent(t.InfoHash)
+	switch {
+	case errors.Is(err, downloader.ErrTorrentNotFound):
+		m.endGone(bt, "下载器里已经没有这个种子", now, res)
+		return false, false
+	case err != nil:
+		res.addError(fmt.Sprintf("删除 %s 前重新读种子失败: %v", bt.Title, err))
+		return false, true
+	case !hasTag(fresh, models.BrushTaskTag(task.ID)):
+		m.endGone(bt, "种子不再带任务标签，交还给用户", now, res)
+		return false, false
+	}
+	if why := tagProtection(fresh, protectTags); why != "" {
+		m.endGone(bt, "种子"+why+"，交还给用户", now, res)
+		return false, false
+	}
+	if err := dl.RemoveTorrent(t.ID, withData); err != nil {
+		res.addError(fmt.Sprintf("删除 %s 失败: %v", bt.Title, err))
+		return false, true
+	}
+	res.Removed++
+	res.step(brushStepRemove, "%s：%s", bt.Title, reason)
+	m.cfg.Logger.Infof("[刷流] %s 删除 %s：%s", task.Name, bt.Title, reason)
+	if err := m.repo.MarkEnded(bt, models.BrushTorrentRemoved, reason, now, m.dayOf(now)); err != nil {
+		res.addError(err.Error())
+	}
+	return true, false
+}
+
+// protectTags 是全局设置里的保护标签（自动删种的「保护标签」）；还没有全局设置时为空。读库出错时返回错误。
+func (m *BrushMonitor) protectTags() ([]string, error) {
+	var g models.SettingsGlobal
+	err := m.cfg.DB.Select("id", "cleanup_protect_tags").First(&g).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("读取保护标签失败: %w", err)
+	}
+	return splitTags(g.CleanupProtectTags), nil
 }
 
 // withProgress 记下这一轮看到的完成状态，供限额计算用（Progress 字段用 brushCompleted 的口径：没真正下完就小于 1）。

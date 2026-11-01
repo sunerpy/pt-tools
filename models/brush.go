@@ -19,7 +19,8 @@ const (
 	BrushTorrentGone = "gone"
 )
 
-// BrushTagAll 是所有刷流种子都带的标签；全局自动清理按它把刷流种子排除在常规规则之外。
+// BrushTagAll 是所有刷流种子都带的标签，方便在下载器里认出刷流种子。归属不按它认：自动删种、做种竞争度按刷流记录
+// （BrushRepository.ActiveHashesOn）认刷流任务正在管的种子，交还以后的种子即使还带着它，也按自动删种的规则处理。
 const BrushTagAll = "pt-tools-brush"
 
 // BrushTaskTag 是某个刷流任务专属的标签，删种只处理带这个标签、且有 BrushTorrent 记录的种子。
@@ -312,6 +313,53 @@ func (r *BrushRepository) ActiveTorrents(taskID uint) ([]BrushTorrent, error) {
 		return nil, fmt.Errorf("读取刷流种子失败: %w", err)
 	}
 	return rows, nil
+}
+
+// activeOn 是下载器 dlID 上仍在做的刷流记录：按记录上的下载器编号认，编号为 0 的旧记录按所属任务的下载器。
+func (r *BrushRepository) activeOn(dlID uint) *gorm.DB {
+	return r.db.Model(&BrushTorrent{}).
+		Joins("LEFT JOIN brush_tasks ON brush_tasks.id = brush_torrents.task_id").
+		Where("brush_torrents.state = ?", BrushTorrentActive).
+		Where("brush_torrents.downloader_id = ? OR (brush_torrents.downloader_id = 0 AND brush_tasks.downloader_id = ?)", dlID, dlID)
+}
+
+// ActiveHashesOn 返回下载器 dlID 上刷流任务正在管的种子（info hash，小写）。自动删种据此把它们留给刷流自己的删种规则。
+func (r *BrushRepository) ActiveHashesOn(dlID uint) (map[string]bool, error) {
+	var hashes []string
+	if err := r.activeOn(dlID).Distinct().Pluck("brush_torrents.info_hash", &hashes).Error; err != nil {
+		return nil, fmt.Errorf("读取刷流种子失败: %w", err)
+	}
+	out := make(map[string]bool, len(hashes))
+	for _, h := range hashes {
+		out[strings.ToLower(h)] = true
+	}
+	return out, nil
+}
+
+// IsActive 报告这条刷流记录现在是不是仍在做：刷流删种在删除锁里用它复查，一轮开头读进内存的记录可能已经被交还。
+func (r *BrushRepository) IsActive(id uint) (bool, error) {
+	var n int64
+	if err := r.db.Model(&BrushTorrent{}).Where("id = ? AND state = ?", id, BrushTorrentActive).Count(&n).Error; err != nil {
+		return false, fmt.Errorf("读取刷流种子失败: %w", err)
+	}
+	return n > 0, nil
+}
+
+// EndActiveByHash 把下载器 dlID 上这个种子仍在做的刷流记录都交还给用户（gone，终态：刷流不再管它，也不会再加回来），返回交还了几条。
+// 网页点「保留」时在同一次操作里调用，不等刷流下一轮发现标签。
+func (r *BrushRepository) EndActiveByHash(dlID uint, hash, reason string, at time.Time) (int, error) {
+	var rows []BrushTorrent
+	if err := r.activeOn(dlID).Where("LOWER(brush_torrents.info_hash) = ?", strings.ToLower(hash)).
+		Select("brush_torrents.*").Find(&rows).Error; err != nil {
+		return 0, fmt.Errorf("读取刷流种子失败: %w", err)
+	}
+	for i := range rows {
+		// gone 不记进每天的统计（MarkEnded 只给 removed 记），day 用不到
+		if err := r.MarkEnded(&rows[i], BrushTorrentGone, reason, at, ""); err != nil {
+			return i, err
+		}
+	}
+	return len(rows), nil
 }
 
 // CountActive 返回任务名下仍在做的种子数。

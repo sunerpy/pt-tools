@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
+	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -147,6 +150,13 @@ func (p *PeerRatioMonitor) runOnce(cfg *models.SettingsGlobal, maxSL float64) {
 	}
 }
 
+// peerOver 是做种竞争度超标、这一轮要处理的种子。
+type peerOver struct {
+	t              downloader.Torrent
+	seeds, leeches int
+	ratio          float64
+}
+
 func (p *PeerRatioMonitor) processDownloader(dl downloader.Downloader, dlName string, maxSL float64, removeData bool) {
 	allTorrents, err := dl.GetAllTorrents()
 	if err != nil {
@@ -154,18 +164,47 @@ func (p *PeerRatioMonitor) processDownloader(dl downloader.Downloader, dlName st
 		return
 	}
 
+	dlID := downloaderIDByName(p.db, dlName)
 	managed := p.filterManagedSeedingTorrents(allTorrents, dlName)
 	if len(managed) == 0 {
 		p.logger.Debugf("[竞争度监控] %s: 无做种中的管理种子", dlName)
 		return
 	}
 
-	var acted int
-	sharing := downloader.NewDataSharing(allTorrents, downloader.FilesOf(dl))
-	removed := map[string]bool{} // 这一轮已删掉的（键见 downloader.TorrentKey）
+	// 和自动删种一样遵守保护规则（见 protection.go），刷流任务正在管的种子留给刷流；读不出这些信息时这一轮不处理
+	cfg, err := p.protectionConfig()
+	if err != nil {
+		p.logger.Errorf("[竞争度监控] %s: %v，这一轮不处理", dlName, err)
+		return
+	}
+	hr, err := loadHRInfo(p.db)
+	if err != nil {
+		p.logger.Errorf("[竞争度监控] %s: %v，这一轮不处理", dlName, err)
+		return
+	}
+	brushOwned, err := brushOwnedHashes(p.db, dlID)
+	if err != nil {
+		p.logger.Errorf("[竞争度监控] %s: %v，这一轮不处理", dlName, err)
+		return
+	}
+	protectTags := splitTags(cfg.CleanupProtectTags)
+	now := time.Now().Unix()
+
+	var over []peerOver
 	for _, t := range managed {
 		if p.ctx.Err() != nil {
 			return
+		}
+		if brushOwned[strings.ToLower(t.InfoHash)] {
+			continue
+		}
+		if why := hardProtection(cfg, t, hr, protectTags); why != "" {
+			p.logger.Debugf("[竞争度监控] %s: %s 受保护（%s），跳过", dlName, t.Name, why)
+			continue
+		}
+		if why := softProtection(cfg, t, now); why != "" {
+			p.logger.Debugf("[竞争度监控] %s: %s 受保护（%s），跳过", dlName, t.Name, why)
+			continue
 		}
 
 		seeds, leeches, err := p.getTrackerPeerCounts(dl, t)
@@ -174,7 +213,7 @@ func (p *PeerRatioMonitor) processDownloader(dl downloader.Downloader, dlName st
 			continue
 		}
 
-		p.updateDBPeerCounts(t.InfoHash, seeds, leeches)
+		p.updateDBPeerCounts(dlID, dlName, t.InfoHash, seeds, leeches)
 
 		if seeds == 0 {
 			continue
@@ -191,29 +230,14 @@ func (p *PeerRatioMonitor) processDownloader(dl downloader.Downloader, dlName st
 			continue
 		}
 
-		if p.isAlreadyPausedForPeerRatio(t.InfoHash) {
+		if p.isAlreadyPausedForPeerRatio(dlID, dlName, t.InfoHash) {
 			continue
 		}
-
-		if removeData {
-			// 数据还被别的种子用着（如辅种）时只删种子、保留数据
-			withData := !sharing.Shares(t, removed)
-			p.logger.Infof("[竞争度监控] 删除: %s (S/L=%d/%d=%.1f > %.1f, 删除数据=%v)", t.Name, seeds, leeches, ratio, maxSL, withData)
-			if err := dl.RemoveTorrent(t.ID, withData); err != nil {
-				p.logger.Errorf("[竞争度监控] 删除失败: %s: %v", t.Name, err)
-				continue
-			}
-			removed[downloader.TorrentKey(t)] = true
-			p.markDeletedForPeerRatio(t.InfoHash, seeds, leeches)
-		} else {
-			p.logger.Infof("[竞争度监控] 暂停: %s (S/L=%d/%d=%.1f > %.1f)", t.Name, seeds, leeches, ratio, maxSL)
-			if err := dl.PauseTorrent(t.ID); err != nil {
-				p.logger.Errorf("[竞争度监控] 暂停失败: %s: %v", t.Name, err)
-				continue
-			}
-			p.markPausedForPeerRatio(t.InfoHash, seeds, leeches)
-		}
-		acted++
+		over = append(over, peerOver{t: t, seeds: seeds, leeches: leeches, ratio: ratio})
+	}
+	acted := 0
+	if len(over) > 0 {
+		acted = p.act(dl, dlID, dlName, over, maxSL, removeData, protectTags)
 	}
 
 	action := "暂停"
@@ -221,6 +245,66 @@ func (p *PeerRatioMonitor) processDownloader(dl downloader.Downloader, dlName st
 		action = "删除"
 	}
 	p.logger.Infof("[竞争度监控] %s: 检查完成 (管理做种=%d, %s=%d)", dlName, len(managed), action, acted)
+}
+
+// act 在删除锁里删除或暂停竞争度超标的种子（见 internal.RemovalMutex）：重新读种子列表，不在了的、刚带上保留或保护标签的、
+// 不再做种的不处理。返回处理了几个。
+func (p *PeerRatioMonitor) act(dl downloader.Downloader, dlID *uint, dlName string, over []peerOver, maxSL float64, removeData bool, protectTags []string) int {
+	mu := ptinternal.RemovalMutex()
+	mu.Lock()
+	defer mu.Unlock()
+	fresh, err := dl.GetAllTorrents()
+	if err != nil {
+		p.logger.Errorf("[竞争度监控] %s: 处理前重新读种子列表失败: %v，这一轮不处理", dlName, err)
+		return 0
+	}
+	byID := make(map[string]downloader.Torrent, len(fresh))
+	for _, t := range fresh {
+		byID[t.ID] = t
+	}
+	sharing := downloader.NewDataSharing(fresh, downloader.FilesOf(dl))
+	removed := map[string]bool{} // 这一轮已删掉的（键见 downloader.TorrentKey）
+	acted := 0
+	for _, o := range over {
+		t, ok := byID[o.t.ID]
+		if !ok || t.State != downloader.TorrentSeeding || tagProtection(t, protectTags) != "" {
+			p.logger.Infof("[竞争度监控] %s: %s 处理前不在下载器里了、不在做种或者带上了保留、保护标签，跳过", dlName, o.t.Name)
+			continue
+		}
+		if removeData {
+			// 数据还被别的种子用着（如辅种）时只删种子、保留数据
+			withData := !sharing.Shares(t, removed)
+			p.logger.Infof("[竞争度监控] 删除: %s (S/L=%d/%d=%.1f > %.1f, 删除数据=%v)", t.Name, o.seeds, o.leeches, o.ratio, maxSL, withData)
+			if err := dl.RemoveTorrent(t.ID, withData); err != nil {
+				p.logger.Errorf("[竞争度监控] 删除失败: %s: %v", t.Name, err)
+				continue
+			}
+			removed[downloader.TorrentKey(t)] = true
+			p.markDeletedForPeerRatio(dlID, dlName, t.InfoHash, o.seeds, o.leeches)
+		} else {
+			p.logger.Infof("[竞争度监控] 暂停: %s (S/L=%d/%d=%.1f > %.1f)", t.Name, o.seeds, o.leeches, o.ratio, maxSL)
+			if err := dl.PauseTorrent(t.ID); err != nil {
+				p.logger.Errorf("[竞争度监控] 暂停失败: %s: %v", t.Name, err)
+				continue
+			}
+			p.markPausedForPeerRatio(dlID, dlName, t.InfoHash, o.seeds, o.leeches)
+		}
+		acted++
+	}
+	return acted
+}
+
+// protectionConfig 是保护规则用的全局设置；还没有全局设置时按默认的空设置（只认保留标签）。读库出错时返回错误。
+func (p *PeerRatioMonitor) protectionConfig() (*models.SettingsGlobal, error) {
+	var cfg models.SettingsGlobal
+	err := p.db.First(&cfg).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return &models.SettingsGlobal{}, nil
+	case err != nil:
+		return nil, fmt.Errorf("读取全局设置失败: %w", err)
+	}
+	return &cfg, nil
 }
 
 func (p *PeerRatioMonitor) filterManagedSeedingTorrents(torrents []downloader.Torrent, dlName string) []downloader.Torrent {
@@ -241,11 +325,12 @@ func (p *PeerRatioMonitor) filterManagedSeedingTorrents(torrents []downloader.To
 	return result
 }
 
+// getManagedCompletedHashes 是推到这台下载器（按编号认，见 recordsOn）、已经下完的 pt-tools 推送记录。
 func (p *PeerRatioMonitor) getManagedCompletedHashes(dlName string) map[string]struct{} {
 	hashes := make(map[string]struct{})
 	var dbHashes []string
-	p.db.Model(&models.TorrentInfo{}).
-		Where("torrent_hash IS NOT NULL AND torrent_hash != '' AND is_pushed IS NOT NULL AND is_completed = ? AND downloader_name = ?", true, dlName).
+	recordsOn(p.db.Model(&models.TorrentInfo{}), downloaderIDByName(p.db, dlName), dlName).
+		Where("torrent_hash IS NOT NULL AND torrent_hash != '' AND is_pushed IS NOT NULL AND is_completed = ?", true).
 		Pluck("torrent_hash", &dbHashes)
 
 	for _, h := range dbHashes {
@@ -274,19 +359,23 @@ func (p *PeerRatioMonitor) getTrackerPeerCounts(dl downloader.Downloader, t down
 	return seeds, leeches, nil
 }
 
-func (p *PeerRatioMonitor) isAlreadyPausedForPeerRatio(infoHash string) bool {
+// peerRecords 是这台下载器上这个种子的推送记录（按编号认，见 recordsOn）：竞争度只读写这些，不碰别的下载器上同一个种子的记录。
+func (p *PeerRatioMonitor) peerRecords(dlID *uint, dlName, infoHash string) *gorm.DB {
+	return recordsOn(p.db.Model(&models.TorrentInfo{}), dlID, dlName).
+		Where("LOWER(torrent_hash) = ?", strings.ToLower(infoHash))
+}
+
+func (p *PeerRatioMonitor) isAlreadyPausedForPeerRatio(dlID *uint, dlName, infoHash string) bool {
 	var count int64
-	p.db.Model(&models.TorrentInfo{}).
-		Where("torrent_hash = ? AND is_paused_by_system = ? AND pause_reason = ?",
-			strings.ToLower(infoHash), true, PauseReasonPeerRatio).
+	p.peerRecords(dlID, dlName, infoHash).
+		Where("is_paused_by_system = ? AND pause_reason = ?", true, PauseReasonPeerRatio).
 		Count(&count)
 	return count > 0
 }
 
-func (p *PeerRatioMonitor) updateDBPeerCounts(infoHash string, seeds, leeches int) {
+func (p *PeerRatioMonitor) updateDBPeerCounts(dlID *uint, dlName, infoHash string, seeds, leeches int) {
 	now := time.Now()
-	p.db.Model(&models.TorrentInfo{}).
-		Where("torrent_hash = ?", strings.ToLower(infoHash)).
+	p.peerRecords(dlID, dlName, infoHash).
 		Updates(map[string]any{
 			"seeders":         seeds,
 			"leechers":        leeches,
@@ -294,10 +383,9 @@ func (p *PeerRatioMonitor) updateDBPeerCounts(infoHash string, seeds, leeches in
 		})
 }
 
-func (p *PeerRatioMonitor) markPausedForPeerRatio(infoHash string, seeds, leeches int) {
+func (p *PeerRatioMonitor) markPausedForPeerRatio(dlID *uint, dlName, infoHash string, seeds, leeches int) {
 	now := time.Now()
-	p.db.Model(&models.TorrentInfo{}).
-		Where("torrent_hash = ?", strings.ToLower(infoHash)).
+	p.peerRecords(dlID, dlName, infoHash).
 		Updates(map[string]any{
 			"is_paused_by_system": true,
 			"paused_at":           now,
@@ -308,10 +396,9 @@ func (p *PeerRatioMonitor) markPausedForPeerRatio(infoHash string, seeds, leeche
 		})
 }
 
-func (p *PeerRatioMonitor) markDeletedForPeerRatio(infoHash string, seeds, leeches int) {
+func (p *PeerRatioMonitor) markDeletedForPeerRatio(dlID *uint, dlName, infoHash string, seeds, leeches int) {
 	now := time.Now()
-	p.db.Model(&models.TorrentInfo{}).
-		Where("torrent_hash = ?", strings.ToLower(infoHash)).
+	p.peerRecords(dlID, dlName, infoHash).
 		Updates(map[string]any{
 			"is_expired":      true,
 			"pause_reason":    PauseReasonPeerRatio,
