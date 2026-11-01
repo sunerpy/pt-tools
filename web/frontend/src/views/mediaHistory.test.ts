@@ -355,6 +355,35 @@ describe("整理历史", () => {
       expect(api.preview).toHaveBeenCalledWith({ source_path: "/data/in/my-download-01" }),
     );
   });
+
+  it("手动整理时选过整理方式的记录：带着那个方式重新打开", async () => {
+    await mountPage(false, [
+      row({
+        downloader_id: 0,
+        downloader_name: "指定路径",
+        info_hash: "path:0123456789abcdef",
+        task_id: "",
+        torrent_name: "my-download-01",
+        trigger: "manual",
+        manual_path: "/data/in/my-download-01",
+        chosen_mode: "copy",
+        id: 5,
+        status: "failed",
+        message: "识别失败",
+        target_path: "",
+        has_files: false,
+      }),
+    ]);
+    api.libraries.mockResolvedValue([]);
+    api.preview.mockResolvedValue({ ...manualPlan, mode: "copy" });
+    q("mh-manual-5")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({
+        source_path: "/data/in/my-download-01",
+        mode: "copy",
+      }),
+    );
+  });
 });
 
 const manualPlan = {

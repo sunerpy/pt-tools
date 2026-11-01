@@ -3403,11 +3403,15 @@ export interface MediaServerInfo {
   libraries?: number;
 }
 
-/** 两种整理请求共用的可选项：指定条目（类型与 TMDB 编号一起给）与媒体库；不给时自动识别、按类型选库 */
+/**
+ * 两种整理请求共用的可选项：指定条目（类型与 TMDB 编号一起给）与媒体库；不给时自动识别、按类型选库。
+ * mode 是这次用的整理方式，不给时跟媒体库（只有网页会话的两个整理路由收，App API 不收）
+ */
 interface OrganizeRequestOptions {
   media_type?: MediaKind;
   tmdb_id?: number;
   library_id?: number;
+  mode?: MediaMode;
 }
 
 /** 整理下载器里的一个种子 */
@@ -3491,6 +3495,8 @@ export interface MediaHistoryItem {
   source_path: string;
   target_path: string;
   mode: MediaMode;
+  /** 手动整理时选的整理方式（空串是跟媒体库）：重试按它整理 */
+  chosen_mode: "" | MediaMode;
   media_type: "" | MediaKind;
   tmdb_id: number;
   title: string;

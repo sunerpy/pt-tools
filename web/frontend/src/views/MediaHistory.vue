@@ -145,8 +145,9 @@ const canRetry = (r: MediaHistoryItem) => r.status === "failed" || r.status === 
 const organizeVisible = ref(false);
 const organizeTarget = ref<OrganizeTarget | null>(null);
 /** 打开「手动整理」：从页头打开时路径是空的；从一条记录打开时带上当时填的路径 */
-function openManual(path = "") {
-  organizeTarget.value = { source_path: path };
+/** 打开手动整理：从记录打开时带上当时填的路径与选的整理方式 */
+function openManual(path = "", mode: MediaHistoryItem["chosen_mode"] = "") {
+  organizeTarget.value = mode ? { source_path: path, mode } : { source_path: path };
   organizeVisible.value = true;
 }
 /** 指定路径整理失败或跳过的记录：可以带着原路径重新打开，换条目或库 */
@@ -283,7 +284,7 @@ onMounted(load);
               v-if="canManual(row)"
               link
               :data-testid="`mh-manual-${row.id}`"
-              @click="openManual(row.manual_path)"
+              @click="openManual(row.manual_path, row.chosen_mode)"
               >手动整理</el-button
             >
             <el-button
@@ -330,7 +331,10 @@ onMounted(load);
               @click="retry(r)"
               >重试</el-button
             >
-            <el-button v-if="canManual(r)" size="small" @click="openManual(r.manual_path)"
+            <el-button
+              v-if="canManual(r)"
+              size="small"
+              @click="openManual(r.manual_path, r.chosen_mode)"
               >手动整理</el-button
             >
             <el-button
