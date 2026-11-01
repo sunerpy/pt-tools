@@ -73,7 +73,7 @@ Each task keeps its latest 500 entries from the last 14 days, and they are delet
 
 ## Relation to auto cleanup
 
-The torrents a brush task is managing are handled by the task's own removal rules; the regular **Auto cleanup** rules (seeding time, ratio, and so on) and the seeding competition monitor skip them, so the two sets of rules never compete. Ownership is recognised by the brush task's records, not by the `pt-tools-brush` tag: once the task is deleted or a torrent is handed back to you (task tag removed, or kept), auto-delete handles it by its rules even if it still carries `pt-tools-brush`. The emergency cleanup that runs when free disk space drops below the minimum still covers every torrent, brush torrents included, except those with the keep tag or a protected tag.
+The torrents a brush task is managing are handled by the task's own removal rules; the auto-delete deletion conditions (seeding time, ratio, seeding competition, and so on) skip them, so the two sets of rules never compete. Ownership is recognised by the brush task's records, not by the `pt-tools-brush` tag: once the task is deleted or a torrent is handed back to you (task tag removed, or kept), auto-delete handles it by its rules even if it still carries `pt-tools-brush`. The emergency cleanup that runs when free disk space drops below the minimum still covers every torrent, brush torrents included, except those with the keep tag or a protected tag.
 
 ## Turning off and deleting a task
 

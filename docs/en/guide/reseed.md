@@ -70,7 +70,7 @@ The run status on the Settings tab shows how many requests each endpoint got tod
 
 ## Deleting torrents and shared data
 
-A cross-seed and its original torrent use the same files. When auto-delete (emergency cleanup and deleting torrents still unfinished when the free period ends included), the seeding competition monitor (做种竞争度监控), brushing removal or Delete dead torrents (删除失效种子) in the downloader assistant is about to delete data, pt-tools first checks whether another torrent in the downloader still uses the same data: if one does, only the torrent is removed and the data stays; when all the torrents sharing the data are deleted together, the data is deleted as usual. pt-tools compares the paths where the torrents keep their data: the same path counts as shared (for a qBittorrent multi-file torrent without a subfolder it compares the files).
+A cross-seed and its original torrent use the same files. When auto-delete (emergency cleanup, seeding competition and deleting torrents still unfinished when the free period ends included), brushing removal or Delete dead torrents (删除失效种子) in the downloader assistant is about to delete data, pt-tools first checks whether another torrent in the downloader still uses the same data: if one does, only the torrent is removed and the data stays; when all the torrents sharing the data are deleted together, the data is deleted as usual. pt-tools compares the paths where the torrents keep their data: the same path counts as shared (for a qBittorrent multi-file torrent without a subfolder it compares the files).
 
 Deleting a torrent by hand, in the downloader or in a pt-tools torrent list, with its data selected for deletion deletes the files, and the torrents sharing them lose their data too.
 
