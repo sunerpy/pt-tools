@@ -31,6 +31,8 @@ type Request struct {
 	MediaType  string `json:"media_type,omitempty"`
 	TMDBID     int    `json:"tmdb_id,omitempty"`
 	LibraryID  uint   `json:"library_id,omitempty"`
+	// Mode 是这次用的整理方式（hardlink、copy、symlink、move），手动整理时可以选；空串跟媒体库
+	Mode string `json:"mode,omitempty"`
 }
 
 // queueHash 是排队去重、退避与重试分组用的种子标识：目录监控的一项用 watchHash，指定的路径用 pathHash。
@@ -56,11 +58,16 @@ func pathHash(p string) string {
 	return fmt.Sprintf("%s%x", pathHashPrefix, sum[:8])
 }
 
-// normalized 检查并规整请求：指定条目时类型与编号要对得上；来源（下载器里的种子、监控目录里的一项、一个路径）只能有一种；
-// 源路径按 cleanSource 检查，写回规整后的路径。
+// normalized 检查并规整请求：指定条目时类型与编号要对得上；整理方式要认得；来源（下载器里的种子、监控目录里的一项、一个路径）
+// 只能有一种；源路径按 cleanSource 检查，写回规整后的路径。
 func (r Request) normalized() (Request, error) {
 	if r.TMDBID < 0 || (r.TMDBID > 0 && r.MediaType != tmdb.KindMovie && r.MediaType != tmdb.KindTV) {
 		return r, fmt.Errorf("%w: 指定条目时要写明类型（movie 或 tv）与 TMDB 编号", ErrInvalid)
+	}
+	if r.Mode = strings.TrimSpace(r.Mode); r.Mode != "" {
+		if _, err := transfer.NormalizeMode(r.Mode); err != nil {
+			return r, fmt.Errorf("%w: 整理方式只能是 hardlink、copy、symlink 或 move（空着跟媒体库）: %w", ErrInvalid, err)
+		}
 	}
 	r.SourcePath = strings.TrimSpace(r.SourcePath)
 	sources := 0
@@ -179,6 +186,8 @@ type Plan struct {
 	tmdbClient *tmdb.Client
 	// root 是这次整理放进的目录：库目录，按二级分类放进子目录时是库目录下的分类目录
 	root string
+	// chosenMode 是请求里选的整理方式（空串是跟媒体库）：写进整理记录，重试按它整理
+	chosenMode string
 }
 
 // otherNote 是同一个位置上换了文件时写在整理记录消息前面的说明（见 markOtherFiles）。
@@ -340,13 +349,28 @@ func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	var p *Plan
 	switch {
 	case req.SourcePath != "":
-		return s.buildPathPlan(ctx, req)
+		p, err = s.buildPathPlan(ctx, req)
 	case req.WatchDirID > 0:
-		return s.buildWatchPlan(ctx, req)
+		p, err = s.buildWatchPlan(ctx, req)
+	default:
+		p, err = s.buildTorrentPlan(ctx, req)
 	}
-	return s.buildTorrentPlan(ctx, req)
+	if p != nil {
+		// 还没选到媒体库就整理不了的（例如识别失败）也记下：重试时还按选的方式
+		p.chosenMode = req.Mode
+	}
+	return p, err
+}
+
+// hardlinkHint 是移动整理不了时请用户改用硬链接的说法：这次选了整理方式时改选，跟媒体库时改媒体库。
+func hardlinkHint(req Request) string {
+	if req.Mode != "" {
+		return "整理方式改选硬链接"
+	}
+	return "把媒体库改用硬链接"
 }
 
 // buildTorrentPlan 是下载器里一个种子的整理计划：读种子与文件列表，按路径映射换成 pt-tools 里的路径。
@@ -461,7 +485,7 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 			return p, nil
 		}
 		if owner != "" {
-			p.Problem = "「" + p.Name + "」是下载器里的种子（" + owner + "），目录监控不移动下载器里的种子：把媒体库改用硬链接，或不要监控下载目录"
+			p.Problem = "「" + p.Name + "」是下载器里的种子（" + owner + "），目录监控不移动下载器里的种子：" + hardlinkHint(req) + "，或不要监控下载目录"
 			return p, nil
 		}
 	case p.SourcePath != "":
@@ -471,12 +495,12 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 			return p, nil
 		}
 		if p.nameHit != nil {
-			p.Problem = fmt.Sprintf("「%s」和下载器里的种子同名（%s：%s），可能就是它：移动整理会让它没法做种。把媒体库改用硬链接，或配好路径映射后在「下载器 Web UI」里按种子整理",
-				p.Name, p.nameHit.DownloaderName, p.nameHit.Name)
+			p.Problem = fmt.Sprintf("「%s」和下载器里的种子同名（%s：%s），可能就是它：移动整理会让它没法做种。%s，或配好路径映射后在「下载器 Web UI」里按种子整理",
+				p.Name, p.nameHit.DownloaderName, p.nameHit.Name, hardlinkHint(req))
 			return p, nil
 		}
 	case t.State != downloader.TorrentPaused && t.State != downloader.TorrentStopped:
-		p.Problem = "种子还在做种，不能用移动整理：暂停种子后再整理，或把媒体库改用硬链接"
+		p.Problem = "种子还在做种，不能用移动整理：暂停种子后再整理，或" + hardlinkHint(req)
 		return p, nil
 	}
 	if p.SourcePath != "" && p.Mode != models.MediaModeMove {
@@ -626,7 +650,8 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 		p.Problem = fmt.Sprintf("没有启用的%s媒体库：先在「媒体库」里添加", what)
 		return false
 	}
-	p.Library, p.Mode = lib, lib.Mode
+	// 手动整理时选了整理方式就用选的，否则用库的
+	p.Library, p.Mode = lib, firstNonEmpty(req.Mode, lib.Mode)
 	if p.Mode == "" {
 		p.Mode = models.MediaModeHardlink
 	}

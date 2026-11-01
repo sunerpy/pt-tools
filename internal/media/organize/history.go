@@ -113,15 +113,16 @@ func (s *Service) historyRow(ctx context.Context, id uint) (models.MediaTransfer
 }
 
 // requestOf 是重新整理这条记录所在的种子（或目录监控的那一项、手动指定的那个路径）的请求。
+// 手动整理时选了整理方式的，还按选的方式（跟媒体库的按库现在的方式，不按上次实际用的）。
 func requestOf(r models.MediaTransferHistory) Request {
 	if pathRow(r) {
 		// 指定的路径记成上级目录（SaveRoot）与最后一段（TorrentName）：规整过的路径 Join 回来还是它
-		return Request{SourcePath: filepath.Join(r.SaveRoot, r.TorrentName)}
+		return Request{SourcePath: filepath.Join(r.SaveRoot, r.TorrentName), Mode: r.ChosenMode}
 	}
 	if r.WatchDirID > 0 {
-		return Request{WatchDirID: r.WatchDirID, Entry: r.TorrentName}
+		return Request{WatchDirID: r.WatchDirID, Entry: r.TorrentName, Mode: r.ChosenMode}
 	}
-	return Request{DownloaderID: r.DownloaderID, Hash: firstNonEmpty(r.TaskID, r.InfoHash)}
+	return Request{DownloaderID: r.DownloaderID, Hash: firstNonEmpty(r.TaskID, r.InfoHash), Mode: r.ChosenMode}
 }
 
 // Retry 重新整理这条记录所在的种子（按手动整理处理）。之前手动指定过条目的，沿用那个条目。
