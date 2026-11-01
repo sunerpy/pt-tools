@@ -4,12 +4,17 @@
 package internal
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 func TestDiskBudget_ReservedNormalizesNegative(t *testing.T) {
@@ -202,4 +207,100 @@ func TestPushMutex_SerializesPushers(t *testing.T) {
 	}
 	wg.Wait()
 	assert.Equal(t, int32(1), maxConcurrent.Load(), "互斥锁应保证临界区最多 1 个 goroutine")
+}
+
+// 推给下载器的种子出现在下载器里以后丢掉预留：只丢这台下载器上 hash 对得上的（大小写不论）；
+// 别的下载器上同一个 hash 的、还没看到的、旧接口不记种子的都留着
+func TestDiskBudget_SeenDropsVisibleReservations(t *testing.T) {
+	b := &DiskBudget{}
+	b.ReserveTorrent("qb", "AAAA", 10*gb)
+	b.ReserveTorrent("qb", "bbbb", 20*gb)
+	b.ReserveTorrent("tr", "aaaa", 40*gb)
+	b.Reserve(80 * gb)
+	require.Equal(t, 150*gb, b.Reserved())
+
+	freed, n := b.Seen("qb", map[string]struct{}{"aaaa": {}, "zzzz": {}})
+	assert.Equal(t, 10*gb, freed)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, 140*gb, b.Reserved())
+
+	freed, n = b.Seen("qb", nil)
+	assert.Zero(t, freed)
+	assert.Zero(t, n)
+	assert.Equal(t, 140*gb, b.Reserved())
+}
+
+// 归还函数只归还自己那一份，调用多次也只归还一次；体积 <= 0 时什么也不记
+func TestDiskBudget_ReserveTorrentRelease(t *testing.T) {
+	b := &DiskBudget{}
+	release := b.ReserveTorrent("qb", "aaaa", 10*gb)
+	b.ReserveTorrent("qb", "bbbb", 20*gb)
+	release()
+	release()
+	assert.Equal(t, 20*gb, b.Reserved())
+
+	b.ReserveTorrent("qb", "cccc", 0)()
+	b.ReserveTorrent("qb", "dddd", -1)()
+	assert.Equal(t, 20*gb, b.Reserved())
+}
+
+// 一直没出现在下载器里的预留过 reservationTTL 丢掉（例如 hash 对不上），旧接口的也一样
+func TestDiskBudget_ReservationsExpire(t *testing.T) {
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	b := &DiskBudget{now: func() time.Time { return now }}
+	b.ReserveTorrent("qb", "aaaa", 10*gb)
+	now = now.Add(5 * time.Minute)
+	b.Reserve(20 * gb)
+	now = now.Add(reservationTTL - 5*time.Minute - time.Second)
+	assert.Equal(t, 30*gb, b.Reserved(), "都还没到期")
+	now = now.Add(time.Second)
+	assert.Equal(t, 20*gb, b.Reserved(), "第一份到期")
+	now = now.Add(5 * time.Minute)
+	assert.Zero(t, b.Reserved())
+}
+
+// snapshotDL 是能给出种子列表的下载器（只用到 IncompletePendingSnapshot）。
+type snapshotDL struct {
+	downloader.Downloader
+	snap downloader.PendingSnapshot
+	err  error
+}
+
+func (d snapshotDL) IncompletePendingSnapshot(context.Context) (downloader.PendingSnapshot, error) {
+	return d.snap, d.err
+}
+
+// plainDL 是给不出种子列表的下载器（只用到 GetIncompletePendingBytes）。
+type plainDL struct {
+	downloader.Downloader
+	pending int64
+}
+
+func (d plainDL) GetIncompletePendingBytes(context.Context) (int64, error) { return d.pending, nil }
+
+// PendingForGate：下载器给得出种子列表时，待占用与丢预留出自同一份列表（丢掉这台下载器上已经看到的）；
+// 读不到时报错、预留不动；给不出种子列表的下载器只读待占用，预留等过期或清零
+func TestPendingForGate(t *testing.T) {
+	b := GetDiskBudget()
+	b.Reset()
+	t.Cleanup(b.Reset)
+	b.ReserveTorrent("qb", "aaaa", 10*gb)
+	b.ReserveTorrent("qb", "bbbb", 20*gb)
+	b.ReserveTorrent("tr", "aaaa", 40*gb)
+
+	_, err := PendingForGate(context.Background(), snapshotDL{err: errors.New("连接被拒绝")}, "qb")
+	require.Error(t, err)
+	assert.Equal(t, 70*gb, b.Reserved(), "读不到种子列表：预留不动")
+
+	pending, err := PendingForGate(context.Background(), snapshotDL{snap: downloader.PendingSnapshot{
+		Bytes: 9 * gb, Hashes: map[string]struct{}{"aaaa": {}},
+	}}, "qb")
+	require.NoError(t, err)
+	assert.Equal(t, 9*gb, pending)
+	assert.Equal(t, 60*gb, b.Reserved(), "qb 上的 aaaa 已经在下载器里：丢掉；tr 上的不动")
+
+	pending, err = PendingForGate(context.Background(), plainDL{pending: 3 * gb}, "qb")
+	require.NoError(t, err)
+	assert.Equal(t, 3*gb, pending)
+	assert.Equal(t, 60*gb, b.Reserved(), "给不出种子列表：只读待占用")
 }
