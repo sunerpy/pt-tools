@@ -244,3 +244,95 @@ func TestUpsertSiteWithRSS_KeepsRSSIDs(t *testing.T) {
 		})
 	}
 }
+
+// 保存 RSS 的哪一步写库出错，都把错误交回调用方，整个保存回滚：站点设置、RSS 行与过滤规则关联都和保存前一样。
+func TestUpsertSiteWithRSS_KeepsRSSIDsRollsBackOnDBError(t *testing.T) {
+	dropA := func(f rssKeepFixture, sc *models.SiteConfig) {
+		kept := sc.RSS[:0]
+		for _, r := range sc.RSS {
+			if r.ID != f.a {
+				kept = append(kept, r)
+			}
+		}
+		sc.RSS = kept
+	}
+	editA := func(apply func(r *models.RSSConfig)) func(f rssKeepFixture, sc *models.SiteConfig) {
+		return func(f rssKeepFixture, sc *models.SiteConfig) {
+			for i := range sc.RSS {
+				if sc.RSS[i].ID == f.a {
+					apply(&sc.RSS[i])
+				}
+			}
+		}
+	}
+	tests := []struct {
+		name    string
+		trigger string // 让这一步写库失败的触发器
+		edit    func(f rssKeepFixture, sc *models.SiteConfig)
+		wantErr string
+	}{
+		{
+			name:    "删掉没传的那条 RSS 的过滤规则关联失败",
+			trigger: "CREATE TRIGGER deny_assoc_delete BEFORE DELETE ON rss_filter_associations BEGIN SELECT RAISE(ABORT, 'deny assoc delete'); END;",
+			edit:    dropA,
+			wantErr: "deny assoc delete",
+		},
+		{
+			name:    "删掉没传的那条 RSS 失败（它的关联已经删了，也要回滚）",
+			trigger: "CREATE TRIGGER deny_rss_delete BEFORE DELETE ON rss_subscriptions BEGIN SELECT RAISE(ABORT, 'deny rss delete'); END;",
+			edit:    dropA,
+			wantErr: "deny rss delete",
+		},
+		{
+			name:    "原地更新 RSS 失败",
+			trigger: "CREATE TRIGGER deny_rss_update BEFORE UPDATE ON rss_subscriptions BEGIN SELECT RAISE(ABORT, 'deny rss update'); END;",
+			edit:    editA(func(r *models.RSSConfig) { r.Name = "A 改名" }),
+			wantErr: "deny rss update",
+		},
+		{
+			name:    "换过滤规则关联失败",
+			trigger: "CREATE TRIGGER deny_assoc_insert BEFORE INSERT ON rss_filter_associations BEGIN SELECT RAISE(ABORT, 'deny assoc insert'); END;",
+			edit: func(f rssKeepFixture, sc *models.SiteConfig) {
+				editA(func(r *models.RSSConfig) { r.FilterRuleIDs = []uint{f.ruleB} })(f, sc)
+			},
+			wantErr: "deny assoc insert",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newRSSKeepFixture(t)
+			sc, err := f.store.GetSiteConf(models.SiteGroup("springsunday"))
+			require.NoError(t, err)
+			sc.UploadLimitKBs = 77
+			tt.edit(f, &sc)
+			require.NoError(t, f.db.DB.Exec(tt.trigger).Error)
+
+			require.ErrorContains(t, f.store.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc), tt.wantErr)
+
+			rows := rssByName(t, f.db, "springsunday")
+			require.Len(t, rows, 2)
+			assert.Equal(t, f.a, rows["A"].ID, "A 还在，名字没改")
+			assert.Equal(t, f.example, rows["示例"].ID)
+			assert.Equal(t, []uint{f.ruleA}, filterIDsOf(t, f.db, f.a), "过滤规则关联没变")
+			var site models.SiteSetting
+			require.NoError(t, f.db.DB.Where("name = ?", "springsunday").First(&site).Error)
+			assert.Zero(t, site.UploadLimitKBs, "站点设置也没保存")
+		})
+	}
+}
+
+// 读不出这个站点现有的 RSS 时（这里是表没了）报错，站点设置也不保存。
+func TestUpsertSiteWithRSS_StoredRSSReadError(t *testing.T) {
+	f := newRSSKeepFixture(t)
+	sc, err := f.store.GetSiteConf(models.SiteGroup("springsunday"))
+	require.NoError(t, err)
+	// 不带 RSS：前面的校验不读 RSS 表，读库出错发生在保存 RSS 的那一步
+	sc.RSS, sc.UploadLimitKBs = nil, 77
+	require.NoError(t, f.db.DB.Migrator().DropTable(&models.RSSSubscription{}))
+
+	require.ErrorContains(t, f.store.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc), "rss_subscriptions")
+
+	var site models.SiteSetting
+	require.NoError(t, f.db.DB.Where("name = ?", "springsunday").First(&site).Error)
+	assert.Zero(t, site.UploadLimitKBs, "整个保存回滚")
+}
