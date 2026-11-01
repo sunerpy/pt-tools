@@ -184,13 +184,13 @@ See [Starting and stopping RSS tasks](configuration.md#starting-and-stopping-rss
 
 ### Torrents are not paused when freeleech ends
 
-**Symptom**: after the free period has ended, the torrent keeps downloading instead of being paused.
+**Symptom**: after the free period has ended, the torrent keeps downloading instead of being paused or deleted.
 
 **What to check**:
 
 1. **That the option is on**
    - Edit the feed on the site's RSS subscriptions (RSS 订阅) tab
-   - Check that Pause when freeleech ends (免费结束暂停) is on
+   - Check that Unfinished when freeleech ends (免费结束时没下完) is Pause or Delete (Do nothing leaves the torrent alone)
 
 2. **That the torrent is freeleech**
    - Torrents that are not free are not monitored
@@ -201,22 +201,23 @@ See [Starting and stopping RSS tasks](configuration.md#starting-and-stopping-rss
    - pt-tools can control the downloader
 
 4. **The free end time**
-   - A torrent whose site gives no freeleech end time cannot be paused on time: with Pause when freeleech ends on, it is added paused and not started automatically, and the freeleech path does not push it
+   - A torrent whose site gives no freeleech end time cannot be paused on time: with Pause or Delete chosen, it is added paused and not started automatically, and the freeleech path does not push it
    - The task list's Free end (免费结束) column shows End time unknown (结束时间未知) for these
 
 5. **The logs**
    - Check that the monitor is running
    - Search for `[推送门禁]` (why a push was refused) and `[FreeEndMonitor]` (end-of-freeleech handling, pause failures and retries)
-   - When pausing keeps failing, a Free-end pause failing (免费结束暂停失败) alert is sent to enabled channels after 3 failures in a row
+   - When pausing or deleting keeps failing, a Free-end pause failing (免费结束暂停失败) alert is sent to enabled channels after 3 failures in a row
+   - Delete was chosen but the torrent was paused: torrents with the keep tag, a protected tag or an H&R requirement not yet met are paused instead of deleted, and the Paused tasks page shows why
 
 **Suggested settings**:
 
-| Situation                     | Suggestion                                                               |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| **Plenty of bandwidth**       | You can leave the option off and let downloads finish sooner             |
-| **Limited bandwidth**         | Turn it on, so nothing counts against your download after freeleech ends |
-| **Little disk space**         | Turn it on and regularly clear out the unfinished paused tasks           |
-| **Keeping an account active** | Turn it on, then resume by hand the tasks you want to keep seeding       |
+| Situation                     | Suggestion                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------- |
+| **Plenty of bandwidth**       | Choose Do nothing and let downloads finish sooner                          |
+| **Limited bandwidth**         | Choose Pause, so nothing counts against your download after freeleech ends |
+| **Little disk space**         | Choose Delete, or choose Pause and regularly clear out the paused tasks    |
+| **Keeping an account active** | Choose Pause, then resume by hand the tasks you want to keep seeding       |
 
 ### A torrent is paused soon after it starts
 

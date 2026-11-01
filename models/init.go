@@ -51,6 +51,7 @@ type TorrentInfo struct {
 	CompletedAt      *time.Time `gorm:"default:null" json:"completedAt"`          // 下载完成时间
 	IsPausedBySystem bool       `gorm:"default:false" json:"isPausedBySystem"`    // 是否被系统自动暂停
 	PauseOnFreeEnd   bool       `gorm:"default:false" json:"pauseOnFreeEnd"`      // 免费结束时是否暂停（来自 RSS 配置）
+	FreeEndDelete    bool       `gorm:"default:false" json:"freeEndDelete"`       // 免费结束时删除而不是暂停（推送时按 RSS 的选择写下）
 	PausedAt         *time.Time `gorm:"default:null" json:"pausedAt"`             // 系统暂停时间
 	PauseReason      string     `gorm:"size:256;default:''" json:"pauseReason"`   // 暂停原因
 	IsCompleted      bool       `gorm:"default:false;index" json:"isCompleted"`   // 下载是否已完成

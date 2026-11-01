@@ -216,3 +216,18 @@ func TestOnRSSDownload_PauseDueStaysPaused(t *testing.T) {
 		})
 	}
 }
+
+// 「立即下载」也按这条 RSS 免费结束时删除的选择写进种子记录。
+func TestOnRSSDownload_InheritsFreeEndDelete(t *testing.T) {
+	r := newButtonRig(t, true)
+	require.NoError(t, r.db.DB.Model(&models.RSSSubscription{}).Where("id = ?", r.sub.ID).Update("free_end_delete", true).Error)
+	end := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	r.lookupFn = func() (*v2.TorrentItem, error) {
+		return &v2.TorrentItem{ID: "77", DiscountLevel: v2.DiscountFree, DiscountEndTime: end, FetchedAt: time.Now().UTC()}, nil
+	}
+
+	require.NoError(t, r.actions.OnRSSDownload(context.Background(), r.row.ID, 0))
+	ti := r.record(t)
+	assert.True(t, ti.PauseOnFreeEnd)
+	assert.True(t, ti.FreeEndDelete)
+}

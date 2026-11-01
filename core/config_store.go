@@ -159,7 +159,7 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 				return e
 			}
 			for _, r := range rss {
-				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
+				sc.RSS = append(sc.RSS, rssConfigOf(r))
 			}
 			out.Sites[sg] = sc
 		}
@@ -385,7 +385,7 @@ func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patc
 		cur.CleanupProtectHR = gs.CleanupProtectHR
 		cur.CleanupMinRetainH = gs.CleanupMinRetainH
 		cur.CleanupProtectTags = gs.CleanupProtectTags
-		cur.AutoDeleteOnFreeEnd = gs.AutoDeleteOnFreeEnd
+		// AutoDeleteOnFreeEnd 不再改：免费结束时删除还是暂停每条 RSS 自己选（v17），它留着升级前的值给旧版
 		cur.FreeEndAdvanceMinutes = gs.FreeEndAdvanceMinutes
 		cur.PeerRatioEnabled = gs.PeerRatioEnabled
 		cur.PeerRatioMaxSL = gs.PeerRatioMaxSL
@@ -791,11 +791,13 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			if r.IntervalMinutes < models.MinIntervalMinutes {
 				r.IntervalMinutes = models.MinIntervalMinutes
 			}
+			// 免费结束时删除只在开着免费结束处理时有意义
+			r.FreeEndDelete = r.PauseOnFreeEnd && r.FreeEndDelete
 			if cur, ok := storedByID[r.ID]; ok {
 				// 改的字段与新建时写的相同；示例标记沿用库里的
 				cur.Name, cur.URL, cur.Category, cur.Tag = r.Name, r.URL, r.Category, r.Tag
 				cur.IntervalMinutes, cur.DownloaderID, cur.DownloadPath = r.IntervalMinutes, r.DownloaderID, r.DownloadPath
-				cur.PauseOnFreeEnd, cur.FilterMode = r.PauseOnFreeEnd, r.FilterMode
+				cur.PauseOnFreeEnd, cur.FreeEndDelete, cur.FilterMode = r.PauseOnFreeEnd, r.FreeEndDelete, r.FilterMode
 				cur.NotifyMode, cur.NotifyConfIDs, cur.MaxNotificationsPerHour = r.NotifyMode, r.NotifyConfIDs, r.MaxNotificationsPerHour
 				if err := tx.Save(cur).Error; err != nil {
 					return err
@@ -816,6 +818,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 				DownloaderID:            r.DownloaderID,
 				DownloadPath:            r.DownloadPath,
 				PauseOnFreeEnd:          r.PauseOnFreeEnd,
+				FreeEndDelete:           r.FreeEndDelete,
 				FilterMode:              r.FilterMode,
 				NotifyMode:              r.NotifyMode,
 				NotifyConfIDs:           r.NotifyConfIDs,
@@ -855,7 +858,7 @@ func (s *ConfigStore) AppendRSSToSite(siteName string, entry models.RSSConfig) (
 		}
 		existing := make([]models.RSSConfig, 0, len(rows))
 		for _, r := range rows {
-			existing = append(existing, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
+			existing = append(existing, rssConfigOf(r))
 		}
 
 		normalized, err := validateAndNormalizeRSS(existing, entry)
@@ -885,6 +888,7 @@ func (s *ConfigStore) AppendRSSToSite(siteName string, entry models.RSSConfig) (
 			DownloaderID:            normalized.DownloaderID,
 			DownloadPath:            normalized.DownloadPath,
 			PauseOnFreeEnd:          normalized.PauseOnFreeEnd,
+			FreeEndDelete:           normalized.FreeEndDelete,
 			FilterMode:              normalized.FilterMode,
 			NotifyMode:              normalized.NotifyMode,
 			NotifyConfIDs:           normalized.NotifyConfIDs,
@@ -1029,6 +1033,12 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 	if err := s.db.DB.Find(&sites).Error; err != nil {
 		return nil, err
 	}
+	// 读不出过滤规则关联时照样列出站点（与 GetSiteConf 一样），只是 RSS 不带过滤规则编号：
+	// 列表用在搜索、统计等很多地方，不能因为这一项整个读不出来
+	rules, err := models.NewRSSFilterAssociationDB(s.db.DB).FilterRuleIDsByRSS()
+	if err != nil {
+		sLogger().Warnf("[站点列表] 读取 RSS 的过滤规则关联失败: %v", err)
+	}
 	for _, ss := range sites {
 		sg := models.SiteGroup(strings.ToLower(ss.Name))
 		cookie, err := s.cookiePlaintextForSite(ss)
@@ -1041,7 +1051,13 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
+			cfg := rssConfigOf(r)
+			// 带上过滤规则编号：站点列表上的启用开关把列表里的配置整站存回去，不带就会把关联清掉
+			cfg.FilterRuleIDs = rules[r.ID]
+			if cfg.FilterRuleIDs == nil {
+				cfg.FilterRuleIDs = []uint{}
+			}
+			sc.RSS = append(sc.RSS, cfg)
 		}
 		// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 		out[sg] = sc
@@ -1110,6 +1126,17 @@ func (s *ConfigStore) SetSiteCookies(ctx context.Context, cookies map[models.Sit
 	return failed, nil
 }
 
+// rssConfigOf 是库里一条 RSS 订阅的运行时配置（不含过滤规则关联，要的调用方自己读）。读站点配置的几处都用它，
+// 整站保存把读出来的配置原样存回去时不会少字段。
+func rssConfigOf(r models.RSSSubscription) models.RSSConfig {
+	return models.RSSConfig{
+		ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes,
+		DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample,
+		PauseOnFreeEnd: r.PauseOnFreeEnd, FreeEndDelete: r.FreeEndDelete, FilterMode: r.FilterMode,
+		NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour,
+	}
+}
+
 func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, error) {
 	var ss models.SiteSetting
 	if err := s.db.DB.Where("name = ?", string(name)).First(&ss).Error; err != nil {
@@ -1130,22 +1157,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	assocDB := models.NewRSSFilterAssociationDB(s.db.DB)
 
 	for _, r := range rss {
-		rssCfg := models.RSSConfig{
-			ID:                      r.ID,
-			Name:                    r.Name,
-			URL:                     r.URL,
-			Category:                r.Category,
-			Tag:                     r.Tag,
-			IntervalMinutes:         r.IntervalMinutes,
-			DownloaderID:            r.DownloaderID,
-			DownloadPath:            r.DownloadPath,
-			IsExample:               r.IsExample,
-			PauseOnFreeEnd:          r.PauseOnFreeEnd,
-			FilterMode:              r.FilterMode,
-			NotifyMode:              r.NotifyMode,
-			NotifyConfIDs:           r.NotifyConfIDs,
-			MaxNotificationsPerHour: r.MaxNotificationsPerHour,
-		}
+		rssCfg := rssConfigOf(r)
 
 		// 获取关联的过滤规则 ID
 		ruleIDs, err := assocDB.GetFilterRuleIDsForRSS(r.ID)

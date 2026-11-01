@@ -53,7 +53,6 @@ const form = ref<GlobalSettings>({
   max_retry: 3,
   default_concurrency: 3,
   default_enabled: false,
-  auto_delete_on_free_end: false,
   free_end_advance_minutes: 0,
   default_filter_mode: "auto_free",
 });
@@ -205,8 +204,6 @@ const headSub = computed(() => {
     f.retain_hours > 0 ? `暂存保留 ${f.retain_hours} 小时` : "暂存不自动清理",
     f.auto_start ? "启动即运行" : "手动启动",
   ].filter(Boolean);
-  // 免费期结束自动删数据是不可恢复的，开着就一定要在摘要里露出来
-  if (f.auto_delete_on_free_end) parts.push("免费结束自动删除");
   if (proxySaved.value?.enabled) parts.push(proxySummary(proxySaved.value));
   return parts.join(" · ");
 });
@@ -507,18 +504,13 @@ async function save() {
               <span>免费结束管理</span>
             </div>
             <div class="settings-body">
-              <el-form-item label="免费结束自动删除">
-                <el-switch v-model="form.auto_delete_on_free_end" />
-                <div class="field-tip">
-                  开启后，免费期结束时未下载完成的种子将自动从下载器中删除（含数据文件）；关闭时仅暂停，可在「暂停任务」页手动恢复或删除
-                </div>
-                <div v-if="form.auto_delete_on_free_end" class="pt-note pt-note--dang mode-note">
-                  <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-                  <span
-                    >已开启：免费期结束时未完成的种子及其数据文件会被自动删除，此操作不可恢复</span
-                  >
-                </div>
-              </el-form-item>
+              <div class="pt-note mode-note" data-testid="gs-free-end-per-rss">
+                <PtIcon name="info" :size="14" class="pt-note__icon" />
+                <span
+                  >免费期结束时没下完的种子暂停还是删除，在站点详情里每条 RSS
+                  自己选（「免费结束时没下完」）；暂停的可以在「暂停任务」页恢复或删除。</span
+                >
+              </div>
 
               <el-form-item label="免费期结束前提前处理（分钟）">
                 <el-input-number

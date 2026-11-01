@@ -307,11 +307,12 @@ func (sp *stagedPush) processFile(ctx context.Context, filePath string) error {
 	return fmt.Errorf("推送种子失败: %s", res.Message)
 }
 
-// policyFor 是暂存项的入场策略：是否要求免费跟着记录（取详情阶段按免费通道或规则写入），暂停开关跟着本 RSS。
+// policyFor 是暂存项的入场策略：是否要求免费跟着记录（取详情阶段按免费通道或规则写入），免费结束时暂停还是删除跟着本 RSS。
 func (sp *stagedPush) policyFor(t models.TorrentInfo, advanceMinutes int) AdmissionPolicy {
 	p := AdmissionPolicy{
 		RequireFree:    t.RequireFree,
 		PauseOnFreeEnd: sp.rss.PauseOnFreeEnd,
+		FreeEndDelete:  sp.rss.PauseOnFreeEnd && sp.rss.FreeEndDelete,
 		SafetyMargin:   SafetyMarginFor(advanceMinutes),
 		SourceKind:     SourceKindRSS,
 		AttemptStart:   sp.attemptStart,

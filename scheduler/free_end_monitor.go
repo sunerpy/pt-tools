@@ -680,7 +680,8 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(scheduled models.TorrentInfo) {
 	}
 
 	protectedWhy := ""
-	if m.isAutoDeleteEnabled() {
+	// 删除还是暂停看推送时写进记录的选择（这条 RSS 当时的设置），不看 RSS 现在的设置
+	if torrent.FreeEndDelete {
 		why, handled := m.autoDeleteFreeEnded(dl, torrent, progress, totalSize, advanced)
 		if handled {
 			return
@@ -702,7 +703,7 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(scheduled models.TorrentInfo) {
 	global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已暂停 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
 }
 
-// autoDeleteFreeEnded 在删除锁里删免费期结束、还没下完的种子（打开了「免费结束自动删除」时，见 internal.RemovalMutex）：
+// autoDeleteFreeEnded 在删除锁里删免费期结束、还没下完的种子（推送时这条 RSS 选了删除，见 internal.RemovalMutex）：
 // 先重新读这个种子，带保留、保护标签或 H&R 没做满（打开了「保护 H&R 种子」时）的不删，返回原因由调用方改成暂停；
 // 读不出这些信息时同样不删。handled 为真时已经处理完：删掉了、种子已经不在了，或者失败了、已经安排重试。
 func (m *FreeEndMonitor) autoDeleteFreeEnded(dl downloader.Downloader, torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool) (protectedWhy string, handled bool) {
@@ -902,7 +903,7 @@ func publishCompleted(t models.TorrentInfo, hash string) {
 	}
 }
 
-// markPaused 记下免费结束暂停了这个种子。protectedWhy 不为空时是打开了「免费结束自动删除」、但种子受保护而改成暂停的原因。
+// markPaused 记下免费结束暂停了这个种子。protectedWhy 不为空时是推送时选了删除、但种子受保护而改成暂停的原因。
 func (m *FreeEndMonitor) markPaused(torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool, protectedWhy string) {
 	now := time.Now()
 	reason := "免费期结束，下载未完成"
@@ -1081,14 +1082,6 @@ func (m *FreeEndMonitor) markRemovedFromDownloader(torrent models.TorrentInfo) {
 		global.GetSlogger().Errorf("更新种子删除状态失败 (种子:%s): %v", torrent.Title, err)
 	}
 	m.CancelTorrent(torrent.ID)
-}
-
-func (m *FreeEndMonitor) isAutoDeleteEnabled() bool {
-	var cfg models.SettingsGlobal
-	if err := m.db.First(&cfg).Error; err != nil {
-		return false
-	}
-	return cfg.AutoDeleteOnFreeEnd
 }
 
 func (m *FreeEndMonitor) markAutoDeleted(torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool) {

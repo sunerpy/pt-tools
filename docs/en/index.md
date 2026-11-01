@@ -93,8 +93,8 @@ home:
             body: Pick fresh torrents from a site's free list by your conditions, seed them, and remove them by seeding time, ratio or upload speed, within limits on concurrent downloads and size. Off by default.
             status: preview
             link: /en/guide/brush
-          - title: Pause when freeleech ends
-            body: A torrent still downloading when its free period ends is paused, so it does not count against your download.
+          - title: Pause or delete when freeleech ends
+            body: A torrent still downloading when its free period ends is paused or deleted, as its subscription chooses, so it does not count against your download.
             status: available
             link: /en/configuration
           - title: Disk protection and auto-delete
@@ -330,7 +330,7 @@ home:
 
 pt-tools fetches every RSS feed on a schedule and pushes the matching torrents to a downloader. A feed with no filter rules downloads freeleech torrents only, which suits building ratio; once rules are attached, only matching torrents are downloaded, which suits following a series or collecting particular releases.
 
-Before a push it checks the downloader's free space and the site's seeding limit, and a torrent still downloading when its free period ends is paused.
+Before a push it checks the downloader's free space and the site's seeding limit, and a torrent still downloading when its free period ends is paused or deleted, as its subscription chooses.
 
 [RSS subscriptions](/en/guide/rss-subscription) · [Filter rules and TV series](/en/guide/filter-rules-tv-series) · [Auto-delete and disk protection](/en/guide/auto-cleanup)
 

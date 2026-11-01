@@ -27,6 +27,8 @@ func validateAndNormalizeRSS(existing []models.RSSConfig, entry models.RSSConfig
 	if entry.IntervalMinutes < models.MinIntervalMinutes {
 		entry.IntervalMinutes = models.MinIntervalMinutes
 	}
+	// 免费结束时删除只在开着免费结束处理时有意义
+	entry.FreeEndDelete = entry.PauseOnFreeEnd && entry.FreeEndDelete
 	return entry, nil
 }
 

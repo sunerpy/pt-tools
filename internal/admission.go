@@ -35,8 +35,10 @@ const (
 type AdmissionPolicy struct {
 	// RequireFree 为 true 时只有本次尝试取得、仍在免费期内的快照才放行
 	RequireFree bool
-	// PauseOnFreeEnd 为 true 时承诺免费结束时暂停（或按设置删除）
+	// PauseOnFreeEnd 为 true 时承诺免费结束时暂停（FreeEndDelete 为 true 时删除）
 	PauseOnFreeEnd bool
+	// FreeEndDelete 是免费结束时删除而不是暂停（来自 RSS 的选择），只在 PauseOnFreeEnd 为 true 时生效，推送时写进种子记录
+	FreeEndDelete bool
 	// SafetyMargin 是免费剩余时间至少要超过的量（见 SafetyMarginFor）
 	SafetyMargin time.Duration
 	// SourceRSSID 是这个推送所属的 RSS（RSS 自动推送与通知按钮）
@@ -48,6 +50,9 @@ type AdmissionPolicy struct {
 	// Clock 是调用方的时钟（刷流、订阅在测试里用假时钟）；为空时用 time.Now
 	Clock func() time.Time
 }
+
+// freeEndDelete 是写进种子记录的「免费结束时删除」：只在承诺了到期处理时为真。
+func (p AdmissionPolicy) freeEndDelete() bool { return p.PauseOnFreeEnd && p.FreeEndDelete }
 
 // Now 是门禁判断用的当前时间。
 func (p AdmissionPolicy) Now() time.Time {

@@ -165,10 +165,11 @@ Set it to 0 to turn the check off.
 
 ### When freeleech ends
 
-| Setting                                                                     | Meaning                                                                                                                                                                                                                                      | Default          | Suggested         |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
-| **Delete when freeleech ends (免费结束自动删除)**                           | When the free period ends, unfinished torrents are deleted with their data; when off, they are only paused. Torrents with the [keep tag](guide/auto-cleanup.md#keeping-torrents), a protected tag or unmet H&R are paused instead of deleted | Off              | On if you need it |
-| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag                                                                                                                                            | 5 (new installs) | 5 minutes or more |
+| Setting                                                                     | Meaning                                                                                           | Default          | Suggested         |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag | 5 (new installs) | 5 minutes or more |
+
+Whether a torrent still unfinished when its free period ends is paused or deleted is chosen per RSS subscription, in Unfinished when freeleech ends (免费结束时没下完): Do nothing, Pause or Delete; see [RSS subscriptions](guide/rss-subscription.md#freeleech-eligibility-and-pausing). This used to be the global Delete when freeleech ends (免费结束自动删除): installs that had it on get Delete on the subscriptions that paused at freeleech end, and torrents already waiting for the end of freeleech are handled as before the upgrade.
 
 Acting early adds a safety margin: the pause or deletion runs at `freeleech end time - N minutes`. That absorbs the delay of the deletion itself and the lag before the downloader reports to the tracker, so that no non-free download is counted after the free period has ended.
 
@@ -230,25 +231,25 @@ Path: /data/downloads/music     Alias: Music     Default: No
 
 RSS subscriptions are the core of pt-tools. A feed is added on the RSS subscriptions (RSS 订阅) tab of a site's page, with these fields:
 
-| Field                                            | Meaning                                      | Required | Example                     |
-| ------------------------------------------------ | -------------------------------------------- | -------- | --------------------------- |
-| **Name (名称)**                                  | A name that identifies the feed              | Yes      | `HDSky movies`, `MT series` |
-| **Link (链接)**                                  | The RSS feed URL                             | Yes      | `https://site.com/rss?...`  |
-| **Category (分类)**                              | The category in the downloader               | No       | `PT-Auto`                   |
-| **Tags (标签)**                                  | Task tags, to keep things organised          | No       | `hdsky,movie`               |
-| **Check interval in minutes (检查间隔（分钟）)** | How often the feed is fetched                | Yes      | 5-1440 minutes              |
-| **Downloader (下载器)**                          | The downloader to use                        | No       | The default when not set    |
-| **Download path (下载路径)**                     | The download folder to use                   | No       | The default when not set    |
-| **Filter rules (过滤规则)**                      | Filter rules attached to the feed            | No       | Several can be chosen       |
-| **Pause when freeleech ends (免费结束暂停)**     | Pauses the torrent when its free period ends | No       | Yes/No                      |
+| Field                                                 | Meaning                             | Required | Example                     |
+| ----------------------------------------------------- | ----------------------------------- | -------- | --------------------------- |
+| **Name (名称)**                                       | A name that identifies the feed     | Yes      | `HDSky movies`, `MT series` |
+| **Link (链接)**                                       | The RSS feed URL                    | Yes      | `https://site.com/rss?...`  |
+| **Category (分类)**                                   | The category in the downloader      | No       | `PT-Auto`                   |
+| **Tags (标签)**                                       | Task tags, to keep things organised | No       | `hdsky,movie`               |
+| **Check interval in minutes (检查间隔（分钟）)**      | How often the feed is fetched       | Yes      | 5-1440 minutes              |
+| **Downloader (下载器)**                               | The downloader to use               | No       | The default when not set    |
+| **Download path (下载路径)**                          | The download folder to use          | No       | The default when not set    |
+| **Filter rules (过滤规则)**                           | Filter rules attached to the feed   | No       | Several can be chosen       |
+| **Unfinished when freeleech ends (免费结束时没下完)** | Do nothing, Pause or Delete         | No       | Pause                       |
 
 ### Suggested RSS settings
 
-| Situation                   | Suggested interval | Pause when freeleech ends |
-| --------------------------- | ------------------ | ------------------------- |
-| **Everyday ratio building** | 15-30 minutes      | Yes                       |
-| **Following a series**      | 10-15 minutes      | Depends                   |
-| **Grabbing new releases**   | 5-10 minutes       | No                        |
+| Situation                   | Suggested interval | Unfinished when freeleech ends |
+| --------------------------- | ------------------ | ------------------------------ |
+| **Everyday ratio building** | 15-30 minutes      | Pause or Delete                |
+| **Following a series**      | 10-15 minutes      | Depends                        |
+| **Grabbing new releases**   | 5-10 minutes       | Do nothing                     |
 
 The full RSS guide is in [RSS subscriptions](guide/rss-subscription.md).
 
@@ -396,7 +397,7 @@ services:
 
 - RSS interval: 15-30 minutes
 - Download freeleech torrents only
-- Turn on Pause when freeleech ends (免费结束暂停)
+- Set Unfinished when freeleech ends (免费结束时没下完) to Pause (or Delete)
 - Set Maximum torrent size (最大种子大小（GB）)
 
 **Setup 2: following series as well as building ratio**
@@ -404,7 +405,7 @@ services:
 - RSS interval: 10 minutes
 - Create a filter rule for the series that allows torrents that are not free
 - Create a general rule that downloads freeleech only
-- Turn on Pause when freeleech ends
+- Set Unfinished when freeleech ends to Pause (or Delete)
 
 **Setup 3: several sites**
 

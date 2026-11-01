@@ -457,3 +457,31 @@ func TestConfigInternalCallsOnly(t *testing.T) {
 	_, _, err = bare.configCall(context.Background(), http.MethodGet, "/api/global", nil)
 	assert.Equal(t, http.StatusServiceUnavailable, configStatus(err), "路由还没建好")
 }
+
+// 配置网关：RSS 有「免费结束时删除」（只在开着免费结束处理时有意义，保存时规范化）；全局设置里不再有「免费结束自动删除」。
+func TestConfigRSSFreeEndDelete(t *testing.T) {
+	e := newConfigEnv(t)
+	ctx := context.Background()
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", AuthMethod: "cookie", IsBuiltin: true}).Error)
+
+	added, err := e.srv.ConfigApply(ctx, "rss", ConfigChange{Op: "add", Values: map[string]any{
+		"site": "hdsky", "name": "电影", "url": "https://hdsky.me/torrentrss.php?rows=10", "pause_on_free_end": true, "free_end_delete": true,
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, true, added.Item["free_end_delete"])
+	var sub models.RSSSubscription
+	require.NoError(t, db.First(&sub).Error)
+	assert.True(t, sub.FreeEndDelete)
+
+	_, err = e.srv.ConfigApply(ctx, "rss", ConfigChange{Op: "update", ID: added.ID, Values: map[string]any{"pause_on_free_end": false}})
+	require.NoError(t, err)
+	require.NoError(t, db.First(&sub, sub.ID).Error)
+	assert.False(t, sub.FreeEndDelete, "关了免费结束处理就不删")
+
+	st, err := e.srv.ConfigRead(ctx, "global", "")
+	require.NoError(t, err)
+	assert.NotContains(t, st.Item, "auto_delete_on_free_end")
+	_, err = e.srv.ConfigPreview(ctx, "global", ConfigChange{Op: "set", Values: map[string]any{"auto_delete_on_free_end": true}})
+	require.Error(t, err)
+}

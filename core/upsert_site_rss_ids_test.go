@@ -336,3 +336,22 @@ func TestUpsertSiteWithRSS_StoredRSSReadError(t *testing.T) {
 	require.NoError(t, f.db.DB.Where("name = ?", "springsunday").First(&site).Error)
 	assert.Zero(t, site.UploadLimitKBs, "整个保存回滚")
 }
+
+// 站点列表（GET /api/sites，读 ListSites）上的启用开关把列表里的站点配置原样整站保存：列表里的 RSS 带上过滤规则编号，
+// 存回去时过滤规则关联不丢。以前列表不带这一项，在列表上启用、停用一次站点，它的 RSS 就没有过滤规则了。
+func TestUpsertSiteWithRSS_ListedConfigKeepsFilterRules(t *testing.T) {
+	f := newRSSKeepFixture(t)
+	sites, err := f.store.ListSites()
+	require.NoError(t, err)
+	sc := sites["springsunday"]
+	for _, r := range sc.RSS {
+		if r.ID == f.a {
+			assert.Equal(t, []uint{f.ruleA}, r.FilterRuleIDs, "列表里的 RSS 带上过滤规则编号")
+		}
+	}
+	disabled := false
+	sc.Enabled = &disabled
+	require.NoError(t, f.store.UpsertSiteWithRSS("springsunday", sc))
+	assert.Equal(t, []uint{f.ruleA}, filterIDsOf(t, f.db, f.a), "存回去以后过滤规则关联还在")
+	assert.Equal(t, []uint{f.ruleB}, filterIDsOf(t, f.db, f.other), "别的站点不动")
+}

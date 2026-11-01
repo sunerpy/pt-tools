@@ -362,10 +362,7 @@ func TestHandleFreeEnded_AutoDelete(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	m, db := newFreeEndMonitorWithFake(t, fake)
 
-	// Enable auto-delete.
-	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
-		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
-	}).Error)
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{DownloadDir: t.TempDir()}).Error)
 
 	// Incomplete torrent in downloader.
 	fake.torrentByID["task-del"] = downloader.Torrent{
@@ -374,7 +371,7 @@ func TestHandleFreeEnded_AutoDelete(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ad1", Title: "AutoDel", PauseOnFreeEnd: true, IsFree: true,
+		SiteName: "s", TorrentID: "ad1", Title: "AutoDel", PauseOnFreeEnd: true, FreeEndDelete: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-del", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -395,9 +392,7 @@ func TestHandleFreeEnded_AutoDelete_NotFoundTolerated(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	m, db := newFreeEndMonitorWithFake(t, fake)
 
-	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
-		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
-	}).Error)
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{DownloadDir: t.TempDir()}).Error)
 
 	fake.torrentByID["task-nf"] = downloader.Torrent{
 		ID: "task-nf", Progress: 0.3, State: downloader.TorrentDownloading,
@@ -406,7 +401,7 @@ func TestHandleFreeEnded_AutoDelete_NotFoundTolerated(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ad2", Title: "AutoDelNF", PauseOnFreeEnd: true, IsFree: true,
+		SiteName: "s", TorrentID: "ad2", Title: "AutoDelNF", PauseOnFreeEnd: true, FreeEndDelete: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-nf", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -422,9 +417,7 @@ func TestHandleFreeEnded_AutoDelete_RealError_Retries(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	m, db := newFreeEndMonitorWithFake(t, fake)
 
-	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
-		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
-	}).Error)
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{DownloadDir: t.TempDir()}).Error)
 
 	fake.torrentByID["task-err"] = downloader.Torrent{
 		ID: "task-err", Progress: 0.3, State: downloader.TorrentDownloading,
@@ -433,7 +426,7 @@ func TestHandleFreeEnded_AutoDelete_RealError_Retries(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ad3", Title: "AutoDelErr", PauseOnFreeEnd: true, IsFree: true,
+		SiteName: "s", TorrentID: "ad3", Title: "AutoDelErr", PauseOnFreeEnd: true, FreeEndDelete: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-err", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -663,17 +656,6 @@ func TestMarkAutoDeleted_AdvancedReason(t *testing.T) {
 	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
 	assert.Equal(t, "免费期临近结束，自动删除（未完成）", updated.PauseReason)
 	assert.True(t, updated.IsPausedBySystem)
-}
-
-func TestIsAutoDeleteEnabled(t *testing.T) {
-	db := setupTestDB(t)
-	m := NewFreeEndMonitor(db.DB, downloader.NewDownloaderManager())
-	assert.False(t, m.isAutoDeleteEnabled(), "no config row → false")
-
-	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
-		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
-	}).Error)
-	assert.True(t, m.isAutoDeleteEnabled())
 }
 
 func TestLoadPendingTasksFromDB_FuturePastSplit(t *testing.T) {
@@ -2194,16 +2176,6 @@ func TestMarkAutoDeleted_NonAdvancedReason(t *testing.T) {
 	assert.Equal(t, "免费期结束，自动删除（未完成）", got.PauseReason)
 }
 
-func TestIsAutoDeleteEnabled_TrueFalse(t *testing.T) {
-	fake := newSchedFakeDownloader("qb1")
-	fm, db := newFreeEndMonitorWithFake(t, fake)
-	assert.False(t, fm.isAutoDeleteEnabled())
-	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
-		DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, AutoDeleteOnFreeEnd: true,
-	}))
-	assert.True(t, fm.isAutoDeleteEnabled())
-}
-
 func TestPauseAndConfirm_Errors(t *testing.T) {
 	// 暂停接口报错：返回错误
 	fake := newSchedFakeDownloader("qb1")
@@ -2331,4 +2303,44 @@ func TestArchiveOldTorrents_KeepsExternalIDs(t *testing.T) {
 	require.NoError(t, db.DB.Where("torrent_id = ?", "ext1").First(&got).Error)
 	assert.Equal(t, "tt0111161", got.IMDbID)
 	assert.Equal(t, "1292052", got.DoubanID)
+}
+
+// 免费结束时删除还是暂停看推送时写进记录的选择（free_end_delete），不看全局设置：
+// 改了 RSS 的选择只影响之后推送的种子，已经在等到期处理的照推送时的选择处理。
+func TestHandleFreeEnded_FollowsRecordChoice(t *testing.T) {
+	for _, c := range []struct {
+		name              string
+		globalDelete, rec bool
+		wantDelete        bool
+	}{
+		{"记录选了删除", false, true, true},
+		{"记录选了暂停，全局旧开关开着也只暂停", true, false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fake := newSchedFakeDownloader("qb1")
+			m, db := newFreeEndMonitorWithFake(t, fake)
+			m.pauseConfirmWait = time.Millisecond
+			require.NoError(t, db.DB.Create(&models.SettingsGlobal{DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: c.globalDelete}).Error)
+			fake.torrentByID["task-c"] = downloader.Torrent{ID: "task-c", Progress: 0.4, State: downloader.TorrentDownloading, TotalSize: 500}
+			freeEnd := time.Now().Add(-time.Minute)
+			tor := models.TorrentInfo{
+				SiteName: "s", TorrentID: "rc1", Title: "Choice", PauseOnFreeEnd: true, FreeEndDelete: c.rec, IsFree: true,
+				FreeEndTime: &freeEnd, DownloaderTaskID: "task-c", DownloaderName: "qb1",
+			}
+			require.NoError(t, db.DB.Create(&tor).Error)
+
+			m.handleFreeEndedTorrent(tor)
+
+			var got models.TorrentInfo
+			require.NoError(t, db.DB.First(&got, tor.ID).Error)
+			if c.wantDelete {
+				assert.Equal(t, []string{"task-c"}, fake.removedSingle)
+				assert.Equal(t, "免费期结束，自动删除（未完成）", got.PauseReason)
+			} else {
+				assert.Empty(t, fake.removedSingle, "不删")
+				assert.True(t, got.IsPausedBySystem)
+				assert.NotContains(t, got.PauseReason, "删除")
+			}
+		})
+	}
 }

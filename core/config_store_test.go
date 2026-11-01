@@ -1779,3 +1779,16 @@ func TestRSSPlaceholderRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "占位地址（hdsky.xxx）")
 }
+
+// v17 起免费结束时删除还是暂停每条 RSS 自己选：保存全局设置不再改全局的「免费结束自动删除」，
+// 它留着升级前的值，给迁移 v17 换算与回退到旧版时用。
+func TestSaveGlobalSettings_KeepsLegacyAutoDeleteOnFreeEnd(t *testing.T) {
+	db := newCloakDB(t)
+	s := NewConfigStore(db)
+	dir := t.TempDir()
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, AutoDeleteOnFreeEnd: true}))
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, AutoDeleteOnFreeEnd: false}))
+	got, err := s.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.True(t, got.AutoDeleteOnFreeEnd)
+}

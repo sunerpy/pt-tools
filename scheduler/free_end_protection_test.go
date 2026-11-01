@@ -11,20 +11,20 @@ import (
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
-// 打开了「免费结束自动删除」：带保留、保护标签或 H&R 没做满的种子不删，改成暂停，写明原因；读不出 H&R 信息时同样不删。
+// 推送时选了免费结束时删除：带保留、保护标签或 H&R 没做满的种子不删，改成暂停，写明原因；读不出 H&R 信息时同样不删。
 func TestHandleFreeEnded_AutoDeleteRespectsProtection(t *testing.T) {
 	setup := func(t *testing.T, tags string, hr bool) (*schedFakeDownloader, *FreeEndMonitor, models.TorrentInfo) {
 		fake := newSchedFakeDownloader("qb1")
 		m, db := newFreeEndMonitorWithFake(t, fake)
 		require.NoError(t, db.DB.Create(&models.SettingsGlobal{
-			DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true, CleanupProtectHR: true, CleanupProtectTags: "fav",
+			DownloadDir: t.TempDir(), CleanupProtectHR: true, CleanupProtectTags: "fav",
 		}).Error)
 		inc := downloader.Torrent{ID: "task-p", InfoHash: "task-p", Progress: 0.4, State: downloader.TorrentDownloading, Tags: tags}
 		fake.torrents = []downloader.Torrent{inc}
 		freeEnd := time.Now().Add(-time.Minute)
 		hash := "task-p"
 		tor := models.TorrentInfo{
-			SiteName: "s", TorrentID: "p1", Title: "Protected", PauseOnFreeEnd: true, IsFree: true, TorrentHash: &hash,
+			SiteName: "s", TorrentID: "p1", Title: "Protected", PauseOnFreeEnd: true, FreeEndDelete: true, IsFree: true, TorrentHash: &hash,
 			FreeEndTime: &freeEnd, DownloaderTaskID: "task-p", DownloaderName: "qb1", HasHR: hr, HRSeedTimeH: 72,
 		}
 		require.NoError(t, db.DB.Create(&tor).Error)

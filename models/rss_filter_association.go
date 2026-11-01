@@ -48,6 +48,19 @@ func (r *RSSFilterAssociationDB) GetByRSSID(rssID uint) ([]uint, error) {
 	return ids, nil
 }
 
+// FilterRuleIDsByRSS 一次读出全部关联，按 RSS 编号分组（每组的顺序与 GetByRSSID 相同）。
+func (r *RSSFilterAssociationDB) FilterRuleIDsByRSS() (map[uint][]uint, error) {
+	var associations []RSSFilterAssociation
+	if err := r.db.Order("id").Find(&associations).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[uint][]uint)
+	for _, assoc := range associations {
+		out[assoc.RSSID] = append(out[assoc.RSSID], assoc.FilterRuleID)
+	}
+	return out, nil
+}
+
 // GetByFilterRuleID retrieves all RSS IDs associated with a filter rule.
 func (r *RSSFilterAssociationDB) GetByFilterRuleID(filterRuleID uint) ([]uint, error) {
 	var associations []RSSFilterAssociation

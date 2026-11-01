@@ -59,13 +59,13 @@ func TestHandleFreeEnded_AutoDelete_KeepsSharedData(t *testing.T) {
 	setup := func(t *testing.T) (*schedFakeDownloader, *FreeEndMonitor, models.TorrentInfo) {
 		fake := newSchedFakeDownloader("qb1")
 		m, db := newFreeEndMonitorWithFake(t, fake)
-		require.NoError(t, db.DB.Create(&models.SettingsGlobal{DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true}).Error)
+		require.NoError(t, db.DB.Create(&models.SettingsGlobal{DownloadDir: t.TempDir()}).Error)
 		inc := downloader.Torrent{ID: "task-sh", InfoHash: "task-sh", Progress: 0.4, State: downloader.TorrentDownloading, ContentPath: "/d/Movie"}
 		fake.torrentByID["task-sh"] = inc
 		fake.torrents = []downloader.Torrent{inc, {ID: "other", InfoHash: "other", Progress: 1, ContentPath: "/d/Movie"}}
 		freeEnd := time.Now().Add(-time.Minute)
 		tor := models.TorrentInfo{
-			SiteName: "s", TorrentID: "ad9", Title: "Shared", PauseOnFreeEnd: true, IsFree: true,
+			SiteName: "s", TorrentID: "ad9", Title: "Shared", PauseOnFreeEnd: true, FreeEndDelete: true, IsFree: true,
 			FreeEndTime: &freeEnd, DownloaderTaskID: "task-sh", DownloaderName: "qb1",
 		}
 		require.NoError(t, db.DB.Create(&tor).Error)

@@ -114,6 +114,7 @@ func (a *RSSCallbackActions) OnRSSDownload(ctx context.Context, logID uint, user
 		DownloaderID: downloaderID,
 		Policy: internal.AdmissionPolicy{
 			PauseOnFreeEnd: rss.PauseOnFreeEnd,
+			FreeEndDelete:  rss.PauseOnFreeEnd && rss.FreeEndDelete,
 			SafetyMargin:   internal.DefaultSafetyMargin(),
 			SourceRSSID:    &rssID,
 			SourceKind:     internal.SourceKindRSSNotify,

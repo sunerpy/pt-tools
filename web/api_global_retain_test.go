@@ -175,3 +175,15 @@ func TestAPIGlobal_CleanupEmergencyAndPeerInterval(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.CleanupEmergency)
 }
+
+// 全局设置接口不再收「免费结束自动删除」（v17 起每条 RSS 自己选）：带上它也不改库里的值。
+func TestAPIGlobal_IgnoresLegacyAutoDeleteOnFreeEnd(t *testing.T) {
+	srv := setupServer(t)
+	dir := t.TempDir()
+	require.NoError(t, srv.store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir}))
+	w := postGlobal(t, srv, map[string]any{"download_dir": dir, "auto_delete_on_free_end": true})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got, err := srv.store.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.False(t, got.AutoDeleteOnFreeEnd)
+}

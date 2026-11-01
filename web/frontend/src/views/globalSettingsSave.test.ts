@@ -76,7 +76,6 @@ const SETTINGS = {
   max_retry: 3,
   default_concurrency: 3,
   default_enabled: false,
-  auto_delete_on_free_end: false,
   free_end_advance_minutes: 0,
   default_filter_mode: "auto_free",
 };
@@ -179,6 +178,16 @@ describe("系统设置：两步保存分开报告", () => {
     const moved = document.querySelector("[data-testid=attendance-moved]");
     expect(moved?.textContent).toContain("自动签到");
     expect(document.querySelector("[data-testid=attendance-window-start]")).toBeNull();
+  });
+});
+
+describe("系统设置：免费结束管理", () => {
+  it("没有全局的免费结束自动删除（每条 RSS 自己选），写明在哪里选", async () => {
+    await mountLoaded();
+    expect(document.body.textContent).not.toContain("免费结束自动删除");
+    expect(document.querySelector("[data-testid=gs-free-end-per-rss]")?.textContent).toContain(
+      "每条 RSS",
+    );
   });
 });
 

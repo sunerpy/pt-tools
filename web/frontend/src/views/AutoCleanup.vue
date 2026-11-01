@@ -777,11 +777,16 @@ async function executeClean() {
                 </div>
 
                 <el-form-item>
-                  <el-checkbox v-model="form.cleanup_del_free_expired">
-                    免费到期仍未下完的种子自动删除
+                  <el-checkbox
+                    v-model="form.cleanup_del_free_expired"
+                    data-testid="ac-free-expired">
+                    其他免费种子免费过了没下完就删
                   </el-checkbox>
                   <div class="field-tip">
-                    只对本应用推送、且记录了免费结束时间的种子有效，与上面的管理范围无关
+                    管理范围里、本应用推送的免费种子，RSS
+                    里没选免费结束时暂停或删除的（选了「不处理」，或者手动推送的），免费期过了没下完就删；
+                    选了的由免费结束时的处理管。带保留标签、保护标签与 H&amp;R
+                    没做满的不删，不等最短保种时间、也不管「保护下载中」：免费一过，再下载就计费了
                   </div>
                 </el-form-item>
 

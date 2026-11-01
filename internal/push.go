@@ -641,6 +641,7 @@ func pushedColumns(target pushTarget, taskID string, policy AdmissionPolicy, sna
 		"downloader_task_id": taskID,
 		"push_pending_at":    nil,
 		"pause_on_free_end":  policy.PauseOnFreeEnd,
+		"free_end_delete":    policy.freeEndDelete(),
 		"require_free":       policy.RequireFree,
 		"pause_planned_at":   nil,
 		"free_end_failures":  0,
@@ -784,6 +785,7 @@ func markPushPending(req PushTorrentRequest, target pushTarget, hash string, sna
 		"downloader_id":     &dlID,
 		"downloader_name":   target.Name,
 		"pause_on_free_end": req.Policy.PauseOnFreeEnd,
+		"free_end_delete":   req.Policy.freeEndDelete(),
 		"require_free":      req.Policy.RequireFree,
 		// 对账补记账时不知道是哪个入口推的：把它推进下载器的规则随标记一起写下
 		"pushed_filter_rule_id": pushedRule(req.Policy),

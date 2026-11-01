@@ -56,14 +56,14 @@ var globalFields = []string{
 	"cleanup_condition_mode", "cleanup_max_seed_time_h", "cleanup_min_ratio", "cleanup_max_inactive_h",
 	"cleanup_slow_seed_time_h", "cleanup_slow_max_ratio", "cleanup_del_free_expired", "cleanup_disk_protect",
 	"cleanup_emergency", "cleanup_min_disk_space_gb", "cleanup_protect_dl", "cleanup_protect_hr", "cleanup_min_retain_h",
-	"cleanup_protect_tags", "auto_delete_on_free_end", "free_end_advance_minutes", "default_filter_mode", "peer_ratio_enabled",
+	"cleanup_protect_tags", "free_end_advance_minutes", "default_filter_mode", "peer_ratio_enabled",
 	"peer_ratio_max_sl", "peer_ratio_remove_data",
 }
 
 // rssFields 是 RSS 订阅能改的字段（models.RSSConfig 里 UpsertSiteWithRSS 与 AppendRSSToSite 会存的那些）。
 var rssFields = []string{
 	"name", "category", "tag", "interval_minutes", "downloader_id", "download_path", "filter_rule_ids",
-	"pause_on_free_end", "filter_mode", "notify_mode", "notify_conf_ids", "max_notifications_per_hour",
+	"pause_on_free_end", "free_end_delete", "filter_mode", "notify_mode", "notify_conf_ids", "max_notifications_per_hour",
 }
 
 // notifySecretRe 判断通知通道配置里的键是不是密钥：令牌、密钥、密码、签名，以及可能带着令牌的地址、请求头与请求体模板。
@@ -81,7 +81,7 @@ func (s *Server) configResources() []*configResource {
 	list := []*configResource{
 		{
 			Name: "global", Title: "全局设置", Kind: configObject, Path: "/api/global", SetMethod: http.MethodPost,
-			Desc:   "RSS 的默认间隔与下载目录、推送限速、种子大小限制、最短免费时间、启动时自动开始，自动删种（含做种竞争度、紧急清理）与免费结束时的处理。",
+			Desc:   "RSS 的默认间隔与下载目录、推送限速、种子大小限制、最短免费时间、启动时自动开始，自动删种（含做种竞争度、紧急清理）与免费结束前提前处理的分钟数。免费结束时暂停还是删除在各条 RSS 的 pause_on_free_end、free_end_delete。",
 			Fields: globalFields, Ops: []string{configOpSet},
 			Hidden: []string{
 				"id", "created_at", "updated_at", "attendance_window_start", "attendance_window_end", "attendance_ai_enabled",
@@ -90,6 +90,8 @@ func (s *Server) configResources() []*configResource {
 				"dead_torrent_scan_channel_ids",
 				// 原来竞争度监控的检查间隔：v16 起竞争度跟着自动删种的间隔，不再收这一项
 				"peer_ratio_interval_min",
+				// 原来全局的免费结束自动删除：v17 起每条 RSS 自己选（rss 的 free_end_delete），不再收这一项
+				"auto_delete_on_free_end",
 			},
 			Hints: map[string]string{
 				"default_filter_mode":      "auto_free（免费的自动下、命中规则的也下）、filter_only（只下命中规则的）、free_only（只下来得及下完的免费种子）",
@@ -108,7 +110,7 @@ func (s *Server) configResources() []*configResource {
 				"download_dir": "种子下载目录", "download_limit_enabled": "启用下载限速判断", "download_speed_limit": "预估下载速度（MB/s）",
 				"torrent_size_gb": "最大种子大小（GB）", "torrent_min_size_gb": "最小种子大小（GB）", "min_free_minutes": "最短免费时间（分钟）",
 				"auto_start": "自动启动 RSS 任务", "retain_hours": "暂存种子保留时长（小时）", "max_retry": "最大重试次数",
-				"cleanup_enabled": "自动删种", "cleanup_remove_data": "删种时删数据", "auto_delete_on_free_end": "免费结束自动删除",
+				"cleanup_enabled": "自动删种", "cleanup_remove_data": "删种时删数据",
 				"free_end_advance_minutes": "免费期结束前提前处理（分钟）", "default_filter_mode": "默认下载模式", "peer_ratio_enabled": "做种竞争度",
 				"peer_ratio_max_sl": "S/L 上限", "peer_ratio_remove_data": "竞争度超标时删除", "cleanup_emergency": "空间低于下限时紧急清理",
 			},
@@ -570,7 +572,9 @@ func (s *Server) configRSSResource() *configResource {
 			"url": "站点 RSS 页面上复制的地址（带 passkey，只写不读）", "interval_minutes": "最少 " + strconv.Itoa(int(models.MinIntervalMinutes)) + " 分钟",
 			"downloader_id": "null 用站点或默认下载器", "filter_mode": "空着用全局的 default_filter_mode；auto_free、filter_only、free_only",
 			"notify_mode": "空着不通知；all（每条新种子）、filtered（命中规则的）、both", "notify_conf_ids": "通知通道编号的 JSON 数组，例如 [1,2]",
-			"filter_rule_ids": "过滤规则的编号（filter_rules 的 id）",
+			"filter_rule_ids":   "过滤规则的编号（filter_rules 的 id）",
+			"pause_on_free_end": "免费结束时没下完就处理（暂停，free_end_delete 为 true 时删除）",
+			"free_end_delete":   "true 删除、false 暂停；要开着 pause_on_free_end；带保留、保护标签与 H&R 没做满的改成暂停；只对之后推送的种子生效",
 		},
 		Impact: []string{impactReload, impactNoRetro},
 		load:   s.configRSSLoad,
@@ -625,7 +629,7 @@ func (s *Server) configRSSLoad(ctx context.Context) (any, error) {
 		items = append(items, configNormalize(map[string]any{
 			"id": r.ID, "site": name, "name": r.Name, "url": r.URL, "category": r.Category, "tag": r.Tag,
 			"interval_minutes": r.IntervalMinutes, "downloader_id": r.DownloaderID, "download_path": r.DownloadPath,
-			"filter_rule_ids": ruleIDs, "pause_on_free_end": r.PauseOnFreeEnd, "filter_mode": r.FilterMode,
+			"filter_rule_ids": ruleIDs, "pause_on_free_end": r.PauseOnFreeEnd, "free_end_delete": r.FreeEndDelete, "filter_mode": r.FilterMode,
 			"notify_mode": r.NotifyMode, "notify_conf_ids": r.NotifyConfIDs, "max_notifications_per_hour": r.MaxNotificationsPerHour,
 			"is_example": r.IsExample,
 		}))

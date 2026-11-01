@@ -33,7 +33,6 @@ vi.mock("@/api", async (orig) => {
           max_retry: 3,
           default_concurrency: 3,
           default_enabled: false,
-          auto_delete_on_free_end: false,
           free_end_advance_minutes: 0,
           default_filter_mode: "auto_free",
         }),
