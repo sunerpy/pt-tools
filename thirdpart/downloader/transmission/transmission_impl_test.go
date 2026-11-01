@@ -1769,7 +1769,7 @@ func TestTrGetAllTorrentsAndMapping(t *testing.T) {
 				"totalSize": 1024, "leftUntilDone": 0, "uploadedEver": 2048,
 				"downloadedEver": 4096, "uploadRatio": 2.0, "addedDate": 1600000000,
 				"downloadDir": "/dl", "labels": []string{"movies", "hd"},
-				"eta": -1, "secondsSeeding": 3600, "doneDate": 1600001000,
+				"eta": -1, "secondsSeeding": 3600, "doneDate": 1600001000, "activityDate": 1600002000,
 				"peersSendingToUs": 3, "peersGettingFromUs": 5, "peersConnected": 8,
 				"desiredAvailable": 1.5,
 				"trackers":         []map[string]any{{"announce": "http://tr1"}},
@@ -1797,6 +1797,8 @@ func TestTrGetAllTorrentsAndMapping(t *testing.T) {
 	assert.Equal(t, 3, first.NumPeers)
 	assert.Equal(t, filepath.Join("/dl", "t1"), first.ContentPath)
 	assert.Equal(t, "test-tr", first.ClientID)
+	assert.Equal(t, int64(1600002000), first.LastActivity, "activityDate 是最后一次上传或下载的时间")
+	assert.Zero(t, torrents[1].LastActivity, "没有 activityDate 时当作不知道")
 
 	// second torrent: NumPeers falls back to peersConnected
 	assert.Equal(t, 2, torrents[1].NumPeers)
@@ -2130,4 +2132,28 @@ func TestTrMapTransmissionPriority(t *testing.T) {
 	assert.Equal(t, 6, mapTransmissionPriority(true, 1))
 	assert.Equal(t, 1, mapTransmissionPriority(true, 0))
 	assert.Equal(t, 1, mapTransmissionPriority(true, -1))
+}
+
+// 种子列表要向 Transmission 要 activityDate：它只回请求了的字段，不要就一直是 0（自动删种的「不活跃」按它判）。
+func TestTrGetAllTorrentsRequestsActivityDate(t *testing.T) {
+	var fields []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method    string `json:"method"`
+			Arguments struct {
+				Fields []string `json:"fields"`
+			} `json:"arguments"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Method == "torrent-get" {
+			fields = req.Arguments.Fields
+		}
+		raw, _ := json.Marshal(map[string]any{"torrents": []map[string]any{}})
+		_ = json.NewEncoder(w).Encode(rpcResponse{Result: "success", Arguments: raw})
+	}))
+	defer srv.Close()
+
+	_, err := covClient(srv.URL).GetAllTorrents()
+	require.NoError(t, err)
+	assert.Contains(t, fields, "activityDate")
 }
