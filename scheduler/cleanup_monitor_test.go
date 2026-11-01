@@ -100,7 +100,8 @@ func TestProcessDownloader_GetAllError(t *testing.T) {
 	assert.Empty(t, fake.removedBatch)
 }
 
-func TestProcessDownloader_SkipsPeerRatioPaused(t *testing.T) {
+// 竞争度暂停着的种子照样按常规条件删（以前常规条件跳过它们）。
+func TestProcessDownloader_DeletesPeerRatioPaused(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	cm := newCleanupMonitorWithFake(t, fake)
 
@@ -113,7 +114,7 @@ func TestProcessDownloader_SkipsPeerRatioPaused(t *testing.T) {
 	tor := seedingTorrent("p1", hash, "PeerPaused", 100, 1.0)
 	fake.torrents = []downloader.Torrent{tor}
 
-	// Mark it paused-for-peer-ratio in DB so isPausedForPeerRatio returns true.
+	// 记录标着竞争度暂停
 	pushed := true
 	require.NoError(t, cm.db.Create(&models.TorrentInfo{
 		SiteName: "s", TorrentID: "p1", TorrentHash: &hash, IsPushed: &pushed,
@@ -121,7 +122,7 @@ func TestProcessDownloader_SkipsPeerRatioPaused(t *testing.T) {
 	}).Error)
 
 	cm.processDownloader(cfg, fake, "qb1")
-	assert.Empty(t, fake.removedBatch, "peer-ratio-paused torrent must be skipped")
+	assert.Equal(t, [][]string{{"p1"}}, fake.removedBatch, "做种超过 72 小时，照常删")
 }
 
 func TestProcessDownloader_RemoveError(t *testing.T) {
@@ -262,17 +263,27 @@ func TestUpdateDatabase_MarksExpired(t *testing.T) {
 	require.NotNil(t, info.LastCheckTime)
 }
 
-func TestIsPausedForPeerRatio(t *testing.T) {
+// 竞争度读的推送记录：只有这台下载器上 pt-tools 推送过的，标着竞争度暂停、手动开始过的分得清。
+func TestPeerRecordsOn(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
-	hash := "prhash"
-	pushed := true
-	require.NoError(t, cm.db.Create(&models.TorrentInfo{
-		SiteName: "s", TorrentID: "pr1", TorrentHash: &hash, IsPushed: &pushed,
-		IsPausedBySystem: true, PauseReason: PauseReasonPeerRatio, Title: "PR",
-	}).Error)
+	pushedRecord(t, cm.db, "qb1", "paused", "HP", func(ti *models.TorrentInfo) {
+		ti.IsPausedBySystem, ti.PauseReason = true, PauseReasonPeerRatio
+	})
+	pushedRecord(t, cm.db, "qb1", "free-end", "hf", func(ti *models.TorrentInfo) {
+		ti.IsPausedBySystem, ti.PauseReason = true, "免费期结束，下载未完成"
+	})
+	pushedRecord(t, cm.db, "qb1", "started", "hs", func(ti *models.TorrentInfo) { ti.PeerPauseOverridden = true })
+	pushedRecord(t, cm.db, "qb2", "other", "ho", nil)
+	hash := "hn"
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "staged", TorrentHash: &hash, DownloaderName: "qb1"}).Error)
 
-	assert.True(t, cm.isPausedForPeerRatio(hash))
-	assert.False(t, cm.isPausedForPeerRatio("nonexistent"))
+	recs, err := cm.peerRecordsOn("qb1")
+	require.NoError(t, err)
+	assert.Equal(t, []peerRecord{{Hash: "hp", Paused: true}}, recs["hp"])
+	assert.Equal(t, []peerRecord{{Hash: "hf"}}, recs["hf"], "免费结束的暂停不算竞争度暂停")
+	assert.Equal(t, []peerRecord{{Hash: "hs", Overridden: true}}, recs["hs"])
+	assert.NotContains(t, recs, "ho", "别的下载器上的")
+	assert.NotContains(t, recs, "hn", "推送前的暂存记录")
 }
 
 func TestGetManagedHashes_IncludesArchive(t *testing.T) {
@@ -348,6 +359,8 @@ func baseCfg() *models.SettingsGlobal {
 		CleanupProtectDL:     true,
 		CleanupProtectHR:     true,
 		CleanupMinRetainH:    0,
+		// 库里的默认值：空间低于下限时紧急清理
+		CleanupEmergency: true,
 	}
 }
 

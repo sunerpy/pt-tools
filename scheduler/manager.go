@@ -45,7 +45,6 @@ type Manager struct {
 	cleanupMonitor  *CleanupMonitor
 	// cleanupHist 是最近一轮自动删种的结果，换监控（配置重载）时留着
 	cleanupHist          *CleanupHistory
-	peerRatioMonitor     *PeerRatioMonitor
 	loginReminderMonitor *LoginReminderMonitor
 	attendanceMonitor    *AttendanceMonitor
 	dailyReportJob       *DailyReportJob
@@ -134,7 +133,6 @@ func (m *Manager) InitFreeEndMonitor() {
 	m.initDownloaderManager()
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
-	m.initPeerRatioMonitor()
 }
 
 // GetDownloaderManager 获取下载器管理器
@@ -255,7 +253,6 @@ func (m *Manager) Reload(cfg *models.Config) {
 
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
-	m.initPeerRatioMonitor()
 
 	defaultDl, err := m.downloaderManager.GetDefaultDownloader()
 	if err != nil {
@@ -484,39 +481,6 @@ func (m *Manager) initCleanupMonitor() {
 	}
 }
 
-// initPeerRatioMonitor 换上新的竞争度监控，做法同 initCleanupMonitor。
-func (m *Manager) initPeerRatioMonitor() {
-	if global.GlobalDB == nil {
-		return
-	}
-	m.monMu.Lock()
-	defer m.monMu.Unlock()
-	stopOld, ok := m.detach(func() func() {
-		old := m.peerRatioMonitor
-		m.peerRatioMonitor = nil
-		if old == nil {
-			return nil
-		}
-		return old.Stop
-	})
-	if !ok {
-		return
-	}
-	if stopOld != nil {
-		stopOld()
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopped {
-		return
-	}
-	m.peerRatioMonitor = NewPeerRatioMonitor(global.GlobalDB.DB, m.downloaderManager)
-	if err := m.peerRatioMonitor.Start(); err != nil {
-		global.GetSlogger().Errorf("启动竞争度监控器失败: %v", err)
-	}
-}
-
 // createQBitFactory 创建 qBittorrent 工厂
 func createQBitFactory() downloader.DownloaderFactory {
 	return func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
@@ -571,7 +535,7 @@ func (m *Manager) cancelJobsAndWait() {
 	m.mu.Unlock()
 }
 
-// StopJobs 停止全部 RSS 任务（网页上的「停止 RSS 任务」）。免费到期、自动删种、竞争度、
+// StopJobs 停止全部 RSS 任务（网页上的「停止 RSS 任务」）。免费到期、自动删种（含做种竞争度）、
 // 登录提醒和签到监控继续运行，配置热重载也照常；之后的配置变更不会把任务重新拉起，直到 StartAll。
 func (m *Manager) StopJobs() {
 	m.mu.Lock()
@@ -617,10 +581,6 @@ func (m *Manager) StopAll() {
 	if m.cleanupMonitor != nil {
 		stops = append(stops, m.cleanupMonitor.Stop)
 		m.cleanupMonitor = nil
-	}
-	if m.peerRatioMonitor != nil {
-		stops = append(stops, m.peerRatioMonitor.Stop)
-		m.peerRatioMonitor = nil
 	}
 	if m.brushMonitor != nil {
 		stops = append(stops, m.brushMonitor.Stop)

@@ -36,20 +36,6 @@ func TestCleanup_KeepsSharedData(t *testing.T) {
 	assert.Equal(t, []bool{true, false}, fake.removeDataFlags, "共用数据的只删种子")
 }
 
-func TestPeerRatio_KeepsSharedData(t *testing.T) {
-	fake := newSchedFakeDownloader("qb1")
-	pm, db := newPeerRatioMonitorWithFake(t, fake)
-	tor := completedManagedTorrent(t, db, "pr9", "peer-shared", "qb1")
-	tor.ContentPath = "/data/Movie"
-	reseed := downloader.Torrent{ID: "rs", InfoHash: "peer-reseed", ContentPath: "/data/Movie", State: downloader.TorrentSeeding}
-	fake.torrents = []downloader.Torrent{tor, reseed}
-	fake.trackers[tor.ID] = []downloader.TorrentTracker{{Status: 2, Seeds: 50, Leeches: 0}}
-
-	pm.processDownloader(fake, "qb1", 5.0, true)
-	require.Equal(t, []string{"pr9"}, fake.removedSingle)
-	assert.Equal(t, []bool{false}, fake.removeDataFlags)
-}
-
 func TestBrushMonitor_KeepsSharedData(t *testing.T) {
 	r := newBrushRig(t)
 	task := r.task(t, func(bt *models.BrushTask) { bt.RemoveRatio = 2; bt.Enabled = false; bt.RemoveWithData = true })
@@ -67,23 +53,6 @@ func TestBrushMonitor_KeepsSharedData(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"id-done"}, r.dl.removedSingle)
 	assert.Equal(t, []bool{false}, r.dl.removeDataFlags, "给它加的辅种还用着数据")
-}
-
-// 两个要删的种子共用数据：先删的只删种子，最后一个连数据删。
-func TestPeerRatio_LastSharedRemovesData(t *testing.T) {
-	fake := newSchedFakeDownloader("qb1")
-	pm, db := newPeerRatioMonitorWithFake(t, fake)
-	a := completedManagedTorrent(t, db, "pa", "peer-a", "qb1")
-	b := completedManagedTorrent(t, db, "pb", "peer-b", "qb1")
-	a.ContentPath, b.ContentPath = "/data/Movie", "/data/Movie"
-	fake.torrents = []downloader.Torrent{a, b}
-	for _, id := range []string{"pa", "pb"} {
-		fake.trackers[id] = []downloader.TorrentTracker{{Status: 2, Seeds: 50, Leeches: 0}}
-	}
-
-	pm.processDownloader(fake, "qb1", 5.0, true)
-	assert.Equal(t, []string{"pa", "pb"}, fake.removedSingle)
-	assert.Equal(t, []bool{false, true}, fake.removeDataFlags)
 }
 
 func TestHandleFreeEnded_AutoDelete_KeepsSharedData(t *testing.T) {

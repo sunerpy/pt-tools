@@ -146,7 +146,17 @@ func (f *schedFakeDownloader) RemoveTorrent(id string, removeData bool) error {
 	return nil
 }
 
-func (f *schedFakeDownloader) PauseTorrents(_ []string) error { return nil }
+func (f *schedFakeDownloader) PauseTorrents(ids []string) error {
+	if f.pauseErr != nil {
+		return f.pauseErr
+	}
+	for _, id := range ids {
+		if err := f.PauseTorrent(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (f *schedFakeDownloader) ResumeTorrents(_ []string) error {
 	return nil

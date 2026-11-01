@@ -470,7 +470,6 @@ func TestInitMonitors_ReplaceExisting(t *testing.T) {
 	m.initDownloaderManager()
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
-	m.initPeerRatioMonitor()
 
 	first := m.GetFreeEndMonitor()
 	require.NotNil(t, first)
@@ -478,7 +477,6 @@ func TestInitMonitors_ReplaceExisting(t *testing.T) {
 	// Calling again should stop the previous and create a new instance.
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
-	m.initPeerRatioMonitor()
 	second := m.GetFreeEndMonitor()
 	require.NotNil(t, second)
 	assert.NotSame(t, first, second, "re-init should replace the free-end monitor")
@@ -1255,7 +1253,7 @@ func TestInitDownloaderManager_MapsSiteDownloader(t *testing.T) {
 	assert.True(t, m.downloaderManager.HasFactory(downloader.DownloaderQBittorrent))
 }
 
-func TestInitCleanupMonitor_And_PeerRatio_Wire(t *testing.T) {
+func TestInitCleanupMonitor_Wire(t *testing.T) {
 	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
@@ -1263,14 +1261,8 @@ func TestInitCleanupMonitor_And_PeerRatio_Wire(t *testing.T) {
 	t.Cleanup(func() { global.GlobalDB = nil })
 
 	m := newTestManager(t)
-	require.NotPanics(t, func() {
-		m.initCleanupMonitor()
-		m.initPeerRatioMonitor()
-	})
-	require.NotPanics(t, func() {
-		m.initCleanupMonitor()
-		m.initPeerRatioMonitor()
-	})
+	require.NotPanics(t, func() { m.initCleanupMonitor() })
+	require.NotPanics(t, func() { m.initCleanupMonitor() })
 	m.StopAll()
 }
 
