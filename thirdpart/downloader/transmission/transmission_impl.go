@@ -640,31 +640,41 @@ var trActiveDLStatus = map[int]struct{}{
 //
 // 与 qBit 实现保持一致的状态约定：暂停种子也计入（用户可恢复）；checking
 // 状态 leftUntilDone 通常为 0 但保留以防边界场景。
-func (t *TransmissionClient) GetIncompletePendingBytes(_ context.Context) (int64, error) {
-	args := torrentGetArgs{Fields: []string{"id", "status", "leftUntilDone"}}
+func (t *TransmissionClient) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	snap, err := t.IncompletePendingSnapshot(ctx)
+	return snap.Bytes, err
+}
+
+// IncompletePendingSnapshot 用同一次 torrent-get 算出待占用（同 GetIncompletePendingBytes），并记下所有种子的 hash。
+func (t *TransmissionClient) IncompletePendingSnapshot(_ context.Context) (downloader.PendingSnapshot, error) {
+	args := torrentGetArgs{Fields: []string{"id", "hashString", "status", "leftUntilDone"}}
 	resp, err := t.doRequest("torrent-get", args)
 	if err != nil {
-		return 0, fmt.Errorf("torrent-get 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("torrent-get 失败: %w", err)
 	}
 	var getResp struct {
 		Torrents []struct {
-			Status        int   `json:"status"`
-			LeftUntilDone int64 `json:"leftUntilDone"`
+			HashString    string `json:"hashString"`
+			Status        int    `json:"status"`
+			LeftUntilDone int64  `json:"leftUntilDone"`
 		} `json:"torrents"`
 	}
 	if err := json.Unmarshal(resp.Arguments, &getResp); err != nil {
-		return 0, fmt.Errorf("解析 torrent-get 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("解析 torrent-get 失败: %w", err)
 	}
-	var total int64
+	snap := downloader.PendingSnapshot{Hashes: make(map[string]struct{}, len(getResp.Torrents))}
 	for _, tt := range getResp.Torrents {
+		if tt.HashString != "" {
+			snap.Hashes[strings.ToLower(tt.HashString)] = struct{}{}
+		}
 		if _, active := trActiveDLStatus[tt.Status]; !active {
 			continue
 		}
 		if tt.LeftUntilDone > 0 {
-			total += tt.LeftUntilDone
+			snap.Bytes += tt.LeftUntilDone
 		}
 	}
-	return total, nil
+	return snap, nil
 }
 
 // torrentFullInfo 完整的种子信息结构

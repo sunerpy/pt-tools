@@ -14,6 +14,18 @@ var ErrCapabilityUnsupported = errors.New("下载器不支持这项操作")
 // ErrTrackerNotFound 表示种子里没有要修改的那个 tracker 地址。
 var ErrTrackerNotFound = errors.New("种子里没有这个 tracker 地址")
 
+// PendingSnapshot 是一次读到的「下载中待占用」（同 GetIncompletePendingBytes）与下载器里所有种子的 info hash（小写，任何状态都算）。
+type PendingSnapshot struct {
+	Bytes  int64
+	Hashes map[string]struct{}
+}
+
+// PendingSnapshotter 用一次请求读出 PendingSnapshot（qBittorrent 与 Transmission 都实现）。磁盘保护用它丢掉
+// 已经出现在下载器里的种子的预留：同一份种子列表里，没下完的剩余体积已经算进了待占用，下完的已经占了磁盘。
+type PendingSnapshotter interface {
+	IncompletePendingSnapshot(ctx context.Context) (PendingSnapshot, error)
+}
+
 // TorrentExporter 把下载器里的种子导出成 .torrent 文件内容。
 // qBittorrent 4.5 起提供 torrents/export；Transmission 没有对应接口，不实现。
 type TorrentExporter interface {

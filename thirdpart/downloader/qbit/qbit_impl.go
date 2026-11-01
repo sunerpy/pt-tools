@@ -940,37 +940,46 @@ var qbitActiveDLStates = map[string]struct{}{
 // 故意保留种子级容错：单个种子的 amount_left 解析失败仅跳过该条；
 // 整体只在 HTTP/auth 层失败时返回错误。
 func (q *QbitClient) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	snap, err := q.IncompletePendingSnapshot(ctx)
+	return snap.Bytes, err
+}
+
+// IncompletePendingSnapshot 用同一次 torrents/info 算出待占用（同 GetIncompletePendingBytes），并记下所有种子的 hash。
+func (q *QbitClient) IncompletePendingSnapshot(ctx context.Context) (downloader.PendingSnapshot, error) {
 	url := fmt.Sprintf("%s/api/v2/torrents/info", q.baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, fmt.Errorf("构建请求失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("构建请求失败: %w", err)
 	}
 
 	resp, err := q.client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("请求 torrents/info 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("请求 torrents/info 失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if !q.isSuccessStatus(resp.StatusCode) {
-		return 0, fmt.Errorf("torrents/info 返回 %d", resp.StatusCode)
+		return downloader.PendingSnapshot{}, fmt.Errorf("torrents/info 返回 %d", resp.StatusCode)
 	}
 	var torrents []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&torrents); err != nil {
-		return 0, fmt.Errorf("解析 torrents/info 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("解析 torrents/info 失败: %w", err)
 	}
 
-	var total int64
+	snap := downloader.PendingSnapshot{Hashes: make(map[string]struct{}, len(torrents))}
 	for _, t := range torrents {
+		if hash, _ := t["hash"].(string); hash != "" {
+			snap.Hashes[strings.ToLower(hash)] = struct{}{}
+		}
 		state, _ := t["state"].(string)
 		if _, active := qbitActiveDLStates[state]; !active {
 			continue
 		}
 		amountLeft, _ := t["amount_left"].(float64)
 		if amountLeft > 0 {
-			total += int64(amountLeft)
+			snap.Bytes += int64(amountLeft)
 		}
 	}
-	return total, nil
+	return snap, nil
 }
 
 // GetAllTorrents 获取所有种子列表
