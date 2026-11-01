@@ -169,3 +169,57 @@ func TestCleanup_FreeExpiredIgnoresUnattributedLegacyRecord(t *testing.T) {
 
 	assert.Empty(t, cm.Preview(context.Background(), cfg)[0].Items)
 }
+
+// 「其他免费种子免费过了还没下完就删」只管不在免费结束监控里的种子：这个下载器上有一条记录开着免费结束处理
+// （pause_on_free_end，按 RSS 的选择暂停或删除）就交给免费结束处理，兜底不删。它只受 hard 保护挡（保留、保护标签、H&R），
+// 正在下载的（打开了「保护下载中的种子」时）、加进下载器不满最短保种时间的照删：免费一过，再下载就计费了。
+func TestCleanup_FreeExpiredFallbackScope(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+	cfg := baseCfg()
+	cfg.CleanupScope = "database"
+	cfg.CleanupDelFreeExpired = true
+	cfg.CleanupProtectDL = true
+	cfg.CleanupMinRetainH = 24
+	cfg.CleanupProtectHR = false
+	cfg.CleanupProtectTags = "fav"
+	past := time.Now().Add(-time.Minute)
+	pushed := true
+	for i, c := range []struct {
+		hash      string
+		monitored bool
+		tags      string
+	}{
+		{"hplain", false, ""},    // 不在免费结束监控里：兜底删
+		{"hmonitored", true, ""}, // 开着免费结束处理：交给免费结束处理
+		{"hfav", false, "fav"},   // 带保护标签：不删
+	} {
+		hash := c.hash
+		require.NoError(t, cm.db.Create(&models.TorrentInfo{
+			SiteName: "s", TorrentID: fmt.Sprintf("f%d", i), TorrentHash: &hash, IsPushed: &pushed, DownloaderName: "qb1",
+			IsFree: true, FreeEndTime: &past, PauseOnFreeEnd: c.monitored,
+		}).Error)
+		tor := seedingTorrent(hash, hash, hash, 0, 0)
+		tor.State, tor.Progress, tor.Tags = downloader.TorrentDownloading, 0.5, c.tags
+		tor.DateAdded = time.Now().Add(-time.Hour).Unix() // 加进下载器 1 小时，不满最短保种时间
+		fake.torrents = append(fake.torrents, tor)
+	}
+
+	res := cm.Preview(t.Context(), cfg)[0]
+	var deleted []string
+	for _, it := range res.Items {
+		deleted = append(deleted, it.Name)
+		assert.Equal(t, []string{"免费期过了还没下完"}, it.Reasons)
+	}
+	assert.Equal(t, []string{"hplain"}, deleted, "不受最短保种时间与「保护下载中」挡；免费结束监控里的与带保护标签的不删")
+	protected := map[string]string{}
+	for _, it := range res.ProtectedItems {
+		protected[it.Name] = it.Reasons[0]
+	}
+	assert.Equal(t, "带保护标签「fav」", protected["hfav"])
+	assert.Contains(t, protected["hmonitored"], "正在下载或校验", "免费结束监控里的种子照常受 soft 保护")
+
+	mon := seedingTorrent("hmonitored", "hmonitored", "hmonitored", 0, 0)
+	mon.Progress = 0.5
+	assert.Empty(t, cm.deleteReasons(cfg, mon, "qb1"), "免费结束监控里的种子兜底不判")
+}

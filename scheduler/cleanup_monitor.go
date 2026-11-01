@@ -369,7 +369,12 @@ func (c *CleanupMonitor) decideOn(cfg *models.SettingsGlobal, dl downloader.Down
 		return res, cleanupPlan{}
 	}
 
-	protected, candidates, err := c.splitProtectedWhy(cfg, managed)
+	// 免费过了还没下完的兜底只受 hard 保护挡：免费一过，再下载就计费了，不等最短保种时间、不管「保护下载中」
+	var freeExpired func(downloader.Torrent) bool
+	if cfg.CleanupDelFreeExpired {
+		freeExpired = func(t downloader.Torrent) bool { return c.isFreeExpiredIncomplete(t, dlName) }
+	}
+	protected, candidates, err := c.splitProtectedWhy(cfg, managed, freeExpired)
 	if err != nil {
 		// 读不到 H&R 信息时分不清哪些种子受保护：这一轮不删
 		res.Error = err.Error() + "，这一轮不删"
@@ -743,7 +748,7 @@ func recordsOn(q *gorm.DB, dlID *uint, dlName string) *gorm.DB {
 
 // splitProtected 同 splitProtectedWhy，不带原因；读不到 H&R 信息时全部算受保护（宁可不删）。
 func (c *CleanupMonitor) splitProtected(cfg *models.SettingsGlobal, torrents []downloader.Torrent) (protected, candidates []downloader.Torrent) {
-	pt, candidates, err := c.splitProtectedWhy(cfg, torrents)
+	pt, candidates, err := c.splitProtectedWhy(cfg, torrents, nil)
 	if err != nil {
 		return torrents, nil
 	}
@@ -760,8 +765,8 @@ type protectedTorrent struct {
 }
 
 // splitProtectedWhy 把种子分成受保护的（带命中的第一条保护规则，先 hard 后 soft，见 protection.go）与剩下的候选。
-// 读不到 H&R 信息时返回错误，调用方这一轮不删。
-func (c *CleanupMonitor) splitProtectedWhy(cfg *models.SettingsGlobal, torrents []downloader.Torrent) ([]protectedTorrent, []downloader.Torrent, error) {
+// hardOnly 报告为真的种子只看 hard 保护（免费过了还没下完的兜底），为 nil 时都看。读不到 H&R 信息时返回错误，调用方这一轮不删。
+func (c *CleanupMonitor) splitProtectedWhy(cfg *models.SettingsGlobal, torrents []downloader.Torrent, hardOnly func(downloader.Torrent) bool) ([]protectedTorrent, []downloader.Torrent, error) {
 	hr, err := loadHRInfo(c.db)
 	if err != nil {
 		return nil, nil, err
@@ -772,7 +777,7 @@ func (c *CleanupMonitor) splitProtectedWhy(cfg *models.SettingsGlobal, torrents 
 	var candidates []downloader.Torrent
 	for _, t := range torrents {
 		why := hardProtection(cfg, t, hr, protectTags)
-		if why == "" {
+		if why == "" && (hardOnly == nil || !hardOnly(t)) {
 			why = softProtection(cfg, t, now)
 		}
 		if why != "" {
@@ -860,6 +865,7 @@ func idleAtLeast(t downloader.Torrent, now time.Time, d time.Duration) bool {
 // RSS 后来读到不再免费（free_ended_at，免费取消或提前结束）。结束时间跟着 RSS 每轮读到的详情走，免费延长了就等新的时间。
 // 只看推到这个下载器的记录（按下载器编号认，见 recordsOn；同一个哈希可能还有别的下载器、别的站点的记录），
 // 而且要每一条都免费已过：有一条还在免费期内或从来不是免费推的就不删——删种会删任务和数据，分不清时宁可不删。
+// 有一条开着免费结束处理（pause_on_free_end，按 RSS 的选择暂停或删除）的归免费结束处理，这里不管。
 // 只认免费的记录（is_free）：以前 RSS 把半价等优惠的结束时间也记成了 free_end_time，库里留着的这类记录不当成免费到期。
 // 时间按时刻比较（julianday），不按文本：库里的时间带各自的时区
 func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent, dlName string) bool {
@@ -869,17 +875,18 @@ func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent, dlName st
 
 	hash := strings.ToLower(t.InfoHash)
 	now := time.Now()
-	var rows []struct{ Ended int }
+	var rows []struct{ Ended, Monitored int }
 	err := recordsOn(c.db.Model(&models.TorrentInfo{}), c.downloaderID(dlName), dlName).
 		Select("CASE WHEN (is_free = ? AND free_end_time IS NOT NULL AND julianday(free_end_time) < julianday(?))"+
-			" OR (free_ended_at IS NOT NULL AND julianday(free_ended_at) <= julianday(?)) THEN 1 ELSE 0 END AS ended", true, now, now).
+			" OR (free_ended_at IS NOT NULL AND julianday(free_ended_at) <= julianday(?)) THEN 1 ELSE 0 END AS ended,"+
+			" CASE WHEN pause_on_free_end = ? THEN 1 ELSE 0 END AS monitored", true, now, now, true).
 		Where("LOWER(torrent_hash) = ?", hash).
 		Scan(&rows).Error
 	if err != nil || len(rows) == 0 {
 		return false
 	}
 	for _, r := range rows {
-		if r.Ended == 0 {
+		if r.Ended == 0 || r.Monitored == 1 {
 			return false
 		}
 	}
