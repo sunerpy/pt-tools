@@ -149,4 +149,86 @@ describe("自动删种：预览与上次运行", () => {
     expect(q("ac-preview-sum")!.textContent).toContain("共会删 2 个");
     expect(api.saveGlobal).not.toHaveBeenCalled();
   });
+  it("预览写明下载器里共几个、刷流与竞争度暂停的各几个，并列出受保护的种子与原因", async () => {
+    api.status.mockResolvedValue({ enabled: true, interval_min: 30 });
+    api.preview.mockResolvedValue({
+      results: [
+        {
+          downloader: "qb",
+          total: 9,
+          managed: 8,
+          protected: 2,
+          candidates: 6,
+          brush: 1,
+          peer_paused: 1,
+          deleted: 0,
+          items: [],
+          protected_items: [
+            {
+              name: "Young.Movie",
+              info_hash: "hy",
+              size: 1024 ** 3,
+              seeding_h: 2,
+              ratio: 0,
+              upload_kbs: 0,
+              reasons: ["加进下载器不到 24 小时（最短保种时间），还差 20.0 小时"],
+            },
+            {
+              name: "HR.Show",
+              info_hash: "hh",
+              size: 1024 ** 3,
+              seeding_h: 10,
+              ratio: 0.2,
+              upload_kbs: 0,
+              reasons: ["H&R：要求做种 72 小时，已做 10.0 小时"],
+            },
+          ],
+        },
+        // 旧版本的结果里连不上的下载器没有列表（null）：页面照样算得出来、不报错
+        {
+          downloader: "tr",
+          managed: 0,
+          protected: 0,
+          candidates: 0,
+          items: null,
+          deleted: 0,
+          error: "下载器连不上",
+        },
+      ],
+    });
+    await mountPage();
+    await vi.waitFor(() => expect((q("ac-preview") as HTMLButtonElement).disabled).toBe(false));
+    q("ac-preview")!.click();
+    await vi.waitFor(() => expect(q("ac-pv-qb")).not.toBeNull());
+    const box = q("ac-pv-qb")!.textContent ?? "";
+    expect(box).toContain("下载器里共 9 个，管理范围里 8 个，受保护 2 个，会删 0 个");
+    expect(box).toContain("1 个刷流任务的种子按刷流任务的规则删");
+    expect(box).toContain("1 个被竞争度监控暂停着，常规规则不删");
+    const prot = q("ac-pv-protected-qb")!;
+    expect(prot.textContent).toContain("受保护、这一轮不删的 2 个");
+    expect(prot.textContent).toContain("Young.Movie");
+    expect(prot.textContent).toContain("还差 20.0 小时");
+    expect(prot.textContent).toContain("H&R：要求做种 72 小时，已做 10.0 小时");
+    expect(q("ac-pv-tr")!.textContent).toContain("下载器连不上");
+    expect(q("ac-preview-sum")!.textContent).toContain("共会删 0 个");
+  });
+
+  it("「不活跃」写明按最后活动时间判，低效做种的说明写明最短保种时间也会挡住删除", async () => {
+    api.status.mockResolvedValue({ enabled: true, interval_min: 30 });
+    api.getGlobal.mockResolvedValue({
+      ...SETTINGS,
+      cleanup_slow_seed_time_h: 3,
+      cleanup_slow_max_ratio: 0.5,
+      cleanup_min_retain_h: 24,
+    });
+    const Page = (await import("./AutoCleanup.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() =>
+      expect(document.querySelector(".slow-note")?.textContent).toContain("3 小时"),
+    );
+    const slow = document.querySelector(".slow-note")!.textContent ?? "";
+    expect(slow).toContain("做种超过 3 小时、分享率仍低于 0.5 的已完成种子会被删除");
+    expect(slow).toContain("加进下载器不满 24 小时的受「最短保种时间」保护，不删");
+    expect(document.body.textContent).toContain("做种中的种子连续这么久没有上传或下载就删");
+  });
 });

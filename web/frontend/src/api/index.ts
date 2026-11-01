@@ -2191,7 +2191,7 @@ export interface CleanupItem {
   seeding_h: number;
   ratio: number;
   upload_kbs: number;
-  /** 对上了的删种条件（紧急清理多挑的写剩余空间不足） */
+  /** 对上了的删种条件（紧急清理多挑的写剩余空间不足）；受保护的种子写命中的保护规则 */
   reasons: string[];
   /** 数据还被别的种子用着：只删种子、保留数据 */
   keep_data?: boolean;
@@ -2200,13 +2200,21 @@ export interface CleanupItem {
 /** 一台下载器一轮自动删种（或预览）的结果 */
 export interface CleanupResult {
   downloader: string;
+  /** 下载器里的种子数（管理范围以外的也算） */
+  total?: number;
   managed: number;
   protected: number;
   candidates: number;
+  /** 受保护、这一轮不删的种子与原因 */
+  protected_items?: CleanupItem[] | null;
+  /** 候选里刷流任务的种子（按刷流任务的规则删）与竞争度监控暂停着的：常规规则都不删 */
+  brush?: number;
+  peer_paused?: number;
   /** 剩余空间低于下限、按紧急清理多挑了种子 */
   emergency?: boolean;
   free_gb?: number;
-  items: CleanupItem[];
+  /** 旧版本里连不上的下载器的结果没有列表（null） */
+  items: CleanupItem[] | null;
   notes?: string[];
   /** 真的删掉的个数（预览时为 0） */
   deleted: number;
