@@ -1662,7 +1662,8 @@ func (d *NexusPHPDriver) setUserInfoField(info *UserInfo, fieldName, value strin
 		info.TrueUploaded = parseSize(value)
 	case "trueDownloaded":
 		info.TrueDownloaded = parseSize(value)
-	case "seederSize":
+	// 定义里写了 seedingSize 就不再取做种列表（见 getUserInfoWithDefinition），值要记进做种体积
+	case "seederSize", "seedingSize":
 		info.SeederSize = parseSize(value)
 	case "leecherSize":
 		info.LeecherSize = parseSize(value)
@@ -2050,6 +2051,8 @@ func parseTime(timeStr string) time.Time {
 		"2006/01/02 15:04",
 		"01-02 15:04",
 		time.RFC3339,
+		// 日期和时间之间只隔一个 <br>：TJUPT 列表的时间格是「2026-10-31<br>20:35:49」，没有 title，取文字时两段连在一起
+		"2006-01-0215:04:05",
 	}
 
 	for _, format := range formats {
@@ -2242,6 +2245,9 @@ func (d *NexusPHPDriver) PrepareUserSeedingPage(userID, listType string) (NexusP
 	}, nil
 }
 
+// totalSizeSummaryPattern 匹配做种列表开头「<b>条数</b>条记录 - 总大小体积」这种汇总（TJUPT），条数与体积是全部做种的合计。
+var totalSizeSummaryPattern = regexp.MustCompile(`<b>(\d+)</b>\s*条记录\s*-\s*总大小[：:]?\s*([\d.]+\s*[KMGTP]?i?B)`)
+
 // ParseSeedingStatus parses the seeding status from the AJAX response
 // Implements two parsing strategies based on NexusPHP.ts:
 // 1. Direct parsing: Look for summary text like "10 | 100 GB" or "<b>94</b>条记录，共计<b>2.756 TB</b>"
@@ -2264,6 +2270,12 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 			fmt.Printf("[DEBUG] ParseSeedingStatus Method1a (SpringSunday format): count=%d, size=%d from pattern match\n", seeding, seedingSize)
 		}
 		return seeding, seedingSize, nil
+	}
+
+	// Method 1c: TJUPT 的写法「<b>58</b>条记录 - 总大小3.127 TiB」：体积直接跟在「总大小」后面，不在 <b> 里，
+	// 外面也没有 div（下面 1b 认不出）。表格累加会从第一行的标题里猜体积列，北洋园的标题常带方括号里的版本号、体积，容易猜错
+	if matches := totalSizeSummaryPattern.FindStringSubmatch(bodyStr); len(matches) >= 3 {
+		return int(parseFloat(matches[1])), parseSize(matches[2]), nil
 	}
 
 	// Method 1b: Try to parse direct summary text (e.g., "10 | 100 GB")
