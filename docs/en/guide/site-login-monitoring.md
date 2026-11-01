@@ -88,6 +88,8 @@ What the time is based on is shown as Site last access (站点最近访问), Sit
 
 Rousi Pro updates its last-active time only when you visit the website in a browser. Reading the profile and signing in with the API key do not refresh it (checked in 2026-10), and a sign-in does not count as activity either. So sign in to Rousi Pro in a browser now and then. After the visit, the next probe, or the probe before the next reminder, reads the new time.
 
+PTerClub disables an account that is not parked after 60 days without a login, and only counts logins you make yourself; automatic sign-in and visits by tools do not count (the account retention rules on its official wiki). TJUPT treats an account below Veteran User as active only if, within 180 days, it signed in on at least one day, posted at least one torrent (or a fun box entry or a new forum topic), or gained more than 5 TiB of actual upload together with more than 300,000 seeding points; visiting pages does not count. TJUPT forbids automatic sign-in, so pt-tools does not sign in there for you. Probes refresh the last-access time on both sites, so Days left does not reflect their own inactivity rules: log in and sign in by hand as each site requires.
+
 When the probe is OK but the last-access time the site returns is the same as last time and already more than 48 hours old, the automatic probe is not refreshing that site's access time. The site list then marks Access not taking effect (访问未生效) next to Days left, and the inactivity reminder adds a sentence saying so. Sign in to such a site by hand; the mark disappears once the site's last-access time moves forward again.
 
 ## Reminders
@@ -138,6 +140,7 @@ Signing in to HDSky, OpenCD, PTCHDBits and 52PT requires a captcha or a quiz ans
 | M-Team          | It has no sign-in; keep the account alive by signing in with a browser; the site forbids third-party tools from calling its keep-alive endpoint |
 | SpringSunday    | It has no sign-in; the site has no sign-in page                                                                                                 |
 | BYRPT           | It has no sign-in; the site has no sign-in page                                                                                                 |
+| TJUPT           | The sign-in page forbids signing in with scripts or programs, and a wrong answer costs bonus points                                             |
 | U2              | Signing in requires picking an anime title from an animated image captcha                                                                       |
 | BTSCHOOL        | Signing in works differently from usual NexusPHP sites                                                                                          |
 | HD Dolby, MooKo | Not NexusPHP sites; sign-in is not supported yet                                                                                                |
