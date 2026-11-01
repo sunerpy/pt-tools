@@ -94,7 +94,6 @@ export interface GlobalSettings {
   cleanup_protect_hr?: boolean;
   cleanup_min_retain_h?: number;
   cleanup_protect_tags?: string;
-  auto_delete_on_free_end?: boolean;
   free_end_advance_minutes?: number;
   /** 做种竞争度：自动删种的一条删除条件，S/L 超过 peer_ratio_max_sl 时删除（peer_ratio_remove_data）或只暂停 */
   peer_ratio_enabled?: boolean;
@@ -120,7 +119,8 @@ export interface RSSConfig {
   downloader_id?: number; // 指定下载器，undefined 表示使用默认下载器
   download_path?: string; // 下载器中下载任务的目标下载路径（可选）
   filter_rule_ids?: number[]; // 关联的过滤规则 ID 列表
-  pause_on_free_end?: boolean; // 免费结束时是否暂停未完成的下载
+  pause_on_free_end?: boolean; // 免费结束时处理没下完的种子（暂停，free_end_delete 为真时删除）
+  free_end_delete?: boolean; // 免费结束时删除而不是暂停，只在 pause_on_free_end 为真时有意义
   is_example?: boolean; // 是否为示例配置
   filter_mode?: FilterMode; // 空字符串表示继承全局
   notify_mode?: "" | "all" | "filtered" | "both"; // RSS 上新通知模式

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { globalApi, type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
+import { type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -16,8 +16,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 const isMobile = useIsMobile();
 const autoRefresh = ref(false);
 const refreshTimer = ref<number | null>(null);
-const autoDeleteOnFreeEnd = ref(false);
-const savingAutoDelete = ref(false);
 
 const pausedTorrents = ref<PausedTorrent[]>([]);
 const pausedTotal = ref(0);
@@ -80,7 +78,7 @@ const pausedStateSub = computed(() => {
   if (pausedState.value === "error" || pausedState.value === "perm") return pausedErrorText.value;
   return hasFilters.value
     ? "这个站点下没有暂停中的种子，换一个站点或清掉筛选"
-    : "免费期结束时被暂停的种子会出现在这里";
+    : "免费期结束时被暂停的种子会出现在这里；暂停还是删除在站点详情里每条 RSS 自己选";
 });
 
 const archiveStateSub = computed(() => {
@@ -156,12 +154,6 @@ const archiveFootNote = computed(() =>
 onMounted(async () => {
   // 画板 17 两个列表同时可见，所以首屏两边都要拉
   await Promise.all([loadPausedTorrents(), loadArchiveTorrents()]);
-  try {
-    const settings = await globalApi.get();
-    autoDeleteOnFreeEnd.value = settings.auto_delete_on_free_end ?? false;
-  } catch {
-    // ignore
-  }
 });
 
 onUnmounted(() => {
@@ -358,21 +350,6 @@ async function confirmDeleteRow(removeData: boolean) {
   await performDelete([deleteTarget.value.id], removeData);
 }
 
-async function toggleAutoDelete(val: boolean) {
-  savingAutoDelete.value = true;
-  try {
-    const current = await globalApi.get();
-    await globalApi.save({ ...current, auto_delete_on_free_end: val });
-    autoDeleteOnFreeEnd.value = val;
-    ElMessage.success(val ? "已开启免费结束自动删除" : "已关闭免费结束自动删除");
-  } catch (e: unknown) {
-    autoDeleteOnFreeEnd.value = !val;
-    ElMessage.error((e as Error).message || "保存失败");
-  } finally {
-    savingAutoDelete.value = false;
-  }
-}
-
 function formatSize(bytes: number): string {
   if (!bytes || bytes <= 0) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -433,19 +410,6 @@ function formatProgress(progress: number): string {
         <label class="ctl">
           <el-switch v-model="autoRefresh" size="small" />
           <span>自动刷新</span>
-        </label>
-      </el-tooltip>
-      <el-tooltip
-        content="开启后，免费期结束时未完成的种子将自动从下载器删除（含数据文件）"
-        placement="bottom">
-        <label class="ctl">
-          <el-switch
-            v-model="autoDeleteOnFreeEnd"
-            size="small"
-            :loading="savingAutoDelete"
-            style="--el-switch-on-color: var(--pt-dang)"
-            @change="toggleAutoDelete" />
-          <span>免费结束自动删除</span>
         </label>
       </el-tooltip>
       <!--

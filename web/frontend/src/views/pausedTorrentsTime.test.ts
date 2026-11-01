@@ -66,7 +66,6 @@ vi.mock("@/api", async (orig) => {
       delete: vi.fn(),
       resume: vi.fn(),
     },
-    globalApi: { get: vi.fn(() => Promise.resolve({ auto_delete_on_free_end: false })) },
   };
 });
 
@@ -85,6 +84,31 @@ afterEach(() => {
   view?.unmount();
   view = null;
   vi.useRealTimers();
+});
+
+describe("暂停任务：免费结束时的删除每条 RSS 自己选", () => {
+  it("页头没有全局的免费结束自动删除开关", async () => {
+    const PausedTorrents = (await import("./PausedTorrents.vue")).default;
+    view = mountView(PausedTorrents);
+    await vi.waitFor(() => expect(timeCell("今年暂停")).not.toBe(""));
+    expect(document.body.textContent).not.toContain("免费结束自动删除");
+  });
+
+  it("列表为空时写明暂停还是删除在站点详情里每条 RSS 选", async () => {
+    const { pausedTorrentsApi } = await import("@/api");
+    const list = vi.mocked(pausedTorrentsApi.list);
+    const original = list.getMockImplementation();
+    list.mockImplementation(() => Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 }));
+    try {
+      const PausedTorrents = (await import("./PausedTorrents.vue")).default;
+      view = mountView(PausedTorrents);
+      await vi.waitFor(() =>
+        expect(document.body.textContent).toContain("暂停还是删除在站点详情里每条 RSS 自己选"),
+      );
+    } finally {
+      if (original) list.mockImplementation(original);
+    }
+  });
 });
 
 describe("暂停任务：跨年的时间带年份", () => {

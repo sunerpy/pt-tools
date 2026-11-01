@@ -163,3 +163,21 @@ describe("自动清理：做种竞争度是一条删除条件", () => {
     expect(payload.cleanup_emergency).toBe(false);
   });
 });
+
+describe("自动清理：免费到期的兜底", () => {
+  it("写明只管 RSS 里没选免费结束时处理的免费种子，不受最短保种时间挡", async () => {
+    api.getGlobal.mockResolvedValue(structuredClone(SETTINGS));
+    await mountPage();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="ac-free-expired"]')).not.toBeNull(),
+    );
+    const item = document
+      .querySelector('[data-testid="ac-free-expired"]')!
+      .closest(".el-form-item")!;
+    const text = item.textContent ?? "";
+    expect(text).toContain("其他免费种子免费过了没下完就删");
+    expect(text).toContain("没选免费结束时暂停或删除");
+    expect(text).toContain("最短保种时间");
+    expect(text).not.toContain("与上面的管理范围无关");
+  });
+});

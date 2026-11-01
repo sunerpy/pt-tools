@@ -169,6 +169,7 @@ const newRss = reactive<RSSConfig>({
   download_path: "",
   filter_rule_ids: [],
   pause_on_free_end: false,
+  free_end_delete: false,
   filter_mode: "",
   notify_mode: "",
   notify_conf_ids: "[]",
@@ -187,12 +188,30 @@ const editingRss = reactive<RSSConfig>({
   download_path: "",
   filter_rule_ids: [],
   pause_on_free_end: false,
+  free_end_delete: false,
   filter_mode: "",
   notify_mode: "",
   notify_conf_ids: "[]",
   max_notifications_per_hour: 100,
 });
 const editingRssIndex = ref(-1);
+
+/** RSS 的「免费结束时没下完」：不处理、暂停、删除，存成 pause_on_free_end 与 free_end_delete 两项 */
+type FreeEndAction = "none" | "pause" | "delete";
+
+function freeEndActionOf(r: RSSConfig): FreeEndAction {
+  if (!r.pause_on_free_end) return "none";
+  return r.free_end_delete ? "delete" : "pause";
+}
+
+function setFreeEndAction(r: RSSConfig, v: FreeEndAction) {
+  r.pause_on_free_end = v !== "none";
+  r.free_end_delete = v === "delete";
+}
+
+type RadioValue = string | number | boolean | undefined;
+const setNewFreeEnd = (v: RadioValue) => setFreeEndAction(newRss, v as FreeEndAction);
+const setEditFreeEnd = (v: RadioValue) => setFreeEndAction(editingRss, v as FreeEndAction);
 const updatingRss = ref(false);
 
 /**
@@ -422,6 +441,7 @@ function openAddRssDialog() {
     download_path: "",
     filter_rule_ids: [],
     pause_on_free_end: true,
+    free_end_delete: false,
     filter_mode: "",
     notify_mode: "",
     notify_conf_ids: "[]",
@@ -470,6 +490,7 @@ async function addRss() {
       download_path: newRss.download_path || "",
       filter_rule_ids: newRss.filter_rule_ids || [],
       pause_on_free_end: newRss.pause_on_free_end || false,
+      free_end_delete: (newRss.pause_on_free_end && newRss.free_end_delete) || false,
       filter_mode: newRss.filter_mode || "",
       notify_mode: newRss.notify_mode || "",
       notify_conf_ids: newRss.notify_conf_ids || "[]",
@@ -545,6 +566,7 @@ function openEditRssDialog(index: number) {
     download_path: rss.download_path || "",
     filter_rule_ids: rss.filter_rule_ids || [],
     pause_on_free_end: rss.pause_on_free_end || false,
+    free_end_delete: rss.free_end_delete || false,
     filter_mode: rss.filter_mode || "",
     notify_mode: rss.notify_mode || "",
     notify_conf_ids: rss.notify_conf_ids || "[]",
@@ -600,6 +622,7 @@ async function updateRss() {
       download_path: editingRss.download_path || "",
       filter_rule_ids: editingRss.filter_rule_ids || [],
       pause_on_free_end: editingRss.pause_on_free_end || false,
+      free_end_delete: (editingRss.pause_on_free_end && editingRss.free_end_delete) || false,
       filter_mode: editingRss.filter_mode || "",
       notify_mode: editingRss.notify_mode || "",
       notify_conf_ids: editingRss.notify_conf_ids || "[]",
@@ -1100,8 +1123,11 @@ function ruleNameOf(id: number): string {
               <div v-if="row.category || row.tag || row.pause_on_free_end" class="rss__tags">
                 <PtTag v-if="row.category">{{ row.category }}</PtTag>
                 <PtTag v-if="row.tag">{{ row.tag }}</PtTag>
-                <PtStatusPill v-if="row.pause_on_free_end" tone="warn" size="sm">
-                  免费结束暂停
+                <PtStatusPill
+                  v-if="row.pause_on_free_end"
+                  :tone="row.free_end_delete ? 'dang' : 'warn'"
+                  size="sm">
+                  {{ row.free_end_delete ? "免费结束删除" : "免费结束暂停" }}
                 </PtStatusPill>
               </div>
 
@@ -1698,12 +1724,22 @@ function ruleNameOf(id: number): string {
             免费种要在推送前读到结束时间：站点没给结束时间的不当长期免费，等下一轮重新读取；确实要下载就用「不要求免费」的过滤规则。
           </div>
         </el-form-item>
-        <el-form-item label="免费结束暂停">
-          <span class="sw"><el-switch v-model="newRss.pause_on_free_end" /></span>
+        <el-form-item label="免费结束时没下完">
+          <el-radio-group
+            :model-value="freeEndActionOf(newRss)"
+            size="small"
+            data-testid="rss-free-end"
+            @update:model-value="setNewFreeEnd">
+            <el-radio-button value="none">不处理</el-radio-button>
+            <el-radio-button value="pause">暂停</el-radio-button>
+            <el-radio-button value="delete">删除</el-radio-button>
+          </el-radio-group>
           <div class="field-tip">
-            免费期结束时还没下完就暂停（全局设置开了「免费结束自动删除」时改为删除）。开着它的种子先暂停加入，登记好到期暂停才开始；
-            站点没有给出免费结束时间的只暂停加入、不自动开始。通知里的「立即下载」也按这条 RSS
-            的设置。
+            选暂停或删除的种子先暂停加入，登记好到期处理才开始；站点没有给出免费结束时间的只暂停加入、不自动开始。
+            删除连数据一起删（数据还被别的种子用着时只删种子），带保留标签、保护标签或 H&R
+            没做满的种子不删、改成暂停。
+            改了只对之后推送的种子生效。选不处理时，自动删种打开了「其他免费种子免费过了没下完就删」的按它处理。
+            通知里的「立即下载」也按这条 RSS 的设置。
           </div>
         </el-form-item>
 
@@ -1869,12 +1905,22 @@ function ruleNameOf(id: number): string {
             免费种要在推送前读到结束时间：站点没给结束时间的不当长期免费，等下一轮重新读取；确实要下载就用「不要求免费」的过滤规则。
           </div>
         </el-form-item>
-        <el-form-item label="免费结束暂停">
-          <span class="sw"><el-switch v-model="editingRss.pause_on_free_end" /></span>
+        <el-form-item label="免费结束时没下完">
+          <el-radio-group
+            :model-value="freeEndActionOf(editingRss)"
+            size="small"
+            data-testid="rss-free-end"
+            @update:model-value="setEditFreeEnd">
+            <el-radio-button value="none">不处理</el-radio-button>
+            <el-radio-button value="pause">暂停</el-radio-button>
+            <el-radio-button value="delete">删除</el-radio-button>
+          </el-radio-group>
           <div class="field-tip">
-            免费期结束时还没下完就暂停（全局设置开了「免费结束自动删除」时改为删除）。开着它的种子先暂停加入，登记好到期暂停才开始；
-            站点没有给出免费结束时间的只暂停加入、不自动开始。通知里的「立即下载」也按这条 RSS
-            的设置。
+            选暂停或删除的种子先暂停加入，登记好到期处理才开始；站点没有给出免费结束时间的只暂停加入、不自动开始。
+            删除连数据一起删（数据还被别的种子用着时只删种子），带保留标签、保护标签或 H&R
+            没做满的种子不删、改成暂停。
+            改了只对之后推送的种子生效。选不处理时，自动删种打开了「其他免费种子免费过了没下完就删」的按它处理。
+            通知里的「立即下载」也按这条 RSS 的设置。
           </div>
         </el-form-item>
 
