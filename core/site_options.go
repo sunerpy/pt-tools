@@ -178,7 +178,7 @@ func (s *ConfigStore) UpdateRSSInSite(siteName string, entry models.RSSConfig) (
 		}
 		row.Name, row.URL, row.Category, row.Tag = normalized.Name, normalized.URL, normalized.Category, normalized.Tag
 		row.IntervalMinutes, row.DownloaderID, row.DownloadPath = normalized.IntervalMinutes, normalized.DownloaderID, normalized.DownloadPath
-		row.PauseOnFreeEnd, row.FilterMode = normalized.PauseOnFreeEnd, normalized.FilterMode
+		row.PauseOnFreeEnd, row.FreeEndDelete, row.FilterMode = normalized.PauseOnFreeEnd, normalized.FreeEndDelete, normalized.FilterMode
 		row.NotifyMode, row.NotifyConfIDs, row.MaxNotificationsPerHour = normalized.NotifyMode, normalized.NotifyConfIDs, normalized.MaxNotificationsPerHour
 		if err := tx.Save(&row).Error; err != nil {
 			return err
