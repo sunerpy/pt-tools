@@ -320,8 +320,8 @@ func (mp *episodeMapper) mapEpisodes(m meta.Meta, title, subtitle string, sp spa
 }
 
 // periodNotAiredYet 报告第 period 期按 TMDB 的播出进度还不可能播出，而标题写的那几集已经播出：这一季到今天播出的集数
-// 连上一期的第一集都排不到（每期几集按 TMDB 已列出的期里最少的算，没列出时当作一集）。留一期的余量，是因为会员常常提前几天看到、
-// TMDB 的日期也会差几天。不知道今天、标题的集没有播出日期时为假。
+// 连上一期的第一集都排不到（每期几集见 episodesPerPeriod）。留一期的余量，是因为会员常常提前几天看到、TMDB 的日期也会差几天。
+// 不知道今天、标题的集没有播出日期时为假。
 func (mp *episodeMapper) periodNotAiredYet(period int, sp span) bool {
 	ix := mp.index
 	if mp.today == "" || period <= 0 {
@@ -332,19 +332,35 @@ func (mp *episodeMapper) periodNotAiredYet(period int, sp span) bool {
 			return false
 		}
 	}
-	perPeriod := 0
-	for _, eps := range ix.periods {
-		if perPeriod == 0 || len(eps) < perPeriod {
-			perPeriod = len(eps)
-		}
-	}
 	aired := 0
 	for _, d := range ix.airOf {
 		if d <= mp.today {
 			aired++
 		}
 	}
-	return aired < (period-2)*max(perPeriod, 1)+1
+	return aired < (period-2)*ix.episodesPerPeriod()+1
+}
+
+// episodesPerPeriod 是一期有几集：TMDB 已列出的期里最常见的集数，一样多时取少的；最新的那一期不算。TMDB 常常先列出一期的上、
+// 下还是占位的集名，有时连着几期都这样，按最少的算会估成一期一集。没列出时当作一集。
+func (ix *episodeIndex) episodesPerPeriod() int {
+	latest := 0
+	for n := range ix.periods {
+		latest = max(latest, n)
+	}
+	counts := map[int]int{}
+	for n, eps := range ix.periods {
+		if n != latest || len(ix.periods) == 1 {
+			counts[len(eps)]++
+		}
+	}
+	per, best := 1, 0
+	for size, c := range counts {
+		if c > best || (c == best && size < per) {
+			per, best = size, c
+		}
+	}
+	return per
 }
 
 // byPeriodHint 按（期，部分）找 TMDB 的集：只写了第几期时是这一期的几集。
