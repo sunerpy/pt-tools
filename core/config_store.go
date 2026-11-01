@@ -385,7 +385,7 @@ func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patc
 		cur.CleanupProtectHR = gs.CleanupProtectHR
 		cur.CleanupMinRetainH = gs.CleanupMinRetainH
 		cur.CleanupProtectTags = gs.CleanupProtectTags
-		cur.AutoDeleteOnFreeEnd = gs.AutoDeleteOnFreeEnd
+		// AutoDeleteOnFreeEnd 不再改：免费结束时删除还是暂停每条 RSS 自己选（v17），它留着升级前的值给旧版
 		cur.FreeEndAdvanceMinutes = gs.FreeEndAdvanceMinutes
 		cur.PeerRatioEnabled = gs.PeerRatioEnabled
 		cur.PeerRatioMaxSL = gs.PeerRatioMaxSL

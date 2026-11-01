@@ -858,7 +858,6 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupProtectHR       bool    `json:"cleanup_protect_hr"`
 			CleanupMinRetainH      int     `json:"cleanup_min_retain_h"`
 			CleanupProtectTags     string  `json:"cleanup_protect_tags"`
-			AutoDeleteOnFreeEnd    bool    `json:"auto_delete_on_free_end"`
 			FreeEndAdvanceMinutes  int     `json:"free_end_advance_minutes"`
 			PeerRatioEnabled       bool    `json:"peer_ratio_enabled"`
 			PeerRatioMaxSL         float64 `json:"peer_ratio_max_sl"`
@@ -921,7 +920,6 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupProtectHR:       req.CleanupProtectHR,
 			CleanupMinRetainH:      req.CleanupMinRetainH,
 			CleanupProtectTags:     req.CleanupProtectTags,
-			AutoDeleteOnFreeEnd:    req.AutoDeleteOnFreeEnd,
 			FreeEndAdvanceMinutes:  req.FreeEndAdvanceMinutes,
 			PeerRatioEnabled:       req.PeerRatioEnabled,
 			PeerRatioMaxSL:         req.PeerRatioMaxSL,
