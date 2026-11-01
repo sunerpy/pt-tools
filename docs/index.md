@@ -51,7 +51,7 @@ home:
     groups:
       - name: 站点与数据
         items:
-          - title: 66 个内置站点
+          - title: 67 个内置站点
             body: 覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey 三种认证方式。
             status: available
             link: /sites

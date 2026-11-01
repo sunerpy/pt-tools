@@ -51,7 +51,7 @@ home:
     groups:
       - name: Sites and statistics
         items:
-          - title: 66 built-in sites
+          - title: 67 built-in sites
             body: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi sites, signing in with a cookie, an API key or a passkey.
             status: available
             link: /en/sites

@@ -1542,6 +1542,23 @@ func TestNexusPHPDriver_ParseSeedingStatus_UpstreamSummary(t *testing.T) {
 	}
 }
 
+// TJUPT 的做种列表开头是「<b>58</b>条记录 - 总大小3.127 TiB<br />」（2026-11-01 在站点上看的格式，数字是示例），后面是全部做种的表格。
+// 第一行标题里的「[2.21GiB]」会让表格累加把标题列当成体积列，所以要用汇总。
+func TestNexusPHPDriver_ParseSeedingStatus_TotalSizeSummary(t *testing.T) {
+	html := `<b>58</b>条记录 - 总大小3.127 TiB<br /><table class='coltable table-left torrentlist'><tr>` +
+		`<td class="colhead">类型</td><td class="colhead">标题</td><td class="colhead"><img class="size" src="pic/trans.gif" alt="size" title="大小" /></td></tr>` +
+		`<tr><td class="rowfollow">软件</td><td class="rowfollow"><a href="details.php?id=1&amp;hit=1"><b>[Windows][Demo][2.21GiB][安装包]</b></a></td><td class="rowfollow">3.00<br />GiB</td></tr>` +
+		`</table>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 58, seeding)
+	tib := 3.127
+	assert.Equal(t, int64(tib*1024*1024*1024*1024), size)
+}
+
 func TestNexusPHPDriver_ParseSeedingStatus_NilDoc(t *testing.T) {
 	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
 	_, _, err := d.ParseSeedingStatus(NexusPHPResponse{})

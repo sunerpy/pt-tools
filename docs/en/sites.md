@@ -1,8 +1,8 @@
 # Supported sites
 
-**66** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi.
+**67** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi.
 
-### NexusPHP sites (62)
+### NexusPHP sites (63)
 
 | Site                  | Sign-in | Features                                   | Status | Notes                                                                                                                     |
 | --------------------- | ------- | ------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------- |
@@ -51,7 +51,7 @@
 | **PTFans**            | Cookie  | RSS, search, user info                     | ✅     | Supported (ptfans.cc; has H&R; data is read from info_block; issue #417)                                                  |
 | **KamePT**            | Cookie  | RSS, search, user info                     | ✅     | Supported (kamept.com; info_block includes the seeding points; issue #418)                                                |
 | **PTCHDBits**         | Cookie  | RSS, search, user info                     | ✅     | Supported (ptchdbits.co; promotion read from img.pro_free on the details page; requested in an issue)                     |
-| **PTerClub**          | Cookie  | RSS, search, user info                     | ✅     | 猫站 (pterclub.net; its bonus points are called 猫粮; data is read from info_block)                                       |
+| **PTerClub**          | Cookie  | RSS, search, user info, class requirements | ✅     | 猫站 (pterclub.net; bonus points are called 猫粮; no H&R; automatic sign-in does not count as a login)                    |
 | **PTHome**            | Cookie  | RSS, search, user info                     | ✅     | 铂金家 (pthome.net; upload, download, bonus and seeding points are read from info_block)                                  |
 | **TangPT**            | Cookie  | RSS, search, user info                     | ✅     | 糖果 (www.tangpt.top; CHD template; issue #456)                                                                           |
 | **T-Baozi**           | Cookie  | RSS, search, user info                     | ✅     | 包子 (p.t-baozi.cc; data is read from info_block; issue #457)                                                             |
@@ -68,6 +68,10 @@
 | **U2分享園@動漫花園** | Cookie  | RSS, search, user info                     | ✅     | U2 / 動漫花園 (u2.dmhy.org; the details page has no hidden title field, so the title is parsed from the text; issue #497) |
 | **PTzone**            | Cookie  | RSS, search, user info                     | ✅     | ptzone.xyz (Traditional Chinese interface; submitted in the Telegram group)                                               |
 | **PigGo**             | Cookie  | RSS, search, user info                     | ✅     | 猪猪 (piggo.me; the subtitle is a bare text node; class and H&R still need more samples to verify; issue #532)            |
+| **TJUPT**             | Cookie  | RSS, search, user info, class requirements | ✅     | 北洋园PT (no download counting, H&R on every torrent; unregistered tools risk a ban; no automatic sign-in)                |
+
+> [!WARNING]
+> TJUPT warns or permanently bans accounts used by programs or scripts that access the site with your cookie unless the program is on its whitelist; the site's own RSS feed needs no registration. Before turning the site on, register pt-tools in the 机器人爬虫/程序脚本报备专帖 topic on the TJUPT forum (purpose, user ID, IP range, User-Agent, pages visited and how often), and turn it on in pt-tools after the staff approve it.
 
 ### Other platforms (4)
 
