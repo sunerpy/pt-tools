@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -2298,53 +2299,46 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 	}
 
 	// Method 2: Fallback - parse table rows and accumulate sizes
-	// Find all rows except the header row
-	rows := doc.Find("table:last tr:not(:first-child)")
-	if rows.Length() == 0 {
-		// Also try without :last if only one table exists
-		rows = doc.Find("table tr:not(:first-child)")
-	}
-
-	if rows.Length() == 0 {
+	// 列表是最后一张不在别的表格里的表格（上游把汇总、分页放在它前面）；第一行是表头
+	table := doc.Find("table").FilterFunction(func(_ int, s *goquery.Selection) bool {
+		return s.ParentsFiltered("table").Length() == 0
+	}).Last()
+	allRows := table.Find("tr").FilterFunction(func(_ int, tr *goquery.Selection) bool {
+		return tr.Closest("table").IsSelection(table)
+	})
+	if allRows.Length() < 2 {
 		if DebugUserInfo {
 			fmt.Printf("[DEBUG] ParseSeedingStatus: no table rows found\n")
 		}
 		return 0, 0, nil
 	}
-
+	rows := allRows.Slice(1, goquery.ToEnd)
 	seeding = rows.Length()
 
-	// Auto-detect size column index by finding the first column that matches size pattern
-	sizeIndex := -1
-	sizePattern := regexp.MustCompile(`(?i)[\d.]+\s*[KMGTP]?i?B`)
-
-	// Check first row to determine size column
-	firstRow := rows.First()
-	firstRow.Find("td").Each(func(i int, td *goquery.Selection) {
-		if sizeIndex < 0 && sizePattern.MatchString(td.Text()) {
-			sizeIndex = i
-		}
-	})
-
-	if sizeIndex < 0 {
-		// Default to column index 2 if not found (common in NexusPHP)
-		sizeIndex = 2
-	}
-
+	// 体积列按表头找，找不到再看第一行里整格就是体积的格子。不按「第一行里第一个像体积的格子」猜：
+	// 标题里的「1940 Blu-ray」「10bit」也像，猜成标题列以后「Name.2023.2160p」会被读成 2023 PiB
+	sizeIndex := seedingSizeColumn(allRows.First(), rows.First())
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] ParseSeedingStatus Method2: detected sizeIndex=%d, rowCount=%d\n", sizeIndex, seeding)
 	}
+	if sizeIndex < 0 {
+		// 找不到体积列：只报做种数，体积按没取到（调用方不更新它）
+		return seeding, 0, nil
+	}
 
-	// Accumulate sizes from all rows
+	// 只加真是体积的格子
 	rows.Each(func(i int, row *goquery.Selection) {
-		tds := row.Find("td")
-		if tds.Length() > sizeIndex {
-			sizeText := strings.TrimSpace(tds.Eq(sizeIndex).Text())
-			size := parseSize(sizeText)
+		cells := row.ChildrenFiltered("td, th")
+		if cells.Length() <= sizeIndex {
+			return
+		}
+		sizeText := cells.Eq(sizeIndex).Text()
+		size, ok := parseSizeCell(sizeText)
+		if ok {
 			seedingSize += size
-			if DebugUserInfo && i < 3 { // Only log first 3 rows for debugging
-				fmt.Printf("[DEBUG]   Row %d: sizeText=%q, parsed=%d\n", i, sizeText, size)
-			}
+		}
+		if DebugUserInfo && i < 3 { // Only log first 3 rows for debugging
+			fmt.Printf("[DEBUG]   Row %d: sizeText=%q, parsed=%d\n", i, sizeText, size)
 		}
 	})
 
@@ -2353,6 +2347,63 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 	}
 
 	return seeding, seedingSize, nil
+}
+
+// sizeHeaderPattern 认做种列表表头里的体积列：「大小」「體積」「体积」「Size」。上游 NexusPHP 的表头是
+// <img class="size" alt="size" title="大小" />，所以也看 img 的 title、alt 与 class。
+var sizeHeaderPattern = regexp.MustCompile(`(?i)大小|體積|体积|\bsize\b`)
+
+// sizeCellPattern 是整格就是一个体积：数字加单位（B、KB…EB，可带 i），格子里不能有别的字。
+var sizeCellPattern = regexp.MustCompile(`(?i)^([\d.,]+)\s*([KMGTPE]?)i?B$`)
+
+// seedingSizeColumn 找做种列表里体积那一列：先按表头，找不到再看第一行里整格就是体积的格子；都找不到返回 -1。
+func seedingSizeColumn(header, first *goquery.Selection) int {
+	index := -1
+	header.ChildrenFiltered("td, th").EachWithBreak(func(i int, cell *goquery.Selection) bool {
+		texts := []string{cell.Text()}
+		cell.Find("img").Each(func(_ int, img *goquery.Selection) {
+			for _, attr := range []string{"title", "alt", "class"} {
+				if v, ok := img.Attr(attr); ok {
+					texts = append(texts, v)
+				}
+			}
+		})
+		for _, t := range texts {
+			if sizeHeaderPattern.MatchString(t) {
+				index = i
+				return false
+			}
+		}
+		return true
+	})
+	if index >= 0 {
+		return index
+	}
+	first.ChildrenFiltered("td, th").EachWithBreak(func(i int, cell *goquery.Selection) bool {
+		if _, ok := parseSizeCell(cell.Text()); ok {
+			index = i
+			return false
+		}
+		return true
+	})
+	return index
+}
+
+// parseSizeCell 解析整格就是一个体积的格子（「90.55<br />GB」的文字是「90.55GB」），按 1024 进位；格子里有别的字时 ok 为假。
+func parseSizeCell(text string) (int64, bool) {
+	m := sizeCellPattern.FindStringSubmatch(strings.Join(strings.Fields(text), ""))
+	if m == nil {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", ""), 64)
+	if err != nil {
+		return 0, false
+	}
+	multiplier := float64(1)
+	if unit := strings.ToUpper(m[2]); unit != "" {
+		multiplier = math.Pow(1024, float64(strings.Index("KMGTPE", unit)+1))
+	}
+	return int64(value * multiplier), true
 }
 
 // FetchSeedingStatus fetches the seeding status (count and size) for a user

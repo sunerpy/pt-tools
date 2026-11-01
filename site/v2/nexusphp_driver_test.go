@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1557,6 +1558,72 @@ func TestNexusPHPDriver_ParseSeedingStatus_TotalSizeSummary(t *testing.T) {
 	assert.Equal(t, 58, seeding)
 	tib := 3.127
 	assert.Equal(t, int64(tib*1024*1024*1024*1024), size)
+}
+
+// hdskySeedingPage 按 HDSky 的做种列表拼（2026-11-02 在站点上看的结构，标题是示例）：开头只有「<b>N</b>条记录」、没有总体积，
+// 表头 类型|标题|大小|种子数|下载数|上传|下载|分享率，体积格是「90.55<br />GB」。
+func hdskySeedingPage(titles, sizes []string) string {
+	var b strings.Builder
+	b.WriteString(`<b>` + strconv.Itoa(len(titles)) + `</b>条记录<br /><table border="1" cellspacing="0" cellpadding="5"><tr>` +
+		`<td class="colhead">类型</td><td class="colhead">标题</td><td class="colhead">大小</td><td class="colhead">种子数</td>` +
+		`<td class="colhead">下载数</td><td class="colhead">上传</td><td class="colhead">下载</td><td class="colhead">分享率</td></tr>`)
+	for i, title := range titles {
+		num, unit, _ := strings.Cut(sizes[i], " ")
+		b.WriteString(`<tr><td class="rowfollow"><img src="pic/cattrans.gif" alt="Movies" /></td>` +
+			`<td class="rowfollow"><a href="details.php?id=` + strconv.Itoa(100+i) + `&amp;hit=1" title="` + title + `"><b>` + title + `</b></a><br />副标题</td>` +
+			`<td class="rowfollow">` + num + `<br />` + unit + `</td><td class="rowfollow">91</td><td class="rowfollow">5</td>` +
+			`<td class="rowfollow">15.32<br />GB</td><td class="rowfollow">0.00<br />KB</td><td class="rowfollow">Inf.</td></tr>`)
+	}
+	b.WriteString(`</table>`)
+	return b.String()
+}
+
+// 第一行标题里有「1940 Blu-ray」「10bit」这类字样时，按第一行猜体积列会猜成标题列；标题「Name.2023.2160p」又会被当成 2023 PiB，
+// 合计出几千 PB。体积列要按表头「大小」找，只加真是体积的格子。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnFromHeader(t *testing.T) {
+	titles := []string{
+		"Casablanca 1940 Blu-ray 1080p AVC REMUX",
+		"Some.Show.2023.2160p.WEB-DL.H265.10bit.DDP5.1-HDSWEB",
+		"Another.Movie.2024.2160p.UHD.BluRay.x265-HDS",
+	}
+	sizes := []string{"90.55 GB", "12.50 GB", "1.25 TB"}
+	html := hdskySeedingPage(titles, sizes)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 3, seeding)
+	gib := float64(1 << 30)
+	want := int64(90.55*gib) + int64(12.50*gib) + int64(1.25*1024*gib)
+	assert.Equal(t, want, size, "体积列是表头写着「大小」的第 3 列，不是标题列")
+}
+
+// 表头认不出时，按第一行里整格就是一个体积（数字加单位）的格子定列；标题里夹着的「10bit」「2160p」不算。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnWholeCellFallback(t *testing.T) {
+	html := `<table><tr><td>a</td><td>b</td><td>c</td></tr>` +
+		`<tr><td>Movie</td><td>Show.S01.2160p.WEB-DL.H265.10bit-XX</td><td>2.00<br />GiB</td></tr>` +
+		`<tr><td>Movie</td><td>Film.2020.2160p.UHD.BluRay-XX</td><td>3.00<br />GiB</td></tr></table>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 2, seeding)
+	assert.Equal(t, int64(5)<<30, size)
+}
+
+// 找不到体积列（表头没有、第一行也没有整格的体积）时不猜：体积按没取到（0），保存时沿用上一次的。
+func TestNexusPHPDriver_ParseSeedingStatus_NoSizeColumn(t *testing.T) {
+	html := `<table><tr><td>a</td><td>b</td><td>c</td></tr>` +
+		`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>-</td></tr></table>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 1, seeding)
+	assert.Zero(t, size)
 }
 
 func TestNexusPHPDriver_ParseSeedingStatus_NilDoc(t *testing.T) {
