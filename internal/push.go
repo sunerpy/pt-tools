@@ -304,7 +304,8 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 			sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB <= 保底 %.1f GB)，暂停推送: site=%s, id=%s",
 				target.Name, freeGB, pendingGB, reservedGB, effGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
 			recordPushDiskProtectError(req.SiteID, req.TorrentID, "磁盘空间不足，暂停推送")
-			if glOnly.CleanupEnabled {
+			// 让自动删种提前开始一轮（只在打开了「空间低于下限时紧急清理」时）
+			if glOnly.CleanupEnabled && glOnly.CleanupEmergency {
 				events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "push", At: time.Now()})
 			}
 			return &PushTorrentResult{

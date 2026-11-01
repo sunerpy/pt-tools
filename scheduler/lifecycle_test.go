@@ -62,7 +62,6 @@ func TestManager_StopJobsKeepsMonitorsRunning(t *testing.T) {
 	assert.NotNil(t, m.GetFreeEndMonitor(), "免费到期监控继续运行")
 	m.mu.Lock()
 	assert.NotNil(t, m.cleanupMonitor)
-	assert.NotNil(t, m.peerRatioMonitor)
 	assert.False(t, m.stopped, "配置事件订阅仍然有效")
 	m.mu.Unlock()
 }
@@ -149,14 +148,12 @@ func TestManager_InitMonitorsConcurrentWithStopAll(t *testing.T) {
 			defer close(done)
 			m.initFreeEndMonitor()
 			m.initCleanupMonitor()
-			m.initPeerRatioMonitor()
 		}()
 		m.StopAll()
 		<-done
 		m.mu.Lock()
 		assert.Nil(t, m.freeEndMonitor)
 		assert.Nil(t, m.cleanupMonitor)
-		assert.Nil(t, m.peerRatioMonitor)
 		m.mu.Unlock()
 	}
 }

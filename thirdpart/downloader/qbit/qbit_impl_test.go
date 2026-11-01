@@ -1253,6 +1253,29 @@ func TestQbitGetAllTorrentsAndMapping(t *testing.T) {
 	assert.Equal(t, downloader.TorrentDownloading, torrents[1].State)
 }
 
+// 整个种子群的做种与下载人数来自 num_complete、num_incomplete（tracker 报的）；没给或给 -1 时是 -1（不知道）。
+func TestQbitGetAllTorrents_SwarmCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"hash": "h1", "state": "uploading", "num_complete": float64(40), "num_incomplete": float64(2), "num_seeds": float64(1)},
+			{"hash": "h2", "state": "uploading"},
+			{"hash": "h3", "state": "uploading", "num_complete": float64(-1), "num_incomplete": float64(0)},
+		})
+	}))
+	defer srv.Close()
+
+	torrents, err := coverageTestClient(srv.URL, false).GetAllTorrents()
+	require.NoError(t, err)
+	require.Len(t, torrents, 3)
+	assert.Equal(t, 40, torrents[0].SwarmSeeds)
+	assert.Equal(t, 2, torrents[0].SwarmLeechers)
+	assert.Equal(t, 1, torrents[0].NumSeeds, "连上的做种人数照旧来自 num_seeds")
+	assert.Equal(t, -1, torrents[1].SwarmSeeds, "没给时不知道")
+	assert.Equal(t, -1, torrents[1].SwarmLeechers)
+	assert.Equal(t, -1, torrents[2].SwarmSeeds, "qB 给 -1 时不知道")
+	assert.Equal(t, 0, torrents[2].SwarmLeechers)
+}
+
 func TestQbitMapQbitState(t *testing.T) {
 	c := coverageTestClient("http://x", false)
 	cases := map[string]downloader.TorrentState{

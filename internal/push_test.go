@@ -20,6 +20,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/events"
 	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -1062,6 +1063,48 @@ func TestPushTorrent_DiskProtectVisibleTorrentNotCountedTwice(t *testing.T) {
 			second := push("vis-2")
 			assert.Equal(t, tc.secondOK, second.Success, second.Message)
 			assert.Equal(t, tc.reservedLeft, GetDiskBudget().Reserved())
+		})
+	}
+}
+
+// 推送遇到空间不足时，打开了自动删种与「空间低于下限时紧急清理」才发磁盘空间不足（让自动删种提前开始一轮）。
+func TestPushTorrent_DiskSpaceLowEventFollowsEmergency(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		cleanup, emergency bool
+		want               bool
+	}{
+		{"都开着", true, true, true},
+		{"紧急清理关着", true, false, false},
+		{"自动删种关着", false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupDB(t)
+			t.Cleanup(func() { global.GlobalDB = nil })
+			GetDiskBudget().Reset()
+			t.Cleanup(func() { GetDiskBudget().Reset() })
+			require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
+				DownloadDir: t.TempDir(), CleanupDiskProtect: true, CleanupMinDiskSpaceGB: 5,
+				CleanupEnabled: tc.cleanup, CleanupEmergency: tc.emergency,
+			}))
+			_, ch, cancel := events.Subscribe(8)
+			t.Cleanup(cancel)
+			srv := fakeQbitServer(t, false, gb)
+			dlID := seedQbitDownloaderNamed(t, "qb-low", srv.URL)
+
+			res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+				SiteID: "springsunday", TorrentID: "low", TorrentData: makeSizedTorrentBytes(t, "m", gb), DownloaderID: dlID,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, res)
+			assert.Equal(t, PushStatusRejectedDisk, res.Status)
+			got := false
+			for len(ch) > 0 {
+				if ev := <-ch; ev.Type == events.DiskSpaceLow && ev.Source == "push" {
+					got = true
+				}
+			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

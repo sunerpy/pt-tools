@@ -62,6 +62,9 @@ type TorrentInfo struct {
 	CheckCount       int        `gorm:"default:0" json:"checkCount"`  // 进度检查次数
 	Seeders          int        `gorm:"default:0" json:"seeders"`
 	Leechers         int        `gorm:"default:0" json:"leechers"`
+	// PeerPauseOverridden 是做种竞争度暂停过、用户又手动开始了的种子（在下载器里或「暂停任务」页）：
+	// 自动删种的竞争度不再暂停它，其他删除条件照常
+	PeerPauseOverridden bool `gorm:"default:false" json:"peerPauseOverridden"`
 	// IMDbID、DoubanID 是站点给的外部编号（详情页或接口里有时才有），媒体识别优先用它们
 	IMDbID   string `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
 	DoubanID string `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`

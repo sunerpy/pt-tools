@@ -73,6 +73,8 @@ type Torrent struct {
 	LastActivity    int64        // 最后一次上传或下载数据的时间 (Unix timestamp), 0=下载器没给
 	NumSeeds        int          // 种子数
 	NumPeers        int          // 下载者数
+	SwarmSeeds      int          // 整个种子群里的做种人数（tracker 报的，不只是连上的），-1=不知道
+	SwarmLeechers   int          // 整个种子群里的下载人数（qBit 在列表里给；TR 要另读 tracker 状态，见 BulkTrackerReader），-1=不知道
 	Availability    float64      // 可用性 (0.0-1.0+)
 	ContentPath     string       // 内容路径 (文件/文件夹的完整路径)
 	TotalUploaded   int64        // 总上传量 (bytes)

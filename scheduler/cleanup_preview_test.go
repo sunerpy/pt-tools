@@ -84,7 +84,7 @@ func TestDeleteReasonsModes(t *testing.T) {
 }
 
 // 预览列出受保护、这一轮不删的种子与原因（命中的第一条保护规则），写明下载器里一共几个种子，
-// 以及刷流任务的、竞争度监控暂停着的各几个（常规规则不管它们）：用户能看出为什么没删。
+// 以及刷流任务的有几个（删除条件不管它们）：用户能看出为什么没删。
 func TestCleanupPreviewProtectedReasons(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	cm := newCleanupMonitorWithFake(t, fake)
@@ -128,7 +128,6 @@ func TestCleanupPreviewProtectedReasons(t *testing.T) {
 	assert.Equal(t, 9, r.Managed)
 	assert.Equal(t, 6, r.Protected)
 	assert.Equal(t, 1, r.Brush, "刷流任务的种子由刷流规则管")
-	assert.Equal(t, 1, r.PeerPaused, "竞争度监控暂停着的不删")
 	why := map[string]string{}
 	for _, it := range r.ProtectedItems {
 		why[it.Name] = strings.Join(it.Reasons, "；")
@@ -139,8 +138,13 @@ func TestCleanupPreviewProtectedReasons(t *testing.T) {
 	assert.Equal(t, "带保护标签「keep」", why["Kept"])
 	assert.Equal(t, "带保留标签（pt-tools-keep）", why["Pinned"])
 	assert.Equal(t, "正在下载或校验（打开了「保护下载中的种子」）", why["Downloading"])
-	require.Len(t, r.Items, 1)
-	assert.Equal(t, "Delete", r.Items[0].Name)
+	// 竞争度暂停着的种子照样按常规条件删
+	require.Len(t, r.Items, 2)
+	assert.Equal(t, "Peer", r.Items[0].Name)
+	assert.Equal(t, "Delete", r.Items[1].Name)
+	for _, it := range r.Items {
+		assert.Equal(t, "delete", it.Action)
+	}
 }
 
 // 连不上的下载器的结果也带空的列表（不是 null）：页面按列表算个数。

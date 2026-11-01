@@ -1800,6 +1800,10 @@ func TestTrGetAllTorrentsAndMapping(t *testing.T) {
 	assert.Equal(t, int64(1600002000), first.LastActivity, "activityDate 是最后一次上传或下载的时间")
 	assert.Zero(t, torrents[1].LastActivity, "没有 activityDate 时当作不知道")
 
+	// 整个种子群的人数要另读 tracker 状态（见 BulkTrackerReader），列表里不知道
+	assert.Equal(t, -1, first.SwarmSeeds)
+	assert.Equal(t, -1, first.SwarmLeechers)
+
 	// second torrent: NumPeers falls back to peersConnected
 	assert.Equal(t, 2, torrents[1].NumPeers)
 	assert.Equal(t, downloader.TorrentDownloading, torrents[1].State)

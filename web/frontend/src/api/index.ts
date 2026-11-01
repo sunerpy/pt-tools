@@ -87,6 +87,8 @@ export interface GlobalSettings {
   cleanup_slow_max_ratio?: number;
   cleanup_del_free_expired?: boolean;
   cleanup_disk_protect?: boolean;
+  /** 空间低于下限时紧急清理（多挑种子删、推送遇到空间不足时提前开始一轮）；只在 cleanup_disk_protect 开着时起作用 */
+  cleanup_emergency?: boolean;
   cleanup_min_disk_space_gb?: number;
   cleanup_protect_dl?: boolean;
   cleanup_protect_hr?: boolean;
@@ -94,9 +96,9 @@ export interface GlobalSettings {
   cleanup_protect_tags?: string;
   auto_delete_on_free_end?: boolean;
   free_end_advance_minutes?: number;
+  /** 做种竞争度：自动删种的一条删除条件，S/L 超过 peer_ratio_max_sl 时删除（peer_ratio_remove_data）或只暂停 */
   peer_ratio_enabled?: boolean;
   peer_ratio_max_sl?: number;
-  peer_ratio_interval_min?: number;
   peer_ratio_remove_data?: boolean;
   default_filter_mode?: FilterMode;
 }
@@ -2195,7 +2197,7 @@ export interface CleanRequest {
 // 工作目录清理 API
 // ---- 自动删种的预览与上次运行 ----
 
-/** 一个要删的种子与为什么删 */
+/** 一个要删（或要暂停）的种子与为什么 */
 export interface CleanupItem {
   name: string;
   info_hash: string;
@@ -2207,6 +2209,8 @@ export interface CleanupItem {
   reasons: string[];
   /** 数据还被别的种子用着：只删种子、保留数据 */
   keep_data?: boolean;
+  /** delete（删除）或 pause（做种竞争度过高、设置成只暂停）；受保护的条目没有 */
+  action?: "delete" | "pause";
 }
 
 /** 一台下载器一轮自动删种（或预览）的结果 */
@@ -2219,17 +2223,17 @@ export interface CleanupResult {
   candidates: number;
   /** 受保护、这一轮不删的种子与原因 */
   protected_items?: CleanupItem[] | null;
-  /** 候选里刷流任务的种子（按刷流任务的规则删）与竞争度监控暂停着的：常规规则都不删 */
+  /** 候选里刷流任务的种子：按刷流任务的规则删，自动删种的删除条件都不碰 */
   brush?: number;
-  peer_paused?: number;
   /** 剩余空间低于下限、按紧急清理多挑了种子 */
   emergency?: boolean;
   free_gb?: number;
   /** 旧版本里连不上的下载器的结果没有列表（null） */
   items: CleanupItem[] | null;
   notes?: string[];
-  /** 真的删掉的个数（预览时为 0） */
+  /** 真的删掉、因做种竞争度暂停的个数（预览时为 0） */
   deleted: number;
+  paused?: number;
   error?: string;
 }
 
@@ -2260,11 +2264,15 @@ export interface CleanupPreviewInput {
   cleanup_slow_max_ratio: number;
   cleanup_del_free_expired: boolean;
   cleanup_disk_protect: boolean;
+  cleanup_emergency: boolean;
   cleanup_min_disk_space_gb: number;
   cleanup_protect_dl: boolean;
   cleanup_protect_hr: boolean;
   cleanup_min_retain_h: number;
   cleanup_protect_tags: string;
+  peer_ratio_enabled: boolean;
+  peer_ratio_max_sl: number;
+  peer_ratio_remove_data: boolean;
 }
 
 export const cleanupApi = {

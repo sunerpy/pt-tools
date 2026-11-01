@@ -29,7 +29,7 @@ func countSettingsQueries(t *testing.T, db *gorm.DB, block <-chan struct{}) *ato
 }
 
 // 启动后的等待期内停止，监控不会在之后醒来再跑一轮。
-func TestCleanupAndPeerRatioMonitors_StopDuringStartDelay(t *testing.T) {
+func TestCleanupMonitor_StopDuringStartDelay(t *testing.T) {
 	db := setupLifecycleDB(t)
 	queries := countSettingsQueries(t, db.DB, nil)
 
@@ -37,11 +37,6 @@ func TestCleanupAndPeerRatioMonitors_StopDuringStartDelay(t *testing.T) {
 	cm.startDelay = 30 * time.Millisecond
 	require.NoError(t, cm.Start())
 	cm.Stop()
-
-	pm := NewPeerRatioMonitor(db.DB, downloader.NewDownloaderManager())
-	pm.startDelay = 30 * time.Millisecond
-	require.NoError(t, pm.Start())
-	pm.Stop()
 
 	time.Sleep(150 * time.Millisecond)
 	assert.Zero(t, queries.Load(), "停止之后不再执行检查")

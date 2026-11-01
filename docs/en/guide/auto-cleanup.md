@@ -6,12 +6,19 @@ pt-tools can delete torrents automatically. This manages disk space over long pe
 
 Auto-delete checks the torrents in your downloaders on a schedule and, following the rules you set, deletes the torrents that meet them, together with their data files, to free disk space.
 
+Which automatic deletion handles which torrents:
+
+- Torrents pt-tools pushed follow the auto-delete rules (with a tag or all-torrents scope, the torrents in that scope too).
+- Torrents a brush task is managing follow the brush task's own rules; see [Brushing](./brush.md#relation-to-auto-cleanup).
+- Torrents with `pt-tools-keep` or a protected tag, and torrents that have not met their H&R requirement, are not deleted by any automatic feature.
+
 **Key features**:
 
 - **Safety first**: by default only the torrents pt-tools pushed itself are managed; torrents you added by hand are left alone
 - **H&R protection**: torrents with an H&R requirement are recognised and not deleted before they have seeded long enough
 - **Keep with one click**: click Keep (保留) in the torrent list on the Downloader page and the torrent gets the `pt-tools-keep` tag, which every automatic feature leaves alone; see [Keeping torrents](#keeping-torrents)
 - **Flexible conditions**: seeding time, ratio, inactivity and other conditions, combined with AND or OR
+- **Seeding competition**: delete or only pause a torrent when far more people seed it than download it; see [Seeding competition](#seeding-competition)
 - **A floor for disk space**: disk space protection (on by default) blocks new pushes when space runs low and clears existing torrents in order of priority
 - **Push blocking**: RSS downloads and manual pushes stop automatically when free space falls below the threshold, so the disk does not fill up
 - **Strict scope**: cleanup always respects the management scope; even an emergency cleanup never deletes torrents outside it
@@ -56,6 +63,7 @@ A torrent that meets the configured conditions is marked for deletion.
 | **Inactive for over (不活跃超过（小时）)**                                                | Can be deleted once it is seeding and has not uploaded or downloaded anything for N hours   | 48 hours      |
 | **Low-efficiency seeding (低效做种)**                                                     | Can be deleted once it has finished, seeded for over N hours and its ratio is still below M | 3 hours / 0.5 |
 | **Delete torrents still unfinished when freeleech ends (免费到期仍未下完的种子自动删除)** | Torrents whose free period has ended before they finished downloading                       | On/Off        |
+| **Act on high seeding competition (做种竞争度过高时处理)**                                | Delete or pause when seeders per leecher (S/L) exceed the limit                             | 30            |
 
 Inactivity is judged by the time the downloader recorded for the torrent's last upload or download (qBittorrent and Transmission both record it), not by the speed at the moment of the check: a torrent that usually uploads but happens to be at 0 when checked is kept, and a torrent that has uploaded nothing since it finished is deleted N hours after it finished. When the downloader does not report that time, pt-tools uses the time the torrent finished, then the time it was added. A torrent that is uploading or downloading at the moment of the check is not inactive, and neither is a paused one. Low-efficiency seeding only applies when both of its values are filled in.
 
@@ -68,17 +76,33 @@ Delete torrents still unfinished when freeleech ends is checked on its own, what
 
 > A condition set to 0 is ignored. With the seeding time at 72 hours and the ratio at 0, for example, only the seeding time counts.
 
+### Seeding competition
+
+A torrent with many seeders and few leechers rarely uploads much more. With Act on high seeding competition (做种竞争度过高时处理) ticked, every auto-delete run compares the number of seeders in the whole swarm with the number of leechers (S/L), and acts on a torrent once that exceeds the S/L limit (30 by default):
+
+| Setting                    | Default    | Meaning                                                                                                                                                                                           |
+| -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S/L limit (S/L 上限)**   | 30         | Seeders ÷ leechers above this counts as high competition; with no leechers the seeder count is used. At least 1                                                                                   |
+| **When exceeded (超标时)** | Pause only | Pause only (只暂停): the torrent is paused and can be resumed on the Paused torrents page. Delete (删除): the torrent is deleted, with or without its data according to Delete the data files too |
+
+- Only torrents that are seeding, have finished, and were pushed to this downloader by pt-tools (they have a push record) count, and they must be within the management scope. Torrents added to the downloader by hand are never judged by competition, even when the scope is all torrents. A torrent with 0 seeders is not judged.
+- Like the other deletion conditions it follows the [protection rules](#protection-rules): torrents with the keep tag or a protected tag, torrents that have not met their H&R requirement, downloading torrents (when Protect downloading torrents is on) and torrents added less than the minimum keep time ago are neither deleted nor paused. Torrents a brush task is managing follow the task's own rules.
+- Like the free-period deletion it is checked on its own and ignores the condition logic, so it applies in AND mode too. A torrent that meets another deletion condition is deleted for that condition, and competition is not checked.
+- Once you start a torrent that competition paused, in the downloader or on the Paused torrents page, competition no longer pauses it; the other deletion conditions still delete it when they match. Paused torrents are judged by the other deletion conditions as well.
+- It runs at the auto-delete check interval (30 minutes by default) and is not checked while Enable auto-delete is off. qBittorrent reports the swarm counts in its torrent list; for Transmission pt-tools reads the tracker status of every torrent once per run and takes the highest counts reported by working trackers. A torrent whose counts cannot be read is not judged that run, and the preview says how many there were.
+
 ### Disk space protection
 
-| Setting                                             | Default | Meaning                                            |
-| --------------------------------------------------- | ------- | -------------------------------------------------- |
-| **Enable disk space protection (启用磁盘空间保护)** | On      |                                                    |
-| **Minimum free space (最低剩余空间（GB）)**         | 50 GB   | Protection starts when free space falls below this |
+| Setting                                                               | Default | Meaning                                                                      |
+| --------------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------- |
+| **Enable disk space protection (启用磁盘空间保护)**                   | On      |                                                                              |
+| **Minimum free space (最低剩余空间（GB）)**                           | 50 GB   | New pushes stop when free space falls below this                             |
+| **Emergency cleanup when below the minimum (空间低于下限时紧急清理)** | On      | Below the minimum, delete extra torrents by priority and start a check early |
 
 Disk space protection works in **two ways**:
 
 1. **Push blocking** (at the entrance): when an RSS download or a manual push finds that the downloader's free space is below the threshold, the push is skipped and no more torrents are added to the downloader. As soon as a batch finds that space is short, it stops processing the remaining torrents. Free space is the downloader's reported free space, minus what unfinished torrents still have to download, minus the size of newly pushed torrents the downloader doesn't list yet (once listed they count by the downloader's remaining size, not twice; one never listed stops counting after 15 minutes).
-2. **Emergency cleanup** (existing torrents): when the scheduled auto-delete check finds free space below the threshold, it force-deletes torrents within the management scope in order of a combined score, highest first, even if they do not meet the deletion conditions above. Each of these raises the score:
+2. **Emergency cleanup** (existing torrents, when Emergency cleanup when below the minimum is ticked): when the scheduled auto-delete check finds free space below the threshold, it force-deletes torrents within the management scope in order of a combined score, highest first, even if they do not meet the deletion conditions above; a push that runs short of space also makes auto-delete start a check early. With the box unticked, low space only blocks pushes: no extra torrents are deleted and no check starts early. Each of these raises the score:
    - paused
    - a high ratio
    - a long seeding time
@@ -101,7 +125,7 @@ These torrents are not deleted, even when they meet the deletion conditions:
 | **Minimum keep time (最短保种时间（小时）)**        | 24 hours | Torrents added to the downloader less than N hours ago are not deleted                                                 |
 | **Protected tags (保护标签)**                       | Empty    | Torrents with these tags are not deleted (type a tag and press Enter; add as many as you like)                         |
 
-The keep tag, the protected tags and H&R (when Protect H&R torrents is on) are not only for auto-delete: emergency cleanup, the seeding competition monitor and the automatic deletion when the free period ends skip these torrents too, and a torrent the free-period end would have deleted is paused instead, with the reason shown on the Paused torrents page. Brush tasks skip torrents with the keep tag or a protected tag when deleting, and judge H&R by the task's own rules. When the H&R information cannot be read (a database error), pt-tools cannot tell which torrents are protected: that round deletes nothing, and a deletion at the end of the free period becomes a pause.
+The keep tag, the protected tags and H&R (when Protect H&R torrents is on) are not only for the regular deletion conditions: emergency cleanup, seeding competition and the automatic deletion when the free period ends skip these torrents too, and a torrent the free-period end would have deleted is paused instead, with the reason shown on the Paused torrents page. Brush tasks skip torrents with the keep tag or a protected tag when deleting, and judge H&R by the task's own rules. When the H&R information cannot be read (a database error), pt-tools cannot tell which torrents are protected: that round deletes nothing, and a deletion at the end of the free period becomes a pause.
 
 Protection rules win over the deletion conditions, and emergency cleanup does not delete protected torrents either. For example, with a minimum keep time of 24 hours and low-efficiency seeding set to 3 hours with a ratio below 0.5, a torrent added to the downloader less than 24 hours ago is kept however low its ratio is, and is deleted only once it has been there for 24 hours. To have such torrents deleted sooner, lower the minimum keep time. Preview what would be deleted (预览会删哪些) lists the protected torrents and the rule each one hits (for example how many hours of the minimum keep time are left).
 
@@ -109,7 +133,7 @@ Protection rules win over the deletion conditions, and emergency cleanup does no
 
 To hold on to a torrent (for example a free torrent an RSS feed pushed that you want to keep), select it in Downloads → Task list (下载 → 任务列表) and click Keep (保留) on the bulk bar, or right-click it and choose Keep. The torrent gets the `pt-tools-keep` tag, Keep shows in front of its title, and hovering over it lists the automatic features that skip it. When every selected torrent is already kept, the same bulk bar button becomes Unkeep (取消保留), and the right-click menu has Unkeep too; once the tag is removed, auto-delete handles the torrent by its rules as usual.
 
-- Auto-delete (including emergency cleanup), the seeding competition monitor, the automatic deletion at the end of a free period and brush task deletion do not delete torrents with this tag, and the seeding competition monitor does not pause them.
+- Auto-delete (including emergency cleanup and seeding competition), the automatic deletion at the end of a free period and brush task deletion do not delete torrents with this tag, and seeding competition does not pause them.
 - Keeping a torrent a brush task is managing hands it over to you: the brush task stops managing it and never adds the same torrent again. If you unkeep it later, auto-delete handles it by its rules; it does not go back to the brush task.
 - To keep every torrent one RSS feed pushes, set that subscription's Tag (标签) to `pt-tools-keep`. You can also put the tag on a torrent directly in the downloader.
 - An automatic deletion reads the downloader's torrents again right before it runs and checks the latest tags, so a torrent kept a moment earlier is not deleted in that round either; when the torrent has already been deleted, Keep reports that it is no longer in the downloader.
@@ -137,19 +161,19 @@ To hold on to a torrent (for example a free torrent an RSS feed pushed that you 
 2. Get the downloader's list of torrents
 3. Keep the "manageable" torrents according to the management scope (strictly)
 4. Leave out protected torrents (keep tag / protected tags / H&R / downloading / minimum keep time), and leave the torrents a brush task is managing to the brush task
-5. Evaluate the deletion conditions (in AND or OR mode)
-6. Check disk space (when protection is on):
+5. Evaluate the deletion conditions: free period ended → regular conditions (in AND or OR mode) → seeding competition
+6. Check disk space (when protection and emergency cleanup are on):
    - enough space → delete only the torrents that meet the conditions
    - not enough space → force-delete within the scope by score until space recovers
-7. Read the torrent list again; torrents that are gone or have just got the keep tag or a protected tag are not deleted
-8. Delete, update the database and write the log
+7. Read the torrent list again; torrents that are gone or have just got the keep tag or a protected tag are not deleted, and a torrent to pause that is no longer seeding is not paused
+8. Delete and pause, update the database and write the log
 ```
 
 ### Preview and the last run
 
-- Preview what would be deleted (预览会删哪些) runs the flow above with the rules on the page (unsaved ones too) without deleting anything. For each downloader it shows how many torrents the downloader has in total, how many are in scope, how many are protected, which ones would be deleted, and why each one would go (the condition it meets, or low disk space and emergency cleanup). Torrents whose data other torrents still use are marked as deleting the torrent only and keeping the data. An actual run works with the torrents in the downloader at that time.
-- The protected torrents this round keeps can be expanded in the preview, each with the protection rule it hits: the keep tag, the protected tag it carries, the H&R seeding time required and done so far (always protected when the site gives no requirement), downloading or being checked, or how many hours of the minimum keep time are left. Torrents a brush task is managing (recognised by the brush task's records, not by the `pt-tools-brush` tag) are deleted by the brush task's own rules, and torrents paused by the seeding competition monitor (做种竞争度监控) are not deleted by the regular rules either; the preview shows how many of each there are.
-- Below the card is the last run's result (how many each downloader deleted, and why a downloader couldn't be checked or a deletion failed) and roughly when the next run is. These start over when pt-tools restarts.
+- Preview what would be deleted (预览会删哪些) runs the flow above with the rules on the page (unsaved ones too) without deleting anything. For each downloader it shows how many torrents the downloader has in total, how many are in scope, how many are protected, which ones would be deleted or paused, and why (the condition it meets, or low disk space and emergency cleanup; seeding competition shows the seeder and leecher counts). Torrents whose data other torrents still use are marked as deleting the torrent only and keeping the data, and torrents that competition would pause are marked as pause only. An actual run works with the torrents in the downloader at that time.
+- The protected torrents this round keeps can be expanded in the preview, each with the protection rule it hits: the keep tag, the protected tag it carries, the H&R seeding time required and done so far (always protected when the site gives no requirement), downloading or being checked, or how many hours of the minimum keep time are left. Torrents a brush task is managing (recognised by the brush task's records, not by the `pt-tools-brush` tag) are deleted by the brush task's own rules; the preview shows how many there are.
+- Below the card is the last run's result (how many each downloader deleted and paused, and why a downloader couldn't be checked or a deletion or pause failed) and roughly when the next run is. These start over when pt-tools restarts.
 
 ## H&R protection
 

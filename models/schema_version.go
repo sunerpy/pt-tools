@@ -21,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 15
+const CurrentSchemaVersion = 16
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -178,6 +178,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     15,
 		Description: "reseed_attempts: backfill one attempt per existing reseed_records row",
 		Up:          sm.migrateV14ToV15,
+	})
+
+	// v15 -> v16: 做种竞争度并进自动删种：只开了竞争度的安装打开自动删种，只按竞争度处理
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     16,
+		Description: "settings_globals: merge the peer ratio monitor into cleanup for installs that only enabled peer ratio",
+		Up:          sm.migrateV15ToV16,
 	})
 }
 
@@ -857,4 +864,52 @@ func (sm *SchemaManager) migrateV14ToV15(db *gorm.DB) error {
 		}
 		return nil
 	})
+}
+
+// migrateV15ToV16 把做种竞争度监控并进自动删种：竞争度从此是自动删种的一条删除条件，跟着自动删种的检查间隔，
+// 自动删种关着时不判断。升级前只开了竞争度、没开自动删种的安装打开自动删种、只管 pt-tools 推送的种子，
+// 检查间隔沿用竞争度原来的（小于 5 分钟时按 10 分钟，与原来的竞争度监控一样），常规删除条件全部清零，
+// 不删免费到期没下完的、不做紧急清理：升级前后都只按竞争度处理。其他安装不改设置（cleanup_emergency 是加列时的默认值 1，
+// 与升级前一样做紧急清理）。有要改的行时先备份 settings_globals（要求备份钩子，同 v9）；改过的行自动删种已经开着，重跑不再命中。
+func (sm *SchemaManager) migrateV15ToV16(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&SettingsGlobal{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&SettingsGlobal{}, "CleanupEmergency") {
+		if err := db.Migrator().AddColumn(&SettingsGlobal{}, "CleanupEmergency"); err != nil {
+			return fmt.Errorf("v15→v16: add cleanup_emergency: %w", err)
+		}
+	}
+	peerOnly := func(tx *gorm.DB) *gorm.DB {
+		return tx.Model(&SettingsGlobal{}).Where("peer_ratio_enabled = ? AND cleanup_enabled = ?", true, false)
+	}
+	var n int64
+	if err := peerOnly(db).Count(&n).Error; err != nil {
+		return fmt.Errorf("v15→v16: query settings_globals: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if sm.BackupTable == nil {
+		return errors.New("v16 migration requires backup hook")
+	}
+	if _, err := sm.BackupTable(db, "settings_globals"); err != nil {
+		return fmt.Errorf("v15→v16: backup settings_globals: %w", err)
+	}
+	if err := peerOnly(db).Updates(map[string]any{
+		"cleanup_enabled": true,
+		"cleanup_scope":   "database",
+		"cleanup_interval_min": gorm.Expr("CASE WHEN peer_ratio_interval_min IS NULL OR peer_ratio_interval_min < ? THEN ? ELSE peer_ratio_interval_min END",
+			MinPeerRatioIntervalMin, DefaultPeerRatioIntervalMin),
+		"cleanup_max_seed_time_h":  0,
+		"cleanup_min_ratio":        0,
+		"cleanup_max_inactive_h":   0,
+		"cleanup_slow_seed_time_h": 0,
+		"cleanup_slow_max_ratio":   0,
+		"cleanup_del_free_expired": false,
+		"cleanup_emergency":        false,
+	}).Error; err != nil {
+		return fmt.Errorf("v15→v16: merge peer ratio into cleanup: %w", err)
+	}
+	return nil
 }

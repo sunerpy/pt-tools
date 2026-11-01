@@ -852,6 +852,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupSlowMaxRatio    float64 `json:"cleanup_slow_max_ratio"`
 			CleanupDelFreeExpired  bool    `json:"cleanup_del_free_expired"`
 			CleanupDiskProtect     bool    `json:"cleanup_disk_protect"`
+			CleanupEmergency       bool    `json:"cleanup_emergency"`
 			CleanupMinDiskSpaceGB  float64 `json:"cleanup_min_disk_space_gb"`
 			CleanupProtectDL       bool    `json:"cleanup_protect_dl"`
 			CleanupProtectHR       bool    `json:"cleanup_protect_hr"`
@@ -861,7 +862,6 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			FreeEndAdvanceMinutes  int     `json:"free_end_advance_minutes"`
 			PeerRatioEnabled       bool    `json:"peer_ratio_enabled"`
 			PeerRatioMaxSL         float64 `json:"peer_ratio_max_sl"`
-			PeerRatioIntervalMin   int     `json:"peer_ratio_interval_min"`
 			PeerRatioRemoveData    bool    `json:"peer_ratio_remove_data"`
 			DefaultFilterMode      string  `json:"default_filter_mode"`
 			DefaultEnabled         *bool   `json:"default_enabled"`
@@ -915,6 +915,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupSlowMaxRatio:    req.CleanupSlowMaxRatio,
 			CleanupDelFreeExpired:  req.CleanupDelFreeExpired,
 			CleanupDiskProtect:     req.CleanupDiskProtect,
+			CleanupEmergency:       req.CleanupEmergency,
 			CleanupMinDiskSpaceGB:  req.CleanupMinDiskSpaceGB,
 			CleanupProtectDL:       req.CleanupProtectDL,
 			CleanupProtectHR:       req.CleanupProtectHR,
@@ -924,7 +925,6 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			FreeEndAdvanceMinutes:  req.FreeEndAdvanceMinutes,
 			PeerRatioEnabled:       req.PeerRatioEnabled,
 			PeerRatioMaxSL:         req.PeerRatioMaxSL,
-			PeerRatioIntervalMin:   req.PeerRatioIntervalMin,
 			PeerRatioRemoveData:    req.PeerRatioRemoveData,
 			DefaultFilterMode:      models.NormalizeFilterMode(models.FilterMode(req.DefaultFilterMode)),
 		}

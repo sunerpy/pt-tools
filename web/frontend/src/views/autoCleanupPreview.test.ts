@@ -34,6 +34,10 @@ const SETTINGS = {
   cleanup_max_seed_time_h: 72,
   cleanup_min_ratio: 2,
   cleanup_max_inactive_h: 0,
+  cleanup_emergency: true,
+  peer_ratio_enabled: true,
+  peer_ratio_max_sl: 5,
+  peer_ratio_remove_data: false,
 };
 
 let view: MountedView | null = null;
@@ -79,6 +83,15 @@ describe("自动删种：预览与上次运行", () => {
             deleted: 1,
             error: "删除（保留数据）失败: timeout",
           },
+          {
+            downloader: "box",
+            managed: 3,
+            protected: 0,
+            candidates: 3,
+            items: [],
+            deleted: 1,
+            paused: 2,
+          },
         ],
       },
       next_run_at: "2026-10-15T10:30:00Z",
@@ -89,8 +102,9 @@ describe("自动删种：预览与上次运行", () => {
     expect(text).toContain("qb 删了 2 个");
     expect(text).toContain("tr：下载器连不上");
     expect(text, "一批成了一批失败：两样都写").toContain(
-      "nas 删了 1 个，另有删除失败：删除（保留数据）失败: timeout",
+      "nas 删了 1 个，另有失败：删除（保留数据）失败: timeout",
     );
+    expect(text, "做种竞争度暂停的也写").toContain("box 删了 1 个、暂停了 2 个");
     expect(text).toContain("下次大约");
   });
 
@@ -126,6 +140,16 @@ describe("自动删种：预览与上次运行", () => {
               reasons: ["做种超过 72 小时"],
               keep_data: true,
             },
+            {
+              name: "Crowded.Seed",
+              info_hash: "h3",
+              size: 1024 ** 3,
+              seeding_h: 30,
+              ratio: 0.4,
+              upload_kbs: 0,
+              reasons: ["做种竞争度过高：60 人做种、2 人下载（S/L 30.0），超过 5"],
+              action: "pause",
+            },
           ],
         },
       ],
@@ -139,17 +163,27 @@ describe("自动删种：预览与上次运行", () => {
       cleanup_max_seed_time_h: 72,
       cleanup_min_ratio: 2,
       cleanup_protect_tags: "keep,hr",
+      peer_ratio_enabled: true,
+      peer_ratio_max_sl: 5,
+      peer_ratio_remove_data: false,
+      cleanup_emergency: true,
     });
     await vi.waitFor(() => expect(q("ac-pv-qb")).not.toBeNull());
     const box = q("ac-pv-qb")!.textContent ?? "";
-    expect(box).toContain("会删 2 个");
+    expect(box).toContain("会删 2 个，会暂停 1 个");
     expect(box).toContain("做种超过 72 小时；分享率达到 2");
     expect(box).toContain("只删种子");
     expect(box).toContain("低于下限");
+    expect(box).toContain("只暂停：做种竞争度过高");
     expect(q("ac-preview-sum")!.textContent).toContain("共会删 2 个");
+    expect(q("ac-preview-sum")!.textContent).toContain("会暂停 1 个");
+    expect(q("ac-preview-sum")!.textContent, "预览也没有暂停").toContain("没有删也没有暂停");
+    expect(document.querySelector(".el-dialog__title")?.textContent).toBe(
+      "按现在的规则会删、会暂停这些",
+    );
     expect(api.saveGlobal).not.toHaveBeenCalled();
   });
-  it("预览写明下载器里共几个、刷流与竞争度暂停的各几个，并列出受保护的种子与原因", async () => {
+  it("预览写明下载器里共几个、刷流任务的几个，并列出受保护的种子与原因", async () => {
     api.status.mockResolvedValue({ enabled: true, interval_min: 30 });
     api.preview.mockResolvedValue({
       results: [
@@ -160,7 +194,6 @@ describe("自动删种：预览与上次运行", () => {
           protected: 2,
           candidates: 6,
           brush: 1,
-          peer_paused: 1,
           deleted: 0,
           items: [],
           protected_items: [
@@ -203,7 +236,6 @@ describe("自动删种：预览与上次运行", () => {
     const box = q("ac-pv-qb")!.textContent ?? "";
     expect(box).toContain("下载器里共 9 个，管理范围里 8 个，受保护 2 个，会删 0 个");
     expect(box).toContain("1 个刷流任务的种子按刷流任务的规则删");
-    expect(box).toContain("1 个被竞争度监控暂停着，常规规则不删");
     const prot = q("ac-pv-protected-qb")!;
     expect(prot.textContent).toContain("受保护、这一轮不删的 2 个");
     expect(prot.textContent).toContain("Young.Movie");
@@ -211,6 +243,8 @@ describe("自动删种：预览与上次运行", () => {
     expect(prot.textContent).toContain("H&R：要求做种 72 小时，已做 10.0 小时");
     expect(q("ac-pv-tr")!.textContent).toContain("下载器连不上");
     expect(q("ac-preview-sum")!.textContent).toContain("共会删 0 个");
+    expect(q("ac-preview-sum")!.textContent).not.toContain("暂停");
+    expect(document.querySelector(".el-dialog__title")?.textContent).toBe("按现在的规则会删这些");
   });
 
   it("「不活跃」写明按最后活动时间判，低效做种的说明写明最短保种时间也会挡住删除", async () => {

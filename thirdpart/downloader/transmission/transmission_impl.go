@@ -789,6 +789,8 @@ func (t *TransmissionClient) mapTransmissionTorrent(tt torrentFullInfo) download
 		TotalDownloaded: tt.DownloadedEver,
 		ClientID:        t.name,
 		Raw:             tt,
+		// 整个种子群的人数在 trackerStats 里，列表不读它（见 GetAllTorrentTrackers）
+		SwarmSeeds: -1, SwarmLeechers: -1,
 	}
 
 	if len(tt.Trackers) > 0 {
