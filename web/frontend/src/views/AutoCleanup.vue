@@ -273,6 +273,11 @@ const cpTotal = computed(() =>
   ),
 );
 
+/** 预览弹窗的标题：有要暂停的（做种竞争度设成只暂停）时也写上暂停 */
+const cpTitle = computed(() =>
+  cpTotal.value.paused ? "按现在的规则会删、会暂停这些" : "按现在的规则会删这些",
+);
+
 /** 预览里一台下载器的个数一句：有总数时写下载器里共几个（管理范围以外的也算），有要暂停的写几个 */
 function cpCounts(r: CleanupResult): string {
   const head = r.total != null ? `下载器里共 ${r.total} 个，` : "";
@@ -921,12 +926,13 @@ async function executeClean() {
       <el-dialog
         v-model="cpDialog"
         class="pt-dialog"
-        title="按现在的规则会删这些"
+        :title="cpTitle"
         :width="isMobile ? '94%' : '760px'"
         align-center>
         <p class="field-tip" data-testid="ac-preview-sum">
-          只是算一遍，没有删。按页面上的规则（还没保存的也算）共会删 {{ cpTotal.n }} 个，{{
-            cpSize(cpTotal.size)
+          只是算一遍，{{
+            cpTotal.paused ? "没有删也没有暂停" : "没有删"
+          }}。按页面上的规则（还没保存的也算）共会删 {{ cpTotal.n }} 个，{{ cpSize(cpTotal.size)
           }}{{
             cpTotal.paused ? `；会暂停 ${cpTotal.paused} 个（做种竞争度过高）` : ""
           }}；真的执行的时候以那时下载器里的种子为准。

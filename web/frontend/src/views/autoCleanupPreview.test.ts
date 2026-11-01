@@ -177,6 +177,10 @@ describe("自动删种：预览与上次运行", () => {
     expect(box).toContain("只暂停：做种竞争度过高");
     expect(q("ac-preview-sum")!.textContent).toContain("共会删 2 个");
     expect(q("ac-preview-sum")!.textContent).toContain("会暂停 1 个");
+    expect(q("ac-preview-sum")!.textContent, "预览也没有暂停").toContain("没有删也没有暂停");
+    expect(document.querySelector(".el-dialog__title")?.textContent).toBe(
+      "按现在的规则会删、会暂停这些",
+    );
     expect(api.saveGlobal).not.toHaveBeenCalled();
   });
   it("预览写明下载器里共几个、刷流任务的几个，并列出受保护的种子与原因", async () => {
@@ -239,6 +243,8 @@ describe("自动删种：预览与上次运行", () => {
     expect(prot.textContent).toContain("H&R：要求做种 72 小时，已做 10.0 小时");
     expect(q("ac-pv-tr")!.textContent).toContain("下载器连不上");
     expect(q("ac-preview-sum")!.textContent).toContain("共会删 0 个");
+    expect(q("ac-preview-sum")!.textContent).not.toContain("暂停");
+    expect(document.querySelector(".el-dialog__title")?.textContent).toBe("按现在的规则会删这些");
   });
 
   it("「不活跃」写明按最后活动时间判，低效做种的说明写明最短保种时间也会挡住删除", async () => {
