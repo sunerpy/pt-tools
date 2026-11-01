@@ -250,8 +250,9 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	// 磁盘保护预检（修复 Issue #299）：
 	// effective_free = client_free - in_flight_pending - pre_reserved
 	// gate           = effective_free - thisTorrentSize >= threshold
-	// 用全局互斥锁串行化整个 check + Reserve + push 临界区。
+	// 用全局互斥锁串行化整个 check + Reserve + push 临界区。pre_reserved 只算还没出现在下载器里的推送（见 PendingForGate）。
 	var pushTorrentSize int64
+	releaseReservation := func() {}
 	// 数据已经在盘上时不再占用空间，不走磁盘保护
 	diskProtectOn := record && glErr == nil && glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0
 	if diskProtectOn {
@@ -270,7 +271,7 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 			}, nil
 		}
 
-		pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
+		pendingBytes, pendingErr := PendingForGate(ctx, dl, target.Name)
 		if pendingErr != nil {
 			// fail-closed：读不到下载中任务的待占用空间时，可用空间会被高估这部分体积
 			sLogger().Warnf("[磁盘保护] %s: 查询下载中任务的待占用空间失败，磁盘保护启用故拒绝推送: %v", target.Name, pendingErr)
@@ -326,14 +327,10 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 				Status:      PushStatusRejectedTooLarge,
 			}, nil
 		default:
-			budget.Reserve(pushTorrentSize)
+			releaseReservation = budget.ReserveTorrent(target.Name, torrentHash, pushTorrentSize)
 		}
 	}
-	release := func() {
-		if pushTorrentSize > 0 && diskProtectOn {
-			GetDiskBudget().Release(pushTorrentSize)
-		}
-	}
+	release := func() { releaseReservation() }
 
 	// 站点容量闸门（Issue #405）：超过该站点 SeedingCapacityGB 上限则拒绝推送。
 	// 接在 disk-protect 之后、AddTorrentFileEx 之前；disk-protect 关闭时本闸门自行加锁。

@@ -5,9 +5,12 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 func TestPushTorrent_DiskProtectReserveThenAddFails(t *testing.T) {
@@ -976,4 +980,88 @@ func TestPushTorrent_UsesContextAdder(t *testing.T) {
 	dl1, ok1 := ctx.Deadline()
 	dl2, ok2 := dl.got.Deadline()
 	assert.True(t, ok1 && ok2 && dl1.Equal(dl2), "拿到的是调用方的 ctx")
+}
+
+// listingQbitServer 是把加进来的种子列在 torrents/info 里的假 qBittorrent（state downloading、amount_left 是整个体积）；
+// list 为假时加了也不列（下载器里还看不到）。
+func listingQbitServer(t *testing.T, freeSpace int64, list bool) *httptest.Server {
+	t.Helper()
+	var mu sync.Mutex
+	added := []map[string]any{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v2/auth/login":
+			_, _ = w.Write([]byte("Ok."))
+		case r.URL.Path == "/api/v2/app/version":
+			_, _ = w.Write([]byte("v4.6.0"))
+		case strings.HasPrefix(r.URL.Path, "/api/v2/torrents/properties"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.URL.Path == "/api/v2/sync/maindata":
+			_, _ = w.Write([]byte(`{"server_state":{"free_space_on_disk":` + itoa(freeSpace) + `}}`))
+		case r.URL.Path == "/api/v2/torrents/info":
+			mu.Lock()
+			b, _ := json.Marshal(added)
+			mu.Unlock()
+			_, _ = w.Write(b)
+		case r.URL.Path == "/api/v2/torrents/add":
+			f, _, err := r.FormFile("torrents")
+			if err == nil {
+				data, _ := io.ReadAll(f)
+				h, _ := qbit.ComputeTorrentHash(data)
+				size, _ := qbit.ComputeTorrentSize(data)
+				if list {
+					mu.Lock()
+					added = append(added, map[string]any{"hash": h, "name": h, "state": "downloading", "amount_left": size, "size": size})
+					mu.Unlock()
+				}
+			}
+			_, _ = w.Write([]byte("Ok."))
+		default:
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// 推送成功的种子出现在下载器里以后，下一次推送不再把它算两遍（下载中待占用里有它，预留丢掉）。
+// 可用 100 GB、保底 5 GB：每个 45 GB 时第二个照样能推（以前「待占用 45 + 预留 45」被拒）；
+// 每个 60 GB 时第二个不管看不看得到都被拒：看得到时算在待占用里，看不到时还按预留算
+func TestPushTorrent_DiskProtectVisibleTorrentNotCountedTwice(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		list         bool
+		size         int64
+		secondOK     bool
+		reservedLeft int64
+	}{
+		{"看得到、两个装得下", true, 45 * gb, true, 45 * gb},
+		{"看不到、按预留算", false, 60 * gb, false, 60 * gb},
+		{"看得到、按待占用算", true, 60 * gb, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupDB(t)
+			t.Cleanup(func() { global.GlobalDB = nil })
+			GetDiskBudget().Reset()
+			t.Cleanup(func() { GetDiskBudget().Reset() })
+			require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
+				DownloadDir: t.TempDir(), CleanupDiskProtect: true, CleanupMinDiskSpaceGB: 5,
+			}))
+			dlID := seedQbitDownloader(t, listingQbitServer(t, 100*gb, tc.list).URL)
+			push := func(id string) *PushTorrentResult {
+				res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+					SiteID: "springsunday", TorrentID: id, TorrentData: makeSizedTorrentBytes(t, id, tc.size), DownloaderID: dlID,
+				})
+				require.NoError(t, err)
+				require.NotNil(t, res)
+				return res
+			}
+			first := push("vis-1")
+			require.True(t, first.Success, first.Message)
+			assert.Equal(t, tc.size, GetDiskBudget().Reserved(), "推送成功：预留到下载器里出现为止")
+			second := push("vis-2")
+			assert.Equal(t, tc.secondOK, second.Success, second.Message)
+			assert.Equal(t, tc.reservedLeft, GetDiskBudget().Reserved())
+		})
+	}
 }

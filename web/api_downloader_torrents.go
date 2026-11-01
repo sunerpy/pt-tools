@@ -848,7 +848,7 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 			})
 			continue
 		}
-		reservedSize, guardErr := reserveDownloaderAddDiskBudget(r.Context(), dl, torrentBytes, source)
+		release, guardErr := reserveDownloaderAddDiskBudget(r.Context(), dl, torrentBytes, source)
 		if guardErr != nil {
 			resp.FailedCount++
 			resp.Results = append(resp.Results, AddDownloaderTorrentResult{
@@ -867,9 +867,7 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 			result, err = dl.AddTorrentEx(source, opt)
 		}
 		if err != nil || !result.Success {
-			if reservedSize > 0 {
-				ptinternal.GetDiskBudget().Release(reservedSize)
-			}
+			release()
 		}
 
 		if err != nil {
@@ -902,27 +900,32 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 }
 
 // reserveDownloaderAddDiskBudget executes the disk-protect gate for the manual
-// "add torrent" endpoint. Returns the reserved torrent size on success (caller
-// is responsible for Releasing it on failure paths). When disk protection is
-// disabled, returns (0, nil) and the caller must NOT call Release.
+// "add torrent" endpoint. On success it returns the function that gives the
+// reservation back (call it when the add fails); a successful add keeps the
+// reservation until the torrent shows up in the downloader (see
+// ptinternal.PendingForGate). When disk protection is disabled it reserves
+// nothing and the returned function does nothing.
 //
 // Magnet / URL sources cannot be sized before the metadata is fetched, so they
 // are rejected when disk protection is on. This closes a bypass where a user
 // could submit a magnet and skip the gate entirely.
-func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloader, torrentBytes []byte, source string) (int64, error) {
+func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloader, torrentBytes []byte, source string) (release func(), err error) {
+	noop := func() {}
 	glOnly, err := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
 	if err != nil || !glOnly.CleanupDiskProtect || glOnly.CleanupMinDiskSpaceGB <= 0 {
-		return 0, nil
+		return noop, nil
 	}
 
 	if len(torrentBytes) == 0 {
-		return 0, fmt.Errorf("[磁盘保护] 已启用，无法在添加前确定 magnet/URL 种子大小: %s。请改用 .torrent 文件上传，或在全局设置中关闭磁盘保护。", source)
+		return noop, fmt.Errorf("[磁盘保护] 已启用，无法在添加前确定 magnet/URL 种子大小: %s。请改用 .torrent 文件上传，或在全局设置中关闭磁盘保护。", source)
 	}
 
 	torrentSize, sizeErr := qbit.ComputeTorrentSize(torrentBytes)
 	if sizeErr != nil {
-		return 0, fmt.Errorf("种子文件无效，无法解析大小: %w", sizeErr)
+		return noop, fmt.Errorf("种子文件无效，无法解析大小: %w", sizeErr)
 	}
+	// 算不出 hash 时预留照样记，只是认不出它什么时候出现在下载器里（等过期或清理监控清零）
+	torrentHash, _ := qbit.ComputeTorrentHash(torrentBytes)
 
 	mu := ptinternal.PushMutex()
 	mu.Lock()
@@ -930,9 +933,9 @@ func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloade
 
 	freeSpace, spaceErr := dl.GetClientFreeSpace(ctx)
 	if spaceErr != nil {
-		return 0, fmt.Errorf("[磁盘保护] %s: 获取磁盘空间失败，拒绝添加: %w", dl.GetName(), spaceErr)
+		return noop, fmt.Errorf("[磁盘保护] %s: 获取磁盘空间失败，拒绝添加: %w", dl.GetName(), spaceErr)
 	}
-	pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
+	pendingBytes, pendingErr := ptinternal.PendingForGate(ctx, dl, dl.GetName())
 	if pendingErr != nil {
 		pendingBytes = 0
 	}
@@ -953,12 +956,9 @@ func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloade
 		if glOnly.CleanupEnabled {
 			events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "downloader-add", At: time.Now()})
 		}
-		return 0, fmt.Errorf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
+		return noop, fmt.Errorf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
 	}
-	if torrentSize > 0 {
-		budget.Reserve(torrentSize)
-	}
-	return torrentSize, nil
+	return budget.ReserveTorrent(dl.GetName(), torrentHash, torrentSize), nil
 }
 
 // downloaderAcquireTimeout 是 Web 请求获取下载器实例的预算上限。

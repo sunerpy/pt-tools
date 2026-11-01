@@ -76,7 +76,7 @@ Delete torrents still unfinished when freeleech ends is checked on its own, what
 
 Disk space protection works in **two ways**:
 
-1. **Push blocking** (at the entrance): when an RSS download or a manual push finds that the downloader's free space is below the threshold, the push is skipped and no more torrents are added to the downloader. As soon as a batch finds that space is short, it stops processing the remaining torrents.
+1. **Push blocking** (at the entrance): when an RSS download or a manual push finds that the downloader's free space is below the threshold, the push is skipped and no more torrents are added to the downloader. As soon as a batch finds that space is short, it stops processing the remaining torrents. Free space is the downloader's reported free space, minus what unfinished torrents still have to download, minus the size of newly pushed torrents the downloader doesn't list yet (once listed they count by the downloader's remaining size, not twice; one never listed stops counting after 15 minutes).
 2. **Emergency cleanup** (existing torrents): when the scheduled auto-delete check finds free space below the threshold, it force-deletes torrents within the management scope in order of a combined score, highest first, even if they do not meet the deletion conditions above. Each of these raises the score:
    - paused
    - a high ratio
