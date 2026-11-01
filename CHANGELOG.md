@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.49](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.48...v1.0.0-rc.49) (2026-11-01)
+
+
+### Features
+
+* **media:** 手动整理可以选这一次的整理方式，重试按选的方式 ([#811](https://github.com/sunerpy/pt-tools/issues/811)) ([e0388a1](https://github.com/sunerpy/pt-tools/commit/e0388a192a9e19776b7678df159c55bbfaf4bdcb))
+* **media:** 整理入库可以手动指定一个文件或目录，自动识别或填 TMDB 编号 ([#808](https://github.com/sunerpy/pt-tools/issues/808)) ([5bd9b74](https://github.com/sunerpy/pt-tools/commit/5bd9b74a7d4338cc78b9c82813f861bda330e5d2))
+* **site:** 新增北洋园（TJUPT），猫站补上副标题、时魔、做种体积与等级要求 ([#812](https://github.com/sunerpy/pt-tools/issues/812)) ([2e4e8b1](https://github.com/sunerpy/pt-tools/commit/2e4e8b1540826b3d6ed98e3bbc214e0dfb00e7de))
+
+
+### Bug Fixes
+
+* **cleanup:** 「不活跃」按最后活动时间判，预览写明受保护的种子为什么不删 ([#810](https://github.com/sunerpy/pt-tools/issues/810)) ([599aa14](https://github.com/sunerpy/pt-tools/commit/599aa148328073822b26dc59e971332c3d2d71a9))
+* **push:** 推送的种子出现在下载器里以后不再按预留重复扣空间 ([#813](https://github.com/sunerpy/pt-tools/issues/813)) ([299726f](https://github.com/sunerpy/pt-tools/commit/299726f067402bd44c7f8ac8b5bc8232bbde1aa0))
+
 ## [1.0.0-rc.48](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.47...v1.0.0-rc.48) (2026-10-31)
 
 
