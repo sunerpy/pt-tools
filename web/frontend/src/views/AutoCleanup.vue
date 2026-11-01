@@ -1317,6 +1317,8 @@ async function executeClean() {
 .scope-list {
   display: flex;
   flex-direction: column;
+  /* el-radio-group 自带 align-items: center，竖排时三块会缩成各自内容宽、居中错开 */
+  align-items: stretch;
   gap: var(--pt-space-2);
   width: 100%;
 }
