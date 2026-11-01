@@ -87,10 +87,13 @@ type SettingsGlobal struct {
 	CleanupDelFreeExpired bool    `json:"cleanup_del_free_expired" gorm:"default:true"`
 	CleanupDiskProtect    bool    `json:"cleanup_disk_protect" gorm:"default:true"`
 	CleanupMinDiskSpaceGB float64 `json:"cleanup_min_disk_space_gb" gorm:"default:50"`
-	CleanupProtectDL      bool    `json:"cleanup_protect_dl" gorm:"default:false"`
-	CleanupProtectHR      bool    `json:"cleanup_protect_hr" gorm:"default:true"`
-	CleanupMinRetainH     int     `json:"cleanup_min_retain_h" gorm:"default:24"`
-	CleanupProtectTags    string  `json:"cleanup_protect_tags" gorm:"size:256"`
+	// CleanupEmergency 是空间低于下限时紧急清理（自动删种按优先级多挑种子删、推送遇到空间不足时提前开始一轮检查）；
+	// 只在 CleanupDiskProtect 开着时起作用。v16 以前没有这个开关，紧急清理跟着磁盘空间保护一起开
+	CleanupEmergency   bool   `json:"cleanup_emergency" gorm:"default:true"`
+	CleanupProtectDL   bool   `json:"cleanup_protect_dl" gorm:"default:false"`
+	CleanupProtectHR   bool   `json:"cleanup_protect_hr" gorm:"default:true"`
+	CleanupMinRetainH  int    `json:"cleanup_min_retain_h" gorm:"default:24"`
+	CleanupProtectTags string `json:"cleanup_protect_tags" gorm:"size:256"`
 
 	// 免费结束自动删除
 	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"` // 免费期结束时自动删除未完成的种子及数据
@@ -102,11 +105,13 @@ type SettingsGlobal struct {
 	// 默认下载模式（RSS 级别可 override）
 	DefaultFilterMode FilterMode `json:"default_filter_mode" gorm:"size:16;default:'auto_free'"`
 
-	// 做种竞争度监控（Peer Ratio Monitor）
-	PeerRatioEnabled     bool    `json:"peer_ratio_enabled" gorm:"default:false"`     // 是否启用做种竞争度监控
-	PeerRatioMaxSL       float64 `json:"peer_ratio_max_sl" gorm:"default:30.0"`       // Seeder/Leecher 比值上限
-	PeerRatioIntervalMin int     `json:"peer_ratio_interval_min" gorm:"default:10"`   // 检查间隔（分钟）
-	PeerRatioRemoveData  bool    `json:"peer_ratio_remove_data" gorm:"default:false"` // 超标时删除种子及数据（否则仅暂停）
+	// 做种竞争度：自动删种的一条删除条件（v16 以前是单独的监控），跟着自动删种的检查间隔。
+	// PeerRatioRemoveData 为真时超标的种子删除（连不连数据跟着 CleanupRemoveData），否则只暂停。
+	// PeerRatioIntervalMin 是原来竞争度监控的检查间隔：新版不再读写，只在 v16 迁移时换算成自动删种的间隔
+	PeerRatioEnabled     bool    `json:"peer_ratio_enabled" gorm:"default:false"`
+	PeerRatioMaxSL       float64 `json:"peer_ratio_max_sl" gorm:"default:30.0"` // Seeder/Leecher 比值上限
+	PeerRatioIntervalMin int     `json:"peer_ratio_interval_min" gorm:"default:10"`
+	PeerRatioRemoveData  bool    `json:"peer_ratio_remove_data" gorm:"default:false"`
 
 	// 每日签到时间窗（HH:MM，进程时区）：各站每天在窗口内随机取一个时刻签到。
 	// 只经 ConfigStore.SaveAttendanceWindow 写；SaveGlobalSettings 不改这两列。

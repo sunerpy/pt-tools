@@ -235,6 +235,7 @@ func (s *ConfigStore) GetGlobalOnly() (models.SettingsGlobal, error) {
 	out.TorrentSizeGB = 200
 	out.AutoStart = false
 	out.CleanupDiskProtect = true
+	out.CleanupEmergency = true
 	out.CleanupMinDiskSpaceGB = 50
 	return out, nil
 }
@@ -292,6 +293,7 @@ func (s *ConfigStore) GetGlobalSettings() (models.SettingsGlobal, error) {
 		gs.TorrentSizeGB = 200
 		gs.AutoStart = false
 		gs.CleanupDiskProtect = true
+		gs.CleanupEmergency = true
 		gs.CleanupMinDiskSpaceGB = 50
 		return gs, nil
 	}
@@ -377,6 +379,7 @@ func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patc
 		cur.CleanupSlowMaxRatio = gs.CleanupSlowMaxRatio
 		cur.CleanupDelFreeExpired = gs.CleanupDelFreeExpired
 		cur.CleanupDiskProtect = gs.CleanupDiskProtect
+		cur.CleanupEmergency = gs.CleanupEmergency
 		cur.CleanupMinDiskSpaceGB = gs.CleanupMinDiskSpaceGB
 		cur.CleanupProtectDL = gs.CleanupProtectDL
 		cur.CleanupProtectHR = gs.CleanupProtectHR
@@ -386,7 +389,7 @@ func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patc
 		cur.FreeEndAdvanceMinutes = gs.FreeEndAdvanceMinutes
 		cur.PeerRatioEnabled = gs.PeerRatioEnabled
 		cur.PeerRatioMaxSL = gs.PeerRatioMaxSL
-		cur.PeerRatioIntervalMin = gs.PeerRatioIntervalMin
+		// PeerRatioIntervalMin 不再改：竞争度跟着自动删种的检查间隔（v16）
 		cur.PeerRatioRemoveData = gs.PeerRatioRemoveData
 		cur.DefaultFilterMode = models.NormalizeFilterMode(gs.DefaultFilterMode)
 		if err := db.Save(&cur).Error; err != nil {

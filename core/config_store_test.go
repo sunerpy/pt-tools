@@ -1281,6 +1281,7 @@ func TestConfigStore_SaveGlobalAndDefaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "download", got.DownloadDir)
 	assert.True(t, got.CleanupDiskProtect)
+	assert.True(t, got.CleanupEmergency)
 	assert.Equal(t, float64(50), got.CleanupMinDiskSpaceGB)
 
 	require.NoError(t, s.SaveGlobal(models.SettingsGlobal{
@@ -1371,6 +1372,24 @@ func TestUpsertSiteWithRSS_ValidationErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "重复")
 }
 
+// 紧急清理开关能存成关（更新走整行 Save，false 不会被换成默认值）；竞争度原来的检查间隔不再改（v16 起跟着自动删种的间隔）。
+func TestSaveGlobalSettings_CleanupEmergencyAndPeerInterval(t *testing.T) {
+	db := newCloakDB(t)
+	s := NewConfigStore(db)
+	dir := t.TempDir()
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, CleanupEmergency: true, PeerRatioIntervalMin: 20}))
+	got, err := s.GetGlobalSettings()
+	require.NoError(t, err)
+	require.True(t, got.CleanupEmergency)
+	require.Equal(t, 20, got.PeerRatioIntervalMin)
+
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, CleanupEmergency: false, PeerRatioIntervalMin: 99}))
+	got, err = s.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.False(t, got.CleanupEmergency)
+	assert.Equal(t, 20, got.PeerRatioIntervalMin, "保存全局设置不再改竞争度原来的间隔")
+}
+
 func TestGetGlobalSettings_DefaultsWhenEmpty(t *testing.T) {
 	db := newCloakDB(t)
 	s := NewConfigStore(db)
@@ -1379,6 +1398,7 @@ func TestGetGlobalSettings_DefaultsWhenEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "download", gs.DownloadDir)
 	assert.True(t, gs.CleanupDiskProtect)
+	assert.True(t, gs.CleanupEmergency)
 
 	q, err := s.GetQbitSettings()
 	require.NoError(t, err)
