@@ -1033,6 +1033,12 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 	if err := s.db.DB.Find(&sites).Error; err != nil {
 		return nil, err
 	}
+	// 读不出过滤规则关联时照样列出站点（与 GetSiteConf 一样），只是 RSS 不带过滤规则编号：
+	// 列表用在搜索、统计等很多地方，不能因为这一项整个读不出来
+	rules, err := models.NewRSSFilterAssociationDB(s.db.DB).FilterRuleIDsByRSS()
+	if err != nil {
+		sLogger().Warnf("[站点列表] 读取 RSS 的过滤规则关联失败: %v", err)
+	}
 	for _, ss := range sites {
 		sg := models.SiteGroup(strings.ToLower(ss.Name))
 		cookie, err := s.cookiePlaintextForSite(ss)
@@ -1045,7 +1051,13 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, rssConfigOf(r))
+			cfg := rssConfigOf(r)
+			// 带上过滤规则编号：站点列表上的启用开关把列表里的配置整站存回去，不带就会把关联清掉
+			cfg.FilterRuleIDs = rules[r.ID]
+			if cfg.FilterRuleIDs == nil {
+				cfg.FilterRuleIDs = []uint{}
+			}
+			sc.RSS = append(sc.RSS, cfg)
 		}
 		// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 		out[sg] = sc
