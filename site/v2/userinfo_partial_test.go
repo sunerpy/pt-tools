@@ -482,3 +482,90 @@ func TestUserInfo_SeedingStatusFailures(t *testing.T) {
 		}
 	}
 }
+
+// 做种列表认不出体积列：做种数照样用，体积算缺（保存时沿用上一次的），不存成 0。
+func TestUserInfo_SeedingSizeUnknownIsPartial(t *testing.T) {
+	ps := newPartialServer(t, func(path string, _ int, w http.ResponseWriter) bool {
+		if path == "/getusertorrentlistajax.php" {
+			_, _ = w.Write([]byte(`<table><tr><td>a</td><td>b</td></tr><tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td></tr></table>`))
+			return true
+		}
+		return false
+	})
+	d := partialDriver(t, ps, 0)
+	def := partialDefinition(0)
+	delete(def.UserInfo.Selectors, "seedingSize")
+	d.SetSiteDefinition(def)
+	info, err := d.GetUserInfo(context.Background())
+	var partial *PartialUserInfoError
+	require.ErrorAs(t, err, &partial)
+	assert.Equal(t, []string{"seederSize"}, partial.Missing)
+	assert.ErrorIs(t, partial.Err, ErrSeedingSizeUnknown)
+	assert.Equal(t, "tester", info.Username)
+	assert.Zero(t, info.SeederSize)
+}
+
+// 首页没给做种数、做种列表认不出体积列时：做种数用列表的行数，体积按没取到算。
+func TestUserInfo_SeedingSizeUnknownKeepsListCount(t *testing.T) {
+	ps := newPartialServer(t, func(path string, _ int, w http.ResponseWriter) bool {
+		switch path {
+		case "/index.php":
+			_, _ = w.Write([]byte(`<html><body><a id="uid" href="userdetails.php?id=888">tester</a><span id="seed">0</span></body></html>`))
+			return true
+		case "/getusertorrentlistajax.php":
+			_, _ = w.Write([]byte(`<table><tr><td>a</td><td>b</td></tr><tr><td>Movie</td><td>Film.2020.2160p-XX</td></tr>` +
+				`<tr><td>TV</td><td>Show.S01.2160p.10bit-XX</td></tr></table>`))
+			return true
+		}
+		return false
+	})
+	d := partialDriver(t, ps, 0)
+	def := partialDefinition(0)
+	delete(def.UserInfo.Selectors, "seedingSize")
+	d.SetSiteDefinition(def)
+	info, err := d.GetUserInfo(context.Background())
+	var partial *PartialUserInfoError
+	require.ErrorAs(t, err, &partial)
+	assert.Equal(t, []string{"seederSize"}, partial.Missing)
+	assert.Equal(t, 2, info.Seeding)
+	assert.Equal(t, 2, info.SeederCount)
+	assert.Zero(t, info.SeederSize)
+}
+
+// 首页说在做种、做种列表却什么都没读到（限流提示、出错页，没有表格）：体积按没取到算，不存成 0。
+// 首页说没在做种时，列表没有表格就是真的 0。
+func TestUserInfo_SeedingListEmptyWhileSeeding(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		seeding string
+		partial bool
+	}{{"index says seeding", "7", true}, {"index says nothing seeding", "0", false}} {
+		t.Run(c.name, func(t *testing.T) {
+			ps := newPartialServer(t, func(path string, _ int, w http.ResponseWriter) bool {
+				switch path {
+				case "/index.php":
+					_, _ = w.Write([]byte(`<html><body><a id="uid" href="userdetails.php?id=888">tester</a><span id="seed">` + c.seeding + `</span></body></html>`))
+					return true
+				case "/getusertorrentlistajax.php":
+					_, _ = w.Write([]byte(`<html><body>请求过于频繁，限制访问间隔 60 秒/次</body></html>`))
+					return true
+				}
+				return false
+			})
+			d := partialDriver(t, ps, 0)
+			def := partialDefinition(0)
+			delete(def.UserInfo.Selectors, "seedingSize")
+			d.SetSiteDefinition(def)
+			info, err := d.GetUserInfo(context.Background())
+			assert.Equal(t, "tester", info.Username)
+			assert.Zero(t, info.SeederSize)
+			if c.partial {
+				var partial *PartialUserInfoError
+				require.ErrorAs(t, err, &partial)
+				assert.Equal(t, []string{"seederSize"}, partial.Missing)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}

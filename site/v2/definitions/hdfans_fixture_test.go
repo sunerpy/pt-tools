@@ -184,6 +184,9 @@ func TestHDFansUserInfo_BonusAndLastAccess(t *testing.T) {
 			_, _ = w.Write([]byte(hdfansIndexFixture))
 		case "/userdetails.php":
 			_, _ = w.Write([]byte(hdfansUserdetailsFixture))
+		case "/getusertorrentlistajax.php":
+			// 首页说在做种时做种列表不能是空页（空页按体积没取到算）
+			_, _ = w.Write([]byte(`<b>113</b> 条记录 | 总大小：1.000 TB<table><tr><td>大小</td></tr><tr><td>1.000<br />TB</td></tr></table>`))
 		default:
 			_, _ = w.Write([]byte(`<html><body></body></html>`))
 		}

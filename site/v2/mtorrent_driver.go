@@ -1108,6 +1108,17 @@ type MTorrentPeerStatResponse struct {
 	} `json:"data"`
 }
 
+// 做种体积从个人页「目前做種」列表（/api/member/getUserTorrentList）各页加起来：每页的条数（M-Team 认 200，500 回「參數錯誤」），
+// 与最多读的页数。做种更多、超过上限时体积按没取到算（保存时沿用上一次的），不读一半就当总数。
+const (
+	mtorrentSeedingPageSize = 200
+	mtorrentMaxSeedingPages = 25
+)
+
+// mtorrentSeedingPageDelay 是读做种列表时每两页之间等的时间：2026-11-02 连着读两页，第 2 页回「請求過於頻繁」，
+// 隔 1 秒读完了 4 页。被限流的那一页等两倍的时间再读一次。测试里改成 0。
+var mtorrentSeedingPageDelay = 1500 * time.Millisecond
+
 // PrepareGetBonusPerHour prepares a request for fetching bonus per hour
 func (d *MTorrentDriver) PrepareGetBonusPerHour() (MTorrentRequest, error) {
 	return MTorrentRequest{
@@ -1248,6 +1259,116 @@ func (d *MTorrentDriver) GetPeerStatistics(ctx context.Context) (*PeerStatistics
 	return d.ParsePeerStatistics(res)
 }
 
+// MTorrentPeerStatusResponse 是 /api/tracker/myPeerStatus 的返回：网页页头「當前活動」后面的做种数与下载数
+type MTorrentPeerStatusResponse struct {
+	Data struct {
+		Seeder  json.Number `json:"seeder"`
+		Leecher json.Number `json:"leecher"`
+	} `json:"data"`
+}
+
+// GetPeerStatus 取正在做种与正在下载的种子数（/api/tracker/myPeerStatus）
+func (d *MTorrentDriver) GetPeerStatus(ctx context.Context) (seeder, leecher int, err error) {
+	res, err := d.Execute(ctx, MTorrentRequest{Endpoint: "/api/tracker/myPeerStatus", Method: "POST", Body: map[string]any{}})
+	if err != nil {
+		return 0, 0, err
+	}
+	if !res.Code.IsSuccess() {
+		return 0, 0, fmt.Errorf("%w: %s - %s", ErrPeerStatsUnavailable, res.Code.String(), res.Message)
+	}
+	var status MTorrentPeerStatusResponse
+	if err = json.Unmarshal(res.RawBody, &status); err != nil {
+		return 0, 0, fmt.Errorf("parse peer status: %w", err)
+	}
+	s, err := status.Data.Seeder.Int64()
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse seeder %q: %w", status.Data.Seeder, err)
+	}
+	l, err := status.Data.Leecher.Int64()
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse leecher %q: %w", status.Data.Leecher, err)
+	}
+	return int(s), int(l), nil
+}
+
+// MTorrentUserTorrentListResponse 是 /api/member/getUserTorrentList 的返回（个人页「目前做種」用的接口）
+type MTorrentUserTorrentListResponse struct {
+	Data struct {
+		Total      json.Number `json:"total"`
+		TotalPages json.Number `json:"totalPages"`
+		Data       []struct {
+			Torrent struct {
+				Size json.Number `json:"size"`
+			} `json:"torrent"`
+		} `json:"data"`
+	} `json:"data"`
+}
+
+// GetSeedingSize 把个人页「目前做種」列表（type=SEEDING）各页的种子体积加起来，返回做种数与体积。
+// 个人页「保種總體積」用的 /api/member/seedingStats 不认 API Key（401），myPeerStatistics 对 API Key 全返回 0，只能这样算。
+// 页数超过 mtorrentMaxSeedingPages 时报错，不读一半就当总数。
+func (d *MTorrentDriver) GetSeedingSize(ctx context.Context, userID string) (count int, size int64, err error) {
+	uid, err := strconv.ParseInt(strings.TrimSpace(userID), 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("seeding list needs the user id, got %q: %w", userID, err)
+	}
+	readPage := func(page int) (MTorrentResponse, error) {
+		return d.Execute(ctx, MTorrentRequest{
+			Endpoint: "/api/member/getUserTorrentList",
+			Method:   "POST",
+			Body:     map[string]any{"userid": uid, "type": "SEEDING", "pageNumber": page, "pageSize": mtorrentSeedingPageSize},
+		})
+	}
+	for page := 1; ; page++ {
+		if page > 1 && !sleepContext(ctx, mtorrentSeedingPageDelay) {
+			return 0, 0, fmt.Errorf("seeding list page %d: %w", page, ctx.Err())
+		}
+		res, err := readPage(page)
+		if err == nil && !res.Code.IsSuccess() && mtorrentRateLimited(res) {
+			if !sleepContext(ctx, 2*mtorrentSeedingPageDelay) {
+				return 0, 0, fmt.Errorf("seeding list page %d: %w", page, ctx.Err())
+			}
+			res, err = readPage(page)
+		}
+		if err != nil {
+			return 0, 0, fmt.Errorf("seeding list page %d: %w", page, err)
+		}
+		if !res.Code.IsSuccess() {
+			return 0, 0, fmt.Errorf("seeding list page %d: %s - %s", page, res.Code.String(), res.Message)
+		}
+		var list MTorrentUserTorrentListResponse
+		if err = json.Unmarshal(res.RawBody, &list); err != nil {
+			return 0, 0, fmt.Errorf("parse seeding list page %d: %w", page, err)
+		}
+		pages, err := list.Data.TotalPages.Int64()
+		if err != nil {
+			return 0, 0, fmt.Errorf("parse seeding list totalPages %q: %w", list.Data.TotalPages, err)
+		}
+		if pages > mtorrentMaxSeedingPages {
+			return 0, 0, fmt.Errorf("seeding list has %d pages, more than %d", pages, mtorrentMaxSeedingPages)
+		}
+		for _, row := range list.Data.Data {
+			n, err := row.Torrent.Size.Int64()
+			if err != nil {
+				return 0, 0, fmt.Errorf("parse torrent size %q: %w", row.Torrent.Size, err)
+			}
+			size += n
+		}
+		if int64(page) >= pages || len(list.Data.Data) == 0 {
+			total, err := list.Data.Total.Int64()
+			if err != nil {
+				return 0, 0, fmt.Errorf("parse seeding list total %q: %w", list.Data.Total, err)
+			}
+			return int(total), size, nil
+		}
+	}
+}
+
+// mtorrentRateLimited 报告 M-Team 回的是不是「請求過於頻繁」（返回码 4）
+func mtorrentRateLimited(res MTorrentResponse) bool {
+	return strings.Contains(res.Message, "頻繁") || strings.Contains(res.Message, "频繁")
+}
+
 // GetUserInfo fetches complete user information including extended stats
 // Uses parallel requests for independent API calls to improve performance
 func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
@@ -1256,7 +1377,8 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 	var info UserInfo
 	var bonusPerHour float64
 	var unread, total int
-	var peerStats *PeerStatistics
+	var seeder, leecher int
+	var bonusErr, messageErr, statusErr error
 	var mu sync.Mutex
 
 	// Use errgroup for cleaner parallel execution with error handling
@@ -1285,37 +1407,27 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 		return nil
 	})
 
-	// 2. Get bonus per hour (non-critical - errors are ignored)
+	// 2-4 不是必需的：没取到时整次不失败，按没取到的字段交回去（*PartialUserInfoError），保存时沿用上一次的
 	g.Go(func() error {
 		bonus, err := d.GetBonusPerHour(gctx)
-		if err == nil {
-			mu.Lock()
-			bonusPerHour = bonus
-			mu.Unlock()
-		}
-		return nil // Don't fail the whole operation
-	})
-
-	// 3. Get unread message count (non-critical)
-	g.Go(func() error {
-		u, t, err := d.GetUnreadMessageCount(gctx)
-		if err == nil {
-			mu.Lock()
-			unread = u
-			total = t
-			mu.Unlock()
-		}
+		mu.Lock()
+		bonusPerHour, bonusErr = bonus, err
+		mu.Unlock()
 		return nil
 	})
-
-	// 4. Get peer statistics (non-critical)
 	g.Go(func() error {
-		stats, err := d.GetPeerStatistics(gctx)
-		if err == nil && stats != nil {
-			mu.Lock()
-			peerStats = stats
-			mu.Unlock()
-		}
+		u, t, err := d.GetUnreadMessageCount(gctx)
+		mu.Lock()
+		unread, total, messageErr = u, t, err
+		mu.Unlock()
+		return nil
+	})
+	// 做种数与下载数：网页页头「當前活動」用的 myPeerStatus。myPeerStatistics 现在（2026-11）对 API Key 全返回 0
+	g.Go(func() error {
+		s, l, err := d.GetPeerStatus(gctx)
+		mu.Lock()
+		seeder, leecher, statusErr = s, l, err
+		mu.Unlock()
 		return nil
 	})
 
@@ -1324,24 +1436,54 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 		return UserInfo{}, err
 	}
 
-	// Merge results
-	info.BonusPerHour = bonusPerHour
-	info.UnreadMessageCount = unread
-	info.TotalMessageCount = total
+	var missing []string
+	var firstErr error
+	miss := func(err error, fields ...string) {
+		missing = append(missing, fields...)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if bonusErr != nil {
+		miss(bonusErr, "bonusPerHour")
+	} else {
+		info.BonusPerHour = bonusPerHour
+	}
+	if messageErr != nil {
+		miss(messageErr, "messageCount")
+	} else {
+		info.UnreadMessageCount = unread
+		info.TotalMessageCount = total
+	}
+	if statusErr != nil {
+		miss(statusErr, "leeching")
+	} else {
+		info.Seeding, info.SeederCount = seeder, seeder
+		info.Leeching, info.LeecherCount = leecher, leecher
+	}
 
-	if peerStats != nil {
-		info.SeederCount = peerStats.SeederCount
-		info.SeederSize = peerStats.SeederSize
-		info.LeecherCount = peerStats.LeecherCount
-		info.LeecherSize = peerStats.LeecherSize
-		info.Seeding = peerStats.SeederCount
-		info.Leeching = peerStats.LeecherCount
+	// 做种体积：个人页「目前做種」列表各页加起来，要用户编号，所以等个人资料取到以后再取。没在做种时不用读
+	if statusErr != nil || seeder > 0 {
+		count, size, err := d.GetSeedingSize(ctx, info.UserID)
+		switch {
+		case err != nil:
+			miss(err, "seederSize")
+		default:
+			info.SeederSize = size
+			if statusErr != nil {
+				// 做种数没取到：用列表的总条数
+				info.Seeding, info.SeederCount = count, count
+			}
+		}
 	}
 
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] MTorrent GetUserInfo completed in %v\n", time.Since(startTime))
 	}
 
+	if len(missing) > 0 {
+		return info, &PartialUserInfoError{Missing: missing, Err: firstErr}
+	}
 	return info, nil
 }
 

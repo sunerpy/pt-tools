@@ -12,7 +12,8 @@ import (
 func ProbeMTorrent(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult, error) {
 	_ = clock
 	info, err := site.GetUserInfo(ctx)
-	return classifyMTorrentResult(info, err), nil
+	// 只少了做种体积、时魔这类不必需的接口而个人资料到手了：登录是好的，按取到的部分判断
+	return classifyMTorrentResult(info, v2.IgnorePartial(info, err)), nil
 }
 
 func classifyMTorrentResult(info v2.UserInfo, err error) *ProbeResult {

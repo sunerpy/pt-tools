@@ -170,6 +170,14 @@ func (r *DBUserInfoRepo) Today() string {
 	return r.dayOf(r.clock())
 }
 
+// zeroableUserInfoFields 是会合法变成 0 的计数：做种、下载中、两种体积、未读消息、H&R、时魔。
+// 这次没取到的字段在 UserInfoService 里已经补成上一次的值（mergeMissingUserInfo），到 Save 的都是这次的结果；
+// 别的字段（加入时间、等级等）这次是零值时照旧不动。
+var zeroableUserInfoFields = []string{
+	"Seeding", "Leeching", "SeederCount", "SeederSize", "LeecherCount", "LeecherSize",
+	"UnreadMessageCount", "TotalMessageCount", "HnRUnsatisfied", "HnRPreWarning", "BonusPerHour", "SeedingBonusPerHour",
+}
+
 // Save stores user info for a site (upsert)
 //
 // 记录与当天的快照在同一个事务里写：快照写失败时记录也回滚，调用方（UserInfoService.FetchAndSave）
@@ -197,6 +205,11 @@ func (r *DBUserInfoRepo) Save(ctx context.Context, info UserInfo) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Use upsert: update if exists, insert if not
 		if err := tx.Where("site = ?", info.Site).Assign(record).FirstOrCreate(&record).Error; err != nil {
+			return err
+		}
+		// 按结构体更新会跳过零值：会合法变成 0 的计数单独写一遍，取到 0 就存成 0
+		if err := tx.Model(&UserInfoRecord{}).Where("site = ?", info.Site).
+			Select(zeroableUserInfoFields).Updates(FromUserInfo(info)).Error; err != nil {
 			return err
 		}
 		return tx.Clauses(clause.OnConflict{
