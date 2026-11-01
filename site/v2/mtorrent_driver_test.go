@@ -1224,8 +1224,12 @@ func TestMTorrentDriver_GetUserInfo(t *testing.T) {
 			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"formulaParams":{"finalBs":"8.8"}}}`))
 		case strings.Contains(r.URL.Path, "notify/statistic"):
 			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"unMake":"2","count":"5"}}`))
-		case strings.Contains(r.URL.Path, "myPeerStatistics"):
-			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"seederCount":"20","seederSize":"2048","leecherCount":"1","leecherSize":"512"}}`))
+		case strings.Contains(r.URL.Path, "myPeerStatus"):
+			// 做种数与下载数从 myPeerStatus 取（myPeerStatistics 现在对 API Key 全返回 0）
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"seeder":"20","leecher":"1"}}`))
+		case strings.Contains(r.URL.Path, "getUserTorrentList"):
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"pageNumber":"1","pageSize":"100","total":"20","totalPages":"1",
+				"data":[{"torrent":{"size":"2048"}}]}}`))
 		default:
 			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{}}`))
 		}
@@ -1240,6 +1244,7 @@ func TestMTorrentDriver_GetUserInfo(t *testing.T) {
 	assert.Equal(t, "Power User", info.Rank)
 	assert.Equal(t, int64(10737418240), info.Uploaded)
 	assert.Equal(t, 20, info.SeederCount)
+	assert.Equal(t, int64(2048), info.SeederSize)
 	assert.Greater(t, info.LastAccess, int64(0))
 }
 
