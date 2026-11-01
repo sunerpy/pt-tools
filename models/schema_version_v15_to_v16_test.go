@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -62,6 +63,7 @@ func TestMigrationV15ToV16MergesPeerRatioIntoCleanup(t *testing.T) {
 		assert.Equal(t, 8.0, got.PeerRatioMaxSL)
 		assert.True(t, got.PeerRatioRemoveData)
 		assert.EqualValues(t, 1, hooks.backupCalls.Load(), "改设置前先备份 settings_globals")
+		assert.Equal(t, []string{"settings_globals v15→v16"}, hooks.backupList(), "备份文件名带这一步迁移的版本")
 		version, err := sm.GetCurrentVersion()
 		require.NoError(t, err)
 		assert.Equal(t, CurrentSchemaVersion, version)
@@ -104,6 +106,29 @@ func TestMigrationV15ToV16MergesPeerRatioIntoCleanup(t *testing.T) {
 			assert.Zero(t, hooks.backupCalls.Load(), "没有要改的行时不用备份")
 		})
 	}
+}
+
+// 备份失败时 v16 不改设置，版本停在 15。
+func TestMigrationV15ToV16StopsWhenBackupFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "v15.db")), &gorm.Config{})
+	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
+	require.NoError(t, db.AutoMigrate(&SchemaVersion{}, &SettingsGlobal{}))
+	require.NoError(t, db.Create(&SchemaVersion{Version: 15, Description: "test v15", AppVersion: "test"}).Error)
+	require.NoError(t, db.Create(&SettingsGlobal{DownloadDir: "downloads", PeerRatioEnabled: true}).Error)
+	require.NoError(t, db.Model(&SettingsGlobal{}).Where("1 = 1").Update("cleanup_enabled", false).Error)
+	failing := func(_ *gorm.DB, table string, _, _ int) (string, error) {
+		return "", fmt.Errorf("backup %s failed", table)
+	}
+	sm := NewSchemaManagerWithHooks(db, "test", failing, nil, nil)
+
+	require.Error(t, sm.RunMigrations())
+	var gs SettingsGlobal
+	require.NoError(t, db.First(&gs).Error)
+	assert.False(t, gs.CleanupEnabled)
+	version, err := sm.GetCurrentVersion()
+	require.NoError(t, err)
+	assert.Equal(t, 15, version)
 }
 
 // 有要改的行、却没有备份钩子时迁移报错，不改设置（同 v9）；没有要改的行时不需要钩子。

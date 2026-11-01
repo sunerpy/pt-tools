@@ -186,7 +186,7 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 func NewDBWithVersionAndHooks(
 	gormLg zapgorm2.Logger,
 	appVersion string,
-	backupFn func(db *gorm.DB, table string) (path string, err error),
+	backupFn func(db *gorm.DB, table string, fromVer, toVer int) (path string, err error),
 	encryptFn func(plain string) (cipher string, err error),
 	decryptFn func(cipher string) (plain string, err error),
 ) (*TorrentDB, error) {

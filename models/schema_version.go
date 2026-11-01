@@ -47,10 +47,11 @@ type Migration struct {
 
 // SchemaManager 架构版本管理器
 type SchemaManager struct {
-	db            *gorm.DB
-	migrations    []Migration
-	appVersion    string
-	BackupTable   func(db *gorm.DB, table string) (path string, err error)
+	db         *gorm.DB
+	migrations []Migration
+	appVersion string
+	// BackupTable 在迁移改表前把整张表存一份；fromVer、toVer 是这一步迁移的版本，写进备份文件名
+	BackupTable   func(db *gorm.DB, table string, fromVer, toVer int) (path string, err error)
 	EncryptCookie func(plain string) (cipher string, err error)
 	DecryptCookie func(cipher string) (plain string, err error)
 }
@@ -69,7 +70,7 @@ func NewSchemaManager(db *gorm.DB, appVersion string) *SchemaManager {
 func NewSchemaManagerWithHooks(
 	db *gorm.DB,
 	appVersion string,
-	backupFn func(db *gorm.DB, table string) (path string, err error),
+	backupFn func(db *gorm.DB, table string, fromVer, toVer int) (path string, err error),
 	encryptFn func(plain string) (cipher string, err error),
 	decryptFn func(cipher string) (plain string, err error),
 ) *SchemaManager {
@@ -575,7 +576,7 @@ func (sm *SchemaManager) migrateV8ToV9(db *gorm.DB) error {
 		return fmt.Errorf("v9 migration requires crypto hooks")
 	}
 
-	if _, err := sm.BackupTable(db, "site_settings"); err != nil {
+	if _, err := sm.BackupTable(db, "site_settings", 8, 9); err != nil {
 		return fmt.Errorf("v8→v9: backup site_settings: %w", err)
 	}
 
@@ -656,7 +657,7 @@ func (sm *SchemaManager) migrateV9ToV10(db *gorm.DB) error {
 		return sm.recordV10MigrationState(db)
 	}
 
-	if _, err := sm.BackupTable(db, "site_login_states"); err != nil {
+	if _, err := sm.BackupTable(db, "site_login_states", 9, 10); err != nil {
 		return fmt.Errorf("v9→v10: backup site_login_states: %w", err)
 	}
 
@@ -900,7 +901,7 @@ func (sm *SchemaManager) migrateV15ToV16(db *gorm.DB) error {
 	if sm.BackupTable == nil {
 		return errors.New("v16 migration requires backup hook")
 	}
-	if _, err := sm.BackupTable(db, "settings_globals"); err != nil {
+	if _, err := sm.BackupTable(db, "settings_globals", 15, 16); err != nil {
 		return fmt.Errorf("v15→v16: backup settings_globals: %w", err)
 	}
 	if err := peerOnly(db).Updates(map[string]any{
