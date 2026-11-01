@@ -56,14 +56,14 @@ Three modes decide which torrents auto-delete manages:
 
 A torrent that meets the configured conditions is marked for deletion.
 
-| Condition                                                                                 | Meaning                                                                                     | Example       |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------- |
-| **Seeding time over (做种时间超过（小时）)**                                              | Can be deleted after seeding for N hours                                                    | 72 hours      |
-| **Ratio reached (分享率达到)**                                                            | Can be deleted once the ratio is ≥ N                                                        | 2.0           |
-| **Inactive for over (不活跃超过（小时）)**                                                | Can be deleted once it is seeding and has not uploaded or downloaded anything for N hours   | 48 hours      |
-| **Low-efficiency seeding (低效做种)**                                                     | Can be deleted once it has finished, seeded for over N hours and its ratio is still below M | 3 hours / 0.5 |
-| **Delete torrents still unfinished when freeleech ends (免费到期仍未下完的种子自动删除)** | Torrents whose free period has ended before they finished downloading                       | On/Off        |
-| **Act on high seeding competition (做种竞争度过高时处理)**                                | Delete or pause when seeders per leecher (S/L) exceed the limit                             | 30            |
+| Condition                                                                                        | Meaning                                                                                                   | Example       |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------- |
+| **Seeding time over (做种时间超过（小时）)**                                                     | Can be deleted after seeding for N hours                                                                  | 72 hours      |
+| **Ratio reached (分享率达到)**                                                                   | Can be deleted once the ratio is ≥ N                                                                      | 2.0           |
+| **Inactive for over (不活跃超过（小时）)**                                                       | Can be deleted once it is seeding and has not uploaded or downloaded anything for N hours                 | 48 hours      |
+| **Low-efficiency seeding (低效做种)**                                                            | Can be deleted once it has finished, seeded for over N hours and its ratio is still below M               | 3 hours / 0.5 |
+| **Delete other free torrents still unfinished after freeleech (其他免费种子免费过了没下完就删)** | Free torrents whose subscription did not choose Pause or Delete, still unfinished after their free period | On/Off        |
+| **Act on high seeding competition (做种竞争度过高时处理)**                                       | Delete or pause when seeders per leecher (S/L) exceed the limit                                           | 30            |
 
 Inactivity is judged by the time the downloader recorded for the torrent's last upload or download (qBittorrent and Transmission both record it), not by the speed at the moment of the check: a torrent that usually uploads but happens to be at 0 when checked is kept, and a torrent that has uploaded nothing since it finished is deleted N hours after it finished. When the downloader does not report that time, pt-tools uses the time the torrent finished, then the time it was added. A torrent that is uploading or downloading at the moment of the check is not inactive, and neither is a paused one. Low-efficiency seeding only applies when both of its values are filled in.
 
@@ -72,7 +72,7 @@ Inactivity is judged by the time the downloader recorded for the torrent's last 
 - **OR mode (任一满足即删（OR）)**, the default: a torrent is deleted when any one condition is met. Good for freeing space quickly.
 - **AND mode (全部满足才删（AND）)**: every configured condition has to be met at the same time. More conservative, for getting the most out of each torrent.
 
-Delete torrents still unfinished when freeleech ends is checked on its own, whatever the condition logic: when it is on, a torrent whose free period has passed before it finished is deleted even in AND mode. The free period follows the site details the RSS subscription read most recently: if the site extends freeleech, pt-tools waits for the new end time; if freeleech is cancelled or ends early, it counts as ended once the subscription has read that.
+Delete other free torrents still unfinished after freeleech is checked on its own, whatever the condition logic: when it is on, a torrent whose free period has passed before it finished is deleted even in AND mode. It covers only free torrents pushed by pt-tools within the management scope whose RSS subscription has Unfinished when freeleech ends set to Do nothing, plus manually pushed ones; torrents set to Pause or Delete are handled at the end of freeleech instead (see [RSS subscriptions](rss-subscription.md#freeleech-eligibility-and-pausing)). Only the keep tag, the protected tags and H&R protection stop it: it does not wait for the minimum keep time and ignores Protect downloading torrents, because once freeleech is over, further downloading counts. The free period follows the site details the RSS subscription read most recently: if the site extends freeleech, pt-tools waits for the new end time; if freeleech is cancelled or ends early, it counts as ended once the subscription has read that.
 
 > A condition set to 0 is ignored. With the seeding time at 72 hours and the ratio at 0, for example, only the seeding time counts.
 
@@ -125,15 +125,15 @@ These torrents are not deleted, even when they meet the deletion conditions:
 | **Minimum keep time (最短保种时间（小时）)**        | 24 hours | Torrents added to the downloader less than N hours ago are not deleted                                                 |
 | **Protected tags (保护标签)**                       | Empty    | Torrents with these tags are not deleted (type a tag and press Enter; add as many as you like)                         |
 
-The keep tag, the protected tags and H&R (when Protect H&R torrents is on) are not only for the regular deletion conditions: emergency cleanup, seeding competition and the automatic deletion when the free period ends skip these torrents too, and a torrent the free-period end would have deleted is paused instead, with the reason shown on the Paused torrents page. Brush tasks skip torrents with the keep tag or a protected tag when deleting, and judge H&R by the task's own rules. When the H&R information cannot be read (a database error), pt-tools cannot tell which torrents are protected: that round deletes nothing, and a deletion at the end of the free period becomes a pause.
+The keep tag, the protected tags and H&R (when Protect H&R torrents is on) are not only for the regular deletion conditions: emergency cleanup, seeding competition and the deletion when the free period ends (for subscriptions set to Delete) skip these torrents too, and a torrent the free-period end would have deleted is paused instead, with the reason shown on the Paused torrents page. Brush tasks skip torrents with the keep tag or a protected tag when deleting, and judge H&R by the task's own rules. When the H&R information cannot be read (a database error), pt-tools cannot tell which torrents are protected: that round deletes nothing, and a deletion at the end of the free period becomes a pause.
 
-Protection rules win over the deletion conditions, and emergency cleanup does not delete protected torrents either. For example, with a minimum keep time of 24 hours and low-efficiency seeding set to 3 hours with a ratio below 0.5, a torrent added to the downloader less than 24 hours ago is kept however low its ratio is, and is deleted only once it has been there for 24 hours. To have such torrents deleted sooner, lower the minimum keep time. Preview what would be deleted (预览会删哪些) lists the protected torrents and the rule each one hits (for example how many hours of the minimum keep time are left).
+Protection rules win over the deletion conditions, and emergency cleanup does not delete protected torrents either; Delete other free torrents still unfinished after freeleech is the exception, stopped only by the keep tag, the protected tags and H&R protection. For example, with a minimum keep time of 24 hours and low-efficiency seeding set to 3 hours with a ratio below 0.5, a torrent added to the downloader less than 24 hours ago is kept however low its ratio is, and is deleted only once it has been there for 24 hours. To have such torrents deleted sooner, lower the minimum keep time. Preview what would be deleted (预览会删哪些) lists the protected torrents and the rule each one hits (for example how many hours of the minimum keep time are left).
 
 ### Keeping torrents
 
 To hold on to a torrent (for example a free torrent an RSS feed pushed that you want to keep), select it in Downloads → Task list (下载 → 任务列表) and click Keep (保留) on the bulk bar, or right-click it and choose Keep. The torrent gets the `pt-tools-keep` tag, Keep shows in front of its title, and hovering over it lists the automatic features that skip it. When every selected torrent is already kept, the same bulk bar button becomes Unkeep (取消保留), and the right-click menu has Unkeep too; once the tag is removed, auto-delete handles the torrent by its rules as usual.
 
-- Auto-delete (including emergency cleanup and seeding competition), the automatic deletion at the end of a free period and brush task deletion do not delete torrents with this tag, and seeding competition does not pause them.
+- Auto-delete (including emergency cleanup and seeding competition), the deletion at the end of a free period and brush task deletion do not delete torrents with this tag, and seeding competition does not pause them.
 - Keeping a torrent a brush task is managing hands it over to you: the brush task stops managing it and never adds the same torrent again. If you unkeep it later, auto-delete handles it by its rules; it does not go back to the brush task.
 - To keep every torrent one RSS feed pushes, set that subscription's Tag (标签) to `pt-tools-keep`. You can also put the tag on a torrent directly in the downloader.
 - An automatic deletion reads the downloader's torrents again right before it runs and checks the latest tags, so a torrent kept a moment earlier is not deleted in that round either; when the torrent has already been deleted, Keep reports that it is no longer in the downloader.
@@ -160,7 +160,7 @@ To hold on to a torrent (for example a free torrent an RSS feed pushed that you 
 1. Go through every configured downloader
 2. Get the downloader's list of torrents
 3. Keep the "manageable" torrents according to the management scope (strictly)
-4. Leave out protected torrents (keep tag / protected tags / H&R / downloading / minimum keep time), and leave the torrents a brush task is managing to the brush task
+4. Leave out protected torrents (keep tag / protected tags / H&R / downloading / minimum keep time; for free torrents still unfinished after freeleech only the first three), and leave the torrents a brush task is managing to the brush task
 5. Evaluate the deletion conditions: free period ended → regular conditions (in AND or OR mode) → seeding competition
 6. Check disk space (when protection and emergency cleanup are on):
    - enough space → delete only the torrents that meet the conditions
@@ -203,16 +203,16 @@ With several downloaders configured:
 
 A conservative setup that suits most people:
 
-| Setting                                                                  | Value                            |
-| ------------------------------------------------------------------------ | -------------------------------- |
-| Management scope (管理范围)                                              | Torrents pushed by pt-tools only |
-| Condition logic (条件关系)                                               | OR                               |
-| Seeding time (做种时间超过（小时）)                                      | 72 hours                         |
-| Ratio (分享率达到)                                                       | 2.0                              |
-| Delete when unfinished at freeleech end (免费到期仍未下完的种子自动删除) | On                               |
-| Protect H&R (保护 H&R 种子)                                              | On                               |
-| Minimum keep time (最短保种时间（小时）)                                 | 24 hours                         |
-| Disk space protection (启用磁盘空间保护)                                 | On, at least 50 GB               |
+| Setting                                                                                      | Value                            |
+| -------------------------------------------------------------------------------------------- | -------------------------------- |
+| Management scope (管理范围)                                                                  | Torrents pushed by pt-tools only |
+| Condition logic (条件关系)                                                                   | OR                               |
+| Seeding time (做种时间超过（小时）)                                                          | 72 hours                         |
+| Ratio (分享率达到)                                                                           | 2.0                              |
+| Delete other free torrents still unfinished after freeleech (其他免费种子免费过了没下完就删) | On                               |
+| Protect H&R (保护 H&R 种子)                                                                  | On                               |
+| Minimum keep time (最短保种时间（小时）)                                                     | 24 hours                         |
+| Disk space protection (启用磁盘空间保护)                                                     | On, at least 50 GB               |
 
 ### Scenario 2: little disk space
 
