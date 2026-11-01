@@ -25,7 +25,7 @@ type SiteOptions struct {
 	Passkey           *string
 }
 
-// UpdateSiteOptions 只改给了的几项，不动认证方式、地址与 RSS（RSS 的编号不变：UpsertSiteWithRSS 会把 RSS 整体重建）。
+// UpdateSiteOptions 只改给了的几项，不动认证方式、地址与 RSS（UpsertSiteWithRSS 要带上整份站点配置和全部 RSS）。
 // 改完以后站点是启用的，就要求凭据按认证方式齐全（MissingCredential）；站点定义标为不可用的不能启用。
 // 配置网关（AI 与 App API 改配置）用它。
 func (s *ConfigStore) UpdateSiteOptions(site models.SiteGroup, o SiteOptions) error {
