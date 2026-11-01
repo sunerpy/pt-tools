@@ -1207,9 +1207,14 @@ func (t *TransmissionClient) SetTorrentTags(id, tags string) error {
 		return nil
 	}
 
+	// 去掉全部标签时要发空数组：nil 会编码成 null
+	labels := splitLabels(tags)
+	if labels == nil {
+		labels = []string{}
+	}
 	_, err := t.doRequest("torrent-set", map[string]any{
 		"ids":    ids,
-		"labels": splitLabels(tags),
+		"labels": labels,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set torrent tags: %w", err)
