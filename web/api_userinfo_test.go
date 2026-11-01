@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -109,6 +111,29 @@ func TestApiResumeTorrent_DownloaderErrors(t *testing.T) {
 		server.apiResumeTorrent(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+}
+
+// 在「暂停任务」页恢复竞争度暂停的种子：记下手动开始过，自动删种的竞争度不再暂停它；别的原因暂停的不记。
+func TestApiResumeTorrent_PeerPauseOverridden(t *testing.T) {
+	for reason, want := range map[string]bool{scheduler.PauseReasonPeerRatio: true, "免费期结束，下载未完成": false} {
+		t.Run(reason, func(t *testing.T) {
+			server, _ := setupServerWithFakeDownloader(t, &fakeDownloader{})
+			require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+			ti := models.TorrentInfo{
+				SiteName: "s", TorrentID: "r1", IsPausedBySystem: true, PauseReason: reason,
+				DownloaderTaskID: "task-r1", DownloaderName: "qb1",
+			}
+			require.NoError(t, global.GlobalDB.DB.Create(&ti).Error)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/torrents/%d/resume", ti.ID), nil)
+			server.apiResumeTorrent(w, req)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var got models.TorrentInfo
+			require.NoError(t, global.GlobalDB.DB.First(&got, ti.ID).Error)
+			assert.False(t, got.IsPausedBySystem)
+			assert.Equal(t, want, got.PeerPauseOverridden)
+		})
+	}
 }
 
 func TestApiUserInfoSiteDetail_DeleteFail(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -600,6 +601,31 @@ func TestReserveDownloaderAddDiskBudget_MoreBranches(t *testing.T) {
 		_, err := reserveDownloaderAddDiskBudget(ctx, fake, minimalTorrentBytes(5<<30), "")
 		assert.Error(t, err)
 	})
+}
+
+// 手动添加遇到空间不足时，打开了自动删种与「空间低于下限时紧急清理」才发磁盘空间不足（让自动删种提前开始一轮）。
+func TestReserveDownloaderAddDiskBudget_DiskSpaceLowEvent(t *testing.T) {
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.SettingsGlobal{}))
+	gs, err := server.store.GetGlobalSettings()
+	require.NoError(t, err)
+	require.NoError(t, server.store.SaveGlobalSettings(gs))
+	for _, emergency := range []bool{true, false} {
+		require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).Where("1 = 1").Updates(map[string]any{
+			"cleanup_disk_protect": true, "cleanup_min_disk_space_gb": 10, "cleanup_enabled": true, "cleanup_emergency": emergency,
+		}).Error)
+		_, ch, cancel := events.Subscribe(8)
+		_, err := reserveDownloaderAddDiskBudget(context.Background(), &fakeDownloader{freSpace: 1 << 30, name: "qb1"}, minimalTorrentBytes(5<<30), "")
+		require.Error(t, err)
+		got := false
+		for len(ch) > 0 {
+			if ev := <-ch; ev.Type == events.DiskSpaceLow && ev.Source == "downloader-add" {
+				got = true
+			}
+		}
+		cancel()
+		assert.Equal(t, emergency, got, "cleanup_emergency=%v", emergency)
+	}
 }
 
 func TestApiDownloaderTorrentDetail_FilesFallback(t *testing.T) {

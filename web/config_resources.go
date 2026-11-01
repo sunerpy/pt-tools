@@ -55,9 +55,9 @@ var globalFields = []string{
 	"max_retry", "cleanup_enabled", "cleanup_interval_min", "cleanup_scope", "cleanup_scope_tags", "cleanup_remove_data",
 	"cleanup_condition_mode", "cleanup_max_seed_time_h", "cleanup_min_ratio", "cleanup_max_inactive_h",
 	"cleanup_slow_seed_time_h", "cleanup_slow_max_ratio", "cleanup_del_free_expired", "cleanup_disk_protect",
-	"cleanup_min_disk_space_gb", "cleanup_protect_dl", "cleanup_protect_hr", "cleanup_min_retain_h", "cleanup_protect_tags",
-	"auto_delete_on_free_end", "free_end_advance_minutes", "default_filter_mode", "peer_ratio_enabled", "peer_ratio_max_sl",
-	"peer_ratio_interval_min", "peer_ratio_remove_data",
+	"cleanup_emergency", "cleanup_min_disk_space_gb", "cleanup_protect_dl", "cleanup_protect_hr", "cleanup_min_retain_h",
+	"cleanup_protect_tags", "auto_delete_on_free_end", "free_end_advance_minutes", "default_filter_mode", "peer_ratio_enabled",
+	"peer_ratio_max_sl", "peer_ratio_remove_data",
 }
 
 // rssFields 是 RSS 订阅能改的字段（models.RSSConfig 里 UpsertSiteWithRSS 与 AppendRSSToSite 会存的那些）。
@@ -81,13 +81,15 @@ func (s *Server) configResources() []*configResource {
 	list := []*configResource{
 		{
 			Name: "global", Title: "全局设置", Kind: configObject, Path: "/api/global", SetMethod: http.MethodPost,
-			Desc:   "RSS 的默认间隔与下载目录、推送限速、种子大小限制、最短免费时间、启动时自动开始，自动删种、免费结束时的处理与做种人数比监控。",
+			Desc:   "RSS 的默认间隔与下载目录、推送限速、种子大小限制、最短免费时间、启动时自动开始，自动删种（含做种竞争度、紧急清理）与免费结束时的处理。",
 			Fields: globalFields, Ops: []string{configOpSet},
 			Hidden: []string{
 				"id", "created_at", "updated_at", "attendance_window_start", "attendance_window_end", "attendance_ai_enabled",
 				"attendance_vision_model", "attendance_notify_enabled", "attendance_notify_channel_ids", "daily_report_enabled",
 				"daily_report_time", "daily_report_channel_ids", "daily_report_scope", "dead_torrent_scan_enabled", "dead_torrent_scan_interval_h",
 				"dead_torrent_scan_channel_ids",
+				// 原来竞争度监控的检查间隔：v16 起竞争度跟着自动删种的间隔，不再收这一项
+				"peer_ratio_interval_min",
 			},
 			Hints: map[string]string{
 				"default_filter_mode":      "auto_free（免费的自动下、命中规则的也下）、filter_only（只下命中规则的）、free_only（只下来得及下完的免费种子）",
@@ -96,6 +98,9 @@ func (s *Server) configResources() []*configResource {
 				"download_dir":             "不能为空",
 				"torrent_size_gb":          "最大种子大小（GB），0 不限；要大于 torrent_min_size_gb",
 				"free_end_advance_minutes": "免费结束前提前处理的分钟数（0–60）",
+				"peer_ratio_max_sl":        "做种人数比下载人数的上限（S/L），超过算竞争度过高；最小 1",
+				"peer_ratio_remove_data":   "true 删除（连不连数据跟着 cleanup_remove_data），false 只暂停",
+				"cleanup_emergency":        "剩余空间低于 cleanup_min_disk_space_gb 时按优先级多删种子腾空间；要开着 cleanup_disk_protect",
 			},
 			Labels: map[string]string{
 				// 和网页「全局设置」上的叫法一样
@@ -104,9 +109,13 @@ func (s *Server) configResources() []*configResource {
 				"torrent_size_gb": "最大种子大小（GB）", "torrent_min_size_gb": "最小种子大小（GB）", "min_free_minutes": "最短免费时间（分钟）",
 				"auto_start": "自动启动 RSS 任务", "retain_hours": "暂存种子保留时长（小时）", "max_retry": "最大重试次数",
 				"cleanup_enabled": "自动删种", "cleanup_remove_data": "删种时删数据", "auto_delete_on_free_end": "免费结束自动删除",
-				"free_end_advance_minutes": "免费期结束前提前处理（分钟）", "default_filter_mode": "默认下载模式", "peer_ratio_enabled": "做种人数比监控",
+				"free_end_advance_minutes": "免费期结束前提前处理（分钟）", "default_filter_mode": "默认下载模式", "peer_ratio_enabled": "做种竞争度",
+				"peer_ratio_max_sl": "S/L 上限", "peer_ratio_remove_data": "竞争度超标时删除", "cleanup_emergency": "空间低于下限时紧急清理",
 			},
-			Impact: []string{impactReload, "自动删种与做种人数比监控按新条件处理下载器里的种子（cleanup_remove_data、peer_ratio_remove_data 为真时连数据一起删）"},
+			Impact: []string{
+				impactReload,
+				"自动删种按新条件处理下载器里的种子（cleanup_remove_data 为真时连数据一起删；做种竞争度超标时 peer_ratio_remove_data 为真删除、否则只暂停）",
+			},
 		},
 		{
 			Name: "attendance", Title: "自动签到", Kind: configObject, Path: "/api/sites/attendance/settings", SetMethod: http.MethodPut,

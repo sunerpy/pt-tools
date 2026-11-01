@@ -35,6 +35,10 @@ func TestCleanupAPI(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &pv))
 	assert.NotNil(t, pv.Results)
 
+	// 做种竞争度与紧急清理也按页面上的设置预览
+	w = e.do(appReq{method: http.MethodPost, path: "/api/cleanup/preview", session: true, body: `{"cleanup_scope":"database","peer_ratio_enabled":true,"peer_ratio_max_sl":5,"peer_ratio_remove_data":false,"cleanup_emergency":false}`})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
 	for _, bad := range []string{`{"cleanup_scope":"x"}`, `{"cleanup_condition_mode":"xor"}`, `{"cleanup_scop":"all"}`} {
 		assert.Equal(t, http.StatusBadRequest, e.do(appReq{method: http.MethodPost, path: "/api/cleanup/preview", session: true, body: bad}).Code, bad)
 	}

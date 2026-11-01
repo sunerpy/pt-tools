@@ -957,7 +957,7 @@ func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloade
 		reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
 		global.GetSlogger().Warnf("[磁盘保护] %s: 空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB；有效 - 种子 %.1f GB < 保底 %.1f GB)，跳过手动添加",
 			dl.GetName(), freeGB, pendingGB, reservedGB, effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
-		if glOnly.CleanupEnabled {
+		if glOnly.CleanupEnabled && glOnly.CleanupEmergency {
 			events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "downloader-add", At: time.Now()})
 		}
 		return noop, fmt.Errorf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB)

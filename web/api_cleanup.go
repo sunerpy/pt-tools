@@ -46,7 +46,7 @@ func (s *Server) apiCleanupStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, v)
 }
 
-// CleanupPreviewInput 是预览用的删种规则（自动删种页上的那几项，可以还没保存）。开关与间隔不影响会删哪些，不用给。
+// CleanupPreviewInput 是预览用的删种规则（自动删种页上的那几项，可以还没保存）。总开关与间隔不影响会删哪些，不用给。
 type CleanupPreviewInput struct {
 	CleanupScope          string  `json:"cleanup_scope"`
 	CleanupScopeTags      string  `json:"cleanup_scope_tags"`
@@ -59,11 +59,16 @@ type CleanupPreviewInput struct {
 	CleanupSlowMaxRatio   float64 `json:"cleanup_slow_max_ratio"`
 	CleanupDelFreeExpired bool    `json:"cleanup_del_free_expired"`
 	CleanupDiskProtect    bool    `json:"cleanup_disk_protect"`
+	CleanupEmergency      bool    `json:"cleanup_emergency"`
 	CleanupMinDiskSpaceGB float64 `json:"cleanup_min_disk_space_gb"`
 	CleanupProtectDL      bool    `json:"cleanup_protect_dl"`
 	CleanupProtectHR      bool    `json:"cleanup_protect_hr"`
 	CleanupMinRetainH     int     `json:"cleanup_min_retain_h"`
 	CleanupProtectTags    string  `json:"cleanup_protect_tags"`
+	// 做种竞争度：超过 S/L 上限时删除（peer_ratio_remove_data）或只暂停
+	PeerRatioEnabled    bool    `json:"peer_ratio_enabled"`
+	PeerRatioMaxSL      float64 `json:"peer_ratio_max_sl"`
+	PeerRatioRemoveData bool    `json:"peer_ratio_remove_data"`
 }
 
 // CleanupPreviewView 是预览的结果：每台连得上的下载器一个。
@@ -101,7 +106,9 @@ func (s *Server) apiCleanupPreview(w http.ResponseWriter, r *http.Request) {
 	cfg.CleanupMaxSeedTimeH, cfg.CleanupMinRatio, cfg.CleanupMaxInactiveH = in.CleanupMaxSeedTimeH, in.CleanupMinRatio, in.CleanupMaxInactiveH
 	cfg.CleanupSlowSeedTimeH, cfg.CleanupSlowMaxRatio = in.CleanupSlowSeedTimeH, in.CleanupSlowMaxRatio
 	cfg.CleanupDelFreeExpired, cfg.CleanupDiskProtect, cfg.CleanupMinDiskSpaceGB = in.CleanupDelFreeExpired, in.CleanupDiskProtect, in.CleanupMinDiskSpaceGB
+	cfg.CleanupEmergency = in.CleanupEmergency
 	cfg.CleanupProtectDL, cfg.CleanupProtectHR, cfg.CleanupMinRetainH, cfg.CleanupProtectTags = in.CleanupProtectDL, in.CleanupProtectHR, in.CleanupMinRetainH, in.CleanupProtectTags
+	cfg.PeerRatioEnabled, cfg.PeerRatioMaxSL, cfg.PeerRatioRemoveData = in.PeerRatioEnabled, in.PeerRatioMaxSL, in.PeerRatioRemoveData
 	res := s.mgr.CleanupPreview(r.Context(), &cfg)
 	if res == nil {
 		res = []scheduler.CleanupResult{}
