@@ -47,7 +47,7 @@ func keepTorrents(dl downloader.Downloader, rec downloaderRecord, targets []Torr
 		case !ok:
 			result(target, fmt.Errorf("种子不在下载器里了"))
 		case keep:
-			result(target, keepOne(dl, rec.ID, t, labels, repo))
+			result(target, keepOne(dl, rec.ID, t, labels, repo, keepHandOverReason))
 		default:
 			result(target, unkeepOne(dl, t, labels))
 		}
@@ -64,16 +64,17 @@ func findTorrent(all []downloader.Torrent, id string) (downloader.Torrent, bool)
 	return downloader.Torrent{}, false
 }
 
-// keepOne 给一个种子加上保留标签，再交还刷流记录。交还失败时撤回刚加的标签、报失败；撤回也失败时报部分失败
-// （标签留着，刷流下一轮看到标签会交还）。种子本来就带保留标签时不改标签，只补交还。
-func keepOne(dl downloader.Downloader, dlID uint, t downloader.Torrent, labels bool, repo *models.BrushRepository) error {
+// keepOne 给一个种子加上保留标签，再交还刷流记录（reason 写进刷流记录的结束原因）。交还失败时撤回刚加的标签、报失败；
+// 撤回也失败时报部分失败（标签留着，刷流下一轮看到标签会交还）。种子本来就带保留标签时不改标签，只补交还。
+// 种子列表的「保留」与删除刷流任务时选了保留（见 keepBrushTorrentsAndDelete）都用它。
+func keepOne(dl downloader.Downloader, dlID uint, t downloader.Torrent, labels bool, repo *models.BrushRepository, reason string) error {
 	had := hasKeepTag(t)
 	if !had {
 		if err := addKeepTag(dl, t, labels); err != nil {
 			return fmt.Errorf("加保留标签失败: %w", err)
 		}
 	}
-	if _, err := repo.EndActiveByHash(dlID, t.InfoHash, keepHandOverReason, time.Now()); err != nil {
+	if _, err := repo.EndActiveByHash(dlID, t.InfoHash, reason, time.Now()); err != nil {
 		if had {
 			return fmt.Errorf("刷流记录没改（%v）；刷流下一轮看到保留标签会交还", err)
 		}

@@ -1,4 +1,13 @@
-import type { BrushRun, BrushRunResult, BrushRunStep, BrushTask, BrushTaskConfig } from "@/api";
+import {
+  ApiError,
+  type BrushDeleteResult,
+  type BrushDeleteTorrents,
+  type BrushRun,
+  type BrushRunResult,
+  type BrushRunStep,
+  type BrushTask,
+  type BrushTaskConfig,
+} from "@/api";
 
 /** 刷流入场可选的优惠类型（与 site/v2 的 DiscountLevel 一致），按常用程度排 */
 export const BRUSH_DISCOUNTS: readonly { value: string; label: string }[] = [
@@ -134,6 +143,35 @@ export function runMessage(
   const errs = r.errors ?? [];
   if (errs.length) parts.push(`${errs.length} 个错误：${errs[0]}`);
   return { tone: errs.length ? "warn" : "ok", text: parts.join("；") };
+}
+
+/**
+ * 删除任务时选了保留、有种子保留失败：接口回 502，正文是 BrushDeleteResult（带 failed）。
+ * 是这种情况时返回它，别的错误（任务正在运行一轮、任务不存在、回的不是 JSON）返回 null。
+ */
+export function brushDeleteFailure(e: unknown): BrushDeleteResult | null {
+  if (!(e instanceof ApiError) || e.status !== 502) return null;
+  try {
+    const body = JSON.parse(e.message) as BrushDeleteResult | null;
+    return body && Array.isArray(body.failed) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 删掉任务以后的提示：count 是删除前任务名下在做的种子数 */
+export function brushDeletedText(
+  choice: BrushDeleteTorrents,
+  res: BrushDeleteResult | undefined,
+  count: number,
+): string {
+  if (choice === "handover") {
+    return count > 0 ? `已删除，留下的 ${count} 个种子交给自动删种` : "已删除";
+  }
+  const parts = ["已删除"];
+  if (res?.kept) parts.push(`${res.kept} 个种子已保留`);
+  if (res?.missing) parts.push(`${res.missing} 个已不在下载器里`);
+  return parts.join("，");
 }
 
 /** 下次运行时间（毫秒）；从没运行过时为 null（启动后一分钟内会跑） */

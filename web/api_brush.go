@@ -281,16 +281,39 @@ func (s *Server) brushTaskCRUD(w http.ResponseWriter, r *http.Request, repo *mod
 		}
 		s.writeBrushTask(w, repo, id, http.StatusOK)
 	case http.MethodDelete:
-		err := s.brushMonitor().WithTaskLock(id, func() error { return repo.DeleteTask(id) })
+		// 留下的种子：交给自动删种（默认）或者保留，见 BrushDeleteHandover、BrushDeleteKeep
+		keep := false
+		switch r.URL.Query().Get("torrents") {
+		case "", BrushDeleteHandover:
+		case BrushDeleteKeep:
+			keep = true
+		default:
+			http.Error(w, "torrents 只能是 handover（交给自动删种）或 keep（保留）", http.StatusBadRequest)
+			return
+		}
+		resp := BrushDeleteResponse{Success: true}
+		err := s.brushMonitor().WithTaskLock(id, func() error {
+			if keep {
+				return s.keepBrushTorrentsAndDelete(r.Context(), repo, id, &resp)
+			}
+			return repo.DeleteTask(id)
+		})
 		switch {
 		case errors.Is(err, scheduler.ErrBrushBusy):
 			http.Error(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, models.ErrBrushTaskNotFound):
 			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, errBrushKeepIncomplete):
+			// 下载器连不上或标签加不上：任务没删，回 502，正文列出保留失败的种子
+			resp.Success = false
+			resp.Error = fmt.Sprintf("有 %d 个种子保留失败，任务没有删除", len(resp.Failed))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(resp)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
-			writeJSON(w, map[string]any{"success": true})
+			writeJSON(w, resp)
 		}
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)

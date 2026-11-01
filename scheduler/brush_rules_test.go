@@ -189,6 +189,36 @@ func TestBrushRemoval(t *testing.T) {
 	}
 }
 
+// 「没有活动」先看下载器记的最后一次上传或下载的时间（qB 的 last_activity、Transmission 的 activityDate，
+// 与自动删种的「不活跃」同一个来源）；下载器没给（0）时，退回刷流自己采样记下的最后活动时间。
+func TestBrushRemoval_InactiveUsesDownloaderLastActivity(t *testing.T) {
+	task := models.BrushTask{IntervalMin: 10, RemoveInactiveH: 6}
+	sampledLongAgo := brushNow.Add(-7 * time.Hour)
+	sampledJustNow := brushNow.Add(-10 * time.Minute)
+	cases := []struct {
+		name   string
+		bt     models.BrushTorrent
+		last   int64
+		remove bool
+	}{
+		{name: "下载器记的 7 小时前：删，采样刚记过活动也不算", bt: models.BrushTorrent{LastActivityAt: &sampledJustNow}, last: brushNow.Add(-7 * time.Hour).Unix(), remove: true},
+		{name: "下载器记的 1 小时前：不删，采样 7 小时没涨也不算", bt: models.BrushTorrent{LastActivityAt: &sampledLongAgo}, last: brushNow.Add(-time.Hour).Unix()},
+		{name: "还没采样过、下载器记的 7 小时前：删", last: brushNow.Add(-7 * time.Hour).Unix(), remove: true},
+		{name: "下载器没给：按采样，7 小时没涨就删", bt: models.BrushTorrent{LastActivityAt: &sampledLongAgo}, remove: true},
+		{name: "下载器没给：按采样，刚有活动不删", bt: models.BrushTorrent{LastActivityAt: &sampledJustNow}},
+		{name: "两边都不知道：不删", bt: models.BrushTorrent{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			remove, reason := brushRemoval(task, tc.bt, downloader.Torrent{Progress: 1, LastActivity: tc.last}, nil, brushNow)
+			assert.Equal(t, tc.remove, remove, reason)
+			if tc.remove {
+				assert.Equal(t, "已 7.0 小时没有上传或下载", reason, "文案不变")
+			}
+		})
+	}
+}
+
 func TestBrushCompleted(t *testing.T) {
 	assert.True(t, brushCompleted(downloader.Torrent{Progress: 1, State: downloader.TorrentSeeding}))
 	assert.True(t, brushCompleted(downloader.Torrent{Progress: 1, State: downloader.TorrentPaused}), "暂停的已完成种子算完成")

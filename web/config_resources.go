@@ -261,7 +261,10 @@ func (s *Server) configResources() []*configResource {
 				"interval_min": "多久挑一轮（分钟）",
 				"section":      "只对 M-Team：normal 综合区、adult 成人区、all 两个都读；空着等于 normal",
 			},
-			Impact: []string{"开着的任务会按间隔往下载器里加种子、按条件删种", "任务正在运行一轮时不能保存，稍后再试"},
+			Impact: []string{
+				"开着的任务会按间隔往下载器里加种子、按条件删种", "任务正在运行一轮时不能保存，稍后再试",
+				"删除任务时，留下的种子交给自动删种",
+			},
 		},
 		{
 			Name: "transfer_rules", Title: "转移做种规则", Kind: configList, Path: "/api/transfer/rules", Wrap: "items",

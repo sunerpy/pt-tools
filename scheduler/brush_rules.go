@@ -241,13 +241,27 @@ func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.To
 			}
 		}
 	}
-	if task.RemoveInactiveH > 0 && bt.LastActivityAt != nil {
-		idle := now.Sub(*bt.LastActivityAt)
-		if idle >= time.Duration(task.RemoveInactiveH*float64(time.Hour)) {
-			return true, fmt.Sprintf("已 %.1f 小时没有上传或下载", idle.Hours())
+	if task.RemoveInactiveH > 0 {
+		if last, ok := brushLastActivity(bt, t); ok {
+			idle := now.Sub(last)
+			if idle >= time.Duration(task.RemoveInactiveH*float64(time.Hour)) {
+				return true, fmt.Sprintf("已 %.1f 小时没有上传或下载", idle.Hours())
+			}
 		}
 	}
 	return false, ""
+}
+
+// brushLastActivity 是种子最后一次上传或下载数据的时间：先看下载器记的（qB 的 last_activity、Transmission 的 activityDate，
+// 与自动删种的「不活跃」同一个来源），下载器没给时用刷流自己采样记下的（累计上传或下载量涨了的那次采样）。都不知道时 ok 为假。
+func brushLastActivity(bt models.BrushTorrent, t downloader.Torrent) (time.Time, bool) {
+	if t.LastActivity > 0 {
+		return time.Unix(t.LastActivity, 0), true
+	}
+	if bt.LastActivityAt != nil {
+		return *bt.LastActivityAt, true
+	}
+	return time.Time{}, false
 }
 
 // brushCompleted 报告种子是否已经下完：进度 100%，并且不在校验、出错这类进度还不可信的状态里

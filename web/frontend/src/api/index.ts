@@ -2436,12 +2436,40 @@ export interface BrushStatsResponse {
   totals: BrushStatsPoint[];
 }
 
+/** 删除刷流任务时留下的种子：交给自动删种（handover，默认），或者保留（keep：加 pt-tools-keep） */
+export type BrushDeleteTorrents = "handover" | "keep";
+
+/** 删除任务时选了保留、保留失败的一个种子 */
+export interface BrushKeepFailure {
+  title: string;
+  info_hash: string;
+  downloader_id: number;
+  downloader_name?: string;
+  message: string;
+}
+
+/**
+ * 删除刷流任务的结果。选了保留时 kept 是加上保留标签并交还给你的种子数，missing 是已经不在下载器里的；
+ * 有种子保留失败时任务不删，接口回 502，正文也是这个形状（success 为 false，failed 列出那几个）。
+ */
+export interface BrushDeleteResult {
+  success: boolean;
+  error?: string;
+  kept?: number;
+  missing?: number;
+  failed?: BrushKeepFailure[];
+}
+
 export const brushApi = {
   list: () => api.get<BrushTask[]>("/api/brush/tasks"),
   get: (id: number) => api.get<BrushTask>(`/api/brush/tasks/${id}`),
   create: (data: BrushTaskConfig) => api.post<BrushTask>("/api/brush/tasks", data),
   update: (id: number, data: BrushTaskConfig) => api.put<BrushTask>(`/api/brush/tasks/${id}`, data),
-  remove: (id: number) => api.delete<{ success: boolean }>(`/api/brush/tasks/${id}`),
+  /** 删除任务；torrents 不传时按接口的默认值（交给自动删种） */
+  remove: (id: number, torrents?: BrushDeleteTorrents) =>
+    api.delete<BrushDeleteResult>(
+      `/api/brush/tasks/${id}${torrents ? `?torrents=${torrents}` : ""}`,
+    ),
   run: (id: number) =>
     api.post<{ result: BrushRunResult; error?: string }>(`/api/brush/tasks/${id}/run`),
   /** 运行记录，新的在前 */

@@ -550,7 +550,7 @@ The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` 
 | POST   | `/brush/tasks/preview`       | Read       | Preview a `ConfigChange`, restricted to brush tasks                                                           |
 | POST   | `/brush/tasks`               | Write      | Create a brush task                                                                                           |
 | PUT    | `/brush/tasks/{id}`          | Write      | Update a brush task                                                                                           |
-| DELETE | `/brush/tasks/{id}`          | Write      | Delete a brush task                                                                                           |
+| DELETE | `/brush/tasks/{id}`          | Write      | Delete a brush task; the torrents it leaves behind are handed over to auto-delete                             |
 | POST   | `/brush/tasks/{id}/status`   | Write      | Enable or disable with `{"enabled": true}` or `false`                                                         |
 | GET    | `/brush/tasks/{id}/runs`     | Read       | Paginated run records                                                                                         |
 | GET    | `/stats/aggregated`          | Read       | Aggregated site statistics using the web statistics fields and billed download semantics                      |

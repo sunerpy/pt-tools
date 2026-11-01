@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import {
+  type BrushDeleteResult,
+  type BrushDeleteTorrents,
   type BrushStatsResponse,
   type BrushTask,
   type BrushTaskConfig,
@@ -28,6 +30,8 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import {
   BRUSH_DISCOUNTS,
   BRUSH_SECTIONS,
+  brushDeletedText,
+  brushDeleteFailure,
   brushSectionFor,
   configOf,
   defaultBrushConfig,
@@ -49,7 +53,7 @@ import {
   saveBrushPeriod,
 } from "@/utils/brushPeriods";
 import { formatBytes, formatRatio, formatShortDateTime } from "@/utils/format";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 
 /*
@@ -381,22 +385,55 @@ async function toggleEnabled(task: BrushTask) {
   }
 }
 
-async function removeTask(task: BrushTask) {
+/*
+ * 删除任务时选留下的种子怎么办（2026-11-01 用户决定）：交给自动删种（默认），或者保留
+ * （每个种子加上 pt-tools-keep，自动删除都跳过它们）。选了保留、有种子加不上标签时任务不删，
+ * 对话框不关，列出是哪几个；已经加上标签的保持保留，可以再试，或者改选交给自动删种。
+ */
+const deleteOpen = ref(false);
+const deleteTarget = ref<BrushTask | null>(null);
+const deleteChoice = ref<BrushDeleteTorrents>("handover");
+const deleteFailure = ref<BrushDeleteResult | null>(null);
+const deleting = ref(false);
+const deleteCount = computed(() => deleteTarget.value?.active_count ?? 0);
+
+function removeTask(task: BrushTask) {
+  deleteTarget.value = task;
+  deleteChoice.value = "handover";
+  deleteFailure.value = null;
+  deleteOpen.value = true;
+}
+
+async function confirmRemove() {
+  const task = deleteTarget.value;
+  if (!task || deleting.value) return;
+  // 名下没有在做的种子时不给选项，按默认的交给自动删种
+  const choice = deleteCount.value > 0 ? deleteChoice.value : "handover";
+  deleting.value = true;
+  deleteFailure.value = null;
+  // 等回应时关掉对话框、又打开了别的任务的：回应只落到它自己的那个任务上
+  const same = () => deleteTarget.value?.id === task.id;
+  const count = deleteCount.value;
   try {
-    await ElMessageBox.confirm(
-      `删除任务「${task.name}」？它名下 ${task.active_count} 个在做的种子会留在下载器里，不再由刷流管理（也不会被自动清理的常规规则处理）。`,
-      "删除刷流任务",
-      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
-    );
-  } catch {
-    return;
-  }
-  try {
-    await brushApi.remove(task.id);
-    ElMessage.success("已删除");
+    const res = await brushApi.remove(task.id, choice);
+    if (same()) deleteOpen.value = false;
+    ElMessage.success(brushDeletedText(choice, res, count));
     await loadAll();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "删除失败");
+    const failure = brushDeleteFailure(e);
+    if (failure) {
+      // 加上了标签的那些已经交还给你：任务名下的在做数变了，刷新列表，对话框里的个数也跟着换
+      if (same()) deleteFailure.value = failure;
+      void loadAll().then(() => {
+        const fresh = tasks.value.find((t) => t.id === task.id);
+        if (fresh && same()) deleteTarget.value = fresh;
+      });
+    } else {
+      if (same()) deleteOpen.value = false;
+      ElMessage.error((e as Error).message || "删除失败");
+    }
+  } finally {
+    deleting.value = false;
   }
 }
 
@@ -865,9 +902,8 @@ function progressText(t: BrushTorrent): string {
             删种只处理带本任务标签、并且是本任务加的种子；H&amp;R 种子在做种时长达标前一律不删。
           </li>
           <li>
-            刷流种子带
-            <code>pt-tools-brush</code>
-            标签，全局自动清理的常规规则不处理它们；磁盘告急时的紧急清理照样覆盖。
+            刷流任务正在管的种子按任务自己的规则删，全局自动清理的常规规则跳过它们；删除任务时可以选择把留下的种子交给自动删种，或者保留（加
+            <code>pt-tools-keep</code>）。磁盘告急时的紧急清理照样覆盖，带保留或保护标签的除外。
           </li>
           <li>
             关闭任务只是停止加种，已加入的种子继续按删种规则处理。刷流会增加站点请求，开启前请确认站点规则允许。
@@ -1134,6 +1170,68 @@ function progressText(t: BrushTorrent): string {
         <el-button type="primary" :loading="saving" data-testid="brush-save" @click="saveTask">
           {{ editingId === null ? "创建" : "保存" }}
         </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="deleteOpen"
+      class="pt-dialog"
+      title="删除刷流任务"
+      :width="isMobile ? '94%' : '520px'"
+      align-center
+      data-testid="brush-delete-dialog">
+      <p class="brush-del-text">
+        删除任务「{{ deleteTarget?.name }}」：任务和它的统计、种子记录、运行记录一起删除。
+      </p>
+      <el-form v-if="deleteCount > 0" class="pt-form" label-position="top" @submit.prevent>
+        <el-form-item
+          class="brush-del-item"
+          :label="`名下 ${deleteCount} 个在做的种子留在下载器里，之后：`">
+          <el-radio-group v-model="deleteChoice" class="brush-del-opts">
+            <el-radio value="handover">交给自动删种</el-radio>
+            <div class="field-tip brush-del-tip">
+              种子按自动删种的规则处理（在「自动清理」页设置）：满足条件就删，保护规则照样生效；没开自动删种时一直留在下载器里。
+            </div>
+            <el-radio value="keep">保留这些种子（加 pt-tools-keep，自动删除都跳过它们）</el-radio>
+            <div class="field-tip brush-del-tip">
+              给每个种子加上
+              <code>pt-tools-keep</code>
+              标签，自动删种（含紧急清理）、做种竞争度和免费结束时的删除都不删它们，要删时在「下载器」页手动处理。有下载器连不上或标签加不上时任务不删，会列出是哪几个。
+            </div>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <p v-else class="brush-del-text">它名下现在没有在做的种子。</p>
+      <div
+        v-if="deleteFailure"
+        class="pt-note pt-note--warn brush-del-failed"
+        data-testid="brush-delete-failed">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <div>
+          <p class="brush-del-failed__lead">
+            有 {{ deleteFailure.failed?.length ?? 0 }} 个种子保留失败，任务没有删除。<template
+              v-if="deleteFailure.kept"
+              >已经加上保留标签的 {{ deleteFailure.kept }} 个保持保留，不再归这个任务管。</template
+            >可以稍后再试，或者改选「交给自动删种」。
+          </p>
+          <ul class="brush-del-failed__list">
+            <li v-for="f in deleteFailure.failed" :key="`${f.downloader_id}-${f.info_hash}`">
+              {{ f.title || f.info_hash }}（{{
+                f.downloader_name || `下载器 ${f.downloader_id}`
+              }}）：{{ f.message }}
+            </li>
+          </ul>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="deleteOpen = false">取消</el-button>
+        <el-button
+          type="danger"
+          :loading="deleting"
+          data-testid="brush-delete-confirm"
+          @click="confirmRemove"
+          >删除</el-button
+        >
       </template>
     </el-dialog>
 
@@ -1477,6 +1575,69 @@ function progressText(t: BrushTorrent): string {
   margin-top: 2px;
   font-size: var(--pt-fz-label);
   color: var(--pt-t3);
+}
+
+/* 删除任务的对话框：两个选项竖着排，各自的后果写在选项下面 */
+.brush-del-text {
+  margin: 0 0 var(--pt-space-3);
+  overflow-wrap: anywhere;
+}
+
+.brush-del-text:last-child {
+  margin-bottom: 0;
+}
+
+/* 对话框里只有这一项：去掉表单项的下边距，正文上下留白一致 */
+.pt-form .brush-del-item {
+  margin-bottom: 0;
+}
+
+.brush-del-opts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+}
+
+/* el-radio 默认一行、不换行：选项名在手机上要能折行，圆点对齐第一行 */
+.brush-del-opts :deep(.el-radio) {
+  height: auto;
+  margin-right: 0;
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.brush-del-opts :deep(.el-radio__input) {
+  margin-top: 3px;
+}
+
+.brush-del-opts :deep(.el-radio__label) {
+  line-height: 20px;
+}
+
+/* 说明与选项文字左对齐（圆点 14 + 间距 8）；全局的 .field-tip 是 100% 宽，这里让出左边的 22 */
+.brush-del-opts .brush-del-tip {
+  width: auto;
+  margin: 2px 0 var(--pt-space-3) 22px;
+}
+
+.brush-del-opts .brush-del-tip:last-child {
+  margin-bottom: 0;
+}
+
+.brush-del-failed {
+  margin-top: var(--pt-space-3);
+}
+
+.brush-del-failed__lead {
+  margin: 0;
+}
+
+/* 种子名常常是一长串没有空格的英文，只在放不下时才断开 */
+.brush-del-failed__list {
+  margin: var(--pt-space-1) 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
 }
 </style>
 
