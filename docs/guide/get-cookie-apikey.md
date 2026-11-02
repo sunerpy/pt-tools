@@ -6,11 +6,11 @@
 
 pt-tools 支持三种站点认证方式：
 
-| 认证方式    | 适用站点                             | 特点                 | 推荐配置方式          |
-| ----------- | ------------------------------------ | -------------------- | --------------------- |
-| **Cookie**  | HDSky, SpringSunday, HDDolby, NovaHD | 传统方式，需定期更新 | ✅ 浏览器扩展自动同步 |
-| **API Key** | M-Team                               | 长期有效             | 手动配置              |
-| **Passkey** | Rousi Pro（填个人 API Key）          | 长期有效             | 手动配置              |
+| 认证方式    | 适用站点                    | 特点                                               | 推荐配置方式          |
+| ----------- | --------------------------- | -------------------------------------------------- | --------------------- |
+| **Cookie**  | HDSky, SpringSunday, NovaHD | 传统方式，需定期更新                               | ✅ 浏览器扩展自动同步 |
+| **API Key** | M-Team、UHDDolby（RSS key） | M-Team 长期有效；UHDDolby 的 RSS key 30–180 天到期 | 手动配置              |
+| **Passkey** | Rousi Pro（填个人 API Key） | 长期有效                                           | 手动配置              |
 
 **Cookie 鉴权站点强烈推荐使用浏览器扩展**，可省去手动复制粘贴的繁琐操作，并在 Cookie 过期时自动更新。
 
@@ -96,7 +96,7 @@ Firefox 只能临时载入，步骤见[浏览器扩展](browser-extension.md)。
 
 Cookie 是网站存储在浏览器中的小段数据，用于维持用户的登录状态。PT 站点通过 Cookie 来识别已登录的用户身份。
 
-**适用站点**：HDSky, SpringSunday, HDDolby, NovaHD 等基于 NexusPHP 架构的站点。
+**适用站点**：HDSky, SpringSunday, NovaHD 等基于 NexusPHP 架构的站点。
 
 ### Chrome / Edge 浏览器手动获取方法
 
@@ -224,6 +224,19 @@ Rousi Pro 在 pt-tools 里是 Passkey 认证，但这一栏要填站点的个人
 
 每个账户只有一把个人 API Key，MoviePilot 等别的工具共用它。轮换会让所有工具里的旧 Key 立即失效，要在 pt-tools 里换成新 Key；已有的 Key 改权限，要轮换以后才生效。
 
+### UHDDolby RSS key 获取方法
+
+UHDDolby（高清杜比，现在的域名是 `www.uhddolby.com`）的搜索、下载和用户数据走站点的 API，API Key 就是 RSS 页给的 RSSKEY：
+
+1. 用浏览器登录 UHDDolby，打开「控制面板 → RSS 订阅」（`https://www.uhddolby.com/getrss.php`）。
+2. 选好「RSS链接有效期」（默认 90 天，最长 180 天），生成 RSS 链接。
+3. 复制页面给出的 RSSKEY，填到 pt-tools 站点详情里 UHDDolby 的「API Key / RSS Key」一栏。
+
+- RSS 链接到期后 RSSKEY 跟着失效，pt-tools 的搜索、下载会报「API Key（RSS key）不对或已过期」，到期前在 RSS 页生成新的换上。
+- Cookie 可选，只用于时魔和签到：没填 Cookie 时这两项没有，其余照常。浏览器扩展同步来的就是这份 Cookie。
+- 站点强制两步验证。Cookie 第一次在 pt-tools 所在的网络上用时，站点可能先要输两步验证码，这时时魔和签到会失败、原因里写明；搜索、下载和用户数据走 API，不受影响。
+- 站点的 API 每小时最多 50 次请求，超了要等 4 小时，pt-tools 已按这个限速；每小时最多下载 60 个种子（VIP 100 个），超了会被暂时拉黑 4 小时。
+
 ### API Key 安全注意事项
 
 1. **不要分享 API Key**：API Key 等同于你的账户密码
@@ -274,7 +287,7 @@ Rousi Pro 在 pt-tools 里是 Passkey 认证，但这一栏要填站点的个人
 | 有效期   | 自动续期            | 1-4 周               | 长期有效             |
 | 配置方式 | 扩展自动推送        | 手动粘贴             | 手动粘贴             |
 | 安全性   | 一般                | 一般                 | 较高                 |
-| 适用站点 | NexusPHP 架构       | NexusPHP 架构        | mTorrent 架构        |
+| 适用站点 | NexusPHP 架构       | NexusPHP 架构        | M-Team、UHDDolby     |
 
 ## 常见问题排查
 

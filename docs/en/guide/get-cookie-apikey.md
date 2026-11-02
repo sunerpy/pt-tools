@@ -6,11 +6,11 @@ This page explains how to obtain a site's credentials (a cookie, an API key or a
 
 pt-tools supports three ways of authenticating with a site:
 
-| Method      | Sites                                | Characteristics                                | Recommended setup                                |
-| ----------- | ------------------------------------ | ---------------------------------------------- | ------------------------------------------------ |
-| **Cookie**  | HDSky, SpringSunday, HDDolby, NovaHD | The traditional way; expires from time to time | ✅ Synced automatically by the browser extension |
-| **API key** | M-Team                               | Valid for a long time                          | Entered by hand                                  |
-| **Passkey** | Rousi Pro (personal API key)         | Valid for a long time                          | Entered by hand                                  |
+| Method      | Sites                        | Characteristics                                                             | Recommended setup                                |
+| ----------- | ---------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
+| **Cookie**  | HDSky, SpringSunday, NovaHD  | The traditional way; expires from time to time                              | ✅ Synced automatically by the browser extension |
+| **API key** | M-Team, UHDDolby (RSS key)   | M-Team's lasts a long time; UHDDolby's RSS key expires after 30 to 180 days | Entered by hand                                  |
+| **Passkey** | Rousi Pro (personal API key) | Valid for a long time                                                       | Entered by hand                                  |
 
 **For sites that use a cookie, the browser extension is strongly recommended.** It saves you copying and pasting by hand, and updates the cookie when it expires.
 
@@ -98,7 +98,7 @@ If you would rather not install the extension, or the site uses an API key or a 
 
 A cookie is a small piece of data a website stores in the browser to keep you signed in. Sites recognise a signed-in user by the cookie.
 
-**Sites**: HDSky, SpringSunday, HDDolby, NovaHD and the other sites that run NexusPHP.
+**Sites**: HDSky, SpringSunday, NovaHD and the other sites that run NexusPHP.
 
 ### Getting it by hand in Chrome or Edge
 
@@ -226,6 +226,19 @@ Rousi Pro uses passkey authentication in pt-tools, but the field takes the site'
 
 Each account has one personal API key, which other tools such as MoviePilot share. Rotating it revokes the old key in every tool at once, so replace it in pt-tools as well; changed permissions on an existing key take effect only after rotating it.
 
+### Getting the UHDDolby RSS key
+
+UHDDolby (HDDolby, 高清杜比, now at `www.uhddolby.com`) searches, downloads and reports user data through the site's API, and the API key is the RSSKEY from the RSS page:
+
+1. Sign in to UHDDolby in a browser and open Control panel → RSS (控制面板 → RSS 订阅, `https://www.uhddolby.com/getrss.php`).
+2. Choose how long the RSS link stays valid (RSS链接有效期; 90 days by default, at most 180) and generate the link.
+3. Copy the RSSKEY the page shows and enter it in the API Key / RSS Key field of UHDDolby's site details in pt-tools.
+
+- When the RSS link expires its RSSKEY stops working, and searching and downloading in pt-tools report that the API key (RSS key) is wrong or has expired. Generate a new one on the RSS page before it expires and replace it.
+- The cookie is optional and only used for bonus per hour and sign-in; without it those two are missing and everything else works. It is the cookie the browser extension syncs.
+- The site enforces two-step verification. The first time the cookie is used from the network pt-tools runs on, the site may ask for a two-step code first; bonus per hour and sign-in then fail with that reason, while searching, downloading and user data go through the API and keep working.
+- The site's API allows at most 50 requests an hour and blocks you for 4 hours after that; pt-tools stays within this limit. You can download at most 60 torrents an hour (100 for VIP); more gets you blacklisted for 4 hours.
+
 ### Keeping an API key safe
 
 1. **Never share it**: an API key is as good as your account password
@@ -276,7 +289,7 @@ Click Probe now (立即探测) on the row to check the login status at once; see
 | Lifetime      | Renewed automatically            | One to four weeks        | Long                        |
 | How it is set | Pushed by the extension          | Pasted by hand           | Pasted by hand              |
 | Security      | Average                          | Average                  | Better                      |
-| Sites         | NexusPHP                         | NexusPHP                 | mTorrent                    |
+| Sites         | NexusPHP                         | NexusPHP                 | M-Team, UHDDolby            |
 
 ## Troubleshooting
 

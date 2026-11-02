@@ -21,7 +21,7 @@ This is the core of fully automatic ratio building and of following series.
 
 How you get the RSS link depends on the software the site runs.
 
-### NexusPHP sites (such as HDSky and HDDolby)
+### NexusPHP sites (such as HDSky and SpringSunday)
 
 These sites usually authenticate with a cookie, and the RSS link may contain your `passkey`. Never share your RSS link.
 
@@ -39,6 +39,8 @@ These sites usually authenticate with a cookie, and the RSS link may contain you
 - `rows`: the number of torrents returned (10 to 50 is a good range)
 - `linktype`: the link type; it normally has to include `dl` so the feed carries direct download links
 - `passkey`: your personal key; **never share it**
+
+UHDDolby's RSS links expire (after 90 days by default, at most 180, chosen when you generate the link). Generate a new one before it expires and replace both the RSS address in pt-tools and the API key in the site settings, which is the same RSSKEY.
 
 ### mTorrent sites (such as M-Team)
 

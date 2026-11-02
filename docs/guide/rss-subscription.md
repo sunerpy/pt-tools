@@ -21,7 +21,7 @@ RSS (Really Simple Syndication) 是一种网络内容聚合格式。在 PT (Priv
 
 不同的 PT 站点架构，获取 RSS 链接的方式略有不同。
 
-### NexusPHP 架构站点 (如 HDSky, HDDolby)
+### NexusPHP 架构站点 (如 HDSky, SpringSunday)
 
 这类站点通常基于 Cookie 进行认证，RSS 链接中可能会包含用户的 `passkey`，请勿泄露自己的 RSS 链接。
 
@@ -39,6 +39,8 @@ RSS (Really Simple Syndication) 是一种网络内容聚合格式。在 PT (Priv
 - `rows`: 返回的种子数量 (建议设置为 10-50)
 - `linktype`: 链接类型，通常必须包含 `dl` 以直接获取下载链接
 - `passkey`: 你的个人密钥，**请勿泄露**
+
+UHDDolby 的 RSS 链接有有效期（默认 90 天，最长 180 天，生成时选），到期后要重新生成，换掉 pt-tools 里的 RSS 地址和站点设置里的 API Key（同一个 RSSKEY）。
 
 ### mTorrent 架构站点 (如 M-Team)
 
