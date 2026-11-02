@@ -599,7 +599,18 @@ func (s *Service) attempt(ctx context.Context, p *pass, src source, c iyuu.Candi
 		retryLater("下载种子失败: " + err.Error())
 		return
 	}
-	if h, hashErr := qbit.ComputeTorrentHash(data); hashErr != nil || !strings.EqualFold(h, c.InfoHash) {
+	h, hashErr := qbit.ComputeTorrentHash(data)
+	if hashErr != nil {
+		// 站点回的不是种子文件（网页、错误提示；驱动没有认出来的）：多半是站点那边的状态（要先在网页上确认提示、Cookie 失效），
+		// 过一段时间再试。以前记成「info hash 不符」、以后都不试（2026-11-02 织梦的「第一次下载提示」页）
+		why := hashErr.Error()
+		if notTorrent := v2.CheckTorrentFile(data); notTorrent != nil {
+			why = notTorrent.Error()
+		}
+		retryLater("下载种子失败: " + why)
+		return
+	}
+	if !strings.EqualFold(h, c.InfoHash) {
 		fail("下载到的种子与 IYUU 给的 info hash 不符")
 		return
 	}

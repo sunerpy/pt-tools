@@ -733,3 +733,40 @@ func TestRunSkipsTorrentGoneFromSite(t *testing.T) {
 	assert.Equal(t, 1, res.Skipped[SkipTried], "过了重试间隔也不再试")
 	assert.Equal(t, 1, e.site.downloads["61"], "只下过一次")
 }
+
+// 站点回的不是种子文件（2026-11-02 织梦：Cookie 下载拿到「第一次下载提示」页）：记为可重试的失败、写明拿到的是什么，
+// 不再当成「info hash 不符」以后都不试；种子的 info hash 真的对不上时照旧不再试。
+func TestRunRetriesWhenSiteReturnsWebPage(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	files := map[string]int64{"a.mkv": 100, "sub/b.srt": 1}
+	page := e.candidate("71", files)
+	real := e.site.data["71"]
+	e.site.data["71"] = []byte(`<html><head><title>织梦 :: 下载提示 - Powered by NexusPHP</title></head><body><h2>第一次下载提示</h2>` +
+		`<form action="?" method="post"><input type="hidden" name="id" value="71" /><input type="hidden" name="type" value="firsttime" />` +
+		`<input type="checkbox" name="hidenotice" value="1" checked="checked" /></form></body></html>`)
+	e.candidate("72", files)
+	_, wrong := torrentWith(t, "Movie", files, "wrong")
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 71, "info_hash": page}, map[string]any{"sid": 1, "torrent_id": 72, "info_hash": wrong})
+
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Failed)
+	var recs []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&recs).Error)
+	require.Len(t, recs, 2)
+	assert.True(t, recs[0].Retryable, "拿到网页是站点那边的状态，过一段时间再试")
+	assert.Contains(t, recs[0].Message, "不是种子文件")
+	assert.Contains(t, recs[0].Message, "第一次下载提示")
+	assert.NotContains(t, recs[0].Message, "info hash")
+	assert.False(t, recs[1].Retryable)
+	assert.Contains(t, recs[1].Message, "info hash 不符")
+
+	e.site.data["71"] = real
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "过了 7 天再下，这次拿到种子")
+	assert.Equal(t, 1, res.Skipped[SkipTried], "info hash 不符的不再试")
+}
