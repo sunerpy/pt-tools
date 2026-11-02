@@ -14,6 +14,7 @@ import {
   episodeText,
   mediaKindLabel,
   mediaSourceLabel,
+  matchSourceLabel,
   metaTags,
   posterURL,
   scrapeItemsFor,
@@ -107,6 +108,16 @@ describe("媒体识别的显示工具", () => {
     expect(mediaKindLabel("")).toBe("类型未知");
     expect(mediaSourceLabel("override")).toBe("手动纠正");
     expect(mediaSourceLabel("none")).toBe("没有匹配");
+  });
+
+  it("整理时条目从哪来", () => {
+    expect(matchSourceLabel("manual")).toBe("手动指定");
+    expect(matchSourceLabel("history")).toBe("沿用之前整理用的条目");
+    expect(matchSourceLabel("subscription")).toBe("按订阅的条目");
+    expect(matchSourceLabel("push")).toBe("按推送时说明的条目");
+    expect(matchSourceLabel("search")).toBe("按名字搜索");
+    expect(matchSourceLabel(""), "升级前的记录没有").toBe("");
+    expect(matchSourceLabel(undefined)).toBe("");
   });
 
   it("识别词做什么", () => {

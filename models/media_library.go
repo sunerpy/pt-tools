@@ -207,8 +207,11 @@ type MediaTransferHistory struct {
 	ScrapeNote   string     `gorm:"size:1024;not null;default:''" json:"scrape_note"`
 	ScrapedAt    *time.Time `json:"scraped_at,omitempty"`
 	Trigger      string     `gorm:"size:16;not null;default:''" json:"trigger"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// MatchSource 是条目从哪来：manual（手动指定）、history（沿用之前整理用的）、subscription（订阅的）、push（推送时说明的），
+	// 或者媒体识别的来源（纠正、IMDb 编号、搜索等）。升级前的记录为空
+	MatchSource string    `gorm:"size:16;not null;default:''" json:"match_source"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (MediaTransferHistory) TableName() string { return "media_transfer_histories" }

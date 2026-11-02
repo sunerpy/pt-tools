@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm/clause"
 
+	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -393,19 +394,19 @@ func ruleText(r models.MediaEpisodeRule) string {
 	return r.Mode
 }
 
-// LibraryFor 是追剧指定的媒体库（给整理入库用，见 organize.LibraryFor）：按种子的编号找订阅推送或认领的种子（任何状态，
-// 同一个编号在几个下载器里时先看这个下载器的，再取最新的），回那个订阅的媒体库编号（0 是没指定）。
-func (s *Service) LibraryFor(ctx context.Context, downloaderID uint, hash string) (uint, bool, error) {
+// MediaFor 是订阅的条目与媒体库（给整理入库用，见 organize.MediaFor）：按种子的编号找订阅推送或认领的种子（任何状态，
+// 同一个编号在几个下载器里时先看这个下载器的，再取最新的），回那个订阅的条目与媒体库（库为 0 是没指定）。
+func (s *Service) MediaFor(ctx context.Context, downloaderID uint, hash string) (organize.MediaHint, bool, error) {
 	hash = strings.ToLower(strings.TrimSpace(hash))
 	if hash == "" {
-		return 0, false, nil
+		return organize.MediaHint{}, false, nil
 	}
 	var rows []models.MediaSubscriptionTorrent
 	if err := s.cfg.DB.WithContext(ctx).Select("id", "subscription_id", "downloader_id").Where("info_hash = ?", hash).Order("id DESC").Find(&rows).Error; err != nil {
-		return 0, false, fmt.Errorf("读取订阅的种子失败: %w", err)
+		return organize.MediaHint{}, false, fmt.Errorf("读取订阅的种子失败: %w", err)
 	}
 	if len(rows) == 0 {
-		return 0, false, nil
+		return organize.MediaHint{}, false, nil
 	}
 	pick := rows[0]
 	for _, r := range rows {
@@ -415,13 +416,13 @@ func (s *Service) LibraryFor(ctx context.Context, downloaderID uint, hash string
 		}
 	}
 	var sub models.MediaSubscription
-	if err := s.cfg.DB.WithContext(ctx).Select("id", "library_id").Where("id = ?", pick.SubscriptionID).Limit(1).Find(&sub).Error; err != nil {
-		return 0, false, fmt.Errorf("读取订阅失败: %w", err)
+	if err := s.cfg.DB.WithContext(ctx).Select("id", "library_id", "media_type", "tmdb_id").Where("id = ?", pick.SubscriptionID).Limit(1).Find(&sub).Error; err != nil {
+		return organize.MediaHint{}, false, fmt.Errorf("读取订阅失败: %w", err)
 	}
 	if sub.ID == 0 {
-		return 0, false, nil
+		return organize.MediaHint{}, false, nil
 	}
-	return sub.LibraryID, true, nil
+	return organize.MediaHint{LibraryID: sub.LibraryID, MediaType: sub.MediaType, TMDBID: sub.TMDBID}, true, nil
 }
 
 // intervalText 是间隔的说法：整小时的写小时（整天的写天），其余写分钟。

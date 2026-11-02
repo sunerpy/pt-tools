@@ -111,6 +111,8 @@ Once every episode to follow (from the start episode on, not skipped) is in the 
 
 Under Edit you can pick the media library for a follow: torrents it pushed, and downloader torrents counted towards it, are organised into that library instead of one chosen by type. When the library has been deleted or switched off, or is not a TV library, organising fails with an explanation; pick another library in the follow.
 
+These torrents are also organised as the subscription's item instead of being recognised from the torrent name (organise history shows 按订阅的条目), so a torrent whose name is not recognised, or is recognised as another series, still ends up in this series. Files corrected by hand or organised before keep the item they were organised as. A subscription also records its item on the torrents it pushes, so they are organised the same way after the subscription is deleted.
+
 ## Finding releases
 
 Two sources feed every subscription, and the results are picked together:

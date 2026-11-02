@@ -373,3 +373,41 @@ func TestProcessTorrentPush_DownloadPath(t *testing.T) {
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }
+
+// 网页推送带上条目（按条目搜索的结果里推送）：写进种子记录，批量推送的每一项也带；不合法的不写。
+func TestProcessTorrentPush_Media(t *testing.T) {
+	writeWebTestSecretKey(t)
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.SiteSetting{}, &models.SettingsGlobal{}))
+	require.NoError(t, db.Create(&models.SettingsGlobal{DownloadDir: "downloads", CleanupDiskProtect: false}).Error)
+	mock := qbitMockServer(t)
+	defer mock.Close()
+	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "qbmock", Type: "qbittorrent", URL: mock.URL, Enabled: true}).Error)
+	withOrchestrator(t, &fakeV2Site{id: "hdsky", name: "HDSky", data: minimalTorrentBytes(4096)})
+	media := func(id string) (string, int, int) {
+		t.Helper()
+		var ti models.TorrentInfo
+		require.NoError(t, db.Where("site_name = ? AND torrent_id = ?", "hdsky", id).First(&ti).Error)
+		return ti.MediaType, ti.TMDBID, ti.MediaSeason
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/push", nil)
+
+	server.processTorrentPush(req, TorrentPushRequest{
+		DownloadURL: "/api/site/hdsky/torrent/1/download", DownloaderIDs: []uint{1}, TorrentTitle: "t1",
+		MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2,
+	})
+	kind, id, season := media("1")
+	assert.Equal(t, []any{models.MediaKindTV, 100088, 2}, []any{kind, id, season})
+
+	server.processBatchTorrentPush(req, BatchTorrentPushRequest{
+		Torrents: []TorrentPushItem{
+			{DownloadURL: "/api/site/hdsky/torrent/2/download", TorrentTitle: "t2", MediaType: models.MediaKindMovie, TMDBID: 872585},
+			{DownloadURL: "/api/site/hdsky/torrent/3/download", TorrentTitle: "t3", MediaType: "book", TMDBID: 1},
+		},
+		DownloaderIDs: []uint{1},
+	})
+	kind, id, season = media("2")
+	assert.Equal(t, []any{models.MediaKindMovie, 872585, 0}, []any{kind, id, season})
+	kind, id, _ = media("3")
+	assert.Equal(t, []any{"", 0}, []any{kind, id}, "不合法的条目不写")
+}

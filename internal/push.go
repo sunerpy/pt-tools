@@ -47,6 +47,9 @@ type PushTorrentRequest struct {
 	// IMDbID、DoubanID 是调用方已经知道的外部编号（刷流、订阅从搜索结果带来）；为空的不覆盖库里已有的值。
 	IMDbID   string
 	DoubanID string
+	// Media 是调用方说明的条目（订阅推送、网页上按条目推送）：合法的写进种子记录、覆盖旧值，整理入库按它整理；
+	// 为空或不合法时不动库里的值。RSS、刷流、辅种、qB 兼容入口不带
+	Media *PushMedia
 	// AddPaused 要求以暂停状态添加（qB 兼容入口的 paused/stopped）；下载器本身设成不自动开始时照样暂停。
 	AddPaused bool
 	// Rename 是加进下载器以后显示的名字（qB 的 rename；Transmission 没有这个选项，忽略）。
@@ -76,6 +79,25 @@ type PushTorrentMeta struct {
 	IsFree      bool
 	FreeLevel   string
 	FreeEndTime *time.Time
+}
+
+// PushMedia 是推送时说明的条目。Type 是 movie 或 tv；Season 是剧集的季（电影不记）。
+type PushMedia struct {
+	Type   string
+	TMDBID int
+	Season int
+}
+
+// columns 是写进种子记录的三列；条目不合法（类型不对、编号不大于 0）时返回 nil。
+func (m *PushMedia) columns() map[string]any {
+	if m == nil || m.TMDBID <= 0 || (m.Type != models.MediaKindMovie && m.Type != models.MediaKindTV) {
+		return nil
+	}
+	season := max(m.Season, 0)
+	if m.Type == models.MediaKindMovie {
+		season = 0
+	}
+	return map[string]any{"media_type": m.Type, "tmdb_id": m.TMDBID, "media_season": season}
 }
 
 // PushTorrentResult 推送种子结果
@@ -179,7 +201,7 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 		sLogger().Infof("[PushTorrent] 种子已存在于下载器中，跳过: site=%s, id=%s, hash=%s, downloader=%s",
 			req.SiteID, req.TorrentID, torrentHash, target.Name)
 		// 只更新已有的记录：没有记录说明不是经 pt-tools 推送的，不为编号新建一条
-		mergeTorrentExternalIDs(req.SiteID, req.TorrentID, req.IMDbID, req.DoubanID)
+		mergeTorrentExternalIDs(req.SiteID, req.TorrentID, req.IMDbID, req.DoubanID, req.Media)
 		return &PushTorrentResult{
 			Success:     true,
 			Skipped:     true,
@@ -225,8 +247,8 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 			return nil, fmt.Errorf("保存种子记录失败: %w", err)
 		}
 	}
-	// 外部编号不放进上面的更新列：不带编号的推送（手动、ChatOps）不能清掉已有的值
-	mergeTorrentExternalIDs(req.SiteID, req.TorrentID, req.IMDbID, req.DoubanID)
+	// 外部编号与条目不放进上面的更新列：不带它们的推送（手动、ChatOps）不能清掉已有的值
+	mergeTorrentExternalIDs(req.SiteID, req.TorrentID, req.IMDbID, req.DoubanID, req.Media)
 
 	// 构建添加选项。承诺到期暂停的一律先暂停加入：监控记账成功以后才开始，结束时间不可信的就不自动开始
 	pausePromised := decision.Monitor || decision.KeepPaused
@@ -904,9 +926,12 @@ func stricterLimit(a, b int) int {
 	}
 }
 
-// mergeTorrentExternalIDs 把非空的外部编号写进已有的种子记录；没有记录时什么也不做（不为编号新建记录）。
-func mergeTorrentExternalIDs(siteID, torrentID, imdbID, doubanID string) {
-	updates := map[string]any{}
+// mergeTorrentExternalIDs 把非空的外部编号与合法的条目写进已有的种子记录；没有记录时什么也不做（不为编号新建记录）。
+func mergeTorrentExternalIDs(siteID, torrentID, imdbID, doubanID string, media *PushMedia) {
+	updates := media.columns()
+	if updates == nil {
+		updates = map[string]any{}
+	}
 	if id := v2.NormalizeIMDbID(imdbID); id != "" {
 		updates["imdb_id"] = id
 	}

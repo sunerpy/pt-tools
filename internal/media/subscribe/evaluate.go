@@ -728,6 +728,8 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		SiteID: o.c.Site, TorrentID: o.c.Item.ID, TorrentData: data, Title: o.c.Item.Title,
 		Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath, DownloaderID: dlID, Source: pushSource,
 		IMDbID: o.c.Item.IMDbID, DoubanID: o.c.Item.DoubanID,
+		// 订阅知道它要的是哪个条目：整理入库按它整理（订阅的记录删了以后也是）
+		Media: &ptinternal.PushMedia{Type: sub.MediaType, TMDBID: sub.TMDBID, Season: sub.Season},
 		Meta: &ptinternal.PushTorrentMeta{
 			SizeBytes: size, HasHR: hasHR, HRSeedTimeH: hrHours,
 			IsFree: o.c.Item.IsFree(), FreeLevel: string(o.c.Item.DiscountLevel), FreeEndTime: freeEnd,

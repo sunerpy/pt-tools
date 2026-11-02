@@ -103,6 +103,9 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 			_, _ = w.Write([]byte(`{"id":209867,"name":"Frieren: Beyond Journey's End","alternative_titles":{"results":[{"title":"Sousou no Frieren"}]}}`))
 		case r.URL.Path == "/3/tv/209867":
 			_, _ = w.Write([]byte(`{"id":209867,"name":"葬送的芙莉莲","original_name":"葬送のフリーレン","first_air_date":"2023-09-29","genres":[{"id":16,"name":"动画"}]}`))
+		case r.URL.Path == "/3/tv/1396":
+			// 只能按编号取（推送、订阅时说明的条目），搜不到
+			_, _ = w.Write([]byte(`{"id":1396,"name":"绝命毒师","original_name":"Breaking Bad","first_air_date":"2008-01-20","genres":[{"id":18,"name":"剧情"}]}`))
 		case strings.HasPrefix(r.URL.Path, "/3/search/"):
 			_, _ = w.Write([]byte(`{"results":[]}`))
 		default:
@@ -237,7 +240,7 @@ func newDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
 		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{}, &models.MediaWatchDir{},
-		&models.MediaTransferHistory{}, &models.TorrentInfo{}, &models.DownloaderSetting{},
+		&models.MediaTransferHistory{}, &models.TorrentInfo{}, &models.TorrentInfoArchive{}, &models.DownloaderSetting{},
 	))
 	return db
 }
