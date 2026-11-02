@@ -50,7 +50,7 @@
 | **PandaPT**           | Cookie  | RSS, search, user info                     | ✅     | Supported (pandapt.net; upload, download and bonus are read from info_block; issue #416)                                  |
 | **PTFans**            | Cookie  | RSS, search, user info                     | ✅     | Supported (ptfans.cc; has H&R; data is read from info_block; issue #417)                                                  |
 | **KamePT**            | Cookie  | RSS, search, user info                     | ✅     | Supported (kamept.com; info_block includes the seeding points; issue #418)                                                |
-| **PTCHDBits**         | Cookie  | RSS, search, user info                     | ✅     | Supported (ptchdbits.co; promotion read from img.pro_free on the details page; requested in an issue)                     |
+| **PTCHDBits**         | Cookie  | RSS, search, user info, class requirements | ✅     | Supported (ptchdbits.co; text and icon promotion display; H&R only on H3/H5 torrents, counted as 120 hours)               |
 | **PTerClub**          | Cookie  | RSS, search, user info, class requirements | ✅     | 猫站 (pterclub.net; bonus points are called 猫粮; no H&R; automatic sign-in does not count as a login)                    |
 | **PTHome**            | Cookie  | RSS, search, user info                     | ✅     | 铂金家 (pthome.net; upload, download, bonus and seeding points are read from info_block)                                  |
 | **TangPT**            | Cookie  | RSS, search, user info                     | ✅     | 糖果 (www.tangpt.top; CHD template; issue #456)                                                                           |
