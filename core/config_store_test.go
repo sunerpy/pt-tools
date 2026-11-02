@@ -606,18 +606,29 @@ func TestUpsertSiteWithRSS_CookieAndAPIKeyAcceptsEmptyCookieWhenStored(t *testin
 	require.Equal(t, storedCookie, plain)
 }
 
-func TestUpsertSiteWithRSS_CookieAndAPIKeyRequiresCookieWhenNoneStored(t *testing.T) {
+// cookie_and_api_key 只要 API Key：Cookie 可选（HDDolby 只有时魔、签到用它），库里没有 Cookie 也能保存；没有 API Key 照旧拒绝
+func TestUpsertSiteWithRSS_CookieAndAPIKeyCookieOptional(t *testing.T) {
 	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
-	err = s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
 		AuthMethod: "cookie_and_api_key",
 		APIKey:     "api-key",
-		APIUrl:     "https://www.hddolby.com",
+		APIUrl:     "https://www.uhddolby.com",
 		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+	var row models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "hddolby").First(&row).Error)
+	assert.Equal(t, "api-key", row.APIKey)
+	assert.Empty(t, row.CookieEncrypted)
+
+	err = s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		Cookie:     "uid=1",
+		APIUrl:     "https://www.uhddolby.com",
 	})
-	require.EqualError(t, err, "Cookie 不能为空")
+	require.EqualError(t, err, "API Key 不能为空")
 }
 
 func TestConfigStore_GlobalCRUD(t *testing.T) {
@@ -1433,7 +1444,11 @@ func TestUpsertSiteWithRSS_ApiKeyAndRSSFieldErrors(t *testing.T) {
 		AuthMethod: "api_key", APIUrl: "https://x",
 	}))
 
+	// cookie_and_api_key 要 API Key，Cookie 可选
 	require.Error(t, s.UpsertSiteWithRSS("customx", models.SiteConfig{
+		AuthMethod: "cookie_and_api_key", APIUrl: "https://x", Cookie: "c",
+	}))
+	require.NoError(t, s.UpsertSiteWithRSS("customx", models.SiteConfig{
 		AuthMethod: "cookie_and_api_key", APIUrl: "https://x", APIKey: "k",
 	}))
 

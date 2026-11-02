@@ -206,7 +206,7 @@ var hdskyCategoriesConfig = SiteCategoriesConfig{
 // HDDolby 站点分类配置
 var hddolbyCategoriesConfig = SiteCategoriesConfig{
 	SiteID:   "hddolby",
-	SiteName: "HD Dolby",
+	SiteName: "UHDDolby",
 	Categories: []SiteCategory{
 		{
 			Name: "类别",

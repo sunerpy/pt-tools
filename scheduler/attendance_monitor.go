@@ -444,7 +444,7 @@ func (m *AttendanceMonitor) attempt(ctx context.Context, repo *models.SiteAttend
 	case !ok:
 		runErr = errors.New("站点没有注册：凭证缺失或站点实例创建失败")
 	case !site.SupportsAttendance():
-		runErr = v2.ErrAttendanceUnsupported
+		runErr = unsupportedAttendance(site)
 	default:
 		solverCtx, timeout, aiErr := m.withSolver(ctx, siteName)
 		attemptCtx, cancel := context.WithTimeout(v2.WithAttendanceAIUsage(solverCtx, &usage), timeout)
@@ -554,6 +554,16 @@ func AttendanceMethodOf(siteName string) string {
 	default:
 		return models.AttendanceMethodAIQuiz
 	}
+}
+
+// unsupportedAttendance 是站点实例不能签到时记下的错误：站点说得出原因（UHDDolby 没配 Cookie）时带上原因。
+func unsupportedAttendance(site v2.AttendanceCapable) error {
+	if r, ok := site.(interface{ AttendanceUnsupportedReason() string }); ok {
+		if reason := r.AttendanceUnsupportedReason(); reason != "" {
+			return fmt.Errorf("%w: %s", v2.ErrAttendanceUnsupported, reason)
+		}
+	}
+	return v2.ErrAttendanceUnsupported
 }
 
 func (m *AttendanceMonitor) lookupSite(siteName string) (v2.AttendanceCapable, bool) {

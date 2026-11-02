@@ -23,9 +23,10 @@ var attendanceUnsupported = map[string]string{
 	"tjupt":        "禁止用脚本或程序签到",
 }
 
-// 不是 NexusPHP、但驱动自己实现了签到的站点（走站点的签到接口）。
+// 不是 NexusPHP、但驱动自己实现了签到的站点：Rousi 走站点的签到接口，HDDolby 用 Cookie 打开 attendance.php。
 var attendanceAPISites = map[string]bool{
 	"rousipro": true,
+	"hddolby":  true,
 }
 
 // 签到要过一关的站点：识别验证码或答题，要用 AI（流程见 site/v2/attendance_challenge.go）。
@@ -61,6 +62,12 @@ func TestAttendanceDefinitions(t *testing.T) {
 			seen[def.ID] = true
 			assert.True(t, ok, def.ID)
 			assert.Empty(t, reason, def.ID)
+			if def.Schema == v2.SchemaHDDolby {
+				cfg := v2.ResolveAttendanceConfig(def)
+				require.NotNil(t, cfg, def.ID)
+				assert.Equal(t, "/attendance.php", cfg.Path, def.ID)
+				assert.Equal(t, http.MethodGet, cfg.Method, def.ID)
+			}
 			continue
 		}
 		if def.Schema != v2.SchemaNexusPHP {

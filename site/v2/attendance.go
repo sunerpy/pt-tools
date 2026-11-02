@@ -293,6 +293,17 @@ func (b *BaseSite[Req, Res]) SupportsAttendance() bool {
 	return true
 }
 
+// AttendanceUnsupportedReason 是这个站点实例不能签到的原因（例如 UHDDolby 没配 Cookie）；能签到时为空。
+func (b *BaseSite[Req, Res]) AttendanceUnsupportedReason() string {
+	if _, ok := any(b.driver).(Attender); !ok {
+		return "该站点的架构暂不支持签到"
+	}
+	if r, ok := any(b.driver).(attendanceSupportReporter); ok {
+		return r.AttendanceUnsupportedReason()
+	}
+	return ""
+}
+
 // Attend 签到一次。与 GetUserInfo 一样先经过本站的限速器——不能像 GetDetailFetcher 那样把驱动直接交出去。
 func (b *BaseSite[Req, Res]) Attend(ctx context.Context) (AttendResult, error) {
 	a, ok := any(b.driver).(Attender)

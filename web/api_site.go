@@ -117,8 +117,9 @@ func (s *Server) apiSiteValidate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "cookie_and_api_key":
-		if req.Cookie == "" || req.APIKey == "" {
-			writeJSON(w, SiteValidationResponse{Valid: false, Message: "Cookie和API Key都不能为空"})
+		// Cookie 可选：只有时魔、签到这类网页功能用它
+		if req.APIKey == "" {
+			writeJSON(w, SiteValidationResponse{Valid: false, Message: "API Key不能为空"})
 			return
 		}
 	case "passkey":
@@ -337,8 +338,8 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "cookie_and_api_key":
-		if req.Cookie == "" || req.APIKey == "" {
-			http.Error(w, "Cookie和API Key都不能为空", http.StatusBadRequest)
+		if req.APIKey == "" {
+			http.Error(w, "API Key不能为空", http.StatusBadRequest)
 			return
 		}
 	case "passkey":

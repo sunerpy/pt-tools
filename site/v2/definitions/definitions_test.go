@@ -128,8 +128,8 @@ func TestHDDolbyDefinition(t *testing.T) {
 		t.Fatal("HDDolby definition not found in registry")
 	}
 
-	if def.Name != "HD Dolby" {
-		t.Errorf("Name = %q, want %q", def.Name, "HD Dolby")
+	if def.Name != "UHDDolby" {
+		t.Errorf("Name = %q, want %q", def.Name, "UHDDolby")
 	}
 	if def.Schema != "HDDolby" {
 		t.Errorf("Schema = %q, want %q", def.Schema, "HDDolby")
