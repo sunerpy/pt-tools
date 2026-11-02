@@ -154,7 +154,7 @@ const showingExamples = computed(() => {
 const apiKeyPlaceholder = computed(() => {
   const name = siteName.value.toLowerCase();
   if (name === "hddolby") {
-    return "从站点 RSS 订阅页面获取 RSS Key";
+    return "从站点 RSS 订阅页面获取 RSSKEY";
   }
   return "从 M-Team 个人设置中获取";
 });
@@ -1297,11 +1297,12 @@ function ruleNameOf(id: number): string {
                   :placeholder="apiKeyPlaceholder" />
                 <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
                   前往站点「<a
-                    href="https://www.hddolby.com/getrss.php"
+                    href="https://www.uhddolby.com/getrss.php"
                     target="_blank"
                     rel="noopener">
                     控制面板 - RSS 订阅 </a
-                  >」页面，复制「本次加密密钥（RssKEY）」
+                  >」页面生成 RSS 链接，复制其中的 RSSKEY。RSS 链接默认 90 天有效（最长 180
+                  天），过期后要重新生成并填到这里
                 </div>
               </el-form-item>
               <el-form-item label="API URL">
@@ -1311,7 +1312,7 @@ function ruleNameOf(id: number): string {
             </template>
 
             <template v-if="form.auth_method === 'cookie_and_api_key'">
-              <el-form-item label="Cookie">
+              <el-form-item label="Cookie（可选）">
                 <div v-if="savedCookieHidden" class="pt-note pt-note--ok cred-note">
                   <PtIcon name="shield" :size="14" class="pt-note__icon" />
                   <span>Cookie 已保存，出于安全原因不会回显；留空保存不会覆盖已存的值</span>
@@ -1320,7 +1321,7 @@ function ruleNameOf(id: number): string {
                   v-model="form.cookie"
                   type="textarea"
                   :rows="3"
-                  placeholder="从浏览器开发者工具中获取（用于获取时魔等信息）；已保存 Cookie 时可留空" />
+                  placeholder="只有时魔、签到用它，搜索、下载与用户数据走 API Key；已保存 Cookie 时可留空" />
               </el-form-item>
               <el-form-item label="API Key / RSS Key">
                 <el-input
@@ -1330,11 +1331,12 @@ function ruleNameOf(id: number): string {
                   :placeholder="apiKeyPlaceholder" />
                 <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
                   前往站点「<a
-                    href="https://www.hddolby.com/getrss.php"
+                    href="https://www.uhddolby.com/getrss.php"
                     target="_blank"
                     rel="noopener">
                     控制面板 - RSS 订阅 </a
-                  >」页面，复制「本次加密密钥（RssKEY）」
+                  >」页面生成 RSS 链接，复制其中的 RSSKEY。RSS 链接默认 90 天有效（最长 180
+                  天），过期后要重新生成并填到这里
                 </div>
               </el-form-item>
               <el-form-item label="API URL">
