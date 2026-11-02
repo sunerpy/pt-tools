@@ -54,6 +54,32 @@ vi.mock("@/api", async (orig) => {
       getDailyReport: api.getReport,
       saveDailyReport: api.saveReport,
     },
+    // 备份：读到默认设置，没改就不写
+    backupApi: {
+      ...real.backupApi,
+      get: vi.fn(() =>
+        Promise.resolve({
+          settings: {
+            enabled: true,
+            time: "04:30",
+            keep: 7,
+            dir: "",
+            include_secret: true,
+            default_dir: "/root/.pt-tools/backups",
+            min_keep: 1,
+            max_keep: 60,
+          },
+          dir: "/root/.pt-tools/backups",
+          env_key: false,
+          next_at: null,
+          last: null,
+          restore: null,
+          pending: null,
+          backups: [],
+        }),
+      ),
+      saveSettings: vi.fn(),
+    },
     siteProxyApi: { get: api.getProxy, save: api.saveProxy },
   };
 });

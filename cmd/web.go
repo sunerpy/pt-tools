@@ -64,6 +64,8 @@ var webCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		version.CleanupOldBinary()
 
+		// 只有 Web 服务在启动时换上网页或命令行放好的待恢复备份（别的子命令也走 InitRuntime）
+		core.EnablePendingRestore()
 		if _, err := core.InitRuntime(); err != nil {
 			color.Red("初始化失败: %v", err)
 			return
@@ -245,6 +247,7 @@ var webCmd = &cobra.Command{
 		wireTransferWorker(mgr, userInfoService)
 		wireReseedWorker(mgr, userInfoService, store, monitorNotifier)
 		wireCookieCloudWorker(mgr, store, siteRegistry)
+		wireBackupJob(mgr, store, monitorNotifier)
 
 		srv := web.NewServer(store, mgr)
 		mediaSvc := newMediaService(store)

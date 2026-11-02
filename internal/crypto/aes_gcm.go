@@ -214,8 +214,11 @@ func Decrypt(cipherStr string) (plain []byte, err error) {
 	if encryptor == nil || len(encryptor.key) == 0 {
 		return nil, errNoKey
 	}
+	return decryptWith(encryptor.key, cipherStr)
+}
 
-	block, err := aes.NewCipher(encryptor.key)
+func decryptWith(key []byte, cipherStr string) (plain []byte, err error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}

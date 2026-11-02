@@ -33,6 +33,32 @@ vi.mock("@/api", async (orig) => {
       saveDailyReport: api.saveReport,
     },
     chatopsApi: { ...real.chatopsApi, notifications: { list: vi.fn(() => Promise.resolve([])) } },
+    // 备份：读到默认设置，没改就不写
+    backupApi: {
+      ...real.backupApi,
+      get: vi.fn(() =>
+        Promise.resolve({
+          settings: {
+            enabled: true,
+            time: "04:30",
+            keep: 7,
+            dir: "",
+            include_secret: true,
+            default_dir: "/root/.pt-tools/backups",
+            min_keep: 1,
+            max_keep: 60,
+          },
+          dir: "/root/.pt-tools/backups",
+          env_key: false,
+          next_at: null,
+          last: null,
+          restore: null,
+          pending: null,
+          backups: [],
+        }),
+      ),
+      saveSettings: vi.fn(),
+    },
     // 站点代理：读到默认值（没有设置），没改就不写
     siteProxyApi: {
       get: vi.fn(() =>
@@ -100,8 +126,11 @@ async function changeReportTime() {
   const field = document.querySelector("[data-testid=daily-report-time]")!;
   (field.querySelector<HTMLElement>(".el-select__wrapper") ?? (field as HTMLElement)).click();
   await vi.waitFor(() => {
+    // 页上还有「备份时刻」，也是一个 00:00–23:45 的时刻下拉：只认刚打开的那一个（另一个的浮层是 display: none）
     const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
-      (o) => (o.textContent ?? "").trim() === "00:00",
+      (o) =>
+        (o.textContent ?? "").trim() === "00:00" &&
+        o.closest<HTMLElement>(".el-popper")?.style.display !== "none",
     );
     expect(opt).toBeTruthy();
     opt!.click();

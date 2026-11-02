@@ -517,7 +517,7 @@ Restores the built-in text and responds with `{"ok": true}`; an unknown event ge
 
 These endpoints read and change pt-tools' configuration through the configuration gateway, the same one behind MCP's `get_config` and `change_config` and the AI assistant's [configuration changes](../guide/assistant.md#changing-the-configuration). A change goes to the endpoint the web settings use, so validation, encryption and hot reload are the same. All of them need Config (`app:config`); reading and previewing also need Read, saving needs Operate. A web login has every permission; paired devices have no Config and get 403.
 
-Not available here: the login password, API tokens, remote access, the encryption key, the AI assistant's own settings (including voice input), ChatOps bindings and admins, and the qB-compatible entrance.
+Not available here: the login password, API tokens, remote access, the encryption key, backup and restore, the AI assistant's own settings (including voice input), ChatOps bindings and admins, and the qB-compatible entrance.
 
 ### GET /config
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/models"
 )
 
 // acceptNewSecretKeyEnv 设为 1 表示确认原密钥已经丢失，接受新生成的密钥并重新填写凭证。
@@ -20,13 +21,6 @@ var (
 	// ErrSecretKeyRegenerated 表示 secret.key 是本次新生成的，但数据库里已有用原密钥加密的数据。
 	ErrSecretKeyRegenerated = errors.New("secret.key 是新生成的，数据库里却已有加密数据")
 )
-
-// encryptedColumns 列出以 AES-GCM 密文保存的列，非空即说明库里有用某个密钥加密过的数据。
-var encryptedColumns = []struct{ table, column string }{
-	{"site_settings", "cookie_encrypted"},
-	{"notification_conf", "config_json"},
-	{"cloak_settings", "token_encrypted"},
-}
 
 // checkSecretKeyFile 在打开数据库之前检查密钥文件：文件存在却无法使用时拒绝启动，不自动换新密钥。
 func checkSecretKeyFile() error {
@@ -72,12 +66,13 @@ func checkGeneratedSecretKey(db *gorm.DB) error {
 }
 
 func hasEncryptedData(db *gorm.DB) (bool, error) {
-	for _, c := range encryptedColumns {
-		if !db.Migrator().HasTable(c.table) {
+	// 以 AES-GCM 密文保存的列（与备份校验共用一份清单），非空即说明库里有用某个密钥加密过的数据
+	for _, c := range models.EncryptedColumns {
+		if !db.Migrator().HasTable(c.Table) {
 			continue
 		}
 		var n int64
-		if err := db.Table(c.table).Where(c.column + " IS NOT NULL AND " + c.column + " != ''").Count(&n).Error; err != nil {
+		if err := db.Table(c.Table).Where(c.Column + " IS NOT NULL AND " + c.Column + " != ''").Count(&n).Error; err != nil {
 			return false, err
 		}
 		if n > 0 {

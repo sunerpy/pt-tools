@@ -64,6 +64,8 @@ type Server struct {
 	qbitCompatCtl QbitCompatControl
 	// qbitCompatMu 让存设置与换监听一次只做一个（见 apiQbitCompatPut）
 	qbitCompatMu sync.Mutex
+	// backupMu 让网页上的「立即备份」与上传恢复一次只做一个（见 api_backup.go）
+	backupMu sync.Mutex
 	// remote 是远程访问的主机端（M15）；为空时直连入口 404，设置接口回 503
 	remote *remote.Host
 	// assistant 是内置 AI 助手（M19）；为空时接口回 503
@@ -243,6 +245,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerTokenRoutes(mux)
 	s.registerQbitCompatRoutes(mux)
 	s.registerCleanupRoutes(mux)
+	s.registerBackupRoutes(mux)
 	s.registerAppV1Routes(mux)
 	s.registerMCPRoutes(mux)
 	s.registerRemoteRoutes(mux)

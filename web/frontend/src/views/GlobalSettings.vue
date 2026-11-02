@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import {
+  backupApi,
+  type BackupSettingsInput,
+  type BackupsView,
   chatopsApi,
   type DailyReportScope,
   type DailyReportSettings,
@@ -14,6 +17,7 @@ import {
   userInfoApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import BackupFilesPanel from "@/components/settings/BackupFilesPanel.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -157,6 +161,68 @@ function proxySummary(p: SiteProxyInput): string {
   return "站点代理：全部站点";
 }
 
+/**
+ * 备份设置（「备份」一节）也走自己的接口，和全局配置一起保存（保存的第三步）；读回来的是整个备份页
+ * （设置、结果、待恢复与备份文件），下面的「备份与恢复」面板用同一份。读不回来时这一节整段禁用、不参与保存。
+ */
+const backupForm = ref<BackupSettingsInput>({
+  enabled: true,
+  time: "04:30",
+  keep: 7,
+  dir: "",
+  include_secret: true,
+});
+const backupSaved = ref<BackupSettingsInput | null>(null);
+const backupView = ref<BackupsView | null>(null);
+const backupErr = ref("");
+const backupLoading = ref(false);
+const backupLoadFailed = computed(() => backupSaved.value === null && backupErr.value !== "");
+
+function toBackupInput(v: BackupsView): BackupSettingsInput {
+  const s = v.settings;
+  return {
+    enabled: s.enabled,
+    time: s.time,
+    keep: s.keep,
+    dir: s.dir,
+    include_secret: s.include_secret,
+  };
+}
+
+function sameBackup(a: BackupSettingsInput, b: BackupSettingsInput): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.time === b.time &&
+    a.keep === b.keep &&
+    a.dir.trim() === b.dir.trim() &&
+    a.include_secret === b.include_secret
+  );
+}
+
+/**
+ * 换上服务端回的备份页。表单没改过（等于旧的基线）或 resetForm 时跟着换成新值；
+ * 改过就留着改动，只换基线（面板上的操作回来的设置不会变）。
+ */
+function applyBackupView(v: BackupsView, resetForm: boolean) {
+  const next = toBackupInput(v);
+  const untouched = backupSaved.value !== null && sameBackup(backupForm.value, backupSaved.value);
+  backupView.value = v;
+  backupSaved.value = next;
+  backupErr.value = "";
+  if (resetForm || untouched) backupForm.value = { ...next };
+}
+
+async function loadBackups(resetForm: boolean) {
+  backupLoading.value = true;
+  try {
+    applyBackupView(await backupApi.get(), resetForm);
+  } catch (e) {
+    backupErr.value = (e as Error)?.message || "读取失败";
+  } finally {
+    backupLoading.value = false;
+  }
+}
+
 /** short 是给页头摘要用的短名：摘要行是单行截断的，装不下带括号的完整标签 */
 const filterModeOptions = [
   {
@@ -227,6 +293,7 @@ async function loadData() {
     userInfoApi.getDailyReport().catch(() => null),
     chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
     siteProxyApi.get().catch(() => null),
+    loadBackups(true),
   ]);
   reportChannels.value = (channels ?? []).filter((c) => c.enabled);
   if (report) {
@@ -276,6 +343,11 @@ async function save() {
     ElMessage.error("选了「只有选中的站点」，至少选一个站点");
     return;
   }
+  const backupInput: BackupSettingsInput = {
+    ...backupForm.value,
+    dir: backupForm.value.dir.trim(),
+  };
+  const backupChanged = backupSaved.value !== null && !sameBackup(backupSaved.value, backupInput);
 
   saving.value = true;
   try {
@@ -303,6 +375,16 @@ async function save() {
         label: "每日战报设置",
         run: async () => {
           reportSaved.value = await userInfoApi.saveDailyReport(next);
+        },
+      });
+    }
+    if (backupChanged) {
+      steps.push({
+        label: "备份设置",
+        run: async () => {
+          const v = await backupApi.saveSettings(backupInput);
+          // 保存期间没再改过：换成服务端整理过的值（目录去掉多余的 ..、/）
+          applyBackupView(v, sameBackup(backupForm.value, backupInput));
         },
       });
     }
@@ -477,6 +559,89 @@ async function save() {
                   </div>
                 </el-form-item>
               </div>
+            </div>
+
+            <div class="pt-strip">
+              <PtIcon name="database" :size="13" />
+              <span>备份</span>
+            </div>
+            <div class="settings-body">
+              <div
+                v-if="backupLoadFailed"
+                class="pt-note pt-note--warn proxy-note"
+                data-testid="backup-load-failed">
+                <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                <span>备份设置读取失败，这一段暂时不能修改；刷新页面重试</span>
+              </div>
+              <el-form-item label="每天定时备份">
+                <el-switch
+                  v-model="backupForm.enabled"
+                  :disabled="backupLoadFailed"
+                  data-testid="backup-enabled" />
+                <div class="field-tip">
+                  每天在设定时刻把数据库打成一个备份文件，服务运行时也能做；升级到新版本以后第一次启动时，迁移数据库以前也会先备份一次（另外保留最新
+                  3 份）
+                </div>
+              </el-form-item>
+              <div class="field-row">
+                <el-form-item label="备份时刻">
+                  <el-time-select
+                    v-model="backupForm.time"
+                    :disabled="backupLoadFailed || !backupForm.enabled"
+                    start="00:00"
+                    step="00:15"
+                    end="23:45"
+                    :clearable="false"
+                    data-testid="backup-time" />
+                  <div class="field-tip">服务器时区；那时没开着的话，下次启动以后补做当天的</div>
+                </el-form-item>
+                <el-form-item label="保留份数">
+                  <el-input-number
+                    v-model="backupForm.keep"
+                    :min="backupView?.settings.min_keep ?? 1"
+                    :max="backupView?.settings.max_keep ?? 60"
+                    :disabled="backupLoadFailed"
+                    data-testid="backup-keep" />
+                  <div class="field-tip">
+                    只算定时备份，多的从最旧的删；手动备份与命令行备份不会被自动删掉
+                  </div>
+                </el-form-item>
+              </div>
+              <el-form-item label="备份目录">
+                <el-input
+                  v-model="backupForm.dir"
+                  :disabled="backupLoadFailed"
+                  :placeholder="backupView?.settings.default_dir || '留空用默认目录'"
+                  data-testid="backup-dir" />
+                <div class="field-tip">
+                  留空用默认目录<template v-if="backupView">
+                    <code>{{ backupView.settings.default_dir }}</code></template
+                  >；要填绝对路径，保存时会试写一个文件确认能写。放到另一块盘或网络存储上，这块盘坏了备份也还在
+                </div>
+              </el-form-item>
+              <el-form-item label="带上密钥">
+                <el-switch
+                  v-model="backupForm.include_secret"
+                  :disabled="backupLoadFailed"
+                  data-testid="backup-secret" />
+                <div class="field-tip">
+                  带上 secret.key：换机器或密钥丢了也能直接恢复；不带时，恢复要有做备份时的密钥
+                </div>
+                <div
+                  v-if="backupForm.include_secret"
+                  class="pt-note pt-note--warn mode-note"
+                  data-testid="backup-secret-risk">
+                  <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+                  <span
+                    >拿到带密钥的备份就能解开里面保存的站点 Cookie
+                    与通知凭证：备份文件要和数据库一样妥善保管，不要放到别人也读得到的地方</span
+                  >
+                </div>
+                <div v-if="backupView?.env_key" class="field-tip" data-testid="backup-env-key">
+                  现在的密钥来自环境变量 PT_TOOLS_SECRET_KEY：带上的是它；恢复时仍用环境变量，不动
+                  secret.key 文件
+                </div>
+              </el-form-item>
             </div>
           </div>
           <div class="gs-col">
@@ -712,6 +877,13 @@ async function save() {
         </el-button>
       </template>
     </PtPanel>
+
+    <BackupFilesPanel
+      :view="backupView"
+      :loading="backupLoading"
+      :error-text="backupErr"
+      @update="(v) => applyBackupView(v, false)"
+      @reload="loadBackups(false)" />
   </div>
 </template>
 

@@ -23,6 +23,8 @@ describe("后台通知的投递在审计里的读法", () => {
     expect(notifySourceLabel("free_end")).toBe("免费到期");
     expect(notifyCommandLabel("notify:reseed:round")).toBe("辅种结果");
     expect(notifySourceLabel("reseed")).toBe("辅种");
+    expect(notifyCommandLabel("notify:backup:failed")).toBe("备份失败");
+    expect(notifySourceLabel("backup")).toBe("备份");
   });
 
   it("失败原因带上第几次与什么时候再试；送达的没有", () => {

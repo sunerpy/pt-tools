@@ -46,7 +46,7 @@ func TestNewDBWithVersionAndHooks_PersistsTorrent(t *testing.T) {
 	enc := func(plain string) (string, error) { return "enc:" + plain, nil }
 	dec := func(cipher string) (string, error) { return cipher[4:], nil }
 
-	tdb, err := NewDBWithVersionAndHooks(zapNopGormLogger(), "2.0.0", backup, enc, dec)
+	tdb, err := NewDBWithVersionAndHooks(zapNopGormLogger(), "2.0.0", backup, enc, dec, nil)
 	require.NoError(t, err)
 	require.NotNil(t, tdb)
 	t.Cleanup(func() { closeTestGorm(tdb.DB) })

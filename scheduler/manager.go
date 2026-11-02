@@ -48,6 +48,7 @@ type Manager struct {
 	loginReminderMonitor *LoginReminderMonitor
 	attendanceMonitor    *AttendanceMonitor
 	dailyReportJob       *DailyReportJob
+	backupJob            *BackupJob
 	brushMonitor         *BrushMonitor
 	deadTorrentMonitor   *DeadTorrentMonitor
 	transferWorker       *TransferWorker
@@ -602,6 +603,10 @@ func (m *Manager) StopAll() {
 		stops = append(stops, m.dailyReportJob.Stop)
 		m.dailyReportJob = nil
 	}
+	if m.backupJob != nil {
+		stops = append(stops, m.backupJob.Stop)
+		m.backupJob = nil
+	}
 	if m.attendanceMonitor != nil {
 		stops = append(stops, m.attendanceMonitor.Stop)
 		m.attendanceMonitor = nil
@@ -764,6 +769,16 @@ func (m *Manager) SetDailyReportJob(job *DailyReportJob) {
 		m.dailyReportJob.Stop()
 	}
 	m.dailyReportJob = job
+}
+
+// SetBackupJob 登记定时备份任务；替换旧实例时先停掉旧的。
+func (m *Manager) SetBackupJob(job *BackupJob) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.backupJob != nil && m.backupJob != job {
+		m.backupJob.Stop()
+	}
+	m.backupJob = job
 }
 
 // SetDeadTorrentMonitor 登记失效种子定时扫描；替换旧实例时先停掉旧的。

@@ -59,6 +59,26 @@ pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
 
 每个参数也可以用环境变量给出：`PT_TOOLS_RELAY_LISTEN`、`PT_TOOLS_RELAY_PUBLIC_URL`、`PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`、`PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`、`PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`、`PT_TOOLS_RELAY_CLIENT_IP_HEADER`、`PT_TOOLS_RELAY_TLS_CERT`、`PT_TOOLS_RELAY_TLS_KEY`、`PT_TOOLS_RELAY_DISABLED=true`、`PT_TOOLS_RELAY_MAX_CONNECTIONS`、`PT_TOOLS_RELAY_DRAIN_GRACE`（例如 `5s`）、`PT_TOOLS_RELAY_METRICS=false`；值写错（数字不是整数、开关不是 `true`/`false`、时长没有单位），或者 `--max-streams-per-host`、`--daily-bytes-per-host` 是负数、`--drain-grace` 超出 0 到 5 分钟时不启动（`--max-conn-per-ip-per-min`、`--max-connections` 的负数仍表示不限）。Docker 镜像设 `PT_MODE=relay` 时运行它。`GET /healthz` 返回运行状态与版本；`GET /ready` 在接新连接时回 200，排空、满了、暂停服务时回 503，健康检查用它。
 
+## pt-tools db
+
+备份与恢复数据。两个命令都不迁移数据库，pt-tools 在运行时也能用。
+
+```bash
+pt-tools db backup                                   # 放进备份设置里的目录
+pt-tools db backup --output /mnt/backup/ --no-secret # 放到别的目录，不带密钥
+pt-tools db restore --input /mnt/backup/pt-tools-backup-20261102-043000-scheduled.tar.gz
+pt-tools db restore --cancel
+```
+
+| 子命令    | 参数             | 说明                                                                    |
+| --------- | ---------------- | ----------------------------------------------------------------------- |
+| `backup`  | `--output`, `-o` | 备份文件或目录，默认是「全局设置 → 备份」里的目录；文件已经存在时不覆盖 |
+|           | `--no-secret`    | 不带上 `secret.key`；不加时按备份设置                                   |
+| `restore` | `--input`, `-i`  | 校验这份备份，通过后放进待恢复，**重启 pt-tools 以后生效**              |
+|           | `--cancel`       | 取消尚未生效的恢复                                                      |
+
+恢复的密钥规则、重启时怎么换上与失败时怎么回退，见[升级与备份](../guide/upgrade.md#恢复)。
+
 ## pt-tools secret
 
 导出或导入用于加密站点 Cookie 和通知凭证的密钥。
@@ -100,7 +120,7 @@ pt-tools clean --confirm --keep-backups 10
 
 - `logs`：已轮转的日志备份。正在写入的日志文件不会被删除。
 - `staging`：`downloads/` 下已经推送、已失效或超过保留期的 `.torrent` 文件。
-- `backups`：自动生成的历史配置备份，只保留最近 N 份。
+- `backups`：迁移数据库时自动留下的旧配置备份（`.json`），只保留最近 N 份。备份文件（`.tar.gz`）不归它管。
 
 `torrents.db`、`secret.key` 和正在写入的日志在任何情况下都不会被删除。
 
@@ -123,7 +143,7 @@ pt-tools completion zsh > "${fpath[1]}/_pt-tools"
 
 ## 较少使用的命令
 
-下面的命令不在 `pt-tools --help` 中显示，只在特定情况下使用。
+下面的命令只在特定情况下使用，`config` 不在 `pt-tools --help` 中显示。
 
 | 命令                       | 用途                                                                                                                        |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |

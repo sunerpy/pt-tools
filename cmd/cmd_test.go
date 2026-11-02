@@ -75,10 +75,20 @@ func TestRunCmd_InvalidModeShowsUsage(t *testing.T) {
 }
 
 func TestBackupCmd_Run(t *testing.T) {
-	// exercise backup command path
+	// 经 cobra 的参数走一遍备份与恢复（在单独的家目录里，不动 TestMain 的密钥）
+	cliKeyHome(t, cliKey(1))
+	openServiceDB(t)
+	file := filepath.Join(t.TempDir(), "backup.tar.gz")
 	c := &cobra.Command{}
-	c.Flags().String("output", t.TempDir()+"/backup.db", "")
-	backupCmd.Run(c, []string{})
+	c.Flags().String("output", file, "")
+	c.Flags().Bool("no-secret", false, "")
+	require.NoError(t, backupCmd.RunE(c, []string{}))
+	r := &cobra.Command{}
+	r.Flags().String("input", file, "")
+	r.Flags().Bool("cancel", false, "")
+	require.NoError(t, restoreCmd.RunE(r, []string{}))
+	assert.NotNil(t, backupCmd.PersistentPreRun, "不走 db 的 InitRuntime")
+	backupCmd.PersistentPreRun(backupCmd, nil)
 }
 
 func TestInitConfigAndDBFile(t *testing.T) {

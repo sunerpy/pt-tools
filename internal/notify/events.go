@@ -27,6 +27,7 @@ const (
 	EventFreeEndPauseFailed  = "downloader.free_end_pause_failed"
 	EventReseedRound         = "reseed.round"
 	EventRemotePaired        = "remote.paired"
+	EventBackupFailed        = "system.backup_failed"
 	EventTest                = "test"
 )
 
@@ -373,6 +374,16 @@ var notifyEvents = []EventSpec{
 		},
 		SampleTitle: "新设备已配对",
 		SampleText:  "设备「我的手机」已经配对，权限：完全控制。如果不是你本人操作，请在「系统 → 远程访问」撤销这台设备。",
+	},
+	{
+		Type: EventBackupFailed, Name: "备份失败", Desc: "定时备份没做成（每天最多发一次）",
+		Vars: []Var{
+			{Key: "dir", Type: VarString, Desc: "备份目录", Sample: "/mnt/backup/pt-tools"},
+			{Key: "error", Type: VarString, Desc: "失败的原因", Sample: "创建备份目录失败: mkdir /mnt/backup/pt-tools: permission denied"},
+			{Key: "last_ok", Type: VarString, Desc: "上一次备份成功的时间（本地时间；从没成功过时为空）", Sample: "2026-10-31 04:30"},
+		},
+		SampleTitle: "备份失败",
+		SampleText:  "今天的定时备份没做成：创建备份目录失败: mkdir /mnt/backup/pt-tools: permission denied。\n备份目录：/mnt/backup/pt-tools\n上一次成功的备份：2026-10-31 04:30\n请到「全局设置 → 备份」检查备份目录，或者点「立即备份」再试一次。",
 	},
 	{
 		Type: EventTest, Name: "通道测试", Desc: "在通知通道里点了「发送测试」",
