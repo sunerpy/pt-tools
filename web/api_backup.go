@@ -161,7 +161,7 @@ func (s *Server) backupsView(now time.Time) (BackupsView, error) {
 		view.Restore = &RestoreResultView{At: r.At, Name: r.Name, Dir: r.Dir, Error: r.Error}
 	}
 	if p, perr := core.PendingRestore(); perr != nil {
-		global.GetSlogger().Warnf("读取待恢复失败: %v", perr)
+		global.GetSlogger().Warnf("列表里先不显示待恢复：%v", perr)
 	} else if p != nil {
 		view.Pending = pendingView(*p)
 	}

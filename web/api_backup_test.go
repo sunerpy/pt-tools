@@ -3,14 +3,17 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -284,4 +287,73 @@ func TestBackupAPI_ResultsAndUploadName(t *testing.T) {
 	assert.Equal(t, "x.tar.gz", uploadName("../../x.tar.gz"))
 	assert.Equal(t, "ab.tar.gz", uploadName("a\x00b.tar.gz"))
 	assert.Len(t, []rune(uploadName(strings.Repeat("长", 300))), 200)
+}
+
+// 配置存储没有初始化时一律 503。
+func TestBackupAPI_NoStore(t *testing.T) {
+	e := setupBackupServer(t)
+	e.srv.store = nil
+	name := "pt-tools-backup-20261102-043000-manual.tar.gz"
+	for _, c := range []struct{ method, path string }{
+		{http.MethodGet, "/api/backups"},
+		{http.MethodPost, "/api/backups"},
+		{http.MethodPut, "/api/backups/settings"},
+		{http.MethodGet, "/api/backups/file/" + name},
+		{http.MethodDelete, "/api/backups/file/" + name},
+		{http.MethodPost, "/api/backups/file/" + name + "/restore"},
+		{http.MethodPost, "/api/backups/upload"},
+		{http.MethodDelete, "/api/backups/pending"},
+	} {
+		assert.Equal(t, http.StatusServiceUnavailable, e.call(t, c.method, c.path, strings.NewReader("{}")).Code, c.method+" "+c.path)
+	}
+}
+
+// 拿不到主目录（读不到数据目录）时回 500。
+func TestBackupAPI_DataDirErrors(t *testing.T) {
+	e := setupBackupServer(t)
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	body, err := json.Marshal(BackupSettingsRequest{Enabled: true, Time: "04:30", Keep: 7, IncludeSecret: true})
+	require.NoError(t, err)
+	for _, c := range []struct {
+		method, path string
+		body         io.Reader
+	}{
+		{http.MethodGet, "/api/backups", nil},
+		{http.MethodPost, "/api/backups", nil},
+		{http.MethodPut, "/api/backups/settings", bytes.NewReader(body)},
+		{http.MethodGet, "/api/backups/file/pt-tools-backup-20261102-043000-manual.tar.gz", nil},
+		{http.MethodPost, "/api/backups/upload", strings.NewReader("x")},
+		{http.MethodDelete, "/api/backups/pending", nil},
+	} {
+		assert.Equal(t, http.StatusInternalServerError, e.call(t, c.method, c.path, c.body).Code, c.method+" "+c.path)
+	}
+}
+
+// 待恢复的说明文件坏了：列表照常返回，不显示待恢复（日志里记一条）。
+func TestBackupAPI_BrokenPending(t *testing.T) {
+	e := setupBackupServer(t)
+	pend := filepath.Join(e.home, ".pt-tools", backup.PendingDir)
+	require.NoError(t, os.MkdirAll(pend, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(pend, "ready"), []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pend, "pending.json"), []byte("{"), 0o600))
+	v := e.view(t, e.call(t, http.MethodGet, "/api/backups", nil))
+	assert.Nil(t, v.Pending)
+}
+
+// 上传读到一半出错回 400，已有的待恢复不动；备份文件打不开时下载回 500。
+func TestBackupAPI_UploadReadErrorAndUnreadableFile(t *testing.T) {
+	e := setupBackupServer(t)
+	w := e.call(t, http.MethodPost, "/api/backups/upload", iotest.ErrReader(errors.New("连接断了")))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "上传没有完成")
+
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return // 读权限位在 Windows 与 root 下不起作用
+	}
+	v := e.view(t, e.call(t, http.MethodPost, "/api/backups", nil))
+	p := filepath.Join(v.Dir, v.Backups[0].Name)
+	require.NoError(t, os.Chmod(p, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
+	assert.Equal(t, http.StatusInternalServerError, e.call(t, http.MethodGet, "/api/backups/file/"+v.Backups[0].Name, nil).Code)
 }
