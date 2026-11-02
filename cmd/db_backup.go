@@ -83,7 +83,7 @@ func init() {
 	backupCmd.Flags().StringP("output", "o", "", "备份文件或目录（默认是备份设置里的目录）")
 	backupCmd.Flags().Bool("no-secret", false, "不带上密钥，只备份数据库")
 	restoreCmd.Flags().StringP("input", "i", "", "要恢复的备份文件（.tar.gz）")
-	restoreCmd.Flags().Bool("cancel", false, "取消还没生效的恢复")
+	restoreCmd.Flags().Bool("cancel", false, "取消尚未生效的恢复")
 	restoreCmd.MarkFlagsMutuallyExclusive("input", "cancel")
 }
 

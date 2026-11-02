@@ -75,7 +75,7 @@ pt-tools db restore --cancel
 | `backup`  | `--output`, `-o` | 备份文件或目录，默认是「全局设置 → 备份」里的目录；文件已经存在时不覆盖 |
 |           | `--no-secret`    | 不带上 `secret.key`；不加时按备份设置                                   |
 | `restore` | `--input`, `-i`  | 校验这份备份，通过后放进待恢复，**重启 pt-tools 以后生效**              |
-|           | `--cancel`       | 取消还没生效的恢复                                                      |
+|           | `--cancel`       | 取消尚未生效的恢复                                                      |
 
 恢复的密钥规则、重启时怎么换上与失败时怎么回退，见[升级与备份](../guide/upgrade.md#恢复)。
 

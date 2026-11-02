@@ -98,7 +98,7 @@ docker exec pt-tools pt-tools secret export > secret.b64
 
   ```bash
   pt-tools db restore --input /mnt/backup/pt-tools-backup-20261102-043000-scheduled.tar.gz
-  pt-tools db restore --cancel   # 取消还没生效的恢复
+  pt-tools db restore --cancel   # 取消尚未生效的恢复
 
   # Docker：备份文件要在容器里看得到，例如放进数据目录
   docker exec pt-tools pt-tools db restore --input /app/.pt-tools/backups/pt-tools-backup-20261102-043000-scheduled.tar.gz
