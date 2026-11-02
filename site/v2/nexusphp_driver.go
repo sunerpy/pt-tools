@@ -1797,7 +1797,8 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 var nexusTorrentFetchTimeout = 30 * time.Second
 
 // ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消，一时的错误按指数退避重拉同一个下载地址
-// （见 retryTransient，不再重取详情页）。BaseSite 下载时用它。
+// （见 retryTransient，不再重取详情页）。账号开着「第一次下载提示」时带上 letdown=1 再拉一次（见 fetchSkippingFirstNotice）。
+// BaseSite 下载时用它。
 func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPResponse) ([]byte, error) {
 	if res.Document == nil {
 		// If we have raw body (torrent file directly), return it
@@ -1833,10 +1834,13 @@ func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPR
 	}
 	// 链接取自详情页，简介等区域是用户内容；只有指向站点自己的域名时才附带 Cookie，
 	// 外域链接照常请求（passkey 下载链接不依赖 Cookie），但不把站点 Cookie 交给第三方。
-	return retryTransient(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, headers, sameSite) })
+	return retryTransient(ctx, nil, func() ([]byte, error) {
+		return fetchSkippingFirstNotice(downloadURL, func(u string) ([]byte, error) { return d.fetchTorrentOnce(ctx, u, headers, sameSite) })
+	})
 }
 
 // fetchTorrentOnce 拉一次种子文件（每次设上限超时）。下载地址带 passkey：错误里的地址一律脱敏。
+// 拿到的不是种子文件（登录页、「下载提示」页等）时返回包着 ErrNotTorrentFile 的错误（见 CheckTorrentFile）。
 func (d *NexusPHPDriver) fetchTorrentOnce(ctx context.Context, downloadURL string, headers map[string]string, withCookie bool) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, nexusTorrentFetchTimeout)
 	defer cancel()
@@ -1859,6 +1863,9 @@ func (d *NexusPHPDriver) fetchTorrentOnce(ctx context.Context, downloadURL strin
 
 	if len(resp.Body) == 0 {
 		return nil, fmt.Errorf("empty torrent file response")
+	}
+	if err := CheckTorrentFile(resp.Body); err != nil {
+		return nil, err
 	}
 
 	return resp.Body, nil
