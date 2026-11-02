@@ -246,6 +246,8 @@ func TestListAndPrune(t *testing.T) {
 	empty, err := List(filepath.Join(e.data, "nope"))
 	require.NoError(t, err)
 	assert.Empty(t, empty)
+	_, err = List(filepath.Join(dir, "notes.txt"))
+	assert.ErrorContains(t, err, "不是目录", "备份目录是个文件")
 }
 
 // 界面传来的名字只认这里起的备份名，路径一律拒绝。

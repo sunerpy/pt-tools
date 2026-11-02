@@ -7,7 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 	"unicode"
@@ -365,7 +365,7 @@ func uploadName(raw string) string {
 			return -1
 		}
 		return r
-	}, filepath.Base(strings.ReplaceAll(raw, `\`, "/")))
+	}, path.Base(strings.ReplaceAll(raw, `\`, "/")))
 	name = strings.TrimSpace(name)
 	if name == "" || name == "." || name == "/" {
 		return "上传的备份"

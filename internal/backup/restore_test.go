@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -487,6 +488,11 @@ func TestApplyPending_RollbackFailureStopsStartup(t *testing.T) {
 
 func TestSqliteURI(t *testing.T) {
 	u := sqliteURI("/tmp/a b/torrents.db", "mode=ro")
+	if runtime.GOOS == "windows" {
+		// Windows 的绝对路径带盘符，SQLite 的写法是 file:///D:/…
+		assert.Regexp(t, `^file:///[A-Za-z]:/tmp/a%20b/torrents\.db\?mode=ro$`, u)
+		return
+	}
 	assert.Equal(t, "file:///tmp/a%20b/torrents.db?mode=ro", u)
 }
 

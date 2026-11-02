@@ -367,6 +367,10 @@ func IsBackupName(name string) bool {
 
 // List 列出备份目录里的备份，最新的在前。目录不存在时返回空。
 func List(dir string) ([]Info, error) {
+	// 备份目录是个文件时报错：Windows 上 ReadDir 一个文件回的是「不存在」，会被当成还没有备份
+	if st, err := os.Stat(dir); err == nil && !st.IsDir() {
+		return nil, fmt.Errorf("读取备份目录失败: %s 不是目录", dir)
+	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return []Info{}, nil
