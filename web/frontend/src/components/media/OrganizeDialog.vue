@@ -21,8 +21,8 @@ import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import {
   MEDIA_MODES,
   itemStatus,
+  matchSourceLabel,
   mediaKindLabel,
-  mediaSourceLabel,
   modeLabel,
   posterURL,
   seasonEpisode,
@@ -190,12 +190,6 @@ function onModeChange() {
   void preview();
 }
 
-function planSource(source: NonNullable<OrganizePlan["source"]>): string {
-  if (source === "manual") return "手动指定";
-  if (source === "history") return "沿用之前整理用的条目";
-  return mediaSourceLabel(source);
-}
-
 /** 目标路径去掉媒体库目录，只留库里的相对路径 */
 function inLibrary(target?: string): string {
   const root = plan.value?.library?.path;
@@ -334,7 +328,7 @@ const resultHint = computed(() =>
             <div class="od__meta">
               <span>{{ mediaKindLabel(plan.match.media_type) }}</span>
               <span>TMDB {{ plan.match.id }}</span>
-              <span v-if="plan.source">{{ planSource(plan.source) }}</span>
+              <span v-if="plan.source">{{ matchSourceLabel(plan.source) }}</span>
             </div>
             <div v-if="plan.library" class="od__meta" data-testid="organize-library">
               <span>媒体库：{{ plan.library.name }}</span>

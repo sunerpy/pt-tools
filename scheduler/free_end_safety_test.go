@@ -233,7 +233,7 @@ func TestFreeEnd_ArchiveKeepsFreeStatusColumns(t *testing.T) {
 		SiteName: "s", TorrentID: "arch", Title: "Arch", IsCompleted: true, CreatedAt: old,
 		FreeValidity: "free_until", DetailID: "42", SourceRSSID: &rss, RequireFree: true,
 		FreeEndFailures: 3, FreeEndAlertedAt: &alerted, PushPendingAt: &pending, FreeEndedAt: &pending, PushedFilterRuleID: &rss,
-		HasHR: true, HRSeedTimeH: 720,
+		HasHR: true, HRSeedTimeH: 720, MediaType: models.MediaKindTV, TMDBID: 100088, MediaSeason: 2,
 	}).Error)
 
 	m.archiveOldTorrents()
@@ -253,6 +253,9 @@ func TestFreeEnd_ArchiveKeepsFreeStatusColumns(t *testing.T) {
 	assert.Equal(t, rss, *a.PushedFilterRuleID)
 	assert.True(t, a.HasHR, "H&R 标记一起归档（自动删种按它保护）")
 	assert.Equal(t, 720, a.HRSeedTimeH)
+	assert.Equal(t, models.MediaKindTV, a.MediaType, "推送时说明的条目一起归档（整理入库按它整理）")
+	assert.Equal(t, 100088, a.TMDBID)
+	assert.Equal(t, 2, a.MediaSeason)
 }
 
 // 计划暂停时间到了就处理，即使记录已经不是免费（RSS 读到免费被取消时把计划改成现在）。

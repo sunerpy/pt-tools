@@ -3624,6 +3624,17 @@ export interface OrganizePlanItem {
   history_id?: number;
 }
 
+/**
+ * 整理时条目从哪来：manual 是手动指定的，history 是沿用之前整理这些文件时用的，subscription 是订阅的，
+ * push 是推送时说明的（按条目搜索、订阅推送）；都没有时是媒体识别的来源
+ */
+export type MediaMatchSource =
+  | MediaRecognizeResult["source"]
+  | "manual"
+  | "history"
+  | "subscription"
+  | "push";
+
 export interface OrganizePlan {
   downloader_id: number;
   downloader_name: string;
@@ -3634,8 +3645,7 @@ export interface OrganizePlan {
   local_path: string;
   mapped: boolean;
   match?: TMDBItem;
-  /** manual 是手动指定的条目，history 是沿用之前整理这些文件时用的条目 */
-  source?: MediaRecognizeResult["source"] | "manual" | "history";
+  source?: MediaMatchSource;
   library?: MediaLibraryInput & { id: number };
   /** 放进的二级分类（媒体库开了「按二级分类放进子目录」、规则对得上时才有） */
   category?: string;
@@ -3690,6 +3700,8 @@ export interface MediaHistoryItem {
   attempts: number;
   next_retry_at?: string;
   trigger: "auto" | "scan" | "manual" | "watch";
+  /** 条目从哪来（升级前的记录为空） */
+  match_source?: "" | MediaMatchSource;
   /** 目录监控的目录（不是下载器里的种子时） */
   watch_dir_id?: number;
   /** 手动指定路径整理的记录当时填的路径（别的记录没有） */

@@ -120,7 +120,15 @@ Only size decides: the smaller old version never swaps the larger one back when 
 - Subtitles (srt, ass, ssa, sub, idx, sup, vtt) go with their video (except those in extras or sample folders) and get a language suffix from the file name: `zh-CN` simplified Chinese, `zh-TW` traditional Chinese, `zh` Chinese, `en` English, `ja` Japanese, `ko` Korean. When a torrent has several videos, subtitles are matched by file name prefix or by season and episode.
 - Season and episode numbers come from each file name, with [recognition words](media-recognize.md#recognition-words) applied (episode offsets included); single-file torrents use the torrent name.
 
-Recognition uses the torrent name (and the site title as a subtitle when it differs), looking up the site's IMDb ID first when there is one.
+Organising picks the item in this order, and the preview and organise history say which one was used:
+
+1. The TMDB ID filled in for a manual organise (手动指定);
+2. The item these files were organised as before (沿用之前整理用的条目);
+3. For torrents a subscription pushed or counted towards it: the subscription's item (按订阅的条目), without recognising;
+4. The item pt-tools recorded when it pushed the torrent (按推送时说明的条目): every torrent a subscription pushes carries one, so it still applies after the subscription is deleted;
+5. Otherwise recognition: the torrent name (and the site title as a subtitle when it differs), looking up the site's IMDb ID first when there is one.
+
+When the item from a subscription or a push is no longer on TMDB (merged or deleted), recognition is used instead and the organise record says so. Seasons and episodes are still read from each file name, not taken from the subscription.
 
 ## When organising runs
 
@@ -248,7 +256,7 @@ When channels are selected under Organise settings (整理设置), each run that
 
 ## Organise history
 
-There is one record per video file, showing where it went, how, which trigger organised it and whether it worked, plus the result of its last scrape: scraped (刮削成功), partly scraped (部分刮削: some selected items weren't written because the sources don't have them, a download failed or the Fanart.tv key is missing; or a source failed and TMDB's data was used) or scrape failed (刮削失败), with the reasons and notes on the line below.
+There is one record per video file, showing which item it was organised as and where that item came from (the order at the end of [Which files are organised](#which-files-are-organised); records from before the upgrade don't say), where it went, how, which trigger organised it and whether it worked, plus the result of its last scrape: scraped (刮削成功), partly scraped (部分刮削: some selected items weren't written because the sources don't have them, a download failed or the Fanart.tv key is missing; or a source failed and TMDB's data was used) or scrape failed (刮削失败), with the reasons and notes on the line below.
 
 | Status           | Description                                                                                                                                                                                                                                                              |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

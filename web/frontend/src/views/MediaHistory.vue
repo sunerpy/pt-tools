@@ -20,6 +20,7 @@ import {
   HISTORY_FILTERS,
   historyEntry,
   historyStatus,
+  matchSourceLabel,
   modeLabel,
   organizeOutcome,
   rescrapeOutcome,
@@ -154,6 +155,9 @@ function openManual(path = "", mode: MediaHistoryItem["chosen_mode"] = "") {
 const canManual = (r: MediaHistoryItem) => canRetry(r) && Boolean(r.manual_path);
 const rowTrigger = (r: MediaHistoryItem) =>
   r.manual_path ? "手动（指定路径）" : triggerLabel(r.trigger);
+/** 条目下面那一行：条目从哪来（升级前的记录没有）与种子名 */
+const entrySub = (r: MediaHistoryItem) =>
+  [matchSourceLabel(r.match_source), r.torrent_name].filter(Boolean).join(" · ");
 
 onMounted(load);
 </script>
@@ -223,7 +227,7 @@ onMounted(load);
           show-overflow-tooltip>
           <template #default="{ row }">
             <div class="mh-strong">{{ historyEntry(row) || "没识别出来" }}</div>
-            <div class="mh-sub">{{ row.torrent_name }}</div>
+            <div class="mh-sub">{{ entrySub(row) }}</div>
           </template>
         </el-table-column>
         <el-table-column
@@ -305,6 +309,7 @@ onMounted(load);
         <PtRowCard v-for="r in items" :key="r.id">
           <template #title>{{ historyEntry(r) || "没识别出来" }}</template>
           <template #meta>
+            <span v-if="r.match_source">{{ matchSourceLabel(r.match_source) }}</span>
             <span class="mh-full">{{ fileName(r.source_path) }}</span>
             <span v-if="r.target_path" class="mh-full">→ {{ r.target_path }}</span>
             <span

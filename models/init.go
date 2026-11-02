@@ -69,6 +69,11 @@ type TorrentInfo struct {
 	// IMDbID、DoubanID 是站点给的外部编号（详情页或接口里有时才有），媒体识别优先用它们
 	IMDbID   string `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
 	DoubanID string `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
+	// MediaType、TMDBID、MediaSeason 是推送时说明的条目（订阅推送、网页上按条目推送时写；RSS、刷流、辅种、qB 兼容入口不写）：
+	// 整理入库没有手动指定、之前也没整理过、不是订阅的种子时按它整理，不再识别。空串与 0 是不知道
+	MediaType   string `gorm:"column:media_type;size:8;default:''" json:"mediaType"`
+	TMDBID      int    `gorm:"column:tmdb_id;default:0" json:"tmdbId"`
+	MediaSeason int    `gorm:"column:media_season;default:0" json:"mediaSeason"`
 
 	// 免费资格（docs/design/free-expiry-safety.md）：每次读到站点详情都按规范快照整套写入。
 	// FreeValidity 是 not_free / free_until / free_permanent / unknown；空串是还没按新规则验证过的旧记录。
@@ -139,6 +144,10 @@ type TorrentInfoArchive struct {
 	CheckCount         int        `json:"checkCount"`
 	IMDbID             string     `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
 	DoubanID           string     `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
+	// 推送时说明的条目（同 TorrentInfo）：归档以后种子照样在下载器里做种，整理入库照样按它整理
+	MediaType   string `gorm:"column:media_type;size:8;default:''" json:"mediaType"`
+	TMDBID      int    `gorm:"column:tmdb_id;default:0" json:"tmdbId"`
+	MediaSeason int    `gorm:"column:media_season;default:0" json:"mediaSeason"`
 	// 免费资格、归属与暂停记录：与 TorrentInfo 同名的列，归档时原样复制
 	FreeValidity     string     `gorm:"size:16;default:''" json:"freeValidity"`
 	FreeVerifiedAt   *time.Time `json:"freeVerifiedAt"`

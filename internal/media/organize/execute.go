@@ -271,6 +271,9 @@ func (s *Service) writeRecord(ctx context.Context, p *Plan, it *PlanItem, trigge
 // writeRecordIn 同 writeRecord，写进 db（替换旧版本时是事务）。
 func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *PlanItem, trigger, status, msg string, retry bool, fileID string, extras []extra) error {
 	now := s.cfg.Now()
+	if p.matchNote != "" {
+		msg = strings.TrimSuffix(p.matchNote+"；"+msg, "；")
+	}
 	row := models.MediaTransferHistory{
 		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, WatchDirID: p.WatchDirID, InfoHash: p.Hash, TaskID: p.TaskID,
 		TorrentName: truncate(p.Name, 512), SourcePath: it.Source, SaveRoot: p.LocalPath, TargetPath: it.Target, Mode: firstNonEmpty(it.mode, p.Mode),
@@ -285,6 +288,7 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 	}
 	if p.Match != nil {
 		row.MediaType, row.TMDBID, row.Title, row.Year = p.Match.MediaType, p.Match.ID, truncate(p.Match.Title, 255), p.Match.Year
+		row.MatchSource = truncate(p.Source, 16)
 	}
 	if len(extras) > 0 {
 		b, _ := json.Marshal(extras)
@@ -315,7 +319,7 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 		DoUpdates: clause.AssignmentColumns([]string{
 			"downloader_id", "downloader_name", "watch_dir_id", "info_hash", "task_id", "torrent_name", "library_id", "save_root", "target_path", "root_path",
 			"extras", "mode", "chosen_mode", "media_type", "tmdb_id", "title", "year", "season", "episode", "episode_end", "size",
-			"status", "message", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "updated_at",
+			"status", "message", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "match_source", "updated_at",
 		}),
 	}).Create(&row).Error
 	if err != nil {

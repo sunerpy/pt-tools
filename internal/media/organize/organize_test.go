@@ -826,17 +826,17 @@ func TestOrganizeFollowLibrary(t *testing.T) {
 	e.lastOfUs()
 	var gotDL uint
 	var gotHash string
-	answer := func(uint, string) (uint, bool, error) { return lib.ID, true, nil }
-	e.svc.SetLibraryFor(func(_ context.Context, dl uint, hash string) (uint, bool, error) {
+	answer := func(uint, string) (MediaHint, bool, error) { return MediaHint{LibraryID: lib.ID}, true, nil }
+	e.svc.SetMediaFor(func(_ context.Context, dl uint, hash string) (MediaHint, bool, error) {
 		gotDL, gotHash = dl, hash
 		return answer(dl, hash)
 	})
 
-	// 查不了：不自动选库，稍后重试
-	answer = func(uint, string) (uint, bool, error) { return 0, false, errors.New("数据库忙") }
+	// 查不了：不自动识别、不自动选库，稍后重试
+	answer = func(uint, string) (MediaHint, bool, error) { return MediaHint{}, false, errors.New("数据库忙") }
 	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
 	require.NoError(t, err)
-	assert.Contains(t, res.Plan.Problem, "查不到追剧指定的媒体库")
+	assert.Contains(t, res.Plan.Problem, "查不到追剧的条目与媒体库")
 	assert.Equal(t, uint(1), gotDL)
 	assert.Equal(t, tlouHash, gotHash)
 	rows := e.history()
@@ -851,13 +851,13 @@ func TestOrganizeFollowLibrary(t *testing.T) {
 	disabled := e.library(LibraryInput{Name: "停用", Kind: models.MediaKindTV, Path: filepath.Join(e.root, "media", "off")})
 	_, err = e.svc.SaveLibrary(e.ctx, disabled.ID, LibraryInput{Name: "停用", Kind: models.MediaKindTV, Path: disabled.Path, Enabled: false})
 	require.NoError(t, err)
-	answer = func(uint, string) (uint, bool, error) { return disabled.ID, true, nil }
+	answer = func(uint, string) (MediaHint, bool, error) { return MediaHint{LibraryID: disabled.ID}, true, nil }
 	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
 	require.NoError(t, err)
 	assert.Contains(t, res.Plan.Problem, "追剧指定的媒体库不存在、没有启用")
 
 	// 追剧指定了库：整理进它
-	answer = func(uint, string) (uint, bool, error) { return lib.ID, true, nil }
+	answer = func(uint, string) (MediaHint, bool, error) { return MediaHint{LibraryID: lib.ID}, true, nil }
 	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
 	require.NoError(t, err)
 	require.Empty(t, res.Plan.Problem)
@@ -877,15 +877,18 @@ func TestOrganizeFollowLibraryNotFollowOrExplicit(t *testing.T) {
 	lib := e.library(LibraryInput{Name: "综艺", Kind: models.MediaKindTV, Path: variety})
 	e.lastOfUs()
 	// 不是追剧的种子，或者追剧没指定库：按类型自动选
-	e.svc.SetLibraryFor(func(context.Context, uint, string) (uint, bool, error) { return 0, true, nil })
+	e.svc.SetMediaFor(func(context.Context, uint, string) (MediaHint, bool, error) { return MediaHint{}, true, nil })
 	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
 	require.NoError(t, err)
 	require.NotNil(t, p.Library)
 	assert.Equal(t, "剧集", p.Library.Name)
-	// 手动整理时指定的库优先，不问追剧
+	// 手动整理时指定了条目与库：不问追剧
 	called := false
-	e.svc.SetLibraryFor(func(context.Context, uint, string) (uint, bool, error) { called = true; return 999, true, nil })
-	p, err = e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: tlouHash, LibraryID: lib.ID})
+	e.svc.SetMediaFor(func(context.Context, uint, string) (MediaHint, bool, error) {
+		called = true
+		return MediaHint{LibraryID: 999}, true, nil
+	})
+	p, err = e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: tlouHash, MediaType: models.MediaKindTV, TMDBID: 100088, LibraryID: lib.ID})
 	require.NoError(t, err)
 	assert.Equal(t, lib.ID, p.Library.ID)
 	assert.False(t, called)

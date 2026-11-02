@@ -4,6 +4,7 @@ import type {
   MediaHistoryItem,
   MediaImageLang,
   MediaKind,
+  MediaMatchSource,
   MediaMeta,
   MediaMode,
   MediaOverwriteMode,
@@ -44,6 +45,19 @@ const SOURCE_LABELS: Record<MediaRecognizeResult["source"], string> = {
 
 export function mediaSourceLabel(source: MediaRecognizeResult["source"]): string {
   return SOURCE_LABELS[source] ?? source;
+}
+
+const MATCH_SOURCE_LABELS: Record<string, string> = {
+  manual: "手动指定",
+  history: "沿用之前整理用的条目",
+  subscription: "按订阅的条目",
+  push: "按推送时说明的条目",
+};
+
+/** 整理时条目从哪来（预览与整理记录里显示）；升级前的记录没有，回空串 */
+export function matchSourceLabel(source?: MediaMatchSource | ""): string {
+  if (!source) return "";
+  return MATCH_SOURCE_LABELS[source] ?? mediaSourceLabel(source as MediaRecognizeResult["source"]);
 }
 
 const WORD_KIND_LABELS: Record<MediaWordKind, string> = {

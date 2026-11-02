@@ -188,6 +188,10 @@ type Plan struct {
 	root string
 	// chosenMode 是请求里选的整理方式（空串是跟媒体库）：写进整理记录，重试按它整理
 	chosenMode string
+	// follow 是订阅推送或认领的种子的订阅的条目与媒体库（不是订阅的种子、没有查时为空）
+	follow *MediaHint
+	// matchNote 是条目来源上要写进整理记录的说明（订阅或推送时说明的条目在 TMDB 上找不到了、改成自动识别）
+	matchNote string
 }
 
 // otherNote 是同一个位置上换了文件时写在整理记录消息前面的说明（见 markOtherFiles）。
@@ -232,11 +236,17 @@ type Result struct {
 	Queued bool `json:"queued,omitempty"`
 }
 
-// 来源：手动指定的 TMDB 条目；沿用之前整理这些文件时用的条目。
+// 条目的来源，按这个顺序取：手动指定的 TMDB 条目；沿用之前整理这些文件时用的条目；订阅的条目；推送时说明的条目。
+// 都没有时自动识别，来源是媒体识别给的（纠正、IMDb 编号、搜索等）。
 const (
-	sourceManual  = "manual"
-	sourceHistory = "history"
+	sourceManual       = "manual"
+	sourceHistory      = "history"
+	sourceSubscription = "subscription"
+	sourcePush         = "push"
 )
+
+// validKind 报告类型是不是电影或剧集。
+func validKind(kind string) bool { return kind == tmdb.KindMovie || kind == tmdb.KindTV }
 
 // cleanRel 检查下载器给的相对路径：不能是绝对路径，不能有 .. 这一级。
 func cleanRel(name string) (string, bool) {
@@ -325,6 +335,35 @@ func extraOurs(e extra, mode string) bool {
 		return err == nil && os.SameFile(src, info)
 	}
 	return false
+}
+
+// followHint 问订阅：这个种子是订阅推送或认领的时，回订阅的条目与媒体库；不是时回 nil。没有接上订阅服务时也是 nil。
+func (s *Service) followHint(ctx context.Context, p *Plan) (*MediaHint, error) {
+	f := s.followMedia()
+	if f == nil {
+		return nil, nil
+	}
+	h, found, err := f(ctx, p.DownloaderID, p.Hash)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &h, nil
+}
+
+// torrentRecord 是 pt-tools 推送这个种子时记下的记录（站点、标题、外部编号、推送时说明的条目）：先查种子表，
+// 没有时查归档表（完成两周后记录挪进归档表，种子照样在下载器里做种）。都没有时是空的。
+func (s *Service) torrentRecord(ctx context.Context, hash string) models.TorrentInfo {
+	var info models.TorrentInfo
+	_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", hash).Order("id DESC").Limit(1).Find(&info).Error
+	if info.ID != 0 {
+		return info
+	}
+	var a models.TorrentInfoArchive
+	_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", hash).Order("id DESC").Limit(1).Find(&a).Error
+	return models.TorrentInfo{
+		SiteName: a.SiteName, Title: a.Title, IMDbID: a.IMDbID, DoubanID: a.DoubanID,
+		MediaType: a.MediaType, TMDBID: a.TMDBID, MediaSeason: a.MediaSeason,
+	}
 }
 
 // priorEntry 是之前整理这些文件时用的条目：先看已经整理好的记录，再看手动整理时指定过条目的记录。
@@ -538,7 +577,8 @@ func (s *Service) loadRows(ctx context.Context, p *Plan) error {
 	return nil
 }
 
-// recognize 识别种子对应的条目：指定了 TMDB 编号时直接取详情，否则用种子名（站点标题作副标题）与 IMDb 编号识别。
+// recognize 定种子对应的条目：手动指定的、之前整理用过的、订阅的、推送时说明的条目依次直接取详情；
+// 都没有时用种子名（站点标题作副标题）与 IMDb 编号识别。
 func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloader.Torrent) bool {
 	c, err := s.cfg.Recognizer.TMDB(ctx)
 	if errors.Is(err, tmdb.ErrNoKey) {
@@ -550,8 +590,17 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	}
 	var info models.TorrentInfo
 	if p.WatchDirID == 0 && p.SourcePath == "" {
-		// 目录监控的一项与指定的路径不是种子：没有站点给的标题与 IMDb 编号
-		_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", p.Hash).Order("id DESC").Limit(1).Find(&info).Error
+		// 目录监控的一项与指定的路径不是种子：没有站点给的标题、编号与推送时说明的条目
+		info = s.torrentRecord(ctx, p.Hash)
+		// 条目或媒体库没有指定时问订阅：查不到时不自动识别、不自动选库，识别成别的条目或放错了库，订阅那边就缺了这几集
+		if req.TMDBID == 0 || req.LibraryID == 0 {
+			hint, ferr := s.followHint(ctx, p)
+			if ferr != nil {
+				p.Problem, p.retryable = "查不到追剧的条目与媒体库，稍后重试："+ferr.Error(), true
+				return false
+			}
+			p.follow = hint
+		}
 	}
 	p.siteName, p.doubanID = info.SiteName, info.DoubanID
 	source := sourceManual
@@ -561,19 +610,35 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 			req.MediaType, req.TMDBID, source = kind, id, sourceHistory
 		}
 	}
+	if f := p.follow; req.TMDBID == 0 && f != nil && validKind(f.MediaType) && f.TMDBID > 0 {
+		req.MediaType, req.TMDBID, source = f.MediaType, f.TMDBID, sourceSubscription
+	}
+	if req.TMDBID == 0 && validKind(info.MediaType) && info.TMDBID > 0 {
+		req.MediaType, req.TMDBID, source = info.MediaType, info.TMDBID, sourcePush
+	}
 	if req.TMDBID > 0 {
 		if err != nil {
 			p.Problem = "识别失败：" + err.Error()
 			return false
 		}
 		d, detailErr := c.Details(ctx, req.MediaType, req.TMDBID)
-		if detailErr != nil {
+		switch {
+		case detailErr == nil:
+			p.meta, _ = s.cfg.Recognizer.Parse(ctx, t.Name, "")
+			p.Match, p.Source = d, source
+			return true
+		case errors.Is(detailErr, tmdb.ErrNotFound) && (source == sourceSubscription || source == sourcePush):
+			// 订阅或推送时说明的条目在 TMDB 上不在了（被合并、删除）：改成自动识别，写明
+			what := "订阅的条目"
+			if source == sourcePush {
+				what = "推送时说明的条目"
+			}
+			p.matchNote = fmt.Sprintf("%s（TMDB %s %d）在 TMDB 上找不到了，改成自动识别", what, req.MediaType, req.TMDBID)
+			p.Notes = append(p.Notes, p.matchNote)
+		default:
 			p.Problem, p.retryable = "识别失败："+detailErr.Error(), !errors.Is(detailErr, tmdb.ErrNotFound)
 			return false
 		}
-		p.meta, _ = s.cfg.Recognizer.Parse(ctx, t.Name, "")
-		p.Match, p.Source = d, source
-		return true
 	}
 	in := recognize.Input{Title: t.Name, IMDbID: info.IMDbID}
 	if info.Title != "" && info.Title != t.Name {
@@ -602,7 +667,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	return true
 }
 
-// pickLibrary 选媒体库：指定了就用指定的（要启用、类型相同）；追剧推送或认领的种子用追剧指定的库（同样当作指定的）；
+// pickLibrary 选媒体库：指定了就用指定的（要启用、类型相同）；订阅推送或认领的种子用订阅指定的库（同样当作指定的）；
 // 否则在同类型里选，动画优先进只收动画的库。
 func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	var libs []models.MediaLibrary
@@ -612,18 +677,8 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	}
 	kind := p.Match.MediaType
 	wanted, follow := req.LibraryID, false
-	if wanted == 0 && p.WatchDirID == 0 && p.SourcePath == "" {
-		if f := s.followLibrary(); f != nil {
-			id, found, err := f(ctx, p.DownloaderID, p.Hash)
-			if err != nil {
-				// 查不到时不自动选库：选错了库，追剧要的库里就缺了这一集
-				p.Problem, p.retryable = "查不到追剧指定的媒体库，稍后重试："+err.Error(), true
-				return false
-			}
-			if found && id > 0 {
-				wanted, follow = id, true
-			}
-		}
+	if wanted == 0 && p.follow != nil && p.follow.LibraryID > 0 {
+		wanted, follow = p.follow.LibraryID, true
 	}
 	var lib *models.MediaLibrary
 	if wanted > 0 {

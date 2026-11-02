@@ -59,8 +59,8 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 	}
 	svc := subscribe.New(cfg)
 	if organizer != nil {
-		// 追剧推送或认领的种子整理进追剧指定的媒体库
-		organizer.SetLibraryFor(svc.LibraryFor)
+		// 订阅推送或认领的种子按订阅的条目整理，放进订阅指定的媒体库
+		organizer.SetMediaFor(svc.MediaFor)
 	}
 	svc.Start(ctx)
 	internal.SetSubscriptionOffer(svc.Offer)

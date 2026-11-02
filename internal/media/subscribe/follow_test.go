@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/schedule"
 	"github.com/sunerpy/pt-tools/models"
@@ -1047,7 +1048,8 @@ func TestEpisodeRules(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotFound)
 }
 
-func TestLibraryFor(t *testing.T) {
+// 订阅推送的种子：推送时带上订阅的条目；整理入库按种子编号问到订阅的条目与媒体库（给整理入库用，见 organize.MediaFor）。
+func TestMediaFor(t *testing.T) {
 	e := newEnv(t)
 	lib := models.MediaLibrary{Name: "综艺", Kind: models.MediaKindTV, Path: t.TempDir(), Enabled: true}
 	require.NoError(t, e.db.Create(&lib).Error)
@@ -1057,30 +1059,39 @@ func TestLibraryFor(t *testing.T) {
 	e.search.set(e.item("mteam", "971", "Natural.High.S04E01.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", "", 2, 10))
 	_, err := e.svc.SearchNow(e.ctx, sub.ID)
 	require.NoError(t, err)
+	pushes := e.gotPushes()
+	require.Len(t, pushes, 1)
+	require.NotNil(t, pushes[0].Media, "推送带上订阅的条目")
+	assert.Equal(t, ptinternal.PushMedia{Type: sub.MediaType, TMDBID: sub.TMDBID, Season: sub.Season}, *pushes[0].Media)
+
 	hash := e.hashOf("971")
-	id, found, err := e.svc.LibraryFor(e.ctx, 1, strings.ToUpper(hash))
+	want := organize.MediaHint{LibraryID: lib.ID, MediaType: sub.MediaType, TMDBID: sub.TMDBID}
+	hint, found, err := e.svc.MediaFor(e.ctx, 1, strings.ToUpper(hash))
 	require.NoError(t, err)
 	assert.True(t, found)
-	assert.Equal(t, lib.ID, id)
+	assert.Equal(t, want, hint)
 	// 种子失败以后（重试整理时）照样有效
 	require.NoError(t, e.db.Model(&models.MediaSubscriptionTorrent{}).Where("info_hash = ?", hash).Update("status", models.MediaSubTorrentFailed).Error)
-	id, found, err = e.svc.LibraryFor(e.ctx, 1, hash)
+	hint, found, err = e.svc.MediaFor(e.ctx, 1, hash)
 	require.NoError(t, err)
 	assert.True(t, found)
-	assert.Equal(t, lib.ID, id)
-	_, found, err = e.svc.LibraryFor(e.ctx, 1, "ffff")
+	assert.Equal(t, want, hint)
+	_, found, err = e.svc.MediaFor(e.ctx, 1, "ffff")
 	require.NoError(t, err)
 	assert.False(t, found, "不是订阅的种子")
+	_, found, err = e.svc.MediaFor(e.ctx, 1, " ")
+	require.NoError(t, err)
+	assert.False(t, found)
 
-	// 没指定库的追剧：found 但编号是 0（整理按类型自动选）
+	// 没指定库的追剧：found，库是 0（整理按类型自动选），条目照样回
 	sub2 := e.follow(func(in *SubscriptionInput) { in.TMDBID, in.Season = 100088, 2; in.LockVersion = off() })
 	e.search.set(e.item("mteam", "972", "The.Last.of.Us.S02E01.2160p.WEB-DL.H.265-HHWEB", "", 2, 10))
 	_, err = e.svc.SearchNow(e.ctx, sub2.ID)
 	require.NoError(t, err)
-	id, found, err = e.svc.LibraryFor(e.ctx, 1, e.hashOf("972"))
+	hint, found, err = e.svc.MediaFor(e.ctx, 1, e.hashOf("972"))
 	require.NoError(t, err)
 	assert.True(t, found)
-	assert.Zero(t, id)
+	assert.Equal(t, organize.MediaHint{MediaType: models.MediaKindTV, TMDBID: 100088}, hint)
 }
 
 // 只改定时：按新的定时排下次搜索，不马上搜；一样的再存一次什么都不变；改了版本锁马上搜

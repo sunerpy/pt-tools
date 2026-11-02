@@ -140,6 +140,19 @@ describe("整理历史", () => {
     expect(q("mh-retry-1"), "整理成功的不能重试").toBeNull();
   });
 
+  it("写明条目从哪来：按订阅的、推送时说明的；升级前的记录不写", async () => {
+    await mountPage(false, [
+      row({ id: 3, match_source: "subscription" }),
+      row({ id: 4, match_source: "push" }),
+    ]);
+    const rows = [...q("mh-table")!.querySelectorAll(".el-table__body tr")].map(
+      (tr) => tr.textContent ?? "",
+    );
+    expect(rows[0]).toContain("按订阅的条目 · The.Last.of.Us.S01.2160p");
+    expect(rows[1]).toContain("按推送时说明的条目");
+    expect(rows[2]).not.toContain("按");
+  });
+
   it("筛选：按状态与关键字重新读，回到第一页", async () => {
     await mountPage();
     const failed = [...q("mh-status")!.querySelectorAll("label")].find((l) =>

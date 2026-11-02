@@ -31,6 +31,11 @@ type TorrentPushRequest struct {
 	TorrentTitle string `json:"torrentTitle,omitempty"`
 	SourceSite   string `json:"sourceSite,omitempty"`
 	SizeBytes    int64  `json:"sizeBytes,omitempty"`
+
+	// 条目（可选，按条目搜索的结果里推送时带上）：写进种子记录，整理入库按它整理，不再识别
+	MediaType string `json:"mediaType,omitempty"` // movie 或 tv
+	TMDBID    int    `json:"tmdbId,omitempty"`
+	Season    int    `json:"season,omitempty"` // 剧集的季
 }
 
 // TorrentPushResponse 种子推送响应
@@ -67,6 +72,10 @@ type TorrentPushItem struct {
 	TorrentTitle string `json:"torrentTitle,omitempty"`
 	SourceSite   string `json:"sourceSite,omitempty"`
 	SizeBytes    int64  `json:"sizeBytes,omitempty"`
+	// 条目（可选，同 TorrentPushRequest）
+	MediaType string `json:"mediaType,omitempty"`
+	TMDBID    int    `json:"tmdbId,omitempty"`
+	Season    int    `json:"season,omitempty"`
 }
 
 // BatchTorrentPushResponse 批量推送响应
@@ -244,6 +253,9 @@ func (s *Server) processTorrentPush(r *http.Request, req TorrentPushRequest) Tor
 			// 网页里的手动推送：明确的用户操作，不要求免费
 			Policy: internal.AdmissionPolicy{SourceKind: internal.SourceKindManual, SafetyMargin: internal.DefaultSafetyMargin()},
 		}
+		if req.TMDBID > 0 {
+			pushReq.Media = &internal.PushMedia{Type: req.MediaType, TMDBID: req.TMDBID, Season: req.Season}
+		}
 
 		pushResult, err := internal.PushTorrentToDownloader(ctx, pushReq)
 		if err != nil {
@@ -309,6 +321,9 @@ func (s *Server) processBatchTorrentPush(r *http.Request, req BatchTorrentPushRe
 			TorrentTitle:  torrent.TorrentTitle,
 			SourceSite:    torrent.SourceSite,
 			SizeBytes:     torrent.SizeBytes,
+			MediaType:     torrent.MediaType,
+			TMDBID:        torrent.TMDBID,
+			Season:        torrent.Season,
 		}
 
 		// Process single push
