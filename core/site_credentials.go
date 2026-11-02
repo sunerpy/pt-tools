@@ -13,7 +13,7 @@ import (
 )
 
 // MissingCredential 按认证方式返回站点还缺的那项凭据：cookie、api_key 或 passkey；齐了返回空串。
-// cookie_and_api_key 只要 API Key：Cookie 可选（HDDolby 搜索、下载、用户数据都走 API，只有时魔与签到用 Cookie）。
+// cookie_and_api_key 只要 API Key：Cookie 可选（HDDolby 搜索、用户数据与带 downhash 的下载走 API，时魔、签到与只知道种子编号的下载用 Cookie）。
 func MissingCredential(authMethod, cookie, apiKey, passkey string) string {
 	has := func(v string) bool { return strings.TrimSpace(v) != "" }
 	switch strings.ToLower(strings.TrimSpace(authMethod)) {

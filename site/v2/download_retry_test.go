@@ -127,3 +127,37 @@ func TestNexusPHPDriver_ParseDownloadContext_RetriesFetch(t *testing.T) {
 	assert.NotContains(t, err.Error(), "SECRETPASSKEY")
 	assert.True(t, errors.Is(err, ErrNetworkError))
 }
+
+// selfDL 是自己按编号下载的驱动（同 HDDolby）：BaseSite 下载时交给它，不走 PrepareDownload。
+type selfDL struct {
+	hashDriver
+	fails, calls int
+}
+
+func (s *selfDL) PrepareDownload(string) (string, error) {
+	return "", errors.New("不该走 PrepareDownload")
+}
+
+func (s *selfDL) Download(context.Context, string) ([]byte, error) {
+	s.calls++
+	if s.calls <= s.fails {
+		return nil, fmt.Errorf("download request failed: %w: EOF", ErrNetworkError)
+	}
+	return []byte("d4:info"), nil
+}
+
+func TestBaseSite_Download_UsesDriverDownload(t *testing.T) {
+	quickDownloadRetry(t)
+	d := &selfDL{fails: 1}
+	site := NewBaseSite[string, string](d, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteHDDolby, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	data, err := site.Download(context.Background(), "5")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("d4:info"), data)
+	assert.Equal(t, 2, d.calls, "一时的错误再下一次")
+
+	d = &selfDL{fails: 100}
+	site = NewBaseSite[string, string](d, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteHDDolby, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	_, err = site.Download(context.Background(), "5")
+	require.ErrorIs(t, err, ErrNetworkError)
+	assert.Contains(t, err.Error(), "(3 attempts)")
+}

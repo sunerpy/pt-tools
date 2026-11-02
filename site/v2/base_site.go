@@ -213,6 +213,13 @@ func (b *BaseSite[Req, Res]) Download(ctx context.Context, torrentID string) ([]
 	return b.download(ctx, torrentID)
 }
 
+// selfDownloader 是自己按种子编号取种子文件的驱动：要的东西不在 PrepareDownload 那一个请求里。HDDolby 的下载地址要带
+// downhash（只在搜索结果里）或者用 Cookie 下载，PrepareDownload 只给得出 /download.php?id=，站点回的是登录页
+// （2026-11-02 辅种）。BaseSite 下载时驱动实现了它就交给它。
+type selfDownloader interface {
+	Download(ctx context.Context, torrentID string) ([]byte, error)
+}
+
 // download 执行一次下载，不取限速令牌；调用方负责先 limiter.Wait，保证一次下载只消耗一个令牌。
 func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]byte, error) {
 	startTime := time.Now()
@@ -221,6 +228,17 @@ func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]
 		zap.String("site", b.name),
 		zap.String("torrentID", torrentID),
 	)
+
+	if sd, ok := any(b.driver).(selfDownloader); ok {
+		// 一时的错误（网络、5xx）按指数退避再下，每次重试先等限速的令牌（同 DownloadWithHash）
+		data, err := retryTransient(ctx, b.limiter.Wait, func() ([]byte, error) { return sd.Download(ctx, torrentID) })
+		if err != nil {
+			b.logDownloadFailure(torrentID, err)
+			return nil, fmt.Errorf("download: %w", err)
+		}
+		b.logDownloaded(torrentID, len(data), startTime)
+		return data, nil
+	}
 
 	// Prepare request
 	req, err := b.driver.PrepareDownload(torrentID)
@@ -244,24 +262,31 @@ func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]
 		data, err = b.driver.ParseDownload(res)
 	}
 	if err != nil {
-		// 站点上已经没有这个种子（删了；IYUU 辅种常遇到）：是站点的状态不是故障，记警告
-		if errors.Is(err, ErrTorrentNotFound) {
-			b.logger.Warn("Torrent not found on site", zap.String("torrentID", torrentID), zap.Error(err))
-		} else {
-			b.logger.Error("Failed to parse download response", zap.String("torrentID", torrentID), zap.Error(err))
-		}
+		b.logDownloadFailure(torrentID, err)
 		return nil, fmt.Errorf("parse download: %w", err)
 	}
 
+	b.logDownloaded(torrentID, len(data), startTime)
+	return data, nil
+}
+
+// logDownloadFailure 记下没下到种子的原因。站点上已经没有这个种子（删了；IYUU 辅种常遇到）是站点的状态不是故障，记警告。
+func (b *BaseSite[Req, Res]) logDownloadFailure(torrentID string, err error) {
+	if errors.Is(err, ErrTorrentNotFound) {
+		b.logger.Warn("Torrent not found on site", zap.String("torrentID", torrentID), zap.Error(err))
+		return
+	}
+	b.logger.Error("Failed to parse download response", zap.String("torrentID", torrentID), zap.Error(err))
+}
+
+func (b *BaseSite[Req, Res]) logDownloaded(torrentID string, size int, startTime time.Time) {
 	b.logger.Info(
 		"Torrent downloaded",
 		zap.String("site", b.name),
 		zap.String("torrentID", torrentID),
-		zap.Int("size", len(data)),
+		zap.Int("size", size),
 		zap.Duration("duration", time.Since(startTime)),
 	)
-
-	return data, nil
 }
 
 // Close releases any resources held by the site

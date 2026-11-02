@@ -601,7 +601,9 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
               type="textarea"
               :rows="3"
               placeholder="请输入站点 Cookie" />
-            <div class="field-tip">只用于时魔、签到这类只在网页上才有的信息，可以不填</div>
+            <div class="field-tip">
+              用于时魔、签到，以及辅种、转种这类只知道种子编号的下载，可以不填
+            </div>
           </el-form-item>
           <el-form-item label="API Key / RSS Key" required>
             <el-input v-model="addForm.api_key" placeholder="请输入 API Key 或 RSS Key" />

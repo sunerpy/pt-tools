@@ -1321,7 +1321,7 @@ function ruleNameOf(id: number): string {
                   v-model="form.cookie"
                   type="textarea"
                   :rows="3"
-                  placeholder="只有时魔、签到用它，搜索、下载与用户数据走 API Key；已保存 Cookie 时可留空" />
+                  placeholder="时魔、签到，以及辅种、转种这类只知道种子编号的下载用它，搜索与用户数据走 API Key；已保存 Cookie 时可留空" />
               </el-form-item>
               <el-form-item label="API Key / RSS Key">
                 <el-input
