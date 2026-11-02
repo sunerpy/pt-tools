@@ -235,8 +235,8 @@ UHDDolby (HDDolby, 高清杜比, now at `www.uhddolby.com`) searches, downloads 
 3. Copy the RSSKEY the page shows and enter it in the API Key / RSS Key field of UHDDolby's site details in pt-tools.
 
 - When the RSS link expires its RSSKEY stops working, and searching and downloading in pt-tools report that the API key (RSS key) is wrong or has expired. Generate a new one on the RSS page before it expires and replace it.
-- The cookie is optional and only used for bonus per hour and sign-in; without it those two are missing and everything else works. It is the cookie the browser extension syncs.
-- The site enforces two-step verification. The first time the cookie is used from the network pt-tools runs on, the site may ask for a two-step code first; bonus per hour and sign-in then fail with that reason, while searching, downloading and user data go through the API and keep working.
+- The cookie is optional. It is used for bonus per hour, sign-in and downloads that only know the torrent ID, such as cross-seeding and transfers: the download addresses the site's API gives are only in search results, so when pt-tools only has the ID it downloads with the cookie, the same as clicking Download on the web page. Without a cookie there is no bonus per hour or sign-in, and downloading by ID only works for torrents in recent search results, so cross-seeding older torrents fails; everything else works. It is the cookie the browser extension syncs.
+- The site enforces two-step verification. The first time the cookie is used from the network pt-tools runs on, the site may ask for a two-step code first; bonus per hour, sign-in and downloads by ID then fail with that reason, while searching, user data and downloads from search results or RSS go through the API and keep working.
 - The site's API allows at most 50 requests an hour and blocks you for 4 hours after that; pt-tools stays within this limit. You can download at most 60 torrents an hour (100 for VIP); more gets you blacklisted for 4 hours.
 
 ### Keeping an API key safe

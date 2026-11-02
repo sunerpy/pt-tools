@@ -105,6 +105,12 @@ func (f *fakeRenewingSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Set-Cookie", "auth_token=A1; Path=/; Max-Age=2592000; HttpOnly")
 		w.Header().Add("Set-Cookie", "refresh_token=R1; Path=/; Max-Age=2592000; HttpOnly")
 	}
+	if r.URL.Path == "/download.php" {
+		// 下载种子：给一个种子文件（拿到网页会被当成「不是种子文件」）
+		w.Header().Set("Content-Type", "application/x-bittorrent")
+		_, _ = w.Write([]byte("d8:announce4:infod4:name1:aee"))
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<html><head><title>首页</title></head><body><a href="userdetails.php?id=1">me</a></body></html>`))
 }

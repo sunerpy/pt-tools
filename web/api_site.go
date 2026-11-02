@@ -117,7 +117,7 @@ func (s *Server) apiSiteValidate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "cookie_and_api_key":
-		// Cookie 可选：只有时魔、签到这类网页功能用它
+		// Cookie 可选：时魔、签到与只知道种子编号的下载用它
 		if req.APIKey == "" {
 			writeJSON(w, SiteValidationResponse{Valid: false, Message: "API Key不能为空"})
 			return

@@ -99,7 +99,7 @@ type HDDolbyDriver struct {
 	APIKey     string
 	Cookie     string
 	httpClient *SiteHTTPClient
-	// pageClient 用浏览器的 User-Agent 打开网页（时魔、签到）；客户端会先写上自己的 User-Agent，请求头里另给的不起作用
+	// pageClient 用浏览器的 User-Agent 打开网页（时魔、签到、用 Cookie 下载）；客户端会先写上自己的 User-Agent，请求头里另给的不起作用
 	pageClient     *SiteHTTPClient
 	userAgent      string
 	siteDefinition *SiteDefinition
@@ -684,7 +684,7 @@ func (d *HDDolbyDriver) getPage(ctx context.Context, path string) ([]byte, error
 	}
 	if is2FAPage(doc) {
 		return nil, fmt.Errorf("%w: 站点要先输两步验证码，这份 Cookie 在 pt-tools 这里打开网页时还没通过两步验证（换了网络或设备时会这样）；"+
-			"搜索、下载与用户数据走 API，不受影响", withPageTitle(Err2FARequired, doc))
+			"搜索、用户数据与从搜索结果、RSS 下载种子走 API，不受影响", withPageTitle(Err2FARequired, doc))
 	}
 	return resp.Body, nil
 }
@@ -752,6 +752,8 @@ func (d *HDDolbyDriver) AttendanceUnsupportedReason() string {
 	return ""
 }
 
+// PrepareDownload、ParseDownload 是 Driver 接口要的；BaseSite 下载时用驱动自己的 Download（下载要 downhash 或 Cookie，
+// 这一个请求给不了）。
 func (d *HDDolbyDriver) PrepareDownload(torrentID string) (HDDolbyRequest, error) {
 	return HDDolbyRequest{
 		Endpoint: fmt.Sprintf("/download.php?id=%s", torrentID),
@@ -766,14 +768,19 @@ func (d *HDDolbyDriver) ParseDownload(res HDDolbyResponse) ([]byte, error) {
 	return res.RawBody, nil
 }
 
+// Download 按种子编号下载（辅种、转种、批量下载这些只知道编号的入口；BaseSite 下载时用它）。
 func (d *HDDolbyDriver) Download(ctx context.Context, torrentID string) ([]byte, error) {
 	return d.DownloadWithHash(ctx, torrentID, "")
 }
 
-// DownloadWithHash 下载种子文件：download.php 要带种子的 downhash（API 搜索结果里才有，不带时站点回一个网页）。
-// 调用方没有 downhash 时到详情缓存（最近 100 条搜索结果）里找。
+// DownloadWithHash 下载种子文件：带 downhash 的 download.php（downhash 只在 API 搜索结果里）不要 Cookie，不带 downhash 又没有
+// Cookie 时站点回登录页。调用方没有 downhash（只知道种子编号）时：配了 Cookie 就像在网页上点「下载」一样用 Cookie 下，
+// 什么种子都行（见 downloadWithCookie）；没配 Cookie 时到详情缓存（最近 100 条搜索结果）里找 downhash，老种子找不到。
 func (d *HDDolbyDriver) DownloadWithHash(ctx context.Context, torrentID, downhash string) ([]byte, error) {
 	if strings.TrimSpace(downhash) == "" {
+		if strings.TrimSpace(d.Cookie) != "" {
+			return d.downloadWithCookie(ctx, torrentID)
+		}
 		h, err := d.lookupDownhash(ctx, torrentID)
 		if err != nil {
 			return nil, err
@@ -804,6 +811,38 @@ func (d *HDDolbyDriver) DownloadWithHash(ctx context.Context, torrentID, downhas
 	return body, nil
 }
 
+// downloadWithCookie 用 Cookie 下载种子文件：download.php?id= 不带 downhash，和网页上点「下载」一样（2026-11-02 生产核对过，
+// 辅种的老种子拿到的种子与 IYUU 给的 info hash 一致），不为找 downhash 调 API（每小时只有 50 次）。网页用浏览器的 User-Agent。
+// 账号开着「第一次下载提示」时带上 letdown=1 再下；登录页、两步验证页、别的提示页返回对应的错误（见 CheckTorrentFile）。
+func (d *HDDolbyDriver) downloadWithCookie(ctx context.Context, torrentID string) ([]byte, error) {
+	id, err := strconv.Atoi(strings.TrimSpace(torrentID))
+	if err != nil {
+		return nil, fmt.Errorf("invalid torrent ID %q: %w", torrentID, err)
+	}
+	headers := map[string]string{
+		"Cookie": d.Cookie,
+		"Accept": "application/x-bittorrent,*/*",
+	}
+	return fetchSkippingFirstNotice(fmt.Sprintf("%s/download.php?id=%d", d.BaseURL, id), func(u string) ([]byte, error) {
+		resp, err := d.pageClient.DoRequest(ctx, http.MethodGet, u, nil, headers)
+		if err != nil {
+			return nil, fmt.Errorf("download request failed: %w", err)
+		}
+		switch {
+		case resp.IsCloudflareChallenge():
+			return nil, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+		case resp.StatusCode == http.StatusTooManyRequests:
+			return nil, fmt.Errorf("HTTP 429: %w", ErrRateLimited)
+		case resp.StatusCode != http.StatusOK:
+			return nil, &HTTPStatusError{Code: resp.StatusCode}
+		}
+		if err := CheckTorrentFile(resp.Body); err != nil {
+			return nil, err
+		}
+		return resp.Body, nil
+	})
+}
+
 // lookupDownhash 在详情缓存（最近 100 条搜索结果）里找种子的 downhash。
 func (d *HDDolbyDriver) lookupDownhash(ctx context.Context, torrentID string) (string, error) {
 	id, err := strconv.Atoi(strings.TrimSpace(torrentID))
@@ -819,7 +858,8 @@ func (d *HDDolbyDriver) lookupDownhash(ctx context.Context, torrentID string) (s
 			return t.DownHash, nil
 		}
 	}
-	return "", fmt.Errorf("下载种子 %s 要带 downhash，最近 %d 条搜索结果里没有这个种子：从搜索结果或 RSS 里下载", torrentID, len(torrents))
+	return "", fmt.Errorf("下载种子 %s 要带 downhash，最近 %d 条搜索结果里没有这个种子：在站点设置里填上 Cookie 就能按编号下载"+
+		"（辅种、转种这些只知道编号的入口都要），或者从搜索结果、RSS 里下载", torrentID, len(torrents))
 }
 
 func (d *HDDolbyDriver) Search(ctx context.Context, query SearchQuery) ([]TorrentItem, error) {
@@ -1013,7 +1053,7 @@ func createHDDolbySite(config SiteConfig, logger *zap.Logger) (Site, error) {
 	if opts.APIKey == "" {
 		return nil, fmt.Errorf("HDDolby 站点需要配置 API Key（站点 RSS 页生成的链接里的 RSS key）")
 	}
-	// Cookie 可以不填：只有时魔与签到用它
+	// Cookie 可以不填：时魔、签到与只知道种子编号的下载（辅种、转种等）用它
 
 	siteDef := GetDefinitionRegistry().GetOrDefault(config.ID)
 

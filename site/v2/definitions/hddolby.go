@@ -11,15 +11,16 @@ import (
 //   - 搜索、用户数据、做种列表与下载都走站点 API（www.uhddolby.com/api/v1，以前在 api. 子域名），
 //     认 x-api-key，值是 RSS 链接里的 RSS key（RSS 页生成，有效期 30～180 天，到期前要重新生成）。
 //     wiki 给 MoviePilot 的配置也是只填 API Key、不要 Cookie；API 每小时最多 50 次请求，超了会被冷却。
-//   - Cookie 可以不填，填了用于时魔（API 没有）与签到。站点强制两步验证，Cookie 拿到别的网络上用时页面可能先要两步验证，
-//     这时时魔与签到会报「要两步验证」，搜索、下载照常。
+//   - Cookie 可以不填，填了用于时魔（API 没有）、签到，以及只知道种子编号的下载（辅种、转种等：API 给的下载地址带 downhash，
+//     只在搜索结果里；用 Cookie 下载 download.php?id= 什么种子都行，2026-11-02 生产核对过）。站点强制两步验证，Cookie 拿到别的
+//     网络上用时页面可能先要两步验证，这时时魔、签到与按编号下载会报「要两步验证」，搜索与从搜索结果、RSS 下载照常。
 //   - H&R（wiki H&R 规则）：带 H&R 标识的种子，下载完成起 30 天内做种满 48 小时或分享率达到 1.5；发布超过 90 天的不再考核。
 //   - 旧的 tracker 是 t.hddolby.com，新的是 www.uhddolby.com/announce.php；旧地址留在 LegacyURLs 里，下载器里还没换 tracker 的种子照样认得。
 var HDDolbyDefinition = &v2.SiteDefinition{
 	ID:          "hddolby",
 	Name:        "UHDDolby",
 	Aka:         []string{"高清杜比", "HD Dolby", "HDDolby"},
-	Description: "高清杜比 - 需要配置 API Key（RSS 链接里的 RSS key），用于搜索、下载与用户数据；Cookie 可选，用于时魔与签到",
+	Description: "高清杜比 - 需要配置 API Key（RSS 链接里的 RSS key），用于搜索、下载与用户数据；Cookie 可选，用于时魔、签到与辅种等只知道种子编号的下载",
 	Schema:      v2.SchemaHDDolby,
 	AuthMethod:  v2.AuthMethodCookieAndAPIKey,
 	URLs:        []string{"https://www.uhddolby.com/"},

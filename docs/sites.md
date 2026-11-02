@@ -75,12 +75,12 @@
 
 ### 其他架构（4）
 
-| 站点          | 站点类型                | 认证方式                        | 支持功能                            | 适配情况 | 备注                              |
-| ------------- | ----------------------- | ------------------------------- | ----------------------------------- | -------- | --------------------------------- |
-| **M-Team**    | mTorrent                | API Key                         | RSS、搜索、用户信息、等级要求       | ✅       | 完全适配                          |
-| **UHDDolby**  | HDDolby (NexusPHP 衍生) | API Key（RSS key），Cookie 可选 | RSS、搜索、用户信息、签到、等级要求 | ✅       | 高清杜比；Cookie 只用于时魔和签到 |
-| **Rousi Pro** | Rousi                   | Passkey                         | RSS、搜索、用户信息                 | ✅       | 已适配，有问题请提交 issue        |
-| **MooKo**     | Gazelle                 | Cookie                          | RSS、搜索、用户信息、等级要求       | ✅       | 已适配，有问题请提交 issue        |
+| 站点          | 站点类型                | 认证方式                        | 支持功能                            | 适配情况 | 备注                                                |
+| ------------- | ----------------------- | ------------------------------- | ----------------------------------- | -------- | --------------------------------------------------- |
+| **M-Team**    | mTorrent                | API Key                         | RSS、搜索、用户信息、等级要求       | ✅       | 完全适配                                            |
+| **UHDDolby**  | HDDolby (NexusPHP 衍生) | API Key（RSS key），Cookie 可选 | RSS、搜索、用户信息、签到、等级要求 | ✅       | 高清杜比；Cookie 用于时魔、签到和辅种等按编号的下载 |
+| **Rousi Pro** | Rousi                   | Passkey                         | RSS、搜索、用户信息                 | ✅       | 已适配，有问题请提交 issue                          |
+| **MooKo**     | Gazelle                 | Cookie                          | RSS、搜索、用户信息、等级要求       | ✅       | 已适配，有问题请提交 issue                          |
 
 > [!NOTE]
 > 高清杜比换了域名，现在是 `www.uhddolby.com`，站点名改成 UHDDolby，API Key 填 RSS 页的 RSSKEY，见[获取 UHDDolby 的 RSS key](guide/get-cookie-apikey.md#uhddolby-rss-key-获取方法)。下载器里旧种子的 tracker 还是 `t.hddolby.com`，在[下载器助手](guide/downloader-assistant.md#替换-tracker)里把 `https://t.hddolby.com` 替换成 `https://www.uhddolby.com`，先预览再执行。站方提醒不要用 Transmission 自带的批量替换，会把 tracker 地址改坏。

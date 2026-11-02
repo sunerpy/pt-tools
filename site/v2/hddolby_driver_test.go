@@ -763,6 +763,7 @@ func TestHDDolbyDriver_DownloadWithHash(t *testing.T) {
 	_, err = d.Download(context.Background(), "6")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "没有这个种子")
+	assert.Contains(t, err.Error(), "Cookie", "告诉用户填上 Cookie 就能按编号下载")
 	_, err = d.Download(context.Background(), "99")
 	require.Error(t, err)
 
@@ -796,7 +797,7 @@ func TestCreateHDDolbySite(t *testing.T) {
 	require.NotNil(t, site)
 	assert.Equal(t, "hddolby", site.ID())
 
-	// 只有 API Key 也能建：Cookie 只有时魔与签到用
+	// 只有 API Key 也能建：Cookie 是可选的
 	optsBytes, _ = json.Marshal(HDDolbyOptions{APIKey: "rsskey"})
 	site, err = createHDDolbySite(SiteConfig{ID: "hddolby", Name: "UHDDolby", BaseURL: "https://www.uhddolby.com", Options: optsBytes}, zap.NewNop())
 	require.NoError(t, err)
@@ -816,4 +817,76 @@ func TestCreateHDDolbySite_MissingCreds(t *testing.T) {
 func TestCreateHDDolbySite_BadOptions(t *testing.T) {
 	_, err := createHDDolbySite(SiteConfig{ID: "hddolby", Options: []byte("notjson")}, zap.NewNop())
 	require.Error(t, err)
+}
+
+// 只知道种子编号时（辅种、转种、批量下载）：配了 Cookie 就像在网页上点「下载」一样用 Cookie 下 download.php?id=，不要 downhash，
+// 也不为找 downhash 去调 API（每小时只有 50 次）。2026-11-02 生产辅种的 4 个 UHDDolby 种子以前拿到的都是登录页。
+func TestHDDolbyDriver_DownloadByIDWithCookie(t *testing.T) {
+	torrent := []byte("d8:announce4:infod4:name1:aee")
+	var searches, letdowns atomic.Int32
+	var gotCookie, gotUA atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch r.URL.Path {
+		case "/api/v1/torrent/search":
+			searches.Add(1)
+			_, _ = w.Write([]byte(`{"status":0,"data":[]}`))
+		case "/download.php":
+			assert.Empty(t, q.Get("downhash"), "Cookie 下载不带 downhash")
+			gotCookie.Store(r.Header.Get("Cookie"))
+			gotUA.Store(r.Header.Get("User-Agent"))
+			switch {
+			case q.Get("letdown") == "1":
+				letdowns.Add(1)
+				_, _ = w.Write(torrent)
+			case q.Get("id") == "8":
+				http.Redirect(w, r, "/downloadnotice.php?torrentid=8&type=firsttime", http.StatusFound)
+			case q.Get("id") == "9":
+				_, _ = w.Write([]byte(hddolbyLoginPage))
+			case q.Get("id") == "10":
+				_, _ = w.Write([]byte(hddolbyTwoFactorPage))
+			default:
+				_, _ = w.Write(torrent)
+			}
+		case "/downloadnotice.php":
+			_, _ = w.Write([]byte(noticePage(q.Get("torrentid"), q.Get("type"))))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	optsBytes, _ := json.Marshal(HDDolbyOptions{APIKey: "rsskey", Cookie: "c_secure_uid=1"})
+	site, err := createHDDolbySite(SiteConfig{ID: "hddolby", Name: "UHDDolby", BaseURL: server.URL, Options: optsBytes, RateLimit: 100, RateBurst: 100}, zap.NewNop())
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	// BaseSite.Download（辅种走这里）交给驱动按编号下载
+	data, err := site.Download(ctx, "7")
+	require.NoError(t, err)
+	assert.Equal(t, torrent, data)
+	assert.Equal(t, "c_secure_uid=1", gotCookie.Load())
+	assert.Contains(t, gotUA.Load(), "Mozilla", "网页用浏览器的 User-Agent")
+
+	// 账号开着「第一次下载提示」：带上 letdown=1 再下
+	data, err = site.Download(ctx, "8")
+	require.NoError(t, err)
+	assert.Equal(t, torrent, data)
+	assert.Equal(t, int32(1), letdowns.Load())
+
+	// Cookie 失效、要两步验证：报清楚，不把网页当成种子
+	_, err = site.Download(ctx, "9")
+	require.ErrorIs(t, err, ErrSessionExpired)
+	assert.ErrorIs(t, err, ErrNotTorrentFile)
+	_, err = site.Download(ctx, "10")
+	require.ErrorIs(t, err, Err2FARequired)
+	assert.Contains(t, err.Error(), "两步验证")
+
+	// 调用方没给 downhash 的 DownloadWithHash 也一样
+	hd, ok := site.(HashDownloader)
+	require.True(t, ok)
+	data, err = hd.DownloadWithHash(ctx, "7", "")
+	require.NoError(t, err)
+	assert.Equal(t, torrent, data)
+	assert.Zero(t, searches.Load(), "有 Cookie 时不为找 downhash 调 API")
 }

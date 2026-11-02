@@ -606,7 +606,7 @@ func TestUpsertSiteWithRSS_CookieAndAPIKeyAcceptsEmptyCookieWhenStored(t *testin
 	require.Equal(t, storedCookie, plain)
 }
 
-// cookie_and_api_key 只要 API Key：Cookie 可选（HDDolby 只有时魔、签到用它），库里没有 Cookie 也能保存；没有 API Key 照旧拒绝
+// cookie_and_api_key 只要 API Key：Cookie 可选（HDDolby 的 Cookie 可选），库里没有 Cookie 也能保存；没有 API Key 照旧拒绝
 func TestUpsertSiteWithRSS_CookieAndAPIKeyCookieOptional(t *testing.T) {
 	db, err := OpenTestDB(t)
 	require.NoError(t, err)

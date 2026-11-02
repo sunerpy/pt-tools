@@ -17,7 +17,7 @@ func TestSiteRegistry_CreateSite_KindBranches(t *testing.T) {
 
 	_, errHDNoCreds := registry.CreateSite("hddolbytest", SiteCredentials{}, "")
 	require.Error(t, errHDNoCreds)
-	// 只有 API Key 也能建：Cookie 只有时魔与签到用
+	// 只有 API Key 也能建：Cookie 是可选的
 	hdAPIOnly, errHDNoCookie := registry.CreateSite("hddolbytest", SiteCredentials{APIKey: "k"}, "")
 	require.NoError(t, errHDNoCookie)
 	require.NotNil(t, hdAPIOnly)
