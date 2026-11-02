@@ -51,8 +51,8 @@ export const KNOWN_SITES: KnownSite[] = [
   },
   {
     id: "hddolby",
-    name: "HDDolby",
-    domains: ["www.hddolby.com"],
+    name: "UHDDolby",
+    domains: ["www.uhddolby.com"],
     schema: "HDDolby",
     authMethod: "cookie",
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl", "c_secure_login"],
