@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.51](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.50...v1.0.0-rc.51) (2026-11-02)
+
+
+### Bug Fixes
+
+* **site:** CHDBits 认出文字显示的促销、限时结束时间与 H3/H5 的 H&R，运行时建站不再丢站点定义的优惠映射与副标题取法 ([#824](https://github.com/sunerpy/pt-tools/issues/824)) ([c0f8b18](https://github.com/sunerpy/pt-tools/commit/c0f8b18aab08469f05e49bd65980df4e7d7c3ee8))
+
 ## [1.0.0-rc.50](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.49...v1.0.0-rc.50) (2026-11-01)
 
 
