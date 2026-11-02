@@ -522,20 +522,14 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 	if exist > 0 {
 		return nil, fmt.Errorf("%w: 已经订阅过了", ErrInvalid)
 	}
-	c, err := s.cfg.Recognizer.TMDB(ctx)
+	row, err := s.draft(ctx, in.MediaType, in.TMDBID, in.Season)
 	if err != nil {
 		return nil, err
 	}
-	d, err := c.Details(ctx, in.MediaType, in.TMDBID)
-	if err != nil {
-		return nil, fmt.Errorf("取 TMDB 条目失败: %w", err)
-	}
-	row := models.MediaSubscription{
-		MediaType: in.MediaType, TMDBID: in.TMDBID, Season: in.Season, Title: d.Title, OriginalTitle: d.OriginalTitle, Year: d.Year,
-		IMDbID: d.IMDbID, PosterPath: d.PosterPath, ProfileID: in.ProfileID, Sites: encodeList(sites), DownloaderID: in.DownloaderID,
-		Category: strings.TrimSpace(in.Category), Tags: strings.TrimSpace(in.Tags), SavePath: strings.TrimSpace(in.SavePath),
-		Status: models.MediaSubActive, Upgrade: in.Upgrade, Source: source,
-	}
+	in.Season = row.Season
+	row.ProfileID, row.Sites, row.DownloaderID = in.ProfileID, encodeList(sites), in.DownloaderID
+	row.Category, row.Tags, row.SavePath = strings.TrimSpace(in.Category), strings.TrimSpace(in.Tags), strings.TrimSpace(in.SavePath)
+	row.Status, row.Upgrade, row.Source = models.MediaSubActive, in.Upgrade, source
 	if in.Pending {
 		row.Status = models.MediaSubPending
 	}
@@ -550,7 +544,7 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		if err != nil {
 			return nil, err
 		}
-		sc.apply(&row)
+		sc.apply(row)
 	}
 	if in.MediaType == models.MediaKindTV {
 		if in.LockVersion != nil {
@@ -568,6 +562,9 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		if in.FollowNextSeason != nil {
 			row.FollowNextSeason = *in.FollowNextSeason
 		}
+		if in.TotalEpisodes != nil && *in.TotalEpisodes > 0 {
+			row.TotalEpisodes, row.TotalEpisodesManual = *in.TotalEpisodes, true
+		}
 	}
 	if in.LibraryID != nil {
 		if err := s.checkLibrary(ctx, in.MediaType, *in.LibraryID); err != nil {
@@ -575,39 +572,56 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		}
 		row.LibraryID = *in.LibraryID
 	}
-	if titles, err := c.Titles(ctx, in.MediaType, in.TMDBID); err == nil {
-		row.Aliases = encodeList(titles)
-	}
-	if in.MediaType == models.MediaKindTV {
-		if in.Season == 0 {
-			in.Season = max(d.Seasons, 1)
-			row.Season = in.Season
-		}
-		season, err := c.Season(ctx, in.TMDBID, in.Season)
-		if err != nil {
-			if errors.Is(err, tmdb.ErrNotFound) {
-				return nil, fmt.Errorf("%w: TMDB 上「%s」没有第 %d 季", ErrInvalid, d.Title, in.Season)
-			}
-			return nil, fmt.Errorf("取 TMDB 季详情失败: %w", err)
-		}
-		row.TotalEpisodes = len(season.Episodes)
-		if in.TotalEpisodes != nil && *in.TotalEpisodes > 0 {
-			row.TotalEpisodes, row.TotalEpisodesManual = *in.TotalEpisodes, true
-		}
-		if y := yearOf(season.AirDate); y > 0 {
-			row.Year = y // 这一季的年份（种子标题里写的多半是它）
-		}
-	}
 	now := s.cfg.Now()
 	row.CreatedAt, row.UpdatedAt, row.NextSearchAt = now, now, &now
-	if err := s.cfg.DB.WithContext(ctx).Create(&row).Error; err != nil {
+	if err := s.cfg.DB.WithContext(ctx).Create(row).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "UNIQUE") {
 			return nil, fmt.Errorf("%w: 已经订阅过了", ErrInvalid)
 		}
 		return nil, fmt.Errorf("保存订阅失败: %w", err)
 	}
-	s.afterCreate(ctx, &row, in)
-	return &row, nil
+	s.afterCreate(ctx, row, in)
+	return row, nil
+}
+
+// draft 按 TMDB 条目拼一份订阅，不写库：名字、原名、年份、IMDb、海报与别名；剧集再取这一季的集数，年份换成这一季的
+// （种子标题里写的多半是它）。剧集的 season 为 0 时取最新的一季。新建订阅与按条目搜索（没有订阅时）共用。
+func (s *Service) draft(ctx context.Context, kind string, id, season int) (*models.MediaSubscription, error) {
+	c, err := s.cfg.Recognizer.TMDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	d, err := c.Details(ctx, kind, id)
+	if err != nil {
+		return nil, fmt.Errorf("取 TMDB 条目失败: %w", err)
+	}
+	row := &models.MediaSubscription{
+		MediaType: kind, TMDBID: id, Season: season, Title: d.Title, OriginalTitle: d.OriginalTitle, Year: d.Year,
+		IMDbID: d.IMDbID, PosterPath: d.PosterPath,
+	}
+	// 别名取不到时照样建：只少几个用来对种子名字的写法
+	if titles, terr := c.Titles(ctx, kind, id); terr == nil {
+		row.Aliases = encodeList(titles)
+	}
+	if kind != models.MediaKindTV {
+		row.Season = 0
+		return row, nil
+	}
+	if row.Season == 0 {
+		row.Season = max(d.Seasons, 1)
+	}
+	se, err := c.Season(ctx, id, row.Season)
+	if err != nil {
+		if errors.Is(err, tmdb.ErrNotFound) {
+			return nil, fmt.Errorf("%w: TMDB 上「%s」没有第 %d 季", ErrInvalid, d.Title, row.Season)
+		}
+		return nil, fmt.Errorf("取 TMDB 季详情失败: %w", err)
+	}
+	row.TotalEpisodes = len(se.Episodes)
+	if y := yearOf(se.AirDate); y > 0 {
+		row.Year = y
+	}
+	return row, nil
 }
 
 // UpdateSubscription 修改订阅（条目与季不能改）。

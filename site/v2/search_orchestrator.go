@@ -38,6 +38,9 @@ type MultiSiteSearchQuery struct {
 	MinSizeBytes int64 `json:"minSizeBytes,omitempty"`
 	// RawTitles 为真时不规整标题：订阅要按站点上原样的标题解析画质（规整会把 UHD 换成 2160p、x265 换成 H.265）
 	RawTitles bool `json:"rawTitles,omitempty"`
+	// KeepDuplicates 为真时不按 InfoHash 合并，各站点的结果原样返回：按条目搜索要列出同一资源的每个来源
+	// （合并只留一条，其他站点的种子编号与下载入口就丢了）。缓存键是整个查询，两种结果分开缓存
+	KeepDuplicates bool `json:"keepDuplicates,omitempty"`
 }
 
 // MultiSiteSearchResult contains results from a multi-site search
@@ -145,7 +148,9 @@ func (o *SearchOrchestrator) Search(ctx context.Context, query MultiSiteSearchQu
 
 	// Deduplicate by InfoHash
 	totalBeforeDedup := len(results)
-	results = o.deduper.Deduplicate(results)
+	if !query.KeepDuplicates {
+		results = o.deduper.Deduplicate(results)
+	}
 
 	// Rank results
 	results = o.ranker.Rank(results)

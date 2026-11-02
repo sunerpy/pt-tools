@@ -288,6 +288,37 @@ const EXPECT = {
      * 出现在具体档位下，并且被筛掉的条数要写在表格上方。
      */
     probes: [
+      /*
+       * 「筛选」浮层（媒体中心 M2a，按解析信息筛）：勾「1080p」以后表格只剩那几行，
+       * 行数等于选项上写的数。排在分类那条探针前面，在没动过的状态上点，点完再取消。
+       */
+      {
+        desc: "筛选浮层：勾 1080p，表格行数变成选项上的数，取消后回到原数",
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const rows = () => document.querySelectorAll('.el-table__body tbody tr').length;
+          const btn = document.querySelector('[data-testid="search-facets-btn"]');
+          if (!btn) return 'no-facets-btn';
+          btn.click();
+          await wait(500);
+          const opt = document.querySelector('[data-testid="es-facet-resolution-1080p"]');
+          if (!opt) return 'no-option';
+          const n = Number((opt.querySelector('.es-facets__n')?.textContent ?? '').trim());
+          const before = rows();
+          opt.click();
+          await wait(500);
+          const after = rows();
+          const label = (btn.textContent ?? '').replace(/\s+/g, ' ').trim();
+          opt.click();
+          await wait(500);
+          const back = rows();
+          btn.click();
+          await wait(300);
+          const ok = n > 0 && after === n && after < before && back === before && label === '筛选 · 1';
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 选项 ' + n + ' 行 ' + before + '→' + after + '→' + back + ' 按钮 ' + label;
+        })()`,
+      },
       {
         desc: "分类 + 仅免费 + 一并显示：说明里的条数与表格真会多出来的行数一致",
         want: "verdict=ok",
@@ -335,6 +366,8 @@ const EXPECT = {
       "音乐",
       "排序",
       "列设置",
+      /* 按解析信息筛的浮层（媒体中心 M2a，画板 06 的筛选组）；画板 15 没画 */
+      "筛选",
     ],
     /* 画板 15 的表头 */
     gridColumns: ["站点", "标题", "大小", "优惠", "上传", "下载", "完成", "发布时间", "操作"],
@@ -2861,6 +2894,564 @@ if (emptyRoutes.length > 0) {
   }
 }
 
+// ------------------------------------------------- 按条目搜索（画板 06、09、10，媒体中心 M2a）
+
+/*
+ * 按条目搜索不是带式表格页：64 高的搜索带代替页头，左栏 256，结果区是 888 宽的分组卡片。
+ * 画板 06 按 1440×1024 画（侧栏 264 + 主区 1176），所以这一趟按 1440 量，不按上面的 1376；
+ * 视口 < 1280 时左栏收进抽屉，另量一次 1200；手机按画板 09、10 量 375×812。
+ * 数字来自 docs/design/media-hub-board-spec.md 的 B06 / B09；假数据是 board-fixtures.mjs 的 ENTRY_SEARCH
+ * （五组：两个站点的同一资源、整组已入库、锁定的版本、正在下载、不符合档案）。
+ * 条目从地址带进来（探索页的「搜资源」就是这么跳的），不经候选下拉。
+ */
+const ENTRY_ROUTE = "/search?media_type=tv&tmdb_id=231620";
+const doEntry =
+  wanted.length === 0 || wanted.includes("/search") || wanted.includes("/search?entry");
+
+const MEASURE_ES = `(() => {
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const q = (sel, root = document) => root.querySelector(sel);
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const band = q('[data-testid="es-head"]');
+  const rail = q('.es-body__rail');
+  const btn = (root, label) => [...(root?.querySelectorAll('button') ?? [])].find((b) => txt(b) === label);
+  return {
+    band: box(band),
+    query: box(q('.es-q .el-input__wrapper', band ?? document)),
+    token: box(q('[data-testid="es-token"]')),
+    tokenText: txt(q('[data-testid="es-token"]')),
+    kbd: box(q('.pt-kbd', band ?? document)),
+    search: box(btn(band, '搜索')),
+    history: box(q('button[aria-label="最近搜索"]', band ?? document)),
+    merge: box(q('.es-merge', band ?? document)),
+    controls: [...(band?.querySelectorAll('button, label, input[placeholder]') ?? [])]
+      .flatMap((el) => [txt(el), el.getAttribute('aria-label') ?? '', el.getAttribute('placeholder') ?? ''])
+      .filter(Boolean),
+    facetRow: Boolean(q('.pt-band__row--facet', band ?? document)),
+    rail: box(rail),
+    railPos: rail ? getComputedStyle(rail).position : '',
+    railTop: rail ? getComputedStyle(rail).top : '',
+    poster: box(q('.es-rail__item > *', rail ?? document)),
+    railTitle: txt(q('.es-rail__title', rail ?? document)),
+    railLines: [...(rail?.querySelectorAll('.es-rail__line') ?? [])].map(txt),
+    seasons: [...(rail?.querySelectorAll('.es-rail__season') ?? [])].map((el) => ({ t: txt(el), on: el.classList.contains('is-on'), ...box(el) })),
+    eps: [...(rail?.querySelectorAll('.es-eps__cell') ?? [])].map((el) => ({ t: txt(el), cls: el.className, ...box(el) })),
+    note: txt(q('[data-testid="es-ep-note"]', rail ?? document)),
+    profile: box(q('[data-testid="es-profile"]', rail ?? document)),
+    /* 选中项的文字在 .el-select__placeholder 上；第一个 .el-select__selected-item 是空的输入框外壳 */
+    profileText: txt(q('[data-testid="es-profile"] .el-select__placeholder', rail ?? document)),
+    facetGroups: [...(rail?.querySelectorAll('.es-facets__label') ?? [])].map(txt),
+    moreFacets: txt(q('[data-testid="es-more-facets"]', rail ?? document)),
+    summary: box(q('[data-testid="es-summary"]')),
+    summaryText: txt(q('[data-testid="es-summary"]')),
+    siteErrors: txt(q('[data-testid="es-site-errors"]')),
+    sorts: [...document.querySelectorAll('[data-testid^="es-sort-"]')].map((el) => ({ t: txt(el), on: el.classList.contains('is-on'), ...box(el) })),
+    cards: [...document.querySelectorAll('[data-testid^="es-card-"]')].map((el) => ({
+      key: el.getAttribute('data-testid'),
+      ...box(el),
+      members: el.querySelectorAll('[data-testid="es-member"]').length,
+      score: box(q('[data-testid="es-score"]', el)),
+      scoreText: txt(q('[data-testid="es-score"]', el)),
+      pill: txt(q('.es-card__pill', el)),
+      lock: txt(q('.es-card__lock', el)),
+      more: txt(q('[data-testid="es-more"]', el)),
+      text: txt(el).slice(0, 400),
+    })),
+    unmatched: txt(q('[data-testid="es-unmatched-line"]')),
+    narrow: Boolean(q('.es-narrow')),
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  };
+})()`;
+
+/* 没加载完就量：先等概况那一行出来（第一次搜索要等假数据回来） */
+async function waitEntry() {
+  for (let i = 0; i < 40; i++) {
+    const ok = await ev(`Boolean(document.querySelector('[data-testid="es-summary"]'))`).catch(
+      () => false,
+    );
+    if (ok === true) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
+/* 打开一个视口下的按条目搜索：先换视口再整页重载，页面按新视口挂载（手机、窄屏的判断都在挂载时读） */
+async function openEntry(metrics) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { deviceScaleFactor: 1, ...metrics },
+    sessionId,
+  );
+  await goto(`${BASE}/#${ENTRY_ROUTE}`);
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitReady();
+  const ok = await waitEntry();
+  /* 卡片的展开、筛选都是过渡后的几何：等动画走完再量 */
+  await sleep(500);
+  return ok;
+}
+
+if (doEntry) {
+  const entryFail = (key, msg, mobile = false) => {
+    const gapKey = `/search?entry${mobile ? "@375" : ""} ${key}`;
+    if (ALLOWED_GAPS[gapKey]) {
+      gapsUsed.add(gapKey);
+      return;
+    }
+    failures.push({
+      route: `/search（按条目${mobile ? "，375" : ""}）`,
+      board: mobile ? "09/10 按条目搜索·手机" : "06 按条目搜索",
+      key,
+      msg,
+    });
+  };
+  const expectBox = (key, got, want, tol = 4, mobile = false) => {
+    if (!got) {
+      entryFail(key, "找不到这一块", mobile);
+      return;
+    }
+    const diffs = Object.entries(want)
+      .filter(([k, v]) => !near(got[k], v, tol))
+      .map(([k, v]) => `${k} ${got[k]}≠${v}`);
+    if (diffs.length > 0)
+      entryFail(key, `${diffs.join("，")}（实测 ${JSON.stringify(got)}）`, mobile);
+  };
+
+  /* ---- 桌面 1440×1024（画板 06） ---- */
+  consoleErrors = [];
+  if (!(await openEntry({ width: 1440, height: 1024, mobile: false }))) {
+    entryFail(
+      "load",
+      "等了 10 秒还没有结果概况：页面没进按条目搜索，或 POST /api/media/search 没回来",
+    );
+  } else {
+    const m = await ev(MEASURE_ES);
+    expectBox("band", m.band, { x: 264, y: 0, w: 1176, h: 64 });
+    expectBox("query", m.query, { x: 280, y: 13, w: 640, h: 38 });
+    expectBox("token", m.token, { x: 316, h: 26 }, 6);
+    if (m.tokenText !== "长夜将尽 · 2025 · 剧集")
+      entryFail("token.text", `条目标记写的是「${m.tokenText}」`);
+    /* ⌘K 在输入框里 9 下、20 高（画板 06 kbd 30×20）；行高没写死时它跟着输入框的行高变成 40 高、顶出框外 */
+    expectBox("kbd", m.kbd, { y: 22, h: 20 }, 2);
+    expectBox("search", m.search, { x: 928, y: 13, w: 74, h: 38 }, 6);
+    expectBox("history", m.history, { x: 1010, y: 13, w: 38, h: 38 }, 6);
+    if (!m.merge) entryFail("merge", "搜索带上没有「合并同一资源」开关");
+    else if (!near(m.merge.x + m.merge.w, 1424, 6))
+      entryFail("merge", `开关的右边在 ${m.merge.x + m.merge.w}，画板 1424`);
+    for (const label of [
+      "搜索",
+      "最近搜索",
+      "合并同一资源",
+      "再输入关键字可以缩小范围",
+      "去掉条目，回到关键字搜索",
+    ]) {
+      if (!m.controls.some((t) => t.includes(label)))
+        entryFail(`controls(${label})`, `搜索带里找不到「${label}」`);
+    }
+    /* 按条目搜时搜索带只有一排：保存搜索与站点那一排属于关键字模式 */
+    if (m.controls.some((t) => t.includes("保存搜索")))
+      entryFail("controls(保存搜索)", "按条目搜时不该有「保存搜索」");
+    if (m.facetRow) entryFail("facetRow", "按条目搜时不该有站点那一排");
+
+    expectBox("rail", m.rail, { x: 264, y: 64, w: 256, h: 932 });
+    if (m.railPos !== "sticky" || m.railTop !== "64px")
+      entryFail("rail.sticky", `左栏 position ${m.railPos}、top ${m.railTop}，画板 sticky 64px`);
+    expectBox("rail.poster", m.poster, { x: 280, y: 80, w: 56, h: 84 });
+    if (m.railTitle !== "长夜将尽") entryFail("rail.title", `条目名「${m.railTitle}」`);
+    const lines = m.railLines.join(" | ");
+    if (lines !== "2025 · 剧集 · 追剧中 | 版本锁 HHWEB 2160p")
+      entryFail("rail.lines", `两行说明是「${lines}」`);
+    const seasonText = m.seasons.map((s) => s.t + (s.on ? "*" : "")).join(" ");
+    if (seasonText !== "第 1 季 第 2 季*") entryFail("rail.seasons", `季是「${seasonText}」`);
+    if (m.seasons.some((s) => !near(s.h, 26, 1)))
+      entryFail("rail.seasons", `季的高度 ${m.seasons.map((s) => s.h).join("/")}，画板 26`);
+    if (m.eps.length !== 8) entryFail("rail.eps", `每集格子 ${m.eps.length} 个，这一季 8 集`);
+    else {
+      const sizes = [...new Set(m.eps.map((e) => `${e.w}×${e.h}`))];
+      if (sizes.join() !== "34×24")
+        entryFail("rail.eps", `格子尺寸 ${sizes.join("、")}，画板 34×24`);
+      /* 每行 6 个，列距 38、行距 30（格子 34 加 4、24 加 6） */
+      const e0 = m.eps[0];
+      const e1 = m.eps[1];
+      const e6 = m.eps[6];
+      if (
+        !near(e0.x, 280, 2) ||
+        !near(e1.x - e0.x, 38, 1) ||
+        !near(e6.x, e0.x, 1) ||
+        !near(e6.y - e0.y, 30, 1)
+      ) {
+        entryFail(
+          "rail.eps",
+          `格子位置 ${JSON.stringify([e0, e1, e6].map(({ x, y }) => [x, y]))}，画板首格 280、列距 38、每行 6 个、行距 30`,
+        );
+      }
+      const states = m.eps.map(
+        (e) => (e.cls.match(/is-(library|downloading|waiting_version|missing|upcoming)/) ?? [])[1],
+      );
+      const wantStates = [
+        "library",
+        "library",
+        "library",
+        "library",
+        "library",
+        "library",
+        "downloading",
+        "waiting_version",
+      ];
+      if (states.join() !== wantStates.join())
+        entryFail("rail.eps", `格子的状态 ${states.join("/")}`);
+    }
+    if (m.note !== "缺 E08（等版本）· E07 下载中") entryFail("rail.note", `一句话是「${m.note}」`);
+    expectBox("rail.profile", m.profile, { x: 280, w: 224, h: 30 }, 4);
+    if (m.profileText !== "档案：默认（2160p 优先）")
+      entryFail("rail.profile", `档案下拉写的是「${m.profileText}」`);
+    /* 假数据里没有流媒体平台，平台那一组没有选项、不出现（筛选组只列有选项的） */
+    const groups = m.facetGroups.join("、");
+    if (groups !== "分辨率、来源、HDR、制作组、中字与优惠")
+      entryFail("rail.facets", `筛选组是「${groups}」`);
+    if (m.moreFacets !== "更多筛选：编码、季集、站点")
+      entryFail("rail.more", `「更多筛选」写的是「${m.moreFacets}」`);
+
+    expectBox("summary", m.summary, { x: 536, y: 80 }, 4);
+    if (m.summaryText !== "6 条结果 · 合并成 5 组 · 符合档案 4")
+      entryFail("summary", `概况是「${m.summaryText}」`);
+    if (m.siteErrors !== "1 个站点没回应")
+      entryFail("siteErrors", `站点错误写的是「${m.siteErrors}」`);
+    const sortText = m.sorts.map((s) => s.t + (s.on ? "*" : "")).join(" ");
+    if (sortText !== "档案分* 做种 体积 发布时间") entryFail("sorts", `排序是「${sortText}」`);
+    else {
+      const last = m.sorts[m.sorts.length - 1];
+      if (!near(last.x + last.w, 1424, 4) || m.sorts.some((s) => !near(s.h, 24, 1))) {
+        entryFail(
+          "sorts",
+          `排序的右边 ${last.x + last.w}、高 ${m.sorts.map((s) => s.h).join("/")}，画板右对齐到 1424、高 24`,
+        );
+      }
+    }
+
+    /* 卡片：888 宽从 536 起；默认只显示首选一行 = 150 高，整组已入库折叠 = 108 高；卡距 12，第一张 y 112 */
+    const wantCards = [
+      ["es-card-h:9f2c0d8e41b7a3c5", 150, 1],
+      ["es-card-h:04aa71c3e9d25b80", 108, 0],
+      ["es-card-h:c71e5a90b2d4f618", 150, 1],
+      ["es-card-s:pthome:77310", 150, 1],
+      ["es-card-s:pttime:351098", 150, 1],
+    ];
+    if (m.cards.map((c) => c.key).join() !== wantCards.map(([k]) => k).join()) {
+      entryFail("cards", `卡片是 ${m.cards.map((c) => c.key).join("、")}`);
+    } else {
+      let y = 112;
+      wantCards.forEach(([key, h, members], i) => {
+        const c = m.cards[i];
+        expectBox(`card[${i}]`, c, { x: 536, y, w: 888, h }, 2);
+        if (c.members !== members)
+          entryFail(`card[${i}].members`, `${key} 显示了 ${c.members} 行成员，应为 ${members}`);
+        y += h + 12;
+      });
+      const [c0, c1, , c3, c4] = m.cards;
+      expectBox("card[0].score", c0.score, { x: 552, y: 128, w: 48, h: 48 }, 2);
+      if (c0.scoreText !== "92档案分")
+        entryFail("card[0].score", `档案分写的是「${c0.scoreText}」`);
+      if (c0.pill !== "能补上 E08") entryFail("card[0].pill", `覆盖结果是「${c0.pill}」`);
+      if (c0.lock !== "不是锁定的版本（HHWEB）")
+        entryFail("card[0].lock", `版本提醒是「${c0.lock}」`);
+      if (!c0.more.startsWith("另有 1 个站点：CHDBits"))
+        entryFail("card[0].more", `脚注是「${c0.more}」`);
+      for (const want of ["OurBits", "首选", "做种 41", "免费 18 时", "无 H&R", "推送"]) {
+        if (!c0.text.includes(want)) entryFail(`card[0](${want})`, "首选那一行没有这一项");
+      }
+      if (c1.pill !== "库里都有了" || !c1.text.includes("这一组的集都已入库，默认折叠")) {
+        entryFail(
+          "card[1]",
+          `整组已入库的卡：覆盖结果「${c1.pill}」，正文「${c1.text.slice(0, 80)}」`,
+        );
+      }
+      if (c3.pill !== "E07 正在下载（HDSky）")
+        entryFail("card[3].pill", `覆盖结果是「${c3.pill}」`);
+      if (
+        c4.pill !== "不符合：分辨率 1080p 不在档案里" ||
+        c4.scoreText !== "—不符合" ||
+        !c4.text.includes("仍然推送")
+      ) {
+        entryFail("card[4]", `不符合档案的卡：覆盖结果「${c4.pill}」，档案分「${c4.scoreText}」`);
+      }
+    }
+    if (!m.unmatched.includes("对不上这个条目的 3 条没显示"))
+      entryFail("unmatched", `最后一行是「${m.unmatched}」`);
+    if (m.overflow > 0) entryFail("overflow", `横向溢出 ${m.overflow}px`);
+
+    /*
+     * 探针：点了才看得出的效果。每条都返回 verdict=ok 或 MISMATCH 加实测，
+     * 并在故意改坏的构建上跑过一遍确认会红（见 state/pt-tools-media-hub/m2a/qa-notes.md）。
+     */
+    const ENTRY_PROBES = [
+      {
+        key: "probe.expand",
+        desc: "展开一组：成员两行、卡高 186，第二个站点的按钮是「推送这个」；再点收起回到 150",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const card = () => document.querySelector('[data-testid="es-card-h:9f2c0d8e41b7a3c5"]');
+          const more = card()?.querySelector('[data-testid="es-more"]');
+          if (!more) return 'no-more';
+          more.click();
+          await wait(400);
+          const h1 = Math.round(card().getBoundingClientRect().height);
+          const rows = card().querySelectorAll('[data-testid="es-member"]').length;
+          const soft = (card().querySelector('[data-testid="es-push-CHDBits-286014"]')?.textContent ?? '').trim();
+          const fold = (card().querySelector('[data-testid="es-more"]')?.textContent ?? '').trim();
+          card().querySelector('[data-testid="es-more"]').click();
+          await wait(400);
+          const h2 = Math.round(card().getBoundingClientRect().height);
+          const ok = Math.abs(h1 - 186) <= 2 && rows === 2 && soft === '推送这个' && fold.startsWith('收起') && Math.abs(h2 - 150) <= 2;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 展开高 ' + h1 + ' 行 ' + rows + ' 按钮 ' + soft + ' 脚注 ' + fold + ' 收起高 ' + h2;
+        })()`,
+      },
+      {
+        key: "probe.facet",
+        desc: "勾「1080p」：只剩不符合档案那一组，同组 2160p 的数不变、制作组 CHDWEB 变 0，概况跟着变",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const n = (k, v) => (document.querySelector('[data-testid="es-facet-' + k + '-' + v + '"] .es-facets__n')?.textContent ?? '').trim();
+          const opt = document.querySelector('[data-testid="es-facet-resolution-1080p"]');
+          if (!opt) return 'no-facet';
+          const before = [n('resolution', '2160p'), n('group', 'CHDWEB')].join('/');
+          opt.click();
+          await wait(400);
+          const cards = [...document.querySelectorAll('[data-testid^="es-card-"]')].map((el) => el.getAttribute('data-testid'));
+          const after = [n('resolution', '2160p'), n('group', 'CHDWEB')].join('/');
+          const sum = (document.querySelector('[data-testid="es-summary"]')?.textContent ?? '').trim();
+          opt.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = before === '5/2' && after === '5/0' && cards.join() === 'es-card-s:pttime:351098' &&
+            sum === '1 条结果 · 合并成 1 组 · 符合档案 0' && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 计数 ' + before + '→' + after + ' 卡 ' + cards.join(',') + ' 概况 ' + sum + ' 取消后 ' + back;
+        })()`,
+      },
+      {
+        key: "probe.unfold",
+        desc: "点折叠的卡：展开成一行成员、150 高",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const card = () => document.querySelector('[data-testid="es-card-h:04aa71c3e9d25b80"]');
+          if (!card()) return 'no-card';
+          card().click();
+          await wait(400);
+          const h = Math.round(card().getBoundingClientRect().height);
+          const rows = card().querySelectorAll('[data-testid="es-member"]').length;
+          return 'verdict=' + (Math.abs(h - 150) <= 2 && rows === 1 ? 'ok' : 'MISMATCH') + ' 高 ' + h + ' 行 ' + rows;
+        })()`,
+      },
+      {
+        key: "probe.episode",
+        desc: "点 E07 的格子：只剩包含 E07 的那一组，概况旁出现「只看 E07」；再点取消",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const cell = document.querySelector('[data-testid="es-ep-7"]');
+          if (!cell) return 'no-cell';
+          cell.click();
+          await wait(400);
+          const cards = [...document.querySelectorAll('[data-testid^="es-card-"]')].map((el) => el.getAttribute('data-testid'));
+          const chip = (document.querySelector('.es-sum__chip')?.textContent ?? '').trim();
+          cell.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = cards.join() === 'es-card-s:pthome:77310' && chip === '只看 E07' && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡 ' + cards.join(',') + ' 提示 ' + chip + ' 取消后 ' + back;
+        })()`,
+      },
+      {
+        key: "probe.merge",
+        desc: "关掉「合并同一资源」：一个成员一张卡，概况不写组数；再打开回到 5 组",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const sw = document.querySelector('[data-testid="es-merge"]');
+          if (!sw) return 'no-switch';
+          sw.click();
+          await wait(400);
+          const n = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const sum = (document.querySelector('[data-testid="es-summary"]')?.textContent ?? '').trim();
+          sw.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = n === 6 && sum === '6 条结果 · 符合档案 5' && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡 ' + n + ' 概况 ' + sum + ' 打开后 ' + back;
+        })()`,
+      },
+    ];
+    for (const p of ENTRY_PROBES) {
+      const r = String(await ev(p.js).catch((e) => `probe 失败：${e.message}`));
+      if (probeMiss(r, "verdict=ok").length > 0) entryFail(p.key, `${p.desc}：${r}`);
+    }
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) entryFail("console", err);
+  }
+
+  /* ---- 桌面窄屏 1200×1024：左栏收成一排，筛选在右侧 296 宽的抽屉里 ---- */
+  consoleErrors = [];
+  if (await openEntry({ width: 1200, height: 1024, mobile: false })) {
+    const r = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        if (document.querySelector('.es-body__rail')) return 'MISMATCH 窄屏还有常驻左栏';
+        const row = document.querySelector('.es-narrow');
+        const btn = document.querySelector('[data-testid="es-drawer-btn"]');
+        if (!row || !btn) return 'no-narrow';
+        btn.click();
+        await wait(600);
+        const drawer = [...document.querySelectorAll('.es-drawer')].find((el) => el.getBoundingClientRect().width > 0);
+        const w = drawer ? Math.round(drawer.getBoundingClientRect().width) : 0;
+        const rail = drawer?.querySelector('.es-rail');
+        const ok = Boolean(rail) && Math.abs(w - 296) <= 2 && (row.textContent ?? '').includes('长夜将尽 第 2 季');
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 抽屉宽 ' + w + ' 左栏在抽屉里 ' + Boolean(rail) + ' 一排 ' + (row.textContent ?? '').replace(/\\s+/g, ' ').trim().slice(0, 40);
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(r, "verdict=ok").length > 0) entryFail("narrow", `视口 1200：${r}`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) entryFail("console(1200)", err);
+  } else {
+    entryFail("narrow", "视口 1200 下没进按条目搜索");
+  }
+
+  /* ---- 手机 375×812（画板 09、10） ---- */
+  consoleErrors = [];
+  if (!(await openEntry({ ...M_VIEWPORT, mobile: true }))) {
+    entryFail("load", "等了 10 秒还没有结果概况", true);
+  } else {
+    const mm = await ev(`(() => {
+      const box = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+      };
+      const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+      const ctl = document.querySelector('.es-mctl');
+      const scroller = document.querySelector('.pt-shell__content');
+      return {
+        /* 模拟视口里的竖向滚动条占 10 宽（真机是浮在上面的），内容列跟着窄这么多 */
+        sb: scroller ? scroller.offsetWidth - scroller.clientWidth : 0,
+        sub: txt(document.querySelector('#pt-mhead-sub')),
+        query: box(document.querySelector('.es-q .el-input__wrapper')),
+        token: txt(document.querySelector('[data-testid="es-token"]')),
+        bandButtons: [...(document.querySelector('[data-testid="es-head"]')?.querySelectorAll('button') ?? [])].map(txt).filter(Boolean),
+        season: box(ctl?.querySelector('.es-mctl__season')),
+        profile: box(ctl?.querySelector('.es-mctl__profile')),
+        filter: box(ctl?.querySelector('[data-testid="es-mfilter"]')),
+        filterText: txt(ctl?.querySelector('[data-testid="es-mfilter"]')),
+        item: box(document.querySelector('.es-mitem')),
+        itemTitle: txt(document.querySelector('.es-mitem__title')),
+        eps: [...document.querySelectorAll('.es-mitem .es-eps__cell')].map(box),
+        summary: box(document.querySelector('[data-testid="es-summary"]')),
+        summaryText: txt(document.querySelector('[data-testid="es-summary"]')),
+        sum: box(document.querySelector('.es-sum')),
+        sort: box(document.querySelector('.es-sum__msort')),
+        sortText: txt(document.querySelector('.es-sum__msort .el-select__placeholder')),
+        /* 选中的字有没有被省略号截掉：textContent 看不出来，要比滚动宽度 */
+        sortClipped: (() => {
+          const el = document.querySelector('.es-sum__msort .el-select__placeholder span') ?? document.querySelector('.es-sum__msort .el-select__placeholder');
+          return el ? el.scrollWidth > el.clientWidth : true;
+        })(),
+        warn: box(document.querySelector('[data-testid="es-site-errors"]')),
+        cards: [...document.querySelectorAll('[data-testid^="es-mcard-"]')].map(box),
+        rail: Boolean(document.querySelector('.es-body__rail')),
+        overflow: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    })()`);
+    if (mm.sub !== "按条目 · 长夜将尽 第 2 季")
+      entryFail("topbar.sub", `顶栏副标题是「${mm.sub}」`, true);
+    const cw = 343 - mm.sb;
+    expectBox("query", mm.query, { x: 16, y: 64, w: cw, h: 44 }, 2, true);
+    /* 手机的条目标记 150 宽，画板 09 只写名字与类型 */
+    if (mm.token !== "长夜将尽 · 剧集")
+      entryFail("token.text", `条目标记写的是「${mm.token}」`, true);
+    if (mm.bandButtons.includes("搜索"))
+      entryFail("band", "手机上按条目搜时搜索带里不该有「搜索」按钮（画板 09 只有输入框）", true);
+    expectBox("ctl.season", mm.season, { x: 16, y: 116, w: 92, h: 36 }, 2, true);
+    /* 档案下拉吃掉内容列剩下的宽度，滚动条让出来的 10 也从它身上扣 */
+    expectBox("ctl.profile", mm.profile, { x: 116, y: 116, w: 136 - mm.sb, h: 36 }, 2, true);
+    expectBox("ctl.filter", mm.filter, { x: 260 - mm.sb, y: 116, w: 99, h: 36 }, 2, true);
+    if (mm.filterText !== "筛选")
+      entryFail("ctl.filter", `筛选按钮写的是「${mm.filterText}」`, true);
+    expectBox("item", mm.item, { x: 16, y: 164, w: cw, h: 118 }, 2, true);
+    if (mm.itemTitle !== "长夜将尽 第 2 季")
+      entryFail("item.title", `条目卡标题是「${mm.itemTitle}」`, true);
+    const msizes = [...new Set(mm.eps.map((e) => `${e.w}×${e.h}`))];
+    if (mm.eps.length !== 8 || msizes.join() !== "38×22")
+      entryFail(
+        "item.eps",
+        `格子 ${mm.eps.length} 个，尺寸 ${msizes.join("、")}，画板 38×22`,
+        true,
+      );
+    expectBox("summary", mm.summary, { x: 16, y: 300 }, 8, true);
+    if (mm.summaryText !== "6 条 · 合并成 5 组 · 符合档案 4")
+      entryFail("summary", `概况是「${mm.summaryText}」`, true);
+    /* 排序：h26 的胶囊，右对齐到内容列右边（画板 359），选中「档案分」时 82 宽（画板 71，照它给字会被省略，见规格的落地偏离） */
+    expectBox("sort", mm.sort, { y: 297, w: 82, h: 26 }, 3, true);
+    if (mm.sortClipped) entryFail("sort", "排序下拉里选中的字被省略号截掉了", true);
+    if (mm.sort && !near(mm.sort.x + mm.sort.w, 16 + cw, 2))
+      entryFail("sort", `排序的右边在 ${mm.sort.x + mm.sort.w}，应在 ${16 + cw}`, true);
+    if (mm.sortText !== "档案分") entryFail("sort", `排序写的是「${mm.sortText}」`, true);
+    /* 「1 个站点没回应」在概况那一行下面单独一行（画板 09 的概况一行没有它） */
+    if (!mm.warn || !mm.sort || mm.warn.y < mm.sort.y + mm.sort.h || mm.warn.x !== 16) {
+      entryFail("siteErrors", `站点错误没有单独一行：${JSON.stringify(mm.warn)}`, true);
+    }
+    if (mm.cards.length !== 5) entryFail("cards", `结果卡 ${mm.cards.length} 张，应为 5`, true);
+    else {
+      /* 第一张卡在概况（这里多一行站点错误）下面 8；画板没有错误那一行，卡从 332 起 */
+      expectBox("cards[0]", mm.cards[0], { x: 16, y: mm.sum.y + mm.sum.h + 8, w: cw }, 2, true);
+      const gaps = mm.cards.slice(1).map((c, i) => c.y - (mm.cards[i].y + mm.cards[i].h));
+      /* 卡高带小数，取整后卡距会在 8、9 之间跳 */
+      if (gaps.some((g) => Math.abs(g - 8) > 1) || mm.cards.some((c) => c.x !== 16 || c.w !== cw)) {
+        entryFail(
+          "cards",
+          `卡距 ${gaps.join("/")}、宽 ${mm.cards.map((c) => c.w).join("/")}，画板 8 与 ${cw}`,
+          true,
+        );
+      }
+    }
+    if (mm.rail) entryFail("rail", "手机上不该有左栏", true);
+    if (mm.overflow > 0) entryFail("overflow", `横向溢出 ${mm.overflow}px`, true);
+
+    const panel = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const btn = document.querySelector('[data-testid="es-mfilter"]');
+        if (!btn) return 'no-filter';
+        btn.click();
+        await wait(700);
+        const sheet = [...document.querySelectorAll('.es-mpanel')].find((el) => el.getBoundingClientRect().height > 0);
+        if (!sheet) return 'no-sheet';
+        const r = sheet.getBoundingClientRect();
+        const pill = [...sheet.querySelectorAll('[data-testid="es-mfacet-resolution"] button')].find((b) => (b.textContent ?? '').includes('1080p'));
+        if (!pill) return 'no-pill';
+        pill.click();
+        await wait(300);
+        const apply = sheet.querySelector('[data-testid="es-mpanel-apply"]');
+        const applyText = (apply?.textContent ?? '').trim();
+        const before = document.querySelectorAll('[data-testid^="es-mcard-"]').length;
+        apply.click();
+        await wait(700);
+        const after = document.querySelectorAll('[data-testid^="es-mcard-"]').length;
+        const label = (btn.textContent ?? '').replace(/\\s+/g, ' ').trim();
+        const ok = Math.round(r.top) === 120 && Math.round(r.height) === 692 && applyText === '看 1 条结果' && before === 5 && after === 1 && label === '筛选 · 1';
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 面板 y ' + Math.round(r.top) + ' 高 ' + Math.round(r.height) +
+          ' 按钮 ' + applyText + ' 卡 ' + before + '→' + after + ' 筛选按钮 ' + label;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(panel, "verdict=ok").length > 0)
+      entryFail("probe.panel", `筛选面板：${panel}`, true);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) entryFail("console", err, true);
+  }
+  /* 后面的登录页一趟自己设视口；这里恢复桌面口径，免得以后在这一段后面加的检查拿到手机视口 */
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+}
+
 // ------------------------------------------------- 登录页（画板 43）
 
 /*
@@ -2956,7 +3547,9 @@ const stale = Object.keys(ALLOWED_GAPS).filter(
   (k) =>
     !gapsUsed.has(k) &&
     /* --route 只跑子集时，别把没跑到的路由的偏离判成多余。移动端的键是 `<路由>@375 <项>` */
-    (wanted.length === 0 || wanted.some((r) => k.startsWith(`${r} `) || k.startsWith(`${r}@375 `))),
+    (wanted.length === 0 ||
+      wanted.some((r) => k.startsWith(`${r} `) || k.startsWith(`${r}@375 `)) ||
+      (doEntry && k.startsWith("/search?entry"))),
 );
 
 for (const f of failures) {
@@ -3007,6 +3600,7 @@ for (const k of stale) {
 const scope =
   `桌面 ${routes.length} 条 + 移动 ${mobileRoutes.length} 条` +
   (emptyRoutes.length > 0 ? ` + 空态 ${emptyRoutes.length} 条` : "") +
+  (doEntry ? " + 按条目搜索（1440、1200、375）" : "") +
   (doLogin ? " + 登录页" : "");
 if (failures.length === 0 && stale.length === 0) {
   /*

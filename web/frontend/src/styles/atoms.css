@@ -799,11 +799,16 @@
 }
 
 /* 画板 kbd：34×20 hover 底，装 ⌘K 提示 */
+/*
+ * 输入框里的快捷键提示（画板 06 kbd 30×20）。行高要写死：el-input 的后缀继承输入框的行高（38 高的框是 36），
+ * 不写的话这一枚有 40 高，比输入框还高、顶出框外
+ */
 .pt-kbd {
   flex: 0 0 auto;
   padding: 2px 6px;
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
+  line-height: 16px;
   color: var(--pt-t3);
   background: var(--pt-hover);
   border-radius: var(--pt-r-sm);

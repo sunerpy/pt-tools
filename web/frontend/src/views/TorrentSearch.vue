@@ -2,6 +2,10 @@
 import {
   downloadersApi,
   type DownloaderSetting,
+  type ExploreItem,
+  type MediaKind,
+  type MediaSearchMember,
+  type MediaSearchResult,
   mediaApi,
   type MultiSiteSearchRequest,
   searchApi,
@@ -10,6 +14,7 @@ import {
   siteCategoriesApi,
   type SiteCategoriesConfig,
   type SiteSearchParams,
+  subscribeApi,
   torrentPushApi,
   type TMDBItem,
   type TorrentPushItem,
@@ -20,6 +25,10 @@ import SubscribeDialog, {
   type FollowTorrent,
   type SubscribeTarget,
 } from "@/components/media/SubscribeDialog.vue";
+import EntryCandidates from "@/components/search/EntryCandidates.vue";
+import EntryPoster from "@/components/search/EntryPoster.vue";
+import EntrySearch, { type EntryRef } from "@/components/search/EntrySearch.vue";
+import FacetChecklist from "@/components/search/FacetChecklist.vue";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -37,17 +46,34 @@ import {
   matchesCategory,
   verdictOfItem,
 } from "@/utils/category";
+import { parsedTags } from "@/utils/entrySearch";
 import { formatShortDateTime } from "@/utils/format";
+import { mediaKindLabel } from "@/utils/media";
 import {
   loadSavedSearches,
   SAVED_MAX,
   type SavedSearch,
   writeSavedSearches,
 } from "@/utils/savedSearch";
+import {
+  buildFacets,
+  type FacetKey,
+  type FacetRecord,
+  type FacetSelection,
+  MAIN_FACETS,
+  matchesFacets,
+  MORE_FACETS,
+  selectedCount,
+  toggleFacet,
+} from "@/utils/searchFacets";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue";
+import { routeLocationKey, routerKey } from "vue-router";
 
 const isMobile = useIsMobile();
+/* 测试里挂载这一页时没有路由：inject 带默认值，拿不到就是 null（不报警告） */
+const router = inject(routerKey, null);
+const route = inject(routeLocationKey, null);
 
 // 搜索状态
 const searchKeyword = ref("");
@@ -456,12 +482,41 @@ const freeFilteredResults = computed(() =>
   freeOnly.value ? sortedResults.value.filter((r) => r.isFree) : sortedResults.value,
 );
 
-const filteredResults = computed(() => {
+const categoryResults = computed(() => {
   if (!activeCategory.value) return freeFilteredResults.value;
   return freeFilteredResults.value.filter((r) =>
     matchesCategory(r, activeCategory.value, { includeUnknown: includeUnknown.value }),
   );
 });
+
+/**
+ * 「筛选」浮层（画板 06 的筛选组，关键字搜索也用）：在分类与「仅免费」之后再按解析信息筛。
+ * 计数也从这一批算，所以浮层里的数与表格真会剩下的行数一致。
+ */
+const facetSel = ref<FacetSelection>({});
+const facetRecord = (r: SearchTorrentItem): FacetRecord => ({
+  meta: r.meta,
+  free: r.isFree,
+  hr: Boolean(r.hasHR),
+  discount: r.discountLevel,
+  site: r.sourceSite,
+});
+const keywordFacets = computed(() =>
+  buildFacets(categoryResults.value.map(facetRecord), facetSel.value, [
+    ...MAIN_FACETS,
+    ...MORE_FACETS,
+  ]),
+);
+const facetChosen = computed(() => selectedCount(facetSel.value));
+function toggleKeywordFacet(key: FacetKey, value: string) {
+  facetSel.value = toggleFacet(facetSel.value, key, value);
+}
+
+const filteredResults = computed(() =>
+  facetChosen.value === 0
+    ? categoryResults.value
+    : categoryResults.value.filter((r) => matchesFacets(facetRecord(r), facetSel.value)),
+);
 
 /*
  * 这两个 watch 必须排在 filteredResults **之后**：watch 的 getter 在 setup 里会立刻
@@ -474,7 +529,7 @@ const filteredResults = computed(() => {
  * 于是页面显示一片空白，而命中数明明不是 0。所以这里在筛选集变化时把页码夹到
  * 合法范围内 —— 页脚文案、分页总数与表格必须用同一份集合，这是同一件事的三个出口。
  */
-watch([activeCategory, freeOnly], () => {
+watch([activeCategory, freeOnly, facetSel], () => {
   currentPage.value = 1;
 });
 
@@ -546,7 +601,11 @@ function loadFromCache() {
       return false;
     }
 
-    searchKeyword.value = data.keyword || "";
+    /*
+     * 从探索页带着条目进来时，按条目搜已经开始了，输入框只用来在条目的结果里按标题筛：
+     * 缓存的关键词不写进去（写进去结果就被筛成 0 条），去掉条目时 clearEntry 再写回
+     */
+    if (!entry.value) searchKeyword.value = data.keyword || "";
     // 缓存里的结果集就是这个关键词搜出来的，一起恢复，空结果才能正确画成 zero
     searchedKeyword.value = data.keyword || "";
     searchResults.value = data.results || [];
@@ -627,7 +686,9 @@ async function doSearch() {
   }
 
   clearSelection();
+  closeCandidates();
   currentPage.value = 1;
+  facetSel.value = {};
   searchedKeyword.value = searchKeyword.value.trim();
 
   // 站点列表也套在 run 里：它在请求之前，不然这段时间面板上没有加载态
@@ -1041,6 +1102,7 @@ async function followShow(torrent: SearchTorrentItem) {
 // 打开推送对话框（单个）
 function openPushDialog(torrent: SearchTorrentItem) {
   currentPushTorrent.value = torrent;
+  pushMedia.value = null;
   pushForm.value = {
     downloaderIds: defaultDownloader.value ? [defaultDownloader.value.id!] : [],
     savePath: "",
@@ -1088,6 +1150,14 @@ async function doPush() {
       torrentTitle: currentPushTorrent.value.title,
       sourceSite: currentPushTorrent.value.sourceSite,
       sizeBytes: currentPushTorrent.value.sizeBytes,
+      // 按条目搜索的结果带上条目：写进种子记录，整理入库按它整理
+      ...(pushMedia.value
+        ? {
+            mediaType: pushMedia.value.media_type,
+            tmdbId: pushMedia.value.tmdb_id,
+            season: pushMedia.value.season || undefined,
+          }
+        : {}),
     });
 
     if (resp.success) {
@@ -1327,6 +1397,265 @@ const footNote = computed(() => {
   if (searchErrors.value.length > 0) parts.push(`${searchErrors.value.length} 个站点失败`);
   return parts.join(" · ");
 });
+
+// ---------------------------------------------------------------- 按条目搜索（媒体中心 M2a）
+
+/**
+ * 搜索框里选了一个条目时按条目搜（画板 06）：输入框里是条目标记，再写的字只按标题筛；
+ * 去掉标记回到关键字搜索。条目也可以从探索页带进来（/search?media_type=tv&tmdb_id=…&season=…）。
+ */
+const entry = ref<EntryRef | null>(null);
+const entryInfo = ref<{
+  title: string;
+  year?: number;
+  poster_path?: string;
+  media_type: MediaKind;
+} | null>(null);
+const mergeSame = ref(true);
+const entryBusy = ref(false);
+const entryView = ref<InstanceType<typeof EntrySearch> | null>(null);
+/** 从按条目搜索的结果推送时带上的条目 */
+const pushMedia = ref<{ media_type: MediaKind; tmdb_id: number; season: number } | null>(null);
+
+const entryToken = computed(() => {
+  const info = entryInfo.value;
+  if (!info) return "…";
+  const parts = [info.title];
+  if (info.year && !isMobile.value) parts.push(String(info.year));
+  parts.push(mediaKindLabel(info.media_type));
+  return parts.join(" · ");
+});
+
+/** 手机顶栏的副标题：「按条目 · 长夜将尽 第 2 季」 */
+const entrySub = ref("");
+
+function syncQuery(e: EntryRef | null) {
+  if (!router) return;
+  const query: Record<string, string> = {};
+  if (e) {
+    query.media_type = e.media_type;
+    query.tmdb_id = String(e.tmdb_id);
+    if (e.season) query.season = String(e.season);
+  }
+  void router.replace({ query });
+}
+
+function entryFromQuery(): EntryRef | null {
+  const q = route?.query ?? {};
+  const kind = typeof q.media_type === "string" ? q.media_type : "";
+  const id = Number(typeof q.tmdb_id === "string" ? q.tmdb_id : NaN);
+  if ((kind !== "movie" && kind !== "tv") || !Number.isInteger(id) || id <= 0) return null;
+  const season = Number(typeof q.season === "string" ? q.season : NaN);
+  return {
+    media_type: kind,
+    tmdb_id: id,
+    season: Number.isInteger(season) && season > 0 ? season : undefined,
+  };
+}
+
+function sameEntry(a: EntryRef | null, b: EntryRef | null): boolean {
+  return (
+    a?.media_type === b?.media_type &&
+    a?.tmdb_id === b?.tmdb_id &&
+    (a?.season ?? 0) === (b?.season ?? 0)
+  );
+}
+
+function setEntry(e: EntryRef | null, info?: ExploreItem) {
+  const same =
+    e !== null && entry.value?.media_type === e.media_type && entry.value?.tmdb_id === e.tmdb_id;
+  if (e && info) {
+    entryInfo.value = {
+      title: info.title,
+      year: info.year,
+      poster_path: info.poster_path,
+      media_type: e.media_type,
+    };
+  } else if (!same) {
+    // 从地址带进来的条目：名字等搜完了从结果里补上
+    entryInfo.value = null;
+  }
+  /*
+   * 换成另一个条目时清掉输入框。从探索页带着条目进来时，页面刚从缓存恢复了上一次的关键词，
+   * 按条目搜时输入框里的字会按标题再筛一遍，留着它结果就只剩 0 条
+   */
+  if (e && !same) searchKeyword.value = "";
+  entry.value = e;
+  if (!e) entrySub.value = "";
+}
+
+function pickCandidate(it: ExploreItem) {
+  const e: EntryRef = { media_type: it.media_type, tmdb_id: it.id };
+  closeCandidates();
+  searchKeyword.value = "";
+  setEntry(e, it);
+  syncQuery(e);
+}
+
+function clearEntry() {
+  setEntry(null);
+  syncQuery(null);
+  // 回到关键字模式：输入框写回下面那张表的关键词（没搜过就是空的）
+  searchKeyword.value = searchedKeyword.value;
+}
+
+function onEntryLoaded(item: MediaSearchResult["item"]) {
+  if (!entry.value) return;
+  entryInfo.value = {
+    title: item.title,
+    year: item.year,
+    poster_path: item.poster_path,
+    media_type: item.media_type,
+  };
+  entrySub.value = `按条目 · ${item.media_type === "tv" && item.season ? `${item.title} 第 ${item.season} 季` : item.title}`;
+}
+
+function onEntrySeason(n: number) {
+  if (!entry.value) return;
+  const e = { ...entry.value, season: n };
+  entry.value = e;
+  syncQuery(e);
+}
+
+function onEntryKeyword(kw: string) {
+  clearEntry();
+  searchKeyword.value = kw;
+  void doSearch();
+}
+
+function onEntryPush(
+  m: MediaSearchMember,
+  media: { media_type: MediaKind; tmdb_id: number; season: number },
+) {
+  openPushDialog({
+    id: m.torrent_id,
+    title: m.title,
+    subtitle: m.subtitle,
+    url: m.url,
+    downloadUrl: m.download_url,
+    sizeBytes: m.size_bytes,
+    seeders: m.seeders,
+    leechers: m.leechers,
+    snatched: m.snatched ?? 0,
+    isFree: m.free,
+    discountLevel: m.discount,
+    hasHR: m.hr,
+    sourceSite: m.site,
+    meta: m.meta,
+  });
+  pushMedia.value = media;
+}
+
+/** 搜索按钮：按条目时重新搜这个条目，否则按关键字搜 */
+function onSearchClick() {
+  if (entry.value) void entryView.value?.run();
+  else void doSearch();
+}
+
+watch(
+  () => route?.query,
+  () => {
+    const e = entryFromQuery();
+    if (!sameEntry(e, entry.value)) setEntry(e);
+  },
+);
+
+// ---------------------------------------------------------------- 打字时的 TMDB 候选（画板 05 的片段）
+
+const candOpen = ref(false);
+const candTV = ref<ExploreItem[]>([]);
+const candMovies = ref<ExploreItem[]>([]);
+const candActive = ref(-1);
+const candLoading = ref(false);
+const candFor = ref("");
+let candTimer: ReturnType<typeof setTimeout> | undefined;
+let candSeq = 0;
+
+function closeCandidates() {
+  if (candTimer) clearTimeout(candTimer);
+  candTimer = undefined;
+  candSeq++;
+  candOpen.value = false;
+  candActive.value = -1;
+  candLoading.value = false;
+}
+
+/**
+ * 停 500 ms、至少 2 个字才问 TMDB；电影、剧集各取前 5 个。按条目搜时输入框只用来筛标题，不给候选。
+ * 只跟用户打的字（el-input 的 input 事件）：恢复上一次的关键词、点历史、去掉条目时写回关键词这些程序里改的不算
+ */
+function onQueryInput(v: string) {
+  if (candTimer) clearTimeout(candTimer);
+  candTimer = undefined;
+  const q = v.trim();
+  if (entry.value || [...q].length < 2) {
+    closeCandidates();
+    return;
+  }
+  candTimer = setTimeout(() => void fetchCandidates(q), 500);
+}
+
+async function fetchCandidates(q: string) {
+  const my = ++candSeq;
+  candLoading.value = true;
+  candFor.value = q;
+  const [tv, movie] = await Promise.allSettled([
+    subscribeApi.explore({ kind: "tv", list: "search", q }),
+    subscribeApi.explore({ kind: "movie", list: "search", q }),
+  ]);
+  if (my !== candSeq) return;
+  candLoading.value = false;
+  candTV.value = tv.status === "fulfilled" ? tv.value.items.slice(0, 5) : [];
+  candMovies.value = movie.status === "fulfilled" ? movie.value.items.slice(0, 5) : [];
+  candActive.value = -1;
+  // TMDB 没配好或出错时不弹空下拉：照旧按关键字搜
+  candOpen.value =
+    candTV.value.length + candMovies.value.length > 0 ||
+    (tv.status === "fulfilled" && movie.status === "fulfilled");
+}
+
+function onQueryKeydown(e: KeyboardEvent) {
+  if (!candOpen.value) return;
+  const total = candTV.value.length + candMovies.value.length;
+  if (e.key === "ArrowDown" && total > 0) {
+    e.preventDefault();
+    candActive.value = (candActive.value + 1) % total;
+  } else if (e.key === "ArrowUp" && total > 0) {
+    e.preventDefault();
+    candActive.value = candActive.value <= 0 ? total - 1 : candActive.value - 1;
+  } else if (e.key === "Escape") {
+    closeCandidates();
+  }
+}
+
+/** 回车：上下键选中了候选时按条目搜，否则和现在一样按关键字搜 */
+function onQueryEnter() {
+  if (entry.value) return;
+  if (candOpen.value && candActive.value >= 0) {
+    const all = [...candTV.value, ...candMovies.value];
+    const it = all[candActive.value];
+    if (it) {
+      pickCandidate(it);
+      return;
+    }
+  }
+  closeCandidates();
+  void doSearch();
+}
+
+function onQueryBlur() {
+  // 点候选时 mousedown 已经 preventDefault，焦点不会走；这里只处理点到别处
+  window.setTimeout(() => (candOpen.value = false), 120);
+}
+
+onMounted(() => {
+  const e = entryFromQuery();
+  if (e) setEntry(e);
+});
+
+onUnmounted(() => {
+  if (candTimer) clearTimeout(candTimer);
+});
 </script>
 
 <template>
@@ -1337,24 +1666,72 @@ const footNote = computed(() => {
       下排 24 高的筛选 chip 加一行提示。App.vue 的 OWN_TOP_ROUTES 已经让外壳
       对本路由不画 .pt-head，所以页头由页面自己出。
     -->
-    <header class="pt-band--head">
+    <header
+      class="pt-band--head"
+      :class="{ 'is-entry': entry }"
+      :data-testid="entry ? 'es-head' : undefined">
       <div class="pt-band__row pt-band__row--query">
-        <el-input
-          ref="queryRef"
-          v-model="searchKeyword"
-          placeholder="输入关键词，回车即搜"
-          clearable
-          @keyup.enter="doSearch">
-          <template #prefix>
-            <PtIcon name="search" :size="15" />
-          </template>
-          <!-- 画板 kbd 34×20：快捷键提示紧贴在框内右侧 -->
-          <template #suffix>
-            <span class="pt-kbd">⌘K</span>
-          </template>
-        </el-input>
-        <el-button type="primary" :loading="loading" @click="doSearch">
-          <PtIcon v-if="!loading" name="search" :size="15" /><span>搜索</span>
+        <!--
+          按条目搜（画板 06）：输入框里是条目标记，再写的字只按标题筛；打字时（没有条目）
+          在下面给 TMDB 候选（画板 05 的片段），直接回车仍按关键字搜。
+        -->
+        <div class="es-q" :class="{ 'is-entry': entry }">
+          <el-input
+            ref="queryRef"
+            v-model="searchKeyword"
+            :placeholder="entry ? '再输入关键字可以缩小范围' : '输入关键词，回车即搜'"
+            clearable
+            @keydown="onQueryKeydown"
+            @keyup.enter="onQueryEnter"
+            @input="onQueryInput"
+            @blur="onQueryBlur">
+            <template #prefix>
+              <PtIcon name="search" :size="15" />
+              <span v-if="entry" class="es-token" data-testid="es-token">
+                <EntryPoster
+                  :path="entryInfo?.poster_path"
+                  size="w92"
+                  :width="14"
+                  :height="20"
+                  :radius="2" />
+                <span class="es-token__label" :title="entryToken">{{ entryToken }}</span>
+                <button
+                  type="button"
+                  class="es-token__x"
+                  aria-label="去掉条目，回到关键字搜索"
+                  data-testid="es-token-x"
+                  @mousedown.prevent
+                  @click.stop="clearEntry">
+                  <PtIcon name="x" :size="12" />
+                </button>
+              </span>
+            </template>
+            <!-- 画板 kbd 34×20：快捷键提示紧贴在框内右侧 -->
+            <template v-if="!isMobile" #suffix>
+              <span class="pt-kbd">⌘K</span>
+            </template>
+          </el-input>
+          <EntryCandidates
+            v-if="candOpen && !entry"
+            class="es-q__drop"
+            :tv="candTV"
+            :movies="candMovies"
+            :keyword="candFor"
+            :active="candActive"
+            :loading="candLoading"
+            @pick="pickCandidate"
+            @hover="candActive = $event"
+            @keyword="
+              candActive = -1;
+              onQueryEnter();
+            " />
+        </div>
+        <el-button
+          v-if="!(entry && isMobile)"
+          type="primary"
+          :loading="entry ? entryBusy : loading"
+          @click="onSearchClick">
+          <PtIcon v-if="!(entry ? entryBusy : loading)" name="search" :size="15" /><span>搜索</span>
         </el-button>
 
         <!--
@@ -1362,7 +1739,10 @@ const footNote = computed(() => {
           ha-1 是 101×32 的「保存搜索」。历史这枚做成下拉，点一条就恢复关键词重搜 ——
           底下那张历史卡是全量清单，这里是搜索框旁边的快捷入口。
         -->
-        <el-dropdown trigger="click" :disabled="searchHistory.length === 0">
+        <el-dropdown
+          v-if="!(entry && isMobile)"
+          trigger="click"
+          :disabled="searchHistory.length === 0">
           <el-tooltip
             :content="searchHistory.length > 0 ? '最近搜索' : '还没有搜索记录'"
             placement="bottom">
@@ -1388,9 +1768,17 @@ const footNote = computed(() => {
           </template>
         </el-dropdown>
 
-        <el-button :disabled="!searchKeyword.trim()" @click="saveCurrentSearch">
+        <el-button v-if="!entry" :disabled="!searchKeyword.trim()" @click="saveCurrentSearch">
           <PtIcon name="bookmark" :size="15" /><span>保存搜索</span>
         </el-button>
+        <template v-if="entry && !isMobile">
+          <span class="pt-band__spacer" />
+          <!-- 画板 merge：开关 28×16 在字左 8，默认开 -->
+          <label class="es-merge">
+            <el-switch v-model="mergeSame" size="small" data-testid="es-merge" />
+            <span>合并同一资源</span>
+          </label>
+        </template>
       </div>
 
       <!--
@@ -1398,7 +1786,7 @@ const footNote = computed(() => {
         与「仅免费」口径（分类是各站自己的，见工具栏里的分类 chip），所以这一排落的是
         站点、排序、方向三个真的有数据支撑的筛选。
       -->
-      <div class="pt-band__row pt-band__row--facet">
+      <div v-if="!entry" class="pt-band__row pt-band__row--facet">
         <!-- 站点多选：不选 = 搜全部，占位符直接把「全部 N 个站点」说出来，省掉一个标签 -->
         <el-tooltip
           :content="
@@ -1449,587 +1837,656 @@ const footNote = computed(() => {
       </div>
     </header>
 
-    <!--
-      工具栏带 —— 画板 bar-88（40 高）。它是表格带的**兄弟**，不能套在 .pt-band--grid
-      里面：套进去就变成表格内部的一行，和画板上那条独立的带不是一回事。
-    -->
-    <PtToolbar band>
-      <!--
-        画板 bar-88 的 seg：分类分段，档位写死成画板那五个，搜索前也在。
-        各站分类名不统一，靠 bucketOf 的关键词映射归桶。
-      -->
-      <el-segmented
-        v-model="activeCategory"
-        class="pt-seg"
-        :options="categoryOptions"
-        :props="{ label: 'label', value: 'value' }" />
+    <!-- 手机顶栏的副标题（画板 09「按条目 · 长夜将尽 第 2 季」）；桌面这一页没有外壳页头 -->
+    <Teleport v-if="isMobile && entry && entrySub" to="#pt-mhead-sub">{{ entrySub }}</Teleport>
 
+    <EntrySearch
+      v-if="entry"
+      ref="entryView"
+      :entry="entry"
+      :text="searchKeyword"
+      :merge="mergeSame"
+      @push="onEntryPush"
+      @season="onEntrySeason"
+      @loaded="onEntryLoaded"
+      @keyword="onEntryKeyword"
+      @busy="entryBusy = $event" />
+
+    <template v-else>
       <!--
-        画板 chip-0「做种数 ↓」：排序。原来只能点表头排 —— 手机上是行卡、没有表头，
-        等于没有排序入口，所以这枚 chip 不是装饰。
+        工具栏带 —— 画板 bar-88（40 高）。它是表格带的**兄弟**，不能套在 .pt-band--grid
+        里面：套进去就变成表格内部的一行，和画板上那条独立的带不是一回事。
       -->
-      <el-select v-model="sortBy" class="sc-chip-sel" size="small" data-testid="search-sort-select">
-        <el-option
-          v-for="o in SORT_OPTIONS"
-          :key="o.value"
-          :label="`排序: ${o.label}`"
-          :value="o.value" />
-      </el-select>
-      <el-tooltip
-        :content="orderDesc ? '当前降序，点一下改升序' : '当前升序，点一下改降序'"
-        placement="top">
+      <PtToolbar band>
+        <!--
+          画板 bar-88 的 seg：分类分段，档位写死成画板那五个，搜索前也在。
+          各站分类名不统一，靠 bucketOf 的关键词映射归桶。
+        -->
+        <el-segmented
+          v-model="activeCategory"
+          class="pt-seg"
+          :options="categoryOptions"
+          :props="{ label: 'label', value: 'value' }" />
+
+        <!--
+          画板 chip-0「做种数 ↓」：排序。原来只能点表头排 —— 手机上是行卡、没有表头，
+          等于没有排序入口，所以这枚 chip 不是装饰。
+        -->
+        <el-select
+          v-model="sortBy"
+          class="sc-chip-sel"
+          size="small"
+          data-testid="search-sort-select">
+          <el-option
+            v-for="o in SORT_OPTIONS"
+            :key="o.value"
+            :label="`排序: ${o.label}`"
+            :value="o.value" />
+        </el-select>
+        <el-tooltip
+          :content="orderDesc ? '当前降序，点一下改升序' : '当前升序，点一下改降序'"
+          placement="top">
+          <el-button
+            class="sc-chip"
+            :aria-label="orderDesc ? '改为升序' : '改为降序'"
+            data-testid="search-order-toggle"
+            @click="orderDesc = !orderDesc">
+            <span>{{ orderDesc ? "↓" : "↑" }}</span>
+          </el-button>
+        </el-tooltip>
+
+        <!-- 画板 chip-1「仅免费」 -->
         <el-button
           class="sc-chip"
-          :aria-label="orderDesc ? '改为升序' : '改为降序'"
-          data-testid="search-order-toggle"
-          @click="orderDesc = !orderDesc">
-          <span>{{ orderDesc ? "↓" : "↑" }}</span>
+          :type="freeOnly ? 'primary' : 'default'"
+          :plain="freeOnly"
+          :aria-pressed="freeOnly"
+          @click="freeOnly = !freeOnly">
+          <span>仅免费</span>
         </el-button>
-      </el-tooltip>
-
-      <!-- 画板 chip-1「仅免费」 -->
-      <el-button
-        class="sc-chip"
-        :type="freeOnly ? 'primary' : 'default'"
-        :plain="freeOnly"
-        :aria-pressed="freeOnly"
-        @click="freeOnly = !freeOnly">
-        <span>仅免费</span>
-      </el-button>
-
-      <!-- 支持分类的站点各给一枚 chip（画板 chip 24 高），按钮上带已选条数 -->
-      <template v-for="siteId in selectedSites" :key="siteId">
-        <el-popover
-          v-if="siteHasCategories(siteId)"
-          placement="bottom-start"
-          :width="400"
-          trigger="click">
+        <!-- 按解析信息筛（同按条目搜索的左栏）：计数是其他组的筛选下还有几条 -->
+        <el-popover placement="bottom-start" trigger="click" :width="280">
           <template #reference>
-            <el-button size="small" :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'">
+            <el-button
+              class="sc-chip"
+              :type="facetChosen > 0 ? 'primary' : 'default'"
+              :plain="facetChosen > 0"
+              data-testid="search-facets-btn">
               <PtIcon name="list-filter" :size="14" />
-              <span>{{ siteId }}</span>
-              <span v-if="getSiteFilterCount(siteId) > 0" class="cats__n">
-                {{ getSiteFilterCount(siteId) }}
-              </span>
+              <span>{{ facetChosen > 0 ? `筛选 · ${facetChosen}` : "筛选" }}</span>
             </el-button>
           </template>
-          <div class="cat">
-            <div class="cat__head">
-              <span class="cat__title">
-                {{ getSiteCategoriesConfig(siteId)?.site_name || siteId }} 分类筛选
-              </span>
-              <el-button
-                v-if="getSiteFilterCount(siteId) > 0"
-                link
-                type="danger"
-                size="small"
-                @click="clearSiteCategoryFilters(siteId)">
-                <PtIcon name="x" :size="13" /><span>清除</span>
-              </el-button>
-            </div>
-            <el-form label-position="top" class="pt-form">
-              <el-form-item
-                v-for="category in getSiteCategoriesConfig(siteId)?.categories || []"
-                :key="category.key"
-                :label="category.name">
-                <el-select
-                  :model-value="selectedCategoryFilters[siteId]?.[category.key]"
-                  placeholder="全部"
-                  clearable
-                  style="width: 100%"
-                  @update:model-value="updateSiteCategoryFilter(siteId, category.key, $event)">
-                  <el-option
-                    v-for="opt in category.options"
-                    :key="opt.value"
-                    :label="opt.name"
-                    :value="opt.value" />
-                </el-select>
-              </el-form-item>
-            </el-form>
+          <div class="sc-facets">
+            <p v-if="keywordFacets.length === 0" class="sc-facets__empty">
+              搜了以后按分辨率、来源、制作组等筛选
+            </p>
+            <FacetChecklist :groups="keywordFacets" :sel="facetSel" @toggle="toggleKeywordFacet" />
+            <el-button
+              v-if="facetChosen > 0"
+              link
+              type="primary"
+              size="small"
+              @click="facetSel = {}">
+              清空筛选
+            </el-button>
           </div>
         </el-popover>
-      </template>
 
-      <template #right>
-        <!-- 画板 bar-88 右端的 bi-columns-3 -->
-        <el-tooltip content="列设置" placement="top">
-          <span class="pt-tip-anchor">
-            <el-popover placement="bottom-end" trigger="click" :width="170">
-              <template #reference>
-                <button
-                  type="button"
-                  class="pt-band__iconbtn"
-                  aria-label="列设置"
-                  data-testid="search-cols-btn">
-                  <PtIcon name="columns-3" :size="15" />
-                </button>
-              </template>
-              <div class="sc-cols">
-                <label v-for="c in OPTIONAL_SEARCH_COLS" :key="c.key" class="sc-cols__row">
-                  <el-checkbox
-                    :model-value="searchColShown(c.key)"
-                    @change="toggleSearchCol(c.key)" />
-                  <span>{{ c.label }}</span>
-                </label>
+        <!-- 支持分类的站点各给一枚 chip（画板 chip 24 高），按钮上带已选条数 -->
+        <template v-for="siteId in selectedSites" :key="siteId">
+          <el-popover
+            v-if="siteHasCategories(siteId)"
+            placement="bottom-start"
+            :width="400"
+            trigger="click">
+            <template #reference>
+              <el-button
+                size="small"
+                :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'">
+                <PtIcon name="list-filter" :size="14" />
+                <span>{{ siteId }}</span>
+                <span v-if="getSiteFilterCount(siteId) > 0" class="cats__n">
+                  {{ getSiteFilterCount(siteId) }}
+                </span>
+              </el-button>
+            </template>
+            <div class="cat">
+              <div class="cat__head">
+                <span class="cat__title">
+                  {{ getSiteCategoriesConfig(siteId)?.site_name || siteId }} 分类筛选
+                </span>
+                <el-button
+                  v-if="getSiteFilterCount(siteId) > 0"
+                  link
+                  type="danger"
+                  size="small"
+                  @click="clearSiteCategoryFilters(siteId)">
+                  <PtIcon name="x" :size="13" /><span>清除</span>
+                </el-button>
               </div>
-            </el-popover>
-          </span>
-        </el-tooltip>
+              <el-form label-position="top" class="pt-form">
+                <el-form-item
+                  v-for="category in getSiteCategoriesConfig(siteId)?.categories || []"
+                  :key="category.key"
+                  :label="category.name">
+                  <el-select
+                    :model-value="selectedCategoryFilters[siteId]?.[category.key]"
+                    placeholder="全部"
+                    clearable
+                    style="width: 100%"
+                    @update:model-value="updateSiteCategoryFilter(siteId, category.key, $event)">
+                    <el-option
+                      v-for="opt in category.options"
+                      :key="opt.value"
+                      :label="opt.name"
+                      :value="opt.value" />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+            </div>
+          </el-popover>
+        </template>
 
-        <!-- 画板 bar-88 右端的 bi-refresh-cw：按当前条件重搜一次 -->
-        <el-tooltip content="按当前条件重新搜索" placement="top">
-          <button
-            type="button"
-            class="pt-band__iconbtn"
-            :disabled="loading || !searchKeyword.trim()"
-            aria-label="刷新"
-            data-testid="search-refresh-btn"
-            @click="doSearch">
-            <PtIcon
-              :name="loading ? 'loader-circle' : 'refresh-cw'"
-              :size="15"
-              :class="loading ? 'pt-spin' : undefined" />
-          </button>
-        </el-tooltip>
+        <template #right>
+          <!-- 画板 bar-88 右端的 bi-columns-3 -->
+          <el-tooltip content="列设置" placement="top">
+            <span class="pt-tip-anchor">
+              <el-popover placement="bottom-end" trigger="click" :width="170">
+                <template #reference>
+                  <button
+                    type="button"
+                    class="pt-band__iconbtn"
+                    aria-label="列设置"
+                    data-testid="search-cols-btn">
+                    <PtIcon name="columns-3" :size="15" />
+                  </button>
+                </template>
+                <div class="sc-cols">
+                  <label v-for="c in OPTIONAL_SEARCH_COLS" :key="c.key" class="sc-cols__row">
+                    <el-checkbox
+                      :model-value="searchColShown(c.key)"
+                      @change="toggleSearchCol(c.key)" />
+                    <span>{{ c.label }}</span>
+                  </label>
+                </div>
+              </el-popover>
+            </span>
+          </el-tooltip>
 
-        <!-- 画板 note：这份结果有多全，比命中多少条更该先说 -->
-        <span v-if="barNote" class="pt-band__note">{{ barNote }}</span>
-        <el-tooltip content="丢掉服务端的搜索缓存，下次搜索重新请求各站点" placement="bottom">
-          <button
-            type="button"
-            class="pt-band__iconbtn"
-            aria-label="清除搜索缓存"
-            @click="clearCache">
-            <PtIcon name="rotate-ccw" :size="15" />
-          </button>
-        </el-tooltip>
-      </template>
-    </PtToolbar>
+          <!-- 画板 bar-88 右端的 bi-refresh-cw：按当前条件重搜一次 -->
+          <el-tooltip content="按当前条件重新搜索" placement="top">
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              :disabled="loading || !searchKeyword.trim()"
+              aria-label="刷新"
+              data-testid="search-refresh-btn"
+              @click="doSearch">
+              <PtIcon
+                :name="loading ? 'loader-circle' : 'refresh-cw'"
+                :size="15"
+                :class="loading ? 'pt-spin' : undefined" />
+            </button>
+          </el-tooltip>
 
-    <!-- 表格带：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
-    <div v-loading="loading" class="pt-band--grid" element-loading-text="正在聚合多站点搜索结果...">
-      <!--
-        部分失败（§5 的 partial）：还有结果可看时不能用一整块状态图顶掉列表 ——
-        那等于把已经拿到的数据也藏了。所以有结果时在结果上方挂这条提示，
-        一条结果都没有时才让 partial 成为主状态（见下面的 PtDataState）。
-      -->
-      <div v-if="hasPartialBanner(filteredResults.length)" class="pt-note pt-note--warn partial">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <div class="partial__body">
-          <p class="partial__t">
-            {{ searchErrors.length }} 个站点没有返回结果，下面只是其余站点的命中
-          </p>
-          <p v-for="err in searchErrors" :key="err.site" class="partial__l">
-            {{ err.site }}：{{ err.error }}
-          </p>
+          <!-- 画板 note：这份结果有多全，比命中多少条更该先说 -->
+          <span v-if="barNote" class="pt-band__note">{{ barNote }}</span>
+          <el-tooltip content="丢掉服务端的搜索缓存，下次搜索重新请求各站点" placement="bottom">
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="清除搜索缓存"
+              @click="clearCache">
+              <PtIcon name="rotate-ccw" :size="15" />
+            </button>
+          </el-tooltip>
+        </template>
+      </PtToolbar>
+
+      <!-- 表格带：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
+      <div
+        v-loading="loading"
+        class="pt-band--grid"
+        element-loading-text="正在聚合多站点搜索结果...">
+        <!--
+          部分失败（§5 的 partial）：还有结果可看时不能用一整块状态图顶掉列表 ——
+          那等于把已经拿到的数据也藏了。所以有结果时在结果上方挂这条提示，
+          一条结果都没有时才让 partial 成为主状态（见下面的 PtDataState）。
+        -->
+        <div v-if="hasPartialBanner(filteredResults.length)" class="pt-note pt-note--warn partial">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <div class="partial__body">
+            <p class="partial__t">
+              {{ searchErrors.length }} 个站点没有返回结果，下面只是其余站点的命中
+            </p>
+            <p v-for="err in searchErrors" :key="err.site" class="partial__l">
+              {{ err.site }}：{{ err.error }}
+            </p>
+          </div>
+          <el-button size="small" :loading="loading" @click="doSearch">
+            <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+          </el-button>
         </div>
-        <el-button size="small" :loading="loading" @click="doSearch">
-          <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-        </el-button>
-      </div>
 
-      <!--
-        选中具体档位时，交代那些「站点根本没给分类」的行。默认它们被筛掉了（否则档位对
-        Gazelle 那类站点等于没作用），所以必须在这里报出条数，并给一个请回来的开关 ——
-        不说的话「站点命中 12 条」配一张少几行的表格就成了自相矛盾的画面。
-      -->
-      <div v-if="unknownNote" class="pt-note nocat">
-        <PtIcon name="info" :size="14" class="pt-note__icon" />
-        <span>{{ unknownNote }}</span>
-        <el-button size="small" text @click="includeUnknown = !includeUnknown">
-          {{ includeUnknown ? "只看有分类的" : "一并显示" }}
-        </el-button>
-      </div>
+        <!--
+          选中具体档位时，交代那些「站点根本没给分类」的行。默认它们被筛掉了（否则档位对
+          Gazelle 那类站点等于没作用），所以必须在这里报出条数，并给一个请回来的开关 ——
+          不说的话「站点命中 12 条」配一张少几行的表格就成了自相矛盾的画面。
+        -->
+        <div v-if="unknownNote" class="pt-note nocat">
+          <PtIcon name="info" :size="14" class="pt-note__icon" />
+          <span>{{ unknownNote }}</span>
+          <el-button size="small" text @click="includeUnknown = !includeUnknown">
+            {{ includeUnknown ? "只看有分类的" : "一并显示" }}
+          </el-button>
+        </div>
 
-      <el-table
-        v-if="!isMobile"
-        ref="tableRef"
-        :data="pagedTorrents"
-        class="pt-grid"
-        :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
-        @selection-change="handleSelectionChange"
-        @sort-change="handleSortChange">
-        <template #empty>
-          <PtDataState :state="state" dense :title="stateTitle" :sub="stateSub">
-            <!-- perm 不给重试：没权限点重试没有意义，只会让用户一直点 -->
+        <el-table
+          v-if="!isMobile"
+          ref="tableRef"
+          :data="pagedTorrents"
+          class="pt-grid"
+          :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
+          @selection-change="handleSelectionChange"
+          @sort-change="handleSortChange">
+          <template #empty>
+            <PtDataState :state="state" dense :title="stateTitle" :sub="stateSub">
+              <!-- perm 不给重试：没权限点重试没有意义，只会让用户一直点 -->
+              <template v-if="state === 'error' || state === 'partial'" #action>
+                <el-button size="small" @click="doSearch">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+            </PtDataState>
+          </template>
+
+          <el-table-column type="selection" width="45" align="center" />
+
+          <el-table-column
+            label="站点"
+            prop="sourceSite"
+            width="90"
+            align="center"
+            sortable="custom">
+            <template #default="{ row }">
+              <span class="pt-cell-site">{{ row.sourceSite }}</span>
+            </template>
+          </el-table-column>
+
+          <!--
+            列宽按 1440 展开侧栏时的主区（1176）排：以前九列加起来 1256，表格右边越出视口，
+            「发布时间」被固定的操作列压住。标题列是弹性的，剩下的宽度都给它。
+            上传 / 下载 / 完成三列不能再窄：76 时表头的排序箭头被挤到第二行。
+          -->
+          <el-table-column label="标题" min-width="296">
+            <template #default="{ row }">
+              <div class="ti">
+                <el-tooltip :content="row.title" placement="top" :show-after="500">
+                  <a v-if="row.url" :href="row.url" target="_blank" rel="noopener" class="ti__t">
+                    {{ row.title }}
+                  </a>
+                  <span v-else class="ti__t ti__t--plain">{{ row.title }}</span>
+                </el-tooltip>
+                <p v-if="row.subtitle" class="ti__sub">{{ row.subtitle }}</p>
+                <div
+                  v-if="
+                    row.category ||
+                    row.hasHR ||
+                    (row.tags && row.tags.length > 0) ||
+                    parsedTags(row.meta).length > 0
+                  "
+                  class="ti__tags">
+                  <PtTag v-for="t in parsedTags(row.meta)" :key="`m-${t.label}`" :tone="t.tone">
+                    {{ t.label }}
+                  </PtTag>
+                  <PtTag v-if="row.category">{{ row.category }}</PtTag>
+                  <PtTag v-for="tag in row.tags || []" :key="tag">{{ tag }}</PtTag>
+                  <PtStatusPill v-if="row.hasHR" tone="dang" size="sm">H&amp;R</PtStatusPill>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="大小"
+            prop="sizeBytes"
+            width="95"
+            align="center"
+            sortable="custom"
+            class-name="pt-cell-num"
+            label-class-name="pt-cell-num">
+            <template #default="{ row }">{{ formatSize(row.sizeBytes) }}</template>
+          </el-table-column>
+
+          <el-table-column label="优惠" width="82" align="center">
+            <template #default="{ row }">
+              <PtStatusPill :tone="discountTone(row)" size="sm">
+                {{ getDiscountTag(row).text }}
+              </PtStatusPill>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            v-if="searchColShown('up')"
+            label="上传"
+            prop="seeders"
+            width="84"
+            align="center"
+            sortable="custom"
+            class-name="pt-cell-num"
+            label-class-name="pt-cell-num">
+            <template #default="{ row }">
+              <span class="peers peers--up">{{ row.seeders }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            v-if="searchColShown('down')"
+            label="下载"
+            prop="leechers"
+            width="84"
+            align="center"
+            sortable="custom"
+            class-name="pt-cell-num"
+            label-class-name="pt-cell-num">
+            <template #default="{ row }">
+              <span class="peers peers--down">{{ row.leechers }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            v-if="searchColShown('done')"
+            label="完成"
+            prop="snatched"
+            width="84"
+            align="center"
+            sortable="custom"
+            class-name="pt-cell-num"
+            label-class-name="pt-cell-num">
+            <template #default="{ row }">{{ row.snatched }}</template>
+          </el-table-column>
+
+          <el-table-column
+            v-if="searchColShown('published')"
+            label="发布时间"
+            prop="uploadedAt"
+            width="136"
+            sortable="custom"
+            class-name="pt-cell-muted">
+            <template #default="{ row }">
+              <span class="ts">{{ formatTime(row.uploadedAt) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="操作"
+            width="140"
+            align="center"
+            fixed="right"
+            class-name="pt-cell-act">
+            <template #default="{ row }">
+              <el-tooltip content="下载种子文件" placement="top">
+                <span class="act">
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    aria-label="下载种子文件"
+                    :disabled="!row.downloadUrl"
+                    @click="downloadTorrent(row)">
+                    <PtIcon name="download" :size="15" />
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-tooltip content="复制下载链接" placement="top">
+                <span class="act">
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    aria-label="复制下载链接"
+                    :disabled="!row.downloadUrl && !row.magnetLink"
+                    @click="copyDownloadLink(row)">
+                    <PtIcon name="copy" :size="15" />
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-tooltip content="推送到下载器" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="推送到下载器"
+                  @click="openPushDialog(row)">
+                  <PtIcon name="upload" :size="15" />
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="追剧：从这个种子开始追这部剧" placement="top">
+                <span class="act">
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    aria-label="追剧"
+                    :loading="recognizing === rowKey(row)"
+                    :data-testid="`ts-follow-${rowKey(row)}`"
+                    @click="followShow(row)">
+                    <PtIcon v-if="recognizing !== rowKey(row)" name="bookmark" :size="15" />
+                  </el-button>
+                </span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!--
+          移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+          这张表桌面有 10 列，手机上横着滚既看不到列头也和页面纵向滚动打架。
+          卡上留的是判断一个种子够不够抢真正要看的：标题（+副标题）、站点/分类/大小/
+          做种下载完成/发布时间、右上角优惠与 H&R，底下三个操作。
+          排序仍然走上面搜索条里的「排序 / 方向」，所以表头的 sortable 不算丢功能。
+        -->
+        <div v-else class="cards">
+          <PtDataState
+            v-if="!pagedTorrents.length"
+            :state="state"
+            :title="stateTitle"
+            :sub="stateSub">
             <template v-if="state === 'error' || state === 'partial'" #action>
               <el-button size="small" @click="doSearch">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
               </el-button>
             </template>
           </PtDataState>
-        </template>
 
-        <el-table-column type="selection" width="45" align="center" />
+          <PtRowCard v-for="torrent in pagedTorrents" :key="rowKey(torrent)">
+            <template #lead>
+              <el-checkbox
+                :model-value="isSelected(torrent)"
+                :aria-label="`选择 ${torrent.title}`"
+                @update:model-value="toggleSelect(torrent)" />
+            </template>
 
-        <el-table-column label="站点" prop="sourceSite" width="90" align="center" sortable="custom">
-          <template #default="{ row }">
-            <span class="pt-cell-site">{{ row.sourceSite }}</span>
-          </template>
-        </el-table-column>
+            <template #title>
+              <a
+                v-if="torrent.url"
+                :href="torrent.url"
+                target="_blank"
+                rel="noopener"
+                class="card-link">
+                {{ torrent.title }}
+              </a>
+              <template v-else>{{ torrent.title }}</template>
+            </template>
 
-        <!--
-          列宽按 1440 展开侧栏时的主区（1176）排：以前九列加起来 1256，表格右边越出视口，
-          「发布时间」被固定的操作列压住。标题列是弹性的，剩下的宽度都给它。
-          上传 / 下载 / 完成三列不能再窄：76 时表头的排序箭头被挤到第二行。
-        -->
-        <el-table-column label="标题" min-width="296">
-          <template #default="{ row }">
-            <div class="ti">
-              <el-tooltip :content="row.title" placement="top" :show-after="500">
-                <a v-if="row.url" :href="row.url" target="_blank" rel="noopener" class="ti__t">
-                  {{ row.title }}
-                </a>
-                <span v-else class="ti__t ti__t--plain">{{ row.title }}</span>
-              </el-tooltip>
-              <p v-if="row.subtitle" class="ti__sub">{{ row.subtitle }}</p>
-              <div
-                v-if="row.category || row.hasHR || (row.tags && row.tags.length > 0)"
-                class="ti__tags">
-                <PtTag v-if="row.category">{{ row.category }}</PtTag>
-                <PtTag v-for="tag in row.tags || []" :key="tag">{{ tag }}</PtTag>
-                <PtStatusPill v-if="row.hasHR" tone="dang" size="sm">H&amp;R</PtStatusPill>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          label="大小"
-          prop="sizeBytes"
-          width="95"
-          align="center"
-          sortable="custom"
-          class-name="pt-cell-num"
-          label-class-name="pt-cell-num">
-          <template #default="{ row }">{{ formatSize(row.sizeBytes) }}</template>
-        </el-table-column>
-
-        <el-table-column label="优惠" width="82" align="center">
-          <template #default="{ row }">
-            <PtStatusPill :tone="discountTone(row)" size="sm">
-              {{ getDiscountTag(row).text }}
-            </PtStatusPill>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          v-if="searchColShown('up')"
-          label="上传"
-          prop="seeders"
-          width="84"
-          align="center"
-          sortable="custom"
-          class-name="pt-cell-num"
-          label-class-name="pt-cell-num">
-          <template #default="{ row }">
-            <span class="peers peers--up">{{ row.seeders }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          v-if="searchColShown('down')"
-          label="下载"
-          prop="leechers"
-          width="84"
-          align="center"
-          sortable="custom"
-          class-name="pt-cell-num"
-          label-class-name="pt-cell-num">
-          <template #default="{ row }">
-            <span class="peers peers--down">{{ row.leechers }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          v-if="searchColShown('done')"
-          label="完成"
-          prop="snatched"
-          width="84"
-          align="center"
-          sortable="custom"
-          class-name="pt-cell-num"
-          label-class-name="pt-cell-num">
-          <template #default="{ row }">{{ row.snatched }}</template>
-        </el-table-column>
-
-        <el-table-column
-          v-if="searchColShown('published')"
-          label="发布时间"
-          prop="uploadedAt"
-          width="136"
-          sortable="custom"
-          class-name="pt-cell-muted">
-          <template #default="{ row }">
-            <span class="ts">{{ formatTime(row.uploadedAt) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          label="操作"
-          width="140"
-          align="center"
-          fixed="right"
-          class-name="pt-cell-act">
-          <template #default="{ row }">
-            <el-tooltip content="下载种子文件" placement="top">
-              <span class="act">
-                <el-button
-                  link
-                  type="primary"
-                  size="small"
-                  aria-label="下载种子文件"
-                  :disabled="!row.downloadUrl"
-                  @click="downloadTorrent(row)">
-                  <PtIcon name="download" :size="15" />
-                </el-button>
+            <template #meta>
+              <span v-if="torrent.subtitle" class="card-sub">{{ torrent.subtitle }}</span>
+              <PtTag>{{ torrent.sourceSite }}</PtTag>
+              <PtTag v-for="t in parsedTags(torrent.meta)" :key="`m-${t.label}`" :tone="t.tone">
+                {{ t.label }}
+              </PtTag>
+              <PtTag v-if="torrent.category">{{ torrent.category }}</PtTag>
+              <span>{{ formatSize(torrent.sizeBytes) }}</span>
+              <span class="card-peers">
+                <span class="peers peers--up">做种 {{ torrent.seeders }}</span>
+                <span class="peers peers--down">下载 {{ torrent.leechers }}</span>
+                <span>完成 {{ torrent.snatched }}</span>
               </span>
-            </el-tooltip>
-            <el-tooltip content="复制下载链接" placement="top">
-              <span class="act">
-                <el-button
-                  link
-                  type="primary"
-                  size="small"
-                  aria-label="复制下载链接"
-                  :disabled="!row.downloadUrl && !row.magnetLink"
-                  @click="copyDownloadLink(row)">
-                  <PtIcon name="copy" :size="15" />
-                </el-button>
+              <span>
+                <PtIcon name="clock" :size="11" />
+                {{ formatTime(torrent.uploadedAt) }}
               </span>
-            </el-tooltip>
-            <el-tooltip content="推送到下载器" placement="top">
+            </template>
+
+            <template #status>
+              <span class="card-status">
+                <PtStatusPill :tone="discountTone(torrent)" size="sm">
+                  {{ getDiscountTag(torrent).text }}
+                </PtStatusPill>
+                <PtStatusPill v-if="torrent.hasHR" tone="dang" size="sm">H&amp;R</PtStatusPill>
+              </span>
+            </template>
+
+            <template #actions>
               <el-button
-                link
-                type="primary"
                 size="small"
-                aria-label="推送到下载器"
-                @click="openPushDialog(row)">
-                <PtIcon name="upload" :size="15" />
+                :disabled="!torrent.downloadUrl"
+                @click="downloadTorrent(torrent)">
+                <PtIcon name="download" :size="14" /><span>下载</span>
               </el-button>
-            </el-tooltip>
-            <el-tooltip content="追剧：从这个种子开始追这部剧" placement="top">
-              <span class="act">
-                <el-button
-                  link
-                  type="primary"
-                  size="small"
-                  aria-label="追剧"
-                  :loading="recognizing === rowKey(row)"
-                  :data-testid="`ts-follow-${rowKey(row)}`"
-                  @click="followShow(row)">
-                  <PtIcon v-if="recognizing !== rowKey(row)" name="bookmark" :size="15" />
-                </el-button>
-              </span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-      </el-table>
+              <el-button
+                size="small"
+                :disabled="!torrent.downloadUrl && !torrent.magnetLink"
+                @click="copyDownloadLink(torrent)">
+                <PtIcon name="copy" :size="14" /><span>复制</span>
+              </el-button>
+              <el-button type="primary" size="small" @click="openPushDialog(torrent)">
+                <PtIcon name="upload" :size="14" /><span>推送</span>
+              </el-button>
+              <el-button
+                size="small"
+                :loading="recognizing === rowKey(torrent)"
+                @click="followShow(torrent)">
+                <PtIcon v-if="recognizing !== rowKey(torrent)" name="bookmark" :size="14" /><span
+                  >追剧</span
+                >
+              </el-button>
+            </template>
+          </PtRowCard>
+        </div>
+      </div>
 
       <!--
-        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
-        这张表桌面有 10 列，手机上横着滚既看不到列头也和页面纵向滚动打架。
-        卡上留的是判断一个种子够不够抢真正要看的：标题（+副标题）、站点/分类/大小/
-        做种下载完成/发布时间、右上角优惠与 H&R，底下三个操作。
-        排序仍然走上面搜索条里的「排序 / 方向」，所以表头的 sortable 不算丢功能。
+        画板 gfoot 34：左说明 + 右分页。板 15 的带序是 grid 128..430 → gfoot 430..464
+        → selband 464..508，所以页脚在多选带之前，和任务列表页正好相反。
       -->
-      <div v-else class="cards">
-        <PtDataState
-          v-if="!pagedTorrents.length"
-          :state="state"
-          :title="stateTitle"
-          :sub="stateSub">
-          <template v-if="state === 'error' || state === 'partial'" #action>
-            <el-button size="small" @click="doSearch">
-              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-            </el-button>
-          </template>
-        </PtDataState>
-
-        <PtRowCard v-for="torrent in pagedTorrents" :key="rowKey(torrent)">
-          <template #lead>
-            <el-checkbox
-              :model-value="isSelected(torrent)"
-              :aria-label="`选择 ${torrent.title}`"
-              @update:model-value="toggleSelect(torrent)" />
-          </template>
-
-          <template #title>
-            <a
-              v-if="torrent.url"
-              :href="torrent.url"
-              target="_blank"
-              rel="noopener"
-              class="card-link">
-              {{ torrent.title }}
-            </a>
-            <template v-else>{{ torrent.title }}</template>
-          </template>
-
-          <template #meta>
-            <span v-if="torrent.subtitle" class="card-sub">{{ torrent.subtitle }}</span>
-            <PtTag>{{ torrent.sourceSite }}</PtTag>
-            <PtTag v-if="torrent.category">{{ torrent.category }}</PtTag>
-            <span>{{ formatSize(torrent.sizeBytes) }}</span>
-            <span class="card-peers">
-              <span class="peers peers--up">做种 {{ torrent.seeders }}</span>
-              <span class="peers peers--down">下载 {{ torrent.leechers }}</span>
-              <span>完成 {{ torrent.snatched }}</span>
-            </span>
-            <span>
-              <PtIcon name="clock" :size="11" />
-              {{ formatTime(torrent.uploadedAt) }}
-            </span>
-          </template>
-
-          <template #status>
-            <span class="card-status">
-              <PtStatusPill :tone="discountTone(torrent)" size="sm">
-                {{ getDiscountTag(torrent).text }}
-              </PtStatusPill>
-              <PtStatusPill v-if="torrent.hasHR" tone="dang" size="sm">H&amp;R</PtStatusPill>
-            </span>
-          </template>
-
-          <template #actions>
-            <el-button
-              size="small"
-              :disabled="!torrent.downloadUrl"
-              @click="downloadTorrent(torrent)">
-              <PtIcon name="download" :size="14" /><span>下载</span>
-            </el-button>
-            <el-button
-              size="small"
-              :disabled="!torrent.downloadUrl && !torrent.magnetLink"
-              @click="copyDownloadLink(torrent)">
-              <PtIcon name="copy" :size="14" /><span>复制</span>
-            </el-button>
-            <el-button type="primary" size="small" @click="openPushDialog(torrent)">
-              <PtIcon name="upload" :size="14" /><span>推送</span>
-            </el-button>
-            <el-button
-              size="small"
-              :loading="recognizing === rowKey(torrent)"
-              @click="followShow(torrent)">
-              <PtIcon v-if="recognizing !== rowKey(torrent)" name="bookmark" :size="14" /><span
-                >追剧</span
-              >
-            </el-button>
-          </template>
-        </PtRowCard>
+      <div v-if="filteredResults.length > 0" class="pt-band--foot">
+        <span>{{ footNote }}</span>
+        <span class="pt-band__spacer" />
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          class="pt-pager"
+          :page-sizes="pageSizeOptions"
+          :total="filteredResults.length"
+          layout="sizes, prev, pager, next, jumper"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange" />
       </div>
-    </div>
 
-    <!--
-      画板 gfoot 34：左说明 + 右分页。板 15 的带序是 grid 128..430 → gfoot 430..464
-      → selband 464..508，所以页脚在多选带之前，和任务列表页正好相反。
-    -->
-    <div v-if="filteredResults.length > 0" class="pt-band--foot">
-      <span>{{ footNote }}</span>
-      <span class="pt-band__spacer" />
-      <el-pagination
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
-        class="pt-pager"
-        :page-sizes="pageSizeOptions"
-        :total="filteredResults.length"
-        layout="sizes, prev, pager, next, jumper"
-        @current-change="handlePageChange"
-        @size-change="handleSizeChange" />
-    </div>
+      <!-- 画板 selband 44（cyan@0.06）：批量操作从原来的面板头部挪到这条带上 -->
+      <div v-if="selectedTorrents.length > 0" class="pt-band--sel">
+        <PtIcon name="square-check" :size="15" />
+        <span>已选 {{ selectedTorrents.length }} 个种子</span>
+        <span class="pt-band__spacer" />
+        <el-button :loading="batchDownloading" @click="batchDownloadTorrents">
+          <PtIcon v-if="!batchDownloading" name="file-down" :size="15" /><span>打包下载</span>
+        </el-button>
+        <el-button type="primary" @click="openBatchPushDialog">
+          <PtIcon name="upload" :size="15" /><span>批量推送</span>
+        </el-button>
+        <el-button link @click="clearSelection">取消选择</el-button>
+      </div>
 
-    <!-- 画板 selband 44（cyan@0.06）：批量操作从原来的面板头部挪到这条带上 -->
-    <div v-if="selectedTorrents.length > 0" class="pt-band--sel">
-      <PtIcon name="square-check" :size="15" />
-      <span>已选 {{ selectedTorrents.length }} 个种子</span>
-      <span class="pt-band__spacer" />
-      <el-button :loading="batchDownloading" @click="batchDownloadTorrents">
-        <PtIcon v-if="!batchDownloading" name="file-down" :size="15" /><span>打包下载</span>
-      </el-button>
-      <el-button type="primary" @click="openBatchPushDialog">
-        <PtIcon name="upload" :size="15" /><span>批量推送</span>
-      </el-button>
-      <el-button link @click="clearSelection">取消选择</el-button>
-    </div>
+      <!--
+        画板 p-sites 344,524：各站点的命中数属于表格下方的分析卡片，
+        不是工具栏上的一排 chip —— 站点一多，那排 chip 会把 40 高的带挤爆。
+      -->
+      <!--
+        画板 15 的分析卡：p-sites 548（站点命中）/ p-alt 516（没返回的站点）两栏
+        + p-hist 1080（搜索历史）通栏。三张都用已经在手的数据，不额外请求。
+      -->
+      <div v-if="hasResultCards" class="pt-cards pt-cards--2">
+        <PtPanel
+          title="站点命中"
+          icon="layers"
+          :count="`${Object.keys(siteResultCounts).length} 个站点`">
+          <PtBreakdown :rows="siteHitRows" :total="totalResults" :foot="siteHitFoot" />
+        </PtPanel>
 
-    <!--
-      画板 p-sites 344,524：各站点的命中数属于表格下方的分析卡片，
-      不是工具栏上的一排 chip —— 站点一多，那排 chip 会把 40 高的带挤爆。
-    -->
-    <!--
-      画板 15 的分析卡：p-sites 548（站点命中）/ p-alt 516（没返回的站点）两栏
-      + p-hist 1080（搜索历史）通栏。三张都用已经在手的数据，不额外请求。
-    -->
-    <div v-if="hasResultCards" class="pt-cards pt-cards--2">
-      <PtPanel
-        title="站点命中"
-        icon="layers"
-        :count="`${Object.keys(siteResultCounts).length} 个站点`">
-        <PtBreakdown :rows="siteHitRows" :total="totalResults" :foot="siteHitFoot" />
-      </PtPanel>
+        <PtPanel
+          v-if="Object.keys(siteResultCounts).length > 0"
+          title="没返回的站点"
+          icon="signal"
+          :count="searchErrors.length > 0 ? `${searchErrors.length} 个` : '全部返回'">
+          <PtBreakdown
+            v-if="searchErrors.length > 0"
+            :rows="failedSiteRows"
+            foot="这些站点超时或报错，结果里不含它们的种子；重搜一次通常就能补上。" />
+          <p v-else class="search-ok">这次问到的站点全都返回了结果。</p>
+        </PtPanel>
 
-      <PtPanel
-        v-if="Object.keys(siteResultCounts).length > 0"
-        title="没返回的站点"
-        icon="signal"
-        :count="searchErrors.length > 0 ? `${searchErrors.length} 个` : '全部返回'">
-        <PtBreakdown
-          v-if="searchErrors.length > 0"
-          :rows="failedSiteRows"
-          foot="这些站点超时或报错，结果里不含它们的种子；重搜一次通常就能补上。" />
-        <p v-else class="search-ok">这次问到的站点全都返回了结果。</p>
-      </PtPanel>
+        <PtPanel
+          v-if="searchHistory.length > 0"
+          class="pt-cards__full"
+          title="搜索历史"
+          icon="history"
+          :count="`${searchHistory.length} 条`"
+          action="清空"
+          @action="clearHistory">
+          <ul class="hist">
+            <li v-for="item in searchHistory" :key="item.keyword" class="hist__row">
+              <el-button link type="primary" @click="replaySearch(item.keyword)">
+                {{ item.keyword }}
+              </el-button>
+              <span class="hist__meta">
+                命中 {{ item.hits }} 条 · 耗时 {{ item.ms }} ms ·
+                {{ new Date(item.at).toLocaleString("zh-CN", { hour12: false }) }}
+              </span>
+            </li>
+          </ul>
+          <p class="hist__foot">
+            只记关键词与战果，不存结果本体 —— 一次多站点搜索的条目太多，塞不进本地存储。
+          </p>
+        </PtPanel>
 
-      <PtPanel
-        v-if="searchHistory.length > 0"
-        class="pt-cards__full"
-        title="搜索历史"
-        icon="history"
-        :count="`${searchHistory.length} 条`"
-        action="清空"
-        @action="clearHistory">
-        <ul class="hist">
-          <li v-for="item in searchHistory" :key="item.keyword" class="hist__row">
-            <el-button link type="primary" @click="replaySearch(item.keyword)">
-              {{ item.keyword }}
-            </el-button>
-            <span class="hist__meta">
-              命中 {{ item.hits }} 条 · 耗时 {{ item.ms }} ms ·
-              {{ new Date(item.at).toLocaleString("zh-CN", { hour12: false }) }}
-            </span>
-          </li>
-        </ul>
-        <p class="hist__foot">
-          只记关键词与战果，不存结果本体 —— 一次多站点搜索的条目太多，塞不进本地存储。
-        </p>
-      </PtPanel>
-
-      <!-- 「保存搜索」存下来的条件组，点一下恢复条件并重搜 -->
-      <PtPanel
-        v-if="savedSearches.length > 0"
-        class="pt-cards__full"
-        title="已保存的搜索"
-        icon="bookmark"
-        :count="`${savedSearches.length} 组`">
-        <ul class="hist">
-          <li v-for="item in savedSearches" :key="item.name" class="hist__row">
-            <el-button link type="primary" @click="applySaved(item)">{{ item.name }}</el-button>
-            <span class="hist__meta">
-              {{ item.sites.length > 0 ? `${item.sites.length} 个站点` : "全部站点" }} ·
-              {{ categoryLabel(item.category) }}{{ item.freeOnly ? " · 仅免费" : "" }}
-            </span>
-            <el-button
-              link
-              type="danger"
-              :aria-label="`删除已保存的搜索「${item.name}」`"
-              @click="removeSaved(item.name)">
-              <PtIcon name="x" :size="13" />
-            </el-button>
-          </li>
-        </ul>
-        <p class="hist__foot">存的是搜索条件（关键词、站点、排序、分类、仅免费），不含结果。</p>
-      </PtPanel>
-    </div>
+        <!-- 「保存搜索」存下来的条件组，点一下恢复条件并重搜 -->
+        <PtPanel
+          v-if="savedSearches.length > 0"
+          class="pt-cards__full"
+          title="已保存的搜索"
+          icon="bookmark"
+          :count="`${savedSearches.length} 组`">
+          <ul class="hist">
+            <li v-for="item in savedSearches" :key="item.name" class="hist__row">
+              <el-button link type="primary" @click="applySaved(item)">{{ item.name }}</el-button>
+              <span class="hist__meta">
+                {{ item.sites.length > 0 ? `${item.sites.length} 个站点` : "全部站点" }} ·
+                {{ categoryLabel(item.category) }}{{ item.freeOnly ? " · 仅免费" : "" }}
+              </span>
+              <el-button
+                link
+                type="danger"
+                :aria-label="`删除已保存的搜索「${item.name}」`"
+                @click="removeSaved(item.name)">
+                <PtIcon name="x" :size="13" />
+              </el-button>
+            </li>
+          </ul>
+          <p class="hist__foot">存的是搜索条件（关键词、站点、排序、分类、仅免费），不含结果。</p>
+        </PtPanel>
+      </div>
+    </template>
 
     <!-- 一键追剧：认出的剧集与季预先填好，带着选中的种子 -->
     <SubscribeDialog
@@ -2455,6 +2912,137 @@ const footNote = computed(() => {
   /* 页头带在手机上照样在（它是页面自己的，不是被外壳藏掉的那条），只是要换行 */
   .tb__ctl--sites {
     width: 140px;
+  }
+}
+/*
+ * 查询框外面这一层：候选下拉挂在它下面，宽度跟输入框（关键字模式 720，按条目 640，画板 05、06）。
+ */
+.es-q {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 720px;
+}
+
+.es-q .el-input {
+  max-width: none;
+}
+
+.es-q.is-entry {
+  max-width: 640px;
+}
+
+.es-q__drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: 30;
+}
+
+/* 按条目搜：带只有一排，64 高（13 + 38 + 12 + 1px 下沿），顶在内容区最上面不动 */
+.pt-band--head.is-entry {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 13px var(--pt-pad) 12px;
+}
+
+/* 条目标记：主色 10% 底、r4、26 高；小海报 14×20、字 12/500 主色、右边 x */
+.es-token {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 26px;
+  max-width: 260px;
+  padding: 0 4px;
+  margin-left: 6px;
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
+  border-radius: var(--pt-r-sm);
+}
+
+.es-token__label {
+  overflow: hidden;
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.es-token__x {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pt-r-sm);
+}
+
+.es-token__x:hover {
+  background: var(--pt-p-soft-strong);
+}
+
+.es-merge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  cursor: pointer;
+}
+
+/* 关键字搜索的「筛选」浮层 */
+.sc-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.sc-facets__empty {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+@media (max-width: 768px) {
+  .es-q,
+  .es-q.is-entry {
+    max-width: none;
+  }
+
+  /*
+   * 画板 09：输入框直接放在灰底上（16,64 343×44、r8），没有白底的带；左右与顶上的空白是外壳内容列给的
+   * （顶栏 52 + 12）。手机上不贴顶：带是透明的，贴顶以后下面的卡会从输入框后面透出来
+   */
+  .pt-band--head.is-entry {
+    position: static;
+    padding: 0;
+    background: transparent;
+    border-bottom: 0;
+  }
+
+  /* el-input 的根节点带着本组件的 scoped 标记，里面的 __wrapper 没有，要用 :deep */
+  .pt-band--head.is-entry .pt-band__row--query .el-input {
+    --el-component-size: 44px;
+
+    height: 44px;
+  }
+
+  .pt-band--head.is-entry .pt-band__row--query :deep(.el-input__wrapper) {
+    height: 44px;
+    min-height: 44px;
+    border-radius: var(--pt-r-lg);
   }
 }
 </style>

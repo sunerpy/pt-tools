@@ -25,6 +25,7 @@
 
 ## RSS 与下载
 
+- [种子搜索](guide/torrent-search.md)：关键字搜索与按条目搜索：选一部电影或剧集搜各站点，按质量档案打分、合并同一资源、写明能补上哪几集，按解析信息筛选。
 - [RSS 订阅配置](guide/rss-subscription.md)：订阅地址、选项、下载模式与故障排查。
 - [过滤规则与追剧](guide/filter-rules-tv-series.md)：关键词、通配符、正则和组合规则。
 - [自动删种与磁盘保护](guide/auto-cleanup.md)：清理范围、H&R 保护、磁盘门禁和工作目录清理。

@@ -120,6 +120,8 @@ Two sources feed every subscription, and the results are picked together:
 - **RSS**: items fetched by your existing [RSS subscriptions](rss-subscription.md) are also checked against your subscriptions once their details are fetched. This works independently of the RSS filter rules: a torrent that matches a subscription is pushed by the subscription.
 - **Active search**: films and series on the global interval are searched once per Search interval (主动搜索的间隔), 12 hours by default and at least 6, plus up to 30 minutes of random offset so that the subscriptions do not all search at once; followed series search on their own schedule (see Following a series above). It searches by the English or original title first (with the year for films and the season for series, such as `The Last of Us S02`), then by the Chinese title. A subscription limited to certain sites only searches those; sites under Sites skipped by active search (不参与主动搜索的站点) only contribute through RSS.
 
+To see which releases the sites have right now and pick one yourself, use [search by title](torrent-search.md#search-by-title) on the Torrent search page: it searches and matches the same way, scores releases with the subscription's quality profile and says which episodes each one would fill in.
+
 A torrent matches a subscription when:
 
 - both have an IMDb ID and the IDs are equal; when both have one, nothing else is compared;

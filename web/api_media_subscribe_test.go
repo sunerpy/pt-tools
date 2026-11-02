@@ -111,6 +111,7 @@ var subscribeRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/media/douban-sources/1/fetch"},
 	{http.MethodGet, "/api/media/douban-sources/1/items"},
 	{http.MethodGet, "/api/media/explore"},
+	{http.MethodPost, "/api/media/search"},
 }
 
 func TestSubscribeAPI_RequiresSessionAndService(t *testing.T) {

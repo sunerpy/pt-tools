@@ -256,7 +256,11 @@ const FILTER_RULES = Array.from({ length: 6 }, (_, i) => ({
 
 const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
   id: `s${i}`,
-  title: `Search.Hit.${i + 1}.2160p.WEB-DL.H265`,
+  /* 每四条有一条是 1080p 的蓝光：「筛选」浮层里分辨率那一组要有两个选项，勾了表格才会变 */
+  title:
+    i % 4 === 3
+      ? `Search.Hit.${i + 1}.1080p.BluRay.x264-FRDS`
+      : `Search.Hit.${i + 1}.2160p.WEB-DL.H265`,
   subtitle: "示例副标题",
   sourceSite: SITES[i % SITES.length][0],
   url: "https://example.invalid/t/1",
@@ -305,7 +309,176 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
    * 正好掩盖了「选具体档位时这些行会被整片筛掉」这个缺陷 —— 本文件开头反对的就是这种假数据。
    */
   tags: i % 3 === 1 ? ["剧情", "悬疑", "传记"] : [],
+  /* 后端按标题与副标题解析出的信息（web/api_search.go 的 meta，媒体中心 M2a 加的）：上面两种标题解析出来就是这几项 */
+  meta:
+    i % 4 === 3
+      ? { resolution: "1080p", source: "BluRay", video_codec: "H.264", group: "FRDS" }
+      : { resolution: "2160p", source: "WEB-DL", video_codec: "H.265" },
 }));
+
+/*
+ * 按条目搜索（POST /api/media/search，媒体中心 M2a，画板 06 / 09 / 10）。
+ * 字段名照 internal/media/subscribe/search_media.go 的 MediaSearchResult；值域照来源写：
+ * 集的状态是 models/media_subscribe.go 的 library / downloading / waiting_version / missing / upcoming，
+ * 订阅状态是 active / paused / pending / done，优惠是 site/v2/types.go 的 DiscountLevel（FREE、PERCENT_50、NONE）。
+ * 五组对应画板上的五种卡：两个站点的同一资源（展开后两行）、整组已入库（默认折叠）、锁定的版本、正在下载、不符合档案。
+ * 组的顺序照服务端的排法（profile.better：符合档案的在前，分数高的在前，同分时做种多的在前）。
+ */
+const entryMember = (site, id, over) => ({
+  site,
+  torrent_id: id,
+  title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL.H265.DV.HDR10-CHDWEB",
+  subtitle: "长夜将尽 第二季 第08集",
+  size_bytes: Math.round(4.71 * 1024 ** 3),
+  uploaded_at: 1762101000,
+  seeders: 10,
+  leechers: 1,
+  discount: "NONE",
+  free: false,
+  hr: false,
+  url: `https://example.invalid/${site.toLowerCase()}/details.php?id=${id}`,
+  download_url: `/api/site/${site.toLowerCase()}/torrent/${id}/download`,
+  meta: {
+    name_en: "Chang Ye Jiang Jin",
+    season: 2,
+    episode: 8,
+    resolution: "2160p",
+    source: "WEB-DL",
+    video_codec: "H.265",
+    hdr: ["DV", "HDR10"],
+    group: "CHDWEB",
+  },
+  verdict: { score: 92 },
+  ...over,
+});
+const entryGroup = (id, members, over) => ({
+  group_id: id,
+  members,
+  meta: members[0].meta,
+  verdict: members[0].verdict,
+  span: { start: 8, end: 8 },
+  covers: [8],
+  downloading: [],
+  in_library: false,
+  ...over,
+});
+const HHWEB_META = {
+  name_en: "Chang Ye Jiang Jin",
+  season: 2,
+  episode: 8,
+  resolution: "2160p",
+  source: "WEB-DL",
+  video_codec: "H.265",
+  group: "HHWEB",
+};
+const ENTRY_SEARCH = {
+  item: {
+    media_type: "tv",
+    tmdb_id: 231620,
+    season: 2,
+    title: "长夜将尽",
+    original_title: "Chang Ye Jiang Jin",
+    year: 2025,
+    seasons: 2,
+    total_episodes: 8,
+  },
+  subscription: { id: 3, status: "active", lock: { group: "HHWEB", resolution: "2160p" } },
+  profile: { id: 1, name: "默认（2160p 优先）" },
+  keywords: ["Chang Ye Jiang Jin S02", "长夜将尽 第二季"],
+  episodes: [
+    ...Array.from({ length: 6 }, (_, i) => ({
+      episode: i + 1,
+      state: "library",
+      air_date: `2025-10-${String(3 + i * 7).padStart(2, "0")}`,
+    })),
+    { episode: 7, state: "downloading", site: "HDSky", air_date: "2025-11-14" },
+    { episode: 8, state: "waiting_version", air_date: "2025-11-21" },
+  ],
+  groups: [
+    entryGroup("h:9f2c0d8e41b7a3c5", [
+      entryMember("OurBits", "412377", {
+        info_hash: "9f2c0d8e41b7a3c5",
+        seeders: 41,
+        discount: "FREE",
+        free: true,
+        free_left_seconds: 18 * 3600,
+      }),
+      entryMember("CHDBits", "286014", {
+        info_hash: "9f2c0d8e41b7a3c5",
+        seeders: 23,
+        uploaded_at: 1762100400,
+        discount: "PERCENT_50",
+        hr: true,
+        hr_hours: 120,
+      }),
+    ]),
+    entryGroup(
+      "h:04aa71c3e9d25b80",
+      [
+        entryMember("HDSky", "508811", {
+          info_hash: "04aa71c3e9d25b80",
+          title: "Chang.Ye.Jiang.Jin.S02E01-E06.2160p.WEB-DL.H265-HHWEB",
+          subtitle: "长夜将尽 第二季 第01-06集",
+          size_bytes: Math.round(23.6 * 1024 ** 3),
+          uploaded_at: 1761497000,
+          seeders: 64,
+          meta: { ...HHWEB_META, episode: 1, episode_end: 6 },
+          verdict: { score: 85 },
+        }),
+      ],
+      { span: { start: 1, end: 6 }, covers: [], in_library: true },
+    ),
+    entryGroup("h:c71e5a90b2d4f618", [
+      entryMember("HDHome", "190552", {
+        info_hash: "c71e5a90b2d4f618",
+        title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL.H265-HHWEB",
+        size_bytes: Math.round(3.92 * 1024 ** 3),
+        uploaded_at: 1762098300,
+        seeders: 18,
+        meta: HHWEB_META,
+        verdict: { score: 85 },
+      }),
+    ]),
+    entryGroup(
+      "s:pthome:77310",
+      [
+        entryMember("PTHome", "77310", {
+          title: "Chang.Ye.Jiang.Jin.S02E07.2160p.WEB-DL.H265-HHWEB",
+          subtitle: "长夜将尽 第二季 第07集",
+          size_bytes: Math.round(4.05 * 1024 ** 3),
+          uploaded_at: 1761497100,
+          seeders: 12,
+          meta: { ...HHWEB_META, episode: 7 },
+          verdict: { score: 85 },
+        }),
+      ],
+      { span: { start: 7, end: 7 }, covers: [], downloading: [7] },
+    ),
+    entryGroup("s:pttime:351098", [
+      entryMember("PTTime", "351098", {
+        title: "The.Long.Night.Ends.S02E08.1080p.WEB-DL.H264.AAC-ADWeb",
+        subtitle: "长夜将尽 第二季 第08集 中字",
+        size_bytes: Math.round(1.38 * 1024 ** 3),
+        uploaded_at: 1762102800,
+        seeders: 212,
+        meta: {
+          name_en: "The Long Night Ends",
+          season: 2,
+          episode: 8,
+          resolution: "1080p",
+          source: "WEB-DL",
+          video_codec: "H.264",
+          group: "ADWeb",
+          chinese_subs: true,
+        },
+        verdict: { score: 0, reject: "分辨率 1080p 不在档案里" },
+      }),
+    ]),
+  ],
+  total: 6,
+  unmatched_count: 3,
+  errors: [{ site: "TTG", error: "请求超时" }],
+};
 
 const SUPPORTED = SITES.map(([site], i) => ({
   id: site.toLowerCase(),
@@ -800,6 +973,7 @@ export const FIXTURES = [
     },
   ],
   ["/api/v2/search/sites", SITES.map(([s]) => s)],
+  ["/api/media/search", ENTRY_SEARCH],
   ["/api/v2/sites/supported", SITES.map(([s2]) => s2)],
   ["/api/v2/sites/categories", {}],
   ["/api/v2/sites/levels", {}],

@@ -92,6 +92,14 @@ function openSubscriptions() {
   void router.push("/media/subscriptions");
 }
 
+/** 按条目搜索这个条目的资源（剧集默认最新的一季，搜索页上可以换季） */
+function searchFor(it: ExploreItem) {
+  void router.push({
+    path: "/search",
+    query: { media_type: it.media_type, tmdb_id: String(it.id) },
+  });
+}
+
 onMounted(load);
 </script>
 
@@ -201,25 +209,35 @@ onMounted(load);
                 <PtIcon name="star" :size="12" />{{ it.vote_average.toFixed(1) }}
               </span>
             </div>
-            <el-button
-              v-if="it.subscribed"
-              size="small"
-              text
-              :data-testid="`ex-subscribed-${it.id}`"
-              @click="openSubscriptions"
-              >{{ it.media_type === "tv" ? "查看追剧" : "查看订阅" }}</el-button
-            >
-            <el-button
-              v-else
-              size="small"
-              type="primary"
-              plain
-              :data-testid="`ex-sub-${it.id}`"
-              @click="subscribe(it)">
-              <PtIcon name="bookmark" :size="13" /><span>{{
-                it.media_type === "tv" ? "追剧" : "订阅"
-              }}</span>
-            </el-button>
+            <div class="ex-card__acts">
+              <el-button
+                v-if="it.subscribed"
+                size="small"
+                text
+                :data-testid="`ex-subscribed-${it.id}`"
+                @click="openSubscriptions"
+                >{{ it.media_type === "tv" ? "查看追剧" : "查看订阅" }}</el-button
+              >
+              <el-button
+                v-else
+                size="small"
+                type="primary"
+                plain
+                :data-testid="`ex-sub-${it.id}`"
+                @click="subscribe(it)">
+                <PtIcon name="bookmark" :size="13" /><span>{{
+                  it.media_type === "tv" ? "追剧" : "订阅"
+                }}</span>
+              </el-button>
+              <!-- 按条目搜：带着这个条目打开种子搜索 -->
+              <el-button
+                size="small"
+                text
+                :data-testid="`ex-search-${it.id}`"
+                @click="searchFor(it)">
+                <PtIcon name="search" :size="13" /><span>搜资源</span>
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -340,9 +358,16 @@ onMounted(load);
   gap: 2px;
 }
 
-.ex-card__body .el-button {
-  align-self: flex-start;
+.ex-card__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  align-items: center;
   margin-top: 2px;
+}
+
+.ex-card__acts .el-button {
+  margin: 0;
 }
 
 .ex-pager {
