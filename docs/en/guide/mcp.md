@@ -149,7 +149,7 @@ With the Config scope, the assistant can read and change pt-tools' configuration
 
 - A change goes through the endpoint the web settings use, so validation, encryption and hot reload work as on the web, and that endpoint's errors reach the assistant as they are.
 - Secrets are write-only: passwords, cookies, API keys, passkeys, tokens, RSS URLs, and the tokens and URLs in notification channel settings read as `<已设置>` or an empty string. A new value changes a secret, giving back `<已设置>` keeps it and an empty string clears it.
-- Not changeable through the configuration tools: the login password, API tokens, remote access, the encryption key, the AI assistant's own settings (including voice input), ChatOps bindings and admins, the qB-compatible entrance, and MCP access (the switch and address).
+- Not changeable through the configuration tools: the login password, API tokens, remote access, the encryption key, backup and restore, the AI assistant's own settings (including voice input), ChatOps bindings and admins, the qB-compatible entrance, and MCP access (the switch and address).
 - For what can be changed see [AI assistant · Changing the configuration](assistant.md#changing-the-configuration); for the endpoints see [App API · Configuration](../reference/app-api.md#configuration).
 
 ## Audit and security

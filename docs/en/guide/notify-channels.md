@@ -116,6 +116,7 @@ Every event has these variables: `event` (event type), `event_name` (event name)
 | `downloader.free_end_pause_failed` free-end pause failing | `site`, `torrent_title`, `downloader`, `free_end`, `failures`, `error`                                                                                                |
 | `reseed.round` cross-seeding round result                 | `run_id`, `trigger`, `status`, `status_label`, `hashes`, `candidates`, `created`, `failed`, `gone`, `skipped`, `iyuu_calls`, `duration`, `stopped`, `summary`         |
 | `remote.paired` new device paired                         | `device`, `permission`                                                                                                                                                |
+| `system.backup_failed` backup failed                      | `dir`, `error`, `last_ok` (time of the last successful backup; empty if none succeeded)                                                                               |
 | `test` channel test                                       | `channel`                                                                                                                                                             |
 
 The daily report's variables cover the totals and the per-site figures; the login problems, sign-in, brushing and cross-seeding parts are only in `text`. For round results see [IYUU cross-seeding notifications](reseed.md#notifications). Lists hold at most 100 entries; the number left out is in `items_more`.

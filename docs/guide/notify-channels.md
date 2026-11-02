@@ -116,6 +116,7 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 | `downloader.free_end_pause_failed` 免费结束暂停失败 | `site`、`torrent_title`、`downloader`、`free_end`、`failures`、`error`                                                                                          |
 | `reseed.round` 辅种结果                             | `run_id`、`trigger`、`status`、`status_label`、`hashes`、`candidates`、`created`、`failed`、`gone`、`skipped`、`iyuu_calls`、`duration`、`stopped`、`summary`   |
 | `remote.paired` 新设备配对                          | `device`、`permission`                                                                                                                                          |
+| `system.backup_failed` 备份失败                     | `dir`、`error`、`last_ok`（上一次成功的时间，从没成功过时为空）                                                                                                 |
 | `test` 通道测试                                     | `channel`                                                                                                                                                       |
 
 每日战报的变量只有合计与各站点；登录异常、签到、刷流、辅种几段在 `text` 里。辅种结果见 [IYUU 辅种的通知](reseed.md#通知)。列表最多 100 项，省略的条数在 `items_more` 里。

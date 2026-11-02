@@ -24,13 +24,16 @@ import (
 
 // dbCmd represents the db command
 var dbCmd = &cobra.Command{
-	Use:              "db",
-	Short:            "Database ops (deprecated)",
-	Long:             "数据库相关命令已通过 Web 管理与自动迁移实现，此命令废弃",
-	Example:          `  （已废弃）`,
-	Run:              func(cmd *cobra.Command, args []string) {},
-	Hidden:           true,
-	PersistentPreRun: PersistentCheckCfg, // 确保在执行所有子命令前进行配置检查
+	Use:   "db",
+	Short: "备份与恢复数据库",
+	Long: `备份与恢复 pt-tools 的数据：db backup 做一份备份（服务在运行时也能做），
+db restore 校验一份备份并放进待恢复（重启 pt-tools 以后生效）。
+数据库结构由 pt-tools web 在启动时自动迁移，不用手动初始化或升级。`,
+	Example: `  pt-tools db backup
+  pt-tools db restore --input /mnt/backup/pt-tools-backup-20261102-043000-scheduled.tar.gz`,
+	Run: func(cmd *cobra.Command, args []string) {},
+	// backup、restore 自己覆盖成不初始化运行时（见 db_backup.go）；其余子命令先做配置检查
+	PersistentPreRun: PersistentCheckCfg,
 }
 
 func init() {

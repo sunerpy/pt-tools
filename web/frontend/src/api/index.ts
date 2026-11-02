@@ -248,6 +248,138 @@ export const siteProxyApi = {
   save: (data: SiteProxyInput) => api.put<SiteProxySettings>("/api/site-proxy", data),
 };
 
+/** 备份的原因：定时、升级前、手动（网页上点的）、命令行 */
+export type BackupReason = "scheduled" | "pre-upgrade" | "manual" | "cli";
+
+/** 备份设置（全局设置 → 备份）。dir 为空表示用默认目录 default_dir */
+export interface BackupSettingsInput {
+  enabled: boolean;
+  /** 每天定时备份的时刻（HH:MM，服务器时区） */
+  time: string;
+  /** 定时备份保留几份（min_keep–max_keep） */
+  keep: number;
+  dir: string;
+  include_secret: boolean;
+}
+
+export interface BackupSettings extends BackupSettingsInput {
+  default_dir: string;
+  min_keep: number;
+  max_keep: number;
+}
+
+/** 备份目录里的一份备份；error 非空表示读不出它的说明（坏文件），只能删掉 */
+export interface BackupItem {
+  name: string;
+  size: number;
+  created_at: string | null;
+  reason: BackupReason | "";
+  reason_label: string;
+  app_version: string;
+  schema_version: number;
+  has_secret: boolean;
+  /** 带上的密钥从哪来：file（secret.key）或 env（PT_TOOLS_SECRET_KEY） */
+  secret_source?: "file" | "env";
+  error?: string;
+}
+
+/** 最近一次备份的结果：error 为空表示成功 */
+export interface BackupResult {
+  at: string;
+  reason: BackupReason;
+  reason_label: string;
+  name: string;
+  error?: string;
+  last_ok_at: string | null;
+}
+
+/** 最近一次启动时恢复的结果：error 为空表示换上了；dir 是换下来的原文件放在哪 */
+export interface RestoreResult {
+  at: string;
+  name: string;
+  dir?: string;
+  error?: string;
+}
+
+/**
+ * 放好了、重启 pt-tools 以后生效的恢复。key_action：keep-env 仍用环境变量的密钥，
+ * use-backup 换成备份里的密钥，keep-file 不动 secret.key（no_cipher 时备份里没有密文，不需要密钥）
+ */
+export interface PendingRestore {
+  name: string;
+  staged_at: string;
+  created_at: string;
+  reason: BackupReason | "";
+  reason_label: string;
+  app_version: string;
+  schema_version: number;
+  key_action: "keep-env" | "use-backup" | "keep-file";
+  no_cipher: boolean;
+}
+
+/** 备份页：设置、最近一次备份与恢复、下一次定时备份、备份列表与待恢复 */
+export interface BackupsView {
+  settings: BackupSettings;
+  /** 现在生效的备份目录 */
+  dir: string;
+  /** 密钥来自环境变量 PT_TOOLS_SECRET_KEY */
+  env_key: boolean;
+  /** 下一次定时备份大约什么时候；关着时为 null */
+  next_at: string | null;
+  last: BackupResult | null;
+  restore: RestoreResult | null;
+  pending: PendingRestore | null;
+  backups: BackupItem[];
+  /** 读不出备份目录的原因（设置照常返回） */
+  list_error?: string;
+}
+
+/** 下载一份备份的地址（同源，带着网页会话） */
+export function backupFileURL(name: string): string {
+  return `/api/backups/file/${encodeURIComponent(name)}`;
+}
+
+/** 全局设置里的「备份」与备份文件：恢复只是放进待恢复，重启 pt-tools 以后才换上 */
+export const backupApi = {
+  get: () => api.get<BackupsView>("/api/backups"),
+  saveSettings: (data: BackupSettingsInput) => api.put<BackupsView>("/api/backups/settings", data),
+  /** 立即备份（手动备份不会被自动删掉） */
+  create: () => api.post<BackupsView>("/api/backups"),
+  remove: (name: string) => api.delete<BackupsView>(backupFileURL(name)),
+  restore: (name: string) =>
+    api.post<BackupsView>(`/api/backups/file/${encodeURIComponent(name)}/restore`),
+  cancelRestore: () => api.delete<BackupsView>("/api/backups/pending"),
+  /**
+   * 上传一个备份文件并放进待恢复：请求体就是文件本身（最大 2 GiB）。
+   * 用 XMLHttpRequest 而不是 fetch：fetch 拿不到上传进度，大文件在慢的线路上会像卡住了一样。
+   */
+  upload: (file: File, onProgress?: (ratio: number) => void) =>
+    new Promise<BackupsView>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/backups/upload?name=${encodeURIComponent(file.name)}`);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+        };
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as BackupsView);
+          } catch {
+            reject(new ApiError(xhr.status, "服务返回的内容读不懂"));
+          }
+          return;
+        }
+        reject(new ApiError(xhr.status, xhr.responseText.trim() || `HTTP ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new ApiError(0, "上传没有完成：连接断开了"));
+      xhr.send(file);
+    }),
+};
+
 export const qbitApi = {
   get: () => api.get<QbitSettings>("/api/qbit"),
   save: (data: QbitSettings) => api.post<void>("/api/qbit", data),

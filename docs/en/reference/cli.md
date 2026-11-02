@@ -59,6 +59,26 @@ pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
 
 Each option can also come from an environment variable: `PT_TOOLS_RELAY_LISTEN`, `PT_TOOLS_RELAY_PUBLIC_URL`, `PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`, `PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`, `PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`, `PT_TOOLS_RELAY_CLIENT_IP_HEADER`, `PT_TOOLS_RELAY_TLS_CERT`, `PT_TOOLS_RELAY_TLS_KEY`, `PT_TOOLS_RELAY_DISABLED=true`, `PT_TOOLS_RELAY_MAX_CONNECTIONS`, `PT_TOOLS_RELAY_DRAIN_GRACE` (for example `5s`) and `PT_TOOLS_RELAY_METRICS=false`. A value that does not parse (a number that is not an integer, a switch that is not `true`/`false`, a duration without a unit), a negative `--max-streams-per-host` or `--daily-bytes-per-host`, or a `--drain-grace` outside 0 to 5 minutes stops it from starting; a negative `--max-conn-per-ip-per-min` or `--max-connections` still means no limit. The Docker image runs it when `PT_MODE=relay` is set. `GET /healthz` returns the status and the version; `GET /ready` returns 200 while it accepts new connections and 503 while draining, full or paused, so use it for health checks.
 
+## pt-tools db
+
+Backs up and restores the data. Neither command migrates the database, and both work while pt-tools is running.
+
+```bash
+pt-tools db backup                                   # into the folder from the backup settings
+pt-tools db backup --output /mnt/backup/ --no-secret # into another folder, without the key
+pt-tools db restore --input /mnt/backup/pt-tools-backup-20261102-043000-scheduled.tar.gz
+pt-tools db restore --cancel
+```
+
+| Subcommand | Option           | Description                                                                                                                         |
+| ---------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `backup`   | `--output`, `-o` | Backup file or folder; by default the folder from Global settings → Backup (全局设置 → 备份). An existing file is never overwritten |
+|            | `--no-secret`    | Leave `secret.key` out; without it the backup settings decide                                                                       |
+| `restore`  | `--input`, `-i`  | Checks the backup and stages it; it is applied **when pt-tools restarts**                                                           |
+|            | `--cancel`       | Cancels a restore that has not been applied yet                                                                                     |
+
+The key rules for a restore, how it is applied on restart and how a failure is rolled back are described in [Upgrades and backups](../guide/upgrade.md#restoring).
+
 ## pt-tools secret
 
 Exports or imports the key that encrypts site cookies and notification credentials.
@@ -100,7 +120,7 @@ The categories:
 
 - `logs`: rotated log backups. The log file being written is never removed.
 - `staging`: `.torrent` files in `downloads/` that were pushed, are orphaned or are past their retention.
-- `backups`: configuration backups made automatically; only the most recent N are kept.
+- `backups`: old configuration backups (`.json`) left automatically by database migrations; only the most recent N are kept. Backup files (`.tar.gz`) are not part of it.
 
 `torrents.db`, `secret.key` and the log being written are never removed, whatever the options.
 
@@ -123,7 +143,7 @@ pt-tools completion zsh > "${fpath[1]}/_pt-tools"
 
 ## Less common commands
 
-These commands do not appear in `pt-tools --help` and are for particular situations only.
+These commands are for particular situations only; `config` does not appear in `pt-tools --help`.
 
 | Command                    | Purpose                                                                                                                                                                       |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

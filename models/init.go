@@ -180,15 +180,18 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 
 // NewDBWithVersion 初始化并返回 TorrentDB（带应用版本）
 func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, error) {
-	return NewDBWithVersionAndHooks(gormLg, appVersion, nil, nil, nil)
+	return NewDBWithVersionAndHooks(gormLg, appVersion, nil, nil, nil, nil)
 }
 
+// NewDBWithVersionAndHooks 打开数据库并迁移。beforeMigrate 在设置好 WAL 之后、AutoMigrate 与编号迁移之前调用
+// （升级前备份用）；它返回的错误只记日志，不阻止打开数据库。
 func NewDBWithVersionAndHooks(
 	gormLg zapgorm2.Logger,
 	appVersion string,
 	backupFn func(db *gorm.DB, table string, fromVer, toVer int) (path string, err error),
 	encryptFn func(plain string) (cipher string, err error),
 	decryptFn func(cipher string) (plain string, err error),
+	beforeMigrate func(db *gorm.DB) error,
 ) (*TorrentDB, error) {
 	// 确保工作目录存在
 	homeDir, _ := os.UserHomeDir()
@@ -229,6 +232,11 @@ func NewDBWithVersionAndHooks(
 	// Set synchronous=NORMAL for better performance while maintaining durability
 	if err := db.Exec("PRAGMA synchronous=NORMAL;").Error; err != nil {
 		return nil, fmt.Errorf("无法设置 synchronous 模式: %w", err)
+	}
+	if beforeMigrate != nil {
+		if err := beforeMigrate(db); err != nil && gormLg.ZapLogger != nil {
+			gormLg.ZapLogger.Sugar().Warnf("迁移前的钩子出错，照常打开数据库: %v", err)
+		}
 	}
 	// 自动迁移表结构（包括版本表）
 	if err := db.AutoMigrate(
@@ -327,6 +335,9 @@ func NewDBWithVersionAndHooks(
 		&NotificationTemplate{},
 		// 站点代理（全局设置）
 		&SiteProxySetting{},
+		// 备份与恢复（媒体中心 M0）
+		&AppMeta{},
+		&BackupSetting{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
