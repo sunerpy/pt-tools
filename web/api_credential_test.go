@@ -192,7 +192,7 @@ func TestUpdateSiteCredential(t *testing.T) {
 	})
 }
 
-// HDDolby 要 Cookie 和 API Key：扩展只同步来 Cookie、库里还没有 API Key 时，Cookie 照样存下，站点保持停用，
+// HDDolby 要 API Key（Cookie 可选）：扩展只同步来 Cookie、库里还没有 API Key 时，Cookie 照样存下，站点保持停用，
 // 回 200 并说明还缺 API Key（以前走完整校验回 500「API Key 不能为空」，扩展每次同步都报失败、Cookie 也存不进去）。
 func TestUpdateSiteCredential_IncompleteKeepsDisabled(t *testing.T) {
 	writeWebTestSecretKey(t)
@@ -218,7 +218,7 @@ func TestUpdateSiteCredential_IncompleteKeepsDisabled(t *testing.T) {
 	assert.Equal(t, true, resp["success"])
 	assert.Equal(t, false, resp["enabled"])
 	assert.Contains(t, resp["warning"], "API Key")
-	assert.Contains(t, resp["warning"], "HD Dolby", "用站点定义里的名字")
+	assert.Contains(t, resp["warning"], "UHDDolby", "用站点定义里的名字")
 
 	sc, err := srv.store.GetSiteConf(models.SiteGroup("hddolby"))
 	require.NoError(t, err)
@@ -262,7 +262,7 @@ func TestMissingCredential(t *testing.T) {
 	assert.Equal(t, "cookie", core.MissingCredential("cookie", " ", "", ""))
 	assert.Equal(t, "api_key", core.MissingCredential("api_key", "a=1", "", ""))
 	assert.Equal(t, "api_key", core.MissingCredential("cookie_and_api_key", "a=1", "", ""))
-	assert.Equal(t, "cookie", core.MissingCredential("cookie_and_api_key", "", "k", ""))
+	assert.Equal(t, "", core.MissingCredential("cookie_and_api_key", "", "k", ""), "Cookie 可选")
 	assert.Equal(t, "", core.MissingCredential("cookie_and_api_key", "a=1", "k", ""))
 	assert.Equal(t, "passkey", core.MissingCredential("passkey", "", "", ""))
 }

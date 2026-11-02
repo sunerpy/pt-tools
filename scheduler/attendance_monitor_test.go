@@ -19,17 +19,20 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
-// fakeAttendSite 是能签到的假站点：unsupported 时 SupportsAttendance 为 false；
+// fakeAttendSite 是能签到的假站点：unsupported 时 SupportsAttendance 为 false，reason 是站点说的原因；
 // needsAI 时像要过验证码的站点那样，ctx 里没有 AI 就报 ErrAttendanceNeedsAI。
 type fakeAttendSite struct {
 	result      v2.AttendResult
 	err         error
 	unsupported bool
+	reason      string
 	needsAI     bool
 	calls       atomic.Int32
 }
 
 func (s *fakeAttendSite) SupportsAttendance() bool { return !s.unsupported }
+
+func (s *fakeAttendSite) AttendanceUnsupportedReason() string { return s.reason }
 
 func (s *fakeAttendSite) Attend(ctx context.Context) (v2.AttendResult, error) {
 	s.calls.Add(1)
@@ -224,6 +227,20 @@ func TestAttendance_UnsupportedIsFinalWithoutRequest(t *testing.T) {
 	rig.mon.RunOnce(context.Background())
 	assert.Equal(t, models.AttendanceUnsupported, rig.row(t, "hdsky").Status)
 	assert.Zero(t, rig.sites["hdsky"].calls.Load())
+	assert.Equal(t, "该站点不支持自动签到", rig.row(t, "hdsky").LastError)
+}
+
+// 站点实例说得出不能签到的原因（UHDDolby 没配 Cookie）时，记下的是这句原因
+func TestAttendance_UnsupportedKeepsSiteReason(t *testing.T) {
+	rig := newAttendanceRig(t, time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), "hddolby")
+	rig.sites["hddolby"].unsupported = true
+	rig.sites["hddolby"].reason = "签到要用 Cookie：在站点设置里填上 Cookie（API Key 不能签到）"
+	rig.mon.Rand = func(int64) int64 { return 0 }
+	rig.mon.RunOnce(context.Background())
+	row := rig.row(t, "hddolby")
+	assert.Equal(t, models.AttendanceUnsupported, row.Status)
+	assert.Equal(t, "签到要用 Cookie：在站点设置里填上 Cookie（API Key 不能签到）", row.LastError)
+	assert.Zero(t, rig.sites["hddolby"].calls.Load())
 }
 
 // 站点实例没有注册（凭证缺失等）按失败处理并说明原因。

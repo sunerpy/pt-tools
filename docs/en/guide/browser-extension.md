@@ -38,7 +38,7 @@ When there are only analytics, Cloudflare or language-preference cookies, the ro
 - **Automatically**: open the popup on the site's page and turn on Auto-sync Cookie (自动同步 Cookie); the cookie is then synced whenever you sign in again or it changes.
 - **Keeping accounts active**: Open sites (打开站点) opens the sites in background tabs; Open (打开) on a row opens one.
 
-Sites that use an API key or a passkey (M-Team, Rousi Pro) cannot be synced by the extension; enter their credentials in pt-tools' site settings instead, as described in [Cookies and API keys](get-cookie-apikey.md). For sites such as HDDolby that need both a cookie and an API key, pt-tools stores the synced cookie first; until the API key is filled in the site stays disabled, and the extension reminds you to add the API key in pt-tools.
+Sites that use an API key or a passkey (M-Team, Rousi Pro) cannot be synced by the extension; enter their credentials in pt-tools' site settings instead, as described in [Cookies and API keys](get-cookie-apikey.md). UHDDolby needs an API key (the RSSKEY from the site's RSS page) and takes an optional cookie that is only used for bonus per hour and sign-in: pt-tools stores the synced cookie first; until the API key is filled in the site stays disabled, and the extension reminds you to add the API key in pt-tools.
 
 ### Scheduled sync
 

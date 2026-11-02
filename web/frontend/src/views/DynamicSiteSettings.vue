@@ -595,13 +595,13 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
         </template>
 
         <template v-if="addForm.auth_method === 'cookie_and_api_key'">
-          <el-form-item label="Cookie" required>
+          <el-form-item label="Cookie（可选）">
             <el-input
               v-model="addForm.cookie"
               type="textarea"
               :rows="3"
               placeholder="请输入站点 Cookie" />
-            <div class="field-tip">用于抓取时魔、魔力等只在网页上出现的信息</div>
+            <div class="field-tip">只用于时魔、签到这类只在网页上才有的信息，可以不填</div>
           </el-form-item>
           <el-form-item label="API Key / RSS Key" required>
             <el-input v-model="addForm.api_key" placeholder="请输入 API Key 或 RSS Key" />

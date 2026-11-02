@@ -417,7 +417,8 @@ func TestProbe_PrecheckMissingCredential(t *testing.T) {
 	}{
 		{"cookie", models.SiteSetting{Name: "A", Enabled: true, AuthMethod: "cookie"}, "Cookie"},
 		{"api_key", models.SiteSetting{Name: "B", Enabled: true, AuthMethod: "api_key", Cookie: "c=1"}, "API Key"},
-		{"cookie_and_api_key", models.SiteSetting{Name: "C", Enabled: true, AuthMethod: "cookie_and_api_key", APIKey: "k"}, "Cookie"},
+		// Cookie 可选，缺的是 API Key
+		{"cookie_and_api_key", models.SiteSetting{Name: "C", Enabled: true, AuthMethod: "cookie_and_api_key", Cookie: "c=1"}, "API Key"},
 		{"passkey", models.SiteSetting{Name: "D", Enabled: true, AuthMethod: "passkey"}, "Passkey"},
 	}
 	for _, tc := range cases {
@@ -445,6 +446,7 @@ func TestProbe_PrecheckPassesWithCredentials(t *testing.T) {
 		{AuthMethod: "cookie", CookieEncrypted: "enc"},
 		{AuthMethod: "api_key", APIKey: "k"},
 		{AuthMethod: "cookie_and_api_key", Cookie: "c", APIKey: "k"},
+		{AuthMethod: "cookie_and_api_key", APIKey: "k"},
 		{AuthMethod: "passkey", Passkey: "p"},
 		{AuthMethod: ""},
 	}

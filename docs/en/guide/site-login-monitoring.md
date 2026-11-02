@@ -133,17 +133,17 @@ Daily sign-in was added in the 1.0 preview. pt-tools can sign in to a site once 
 - Sign in to all (一键签到): the button at the top right of the Sign-in page signs in once to every site with automatic sign-in turned on that has no result today. It runs in the background and the page shows the progress; a site that needs a captcha can take a few minutes, so you can leave the page.
 - Signing in by hand: Sign in now (立即签到) on a row of the Sign-in page, Sign in now (the calendar icon) on the site's row in the site list, Sign in now on the Keep-alive rules (保号规则) card of the site's detail page, and the ChatOps command `/signin [site]` (without a site, it signs in every site with automatic sign-in turned on that has no result today). Signing in by hand does not require automatic sign-in to be turned on, and a failure does not use up the automatic retries.
 
-Signing in to HDSky, OpenCD, PTCHDBits and 52PT requires a captcha or a quiz answer and uses AI; see the next section. Rousi Pro signs in with the personal API key entered in the Passkey field of its site settings; the key needs the Sign in (执行签到) permission (`attendance:claim`). Without it the sign-in fails and the reason says so. These built-in sites do not support automatic sign-in:
+Signing in to HDSky, OpenCD, PTCHDBits and 52PT requires a captcha or a quiz answer and uses AI; see the next section. Rousi Pro signs in with the personal API key entered in the Passkey field of its site settings; the key needs the Sign in (执行签到) permission (`attendance:claim`). Without it the sign-in fails and the reason says so. UHDDolby signs in with the cookie from its site settings (the API key cannot sign in); without a cookie, sign-in is recorded as not supported and the reason says to enter a cookie. These built-in sites do not support automatic sign-in:
 
-| Site            | Reason                                                                                                                                          |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| M-Team          | It has no sign-in; keep the account alive by signing in with a browser; the site forbids third-party tools from calling its keep-alive endpoint |
-| SpringSunday    | It has no sign-in; the site has no sign-in page                                                                                                 |
-| BYRPT           | It has no sign-in; the site has no sign-in page                                                                                                 |
-| TJUPT           | The sign-in page forbids signing in with scripts or programs, and a wrong answer costs bonus points                                             |
-| U2              | Signing in requires picking an anime title from an animated image captcha                                                                       |
-| BTSCHOOL        | Signing in works differently from usual NexusPHP sites                                                                                          |
-| HD Dolby, MooKo | Not NexusPHP sites; sign-in is not supported yet                                                                                                |
+| Site         | Reason                                                                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| M-Team       | It has no sign-in; keep the account alive by signing in with a browser; the site forbids third-party tools from calling its keep-alive endpoint |
+| SpringSunday | It has no sign-in; the site has no sign-in page                                                                                                 |
+| BYRPT        | It has no sign-in; the site has no sign-in page                                                                                                 |
+| TJUPT        | The sign-in page forbids signing in with scripts or programs, and a wrong answer costs bonus points                                             |
+| U2           | Signing in requires picking an anime title from an animated image captcha                                                                       |
+| BTSCHOOL     | Signing in works differently from usual NexusPHP sites                                                                                          |
+| MooKo        | Not a NexusPHP site; sign-in is not supported yet                                                                                               |
 
 Signing in adds one request to the site every day; make sure the site's rules allow automatic sign-in before turning it on.
 

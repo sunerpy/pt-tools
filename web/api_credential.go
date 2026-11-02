@@ -86,7 +86,7 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 		writeJSON(w, map[string]any{"success": true, "site": string(sg), "enabled": false})
 		return
 	}
-	// 凭据还没配齐的停用站点（HDDolby 要 Cookie 和 API Key，扩展只同步来了 Cookie）：先把这次的凭据存下，
+	// 凭据还没配齐的停用站点（HDDolby 要 API Key，扩展只同步来了 Cookie）：先把这次的凭据存下，
 	// 站点保持停用，告诉调用方还缺什么；不再走完整校验回 500，免得扩展每次同步都报失败、Cookie 也存不进去。
 	if missing := core.MissingCredential(sc.AuthMethod, sc.Cookie, sc.APIKey, sc.Passkey); missing != "" && !enabled && credentialProvided(req) {
 		if err := s.store.SaveSiteCredentials(sg, req.Cookie, req.APIKey, req.Passkey); err != nil {

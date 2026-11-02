@@ -55,7 +55,7 @@ type addrssWizardState struct {
 	MaxNotificationsPerHour *int     `json:"max_notifications_per_hour,omitempty"`
 }
 
-const addrssShortcutExample = "快捷添加（单行，| 分隔，下载器可选）：\n/addrss 站点 | 订阅名 | RSS地址 | 下载器(可选)\n示例：/addrss hddolby | 高清电影 | https://www.hddolby.com/torrentrss.php?passkey=xxx | qbittorrent-default"
+const addrssShortcutExample = "快捷添加（单行，| 分隔，下载器可选）：\n/addrss 站点 | 订阅名 | RSS地址 | 下载器(可选)\n示例：/addrss hddolby | 高清电影 | https://www.uhddolby.com/torrentrss.php?passkey=xxx | qbittorrent-default"
 
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{

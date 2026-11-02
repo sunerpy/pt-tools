@@ -186,11 +186,9 @@ func (r *SiteRegistry) CreateSite(siteID string, creds SiteCredentials, customBa
 		}
 		options, err = json.Marshal(GazelleOptions{APIKey: creds.APIKey, Cookie: creds.Cookie})
 	case SiteHDDolby:
+		// Cookie 可选：只有时魔与签到用它
 		if creds.APIKey == "" {
-			return nil, fmt.Errorf("site %s requires RSS Key (from getrss.php)", siteID)
-		}
-		if creds.Cookie == "" {
-			return nil, fmt.Errorf("site %s requires Cookie (for bonus info)", siteID)
+			return nil, fmt.Errorf("site %s requires API key (the RSS key from getrss.php)", siteID)
 		}
 		options, err = json.Marshal(HDDolbyOptions{APIKey: creds.APIKey, Cookie: creds.Cookie})
 	case SiteRousi:

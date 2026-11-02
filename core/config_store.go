@@ -619,7 +619,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	// 严格校验：
 	// 1) 认证方式必填且合法；
 	// 2) 根据认证方式二选一且对应字段不为空（api_key 或 cookie），另一项必须为空；
-	//    特殊：cookie_and_api_key 同时需要两者
+	//    特殊：cookie_and_api_key 要 API Key，Cookie 可选（只有时魔、签到这类网页功能用它）
 	// 3) 对于非预置站点，API URL 必填；预置站点使用常量
 	// 4) RSS 列表可以为空，但如果有则各项字段需合法。
 	am := strings.ToLower(strings.TrimSpace(sc.AuthMethod))
@@ -660,9 +660,6 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	case "cookie_and_api_key":
 		if apiKeyEmpty {
 			return errors.New("API Key 不能为空")
-		}
-		if cookieEmpty {
-			return errors.New("Cookie 不能为空")
 		}
 	case "cookie":
 		if cookieEmpty {

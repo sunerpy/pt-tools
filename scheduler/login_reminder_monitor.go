@@ -617,12 +617,8 @@ func missingCredential(setting models.SiteSetting) string {
 			return "未配置 API Key"
 		}
 	case string(v2.AuthMethodCookieAndAPIKey):
-		switch {
-		case !hasCookie && !hasAPIKey:
-			return "未配置 Cookie 和 API Key"
-		case !hasCookie:
-			return "未配置 Cookie"
-		case !hasAPIKey:
+		// Cookie 可选：登录探测走 API
+		if !hasAPIKey {
 			return "未配置 API Key"
 		}
 	case string(v2.AuthMethodPasskey):

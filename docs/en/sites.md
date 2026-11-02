@@ -75,12 +75,15 @@
 
 ### Other platforms (4)
 
-| Site          | Platform                        | Sign-in          | Features                                   | Status | Notes                                                                    |
-| ------------- | ------------------------------- | ---------------- | ------------------------------------------ | ------ | ------------------------------------------------------------------------ |
-| **M-Team**    | mTorrent                        | API Key          | RSS, search, user info, class requirements | ✅     | Fully supported                                                          |
-| **HDDolby**   | HDDolby (derived from NexusPHP) | Cookie + API Key | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if two-step verification causes problems |
-| **Rousi Pro** | Rousi                           | Passkey          | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                    |
-| **MooKo**     | Gazelle                         | Cookie           | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                    |
+| Site          | Platform                        | Sign-in                            | Features                                            | Status | Notes                                                                      |
+| ------------- | ------------------------------- | ---------------------------------- | --------------------------------------------------- | ------ | -------------------------------------------------------------------------- |
+| **M-Team**    | mTorrent                        | API Key                            | RSS, search, user info, class requirements          | ✅     | Fully supported                                                            |
+| **UHDDolby**  | HDDolby (derived from NexusPHP) | API key (RSS key), cookie optional | RSS, search, user info, sign-in, class requirements | ✅     | HDDolby (高清杜比); the cookie is only used for bonus per hour and sign-in |
+| **Rousi Pro** | Rousi                           | Passkey                            | RSS, search, user info                              | ✅     | Supported; please open an issue if something is wrong                      |
+| **MooKo**     | Gazelle                         | Cookie                             | RSS, search, user info, class requirements          | ✅     | Supported; please open an issue if something is wrong                      |
+
+> [!NOTE]
+> HDDolby (高清杜比) has moved to `www.uhddolby.com` and is now called UHDDolby. Its API key is the RSSKEY from the RSS page; see [Getting the UHDDolby RSS key](guide/get-cookie-apikey.md#getting-the-uhddolby-rss-key). Torrents already in your downloader still announce to `t.hddolby.com`: in the [downloader assistant](guide/downloader-assistant.md#replacing-trackers), replace `https://t.hddolby.com` with `https://www.uhddolby.com`, preview first and then apply. The site's staff warn against Transmission's own batch replace, which breaks the tracker addresses.
 
 > **More sites**: to have another site supported, open an [issue](https://github.com/sunerpy/pt-tools/issues) or a [pull request](https://github.com/sunerpy/pt-tools/pulls).
 >
