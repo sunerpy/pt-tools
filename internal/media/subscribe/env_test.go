@@ -155,6 +155,8 @@ type fakeSearch struct {
 	queries []v2.MultiSiteSearchQuery
 	err     error
 	cached  map[string]v2.TorrentItem
+	// siteErrs 是每次搜索都带上的站点错误（部分站点没回应）
+	siteErrs []v2.SearchError
 }
 
 func (f *fakeSearch) CachedTorrent(site, id string) (v2.TorrentItem, bool) {
@@ -180,7 +182,7 @@ func (f *fakeSearch) Search(_ context.Context, q v2.MultiSiteSearchQuery) (*v2.M
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &v2.MultiSiteSearchResult{Items: append([]v2.TorrentItem(nil), f.items...)}, nil
+	return &v2.MultiSiteSearchResult{Items: append([]v2.TorrentItem(nil), f.items...), Errors: append([]v2.SearchError(nil), f.siteErrs...)}, nil
 }
 
 func (f *fakeSearch) set(items ...v2.TorrentItem) {

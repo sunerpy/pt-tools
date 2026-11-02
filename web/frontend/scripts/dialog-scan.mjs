@@ -185,6 +185,10 @@ const NOT_ON_BOARD = {
     "列表页的只读详情弹窗，画板把通道详情画成了独立路由（板 23/37）",
   "components/shell/MobileChrome.vue":
     "底栏「我的」的上拉面板 —— 它的规格在画板 34（移动 · 我的），不在这张清点图里",
+  "components/search/EntrySearch.vue#筛选":
+    "按条目搜索（媒体中心 M2a）晚于画板 40 定稿：视口窄于 1280 时左栏收进这个抽屉，内容就是画板 06 的左栏",
+  "components/search/EntrySearch.vue#(drawer 无 title)":
+    "按条目搜索（媒体中心 M2a）在手机上的筛选面板：规格在画板 10（媒体中心那一组），不在画板 40 的清点图里",
   "views/chatops/RSSNotifications.vue#通知详情":
     "移动端专用：行卡替代了桌面表格的展开行，详情只能放弹窗。画板 26 画的是桌面展开行，" +
     "画板 40 定稿时移动端行卡还没落地，所以两张图上都没有它。桌面走展开行，不会用到这个弹窗。",

@@ -126,45 +126,83 @@ func hasFold(list []string, v string) bool {
 // Score 按档案给候选种子打分。episodes 是种子里有几集（剧集按每集算体积；电影与认不出集数的传 1）。
 // RSS 里刚发布的种子做种数还没有意义，最少做种数只对搜索到的种子生效。
 func (p Profile) Score(c Candidate, episodes int) Verdict {
+	if why := p.rejects(c, episodes, true); len(why) > 0 {
+		return Verdict{Reject: why[0]}
+	}
+	return Verdict{Score: p.points(c.Meta)}
+}
+
+// rejects 是候选种子不满足档案硬条件的原因，按分辨率、来源、编码、Remux、HDR、中字、免费、H&R、做种、体积的顺序；
+// first 为真时找到第一条就停（推送时只要一条），按条目搜索要全部列出来。
+func (p Profile) rejects(c Candidate, episodes int, first bool) []string {
+	var out []string
+	add := func(reason string) bool {
+		if reason == "" {
+			return false
+		}
+		out = append(out, reason)
+		return first
+	}
 	m := c.Meta
-	if len(p.Resolutions) > 0 && !hasFold(p.Resolutions, m.Resolution) {
-		return Verdict{Reject: fmt.Sprintf("分辨率%s不在档案里", orUnknown(m.Resolution))}
+	if len(p.Resolutions) > 0 && !hasFold(p.Resolutions, m.Resolution) && add(fmt.Sprintf("分辨率%s不在档案里", orUnknown(m.Resolution))) {
+		return out
 	}
-	if len(p.Sources) > 0 && !hasFold(p.Sources, m.Source) {
-		return Verdict{Reject: fmt.Sprintf("来源%s不在档案里", orUnknown(m.Source))}
+	if len(p.Sources) > 0 && !hasFold(p.Sources, m.Source) && add(fmt.Sprintf("来源%s不在档案里", orUnknown(m.Source))) {
+		return out
 	}
-	if len(p.Codecs) > 0 && !hasFold(p.Codecs, m.VideoCodec) {
-		return Verdict{Reject: fmt.Sprintf("编码%s不在档案里", orUnknown(m.VideoCodec))}
+	if len(p.Codecs) > 0 && !hasFold(p.Codecs, m.VideoCodec) && add(fmt.Sprintf("编码%s不在档案里", orUnknown(m.VideoCodec))) {
+		return out
 	}
-	if reason := wanted("Remux", p.Remux, m.Remux); reason != "" {
-		return Verdict{Reject: reason}
+	if add(wanted("Remux", p.Remux, m.Remux)) || add(wanted("HDR", p.HDR, len(m.HDR) > 0)) || add(wanted("中字", p.ChineseSubs, m.ChineseSubs)) {
+		return out
 	}
-	if reason := wanted("HDR", p.HDR, len(m.HDR) > 0); reason != "" {
-		return Verdict{Reject: reason}
+	if p.Free == models.MediaPrefRequire && !c.Item.IsFree() && add("不是免费") {
+		return out
 	}
-	if reason := wanted("中字", p.ChineseSubs, m.ChineseSubs); reason != "" {
-		return Verdict{Reject: reason}
+	if p.ExcludeHR && (c.Item.HasHR || c.SiteHR) && add("有 H&R 要求") {
+		return out
 	}
-	if p.Free == models.MediaPrefRequire && !c.Item.IsFree() {
-		return Verdict{Reject: "不是免费"}
-	}
-	if p.ExcludeHR && (c.Item.HasHR || c.SiteHR) {
-		return Verdict{Reject: "有 H&R 要求"}
-	}
-	if c.From == fromSearch && p.MinSeeders > 0 && c.Item.Seeders < p.MinSeeders {
-		return Verdict{Reject: fmt.Sprintf("做种 %d 个，少于 %d 个", c.Item.Seeders, p.MinSeeders)}
+	if c.From == fromSearch && p.MinSeeders > 0 && c.Item.Seeders < p.MinSeeders &&
+		add(fmt.Sprintf("做种 %d 个，少于 %d 个", c.Item.Seeders, p.MinSeeders)) {
+		return out
 	}
 	if c.Item.SizeBytes > 0 && (p.MinSizeGB > 0 || p.MaxSizeGB > 0) {
 		per := float64(c.Item.SizeBytes) / gib / float64(max(episodes, 1))
 		if p.MinSizeGB > 0 && per < p.MinSizeGB {
-			return Verdict{Reject: fmt.Sprintf("体积 %.1f GB，小于 %.1f GB", per, p.MinSizeGB)}
+			add(fmt.Sprintf("体积 %.1f GB，小于 %.1f GB", per, p.MinSizeGB))
 		}
 		if p.MaxSizeGB > 0 && per > p.MaxSizeGB {
-			return Verdict{Reject: fmt.Sprintf("体积 %.1f GB，大于 %.1f GB", per, p.MaxSizeGB)}
+			add(fmt.Sprintf("体积 %.1f GB，大于 %.1f GB", per, p.MaxSizeGB))
 		}
 	}
+	return out
+}
 
-	return Verdict{Score: p.points(m)}
+// percent 把分数换成给人看的 0–100：除以这个档案能拿到的最高分（排第一的分辨率、来源与编码，加上全部加分）。
+// 分数本身按档位加权（几万到十几万），排序仍用它。
+func (p Profile) percent(score int) int {
+	resolutions, sources := p.Resolutions, p.Sources
+	if len(resolutions) == 0 {
+		resolutions = Resolutions
+	}
+	if len(sources) == 0 {
+		sources = Sources
+	}
+	top := len(resolutions)*weightResolution + len(sources)*weightSource + len(p.Codecs)*weightCodec
+	for _, b := range []struct {
+		on    bool
+		bonus int
+	}{
+		{p.Remux == models.MediaPrefPrefer, bonusRemux},
+		{p.HDR == models.MediaPrefPrefer, bonusHDR},
+		{p.ChineseSubs == models.MediaPrefPrefer, bonusChineseSubs},
+		{len(p.Groups) > 0, bonusGroup},
+	} {
+		if b.on {
+			top += b.bonus
+		}
+	}
+	return min(max(score*100/top, 0), 100)
 }
 
 // points 是不看硬条件的分数：候选过了硬条件以后用它排先后，已有的版本（库里的、下载过的）按当前档案重算时也用它。

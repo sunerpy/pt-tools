@@ -13,6 +13,7 @@ on:
       - "!docs/readme/**"
       - "!docs/brand.md"
       - "!docs/design/webui-board-spec.md"
+      - "!docs/design/media-hub-board-spec.md"
       - "web/frontend/public/logo.svg"
       - ".github/workflows/docs-site.yml"
       - ".github/workflows/publish-docs-site.yml"

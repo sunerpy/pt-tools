@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -70,6 +71,8 @@ type TorrentItemResponse struct {
 	DownloadURL     string   `json:"downloadUrl,omitempty"`
 	Category        string   `json:"category,omitempty"`
 	IsFree          bool     `json:"isFree"`
+	// Meta 是标题与副标题解析出的信息（分辨率、来源、平台、编码、HDR、制作组、中字、季集），页面按它筛选；没有标题时不带
+	Meta *meta.Meta `json:"meta,omitempty"`
 }
 
 // SearchErrorResponse represents a search error in API response
@@ -252,6 +255,11 @@ func toTorrentItemResponse(item v2.TorrentItem) TorrentItemResponse {
 	if !item.DiscountEndTime.IsZero() {
 		discountEndTime = item.DiscountEndTime.Unix()
 	}
+	var parsed *meta.Meta
+	if item.Title != "" || item.Subtitle != "" {
+		m := meta.Parse(item.Title, item.Subtitle)
+		parsed = &m
+	}
 
 	return TorrentItemResponse{
 		ID:              item.ID,
@@ -273,6 +281,7 @@ func toTorrentItemResponse(item v2.TorrentItem) TorrentItemResponse {
 		DownloadURL:     item.DownloadURL,
 		Category:        item.Category,
 		IsFree:          item.IsFree(),
+		Meta:            parsed,
 	}
 }
 

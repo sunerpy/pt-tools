@@ -1285,6 +1285,8 @@ export interface SearchTorrentItem {
   discountEndTime?: number;
   hasHR?: boolean;
   sourceSite: string;
+  /** 标题与副标题解析出的信息（分辨率、来源、平台、编码、HDR、制作组、中字、季集），按它筛选 */
+  meta?: MediaMeta;
 }
 
 export interface SiteSearchParams {
@@ -1347,6 +1349,10 @@ export interface TorrentPushRequest {
   torrentTitle?: string;
   sourceSite?: string;
   sizeBytes?: number;
+  /** 条目（按条目搜索的结果里推送时带上）：写进种子记录，整理入库按它整理 */
+  mediaType?: MediaKind;
+  tmdbId?: number;
+  season?: number;
 }
 
 export interface TorrentPushResultItem {
@@ -3332,6 +3338,8 @@ export interface TMDBItem {
   genre_ids?: number[];
   genres?: string[];
   runtime?: number;
+  /** 出品国家或地区（ISO 3166-1）：详情里有，剧集的搜索结果里也有 */
+  countries?: string[];
 }
 
 export interface MediaCandidate extends TMDBItem {
@@ -4136,6 +4144,117 @@ export interface ExplorePage {
   total_pages: number;
 }
 
+/** 按条目搜索的请求（POST /api/media/search，只读） */
+export interface MediaSearchInput {
+  media_type: MediaKind;
+  tmdb_id: number;
+  /** 剧集的季，0 或不填是最新的一季 */
+  season?: number;
+  /** 只影响这一次：大于 0 用这个档案，0 用订阅的（没有时用默认档案），-1 不按档案 */
+  profile_id?: number;
+  sites?: string[];
+  include_unmatched?: boolean;
+}
+
+/** 一集现在的情况：已入库、在下载、等锁住的版本、缺、还没播 */
+export type MediaSearchEpisodeState =
+  | "library"
+  | "downloading"
+  | "waiting_version"
+  | "missing"
+  | "upcoming";
+
+export interface MediaSearchEpisode {
+  episode: number;
+  state: MediaSearchEpisodeState;
+  /** 在下载时的来源站点（下载器里认领的种子没有） */
+  site?: string;
+  air_date?: string;
+  name?: string;
+}
+
+/** 按档案的结果：reject 不为空时不符合（全部原因），score 是 0–100 的分 */
+export interface MediaSearchVerdict {
+  score: number;
+  reject?: string;
+}
+
+export interface MediaSearchMember {
+  site: string;
+  torrent_id: string;
+  title: string;
+  subtitle?: string;
+  info_hash?: string;
+  size_bytes: number;
+  uploaded_at?: number;
+  seeders: number;
+  leechers: number;
+  snatched?: number;
+  /** 站点给的优惠（FREE、2XFREE、PERCENT_50、NONE……） */
+  discount: string;
+  free: boolean;
+  /** 免费还剩几秒；不知道结束时间时没有 */
+  free_left_seconds?: number;
+  /** 有 H&R 要求（种子自己有，或者站点整站有）；hr_hours 是要做种几小时，不知道时没有 */
+  hr: boolean;
+  hr_hours?: number;
+  url?: string;
+  download_url?: string;
+  category?: string;
+  by_imdb?: boolean;
+  meta: MediaMeta;
+  /** 不按档案时为 null */
+  verdict: MediaSearchVerdict | null;
+  /** 对不上这个条目的原因（只在 unmatched 里） */
+  reason?: string;
+}
+
+/** 同一个资源：members 的第一个是首选 */
+export interface MediaSearchGroup {
+  group_id: string;
+  members: MediaSearchMember[];
+  meta: MediaMeta;
+  verdict: MediaSearchVerdict | null;
+  /** 剧集里有的集（电影没有） */
+  span?: { start?: number; end?: number; whole?: boolean };
+  /** 能补上的集（缺的与等版本的） */
+  covers: number[];
+  /** 这一组里正在下载的集 */
+  downloading: number[];
+  /** 这一组的集都已入库（电影是库里有） */
+  in_library: boolean;
+}
+
+export interface MediaSearchResult {
+  item: {
+    media_type: MediaKind;
+    tmdb_id: number;
+    season?: number;
+    title: string;
+    original_title?: string;
+    year?: number;
+    poster_path?: string;
+    /** 剧集一共几季、这一季几集 */
+    seasons?: number;
+    total_episodes?: number;
+  };
+  subscription: {
+    id: number;
+    status: SubscriptionStatus;
+    lock: { group: string; resolution: string } | null;
+  } | null;
+  /** 这次打分用的档案；不按档案时为 null，没有档案（按分辨率与来源比）时 id 为 0 */
+  profile: { id: number; name: string } | null;
+  keywords: string[];
+  episodes: MediaSearchEpisode[];
+  movie?: { state: "library" | "downloading" | "missing"; site?: string };
+  groups: MediaSearchGroup[];
+  total: number;
+  unmatched_count: number;
+  unmatched?: MediaSearchMember[];
+  errors: { site: string; error: string }[];
+}
+
 export const subscribeApi = {
   settings: () => api.get<SubscribeSettings>("/api/media/subscribe/settings"),
   saveSettings: (data: SubscribeSettings) =>
@@ -4218,6 +4337,8 @@ export const subscribeApi = {
     if (q.q) params.set("q", q.q);
     return api.get<ExplorePage>(`/api/media/explore?${params.toString()}`);
   },
+  /** 按条目搜索：只读，不推送；站点多时要十几秒到一分钟 */
+  searchMedia: (data: MediaSearchInput) => api.post<MediaSearchResult>("/api/media/search", data),
 };
 
 export const reseedApi = {

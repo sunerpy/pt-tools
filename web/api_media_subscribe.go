@@ -17,6 +17,9 @@ import (
 // subscribeSearchTimeout 是「立即搜索」的时限（要在各站点搜索、下载种子文件并推送）。
 const subscribeSearchTimeout = 3 * time.Minute
 
+// mediaSearchTimeout 是按条目搜索的时限：几个关键字一起搜最多 60 秒，另外留给取 TMDB 条目与这一季。
+const mediaSearchTimeout = 90 * time.Second
+
 // SetSubscribeService 接上订阅服务（cmd 里建好后调用）。
 func (s *Server) SetSubscribeService(svc *subscribe.Service) { s.subscriber = svc }
 
@@ -51,6 +54,7 @@ func (s *Server) registerSubscribeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/media/douban-sources/{id}/fetch", s.auth(s.apiDoubanSourceFetch))
 	mux.HandleFunc("GET /api/media/douban-sources/{id}/items", s.auth(s.apiDoubanSourceItems))
 	mux.HandleFunc("GET /api/media/explore", s.auth(s.apiMediaExplore))
+	mux.HandleFunc("POST /api/media/search", s.auth(s.apiMediaSearch))
 }
 
 func (s *Server) subscribeService(w http.ResponseWriter) (*subscribe.Service, bool) {
@@ -416,6 +420,37 @@ func (s *Server) apiMediaExplore(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeSubscribeError(w, err)
 		return
+	}
+	writeJSON(w, got)
+}
+
+// apiMediaSearch handles POST /api/media/search：按条目搜索（只读，不推送）。指定了站点时只搜启用了的，没启用的写进 errors；
+// 一个都没启用时报错（空的站点列表是搜全部）。
+func (s *Server) apiMediaSearch(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	var in subscribe.MediaSearchInput
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	requested := in.Sites
+	in.Sites = filterEnabledSites(in.Sites, s.getEnabledSiteIDs())
+	skipped := skippedSites(requested, in.Sites)
+	if len(requested) > 0 && len(in.Sites) == 0 {
+		http.Error(w, "指定的站点都没有启用", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), mediaSearchTimeout)
+	defer cancel()
+	got, err := svc.SearchMedia(ctx, in)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	for _, e := range skipped {
+		got.Errors = append(got.Errors, subscribe.MediaSearchError{Site: e.Site, Error: e.Error})
 	}
 	writeJSON(w, got)
 }
