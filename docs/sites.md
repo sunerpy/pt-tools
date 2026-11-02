@@ -50,7 +50,7 @@
 | **PandaPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（pandapt.net，info_block 取上传/下载/魔力，issue #416）               |
 | **PTFans**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptfans.cc，含 H&R，info_block 取数据，issue #417）                   |
 | **KamePT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（kamept.com，info_block 含做种积分，issue #418）                      |
-| **PTCHDBits**         | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptchdbits.co，详情页 img.pro_free 促销，issue 请求）                 |
+| **PTCHDBits**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配（ptchdbits.co；文字与图标促销都认；H&R 只算 H3/H5 种子，按 120 小时） |
 | **PTerClub**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 猫站（pterclub.net，魔力值=猫粮，无 H&R，自动签到不算登录）                  |
 | **PTHome**            | Cookie   | RSS、搜索、用户信息           | ✅       | 铂金家（pthome.net，info_block 取上传/下载/魔力/做种积分）                   |
 | **TangPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 糖果（www.tangpt.top，CHD 模板，issue #456）                                 |
