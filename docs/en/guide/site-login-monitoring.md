@@ -117,7 +117,7 @@ Reminders start once the days left are no more than Days ahead to remind:
 - Reminders go to the channels selected in Keep-alive settings that are enabled; when none are selected, to every channel enabled at the time the reminder is created.
 - Quiet hours apply per channel and are set in the same place as for RSS notifications; see [quiet hours in RSS notifications](chatops-rss-notify.md#quiet-hours). A channel in its quiet hours waits until they end; the other channels deliver as usual.
 - Inactivity reminders with 1 day or less left (including past the limit) and Test reminder ignore quiet hours.
-- A failed delivery is retried after 1, 5 and 30 minutes; after the 4th failure it is given up. A retry that falls in quiet hours also waits until they end.
+- A failed delivery is retried after 1, 5 and 30 minutes, then after 2 and 6 hours; after the 6th failure it is given up. A retry that falls in quiet hours also waits until they end.
 - Reminders are sent through the channels ChatOps already has connected; QQ and Telegram do not open a second connection. When the notification service has not started (the log shows a warning), reminders are recorded but not sent.
 
 ## Daily sign-in

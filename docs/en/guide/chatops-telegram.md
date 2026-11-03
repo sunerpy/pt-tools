@@ -229,6 +229,8 @@ If you are not sure of the port, look for the "allow LAN connections" section in
 
 ### Q: The channel's status shows Problem (异常), or the test message is not delivered
 
+The status follows receiving (long polling): it shows Problem when the latest getUpdates failed, for example when Telegram answers 502/504 or another pt-tools instance polls the same bot. Notifications are still sent while receiving fails; when one cannot be delivered, Recent notifications (最近的通知) and the audit log show the reason Telegram gave.
+
 **Cause 1**: `api.telegram.org` cannot be reached; set up a proxy (see section 6).
 
 **Check**: on the machine pt-tools runs on, run:

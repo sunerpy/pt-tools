@@ -16,15 +16,21 @@ const targetParseModeKey = "parse_mode"
 
 const targetChatIDKey = "chat_id"
 
+// Send 不看 healthy：它跟着长轮询（收消息）走，getUpdates 返回 502/504、同一个 bot 在别处被轮询（409）
+// 时为假，sendMessage 却不一定发不出去。原来按它拒发，长轮询出问题的几个小时里每条通知都报
+// not initialized、根本没去发。现在只在没初始化成功或已关闭时拒发，发不出去时报 Telegram 回的原因。
 func (c *TelegramChannel) Send(ctx context.Context, n notify.Notification) error {
 	c.mu.RLock()
 	bot := c.bot
 	cfg := c.cfg
-	healthy := c.healthy
+	closed := c.pollCtx != nil && c.pollCtx.Err() != nil
 	c.mu.RUnlock()
 
-	if !healthy || bot == nil || cfg == nil {
+	if bot == nil || cfg == nil {
 		return errors.New("telegram: channel not initialized")
+	}
+	if closed {
+		return errors.New("telegram: 通道已关闭")
 	}
 
 	chatID, err := resolveChatID(n, cfg)
@@ -54,9 +60,30 @@ func (c *TelegramChannel) Send(ctx context.Context, n notify.Notification) error
 	}
 
 	if _, err := bot.SendMessage(ctx, params); err != nil {
-		return fmt.Errorf("telegram: SendMessage 失败: %w", err)
+		return redactBotToken(fmt.Errorf("telegram: SendMessage 失败: %w", err), cfg.BotToken)
 	}
 	return nil
+}
+
+// tokenRedactedError 的文字里令牌换成 <bot_token>，Unwrap 仍是原错误。
+// net/http 的错误带着请求地址（https://api.telegram.org/bot<令牌>/sendMessage），
+// 发送错误会写进日志、通知记录与操作审计。
+type tokenRedactedError struct {
+	err   error
+	token string
+}
+
+func (e tokenRedactedError) Error() string {
+	return strings.ReplaceAll(e.err.Error(), e.token, "<bot_token>")
+}
+
+func (e tokenRedactedError) Unwrap() error { return e.err }
+
+func redactBotToken(err error, token string) error {
+	if err == nil || token == "" {
+		return err
+	}
+	return tokenRedactedError{err: err, token: token}
 }
 
 func buildInlineKeyboard(rows [][]notify.Button) *telego.InlineKeyboardMarkup {

@@ -104,7 +104,8 @@ func TestMonitorNotifier_RetryBackoffThenFailed(t *testing.T) {
 	_, err := n.Enqueue(context.Background(), sampleEntry())
 	require.NoError(t, err)
 
-	for i, wait := range []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute} {
+	waits := []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour, 6 * time.Hour}
+	for i, wait := range waits {
 		assert.Equal(t, 0, n.DeliverDue(context.Background()))
 		row := notifyRows(t, db)[0]
 		assert.Equal(t, i+1, row.Attempts)
@@ -115,8 +116,8 @@ func TestMonitorNotifier_RetryBackoffThenFailed(t *testing.T) {
 	}
 	n.DeliverDue(context.Background())
 	row := notifyRows(t, db)[0]
-	assert.Equal(t, 4, row.Attempts)
-	assert.Equal(t, models.MonitorNotifyFailed, row.Result, "the 4th failure gives up")
+	assert.Equal(t, 6, row.Attempts)
+	assert.Equal(t, models.MonitorNotifyFailed, row.Result, "the 6th failure gives up")
 }
 
 func TestMonitorNotifier_RetryLandingInQuietIsDeferred(t *testing.T) {
@@ -312,15 +313,17 @@ func TestMonitorNotifier_AuditsGiveUpAndBrokenRows(t *testing.T) {
 	e.ConfIDs = []uint{1}
 	_, err := n.Enqueue(context.Background(), e)
 	require.NoError(t, err)
-	for _, wait := range []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 0} {
+	for _, wait := range []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour, 6 * time.Hour, 0} {
 		n.DeliverDue(context.Background())
 		clock.Advance(wait)
 	}
 	got := aud.all()
-	require.Len(t, got, 4)
-	assert.True(t, got[3].Final, "第 4 次失败后放弃")
-	assert.True(t, got[3].NextRetryAt.IsZero())
-	assert.Equal(t, 4, got[3].Attempt)
+	require.Len(t, got, 6)
+	assert.False(t, got[4].Final, "第 5 次失败 6 小时后还会再试")
+	assert.True(t, got[4].NextRetryAt.Equal(now.Add(time.Minute+5*time.Minute+30*time.Minute+2*time.Hour+6*time.Hour)))
+	assert.True(t, got[5].Final, "第 6 次失败后放弃")
+	assert.True(t, got[5].NextRetryAt.IsZero())
+	assert.Equal(t, 6, got[5].Attempt)
 
 	// 通道在投递前被停用：放弃并说明原因
 	e2 := sampleEntry()
@@ -330,10 +333,10 @@ func TestMonitorNotifier_AuditsGiveUpAndBrokenRows(t *testing.T) {
 	require.NoError(t, db.Model(&models.NotificationConf{}).Where("id = ?", 2).Update("enabled", false).Error)
 	n.DeliverDue(context.Background())
 	got = aud.all()
-	require.Len(t, got, 5)
-	assert.True(t, got[4].Final)
-	assert.EqualError(t, got[4].Err, "通知通道不存在或已停用")
-	assert.Zero(t, got[4].Latency)
+	require.Len(t, got, 7)
+	assert.True(t, got[6].Final)
+	assert.EqualError(t, got[6].Err, "通知通道不存在或已停用")
+	assert.Zero(t, got[6].Latency)
 }
 
 func TestMonitorNotifier_QuietDeferralIsNotAudited(t *testing.T) {
