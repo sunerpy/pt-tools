@@ -3,6 +3,7 @@ package organize
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -22,6 +24,7 @@ import (
 type fakeWatcher struct {
 	mu      sync.Mutex
 	added   map[string]bool
+	adds    map[string]int
 	removed []string
 	events  chan fsnotify.Event
 	errs    chan error
@@ -30,7 +33,7 @@ type fakeWatcher struct {
 }
 
 func newFakeWatcher() *fakeWatcher {
-	return &fakeWatcher{added: map[string]bool{}, events: make(chan fsnotify.Event, 16), errs: make(chan error, 4)}
+	return &fakeWatcher{added: map[string]bool{}, adds: map[string]int{}, events: make(chan fsnotify.Event, 16), errs: make(chan error, 4)}
 }
 
 func (f *fakeWatcher) Add(name string) error {
@@ -42,7 +45,14 @@ func (f *fakeWatcher) Add(name string) error {
 		}
 	}
 	f.added[name] = true
+	f.adds[name]++
 	return nil
+}
+
+func (f *fakeWatcher) addCount(name string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.adds[name]
 }
 
 func (f *fakeWatcher) Remove(name string) error {
@@ -278,6 +288,8 @@ func TestRealtimeUnavailable(t *testing.T) {
 	st = e.realtimeState(d.ID)
 	assert.Equal(t, RealtimeUnavailable, st.state)
 	assert.Contains(t, st.note, "NFS")
+	e.svc.rtSync(e.ctx)
+	assert.Equal(t, st, e.realtimeState(d.ID), "每次核对再试，原因不变")
 
 	// 目录太多
 	isNetworkFS = func(string) (string, bool) { return "", false }
@@ -405,6 +417,17 @@ func TestRealtimeLoop(t *testing.T) {
 	assert.Equal(t, 2, fw.count())
 	close(w3.events)
 	require.Eventually(t, func() bool { return e.realtimeState(d.ID).state == RealtimeUnavailable }, 5*time.Second, 10*time.Millisecond)
+
+	// 保存设置时重建；事件太多、丢了一些：排上整个目录重扫；错误的通道关了：标成不可用
+	w4 := newFakeWatcher()
+	fw.set(w4, nil)
+	e.settings(SettingsInput{MinVideoMB: 1, WatchRealtime: &on})
+	require.Equal(t, RealtimeOn, e.realtimeState(d.ID).state)
+	w4.errs <- fsnotify.ErrEventOverflow
+	require.Eventually(t, func() bool { _, ok := e.pendingAt(d.ID, rescanAll); return ok }, 5*time.Second, 10*time.Millisecond)
+	w4.errs <- errors.New("别的错误")
+	close(w4.errs)
+	require.Eventually(t, func() bool { return e.realtimeState(d.ID).state == RealtimeUnavailable }, 5*time.Second, 10*time.Millisecond)
 }
 
 // 真的 inotify / ReadDirectoryChangesW：放进一个文件就排上那一项
@@ -413,9 +436,9 @@ func TestRealtimeRealWatcher(t *testing.T) {
 		t.Skip("只在 Linux 与 Windows 上做实时监控")
 	}
 	e, d := watchEnv(t)
-	oldTick := realtimeTick
-	t.Cleanup(func() { realtimeTick = oldTick })
-	realtimeTick = 10 * time.Millisecond
+	oldTick, oldResync := realtimeTick, realtimeResync
+	t.Cleanup(func() { realtimeTick, realtimeResync = oldTick, oldResync })
+	realtimeTick, realtimeResync = 10*time.Millisecond, 20*time.Millisecond
 	ctx, cancel := context.WithCancel(e.ctx)
 	done := make(chan struct{})
 	go func() {
@@ -437,4 +460,147 @@ func TestRealtimeRealWatcher(t *testing.T) {
 	watched := e.svc.rt.dirs[d.ID].watched[filepath.Join(d.Path, "Show")]
 	e.svc.rt.mu.Unlock()
 	assert.True(t, watched, "新建的文件夹补了监听")
+
+	// 再加一个监控目录、又删掉：核对时加上、拿掉它的监听
+	other := filepath.Join(e.root, "incoming2")
+	require.NoError(t, os.MkdirAll(other, 0o755))
+	d2, err := e.svc.SaveWatchDir(e.ctx, 0, WatchDirInput{Path: other, Enabled: true})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return e.realtimeState(d2.ID).state == RealtimeOn }, 5*time.Second, 10*time.Millisecond)
+	require.NoError(t, e.svc.DeleteWatchDir(e.ctx, d2.ID))
+	require.Eventually(t, func() bool {
+		e.svc.rt.mu.Lock()
+		defer e.svc.rt.mu.Unlock()
+		return e.svc.rt.dirs[d2.ID] == nil && e.svc.rt.dirs[d.ID] != nil
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// 到期扫描时的边角：隐藏的项与已经没了的项不排；监控目录在库里关了时不扫；监控目录读不了时整个目录重扫只写日志
+func TestRealtimeFireEdgeCases(t *testing.T) {
+	if !realtimeSupported() {
+		t.Skip("这个系统上不做实时监控")
+	}
+	e, d := watchEnv(t)
+	w := newFakeWatcher()
+	useFakeWatcher(t, w)
+	e.svc.rtSync(e.ctx)
+	require.Equal(t, RealtimeOn, e.realtimeState(d.ID).state)
+	schedule := func(names ...string) {
+		e.svc.rt.mu.Lock()
+		for _, n := range names {
+			e.svc.rtScheduleLocked(d.ID, n, e.Now())
+		}
+		e.svc.rt.mu.Unlock()
+	}
+
+	e.put(d, ".partial.mkv", 5, 10*time.Minute)
+	schedule(rescanAll, "gone.mkv")
+	e.svc.rtFire(e.ctx)
+	assert.Zero(t, e.drain(), "隐藏的项、已经没了的项都不排")
+
+	// 监控目录在库里关了（还没核对）：不扫；打开以后照常
+	e.put(d, "Oppenheimer.2023.2160p.BluRay.x265-FRDS.mkv", 5, 10*time.Minute)
+	require.NoError(t, e.db.Model(&models.MediaWatchDir{}).Where("id = ?", d.ID).Update("enabled", false).Error)
+	schedule("Oppenheimer.2023.2160p.BluRay.x265-FRDS.mkv")
+	e.svc.rtFire(e.ctx)
+	assert.Zero(t, e.drain())
+	require.NoError(t, e.db.Model(&models.MediaWatchDir{}).Where("id = ?", d.ID).Update("enabled", true).Error)
+	schedule("Oppenheimer.2023.2160p.BluRay.x265-FRDS.mkv")
+	e.svc.rtFire(e.ctx)
+	assert.Equal(t, 1, e.drain())
+
+	// 监控目录被删了：整个目录重扫时读不了，只写日志
+	require.NoError(t, os.RemoveAll(d.Path))
+	schedule(rescanAll)
+	e.svc.rtFire(e.ctx)
+	assert.Zero(t, e.drain())
+}
+
+// 一个监控目录里的目录超过上限：不全加监听，加了的拿掉，只按间隔扫描
+func TestRealtimeTooManyDirs(t *testing.T) {
+	if !realtimeSupported() {
+		t.Skip("这个系统上不做实时监控")
+	}
+	e, d := watchEnv(t)
+	w := newFakeWatcher()
+	useFakeWatcher(t, w)
+	for i := range realtimeMaxDirs {
+		require.NoError(t, os.Mkdir(filepath.Join(d.Path, fmt.Sprintf("d%04d", i)), 0o755))
+	}
+	e.svc.rtSync(e.ctx)
+	st := e.realtimeState(d.ID)
+	assert.Equal(t, RealtimeUnavailable, st.state)
+	assert.Equal(t, "目录太多（超过 4096 个）", st.note)
+	assert.Empty(t, w.watching(), "加了的拿掉")
+}
+
+// 加监听时子目录刚被删掉：跳过它，目录照样开着；同一个新目录的事件来了两次：只加一次
+func TestRealtimeWalkSkips(t *testing.T) {
+	if !realtimeSupported() {
+		t.Skip("这个系统上不做实时监控")
+	}
+	e, d := watchEnv(t)
+	w := newFakeWatcher()
+	useFakeWatcher(t, w)
+	gone := filepath.Join(d.Path, "Movie", "Gone")
+	require.NoError(t, os.MkdirAll(gone, 0o755))
+	w.addErr = func(p string) error {
+		if p == gone {
+			return fmt.Errorf("inotify_add_watch: %w", os.ErrNotExist)
+		}
+		return nil
+	}
+	e.svc.rtSync(e.ctx)
+	assert.Equal(t, RealtimeOn, e.realtimeState(d.ID).state)
+	assert.Equal(t, []string{d.Path, filepath.Join(d.Path, "Movie")}, w.watching())
+
+	w.addErr = nil
+	sub := filepath.Join(d.Path, "New")
+	require.NoError(t, os.Mkdir(sub, 0o755))
+	e.svc.rtEvent(fsnotify.Event{Name: sub, Op: fsnotify.Create})
+	e.svc.rtEvent(fsnotify.Event{Name: sub, Op: fsnotify.Create})
+	assert.Equal(t, 1, w.addCount(sub))
+	assert.Equal(t, RealtimeOn, e.realtimeState(d.ID).state)
+}
+
+// 读不了整理设置或监控目录：这次核对什么也不做
+func TestRealtimeSyncReadErrors(t *testing.T) {
+	if !realtimeSupported() {
+		t.Skip("这个系统上不做实时监控")
+	}
+	e, d := watchEnv(t)
+	w := newFakeWatcher()
+	fw := useFakeWatcher(t, w)
+	boom := errors.New("disk I/O error")
+	for _, table := range []string{"media_organize_settings", "media_watch_dirs"} {
+		name := "test:fail_" + table
+		require.NoError(t, e.db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+			if tx.Statement.Schema != nil && tx.Statement.Schema.Table == table {
+				_ = tx.AddError(boom)
+			}
+		}))
+		e.svc.rtSync(e.ctx)
+		require.NoError(t, e.db.Callback().Query().Remove(name))
+		assert.Zero(t, fw.count(), table)
+		assert.Equal(t, rtState{}, e.realtimeState(d.ID), table)
+	}
+	e.svc.rtSync(e.ctx)
+	assert.Equal(t, RealtimeOn, e.realtimeState(d.ID).state)
+}
+
+// 监控目录的路径在库里变了（接口不让改，防万一）：拿掉旧的监听，加新的
+func TestRealtimeDirPathChanged(t *testing.T) {
+	if !realtimeSupported() {
+		t.Skip("这个系统上不做实时监控")
+	}
+	e, d := watchEnv(t)
+	w := newFakeWatcher()
+	useFakeWatcher(t, w)
+	e.svc.rtSync(e.ctx)
+	other := filepath.Join(e.root, "moved")
+	require.NoError(t, os.MkdirAll(other, 0o755))
+	require.NoError(t, e.db.Model(&models.MediaWatchDir{}).Where("id = ?", d.ID).Update("path", other).Error)
+	e.svc.rtSync(e.ctx)
+	assert.Equal(t, []string{other}, w.watching())
+	assert.Equal(t, RealtimeOn, e.realtimeState(d.ID).state)
 }

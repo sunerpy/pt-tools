@@ -144,3 +144,22 @@ func TestCopyClonedReportedOnEveryPlacement(t *testing.T) {
 	assert.True(t, d.Cloned, "独占新建时从临时文件克隆")
 	assert.Equal(t, "cloned:.part", readFileT(t, filepath.Join(dir, "lib2", "a.mkv")), "独占新建时克隆的是写好的临时文件")
 }
+
+// 写时复制做不了、回退逐字节复制时目标写不了（只读打开的）：返回错误，不算复制成功
+func TestFillFallbackError(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.mkv")
+	dst := filepath.Join(dir, "b.mkv")
+	writeFile(t, src, "video data")
+	writeFile(t, dst, "")
+	in, err := os.Open(src)
+	require.NoError(t, err)
+	defer in.Close()
+	out, err := os.Open(dst)
+	require.NoError(t, err)
+	defer out.Close()
+	fakeClone(t, func(*os.File, *os.File) error { return errCloneUnsupported })
+	cloned, err := fill(out, in)
+	assert.False(t, cloned)
+	require.Error(t, err)
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
@@ -596,4 +597,192 @@ func TestOrganizeCloneNote(t *testing.T) {
 	var r models.MediaTransferHistory
 	require.NoError(t, e.db.Where("info_hash = ?", discHash).First(&r).Error)
 	assert.Contains(t, r.Message, "写时复制", "原盘的主文件用了写时复制")
+}
+
+// failHistoryWrites 让整理记录写不进去（新建与更新都失败），返回恢复的函数。
+func failHistoryWrites(t *testing.T, e *env) func() {
+	t.Helper()
+	boom := errors.New("disk I/O error")
+	fail := func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "media_transfer_histories" {
+			_ = tx.AddError(boom)
+		}
+	}
+	require.NoError(t, e.db.Callback().Create().Before("gorm:create").Register("test:disc_fail_create", fail))
+	require.NoError(t, e.db.Callback().Update().Before("gorm:update").Register("test:disc_fail_update", fail))
+	restore := func() {
+		_ = e.db.Callback().Create().Remove("test:disc_fail_create")
+		_ = e.db.Callback().Update().Remove("test:disc_fail_update")
+	}
+	t.Cleanup(restore)
+	return restore
+}
+
+// 整理记录写不进去：这次放进库的原盘撤回（源文件还在），之后能正常整理；认回来的原盘补记录也写不进去时记为失败
+func TestOrganizeDiscRecordFailure(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.discTorrent(nil)
+	root := filepath.Join(e.dlDir, discName)
+	movieDir := filepath.Join(e.movies, "奥本海默 (2023)")
+
+	restore := failHistoryWrites(t, e)
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Created)
+	assert.Equal(t, 1, res.Failed)
+	assert.Contains(t, strings.Join(res.Messages, " "), "整理记录写不进去")
+	assert.False(t, exists(movieDir), "库里不留没人认领的原盘")
+	for _, in := range discIns {
+		assert.True(t, exists(filepath.Join(root, filepath.FromSlash(in))), "源文件不动 %s", in)
+	}
+	restore()
+
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created)
+
+	// 记录删了、库里的文件留着：认回来时补的记录也写不进去
+	_, err = e.svc.DeleteHistory(e.ctx, e.history()[0].ID, false)
+	require.NoError(t, err)
+	failHistoryWrites(t, e)
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Failed)
+	assert.Equal(t, 0, res.Done)
+	assert.Contains(t, strings.Join(res.Messages, " "), discName)
+	assert.True(t, exists(filepath.Join(movieDir, "BDMV", "STREAM", "00001.m2ts")), "库里的原盘不动")
+}
+
+// 放原盘时目标冒出了别的文件：跳过、不重试；硬链接跨文件系统：失败、不重试（要先改设置）
+func TestOrganizeDiscPlaceErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status string
+	}{
+		{"target-exists", transfer.ErrTargetExists, models.MediaTransferSkipped},
+		{"cross-device", transfer.ErrCrossDevice, models.MediaTransferFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.defaultLibraries()
+			e.settings(SettingsInput{MinVideoMB: 1})
+			e.discTorrent(nil)
+			old := transferDetail
+			t.Cleanup(func() { transferDetail = old })
+			transferDetail = func(string, string, string) (transfer.Outcome, transfer.Detail, error) {
+				return 0, transfer.Detail{}, tc.err
+			}
+			res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+			require.NoError(t, err)
+			assert.Equal(t, 0, res.Created)
+			rows := e.history()
+			require.Len(t, rows, 1)
+			assert.Equal(t, tc.status, rows[0].Status)
+			assert.Nil(t, rows[0].NextRetryAt, "不自动重试")
+			assert.Contains(t, rows[0].Message, tc.err.Error())
+		})
+	}
+}
+
+// 移动时有的文件删不掉源文件：库里照样放好，方式记移动，写明几个源文件留在下载目录里；源原盘的目录不删
+func TestOrganizeDiscMoveSourceKept(t *testing.T) {
+	e := newEnv(t)
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Mode: models.MediaModeMove})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.discTorrent(func(t *downloader.Torrent) { t.State = downloader.TorrentPaused })
+	root := filepath.Join(e.dlDir, discName)
+	movieDir := filepath.Join(e.movies, "奥本海默 (2023)")
+	old := transferDetail
+	t.Cleanup(func() { transferDetail = old })
+	transferDetail = func(src, dst, mode string) (transfer.Outcome, transfer.Detail, error) {
+		if !strings.Contains(filepath.ToSlash(src), "/BDMV/STREAM/") {
+			return old(src, dst, mode)
+		}
+		// 视频流按硬链接放进库，源文件删不掉
+		out, d, err := old(src, dst, models.MediaModeHardlink)
+		if err != nil {
+			return out, d, err
+		}
+		return out, d, &transfer.SourceKeptError{Mode: models.MediaModeHardlink, Err: errors.New("只读")}
+	}
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created)
+	rows := e.history()
+	require.Len(t, rows, 1)
+	assert.Equal(t, models.MediaTransferDone, rows[0].Status)
+	assert.Equal(t, models.MediaModeMove, rows[0].Mode)
+	assert.Contains(t, rows[0].Message, "2 个文件删不掉源文件")
+	assert.True(t, exists(filepath.Join(movieDir, "BDMV", "STREAM", "00001.m2ts")))
+	assert.True(t, exists(filepath.Join(root, "BDMV", "STREAM", "00001.m2ts")), "删不掉的源文件留着")
+	assert.False(t, exists(filepath.Join(root, "BDMV", "index.bdmv")), "别的文件移走了")
+	assert.True(t, exists(filepath.Join(root, "BDMV")), "源原盘里还有文件，目录不删")
+}
+
+// 按软链接整理的原盘：记录删了、库里的软链接留着时认回来（方式记软链接）；有一个换成了别的文件时不认
+func TestOrganizeDiscAdoptsSymlinks(t *testing.T) {
+	e := newEnv(t)
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Mode: models.MediaModeSymlink})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.discTorrent(nil)
+	root := filepath.Join(e.dlDir, discName)
+	movieDir := filepath.Join(e.movies, "奥本海默 (2023)")
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created)
+	_, err = e.svc.DeleteHistory(e.ctx, e.history()[0].ID, false)
+	require.NoError(t, err)
+
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Done)
+	rows := e.history()
+	require.Len(t, rows, 1)
+	assert.Equal(t, models.MediaModeSymlink, rows[0].Mode, "认回来的按软链接记")
+	assert.True(t, ours(&rows[0]))
+	_, err = e.svc.DeleteHistory(e.ctx, rows[0].ID, false)
+	require.NoError(t, err)
+
+	// 一个文件换成了源文件的硬链接：和别的不是同一种方式，不认，电影目录里已经有文件
+	idx := filepath.Join(movieDir, "BDMV", "index.bdmv")
+	require.NoError(t, os.Remove(idx))
+	require.NoError(t, os.Link(filepath.Join(root, "BDMV", "index.bdmv"), idx))
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Skipped)
+	assert.Equal(t, models.MediaTransferSkipped, e.history()[0].Status)
+	assert.Contains(t, e.history()[0].Message, "里已经有文件")
+}
+
+// 自动整理不重做：记录已整理、库里的电影目录被删了（多半是用户自己删的）
+func TestOrganizeDiscAutoKeepsDeleted(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.discTorrent(nil)
+	movieDir := filepath.Join(e.movies, "奥本海默 (2023)")
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(movieDir))
+	e.svc.mu.Lock()
+	res, err := e.svc.organize(e.ctx, Request{DownloaderID: 1, Hash: discHash}, models.MediaTriggerAuto)
+	e.svc.mu.Unlock()
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Done)
+	assert.Equal(t, 0, res.Created)
+	assert.False(t, exists(movieDir), "不重新放进库")
+}
+
+// 种子里的原盘多于三张：说明里只列前三张
+func TestDiscProblemListsFirstThree(t *testing.T) {
+	discs := make([]transfer.Disc, 4)
+	for i := range discs {
+		discs[i] = transfer.Disc{Root: "Box/D" + string(rune('1'+i))}
+	}
+	assert.Equal(t, "种子里有 4 张原盘（Box/D1、Box/D2、Box/D3、…），暂不整理", discProblem(discs))
+	_, ok := discMain(nil)
+	assert.False(t, ok)
 }

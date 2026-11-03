@@ -17,7 +17,12 @@ func networkFS(path string) (string, bool) {
 	if err := unix.Statfs(path, &st); err != nil {
 		return "", false
 	}
-	switch uint32(st.Type) { //nolint:gosec // 文件系统的类型号按 32 位比较（32 位平台上 Type 是 int32）
+	return networkKind(uint32(st.Type)) //nolint:gosec // 文件系统的类型号按 32 位比较（32 位平台上 Type 是 int32）
+}
+
+// networkKind 按 statfs 的类型号认网络文件系统。
+func networkKind(magic uint32) (string, bool) {
+	switch magic {
 	case unix.NFS_SUPER_MAGIC:
 		return "NFS", true
 	case unix.SMB_SUPER_MAGIC, unix.SMB2_SUPER_MAGIC, unix.CIFS_SUPER_MAGIC:
