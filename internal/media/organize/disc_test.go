@@ -127,6 +127,7 @@ func TestOrganizeDiscMovie(t *testing.T) {
 	assert.ElementsMatch(t, []string{"movie.nfo", "poster.jpg", "fanart.jpg"}, meta)
 	assert.True(t, ours(&r))
 	require.Len(t, e.gotNotices(), 1)
+	assert.Equal(t, int64(5), e.gotNotices()[0].Event.Fields["files"], "入库的文件数是原盘里放进库的文件数")
 
 	// 再整理：库里已经是这张原盘
 	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
