@@ -156,12 +156,17 @@ describe("整理历史", () => {
         episode: 0,
         source_path: "/data/downloads/Oppenheimer.2023.BluRay",
         target_path: "/media/movies/奥本海默 (2023)",
+        torrent_name: "Oppenheimer.2023.BluRay",
+        match_source: "search",
         subtitles: 0,
         disc_files: 5,
       }),
     ]);
-    const text = q("mh-table")!.textContent ?? "";
-    expect(text).toContain("→ /media/movies/奥本海默 (2023) · 原盘 5 个文件");
+    const tr = q("mh-table")!.querySelector(".el-table__body tr")!.textContent ?? "";
+    expect(tr).toContain("→ /media/movies/奥本海默 (2023)");
+    // 写在条目下面那一行、种子名前面：库里的路径长，文件那一行放不下时也看得到
+    expect(tr).toContain("按名字搜索 · 原盘 5 个文件 · Oppenheimer.2023.BluRay");
+    expect(tr.split("原盘 5 个文件").length - 1, "只写一次").toBe(1);
   });
 
   it("识别出了条目的记录：条目名链到条目详情（剧集带季）；没识别出来的不链", async () => {
