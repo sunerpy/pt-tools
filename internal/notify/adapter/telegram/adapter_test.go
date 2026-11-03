@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -553,6 +554,70 @@ func TestTelegram_Send_BotError(t *testing.T) {
 	err := c.Send(context.Background(), notify.Notification{Title: "x", Text: "y"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SendMessage")
+}
+
+// TestTelegram_Send_WhileLongPollFailing：getUpdates 一直失败（Telegram 回 502/504、别处在轮询同一个 bot）
+// 时状态是异常，但通知照样发。以前按状态拒发，报 not initialized、根本没发。
+func TestTelegram_Send_WhileLongPollFailing(t *testing.T) {
+	bot := &fakeBot{}
+	c := New()
+	c.factory = func(_ *Config, _ func(error)) (botAPI, updateSource, error) {
+		// 长轮询一直挂着，健康状态只由下面的 reportPoll 决定
+		return bot, func(ctx context.Context) (<-chan telego.Update, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}, nil
+	}
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	plain := `{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK","default_chat_id":555}`
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: plain}))
+
+	c.reportPoll(errors.New("getUpdates 返回 HTTP 502"))
+	require.False(t, c.Healthy(), "长轮询失败时状态是异常")
+
+	require.NoError(t, c.Send(context.Background(), notify.Notification{Title: "每日战报", Text: "x"}))
+	assert.Equal(t, 1, bot.sendCount(), "长轮询失败不挡发送")
+	assert.False(t, c.Healthy(), "发送成功不改长轮询的状态")
+}
+
+// TestTelegram_Send_AfterClose：关闭以后不再发送。
+func TestTelegram_Send_AfterClose(t *testing.T) {
+	bot := &fakeBot{}
+	src := newFakeSource()
+	plain := []byte(`{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK","default_chat_id":555}`)
+	c := newChannelWithFakes(t, nil, bot, src, plain)
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: string(plain)}))
+	require.NoError(t, c.Close(context.Background()))
+
+	err := c.Send(context.Background(), notify.Notification{Title: "x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "通道已关闭")
+	assert.Equal(t, 0, bot.sendCount())
+}
+
+// TestTelegram_Send_BotErrorRedactsToken：net/http 的错误带着请求地址，地址里有令牌；
+// 发送错误会进日志、通知记录与操作审计，令牌要换掉，原错误仍能 errors.As 取到。
+func TestTelegram_Send_BotErrorRedactsToken(t *testing.T) {
+	const token = "123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK"
+	bot := &fakeBot{sendErr: &url.Error{
+		Op:  "Post",
+		URL: "https://api.telegram.org/bot" + token + "/sendMessage",
+		Err: errors.New("read: connection reset by peer"),
+	}}
+	src := newFakeSource()
+	plain := []byte(`{"bot_token":"` + token + `","default_chat_id":555}`)
+	c := newChannelWithFakes(t, nil, bot, src, plain)
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: string(plain)}))
+
+	err := c.Send(context.Background(), notify.Notification{Title: "x"})
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), token)
+	assert.Contains(t, err.Error(), "https://api.telegram.org/bot<bot_token>/sendMessage")
+	assert.Contains(t, err.Error(), "connection reset by peer")
+	var ue *url.Error
+	assert.True(t, errors.As(err, &ue), "原错误仍在错误链上")
+	assert.Equal(t, err, redactBotToken(err, ""), "没有令牌时原样返回")
+	assert.NoError(t, redactBotToken(nil, token))
 }
 
 // TestTelegram_HandleUpdate_Guards covers the early-return branches of

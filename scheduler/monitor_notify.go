@@ -96,8 +96,12 @@ const (
 	monitorNotifyMaxErrLen = 1024
 )
 
-// monitorNotifyBackoff 是第 1、2、3 次投递失败后的等待时间；第 4 次失败记为 failed。
-var monitorNotifyBackoff = []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute}
+// monitorNotifyBackoff 是第 1–5 次投递失败后的等待时间；第 6 次失败记为 failed。
+// 最后两档（2 小时、6 小时）让通知撑过几个小时的通道故障：2026-11-03 Telegram 的 getUpdates
+// 连续 5 个小时返回 502/504，那时只重试 36 分钟，战报、签到汇总都没发出去。
+var monitorNotifyBackoff = []time.Duration{
+	time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour, 6 * time.Hour,
+}
 
 // MonitorNotifier 负责后台监控通知的入队与投递，是这些通知唯一的重试者。
 type MonitorNotifier struct {
