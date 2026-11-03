@@ -179,6 +179,7 @@ describe("整理入库弹窗", () => {
     await vi.waitFor(() => expect(q("organize-disc")).not.toBeNull());
     expect(q("organize-disc")!.textContent).toBe("蓝光原盘 · 5 个文件");
     expect(q("organize-items")!.textContent).toContain("奥本海默 (2023)");
+    expect(q("organize-run")!.textContent, "按钮按原盘里的文件数").toContain("整理 5 个文件");
   });
 
   it("整理：写明结果并通知外面；后台还在跑时说明稍后看历史", async () => {
