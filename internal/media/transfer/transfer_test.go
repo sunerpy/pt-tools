@@ -161,7 +161,8 @@ func TestCopyWithoutHardlinkSupport(t *testing.T) {
 		noReplace = nr
 		dst := filepath.Join(t.TempDir(), "a.mkv")
 		writeFile(t, dst, "someone else")
-		require.ErrorIs(t, copyFile(src, dst, info), ErrTargetExists)
+		_, err := copyFile(src, dst, info)
+		require.ErrorIs(t, err, ErrTargetExists)
 		assert.Equal(t, "someone else", readFileT(t, dst))
 		left, _ := filepath.Glob(filepath.Join(filepath.Dir(dst), "*.part"))
 		assert.Empty(t, left, "不留临时文件")
@@ -185,7 +186,7 @@ func TestCopyRefusesClobberRace(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0o755))
 	// 复制途中目标出现了：不覆盖
 	writeFile(t, dst, "someone else")
-	err = copyFile(src, dst, info)
+	_, err = copyFile(src, dst, info)
 	require.ErrorIs(t, err, ErrTargetExists)
 	b, _ := os.ReadFile(dst)
 	assert.Equal(t, "someone else", string(b))

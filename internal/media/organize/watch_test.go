@@ -584,7 +584,7 @@ func TestWatchBusy(t *testing.T) {
 	assert.Empty(t, e.svc.jobs, "整理好了")
 }
 
-// 原盘的项排一次：整理时写一条跳过的记录，之后扫描不再排
+// 原盘的项排一次：整理成一条记录（记在原盘根目录上），之后扫描不再排
 func TestWatchDiscOnce(t *testing.T) {
 	e, d := watchEnv(t)
 	e.put(d, "Oppenheimer.2023.BluRay/BDMV/STREAM/00000.m2ts", 5, 10*time.Minute)
@@ -592,7 +592,8 @@ func TestWatchDiscOnce(t *testing.T) {
 	require.Equal(t, 1, e.drain())
 	rows := e.history()
 	require.Len(t, rows, 1)
-	assert.Contains(t, rows[0].Message, "原盘")
+	assert.Equal(t, models.MediaTransferDone, rows[0].Status)
+	assert.Equal(t, filepath.Join(d.Path, "Oppenheimer.2023.BluRay"), rows[0].SourcePath)
 	e.svc.watchScan(e.ctx, e.mustSettings())
 	assert.Zero(t, e.drain())
 }

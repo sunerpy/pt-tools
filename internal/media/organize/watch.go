@@ -420,9 +420,20 @@ func (s *Service) watchCovered(ctx context.Context, entryPath string, files []tr
 	db := s.cfg.DB.WithContext(ctx)
 	var videos []transfer.File
 	if !tooBig {
-		if sel := transfer.Select(files, int64(set.MinVideoMB)<<20); sel.Disc == "" {
-			videos = sel.Videos
+		sel := transfer.Select(files, int64(set.MinVideoMB)<<20)
+		if len(sel.Discs) > 0 {
+			// 原盘：整理成的记录在原盘根目录上，整理不了的记在这一项本身上
+			paths := []string{entryPath}
+			for _, d := range sel.Discs {
+				paths = append(paths, d.Path)
+			}
+			var n int64
+			if err := db.Model(&models.MediaTransferHistory{}).Where("source_path IN ?", paths).Count(&n).Error; err != nil {
+				return false, err
+			}
+			return n > 0, nil
 		}
+		videos = sel.Videos
 	}
 	if len(videos) == 0 {
 		var n int64

@@ -65,6 +65,11 @@ func vars(m *tmdb.Result, fm, tm meta.Meta) transfer.Vars {
 func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) {
 	lib, tv := p.Library, p.Match.MediaType == tmdb.KindTV
 	tpl := effectiveTemplate(*lib)
+	if len(p.Items) == 1 && p.Items[0].disc != nil {
+		// 原盘：一项、没有字幕（见 finishPlan）
+		s.planDisc(ctx, p, tpl, &p.Items[0])
+		return
+	}
 	seasons := map[int]*tmdb.Season{}
 	season := func(n int) *tmdb.Season {
 		if s, ok := seasons[n]; ok {

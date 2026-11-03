@@ -28,6 +28,8 @@ type extra struct {
 	FileID string `json:"file_id,omitempty"`
 	Kind   string `json:"kind,omitempty"`
 	SHA256 string `json:"sha256,omitempty"`
+	// Main 标出原盘的主文件（kind 为 extraDisc 时）
+	Main bool `json:"main,omitempty"`
 }
 
 const extraMeta = "meta"
@@ -71,12 +73,19 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		return res, nil
 	}
 	var created []*PlanItem
+	s.recordISOSkips(ctx, p, trigger, res)
 	for i := range p.Items {
 		it := &p.Items[i]
 		if it.otherFile {
 			// 记录管着库里的文件，不改成这个新文件的（见 markOtherFiles）
 			res.Skipped++
 			s.noteOtherFile(ctx, it, p.otherNote())
+			continue
+		}
+		if it.disc != nil {
+			if s.organizeDisc(ctx, p, it, trigger, res) {
+				created = append(created, it)
+			}
 			continue
 		}
 		switch it.Status {
@@ -126,7 +135,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			res.Done++
 			continue
 		}
-		out, terr := transfer.Transfer(it.Source, it.Target, p.Mode)
+		out, detail, terr := transferDetail(it.Source, it.Target, p.Mode)
 		var keptNote string
 		if kept := (*transfer.SourceKeptError)(nil); errors.As(terr, &kept) {
 			// 移动没做成，但库里已经放好了一份：按实际的方式（硬链接或复制）记成已整理，写明源文件还在
@@ -153,6 +162,9 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		extras, newSubs, msgs := s.transferSubtitles(it, mode, rowExtras(it.row))
 		if keptNote != "" {
 			msgs = append([]string{keptNote}, msgs...)
+		}
+		if detail.Cloned {
+			msgs = append([]string{cloneNote}, msgs...)
 		}
 		if err := s.writeRecord(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), extras)); err != nil {
 			// 记录写不进去时库里的文件没人认领：源文件还在的撤回这次放进去的（移动过去的是唯一的一份，留着）
@@ -229,6 +241,15 @@ func unplace(it *PlanItem, mode, fileID string, placed bool, subs []extra) {
 // recordProblem 为整个种子整理不了的情况写记录：知道视频文件时每个文件一行，否则用种子的内容路径记一行。
 func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, res *Result) {
 	status := models.MediaTransferFailed
+	if p.skip {
+		// 整理不了但不是出错（例如剧集原盘）：记成跳过，不重试
+		status = models.MediaTransferSkipped
+	}
+	if len(p.Items) == 0 && len(p.isoSkips) > 0 {
+		// 只有剧集里的 ISO：每个 ISO 一条跳过的记录（目录监控按它们认处理过了）
+		s.recordISOSkips(ctx, p, trigger, res)
+		return
+	}
 	if len(p.Items) == 0 {
 		status = models.MediaTransferSkipped
 		it := &PlanItem{Rel: p.Name, Source: p.contentSrc}
@@ -253,9 +274,14 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 			continue
 		}
 		it.Status, it.Message = ItemFailed, p.Problem
-		s.record(ctx, p, it, trigger, status, p.Problem, p.retryable, "", nil)
-		res.Failed++
+		s.record(ctx, p, it, trigger, status, p.Problem, p.retryable && !p.skip, "", nil)
+		if p.skip {
+			res.Skipped++
+		} else {
+			res.Failed++
+		}
 	}
+	s.recordISOSkips(ctx, p, trigger, res)
 }
 
 // record 写一个文件的整理记录（按源文件更新或新建）；写不进去时只记日志（不认领库里文件的情况用）。
@@ -294,8 +320,9 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 		b, _ := json.Marshal(extras)
 		row.Extras = string(b)
 	}
-	// 没整理成时保留记录里之前整理出的文件（视频的位置、方式与文件编号，字幕与刮削写的文件）：删除记录时还要按它们清理
-	if status != models.MediaTransferDone && hasLibraryFiles(it.row) {
+	// 没整理成时保留记录里之前整理出的文件（视频的位置、方式与文件编号，字幕与刮削写的文件）：删除记录时还要按它们清理。
+	// 带着 extras 的（原盘移动到一半、挪不回去的文件）记这次的：之前的那些文件已经不在了（电影目录不在或是空的才会放）
+	if status != models.MediaTransferDone && len(extras) == 0 && hasLibraryFiles(it.row) {
 		prior := it.row
 		row.LibraryID, row.TargetPath, row.Mode, row.TargetFileID, row.Extras = prior.LibraryID, prior.TargetPath, prior.Mode, prior.TargetFileID, prior.Extras
 		row.RootPath = prior.RootPath

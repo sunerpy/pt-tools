@@ -31,6 +31,8 @@ type HistoryItem struct {
 	HasFiles    bool   `json:"has_files"`
 	// ManualPath 是手动指定路径整理的记录当时填的路径（别的记录没有）：网页上带着它重新打开「手动整理」
 	ManualPath string `json:"manual_path,omitempty"`
+	// DiscFiles 是原盘记录放进库的文件数（不是原盘时为 0）
+	DiscFiles int `json:"disc_files,omitempty"`
 }
 
 // HistoryPage 是一页整理记录。
@@ -86,13 +88,16 @@ func (s *Service) History(ctx context.Context, q HistoryQuery) (HistoryPage, err
 	}
 	page.Items = make([]HistoryItem, 0, len(rows))
 	for _, r := range rows {
-		subs := 0
+		subs, disc := 0, 0
 		for _, e := range decodeExtras(r.Extras) {
-			if e.Kind == "" {
+			switch e.Kind {
+			case "":
 				subs++
+			case extraDisc:
+				disc++
 			}
 		}
-		item := HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: subs, HasFiles: hasLibraryFiles(&r)}
+		item := HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: subs, HasFiles: hasLibraryFiles(&r), DiscFiles: disc}
 		if pathRow(r) {
 			item.ManualPath = requestOf(r).SourcePath
 		}
@@ -222,7 +227,7 @@ func hasVideo(dir string) bool {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && transfer.IsVideo(d.Name()) {
+		if !d.IsDir() && transfer.IsLibraryVideo(d.Name()) {
 			found = true
 			return filepath.SkipAll
 		}
@@ -246,12 +251,14 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 		}
 		return err
 	}
-	if row.TargetPath != "" {
+	// 原盘记录的目标是电影目录：不删它本身，原盘的文件在 extras 里逐个确认
+	_, disc := discMain(&row)
+	if row.TargetPath != "" && !disc {
 		if err := remove(row.TargetPath, row.Mode, row.TargetFileID, row.SourcePath); err != nil {
 			return nil, err
 		}
 	}
-	var shared []extra
+	var shared, discFiles []extra
 	for _, e := range decodeExtras(row.Extras) {
 		switch {
 		case e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)):
@@ -262,6 +269,9 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 				errs = append(errs, err)
 			}
 		default:
+			if e.Kind == extraDisc {
+				discFiles = append(discFiles, e)
+			}
 			if err := remove(e.Target, row.Mode, e.FileID, e.Source); err != nil {
 				errs = append(errs, err)
 			}
@@ -290,6 +300,11 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 	}
 	if err := s.handOver(ctx, row, stay); err != nil {
 		return nil, err
+	}
+	if disc {
+		// 从每个原盘文件的目录往上删空目录，最后是电影目录
+		removeDiscDirs(discFiles, row.TargetPath, lib.Path)
+		return kept, errors.Join(errs...)
 	}
 	dirs := []string{filepath.Dir(row.TargetPath)}
 	if sd := showDir(lib.Path, row.TargetPath); sd != "" && sd != dirs[0] {
@@ -328,7 +343,7 @@ func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory,
 		}
 		d := filepath.Dir(e.Target)
 		for _, r := range rows {
-			if transfer.Within(d, r.TargetPath) {
+			if transfer.Within(d, rowVideo(r)) {
 				add[r.ID] = append(add[r.ID], e)
 				break
 			}
