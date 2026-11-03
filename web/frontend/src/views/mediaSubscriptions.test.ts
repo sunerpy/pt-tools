@@ -4,7 +4,7 @@
  * 立即搜索、暂停、确认、删除；详情列出分集与种子，点一集可以跳过、换版本，集号规则与运行记录；修改追剧只发接口认的字段；
  * 设置、质量档案、豆瓣来源只发接口认的字段（严格解析）；豆瓣立即拉取写明建了几个订阅。
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
 import { type MountedView, mountView } from "@/test-mount";
@@ -116,6 +116,9 @@ const settings = {
   default_downloader_id: 0,
   notify_channels: [],
   upgrade_old: "keep",
+  today_enabled: false,
+  today_time: "09:00",
+  today_channels: [],
 };
 
 const base = {
@@ -227,10 +230,15 @@ const follow = {
 };
 
 async function mountPage(
-  opts: { listFail?: boolean; settingsFail?: boolean; subs?: unknown[] } = {},
+  opts: {
+    listFail?: boolean;
+    settingsFail?: boolean;
+    keepSettings?: boolean;
+    subs?: unknown[];
+  } = {},
 ) {
   if (opts.settingsFail) api.settings.mockRejectedValue(new Error("读取设置失败"));
-  else api.settings.mockResolvedValue(settings);
+  else if (!opts.keepSettings) api.settings.mockResolvedValue(settings);
   if (opts.listFail) api.list.mockRejectedValue(new Error("读取订阅失败"));
   else api.list.mockResolvedValue(opts.subs ?? [movie, tv]);
   api.profiles.mockResolvedValue({
@@ -271,6 +279,38 @@ describe("订阅", () => {
     expect(table).toContain("没有找到对得上的资源");
     expect(table).toContain("下次搜索");
     expect(api.list).toHaveBeenCalledWith({ status: "", q: "" });
+    // 名字链到条目详情：剧集打开订阅的那一季
+    expect(q("ms-item-1")!.getAttribute("href")).toBe("/media/item/movie/1?from=subscriptions");
+    expect(q("ms-item-2")!.getAttribute("href")).toBe(
+      "/media/item/tv/1?from=subscriptions&season=2",
+    );
+  });
+
+  it("手机：行卡的名字也链到条目详情（剧集带季）", async () => {
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes("max-width: 768px"),
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    );
+    await mountPage();
+    const hrefs = [...document.querySelectorAll(".ms-cards a.ms-link")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toEqual([
+      "/media/item/movie/1?from=subscriptions",
+      "/media/item/tv/1?from=subscriptions&season=2",
+    ]);
   });
 
   it("立即搜索、暂停、确认、删除", async () => {
@@ -696,6 +736,39 @@ describe("订阅", () => {
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
     expect(api.saveSettings.mock.calls[0]![0]).toEqual({ ...settings, enabled: true });
     expect(ui.success).toHaveBeenCalledWith("已保存订阅设置");
+  });
+
+  it("设置：每天推送今天的更新，打开以后才有时刻与通道", async () => {
+    await mountPage();
+    expect(q("ms-today-time"), "没开时不显示").toBeNull();
+    (q("ms-today")!.querySelector("input") ?? q("ms-today"))!.click();
+    await vi.waitFor(() => expect(q("ms-today-time")).not.toBeNull());
+    expect(q("ms-today-channels")).not.toBeNull();
+    api.saveSettings.mockResolvedValue({ ...settings, today_enabled: true });
+    q("ms-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({ ...settings, today_enabled: true });
+  });
+
+  it("设置：读到的今日更新照样显示、照样存回去", async () => {
+    api.settings.mockResolvedValue({
+      ...settings,
+      today_enabled: true,
+      today_time: "21:15",
+      today_channels: [2],
+    });
+    await mountPage({ keepSettings: true });
+    expect(q("ms-today-time")!.textContent).toContain("21:15");
+    expect(q("ms-today-channels")!.textContent).toContain("TG");
+    api.saveSettings.mockResolvedValue({ ...settings, today_enabled: true });
+    q("ms-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      ...settings,
+      today_enabled: true,
+      today_time: "21:15",
+      today_channels: [2],
+    });
   });
 
   it("设置没读到时不能保存，避免用默认值盖掉真正的设置", async () => {

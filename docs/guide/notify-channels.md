@@ -104,6 +104,7 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 | `media.followshow.found` 追剧更新                   | `subscription`、`season`、`episodes`、`torrent_title`、`site`、`quality`、`version`、`poster`                                                                   |
 | `media.followshow.waiting` 追剧等版本               | `subscription`、`subscription_id`、`season`、`episodes`、`version`、`days`                                                                                      |
 | `media.followshow.failed` 追剧出错                  | `subscription`、`season`、`fails`、`error`                                                                                                                      |
+| `media.calendar.today` 今日更新                     | `day`、`count`（几项）、`in_library`（其中已入库的），`items`（每项 `title`、`media_type`、`season`、`episode`、`name`、`air_time`、`state`、`state_label`）    |
 | `subscribe.douban_failed` 豆瓣想看拉取失败          | `source`、`fails`、`error`                                                                                                                                      |
 | `media.organized` 入库                              | `name`、`media_type`、`episodes`、`files`、`quality`、`library`、`torrent`、`poster`                                                                            |
 | `site.login_expiring` 站点即将被封号                | `site`、`tier`、`days_remaining`、`last_active`、`days_since_active`、`access_stale`                                                                            |
@@ -122,7 +123,7 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 | `system.backup_failed` 备份失败                     | `dir`、`error`、`last_ok`（上一次成功的时间，从没成功过时为空）                                                                                                 |
 | `test` 通道测试                                     | `channel`                                                                                                                                                       |
 
-每日战报的变量只有合计与各站点；登录异常、签到、刷流、辅种几段在 `text` 里。辅种结果见 [IYUU 辅种的通知](reseed.md#通知)。列表最多 100 项，省略的条数在 `items_more` 里。
+每日战报的变量只有合计与各站点；登录异常、签到、刷流、辅种、追剧几段在 `text` 里。辅种结果见 [IYUU 辅种的通知](reseed.md#通知)。列表最多 100 项，省略的条数在 `items_more` 里。
 
 能用的函数：比较 `eq`、`ne`、`lt`、`le`、`gt`、`ge`（整数与小数可以直接比），`default`（为空时用默认值），`truncate`（按字符截断，截掉了补「…」），`contains`、`hasPrefix`、`hasSuffix`，`replace`、`upper`、`lower`、`trim`，`bytes`（字节数写成 `15.00 GB`），`date`（按 Go 的版式写时间），`printf`，`json`（写成 JSON 字面量）。写法举例：
 
@@ -155,6 +156,7 @@ Telegram 按纯文本发，模板里写的 HTML、Markdown 标记会原样显示
 | `reply.version` 版本       | `/version`                                                               | `version`、`build`、`commit`、`update_checked`、`has_update`、`latest`                                                                  |
 | `reply.help` 命令列表      | `/help`                                                                  | `items`（`name`、`description`、`admin`）                                                                                               |
 | `reply.subs` 订阅列表      | `/subs`                                                                  | `count`，`items`（最多 20 个：`id`、`title`、`status`、`progress`、`next_search`），`items_more`                                        |
+| `reply.today` 今日更新     | `/today`                                                                 | `day`、`count`、`in_library`，`items`（同 `media.calendar.today`，回复的文字最多列 30 项）                                              |
 | `reply.other` 其他回复     | 其余的回复：别的命令的结果、命令出错，没绑定、权限不够、命令不认识的提示 | `command`（命令名，不带 `/`）、`ok`（做成了没有）                                                                                       |
 | `assistant.reply` AI 助手  | AI 助手发的消息                                                          | `kind`（`answer` 回答、`notice` 提示、`confirm` 要确认的操作、`timeout` 确认超时、`status` 收到消息时的即时答复）、`summary`、`expires` |
 

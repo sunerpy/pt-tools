@@ -76,6 +76,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "媒体",
     items: [
       { path: "/media/explore", label: "探索", icon: "compass" },
+      /* 媒体中心 M3：画板 04 的导航把日历画在探索后面（那枚「新」徽标不做）；页面画板没画，沿用媒体页的样式 */
+      { path: "/media/calendar", label: "日历", icon: "calendar-days" },
       { path: "/media/subscriptions", label: "追剧与订阅", icon: "bookmark" },
       { path: "/media/library", label: "媒体库", icon: "folder-open" },
       { path: "/media/history", label: "整理历史", icon: "history" },
@@ -191,6 +193,7 @@ const ROUTE_NAME_TO_NAV: Record<string, string> = {
   brush: "/brush",
   "qbit-compat": "/qbit-compat",
   "media-explore": "/media/explore",
+  "media-calendar": "/media/calendar",
   "media-subscriptions": "/media/subscriptions",
   "media-library": "/media/library",
   "media-history": "/media/history",

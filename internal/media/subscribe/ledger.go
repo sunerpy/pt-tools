@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/media/cachectl"
@@ -113,7 +114,7 @@ func (s *Service) mapperFor(ctx context.Context, sub *models.MediaSubscription, 
 // libraryRows 是整理记录里这一季已入库的集（一集有几个文件时取最新的那条）。
 func (s *Service) libraryRows(ctx context.Context, sub *models.MediaSubscription) (map[int]models.MediaTransferHistory, error) {
 	var rows []models.MediaTransferHistory
-	if err := s.cfg.DB.WithContext(ctx).Select("id", "episode", "episode_end", "torrent_name", "source_path").
+	if err := s.cfg.DB.WithContext(ctx).Select("id", "episode", "episode_end", "torrent_name", "source_path", "size").
 		Where("status = ? AND media_type = ? AND tmdb_id = ? AND season = ?", models.MediaTransferDone, models.MediaKindTV, sub.TMDBID, sub.Season).
 		Order("id").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("读取整理记录失败: %w", err)
@@ -144,6 +145,14 @@ func covered(t models.MediaSubscriptionTorrent) func(n int) bool {
 // listCacheTTL 是下载器的种子列表缓存多久：大客户端列一次要好几秒，每个下载器每分钟最多列一次。
 const listCacheTTL = time.Minute
 
+// itemListMaxAge 是条目详情（详情与一季的每一集）用的缓存最多多旧：进度、分享率不能是一分钟以前的；
+// 同一次打开的详情与季合成一次列表。
+const itemListMaxAge = 10 * time.Second
+
+// recentRecord 是多久以内记下的种子记录算「刚记下的」：缓存的列表（最多 itemListMaxAge 旧）里没有它时，
+// 列表可能是推送以前列的，再列一次（见 downloaderTorrentsWithin）。比 itemListMaxAge 多留几秒。
+const recentRecord = itemListMaxAge + 5*time.Second
+
 type dlList struct {
 	at       time.Time
 	torrents []downloader.Torrent
@@ -153,13 +162,36 @@ type dlList struct {
 type dlCache struct {
 	mu sync.Mutex
 	m  map[uint]dlList
+	// group 把同时来的、问同一台下载器的几次列表合成一次
+	group singleflight.Group
 }
 
 // downloaderTorrents 列出下载器里的种子（缓存 listCacheTTL）。
 func (s *Service) downloaderTorrents(ctx context.Context, id uint) ([]downloader.Torrent, error) {
-	now := s.cfg.Now()
+	return s.downloaderTorrentsWithin(ctx, id, listCacheTTL, nil)
+}
+
+// downloaderTorrentsWithin 同 downloaderTorrents，只用不超过 maxAge 的缓存（条目详情用 itemListMaxAge）。want 是刚记下的种子
+// （info hash，小写）：缓存的列表里少了其中一个时，列表可能是推送以前列的，再列一次；合进了别人正在列的那一次、还是少时再列一次
+// （那一次可能是推送以前开始的）。不按时间先后比：Windows 的时钟粗，列表与记录常常是同一刻。
+func (s *Service) downloaderTorrentsWithin(ctx context.Context, id uint, maxAge time.Duration, want []string) ([]downloader.Torrent, error) {
+	missing := func(l dlList) bool {
+		if l.err != nil || len(want) == 0 {
+			return false
+		}
+		have := make(map[string]bool, len(l.torrents))
+		for _, t := range l.torrents {
+			have[strings.ToLower(t.InfoHash)] = true
+		}
+		for _, h := range want {
+			if !have[h] {
+				return true
+			}
+		}
+		return false
+	}
 	s.dls.mu.Lock()
-	if l, ok := s.dls.m[id]; ok && now.Sub(l.at) < listCacheTTL {
+	if l, ok := s.dls.m[id]; ok && s.cfg.Now().Sub(l.at) < maxAge && !missing(l) {
 		s.dls.mu.Unlock()
 		return l.torrents, l.err
 	}
@@ -167,20 +199,45 @@ func (s *Service) downloaderTorrents(ctx context.Context, id uint) ([]downloader
 	if s.cfg.Downloaders == nil {
 		return nil, fmt.Errorf("下载器服务没有启动")
 	}
-	var list []downloader.Torrent
-	dl, setting, err := s.cfg.Downloaders.Get(ctx, id)
-	if err == nil {
-		list, err = dl.GetAllTorrents()
-		if err != nil {
-			err = fmt.Errorf("读不到下载器「%s」里的种子：%w", setting.Name, err)
+	var l dlList
+	for range 2 {
+		v, _, shared := s.dls.group.Do(strconv.FormatUint(uint64(id), 10), func() (any, error) {
+			got := dlList{at: s.cfg.Now()}
+			dl, setting, err := s.cfg.Downloaders.Get(ctx, id)
+			if err == nil {
+				got.torrents, err = dl.GetAllTorrents()
+				if err != nil {
+					err = fmt.Errorf("读不到下载器「%s」里的种子：%w", setting.Name, err)
+				}
+			} else {
+				err = fmt.Errorf("连不上下载器：%w", err)
+			}
+			got.err = err
+			s.dls.mu.Lock()
+			s.dls.m[id] = got
+			s.dls.mu.Unlock()
+			return got, nil
+		})
+		// 自己列的（这次调用以后才开始）还是少：种子不在下载器里了
+		if l = v.(dlList); !shared || !missing(l) {
+			break
 		}
-	} else {
-		err = fmt.Errorf("连不上下载器：%w", err)
 	}
-	s.dls.mu.Lock()
-	s.dls.m[id] = dlList{at: now, torrents: list, err: err}
-	s.dls.mu.Unlock()
-	return list, err
+	return l.torrents, l.err
+}
+
+// recentHashes 是 refs 里刚记下的种子（info hash，小写），按下载器分开。
+func recentHashes[T any](refs []T, of func(T) (uint, string, time.Time)) map[uint][]string {
+	out := map[uint][]string{}
+	for _, r := range refs {
+		// 没记时间的（升级前的归档记录）是零值，离现在很远，不算
+		dl, hash, seen := of(r)
+		if time.Since(seen) > recentRecord {
+			continue
+		}
+		out[dl] = append(out[dl], strings.ToLower(hash))
+	}
+	return out
 }
 
 // adoptedSite 是认领的下载器里的种子记在订阅种子表里的站点名。

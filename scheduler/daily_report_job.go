@@ -56,6 +56,9 @@ type DailyReportJobConfig struct {
 	// ReseedLine 返回 day 那天的辅种那一行，label（「今日」「昨日」）写在行首；辅种设置里没开「每日战报」
 	// 或那天没有辅种时为空串。为空时不写这一行。
 	ReseedLine func(ctx context.Context, day, label string) string
+	// FollowLine 返回 day 那天订阅里播出的集与其中已入库的那一行，label 写在行首；订阅没开或那天没有播出的集时为空串。
+	// 为空时不写这一行。
+	FollowLine func(ctx context.Context, day, label string) string
 	Clock      sitelogin.Clock
 	Logger     *zap.SugaredLogger
 	Tick       time.Duration
@@ -383,8 +386,11 @@ func (j *DailyReportJob) buildReport(ctx context.Context, now time.Time, scope s
 		b.WriteString("\n")
 		b.WriteString(strings.Join(lines, "\n"))
 	}
-	if j.cfg.ReseedLine != nil {
-		if line := j.cfg.ReseedLine(ctx, p.day, p.label); line != "" {
+	for _, hook := range []func(context.Context, string, string) string{j.cfg.ReseedLine, j.cfg.FollowLine} {
+		if hook == nil {
+			continue
+		}
+		if line := hook(ctx, p.day, p.label); line != "" {
 			b.WriteString("\n")
 			b.WriteString(line)
 		}

@@ -66,9 +66,10 @@ Each day at the send time, plus a fixed per-installation offset of up to 10 minu
 - sites whose login state is abnormal (session expired, key error, challenged, network error and so on), as it is at the send time, also when the report covers the previous day;
 - check-in results (how many sites signed in, were already signed in, or failed);
 - with In the daily report (写进每日战报) on in the IYUU cross-seeding settings, cross-seeds created, succeeded, failed and deleted on site (see [IYUU cross-seeding notifications](reseed.md#notifications));
+- with subscriptions on and episodes aired that day, a followed-show line: how many episodes of your subscriptions aired on the day covered and how many of them are in the library now (see [the subscription calendar](media-detail.md#bot-and-daily-report));
 - sites whose numbers went backwards and were counted as 0.
 
-Increments, check-ins, brushing and cross-seeding are all counted for the day the report covers. A day's increment is that day's last snapshot minus the latest one before it, the same numbers the User Stats page shows per day: uploads after that day's last sync are counted on the next day.
+Increments, check-ins, brushing, cross-seeding and followed shows are all counted for the day the report covers. A day's increment is that day's last snapshot minus the latest one before it, the same numbers the User Stats page shows per day: uploads after that day's last sync are counted on the next day.
 
 Only enabled sites are counted. A site whose probe mode is "Disabled" is no longer probed, so its last probe status is not reported as a login problem. When there is no snapshot from before the day the report covers and nothing can be compared yet, the report says so instead of listing zeros.
 

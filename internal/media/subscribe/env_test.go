@@ -301,6 +301,8 @@ type fakeDL struct {
 	torrents []downloader.Torrent
 	listErr  error
 	lists    int
+	// listHook 在每次列完（拿到那一刻的种子）以后、返回以前调用，参数是第几次列
+	listHook func(n int)
 	// files 是种子的文件列表（按种子 ID）；没有的回空列表，filesErr 里有的读不出来
 	files    map[string][]downloader.TorrentFile
 	filesErr map[string]error
@@ -356,12 +358,23 @@ func (f *fakeDL) setFiles(id string, files ...downloader.TorrentFile) {
 
 func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.lists++
-	if f.listErr != nil {
-		return nil, f.listErr
+	n, hook, err := f.lists, f.listHook, f.listErr
+	list := append([]downloader.Torrent(nil), f.torrents...)
+	f.mu.Unlock()
+	if hook != nil {
+		hook(n)
 	}
-	return append([]downloader.Torrent(nil), f.torrents...), nil
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (f *fakeDL) listCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lists
 }
 
 func (f *fakeDL) setTorrents(list ...downloader.Torrent) {

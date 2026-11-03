@@ -13,7 +13,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
-// SubscribeService 是 /sub、/subs、/follow、/runs、/unlock 用到的订阅能力。订阅服务比 ChatOps 晚建，用 SetSubscribeService 单独登记。
+// SubscribeService 是 /sub、/subs、/follow、/runs、/unlock、/today 用到的订阅能力。订阅服务比 ChatOps 晚建，用 SetSubscribeService 单独登记。
 type SubscribeService interface {
 	// Search 在 TMDB 上按关键字找电影与剧集（按热度排）。
 	Search(ctx context.Context, keyword string) ([]SubscribeCandidate, error)
@@ -27,6 +27,8 @@ type SubscribeService interface {
 	Runs(ctx context.Context, id uint, limit int) (string, []RunLine, error)
 	// Unlock 让追剧的第 episode 集不受版本锁限制（并尽快搜一次），返回订阅的名字。
 	Unlock(ctx context.Context, id uint, episode int) (string, error)
+	// Today 是今天播出的集与上映的电影（暂停的订阅不算，按播出时刻），day 是今天的日期。
+	Today(ctx context.Context) (day string, lines []TodayLine, err error)
 }
 
 // SubscribeCandidate 是 /sub 列出的一个条目。

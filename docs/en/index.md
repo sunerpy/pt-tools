@@ -137,6 +137,10 @@ home:
             body: Subscribe to a film or follow a season, search your sites and pick it up from RSS; a followed show is searched when each episode airs and keeps to one release, and variety shows split into parts match too; quality profiles choose the release, upgrades swap in better releases, and a Douban wish list subscribes for you.
             status: preview
             link: /en/guide/media-subscribe
+          - title: Title details and calendar
+            body: One page for a film or series with its details, the episodes in your library, the torrents seeding and whether they can be deleted; the calendar lists when each subscribed episode airs and whether it is in the library, and today's updates can be pushed to you every day.
+            status: preview
+            link: /en/guide/media-detail
           - title: Library organising
             body: Hard-link finished movies and shows into your library with a naming template, write NFO files and artwork, ask Emby, Jellyfin or Plex to scan, and send a notification.
             status: preview

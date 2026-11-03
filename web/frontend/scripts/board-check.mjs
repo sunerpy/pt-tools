@@ -3545,6 +3545,630 @@ if (doEntry) {
   );
 }
 
+// ------------------------------------------------- 条目详情（画板 04、08，媒体中心 M3）
+
+/*
+ * 条目详情不是带式表格页：88 高的页头带面包屑，下面是 1144 宽的大图与几个区块。画板 04 按 1440×1024 画
+ * （侧栏 264 + 主区 1176），所以这一趟按 1440 量；手机按画板 08 量 375×812。剧集一部（长夜将尽第 2 季）、电影一部（沙丘2）。
+ * 数字来自 docs/design/media-hub-board-spec.md 的 B04 / B08；块与块之间统一 24（偏离 ④）。
+ * 依赖后面里程碑的部分不量：播放与媒体服务器那一行（M6）、删除（M7）；「你的 NAS 上」只有三行。
+ * 假数据是 board-fixtures.mjs 的 ITEM_TV / ITEM_TV_S2 / ITEM_MOVIE（图片路径都不给，走占位）。
+ */
+const ITEM_TV_ROUTE = "/media/item/tv/100088?from=subscriptions&season=2";
+const ITEM_MOVIE_ROUTE = "/media/item/movie/693134?from=explore";
+const doItem = wanted.length === 0 || wanted.includes("/media/item");
+
+const MEASURE_MI = `(() => {
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const q = (sel, root = document) => root.querySelector(sel);
+  const qa = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const hero = q('[data-testid="mi-hero"]');
+  const nas = q('[data-testid="mi-nas"]');
+  const scroller = document.querySelector('.pt-shell__content');
+  return {
+    sb: scroller ? scroller.offsetWidth - scroller.clientWidth : 0,
+    head: box(q('.pt-head')),
+    /* 面包屑的分隔是外壳的 chevron 图标（同其他详情页），按段取字再用斜杠连起来比画板的写法 */
+    crumbs: qa('.pt-head__crumbs a, .pt-head__crumbs span').map(txt).join(' / '),
+    headTitle: txt(q('.pt-head__title')),
+    mheadSub: txt(q('#pt-mhead-sub')),
+    hero: box(hero),
+    poster: box(q('.mi-hero__poster', hero ?? document)),
+    title: box(q('[data-testid="mi-title"]')),
+    titleText: txt(q('[data-testid="mi-title"]')),
+    titleSize: q('[data-testid="mi-title"]') ? getComputedStyle(q('[data-testid="mi-title"]')).fontSize : '',
+    original: txt(q('.mi-hero__original')),
+    originalBox: box(q('.mi-hero__original')),
+    pills: qa('[data-testid="mi-pills"] .mi-glass').map(txt),
+    /* 看得见的胶囊（没被两行的高度截掉的）与几行 */
+    pillsShown: (() => {
+      const c = q('[data-testid="mi-pills"]');
+      if (!c) return { n: 0, rows: 0 };
+      const cr = c.getBoundingClientRect();
+      const shown = qa('.mi-glass', c).filter((el) => el.getBoundingClientRect().bottom <= cr.bottom + 0.5);
+      return { n: shown.length, rows: new Set(shown.map((el) => Math.round(el.getBoundingClientRect().top))).size };
+    })(),
+    pillsBox: box(q('[data-testid="mi-pills"]')),
+    ratingText: txt(q('[data-testid="mi-rating"]')),
+    rating: box(q('[data-testid="mi-rating"]')),
+    imdb: box(q('[data-testid="mi-imdb"]')),
+    tvdb: box(q('[data-testid="mi-tvdb"]')),
+    overview: box(q('[data-testid="mi-overview"]')),
+    credits: txt(q('.mi-hero__credits')),
+    creditsBox: box(q('.mi-hero__credits')),
+    acts: qa('[data-testid="mi-acts"] .mi-btn').map((el) => ({ t: txt(el) || el.getAttribute('aria-label'), ...box(el) })),
+    more: box(q('.mi-hero__more')),
+    nas: box(nas),
+    nasGlass: Boolean(nas?.classList.contains('mi-nas--glass')),
+    nasRows: qa('[data-testid^="mi-nas-"]').map((el) => ({ key: el.getAttribute('data-testid'), t: txt(el), ...box(el) })),
+    seasons: box(q('[data-testid="mi-seasons"]')),
+    seasonTitle: box(q('[data-testid="mi-seasons"] .mi-block__title')),
+    tabs: qa('[data-testid^="mi-tab-"]').map((el) => ({ t: qa('span', el).map(txt).join(' '), on: el.classList.contains('is-on'), ...box(el) })),
+    legend: box(q('[data-testid="mi-legend"]')),
+    legendText: txt(q('[data-testid="mi-legend"]')),
+    collapse: box(q('[data-testid="mi-collapse"]')),
+    collapseText: txt(q('[data-testid="mi-collapse"]')),
+    eps: qa('.mi-ep').map((el) => ({
+      id: el.getAttribute('data-testid'),
+      ...box(el),
+      still: box(q('.mi-ep__still', el)),
+      title: txt(q('.mi-ep__title', el)),
+      titleBox: box(q('.mi-ep__title', el)),
+      air: txt(q('.mi-ep__air', el)),
+      state: txt(q('.mi-ep__state', el)),
+      act: txt(q('.mi-ep__act', el)),
+    })),
+    torTitle: box(q('[data-testid="mi-torrents"] .mi-block__title')),
+    torTitleText: txt(q('[data-testid="mi-torrents"] .mi-block__title')),
+    torSub: txt(q('[data-testid="mi-torrents"] .mi-block__sub')),
+    torList: box(q('[data-testid="mi-torrents"] .mi-list')),
+    torEmpty: txt(q('[data-testid="mi-torrents-empty"]')),
+    rows: qa('[data-testid="mi-trow"]').map((el) => ({
+      ...box(el),
+      t: txt(el),
+      cells: [...el.children].map((c) => ({ t: txt(c), ...box(c) })),
+    })),
+    castTitle: box(q('[data-testid="mi-cast"] .mi-block__title')),
+    castAll: txt(q('[data-testid="mi-cast-all"]')),
+    castAllBox: box(q('[data-testid="mi-cast-all"]')),
+    people: qa('.mi-person').map((el) => ({
+      ...box(el),
+      face: box(q('.mi-person__face', el)),
+      name: txt(q('.mi-person__name', el)),
+      nameBox: box(q('.mi-person__name', el)),
+      role: txt(q('.mi-person__role', el)),
+    })),
+    cast: box(q('.mi-cast')),
+    recTitle: box(q('[data-testid="mi-recs"] .mi-block__title')),
+    recSub: txt(q('[data-testid="mi-recs"] .mi-block__sub')),
+    recs: qa('.mi-rec').map((el) => ({
+      ...box(el),
+      poster: box(q('.mi-rec__poster', el)),
+      tag: txt(q('.mi-rec__tag', el)),
+      name: txt(q('.mi-rec__name', el)),
+    })),
+    recBox: box(q('.mi-recs')),
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  };
+})()`;
+
+/* 等页面读到条目（剧集还要等这一季的集出来），再等过渡走完 */
+async function openItem(metrics, route, tv) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { deviceScaleFactor: 1, ...metrics },
+    sessionId,
+  );
+  await goto(`${BASE}/#${route}`);
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitReady();
+  for (let i = 0; i < 40; i++) {
+    const ok = await ev(
+      tv
+        ? `document.querySelectorAll('.mi-ep').length > 0`
+        : `Boolean(document.querySelector('[data-testid="mi-title"]'))`,
+    ).catch(() => false);
+    if (ok === true) {
+      await sleep(500);
+      return true;
+    }
+    await sleep(250);
+  }
+  return false;
+}
+
+if (doItem) {
+  const itemFail = (key, msg, mobile = false) => {
+    const gapKey = `/media/item${mobile ? "@375" : ""} ${key}`;
+    if (ALLOWED_GAPS[gapKey]) {
+      gapsUsed.add(gapKey);
+      return;
+    }
+    failures.push({
+      route: `/media/item${mobile ? "（375）" : ""}`,
+      board: mobile ? "08 条目详情·手机" : "04 条目详情",
+      key,
+      msg,
+    });
+  };
+  const expectBox = (key, got, want, tol = 4, mobile = false) => {
+    if (!got) {
+      itemFail(key, "找不到这一块", mobile);
+      return;
+    }
+    const diffs = Object.entries(want)
+      .filter(([k, v]) => !near(got[k], v, tol))
+      .map(([k, v]) => `${k} ${got[k]}≠${v}`);
+    if (diffs.length > 0)
+      itemFail(key, `${diffs.join("，")}（实测 ${JSON.stringify(got)}）`, mobile);
+  };
+  const expectText = (key, got, want, mobile = false) => {
+    if (got !== want) itemFail(key, `写的是「${got}」，应为「${want}」`, mobile);
+  };
+  /* 块与块：上一块的底到下一块标题的顶 24（偏离 ④） */
+  const expectGap = (key, prevBottom, next, mobile = false) => {
+    if (!next) itemFail(key, "找不到下一块的标题", mobile);
+    else if (!near(next.y - prevBottom, 24, 2))
+      itemFail(
+        key,
+        `上一块的底 ${prevBottom} 到标题 ${next.y} 是 ${next.y - prevBottom}，统一 24`,
+        mobile,
+      );
+  };
+
+  /* ---- 桌面 1440×1024，剧集（画板 04） ---- */
+  consoleErrors = [];
+  if (!(await openItem({ width: 1440, height: 1024, mobile: false }, ITEM_TV_ROUTE, true))) {
+    itemFail("load", "等了 10 秒还没有集卡：页面没进条目详情，或条目、季的接口没回来");
+  } else {
+    const m = await ev(MEASURE_MI);
+    if (process.env.MI_DUMP) console.log(JSON.stringify(m, null, 1));
+    /* 页面比视口长，滚动区有竖向滚动条（无头 Chrome 里 10 宽，画板按没有滚动条画）：内容宽 W 与右边都让出 sb */
+    const W = 1144 - m.sb;
+    const R = 280 + W;
+    expectBox("head", m.head, { x: 264, y: 0, w: 1176, h: 88 }, 2);
+    expectText("head.crumbs", m.crumbs, "媒体 / 追剧与订阅 / 长夜将尽");
+    expectText("head.title", m.headTitle, "长夜将尽");
+
+    /* 大图 1144×340：海报 28,44 168×252；文字列从 224 起（名字 40、原名 80、胶囊 110、评分 142、简介 178、主创 228、动作 264） */
+    expectBox("hero", m.hero, { x: 280, y: 104, w: W, h: 340 }, 2);
+    expectBox("hero.poster", m.poster, { x: 308, y: 148, w: 168, h: 252 }, 2);
+    expectBox("hero.title", m.title, { x: 504, y: 144 }, 4);
+    if (m.titleSize !== "28px") itemFail("hero.title", `名字 ${m.titleSize}，画板 28/700`);
+    expectBox("hero.original", m.originalBox, { x: 504, y: 184 }, 4);
+    expectText("hero.original", m.original, "The Long Night · 2025 · 2 季 24 集");
+    expectBox("hero.pills", m.pillsBox, { x: 504, y: 214, h: 22 }, 4);
+    expectText("hero.pills", m.pills.join("|"), "剧集|悬疑|犯罪|剧情|中国大陆|每集 45 分钟|连载中");
+    expectBox("hero.rating", m.rating, { x: 504, y: 246 }, 6);
+    if (!m.ratingText.includes("8.4") || !m.ratingText.includes("TMDB 1,204 人评分"))
+      itemFail("hero.rating", `评分那一行是「${m.ratingText}」`);
+    expectBox("hero.imdb", m.imdb, { y: 248, h: 20 }, 4);
+    if (!m.tvdb) itemFail("hero.tvdb", "有 TVDB 编号时要有 TVDB 胶囊");
+    expectBox("hero.overview", m.overview, { x: 504, y: 282, w: 600 }, 4);
+    if (m.overview && !near(m.overview.h, 42, 2))
+      itemFail("hero.overview", `简介 ${m.overview.h} 高，画板两行省略 42`);
+    expectBox("hero.credits", m.creditsBox, { x: 504, y: 332 }, 4);
+    expectText("hero.credits", m.credits, "导演 陈默 · 主演 周屿、林晚晴、沈川、许曼");
+    /* 动作：y 264，从 224 起、间距 8，h32：搜资源 96、订阅（玻璃按钮）、重新刮削与更多两个方钮 32 */
+    const acts = m.acts;
+    if (acts.map((a) => a.t).join("|") !== "搜资源|追剧中 · 第 2 季|重新刮削|更多") {
+      itemFail("hero.acts", `动作是「${acts.map((a) => a.t).join("、")}」`);
+    } else {
+      const [find, sub, rescrape, more] = acts;
+      expectBox("hero.acts.search", find, { x: 504, y: 368, w: 96, h: 32 }, 2);
+      expectBox("hero.acts.sub", sub, { x: 608, y: 368, h: 32 }, 2);
+      expectBox("hero.acts.rescrape", rescrape, { x: sub.x + sub.w + 8, y: 368, w: 32, h: 32 }, 2);
+      expectBox("hero.acts.more", more, { x: rescrape.x + 40, y: 368, w: 32, h: 32 }, 2);
+    }
+    /* 你的 NAS 上：868,44 248×252，玻璃底；三行（媒体服务器那一行 M6 才有），y 40 起、行距 51 */
+    expectBox("nas", m.nas, { x: R - 28 - 248, y: 148, w: 248, h: 252 }, 2);
+    if (!m.nasGlass) itemFail("nas", "1440 下「你的 NAS 上」应在大图里（玻璃底）");
+    const nasText = m.nasRows.map((r) => r.t).join(" | ");
+    expectText(
+      "nas.rows",
+      nasText,
+      "库里 S01 12/12 · S02 6/12剧集库 · 18 个文件 · 82.6 GB | 做种 4 个种子1 个 H&R 还差 2 天 | 追剧中 · 第 2 季版本锁 HHWEB 2160p",
+    );
+    if (m.nasRows.length === 3) {
+      const ys = m.nasRows.map((r) => r.y - m.nas.y);
+      if (!near(ys[0], 40, 2) || !near(ys[1] - ys[0], 51, 2) || !near(ys[2] - ys[1], 51, 2))
+        itemFail("nas.rows", `三行在卡内 y ${ys.join("、")}，画板 40 起、行距 51`);
+    }
+
+    /* 季与集：标题 280,468；季 tab 从 352 起、间距 8、h26；图例右对齐到 1424 */
+    expectBox("season.title", m.seasonTitle, { x: 280, y: 468 }, 2);
+    expectText(
+      "season.tabs",
+      m.tabs.map((t) => t.t + (t.on ? "*" : "")).join(" | "),
+      "第 1 季 12/12 | 第 2 季 6/12* | 特别篇 0/2",
+    );
+    if (m.tabs.length === 3) {
+      const [t1, t2, t3] = m.tabs;
+      expectBox("season.tab1", t1, { x: 352, y: 466, h: 26 }, 2);
+      if (!near(t2.x - (t1.x + t1.w), 8, 1) || !near(t3.x - (t2.x + t2.w), 8, 1))
+        itemFail(
+          "season.tabs",
+          `tab 间距 ${t2.x - (t1.x + t1.w)}、${t3.x - (t2.x + t2.w)}，画板 8`,
+        );
+    }
+    if (!m.legend || !near(m.legend.x + m.legend.w, R, 2))
+      itemFail(
+        "season.legend",
+        `图例的右边在 ${m.legend ? m.legend.x + m.legend.w : "无"}，画板右对齐到 ${R}`,
+      );
+    expectText("season.legend", m.legendText, "已入库 6 下载中 1 等版本 1 还没播 4");
+    if (m.collapse) itemFail("season.collapse", "一季 12 集时桌面不收起");
+    /* 集卡三列（auto-fill、最小 340），列距 17：1144 宽时 370×92 在 x 280、667、1054，行距 104；剧照 10,10 128×72，标题 150,12 */
+    const cardW = (W - 34) / 3;
+    if (m.eps.length !== 12) itemFail("eps", `集卡 ${m.eps.length} 张，这一季 12 集`);
+    else {
+      m.eps.forEach((e, i) => {
+        const want = {
+          x: 280 + (i % 3) * (cardW + 17),
+          y: 504 + Math.floor(i / 3) * 104,
+          w: cardW,
+          h: 92,
+        };
+        if (Object.entries(want).some(([k, v]) => !near(e[k], v, 2)))
+          itemFail(
+            `eps[${i}]`,
+            `${e.id} 在 ${JSON.stringify({ x: e.x, y: e.y, w: e.w, h: e.h })}，画板 ${JSON.stringify(want)}`,
+          );
+      });
+      const e0 = m.eps[0];
+      expectBox("eps[0].still", e0.still, { x: e0.x + 10, y: e0.y + 10, w: 128, h: 72 }, 1);
+      expectBox("eps[0].title", e0.titleBox, { x: e0.x + 150, y: e0.y + 12 }, 3);
+      expectText("eps[0].title", e0.title, "E01 · 归来");
+      const e7 = m.eps[6];
+      if (!e7.state.includes("下载中") || !e7.state.includes("63% · 还要 12 分钟"))
+        itemFail("eps[6]", `下载中的集写的是「${e7.state}」`);
+      const e8 = m.eps[7];
+      if (
+        !e8.state.includes("等版本") ||
+        !e8.state.includes("锁定 HHWEB 2160p") ||
+        e8.act !== "看版本"
+      )
+        itemFail("eps[7]", `等版本的集写的是「${e8.state}」、动作「${e8.act}」`);
+      const e9 = m.eps[8];
+      if (!e9.state.includes("还没播") || !e9.state.includes("播出后 2 小时开始搜"))
+        itemFail("eps[8]", `下一集写的是「${e9.state}」`);
+      const e12 = m.eps[11];
+      if (!e12.air.endsWith("· 季终")) itemFail("eps[11]", `最后一集的播出日是「${e12.air}」`);
+    }
+
+    /* 这一季的种子：标题 16/700，说明在标题右 24；列表 1144 宽、每行 50；列 x 16、100、460、500、576、800、1108 */
+    const lastEp = m.eps[m.eps.length - 1];
+    if (lastEp) expectGap("torrents.gap", lastEp.y + lastEp.h, m.torTitle);
+    expectText("torrents.title", m.torTitleText, "这一季的种子");
+    expectText("torrents.sub", m.torSub, "能不能删：下载中的、H&R 没做够的受保护");
+    if (m.torTitle)
+      expectBox("torrents.list", m.torList, { x: 280, y: m.torTitle.y + 32, w: W }, 2);
+    if (m.rows.length !== 3) itemFail("torrents.rows", `种子 ${m.rows.length} 行，这一季 3 个`);
+    else {
+      m.rows.forEach((r, i) => {
+        if (!near(r.h, 50, 1)) itemFail(`torrents.rows[${i}]`, `行高 ${r.h}，画板 50`);
+      });
+      const r0 = m.rows[0];
+      const cellX = r0.cells.map((c) => c.x - 280);
+      /* 站点、种子、下载器、状态、数据、能不能删、更多 */
+      const want = [16, 100, 460, 500, 576, 800, 1108];
+      const off = want
+        .map((w, i) => `${cellX[i]}/${w}`)
+        .filter((s) => {
+          const [a, b] = s.split("/").map(Number);
+          return Math.abs(a - b) > 16;
+        });
+      if (off.length > 0) itemFail("torrents.cols", `各列 x（实测/画板）${off.join("、")}`);
+      expectText(
+        "torrents.row0",
+        r0.t,
+        "OurBitsS02E01–E04 · 2160p HHWEB · 27.3 GBqb做种中分享率 1.31 · 做种 18 天H&R 已满足",
+      );
+      if (!m.rows[1].t.includes("H&R 还差 2 天") || !m.rows[2].t.includes("受保护：下载中"))
+        itemFail("torrents.guard", `能不能删：${m.rows.map((r) => r.cells[5]?.t).join("、")}`);
+    }
+
+    /* 演职员：每格 108 宽、间距 8，头像 72 圆在格内 18；一行放得下几个放几个；右侧「全部 15 位」右对齐到 1424 */
+    if (m.torList) expectGap("cast.gap", m.torList.y + m.torList.h, m.castTitle);
+    expectText("cast.all", m.castAll, "全部 15 位");
+    if (m.castAllBox && !near(m.castAllBox.x + m.castAllBox.w, R, 2))
+      itemFail(
+        "cast.all",
+        `「全部 15 位」的右边在 ${m.castAllBox.x + m.castAllBox.w}，画板右对齐到 ${R}`,
+      );
+    /* 收起时一行放得下几个放几个、不露半个：W 宽放 floor((W + 8) / 116) 位，其余不渲染 */
+    const castFit = Math.floor((W + 8) / 116);
+    if (m.people.length !== castFit || m.people.some((p) => p.y !== m.people[0].y || p.x + p.w > R))
+      itemFail(
+        "cast.row",
+        `收起时 ${m.people.length} 位（${[...new Set(m.people.map((p) => p.y))].length} 行），${W} 宽放 ${castFit} 位（108 + 8）、一行、不出右边`,
+      );
+    if (m.people[0]) {
+      const p0 = m.people[0];
+      expectBox("cast[0]", p0, { x: 280, y: m.castTitle.y + 36, w: 108 }, 2);
+      expectBox("cast[0].face", p0.face, { x: 298, y: p0.y, w: 72, h: 72 }, 1);
+      expectText("cast[0]", `${p0.name}/${p0.role}`, "陈默/导演");
+      if (m.people[1] && !near(m.people[1].x - p0.x, 116, 1))
+        itemFail("cast.pitch", `格距 ${m.people[1].x - p0.x}，画板 116`);
+    }
+    /* 推荐：海报 116×174（偏离 ⑤），间距 12；标牌写已入库、已订阅 */
+    if (m.cast) expectGap("recs.gap", m.cast.y + m.cast.h, m.recTitle);
+    expectText("recs.sub", m.recSub, "TMDB 按这部剧推荐，标出库里有的和已订阅的");
+    const recFit = Math.floor((W + 12) / 128);
+    if (m.recs.length !== recFit || m.recs.some((r) => r.y !== m.recs[0].y || r.x + r.w > R))
+      itemFail(
+        "recs.row",
+        `推荐 ${m.recs.length} 个，${W} 宽一行放 ${recFit} 个（116 + 12）、不出右边`,
+      );
+    if (m.recs[0]) {
+      const r0 = m.recs[0];
+      expectBox("recs[0].poster", r0.poster, { x: 280, y: m.recTitle.y + 32, w: 116, h: 174 }, 2);
+      if (m.recs[1] && !near(m.recs[1].x - r0.x, 128, 1))
+        itemFail("recs.pitch", `间距 ${m.recs[1].x - r0.x - 116}，画板 12`);
+      expectText(
+        "recs.tags",
+        m.recs
+          .slice(0, 6)
+          .map((r) => r.tag || "-")
+          .join(" "),
+        "已入库 已订阅 - - 已入库 已订阅",
+      );
+    }
+    if (m.overflow > 0) itemFail("overflow", `横向溢出 ${m.overflow}px`);
+
+    /* 探针：换到第 1 季 —— 路由跟着换，集与种子跟着这一季 */
+    const tab = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const t1 = document.querySelector('[data-testid="mi-tab-1"]');
+        if (!t1) return 'no-tab';
+        t1.click();
+        for (let i = 0; i < 20; i++) {
+          await wait(150);
+          const first = document.querySelector('.mi-ep .mi-ep__title');
+          if (first && (first.textContent ?? '').includes('第 1 集')) break;
+        }
+        const eps = document.querySelectorAll('.mi-ep').length;
+        const first = (document.querySelector('.mi-ep .mi-ep__title')?.textContent ?? '').trim();
+        const rows = [...document.querySelectorAll('[data-testid="mi-trow"]')].map((r) => (r.textContent ?? '').replace(/\\s+/g, ' '));
+        const ok = location.hash.includes('season=1') && t1.classList.contains('is-on') && eps === 12 &&
+          first === 'E01 · 第 1 集' && rows.length === 1 && rows[0].includes('S01 整季');
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' ' + location.hash + ' 集 ' + eps + ' 第一集 ' + first + ' 种子 ' + rows.join(' / ');
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(tab, "verdict=ok").length > 0) itemFail("probe.season", `换季：${tab}`);
+    /* 探针：「全部 15 位」展开成多行，再点收起 */
+    const castProbe = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const btn = document.querySelector('[data-testid="mi-cast-all"]');
+        if (!btn) return 'no-cast-all';
+        const rowsOf = () => new Set([...document.querySelectorAll('.mi-person')].map((p) => Math.round(p.getBoundingClientRect().top))).size;
+        const visible = () => document.querySelectorAll('.mi-person').length;
+        const before = visible();
+        btn.click();
+        await wait(300);
+        const open = visible();
+        const rows = rowsOf();
+        const label = (btn.textContent ?? '').trim();
+        btn.click();
+        await wait(300);
+        const after = visible();
+        const ok = before === ${castFit} && open === 15 && rows === 2 && label === '收起' && after === before;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 看得到 ' + before + '→' + open + '（' + rows + ' 行，按钮 ' + label + '）→' + after;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(castProbe, "verdict=ok").length > 0)
+      itemFail("probe.cast", `全部演职员：${castProbe}`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("console", err);
+  }
+
+  /* ---- 桌面 1200×1024：主区窄于 1000，「你的 NAS 上」移出大图，换成大图下面的白卡（B04 布局规则） ---- */
+  consoleErrors = [];
+  if (!(await openItem({ width: 1200, height: 1024, mobile: false }, ITEM_TV_ROUTE, true))) {
+    itemFail("narrow.load", "视口 1200 下没进条目详情");
+  } else {
+    const m = await ev(MEASURE_MI);
+    const W = 1200 - 264 - 32 - m.sb;
+    expectBox("narrow.hero", m.hero, { x: 280, y: 104, w: W, h: 340 }, 2);
+    if (m.nasGlass) itemFail("narrow.nas", "主区窄于 1000 时「你的 NAS 上」不该在大图里");
+    expectBox("narrow.nas", m.nas, { x: 280, y: 104 + 340 + 24, w: W }, 2);
+    /* 文字列伸到大图右边 28：简介最宽 600，W − 224 − 28 不到 600 时取它 */
+    expectBox("narrow.overview", m.overview, { x: 504, w: Math.min(600, W - 224 - 28) }, 2);
+    if (m.nas) expectGap("narrow.season.gap", m.nas.y + m.nas.h, m.seasonTitle);
+    /* 两列集卡：(W − 17) / 2，最小 340 */
+    const cardW = (W - 17) / 2;
+    if (
+      m.eps.length !== 12 ||
+      m.eps.some((e, i) => !near(e.w, cardW, 2) || !near(e.x, 280 + (i % 2) * (cardW + 17), 2))
+    )
+      itemFail(
+        "narrow.eps",
+        `集卡 ${m.eps.length} 张，宽 ${[...new Set(m.eps.map((e) => e.w))].join("、")}，应为两列 ${cardW.toFixed(1)}`,
+      );
+    if (m.overflow > 0) itemFail("narrow.overflow", `横向溢出 ${m.overflow}px`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("narrow.console", err);
+  }
+
+  /* ---- 桌面 1440×1024，电影 ---- */
+  consoleErrors = [];
+  if (!(await openItem({ width: 1440, height: 1024, mobile: false }, ITEM_MOVIE_ROUTE, false))) {
+    itemFail("movie.load", "等了 10 秒还没有条目");
+  } else {
+    const m = await ev(MEASURE_MI);
+    if (process.env.MI_DUMP) console.log(JSON.stringify(m, null, 1));
+    expectText("movie.crumbs", m.crumbs, "媒体 / 探索 / 沙丘2");
+    expectBox("movie.hero", m.hero, { x: 280, y: 104, w: 1144 - m.sb, h: 340 }, 2);
+    expectText("movie.original", m.original, "Dune: Part Two · 2024 · 2 小时 46 分");
+    expectText("movie.pills", m.pills.join("|"), "电影|科幻|冒险|美国|已上映");
+    if (m.seasons) itemFail("movie.seasons", "电影不该有「季与集」");
+    expectText(
+      "movie.nas.library",
+      m.nasRows[0]?.t ?? "",
+      "库里有 · 2160p FRDS电影库 · 1 个文件 · 58.2 GB",
+    );
+    expectText("movie.nas.subscription", m.nasRows[2]?.t ?? "", "已完成没开版本锁");
+    expectText("movie.torrents.title", m.torTitleText, "这部片的种子");
+    expectGap("movie.torrents.gap", m.hero ? m.hero.y + m.hero.h : 0, m.torTitle);
+    if (m.rows.length !== 1 || !m.rows[0].t.startsWith("CHDBits2160p FRDS · 58.2 GB"))
+      itemFail("movie.torrents.rows", `种子：${m.rows.map((r) => r.t).join(" / ")}`);
+    expectText("movie.recs.sub", m.recSub, "TMDB 按这部片推荐，标出库里有的和已订阅的");
+    if (m.overflow > 0) itemFail("movie.overflow", `横向溢出 ${m.overflow}px`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("movie.console", err);
+  }
+
+  /* ---- 手机 375×812，剧集（画板 08） ---- */
+  consoleErrors = [];
+  if (!(await openItem({ ...M_VIEWPORT, mobile: true }, ITEM_TV_ROUTE, true))) {
+    itemFail("load", "等了 10 秒还没有集卡", true);
+  } else {
+    const m = await ev(MEASURE_MI);
+    if (process.env.MI_DUMP) console.log(JSON.stringify(m, null, 1));
+    const cw = 343 - m.sb;
+    expectText("topbar.sub", m.mheadSub, "剧集 · 2025 · 追剧中", true);
+    /* 大图 375×348 不留边、贴住顶栏（52）；海报 16,20 108×162；名字 136,20；简介 16,196；动作 y 292 h40 */
+    expectBox("hero", m.hero, { x: 0, y: 52, w: 375 - m.sb, h: 348 }, 2, true);
+    expectBox("hero.poster", m.poster, { x: 16, y: 72, w: 108, h: 162 }, 2, true);
+    expectBox("hero.title", m.title, { x: 136, y: 72 }, 4, true);
+    expectBox("hero.overview", m.overview, { x: 16, y: 248, w: cw }, 4, true);
+    if (m.imdb) itemFail("hero.imdb", "手机不放 IMDb", true);
+    /* 资料胶囊从 136,156 起两行（画板 08：类型、三个题材一行，国家、片长、状态一行），一个都不能被截掉 */
+    expectBox("hero.pills", m.pillsBox, { x: 136, y: 156 }, 4, true);
+    if (m.pillsShown.n !== m.pills.length || m.pillsShown.rows !== 2)
+      itemFail(
+        "hero.pills",
+        `胶囊 ${m.pills.length} 个，看得见 ${m.pillsShown.n} 个、${m.pillsShown.rows} 行（画板两行全部看得见）`,
+        true,
+      );
+    const acts = m.acts;
+    if (acts.map((a) => a.t).join("|") !== "搜资源|追剧中 · 第 2 季")
+      itemFail("hero.acts", `动作是「${acts.map((a) => a.t).join("、")}」`, true);
+    else {
+      expectBox("hero.acts.search", acts[0], { x: 16, y: 344, h: 40 }, 2, true);
+      expectBox("hero.acts.sub", acts[1], { y: 344, h: 40 }, 2, true);
+      if (
+        !near(acts[1].x + acts[1].w, 16 + cw, 2) ||
+        !near(acts[1].x - (acts[0].x + acts[0].w), 8, 2)
+      )
+        itemFail("hero.acts", `两个按钮 ${JSON.stringify(acts)}，画板平分 343、中间 8`, true);
+    }
+    /* 「更多」在大图右上角（顶栏留给外壳，见落地偏离 40） */
+    expectBox("hero.more", m.more, { y: 72 }, 4, true);
+    /* 你的 NAS 上：行卡 343 宽在 y 416；三行时 180 高（画板四行加播放 276，少一行减 46、没有播放减 50） */
+    expectBox("nas", m.nas, { x: 16, y: 416, w: cw, h: 180 }, 2, true);
+    if (m.nasGlass) itemFail("nas", "手机上「你的 NAS 上」是大图下面的白卡", true);
+    /* 季与集：标题、横滑 tab（标题下 32）、图例（标题下 74）、收起行（标题下 100，343×44）、集卡（标题下 152，343×80，行距 88） */
+    if (m.nas) expectGap("season.gap", m.nas.y + m.nas.h, m.seasonTitle, true);
+    if (m.seasonTitle) {
+      const t = m.seasonTitle.y;
+      if (m.tabs[0]) expectBox("season.tab1", m.tabs[0], { x: 16, y: t + 32, h: 30 }, 2, true);
+      expectBox("season.legend", m.legend, { x: 16, y: t + 74 }, 3, true);
+      expectBox("season.collapse", m.collapse, { x: 16, y: t + 100, w: cw, h: 44 }, 2, true);
+      expectText("season.collapse", m.collapseText, "E01–E06 · 6 集都已入库展开", true);
+      if (m.eps.length !== 6)
+        itemFail("eps", `收起以后 ${m.eps.length} 张集卡，应为 6（E07–E12）`, true);
+      else {
+        m.eps.forEach((e, i) => {
+          const want = { x: 16, y: t + 152 + i * 88, w: cw, h: 80 };
+          if (Object.entries(want).some(([k, v]) => !near(e[k], v, 2)))
+            itemFail(
+              `eps[${i}]`,
+              `${e.id} 在 ${JSON.stringify({ x: e.x, y: e.y, w: e.w, h: e.h })}，画板 ${JSON.stringify(want)}`,
+              true,
+            );
+        });
+        expectBox(
+          "eps[0].still",
+          m.eps[0].still,
+          { x: 24, y: m.eps[0].y + 8, w: 112, h: 63 },
+          1,
+          true,
+        );
+      }
+    }
+    /* 这一季的种子：行卡 343 宽，每个种子 64 */
+    const lastEp = m.eps[m.eps.length - 1];
+    if (lastEp) expectGap("torrents.gap", lastEp.y + lastEp.h, m.torTitle, true);
+    /* 行在卡内 14（加 1px 边框是 15，横向差的 1px 不补，同 M2a 的落地偏离 16），每个 64 */
+    if (m.torList) expectBox("torrents.list", m.torList, { x: 16, w: cw }, 2, true);
+    if (
+      m.rows.length !== 3 ||
+      m.rows.some((r) => !near(r.h, 64, 1) || !near(r.x, 31, 1) || !near(r.w, cw - 30, 1))
+    )
+      itemFail(
+        "torrents.rows",
+        `种子行 ${JSON.stringify(m.rows.map(({ x, y, w, h }) => ({ x, y, w, h })))}，画板卡内 14 起、315 宽、每个 64`,
+        true,
+      );
+    /* 演职员：横滑，每格 76、间距 8，头像 64；推荐：海报 104×156、间距 12 */
+    if (m.people[0]) {
+      expectBox("cast[0]", m.people[0], { x: 16, w: 76 }, 2, true);
+      expectBox("cast[0].face", m.people[0].face, { x: 22, w: 64, h: 64 }, 1, true);
+      if (m.people[1] && !near(m.people[1].x - m.people[0].x, 84, 1))
+        itemFail("cast.pitch", `格距 ${m.people[1].x - m.people[0].x}，画板 84`, true);
+    } else itemFail("cast", "没有演职员", true);
+    if (m.recs[0]) {
+      expectBox("recs[0].poster", m.recs[0].poster, { x: 16, w: 104, h: 156 }, 2, true);
+      if (m.recs[1] && !near(m.recs[1].x - m.recs[0].x, 116, 1))
+        itemFail("recs.pitch", `间距 ${m.recs[1].x - m.recs[0].x - 104}，画板 12`, true);
+    } else itemFail("recs", "没有推荐", true);
+    if (m.overflow > 0) itemFail("overflow", `横向溢出 ${m.overflow}px`, true);
+
+    /* 探针：收起行「展开」以后 12 张、换成「收起」，再点回到 6 张 */
+    const fold = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const btn = document.querySelector('[data-testid="mi-expand"]');
+        if (!btn) return 'no-expand';
+        btn.click();
+        await wait(300);
+        const open = document.querySelectorAll('.mi-ep').length;
+        const label = (btn.textContent ?? '').trim();
+        btn.click();
+        await wait(300);
+        const closed = document.querySelectorAll('.mi-ep').length;
+        const ok = open === 12 && label === '收起' && closed === 6;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 展开 ' + open + '（' + label + '）收起 ' + closed;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(fold, "verdict=ok").length > 0) itemFail("probe.fold", `收起行：${fold}`, true);
+    /* 探针：点简介展开全文（盖在大图上），大图高度不变，再点收起 */
+    const ov = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const p = document.querySelector('[data-testid="mi-overview"]');
+        const hero = document.querySelector('[data-testid="mi-hero"]');
+        if (!p || !hero) return 'no-overview';
+        const h0 = Math.round(p.getBoundingClientRect().height);
+        p.click();
+        await wait(300);
+        const r = p.getBoundingClientRect();
+        const hr = hero.getBoundingClientRect();
+        const full = p.scrollHeight <= p.clientHeight + 1 || getComputedStyle(p).overflowY === 'auto';
+        const inside = r.top >= hr.top && r.bottom <= hr.bottom + 0.5;
+        const heroH = Math.round(hr.height);
+        p.click();
+        await wait(300);
+        const h1 = Math.round(p.getBoundingClientRect().height);
+        const ok = r.height > h0 && full && inside && heroH === 348 && h1 === h0;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 高 ' + h0 + '→' + Math.round(r.height) + '→' + h1 + ' 在大图里 ' + inside + ' 大图 ' + heroH;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(ov, "verdict=ok").length > 0) itemFail("probe.overview", `简介展开：${ov}`, true);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("console", err, true);
+  }
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+}
+
 // ------------------------------------------------- 登录页（画板 43）
 
 /*
@@ -3642,7 +4266,8 @@ const stale = Object.keys(ALLOWED_GAPS).filter(
     /* --route 只跑子集时，别把没跑到的路由的偏离判成多余。移动端的键是 `<路由>@375 <项>` */
     (wanted.length === 0 ||
       wanted.some((r) => k.startsWith(`${r} `) || k.startsWith(`${r}@375 `)) ||
-      (doEntry && k.startsWith("/search?entry"))),
+      (doEntry && k.startsWith("/search?entry")) ||
+      (doItem && k.startsWith("/media/item"))),
 );
 
 for (const f of failures) {
@@ -3694,6 +4319,7 @@ const scope =
   `桌面 ${routes.length} 条 + 移动 ${mobileRoutes.length} 条` +
   (emptyRoutes.length > 0 ? ` + 空态 ${emptyRoutes.length} 条` : "") +
   (doEntry ? " + 按条目搜索（1440、1200、375）" : "") +
+  (doItem ? " + 条目详情（1440 剧集与电影、1200、375）" : "") +
   (doLogin ? " + 登录页" : "");
 if (failures.length === 0 && stale.length === 0) {
   /*

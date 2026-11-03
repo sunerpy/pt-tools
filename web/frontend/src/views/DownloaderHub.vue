@@ -31,6 +31,7 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { hasKeepTag, KEEP_TIP } from "@/utils/keepTag";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 const COLUMN_STORAGE_KEY = "downloader-hub-visible-columns-v1";
 const COLUMN_ORDER_STORAGE_KEY = "downloader-hub-column-order-v1";
@@ -137,9 +138,17 @@ const capabilities = ref<DownloaderCapability[]>([]);
  */
 const loadFailures = ref<DownloaderFailure[]>([]);
 
+/*
+ * 条目详情的「在下载器里打开」带着下载器与种子的 hash 进来（?downloader_id=…&search=…）：打开时先按它筛。
+ * 没有路由（组件测试）时 useRoute 是 undefined。
+ */
+const routeQuery = useRoute()?.query ?? {};
 const filters = ref({
-  search: "",
-  downloaderId: "all",
+  search: typeof routeQuery.search === "string" ? routeQuery.search.trim() : "",
+  downloaderId:
+    typeof routeQuery.downloader_id === "string" && /^\d+$/.test(routeQuery.downloader_id)
+      ? routeQuery.downloader_id
+      : "all",
   state: "",
   category: "",
   tag: "",

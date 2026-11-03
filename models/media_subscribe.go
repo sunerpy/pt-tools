@@ -336,8 +336,12 @@ type MediaSubscribeSetting struct {
 	// NotifyChannels 是下载了订阅的资源时发通知的通道（JSON 数组）
 	NotifyChannels string `gorm:"type:text;not null;default:''" json:"-"`
 	// UpgradeOld 是洗版以后旧种子怎么办：keep（空串也是）继续做种，delete 连数据删掉
-	UpgradeOld string    `gorm:"size:16;not null;default:''" json:"upgrade_old"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	UpgradeOld string `gorm:"size:16;not null;default:''" json:"upgrade_old"`
+	// TodayEnabled 为真时每天 TodayTime（HH:MM，空的按 09:00）把今天播出的集推送到 TodayChannels（JSON 数组；空的用 NotifyChannels）
+	TodayEnabled  bool      `gorm:"not null;default:false" json:"today_enabled"`
+	TodayTime     string    `gorm:"size:5;not null;default:''" json:"today_time"`
+	TodayChannels string    `gorm:"type:text;not null;default:''" json:"-"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (MediaSubscribeSetting) TableName() string { return "media_subscribe_settings" }

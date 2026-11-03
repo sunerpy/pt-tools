@@ -25,6 +25,7 @@ import {
   spanText,
   summaryText,
 } from "@/utils/entrySearch";
+import { itemLink } from "@/utils/mediaItem";
 import {
   applyFacets,
   buildFacets,
@@ -503,7 +504,21 @@ const profileOptions = computed(() => [
         <section class="es-mitem">
           <EntryPoster :path="result.item.poster_path" :width="40" :height="60" :radius="3" />
           <div class="es-mitem__text">
-            <p class="es-mitem__title">{{ seasonLabel }}</p>
+            <p class="es-mitem__title">
+              <router-link
+                class="es-mitem__link"
+                :to="
+                  itemLink(
+                    result.item.media_type,
+                    result.item.tmdb_id,
+                    'search',
+                    result.item.season,
+                  )
+                "
+                data-testid="es-mdetail"
+                >{{ seasonLabel }}</router-link
+              >
+            </p>
             <p class="es-mitem__sub">
               {{
                 [
@@ -1138,6 +1153,15 @@ const profileOptions = computed(() => [
   font-weight: 700;
   line-height: 1.4;
   color: var(--pt-t1);
+}
+
+.es-mitem__link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.es-mitem__link:hover {
+  color: var(--pt-p);
 }
 
 .es-mitem__sub {

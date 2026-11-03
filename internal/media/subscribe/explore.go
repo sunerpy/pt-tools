@@ -58,32 +58,10 @@ func (s *Service) Explore(ctx context.Context, kind, list string, page int, quer
 	default:
 		return nil, fmt.Errorf("%w: 列表要选 trending、popular 或 search", ErrInvalid)
 	}
-	ids := make([]int, 0, len(results))
-	for _, r := range results {
-		ids = append(ids, r.ID)
+	items, err := s.markExplore(ctx, kind, results)
+	if err != nil {
+		return nil, err
 	}
-	inLib := map[int]bool{}
-	subs := map[int]uint{}
-	if len(ids) > 0 {
-		var lib []int
-		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
-			Where("status = ? AND media_type = ? AND tmdb_id IN ?", models.MediaTransferDone, kind, ids).Distinct().Pluck("tmdb_id", &lib).Error; err != nil {
-			return nil, fmt.Errorf("读取整理记录失败: %w", err)
-		}
-		for _, id := range lib {
-			inLib[id] = true
-		}
-		var rows []models.MediaSubscription
-		if err := s.cfg.DB.WithContext(ctx).Select("id", "tmdb_id").Where("media_type = ? AND tmdb_id IN ?", kind, ids).Order("id").Find(&rows).Error; err != nil {
-			return nil, fmt.Errorf("读取订阅失败: %w", err)
-		}
-		for _, r := range rows {
-			subs[r.TMDBID] = r.ID
-		}
-	}
-	out.Items = make([]ExploreItem, 0, len(results))
-	for _, r := range results {
-		out.Items = append(out.Items, ExploreItem{Result: r, InLibrary: inLib[r.ID], Subscribed: subs[r.ID] != 0, SubscriptionID: subs[r.ID]})
-	}
+	out.Items = items
 	return out, nil
 }

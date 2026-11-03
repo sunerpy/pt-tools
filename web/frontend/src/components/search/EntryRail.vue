@@ -4,6 +4,7 @@ import { computed } from "vue";
 import type { MediaSearchResult, QualityProfile } from "@/api";
 import { episodeNote } from "@/utils/entrySearch";
 import { mediaKindLabel } from "@/utils/media";
+import { itemLink } from "@/utils/mediaItem";
 import type { FacetGroup, FacetKey, FacetSelection } from "@/utils/searchFacets";
 
 import EntryPoster from "./EntryPoster.vue";
@@ -81,6 +82,12 @@ const profileOptions = computed(() => [
         <h2 class="es-rail__title" :title="item.title">{{ item.title }}</h2>
         <p class="es-rail__line">{{ line1 }}</p>
         <p v-if="lock" class="es-rail__line">{{ lock }}</p>
+        <router-link
+          class="es-rail__detail"
+          :to="itemLink(item.media_type, item.tmdb_id, 'search', item.season)"
+          data-testid="es-detail"
+          >条目详情 ›</router-link
+        >
       </div>
     </div>
 
@@ -174,6 +181,21 @@ const profileOptions = computed(() => [
   font-size: var(--pt-fz-label);
   line-height: var(--pt-lh-row);
   color: var(--pt-t3);
+}
+
+/* 「条目详情 ›」84,78：12/500 主色（媒体中心 M3） */
+.es-rail__detail {
+  display: inline-block;
+  margin-top: 7px;
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  line-height: var(--pt-lh-row);
+  color: var(--pt-p);
+  text-decoration: none;
+}
+
+.es-rail__detail:hover {
+  text-decoration: underline;
 }
 
 /* 季：h26 r13、左右 10、12 字；选中 t1 底白字 */

@@ -43,7 +43,7 @@ Search by title only reads: it creates no subscription, pushes nothing, writes n
 
 ### The side panel
 
-The side panel shows the title: poster, year and type, and for a subscription that it is being followed and the locked version.
+The side panel shows the title: poster, year and type, and for a subscription that it is being followed and the locked version; Title details › (条目详情 ›) opens the title's [details page](media-detail.md).
 
 - **Season**: a series can switch season; the latest season is the default.
 - **Episode cells**: one cell per episode, coloured by where the episode stands: in the library (green), downloading (blue), waiting for the locked version (primary colour), missing (orange), not aired yet (grey). The sentence below says which episodes are missing and which are downloading. Click a cell to show only results that contain that episode; click it again to clear.
@@ -120,7 +120,7 @@ Download → Wait for free (下载 → 等免费) lists every wait: which downlo
 
 ## Phone
 
-On a phone, search by title puts the season, the profile and a Filters (筛选) button in a row under the box. The title card shows the poster and the episode cells, and the result cards show the same content as on the desktop, stacked, with Wait for free (等免费) and Don't want (不要) as the two halves at the bottom of each card. Filters open from the bottom; the selection only applies after tapping "Show N results" (看 N 条结果), and closing the panel without it changes nothing. The discount group on the phone also has 50%. When sites did not answer, a line of its own under the summary says so; tap it for each site's reason.
+On a phone, search by title puts the season, the profile and a Filters (筛选) button in a row under the box. The title card shows the poster and the episode cells (tap the name for the title details), and the result cards show the same content as on the desktop, stacked, with Wait for free (等免费) and Don't want (不要) as the two halves at the bottom of each card. Filters open from the bottom; the selection only applies after tapping "Show N results" (看 N 条结果), and closing the panel without it changes nothing. The discount group on the phone also has 50%. When sites did not answer, a line of its own under the summary says so; tap it for each site's reason.
 
 ## Troubleshooting
 

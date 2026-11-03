@@ -242,6 +242,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerOrganizeRoutes(mux)
 	s.registerSubscribeRoutes(mux)
 	s.registerBlockRoutes(mux)
+	s.registerMediaItemRoutes(mux)
 	s.registerFreeWatchRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	s.registerTokenRoutes(mux)
