@@ -146,6 +146,13 @@ type PlanItem struct {
 	sourceID string
 	// disc 是这一项的原盘（Disc 不为空时）
 	disc *transfer.Disc
+	// failKind 是这一项整理不了的分类（models.MediaFailExists 等）：写进整理记录
+	failKind string
+}
+
+// fail 把这一项标成整理不了，记下原因与分类。
+func (it *PlanItem) fail(kind, msg string) {
+	it.Status, it.Message, it.failKind = ItemFailed, msg, kind
 }
 
 // Plan 是一个种子的整理计划，预览与执行共用。Problem 不为空时整个种子整理不了。
@@ -166,11 +173,15 @@ type Plan struct {
 	Source     string               `json:"source,omitempty"`
 	Library    *models.MediaLibrary `json:"library,omitempty"`
 	// Category 是放进的二级分类（媒体库开了「按二级分类放进子目录」、规则对得上时才有）
-	Category string          `json:"category,omitempty"`
+	Category string `json:"category,omitempty"`
+	// Classify 说明二级分类怎么定的（媒体库开了「按二级分类放进子目录」、这一类有规则时才有）
+	Classify *ClassifyNote   `json:"classify,omitempty"`
 	Mode     string          `json:"mode,omitempty"`
 	Items    []PlanItem      `json:"items"`
 	Skipped  []transfer.Skip `json:"skipped,omitempty"`
 	Problem  string          `json:"problem,omitempty"`
+	// FailKind 是整理不了的分类（models.MediaFailRecognize 等，有 Problem 时才有）：写进整理记录，页面按它给出处理办法
+	FailKind string `json:"fail_kind,omitempty"`
 	// Notes 是不挡整理的说明（例如指定的路径是下载器里的种子、改成了按种子整理）
 	Notes []string `json:"notes,omitempty"`
 
@@ -186,8 +197,12 @@ type Plan struct {
 	meta       meta.Meta
 	siteName   string
 	// doubanID 是站点给的豆瓣编号（pt-tools 推送的种子才有），刮削补充豆瓣的内容时电影直接用它
-	doubanID   string
-	tmdbClient *tmdb.Client
+	doubanID string
+	// siteTitle 是站点上的标题（pt-tools 推送的种子才有）：二级分类的关键字也看它
+	siteTitle string
+	// recognizeIn 是按名字识别时用的输入（走到这一步才有）：「让 AI 认」用它搜候选
+	recognizeIn recognize.Input
+	tmdbClient  *tmdb.Client
 	// root 是这次整理放进的目录：库目录，按二级分类放进子目录时是库目录下的分类目录
 	root string
 	// chosenMode 是请求里选的整理方式（空串是跟媒体库）：写进整理记录，重试按它整理
@@ -447,6 +462,7 @@ func (s *Service) buildTorrentPlan(ctx context.Context, req Request) (*Plan, err
 		p.Hash = strings.ToLower(strings.TrimSpace(req.Hash))
 	}
 	if t.Progress < 1 {
+		p.FailKind = models.MediaFailOther
 		p.Problem, p.noRecord = "种子还没下载完", true
 		return p, nil
 	}
@@ -492,10 +508,12 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 	switch {
 	case len(sel.Discs) > 0:
 		if p.Problem = discProblem(sel.Discs); p.Problem != "" {
+			p.FailKind = models.MediaFailDisc
 			return p, nil
 		}
 		p.Items = append(p.Items, discItem(sel.Discs[0], p))
 	case len(sel.Videos) == 0:
+		p.FailKind = models.MediaFailOther
 		p.Problem = "没有可整理的视频文件"
 		return p, nil
 	}
@@ -516,6 +534,7 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 			continue
 		}
 		if _, err := os.Stat(it.Source); err != nil {
+			p.FailKind = models.MediaFailPath
 			p.Problem = fmt.Sprintf("pt-tools 里找不到 %s：下载器与 pt-tools 看到的路径不同时（例如在 Docker 里），在「路径映射」里添加对应关系", it.Source)
 			return p, nil
 		}
@@ -526,10 +545,12 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 	}
 	if p.Match.MediaType == tmdb.KindTV {
 		if p.Items[0].disc != nil {
+			p.FailKind = models.MediaFailDisc
 			p.Problem, p.skip = "剧集原盘暂不整理", true
 			return p, nil
 		}
 		if p.splitTVISO(); len(p.Items) == 0 {
+			p.FailKind = models.MediaFailDisc
 			p.Problem, p.skip = "没有可整理的视频文件（"+isoTVNote+"）", true
 			return p, nil
 		}
@@ -543,25 +564,30 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 		// 目录监控的一项可能是下载器里的种子（监控了下载目录）：移走了种子就没法做种
 		owner, err := s.watchTorrent(ctx, p.contentSrc, p.Name)
 		if err != nil {
+			p.FailKind = models.MediaFailOther
 			p.Problem, p.retryable = "移动整理以前要确认「"+p.Name+"」不是下载器里的种子："+err.Error(), true
 			return p, nil
 		}
 		if owner != "" {
+			p.FailKind = models.MediaFailOther
 			p.Problem = "「" + p.Name + "」是下载器里的种子（" + owner + "），目录监控不移动下载器里的种子：" + hardlinkHint(req) + "，或不要监控下载目录"
 			return p, nil
 		}
 	case p.SourcePath != "":
 		// 指定的路径认种子时只剩按名字认出的或确认不了的（见 buildPathPlan）：可能就是下载器里的种子，移走了没法做种
 		if p.torrentErr != nil {
+			p.FailKind = models.MediaFailOther
 			p.Problem, p.retryable = "移动整理以前要确认「"+p.Name+"」不是下载器里的种子："+p.torrentErr.Error(), true
 			return p, nil
 		}
 		if p.nameHit != nil {
+			p.FailKind = models.MediaFailOther
 			p.Problem = fmt.Sprintf("「%s」和下载器里的种子同名（%s：%s），可能就是它：移动整理会让它没法做种。%s，或配好路径映射后在「下载器 Web UI」里按种子整理",
 				p.Name, p.nameHit.DownloaderName, p.nameHit.Name, hardlinkHint(req))
 			return p, nil
 		}
 	case t.State != downloader.TorrentPaused && t.State != downloader.TorrentStopped:
+		p.FailKind = models.MediaFailOther
 		p.Problem = "种子还在做种，不能用移动整理：暂停种子后再整理，或" + hardlinkHint(req)
 		return p, nil
 	}
@@ -605,6 +631,7 @@ func (s *Service) loadRows(ctx context.Context, p *Plan) error {
 func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloader.Torrent) bool {
 	c, err := s.cfg.Recognizer.TMDB(ctx)
 	if errors.Is(err, tmdb.ErrNoKey) {
+		p.FailKind = models.MediaFailRecognize
 		p.Problem = "没有填写 TMDB API Key：先在「媒体识别」里填写"
 		return false
 	}
@@ -619,13 +646,14 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 		if req.TMDBID == 0 || req.LibraryID == 0 {
 			hint, ferr := s.followHint(ctx, p)
 			if ferr != nil {
+				p.FailKind = models.MediaFailRecognize
 				p.Problem, p.retryable = "查不到追剧的条目与媒体库，稍后重试："+ferr.Error(), true
 				return false
 			}
 			p.follow = hint
 		}
 	}
-	p.siteName, p.doubanID = info.SiteName, info.DoubanID
+	p.siteName, p.doubanID, p.siteTitle = info.SiteName, info.DoubanID, info.Title
 	source := sourceManual
 	if req.TMDBID == 0 {
 		// 之前整理过（比如手动指定过条目）：沿用那个条目，库里的文件名与重新整理时一致
@@ -641,6 +669,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	}
 	if req.TMDBID > 0 {
 		if err != nil {
+			p.FailKind = models.MediaFailRecognize
 			p.Problem = "识别失败：" + err.Error()
 			return false
 		}
@@ -659,6 +688,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 			p.matchNote = fmt.Sprintf("%s（TMDB %s %d）在 TMDB 上找不到了，改成自动识别", what, req.MediaType, req.TMDBID)
 			p.Notes = append(p.Notes, p.matchNote)
 		default:
+			p.FailKind = models.MediaFailRecognize
 			p.Problem, p.retryable = "识别失败："+detailErr.Error(), !errors.Is(detailErr, tmdb.ErrNotFound)
 			return false
 		}
@@ -667,17 +697,21 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	if info.Title != "" && info.Title != t.Name {
 		in.Subtitle = info.Title
 	}
+	p.recognizeIn = in
 	res, err := s.cfg.Recognizer.Recognize(ctx, in)
 	if err != nil {
+		p.FailKind = models.MediaFailRecognize
 		p.Problem = "识别失败：" + err.Error()
 		return false
 	}
 	p.meta = res.Meta
 	switch {
 	case res.Error != "":
+		p.FailKind = models.MediaFailRecognize
 		p.Problem, p.retryable = "识别失败："+res.Error, true
 		return false
 	case res.Match == nil:
+		p.FailKind = models.MediaFailRecognize
 		p.Problem = "没有识别出来：TMDB 上没有可靠的匹配"
 		if len(res.Candidates) > 0 {
 			c := res.Candidates[0]
@@ -695,6 +729,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	var libs []models.MediaLibrary
 	if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&libs).Error; err != nil {
+		p.FailKind = models.MediaFailLibrary
 		p.Problem, p.retryable = "读取媒体库失败："+err.Error(), true
 		return false
 	}
@@ -711,6 +746,7 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 			}
 		}
 		if lib == nil {
+			p.FailKind = models.MediaFailLibrary
 			p.Problem = "指定的媒体库不存在、没有启用，或类型与条目不同"
 			if follow {
 				p.Problem = "追剧指定的媒体库不存在、没有启用，或类型与条目不同：在追剧里改选媒体库"
@@ -725,6 +761,7 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 		if kind == tmdb.KindTV {
 			what = "剧集"
 		}
+		p.FailKind = models.MediaFailLibrary
 		p.Problem = fmt.Sprintf("没有启用的%s媒体库：先在「媒体库」里添加", what)
 		return false
 	}

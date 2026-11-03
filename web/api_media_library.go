@@ -29,6 +29,8 @@ func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/media/organize/classify", s.auth(s.apiClassifyPut))
 	mux.HandleFunc("POST /api/media/organize/preview", s.auth(s.apiOrganizePreview))
 	mux.HandleFunc("POST /api/media/organize", s.auth(s.apiOrganizeRun))
+	mux.HandleFunc("POST /api/media/organize/ai-recognize", s.auth(s.apiOrganizeAIRecognize))
+	mux.HandleFunc("GET /api/media/organize/ai-status", s.auth(s.apiOrganizeAIStatus))
 	mux.HandleFunc("GET /api/media/libraries", s.auth(s.apiLibraries))
 	mux.HandleFunc("POST /api/media/libraries", s.auth(s.apiLibrarySave))
 	mux.HandleFunc("PUT /api/media/libraries/{id}", s.auth(s.apiLibrarySave))
@@ -49,7 +51,11 @@ func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/media/servers/{id}", s.auth(s.apiMediaServerDelete))
 	mux.HandleFunc("POST /api/media/servers/test", s.auth(s.apiMediaServerTest))
 	mux.HandleFunc("GET /api/media/history", s.auth(s.apiMediaHistory))
+	mux.HandleFunc("POST /api/media/history/batch", s.auth(s.apiMediaHistoryBatch))
+	mux.HandleFunc("GET /api/media/fs/roots", s.auth(s.apiMediaFSRoots))
+	mux.HandleFunc("GET /api/media/fs/list", s.auth(s.apiMediaFSList))
 	mux.HandleFunc("POST /api/media/history/{id}/retry", s.auth(s.apiMediaHistoryRetry))
+	mux.HandleFunc("POST /api/media/history/{id}/ai-recognize", s.auth(s.apiMediaHistoryAIRecognize))
 	mux.HandleFunc("POST /api/media/history/{id}/scrape", s.auth(s.apiMediaHistoryScrape))
 	mux.HandleFunc("DELETE /api/media/history/{id}", s.auth(s.apiMediaHistoryDelete))
 }
@@ -70,6 +76,8 @@ func writeOrganizeError(w http.ResponseWriter, err error) {
 		status = http.StatusBadRequest
 	case errors.Is(err, organize.ErrNotFound), errors.Is(err, tmdb.ErrNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, organize.ErrForbidden):
+		status = http.StatusForbidden
 	case errors.Is(err, tmdb.ErrRateLimited):
 		status = http.StatusTooManyRequests
 	case errors.Is(err, context.DeadlineExceeded):
@@ -481,7 +489,8 @@ func (s *Server) apiMediaServerTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, got)
 }
 
-// apiMediaHistory handles GET /api/media/history?status=&q=&limit=&offset=
+// apiMediaHistory handles GET /api/media/history?status=&kind=&q=&limit=&offset=&media_type=&tmdb_id=&season=&torrent=；
+// group=item 时回按条目分的组（HistoryGroupPage），不带它时回记录
 func (s *Server) apiMediaHistory(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.organizeService(w)
 	if !ok {
@@ -490,7 +499,77 @@ func (s *Server) apiMediaHistory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
-	got, err := svc.History(r.Context(), organize.HistoryQuery{Status: q.Get("status"), Keyword: q.Get("q"), Limit: limit, Offset: offset})
+	tmdbID, _ := strconv.Atoi(q.Get("tmdb_id"))
+	season, _ := strconv.Atoi(q.Get("season"))
+	query := organize.HistoryQuery{
+		Status: q.Get("status"), Kind: q.Get("kind"), Keyword: q.Get("q"), MediaType: q.Get("media_type"), TMDBID: tmdbID, Season: season,
+		Torrent: q.Get("torrent"), Limit: limit, Offset: offset,
+	}
+	var (
+		got any
+		err error
+	)
+	switch q.Get("group") {
+	case "":
+		got, err = svc.History(r.Context(), query)
+	case "item":
+		got, err = svc.HistoryGroups(r.Context(), query)
+	default:
+		http.Error(w, "group 只能是 item（按条目分组）", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiMediaFSRoots handles GET /api/media/fs/roots：「手动整理」浏览文件时能进的根目录
+func (s *Server) apiMediaFSRoots(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	got, err := svc.FSRoots(r.Context())
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"roots": got})
+}
+
+// apiMediaFSList handles GET /api/media/fs/list?path=：一层目录；根目录以外的回 403
+func (s *Server) apiMediaFSList(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	got, err := svc.FSList(r.Context(), r.URL.Query().Get("path"))
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiMediaHistoryBatch handles POST /api/media/history/batch {"ids":[…],"action":"retry|delete|delete_files|rescrape"}：
+// 逐条回结果（organize.BatchResult）；重试与重新刮削排进队列就回
+func (s *Server) apiMediaHistoryBatch(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	var in struct {
+		IDs    []uint `json:"ids"`
+		Action string `json:"action"`
+	}
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	got, err := svc.Batch(ctx, in.IDs, in.Action)
 	if err != nil {
 		writeOrganizeError(w, err)
 		return

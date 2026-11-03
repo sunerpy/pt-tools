@@ -96,10 +96,11 @@ With Organise by category (按二级分类放进子目录) checked on a library,
 
 - The first matching rule from the top wins; when none matches, the title goes straight into the library folder.
 - A rule can match on genre, original language and production country or region: all conditions must hold, and a condition with several values matches any of them. A rule with no conditions takes everything the rules above it didn't.
+- A rule can also match on running time and title keywords (useful for short dramas): the running time (minutes, per episode for TV) is at most a limit, or the torrent name or the site's title contains one of the keywords. The two count as one condition with "or" between them, and the other conditions must still hold; a limit of 0 ignores the running time, and when TMDB has no running time only the keywords count.
 - Original languages are ISO 639-1 codes (`zh`, `ja` and so on; TMDB records Cantonese as `cn`), countries and regions are ISO 3166-1 codes (`CN`, `US` and so on). Codes that aren't in the list can be typed in.
-- Fill in common categories (填入常用分类) uses the same categories as MoviePilot's defaults: animated, Chinese-language and foreign movies; for TV, Chinese animation, Japanese anime, documentaries, kids, variety, Chinese, Western and Japanese/Korean series, and uncategorised.
+- Fill in common categories (填入常用分类) uses roughly the same categories as MoviePilot's defaults: animated, Chinese-language and foreign movies; for TV, Chinese animation, Japanese anime, documentaries, kids, variety, short dramas (短剧), Chinese, Western and Japanese/Korean series, and uncategorised. Short dramas are shows with episodes of at most 15 minutes or 短剧 in the title; the rule comes after the genre rules, so animation and kids' shows with short episodes go into their own categories first.
 
-The category name is the folder name, so it can't contain `/ \ : * ? " < > |`. Changing the rules or the checkbox only affects files organised afterwards; files already in the library stay where they are. For TV, the NFO files, poster and logo go into the show folder inside the category folder. The organise preview shows which category a title goes into. Categorising needs TMDB's details (a movie's production countries are only there); when they can't be fetched, the title isn't organised this time and is retried later.
+The category name is the folder name, so it can't contain `/ \ : * ? " < > |`. Changing the rules or the checkbox only affects files organised afterwards; files already in the library stay where they are. For TV, the NFO files, poster and logo go into the show folder inside the category folder. The organise preview shows which category a title goes into, which rule matched and which conditions it matched (for example 对上第 6 条「短剧」：片长 8 分钟（不超过 15 分钟）, rule 6 "短剧": 8 minutes, at most 15); when no rule matches, it says the title stays in the library folder. Categorising needs TMDB's details (a movie's production countries and running time are only there); when they can't be fetched, the title isn't organised this time and is retried later.
 
 ## Files with the same name
 
@@ -182,7 +183,7 @@ Videos dropped into a monitored folder (not torrents in a downloader, for exampl
 
 Videos that aren't in a downloader pt-tools manages (for example ones downloaded by another client or copied from another machine) can be organised into a library by entering their path, without adding a monitored folder first. Click Manual organise (手动整理) at the top of the organise history (整理历史) or media library (媒体库) page:
 
-1. **Enter the source path**: a file or folder as pt-tools sees it, for example the folder of one movie or one season, or a single video file. In Docker, mount the folder that holds it into the container first and enter the path inside the container.
+1. **Enter the source path**: a file or folder as pt-tools sees it, for example the folder of one movie or one season, or a single video file. In Docker, mount the folder that holds it into the container first and enter the path inside the container. You can also click Browse (浏览): it lists the folders you can browse (libraries, monitored folders, the local side of path mappings and the download folders set on downloaders); open a folder and pick a file, or use Pick this folder (选这个文件夹). Only these folders can be browsed, and symbolic links pointing outside them aren't listed; a folder lists at most 2,000 entries, so type the path for larger ones.
 2. **Preview**: click Preview (预览) or press Enter. The dialog shows the recognised title, the library it goes into, the organise mode, whether NFO files and images are written, and where each file goes in the library. When the match is wrong, choose the type (movie or TV), enter a TMDB ID and click Preview again (重新预览); you can also pick another library of the same type. Leaving the TMDB ID empty recognises the title by name.
 3. **Organise**: the files go into the library folder with the organise mode (the library's by default; Organise mode (整理方式) can pick another one for this run), NFO files and images are written when the library scrapes, the media servers are asked to scan and a notification is sent, the same as for torrents. After changing the source path, preview again before organising.
 
@@ -284,6 +285,20 @@ There is one record per video file, showing which item it was organised as and w
 | Skipped (跳过)   | Another file is at the target, there's no video to organise, the disc can't be organised (see [discs](#discs)), or it's an ISO image in a TV show                                                                                                                        |
 | Removed (已删除) | The files in the library have been deleted                                                                                                                                                                                                                               |
 
+Failed and skipped records show a category: not recognised (没识别出来), library (媒体库: no enabled library, or a problem with the naming template or secondary categories), path mapping (路径映射: pt-tools can't find the file), file system (文件系统: different file systems, no permission), target already has a file (目标已有文件), source gone (源文件不在了), discs and images (原盘与镜像: discs that can't be organised, ISO images in TV shows) and other (其他). Failed and skipped records from before this version have no category and count as other. The list can be filtered by category when showing all, failed or skipped records.
+
+After ticking some records, batch actions appear below the list:
+
+- **Retry**: only the failed and skipped records among those ticked; several records of the same torrent (or the same monitored item or path) are organised once.
+- **Rescrape**: only organised records; the same title in the same library is scraped once.
+- **Delete records** (删除记录) and **delete with files** (连文件删除): after a confirmation; deleting with files follows the rules for deleting below, and moved records can only have their record deleted, which the result says.
+
+Retry and rescrape answer once the work is queued; refresh later for the results. The result says how many records were done and why the others weren't.
+
+By title (按条目) groups the records by movie or by season of a show (records that weren't recognised by torrent name) and shows how many records each group has, how many per status and the latest time; the status, category and keyword filters still apply. View records (看记录) lists a group's records, and Back to groups (返回分组) returns.
+
+Records that weren't recognised have Ask AI (让 AI 认): it opens the organise dialog and asks the AI once after the preview, see [Asking the AI](#asking-the-ai).
+
 Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. A record organised by hand with an organise mode picked is retried with that mode. Failed or skipped records shown as 手动（指定路径） (manual, by path) also have Manual organise (手动整理): it opens the dialog with the path entered and the organise mode picked back then, so you can change the title, library or mode and organise again.
 
 Rescrape (重新刮削) rewrites the NFO files and images of the record's movie or show (every episode of it organised in this library) with the library's current scraping settings; use it after changing the scraping content, data sources or image language, or after entering a new key under media recognition:
@@ -296,6 +311,16 @@ Rescrape (重新刮削) rewrites the NFO files and images of the record's movie 
 
 When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): videos and subtitles are deleted only when still confirmed to be the files pt-tools created (hard links and copies by file ID: device, inode, size and modification time; symbolic links by their target); NFO files and images only when they are the copies pt-tools wrote, and the folder's posters, backgrounds, logos and NFO files only once no video is left; empty folders go last. Replaced or edited files stay and are listed after the deletion. When a record turns skipped or failed (for example because the video in the library was replaced with another file), the subtitles and scraped files organised earlier stay recorded on it and are cleaned up by the same rules when it is deleted. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
 
+## Asking the AI
+
+When the torrent name can't be matched to a title (the organise dialog's preview says 没有识别出来, or the history shows the not recognised category), Ask AI (让 AI 认) searches TMDB for movies and shows by the torrent name (with recognition words applied and corrections ignored, at most 8 candidates) and sends them, with the torrent name and the site's title, to the model of the [AI assistant](./assistant.md), which picks one or says none fits.
+
+- When it picks one, the type and TMDB ID are filled into the row for fixing the match, the preview is worked out for that title, and the AI's reason, the model and the token counts are shown. **You still click Organise yourself**, after checking the preview or changing the title or library.
+- With Record as a correction when organising (整理时记成纠正, ticked by default), clicking Organise first saves a [correction](./media-recognize.md), so torrents with the same name are matched to this title from then on; changing the title in the row turns this off.
+- When the AI says none fits, the first few candidates are listed so you can enter a TMDB ID yourself. When TMDB has no candidates, the model isn't asked.
+- The AI assistant must be enabled with its endpoint, key and model set up first; otherwise the dialog says why. Each request waits at most 30 seconds.
+- Only the torrent name, the site's title and each candidate's type, name, year and the first 80 characters of its overview go to the model, with long strings that look like secrets masked first. It uses the AI assistant's endpoint without tools, so it can't organise or change anything.
+
 ## Interaction with auto cleanup
 
 Once a torrent is hard-linked into the library, deleting it with its data frees no space (the library link still holds it), so the low-space emergency cleanup does not pick hard-linked torrents. Regular cleanup rules still apply: delete the torrent when it has seeded enough and the library file stays watchable.
@@ -306,9 +331,9 @@ Delete library links when torrents are deleted (删种时一并删除入库链�
 
 **Failed: the source and the library are not on the same file system**: hard links need the download folder and the library on one partition. In Docker, mount them as one volume as in [preparing the folders](#preparing-the-folders), or switch the library to copy.
 
-**Failed: pt-tools cannot find a path**: the downloader and pt-tools see different paths; add a path mapping.
+**Failed: pt-tools cannot find a path**: the downloader and pt-tools see different paths; add a path mapping, then retry in the history (filter by path mapping to retry them together). Once a retry finds the files, the failed records written under the downloader's path are removed.
 
-**No match**: preview the torrent name under [media recognition](media-recognize.md), pick a candidate or enter a TMDB ID, then click Retry (重试) in the history; or enter the TMDB ID directly when organising by hand.
+**No match**: preview the torrent name under [media recognition](media-recognize.md), pick a candidate or enter a TMDB ID, then click Retry (重试) in the history; or enter the TMDB ID directly when organising by hand, or [ask the AI](#asking-the-ai).
 
 **Another file is at the target**: pt-tools does not overwrite other files. If you no longer need the file in the library, delete it and retry.
 

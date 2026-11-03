@@ -207,6 +207,7 @@ func TestWatchDirMoveSkipsTorrents(t *testing.T) {
 	rows := e.history()
 	require.Len(t, rows, 1)
 	assert.Equal(t, models.MediaTransferFailed, rows[0].Status)
+	assert.Equal(t, models.MediaFailOther, rows[0].FailKind)
 	assert.Nil(t, rows[0].NextRetryAt, "改了设置再手动重试")
 
 	e.dl.mu.Lock()

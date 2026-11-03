@@ -137,11 +137,16 @@ func reportUsage(ctx context.Context, model string, u openai.CompletionUsage) {
 
 // signInAsk 发一次不带工具的对话，回第一条回答的正文。错误原样返回（调用方按场景说明）。
 func (s *Service) signInAsk(ctx context.Context, c llmConfig, model string, msg openai.ChatCompletionMessageParamUnion) (string, error) {
+	return s.askOnce(ctx, c, model, msg, signInTimeout)
+}
+
+// askOnce 发一次不带工具的对话，最多等 timeout，回第一条回答的正文；用量交给 ctx 里的 sink（见 WithUsageSink）。
+func (s *Service) askOnce(ctx context.Context, c llmConfig, model string, msg openai.ChatCompletionMessageParamUnion, timeout time.Duration) (string, error) {
 	chat, err := s.chatService(c)
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", ErrInvalid, err.Error())
 	}
-	ctx, cancel := context.WithTimeout(ctx, signInTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	res, err := chat.New(ctx, openai.ChatCompletionNewParams{Model: model, Messages: []openai.ChatCompletionMessageParamUnion{msg}})
 	if err != nil {

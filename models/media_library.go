@@ -153,6 +153,32 @@ const (
 	MediaTriggerWatch = "watch"
 )
 
+// 失败与跳过的整理记录的分类（FailKind）。整理成的记录为空；升级前的失败、跳过记录也为空，当作其他。
+const (
+	// MediaFailRecognize 是没识别出来（没填 TMDB Key、TMDB 上没有可靠的匹配、取不到条目详情）
+	MediaFailRecognize = "recognize"
+	// MediaFailLibrary 是没有媒体库、媒体库不对（类型、命名模板、二级分类）
+	MediaFailLibrary = "library"
+	// MediaFailPath 是 pt-tools 里找不到文件，要加路径映射
+	MediaFailPath = "path"
+	// MediaFailFilesystem 是跨文件系统、没有权限这类文件系统的问题
+	MediaFailFilesystem = "filesystem"
+	// MediaFailExists 是目标位置已经有别的文件
+	MediaFailExists = "exists"
+	// MediaFailSource 是源文件不在了
+	MediaFailSource = "source"
+	// MediaFailDisc 是整理不了的原盘与镜像（剧集原盘、几张原盘、剧集里的 ISO 等）
+	MediaFailDisc = "disc"
+	// MediaFailOther 是其他
+	MediaFailOther = "other"
+)
+
+// MediaFailKinds 是所有的失败分类，按页面上的顺序。
+var MediaFailKinds = []string{
+	MediaFailRecognize, MediaFailLibrary, MediaFailPath, MediaFailFilesystem,
+	MediaFailExists, MediaFailSource, MediaFailDisc, MediaFailOther,
+}
+
 // 刮削的结果（整理记录的 ScrapeStatus）。空串是没刮削过（媒体库关着刮削，或升级前整理的）。
 const (
 	MediaScrapeOK = "ok"
@@ -193,7 +219,9 @@ type MediaTransferHistory struct {
 	Size       int64  `gorm:"not null;default:0" json:"size"`
 	Status     string `gorm:"size:16;not null;default:'';index" json:"status"`
 	Message    string `gorm:"size:1024;not null;default:''" json:"message"`
-	Attempts   int    `gorm:"not null;default:0" json:"attempts"`
+	// FailKind 是失败与跳过的分类（MediaFailRecognize 等）；整理成的为空，升级前的失败、跳过记录也为空（当作其他）
+	FailKind string `gorm:"size:16;not null;default:''" json:"fail_kind"`
+	Attempts int    `gorm:"not null;default:0" json:"attempts"`
 	// NextRetryAt 是失败后下次自动重试的时间；为空的不自动重试（例如没识别出来，要先纠正）
 	NextRetryAt *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
 	// TargetFileID 是整理出的文件的设备号与 inode（Windows 是卷序列号与文件索引），删除库里的文件前用它确认还是这个文件

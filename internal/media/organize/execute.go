@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -68,6 +69,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 	if p.noRecord {
 		return res, nil
 	}
+	s.dropStalePathRows(ctx, p)
 	if p.Problem != "" {
 		s.recordProblem(ctx, p, trigger, res)
 		return res, nil
@@ -95,6 +97,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			continue
 		case ItemExists:
 			res.Skipped++
+			it.failKind = models.MediaFailExists
 			s.record(ctx, p, it, trigger, models.MediaTransferSkipped, it.Message, false, "", nil)
 			continue
 		case ItemReplace:
@@ -153,7 +156,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			default:
 				res.Failed++
 			}
-			it.Status, it.Message = ItemFailed, terr.Error()
+			it.fail(failKindOf(terr), terr.Error())
 			s.record(ctx, p, it, trigger, status, terr.Error(), retry, "", nil)
 			continue
 		}
@@ -224,6 +227,19 @@ func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([
 	return out, created, msgs
 }
 
+// failKindOf 是放文件出错时的分类。
+func failKindOf(err error) string {
+	switch {
+	case errors.Is(err, transfer.ErrTargetExists):
+		return models.MediaFailExists
+	case errors.Is(err, transfer.ErrSourceMissing):
+		return models.MediaFailSource
+	case errors.Is(err, transfer.ErrCrossDevice), errors.Is(err, os.ErrPermission):
+		return models.MediaFailFilesystem
+	}
+	return models.MediaFailOther
+}
+
 // unplace 撤回这次放进库里、但整理记录没写进去的文件（视频要 placed 为真）：源文件还在，按文件编号或指向确认是自己放的才删；
 // 移动过去的是唯一的一份，不撤。
 func unplace(it *PlanItem, mode, fileID string, placed bool, subs []extra) {
@@ -252,7 +268,7 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 	}
 	if len(p.Items) == 0 {
 		status = models.MediaTransferSkipped
-		it := &PlanItem{Rel: p.Name, Source: p.contentSrc}
+		it := &PlanItem{Rel: p.Name, Source: p.contentSrc, failKind: p.FailKind}
 		var row models.MediaTransferHistory
 		if err := s.cfg.DB.WithContext(ctx).Where("source_path = ?", it.Source).Limit(1).Find(&row).Error; err == nil && row.ID != 0 {
 			it.row = &row
@@ -273,7 +289,7 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 			s.noteOtherFile(ctx, it, p.otherNote())
 			continue
 		}
-		it.Status, it.Message = ItemFailed, p.Problem
+		it.fail(p.FailKind, p.Problem)
 		s.record(ctx, p, it, trigger, status, p.Problem, p.retryable && !p.skip, "", nil)
 		if p.skip {
 			res.Skipped++
@@ -282,6 +298,27 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 		}
 	}
 	s.recordISOSkips(ctx, p, trigger, res)
+}
+
+// dropStalePathRows 删掉这个种子之前因为没配好路径映射记下的失败记录。那时的源路径是下载器看到的路径，配好映射以后
+// 源文件换了路径，整理记录按新路径记，旧的那几条没人再更新、一直留在失败里。这次找得到文件（不是路径映射的问题）时才删，
+// 只删这个种子的、这次的文件里没有的、没记着库里文件的（路径不对时什么也没整理出来）。
+func (s *Service) dropStalePathRows(ctx context.Context, p *Plan) {
+	if p.WatchDirID > 0 || p.SourcePath != "" || p.DownloaderID == 0 || p.Hash == "" || p.FailKind == models.MediaFailPath || len(p.Items) == 0 {
+		return
+	}
+	srcs := make([]string, 0, len(p.Items))
+	for _, it := range p.Items {
+		srcs = append(srcs, it.Source)
+	}
+	err := s.cfg.DB.WithContext(ctx).
+		Where("downloader_id = ? AND info_hash = ? AND fail_kind = ? AND status IN ?", p.DownloaderID, p.Hash, models.MediaFailPath,
+			[]string{models.MediaTransferFailed, models.MediaTransferSkipped}).
+		Where("target_path = '' AND target_file_id = '' AND extras = '' AND source_path NOT IN ?", srcs).
+		Delete(&models.MediaTransferHistory{}).Error
+	if err != nil {
+		s.cfg.Logger.Warnf("[整理入库] 清理没配好路径映射时的失败记录失败 (%s): %v", p.Name, err)
+	}
 }
 
 // record 写一个文件的整理记录（按源文件更新或新建）；写不进去时只记日志（不认领库里文件的情况用）。
@@ -320,6 +357,9 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 		b, _ := json.Marshal(extras)
 		row.Extras = string(b)
 	}
+	if status == models.MediaTransferFailed || status == models.MediaTransferSkipped {
+		row.FailKind = firstNonEmpty(it.failKind, p.FailKind, models.MediaFailOther)
+	}
 	// 没整理成时保留记录里之前整理出的文件（视频的位置、方式与文件编号，字幕与刮削写的文件）：删除记录时还要按它们清理。
 	// 带着 extras 的（原盘移动到一半、挪不回去的文件）记这次的：之前的那些文件已经不在了（电影目录不在或是空的才会放）
 	if status != models.MediaTransferDone && len(extras) == 0 && hasLibraryFiles(it.row) {
@@ -346,7 +386,7 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 		DoUpdates: clause.AssignmentColumns([]string{
 			"downloader_id", "downloader_name", "watch_dir_id", "info_hash", "task_id", "torrent_name", "library_id", "save_root", "target_path", "root_path",
 			"extras", "mode", "chosen_mode", "media_type", "tmdb_id", "title", "year", "season", "episode", "episode_end", "size",
-			"status", "message", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "match_source", "updated_at",
+			"status", "message", "fail_kind", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "match_source", "updated_at",
 		}),
 	}).Create(&row).Error
 	if err != nil {

@@ -608,6 +608,34 @@ func (s *Service) match(ctx context.Context, c *tmdb.Client, m meta.Meta, imdb s
 	return nil
 }
 
+// maxCandidates 是 Candidates 一次最多回几个候选。
+const maxCandidates = 20
+
+// Candidates 是一个标题在 TMDB 上的候选：套用识别词解析以后电影与剧集都搜，按分数排，最多 limit 个（1 到 20）。
+// 不看手动纠正与 IMDb 编号：给自动识别认不出的标题让人或 AI 挑。解析出的名字为空时没有候选；没填 TMDB API Key 时返回 tmdb.ErrNoKey。
+func (s *Service) Candidates(ctx context.Context, in Input, limit int) ([]Candidate, error) {
+	in, err := cleanInput(in)
+	if err != nil {
+		return nil, err
+	}
+	m, _, err := s.parse(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cands, err := s.search(ctx, c, m, []string{tmdb.KindMovie, tmdb.KindTV})
+	if err != nil {
+		return nil, err
+	}
+	if limit = min(max(limit, 1), maxCandidates); len(cands) > limit {
+		cands = cands[:limit]
+	}
+	return cands, nil
+}
+
 // findOverride 找这个解析结果的手动纠正：先按英文名、再按中文名找主键，最后按中文名找别名。没有时返回零值。
 func (s *Service) findOverride(ctx context.Context, m meta.Meta) (models.MediaOverride, error) {
 	en, cn := overrideKey(m, m.NameEN), overrideKey(m, m.NameCN)

@@ -8,7 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
@@ -17,8 +20,16 @@ import (
 
 // HistoryQuery 是整理记录的查询。
 type HistoryQuery struct {
-	Status  string
+	Status string
+	// Kind 是失败与跳过的分类（models.MediaFailKinds 之一）：只列失败与跳过的记录，other 也包括升级前没有分类的
+	Kind    string
 	Keyword string
+	// MediaType、TMDBID 与 Season 选一组识别出条目的记录（见 HistoryGroups）：TMDBID 不为 0 时只列这个条目这一季的
+	MediaType string
+	TMDBID    int
+	Season    int
+	// Torrent 选一组没识别出条目的记录：种子名（监控目录的项、指定的路径是最后一段）
+	Torrent string
 	Limit   int
 	Offset  int
 }
@@ -49,26 +60,55 @@ func decodeExtras(raw string) []extra {
 	return out
 }
 
-// History 按时间倒序列出整理记录，可以按状态与关键字（种子名、标题、路径）筛选。
-func (s *Service) History(ctx context.Context, q HistoryQuery) (HistoryPage, error) {
-	if q.Limit <= 0 || q.Limit > 200 {
-		q.Limit = 50
-	}
-	q.Offset = max(q.Offset, 0)
+// historyDB 是按查询条件（状态、分类、关键字、组）筛选整理记录的查询；每次调用都是新的。
+func (s *Service) historyDB(ctx context.Context, q HistoryQuery) (*gorm.DB, error) {
 	db := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{})
 	switch q.Status {
 	case "":
 	case models.MediaTransferDone, models.MediaTransferFailed, models.MediaTransferSkipped, models.MediaTransferRemoved:
 		db = db.Where("status = ?", q.Status)
 	default:
-		return HistoryPage{}, fmt.Errorf("%w: 状态要选 done、failed、skipped 或 removed", ErrInvalid)
+		return nil, fmt.Errorf("%w: 状态要选 done、failed、skipped 或 removed", ErrInvalid)
+	}
+	switch {
+	case q.Kind == "":
+	case !slices.Contains(models.MediaFailKinds, q.Kind):
+		return nil, fmt.Errorf("%w: 分类要选 %s", ErrInvalid, strings.Join(models.MediaFailKinds, "、"))
+	case q.Kind == models.MediaFailOther:
+		db = db.Where("status IN ? AND fail_kind IN ?", []string{models.MediaTransferFailed, models.MediaTransferSkipped}, []string{models.MediaFailOther, ""})
+	default:
+		db = db.Where("status IN ? AND fail_kind = ?", []string{models.MediaTransferFailed, models.MediaTransferSkipped}, q.Kind)
 	}
 	if kw := strings.TrimSpace(q.Keyword); kw != "" {
 		if len(kw) > 200 {
-			return HistoryPage{}, fmt.Errorf("%w: 关键字太长", ErrInvalid)
+			return nil, fmt.Errorf("%w: 关键字太长", ErrInvalid)
 		}
 		like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(kw) + "%"
 		db = db.Where(`torrent_name LIKE ? ESCAPE '\' OR title LIKE ? ESCAPE '\' OR source_path LIKE ? ESCAPE '\' OR target_path LIKE ? ESCAPE '\'`, like, like, like, like)
+	}
+	switch {
+	case q.TMDBID < 0 || q.Season < 0:
+		return nil, fmt.Errorf("%w: 条目编号与季不能是负数", ErrInvalid)
+	case q.TMDBID > 0:
+		if !validKind(q.MediaType) {
+			return nil, fmt.Errorf("%w: 按条目看记录时要写明类型（movie 或 tv）", ErrInvalid)
+		}
+		db = db.Where("media_type = ? AND tmdb_id = ? AND season = ?", q.MediaType, q.TMDBID, q.Season)
+	case q.Torrent != "":
+		db = db.Where("tmdb_id = 0 AND torrent_name = ?", q.Torrent)
+	}
+	return db, nil
+}
+
+// History 按时间倒序列出整理记录，可以按状态、分类、关键字（种子名、标题、路径）与组筛选。
+func (s *Service) History(ctx context.Context, q HistoryQuery) (HistoryPage, error) {
+	if q.Limit <= 0 || q.Limit > 200 {
+		q.Limit = 50
+	}
+	q.Offset = max(q.Offset, 0)
+	db, err := s.historyDB(ctx, q)
+	if err != nil {
+		return HistoryPage{}, err
 	}
 	var page HistoryPage
 	if err := db.Count(&page.Total).Error; err != nil {
@@ -136,11 +176,16 @@ func (s *Service) Retry(ctx context.Context, id uint) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.Organize(ctx, retryRequest(row))
+}
+
+// retryRequest 是重试这条记录的请求：之前手动指定过条目的，沿用那个条目与媒体库。
+func retryRequest(row models.MediaTransferHistory) Request {
 	req := requestOf(row)
 	if row.Trigger == models.MediaTriggerManual && row.TMDBID > 0 {
 		req.MediaType, req.TMDBID, req.LibraryID = row.MediaType, row.TMDBID, row.LibraryID
 	}
-	return s.Organize(ctx, req)
+	return req
 }
 
 // hasLibraryFiles 报告记录里有没有记着 pt-tools 放进库的文件：已整理的，或者之后变成跳过、失败（例如库里的视频被换掉了），

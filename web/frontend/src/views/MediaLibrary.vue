@@ -409,6 +409,8 @@ const ruleForm = ref<Required<ClassifyRule>>({
   genres: [],
   languages: [],
   countries: [],
+  max_runtime: 0,
+  keywords: [],
 });
 const ruleTitle = computed(
   () => `${ruleIndex.value === null ? "添加" : "编辑"}${mediaKindLabel(ruleKind.value)}分类`,
@@ -447,6 +449,8 @@ function openRule(kind: MediaKind, index?: number) {
     genres: [...(r?.genres ?? [])],
     languages: [...(r?.languages ?? [])],
     countries: [...(r?.countries ?? [])],
+    max_runtime: r?.max_runtime ?? 0,
+    keywords: [...(r?.keywords ?? [])],
   };
   ruleDialog.value = true;
 }
@@ -463,6 +467,9 @@ async function saveRule() {
     languages: [...f.languages],
     countries: [...f.countries],
   };
+  if (f.max_runtime) rule.max_runtime = f.max_runtime;
+  const keywords = f.keywords.map((k) => k.trim()).filter(Boolean);
+  if (keywords.length) rule.keywords = keywords;
   const list = [...classify.value[ruleKind.value]];
   if (ruleIndex.value === null) list.push(rule);
   else list[ruleIndex.value] = rule;
@@ -1755,10 +1762,32 @@ onMounted(refresh);
               :label="`${c.label}（${c.value}）`"
               :value="c.value" />
           </el-select>
-          <div class="field-tip">
-            几个条件都要满足；一个条件里选了几个时满足其中一个就行。都不选时，前面的分类都对不上的放进这里。
-          </div>
         </el-form-item>
+        <div class="ml-rule-pair">
+          <el-form-item label="片长不超过（分钟）">
+            <el-input-number
+              v-model="ruleForm.max_runtime"
+              :min="0"
+              :max="600"
+              controls-position="right"
+              data-testid="ml-rule-runtime" />
+          </el-form-item>
+          <el-form-item label="或标题里有">
+            <el-select
+              v-model="ruleForm.keywords"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              :reserve-keyword="false"
+              placeholder="输入关键字后回车，例如 短剧"
+              data-testid="ml-rule-keywords" />
+          </el-form-item>
+        </div>
+        <div class="field-tip">
+          几个条件都要满足；一个条件里选了几个时满足其中一个就行。片长与标题关键字算一个条件：片长（剧集按一集）不超过这么多分钟，或者种子名、站点标题里有其中一个关键字；片长为
+          0 是不看片长，TMDB 上没写片长时只看关键字。都不填时，前面的分类都对不上的放进这里。
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="ruleDialog = false">取消</el-button>
@@ -2090,6 +2119,20 @@ onMounted(refresh);
 
 .ml-delete-warn {
   margin-top: var(--pt-space-2);
+}
+
+/* 片长与关键字是一个条件：并排放，手机上上下排 */
+.ml-rule-pair {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .ml-rule-pair {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
 }
 
 .ml-sub {

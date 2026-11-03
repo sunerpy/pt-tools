@@ -87,6 +87,7 @@ func TestChosenModeTorrent(t *testing.T) {
 	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash, Mode: models.MediaModeMove})
 	require.NoError(t, err)
 	assert.Contains(t, res.Plan.Problem, "种子还在做种，不能用移动整理")
+	assert.Equal(t, models.MediaFailOther, res.Plan.FailKind)
 	assert.Contains(t, res.Plan.Problem, "整理方式改选硬链接")
 	assert.NotContains(t, res.Plan.Problem, "媒体库改用", "库本来就是硬链接")
 	assert.True(t, exists(src), "源文件不动")

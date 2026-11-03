@@ -102,7 +102,7 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 				it.Episode, it.EpisodeEnd = p.meta.Episode, p.meta.EpisodeEnd
 			}
 			if it.Episode == 0 {
-				it.Status, it.Message = ItemFailed, "文件名里没认出集数：可以加识别词，或改文件名后重试"
+				it.fail(models.MediaFailRecognize, "文件名里没认出集数：可以加识别词，或改文件名后重试")
 				continue
 			}
 			if sd := season(it.Season); sd != nil {
@@ -117,12 +117,13 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 		}
 		rel, err := transfer.Render(tpl, v)
 		if err != nil {
-			it.Status, it.Message = ItemFailed, err.Error()
+			it.fail(models.MediaFailLibrary, err.Error())
 			continue
 		}
 		it.Target = filepath.Join(p.base(), filepath.FromSlash(rel)) + strings.ToLower(path.Ext(it.Rel))
 		if !transfer.Within(lib.Path, it.Target) {
-			it.Status, it.Message, it.Target = ItemFailed, "模板算出的路径不在库目录里", ""
+			it.fail(models.MediaFailLibrary, "模板算出的路径不在库目录里")
+			it.Target = ""
 			continue
 		}
 	}
@@ -130,7 +131,7 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 	for i := range p.Items {
 		for j := range i {
 			if p.Items[i].Target != "" && p.Items[i].Target == p.Items[j].Target && p.Items[j].Status != ItemFailed {
-				p.Items[i].Status, p.Items[i].Message = ItemFailed, "与另一个文件算出的目标相同（同一集或同一部的另一个版本）：在模板里加上画质或版本"
+				p.Items[i].fail(models.MediaFailLibrary, "与另一个文件算出的目标相同（同一集或同一部的另一个版本）：在模板里加上画质或版本")
 			}
 		}
 	}

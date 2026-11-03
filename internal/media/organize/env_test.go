@@ -124,6 +124,23 @@ type fakeDL struct {
 	files    map[string][]downloader.TorrentFile
 	listErr  error
 	getErr   error
+	// diskPath 是 GetDiskInfo 回的默认保存路径；diskBlock 让它等着
+	diskPath  string
+	diskBlock chan struct{}
+}
+
+// GetDiskInfo 回 diskPath（为空时报错）；diskBlock 不为 nil 时先等它关上。
+func (f *fakeDL) GetDiskInfo() (downloader.DiskInfo, error) {
+	f.mu.Lock()
+	p, block := f.diskPath, f.diskBlock
+	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
+	if p == "" {
+		return downloader.DiskInfo{}, errors.New("读不到下载器的默认保存路径")
+	}
+	return downloader.DiskInfo{Path: p}, nil
 }
 
 func (f *fakeDL) GetTorrent(id string) (downloader.Torrent, error) {
@@ -240,7 +257,7 @@ func newDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
 		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{}, &models.MediaWatchDir{},
-		&models.MediaTransferHistory{}, &models.TorrentInfo{}, &models.TorrentInfoArchive{}, &models.DownloaderSetting{},
+		&models.MediaTransferHistory{}, &models.TorrentInfo{}, &models.TorrentInfoArchive{}, &models.DownloaderSetting{}, &models.DownloaderDirectory{},
 	))
 	return db
 }
