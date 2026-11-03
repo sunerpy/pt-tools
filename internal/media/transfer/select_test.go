@@ -147,6 +147,7 @@ func TestSelectDisc(t *testing.T) {
 	require.Len(t, two.Discs, 3)
 	assert.Equal(t, []string{"Box/Disc1", "Box/Disc2", "Box/Disc2/Inner"}, []string{two.Discs[0].Root, two.Discs[1].Root, two.Discs[2].Root})
 	assert.Len(t, two.Discs[1].Files, 2, "CERTIFICATE 归到最近的那个根目录")
+	assert.Len(t, two.Discs[2].Files, 1, "里面那张盘的文件归它自己，不当作外面那张的「原盘以外的文件」")
 	hybrid := Select([]File{
 		{Rel: "H/VIDEO_TS/VTS_01_1.VOB", Path: "/dl/H/VIDEO_TS/VTS_01_1.VOB", Size: 900 * mb},
 		{Rel: "H/BDMV/STREAM/1.m2ts", Path: "/dl/H/BDMV/STREAM/1.m2ts", Size: 9000 * mb},

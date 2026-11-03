@@ -374,6 +374,45 @@ func TestOrganizeDiscMoveRollbackLeftovers(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalid, "移动的文件是唯一的一份，不在这里删")
 }
 
+// 之前硬链接整理过、库里的目录被删了，改成移动以后放到一半失败、挪不回去：记录改成移动（库里留着的是唯一的一份），
+// 不沿用之前硬链接的方式与文件，删除记录时不能连这些文件删
+func TestOrganizeDiscMoveLeftoversReplacePriorRecord(t *testing.T) {
+	e := newEnv(t)
+	lib := e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.discTorrent(func(t *downloader.Torrent) { t.State = downloader.TorrentPaused })
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
+	require.NoError(t, err)
+	require.Equal(t, models.MediaModeHardlink, e.history()[0].Mode)
+	movieDir := filepath.Join(e.movies, "奥本海默 (2023)")
+	require.NoError(t, os.RemoveAll(movieDir))
+	old := transferDetail
+	t.Cleanup(func() { transferDetail = old })
+	calls := 0
+	transferDetail = func(src, dst, m string) (transfer.Outcome, transfer.Detail, error) {
+		calls++
+		switch {
+		case calls == 3:
+			return 0, transfer.Detail{}, errors.New("磁盘满了")
+		case calls > 3:
+			return 0, transfer.Detail{}, errors.New("只读")
+		}
+		return old(src, dst, m)
+	}
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash, LibraryID: lib.ID, Mode: models.MediaModeMove})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Failed)
+	r := e.history()[0]
+	assert.Equal(t, models.MediaModeMove, r.Mode, "库里留着的是移动过去的文件")
+	disc, _ := discExtrasOf(t, r)
+	assert.Len(t, disc, 2)
+	_, err = e.svc.DeleteHistory(e.ctx, r.ID, true)
+	require.ErrorIs(t, err, ErrInvalid)
+	for _, x := range disc {
+		assert.True(t, exists(x.Target), "移动过去的文件留着 %s", x.Target)
+	}
+}
+
 func TestDiscDeleteAndRetire(t *testing.T) {
 	e := newEnv(t)
 	e.defaultLibraries()
@@ -413,6 +452,16 @@ func TestDiscDeleteAndRetire(t *testing.T) {
 	var after models.MediaTransferHistory
 	require.NoError(t, e.db.First(&after, r.ID).Error)
 	assert.Equal(t, models.MediaTransferRemoved, after.Status)
+}
+
+// 删除库里的文件时，目录里还有 ISO、DVD 的 VOB 也算有视频（目录里的海报等留着）
+func TestHasVideoCountsDiscAndISO(t *testing.T) {
+	for name, want := range map[string]bool{"Movie.iso": true, "VTS_01_1.VOB": true, "00001.m2ts": true, "movie.mkv": true, "poster.jpg": false} {
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", name), nil, 0o644))
+		assert.Equal(t, want, hasVideo(dir), name)
+	}
 }
 
 func TestDiscRescrape(t *testing.T) {
@@ -498,6 +547,23 @@ func TestWatchDiscAndISO(t *testing.T) {
 
 	e.svc.watchScan(e.ctx, e.mustSettings())
 	assert.Zero(t, e.drain(), "整理过、跳过的不再排")
+}
+
+// 原盘在这一项里面一层（这一项不是原盘根目录）：记录在原盘根目录上，之后扫描按它认处理过了
+func TestWatchNestedDisc(t *testing.T) {
+	e, d := watchEnv(t)
+	entry := "Oppenheimer.2023.BluRay.Box"
+	for _, in := range discIns {
+		e.put(d, entry+"/DISC1/"+in, 1, 10*time.Minute)
+	}
+	e.svc.watchScan(e.ctx, e.mustSettings())
+	require.Equal(t, 1, e.drain())
+	rows := e.history()
+	require.Len(t, rows, 1)
+	assert.Equal(t, filepath.Join(d.Path, entry, "DISC1"), rows[0].SourcePath)
+	assert.Equal(t, models.MediaTransferDone, rows[0].Status)
+	e.svc.watchScan(e.ctx, e.mustSettings())
+	assert.Zero(t, e.drain(), "按原盘根目录上的记录认处理过了")
 }
 
 // 复制用了写时复制：整理记录写明

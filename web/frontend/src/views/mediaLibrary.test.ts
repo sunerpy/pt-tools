@@ -153,8 +153,9 @@ const server = {
   updated_at: "",
 };
 
-async function mountPage(opts: { libsFail?: boolean } = {}) {
-  api.settings.mockResolvedValue(settings);
+async function mountPage(opts: { libsFail?: boolean; settingsFail?: boolean } = {}) {
+  if (opts.settingsFail) api.settings.mockRejectedValue(new Error("读取整理设置失败"));
+  else api.settings.mockResolvedValue(settings);
   media.settings.mockResolvedValue({
     key_source: "user",
     has_fanart_key: false,
@@ -192,7 +193,8 @@ async function mountPage(opts: { libsFail?: boolean } = {}) {
       realtime: "unavailable",
       realtime_note: "在网络文件系统（NFS）上，收不到别的机器写进来的通知",
     },
-    { id: 8, path: "/media/off", enabled: false, created_at: "", updated_at: "", realtime: "off" },
+    // 关着的目录：即使状态还写着 on 也不写
+    { id: 8, path: "/media/off", enabled: false, created_at: "", updated_at: "", realtime: "on" },
   ]);
   api.templatePreview.mockResolvedValue({ template: "", preview: "示例路径" });
   dl.list.mockResolvedValue([
@@ -428,6 +430,18 @@ describe("媒体库", () => {
     q("ml-save-settings")!.click();
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
     expect(api.saveSettings.mock.calls[0]![0]).toMatchObject({ watch_realtime: false });
+  });
+
+  it("设置没读到时保存的是默认值：实时监控同后端一样默认开", async () => {
+    await mountPage({ settingsFail: true });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("设置没读到"));
+    api.saveSettings.mockResolvedValue(settings);
+    q("ml-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toMatchObject({
+      watch_realtime: true,
+      watch_interval_min: 10,
+    });
   });
 
   it("目录监控：列表、添加只发输入字段、启停与删除", async () => {

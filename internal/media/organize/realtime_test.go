@@ -341,10 +341,15 @@ func TestRealtimeDropsDirs(t *testing.T) {
 	fw.set(w2, nil)
 	e.svc.rtSync(e.ctx)
 	assert.Equal(t, []string{d.Path, other}, w2.watching())
+	e.svc.rtEvent(fsnotify.Event{Name: filepath.Join(other, "b.mkv"), Op: fsnotify.Create})
+	_, ok = e.pendingAt(d2.ID, "b.mkv")
+	require.True(t, ok)
 	require.NoError(t, e.svc.DeleteWatchDir(e.ctx, d2.ID))
 	e.svc.rtSync(e.ctx)
 	assert.Equal(t, []string{d.Path}, w2.watching())
 	assert.Equal(t, rtState{}, e.realtimeState(d2.ID))
+	_, ok = e.pendingAt(d2.ID, "b.mkv")
+	assert.False(t, ok, "删掉的目录排着的扫描丢掉")
 }
 
 // 跑起来的后台：改了设置以后马上核对；收到事件、到了时间就扫
