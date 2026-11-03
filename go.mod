@@ -11,6 +11,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/fatih/color v1.19.0
 	github.com/flynn/noise v1.1.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang/mock v1.6.0

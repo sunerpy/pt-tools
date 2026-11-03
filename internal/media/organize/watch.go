@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -172,6 +173,8 @@ func (s *Service) SaveWatchDir(ctx context.Context, id uint, in WatchDirInput) (
 	if err != nil {
 		return models.MediaWatchDir{}, err
 	}
+	// 改了监控目录以后实时监控重新核对（在放开 setMu 以后）
+	defer s.resyncRealtime(ctx)
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
 	db := s.cfg.DB.WithContext(ctx)
@@ -224,6 +227,7 @@ func (s *Service) SaveWatchDir(ctx context.Context, id uint, in WatchDirInput) (
 
 // DeleteWatchDir 删除监控目录（整理过的文件与记录不动）。
 func (s *Service) DeleteWatchDir(ctx context.Context, id uint) error {
+	defer s.resyncRealtime(ctx)
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
 	res := s.cfg.DB.WithContext(ctx).Delete(&models.MediaWatchDir{}, id)
@@ -370,46 +374,87 @@ func (s *Service) watchScan(ctx context.Context, set Settings) {
 	}
 	queued := 0
 	for _, d := range dirs {
-		entries, err := os.ReadDir(d.Path)
+		names, err := watchEntries(d.Path)
 		if err != nil {
 			s.cfg.Logger.Warnf("[整理入库] 读取监控目录 %s 失败: %v", d.Path, err)
 			continue
 		}
-		for _, e := range entries {
-			name := e.Name()
-			if skipWatchEntry(name) {
-				continue
-			}
-			hash := watchHash(d.ID, name)
-			if s.backedOff(0, hash) || s.watchBusyOn(hash) {
-				continue
-			}
-			files, newest, err := watchFiles(d.Path, name)
-			if err != nil && !errors.Is(err, errWatchTooBig) {
-				continue
-			}
-			if err == nil && s.cfg.Now().Sub(newest) < watchSettle {
-				continue
-			}
-			covered, cerr := s.watchCovered(ctx, filepath.Join(d.Path, name), files, err != nil, set)
-			if cerr != nil {
-				s.cfg.Logger.Warnf("[整理入库] 读取整理记录失败: %v", cerr)
-				return
-			}
-			if covered {
-				continue
-			}
-			if queued >= maxPerRound {
-				return
-			}
-			s.setWatchBusy(hash, true)
-			if !s.enqueue(job{req: Request{WatchDirID: d.ID, Entry: name}, trigger: models.MediaTriggerWatch}) {
-				s.setWatchBusy(hash, false)
-				continue
-			}
-			queued++
+		if !s.watchQueue(ctx, set, d, names, &queued, nil) {
+			return
 		}
 	}
+}
+
+// watchEntries 是监控目录下的每一项的名字。
+func watchEntries(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names, nil
+}
+
+// watchScanEntries 只扫监控目录 dirID 里的这几项（实时监控收到了改动；名字里有 rescanAll 时整个目录扫一遍），规则同 watchScan。
+// 还在改动的项交给 settling（带上最近一次改动的时间）。
+func (s *Service) watchScanEntries(ctx context.Context, set Settings, dirID uint, names []string, settling func(string, time.Time)) {
+	d, err := s.watchDir(ctx, dirID)
+	if err != nil || d.ID == 0 || !d.Enabled {
+		return
+	}
+	if slices.Contains(names, rescanAll) {
+		if names, err = watchEntries(d.Path); err != nil {
+			s.cfg.Logger.Warnf("[整理入库] 读取监控目录 %s 失败: %v", d.Path, err)
+			return
+		}
+	}
+	queued := 0
+	s.watchQueue(ctx, set, d, names, &queued, settling)
+}
+
+// watchQueue 把监控目录 d 里这几项中该整理的排进队列（规则见 watchScan），queued 是这一轮已经排了几项。
+// 还在改动的项交给 settling（为空时不管）。这一轮到了上限、或读不了整理记录时返回假，不再往下扫。
+func (s *Service) watchQueue(ctx context.Context, set Settings, d models.MediaWatchDir, names []string, queued *int, settling func(string, time.Time)) bool {
+	for _, name := range names {
+		if skipWatchEntry(name) {
+			continue
+		}
+		hash := watchHash(d.ID, name)
+		if s.backedOff(0, hash) || s.watchBusyOn(hash) {
+			continue
+		}
+		files, newest, err := watchFiles(d.Path, name)
+		if err != nil && !errors.Is(err, errWatchTooBig) {
+			continue
+		}
+		if err == nil && s.cfg.Now().Sub(newest) < watchSettle {
+			if settling != nil {
+				settling(name, newest)
+			}
+			continue
+		}
+		covered, cerr := s.watchCovered(ctx, filepath.Join(d.Path, name), files, err != nil, set)
+		if cerr != nil {
+			s.cfg.Logger.Warnf("[整理入库] 读取整理记录失败: %v", cerr)
+			return false
+		}
+		if covered {
+			continue
+		}
+		if *queued >= maxPerRound {
+			return false
+		}
+		s.setWatchBusy(hash, true)
+		if !s.enqueue(job{req: Request{WatchDirID: d.ID, Entry: name}, trigger: models.MediaTriggerWatch}) {
+			s.setWatchBusy(hash, false)
+			continue
+		}
+		*queued++
+	}
+	return true
 }
 
 // watchCovered 报告这一项不用再排：里面的视频都有整理记录（整理过、跳过或失败的；失败的由到期重试处理）。
@@ -420,9 +465,20 @@ func (s *Service) watchCovered(ctx context.Context, entryPath string, files []tr
 	db := s.cfg.DB.WithContext(ctx)
 	var videos []transfer.File
 	if !tooBig {
-		if sel := transfer.Select(files, int64(set.MinVideoMB)<<20); sel.Disc == "" {
-			videos = sel.Videos
+		sel := transfer.Select(files, int64(set.MinVideoMB)<<20)
+		if len(sel.Discs) > 0 {
+			// 原盘：整理成的记录在原盘根目录上，整理不了的记在这一项本身上
+			paths := []string{entryPath}
+			for _, d := range sel.Discs {
+				paths = append(paths, d.Path)
+			}
+			var n int64
+			if err := db.Model(&models.MediaTransferHistory{}).Where("source_path IN ?", paths).Count(&n).Error; err != nil {
+				return false, err
+			}
+			return n > 0, nil
 		}
+		videos = sel.Videos
 	}
 	if len(videos) == 0 {
 		var n int64

@@ -135,6 +135,7 @@ func (s *Service) Start() {
 		s.worker(ctx)
 	})
 	s.wg.Go(func() { s.loop(ctx) })
+	s.wg.Go(func() { s.realtimeLoop(ctx) })
 }
 
 // Stop 停止后台循环，等正在整理的种子做完。

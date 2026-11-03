@@ -46,10 +46,23 @@ func noticeEvent(at time.Time, p *Plan, created []*PlanItem) *notify.Event {
 		episodes = strings.Join(eps, "、")
 	}
 	return notify.NewEvent(notify.EventMediaOrganized, at, map[string]any{
-		"name": name, "media_type": m.MediaType, "episodes": episodes, "files": len(created),
+		"name": name, "media_type": m.MediaType, "episodes": episodes, "files": createdFiles(created),
 		"quality": vars(m, created[0].meta, p.meta).Quality, "library": p.Library.Name, "torrent": p.Name,
 		"poster": p.posterURL(m.PosterPath),
 	})
+}
+
+// createdFiles 是这次入库的文件数：一张原盘算它放进库的文件数。
+func createdFiles(created []*PlanItem) int {
+	n := 0
+	for _, it := range created {
+		if it.disc != nil {
+			n += len(it.disc.Files)
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // posterURL 是通知里的海报地址：用这次整理的 TMDB 客户端的图片地址（用户换了图片地址时跟着换），没有客户端时用官方地址。

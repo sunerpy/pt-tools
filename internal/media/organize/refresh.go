@@ -11,11 +11,11 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 )
 
-// refreshDirs 是要通知媒体服务器扫描的目录：电影是文件所在目录，剧集是剧集目录（平铺时是文件所在目录）。
+// refreshDirs 是要通知媒体服务器扫描的目录：电影是文件所在目录（原盘是电影目录），剧集是剧集目录（平铺时是文件所在目录）。
 func refreshDirs(p *Plan, created []*PlanItem) []string {
 	var dirs []string
 	for _, it := range created {
-		d := filepath.Dir(it.Target)
+		d := filepath.Dir(it.videoPath())
 		if p.Match.MediaType == tmdb.KindTV {
 			if sd := p.showDir(it.Target); sd != "" {
 				d = sd

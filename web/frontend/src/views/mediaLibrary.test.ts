@@ -105,6 +105,7 @@ const settings = {
   notify_channels: [],
   delete_links_on_remove: false,
   watch_interval_min: 10,
+  watch_realtime: true,
   runs: { watch_last: "2026-10-15T10:00:00Z", watch_next: "2026-10-15T10:10:00Z" },
 };
 
@@ -152,8 +153,9 @@ const server = {
   updated_at: "",
 };
 
-async function mountPage(opts: { libsFail?: boolean } = {}) {
-  api.settings.mockResolvedValue(settings);
+async function mountPage(opts: { libsFail?: boolean; settingsFail?: boolean } = {}) {
+  if (opts.settingsFail) api.settings.mockRejectedValue(new Error("读取整理设置失败"));
+  else api.settings.mockResolvedValue(settings);
   media.settings.mockResolvedValue({
     key_source: "user",
     has_fanart_key: false,
@@ -174,7 +176,25 @@ async function mountPage(opts: { libsFail?: boolean } = {}) {
   api.servers.mockResolvedValue([server]);
   api.classify.mockResolvedValue({ rules: { movie: [], tv: [] }, presets: classifyPresets });
   api.watchDirs.mockResolvedValue([
-    { id: 4, path: "/media/incoming", enabled: true, created_at: "", updated_at: "" },
+    {
+      id: 4,
+      path: "/media/incoming",
+      enabled: true,
+      created_at: "",
+      updated_at: "",
+      realtime: "on",
+    },
+    {
+      id: 6,
+      path: "/mnt/nas/in",
+      enabled: true,
+      created_at: "",
+      updated_at: "",
+      realtime: "unavailable",
+      realtime_note: "在网络文件系统（NFS）上，收不到别的机器写进来的通知",
+    },
+    // 关着的目录：即使状态还写着 on 也不写
+    { id: 8, path: "/media/off", enabled: false, created_at: "", updated_at: "", realtime: "on" },
   ]);
   api.templatePreview.mockResolvedValue({ template: "", preview: "示例路径" });
   dl.list.mockResolvedValue([
@@ -242,6 +262,7 @@ describe("媒体库", () => {
       notify_channels: [],
       delete_links_on_remove: false,
       watch_interval_min: 10,
+      watch_realtime: true,
     });
     expect(ui.success).toHaveBeenCalledWith("已保存整理设置");
     expect(q("ml-watch-runs")!.textContent, "目录监控写明上次与下次扫描").toContain("下次大约");
@@ -386,6 +407,41 @@ describe("媒体库", () => {
       expect(ui.warning).toHaveBeenCalledWith("刮削内容至少选一项；不想刮削就关掉刮削"),
     );
     expect(api.updateLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it("目录监控：实时监控的开关跟着保存；每个目录写明在不在实时监控、不可用的原因", async () => {
+    await mountPage();
+    await vi.waitFor(() => expect(q("ml-watch-4")).not.toBeNull());
+    expect(q("ml-watch-rt-4")!.textContent).toBe("实时监控中");
+    expect(q("ml-watch-rt-6")!.textContent).toBe(
+      "实时监控不可用：在网络文件系统（NFS）上，收不到别的机器写进来的通知，按间隔扫描",
+    );
+    expect(q("ml-watch-rt-6")!.classList.contains("ml-watch__rt--warn")).toBe(true);
+    expect(q("ml-watch-rt-8"), "关着的目录不写").toBeNull();
+    const field = q("ml-watch-realtime")!.closest(".el-form-item")!;
+    expect(field.textContent).toContain("实时监控漏掉的照样整理");
+
+    api.saveSettings.mockResolvedValue({ ...settings, watch_realtime: false });
+    q("ml-watch-realtime")!.click();
+    await flush();
+    expect(field.textContent, "关掉以后只按间隔扫描").toContain(
+      "分钟扫一次下面「目录监控」里开着的目录",
+    );
+    q("ml-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toMatchObject({ watch_realtime: false });
+  });
+
+  it("设置没读到时保存的是默认值：实时监控同后端一样默认开", async () => {
+    await mountPage({ settingsFail: true });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("设置没读到"));
+    api.saveSettings.mockResolvedValue(settings);
+    q("ml-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toMatchObject({
+      watch_realtime: true,
+      watch_interval_min: 10,
+    });
   });
 
   it("目录监控：列表、添加只发输入字段、启停与删除", async () => {

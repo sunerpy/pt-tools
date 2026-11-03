@@ -24,6 +24,8 @@ var (
 	ErrBadMode = errors.New("整理方式无效（可选 hardlink、copy、symlink、move）")
 	// ErrNotOurs 表示库里的文件已经不是当初整理出的那个（换成了别的文件、不是软链接），没有删除。
 	ErrNotOurs = errors.New("已经不是当初整理出的文件")
+	// errCloneUnsupported 表示这个系统上不试写时复制（见 cloneFile）。
+	errCloneUnsupported = errors.New("不支持写时复制")
 )
 
 // Outcome 是一次整理的结果。
@@ -58,57 +60,75 @@ var (
 	placeRename = moveNoReplace
 	// removeSrc 删掉移动以后的源文件（测试里换成会失败的）
 	removeSrc = os.Remove
+	// clone 是复制时先试的写时复制（Linux 的 FICLONE，见 cloneFile；测试里换成假的）
+	clone = cloneFile
 )
+
+// Detail 是一次整理的细节。
+type Detail struct {
+	// Cloned 表示复制用了写时复制（reflink）：库里这份和源文件共用磁盘上的数据，不多占空间
+	Cloned bool
+}
 
 // Transfer 把源文件 src 按 mode 放到 dst（父目录不存在时建好）。dst 已经是这个文件时返回 AlreadyDone；
 // 是别的文件时返回 ErrTargetExists，不覆盖。硬链接跨文件系统时返回 ErrCrossDevice。
 func Transfer(src, dst, mode string) (Outcome, error) {
+	out, _, err := TransferDetail(src, dst, mode)
+	return out, err
+}
+
+// TransferDetail 同 Transfer，另外回这次怎么放的（复制用没用写时复制）。
+func TransferDetail(src, dst, mode string) (Outcome, Detail, error) {
+	var d Detail
 	mode, err := NormalizeMode(mode)
 	if err != nil {
-		return 0, err
+		return 0, d, err
 	}
 	srcInfo, srcErr := os.Stat(src)
 	dstInfo, dstErr := os.Lstat(dst)
 	if dstErr == nil {
-		return existing(src, dst, mode, srcInfo, srcErr, dstInfo)
+		out, err := existing(src, dst, mode, srcInfo, srcErr, dstInfo)
+		return out, d, err
 	}
 	if !errors.Is(dstErr, os.ErrNotExist) {
-		return 0, fmt.Errorf("检查目标失败: %w", dstErr)
+		return 0, d, fmt.Errorf("检查目标失败: %w", dstErr)
 	}
 	if srcErr != nil {
 		if errors.Is(srcErr, os.ErrNotExist) {
-			return 0, ErrSourceMissing
+			return 0, d, ErrSourceMissing
 		}
-		return 0, fmt.Errorf("读取源文件失败: %w", srcErr)
+		return 0, d, fmt.Errorf("读取源文件失败: %w", srcErr)
 	}
 	if !srcInfo.Mode().IsRegular() {
-		return 0, fmt.Errorf("源文件不是普通文件: %s", src)
+		return 0, d, fmt.Errorf("源文件不是普通文件: %s", src)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return 0, fmt.Errorf("建立目录失败: %w", err)
+		return 0, d, fmt.Errorf("建立目录失败: %w", err)
 	}
 	switch mode {
 	case models.MediaModeHardlink:
 		if err := link(src, dst); err != nil {
 			if isCrossDevice(err) {
-				return 0, ErrCrossDevice
+				return 0, d, ErrCrossDevice
 			}
-			return 0, fmt.Errorf("建立硬链接失败: %w", err)
+			return 0, d, fmt.Errorf("建立硬链接失败: %w", err)
 		}
 	case models.MediaModeSymlink:
 		if err := os.Symlink(src, dst); err != nil {
-			return 0, fmt.Errorf("建立软链接失败: %w", err)
+			return 0, d, fmt.Errorf("建立软链接失败: %w", err)
 		}
 	case models.MediaModeCopy:
-		if err := copyFile(src, dst, srcInfo); err != nil {
-			return 0, err
+		cloned, err := copyFile(src, dst, srcInfo)
+		if err != nil {
+			return 0, Detail{}, err
 		}
+		d.Cloned = cloned
 	case models.MediaModeMove:
 		if err := move(src, dst, srcInfo); err != nil {
-			return 0, err
+			return 0, d, err
 		}
 	}
-	return Created, nil
+	return Created, d, nil
 }
 
 // move 把 src 移到 dst，不覆盖 dst：同一个文件系统上用不覆盖的改名；不支持时用硬链接放过去再删源文件；
@@ -131,7 +151,8 @@ func move(src, dst string, srcInfo os.FileInfo) error {
 	case !isCrossDevice(err):
 		return fmt.Errorf("移动失败: %w", err)
 	}
-	if err := copyFile(src, dst, srcInfo); err != nil {
+	// 跨文件系统：写时复制做不了（copyFile 试了也会回退），逐字节复制过去
+	if _, err := copyFile(src, dst, srcInfo); err != nil {
 		return err
 	}
 	return removeMoved(src, models.MediaModeCopy)
@@ -215,12 +236,13 @@ func Place(src, dst string) error {
 }
 
 // copyFile 先复制到同目录的临时文件，写完、落盘后再放到目标位置，中途失败不会在库里留下半个文件。
+// 复制先试写时复制（见 fill），报告用没用上。
 // 放到目标位置时都不覆盖已有的文件：先用硬链接；文件系统不支持硬链接时用不覆盖的改名（Linux 的
 // RENAME_NOREPLACE）；也不支持时以独占方式新建目标再复制一遍。修改时间跟源文件一样（媒体服务器按它排「最近添加」）。
-func copyFile(src, dst string, srcInfo os.FileInfo) error {
+func copyFile(src, dst string, srcInfo os.FileInfo) (bool, error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("打开源文件失败: %w", err)
+		return false, fmt.Errorf("打开源文件失败: %w", err)
 	}
 	defer in.Close()
 	var rnd [6]byte
@@ -228,9 +250,9 @@ func copyFile(src, dst string, srcInfo os.FileInfo) error {
 	tmp := dst + ".pt-tools-" + hex.EncodeToString(rnd[:]) + ".part"
 	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return fmt.Errorf("建立临时文件失败: %w", err)
+		return false, fmt.Errorf("建立临时文件失败: %w", err)
 	}
-	_, err = io.Copy(out, in)
+	cloned, err := fill(out, in)
 	if err == nil {
 		err = out.Sync()
 	}
@@ -239,43 +261,68 @@ func copyFile(src, dst string, srcInfo os.FileInfo) error {
 	}
 	if err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("复制失败: %w", err)
+		return false, fmt.Errorf("复制失败: %w", err)
 	}
 	_ = os.Chtimes(tmp, srcInfo.ModTime(), srcInfo.ModTime())
 	defer os.Remove(tmp)
 	err = linkTmp(tmp, dst)
 	if err == nil {
-		return nil
+		return cloned, nil
 	}
 	if errors.Is(err, os.ErrExist) {
-		return ErrTargetExists
+		return false, ErrTargetExists
 	}
 	switch err := noReplace(tmp, dst); {
 	case err == nil:
-		return nil
+		return cloned, nil
 	case errors.Is(err, os.ErrExist):
-		return ErrTargetExists
+		return false, ErrTargetExists
 	case !errors.Is(err, errNoReplaceUnsupported):
-		return fmt.Errorf("复制完放到库里失败: %w", err)
+		return false, fmt.Errorf("复制完放到库里失败: %w", err)
 	}
 	return exclusiveCopy(tmp, dst, srcInfo)
 }
 
-// exclusiveCopy 以独占方式新建目标（已存在时返回 ErrTargetExists），把 tmp 复制进去；中途失败删掉这个新建的目标。
-func exclusiveCopy(tmp, dst string, srcInfo os.FileInfo) error {
+// fill 把 in 的内容写进新建的 out：先试写时复制（clone），做不了（cloneUnsupported）时从头逐字节复制。
+// 报告用没用上写时复制；克隆出了别的错误时返回它。
+func fill(out, in *os.File) (bool, error) {
+	err := clone(out, in)
+	if err == nil {
+		return true, nil
+	}
+	if !cloneUnsupported(err) {
+		return false, err
+	}
+	// 克隆失败时目标应该没动；以防万一清空，两边都回到开头
+	if err = out.Truncate(0); err != nil {
+		return false, err
+	}
+	if _, err = out.Seek(0, io.SeekStart); err != nil {
+		return false, err
+	}
+	if _, err = in.Seek(0, io.SeekStart); err != nil {
+		return false, err
+	}
+	_, err = io.Copy(out, in)
+	return false, err
+}
+
+// exclusiveCopy 以独占方式新建目标（已存在时返回 ErrTargetExists），把 tmp 复制进去（同样先试写时复制）；
+// 中途失败删掉这个新建的目标。
+func exclusiveCopy(tmp, dst string, srcInfo os.FileInfo) (bool, error) {
 	in, err := os.Open(tmp)
 	if err != nil {
-		return fmt.Errorf("打开临时文件失败: %w", err)
+		return false, fmt.Errorf("打开临时文件失败: %w", err)
 	}
 	defer in.Close()
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if errors.Is(err, os.ErrExist) {
-		return ErrTargetExists
+		return false, ErrTargetExists
 	}
 	if err != nil {
-		return fmt.Errorf("建立目标文件失败: %w", err)
+		return false, fmt.Errorf("建立目标文件失败: %w", err)
 	}
-	_, err = io.Copy(out, in)
+	cloned, err := fill(out, in)
 	if err == nil {
 		err = out.Sync()
 	}
@@ -284,10 +331,10 @@ func exclusiveCopy(tmp, dst string, srcInfo os.FileInfo) error {
 	}
 	if err != nil {
 		_ = os.Remove(dst)
-		return fmt.Errorf("复制失败: %w", err)
+		return false, fmt.Errorf("复制失败: %w", err)
 	}
 	_ = os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
-	return nil
+	return cloned, nil
 }
 
 // RemoveIfOurs 删掉库里的 dst，前提是它还是当初整理出的那个文件：硬链接、复制、移动按文件编号（fileID）确认，

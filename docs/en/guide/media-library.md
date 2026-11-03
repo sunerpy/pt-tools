@@ -39,11 +39,13 @@ Each library takes one kind of title. Create one for movies and one for TV shows
 | Mode          | Description                                                                                                                              |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Hard link     | No extra space and the torrent keeps seeding; the download folder and the library must be on the same file system                        |
-| Copy          | Uses space for a second copy and works across partitions; written to a temporary file first, then renamed                                |
+| Copy          | Works across partitions; written to a temporary file first, then renamed. Uses space for a second copy, except with copy-on-write below  |
 | Symbolic link | No extra space; the media server must reach the download folder by the same path, and the link breaks when the torrent's data is deleted |
 | Move          | The files move into the library and the torrent can no longer seed; only paused torrents are organised                                   |
 
 When a move cannot delete the source file (for example because the download folder is read-only), the copy already placed in the library is still recorded as organised, with the mode it actually has, copy (across file systems) or hard link, and a note that the source file is still in the download folder; delete it yourself if needed.
+
+Copying tries copy-on-write first (reflink, on Linux when the download folder and the library are on the same file system that supports it, such as Btrfs or XFS): the library copy shares the data on disk with the source and takes no extra space until one side changes. The mode is still copy, and the organise record says 复制用了写时复制. When the file system doesn't support it, across file systems, or on other operating systems, the file is copied byte by byte as before.
 
 Click Check (检查) while editing a library: it confirms the folder exists and is writable, and for hard links it creates a file in the pt-tools path of each path mapping and tries to hard-link it into the library, which confirms they are on the same file system. The test files are removed afterwards.
 
@@ -116,7 +118,8 @@ Only size decides: the smaller old version never swaps the larger one back when 
 
 - Video files: mkv, mp4, m4v, avi, ts, m2ts, mts, mov, wmv, flv, rmvb, rm, webm, mpg, mpeg.
 - Skipped: files in Sample, Trailers, Featurettes, Extras, SPs and similar folders, file names ending in sample or trailer, NCOP and NCED openings and endings, and files smaller than Minimum video size (视频最小体积, 50 MB by default). The Specials folder holds season 0 episodes and is organised as usual.
-- Discs (BDMV and VIDEO_TS folders) and ISO images are not organised.
+- ISO images: a movie's ISO is organised as one video file (named by the video file rules, with the `.iso` extension); whether it plays depends on the media server and the client. ISO images in a TV show are not organised, and each one gets a skipped record.
+- Discs (BDMV and VIDEO_TS folders): a movie's disc goes into the movie folder whole, see [discs](#discs).
 - Subtitles (srt, ass, ssa, sub, idx, sup, vtt) go with their video (except those in extras or sample folders) and get a language suffix from the file name: `zh-CN` simplified Chinese, `zh-TW` traditional Chinese, `zh` Chinese, `en` English, `ja` Japanese, `ko` Korean. When a torrent has several videos, subtitles are matched by file name prefix or by season and episode.
 - Season and episode numbers come from each file name, with [recognition words](media-recognize.md#recognition-words) applied (episode offsets included); single-file torrents use the torrent name.
 
@@ -130,15 +133,27 @@ Organising picks the item in this order, and the preview and organise history sa
 
 When the item from a subscription or a push is no longer on TMDB (merged or deleted), recognition is used instead and the organise record says so. Seasons and episodes are still read from each file name, not taken from the subscription.
 
+## Discs
+
+A movie's Blu-ray disc (BDMV folder) or DVD (VIDEO_TS folder) goes into the movie folder whole:
+
+- The disc folders (BDMV, CERTIFICATE, AACS, BDSVM, VIDEO_TS, AUDIO_TS) in the disc root (the folder above BDMV or VIDEO_TS) go into the movie folder the naming template gives, keeping their relative paths, for example `Oppenheimer (2023)/BDMV/STREAM/00001.m2ts`. Other files in the disc root (nfo, images, samples) stay out of the library and are listed under 没选上的文件 in the preview.
+- The organise mode works as for video files: hard links, copies or symbolic links are made file by file; a move still only organises paused torrents and removes the disc folders it emptied in the download folder. When it fails half way, the files placed so far are taken back out (moved files are moved back) and the record says failed.
+- Scraping writes `movie.nfo`, `poster.jpg`, `fanart.jpg` and the rest into the movie folder (Jellyfin, Emby and Kodi read `movie.nfo` there), and the media servers are asked to scan the movie folder.
+- A disc has one organise record: the source is the disc root, the target is the movie folder, the size is the total of the files placed, and organise history shows 原盘 N 个文件. Deleting the record with its library files, and subscription upgrades, check each file's ID before deleting it and remove the empty folders last.
+- When the movie folder already exists with other files in it (for example another version of the movie), the disc isn't placed there and the record says skipped; discs don't take part in same-name replacement. When a record was deleted but its library files kept, organising again recognises them (when each file is a hard link to, or a symbolic link pointing at, its source).
+- Skipped and not organised: TV show discs, several discs in one torrent, discs without a video stream, and discs whose BDMV or VIDEO_TS sits directly in the download folder or monitored folder (the disc has no folder of its own; for a manual organise, pick the folder that contains BDMV). When the movie naming template has no folder (movies placed directly in the library folder), the record says failed: switch to a template that puts each movie in its own folder (such as the default one) and organise again.
+- Discs and ISO images skipped before the upgrade aren't organised again automatically (they already have records); click Retry (重试) in organise history.
+
 ## When organising runs
 
-| Trigger       | Description                                                                                                                                                                                                 |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Automatic     | Torrents pushed by pt-tools are organised when they finish downloading. Only torrents finished after you turn it on; missed ones are picked up every 10 minutes                                             |
-| Periodic scan | Finished torrents in the downloaders are scanned at the interval, including ones pt-tools did not push. Up to 50 per round; torrents that already have records are skipped                                  |
-| Monitoring    | Monitored folders that are switched on are scanned at the interval, and videos dropped there (not torrents) are organised, see [directory monitoring](#directory-monitoring)                                |
-| Manual        | The organise icon in the Status (状态) column of the task list (整理入库 on mobile cards); in the downloader web UI, select one finished torrent and click 整理入库, or use the right-click menu            |
-| By path       | Manual organise (手动整理) on the organise history and media library pages: enter a file or folder, preview, then organise, see [organising a file or folder by hand](#organising-a-file-or-folder-by-hand) |
+| Trigger       | Description                                                                                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Automatic     | Torrents pushed by pt-tools are organised when they finish downloading. Only torrents finished after you turn it on; missed ones are picked up every 10 minutes                                                    |
+| Periodic scan | Finished torrents in the downloaders are scanned at the interval, including ones pt-tools did not push. Up to 50 per round; torrents that already have records are skipped                                         |
+| Monitoring    | Videos dropped into monitored folders that are switched on (not torrents) are organised when the folder changes (real-time monitoring) and at the scan interval, see [directory monitoring](#directory-monitoring) |
+| Manual        | The organise icon in the Status (状态) column of the task list (整理入库 on mobile cards); in the downloader web UI, select one finished torrent and click 整理入库, or use the right-click menu                   |
+| By path       | Manual organise (手动整理) on the organise history and media library pages: enter a file or folder, preview, then organise, see [organising a file or folder by hand](#organising-a-file-or-folder-by-hand)        |
 
 The organise settings show when the periodic scan and directory monitoring last ran and roughly when they run next (these times start over when pt-tools restarts, and the first round after start runs within a minute).
 
@@ -151,6 +166,8 @@ Each file is organised once: repeated completion events or several triggers at t
 ## Directory monitoring
 
 Videos dropped into a monitored folder (not torrents in a downloader, for example files copied by hand or downloaded by another tool) can be organised into the libraries too. Add folders (paths as pt-tools sees them) under Directory monitoring (目录监控) on the media library page; the scan interval is in the organise settings, 10 minutes by default. A folder's path can't be changed after it's added: to monitor another folder, delete it and add the new one.
+
+- Real-time monitoring (实时监控, a switch in the organise settings, on by default): when something changes in a folder, the changed item is organised 2 minutes after its last change instead of waiting for the next scan; the scans at the interval still run and catch anything it misses. It's available on Linux and Windows only; on macOS the folders are scanned at the interval. Folders that can't be watched are scanned at the interval only, and the directory monitoring list says 实时监控不可用 with the reason: the inotify watch limit was reached (`fs.inotify.max_user_watches` on the host), the folder is on NFS, SMB or CephFS (changes written from other machines aren't reported), or a monitored folder has more than 4096 subfolders. Those folders are tried again every minute.
 
 - Each item in the folder (one file, or one subfolder) is treated like a torrent: it's recognised by its name, its videos go into the library with the library's mode (hard link, copy, symbolic link or move), and the organise record shows 目录监控 as the downloader.
 - Items changed within the last 2 minutes wait (they may still be copying). Items whose videos all have organise records aren't scanned again; when a subfolder gets more episodes later, the new ones are organised.
@@ -250,6 +267,8 @@ After organising, pt-tools asks the media servers to scan the new folders. Organ
 
 Click Test (测试) to check the address and key. The list shows the result of the last notification; a failed notification does not affect organising. With path prefixes set, a folder outside them is not sent to that server as a pt-tools path; the list says why.
 
+When Jellyfin scans only the organised folders, scan a newly created, empty library in Jellyfin once first: Jellyfin walks up the path to find the item to refresh, and in a library with no items it finds none, so nothing is refreshed. After that first scan, organised titles show up on their own.
+
 ## Notifications
 
 When channels are selected under Organise settings (整理设置), each run that adds files sends one message: title and year, episodes, quality, library and source torrent, ending with the TMDB poster address (Telegram usually shows it as a preview image). Messages wait for the channel's quiet hours and are retried on failure. Nothing is sent when no channel is selected.
@@ -262,7 +281,7 @@ There is one record per video file, showing which item it was organised as and w
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Done (已整理)    | The file is in the library                                                                                                                                                                                                                                               |
 | Failed (失败)    | With the reason. Temporary problems such as TMDB being unreachable are retried after 10 minutes, 30 minutes, 1 hour, 3 hours and 12 hours, then no more; problems that need a settings change, such as no match or different file systems, are not retried automatically |
-| Skipped (跳过)   | Another file is at the target, or the torrent is a disc or has no video to organise                                                                                                                                                                                      |
+| Skipped (跳过)   | Another file is at the target, there's no video to organise, the disc can't be organised (see [discs](#discs)), or it's an ISO image in a TV show                                                                                                                        |
 | Removed (已删除) | The files in the library have been deleted                                                                                                                                                                                                                               |
 
 Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. A record organised by hand with an organise mode picked is retried with that mode. Failed or skipped records shown as 手动（指定路径） (manual, by path) also have Manual organise (手动整理): it opens the dialog with the path entered and the organise mode picked back then, so you can change the title, library or mode and organise again.

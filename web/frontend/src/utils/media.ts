@@ -493,6 +493,11 @@ export function serverKindLabel(kind: string): string {
   return MEDIA_SERVER_KINDS.find((k) => k.value === kind)?.label ?? kind;
 }
 
+/** 整理计划里一张原盘的说明：「蓝光原盘 · 5 个文件」「DVD 原盘 · 12 个文件」 */
+export function discLabel(disc: { kind: string; files: number }): string {
+  return `${disc.kind === "VIDEO_TS" ? "DVD 原盘" : "蓝光原盘"} · ${disc.files} 个文件`;
+}
+
 /** S01E02，多集时 S01E02-E03；没有集数时只写季 */
 export function seasonEpisode(season?: number, episode?: number, end?: number): string {
   const s = `S${pad(season ?? 0)}`;

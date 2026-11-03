@@ -289,14 +289,14 @@ func TestOrganizeProblems(t *testing.T) {
 	e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee").Count(&n)
 	assert.Zero(t, n)
 
-	// 原盘：用内容路径记一行跳过
+	// 原盘没识别出来：记在原盘根目录上（原盘的整理见 disc_test.go）
 	e.addTorrent("ffffffffffffffffffffffffffffffffffffffff", "Disc.2021.BluRay", map[string]int{"Disc.2021.BluRay/BDMV/STREAM/00001.m2ts": 3}, nil)
 	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: "ffffffffffffffffffffffffffffffffffffffff"})
 	require.NoError(t, err)
-	assert.Contains(t, res.Plan.Problem, "原盘")
+	assert.Contains(t, res.Plan.Problem, "没有识别出来")
 	var disc models.MediaTransferHistory
 	require.NoError(t, e.db.Where("info_hash = ?", "ffffffffffffffffffffffffffffffffffffffff").First(&disc).Error)
-	assert.Equal(t, models.MediaTransferSkipped, disc.Status)
+	assert.Equal(t, models.MediaTransferFailed, disc.Status)
 	assert.Equal(t, filepath.Join(e.dlDir, "Disc.2021.BluRay"), disc.SourcePath)
 
 	// pt-tools 里找不到文件：提示加路径映射

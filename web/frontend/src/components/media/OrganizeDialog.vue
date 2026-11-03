@@ -20,6 +20,7 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import {
   MEDIA_MODES,
+  discLabel,
   itemStatus,
   matchSourceLabel,
   mediaKindLabel,
@@ -161,6 +162,13 @@ watch(
 );
 
 const pending = computed(() => plan.value?.items.filter((i) => i.status === "pending").length ?? 0);
+/** 按钮上写的文件数：一张原盘是它放进库的文件数 */
+const pendingFiles = computed(
+  () =>
+    plan.value?.items
+      .filter((i) => i.status === "pending")
+      .reduce((n, i) => n + (i.disc ? i.disc.files : 1), 0) ?? 0,
+);
 /** 指定路径时输入框里的路径改过了、还没重新预览 */
 const pathChanged = computed(
   () => pathMode.value && plan.value !== null && sourcePath.value.trim() !== previewedPath.value,
@@ -358,6 +366,9 @@ const resultHint = computed(() =>
               <span v-if="it.episode" class="od__ep">{{
                 seasonEpisode(it.season, it.episode, it.episode_end)
               }}</span>
+              <span v-if="it.disc" class="od__ep" data-testid="organize-disc">{{
+                discLabel(it.disc)
+              }}</span>
               <span class="od__rel" :title="it.rel">{{ it.rel }}</span>
             </div>
             <div v-if="it.target" class="od__target">
@@ -466,7 +477,7 @@ const resultHint = computed(() =>
         data-testid="organize-run"
         @click="run">
         <PtIcon v-if="!running" name="folder-open" :size="14" /><span
-          >整理{{ pending ? ` ${pending} 个文件` : "" }}</span
+          >整理{{ pendingFiles ? ` ${pendingFiles} 个文件` : "" }}</span
         >
       </el-button>
     </template>

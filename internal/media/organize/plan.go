@@ -130,6 +130,8 @@ type PlanItem struct {
 	Status       string         `json:"status"`
 	Message      string         `json:"message,omitempty"`
 	HistoryID    uint           `json:"history_id,omitempty"`
+	// Disc 不为空时这一项是一张原盘：Source 是原盘根目录，Target 是电影目录
+	Disc *DiscInfo `json:"disc,omitempty"`
 
 	meta     meta.Meta
 	row      *models.MediaTransferHistory
@@ -142,6 +144,8 @@ type PlanItem struct {
 	otherFile bool
 	// sourceID 是源文件现在的编号（目录监控的项才读，记进整理记录的 SourceFileID）
 	sourceID string
+	// disc 是这一项的原盘（Disc 不为空时）
+	disc *transfer.Disc
 }
 
 // Plan 是一个种子的整理计划，预览与执行共用。Problem 不为空时整个种子整理不了。
@@ -192,6 +196,10 @@ type Plan struct {
 	follow *MediaHint
 	// matchNote 是条目来源上要写进整理记录的说明（订阅或推送时说明的条目在 TMDB 上找不到了、改成自动识别）
 	matchNote string
+	// skip 表示 Problem 不是出错（例如剧集原盘）：记成跳过，不重试
+	skip bool
+	// isoSkips 是剧集里不整理的 ISO 镜像：每个写一条跳过的记录
+	isoSkips []PlanItem
 }
 
 // otherNote 是同一个位置上换了文件时写在整理记录消息前面的说明（见 markOtherFiles）。
@@ -292,6 +300,9 @@ func (s *Service) plan(ctx context.Context, req Request) (*Plan, error) {
 func ours(row *models.MediaTransferHistory) bool {
 	if row == nil || row.TargetPath == "" {
 		return false
+	}
+	if main, ok := discMain(row); ok {
+		return discOurs(row, main)
 	}
 	info, err := os.Lstat(row.TargetPath)
 	if err != nil {
@@ -479,9 +490,11 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 	sel := transfer.Select(tfs, int64(settings.MinVideoMB)<<20)
 	p.Skipped = append(p.Skipped, sel.Skipped...)
 	switch {
-	case sel.Disc != "":
-		p.Problem = fmt.Sprintf("原盘（%s 目录）暂不整理", sel.Disc)
-		return p, nil
+	case len(sel.Discs) > 0:
+		if p.Problem = discProblem(sel.Discs); p.Problem != "" {
+			return p, nil
+		}
+		p.Items = append(p.Items, discItem(sel.Discs[0], p))
 	case len(sel.Videos) == 0:
 		p.Problem = "没有可整理的视频文件"
 		return p, nil
@@ -510,6 +523,16 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 	}
 	if !s.recognize(ctx, p, req, t) {
 		return p, nil
+	}
+	if p.Match.MediaType == tmdb.KindTV {
+		if p.Items[0].disc != nil {
+			p.Problem, p.skip = "剧集原盘暂不整理", true
+			return p, nil
+		}
+		if p.splitTVISO(); len(p.Items) == 0 {
+			p.Problem, p.skip = "没有可整理的视频文件（"+isoTVNote+"）", true
+			return p, nil
+		}
 	}
 	if !s.pickLibrary(ctx, p, req) {
 		return p, nil

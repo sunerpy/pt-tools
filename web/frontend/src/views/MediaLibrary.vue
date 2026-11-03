@@ -98,6 +98,7 @@ const blankSettings = (): OrganizeSettingsInput => ({
   notify_channels: [],
   delete_links_on_remove: false,
   watch_interval_min: 10,
+  watch_realtime: true,
 });
 const sform = ref<OrganizeSettingsInput>(blankSettings());
 const savePaths = ref<string[]>([]);
@@ -997,6 +998,10 @@ onMounted(refresh);
               </div>
             </el-form-item>
             <el-form-item label="目录监控">
+              <div class="ml-switch">
+                <el-switch v-model="sform.watch_realtime" data-testid="ml-watch-realtime" />
+                <span>实时监控：目录里有改动时不等扫描，改动停了 2 分钟就整理</span>
+              </div>
               <div class="ml-inline ml-inline--grow">
                 <span>每</span>
                 <el-input-number
@@ -1006,7 +1011,11 @@ onMounted(refresh);
                   controls-position="right"
                   data-testid="ml-watch-interval"
                   aria-label="目录监控的扫描间隔（分钟）" />
-                <span>分钟扫一次下面「目录监控」里开着的目录</span>
+                <span>{{
+                  sform.watch_realtime
+                    ? "分钟再扫一遍开着的目录（实时监控漏掉的照样整理）"
+                    : "分钟扫一次下面「目录监控」里开着的目录"
+                }}</span>
               </div>
               <div
                 v-if="watchDirs.some((d) => d.enabled) && watchRunText"
@@ -1246,6 +1255,18 @@ onMounted(refresh);
               :data-testid="`ml-watch-${d.id}`">
               <div class="ml-classify__text">
                 <span class="ml-path">{{ d.path }}</span>
+                <span
+                  v-if="d.enabled && d.realtime === 'on'"
+                  class="ml-watch__rt"
+                  :data-testid="`ml-watch-rt-${d.id}`"
+                  >实时监控中</span
+                >
+                <span
+                  v-else-if="d.enabled && d.realtime === 'unavailable'"
+                  class="ml-watch__rt ml-watch__rt--warn"
+                  :data-testid="`ml-watch-rt-${d.id}`"
+                  >实时监控不可用：{{ d.realtime_note || "原因不明" }}，按间隔扫描</span
+                >
               </div>
               <div class="ml-classify__acts">
                 <el-switch
@@ -2026,6 +2047,15 @@ onMounted(refresh);
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.ml-watch__rt {
+  font-size: 12px;
+  color: var(--pt-t3);
+}
+
+.ml-watch__rt--warn {
+  color: var(--pt-warn);
 }
 
 .ml-classify__acts {

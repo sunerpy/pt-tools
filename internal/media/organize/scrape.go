@@ -136,7 +136,7 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) []st
 	targets := make([]scrapeTarget, 0, len(created))
 	for _, it := range created {
 		targets = append(targets, scrapeTarget{
-			historyID: it.HistoryID, path: it.Target, root: p.rootFor(it.Target), season: it.Season, episode: it.Episode, episodeEnd: it.EpisodeEnd,
+			historyID: it.HistoryID, path: it.videoPath(), root: p.rootFor(it.Target), season: it.Season, episode: it.Episode, episodeEnd: it.EpisodeEnd,
 		})
 	}
 	rep := s.runScrape(ctx, p.Library, *p.Match, p.doubanID, p.tmdbClient, targets, nil)
@@ -369,7 +369,7 @@ func (s *Service) rescrape(ctx context.Context, id uint) (*RescrapeResult, error
 			skipped = append(skipped, skippedRow{r, "升级前整理的、媒体库按二级分类放进了子目录，认不出它在哪个分类目录里，没有刮削"})
 			continue
 		}
-		targets = append(targets, scrapeTarget{historyID: r.ID, path: r.TargetPath, root: root, season: r.Season, episode: r.Episode, episodeEnd: r.EpisodeEnd})
+		targets = append(targets, scrapeTarget{historyID: r.ID, path: rowVideo(r), root: root, season: r.Season, episode: r.Episode, episodeEnd: r.EpisodeEnd})
 		scraping = append(scraping, r)
 	}
 	for _, k := range skipped {

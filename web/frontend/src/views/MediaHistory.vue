@@ -162,9 +162,16 @@ function openManual(path = "", mode: MediaHistoryItem["chosen_mode"] = "") {
 const canManual = (r: MediaHistoryItem) => canRetry(r) && Boolean(r.manual_path);
 const rowTrigger = (r: MediaHistoryItem) =>
   r.manual_path ? "手动（指定路径）" : triggerLabel(r.trigger);
-/** 条目下面那一行：条目从哪来（升级前的记录没有）与种子名 */
+/** 条目下面那一行：条目从哪来（升级前的记录没有）、原盘的文件数与种子名。原盘写在这里，不跟在库里的路径后面：
+ * 路径长，文件那一行放不下时看不到 */
 const entrySub = (r: MediaHistoryItem) =>
-  [matchSourceLabel(r.match_source), r.torrent_name].filter(Boolean).join(" · ");
+  [
+    matchSourceLabel(r.match_source),
+    r.disc_files ? `原盘 ${r.disc_files} 个文件` : "",
+    r.torrent_name,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 onMounted(load);
 </script>
@@ -333,6 +340,7 @@ onMounted(load);
             <span v-if="r.match_source">{{ matchSourceLabel(r.match_source) }}</span>
             <span class="mh-full">{{ fileName(r.source_path) }}</span>
             <span v-if="r.target_path" class="mh-full">→ {{ r.target_path }}</span>
+            <span v-if="r.disc_files">原盘 {{ r.disc_files }} 个文件</span>
             <span
               >{{ modeLabel(r.mode) }} · {{ rowTrigger(r) }} ·
               {{ formatShortDateTime(r.updated_at) }}</span
