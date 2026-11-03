@@ -37,9 +37,10 @@ func scrapeFiles(kind string, items scrape.Items, targets []scrapeTarget) []scra
 	var files []scrape.File
 	if kind != tmdb.KindTV {
 		for _, t := range targets {
-			// 平铺在库目录（或分类目录）里的电影没有自己的目录：海报等带上文件名，免得几部电影共用一张
+			// 平铺在库目录（或分类目录）里的电影没有自己的目录：海报等带上文件名，免得几部电影共用一张。
+			// 有自己的目录、目录里已经有 movie.nfo（例如导入的已有文件）时用它，不另写一份
 			ownDir := filepath.Clean(filepath.Dir(t.path)) != filepath.Clean(t.root)
-			files = append(files, scrape.MovieFiles(t.path, ownDir, items)...)
+			files = append(files, scrape.UseMovieNFO(scrape.MovieFiles(t.path, ownDir, items), t.path, ownDir)...)
 		}
 		return uniqueFiles(files)
 	}
@@ -113,10 +114,23 @@ func (s *Service) runScrape(ctx context.Context, lib *models.MediaLibrary, match
 	if c != nil {
 		w.RecogLang = c.Language()
 	}
+	var castErr error
+	if lib.ScrapeActorZh && c != nil {
+		w.CastName = func(ctx context.Context, id int) string {
+			n, err := c.PersonChineseName(ctx, id)
+			if err != nil && castErr == nil {
+				castErr = err
+			}
+			return n
+		}
+	}
 	rep := w.Write(ctx, metadata.QueryFor(match, doubanID), metadata.FromTMDB(match), files)
 	if rep.Fetched {
 		// Fanart.tv、OMDb 建不了客户端：这次取了数据时才算来源出错
 		rep.Errors = append(msgs, rep.Errors...)
+	}
+	if castErr != nil {
+		rep.Notes = append(rep.Notes, "有的演员没取到中文名，用原名（"+castErr.Error()+"）")
 	}
 	for _, e := range rep.Errors {
 		s.cfg.Logger.Warnf("[整理入库] 刮削「%s」：%s", match.Title, e)
@@ -346,12 +360,21 @@ func (s *Service) markScrape(ctx context.Context, rows []models.MediaTransferHis
 	}
 }
 
-// rescrape 重新刮削（调用方持有 s.mu）。各来源都不读缓存，要现在的数据（取到的照样写进缓存）。没能刮削的记录
-// （视频不在了、换成了别的文件、认不出分类目录、TMDB 不能用）记成刮削失败并写明原因。
+// rescrape 重新刮削（调用方持有 s.mu），见 rescrapeWith。
 func (s *Service) rescrape(ctx context.Context, id uint) (*RescrapeResult, error) {
+	return s.rescrapeWith(ctx, id, false)
+}
+
+// rescrapeWith 重新刮削（调用方持有 s.mu）。各来源都不读缓存，要现在的数据（取到的照样写进缓存）。没能刮削的记录
+// （视频不在了、换成了别的文件、认不出分类目录、TMDB 不能用）记成刮削失败并写明原因。fill 为真时只补没有的文件
+// （导入已有文件以后与每周补刮）：媒体库开着覆盖也不换别人放的文件，pt-tools 写的照样换成新的。
+func (s *Service) rescrapeWith(ctx context.Context, id uint, fill bool) (*RescrapeResult, error) {
 	row, lib, err := s.rescrapeBase(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if fill {
+		lib.ScrapeOverwrite = false
 	}
 	rows, skipped, err := s.rescrapeRows(ctx, row, lib)
 	if err != nil {

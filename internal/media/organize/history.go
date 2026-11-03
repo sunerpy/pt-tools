@@ -176,6 +176,9 @@ func (s *Service) Retry(ctx context.Context, id uint) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if importRow(row) {
+		return nil, fmt.Errorf("%w: %s", ErrInvalid, importRetryNote)
+	}
 	return s.Organize(ctx, retryRequest(row))
 }
 
@@ -197,10 +200,23 @@ func hasLibraryFiles(r *models.MediaTransferHistory) bool {
 	return (r.Status == models.MediaTransferDone && r.TargetPath != "") || r.TargetFileID != "" || len(decodeExtras(r.Extras)) > 0
 }
 
-// DeleteHistory 删除一条整理记录。files 为真时连库里整理出的文件一起删：视频、字幕、同名的 NFO 与图片，
-// 目录里不再有视频时再删目录级的海报与 NFO 和空目录。只删确认还是当初整理出的那个文件，换掉或改过的留着，
-// 返回留着的文件的说明；移动整理的文件是唯一的一份，不在这里删。
+// DeleteOptions 是删除整理记录的选项。
+type DeleteOptions struct {
+	// Files 为真时连库里整理出的文件一起删
+	Files bool
+	// AllowExisting 为真时导入的已有文件（MediaModeExisting）也删：那是导入时就在库里的文件、不是 pt-tools 放进去的，要另外确认
+	AllowExisting bool
+}
+
+// DeleteHistory 删除一条整理记录，files 为真时连库里的文件一起删（导入的已有文件不删，见 DeleteHistoryWith）。
 func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) ([]string, error) {
+	return s.DeleteHistoryWith(ctx, id, DeleteOptions{Files: files})
+}
+
+// DeleteHistoryWith 删除一条整理记录。opt.Files 为真时连库里整理出的文件一起删：视频、字幕、同名的 NFO 与图片，
+// 目录里不再有视频时再删目录级的海报与 NFO 和空目录。只删确认还是当初整理出的那个文件，换掉或改过的留着，
+// 返回留着的文件的说明；移动整理的文件是唯一的一份，不在这里删；导入的已有文件只在 opt.AllowExisting 时删。
+func (s *Service) DeleteHistoryWith(ctx context.Context, id uint, opt DeleteOptions) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row, err := s.historyRow(ctx, id)
@@ -208,9 +224,12 @@ func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) ([]str
 		return nil, err
 	}
 	var kept []string
-	if files && hasLibraryFiles(&row) {
+	if opt.Files && hasLibraryFiles(&row) {
 		if row.Mode == models.MediaModeMove {
 			return nil, fmt.Errorf("%w: 移动整理的文件是唯一的一份，不在这里删除；只删记录时去掉「同时删除库里的文件」", ErrInvalid)
+		}
+		if row.Mode == models.MediaModeExisting && !opt.AllowExisting {
+			return nil, fmt.Errorf("%w: %s", ErrInvalid, existingDeleteNote)
 		}
 		if kept, err = s.removeLibraryFiles(ctx, row); err != nil {
 			return nil, err
@@ -223,7 +242,8 @@ func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) ([]str
 }
 
 // Retire 用在洗版：换成了更好的版本以后，删掉一条已整理记录在库里整理出的文件（规则同连文件删除记录，只删确认是自己放的），
-// 记录改成已删除并写明原因。移动整理的文件是唯一的一份，不删，返回 ErrInvalid。不是已整理的记录不动。
+// 记录改成已删除并写明原因。移动整理的文件是唯一的一份，不删，返回 ErrInvalid；导入的已有文件不删，写明以后返回 ErrExistingKept。
+// 不是已整理的记录不动。
 func (s *Service) Retire(ctx context.Context, id uint, reason string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -236,6 +256,17 @@ func (s *Service) Retire(ctx context.Context, id uint, reason string) ([]string,
 	}
 	if row.Mode == models.MediaModeMove {
 		return nil, fmt.Errorf("%w: 移动整理的文件是唯一的一份，洗版时不删", ErrInvalid)
+	}
+	if row.Mode == models.MediaModeExisting {
+		// 导入时就在库里的文件不是 pt-tools 放进去的：不删，记录照旧是已整理（库里有两个版本，要删到整理历史里删），
+		// 说明只写一次（每次洗版都会再看到它）
+		if msg := truncate(reason+"；"+existingRetireNote, 1024); row.Message != msg {
+			if uerr := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).
+				UpdateColumn("message", msg).Error; uerr != nil {
+				return nil, fmt.Errorf("更新整理记录失败: %w", uerr)
+			}
+		}
+		return nil, ErrExistingKept
 	}
 	kept, err := s.removeLibraryFiles(ctx, row)
 	if err != nil {
@@ -306,7 +337,8 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 	var shared, discFiles []extra
 	for _, e := range decodeExtras(row.Extras) {
 		switch {
-		case e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)):
+		// 原盘的电影目录里只有这一张原盘：它的 movie.nfo 是这条记录自己的（别的电影目录里的 movie.nfo 是几个版本共用的）
+		case e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)) && (!disc || filepath.Base(e.Target) != scrape.MovieNFOName):
 			shared = append(shared, e)
 		case e.Kind == extraMeta:
 			// 刮削写的文件是普通文件：按文件编号确认（软链接方式整理的视频也一样）

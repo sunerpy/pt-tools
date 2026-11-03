@@ -123,6 +123,8 @@ type fakeTMDB struct {
 	fail  map[string]error
 	// onDetails 在取详情时调用（模拟取数据的这段时间里文件被改了）
 	onDetails func()
+	// cast 是完整信息里的演员
+	cast []tmdb.CastMember
 }
 
 func (f *fakeTMDB) hit(s string) {
@@ -150,7 +152,7 @@ func (f *fakeTMDB) Details(_ context.Context, kind string, id int) (*tmdb.Result
 
 func (f *fakeTMDB) Extras(context.Context, string, int) (*tmdb.Extras, error) {
 	f.hit("extras")
-	return &tmdb.Extras{Tagline: "宣传语", VoteCount: 10}, nil
+	return &tmdb.Extras{Tagline: "宣传语", VoteCount: 10, Cast: f.cast}, nil
 }
 
 func (f *fakeTMDB) Season(_ context.Context, _, n int) (*tmdb.Season, error) {
@@ -319,6 +321,45 @@ func TestWriteTV(t *testing.T) {
 	assert.Equal(t, []string{"TMDB 上没有第 2 季的详情，这一季只写季号与集号"}, rep.Problems())
 	assert.Equal(t, []string{"S2/S02E05.nfo", "S2/season.nfo"}, listFiles(t, flat))
 	assert.Contains(t, read(t, filepath.Join(flat, "S2", "S02E05.nfo")), "<title>第 5 集</title>")
+}
+
+// 演员名用中文：前 15 位按 TMDB 上的编号换成中文名，没有中文名、没有编号的照旧，角色名不变；不写 NFO 时不取
+func TestWriteCastNames(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeTMDB{}
+	for i := 1; i <= 17; i++ {
+		id := i
+		if i == 3 {
+			id = 0
+		}
+		f.cast = append(f.cast, tmdb.CastMember{ID: id, Name: fmt.Sprintf("Actor %d", i), Character: fmt.Sprintf("Role %d", i), Order: i})
+	}
+	var asked []int
+	w := writer(f)
+	w.CastName = func(_ context.Context, id int) string {
+		asked = append(asked, id)
+		if id == 2 {
+			return ""
+		}
+		return fmt.Sprintf("演员%d", id)
+	}
+	root := t.TempDir()
+	video := filepath.Join(root, "M (2023)", "M.mkv")
+	rep := w.Write(ctx, movieQuery, movieBase, MovieFiles(video, true, ParseItems("nfo")))
+	require.Empty(t, rep.Problems())
+	nfo := read(t, filepath.Join(root, "M (2023)", "M.nfo"))
+	assert.Contains(t, nfo, "<name>演员1</name>")
+	assert.Contains(t, nfo, "<role>Role 1</role>", "角色名不变")
+	assert.Contains(t, nfo, "<name>Actor 2</name>", "没有中文名的用原名")
+	assert.Contains(t, nfo, "<name>Actor 3</name>", "没有编号的用原名")
+	assert.Contains(t, nfo, "<name>演员15</name>")
+	assert.Contains(t, nfo, "<name>Actor 16</name>", "只换前 15 位")
+	assert.Len(t, asked, 14, "没有编号的不问")
+
+	asked = nil
+	rep = w.Write(ctx, movieQuery, movieBase, MovieFiles(filepath.Join(t.TempDir(), "M", "M.mkv"), true, ParseItems("poster")))
+	require.Empty(t, rep.Problems())
+	assert.Empty(t, asked, "不写 NFO 时不取中文名")
 }
 
 // 只写选了的内容；只有 Fanart.tv 有的图没填它的 Key 时写明

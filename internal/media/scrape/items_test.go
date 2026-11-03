@@ -1,6 +1,7 @@
 package scrape
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -66,12 +67,39 @@ func TestFiles(t *testing.T) {
 	assert.Equal(t, 1, ep[0].EpisodeEnd, "单集的 EpisodeEnd 是这一集")
 	assert.Empty(t, MovieFiles(video, true, Items{}))
 
-	for _, n := range []string{"poster.jpg", "fanart.jpg", "clearlogo.png", "clearart.png", "banner.jpg", "landscape.jpg", "discart.png", "tvshow.nfo", "season.nfo", "season01-poster.jpg", "season-specials-poster.jpg"} {
+	for _, n := range []string{"poster.jpg", "fanart.jpg", "clearlogo.png", "clearart.png", "banner.jpg", "landscape.jpg", "discart.png", "movie.nfo", "tvshow.nfo", "season.nfo", "season01-poster.jpg", "season-specials-poster.jpg"} {
 		assert.True(t, IsDirArtifact(n), n)
 	}
 	for _, n := range []string{"M-poster.jpg", "M.nfo", "S01E01-thumb.jpg", "season1-poster.png"} {
 		assert.False(t, IsDirArtifact(n), n)
 	}
+}
+
+// 电影有自己的目录、目录里已经有 movie.nfo、没有 <文件名>.nfo 时写进 movie.nfo，不另写一份（会盖住原来的）
+func TestUseMovieNFO(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "M (2023)")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	video := filepath.Join(dir, "M.2023.mkv")
+	all := ParseItems("nfo,poster")
+	nfoOf := func(files []File) string {
+		for _, f := range files {
+			if f.NFO != "" {
+				return filepath.Base(f.Path)
+			}
+		}
+		return ""
+	}
+	assert.Equal(t, "M.2023.nfo", nfoOf(UseMovieNFO(MovieFiles(video, true, all), video, true)), "没有 movie.nfo")
+	require.NoError(t, os.Mkdir(filepath.Join(dir, MovieNFOName), 0o755))
+	assert.Equal(t, "M.2023.nfo", nfoOf(UseMovieNFO(MovieFiles(video, true, all), video, true)), "movie.nfo 是目录")
+	require.NoError(t, os.Remove(filepath.Join(dir, MovieNFOName)))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, MovieNFOName), []byte("<movie/>"), 0o644))
+	files := UseMovieNFO(MovieFiles(video, true, all), video, true)
+	assert.Equal(t, MovieNFOName, nfoOf(files))
+	assert.Equal(t, filepath.Join(dir, "poster.jpg"), files[1].Path, "图片不变")
+	assert.Equal(t, "M.2023.nfo", nfoOf(UseMovieNFO(MovieFiles(video, false, all), video, false)), "平铺在库目录里的电影不用 movie.nfo")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "M.2023.nfo"), []byte("<movie/>"), 0o644))
+	assert.Equal(t, "M.2023.nfo", nfoOf(UseMovieNFO(MovieFiles(video, true, all), video, true)), "两份都有时写 <文件名>.nfo")
 }
 
 func TestJoin(t *testing.T) {

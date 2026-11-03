@@ -308,6 +308,8 @@ describe("媒体库", () => {
         scrape_sources: { plot: "", rating: "", episode: "", artwork: "" },
         classify_dir: false,
         overwrite_mode: "",
+        scrape_actor_zh: false,
+        scrape_fill: false,
         enabled: true,
       },
     ]);
@@ -321,6 +323,43 @@ describe("媒体库", () => {
     api.deleteLibrary.mockResolvedValue({ ok: true });
     q("ml-lib-del-3")!.click();
     await vi.waitFor(() => expect(api.deleteLibrary).toHaveBeenCalledWith(3));
+  });
+
+  it("媒体库：演员名用中文、每周补刮跟着保存，关着刮削时不能选；导入已有文件打开导入弹窗", async () => {
+    await mountPage();
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-actor-zh")).not.toBeNull());
+    const box = (id: string) => q(id)!.querySelector("input")!;
+    expect(box("ml-lib-actor-zh").checked).toBe(false);
+    expect(box("ml-lib-fill").checked).toBe(false);
+    box("ml-lib-actor-zh").click();
+    await flush();
+    box("ml-lib-fill").click();
+    await flush();
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
+      scrape_actor_zh: true,
+      scrape_fill: true,
+    });
+
+    // 关掉刮削：这两项跟着不能选
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-actor-zh")).not.toBeNull());
+    expect(box("ml-lib-actor-zh").disabled).toBe(false);
+    q("ml-lib-scrape")!.click();
+    await flush();
+    expect(box("ml-lib-actor-zh").disabled, "关着刮削").toBe(true);
+    expect(box("ml-lib-fill").disabled).toBe(true);
+
+    // 列表里每个媒体库都能导入已有文件：打开弹窗，路径默认是库目录
+    document.querySelector<HTMLElement>(".el-dialog__headerbtn")?.click();
+    await flush();
+    q("ml-lib-import-3")!.click();
+    await vi.waitFor(() => expect(q("import-path")).not.toBeNull());
+    expect((q("import-path") as HTMLInputElement).value).toBe("/media/movies");
+    expect(document.body.textContent).toContain("导入已有文件：电影");
   });
 
   it("媒体库：刮削内容按类型列出，选了才写；开着刮削时至少选一项", async () => {

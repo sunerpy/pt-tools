@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -378,7 +379,10 @@ func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription,
 			continue
 		}
 		if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil {
-			s.cfg.Logger.Warnf("[订阅] 洗版时删除旧版本失败 (%s): %v", o.TargetPath, err)
+			// 导入的已有文件不删：新版本照旧整理不了（目标被它占着），记录里写明了
+			if !errors.Is(err, organize.ErrExistingKept) {
+				s.cfg.Logger.Warnf("[订阅] 洗版时删除旧版本失败 (%s): %v", o.TargetPath, err)
+			}
 			continue
 		}
 		freed = append(freed, o.ID)
@@ -436,7 +440,7 @@ func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscriptio
 			if strings.EqualFold(o.InfoHash, t.InfoHash) || !covered(o.Episode, o.EpisodeEnd) || s.versionPoints(ctx, prof, v.title, v.subtitle) > score {
 				continue
 			}
-			if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil {
+			if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil && !errors.Is(err, organize.ErrExistingKept) {
 				s.cfg.Logger.Warnf("[订阅] 洗版时删除旧版本失败 (%s): %v", o.TargetPath, err)
 			}
 		}

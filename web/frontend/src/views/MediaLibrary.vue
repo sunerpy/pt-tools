@@ -27,6 +27,7 @@ import {
 } from "@/api";
 import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
+import ImportLibraryDialog from "@/components/media/ImportLibraryDialog.vue";
 import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import TmdbKeyNotice from "@/components/media/TmdbKeyNotice.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -190,6 +191,8 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   scrape_sources: tmdbSources(),
   classify_dir: false,
   overwrite_mode: "",
+  scrape_actor_zh: false,
+  scrape_fill: false,
   enabled: true,
 });
 const libForm = ref<MediaLibraryInput>(blankLibrary());
@@ -220,8 +223,18 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     scrape_sources: { ...tmdbSources(), ...l.scrape_sources },
     classify_dir: l.classify_dir ?? false,
     overwrite_mode: l.overwrite_mode ?? "",
+    scrape_actor_zh: l.scrape_actor_zh ?? false,
+    scrape_fill: l.scrape_fill ?? false,
     enabled: l.enabled,
   };
+}
+
+// ---- 导入已有文件 ----
+const importVisible = ref(false);
+const importLibrary = ref<MediaLibrary | null>(null);
+function openImport(l: MediaLibrary) {
+  importLibrary.value = l;
+  importVisible.value = true;
 }
 
 function openLibrary(l?: MediaLibrary) {
@@ -922,8 +935,11 @@ onMounted(refresh);
                   " />
               </template>
             </el-table-column>
-            <el-table-column label="" width="120" align="right">
+            <el-table-column label="" width="210" align="right">
               <template #default="{ row }">
+                <el-button link :data-testid="`ml-lib-import-${row.id}`" @click="openImport(row)"
+                  >导入已有文件</el-button
+                >
                 <el-button link :data-testid="`ml-lib-edit-${row.id}`" @click="openLibrary(row)"
                   >编辑</el-button
                 >
@@ -957,6 +973,7 @@ onMounted(refresh);
                   " />
               </template>
               <template #actions>
+                <el-button size="small" @click="openImport(l)">导入已有文件</el-button>
                 <el-button size="small" @click="openLibrary(l)">编辑</el-button>
                 <el-button size="small" type="danger" plain @click="removeLibrary(l)"
                   >删除</el-button
@@ -1686,6 +1703,23 @@ onMounted(refresh);
             data-testid="ml-lib-overwrite"
             >覆盖已有的 NFO 与图片</el-checkbox
           >
+          <el-checkbox
+            v-model="libForm.scrape_actor_zh"
+            :disabled="!libForm.scrape"
+            data-testid="ml-lib-actor-zh"
+            >演员名用中文</el-checkbox
+          >
+          <el-checkbox
+            v-model="libForm.scrape_fill"
+            :disabled="!libForm.scrape"
+            data-testid="ml-lib-fill"
+            >每周补一次缺的刮削</el-checkbox
+          >
+          <div v-if="libForm.scrape" class="field-tip">
+            演员名用中文：NFO 里前 15 位演员用 TMDB
+            上的中文译名，没有译名的用原名，角色名不变。每周补刮：刮削结果是部分刮削或刮削失败的条目每周重新刮削一次（一次最多
+            50 部），自己放的、别的工具写的文件不换。
+          </div>
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="libForm.enabled" data-testid="ml-lib-enabled" />
@@ -1964,6 +1998,7 @@ onMounted(refresh);
     </el-dialog>
 
     <OrganizeDialog v-model="organizeVisible" :target="organizeTarget" />
+    <ImportLibraryDialog v-model="importVisible" :library="importLibrary" />
   </div>
 </template>
 

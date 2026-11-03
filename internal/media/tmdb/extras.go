@@ -36,8 +36,9 @@ type Collection struct {
 	Name string `json:"name"`
 }
 
-// CastMember 是一位演员。ProfilePath 是头像图片的路径（/xxx.jpg），没有时为空。
+// CastMember 是一位演员。ID 是 TMDB 上这个人的编号（取中文译名用），ProfilePath 是头像图片的路径（/xxx.jpg），没有时为空。
 type CastMember struct {
+	ID          int    `json:"id,omitempty"`
 	Name        string `json:"name"`
 	Character   string `json:"character,omitempty"`
 	Order       int    `json:"order"`
@@ -84,7 +85,8 @@ func (c *Client) Extras(ctx context.Context, kind string, id int) (*Extras, erro
 		ratings = "content_ratings"
 	}
 	var out Extras
-	err := c.cached(ctx, fmt.Sprintf("extras:%s:%d:%s", kind, id, c.language), DetailsTTL, &out, func() (any, error) {
+	// extras2：演员带上了编号（演员中文名用），之前的缓存没有
+	err := c.cached(ctx, fmt.Sprintf("extras2:%s:%d:%s", kind, id, c.language), DetailsTTL, &out, func() (any, error) {
 		var raw struct {
 			Tagline   string `json:"tagline"`
 			Status    string `json:"status"`

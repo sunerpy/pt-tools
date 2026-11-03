@@ -2,6 +2,7 @@ package scrape
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -77,6 +78,33 @@ func MovieFiles(video string, ownDir bool, it Items) []File {
 	return out
 }
 
+// MovieNFOName 是电影有自己的目录时目录里的 NFO（Kodi、Jellyfin 与 Emby 都认）：别的工具常写这个名字。
+const MovieNFOName = "movie.nfo"
+
+// UseMovieNFO 在电影有自己的目录、目录里已经有 movie.nfo、没有 <文件名>.nfo 时，把要写的 <文件名>.nfo 换成 movie.nfo：
+// 照旧按覆盖的规则处理原来那份，不另写一份（Jellyfin 与 Emby 先读 <文件名>.nfo，另写一份会盖住原来的）。
+func UseMovieNFO(files []File, video string, ownDir bool) []File {
+	if !ownDir {
+		return files
+	}
+	own := stem(video) + ".nfo"
+	shared := filepath.Join(filepath.Dir(video), MovieNFOName)
+	if regularFile(own) || !regularFile(shared) {
+		return files
+	}
+	for i := range files {
+		if files[i].NFO == NFOMovie && files[i].Path == own {
+			files[i].Path = shared
+		}
+	}
+	return files
+}
+
+func regularFile(p string) bool {
+	info, err := os.Lstat(p)
+	return err == nil && info.Mode().IsRegular()
+}
+
 // ShowFiles 是剧集目录里的文件：tvshow.nfo 与图片（碟片图只有电影有）。
 func ShowFiles(showDir string, it Items) []File {
 	var out []File
@@ -128,10 +156,10 @@ func EpisodeFiles(video string, season, episode, end int, it Items) []File {
 
 var seasonPosterRe = regexp.MustCompile(`^season(\d+|-specials)-poster\.jpg$`)
 
-// IsDirArtifact 报告文件名是不是刮削写在目录里、几个视频共用的文件（电影与剧集目录里的图片、tvshow.nfo、season.nfo、季海报）。
+// IsDirArtifact 报告文件名是不是刮削写在目录里、几个视频共用的文件（电影与剧集目录里的图片、movie.nfo、tvshow.nfo、season.nfo、季海报）。
 func IsDirArtifact(name string) bool {
 	switch name {
-	case "tvshow.nfo", "season.nfo":
+	case MovieNFOName, "tvshow.nfo", "season.nfo":
 		return true
 	}
 	for _, a := range dirArt {

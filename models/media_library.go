@@ -14,6 +14,9 @@ const (
 	MediaModeCopy     = "copy"
 	MediaModeSymlink  = "symlink"
 	MediaModeMove     = "move"
+	// MediaModeExisting 是导入已有媒体库时记下的文件：导入时就在库里，不是 pt-tools 放进去的（源与目标是同一个文件）。
+	// 只出现在整理记录里，不能选作整理方式
+	MediaModeExisting = "existing"
 )
 
 // MediaLibrary 是一个媒体库：一类条目（电影或剧集，可以只收动画）整理到哪个目录、怎么命名、怎么整理、要不要刮削。
@@ -42,10 +45,15 @@ type MediaLibrary struct {
 	// ClassifyDir 为真时按二级分类（MediaOrganizeSetting.ClassifyRules）放进库目录下的分类目录
 	ClassifyDir bool `gorm:"not null;default:false" json:"classify_dir"`
 	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办：空串不替换，larger 新文件更大时替换
-	OverwriteMode string    `gorm:"size:16;not null;default:''" json:"overwrite_mode"`
-	Enabled       bool      `gorm:"not null;default:false" json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	OverwriteMode string `gorm:"size:16;not null;default:''" json:"overwrite_mode"`
+	// ScrapeActorZh 为真时刮削的演员名用 TMDB 上的中文译名（前 15 位，没有译名的用原名）
+	ScrapeActorZh bool `gorm:"not null;default:false" json:"scrape_actor_zh"`
+	// ScrapeFill 为真时每周对刮削结果是部分成功或失败的记录补刮一次，ScrapeFilledAt 是上一次补刮的时间
+	ScrapeFill     bool       `gorm:"not null;default:false" json:"scrape_fill"`
+	ScrapeFilledAt *time.Time `json:"scrape_filled_at,omitempty"`
+	Enabled        bool       `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 func (MediaLibrary) TableName() string { return "media_libraries" }
@@ -151,6 +159,8 @@ const (
 	MediaTriggerManual = "manual"
 	// MediaTriggerWatch 是目录监控发现的（不是下载器里的种子）
 	MediaTriggerWatch = "watch"
+	// MediaTriggerImport 是导入已有媒体库时记下的（见 MediaModeExisting）
+	MediaTriggerImport = "import"
 )
 
 // 失败与跳过的整理记录的分类（FailKind）。整理成的记录为空；升级前的失败、跳过记录也为空，当作其他。

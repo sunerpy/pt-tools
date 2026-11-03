@@ -191,6 +191,8 @@ const NOT_ON_BOARD = {
     "「不要这个种子」（媒体中心 M2b）晚于画板 40 定稿：按条目搜索、关键字搜索与订阅详情共用，写原因、作用范围，订阅详情里还能顺手删种",
   "views/FreeWatches.vue":
     "等免费页（媒体中心 M2b）晚于画板 40 定稿：改到期时间的弹窗不在那张清点图里",
+  "components/media/ImportLibraryDialog.vue":
+    "「导入已有文件」（媒体中心 M5）晚于画板 40 定稿：媒体库页每个库的导入弹窗，以及它里面在库目录里浏览的「选一个文件夹」",
   "components/search/EntrySearch.vue#(drawer 无 title)":
     "按条目搜索（媒体中心 M2a）在手机上的筛选面板：规格在画板 10（媒体中心那一组），不在画板 40 的清点图里",
   "views/MediaItem.vue#(drawer 无 title)":

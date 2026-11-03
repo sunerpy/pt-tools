@@ -193,6 +193,11 @@ func (s *Service) itemState(ctx context.Context, p *Plan, it *PlanItem) string {
 		it.Message = "目标位置已经有同名文件（不是同一个文件），不会覆盖"
 		return ItemExists
 	}
+	if old.Mode == models.MediaModeExisting {
+		// 用户原来的文件：换的话要把它挪开删掉
+		it.Message = fmt.Sprintf("目标位置是导入时就在库里的文件（%s，%s，不是 pt-tools 放进去的），不替换", filepath.Base(old.TargetPath), utils.FormatBytes(old.Size))
+		return ItemExists
+	}
 	// 目标位置是 pt-tools 之前放进库的另一个版本：按媒体库的覆盖策略看换不换
 	what := fmt.Sprintf("目标位置是之前整理的另一个版本（%s，%s）", firstNonEmpty(old.TorrentName, filepath.Base(old.SourcePath)), utils.FormatBytes(old.Size))
 	switch {

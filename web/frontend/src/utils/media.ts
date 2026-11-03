@@ -55,6 +55,9 @@ const MATCH_SOURCE_LABELS: Record<string, string> = {
   history: "沿用之前整理用的条目",
   subscription: "按订阅的条目",
   push: "按推送时说明的条目",
+  nfo: "按 NFO 里的 TMDB 编号",
+  "nfo-imdb": "按 NFO 里的 IMDb 编号",
+  dirname: "按目录名里的 TMDB 编号",
 };
 
 /** 整理时条目从哪来（预览与整理记录里显示）；升级前的记录没有，回空串 */
@@ -181,6 +184,8 @@ export const MEDIA_MODES: readonly { value: MediaMode; label: string; hint: stri
 ];
 
 export function modeLabel(mode?: string): string {
+  // 导入已有媒体库时记下的文件：导入时就在库里，不是 pt-tools 放进去的
+  if (mode === "existing") return "已有文件";
   return MEDIA_MODES.find((m) => m.value === (mode || "hardlink"))?.label ?? mode ?? "";
 }
 
@@ -532,8 +537,13 @@ export const HISTORY_FILTERS: readonly { value: "" | MediaTransferStatus; label:
 
 export function triggerLabel(trigger: string): string {
   return (
-    { auto: "下载完成后自动", scan: "定期扫描", manual: "手动", watch: "目录监控" }[trigger] ??
-    trigger
+    {
+      auto: "下载完成后自动",
+      scan: "定期扫描",
+      manual: "手动",
+      watch: "目录监控",
+      import: "导入已有文件",
+    }[trigger] ?? trigger
   );
 }
 

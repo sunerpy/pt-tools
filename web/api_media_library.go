@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -58,6 +59,11 @@ func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/media/history/{id}/ai-recognize", s.auth(s.apiMediaHistoryAIRecognize))
 	mux.HandleFunc("POST /api/media/history/{id}/scrape", s.auth(s.apiMediaHistoryScrape))
 	mux.HandleFunc("DELETE /api/media/history/{id}", s.auth(s.apiMediaHistoryDelete))
+	mux.HandleFunc("POST /api/media/libraries/{id}/import/scan", s.auth(s.apiImportScanStart))
+	mux.HandleFunc("GET /api/media/import/scans/{id}", s.auth(s.apiImportScanGet))
+	mux.HandleFunc("DELETE /api/media/import/scans/{id}", s.auth(s.apiImportScanDelete))
+	mux.HandleFunc("PUT /api/media/import/scans/{id}/item", s.auth(s.apiImportScanItem))
+	mux.HandleFunc("POST /api/media/import/scans/{id}/import", s.auth(s.apiImportScanImport))
 }
 
 func (s *Server) organizeService(w http.ResponseWriter) (*organize.Service, bool) {
@@ -553,7 +559,7 @@ func (s *Server) apiMediaFSList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, got)
 }
 
-// apiMediaHistoryBatch handles POST /api/media/history/batch {"ids":[…],"action":"retry|delete|delete_files|rescrape"}：
+// apiMediaHistoryBatch handles POST /api/media/history/batch {"ids":[…],"action":"retry|delete|delete_files|rescrape","allow_existing":false}：
 // 逐条回结果（organize.BatchResult）；重试与重新刮削排进队列就回
 func (s *Server) apiMediaHistoryBatch(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.organizeService(w)
@@ -563,13 +569,15 @@ func (s *Server) apiMediaHistoryBatch(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		IDs    []uint `json:"ids"`
 		Action string `json:"action"`
+		// AllowExisting 为真时连文件删除也删导入的已有文件（页面上另外确认过）
+		AllowExisting bool `json:"allow_existing"`
 	}
 	if !decodeStrictBody(w, r, &in) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
 	defer cancel()
-	got, err := svc.Batch(ctx, in.IDs, in.Action)
+	got, err := svc.BatchWith(ctx, in.IDs, in.Action, organize.BatchOptions{AllowExisting: in.AllowExisting})
 	if err != nil {
 		writeOrganizeError(w, err)
 		return
@@ -617,7 +625,8 @@ func (s *Server) apiMediaHistoryScrape(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, got)
 }
 
-// apiMediaHistoryDelete handles DELETE /api/media/history/{id}?files=1
+// apiMediaHistoryDelete handles DELETE /api/media/history/{id}?files=1&allow_existing=1：allow_existing 是连文件删除导入的已有文件
+// （页面上另外确认过）
 func (s *Server) apiMediaHistoryDelete(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.organizeService(w)
 	if !ok {
@@ -627,7 +636,8 @@ func (s *Server) apiMediaHistoryDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	kept, err := svc.DeleteHistory(r.Context(), id, r.URL.Query().Get("files") == "1")
+	q := r.URL.Query()
+	kept, err := svc.DeleteHistoryWith(r.Context(), id, organize.DeleteOptions{Files: q.Get("files") == "1", AllowExisting: q.Get("allow_existing") == "1"})
 	if err != nil {
 		writeOrganizeError(w, err)
 		return
@@ -637,4 +647,131 @@ func (s *Server) apiMediaHistoryDelete(w http.ResponseWriter, r *http.Request) {
 		out["kept"] = kept
 	}
 	writeJSON(w, out)
+}
+
+// scanIDRe 是导入扫描的编号。
+var scanIDRe = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// importScanID 是路由里的扫描编号；不对时回 404。
+func importScanID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.PathValue("id")
+	if !scanIDRe.MatchString(id) {
+		http.Error(w, "扫描结果不在了：重新扫描", http.StatusNotFound)
+		return "", false
+	}
+	return id, true
+}
+
+// apiImportScanStart handles POST /api/media/libraries/{id}/import/scan {"path":""}：开始扫描媒体库里已有的文件（后台进行），回扫描的状态
+func (s *Server) apiImportScanStart(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Path string `json:"path"`
+	}
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	got, err := svc.StartImportScan(r.Context(), id, in.Path)
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiImportScanGet handles GET /api/media/import/scans/{id}?brief=1：扫描的进度与结果；brief=1 时不带每一项（轮询进度用）
+func (s *Server) apiImportScanGet(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := importScanID(w, r)
+	if !ok {
+		return
+	}
+	got, err := svc.ImportScanStatus(id, r.URL.Query().Get("brief") != "1")
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiImportScanDelete handles DELETE /api/media/import/scans/{id}：取消还在进行的扫描，扫描完了的丢掉结果
+func (s *Server) apiImportScanDelete(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := importScanID(w, r)
+	if !ok {
+		return
+	}
+	if err := svc.CancelImportScan(id); err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// apiImportScanItem handles PUT /api/media/import/scans/{id}/item {"path":"…","tmdb_id":123}：改一项的条目（类型跟媒体库），回改好的这一项
+func (s *Server) apiImportScanItem(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := importScanID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Path   string `json:"path"`
+		TMDBID int    `json:"tmdb_id"`
+	}
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	got, err := svc.SetImportItem(ctx, id, in.Path, in.TMDBID)
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiImportScanImport handles POST /api/media/import/scans/{id}/import {"paths":[…],"scrape":false}：导入选中的项（排进整理的队列），
+// 回导入的进度（之后在扫描的 import 里看）
+func (s *Server) apiImportScanImport(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	id, ok := importScanID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Paths  []string `json:"paths"`
+		Scrape bool     `json:"scrape"`
+	}
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), organizeAPITimeout)
+	defer cancel()
+	got, err := svc.QueueImport(ctx, id, in.Paths, in.Scrape)
+	if err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, got)
 }

@@ -148,6 +148,17 @@ func itemError(id uint, err error) BatchItem {
 //   - delete 只删记录；delete_files 连库里整理出的文件一起删（同 DeleteHistory，移动整理的不删）；
 //   - rescrape：重新刮削记录所在的电影或剧集（同 Rescrape，只收整理好的记录），同一个媒体库里的同一部只刮一次，也是排进队列就回。
 func (s *Service) Batch(ctx context.Context, ids []uint, action string) (*BatchResult, error) {
+	return s.BatchWith(ctx, ids, action, BatchOptions{})
+}
+
+// BatchOptions 是批量操作的选项。
+type BatchOptions struct {
+	// AllowExisting 为真时连文件删除也删导入的已有文件（见 DeleteOptions）
+	AllowExisting bool
+}
+
+// BatchWith 同 Batch，带上选项。
+func (s *Service) BatchWith(ctx context.Context, ids []uint, action string, opt BatchOptions) (*BatchResult, error) {
 	seen := map[uint]bool{}
 	ids = slices.DeleteFunc(slices.Clone(ids), func(id uint) bool {
 		dup := id == 0 || seen[id]
@@ -166,7 +177,7 @@ func (s *Service) Batch(ctx context.Context, ids []uint, action string) (*BatchR
 		s.batchRetry(ctx, ids, res)
 	case BatchDelete, BatchDeleteFiles:
 		for _, id := range ids {
-			kept, err := s.DeleteHistory(ctx, id, action == BatchDeleteFiles)
+			kept, err := s.DeleteHistoryWith(ctx, id, DeleteOptions{Files: action == BatchDeleteFiles, AllowExisting: opt.AllowExisting})
 			switch {
 			case err != nil:
 				res.add(itemError(id, err))
@@ -191,6 +202,10 @@ func (s *Service) batchRetry(ctx context.Context, ids []uint, res *BatchResult) 
 		row, err := s.historyRow(ctx, id)
 		if err != nil {
 			res.add(itemError(id, err))
+			continue
+		}
+		if importRow(row) {
+			res.add(BatchItem{ID: id, Message: importRetryNote})
 			continue
 		}
 		req, err := retryRequest(row).normalized()
