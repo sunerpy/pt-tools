@@ -859,7 +859,11 @@ func (s *Service) Subscription(ctx context.Context, id uint) (*SubscriptionDetai
 	}
 	v := viewOf(row)
 	v.Torrents = len(torrents)
-	views, err := s.torrentViews(ctx, torrents)
+	blocked, err := s.blocksFor(ctx, row.MediaType, row.TMDBID, row.Season)
+	if err != nil {
+		return nil, err
+	}
+	views, err := s.torrentViews(ctx, torrents, blocked)
 	if err != nil {
 		return nil, err
 	}

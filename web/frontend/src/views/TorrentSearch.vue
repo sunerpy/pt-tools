@@ -3,6 +3,7 @@ import {
   downloadersApi,
   type DownloaderSetting,
   type ExploreItem,
+  freeWatchApi,
   type MediaKind,
   type MediaSearchMember,
   type MediaSearchResult,
@@ -25,6 +26,7 @@ import SubscribeDialog, {
   type FollowTorrent,
   type SubscribeTarget,
 } from "@/components/media/SubscribeDialog.vue";
+import BlockDialog, { type BlockChoice } from "@/components/search/BlockDialog.vue";
 import EntryCandidates from "@/components/search/EntryCandidates.vue";
 import EntryPoster from "@/components/search/EntryPoster.vue";
 import EntrySearch, { type EntryRef } from "@/components/search/EntrySearch.vue";
@@ -162,6 +164,21 @@ const pushForm = ref({
   tags: "",
   autoStart: true,
 });
+/**
+ * 推送弹窗的两种用法：直接推送；「等免费」（媒体中心 M2b）——免费了才推，下载器只选一个，
+ * 不要「添加后立即开始」，加「等多久」。按条目搜索的成员还带上 H&R 要做种几小时（知道时）。
+ */
+const pushMode = ref<"push" | "watch">("push");
+const watchForm = ref({ downloaderId: undefined as number | undefined, days: 7, hrHours: 0 });
+/** 能等免费的站点（小写）：启用着、读得了种子详情；读不到时都当作不能 */
+const watchSites = ref(new Set<string>());
+const pushTargetIds = computed(() =>
+  pushMode.value === "watch"
+    ? watchForm.value.downloaderId
+      ? [watchForm.value.downloaderId]
+      : []
+    : pushForm.value.downloaderIds,
+);
 
 // 站点分类配置
 const siteCategories = ref<Record<string, SiteCategoriesConfig>>({});
@@ -645,7 +662,12 @@ const HOTKEY_OPTS = { capture: true } as const;
 
 onMounted(async () => {
   window.addEventListener("keydown", onHotkey, HOTKEY_OPTS);
-  await Promise.all([loadAvailableSites(), loadDownloaders(), loadSiteCategories()]);
+  await Promise.all([
+    loadAvailableSites(),
+    loadDownloaders(),
+    loadSiteCategories(),
+    loadWatchSites(),
+  ]);
   // 尝试从缓存加载
   loadFromCache();
 });
@@ -1099,10 +1121,11 @@ async function followShow(torrent: SearchTorrentItem) {
   }
 }
 
-// 打开推送对话框（单个）
-function openPushDialog(torrent: SearchTorrentItem) {
+// 打开推送对话框（单个）；mode 为 watch 时是「等免费」
+function openPushDialog(torrent: SearchTorrentItem, mode: "push" | "watch" = "push") {
   currentPushTorrent.value = torrent;
   pushMedia.value = null;
+  pushMode.value = mode;
   pushForm.value = {
     downloaderIds: defaultDownloader.value ? [defaultDownloader.value.id!] : [],
     savePath: "",
@@ -1110,7 +1133,114 @@ function openPushDialog(torrent: SearchTorrentItem) {
     tags: "",
     autoStart: true,
   };
+  watchForm.value = { downloaderId: defaultDownloader.value?.id, days: 7, hrHours: 0 };
   pushDialogVisible.value = true;
+}
+
+async function loadWatchSites() {
+  try {
+    watchSites.value = new Set(
+      ((await freeWatchApi.sites()).sites ?? []).map((s) => s.toLowerCase()),
+    );
+  } catch {
+    watchSites.value = new Set();
+  }
+}
+
+function canWatch(torrent: SearchTorrentItem): boolean {
+  return watchSites.value.has(torrent.sourceSite.toLowerCase());
+}
+
+/** 等免费：建一条等免费，免费了由后台推送到选的下载器 */
+async function doWatch() {
+  const t = currentPushTorrent.value;
+  if (!t) return;
+  const downloaderId = watchForm.value.downloaderId;
+  if (!downloaderId) {
+    ElMessage.warning("请选择下载器");
+    return;
+  }
+  const days = watchForm.value.days;
+  pushLoading.value = true;
+  try {
+    await freeWatchApi.create({
+      site: t.sourceSite,
+      torrent_id: t.id,
+      title: t.title,
+      subtitle: t.subtitle || undefined,
+      size_bytes: t.sizeBytes || undefined,
+      has_hr: t.hasHR || undefined,
+      hr_seed_time_h: watchForm.value.hrHours || undefined,
+      downloader_id: downloaderId,
+      save_path: pushForm.value.savePath || undefined,
+      category: pushForm.value.category || undefined,
+      tags: pushForm.value.tags || undefined,
+      ...(pushMedia.value
+        ? {
+            media_type: pushMedia.value.media_type,
+            tmdb_id: pushMedia.value.tmdb_id,
+            season: pushMedia.value.season || undefined,
+          }
+        : {}),
+      days,
+    });
+    ElMessage.success(`已加进「等免费」：免费了就推送，最多等 ${days} 天`);
+    pushDialogVisible.value = false;
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "等免费没有建成");
+  } finally {
+    pushLoading.value = false;
+  }
+}
+
+/* ---- 不要（关键字搜索里拉黑，对所有条目） ---- */
+
+const blockOpen = ref(false);
+const blockBusy = ref(false);
+const blockRow = ref<SearchTorrentItem | null>(null);
+
+function openBlock(torrent: SearchTorrentItem) {
+  blockRow.value = torrent;
+  blockOpen.value = true;
+}
+
+async function confirmBlock(choice: BlockChoice) {
+  const t = blockRow.value;
+  if (!t) return;
+  blockBusy.value = true;
+  try {
+    const res = await subscribeApi.addBlocks({
+      reason: choice.reason || undefined,
+      items: [{ site: t.sourceSite, torrent_id: t.id, title: t.title }],
+    });
+    const b = res.blocks[0];
+    if (b) t.block = { id: b.id, ...(b.reason ? { reason: b.reason } : {}) };
+    blockOpen.value = false;
+    ElMessage.success("已拉黑，哪个订阅都不再选它");
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "拉黑失败");
+  } finally {
+    blockBusy.value = false;
+  }
+}
+
+async function unblockRow(torrent: SearchTorrentItem) {
+  const id = torrent.block?.id;
+  if (!id) return;
+  try {
+    await subscribeApi.removeBlock(id);
+    torrent.block = undefined;
+    ElMessage.success("已移出黑名单");
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "移出黑名单失败");
+  }
+}
+
+/** 每行「更多」里的三项 */
+function onRowCommand(cmd: "watch" | "block" | "unblock", torrent: SearchTorrentItem) {
+  if (cmd === "watch") openPushDialog(torrent, "watch");
+  else if (cmd === "block") openBlock(torrent);
+  else void unblockRow(torrent);
 }
 
 // 打开批量推送对话框
@@ -1523,11 +1653,9 @@ function onEntryKeyword(kw: string) {
   void doSearch();
 }
 
-function onEntryPush(
-  m: MediaSearchMember,
-  media: { media_type: MediaKind; tmdb_id: number; season: number },
-) {
-  openPushDialog({
+/** 按条目搜索的成员换成推送弹窗用的种子 */
+function entryTorrent(m: MediaSearchMember): SearchTorrentItem {
+  return {
     id: m.torrent_id,
     title: m.title,
     subtitle: m.subtitle,
@@ -1542,8 +1670,24 @@ function onEntryPush(
     hasHR: m.hr,
     sourceSite: m.site,
     meta: m.meta,
-  });
+  };
+}
+
+function onEntryPush(
+  m: MediaSearchMember,
+  media: { media_type: MediaKind; tmdb_id: number; season: number },
+) {
+  openPushDialog(entryTorrent(m));
   pushMedia.value = media;
+}
+
+function onEntryWatch(
+  m: MediaSearchMember,
+  media: { media_type: MediaKind; tmdb_id: number; season: number },
+) {
+  openPushDialog(entryTorrent(m), "watch");
+  pushMedia.value = media;
+  watchForm.value.hrHours = m.hr_hours ?? 0;
 }
 
 /** 搜索按钮：按条目时重新搜这个条目，否则按关键字搜 */
@@ -1847,6 +1991,7 @@ onUnmounted(() => {
       :text="searchKeyword"
       :merge="mergeSame"
       @push="onEntryPush"
+      @watch="onEntryWatch"
       @season="onEntrySeason"
       @loaded="onEntryLoaded"
       @keyword="onEntryKeyword"
@@ -2130,12 +2275,21 @@ onUnmounted(() => {
                 <p v-if="row.subtitle" class="ti__sub">{{ row.subtitle }}</p>
                 <div
                   v-if="
+                    row.block ||
                     row.category ||
                     row.hasHR ||
                     (row.tags && row.tags.length > 0) ||
                     parsedTags(row.meta).length > 0
                   "
                   class="ti__tags">
+                  <PtStatusPill
+                    v-if="row.block"
+                    tone="neutral"
+                    size="sm"
+                    :title="row.block.reason ? `不要这个种子：${row.block.reason}` : '不要这个种子'"
+                    :data-testid="`ts-blocked-${rowKey(row)}`"
+                    >已拉黑</PtStatusPill
+                  >
                   <PtTag v-for="t in parsedTags(row.meta)" :key="`m-${t.label}`" :tone="t.tone">
                     {{ t.label }}
                   </PtTag>
@@ -2218,9 +2372,10 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
+          <!-- 画板 15 是 140 宽、四个图标；M2b 加了第五个「更多」（等免费、不要），放宽到 172 -->
           <el-table-column
             label="操作"
-            width="140"
+            width="172"
             align="center"
             fixed="right"
             class-name="pt-cell-act">
@@ -2275,6 +2430,43 @@ onUnmounted(() => {
                   </el-button>
                 </span>
               </el-tooltip>
+              <!-- 更多：等免费（免费了才推）、不要（对所有条目拉黑） -->
+              <el-dropdown
+                trigger="click"
+                @command="(c: 'watch' | 'block' | 'unblock') => onRowCommand(c, row)">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="更多操作"
+                  :data-testid="`ts-more-${rowKey(row)}`">
+                  <PtIcon name="ellipsis" :size="15" />
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                      command="watch"
+                      :disabled="!canWatch(row)"
+                      :data-testid="`ts-watch-${rowKey(row)}`">
+                      <PtIcon name="hourglass" :size="14" class="dd-ico" /><span>{{
+                        canWatch(row) ? "等免费" : "等免费（这个站点读不了种子详情）"
+                      }}</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-if="row.block"
+                      command="unblock"
+                      :data-testid="`ts-unblock-${rowKey(row)}`">
+                      <PtIcon name="rotate-ccw" :size="14" class="dd-ico" /><span>移出黑名单</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-else
+                      command="block"
+                      :data-testid="`ts-block-${rowKey(row)}`">
+                      <PtIcon name="eye-off" :size="14" class="dd-ico" /><span>不要</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </el-table-column>
         </el-table>
@@ -2344,6 +2536,7 @@ onUnmounted(() => {
                   {{ getDiscountTag(torrent).text }}
                 </PtStatusPill>
                 <PtStatusPill v-if="torrent.hasHR" tone="dang" size="sm">H&amp;R</PtStatusPill>
+                <PtStatusPill v-if="torrent.block" tone="neutral" size="sm">已拉黑</PtStatusPill>
               </span>
             </template>
 
@@ -2371,6 +2564,29 @@ onUnmounted(() => {
                   >追剧</span
                 >
               </el-button>
+              <el-dropdown
+                class="card-more"
+                trigger="click"
+                @command="(c: 'watch' | 'block' | 'unblock') => onRowCommand(c, torrent)">
+                <el-button size="small">
+                  <PtIcon name="ellipsis" :size="14" /><span>更多</span>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="watch" :disabled="!canWatch(torrent)">
+                      <PtIcon name="hourglass" :size="14" class="dd-ico" /><span>{{
+                        canWatch(torrent) ? "等免费" : "等免费（这个站点读不了种子详情）"
+                      }}</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item v-if="torrent.block" command="unblock">
+                      <PtIcon name="rotate-ccw" :size="14" class="dd-ico" /><span>移出黑名单</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item v-else command="block">
+                      <PtIcon name="eye-off" :size="14" class="dd-ico" /><span>不要</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </PtRowCard>
         </div>
@@ -2503,7 +2719,19 @@ onUnmounted(() => {
       title="推送到下载器"
       width="560px"
       align-center>
+      <!-- 等免费模式换标题；标题仍是「推送到下载器」这一个弹窗（画板 40 的 05） -->
+      <template v-if="pushMode === 'watch'" #header="{ titleId, titleClass }">
+        <span :id="titleId" :class="titleClass" role="heading" aria-level="2">等免费再下载</span>
+      </template>
       <el-form :model="pushForm" label-position="top" class="pt-form">
+        <div v-if="pushMode === 'watch'" class="pt-note" data-testid="watch-note">
+          <PtIcon name="hourglass" :size="14" class="pt-note__icon" />
+          <span>
+            每 5
+            分钟看一次这个种子的优惠，免费了（离免费结束还多于「免费期结束前提前处理」的分钟数）就推送到下面的下载器，
+            免费结束时没下完会暂停；到期还没免费就不再等。
+          </span>
+        </div>
         <div class="field-head">种子</div>
         <p class="push-title">{{ currentPushTorrent?.title }}</p>
         <div class="push-meta">
@@ -2512,7 +2740,20 @@ onUnmounted(() => {
         </div>
 
         <div class="field-head">推送目标</div>
-        <el-form-item label="下载器" required>
+        <el-form-item v-if="pushMode === 'watch'" label="下载器" required>
+          <el-select
+            v-model="watchForm.downloaderId"
+            placeholder="选择下载器"
+            style="width: 100%"
+            data-testid="watch-downloader">
+            <el-option
+              v-for="d in downloaders.filter((d) => d.enabled)"
+              :key="d.id"
+              :label="`${d.name} (${d.type})${d.is_default ? ' [默认]' : ''}`"
+              :value="d.id!" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="下载器" required>
           <el-select
             v-model="pushForm.downloaderIds"
             multiple
@@ -2528,7 +2769,7 @@ onUnmounted(() => {
         <el-form-item label="保存路径">
           <DownloaderPathInput
             v-model="pushForm.savePath"
-            :downloader-ids="pushForm.downloaderIds"
+            :downloader-ids="pushTargetIds"
             placeholder="使用默认路径"
             data-testid="push-save-path" />
         </el-form-item>
@@ -2540,16 +2781,47 @@ onUnmounted(() => {
             <el-input v-model="pushForm.tags" placeholder="多个标签用逗号分隔" />
           </el-form-item>
         </div>
-        <el-form-item label="添加后立即开始">
+        <el-form-item v-if="pushMode === 'watch'" label="等多久">
+          <span class="watch-days">
+            <el-input-number
+              v-model="watchForm.days"
+              :min="1"
+              :max="30"
+              :step="1"
+              step-strictly
+              controls-position="right"
+              data-testid="watch-days" />
+            <span>天</span>
+          </span>
+          <div class="field-tip">1–30 天；在「等免费」页可以改到期时间或取消</div>
+        </el-form-item>
+        <el-form-item v-else label="添加后立即开始">
           <span class="sw"><el-switch v-model="pushForm.autoStart" /></span>
           <div class="field-tip">关掉则种子以暂停状态入队，适合先排队再统一开始</div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="pushDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="pushLoading" @click="doPush">推送</el-button>
+        <el-button
+          v-if="pushMode === 'watch'"
+          type="primary"
+          :loading="pushLoading"
+          data-testid="watch-confirm"
+          @click="doWatch"
+          >开始等</el-button
+        >
+        <el-button v-else type="primary" :loading="pushLoading" @click="doPush">推送</el-button>
       </template>
     </el-dialog>
+
+    <!-- 关键字搜索里的「不要」：对所有条目 -->
+    <BlockDialog
+      v-model="blockOpen"
+      :torrent-title="blockRow?.title ?? ''"
+      :sites="blockRow ? [blockRow.sourceSite] : []"
+      scope="对所有条目生效：哪个订阅都不再选它，关键字搜索里标成已拉黑。"
+      :busy="blockBusy"
+      @confirm="confirmBlock" />
 
     <!-- 批量推送对话框 -->
     <el-dialog
@@ -2865,6 +3137,30 @@ onUnmounted(() => {
   line-height: var(--pt-lh-body);
   color: var(--pt-t1);
   overflow-wrap: anywhere;
+}
+
+.watch-days {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+/* 下拉项的图标与文字间距。菜单被 teleport 到 body，但 scoped 是属性选择器，照样生效 */
+.dd-ico {
+  margin-right: 6px;
+}
+
+/* 行卡里的「更多」：el-dropdown 自己包了一层，照 PtRowCard 直接塞的按钮那样等分（flex 1、最小 96、高 44） */
+.card-more {
+  flex: 1;
+  min-width: 96px;
+}
+
+.card-more :deep(.el-button) {
+  width: 100%;
+  min-height: var(--pt-m-touch);
 }
 
 .push-meta {

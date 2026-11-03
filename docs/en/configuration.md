@@ -175,7 +175,7 @@ Acting early adds a safety margin: the pause or deletion runs at `freeleech end 
 
 - The range is `[0, 60]` minutes; a value outside it is clamped.
 - `0` acts exactly when freeleech ends. A value you already set before upgrading is kept; new installs default to 5. When it is 0 the settings page warns that billed download may still be counted.
-- Pushes that require freeleech (the freeleech path, filter rules with Free only on, subscriptions whose quality profile requires free, brush tasks that only take free discounts) also require more than this much freeleech time left, and at least 5 minutes; otherwise they are not pushed.
+- Pushes that require freeleech (the freeleech path, filter rules with Free only on, subscriptions whose quality profile requires free, brush tasks that only take free discounts, [waiting for free](guide/torrent-search.md#waiting-for-free)) also require more than this much freeleech time left, and at least 5 minutes; otherwise they are not pushed.
 - The periodic fallback check runs every 5 minutes, so `≥5` minutes is recommended. Each torrent's own timer is accurate to the second, so the main path is not limited to that interval.
 - The margin only moves the freeleech-end action; retries keep their own schedule.
 

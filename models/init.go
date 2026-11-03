@@ -347,6 +347,9 @@ func NewDBWithVersionAndHooks(
 		// 备份与恢复（媒体中心 M0）
 		&AppMeta{},
 		&BackupSetting{},
+		// 种子黑名单与等免费（媒体中心 M2b）
+		&MediaTorrentBlock{},
+		&FreeWatch{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

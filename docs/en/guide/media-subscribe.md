@@ -100,8 +100,9 @@ At the bottom of the follow details is every torrent the subscription downloaded
 
 - Organise again (重新整理): shown when a file of the torrent was not organised and is not being retried, or the torrent was marked failed after 7 days without reaching the library. It organises the torrent with the subscription's title and library (no recognition) and leaves organised files alone; a torrent marked failed goes back to waiting, and is marked in the library as soon as organising succeeds.
 - Scrape again (重新刮削): shown when a file is organised. It rewrites the NFO and images of the show (or movie) with the library's current scrape settings, the same as Scrape again in the organise history.
+- Don't want this torrent (不要这个种子): shown for every torrent downloaded from a site (not for torrents adopted from the downloader). It blocks the torrent, see [blocked torrents](#blocked-torrents) below.
 
-Both are recorded in the run history. An old version replaced by an upgrade has neither button. A single file can also be retried or scraped again under Media → Organise history (媒体 → 整理历史).
+Each of them is recorded in the run history. An old version replaced by an upgrade has neither Organise again nor Scrape again. A single file can also be retried or scraped again under Media → Organise history (媒体 → 整理历史).
 
 ### After the season is done
 
@@ -169,6 +170,19 @@ With upgrades on, a subscription keeps looking for higher-scoring releases after
 - Series: once the whole season is in the library, only season packs are considered, and only if they improve at least one episode; episodes whose current version is better than the pack keep it.
 - After the new release is organised, the older files it covers that score no higher than it (equal scores too, so the library keeps one copy) are removed from the library by the rules for [deleting history records](media-library.md#organise-history): only files confirmed to be the ones pt-tools placed, and never moved files. The old record becomes Removed (已删除) and names the release that replaced it. For series, only the episodes the new torrent actually organised are replaced: when a season pack leaves some episodes unorganised, their old files stay, and an old file holding several episodes is replaced only when the new release has all of them. When the old and new releases organise to the same file name, the old one is removed first and the new one organised after it (if the new one then fails to organise, the old one is organised back), but only when the new one scores higher; on equal scores the old file stays.
 - Once none of an old subscription torrent's files remain in the library, it follows the setting: keep seeding (the default), or delete it with its data. Torrents that were already in the downloader when the subscription pushed them, and torrents with H&R requirements, are kept.
+
+## Blocked torrents
+
+Subscriptions no longer pick a blocked torrent: both torrents from RSS and torrents found by active search skip it, and the run history says "已拉黑：原因" (blocked: reason). A block is kept per title (for a series, per season), so deleting a subscription and creating it again keeps it; a block made in keyword search applies to every subscription. For where you can block a torrent, see [torrent search](torrent-search.md#blocking).
+
+Don't want this torrent (不要这个种子) under Downloaded torrents in the follow details:
+
+- You can give a reason, and tick Not this torrent's release group again (以后也不要这个种子的制作组) to add the release group from the torrent name to the subscription's title exclusions (a group already there is not added twice).
+- A torrent that is still downloading is marked failed with "不要这个种子：原因" (don't want this torrent: reason); its episodes count as missing again and the subscription searches again straight away. Files already organised into the library are left alone.
+- You can tick Also delete this torrent from the downloader (同时从下载器删掉这个种子), and then also the downloaded files; you confirm once more before the deletion.
+- A blocked torrent is marked Blocked (已拉黑), and a blocked torrent marked failed cannot be organised again (that would set it back to downloading). Unblock it first to organise it.
+
+Blocked torrents (拉黑的种子) on the Follow and subscribe page lists every blocked torrent: the torrent name, site and ID, the title the block applies to ("所有条目", every title, for blocks made in keyword search), the reason and the time. After Unblock (移出), subscriptions pick it again.
 
 ## Douban wish list
 

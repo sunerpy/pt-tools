@@ -28,14 +28,26 @@ const props = defineProps<{
   merged: boolean;
   expanded: boolean;
   unfolded: boolean;
+  /** 卡上有能等免费的站点；没有时「等免费」点不了 */
+  canWatch?: boolean;
 }>();
 
-const emit = defineEmits<{ push: [member: MediaSearchMember]; toggle: []; unfold: [] }>();
+const emit = defineEmits<{
+  push: [member: MediaSearchMember];
+  toggle: [];
+  unfold: [];
+  watch: [];
+  block: [];
+  unblock: [members: MediaSearchMember[]];
+}>();
 
 const best = computed(() => props.card.members[0]!);
+const blockedHere = computed(() => props.card.members.filter((m) => m.block));
 const g = computed(() => props.card.group);
 const folded = computed(() => g.value.in_library && !props.unfolded);
-const score = computed(() => scoreCard(best.value.verdict, g.value.in_library));
+const score = computed(() =>
+  scoreCard(best.value.verdict, g.value.in_library || props.card.blocked),
+);
 const pill = computed(() =>
   coverPill({ ...g.value, verdict: best.value.verdict }, props.episodes, props.movie),
 );
@@ -63,7 +75,11 @@ function pushLabel(
 <template>
   <article
     class="es-mcard"
-    :class="{ 'is-folded': folded, 'is-dim': g.in_library }"
+    :class="{
+      'is-folded': folded,
+      'is-dim': g.in_library || card.blocked,
+      'is-blocked': card.blocked,
+    }"
     :data-testid="`es-mcard-${card.key}`"
     @click="folded && emit('unfold')">
     <div class="es-mcard__head">
@@ -94,11 +110,24 @@ function pushLabel(
         <div class="es-mmember__text">
           <span class="es-mmember__site">
             {{ m.site }}
-            <PtStatusPill v-if="i === 0 && card.pass" tone="primary" size="sm">首选</PtStatusPill>
+            <PtStatusPill v-if="m.block" tone="neutral" size="sm">已拉黑</PtStatusPill>
+            <PtStatusPill v-else-if="i === 0 && card.pass" tone="primary" size="sm"
+              >首选</PtStatusPill
+            >
           </span>
-          <span class="es-mmember__line">{{ memberLine(m) }}</span>
+          <span class="es-mmember__line">{{
+            m.block?.reason ? `不要这个种子：${m.block.reason}` : memberLine(m)
+          }}</span>
         </div>
         <el-button
+          v-if="m.block"
+          class="es-mmember__push is-plain"
+          :data-testid="`es-unblock-${m.site}-${m.torrent_id}`"
+          @click.stop="emit('unblock', [m])">
+          <span>移出黑名单</span>
+        </el-button>
+        <el-button
+          v-else
           class="es-mmember__push"
           :class="`is-${pushLabel(m, i).kind}`"
           :type="pushLabel(m, i).kind === 'primary' ? 'primary' : 'default'"
@@ -117,6 +146,35 @@ function pushLabel(
           >另有 {{ others.length }} 个站点：{{ others.map((m) => m.site).join("、") }} ▾</template
         >
       </button>
+      <!-- 底部两半（画板 09）：等免费、不要；整张卡都拉黑了而且不止一个站点时换成全部移出 -->
+      <div v-if="!card.blocked || card.members.length > 1" class="es-mcard__acts">
+        <button
+          v-if="card.blocked"
+          type="button"
+          class="es-mact"
+          data-testid="es-act-unblock"
+          @click.stop="emit('unblock', blockedHere)">
+          <PtIcon name="rotate-ccw" :size="14" /><span>全部移出黑名单</span>
+        </button>
+        <template v-else>
+          <button
+            type="button"
+            class="es-mact"
+            :disabled="!canWatch"
+            data-testid="es-act-watch"
+            @click.stop="emit('watch')">
+            <PtIcon name="hourglass" :size="14" /><span>等免费</span>
+          </button>
+          <span class="es-mcard__split" aria-hidden="true" />
+          <button
+            type="button"
+            class="es-mact"
+            data-testid="es-act-block"
+            @click.stop="emit('block')">
+            <PtIcon name="eye-off" :size="14" /><span>不要</span>
+          </button>
+        </template>
+      </div>
     </template>
   </article>
 </template>
@@ -285,6 +343,50 @@ function pushLabel(
   color: var(--pt-p);
   background: var(--pt-p-soft);
   border-color: transparent;
+}
+
+/*
+ * 底部动作：两半各 171 宽、44 高，上面一条贯穿整张卡的分隔线（画板 foot rule 343 宽，所以左右、下面都压掉卡的 14 内边距），
+ * 图标 14 t3、字 t2；中间竖线 28 高
+ */
+.es-mcard__acts {
+  display: flex;
+  align-items: center;
+  /* 1px 分隔线加 44 高的两半（全局 border-box） */
+  height: 45px;
+  margin: 2px -14px -14px;
+  border-top: 1px solid var(--pt-border);
+}
+
+.es-mact {
+  display: inline-flex;
+  flex: 1 1 0;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t2);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.es-mact > :first-child {
+  color: var(--pt-t3);
+}
+
+.es-mact:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.es-mcard__split {
+  flex: 0 0 1px;
+  height: 28px;
+  background: var(--pt-border);
 }
 
 .es-mcard__more {

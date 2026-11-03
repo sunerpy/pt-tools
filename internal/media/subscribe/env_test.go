@@ -144,6 +144,7 @@ func newDB(t *testing.T) *gorm.DB {
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{},
 		&models.MediaSubscribeSetting{}, &models.MediaDoubanSource{}, &models.MediaDoubanItem{},
 		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{}, &models.MediaLibrary{},
+		&models.MediaTorrentBlock{},
 	))
 	return db
 }

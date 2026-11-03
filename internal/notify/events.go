@@ -28,6 +28,9 @@ const (
 	EventReseedRound         = "reseed.round"
 	EventRemotePaired        = "remote.paired"
 	EventBackupFailed        = "system.backup_failed"
+	EventFreeWatchPushed     = "torrent.free_watch.pushed"
+	EventFreeWatchExpired    = "torrent.free_watch.expired"
+	EventFreeWatchFailed     = "torrent.free_watch.failed"
 	EventTest                = "test"
 )
 
@@ -384,6 +387,43 @@ var notifyEvents = []EventSpec{
 		},
 		SampleTitle: "备份失败",
 		SampleText:  "今天的定时备份没做成：创建备份目录失败: mkdir /mnt/backup/pt-tools: permission denied。\n备份目录：/mnt/backup/pt-tools\n上一次成功的备份：2026-10-31 04:30\n请到「全局设置 → 备份」检查备份目录，或者点「立即备份」再试一次。",
+	},
+	{
+		Type: EventFreeWatchPushed, Name: "等到免费", Desc: "等免费的种子免费了，已推送到下载器",
+		Vars: []Var{
+			{Key: "site", Type: VarString, Desc: "站点", Sample: "hdtime"},
+			{Key: "torrent_title", Type: VarString, Desc: "种子标题", Sample: "Fake.Movie.2026.2160p.WEB-DL.H.265-FAKE"},
+			{Key: "torrent_id", Type: VarString, Desc: "种子编号", Sample: "300101"},
+			{Key: "downloader", Type: VarString, Desc: "推送到的下载器", Sample: "家里的 qB"},
+			{Key: "size", Type: VarString, Desc: "大小（不知道时为空）", Sample: "15.00 GiB"},
+			{Key: "free_end", Type: VarString, Desc: "免费到什么时候（本地时间；长期免费时为空）", Sample: "2026-11-05 08:00:00"},
+			{Key: "free_remaining", Type: VarString, Desc: "免费还剩多久（长期免费时为空）", Sample: "23h59min"},
+		},
+		SampleTitle: "等到免费了，已推送",
+		SampleText:  "「Fake.Movie.2026.2160p.WEB-DL.H.265-FAKE」（hdtime）免费了，已推送到 家里的 qB。\n免费到 2026-11-05 08:00:00（还剩 23h59min），到时候没下完会暂停。",
+	},
+	{
+		Type: EventFreeWatchExpired, Name: "等免费到期", Desc: "等免费的种子等到期了还没免费，不再等",
+		Vars: []Var{
+			{Key: "site", Type: VarString, Desc: "站点", Sample: "hdtime"},
+			{Key: "torrent_title", Type: VarString, Desc: "种子标题", Sample: "Fake.Movie.2026.2160p.WEB-DL.H.265-FAKE"},
+			{Key: "torrent_id", Type: VarString, Desc: "种子编号", Sample: "300101"},
+			{Key: "days", Type: VarInt, Desc: "等了几天", Sample: int64(7)},
+		},
+		SampleTitle: "等免费到期了",
+		SampleText:  "「Fake.Movie.2026.2160p.WEB-DL.H.265-FAKE」（hdtime）等了 7 天还没免费，不再等了。",
+	},
+	{
+		Type: EventFreeWatchFailed, Name: "等免费不再等", Desc: "等免费的种子连续几次没成（读不到优惠、下载或推送失败），不再等",
+		Vars: []Var{
+			{Key: "site", Type: VarString, Desc: "站点", Sample: "hdtime"},
+			{Key: "torrent_title", Type: VarString, Desc: "种子标题", Sample: "Fake.Movie.2026.2160p.WEB-DL.H.265-FAKE"},
+			{Key: "torrent_id", Type: VarString, Desc: "种子编号", Sample: "300101"},
+			{Key: "fails", Type: VarInt, Desc: "连续失败次数", Sample: int64(5)},
+			{Key: "error", Type: VarString, Desc: "最近一次的原因", Sample: "读不到种子现在的优惠"},
+		},
+		SampleTitle: "等免费没成，不再等了",
+		SampleText:  "「Fake.Movie.2026.2160p.WEB-DL.H.265-FAKE」（hdtime）连续 5 次没成，不再等了。最近一次：读不到种子现在的优惠。",
 	},
 	{
 		Type: EventTest, Name: "通道测试", Desc: "在通知通道里点了「发送测试」",

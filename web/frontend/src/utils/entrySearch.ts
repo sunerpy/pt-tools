@@ -217,6 +217,8 @@ export interface EntryCard {
   members: MediaSearchMember[];
   /** 过了档案（不按档案时都算过） */
   pass: boolean;
+  /** 卡上的成员都拉黑了（只在显示拉黑的时候有，排在最后） */
+  blocked: boolean;
 }
 
 export interface CardOptions {
@@ -227,6 +229,8 @@ export interface CardOptions {
   text: string;
   /** 点了每集格子里的一集：只看包含这一集的 */
   episode?: number;
+  /** 显示拉黑的（默认不显示；显示时全拉黑的卡排在最后） */
+  showBlocked?: boolean;
 }
 
 type Row = FacetRecord & { m: MediaSearchMember; g: MediaSearchGroup; gi: number; mi: number };
@@ -246,6 +250,7 @@ export function buildCards(res: MediaSearchResult, opts: CardOptions): EntryCard
   res.groups.forEach((g, gi) => {
     if (opts.episode && !covers(g, opts.episode)) return;
     g.members.forEach((m, mi) => {
+      if (m.block && !opts.showBlocked) return;
       const text = `${m.title} ${m.subtitle ?? ""}`.toLowerCase();
       if (words.some((w) => !text.includes(w))) return;
       rows.push({
@@ -275,6 +280,7 @@ export function buildCards(res: MediaSearchResult, opts: CardOptions): EntryCard
         group: g,
         members,
         pass: verdictPass(members[0]!.verdict),
+        blocked: members.every((m) => Boolean(m.block)),
         order: gi * 10000,
       };
     });
@@ -284,6 +290,7 @@ export function buildCards(res: MediaSearchResult, opts: CardOptions): EntryCard
       group: r.g,
       members: [r.m],
       pass: verdictPass(r.m.verdict),
+      blocked: Boolean(r.m.block),
       order: r.gi * 10000 + r.mi,
     }));
   }
@@ -295,8 +302,26 @@ export function buildCards(res: MediaSearchResult, opts: CardOptions): EntryCard
     uploaded: (c) => best(c).uploaded_at ?? 0,
   };
   const by = key[opts.sort];
-  cards.sort((a, b) => by(b) - by(a) || a.order - b.order);
+  cards.sort((a, b) => Number(a.blocked) - Number(b.blocked) || by(b) - by(a) || a.order - b.order);
   return cards.map(({ order: _order, ...c }) => c);
+}
+
+/** 拉黑的成员（按服务端的顺序） */
+export function blockedMembers(res: MediaSearchResult): MediaSearchMember[] {
+  return res.groups.flatMap((g) => g.members.filter((m) => m.block));
+}
+
+/**
+ * 最后一行拉黑的那段（画板 06）：「已拉黑 1 条：标题（不要这个种子：原因）」；多于一条只写条数；没有拉黑的为空
+ */
+export function blockedLine(res: MediaSearchResult): { count: string; detail: string } | null {
+  const list = blockedMembers(res);
+  if (!list.length) return null;
+  const count = `已拉黑 ${list.length} 条`;
+  if (list.length > 1) return { count, detail: "" };
+  const m = list[0]!;
+  const reason = m.block?.reason ? `不要这个种子：${m.block.reason}` : "不要这个种子";
+  return { count, detail: `：${m.title}（${reason}）` };
 }
 
 /**

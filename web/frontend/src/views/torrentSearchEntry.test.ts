@@ -43,6 +43,8 @@ vi.mock("@/api", async (orig) => {
       searchMedia: api.searchMedia,
       profiles: api.profiles,
     },
+    // 等免费与黑名单（M2b）另有 torrentSearchBlockWatch.test.ts；这里只给空的，不发真请求
+    freeWatchApi: { ...real.freeWatchApi, sites: vi.fn(() => Promise.resolve({ sites: [] })) },
   };
 });
 
@@ -168,6 +170,7 @@ const searchResult = (): MediaSearchResult => ({
     },
   ],
   total: 4,
+  blocked_count: 0,
   unmatched_count: 6,
   errors: [{ site: "TTG", error: "请求超时" }],
 });

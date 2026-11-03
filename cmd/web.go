@@ -248,6 +248,7 @@ var webCmd = &cobra.Command{
 		wireReseedWorker(mgr, userInfoService, store, monitorNotifier)
 		wireCookieCloudWorker(mgr, store, siteRegistry)
 		wireBackupJob(mgr, store, monitorNotifier)
+		wireFreeWatchWorker(mgr, store, monitorNotifier)
 
 		srv := web.NewServer(store, mgr)
 		mediaSvc := newMediaService(store)

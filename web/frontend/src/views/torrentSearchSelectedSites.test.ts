@@ -13,6 +13,8 @@ vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
   return {
     ...real,
+    // 推送弹窗的「等免费」先读能等免费的站点（媒体中心 M2b）
+    freeWatchApi: { ...real.freeWatchApi, sites: vi.fn(() => Promise.resolve({ sites: [] })) },
     searchApi: { getSites: api.getSites, multiSite: api.multiSite, clearCache: vi.fn() },
     downloadersApi: { list: vi.fn(() => Promise.resolve([])) },
     downloaderDirectoriesApi: { listAll: vi.fn(() => Promise.resolve({})) },

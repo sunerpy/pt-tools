@@ -39,7 +39,11 @@ const api = vi.hoisted(() => ({
   previewSchedule: vi.fn(async () => ({ next: [] as string[] })),
   organizeTorrent: vi.fn(),
   rescrapeTorrent: vi.fn(),
+  blocks: vi.fn(async (): Promise<{ items: unknown[] }> => ({ items: [] })),
+  removeBlock: vi.fn(),
+  blockTorrent: vi.fn(),
 }));
+const dlt = vi.hoisted(() => ({ batchAction: vi.fn() }));
 const organize = vi.hoisted(() => ({
   libraries: vi.fn(async () => [{ id: 4, name: "剧集库", kind: "tv" }]),
 }));
@@ -60,6 +64,7 @@ vi.mock("@/api", async (orig) => {
     ...real,
     subscribeApi: api,
     downloadersApi: dl,
+    downloaderTorrentsApi: dlt,
     sitesApi: sites,
     chatopsApi: { ...real.chatopsApi, notifications },
     mediaApi: { ...real.mediaApi, settings: vi.fn(async () => ({ image_base_url: "" })) },
@@ -482,6 +487,168 @@ describe("订阅", () => {
     q("sub-search-now")!.click();
     await vi.waitFor(() => expect(api.search).toHaveBeenCalledWith(3));
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("推送了 1 个"));
+  });
+
+  it("详情：不要这个种子，写原因、可以顺手从下载器删掉（再确认一次）；认领的种子没有这一项", async () => {
+    await mountPage({ subs: [follow] });
+    const torrent = (id: number, extra: Record<string, unknown>) => ({
+      id,
+      subscription_id: 3,
+      site_name: "hdsky",
+      torrent_id: String(id),
+      info_hash: `h${id}`,
+      title: `Show.S04E0${id}.1080p.WEB-DL-HHWEB`,
+      subtitle: "",
+      score: 5000,
+      episode: id,
+      episode_end: id,
+      complete: false,
+      size_bytes: 1,
+      downloader_id: 1,
+      has_hr: false,
+      adopted: false,
+      status: "downloading",
+      message: "",
+      created_at: "2026-10-20T10:00:00Z",
+      files: [],
+      ...extra,
+    });
+    api.get.mockResolvedValue({
+      ...follow,
+      progress: { ...follow.progress, episodes: [] },
+      torrent_list: [torrent(5, {}), torrent(6, { adopted: true, site_name: "" })],
+    });
+    q("ms-detail-3")!.click();
+    await vi.waitFor(() => expect(q("sub-detail-torrents")).not.toBeNull());
+    expect(q("sub-torrent-block-6"), "下载器里认领的不是站点上的种子").toBeNull();
+    q("sub-torrent-block-5")!.click();
+    await vi.waitFor(() => expect(q("block-dialog")).not.toBeNull());
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("同时从下载器 qb 删掉这个种子"),
+    );
+    expect(q("block-scope")!.textContent).toContain("只对「现在就出发 (2023) 第 4 季」生效");
+    expect(q("block-scope")!.textContent).toContain("这几集重新找资源");
+    fill("block-reason", "假种");
+    q("block-exclude-group")!.click();
+    q("block-delete")!.click();
+    await vi.waitFor(() => expect(q("block-delete-files")).not.toBeNull());
+    q("block-delete-files")!.click();
+    api.blockTorrent.mockResolvedValue({ blocks: [{ id: 41 }], excluded_group: "HHWEB" });
+    ui.confirm.mockResolvedValue("confirm");
+    dlt.batchAction.mockResolvedValue({ success_count: 1, failed_count: 0 });
+    q("block-confirm")!.click();
+    await vi.waitFor(() =>
+      expect(api.blockTorrent).toHaveBeenCalledWith(3, 5, { reason: "假种", exclude_group: true }),
+    );
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith("已拉黑，制作组 HHWEB 也加进了标题排除词"),
+    );
+    await vi.waitFor(() => expect(dlt.batchAction).toHaveBeenCalledTimes(1));
+    expect(ui.confirm.mock.calls.at(-1)![0]).toContain("并删除已下载到磁盘上的文件");
+    expect(dlt.batchAction).toHaveBeenCalledWith({
+      action: "delete_with_files",
+      targets: [{ downloader_id: 1, task_id: "h5" }],
+    });
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("已从下载器删掉这个种子"));
+    await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    // 拉黑的种子面板跟着重读
+    await vi.waitFor(() => expect(api.blocks).toHaveBeenCalledTimes(2));
+
+    // 删种时取消：拉黑照样算，不发删除
+    q("sub-torrent-block-5")!.click();
+    await vi.waitFor(() => expect(q("block-delete")).not.toBeNull());
+    q("block-delete")!.click();
+    ui.confirm.mockRejectedValueOnce("cancel");
+    q("block-confirm")!.click();
+    await vi.waitFor(() => expect(api.blockTorrent).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(dlt.batchAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("详情：拉黑了的种子标「已拉黑」，没有「不要这个种子」", async () => {
+    await mountPage({ subs: [follow] });
+    api.get.mockResolvedValue({
+      ...follow,
+      progress: { ...follow.progress, episodes: [] },
+      torrent_list: [
+        {
+          id: 7,
+          subscription_id: 3,
+          site_name: "hdsky",
+          torrent_id: "7",
+          info_hash: "h7",
+          title: "Show.S04E07.1080p",
+          subtitle: "",
+          score: 1,
+          episode: 7,
+          episode_end: 7,
+          complete: false,
+          size_bytes: 1,
+          downloader_id: 1,
+          has_hr: false,
+          adopted: false,
+          status: "failed",
+          message: "不要这个种子：假种",
+          created_at: "2026-10-20T10:00:00Z",
+          files: [],
+          blocked: true,
+        },
+      ],
+    });
+    q("ms-detail-3")!.click();
+    await vi.waitFor(() => expect(q("sub-detail-torrents")).not.toBeNull());
+    expect(q("sub-detail-torrents")!.textContent).toContain("已拉黑");
+    expect(q("sub-torrent-block-7")).toBeNull();
+    expect(
+      q("sub-torrent-organize-7"),
+      "拉黑了的不给重新整理（服务端 can_organize 为假）",
+    ).toBeNull();
+  });
+
+  it("拉黑的种子：写作用于哪个条目与原因，移出以后重读", async () => {
+    api.blocks.mockResolvedValue({
+      items: [
+        {
+          id: 11,
+          site_name: "hdsky",
+          torrent_id: "12",
+          media_type: "tv",
+          tmdb_id: 231620,
+          season: 2,
+          media_title: "长夜将尽 第 2 季",
+          title: "Chang.Ye.S02E08.2160p",
+          reason: "音画不同步",
+          created_at: "2026-11-03T08:00:00Z",
+        },
+        {
+          id: 12,
+          site_name: "ourbits",
+          torrent_id: "7",
+          media_type: "",
+          tmdb_id: 0,
+          season: 0,
+          media_title: "",
+          title: "Fake.Show",
+          reason: "",
+          created_at: "2026-11-03T08:00:00Z",
+        },
+      ],
+    });
+    await mountPage();
+    await vi.waitFor(() => expect(q("ms-blocks")).not.toBeNull());
+    const text = q("ms-blocks")!.textContent ?? "";
+    expect(text).toContain("Chang.Ye.S02E08.2160p");
+    expect(text).toContain("hdsky · 12");
+    expect(text).toContain("长夜将尽 第 2 季");
+    expect(text).toContain("所有条目");
+    expect(text).toContain("音画不同步");
+    expect(text).toContain("没写");
+    api.removeBlock.mockResolvedValue({ ok: true });
+    api.blocks.mockResolvedValue({ items: [] });
+    q("ms-block-del-11")!.click();
+    await vi.waitFor(() => expect(api.removeBlock).toHaveBeenCalledWith(11));
+    await vi.waitFor(() => expect(q("ms-blocks-state")).not.toBeNull());
+    expect(ui.success).toHaveBeenCalledWith("已移出黑名单");
   });
 
   it("详情：暂停的订阅没有立即搜索；上次成功时写「立即搜索」", async () => {

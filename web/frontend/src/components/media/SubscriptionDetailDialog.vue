@@ -3,9 +3,13 @@
  * 订阅详情。剧集（追剧）：每一集的格子（已入库、下载中、缺、等版本、还没播、不追），点一集可以跳过或让它换版本；
  * 集号规则（标题里的集号对不上 TMDB 时）；运行记录（每次搜索找到了什么、为什么没要、推送了哪个），可以立即搜索
  * （推送失败、没找到时重试）；以及订阅下载过的种子（站点、集、分数、状态）与每个文件整理、刮削得怎样：
- * 整理没成的种子能「重新整理」，整理好的能「重新刮削」（整季包与单集一样，一个种子一个按钮）。
+ * 整理没成的种子能「重新整理」，整理好的能「重新刮削」（整季包与单集一样，一个种子一个按钮）；
+ * 站点上下的种子能「不要这个种子」（拉黑，可顺手从下载器删掉、把制作组加进标题排除词）。
  */
 import {
+  type DownloaderSetting,
+  downloadersApi,
+  downloaderTorrentsApi,
   type EpisodeRule,
   type EpisodeRuleInput,
   type SubscriptionDetail,
@@ -15,6 +19,7 @@ import {
   type SubscriptionTorrentFile,
   subscribeApi,
 } from "@/api";
+import BlockDialog, { type BlockChoice } from "@/components/search/BlockDialog.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
@@ -311,6 +316,96 @@ async function rescrapeTorrent(t: SubscriptionTorrent) {
   );
 }
 
+// ---- 不要这个种子 ----
+const blockOpen = ref(false);
+const blockBusy = ref(false);
+const blockRow = ref<SubscriptionTorrent | null>(null);
+const downloaders = ref<DownloaderSetting[]>([]);
+
+/** 能顺手删掉时写下载器的名字：要记下了下载器与哈希，下载器还在 */
+const blockDeleteFrom = computed(() => {
+  const t = blockRow.value;
+  if (!t?.info_hash || !t.downloader_id) return undefined;
+  return downloaders.value.find((d) => d.id === t.downloader_id)?.name;
+});
+
+async function openBlock(t: SubscriptionTorrent) {
+  blockRow.value = t;
+  blockOpen.value = true;
+  if (!downloaders.value.length) {
+    try {
+      downloaders.value = await downloadersApi.list();
+    } catch {
+      downloaders.value = [];
+    }
+  }
+}
+
+/** 删种前再确认一次（同下载器页的删除确认）；返回 false 是用户取消 */
+async function confirmDelete(withFiles: boolean, title: string): Promise<boolean> {
+  try {
+    await ElMessageBox.confirm(
+      withFiles
+        ? `将从下载器删除 1 个任务「${title}」，并删除已下载到磁盘上的文件。文件删除后无法恢复，确认删除？`
+        : `将从下载器删除 1 个任务「${title}」，已下载的文件留在磁盘上。确认删除？`,
+      withFiles ? "删除任务和文件" : "删除任务",
+      {
+        type: withFiles ? "error" : "warning",
+        confirmButtonText: withFiles ? "删除任务和文件" : "删除任务",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger",
+      },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function confirmBlock(choice: BlockChoice) {
+  const t = blockRow.value;
+  if (!props.id || !t) return;
+  const id = props.id;
+  blockBusy.value = true;
+  let done = false;
+  try {
+    const res = await subscribeApi.blockTorrent(id, t.id, {
+      reason: choice.reason || undefined,
+      exclude_group: choice.excludeGroup || undefined,
+    });
+    done = true;
+    blockOpen.value = false;
+    ElMessage.success(
+      res.excluded_group
+        ? `已拉黑，制作组 ${res.excluded_group} 也加进了标题排除词`
+        : "已拉黑，以后不选它",
+    );
+  } catch (e) {
+    ElMessage.error((e as Error)?.message || "拉黑失败");
+  } finally {
+    blockBusy.value = false;
+  }
+  if (!done) return;
+  if (choice.deleteTorrent && t.info_hash && t.downloader_id) {
+    if (await confirmDelete(choice.deleteFiles, t.title)) {
+      try {
+        const resp = await downloaderTorrentsApi.batchAction({
+          action: choice.deleteFiles ? "delete_with_files" : "delete",
+          targets: [{ downloader_id: t.downloader_id, task_id: t.info_hash }],
+        });
+        const failed = (resp.results ?? []).find((r) => !r.success);
+        if (resp.failed_count > 0)
+          ElMessage.warning(`种子没有删掉${failed?.message ? `：${failed.message}` : ""}`);
+        else ElMessage.success("已从下载器删掉这个种子");
+      } catch (e) {
+        ElMessage.error((e as Error)?.message || "从下载器删除失败");
+      }
+    }
+  }
+  await Promise.all([load(), loadRuns()]);
+  emit("changed");
+}
+
 watch(
   () => [props.modelValue, props.id] as const,
   ([open]) => {
@@ -573,6 +668,7 @@ watch(
               <PtStatusPill :tone="torrentStatus(t.status).tone" size="sm">{{
                 torrentStatus(t.status).label
               }}</PtStatusPill>
+              <PtStatusPill v-if="t.blocked" tone="neutral" size="sm">已拉黑</PtStatusPill>
               <span>{{ t.adopted ? "下载器里已有的" : t.site_name }}</span>
               <span v-if="torrentSpan(t)">{{ torrentSpan(t) }}</span>
               <span v-if="!t.adopted">{{ t.score }} 分</span>
@@ -605,7 +701,9 @@ watch(
                 }}</span>
               </li>
             </ul>
-            <div v-if="t.can_organize || t.can_rescrape" class="sdd__tacts">
+            <div
+              v-if="t.can_organize || t.can_rescrape || (!t.adopted && !t.blocked)"
+              class="sdd__tacts">
               <el-button
                 v-if="t.can_organize"
                 size="small"
@@ -626,11 +724,29 @@ watch(
                 @click="rescrapeTorrent(t)"
                 >重新刮削</el-button
               >
+              <el-button
+                v-if="!t.adopted && !t.blocked"
+                size="small"
+                :disabled="Boolean(torrentBusy)"
+                :data-testid="`sub-torrent-block-${t.id}`"
+                @click="openBlock(t)"
+                >不要这个种子</el-button
+              >
             </div>
           </div>
         </div>
       </div>
     </div>
+    <!-- 不要这个种子（append-to-body，放在这里只是让组件只有一个根） -->
+    <BlockDialog
+      v-model="blockOpen"
+      :torrent-title="blockRow?.title ?? ''"
+      :sites="blockRow ? [blockRow.site_name] : []"
+      :scope="`只对「${detail ? subName(detail) : ''}」生效：以后不选它${blockRow?.status === 'downloading' ? '，这几集重新找资源' : ''}。已经整理进库的文件不动。`"
+      :exclude-group="true"
+      :delete-from="blockDeleteFrom"
+      :busy="blockBusy"
+      @confirm="confirmBlock" />
     <template #footer>
       <el-button @click="visible = false">关闭</el-button>
     </template>

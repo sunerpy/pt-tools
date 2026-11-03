@@ -1,19 +1,24 @@
 <script setup lang="ts">
+import { ElMessage } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import {
+  freeWatchApi,
   type MediaKind,
   type MediaSearchMember,
   type MediaSearchResult,
   type QualityProfile,
   subscribeApi,
+  type TorrentBlock,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import {
+  blockedLine,
   buildCards,
+  type EntryCard,
   ENTRY_SORTS,
   type EntrySort,
   episodeNote,
@@ -33,6 +38,7 @@ import {
   toggleFacet,
 } from "@/utils/searchFacets";
 
+import BlockDialog, { type BlockChoice } from "./BlockDialog.vue";
 import EntryGroupCard from "./EntryGroupCard.vue";
 import EntryGroupCardMobile from "./EntryGroupCardMobile.vue";
 import EntryPoster from "./EntryPoster.vue";
@@ -43,7 +49,8 @@ import FacetPills from "./FacetPills.vue";
 /**
  * 按条目搜索（画板 06 桌面、09 手机、10 手机筛选面板）：调 POST /api/media/search（只读），
  * 左栏是条目、季、每集格子、档案与带计数的筛选，右边是分组卡片。筛选、排序、合并都在前端按返回的全部结果算。
- * 推送交给页面现有的推送弹窗（带上条目）。
+ * 推送交给页面现有的推送弹窗（带上条目）；「等免费」也交给它（等免费模式）。
+ * 「不要」在这里拉黑这一组的成员（只对这个条目），拉黑的默认不显示，最后一行写条数，点了显示出来。
  */
 export interface EntryRef {
   media_type: MediaKind;
@@ -62,6 +69,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   push: [
+    member: MediaSearchMember,
+    media: { media_type: MediaKind; tmdb_id: number; season: number },
+  ];
+  watch: [
     member: MediaSearchMember,
     media: { media_type: MediaKind; tmdb_id: number; season: number },
   ];
@@ -103,8 +114,22 @@ const drawer = ref(false);
 /** 手机筛选面板：面板里的选择点「看 N 条结果」才生效，直接关掉不生效 */
 const panel = ref(false);
 const draft = ref<FacetSelection>({});
+/** 显示拉黑的（最后一行「已拉黑 N 条」点了打开） */
+const showBlocked = ref(false);
+/** 能等免费的站点（小写）；读不到时都当作不能 */
+const watchSites = ref(new Set<string>());
 
 let seq = 0;
+
+async function loadWatchSites() {
+  try {
+    watchSites.value = new Set(
+      ((await freeWatchApi.sites()).sites ?? []).map((s) => s.toLowerCase()),
+    );
+  } catch {
+    watchSites.value = new Set();
+  }
+}
 
 async function loadProfiles() {
   try {
@@ -150,6 +175,7 @@ defineExpose({ run });
 
 onMounted(() => {
   void loadProfiles();
+  void loadWatchSites();
   void run();
 });
 
@@ -162,6 +188,7 @@ watch(
       profileId.value = 0;
       includeUnmatched.value = false;
       sort.value = "score";
+      showBlocked.value = false;
     }
     episode.value = undefined;
     expanded.value = new Set();
@@ -182,17 +209,19 @@ function showUnmatched() {
   void run();
 }
 
-/** 卡片里的成员连同它所在的组，供筛选计数用（计数是成员的条数） */
+/** 卡片里的成员连同它所在的组，供筛选计数用（计数是成员的条数）；拉黑的不显示时也不计 */
 const records = computed<FacetRecord[]>(() =>
   (result.value?.groups ?? []).flatMap((g) =>
-    g.members.map((m) => ({
-      meta: m.meta,
-      free: m.free,
-      hr: m.hr,
-      discount: m.discount,
-      site: m.site,
-      episodes: spanText(g.span),
-    })),
+    g.members
+      .filter((m) => showBlocked.value || !m.block)
+      .map((m) => ({
+        meta: m.meta,
+        free: m.free,
+        hr: m.hr,
+        discount: m.discount,
+        site: m.site,
+        episodes: spanText(g.span),
+      })),
   ),
 );
 
@@ -212,6 +241,7 @@ const cards = computed(() =>
         sel: sel.value,
         text: props.text,
         episode: episode.value,
+        showBlocked: showBlocked.value,
       })
     : [],
 );
@@ -258,11 +288,143 @@ function unfold(key: string) {
   unfolded.value = new Set(unfolded.value).add(key);
 }
 
-function push(m: MediaSearchMember) {
+function media() {
   const it = result.value?.item;
-  if (!it) return;
-  emit("push", m, { media_type: it.media_type, tmdb_id: it.tmdb_id, season: it.season ?? 0 });
+  return it ? { media_type: it.media_type, tmdb_id: it.tmdb_id, season: it.season ?? 0 } : null;
 }
+
+function push(m: MediaSearchMember) {
+  const md = media();
+  if (md) emit("push", m, md);
+}
+
+/** 卡上能等免费的成员：没拉黑、站点读得了种子详情；首选在前 */
+function watchable(c: EntryCard): MediaSearchMember | undefined {
+  return c.members.find((m) => !m.block && watchSites.value.has(m.site.toLowerCase()));
+}
+
+function watchFree(c: EntryCard) {
+  const m = watchable(c);
+  const md = media();
+  if (m && md) emit("watch", m, md);
+}
+
+/* ---- 不要（黑名单） ---- */
+
+const blockOpen = ref(false);
+const blockBusy = ref(false);
+const blockCard = ref<EntryCard | null>(null);
+/** 这次拉黑的成员：卡上还没拉黑的（同一资源在几个站点上的种子一起拉黑） */
+const blockTargets = computed(() => blockCard.value?.members.filter((m) => !m.block) ?? []);
+/** 订阅有了才能把制作组加进标题排除词；名字按首选的解析结果写 */
+const blockGroup = computed(() =>
+  result.value?.subscription ? blockTargets.value[0]?.meta.group || undefined : undefined,
+);
+/** 拉黑记下的条目名（订阅页的「拉黑的种子」里写作用于哪个条目） */
+const mediaTitle = computed(() => {
+  const it = result.value?.item;
+  if (!it) return "";
+  return it.media_type === "movie" && it.year ? `${it.title} (${it.year})` : seasonLabel.value;
+});
+
+function openBlock(c: EntryCard) {
+  blockCard.value = c;
+  blockOpen.value = true;
+}
+
+const blockKey = (site: string, id: string) => `${site.toLowerCase()}|${id}`;
+
+/**
+ * 按服务端的黑名单重新标一遍结果里的成员：对这个条目的优先，其次是对所有条目的（同服务端 blocksFor）。
+ * 拉黑与移出以后都走这里，免得本地猜错（比如移出了对这个条目的，对所有条目的那条还在）。
+ */
+async function refreshBlocks() {
+  const res = result.value;
+  if (!res) return;
+  let list: TorrentBlock[];
+  try {
+    list = (await subscribeApi.blocks()).items ?? [];
+  } catch (e) {
+    ElMessage.error((e as Error).message || "读取黑名单失败");
+    return;
+  }
+  const it = res.item;
+  const season = it.media_type === "tv" ? (it.season ?? 0) : 0;
+  const byKey = new Map<string, TorrentBlock>();
+  for (const b of list) {
+    const mine = b.media_type === it.media_type && b.tmdb_id === it.tmdb_id && b.season === season;
+    if (!mine && b.tmdb_id !== 0) continue;
+    const k = blockKey(b.site_name, b.torrent_id);
+    const old = byKey.get(k);
+    if (!old || (old.tmdb_id === 0 && mine)) byKey.set(k, b);
+  }
+  let n = 0;
+  for (const g of res.groups) {
+    for (const m of g.members) {
+      const b = byKey.get(blockKey(m.site, m.torrent_id));
+      m.block = b
+        ? {
+            id: b.id,
+            ...(b.reason ? { reason: b.reason } : {}),
+            ...(b.tmdb_id ? {} : { all: true }),
+          }
+        : undefined;
+      if (b) n++;
+    }
+    g.blocked = g.members.every((m) => Boolean(m.block));
+  }
+  res.blocked_count = n;
+}
+
+async function confirmBlock(choice: BlockChoice) {
+  const it = result.value?.item;
+  const items = blockTargets.value.map((m) => ({
+    site: m.site,
+    torrent_id: m.torrent_id,
+    title: m.title,
+  }));
+  if (!it || !items.length) {
+    blockOpen.value = false;
+    return;
+  }
+  blockBusy.value = true;
+  try {
+    const res = await subscribeApi.addBlocks({
+      media_type: it.media_type,
+      tmdb_id: it.tmdb_id,
+      season: it.media_type === "tv" ? (it.season ?? 0) : 0,
+      media_title: mediaTitle.value,
+      reason: choice.reason || undefined,
+      items,
+      exclude_group: choice.excludeGroup || undefined,
+    });
+    blockOpen.value = false;
+    ElMessage.success(
+      res.excluded_group
+        ? `已拉黑，制作组 ${res.excluded_group} 也加进了订阅的标题排除词`
+        : "已拉黑，订阅以后不选它",
+    );
+    await refreshBlocks();
+  } catch (e) {
+    ElMessage.error((e as Error).message || "拉黑失败");
+  } finally {
+    blockBusy.value = false;
+  }
+}
+
+async function unblock(members: MediaSearchMember[]) {
+  const ids = [...new Set(members.map((m) => m.block?.id ?? 0).filter((id) => id > 0))];
+  if (!ids.length) return;
+  try {
+    for (const id of ids) await subscribeApi.removeBlock(id);
+    ElMessage.success("已移出黑名单");
+  } catch (e) {
+    ElMessage.error((e as Error).message || "移出黑名单失败");
+  }
+  await refreshBlocks();
+}
+
+const blocked = computed(() => (result.value ? blockedLine(result.value) : null));
 
 function openPanel() {
   draft.value = { ...sel.value };
@@ -471,9 +633,13 @@ const profileOptions = computed(() => [
                 :merged="merge"
                 :expanded="expanded.has(c.key)"
                 :unfolded="unfolded.has(c.key)"
+                :can-watch="Boolean(watchable(c))"
                 @push="push"
                 @toggle="toggleExpanded(c.key)"
-                @unfold="unfold(c.key)" />
+                @unfold="unfold(c.key)"
+                @watch="watchFree(c)"
+                @block="openBlock(c)"
+                @unblock="unblock" />
             </template>
             <template v-else>
               <EntryGroupCard
@@ -486,26 +652,48 @@ const profileOptions = computed(() => [
                 :merged="merge"
                 :expanded="expanded.has(c.key)"
                 :unfolded="unfolded.has(c.key)"
+                :can-watch="Boolean(watchable(c))"
                 @push="push"
                 @toggle="toggleExpanded(c.key)"
-                @unfold="unfold(c.key)" />
+                @unfold="unfold(c.key)"
+                @watch="watchFree(c)"
+                @block="openBlock(c)"
+                @unblock="unblock" />
             </template>
           </div>
 
-          <!-- 最后一行：没对上的（M2b 起这里也写已拉黑的） -->
-          <p v-if="result.unmatched_count > 0" class="es-last" data-testid="es-unmatched-line">
+          <!-- 最后一行（画板 06）：已拉黑的与没对上的，两段之间「 · 」；文字链点了把它们显示出来 -->
+          <p
+            v-if="blocked || result.unmatched_count > 0"
+            class="es-last"
+            data-testid="es-unmatched-line">
             <PtIcon name="eye-off" :size="14" />
             <span>
-              对不上这个条目的
-              <button
-                v-if="!result.unmatched?.length"
-                type="button"
-                class="es-link es-link--muted"
-                data-testid="es-show-unmatched"
-                @click="showUnmatched">
-                {{ result.unmatched_count }} 条没显示
-              </button>
-              <template v-else>{{ result.unmatched_count }} 条，列在下面</template>
+              <template v-if="blocked">
+                <button
+                  type="button"
+                  class="es-link es-link--muted"
+                  :aria-pressed="showBlocked"
+                  data-testid="es-show-blocked"
+                  @click="showBlocked = !showBlocked">
+                  {{ blocked.count }}</button
+                >{{ showBlocked ? "，灰显在上面（再点一次不显示）" : blocked.detail
+                }}<template v-if="result.unmatched_count > 0">{{
+                  !showBlocked && blocked.detail ? "· " : " · "
+                }}</template>
+              </template>
+              <template v-if="result.unmatched_count > 0">
+                对不上这个条目的
+                <button
+                  v-if="!result.unmatched?.length"
+                  type="button"
+                  class="es-link es-link--muted"
+                  data-testid="es-show-unmatched"
+                  @click="showUnmatched">
+                  {{ result.unmatched_count }} 条没显示
+                </button>
+                <template v-else>{{ result.unmatched_count }} 条，列在下面</template>
+              </template>
             </span>
           </p>
           <PtPanel
@@ -536,6 +724,16 @@ const profileOptions = computed(() => [
         </div>
       </div>
     </template>
+
+    <!-- 不要：拉黑这一组还没拉黑的成员，只对这个条目（这一季） -->
+    <BlockDialog
+      v-model="blockOpen"
+      :torrent-title="blockTargets[0]?.title ?? ''"
+      :sites="blockTargets.map((m) => m.site)"
+      :scope="`只对「${mediaTitle}」生效：订阅以后不选它，这里默认不显示。关键字搜索不受影响。`"
+      :exclude-group="blockGroup"
+      :busy="blockBusy"
+      @confirm="confirmBlock" />
 
     <!-- 桌面窄屏的筛选抽屉：内容同左栏 -->
     <el-drawer
