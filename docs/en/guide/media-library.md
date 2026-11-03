@@ -267,6 +267,8 @@ After organising, pt-tools asks the media servers to scan the new folders. Organ
 
 Click Test (测试) to check the address and key. The list shows the result of the last notification; a failed notification does not affect organising. With path prefixes set, a folder outside them is not sent to that server as a pt-tools path; the list says why.
 
+When Jellyfin scans only the organised folders, scan a newly created, empty library in Jellyfin once first: Jellyfin walks up the path to find the item to refresh, and in a library with no items it finds none, so nothing is refreshed. After that first scan, organised titles show up on their own.
+
 ## Notifications
 
 When channels are selected under Organise settings (整理设置), each run that adds files sends one message: title and year, episodes, quality, library and source torrent, ending with the TMDB poster address (Telegram usually shows it as a preview image). Messages wait for the channel's quiet hours and are retried on failure. Nothing is sent when no channel is selected.
