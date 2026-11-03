@@ -160,11 +160,12 @@ func TestOrganizeDiscModes(t *testing.T) {
 			e.discTorrent(func(t *downloader.Torrent) { t.State = downloader.TorrentPaused })
 			root := filepath.Join(e.dlDir, discName)
 			movieDir := filepath.Join(e.movies, "奥本海默 (2023)")
-			srcInfo := map[string]os.FileInfo{}
+			// 移动以前的文件编号（Windows 上 os.SameFile 要按原来的路径再读编号，移走以后读不到）
+			srcID := map[string]string{}
 			for _, in := range discIns {
-				fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(in)))
+				id, err := transfer.FileID(filepath.Join(root, filepath.FromSlash(in)))
 				require.NoError(t, err)
-				srcInfo[in] = fi
+				srcID[in] = id
 			}
 
 			res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
@@ -182,9 +183,9 @@ func TestOrganizeDiscModes(t *testing.T) {
 					assert.Equal(t, src, to)
 				case models.MediaModeMove:
 					assert.False(t, exists(src), "移走了")
-					dstInfo, err := os.Stat(dst)
+					id, err := transfer.FileID(dst)
 					require.NoError(t, err)
-					assert.True(t, os.SameFile(srcInfo[in], dstInfo), "同一个文件挪了位置")
+					assert.Equal(t, srcID[in], id, "同一个文件挪了位置")
 				}
 			}
 			r := e.history()[0]

@@ -5,7 +5,6 @@ package transfer
 import (
 	"fmt"
 	"path"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -135,9 +134,17 @@ func rootPath(f File, root string) string {
 	if root != "" {
 		in = strings.TrimPrefix(f.Rel, root+"/")
 	}
-	p := strings.TrimSuffix(f.Path, filepath.FromSlash(in))
-	if trimmed := strings.TrimRight(p, `/\`); trimmed != "" {
-		return trimmed
+	// 从 f.Path 的末尾去掉 in 那么多段：f.Path 的分隔符可能是 / 也可能是 \（Windows），不按字面去掉 in
+	p := f.Path
+	for range strings.Count(in, "/") + 1 {
+		switch i := strings.LastIndexAny(p, `/\`); {
+		case i < 0:
+			return p
+		case i == 0:
+			return p[:1] // 原盘根目录就是文件系统的根
+		default:
+			p = p[:i]
+		}
 	}
 	return p
 }

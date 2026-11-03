@@ -170,3 +170,18 @@ func TestIsVideoSubtitle(t *testing.T) {
 	assert.True(t, IsSubtitle("a.SUP"))
 	assert.False(t, IsSubtitle("a.mkv"))
 }
+
+// 原盘根目录的路径：文件路径的分隔符是 / 或 \（Windows）都按段去掉，不按字面去掉相对路径
+func TestRootPathSeparators(t *testing.T) {
+	for _, tc := range []struct {
+		path, rel, root, want string
+	}{
+		{"/dl/Movie/BDMV/STREAM/00001.m2ts", "Movie/BDMV/STREAM/00001.m2ts", "Movie", "/dl/Movie"},
+		{`D:\dl\Movie\BDMV\STREAM\00001.m2ts`, "Movie/BDMV/STREAM/00001.m2ts", "Movie", `D:\dl\Movie`},
+		{`D:/dl/Movie/BDMV/index.bdmv`, "Movie/BDMV/index.bdmv", "Movie", "D:/dl/Movie"},
+		{"/dl/BDMV/index.bdmv", "BDMV/index.bdmv", "", "/dl"},
+		{"/BDMV/index.bdmv", "BDMV/index.bdmv", "", "/"},
+	} {
+		assert.Equal(t, tc.want, rootPath(File{Rel: tc.rel, Path: tc.path}, tc.root), tc.path)
+	}
+}
