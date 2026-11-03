@@ -20,6 +20,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -144,6 +145,11 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 		{http.MethodPost, "/api/media/history/1/retry"},
 		{http.MethodPost, "/api/media/history/1/scrape"},
 		{http.MethodDelete, "/api/media/history/1"},
+		{http.MethodPost, "/api/media/libraries/1/import/scan"},
+		{http.MethodGet, "/api/media/import/scans/0123456789abcdef"},
+		{http.MethodDelete, "/api/media/import/scans/0123456789abcdef"},
+		{http.MethodPut, "/api/media/import/scans/0123456789abcdef/item"},
+		{http.MethodPost, "/api/media/import/scans/0123456789abcdef/import"},
 	}
 	for _, c := range routes {
 		w := httptest.NewRecorder()
@@ -559,4 +565,116 @@ func TestOrganizeAPI_SourcePath(t *testing.T) {
 	w = serveAuthed(e.mux, http.MethodPost, "/api/media/history/"+strconv.Itoa(int(page.Items[0].ID))+"/retry", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"done":1`, "已经在库里")
+}
+
+// 导入已有文件：扫描（后台进行）、看进度与结果、改条目、导入；导入的记录删除时要另外确认才连文件删
+func TestOrganizeAPI_Import(t *testing.T) {
+	e := newOrganizeServer(t)
+	w := serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var lib organize.LibraryView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &lib))
+	dir := filepath.Join(e.library, "The Shawshank Redemption (1994)")
+	video := filepath.Join(dir, "The.Shawshank.Redemption.1994.mkv")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	f, err := os.Create(video)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(60<<20))
+	require.NoError(t, f.Close())
+	old := time.Now().Add(-time.Hour)
+	for _, p := range []string{video, dir} {
+		require.NoError(t, os.Chtimes(p, old, old))
+	}
+	scanURL := "/api/media/libraries/" + strconv.Itoa(int(lib.ID)) + "/import/scan"
+
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, scanURL, `{"path":"/elsewhere"}`).Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/99/import/scan", `{}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, scanURL, `{"x":1}`).Code)
+	w = serveAuthed(e.mux, http.MethodPost, scanURL, `{"path":""}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var sc organize.ImportScan
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sc))
+	scanPath := "/api/media/import/scans/" + sc.ID
+	require.Eventually(t, func() bool {
+		got := serveAuthed(e.mux, http.MethodGet, scanPath+"?brief=1", "")
+		return got.Code == http.StatusOK && strings.Contains(got.Body.String(), `"status":"done"`)
+	}, 10*time.Second, 10*time.Millisecond)
+	w = serveAuthed(e.mux, http.MethodGet, scanPath+"?brief=1", "")
+	assert.NotContains(t, w.Body.String(), `"items"`)
+	w = serveAuthed(e.mux, http.MethodGet, scanPath, "")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sc))
+	require.Len(t, sc.Items, 1)
+	require.NotNil(t, sc.Items[0].Match, sc.Items[0].Problem)
+	assert.Equal(t, 278, sc.Items[0].Match.TMDBID)
+
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPut, scanPath+"/item", `{"path":`+jsonPath(dir)+`,"tmdb_id":0}`).Code)
+	w = serveAuthed(e.mux, http.MethodPut, scanPath+"/item", `{"path":`+jsonPath(dir)+`,"tmdb_id":278}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"source":"manual"`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, scanPath+"/import", `{"paths":[]}`).Code)
+	w = serveAuthed(e.mux, http.MethodPost, scanPath+"/import", `{"paths":[`+jsonPath(dir)+`],"scrape":false}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"created":1`)
+
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history", "")
+	var page organize.HistoryPage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	row := page.Items[0]
+	assert.Equal(t, models.MediaModeExisting, row.Mode)
+	assert.Equal(t, models.MediaTriggerImport, row.Trigger)
+	id := strconv.Itoa(int(row.ID))
+	w = serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id+"?files=1", "")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "导入时就在库里的文件")
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/history/batch", `{"ids":[`+id+`],"action":"delete_files"}`)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"ok":false`)
+	assert.FileExists(t, video)
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/history/batch", `{"ids":[`+id+`],"action":"delete_files","allow_existing":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"ok":1`)
+	assert.NoFileExists(t, video, "确认以后连文件删除")
+
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPut, scanPath+"/item", `{"x":1}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, scanPath+"/import", `{"x":1}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/abc/import/scan", `{}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodDelete, scanPath, "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodGet, scanPath, "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodDelete, scanPath, "").Code)
+	for _, c := range []struct{ method, path string }{
+		{http.MethodGet, "/api/media/import/scans/xyz"},
+		{http.MethodDelete, "/api/media/import/scans/xyz"},
+		{http.MethodPut, "/api/media/import/scans/xyz/item"},
+		{http.MethodPost, "/api/media/import/scans/xyz/import"},
+		{http.MethodPut, scanPath + "/item"},
+		{http.MethodPost, scanPath + "/import"},
+	} {
+		body := `{"path":"/x","tmdb_id":278,"paths":["/x"]}`
+		if strings.HasSuffix(c.path, "/item") {
+			body = `{"path":"/x","tmdb_id":278}`
+		} else if strings.HasSuffix(c.path, "/import") {
+			body = `{"paths":["/x"]}`
+		}
+		assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, c.method, c.path, body).Code, c.method+" "+c.path)
+	}
+}
+
+// 删除单条导入的记录：带 allow_existing=1 才连文件删
+func TestOrganizeAPI_DeleteImportedWithFiles(t *testing.T) {
+	e := newOrganizeServer(t)
+	video := filepath.Join(e.library, "a.mkv")
+	require.NoError(t, os.WriteFile(video, []byte("video"), 0o644))
+	fileID, err := transfer.FileID(video)
+	require.NoError(t, err)
+	row := models.MediaTransferHistory{
+		SourcePath: video, TargetPath: video, Status: models.MediaTransferDone, Mode: models.MediaModeExisting, Trigger: models.MediaTriggerImport,
+		TargetFileID: fileID, InfoHash: "import:0123456789abcdef",
+	}
+	require.NoError(t, global.GlobalDB.DB.Create(&row).Error)
+	id := strconv.Itoa(int(row.ID))
+	w := serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id+"?files=1&allow_existing=1", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NoFileExists(t, video)
 }

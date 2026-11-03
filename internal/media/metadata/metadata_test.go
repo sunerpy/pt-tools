@@ -70,7 +70,7 @@ func (f *fakeTMDB) Extras(_ context.Context, kind string, id int) (*tmdb.Extras,
 		return &tmdb.Extras{
 			Tagline: "宣传语", VoteCount: 9000, Studios: []string{"Syncopy"}, Certifications: map[string]string{"US": "R", "CN": "x"},
 			Collection: &tmdb.Collection{ID: 1, Name: "系列"}, Directors: []string{"Christopher Nolan"}, Writers: []string{"Kai Bird"},
-			Cast: []tmdb.CastMember{{Name: "Cillian Murphy", Character: "Oppenheimer", Order: 0, ProfilePath: "/c.jpg"}},
+			Cast: []tmdb.CastMember{{ID: 2037, Name: "Cillian Murphy", Character: "Oppenheimer", Order: 0, ProfilePath: "/c.jpg"}},
 		}, nil
 	case 100088:
 		return &tmdb.Extras{Status: "Returning Series", TVDBID: 392256, IMDbID: "tt3581920", Studios: []string{"HBO"}}, nil
@@ -216,6 +216,7 @@ func TestResolveTMDBOnly(t *testing.T) {
 	assert.Equal(t, &Collection{TMDBID: 1, Name: "系列"}, it.Collection)
 	require.Len(t, it.Cast, 1)
 	assert.Equal(t, "https://img/w185/c.jpg", it.Cast[0].Thumb)
+	assert.Equal(t, 2037, it.Cast[0].ID, "演员带上 TMDB 编号（演员中文名用）")
 	assert.Equal(t, []Rating{{Name: RatingTMDB, Value: 8.1, Max: 10, Votes: 9000}}, it.Ratings)
 	assert.Equal(t, map[string]string{"tmdb": "872585", "imdb": "tt15398776"}, it.IDs)
 	assert.Equal(t, map[string]string{"plot": SourceTMDB, "rating": SourceTMDB}, res.Used)

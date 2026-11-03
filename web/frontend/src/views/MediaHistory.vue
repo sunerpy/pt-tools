@@ -204,6 +204,7 @@ async function batch(action: MediaHistoryBatchAction) {
         ? selRescrape.value
         : selectedRows.value;
   if (!rows.length) return;
+  let allowExisting = false;
   if (action === "delete" || action === "delete_files") {
     const files =
       action === "delete_files"
@@ -219,13 +220,32 @@ async function batch(action: MediaHistoryBatchAction) {
     } catch {
       return;
     }
+    // 导入的已有文件不是 pt-tools 放进去的：连文件删要再确认一次
+    const existing = rows.filter((r) => r.mode === "existing" && r.has_files).length;
+    if (action === "delete_files" && existing) {
+      try {
+        await ElMessageBox.confirm(
+          `其中 ${existing} 条是导入时就在库里的文件（不是 pt-tools 放进去的），也删掉这些文件？`,
+          "删除导入的已有文件",
+          {
+            confirmButtonText: "也删掉",
+            cancelButtonText: "取消",
+            confirmButtonClass: "el-button--danger",
+            type: "warning",
+          },
+        );
+      } catch {
+        return;
+      }
+      allowExisting = true;
+    }
   }
   batching.value = action;
   try {
-    const res = await organizeApi.historyBatch(
-      rows.map((r) => r.id),
-      action,
-    );
+    const ids = rows.map((r) => r.id);
+    const res = allowExisting
+      ? await organizeApi.historyBatch(ids, action, true)
+      : await organizeApi.historyBatch(ids, action);
     const out = batchOutcome(res, BATCH_DONE[action]);
     const queued =
       (action === "retry" || action === "rescrape") && res.ok
@@ -242,6 +262,8 @@ async function batch(action: MediaHistoryBatchAction) {
 }
 
 const fileName = (p: string) => p.split(/[/\\]/).pop() || p;
+/** 库里的位置前面写什么：导入的已有文件就在库里（源文件就是它），不写箭头 */
+const targetPrefix = (r: MediaHistoryItem) => (r.mode === "existing" ? "位置：" : "→ ");
 
 const retrying = ref<number | null>(null);
 async function retry(r: MediaHistoryItem) {
@@ -309,12 +331,30 @@ function askDelete(r: MediaHistoryItem) {
 
 async function confirmDelete() {
   if (!delTarget.value) return;
+  const files = delFiles.value && canDeleteFiles.value;
+  // 导入的已有文件不是 pt-tools 放进去的：连文件删要再确认一次
+  const existing = files && delTarget.value.mode === "existing";
+  if (existing) {
+    try {
+      await ElMessageBox.confirm(
+        "这是导入时就在库里的文件（不是 pt-tools 放进去的），确定连文件一起删掉？",
+        "删除导入的已有文件",
+        {
+          confirmButtonText: "删掉",
+          cancelButtonText: "取消",
+          confirmButtonClass: "el-button--danger",
+          type: "warning",
+        },
+      );
+    } catch {
+      return;
+    }
+  }
   deleting.value = true;
   try {
-    const res = await organizeApi.deleteHistory(
-      delTarget.value.id,
-      delFiles.value && canDeleteFiles.value,
-    );
+    const res = existing
+      ? await organizeApi.deleteHistory(delTarget.value.id, files, true)
+      : await organizeApi.deleteHistory(delTarget.value.id, files);
     if (res.kept?.length) ElMessage.warning(`已删除记录；这些文件留着：${res.kept.join("；")}`);
     else ElMessage.success(delFiles.value ? "已删除记录与库里的文件" : "已删除记录");
     delDialog.value = false;
@@ -557,7 +597,7 @@ onMounted(load);
           <template #default="{ row }">
             <div>{{ fileName(row.source_path) }}</div>
             <div v-if="row.target_path" class="mh-sub">
-              → {{ row.target_path
+              {{ targetPrefix(row) }}{{ row.target_path
               }}<template v-if="row.subtitles"> · {{ row.subtitles }} 个字幕</template>
             </div>
           </template>
@@ -652,7 +692,9 @@ onMounted(load);
           <template #meta>
             <span v-if="r.match_source">{{ matchSourceLabel(r.match_source) }}</span>
             <span class="mh-full">{{ fileName(r.source_path) }}</span>
-            <span v-if="r.target_path" class="mh-full">→ {{ r.target_path }}</span>
+            <span v-if="r.target_path" class="mh-full"
+              >{{ targetPrefix(r) }}{{ r.target_path }}</span
+            >
             <span v-if="r.disc_files">原盘 {{ r.disc_files }} 个文件</span>
             <span
               >{{ modeLabel(r.mode) }} · {{ rowTrigger(r) }} ·
@@ -758,16 +800,22 @@ onMounted(load);
       title="删除整理记录"
       :width="isMobile ? '94%' : '460px'"
       align-center>
-      <p class="mh-del-text">
-        删除「{{
-          delTarget ? fileName(delTarget.source_path) : ""
-        }}」的整理记录？下载目录里的文件不动。
+      <p class="mh-del-text" data-testid="mh-del-text">
+        删除「{{ delTarget ? fileName(delTarget.source_path) : "" }}」的整理记录？{{
+          delTarget?.mode === "existing" ? "" : "下载目录里的文件不动。"
+        }}
       </p>
       <el-checkbox v-model="delFiles" :disabled="!canDeleteFiles" data-testid="mh-del-files"
         >同时删除库里整理出的文件（视频、字幕、同名的 NFO 与图片）</el-checkbox
       >
       <p v-if="delTarget?.mode === 'move'" class="mh-sub mh-del-text">
         移动整理的文件是唯一的一份，这里不删。
+      </p>
+      <p
+        v-else-if="delTarget?.mode === 'existing'"
+        class="mh-sub mh-del-text"
+        data-testid="mh-del-existing">
+        这是导入时就在库里的文件（不是 pt-tools 放进去的）：勾上以后还要再确认一次。
       </p>
       <p v-else-if="!canDeleteFiles" class="mh-sub mh-del-text">这条记录没有整理出文件。</p>
       <template #footer>

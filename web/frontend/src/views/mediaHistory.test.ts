@@ -283,6 +283,7 @@ describe("整理历史", () => {
     api.deleteHistory.mockResolvedValue({ ok: true });
     q("mh-del-1")!.click();
     await flush();
+    expect(q("mh-del-text")!.textContent).toContain("下载目录里的文件不动");
     const box = q("mh-del-files")!;
     expect(box.classList.contains("is-disabled")).toBe(false);
     box.querySelector("input")!.click();

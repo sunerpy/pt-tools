@@ -117,7 +117,7 @@ const rows = [
   row({ id: 4, status: "failed", fail_kind: "exists", message: "目标位置已经有同名文件" }),
 ];
 
-async function mountPage(mobile = false) {
+async function mountPage(mobile = false, list = rows) {
   if (mobile) {
     vi.spyOn(window, "matchMedia").mockImplementation(
       (query: string) =>
@@ -133,7 +133,7 @@ async function mountPage(mobile = false) {
         }) as unknown as MediaQueryList,
     );
   }
-  api.history.mockResolvedValue({ items: rows, total: rows.length });
+  api.history.mockResolvedValue({ items: list, total: list.length });
   api.aiStatus.mockResolvedValue({ ready: true });
   const Page = (await import("./MediaHistory.vue")).default;
   const router = createRouter({
@@ -413,5 +413,75 @@ describe("整理历史：让 AI 认", () => {
     );
     expect(api.preview).toHaveBeenCalledWith({ downloader_id: 1, hash: "abc" });
     await vi.waitFor(() => expect(q("organize-ai-result")).not.toBeNull());
+  });
+});
+
+describe("整理历史：导入的已有文件", () => {
+  const imported = row({
+    id: 7,
+    mode: "existing",
+    trigger: "import",
+    downloader_id: 0,
+    downloader_name: "导入",
+    info_hash: "import:0123456789abcdef",
+    source_path: "/media/tv/最后生还者 (2023)/Season 1/S01E01.mkv",
+    target_path: "/media/tv/最后生还者 (2023)/Season 1/S01E01.mkv",
+  });
+
+  it("写明方式是已有文件、触发方式是导入", async () => {
+    await mountPage(false, [imported]);
+    expect(document.body.textContent).toContain("已有文件");
+    expect(document.body.textContent).toContain("导入已有文件");
+    expect(document.body.textContent, "就在库里：写位置，不写箭头").toContain(
+      "位置：/media/tv/最后生还者 (2023)/Season 1/S01E01.mkv",
+    );
+    expect(document.body.textContent).not.toContain("→ /media/tv");
+  });
+
+  it("批量连文件删除：选中的里有导入的已有文件时再确认一次，确认以后才删它们的文件", async () => {
+    await mountPage(false, [imported, row({})]);
+    await tick(0);
+    await tick(1);
+    ui.confirm.mockResolvedValueOnce("confirm").mockRejectedValueOnce("cancel");
+    q("mh-batch-delete-files")!.click();
+    await vi.waitFor(() => expect(ui.confirm).toHaveBeenCalledTimes(2));
+    expect(ui.confirm.mock.calls[1]![0]).toContain("其中 1 条是导入时就在库里的文件");
+    await flush();
+    expect(api.historyBatch, "第二次取消：不删").not.toHaveBeenCalled();
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.historyBatch.mockResolvedValue({
+      items: [
+        { id: 7, ok: true },
+        { id: 1, ok: true },
+      ],
+      ok: 2,
+      failed: 0,
+    });
+    q("mh-batch-delete-files")!.click();
+    await vi.waitFor(() =>
+      expect(api.historyBatch).toHaveBeenCalledWith([7, 1], "delete_files", true),
+    );
+  });
+
+  it("单条删除：写明是导入的已有文件，勾上连文件删时再确认一次", async () => {
+    await mountPage(false, [imported]);
+    q("mh-del-7")!.click();
+    await flush();
+    expect(q("mh-del-existing")!.textContent).toContain("导入时就在库里的文件");
+    expect(q("mh-del-text")!.textContent, "导入的文件就在库里：不写下载目录").not.toContain(
+      "下载目录",
+    );
+    q("mh-del-files")!.querySelector("input")!.click();
+    await flush();
+    ui.confirm.mockRejectedValueOnce("cancel");
+    q("mh-del-confirm")!.click();
+    await flush();
+    expect(api.deleteHistory).not.toHaveBeenCalled();
+
+    ui.confirm.mockResolvedValueOnce("confirm");
+    api.deleteHistory.mockResolvedValue({ ok: true });
+    q("mh-del-confirm")!.click();
+    await vi.waitFor(() => expect(api.deleteHistory).toHaveBeenCalledWith(7, true, true));
   });
 });

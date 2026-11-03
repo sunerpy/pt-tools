@@ -70,6 +70,8 @@ type Rating struct {
 
 // Person 是一位演员：名字、饰演的角色、排第几、头像地址（完整的 URL，没有时为空）。
 type Person struct {
+	// ID 是 TMDB 上这个人的编号（TMDB 以外的来源为 0）
+	ID    int
 	Name  string
 	Role  string
 	Order int

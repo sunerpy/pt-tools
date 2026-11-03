@@ -111,7 +111,7 @@ When a movie or an episode gets another release (say 1080p first and 2160p later
 | Keep (default)      | Keep the old version; the new one is recorded as skipped, with the reason |
 | Replace when larger | Replace only when the new file is larger than the old version             |
 
-Only files pt-tools put into this library for the same movie (or the same episode) are replaced, confirmed by the organise record and file ID. Files you put there yourself, files that were changed, and moved files (the only copy) are never replaced, and nothing is replaced when the library organises by moving. The new file is placed under a temporary name next to the target first, the old file is moved to a backup name and checked to be the one the old record placed, then the new file goes into place, and the old file is deleted only after the records are saved. If any step fails the old file goes back where it was, and if pt-tools stops halfway the unfinished replacement is rolled back on the next start. The old version's subtitles and same-name NFO and thumbnail are swapped for the new ones, folder images stay, and the old record is marked removed with what replaced it. Files in the download folder are never touched. When the library's file system supports neither hard links nor no-overwrite renames (some network storage), nothing is replaced and the reason is shown.
+Only files pt-tools put into this library for the same movie (or the same episode) are replaced, confirmed by the organise record and file ID. Files you put there yourself, files that were changed, [imported existing files](#importing-an-existing-library) and moved files (the only copy) are never replaced, and nothing is replaced when the library organises by moving. The new file is placed under a temporary name next to the target first, the old file is moved to a backup name and checked to be the one the old record placed, then the new file goes into place, and the old file is deleted only after the records are saved. If any step fails the old file goes back where it was, and if pt-tools stops halfway the unfinished replacement is rolled back on the next start. The old version's subtitles and same-name NFO and thumbnail are swapped for the new ones, folder images stay, and the old record is marked removed with what replaced it. Files in the download folder are never touched. When the library's file system supports neither hard links nor no-overwrite renames (some network storage), nothing is replaced and the reason is shown.
 
 Only size decides: the smaller old version never swaps the larger one back when it's organised again (automatically or by hand); it's recorded as skipped. To go back, delete the new version's record together with its library files under organise history, then organise the old one. When the naming template includes the quality (the default movie template does), different releases get different file names, never collide, and both stay in the library; to keep only one, drop the quality from the template or use subscription upgrades.
 
@@ -208,14 +208,48 @@ Failures and retries:
 
 When a torrent you downloaded by hand is in a downloader pt-tools manages, you can also select it in the downloader web UI and click 整理入库. To have such torrents organised automatically from now on, give them a category or tag in the downloader, add it to the scope in the organise settings (整理设置) and turn on Periodic downloader scan (定期扫描下载器).
 
+## Importing an existing library
+
+Movies and shows already in a library folder (ones you organised yourself, or ones another tool put there) can be imported as organise records: the files stay where they are, without moving, renaming or linking. After the import they count as in the library: subscriptions no longer download those movies or the episodes already there, title details, the calendar and the follow details show them as in the library (已入库), and upgrades compare against their versions.
+
+In the library list on the Media library (媒体库) page, click Import existing files (导入已有文件) on the library:
+
+1. **Choose the path**: the library folder by default; click Browse (浏览) to pick a folder inside it and import only what's under that folder. Only the library folder and folders inside it can be chosen.
+2. **Scan**: click Start scan (开始扫描). Every item is looked up on TMDB, so the scan runs in the background; the dialog shows how many items are done, and the scan can be cancelled. Only one scan runs at a time, and starting another cancels the previous one. The result is kept for 30 minutes from the last time it was viewed; after that, scan again.
+3. **Review**: each item shows the title it was matched to and where the match came from, how many videos it has (seasons and episodes for TV) and whether it can be imported; items that can be imported are selected. When a match is wrong or missing, click Change ID (改编号) or Enter TMDB ID (填 TMDB 编号) (the type follows the library), then select the item. The list can show only importable items, items already recorded or items that can't be imported; View videos (看视频) lists every video and why it can't be imported.
+4. **Import**: click Import N items (导入 N 项). The import is queued like organising and runs one job at a time; when it's done the dialog says how many videos were recorded, how many already had organise records and were skipped, and what couldn't be imported and why. With Fill in missing NFO and images (补上缺的 NFO 与图片) ticked (only possible when the library scrapes), each title is scraped once after the import: only NFO files and images that don't exist yet are written, and existing ones stay.
+
+How items are found:
+
+- Movie library: every folder under the library folder is one movie (its videos are picked by the rules in [which files are organised](#which-files-are-organised), without extras and samples), and every video directly in the library folder is one movie.
+- TV library: every folder under the library folder is one show. Seasons and episodes come from the file names (recognition words apply); when a file name has no season number, the season folder above it decides (`Season 1`, `S01`, `第一季`, `Specials`), and otherwise it's season 1. Videos without a recognisable episode number are listed and not imported; videos directly in the library folder aren't imported either and need to go into the show's folder.
+- Folders named like a secondary category, and folders that only hold several movies or shows (groups of your own), count as category folders and are searched below, at most 4 levels deep.
+- One scan lists at most 1,000 items; for more, scan subfolders. An item more than 6 levels deep or with more than 5,000 files, an item whose videos changed within the last 2 minutes (they may still be copying; NFO files and images don't count), discs (BDMV, VIDEO_TS) and ISO images in TV shows aren't imported, with the reason shown.
+- Videos that already have organise records (organised by pt-tools, or imported before) are skipped, and an item whose videos all have records shows as already recorded (已有记录).
+
+Titles are matched in this order, and the type has to match the library (a movie library item matched as a show isn't imported; change its ID):
+
+1. Existing NFO files: `movie.nfo` and the `.nfo` next to each video for movies, `tvshow.nfo` for shows. A TMDB ID there is used directly; with only an IMDb ID, the title is recognised by that IMDb ID.
+2. An ID in the folder name (the file name for a movie directly in the library folder): `[tmdbid=123]` and `[tmdbid-123]` as Emby and Jellyfin read them, `{tmdb-123}` as Plex reads it; with only an IMDb ID (`[imdbid-tt1234567]`), the title is recognised by that IMDb ID. When the ID isn't this type on TMDB, the item says so and is matched by name.
+3. Recognition of the folder name, with recognition words and corrections applied as for torrent names.
+
+Importing reads each item's videos again and writes one organise record per video with the chosen title: the mode shows as existing file (已有文件), the trigger as import (导入已有文件), the downloader column as 导入, and the source file is the library file itself. pt-tools didn't put these files there, so:
+
+- Deleting a record doesn't delete the file by default. With Also delete the organised files in the library (同时删除库里整理出的文件) checked there's a second confirmation (batch delete with files asks too), and the file is deleted only after its file ID confirms it's still the file that was imported.
+- Upgrades don't delete them: the new version is organised into the library as usual and the imported record stays as it is; with different file names, both versions stay in the library. When the new version has the same file name as an imported file (the library's existing naming matches the naming template), the new version is skipped when organising and stays in the downloader; to switch to it, delete the imported record together with its file under organise history, then organise the new version again.
+- Same-name files (同名文件) never replaces them, whichever option is chosen.
+- They don't need retrying: retry and batch retry skip them, with the reason shown.
+- Delete library links on torrent removal leaves them alone.
+- Rescrape works as usual: NFO files and images that were there before count as written by another tool and are replaced only with Overwrite existing NFO and images (覆盖已有的 NFO 与图片) on.
+
 ## Scraping
 
 With scraping on, Scraping content (刮削内容) lets you pick NFO, poster, background, logo, clearart, banner, landscape, disc art (movies only), season posters and episode thumbnails (the last two only exist for TV) one by one. A library you haven't changed writes the NFO, poster, background, season posters and episode thumbnails. Clearart, banner, landscape and disc art only exist on Fanart.tv and are written only after you enter a Fanart.tv key under [media recognition](media-recognize.md#other-scraping-sources).
 
-| Title | Files written                                                                                                                                                                                                                                                                                         |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Movie | `<file name>.nfo`; with its own folder, `poster.jpg`, `fanart.jpg`, `clearlogo.png`, `clearart.png`, `banner.jpg`, `landscape.jpg` and `discart.png`; directly in the library root, the same images with the file name in front, for example `<file name>-poster.jpg`                                 |
-| TV    | In the show folder: `tvshow.nfo`, `poster.jpg`, `fanart.jpg`, `clearlogo.png`, `clearart.png`, `banner.jpg`, `landscape.jpg` and `season01-poster.jpg` (`season-specials-poster.jpg` for season 0); `season.nfo` in the season folder; `<file name>.nfo` and `<file name>-thumb.jpg` for each episode |
+| Title | Files written                                                                                                                                                                                                                                                                                                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Movie | `<file name>.nfo` (with its own folder that already has a `movie.nfo`, that file instead of a second one); with its own folder, `poster.jpg`, `fanart.jpg`, `clearlogo.png`, `clearart.png`, `banner.jpg`, `landscape.jpg` and `discart.png`; directly in the library root, the same images with the file name in front, for example `<file name>-poster.jpg` |
+| TV    | In the show folder: `tvshow.nfo`, `poster.jpg`, `fanart.jpg`, `clearlogo.png`, `clearart.png`, `banner.jpg`, `landscape.jpg` and `season01-poster.jpg` (`season-specials-poster.jpg` for season 0); `season.nfo` in the season folder; `<file name>.nfo` and `<file name>-thumb.jpg` for each episode                                                         |
 
 The logo is the title artwork on a transparent background, clearart shows characters and the title on a transparent background, and landscape is a wide image with the title; Emby, Jellyfin and Kodi all read these file names. Image language (图片语言) decides which image is used:
 
@@ -228,6 +262,10 @@ The logo is the title artwork on a transparent background, clearart shows charac
 For the logo or a chosen image language, pt-tools fetches TMDB's image list once more (cached for a week). If that fails, the poster and background fall back to the ones TMDB returns, no logo is written, and the organise result says why. Episode thumbnails always use the ones TMDB returns.
 
 The NFO files use the Kodi format, read by the NFO support of Emby, Jellyfin and Plex. Besides the title, plot, genres and ratings they include the tagline, certification, studios (networks for TV), the collection a movie belongs to, a show's status, directors, writers and cast (with TMDB image links for the photos), and whichever TMDB, IMDb, TVDB, Douban and Bangumi IDs are known. Images are downloaded through the proxy set under media recognition, three at a time. When the template puts episodes directly in the library root, the show and season files are not written.
+
+With Cast names in Chinese (演员名用中文) ticked, the first 15 cast members in the NFO use their Chinese names on TMDB (`zh-CN`, then `zh-SG`, `zh-TW` and `zh-HK`); members without a Chinese name keep the original one, and role names don't change. The names are cached for 30 days. When they can't be fetched, the original names are used and the scrape result says so.
+
+With Fill in missing scraping weekly (每周补一次缺的刮削) ticked, every 7 days the titles in this library whose scrape result is partly scraped or scrape failed are scraped again, at most 50 titles per run, the ones scraped longest ago first. It works like Rescrape, except that files you placed or another tool wrote are never replaced, whether or not Overwrite is on. Titles that don't fit into a full organise queue are filled in next time.
 
 Existing files are left alone by default; turn on Overwrite existing NFO and images (覆盖已有的 NFO 与图片) to rewrite them:
 
@@ -297,6 +335,8 @@ Retry and rescrape answer once the work is queued; refresh later for the results
 
 By title (按条目) groups the records by movie or by season of a show (records that weren't recognised by torrent name) and shows how many records each group has, how many per status and the latest time; the status, category and keyword filters still apply. View records (看记录) lists a group's records, and Back to groups (返回分组) returns.
 
+Records of [imported existing files](#importing-an-existing-library) show the mode as existing file (已有文件) and the trigger as import (导入已有文件); they can't be retried, and deleting them with their files asks for a second confirmation.
+
 Records that weren't recognised have Ask AI (让 AI 认): it opens the organise dialog and asks the AI once after the preview, see [Asking the AI](#asking-the-ai).
 
 Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. A record organised by hand with an organise mode picked is retried with that mode. Failed or skipped records shown as 手动（指定路径） (manual, by path) also have Manual organise (手动整理): it opens the dialog with the path entered and the organise mode picked back then, so you can change the title, library or mode and organise again.
@@ -336,5 +376,7 @@ Delete library links when torrents are deleted (删种时一并删除入库链�
 **No match**: preview the torrent name under [media recognition](media-recognize.md), pick a candidate or enter a TMDB ID, then click Retry (重试) in the history; or enter the TMDB ID directly when organising by hand, or [ask the AI](#asking-the-ai).
 
 **Another file is at the target**: pt-tools does not overwrite other files. If you no longer need the file in the library, delete it and retry.
+
+**Subscriptions download again what's already in a library I organised myself**: subscriptions only go by organise records. Click Import existing files (导入已有文件) under Media library to record the movies and shows already in the library, see [importing an existing library](#importing-an-existing-library).
 
 **How do I organise a movie I downloaded by hand, and where do the links go**: see [organising a file or folder by hand](#organising-a-file-or-folder-by-hand).

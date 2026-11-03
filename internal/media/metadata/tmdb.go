@@ -163,7 +163,7 @@ func (t *TMDB) Item(ctx context.Context, q Query) (*Item, error) {
 	}
 	it.Directors, it.Writers = slices.Clone(x.Directors), slices.Clone(x.Writers)
 	for _, m := range x.Cast {
-		it.Cast = append(it.Cast, Person{Name: m.Name, Role: m.Character, Order: m.Order, Thumb: t.c.ProfileURL(m.ProfilePath)})
+		it.Cast = append(it.Cast, Person{ID: m.ID, Name: m.Name, Role: m.Character, Order: m.Order, Thumb: t.c.ProfileURL(m.ProfilePath)})
 	}
 	if x.Collection != nil {
 		it.Collection = &Collection{TMDBID: x.Collection.ID, Name: x.Collection.Name}

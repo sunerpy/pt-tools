@@ -3503,6 +3503,10 @@ export interface MediaLibraryInput {
   classify_dir: boolean;
   /** 目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时：空串不替换，larger 新文件更大时替换 */
   overwrite_mode: MediaOverwriteMode;
+  /** 刮削的演员名用 TMDB 上的中文译名（前 15 位，没有译名的用原名；要开着刮削） */
+  scrape_actor_zh: boolean;
+  /** 每周对刮削结果是部分成功或失败的记录补刮一次（只补没有的文件；要开着刮削） */
+  scrape_fill: boolean;
   enabled: boolean;
 }
 
@@ -3555,6 +3559,8 @@ export interface ClassifyView {
 
 export interface MediaLibrary extends MediaLibraryInput {
   id: number;
+  /** 上一次每周补刮的时间 */
+  scrape_filled_at?: string;
   created_at: string;
   updated_at: string;
   /** 实际用的模板与示例渲染的结果 */
@@ -3686,7 +3692,10 @@ export type MediaMatchSource =
   | "manual"
   | "history"
   | "subscription"
-  | "push";
+  | "push"
+  | "nfo"
+  | "nfo-imdb"
+  | "dirname";
 
 export interface OrganizePlan {
   downloader_id: number;
@@ -3755,7 +3764,8 @@ export interface MediaHistoryItem {
   library_name?: string;
   source_path: string;
   target_path: string;
-  mode: MediaMode;
+  /** existing 是导入已有媒体库时记下的文件（导入时就在库里，不是 pt-tools 放进去的） */
+  mode: MediaMode | "existing";
   /** 手动整理时选的整理方式（空串是跟媒体库）：重试按它整理 */
   chosen_mode: "" | MediaMode;
   media_type: "" | MediaKind;
@@ -3772,7 +3782,7 @@ export interface MediaHistoryItem {
   fail_kind: "" | MediaFailKind;
   attempts: number;
   next_retry_at?: string;
-  trigger: "auto" | "scan" | "manual" | "watch";
+  trigger: "auto" | "scan" | "manual" | "watch" | "import";
   /** 条目从哪来（升级前的记录为空） */
   match_source?: "" | MediaMatchSource;
   /** 目录监控的目录（不是下载器里的种子时） */
@@ -3962,8 +3972,13 @@ export const organizeApi = {
   /** 按条目分组（组的条件不看） */
   historyGroups: (q: MediaHistoryQuery = {}) =>
     api.get<MediaHistoryGroupPage>(`/api/media/history${historyParams(q, true)}`),
-  historyBatch: (ids: number[], action: MediaHistoryBatchAction) =>
-    api.post<MediaHistoryBatchResult>("/api/media/history/batch", { ids, action }),
+  /** allowExisting：连文件删除时也删导入的已有文件（页面上另外确认过） */
+  historyBatch: (ids: number[], action: MediaHistoryBatchAction, allowExisting = false) =>
+    api.post<MediaHistoryBatchResult>("/api/media/history/batch", {
+      ids,
+      action,
+      ...(allowExisting ? { allow_existing: true } : {}),
+    }),
   /** 让 AI 从 TMDB 的候选里认这个种子（请求同预览）：只认、不整理 */
   aiRecognize: (data: OrganizeRequest) =>
     api.post<MediaAIRecognizeResult>("/api/media/organize/ai-recognize", data),
@@ -3977,12 +3992,108 @@ export const organizeApi = {
   retry: (id: number) => api.post<OrganizeResult>(`/api/media/history/${id}/retry`),
   /** 按媒体库现在的设置重新刮削这条记录所在的电影或剧集 */
   rescrape: (id: number) => api.post<RescrapeResult>(`/api/media/history/${id}/scrape`),
-  /** kept 是换掉或改过、没有删的文件的说明 */
-  deleteHistory: (id: number, files = false) =>
+  /** kept 是换掉或改过、没有删的文件的说明；allowExisting：连文件删除导入的已有文件（页面上另外确认过） */
+  deleteHistory: (id: number, files = false, allowExisting = false) =>
     api.delete<{ ok: boolean; kept?: string[] }>(
-      `/api/media/history/${id}${files ? "?files=1" : ""}`,
+      `/api/media/history/${id}${files ? `?files=1${allowExisting ? "&allow_existing=1" : ""}` : ""}`,
     ),
+  /** 开始扫描媒体库里已有的文件（后台进行；path 空串是库目录），回扫描的状态 */
+  importScan: (libraryId: number, path: string) =>
+    api.post<MediaImportScan>(`/api/media/libraries/${libraryId}/import/scan`, { path }),
+  /** 扫描的进度与结果；brief 时不带每一项（轮询进度用） */
+  importScanStatus: (id: string, brief = false) =>
+    api.get<MediaImportScan>(`/api/media/import/scans/${id}${brief ? "?brief=1" : ""}`),
+  /** 取消还在进行的扫描；扫描完了的丢掉结果 */
+  cancelImportScan: (id: string) => api.delete<{ ok: boolean }>(`/api/media/import/scans/${id}`),
+  /** 改扫描里一项的条目（类型跟媒体库） */
+  setImportItem: (id: string, path: string, tmdbId: number) =>
+    api.put<MediaImportItem>(`/api/media/import/scans/${id}/item`, { path, tmdb_id: tmdbId }),
+  /** 导入选中的项（排进整理的队列）；scrape 时每个条目补刮一次（只补没有的 NFO 与图片） */
+  importItems: (id: string, paths: string[], scrape: boolean) =>
+    api.post<MediaImportRun>(`/api/media/import/scans/${id}/import`, { paths, scrape }),
 };
+
+// ---- 导入已有媒体库 ----
+
+/** 扫描与导入的状态 */
+export type MediaImportStatus = "running" | "done" | "failed" | "canceled" | "queued";
+
+/** 扫描出的一项里的一个视频 */
+export interface MediaImportFile {
+  /** 相对这一项的路径（库目录里直接放的视频是文件名） */
+  rel: string;
+  size: number;
+  season?: number;
+  episode?: number;
+  episode_end?: number;
+  /** 已经有整理记录（导入时跳过） */
+  recorded?: boolean;
+  /** 这个视频导入不了的原因（例如没认出集数） */
+  problem?: string;
+}
+
+/** 一项认出的条目 */
+export interface MediaImportMatch {
+  media_type: MediaKind;
+  tmdb_id: number;
+  title: string;
+  original_title?: string;
+  year?: number;
+  poster_path?: string;
+}
+
+/** 扫描出的一项：一部电影（一个文件夹，或库目录里直接放的一个视频）或一部剧（一个剧集目录） */
+export interface MediaImportItem {
+  path: string;
+  /** 相对库目录的路径 */
+  name: string;
+  file?: boolean;
+  match?: MediaImportMatch;
+  source?: MediaMatchSource;
+  /** 条目是页面上改的 */
+  edited?: boolean;
+  /** 视频（最多 200 个）；file_count 与 size 按全部视频算 */
+  files: MediaImportFile[];
+  file_count: number;
+  size: number;
+  /** 能导入的视频数（没有整理记录、没有问题的） */
+  ready: number;
+  /** 已经有整理记录的视频数 */
+  recorded: number;
+  /** 这一项导入不了的原因 */
+  problem?: string;
+  notes?: string[];
+}
+
+/** 一次导入：排进整理的队列，和整理一样一次只做一件 */
+export interface MediaImportRun {
+  status: MediaImportStatus;
+  items: number;
+  done: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  scraped: number;
+  messages?: string[];
+  finished_at?: string;
+}
+
+/** 一次扫描：进度、每一项（扫描完了、不是 brief 时才有）与之后的导入 */
+export interface MediaImportScan {
+  id: string;
+  library_id: number;
+  path: string;
+  status: MediaImportStatus;
+  scanned: number;
+  total: number;
+  /** 多于 1000 项：只列了前这么多项，其余的分子目录扫描 */
+  truncated?: boolean;
+  error?: string;
+  items?: MediaImportItem[];
+  started_at: string;
+  finished_at?: string;
+  import?: MediaImportRun;
+}
 
 // ---- 订阅（路线图 M11） ----
 

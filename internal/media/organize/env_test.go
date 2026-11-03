@@ -44,7 +44,9 @@ type fakeTMDB struct {
 	imagesDown bool
 	// detailsDown 为真时奥本海默的详情回 503（搜索照常）
 	detailsDown bool
-	hits        map[string]int
+	// personDown 为真时演员的译名（/person/…/translations）回 503
+	personDown bool
+	hits       map[string]int
 }
 
 func (f *fakeTMDB) setDown(v bool) {
@@ -58,7 +60,8 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.hits[r.URL.Path]++
-		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images")) || (f.detailsDown && r.URL.Path == "/3/movie/872585")
+		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images")) || (f.detailsDown && r.URL.Path == "/3/movie/872585") ||
+			(f.personDown && strings.HasPrefix(r.URL.Path, "/3/person/"))
 		f.mu.Unlock()
 		if strings.HasPrefix(r.URL.Path, "/t/p/") {
 			w.Header().Set("Content-Type", "image/jpeg")
@@ -80,7 +83,14 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 			_, _ = w.Write([]byte(`{"results":[{"id":872585,"title":"奥本海默","original_title":"Oppenheimer","release_date":"2023-07-19","popularity":300,"genre_ids":[18,36]}]}`))
 		case r.URL.Path == "/3/movie/872585":
 			_, _ = w.Write([]byte(`{"id":872585,"title":"奥本海默","original_title":"Oppenheimer","release_date":"2023-07-19","overview":"原子弹之父的故事。",
-				"imdb_id":"tt15398776","poster_path":"/opp.jpg","backdrop_path":"/opp-bd.jpg","vote_average":8.1,"runtime":181,"genres":[{"id":18,"name":"剧情"},{"id":36,"name":"历史"}]}`))
+				"imdb_id":"tt15398776","poster_path":"/opp.jpg","backdrop_path":"/opp-bd.jpg","vote_average":8.1,"runtime":181,"genres":[{"id":18,"name":"剧情"},{"id":36,"name":"历史"}],
+				"credits":{"cast":[{"id":2037,"name":"Cillian Murphy","character":"J. Robert Oppenheimer","order":0}]}}`))
+		case r.URL.Path == "/3/person/2037/translations":
+			_, _ = w.Write([]byte(`{"translations":[{"iso_639_1":"zh","iso_3166_1":"CN","data":{"name":"基里安·墨菲"}}]}`))
+		case r.URL.Path == "/3/find/tt15398776":
+			_, _ = w.Write([]byte(`{"movie_results":[{"id":872585,"title":"奥本海默","original_title":"Oppenheimer","release_date":"2023-07-19"}],"tv_results":[]}`))
+		case r.URL.Path == "/3/find/tt3581920":
+			_, _ = w.Write([]byte(`{"movie_results":[],"tv_results":[{"id":100088,"name":"最后生还者","original_name":"The Last of Us","first_air_date":"2023-01-15"}]}`))
 		case r.URL.Path == "/3/movie/872585/images":
 			_, _ = w.Write([]byte(`{"posters":[{"file_path":"/opp-zh.jpg","iso_639_1":"zh","vote_average":6},{"file_path":"/opp-en.jpg","iso_639_1":"en","vote_average":7},
 				{"file_path":"/opp-none.jpg","iso_639_1":null,"vote_average":5}],"backdrops":[{"file_path":"/opp-bd-none.jpg","iso_639_1":null,"vote_average":5}],
@@ -106,6 +116,13 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 		case r.URL.Path == "/3/tv/1396":
 			// 只能按编号取（推送、订阅时说明的条目），搜不到
 			_, _ = w.Write([]byte(`{"id":1396,"name":"绝命毒师","original_name":"Breaking Bad","first_air_date":"2008-01-20","genres":[{"id":18,"name":"剧情"}]}`))
+		case r.URL.Path == "/3/search/movie" && strings.Contains(q, "Fallout"):
+			// 同名的电影与剧集：电影更热门（剧集库的文件夹名没写季号时也要认成剧集）
+			_, _ = w.Write([]byte(`{"results":[{"id":9001,"title":"辐射","original_title":"Fallout","release_date":"2024-04-10","popularity":900}]}`))
+		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Fallout"):
+			_, _ = w.Write([]byte(`{"results":[{"id":106379,"name":"辐射","original_name":"Fallout","first_air_date":"2024-04-10","popularity":100}]}`))
+		case r.URL.Path == "/3/tv/106379":
+			_, _ = w.Write([]byte(`{"id":106379,"name":"辐射","original_name":"Fallout","first_air_date":"2024-04-10","genres":[{"id":18,"name":"剧情"}]}`))
 		case strings.HasPrefix(r.URL.Path, "/3/search/"):
 			_, _ = w.Write([]byte(`{"results":[]}`))
 		default:

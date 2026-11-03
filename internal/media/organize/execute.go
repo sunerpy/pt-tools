@@ -107,6 +107,11 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			}
 			continue
 		case ItemDone:
+			if it.row != nil && it.row.Mode == models.MediaModeExisting {
+				// 种子的文件就是导入时就在库里的那个（种子下载在库目录里）：记录照旧
+				res.Done++
+				continue
+			}
 			// 库里已经是这个文件：补上之前没整理成的字幕；没有记录时（例如记录被删了）补一条
 			if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.Mode != "" {
 				it.mode = it.row.Mode // 库里这份是当初按这个方式放的（媒体库后来换了方式、移动时留下了源文件也一样）

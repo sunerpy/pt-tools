@@ -23,9 +23,12 @@ type job struct {
 	// 整理完了却没改写的清掉；租约没被改写时说明这次重试没做完（例如中途重启），租约到期以后还会再试
 	retryIDs []uint
 	lease    time.Time
-	// rescrape 不为 0 时这是重新刮削这条整理记录所在的电影或剧集（见 Rescrape），不是整理
+	// rescrape 不为 0 时这是重新刮削这条整理记录所在的电影或剧集（见 Rescrape），不是整理；fill 为真时只补没有的文件（见 rescrapeWith）
 	rescrape uint
-	done     chan jobResult
+	fill     bool
+	// imp 不为空时这是一次导入已有文件（见 QueueImport），不是整理
+	imp  *importRun
+	done chan jobResult
 }
 
 type jobResult struct {
@@ -36,6 +39,9 @@ type jobResult struct {
 
 // key 是排队去重用的键（见 jobKey）。
 func (j job) key() string {
+	if j.imp != nil {
+		return fmt.Sprintf("import|%p", j.imp)
+	}
 	if j.rescrape > 0 {
 		return fmt.Sprintf("rescrape|%d", j.rescrape)
 	}
@@ -138,8 +144,9 @@ func (s *Service) Start() {
 	s.wg.Go(func() { s.realtimeLoop(ctx) })
 }
 
-// Stop 停止后台循环，等正在整理的种子做完。
+// Stop 停止后台循环，等正在整理的种子做完；在跑的导入扫描取消掉。
 func (s *Service) Stop() {
+	s.stopImportScan()
 	s.runMu.Lock()
 	if !s.running {
 		s.runMu.Unlock()
@@ -190,6 +197,10 @@ func (s *Service) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case j := <-s.jobs:
+			if j.imp != nil {
+				s.handleImport(ctx, j)
+				continue
+			}
 			if j.rescrape > 0 {
 				res, err := s.handleRescrape(ctx, j)
 				if j.done != nil {
@@ -212,7 +223,7 @@ func (s *Service) handleRescrape(ctx context.Context, j job) (*RescrapeResult, e
 	s.qmu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.rescrape(ctx, j.rescrape)
+	res, err := s.rescrapeWith(ctx, j.rescrape, j.fill)
 	if err != nil {
 		s.cfg.Logger.Warnf("[整理入库] 重新刮削失败 (记录 %d): %v", j.rescrape, err)
 	}
@@ -459,7 +470,7 @@ func (s *Service) loop(ctx context.Context) {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	// lastRecover 从开始时算起：worker 开始时已经恢复过一次
-	var lastSweep, lastScan, lastReconcile, lastWatch time.Time
+	var lastSweep, lastScan, lastReconcile, lastWatch, lastFill time.Time
 	lastRecover := s.cfg.Now()
 	for {
 		select {
@@ -495,6 +506,10 @@ func (s *Service) loop(ctx context.Context) {
 		if now.Sub(lastRecover) >= sweepInterval {
 			lastRecover = now
 			s.recoverReplacements(ctx)
+		}
+		if now.Sub(lastFill) >= fillCheck {
+			lastFill = now
+			s.scrapeFill(ctx)
 		}
 	}
 }

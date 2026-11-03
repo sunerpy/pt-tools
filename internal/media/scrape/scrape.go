@@ -111,7 +111,12 @@ type Writer struct {
 	Replace func(path string) bool
 	// ImageLang 是海报与 Logo 优先的语言（见 ImageLangs），RecogLang 是识别语言（例如 zh-CN）
 	ImageLang, RecogLang string
+	// CastName 不为空时是演员的中文名（按 TMDB 上这个人的编号取，没有时回空串）：写 NFO 时前 castNames 位演员换成它
+	CastName func(ctx context.Context, id int) string
 }
+
+// castNames 是换成中文名的演员数。
+const castNames = 15
 
 // imageWorkers 是同时下载的图片数。
 const imageWorkers = 3
@@ -215,6 +220,15 @@ func (w Writer) Write(ctx context.Context, q metadata.Query, base *metadata.Item
 	}
 	res := resolver.Resolve(ctx, q, base, w.Sources, need)
 	rep.Notes, rep.Errors, rep.Fetched = res.Notes, res.Errors, true
+	if w.CastName != nil && need.Item && res.Item != nil {
+		for i := range res.Item.Cast[:min(len(res.Item.Cast), castNames)] {
+			if p := &res.Item.Cast[i]; p.ID > 0 {
+				if n := w.CastName(ctx, p.ID); n != "" {
+					p.Name = n
+				}
+			}
+		}
+	}
 	if nfo {
 		var eps []metadata.EpisodeRef
 		for _, i := range todo {

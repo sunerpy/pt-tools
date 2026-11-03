@@ -60,7 +60,10 @@ type LibraryInput struct {
 	ClassifyDir bool `json:"classify_dir"`
 	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办（OverwriteNever、OverwriteLarger）
 	OverwriteMode string `json:"overwrite_mode"`
-	Enabled       bool   `json:"enabled"`
+	// ScrapeActorZh 为真时演员名用中文译名；ScrapeFill 为真时每周补刮一次（都要开着刮削）
+	ScrapeActorZh bool `json:"scrape_actor_zh"`
+	ScrapeFill    bool `json:"scrape_fill"`
+	Enabled       bool `json:"enabled"`
 }
 
 // DefaultTemplate 是这种媒体库的默认模板。
@@ -172,7 +175,8 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
 		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
 		ScrapeSource: source, ScrapeSources: sources,
-		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, Enabled: in.Enabled,
+		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, ScrapeActorZh: in.ScrapeActorZh && in.Scrape, ScrapeFill: in.ScrapeFill && in.Scrape,
+		Enabled: in.Enabled,
 	}, nil
 }
 
@@ -231,7 +235,7 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(
 		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang", "scrape_source",
 		"scrape_sources",
-		"classify_dir", "overwrite_mode", "enabled", "updated_at",
+		"classify_dir", "overwrite_mode", "scrape_actor_zh", "scrape_fill", "enabled", "updated_at",
 	).Updates(&row)
 	if res.Error != nil {
 		if isUnique(res.Error) {

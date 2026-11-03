@@ -25,7 +25,7 @@ func TestExtras(t *testing.T) {
 				"production_companies":[{"name":"Syncopy"},{"name":"Atlas"},{"name":"Syncopy"}],
 				"belongs_to_collection":{"id":1,"name":"系列"},
 				"credits":{"cast":[{"name":"Emily Blunt","character":"Kitty","order":1,"profile_path":"bad"},
-					{"name":"Cillian Murphy","character":"Oppenheimer","order":0,"profile_path":"/c.jpg"},{"name":" ","order":2}],
+					{"id":2037,"name":"Cillian Murphy","character":"Oppenheimer","order":0,"profile_path":"/c.jpg"},{"name":" ","order":2}],
 					"crew":[{"name":"Christopher Nolan","job":"Director","department":"Directing"},
 					{"name":"Christopher Nolan","job":"Screenplay","department":"Writing"},
 					{"name":"Kai Bird","job":"Novel","department":"Writing"},{"name":"X","job":"Editor","department":"Editing"}]},
@@ -57,6 +57,7 @@ func TestExtras(t *testing.T) {
 	assert.Equal(t, []string{"Christopher Nolan", "Kai Bird"}, m.Writers, "编剧是 Writing 部门的")
 	require.Len(t, m.Cast, 2, "没有名字的演员不要")
 	assert.Equal(t, "Cillian Murphy", m.Cast[0].Name, "按 order 排")
+	assert.Equal(t, 2037, m.Cast[0].ID, "演员带上 TMDB 编号（取中文名用）")
 	assert.Equal(t, srv.URL+"/t/p/w185/c.jpg", c.ProfileURL(m.Cast[0].ProfilePath))
 	assert.Empty(t, m.Cast[1].ProfilePath, "头像路径格式不对时不要")
 	assert.Empty(t, c.ProfileURL(""))

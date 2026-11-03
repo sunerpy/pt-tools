@@ -261,6 +261,11 @@ func (f *fakeOrganizer) Retire(_ context.Context, id uint, reason string) ([]str
 	f.mu.Lock()
 	f.retired = append(f.retired, id)
 	f.mu.Unlock()
+	var row models.MediaTransferHistory
+	if err := f.db.Where("id = ?", id).Limit(1).Find(&row).Error; err == nil && row.Mode == models.MediaModeExisting {
+		// 同整理入库：导入的已有文件不删，记录照旧是已整理
+		return nil, organize.ErrExistingKept
+	}
 	return nil, f.db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).Updates(map[string]any{"status": models.MediaTransferRemoved, "message": reason}).Error
 }
 
