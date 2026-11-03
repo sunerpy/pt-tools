@@ -628,3 +628,32 @@ func TestSourceKeys(t *testing.T) {
 	assert.False(t, got.HasFanartClientKey)
 	assert.False(t, got.HasOMDbKey)
 }
+
+// 候选：电影与剧集都搜、按分数排、按 limit 截；没填 Key 时报 ErrNoKey
+func TestCandidates(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	_, err := s.Candidates(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p"}, 8)
+	require.ErrorIs(t, err, tmdb.ErrNoKey)
+	_, err = s.Candidates(ctx, Input{}, 8)
+	require.ErrorIs(t, err, ErrInvalid)
+
+	withKey(t, s)
+	got, err := s.Candidates(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p"}, 8)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, 278, got[0].ID)
+	assert.Equal(t, 5000, got[1].ID)
+	assert.Greater(t, got[0].Score, got[1].Score)
+
+	got, err = s.Candidates(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p"}, 0)
+	require.NoError(t, err)
+	assert.Len(t, got, 1, "limit 至少 1")
+	got, err = s.Candidates(ctx, Input{Title: "Game.of.Thrones.2011"}, 50)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "只靠年份判成电影的也搜剧集")
+	assert.Equal(t, tmdb.KindTV, got[0].MediaType)
+	got, err = s.Candidates(ctx, Input{Title: "Nothing.Matches.Here.2020"}, 8)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}

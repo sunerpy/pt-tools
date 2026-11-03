@@ -488,6 +488,7 @@ func TestPathOverlapsTorrentRefused(t *testing.T) {
 		require.NoError(t, err, src)
 		assert.Contains(t, p.Problem, "重叠", src)
 		assert.Contains(t, p.Problem, "下载器「qb」里的种子", src)
+		assert.Equal(t, models.MediaFailOther, p.FailKind, src)
 		res, err := e.svc.Organize(e.ctx, Request{SourcePath: src})
 		require.NoError(t, err, src)
 		assert.Contains(t, res.Plan.Problem, "重叠", src)
@@ -516,6 +517,7 @@ func TestPathMoveChecksDownloaders(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, models.MediaTransferFailed, rows[0].Status)
 	assert.Nil(t, rows[0].NextRetryAt, "改了设置再手动重试")
+	assert.Equal(t, models.MediaFailOther, rows[0].FailKind)
 
 	e.dl.mu.Lock()
 	e.dl.listErr = errors.New("连接被拒绝")

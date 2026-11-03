@@ -3517,6 +3517,28 @@ export interface ClassifyRule {
   languages?: string[];
   /** 出品国家或地区（ISO 3166-1，例如 CN、US） */
   countries?: string[];
+  /**
+   * max_runtime 与 keywords 合成一个条件（两个都填时是「或」）：片长（分钟，剧集是一集）不超过 max_runtime，
+   * 或者标题（种子名、站点标题）里有其中一个关键字。片长未知时片长这一半对不上
+   */
+  max_runtime?: number;
+  keywords?: string[];
+}
+
+/** 这次放进哪个二级分类、为什么：rule 是对上的第几条（从 1 数），0 是都没对上；其余是对上的条件 */
+export interface ClassifyNote {
+  rule: number;
+  name?: string;
+  /** 这一类（电影或剧集）的规则数 */
+  rules: number;
+  genres?: number[];
+  languages?: string[];
+  countries?: string[];
+  /** 对上「片长不超过」时条目的片长与规则里的上限（分钟） */
+  runtime?: number;
+  max_runtime?: number;
+  /** 标题里对上的关键字 */
+  keyword?: string;
 }
 
 /** 电影与剧集各自的二级分类，按顺序取第一条对得上的 */
@@ -3628,7 +3650,13 @@ export interface PathOrganizeRequest extends OrganizeRequestOptions {
   source_path: string;
 }
 
-export type OrganizeRequest = TorrentOrganizeRequest | PathOrganizeRequest;
+/** 整理监控目录里的一项（只有网页会话能用，App API 不收） */
+export interface WatchOrganizeRequest extends OrganizeRequestOptions {
+  watch_dir_id: number;
+  entry: string;
+}
+
+export type OrganizeRequest = TorrentOrganizeRequest | PathOrganizeRequest | WatchOrganizeRequest;
 
 export type OrganizeItemStatus = "pending" | "done" | "exists" | "replace" | "failed";
 
@@ -3674,11 +3702,15 @@ export interface OrganizePlan {
   library?: MediaLibraryInput & { id: number };
   /** 放进的二级分类（媒体库开了「按二级分类放进子目录」、规则对得上时才有） */
   category?: string;
+  /** 二级分类怎么定的（媒体库开了「按二级分类放进子目录」、这一类有规则时才有） */
+  classify?: ClassifyNote;
   mode?: MediaMode;
   items: OrganizePlanItem[];
   skipped?: { file: { rel: string; path: string; size: number }; reason: string }[];
   /** 整个种子整理不了的原因 */
   problem?: string;
+  /** 整理不了的分类（有 problem 时才有） */
+  fail_kind?: MediaFailKind;
   /** 手动指定路径整理时是规整后的路径（改成按种子整理时没有） */
   source_path?: string;
   /** 不挡整理的说明（例如指定的路径是下载器里的种子，改成了按种子整理） */
@@ -3697,6 +3729,20 @@ export interface OrganizeResult {
 }
 
 export type MediaTransferStatus = "done" | "failed" | "skipped" | "removed";
+
+/**
+ * 失败与跳过的整理记录的分类：没识别出来、媒体库的问题、要加路径映射、文件系统（跨文件系统、权限）、目标已有别的文件、
+ * 源文件不在了、整理不了的原盘与镜像、其他。整理成的记录为空；升级前的失败、跳过记录也为空（当作其他）
+ */
+export type MediaFailKind =
+  | "recognize"
+  | "library"
+  | "path"
+  | "filesystem"
+  | "exists"
+  | "source"
+  | "disc"
+  | "other";
 
 export interface MediaHistoryItem {
   id: number;
@@ -3722,6 +3768,8 @@ export interface MediaHistoryItem {
   size: number;
   status: MediaTransferStatus;
   message: string;
+  /** 失败与跳过的分类（见 MediaFailKind） */
+  fail_kind: "" | MediaFailKind;
   attempts: number;
   next_retry_at?: string;
   trigger: "auto" | "scan" | "manual" | "watch";
@@ -3766,6 +3814,110 @@ export interface MediaHistoryPage {
   total: number;
 }
 
+/** 按条目分的一组整理记录：识别出条目的按类型、TMDB 编号与季分，没识别出的按种子名（torrent）分 */
+export interface MediaHistoryGroup {
+  media_type?: MediaKind;
+  tmdb_id?: number;
+  season?: number;
+  torrent?: string;
+  title?: string;
+  year?: number;
+  total: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  removed: number;
+  /** 组里最近更新的那条记录的时间 */
+  latest_at: string;
+}
+
+export interface MediaHistoryGroupPage {
+  groups: MediaHistoryGroup[];
+  total: number;
+}
+
+/** 整理历史的查询：kind 只看失败与跳过的记录；media_type、tmdb_id、season 或 torrent 选一组（见 MediaHistoryGroup） */
+export interface MediaHistoryQuery {
+  status?: string;
+  kind?: MediaFailKind;
+  q?: string;
+  limit?: number;
+  offset?: number;
+  media_type?: MediaKind;
+  tmdb_id?: number;
+  season?: number;
+  torrent?: string;
+}
+
+export type MediaHistoryBatchAction = "retry" | "delete" | "delete_files" | "rescrape";
+
+/** 批量操作的结果：每条记录一项；重试与重新刮削排进整理队列就回 */
+export interface MediaHistoryBatchResult {
+  items: { id: number; ok: boolean; message?: string }[];
+  ok: number;
+  failed: number;
+}
+
+/**
+ * 「让 AI 认」的结果：chosen 是选中的候选下标，-1 是都不是（或没有候选、没调模型）；选中时 request 是带上这个条目的整理请求，
+ * preview 是按它算出的整理预览（不整理）
+ */
+export interface MediaAIRecognizeResult {
+  /** 认的标题（种子名与站点标题）：「记成纠正」用它 */
+  input: { title: string; subtitle?: string };
+  candidates: MediaCandidate[];
+  chosen: number;
+  reason?: string;
+  model?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  request?: OrganizeRequest & { media_type: MediaKind; tmdb_id: number };
+  preview?: OrganizePlan;
+}
+
+/** 「手动整理」浏览文件时能进的根目录：kinds 是它从哪来（媒体库、监控目录、路径映射、下载器的下载目录） */
+export interface MediaFSRoot {
+  path: string;
+  kinds: ("library" | "watch" | "map" | "downloader")[];
+  labels?: string[];
+}
+
+export interface MediaFSEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+  size?: number;
+  mod_time: string;
+}
+
+/** 一层目录：目录在前、按名字排；root 是所在的根目录，parent 是上一级（已经是根目录时没有） */
+export interface MediaFSList {
+  path: string;
+  root: string;
+  parent?: string;
+  entries: MediaFSEntry[];
+  truncated?: boolean;
+}
+
+function historyParams(q: MediaHistoryQuery, group = false): string {
+  const params = new URLSearchParams();
+  if (q.status) params.set("status", q.status);
+  if (q.kind) params.set("kind", q.kind);
+  if (q.q) params.set("q", q.q);
+  if (q.limit) params.set("limit", String(q.limit));
+  if (q.offset) params.set("offset", String(q.offset));
+  if (q.tmdb_id) {
+    params.set("media_type", q.media_type ?? "");
+    params.set("tmdb_id", String(q.tmdb_id));
+    params.set("season", String(q.season ?? 0));
+  } else if (q.torrent) {
+    params.set("torrent", q.torrent);
+  }
+  if (group) params.set("group", "item");
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export const organizeApi = {
   settings: () => api.get<OrganizeSettings>("/api/media/organize/settings"),
   saveSettings: (data: OrganizeSettingsInput) =>
@@ -3805,15 +3957,23 @@ export const organizeApi = {
   deleteServer: (id: number) => api.delete<{ ok: boolean }>(`/api/media/servers/${id}`),
   testServer: (data: { id?: number; kind: MediaServerKind; url: string; token?: string }) =>
     api.post<MediaServerInfo>("/api/media/servers/test", data),
-  history: (q: { status?: string; q?: string; limit?: number; offset?: number } = {}) => {
-    const params = new URLSearchParams();
-    if (q.status) params.set("status", q.status);
-    if (q.q) params.set("q", q.q);
-    if (q.limit) params.set("limit", String(q.limit));
-    if (q.offset) params.set("offset", String(q.offset));
-    const qs = params.toString();
-    return api.get<MediaHistoryPage>(`/api/media/history${qs ? `?${qs}` : ""}`);
-  },
+  history: (q: MediaHistoryQuery = {}) =>
+    api.get<MediaHistoryPage>(`/api/media/history${historyParams(q)}`),
+  /** 按条目分组（组的条件不看） */
+  historyGroups: (q: MediaHistoryQuery = {}) =>
+    api.get<MediaHistoryGroupPage>(`/api/media/history${historyParams(q, true)}`),
+  historyBatch: (ids: number[], action: MediaHistoryBatchAction) =>
+    api.post<MediaHistoryBatchResult>("/api/media/history/batch", { ids, action }),
+  /** 让 AI 从 TMDB 的候选里认这个种子（请求同预览）：只认、不整理 */
+  aiRecognize: (data: OrganizeRequest) =>
+    api.post<MediaAIRecognizeResult>("/api/media/organize/ai-recognize", data),
+  aiRecognizeHistory: (id: number) =>
+    api.post<MediaAIRecognizeResult>(`/api/media/history/${id}/ai-recognize`),
+  /** 「让 AI 认」能不能用（AI 助手启用并配好了没有），不能用时写明原因 */
+  aiStatus: () => api.get<{ ready: boolean; reason?: string }>("/api/media/organize/ai-status"),
+  fsRoots: () => api.get<{ roots: MediaFSRoot[] }>("/api/media/fs/roots"),
+  fsList: (path: string) =>
+    api.get<MediaFSList>(`/api/media/fs/list?path=${encodeURIComponent(path)}`),
   retry: (id: number) => api.post<OrganizeResult>(`/api/media/history/${id}/retry`),
   /** 按媒体库现在的设置重新刮削这条记录所在的电影或剧集 */
   rescrape: (id: number) => api.post<RescrapeResult>(`/api/media/history/${id}/scrape`),

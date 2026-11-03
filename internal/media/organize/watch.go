@@ -133,12 +133,14 @@ func (s *Service) buildWatchPlan(ctx context.Context, req Request) (*Plan, error
 		return nil, fmt.Errorf("%w: 监控目录里没有「%s」", ErrNotFound, entry)
 	case errors.Is(err, errWatchTooBig):
 		// 只整理一部分的话剩下的永远不会整理：整项不整理，写一条跳过的记录说明
+		p.FailKind = models.MediaFailOther
 		p.Problem = "「" + entry + "」里的" + errWatchTooBig.Error() + "，不整理：拆成几项放进监控目录"
 		return p, nil
 	case err != nil:
 		return nil, fmt.Errorf("读取「%s」失败: %w", entry, err)
 	}
 	if s.cfg.Now().Sub(newest) < watchSettle {
+		p.FailKind = models.MediaFailOther
 		p.Problem, p.noRecord = fmt.Sprintf("「%s」最近 %d 分钟里还有改动（可能还在复制），等写完再整理", entry, int(watchSettle/time.Minute)), true
 		return p, nil
 	}

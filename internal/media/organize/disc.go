@@ -122,7 +122,7 @@ func (p *Plan) splitTVISO() {
 func (s *Service) recordISOSkips(ctx context.Context, p *Plan, trigger string, res *Result) {
 	for i := range p.isoSkips {
 		it := &p.isoSkips[i]
-		it.Status, it.Message = ItemFailed, isoTVNote
+		it.fail(models.MediaFailDisc, isoTVNote)
 		s.record(ctx, p, it, trigger, models.MediaTransferSkipped, isoTVNote, false, "", nil)
 		res.Skipped++
 	}
@@ -135,17 +135,18 @@ func (s *Service) planDisc(ctx context.Context, p *Plan, tpl string, it *PlanIte
 	it.meta = fm
 	rel, err := transfer.Render(tpl, vars(p.Match, fm, p.meta))
 	if err != nil {
-		it.Status, it.Message = ItemFailed, err.Error()
+		it.fail(models.MediaFailLibrary, err.Error())
 		return
 	}
 	dir := path.Dir(rel)
 	if dir == "." {
-		it.Status, it.Message = ItemFailed, "原盘要放在单独的目录里：电影的命名模板把电影直接放在库目录里（模板里没有「/」），改成先建电影目录的模板（例如默认模板）再整理"
+		it.fail(models.MediaFailLibrary, "原盘要放在单独的目录里：电影的命名模板把电影直接放在库目录里（模板里没有「/」），改成先建电影目录的模板（例如默认模板）再整理")
 		return
 	}
 	it.Target = filepath.Join(p.base(), filepath.FromSlash(dir))
 	if !transfer.Within(p.Library.Path, it.Target) {
-		it.Status, it.Message, it.Target = ItemFailed, "模板算出的路径不在库目录里", ""
+		it.fail(models.MediaFailLibrary, "模板算出的路径不在库目录里")
+		it.Target = ""
 		return
 	}
 	it.Status = discState(it)
@@ -170,7 +171,7 @@ func discState(it *PlanItem) string {
 	case errors.Is(err, os.ErrNotExist), err == nil && len(entries) == 0:
 		return ItemPending
 	case err != nil:
-		it.Message = "读不了电影目录：" + err.Error()
+		it.Message, it.failKind = "读不了电影目录："+err.Error(), models.MediaFailFilesystem
 		return ItemFailed
 	}
 	if mode := adoptMode(it); mode != "" {
@@ -329,6 +330,7 @@ func (s *Service) organizeDisc(ctx context.Context, p *Plan, it *PlanItem, trigg
 		return false
 	case ItemExists:
 		res.Skipped++
+		it.failKind = models.MediaFailExists
 		s.record(ctx, p, it, trigger, models.MediaTransferSkipped, it.Message, false, "", nil)
 		return false
 	case ItemDone:
@@ -362,7 +364,7 @@ func (s *Service) organizeDisc(ctx context.Context, p *Plan, it *PlanItem, trigg
 		default:
 			res.Failed++
 		}
-		it.Status, it.Message = ItemFailed, err.Error()
+		it.fail(failKindOf(err), err.Error())
 		s.record(ctx, p, it, trigger, status, err.Error(), retry, mainOf(placed.extras), placed.extras)
 		return false
 	}

@@ -10,8 +10,12 @@ import {
   SCRAPE_SOURCE_FIELDS,
   SCRAPE_SOURCE_OPTIONS,
   TMDB_GENRES,
+  batchOutcome,
+  classifyNoteText,
   classifyRuleSummary,
   discLabel,
+  failKindLabel,
+  failKindOf,
   episodeText,
   mediaKindLabel,
   mediaSourceLabel,
@@ -100,6 +104,63 @@ describe("媒体识别的显示工具", () => {
     );
     expect(classifyRuleSummary("movie", { name: "外语电影" })).toBe(
       "不限条件：前面都对不上的放进这里",
+    );
+    expect(
+      classifyRuleSummary("tv", {
+        name: "短剧",
+        countries: ["CN"],
+        max_runtime: 15,
+        keywords: ["短剧", "竖屏"],
+      }),
+    ).toBe("国家或地区：中国大陆；片长不超过 15 分钟或标题含「短剧」「竖屏」");
+    expect(classifyRuleSummary("tv", { name: "短剧", keywords: ["短剧"] })).toBe("标题含「短剧」");
+  });
+
+  it("二级分类的说明：对上第几条、对上的条件；都没对上时写规则数", () => {
+    expect(
+      classifyNoteText("tv", { rule: 1, name: "国漫", rules: 9, genres: [16], countries: ["CN"] }),
+    ).toBe("对上第 1 条「国漫」：类型是动画，出品国家或地区有中国大陆");
+    expect(
+      classifyNoteText("movie", { rule: 2, name: "华语电影", rules: 3, languages: ["cn"] }),
+    ).toBe("对上第 2 条「华语电影」：原始语言是粤语");
+    expect(classifyNoteText("movie", { rule: 3, name: "外语电影", rules: 3 })).toBe(
+      "对上第 3 条「外语电影」：不限条件",
+    );
+    expect(classifyNoteText("tv", { rule: 0, rules: 4 })).toBe("4 条规则都没对上，放在库目录里");
+  });
+
+  it("失败分类：只看失败与跳过，升级前没有分类的算其他", () => {
+    expect(failKindOf({ status: "failed", fail_kind: "recognize" })).toBe("recognize");
+    expect(failKindOf({ status: "skipped", fail_kind: "" })).toBe("other");
+    expect(failKindOf({ status: "done", fail_kind: "" })).toBe("");
+    expect(failKindOf({ status: "removed", fail_kind: "other" })).toBe("");
+    expect(failKindLabel("disc")).toBe("原盘与镜像");
+    expect(failKindLabel("")).toBe("");
+  });
+
+  it("批量结果：都成了；有的不成时列出前两条原因", () => {
+    expect(batchOutcome({ items: [], ok: 3, failed: 0 }, "已重试")).toEqual({
+      level: "success",
+      text: "已重试 3 条",
+    });
+    expect(
+      batchOutcome(
+        {
+          items: [
+            { id: 1, ok: false, message: "a" },
+            { id: 2, ok: true },
+            { id: 3, ok: false, message: "b" },
+            { id: 4, ok: false, message: "c" },
+            { id: 5, ok: false },
+          ],
+          ok: 1,
+          failed: 4,
+        },
+        "已删除记录",
+      ),
+    ).toEqual({ level: "warning", text: "已删除记录 1 条，4 条没做成：a；b" });
+    expect(batchOutcome({ items: [{ id: 1, ok: false }], ok: 0, failed: 1 }, "已重试").text).toBe(
+      "已重试 0 条，1 条没做成",
     );
   });
 

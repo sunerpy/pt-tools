@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,6 +64,7 @@ func newOrganizeServer(t *testing.T) *organizeTestEnv {
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
 		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaTransferHistory{}, &models.MediaReplaceJournal{}, &models.MediaWatchDir{},
+		&models.DownloaderDirectory{},
 	))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -133,6 +135,12 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 		{http.MethodDelete, "/api/media/servers/1"},
 		{http.MethodPost, "/api/media/servers/test"},
 		{http.MethodGet, "/api/media/history"},
+		{http.MethodPost, "/api/media/history/batch"},
+		{http.MethodGet, "/api/media/fs/roots"},
+		{http.MethodGet, "/api/media/organize/ai-status"},
+		{http.MethodPost, "/api/media/organize/ai-recognize"},
+		{http.MethodPost, "/api/media/history/1/ai-recognize"},
+		{http.MethodGet, "/api/media/fs/list?path=/"},
 		{http.MethodPost, "/api/media/history/1/retry"},
 		{http.MethodPost, "/api/media/history/1/scrape"},
 		{http.MethodDelete, "/api/media/history/1"},
@@ -339,6 +347,86 @@ func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {
 	_, err = os.Stat(target)
 	assert.ErrorIs(t, err, os.ErrNotExist, "连库里的文件一起删")
 	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id, "").Code)
+}
+
+// 浏览文件：根目录、一层目录；根目录以外的回 403，不存在的 404，相对路径 400
+func TestOrganizeAPI_FS(t *testing.T) {
+	e := newOrganizeServer(t)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":`+jsonPath(e.dlDir)+`}`).Code)
+	w := serveAuthed(e.mux, http.MethodGet, "/api/media/fs/roots", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var roots struct {
+		Roots []organize.FSRoot `json:"roots"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &roots))
+	require.Len(t, roots.Roots, 2)
+
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/fs/list?path="+url.QueryEscape(e.dlDir), "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var list organize.FSList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	require.Len(t, list.Entries, 1)
+	assert.True(t, list.Entries[0].Dir)
+	assert.Equal(t, http.StatusForbidden, serveAuthed(e.mux, http.MethodGet, "/api/media/fs/list?path="+url.QueryEscape(filepath.Dir(e.dlDir)), "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodGet, "/api/media/fs/list?path="+url.QueryEscape(filepath.Join(e.dlDir, "nope")), "").Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodGet, "/api/media/fs/list?path=rel", "").Code)
+}
+
+// 整理历史的分类筛选、按条目分组与批量操作
+func TestOrganizeAPI_HistoryGroupsAndBatch(t *testing.T) {
+	e := newOrganizeServer(t)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":`+jsonPath(e.dlDir)+`}`).Code)
+	w := serveAuthed(e.mux, http.MethodPost, "/api/media/organize", `{"downloader_id":1,"hash":"hash1"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"created":1`)
+	failed := models.MediaTransferHistory{TorrentName: "Unknown.2020", SourcePath: "/downloads/Unknown.2020", Status: models.MediaTransferFailed, FailKind: models.MediaFailRecognize}
+	require.NoError(t, global.GlobalDB.DB.Create(&failed).Error)
+
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history?kind=recognize", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page organize.HistoryPage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, failed.ID, page.Items[0].ID)
+	assert.Contains(t, w.Body.String(), `"fail_kind":"recognize"`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodGet, "/api/media/history?kind=bad", "").Code)
+
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history?group=item", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var groups organize.HistoryGroupPage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &groups))
+	require.Equal(t, int64(2), groups.Total)
+	var movie organize.HistoryGroup
+	for _, g := range groups.Groups {
+		if g.TMDBID > 0 {
+			movie = g
+		}
+	}
+	require.Equal(t, "movie", movie.MediaType)
+	assert.Equal(t, 1, movie.Done)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodGet, "/api/media/history?group=site", "").Code)
+
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history?media_type=movie&tmdb_id="+strconv.Itoa(movie.TMDBID)+"&season=0", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	done := page.Items[0].ID
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/history?torrent=Unknown.2020", "")
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodGet, "/api/media/history?tmdb_id=5", "").Code, "按条目看要写类型")
+
+	body := `{"ids":[` + strconv.Itoa(int(done)) + `,` + strconv.Itoa(int(failed.ID)) + `],"action":"delete"}`
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/history/batch", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var res organize.BatchResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+	assert.Equal(t, 2, res.OK)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/history/batch", `{"ids":[1],"action":"burn"}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/history/batch", `{"ids":[],"action":"delete"}`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/history/batch", `{"ids":[1],"action":"delete","x":1}`).Code)
 }
 
 // 手动整理时选整理方式：网页会话的预览与整理按选的方式（这里媒体库是硬链接、选了复制），整理历史写明选的方式；

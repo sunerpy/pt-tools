@@ -554,6 +554,56 @@ describe("媒体库", () => {
     expect(api.saveClassify).toHaveBeenCalledTimes(4);
   });
 
+  it("二级分类：片长上限与标题关键字（短剧）一起保存，摘要写成「或」；编辑时带出原来的值", async () => {
+    // mountPage 把读分类设成空的：排一次带短剧规则的回答（排着的先用）
+    api.classify.mockResolvedValueOnce({
+      rules: { movie: [], tv: [{ name: "短剧", max_runtime: 15, keywords: ["短剧"] }] },
+      presets: classifyPresets,
+    });
+    await mountPage();
+    await vi.waitFor(() => expect(q("ml-rule-tv-0")).not.toBeNull());
+    expect(q("ml-rule-tv-0")!.textContent).toContain("片长不超过 15 分钟或标题含「短剧」");
+
+    // 编辑：带出原来的片长与关键字
+    q("ml-rule-edit-tv-0")!.click();
+    await vi.waitFor(() => expect(q("ml-rule-runtime")).not.toBeNull());
+    expect(q("ml-rule-runtime")!.querySelector("input")!.value).toBe("15");
+    expect(q("ml-rule-keywords")!.textContent).toContain("短剧");
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent?.trim() === "取消" && b.closest(".el-dialog"))!
+      .click();
+    await flush();
+
+    api.saveClassify.mockImplementation(async (rules) => ({ rules, presets: classifyPresets }));
+    q("ml-classify-add-tv")!.click();
+    await vi.waitFor(() => expect(q("ml-rule-name")).not.toBeNull());
+    fill("ml-rule-name", "微短剧");
+    const runtime = q("ml-rule-runtime")!.querySelector("input")!;
+    runtime.value = "10";
+    runtime.dispatchEvent(new Event("input"));
+    runtime.dispatchEvent(new Event("change"));
+    const kw = q("ml-rule-keywords")!.querySelector("input")!;
+    kw.value = " 竖屏 ";
+    kw.dispatchEvent(new Event("input"));
+    await flush();
+    // 能自己填的下拉框：输入的字作为一个选项出现在最前面，点它
+    const created = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+      (el) => el.textContent?.trim() === "竖屏",
+    );
+    created!.click();
+    await flush();
+    q("ml-rule-save")!.click();
+    await vi.waitFor(() => expect(api.saveClassify).toHaveBeenCalledTimes(1));
+    expect(api.saveClassify.mock.calls[0]![0].tv[1], "关键字去掉前后的空白").toEqual({
+      name: "微短剧",
+      genres: [],
+      languages: [],
+      countries: [],
+      max_runtime: 10,
+      keywords: ["竖屏"],
+    });
+  });
+
   it("媒体库：同名文件选「新文件更大时替换」时带上 overwrite_mode", async () => {
     await mountPage();
     q("ml-lib-edit-3")!.click();

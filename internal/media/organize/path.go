@@ -96,6 +96,7 @@ func (s *Service) buildPathPlan(ctx context.Context, req Request) (*Plan, error)
 	cancel()
 	if hit != nil && !hit.ByName {
 		if !hit.Exact {
+			p.FailKind = models.MediaFailOther
 			p.Problem = fmt.Sprintf("「%s」和下载器「%s」里的种子「%s」的文件重叠（在它里面或包含它），不整理：下载器里的种子在「下载器 Web UI」里选中它点「整理入库」，或在这里填这个种子自己的目录",
 				base, hit.DownloaderName, hit.Name)
 			p.noRecord = true
@@ -118,12 +119,14 @@ func (s *Service) buildPathPlan(ctx context.Context, req Request) (*Plan, error)
 	case errors.Is(err, os.ErrNotExist):
 		return nil, errSourceMissing(src)
 	case errors.Is(err, errWatchTooBig):
+		p.FailKind = models.MediaFailOther
 		p.Problem, p.noRecord = "「"+base+"」里的"+errWatchTooBig.Error()+"，不整理：选一部电影或一季剧集的文件夹", true
 		return p, nil
 	case err != nil:
 		return nil, fmt.Errorf("读取 %s 失败: %w", src, err)
 	}
 	if s.cfg.Now().Sub(newest) < watchSettle {
+		p.FailKind = models.MediaFailOther
 		p.Problem, p.noRecord = fmt.Sprintf("「%s」最近 %d 分钟里还有改动（可能还在复制），等写完再整理", base, int(watchSettle/time.Minute)), true
 		return p, nil
 	}

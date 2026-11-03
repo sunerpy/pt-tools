@@ -252,8 +252,10 @@ func TestOrganizeProblems(t *testing.T) {
 	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
 	require.NoError(t, err)
 	assert.Contains(t, res.Plan.Problem, "没有启用的电影媒体库")
+	assert.Equal(t, models.MediaFailLibrary, res.Plan.FailKind)
 	rows := e.history()
 	require.Len(t, rows, 1)
+	assert.Equal(t, models.MediaFailLibrary, rows[0].FailKind)
 	assert.Equal(t, models.MediaTransferFailed, rows[0].Status)
 	assert.Nil(t, rows[0].NextRetryAt, "要用户先加媒体库，不自动重试")
 	assert.Equal(t, 1, rows[0].Attempts)
@@ -269,6 +271,7 @@ func TestOrganizeProblems(t *testing.T) {
 	require.NoError(t, e.db.Where("info_hash = ?", "dddddddddddddddddddddddddddddddddddddddd").First(&row).Error)
 	require.NotNil(t, row.NextRetryAt)
 	assert.Equal(t, e.now.Add(retryDelays[0]), row.NextRetryAt.UTC())
+	assert.Equal(t, models.MediaFailRecognize, row.FailKind)
 	e.tmdb.setDown(false)
 
 	// 没识别出来：不自动重试
@@ -279,12 +282,14 @@ func TestOrganizeProblems(t *testing.T) {
 	require.NoError(t, e.db.First(&again, row.ID).Error)
 	assert.Nil(t, again.NextRetryAt)
 	assert.Equal(t, 2, again.Attempts)
+	assert.Equal(t, models.MediaFailRecognize, again.FailKind)
 
 	// 没下载完：不写记录
 	e.addTorrent("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "Half.2020.mkv", map[string]int{"Half.2020.mkv": 2}, func(t *downloader.Torrent) { t.Progress = 0.5 })
 	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"})
 	require.NoError(t, err)
 	assert.Equal(t, "种子还没下载完", res.Plan.Problem)
+	assert.Equal(t, models.MediaFailOther, res.Plan.FailKind)
 	var n int64
 	e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee").Count(&n)
 	assert.Zero(t, n)
@@ -298,6 +303,7 @@ func TestOrganizeProblems(t *testing.T) {
 	require.NoError(t, e.db.Where("info_hash = ?", "ffffffffffffffffffffffffffffffffffffffff").First(&disc).Error)
 	assert.Equal(t, models.MediaTransferFailed, disc.Status)
 	assert.Equal(t, filepath.Join(e.dlDir, "Disc.2021.BluRay"), disc.SourcePath)
+	assert.Equal(t, models.MediaFailRecognize, disc.FailKind)
 
 	// pt-tools 里找不到文件：提示加路径映射
 	e.addTorrent("1111111111111111111111111111111111111111", "Lost.2022.mkv", map[string]int{"Lost.2022.mkv": 2}, func(t *downloader.Torrent) { t.SavePath = "/elsewhere" })
@@ -305,6 +311,10 @@ func TestOrganizeProblems(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, res.Plan.Problem, "路径映射")
 	assert.False(t, res.Plan.Mapped)
+	assert.Equal(t, models.MediaFailPath, res.Plan.FailKind)
+	var lost models.MediaTransferHistory
+	require.NoError(t, e.db.Where("info_hash = ?", "1111111111111111111111111111111111111111").First(&lost).Error)
+	assert.Equal(t, models.MediaFailPath, lost.FailKind)
 
 	// 下载器里没有、参数不对
 	_, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: "9999"})
@@ -351,6 +361,7 @@ func TestOrganizeTargetExistsAndDuplicates(t *testing.T) {
 	assert.Equal(t, 1, res.Skipped)
 	assert.Equal(t, "someone else", readFile(t, occupied), "不覆盖")
 	assert.Equal(t, models.MediaTransferSkipped, e.history()[0].Status)
+	assert.Equal(t, models.MediaFailExists, e.history()[0].FailKind)
 
 	e.addTorrent("3333333333333333333333333333333333333333", "Oppenheimer.2023.Pack", map[string]int{
 		"Oppenheimer.2023.Pack/Oppenheimer.2023.1080p.mkv": 2,
@@ -362,6 +373,9 @@ func TestOrganizeTargetExistsAndDuplicates(t *testing.T) {
 	assert.Equal(t, 1, res.Created)
 	assert.Equal(t, 1, res.Failed)
 	assert.Contains(t, res.Plan.Items[1].Message, "目标相同")
+	var dup models.MediaTransferHistory
+	require.NoError(t, e.db.Where("info_hash = ? AND status = ?", "3333333333333333333333333333333333333333", models.MediaTransferFailed).First(&dup).Error)
+	assert.Equal(t, models.MediaFailLibrary, dup.FailKind)
 }
 
 func TestOrganizeTVNoEpisode(t *testing.T) {
@@ -378,6 +392,7 @@ func TestOrganizeTVNoEpisode(t *testing.T) {
 	assert.Equal(t, 1, res.Failed)
 	var failed models.MediaTransferHistory
 	require.NoError(t, e.db.Where("status = ?", models.MediaTransferFailed).First(&failed).Error)
+	assert.Equal(t, models.MediaFailRecognize, failed.FailKind)
 	assert.Contains(t, failed.Message, "集数")
 	assert.Nil(t, failed.NextRetryAt)
 }
@@ -843,6 +858,7 @@ func TestOrganizeFollowLibrary(t *testing.T) {
 	require.NotEmpty(t, rows)
 	assert.Equal(t, models.MediaTransferFailed, rows[0].Status)
 	assert.NotNil(t, rows[0].NextRetryAt, "可以重试")
+	assert.Equal(t, models.MediaFailRecognize, rows[0].FailKind)
 	entries, err := os.ReadDir(e.tv)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "没有整理进自动选的库")
@@ -855,6 +871,7 @@ func TestOrganizeFollowLibrary(t *testing.T) {
 	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
 	require.NoError(t, err)
 	assert.Contains(t, res.Plan.Problem, "追剧指定的媒体库不存在、没有启用")
+	assert.Equal(t, models.MediaFailLibrary, res.Plan.FailKind)
 
 	// 追剧指定了库：整理进它
 	answer = func(uint, string) (MediaHint, bool, error) { return MediaHint{LibraryID: lib.ID}, true, nil }

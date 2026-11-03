@@ -217,6 +217,8 @@ func TestOrganizeDiscProblems(t *testing.T) {
 	assert.Equal(t, models.MediaTransferSkipped, row.Status)
 	assert.Equal(t, filepath.Join(e.dlDir, tvName), row.SourcePath, "记在原盘根目录上")
 	assert.Nil(t, row.NextRetryAt)
+	assert.Equal(t, models.MediaFailDisc, res.Plan.FailKind)
+	assert.Equal(t, models.MediaFailDisc, row.FailKind)
 
 	// 种子里有两张原盘、没有视频流、BDMV 直接在保存目录里：识别以前就跳过，记在内容路径上
 	for _, tc := range []struct {
@@ -235,6 +237,7 @@ func TestOrganizeDiscProblems(t *testing.T) {
 		require.NoError(t, e.db.Where("info_hash = ?", tc.hash).First(&r).Error)
 		assert.Equal(t, models.MediaTransferSkipped, r.Status, tc.name)
 		assert.Equal(t, filepath.Join(e.dlDir, tc.name), r.SourcePath, tc.name)
+		assert.Equal(t, models.MediaFailDisc, r.FailKind, tc.name)
 	}
 
 	// 电影目录里已经有文件（另一个版本）：不和它放在一起
@@ -250,12 +253,17 @@ func TestOrganizeDiscProblems(t *testing.T) {
 	var skipped models.MediaTransferHistory
 	require.NoError(t, e.db.Where("info_hash = ?", discHash).First(&skipped).Error)
 	assert.Equal(t, models.MediaTransferSkipped, skipped.Status)
+	assert.Equal(t, models.MediaFailExists, skipped.FailKind)
 
-	// 空的电影目录照常放
+	// 空的电影目录照常放：整理成了，分类清掉
 	require.NoError(t, os.Remove(filepath.Join(movieDir, "奥本海默 (2023) - 2160p.mkv")))
 	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: discHash})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Created)
+	var placed models.MediaTransferHistory
+	require.NoError(t, e.db.First(&placed, skipped.ID).Error)
+	assert.Equal(t, models.MediaTransferDone, placed.Status)
+	assert.Empty(t, placed.FailKind)
 }
 
 // 电影的命名模板没有目录：原盘没地方放，记失败、不重试
@@ -271,6 +279,7 @@ func TestOrganizeDiscNeedsMovieDir(t *testing.T) {
 	r := e.history()[0]
 	assert.Equal(t, models.MediaTransferFailed, r.Status)
 	assert.Nil(t, r.NextRetryAt)
+	assert.Equal(t, models.MediaFailLibrary, r.FailKind)
 	entries, err := os.ReadDir(e.movies)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
@@ -514,6 +523,7 @@ func TestOrganizeTVISO(t *testing.T) {
 	require.NoError(t, e.db.Where("source_path = ?", filepath.Join(e.dlDir, name, "The.Last.of.Us.S01E01.1080p.BluRay-GRP.iso")).First(&iso).Error)
 	assert.Equal(t, models.MediaTransferSkipped, iso.Status)
 	assert.Contains(t, iso.Message, "ISO")
+	assert.Equal(t, models.MediaFailDisc, iso.FailKind)
 	reasons := map[string]string{}
 	for _, s := range res.Plan.Skipped {
 		reasons[filepath.Base(s.File.Rel)] = s.Reason
@@ -527,7 +537,7 @@ func TestOrganizeTVISO(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, res.Plan.Problem, "ISO")
 	var n int64
-	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("source_path = ? AND status = ?", filepath.Join(e.dlDir, only, only+".iso"), models.MediaTransferSkipped).Count(&n).Error)
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("source_path = ? AND status = ? AND fail_kind = ?", filepath.Join(e.dlDir, only, only+".iso"), models.MediaTransferSkipped, models.MediaFailDisc).Count(&n).Error)
 	assert.Equal(t, int64(1), n)
 }
 
@@ -662,9 +672,10 @@ func TestOrganizeDiscPlaceErrors(t *testing.T) {
 		name   string
 		err    error
 		status string
+		kind   string
 	}{
-		{"target-exists", transfer.ErrTargetExists, models.MediaTransferSkipped},
-		{"cross-device", transfer.ErrCrossDevice, models.MediaTransferFailed},
+		{"target-exists", transfer.ErrTargetExists, models.MediaTransferSkipped, models.MediaFailExists},
+		{"cross-device", transfer.ErrCrossDevice, models.MediaTransferFailed, models.MediaFailFilesystem},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -684,6 +695,7 @@ func TestOrganizeDiscPlaceErrors(t *testing.T) {
 			assert.Equal(t, tc.status, rows[0].Status)
 			assert.Nil(t, rows[0].NextRetryAt, "不自动重试")
 			assert.Contains(t, rows[0].Message, tc.err.Error())
+			assert.Equal(t, tc.kind, rows[0].FailKind)
 		})
 	}
 }

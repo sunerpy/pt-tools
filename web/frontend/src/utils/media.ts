@@ -1,6 +1,9 @@
 import { ref } from "vue";
 import type {
+  ClassifyNote,
   ClassifyRule,
+  MediaFailKind,
+  MediaHistoryBatchResult,
   MediaHistoryItem,
   MediaImageLang,
   MediaKind,
@@ -330,7 +333,40 @@ export function classifyRuleSummary(kind: MediaKind, rule: ClassifyRule): string
   if (rule.countries?.length) {
     parts.push(`国家或地区：${rule.countries.map((c) => label(CLASSIFY_COUNTRIES, c)).join("、")}`);
   }
+  const short: string[] = [];
+  if (rule.max_runtime) short.push(`片长不超过 ${rule.max_runtime} 分钟`);
+  if (rule.keywords?.length) short.push(`标题含「${rule.keywords.join("」「")}」`);
+  if (short.length) parts.push(short.join("或"));
   return parts.length ? parts.join("；") : "不限条件：前面都对不上的放进这里";
+}
+
+/**
+ * classifyNoteText 把二级分类的说明写成一句话：「第 6 条「短剧」：片长 8 分钟（不超过 15 分钟）」，
+ * 都没对上时「3 条规则都没对上，放在库目录里」
+ */
+export function classifyNoteText(kind: MediaKind, note: ClassifyNote): string {
+  if (!note.rule) return `${note.rules} 条规则都没对上，放在库目录里`;
+  const label = (list: readonly { value: string; label: string }[], v: string) =>
+    list.find((x) => x.value === v)?.label ?? v;
+  const parts: string[] = [];
+  if (note.genres?.length) {
+    const names = note.genres.map(
+      (id) => TMDB_GENRES[kind].find((g) => g.id === id)?.name ?? String(id),
+    );
+    parts.push(`类型是${names.join("、")}`);
+  }
+  if (note.languages?.length) {
+    parts.push(`原始语言是${note.languages.map((l) => label(CLASSIFY_LANGUAGES, l)).join("、")}`);
+  }
+  if (note.countries?.length) {
+    parts.push(
+      `出品国家或地区有${note.countries.map((c) => label(CLASSIFY_COUNTRIES, c)).join("、")}`,
+    );
+  }
+  if (note.runtime) parts.push(`片长 ${note.runtime} 分钟（不超过 ${note.max_runtime} 分钟）`);
+  if (note.keyword) parts.push(`标题里有「${note.keyword}」`);
+  const why = parts.length ? parts.join("，") : "不限条件";
+  return `对上第 ${note.rule} 条「${note.name}」：${why}`;
 }
 
 /** 图片语言（和后端 scrape.ImageLangs 一致） */
@@ -448,6 +484,42 @@ const SCRAPE_STATUS: Record<MediaScrapeStatus, { label: string; tone: Tone }> = 
 /** 整理记录上一次刮削的结果；没刮削过（媒体库关着刮削、升级前整理的）时为 null */
 export function scrapeStatus(status: string): { label: string; tone: Tone } | null {
   return SCRAPE_STATUS[status as MediaScrapeStatus] ?? null;
+}
+
+/** 失败与跳过的分类（和后端 models.MediaFailKinds 一样的顺序） */
+export const FAIL_KINDS: readonly { value: MediaFailKind; label: string }[] = [
+  { value: "recognize", label: "没识别出来" },
+  { value: "library", label: "媒体库" },
+  { value: "path", label: "路径映射" },
+  { value: "filesystem", label: "文件系统" },
+  { value: "exists", label: "目标已有文件" },
+  { value: "source", label: "源文件不在了" },
+  { value: "disc", label: "原盘与镜像" },
+  { value: "other", label: "其他" },
+];
+
+/** 一条失败或跳过的记录的分类；升级前的记录没有分类，算其他。整理成的、已删除的记录没有分类（空串） */
+export function failKindOf(r: Pick<MediaHistoryItem, "status" | "fail_kind">): "" | MediaFailKind {
+  if (r.status !== "failed" && r.status !== "skipped") return "";
+  return r.fail_kind || "other";
+}
+
+export function failKindLabel(kind: "" | MediaFailKind): string {
+  return FAIL_KINDS.find((k) => k.value === kind)?.label ?? "";
+}
+
+/** 批量操作的结果写成一句提示：都成了、有的不成（列出前两条原因） */
+export function batchOutcome(res: MediaHistoryBatchResult, done: string): Outcome {
+  if (!res.failed) return { level: "success", text: `${done} ${res.ok} 条` };
+  const why = res.items
+    .filter((i) => !i.ok && i.message)
+    .slice(0, 2)
+    .map((i) => i.message)
+    .join("；");
+  return {
+    level: "warning",
+    text: `${done} ${res.ok} 条，${res.failed} 条没做成${why ? `：${why}` : ""}`,
+  };
 }
 
 export const HISTORY_FILTERS: readonly { value: "" | MediaTransferStatus; label: string }[] = [
