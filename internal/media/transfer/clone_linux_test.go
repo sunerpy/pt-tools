@@ -52,8 +52,8 @@ func TestRealCloneClassified(t *testing.T) {
 	out, err := os.Create(filepath.Join(dir, "b.mkv"))
 	require.NoError(t, err)
 	defer out.Close()
-	if err := cloneFile(out, in); err != nil {
-		assert.True(t, cloneUnsupported(err), "FICLONE 的错误 %v 要认成不支持", err)
+	if cerr := cloneFile(out, in); cerr != nil {
+		assert.True(t, cloneUnsupported(cerr), "FICLONE 的错误 %v 要认成不支持", cerr)
 		return
 	}
 	b, err := os.ReadFile(out.Name())

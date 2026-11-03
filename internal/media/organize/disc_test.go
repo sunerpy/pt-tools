@@ -226,9 +226,9 @@ func TestOrganizeDiscProblems(t *testing.T) {
 		{"d4", "BDMV", "没有自己的文件夹", map[string]int{"BDMV/STREAM/00001.m2ts": 1}},
 	} {
 		e.addTorrent(tc.hash, tc.name, tc.files, nil)
-		res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tc.hash})
-		require.NoError(t, err)
-		assert.Contains(t, res.Plan.Problem, tc.want, tc.name)
+		got, oerr := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tc.hash})
+		require.NoError(t, oerr)
+		assert.Contains(t, got.Plan.Problem, tc.want, tc.name)
 		var r models.MediaTransferHistory
 		require.NoError(t, e.db.Where("info_hash = ?", tc.hash).First(&r).Error)
 		assert.Equal(t, models.MediaTransferSkipped, r.Status, tc.name)

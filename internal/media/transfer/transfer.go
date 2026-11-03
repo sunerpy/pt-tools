@@ -118,9 +118,11 @@ func TransferDetail(src, dst, mode string) (Outcome, Detail, error) {
 			return 0, d, fmt.Errorf("建立软链接失败: %w", err)
 		}
 	case models.MediaModeCopy:
-		if d.Cloned, err = copyFile(src, dst, srcInfo); err != nil {
+		cloned, err := copyFile(src, dst, srcInfo)
+		if err != nil {
 			return 0, Detail{}, err
 		}
+		d.Cloned = cloned
 	case models.MediaModeMove:
 		if err := move(src, dst, srcInfo); err != nil {
 			return 0, d, err
@@ -292,13 +294,13 @@ func fill(out, in *os.File) (bool, error) {
 		return false, err
 	}
 	// 克隆失败时目标应该没动；以防万一清空，两边都回到开头
-	if err := out.Truncate(0); err != nil {
+	if err = out.Truncate(0); err != nil {
 		return false, err
 	}
-	if _, err := out.Seek(0, io.SeekStart); err != nil {
+	if _, err = out.Seek(0, io.SeekStart); err != nil {
 		return false, err
 	}
-	if _, err := in.Seek(0, io.SeekStart); err != nil {
+	if _, err = in.Seek(0, io.SeekStart); err != nil {
 		return false, err
 	}
 	_, err = io.Copy(out, in)
