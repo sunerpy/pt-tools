@@ -129,6 +129,8 @@ type MediaOrganizeSetting struct {
 	DeleteLinksOnRemove bool `gorm:"not null;default:false" json:"delete_links_on_remove"`
 	// WatchIntervalMin 是目录监控扫描的间隔（分钟）；0 用默认值
 	WatchIntervalMin int `gorm:"not null;default:0" json:"watch_interval_min"`
+	// WatchRealtimeOff 是关掉了实时目录监控（默认开着，存反过来的，零值就是开）
+	WatchRealtimeOff bool `gorm:"not null;default:false" json:"-"`
 	// ClassifyRules 是二级分类的规则（JSON，见 organize.ClassifyRules）；空串是没有规则
 	ClassifyRules string    `gorm:"type:text;not null;default:''" json:"-"`
 	UpdatedAt     time.Time `json:"updated_at"`

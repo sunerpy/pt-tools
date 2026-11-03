@@ -146,6 +146,39 @@ describe("整理入库弹窗", () => {
     expect(document.body.textContent).toContain("pt-tools 里是 /data/downloads");
     expect((q("organize-run") as HTMLButtonElement).disabled).toBe(false);
     expect(q("organize-run")!.textContent).toContain("整理 1 个文件");
+    expect(q("organize-disc"), "不是原盘不写").toBeNull();
+  });
+
+  it("原盘：写明种类与放进库的文件数，目标是电影目录", async () => {
+    api.preview.mockResolvedValue({
+      ...plan,
+      items: [
+        {
+          rel: "Oppenheimer.2023.BluRay",
+          source: "/data/downloads/Oppenheimer.2023.BluRay",
+          size: 1,
+          target: "/media/movies/奥本海默 (2023)",
+          status: "pending",
+          disc: { kind: "BDMV", files: 5 },
+        },
+      ],
+    });
+    api.libraries.mockResolvedValue([
+      { ...library, effective_template: "", preview: "", created_at: "", updated_at: "" },
+    ]);
+    const OrganizeDialog = (await import("./OrganizeDialog.vue")).default;
+    view = mountView(
+      defineComponent({
+        setup: () => () =>
+          h(OrganizeDialog, {
+            modelValue: true,
+            target: { downloader_id: 1, hash: "abc", name: "Oppenheimer" },
+          }),
+      }),
+    );
+    await vi.waitFor(() => expect(q("organize-disc")).not.toBeNull());
+    expect(q("organize-disc")!.textContent).toBe("蓝光原盘 · 5 个文件");
+    expect(q("organize-items")!.textContent).toContain("奥本海默 (2023)");
   });
 
   it("整理：写明结果并通知外面；后台还在跑时说明稍后看历史", async () => {

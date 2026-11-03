@@ -361,7 +361,7 @@ func (s *Server) apiWatchDirs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	list, err := svc.WatchDirs(r.Context())
+	list, err := svc.WatchDirViews(r.Context())
 	if err != nil {
 		writeOrganizeError(w, err)
 		return

@@ -3438,6 +3438,8 @@ export interface OrganizeSettings {
   delete_links_on_remove: boolean;
   /** 扫描监控目录的间隔（分钟） */
   watch_interval_min: number;
+  /** 实时目录监控：监控目录里有改动时提前扫描那一项（默认开，按间隔扫描照旧兜底） */
+  watch_realtime: boolean;
   /** 定期扫描与目录监控扫描上一次、下一次大约什么时候（在内存里，重启以后从头算；只在读设置时回） */
   runs?: OrganizeRunTimes;
 }
@@ -3550,10 +3552,16 @@ export interface MediaWatchDirInput {
   enabled: boolean;
 }
 
+/** 监控目录的实时监控：on 在监听；off 关着（设置里关了、目录关着或后台没在跑）；unavailable 加不了监听，只按间隔扫描 */
+export type MediaWatchRealtime = "on" | "off" | "unavailable";
+
 export interface MediaWatchDir extends MediaWatchDirInput {
   id: number;
   created_at: string;
   updated_at: string;
+  realtime?: MediaWatchRealtime;
+  /** 实时监控不可用的原因 */
+  realtime_note?: string;
 }
 
 export interface MediaPathMapInput {
@@ -3637,6 +3645,8 @@ export interface OrganizePlanItem {
   status: OrganizeItemStatus;
   message?: string;
   history_id?: number;
+  /** 这一项是一张原盘（BDMV 蓝光、VIDEO_TS DVD）：source 是原盘根目录，target 是电影目录 */
+  disc?: { kind: "BDMV" | "VIDEO_TS"; files: number };
 }
 
 /**
@@ -3722,6 +3732,8 @@ export interface MediaHistoryItem {
   /** 手动指定路径整理的记录当时填的路径（别的记录没有） */
   manual_path?: string;
   subtitles: number;
+  /** 原盘的记录放进库的文件数（不是原盘时没有） */
+  disc_files?: number;
   /** 记录里记着 pt-tools 放进库的文件（跳过、失败的记录也可能有），可以连文件删 */
   has_files: boolean;
   /** 上一次刮削的结果：空串是没刮削过（媒体库关着刮削，或升级前整理的） */

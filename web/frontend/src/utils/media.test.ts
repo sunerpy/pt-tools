@@ -11,6 +11,7 @@ import {
   SCRAPE_SOURCE_OPTIONS,
   TMDB_GENRES,
   classifyRuleSummary,
+  discLabel,
   episodeText,
   mediaKindLabel,
   mediaSourceLabel,
@@ -217,5 +218,12 @@ describe("媒体识别的显示工具", () => {
       setTmdbImageBase("https://static.example.com/t/p/");
       expect(posterURL("/p.jpg"), "读到了").toBe("https://static.example.com/t/p/w185/p.jpg");
     });
+  });
+});
+
+describe("原盘的说明", () => {
+  it("蓝光与 DVD 写成中文，带上文件数", () => {
+    expect(discLabel({ kind: "BDMV", files: 5 })).toBe("蓝光原盘 · 5 个文件");
+    expect(discLabel({ kind: "VIDEO_TS", files: 12 })).toBe("DVD 原盘 · 12 个文件");
   });
 });

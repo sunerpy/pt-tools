@@ -20,6 +20,7 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import {
   MEDIA_MODES,
+  discLabel,
   itemStatus,
   matchSourceLabel,
   mediaKindLabel,
@@ -357,6 +358,9 @@ const resultHint = computed(() =>
               }}</PtStatusPill>
               <span v-if="it.episode" class="od__ep">{{
                 seasonEpisode(it.season, it.episode, it.episode_end)
+              }}</span>
+              <span v-if="it.disc" class="od__ep" data-testid="organize-disc">{{
+                discLabel(it.disc)
               }}</span>
               <span class="od__rel" :title="it.rel">{{ it.rel }}</span>
             </div>

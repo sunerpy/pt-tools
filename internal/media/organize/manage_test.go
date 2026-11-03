@@ -24,7 +24,8 @@ func TestSettingsDefaultsAndValidation(t *testing.T) {
 	assert.Equal(t, Settings{
 		ScanIntervalMin: DefaultScanIntervalMin, MinVideoMB: DefaultMinVideoMB, WatchIntervalMin: DefaultWatchIntervalMin,
 		Downloaders: []uint{}, Categories: []string{}, Tags: []string{}, SavePaths: []string{}, NotifyChannels: []uint{},
-	}, got)
+		WatchRealtime: true,
+	}, got, "实时监控默认开着")
 
 	got = e.settings(SettingsInput{
 		AutoEnabled: true, ScanEnabled: true, ScanIntervalMin: 30, Downloaders: []uint{1, 1}, Categories: []string{" movies ", "tv", "movies"},

@@ -135,6 +135,9 @@ type Service struct {
 	runMu   sync.Mutex
 	running bool
 
+	// rt 是实时目录监控（见 realtime.go）
+	rt realtime
+
 	// timesMu 保护下面三个时间（见 Runs）：scanAt 是上一次定期扫描；watchTick 是后台节拍上一次做目录监控扫描
 	// （按它排下一次，没有开着的目录时也算），watchAt 是其中真的扫了目录的那一次（页面上的「上次」）
 	timesMu                    sync.Mutex
@@ -174,6 +177,7 @@ func New(cfg Config) *Service {
 		queued:   map[string]bool{},
 		backoff:  map[string]backoffState{},
 		retrying: map[uint]bool{},
+		rt:       realtime{sync: make(chan chan struct{}, 1)},
 	}
 }
 
@@ -203,6 +207,8 @@ type Settings struct {
 	DeleteLinksOnRemove bool       `json:"delete_links_on_remove"`
 	// WatchIntervalMin 是扫描监控目录的间隔（分钟）
 	WatchIntervalMin int `json:"watch_interval_min"`
+	// WatchRealtime 是实时目录监控：监控目录里有改动时提前扫描那一项（默认开）
+	WatchRealtime bool `json:"watch_realtime"`
 }
 
 // SettingsInput 是保存设置的请求（AutoSince 由服务在打开自动整理时记下）。
@@ -219,6 +225,8 @@ type SettingsInput struct {
 	DeleteLinksOnRemove bool     `json:"delete_links_on_remove"`
 	// WatchIntervalMin 是扫描监控目录的间隔（分钟）；0 用默认值
 	WatchIntervalMin int `json:"watch_interval_min"`
+	// WatchRealtime 是实时目录监控；不给时不改
+	WatchRealtime *bool `json:"watch_realtime,omitempty"`
 }
 
 func (s *Service) loadSettings(ctx context.Context) (models.MediaOrganizeSetting, error) {
@@ -259,7 +267,7 @@ func viewSettings(row models.MediaOrganizeSetting) Settings {
 		Categories: splitList(row.ScopeCategories, ","), Tags: splitList(row.ScopeTags, ","),
 		SavePaths: splitList(row.ScopeSavePaths, "\n"), MinVideoMB: row.MinVideoMB,
 		NotifyChannels: decodeIDs(row.NotifyChannels), DeleteLinksOnRemove: row.DeleteLinksOnRemove,
-		WatchIntervalMin: row.WatchIntervalMin,
+		WatchIntervalMin: row.WatchIntervalMin, WatchRealtime: !row.WatchRealtimeOff,
 	}
 	if v.ScanIntervalMin <= 0 {
 		v.ScanIntervalMin = DefaultScanIntervalMin
@@ -356,6 +364,8 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 	if err != nil {
 		return Settings{}, err
 	}
+	// 保存以后实时监控按新的开关重新核对（在放开 setMu 以后）
+	defer s.resyncRealtime(ctx)
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
 	row, err := s.loadSettings(ctx)
@@ -375,12 +385,16 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 	row.ScopeDownloaders, row.NotifyChannels = string(dlJSON), string(chJSON)
 	row.ScopeCategories, row.ScopeTags, row.ScopeSavePaths = strings.Join(cats, ","), strings.Join(tags, ","), strings.Join(paths, "\n")
 	row.MinVideoMB, row.DeleteLinksOnRemove, row.WatchIntervalMin = in.MinVideoMB, in.DeleteLinksOnRemove, in.WatchIntervalMin
+	if in.WatchRealtime != nil {
+		row.WatchRealtimeOff = !*in.WatchRealtime
+	}
 	row.UpdatedAt = s.cfg.Now()
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"auto_enabled", "auto_since", "scan_enabled", "scan_interval_min", "scope_downloaders", "scope_categories",
-			"scope_tags", "scope_save_paths", "min_video_mb", "notify_channels", "delete_links_on_remove", "watch_interval_min", "updated_at",
+			"scope_tags", "scope_save_paths", "min_video_mb", "notify_channels", "delete_links_on_remove", "watch_interval_min",
+			"watch_realtime_off", "updated_at",
 		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存整理设置失败: %w", err)

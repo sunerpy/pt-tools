@@ -145,6 +145,25 @@ describe("整理历史", () => {
     expect(q("mh-retry-1"), "整理成功的不能重试").toBeNull();
   });
 
+  it("原盘的记录写明放进库的文件数", async () => {
+    await mountPage(false, [
+      row({
+        id: 9,
+        media_type: "movie",
+        tmdb_id: 872585,
+        title: "奥本海默",
+        season: 0,
+        episode: 0,
+        source_path: "/data/downloads/Oppenheimer.2023.BluRay",
+        target_path: "/media/movies/奥本海默 (2023)",
+        subtitles: 0,
+        disc_files: 5,
+      }),
+    ]);
+    const text = q("mh-table")!.textContent ?? "";
+    expect(text).toContain("→ /media/movies/奥本海默 (2023) · 原盘 5 个文件");
+  });
+
   it("识别出了条目的记录：条目名链到条目详情（剧集带季）；没识别出来的不链", async () => {
     await mountPage(false, [
       row({ id: 5, media_type: "", tmdb_id: 0, title: "", year: 0, season: 0, episode: 0 }),

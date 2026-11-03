@@ -255,7 +255,8 @@ onMounted(load);
             <div>{{ fileName(row.source_path) }}</div>
             <div v-if="row.target_path" class="mh-sub">
               → {{ row.target_path
-              }}<template v-if="row.subtitles"> · {{ row.subtitles }} 个字幕</template>
+              }}<template v-if="row.disc_files"> · 原盘 {{ row.disc_files }} 个文件</template
+              ><template v-if="row.subtitles"> · {{ row.subtitles }} 个字幕</template>
             </div>
           </template>
         </el-table-column>
@@ -333,6 +334,7 @@ onMounted(load);
             <span v-if="r.match_source">{{ matchSourceLabel(r.match_source) }}</span>
             <span class="mh-full">{{ fileName(r.source_path) }}</span>
             <span v-if="r.target_path" class="mh-full">→ {{ r.target_path }}</span>
+            <span v-if="r.disc_files">原盘 {{ r.disc_files }} 个文件</span>
             <span
               >{{ modeLabel(r.mode) }} · {{ rowTrigger(r) }} ·
               {{ formatShortDateTime(r.updated_at) }}</span
