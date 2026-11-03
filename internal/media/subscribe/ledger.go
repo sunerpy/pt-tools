@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/media/cachectl"
@@ -113,7 +114,7 @@ func (s *Service) mapperFor(ctx context.Context, sub *models.MediaSubscription, 
 // libraryRows 是整理记录里这一季已入库的集（一集有几个文件时取最新的那条）。
 func (s *Service) libraryRows(ctx context.Context, sub *models.MediaSubscription) (map[int]models.MediaTransferHistory, error) {
 	var rows []models.MediaTransferHistory
-	if err := s.cfg.DB.WithContext(ctx).Select("id", "episode", "episode_end", "torrent_name", "source_path").
+	if err := s.cfg.DB.WithContext(ctx).Select("id", "episode", "episode_end", "torrent_name", "source_path", "size").
 		Where("status = ? AND media_type = ? AND tmdb_id = ? AND season = ?", models.MediaTransferDone, models.MediaKindTV, sub.TMDBID, sub.Season).
 		Order("id").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("读取整理记录失败: %w", err)
@@ -144,8 +145,14 @@ func covered(t models.MediaSubscriptionTorrent) func(n int) bool {
 // listCacheTTL 是下载器的种子列表缓存多久：大客户端列一次要好几秒，每个下载器每分钟最多列一次。
 const listCacheTTL = time.Minute
 
+// itemListMaxAge 是条目详情（详情与一季的每一集）用的缓存最多多旧：进度、分享率不能是一分钟以前的
+// （刚推送的种子另外按记录的时间判断，见 downloaderTorrentsWithin）；同一次打开的详情与季合成一次列表。
+const itemListMaxAge = 10 * time.Second
+
 type dlList struct {
-	at       time.Time
+	at time.Time // s.cfg.Now() 时开始列的，按它算缓存多旧
+	// wall 是开始列的真实时间，和数据库里记录的时间比：比它晚记下的种子，这份列表里可能还没有
+	wall     time.Time
 	torrents []downloader.Torrent
 	err      error
 }
@@ -153,13 +160,24 @@ type dlList struct {
 type dlCache struct {
 	mu sync.Mutex
 	m  map[uint]dlList
+	// group 把同时来的、问同一台下载器的几次列表合成一次
+	group singleflight.Group
 }
 
 // downloaderTorrents 列出下载器里的种子（缓存 listCacheTTL）。
 func (s *Service) downloaderTorrents(ctx context.Context, id uint) ([]downloader.Torrent, error) {
-	now := s.cfg.Now()
+	return s.downloaderTorrentsWithin(ctx, id, listCacheTTL, time.Time{})
+}
+
+// downloaderTorrentsWithin 同 downloaderTorrents，只用不超过 maxAge、并且在 since 以后才开始列的缓存：
+// 条目详情用 itemListMaxAge，since 是要在列表里找的那些种子的记录里最晚记下的时间（刚推送就打开详情时，
+// 推送以前列的那份里还没有这个种子）。
+func (s *Service) downloaderTorrentsWithin(ctx context.Context, id uint, maxAge time.Duration, since time.Time) ([]downloader.Torrent, error) {
+	if now := time.Now(); since.After(now) {
+		since = now // 记录的时间比现在还晚（改过系统时间）：按现在算
+	}
 	s.dls.mu.Lock()
-	if l, ok := s.dls.m[id]; ok && now.Sub(l.at) < listCacheTTL {
+	if l, ok := s.dls.m[id]; ok && s.cfg.Now().Sub(l.at) < maxAge && !l.wall.Before(since) {
 		s.dls.mu.Unlock()
 		return l.torrents, l.err
 	}
@@ -167,20 +185,31 @@ func (s *Service) downloaderTorrents(ctx context.Context, id uint) ([]downloader
 	if s.cfg.Downloaders == nil {
 		return nil, fmt.Errorf("下载器服务没有启动")
 	}
-	var list []downloader.Torrent
-	dl, setting, err := s.cfg.Downloaders.Get(ctx, id)
-	if err == nil {
-		list, err = dl.GetAllTorrents()
-		if err != nil {
-			err = fmt.Errorf("读不到下载器「%s」里的种子：%w", setting.Name, err)
+	var l dlList
+	// 合进了一次 since 以前就开始列的，再列一次：第二次一定是这次调用以后才开始列的
+	for range 2 {
+		v, _, _ := s.dls.group.Do(strconv.FormatUint(uint64(id), 10), func() (any, error) {
+			got := dlList{at: s.cfg.Now(), wall: time.Now()}
+			dl, setting, err := s.cfg.Downloaders.Get(ctx, id)
+			if err == nil {
+				got.torrents, err = dl.GetAllTorrents()
+				if err != nil {
+					err = fmt.Errorf("读不到下载器「%s」里的种子：%w", setting.Name, err)
+				}
+			} else {
+				err = fmt.Errorf("连不上下载器：%w", err)
+			}
+			got.err = err
+			s.dls.mu.Lock()
+			s.dls.m[id] = got
+			s.dls.mu.Unlock()
+			return got, nil
+		})
+		if l = v.(dlList); !l.wall.Before(since) {
+			break
 		}
-	} else {
-		err = fmt.Errorf("连不上下载器：%w", err)
 	}
-	s.dls.mu.Lock()
-	s.dls.m[id] = dlList{at: now, torrents: list, err: err}
-	s.dls.mu.Unlock()
-	return list, err
+	return l.torrents, l.err
 }
 
 // adoptedSite 是认领的下载器里的种子记在订阅种子表里的站点名。

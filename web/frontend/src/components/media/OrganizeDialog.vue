@@ -32,11 +32,17 @@ import { computed, ref, watch } from "vue";
 
 /**
  * 整理什么：下载器里的一个种子，或 pt-tools 里看到的一个文件或文件夹（source_path 为空时等用户填）；
- * mode 是整理历史里重新整理时带上的、上次选的整理方式
+ * mode 是整理历史里重新整理时带上的、上次选的整理方式；media_type 与 tmdb_id 是条目详情里「手动整理到这个条目」预填的条目
  */
 export type OrganizeTarget =
   | { downloader_id: number; hash: string; name?: string }
-  | { source_path: string; name?: string; mode?: MediaMode };
+  | {
+      source_path: string;
+      name?: string;
+      mode?: MediaMode;
+      media_type?: MediaKind;
+      tmdb_id?: number;
+    };
 
 const props = defineProps<{ target: OrganizeTarget | null }>();
 const visible = defineModel<boolean>({ default: false });
@@ -127,11 +133,12 @@ watch(
     void loadTmdbImageBase();
     result.value = null;
     const t = props.target;
+    const path = t && "source_path" in t ? t : null;
     override.value = {
-      type: "movie",
-      id: undefined,
+      type: path?.media_type ?? "movie",
+      id: path?.tmdb_id && path.tmdb_id > 0 ? path.tmdb_id : undefined,
       library: undefined,
-      mode: t && "source_path" in t ? t.mode : undefined,
+      mode: path?.mode,
     };
     if (t && "source_path" in t) {
       // 从页头打开时路径是空的，等用户填了再预览；从整理历史打开时带着当时填的路径，马上预览

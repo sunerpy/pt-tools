@@ -3827,6 +3827,10 @@ export interface SubscribeSettings {
   default_downloader_id: number;
   notify_channels: number[];
   upgrade_old: "keep" | "delete";
+  /** 每天 today_time（HH:MM）把今天播出的集推送到 today_channels（空的用 notify_channels） */
+  today_enabled: boolean;
+  today_time: string;
+  today_channels: number[];
 }
 
 export interface QualityProfile {
@@ -4270,6 +4274,193 @@ export interface MediaSearchResult {
   errors: { site: string; error: string }[];
 }
 
+// ---- 条目详情与订阅日历（媒体中心 M3） ----
+
+/** 一集或一部电影现在的情况：已入库、在下载、等锁住的版本、缺、还没播、不追 */
+export type ItemEpisodeState = MediaSearchEpisodeState | "skipped";
+
+/** 演职员里的一位 */
+export interface CastMember {
+  name: string;
+  character?: string;
+  order: number;
+  profile_path?: string;
+}
+
+/** 条目的资料：TMDB 详情与演职员 */
+export interface ItemInfo {
+  media_type: MediaKind;
+  tmdb_id: number;
+  title: string;
+  original_title?: string;
+  year?: number;
+  /** 电影的上映日期、剧集的首播日期 */
+  date?: string;
+  overview?: string;
+  genres: string[];
+  /** 出品国家或地区（ISO 3166-1） */
+  countries: string[];
+  /** 片长（分钟）：电影是整部，剧集是一集 */
+  runtime?: number;
+  /** TMDB 的状态原文（Returning Series、Ended、Released……） */
+  status?: string;
+  poster_path?: string;
+  backdrop_path?: string;
+  rating?: number;
+  votes?: number;
+  imdb_id?: string;
+  tvdb_id?: number;
+  studios: string[];
+  directors: string[];
+  cast: CastMember[];
+  /** 剧集的季数与总集数（不算特别篇） */
+  seasons_count?: number;
+  episodes_count?: number;
+}
+
+/** 剧集的一季：have 是这一季已入库的集数；n 为 0 是特别篇 */
+export interface ItemSeason {
+  n: number;
+  name?: string;
+  episode_count: number;
+  air_date?: string;
+  poster_path?: string;
+  have: number;
+}
+
+/** 关联的种子在下载器里的状态；unknown 是下载器没读到 */
+export type ItemTorrentState = "seeding" | "downloading" | "paused" | "error" | "unknown";
+
+/** 和这个条目有关、还在下载器里的一个种子 */
+export interface ItemTorrent {
+  site: string;
+  torrent_id?: string;
+  title: string;
+  /** 剧集的季（0 是不知道）；episodes 是种子里的集（E01–E04、整季） */
+  season: number;
+  episodes?: string;
+  version?: string;
+  size: number;
+  downloader_id: number;
+  downloader: string;
+  hash: string;
+  state: ItemTorrentState;
+  percent: number;
+  eta_seconds?: number;
+  ratio: number;
+  seeding_seconds: number;
+  hr: boolean;
+  hr_hours?: number;
+  /** 能不能删与原因（M3 只看下载中与 H&R） */
+  deletable: boolean;
+  reason: string;
+}
+
+/** 这个条目的一个订阅（剧集每季一个，新的季在前）；follow 是追剧 */
+export interface ItemSubscription {
+  id: number;
+  status: SubscriptionStatus;
+  season: number;
+  follow: boolean;
+  lock?: { group: string; resolution: string };
+}
+
+/** 条目详情（GET /api/media/items/{type}/{tmdb_id}）；errors 是没取到的部分，其余照样给 */
+export interface ItemDetail {
+  item: ItemInfo;
+  seasons: ItemSeason[];
+  nas: {
+    library: {
+      /** 剧集按季写入库了几集（只列有入库的季） */
+      seasons: { n: number; have: number; total: number }[];
+      files: number;
+      size: number;
+      libraries: string[];
+      /** 电影最新入库的那个文件的版本（分辨率与制作组） */
+      version?: string;
+      /** 最新的一条整理记录：「重新刮削」刮削它所在的电影或剧集 */
+      record_id?: number;
+    };
+    seeding: {
+      count: number;
+      /** 有 H&R 要求还没做够的个数，与其中离做够最近的还差几秒 */
+      hr_pending: number;
+      hr_left_seconds?: number;
+      lowest_ratio?: number;
+    };
+  };
+  subscriptions: ItemSubscription[];
+  torrents: ItemTorrent[];
+  recommendations: ExploreItem[];
+  errors: string[];
+}
+
+/** 剧集一季里的一集 */
+export interface SeasonEpisode {
+  episode: number;
+  name?: string;
+  air_date?: string;
+  /** 播出时刻：按播出时间追剧的才有 */
+  air_at?: string;
+  still_path?: string;
+  runtime?: number;
+  state: ItemEpisodeState;
+  site?: string;
+  /** 入库的：版本（分辨率与制作组）与体积 */
+  version?: string;
+  size?: number;
+  /** 下载中的：进度与还要多久 */
+  percent?: number;
+  eta_seconds?: number;
+}
+
+/** 剧集的一季（GET /api/media/items/tv/{tmdb_id}/seasons/{n}） */
+export interface SeasonDetail {
+  tmdb_id: number;
+  season: number;
+  name?: string;
+  air_date?: string;
+  /** 这一季的订阅；airtime 为真时按播出时间追剧，search_delay_hours 是播出后几小时开始搜 */
+  subscription?: {
+    id: number;
+    status: SubscriptionStatus;
+    follow: boolean;
+    lock?: { group: string; resolution: string };
+    airtime?: boolean;
+    search_delay_hours?: number;
+  };
+  episodes: SeasonEpisode[];
+  errors: string[];
+}
+
+/** 日历上的一项：剧集的一集，或电影的上映 */
+export interface CalendarEntry {
+  subscription_id: number;
+  media_type: MediaKind;
+  tmdb_id: number;
+  title: string;
+  year?: number;
+  season?: number;
+  episode?: number;
+  name?: string;
+  air_date: string;
+  /** 播出时刻与开始搜的时刻：按播出时间追剧的才有 */
+  air_at?: string;
+  search_at?: string;
+  state: ItemEpisodeState;
+  poster_path?: string;
+  still_path?: string;
+}
+
+/** 订阅日历（GET /api/media/calendar）：from 到 to 含两头；errors 是没读到 TMDB 的订阅 */
+export interface MediaCalendar {
+  from: string;
+  to: string;
+  today: string;
+  entries: CalendarEntry[];
+  errors: string[];
+}
+
 /** 拉黑的一个种子：tmdb_id 为 0 时对所有条目生效（关键字搜索里拉黑的） */
 export interface TorrentBlock {
   id: number;
@@ -4394,6 +4585,16 @@ export const subscribeApi = {
   /** 追剧详情里「不要这个种子」：还在下载的改成失败、马上再搜；下载器里的种子不删 */
   blockTorrent: (id: number, tid: number, data: { reason?: string; exclude_group?: boolean }) =>
     api.post<TorrentBlockResult>(`/api/media/subscriptions/${id}/torrents/${tid}/block`, data),
+  /** 条目详情：资料、库里与做种的情况、订阅、关联的种子与推荐（只读） */
+  item: (kind: MediaKind, id: number) => api.get<ItemDetail>(`/api/media/items/${kind}/${id}`),
+  /** 剧集一季的每一集（只读） */
+  itemSeason: (id: number, n: number) =>
+    api.get<SeasonDetail>(`/api/media/items/tv/${id}/seasons/${n}`),
+  /** 订阅日历：from 到 to（YYYY-MM-DD，含两头，最多 62 天） */
+  calendar: (from: string, to: string) =>
+    api.get<MediaCalendar>(
+      `/api/media/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
 };
 
 /** 等免费的状态 */

@@ -144,6 +144,9 @@ type Service struct {
 	// doneAt 记下每个完成的追剧上次看有没有新的集、下一季的时间
 	doneMu sync.Mutex
 	doneAt map[uint]time.Time
+	// today 记下今日更新今天处理过没有
+	todayMu sync.Mutex
+	today   todayState
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
@@ -254,7 +257,7 @@ func (s *Service) loop(ctx context.Context) {
 	}
 }
 
-// Tick 做一轮后台工作：下载中的种子入库了没有、订阅完成了没有、到期的主动搜索与豆瓣想看。总开关关着时什么都不做。
+// Tick 做一轮后台工作：下载中的种子入库了没有、订阅完成了没有、到期的主动搜索与豆瓣想看、到点的今日更新。总开关关着时什么都不做。
 func (s *Service) Tick(ctx context.Context) {
 	set, err := s.Settings(ctx)
 	if err != nil || !set.Enabled {
@@ -263,6 +266,7 @@ func (s *Service) Tick(ctx context.Context) {
 	s.refresh(ctx)
 	s.searchDue(ctx, set)
 	s.doubanDue(ctx)
+	s.todayDue(ctx, set)
 }
 
 // parseCache 按标题缓存解析结果（RSS 一小时能拉到几百个种子，识别词要读库）。

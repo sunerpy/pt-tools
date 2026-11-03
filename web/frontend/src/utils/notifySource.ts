@@ -34,6 +34,7 @@ const KIND_LABELS: Record<string, string> = {
   "media:followshow_found": "追剧：下载了新的集",
   "media:followshow_waiting": "追剧：锁定的版本久等不到",
   "media:followshow_failed": "追剧：连续几次没搜成",
+  "media:calendar_today": "今日更新：今天播出的集",
   "reseed:round": "辅种结果",
   "backup:failed": "备份失败",
   "free_watch:pushed": "等免费：免费了，已推送",

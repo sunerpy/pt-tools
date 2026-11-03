@@ -134,6 +134,19 @@ const router = createRouter({
       meta: { title: "追剧与订阅" },
     },
     {
+      path: "/media/calendar",
+      name: "media-calendar",
+      component: () => import("@/views/MediaCalendar.vue"),
+      meta: { title: "订阅日历" },
+    },
+    {
+      // 条目详情（媒体中心 M3）：type 是 movie 或 tv，id 是 TMDB 编号；?from= 是从哪里进来的（面包屑），?season= 是打开的季
+      path: "/media/item/:type(movie|tv)/:id(\\d+)",
+      name: "media-item",
+      component: () => import("@/views/MediaItem.vue"),
+      meta: { title: "条目详情" },
+    },
+    {
       path: "/search",
       name: "search",
       component: () => import("@/views/TorrentSearch.vue"),

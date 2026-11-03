@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/schedule"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -33,6 +34,10 @@ type Settings struct {
 	DefaultDownloaderID uint     `json:"default_downloader_id"`
 	NotifyChannels      []uint   `json:"notify_channels"`
 	UpgradeOld          string   `json:"upgrade_old"`
+	// TodayEnabled 为真时每天 TodayTime 把今天播出的集推送到 TodayChannels（空的用 NotifyChannels）
+	TodayEnabled  bool   `json:"today_enabled"`
+	TodayTime     string `json:"today_time"`
+	TodayChannels []uint `json:"today_channels"`
 }
 
 func decodeIDs(raw string) []uint {
@@ -69,6 +74,10 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		Enabled: row.Enabled, SearchIntervalHours: row.SearchIntervalHours, SearchSkipSites: orEmpty(decodeList(row.SearchSkipSites)),
 		DefaultProfileID: row.DefaultProfileID, DefaultDownloaderID: row.DefaultDownloaderID,
 		NotifyChannels: orEmpty(decodeIDs(row.NotifyChannels)), UpgradeOld: row.UpgradeOld,
+		TodayEnabled: row.TodayEnabled, TodayTime: row.TodayTime, TodayChannels: orEmpty(decodeIDs(row.TodayChannels)),
+	}
+	if out.TodayTime == "" {
+		out.TodayTime = defaultTodayTime
 	}
 	if out.SearchIntervalHours <= 0 {
 		out.SearchIntervalHours = DefaultSearchIntervalHours
@@ -101,17 +110,28 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 			return Settings{}, fmt.Errorf("%w: 默认的质量档案不存在", ErrInvalid)
 		}
 	}
-	if len(in.NotifyChannels) > 20 {
+	if len(in.NotifyChannels) > 20 || len(in.TodayChannels) > 20 {
 		return Settings{}, fmt.Errorf("%w: 通知通道最多 20 个", ErrInvalid)
+	}
+	if in.TodayTime == "" {
+		in.TodayTime = defaultTodayTime
+	}
+	h, m, cerr := schedule.Clock(in.TodayTime)
+	if cerr != nil {
+		return Settings{}, fmt.Errorf("%w: 今日更新的推送时刻要写成 HH:MM（例如 09:00）", ErrInvalid)
 	}
 	row := models.MediaSubscribeSetting{
 		ID: 1, Enabled: in.Enabled, SearchIntervalHours: in.SearchIntervalHours, SearchSkipSites: encodeList(sites),
 		DefaultProfileID: in.DefaultProfileID, DefaultDownloaderID: in.DefaultDownloaderID,
-		NotifyChannels: encodeIDs(in.NotifyChannels), UpgradeOld: in.UpgradeOld, UpdatedAt: s.cfg.Now(),
+		NotifyChannels: encodeIDs(in.NotifyChannels), UpgradeOld: in.UpgradeOld,
+		TodayEnabled: in.TodayEnabled, TodayTime: fmt.Sprintf("%02d:%02d", h, m), TodayChannels: encodeIDs(in.TodayChannels), UpdatedAt: s.cfg.Now(),
 	}
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"enabled", "search_interval_hours", "search_skip_sites", "default_profile_id", "default_downloader_id", "notify_channels", "upgrade_old", "updated_at"}),
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"enabled", "search_interval_hours", "search_skip_sites", "default_profile_id", "default_downloader_id", "notify_channels", "upgrade_old",
+			"today_enabled", "today_time", "today_channels", "updated_at",
+		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存订阅设置失败: %w", err)
 	}

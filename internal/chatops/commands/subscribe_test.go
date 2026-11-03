@@ -20,6 +20,7 @@ type fakeSubscribe struct {
 	followed []string
 	unlocked []string
 	keyword  string
+	today    []TodayLine
 }
 
 func (f *fakeSubscribe) Search(_ context.Context, kw string) ([]SubscribeCandidate, error) {
@@ -58,6 +59,10 @@ func (f *fakeSubscribe) Unlock(_ context.Context, id uint, ep int) (string, erro
 	}
 	f.unlocked = append(f.unlocked, itoa(int(id))+":"+itoa(ep))
 	return "名字", nil
+}
+
+func (f *fakeSubscribe) Today(context.Context) (string, []TodayLine, error) {
+	return "2026-11-03", f.today, f.err
 }
 
 func itoa(n int) string {

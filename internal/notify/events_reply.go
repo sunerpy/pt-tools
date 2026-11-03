@@ -35,6 +35,7 @@ const (
 	EventReplyVersion   = "reply.version"
 	EventReplyHelp      = "reply.help"
 	EventReplySubs      = "reply.subs"
+	EventReplyToday     = "reply.today"
 	EventReplyOther     = "reply.other"
 	EventAssistantReply = "assistant.reply"
 )
@@ -204,6 +205,26 @@ var replyEvents = []EventSpec{
 			{Key: "items_more", Type: VarInt, Desc: "没列出的订阅数", Sample: int64(0)},
 		},
 		SampleText: "#1 沙丘 (2021) · 完成 · 已入库\n#2 最后生还者 (2023) 第 2 季 · 在找 · 已入库 3/7，缺 1 · 下次 10-22 20:00",
+	},
+	{
+		Type: EventReplyToday, Name: "/today 今日更新", Desc: "发送 /today 时的回复：今天播出的集与上映的电影（暂停的订阅不算）",
+		Vars: []Var{
+			{Key: "day", Type: VarString, Desc: "日期", Sample: "2026-11-03"},
+			{Key: "count", Type: VarInt, Desc: "今天播出的集与上映的电影一共几项", Sample: int64(2)},
+			{Key: "in_library", Type: VarInt, Desc: "其中已入库的", Sample: int64(1)},
+			{Key: "items", Type: VarList, Desc: "各项（按播出时刻）", Item: todayItem, Sample: []map[string]any{
+				{
+					"title": "最后生还者 (2023) 第 2 季 E03「路」", "media_type": "tv", "season": int64(2), "episode": int64(3), "name": "路",
+					"air_time": "21:30", "state": "upcoming", "state_label": "还没播",
+				},
+				{
+					"title": "沙丘2 (2024) 上映", "media_type": "movie", "season": int64(0), "episode": int64(0), "name": "",
+					"air_time": "", "state": "library", "state_label": "已入库",
+				},
+			}},
+			more("省略的项数"),
+		},
+		SampleText: "2026-11-03 播出 1 集、上映 1 部电影：\n· 最后生还者 (2023) 第 2 季 E03「路」 21:30 · 还没播\n· 沙丘2 (2024) 上映 · 已入库",
 	},
 	{
 		Type: EventReplyOther, Name: "其他回复",

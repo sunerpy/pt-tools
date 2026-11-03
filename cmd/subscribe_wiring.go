@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/sunerpy/pt-tools/global"
@@ -65,17 +66,31 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 	svc.Start(ctx)
 	internal.SetSubscriptionOffer(svc.Offer)
 	chatopscmds.SetSubscribeService(chatopsSubscribe{svc: svc})
+	reportSubscriber.Store(svc)
 	global.GetSlogger().Info("订阅服务已启动")
 	return svc
 }
 
-// stopSubscribeService 先断开 RSS 与 ChatOps 的入口再停后台。
+// stopSubscribeService 先断开 RSS、ChatOps 与每日战报的入口再停后台。
 func stopSubscribeService(svc *subscribe.Service) {
 	internal.SetSubscriptionOffer(nil)
 	chatopscmds.SetSubscribeService(nil)
+	reportSubscriber.CompareAndSwap(svc, nil)
 	if svc != nil {
 		svc.Stop()
 	}
+}
+
+// reportSubscriber 是每日战报取追剧那一行用的订阅服务：战报任务比订阅服务先接线，到发战报时才取。
+var reportSubscriber atomic.Pointer[subscribe.Service]
+
+// followReportLine 是每日战报里追剧的那一行；订阅服务没有启动时不写。
+func followReportLine(ctx context.Context, day, label string) string {
+	svc := reportSubscriber.Load()
+	if svc == nil {
+		return ""
+	}
+	return svc.FollowLine(ctx, day, label)
 }
 
 // chatopsSubscribe 把订阅服务接到 /sub、/subs。
@@ -167,6 +182,22 @@ func (c chatopsSubscribe) Unlock(ctx context.Context, id uint, episode int) (str
 		return "", err
 	}
 	return subscriptionName(&d.MediaSubscription), nil
+}
+
+// Today 是今天播出的集与上映的电影（同订阅日历的今天）。
+func (c chatopsSubscribe) Today(ctx context.Context) (string, []chatopscmds.TodayLine, error) {
+	cal, err := c.svc.Today(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	out := make([]chatopscmds.TodayLine, 0, len(cal.Entries))
+	for _, e := range cal.Entries {
+		out = append(out, chatopscmds.TodayLine{
+			Title: subscribe.EntryTitle(e), MediaType: e.MediaType, Season: e.Season, Episode: e.Episode, Name: e.Name,
+			AirTime: subscribe.AirClock(e), State: e.State,
+		})
+	}
+	return cal.Today, out, nil
 }
 
 // nextSearchText 是下次主动搜索的时间（月-日 时:分）；暂停、完成、待确认的是空，已经到点的是「马上」。

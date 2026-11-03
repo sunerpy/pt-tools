@@ -496,6 +496,289 @@ const ENTRY_SEARCH = {
   errors: [{ site: "TTG", error: "请求超时" }],
 };
 
+/*
+ * 条目详情（画板 04、08，媒体中心 M3）：字段照 internal/media/subscribe/item.go 的 ItemDetail / SeasonDetail。
+ * 内容照画板：长夜将尽第 2 季 12 集（E01–E06 已入库、E07 下载中、E08 等版本、E09–E12 还没播），这一季三个种子
+ * （H&R 已满足、H&R 还差 2 天、下载中），第 1 季一个整季包；导演 1 位加演员 14 位（「全部 15 位」），推荐 12 个。
+ * 图片路径都不给：无头 Chrome 连不上 TMDB，海报、背景、剧照、头像都走占位（画板「没有背景图用深色渐变」那条）。
+ * 还没播的集日期放在 2099 年，播出日那一行的文字不随运行的日子变。
+ */
+const ITEM_TV_ID = 100088;
+const ITEM_PEOPLE = [
+  ["周屿", "周远"],
+  ["林晚晴", "林晚"],
+  ["沈川", "沈队"],
+  ["许曼", "许曼"],
+  ["何青", "何青"],
+  ["顾一鸣", "老顾"],
+  ["苏禾", "苏禾"],
+  ["唐棣", "唐律师"],
+  ["梁冬", "梁冬"],
+  ["江离", "江离"],
+  ["宋知", "宋法医"],
+  ["白露", "白露"],
+  ["程野", "程野"],
+  ["叶舟", "叶舟"],
+];
+const ITEM_RECS = [
+  ["雾港", { in_library: true }],
+  ["北方来信", { subscribed: true, subscription_id: 12 }],
+  ["无声证词", {}],
+  ["潮汐之下", {}],
+  ["第七个夏天", { in_library: true }],
+  ["群山回响", { subscribed: true, subscription_id: 13 }],
+  ["夜航", {}],
+  ["灰域", {}],
+  ["迷城", {}],
+  ["光年之外", {}],
+  ["白昼之下", {}],
+  ["长街", {}],
+].map(([title, extra], i) => ({
+  id: 200001 + i,
+  media_type: "tv",
+  title,
+  original_title: title,
+  year: 2020 + (i % 5),
+  in_library: false,
+  subscribed: false,
+  ...extra,
+}));
+const itemTorrent = (over) => ({
+  site: "HDSky",
+  title: "",
+  season: 2,
+  version: "2160p HHWEB",
+  size: 0,
+  downloader_id: 1,
+  downloader: "qb",
+  hash: "",
+  state: "seeding",
+  percent: 100,
+  ratio: 1,
+  seeding_seconds: 0,
+  hr: false,
+  deletable: true,
+  reason: "可以删",
+  ...over,
+});
+const ITEM_TV = {
+  item: {
+    media_type: "tv",
+    tmdb_id: ITEM_TV_ID,
+    title: "长夜将尽",
+    original_title: "The Long Night",
+    year: 2025,
+    date: "2025-03-14",
+    overview:
+      "十年前的一桩旧案在暴雨夜重新浮出水面。刑警周远带着当年的笔记回到海港小城，一个个证人接连失踪，他不得不面对自己亲手合上的卷宗。",
+    genres: ["悬疑", "犯罪", "剧情"],
+    countries: ["CN"],
+    runtime: 45,
+    status: "Returning Series",
+    rating: 8.4,
+    votes: 1204,
+    imdb_id: "tt3581920",
+    tvdb_id: 392256,
+    studios: ["海港影业"],
+    directors: ["陈默"],
+    cast: ITEM_PEOPLE.map(([name, character], order) => ({ name, character, order })),
+    seasons_count: 2,
+    episodes_count: 24,
+  },
+  seasons: [
+    { n: 1, name: "第 1 季", episode_count: 12, air_date: "2025-03-14", have: 12 },
+    { n: 2, name: "第 2 季", episode_count: 12, air_date: "2025-10-05", have: 6 },
+    { n: 0, name: "特别篇", episode_count: 2, have: 0 },
+  ],
+  nas: {
+    library: {
+      seasons: [
+        { n: 1, have: 12, total: 12 },
+        { n: 2, have: 6, total: 12 },
+      ],
+      files: 18,
+      size: 82.6 * 1024 ** 3,
+      libraries: ["剧集库"],
+      record_id: 77,
+    },
+    seeding: { count: 4, hr_pending: 1, hr_left_seconds: 2 * 86400, lowest_ratio: 0.42 },
+  },
+  subscriptions: [
+    {
+      id: 5,
+      status: "active",
+      season: 2,
+      follow: true,
+      lock: { group: "HHWEB", resolution: "2160p" },
+    },
+  ],
+  torrents: [
+    itemTorrent({
+      torrent_id: "88210",
+      title: "The.Long.Night.S01.2160p.WEB-DL.H265.DDP5.1-HHWEB",
+      season: 1,
+      episodes: "整季",
+      size: 86.4 * 1024 ** 3,
+      hash: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      ratio: 2.14,
+      seeding_seconds: 41 * 86400,
+    }),
+    itemTorrent({
+      site: "OurBits",
+      torrent_id: "31207",
+      title: "The.Long.Night.S02E01-E04.2160p.WEB-DL.H265-HHWEB",
+      episodes: "E01–E04",
+      size: 27.3 * 1024 ** 3,
+      hash: "b2c3d4e5f60718293a4b5c6d7e8f901234567890",
+      ratio: 1.31,
+      seeding_seconds: 18 * 86400,
+      hr: true,
+      hr_hours: 72,
+      reason: "H&R 已满足",
+    }),
+    itemTorrent({
+      torrent_id: "88402",
+      title: "The.Long.Night.S02E05-E06.2160p.WEB-DL.H265-HHWEB",
+      episodes: "E05–E06",
+      size: 13.6 * 1024 ** 3,
+      downloader_id: 2,
+      downloader: "tr",
+      hash: "c3d4e5f60718293a4b5c6d7e8f9012345678901a",
+      ratio: 0.42,
+      seeding_seconds: 5 * 86400,
+      hr: true,
+      hr_hours: 168,
+      deletable: false,
+      reason: "H&R 还差 2 天",
+    }),
+    itemTorrent({
+      torrent_id: "88517",
+      title: "The.Long.Night.S02E07.2160p.WEB-DL.H265-HHWEB",
+      episodes: "E07",
+      size: 7.2 * 1024 ** 3,
+      hash: "d4e5f60718293a4b5c6d7e8f9012345678901a2b",
+      state: "downloading",
+      percent: 63,
+      eta_seconds: 720,
+      ratio: 0.05,
+      deletable: false,
+      reason: "受保护：下载中",
+    }),
+  ],
+  recommendations: ITEM_RECS,
+  errors: [],
+};
+const ITEM_EPISODE_NAMES = ["归来", "旧案", "雨夜", "证人", "回声", "暗涌", "失踪者", "灯塔"];
+const ITEM_TV_S2 = {
+  tmdb_id: ITEM_TV_ID,
+  season: 2,
+  name: "第 2 季",
+  air_date: "2025-10-05",
+  subscription: {
+    id: 5,
+    status: "active",
+    follow: true,
+    airtime: true,
+    search_delay_hours: 2,
+    lock: { group: "HHWEB", resolution: "2160p" },
+  },
+  episodes: Array.from({ length: 12 }, (_, i) => {
+    const n = i + 1;
+    const base = { episode: n, name: ITEM_EPISODE_NAMES[i] ?? `第 ${n} 集` };
+    if (n <= 6)
+      return {
+        ...base,
+        air_date: `2025-10-${String(4 + n).padStart(2, "0")}`,
+        state: "library",
+        version: "2160p HHWEB",
+        size: (6.8 - n * 0.1) * 1024 ** 3,
+      };
+    if (n === 7)
+      return {
+        ...base,
+        air_date: "2025-10-26",
+        state: "downloading",
+        site: "HDSky",
+        percent: 63,
+        eta_seconds: 720,
+      };
+    if (n === 8) return { ...base, air_date: "2025-10-27", state: "waiting_version" };
+    return { ...base, air_date: `2099-11-${String(n - 6).padStart(2, "0")}`, state: "upcoming" };
+  }),
+  errors: [],
+};
+const ITEM_TV_S1 = {
+  tmdb_id: ITEM_TV_ID,
+  season: 1,
+  name: "第 1 季",
+  air_date: "2025-03-14",
+  episodes: Array.from({ length: 12 }, (_, i) => ({
+    episode: i + 1,
+    name: `第 ${i + 1} 集`,
+    air_date: `2025-03-${String(14 + i).padStart(2, "0")}`,
+    state: "library",
+    version: "2160p HHWEB",
+    size: 7.2 * 1024 ** 3,
+  })),
+  errors: [],
+};
+/* 电影：没有季与集；「你的 NAS 上」第一行写版本；种子块叫「这部片的种子」 */
+const ITEM_MOVIE_ID = 693134;
+const ITEM_MOVIE = {
+  item: {
+    media_type: "movie",
+    tmdb_id: ITEM_MOVIE_ID,
+    title: "沙丘2",
+    original_title: "Dune: Part Two",
+    year: 2024,
+    date: "2024-02-27",
+    overview: "保罗·厄崔迪与契妮和弗雷曼人联手，向毁灭他家族的阴谋者复仇。",
+    genres: ["科幻", "冒险"],
+    countries: ["US"],
+    runtime: 166,
+    status: "Released",
+    rating: 8.2,
+    votes: 6210,
+    imdb_id: "tt15239678",
+    studios: ["Legendary Pictures"],
+    directors: ["丹尼斯·维伦纽瓦"],
+    cast: [
+      ["提莫西·查拉梅", "保罗·厄崔迪"],
+      ["赞达亚", "契妮"],
+      ["丽贝卡·弗格森", "杰西卡女士"],
+      ["哈维尔·巴登", "斯第加"],
+    ].map(([name, character], order) => ({ name, character, order })),
+  },
+  seasons: [],
+  nas: {
+    library: {
+      seasons: [],
+      files: 1,
+      size: 58.2 * 1024 ** 3,
+      libraries: ["电影库"],
+      version: "2160p FRDS",
+      record_id: 91,
+    },
+    seeding: { count: 1, hr_pending: 0, lowest_ratio: 1.02 },
+  },
+  subscriptions: [{ id: 9, status: "done", season: 0, follow: false }],
+  torrents: [
+    itemTorrent({
+      site: "CHDBits",
+      torrent_id: "402118",
+      title: "Dune.Part.Two.2024.2160p.UHD.BluRay.x265.10bit.HDR-FRDS",
+      season: 0,
+      version: "2160p FRDS",
+      size: 58.2 * 1024 ** 3,
+      hash: "e5f60718293a4b5c6d7e8f9012345678901a2b3c",
+      ratio: 1.02,
+      seeding_seconds: 30 * 86400,
+    }),
+  ],
+  recommendations: ITEM_RECS.slice(0, 6).map((r) => ({ ...r, media_type: "movie" })),
+  errors: [],
+};
+
 const SUPPORTED = SITES.map(([site], i) => ({
   id: site.toLowerCase(),
   name: site,
@@ -990,6 +1273,11 @@ export const FIXTURES = [
   ],
   ["/api/v2/search/sites", SITES.map(([s]) => s)],
   ["/api/media/search", ENTRY_SEARCH],
+  /* 条目详情（M3）：季的路径是条目路径的子路径，前缀匹配先命中先用，要排在前面 */
+  [`/api/media/items/tv/${ITEM_TV_ID}/seasons/2`, ITEM_TV_S2],
+  [`/api/media/items/tv/${ITEM_TV_ID}/seasons/1`, ITEM_TV_S1],
+  [`/api/media/items/tv/${ITEM_TV_ID}`, ITEM_TV],
+  [`/api/media/items/movie/${ITEM_MOVIE_ID}`, ITEM_MOVIE],
   /* 黑名单与等免费（媒体中心 M2b）：字段照 models/media_block.go、web/api_free_watch.go */
   [
     "/api/media/blocks",

@@ -27,6 +27,7 @@ import {
   scrapeStatus,
   triggerLabel,
 } from "@/utils/media";
+import { itemLink } from "@/utils/mediaItem";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
@@ -75,6 +76,12 @@ async function retry(r: MediaHistoryItem) {
   } finally {
     retrying.value = null;
   }
+}
+
+/** 识别出了条目的记录：条目名点进条目详情（剧集打开这一季） */
+function itemOf(r: MediaHistoryItem) {
+  if (r.tmdb_id <= 0 || (r.media_type !== "movie" && r.media_type !== "tv")) return null;
+  return itemLink(r.media_type, r.tmdb_id, "history", r.season);
 }
 
 // ---- 重新刮削 ----
@@ -226,7 +233,16 @@ onMounted(load);
           class-name="pt-cell-1line"
           show-overflow-tooltip>
           <template #default="{ row }">
-            <div class="mh-strong">{{ historyEntry(row) || "没识别出来" }}</div>
+            <div class="mh-strong">
+              <router-link
+                v-if="itemOf(row)"
+                class="mh-link"
+                :to="itemOf(row)!"
+                :data-testid="`mh-item-${row.id}`"
+                >{{ historyEntry(row) }}</router-link
+              >
+              <template v-else>{{ historyEntry(row) || "没识别出来" }}</template>
+            </div>
             <div class="mh-sub">{{ entrySub(row) }}</div>
           </template>
         </el-table-column>
@@ -307,7 +323,12 @@ onMounted(load);
       </el-table>
       <div v-else class="mh-cards">
         <PtRowCard v-for="r in items" :key="r.id">
-          <template #title>{{ historyEntry(r) || "没识别出来" }}</template>
+          <template #title>
+            <router-link v-if="itemOf(r)" class="mh-link" :to="itemOf(r)!">{{
+              historyEntry(r)
+            }}</router-link>
+            <template v-else>{{ historyEntry(r) || "没识别出来" }}</template>
+          </template>
           <template #meta>
             <span v-if="r.match_source">{{ matchSourceLabel(r.match_source) }}</span>
             <span class="mh-full">{{ fileName(r.source_path) }}</span>
@@ -401,6 +422,16 @@ onMounted(load);
 </template>
 
 <style scoped>
+.mh-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mh-link:hover {
+  color: var(--pt-p);
+  text-decoration: underline;
+}
+
 .mh-bar {
   display: flex;
   flex-wrap: wrap;

@@ -473,18 +473,49 @@ func (mt matcher) byIMDb(it v2.TorrentItem) bool {
 	return imdb != "" && mt.sub.IMDbID != "" && strings.EqualFold(imdb, mt.sub.IMDbID)
 }
 
-// searchEpisodes 是这一季每集现在的情况，只读库：整理记录里已入库的；订阅的种子与带这个条目、还没下完的推送记录在下载的；
-// 订阅台账里等版本的；其余按 TMDB 的播出日期分成缺的与还没播的。
+// searchEpisodes 是这一季每集现在的情况（见 episodeStates）。
 func (s *Service) searchEpisodes(ctx context.Context, sub *models.MediaSubscription, subscribed bool, season *tmdb.Season, total int, mp *episodeMapper) ([]MediaSearchEpisode, error) {
+	states, err := s.episodeStates(ctx, sub, subscribed, season, total, mp)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MediaSearchEpisode, 0, len(states))
+	for _, st := range states {
+		out = append(out, st.MediaSearchEpisode)
+	}
+	return out, nil
+}
+
+// dlRef 是在下载的一集用的种子：哪个下载器、哪个 info hash（读进度用）。
+type dlRef struct {
+	downloaderID uint
+	hash         string
+	seen         time.Time // 记录记下的时间（比它早列的下载器列表里可能还没有这个种子）
+}
+
+// episodeState 是一集现在的情况，带上入库的那条整理记录与在下载的种子（条目详情要版本、体积与进度）。
+type episodeState struct {
+	MediaSearchEpisode
+	lib *models.MediaTransferHistory
+	dl  dlRef
+}
+
+// episodeStates 是这一季每集现在的情况，只读库：整理记录里已入库的；订阅的种子与带这个条目、还没下完的推送记录在下载的；
+// 订阅台账里等版本的；其余按 TMDB 的播出日期分成缺的与还没播的。
+func (s *Service) episodeStates(ctx context.Context, sub *models.MediaSubscription, subscribed bool, season *tmdb.Season, total int, mp *episodeMapper) ([]episodeState, error) {
 	lib, err := s.libraryRows(ctx, sub)
 	if err != nil {
 		return nil, err
 	}
-	down := map[int]string{}
-	mark := func(covers func(int) bool, site string) {
+	type downloading struct {
+		site string
+		ref  dlRef
+	}
+	down := map[int]downloading{}
+	mark := func(covers func(int) bool, site string, ref dlRef) {
 		for n := 1; n <= total; n++ {
 			if _, ok := down[n]; !ok && covers(n) {
-				down[n] = site
+				down[n] = downloading{site: site, ref: ref}
 			}
 		}
 	}
@@ -499,7 +530,7 @@ func (s *Service) searchEpisodes(ctx context.Context, sub *models.MediaSubscript
 			if strings.HasPrefix(site, models.MediaAdoptedSitePrefix) {
 				site = ""
 			}
-			mark(covered(t), site)
+			mark(covered(t), site, dlRef{downloaderID: t.DownloaderID, hash: t.InfoHash, seen: t.CreatedAt})
 		}
 		var rows []models.MediaSubscriptionEpisode
 		if qerr := s.cfg.DB.WithContext(ctx).Select("episode", "state").Where("subscription_id = ? AND state = ?", sub.ID, models.MediaEpisodeWaitingVersion).
@@ -523,23 +554,30 @@ func (s *Service) searchEpisodes(ctx context.Context, sub *models.MediaSubscript
 		if mapped, ok, _ := mp.mapEpisodes(m, t.Title, "", sp); ok {
 			sp = mapped
 		}
-		mark(sp.covers, t.SiteName)
+		var ref dlRef
+		if t.DownloaderID != nil && t.TorrentHash != nil {
+			ref = dlRef{downloaderID: *t.DownloaderID, hash: *t.TorrentHash, seen: recordSeen(t.CreatedAt, t.PushTime)}
+		}
+		mark(sp.covers, t.SiteName, ref)
 	}
 	today := s.cfg.Now().In(time.Local).Format(time.DateOnly)
-	out := make([]MediaSearchEpisode, 0, total)
+	out := make([]episodeState, 0, total)
 	for n := 1; n <= total; n++ {
 		e := MediaSearchEpisode{Episode: n}
 		if ep := season.Episode(n); ep != nil {
 			e.AirDate, e.Name = ep.AirDate, ep.Name
 		}
 		aired := e.AirDate != "" && e.AirDate <= today
-		site, downloading := down[n]
-		_, inLib := lib[n]
+		d, isDown := down[n]
+		h, inLib := lib[n]
+		st := episodeState{}
 		switch {
 		case inLib:
 			e.State = models.MediaEpisodeLibrary
-		case downloading:
-			e.State, e.Site = models.MediaEpisodeDownloading, site
+			st.lib = &h
+		case isDown:
+			e.State, e.Site = models.MediaEpisodeDownloading, d.site
+			st.dl = d.ref
 		case aired && waiting[n]:
 			e.State = models.MediaEpisodeWaitingVersion
 		case aired:
@@ -547,7 +585,8 @@ func (s *Service) searchEpisodes(ctx context.Context, sub *models.MediaSubscript
 		default:
 			e.State = models.MediaEpisodeUpcoming
 		}
-		out = append(out, e)
+		st.MediaSearchEpisode = e
+		out = append(out, st)
 	}
 	return out, nil
 }
@@ -555,7 +594,7 @@ func (s *Service) searchEpisodes(ctx context.Context, sub *models.MediaSubscript
 // pushedTorrents 是推送时说明了这个条目（剧集是这一季）、还没下完的种子记录。
 func (s *Service) pushedTorrents(ctx context.Context, sub *models.MediaSubscription) ([]models.TorrentInfo, error) {
 	var rows []models.TorrentInfo
-	if err := s.cfg.DB.WithContext(ctx).Select("site_name", "title").
+	if err := s.cfg.DB.WithContext(ctx).Select("site_name", "title", "torrent_hash", "downloader_id", "push_time", "created_at").
 		Where("media_type = ? AND tmdb_id = ? AND media_season = ? AND is_pushed = ? AND is_completed = ?", sub.MediaType, sub.TMDBID, sub.Season, true, false).
 		Order("id").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("读取种子记录失败: %w", err)

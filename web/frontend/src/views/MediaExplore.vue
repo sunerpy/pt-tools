@@ -15,6 +15,7 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { useTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { posterURL } from "@/utils/media";
+import { itemLink } from "@/utils/mediaItem";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -188,7 +189,11 @@ onMounted(load);
       </PtDataState>
       <div v-else class="ex-grid" data-testid="ex-grid">
         <div v-for="it in items" :key="it.id" class="ex-card" :data-testid="`ex-item-${it.id}`">
-          <div class="ex-card__poster">
+          <router-link
+            class="ex-card__poster"
+            :to="itemLink(it.media_type, it.id, 'explore')"
+            :aria-label="`${it.title} 的详情`"
+            :data-testid="`ex-open-${it.id}`">
             <img
               v-if="posterURL(it.poster_path, 'w342') && !failedPosters.has(it.id)"
               :src="posterURL(it.poster_path, 'w342')"
@@ -200,9 +205,14 @@ onMounted(load);
               <PtStatusPill v-if="it.in_library" tone="ok" size="sm">已入库</PtStatusPill>
               <PtStatusPill v-if="it.subscribed" tone="info" size="sm">已订阅</PtStatusPill>
             </div>
-          </div>
+          </router-link>
           <div class="ex-card__body">
-            <div class="ex-card__title" :title="it.title">{{ it.title }}</div>
+            <router-link
+              class="ex-card__title"
+              :to="itemLink(it.media_type, it.id, 'explore')"
+              :title="it.title"
+              >{{ it.title }}</router-link
+            >
             <div class="ex-card__meta">
               <span v-if="it.year">{{ it.year }}</span>
               <span v-if="it.vote_average" class="ex-card__vote">
@@ -292,6 +302,7 @@ onMounted(load);
 
 .ex-card__poster {
   position: relative;
+  display: block;
   aspect-ratio: 2 / 3;
   background: var(--pt-bg-surface-muted);
 }
@@ -337,12 +348,18 @@ onMounted(load);
 }
 
 .ex-card__title {
+  display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--pt-t1);
+  text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ex-card__title:hover {
+  color: var(--pt-p);
 }
 
 .ex-card__meta {

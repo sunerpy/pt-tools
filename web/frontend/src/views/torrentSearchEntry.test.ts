@@ -439,6 +439,18 @@ describe("按条目搜索", () => {
     expect(document.querySelector("[data-testid='search-facets-btn']")).not.toBeNull();
   });
 
+  it.each([
+    ["wide", "es-detail"],
+    ["mobile", "es-mdetail"],
+  ] as const)("%s：「条目详情」打开这一季的详情，面包屑写从种子搜索进来", async (kind, id) => {
+    viewport(kind);
+    await mountPage("/search?media_type=tv&tmdb_id=231620&season=2");
+    await vi.waitFor(() => expect(document.querySelector(`[data-testid='${id}']`)).not.toBeNull());
+    expect(document.querySelector(`[data-testid='${id}']`)!.getAttribute("href")).toBe(
+      "/media/item/tv/231620?from=search&season=2",
+    );
+  });
+
   it("从探索页带着条目进来：清掉缓存里上一次的关键词，不拿它筛条目的结果", async () => {
     viewport("wide");
     sessionStorage.setItem(

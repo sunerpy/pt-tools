@@ -34,6 +34,7 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { useTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { formatShortDateTime } from "@/utils/format";
 import { posterURL } from "@/utils/media";
+import { itemLink } from "@/utils/mediaItem";
 import {
   SUB_FILTERS,
   doubanItemState,
@@ -160,6 +161,9 @@ const sform = ref<SubscribeSettings>({
   default_downloader_id: 0,
   notify_channels: [],
   upgrade_old: "keep",
+  today_enabled: false,
+  today_time: "09:00",
+  today_channels: [],
 });
 const settingsFailed = ref(false);
 const savingSettings = ref(false);
@@ -176,6 +180,7 @@ async function loadSettings() {
         ...s,
         search_skip_sites: [...s.search_skip_sites],
         notify_channels: [...s.notify_channels],
+        today_channels: [...(s.today_channels ?? [])],
       };
     }
     settingsFailed.value = false;
@@ -476,7 +481,12 @@ onBeforeUnmount(() => clearInterval(autoTimer));
                 alt=""
                 @error="failedPosters.add(row.id)" />
               <div class="ms-entry__text">
-                <div class="ms-strong">{{ subName(row) }}</div>
+                <router-link
+                  class="ms-strong ms-link"
+                  :to="itemLink(row.media_type, row.tmdb_id, 'subscriptions', row.season)"
+                  :data-testid="`ms-item-${row.id}`"
+                  >{{ subName(row) }}</router-link
+                >
                 <div class="ms-sub">
                   {{ sourceLabel(row.source) }} · {{ profileName(row.profile_id)
                   }}<template v-if="row.upgrade"> · 洗版</template
@@ -597,7 +607,13 @@ onBeforeUnmount(() => clearInterval(autoTimer));
       </el-table>
       <div v-else class="ms-cards">
         <PtRowCard v-for="s in subs" :key="s.id">
-          <template #title>{{ subName(s) }}</template>
+          <template #title>
+            <router-link
+              class="ms-link"
+              :to="itemLink(s.media_type, s.tmdb_id, 'subscriptions', s.season)"
+              >{{ subName(s) }}</router-link
+            >
+          </template>
           <template #meta>
             <span>{{ progressText(s.media_type, s.progress) }}</span>
             <span v-if="strip(s).length" class="ms-strip ms-full" aria-hidden="true">
@@ -741,6 +757,36 @@ onBeforeUnmount(() => clearInterval(autoTimer));
                   <el-option value="keep" label="继续做种" />
                   <el-option value="delete" label="连数据删掉（有 H&R 要求的留着）" />
                 </el-select>
+              </el-form-item>
+            </div>
+            <!-- 媒体中心 M3：每天推送今天播出的集（同订阅日历的今天） -->
+            <el-form-item label="今日更新">
+              <div class="ms-switch">
+                <el-switch v-model="sform.today_enabled" data-testid="ms-today" />
+                <span>每天推送今天播出的集与上映的电影，没有时不推</span>
+              </div>
+            </el-form-item>
+            <div v-if="sform.today_enabled" class="ms-row">
+              <el-form-item label="推送时刻">
+                <el-time-select
+                  v-model="sform.today_time"
+                  start="00:00"
+                  step="00:15"
+                  end="23:45"
+                  :clearable="false"
+                  data-testid="ms-today-time" />
+                <div class="field-tip">服务器时区；订阅的总开关关着时不推</div>
+              </el-form-item>
+              <el-form-item label="推送到">
+                <el-select
+                  v-model="sform.today_channels"
+                  multiple
+                  clearable
+                  placeholder="同上面的通知"
+                  data-testid="ms-today-channels">
+                  <el-option v-for="c in channels" :key="c.id" :label="c.name" :value="c.id" />
+                </el-select>
+                <div class="field-tip">不选时推送到上面「通知」选的通道</div>
               </el-form-item>
             </div>
             <el-button
@@ -1164,6 +1210,17 @@ onBeforeUnmount(() => clearInterval(autoTimer));
 
 .ms-form {
   max-width: 860px;
+}
+
+/* 条目名点进条目详情：样式不变，悬停时下划线 */
+.ms-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ms-link:hover {
+  color: var(--pt-p);
+  text-decoration: underline;
 }
 
 .ms-row {

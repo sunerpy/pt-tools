@@ -125,6 +125,12 @@ describe("探索", () => {
     expect(q("ex-sub-872585"), "已订阅的不再显示「订阅」").toBeNull();
     expect(q("ex-subscribed-872585")).not.toBeNull();
     expect(document.body.textContent).toContain("未经 TMDB 认可或认证");
+    // 海报与名字都链到条目详情，面包屑写从探索进来
+    const links = [...q("ex-item-693134")!.querySelectorAll("a")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(links.length, "海报与名字").toBe(2);
+    expect(new Set(links)).toEqual(new Set(["/media/item/movie/693134?from=explore"]));
     await vi.waitFor(() =>
       expect(q("ex-item-693134")!.querySelector("img")!.getAttribute("src"), "换过的图片地址").toBe(
         "https://static.example.com/t/p/w342/p.jpg",

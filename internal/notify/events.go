@@ -17,6 +17,7 @@ const (
 	EventFollowWaiting       = "media.followshow.waiting"
 	EventFollowFailed        = "media.followshow.failed"
 	EventMediaOrganized      = "media.organized"
+	EventCalendarToday       = "media.calendar.today"
 	EventLoginExpiring       = "site.login_expiring"
 	EventProbeFailed         = "site.probe_failed"
 	EventProbeRecovered      = "site.probe_recovered"
@@ -84,6 +85,18 @@ var WebhookVars = []Var{
 
 func more(desc string) Var {
 	return Var{Key: "items_more", Type: VarInt, Desc: desc + "（列表最多 100 项）", Sample: int64(0)}
+}
+
+// todayItem 是今日更新与 /today 回复里一项的变量。
+var todayItem = []Var{
+	{Key: "title", Type: VarString, Desc: "订阅（带年份与季）加集号与集名；电影写上映"},
+	{Key: "media_type", Type: VarString, Desc: "movie 或 tv"},
+	{Key: "season", Type: VarInt, Desc: "季（电影是 0）"},
+	{Key: "episode", Type: VarInt, Desc: "集（电影是 0）"},
+	{Key: "name", Type: VarString, Desc: "集名"},
+	{Key: "air_time", Type: VarString, Desc: "播出时刻（按播出时间追剧的才有，例如 21:30）"},
+	{Key: "state", Type: VarString, Desc: "状态（library、downloading、waiting_version、missing、upcoming、skipped）"},
+	{Key: "state_label", Type: VarString, Desc: "状态说明（已入库、下载中、等版本、缺、还没播、不追）"},
 }
 
 // notifyEvents 是通知组的事件（发到所有通知通道，Webhook 收到的也是这些）。改这里要同时改对应生产者。
@@ -220,6 +233,27 @@ var notifyEvents = []EventSpec{
 		},
 		SampleTitle: "入库：沙丘 (2021)",
 		SampleText:  "电影\n画质：2160p BluRay\n媒体库：电影\n种子：Dune.2021.2160p.BluRay.x265-FAKE\n海报：https://image.tmdb.org/t/p/w500/d5NXSklXo0qyIYkgV94XAgMIckC.jpg",
+	},
+	{
+		Type: EventCalendarToday, Name: "今日更新", Desc: "订阅设置里开了每天推送今天的更新：今天播出的集与上映的电影（暂停的订阅不算，没有时不发）",
+		Vars: []Var{
+			{Key: "day", Type: VarString, Desc: "日期", Sample: "2026-11-03"},
+			{Key: "count", Type: VarInt, Desc: "今天播出的集与上映的电影一共几项", Sample: int64(2)},
+			{Key: "in_library", Type: VarInt, Desc: "其中已入库的", Sample: int64(0)},
+			{Key: "items", Type: VarList, Desc: "各项（按播出时刻）", Item: todayItem, Sample: []map[string]any{
+				{
+					"title": "最后生还者 (2023) 第 2 季 E03「路」", "media_type": "tv", "season": int64(2), "episode": int64(3), "name": "路",
+					"air_time": "21:30", "state": "upcoming", "state_label": "还没播",
+				},
+				{
+					"title": "现在就出发 (2023) 第 4 季 E05「第 3 期上」", "media_type": "tv", "season": int64(4), "episode": int64(5), "name": "第 3 期上",
+					"air_time": "", "state": "missing", "state_label": "缺",
+				},
+			}},
+			more("省略的项数"),
+		},
+		SampleTitle: "📺 今日更新 2026-11-03",
+		SampleText:  "今天播出 2 集：\n· 最后生还者 (2023) 第 2 季 E03「路」 21:30 · 还没播\n· 现在就出发 (2023) 第 4 季 E05「第 3 期上」 · 缺",
 	},
 	{
 		Type: EventLoginExpiring, Name: "站点即将被封号", Desc: "站点很久没有活跃，快到封号期限",

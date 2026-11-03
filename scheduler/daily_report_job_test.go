@@ -585,3 +585,30 @@ func TestDailyReport_IncludesReseed(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.NotContains(t, reportText(t, rows[0]), "辅种")
 }
+
+// 追剧一行：FollowLine 给了内容时写在辅种那一行后面，按战报的日期取；空串时不写。
+func TestDailyReport_IncludesFollow(t *testing.T) {
+	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	var asked, askedLabel string
+	f.cfg.ReseedLine = func(context.Context, string, string) string {
+		return "🌱 今日辅种：建成 2 · 成功 1 · 失败 0 · 站点已删除 1"
+	}
+	f.cfg.FollowLine = func(_ context.Context, day, label string) string {
+		asked, askedLabel = day, label
+		return "📺 今日追剧：播出 3 集，入库 2 集"
+	}
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "2026-10-06", asked)
+	assert.Equal(t, "今日", askedLabel)
+	assert.True(t, strings.HasSuffix(reportText(t, rows[0]), "\n🌱 今日辅种：建成 2 · 成功 1 · 失败 0 · 站点已删除 1\n📺 今日追剧：播出 3 集，入库 2 集"))
+
+	g := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	g.cfg.FollowLine = func(context.Context, string, string) string { return "" }
+	NewDailyReportJob(g.cfg).RunOnce(context.Background())
+	rows = reportRows(t, g.db)
+	require.Len(t, rows, 1)
+	assert.NotContains(t, reportText(t, rows[0]), "追剧")
+}

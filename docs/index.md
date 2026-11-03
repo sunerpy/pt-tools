@@ -137,6 +137,10 @@ home:
             body: 订阅电影、追剧集的一季，到各站点搜索，RSS 里出现时也下载；追剧按播出时间去搜、只要同一个版本，综艺的上下期也对得上；按质量档案挑资源，洗版换更好的版本，豆瓣想看自动建订阅。
             status: preview
             link: /guide/media-subscribe
+          - title: 条目详情与订阅日历
+            body: 一页看一部电影或剧集的资料、库里有几集、在做种的种子与能不能删；日历按天列出订阅的集哪天播出、入库了没有，还可以每天推送今天的更新。
+            status: preview
+            link: /guide/media-detail
           - title: 整理入库
             body: 下载完的电影与剧集按模板硬链接进媒体库，写好 NFO 与海报，通知 Emby、Jellyfin、Plex 扫描，发入库通知。
             status: preview

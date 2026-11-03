@@ -4,6 +4,7 @@
  * 删除时可选连库里的文件一起删，移动整理的与没整理出文件的不能选；读不到时写明原因。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMemoryHistory, createRouter } from "vue-router";
 
 import { type MountedView, mountView } from "@/test-mount";
 
@@ -117,7 +118,11 @@ async function mountPage(fail = false, extra: ReturnType<typeof row>[] = []) {
       total: 4,
     });
   const Page = (await import("./MediaHistory.vue")).default;
-  view = mountView(Page);
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: "/:p(.*)*", component: { render: () => null } }],
+  });
+  view = mountView(Page, { router });
   await vi.waitFor(() => expect(api.history).toHaveBeenCalled());
   await flush();
   await flush();
@@ -138,6 +143,17 @@ describe("整理历史", () => {
     expect(text).toContain("自动重试（第 1 次失败）");
     expect(q("mh-retry-2")).not.toBeNull();
     expect(q("mh-retry-1"), "整理成功的不能重试").toBeNull();
+  });
+
+  it("识别出了条目的记录：条目名链到条目详情（剧集带季）；没识别出来的不链", async () => {
+    await mountPage(false, [
+      row({ id: 5, media_type: "", tmdb_id: 0, title: "", year: 0, season: 0, episode: 0 }),
+    ]);
+    expect(q("mh-item-1")!.getAttribute("href")).toBe(
+      "/media/item/tv/100088?from=history&season=1",
+    );
+    expect(q("mh-item-5"), "没识别出来的不链").toBeNull();
+    expect(q("mh-table")!.textContent).toContain("没识别出来");
   });
 
   it("写明条目从哪来：按订阅的、推送时说明的；升级前的记录不写", async () => {

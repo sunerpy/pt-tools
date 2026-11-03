@@ -13,6 +13,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
@@ -90,6 +91,7 @@ func TestChatOpsSubscribeAdapterFlow(t *testing.T) {
 		&models.MediaTorrentBlock{},
 	))
 	const key = "0123456789abcdef0123456789abcdef"
+	today := time.Now().Format(time.DateOnly)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		en := r.URL.Query().Get("language") == "en-US"
@@ -107,7 +109,9 @@ func TestChatOpsSubscribeAdapterFlow(t *testing.T) {
 		case r.URL.Path == "/3/tv/1396":
 			_, _ = w.Write([]byte(`{"id":1396,"name":"绝命毒师","original_name":"Breaking Bad","first_air_date":"2008-01-20","number_of_seasons":1}`))
 		case r.URL.Path == "/3/tv/1396/season/1":
-			_, _ = w.Write([]byte(`{"season_number":1,"air_date":"2008-01-20","episodes":[{"episode_number":1,"air_date":"2008-01-20"},{"episode_number":2,"air_date":"2008-01-27"}]}`))
+			// 第 2 集今天播出（/today 与每日战报用）
+			_, _ = w.Write([]byte(`{"season_number":1,"air_date":"2008-01-20","episodes":[{"episode_number":1,"air_date":"2008-01-20"},` +
+				`{"episode_number":2,"name":"猫在袋子里","air_date":"` + today + `"}]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -168,6 +172,30 @@ func TestChatOpsSubscribeAdapterFlow(t *testing.T) {
 	_, runs, err = c.Runs(ctx, lines[0].ID, 5)
 	require.NoError(t, err)
 	assert.Len(t, runs, 2, "换版本记一条手动的运行")
+
+	// /today：今天播出的第 2 集，按播出时间追剧带播出时刻
+	day, todays, err := c.Today(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, today, day)
+	require.Len(t, todays, 1)
+	assert.Equal(t, chatopscmds.TodayLine{
+		Title: "绝命毒师 (2008) 第 1 季 E02「猫在袋子里」", MediaType: models.MediaKindTV, Season: 1, Episode: 2, Name: "猫在袋子里",
+		AirTime: "20:00", State: todays[0].State,
+	}, todays[0])
+	assert.Contains(t, []string{models.MediaEpisodeUpcoming, models.MediaEpisodeMissing}, todays[0].State, "按现在是不是过了 20:00")
+
+	// 每日战报的追剧一行：订阅服务没接上时不写；接上、总开关开着时写那天播出的集
+	t.Cleanup(func() { reportSubscriber.Store(nil) })
+	reportSubscriber.Store(nil)
+	assert.Empty(t, followReportLine(ctx, "2008-01-20", "昨日"))
+	reportSubscriber.Store(c.svc)
+	assert.Empty(t, followReportLine(ctx, "2008-01-20", "昨日"), "总开关关着")
+	set, err := c.svc.Settings(ctx)
+	require.NoError(t, err)
+	set.Enabled = true
+	_, err = c.svc.SaveSettings(ctx, set)
+	require.NoError(t, err)
+	assert.Equal(t, "📺 昨日追剧：播出 1 集，入库 0 集", followReportLine(ctx, "2008-01-20", "昨日"))
 
 	// 搜索出错时写明
 	_, err = chatopsSubscribe{svc: subscribe.New(subscribe.Config{DB: db, Recognizer: noTMDB{rec}})}.Search(ctx, "x")
