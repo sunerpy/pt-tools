@@ -371,7 +371,7 @@ func TestOrganizeDropsStalePathRows(t *testing.T) {
 	var stale models.MediaTransferHistory
 	require.NoError(t, e.db.Where("info_hash = ?", oppHash).First(&stale).Error)
 	require.Equal(t, models.MediaFailPath, stale.FailKind)
-	require.True(t, strings.HasPrefix(stale.SourcePath, "/elsewhere/"), stale.SourcePath)
+	require.True(t, strings.HasPrefix(stale.SourcePath, filepath.FromSlash("/elsewhere/")), stale.SourcePath)
 
 	// 这次还是找不到文件：不删
 	_, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
