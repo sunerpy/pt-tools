@@ -34,18 +34,29 @@ const props = defineProps<{
   expanded: boolean;
   /** 整组库里都有、用户点开了 */
   unfolded: boolean;
+  /** 卡上有能等免费的站点（能读种子详情）；没有时「等免费」点不了 */
+  canWatch?: boolean;
 }>();
 
 const emit = defineEmits<{
   push: [member: MediaSearchMember];
   toggle: [];
   unfold: [];
+  /** 等免费：用卡上第一个能等免费的成员 */
+  watch: [];
+  /** 不要：拉黑这一组的成员 */
+  block: [];
+  /** 移出黑名单 */
+  unblock: [members: MediaSearchMember[]];
 }>();
 
 const best = computed(() => props.card.members[0]!);
+const blockedHere = computed(() => props.card.members.filter((m) => m.block));
 const g = computed(() => props.card.group);
 const folded = computed(() => g.value.in_library && !props.unfolded);
-const score = computed(() => scoreCard(best.value.verdict, g.value.in_library));
+const score = computed(() =>
+  scoreCard(best.value.verdict, g.value.in_library || props.card.blocked),
+);
 const pill = computed(() =>
   coverPill({ ...g.value, verdict: best.value.verdict }, props.episodes, props.movie),
 );
@@ -82,7 +93,11 @@ function onCardClick() {
   <PtPanel
     padding="none"
     class="es-card"
-    :class="{ 'is-folded': folded, 'is-dim': g.in_library }"
+    :class="{
+      'is-folded': folded,
+      'is-dim': g.in_library || card.blocked,
+      'is-blocked': card.blocked,
+    }"
     :data-testid="`es-card-${card.key}`"
     @click="onCardClick">
     <div class="es-card__head">
@@ -133,7 +148,12 @@ function onCardClick() {
           data-testid="es-member">
           <span class="es-member__site">
             <span class="es-member__name">{{ m.site }}</span>
-            <PtStatusPill v-if="i === 0 && card.pass" tone="primary" size="sm">首选</PtStatusPill>
+            <PtStatusPill v-if="m.block" tone="neutral" size="sm" :title="m.block.reason || ''"
+              >已拉黑</PtStatusPill
+            >
+            <PtStatusPill v-else-if="i === 0 && card.pass" tone="primary" size="sm"
+              >首选</PtStatusPill
+            >
           </span>
           <span class="es-member__seed">做种 {{ m.seeders }}</span>
           <span class="es-member__promo">
@@ -145,6 +165,14 @@ function onCardClick() {
             hrText(m).text
           }}</span>
           <el-button
+            v-if="m.block"
+            class="es-member__push is-plain"
+            :data-testid="`es-unblock-${m.site}-${m.torrent_id}`"
+            @click.stop="emit('unblock', [m])">
+            <span>移出黑名单</span>
+          </el-button>
+          <el-button
+            v-else
             class="es-member__push"
             :class="`is-${pushKind(m, i).kind}`"
             :type="pushKind(m, i).kind === 'primary' ? 'primary' : 'default'"
@@ -167,6 +195,35 @@ function onCardClick() {
             另有 {{ others.length }} 个站点：{{ others.map((m) => m.site).join("、") }} ▾
           </template>
         </button>
+        <span class="es-card__acts">
+          <!-- 整张卡都拉黑了：成员行上各有「移出黑名单」，不止一个站点时脚注再给一个全部移出 -->
+          <button
+            v-if="card.blocked && card.members.length > 1"
+            type="button"
+            class="es-act"
+            data-testid="es-act-unblock"
+            @click.stop="emit('unblock', blockedHere)">
+            <PtIcon name="rotate-ccw" :size="13" /><span>全部移出黑名单</span>
+          </button>
+          <template v-else-if="!card.blocked">
+            <button
+              type="button"
+              class="es-act"
+              :disabled="!canWatch"
+              :title="canWatch ? '免费了再推送' : '这些站点读不了种子详情，不能等免费'"
+              data-testid="es-act-watch"
+              @click.stop="emit('watch')">
+              <PtIcon name="hourglass" :size="13" /><span>等免费</span>
+            </button>
+            <button
+              type="button"
+              class="es-act"
+              data-testid="es-act-block"
+              @click.stop="emit('block')">
+              <PtIcon name="eye-off" :size="13" /><span>不要</span>
+            </button>
+          </template>
+        </span>
       </div>
     </template>
   </PtPanel>
@@ -418,4 +475,38 @@ a.es-card__title:hover {
 .es-card__more:hover {
   text-decoration: underline;
 }
+
+/* 脚注右边的「等免费」「不要」：图标 13 t3 加 12 t3 字，右对齐，「不要」在最右，两项间 12 */
+.es-card__acts {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.es-act {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 16px;
+  padding: 0;
+  font: inherit;
+  font-size: var(--pt-fz-sm);
+  line-height: 16px;
+  color: var(--pt-t3);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.es-act:hover:not(:disabled) {
+  color: var(--pt-p);
+}
+
+.es-act:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* 拉黑的卡灰显：标题换 t3、档案分用 dim 的颜色（同整组已入库，见 score），成员行留着，「移出黑名单」要点得到 */
 </style>

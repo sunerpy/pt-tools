@@ -322,7 +322,8 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
  * 集的状态是 models/media_subscribe.go 的 library / downloading / waiting_version / missing / upcoming，
  * 订阅状态是 active / paused / pending / done，优惠是 site/v2/types.go 的 DiscountLevel（FREE、PERCENT_50、NONE）。
  * 五组对应画板上的五种卡：两个站点的同一资源（展开后两行）、整组已入库（默认折叠）、锁定的版本、正在下载、不符合档案。
- * 组的顺序照服务端的排法（profile.better：符合档案的在前，分数高的在前，同分时做种多的在前）。
+ * 第六组（M2b）是拉黑了的：默认不显示，最后一行写它的标题与原因（画板 06 的 blocked 行），点「已拉黑 1 条」才出来。
+ * 组的顺序照服务端的排法（profile.better：拉黑的在最后，符合档案的在前，分数高的在前，同分时做种多的在前）。
  */
 const entryMember = (site, id, over) => ({
   site,
@@ -474,8 +475,23 @@ const ENTRY_SEARCH = {
         verdict: { score: 0, reject: "分辨率 1080p 不在档案里" },
       }),
     ]),
+    entryGroup(
+      "s:hdfans:66120",
+      [
+        entryMember("HDFans", "66120", {
+          title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL-XXWEB",
+          size_bytes: Math.round(4.4 * 1024 ** 3),
+          seeders: 6,
+          meta: { ...HHWEB_META, group: "XXWEB" },
+          verdict: { score: 85 },
+          block: { id: 7, reason: "音画不同步" },
+        }),
+      ],
+      { blocked: true },
+    ),
   ],
-  total: 6,
+  total: 7,
+  blocked_count: 1,
   unmatched_count: 3,
   errors: [{ site: "TTG", error: "请求超时" }],
 };
@@ -974,6 +990,31 @@ export const FIXTURES = [
   ],
   ["/api/v2/search/sites", SITES.map(([s]) => s)],
   ["/api/media/search", ENTRY_SEARCH],
+  /* 黑名单与等免费（媒体中心 M2b）：字段照 models/media_block.go、web/api_free_watch.go */
+  [
+    "/api/media/blocks",
+    {
+      items: [
+        {
+          id: 7,
+          site_name: "HDFans",
+          torrent_id: "66120",
+          media_type: "tv",
+          tmdb_id: 231620,
+          season: 2,
+          media_title: "长夜将尽 第 2 季",
+          title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL-XXWEB",
+          reason: "音画不同步",
+          created_at: "2025-11-21T12:00:00Z",
+        },
+      ],
+    },
+  ],
+  /* 能等免费的站点（启用着、读得了种子详情）：按条目搜索假数据里的站点都能 */
+  [
+    "/api/free-watches/sites",
+    { sites: ["CHDBits", "HDFans", "HDHome", "HDSky", "OurBits", "PTHome", "PTTime"] },
+  ],
   ["/api/v2/sites/supported", SITES.map(([s2]) => s2)],
   ["/api/v2/sites/categories", {}],
   ["/api/v2/sites/levels", {}],

@@ -28,6 +28,7 @@ func TestNewSubscribeService(t *testing.T) {
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{},
 		&models.MediaSubscribeSetting{}, &models.MediaDoubanSource{}, &models.MediaDoubanItem{},
 		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{},
+		&models.MediaTorrentBlock{},
 	))
 	store := core.NewConfigStore(global.GlobalDB)
 	mgr := scheduler.NewManager()
@@ -86,6 +87,7 @@ func TestChatOpsSubscribeAdapterFlow(t *testing.T) {
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{},
 		&models.MediaSubscribeSetting{}, &models.MediaDoubanSource{}, &models.MediaDoubanItem{},
 		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{},
+		&models.MediaTorrentBlock{},
 	))
 	const key = "0123456789abcdef0123456789abcdef"
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

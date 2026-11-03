@@ -114,6 +114,9 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 | `report.daily` 每日战报                             | `day`（统计的日期）、`scope`（统计范围：`previous_day` 或 `today`）、`uploaded`、`downloaded`、`uploaded_bytes`、`downloaded_bytes`、`bonus`，`items`（各站点） |
 | `downloader.dead_torrents` 失效种子                 | `downloader`、`count`、`size`、`size_bytes`，`items`（每项 `name`、`size`、`size_bytes`）                                                                       |
 | `downloader.free_end_pause_failed` 免费结束暂停失败 | `site`、`torrent_title`、`downloader`、`free_end`、`failures`、`error`                                                                                          |
+| `torrent.free_watch.pushed` 等到免费                | `site`、`torrent_title`、`torrent_id`、`downloader`、`size`、`free_end`、`free_remaining`（长期免费时后两个为空）                                               |
+| `torrent.free_watch.expired` 等免费到期             | `site`、`torrent_title`、`torrent_id`、`days`（等了几天）                                                                                                       |
+| `torrent.free_watch.failed` 等免费不再等            | `site`、`torrent_title`、`torrent_id`、`fails`、`error`（最近一次的原因）                                                                                       |
 | `reseed.round` 辅种结果                             | `run_id`、`trigger`、`status`、`status_label`、`hashes`、`candidates`、`created`、`failed`、`gone`、`skipped`、`iyuu_calls`、`duration`、`stopped`、`summary`   |
 | `remote.paired` 新设备配对                          | `device`、`permission`                                                                                                                                          |
 | `system.backup_failed` 备份失败                     | `dir`、`error`、`last_ok`（上一次成功的时间，从没成功过时为空）                                                                                                 |

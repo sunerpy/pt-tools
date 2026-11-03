@@ -59,6 +59,8 @@ type MediaSearchResult struct {
 	Groups []MediaSearchGroup `json:"groups"`
 	// Total 是对上这个条目的结果数（各组成员数之和）
 	Total int `json:"total"`
+	// BlockedCount 是对上了、但拉黑了的结果数（成员数）
+	BlockedCount int `json:"blocked_count"`
 	// UnmatchedCount 是对不上这个条目的结果数；Unmatched 只在请求 include_unmatched 时带上
 	UnmatchedCount int                 `json:"unmatched_count"`
 	Unmatched      []MediaSearchMember `json:"unmatched,omitempty"`
@@ -150,6 +152,15 @@ type MediaSearchMember struct {
 	Verdict *MediaSearchVerdict `json:"verdict"`
 	// Reason 是对不上这个条目的原因（只在 unmatched 里）
 	Reason string `json:"reason,omitempty"`
+	// Block 是这个种子拉黑了（对这个条目，或对所有条目）；没拉黑时为空
+	Block *MediaSearchBlock `json:"block,omitempty"`
+}
+
+// MediaSearchBlock 是拉黑的记录：ID 用来移出黑名单，All 为真时是对所有条目拉黑的。
+type MediaSearchBlock struct {
+	ID     uint   `json:"id"`
+	Reason string `json:"reason,omitempty"`
+	All    bool   `json:"all,omitempty"`
 }
 
 // MediaSearchGroup 是同一个资源：Members 的第一个是首选。
@@ -165,6 +176,8 @@ type MediaSearchGroup struct {
 	Covers      []int `json:"covers"`
 	Downloading []int `json:"downloading"`
 	InLibrary   bool  `json:"in_library"`
+	// Blocked 是这一组的成员都拉黑了（排在最后）
+	Blocked bool `json:"blocked,omitempty"`
 }
 
 // MediaSearchSpan 是种子里的集：Whole 为真时是整季，否则是 [Start, End]。
@@ -188,6 +201,7 @@ type searchHit struct {
 	scored  bool
 	reasons []string
 	member  MediaSearchMember
+	blocked bool
 }
 
 func (in *MediaSearchInput) check() error {
@@ -286,6 +300,10 @@ func (s *Service) SearchMedia(ctx context.Context, in MediaSearchInput) (*MediaS
 	}
 	res.Errors = append(res.Errors, errs...)
 
+	blocks, err := s.blocksFor(ctx, in.MediaType, in.TMDBID, sub.Season)
+	if err != nil {
+		return nil, err
+	}
 	now := s.cfg.Now()
 	var hits []searchHit
 	var unmatched []MediaSearchMember
@@ -317,6 +335,11 @@ func (s *Service) SearchMedia(ctx context.Context, in MediaSearchInput) (*MediaS
 				h.v.Reject = strings.Join(h.reasons, "；")
 			}
 			m.Verdict = &MediaSearchVerdict{Score: profile.percent(h.v.Score), Reject: h.v.Reject}
+		}
+		if b, hit := blocks.get(it.SourceSite, it.ID); hit {
+			h.blocked = true
+			m.Block = &MediaSearchBlock{ID: b.ID, Reason: b.Reason, All: b.TMDBID == 0}
+			res.BlockedCount++
 		}
 		h.member = m
 		hits = append(hits, h)
@@ -575,8 +598,15 @@ func (s *Service) searchMovie(ctx context.Context, sub *models.MediaSubscription
 // passes 报告结果过了档案（不打分时都算过）。
 func (h searchHit) passes() bool { return !h.scored || h.v.Reject == "" }
 
-// hitBefore 是结果的先后：过了档案的在前，再按档案的比法，最后按站点名与编号（同一批结果不管到达的顺序，排出来都一样）。
+// hitBefore 是结果的先后：拉黑的在最后，过了档案的在前，再按档案的比法，最后按站点名与编号（同一批结果不管到达的顺序，
+// 排出来都一样）。
 func hitBefore(p Profile, a, b searchHit) int {
+	if a.blocked != b.blocked {
+		if b.blocked {
+			return -1
+		}
+		return 1
+	}
 	if a.passes() != b.passes() {
 		if a.passes() {
 			return -1
@@ -663,7 +693,8 @@ func groupHits(hits []searchHit, p Profile, total int, states map[int]MediaSearc
 	for id, members := range groups {
 		slices.SortFunc(members, func(a, b searchHit) int { return hitBefore(p, a, b) })
 		best := members[0]
-		g := MediaSearchGroup{GroupID: id, Meta: best.c.Meta, Verdict: best.member.Verdict, Covers: []int{}, Downloading: []int{}}
+		// 组内拉黑的排在最后：首选是拉黑的，就是整组都拉黑了
+		g := MediaSearchGroup{GroupID: id, Meta: best.c.Meta, Verdict: best.member.Verdict, Covers: []int{}, Downloading: []int{}, Blocked: best.blocked}
 		for _, m := range members {
 			g.Members = append(g.Members, m.member)
 		}

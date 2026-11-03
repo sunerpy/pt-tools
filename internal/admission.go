@@ -20,6 +20,7 @@ const (
 	SourceKindQbitCompat    = "qbit_compat"    // qB 兼容入口
 	SourceKindTransfer      = "transfer"       // 转移做种、辅种（复用已有数据）
 	SourceKindDownloaderAdd = "downloader_add" // 下载器页面直接加任务
+	SourceKindFreeWatch     = "free_watch"     // 等免费再下：免费了才推
 )
 
 const (

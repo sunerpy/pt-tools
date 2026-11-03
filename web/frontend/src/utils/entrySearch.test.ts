@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { MediaSearchGroup, MediaSearchMember, MediaSearchResult } from "@/api";
 
 import {
+  blockedLine,
+  blockedMembers,
   buildCards,
   coverPill,
   discountText,
@@ -67,6 +69,7 @@ const result = (
   ],
   groups,
   total: groups.reduce((n, g) => n + g.members.length, 0),
+  blocked_count: 0,
   unmatched_count: 0,
   errors: [],
   ...over,
@@ -352,5 +355,52 @@ describe("集号范围", () => {
     expect(
       buildCards(res, { merge: true, sort: "score", sel: { episodes: ["S04（整季）"] }, text: "" }),
     ).toHaveLength(0);
+  });
+});
+
+describe("拉黑的结果", () => {
+  const base = (): MediaSearchResult =>
+    result([
+      group("h:a", [member("ourbits", "1"), member("chdbits", "2", { block: { id: 9 } })]),
+      group("h:b", [member("pttime", "3", { block: { id: 7, reason: "假种" } })], {
+        blocked: true,
+      }),
+      group("h:c", [member("hdsky", "4")]),
+    ]);
+  const opts = { merge: true, sort: "score" as const, sel: {}, text: "" };
+
+  it("默认不显示拉黑的成员；全拉黑的组整张卡不显示", () => {
+    const cards = buildCards(base(), opts);
+    expect(cards.map((c) => c.key)).toEqual(["h:a", "h:c"]);
+    expect(cards[0]!.members.map((m) => m.site)).toEqual(["ourbits"]);
+    expect(cards.every((c) => !c.blocked)).toBe(true);
+  });
+
+  it("显示拉黑的：全拉黑的卡排在最后、标成 blocked，部分拉黑的卡不算", () => {
+    const cards = buildCards(base(), { ...opts, showBlocked: true });
+    expect(cards.map((c) => [c.key, c.blocked])).toEqual([
+      ["h:a", false],
+      ["h:c", false],
+      ["h:b", true],
+    ]);
+    expect(cards[0]!.members.map((m) => m.site)).toEqual(["ourbits", "chdbits"]);
+    // 关掉合并：一个成员一张卡，拉黑的排最后
+    const flat = buildCards(base(), { ...opts, merge: false, showBlocked: true });
+    expect(flat.map((c) => c.blocked)).toEqual([false, false, true, true]);
+  });
+
+  it("最后一行：一条写标题与原因，没写原因只写「不要这个种子」，多条只写条数，没有时为空", () => {
+    const res = base();
+    expect(blockedMembers(res).map((m) => m.torrent_id)).toEqual(["2", "3"]);
+    expect(blockedLine(res)).toEqual({ count: "已拉黑 2 条", detail: "" });
+    res.groups[0]!.members[1]!.block = undefined;
+    expect(blockedLine(res)).toEqual({
+      count: "已拉黑 1 条",
+      detail: "：Chang.Ye.S02E03.2160p.WEB-DL-HHWEB（不要这个种子：假种）",
+    });
+    res.groups[1]!.members[0]!.block = { id: 7 };
+    expect(blockedLine(res)?.detail).toBe("：Chang.Ye.S02E03.2160p.WEB-DL-HHWEB（不要这个种子）");
+    res.groups[1]!.members[0]!.block = undefined;
+    expect(blockedLine(res)).toBeNull();
   });
 });

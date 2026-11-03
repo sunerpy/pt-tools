@@ -56,6 +56,11 @@ export const api = {
       body: data ? JSON.stringify(data) : undefined,
     }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  patch: <T>(path: string, data?: unknown) =>
+    request<T>(path, {
+      method: "PATCH",
+      body: data ? JSON.stringify(data) : undefined,
+    }),
 };
 
 // API 类型定义
@@ -1287,6 +1292,8 @@ export interface SearchTorrentItem {
   sourceSite: string;
   /** 标题与副标题解析出的信息（分辨率、来源、平台、编码、HDR、制作组、中字、季集），按它筛选 */
   meta?: MediaMeta;
+  /** 对所有条目拉黑了（关键字搜索里点的「不要」）；id 用来移出黑名单 */
+  block?: { id: number; reason?: string };
 }
 
 export interface SiteSearchParams {
@@ -3999,6 +4006,8 @@ export interface SubscriptionTorrent {
   can_organize?: boolean;
   /** 能重新刮削：有整理好的文件 */
   can_rescrape?: boolean;
+  /** 对这个订阅的条目拉黑了（不要这个种子） */
+  blocked?: boolean;
 }
 
 /** 订阅下载的种子里一个视频文件的整理记录 */
@@ -4207,6 +4216,8 @@ export interface MediaSearchMember {
   verdict: MediaSearchVerdict | null;
   /** 对不上这个条目的原因（只在 unmatched 里） */
   reason?: string;
+  /** 拉黑了（对这个条目，或 all 为真时对所有条目）；没拉黑时没有 */
+  block?: { id: number; reason?: string; all?: boolean };
 }
 
 /** 同一个资源：members 的第一个是首选 */
@@ -4223,6 +4234,8 @@ export interface MediaSearchGroup {
   downloading: number[];
   /** 这一组的集都已入库（电影是库里有） */
   in_library: boolean;
+  /** 这一组的成员都拉黑了（排在最后） */
+  blocked?: boolean;
 }
 
 export interface MediaSearchResult {
@@ -4250,9 +4263,44 @@ export interface MediaSearchResult {
   movie?: { state: "library" | "downloading" | "missing"; site?: string };
   groups: MediaSearchGroup[];
   total: number;
+  /** 对上了、但拉黑了的结果数（成员数） */
+  blocked_count: number;
   unmatched_count: number;
   unmatched?: MediaSearchMember[];
   errors: { site: string; error: string }[];
+}
+
+/** 拉黑的一个种子：tmdb_id 为 0 时对所有条目生效（关键字搜索里拉黑的） */
+export interface TorrentBlock {
+  id: number;
+  site_name: string;
+  torrent_id: string;
+  media_type: "" | MediaKind;
+  tmdb_id: number;
+  season: number;
+  /** 拉黑时条目的名字（作用于哪个条目） */
+  media_title: string;
+  title: string;
+  reason: string;
+  created_at: string;
+}
+
+/** 一次拉黑：同一资源在几个站点上的种子一起拉黑；tmdb_id 为 0 时对所有条目 */
+export interface TorrentBlockInput {
+  media_type?: MediaKind;
+  tmdb_id?: number;
+  season?: number;
+  media_title?: string;
+  reason?: string;
+  items: { site: string; torrent_id: string; title: string }[];
+  /** 把第一个种子的制作组加进这一季订阅的标题排除词（要有订阅） */
+  exclude_group?: boolean;
+}
+
+export interface TorrentBlockResult {
+  blocks: TorrentBlock[];
+  /** 加进标题排除词的制作组（没有加时没有） */
+  excluded_group?: string;
 }
 
 export const subscribeApi = {
@@ -4339,6 +4387,77 @@ export const subscribeApi = {
   },
   /** 按条目搜索：只读，不推送；站点多时要十几秒到一分钟 */
   searchMedia: (data: MediaSearchInput) => api.post<MediaSearchResult>("/api/media/search", data),
+  /** 黑名单：全部拉黑的种子，新的在前 */
+  blocks: () => api.get<{ items: TorrentBlock[] }>("/api/media/blocks"),
+  addBlocks: (data: TorrentBlockInput) => api.post<TorrentBlockResult>("/api/media/blocks", data),
+  removeBlock: (id: number) => api.delete<{ ok: boolean }>(`/api/media/blocks/${id}`),
+  /** 追剧详情里「不要这个种子」：还在下载的改成失败、马上再搜；下载器里的种子不删 */
+  blockTorrent: (id: number, tid: number, data: { reason?: string; exclude_group?: boolean }) =>
+    api.post<TorrentBlockResult>(`/api/media/subscriptions/${id}/torrents/${tid}/block`, data),
+};
+
+/** 等免费的状态 */
+export type FreeWatchStatus = "watching" | "pushed" | "expired" | "canceled" | "failed";
+
+/** 一条等免费：免费了才推送到记下的下载器与路径 */
+export interface FreeWatch {
+  id: number;
+  site_name: string;
+  torrent_id: string;
+  title: string;
+  subtitle: string;
+  size_bytes: number;
+  has_hr: boolean;
+  hr_seed_time_h: number;
+  downloader_id: number;
+  save_path: string;
+  category: string;
+  tags: string;
+  media_type: "" | MediaKind;
+  tmdb_id: number;
+  season: number;
+  status: FreeWatchStatus;
+  next_check_at?: string;
+  last_check_at?: string;
+  check_count: number;
+  failures: number;
+  expires_at: string;
+  info_hash: string;
+  message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FreeWatchInput {
+  site: string;
+  torrent_id: string;
+  title: string;
+  subtitle?: string;
+  size_bytes?: number;
+  has_hr?: boolean;
+  hr_seed_time_h?: number;
+  downloader_id: number;
+  save_path?: string;
+  category?: string;
+  tags?: string;
+  media_type?: MediaKind;
+  tmdb_id?: number;
+  season?: number;
+  /** 等多久（1–30 天，默认 7） */
+  days?: number;
+}
+
+export const freeWatchApi = {
+  list: (status?: FreeWatchStatus) =>
+    api.get<{ items: FreeWatch[]; counts: Partial<Record<FreeWatchStatus, number>> }>(
+      `/api/free-watches${status ? `?status=${status}` : ""}`,
+    ),
+  create: (data: FreeWatchInput) => api.post<FreeWatch>("/api/free-watches", data),
+  /** 能等免费的站点（启用着、能读种子详情） */
+  sites: () => api.get<{ sites: string[] }>("/api/free-watches/sites"),
+  setExpiry: (id: number, expiresAt: string) =>
+    api.patch<FreeWatch>(`/api/free-watches/${id}`, { expires_at: expiresAt }),
+  cancel: (id: number) => api.post<FreeWatch>(`/api/free-watches/${id}/cancel`),
 };
 
 export const reseedApi = {

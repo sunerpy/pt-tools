@@ -23,6 +23,8 @@ type TorrentView struct {
 	CanOrganize bool `json:"can_organize"`
 	// CanRescrape 是能「重新刮削」：有整理好的文件
 	CanRescrape bool `json:"can_rescrape"`
+	// Blocked 是这个种子对订阅的条目拉黑了（「不要这个种子」或在搜索里点了「不要」）
+	Blocked bool `json:"blocked,omitempty"`
 }
 
 // TorrentFile 是种子里一个视频文件的整理记录。
@@ -40,8 +42,9 @@ type TorrentFile struct {
 	Retrying bool `json:"retrying,omitempty"`
 }
 
-// torrentViews 给订阅的种子带上整理记录（一次查完这些种子的记录）。
-func (s *Service) torrentViews(ctx context.Context, torrents []models.MediaSubscriptionTorrent) ([]TorrentView, error) {
+// torrentViews 给订阅的种子带上整理记录（一次查完这些种子的记录）。blocked 是这个订阅的条目的黑名单：
+// 拉黑了、标成失败的种子不给重新整理（重新整理会把它改回下载中，和「不要这个种子」相反）。
+func (s *Service) torrentViews(ctx context.Context, torrents []models.MediaSubscriptionTorrent, blocked blockIndex) ([]TorrentView, error) {
 	hashes := make([]string, 0, len(torrents))
 	for _, t := range torrents {
 		if t.InfoHash != "" {
@@ -84,6 +87,12 @@ func (s *Service) torrentViews(ctx context.Context, torrents []models.MediaSubsc
 		if t.InfoHash == "" || s.cfg.Organizer == nil || t.Status == models.MediaSubTorrentReplaced {
 			v.CanOrganize, v.CanRescrape = false, false
 		}
+		if _, hit := blocked.get(t.SiteName, t.TorrentID); hit {
+			v.Blocked = true
+			if t.Status == models.MediaSubTorrentFailed {
+				v.CanOrganize = false
+			}
+		}
 		out = append(out, v)
 	}
 	return out, nil
@@ -92,6 +101,9 @@ func (s *Service) torrentViews(ctx context.Context, torrents []models.MediaSubsc
 // errReplacedTorrent 是洗版换掉的旧版本：它的文件是特意从库里删掉的，不再整理、刮削（详情里的 CanOrganize、CanRescrape 也是假）。
 // 动作本身也要拒绝：App API、MCP（带 confirm=true）直接调动作，不经过详情；旧版本还在下载器里做种时，重新整理会把它放回库里。
 var errReplacedTorrent = fmt.Errorf("%w: 这个版本已经被洗版换掉（库里的文件是特意删掉的），不再整理、刮削", ErrInvalid)
+
+// errBlockedTorrent 是拉黑了、标成失败的种子（「不要这个种子」）：重新整理会把它改回下载中，所以拒绝；详情里的 CanOrganize 也是假。
+var errBlockedTorrent = fmt.Errorf("%w: 这个种子拉黑了（不要这个种子），不再整理；要整理先在「拉黑的种子」里移出", ErrInvalid)
 
 // subTorrent 是订阅下载过的一个种子（不是这个订阅的回 ErrNotFound）。
 func (s *Service) subTorrent(ctx context.Context, subID, torrentID uint) (models.MediaSubscription, models.MediaSubscriptionTorrent, error) {
@@ -121,6 +133,15 @@ func (s *Service) OrganizeTorrent(ctx context.Context, subID, torrentID uint) (*
 	}
 	if t.Status == models.MediaSubTorrentReplaced {
 		return nil, errReplacedTorrent
+	}
+	if t.Status == models.MediaSubTorrentFailed {
+		blocked, berr := s.blocksFor(ctx, sub.MediaType, sub.TMDBID, sub.Season)
+		if berr != nil {
+			return nil, berr
+		}
+		if _, hit := blocked.get(t.SiteName, t.TorrentID); hit {
+			return nil, errBlockedTorrent
+		}
 	}
 	if t.InfoHash == "" || t.DownloaderID == 0 {
 		return nil, fmt.Errorf("%w: 这个种子没有记下下载器或 info hash，到下载器里手动整理", ErrInvalid)

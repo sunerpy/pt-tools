@@ -52,6 +52,7 @@ type Manager struct {
 	brushMonitor         *BrushMonitor
 	deadTorrentMonitor   *DeadTorrentMonitor
 	transferWorker       *TransferWorker
+	freeWatchWorker      *FreeWatchWorker
 	reseedWorker         *ReseedWorker
 	cookieCloudWorker    *CookieCloudWorker
 	eventCancel          func()
@@ -599,6 +600,10 @@ func (m *Manager) StopAll() {
 		stops = append(stops, m.transferWorker.Stop)
 		m.transferWorker = nil
 	}
+	if m.freeWatchWorker != nil {
+		stops = append(stops, m.freeWatchWorker.Stop)
+		m.freeWatchWorker = nil
+	}
 	if m.dailyReportJob != nil {
 		stops = append(stops, m.dailyReportJob.Stop)
 		m.dailyReportJob = nil
@@ -813,6 +818,23 @@ func (m *Manager) GetTransferWorker() *TransferWorker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.transferWorker
+}
+
+// SetFreeWatchWorker 登记等免费后台；替换旧实例时先停掉旧的。
+func (m *Manager) SetFreeWatchWorker(w *FreeWatchWorker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.freeWatchWorker != nil && m.freeWatchWorker != w {
+		m.freeWatchWorker.Stop()
+	}
+	m.freeWatchWorker = w
+}
+
+// GetFreeWatchWorker 返回等免费后台（未接线时为 nil）。
+func (m *Manager) GetFreeWatchWorker() *FreeWatchWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.freeWatchWorker
 }
 
 // SetReseedWorker 登记辅种后台；替换旧实例时先停掉旧的。

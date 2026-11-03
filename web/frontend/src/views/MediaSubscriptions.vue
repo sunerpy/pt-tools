@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /*
  * 追剧与订阅（路线图 M11，追剧见 state 里的方案）：订阅列表（进度、每一集的格子、定时与版本锁、最近一次搜索的结果、
- * 立即搜索、暂停与恢复、确认、修改、删除），订阅设置、质量档案与豆瓣想看来源。画板没有这一页，沿用媒体页的样式：
+ * 立即搜索、暂停与恢复、确认、修改、删除），订阅设置、质量档案、豆瓣想看来源与拉黑的种子。画板没有这一页，沿用媒体页的样式：
  * 页头 + 面板里的表格，手机是行卡。
  */
 import {
@@ -12,6 +12,7 @@ import {
   type QualityProfile,
   type SubscribeSettings,
   type Subscription,
+  type TorrentBlock,
   chatopsApi,
   downloadersApi,
   sitesApi,
@@ -329,11 +330,49 @@ async function removeSource(s: DoubanSource) {
   }
 }
 
+// ---- 拉黑的种子 ----
+const blocks = ref<TorrentBlock[]>([]);
+const blocksDS = useDataState();
+const unblocking = ref<number | null>(null);
+
+async function loadBlocks() {
+  const pending = blocksDS.run(() => subscribeApi.blocks());
+  const got = await pending;
+  if (blocksDS.isStale(pending) || !got) return;
+  blocks.value = got.items ?? [];
+}
+
+/** 作用于哪个条目：对所有条目的（关键字搜索里拉黑的）写「所有条目」 */
+function blockScope(b: TorrentBlock) {
+  if (!b.tmdb_id) return "所有条目";
+  return b.media_title || `${b.media_type === "tv" ? "剧集" : "电影"} ${b.tmdb_id}`;
+}
+
+async function unblock(b: TorrentBlock) {
+  unblocking.value = b.id;
+  try {
+    await subscribeApi.removeBlock(b.id);
+    ElMessage.success("已移出黑名单");
+    await loadBlocks();
+  } catch (e) {
+    ElMessage.error(errText(e, "移出黑名单失败"));
+  } finally {
+    unblocking.value = null;
+  }
+}
+
+/** 订阅详情里改了东西（跳过、换版本、拉黑……）：列表与拉黑的种子都重读 */
+function onDetailChanged() {
+  void loadSubs();
+  void loadBlocks();
+}
+
 function refresh() {
   void loadSubs();
   void loadSettings();
   void loadProfiles();
   void loadSources();
+  void loadBlocks();
 }
 
 function openExplore() {
@@ -886,11 +925,74 @@ onBeforeUnmount(() => clearInterval(autoTimer));
             </PtRowCard>
           </div>
         </PtPanel>
+
+        <PtPanel title="拉黑的种子" icon="eye-off" :count="blocks.length">
+          <p class="ms-tip">
+            在按条目搜索、关键字搜索或订阅详情里点了「不要」的种子：订阅不再选它们。移出黑名单以后订阅又会选。
+          </p>
+          <PtDataState
+            v-if="!blocks.length"
+            :state="blocksDS.state.value"
+            :title="blocksDS.state.value === 'empty' ? '没有拉黑的种子' : ''"
+            :sub="blocksDS.errorText.value"
+            data-testid="ms-blocks-state" />
+          <el-table
+            v-else-if="!isMobile"
+            :data="blocks"
+            row-key="id"
+            class="pt-grid"
+            data-testid="ms-blocks">
+            <el-table-column label="种子" min-width="260" class-name="pt-cell-1line">
+              <template #default="{ row }">
+                <div class="ms-strong" :title="row.title">{{ row.title || row.torrent_id }}</div>
+                <div class="ms-sub">{{ row.site_name }} · {{ row.torrent_id }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="作用于" min-width="150">
+              <template #default="{ row }">{{ blockScope(row) }}</template>
+            </el-table-column>
+            <el-table-column label="原因" min-width="140">
+              <template #default="{ row }">
+                <span :class="{ 'ms-sub': !row.reason }">{{ row.reason || "没写" }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="时间" width="120" class-name="pt-cell-muted">
+              <template #default="{ row }">{{ formatShortDateTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="" width="80" align="right">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  :loading="unblocking === row.id"
+                  :data-testid="`ms-block-del-${row.id}`"
+                  @click="unblock(row)"
+                  >移出</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-else class="ms-cards">
+            <PtRowCard v-for="b in blocks" :key="b.id">
+              <template #title>{{ b.title || b.torrent_id }}</template>
+              <template #meta>
+                <span>{{ b.site_name }}</span>
+                <span>{{ blockScope(b) }}</span>
+                <span v-if="b.reason" class="ms-full">{{ b.reason }}</span>
+                <span>{{ formatShortDateTime(b.created_at) }}</span>
+              </template>
+              <template #actions>
+                <el-button size="small" :loading="unblocking === b.id" @click="unblock(b)"
+                  >移出黑名单</el-button
+                >
+              </template>
+            </PtRowCard>
+          </div>
+        </PtPanel>
       </div>
     </div>
 
     <SubscribeDialog v-model="editDialog" :sub="editing" @saved="loadSubs" />
-    <SubscriptionDetailDialog v-model="detailDialog" :id="detailID" @changed="loadSubs" />
+    <SubscriptionDetailDialog v-model="detailDialog" :id="detailID" @changed="onDetailChanged" />
     <QualityProfileDialog
       v-model="profileDialog"
       :profile="editingProfile"

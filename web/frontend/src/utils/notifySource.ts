@@ -18,6 +18,7 @@ export const NOTIFY_SOURCE_LABELS: Record<string, string> = {
   remote: "远程访问",
   reseed: "辅种",
   backup: "备份",
+  free_watch: "等免费",
 };
 
 /** 同一来源下要分开叫的种类（来源:种类）；没列的用来源的叫法 */
@@ -35,6 +36,9 @@ const KIND_LABELS: Record<string, string> = {
   "media:followshow_failed": "追剧：连续几次没搜成",
   "reseed:round": "辅种结果",
   "backup:failed": "备份失败",
+  "free_watch:pushed": "等免费：免费了，已推送",
+  "free_watch:expired": "等免费：到期了",
+  "free_watch:failed": "等免费：连续没成，不再等",
 };
 
 export const NOTIFY_COMMAND_PREFIX = "notify:";

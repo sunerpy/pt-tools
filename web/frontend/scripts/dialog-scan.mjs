@@ -187,6 +187,10 @@ const NOT_ON_BOARD = {
     "底栏「我的」的上拉面板 —— 它的规格在画板 34（移动 · 我的），不在这张清点图里",
   "components/search/EntrySearch.vue#筛选":
     "按条目搜索（媒体中心 M2a）晚于画板 40 定稿：视口窄于 1280 时左栏收进这个抽屉，内容就是画板 06 的左栏",
+  "components/search/BlockDialog.vue":
+    "「不要这个种子」（媒体中心 M2b）晚于画板 40 定稿：按条目搜索、关键字搜索与订阅详情共用，写原因、作用范围，订阅详情里还能顺手删种",
+  "views/FreeWatches.vue":
+    "等免费页（媒体中心 M2b）晚于画板 40 定稿：改到期时间的弹窗不在那张清点图里",
   "components/search/EntrySearch.vue#(drawer 无 title)":
     "按条目搜索（媒体中心 M2a）在手机上的筛选面板：规格在画板 10（媒体中心那一组），不在画板 40 的清点图里",
   "views/chatops/RSSNotifications.vue#通知详情":

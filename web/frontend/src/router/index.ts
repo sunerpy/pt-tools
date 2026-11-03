@@ -164,6 +164,12 @@ const router = createRouter({
       meta: { title: "任务列表" },
     },
     {
+      path: "/free-watch",
+      name: "free-watch",
+      component: () => import("@/views/FreeWatches.vue"),
+      meta: { title: "等免费" },
+    },
+    {
       path: "/brush",
       name: "brush",
       component: () => import("@/views/BrushTasks.vue"),

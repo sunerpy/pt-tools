@@ -51,6 +51,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { path: "/search", label: "种子搜索", icon: "search", rail: true },
       { path: "/tasks", label: "任务列表", icon: "list-checks", badge: "tasks", rail: true },
+      /* 媒体中心 M2b：画板 06 的导航画在任务列表后面（画板那枚「新」徽标不做），页面沿用下载组的列表页样式 */
+      { path: "/free-watch", label: "等免费", icon: "hourglass" },
       { path: "/paused", label: "暂停任务", icon: "circle-pause", badge: "paused", rail: true },
       /* 路线图 M3：画板没有这一页，沿用下载组的列表页样式 */
       { path: "/brush", label: "刷流任务", icon: "trending-up" },
@@ -177,6 +179,7 @@ const ROUTE_NAME_TO_NAV: Record<string, string> = {
   "supported-sites": "/supported-sites",
   search: "/search",
   tasks: "/tasks",
+  "free-watch": "/free-watch",
   paused: "/paused",
   "downloader-hub": "/downloader-hub",
   downloaders: "/downloaders",

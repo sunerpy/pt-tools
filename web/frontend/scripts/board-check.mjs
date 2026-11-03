@@ -2901,7 +2901,7 @@ if (emptyRoutes.length > 0) {
  * 画板 06 按 1440×1024 画（侧栏 264 + 主区 1176），所以这一趟按 1440 量，不按上面的 1376；
  * 视口 < 1280 时左栏收进抽屉，另量一次 1200；手机按画板 09、10 量 375×812。
  * 数字来自 docs/design/media-hub-board-spec.md 的 B06 / B09；假数据是 board-fixtures.mjs 的 ENTRY_SEARCH
- * （五组：两个站点的同一资源、整组已入库、锁定的版本、正在下载、不符合档案）。
+ * （五组：两个站点的同一资源、整组已入库、锁定的版本、正在下载、不符合档案；第六组拉黑了，默认不显示，M2b）。
  * 条目从地址带进来（探索页的「搜资源」就是这么跳的），不经候选下拉。
  */
 const ENTRY_ROUTE = "/search?media_type=tv&tmdb_id=231620";
@@ -2959,6 +2959,14 @@ const MEASURE_ES = `(() => {
       pill: txt(q('.es-card__pill', el)),
       lock: txt(q('.es-card__lock', el)),
       more: txt(q('[data-testid="es-more"]', el)),
+      /* 脚注右边的「等免费」「不要」（M2b）：位置、图标与字 */
+      acts: [...el.querySelectorAll('.es-card__acts .es-act')].map((b) => ({
+        t: txt(b),
+        disabled: b.disabled,
+        icon: box(b.querySelector('svg')),
+        color: getComputedStyle(b).color,
+        ...box(b),
+      })),
       text: txt(el).slice(0, 400),
     })),
     unmatched: txt(q('[data-testid="es-unmatched-line"]')),
@@ -3179,8 +3187,36 @@ if (doEntry) {
       ) {
         entryFail("card[4]", `不符合档案的卡：覆盖结果「${c4.pill}」，档案分「${c4.scoreText}」`);
       }
+      /*
+       * 脚注右边（画板 06，M2b）：「等免费」「不要」，图标 13 t3 加 12 t3 字，右对齐到卡内 872，「不要」在最右，两项间 12；
+       * 脚注在 y = 卡高 − 30、16 高。整组已入库折叠的卡没有脚注。
+       */
+      const acts = c0.acts;
+      if (acts.map((a) => a.t).join("|") !== "等免费|不要") {
+        entryFail("card[0].acts", `脚注右边是「${acts.map((a) => a.t).join("、")}」`);
+      } else {
+        const [watch, no] = acts;
+        const footY = c0.y + c0.h - 30;
+        if (
+          !near(no.x + no.w, c0.x + 872, 4) ||
+          !near(no.x - (watch.x + watch.w), 12, 2) ||
+          acts.some((a) => !near(a.y, footY, 3) || !near(a.h, 16, 2)) ||
+          acts.some((a) => !a.icon || !near(a.icon.w, 13, 1)) ||
+          acts.some((a) => a.disabled)
+        ) {
+          entryFail(
+            "card[0].acts",
+            `位置 ${JSON.stringify(acts)}，画板「不要」右边在 ${c0.x + 872}、两项间 12、y ${footY}、高 16、图标 13，都点得了`,
+          );
+        }
+      }
+      if (c1.acts.length !== 0) entryFail("card[1].acts", "折叠的卡不该有脚注右边的两项");
     }
-    if (!m.unmatched.includes("对不上这个条目的 3 条没显示"))
+    /* 最后一行（画板 06 的 blocked 行）：拉黑的一条写标题与原因，再写没对上的条数 */
+    if (
+      m.unmatched !==
+      "已拉黑 1 条：Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL-XXWEB（不要这个种子：音画不同步）· 对不上这个条目的 3 条没显示"
+    )
       entryFail("unmatched", `最后一行是「${m.unmatched}」`);
     if (m.overflow > 0) entryFail("overflow", `横向溢出 ${m.overflow}px`);
 
@@ -3262,6 +3298,32 @@ if (doEntry) {
           const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
           const ok = cards.join() === 'es-card-s:pthome:77310' && chip === '只看 E07' && back === 5;
           return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡 ' + cards.join(',') + ' 提示 ' + chip + ' 取消后 ' + back;
+        })()`,
+      },
+      {
+        key: "probe.blocked",
+        desc: "点「已拉黑 1 条」：拉黑的那张卡排在最后、灰显、成员行写已拉黑与「移出黑名单」，没有「不要」；再点收起",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const link = document.querySelector('[data-testid="es-show-blocked"]');
+          if (!link) return 'no-link';
+          link.click();
+          await wait(400);
+          const cards = [...document.querySelectorAll('[data-testid^="es-card-"]')];
+          const last = cards[cards.length - 1];
+          const key = last?.getAttribute('data-testid') ?? '';
+          const text = (last?.textContent ?? '').replace(/\s+/g, ' ');
+          const unblock = Boolean(last?.querySelector('[data-testid="es-unblock-HDFans-66120"]'));
+          const noBlock = !last?.querySelector('[data-testid="es-act-block"]');
+          const dim = last?.classList.contains('is-blocked') ?? false;
+          const line = (document.querySelector('[data-testid="es-unmatched-line"]')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+          link.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = cards.length === 6 && key === 'es-card-s:hdfans:66120' && text.includes('已拉黑') &&
+            unblock && noBlock && dim && line.includes('灰显在上面') && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡 ' + cards.length + ' 最后 ' + key + ' 已拉黑 ' + text.includes('已拉黑') +
+            ' 移出 ' + unblock + ' 没有不要 ' + noBlock + ' 灰显 ' + dim + ' 最后一行 ' + line + ' 收起后 ' + back;
         })()`,
       },
       {
@@ -3355,6 +3417,16 @@ if (doEntry) {
         })(),
         warn: box(document.querySelector('[data-testid="es-site-errors"]')),
         cards: [...document.querySelectorAll('[data-testid^="es-mcard-"]')].map(box),
+        /* 第一张卡底部两半（画板 09，M2b）：每半的盒子、字、图标，中间的竖线 */
+        acts: (() => {
+          const el = document.querySelector('[data-testid^="es-mcard-"] .es-mcard__acts');
+          if (!el) return null;
+          return {
+            ...box(el),
+            halves: [...el.querySelectorAll('.es-mact')].map((b) => ({ t: txt(b), icon: box(b.querySelector('svg')), ...box(b) })),
+            split: box(el.querySelector('.es-mcard__split')),
+          };
+        })(),
         rail: Boolean(document.querySelector('.es-body__rail')),
         overflow: document.documentElement.scrollWidth - window.innerWidth,
       };
@@ -3410,6 +3482,27 @@ if (doEntry) {
           true,
         );
       }
+    }
+    /* 底部两半：贯穿整张卡（上面 1px 分隔线），每半 171 宽（滚动条让出的宽度两半分）、44 高，图标 14；中间竖线 28 高 */
+    const ma = mm.acts;
+    if (!ma) entryFail("acts", "第一张结果卡底部没有「等免费」「不要」", true);
+    else {
+      const half = (cw - 1) / 2;
+      const ok =
+        ma.halves.map((h) => h.t).join("|") === "等免费|不要" &&
+        near(ma.x, 17, 2) &&
+        near(ma.w, cw - 2, 2) &&
+        ma.halves.every((h) => near(h.w, half - 1, 2) && near(h.h, 44, 1)) &&
+        ma.halves.every((h) => h.icon && near(h.icon.w, 14, 1)) &&
+        ma.split &&
+        near(ma.split.h, 28, 1) &&
+        near(ma.split.x, ma.x + ma.halves[0].w, 1);
+      if (!ok)
+        entryFail(
+          "acts",
+          `底部两半 ${JSON.stringify(ma)}，画板每半 171 宽、44 高、图标 14、中间竖线 28 高`,
+          true,
+        );
     }
     if (mm.rail) entryFail("rail", "手机上不该有左栏", true);
     if (mm.overflow > 0) entryFail("overflow", `横向溢出 ${mm.overflow}px`, true);

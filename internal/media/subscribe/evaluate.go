@@ -336,9 +336,13 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 	if err != nil {
 		return err.Error()
 	}
+	blocks, err := s.blocksFor(ctx, sub.MediaType, sub.TMDBID, sub.Season)
+	if err != nil {
+		return err.Error()
+	}
 	var ok []scored
 	var rejects []string
-	byKeywords := false
+	byKeywords, blocked := false, 0
 	for _, c := range cands {
 		if slices.ContainsFunc(linked, func(t models.MediaSubscriptionTorrent) bool {
 			return strings.EqualFold(t.SiteName, c.Site) && t.TorrentID == c.Item.ID
@@ -351,6 +355,12 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 				rejects = append(rejects, c.Item.Title+"："+why)
 				step(ctx, stepReject, "%s：%s", c.Item.Title, why)
 			}
+			continue
+		}
+		if b, hit := blocks.get(c.Site, c.Item.ID); hit {
+			blocked++
+			rejects = append(rejects, c.Item.Title+"："+blockWhy(b))
+			step(ctx, stepReject, "%s：%s", c.Item.Title, blockWhy(b))
 			continue
 		}
 		if why := keywordReject(sub, c.Item); why != "" {
@@ -368,12 +378,19 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 		ok = append(ok, scored{c: c, v: v, sp: sp, titleOverSubtitle: mt.mapper.titleOverSubtitle(c.Meta, c.Item.Title, c.Item.Subtitle, sp)})
 	}
 	if len(ok) == 0 {
-		if len(rejects) > 0 {
+		switch {
+		case blocked > 0 && blocked == len(rejects):
+			return fmt.Sprintf("找到 %d 个，都已拉黑：%s", blocked, strings.Join(rejects[:min(len(rejects), 3)], "；"))
+		case len(rejects) > 0:
 			what := "质量档案"
 			if byKeywords {
 				what = "质量档案或标题关键词"
 			}
-			return fmt.Sprintf("找到 %d 个，都不符合%s：%s", len(rejects), what, strings.Join(rejects[:min(len(rejects), 3)], "；"))
+			msg := fmt.Sprintf("找到 %d 个，都不符合%s：%s", len(rejects), what, strings.Join(rejects[:min(len(rejects), 3)], "；"))
+			if blocked > 0 {
+				msg += fmt.Sprintf("（其中 %d 个已拉黑）", blocked)
+			}
+			return msg
 		}
 		return "没有找到对得上的资源"
 	}

@@ -5,7 +5,7 @@ Download → Torrent search (下载 → 种子搜索) searches your sites for to
 - **Keyword search**: type a keyword and press Enter. The results are a table, as in 0.48.0.
 - **Search by title**: while typing, pick a film or series from the drop-down. pt-tools searches every site for that title, scores each result against a quality profile, merges copies of the same release into one card and, for a series, says which episodes a release would fill in.
 
-Search by title, the parsed tags in the results and Filters (筛选) were added in the 1.0 preview.
+Search by title, the parsed tags in the results and Filters (筛选), [blocking](#blocking) torrents you do not want and [waiting for free](#waiting-for-free) before downloading were added in the 1.0 preview.
 
 ## Keyword search
 
@@ -21,7 +21,7 @@ Type a keyword and press Enter or click Search (搜索). With no sites selected 
 | Save search (保存搜索)                         | Saves the keyword, sites, sort order, category and Free only; saved searches are listed under Saved searches (已保存的搜索), and one click runs a saved search again |
 | Recent searches (最近搜索)                     | The button to the right of the box lists the last 8 searches; click one to run it again                                                                              |
 
-Under each title the row shows what was parsed from it: resolution, source, platform, codec, HDR, release group and Chinese subtitles, next to the site's category and H&R. Push to downloader (推送到下载器) asks for the downloader, save path, category and tags; the push goes through the usual disk space protection and site seeding capacity checks. For a series torrent, Follow (追剧) starts following the show from that torrent (see [follow and subscribe](media-subscribe.md#starting-from-a-torrent)).
+Under each title the row shows what was parsed from it: resolution, source, platform, codec, HDR, release group and Chinese subtitles, next to the site's category and H&R. Push to downloader (推送到下载器) asks for the downloader, save path, category and tags; the push goes through the usual disk space protection and site seeding capacity checks. For a series torrent, Follow (追剧) starts following the show from that torrent (see [follow and subscribe](media-subscribe.md#starting-from-a-torrent)). The More (更多) menu at the end of each row has Wait for free (等免费) and Don't want (不要), see [waiting for free](#waiting-for-free) and [blocking](#blocking) below.
 
 ## Search by title
 
@@ -67,6 +67,8 @@ Cards whose episodes are all in the library are folded; click one to open it.
 
 Pushing opens the same push dialog as keyword search. The push carries the title, so when the download completes, library organising uses that title instead of recognising the torrent name (see [library organising](media-library.md#which-files-are-organised)). Torrents that do not fit the profile have a Push anyway (仍然推送) button and can be pushed as well.
 
+The bottom right of each card has Wait for free (等免费) and Don't want (不要), see [waiting for free](#waiting-for-free) and [blocking](#blocking) below.
+
 ### Merging copies of a release
 
 Merge same release (合并同一资源), at the right of the search bar, is on by default: the same release on different sites becomes one card. When sites give an InfoHash, torrents with the same InfoHash are merged; otherwise torrents with the same size (to the byte), resolution, release group and episode range are merged. A torrent without an InfoHash that looks like several releases with different InfoHashes gets a card of its own and is merged into none of them. With the switch off, each torrent on each site is its own card.
@@ -87,9 +89,38 @@ Filters (筛选) is in the toolbar for keyword search and in the side panel for 
 
 Several options in one group are combined with "or", groups with "and". The number next to an option is how many results remain with the other groups as they are now selected: ticking an option does not turn the other options in its own group into 0. Options with 0 cannot be ticked. A group with no options (for example when no result names a platform) is not shown. In keyword search, Filters applies to the results left after the category and Free only filters, and a new search clears it.
 
+## Blocking
+
+Click Don't want (不要) to block a torrent you do not want (a fake, out-of-sync audio, poor picture), optionally with a reason. Subscriptions no longer pick a blocked torrent: both torrents from RSS and torrents found by active search skip it, and the run log says "已拉黑：原因" (blocked: reason). A block is keyed on the site and the torrent ID, so the same release uploaded again elsewhere is not blocked; deleting a subscription and creating it again keeps the block.
+
+| Where you click                                                                        | What is blocked                                                        | Which subscriptions it affects                                                            |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Don't want (不要) on a card in search by title                                         | Every torrent on the card (the same release on several sites together) | This title only (for a series, this season)                                               |
+| More → Don't want (更多 → 不要) on a keyword search row                                | This torrent                                                           | Every subscription                                                                        |
+| Don't want this torrent (不要这个种子) under Torrents downloaded in a follow's details | This torrent                                                           | The subscription's title, see [follow and subscribe](media-subscribe.md#blocked-torrents) |
+
+With Don't want on a card in search by title, when this season has a subscription you can also tick Not this release group again (以后也不要这个制作组), which adds the preferred torrent's release group to the subscription's title exclusions. Blocked torrents are hidden by default and the last line of the results says "已拉黑 N 条" (N blocked), with the title and the reason when there is only one. Click "已拉黑 N 条" to show them greyed out at the end; each site row has Unblock (移出黑名单), and a card whose torrents are all blocked also has Unblock all (全部移出黑名单) at the bottom right.
+
+Torrents blocked in keyword search stay in the results with Blocked (已拉黑) under the title, and the More menu offers Unblock (移出黑名单) instead. Every blocked torrent is listed under Blocked torrents (拉黑的种子) on the Follow and subscribe (追剧与订阅) page, with the title it applies to, the reason and the time; you can unblock it there too.
+
+## Waiting for free
+
+For a torrent that is not free yet that you want to download once it is: click Wait for free (等免费) at the bottom right of a card in search by title (it uses the card's first torrent on a site that supports waiting), or More → Wait for free (更多 → 等免费) on a keyword search row. This opens the push dialog in wait-for-free mode: pick one downloader, fill in the save path, category and tags (as for a push), and choose how long to wait (1–30 days, 7 by default). There is no Start after adding (添加后立即开始) switch.
+
+Every 5 minutes, a background task looks at the torrents that are due and reads the current discount from each torrent's details page:
+
+- Free, with more free time left than Act early, minutes before freeleech ends (免费期结束前提前处理, see [configuration](../configuration.md#when-freeleech-ends); at least 5 minutes; permanent free torrents skip this check): pushed to the chosen downloader, through the usual disk space protection and site seeding capacity checks, and paused if it has not finished when the free period ends. A "等到免费了，已推送" (free now, pushed) notification is sent. A torrent that is already free when you create the wait is pushed straight away.
+- Not free yet, not enough free time left, no known end of the free period, or the push was stopped by disk space protection or site seeding capacity: checked again in 30 minutes.
+- The discount could not be read, the torrent file could not be downloaded or the push failed: retried after 1, 2, 4 and 4 hours; after 5 times in a row it stops waiting and sends a notification with the last reason.
+- Not free by the time the wait ends: it stops waiting and sends a "等免费到期了" (wait for free ended) notification.
+
+Only sites whose torrent details can be read support waiting; on other sites the button is greyed out. At most 200 torrents can be waiting at a time, and the same torrent can only have one wait. Notifications go to every enabled notification channel; for the events and their variables see [message templates](notify-channels.md#message-templates).
+
+Download → Wait for free (下载 → 等免费) lists every wait: which downloader it goes to, its state (waiting, pushed, ended, stopped, cancelled), what the last check found, when it is checked next and how many times it was checked. A waiting one can be given a new end time (改到期; later than now, at most 30 days from now) or cancelled (取消). The page lists the latest 500.
+
 ## Phone
 
-On a phone, search by title puts the season, the profile and a Filters (筛选) button in a row under the box. The title card shows the poster and the episode cells, and the result cards show the same content as on the desktop, stacked. Filters open from the bottom; the selection only applies after tapping "Show N results" (看 N 条结果), and closing the panel without it changes nothing. The discount group on the phone also has 50%. When sites did not answer, a line of its own under the summary says so; tap it for each site's reason.
+On a phone, search by title puts the season, the profile and a Filters (筛选) button in a row under the box. The title card shows the poster and the episode cells, and the result cards show the same content as on the desktop, stacked, with Wait for free (等免费) and Don't want (不要) as the two halves at the bottom of each card. Filters open from the bottom; the selection only applies after tapping "Show N results" (看 N 条结果), and closing the panel without it changes nothing. The discount group on the phone also has 50%. When sites did not answer, a line of its own under the summary says so; tap it for each site's reason.
 
 ## Troubleshooting
 
@@ -98,3 +129,5 @@ On a phone, search by title puts the season, the profile and a Filters (筛选) 
 **Search by title finds few results**: the last line of the results, "对不上这个条目的 N 条" (N do not match this title), counts the torrents that did not match; open it for the reasons. When the torrent names differ from the names on TMDB, add a recognition word under [media recognition](media-recognize.md). A title you do not subscribe to is searched with the names on TMDB only; a keyword search shows how the sites name its torrents.
 
 **The profile score is 0 or says Not a fit**: the top right of the card says why. Try another profile or Ignore profile; neither changes the subscription.
+
+**A wait for free never pushes**: on Download → Wait for free, the wait's note says what the last check found (for example "还没免费（现在是 50%）", not free yet, 50% now) or why the push did not happen. When disk space protection stopped the push, it is pushed at the next check once there is space.
