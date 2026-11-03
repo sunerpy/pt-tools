@@ -490,7 +490,7 @@ func (s *Service) searchEpisodes(ctx context.Context, sub *models.MediaSubscript
 type dlRef struct {
 	downloaderID uint
 	hash         string
-	seen         time.Time // 记录记下的时间（比它早列的下载器列表里可能还没有这个种子）
+	seen         time.Time // 记录记下的时间（刚记下的，缓存的下载器列表里可能还没有这个种子）
 }
 
 // episodeState 是一集现在的情况，带上入库的那条整理记录与在下载的种子（条目详情要版本、体积与进度）。

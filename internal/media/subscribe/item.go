@@ -378,7 +378,7 @@ type torrentRef struct {
 	hash                   string
 	hr                     bool
 	hrHours                int
-	seen                   time.Time // 关联记录里最晚记下的时间（比它早列的下载器列表里可能还没有这个种子）
+	seen                   time.Time // 关联记录里最晚记下的时间（刚记下的，缓存的下载器列表里可能还没有这个种子）
 }
 
 // itemTorrents 合并关联的种子（订阅的种子、推送记录、整理记录），按下载器里现在的样子给出状态；不在下载器里的不列。
@@ -575,15 +575,12 @@ func (s *Service) liveTorrents(ctx context.Context, refs []*torrentRef) ([]ItemT
 		return out, nil, nil
 	}
 	ids := []uint{}
-	since := map[uint]time.Time{}
 	for _, r := range refs {
 		if !slices.Contains(ids, r.downloaderID) {
 			ids = append(ids, r.downloaderID)
 		}
-		if r.seen.After(since[r.downloaderID]) {
-			since[r.downloaderID] = r.seen
-		}
 	}
+	recent := recentHashes(refs, func(r *torrentRef) (uint, string, time.Time) { return r.downloaderID, r.hash, r.seen })
 	var settings []models.DownloaderSetting
 	if err := s.cfg.DB.WithContext(ctx).Select("id", "name").Where("id IN ?", ids).Find(&settings).Error; err != nil {
 		return nil, nil, fmt.Errorf("读取下载器失败: %w", err)
@@ -596,7 +593,7 @@ func (s *Service) liveTorrents(ctx context.Context, refs []*torrentRef) ([]ItemT
 	failed := map[uint]bool{}
 	var errs []string
 	for _, id := range ids {
-		list, err := s.downloaderTorrentsWithin(ctx, id, itemListMaxAge, since[id])
+		list, err := s.downloaderTorrentsWithin(ctx, id, itemListMaxAge, recent[id])
 		if err != nil {
 			failed[id] = true
 			name := names[id]
@@ -853,19 +850,14 @@ func (s *Service) SeasonItem(ctx context.Context, id, n int) (*SeasonDetail, err
 		return nil, err
 	}
 	now := s.cfg.Now()
-	since := map[uint]time.Time{}
-	for _, st := range states {
-		if st.dl.seen.After(since[st.dl.downloaderID]) {
-			since[st.dl.downloaderID] = st.dl.seen
-		}
-	}
+	recent := recentHashes(states, func(st episodeState) (uint, string, time.Time) { return st.dl.downloaderID, st.dl.hash, st.dl.seen })
 	lists := map[uint]map[string]downloader.Torrent{}
 	listFor := func(dl uint) map[string]downloader.Torrent {
 		if m, ok := lists[dl]; ok {
 			return m
 		}
 		m := map[string]downloader.Torrent{}
-		list, lerr := s.downloaderTorrentsWithin(ctx, dl, itemListMaxAge, since[dl])
+		list, lerr := s.downloaderTorrentsWithin(ctx, dl, itemListMaxAge, recent[dl])
 		if lerr != nil {
 			out.Errors = append(out.Errors, "下载进度没读到："+lerr.Error())
 		}

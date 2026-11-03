@@ -214,11 +214,38 @@ func TestItemSeesFreshTorrents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, lists+3, e.dl.listCount())
 
-	// 记录的时间比现在还晚（改过系统时间）：按现在算，列一次就够
+	// 记录的时间比现在还晚（改过系统时间）也算刚记下的：列一次，下载器里没有就不再列
 	pushTLOU(t, e, "h6", 3, time.Now().Add(time.Hour))
 	_, err = e.svc.Item(e.ctx, models.MediaKindTV, 100088)
 	require.NoError(t, err)
 	assert.Equal(t, lists+4, e.dl.listCount())
+}
+
+// 早就记下、下载器里已经没有了的种子不再列（不然每次打开详情都要列一遍）；下载器读不到时 10 秒以内也不再列。
+func TestItemOldRecordGone(t *testing.T) {
+	e := newEnv(t)
+	e.tmdb.set("/3/tv/100088", tlouFull())
+	e.sub(SubscriptionInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2})
+	pushTLOU(t, e, "gone", 3, time.Now().Add(-time.Hour))
+	d, err := e.svc.Item(e.ctx, models.MediaKindTV, 100088)
+	require.NoError(t, err)
+	assert.Empty(t, d.Torrents)
+	_, err = e.svc.Item(e.ctx, models.MediaKindTV, 100088)
+	require.NoError(t, err)
+	assert.Equal(t, 1, e.dl.listCount(), "10 秒以内用同一份")
+
+	// 下载器读不到：刚记下的种子也不在 10 秒以内再列
+	e.advance(11 * time.Second)
+	e.dl.mu.Lock()
+	e.dl.listErr = errors.New("连接被拒绝")
+	e.dl.mu.Unlock()
+	pushTLOU(t, e, "h5", 2, time.Time{})
+	d, err = e.svc.Item(e.ctx, models.MediaKindTV, 100088)
+	require.NoError(t, err)
+	require.NotEmpty(t, d.Errors)
+	_, err = e.svc.Item(e.ctx, models.MediaKindTV, 100088)
+	require.NoError(t, err)
+	assert.Equal(t, 2, e.dl.listCount())
 }
 
 // 关联记录（订阅的种子、先记下后推送的种子记录、整理记录）比缓存的列表晚记下时，详情与一季的每一集都再列一次；
