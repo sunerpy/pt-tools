@@ -268,6 +268,53 @@ func TestClearUnmatched(t *testing.T) {
 	require.ErrorContains(t, ClearUnmatched(db, models.MediaKindTV, 100088, "x", t0), "读取问题失败")
 }
 
+// 媒体服务器里最近新加的项：最新在前；pt-tools 整理的（按路径、换不了路径时按编号与季集）、删了的、没有 TMDB 编号的、
+// 关着的服务器里的都不算；集写剧名。
+func TestRecentAdded(t *testing.T) {
+	db := newDB(t)
+	jf, emby := seed(t, db)
+	at := func(m int) *time.Time {
+		v := t0.Add(time.Duration(m) * time.Minute)
+		return &v
+	}
+	gone := t0
+	require.NoError(t, db.Create(&[]models.MediaServerItem{
+		{ServerID: jf.ID, ItemID: "n1", Kind: models.MediaServerItemEpisode, SeriesItemID: "s1", TMDBID: 100088, Season: 2, Episode: 1, Title: "第一集", AddedAt: at(5), SyncedAt: t0},
+		{ServerID: jf.ID, ItemID: "n2", Kind: models.MediaServerItemEpisode, SeriesItemID: "s1", TMDBID: 100088, Season: 2, Episode: 2, AddedAt: at(9), LocalPath: "/lib/S02E02.mkv", SyncedAt: t0},
+		{ServerID: jf.ID, ItemID: "n3", Kind: models.MediaServerItemEpisode, SeriesItemID: "s1", TMDBID: 100088, Season: 2, Episode: 3, AddedAt: at(8), SyncedAt: t0},
+		{ServerID: emby.ID, ItemID: "nm", Kind: models.MediaServerItemMovie, TMDBID: 603, Title: "黑客帝国", AddedAt: at(7), SyncedAt: t0},
+		{ServerID: emby.ID, ItemID: "old", Kind: models.MediaServerItemMovie, TMDBID: 604, AddedAt: at(1), RemovedAt: &gone, SyncedAt: t0},
+		{ServerID: emby.ID, ItemID: "noid", Kind: models.MediaServerItemMovie, AddedAt: at(6), SyncedAt: t0},
+	}).Error)
+	require.NoError(t, db.Create(&[]models.MediaTransferHistory{
+		{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2, Episode: 2, Status: models.MediaTransferDone, TargetPath: "/lib/S02E02.mkv", SourcePath: "/dl/a"},
+		{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2, Episode: 3, Status: models.MediaTransferDone, TargetPath: "/lib/x/E03.mkv", SourcePath: "/dl/b"},
+	}).Error)
+	got, err := RecentAdded(context.Background(), db, 10)
+	require.NoError(t, err)
+	lines := []string{}
+	for _, it := range got {
+		lines = append(lines, fmt.Sprintf("%s %s %d %s S%dE%d", it.Server.Name, it.MediaType, it.TMDBID, it.Title, it.Season, it.Episode))
+	}
+	assert.Equal(t, []string{"Emby movie 603 黑客帝国 S0E0", "Jellyfin tv 100088 最后生还者 S2E1"}, lines,
+		"E02 按路径是 pt-tools 整理的；E03 换不了路径，按季集也是；删了的、没有编号的不算")
+	assert.True(t, got[0].AddedAt.Equal(*at(7)))
+
+	one, err := RecentAdded(context.Background(), db, 1)
+	require.NoError(t, err)
+	assert.Len(t, one, 1)
+	none, err := RecentAdded(context.Background(), db, 0)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+
+	require.NoError(t, db.Migrator().DropTable(&models.MediaTransferHistory{}))
+	_, err = RecentAdded(context.Background(), db, 10)
+	require.ErrorContains(t, err, "读取整理记录失败")
+	require.NoError(t, db.Migrator().DropTable(&models.MediaServerItem{}))
+	_, err = RecentAdded(context.Background(), db, 10)
+	require.ErrorContains(t, err, "读取索引失败")
+}
+
 func mustIssueID(t *testing.T, db *gorm.DB, itemID string) uint {
 	t.Helper()
 	var is models.MediaIssue

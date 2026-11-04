@@ -33,3 +33,33 @@ describe("rail 的导航入口", () => {
     expect(RAIL_ITEMS.map((i) => i.path)).not.toContain(RAIL_FOOT_PATH);
   });
 });
+
+describe("首页与系统体检的入口（媒体中心 M8）", () => {
+  it("概览的第一项是首页，rail 上也有；手机底栏的「概览」去首页", async () => {
+    const { MOBILE_TABS, NAV_GROUPS } = await import("./navigation");
+    const overview = NAV_GROUPS.find((g) => g.title === "概览")!;
+    expect(overview.items[0]).toMatchObject({
+      path: "/home",
+      label: "首页",
+      icon: "house",
+      rail: true,
+    });
+    expect(RAIL_ITEMS[0]?.path).toBe("/home");
+    expect(MOBILE_TABS.find((t) => t.key === "overview")?.path).toBe("/home");
+  });
+
+  it("手机底栏：首页与原来的用户统计都点亮「概览」，别的页按自己的 tab，没有 tab 的不点亮", async () => {
+    const { mobileTabFor } = await import("./navigation");
+    expect(mobileTabFor("/home")).toBe("overview");
+    expect(mobileTabFor("/userinfo")).toBe("overview");
+    expect(mobileTabFor("/sites")).toBe("sites");
+    expect(mobileTabFor("/search")).toBe("search");
+    expect(mobileTabFor("/global")).toBe("");
+  });
+
+  it("系统体检在「系统」一组、全局设置后面", async () => {
+    const { NAV_GROUPS } = await import("./navigation");
+    const paths = NAV_GROUPS.find((g) => g.title === "系统")!.items.map((i) => i.path);
+    expect(paths.indexOf("/system/check")).toBe(paths.indexOf("/global") + 1);
+  });
+});

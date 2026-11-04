@@ -349,3 +349,11 @@ func TestItemURL(t *testing.T) {
 	assert.Empty(t, ItemURL(models.MediaServerEmby, "http://x", "s", ""))
 	assert.Empty(t, ItemURL("kodi", "http://x", "s", "1"))
 }
+
+func TestHomeURL(t *testing.T) {
+	assert.Equal(t, "http://emby:8096/web/index.html", HomeURL(models.MediaServerEmby, " http://emby:8096/ "))
+	assert.Equal(t, "https://jf.example.com/web/", HomeURL(models.MediaServerJellyfin, "https://jf.example.com"))
+	assert.Equal(t, "http://plex:32400/web/index.html", HomeURL(models.MediaServerPlex, "http://plex:32400"))
+	assert.Empty(t, HomeURL(models.MediaServerEmby, ""))
+	assert.Empty(t, HomeURL("kodi", "http://x"))
+}

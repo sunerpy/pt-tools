@@ -1181,6 +1181,8 @@ type DownloaderTransferStatsResponse struct {
 	TotalSessionDownloaded int64                        `json:"total_session_downloaded"`
 	TotalFreeSpace         int64                        `json:"total_free_space"`
 	Downloaders            []DownloaderTransferStatItem `json:"downloaders"`
+	// SpeedHistory 是最近的总速度采样（首页的速度柱，旧的在前；只有 transfer-stats 接口给）
+	SpeedHistory []SpeedSample `json:"speed_history,omitempty"`
 }
 
 type DownloaderTransferStatItem struct {
@@ -1257,7 +1259,9 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, s.collectTransferStats(r.Context(), dm, records))
+	resp := s.collectTransferStats(r.Context(), dm, records)
+	resp.SpeedHistory = s.speeds.snapshot()
+	writeJSON(w, resp)
 }
 
 // transferProbeParallel 是同时探测几台下载器。
@@ -1302,9 +1306,13 @@ collect:
 	resp := DownloaderTransferStatsResponse{
 		Downloaders: make([]DownloaderTransferStatItem, 0, len(records)),
 	}
+	answered := 0
 	for _, item := range got {
 		if item == nil {
 			continue
+		}
+		if item.Reachable {
+			answered++
 		}
 		resp.TotalUploadSpeed += item.UploadSpeed
 		resp.TotalDownloadSpeed += item.DownloadSpeed
@@ -1314,6 +1322,11 @@ collect:
 		resp.TotalSessionDownloaded += item.SessionDownloaded
 		resp.TotalFreeSpace += item.FreeSpace
 		resp.Downloaders = append(resp.Downloaders, *item)
+	}
+	if len(records) > 0 {
+		s.speeds.record(SpeedSample{
+			At: time.Now(), Down: resp.TotalDownloadSpeed, Up: resp.TotalUploadSpeed, Answered: answered, Total: len(records),
+		})
 	}
 	return resp
 }

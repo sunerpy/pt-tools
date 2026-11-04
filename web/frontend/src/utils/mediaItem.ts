@@ -27,6 +27,7 @@ export const ITEM_FROM = {
   history: { label: "整理历史", path: "/media/history" },
   search: { label: "种子搜索", path: "/search" },
   calendar: { label: "订阅日历", path: "/media/calendar" },
+  home: { label: "首页", path: "/home" },
 } as const;
 
 export type ItemFrom = keyof typeof ITEM_FROM;

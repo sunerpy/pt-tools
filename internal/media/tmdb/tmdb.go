@@ -247,8 +247,26 @@ func ParseProxyURL(s string) (*url.URL, error) {
 
 // Validate 用 /configuration 检查 API Key 是否可用。
 func (c *Client) Validate(ctx context.Context) error {
+	_, err := c.ServerTime(ctx)
+	return err
+}
+
+// ServerTime 同 Validate，另返回 TMDB 那边现在的时间（响应头的 Date 加上 Age，CDN 缓存的响应 Date 是生成时的）：
+// 系统体检拿它比本机的时钟。响应里没有 Date 时返回零值。
+func (c *Client) ServerTime(ctx context.Context) (time.Time, error) {
 	var out map[string]any
-	return c.get(ctx, "/configuration", url.Values{}, &out)
+	h, err := c.do(ctx, "/configuration", url.Values{}, &out)
+	if err != nil {
+		return time.Time{}, err
+	}
+	at, err := http.ParseTime(h.Get("Date"))
+	if err != nil {
+		return time.Time{}, nil
+	}
+	if age, err := strconv.Atoi(strings.TrimSpace(h.Get("Age"))); err == nil && age > 0 {
+		at = at.Add(time.Duration(age) * time.Second)
+	}
+	return at, nil
 }
 
 type rawItem struct {
@@ -453,16 +471,22 @@ func (c *Client) cached(ctx context.Context, key string, ttl time.Duration, out 
 const maxBody = 4 << 20
 
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
+	_, err := c.do(ctx, path, q, out)
+	return err
+}
+
+// do 发一个请求，解析成功的响应进 out，返回响应头。
+func (c *Client) do(ctx context.Context, path string, q url.Values, out any) (http.Header, error) {
 	if !c.bearer {
 		q.Set("api_key", c.key)
 	}
 	if err := c.limiter.Wait(ctx); err != nil {
-		return fmt.Errorf("等待 TMDB 限速: %w", err)
+		return nil, fmt.Errorf("等待 TMDB 限速: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path+"?"+q.Encode(), nil)
 	if err != nil {
 		// 解析错误会带上整个地址（含 API Key），不往外传
-		return errors.New("TMDB 接口地址格式不对")
+		return nil, errors.New("TMDB 接口地址格式不对")
 	}
 	req.Header.Set("Accept", "application/json")
 	if c.bearer {
@@ -474,26 +498,26 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
-		return fmt.Errorf("读取 TMDB 响应失败: %w", err)
+		return nil, fmt.Errorf("读取 TMDB 响应失败: %w", err)
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized:
-		return ErrUnauthorized
+		return nil, ErrUnauthorized
 	case http.StatusNotFound:
-		return ErrNotFound
+		return nil, ErrNotFound
 	case http.StatusTooManyRequests:
-		return ErrRateLimited
+		return nil, ErrRateLimited
 	default:
-		return fmt.Errorf("%w: HTTP %d", ErrUnavailable, resp.StatusCode)
+		return nil, fmt.Errorf("%w: HTTP %d", ErrUnavailable, resp.StatusCode)
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("解析 TMDB 响应失败: %w", err)
+		return nil, fmt.Errorf("解析 TMDB 响应失败: %w", err)
 	}
-	return nil
+	return resp.Header, nil
 }

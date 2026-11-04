@@ -195,6 +195,8 @@ const NOT_ON_BOARD = {
     "「导入已有文件」（媒体中心 M5）晚于画板 40 定稿：媒体库页每个库的导入弹窗，以及它里面在库目录里浏览的「选一个文件夹」",
   "components/media/MediaDeleteDialog.vue":
     "「删除一部片」（媒体中心 M7）晚于画板 40 定稿：条目详情的删除弹窗，规格是画板 03 的片段「删除这一季」（docs/design/media-hub-board-spec.md）",
+  "components/home/HomeTodo.vue#drawerTitle":
+    "首页「待处理」的抽屉（媒体中心 M8）晚于画板 40 定稿：「全部」与抽屉类的标签打开它，一件事一行；规格在画板 02、07（docs/design/media-hub-board-spec.md）",
   "components/search/EntrySearch.vue#(drawer 无 title)":
     "按条目搜索（媒体中心 M2a）在手机上的筛选面板：规格在画板 10（媒体中心那一组），不在画板 40 的清点图里",
   "views/MediaItem.vue#(drawer 无 title)":

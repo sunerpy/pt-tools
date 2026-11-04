@@ -1757,6 +1757,8 @@ export const downloaderTorrentsApi = {
       total_free_space: number;
       /* 后端一直在返回每台的明细，这里以前漏了声明 */
       downloaders: DownloaderTransferStatItem[];
+      /** 最近的总速度采样（首页的速度柱，旧的在前）；老后端不返回 */
+      speed_history?: SpeedSample[];
     }>("/api/downloader-torrents/transfer-stats", { signal }),
 
   capabilities: () =>
@@ -5738,4 +5740,237 @@ export const assistantApi = {
   /** SSE 地址：浏览器断线重连时自己带 Last-Event-ID */
   eventsURL: (id: number, after: number) =>
     `/api/assistant/conversations/${id}/events?after=${after}`,
+};
+
+// ---- 首页与系统体检（媒体中心 M8） ----
+
+/** 一拍全部下载器合成的总速度（字节/秒）；answered < total 时这一拍有下载器没取到 */
+export interface SpeedSample {
+  at: string;
+  down: number;
+  up: number;
+  answered: number;
+  total: number;
+}
+
+/** 首页的一块：data 是这一块的数据，error 是没取到的原因（别的块照样有） */
+export interface HomeBlock<T> {
+  data: T | null;
+  error?: string;
+}
+
+/** 今天播出的一项：日历的一项，加上卡片要写的 */
+export interface HomeTodayItem extends CalendarEntry {
+  /** 没有剧照时用的背景图（这一部的） */
+  backdrop_path?: string;
+  /** 已入库的版本（例如 2160p HHWEB） */
+  version?: string;
+  /** 下载中的站点、进度（0–100）与预计还要多久（秒） */
+  site?: string;
+  percent?: number;
+  eta_seconds?: number;
+  /** 等版本时锁住的版本（例如 HHWEB 2160p） */
+  lock?: string;
+  /** 在媒体服务器里打开这一集（电影是这一部）；服务器里没有时不给 */
+  open_url?: string;
+}
+
+/** 今天播出与这周还要播（明天起 6 天）；errors 是没读到 TMDB 的订阅 */
+export interface HomeCalendar {
+  today: HomeTodayItem[];
+  week: CalendarEntry[];
+  errors: string[];
+  /** 订阅的个数：一个都没有时写「还没有追剧」 */
+  subscriptions: number;
+}
+
+export type HomeTodoKind =
+  | "organize_failed"
+  | "recognize"
+  | "waiting_version"
+  | "attendance_failed"
+  | "login_failed"
+  | "server_removed"
+  | "library_missing"
+  | "backup"
+  | "health";
+
+export type HomeTone = "dang" | "warn" | "primary" | "info";
+
+/** 待处理的一类：target 是去哪个页面（带着筛选），drawer 是在首页的抽屉里处理 */
+export interface HomeTodoGroup {
+  kind: HomeTodoKind;
+  count: number;
+  label: string;
+  target: string;
+  tone: HomeTone;
+}
+
+/** 待处理抽屉里的一行；issue_ids 是媒体服务器里删了的与库文件不见了的问题 */
+export interface HomeTodoItem {
+  kind: HomeTodoKind;
+  title: string;
+  detail?: string;
+  target?: string;
+  issue_ids?: number[];
+  media_type?: MediaKind;
+  tmdb_id?: number;
+  season?: number;
+  episode?: number;
+  /** 问题说的那几集（剧集；有说整季的问题时没有，删除弹窗按整季） */
+  episodes?: number[];
+}
+
+export interface HomeTodo {
+  groups: HomeTodoGroup[];
+  items: HomeTodoItem[];
+}
+
+/** 最近入库的一项：一部电影，或剧的一季（写最新那一集）；source 是 pt-tools 整理的或服务器里新加的 */
+export interface HomeRecentItem {
+  media_type: MediaKind;
+  tmdb_id: number;
+  title: string;
+  season?: number;
+  episode?: number;
+  poster_path?: string;
+  quality?: string;
+  source: "pt-tools" | "server";
+  at: string;
+}
+
+export interface HomeRecent {
+  today_count: number;
+  items: HomeRecentItem[];
+}
+
+export interface HomeDownloader {
+  id: number;
+  name: string;
+  type: string;
+  online: boolean;
+  down: number;
+  up: number;
+  downloading: number;
+  seeding: number;
+  error?: string;
+}
+
+export interface HomeDownloaders {
+  downloaders: HomeDownloader[];
+  down: number;
+  up: number;
+  downloading: number;
+  seeding: number;
+  speed_history: SpeedSample[];
+}
+
+/** 存储里的一块盘：total 为 0 是不知道总量；low 同体检的警告线（剩不到 5% 或 20 GB） */
+export interface HomeDisk {
+  kind: "download" | "library";
+  label: string;
+  path: string;
+  free: number;
+  total: number;
+  low: boolean;
+  error?: string;
+}
+
+export interface HomeHealthLine {
+  at: string;
+  ok: number;
+  warn: number;
+  fail: number;
+  skip: number;
+  /** 第一项失败（没有时第一项提醒）的「标题：说明」 */
+  problem?: string;
+}
+
+export interface HomeBackupLine {
+  enabled: boolean;
+  last_at?: string;
+  last_ok_at?: string;
+  error?: string;
+  late: boolean;
+  /** 最近一次成功距今几天；-1 是没成功过 */
+  days: number;
+}
+
+export interface HomeServerLine {
+  id: number;
+  name: string;
+  kind: MediaServerKind;
+  version?: string;
+  online: boolean;
+  error?: string;
+  indexed_at?: string;
+  index_error?: string;
+  movies: number;
+  series: number;
+  episodes: number;
+  open_url?: string;
+}
+
+export interface HomeStatus {
+  health: HomeHealthLine | null;
+  backup: HomeBackupLine | null;
+  servers: HomeServerLine[];
+}
+
+/** 首页（GET /api/home）：每块单独给数据或错误 */
+export interface HomeData {
+  at: string;
+  calendar: HomeBlock<HomeCalendar>;
+  todo: HomeBlock<HomeTodo>;
+  resume: HomeBlock<MediaResumeGroup[]>;
+  recent: HomeBlock<HomeRecent>;
+  downloaders: HomeBlock<HomeDownloaders>;
+  storage: HomeBlock<HomeDisk[]>;
+  status: HomeBlock<HomeStatus>;
+}
+
+export const homeApi = {
+  /** refresh 为真时不用服务端 30 秒的缓存 */
+  get: (refresh = false) => api.get<HomeData>(refresh ? "/api/home?refresh=1" : "/api/home"),
+};
+
+export type HealthStatus = "ok" | "warn" | "fail" | "skip";
+
+export type HealthGroup =
+  | "tmdb"
+  | "sites"
+  | "downloaders"
+  | "servers"
+  | "paths"
+  | "libraries"
+  | "disks"
+  | "time"
+  | "backup"
+  | "secret";
+
+/** 体检的一项：hint 是怎么修（没问题时没有） */
+export interface HealthItem {
+  key: string;
+  group: HealthGroup;
+  title: string;
+  status: HealthStatus;
+  detail?: string;
+  hint?: string;
+}
+
+export interface HealthReport {
+  at: string;
+  duration_ms: number;
+  items: HealthItem[];
+  ok: number;
+  warn: number;
+  fail: number;
+  skip: number;
+}
+
+export const systemCheckApi = {
+  /** 上一次体检的结果；没体检过时 report 为 null */
+  last: () => api.get<{ report: HealthReport | null }>("/api/system/check"),
+  /** 马上体检一次（最多 60 秒；跑着的时候再点等它跑完） */
+  run: () => api.post<{ report: HealthReport }>("/api/system/check"),
 };

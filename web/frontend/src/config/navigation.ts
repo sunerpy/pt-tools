@@ -1,7 +1,7 @@
 import type { LucideIconName } from "../icons/lucide";
 
 /**
- * 导航结构 —— 与 Penpot 设计稿 G Cockpit 的 `D.nav` 一一对应（6 组 / 19 个路由）。
+ * 导航结构 —— 与 Penpot 设计稿 G Cockpit 的 `D.nav` 一一对应（6 组 / 19 个路由），后来各里程碑加的页面在注释里写明来历。
  * 分组顺序、图标名和文案都以设计稿为准；改这里等于改设计稿，先对一下画板。
  */
 export interface NavItem {
@@ -29,6 +29,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     title: "概览",
     items: [
+      /* 媒体中心 M8：画板 02 的首页（今天播出、待处理、继续观看、最近入库与 NAS 状态），打开网页先到这里 */
+      { path: "/home", label: "首页", icon: "house", rail: true },
       { path: "/userinfo", label: "用户统计", icon: "gauge", rail: true },
       { path: "/userinfo/export", label: "数据导出", icon: "file-down" },
       /* 路线图 M19：画板没有这一页 */
@@ -105,6 +107,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "系统",
     items: [
       { path: "/global", label: "全局设置", icon: "settings", rail: true },
+      /* 媒体中心 M8：画板没有这一页，沿用 qB 兼容入口页的样式 */
+      { path: "/system/check", label: "系统体检", icon: "activity" },
       { path: "/cloak-config", label: "CloakBrowser", icon: "shield" },
       { path: "/api-tokens", label: "API 令牌", icon: "id-card" },
       /* 路线图 M14：画板没有这一页，沿用 qB 兼容入口页的样式 */
@@ -129,13 +133,22 @@ export const MOBILE_TABS: readonly {
   label: string;
   icon: LucideIconName;
   path?: string;
+  /** 除了 path，在这些页面上也点亮 */
+  also?: readonly string[];
 }[] = [
-  { key: "overview", label: "概览", icon: "gauge", path: "/userinfo" },
+  /* 媒体中心 M8：「概览」改指首页（画板 07 的底栏）；原来它指的用户统计也还点亮它 */
+  { key: "overview", label: "概览", icon: "gauge", path: "/home", also: ["/userinfo"] },
   { key: "sites", label: "站点", icon: "globe", path: "/sites" },
   { key: "tasks", label: "任务", icon: "list-checks", path: "/tasks" },
   { key: "search", label: "搜索", icon: "search", path: "/search" },
   { key: "me", label: "我的", icon: "user" },
 ] as const;
+
+/** 手机底栏在这一页点亮哪个 tab；没有对应的 tab 时是空串 */
+export function mobileTabFor(activePath: string): string {
+  const hit = MOBILE_TABS.find((t) => t.path === activePath || t.also?.includes(activePath));
+  return hit?.key ?? "";
+}
 
 /** 所有导航项打平，供标题解析与高亮匹配使用 */
 export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
@@ -170,6 +183,7 @@ export const RAIL_FOOT_ITEM: NavItem | undefined = NAV_ITEMS.find((i) => i.path 
  * 在这里显式映射，避免详情页把整组导航的高亮丢掉。
  */
 const ROUTE_NAME_TO_NAV: Record<string, string> = {
+  home: "/home",
   userinfo: "/userinfo",
   "userinfo-export": "/userinfo/export",
   assistant: "/assistant",
@@ -205,6 +219,7 @@ const ROUTE_NAME_TO_NAV: Record<string, string> = {
   "audit-log": "/chatops/audit",
   "rss-notifications": "/chatops/rss-notifications",
   global: "/global",
+  "system-check": "/system/check",
   "cloak-config": "/cloak-config",
   "api-tokens": "/api-tokens",
   mcp: "/mcp",

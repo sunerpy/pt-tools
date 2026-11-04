@@ -3,9 +3,11 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import {
   controlApi,
+  type DownloaderTransferStatItem,
   downloaderTorrentsApi,
   pausedTorrentsApi,
   type RssTaskStatus,
+  type SpeedSample,
   sitesApi,
   tasksApi,
 } from "../api";
@@ -80,6 +82,9 @@ export const useRuntimeStore = defineStore("runtime", () => {
   const downloadSpeed = ref<number | null>(null);
   const uploadSpeed = ref<number | null>(null);
   const freeSpace = ref<number | null>(null);
+  /** 每台下载器这一拍的速度（首页的 NAS 状态跟着它更新）；speedHistory 是服务端记的最近几拍总速度 */
+  const downloaderStats = ref<DownloaderTransferStatItem[]>([]);
+  const speedHistory = ref<SpeedSample[]>([]);
   const lastSync = ref<Date | null>(null);
   /** 拉取失败时把上一次的数字保留着，但标记为陈旧，状态栏据此变灰 */
   const stale = ref(true);
@@ -158,6 +163,8 @@ export const useRuntimeStore = defineStore("runtime", () => {
         downloadSpeed.value = stats.value.total_download_speed;
         uploadSpeed.value = stats.value.total_upload_speed;
         freeSpace.value = stats.value.total_free_space;
+        downloaderStats.value = stats.value.downloaders ?? [];
+        if (stats.value.speed_history) speedHistory.value = stats.value.speed_history;
         lastSync.value = new Date();
         stale.value = false;
         statsFailures = 0;
@@ -318,6 +325,8 @@ export const useRuntimeStore = defineStore("runtime", () => {
     downloadSpeed,
     uploadSpeed,
     freeSpace,
+    downloaderStats,
+    speedHistory,
     lastSync,
     stale,
     rss,

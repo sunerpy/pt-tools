@@ -278,6 +278,48 @@ async function mountAt(path: string, opts: { mobile?: boolean } = {}) {
 }
 
 describe("条目详情", () => {
+  it("首页的「看版本」带着 ?episode=N 进来：这一季读完滚到那一集，折起来的先展开，只滚一次", async () => {
+    const scrolled: string[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push((this as HTMLElement).dataset.testid ?? "");
+    };
+    try {
+      api.item.mockResolvedValue(tlou);
+      api.itemSeason.mockResolvedValue(season2);
+      await mountAt("/media/item/tv/100088?from=home&season=2&episode=8");
+      await vi.waitFor(() => expect(scrolled).toEqual(["mi-ep-8"]));
+
+      // 手机上开头 6 集都已入库会折起来：要滚到的那一集在折起来的那段里时先展开
+      view?.unmount();
+      scrolled.length = 0;
+      const lib = (n: number) => ({
+        episode: n,
+        name: `第 ${n} 集`,
+        air_date: "2026-10-01",
+        state: "library",
+      });
+      api.itemSeason.mockResolvedValue({
+        ...season2,
+        episodes: [1, 2, 3, 4, 5, 6].map(lib).concat([season2.episodes[3]]),
+      });
+      await mountAt("/media/item/tv/100088?from=home&season=2&episode=2", { mobile: true });
+      await vi.waitFor(() => expect(scrolled).toEqual(["mi-ep-2"]));
+      expect(q("mi-ep-2")).not.toBeNull();
+
+      // 没有这一集时不滚
+      view?.unmount();
+      scrolled.length = 0;
+      api.itemSeason.mockResolvedValue(season2);
+      await mountAt("/media/item/tv/100088?from=home&season=2&episode=99");
+      await vi.waitFor(() => expect(q("mi-ep-1")).not.toBeNull());
+      await flush();
+      expect(scrolled).toEqual([]);
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
+  });
+
   it("剧集：资料、你的 NAS 上、季与集、种子、演职员、推荐", async () => {
     api.item.mockResolvedValue(tlou);
     api.itemSeason.mockResolvedValue(season2);

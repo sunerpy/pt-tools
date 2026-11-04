@@ -235,6 +235,7 @@ async function mountPage(
     settingsFail?: boolean;
     keepSettings?: boolean;
     subs?: unknown[];
+    path?: string;
   } = {},
 ) {
   if (opts.settingsFail) api.settings.mockRejectedValue(new Error("读取设置失败"));
@@ -258,6 +259,7 @@ async function mountPage(
     history: createMemoryHistory(),
     routes: [{ path: "/:p(.*)*", component: { render: () => null } }],
   });
+  await router.push(opts.path ?? "/");
   view = mountView(Page, { router });
   await vi.waitFor(() => expect(api.list).toHaveBeenCalled());
   await flush();
@@ -265,6 +267,31 @@ async function mountPage(
 }
 
 describe("订阅", () => {
+  it("首页的「等版本」带着 ?state=waiting_version 进来：只看在找的、有集在等锁住的版本的订阅", async () => {
+    await mountPage({
+      subs: [movie, tv, follow],
+      path: "/media/subscriptions?state=waiting_version",
+    });
+    expect(api.list).toHaveBeenCalledWith({ status: "active", q: "" });
+    const tag = q("ms-waiting")!;
+    expect(tag.classList.contains("is-checked")).toBe(true);
+    expect(q("ms-table")!.textContent).toContain("现在就出发");
+    expect(q("ms-table")!.textContent).not.toContain("沙丘2");
+    tag.click();
+    await flush();
+    expect(q("ms-waiting")!.classList.contains("is-checked")).toBe(false);
+    expect(q("ms-table")!.textContent).toContain("沙丘2");
+  });
+
+  it("不带筛选进来时「等版本」没勾", async () => {
+    await mountPage({ subs: [movie, follow] });
+    expect(q("ms-waiting")!.classList.contains("is-checked")).toBe(false);
+    q("ms-waiting")!.click();
+    await flush();
+    expect(q("ms-table")!.textContent).not.toContain("沙丘2");
+    expect(q("ms-table")!.textContent).toContain("现在就出发");
+  });
+
   it("列表：进度、来源与最近一次的结果；总开关关着时写明", async () => {
     await mountPage();
     expect(q("ms-disabled")).not.toBeNull();

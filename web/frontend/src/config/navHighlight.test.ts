@@ -34,3 +34,11 @@ describe("导航高亮", () => {
     expect(activeNavPath("not-a-route")).toBe("");
   });
 });
+
+describe("打开网页先到首页", () => {
+  it("/ 重定向到 /home，首页与系统体检的页面高亮自己", () => {
+    expect(router.getRoutes().find((r) => r.path === "/")?.redirect).toBe("/home");
+    expect(activeNavPath("home")).toBe("/home");
+    expect(activeNavPath("system-check")).toBe("/system/check");
+  });
+});

@@ -22,7 +22,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { formatShortDateTime, formatTimeAgo } from "@/utils/format";
 import { isInteractiveClick, ROW_LINK_CLASS } from "@/utils/rowClick";
@@ -34,6 +34,7 @@ import { useLoginState } from "@/composables/useLoginState";
 import type { ReminderTier } from "@/composables/useLoginState";
 
 const router = useRouter();
+const route = useRoute();
 
 const isMobile = useIsMobile();
 const sites = ref<Record<string, SiteConfig>>({});
@@ -643,8 +644,13 @@ function exportCsv() {
   ElMessage.success(`已导出 ${visibleEntries.value.length} 个站点`);
 }
 
-/** 勾中的状态。空集合 = 不筛（而不是全都不显示） */
-const statusFilter = ref<Set<SiteStatus>>(new Set());
+/**
+ * 勾中的状态。空集合 = 不筛（而不是全都不显示）。
+ * 首页的「登录探测失败」带着 ?status=abnormal 进来：只看异常的。
+ */
+const statusFilter = ref<Set<SiteStatus>>(
+  new Set(route.query.status === "abnormal" ? (["bad"] as const) : []),
+);
 /** 认证方式筛选，空串 = 全部（画板 chip-0「认证: 全部」） */
 const authFilter = ref("");
 /** 探测方式筛选，空串 = 全部（画板 chip-1「探测: 全部」） */

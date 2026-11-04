@@ -538,6 +538,16 @@ export const HISTORY_FILTERS: readonly { value: "" | MediaTransferStatus; label:
   { value: "removed", label: "已删除" },
 ];
 
+/** 地址里带的状态筛选（首页的待处理带着进来，例如 ?status=failed）；不认得的当全部 */
+export function historyStatusFrom(q: unknown): "" | MediaTransferStatus {
+  return HISTORY_FILTERS.find((f) => f.value && f.value === q)?.value ?? "";
+}
+
+/** 地址里带的分类筛选（例如 ?kind=recognize）；不认得的当没有 */
+export function failKindFrom(q: unknown): "" | MediaFailKind {
+  return FAIL_KINDS.find((k) => k.value === q)?.value ?? "";
+}
+
 export function triggerLabel(trigger: string): string {
   return (
     {

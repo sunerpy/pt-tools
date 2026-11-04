@@ -24,7 +24,8 @@ import PtPanel from "@/components/ui/PtPanel.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 
 /**
  * 六态（设计文档 §5）：这一页是表单不是列表，能落到的只有 loading / error / perm ——
@@ -315,7 +316,22 @@ async function loadData() {
   }
 }
 
-onMounted(loadData);
+/* 测试里有的不挂路由：没有时当作没带参数 */
+const route = useRoute() as ReturnType<typeof useRoute> | undefined;
+
+/** 首页的「备份 N 天没成功」带着 ?section=backup 进来：读完设置以后滚到备份那一段 */
+async function scrollToSection() {
+  if (route?.query.section !== "backup") return;
+  await nextTick();
+  document
+    .querySelector<HTMLElement>('[data-testid="backup-strip"]')
+    ?.scrollIntoView?.({ block: "start" });
+}
+
+onMounted(async () => {
+  await loadData();
+  await scrollToSection();
+});
 
 async function save() {
   if (!form.value.download_dir) {
@@ -561,7 +577,7 @@ async function save() {
               </div>
             </div>
 
-            <div class="pt-strip">
+            <div class="pt-strip" data-testid="backup-strip">
               <PtIcon name="database" :size="13" />
               <span>备份</span>
             </div>

@@ -23,7 +23,7 @@
  * 依赖：只用 Chrome 的 CDP，不装任何浏览器自动化包。Chrome 路径可用 PT_CHROME 覆盖。
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyStubScript, stubScript } from "./board-fixtures.mjs";
@@ -4496,6 +4496,752 @@ if (doItem) {
   );
 }
 
+// ------------------------------------------------- 首页与系统体检（画板 02、07，媒体中心 M8）
+
+/*
+ * 首页不是带式表格页：页头 64 下面是今天播出、待处理条，再是两栏（左 760：继续观看、最近入库、这周还要播；右 368：NAS 状态）。
+ * 画板 02 按 1440×1024 画（侧栏 264 + 主区 1176，内容 1144），手机按画板 07 量 375×812；1200 宽时内容 904 < 1100，NAS 状态落到下面。
+ * 数字来自 docs/design/media-hub-board-spec.md 的 02 / 07；手机块与块之间统一 24（偏离 ④）。
+ * 假数据是 board-fixtures.mjs 的 HOME（照画板：今天五张卡、待处理六类、继续观看三张、最近入库七张、这周四条、三块盘两台下载器）；
+ * localStorage 设了 pt-fixture-home-empty 时回 HOME_EMPTY，量空态。系统体检画板没有，只量不溢出、各组与项都在。
+ */
+const doHome = wanted.length === 0 || wanted.includes("/home");
+
+const MEASURE_HM = `(() => {
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const q = (sel, root = document) => root.querySelector(sel);
+  const qa = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const sec = (id) => {
+    const el = q('[data-testid="' + id + '"]');
+    if (!el) return null;
+    return {
+      ...box(el),
+      title: box(q('.hm-sec__title', el)),
+      titleText: txt(q('.hm-sec__title', el)),
+      count: box(q('.hm-sec__count', el)),
+      countText: txt(q('.hm-sec__count', el)),
+      tag: txt(q('.hm-sec__tag', el)),
+      link: box(q('.hm-sec__link', el)),
+      linkText: txt(q('.hm-sec__link', el)),
+      empty: txt(q('.hm-empty', el)),
+    };
+  };
+  const panel = (id) => {
+    const el = q('[data-testid="' + id + '"]');
+    if (!el) return null;
+    return { ...box(el), head: box(q('.pt-panel__head', el)), headText: txt(q('.pt-panel__title', el)), card: box(q('.hm-mcard', el)) };
+  };
+  const scroller = document.querySelector('.pt-shell__content');
+  const inner = document.querySelector('.pt-shell__inner');
+  return {
+    sb: scroller ? scroller.offsetWidth - scroller.clientWidth : 0,
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+    innerOverflow: inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0,
+    head: box(q('.pt-head')),
+    headSub: txt(q('#pt-head-sub')),
+    mheadSub: txt(q('#pt-mhead-sub')),
+    refresh: box(q('#pt-head-acts [data-testid="hm-refresh"]')),
+    mrefresh: box(q('.hm-mrefresh [data-testid="hm-refresh"]')),
+    today: sec('hm-today'),
+    tcs: qa('.hm-tc').map((el) => ({
+      id: el.getAttribute('data-testid'),
+      ...box(el),
+      img: box(q('.hm-tc__img', el)),
+      state: box(q('.hm-tc__state', el)),
+      stateText: txt(q('.hm-tc__state', el)),
+      time: box(q('.hm-tc__time', el)),
+      title: box(q('.hm-tc__title', el)),
+      sub: box(q('.hm-tc__sub', el)),
+      subText: txt(q('.hm-tc__sub', el)),
+      act: box(q('.hm-tc__act, .hm-tc__note', el)),
+      actText: txt(q('.hm-tc__act, .hm-tc__note', el)),
+    })),
+    row: box(q('[data-testid="hm-today-row"]')),
+    rowScroll: (() => { const r = q('[data-testid="hm-today-row"]'); return r ? r.scrollWidth - r.clientWidth : 0; })(),
+    pages: qa('.hm-today__page').map(box),
+    dots: qa('[data-testid="hm-today-dots"] > *').map(box),
+    todo: box(q('[data-testid="hm-todo"]')),
+    todoIcon: box(q('[data-testid="hm-todo"] .hm-todo__icon')),
+    todoTitle: box(q('[data-testid="hm-todo"] .hm-todo__title')),
+    todoCount: box(q('[data-testid="hm-todo-count"]')),
+    todoNote: txt(q('[data-testid="hm-todo-empty"]')),
+    chips: qa('[data-testid^="hm-chip-"]').map((el) => ({ t: txt(el), ...box(el) })),
+    todoAll: box(q('[data-testid="hm-todo-all"]')),
+    resume: sec('hm-resume'),
+    rcs: qa('.hm-rc').map((el) => ({
+      ...box(el),
+      img: box(q('.hm-rc__img', el)),
+      play: box(q('.hm-rc__play', el)),
+      track: box(q('.hm-rc__track', el)),
+      title: box(q('.hm-rc__title', el)),
+      sub: box(q('.hm-rc__sub', el)),
+      subText: txt(q('.hm-rc__sub', el)),
+    })),
+    recent: sec('hm-recent'),
+    pcs: qa('.hm-pc').map((el) => ({
+      ...box(el),
+      poster: box(q('.hm-pc__poster', el)),
+      q: box(q('.hm-pc__q', el)),
+      title: box(q('.hm-pc__title', el)),
+      sub: box(q('.hm-pc__sub', el)),
+    })),
+    week: panel('hm-week'),
+    weekSec: sec('hm-week'),
+    weekEmpty: txt(q('[data-testid="hm-week-empty"]')),
+    wks: qa('.hm-wk').map((el) => ({
+      ...box(el),
+      date: box(q('.hm-wk__date', el)),
+      title: box(q('.hm-wk__title', el)),
+      note: box(q('.hm-wk__note', el)),
+      line: (() => { const st = getComputedStyle(el, '::before'); return st.content === 'none' || st.display === 'none' ? null : { left: st.left, top: st.top, w: st.width, h: st.height }; })(),
+    })),
+    nas: panel('hm-nas'),
+    nasSec: sec('hm-nas'),
+    speed: box(q('[data-testid="hm-speed"]')),
+    speedCols: qa('[data-testid="hm-speed"] .hm-speed__col').map((el) => ({
+      ...box(el),
+      icon: box(q('.hm-speed__icon', el)),
+      label: box(q('.hm-speed__label span', el)),
+      labelText: txt(q('.hm-speed__label span', el)),
+      value: box(q('.hm-speed__value', el)),
+      bars: box(q('.pt-bars', el)),
+    })),
+    storage: box(q('[data-testid="hm-storage"]')),
+    storageGroup: box(q('[data-testid="hm-storage"] .hm-nas__group')),
+    disks: qa('[data-testid^="hm-disk-"]').map((el) => ({
+      ...box(el),
+      name: box(q('.hm-disk__name', el)),
+      free: box(q('.hm-disk__free', el)),
+      freeText: txt(q('.hm-disk__free', el)),
+      bar: box(q('.hm-disk__bar', el)),
+    })),
+    dlPart: box(q('[data-testid="hm-downloaders"]')),
+    dlGroup: box(q('[data-testid="hm-downloaders"] .hm-nas__group')),
+    dls: qa('[data-testid^="hm-dl-"]').map((el) => ({
+      ...box(el),
+      dot: box(q('.hm-dl__dot', el)),
+      name: box(q('.hm-dl__name', el)),
+      speed: box(q('.hm-dl__speed', el)),
+    })),
+    linesPart: box(q('[data-testid="hm-lines"]')),
+    lines: qa('[data-testid^="hm-line-"]').map((el) => ({
+      key: el.getAttribute('data-testid'),
+      ...box(el),
+      icon: box(q('.hm-line__icon', el)),
+      title: box(q('.hm-line__title', el)),
+      titleText: txt(q('.hm-line__title', el)),
+      desc: box(q('.hm-line__desc', el)),
+      right: box(q('.hm-line__right, .hm-line__act', el)),
+      rightText: txt(q('.hm-line__right, .hm-line__act', el)),
+    })),
+  };
+})()`;
+
+/* 等首页读到数据（今天播出出了卡，或空态那一句），再等过渡走完 */
+async function openHome(metrics, { empty = false } = {}) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { deviceScaleFactor: 1, ...metrics },
+    sessionId,
+  );
+  await goto(`${BASE}/#/home`);
+  await ev(
+    empty
+      ? `localStorage.setItem('pt-fixture-home-empty', '1')`
+      : `localStorage.removeItem('pt-fixture-home-empty')`,
+  );
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitReady();
+  for (let i = 0; i < 40; i++) {
+    const ok = await ev(
+      empty
+        ? `Boolean(document.querySelector('[data-testid="hm-today-empty"]'))`
+        : `document.querySelectorAll('.hm-tc').length > 0 && document.querySelectorAll('[data-testid^="hm-line-"]').length === 3`,
+    ).catch(() => false);
+    if (ok === true) {
+      await sleep(600);
+      return true;
+    }
+    await sleep(250);
+  }
+  return false;
+}
+
+if (doHome) {
+  /* HM_SHOTS=<目录> 时每一趟量完存一张截图（整页，验收时逐张看） */
+  const shot = async (name) => {
+    if (!process.env.HM_SHOTS) return;
+    const { data } = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+    writeFileSync(join(process.env.HM_SHOTS, `${name}.png`), Buffer.from(data, "base64"));
+  };
+  /* 整页：外壳的内容区自己滚，把视口临时拉高到放得下全部内容再截，截完换回来 */
+  const shotFull = async (name, metrics) => {
+    if (!process.env.HM_SHOTS) return;
+    const extra = await ev(`(() => {
+      const sc = document.querySelector('.pt-shell__content');
+      return sc ? sc.scrollHeight - sc.clientHeight : 0;
+    })()`).catch(() => 0);
+    if (extra > 0) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { deviceScaleFactor: 1, ...metrics, height: metrics.height + extra },
+        sessionId,
+      );
+      await sleep(400);
+    }
+    await shot(name);
+    if (extra > 0) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { deviceScaleFactor: 1, ...metrics },
+        sessionId,
+      );
+      await sleep(300);
+    }
+  };
+  const homeFail = (key, msg, where = "") => {
+    const gapKey = `/home${where} ${key}`;
+    if (ALLOWED_GAPS[gapKey]) {
+      gapsUsed.add(gapKey);
+      return;
+    }
+    failures.push({
+      route: `/home${where ? `（${where.replace("@", "")}）` : ""}`,
+      board: where === "@375" ? "07 首页·手机" : where === "@check" ? "系统体检" : "02 首页",
+      key,
+      msg,
+    });
+  };
+  const hmBox = (key, got, want, tol = 2, where = "") => {
+    if (!got) {
+      homeFail(key, "找不到这一块", where);
+      return;
+    }
+    const diffs = Object.entries(want)
+      .filter(([k, v]) => !near(got[k], v, tol))
+      .map(([k, v]) => `${k} ${got[k]}≠${v}`);
+    if (diffs.length > 0)
+      homeFail(key, `${diffs.join("，")}（实测 ${JSON.stringify(got)}）`, where);
+  };
+  const rel = (b, o) => (b && o ? { x: b.x - o.x, y: b.y - o.y, w: b.w, h: b.h } : null);
+
+  /* ---- 桌面 1440×1024（画板 02） ---- */
+  consoleErrors = [];
+  if (!(await openHome({ width: 1440, height: 1024, mobile: false }))) {
+    homeFail("load", "等了 10 秒还没有今天播出的卡或三条状态行：页面没进首页，或 /api/home 没回来");
+  } else {
+    const m = await ev(MEASURE_HM);
+    if (process.env.HM_DUMP) console.log(JSON.stringify(m, null, 1));
+    await shot("home-1440");
+    /* 页面比视口长时滚动区有竖向滚动条：内容宽与右边让出 sb（画板按没有滚动条画） */
+    const W = 1144 - m.sb;
+    const R = 280 + W;
+    hmBox("head", m.head, { x: 264, y: 0, w: 1176, h: 64 });
+    if (!m.refresh) homeFail("head.refresh", "页头右侧没有「刷新」");
+    if (!m.headSub.startsWith("今天 5 集播出 · 其中 2 集已入库 · "))
+      homeFail("head.sub", `副标题是「${m.headSub}」`);
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      homeFail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+
+    /* 今天播出：标题 280,80，卡 216×200 从 112 起、间距 16，一行五张；卡里剧照 122、状态牌 8,8、时刻牌右下 8、标题 132、副行 152、动作 172 */
+    hmBox("today.title", m.today?.title, { x: 280, y: 80, h: 21 });
+    if (m.today?.countText !== "5 集") homeFail("today.count", `计数是「${m.today?.countText}」`);
+    if (
+      !m.today?.link ||
+      !near(m.today.link.x + m.today.link.w, R, 2) ||
+      m.today.linkText !== "看日历"
+    )
+      homeFail("today.link", `「看日历」${JSON.stringify(m.today?.link)}，右边应到 ${R}`);
+    if (m.tcs.length !== 5) homeFail("today.cards", `今天播出有 ${m.tcs.length} 张卡，假数据 5 张`);
+    m.tcs.forEach((c, i) => {
+      hmBox(`today.card[${i}]`, c, { x: 280 + 232 * i, y: 112, w: 216, h: 200 });
+      hmBox(`today.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: 216, h: 122 }, 2);
+      hmBox(`today.card[${i}].state`, rel(c.state, c), { x: 8, y: 8, h: 20 }, 2);
+      if (c.time) {
+        const t = rel(c.time, c);
+        if (!near(t.x + t.w, 208, 2) || !near(t.y + t.h, 114, 2) || t.h !== 20)
+          homeFail(
+            `today.card[${i}].time`,
+            `时刻牌 ${JSON.stringify(t)}：右下各留 8（右边 208、底 114）`,
+          );
+      } else homeFail(`today.card[${i}].time`, "按播出时间追剧的卡要有时刻牌");
+      hmBox(`today.card[${i}].title`, rel(c.title, c), { x: 12, y: 132 }, 2);
+      hmBox(`today.card[${i}].sub`, rel(c.sub, c), { x: 12, y: 152 }, 2);
+      hmBox(`today.card[${i}].act`, rel(c.act, c), { x: 12, y: 172 }, 2);
+    });
+    const acts = m.tcs.map((c) => c.actText).join("|");
+    if (acts !== "播出后 2 小时开始搜|播放|下载中，预计 12 分钟|搜资源|播放")
+      homeFail("today.acts", `动作行是「${acts}」`);
+    if (m.rowScroll > 0 && m.pages.length === 0)
+      homeFail("today.pages", "一行排不下时两端要有翻页按钮");
+
+    /* 待处理条：280,328 满宽 48；图标 16,16、标题 40、计数 92、chip 从 132 起 h26 间距 8、「全部」右边到 W − 16 */
+    hmBox("todo", m.todo, { x: 280, y: 328, w: W, h: 48 });
+    hmBox("todo.icon", rel(m.todoIcon, m.todo), { x: 16, y: 16, w: 16, h: 16 }, 2);
+    hmBox("todo.title", rel(m.todoTitle, m.todo), { x: 40 }, 2);
+    hmBox("todo.count", rel(m.todoCount, m.todo), { x: 92, y: 15, h: 18 }, 2);
+    if (m.chips.length !== 6)
+      homeFail("todo.chips", `待处理有 ${m.chips.length} 个 chip，假数据 6 类`);
+    m.chips.forEach((c, i) => {
+      const r = rel(c, m.todo);
+      if (i === 0) hmBox("todo.chip[0]", r, { x: 132, y: 11, h: 26 }, 2);
+      else {
+        const prev = m.chips[i - 1];
+        if (!near(c.x - (prev.x + prev.w), 8, 1) || !near(r.y, 11, 1) || c.h !== 26)
+          homeFail(`todo.chip[${i}]`, `「${c.t}」${JSON.stringify(r)}：同一行、间距 8、h26`);
+      }
+    });
+    const all = rel(m.todoAll, m.todo);
+    if (!all || !near(all.x + all.w, W - 16, 2))
+      homeFail("todo.all", `「全部」${JSON.stringify(all)}，右边应到 ${W - 16}`);
+
+    /* 两栏：左栏 760（W − 368 − 16）、右栏 368，都从 392 起、底在 980 */
+    const LW = W - 368 - 16;
+    hmBox("resume.title", m.resume?.title, { x: 280, y: 392, h: 21 });
+    if (m.resume?.tag !== "Jellyfin · admin")
+      homeFail("resume.tag", `身份 chip 是「${m.resume?.tag}」`);
+    if (
+      !m.resume?.link ||
+      !near(m.resume.link.x + m.resume.link.w, 280 + LW, 2) ||
+      m.resume.linkText !== "在 Jellyfin 打开"
+    )
+      homeFail(
+        "resume.link",
+        `「在 Jellyfin 打开」${JSON.stringify(m.resume?.link)}，右边应到 ${280 + LW}`,
+      );
+    if (m.rcs.length !== 3)
+      homeFail("resume.cards", `继续观看有 ${m.rcs.length} 张卡，假数据 3 张`);
+    m.rcs.forEach((c, i) => {
+      hmBox(`resume.card[${i}]`, c, { x: 280 + 259 * i, y: 424, w: 242, h: 182 }, 2);
+      hmBox(`resume.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: 242, h: 136 }, 2);
+      hmBox(`resume.card[${i}].play`, rel(c.play, c), { x: 101, y: 48, w: 40, h: 40 }, 2);
+      hmBox(`resume.card[${i}].track`, rel(c.track, c), { x: 0, y: 132, w: 242, h: 4 }, 2);
+      hmBox(`resume.card[${i}].title`, rel(c.title, c), { x: 12, y: 145 }, 2);
+      hmBox(`resume.card[${i}].sub`, rel(c.sub, c), { x: 12, y: 163 }, 2);
+    });
+    hmBox("recent.title", m.recent?.title, { x: 280, y: 626, h: 21 });
+    if (m.recent?.countText !== "今天 7")
+      homeFail("recent.count", `计数是「${m.recent?.countText}」`);
+    const shownPosters = m.pcs.filter((c) => c.x + c.w <= 280 + LW + 1);
+    if (shownPosters.length !== 7)
+      homeFail("recent.posters", `一行放得下的海报 ${shownPosters.length} 张，760 宽放 7 张`);
+    m.pcs.slice(0, 7).forEach((c, i) => {
+      hmBox(
+        `recent.poster[${i}]`,
+        rel(c.poster, { x: 0, y: 0 }),
+        { x: 280 + 110 * i, y: 658, w: 98, h: 147 },
+        2,
+      );
+      hmBox(`recent.poster[${i}].q`, rel(c.q, c), { x: 6, y: 6, h: 17 }, 2);
+      hmBox(`recent.poster[${i}].title`, rel(c.title, c), { x: 0, y: 153, w: 98 }, 2);
+      hmBox(`recent.poster[${i}].sub`, rel(c.sub, c), { x: 0, y: 171 }, 2);
+    });
+    hmBox("week", m.week, { x: 280, y: 864, w: LW, h: 116 });
+    if (m.week?.headText !== "这周还要播") homeFail("week.head", `卡头是「${m.week?.headText}」`);
+    if (m.wks.length !== 4) homeFail("week.cols", `这周还要播有 ${m.wks.length} 列，假数据 4 条`);
+    const colW = (LW - 16) / 4;
+    m.wks.forEach((c, i) => {
+      hmBox(`week.col[${i}].date`, rel(c.date, m.week), { x: 16 + colW * i, y: 42 }, 2);
+      hmBox(`week.col[${i}].title`, rel(c.title, m.week), { x: 16 + colW * i, y: 60 }, 2);
+      hmBox(`week.col[${i}].note`, rel(c.note, m.week), { x: 16 + colW * i, y: 80 }, 2);
+      if (i === 0 && c.line) homeFail("week.col[0].rule", "第一列前不要竖线");
+      if (i > 0 && (!c.line || c.line.left !== "-12px" || c.line.h !== "52px"))
+        homeFail(`week.col[${i}].rule`, `竖线 ${JSON.stringify(c.line)}：在文字左边 12、52 高`);
+    });
+    hmBox("nas", m.nas, { x: R - 368, y: 392, w: 368, h: 588 }, 2);
+    if (m.nas?.headText !== "NAS 状态") homeFail("nas.head", `卡头是「${m.nas?.headText}」`);
+    const N = m.nas;
+    m.speedCols.forEach((c, i) => {
+      const x = i === 0 ? 16 : 192;
+      hmBox(`nas.speed[${i}].icon`, rel(c.icon, N), { x, y: 44, w: 14, h: 14 }, 2);
+      hmBox(`nas.speed[${i}].label`, rel(c.label, N), { x: x + 20, y: 42 }, 2);
+      hmBox(`nas.speed[${i}].value`, rel(c.value, N), { x, y: 60 }, 2);
+      hmBox(`nas.speed[${i}].bars`, rel(c.bars, N), { x, y: 88, w: 160, h: 26 }, 2);
+    });
+    const labels = m.speedCols.map((c) => c.labelText).join("|");
+    if (labels !== "下载 · 下载中 4|上传 · 做种 1,284")
+      homeFail("nas.speed.labels", `标签是「${labels}」`);
+    hmBox("nas.storage.group", rel(m.storageGroup, N), { x: 16, y: 142 }, 2);
+    if (m.disks.length !== 3) homeFail("nas.disks", `存储有 ${m.disks.length} 块盘，假数据 3 块`);
+    m.disks.forEach((d, i) => {
+      hmBox(`nas.disk[${i}].name`, rel(d.name, N), { x: 16, y: 164 + 42 * i }, 2);
+      hmBox(`nas.disk[${i}].bar`, rel(d.bar, N), { x: 16, y: 186 + 42 * i, w: 336, h: 5 }, 2);
+      const f = rel(d.free, N);
+      if (!f || !near(f.x + f.w, 352, 2))
+        homeFail(`nas.disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到 352`);
+    });
+    hmBox("nas.dls.group", rel(m.dlGroup, N), { x: 16, y: 308 }, 2);
+    m.dls.forEach((d, i) => {
+      hmBox(`nas.dl[${i}].dot`, rel(d.dot, N), { x: 16, y: 336 + 26 * i, w: 7, h: 7 }, 2);
+      hmBox(`nas.dl[${i}].name`, rel(d.name, N), { x: 30, y: 330 + 26 * i }, 2);
+      const sp = rel(d.speed, N);
+      if (!sp || !near(sp.x + sp.w, 352, 2))
+        homeFail(`nas.dl[${i}].speed`, `速度 ${JSON.stringify(sp)}，右边应到 352`);
+    });
+    if (m.lines.length !== 3)
+      homeFail("nas.lines", `状态行有 ${m.lines.length} 条，应是体检、备份、媒体服务器`);
+    m.lines.forEach((l, i) => {
+      const y = 406 + 58 * i;
+      hmBox(`nas.line[${i}].icon`, rel(l.icon, N), { x: 16, y: y + 2, w: 16, h: 16 }, 2);
+      hmBox(`nas.line[${i}].title`, rel(l.title, N), { x: 40, y }, 2);
+      hmBox(`nas.line[${i}].desc`, rel(l.desc, N), { x: 40, y: y + 20 }, 2);
+      const rt = rel(l.right, N);
+      if (!rt || !near(rt.x + rt.w, 352, 2))
+        homeFail(`nas.line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到 352`);
+    });
+    const titles = m.lines.map((l) => l.titleText).join("|");
+    if (titles !== "体检：13 项通过，1 项提醒|备份：3 天没成功|Jellyfin 12.2 · 14:00 同步")
+      homeFail("nas.lines.titles", `状态行标题是「${titles}」`);
+
+    /* 探针：「全部」打开右侧 440 宽的抽屉，一件事一行；点一个去别的页面的 chip，地址带着筛选 */
+    const drawer = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        document.querySelector('[data-testid="hm-todo-all"]')?.click();
+        let d = null;
+        for (let i = 0; i < 20; i++) {
+          await wait(100);
+          d = [...document.querySelectorAll('.hm-todo-drawer')].find((e) => e.getBoundingClientRect().width > 0);
+          if (d) break;
+        }
+        if (!d) return 'no-drawer';
+        await wait(400);
+        const r = d.getBoundingClientRect();
+        const rows = d.querySelectorAll('.hm-row').length;
+        const acts = [...d.querySelectorAll('.hm-row .el-button')].map((b) => (b.textContent ?? '').trim()).join(',');
+        const over = d.scrollWidth - d.clientWidth;
+        d.querySelector('.el-drawer__close-btn')?.click();
+        await wait(500);
+        const ok = Math.round(r.width) === 440 && Math.round(r.right) === innerWidth && rows === 7 && acts.includes('处理,忽略') && over <= 0;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 宽 ' + Math.round(r.width) + ' 右 ' + Math.round(r.right) + ' 行 ' + rows + ' 按钮 ' + acts + ' 溢出 ' + over;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(drawer, "verdict=ok").length > 0)
+      homeFail("probe.drawer", `待处理抽屉：${drawer}`);
+    const chip = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        document.querySelector('[data-testid="hm-chip-organize_failed"]')?.click();
+        for (let i = 0; i < 20 && !location.hash.startsWith('#/media/history'); i++) await wait(100);
+        const at = location.hash;
+        history.back();
+        for (let i = 0; i < 20 && !location.hash.startsWith('#/home'); i++) await wait(100);
+        return 'verdict=' + (at === '#/media/history?status=failed' ? 'ok' : 'MISMATCH') + ' ' + at;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(chip, "verdict=ok").length > 0)
+      homeFail("probe.chip", `「整理失败」chip：${chip}`);
+  }
+  for (const err of [...new Set(consoleErrors)].slice(0, 3)) homeFail("console", err);
+
+  /* ---- 1200×900：内容 904 < 1100，NAS 状态落到左栏下面、占满宽 ---- */
+  consoleErrors = [];
+  if (await openHome({ width: 1200, height: 900, mobile: false })) {
+    const m = await ev(MEASURE_HM);
+    await shot("home-1200");
+    const W = 1200 - 264 - 32 - m.sb;
+    const weekBottom = m.week ? m.week.y + m.week.h : 0;
+    hmBox("@1200 nas", m.nas, { x: 280, w: W }, 2, "@1200");
+    if (m.nas && !near(m.nas.y - weekBottom, 16, 2))
+      homeFail(
+        "@1200 nas",
+        `NAS 状态的顶 ${m.nas.y} 到这周还要播的底 ${weekBottom} 应隔 16`,
+        "@1200",
+      );
+    hmBox("@1200 week", m.week, { x: 280, w: W }, 2, "@1200");
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      homeFail("@1200 overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`, "@1200");
+    /* 今天播出一行排不下：横向滚，两端有翻页按钮，点「下一页」往后滚 */
+    const page = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const row = document.querySelector('[data-testid="hm-today-row"]');
+        const next = document.querySelector('[data-testid="hm-today-next"]');
+        if (!row || !next) return 'no-pager ' + Boolean(row) + ' ' + Boolean(next);
+        const s0 = row.scrollLeft;
+        next.click();
+        await wait(900);
+        const s1 = row.scrollLeft;
+        const prev = Boolean(document.querySelector('[data-testid="hm-today-prev"]'));
+        const rows = new Set([...row.querySelectorAll('.hm-tc')].map((c) => Math.round(c.getBoundingClientRect().top))).size;
+        return 'verdict=' + (s1 > s0 && prev && rows === 1 ? 'ok' : 'MISMATCH') + ' 滚 ' + s0 + '→' + s1 + ' 上一页 ' + prev + ' 行 ' + rows;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(page, "verdict=ok").length > 0)
+      homeFail("@1200 probe.pager", `今天播出翻页：${page}`, "@1200");
+  } else homeFail("@1200 load", "1200 下首页没读到数据", "@1200");
+  for (const err of [...new Set(consoleErrors)].slice(0, 3))
+    homeFail("@1200 console", err, "@1200");
+
+  /* ---- 手机 375×812（画板 07）：区块标题 16,y；标题顶到内容顶 32；块与块之间统一 24（偏离 ④） ---- */
+  consoleErrors = [];
+  if (!(await openHome({ width: 375, height: 812, mobile: true }))) {
+    homeFail("load", "手机上首页没读到数据", "@375");
+  } else {
+    const m = await ev(MEASURE_HM);
+    if (process.env.HM_DUMP) console.log(JSON.stringify(m, null, 1));
+    await shotFull("home-375", { width: 375, height: 812, mobile: true });
+    const fail = (k, msg) => homeFail(k, msg, "@375");
+    const box = (k, got, want, tol = 2) => hmBox(k, got, want, tol, "@375");
+    /* 无头 Chrome 的竖向滚动条占 sb（画板按没有滚动条画）：卡宽 343 − sb，右边 359 − sb，卡里右边 329 − sb */
+    const sb = m.sb;
+    const cw = 343 - sb;
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      fail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+    if (m.mheadSub !== "今天 5 集播出 · 7 件事要处理")
+      fail("head.sub", `顶栏副标题是「${m.mheadSub}」（画板 07 不写入库的那段）`);
+    if (m.refresh) fail("head.refresh", "手机上页头不放「刷新」（在页面底部）");
+    if (!m.mrefresh) fail("refresh", "手机上页面底部要有「刷新」");
+    const sec = (k, s, y) => {
+      box(`${k}.title`, s?.title, { x: 16, y, h: 21 });
+      if (s?.link && !near(s.link.x + s.link.w, 359 - sb, 2))
+        fail(`${k}.link`, `文字链 ${JSON.stringify(s.link)}，右边应到 ${359 - sb}`);
+    };
+    sec("today", m.today, 68);
+    m.tcs.slice(0, 2).forEach((c, i) => {
+      box(`today.card[${i}]`, c, { x: 16 + 252 * i, y: 100, w: 240, h: 196 });
+      box(`today.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: 240, h: 135 });
+      box(`today.card[${i}].state`, rel(c.state, c), { x: 8, y: 8, h: 20 });
+      box(`today.card[${i}].title`, rel(c.title, c), { x: 12, y: 144 });
+      box(`today.card[${i}].sub`, rel(c.sub, c), { x: 12, y: 164 });
+    });
+    if (!m.tcs[0]?.subText?.includes("20:00 播出"))
+      fail("today.sub", `时刻要并进副行：「${m.tcs[0]?.subText}」`);
+    if (m.tcs.some((c) => c.act)) fail("today.acts", "手机上没有动作行（整张卡可点）");
+    if (m.dots.length !== 5) fail("today.dots", `翻页圆点 ${m.dots.length} 个，五张卡五个`);
+    else {
+      const x0 = Math.round((375 - sb) / 2 - 27);
+      m.dots.forEach((d, i) =>
+        box(`today.dot[${i}]`, d, { x: x0 + 12 * i, y: 304, w: 6, h: 6 }, 2),
+      );
+    }
+    const dotsBottom = m.dots.length ? m.dots[0].y + m.dots[0].h : 0;
+    /* 待处理卡：343 宽，标题行在卡里；chip h30 从 14,42 起 */
+    box("todo", m.todo, { x: 16, w: cw });
+    if (m.todo && !near(m.todo.y - dotsBottom, 24, 2))
+      fail("todo.gap", `圆点的底 ${dotsBottom} 到待处理卡 ${m.todo.y} 应隔 24`);
+    box("todo.icon", rel(m.todoIcon, m.todo), { x: 14, y: 13, w: 16, h: 16 });
+    box("todo.title", rel(m.todoTitle, m.todo), { x: 38, y: 11 });
+    box("todo.count", rel(m.todoCount, m.todo), { x: 90, y: 11 });
+    const allM = rel(m.todoAll, m.todo);
+    if (!allM || !near(allM.x + allM.w, 329 - sb, 2) || !near(allM.y, 12, 2))
+      fail("todo.all", `「全部」${JSON.stringify(allM)}，右边到 ${329 - sb}、y 12`);
+    if (m.chips.length) {
+      box("todo.chip[0]", rel(m.chips[0], m.todo), { x: 14, y: 42, h: 30 });
+      const tops = [...new Set(m.chips.map((c) => c.y))].sort((a, b) => a - b);
+      for (let i = 1; i < tops.length; i++)
+        if (!near(tops[i] - tops[i - 1], 36, 1))
+          fail("todo.chips", `chip 的行距 ${tops[i] - tops[i - 1]}，应为 36`);
+      const last = Math.max(...m.chips.map((c) => c.y + c.h));
+      if (m.todo && !near(m.todo.y + m.todo.h - last, 8, 2))
+        fail("todo.bottom", `最后一行 chip 底下留 ${m.todo.y + m.todo.h - last}，应为 8`);
+      if (m.chips.some((c) => c.x + c.w > m.todo.x + 329 - sb + 1))
+        fail("todo.wrap", "chip 要在卡里右边 14 以内换行");
+    }
+    const todoBottom = m.todo ? m.todo.y + m.todo.h : 0;
+    sec("resume", m.resume, todoBottom + 24);
+    if (m.resume?.linkText !== "Jellyfin")
+      fail("resume.link", `手机上文字链只写服务器名：「${m.resume?.linkText}」`);
+    const rTop = m.resume?.title ? m.resume.title.y + 32 : 0;
+    m.rcs.slice(0, 1).forEach((c) => {
+      box("resume.card[0]", c, { x: 16, y: rTop, w: 240, h: 188 });
+      box("resume.card[0].img", rel(c.img, c), { x: 0, y: 0, w: 240, h: 135 });
+      box("resume.card[0].play", rel(c.play, c), { x: 100, y: 47, w: 40, h: 40 });
+      box("resume.card[0].track", rel(c.track, c), { x: 0, y: 131, w: 240, h: 4 });
+      box("resume.card[0].title", rel(c.title, c), { x: 12, y: 144 });
+      box("resume.card[0].sub", rel(c.sub, c), { x: 12, y: 163 });
+    });
+    if (m.rcs[1]) box("resume.card[1]", m.rcs[1], { x: 268, y: rTop, w: 240, h: 188 });
+    const resumeBottom = rTop + 188;
+    sec("recent", m.recent, resumeBottom + 24);
+    const pTop = m.recent?.title ? m.recent.title.y + 32 : 0;
+    m.pcs.slice(0, 3).forEach((c, i) => {
+      box(`recent.poster[${i}]`, rel(c.poster, { x: 0, y: 0 }), {
+        x: 16 + 112 * i,
+        y: pTop,
+        w: 100,
+        h: 150,
+      });
+      box(`recent.poster[${i}].title`, rel(c.title, c), { x: 0, y: 156, w: 100 });
+      box(`recent.poster[${i}].sub`, rel(c.sub, c), { x: 0, y: 174 });
+    });
+    const recentBottom = m.pcs[0] ? m.pcs[0].y + m.pcs[0].h : 0;
+    /* 这周还要播与 NAS 状态：标题在卡外（画板 07 的 week / title、nas / title），卡 343 宽 */
+    sec("week", m.weekSec, recentBottom + 24);
+    if (m.weekSec?.linkText !== "看日历") fail("week.link", `文字链是「${m.weekSec?.linkText}」`);
+    const wc = m.week?.card;
+    box("week.card", wc, { x: 16, y: (m.weekSec?.title?.y ?? 0) + 32, w: cw, h: 208 });
+    m.wks.forEach((c, i) => {
+      box(`week.row[${i}]`, rel(c, wc), { x: 14, y: 52 * i, h: 52 }, 2);
+      box(`week.row[${i}].date`, rel(c.date, wc), { x: 14, y: 52 * i + 17 }, 2);
+      box(`week.row[${i}].title`, rel(c.title, wc), { x: 96, y: 52 * i + 9 }, 2);
+      box(`week.row[${i}].note`, rel(c.note, wc), { x: 96, y: 52 * i + 28 }, 2);
+    });
+    const weekBottom = wc ? wc.y + wc.h : 0;
+    sec("nas", m.nasSec, weekBottom + 24);
+    if (m.nasSec?.linkText !== "系统体检") fail("nas.link", `文字链是「${m.nasSec?.linkText}」`);
+    const nc = m.nas?.card;
+    box("nas.card", nc, { x: 16, y: (m.nasSec?.title?.y ?? 0) + 32, w: cw, h: 368 });
+    /* 两列：画板 148 宽、x 14 与 180（列间 18） */
+    const bw = (cw - 28 - 18) / 2;
+    m.speedCols.forEach((c, i) => {
+      const x = i === 0 ? 14 : 14 + bw + 18;
+      box(`nas.speed[${i}].icon`, rel(c.icon, nc), { x, y: 16, w: 14, h: 14 });
+      box(`nas.speed[${i}].label`, rel(c.label, nc), { x: x + 20, y: 14 });
+      box(`nas.speed[${i}].value`, rel(c.value, nc), { x, y: 32 });
+      box(`nas.speed[${i}].bars`, rel(c.bars, nc), { x, y: 60, w: bw, h: 24 });
+    });
+    if (m.speedCols.map((c) => c.labelText).join("|") !== "下载|上传")
+      fail(
+        "nas.speed.labels",
+        `手机上标签只写「下载」「上传」：「${m.speedCols.map((c) => c.labelText).join("|")}」`,
+      );
+    if (m.disks.length !== 2)
+      fail("nas.disks", `手机上存储列 ${m.disks.length} 块，应是下载盘与媒体库盘各一块`);
+    m.disks.forEach((d, i) => {
+      box(`nas.disk[${i}].name`, rel(d.name, nc), { x: 14, y: 110 + 42 * i });
+      box(`nas.disk[${i}].bar`, rel(d.bar, nc), { x: 14, y: 132 + 42 * i, w: cw - 28, h: 5 });
+      const f = rel(d.free, nc);
+      if (!f || !near(f.x + f.w, 329 - sb, 2))
+        fail(`nas.disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到 ${329 - sb}`);
+    });
+    if (m.dlPart) fail("nas.dls", "手机上不列下载器那一组");
+    m.lines.forEach((l, i) => {
+      const y = 214 + 50 * i;
+      box(`nas.line[${i}]`, rel(l, nc), { y, h: 50 }, 2);
+      box(`nas.line[${i}].icon`, rel(l.icon, nc), { x: 14, y: y + 14, w: 16, h: 16 });
+      box(`nas.line[${i}].title`, rel(l.title, nc), { x: 40, y: y + 12 });
+      if (l.desc) fail(`nas.line[${i}].desc`, "手机上状态行没有说明行");
+      const rt = rel(l.right, nc);
+      if (!rt || !near(rt.x + rt.w, 329 - sb, 2))
+        fail(`nas.line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到 ${329 - sb}`);
+    });
+    /* 探针：「全部」打开全屏的列表 */
+    const full = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        document.querySelector('[data-testid="hm-todo-all"]')?.click();
+        let d = null;
+        for (let i = 0; i < 20; i++) {
+          await wait(100);
+          d = [...document.querySelectorAll('.hm-todo-drawer')].find((e) => e.getBoundingClientRect().width > 0);
+          if (d) break;
+        }
+        if (!d) return 'no-drawer';
+        await wait(400);
+        const r = d.getBoundingClientRect();
+        const over = d.scrollWidth - d.clientWidth;
+        d.querySelector('.el-drawer__close-btn')?.click();
+        await wait(500);
+        return 'verdict=' + (Math.round(r.width) === innerWidth && over <= 0 ? 'ok' : 'MISMATCH') + ' 宽 ' + Math.round(r.width) + ' 溢出 ' + over;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(full, "verdict=ok").length > 0) fail("probe.drawer", `手机上「全部」：${full}`);
+  }
+  for (const err of [...new Set(consoleErrors)].slice(0, 3)) homeFail("console", err, "@375");
+
+  /* ---- 空态（1440 与 375）：今天播出、待处理、最近入库、这周还要播各写一句，继续观看整块不显示 ---- */
+  for (const [where, metrics] of [
+    ["@empty", { width: 1440, height: 1024, mobile: false }],
+    ["@empty375", { width: 375, height: 812, mobile: true }],
+  ]) {
+    consoleErrors = [];
+    if (!(await openHome(metrics, { empty: true }))) {
+      homeFail("load", "空态下首页没读到数据", where);
+      continue;
+    }
+    const m = await ev(MEASURE_HM);
+    await shotFull(`home-${where.slice(1)}`, metrics);
+    const fail = (k, msg) => homeFail(k, msg, where);
+    if (m.today?.empty !== "还没有追剧") fail("today.empty", `今天播出写的是「${m.today?.empty}」`);
+    if (m.today?.linkText !== "去探索")
+      fail("today.link", `没有追剧时文字链是「${m.today?.linkText}」`);
+    if (m.todoNote !== "没有要处理的事") fail("todo.empty", `待处理写的是「${m.todoNote}」`);
+    if (m.resume) fail("resume", "没连媒体服务器时继续观看整块不显示");
+    if (m.recent?.empty !== "最近没有入库")
+      fail("recent.empty", `最近入库写的是「${m.recent?.empty}」`);
+    if (m.today?.countText || m.recent?.countText)
+      fail(
+        "counts",
+        `没有数据时标题旁不写计数：「${m.today?.countText}」「${m.recent?.countText}」`,
+      );
+    if (m.weekEmpty !== "这周没有要播的集")
+      fail("week.empty", `这周还要播写的是「${m.weekEmpty}」`);
+    const titles = m.lines.map((l) => l.titleText).join("|");
+    if (titles !== "体检：没体检过|备份：每天定时备份关着|媒体服务器")
+      fail("nas.lines", `状态行是「${titles}」`);
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      fail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
+  }
+  await ev(`localStorage.removeItem('pt-fixture-home-empty')`).catch(() => {});
+
+  /* ---- 系统体检（画板没有）：1440 与 375 不溢出，十组按顺序、每项都在，「有问题的」只留提醒与失败 ---- */
+  for (const [where, metrics] of [
+    ["@check", { width: 1440, height: 1024, mobile: false }],
+    ["@check375", { width: 375, height: 812, mobile: true }],
+  ]) {
+    consoleErrors = [];
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { deviceScaleFactor: 1, ...metrics },
+      sessionId,
+    );
+    await goto(`${BASE}/#/system/check`);
+    await cdp.send("Page.reload", {}, sessionId);
+    await waitReady();
+    let ready = false;
+    for (let i = 0; i < 40 && !ready; i++) {
+      ready =
+        (await ev(`document.querySelectorAll('.sc-item').length > 0`).catch(() => false)) === true;
+      if (!ready) await sleep(250);
+    }
+    const fail = (k, msg) => homeFail(k, msg, where);
+    if (!ready) {
+      fail("load", "系统体检没列出任何一项");
+      continue;
+    }
+    await sleep(400);
+    await shotFull(`system-${where.slice(1)}`, metrics);
+    const got = await ev(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const inner = document.querySelector('.pt-shell__inner');
+      const groups = [...document.querySelectorAll('[data-testid^="sc-group-"]')].map((g) => g.dataset.testid.slice(9));
+      const items = document.querySelectorAll('.sc-item').length;
+      const hints = document.querySelectorAll('.sc-item__hint').length;
+      const run = Boolean(document.querySelector(${JSON.stringify(where === "@check" ? '#pt-head-acts [data-testid="sc-run"]' : '.sc-mbar [data-testid="sc-run"]')}));
+      const clipped = [...document.querySelectorAll('.sc-item__title, .sc-item__detail, .sc-item__hint')]
+        .filter((el) => el.scrollWidth > el.clientWidth + 1).length;
+      const over = Math.max(document.documentElement.scrollWidth - innerWidth, inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0);
+      const radio = [...document.querySelectorAll('.el-radio-button')].find((l) => (l.textContent ?? '').includes('有问题的'));
+      radio?.querySelector('input')?.click();
+      await wait(300);
+      const left = [...document.querySelectorAll('.sc-item')].map((el) => [...el.classList].find((c) => c.startsWith('st-')));
+      return { groups: groups.join(','), items, hints, run, clipped, over, left: left.join(',') };
+    })()`);
+    if (got.groups !== "tmdb,sites,downloaders,servers,paths,libraries,disks,time,backup,secret")
+      fail("groups", `分组是「${got.groups}」`);
+    if (got.items !== 15) fail("items", `列了 ${got.items} 项，假数据 15 项`);
+    if (got.hints !== 4) fail("hints", `「怎么修」有 ${got.hints} 条，假数据有问题的 4 项各一条`);
+    if (!got.run) fail("run", "「立即体检」不在该在的地方（桌面在页头，手机在面板顶部）");
+    if (got.clipped > 0) fail("clipped", `有 ${got.clipped} 处说明被截断（应换行）`);
+    if (got.over > 0) fail("overflow", `横向溢出 ${got.over}px`);
+    if (got.left !== "st-warn,st-fail,st-warn,st-warn")
+      fail("filter", `「有问题的」留下的是「${got.left}」`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
+  }
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+}
+
 // ------------------------------------------------- 登录页（画板 43）
 
 /*
@@ -4594,7 +5340,8 @@ const stale = Object.keys(ALLOWED_GAPS).filter(
     (wanted.length === 0 ||
       wanted.some((r) => k.startsWith(`${r} `) || k.startsWith(`${r}@375 `)) ||
       (doEntry && k.startsWith("/search?entry")) ||
-      (doItem && k.startsWith("/media/item"))),
+      (doItem && k.startsWith("/media/item")) ||
+      (doHome && k.startsWith("/home"))),
 );
 
 for (const f of failures) {
@@ -4647,6 +5394,7 @@ const scope =
   (emptyRoutes.length > 0 ? ` + 空态 ${emptyRoutes.length} 条` : "") +
   (doEntry ? " + 按条目搜索（1440、1200、375）" : "") +
   (doItem ? " + 条目详情（1440 剧集与电影、1200、375）" : "") +
+  (doHome ? " + 首页（1440、1200、375、空态）与系统体检" : "") +
   (doLogin ? " + 登录页" : "");
 if (failures.length === 0 && stale.length === 0) {
   /*

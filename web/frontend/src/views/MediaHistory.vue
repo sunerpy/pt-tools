@@ -37,6 +37,8 @@ import {
   matchSourceLabel,
   modeLabel,
   organizeOutcome,
+  failKindFrom,
+  historyStatusFrom,
   rescrapeOutcome,
   scrapeStatus,
   seasonEpisode,
@@ -45,17 +47,23 @@ import {
 import { itemLink } from "@/utils/mediaItem";
 import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 
 const isMobile = useIsMobile();
+/* 测试里有的不挂路由：没有时当作没带筛选 */
+const route = useRoute() as ReturnType<typeof useRoute> | undefined;
 const errText = (e: unknown, fallback: string) => (e as Error)?.message || fallback;
 
 const PAGE_SIZE = 50;
 const items = ref<MediaHistoryItem[]>([]);
 const total = ref(0);
 const page = ref(1);
-const status = ref<"" | MediaTransferStatus>("");
+/** 首页的待处理带着筛选进来（?status=failed、?kind=recognize） */
+const status = ref<"" | MediaTransferStatus>(historyStatusFrom(route?.query.status));
 /** 失败与跳过的分类（只在看全部、失败或跳过时有） */
-const kind = ref<"" | MediaFailKind>("");
+const kind = ref<"" | MediaFailKind>(
+  status.value === "done" || status.value === "removed" ? "" : failKindFrom(route?.query.kind),
+);
 const keyword = ref("");
 /** 「按条目」：列分组；group 是点开的那一组（看组里的记录） */
 const byItem = ref(false);

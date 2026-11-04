@@ -38,6 +38,9 @@ type fakeDownloader struct {
 	addErr         error
 	// statusBlock 不为空时 GetClientStatus 等它关掉才回（测请求结束时不再等）
 	statusBlock chan struct{}
+	// paths、pathsErr 是 GetClientPaths 回的（默认保存路径）
+	paths    []string
+	pathsErr error
 }
 
 func (f *fakeDownloader) Authenticate() error { return nil }
@@ -136,7 +139,7 @@ func (f *fakeDownloader) GetSpeedLimit() (downloader.SpeedLimit, error) {
 	return downloader.SpeedLimit{}, nil
 }
 func (f *fakeDownloader) SetSpeedLimit(_ downloader.SpeedLimit) error { return nil }
-func (f *fakeDownloader) GetClientPaths() ([]string, error)           { return nil, nil }
+func (f *fakeDownloader) GetClientPaths() ([]string, error)           { return f.paths, f.pathsErr }
 func (f *fakeDownloader) GetClientLabels() ([]string, error)          { return nil, nil }
 func (f *fakeDownloader) GetType() downloader.DownloaderType          { return f.dlType }
 func (f *fakeDownloader) GetName() string                             { return f.name }

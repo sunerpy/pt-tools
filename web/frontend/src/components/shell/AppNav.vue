@@ -145,7 +145,7 @@ watch(
     -->
     <div class="pt-nav__head">
       <div class="pt-nav__brand">
-        <router-link to="/userinfo" class="pt-nav__logo" aria-label="pt-tools 首页">
+        <router-link to="/home" class="pt-nav__logo" aria-label="pt-tools 首页">
           <PtLogo variant="plated" :size="28" />
         </router-link>
         <span class="pt-nav__brand-text">

@@ -30,6 +30,8 @@ import {
   tmdbPageURL,
   wordEffect,
   wordKindLabel,
+  failKindFrom,
+  historyStatusFrom,
 } from "./media";
 
 describe("媒体识别的显示工具", () => {
@@ -286,5 +288,23 @@ describe("原盘的说明", () => {
   it("蓝光与 DVD 写成中文，带上文件数", () => {
     expect(discLabel({ kind: "BDMV", files: 5 })).toBe("蓝光原盘 · 5 个文件");
     expect(discLabel({ kind: "VIDEO_TS", files: 12 })).toBe("DVD 原盘 · 12 个文件");
+  });
+});
+
+describe("地址里带的整理历史筛选", () => {
+  it("状态：认得的照用，不认得的、空的当全部", () => {
+    expect(historyStatusFrom("failed")).toBe("failed");
+    expect(historyStatusFrom("skipped")).toBe("skipped");
+    expect(historyStatusFrom("bogus")).toBe("");
+    expect(historyStatusFrom("")).toBe("");
+    expect(historyStatusFrom(undefined)).toBe("");
+    expect(historyStatusFrom(["failed"])).toBe("");
+  });
+
+  it("分类：认得的照用，不认得的当没有", () => {
+    expect(failKindFrom("recognize")).toBe("recognize");
+    expect(failKindFrom("exists")).toBe("exists");
+    expect(failKindFrom("nope")).toBe("");
+    expect(failKindFrom(null)).toBe("");
   });
 });
