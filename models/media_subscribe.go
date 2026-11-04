@@ -347,9 +347,12 @@ type MediaSubscribeSetting struct {
 	TodayTime     string `gorm:"size:5;not null;default:''" json:"today_time"`
 	TodayChannels string `gorm:"type:text;not null;default:''" json:"-"`
 	// SubdirEnabled 为真时订阅推送的种子放进按 SubdirTemplate（空的按 {title} ({year})）起名的一级子目录（见 subscribe.subdirName）
-	SubdirEnabled  bool      `gorm:"not null;default:false" json:"subdir_enabled"`
-	SubdirTemplate string    `gorm:"size:255;not null;default:''" json:"subdir_template"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	SubdirEnabled  bool   `gorm:"not null;default:false" json:"subdir_enabled"`
+	SubdirTemplate string `gorm:"size:255;not null;default:''" json:"subdir_template"`
+	// AIReviewEnabled 为真时推送订阅的候选以前让 AI 助手的模型复核；AIReviewScope 是 name（空串也是，只复核按名字对上的）或 all
+	AIReviewEnabled bool      `gorm:"column:ai_review_enabled;not null;default:false" json:"ai_review_enabled"`
+	AIReviewScope   string    `gorm:"column:ai_review_scope;size:8;not null;default:''" json:"ai_review_scope"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func (MediaSubscribeSetting) TableName() string { return "media_subscribe_settings" }

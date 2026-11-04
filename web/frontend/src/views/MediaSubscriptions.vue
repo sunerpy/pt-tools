@@ -176,6 +176,8 @@ const sform = ref<SubscribeSettings>({
   today_channels: [],
   subdir_enabled: false,
   subdir_template: "{title} ({year})",
+  ai_review_enabled: false,
+  ai_review_scope: "name",
 });
 const settingsFailed = ref(false);
 const savingSettings = ref(false);
@@ -829,6 +831,27 @@ onBeforeUnmount(() => clearInterval(autoTimer));
                 {title}（标题）、{original_title}（原名）、{year}（年份，剧集是首播年份）、{season}（季）、{tmdb_id}；名字里不能用的字符会换掉，空着是
                 {title} ({year})
               </div>
+            </el-form-item>
+            <!-- 媒体中心 M9b：推送前让 AI 助手的模型复核候选是不是要的条目 -->
+            <el-form-item label="下载前让 AI 复核">
+              <div class="ms-switch">
+                <el-switch v-model="sform.ai_review_enabled" data-testid="ms-ai-review" />
+                <span
+                  >推送订阅找到的种子以前，问 AI
+                  助手的模型是不是这部片（剧集还要是这一季），说不是的不推</span
+                >
+              </div>
+              <div class="field-tip">
+                要先在<router-link class="ms-link" to="/assistant/settings">AI 助手设置</router-link
+                >里配好并启用。每个种子要等模型回答，会用掉 token；每次搜索最多问 10 个，同一个种子
+                24 小时内不重复问。模型出错时照常推送，写进运行记录
+              </div>
+            </el-form-item>
+            <el-form-item v-if="sform.ai_review_enabled" label="复核哪些">
+              <el-select v-model="sform.ai_review_scope" data-testid="ms-ai-review-scope">
+                <el-option value="name" label="只复核按名字对上的（按 IMDb 编号对上的不问）" />
+                <el-option value="all" label="全部" />
+              </el-select>
             </el-form-item>
             <el-button
               type="primary"

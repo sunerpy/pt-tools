@@ -29,13 +29,13 @@ import (
 
 // PushTorrentRequest 推送种子请求参数
 type PushTorrentRequest struct {
-	SiteID       string // 站点ID (如 hdsky, mteam)
-	TorrentID    string // 种子ID
-	TorrentData  []byte // 种子文件数据
-	Title        string // 种子标题
-	Category     string // 分类
-	Tags         string // 标签
-	SavePath     string // 保存路径（可选）
+	SiteID      string // 站点ID (如 hdsky, mteam)
+	TorrentID   string // 种子ID
+	TorrentData []byte // 种子文件数据
+	Title       string // 种子标题
+	Category    string // 分类
+	Tags        string // 标签
+	SavePath    string // 保存路径（可选）
 	// ForceSavePath 要下载器照 SavePath 放（qBittorrent 另外传 autoTMM=false）：订阅与按条目推送「按条目建子目录」时用
 	ForceSavePath bool
 	DownloaderID  uint // 下载器ID

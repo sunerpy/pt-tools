@@ -4263,6 +4263,10 @@ export interface SubscribeSettings {
   subdir_enabled: boolean;
   /** 子目录名：{title}、{original_title}、{year}、{season}、{tmdb_id}；空着保存时是 {title} ({year}) */
   subdir_template: string;
+  /** 下载前让 AI 复核：推送订阅的候选以前问 AI 助手的模型是不是要的条目，说不是的不推 */
+  ai_review_enabled: boolean;
+  /** name 只复核按名字对上的（按 IMDb 编号对上的不问），all 全部 */
+  ai_review_scope: "name" | "all";
 }
 
 export interface QualityProfile {

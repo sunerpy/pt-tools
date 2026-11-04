@@ -272,6 +272,7 @@ var webCmd = &cobra.Command{
 		assistantSvc := newAssistantService(runtimeCtx, store, srv)
 		srv.SetAssistantService(assistantSvc)
 		wireAttendanceAI(mgr, store, assistantSvc)
+		wireSubscribeReview(subscriber, assistantSvc)
 		wireAssistantChatOps(assistantSvc, bs)
 		wireQATestHooks(srv, bs)
 		if cfg, _ := store.Load(); cfg != nil {

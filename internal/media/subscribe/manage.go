@@ -42,6 +42,10 @@ type Settings struct {
 	// 起名的一级子目录（见 subdir.go）；SubdirTemplate 空着保存时按 DefaultSubdirTemplate
 	SubdirEnabled  bool   `json:"subdir_enabled"`
 	SubdirTemplate string `json:"subdir_template"`
+	// AIReviewEnabled 为真时推送一个候选以前让 AI 助手的模型复核是不是要的条目（见 review.go）；AIReviewScope 是
+	// ReviewByName（只复核按名字对上的，默认）或 ReviewAll
+	AIReviewEnabled bool   `json:"ai_review_enabled"`
+	AIReviewScope   string `json:"ai_review_scope"`
 }
 
 func decodeIDs(raw string) []uint {
@@ -80,6 +84,10 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		NotifyChannels: orEmpty(decodeIDs(row.NotifyChannels)), UpgradeOld: row.UpgradeOld,
 		TodayEnabled: row.TodayEnabled, TodayTime: row.TodayTime, TodayChannels: orEmpty(decodeIDs(row.TodayChannels)),
 		SubdirEnabled: row.SubdirEnabled, SubdirTemplate: row.SubdirTemplate,
+		AIReviewEnabled: row.AIReviewEnabled, AIReviewScope: row.AIReviewScope,
+	}
+	if out.AIReviewScope == "" {
+		out.AIReviewScope = ReviewByName
 	}
 	if out.SubdirTemplate == "" {
 		out.SubdirTemplate = DefaultSubdirTemplate
@@ -132,18 +140,27 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 	if err != nil {
 		return Settings{}, err
 	}
+	switch in.AIReviewScope {
+	case "":
+		in.AIReviewScope = ReviewByName
+	case ReviewByName, ReviewAll:
+	default:
+		return Settings{}, fmt.Errorf("%w: AI 复核的范围要选只复核按名字对上的或全部", ErrInvalid)
+	}
 	row := models.MediaSubscribeSetting{
 		ID: 1, Enabled: in.Enabled, SearchIntervalHours: in.SearchIntervalHours, SearchSkipSites: encodeList(sites),
 		DefaultProfileID: in.DefaultProfileID, DefaultDownloaderID: in.DefaultDownloaderID,
 		NotifyChannels: encodeIDs(in.NotifyChannels), UpgradeOld: in.UpgradeOld,
 		TodayEnabled: in.TodayEnabled, TodayTime: fmt.Sprintf("%02d:%02d", h, m), TodayChannels: encodeIDs(in.TodayChannels),
-		SubdirEnabled: in.SubdirEnabled, SubdirTemplate: tpl, UpdatedAt: s.cfg.Now(),
+		SubdirEnabled: in.SubdirEnabled, SubdirTemplate: tpl,
+		AIReviewEnabled: in.AIReviewEnabled, AIReviewScope: in.AIReviewScope, UpdatedAt: s.cfg.Now(),
 	}
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"enabled", "search_interval_hours", "search_skip_sites", "default_profile_id", "default_downloader_id", "notify_channels", "upgrade_old",
-			"today_enabled", "today_time", "today_channels", "subdir_enabled", "subdir_template", "updated_at",
+			"today_enabled", "today_time", "today_channels", "subdir_enabled", "subdir_template", "ai_review_enabled", "ai_review_scope",
+			"updated_at",
 		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存订阅设置失败: %w", err)

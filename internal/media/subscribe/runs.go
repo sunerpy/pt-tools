@@ -63,6 +63,10 @@ type runLog struct {
 	siteFetchFails map[string]int
 	// unfinished 不为空时这一轮没推完就停了（时间用完了、推满了一轮的上限），是原因
 	unfinished string
+	// reviews 是这一轮问了几次 AI 复核；reviewFull 是问满了；reviewDown 不为空时这一轮复核出过错（后面的候选不再复核），是原因
+	reviews    int
+	reviewFull bool
+	reviewDown string
 }
 
 // fetched 记下一次在 site 下载种子文件的结果（调用方持有 rl.mu，见 markRun）。

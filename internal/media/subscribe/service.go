@@ -151,6 +151,10 @@ type Service struct {
 	// today 记下今日更新今天处理过没有
 	todayMu sync.Mutex
 	today   todayState
+	// reviewer 是推送前的 AI 复核（见 review.go）；reviews 记下每个订阅的每个种子复核的结论
+	reviewMu sync.Mutex
+	reviewer Reviewer
+	reviews  map[reviewKey]reviewEntry
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc

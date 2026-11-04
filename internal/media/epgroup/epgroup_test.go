@@ -117,8 +117,11 @@ func TestConvertSeasons(t *testing.T) {
 func TestConvertSpecialsInsideGroup(t *testing.T) {
 	// 组里夹着特别篇：组里的位置要算上它
 	m := New(&tmdb.EpisodeGroup{Groups: []tmdb.EpisodeGroupPart{{Order: 1, Episodes: []tmdb.EpisodeGroupEpisode{
-		{Season: 1, Episode: 1, Order: 0}, {Season: 0, Episode: 1, Order: 1}, {Season: 1, Episode: 2, Order: 2},
-		{Season: 1, Episode: 0, Order: 3}, {Season: -1, Episode: 4, Order: 4},
+		{Season: 1, Episode: 1, Order: 0},
+		{Season: 0, Episode: 1, Order: 1},
+		{Season: 1, Episode: 2, Order: 2},
+		{Season: 1, Episode: 0, Order: 3},
+		{Season: -1, Episode: 4, Order: 4},
 	}}}})
 	assert.Equal(t, 1, m.Parts())
 	refs, ok := m.Convert(Coord{Season: 1, Episode: 2, EpisodeEnd: 3})

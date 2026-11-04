@@ -415,16 +415,20 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 			if len(vers) > 0 {
 				return "库里已经有了"
 			}
-			return s.pushOne(ctx, sub, ok[0], set, nil)
+			return s.pushReviewed(ctx, sub, ok, set, nil)
 		}
 		if downloading {
 			return "洗版：上一个版本还在下载"
 		}
 		// 现在的版本（库里的与订阅下载的）按当前档案重算：失败的下载不算，档案改过也能比
-		if base, has := s.baseline(ctx, profile, linked, vers); has && ok[0].v.Score <= base {
+		base, has := s.baseline(ctx, profile, linked, vers)
+		if has && ok[0].v.Score <= base {
 			return "洗版：没有比现在更好的版本"
 		}
-		return s.pushOne(ctx, sub, ok[0], set, nil)
+		if has {
+			ok = slices.DeleteFunc(ok, func(o scored) bool { return o.v.Score <= base })
+		}
+		return s.pushReviewed(ctx, sub, ok, set, nil)
 	}
 	msg := s.pickTV(ctx, sub, profile, ok, set, lg)
 	// 推送了的话按新的种子重建台账（锁住的版本也可能刚写上）：详情与进度马上看得到这几集在下载
@@ -470,10 +474,11 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		if err != nil {
 			return err.Error()
 		}
-		if len(packs) == 0 || packs[0].v.Score <= s.episodeFloor(ctx, profile, vers, lg.required) {
+		floor := s.episodeFloor(ctx, profile, vers, lg.required)
+		if len(packs) == 0 || packs[0].v.Score <= floor {
 			return "洗版：没有比现在更好的整季包"
 		}
-		return s.pushOne(ctx, sub, packs[0], set, nil)
+		return s.pushReviewed(ctx, sub, slices.DeleteFunc(packs, func(o scored) bool { return o.v.Score <= floor }), set, nil)
 	}
 	if lg.listErr != "" {
 		step(ctx, stepWait, "这一轮不推缺的集（免得重复下载正在下载的集）：%s", lg.listErr)
@@ -578,15 +583,30 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		step(ctx, stepLock, "%s：版本锁改成了 %s，不推这个", o.c.Item.Title, lockText(g, r))
 		return false
 	}
-	if wantPack(packs, eps) && allowedNow(packs[0]) {
-		msg := s.pushOne(ctx, sub, packs[0], set, missing)
-		if strings.HasPrefix(msg, "下载了") {
-			pushed()
+	// AI 复核说不是的候选跳过，接着看下一个（整季包都不是时一集一集补）；问满了这一轮就停
+	reviewRejected := 0
+	if wantPack(packs, eps) {
+		for _, p := range packs {
+			if !allowedNow(p) {
+				break
+			}
+			switch s.review(ctx, sub, p, set) {
+			case reviewReject:
+				reviewRejected++
+				continue
+			case reviewStop:
+				return fmt.Sprintf("缺 %d 集，%s", len(lg.missing), reviewStopMsg(reviewRejected))
+			}
+			msg := s.pushOne(ctx, sub, p, set, missing)
+			if strings.HasPrefix(msg, "下载了") {
+				pushed()
+			}
+			return msg
 		}
-		return msg
 	}
 	var msgs []string
 	down := map[string]bool{}
+	stopped := false
 	for _, o := range eps {
 		if len(missing) == 0 {
 			break
@@ -612,6 +632,14 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 			}
 			continue
 		}
+		if r := s.review(ctx, sub, o, set); r != reviewPass {
+			if r == reviewStop {
+				stopped = true
+				break
+			}
+			reviewRejected++
+			continue
+		}
 		msg := s.pushOne(ctx, sub, o, set, missing)
 		msgs = append(msgs, msg)
 		if strings.HasPrefix(msg, "下载了") {
@@ -626,7 +654,15 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 			}
 		}
 	}
-	if len(msgs) == 0 {
+	switch {
+	case len(msgs) > 0 && stopped:
+		msgs = append(msgs, fmt.Sprintf("这一轮 AI 复核问满了 %d 个，剩下的下次再看", maxReviewsPerRun))
+	case len(msgs) > 0:
+	case stopped:
+		return fmt.Sprintf("缺 %d 集，%s", len(lg.missing), reviewStopMsg(reviewRejected))
+	case reviewRejected > 0:
+		return fmt.Sprintf("缺 %d 集，找到的 %d 个 AI 复核都说不是", len(lg.missing), reviewRejected)
+	default:
 		return fmt.Sprintf("缺 %d 集，没有找到这些集的资源", len(lg.missing))
 	}
 	return strings.Join(msgs, "；")

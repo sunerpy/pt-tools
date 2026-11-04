@@ -97,6 +97,8 @@ type Candidate struct {
 	SiteHR bool
 	// SeenAt 是取得这条数据的时间（RSS 是取详情的时间，搜索是发起搜索的时间）
 	SeenAt time.Time
+	// Chosen 是用户在一键追剧里自己选的种子：推送前不让 AI 复核
+	Chosen bool
 }
 
 // 候选种子的来源。

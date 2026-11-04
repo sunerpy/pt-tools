@@ -194,13 +194,18 @@ func (s *Server) configResources() []*configResource {
 		},
 		{
 			Name: "subscribe", Title: "订阅设置", Kind: configObject, Path: "/api/media/subscribe/settings", SetMethod: http.MethodPut,
-			Desc:   "电影、剧集订阅的开关、搜索间隔、跳过的站点、默认的质量规则与下载器、通知通道、洗版时旧文件怎么办、下载时按条目建子目录。",
+			Desc:   "电影、剧集订阅的开关、搜索间隔、跳过的站点、默认的质量规则与下载器、通知通道、洗版时旧文件怎么办、下载时按条目建子目录、下载前让 AI 复核。",
 			Fields: jsonFields[subscribe.Settings](), Ops: []string{configOpSet},
 			Hints: map[string]string{
-				"subdir_enabled":  "打开以后订阅推送的种子放进保存路径（没填时是下载器的默认保存路径）下的一级子目录",
-				"subdir_template": "子目录名，可以用 {title}、{original_title}、{year}、{season}、{tmdb_id}；空着是 {title} ({year})",
+				"subdir_enabled":    "打开以后订阅推送的种子放进保存路径（没填时是下载器的默认保存路径）下的一级子目录",
+				"subdir_template":   "子目录名，可以用 {title}、{original_title}、{year}、{season}、{tmdb_id}；空着是 {title} ({year})",
+				"ai_review_enabled": "打开以后推送订阅的候选以前问 AI 助手的模型是不是要的条目，说不是的不推；要先在 AI 助手设置里启用",
+				"ai_review_scope":   "name（只复核按名字对上的，按 IMDb 编号对上的不问）或 all（全部）",
 			},
-			Impact: []string{"打开按条目建子目录以后，订阅没填保存路径的种子放在下载器的默认保存路径下：自动整理限了「保存路径」时要包含它"},
+			Impact: []string{
+				"打开按条目建子目录以后，订阅没填保存路径的种子放在下载器的默认保存路径下：自动整理限了「保存路径」时要包含它",
+				"打开 AI 复核以后，每个要推送的候选都要等模型回答（每次运行最多问 10 个），会用掉 AI 助手的 token",
+			},
 		},
 		{
 			Name: "downloaders", Title: "下载器", Kind: configList, Path: "/api/downloaders", ItemPath: "/api/downloaders/{id}",

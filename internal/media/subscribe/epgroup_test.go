@@ -87,7 +87,9 @@ func TestRegroup(t *testing.T) {
 		{"跨季的范围只留这一季的", meta.Meta{Episode: 9, EpisodeEnd: 11}, meta.Meta{Season: 2, Episode: 1, EpisodeEnd: 2}, regrouped{}},
 		{"都在第 1 季：不是这个订阅的", meta.Meta{Episode: 5}, meta.Meta{Episode: 5}, regrouped{other: true}},
 		{
-			"剧集组里没有：照默认的季集", meta.Meta{Season: 2, Episode: 2}, meta.Meta{Season: 2, Episode: 2},
+			"剧集组里没有：照默认的季集",
+			meta.Meta{Season: 2, Episode: 2},
+			meta.Meta{Season: 2, Episode: 2},
 			regrouped{note: "剧集组「Absolute Order」里没有第 2 组第 2 集，按 TMDB 默认的季集算"},
 		},
 		{"一整组正好是这一季的全部集：还是整季", meta.Meta{Season: 1}, meta.Meta{Season: 2}, regrouped{}},

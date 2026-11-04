@@ -161,7 +161,7 @@ func (s *Service) fromTorrent(ctx context.Context, sub *models.MediaSubscription
 		return err.Error()
 	}
 	hr, _ := siteHR(item.SourceSite)
-	c := Candidate{Site: item.SourceSite, Item: item, Meta: m, From: fromSearch, SiteHR: hr, SeenAt: s.cfg.Now()}
+	c := Candidate{Site: item.SourceSite, Item: item, Meta: m, From: fromSearch, SiteHR: hr, SeenAt: s.cfg.Now(), Chosen: true}
 	failed := pushFailures(ctx)
 	s.mu.Lock()
 	msg := s.evaluate(ctx, sub, []Candidate{c}, set)
