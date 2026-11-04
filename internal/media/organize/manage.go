@@ -15,6 +15,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/media/csf"
 	"github.com/sunerpy/pt-tools/internal/media/metadata"
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/server"
@@ -38,6 +39,8 @@ type LibraryView struct {
 	ScrapeSources     metadata.Sources `json:"scrape_sources"`
 	EffectiveTemplate string           `json:"effective_template"`
 	Preview           string           `json:"preview"`
+	// HasCSFKey 说有没有保存 ChineseSubFinder 的 API Key（Key 只写不读）
+	HasCSFKey bool `json:"has_csf_key"`
 }
 
 // LibraryInput 是新建或修改媒体库的请求。
@@ -65,7 +68,14 @@ type LibraryInput struct {
 	// ScrapeActorZh 为真时演员名用中文译名；ScrapeFill 为真时每周补刮一次（都要开着刮削）
 	ScrapeActorZh bool `json:"scrape_actor_zh"`
 	ScrapeFill    bool `json:"scrape_fill"`
-	Enabled       bool `json:"enabled"`
+	// SiteSubtitles 为真时整理出新视频以后到站点上取字幕（种子里没有字幕、种子是从支持的站点推送的时）
+	SiteSubtitles bool `json:"site_subtitles"`
+	// CSFURL 是 ChineseSubFinder 的地址（空串是不用，同时清掉 Key）；CSFKey 是它的 API Key，不带（nil）或空串时保留原来的；
+	// CSFPath 是 ChineseSubFinder 里看到的这个库的目录（空串是和库目录一样）
+	CSFURL  string  `json:"csf_url"`
+	CSFKey  *string `json:"csf_key,omitempty"`
+	CSFPath string  `json:"csf_path"`
+	Enabled bool    `json:"enabled"`
 }
 
 // DefaultTemplate 是这种媒体库的默认模板。
@@ -89,6 +99,7 @@ func viewLibrary(l models.MediaLibrary) LibraryView {
 		ScrapeSources: metadata.ParseSources(l.ScrapeSources, l.ScrapeSource).ForKind(l.Kind),
 	}
 	v.Preview, _ = transfer.Check(v.EffectiveTemplate, l.Kind)
+	v.HasCSFKey = l.CSFKeyEncrypted != ""
 	return v
 }
 
@@ -173,13 +184,62 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 	if overwrite != OverwriteNever && overwrite != OverwriteLarger {
 		return models.MediaLibrary{}, fmt.Errorf("%w: 同名文件要选 larger（新文件更大时替换）或留空（不替换）", ErrInvalid)
 	}
+	csfURL, csfPath, err := cleanCSF(in.CSFURL, in.CSFPath)
+	if err != nil {
+		return models.MediaLibrary{}, err
+	}
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
 		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
 		ScrapeSource: source, ScrapeSources: sources,
 		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, ScrapeActorZh: in.ScrapeActorZh && in.Scrape, ScrapeFill: in.ScrapeFill && in.Scrape,
+		SiteSubtitles: in.SiteSubtitles, CSFURL: csfURL, CSFPath: csfPath,
 		Enabled: in.Enabled,
 	}, nil
+}
+
+// cleanCSF 检查 ChineseSubFinder 的地址（规整成以 / 结尾）与它那边的库目录（绝对路径：/… 或 Windows 的盘符、\\ 开头）。
+func cleanCSF(rawURL, dir string) (string, string, error) {
+	u := strings.TrimSpace(rawURL)
+	if u != "" {
+		var err error
+		if u, err = csf.NormalizeURL(u); err != nil {
+			return "", "", fmt.Errorf("%w: %w", ErrInvalid, err)
+		}
+		if len(u) > 512 {
+			return "", "", fmt.Errorf("%w: ChineseSubFinder 的地址太长", ErrInvalid)
+		}
+	}
+	dir = strings.TrimSpace(dir)
+	if dir != "" && (!isAbs(dir) || len(dir) > 1024 || !utf8.ValidString(dir)) {
+		return "", "", fmt.Errorf("%w: 「ChineseSubFinder 里的库目录」要填它那边的绝对路径", ErrInvalid)
+	}
+	return u, dir, nil
+}
+
+// libraryCSFKey 定下保存的 ChineseSubFinder 的 Key：没填地址时清掉；填了新 Key 时加密保存；都没有时沿用 old（新建时没有）。
+// 填了地址却没有 Key 时报错。返回要不要写 csf_key_encrypted 这一列。
+func (s *Service) libraryCSFKey(row *models.MediaLibrary, in LibraryInput, old string) (bool, error) {
+	if row.CSFURL == "" {
+		row.CSFKeyEncrypted = ""
+		return true, nil
+	}
+	key := ""
+	if in.CSFKey != nil {
+		key = strings.TrimSpace(*in.CSFKey)
+	}
+	if key != "" {
+		enc, err := s.cfg.Cipher.Encrypt(key)
+		if err != nil {
+			return false, fmt.Errorf("加密 API Key 失败: %w", err)
+		}
+		row.CSFKeyEncrypted = enc
+		return true, nil
+	}
+	if old == "" {
+		return false, fmt.Errorf("%w: 填了 ChineseSubFinder 的地址就要填它的 API Key", ErrInvalid)
+	}
+	return false, nil
 }
 
 // Libraries 列出媒体库。
@@ -218,6 +278,19 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 			return LibraryView{}, fmt.Errorf("%w: 媒体库的目录不能是监控目录 %s，也不能在它里面或包含它", ErrInvalid, d.Path)
 		}
 	}
+	var old models.MediaLibrary
+	if id > 0 {
+		if err := db.Where("id = ?", id).Limit(1).Find(&old).Error; err != nil {
+			return LibraryView{}, fmt.Errorf("读取媒体库失败: %w", err)
+		}
+		if old.ID == 0 {
+			return LibraryView{}, ErrNotFound
+		}
+	}
+	writeKey, keyErr := s.libraryCSFKey(&row, in, old.CSFKeyEncrypted)
+	if keyErr != nil {
+		return LibraryView{}, keyErr
+	}
 	if id == 0 {
 		var n int64
 		if err := db.Model(&models.MediaLibrary{}).Count(&n).Error; err != nil {
@@ -234,11 +307,15 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 		}
 		return viewLibrary(row), nil
 	}
-	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(
+	cols := []string{
 		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang", "scrape_source",
 		"scrape_sources",
-		"classify_dir", "overwrite_mode", "scrape_actor_zh", "scrape_fill", "enabled", "updated_at",
-	).Updates(&row)
+		"classify_dir", "overwrite_mode", "scrape_actor_zh", "scrape_fill", "site_subtitles", "csf_url", "csf_path", "enabled", "updated_at",
+	}
+	if writeKey {
+		cols = append(cols, "csf_key_encrypted")
+	}
+	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(cols).Updates(&row)
 	if res.Error != nil {
 		if isUnique(res.Error) {
 			return LibraryView{}, fmt.Errorf("%w: 已经有叫「%s」的媒体库", ErrInvalid, row.Name)

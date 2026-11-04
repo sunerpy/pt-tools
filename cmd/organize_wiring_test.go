@@ -17,6 +17,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -47,10 +48,10 @@ func TestNewOrganizeService(t *testing.T) {
 	store := core.NewConfigStore(global.GlobalDB)
 	mgr := scheduler.NewManager()
 	t.Cleanup(mgr.StopAll)
-	assert.Nil(t, newOrganizeService(store, mgr, nil, nil))
-	assert.Nil(t, newOrganizeService(nil, mgr, newMediaService(store), nil))
+	assert.Nil(t, newOrganizeService(store, mgr, nil, nil, nil))
+	assert.Nil(t, newOrganizeService(nil, mgr, newMediaService(store), nil, nil))
 
-	svc := newOrganizeService(store, mgr, newMediaService(store), nil)
+	svc := newOrganizeService(store, mgr, newMediaService(store), nil, nil)
 	require.NotNil(t, svc)
 	t.Cleanup(svc.Stop)
 	tok := "embykey"
@@ -61,6 +62,19 @@ func TestNewOrganizeService(t *testing.T) {
 	assert.NotEmpty(t, row.TokenEncrypted)
 	assert.NotContains(t, row.TokenEncrypted, tok)
 	assert.Empty(t, qaTMDBImageURL(), "正式构建里 TMDB 图片地址不能改")
+}
+
+// 下载站点字幕：用 UserInfoService 里注册的站点；没有注册、驱动不支持字幕（M-Team）时是 nil。
+func TestOrganizeSubtitleSites(t *testing.T) {
+	assert.Nil(t, organizeSubtitleSites(nil))
+	uis := v2.NewUserInfoService(v2.UserInfoServiceConfig{Logger: zap.NewNop()})
+	uis.RegisterSite(v2.NewBaseSite(v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: "https://nexus.example.test", Cookie: "c"}), v2.BaseSiteConfig{ID: "nexus"}))
+	uis.RegisterSite(v2.NewBaseSite(v2.NewMTorrentDriver(v2.MTorrentDriverConfig{BaseURL: "https://api.example.test", APIKey: "k"}), v2.BaseSiteConfig{ID: "mteam"}))
+	get := organizeSubtitleSites(uis)
+	require.NotNil(t, get)
+	assert.NotNil(t, get("nexus"))
+	assert.Nil(t, get("mteam"))
+	assert.Nil(t, get("missing"))
 }
 
 func TestOrganizeDownloaders(t *testing.T) {

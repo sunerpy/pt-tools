@@ -74,6 +74,18 @@ func TestCheckGeneratedSecretKey_RejectsWhenDataIsEncrypted(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "新生成的密钥被删除，恢复原文件后下次启动不会误用它")
 }
 
+// 库里只有媒体库保存的 ChineseSubFinder API Key 是密文时同样拒绝启动：它也是用原密钥加密的。
+func TestCheckGeneratedSecretKey_CSFKeyCounts(t *testing.T) {
+	keyTestHome(t, nil)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaLibrary{}))
+	require.NoError(t, db.Create(&models.MediaLibrary{
+		Name: "电影", Kind: models.MediaKindMovie, Path: "/media/movies", CSFURL: "http://csf.lan/", CSFKeyEncrypted: "b2xkLWNpcGhlcg==",
+	}).Error)
+	require.ErrorIs(t, checkGeneratedSecretKey(db), ErrSecretKeyRegenerated)
+}
+
 // 用户确认原密钥已丢失时放行，保留新密钥。
 func TestCheckGeneratedSecretKey_AcceptNewKeyOptIn(t *testing.T) {
 	home := keyTestHome(t, nil)

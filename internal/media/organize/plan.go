@@ -196,6 +196,10 @@ type Plan struct {
 	contentSrc string
 	meta       meta.Meta
 	siteName   string
+	// siteTorrentID 是站点上取详情用的种子编号（pt-tools 推送的种子才有：RSS 的是 DetailID，TorrentID 是 info hash）；
+	// torrentSubs 是种子里的字幕文件数。两个都是下载站点字幕用的（见 siteSubtitles）
+	siteTorrentID string
+	torrentSubs   int
 	// doubanID 是站点给的豆瓣编号（pt-tools 推送的种子才有），刮削补充豆瓣的内容时电影直接用它
 	doubanID string
 	// siteTitle 是站点上的标题（pt-tools 推送的种子才有）：二级分类的关键字也看它
@@ -387,7 +391,7 @@ func (s *Service) torrentRecord(ctx context.Context, hash string) models.Torrent
 	var a models.TorrentInfoArchive
 	_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", hash).Order("id DESC").Limit(1).Find(&a).Error
 	return models.TorrentInfo{
-		SiteName: a.SiteName, Title: a.Title, IMDbID: a.IMDbID, DoubanID: a.DoubanID,
+		SiteName: a.SiteName, TorrentID: a.TorrentID, DetailID: a.DetailID, Title: a.Title, IMDbID: a.IMDbID, DoubanID: a.DoubanID,
 		MediaType: a.MediaType, TMDBID: a.TMDBID, MediaSeason: a.MediaSeason,
 	}
 }
@@ -601,6 +605,7 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 				p.Name, p.nameHit.DownloaderName, p.nameHit.Name))
 		}
 	}
+	p.torrentSubs = len(sel.Subtitles)
 	s.planItems(ctx, p, sel.Subtitles)
 	return p, nil
 }
@@ -654,6 +659,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 		}
 	}
 	p.siteName, p.doubanID, p.siteTitle = info.SiteName, info.DoubanID, info.Title
+	p.siteTorrentID = firstNonEmpty(info.DetailID, info.TorrentID)
 	source := sourceManual
 	if req.TMDBID == 0 {
 		// 之前整理过（比如手动指定过条目）：沿用那个条目，库里的文件名与重新整理时一致

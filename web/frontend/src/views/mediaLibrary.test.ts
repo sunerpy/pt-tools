@@ -21,6 +21,7 @@ const api = vi.hoisted(() => ({
   updateLibrary: vi.fn(),
   deleteLibrary: vi.fn(),
   checkLibrary: vi.fn(),
+  testCSF: vi.fn(),
   templatePreview: vi.fn(),
   pathMaps: vi.fn(),
   createPathMap: vi.fn(),
@@ -171,7 +172,9 @@ const server = {
   updated_at: "",
 };
 
-async function mountPage(opts: { libsFail?: boolean; settingsFail?: boolean } = {}) {
+async function mountPage(
+  opts: { libsFail?: boolean; settingsFail?: boolean; library?: Record<string, unknown> } = {},
+) {
   if (opts.settingsFail) api.settings.mockRejectedValue(new Error("读取整理设置失败"));
   else api.settings.mockResolvedValue(settings);
   media.settings.mockResolvedValue({
@@ -180,7 +183,7 @@ async function mountPage(opts: { libsFail?: boolean; settingsFail?: boolean } = 
     has_omdb_key: false,
   });
   if (opts.libsFail) api.libraries.mockRejectedValue(new Error("读取媒体库失败"));
-  else api.libraries.mockResolvedValue([library]);
+  else api.libraries.mockResolvedValue([opts.library ?? library]);
   api.pathMaps.mockResolvedValue([
     {
       id: 7,
@@ -328,9 +331,15 @@ describe("媒体库", () => {
         overwrite_mode: "",
         scrape_actor_zh: false,
         scrape_fill: false,
+        site_subtitles: false,
+        csf_url: "",
+        csf_path: "",
         enabled: true,
       },
     ]);
+    expect(Object.keys(api.updateLibrary.mock.calls[0]![1]), "没填 Key 时不带 Key").not.toContain(
+      "csf_key",
+    );
 
     q("ml-lib-enabled-3")!.click();
     await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(2));
@@ -341,6 +350,85 @@ describe("媒体库", () => {
     api.deleteLibrary.mockResolvedValue({ ok: true });
     q("ml-lib-del-3")!.click();
     await vi.waitFor(() => expect(api.deleteLibrary).toHaveBeenCalledWith(3));
+  });
+
+  it("媒体库：站点字幕与 ChineseSubFinder 跟着保存，Key 只写不读；测试没填 Key 时用保存的", async () => {
+    await mountPage({
+      library: {
+        ...library,
+        site_subtitles: false,
+        csf_url: "http://csf.lan/",
+        csf_path: "",
+        has_csf_key: true,
+      },
+    });
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-site-subs")).not.toBeNull());
+    expect(inputOf("ml-lib-csf-url").value).toBe("http://csf.lan/");
+    expect(inputOf("ml-lib-csf-key").value, "Key 不回显").toBe("");
+    expect(inputOf("ml-lib-csf-key").getAttribute("placeholder")).toContain("已设置");
+
+    // 测试：没填 Key 时带上媒体库编号，用保存的
+    api.testCSF.mockResolvedValue({ ok: true });
+    q("ml-lib-csf-test")!.click();
+    await vi.waitFor(() => expect(api.testCSF).toHaveBeenCalledTimes(1));
+    expect(api.testCSF).toHaveBeenCalledWith({ id: 3, url: "http://csf.lan/", key: undefined });
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("ChineseSubFinder 连接正常"));
+    api.testCSF.mockRejectedValue(new Error("ChineseSubFinder 的 API Key 不对"));
+    fill("ml-lib-csf-key", " new-key ");
+    q("ml-lib-csf-test")!.click();
+    await vi.waitFor(() => expect(api.testCSF).toHaveBeenCalledTimes(2));
+    expect(api.testCSF.mock.calls[1]![0]).toEqual({
+      id: 3,
+      url: "http://csf.lan/",
+      key: "new-key",
+    });
+    await vi.waitFor(() =>
+      expect(ui.error).toHaveBeenCalledWith("ChineseSubFinder 的 API Key 不对"),
+    );
+
+    q("ml-lib-site-subs")!.querySelector("input")!.click();
+    fill("ml-lib-csf-url", " http://csf2.lan:19035 ");
+    fill("ml-lib-csf-path", " /csf/movies ");
+    await flush();
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
+      site_subtitles: true,
+      csf_url: "http://csf2.lan:19035",
+      csf_path: "/csf/movies",
+      csf_key: "new-key",
+    });
+  });
+
+  it("媒体库：新建时填了 ChineseSubFinder 的地址却没填 Key 不保存；地址没填时测试不发请求", async () => {
+    await mountPage();
+    // 媒体库那张卡右上角的「添加」
+    [...document.querySelectorAll<HTMLElement>(".pt-panel__action")]
+      .find((b) => b.textContent?.includes("添加"))!
+      .click();
+    await vi.waitFor(() => expect(q("ml-lib-csf-url")).not.toBeNull());
+    q("ml-lib-csf-test")!.click();
+    await flush();
+    expect(api.testCSF).not.toHaveBeenCalled();
+    expect(ui.warning).toHaveBeenCalledWith("先填 ChineseSubFinder 的地址");
+    fill("ml-lib-name", "剧集");
+    fill("ml-lib-path", "/media/tv");
+    fill("ml-lib-csf-url", "http://csf.lan/");
+    await flush();
+    q("ml-lib-save")!.click();
+    await flush();
+    expect(api.createLibrary).not.toHaveBeenCalled();
+    expect(ui.warning).toHaveBeenCalledWith("填了 ChineseSubFinder 的地址就要填它的 API Key");
+    fill("ml-lib-csf-key", "k");
+    api.createLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.createLibrary).toHaveBeenCalledTimes(1));
+    expect(api.createLibrary.mock.calls[0]![0]).toMatchObject({
+      csf_url: "http://csf.lan/",
+      csf_key: "k",
+    });
   });
 
   it("媒体库：演员名用中文、每周补刮跟着保存，关着刮削时不能选；导入已有文件打开导入弹窗", async () => {

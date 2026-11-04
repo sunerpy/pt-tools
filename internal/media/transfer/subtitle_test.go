@@ -43,6 +43,24 @@ func TestSubtitleTarget(t *testing.T) {
 	assert.Equal(t, "/lib/Movie (2023)/Movie (2023) - 1080p.12.srt", SubtitleTarget(v, "x.srt", 12))
 }
 
+func TestSubtitleTargetLang(t *testing.T) {
+	v := "/lib/Show/Season 1/Show - S01E01.mkv"
+	assert.Equal(t, "/lib/Show/Season 1/Show - S01E01.zh-TW.ass", SubtitleTargetLang(v, "zh-TW", ".ASS", 1))
+	assert.Equal(t, "/lib/Show/Season 1/Show - S01E01.zh-CN.3.srt", SubtitleTargetLang(v, "zh-CN", ".srt", 3))
+	assert.Equal(t, "/lib/Show/Season 1/Show - S01E01.srt", SubtitleTargetLang(v, "", ".srt", 1), "认不出语言时不加后缀")
+	assert.Equal(t, SubtitleTarget(v, "x.chs.srt", 2), SubtitleTargetLang(v, SubtitleLang("x.chs.srt"), ".srt", 2), "和 SubtitleTarget 一致")
+}
+
+func TestSubtitleLangRank(t *testing.T) {
+	order := []string{"zh-CN", "zh-TW", "zh", "en", "ja", "ko", ""}
+	for i := 1; i < len(order); i++ {
+		assert.Less(t, SubtitleLangRank(order[i-1]), SubtitleLangRank(order[i]), order[i])
+	}
+	assert.Equal(t, SubtitleLangRank(""), SubtitleLangRank("fr"), "不认得的排在最后")
+	assert.True(t, ChineseSubtitle("zh-CN") && ChineseSubtitle("zh-TW") && ChineseSubtitle("zh"))
+	assert.False(t, ChineseSubtitle("en") || ChineseSubtitle(""))
+}
+
 var epRe = regexp.MustCompile(`(?i)S(\d+)E(\d+)`)
 
 func epKey(f File) string {

@@ -292,6 +292,45 @@ NFO files and images come from TMDB by default. Data sources (数据来源) swit
 - Fanart.tv: needs a Fanart.tv key under media recognition. Movies are looked up by TMDB ID and shows by TVDB ID (shows without a TVDB ID on TMDB use TMDB's images). Without Fanart.tv chosen, the logo comes from TMDB first and from Fanart.tv when TMDB has none.
 - Lookups happen only for files that will be written: Douban and Bangumi aren't asked about NFO files that already exist and aren't overwritten. After changing the data sources, click Rescrape (重新刮削) in the organise history to update titles that are already organised.
 
+## Subtitles
+
+Subtitles inside a torrent go with their video (see [which files are organised](#which-files-are-organised)). When a torrent has none, pt-tools can fetch them from the site or hand the video to ChineseSubFinder; both are under Subtitles (字幕) in the library settings.
+
+### Site subtitles
+
+With Download subtitles from the site after organising (整理完到站点上下载字幕) ticked, pt-tools fetches subtitles from the torrent's detail page for each video newly placed in the library when:
+
+- the torrent has no subtitle files;
+- pt-tools pushed the torrent (from RSS, search, subscriptions, follow-show or the qB-compatible entrance), so it knows which torrent on which site it is;
+- the site runs NexusPHP: a torrent's subtitles are listed in the Subtitles (字幕) row of its detail page as `downloadsubs.php` links. When a site has changed its detail page and has no such links, the site is treated as having no subtitles. Sites on other platforms are not asked.
+
+What is fetched and where it goes:
+
+- When the list has Chinese subtitles (simplified, traditional or plain Chinese), only those are fetched; otherwise all are. The language comes from the language name, the flag image and the title on the list. At most 10 subtitles are downloaded per torrent.
+- When a torrent has several videos, subtitles are matched to videos by file name prefix or by season and episode. Subtitles whose title matches no video are not downloaded, and episodes organised earlier get none.
+- Zip archives are unpacked and only their subtitle files are kept (names that aren't UTF-8 are read as GBK; only the file name is used, not the folders inside the archive). RAR and 7z archives are not unpacked, and the organise history says so.
+- Files are named `<video name>.<language>.<extension>` like subtitles from the torrent, for example `Oppenheimer (2023) - 2160p BluRay HDR H.265.zh-CN.srt`. When there are several of one language, the second gets `.2`, the third `.3`. When a name is taken by another file, the next number is used; nothing is overwritten. A video gets at most 4.
+- Requests use the site's rate limit and retries, shared with the site's other requests; the site needs its cookie set in the site settings.
+
+Placed subtitles are recorded in the organise record, are counted in the N subtitles shown in the organise history, and are removed on [deletion](#organise-history) (checked by file ID; replaced files are kept). Problems such as an unreadable list, a failed download or an archive that won't unpack are written in the record's message and don't change the organise result. When a video is organised again, subtitles placed earlier that are still there aren't fetched again.
+
+### ChineseSubFinder
+
+[ChineseSubFinder](https://github.com/ChineseSubFinder/ChineseSubFinder) downloads Chinese subtitles automatically. With these settings filled in for a library, every newly organised video (except discs) is handed to it:
+
+| Setting                                                          | Notes                                                                                                                                         |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| ChineseSubFinder address (ChineseSubFinder 的地址)               | For example `http://192.168.1.10:19035/`; leave it empty to not use it (saving then also clears the API key)                                  |
+| API key                                                          | Turn on the API key in ChineseSubFinder's Lab (实验室) settings; it is write-only and shows as set (已设置) once saved                        |
+| Library folder in ChineseSubFinder (ChineseSubFinder 里的库目录) | This library's path as ChineseSubFinder sees it (often different when the two run in separate containers); leave it empty when it is the same |
+
+Test (测试) calls ChineseSubFinder once to check the address and API key without creating a job; without a new key it uses the saved one.
+
+- pt-tools calls ChineseSubFinder's `api/v1/add-job` endpoint with one job per video at priority 3 (ChineseSubFinder's own scans use 5). The video path is translated with the library folder in ChineseSubFinder.
+- Videos are handed over after scraping: shows need scraping on, because ChineseSubFinder reads each episode's NFO.
+- Failures (unreachable, wrong key, file not found on its side) are written in the record's message and don't change the organise result. When ChineseSubFinder can't be reached or the key is wrong, the rest of the batch isn't tried.
+- ChineseSubFinder downloads the subtitles and places them in the library itself; they aren't recorded by pt-tools and aren't removed when a record is deleted.
+
 ## Media servers
 
 After organising, pt-tools asks the media servers to scan the new folders. For servers with a synced index, the title details page shows whether the server has the title, with a link to play it there. Organising also works without a media server; the server then scans on its own schedule.
@@ -469,3 +508,5 @@ When the [delete dialog](media-detail.md#deleting-a-title) on title details dele
 **Subscriptions download again what's already in a library I organised myself**: subscriptions only go by organise records. Click Import existing files (导入已有文件) under Media library to record the movies and shows already in the library, see [importing an existing library](#importing-an-existing-library).
 
 **How do I organise a movie I downloaded by hand, and where do the links go**: see [organising a file or folder by hand](#organising-a-file-or-folder-by-hand).
+
+**Site subtitles are on but nothing was downloaded**: look at the record's message in the organise history. "站点上没有这个种子的字幕" means the site has none for this torrent (or has changed its detail page). With no message at all, the torrent most likely had its own subtitles, wasn't pushed by pt-tools, or comes from a site that doesn't run NexusPHP; see [site subtitles](#site-subtitles).

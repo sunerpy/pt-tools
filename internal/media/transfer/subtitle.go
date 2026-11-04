@@ -58,14 +58,35 @@ func SubtitleLang(name string) string {
 // SubtitleTarget 是字幕放进库里的路径：视频的目标路径去掉扩展名，加上语言后缀与字幕的扩展名。
 // n 大于 1 时在语言后面加序号（同一种语言有几份字幕时）。
 func SubtitleTarget(videoTarget, subName string, n int) string {
+	return SubtitleTargetLang(videoTarget, SubtitleLang(subName), path.Ext(subName), n)
+}
+
+// SubtitleTargetLang 同 SubtitleTarget，语言由调用方给（空串是不加语言后缀；站点字幕的文件名里没写语言时用站点列表上的），
+// ext 是字幕的扩展名（带点）。
+func SubtitleTargetLang(videoTarget, lang, ext string, n int) string {
 	base := strings.TrimSuffix(videoTarget, filepath.Ext(videoTarget))
-	if lang := SubtitleLang(subName); lang != "" {
+	if lang != "" {
 		base += "." + lang
 	}
 	if n > 1 {
 		base += "." + strconv.Itoa(n)
 	}
-	return base + strings.ToLower(path.Ext(subName))
+	return base + strings.ToLower(ext)
+}
+
+// SubtitleLangRank 是语言的先后（数小的在前）：简体 → 繁体 → 中文 → 英 → 日 → 韩，认不出的最后。
+func SubtitleLangRank(lang string) int {
+	for i, l := range subLangs {
+		if l.tag == lang {
+			return i
+		}
+	}
+	return len(subLangs)
+}
+
+// ChineseSubtitle 报告这种语言是不是中文（简体、繁体或没分简繁的中文）。
+func ChineseSubtitle(lang string) bool {
+	return lang == "zh-CN" || lang == "zh-TW" || lang == "zh"
 }
 
 // MatchSubtitles 把字幕分给视频：只有一个视频时全给它；否则先按文件名前缀（字幕名以视频名开头），

@@ -196,9 +196,16 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   overwrite_mode: "",
   scrape_actor_zh: false,
   scrape_fill: false,
+  site_subtitles: false,
+  csf_url: "",
+  csf_key: "",
+  csf_path: "",
   enabled: true,
 });
 const libForm = ref<MediaLibraryInput>(blankLibrary());
+/** 正在编辑的媒体库（看它保存过 ChineseSubFinder 的 Key 没有） */
+const editingLib = computed(() => libraries.value.find((l) => l.id === editingLibID.value) ?? null);
+const csfTesting = ref(false);
 const preview = ref({ text: "", error: "" });
 const checkItems = ref<MediaCheckItem[]>([]);
 const checking = ref(false);
@@ -228,6 +235,9 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     overwrite_mode: l.overwrite_mode ?? "",
     scrape_actor_zh: l.scrape_actor_zh ?? false,
     scrape_fill: l.scrape_fill ?? false,
+    site_subtitles: l.site_subtitles ?? false,
+    csf_url: l.csf_url ?? "",
+    csf_path: l.csf_path ?? "",
     enabled: l.enabled,
   };
 }
@@ -358,9 +368,25 @@ async function saveLibrary() {
     ElMessage.warning("刮削内容至少选一项；不想刮削就关掉刮削");
     return;
   }
+  const csfURL = f.csf_url.trim();
+  const csfKey = f.csf_key?.trim() ?? "";
+  if (csfURL && !csfKey && !editingLib.value?.has_csf_key) {
+    ElMessage.warning("填了 ChineseSubFinder 的地址就要填它的 API Key");
+    return;
+  }
   libSaving.value = true;
   try {
-    const body = { ...f, name: f.name.trim(), path: f.path.trim(), template: f.template.trim() };
+    const body: MediaLibraryInput = {
+      ...f,
+      name: f.name.trim(),
+      path: f.path.trim(),
+      template: f.template.trim(),
+      csf_url: csfURL,
+      csf_path: f.csf_path.trim(),
+    };
+    // Key 只在填了时带上：不带时保留保存的
+    delete body.csf_key;
+    if (csfKey) body.csf_key = csfKey;
     if (editingLibID.value) await organizeApi.updateLibrary(editingLibID.value, body);
     else await organizeApi.createLibrary(body);
     ElMessage.success("已保存媒体库");
@@ -370,6 +396,28 @@ async function saveLibrary() {
     ElMessage.error(errText(e, "保存失败"));
   } finally {
     libSaving.value = false;
+  }
+}
+
+/** 访问一次 ChineseSubFinder（不建任务）：没填 Key 时用这个库保存的 */
+async function testCSF() {
+  const url = libForm.value.csf_url.trim();
+  if (!url) {
+    ElMessage.warning("先填 ChineseSubFinder 的地址");
+    return;
+  }
+  csfTesting.value = true;
+  try {
+    await organizeApi.testCSF({
+      id: editingLibID.value ?? undefined,
+      url,
+      key: libForm.value.csf_key?.trim() || undefined,
+    });
+    ElMessage.success("ChineseSubFinder 连接正常");
+  } catch (e) {
+    ElMessage.error(errText(e, "连接失败"));
+  } finally {
+    csfTesting.value = false;
   }
 }
 
@@ -1902,6 +1950,52 @@ onMounted(refresh);
             50 部），自己放的、别的工具写的文件不换。
           </div>
         </el-form-item>
+        <div class="ml-dlg-sec">字幕</div>
+        <el-form-item label="站点字幕">
+          <el-checkbox v-model="libForm.site_subtitles" data-testid="ml-lib-site-subs"
+            >整理完到站点上下载字幕</el-checkbox
+          >
+          <div class="field-tip">
+            种子里没有字幕、种子是 pt-tools 从 NexusPHP
+            架构的站点推送的时，到种子详情页取站点上的字幕：有中文的只取中文的，几个视频时按文件名或季集对上；zip
+            解开只取字幕文件，rar 与 7z
+            不解。放成「视频名.语言.后缀」，记在整理记录里，删除时一起删；取不到的原因写在整理历史里。
+          </div>
+        </el-form-item>
+        <el-form-item label="ChineseSubFinder 的地址">
+          <div class="ml-inline ml-inline--grow">
+            <el-input
+              v-model="libForm.csf_url"
+              placeholder="http://192.168.1.10:19035/（不用就空着）"
+              data-testid="ml-lib-csf-url" />
+            <el-button :loading="csfTesting" data-testid="ml-lib-csf-test" @click="testCSF"
+              >测试</el-button
+            >
+          </div>
+          <div class="field-tip">
+            新整理出视频以后交给 ChineseSubFinder 下载字幕（原盘不交）。剧集要开着刮削：它读每一集的
+            NFO。交不上的原因写在整理历史里。
+          </div>
+        </el-form-item>
+        <div class="ml-row">
+          <el-form-item label="API Key">
+            <el-input
+              v-model="libForm.csf_key"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              :placeholder="editingLib?.has_csf_key ? '已设置；要更换时填写新的' : ''"
+              data-testid="ml-lib-csf-key" />
+            <div class="field-tip">在 ChineseSubFinder 的「实验室」设置里打开 API Key</div>
+          </el-form-item>
+          <el-form-item label="ChineseSubFinder 里的库目录">
+            <el-input
+              v-model="libForm.csf_path"
+              :placeholder="libForm.path || '/media/movies'"
+              data-testid="ml-lib-csf-path" />
+            <div class="field-tip">它那边看到的这个库的路径；和库目录一样时空着</div>
+          </el-form-item>
+        </div>
         <el-form-item label="启用">
           <el-switch v-model="libForm.enabled" data-testid="ml-lib-enabled" />
         </el-form-item>

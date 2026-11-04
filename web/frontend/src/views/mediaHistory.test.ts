@@ -165,6 +165,34 @@ describe("整理历史", () => {
     expect(q("mh-retry-1"), "整理成功的不能重试").toBeNull();
   });
 
+  it("手机上的卡片也写着字幕数与说明", async () => {
+    // useIsMobile 读的是 matchMedia("(max-width: 768px)")
+    const spy = vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes("max-width: 768px"),
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as MediaQueryList,
+    );
+    try {
+      await mountPage(false, [
+        row({ id: 7, subtitles: 2, message: "站点字幕：站点上没有这个种子的字幕" }),
+      ]);
+      expect(q("mh-table"), "手机上是卡片").toBeNull();
+      const text = document.querySelector(".mh-cards")?.textContent ?? "";
+      expect(text).toContain("2 个字幕");
+      expect(text).toContain("站点字幕：站点上没有这个种子的字幕");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("原盘的记录写明放进库的文件数", async () => {
     await mountPage(false, [
       row({

@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/media/csf"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
@@ -121,6 +122,7 @@ func TestOrganizeAPI_RequiresSessionAndService(t *testing.T) {
 		{http.MethodPut, "/api/media/libraries/1"},
 		{http.MethodDelete, "/api/media/libraries/1"},
 		{http.MethodPost, "/api/media/libraries/check"},
+		{http.MethodPost, "/api/media/libraries/csf-test"},
 		{http.MethodPost, "/api/media/libraries/template-preview"},
 		{http.MethodGet, "/api/media/path-maps"},
 		{http.MethodPost, "/api/media/path-maps"},
@@ -281,6 +283,48 @@ func TestOrganizeAPI_SettingsLibrariesMapsServers(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodDelete, "/api/media/servers/1", "").Code)
 	assert.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodDelete, "/api/media/path-maps/1", "").Code)
 	assert.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodDelete, "/api/media/libraries/"+strconv.Itoa(int(lib.ID)), "").Code)
+}
+
+// 媒体库的字幕设置：ChineseSubFinder 的 Key 只写不读；测试按钮按状态码分出 Key 不对与连不上。
+func TestOrganizeAPI_LibraryCSF(t *testing.T) {
+	e := newOrganizeServer(t)
+	csfSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer csf-secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"AccessToken Error"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":"job_id is empty"}`))
+	}))
+	t.Cleanup(csfSrv.Close)
+	w := serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+
+		`,"site_subtitles":true,"csf_url":"`+csfSrv.URL+`","csf_key":"csf-secret","csf_path":"/csf/movies","enabled":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "csf-secret", "Key 只写不读")
+	assert.Contains(t, w.Body.String(), `"has_csf_key":true`)
+	assert.Contains(t, w.Body.String(), `"site_subtitles":true`)
+	assert.Contains(t, w.Body.String(), `"csf_path":"/csf/movies"`)
+	var lib organize.LibraryView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &lib))
+	w = serveAuthed(e.mux, http.MethodGet, "/api/media/libraries", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "csf-secret")
+
+	id := strconv.FormatUint(uint64(lib.ID), 10)
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/csf-test", `{"id":`+id+`,"url":"`+csfSrv.URL+`"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/csf-test", `{"url":"`+csfSrv.URL+`","key":"bad"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Key 不对")
+	assert.Contains(t, w.Body.String(), csf.ErrUnauthorized.Error())
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/csf-test", `{"url":"http://127.0.0.1:9","key":"k"}`)
+	assert.Equal(t, http.StatusBadGateway, w.Code, "连不上")
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/csf-test", `{"url":"csf.lan","key":"k"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "地址不对")
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/csf-test", `{"id":99,"url":"`+csfSrv.URL+`"}`)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"剧集","kind":"tv","path":`+jsonPath(e.library+"-tv")+`,"csf_url":"`+csfSrv.URL+`"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "填了地址没有 Key")
 }
 
 func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {

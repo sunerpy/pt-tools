@@ -15,31 +15,52 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 // newOrganizeService 构造并启动整理入库服务：媒体服务器的 Token 用 ConfigStore 的 Cookie 密钥加解密，
 // 下载器取 DownloaderManager 的共享实例，入库通知写进监控通知日志、由现有的投递器发出。媒体库的数据来源选了豆瓣或
 // Bangumi 时，刮削经它们的客户端补充简介、评分与每一集的标题（响应缓存在 media_cache 表里，和 TMDB 共用）；
-// Fanart.tv 与 OMDb 的客户端按「媒体识别」里填的 Key 由识别服务建。
-func newOrganizeService(store *core.ConfigStore, mgr *scheduler.Manager, rec *recognize.Service, notifier *scheduler.MonitorNotifier) *organize.Service {
+// Fanart.tv 与 OMDb 的客户端按「媒体识别」里填的 Key 由识别服务建。下载站点字幕用 UserInfoService 里注册的共享站点实例。
+func newOrganizeService(store *core.ConfigStore, mgr *scheduler.Manager, rec *recognize.Service, notifier *scheduler.MonitorNotifier, sites *v2.UserInfoService) *organize.Service {
 	if global.GlobalDB == nil || global.GlobalDB.DB == nil || store == nil || mgr == nil || rec == nil {
 		global.GetSlogger().Warn("整理入库跳过初始化：数据库或媒体识别服务未就绪")
 		return nil
 	}
 	svc := organize.New(organize.Config{
-		DB:          global.GlobalDB.DB,
-		Cipher:      storeCipher{store: store},
-		Recognizer:  rec,
-		Downloaders: organizeDownloaders{mgr: mgr},
-		Notify:      organizeNotifier(notifier),
-		Logger:      global.GetSlogger(),
-		Douban:      douban.New(douban.Config{Cache: tmdb.NewDBCache(global.GlobalDB.DB)}),
-		Bangumi:     bangumi.New(bangumi.Config{Cache: tmdb.NewDBCache(global.GlobalDB.DB)}),
+		DB:            global.GlobalDB.DB,
+		Cipher:        storeCipher{store: store},
+		Recognizer:    rec,
+		Downloaders:   organizeDownloaders{mgr: mgr},
+		Notify:        organizeNotifier(notifier),
+		Logger:        global.GetSlogger(),
+		Douban:        douban.New(douban.Config{Cache: tmdb.NewDBCache(global.GlobalDB.DB)}),
+		Bangumi:       bangumi.New(bangumi.Config{Cache: tmdb.NewDBCache(global.GlobalDB.DB)}),
+		SubtitleSites: organizeSubtitleSites(sites),
 	})
 	svc.Start()
 	global.GetSlogger().Info("整理入库服务已启动")
 	return svc
+}
+
+// organizeSubtitleSites 让整理入库下载站点字幕时用 UserInfoService 里注册的共享站点实例（限速与站点别的请求共用，
+// 改了站点设置重新注册后用新的）；站点没有注册、驱动不支持字幕时是 nil。
+func organizeSubtitleSites(sites *v2.UserInfoService) organize.SubtitleSites {
+	if sites == nil {
+		return nil
+	}
+	return func(id string) v2.SubtitleProvider {
+		site, ok := sites.GetSite(id)
+		if !ok {
+			return nil
+		}
+		src, ok := site.(v2.SubtitleSource)
+		if !ok {
+			return nil
+		}
+		return src.Subtitles()
+	}
 }
 
 // organizeNotifier 把入库通知写进监控通知日志（source=media），不直接调用 Push、也不自建 Router。

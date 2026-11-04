@@ -704,6 +704,7 @@ onMounted(load);
               >{{ targetPrefix(r) }}{{ r.target_path }}</span
             >
             <span v-if="r.disc_files">原盘 {{ r.disc_files }} 个文件</span>
+            <span v-if="r.subtitles">{{ r.subtitles }} 个字幕</span>
             <span
               >{{ modeLabel(r.mode) }} · {{ rowTrigger(r) }} ·
               {{ formatShortDateTime(r.updated_at) }}</span

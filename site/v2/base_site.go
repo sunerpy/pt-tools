@@ -331,6 +331,36 @@ func (b *BaseSite[Req, Res]) DownloadWithHash(ctx context.Context, torrentID, ha
 	return b.download(ctx, torrentID)
 }
 
+// Subtitles 是这个站点的字幕（驱动实现了 SubtitleProvider 时；不支持时为 nil）：每次请求先等限速的令牌，
+// 一时的错误（网络、5xx）按指数退避再发，重试前同样先等令牌（同下载种子）。
+func (b *BaseSite[Req, Res]) Subtitles() SubtitleProvider {
+	p, ok := any(b.driver).(SubtitleProvider)
+	if !ok {
+		return nil
+	}
+	return limitedSubtitles{p: p, wait: b.limiter.Wait}
+}
+
+// limitedSubtitles 给驱动的字幕请求加上站点的限速与重试（见 BaseSite.Subtitles）。
+type limitedSubtitles struct {
+	p    SubtitleProvider
+	wait func(context.Context) error
+}
+
+func (l limitedSubtitles) ListSubtitles(ctx context.Context, torrentID string) ([]Subtitle, error) {
+	if err := l.wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit: %w", err)
+	}
+	return retryTransient(ctx, l.wait, func() ([]Subtitle, error) { return l.p.ListSubtitles(ctx, torrentID) })
+}
+
+func (l limitedSubtitles) DownloadSubtitle(ctx context.Context, sub Subtitle) (SubtitleFile, error) {
+	if err := l.wait(ctx); err != nil {
+		return SubtitleFile{}, fmt.Errorf("rate limit: %w", err)
+	}
+	return retryTransient(ctx, l.wait, func() (SubtitleFile, error) { return l.p.DownloadSubtitle(ctx, sub) })
+}
+
 func (b *BaseSite[Req, Res]) GetDetailFetcher() TorrentDetailFetcher {
 	if fetcher, ok := any(b.driver).(TorrentDetailFetcher); ok {
 		return fetcher

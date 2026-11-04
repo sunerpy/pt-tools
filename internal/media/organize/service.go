@@ -98,6 +98,10 @@ type Config struct {
 	Douban Douban
 	// Bangumi 是刮削动画时补充中文简介、评分与每一集标题用的 Bangumi（媒体库的数据来源选了它时才用）；为空时用 TMDB 的
 	Bangumi metadata.BangumiAPI
+	// SubtitleSites 是下载站点字幕用的站点（媒体库开了「下载站点字幕」时才用）；为空时不取站点字幕
+	SubtitleSites SubtitleSites
+	// CSFHTTP 为空时用 csf.NewHTTPClient（测试里换成 httptest 的）
+	CSFHTTP *http.Client
 }
 
 // MediaHint 是订阅（追剧）推送或认领的种子要的条目与媒体库。

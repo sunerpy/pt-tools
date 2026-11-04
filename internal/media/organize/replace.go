@@ -217,7 +217,7 @@ func (s *Service) finishReplace(ctx context.Context, j models.MediaReplaceJourna
 			continue
 		}
 		mode := old.Mode
-		if e.Kind == extraMeta {
+		if e.Kind == extraMeta || e.Kind == extraSiteSub {
 			mode = models.MediaModeCopy
 		}
 		if err := removeIfOurs(e.Target, mode, e.FileID, e.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {

@@ -3509,6 +3509,14 @@ export interface MediaLibraryInput {
   scrape_actor_zh: boolean;
   /** 每周对刮削结果是部分成功或失败的记录补刮一次（只补没有的文件；要开着刮削） */
   scrape_fill: boolean;
+  /** 整理出新视频以后到站点上取字幕（种子里没有字幕、种子是从 NexusPHP 站点推送的时） */
+  site_subtitles: boolean;
+  /** ChineseSubFinder 的地址；空串是不用（保存时一起清掉 Key） */
+  csf_url: string;
+  /** ChineseSubFinder 的 API Key：只写不读，不带或空串时保留原来的 */
+  csf_key?: string;
+  /** ChineseSubFinder 里看到的这个库的目录；空串是和库目录一样 */
+  csf_path: string;
   enabled: boolean;
 }
 
@@ -3568,6 +3576,8 @@ export interface MediaLibrary extends MediaLibraryInput {
   /** 实际用的模板与示例渲染的结果 */
   effective_template: string;
   preview: string;
+  /** 有没有保存 ChineseSubFinder 的 API Key */
+  has_csf_key: boolean;
 }
 
 export interface MediaCheckItem {
@@ -4063,6 +4073,9 @@ export const organizeApi = {
   deleteLibrary: (id: number) => api.delete<{ ok: boolean }>(`/api/media/libraries/${id}`),
   checkLibrary: (data: { path: string; mode: MediaMode }) =>
     api.post<MediaCheckItem[]>("/api/media/libraries/check", data),
+  /** 访问一次 ChineseSubFinder（不建任务）；带了媒体库编号、没填 Key 时用这个库保存的 Key */
+  testCSF: (data: { id?: number; url: string; key?: string }) =>
+    api.post<{ ok: boolean }>("/api/media/libraries/csf-test", data),
   templatePreview: (data: { kind: MediaKind; template: string }) =>
     api.post<{ template: string; preview: string; error?: string }>(
       "/api/media/libraries/template-preview",
