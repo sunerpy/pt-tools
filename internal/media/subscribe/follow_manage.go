@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm/clause"
 
+	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/models"
@@ -73,6 +74,9 @@ func describe(sub *models.MediaSubscription) string {
 		if sub.FollowNextSeason {
 			parts = append(parts, "完成后跟下一季")
 		}
+		if sub.EpisodeGroupID != "" {
+			parts = append(parts, "种子的季集按 TMDB 剧集组换算")
+		}
 	}
 	if kws := splitKeywords(sub.IncludeKeywords); len(kws) > 0 {
 		parts = append(parts, "标题包含 "+strings.Join(kws, " 或 "))
@@ -134,12 +138,8 @@ func (s *Service) fromTorrent(ctx context.Context, sub *models.MediaSubscription
 		item.SourceSite = site
 	}
 	m := s.parse(ctx, item.Title, item.Subtitle)
-	season := m.Season
-	if season == 0 && m.Episode > 0 {
-		season = 1
-	}
-	if _, ok := newMatcher(*sub).match(m, item); !ok || (season > 0 && season != sub.Season) {
-		step(ctx, stepReject, "%s：不是这个追剧的剧集或这一季", item.Title)
+	if why, ok := s.sameSeason(ctx, sub, m, item); !ok {
+		step(ctx, stepReject, "%s：%s", item.Title, why)
 		return fmt.Sprintf("这个种子（%s）不是这部剧的第 %d 季，没有用它；按追剧设置搜索", item.Title, sub.Season)
 	}
 	if res, err := s.cfg.Recognizer.Recognize(ctx, recognize.Input{Title: item.Title, Subtitle: item.Subtitle, IMDbID: item.IMDbID}); err == nil && res != nil && res.Match != nil &&
@@ -161,7 +161,7 @@ func (s *Service) fromTorrent(ctx context.Context, sub *models.MediaSubscription
 		return err.Error()
 	}
 	hr, _ := siteHR(item.SourceSite)
-	c := Candidate{Site: item.SourceSite, Item: item, Meta: m, From: fromSearch, SiteHR: hr, SeenAt: s.cfg.Now()}
+	c := Candidate{Site: item.SourceSite, Item: item, Meta: m, From: fromSearch, SiteHR: hr, SeenAt: s.cfg.Now(), Chosen: true}
 	failed := pushFailures(ctx)
 	s.mu.Lock()
 	msg := s.evaluate(ctx, sub, []Candidate{c}, set)
@@ -170,6 +170,32 @@ func (s *Service) fromTorrent(ctx context.Context, sub *models.MediaSubscription
 	}
 	s.mu.Unlock()
 	return "从这个种子开始追：" + msg
+}
+
+// sameSeason 报告一键追剧选中的种子是不是这部剧的这一季：选了剧集组时先按剧集组换算季集。不是时第一个返回值写明原因。
+func (s *Service) sameSeason(ctx context.Context, sub *models.MediaSubscription, m meta.Meta, item v2.TorrentItem) (string, bool) {
+	mt := newMatcher(*sub)
+	if mt.grouped() {
+		season, err := s.seasonFor(ctx, sub, false)
+		if err != nil {
+			season = nil
+		}
+		if _, ok, why := mt.withMapper(s.mapperFor(ctx, sub, season)).matchMapped(m, item); !ok {
+			if why == "" {
+				why = "不是这个追剧的剧集或这一季"
+			}
+			return why, false
+		}
+		return "", true
+	}
+	season := m.Season
+	if season == 0 && m.Episode > 0 {
+		season = 1
+	}
+	if _, ok := mt.match(m, item); !ok || (season > 0 && season != sub.Season) {
+		return "不是这个追剧的剧集或这一季", false
+	}
+	return "", true
 }
 
 // Episodes 是一个追剧每一集的情况（重建一次台账）。
@@ -416,13 +442,14 @@ func (s *Service) MediaFor(ctx context.Context, downloaderID uint, hash string) 
 		}
 	}
 	var sub models.MediaSubscription
-	if err := s.cfg.DB.WithContext(ctx).Select("id", "library_id", "media_type", "tmdb_id").Where("id = ?", pick.SubscriptionID).Limit(1).Find(&sub).Error; err != nil {
+	if err := s.cfg.DB.WithContext(ctx).Select("id", "library_id", "media_type", "tmdb_id", "episode_group_id").Where("id = ?", pick.SubscriptionID).
+		Limit(1).Find(&sub).Error; err != nil {
 		return organize.MediaHint{}, false, fmt.Errorf("读取订阅失败: %w", err)
 	}
 	if sub.ID == 0 {
 		return organize.MediaHint{}, false, nil
 	}
-	return organize.MediaHint{LibraryID: sub.LibraryID, MediaType: sub.MediaType, TMDBID: sub.TMDBID}, true, nil
+	return organize.MediaHint{LibraryID: sub.LibraryID, MediaType: sub.MediaType, TMDBID: sub.TMDBID, EpisodeGroup: sub.EpisodeGroupID}, true, nil
 }
 
 // intervalText 是间隔的说法：整小时的写小时（整天的写天），其余写分钟。

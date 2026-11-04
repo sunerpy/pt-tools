@@ -180,3 +180,61 @@ func TestErrors(t *testing.T) {
 	_ = slow.wait(context.Background())
 	assert.ErrorIs(t, slow.wait(ctx), context.Canceled)
 }
+
+// 每日放送：按星期一到星期日排；只要动画、有名字的；封面只要 Bangumi 自己的图片（http 改成 https）；缓存 6 小时。
+func TestCalendar(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		assert.Equal(t, "/calendar", r.URL.Path)
+		assert.Contains(t, r.Header.Get("User-Agent"), "pt-tools")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"weekday":{"en":"Tue","cn":"星期二","ja":"火耀日","id":2},"items":[
+				{"id":11,"type":2,"name":"薬屋のひとりごと","name_cn":"药屋少女的呢喃","air_date":"2025-01-10","air_weekday":2,
+				 "images":{"large":"https://lain.bgm.tv/pic/cover/l/a.jpg","common":"http://lain.bgm.tv/pic/cover/c/a.jpg"},
+				 "rating":{"total":5000,"score":7.9},"rank":120,"collection":{"doing":3000}}]},
+			{"weekday":{"en":"Mon","cn":"星期一","ja":"月耀日","id":1},"items":[
+				{"id":12,"type":2,"name":"Some Anime","name_cn":"","images":{"common":"https://evil.example/x.jpg","medium":"javascript:alert(1)","large":""}},
+				{"id":13,"type":6,"name":"三次元"},
+				{"id":14,"type":2,"name":" ","name_cn":""},
+				{"id":0,"type":2,"name":"没有编号"}]},
+			{"weekday":{"en":"Xxx","cn":"","id":9},"items":[]}
+		]`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(Config{BaseURL: srv.URL, Interval: time.Millisecond, Cache: &memCache{m: map[string][]byte{}}})
+	ctx := context.Background()
+	days, err := c.Calendar(ctx)
+	require.NoError(t, err)
+	require.Len(t, days, 2)
+	assert.Equal(t, 1, days[0].Weekday)
+	assert.Equal(t, "星期一", days[0].Name)
+	require.Len(t, days[0].Items, 1, "三次元、没名字、没编号的不要")
+	assert.Equal(t, CalendarItem{ID: 12, Name: "Some Anime"}, days[0].Items[0], "别处的图片不要")
+	assert.Equal(t, CalendarDay{Weekday: 2, Name: "星期二", Items: []CalendarItem{{
+		ID: 11, Name: "薬屋のひとりごと", NameCN: "药屋少女的呢喃", AirDate: "2025-01-10", Image: "https://lain.bgm.tv/pic/cover/c/a.jpg",
+		Score: 7.9, Votes: 5000, Rank: 120, Watching: 3000,
+	}}}, days[1])
+
+	_, err = c.Calendar(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, hits, "第二次读缓存")
+}
+
+func TestCoverURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://lain.bgm.tv/pic/cover/c/a.jpg": "https://lain.bgm.tv/pic/cover/c/a.jpg",
+		"http://lain.bgm.tv/a.jpg":              "https://lain.bgm.tv/a.jpg",
+		"https://bangumi.tv/a.jpg":              "https://bangumi.tv/a.jpg",
+		"https://bgm.tv.evil.example/a.jpg":     "",
+		"https://evilbgm.tv/a.jpg":              "",
+		"ftp://lain.bgm.tv/a.jpg":               "",
+		"https://user@lain.bgm.tv/a.jpg":        "",
+		"/pic/a.jpg":                            "",
+		"":                                      "",
+		"%zz":                                   "",
+	} {
+		assert.Equal(t, want, coverURL(in), in)
+	}
+}

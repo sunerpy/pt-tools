@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/reseed"
@@ -82,7 +83,7 @@ func (s *Service) considerOffer(ctx context.Context, c Candidate) {
 		if !siteAllowed(sub, c.Site) {
 			continue
 		}
-		if _, ok := newMatcher(*sub).match(c.Meta, c.Item); !ok {
+		if !newMatcher(*sub).mayMatch(c.Meta, c.Item) {
 			continue
 		}
 		rctx, run := s.startRun(ctx, sub, models.MediaRunRSS)
@@ -133,7 +134,8 @@ func (s *Service) SearchNow(ctx context.Context, id uint) (string, error) {
 }
 
 // keywords 是主动搜索用的关键字：拉丁字母的名字（原名或英文别名）与中文名，最多两个。拉丁字母的名字剧集加季（S02）、
-// 电影加年份；中文名不加（中文标题多写成「第二季」「第2期」，加了 S02 搜不到）。
+// 电影加年份；中文名不加（中文标题多写成「第二季」「第2期」，加了 S02 搜不到）。选了剧集组的剧集不加季：种子按剧集组写季集
+// （绝对集号的动画多半不写季），加了 TMDB 的季号搜不到。
 func keywords(sub *models.MediaSubscription) []string {
 	latin := ""
 	for _, n := range append([]string{sub.OriginalTitle}, decodeList(sub.Aliases)...) {
@@ -150,6 +152,7 @@ func keywords(sub *models.MediaSubscription) []string {
 		}
 		switch {
 		case !isLatin(n):
+		case sub.MediaType == models.MediaKindTV && sub.EpisodeGroupID != "":
 		case sub.MediaType == models.MediaKindTV:
 			n = fmt.Sprintf("%s S%02d", n, sub.Season)
 		case sub.Year > 0:
@@ -357,6 +360,9 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 			}
 			continue
 		}
+		if why != "" {
+			step(ctx, stepInfo, "%s：%s", c.Item.Title, why)
+		}
 		if b, hit := blocks.get(c.Site, c.Item.ID); hit {
 			blocked++
 			rejects = append(rejects, c.Item.Title+"："+blockWhy(b))
@@ -411,16 +417,20 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 			if len(vers) > 0 {
 				return "库里已经有了"
 			}
-			return s.pushOne(ctx, sub, ok[0], set, nil)
+			return s.pushReviewed(ctx, sub, ok, set, nil)
 		}
 		if downloading {
 			return "洗版：上一个版本还在下载"
 		}
 		// 现在的版本（库里的与订阅下载的）按当前档案重算：失败的下载不算，档案改过也能比
-		if base, has := s.baseline(ctx, profile, linked, vers); has && ok[0].v.Score <= base {
+		base, has := s.baseline(ctx, profile, linked, vers)
+		if has && ok[0].v.Score <= base {
 			return "洗版：没有比现在更好的版本"
 		}
-		return s.pushOne(ctx, sub, ok[0], set, nil)
+		if has {
+			ok = slices.DeleteFunc(ok, func(o scored) bool { return o.v.Score <= base })
+		}
+		return s.pushReviewed(ctx, sub, ok, set, nil)
 	}
 	msg := s.pickTV(ctx, sub, profile, ok, set, lg)
 	// 推送了的话按新的种子重建台账（锁住的版本也可能刚写上）：详情与进度马上看得到这几集在下载
@@ -466,10 +476,11 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		if err != nil {
 			return err.Error()
 		}
-		if len(packs) == 0 || packs[0].v.Score <= s.episodeFloor(ctx, profile, vers, lg.required) {
+		floor := s.episodeFloor(ctx, profile, vers, lg.required)
+		if len(packs) == 0 || packs[0].v.Score <= floor {
 			return "洗版：没有比现在更好的整季包"
 		}
-		return s.pushOne(ctx, sub, packs[0], set, nil)
+		return s.pushReviewed(ctx, sub, slices.DeleteFunc(packs, func(o scored) bool { return o.v.Score <= floor }), set, nil)
 	}
 	if lg.listErr != "" {
 		step(ctx, stepWait, "这一轮不推缺的集（免得重复下载正在下载的集）：%s", lg.listErr)
@@ -574,15 +585,30 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 		step(ctx, stepLock, "%s：版本锁改成了 %s，不推这个", o.c.Item.Title, lockText(g, r))
 		return false
 	}
-	if wantPack(packs, eps) && allowedNow(packs[0]) {
-		msg := s.pushOne(ctx, sub, packs[0], set, missing)
-		if strings.HasPrefix(msg, "下载了") {
-			pushed()
+	// AI 复核说不是的候选跳过，接着看下一个（整季包都不是时一集一集补）；问满了这一轮就停
+	reviewRejected := 0
+	if wantPack(packs, eps) {
+		for _, p := range packs {
+			if !allowedNow(p) {
+				break
+			}
+			switch s.review(ctx, sub, p, set) {
+			case reviewReject:
+				reviewRejected++
+				continue
+			case reviewStop:
+				return fmt.Sprintf("缺 %d 集，%s", len(lg.missing), reviewStopMsg(reviewRejected))
+			}
+			msg := s.pushOne(ctx, sub, p, set, missing)
+			if strings.HasPrefix(msg, "下载了") {
+				pushed()
+			}
+			return msg
 		}
-		return msg
 	}
 	var msgs []string
 	down := map[string]bool{}
+	stopped := false
 	for _, o := range eps {
 		if len(missing) == 0 {
 			break
@@ -608,6 +634,14 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 			}
 			continue
 		}
+		if r := s.review(ctx, sub, o, set); r != reviewPass {
+			if r == reviewStop {
+				stopped = true
+				break
+			}
+			reviewRejected++
+			continue
+		}
 		msg := s.pushOne(ctx, sub, o, set, missing)
 		msgs = append(msgs, msg)
 		if strings.HasPrefix(msg, "下载了") {
@@ -622,7 +656,15 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 			}
 		}
 	}
-	if len(msgs) == 0 {
+	switch {
+	case len(msgs) > 0 && stopped:
+		msgs = append(msgs, fmt.Sprintf("这一轮 AI 复核问满了 %d 个，剩下的下次再看", maxReviewsPerRun))
+	case len(msgs) > 0:
+	case stopped:
+		return fmt.Sprintf("缺 %d 集，%s", len(lg.missing), reviewStopMsg(reviewRejected))
+	case reviewRejected > 0:
+		return fmt.Sprintf("缺 %d 集，找到的 %d 个 AI 复核都说不是", len(lg.missing), reviewRejected)
+	default:
 		return fmt.Sprintf("缺 %d 集，没有找到这些集的资源", len(lg.missing))
 	}
 	return strings.Join(msgs, "；")
@@ -714,7 +756,7 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 	// 开着洗版的订阅整个下：库里已有的集也按每一集比版本，好的换掉旧版本
 	var plan *filePlan
 	if want != nil && !sub.Upgrade && sub.MediaType == models.MediaKindTV && (o.sp.Whole || o.sp.End > o.sp.Start) {
-		if plan = s.planFiles(ctx, sub, data, want); plan != nil && plan.none() {
+		if plan = s.planFiles(ctx, sub, o.c.Meta, data, want); plan != nil && plan.none() {
 			return fmt.Sprintf("%s%s：种子里没有缺的集（种子里是 %s）", noWantedPrefix, o.c.Item.Title, episodeList(plan.all))
 		}
 	}
@@ -741,9 +783,10 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		return fmt.Sprintf("订阅已经暂停或删除，没有推送 %s", o.c.Item.Title)
 	}
 	policy, snap := s.admission(ctx, sub, set, site, o.c)
+	savePath, force := s.savePathFor(ctx, sub, set, dlID)
 	res, err := s.cfg.Push(ctx, ptinternal.PushTorrentRequest{
 		SiteID: o.c.Site, TorrentID: o.c.Item.ID, TorrentData: data, Title: o.c.Item.Title,
-		Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath, DownloaderID: dlID, Source: pushSource,
+		Category: sub.Category, Tags: sub.Tags, SavePath: savePath, ForceSavePath: force, DownloaderID: dlID, Source: pushSource,
 		IMDbID: o.c.Item.IMDbID, DoubanID: o.c.Item.DoubanID,
 		// 订阅知道它要的是哪个条目：整理入库按它整理（订阅的记录删了以后也是）
 		Media: &ptinternal.PushMedia{Type: sub.MediaType, TMDBID: sub.TMDBID, Season: sub.Season},
@@ -799,7 +842,7 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		if plan != nil {
 			eps = plan.all
 		} else {
-			eps = s.packEpisodes(ctx, sub, data)
+			eps = s.packEpisodes(ctx, sub, o.c.Meta, data)
 		}
 		if len(eps) > 0 {
 			b, _ := json.Marshal(eps)
@@ -816,13 +859,14 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 	return "下载了 " + o.c.Item.Title
 }
 
-// packEpisodes 是整季包里实际有的集：按种子的文件列表里每个视频文件的文件名解析（含集号映射）。读不出时为空（按整季算）。
-func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscription, data []byte) []int {
+// packEpisodes 是整季包里实际有的集：按种子的文件列表里每个视频文件的文件名解析（含剧集组的换算与集号映射；m 是种子标题解析出的）。
+// 读不出时为空（按整季算）。
+func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscription, m meta.Meta, data []byte) []int {
 	files, err := reseed.TorrentFiles(data)
 	if err != nil {
 		return nil
 	}
-	mp := s.fileMapper(ctx, sub)
+	mp := s.fileMapper(ctx, sub, m)
 	paths := make([]string, 0, len(files))
 	for _, f := range files {
 		paths = append(paths, f.Path)

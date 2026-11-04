@@ -123,6 +123,8 @@ type Config struct {
 	HTTP *http.Client
 	// DoubanBase 是豆瓣的地址（测试与 QA 换成假服务）
 	DoubanBase string
+	// Bangumi 是探索页番剧日历用的 Bangumi 客户端（为空时番剧日历回错误）
+	Bangumi BangumiAPI
 }
 
 // Service 是订阅服务。
@@ -151,6 +153,10 @@ type Service struct {
 	// today 记下今日更新今天处理过没有
 	todayMu sync.Mutex
 	today   todayState
+	// reviewer 是推送前的 AI 复核（见 review.go）；reviews 记下每个订阅的每个种子复核的结论
+	reviewMu sync.Mutex
+	reviewer Reviewer
+	reviews  map[reviewKey]reviewEntry
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc

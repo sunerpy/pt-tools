@@ -128,3 +128,28 @@ describe("标题包含与排除的说法", () => {
     expect(keywordLines({})).toEqual([]);
   });
 });
+
+describe("剧集组的说法", () => {
+  it("名字、类型、几组几集与平台；不认识的类型写编号", async () => {
+    const { episodeGroupLabel } = await import("./subscribe");
+    expect(
+      episodeGroupLabel({
+        id: "5b11ba820e0a265a53000ce9",
+        name: "Absolute Order",
+        type: 2,
+        group_count: 1,
+        episode_count: 1100,
+      }),
+    ).toBe("Absolute Order · 绝对集号 · 1 组 1100 集");
+    expect(
+      episodeGroupLabel({
+        id: "5c8a1ef80e0a2625f5a4f1b0",
+        name: "",
+        type: 9,
+        group_count: 2,
+        episode_count: 26,
+        network: "Netflix",
+      }),
+    ).toBe("（没有名字） · 类型 9 · 2 组 26 集 · Netflix");
+  });
+});

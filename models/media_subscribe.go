@@ -149,6 +149,9 @@ type MediaSubscription struct {
 	NextSeasonID     uint `gorm:"not null;default:0" json:"next_season_id"`
 	// LibraryID 是整理进哪个媒体库（0 按类型自动选）
 	LibraryID uint `gorm:"not null;default:0" json:"library_id"`
+	// EpisodeGroupID 是种子按 TMDB 的哪个剧集组写季集（剧集；空串是按 TMDB 默认的季集）：对种子与整理入库时先把
+	// （第几组，组里第几集）换成默认的季集，见 internal/media/epgroup
+	EpisodeGroupID string `gorm:"size:32;not null;default:''" json:"episode_group_id"`
 	// CompletedAt 是变成完成的时间
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// LastRunID 是最近一次运行记录
@@ -340,10 +343,16 @@ type MediaSubscribeSetting struct {
 	// UpgradeOld 是洗版以后旧种子怎么办：keep（空串也是）继续做种，delete 连数据删掉
 	UpgradeOld string `gorm:"size:16;not null;default:''" json:"upgrade_old"`
 	// TodayEnabled 为真时每天 TodayTime（HH:MM，空的按 09:00）把今天播出的集推送到 TodayChannels（JSON 数组；空的用 NotifyChannels）
-	TodayEnabled  bool      `gorm:"not null;default:false" json:"today_enabled"`
-	TodayTime     string    `gorm:"size:5;not null;default:''" json:"today_time"`
-	TodayChannels string    `gorm:"type:text;not null;default:''" json:"-"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	TodayEnabled  bool   `gorm:"not null;default:false" json:"today_enabled"`
+	TodayTime     string `gorm:"size:5;not null;default:''" json:"today_time"`
+	TodayChannels string `gorm:"type:text;not null;default:''" json:"-"`
+	// SubdirEnabled 为真时订阅推送的种子放进按 SubdirTemplate（空的按 {title} ({year})）起名的一级子目录（见 subscribe.subdirName）
+	SubdirEnabled  bool   `gorm:"not null;default:false" json:"subdir_enabled"`
+	SubdirTemplate string `gorm:"size:255;not null;default:''" json:"subdir_template"`
+	// AIReviewEnabled 为真时推送订阅的候选以前让 AI 助手的模型复核；AIReviewScope 是 name（空串也是，只复核按名字对上的）或 all
+	AIReviewEnabled bool      `gorm:"column:ai_review_enabled;not null;default:false" json:"ai_review_enabled"`
+	AIReviewScope   string    `gorm:"column:ai_review_scope;size:8;not null;default:''" json:"ai_review_scope"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func (MediaSubscribeSetting) TableName() string { return "media_subscribe_settings" }

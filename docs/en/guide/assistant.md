@@ -192,7 +192,7 @@ With **Notification channels (ChatOps)** turned on in **System → AI assistant 
 ## Privacy and security
 
 - The conversation, your attachments and the tool results (site statistics, torrent titles, downloader state, library folders) are sent to the model provider you chose. To keep data on your machine, use a self-hosted Ollama.
-- With [AI sign-in](site-login-monitoring.md#captchas-and-quiz-questions-with-ai) turned on, sign-in captcha images and quiz questions are sent to this provider too.
+- With [AI sign-in](site-login-monitoring.md#captchas-and-quiz-questions-with-ai) turned on, sign-in captcha images and quiz questions are sent to this provider too; with [review by AI before downloading](media-subscribe.md#review-by-ai-before-downloading) turned on for subscriptions, so are the subscription's title and the title and subtitle of each torrent about to be pushed.
 - Cookies, passkeys, passwords and torrent download links are never given to the model: tool results come from the App API, which never contains them; pasted download URLs are replaced by site and torrent ID; stored conversations and error messages also mask URL query strings and long tokens.
 - Tool results are treated as data: an "instruction" inside a torrent title or a site message is not followed. Images in answers are not shown and links open in a new tab, so an image URL cannot carry data out.
 - The AI assistant's own settings (and the voice input settings) can only be changed on the web (signed-in sessions only); the assistant cannot change them.

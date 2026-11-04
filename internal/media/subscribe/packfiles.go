@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/internal/reseed"
 	"github.com/sunerpy/pt-tools/models"
@@ -41,21 +42,23 @@ func (p *filePlan) none() bool {
 	return len(p.all) > 0 && len(p.wanted) == 0 && p.unmapped == 0
 }
 
-// fileMapper 是按订阅的集号规则把文件名里的集号对到 TMDB 的集；读不到这一季时为 nil（按文件名里的集号）。
-func (s *Service) fileMapper(ctx context.Context, sub *models.MediaSubscription) *episodeMapper {
-	if season, err := s.seasonFor(ctx, sub, false); err == nil {
-		return s.mapperFor(ctx, sub, season)
+// fileMapper 是按订阅的集号规则把种子 m 里文件名的集号对到 TMDB 的集（选了剧集组时先换算，文件名里只写了集的按种子标题写的组）；
+// 读不到这一季时只有剧集组的换算，没选剧集组时为 nil（按文件名里的集号）。
+func (s *Service) fileMapper(ctx context.Context, sub *models.MediaSubscription, m meta.Meta) *episodeMapper {
+	season, err := s.seasonFor(ctx, sub, false)
+	if err != nil {
+		season = nil
 	}
-	return nil
+	return s.mapperFor(ctx, sub, season).forTorrent(m)
 }
 
-// planFiles 按种子文件算这次要下的集；单文件的种子没得选，返回 nil。
-func (s *Service) planFiles(ctx context.Context, sub *models.MediaSubscription, data []byte, want map[int]bool) *filePlan {
+// planFiles 按种子文件算这次要下的集（m 是种子标题解析出的）；单文件的种子没得选，返回 nil。
+func (s *Service) planFiles(ctx context.Context, sub *models.MediaSubscription, m meta.Meta, data []byte, want map[int]bool) *filePlan {
 	files, err := reseed.TorrentFiles(data)
 	if err != nil || len(files) < 2 {
 		return nil
 	}
-	p := &filePlan{mp: s.fileMapper(ctx, sub)}
+	p := &filePlan{mp: s.fileMapper(ctx, sub, m)}
 	all, wanted, unwanted := map[int]bool{}, map[int]bool{}, map[int]bool{}
 	for _, f := range files {
 		eps, video := s.videoEpisodes(ctx, p.mp, f.Path)
@@ -83,13 +86,21 @@ func (s *Service) planFiles(ctx context.Context, sub *models.MediaSubscription, 
 	return p
 }
 
-// videoEpisodes 是一个视频文件对应的集（按文件名解析，含集号映射）。video 为假是不是视频；是视频而对不出集时 eps 为空。
+// videoEpisodes 是一个视频文件对应的集（按文件名解析，含剧集组的换算与集号映射）。video 为假是不是视频；是视频而对不出集时
+// eps 为空（选了剧集组时换算出的集不在这一季的也是）。
 func (s *Service) videoEpisodes(ctx context.Context, mp *episodeMapper, p string) (eps []int, video bool) {
 	if !transfer.IsVideo(p) {
 		return nil, false
 	}
 	name := path.Base(p)
 	m := s.parse(ctx, name, "")
+	if mp.grouped() {
+		out, r := mp.regroup(m)
+		if r.other || r.reject != "" {
+			return nil, true
+		}
+		m = out
+	}
 	sp := span{Start: m.Episode, End: max(m.EpisodeEnd, m.Episode), Whole: m.Episode == 0}
 	if mp != nil {
 		mapped, ok, _ := mp.mapEpisodes(m, name, "", sp)

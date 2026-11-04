@@ -2,10 +2,12 @@
 /*
  * 订阅弹窗：新建（从探索页点「订阅」「追剧」，或从搜索结果的种子开始追）与修改订阅。剧集要选季（不填追最新一季）；
  * 可以选质量档案、只在哪些站点找、推送到哪个下载器、分类、标签、保存目录，打开洗版。条目与季建好以后不能改。
- * 剧集是追剧：什么时候搜索（默认按播出时间）、版本锁（默认开）、从第几集开始、整理进哪个媒体库、追完以后追下一季。
+ * 剧集是追剧：什么时候搜索（默认按播出时间）、版本锁（默认开）、从第几集开始、种子按哪个剧集组写季集、整理进哪个媒体库、
+ * 追完以后追下一季。
  */
 import {
   type DownloaderSetting,
+  type EpisodeGroup,
   type FollowSchedule,
   type MediaKind,
   type MediaLibrary,
@@ -27,6 +29,7 @@ import {
   CRON_PRESETS,
   SCHEDULE_KINDS,
   WEEKDAY_OPTIONS,
+  episodeGroupLabel,
   intervalText,
   previewTime,
 } from "@/utils/subscribe";
@@ -274,6 +277,41 @@ const notSearchingTip = computed(() => {
   return "";
 });
 const tvLibraries = computed(() => libraries.value.filter((l) => l.kind === "tv"));
+
+// ---- 剧集组：TMDB 上这部剧没有剧集组、也没选过时不显示 ----
+const episodeGroup = ref("");
+const episodeGroups = ref<EpisodeGroup[]>([]);
+const groupsError = ref("");
+const groupsLoading = ref(false);
+let groupsSeq = 0;
+const tmdbID = computed(() => props.sub?.tmdb_id ?? chosen.value?.tmdb_id ?? 0);
+// 选着的剧集组不在列表里（TMDB 上删了、读不到列表）：照样列出来，看得出选的是什么
+const missingGroup = computed(
+  () =>
+    Boolean(episodeGroup.value) && !episodeGroups.value.some((g) => g.id === episodeGroup.value),
+);
+const showGroups = computed(
+  () =>
+    isTV.value &&
+    (episodeGroups.value.length > 0 || Boolean(episodeGroup.value) || Boolean(groupsError.value)),
+);
+
+async function loadGroups() {
+  const seq = ++groupsSeq;
+  episodeGroups.value = [];
+  groupsError.value = "";
+  groupsLoading.value = false;
+  if (!isTV.value || !tmdbID.value) return;
+  groupsLoading.value = true;
+  try {
+    const res = await subscribeApi.episodeGroups(tmdbID.value);
+    if (seq === groupsSeq) episodeGroups.value = res?.groups ?? [];
+  } catch (e) {
+    if (seq === groupsSeq) groupsError.value = (e as Error)?.message || "读不到剧集组";
+  } finally {
+    if (seq === groupsSeq) groupsLoading.value = false;
+  }
+}
 const monthDays = Array.from({ length: 31 }, (_, i) => i + 1);
 
 // 保存目录的下拉列这台下载器的预设目录：订阅没选下载器时按订阅设置里的默认下载器（再没有时输入框用 pt-tools 的默认下载器）
@@ -339,7 +377,9 @@ watch(
     libraryID.value = s?.library_id ?? 0;
     totalEpisodes.value = s?.total_episodes_manual ? s.total_episodes : undefined;
     totalBefore.value = totalEpisodes.value;
+    episodeGroup.value = s?.episode_group_id ?? "";
     void loadOptions();
+    void loadGroups();
   },
   { immediate: true },
 );
@@ -349,6 +389,9 @@ function pickCandidate(id: number) {
   if (c) {
     chosen.value = c;
     posterFailed.value = false;
+    // 剧集组是一部剧的：换了条目要重新选
+    episodeGroup.value = "";
+    void loadGroups();
   }
 }
 
@@ -401,6 +444,10 @@ function followInput(): Partial<SubscriptionInput> {
   } else if (startEpisode.value) {
     // 从种子开始追时不填起始集，服务端按这个种子的集号定
     out.start_episode = startEpisode.value;
+  }
+  // 剧集组只在改了时带上（新建时选了才带）：空串是不用剧集组
+  if (episodeGroup.value !== (props.sub?.episode_group_id ?? "")) {
+    out.episode_group_id = episodeGroup.value;
   }
   return out;
 }
@@ -736,6 +783,36 @@ async function save() {
               <div class="field-tip">TMDB 上的集数不对时填；清空改回按 TMDB</div>
             </el-form-item>
           </div>
+          <el-form-item v-if="showGroups" label="剧集组">
+            <el-select
+              v-model="episodeGroup"
+              :empty-values="[null, undefined]"
+              :loading="groupsLoading"
+              data-testid="sd-episode-group">
+              <el-option value="" label="不用（按 TMDB 默认的季集）" />
+              <el-option
+                v-for="g in episodeGroups"
+                :key="g.id"
+                :value="g.id"
+                :label="episodeGroupLabel(g)" />
+              <el-option
+                v-if="missingGroup"
+                :value="episodeGroup"
+                :label="`现在选的剧集组（${episodeGroup}）`" />
+            </el-select>
+            <div
+              v-if="groupsError"
+              class="field-tip field-tip--warn"
+              data-testid="sd-episode-group-error">
+              读不到 TMDB 上的剧集组：{{ groupsError }}
+            </div>
+            <div v-else class="field-tip" data-testid="sd-episode-group-tip">
+              种子按另一种排法写集号时选（例如动画的绝对集号、DVD
+              的分季）：种子标题与文件名里的季集先按它换成 TMDB
+              默认的季集再对。追剧的进度、日历与库里的文件名仍按 TMDB
+              默认的季集；剧集组里没有的集照默认的季集算，写进运行记录
+            </div>
+          </el-form-item>
           <el-form-item label="整理进哪个媒体库">
             <el-select v-model="libraryID" data-testid="sd-library">
               <el-option :value="0" label="按类型自动选" />

@@ -37,6 +37,7 @@ const api = vi.hoisted(() => ({
   saveEpisodeRule: vi.fn(),
   deleteEpisodeRule: vi.fn(),
   previewSchedule: vi.fn(async () => ({ next: [] as string[] })),
+  episodeGroups: vi.fn(async () => ({ groups: [] as unknown[] })),
   organizeTorrent: vi.fn(),
   rescrapeTorrent: vi.fn(),
   blocks: vi.fn(async (): Promise<{ items: unknown[] }> => ({ items: [] })),
@@ -119,6 +120,10 @@ const settings = {
   today_enabled: false,
   today_time: "09:00",
   today_channels: [],
+  subdir_enabled: false,
+  subdir_template: "{title} ({year})",
+  ai_review_enabled: false,
+  ai_review_scope: "name",
 };
 
 const base = {
@@ -775,6 +780,51 @@ describe("订阅", () => {
     q("ms-save-settings")!.click();
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
     expect(api.saveSettings.mock.calls[0]![0]).toEqual({ ...settings, today_enabled: true });
+  });
+
+  it("设置：下载时按条目建子目录，打开以后才有子目录名", async () => {
+    await mountPage();
+    expect(q("ms-subdir-template"), "没开时不显示").toBeNull();
+    (q("ms-subdir")!.querySelector("input") ?? q("ms-subdir"))!.click();
+    await vi.waitFor(() => expect(q("ms-subdir-template")).not.toBeNull());
+    const input = (q("ms-subdir-template")!.querySelector("input") ??
+      q("ms-subdir-template")) as HTMLInputElement;
+    expect(input.value).toBe("{title} ({year})");
+    input.value = "{original_title} [{tmdb_id}]";
+    input.dispatchEvent(new Event("input"));
+    api.saveSettings.mockResolvedValue({ ...settings, subdir_enabled: true });
+    q("ms-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      ...settings,
+      subdir_enabled: true,
+      subdir_template: "{original_title} [{tmdb_id}]",
+    });
+  });
+
+  it("设置：下载前让 AI 复核，打开以后才选范围（默认只复核按名字对上的）", async () => {
+    await mountPage();
+    expect(q("ms-ai-review-scope"), "没开时不显示").toBeNull();
+    (q("ms-ai-review")!.querySelector("input") ?? q("ms-ai-review"))!.click();
+    await vi.waitFor(() => expect(q("ms-ai-review-scope")).not.toBeNull());
+    expect(q("ms-ai-review-scope")!.textContent).toContain("只复核按名字对上的");
+    api.saveSettings.mockResolvedValue({ ...settings, ai_review_enabled: true });
+    q("ms-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({ ...settings, ai_review_enabled: true });
+  });
+
+  it("设置：读到的 AI 复核范围照样显示", async () => {
+    api.settings.mockResolvedValue({
+      ...settings,
+      ai_review_enabled: true,
+      ai_review_scope: "all",
+    });
+    await mountPage({ keepSettings: true });
+    expect(q("ms-ai-review-scope")!.textContent).toContain("全部");
+    expect(q("ms-ai-review-link")!.getAttribute("href"), "说明里链到 AI 助手设置").toBe(
+      "/assistant/settings",
+    );
   });
 
   it("设置：读到的今日更新照样显示、照样存回去", async () => {

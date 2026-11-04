@@ -1,8 +1,9 @@
-// Package bangumi 从 Bangumi（bgm.tv）取动画的中文简介、评分与每一集的中文标题，刮削时补充 TMDB 的数据。
+// Package bangumi 从 Bangumi（bgm.tv）取动画的中文简介、评分与每一集的中文标题（刮削时补充 TMDB 的数据），以及探索页的番剧日历。
 //
-// 用的是 Bangumi 的公开接口 api.bgm.tv/v0（不用登录、不用 Key，但要带写明来历的 User-Agent）：搜索
-// POST /v0/search/subjects、条目 GET /v0/subjects/{id}、章节 GET /v0/episodes。Bangumi 上一季（一部分）是一个条目，
-// 按名字与首播日期找同一季（见 Client.Find）。两次请求之间至少隔 Interval，结果缓存一段时间。
+// 用的是 Bangumi 的公开接口 api.bgm.tv（不用登录、不用 Key，但要带写明来历的 User-Agent）：搜索
+// POST /v0/search/subjects、条目 GET /v0/subjects/{id}、章节 GET /v0/episodes，以及探索页的每日放送 GET /calendar。
+// Bangumi 上一季（一部分）是一个条目，按名字与首播日期找同一季（见 Client.Find）。两次请求之间至少隔 Interval，
+// 结果缓存一段时间。
 package bangumi
 
 import (
@@ -17,6 +18,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -228,6 +230,123 @@ func (c *Client) Episodes(ctx context.Context, id int) ([]Episode, error) {
 		}
 	}
 	return out, nil
+}
+
+// calendarTTL 是每日放送的缓存时间。
+const calendarTTL = 6 * time.Hour
+
+// CalendarDay 是每日放送的一天：Weekday 是星期几（1 是星期一，7 是星期日），Name 是 Bangumi 写的中文（例如 星期一）。
+type CalendarDay struct {
+	Weekday int            `json:"weekday"`
+	Name    string         `json:"name"`
+	Items   []CalendarItem `json:"items"`
+}
+
+// CalendarItem 是每日放送里的一部动画。
+type CalendarItem struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	NameCN  string `json:"name_cn,omitempty"`
+	AirDate string `json:"air_date,omitempty"`
+	// Image 是封面（Bangumi 的 https 图片地址；没有时为空）
+	Image string `json:"image,omitempty"`
+	// Score 是 10 分制的评分（没人评分时为 0），Votes 是评分人数，Rank 是排名（没有时为 0），Watching 是在看的人数
+	Score    float64 `json:"score,omitempty"`
+	Votes    int     `json:"votes,omitempty"`
+	Rank     int     `json:"rank,omitempty"`
+	Watching int     `json:"watching,omitempty"`
+}
+
+// Calendar 取每日放送（GET /calendar，缓存 6 小时）：按星期一到星期日，每天这一季在播的动画。
+func (c *Client) Calendar(ctx context.Context) ([]CalendarDay, error) {
+	var raw []struct {
+		Weekday struct {
+			ID int    `json:"id"`
+			CN string `json:"cn"`
+		} `json:"weekday"`
+		Items []struct {
+			ID      int    `json:"id"`
+			Type    int    `json:"type"`
+			Name    string `json:"name"`
+			NameCN  string `json:"name_cn"`
+			AirDate string `json:"air_date"`
+			Images  *struct {
+				Large  string `json:"large"`
+				Common string `json:"common"`
+				Medium string `json:"medium"`
+			} `json:"images"`
+			Rating *struct {
+				Total int     `json:"total"`
+				Score float64 `json:"score"`
+			} `json:"rating"`
+			Rank       int `json:"rank"`
+			Collection *struct {
+				Doing int `json:"doing"`
+			} `json:"collection"`
+		} `json:"items"`
+	}
+	if err := c.do(ctx, http.MethodGet, "bangumi:v1:calendar", calendarTTL, "/calendar", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]CalendarDay, 0, len(raw))
+	for _, d := range raw {
+		if d.Weekday.ID < 1 || d.Weekday.ID > 7 {
+			continue
+		}
+		day := CalendarDay{Weekday: d.Weekday.ID, Name: strings.TrimSpace(d.Weekday.CN), Items: []CalendarItem{}}
+		for _, it := range d.Items {
+			if it.ID <= 0 || (it.Type != 0 && it.Type != SubjectAnime) {
+				continue
+			}
+			ci := CalendarItem{
+				ID: it.ID, Name: strings.TrimSpace(it.Name), NameCN: strings.TrimSpace(it.NameCN), AirDate: strings.TrimSpace(it.AirDate), Rank: it.Rank,
+			}
+			if it.Images != nil {
+				for _, u := range []string{it.Images.Common, it.Images.Medium, it.Images.Large} {
+					if ci.Image = coverURL(u); ci.Image != "" {
+						break
+					}
+				}
+			}
+			if it.Rating != nil {
+				ci.Score, ci.Votes = it.Rating.Score, it.Rating.Total
+			}
+			if it.Collection != nil {
+				ci.Watching = it.Collection.Doing
+			}
+			if ci.Name == "" && ci.NameCN == "" {
+				continue
+			}
+			day.Items = append(day.Items, ci)
+		}
+		out = append(out, day)
+	}
+	slices.SortStableFunc(out, func(a, b CalendarDay) int { return a.Weekday - b.Weekday })
+	return out, nil
+}
+
+// coverURL 是封面的地址：只要 Bangumi 自己的图片（bgm.tv、bangumi.tv 的子域名），http 改成 https；别的为空。
+func coverURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || u.User != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	ok := false
+	for _, d := range []string{"bgm.tv", "bangumi.tv"} {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			ok = true
+		}
+	}
+	switch {
+	case !ok:
+		return ""
+	case u.Scheme == "http":
+		u.Scheme = "https"
+	case u.Scheme != "https":
+		return ""
+	}
+	return u.String()
 }
 
 // Query 是要找的条目：TMDB 的中文名、原名（日本动画一般是日文）与首播日期（剧集是这一季的）。

@@ -13,6 +13,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
+	"github.com/sunerpy/pt-tools/internal/media/bangumi"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
@@ -28,7 +29,7 @@ import (
 // newSubscribeService 构造并启动订阅服务：搜索用 Web 搜索同一个 CachedSearchOrchestrator，下载种子文件用 UserInfoService
 // 里注册的共享站点实例（共用限速），推送走 internal.PushTorrentToDownloader（磁盘与站点容量闸门不变），下载器取
 // DownloaderManager 的共享实例，电影入库问整理入库配的媒体服务器，洗版替换交给整理入库；通知写进监控通知日志、由现有投递器发出。
-// RSS 取到详情的种子经 internal.SetSubscriptionOffer 交给它。
+// RSS 取到详情的种子经 internal.SetSubscriptionOffer 交给它。探索页的番剧日历从 Bangumi 取。
 func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recognize.Service, organizer *organize.Service, sites *v2.UserInfoService, notifier *scheduler.MonitorNotifier) *subscribe.Service {
 	if global.GlobalDB == nil || global.GlobalDB.DB == nil || mgr == nil || rec == nil {
 		global.GetSlogger().Warn("订阅跳过初始化：数据库或媒体识别服务未就绪")
@@ -55,6 +56,8 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 		Guard:       subscribeGuard(global.GlobalDB.DB),
 		Logger:      global.GetSlogger(),
 		DoubanBase:  qaDoubanURL(),
+		// 番剧日历：响应缓存在 media_cache 表里（和 TMDB、刮削用的 Bangumi 共用）
+		Bangumi: bangumi.New(bangumi.Config{BaseURL: qaBangumiURL(), Cache: tmdb.NewDBCache(global.GlobalDB.DB)}),
 	}
 	if o := web.GetSearchOrchestrator(); o != nil {
 		cfg.Search = o

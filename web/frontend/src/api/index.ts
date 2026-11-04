@@ -1360,6 +1360,8 @@ export interface TorrentPushRequest {
   mediaType?: MediaKind;
   tmdbId?: number;
   season?: number;
+  /** 按条目建子目录（要带条目）：保存路径（空的是每台下载器的默认保存路径）下按订阅设置里的模板建一级子目录 */
+  itemSubdir?: boolean;
 }
 
 export interface TorrentPushResultItem {
@@ -4257,6 +4259,14 @@ export interface SubscribeSettings {
   today_enabled: boolean;
   today_time: string;
   today_channels: number[];
+  /** 下载时按条目建子目录：订阅推送的种子放进保存路径（没填时是下载器的默认保存路径）下按 subdir_template 起名的子目录 */
+  subdir_enabled: boolean;
+  /** 子目录名：{title}、{original_title}、{year}、{season}、{tmdb_id}；空着保存时是 {title} ({year}) */
+  subdir_template: string;
+  /** 下载前让 AI 复核：推送订阅的候选以前问 AI 助手的模型是不是要的条目，说不是的不推 */
+  ai_review_enabled: boolean;
+  /** name 只复核按名字对上的（按 IMDb 编号对上的不问），all 全部 */
+  ai_review_scope: "name" | "all";
 }
 
 export interface QualityProfile {
@@ -4400,6 +4410,8 @@ export interface Subscription {
   next_season_id?: number;
   /** 整理进哪个媒体库（0 按类型自动选） */
   library_id?: number;
+  /** 种子按 TMDB 的哪个剧集组写季集（剧集；空串是按 TMDB 默认的季集） */
+  episode_group_id?: string;
   completed_at?: string;
 }
 
@@ -4486,6 +4498,8 @@ export interface SubscriptionInput {
   library_id?: number;
   /** 这一季的集数：大于 0 时以它为准，0 改回按 TMDB（只在修改时用） */
   total_episodes?: number;
+  /** 种子按 TMDB 的哪个剧集组写季集：空串是不用剧集组；不给时新建不用、修改不变 */
+  episode_group_id?: string;
   /** 从站点上的这个种子开始追（只在新建时用） */
   from_torrent?: { site: string; torrent_id: string; title?: string };
 }
@@ -4581,6 +4595,43 @@ export interface ExplorePage {
   items: ExploreItem[];
   page: number;
   total_pages: number;
+}
+
+/**
+ * 探索页的列表：两边都有本周趋势、热门、高分；电影另有正在上映、即将上映，剧集另有正在播出、今天播出；
+ * discover 按出品国家与类型发现，search 按名字搜
+ */
+export type ExploreList =
+  | "trending"
+  | "popular"
+  | "top_rated"
+  | "now_playing"
+  | "upcoming"
+  | "on_the_air"
+  | "airing_today"
+  | "discover"
+  | "search";
+
+/** 番剧日历的一天：weekday 1 是星期一，7 是星期日 */
+export interface BangumiDay {
+  weekday: number;
+  name: string;
+  items: BangumiCalendarItem[];
+}
+
+/** 番剧日历里的一部动画（Bangumi 的条目） */
+export interface BangumiCalendarItem {
+  id: number;
+  name: string;
+  name_cn?: string;
+  air_date?: string;
+  /** 封面（Bangumi 的 https 图片地址） */
+  image?: string;
+  score?: number;
+  votes?: number;
+  rank?: number;
+  /** 在看的人数 */
+  watching?: number;
 }
 
 /** 按条目搜索的请求（POST /api/media/search，只读） */
@@ -4869,6 +4920,19 @@ export interface SeasonEpisode {
   library_issue?: { id: number };
 }
 
+/** TMDB 上一部剧的一个剧集组（GET /api/media/items/tv/{tmdb_id}/episode-groups）：另一种排法，例如绝对集号、DVD 的分季 */
+export interface EpisodeGroup {
+  id: string;
+  name: string;
+  /** 1 播出日期、2 绝对集号、3 DVD、4 数字发行、5 故事线、6 制作顺序、7 电视台 */
+  type: number;
+  description?: string;
+  group_count: number;
+  episode_count: number;
+  /** 这种排法所属的电视台或平台 */
+  network?: string;
+}
+
 /** 剧集的一季（GET /api/media/items/tv/{tmdb_id}/seasons/{n}） */
 export interface SeasonDetail {
   tmdb_id: number;
@@ -5102,15 +5166,27 @@ export const subscribeApi = {
   doubanItems: (id: number) => api.get<DoubanItem[]>(`/api/media/douban-sources/${id}/items`),
   explore: (q: {
     kind: MediaKind;
-    list: "trending" | "popular" | "search";
+    list: ExploreList;
     page?: number;
     q?: string;
+    /** 按条件发现（list 是 discover）时的出品国家（例如 CN）与类型编号（几个用 | 隔开） */
+    country?: string;
+    genres?: string;
   }) => {
     const params = new URLSearchParams({ kind: q.kind, list: q.list });
     if (q.page) params.set("page", String(q.page));
     if (q.q) params.set("q", q.q);
+    if (q.country) params.set("country", q.country);
+    if (q.genres) params.set("genres", q.genres);
     return api.get<ExplorePage>(`/api/media/explore?${params.toString()}`);
   },
+  /** 番剧日历：Bangumi 的每日放送（星期一到星期日，缓存 6 小时） */
+  bangumiCalendar: () => api.get<{ days: BangumiDay[] }>("/api/media/explore/bangumi"),
+  /** 番剧日历里的一部在 TMDB 上对应的剧集；找不到时 404，错误里写明搜过的名字 */
+  bangumiTMDB: (id: number) =>
+    api.get<{ media_type: MediaKind; tmdb_id: number; title: string }>(
+      `/api/media/explore/bangumi/${id}`,
+    ),
   /** 按条目搜索：只读，不推送；站点多时要十几秒到一分钟 */
   searchMedia: (data: MediaSearchInput) => api.post<MediaSearchResult>("/api/media/search", data),
   /** 黑名单：全部拉黑的种子，新的在前 */
@@ -5125,6 +5201,9 @@ export const subscribeApi = {
   /** 剧集一季的每一集（只读） */
   itemSeason: (id: number, n: number) =>
     api.get<SeasonDetail>(`/api/media/items/tv/${id}/seasons/${n}`),
+  /** 剧集在 TMDB 上的剧集组（追剧里选种子按哪个剧集组写季集） */
+  episodeGroups: (id: number) =>
+    api.get<{ groups: EpisodeGroup[] }>(`/api/media/items/tv/${id}/episode-groups`),
   /** 删除一部片的预览：库里的文件、关联的种子与能不能删、订阅、问题 */
   deletePreview: (sel: DeleteSelector) =>
     api.post<DeletePreview>("/api/media/items/delete/preview", sel),

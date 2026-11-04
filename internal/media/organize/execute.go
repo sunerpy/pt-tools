@@ -342,8 +342,10 @@ func (s *Service) writeRecord(ctx context.Context, p *Plan, it *PlanItem, trigge
 // writeRecordIn 同 writeRecord，写进 db（替换旧版本时是事务）。
 func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *PlanItem, trigger, status, msg string, retry bool, fileID string, extras []extra) error {
 	now := s.cfg.Now()
-	if p.matchNote != "" {
-		msg = strings.TrimSuffix(p.matchNote+"；"+msg, "；")
+	for _, note := range []string{it.groupNote, p.matchNote} {
+		if note != "" {
+			msg = strings.TrimSuffix(note+"；"+msg, "；")
+		}
 	}
 	row := models.MediaTransferHistory{
 		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, WatchDirID: p.WatchDirID, InfoHash: p.Hash, TaskID: p.TaskID,

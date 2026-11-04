@@ -54,6 +54,8 @@ func (s *Server) registerSubscribeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/media/douban-sources/{id}/fetch", s.auth(s.apiDoubanSourceFetch))
 	mux.HandleFunc("GET /api/media/douban-sources/{id}/items", s.auth(s.apiDoubanSourceItems))
 	mux.HandleFunc("GET /api/media/explore", s.auth(s.apiMediaExplore))
+	mux.HandleFunc("GET /api/media/explore/bangumi", s.auth(s.apiMediaBangumiCalendar))
+	mux.HandleFunc("GET /api/media/explore/bangumi/{id}", s.auth(s.apiMediaBangumiTMDB))
 	mux.HandleFunc("POST /api/media/search", s.auth(s.apiMediaSearch))
 }
 
@@ -400,7 +402,8 @@ func (s *Server) apiDoubanSourceItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// apiMediaExplore handles GET /api/media/explore?kind=movie|tv&list=trending|popular|search&page=&q=
+// apiMediaExplore handles GET /api/media/explore?kind=movie|tv&list=<列表>|discover|search&page=&q=&country=&genres=
+// 列表见 tmdb.HasList；discover 按 country（出品国家，例如 CN）与 genres（TMDB 类型编号，几个用 | 隔开）筛。
 func (s *Server) apiMediaExplore(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.subscribeService(w)
 	if !ok {
@@ -416,7 +419,46 @@ func (s *Server) apiMediaExplore(w http.ResponseWriter, r *http.Request) {
 		}
 		page = n
 	}
-	got, err := svc.Explore(r.Context(), q.Get("kind"), q.Get("list"), page, q.Get("q"))
+	var got *subscribe.ExplorePage
+	var err error
+	if q.Get("list") == subscribe.ExploreDiscover {
+		got, err = svc.Discover(r.Context(), q.Get("kind"), subscribe.ExploreFilter{Country: q.Get("country"), Genres: q.Get("genres")}, page)
+	} else {
+		got, err = svc.Explore(r.Context(), q.Get("kind"), q.Get("list"), page, q.Get("q"))
+	}
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiMediaBangumiCalendar handles GET /api/media/explore/bangumi：Bangumi 的每日放送（星期一到星期日）。
+func (s *Server) apiMediaBangumiCalendar(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	days, err := svc.BangumiCalendar(r.Context())
+	if err != nil {
+		http.Error(w, "读不到 Bangumi 的番剧日历："+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"days": days})
+}
+
+// apiMediaBangumiTMDB handles GET /api/media/explore/bangumi/{id}：番剧日历里的一部动画在 TMDB 上对应的剧集，找不到时 404。
+func (s *Server) apiMediaBangumiTMDB(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id <= 0 {
+		http.Error(w, "Bangumi 编号不对", http.StatusBadRequest)
+		return
+	}
+	got, err := svc.BangumiToTMDB(r.Context(), id)
 	if err != nil {
 		writeSubscribeError(w, err)
 		return

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -98,17 +99,35 @@ func (s *Service) genresFor(ctx context.Context, sub *models.MediaSubscription) 
 	return d.GenreIDs
 }
 
-// mapperFor 是这个追剧的集号映射（TMDB 这一季的集列表与用户、AI 设的规则）。
+// mapperFor 是这个追剧的集号映射（TMDB 这一季的集列表与用户、AI 设的规则，选了剧集组时加上剧集组）。
+// season 为空时只有剧集组的换算（没选剧集组时是 nil）。
 func (s *Service) mapperFor(ctx context.Context, sub *models.MediaSubscription, season *tmdb.Season) *episodeMapper {
-	if sub.MediaType != models.MediaKindTV || season == nil {
+	if sub.MediaType != models.MediaKindTV {
 		return nil
 	}
-	var rules []models.MediaEpisodeRule
-	if err := s.cfg.DB.WithContext(ctx).Where("subscription_id = ?", sub.ID).Find(&rules).Error; err != nil {
-		s.cfg.Logger.Warnf("[订阅] 读取集号规则失败: %v", err)
+	var mp *episodeMapper
+	if season != nil {
+		var rules []models.MediaEpisodeRule
+		if err := s.cfg.DB.WithContext(ctx).Where("subscription_id = ?", sub.ID).Find(&rules).Error; err != nil {
+			s.cfg.Logger.Warnf("[订阅] 读取集号规则失败: %v", err)
+		}
+		mp = newEpisodeMapper(newEpisodeIndex(season, s.genresFor(ctx, sub)), rules)
+		mp.today = s.cfg.Now().In(time.Local).Format(time.DateOnly)
 	}
-	mp := newEpisodeMapper(newEpisodeIndex(season, s.genresFor(ctx, sub)), rules)
-	mp.today = s.cfg.Now().In(time.Local).Format(time.DateOnly)
+	if sub.EpisodeGroupID != "" {
+		if mp == nil {
+			mp = newEpisodeMapper(nil, nil)
+		}
+		mp.season = sub.Season
+		g, err := s.episodeGroupFor(ctx, sub)
+		switch {
+		case errors.Is(err, tmdb.ErrNotFound):
+			mp.groupErr = "TMDB 上找不到追剧选的剧集组（可能被删了）：在追剧的「修改」里换一个剧集组或不用剧集组"
+		case err != nil:
+			mp.groupErr = "读不到剧集组：" + err.Error()
+		}
+		mp.group = g
+	}
 	return mp
 }
 
@@ -311,7 +330,7 @@ func (s *Service) adopt(ctx context.Context, sub *models.MediaSubscription, set 
 		if !useful {
 			continue
 		}
-		eps, sure := s.selectedEpisodes(ctx, mp, dl, t, sp)
+		eps, sure := s.selectedEpisodes(ctx, mp.forTorrent(m), dl, t, sp)
 		if !sure {
 			step(ctx, stepInfo, "%s：种子名写的是整季，读不到下载器里的文件列表，认不出有哪几集，这次不认领", t.Name)
 			continue

@@ -1002,7 +1002,8 @@ watch(
   padding: 0 10px 8px 22px;
   font-size: 12px;
   color: var(--pt-t2);
-  word-break: break-all;
+  /* 种子名这类连着的长串放不下时才断开，「127 tokens」这样的词不从中间断 */
+  overflow-wrap: anywhere;
 }
 
 .sdd__step-kind {

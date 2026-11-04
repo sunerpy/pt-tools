@@ -38,6 +38,14 @@ type Settings struct {
 	TodayEnabled  bool   `json:"today_enabled"`
 	TodayTime     string `json:"today_time"`
 	TodayChannels []uint `json:"today_channels"`
+	// SubdirEnabled 为真时下载时按条目建子目录：订阅推送的种子放进保存路径（没有时是下载器的默认保存路径）下按 SubdirTemplate
+	// 起名的一级子目录（见 subdir.go）；SubdirTemplate 空着保存时按 DefaultSubdirTemplate
+	SubdirEnabled  bool   `json:"subdir_enabled"`
+	SubdirTemplate string `json:"subdir_template"`
+	// AIReviewEnabled 为真时推送一个候选以前让 AI 助手的模型复核是不是要的条目（见 review.go）；AIReviewScope 是
+	// ReviewByName（只复核按名字对上的，默认）或 ReviewAll
+	AIReviewEnabled bool   `json:"ai_review_enabled"`
+	AIReviewScope   string `json:"ai_review_scope"`
 }
 
 func decodeIDs(raw string) []uint {
@@ -75,6 +83,14 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		DefaultProfileID: row.DefaultProfileID, DefaultDownloaderID: row.DefaultDownloaderID,
 		NotifyChannels: orEmpty(decodeIDs(row.NotifyChannels)), UpgradeOld: row.UpgradeOld,
 		TodayEnabled: row.TodayEnabled, TodayTime: row.TodayTime, TodayChannels: orEmpty(decodeIDs(row.TodayChannels)),
+		SubdirEnabled: row.SubdirEnabled, SubdirTemplate: row.SubdirTemplate,
+		AIReviewEnabled: row.AIReviewEnabled, AIReviewScope: row.AIReviewScope,
+	}
+	if out.AIReviewScope == "" {
+		out.AIReviewScope = ReviewByName
+	}
+	if out.SubdirTemplate == "" {
+		out.SubdirTemplate = DefaultSubdirTemplate
 	}
 	if out.TodayTime == "" {
 		out.TodayTime = defaultTodayTime
@@ -106,7 +122,7 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 		return Settings{}, err
 	}
 	if in.DefaultProfileID != 0 {
-		if _, err := s.profileRow(ctx, in.DefaultProfileID); err != nil {
+		if _, perr := s.profileRow(ctx, in.DefaultProfileID); perr != nil {
 			return Settings{}, fmt.Errorf("%w: 默认的质量档案不存在", ErrInvalid)
 		}
 	}
@@ -120,17 +136,31 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 	if cerr != nil {
 		return Settings{}, fmt.Errorf("%w: 今日更新的推送时刻要写成 HH:MM（例如 09:00）", ErrInvalid)
 	}
+	tpl, err := cleanSubdirTemplate(in.SubdirTemplate)
+	if err != nil {
+		return Settings{}, err
+	}
+	switch in.AIReviewScope {
+	case "":
+		in.AIReviewScope = ReviewByName
+	case ReviewByName, ReviewAll:
+	default:
+		return Settings{}, fmt.Errorf("%w: AI 复核的范围要选只复核按名字对上的或全部", ErrInvalid)
+	}
 	row := models.MediaSubscribeSetting{
 		ID: 1, Enabled: in.Enabled, SearchIntervalHours: in.SearchIntervalHours, SearchSkipSites: encodeList(sites),
 		DefaultProfileID: in.DefaultProfileID, DefaultDownloaderID: in.DefaultDownloaderID,
 		NotifyChannels: encodeIDs(in.NotifyChannels), UpgradeOld: in.UpgradeOld,
-		TodayEnabled: in.TodayEnabled, TodayTime: fmt.Sprintf("%02d:%02d", h, m), TodayChannels: encodeIDs(in.TodayChannels), UpdatedAt: s.cfg.Now(),
+		TodayEnabled: in.TodayEnabled, TodayTime: fmt.Sprintf("%02d:%02d", h, m), TodayChannels: encodeIDs(in.TodayChannels),
+		SubdirEnabled: in.SubdirEnabled, SubdirTemplate: tpl,
+		AIReviewEnabled: in.AIReviewEnabled, AIReviewScope: in.AIReviewScope, UpdatedAt: s.cfg.Now(),
 	}
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"enabled", "search_interval_hours", "search_skip_sites", "default_profile_id", "default_downloader_id", "notify_channels", "upgrade_old",
-			"today_enabled", "today_time", "today_channels", "updated_at",
+			"today_enabled", "today_time", "today_channels", "subdir_enabled", "subdir_template", "ai_review_enabled", "ai_review_scope",
+			"updated_at",
 		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存订阅设置失败: %w", err)
@@ -392,6 +422,8 @@ type SubscriptionInput struct {
 	LibraryID *uint `json:"library_id,omitempty"`
 	// TotalEpisodes 是手动填的这一季的集数：大于 0 时以它为准，0 改回按 TMDB
 	TotalEpisodes *int `json:"total_episodes,omitempty"`
+	// EpisodeGroupID 是种子按 TMDB 的哪个剧集组写季集（见 models.MediaSubscription）：空串是不用剧集组，要是这部剧的剧集组
+	EpisodeGroupID *string `json:"episode_group_id,omitempty"`
 	// FromTorrent 是「从这个种子开始追」：只在新建时用
 	FromTorrent *FromTorrent `json:"from_torrent,omitempty"`
 }
@@ -478,6 +510,9 @@ func (in SubscriptionInput) check(s *Service, ctx context.Context) error {
 	if (in.LockGroup != nil && utf8.RuneCountInString(*in.LockGroup) > 64) || (in.LockResolution != nil && len(*in.LockResolution) > 16) {
 		return fmt.Errorf("%w: 锁住的版本太长", ErrInvalid)
 	}
+	if in.EpisodeGroupID != nil && strings.TrimSpace(*in.EpisodeGroupID) != "" && in.MediaType == models.MediaKindMovie {
+		return fmt.Errorf("%w: 电影没有剧集组", ErrInvalid)
+	}
 	if in.FromTorrent != nil {
 		f := in.FromTorrent
 		if strings.TrimSpace(f.Site) == "" || strings.TrimSpace(f.TorrentID) == "" || len(f.Site) > 64 || len(f.TorrentID) > 128 || utf8.RuneCountInString(f.Title) > 512 {
@@ -560,9 +595,9 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		row.ExcludeKeywords = strings.TrimSpace(*in.ExcludeKeywords)
 	}
 	if in.Schedule != nil {
-		sc, err := in.Schedule.normalize(in.MediaType)
-		if err != nil {
-			return nil, err
+		sc, serr := in.Schedule.normalize(in.MediaType)
+		if serr != nil {
+			return nil, serr
 		}
 		sc.apply(row)
 	}
@@ -584,6 +619,11 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		}
 		if in.TotalEpisodes != nil && *in.TotalEpisodes > 0 {
 			row.TotalEpisodes, row.TotalEpisodesManual = *in.TotalEpisodes, true
+		}
+		if in.EpisodeGroupID != nil {
+			if row.EpisodeGroupID, err = s.cleanEpisodeGroup(ctx, in.TMDBID, *in.EpisodeGroupID); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if in.LibraryID != nil {
@@ -733,6 +773,15 @@ func (s *Service) UpdateSubscription(ctx context.Context, id uint, in Subscripti
 				upd["total_episodes_manual"] = false
 				searchSoon = searchSoon || row.TotalEpisodesManual
 			}
+		}
+		// 换了剧集组：种子对上的集不一样了，尽快搜一次
+		if in.EpisodeGroupID != nil && strings.TrimSpace(*in.EpisodeGroupID) != row.EpisodeGroupID {
+			var g string
+			if g, err = s.cleanEpisodeGroup(ctx, row.TMDBID, *in.EpisodeGroupID); err != nil {
+				return nil, err
+			}
+			upd["episode_group_id"] = g
+			searchSoon = true
 		}
 	}
 	followChanged := searchSoon || rescheduled

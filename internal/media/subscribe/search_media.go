@@ -551,6 +551,13 @@ func (s *Service) episodeStates(ctx context.Context, sub *models.MediaSubscripti
 	}
 	for _, t := range pushed {
 		m := s.parse(ctx, t.Title, "")
+		if mp.grouped() {
+			out, r := mp.regroup(m)
+			if r.other || r.reject != "" {
+				continue
+			}
+			m = out
+		}
 		sp := span{Whole: true}
 		if m.Episode > 0 {
 			sp = span{Start: m.Episode, End: max(m.EpisodeEnd, m.Episode)}

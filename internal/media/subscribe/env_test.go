@@ -345,6 +345,18 @@ type fakeDL struct {
 	priorities []prioCall
 	prioErr    error
 	noSelect   bool
+	// paths 是下载器设置里的保存路径（GetClientPaths）；pathsErr 不为空时读不出来
+	paths    []string
+	pathsErr error
+}
+
+func (f *fakeDL) GetClientPaths() ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pathsErr != nil {
+		return nil, f.pathsErr
+	}
+	return append([]string(nil), f.paths...), nil
 }
 
 type prioCall struct {

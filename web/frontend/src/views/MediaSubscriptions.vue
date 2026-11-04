@@ -174,6 +174,10 @@ const sform = ref<SubscribeSettings>({
   today_enabled: false,
   today_time: "09:00",
   today_channels: [],
+  subdir_enabled: false,
+  subdir_template: "{title} ({year})",
+  ai_review_enabled: false,
+  ai_review_scope: "name",
 });
 const settingsFailed = ref(false);
 const savingSettings = ref(false);
@@ -805,6 +809,53 @@ onBeforeUnmount(() => clearInterval(autoTimer));
                 <div class="field-tip">不选时推送到上面「通知」选的通道</div>
               </el-form-item>
             </div>
+            <!-- 媒体中心 M9b：订阅推送的种子放进按条目起名的子目录 -->
+            <el-form-item label="下载时按条目建子目录">
+              <div class="ms-switch">
+                <el-switch v-model="sform.subdir_enabled" data-testid="ms-subdir" />
+                <span>订阅推送的种子放进保存路径下的一级子目录，例如「最后生还者 (2023)」</span>
+              </div>
+              <div class="field-tip">
+                订阅没填保存路径时建在下载器的默认保存路径下，下载器照这个目录放（qBittorrent
+                这几个种子不用自动管理）。自动整理限了「保存路径」时，范围要包含这些子目录
+              </div>
+            </el-form-item>
+            <el-form-item v-if="sform.subdir_enabled" label="子目录名">
+              <el-input
+                v-model="sform.subdir_template"
+                maxlength="255"
+                placeholder="{title} ({year})"
+                data-testid="ms-subdir-template" />
+              <div class="field-tip">
+                可以用
+                {title}（标题）、{original_title}（原名）、{year}（年份，剧集是首播年份）、{season}（季）、{tmdb_id}；名字里不能用的字符会换掉，空着是
+                {title} ({year})
+              </div>
+            </el-form-item>
+            <!-- 媒体中心 M9b：推送前让 AI 助手的模型复核候选是不是要的条目 -->
+            <el-form-item label="下载前让 AI 复核">
+              <div class="ms-switch">
+                <el-switch v-model="sform.ai_review_enabled" data-testid="ms-ai-review" />
+                <span
+                  >推送订阅找到的种子以前，问 AI
+                  助手的模型是不是这部片（剧集还要是这一季），说不是的不推</span
+                >
+              </div>
+              <div class="field-tip">
+                要先在
+                <router-link to="/assistant/settings" data-testid="ms-ai-review-link"
+                  >AI 助手设置</router-link
+                >
+                里配好并启用。每个种子要等模型回答，会用掉 token；每次搜索最多问 10 个，同一个种子
+                24 小时内不重复问。模型出错时照常推送，写进运行记录
+              </div>
+            </el-form-item>
+            <el-form-item v-if="sform.ai_review_enabled" label="复核哪些">
+              <el-select v-model="sform.ai_review_scope" data-testid="ms-ai-review-scope">
+                <el-option value="name" label="只复核按名字对上的（按 IMDb 编号对上的不问）" />
+                <el-option value="all" label="全部" />
+              </el-select>
+            </el-form-item>
             <el-button
               type="primary"
               :loading="savingSettings"

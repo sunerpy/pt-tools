@@ -15,6 +15,9 @@ const api = vi.hoisted(() => ({
   explore: vi.fn(),
   searchMedia: vi.fn(),
   profiles: vi.fn(),
+  subSettings: vi.fn(() =>
+    Promise.resolve({ subdir_enabled: false, subdir_template: "{title} ({year})" }),
+  ),
 }));
 
 vi.mock("@/api", async (orig) => {
@@ -42,6 +45,7 @@ vi.mock("@/api", async (orig) => {
       explore: api.explore,
       searchMedia: api.searchMedia,
       profiles: api.profiles,
+      settings: api.subSettings,
     },
     // 等免费与黑名单（M2b）另有 torrentSearchBlockWatch.test.ts；这里只给空的，不发真请求
     freeWatchApi: { ...real.freeWatchApi, sites: vi.fn(() => Promise.resolve({ sites: [] })) },
@@ -358,6 +362,50 @@ describe("按条目搜索", () => {
       tmdbId: 231620,
       season: 2,
     });
+  });
+
+  it("按条目推送：「按条目建子目录」默认跟订阅设置，关掉了不带", async () => {
+    viewport("wide");
+    api.subSettings.mockResolvedValue({
+      subdir_enabled: true,
+      subdir_template: "{title} [{tmdb_id}]",
+    });
+    api.push.mockResolvedValue({
+      success: true,
+      results: [
+        {
+          downloaderId: 1,
+          downloaderName: "qb",
+          success: true,
+          message: "推送成功；放进 /downloads/长夜 [231620]",
+        },
+      ],
+    });
+    const input = await mountPage();
+    await pickEntry(input);
+    const card = () => document.querySelector("[data-testid='es-card-h:aaa']")!;
+    card().querySelector<HTMLButtonElement>("[data-testid^='es-push-']")!.click();
+    const dialog = () => document.querySelector(".el-dialog")!;
+    await vi.waitFor(() =>
+      expect(dialog().querySelector("[data-testid='push-item-subdir']")).not.toBeNull(),
+    );
+    const sw = () => dialog().querySelector<HTMLElement>("[data-testid='push-item-subdir']")!;
+    await vi.waitFor(() => expect(sw().classList.contains("is-checked")).toBe(true));
+    expect(dialog().textContent).toContain("「{title} [{tmdb_id}]」");
+    buttonByText("推送", dialog()).click();
+    await vi.waitFor(() => expect(api.push).toHaveBeenCalledTimes(1));
+    expect(api.push.mock.calls[0]![0]).toMatchObject({ tmdbId: 231620, itemSubdir: true });
+
+    card().querySelector<HTMLButtonElement>("[data-testid^='es-push-']")!.click();
+    // 等这次打开读完设置、页面更新以后再动开关（上一次的勾还在页面上）
+    await vi.waitFor(() => expect(api.subSettings).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 0));
+    await vi.waitFor(() => expect(sw().classList.contains("is-checked")).toBe(true));
+    (sw().querySelector("input") ?? sw()).click();
+    await vi.waitFor(() => expect(sw().classList.contains("is-checked")).toBe(false));
+    buttonByText("推送", dialog()).click();
+    await vi.waitFor(() => expect(api.push).toHaveBeenCalledTimes(2));
+    expect(api.push.mock.calls[1]![0].itemSubdir).toBeUndefined();
   });
 
   it("整组库里都有的卡默认折叠，点了展开", async () => {

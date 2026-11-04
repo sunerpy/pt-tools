@@ -139,6 +139,8 @@ func TestKeywords(t *testing.T) {
 	assert.Equal(t, []string{"Sousou no Frieren S01", "葬送的芙莉莲"}, keywords(tv), "原名不是拉丁字母时用英文别名；中文名不加季")
 	same := &models.MediaSubscription{MediaType: models.MediaKindMovie, Title: "Heat", OriginalTitle: "Heat", Year: 1995}
 	assert.Equal(t, []string{"Heat 1995"}, keywords(same))
+	tv.Season, tv.EpisodeGroupID = 2, "5b11ba820e0a265a53000ce9"
+	assert.Equal(t, []string{"Sousou no Frieren", "葬送的芙莉莲"}, keywords(tv), "选了剧集组时不加季：种子按剧集组写季集")
 }
 
 // 电影：搜到的种子里挑档案里分最高的推送，记下；下载过以后不再推（没开洗版）

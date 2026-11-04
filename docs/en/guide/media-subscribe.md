@@ -12,7 +12,7 @@ The pages are Media → Explore (媒体 → 探索) and Media → Follow and sub
 
 ## Subscribing
 
-On the Explore page, browse TMDB's trending-this-week and popular lists, or search by name, and click Subscribe (订阅) under a film or Follow (追剧) under a series. Titles you have already subscribed to show Subscribed (已订阅); titles already in your library show In library (已入库). For a series, pick the season; leave it empty for the latest season. Each season can have one subscription; follow again for another season. A series also has follow settings, see Following a series below. Click a poster or a name to open its [title details](media-detail.md) with the title's details, how many episodes are in the library and the torrents downloaded for it.
+On the Explore page, browse TMDB's lists (trending this week, popular and top rated; now playing and upcoming for films, on the air and airing today for series), [find by country and genre](#explore), or search by name, and click Subscribe (订阅) under a film or Follow (追剧) under a series. Titles you have already subscribed to show Subscribed (已订阅); titles already in your library show In library (已入库). For a series, pick the season; leave it empty for the latest season. Each season can have one subscription; follow again for another season. A series also has follow settings, see Following a series below. Click a poster or a name to open its [title details](media-detail.md) with the title's details, how many episodes are in the library and the torrents downloaded for it.
 
 | Option                                              | Description                                                                                                                                                                                                                                                                                                                                                                       |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -23,6 +23,12 @@ On the Explore page, browse TMDB's trending-this-week and popular lists, or sear
 | Category, Tags (分类、标签)                         | Sent to the downloader with the torrent                                                                                                                                                                                                                                                                                                                                           |
 | Save folder (保存目录)                              | As the downloader sees it; pick one of the downloader's preset folders or type a path; leave empty for the downloader's default folder                                                                                                                                                                                                                                            |
 | Upgrade (洗版)                                      | Keep looking for higher-scoring releases after the first download, see Upgrades below                                                                                                                                                                                                                                                                                             |
+
+### Explore
+
+Find by country and genre (按国家与类型找) lists TMDB's films or series by country or region of origin (mainland China, Hong Kong, Taiwan, Japan, South Korea, the United States, the United Kingdom) and genre (animation and documentary; series also have variety, which is TMDB's reality and talk genres), sorted by popularity; either filter can be left open. TMDB lists and search results are cached for 6 hours.
+
+The anime calendar (番剧日历) lists, day by day, the anime of the current season in the daily schedule of [Bangumi](https://bgm.tv), starting on today; the data is cached for 6 hours. When you click a title, pt-tools strips suffixes such as 第二季, 第2期 or 2nd Season from its Chinese and original names and looks the series up on TMDB: only animation counts, and its first air year may be at most one year after this season started. When exactly one result has the same Chinese or original name, it is used; when none has the same name, a single result whose name starts with the other is used. A match opens the [title details](media-detail.md), where you can follow it; when pt-tools is not sure or finds nothing, it names the titles it searched for, and Search by name (按名字搜索) lets you pick on TMDB yourself.
 
 You can also subscribe from the bot: send `/sub <name>` and reply with a number from the list; for a series, add a season after the number, for example `2 3` subscribes to season 3 of the second title. `/follow <show>` (or `/追剧`) lists series only and uses the follow defaults. `/subs` lists your subscriptions with their IDs, progress and next search, and `/runs <id>` shows the latest runs. `/sub` and `/follow` are admin-only, see the [ChatOps quick start](chatops-quickstart.md).
 
@@ -88,6 +94,15 @@ Many variety shows split one issue into two TMDB episodes, while torrents on the
 
 When a release group's numbering is converted wrongly, give it a rule under Episode-number rules (集号规则) in the follow details: by the TMDB episode number, by issue and part, by air date, or an offset (TMDB episode = the number in the title + offset). A rule without a group applies to every group. A search under the new rule runs within a minute.
 
+### Episode groups
+
+Besides the default seasons, a series on TMDB can have other orderings, called episode groups: absolute numbering, common for anime (episode 25), or seasons as split on DVD or at broadcast. When the torrents on the sites number episodes in another ordering, choose that episode group of the series under Edit (修改) of the followed series; the option only shows when the series has episode groups on TMDB.
+
+- Seasons and episodes in torrent titles and file names are first converted from the episode group to TMDB's default seasons, then matched and mapped. A title that only gives an episode number (season taken as 1) counts in the group's first part, so absolute episode 25 becomes season 2, episode 1. Active search leaves the season off the English title (torrents number episodes by the group, so TMDB's season number would find nothing).
+- Progress, the calendar and the title details, as well as the file names and scraping in the library, all use TMDB's default seasons.
+- An episode the group does not list is counted by TMDB's default seasons, noted in the run history and the organise record. When matching a torrent, converted episodes that are not consecutive mean the torrent is not used; when organising, converted episodes that span two seasons or are not consecutive are organised by the season and episode in the file name.
+- When the episode group cannot be read (TMDB temporarily unavailable), torrents are not matched by the group in this round, and organising is retried later. When the group has been deleted on TMDB, this is reported; choose another group or none under Edit.
+
 ### Run history
 
 Every active search, RSS match, creation and change by hand (marked Changed, 改动) records a run: how many torrents were found on which sites, which torrents were skipped and why (fails the quality profile, not the locked version, episode number does not match…), and what was pushed. Click a run in the follow details to see the steps, or send `/runs <id>` to the bot. Each subscription keeps its latest 100 runs for at most 90 days.
@@ -119,7 +134,7 @@ These torrents are also organised as the subscription's item instead of being re
 Two sources feed every subscription, and the results are picked together:
 
 - **RSS**: items fetched by your existing [RSS subscriptions](rss-subscription.md) are also checked against your subscriptions once their details are fetched. This works independently of the RSS filter rules: a torrent that matches a subscription is pushed by the subscription.
-- **Active search**: films and series on the global interval are searched once per Search interval (主动搜索的间隔), 12 hours by default and at least 6, plus up to 30 minutes of random offset so that the subscriptions do not all search at once; followed series search on their own schedule (see Following a series above). It searches by the English or original title first (with the year for films and the season for series, such as `The Last of Us S02`), then by the Chinese title. A subscription limited to certain sites only searches those; sites under Sites skipped by active search (不参与主动搜索的站点) only contribute through RSS.
+- **Active search**: films and series on the global interval are searched once per Search interval (主动搜索的间隔), 12 hours by default and at least 6, plus up to 30 minutes of random offset so that the subscriptions do not all search at once; followed series search on their own schedule (see Following a series above). It searches by the English or original title first (with the year for films and the season for series, such as `The Last of Us S02`; a series with an [episode group](#episode-groups) gets no season), then by the Chinese title. A subscription limited to certain sites only searches those; sites under Sites skipped by active search (不参与主动搜索的站点) only contribute through RSS.
 
 To see which releases the sites have right now and pick one yourself, use [search by title](torrent-search.md#search-by-title) on the Torrent search page: it searches and matches the same way, scores releases with the subscription's quality profile and says which episodes each one would fill in.
 
@@ -133,6 +148,28 @@ A torrent matches a subscription when:
 The chosen torrent goes through the same push as RSS: disk space protection and site seeding capacity still apply, and the torrent record shows the source Subscription (订阅). A torrent is pushed once per subscription; a failed push, including one stopped by disk space protection or site seeding capacity, is not recorded, so the next search tries again.
 
 Downloading the torrent file is retried twice, with exponential backoff (about 2 and then 4 seconds, each retry first waiting for the site's rate limit), after a temporary network error (connection reset, timeout) or a server error (5xx). This applies to every site; for sites that first fetch a download address (M-Team, NexusPHP) only that address is fetched again. A site whose download fails twice in a row in one round is skipped for the rest of the round. A round pushes at most 10 torrents, failed ones included. When torrent files could not be downloaded, the limit was reached with episodes still missing, or a search by hand ran out of time, the next search moves up to 30 minutes later, doubling (1, 2, 4 hours) while runs keep failing; an earlier regular search time is kept. A torrent from RSS whose file could not be downloaded moves the next active search up the same way.
+
+## Review by AI before downloading
+
+Turn on Review with AI before downloading (下载前让 AI 复核, off by default) in the subscription settings (订阅设置), and before pushing a torrent a subscription found, pt-tools gives the model of the [AI assistant](assistant.md) the subscription's title, original title, year (for a series, the year the season started), season and alternative titles, plus the torrent's title, subtitle and parsed details (for a series, also the season and episodes it matched), and asks whether the torrent is this title (and, for a series, this season), expecting yes or no and one sentence of reasoning. Set up and enable a model in the AI assistant settings (AI 助手设置) first.
+
+- By default only titles matched by name are reviewed (只复核按名字对上的): a torrent matched by IMDb ID, with both it and the subscription carrying one, is not asked about. Choose All (全部) to review every torrent about to be pushed.
+- A torrent the model says no to is not pushed in this round; the run history records `AI 复核：不是` with the reason, and the next candidate is considered (when every season pack gets a no, missing episodes are filled one by one). A torrent it says yes to is pushed as usual, and the run history records the reason and how many tokens the review used.
+- When the model fails (the assistant is not enabled, cannot be reached, or does not answer within 30 seconds), the torrent is pushed as usual, the run history records `AI 复核没做成` with the cause, and the rest of the round's candidates are not reviewed. When the answer is neither yes nor no, only that torrent is pushed without review.
+- Each run asks about 10 torrents at most; when the limit is reached, the remaining candidates wait for the next search, which moves up to 30 minutes later. The verdict for a torrent in a subscription is kept for 24 hours and not asked again (it is asked again after pt-tools restarts).
+- A torrent you chose yourself when [starting from a torrent](#starting-from-a-torrent) is not reviewed.
+
+Every torrent about to be pushed waits for the model's answer and uses the AI assistant's tokens.
+
+## Per-title download folders
+
+Turn on Create a folder per title when downloading (下载时按条目建子目录, off by default) in the subscription settings, and torrents pushed by subscriptions go into a folder named after the title under the save path, such as `/downloads/最后生还者 (2023)`:
+
+- The save path is the subscription's; without one it is the downloader's default save path (the default save path in qBittorrent's settings, Transmission's download-dir). When the downloader's default save path cannot be read, this push creates no folder and the run history says so.
+- The folder name template is `{title} ({year})` by default and can use `{title}`, `{original_title}`, `{year}` (for a series, the year of its first broadcast), `{season}` and `{tmdb_id}`. An unknown value is left empty, empty brackets are removed, and characters not allowed in names are replaced; when the name comes out empty, no folder is created.
+- The downloader keeps the torrent in that folder: qBittorrent also receives `autoTMM=false`, so these torrents are not under automatic management (with automatic management on, qBittorrent ignores the save path); Transmission follows download-dir anyway.
+- The push dialog of search by title has the same Create a folder per title (按条目建子目录) switch, following this setting by default and using the same template; see [search by title](torrent-search.md#search-by-title).
+- Library organising reads the content path the downloader reports and is not affected. When automatic organising is limited by save path, the scope must include these folders; see [when organising runs](media-library.md#when-organising-runs).
 
 ## Quality profiles
 

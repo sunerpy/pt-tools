@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 )
 
 // 条目详情与订阅日历（媒体中心 M3）：一部电影或剧集的资料、库里与做种的情况、订阅、关联的种子与推荐；剧集一季的每一集；
@@ -21,6 +22,7 @@ const mediaDeleteTimeout = 120 * time.Second
 func (s *Server) registerMediaItemRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/media/items/{type}/{tmdb_id}", s.auth(s.apiMediaItem))
 	mux.HandleFunc("GET /api/media/items/tv/{tmdb_id}/seasons/{n}", s.auth(s.apiMediaItemSeason))
+	mux.HandleFunc("GET /api/media/items/tv/{tmdb_id}/episode-groups", s.auth(s.apiMediaItemEpisodeGroups))
 	mux.HandleFunc("POST /api/media/items/delete/preview", s.auth(s.apiMediaItemDeletePreview))
 	mux.HandleFunc("POST /api/media/items/delete", s.auth(s.apiMediaItemDelete))
 	mux.HandleFunc("GET /api/media/calendar", s.auth(s.apiMediaCalendar))
@@ -119,6 +121,30 @@ func (s *Server) apiMediaItemSeason(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, got)
+}
+
+// apiMediaItemEpisodeGroups handles GET /api/media/items/tv/{tmdb_id}/episode-groups：剧集在 TMDB 上的剧集组
+// （追剧的「修改」里选种子按哪个剧集组写季集，见 subscribe.EpisodeGroups）。
+func (s *Server) apiMediaItemEpisodeGroups(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := pathInt(w, r, "tmdb_id")
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), mediaItemTimeout)
+	defer cancel()
+	got, err := svc.EpisodeGroups(ctx, id)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	if got == nil {
+		got = []tmdb.EpisodeGroupSummary{}
+	}
+	writeJSON(w, map[string]any{"groups": got})
 }
 
 // apiMediaCalendar handles GET /api/media/calendar?from=&to=：订阅日历（日期 YYYY-MM-DD，含两头，最多 62 天；

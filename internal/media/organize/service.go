@@ -111,6 +111,8 @@ type MediaHint struct {
 	// MediaType、TMDBID 是订阅的条目
 	MediaType string
 	TMDBID    int
+	// EpisodeGroup 是追剧选的 TMDB 剧集组（空串是没选）：文件名里的季集按它换成 TMDB 默认的季集再命名
+	EpisodeGroup string
 }
 
 // MediaFor 按下载器里种子的编号找订阅推送或认领的种子，回那个订阅的条目与媒体库。不是订阅的种子 found 为假；

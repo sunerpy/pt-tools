@@ -4,7 +4,7 @@
  * 点「订阅」打开订阅弹窗，订阅后刷新列表；剧集点「追剧」，按追剧的默认设置建；读不到时写明原因。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMemoryHistory, createRouter } from "vue-router";
+import { type Router, createMemoryHistory, createRouter } from "vue-router";
 
 import { type MountedView, mountView } from "@/test-mount";
 
@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   explore: vi.fn(),
   profiles: vi.fn(),
   create: vi.fn(),
+  bangumiCalendar: vi.fn(),
+  bangumiTMDB: vi.fn(),
 }));
 const dl = vi.hoisted(() => ({ list: vi.fn() }));
 const sites = vi.hoisted(() => ({ list: vi.fn() }));
@@ -58,6 +60,7 @@ vi.mock("element-plus", async (orig) => {
 });
 
 let view: MountedView | null = null;
+let router: Router;
 afterEach(() => {
   view?.unmount();
   view = null;
@@ -66,6 +69,34 @@ afterEach(() => {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid=${id}]`);
+
+/** 打开下拉框，点文字是 text 的选项 */
+async function pick(id: string, text: string) {
+  const sel = q(id)!;
+  (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+  const listId = sel.querySelector("input")?.getAttribute("aria-controls");
+  await vi.waitFor(() => {
+    const opt = [
+      ...(document
+        .getElementById(listId ?? "")
+        ?.querySelectorAll<HTMLElement>(".el-select-dropdown__item") ?? []),
+    ].find((o) => (o.textContent ?? "").trim() === text);
+    expect(opt, text).toBeTruthy();
+    opt!.click();
+  });
+}
+
+/** 下拉框里现在有哪些选项 */
+function optionTexts(id: string): string[] {
+  const sel = q(id)!;
+  (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+  const listId = sel.querySelector("input")?.getAttribute("aria-controls");
+  return [
+    ...(document
+      .getElementById(listId ?? "")
+      ?.querySelectorAll<HTMLElement>(".el-select-dropdown__item") ?? []),
+  ].map((o) => (o.textContent ?? "").trim());
+}
 
 const page = (items: unknown[]) => ({ items, page: 1, total_pages: 3 });
 const dune = {
@@ -102,7 +133,7 @@ async function mountPage(fail = false) {
   dl.list.mockResolvedValue([{ id: 1, name: "qb", enabled: true }]);
   sites.list.mockResolvedValue({ hdsky: { enabled: true }, off: { enabled: false } });
   const Page = (await import("./MediaExplore.vue")).default;
-  const router = createRouter({
+  router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: "/:p(.*)*", component: { render: () => null } }],
   });
@@ -150,7 +181,7 @@ describe("探索", () => {
 
   it("搜索：没填名字时不取，填了回车搜", async () => {
     await mountPage();
-    (q("ex-list")!.querySelectorAll("input")[2] as HTMLInputElement).click();
+    await pick("ex-list", "搜索");
     await flush();
     expect(api.explore).toHaveBeenCalledTimes(1);
     expect(q("ex-state")!.textContent).toContain("输入名字搜索");
@@ -175,7 +206,7 @@ describe("探索", () => {
     api.explore.mockReturnValueOnce(new Promise((r) => (resolve = r)));
     (q("ex-kind")!.querySelectorAll("input")[1] as HTMLInputElement).click();
     await flush();
-    (q("ex-list")!.querySelectorAll("input")[2] as HTMLInputElement).click();
+    await pick("ex-list", "搜索");
     await flush();
     resolve(page([{ ...dune, id: 1, media_type: "tv", title: "迟到的剧集" }]));
     await flush();
@@ -259,5 +290,182 @@ describe("探索", () => {
   it("读不到时写明原因", async () => {
     await mountPage(true);
     expect(q("ex-state")!.textContent).toContain("TMDB 暂时不能访问");
+  });
+
+  it("更多列表：电影有正在上映，换成剧集时没有的列表换回本周趋势", async () => {
+    await mountPage();
+    expect(optionTexts("ex-list")).toEqual([
+      "本周趋势",
+      "热门",
+      "正在上映",
+      "即将上映",
+      "高分",
+      "按国家与类型找",
+      "搜索",
+    ]);
+    await pick("ex-list", "正在上映");
+    await vi.waitFor(() =>
+      expect(api.explore).toHaveBeenLastCalledWith({
+        kind: "movie",
+        list: "now_playing",
+        page: 1,
+        q: "",
+      }),
+    );
+    (q("ex-kind")!.querySelectorAll("input")[1] as HTMLInputElement).click();
+    await vi.waitFor(() =>
+      expect(api.explore).toHaveBeenLastCalledWith({
+        kind: "tv",
+        list: "trending",
+        page: 1,
+        q: "",
+      }),
+    );
+    expect(optionTexts("ex-list")).toContain("今天播出");
+    await pick("ex-list", "今天播出");
+    await vi.waitFor(() =>
+      expect(api.explore).toHaveBeenLastCalledWith({
+        kind: "tv",
+        list: "airing_today",
+        page: 1,
+        q: "",
+      }),
+    );
+  });
+
+  it("按国家与类型找：选了才带上；综艺只有剧集有，换成电影时换回不限", async () => {
+    await mountPage();
+    expect(q("ex-country"), "没选按条件找时不显示").toBeNull();
+    (q("ex-kind")!.querySelectorAll("input")[1] as HTMLInputElement).click();
+    await flush();
+    await pick("ex-list", "按国家与类型找");
+    await vi.waitFor(() =>
+      expect(api.explore).toHaveBeenLastCalledWith({
+        kind: "tv",
+        list: "discover",
+        page: 1,
+        q: "",
+        country: "",
+        genres: "",
+      }),
+    );
+    expect(q("ex-country")!.textContent).toContain("不限国家");
+    await pick("ex-country", "日本");
+    await pick("ex-genres", "综艺");
+    await vi.waitFor(() =>
+      expect(api.explore).toHaveBeenLastCalledWith({
+        kind: "tv",
+        list: "discover",
+        page: 1,
+        q: "",
+        country: "JP",
+        genres: "10764|10767",
+      }),
+    );
+    (q("ex-kind")!.querySelectorAll("input")[0] as HTMLInputElement).click();
+    await vi.waitFor(() =>
+      expect(api.explore).toHaveBeenLastCalledWith({
+        kind: "movie",
+        list: "discover",
+        page: 1,
+        q: "",
+        country: "JP",
+        genres: "",
+      }),
+    );
+    expect(optionTexts("ex-genres")).toEqual(["不限类型", "动画", "纪录片"]);
+  });
+
+  it("番剧日历：默认今天，换一天看别的；点一部到 TMDB 上找到以后打开详情", async () => {
+    const today = ((new Date().getDay() + 6) % 7) + 1;
+    const other = (today % 7) + 1;
+    api.bangumiCalendar.mockResolvedValue({
+      days: [
+        {
+          weekday: today,
+          name: "",
+          items: [
+            {
+              id: 500001,
+              name: "葬送のフリーレン 第2期",
+              name_cn: "葬送的芙莉莲 第二季",
+              air_date: "2026-01-16",
+              image: "https://lain.bgm.tv/c.jpg",
+              score: 8.6,
+            },
+          ],
+        },
+        { weekday: other, name: "", items: [{ id: 7, name: "Nobody" }] },
+      ],
+    });
+    api.bangumiTMDB.mockResolvedValue({ media_type: "tv", tmdb_id: 209867, title: "葬送的芙莉莲" });
+    await mountPage();
+    (q("ex-kind")!.querySelectorAll("input")[2] as HTMLInputElement).click();
+    await vi.waitFor(() => expect(q("ex-bgm-500001")).not.toBeNull());
+    expect(q("ex-list"), "番剧日历没有 TMDB 的列表").toBeNull();
+    const card = q("ex-bgm-500001")!.textContent ?? "";
+    expect(card).toContain("葬送的芙莉莲 第二季");
+    expect(card).toContain("2026-01-16 开播");
+    expect(card).toContain("8.6");
+    expect(q("ex-bgm-500001")!.querySelector("img")!.getAttribute("src")).toBe(
+      "https://lain.bgm.tv/c.jpg",
+    );
+    expect(q("ex-days")!.textContent).toContain("今天");
+    expect(document.body.textContent).toContain("番剧日历的数据来自 Bangumi");
+
+    (q("ex-days")!.querySelectorAll("input")[other - 1] as HTMLInputElement).click();
+    await vi.waitFor(() => expect(q("ex-bgm-7")).not.toBeNull());
+    expect(q("ex-bgm-500001")).toBeNull();
+    (q("ex-days")!.querySelectorAll("input")[today - 1] as HTMLInputElement).click();
+    await vi.waitFor(() => expect(q("ex-bgm-500001")).not.toBeNull());
+
+    q("ex-bgm-open-500001")!.click();
+    await vi.waitFor(() => expect(api.bangumiTMDB).toHaveBeenCalledWith(500001));
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.fullPath).toBe("/media/item/tv/209867?from=explore"),
+    );
+  });
+
+  it("番剧日历：TMDB 上没找到时写明，可以按名字搜", async () => {
+    const today = ((new Date().getDay() + 6) % 7) + 1;
+    api.bangumiCalendar.mockResolvedValue({
+      days: [{ weekday: today, name: "", items: [{ id: 7, name: "Nobody", name_cn: "无名" }] }],
+    });
+    api.bangumiTMDB.mockRejectedValue(
+      new Error("TMDB 上没找到对得上的剧集（搜过「无名」「Nobody」）"),
+    );
+    await mountPage();
+    (q("ex-kind")!.querySelectorAll("input")[2] as HTMLInputElement).click();
+    await vi.waitFor(() => expect(q("ex-bgm-7")).not.toBeNull());
+    q("ex-bgm-open-7")!.click();
+    await vi.waitFor(() => expect(q("ex-missing")).not.toBeNull());
+    expect(q("ex-missing")!.textContent).toContain(
+      "「无名」：TMDB 上没找到对得上的剧集（搜过「无名」「Nobody」）。",
+    );
+    q("ex-missing-search")!.click();
+    await vi.waitFor(() =>
+      expect(api.explore).toHaveBeenLastCalledWith({
+        kind: "tv",
+        list: "search",
+        page: 1,
+        q: "无名",
+      }),
+    );
+    expect(q("ex-missing")).toBeNull();
+  });
+
+  it("番剧日历：读不到时写明，可以重试；这一天没有时写明", async () => {
+    const today = ((new Date().getDay() + 6) % 7) + 1;
+    api.bangumiCalendar.mockRejectedValueOnce(
+      new Error("读不到 Bangumi 的番剧日历：连不上 Bangumi"),
+    );
+    await mountPage();
+    (q("ex-kind")!.querySelectorAll("input")[2] as HTMLInputElement).click();
+    await vi.waitFor(() => expect(q("ex-bgm-state")!.textContent).toContain("连不上 Bangumi"));
+    api.bangumiCalendar.mockResolvedValue({ days: [{ weekday: today, name: "", items: [] }] });
+    q("ex-bgm-reload")!.click();
+    await vi.waitFor(() =>
+      expect(q("ex-bgm-state")!.textContent).toContain("这一天没有在播的番剧"),
+    );
   });
 });

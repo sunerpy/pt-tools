@@ -105,6 +105,9 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 				it.fail(models.MediaFailRecognize, "文件名里没认出集数：可以加识别词，或改文件名后重试")
 				continue
 			}
+			if p.group != nil {
+				p.regroup(it)
+			}
 			if sd := season(it.Season); sd != nil {
 				it.stillFor = sd
 				if ep := sd.Episode(it.Episode); ep != nil && ep.Name != "" {
