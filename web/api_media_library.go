@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sunerpy/pt-tools/internal/media/csf"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/server"
 	"github.com/sunerpy/pt-tools/internal/media/serverindex"
@@ -38,6 +39,7 @@ func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/media/libraries/{id}", s.auth(s.apiLibrarySave))
 	mux.HandleFunc("DELETE /api/media/libraries/{id}", s.auth(s.apiLibraryDelete))
 	mux.HandleFunc("POST /api/media/libraries/check", s.auth(s.apiLibraryCheck))
+	mux.HandleFunc("POST /api/media/libraries/csf-test", s.auth(s.apiLibraryCSFTest))
 	mux.HandleFunc("POST /api/media/libraries/template-preview", s.auth(s.apiTemplatePreview))
 	mux.HandleFunc("GET /api/media/path-maps", s.auth(s.apiPathMaps))
 	mux.HandleFunc("POST /api/media/path-maps", s.auth(s.apiPathMapSave))
@@ -81,7 +83,7 @@ func writeOrganizeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, organize.ErrInvalid), errors.Is(err, server.ErrBadConfig), errors.Is(err, server.ErrUnauthorized),
 		errors.Is(err, server.ErrUnsupported), errors.Is(err, server.ErrBadWebhook), errors.Is(err, serverindex.ErrTooMany),
-		errors.Is(err, tmdb.ErrNoKey), errors.Is(err, tmdb.ErrUnauthorized):
+		errors.Is(err, tmdb.ErrNoKey), errors.Is(err, tmdb.ErrUnauthorized), errors.Is(err, csf.ErrBadConfig), errors.Is(err, csf.ErrUnauthorized):
 		status = http.StatusBadRequest
 	case errors.Is(err, organize.ErrNotFound), errors.Is(err, tmdb.ErrNotFound):
 		status = http.StatusNotFound
@@ -91,7 +93,7 @@ func writeOrganizeError(w http.ResponseWriter, err error) {
 		status = http.StatusTooManyRequests
 	case errors.Is(err, context.DeadlineExceeded):
 		status = http.StatusGatewayTimeout
-	case errors.Is(err, server.ErrUnavailable), errors.Is(err, server.ErrRedirect), errors.Is(err, tmdb.ErrUnavailable):
+	case errors.Is(err, server.ErrUnavailable), errors.Is(err, server.ErrRedirect), errors.Is(err, tmdb.ErrUnavailable), errors.Is(err, csf.ErrUnavailable):
 		status = http.StatusBadGateway
 	}
 	http.Error(w, err.Error(), status)
@@ -287,6 +289,26 @@ func (s *Server) apiLibraryCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, got)
+}
+
+// apiLibraryCSFTest handles POST /api/media/libraries/csf-test：访问一次 ChineseSubFinder（不建任务），确认地址与 API Key；
+// 带了媒体库编号、没填 Key 时用这个库保存的 Key。
+func (s *Server) apiLibraryCSFTest(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.organizeService(w)
+	if !ok {
+		return
+	}
+	var in organize.CSFTestInput
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	if err := svc.TestCSF(ctx, in); err != nil {
+		writeOrganizeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 type templatePreviewInput struct {

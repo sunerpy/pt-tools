@@ -46,6 +46,8 @@ type NexusPHPResponse struct {
 	RawBody []byte
 	// StatusCode is the HTTP status code
 	StatusCode int
+	// Header 是响应头（下载字幕时取 Content-Disposition 里的文件名）
+	Header http.Header
 }
 
 // SiteSelectors defines CSS selectors for parsing NexusPHP pages
@@ -366,6 +368,7 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	result := NexusPHPResponse{
 		RawBody:    resp.Body,
 		StatusCode: resp.StatusCode,
+		Header:     resp.Headers,
 	}
 
 	if resp.IsCloudflareChallenge() {

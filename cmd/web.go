@@ -253,7 +253,7 @@ var webCmd = &cobra.Command{
 		srv := web.NewServer(store, mgr)
 		mediaSvc := newMediaService(store)
 		srv.SetMediaService(mediaSvc)
-		organizer := newOrganizeService(store, mgr, mediaSvc, monitorNotifier)
+		organizer := newOrganizeService(store, mgr, mediaSvc, monitorNotifier, userInfoService)
 		srv.SetOrganizeService(organizer)
 		subscriber := newSubscribeService(runtimeCtx, mgr, mediaSvc, organizer, userInfoService, monitorNotifier)
 		srv.SetSubscribeService(subscriber)

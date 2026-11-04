@@ -135,21 +135,7 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 			}
 		}
 	}
-	key := func(f transfer.File) string {
-		m, _ := s.cfg.Recognizer.Parse(ctx, stemOf(f.Rel), "")
-		if m.Episode == 0 {
-			return ""
-		}
-		sn := m.Season
-		if sn == 0 {
-			sn = max(p.meta.Season, 1)
-		}
-		return fmt.Sprintf("%d:%d", sn, m.Episode)
-	}
-	if !tv {
-		key = nil
-	}
-	matched := transfer.MatchSubtitles(videos, subs, key)
+	matched := transfer.MatchSubtitles(videos, subs, s.subtitleKey(ctx, p))
 	for i := range p.Items {
 		it := &p.Items[i]
 		if it.Status == ItemFailed {
@@ -163,6 +149,24 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 			counts[lang]++
 			it.Subtitles = append(it.Subtitles, SubtitlePlan{Source: sub.Path, Target: transfer.SubtitleTarget(it.Target, sub.Rel, counts[lang])})
 		}
+	}
+}
+
+// subtitleKey 是把字幕分给剧集的哪一集时用的季集（「季:集」，文件名里没认出集数时为空）；电影为 nil（只按文件名前缀分）。
+func (s *Service) subtitleKey(ctx context.Context, p *Plan) func(transfer.File) string {
+	if p.Match == nil || p.Match.MediaType != tmdb.KindTV {
+		return nil
+	}
+	return func(f transfer.File) string {
+		m, _ := s.cfg.Recognizer.Parse(ctx, stemOf(f.Rel), "")
+		if m.Episode == 0 {
+			return ""
+		}
+		sn := m.Season
+		if sn == 0 {
+			sn = max(p.meta.Season, 1)
+		}
+		return fmt.Sprintf("%d:%d", sn, m.Episode)
 	}
 }
 

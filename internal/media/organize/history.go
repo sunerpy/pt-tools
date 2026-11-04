@@ -131,7 +131,7 @@ func (s *Service) History(ctx context.Context, q HistoryQuery) (HistoryPage, err
 		subs, disc := 0, 0
 		for _, e := range decodeExtras(r.Extras) {
 			switch e.Kind {
-			case "":
+			case "", extraSiteSub:
 				subs++
 			case extraDisc:
 				disc++
@@ -342,8 +342,8 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 		// 原盘的电影目录里只有这一张原盘：它的 movie.nfo 是这条记录自己的（别的电影目录里的 movie.nfo 是几个版本共用的）
 		case e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)) && (!disc || filepath.Base(e.Target) != scrape.MovieNFOName):
 			shared = append(shared, e)
-		case e.Kind == extraMeta:
-			// 刮削写的文件是普通文件：按文件编号确认（软链接方式整理的视频也一样）
+		case e.Kind == extraMeta || e.Kind == extraSiteSub:
+			// 刮削写的文件与站点字幕是 pt-tools 写的普通文件：按文件编号确认（软链接方式整理的视频也一样）
 			if err := remove(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil {
 				errs = append(errs, err)
 			}

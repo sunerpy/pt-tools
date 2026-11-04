@@ -283,10 +283,14 @@ func (s *Server) configResources() []*configResource {
 		},
 		{
 			Name: "libraries", Title: "媒体库", Kind: configList, Path: "/api/media/libraries", ItemPath: "/api/media/libraries/{id}",
-			Desc:   "整理入库的目标：电影库、剧集库的路径、命名模板、硬链接还是复制、刮削。",
-			Fields: jsonFields[organize.LibraryInput](), Required: []string{"name", "kind", "path"},
-			Ops:    []string{configOpAdd, configOpUpdate, configOpDelete},
-			Hints:  map[string]string{"kind": "movie 或 tv", "mode": "link（硬链接）、copy、move 之类，见网页上的选项"},
+			Desc:   "整理入库的目标：电影库、剧集库的路径、命名模板、硬链接还是复制、刮削、字幕。",
+			Fields: jsonFields[organize.LibraryInput]("csf_key"), Secrets: map[string]string{"csf_key": "has_csf_key"},
+			Required: []string{"name", "kind", "path"},
+			Ops:      []string{configOpAdd, configOpUpdate, configOpDelete},
+			Hints: map[string]string{
+				"kind": "movie 或 tv", "mode": "link（硬链接）、copy、move 之类，见网页上的选项",
+				"csf_url": "ChineseSubFinder 的地址，例如 http://192.168.1.10:19035/；空着是不用", "csf_path": "ChineseSubFinder 里看到的这个库的目录；和库目录一样时空着",
+			},
 			Impact: []string{"只影响以后整理的文件：已经放进库的文件不会挪动"},
 		},
 		{

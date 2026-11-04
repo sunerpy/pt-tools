@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- 按 NexusPHP 1.5（Rhilip/NexusPHP）details.php 的「字幕」一段的写法构造（繁体界面）：同 php8，标题没有 htmlspecialchars；
+     字幕的语言在 language 表里没有时（LEFT JOIN 取不到）国旗图的 src 只有 pic/flag/、alt 与 title 是空的。 -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>另一站 :: 種子詳情 "某剧.S01.2160p.WEB-DL" - Powered by NexusPHP</title>
+  </head>
+  <body>
+    <table width="940" cellspacing="0" cellpadding="5">
+      <tr>
+        <td class="rowhead" valign="top">字幕</td>
+        <td class="rowfollow" align="left" valign="top">
+          <table border="0" cellspacing="0">
+            <tr>
+              <td class="embedded">
+                <img
+                  border="0"
+                  src="pic/flag/hongkong.gif"
+                  alt="繁體中文"
+                  title="繁體中文"
+                  style="padding-bottom: 4px" />
+              </td>
+              <td class="embedded">
+                &nbsp;&nbsp;<a href="downloadsubs.php?torrentid=88&subid=7"
+                  ><u>某剧.S01E01.cht.srt</u></a
+                >
+              </td>
+              <td class="embedded">&nbsp;&nbsp;<a href="userdetails.php?id=3">a</a></td>
+            </tr>
+            <tr>
+              <td class="embedded">
+                <img border="0" src="pic/flag/" alt="" title="" style="padding-bottom: 4px" />
+              </td>
+              <td class="embedded">
+                &nbsp;&nbsp;<a href="downloadsubs.php?torrentid=88&subid=8"
+                  ><u>某剧.S01E02.简体.srt</u></a
+                >
+              </td>
+              <td class="embedded">&nbsp;&nbsp;匿名</td>
+            </tr>
+          </table>
+          <table border="0" cellspacing="0">
+            <tr>
+              <td class="embedded">
+                <form method="post" action="subtitles.php">
+                  <input type="hidden" name="detail_torrent_id" value="88" /><input
+                    type="submit"
+                    value="上傳字幕" />
+                </form>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

@@ -192,8 +192,11 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		created = append(created, it)
 	}
 	if len(created) > 0 {
+		// 站点字幕先放（媒体服务器刷新时看得到）；ChineseSubFinder 在刮削之后（剧集要读每一集的 NFO）
+		res.Messages = append(res.Messages, s.siteSubtitles(ctx, p, created)...)
 		res.Messages = append(res.Messages, s.scrape(ctx, p, created)...)
 		res.Messages = append(res.Messages, s.refreshServers(ctx, p, created)...)
+		res.Messages = append(res.Messages, s.chineseSubFinder(ctx, p, created)...)
 		if msg := s.notify(ctx, p, created); msg != "" {
 			res.Messages = append(res.Messages, msg)
 		}

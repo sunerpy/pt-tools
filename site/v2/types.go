@@ -44,6 +44,10 @@ var (
 	ErrTorrentDetailUnavailable = errors.New("torrent detail unavailable")
 	// ErrUnexpectedPage 表示站点回的不是种子列表：一个种子都没有，页面也不像登录以后的站点页面（拦截、维护、验证页等）。
 	ErrUnexpectedPage = errors.New("站点返回的不是种子列表页面")
+	// ErrInvalidTorrentID 表示种子或字幕的编号不是站点认的写法（NexusPHP 的是数字，RSS 的 guid 是 info hash），不发请求。
+	ErrInvalidTorrentID = errors.New("种子编号不对")
+	// ErrSubtitleNotFound 表示站点上没有这份字幕（NexusPHP 的 downloadsubs.php 回「Not found」「File not found」）。
+	ErrSubtitleNotFound = errors.New("站点上没有这份字幕")
 )
 
 // SiteKind represents the type of PT site architecture
@@ -653,6 +657,38 @@ type TorrentDetailFetcher interface {
 	// 也不返回一个「没有优惠」的占位结果（那等于声称不是免费）。
 	// 实时请求得到的结果写 FetchedAt；结果来自缓存时 FetchedAt 是缓存刷新的时间。
 	GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error)
+}
+
+// Subtitle 是站点上一个种子的一份字幕（NexusPHP 详情页「字幕」一行里的一项）。
+type Subtitle struct {
+	// ID 是字幕的编号（downloadsubs.php 的 subid）；TorrentID 是字幕挂在哪个种子上（torrentid，同一部别的种子的字幕也会列出来）
+	ID        string `json:"id"`
+	TorrentID string `json:"torrent_id"`
+	// Title 是列表上写的标题（多数是上传时的文件名）
+	Title string `json:"title"`
+	// Language 是列表上写的语言（国旗图的 alt 或 title，例如「简体中文」）；Flag 是国旗图的文件名（例如 china.gif）。站点没写时为空
+	Language string `json:"language,omitempty"`
+	Flag     string `json:"flag,omitempty"`
+}
+
+// SubtitleFile 是下载下来的一份字幕：Name 是站点给的文件名（只留最后一段，没有时为空）。
+type SubtitleFile struct {
+	Name string
+	Data []byte
+}
+
+// SubtitleProvider 是能列出、下载种子字幕的驱动（可选接口，现在只有 NexusPHP）。
+type SubtitleProvider interface {
+	// ListSubtitles 是这个种子的字幕（站点上没有时是空的）；种子不在了返回包装了 ErrTorrentNotFound 的错误
+	ListSubtitles(ctx context.Context, torrentID string) ([]Subtitle, error)
+	// DownloadSubtitle 下载列表里的一份字幕；站点上没有了返回包装了 ErrSubtitleNotFound 的错误
+	DownloadSubtitle(ctx context.Context, sub Subtitle) (SubtitleFile, error)
+}
+
+// SubtitleSource 是能给出 SubtitleProvider 的站点（BaseSite）：驱动支持字幕时返回的 SubtitleProvider 每次请求先等站点限速的令牌、
+// 一时的错误按退避重试；不支持时返回 nil。
+type SubtitleSource interface {
+	Subtitles() SubtitleProvider
 }
 
 // DetailFetcherProvider is an optional interface for Site implementations that can provide

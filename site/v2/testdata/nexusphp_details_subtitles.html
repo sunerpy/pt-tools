@@ -1,0 +1,126 @@
+<!doctype html>
+<!-- 按 NexusPHP（xiaomlove/nexusphp php8 分支）public/details.php 的「字幕」一段的写法构造：每份字幕一行，
+     国旗图的 alt/title 是 language.lang_name，链接是 downloadsubs.php?torrentid=&subid=，标题经 htmlspecialchars；
+     有删除权限时链接后面跟 [删除]，第三格是上传者（匿名时写「匿名」）。下面另有上传字幕与到射手网、OpenSubtitles 搜的表单。 -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>示例站 :: 种子详情 "Movie.2023.1080p.BluRay.x264-GRP" - Powered by NexusPHP</title>
+  </head>
+  <body>
+    <table width="97%" cellspacing="0" cellpadding="5">
+      <tr>
+        <td class="rowhead" width="13%">下载</td>
+        <td class="rowfollow" width="87%" align="left">
+          <a class="index" href="download.php?id=123"
+            >[示例站].Movie.2023.1080p.BluRay.x264-GRP.torrent</a
+          >
+        </td>
+      </tr>
+      <tr>
+        <td class="rowhead" valign="top">字幕</td>
+        <td class="rowfollow" align="left" valign="top">
+          <table border="0" cellspacing="0">
+            <tr>
+              <td class="embedded">
+                <img
+                  border="0"
+                  src="pic/flag/china.gif"
+                  alt="简体中文"
+                  title="简体中文"
+                  style="padding-bottom: 4px" />
+              </td>
+              <td class="embedded">
+                &nbsp;&nbsp;<a href="downloadsubs.php?torrentid=123&subid=45"
+                  ><u>Movie.2023.1080p.BluRay.chs.srt</u></a
+                >
+                <font class="small"><a href="subtitles.php?delete=45">[删除</a>]</font>
+              </td>
+              <td class="embedded">
+                &nbsp;&nbsp;<a href="userdetails.php?id=9" class="User_Name"><b>uploader</b></a>
+              </td>
+            </tr>
+            <tr>
+              <td class="embedded">
+                <img
+                  border="0"
+                  src="pic/flag/hongkong.gif"
+                  alt="繁體中文"
+                  title="繁體中文"
+                  style="padding-bottom: 4px" />
+              </td>
+              <td class="embedded">
+                &nbsp;&nbsp;<a href="downloadsubs.php?torrentid=123&subid=46"
+                  ><u>Tom &amp; Jerry 繁中.ass</u></a
+                >
+              </td>
+              <td class="embedded">&nbsp;&nbsp;匿名</td>
+            </tr>
+            <tr>
+              <td class="embedded">
+                <img
+                  border="0"
+                  src="pic/flag/uk.gif"
+                  alt="English"
+                  title="English"
+                  style="padding-bottom: 4px" />
+              </td>
+              <td class="embedded">
+                &nbsp;&nbsp;<a href="downloadsubs.php?torrentid=120&subid=47"
+                  ><u>subs-pack.zip</u></a
+                >
+              </td>
+              <td class="embedded">
+                &nbsp;&nbsp;<a href="userdetails.php?id=10" class="User_Name"><b>other</b></a>
+              </td>
+            </tr>
+          </table>
+          <table border="0" cellspacing="0">
+            <tr>
+              <td class="embedded">
+                <form method="post" action="subtitles.php">
+                  <input
+                    type="hidden"
+                    name="torrent_name"
+                    value="Movie.2023.1080p.BluRay.x264-GRP" /><input
+                    type="hidden"
+                    name="detail_torrent_id"
+                    value="123" /><input type="hidden" name="in_detail" value="in_detail" /><input
+                    type="submit"
+                    value="上传字幕" />
+                </form>
+              </td>
+              <td class="embedded">
+                <form method="get" action="https://assrt.net/sub/" target="_blank">
+                  <input
+                    type="text"
+                    name="searchword"
+                    id="keyword"
+                    style="width: 250px"
+                    value="" /><input type="submit" value="搜索射手网" />
+                </form>
+              </td>
+              <td class="embedded">
+                <form
+                  method="get"
+                  action="https://www.opensubtitles.org/en/search2/"
+                  target="_blank">
+                  <input type="hidden" id="moviename" name="MovieName" /><input
+                    type="hidden"
+                    name="action"
+                    value="search" /><input type="hidden" name="SubLanguageID" value="all" /><input
+                    type="submit"
+                    value="搜索Opensubtitles" />
+                </form>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td class="rowhead">简介</td>
+        <td class="rowfollow" align="left"><div id="kdescr">示例简介</div></td>
+      </tr>
+    </table>
+  </body>
+</html>

@@ -51,9 +51,16 @@ type MediaLibrary struct {
 	// ScrapeFill 为真时每周对刮削结果是部分成功或失败的记录补刮一次，ScrapeFilledAt 是上一次补刮的时间
 	ScrapeFill     bool       `gorm:"not null;default:false" json:"scrape_fill"`
 	ScrapeFilledAt *time.Time `json:"scrape_filled_at,omitempty"`
-	Enabled        bool       `gorm:"not null;default:false" json:"enabled"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// SiteSubtitles 为真时整理出新视频以后到站点上取字幕：种子里没有字幕、种子是从支持的站点（NexusPHP）推送的时
+	SiteSubtitles bool `gorm:"not null;default:false" json:"site_subtitles"`
+	// CSFURL 是 ChineseSubFinder 的地址（空串是不用）；CSFKeyEncrypted 是它的 API Key（加密保存、只写不读）；
+	// CSFPath 是 ChineseSubFinder 里看到的这个库的目录（空串是和 Path 一样）。整理出新视频以后交给它下载字幕
+	CSFURL          string    `gorm:"column:csf_url;size:512;not null;default:''" json:"csf_url"`
+	CSFKeyEncrypted string    `gorm:"column:csf_key_encrypted;type:text;not null;default:''" json:"-"`
+	CSFPath         string    `gorm:"column:csf_path;size:1024;not null;default:''" json:"csf_path"`
+	Enabled         bool      `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func (MediaLibrary) TableName() string { return "media_libraries" }
