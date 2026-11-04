@@ -312,3 +312,61 @@ func TestEpisodeGroupMediaForAndNextSeason(t *testing.T) {
 	require.NotZero(t, row.NextSeasonID)
 	assert.Equal(t, tlouAbsolute, e.subRow(row.NextSeasonID).EpisodeGroupID, "剧集组是这部剧的：下一季沿用")
 }
+
+// 从一个种子开始追（选了剧集组）：按绝对集号写的第 10 集是第 2 季第 1 集，用它；第 5 集换算出是第 1 季的，写明不是这一季、不用。
+func TestFromTorrentEpisodeGroup(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	e.withGroups()
+	group := tlouAbsolute
+	e.search.cache(e.item("hdsky", "801", "The.Last.of.Us.E10.1080p.WEB-DL.H264-GRP", "", 2, 10))
+	e.search.cache(e.item("hdsky", "802", "The.Last.of.Us.E05.1080p.WEB-DL.H264-GRP", "", 2, 10))
+	from := func(id string) *models.MediaSubscription {
+		return e.follow(func(in *SubscriptionInput) {
+			in.TMDBID, in.Season, in.EpisodeGroupID = 100088, 2, &group
+			in.FromTorrent = &FromTorrent{Site: "hdsky", TorrentID: id}
+		})
+	}
+	sub := from("801")
+	assert.True(t, strings.HasPrefix(sub.Message, "从这个种子开始追：下载了"), sub.Message)
+	assert.Equal(t, []string{"801"}, pushedIDs(e))
+	require.NoError(t, e.svc.DeleteSubscription(e.ctx, sub.ID))
+
+	sub = from("802")
+	assert.Contains(t, sub.Message, "不是这部剧的第 2 季")
+	assert.Contains(t, stepsOf(e.runs(sub.ID)[0]), "The.Last.of.Us.E05.1080p.WEB-DL.H264-GRP：不是这个追剧的剧集或这一季")
+	assert.Equal(t, []string{"801"}, pushedIDs(e), "没有推第 5 集")
+}
+
+// 按条目搜索（选了剧集组的追剧）：带这个条目的推送记录按剧集组换算，绝对集号 10 是第 2 季第 1 集（在下载），
+// 绝对集号 2 是第 1 季的，不算第 2 季第 2 集。
+func TestSearchMediaEpisodeGroup(t *testing.T) {
+	e := newEnv(t)
+	e.tlouGroupSub(tlouAbsolute)
+	pushed := true
+	for i, title := range []string{"The.Last.of.Us.E10.1080p.WEB-DL-XX", "The.Last.of.Us.E02.1080p.WEB-DL-XX"} {
+		h := fmt.Sprintf("grouphash%d", i)
+		require.NoError(t, e.db.Create(&models.TorrentInfo{
+			SiteName: "ourbits", TorrentID: fmt.Sprint(90 + i), TorrentHash: &h, Title: title, IsPushed: &pushed,
+			MediaType: models.MediaKindTV, TMDBID: 100088, MediaSeason: 2,
+		}).Error)
+	}
+	e.search.set(e.tlouItems()...)
+	res := e.searchMedia(MediaSearchInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2})
+	require.Len(t, res.Episodes, 3)
+	assert.Equal(t, models.MediaEpisodeDownloading, res.Episodes[0].State, "绝对集号 10 是第 2 季第 1 集")
+	assert.Equal(t, "ourbits", res.Episodes[0].Site)
+	assert.Equal(t, models.MediaEpisodeMissing, res.Episodes[1].State, "绝对集号 2 是第 1 季的")
+}
+
+// RSS 交来按绝对集号写的种子（只写了集，当作第 1 季）：选了剧集组时按名字放过快速筛，评估时换算成第 2 季第 1 集推送。
+func TestEpisodeGroupRSSAbsolute(t *testing.T) {
+	e := newEnv(t)
+	sub := e.tlouGroupSub(tlouAbsolute)
+	e.enable(nil)
+	e.svc.considerOffer(e.ctx, Candidate{Site: "hdsky", Item: e.item("hdsky", "211", "The.Last.of.Us.E10.1080p.WEB-DL.H264-GRP", "", 2, 10), From: fromRSS, SeenAt: e.Now()})
+	assert.Equal(t, []string{"211"}, pushedIDs(e))
+	links := e.linked(sub.ID)
+	require.Len(t, links, 1)
+	assert.Equal(t, 1, links[0].Episode)
+}

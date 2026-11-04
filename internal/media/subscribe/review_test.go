@@ -301,7 +301,7 @@ func TestReviewInputSpan(t *testing.T) {
 	assert.Empty(t, movie.Parsed)
 }
 
-// 洗版：只复核比现在好的；整季包洗版也是。
+// 洗版：只复核比现在好的（整季包洗版见 TestReviewUpgradePack）。
 func TestReviewUpgrade(t *testing.T) {
 	e, f := reviewEnv(t, "", "Dune.Part.Two.2024.2160p.UHD.BluRay.x265-BAD")
 	p, err := e.svc.SaveProfile(e.ctx, 0, ProfileInput{Name: "4K 原盘", Resolutions: []string{"2160p", "1080p"}, Sources: []string{"UHD BluRay", "WEB-DL"}})
@@ -362,4 +362,47 @@ func TestReviewCacheBound(t *testing.T) {
 	}
 	s.remember(reviewKey{sub: 4, site: "hdsky", id: "y"}, ReviewResult{}, now)
 	assert.Len(t, s.reviews, 1, "都没过期时全清掉")
+}
+
+// 整季包洗版：比现在好的整季包也复核，说不是的换下一个。
+func TestReviewUpgradePack(t *testing.T) {
+	bad := "The.Last.of.Us.S02.2160p.WEB-DL.H265-BAD"
+	e, f := reviewEnv(t, "", bad)
+	e.advance(60 * 24 * time.Hour) // 3 集都播完了
+	p := e.profile4K()
+	tv := e.sub(SubscriptionInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2, ProfileID: p.ID, Upgrade: true})
+	e.search.set(e.item("hdsky", "a1", "The.Last.of.Us.S02.1080p.WEB-DL.H264-X", "", 12, 10))
+	_, err := e.svc.SearchNow(e.ctx, tv.ID)
+	require.NoError(t, err)
+	for ep := 1; ep <= 3; ep++ {
+		e.organized(e.hashOf("a1"), models.MediaKindTV, 100088, 2, ep, fmt.Sprintf("/lib/tlou/s02e0%d.1080p.mkv", ep))
+	}
+	e.svc.refresh(e.ctx)
+
+	e.search.set(
+		e.item("hdsky", "b1", bad, "", 30, 50),
+		e.item("hdsky", "b2", "The.Last.of.Us.S02.2160p.WEB-DL.H265-GOOD", "", 30, 10),
+	)
+	msg, err := e.svc.SearchNow(e.ctx, tv.ID)
+	require.NoError(t, err)
+	assert.Contains(t, msg, "下载了 The.Last.of.Us.S02.2160p.WEB-DL.H265-GOOD")
+	assert.Equal(t, []string{"The.Last.of.Us.S02.1080p.WEB-DL.H264-X", bad, "The.Last.of.Us.S02.2160p.WEB-DL.H265-GOOD"}, f.titles())
+}
+
+// 模型给的理由照样遮掉像凭证的内容（不管接的是哪个复核）。
+func TestReviewRedactsReason(t *testing.T) {
+	e := newEnv(t)
+	e.enable(func(s *Settings) { s.AIReviewEnabled = true })
+	secret := "0123456789abcdef0123456789abcdef"
+	e.svc.SetReviewer(func(context.Context, ReviewInput) (ReviewResult, error) {
+		return ReviewResult{Reason: "种子页 https://tracker.example.test/download.php?id=1&passkey=" + secret + " 写的是花絮"}, nil
+	})
+	sub := e.sub(SubscriptionInput{MediaType: models.MediaKindMovie, TMDBID: 693134})
+	e.search.set(e.item("hdsky", "71", "Dune.Part.Two.2024.2160p.WEB-DL.H265-X", "", 20, 50))
+	_, err := e.svc.SearchNow(e.ctx, sub.ID)
+	require.NoError(t, err)
+	steps := runSteps(e, sub.ID)
+	assert.Contains(t, steps, "AI 复核：不是，种子页 https://tracker.example.test/download.php")
+	assert.Contains(t, steps, "写的是花絮")
+	assert.NotContains(t, steps, secret)
 }

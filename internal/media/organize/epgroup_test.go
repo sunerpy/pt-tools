@@ -13,8 +13,11 @@ import (
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
-// tlouAbsolute 是假 TMDB 上最后生还者的绝对集号剧集组（见 newFakeTMDB）。
-const tlouAbsolute = "5b11ba820e0a265a53000ce9"
+// tlouAbsolute、tlouDVD 是假 TMDB 上最后生还者的绝对集号与 DVD 分季的剧集组（见 newFakeTMDB）。
+const (
+	tlouAbsolute = "5b11ba820e0a265a53000ce9"
+	tlouDVD      = "5c8a1ef80e0a2625f5a4f1b0"
+)
 
 const absHash = "cccccccccccccccccccccccccccccccccccccccc"
 
@@ -104,4 +107,24 @@ func TestOrganizeEpisodeGroupUnavailable(t *testing.T) {
 		assert.NotContains(t, it.Target, "S02", it.Rel)
 	}
 	assert.Empty(t, p.Notes)
+}
+
+// 换算出的集在同一季但不连着（DVD 第 2 组的第 1、2 集是第 2 季的第 1、3 集）：按文件名里的季集整理，写明原因。
+func TestOrganizeEpisodeGroupNotContiguous(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	name := "The.Last.of.Us.S02E01-E02.1080p.WEB-DL-GRP"
+	e.addTorrent(absHash, name, map[string]int{name + "/" + name + ".mkv": 5}, func(t *downloader.Torrent) { t.Category = "tv" })
+	e.svc.SetMediaFor(func(context.Context, uint, string) (MediaHint, bool, error) {
+		return MediaHint{MediaType: models.MediaKindTV, TMDBID: 100088, EpisodeGroup: tlouDVD}, true, nil
+	})
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: absHash})
+	require.NoError(t, err)
+	require.Empty(t, p.Problem)
+	require.Len(t, p.Items, 1)
+	assert.Equal(t, 2, p.Items[0].Season)
+	assert.Equal(t, 1, p.Items[0].Episode, "按文件名里的季集")
+	assert.Equal(t, 2, p.Items[0].EpisodeEnd)
+	assert.Contains(t, p.Notes, name+".mkv：按剧集组「DVD」换算的第 2 组第 1–2 集不在同一季或不连着，按文件名里的季集整理")
 }

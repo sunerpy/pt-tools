@@ -100,8 +100,8 @@ func TestBangumiToTMDB(t *testing.T) {
 	assert.ErrorContains(t, err, "番剧日历里没有这一部")
 }
 
-// 名字没有完全相同的、以这个名字开头的动画只有一个时用它；以它开头的不止一个时拿不准；搜不到时写明搜过的名字（中文名、
-// 原名去重）；TMDB 出错时照实报错。
+// 名字没有完全相同的、以这个名字开头的动画只有一个时用它；以它开头的不止一个、名字完全相同的不止一个时拿不准；搜不到时写明
+// 搜过的名字（中文名、原名去重）；TMDB 出错时照实报错。
 func TestBangumiToTMDBFallback(t *testing.T) {
 	e := bangumiEnv(t, bangumi.CalendarItem{ID: 1, Name: "Kusuriya no Hitorigoto 2nd Season", NameCN: "药屋少女的呢喃 第二季", AirDate: "2025-01-10"})
 	e.tmdb.set("/3/search/tv", `{"results":[
@@ -116,6 +116,12 @@ func TestBangumiToTMDBFallback(t *testing.T) {
 		{"id":31,"name":"某某甲","first_air_date":"2020-01-01","genre_ids":[16]},{"id":32,"name":"某某乙","first_air_date":"2020-01-01","genre_ids":[16]}]}`)
 	_, err = e.svc.BangumiToTMDB(e.ctx, 3)
 	require.ErrorIs(t, err, ErrNotFound, "以这个名字开头的不止一个：拿不准")
+
+	e = bangumiEnv(t, bangumi.CalendarItem{ID: 5, Name: "Twin", NameCN: "双子 第二季", AirDate: "2025-01-01"})
+	e.tmdb.set("/3/search/tv", `{"results":[
+		{"id":51,"name":"双子","first_air_date":"2020-01-01","genre_ids":[16]},{"id":52,"name":"双子","first_air_date":"2021-01-01","genre_ids":[16]}]}`)
+	_, err = e.svc.BangumiToTMDB(e.ctx, 5)
+	require.ErrorIs(t, err, ErrNotFound, "名字完全相同的不止一个：拿不准")
 
 	e = bangumiEnv(t, bangumi.CalendarItem{ID: 2, Name: "Same", NameCN: "Same 第2期"})
 	e.tmdb.set("/3/search/tv", `{"results":[]}`)

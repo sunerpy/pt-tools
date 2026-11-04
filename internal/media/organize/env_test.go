@@ -109,6 +109,12 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 			_, _ = w.Write([]byte(`{"season_number":1,"name":"第 1 季","poster_path":"/tlou-s1.jpg","air_date":"2023-01-15",
 				"episodes":[{"id":11,"episode_number":1,"name":"当你迷失在黑暗中","still_path":"/e1.jpg","air_date":"2023-01-15"},
 				{"id":12,"episode_number":2,"name":"感染","still_path":"/e2.jpg","air_date":"2023-01-22"}]}`))
+		case r.URL.Path == "/3/tv/episode_group/"+tlouDVD:
+			// 最后生还者的 DVD 分季：第 2 组是第 2 季的第 1、3、2 集
+			_, _ = w.Write([]byte(`{"id":"` + tlouDVD + `","name":"DVD","type":3,"groups":[
+				{"id":"d1","name":"Disc 1","order":1,"episodes":[{"season_number":1,"episode_number":1,"order":0},{"season_number":1,"episode_number":2,"order":1}]},
+				{"id":"d2","name":"Disc 2","order":2,"episodes":[{"season_number":2,"episode_number":1,"order":0},
+					{"season_number":2,"episode_number":3,"order":1},{"season_number":2,"episode_number":2,"order":2}]}]}`))
 		case r.URL.Path == "/3/tv/episode_group/"+tlouAbsolute:
 			// 最后生还者的绝对集号：第 1 季 2 集接着第 2 季 2 集
 			_, _ = w.Write([]byte(`{"id":"` + tlouAbsolute + `","name":"Absolute Order","type":2,"groups":[{"id":"g","name":"Episodes","order":1,"episodes":[
