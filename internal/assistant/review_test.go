@@ -10,7 +10,7 @@ import (
 )
 
 var tlouReview = CandidateReview{
-	Kind: "tv", Title: "最后生还者", OriginalTitle: "The Last of Us", Year: 2023, Season: 2,
+	Kind: "tv", Title: "最后生还者", OriginalTitle: "The Last of Us", Year: 2025, Season: 2,
 	Aliases:      []string{"最后生还者", "TLOU", " ", "美末"},
 	TorrentTitle: "The.Last.of.Us.S02E01.2160p.WEB-DL.H265-GRP", TorrentSubtitle: "最后生还者 第二季 第01集",
 	Parsed: "The Last of Us S02E01 2160p WEB-DL",
@@ -27,18 +27,18 @@ func TestReviewCandidate(t *testing.T) {
 	assert.Empty(t, reqs[0].Tools, "不带工具")
 	prompt := reqs[0].Messages[0]["content"].(string)
 	assert.Contains(t, prompt, "请判断这个种子是不是这部剧的这一季")
-	assert.Contains(t, prompt, "条目：剧集：最后生还者（The Last of Us，2023），第 2 季\n")
+	assert.Contains(t, prompt, "条目：剧集：最后生还者（The Last of Us），第 2 季（2025 年开播）\n", "剧集的年份是这一季的，写在季后面")
 	assert.Contains(t, prompt, "别名：TLOU、美末\n", "和名字一样的、空的不写")
 	assert.Contains(t, prompt, "种子标题：The.Last.of.Us.S02E01.2160p.WEB-DL.H265-GRP\n副标题：最后生还者 第二季 第01集\n从标题解析出：The Last of Us S02E01 2160p WEB-DL\n")
 
 	e.llm.push(reply{text: "不是"})
-	movie, err := e.svc.ReviewCandidate(context.Background(), CandidateReview{Kind: "movie", Title: "沙丘2", TorrentTitle: "Dune.1984.1080p"})
+	movie, err := e.svc.ReviewCandidate(context.Background(), CandidateReview{Kind: "movie", Title: "沙丘2", Year: 2024, TorrentTitle: "Dune.1984.1080p"})
 	require.NoError(t, err)
 	assert.False(t, movie.Match)
 	assert.Empty(t, movie.Reason)
 	prompt = e.llm.requests()[1].Messages[0]["content"].(string)
 	assert.Contains(t, prompt, "请判断这个种子是不是这部电影")
-	assert.Contains(t, prompt, "条目：电影：沙丘2\n")
+	assert.Contains(t, prompt, "条目：电影：沙丘2（2024）\n")
 	assert.NotContains(t, prompt, "别名")
 	assert.NotContains(t, prompt, "副标题")
 

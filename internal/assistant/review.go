@@ -73,14 +73,20 @@ func (s *Service) ReviewCandidate(ctx context.Context, in CandidateReview) (Revi
 	if in.OriginalTitle != "" && in.OriginalTitle != in.Title {
 		extra = append(extra, in.OriginalTitle)
 	}
-	if in.Year > 0 {
+	// 剧集的年份是这一季开播的年份，写在季的后面：不写在名字后面，模型就不会把它当成这部剧首播的年份，
+	// 把标题里写着首播年份的种子说成不是
+	season := in.Kind == "tv" && in.Season > 0
+	if in.Year > 0 && !season {
 		extra = append(extra, strconv.Itoa(in.Year))
 	}
 	if len(extra) > 0 {
 		fmt.Fprintf(&b, "（%s）", strings.Join(extra, "，"))
 	}
-	if in.Kind == "tv" && in.Season > 0 {
+	if season {
 		fmt.Fprintf(&b, "，第 %d 季", in.Season)
+		if in.Year > 0 {
+			fmt.Fprintf(&b, "（%d 年开播）", in.Year)
+		}
 	}
 	b.WriteString("\n")
 	var aliases []string
