@@ -122,7 +122,7 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 		return Settings{}, err
 	}
 	if in.DefaultProfileID != 0 {
-		if _, err := s.profileRow(ctx, in.DefaultProfileID); err != nil {
+		if _, perr := s.profileRow(ctx, in.DefaultProfileID); perr != nil {
 			return Settings{}, fmt.Errorf("%w: 默认的质量档案不存在", ErrInvalid)
 		}
 	}
@@ -595,9 +595,9 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		row.ExcludeKeywords = strings.TrimSpace(*in.ExcludeKeywords)
 	}
 	if in.Schedule != nil {
-		sc, err := in.Schedule.normalize(in.MediaType)
-		if err != nil {
-			return nil, err
+		sc, serr := in.Schedule.normalize(in.MediaType)
+		if serr != nil {
+			return nil, serr
 		}
 		sc.apply(row)
 	}

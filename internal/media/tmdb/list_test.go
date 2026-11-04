@@ -85,7 +85,7 @@ func TestListMore(t *testing.T) {
 		{KindTV, ListTopRated},
 	} {
 		assert.True(t, HasList(c2.kind, c2.list), c2)
-		_, err := c.List(ctx, c2.kind, c2.list, 1)
+		_, err = c.List(ctx, c2.kind, c2.list, 1)
 		require.NoError(t, err, c2)
 	}
 	assert.Equal(t, []string{

@@ -52,9 +52,9 @@ func (s *Service) Explore(ctx context.Context, kind, list string, page int, quer
 		return nil, err
 	}
 	if list != ExploreSearch {
-		p, err := c.List(ctx, kind, list, page)
-		if err != nil {
-			return nil, err
+		p, lerr := c.List(ctx, kind, list, page)
+		if lerr != nil {
+			return nil, lerr
 		}
 		return s.explorePage(ctx, kind, p)
 	}
