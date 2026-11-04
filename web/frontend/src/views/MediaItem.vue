@@ -69,7 +69,7 @@ import {
 } from "@/utils/mediaItem";
 import { useElementSize } from "@vueuse/core";
 import { ElMessage } from "element-plus";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const route = useRoute();
@@ -188,6 +188,23 @@ const now = ref(new Date());
 const collapsible = computed(() => collapsedCount(episodes.value, isMobile.value));
 const collapsed = computed(() => (expanded.value ? 0 : collapsible.value));
 const shownEpisodes = computed(() => episodes.value.slice(collapsed.value));
+
+/**
+ * 首页的「看版本」带着 ?episode=N 进来：这一季读完以后滚到那一集（折起来的那段里时先展开），只滚一次。
+ */
+const targetEpisode = Number(route.query.episode) || 0;
+let scrolledTo = false;
+watch(seasonData, async (d) => {
+  if (scrolledTo || targetEpisode <= 0 || !d) return;
+  const at = d.episodes.findIndex((e) => e.episode === targetEpisode);
+  if (at < 0) return;
+  scrolledTo = true;
+  if (at < collapsed.value) expanded.value = true;
+  await nextTick();
+  document
+    .querySelector<HTMLElement>(`[data-testid="mi-ep-${targetEpisode}"]`)
+    ?.scrollIntoView?.({ block: "center" });
+});
 /** 还没播的第一集（「播出后 2 小时开始搜」只写在它上面） */
 const nextUpcoming = computed(() => episodes.value.find((e) => e.state === "upcoming")?.episode);
 const lastEpisode = computed(() => episodes.value.at(-1)?.episode);

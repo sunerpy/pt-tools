@@ -180,15 +180,15 @@ const pageTitle = computed(() => {
   return navItem.value?.label ?? "pt-tools";
 });
 
-/** 面包屑的根。产品里没有独立首页，/userinfo（用户统计）就是首页 */
-const HOME_PATH = "/userinfo";
+/** 面包屑的根：首页（媒体中心 M8 以前没有独立首页，根是用户统计） */
+const HOME_PATH = "/home";
 
 /**
  * 面包屑，规则是「链上不出现指向当前页的链接」。
  *
  * 之前根节点恒为「首页 → /userinfo」，而 /userinfo 本身就是用户统计页，
  * 于是在这一页上点「首页」原地不动，看着像坏了。当前页就是首页时直接省掉根节点，
- * 链读作「概览 › 用户统计」。
+ * 链读作「概览 › 首页」。
  */
 const crumbs = computed(() => {
   const out: { label: string; to?: string }[] = [];

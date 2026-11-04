@@ -322,3 +322,48 @@ func TestPosterURL(t *testing.T) {
 	assert.Empty(t, PosterURL("", "w342"))
 	assert.True(t, strings.HasSuffix(PosterURL("p.jpg", ""), "/w342/p.jpg"))
 }
+
+func TestServerTime(t *testing.T) {
+	date, age := "Tue, 03 Nov 2026 08:00:00 GMT", ""
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if date == "" {
+			w.Header()["Date"] = nil
+		} else {
+			w.Header().Set("Date", date)
+		}
+		if age != "" {
+			w.Header().Set("Age", age)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"images":{}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := New(Options{APIKey: "0123456789abcdef0123456789abcdef", BaseURL: srv.URL, RatePerSecond: 1000})
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	at, err := c.ServerTime(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2026, 11, 3, 8, 0, 0, 0, time.UTC), at.UTC())
+
+	age = "90"
+	at, err = c.ServerTime(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2026, 11, 3, 8, 1, 30, 0, time.UTC), at.UTC(), "CDN 缓存的响应加上 Age")
+
+	age = "x"
+	at, err = c.ServerTime(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2026, 11, 3, 8, 0, 0, 0, time.UTC), at.UTC(), "Age 不是数字时不加")
+
+	date, age = "", ""
+	at, err = c.ServerTime(ctx)
+	require.NoError(t, err)
+	assert.True(t, at.IsZero(), "没有 Date 时是零值")
+
+	status = http.StatusUnauthorized
+	_, err = c.ServerTime(ctx)
+	require.ErrorIs(t, err, ErrUnauthorized)
+	require.ErrorIs(t, c.Validate(ctx), ErrUnauthorized)
+}

@@ -55,7 +55,7 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
 
 <template>
   <aside class="pt-rail" aria-label="快捷导航">
-    <router-link to="/userinfo" class="pt-rail__brand" aria-label="pt-tools 首页">
+    <router-link to="/home" class="pt-rail__brand" aria-label="pt-tools 首页">
       <!--
         彩色版（自带 #0B1220 底板的 plated）。用户要的是彩色 logo；brand.md 的变体表把深色导航栏
         指向单色版，但那是选型建议、不在硬性规则里 —— 硬性规则（不改色、不加效果、不变形）这里一条没碰。

@@ -92,7 +92,7 @@ const row = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-async function mountPage(fail = false, extra: ReturnType<typeof row>[] = []) {
+async function mountPage(fail = false, extra: ReturnType<typeof row>[] = [], path = "/") {
   if (fail) api.history.mockRejectedValue(new Error("读取整理记录失败"));
   else
     api.history.mockResolvedValue({
@@ -122,6 +122,7 @@ async function mountPage(fail = false, extra: ReturnType<typeof row>[] = []) {
     history: createMemoryHistory(),
     routes: [{ path: "/:p(.*)*", component: { render: () => null } }],
   });
+  await router.push(path);
   view = mountView(Page, { router });
   await vi.waitFor(() => expect(api.history).toHaveBeenCalled());
   await flush();
@@ -129,6 +130,25 @@ async function mountPage(fail = false, extra: ReturnType<typeof row>[] = []) {
 }
 
 describe("整理历史", () => {
+  it("首页的待处理带着筛选进来：?status=failed、?kind=recognize；不认得的当全部", async () => {
+    await mountPage(false, [], "/media/history?status=failed&kind=recognize");
+    expect(api.history.mock.calls[0]![0]).toMatchObject({ status: "failed", kind: "recognize" });
+    view?.unmount();
+    vi.clearAllMocks();
+    await mountPage(false, [], "/media/history?kind=recognize");
+    expect(api.history.mock.calls[0]![0]).toMatchObject({ status: "", kind: "recognize" });
+    view?.unmount();
+    vi.clearAllMocks();
+    await mountPage(false, [], "/media/history?status=done&kind=recognize");
+    expect(api.history.mock.calls[0]![0], "已入库没有失败分类").toMatchObject({ status: "done" });
+    expect(api.history.mock.calls[0]![0]).not.toHaveProperty("kind", "recognize");
+    view?.unmount();
+    vi.clearAllMocks();
+    await mountPage(false, [], "/media/history?status=bogus&kind=nope");
+    expect(api.history.mock.calls[0]![0]).toMatchObject({ status: "" });
+    expect(api.history.mock.calls[0]![0]).not.toHaveProperty("kind", "nope");
+  });
+
   it("列表：条目、文件、方式与状态；失败的写明原因与下次重试", async () => {
     await mountPage();
     expect(api.history).toHaveBeenCalledWith({ status: "", q: "", limit: 50, offset: 0 });

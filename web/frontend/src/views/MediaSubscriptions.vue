@@ -49,20 +49,30 @@ import {
   subStatus,
 } from "@/utils/subscribe";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { onBeforeUnmount, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 const isMobile = useIsMobile();
 // 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载
 useTmdbImageBase();
 const router = useRouter();
+const route = useRoute();
 const errText = (e: unknown, fallback: string) => (e as Error)?.message || fallback;
 
 // ---- 订阅列表 ----
-const status = ref("");
+/** 首页的「等版本 N」带着 ?state=waiting_version 进来：只看在找的、有集在等锁住的版本的订阅 */
+const waitingOnly = ref(route.query.state === "waiting_version");
+const status = ref(waitingOnly.value ? "active" : "");
 const keyword = ref("");
-const subs = ref<Subscription[]>([]);
-const ds = useDataState({ filtered: () => status.value !== "" || keyword.value.trim() !== "" });
+const loadedSubs = ref<Subscription[]>([]);
+const subs = computed(() =>
+  waitingOnly.value
+    ? loadedSubs.value.filter((s) => (s.progress?.waiting ?? 0) > 0)
+    : loadedSubs.value,
+);
+const ds = useDataState({
+  filtered: () => status.value !== "" || keyword.value.trim() !== "" || waitingOnly.value,
+});
 const failedPosters = ref(new Set<number>());
 
 async function loadSubs() {
@@ -71,7 +81,7 @@ async function loadSubs() {
   );
   const got = await pending;
   if (ds.isStale(pending) || !got) return;
-  subs.value = got;
+  loadedSubs.value = got;
 }
 
 const searching = ref<number | null>(null);
@@ -431,6 +441,12 @@ onBeforeUnmount(() => clearInterval(autoTimer));
             f.label
           }}</el-radio-button>
         </el-radio-group>
+        <el-check-tag
+          :checked="waitingOnly"
+          data-testid="ms-waiting"
+          @change="waitingOnly = !waitingOnly"
+          >等版本</el-check-tag
+        >
         <el-input
           v-model="keyword"
           class="ms-search"

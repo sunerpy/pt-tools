@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { MOBILE_TABS, NAV_GROUPS } from "../../config/navigation";
+import { MOBILE_TABS, NAV_GROUPS, mobileTabFor } from "../../config/navigation";
 import { useRuntimeStore } from "../../stores/runtime";
 import { useThemeStore } from "../../stores/theme";
 import PtIcon from "../PtIcon";
@@ -54,10 +54,7 @@ const sheetGroups = computed(() =>
   NAV_GROUPS.filter((g) => g.title === "系统" || g.title === "ChatOps"),
 );
 
-const activeTab = computed(() => {
-  const hit = MOBILE_TABS.find((t) => t.path && t.path === props.activePath);
-  return hit?.key ?? "";
-});
+const activeTab = computed(() => mobileTabFor(props.activePath));
 
 /** 没有 path 的 tab 只有「我的」，它打开上拉面板而不是跳路由 */
 function onTab(path?: string) {

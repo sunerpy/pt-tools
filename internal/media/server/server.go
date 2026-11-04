@@ -147,6 +147,22 @@ func ItemURL(kind, base, uid, itemID string) string {
 	return u
 }
 
+// HomeURL 是媒体服务器网页的首页（首页状态行的「打开」）：base 是浏览器能打开的地址；种类不认得或没有地址时为空。
+func HomeURL(kind, base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		return ""
+	}
+	switch kind {
+	case models.MediaServerEmby, models.MediaServerPlex:
+		return base + "/web/index.html"
+	case models.MediaServerJellyfin:
+		return base + "/web/"
+	default:
+		return ""
+	}
+}
+
 // providerIDs 从 Emby、Jellyfin 的 ProviderIds 里取 TMDB、IMDb、TVDB 编号（键不分大小写）。
 func providerIDs(m map[string]string) (tmdb int, imdb, tvdb string) {
 	for k, v := range m {

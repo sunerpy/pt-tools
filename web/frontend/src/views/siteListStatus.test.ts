@@ -83,7 +83,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function mountList() {
+async function mountList(path = "/sites") {
   const SiteList = (await import("./SiteList.vue")).default;
   const router = createRouter({
     history: createMemoryHistory(),
@@ -92,7 +92,7 @@ async function mountList() {
       { path: "/sites/:name", component: { render: () => null } },
     ],
   });
-  await router.push("/sites");
+  await router.push(path);
   await router.isReady();
   view = mountView(defineComponent({ render: () => h(RouterView) }), { router });
   await vi.waitFor(() =>
@@ -127,5 +127,17 @@ describe("站点列表：状态列分出「未探测」", () => {
       expect(document.querySelector("[data-testid=site-status-mteam]")).toBeNull(),
     );
     expect(document.querySelector("[data-testid=site-status-hdsky]")).toBeTruthy();
+  });
+
+  it("首页的「登录探测失败」带着 ?status=abnormal 进来：只看异常的", async () => {
+    await mountList("/sites?status=abnormal");
+    expect(document.querySelector("[data-testid=site-status-hdsky]")).toBeNull();
+    expect(document.querySelector("[data-testid=site-status-mteam]")).toBeNull();
+    expect(
+      document.querySelector("[data-testid=site-status-chip-bad]")?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      document.querySelector("[data-testid=site-status-chip-ok]")?.getAttribute("aria-pressed"),
+    ).toBe("false");
   });
 });

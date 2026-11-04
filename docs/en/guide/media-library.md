@@ -362,7 +362,7 @@ Jellyfin 12.2 with Webhook plugin 22.0.0.0 has been tested end to end; Emby and 
 
 ### Continue watching
 
-Pick a continue-watching user in the server settings, and the home page lists the movies and episodes that user has not finished in Emby or Jellyfin (up to 12 per server); episodes show the season, episode number and title with a still, and open on the server when clicked. The server list on the media library page shows how many there are. Plex has no such option.
+Pick a continue-watching user in the server settings, and the [home page](home-and-health.md#continue-watching) lists the movies and episodes that user has not finished in Emby or Jellyfin (up to 12 per server); episodes show the season, episode number and title with a still, and open on the server when clicked. The server list on the media library page shows how many there are. Plex has no such option.
 
 What counts as unfinished follows the server's own rules: by default Jellyfin only keeps the playback position of videos at least 5 minutes long, and counts under 5% watched as unplayed and over 90% as played. For short dramas whose episodes run a few minutes, lower Minimum resume duration under Dashboard → Playback → Resume in Jellyfin.
 

@@ -64,6 +64,8 @@ const INTENTIONAL = {
     "列宽与对齐由同节点的 .vt-cell / .align-center 给",
 
   /* 其余 */
+  "src/components/home/HomeTodo.vue .hm-todo-drawer":
+    "el-drawer 的外观由 Element Plus 给，这个名字只用于定位（board-check 与测试找抽屉）",
   "src/components/VersionChecker.vue .initial": "默认态，样式由 .status-state 给，不需要单独一条",
   "src/views/LogViewer.vue .virtual-spacer": "高度是虚拟滚动算出来的行内样式，没有静态样式",
 };

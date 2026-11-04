@@ -5,6 +5,7 @@
  * 下面的「备份与恢复」面板写明读取失败而不是「还没有备份」。带上密钥时写明风险。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMemoryHistory, createRouter } from "vue-router";
 
 import type { BackupsView } from "@/api";
 import { type MountedView, mountView } from "@/test-mount";
@@ -134,11 +135,18 @@ function disabled(id: string): boolean {
   );
 }
 
-async function mountPage(got: BackupsView | Error = backups()) {
+async function mountPage(got: BackupsView | Error = backups(), path?: string) {
   if (got instanceof Error) api.getBackups.mockRejectedValue(got);
   else api.getBackups.mockResolvedValue(got);
   const Page = (await import("./GlobalSettings.vue")).default;
-  view = mountView(Page);
+  if (path) {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/:p(.*)*", component: { render: () => null } }],
+    });
+    await router.push(path);
+    view = mountView(Page, { router });
+  } else view = mountView(Page);
   await vi.waitFor(() => expect(api.getBackups).toHaveBeenCalled());
   await vi.waitFor(() => saveButton());
   await tick();
@@ -152,6 +160,26 @@ async function fillDir(value: string) {
 }
 
 describe("系统设置：备份", () => {
+  it("首页的「备份 N 天没成功」带着 ?section=backup 进来：读完设置以后滚到备份那一段", async () => {
+    const scrolled: Element[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      await mountPage(backups(), "/global?section=backup");
+      await vi.waitFor(() => expect(scrolled).toHaveLength(1));
+      expect((scrolled[0] as HTMLElement).dataset.testid).toBe("backup-strip");
+      view?.unmount();
+      scrolled.length = 0;
+      await mountPage(backups(), "/global");
+      await tick();
+      expect(scrolled, "不带参数时不滚").toHaveLength(0);
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
+  });
+
   it("读回设置：开关、时刻、份数、目录；默认目录写在提示里；带上密钥时写明风险", async () => {
     await mountPage();
     expect(q("backup-enabled")!.classList.contains("is-checked")).toBe(true);

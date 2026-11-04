@@ -4,8 +4,15 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     {
+      /* 媒体中心 M8：打开网页先到首页（原来是用户统计） */
       path: "/",
-      redirect: "/userinfo",
+      redirect: "/home",
+    },
+    {
+      path: "/home",
+      name: "home",
+      component: () => import("@/views/Home.vue"),
+      meta: { title: "首页" },
     },
     {
       path: "/userinfo",
@@ -36,6 +43,12 @@ const router = createRouter({
       name: "global",
       component: () => import("@/views/GlobalSettings.vue"),
       meta: { title: "全局设置" },
+    },
+    {
+      path: "/system/check",
+      name: "system-check",
+      component: () => import("@/views/SystemCheck.vue"),
+      meta: { title: "系统体检" },
     },
     {
       path: "/api-tokens",

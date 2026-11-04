@@ -843,6 +843,500 @@ const ITEM_TV_DELETE_S2 = {
   errors: [],
 };
 
+/*
+ * 首页（画板 02、07，媒体中心 M8）：字段照 web/api_home.go 的 homeResponse，内容照画板：今天播出五张卡（还没播、已入库、下载中、缺、已入库），
+ * 待处理六类，继续观看三张，最近入库七张，这周还要播四条，NAS 状态三块盘、两台下载器、三条状态行。
+ * 时刻都按跑验收的那天算（今天的 20:00、明天起的几天），卡上「播出 6 小时」这类相对时间随运行的时刻变，验收只量几何。
+ * 图片路径都不给：无头 Chrome 连不上 TMDB，剧照与海报走占位。
+ */
+const HOME_DAY = (offset = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+const HOME_AT = (h, m = 0, offset = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  d.setHours(h, m, 0, 0);
+  return d.toISOString();
+};
+const HOME_TODAY = [
+  {
+    subscription_id: 11,
+    tmdb_id: 100088,
+    title: "长夜将尽",
+    season: 2,
+    episode: 9,
+    name: "第 9 集",
+    state: "upcoming",
+    air_at: HOME_AT(20),
+    search_at: HOME_AT(22),
+  },
+  {
+    subscription_id: 12,
+    tmdb_id: 200101,
+    title: "雾港",
+    season: 1,
+    episode: 14,
+    name: "回航",
+    state: "library",
+    air_at: HOME_AT(19, 30),
+    version: "2160p HHWEB",
+    open_url: "http://jellyfin.qa.test/web/#/details?id=ep14",
+  },
+  {
+    subscription_id: 13,
+    tmdb_id: 200102,
+    title: "北方来信",
+    season: 3,
+    episode: 5,
+    name: "冬至",
+    state: "downloading",
+    air_at: HOME_AT(18),
+    site: "HDSky",
+    percent: 63,
+    eta_seconds: 720,
+  },
+  {
+    subscription_id: 14,
+    tmdb_id: 200103,
+    title: "繁星之下",
+    season: 1,
+    episode: 21,
+    name: "星河",
+    state: "missing",
+    air_at: HOME_AT(12),
+  },
+  {
+    subscription_id: 15,
+    tmdb_id: 200104,
+    title: "第七个夏天",
+    season: 2,
+    episode: 10,
+    name: "回声",
+    state: "library",
+    air_at: HOME_AT(10),
+    version: "1080p ADWeb",
+    open_url: "http://jellyfin.qa.test/web/#/details?id=ep10",
+  },
+].map((e) => ({ media_type: "tv", air_date: HOME_DAY(), ...e }));
+const HOME_WEEK = [
+  {
+    subscription_id: 11,
+    tmdb_id: 100088,
+    title: "长夜将尽",
+    season: 2,
+    episode: 10,
+    offset: 1,
+    at: [20, 0],
+  },
+  {
+    subscription_id: 12,
+    tmdb_id: 200101,
+    title: "雾港",
+    season: 1,
+    episode: 15,
+    offset: 2,
+    at: [19, 30],
+  },
+  {
+    subscription_id: 13,
+    tmdb_id: 200102,
+    title: "北方来信",
+    season: 3,
+    episode: 6,
+    offset: 3,
+    at: [18, 0],
+  },
+  {
+    subscription_id: 15,
+    tmdb_id: 200104,
+    title: "第七个夏天",
+    season: 2,
+    episode: 11,
+    offset: 5,
+    at: [10, 0],
+  },
+].map(({ offset, at, ...e }) => ({
+  media_type: "tv",
+  state: "upcoming",
+  air_date: HOME_DAY(offset),
+  air_at: HOME_AT(at[0], at[1], offset),
+  ...e,
+}));
+const HOME = {
+  at: HOME_AT(14, 20),
+  calendar: { data: { today: HOME_TODAY, week: HOME_WEEK, errors: [], subscriptions: 9 } },
+  todo: {
+    data: {
+      groups: [
+        {
+          kind: "organize_failed",
+          count: 2,
+          label: "整理失败 2",
+          target: "/media/history?status=failed",
+          tone: "dang",
+        },
+        {
+          kind: "recognize",
+          count: 1,
+          label: "识别不出 1",
+          target: "/media/history?kind=recognize",
+          tone: "warn",
+        },
+        {
+          kind: "waiting_version",
+          count: 1,
+          label: "等版本 1",
+          target: "/media/subscriptions?state=waiting_version",
+          tone: "primary",
+        },
+        {
+          kind: "attendance_failed",
+          count: 1,
+          label: "PTTime 签到失败",
+          target: "/attendance",
+          tone: "warn",
+        },
+        {
+          kind: "server_removed",
+          count: 1,
+          label: "媒体服务器里删了 1 部",
+          target: "drawer",
+          tone: "info",
+        },
+        {
+          kind: "backup",
+          count: 1,
+          label: "备份 3 天没成功",
+          target: "/global?section=backup",
+          tone: "warn",
+        },
+      ],
+      items: [
+        {
+          kind: "organize_failed",
+          title: "雾港 S01E13",
+          detail: "目标已有文件，不会覆盖",
+          target: "/media/history?status=failed",
+          media_type: "tv",
+          tmdb_id: 200101,
+          season: 1,
+          episode: 13,
+        },
+        {
+          kind: "organize_failed",
+          title: "沙丘：第二部",
+          detail: "pt-tools 里找不到这个文件（Docker 里要把下载目录挂进容器）",
+          target: "/media/history?status=failed",
+          media_type: "movie",
+          tmdb_id: 693134,
+        },
+        {
+          kind: "recognize",
+          title: "The.Long.Night.S02E07.2160p.WEB-DL",
+          detail: "没识别出来",
+          target: "/media/history?kind=recognize",
+        },
+        {
+          kind: "waiting_version",
+          title: "长夜将尽 第 2 季",
+          detail: "第 8 集在等锁住的版本",
+          target: "/media/item/tv/100088?from=home&season=2&episode=8",
+          media_type: "tv",
+          tmdb_id: 100088,
+          season: 2,
+          episode: 8,
+        },
+        {
+          kind: "attendance_failed",
+          title: "PTTime",
+          detail: "签到页返回 502",
+          target: "/attendance",
+        },
+        {
+          kind: "server_removed",
+          title: "北方来信 第 3 季",
+          detail: "S03E02 在 Jellyfin 里被删了",
+          target: "drawer",
+          issue_ids: [31],
+          media_type: "tv",
+          tmdb_id: 200102,
+          season: 3,
+          episodes: [2],
+        },
+        {
+          kind: "backup",
+          title: "备份 3 天没成功",
+          detail: "最近一次失败：/backup 没有写权限",
+          target: "/global?section=backup",
+        },
+      ],
+    },
+  },
+  resume: {
+    data: [
+      {
+        server_id: 1,
+        name: "Jellyfin",
+        kind: "jellyfin",
+        user: "admin",
+        items: [
+          {
+            server_id: 1,
+            item_id: "r1",
+            media_type: "tv",
+            tmdb_id: 200101,
+            title: "雾港",
+            season: 1,
+            episode: 13,
+            percent: 62,
+            remaining_seconds: 18 * 60,
+            open_url: "http://jellyfin.qa.test/web/#/details?id=r1",
+          },
+          {
+            server_id: 1,
+            item_id: "r2",
+            media_type: "movie",
+            tmdb_id: 693134,
+            title: "沙丘：第二部",
+            percent: 45,
+            remaining_seconds: 72 * 60,
+            open_url: "http://jellyfin.qa.test/web/#/details?id=r2",
+          },
+          {
+            server_id: 1,
+            item_id: "r3",
+            media_type: "tv",
+            tmdb_id: 100088,
+            title: "长夜将尽",
+            season: 2,
+            episode: 5,
+            percent: 30,
+            remaining_seconds: 31 * 60,
+            open_url: "http://jellyfin.qa.test/web/#/details?id=r3",
+          },
+        ],
+      },
+    ],
+  },
+  recent: {
+    data: {
+      today_count: 7,
+      items: [
+        ["tv", 200101, "雾港", 1, 14, "2160p"],
+        ["tv", 200104, "第七个夏天", 2, 10, "1080p"],
+        ["movie", 693134, "沙丘：第二部", 0, 0, "Remux"],
+        ["tv", 100088, "长夜将尽", 2, 6, "2160p"],
+        ["movie", 980477, "哪吒之魔童闹海", 0, 0, "2160p"],
+        ["tv", 200102, "北方来信", 3, 4, "2160p"],
+        ["tv", 200105, "群山回响", 1, 1, "1080p"],
+      ].map(([media_type, tmdb_id, title, season, episode, quality], i) => ({
+        media_type,
+        tmdb_id,
+        title,
+        ...(season ? { season, episode } : {}),
+        quality,
+        source: "pt-tools",
+        at: HOME_AT(13 - i),
+      })),
+    },
+  },
+  downloaders: {
+    data: {
+      downloaders: [
+        {
+          id: 1,
+          name: "qb",
+          type: "qbittorrent",
+          online: true,
+          down: 3.0 * 1024 ** 2,
+          up: 15.2 * 1024 ** 2,
+          downloading: 4,
+          seeding: 980,
+        },
+        {
+          id: 2,
+          name: "tr",
+          type: "transmission",
+          online: true,
+          down: 0.2 * 1024 ** 2,
+          up: 3.4 * 1024 ** 2,
+          downloading: 0,
+          seeding: 304,
+        },
+      ],
+      down: 3.2 * 1024 ** 2,
+      up: 18.6 * 1024 ** 2,
+      downloading: 4,
+      seeding: 1284,
+      speed_history: Array.from({ length: 20 }, (_, i) => ({
+        at: HOME_AT(14, i),
+        down: Math.round((2 + Math.sin(i / 2) * 1.5) * 1024 ** 2),
+        up: Math.round((15 + Math.cos(i / 3) * 4) * 1024 ** 2),
+        answered: i === 6 ? 1 : 2,
+        total: 2,
+      })),
+    },
+  },
+  storage: {
+    data: [
+      {
+        kind: "download",
+        label: "下载盘 · qb、tr",
+        path: "/downloads",
+        free: 1.2 * TB,
+        total: 8 * TB,
+        low: false,
+      },
+      {
+        kind: "library",
+        label: "媒体库 · 电影",
+        path: "/media",
+        free: 2.4 * TB,
+        total: 12 * TB,
+        low: false,
+      },
+      {
+        kind: "library",
+        label: "媒体库 · 剧集",
+        path: "/tv",
+        free: 15 * 1024 ** 3,
+        total: 128 * 1024 ** 3,
+        low: true,
+      },
+    ],
+  },
+  status: {
+    data: {
+      health: {
+        at: HOME_AT(8),
+        ok: 13,
+        warn: 1,
+        fail: 0,
+        skip: 2,
+        problem: "媒体库「电影」：/media：和下载器「qb」的 /downloads 不在同一个文件系统",
+      },
+      backup: {
+        enabled: true,
+        last_at: HOME_AT(4, 30),
+        last_ok_at: HOME_AT(4, 30, -3),
+        error: "/backup 没有写权限",
+        late: true,
+        days: 3,
+      },
+      servers: [
+        {
+          id: 1,
+          name: "家里",
+          kind: "jellyfin",
+          version: "12.2",
+          online: true,
+          indexed_at: HOME_AT(14),
+          movies: 812,
+          series: 236,
+          episodes: 5120,
+          open_url: "http://jellyfin.qa.test/web/",
+        },
+      ],
+    },
+  },
+};
+
+/*
+ * 首页的空态（localStorage 设了 pt-fixture-home-empty 时回它，体检也回「没体检过」）：没有订阅、没有待处理、
+ * 没连媒体服务器、没有下载器与盘、没体检过、定时备份关着。不放进 emptyStubScript：那一层装上以后一直在，后面的首页那一趟就量不到有数据的样子了。
+ */
+const HOME_EMPTY = {
+  at: HOME_AT(14, 20),
+  calendar: { data: { today: [], week: [], errors: [], subscriptions: 0 } },
+  todo: { data: { groups: [], items: [] } },
+  resume: { data: [] },
+  recent: { data: { today_count: 0, items: [] } },
+  downloaders: {
+    data: { downloaders: [], down: 0, up: 0, downloading: 0, seeding: 0, speed_history: [] },
+  },
+  storage: { data: [] },
+  status: {
+    data: { health: null, backup: { enabled: false, late: false, days: -1 }, servers: [] },
+  },
+};
+
+/* 系统体检（M8）：一次体检的结果，十组都有，失败、提醒、跳过各几项（字段照 internal/health 的 Report） */
+const HEALTH_REPORT = {
+  at: HOME_AT(8),
+  duration_ms: 3240,
+  items: [
+    ["tmdb", "tmdb", "TMDB 接口", "ok", "用时 320 毫秒"],
+    ["tmdb:image", "tmdb", "TMDB 图片", "ok", "image.tmdb.org"],
+    ["site:hdsky", "sites", "HDSky", "ok", "登录正常（11-04 07:58 探测）"],
+    [
+      "site:pttime",
+      "sites",
+      "PTTime",
+      "warn",
+      "Cookie 过期（11-04 07:40 探测）",
+      "Cookie 过期了：在浏览器里重新登录站点，再用扩展同步 Cookie，或在站点设置里换上新的",
+    ],
+    ["site:ourbits", "sites", "OurBits", "skip", "关了登录探测"],
+    ["downloader:1", "downloaders", "qb", "ok", "v5.0.4 · 剩余 1.20 TiB"],
+    [
+      "downloader:2",
+      "downloaders",
+      "tr",
+      "fail",
+      "连不上：dial tcp 192.0.2.10:9091: connect: connection refused",
+      "检查下载器是不是开着，以及地址、用户名与密码",
+    ],
+    [
+      "server:1",
+      "servers",
+      "家里",
+      "ok",
+      "Jellyfin 12.2 · 索引 812 部电影、236 部剧，11-04 14:00 同步",
+    ],
+    ["path:1", "paths", "下载器「qb」的路径映射", "ok", "/downloads → /data/downloads"],
+    [
+      "library:1",
+      "libraries",
+      "媒体库「电影」",
+      "warn",
+      "/media：和下载器「qb」的 /downloads 不在同一个文件系统",
+      "存在那里的种子硬链接不进这个库：把下载目录和库放在同一块盘、同一个挂载里，或者把这个库的整理方式改成复制",
+    ],
+    [
+      "disk:/data",
+      "disks",
+      "数据目录、备份目录",
+      "ok",
+      "/config/.pt-tools：剩余 86.0 GB，共 128.0 GB",
+    ],
+    ["disk:/media", "disks", "媒体库「电影」", "ok", "/media：剩余 2.40 TB，共 12.00 TB"],
+    ["time", "time", "本机时间", "ok", "和 TMDB 的时间相差 1 秒"],
+    [
+      "backup",
+      "backup",
+      "备份",
+      "warn",
+      "最近一次备份（11-04 04:30）失败：/backup 没有写权限",
+      "在「全局设置 → 备份与恢复」里看原因，改好以后点「立即备份」",
+    ],
+    ["secret", "secret", "加密密钥", "ok", "密钥在 /config/.pt-tools/secret.key"],
+  ].map(([key, group, title, status, detail, hint]) => ({
+    key,
+    group,
+    title,
+    status,
+    detail,
+    ...(hint ? { hint } : {}),
+  })),
+  ok: 10,
+  warn: 3,
+  fail: 1,
+  skip: 1,
+};
+
 const SUPPORTED = SITES.map(([site], i) => ({
   id: site.toLowerCase(),
   name: site,
@@ -1337,6 +1831,9 @@ export const FIXTURES = [
   ],
   ["/api/v2/search/sites", SITES.map(([s]) => s)],
   ["/api/media/search", ENTRY_SEARCH],
+  /* 首页与系统体检（M8）：POST /api/system/check（立即体检）也回这一份 */
+  ["/api/home", HOME],
+  ["/api/system/check", { report: HEALTH_REPORT }],
   /* 条目详情（M3）：季的路径是条目路径的子路径，前缀匹配先命中先用，要排在前面 */
   /* 删除预览（M7）：只给第 2 季的（画板 03 的片段）；执行删除不拦，验收不点「删除」 */
   ["/api/media/items/delete/preview", ITEM_TV_DELETE_S2],
@@ -1727,6 +2224,11 @@ export function stubScript(overrides = {}) {
            * 验收用的「站点很多」模式：localStorage 设了 pt-fixture-many-sites 就把聚合接口的站点扩到 40 个
            * （复制的那些名字后面带 -2 / -3 …）。站点表的自适应封顶与拖拽调高只有行数多到溢出时才看得出来。
            */
+          /* 首页的空态那一趟（见 HOME_EMPTY） */
+          if (localStorage.getItem('pt-fixture-home-empty') === '1') {
+            if (path === '/api/home') out = ${JSON.stringify(JSON.stringify(HOME_EMPTY))};
+            if (path === '/api/system/check') out = '{"report":null}';
+          }
           if (path === '/api/v2/userinfo/aggregated' && localStorage.getItem('pt-fixture-many-sites') === '1') {
             const agg = JSON.parse(out);
             const base = agg.perSiteStats;

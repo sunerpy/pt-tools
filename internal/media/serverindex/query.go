@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -246,4 +247,82 @@ func seasonOrder(n int) int {
 		return 1 << 20
 	}
 	return n
+}
+
+// AddedItem 是媒体服务器里新加的一项（不是 pt-tools 整理进库的）：一部电影，或剧的一集（TMDBID 是剧的，Title 是剧名）。
+type AddedItem struct {
+	Server    models.MediaServer
+	ItemID    string
+	MediaType string
+	TMDBID    int
+	Title     string
+	Season    int
+	Episode   int
+	AddedAt   time.Time
+}
+
+// recentScan 是找最近新加的项时最多看几行（多数是 pt-tools 整理的，要跳过）
+const recentScan = 500
+
+// RecentAdded 是能用索引的服务器里最近新加的电影与集（最新在前，最多 limit 项）。pt-tools 整理进库的不算（对整理记录的规则同写问题：
+// 有 pt-tools 的路径时按路径，换不了路径时按编号与季集），没有 TMDB 编号的也不算（打不开条目详情）。
+func RecentAdded(ctx context.Context, db *gorm.DB, limit int) ([]AddedItem, error) {
+	out := []AddedItem{}
+	servers, err := Servers(ctx, db, false)
+	if err != nil || len(servers) == 0 || limit <= 0 {
+		return out, err
+	}
+	byID := map[uint]models.MediaServer{}
+	ids := make([]uint, 0, len(servers))
+	for _, s := range servers {
+		byID[s.ID] = s
+		ids = append(ids, s.ID)
+	}
+	tx := db.WithContext(ctx)
+	var rows []models.MediaServerItem
+	if err := tx.Where("server_id IN ? AND kind IN ? AND tmdb_id > 0 AND added_at IS NOT NULL AND removed_at IS NULL", ids,
+		[]string{models.MediaServerItemMovie, models.MediaServerItemEpisode}).
+		Order("added_at DESC, id DESC").Limit(recentScan).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取索引失败: %w", err)
+	}
+	type seriesKey struct {
+		server uint
+		item   string
+	}
+	series := map[seriesKey]string{}
+	for _, r := range rows {
+		if len(out) >= limit {
+			break
+		}
+		kind := models.MediaKindMovie
+		if r.Kind == models.MediaServerItemEpisode {
+			kind = models.MediaKindTV
+		}
+		ok, err := recorded(tx, r, kind)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			continue
+		}
+		it := AddedItem{Server: byID[r.ServerID], ItemID: r.ItemID, MediaType: kind, TMDBID: r.TMDBID, Title: r.Title, Season: r.Season, Episode: r.Episode, AddedAt: *r.AddedAt}
+		if kind == models.MediaKindTV {
+			key := seriesKey{r.ServerID, r.SeriesItemID}
+			name, seen := series[key]
+			if !seen {
+				var titles []string
+				if err := tx.Model(&models.MediaServerItem{}).Where("server_id = ? AND item_id = ?", r.ServerID, r.SeriesItemID).
+					Limit(1).Pluck("title", &titles).Error; err != nil {
+					return nil, fmt.Errorf("读取索引失败: %w", err)
+				}
+				if len(titles) > 0 {
+					name = titles[0]
+				}
+				series[key] = name
+			}
+			it.Title = name
+		}
+		out = append(out, it)
+	}
+	return out, nil
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/internal/assistant"
+	"github.com/sunerpy/pt-tools/internal/health"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
@@ -92,6 +93,13 @@ type Server struct {
 
 	// attendanceRun 是网页「一键签到」的进度（见 apiAttendanceRun）
 	attendanceRun attendanceRunState
+
+	// speeds 是全部下载器的总速度的最近几条采样（首页的速度柱，见 speed_history.go）
+	speeds speedHistory
+	// homeCache 是首页上一次的结果（见 api_home.go）；health 是系统体检的执行器（见 api_system_check.go）
+	homeCache  homeCache
+	health     *health.Runner
+	healthOnce sync.Once
 
 	// verifyCookie 是扩展推来认不出格式的 Cookie 时验证它的方法（见 credential_verify.go）；为空时用 probeSiteCookie，测试里替换
 	verifyCookie cookieVerifier
@@ -243,6 +251,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerSubscribeRoutes(mux)
 	s.registerBlockRoutes(mux)
 	s.registerMediaItemRoutes(mux)
+	s.registerHomeRoutes(mux)
 	s.registerFreeWatchRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	s.registerTokenRoutes(mux)
