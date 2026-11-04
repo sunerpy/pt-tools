@@ -87,9 +87,13 @@ func TestItemTVWithSubscription(t *testing.T) {
 		downloader.Torrent{InfoHash: "H3", Progress: 1, IsCompleted: true, Ratio: 0.2, SeedingTime: 86400, State: downloader.TorrentSeeding},
 	)
 
+	// 删种的保护规则按全局设置（同自动删种）：打开「保护下载中的种子」
+	e.guardSettings(map[string]any{"cleanup_protect_dl": true})
+
 	d, err := e.svc.Item(e.ctx, models.MediaKindTV, 100088)
 	require.NoError(t, err)
 	assert.Empty(t, d.Errors)
+	assert.Equal(t, []string{"下载中", "最短保种 24 小时", "H&R", "保留标签"}, d.ProtectRules)
 	it := d.Item
 	assert.Equal(t, "最后生还者", it.Title)
 	assert.Equal(t, "The Last of Us", it.OriginalTitle)
@@ -118,6 +122,7 @@ func TestItemTVWithSubscription(t *testing.T) {
 	require.NotZero(t, d.NAS.Library.RecordID)
 	assert.Equal(t, ItemLibrary{
 		Seasons: []ItemSeasonHave{{Number: 2, Have: 1, Total: 3}}, Files: 1, Size: 3 << 30, Libraries: []string{"剧集库"}, RecordID: d.NAS.Library.RecordID,
+		Missing: []ItemServerIssue{},
 	}, d.NAS.Library)
 	assert.Equal(t, []ItemSubscription{{ID: sub.ID, Status: models.MediaSubActive, Season: 2, Follow: true, Lock: &MediaSearchLock{Group: "HHWEB", Resolution: "1080p"}}}, d.Subscriptions)
 
@@ -126,7 +131,7 @@ func TestItemTVWithSubscription(t *testing.T) {
 	assert.Equal(t, ItemTorrent{
 		Site: "ourbits", TorrentID: "31", Title: "The.Last.of.Us.S01.1080p.WEB-DL.H264-YYWEB", Season: 1, Episodes: "整季", Version: "1080p YYWEB",
 		Size: 30 << 30, DownloaderID: 1, Downloader: "qb", Hash: "h3", State: ItemTorrentSeeding, Percent: 100, Ratio: 0.2, SeedingSeconds: 86400,
-		HR: true, HRHours: 72, Reason: "H&R 还差 2 天",
+		HR: true, HRHours: 72, Reason: "H&R 还差 2 天", Protection: "H&R：要求做种 72 小时，已做 24.0 小时",
 	}, pack)
 	assert.Equal(t, "hdsky", e01.Site, "推送记录给站点与编号")
 	assert.Equal(t, "11", e01.TorrentID)
@@ -141,6 +146,7 @@ func TestItemTVWithSubscription(t *testing.T) {
 	assert.Equal(t, "E02", e02.Episodes)
 	assert.False(t, e02.Deletable)
 	assert.Equal(t, "受保护：下载中", e02.Reason)
+	assert.Equal(t, "正在下载或校验（打开了「保护下载中的种子」）", e02.Protection)
 
 	require.NotNil(t, d.NAS.Seeding.LowestRatio)
 	assert.InDelta(t, 0.2, *d.NAS.Seeding.LowestRatio, 0.001)

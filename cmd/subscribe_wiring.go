@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
@@ -19,6 +21,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/web"
 )
 
@@ -49,6 +52,7 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 		Push:        internal.PushTorrentToDownloader,
 		Downloaders: organizeDownloaders{mgr: mgr},
 		Notify:      subscribeNotifier(notifier),
+		Guard:       subscribeGuard(global.GlobalDB.DB),
 		Logger:      global.GetSlogger(),
 		DoubanBase:  qaDoubanURL(),
 	}
@@ -56,7 +60,7 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 		cfg.Search = o
 	}
 	if organizer != nil {
-		cfg.Organizer, cfg.Library = organizer, organizer
+		cfg.Organizer, cfg.Library, cfg.Deleter = organizer, organizer, organizer
 	}
 	svc := subscribe.New(cfg)
 	if organizer != nil {
@@ -69,6 +73,26 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 	reportSubscriber.Store(svc)
 	global.GetSlogger().Info("订阅服务已启动")
 	return svc
+}
+
+// seedGuard 把自动删种的保护规则（scheduler.SeedGuard）接成订阅服务的 Guard：条目详情的「能不能删」与「删除一部片」都按它。
+type seedGuard struct{ g *scheduler.SeedGuard }
+
+func (s seedGuard) Check(t downloader.Torrent) subscribe.Protection {
+	return subscribe.Protection(s.g.Check(t))
+}
+
+func (s seedGuard) Rules() []string { return s.g.Rules() }
+
+// subscribeGuard 每次按库里现在的全局设置建保护规则（设置改了马上生效）。
+func subscribeGuard(db *gorm.DB) subscribe.GuardFunc {
+	return func(ctx context.Context) (subscribe.Guard, error) {
+		g, err := scheduler.LoadSeedGuard(db.WithContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		return seedGuard{g}, nil
+	}
 }
 
 // stopSubscribeService 先断开 RSS、ChatOps 与每日战报的入口再停后台。

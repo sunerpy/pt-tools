@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -135,12 +136,19 @@ func TestReconcileDeletesLinksAfterTorrentRemoved(t *testing.T) {
 	e.dl.remove(oppHash)
 	movie := e.history()[0]
 	require.NoError(t, os.RemoveAll(filepath.Join(e.dlDir, oppName)))
+	// 这一条记过「库里的文件不见了」：链接删了以后改成解决了
+	require.NoError(t, serverindex.Raise(e.db, serverindex.MissingKey(movie.ID),
+		serverindex.IssueInfo{MediaType: movie.MediaType, TMDBID: movie.TMDBID}, e.Now()))
 	assert.Equal(t, 1, e.svc.Reconcile(e.ctx))
 	assert.False(t, exists(movie.TargetPath))
 	var row models.MediaTransferHistory
 	require.NoError(t, e.db.First(&row, movie.ID).Error)
 	assert.Equal(t, models.MediaTransferRemoved, row.Status)
 	assert.Contains(t, row.Message, "一并删除")
+	var issue models.MediaIssue
+	require.NoError(t, e.db.Where("history_id = ?", movie.ID).First(&issue).Error)
+	assert.Equal(t, models.MediaIssueResolved, issue.Status)
+	assert.Equal(t, "种子与数据删了，库里的链接一并删了", issue.Detail)
 	assert.Zero(t, e.svc.Reconcile(e.ctx), "已经清理过的不再处理")
 
 	// 下载器连不上时不动

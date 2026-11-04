@@ -4,6 +4,8 @@
  * 季 tab 换季重新读、路由跟着换；集卡的状态与说明、缺的集点「搜资源」去按条目搜索；种子行与能不能删；
  * 演职员导演在前；推荐点了进那一部；没订阅时「追剧」打开订阅弹窗；读不到时能重试；电影没有季、种子块叫「这部片的种子」。
  * 媒体服务器（M6）：第 4 行、「在 Jellyfin 播放」（手机在白卡底部）、集卡的播放圆；服务器里删了的能忽略。
+ * 删除（M7）：大图的「删除」（手机在「更多」里）、种子行的「删除这个种子」、问题的「处理」打开删除弹窗，删完重新读；
+ * 库里的文件不见了写在库里那一行与集卡上；种子块的说明写开着的保护规则。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
@@ -15,6 +17,8 @@ const api = vi.hoisted(() => ({
   itemSeason: vi.fn(),
   setStatus: vi.fn(),
   addBlocks: vi.fn(),
+  deletePreview: vi.fn(),
+  deleteItem: vi.fn(),
   profiles: vi.fn(async () => ({ items: [], resolutions: [], sources: [], codecs: [] })),
   get: vi.fn(),
   episodes: vi.fn(async () => []),
@@ -123,6 +127,7 @@ const tlou = {
       size: 82.6 * 1024 ** 3,
       libraries: ["剧集库"],
       record_id: 77,
+      missing: [],
     },
     seeding: { count: 4, hr_pending: 1, hr_left_seconds: 2 * 86400, lowest_ratio: 0.42 },
   },
@@ -210,6 +215,7 @@ const tlou = {
       subscribed: true,
     },
   ],
+  protect_rules: ["下载中", "最短保种 24 小时", "H&R", "保留与保护标签"],
   errors: [],
 };
 
@@ -306,7 +312,7 @@ describe("条目详情", () => {
     expect(q("mi-ep-1")!.textContent).toContain("2160p HHWEB · 6.8 GB");
     expect(q("mi-ep-7")!.textContent).toContain("63% · 还要 12 分钟");
     expect(q("mi-ep-8")!.textContent).toContain("锁定 HHWEB 2160p");
-    expect(q("mi-ep-act-8")!.textContent).toContain("看版本");
+    expect(q("mi-ep-versions-8")!.textContent).toContain("看版本");
     expect(q("mi-ep-10")!.textContent).toContain("播出后 2 小时开始搜");
     expect(q("mi-ep-10")!.textContent).toContain("季终");
 
@@ -316,6 +322,9 @@ describe("条目详情", () => {
     expect(rows[0]!.textContent).toContain("H&R 已满足");
     expect(rows[1]!.textContent).toContain("受保护：下载中");
     expect(rows[1]!.textContent).toContain("63% · 还要 12 分钟");
+    expect(q("mi-torrents-sub")!.textContent).toBe(
+      "删除时按这几条保护：下载中、最短保种 24 小时、H&R、保留与保护标签",
+    );
 
     const cast = q("mi-cast")!.textContent ?? "";
     expect(cast.indexOf("陈默")).toBeLessThan(cast.indexOf("周屿"));
@@ -325,7 +334,7 @@ describe("条目详情", () => {
     expect(q("mi-rec-10")!.textContent).toContain("已订阅");
 
     // 缺的集点「搜资源」：按条目搜索这一季
-    q("mi-ep-act-9")!.click();
+    q("mi-ep-search-9")!.click();
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe("/search"));
     expect(router.currentRoute.value.query).toEqual({
       media_type: "tv",
@@ -536,15 +545,16 @@ describe("条目详情", () => {
     expect(q("mi-ep-3")!.textContent).toContain("Jellyfin 里没有了");
     expect(q("mi-ep-3")!.querySelector(".mi-ep__note")!.classList.contains("is-warn")).toBe(true);
     expect(q("mi-ep-4")!.textContent, "算作已入库的写来源").toContain("Jellyfin 里有");
-    expect(q("mi-ep-act-3")!.textContent).toContain("忽略");
-    q("mi-ep-act-3")!.click();
+    expect(q("mi-ep-ignore-3")!.textContent).toContain("忽略");
+    expect(q("mi-ep-handle-3")!.textContent).toContain("处理");
+    q("mi-ep-ignore-3")!.click();
     await vi.waitFor(() => expect(organize.dismissIssue).toHaveBeenCalledWith(31));
     await vi.waitFor(() => expect(api.item).toHaveBeenCalledTimes(2));
     expect(ui.success).toHaveBeenCalledWith("已忽略");
 
     // 第 4 行的「忽略」：忽略这台服务器上列出的全部
     organize.dismissIssue.mockClear();
-    q("mi-server-ignore")!.click();
+    q("mi-issue-ignore-server")!.click();
     await vi.waitFor(() => expect(organize.dismissIssue).toHaveBeenCalledWith(31));
   });
 
@@ -574,7 +584,171 @@ describe("条目详情", () => {
     expect(q("mi-nas")!.contains(q("mi-play")), "手机的播放在「你的 NAS 上」白卡里").toBe(true);
     expect(q("mi-acts")!.contains(q("mi-play"))).toBe(false);
     expect(q("mi-nas-server")!.textContent).toContain("同步");
-    expect(q("mi-server-ignore"), "没有删了的不给忽略").toBeNull();
+    expect(q("mi-issue-ignore-server"), "没有删了的不给忽略").toBeNull();
+    expect(q("mi-issue-handle-server")).toBeNull();
+  });
+
+  it("删除：大图的「删除」打开这一季的删除弹窗，删完重新读；种子行「删除这个种子」只勾那一个", async () => {
+    const preview = {
+      files: [],
+      torrents: [{ ...tlou.torrents[0], covers_more: false, shares: [] }],
+      subscriptions: [{ id: 5, status: "active", season: 2, follow: true }],
+      issues: [],
+      errors: [],
+    };
+    api.item.mockResolvedValue(tlou);
+    api.itemSeason.mockResolvedValue(season2);
+    api.deletePreview.mockResolvedValue(preview);
+    await mountAt("/media/item/tv/100088?season=2");
+    await vi.waitFor(() => expect(q("mi-ep-1")).not.toBeNull());
+    expect(q("mi-delete")!.getAttribute("aria-label")).toBe("删除第 2 季");
+    q("mi-delete")!.click();
+    await vi.waitFor(() => expect(q("delete-torrents")).not.toBeNull());
+    expect(api.deletePreview).toHaveBeenCalledWith({
+      media_type: "tv",
+      tmdb_id: 100088,
+      season: 2,
+    });
+    expect(document.querySelector(".md-dialog .el-dialog__title")!.textContent).toBe(
+      "删除《长夜将尽》第 2 季",
+    );
+    expect(q("delete-summary")!.textContent).toBe("将删除 1 个种子（连数据），暂停追剧");
+    api.deleteItem.mockResolvedValue({
+      steps: [
+        { kind: "subscription", target: "长夜将尽 第 2 季", id: 5, ok: true, message: "暂停了" },
+      ],
+      failed: 0,
+    });
+    q("delete-run")!.click();
+    await vi.waitFor(() => expect(api.deleteItem).toHaveBeenCalled());
+    await vi.waitFor(() => expect(api.item).toHaveBeenCalledTimes(2));
+    q("delete-close")!.click();
+    await flush();
+
+    // 种子行的更多菜单：删除这个种子，只勾那一个、订阅保留
+    api.deletePreview.mockClear();
+    qa("mi-trow-more")[0]!.click();
+    await vi.waitFor(() => expect(q("mi-trow-delete")).not.toBeNull());
+    q("mi-trow-delete")!.click();
+    await vi.waitFor(() => expect(api.deletePreview).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(q("delete-summary")!.textContent).toBe("将删除 1 个种子（连数据）"),
+    );
+  });
+
+  it("问题：服务器里删了的「处理」只删那一集；库里的文件不见了写在库里那一行与集卡上，能处理、忽略", async () => {
+    const jf = {
+      server_id: 1,
+      name: "Jellyfin",
+      kind: "jellyfin",
+      synced_at: "2026-11-04T06:00:00Z",
+      have: true,
+      episodes: 17,
+      removed: [{ id: 31, season: 2, episode: 3 }],
+    };
+    api.item.mockResolvedValue({
+      ...tlou,
+      servers: [jf],
+      nas: {
+        ...tlou.nas,
+        library: { ...tlou.nas.library, missing: [{ id: 41, season: 2, episode: 5 }] },
+      },
+    });
+    api.itemSeason.mockResolvedValue({
+      ...season2,
+      episodes: [
+        {
+          episode: 5,
+          name: "回声",
+          air_date: "2026-10-09",
+          state: "library",
+          library_issue: { id: 41 },
+        },
+        ...season2.episodes,
+      ],
+    });
+    api.deletePreview.mockResolvedValue({
+      files: [],
+      torrents: [],
+      subscriptions: [],
+      issues: [],
+      errors: [],
+    });
+    await mountAt("/media/item/tv/100088?season=2");
+    await vi.waitFor(() => expect(q("mi-ep-5")).not.toBeNull());
+
+    const lib = q("mi-nas-library")!;
+    expect(lib.textContent).toContain("S02E05 的文件不见了");
+    expect(lib.querySelector(".mi-nas__desc")!.classList.contains("is-warn")).toBe(true);
+    expect(q("mi-ep-5")!.textContent).toContain("库里的文件不见了");
+    expect(q("mi-ep-5")!.classList.contains("has-two-acts")).toBe(true);
+
+    q("mi-issue-handle-server")!.click();
+    await vi.waitFor(() =>
+      expect(api.deletePreview).toHaveBeenCalledWith({
+        media_type: "tv",
+        tmdb_id: 100088,
+        season: 2,
+        episodes: [3],
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector(".md-dialog .el-dialog__title")!.textContent).toBe(
+        "删除《长夜将尽》第 2 季 E03",
+      ),
+    );
+
+    q("mi-ep-handle-5")!.click();
+    await vi.waitFor(() =>
+      expect(api.deletePreview).toHaveBeenLastCalledWith({
+        media_type: "tv",
+        tmdb_id: 100088,
+        season: 2,
+        episodes: [5],
+      }),
+    );
+
+    q("mi-issue-ignore-library")!.click();
+    await vi.waitFor(() => expect(organize.dismissIssue).toHaveBeenCalledWith(41));
+  });
+
+  it("手机：「更多」里有删除，种子的底部菜单里有「删除这个种子」", async () => {
+    api.item.mockResolvedValue(tlou);
+    api.itemSeason.mockResolvedValue(season2);
+    api.deletePreview.mockResolvedValue({
+      files: [],
+      torrents: [],
+      subscriptions: [],
+      issues: [],
+      errors: [],
+    });
+    await mountAt("/media/item/tv/100088?season=2", { mobile: true });
+    await vi.waitFor(() => expect(q("mi-ep-1")).not.toBeNull());
+    expect(q("mi-delete"), "手机的删除在「更多」里").toBeNull();
+    q("mi-more")!.click();
+    await vi.waitFor(() => expect(q("mi-more-delete")).not.toBeNull());
+    expect(q("mi-more-delete")!.textContent!.trim()).toBe("删除第 2 季");
+    q("mi-more-delete")!.click();
+    await vi.waitFor(() => expect(api.deletePreview).toHaveBeenCalledTimes(1));
+    expect(document.querySelector(".md-dialog")!.classList.contains("is-fullscreen")).toBe(true);
+
+    qa("mi-trow")[0]!.click();
+    await vi.waitFor(() => expect(q("mi-sheet-delete")).not.toBeNull());
+    q("mi-sheet-delete")!.click();
+    await vi.waitFor(() => expect(api.deletePreview).toHaveBeenCalledTimes(2));
+  });
+
+  it("没有可删的（库里没有、没有种子、没有订阅）时不给删除", async () => {
+    api.item.mockResolvedValue({
+      ...tlou,
+      subscriptions: [],
+      torrents: [],
+      nas: { ...tlou.nas, library: { seasons: [], files: 0, size: 0, libraries: [], missing: [] } },
+    });
+    api.itemSeason.mockResolvedValue({ ...season2, subscription: undefined });
+    await mountAt("/media/item/tv/100088?season=2");
+    await vi.waitFor(() => expect(q("mi-ep-1")).not.toBeNull());
+    expect(q("mi-delete")).toBeNull();
   });
 
   it("手机：开头连续入库超过 3 集收成一行，展开以后换成「收起」", async () => {

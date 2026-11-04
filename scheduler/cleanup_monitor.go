@@ -767,20 +767,18 @@ type protectedTorrent struct {
 // splitProtectedWhy 把种子分成受保护的（带命中的第一条保护规则，先 hard 后 soft，见 protection.go）与剩下的候选。
 // hardOnly 报告为真的种子只看 hard 保护（免费过了还没下完的兜底），为 nil 时都看。读不到 H&R 信息时返回错误，调用方这一轮不删。
 func (c *CleanupMonitor) splitProtectedWhy(cfg *models.SettingsGlobal, torrents []downloader.Torrent, hardOnly func(downloader.Torrent) bool) ([]protectedTorrent, []downloader.Torrent, error) {
-	hr, err := loadHRInfo(c.db)
+	guard, err := NewSeedGuard(c.db, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	protectTags := splitTags(cfg.CleanupProtectTags)
-	now := time.Now().Unix()
 	var protected []protectedTorrent
 	var candidates []downloader.Torrent
 	for _, t := range torrents {
-		why := hardProtection(cfg, t, hr, protectTags)
-		if why == "" && (hardOnly == nil || !hardOnly(t)) {
-			why = softProtection(cfg, t, now)
+		p := guard.Hard(t)
+		if p.Rule == "" && (hardOnly == nil || !hardOnly(t)) {
+			p = guard.Check(t)
 		}
-		if why != "" {
+		if why := p.Text; why != "" {
 			protected = append(protected, protectedTorrent{t: t, why: why})
 			continue
 		}

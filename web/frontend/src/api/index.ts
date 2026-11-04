@@ -3709,7 +3709,10 @@ export interface MediaResumeGroup {
 export type MediaIssueKind = "server_removed" | "library_missing";
 export type MediaIssueStatus = "open" | "resolved" | "dismissed";
 
-/** 待处理问题：server_removed 是 pt-tools 整理过的片子在媒体服务器里没了 */
+/**
+ * 待处理问题：server_removed 是 pt-tools 整理过的片子在媒体服务器里没了；library_missing 是每天巡检发现库里的文件不见了
+ * （history_id 是那条整理记录）
+ */
 export interface MediaIssue {
   id: number;
   kind: MediaIssueKind;
@@ -4759,9 +4762,10 @@ export interface ItemTorrent {
   seeding_seconds: number;
   hr: boolean;
   hr_hours?: number;
-  /** 能不能删与原因（M3 只看下载中与 H&R） */
+  /** 能不能删（按自动删种的保护规则）：reason 是「能不能删」那一列的短字，protection 是受保护时的完整原因 */
   deletable: boolean;
   reason: string;
+  protection?: string;
 }
 
 /** 这个条目的一个订阅（剧集每季一个，新的季在前）；follow 是追剧 */
@@ -4788,6 +4792,8 @@ export interface ItemDetail {
       version?: string;
       /** 最新的一条整理记录：「重新刮削」刮削它所在的电影或剧集 */
       record_id?: number;
+      /** 还开着的「库里的文件不见了」（每天巡检发现的） */
+      missing: { id: number; season?: number; episode?: number }[];
     };
     seeding: {
       count: number;
@@ -4802,6 +4808,8 @@ export interface ItemDetail {
   recommendations: ExploreItem[];
   /** 开着、同步过索引的媒体服务器里有没有这一部（按服务器编号排） */
   servers?: ItemServer[];
+  /** 删除时按哪几条保护（开着的保护规则）；读不到保护规则时为空 */
+  protect_rules: string[];
   errors: string[];
 }
 
@@ -4842,6 +4850,8 @@ export interface SeasonEpisode {
   open_url?: string;
   /** 已入库、媒体服务器里被删了（还没处理的问题） */
   server_issue?: { id: number; server: string };
+  /** 已入库、库里的文件不见了（还没处理的问题） */
+  library_issue?: { id: number };
 }
 
 /** 剧集的一季（GET /api/media/items/tv/{tmdb_id}/seasons/{n}） */
@@ -4889,6 +4899,86 @@ export interface MediaCalendar {
   today: string;
   entries: CalendarEntry[];
   errors: string[];
+}
+
+/** 删除一部片选的范围：一部电影；剧集的一季，episodes 不为空时只是其中几集 */
+export interface DeleteSelector {
+  media_type: MediaKind;
+  tmdb_id: number;
+  season: number;
+  episodes?: number[];
+}
+
+/** 删除预览里的一条库文件（整理记录）：state 是 ours（当初放的）、missing（不在了）、changed（换成了别的，删的时候留着） */
+export interface DeleteFile {
+  id: number;
+  path: string;
+  library?: string;
+  mode: string;
+  existing: boolean;
+  size: number;
+  season: number;
+  episode: number;
+  episode_end: number;
+  state: "ours" | "missing" | "changed";
+  deletable: boolean;
+  note?: string;
+  downloader_id?: number;
+  info_hash?: string;
+}
+
+/**
+ * 删除预览里的一个关联种子：rule 是命中的保护规则，why 是受保护的短句（写在「受保护：」后面）；covers_more 是种子里还有这次没选的集
+ * （默认不勾）；shares 是同一台下载器里和它共用数据的种子
+ */
+export interface DeleteTorrent extends ItemTorrent {
+  rule?: string;
+  why?: string;
+  covers_more: boolean;
+  more?: string;
+  shares: { hash: string; name: string }[];
+}
+
+/** 删除预览（POST /api/media/items/delete/preview） */
+export interface DeletePreview {
+  files: DeleteFile[];
+  torrents: DeleteTorrent[];
+  subscriptions: ItemSubscription[];
+  issues: MediaIssue[];
+  errors: string[];
+}
+
+export interface TorrentKey {
+  downloader_id: number;
+  hash: string;
+}
+
+/** 订阅怎么办：暂停（默认）、删除、保留继续追 */
+export type DeleteSubscriptionAction = "pause" | "delete" | "keep";
+
+/** 删除请求（POST /api/media/items/delete） */
+export interface DeleteRequest extends DeleteSelector {
+  history_ids: number[];
+  allow_existing: boolean;
+  torrents: (TorrentKey & { delete_data: boolean })[];
+  confirm_protected: TorrentKey[];
+  subscription: DeleteSubscriptionAction;
+}
+
+/** 删除的一步：订阅、种子或一条整理记录（连库里的文件） */
+export interface DeleteStep {
+  kind: "subscription" | "torrent" | "file";
+  target: string;
+  id?: number;
+  downloader_id?: number;
+  hash?: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface DeleteResult {
+  steps: DeleteStep[];
+  failed: number;
 }
 
 /** 拉黑的一个种子：tmdb_id 为 0 时对所有条目生效（关键字搜索里拉黑的） */
@@ -5020,6 +5110,11 @@ export const subscribeApi = {
   /** 剧集一季的每一集（只读） */
   itemSeason: (id: number, n: number) =>
     api.get<SeasonDetail>(`/api/media/items/tv/${id}/seasons/${n}`),
+  /** 删除一部片的预览：库里的文件、关联的种子与能不能删、订阅、问题 */
+  deletePreview: (sel: DeleteSelector) =>
+    api.post<DeletePreview>("/api/media/items/delete/preview", sel),
+  /** 按勾选删除：每一步单独回结果 */
+  deleteItem: (req: DeleteRequest) => api.post<DeleteResult>("/api/media/items/delete", req),
   /** 订阅日历：from 到 to（YYYY-MM-DD，含两头，最多 62 天） */
   calendar: (from: string, to: string) =>
     api.get<MediaCalendar>(

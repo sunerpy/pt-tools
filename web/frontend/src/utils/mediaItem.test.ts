@@ -1,6 +1,6 @@
 /*
- * 钉子：条目详情页的文字（画板 04、08）。资料行、胶囊、主创；「你的 NAS 上」四行（媒体服务器那一行 M6 加）；集卡的播出日、说明与动作；
- * 收起行；种子行；默认打开哪一季；面包屑从哪里来。
+ * 钉子：条目详情页的文字（画板 04、08）。资料行、胶囊、主创；「你的 NAS 上」四行（媒体服务器那一行 M6 加，文件不见了 M7 加）；
+ * 集卡的播出日、说明与动作；收起行；种子行与保护规则的说明；默认打开哪一季；面包屑从哪里来。
  */
 import { describe, expect, it } from "vitest";
 
@@ -22,8 +22,9 @@ import {
   daysSinceAir,
   defaultSeason,
   deletableView,
-  episodeAction,
   episodeActionLabel,
+  episodeActions,
+  episodeIssues,
   episodeNote,
   episodePlayURL,
   episodeStatePill,
@@ -38,7 +39,9 @@ import {
   nasServer,
   originalLine,
   pickSubscription,
+  itemTorrentSpan,
   playTarget,
+  protectRulesText,
   runtimeText,
   searchLink,
   seasonTabText,
@@ -82,12 +85,13 @@ function detail(over: Partial<ItemDetail> = {}): ItemDetail {
     item: tv,
     seasons: [],
     nas: {
-      library: { seasons: [], files: 0, size: 0, libraries: [] },
+      library: { seasons: [], files: 0, size: 0, libraries: [], missing: [] },
       seeding: { count: 0, hr_pending: 0 },
     },
     subscriptions: [],
     torrents: [],
     recommendations: [],
+    protect_rules: [],
     errors: [],
     ...over,
   };
@@ -145,6 +149,7 @@ describe("你的 NAS 上", () => {
           files: 18,
           size: 82.6 * 1024 ** 3,
           libraries: ["剧集库"],
+          missing: [],
         },
         seeding: { count: 4, hr_pending: 1, hr_left_seconds: 2 * 86400, lowest_ratio: 0.42 },
       },
@@ -184,7 +189,14 @@ describe("你的 NAS 上", () => {
     const movie = detail({
       item: { ...tv, media_type: "movie" },
       nas: {
-        library: { seasons: [], files: 1, size: 0, libraries: [], version: "2160p FRDS" },
+        library: {
+          seasons: [],
+          files: 1,
+          size: 0,
+          libraries: [],
+          version: "2160p FRDS",
+          missing: [],
+        },
         seeding: { count: 1, hr_pending: 0, lowest_ratio: 2 },
       },
     });
@@ -203,7 +215,58 @@ describe("你的 NAS 上", () => {
     expect(nasLines({ ...movie, item: { ...movie.item } }, null)[2]!.title).toBe("没有订阅");
   });
 
-  it("媒体服务器那一行：有删了的写哪一集与「忽略」，没有时写同步时间；没有同步过的服务器不列", () => {
+  it("库里那一行：巡检发现文件不见了时写哪一集不见了（warn），后面是「处理」「忽略」", () => {
+    const lib = (missing: ItemDetail["nas"]["library"]["missing"]) =>
+      nasLines(
+        detail({
+          nas: {
+            library: {
+              seasons: [{ n: 2, have: 6, total: 12 }],
+              files: 6,
+              size: 0,
+              libraries: ["剧集库"],
+              missing,
+            },
+            seeding: { count: 0, hr_pending: 0 },
+          },
+        }),
+        null,
+      )[0]!;
+    expect(lib([])).toEqual({
+      key: "library",
+      icon: "folder-open",
+      title: "库里 S02 6/12",
+      desc: "剧集库 · 6 个文件",
+    });
+    expect(lib([{ id: 41, season: 2, episode: 3 }])).toEqual({
+      key: "library",
+      icon: "folder-open",
+      title: "库里 S02 6/12",
+      desc: "S02E03 的文件不见了",
+      warn: true,
+      issues: [{ id: 41, season: 2, episode: 3 }],
+    });
+    expect(
+      lib([
+        { id: 41, season: 2, episode: 3 },
+        { id: 42, season: 2, episode: 5 },
+      ]).desc,
+    ).toBe("S02E03 等 2 个文件不见了");
+    expect(lib([{ id: 43, season: 2 }]).desc, "不知道是哪一集的写季").toBe("S02 的文件不见了");
+    const movie = nasLines(
+      detail({
+        item: { ...tv, media_type: "movie" },
+        nas: {
+          library: { seasons: [], files: 1, size: 0, libraries: [], missing: [{ id: 44 }] },
+          seeding: { count: 0, hr_pending: 0 },
+        },
+      }),
+      null,
+    )[0]!;
+    expect(movie).toMatchObject({ desc: "库里的文件不见了", warn: true, issues: [{ id: 44 }] });
+  });
+
+  it("媒体服务器那一行：有删了的写哪一集与「处理」「忽略」，没有时写同步时间；没有同步过的服务器不列", () => {
     const now = new Date(2026, 10, 4, 15, 0);
     const synced = new Date(2026, 10, 4, 14, 0).toISOString();
     const jf: ItemServer = {
@@ -226,7 +289,7 @@ describe("你的 NAS 上", () => {
     expect(serverLine("tv", gone, now)).toMatchObject({
       desc: "S02E03 在服务器里被删了",
       warn: true,
-      issues: [31],
+      issues: [{ id: 31, season: 2, episode: 3 }],
     });
     expect(
       serverLine(
@@ -234,8 +297,14 @@ describe("你的 NAS 上", () => {
         { ...gone, removed: [...gone.removed, { id: 32, season: 2, episode: 4 }] },
         now,
       ),
-      "「忽略」要忽略这几集的全部问题",
-    ).toMatchObject({ desc: "S02E03 等 2 集在服务器里被删了", issues: [31, 32] });
+      "「处理」「忽略」都是这几集的全部问题",
+    ).toMatchObject({
+      desc: "S02E03 等 2 集在服务器里被删了",
+      issues: [
+        { id: 31, season: 2, episode: 3 },
+        { id: 32, season: 2, episode: 4 },
+      ],
+    });
     expect(serverLine("movie", { ...jf, episodes: undefined }, now).title).toBe("Jellyfin 已入库");
     expect(serverLine("movie", { ...gone, have: false }, now)).toMatchObject({
       title: "Jellyfin 里没有",
@@ -400,20 +469,29 @@ describe("季与集", () => {
       ),
     ).toBe("");
     expect(episodeNote(ep({ state: "skipped" }), season, now, false)).toBe("");
-    expect(episodeAction(ep({ state: "waiting_version" }))).toBe("versions");
-    expect(episodeAction(ep({ state: "missing" }))).toBe("search");
-    expect(episodeAction(ep({ state: "library" }))).toBe("");
-    expect(episodeActionLabel(ep({ state: "missing" }))).toBe("搜资源");
-    // 媒体服务器：删了的写「Jellyfin 里没有了」、动作是忽略、没有播放；算作已入库的写「Jellyfin 里有」
+    expect(episodeActions(ep({ state: "waiting_version" }))).toEqual(["versions"]);
+    expect(episodeActions(ep({ state: "missing" }))).toEqual(["search"]);
+    expect(episodeActions(ep({ state: "library" }))).toEqual([]);
+    expect(episodeActionLabel("search")).toBe("搜资源");
+    expect(episodeActionLabel("versions")).toBe("看版本");
+    // 媒体服务器：删了的写「Jellyfin 里没有了」、动作是处理与忽略、没有播放；算作已入库的写「Jellyfin 里有」
     const removed = ep({
       version: "2160p",
       open_url: "u",
       server_issue: { id: 7, server: "Jellyfin" },
     });
     expect(episodeNote(removed, season, now, false)).toBe("Jellyfin 里没有了");
-    expect(episodeAction(removed)).toBe("ignore");
-    expect(episodeActionLabel(removed)).toBe("忽略");
+    expect(episodeActions(removed)).toEqual(["handle", "ignore"]);
+    expect(episodeActions(removed).map(episodeActionLabel)).toEqual(["处理", "忽略"]);
+    expect(episodeIssues(removed)).toEqual([7]);
     expect(episodePlayURL(removed)).toBe("");
+    // 库里的文件不见了（M7 的巡检）：写「库里的文件不见了」，忽略时两个问题一起忽略；服务器里还有也不给播放
+    const gone = ep({ open_url: "u", library_issue: { id: 8 } });
+    expect(episodeNote(gone, season, now, false)).toBe("库里的文件不见了");
+    expect(episodeActions(gone)).toEqual(["handle", "ignore"]);
+    expect(episodePlayURL(gone)).toBe("");
+    expect(episodeIssues({ ...gone, server_issue: { id: 7, server: "Jellyfin" } })).toEqual([8, 7]);
+    expect(episodeIssues(ep({}))).toEqual([]);
     expect(episodeNote(ep({ source: "server", server: "Jellyfin" }), season, now, false)).toBe(
       "Jellyfin 里有",
     );
@@ -520,6 +598,8 @@ describe("种子", () => {
       torrentLine(t({ season: 0, episodes: "", version: "", size: 0, title: "Dune.2024" })),
     ).toBe("Dune.2024");
     expect(torrentLine(t({ season: 0, episodes: "整季" }))).toBe("整季 · 2160p HHWEB · 27.3 GB");
+    expect(itemTorrentSpan(t({}))).toBe("S02E01–E04");
+    expect(itemTorrentSpan(t({ season: 0, episodes: "" }))).toBe("");
     expect(torrentData(t({}))).toBe("分享率 1.31 · 做种 18 天");
     expect(torrentData(t({}), true)).toBe("分享率 1.31 · 18 天");
     expect(torrentData(t({ seeding_seconds: 0 }))).toBe("分享率 1.31");
@@ -534,12 +614,26 @@ describe("种子", () => {
     expect(torrentStatePill("seeding")).toEqual({ label: "做种中", tone: "ok" });
     expect(torrentStatePill("error").tone).toBe("dang");
     expect(torrentStatePill("odd")).toEqual({ label: "odd", tone: "neutral" });
-    expect(deletableView(t({}))).toEqual({ text: "可以删", warn: false });
-    expect(deletableView(t({ deletable: false, reason: "H&R 还差 2 天" }))).toEqual({
+    expect(deletableView(t({}))).toEqual({ text: "可以删", warn: false, title: "可以删" });
+    expect(
+      deletableView(
+        t({
+          deletable: false,
+          reason: "H&R 还差 2 天",
+          protection: "H&R：要求做种 168 小时，已做 120.0 小时",
+        }),
+      ),
+      "悬停看完整的原因",
+    ).toEqual({
       text: "H&R 还差 2 天",
       warn: true,
+      title: "H&R：要求做种 168 小时，已做 120.0 小时",
     });
-    expect(deletableView(t({ reason: "" }))).toEqual({ text: "可以删", warn: false });
+    expect(deletableView(t({ reason: "" }))).toEqual({ text: "可以删", warn: false, title: "" });
+    expect(protectRulesText(["下载中", "最短保种 24 小时", "H&R", "保留与保护标签"])).toBe(
+      "删除时按这几条保护：下载中、最短保种 24 小时、H&R、保留与保护标签",
+    );
+    expect(protectRulesText([])).toBe("读不到删种的保护规则，种子一律当作受保护");
   });
 
   it("这一季的种子：剧集按季筛（不知道季的也列），电影全部", () => {

@@ -602,6 +602,7 @@ const ITEM_TV = {
       size: 82.6 * 1024 ** 3,
       libraries: ["剧集库"],
       record_id: 77,
+      missing: [],
     },
     seeding: { count: 4, hr_pending: 1, hr_left_seconds: 2 * 86400, lowest_ratio: 0.42 },
   },
@@ -684,6 +685,8 @@ const ITEM_TV = {
       removed: [{ id: 31, season: 2, episode: 3 }],
     },
   ],
+  /* 删除时按哪几条保护（M7，SeedGuard.Rules 照全局设置的默认值） */
+  protect_rules: ["下载中", "最短保种 24 小时", "H&R", "保留与保护标签"],
   errors: [],
 };
 const ITEM_EPISODE_NAMES = ["归来", "旧案", "雨夜", "证人", "回声", "暗涌", "失踪者", "灯塔"];
@@ -779,6 +782,7 @@ const ITEM_MOVIE = {
       libraries: ["电影库"],
       version: "2160p FRDS",
       record_id: 91,
+      missing: [],
     },
     seeding: { count: 1, hr_pending: 0, lowest_ratio: 1.02 },
   },
@@ -797,6 +801,45 @@ const ITEM_MOVIE = {
     }),
   ],
   recommendations: ITEM_RECS.slice(0, 6).map((r) => ({ ...r, media_type: "movie" })),
+  protect_rules: ["下载中", "最短保种 24 小时", "H&R", "保留与保护标签"],
+  errors: [],
+};
+/*
+ * 删除这一季的预览（POST /api/media/items/delete/preview，M7）：内容照画板 03 的片段「删除这一季」——
+ * 第 2 季库里 6 个硬链接共 41.2 GB；三个种子：OurBits E01–E04（qb，H&R 已满足）、HDSky E05–E06（tr，H&R 要求 7 天还差 2 天）、
+ * HDSky E07（qb，还在下载 63%）；追剧中的订阅。字段照 internal/media/subscribe/delete.go 的 DeletePreview。
+ */
+const deleteTorrent = (t, over) => ({ ...t, covers_more: false, shares: [], ...over });
+const ITEM_TV_DELETE_S2 = {
+  files: Array.from({ length: 6 }, (_, i) => ({
+    id: 301 + i,
+    path: `/media/tv/长夜将尽 (2025)/Season 02/长夜将尽 - S02E0${i + 1}.mkv`,
+    library: "剧集库",
+    mode: "hardlink",
+    existing: false,
+    size: (41.2 / 6) * 1024 ** 3,
+    season: 2,
+    episode: i + 1,
+    episode_end: 0,
+    state: "ours",
+    deletable: true,
+    downloader_id: 1,
+  })),
+  torrents: [
+    deleteTorrent(ITEM_TV.torrents[1], {}),
+    deleteTorrent(ITEM_TV.torrents[2], {
+      rule: "hr",
+      why: "H&R 要求做种 7 天，还差 2 天",
+      protection: "H&R：要求做种 168 小时，已做 120.0 小时",
+    }),
+    deleteTorrent(ITEM_TV.torrents[3], {
+      rule: "downloading",
+      why: "还在下载（63%）",
+      protection: "正在下载或校验（打开了「保护下载中的种子」）",
+    }),
+  ],
+  subscriptions: [ITEM_TV.subscriptions[0]],
+  issues: [],
   errors: [],
 };
 
@@ -1295,6 +1338,8 @@ export const FIXTURES = [
   ["/api/v2/search/sites", SITES.map(([s]) => s)],
   ["/api/media/search", ENTRY_SEARCH],
   /* 条目详情（M3）：季的路径是条目路径的子路径，前缀匹配先命中先用，要排在前面 */
+  /* 删除预览（M7）：只给第 2 季的（画板 03 的片段）；执行删除不拦，验收不点「删除」 */
+  ["/api/media/items/delete/preview", ITEM_TV_DELETE_S2],
   [`/api/media/items/tv/${ITEM_TV_ID}/seasons/2`, ITEM_TV_S2],
   [`/api/media/items/tv/${ITEM_TV_ID}/seasons/1`, ITEM_TV_S1],
   [`/api/media/items/tv/${ITEM_TV_ID}`, ITEM_TV],

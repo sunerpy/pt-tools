@@ -335,6 +335,7 @@ How syncing works:
 When a movie or an episode that pt-tools organised into the library disappears from the server (deleted, or its file is gone and the server dropped it on a scan), a sync records an issue:
 
 - the fourth line of "On your NAS" on the title details page shows `S02E03 在服务器里被删了` (removed from the server) in the warning colour, and that episode's card shows `Jellyfin 里没有了` (no longer in Jellyfin);
+- Handle (处理) opens the delete dialog for those episodes only (see [deleting a title](media-detail.md#deleting-a-title)); once the library files and organise records are deleted, the issue is marked handled. Deleting the record in organise history, or a replacement version retiring it, does the same;
 - Ignore (忽略) stops the reminder for as long as the item stays away; when the server has the item again, the issue closes on its own.
 
 The matching organise record is found by path first (the server path turned into a pt-tools path equals the record's target path); when the path cannot be turned, movies are matched by TMDB ID, and episodes by TMDB ID, season and episode. Items pt-tools did not organise are not recorded.
@@ -427,6 +428,16 @@ Rescrape (重新刮削) rewrites the NFO files and images of the record's movie 
 
 When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): videos and subtitles are deleted only when still confirmed to be the files pt-tools created (hard links and copies by file ID: device, inode, size and modification time; symbolic links by their target); NFO files and images only when they are the copies pt-tools wrote, and the folder's posters, backgrounds, logos and NFO files only once no video is left; empty folders go last. Replaced or edited files stay and are listed after the deletion. When a record turns skipped or failed (for example because the video in the library was replaced with another file), the subtitles and scraped files organised earlier stay recorded on it and are cleaned up by the same rules when it is deleted. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
 
+## Missing library files
+
+Once a day pt-tools checks that the files of organised records are still in the library (hard links and copies by the file itself, symbolic links also by their target, discs by the main file). When one is gone it records an issue:
+
+- the first line of "On your NAS" on the title details page shows `S02E05 的文件不见了` (the file of S02E05 is missing) in the warning colour, and that episode's card shows `库里的文件不见了` (library file missing);
+- Handle (处理) opens the delete dialog for those episodes only (see [deleting a title](media-detail.md#deleting-a-title)); once the organise record is deleted, the issue is marked handled;
+- after Ignore (忽略) it is not mentioned again until the file comes back; when the file is back, the issue closes on its own, and so it does when the organise record is deleted or no longer organised.
+
+The check only records issues; it deletes nothing. The first check runs 10 minutes after start-up when there has never been one, then every 24 hours, scheduled from the previous round after a restart. One round checks up to 5000 records, and the next round carries on from there. Records whose library folder is missing (for example not mounted) or whose library was deleted are skipped, so they are never taken for missing files.
+
 ## Asking the AI
 
 When the torrent name can't be matched to a title (the organise dialog's preview says 没有识别出来, or the history shows the not recognised category), Ask AI (让 AI 认) searches TMDB for movies and shows by the torrent name (with recognition words applied and corrections ignored, at most 8 candidates) and sends them, with the torrent name and the site's title, to the model of the [AI assistant](./assistant.md), which picks one or says none fits.
@@ -442,6 +453,8 @@ When the torrent name can't be matched to a title (the organise dialog's preview
 Once a torrent is hard-linked into the library, deleting it with its data frees no space (the library link still holds it), so the low-space emergency cleanup does not pick hard-linked torrents. Regular cleanup rules still apply: delete the torrent when it has seeded enough and the library file stays watchable.
 
 Delete library links when torrents are deleted (删种时一并删除入库链接) is off by default. When on, pt-tools checks every 10 minutes for torrents that are gone from the downloader and whose source files are gone too (deleted with data), deletes the hard links and symbolic links organised from them and marks the records removed; copies and moved files stay. With it on, the emergency cleanup also picks hard-linked torrents, since deleting them now frees space. Nothing is deleted while the torrent's save folder or the library folder is missing (for example not mounted) or the downloader cannot be reached.
+
+When the [delete dialog](media-detail.md#deleting-a-title) on title details deletes a torrent with its data while its library files stay unticked, the hard links organised from it are the ones you are keeping: their records get a mark, and Delete library links when torrents are deleted leaves them alone. Organising the same source file into the library again later removes the mark.
 
 ## Troubleshooting
 

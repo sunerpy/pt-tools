@@ -21,6 +21,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
@@ -145,8 +146,37 @@ func newDB(t *testing.T) *gorm.DB {
 		&models.MediaSubscribeSetting{}, &models.MediaDoubanSource{}, &models.MediaDoubanItem{},
 		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{}, &models.MediaLibrary{},
 		&models.MediaTorrentBlock{}, &models.MediaServer{}, &models.MediaServerItem{}, &models.MediaIssue{},
+		&models.TorrentInfoArchive{}, &models.SiteSetting{}, &models.SettingsGlobal{},
 	))
 	return db
+}
+
+// seedGuard 把 scheduler.SeedGuard 接成订阅的 Guard（同 cmd 里的接法）：测试里的保护规则和生产环境一样，按库里的全局设置。
+type seedGuard struct{ g *scheduler.SeedGuard }
+
+func (s seedGuard) Check(t downloader.Torrent) Protection { return Protection(s.g.Check(t)) }
+func (s seedGuard) Rules() []string                       { return s.g.Rules() }
+
+// guardSettings 建全局设置（删种的保护规则按它），再改几列：建行时零值会换成列的默认值，所以另外改。
+func (e *env) guardSettings(cols map[string]any) {
+	e.t.Helper()
+	var row models.SettingsGlobal
+	require.NoError(e.t, e.db.Limit(1).Find(&row).Error)
+	if row.ID == 0 {
+		row = models.SettingsGlobal{DownloadDir: "/downloads"}
+		require.NoError(e.t, e.db.Create(&row).Error)
+	}
+	require.NoError(e.t, e.db.Model(&row).Updates(cols).Error)
+}
+
+func seedGuardOf(db *gorm.DB) GuardFunc {
+	return func(ctx context.Context) (Guard, error) {
+		g, err := scheduler.LoadSeedGuard(db.WithContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		return seedGuard{g}, nil
+	}
 }
 
 // fakeSearch 按关键字回种子，记下搜过的关键字；cached 是搜索缓存里的种子（一键追剧按站点与编号取）。
@@ -395,9 +425,16 @@ func (f *fakeDL) RemoveTorrent(id string, removeData bool) error {
 	return nil
 }
 
-type fakeDLs struct{ dl *fakeDL }
+// fakeDLs 是假的下载器们：others 里有的编号用它（名字是 qb 加编号），别的都是 dl。
+type fakeDLs struct {
+	dl     *fakeDL
+	others map[uint]*fakeDL
+}
 
 func (f fakeDLs) Get(_ context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error) {
+	if o, ok := f.others[id]; ok {
+		return o, models.DownloaderSetting{ID: id, Name: fmt.Sprintf("qb%d", id)}, nil
+	}
 	f.dl.mu.Lock()
 	plain := f.dl.noSelect
 	f.dl.mu.Unlock()
@@ -491,6 +528,7 @@ func newEnv(t *testing.T) *env {
 			return &ptinternal.PushTorrentResult{Success: true}, nil
 		},
 		Downloaders: fakeDLs{dl: e.dl}, Organizer: e.org, Now: e.Now,
+		Deleter: organize.New(organize.Config{DB: db, Now: e.Now}), Guard: seedGuardOf(db),
 		Jitter: func(time.Duration) time.Duration { return 0 },
 		Notify: func(_ context.Context, n Notice) error {
 			e.mu.Lock()

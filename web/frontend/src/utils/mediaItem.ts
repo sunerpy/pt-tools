@@ -198,14 +198,24 @@ export function pickSubscription(
   return subs.find((s) => s.season === season) ?? subs[0] ?? null;
 }
 
+/** 一个还没处理的问题（媒体服务器里删了的、库里的文件不见了的）：编号与哪一集 */
+export interface IssueRef {
+  id: number;
+  season?: number;
+  episode?: number;
+}
+
 export interface NasLine {
   key: "library" | "seeding" | "subscription" | "server";
   icon: string;
   title: string;
   desc: string;
-  /** 媒体服务器那一行：有 pt-tools 整理过、服务器里没了的（说明用 warn 色，后面是「忽略」）；issues 是要忽略的问题 */
+  /**
+   * 有没处理的问题时（库里那一行是文件不见了，媒体服务器那一行是服务器里删了）说明用 warn 色，后面是「处理」「忽略」；
+   * issues 是这些问题
+   */
   warn?: boolean;
-  issues?: number[];
+  issues?: IssueRef[];
 }
 
 /** 「你的 NAS 上」第 4 行看的那台服务器：有没处理的问题的、服务器里有这一部的、第一台 */
@@ -223,6 +233,10 @@ export function playTarget(d: ItemDetail): { name: string; url: string } | null 
 const code = (season?: number, episode?: number) =>
   `S${String(season ?? 0).padStart(2, "0")}E${String(episode ?? 0).padStart(2, "0")}`;
 
+/** 问题写在哪一集：「S02E03」；不知道是哪一集的写季「S02」 */
+const issueCode = (r: IssueRef) =>
+  (r.episode ?? 0) > 0 ? code(r.season, r.episode) : `S${String(r.season ?? 0).padStart(2, "0")}`;
+
 /** 媒体服务器那一行：「Jellyfin 已入库 17 集」；服务器里删了的写「S02E03 在服务器里被删了」，没有时写同步时间 */
 export function serverLine(kind: MediaKind, s: ItemServer, now = new Date()): NasLine {
   let title = `${s.name} 里没有`;
@@ -237,14 +251,7 @@ export function serverLine(kind: MediaKind, s: ItemServer, now = new Date()): Na
           ? `${first} 等 ${removed.length} 集在服务器里被删了`
           : `${first} 在服务器里被删了`;
     }
-    return {
-      key: "server",
-      icon: "monitor",
-      title,
-      desc,
-      warn: true,
-      issues: removed.map((r) => r.id),
-    };
+    return { key: "server", icon: "monitor", title, desc, warn: true, issues: removed };
   }
   const desc = s.synced_at ? `${formatShortDateTime(s.synced_at, now)} 同步` : "";
   return { key: "server", icon: "monitor", title, desc };
@@ -275,8 +282,20 @@ export function nasLines(d: ItemDetail, sub: ItemSubscription | null): NasLine[]
   } else if (seed.lowest_ratio !== undefined && seed.count > 0) {
     seedDesc = `分享率最低 ${seed.lowest_ratio.toFixed(2)}`;
   }
+  const libLine: NasLine = { key: "library", icon: "folder-open", title: libTitle, desc: libDesc };
+  const missing = lib.missing ?? [];
+  if (missing.length) {
+    // 每天巡检发现的「库里的文件不见了」：说明换成哪一集不见了，后面是「处理」「忽略」
+    let desc = "库里的文件不见了";
+    if (kind === "tv") {
+      const first = issueCode(missing[0]!);
+      desc =
+        missing.length > 1 ? `${first} 等 ${missing.length} 个文件不见了` : `${first} 的文件不见了`;
+    }
+    Object.assign(libLine, { desc, warn: true, issues: missing });
+  }
   const lines: NasLine[] = [
-    { key: "library", icon: "folder-open", title: libTitle, desc: libDesc },
+    libLine,
     {
       key: "seeding",
       icon: "upload",
@@ -380,6 +399,7 @@ export function episodeNote(
 ): string {
   switch (ep.state) {
     case "library":
+      if (ep.library_issue) return "库里的文件不见了";
       if (ep.server_issue) return `${ep.server_issue.server} 里没有了`;
       if (ep.source === "server" && ep.server) return `${ep.server} 里有`;
       return [ep.version, ep.size ? shortSize(ep.size) : ""].filter(Boolean).join(" · ");
@@ -405,23 +425,37 @@ export function episodeNote(
   return "";
 }
 
-/** 集卡右上的动作：等版本的「看版本」、缺的「搜资源」、媒体服务器里删了的「忽略」 */
-export function episodeAction(ep: SeasonEpisode): "versions" | "search" | "ignore" | "" {
-  if (ep.state === "waiting_version") return "versions";
-  if (ep.state === "missing") return "search";
-  if (ep.state === "library" && ep.server_issue) return "ignore";
-  return "";
+export type EpisodeAction = "versions" | "search" | "handle" | "ignore";
+
+/**
+ * 集卡右上的动作：等版本的「看版本」、缺的「搜资源」；库里的文件不见了、媒体服务器里删了的「处理」（打开删除预览）与「忽略」
+ */
+export function episodeActions(ep: SeasonEpisode): EpisodeAction[] {
+  if (ep.state === "waiting_version") return ["versions"];
+  if (ep.state === "missing") return ["search"];
+  if (ep.state === "library" && (ep.library_issue || ep.server_issue)) return ["handle", "ignore"];
+  return [];
 }
 
-const EP_ACTION_LABEL = { versions: "看版本", search: "搜资源", ignore: "忽略", "": "" } as const;
+const EP_ACTION_LABEL: Record<EpisodeAction, string> = {
+  versions: "看版本",
+  search: "搜资源",
+  handle: "处理",
+  ignore: "忽略",
+};
 
-export function episodeActionLabel(ep: SeasonEpisode): string {
-  return EP_ACTION_LABEL[episodeAction(ep)];
+export function episodeActionLabel(a: EpisodeAction): string {
+  return EP_ACTION_LABEL[a];
 }
 
-/** 集卡上的播放圆：已入库、媒体服务器里有这一集时 */
+/** 集卡上还没处理的问题（库里的文件不见了、媒体服务器里删了）：「忽略」忽略这几个 */
+export function episodeIssues(ep: SeasonEpisode): number[] {
+  return [ep.library_issue?.id, ep.server_issue?.id].filter((id): id is number => Boolean(id));
+}
+
+/** 集卡上的播放圆：已入库、媒体服务器里有这一集、库里的文件也在时 */
 export function episodePlayURL(ep: SeasonEpisode): string {
-  return ep.state === "library" && !ep.server_issue ? (ep.open_url ?? "") : "";
+  return ep.state === "library" && !ep.server_issue && !ep.library_issue ? (ep.open_url ?? "") : "";
 }
 
 /**
@@ -464,14 +498,17 @@ export function torrentStatePill(state: string): { label: string; tone: Tone } {
   return TORRENT_STATE[state] ?? { label: state, tone: "neutral" };
 }
 
+/** 种子里的季与集：「S02E01–E04」「S02 整季」；电影、认不出季与集的为空串 */
+export function itemTorrentSpan(t: Pick<ItemTorrent, "season" | "episodes">): string {
+  if (!(t.season > 0 || t.episodes)) return "";
+  const s = t.season > 0 ? `S${String(t.season).padStart(2, "0")}` : "";
+  if (t.episodes === "整季") return s ? `${s} 整季` : "整季";
+  return `${s}${t.episodes ?? ""}`;
+}
+
 /** 种子那一列：「S02E01–E04 · 2160p HHWEB · 27.3 GB」（整季写「S02 整季」；电影只写版本与体积） */
 export function torrentLine(t: ItemTorrent, opts: { version?: boolean } = {}): string {
-  const parts: string[] = [];
-  if (t.season > 0 || t.episodes) {
-    const s = t.season > 0 ? `S${String(t.season).padStart(2, "0")}` : "";
-    if (t.episodes === "整季") parts.push(s ? `${s} 整季` : "整季");
-    else parts.push(`${s}${t.episodes ?? ""}`);
-  }
+  const parts = [itemTorrentSpan(t)];
   if (opts.version !== false && t.version) parts.push(t.version);
   if (t.size > 0) parts.push(shortSize(t.size));
   return parts.filter(Boolean).join(" · ") || t.title;
@@ -490,9 +527,20 @@ export function torrentData(t: ItemTorrent, short = false): string {
   return parts.join(" · ");
 }
 
-/** 能不能删：受保护的（下载中、H&R 还差）写成 warn 带盾牌 */
-export function deletableView(t: ItemTorrent): { text: string; warn: boolean } {
-  return { text: t.reason || (t.deletable ? "可以删" : ""), warn: !t.deletable };
+/** 能不能删（按自动删种的保护规则）：受保护的写成 warn 带盾牌，悬停看完整的原因 */
+export function deletableView(t: ItemTorrent): { text: string; warn: boolean; title: string } {
+  return {
+    text: t.reason || (t.deletable ? "可以删" : ""),
+    warn: !t.deletable,
+    title: t.protection || t.reason,
+  };
+}
+
+/** 种子块标题旁的说明：开着的保护规则（和自动删种共用）；读不到时种子一律当作受保护 */
+export function protectRulesText(rules: readonly string[]): string {
+  return rules.length
+    ? `删除时按这几条保护：${rules.join("、")}`
+    : "读不到删种的保护规则，种子一律当作受保护";
 }
 
 /** 这一季的种子：剧集按季筛（不知道是哪一季的也列上），电影全部 */

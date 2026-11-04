@@ -391,7 +391,7 @@ func (s *Service) writeRecordIn(ctx context.Context, db *gorm.DB, p *Plan, it *P
 		DoUpdates: clause.AssignmentColumns([]string{
 			"downloader_id", "downloader_name", "watch_dir_id", "info_hash", "task_id", "torrent_name", "library_id", "save_root", "target_path", "root_path",
 			"extras", "mode", "chosen_mode", "media_type", "tmdb_id", "title", "year", "season", "episode", "episode_end", "size",
-			"status", "message", "fail_kind", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "match_source", "updated_at",
+			"status", "message", "fail_kind", "attempts", "next_retry_at", "target_file_id", "source_file_id", "trigger", "match_source", "keep_links", "updated_at",
 		}),
 	}).Create(&row).Error
 	if err != nil {

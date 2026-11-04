@@ -20,6 +20,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 // 订阅服务：没有识别服务时不建；建好后能读写设置，停下时断开 RSS 的入口
@@ -230,4 +231,30 @@ func TestSubscribeNotifierEnqueues(t *testing.T) {
 	assert.Equal(t, subscribe.NoticeDownloaded, rows[0].Kind)
 	assert.Contains(t, rows[0].PayloadJSON, `"type":"subscribe.downloaded"`, "事件一起写进日志行")
 	assert.Contains(t, rows[0].PayloadJSON, `"subscription":"沙丘2 (2024)"`)
+}
+
+// 删种的保护规则：订阅服务拿到的就是自动删种的 SeedGuard（按库里现在的全局设置），规则名两边一样。
+func TestSubscribeGuard(t *testing.T) {
+	db := organizeTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.SettingsGlobal{}, &models.SiteSetting{}, &models.TorrentInfo{}, &models.TorrentInfoArchive{}))
+	for _, pair := range [][2]string{
+		{scheduler.GuardKeepTag, subscribe.GuardKeepTag},
+		{scheduler.GuardProtectTag, subscribe.GuardProtectTag},
+		{scheduler.GuardHR, subscribe.GuardHR},
+		{scheduler.GuardDownloading, subscribe.GuardDownloading},
+		{scheduler.GuardMinRetain, subscribe.GuardMinRetain},
+	} {
+		assert.Equal(t, pair[0], pair[1])
+	}
+	hash := "hx"
+	require.NoError(t, db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "1", TorrentHash: &hash, HasHR: true, HRSeedTimeH: 10}).Error)
+	g, err := subscribeGuard(db)(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"最短保种 24 小时", "H&R", "保留标签"}, g.Rules(), "还没有全局设置时按默认值")
+	p := g.Check(downloader.Torrent{InfoHash: "HX", SeedingTime: 3600})
+	assert.Equal(t, subscribe.Protection{Rule: subscribe.GuardHR, Text: "H&R：要求做种 10 小时，已做 1.0 小时", Hours: 10, Left: 9 * 3600}, p)
+
+	require.NoError(t, db.Migrator().DropTable(&models.SettingsGlobal{}))
+	_, err = subscribeGuard(db)(context.Background())
+	require.Error(t, err)
 }

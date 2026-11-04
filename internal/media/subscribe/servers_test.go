@@ -213,8 +213,9 @@ func TestSeasonItemServers(t *testing.T) {
 	require.NoError(t, e.db.Migrator().DropTable(&models.MediaIssue{}))
 	d, err = e.svc.SeasonItem(e.ctx, 100088, 2)
 	require.NoError(t, err)
-	require.Len(t, d.Errors, 1)
+	require.Len(t, d.Errors, 2)
 	assert.Contains(t, d.Errors[0], "媒体服务器的索引没读到")
+	assert.Contains(t, d.Errors[1], "库文件的巡检结果没读到")
 }
 
 // 日历：开了「算作已入库」的服务器里有的集算已入库。
