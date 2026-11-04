@@ -46,7 +46,9 @@ type fakeTMDB struct {
 	detailsDown bool
 	// personDown 为真时演员的译名（/person/…/translations）回 503
 	personDown bool
-	hits       map[string]int
+	// groupDown 为真时剧集组（/tv/episode_group/…）回 503
+	groupDown bool
+	hits      map[string]int
 }
 
 func (f *fakeTMDB) setDown(v bool) {
@@ -61,7 +63,7 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 		f.mu.Lock()
 		f.hits[r.URL.Path]++
 		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images")) || (f.detailsDown && r.URL.Path == "/3/movie/872585") ||
-			(f.personDown && strings.HasPrefix(r.URL.Path, "/3/person/"))
+			(f.personDown && strings.HasPrefix(r.URL.Path, "/3/person/")) || (f.groupDown && strings.HasPrefix(r.URL.Path, "/3/tv/episode_group/"))
 		f.mu.Unlock()
 		if strings.HasPrefix(r.URL.Path, "/t/p/") {
 			w.Header().Set("Content-Type", "image/jpeg")
@@ -107,6 +109,11 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 			_, _ = w.Write([]byte(`{"season_number":1,"name":"第 1 季","poster_path":"/tlou-s1.jpg","air_date":"2023-01-15",
 				"episodes":[{"id":11,"episode_number":1,"name":"当你迷失在黑暗中","still_path":"/e1.jpg","air_date":"2023-01-15"},
 				{"id":12,"episode_number":2,"name":"感染","still_path":"/e2.jpg","air_date":"2023-01-22"}]}`))
+		case r.URL.Path == "/3/tv/episode_group/"+tlouAbsolute:
+			// 最后生还者的绝对集号：第 1 季 2 集接着第 2 季 2 集
+			_, _ = w.Write([]byte(`{"id":"` + tlouAbsolute + `","name":"Absolute Order","type":2,"groups":[{"id":"g","name":"Episodes","order":1,"episodes":[
+				{"season_number":1,"episode_number":1,"order":0},{"season_number":1,"episode_number":2,"order":1},
+				{"season_number":2,"episode_number":1,"order":2},{"season_number":2,"episode_number":2,"order":3}]}]}`))
 		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Frieren"):
 			_, _ = w.Write([]byte(`{"results":[{"id":209867,"name":"葬送的芙莉莲","original_name":"葬送のフリーレン","first_air_date":"2023-09-29","popularity":200,"genre_ids":[16,10759]}]}`))
 		case r.URL.Path == "/3/tv/209867" && r.URL.Query().Get("language") == "en-US":

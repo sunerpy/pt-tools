@@ -55,6 +55,10 @@ func newSubscribeEnv(t *testing.T, opts ...func(*subscribe.Config)) (*Server, *h
 			_, _ = w.Write([]byte(`{"id":1001,"name":"Fake Variety","alternative_titles":{"results":[]}}`))
 		case r.URL.Path == "/3/tv/1001":
 			_, _ = w.Write([]byte(`{"id":1001,"name":"假综艺","original_name":"假综艺","first_air_date":"2026-01-01","number_of_seasons":1,"genres":[{"id":10764,"name":"真人秀"}]}`))
+		case r.URL.Path == "/3/tv/1001/episode_groups":
+			_, _ = w.Write([]byte(`{"id":1001,"results":[{"id":"5b11ba820e0a265a53000ce9","name":"Absolute Order","type":2,"group_count":1,"episode_count":2}]}`))
+		case r.URL.Path == "/3/tv/278/episode_groups":
+			_, _ = w.Write([]byte(`{"id":278,"results":[]}`))
 		case r.URL.Path == "/3/tv/1001/season/1":
 			_, _ = w.Write([]byte(`{"season_number":1,"air_date":"2026-01-01","episodes":[{"episode_number":1,"name":"第1期上","air_date":"2026-01-01"},{"episode_number":2,"name":"第1期下","air_date":"2026-01-01"}]}`))
 		case r.URL.Path == "/3/search/movie" && strings.Contains(r.URL.Query().Get("query"), "肖申克"):

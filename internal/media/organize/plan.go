@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sunerpy/pt-tools/internal/media/epgroup"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
@@ -148,6 +149,8 @@ type PlanItem struct {
 	disc *transfer.Disc
 	// failKind 是这一项整理不了的分类（models.MediaFailExists 等）：写进整理记录
 	failKind string
+	// groupNote 是按追剧选的剧集组换算这个文件的季集的说明（见 regroup）：写进整理记录
+	groupNote string
 }
 
 // fail 把这一项标成整理不了，记下原因与分类。
@@ -213,6 +216,8 @@ type Plan struct {
 	chosenMode string
 	// follow 是订阅推送或认领的种子的订阅的条目与媒体库（不是订阅的种子、没有查时为空）
 	follow *MediaHint
+	// group 是追剧选的剧集组（条目是追剧的那部剧、选了剧集组时才有）：文件名里的季集按它换算
+	group *epgroup.Map
 	// matchNote 是条目来源上要写进整理记录的说明（订阅或推送时说明的条目在 TMDB 上找不到了、改成自动识别）
 	matchNote string
 	// skip 表示 Problem 不是出错（例如剧集原盘）：记成跳过，不重试
@@ -556,6 +561,9 @@ func (s *Service) finishPlan(ctx context.Context, p *Plan, req Request, t downlo
 		if p.splitTVISO(); len(p.Items) == 0 {
 			p.FailKind = models.MediaFailDisc
 			p.Problem, p.skip = "没有可整理的视频文件（"+isoTVNote+"）", true
+			return p, nil
+		}
+		if !s.loadEpisodeGroup(ctx, p) {
 			return p, nil
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sunerpy/pt-tools/internal/media/epgroup"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
@@ -217,6 +218,12 @@ type episodeMapper struct {
 	rules map[string]models.MediaEpisodeRule
 	// today 是今天（YYYY-MM-DD，和 TMDB 的播出日期比）；为空时不按播出进度判断副标题写错的期号
 	today string
+	// group 是追剧选的剧集组（见 epgroup.go；没选时为空），season 是追剧的季；groupErr 是读不到剧集组时不要种子的原因
+	group    *epgroup.Map
+	groupErr string
+	season   int
+	// packSeason 是种子标题写的组：文件名里只写了集时按它（见 forTorrent）
+	packSeason int
 }
 
 func newEpisodeMapper(ix *episodeIndex, rules []models.MediaEpisodeRule) *episodeMapper {

@@ -16,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -24,6 +25,7 @@ import (
 var mediaItemRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/media/items/movie/278"},
 	{http.MethodGet, "/api/media/items/tv/1001/seasons/1"},
+	{http.MethodGet, "/api/media/items/tv/1001/episode-groups"},
 	{http.MethodPost, "/api/media/items/delete/preview"},
 	{http.MethodPost, "/api/media/items/delete"},
 	{http.MethodGet, "/api/media/calendar"},
@@ -81,6 +83,21 @@ func TestMediaItemAPI_Flow(t *testing.T) {
 	require.NotNil(t, season.Subscription)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/items/tv/1001/seasons/x", "").Code)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/items/tv/-1/seasons/1", "").Code)
+
+	w = serveAuthed(mux, http.MethodGet, "/api/media/items/tv/1001/episode-groups", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var groups struct {
+		Groups []tmdb.EpisodeGroupSummary `json:"groups"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &groups))
+	require.Len(t, groups.Groups, 1)
+	assert.Equal(t, tmdb.EpisodeGroupSummary{ID: "5b11ba820e0a265a53000ce9", Name: "Absolute Order", Type: tmdb.EpisodeGroupAbsolute, GroupCount: 1, EpisodeCount: 2}, groups.Groups[0])
+	w = serveAuthed(mux, http.MethodGet, "/api/media/items/tv/278/episode-groups", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"groups":[]}`, w.Body.String(), "没有剧集组时给 []")
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/items/tv/x/episode-groups", "").Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/items/tv/0/episode-groups", "").Code)
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodGet, "/api/media/items/tv/999/episode-groups", "").Code)
 
 	w = serveAuthed(mux, http.MethodGet, "/api/media/calendar?from=2026-01-01&to=2026-01-31", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

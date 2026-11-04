@@ -4400,6 +4400,8 @@ export interface Subscription {
   next_season_id?: number;
   /** 整理进哪个媒体库（0 按类型自动选） */
   library_id?: number;
+  /** 种子按 TMDB 的哪个剧集组写季集（剧集；空串是按 TMDB 默认的季集） */
+  episode_group_id?: string;
   completed_at?: string;
 }
 
@@ -4486,6 +4488,8 @@ export interface SubscriptionInput {
   library_id?: number;
   /** 这一季的集数：大于 0 时以它为准，0 改回按 TMDB（只在修改时用） */
   total_episodes?: number;
+  /** 种子按 TMDB 的哪个剧集组写季集：空串是不用剧集组；不给时新建不用、修改不变 */
+  episode_group_id?: string;
   /** 从站点上的这个种子开始追（只在新建时用） */
   from_torrent?: { site: string; torrent_id: string; title?: string };
 }
@@ -4869,6 +4873,19 @@ export interface SeasonEpisode {
   library_issue?: { id: number };
 }
 
+/** TMDB 上一部剧的一个剧集组（GET /api/media/items/tv/{tmdb_id}/episode-groups）：另一种排法，例如绝对集号、DVD 的分季 */
+export interface EpisodeGroup {
+  id: string;
+  name: string;
+  /** 1 播出日期、2 绝对集号、3 DVD、4 数字发行、5 故事线、6 制作顺序、7 电视台 */
+  type: number;
+  description?: string;
+  group_count: number;
+  episode_count: number;
+  /** 这种排法所属的电视台或平台 */
+  network?: string;
+}
+
 /** 剧集的一季（GET /api/media/items/tv/{tmdb_id}/seasons/{n}） */
 export interface SeasonDetail {
   tmdb_id: number;
@@ -5125,6 +5142,9 @@ export const subscribeApi = {
   /** 剧集一季的每一集（只读） */
   itemSeason: (id: number, n: number) =>
     api.get<SeasonDetail>(`/api/media/items/tv/${id}/seasons/${n}`),
+  /** 剧集在 TMDB 上的剧集组（追剧里选种子按哪个剧集组写季集） */
+  episodeGroups: (id: number) =>
+    api.get<{ groups: EpisodeGroup[] }>(`/api/media/items/tv/${id}/episode-groups`),
   /** 删除一部片的预览：库里的文件、关联的种子与能不能删、订阅、问题 */
   deletePreview: (sel: DeleteSelector) =>
     api.post<DeletePreview>("/api/media/items/delete/preview", sel),

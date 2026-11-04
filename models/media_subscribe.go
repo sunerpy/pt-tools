@@ -149,6 +149,9 @@ type MediaSubscription struct {
 	NextSeasonID     uint `gorm:"not null;default:0" json:"next_season_id"`
 	// LibraryID 是整理进哪个媒体库（0 按类型自动选）
 	LibraryID uint `gorm:"not null;default:0" json:"library_id"`
+	// EpisodeGroupID 是种子按 TMDB 的哪个剧集组写季集（剧集；空串是按 TMDB 默认的季集）：对种子与整理入库时先把
+	// （第几组，组里第几集）换成默认的季集，见 internal/media/epgroup
+	EpisodeGroupID string `gorm:"size:32;not null;default:''" json:"episode_group_id"`
 	// CompletedAt 是变成完成的时间
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// LastRunID 是最近一次运行记录

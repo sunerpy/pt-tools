@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   previewSchedule: vi.fn(async () => ({ next: [] })),
+  episodeGroups: vi.fn(async () => ({ groups: [] })),
 }));
 
 const DLS = [

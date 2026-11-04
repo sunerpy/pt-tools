@@ -77,7 +77,7 @@ func (s *Service) reopenIfNew(ctx context.Context, sub *models.MediaSubscription
 }
 
 // followNextSeason 给完成的追剧的下一季建追剧：TMDB 上下一季存在、至少一集有播出日期时才建（继承档案、站点、下载器、分类、标签、
-// 保存目录、定时、版本锁（锁住的版本清空）、媒体库与「跟下一季」，从第 1 集开始）。下一季已经有订阅时记下它的编号，不重复建。
+// 保存目录、定时、版本锁（锁住的版本清空）、媒体库、剧集组与「跟下一季」，从第 1 集开始）。下一季已经有订阅时记下它的编号，不重复建。
 func (s *Service) followNextSeason(ctx context.Context, sub *models.MediaSubscription) {
 	c, err := s.cfg.Recognizer.TMDB(ctx)
 	if err != nil {
@@ -96,11 +96,11 @@ func (s *Service) followNextSeason(ctx context.Context, sub *models.MediaSubscri
 	id := existing.ID
 	if id == 0 {
 		sc := scheduleOf(sub)
-		lock, follow, start, lib := sub.LockVersion, true, 1, sub.LibraryID
+		lock, follow, start, lib, group := sub.LockVersion, true, 1, sub.LibraryID, sub.EpisodeGroupID
 		row, err := s.CreateSubscription(ctx, SubscriptionInput{
 			MediaType: models.MediaKindTV, TMDBID: sub.TMDBID, Season: next, ProfileID: sub.ProfileID, Sites: decodeList(sub.Sites),
 			DownloaderID: sub.DownloaderID, Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath, Upgrade: sub.Upgrade,
-			Schedule: &sc, LockVersion: &lock, FollowNextSeason: &follow, StartEpisode: &start, LibraryID: &lib,
+			Schedule: &sc, LockVersion: &lock, FollowNextSeason: &follow, StartEpisode: &start, LibraryID: &lib, EpisodeGroupID: &group,
 		}, sub.Source)
 		switch {
 		case err == nil:

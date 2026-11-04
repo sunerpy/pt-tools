@@ -37,6 +37,7 @@ const api = vi.hoisted(() => ({
   saveEpisodeRule: vi.fn(),
   deleteEpisodeRule: vi.fn(),
   previewSchedule: vi.fn(async () => ({ next: [] as string[] })),
+  episodeGroups: vi.fn(async () => ({ groups: [] as unknown[] })),
   organizeTorrent: vi.fn(),
   rescrapeTorrent: vi.fn(),
   blocks: vi.fn(async (): Promise<{ items: unknown[] }> => ({ items: [] })),

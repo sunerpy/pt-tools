@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/reseed"
@@ -82,7 +83,7 @@ func (s *Service) considerOffer(ctx context.Context, c Candidate) {
 		if !siteAllowed(sub, c.Site) {
 			continue
 		}
-		if _, ok := newMatcher(*sub).match(c.Meta, c.Item); !ok {
+		if !newMatcher(*sub).mayMatch(c.Meta, c.Item) {
 			continue
 		}
 		rctx, run := s.startRun(ctx, sub, models.MediaRunRSS)
@@ -356,6 +357,9 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 				step(ctx, stepReject, "%s：%s", c.Item.Title, why)
 			}
 			continue
+		}
+		if why != "" {
+			step(ctx, stepInfo, "%s：%s", c.Item.Title, why)
 		}
 		if b, hit := blocks.get(c.Site, c.Item.ID); hit {
 			blocked++
@@ -714,7 +718,7 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 	// 开着洗版的订阅整个下：库里已有的集也按每一集比版本，好的换掉旧版本
 	var plan *filePlan
 	if want != nil && !sub.Upgrade && sub.MediaType == models.MediaKindTV && (o.sp.Whole || o.sp.End > o.sp.Start) {
-		if plan = s.planFiles(ctx, sub, data, want); plan != nil && plan.none() {
+		if plan = s.planFiles(ctx, sub, o.c.Meta, data, want); plan != nil && plan.none() {
 			return fmt.Sprintf("%s%s：种子里没有缺的集（种子里是 %s）", noWantedPrefix, o.c.Item.Title, episodeList(plan.all))
 		}
 	}
@@ -799,7 +803,7 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		if plan != nil {
 			eps = plan.all
 		} else {
-			eps = s.packEpisodes(ctx, sub, data)
+			eps = s.packEpisodes(ctx, sub, o.c.Meta, data)
 		}
 		if len(eps) > 0 {
 			b, _ := json.Marshal(eps)
@@ -816,13 +820,14 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 	return "下载了 " + o.c.Item.Title
 }
 
-// packEpisodes 是整季包里实际有的集：按种子的文件列表里每个视频文件的文件名解析（含集号映射）。读不出时为空（按整季算）。
-func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscription, data []byte) []int {
+// packEpisodes 是整季包里实际有的集：按种子的文件列表里每个视频文件的文件名解析（含剧集组的换算与集号映射；m 是种子标题解析出的）。
+// 读不出时为空（按整季算）。
+func (s *Service) packEpisodes(ctx context.Context, sub *models.MediaSubscription, m meta.Meta, data []byte) []int {
 	files, err := reseed.TorrentFiles(data)
 	if err != nil {
 		return nil
 	}
-	mp := s.fileMapper(ctx, sub)
+	mp := s.fileMapper(ctx, sub, m)
 	paths := make([]string, 0, len(files))
 	for _, f := range files {
 		paths = append(paths, f.Path)

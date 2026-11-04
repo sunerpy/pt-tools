@@ -392,6 +392,8 @@ type SubscriptionInput struct {
 	LibraryID *uint `json:"library_id,omitempty"`
 	// TotalEpisodes 是手动填的这一季的集数：大于 0 时以它为准，0 改回按 TMDB
 	TotalEpisodes *int `json:"total_episodes,omitempty"`
+	// EpisodeGroupID 是种子按 TMDB 的哪个剧集组写季集（见 models.MediaSubscription）：空串是不用剧集组，要是这部剧的剧集组
+	EpisodeGroupID *string `json:"episode_group_id,omitempty"`
 	// FromTorrent 是「从这个种子开始追」：只在新建时用
 	FromTorrent *FromTorrent `json:"from_torrent,omitempty"`
 }
@@ -477,6 +479,9 @@ func (in SubscriptionInput) check(s *Service, ctx context.Context) error {
 	}
 	if (in.LockGroup != nil && utf8.RuneCountInString(*in.LockGroup) > 64) || (in.LockResolution != nil && len(*in.LockResolution) > 16) {
 		return fmt.Errorf("%w: 锁住的版本太长", ErrInvalid)
+	}
+	if in.EpisodeGroupID != nil && strings.TrimSpace(*in.EpisodeGroupID) != "" && in.MediaType == models.MediaKindMovie {
+		return fmt.Errorf("%w: 电影没有剧集组", ErrInvalid)
 	}
 	if in.FromTorrent != nil {
 		f := in.FromTorrent
@@ -584,6 +589,11 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 		}
 		if in.TotalEpisodes != nil && *in.TotalEpisodes > 0 {
 			row.TotalEpisodes, row.TotalEpisodesManual = *in.TotalEpisodes, true
+		}
+		if in.EpisodeGroupID != nil {
+			if row.EpisodeGroupID, err = s.cleanEpisodeGroup(ctx, in.TMDBID, *in.EpisodeGroupID); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if in.LibraryID != nil {
@@ -733,6 +743,15 @@ func (s *Service) UpdateSubscription(ctx context.Context, id uint, in Subscripti
 				upd["total_episodes_manual"] = false
 				searchSoon = searchSoon || row.TotalEpisodesManual
 			}
+		}
+		// 换了剧集组：种子对上的集不一样了，尽快搜一次
+		if in.EpisodeGroupID != nil && strings.TrimSpace(*in.EpisodeGroupID) != row.EpisodeGroupID {
+			var g string
+			if g, err = s.cleanEpisodeGroup(ctx, row.TMDBID, *in.EpisodeGroupID); err != nil {
+				return nil, err
+			}
+			upd["episode_group_id"] = g
+			searchSoon = true
 		}
 	}
 	followChanged := searchSoon || rescheduled

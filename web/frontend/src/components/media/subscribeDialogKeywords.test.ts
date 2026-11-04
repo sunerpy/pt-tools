@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   update: vi.fn(),
   previewSchedule: vi.fn(async () => ({ next: [] })),
   settings: vi.fn(async () => ({})),
+  episodeGroups: vi.fn(async () => ({ groups: [] })),
 }));
 
 vi.mock("@/api", async (orig) => {

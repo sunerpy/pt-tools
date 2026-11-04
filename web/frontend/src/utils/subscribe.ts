@@ -2,6 +2,7 @@
  * 订阅（路线图 M11）页面共用的文字与小函数：订阅状态、来源、质量档案的选项、进度、单集与种子状态。
  */
 import type {
+  EpisodeGroup,
   EpisodeRule,
   FollowSchedule,
   QualityPref,
@@ -211,6 +212,27 @@ export const CRON_PRESETS: readonly { label: string; cron: string }[] = [
   { label: "工作日每 2 小时", cron: "0 */2 * * 1-5" },
   { label: "每月 1 号 9:00", cron: "0 9 1 * *" },
 ];
+
+const EPISODE_GROUP_TYPES: Record<number, string> = {
+  1: "按播出日期",
+  2: "绝对集号",
+  3: "DVD",
+  4: "数字发行",
+  5: "故事线",
+  6: "制作顺序",
+  7: "电视台",
+};
+
+/** 剧集组写成一行：名字 · 类型 · 几组几集 · 平台 */
+export function episodeGroupLabel(g: EpisodeGroup): string {
+  const parts = [
+    g.name || "（没有名字）",
+    EPISODE_GROUP_TYPES[g.type] ?? `类型 ${g.type}`,
+    `${g.group_count} 组 ${g.episode_count} 集`,
+  ];
+  if (g.network) parts.push(g.network);
+  return parts.join(" · ");
+}
 
 /** 间隔的说法：整天写天、整小时写小时，其余写分钟（和后端 intervalText 一样） */
 export function intervalText(minutes: number | undefined): string {
