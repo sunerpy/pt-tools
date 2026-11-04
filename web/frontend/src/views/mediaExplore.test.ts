@@ -440,7 +440,7 @@ describe("探索", () => {
     q("ex-bgm-open-7")!.click();
     await vi.waitFor(() => expect(q("ex-missing")).not.toBeNull());
     expect(q("ex-missing")!.textContent).toContain(
-      "「无名」在 TMDB 上没找到对应的剧集：TMDB 上没找到对得上的剧集（搜过「无名」「Nobody」）",
+      "「无名」：TMDB 上没找到对得上的剧集（搜过「无名」「Nobody」）。",
     );
     q("ex-missing-search")!.click();
     await vi.waitFor(() =>

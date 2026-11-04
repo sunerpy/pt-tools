@@ -822,6 +822,9 @@ describe("订阅", () => {
     });
     await mountPage({ keepSettings: true });
     expect(q("ms-ai-review-scope")!.textContent).toContain("全部");
+    expect(q("ms-ai-review-link")!.getAttribute("href"), "说明里链到 AI 助手设置").toBe(
+      "/assistant/settings",
+    );
   });
 
   it("设置：读到的今日更新照样显示、照样存回去", async () => {

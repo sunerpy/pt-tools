@@ -134,7 +134,8 @@ func (s *Service) SearchNow(ctx context.Context, id uint) (string, error) {
 }
 
 // keywords 是主动搜索用的关键字：拉丁字母的名字（原名或英文别名）与中文名，最多两个。拉丁字母的名字剧集加季（S02）、
-// 电影加年份；中文名不加（中文标题多写成「第二季」「第2期」，加了 S02 搜不到）。
+// 电影加年份；中文名不加（中文标题多写成「第二季」「第2期」，加了 S02 搜不到）。选了剧集组的剧集不加季：种子按剧集组写季集
+// （绝对集号的动画多半不写季），加了 TMDB 的季号搜不到。
 func keywords(sub *models.MediaSubscription) []string {
 	latin := ""
 	for _, n := range append([]string{sub.OriginalTitle}, decodeList(sub.Aliases)...) {
@@ -151,6 +152,7 @@ func keywords(sub *models.MediaSubscription) []string {
 		}
 		switch {
 		case !isLatin(n):
+		case sub.MediaType == models.MediaKindTV && sub.EpisodeGroupID != "":
 		case sub.MediaType == models.MediaKindTV:
 			n = fmt.Sprintf("%s S%02d", n, sub.Season)
 		case sub.Year > 0:

@@ -301,9 +301,9 @@ onMounted(load);
       </div>
 
       <template v-if="view === 'bangumi'">
-        <div v-if="missing" class="pt-note pt-note--warn" data-testid="ex-missing">
+        <div v-if="missing" class="pt-note pt-note--warn ex-note" data-testid="ex-missing">
           <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span>「{{ missing.name }}」在 TMDB 上没找到对应的剧集：{{ missing.reason }}。</span>
+          <span>「{{ missing.name }}」：{{ missing.reason }}。</span>
           <el-button
             size="small"
             text
@@ -315,7 +315,7 @@ onMounted(load);
         </div>
         <div
           v-if="bgmItems.length && bgm.error.value"
-          class="pt-note pt-note--warn"
+          class="pt-note pt-note--warn ex-note"
           data-testid="ex-bgm-stale">
           <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
           <span>刷新失败：{{ bgm.errorText.value }}。下面是上次读到的。</span>
@@ -380,7 +380,7 @@ onMounted(load);
       <template v-else>
         <div
           v-if="items.length && ds.error.value"
-          class="pt-note pt-note--warn"
+          class="pt-note pt-note--warn ex-note"
           data-testid="ex-stale">
           <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
           <span>刷新失败：{{ ds.errorText.value }}。下面是上次读到的。</span>
@@ -531,10 +531,15 @@ onMounted(load);
   width: 120px;
 }
 
-/* 一周七天连成一排：放不下时横着滚，不折行（折行以后按钮连不起来） */
+/*
+ * 一周七天连成一排：放不下时横着滚，不折行（折行以后按钮连不起来）。滚动的容器会裁掉按钮贴边的描边，
+ * 留 1px 内边距再用负外边距抵回去，和左边的切换按钮一样高
+ */
 .ex-days {
   flex-wrap: nowrap;
   max-width: 100%;
+  padding: 1px;
+  margin: -1px 0;
   overflow-x: auto;
 }
 
@@ -570,6 +575,11 @@ onMounted(load);
   justify-content: center;
   color: #fff;
   background: rgb(0 0 0 / 0.35);
+}
+
+/* 列表上方的提示（刷新失败、TMDB 上没找到）和下面的海报隔开 */
+.ex-note {
+  margin-bottom: 14px;
 }
 
 .ex-grid {
@@ -652,9 +662,15 @@ onMounted(load);
 
 .ex-card__meta {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   font-size: 12px;
   color: var(--pt-t3);
+}
+
+/* 窄的卡片上一项放不下时整项换到下一行，不在字中间断开（例如「2025-01-05 开播」） */
+.ex-card__meta > span {
+  white-space: nowrap;
 }
 
 .ex-card__vote {

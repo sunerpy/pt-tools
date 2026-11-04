@@ -842,8 +842,11 @@ onBeforeUnmount(() => clearInterval(autoTimer));
                 >
               </div>
               <div class="field-tip">
-                要先在<router-link class="ms-link" to="/assistant/settings">AI 助手设置</router-link
-                >里配好并启用。每个种子要等模型回答，会用掉 token；每次搜索最多问 10 个，同一个种子
+                要先在
+                <router-link to="/assistant/settings" data-testid="ms-ai-review-link"
+                  >AI 助手设置</router-link
+                >
+                里配好并启用。每个种子要等模型回答，会用掉 token；每次搜索最多问 10 个，同一个种子
                 24 小时内不重复问。模型出错时照常推送，写进运行记录
               </div>
             </el-form-item>
