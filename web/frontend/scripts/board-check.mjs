@@ -3662,6 +3662,98 @@ const MEASURE_MI = `(() => {
   };
 })()`;
 
+/*
+ * 删除弹窗（画板 03 的片段「删除这一季」，M7）：点开以后按弹窗内的坐标量，再点「仍然删除」看摘要跟着变，最后关掉。
+ * open 是打开它的脚本（桌面点大图的「删除」，手机点「更多」里的删除）。
+ */
+const measureDelete = (open) => `(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const opened = await (async () => { ${open} })();
+  if (opened !== true) return { err: String(opened) };
+  let dlg = null;
+  for (let i = 0; i < 40; i++) {
+    await wait(150);
+    dlg = document.querySelector('.md-dialog');
+    if (dlg && dlg.querySelectorAll('[data-testid="delete-torrent"]').length === 3) break;
+  }
+  if (!dlg || dlg.querySelectorAll('[data-testid="delete-torrent"]').length !== 3) return { err: 'no-dialog' };
+  await wait(500);
+  const r0 = dlg.getBoundingClientRect();
+  const rel = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left - r0.left), y: Math.round(r.top - r0.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const q = (sel, root = dlg) => root.querySelector(sel);
+  const qa = (sel, root = dlg) => [...root.querySelectorAll(sel)];
+  const inner = (el) => el?.querySelector('.el-checkbox__inner, .el-radio__inner') ?? null;
+  /* 字本身的框（块元素的框是整行宽，右对齐的字量不出来） */
+  const textRel = (el) => {
+    if (!el) return null;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const r = range.getBoundingClientRect();
+    return { x: Math.round(r.left - r0.left), y: Math.round(r.top - r0.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const title = q('.el-dialog__title');
+  const out = {
+    dlg: { x: Math.round(r0.left), y: Math.round(r0.top), w: Math.round(r0.width), h: Math.round(r0.height) },
+    fullscreen: dlg.classList.contains('is-fullscreen'),
+    header: rel(q('.el-dialog__header')),
+    title: rel(title),
+    titleText: txt(title),
+    titleFont: title ? getComputedStyle(title).fontSize + '/' + getComputedStyle(title).fontWeight : '',
+    close: rel(q('.el-dialog__headerbtn .el-dialog__close')),
+    filesCheck: rel(inner(q('[data-testid="delete-files-check"]'))),
+    filesChecked: Boolean(q('[data-testid="delete-files-check"] input')?.checked),
+    filesTitle: rel(q('[data-testid="delete-files"] .md-row__title')),
+    filesSub: rel(q('[data-testid="delete-files"] .md-row__sub')),
+    filesSubText: txt(q('[data-testid="delete-files"] .md-row__sub')),
+    filesMore: rel(q('[data-testid="delete-files-more"]')),
+    secs: qa('.md-sec').map(rel),
+    torTitle: rel(q('[data-testid="delete-torrents"] .md-sec__title')),
+    torTitleText: txt(q('[data-testid="delete-torrents"] .md-sec__title')),
+    tors: qa('[data-testid="delete-torrent"]').map((el) => ({
+      ...rel(el),
+      check: rel(inner(q('[data-testid="delete-torrent-check"]', el))),
+      checked: Boolean(q('[data-testid="delete-torrent-check"] input', el)?.checked),
+      title: txt(q('.md-row__title', el)),
+      titleBox: rel(q('.md-row__title', el)),
+      sub: txt(q('.md-row__sub', el)),
+      subBox: rel(q('.md-row__sub', el)),
+      subText: rel(q('.md-guard span', el)),
+      how: rel(q('[data-testid="delete-torrent-how"]', el)),
+      howText: txt(q('[data-testid="delete-torrent-how"]', el)),
+      force: rel(inner(q('[data-testid="delete-torrent-force"]', el))),
+      forceLabel: rel(q('[data-testid="delete-torrent-force"] .el-checkbox__label', el)),
+      main: rel(q('.md-tor__main', el)),
+      ruled: q('.md-tor__main', el) ? getComputedStyle(q('.md-tor__main', el)).borderBottomWidth : '',
+    })),
+    subTitle: rel(q('[data-testid="delete-subscription"] .md-sec__title')),
+    subs: qa('.md-sub').map((el) => ({
+      radio: rel(inner(el)),
+      title: txt(q('.md-row__title', el)),
+      titleBox: rel(q('.md-row__title', el)),
+      sub: txt(q('.md-row__sub', el)),
+      on: Boolean(q('.el-radio.is-checked', el)),
+    })),
+    footer: rel(q('.el-dialog__footer')),
+    summary: textRel(q('[data-testid="delete-summary"]')),
+    summaryText: txt(q('[data-testid="delete-summary"]')),
+    buttons: qa('.el-dialog__footer .el-button').map((b) => ({ t: txt(b), ...rel(b) })),
+    runBg: q('[data-testid="delete-run"]') ? getComputedStyle(q('[data-testid="delete-run"]')).backgroundColor : '',
+    overflow: Math.round(q('.el-dialog__body').scrollWidth - q('.el-dialog__body').clientWidth),
+  };
+  q('[data-testid="delete-torrent-force"] input')?.click();
+  await wait(250);
+  out.forcedSummary = txt(q('[data-testid="delete-summary"]'));
+  out.forcedChecked = Boolean(qa('[data-testid="delete-torrent-check"] input')[1]?.checked);
+  q('.el-dialog__headerbtn')?.click();
+  await wait(600);
+  return out;
+})()`;
+
 /* 等页面读到条目（剧集还要等这一季的集出来），再等过渡走完 */
 async function openItem(metrics, route, tv) {
   await cdp.send(
@@ -3759,14 +3851,15 @@ if (doItem) {
       itemFail("hero.overview", `简介 ${m.overview.h} 高，画板两行省略 42`);
     expectBox("hero.credits", m.creditsBox, { x: 504, y: 332 }, 4);
     expectText("hero.credits", m.credits, "导演 陈默 · 主演 周屿、林晚晴、沈川、许曼");
-    /* 动作：y 264，从 224 起、间距 8，h32：搜资源 96、订阅与「在 Jellyfin 播放」（玻璃按钮）、重新刮削与更多两个方钮 32 */
+    /* 动作：y 264，从 224 起、间距 8，h32：搜资源 96、订阅与「在 Jellyfin 播放」（玻璃按钮）、重新刮削、删除（M7）与更多三个方钮 32 */
     const acts = m.acts;
     if (
-      acts.map((a) => a.t).join("|") !== "搜资源|追剧中 · 第 2 季|在 Jellyfin 播放|重新刮削|更多"
+      acts.map((a) => a.t).join("|") !==
+      "搜资源|追剧中 · 第 2 季|在 Jellyfin 播放|重新刮削|删除第 2 季|更多"
     ) {
       itemFail("hero.acts", `动作是「${acts.map((a) => a.t).join("、")}」`);
     } else {
-      const [find, sub, play, rescrape, more] = acts;
+      const [find, sub, play, rescrape, del, more] = acts;
       expectBox("hero.acts.search", find, { x: 504, y: 368, w: 96, h: 32 }, 2);
       expectBox("hero.acts.sub", sub, { x: 608, y: 368, h: 32 }, 2);
       expectBox("hero.acts.play", play, { x: sub.x + sub.w + 8, y: 368, h: 32 }, 2);
@@ -3776,7 +3869,8 @@ if (doItem) {
         { x: play.x + play.w + 8, y: 368, w: 32, h: 32 },
         2,
       );
-      expectBox("hero.acts.more", more, { x: rescrape.x + 40, y: 368, w: 32, h: 32 }, 2);
+      expectBox("hero.acts.delete", del, { x: rescrape.x + 40, y: 368, w: 32, h: 32 }, 2);
+      expectBox("hero.acts.more", more, { x: del.x + 40, y: 368, w: 32, h: 32 }, 2);
     }
     /* 你的 NAS 上：868,44 248×252，玻璃底；四行，y 40 起、行距 51；第 4 行是媒体服务器（M6） */
     expectBox("nas", m.nas, { x: R - 28 - 248, y: 148, w: 248, h: 252 }, 2);
@@ -3785,7 +3879,7 @@ if (doItem) {
     expectText(
       "nas.rows",
       nasText,
-      "库里 S01 12/12 · S02 6/12剧集库 · 18 个文件 · 82.6 GB | 做种 4 个种子1 个 H&R 还差 2 天 | 追剧中 · 第 2 季版本锁 HHWEB 2160p | Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 忽略",
+      "库里 S01 12/12 · S02 6/12剧集库 · 18 个文件 · 82.6 GB | 做种 4 个种子1 个 H&R 还差 2 天 | 追剧中 · 第 2 季版本锁 HHWEB 2160p | Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 处理 · 忽略",
     );
     if (m.nasRows.length === 4) {
       const ys = m.nasRows.map((r) => r.y - m.nas.y);
@@ -3843,11 +3937,12 @@ if (doItem) {
       expectBox("eps[0].still", e0.still, { x: e0.x + 10, y: e0.y + 10, w: 128, h: 72 }, 1);
       expectBox("eps[0].title", e0.titleBox, { x: e0.x + 150, y: e0.y + 12 }, 3);
       expectText("eps[0].title", e0.title, "E01 · 归来");
-      /* 播放圆 58,30 32×32：只给已入库、服务器里有的集；E03 在服务器里被删了，写「Jellyfin 里没有了」、动作「忽略」 */
+      /* 播放圆 58,30 32×32：只给已入库、服务器里有的集；E03 在服务器里被删了，写「Jellyfin 里没有了」、动作「处理」「忽略」 */
       expectBox("eps[0].play", e0.play, { x: e0.x + 58, y: e0.y + 30, w: 32, h: 32 }, 1);
       const e3 = m.eps[2];
       if (e3.play) itemFail("eps[2].play", "服务器里删了的集不给播放圆");
-      if (!e3.state.includes("Jellyfin 里没有了") || e3.act !== "忽略")
+      /* 两个动作之间的「·」是单独的元素（字之间的空隙靠 gap），textContent 连在一起 */
+      if (!e3.state.includes("Jellyfin 里没有了") || e3.act !== "处理·忽略")
         itemFail("eps[2]", `服务器里删了的集写的是「${e3.state}」、动作「${e3.act}」`);
       const noPlay = m.eps.filter((e, i) => i !== 2 && i < 6 && !e.play).map((e) => e.id);
       if (noPlay.length)
@@ -3874,7 +3969,11 @@ if (doItem) {
     const lastEp = m.eps[m.eps.length - 1];
     if (lastEp) expectGap("torrents.gap", lastEp.y + lastEp.h, m.torTitle);
     expectText("torrents.title", m.torTitleText, "这一季的种子");
-    expectText("torrents.sub", m.torSub, "能不能删：下载中的、H&R 没做够的受保护");
+    expectText(
+      "torrents.sub",
+      m.torSub,
+      "删除时按这几条保护：下载中、最短保种 24 小时、H&R、保留与保护标签",
+    );
     if (m.torTitle)
       expectBox("torrents.list", m.torList, { x: 280, y: m.torTitle.y + 32, w: W }, 2);
     if (m.rows.length !== 3) itemFail("torrents.rows", `种子 ${m.rows.length} 行，这一季 3 个`);
@@ -3994,6 +4093,134 @@ if (doItem) {
     );
     if (probeMiss(castProbe, "verdict=ok").length > 0)
       itemFail("probe.cast", `全部演职员：${castProbe}`);
+
+    /*
+     * 删除弹窗（画板 03 的片段，弹窗内坐标）：600×568；标题 24,18 16/700，关闭 560,20；库文件勾选框 24,74、标题 46,70、说明 46,90，
+     * 「看文件」右边到 576（画板 580，同画板 04 的右对齐到内容边）；分隔 y 120；种子块标题 24,132，三行 y 154 起、行距 54，
+     * 勾选框 y + 4，下拉 456,y + 2 120×28，「仍然删除」框 492,y + 8；分隔 y 322；订阅块标题 24,334，单选 y 356 起、行距 46；
+     * 页脚分隔 y 508，摘要 24 竖直居中，「取消」424、「删除」504（72×32，y 522，底色 dang）。
+     */
+    const d = await ev(
+      measureDelete(`
+        /* 前面的探针换到了第 1 季：换回第 2 季（假数据的删除预览是第 2 季的） */
+        const tab = document.querySelector('[data-testid="mi-tab-2"]');
+        if (!tab) return 'no-tab-2';
+        if (!tab.classList.contains('is-on')) {
+          tab.click();
+          for (let i = 0; i < 20 && !(document.querySelector('.mi-ep .mi-ep__title')?.textContent ?? '').includes('归来'); i++) await wait(150);
+        }
+        const b = document.querySelector('[data-testid="mi-delete"]');
+        if (!b) return 'no-delete-button';
+        b.click();
+        return true;
+      `),
+    ).catch((e) => ({ err: `probe 失败：${e.message}` }));
+    if (process.env.MI_DUMP) console.log(JSON.stringify(d, null, 1));
+    if (d.err) itemFail("delete", `删除弹窗：${d.err}`);
+    else {
+      const del = (key, got, want, tol = 2) => expectBox(`delete.${key}`, got, want, tol);
+      del("dialog", d.dlg, { w: 600, h: 568 }, 4);
+      del("header", d.header, { x: 0, y: 0, w: 600, h: 57 });
+      del("title", d.title, { x: 24, y: 18 });
+      expectText("delete.title", d.titleText, "删除《长夜将尽》第 2 季");
+      if (d.titleFont !== "16px/700") itemFail("delete.title", `标题 ${d.titleFont}，画板 16/700`);
+      del("close", d.close, { x: 560, y: 20, w: 16, h: 16 });
+      del("files.check", d.filesCheck, { x: 24, y: 74, w: 14, h: 14 });
+      del("files.title", d.filesTitle, { x: 46, y: 70 });
+      del("files.sub", d.filesSub, { x: 46, y: 90 });
+      expectText(
+        "delete.files.sub",
+        d.filesSubText,
+        "6 个文件 · 41.2 GB · 都是硬链接，种子里的数据不受影响",
+      );
+      if (!d.filesChecked) itemFail("delete.files.check", "库里的文件默认要勾上");
+      if (
+        !d.filesMore ||
+        !near(d.filesMore.x + d.filesMore.w, 576, 4) ||
+        !near(d.filesMore.y, 72, 2)
+      )
+        itemFail(
+          "delete.files.more",
+          `「看文件」在 ${JSON.stringify(d.filesMore)}，画板右边到 580、y 72`,
+        );
+      if (d.secs.length !== 3)
+        itemFail("delete.secs", `${d.secs.length} 块，画板三块（库文件、种子、订阅）`);
+      else {
+        /* 块的下沿是分隔线：120、322，订阅块一直到页脚分隔 508 */
+        const bottoms = d.secs.map((b) => b.y + b.h);
+        if (!near(bottoms[0], 121, 1) || !near(bottoms[1], 323, 1) || !near(bottoms[2], 508, 1))
+          itemFail(
+            "delete.rules",
+            `三块的下沿 ${bottoms.join("、")}，画板分隔在 120、322、页脚 508`,
+          );
+      }
+      del("torrents.title", d.torTitle, { x: 24, y: 132 });
+      expectText("delete.torrents.title", d.torTitleText, "种子（每台下载器分开判断）");
+      expectText(
+        "delete.torrents",
+        d.tors.map((t) => `${t.title}/${t.sub}/${t.checked ? "勾" : "不勾"}`).join(" | "),
+        "OurBits · S02E01–E04 · qb/分享率 1.31 · 做种 18 天 · H&R 已满足/勾 | HDSky · S02E05–E06 · tr/受保护：H&R 要求做种 7 天，还差 2 天/不勾 | HDSky · S02E07 · qb/受保护：还在下载（63%）/不勾",
+      );
+      d.tors.forEach((t, i) => {
+        const y = 154 + i * 54;
+        del(`torrents[${i}].check`, t.check, { x: 24, y: y + 4, w: 14, h: 14 });
+        del(`torrents[${i}].title`, t.titleBox, { x: 46, y });
+        del(`torrents[${i}].sub`, t.subBox, { x: 46, y: y + 20 });
+        if (i < 2 && t.ruled !== "1px") itemFail(`delete.torrents[${i}].rule`, "种子之间要有分隔");
+        if (i < 2) del(`torrents[${i}].rule`, t.main, { x: 46, w: 530, h: 47 });
+        if (i === 2 && t.ruled !== "0px") itemFail("delete.torrents[2].rule", "最后一行没有分隔");
+      });
+      const [t0, t1, t2] = d.tors;
+      if (t0) del("torrents[0].how", t0.how, { x: 456, y: 156, w: 120, h: 28 });
+      if (t0 && t0.howText !== "连数据一起删")
+        itemFail("delete.torrents[0].how", `下拉写的是「${t0.howText}」`);
+      for (const [i, t] of [
+        [1, t1],
+        [2, t2],
+      ]) {
+        if (!t) continue;
+        if (t.how) itemFail(`delete.torrents[${i}].how`, "受保护的没勾「仍然删除」时没有下拉");
+        del(`torrents[${i}].force`, t.force, { x: 492, y: 154 + i * 54 + 8, w: 14, h: 14 });
+        del(`torrents[${i}].subText`, t.subText, { x: 62 });
+      }
+      del("subscription.title", d.subTitle, { x: 24, y: 334 });
+      expectText(
+        "delete.subscription",
+        d.subs.map((o) => `${o.title}${o.on ? "*" : ""}/${o.sub}`).join(" | "),
+        "暂停追剧*/推荐：不暂停的话，台账会把删掉的集当成缺的，再去下一遍 | 删除订阅/以后不再找这一季 | 保留，继续追/只删这次选的文件和种子",
+      );
+      d.subs.forEach((o, i) => {
+        const y = 356 + i * 46;
+        del(`subscription[${i}].radio`, o.radio, { x: 24, y: y + 4, w: 14, h: 14 });
+        del(`subscription[${i}].title`, o.titleBox, { x: 46, y });
+      });
+      del("footer", d.footer, { x: 0, y: 508, w: 600, h: 60 });
+      /* 摘要按字本身的框量：左边 24，竖直居中于页脚（画板 17 高的行在 y 530，中线 538.5） */
+      del("summary", d.summary, { x: 24 });
+      if (d.summary && !near(d.summary.y + d.summary.h / 2, 538.5, 2))
+        itemFail(
+          "delete.summary",
+          `摘要的中线在 ${d.summary.y + d.summary.h / 2}，画板 538.5（页脚 508…568 居中）`,
+        );
+      expectText(
+        "delete.summary",
+        d.summaryText,
+        "将删除 6 个库文件、1 个种子（连数据），暂停追剧",
+      );
+      expectText("delete.buttons", d.buttons.map((b) => b.t).join("|"), "取消|删除");
+      if (d.buttons.length === 2) {
+        del("buttons.cancel", d.buttons[0], { x: 424, y: 522, w: 72, h: 32 });
+        del("buttons.delete", d.buttons[1], { x: 504, y: 522, w: 72, h: 32 });
+      }
+      if (d.runBg !== "rgb(179, 35, 24)")
+        itemFail("delete.buttons.delete", `「删除」底色 ${d.runBg}，画板 --pt-dang #B32318`);
+      if (d.overflow > 0) itemFail("delete.overflow", `正文横向溢出 ${d.overflow}px`);
+      if (d.forcedSummary !== "将删除 6 个库文件、2 个种子（连数据），暂停追剧" || !d.forcedChecked)
+        itemFail(
+          "delete.force",
+          `勾了「仍然删除」以后：${d.forcedSummary}，第二行${d.forcedChecked ? "" : "没"}勾上`,
+        );
+    }
     for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("console", err);
   }
 
@@ -4099,7 +4326,7 @@ if (doItem) {
       expectText(
         "nas.server",
         m.nasRows[3].t,
-        "Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 忽略",
+        "Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 处理 · 忽略",
         true,
       );
     }
@@ -4214,6 +4441,52 @@ if (doItem) {
       })()`).catch((e) => `probe 失败：${e.message}`),
     );
     if (probeMiss(ov, "verdict=ok").length > 0) itemFail("probe.overview", `简介展开：${ov}`, true);
+
+    /* 删除弹窗在手机上是全屏页（画板 03 的片段，宽度换成 375 − 32）：「更多」里的删除打开；摘要一行、按钮一行 */
+    const md = await ev(
+      measureDelete(`
+        document.querySelector('.mi-hero__more [data-testid="mi-more"]')?.click();
+        for (let i = 0; i < 20 && !document.querySelector('[data-testid="mi-more-delete"]'); i++) await wait(100);
+        const item = document.querySelector('[data-testid="mi-more-delete"]');
+        if (!item) return 'no-more-delete';
+        item.click();
+        return true;
+      `),
+    ).catch((e) => ({ err: `probe 失败：${e.message}` }));
+    if (process.env.MI_DUMP) console.log(JSON.stringify(md, null, 1));
+    if (md.err) itemFail("delete", `删除弹窗：${md.err}`, true);
+    else {
+      const del = (key, got, want, tol = 2) => expectBox(`delete.${key}`, got, want, tol, true);
+      if (!md.fullscreen) itemFail("delete", "手机上删除弹窗要全屏", true);
+      del("dialog", md.dlg, { x: 0, y: 0, w: 375, h: 812 });
+      del("title", md.title, { x: 16 });
+      del("files.check", md.filesCheck, { x: 16, w: 14, h: 14 });
+      del("files.title", md.filesTitle, { x: 38 });
+      if (!md.filesMore || !near(md.filesMore.x + md.filesMore.w, 359, 2))
+        itemFail(
+          "delete.files.more",
+          `「看文件」的右边 ${md.filesMore ? md.filesMore.x + md.filesMore.w : "无"}，应到 359`,
+          true,
+        );
+      if (md.tors.length === 3) {
+        del("torrents[0].title", md.tors[0].titleBox, { x: 38 });
+        if (!md.tors[0].how || !near(md.tors[0].how.x + md.tors[0].how.w, 359, 2))
+          itemFail(
+            "delete.torrents[0].how",
+            `下拉在 ${JSON.stringify(md.tors[0].how)}，右边应到 359`,
+            true,
+          );
+      }
+      /* 页脚：摘要占一行，取消、删除在下一行靠右 */
+      const [c, r] = md.buttons;
+      if (!md.summary || !c || !r || md.summary.y + md.summary.h > c.y || !near(r.x + r.w, 359, 2))
+        itemFail(
+          "delete.footer",
+          `摘要 ${JSON.stringify(md.summary)}、按钮 ${JSON.stringify(md.buttons)}：摘要在上一行，按钮靠右到 359`,
+          true,
+        );
+      if (md.overflow > 0) itemFail("delete.overflow", `正文横向溢出 ${md.overflow}px`, true);
+    }
     for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("console", err, true);
   }
   await cdp.send(

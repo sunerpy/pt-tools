@@ -275,9 +275,12 @@ type MediaTransferHistory struct {
 	Trigger      string     `gorm:"size:16;not null;default:''" json:"trigger"`
 	// MatchSource 是条目从哪来：manual（手动指定）、history（沿用之前整理用的）、subscription（订阅的）、push（推送时说明的），
 	// 或者媒体识别的来源（纠正、IMDb 编号、搜索等）。升级前的记录为空
-	MatchSource string    `gorm:"size:16;not null;default:''" json:"match_source"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	MatchSource string `gorm:"size:16;not null;default:''" json:"match_source"`
+	// KeepLinks 是在条目详情里删除时选了留着库里的文件、种子连数据删掉了：打开了「删种时一并删除入库链接」也不删这条的入库链接。
+	// 同一个源文件重新整理时清掉
+	KeepLinks bool      `gorm:"not null;default:false" json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (MediaTransferHistory) TableName() string { return "media_transfer_histories" }

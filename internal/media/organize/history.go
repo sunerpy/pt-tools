@@ -238,6 +238,7 @@ func (s *Service) DeleteHistoryWith(ctx context.Context, id uint, opt DeleteOpti
 	if err := s.cfg.DB.WithContext(ctx).Delete(&models.MediaTransferHistory{}, row.ID).Error; err != nil {
 		return nil, fmt.Errorf("删除整理记录失败: %w", err)
 	}
+	s.recordGone(ctx, row, "pt-tools 的整理记录删了")
 	return kept, nil
 }
 
@@ -281,6 +282,7 @@ func (s *Service) Retire(ctx context.Context, id uint, reason string) ([]string,
 	}).Error; err != nil {
 		return nil, fmt.Errorf("更新整理记录失败: %w", err)
 	}
+	s.recordGone(ctx, row, "洗版换掉了这个版本")
 	return kept, nil
 }
 
@@ -444,7 +446,8 @@ func (s *Service) Reconcile(ctx context.Context) int {
 	var rows []models.MediaTransferHistory
 	if err := s.cfg.DB.WithContext(ctx).
 		// 目录监控整理的（没有下载器）不跟着删：那里的文件不是种子，删不删由用户决定
-		Where("status = ? AND mode IN ? AND target_path != '' AND downloader_id > 0", models.MediaTransferDone, []string{models.MediaModeHardlink, models.MediaModeSymlink}).
+		// 在条目详情里删除时选了留着库里的文件的（KeepLinks）不删
+		Where("status = ? AND mode IN ? AND target_path != '' AND downloader_id > 0 AND keep_links = ?", models.MediaTransferDone, []string{models.MediaModeHardlink, models.MediaModeSymlink}, false).
 		Order("downloader_id, id").Find(&rows).Error; err != nil {
 		s.cfg.Logger.Warnf("[整理入库] 读取整理记录失败: %v", err)
 		return 0
@@ -503,7 +506,7 @@ func (s *Service) reconcileRow(ctx context.Context, snap models.MediaTransferHis
 	if row.Status != models.MediaTransferDone || (row.Mode != models.MediaModeHardlink && row.Mode != models.MediaModeSymlink) ||
 		row.Mode != snap.Mode || row.TargetPath != snap.TargetPath || row.TargetFileID != snap.TargetFileID ||
 		row.SourcePath != snap.SourcePath || row.LibraryID != snap.LibraryID ||
-		row.DownloaderID != snap.DownloaderID || row.InfoHash != snap.InfoHash {
+		row.DownloaderID != snap.DownloaderID || row.InfoHash != snap.InfoHash || row.KeepLinks {
 		return false, nil
 	}
 	// 保存目录不在（例如下载目录没挂载）时认不出数据是不是真的删了，不动
@@ -533,5 +536,6 @@ func (s *Service) reconcileRow(ctx context.Context, snap models.MediaTransferHis
 	}).Error; err != nil {
 		return false, fmt.Errorf("更新整理记录失败: %w", err)
 	}
+	s.recordGone(ctx, row, "种子与数据删了，库里的链接一并删了")
 	return true, nil
 }

@@ -466,13 +466,14 @@ func (s *Service) Organize(ctx context.Context, req Request) (*Result, error) {
 	}
 }
 
-// loop 是后台节拍：每分钟重试到期的失败记录；按间隔补查、扫描与清理入库链接。
+// loop 是后台节拍：每分钟重试到期的失败记录；按间隔补查、扫描与清理入库链接，每天巡检一次库里的文件。
 func (s *Service) loop(ctx context.Context) {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	// lastRecover 从开始时算起：worker 开始时已经恢复过一次
 	var lastSweep, lastScan, lastReconcile, lastWatch, lastFill time.Time
 	lastRecover := s.cfg.Now()
+	lc := libCheck{started: lastRecover}
 	for {
 		select {
 		case <-ctx.Done():
@@ -512,6 +513,7 @@ func (s *Service) loop(ctx context.Context) {
 			lastFill = now
 			s.scrapeFill(ctx)
 		}
+		s.libCheckTick(ctx, &lc)
 	}
 }
 

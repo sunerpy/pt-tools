@@ -355,10 +355,14 @@ func (w *writer) seriesTitle(itemID string) string {
 
 // recordedByID 是换不了路径时按编号找 pt-tools 的整理记录：电影按 TMDB 编号，集按剧的 TMDB 编号、季与集。
 func (w *writer) recordedByID(g models.MediaServerItem, mediaType string) (bool, error) {
+	return recordedByID(w.tx, g, mediaType)
+}
+
+func recordedByID(tx *gorm.DB, g models.MediaServerItem, mediaType string) (bool, error) {
 	if g.TMDBID <= 0 {
 		return false, nil
 	}
-	q := w.tx.Model(&models.MediaTransferHistory{}).Where("status = ? AND media_type = ? AND tmdb_id = ?", models.MediaTransferDone, mediaType, g.TMDBID)
+	q := tx.Model(&models.MediaTransferHistory{}).Where("status = ? AND media_type = ? AND tmdb_id = ?", models.MediaTransferDone, mediaType, g.TMDBID)
 	if g.Kind == models.MediaServerItemEpisode {
 		if g.Episode <= 0 {
 			return false, nil
@@ -368,6 +372,19 @@ func (w *writer) recordedByID(g models.MediaServerItem, mediaType string) (bool,
 	}
 	var n int64
 	if err := q.Count(&n).Error; err != nil {
+		return false, fmt.Errorf("读取整理记录失败: %w", err)
+	}
+	return n > 0, nil
+}
+
+// recorded 报告服务器里的这一项（已经标了删除的也算）还有没有对应的 pt-tools 整理记录，规则同同步时写问题（raiseRemoved）：
+// 有 pt-tools 的路径时按路径，换不了路径时按编号。
+func recorded(tx *gorm.DB, g models.MediaServerItem, mediaType string) (bool, error) {
+	if g.LocalPath == "" {
+		return recordedByID(tx, g, mediaType)
+	}
+	var n int64
+	if err := tx.Model(&models.MediaTransferHistory{}).Where("status = ? AND target_path = ?", models.MediaTransferDone, g.LocalPath).Count(&n).Error; err != nil {
 		return false, fmt.Errorf("读取整理记录失败: %w", err)
 	}
 	return n > 0, nil

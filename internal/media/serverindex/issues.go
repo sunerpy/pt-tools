@@ -37,6 +37,47 @@ func removedKey(serverID uint, itemID string) IssueKey {
 	return IssueKey{Kind: models.MediaIssueServerRemoved, ServerID: serverID, ServerItemID: itemID}
 }
 
+// MissingKey 是整理记录 historyID 的 library_missing 问题的键。
+func MissingKey(historyID uint) IssueKey {
+	return IssueKey{Kind: models.MediaIssueLibraryMissing, HistoryID: historyID}
+}
+
+// ClearUnmatched 在删了整理记录以后看这一部（电影或剧）还开着、或忽略了的 server_removed 问题：对不上任何已整理记录的
+// （对应的规则同同步时写问题）改成解决了，说明写 detail。索引里那一项已经清掉了时按问题记的季集对。
+func ClearUnmatched(tx *gorm.DB, mediaType string, tmdbID int, detail string, now time.Time) error {
+	if tmdbID <= 0 {
+		return nil
+	}
+	var issues []models.MediaIssue
+	if err := tx.Where("kind = ? AND status IN ? AND media_type = ? AND tmdb_id = ?", models.MediaIssueServerRemoved,
+		[]string{models.MediaIssueOpen, models.MediaIssueDismissed}, mediaType, tmdbID).Order("id").Find(&issues).Error; err != nil {
+		return fmt.Errorf("读取问题失败: %w", err)
+	}
+	for _, is := range issues {
+		var item models.MediaServerItem
+		if err := tx.Where("server_id = ? AND item_id = ?", is.ServerID, is.ServerItemID).Limit(1).Find(&item).Error; err != nil {
+			return fmt.Errorf("读取索引失败: %w", err)
+		}
+		if item.ID == 0 {
+			item = models.MediaServerItem{Kind: models.MediaServerItemMovie, TMDBID: is.TMDBID}
+			if mediaType == models.MediaKindTV {
+				item.Kind, item.Season, item.Episode = models.MediaServerItemEpisode, is.Season, is.Episode
+			}
+		}
+		ok, err := recorded(tx, item, mediaType)
+		if err != nil {
+			return err
+		}
+		if ok {
+			continue
+		}
+		if err := Clear(tx, removedKey(is.ServerID, is.ServerItemID), detail, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (k IssueKey) where(tx *gorm.DB) *gorm.DB {
 	return tx.Where("kind = ? AND server_id = ? AND server_item_id = ? AND history_id = ?", k.Kind, k.ServerID, k.ServerItemID, k.HistoryID)
 }

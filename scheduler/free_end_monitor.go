@@ -750,17 +750,17 @@ func (m *FreeEndMonitor) autoDeleteFreeEnded(dl downloader.Downloader, torrent m
 }
 
 // freeEndProtection 是免费结束时不删这个种子的原因，空串表示可以删：保留标签、保护标签、H&R 没做满（打开了「保护 H&R 种子」时），
-// 与自动删种的 hard 保护相同（见 hardProtection）。读不出全局设置或 H&R 信息时也不删（宁可暂停也不删掉受保护的种子）。
+// 与自动删种的 hard 保护相同（见 SeedGuard.Hard）。读不出全局设置或 H&R 信息时也不删（宁可暂停也不删掉受保护的种子）。
 func (m *FreeEndMonitor) freeEndProtection(t downloader.Torrent) string {
 	var cfg models.SettingsGlobal
 	if err := m.db.First(&cfg).Error; err != nil {
 		return "读不到全局设置"
 	}
-	hr, err := loadHRInfo(m.db)
+	guard, err := NewSeedGuard(m.db, &cfg)
 	if err != nil {
 		return "读不到 H&R 信息"
 	}
-	return hardProtection(&cfg, t, hr, splitTags(cfg.CleanupProtectTags))
+	return guard.Hard(t).Text
 }
 
 // dataNotShared 报告删除下载器里的这个种子时能不能连数据一起删：没有别的种子用着它的数据。

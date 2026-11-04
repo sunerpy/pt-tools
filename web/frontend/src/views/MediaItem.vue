@@ -3,7 +3,9 @@
  * 条目详情（媒体中心 M3，画板 04 桌面、08 手机）：一部电影或剧集的资料、你的 NAS 上（库里、做种、订阅）、
  * 季与集（每集的状态、播出日、进度）、这一季的种子（能不能删）、演职员与推荐。只读；动作交给现有的弹窗：
  * 搜资源打开按条目搜索，追剧打开订阅弹窗或追剧详情，重新刮削调整理历史的刮削，手动整理打开整理弹窗。
- * 媒体服务器（M6）：「你的 NAS 上」第 4 行、「在 Jellyfin 播放」、集卡的播放圆；服务器里删了的先给「忽略」。删除（M7）还没有。
+ * 媒体服务器（M6）：「你的 NAS 上」第 4 行、「在 Jellyfin 播放」、集卡的播放圆。
+ * 删除（M7）：大图里的「删除」（手机在「更多」里）、种子行的「删除这个种子」、库里的文件不见了与服务器里删了的「处理」
+ * 都打开删除弹窗（画板 03 的片段）；「忽略」把问题改成忽略。
  */
 import {
   type ExploreItem,
@@ -15,6 +17,7 @@ import {
   organizeApi,
   subscribeApi,
 } from "@/api";
+import MediaDeleteDialog from "@/components/media/MediaDeleteDialog.vue";
 import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import SubscribeDialog, { type SubscribeTarget } from "@/components/media/SubscribeDialog.vue";
 import SubscriptionDetailDialog from "@/components/media/SubscriptionDetailDialog.vue";
@@ -30,6 +33,7 @@ import { detailTitle } from "@/composables/useDetailTitle";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { useTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { mediaKindLabel, posterURL, rescrapeOutcome, tmdbPageURL } from "@/utils/media";
+import { type DeletePreset, type DeleteTarget, issueSelector } from "@/utils/mediaDelete";
 import {
   airDayText,
   collapsedCount,
@@ -37,12 +41,15 @@ import {
   creditsLine,
   defaultSeason,
   deletableView,
-  episodeAction,
+  type EpisodeAction,
   episodeActionLabel,
+  episodeActions,
+  episodeIssues,
   episodeNote,
   episodePlayURL,
   episodeStatePill,
   infoPills,
+  type IssueRef,
   itemFrom,
   itemLink,
   legendCounts,
@@ -50,6 +57,7 @@ import {
   originalLine,
   pickSubscription,
   playTarget,
+  protectRulesText,
   searchLink,
   seasonTabText,
   seasonTorrents,
@@ -187,6 +195,7 @@ const torrents = computed<ItemTorrent[]>(() =>
   detail.value ? seasonTorrents(detail.value.torrents, kind.value, season.value) : [],
 );
 const torrentsTitle = computed(() => (kind.value === "tv" ? "这一季的种子" : "这部片的种子"));
+const torrentsSub = computed(() => protectRulesText(detail.value?.protect_rules ?? []));
 const people = computed(() => {
   const i = info.value;
   if (!i) return [];
@@ -316,14 +325,16 @@ async function onMore(cmd: string) {
     organizeOpen.value = true;
   } else if (cmd === "rescrape") {
     await rescrape();
+  } else if (cmd === "delete") {
+    openDelete({ kind: "item" });
   }
 }
 
-function onEpisodeAction(ep: SeasonEpisode) {
-  const act = episodeAction(ep);
-  if (act === "ignore" && ep.server_issue) void ignoreIssues([ep.server_issue.id]);
+function onEpisodeAction(ep: SeasonEpisode, act: EpisodeAction) {
+  if (act === "ignore") void ignoreIssues(episodeIssues(ep));
+  else if (act === "handle") handleIssues([{ id: 0, season: season.value, episode: ep.episode }]);
   // 等版本看能补这一集的其他版本、缺的去搜：都是按条目搜索这一季
-  else if (act) searchResources(season.value);
+  else searchResources(season.value);
 }
 
 function openPlay(url: string) {
@@ -337,7 +348,7 @@ function onEpisodeCard(ep: SeasonEpisode, e: MouseEvent) {
   openPlay(url);
 }
 
-/** 忽略媒体服务器里删了的问题（M7 才有「处理」）；忽略以后这一项一直没再出现前不再提示 */
+/** 忽略库里的文件不见了、媒体服务器里删了的问题：文件回来、服务器里又有了以前不再提示 */
 const ignoring = ref(false);
 async function ignoreIssues(ids: number[]) {
   if (!ids.length || ignoring.value) return;
@@ -376,7 +387,48 @@ function askBlock(t: ItemTorrent) {
 
 async function onTorrentCommand(cmd: string, t: ItemTorrent) {
   if (cmd === "open") openInDownloader(t);
+  else if (cmd === "delete") deleteTorrent(t);
   else if (cmd === "block") askBlock(t);
+}
+
+// ---- 删除（M7） ----
+const deleteOpen = ref(false);
+const deleteTarget = ref<DeleteTarget | null>(null);
+/** 有可删的（库里的文件、种子或订阅）时才给「删除」 */
+const canDeleteItem = computed(() => {
+  const d = detail.value;
+  return Boolean(d && (d.nas.library.files > 0 || d.torrents.length || d.subscriptions.length));
+});
+const deleteTip = computed(() => {
+  if (kind.value !== "tv") return "删除";
+  return season.value === 0 ? "删除特别篇" : `删除第 ${season.value} 季`;
+});
+
+/** 打开删除弹窗：范围默认是这部电影、正在看的这一季 */
+function openDelete(preset: DeletePreset, selector?: DeleteTarget["selector"]) {
+  if (!info.value) return;
+  sheetOpen.value = false;
+  deleteTarget.value = {
+    selector: selector ?? {
+      media_type: kind.value,
+      tmdb_id: tmdbID.value,
+      season: kind.value === "tv" ? season.value : 0,
+    },
+    title: info.value.title,
+    preset,
+  };
+  deleteOpen.value = true;
+}
+
+/** 种子行的「删除这个种子」：只勾这一个 */
+function deleteTorrent(t: ItemTorrent) {
+  openDelete({ kind: "torrent", key: { downloader_id: t.downloader_id, hash: t.hash } });
+}
+
+/** 「处理」：打开删除预览，只删有问题的那几集（电影是整部） */
+function handleIssues(issues: readonly IssueRef[]) {
+  if (!issues.length) return;
+  openDelete({ kind: "issues" }, issueSelector(kind.value, tmdbID.value, issues));
 }
 
 function openSheet(t: ItemTorrent) {
@@ -580,6 +632,16 @@ const failedFaces = ref(new Set<string>());
                 <PtIcon name="rotate-ccw" :size="16" />
               </button>
             </el-tooltip>
+            <el-tooltip v-if="canDeleteItem" :content="deleteTip" placement="top">
+              <button
+                type="button"
+                class="mi-btn mi-btn--glass mi-btn--square"
+                :aria-label="deleteTip"
+                data-testid="mi-delete"
+                @click="openDelete({ kind: 'item' })">
+                <PtIcon name="trash-2" :size="16" />
+              </button>
+            </el-tooltip>
             <el-dropdown trigger="click" data-testid="mi-more-menu" @command="onMore">
               <button
                 type="button"
@@ -614,6 +676,12 @@ const failedFaces = ref(new Set<string>());
               <el-dropdown-item v-if="detail.nas.library.record_id" command="rescrape"
                 >重新刮削</el-dropdown-item
               >
+              <el-dropdown-item
+                v-if="canDeleteItem"
+                command="delete"
+                data-testid="mi-more-delete"
+                >{{ deleteTip }}</el-dropdown-item
+              >
               <el-dropdown-item command="tmdb">在 TMDB 打开</el-dropdown-item>
               <el-dropdown-item command="copy">复制 TMDB 编号</el-dropdown-item>
               <el-dropdown-item command="organize">手动整理到这个条目</el-dropdown-item>
@@ -633,9 +701,17 @@ const failedFaces = ref(new Set<string>());
                   <button
                     type="button"
                     class="mi-nas__ignore"
+                    :data-testid="`mi-issue-handle-${l.key}`"
+                    @click="handleIssues(l.issues)">
+                    处理
+                  </button>
+                  ·
+                  <button
+                    type="button"
+                    class="mi-nas__ignore"
                     :disabled="ignoring"
-                    data-testid="mi-server-ignore"
-                    @click="ignoreIssues(l.issues)">
+                    :data-testid="`mi-issue-ignore-${l.key}`"
+                    @click="ignoreIssues(l.issues.map((i) => i.id))">
                     忽略
                   </button>
                 </template>
@@ -662,9 +738,17 @@ const failedFaces = ref(new Set<string>());
                 <button
                   type="button"
                   class="mi-nas__ignore"
+                  :data-testid="`mi-issue-handle-${l.key}`"
+                  @click="handleIssues(l.issues)">
+                  处理
+                </button>
+                ·
+                <button
+                  type="button"
+                  class="mi-nas__ignore"
                   :disabled="ignoring"
-                  data-testid="mi-server-ignore"
-                  @click="ignoreIssues(l.issues)">
+                  :data-testid="`mi-issue-ignore-${l.key}`"
+                  @click="ignoreIssues(l.issues.map((i) => i.id))">
                   忽略
                 </button>
               </template>
@@ -747,7 +831,10 @@ const failedFaces = ref(new Set<string>());
             v-for="ep in shownEpisodes"
             :key="ep.episode"
             class="mi-ep"
-            :class="[`is-${ep.state}`, { 'is-playable': episodePlayURL(ep) }]"
+            :class="[
+              `is-${ep.state}`,
+              { 'is-playable': episodePlayURL(ep), 'has-two-acts': episodeActions(ep).length > 1 },
+            ]"
             :data-testid="`mi-ep-${ep.episode}`"
             @click="onEpisodeCard(ep, $event)">
             <div class="mi-ep__still">
@@ -787,7 +874,7 @@ const failedFaces = ref(new Set<string>());
               </PtStatusPill>
               <span
                 class="mi-ep__note"
-                :class="{ 'is-warn': ep.server_issue }"
+                :class="{ 'is-warn': ep.server_issue || ep.library_issue }"
                 :title="episodeNote(ep, seasonData!, now, ep.episode === nextUpcoming)">
                 {{ episodeNote(ep, seasonData!, now, ep.episode === nextUpcoming) }}
               </span>
@@ -798,15 +885,19 @@ const failedFaces = ref(new Set<string>());
               :percent="ep.percent"
               tone="info"
               :height="3" />
-            <button
-              v-if="episodeAction(ep)"
-              type="button"
-              class="mi-link mi-ep__act"
-              :disabled="ignoring && episodeAction(ep) === 'ignore'"
-              :data-testid="`mi-ep-act-${ep.episode}`"
-              @click="onEpisodeAction(ep)">
-              {{ episodeActionLabel(ep) }}
-            </button>
+            <span v-if="episodeActions(ep).length" class="mi-ep__act">
+              <template v-for="(a, i) in episodeActions(ep)" :key="a">
+                <span v-if="i > 0" class="mi-ep__dot" aria-hidden="true">·</span>
+                <button
+                  type="button"
+                  class="mi-link"
+                  :disabled="ignoring && a === 'ignore'"
+                  :data-testid="`mi-ep-${a}-${ep.episode}`"
+                  @click="onEpisodeAction(ep, a)">
+                  {{ episodeActionLabel(a) }}
+                </button>
+              </template>
+            </span>
           </div>
         </div>
       </section>
@@ -815,9 +906,9 @@ const failedFaces = ref(new Set<string>());
       <section class="mi-block" data-testid="mi-torrents">
         <div class="mi-block__head">
           <h3 class="mi-block__title">{{ torrentsTitle }}</h3>
-          <span v-if="!isMobile" class="mi-block__sub"
-            >能不能删：下载中的、H&amp;R 没做够的受保护</span
-          >
+          <span v-if="!isMobile" class="mi-block__sub" data-testid="mi-torrents-sub">{{
+            torrentsSub
+          }}</span>
         </div>
         <div class="mi-list" :class="{ 'is-mobile': isMobile }">
           <div v-if="!torrents.length" class="mi-list__empty" data-testid="mi-torrents-empty">
@@ -844,7 +935,7 @@ const failedFaces = ref(new Set<string>());
                 <PtStatusPill
                   :tone="deletableView(t).warn ? 'warn' : 'neutral'"
                   size="sm"
-                  :title="t.reason">
+                  :title="deletableView(t).title">
                   <PtIcon v-if="deletableView(t).warn" name="shield" :size="11" />{{
                     deletableView(t).text
                   }}
@@ -864,6 +955,9 @@ const failedFaces = ref(new Set<string>());
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item command="open">在下载器里打开</el-dropdown-item>
+                    <el-dropdown-item command="delete" data-testid="mi-trow-delete"
+                      >删除这个种子</el-dropdown-item
+                    >
                     <el-dropdown-item v-if="t.torrent_id" command="block"
                       >不要这个种子</el-dropdown-item
                     >
@@ -974,6 +1068,7 @@ const failedFaces = ref(new Set<string>());
       @saved="load" />
     <SubscriptionDetailDialog v-model="subDetailOpen" :id="subDetailID" @changed="load" />
     <OrganizeDialog v-model="organizeOpen" :target="organizeTarget" @done="load" />
+    <MediaDeleteDialog v-model="deleteOpen" :target="deleteTarget" @done="load" />
     <BlockDialog
       v-model="blockOpen"
       :torrent-title="blockTarget?.title ?? ''"
@@ -995,6 +1090,13 @@ const failedFaces = ref(new Set<string>());
         <div class="mi-sheet__title">{{ sheetTorrent.title }}</div>
         <button type="button" class="mi-sheet__item" @click="openInDownloader(sheetTorrent)">
           <PtIcon name="app-window" :size="16" /><span>在下载器里打开</span>
+        </button>
+        <button
+          type="button"
+          class="mi-sheet__item"
+          data-testid="mi-sheet-delete"
+          @click="deleteTorrent(sheetTorrent)">
+          <PtIcon name="trash-2" :size="16" /><span>删除这个种子</span>
         </button>
         <button
           v-if="sheetTorrent.torrent_id"
@@ -1675,6 +1777,19 @@ const failedFaces = ref(new Set<string>());
   position: absolute;
   top: 12px;
   right: 13px;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.mi-ep__dot {
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+/* 「处理 · 忽略」两个动作时名字多让出一些 */
+.mi-ep.has-two-acts .mi-ep__title {
+  right: 92px;
 }
 
 /* 种子列表：一行 50，列按画板（站点 84、种子伸缩、下载器跟着名字宽、状态 76、数据 224、能不能删 308、更多 20） */

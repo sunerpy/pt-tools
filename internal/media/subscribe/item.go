@@ -86,6 +86,8 @@ type ItemLibrary struct {
 	Version string `json:"version,omitempty"`
 	// RecordID 是最新的一条整理记录（详情页的「重新刮削」用它：刮削这条记录所在的电影或剧集）
 	RecordID uint `json:"record_id,omitempty"`
+	// Missing 是还开着的「库里的文件不见了」（library_missing，见每天的巡检）
+	Missing []ItemServerIssue `json:"missing"`
 }
 
 // ItemSeasonHave 是一季入库了几集（Total 是这一季的集数）。
@@ -123,7 +125,7 @@ const (
 )
 
 // ItemTorrent 是和这个条目有关、还在下载器里的一个种子：推送时说明了这个条目的、订阅下载的、整理进库的。
-// Deletable 与 Reason 是能不能删（M3 只看下载中与 H&R）。
+// Deletable 是能不能删（按自动删种的保护规则，见 Guard）：Reason 是「能不能删」那一列的短字，Protection 是受保护时的完整原因。
 type ItemTorrent struct {
 	Site      string `json:"site"`
 	TorrentID string `json:"torrent_id,omitempty"`
@@ -145,6 +147,7 @@ type ItemTorrent struct {
 	HRHours        int     `json:"hr_hours,omitempty"`
 	Deletable      bool    `json:"deletable"`
 	Reason         string  `json:"reason"`
+	Protection     string  `json:"protection,omitempty"`
 }
 
 // ItemDetail 是条目详情页的数据。Errors 是没取到的部分（演职员、各季、推荐、某个下载器、媒体服务器的索引），其余照样给。
@@ -156,7 +159,9 @@ type ItemDetail struct {
 	Subscriptions   []ItemSubscription `json:"subscriptions"`
 	Torrents        []ItemTorrent      `json:"torrents"`
 	Recommendations []ExploreItem      `json:"recommendations"`
-	Errors          []string           `json:"errors"`
+	// ProtectRules 是删除时按哪几条保护（开着的保护规则，见 Guard）；读不到保护规则时为空
+	ProtectRules []string `json:"protect_rules"`
+	Errors       []string `json:"errors"`
 }
 
 // ItemServer 是一台媒体服务器里有没有这一部（「你的 NAS 上」的媒体服务器那一行与「在 Jellyfin 播放」）：开着、索引开着、
@@ -199,9 +204,9 @@ func (s *Service) Item(ctx context.Context, kind string, id int) (*ItemDetail, e
 	out := &ItemDetail{
 		Item:    itemInfo(kind, d),
 		Seasons: []ItemSeason{}, Servers: []ItemServer{}, Subscriptions: []ItemSubscription{}, Torrents: []ItemTorrent{}, Recommendations: []ExploreItem{},
-		Errors: []string{},
+		ProtectRules: []string{}, Errors: []string{},
 	}
-	out.NAS.Library = ItemLibrary{Seasons: []ItemSeasonHave{}, Libraries: []string{}}
+	out.NAS.Library = ItemLibrary{Seasons: []ItemSeasonHave{}, Libraries: []string{}, Missing: []ItemServerIssue{}}
 	if x, xerr := c.Extras(ctx, kind, id); xerr == nil {
 		applyExtras(&out.Item, x)
 	} else {
@@ -237,8 +242,21 @@ func (s *Service) Item(ctx context.Context, kind string, id int) (*ItemDetail, e
 	} else {
 		out.Servers = servers
 	}
+	if missing, merr := serverindex.ItemMissing(ctx, s.cfg.DB, kind, id); merr != nil {
+		out.Errors = append(out.Errors, "库文件的巡检结果没读到："+merr.Error())
+	} else {
+		for _, is := range missing {
+			out.NAS.Library.Missing = append(out.NAS.Library.Missing, ItemServerIssue{ID: is.ID, Season: is.Season, Episode: is.Episode})
+		}
+	}
 
-	torrents, errs, err := s.itemTorrents(ctx, kind, id, subs, hist)
+	g, gerr := s.guard(ctx)
+	if gerr != nil {
+		out.Errors = append(out.Errors, "读不到删种的保护规则："+gerr.Error()+"，种子一律当作受保护")
+	} else {
+		out.ProtectRules = g.Rules()
+	}
+	torrents, errs, err := s.itemTorrents(ctx, kind, id, subs, hist, g)
 	if err != nil {
 		return nil, err
 	}
@@ -470,9 +488,18 @@ type torrentRef struct {
 	seen                   time.Time // 关联记录里最晚记下的时间（刚记下的，缓存的下载器列表里可能还没有这个种子）
 }
 
-// itemTorrents 合并关联的种子（订阅的种子、推送记录、整理记录），按下载器里现在的样子给出状态；不在下载器里的不列。
-// 下载器读不到时这些种子的状态是 unknown，第二个返回值写明哪个下载器没读到。
-func (s *Service) itemTorrents(ctx context.Context, kind string, id int, subs []models.MediaSubscription, hist []models.MediaTransferHistory) ([]ItemTorrent, []string, error) {
+// itemTorrents 合并关联的种子（订阅的种子、推送记录、整理记录），按下载器里现在的样子给出状态与能不能删（g 为空时一律受保护）；
+// 不在下载器里的不列。下载器读不到时这些种子的状态是 unknown，第二个返回值写明哪个下载器没读到。
+func (s *Service) itemTorrents(ctx context.Context, kind string, id int, subs []models.MediaSubscription, hist []models.MediaTransferHistory, g Guard) ([]ItemTorrent, []string, error) {
+	refs, err := s.itemRefs(ctx, kind, id, subs, hist)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.liveTorrents(ctx, refs, g)
+}
+
+// itemRefs 合并关联的种子：订阅的种子、推送时说明了这个条目的种子记录、整理记录；按（下载器, hash）合成一个。
+func (s *Service) itemRefs(ctx context.Context, kind string, id int, subs []models.MediaSubscription, hist []models.MediaTransferHistory) ([]*torrentRef, error) {
 	refs := []*torrentRef{}
 	index := map[string]*torrentRef{}
 	add := func(r torrentRef) {
@@ -511,7 +538,7 @@ func (s *Service) itemTorrents(ctx context.Context, kind string, id int, subs []
 	for _, sub := range subs {
 		rows, err := s.torrents(ctx, sub.ID)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for _, t := range rows {
 			site := t.SiteName
@@ -538,7 +565,7 @@ func (s *Service) itemTorrents(ctx context.Context, kind string, id int, subs []
 
 	pushed, err := s.itemPushed(ctx, kind, id)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, p := range pushed {
 		r := torrentRef{
@@ -586,8 +613,7 @@ func (s *Service) itemTorrents(ctx context.Context, kind string, id int, subs []
 		slices.Sort(r.eps)
 		add(*r)
 	}
-
-	return s.liveTorrents(ctx, refs)
+	return refs, nil
 }
 
 // pushedRef 是一条推送记录（活动表或归档表）。
@@ -657,8 +683,8 @@ func recordSeen(created time.Time, pushed *time.Time) time.Time {
 	return created
 }
 
-// liveTorrents 按下载器里现在的样子给出关联的种子：不在下载器里的不列；读不到下载器时状态是 unknown。
-func (s *Service) liveTorrents(ctx context.Context, refs []*torrentRef) ([]ItemTorrent, []string, error) {
+// liveTorrents 按下载器里现在的样子给出关联的种子与能不能删（g 为空时一律受保护）：不在下载器里的不列；读不到下载器时状态是 unknown。
+func (s *Service) liveTorrents(ctx context.Context, refs []*torrentRef, g Guard) ([]ItemTorrent, []string, error) {
 	out := []ItemTorrent{}
 	if len(refs) == 0 {
 		return out, nil, nil
@@ -699,14 +725,7 @@ func (s *Service) liveTorrents(ctx context.Context, refs []*torrentRef) ([]ItemT
 		lists[id] = m
 	}
 	for _, r := range refs {
-		v := ItemTorrent{
-			Site: r.site, TorrentID: r.torrentID, Title: r.title, Season: r.season, Episodes: spanLabel(r.eps, r.whole), Size: r.size,
-			DownloaderID: r.downloaderID, Downloader: names[r.downloaderID], Hash: r.hash, HR: r.hr, HRHours: r.hrHours,
-		}
-		if v.HR && v.HRHours == 0 && r.site != "" {
-			_, def := siteHR(r.site)
-			v.HRHours = ptinternal.HRSeedTimeH(r.site, def, r.size)
-		}
+		v := torrentView(r, names[r.downloaderID])
 		if failed[r.downloaderID] {
 			v.State, v.Reason = ItemTorrentUnknown, "下载器没读到，不知道能不能删"
 		} else {
@@ -714,28 +733,52 @@ func (s *Service) liveTorrents(ctx context.Context, refs []*torrentRef) ([]ItemT
 			if !ok {
 				continue
 			}
-			v.State = liveState(t)
-			v.Percent = min(max(t.Progress, 0), 1) * 100
-			v.Ratio, v.SeedingSeconds = t.Ratio, t.SeedingTime
-			if v.State == ItemTorrentDownloading && t.ETA > 0 {
-				v.ETASeconds = t.ETA
-			}
-			if v.Size == 0 {
-				v.Size = t.TotalSize
-			}
-			if v.Title == "" {
-				v.Title = t.Name
-			}
-			v.Deletable, v.Reason = deletable(v, t.IsCompleted || t.Progress >= 1)
+			liveView(&v, t)
+			guardView(&v, t, g)
 		}
 		v.Version = versionLabel(s.parse(ctx, v.Title, ""))
 		out = append(out, v)
 	}
-	slices.SortStableFunc(out, func(a, b ItemTorrent) int {
+	sortTorrents(out, func(v ItemTorrent) ItemTorrent { return v })
+	return out, errs, nil
+}
+
+// torrentView 是一个关联的种子在读下载器以前知道的：站点、标题、季集、体积、下载器、H&R 要求。
+func torrentView(r *torrentRef, dlName string) ItemTorrent {
+	v := ItemTorrent{
+		Site: r.site, TorrentID: r.torrentID, Title: r.title, Season: r.season, Episodes: spanLabel(r.eps, r.whole), Size: r.size,
+		DownloaderID: r.downloaderID, Downloader: dlName, Hash: r.hash, HR: r.hr, HRHours: r.hrHours,
+	}
+	if v.HR && v.HRHours == 0 && r.site != "" {
+		_, def := siteHR(r.site)
+		v.HRHours = ptinternal.HRSeedTimeH(r.site, def, r.size)
+	}
+	return v
+}
+
+// liveView 按下载器里现在的样子填状态、进度、分享率与做种时长（标题与体积没记下时用下载器里的）。
+func liveView(v *ItemTorrent, t downloader.Torrent) {
+	v.State = liveState(t)
+	v.Percent = min(max(t.Progress, 0), 1) * 100
+	v.Ratio, v.SeedingSeconds = t.Ratio, t.SeedingTime
+	if v.State == ItemTorrentDownloading && t.ETA > 0 {
+		v.ETASeconds = t.ETA
+	}
+	if v.Size == 0 {
+		v.Size = t.TotalSize
+	}
+	if v.Title == "" {
+		v.Title = t.Name
+	}
+}
+
+// sortTorrents 按季、集、站点、标题排关联的种子（条目详情与删除预览一样）。
+func sortTorrents[T any](list []T, of func(T) ItemTorrent) {
+	slices.SortStableFunc(list, func(x, y T) int {
+		a, b := of(x), of(y)
 		return cmp.Or(cmp.Compare(seasonOrder(a.Season), seasonOrder(b.Season)), cmp.Compare(a.Episodes, b.Episodes),
 			cmp.Compare(strings.ToLower(a.Site), strings.ToLower(b.Site)), cmp.Compare(a.Title, b.Title))
 	})
-	return out, errs, nil
 }
 
 // liveState 是下载器里种子的状态：出错、暂停、下载中、做种。
@@ -749,22 +792,6 @@ func liveState(t downloader.Torrent) string {
 		return ItemTorrentDownloading
 	}
 	return ItemTorrentSeeding
-}
-
-// deletable 是能不能删（M3 只看两条）：没下完的受保护；有 H&R 要求的做种时间要做够（要求不明的受保护）。
-func deletable(v ItemTorrent, completed bool) (bool, string) {
-	switch {
-	case !completed:
-		return false, "受保护：下载中"
-	case v.HR && v.HRHours <= 0:
-		return false, "受保护：有 H&R，要求不明"
-	case v.HR:
-		if left := int64(v.HRHours)*3600 - v.SeedingSeconds; left > 0 {
-			return false, "H&R 还差 " + leftText(left)
-		}
-		return true, "H&R 已满足"
-	}
-	return true, "可以删"
 }
 
 // leftText 是还差多久：不到一天写小时（不足一小时按一小时），一天以上按天（四舍五入）。
@@ -892,9 +919,11 @@ type SeasonEpisode struct {
 	OpenURL    string     `json:"open_url,omitempty"`
 	// ServerIssue 是已入库、媒体服务器里却删了的问题（还开着的）
 	ServerIssue *EpisodeIssue `json:"server_issue,omitempty"`
+	// LibraryIssue 是已入库、库里的文件却不见了的问题（还开着的，见每天的巡检；Server 为空）
+	LibraryIssue *EpisodeIssue `json:"library_issue,omitempty"`
 }
 
-// EpisodeIssue 是一集的 server_removed 问题：编号（忽略时用）与哪台服务器。
+// EpisodeIssue 是一集的 server_removed 或 library_missing 问题：编号（忽略时用）与哪台服务器（库文件的问题没有）。
 type EpisodeIssue struct {
 	ID     uint   `json:"id"`
 	Server string `json:"server"`
@@ -999,7 +1028,49 @@ func (s *Service) SeasonItem(ctx context.Context, id, n int) (*SeasonDetail, err
 	if err := seasonServers(ctx, s.cfg.DB, id, n, out.Episodes); err != nil {
 		out.Errors = append(out.Errors, "媒体服务器的索引没读到："+err.Error())
 	}
+	if err := seasonMissing(ctx, s.cfg.DB, id, n, out.Episodes); err != nil {
+		out.Errors = append(out.Errors, "库文件的巡检结果没读到："+err.Error())
+	}
 	return out, nil
+}
+
+// seasonMissing 给已入库的集写「库里的文件不见了」（一个文件几集时每一集都写）。
+func seasonMissing(ctx context.Context, db *gorm.DB, id, n int, eps []SeasonEpisode) error {
+	issues, err := serverindex.ItemMissing(ctx, db, models.MediaKindTV, id)
+	if err != nil {
+		return err
+	}
+	var hids []uint
+	for _, is := range issues {
+		if is.Season == n {
+			hids = append(hids, is.HistoryID)
+		}
+	}
+	if len(hids) == 0 {
+		return nil
+	}
+	var rows []models.MediaTransferHistory
+	if err := db.WithContext(ctx).Select("id", "episode", "episode_end").Where("id IN ?", hids).Find(&rows).Error; err != nil {
+		return fmt.Errorf("读取整理记录失败: %w", err)
+	}
+	span := map[uint][2]int{}
+	for _, r := range rows {
+		span[r.ID] = [2]int{r.Episode, max(r.EpisodeEnd, r.Episode)}
+	}
+	for i := range eps {
+		e := &eps[i]
+		if e.State != models.MediaEpisodeLibrary {
+			continue
+		}
+		for _, is := range issues {
+			sp, ok := span[is.HistoryID]
+			if is.Season == n && ok && e.Episode >= sp[0] && e.Episode <= sp[1] {
+				e.LibraryIssue = &EpisodeIssue{ID: is.ID}
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // seasonServers 给已入库的集写媒体服务器里的打开链接（服务器里有这一集时）与服务器里删了的问题。

@@ -110,9 +110,13 @@ type Config struct {
 	Downloaders Downloaders
 	Library     Library
 	Organizer   Organizer
-	Notify      Notifier
-	Logger      *zap.SugaredLogger
-	Now         func() time.Time
+	// Deleter 是条目详情里「删除一部片」要用的整理入库的动作（生产环境是 *organize.Service）；Guard 是删种的保护规则
+	// （生产环境是 scheduler.SeedGuard）。为空时删除预览与执行回错误，条目详情里的种子一律当作受保护
+	Deleter LibraryDeleter
+	Guard   GuardFunc
+	Notify  Notifier
+	Logger  *zap.SugaredLogger
+	Now     func() time.Time
 	// Jitter 是主动搜索与豆瓣拉取的随机偏移（测试里换成固定的）
 	Jitter func(limit time.Duration) time.Duration
 	// HTTP 拉豆瓣用（为空时用带超时的默认客户端，走系统代理）

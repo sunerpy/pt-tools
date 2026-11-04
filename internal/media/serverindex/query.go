@@ -187,6 +187,32 @@ func ItemIssues(ctx context.Context, db *gorm.DB, mediaType string, tmdbID int) 
 	return out, nil
 }
 
+// ItemMissing 是一部电影或剧还开着的 library_missing 问题（库里的文件不见了，按季、集排）。
+func ItemMissing(ctx context.Context, db *gorm.DB, mediaType string, tmdbID int) ([]models.MediaIssue, error) {
+	out := []models.MediaIssue{}
+	if tmdbID <= 0 {
+		return out, nil
+	}
+	if err := db.WithContext(ctx).Where("kind = ? AND status = ? AND media_type = ? AND tmdb_id = ?", models.MediaIssueLibraryMissing, models.MediaIssueOpen, mediaType, tmdbID).
+		Order("season, episode, id").Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("读取问题失败: %w", err)
+	}
+	return out, nil
+}
+
+// OpenIssues 是一部电影或剧还开着的全部问题（服务器里删了的、库里的文件不见了的，按季、集排）。
+func OpenIssues(ctx context.Context, db *gorm.DB, mediaType string, tmdbID int) ([]models.MediaIssue, error) {
+	out := []models.MediaIssue{}
+	if tmdbID <= 0 {
+		return out, nil
+	}
+	if err := db.WithContext(ctx).Where("status = ? AND media_type = ? AND tmdb_id = ?", models.MediaIssueOpen, mediaType, tmdbID).
+		Order("season, episode, kind, id").Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("读取问题失败: %w", err)
+	}
+	return out, nil
+}
+
 // SeasonsOf 是一台服务器里一部剧有的各季与每季的集数（季号从小到大，特别篇第 0 季排最后）。
 func SeasonsOf(eps []Episode) [][2]int {
 	count := map[int]map[int]bool{}

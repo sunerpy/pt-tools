@@ -2,6 +2,7 @@ package serverindex
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -164,6 +165,114 @@ func TestIssueQueries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, open, 1)
 	assert.Equal(t, "e1", open[0].ServerItemID)
+}
+
+// 一部片还开着的问题：ItemMissing 只要 library_missing，OpenIssues 两种都要，都按季、集排；编号为 0 时什么也不给。
+func TestItemMissingAndOpenIssues(t *testing.T) {
+	db := newDB(t)
+	ctx := context.Background()
+	tv := func(s, e int) IssueInfo {
+		return IssueInfo{MediaType: models.MediaKindTV, TMDBID: 100088, Season: s, Episode: e}
+	}
+	require.NoError(t, Raise(db, MissingKey(3), tv(1, 5), t0))
+	require.NoError(t, Raise(db, MissingKey(2), tv(1, 2), t0))
+	require.NoError(t, Raise(db, removedKey(1, "e1"), tv(1, 1), t0))
+	require.NoError(t, Raise(db, MissingKey(4), tv(2, 1), t0))
+	require.NoError(t, Clear(db, MissingKey(4), "又有了", t0))
+	require.NoError(t, Raise(db, MissingKey(5), IssueInfo{MediaType: models.MediaKindMovie, TMDBID: 100088}, t0))
+
+	missing, err := ItemMissing(ctx, db, models.MediaKindTV, 100088)
+	require.NoError(t, err)
+	require.Len(t, missing, 2, "只要还开着的 library_missing；电影不算")
+	assert.Equal(t, [2]uint{2, 3}, [2]uint{missing[0].HistoryID, missing[1].HistoryID})
+
+	open, err := OpenIssues(ctx, db, models.MediaKindTV, 100088)
+	require.NoError(t, err)
+	require.Len(t, open, 3)
+	got := make([]string, 0, len(open))
+	for _, is := range open {
+		got = append(got, fmt.Sprintf("%s S%dE%d", is.Kind, is.Season, is.Episode))
+	}
+	assert.Equal(t, []string{"server_removed S1E1", "library_missing S1E2", "library_missing S1E5"}, got)
+
+	none, err := ItemMissing(ctx, db, models.MediaKindTV, 0)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+	none, err = OpenIssues(ctx, db, models.MediaKindTV, 0)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+
+	require.NoError(t, db.Migrator().DropTable(&models.MediaIssue{}))
+	_, err = ItemMissing(ctx, db, models.MediaKindTV, 100088)
+	require.ErrorContains(t, err, "读取问题失败")
+	_, err = OpenIssues(ctx, db, models.MediaKindTV, 100088)
+	require.ErrorContains(t, err, "读取问题失败")
+}
+
+// 删了整理记录以后：这一部开着、忽略了的 server_removed 对不上任何已整理记录的改成解决了。服务器里那一项有 pt-tools 的路径时按路径，
+// 没有时按编号与季集；索引里已经清掉了时按问题记的季集。别的片子、已经解决了的不动。
+func TestClearUnmatched(t *testing.T) {
+	db := newDB(t)
+	srv := newServer(t, db, nil)
+	gone := t0.Add(-time.Hour)
+	item := func(id string, season, ep int, local string) models.MediaServerItem {
+		return models.MediaServerItem{
+			ServerID: srv.ID, ItemID: id, Kind: models.MediaServerItemEpisode, TMDBID: 100088, Season: season,
+			Episode: ep, LocalPath: local, RemovedAt: &gone, SyncedAt: t0,
+		}
+	}
+	require.NoError(t, db.Create(&[]models.MediaServerItem{
+		item("p-ok", 1, 1, "/lib/E01.mkv"), item("p-gone", 1, 2, "/lib/E02.mkv"), item("id-ok", 1, 3, ""), item("id-gone", 1, 4, ""),
+		// 有路径时只按路径：这一集还有别的版本的记录（E03.mkv），对不上它的路径照样算没有
+		item("p-moved", 1, 3, "/lib/old/E03.mkv"),
+		{ServerID: srv.ID, ItemID: "m1", Kind: models.MediaServerItemMovie, TMDBID: 872585, RemovedAt: &gone, SyncedAt: t0},
+	}).Error)
+	require.NoError(t, db.Create(&[]models.MediaTransferHistory{
+		{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 1, Episode: 1, Status: models.MediaTransferDone, TargetPath: "/lib/E01.mkv", SourcePath: "/dl/E01.mkv"},
+		{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 1, Episode: 3, Status: models.MediaTransferDone, TargetPath: "/lib/E03.mkv", SourcePath: "/dl/E03.mkv"},
+		{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 1, Episode: 6, Status: models.MediaTransferDone, TargetPath: "/lib/E06.mkv", SourcePath: "/dl/E06.mkv"},
+		{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 1, Episode: 2, Status: models.MediaTransferRemoved, TargetPath: "/lib/E02.mkv", SourcePath: "/dl/E02.mkv"},
+	}).Error)
+	tv := func(e int) IssueInfo {
+		return IssueInfo{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 1, Episode: e}
+	}
+	for id, ep := range map[string]int{"p-ok": 1, "p-gone": 2, "p-moved": 3, "id-ok": 3, "id-gone": 4, "idx-ok": 6, "idx-gone": 7} {
+		require.NoError(t, Raise(db, removedKey(srv.ID, id), tv(ep), t0))
+	}
+	_, err := Dismiss(context.Background(), db, mustIssueID(t, db, "p-gone"), t0)
+	require.NoError(t, err)
+	require.NoError(t, Raise(db, removedKey(srv.ID, "m1"), IssueInfo{MediaType: models.MediaKindMovie, TMDBID: 872585}, t0))
+
+	require.NoError(t, ClearUnmatched(db, models.MediaKindTV, 100088, "记录删了", t0.Add(time.Minute)))
+	status := map[string]string{}
+	var list []models.MediaIssue
+	require.NoError(t, db.Find(&list).Error)
+	for _, is := range list {
+		status[is.ServerItemID] = is.Status
+	}
+	assert.Equal(t, map[string]string{
+		"p-ok": models.MediaIssueOpen, "p-gone": models.MediaIssueResolved, "p-moved": models.MediaIssueResolved,
+		"id-ok": models.MediaIssueOpen, "id-gone": models.MediaIssueResolved,
+		"idx-ok": models.MediaIssueOpen, "idx-gone": models.MediaIssueResolved, "m1": models.MediaIssueOpen,
+	}, status, "按路径、按编号、按问题记的季集；忽略的也改；别的片子不动")
+	var cleared models.MediaIssue
+	require.NoError(t, db.Where("server_item_id = ?", "id-gone").First(&cleared).Error)
+	assert.Equal(t, "记录删了", cleared.Detail)
+
+	require.NoError(t, ClearUnmatched(db, models.MediaKindTV, 0, "x", t0), "没有编号时什么也不做")
+	require.NoError(t, db.Migrator().DropTable(&models.MediaTransferHistory{}))
+	require.ErrorContains(t, ClearUnmatched(db, models.MediaKindTV, 100088, "x", t0), "读取整理记录失败")
+	require.NoError(t, db.Migrator().DropTable(&models.MediaServerItem{}))
+	require.ErrorContains(t, ClearUnmatched(db, models.MediaKindTV, 100088, "x", t0), "读取索引失败")
+	require.NoError(t, db.Migrator().DropTable(&models.MediaIssue{}))
+	require.ErrorContains(t, ClearUnmatched(db, models.MediaKindTV, 100088, "x", t0), "读取问题失败")
+}
+
+func mustIssueID(t *testing.T, db *gorm.DB, itemID string) uint {
+	t.Helper()
+	var is models.MediaIssue
+	require.NoError(t, db.Where("server_item_id = ?", itemID).First(&is).Error)
+	return is.ID
 }
 
 func TestQueriesReportDBErrors(t *testing.T) {
