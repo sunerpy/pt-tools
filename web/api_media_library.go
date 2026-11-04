@@ -10,6 +10,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/server"
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 )
@@ -64,6 +65,7 @@ func (s *Server) registerOrganizeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/media/import/scans/{id}", s.auth(s.apiImportScanDelete))
 	mux.HandleFunc("PUT /api/media/import/scans/{id}/item", s.auth(s.apiImportScanItem))
 	mux.HandleFunc("POST /api/media/import/scans/{id}/import", s.auth(s.apiImportScanImport))
+	s.registerMediaServerRoutes(mux)
 }
 
 func (s *Server) organizeService(w http.ResponseWriter) (*organize.Service, bool) {
@@ -78,13 +80,14 @@ func writeOrganizeError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch {
 	case errors.Is(err, organize.ErrInvalid), errors.Is(err, server.ErrBadConfig), errors.Is(err, server.ErrUnauthorized),
+		errors.Is(err, server.ErrUnsupported), errors.Is(err, server.ErrBadWebhook), errors.Is(err, serverindex.ErrTooMany),
 		errors.Is(err, tmdb.ErrNoKey), errors.Is(err, tmdb.ErrUnauthorized):
 		status = http.StatusBadRequest
 	case errors.Is(err, organize.ErrNotFound), errors.Is(err, tmdb.ErrNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, organize.ErrForbidden):
 		status = http.StatusForbidden
-	case errors.Is(err, tmdb.ErrRateLimited):
+	case errors.Is(err, tmdb.ErrRateLimited), errors.Is(err, organize.ErrRateLimited):
 		status = http.StatusTooManyRequests
 	case errors.Is(err, context.DeadlineExceeded):
 		status = http.StatusGatewayTimeout

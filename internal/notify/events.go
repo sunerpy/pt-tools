@@ -18,6 +18,7 @@ const (
 	EventFollowFailed        = "media.followshow.failed"
 	EventMediaOrganized      = "media.organized"
 	EventCalendarToday       = "media.calendar.today"
+	EventMediaPlayback       = "media.playback"
 	EventLoginExpiring       = "site.login_expiring"
 	EventProbeFailed         = "site.probe_failed"
 	EventProbeRecovered      = "site.probe_recovered"
@@ -254,6 +255,23 @@ var notifyEvents = []EventSpec{
 		},
 		SampleTitle: "📺 今日更新 2026-11-03",
 		SampleText:  "今天播出 2 集：\n· 最后生还者 (2023) 第 2 季 E03「路」 21:30 · 还没播\n· 现在就出发 (2023) 第 4 季 E05「第 3 期上」 · 缺",
+	},
+	{
+		Type: EventMediaPlayback, Name: "媒体服务器播放", Desc: "媒体服务器的 Webhook 报来开始播放或停止播放（每台服务器单独选通道，默认不发）",
+		Vars: []Var{
+			{Key: "server", Type: VarString, Desc: "媒体服务器的名字", Sample: "Jellyfin"},
+			{Key: "user", Type: VarString, Desc: "谁在看", Sample: "admin"},
+			{Key: "action", Type: VarString, Desc: "start（开始播放）或 stop（停止播放）", Sample: "start"},
+			{Key: "action_label", Type: VarString, Desc: "开始播放或停止播放", Sample: "开始播放"},
+			{Key: "name", Type: VarString, Desc: "片名（电影带年份，剧集带季集与集名）", Sample: "最后生还者 S01E01「当你迷失在黑暗中」"},
+			{Key: "media_type", Type: VarString, Desc: "movie、tv，别的是空串", Sample: "tv"},
+			{Key: "season", Type: VarInt, Desc: "季（电影是 0）", Sample: int64(1)},
+			{Key: "episode", Type: VarInt, Desc: "集（电影是 0）", Sample: int64(1)},
+			{Key: "device", Type: VarString, Desc: "设备", Sample: "Living Room TV"},
+			{Key: "client", Type: VarString, Desc: "客户端", Sample: "Jellyfin Web"},
+		},
+		SampleTitle: "▶️ 开始播放：最后生还者 S01E01「当你迷失在黑暗中」",
+		SampleText:  "Jellyfin · admin · Living Room TV（Jellyfin Web）",
 	},
 	{
 		Type: EventLoginExpiring, Name: "站点即将被封号", Desc: "站点很久没有活跃，快到封号期限",

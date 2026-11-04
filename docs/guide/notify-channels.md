@@ -107,6 +107,7 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 | `media.calendar.today` 今日更新                     | `day`、`count`（几项）、`in_library`（其中已入库的），`items`（每项 `title`、`media_type`、`season`、`episode`、`name`、`air_time`、`state`、`state_label`）    |
 | `subscribe.douban_failed` 豆瓣想看拉取失败          | `source`、`fails`、`error`                                                                                                                                      |
 | `media.organized` 入库                              | `name`、`media_type`、`episodes`、`files`、`quality`、`library`、`torrent`、`poster`                                                                            |
+| `media.playback` 媒体服务器播放                     | `server`、`user`、`action`（`start`、`stop`）、`action_label`、`name`（片名，剧集带季集与集名）、`media_type`、`season`、`episode`、`device`、`client`          |
 | `site.login_expiring` 站点即将被封号                | `site`、`tier`、`days_remaining`、`last_active`、`days_since_active`、`access_stale`                                                                            |
 | `site.probe_failed` 站点探测失败                    | `site`、`status`、`status_label`、`since`、`advice`、`diagnosis`                                                                                                |
 | `site.probe_recovered` 站点探测恢复                 | `site`、`probed_at`                                                                                                                                             |

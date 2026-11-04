@@ -3617,15 +3617,123 @@ export interface MediaServerInput {
   refresh_mode: MediaRefreshMode;
   local_prefix: string;
   server_prefix: string;
+  /* 下面几项不传时不改（新建时用默认值） */
+  /** 打开链接用的地址（浏览器能打开的那个）；空串用上面的地址 */
+  play_url?: string;
+  /** 索引多久同步一次（小时，最多 168）；0 关掉索引。新建时 6 */
+  index_hours?: number;
+  /** 追剧时把这台服务器里有的集算作已入库 */
+  count_library?: boolean;
+  /** 继续观看用的用户（Emby、Jellyfin）；空串不取继续观看 */
+  resume_user_id?: string;
+  resume_user_name?: string;
+  /** 播放通知发往的通道；空的不发 */
+  playback_channels?: number[];
 }
 
-export interface MediaServer extends Omit<MediaServerInput, "token"> {
+export interface MediaServer extends Required<Omit<MediaServerInput, "token">> {
   id: number;
   has_token: boolean;
   last_error: string;
   last_refresh_at?: string;
+  /** 上一次同步成功的时间；index_error 是最近一次同步失败的原因（成功时清空） */
+  indexed_at?: string;
+  index_error: string;
+  index_movies: number;
+  index_series: number;
+  index_episodes: number;
+  /** 开了 Webhook；webhook_at、webhook_event 是最近一次收到的时间与事件 */
+  webhook: boolean;
+  webhook_at?: string;
+  webhook_event: string;
   created_at: string;
   updated_at: string;
+}
+
+/** 同步一次索引的结果（POST /api/media/servers/{id}/sync） */
+export interface MediaServerSyncResult {
+  movies: number;
+  series: number;
+  episodes: number;
+  added: number;
+  updated: number;
+  removed: number;
+  restored: number;
+  purged: number;
+  issues: number;
+  /** 同步的时候服务器里的条目变了：这一次没有标删除 */
+  partial?: boolean;
+  /** 换了一台服务器：清掉了旧的索引 */
+  reset?: boolean;
+}
+
+export interface MediaServerUser {
+  id: string;
+  name: string;
+}
+
+/** 生成的 Webhook 令牌：只在这一次给；path 前面加上媒体服务器访问得到的 pt-tools 地址 */
+export interface MediaServerWebhookToken {
+  token: string;
+  path: string;
+}
+
+/** 继续观看的一项（GET /api/media/resume）；剧集的 title 是剧名 */
+export interface MediaResumeItem {
+  server_id: number;
+  item_id: string;
+  media_type: string;
+  tmdb_id?: number;
+  title: string;
+  season?: number;
+  episode?: number;
+  episode_name?: string;
+  still_path?: string;
+  backdrop_path?: string;
+  poster_path?: string;
+  percent: number;
+  remaining_seconds?: number;
+  open_url?: string;
+}
+
+/** 一台服务器的继续观看；error 是这一台没取到的原因 */
+export interface MediaResumeGroup {
+  server_id: number;
+  name: string;
+  kind: MediaServerKind;
+  user: string;
+  items: MediaResumeItem[];
+  error?: string;
+}
+
+export type MediaIssueKind = "server_removed" | "library_missing";
+export type MediaIssueStatus = "open" | "resolved" | "dismissed";
+
+/** 待处理问题：server_removed 是 pt-tools 整理过的片子在媒体服务器里没了 */
+export interface MediaIssue {
+  id: number;
+  kind: MediaIssueKind;
+  status: MediaIssueStatus;
+  server_id: number;
+  server_name?: string;
+  server_item_id: string;
+  history_id: number;
+  media_type: MediaKind;
+  tmdb_id: number;
+  season: number;
+  episode: number;
+  title: string;
+  detail: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string;
+}
+
+export interface MediaIssueQuery {
+  status?: MediaIssueStatus;
+  kind?: MediaIssueKind;
+  media_type?: MediaKind;
+  tmdb_id?: number;
 }
 
 export interface MediaServerInfo {
@@ -3967,6 +4075,23 @@ export const organizeApi = {
   deleteServer: (id: number) => api.delete<{ ok: boolean }>(`/api/media/servers/${id}`),
   testServer: (data: { id?: number; kind: MediaServerKind; url: string; token?: string }) =>
     api.post<MediaServerInfo>("/api/media/servers/test", data),
+  /** 马上同步这台服务器的索引，等同步做完（大的库要几分钟） */
+  syncServer: (id: number) => api.post<MediaServerSyncResult>(`/api/media/servers/${id}/sync`),
+  /** 服务器的用户（选继续观看的用户；请求同测试连接） */
+  serverUsers: (data: { id?: number; kind: MediaServerKind; url: string; token?: string }) =>
+    api.post<MediaServerUser[]>("/api/media/servers/users", data),
+  /** 生成（或重新生成）Webhook 令牌：原来的作废 */
+  createWebhook: (id: number) =>
+    api.post<MediaServerWebhookToken>(`/api/media/servers/${id}/webhook`),
+  deleteWebhook: (id: number) => api.delete<{ ok: boolean }>(`/api/media/servers/${id}/webhook`),
+  resume: () => api.get<{ servers: MediaResumeGroup[] }>("/api/media/resume"),
+  issues: (q: MediaIssueQuery = {}) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") p.set(k, String(v));
+    const qs = p.toString();
+    return api.get<{ items: MediaIssue[] }>(`/api/media/issues${qs ? `?${qs}` : ""}`);
+  },
+  dismissIssue: (id: number) => api.post<MediaIssue>(`/api/media/issues/${id}/dismiss`),
   history: (q: MediaHistoryQuery = {}) =>
     api.get<MediaHistoryPage>(`/api/media/history${historyParams(q)}`),
   /** 按条目分组（组的条件不看） */
@@ -4156,8 +4281,8 @@ export interface SubscriptionEpisode {
   name?: string;
   air_date?: string;
   state: EpisodeStateKind;
-  /** 状态从哪里来：媒体库、订阅推送的种子、下载器里已有的种子 */
-  source?: "library" | "subscription" | "downloader";
+  /** 状态从哪里来：媒体库、订阅推送的种子、下载器里已有的种子、媒体服务器里有（开了「算作已入库」的服务器） */
+  source?: "library" | "subscription" | "downloader" | "server";
   /** 现在的版本（制作组与分辨率） */
   version?: string;
   manual_skip?: boolean;
@@ -4675,7 +4800,22 @@ export interface ItemDetail {
   subscriptions: ItemSubscription[];
   torrents: ItemTorrent[];
   recommendations: ExploreItem[];
+  /** 开着、同步过索引的媒体服务器里有没有这一部（按服务器编号排） */
+  servers?: ItemServer[];
   errors: string[];
+}
+
+/** 一台媒体服务器里的这一部：剧集写有几集与各季；removed 是 pt-tools 整理过、服务器里没了的（还没处理） */
+export interface ItemServer {
+  server_id: number;
+  name: string;
+  kind: MediaServerKind;
+  synced_at?: string;
+  have: boolean;
+  episodes?: number;
+  seasons?: { n: number; have: number; total: number }[];
+  open_url?: string;
+  removed: { id: number; season?: number; episode?: number }[];
 }
 
 /** 剧集一季里的一集 */
@@ -4695,6 +4835,13 @@ export interface SeasonEpisode {
   /** 下载中的：进度与还要多久 */
   percent?: number;
   eta_seconds?: number;
+  /** 整理记录里没有、算作已入库的媒体服务器里有：source 是 server，server 是服务器名 */
+  source?: "server";
+  server?: string;
+  /** 已入库、媒体服务器里有这一集时的打开链接 */
+  open_url?: string;
+  /** 已入库、媒体服务器里被删了（还没处理的问题） */
+  server_issue?: { id: number; server: string };
 }
 
 /** 剧集的一季（GET /api/media/items/tv/{tmdb_id}/seasons/{n}） */

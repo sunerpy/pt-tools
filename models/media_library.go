@@ -97,6 +97,7 @@ const (
 
 // MediaServer 是整理完后要通知的媒体服务器。Token（Emby、Jellyfin 的 API Key 或 Plex 的 Token）加密保存、只写不读。
 // LocalPrefix → ServerPrefix 把 pt-tools 里的路径换成媒体服务器里看到的路径，两边一样时都留空。
+// 索引（见 internal/media/serverindex）按 IndexHours 定期把服务器里的电影、剧与集记进 media_server_items。
 type MediaServer struct {
 	ID             uint       `gorm:"primaryKey" json:"id"`
 	Name           string     `gorm:"size:64;not null;default:'';uniqueIndex" json:"name"`
@@ -109,8 +110,33 @@ type MediaServer struct {
 	ServerPrefix   string     `gorm:"size:512;not null;default:''" json:"server_prefix"`
 	LastError      string     `gorm:"size:1024;not null;default:''" json:"last_error"`
 	LastRefreshAt  *time.Time `json:"last_refresh_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// PlayURL 是打开链接用的地址（浏览器能打开的那个）；空串用 URL
+	PlayURL string `gorm:"size:512;not null;default:''" json:"play_url"`
+	// ServerUID 是服务器自己的编号（Emby、Jellyfin 的 Id，Plex 的 machineIdentifier）：拼打开链接，认出换了一台服务器
+	ServerUID string `gorm:"column:server_uid;size:64;not null;default:''" json:"-"`
+	// IndexOff 为真时不同步索引（默认同步，存反过来的，零值就是开）；IndexHours 是同步间隔（小时），0 用默认值
+	IndexOff   bool `gorm:"not null;default:false" json:"-"`
+	IndexHours int  `gorm:"not null;default:0" json:"-"`
+	// IndexedAt 是上一次同步成功的时间，IndexError 是最近一次同步失败的原因（成功时清空），后面三个是同步到的条目数
+	IndexedAt     *time.Time `json:"indexed_at,omitempty"`
+	IndexError    string     `gorm:"size:1024;not null;default:''" json:"index_error"`
+	IndexMovies   int        `gorm:"not null;default:0" json:"index_movies"`
+	IndexSeries   int        `gorm:"not null;default:0" json:"index_series"`
+	IndexEpisodes int        `gorm:"not null;default:0" json:"index_episodes"`
+	// CountLibrary 为真时追剧把这台服务器里有的集算作已入库（整理记录里没有的也算）
+	CountLibrary bool `gorm:"not null;default:false" json:"count_library"`
+	// ResumeUserID、ResumeUserName 是继续观看用的用户（Emby、Jellyfin）；空串不取继续观看
+	ResumeUserID   string `gorm:"size:64;not null;default:''" json:"resume_user_id"`
+	ResumeUserName string `gorm:"size:128;not null;default:''" json:"resume_user_name"`
+	// WebhookTokenHash 是 Webhook 令牌的 SHA-256（十六进制，令牌本身不存）；空串没开 Webhook。
+	// WebhookAt、WebhookEvent 是最近一次收到的时间与事件
+	WebhookTokenHash string     `gorm:"size:64;not null;default:''" json:"-"`
+	WebhookAt        *time.Time `json:"webhook_at,omitempty"`
+	WebhookEvent     string     `gorm:"size:64;not null;default:''" json:"webhook_event"`
+	// PlaybackChannels 是播放通知发往的通道 ID（JSON 数组）；空的不发
+	PlaybackChannels string    `gorm:"type:text;not null;default:''" json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func (MediaServer) TableName() string { return "media_servers" }

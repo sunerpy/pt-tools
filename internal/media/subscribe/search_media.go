@@ -15,6 +15,7 @@ import (
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -498,6 +499,8 @@ type episodeState struct {
 	MediaSearchEpisode
 	lib *models.MediaTransferHistory
 	dl  dlRef
+	// server 是算作已入库的集在哪台媒体服务器里（整理记录里没有、开了「算作已入库」的服务器里有）
+	server *serverindex.SeasonHit
 }
 
 // episodeStates 是这一季每集现在的情况，只读库：整理记录里已入库的；订阅的种子与带这个条目、还没下完的推送记录在下载的；
@@ -507,6 +510,7 @@ func (s *Service) episodeStates(ctx context.Context, sub *models.MediaSubscripti
 	if err != nil {
 		return nil, err
 	}
+	onServer := s.countedEpisodes(ctx, sub)
 	type downloading struct {
 		site string
 		ref  dlRef
@@ -570,11 +574,15 @@ func (s *Service) episodeStates(ctx context.Context, sub *models.MediaSubscripti
 		aired := e.AirDate != "" && e.AirDate <= today
 		d, isDown := down[n]
 		h, inLib := lib[n]
+		hit, inServer := onServer[n]
 		st := episodeState{}
 		switch {
 		case inLib:
 			e.State = models.MediaEpisodeLibrary
 			st.lib = &h
+		case inServer:
+			e.State = models.MediaEpisodeLibrary
+			st.server = &hit
 		case isDown:
 			e.State, e.Site = models.MediaEpisodeDownloading, d.site
 			st.dl = d.ref

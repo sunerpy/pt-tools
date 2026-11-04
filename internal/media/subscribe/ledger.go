@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/media/cachectl"
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -126,6 +127,20 @@ func (s *Service) libraryRows(ctx context.Context, sub *models.MediaSubscription
 		}
 	}
 	return out, nil
+}
+
+// countedEpisodes 是开了「算作已入库」的媒体服务器里这一季有的集（集号 → 第一台有它的服务器与条目）。读不到索引时当作
+// 没有（记日志），不挡台账。
+func (s *Service) countedEpisodes(ctx context.Context, sub *models.MediaSubscription) map[int]serverindex.SeasonHit {
+	if sub.MediaType != models.MediaKindTV {
+		return nil
+	}
+	hits, err := serverindex.SeasonEpisodes(ctx, s.cfg.DB, sub.TMDBID, sub.Season, true)
+	if err != nil {
+		s.cfg.Logger.Debugf("[订阅] 读取媒体服务器的索引失败（这一轮不算服务器里的集）: %v", err)
+		return nil
+	}
+	return hits
 }
 
 // covered 是订阅的一个种子里有的集：整季包推送以后核对过文件列表的按核对的，否则按记下的集数（整季是全部）。
@@ -396,6 +411,7 @@ func (s *Service) rebuildLedger(ctx context.Context, sub *models.MediaSubscripti
 	if err != nil {
 		return nil, err
 	}
+	onServer := s.countedEpisodes(ctx, sub)
 	linked, err := s.torrents(ctx, sub.ID)
 	if err != nil {
 		return nil, err
@@ -413,7 +429,8 @@ func (s *Service) rebuildLedger(ctx context.Context, sub *models.MediaSubscripti
 	if opt.adopt && sub.Status == models.MediaSubActive && s.cfg.Downloaders != nil {
 		need := func(n int) bool {
 			_, in := lib[n]
-			return required(n) && !in && downloadingAt(n) == nil
+			_, srv := onServer[n]
+			return required(n) && !in && !srv && downloadingAt(n) == nil
 		}
 		adopted, aerr := s.adopt(ctx, sub, opt.set, s.mapperFor(ctx, sub, season), need, linked)
 		if aerr != nil {
@@ -439,6 +456,7 @@ func (s *Service) rebuildLedger(ctx context.Context, sub *models.MediaSubscripti
 		r.Source, r.Ref, r.VersionGroup, r.VersionResolution = "", "", "", ""
 		aired := r.AirDate != "" && r.AirDate <= today
 		h, inLib := lib[n]
+		hit, inServer := onServer[n]
 		t := downloadingAt(n)
 		switch {
 		case inLib:
@@ -449,6 +467,9 @@ func (s *Service) rebuildLedger(ctx context.Context, sub *models.MediaSubscripti
 			}
 			m := s.parse(ctx, title, "")
 			r.VersionGroup, r.VersionResolution = truncate(m.Group, 64), m.Resolution
+		case inServer:
+			// 整理记录里没有、开了「算作已入库」的媒体服务器里有：版本不知道
+			r.State, r.Source, r.Ref = models.MediaEpisodeLibrary, models.MediaEpisodeFromServer, truncate(serverindex.Ref(hit), 64)
 		case t != nil:
 			r.State, r.Source, r.Ref = models.MediaEpisodeDownloading, models.MediaEpisodeFromSubscription, strconv.FormatUint(uint64(t.ID), 10)
 			if t.Adopted && strings.HasPrefix(t.SiteName, models.MediaAdoptedSitePrefix) {

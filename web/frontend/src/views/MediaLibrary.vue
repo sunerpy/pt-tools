@@ -15,6 +15,7 @@ import {
   type MediaPathMapInput,
   type MediaServer,
   type MediaServerInput,
+  type MediaServerUser,
   type MediaWatchDir,
   type MediaWatchDirInput,
   type NotificationConfig,
@@ -57,7 +58,9 @@ import {
   mediaKindLabel,
   modeLabel,
   scrapeItemsFor,
+  serverIndexView,
   serverKindLabel,
+  syncResultText,
   templatePresets,
   tmdbSources,
 } from "@/utils/media";
@@ -684,7 +687,7 @@ const serverDialog = ref(false);
 const serverSaving = ref(false);
 const serverTesting = ref(false);
 const editingServer = ref<MediaServer | null>(null);
-const serverForm = ref<MediaServerInput & { token: string }>({
+const blankServer = (): Required<MediaServerInput> => ({
   name: "",
   kind: "emby",
   url: "",
@@ -693,17 +696,48 @@ const serverForm = ref<MediaServerInput & { token: string }>({
   refresh_mode: "path",
   local_prefix: "",
   server_prefix: "",
+  play_url: "",
+  index_hours: 6,
+  count_library: false,
+  resume_user_id: "",
+  resume_user_name: "",
+  playback_channels: [],
 });
+const serverForm = ref<Required<MediaServerInput>>(blankServer());
+/** 每台服务器继续观看的条数（选了用户的 Emby、Jellyfin）；没取到的不写 */
+const resumeCounts = ref<Record<number, number>>({});
 
 async function loadServers() {
   const pending = serversDS.run(() => organizeApi.servers());
   const data = await pending;
   if (serversDS.isStale(pending) || !data) return;
   servers.value = data;
+  if (editingServer.value)
+    editingServer.value = data.find((x) => x.id === editingServer.value?.id) ?? editingServer.value;
+  void loadResumeCounts(data);
+}
+
+async function loadResumeCounts(list: MediaServer[]) {
+  if (!list.some((x) => x.enabled && x.kind !== "plex" && x.resume_user_id)) {
+    resumeCounts.value = {};
+    return;
+  }
+  try {
+    const { servers: groups } = await organizeApi.resume();
+    resumeCounts.value = Object.fromEntries(
+      groups.filter((g) => !g.error).map((g) => [g.server_id, g.items.length]),
+    );
+  } catch {
+    resumeCounts.value = {};
+  }
 }
 
 function openServer(s?: MediaServer) {
   editingServer.value = s ?? null;
+  webhookURL.value = "";
+  serverUsers.value = s?.resume_user_id
+    ? [{ id: s.resume_user_id, name: s.resume_user_name || s.resume_user_id }]
+    : [];
   serverForm.value = s
     ? {
         name: s.name,
@@ -714,31 +748,137 @@ function openServer(s?: MediaServer) {
         refresh_mode: s.refresh_mode || "path",
         local_prefix: s.local_prefix,
         server_prefix: s.server_prefix,
+        play_url: s.play_url,
+        index_hours: s.index_hours,
+        count_library: s.count_library,
+        resume_user_id: s.resume_user_id,
+        resume_user_name: s.resume_user_name,
+        playback_channels: [...s.playback_channels],
       }
-    : {
-        name: "",
-        kind: "emby",
-        url: "",
-        token: "",
-        enabled: true,
-        refresh_mode: "path",
-        local_prefix: "",
-        server_prefix: "",
-      };
+    : blankServer();
   serverDialog.value = true;
 }
 
 function serverBody(): MediaServerInput {
   const { token, ...rest } = serverForm.value;
+  const plex = rest.kind === "plex";
   const body: MediaServerInput = {
     ...rest,
     name: rest.name.trim(),
     url: rest.url.trim(),
     local_prefix: rest.local_prefix.trim(),
     server_prefix: rest.server_prefix.trim(),
+    play_url: rest.play_url.trim(),
+    // Plex 没有继续观看
+    resume_user_id: plex ? "" : rest.resume_user_id,
+    resume_user_name: plex ? "" : rest.resume_user_name,
   };
   if (token.trim()) body.token = token.trim();
   return body;
+}
+
+// 继续观看的用户：从服务器读（请求同测试连接）
+const serverUsers = ref<MediaServerUser[]>([]);
+const usersLoading = ref(false);
+async function loadServerUsers() {
+  const f = serverForm.value;
+  if (!f.url.trim()) {
+    ElMessage.warning("先填地址");
+    return;
+  }
+  usersLoading.value = true;
+  try {
+    serverUsers.value = await organizeApi.serverUsers({
+      id: editingServer.value?.id,
+      kind: f.kind,
+      url: f.url.trim(),
+      token: f.token.trim() || undefined,
+    });
+    if (!serverUsers.value.length) ElMessage.info("服务器上没有用户");
+  } catch (e) {
+    ElMessage.error(errText(e, "读取用户失败"));
+  } finally {
+    usersLoading.value = false;
+  }
+}
+function pickResumeUser(id: string) {
+  serverForm.value.resume_user_id = id || "";
+  serverForm.value.resume_user_name = serverUsers.value.find((u) => u.id === id)?.name ?? "";
+}
+
+// Webhook：令牌只在生成的这一次给，地址显示在弹窗里
+const webhookURL = ref("");
+const webhookBusy = ref(false);
+async function createWebhook() {
+  const s = editingServer.value;
+  if (!s) return;
+  if (s.webhook) {
+    try {
+      await ElMessageBox.confirm(
+        "重新生成以后，原来的地址马上作废，要在媒体服务器里换成新的地址。",
+        "重新生成 Webhook 地址",
+        { type: "warning", confirmButtonText: "重新生成", cancelButtonText: "取消" },
+      );
+    } catch {
+      return;
+    }
+  }
+  webhookBusy.value = true;
+  try {
+    const got = await organizeApi.createWebhook(s.id);
+    webhookURL.value = `${window.location.origin}${got.path}`;
+    await loadServers();
+  } catch (e) {
+    ElMessage.error(errText(e, "生成失败"));
+  } finally {
+    webhookBusy.value = false;
+  }
+}
+async function deleteWebhook() {
+  const s = editingServer.value;
+  if (!s) return;
+  try {
+    await ElMessageBox.confirm("关掉以后媒体服务器发来的 Webhook 一律不认。", "关掉 Webhook", {
+      type: "warning",
+      confirmButtonText: "关掉",
+      cancelButtonText: "取消",
+    });
+  } catch {
+    return;
+  }
+  webhookBusy.value = true;
+  try {
+    await organizeApi.deleteWebhook(s.id);
+    webhookURL.value = "";
+    ElMessage.success("已关掉 Webhook");
+    await loadServers();
+  } catch (e) {
+    ElMessage.error(errText(e, "关掉失败"));
+  } finally {
+    webhookBusy.value = false;
+  }
+}
+async function copyWebhook() {
+  try {
+    await navigator.clipboard.writeText(webhookURL.value);
+    ElMessage.success("已复制");
+  } catch {
+    ElMessage.warning("没能复制，请手动选中复制");
+  }
+}
+
+// 马上同步索引：等同步做完（大的库要几分钟）
+const syncingServer = ref(0);
+async function syncServer(s: MediaServer) {
+  syncingServer.value = s.id;
+  try {
+    ElMessage.success(syncResultText(await organizeApi.syncServer(s.id)));
+  } catch (e) {
+    ElMessage.error(errText(e, "同步失败"));
+  } finally {
+    syncingServer.value = 0;
+    await loadServers();
+  }
 }
 
 async function saveServer() {
@@ -1398,7 +1538,8 @@ onMounted(refresh);
           @action="openServer()">
           <p class="ml-tip ml-tip--top">
             整理完通知 Emby、Jellyfin 或 Plex 扫描新目录。媒体服务器看到的路径与 pt-tools
-            不同时，填上两边的路径前缀。
+            不同时，填上两边的路径前缀。索引定期记下服务器里有哪些电影与剧集：条目详情写服务器里有没有、能直接播放，pt-tools
+            整理过的片子在服务器里没了时提示。
           </p>
           <div
             v-if="servers.length && serversDS.error.value"
@@ -1429,16 +1570,16 @@ onMounted(refresh);
             </el-table-column>
             <el-table-column
               label="地址"
-              min-width="200"
+              min-width="140"
               prop="url"
               class-name="pt-cell-1line"
               show-overflow-tooltip />
-            <el-table-column label="刷新" width="150">
+            <el-table-column label="刷新" width="136">
               <template #default="{ row }">{{ refreshText(row.refresh_mode) }}</template>
             </el-table-column>
             <el-table-column
               label="最近一次"
-              min-width="160"
+              min-width="150"
               class-name="pt-cell-1line"
               show-overflow-tooltip>
               <template #default="{ row }">
@@ -1454,6 +1595,22 @@ onMounted(refresh);
                 >
               </template>
             </el-table-column>
+            <el-table-column label="索引" min-width="160" class-name="pt-cell-1line">
+              <template #default="{ row }">
+                <el-tooltip
+                  :content="serverIndexView(row, resumeCounts[row.id]).tip"
+                  placement="top">
+                  <span class="ml-index" :data-testid="`ml-server-index-${row.id}`">
+                    <PtStatusPill :tone="serverIndexView(row).tone" size="sm">{{
+                      serverIndexView(row).label
+                    }}</PtStatusPill>
+                    <span class="ml-sub">{{
+                      serverIndexView(row, resumeCounts[row.id]).text
+                    }}</span>
+                  </span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
             <el-table-column label="启用" width="76">
               <template #default="{ row }">
                 <el-switch
@@ -1465,7 +1622,8 @@ onMounted(refresh);
                   " />
               </template>
             </el-table-column>
-            <el-table-column label="" width="160" align="right">
+            <!-- 列多（加了索引）：窄的窗口里表格横着滚，操作列钉在右边，测试、同步、编辑、删除一直看得到 -->
+            <el-table-column label="" width="200" align="right" fixed="right">
               <template #default="{ row }">
                 <el-button
                   link
@@ -1473,6 +1631,14 @@ onMounted(refresh);
                   :data-testid="`ml-server-test-${row.id}`"
                   @click="testServer(row)"
                   >测试</el-button
+                >
+                <el-button
+                  link
+                  :loading="syncingServer === row.id"
+                  :disabled="!row.enabled || row.index_hours === 0"
+                  :data-testid="`ml-server-sync-${row.id}`"
+                  @click="syncServer(row)"
+                  >同步</el-button
                 >
                 <el-button link :data-testid="`ml-server-edit-${row.id}`" @click="openServer(row)"
                   >编辑</el-button
@@ -1494,6 +1660,14 @@ onMounted(refresh);
                 <span>{{ serverKindLabel(s.kind) }} · {{ refreshText(s.refresh_mode) }}</span>
                 <span class="ml-full">{{ s.url }}</span>
                 <span v-if="s.last_error" class="ml-full ml-err">{{ s.last_error }}</span>
+                <span
+                  class="ml-full"
+                  :class="{ 'ml-err': serverIndexView(s).tone === 'dang' }"
+                  :data-testid="`ml-server-index-${s.id}`"
+                  >索引{{ serverIndexView(s).label }}：{{
+                    serverIndexView(s, resumeCounts[s.id]).text
+                  }}</span
+                >
               </template>
               <template #status>
                 <el-switch
@@ -1506,6 +1680,13 @@ onMounted(refresh);
               <template #actions>
                 <el-button size="small" :loading="serverTesting" @click="testServer(s)"
                   >测试</el-button
+                >
+                <el-button
+                  size="small"
+                  :loading="syncingServer === s.id"
+                  :disabled="!s.enabled || s.index_hours === 0"
+                  @click="syncServer(s)"
+                  >同步</el-button
                 >
                 <el-button size="small" @click="openServer(s)">编辑</el-button>
                 <el-button size="small" type="danger" plain @click="removeServer(s)"
@@ -1978,8 +2159,127 @@ onMounted(refresh);
               data-testid="ml-server-remote" />
           </el-form-item>
         </div>
+        <el-form-item label="打开链接用的地址（可选）">
+          <el-input
+            v-model="serverForm.play_url"
+            placeholder="https://jellyfin.example.com"
+            data-testid="ml-server-play-url" />
+          <div class="field-tip">
+            详情页「在
+            {{ serverKindLabel(serverForm.kind) }}
+            播放」打开的地址；上面的地址浏览器打不开（比如容器里的名字）时填，不填用上面的
+          </div>
+        </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="serverForm.enabled" data-testid="ml-server-enabled" />
+        </el-form-item>
+
+        <div class="ml-dlg-sec">索引与继续观看</div>
+        <div class="ml-row">
+          <el-form-item label="索引间隔（小时）">
+            <el-input-number
+              v-model="serverForm.index_hours"
+              :min="0"
+              :max="168"
+              controls-position="right"
+              data-testid="ml-server-index-hours" />
+            <div class="field-tip">
+              0 是关闭。记下服务器里的电影、剧集与每一集，新入库时有 Webhook 会提前同步
+            </div>
+          </el-form-item>
+          <el-form-item v-if="serverForm.kind !== 'plex'" label="继续观看的用户">
+            <div class="ml-inline ml-inline--grow">
+              <el-select
+                :model-value="serverForm.resume_user_id"
+                clearable
+                placeholder="不取继续观看"
+                data-testid="ml-server-resume-user"
+                @update:model-value="(v: string) => pickResumeUser(v)">
+                <el-option v-for="u in serverUsers" :key="u.id" :label="u.name" :value="u.id" />
+              </el-select>
+              <el-button
+                :loading="usersLoading"
+                data-testid="ml-server-users"
+                @click="loadServerUsers"
+                >读取用户</el-button
+              >
+            </div>
+            <div class="field-tip">这个用户没看完的片子，首页「继续观看」显示</div>
+          </el-form-item>
+        </div>
+        <el-form-item label="把服务器里有的集算作已入库">
+          <div class="ml-switch">
+            <el-switch v-model="serverForm.count_library" data-testid="ml-server-count" />
+            <span>追剧时这台服务器里有的集不再下载（不是 pt-tools 整理进去的也算）</span>
+          </div>
+        </el-form-item>
+
+        <div class="ml-dlg-sec">Webhook 与播放通知</div>
+        <el-form-item label="Webhook">
+          <template v-if="!editingServer">
+            <div class="field-tip">保存以后，编辑这台服务器时生成地址</div>
+          </template>
+          <template v-else>
+            <div class="ml-inline">
+              <PtStatusPill :tone="editingServer.webhook ? 'ok' : 'neutral'" size="sm">{{
+                editingServer.webhook ? "已开启" : "没开"
+              }}</PtStatusPill>
+              <span
+                v-if="editingServer.webhook_at"
+                class="ml-sub"
+                data-testid="ml-server-webhook-at"
+                >最近一次收到 {{ formatShortDateTime(editingServer.webhook_at) }}
+                {{ editingServer.webhook_event }}</span
+              >
+              <el-button
+                size="small"
+                :loading="webhookBusy"
+                data-testid="ml-server-webhook-create"
+                @click="createWebhook"
+                >{{ editingServer.webhook ? "重新生成地址" : "生成地址" }}</el-button
+              >
+              <el-button
+                v-if="editingServer.webhook"
+                size="small"
+                :disabled="webhookBusy"
+                data-testid="ml-server-webhook-delete"
+                @click="deleteWebhook"
+                >关掉</el-button
+              >
+            </div>
+            <div v-if="webhookURL" class="ml-hook" data-testid="ml-server-webhook-url">
+              <el-input :model-value="webhookURL" readonly />
+              <el-button @click="copyWebhook"
+                ><PtIcon name="copy" :size="14" /><span>复制</span></el-button
+              >
+            </div>
+            <div class="field-tip">
+              <template v-if="webhookURL"
+                >地址只显示这一次。媒体服务器访问 pt-tools
+                的地址和浏览器不同时，把前面的地址换掉。</template
+              >
+              <template v-if="serverForm.kind === 'jellyfin'"
+                >Jellyfin 装 Webhook 插件，加一个 Generic 目标，勾上 Item Added、Item
+                Deleted、Playback Start、Playback Stop</template
+              >
+              <template v-else-if="serverForm.kind === 'emby'"
+                >Emby 在设置 → 通知（Webhooks）里加这个地址，选新媒体、删除与播放的事件</template
+              >
+              <template v-else>Plex 在设置 → Webhooks 里加这个地址（要 Plex Pass）</template>
+              。新入库与删除 2 分钟后同步索引，开始、停止播放发通知。
+            </div>
+          </template>
+        </el-form-item>
+        <el-form-item label="播放通知">
+          <el-select
+            v-model="serverForm.playback_channels"
+            multiple
+            clearable
+            placeholder="不通知"
+            data-testid="ml-server-playback">
+            <el-option v-for="c in channels" :key="c.id" :label="c.name" :value="c.id" />
+          </el-select>
+          <div class="field-tip">Webhook 发来开始播放、停止播放时通知谁在看什么</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -2130,6 +2430,47 @@ onMounted(refresh);
 
 .ml-inline--grow > .el-input {
   flex: 1 1 240px;
+}
+
+.ml-inline--grow > .el-select {
+  flex: 1 1 180px;
+}
+
+/* 媒体服务器弹窗里的分组标题 */
+.ml-dlg-sec {
+  margin: 4px 0 12px;
+  padding-top: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pt-t2);
+  border-top: 1px solid var(--pt-border);
+}
+
+/* 索引那一列：状态与条目数一行 */
+.ml-index {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.ml-index .ml-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 生成的 Webhook 地址：只读输入框加复制 */
+.ml-hook {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.ml-hook .el-input {
+  flex: 1 1 auto;
 }
 
 .ml-tip {

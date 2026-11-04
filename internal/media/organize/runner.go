@@ -111,7 +111,7 @@ func (s *Service) put(j job) int {
 	}
 }
 
-// Start 开始后台循环：订阅下载完成事件、处理队列、定时重试、补查、扫描与清理入库链接。重复调用无副作用。
+// Start 开始后台循环：订阅下载完成事件、处理队列、定时重试、补查、扫描与清理入库链接、同步媒体服务器的索引。重复调用无副作用。
 func (s *Service) Start() {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
@@ -142,6 +142,7 @@ func (s *Service) Start() {
 	})
 	s.wg.Go(func() { s.loop(ctx) })
 	s.wg.Go(func() { s.realtimeLoop(ctx) })
+	s.wg.Go(func() { s.indexLoop(ctx) })
 }
 
 // Stop 停止后台循环，等正在整理的种子做完；在跑的导入扫描取消掉。
