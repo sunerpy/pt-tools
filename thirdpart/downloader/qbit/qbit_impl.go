@@ -1481,6 +1481,12 @@ func (q *QbitClient) writeAddTorrentOptions(writer *multipart.Writer, opt downlo
 		if err := writer.WriteField("savepath", opt.SavePath); err != nil {
 			return fmt.Errorf("failed to write savepath: %w", err)
 		}
+		// 要照这个目录放：关掉自动管理（默认用自动管理时 qBittorrent 按分类的路径放，忽略 savepath）
+		if opt.ForceSavePath {
+			if err := writer.WriteField("autoTMM", "false"); err != nil {
+				return fmt.Errorf("failed to write autoTMM: %w", err)
+			}
+		}
 	}
 
 	// 设置分类

@@ -174,6 +174,8 @@ const sform = ref<SubscribeSettings>({
   today_enabled: false,
   today_time: "09:00",
   today_channels: [],
+  subdir_enabled: false,
+  subdir_template: "{title} ({year})",
 });
 const settingsFailed = ref(false);
 const savingSettings = ref(false);
@@ -805,6 +807,29 @@ onBeforeUnmount(() => clearInterval(autoTimer));
                 <div class="field-tip">不选时推送到上面「通知」选的通道</div>
               </el-form-item>
             </div>
+            <!-- 媒体中心 M9b：订阅推送的种子放进按条目起名的子目录 -->
+            <el-form-item label="下载时按条目建子目录">
+              <div class="ms-switch">
+                <el-switch v-model="sform.subdir_enabled" data-testid="ms-subdir" />
+                <span>订阅推送的种子放进保存路径下的一级子目录，例如「最后生还者 (2023)」</span>
+              </div>
+              <div class="field-tip">
+                订阅没填保存路径时建在下载器的默认保存路径下，下载器照这个目录放（qBittorrent
+                这几个种子不用自动管理）。自动整理限了「保存路径」时，范围要包含这些子目录
+              </div>
+            </el-form-item>
+            <el-form-item v-if="sform.subdir_enabled" label="子目录名">
+              <el-input
+                v-model="sform.subdir_template"
+                maxlength="255"
+                placeholder="{title} ({year})"
+                data-testid="ms-subdir-template" />
+              <div class="field-tip">
+                可以用
+                {title}（标题）、{original_title}（原名）、{year}（年份，剧集是首播年份）、{season}（季）、{tmdb_id}；名字里不能用的字符会换掉，空着是
+                {title} ({year})
+              </div>
+            </el-form-item>
             <el-button
               type="primary"
               :loading="savingSettings"

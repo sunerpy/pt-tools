@@ -131,6 +131,10 @@ type AddTorrentOptions struct {
 	// 空字符串表示使用下载器默认路径
 	SavePath string
 
+	// ForceSavePath 为真时一定按 SavePath 放：qBittorrent 另外传 autoTMM=false（默认用自动管理时会忽略 SavePath）；
+	// Transmission 本来就按 download-dir。只有「按条目建子目录」设置它
+	ForceSavePath bool
+
 	// Category 种子分类（可选）
 	Category string
 

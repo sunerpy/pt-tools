@@ -163,7 +163,11 @@ const pushForm = ref({
   category: "",
   tags: "",
   autoStart: true,
+  itemSubdir: false,
 });
+/** 按条目推送时「按条目建子目录」：默认跟订阅设置里的开关，用户动过开关以后不再改它；模板写在说明里 */
+const subdirTouched = ref(false);
+const subdirTemplate = ref("{title} ({year})");
 /**
  * 推送弹窗的两种用法：直接推送；「等免费」（媒体中心 M2b）——免费了才推，下载器只选一个，
  * 不要「添加后立即开始」，加「等多久」。按条目搜索的成员还带上 H&R 要做种几小时（知道时）。
@@ -1132,9 +1136,27 @@ function openPushDialog(torrent: SearchTorrentItem, mode: "push" | "watch" = "pu
     category: "",
     tags: "",
     autoStart: true,
+    itemSubdir: false,
   };
+  subdirTouched.value = false;
   watchForm.value = { downloaderId: defaultDownloader.value?.id, days: 7, hrHours: 0 };
   pushDialogVisible.value = true;
+}
+
+/** 按条目推送：「按条目建子目录」默认跟订阅设置（读不到时关着）；读回来时弹窗换了或用户动过开关就不改 */
+async function applySubdirDefault() {
+  const opened = currentPushTorrent.value;
+  let enabled = false;
+  try {
+    const s = await subscribeApi.settings();
+    enabled = Boolean(s?.subdir_enabled);
+    subdirTemplate.value = s?.subdir_template || "{title} ({year})";
+  } catch {
+    // 读不到设置：关着，用户可以自己打开
+  }
+  if (currentPushTorrent.value === opened && !subdirTouched.value) {
+    pushForm.value.itemSubdir = enabled;
+  }
 }
 
 async function loadWatchSites() {
@@ -1255,6 +1277,7 @@ function openBatchPushDialog() {
     category: "",
     tags: "",
     autoStart: true,
+    itemSubdir: false,
   };
   batchPushDialogVisible.value = true;
 }
@@ -1280,12 +1303,13 @@ async function doPush() {
       torrentTitle: currentPushTorrent.value.title,
       sourceSite: currentPushTorrent.value.sourceSite,
       sizeBytes: currentPushTorrent.value.sizeBytes,
-      // 按条目搜索的结果带上条目：写进种子记录，整理入库按它整理
+      // 按条目搜索的结果带上条目：写进种子记录，整理入库按它整理；选了时按条目建子目录
       ...(pushMedia.value
         ? {
             mediaType: pushMedia.value.media_type,
             tmdbId: pushMedia.value.tmdb_id,
             season: pushMedia.value.season || undefined,
+            itemSubdir: pushForm.value.itemSubdir || undefined,
           }
         : {}),
     });
@@ -1303,6 +1327,11 @@ async function doPush() {
       } else {
         ElMessage.success("推送成功");
       }
+      // 按条目建子目录没建成的写明（照原来的保存路径推送了）
+      const subdirNotes = resp.results
+        .map((r) => (r.message ?? "").split("；").find((m) => m.startsWith("没有建子目录")))
+        .filter(Boolean);
+      if (subdirNotes.length) ElMessage.warning([...new Set(subdirNotes)].join("\n"));
       pushDialogVisible.value = false;
     } else {
       const failedResults = resp.results.filter((r) => !r.success);
@@ -1679,6 +1708,7 @@ function onEntryPush(
 ) {
   openPushDialog(entryTorrent(m));
   pushMedia.value = media;
+  void applySubdirDefault();
 }
 
 function onEntryWatch(
@@ -2772,6 +2802,19 @@ onUnmounted(() => {
             :downloader-ids="pushTargetIds"
             placeholder="使用默认路径"
             data-testid="push-save-path" />
+        </el-form-item>
+        <el-form-item v-if="pushMedia && pushMode === 'push'" label="按条目建子目录">
+          <span class="sw"
+            ><el-switch
+              v-model="pushForm.itemSubdir"
+              data-testid="push-item-subdir"
+              @change="subdirTouched = true"
+          /></span>
+          <div class="field-tip">
+            保存路径（没填时是每台下载器的默认保存路径）下按订阅设置里的子目录名「{{
+              subdirTemplate
+            }}」建一级子目录
+          </div>
         </el-form-item>
         <div class="field-row">
           <el-form-item label="分类">

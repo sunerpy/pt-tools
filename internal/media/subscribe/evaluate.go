@@ -745,9 +745,10 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		return fmt.Sprintf("订阅已经暂停或删除，没有推送 %s", o.c.Item.Title)
 	}
 	policy, snap := s.admission(ctx, sub, set, site, o.c)
+	savePath, force := s.savePathFor(ctx, sub, set, dlID)
 	res, err := s.cfg.Push(ctx, ptinternal.PushTorrentRequest{
 		SiteID: o.c.Site, TorrentID: o.c.Item.ID, TorrentData: data, Title: o.c.Item.Title,
-		Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath, DownloaderID: dlID, Source: pushSource,
+		Category: sub.Category, Tags: sub.Tags, SavePath: savePath, ForceSavePath: force, DownloaderID: dlID, Source: pushSource,
 		IMDbID: o.c.Item.IMDbID, DoubanID: o.c.Item.DoubanID,
 		// 订阅知道它要的是哪个条目：整理入库按它整理（订阅的记录删了以后也是）
 		Media: &ptinternal.PushMedia{Type: sub.MediaType, TMDBID: sub.TMDBID, Season: sub.Season},

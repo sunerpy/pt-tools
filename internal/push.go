@@ -36,7 +36,9 @@ type PushTorrentRequest struct {
 	Category     string // 分类
 	Tags         string // 标签
 	SavePath     string // 保存路径（可选）
-	DownloaderID uint   // 下载器ID
+	// ForceSavePath 要下载器照 SavePath 放（qBittorrent 另外传 autoTMM=false）：订阅与按条目推送「按条目建子目录」时用
+	ForceSavePath bool
+	DownloaderID  uint // 下载器ID
 	// Source 写入 TorrentInfo.DownloadSource（如 brush）；为空时是 manual_push。
 	Source string
 	// Meta 是调用方已经知道的种子信息（刷流从搜索结果里带来）；为空时不覆盖库里已有的值。
@@ -253,10 +255,11 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	// 构建添加选项。承诺到期暂停的一律先暂停加入：监控记账成功以后才开始，结束时间不可信的就不自动开始
 	pausePromised := decision.Monitor || decision.KeepPaused
 	opts := downloader.AddTorrentOptions{
-		AddAtPaused: !target.AutoStart || req.ReuseExistingData || req.AddPaused || pausePromised,
-		SavePath:    req.SavePath,
-		Category:    req.Category,
-		Tags:        req.Tags,
+		AddAtPaused:   !target.AutoStart || req.ReuseExistingData || req.AddPaused || pausePromised,
+		SavePath:      req.SavePath,
+		ForceSavePath: req.ForceSavePath && req.SavePath != "",
+		Category:      req.Category,
+		Tags:          req.Tags,
 	}
 	startAfter := decision.Monitor && target.AutoStart && !req.AddPaused && !req.ReuseExistingData
 	if name := strings.TrimSpace(req.Rename); name != "" {

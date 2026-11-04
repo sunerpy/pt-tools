@@ -112,3 +112,34 @@ func TestPushTorrent_DuplicateFromDownloaderSkips(t *testing.T) {
 	require.NotNil(t, ti)
 	assert.True(t, ti.IsPushed == nil || !*ti.IsPushed, "不记成这次推送的")
 }
+
+// 按条目建子目录：ForceSavePath 带给下载器；没有保存路径时不带（没有可照着放的目录）。
+func TestPushTorrent_ForceSavePath(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	GetDiskBudget().Reset()
+	t.Cleanup(func() { GetDiskBudget().Reset() })
+	disableDiskProtect(t, db)
+	dl := reuseTestDownloader(t)
+	var got []downloader.AddTorrentOptions
+	dl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ []byte, o downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+			got = append(got, o)
+			return downloader.AddTorrentResult{Success: true, Hash: "h"}, nil
+		},
+	).Times(2)
+	dlID := seedQbitDownloader(t, "http://127.0.0.1:9")
+
+	for i, path := range []string{"/data/tv/最后生还者 (2023)", ""} {
+		res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+			SiteID: "springsunday", TorrentID: "f" + string(rune('1'+i)), TorrentData: makeSizedTorrentBytes(t, "x"+string(rune('a'+i)), gb),
+			DownloaderID: dlID, SavePath: path, ForceSavePath: true, ReuseExistingData: true,
+		})
+		require.NoError(t, err)
+		require.True(t, res.Success, res.Message)
+	}
+	require.Len(t, got, 2)
+	assert.True(t, got[0].ForceSavePath)
+	assert.Equal(t, "/data/tv/最后生还者 (2023)", got[0].SavePath)
+	assert.False(t, got[1].ForceSavePath)
+}

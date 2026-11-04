@@ -343,10 +343,13 @@ type MediaSubscribeSetting struct {
 	// UpgradeOld 是洗版以后旧种子怎么办：keep（空串也是）继续做种，delete 连数据删掉
 	UpgradeOld string `gorm:"size:16;not null;default:''" json:"upgrade_old"`
 	// TodayEnabled 为真时每天 TodayTime（HH:MM，空的按 09:00）把今天播出的集推送到 TodayChannels（JSON 数组；空的用 NotifyChannels）
-	TodayEnabled  bool      `gorm:"not null;default:false" json:"today_enabled"`
-	TodayTime     string    `gorm:"size:5;not null;default:''" json:"today_time"`
-	TodayChannels string    `gorm:"type:text;not null;default:''" json:"-"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	TodayEnabled  bool   `gorm:"not null;default:false" json:"today_enabled"`
+	TodayTime     string `gorm:"size:5;not null;default:''" json:"today_time"`
+	TodayChannels string `gorm:"type:text;not null;default:''" json:"-"`
+	// SubdirEnabled 为真时订阅推送的种子放进按 SubdirTemplate（空的按 {title} ({year})）起名的一级子目录（见 subscribe.subdirName）
+	SubdirEnabled  bool      `gorm:"not null;default:false" json:"subdir_enabled"`
+	SubdirTemplate string    `gorm:"size:255;not null;default:''" json:"subdir_template"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func (MediaSubscribeSetting) TableName() string { return "media_subscribe_settings" }

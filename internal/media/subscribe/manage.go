@@ -38,6 +38,10 @@ type Settings struct {
 	TodayEnabled  bool   `json:"today_enabled"`
 	TodayTime     string `json:"today_time"`
 	TodayChannels []uint `json:"today_channels"`
+	// SubdirEnabled 为真时下载时按条目建子目录：订阅推送的种子放进保存路径（没有时是下载器的默认保存路径）下按 SubdirTemplate
+	// 起名的一级子目录（见 subdir.go）；SubdirTemplate 空着保存时按 DefaultSubdirTemplate
+	SubdirEnabled  bool   `json:"subdir_enabled"`
+	SubdirTemplate string `json:"subdir_template"`
 }
 
 func decodeIDs(raw string) []uint {
@@ -75,6 +79,10 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		DefaultProfileID: row.DefaultProfileID, DefaultDownloaderID: row.DefaultDownloaderID,
 		NotifyChannels: orEmpty(decodeIDs(row.NotifyChannels)), UpgradeOld: row.UpgradeOld,
 		TodayEnabled: row.TodayEnabled, TodayTime: row.TodayTime, TodayChannels: orEmpty(decodeIDs(row.TodayChannels)),
+		SubdirEnabled: row.SubdirEnabled, SubdirTemplate: row.SubdirTemplate,
+	}
+	if out.SubdirTemplate == "" {
+		out.SubdirTemplate = DefaultSubdirTemplate
 	}
 	if out.TodayTime == "" {
 		out.TodayTime = defaultTodayTime
@@ -120,17 +128,22 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 	if cerr != nil {
 		return Settings{}, fmt.Errorf("%w: 今日更新的推送时刻要写成 HH:MM（例如 09:00）", ErrInvalid)
 	}
+	tpl, err := cleanSubdirTemplate(in.SubdirTemplate)
+	if err != nil {
+		return Settings{}, err
+	}
 	row := models.MediaSubscribeSetting{
 		ID: 1, Enabled: in.Enabled, SearchIntervalHours: in.SearchIntervalHours, SearchSkipSites: encodeList(sites),
 		DefaultProfileID: in.DefaultProfileID, DefaultDownloaderID: in.DefaultDownloaderID,
 		NotifyChannels: encodeIDs(in.NotifyChannels), UpgradeOld: in.UpgradeOld,
-		TodayEnabled: in.TodayEnabled, TodayTime: fmt.Sprintf("%02d:%02d", h, m), TodayChannels: encodeIDs(in.TodayChannels), UpdatedAt: s.cfg.Now(),
+		TodayEnabled: in.TodayEnabled, TodayTime: fmt.Sprintf("%02d:%02d", h, m), TodayChannels: encodeIDs(in.TodayChannels),
+		SubdirEnabled: in.SubdirEnabled, SubdirTemplate: tpl, UpdatedAt: s.cfg.Now(),
 	}
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"enabled", "search_interval_hours", "search_skip_sites", "default_profile_id", "default_downloader_id", "notify_channels", "upgrade_old",
-			"today_enabled", "today_time", "today_channels", "updated_at",
+			"today_enabled", "today_time", "today_channels", "subdir_enabled", "subdir_template", "updated_at",
 		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存订阅设置失败: %w", err)

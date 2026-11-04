@@ -226,6 +226,29 @@ func TestQbitAddTorrentFileEx_AllOptions(t *testing.T) {
 	assert.Contains(t, form, "upLimit")
 	assert.Contains(t, form, "dlLimit")
 	assert.Equal(t, "Original", form["contentLayout"][0])
+	assert.NotContains(t, form, "autoTMM", "没要求照保存路径放时不动自动管理")
+}
+
+// 按条目建子目录：要照保存路径放时另外传 autoTMM=false（默认用自动管理时 qBittorrent 会忽略 savepath）；没有保存路径时不传。
+func TestQbitAddTorrentFileEx_ForceSavePath(t *testing.T) {
+	var form map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseMultipartForm(1 << 20)
+		form = r.MultipartForm.Value
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	_, err := coverageTestClient(srv.URL, false).AddTorrentFileEx(fixtureTorrentBytes(), downloader.AddTorrentOptions{
+		SavePath: "/dl/最后生还者 (2023)", Category: "tv", ForceSavePath: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "/dl/最后生还者 (2023)", form["savepath"][0])
+	assert.Equal(t, []string{"false"}, form["autoTMM"])
+
+	_, err = coverageTestClient(srv.URL, false).AddTorrentFileEx(fixtureTorrentBytes(), downloader.AddTorrentOptions{ForceSavePath: true})
+	require.NoError(t, err)
+	assert.NotContains(t, form, "autoTMM")
 }
 
 func TestQbitAddTorrentEx(t *testing.T) {

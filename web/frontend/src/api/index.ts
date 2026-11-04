@@ -1360,6 +1360,8 @@ export interface TorrentPushRequest {
   mediaType?: MediaKind;
   tmdbId?: number;
   season?: number;
+  /** 按条目建子目录（要带条目）：保存路径（空的是每台下载器的默认保存路径）下按订阅设置里的模板建一级子目录 */
+  itemSubdir?: boolean;
 }
 
 export interface TorrentPushResultItem {
@@ -4257,6 +4259,10 @@ export interface SubscribeSettings {
   today_enabled: boolean;
   today_time: string;
   today_channels: number[];
+  /** 下载时按条目建子目录：订阅推送的种子放进保存路径（没填时是下载器的默认保存路径）下按 subdir_template 起名的子目录 */
+  subdir_enabled: boolean;
+  /** 子目录名：{title}、{original_title}、{year}、{season}、{tmdb_id}；空着保存时是 {title} ({year}) */
+  subdir_template: string;
 }
 
 export interface QualityProfile {

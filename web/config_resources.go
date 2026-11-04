@@ -194,8 +194,13 @@ func (s *Server) configResources() []*configResource {
 		},
 		{
 			Name: "subscribe", Title: "订阅设置", Kind: configObject, Path: "/api/media/subscribe/settings", SetMethod: http.MethodPut,
-			Desc:   "电影、剧集订阅的开关、搜索间隔、跳过的站点、默认的质量规则与下载器、通知通道、洗版时旧文件怎么办。",
+			Desc:   "电影、剧集订阅的开关、搜索间隔、跳过的站点、默认的质量规则与下载器、通知通道、洗版时旧文件怎么办、下载时按条目建子目录。",
 			Fields: jsonFields[subscribe.Settings](), Ops: []string{configOpSet},
+			Hints: map[string]string{
+				"subdir_enabled":  "打开以后订阅推送的种子放进保存路径（没填时是下载器的默认保存路径）下的一级子目录",
+				"subdir_template": "子目录名，可以用 {title}、{original_title}、{year}、{season}、{tmdb_id}；空着是 {title} ({year})",
+			},
+			Impact: []string{"打开按条目建子目录以后，订阅没填保存路径的种子放在下载器的默认保存路径下：自动整理限了「保存路径」时要包含它"},
 		},
 		{
 			Name: "downloaders", Title: "下载器", Kind: configList, Path: "/api/downloaders", ItemPath: "/api/downloaders/{id}",

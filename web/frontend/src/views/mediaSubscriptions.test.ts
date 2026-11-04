@@ -120,6 +120,8 @@ const settings = {
   today_enabled: false,
   today_time: "09:00",
   today_channels: [],
+  subdir_enabled: false,
+  subdir_template: "{title} ({year})",
 };
 
 const base = {
@@ -776,6 +778,26 @@ describe("订阅", () => {
     q("ms-save-settings")!.click();
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
     expect(api.saveSettings.mock.calls[0]![0]).toEqual({ ...settings, today_enabled: true });
+  });
+
+  it("设置：下载时按条目建子目录，打开以后才有子目录名", async () => {
+    await mountPage();
+    expect(q("ms-subdir-template"), "没开时不显示").toBeNull();
+    (q("ms-subdir")!.querySelector("input") ?? q("ms-subdir"))!.click();
+    await vi.waitFor(() => expect(q("ms-subdir-template")).not.toBeNull());
+    const input = (q("ms-subdir-template")!.querySelector("input") ??
+      q("ms-subdir-template")) as HTMLInputElement;
+    expect(input.value).toBe("{title} ({year})");
+    input.value = "{original_title} [{tmdb_id}]";
+    input.dispatchEvent(new Event("input"));
+    api.saveSettings.mockResolvedValue({ ...settings, subdir_enabled: true });
+    q("ms-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      ...settings,
+      subdir_enabled: true,
+      subdir_template: "{original_title} [{tmdb_id}]",
+    });
   });
 
   it("设置：读到的今日更新照样显示、照样存回去", async () => {

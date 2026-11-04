@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,6 +37,8 @@ type TorrentPushRequest struct {
 	MediaType string `json:"mediaType,omitempty"` // movie 或 tv
 	TMDBID    int    `json:"tmdbId,omitempty"`
 	Season    int    `json:"season,omitempty"` // 剧集的季
+	// ItemSubdir 为真时按条目建子目录（要带条目）：保存路径（空的是每台下载器的默认保存路径）下按订阅设置里的模板起名的一级子目录
+	ItemSubdir bool `json:"itemSubdir,omitempty"`
 }
 
 // TorrentPushResponse 种子推送响应
@@ -256,6 +259,11 @@ func (s *Server) processTorrentPush(r *http.Request, req TorrentPushRequest) Tor
 		if req.TMDBID > 0 {
 			pushReq.Media = &internal.PushMedia{Type: req.MediaType, TMDBID: req.TMDBID, Season: req.Season}
 		}
+		subdirNote := ""
+		if req.ItemSubdir && req.TMDBID > 0 {
+			subdirNote = s.itemSubdir(ctx, &pushReq, req)
+		}
+		placed := pushReq.ForceSavePath
 
 		pushResult, err := internal.PushTorrentToDownloader(ctx, pushReq)
 		if err != nil {
@@ -276,6 +284,10 @@ func (s *Server) processTorrentPush(r *http.Request, req TorrentPushRequest) Tor
 			}
 			successCount++
 		}
+		// 子目录的说明：建不了的原因都写；放进了子目录的只在真的加了种子时写（下载器里本来就有时没动它）
+		if subdirNote != "" && (!placed || (result.Success && !result.Skipped)) {
+			result.Message = strings.TrimPrefix(result.Message+"；"+subdirNote, "；")
+		}
 
 		response.Results = append(response.Results, result)
 	}
@@ -293,6 +305,20 @@ func (s *Server) processTorrentPush(r *http.Request, req TorrentPushRequest) Tor
 		req.TorrentTitle, siteID, successCount, len(req.DownloaderIDs))
 
 	return response
+}
+
+// itemSubdir 给按条目推送算「按条目建子目录」的保存路径（每台下载器的默认保存路径不同，一台一台算）。算不出时照原来的保存路径推送，
+// 返回写进这台下载器结果里的说明。
+func (s *Server) itemSubdir(ctx context.Context, pushReq *internal.PushTorrentRequest, req TorrentPushRequest) string {
+	if s.subscriber == nil {
+		return "没有建子目录：订阅服务没有启动"
+	}
+	dir, err := s.subscriber.ItemDownloadDir(ctx, req.MediaType, req.TMDBID, req.Season, pushReq.DownloaderID, req.SavePath)
+	if err != nil {
+		return "没有建子目录：" + err.Error()
+	}
+	pushReq.SavePath, pushReq.ForceSavePath = dir, true
+	return "放进 " + dir
 }
 
 // processBatchTorrentPush processes a batch torrent push request
