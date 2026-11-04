@@ -506,6 +506,7 @@ watch(
             <span v-if="current.air_date">{{ current.air_date }} 播出</span>
             <span v-if="current.version">版本 {{ current.version }}</span>
             <span v-if="current.source === 'downloader'">下载器里已有的种子</span>
+            <span v-else-if="current.source === 'server'">媒体服务器里有（算作已入库）</span>
             <span v-if="current.manual_unlock">这一集不受版本锁限制</span>
           </div>
           <div class="sdd__ep-acts">

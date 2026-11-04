@@ -31,6 +31,11 @@ const api = vi.hoisted(() => ({
   updateServer: vi.fn(),
   deleteServer: vi.fn(),
   testServer: vi.fn(),
+  syncServer: vi.fn(),
+  serverUsers: vi.fn(),
+  createWebhook: vi.fn(),
+  deleteWebhook: vi.fn(),
+  resume: vi.fn(),
   preview: vi.fn(),
   organize: vi.fn(),
 }));
@@ -149,6 +154,19 @@ const server = {
   has_token: true,
   last_error: "",
   last_refresh_at: "2026-10-07T12:00:00Z",
+  play_url: "",
+  index_hours: 6,
+  indexed_at: "2026-11-04T06:00:00Z",
+  index_error: "",
+  index_movies: 120,
+  index_series: 30,
+  index_episodes: 900,
+  count_library: false,
+  resume_user_id: "",
+  resume_user_name: "",
+  webhook: false,
+  webhook_event: "",
+  playback_channels: [],
   created_at: "",
   updated_at: "",
 };
@@ -730,6 +748,12 @@ describe("媒体库", () => {
       refresh_mode: "path",
       local_prefix: "/media",
       server_prefix: "/data",
+      play_url: "",
+      index_hours: 6,
+      count_library: false,
+      resume_user_id: "",
+      resume_user_name: "",
+      playback_channels: [],
     });
 
     // 新建时不填 Token 不发请求
@@ -739,6 +763,154 @@ describe("媒体库", () => {
     q("ml-server-save")!.click();
     await vi.waitFor(() => expect(api.updateServer).toHaveBeenCalledTimes(2));
     expect(api.updateServer.mock.calls[1]![1]).toMatchObject({ token: "newtoken" });
+  });
+
+  it("媒体服务器的索引：列表写条目数与继续观看，能马上同步；关了索引不能同步", async () => {
+    api.resume.mockResolvedValue({
+      servers: [{ server_id: 5, name: "Emby", kind: "emby", user: "admin", items: [{}, {}, {}] }],
+    });
+    await mountPage();
+    api.servers.mockResolvedValue([{ ...server, resume_user_id: "u1", resume_user_name: "admin" }]);
+    // 选了继续观看的用户才去取继续观看
+    expect(api.resume).not.toHaveBeenCalled();
+    expect(q("ml-server-index-5")!.textContent).toContain("正常");
+    expect(q("ml-server-index-5")!.textContent).toContain("电影 120 · 剧 30 · 集 900");
+
+    api.syncServer.mockResolvedValue({
+      movies: 121,
+      series: 30,
+      episodes: 901,
+      added: 2,
+      updated: 0,
+      removed: 1,
+      restored: 0,
+      purged: 0,
+      issues: 1,
+    });
+    q("ml-server-sync-5")!.click();
+    await vi.waitFor(() => expect(api.syncServer).toHaveBeenCalledWith(5));
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith(
+        "同步完成：电影 121、剧 30、集 901（新加 2、没了 1），1 项 pt-tools 整理过的在服务器里没了",
+      ),
+    );
+    await vi.waitFor(() => expect(api.resume).toHaveBeenCalled());
+    await vi.waitFor(() => expect(q("ml-server-index-5")!.textContent).toContain("继续观看 3"));
+
+    api.syncServer.mockRejectedValue(new Error("媒体服务器连不上"));
+    q("ml-server-sync-5")!.click();
+    await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("媒体服务器连不上"));
+
+    api.servers.mockResolvedValue([{ ...server, index_hours: 0 }]);
+    q("ml-refresh")!.click();
+    await vi.waitFor(() => expect(q("ml-server-index-5")!.textContent).toContain("关闭"));
+    expect(
+      q("ml-server-sync-5")!.hasAttribute("disabled") ||
+        q("ml-server-sync-5")!.classList.contains("is-disabled"),
+    ).toBe(true);
+
+    api.servers.mockResolvedValue([{ ...server, index_error: "HTTP 500", indexed_at: undefined }]);
+    q("ml-refresh")!.click();
+    await vi.waitFor(() => expect(q("ml-server-index-5")!.textContent).toContain("HTTP 500"));
+    expect(q("ml-server-index-5")!.textContent).toContain("失败");
+  });
+
+  it("媒体服务器弹窗：索引间隔、继续观看的用户、打开链接的地址、Webhook 地址只显示一次", async () => {
+    await mountPage();
+    api.updateServer.mockResolvedValue(server);
+    q("ml-server-edit-5")!.click();
+    await flush();
+    fill("ml-server-play-url", " https://emby.example.com ");
+    api.serverUsers.mockResolvedValue([
+      { id: "u1", name: "admin" },
+      { id: "u2", name: "家人" },
+    ]);
+    q("ml-server-users")!.click();
+    await vi.waitFor(() =>
+      expect(api.serverUsers).toHaveBeenCalledWith({
+        id: 5,
+        kind: "emby",
+        url: "http://192.168.1.10:8096",
+        token: undefined,
+      }),
+    );
+    const sel = q("ml-server-resume-user")!;
+    (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+    await vi.waitFor(() => {
+      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => (o.textContent ?? "").trim() === "家人",
+      );
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    await flush();
+
+    // Webhook：生成以后地址显示在弹窗里；再生成要先确认
+    api.createWebhook.mockResolvedValue({ token: "tok", path: "/api/media/servers/5/webhook/tok" });
+    api.servers.mockResolvedValue([{ ...server, webhook: true }]);
+    q("ml-server-webhook-create")!.click();
+    await vi.waitFor(() => expect(api.createWebhook).toHaveBeenCalledWith(5));
+    await vi.waitFor(() =>
+      expect((inputOf("ml-server-webhook-url") as HTMLInputElement).value).toBe(
+        `${window.location.origin}/api/media/servers/5/webhook/tok`,
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(q("ml-server-webhook-create")!.textContent).toContain("重新生成地址"),
+    );
+    ui.confirm.mockRejectedValueOnce(new Error("cancel"));
+    q("ml-server-webhook-create")!.click();
+    await flush();
+    expect(api.createWebhook, "取消了重新生成").toHaveBeenCalledTimes(1);
+
+    q("ml-server-save")!.click();
+    await vi.waitFor(() => expect(api.updateServer).toHaveBeenCalledTimes(1));
+    expect(api.updateServer.mock.calls[0]![1]).toMatchObject({
+      play_url: "https://emby.example.com",
+      resume_user_id: "u2",
+      resume_user_name: "家人",
+      index_hours: 6,
+    });
+
+    // 关掉 Webhook
+    api.servers.mockResolvedValue([{ ...server, webhook: true }]);
+    q("ml-refresh")!.click();
+    await flush();
+    q("ml-server-edit-5")!.click();
+    await flush();
+    expect(q("ml-server-webhook-url"), "重新打开弹窗以后不再显示地址").toBeNull();
+    ui.confirm.mockResolvedValueOnce("confirm");
+    api.deleteWebhook.mockResolvedValue({ ok: true });
+    api.servers.mockResolvedValue([server]);
+    q("ml-server-webhook-delete")!.click();
+    await vi.waitFor(() => expect(api.deleteWebhook).toHaveBeenCalledWith(5));
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("已关掉 Webhook"));
+  });
+
+  it("Plex 不选继续观看的用户；新建的服务器保存以后才能生成 Webhook", async () => {
+    await mountPage();
+    q("ml-server-edit-5")!.click();
+    await flush();
+    expect(q("ml-server-resume-user")).not.toBeNull();
+    const kinds = [...q("ml-server-kind")!.querySelectorAll<HTMLElement>("label")];
+    kinds.find((k) => (k.textContent ?? "").includes("Plex"))!.click();
+    await flush();
+    expect(q("ml-server-resume-user"), "Plex 没有继续观看").toBeNull();
+    api.updateServer.mockResolvedValue(server);
+    q("ml-server-save")!.click();
+    await vi.waitFor(() => expect(api.updateServer).toHaveBeenCalledTimes(1));
+    expect(api.updateServer.mock.calls[0]![1]).toMatchObject({
+      kind: "plex",
+      resume_user_id: "",
+      resume_user_name: "",
+    });
+
+    // 添加：还没有编号，不能生成 Webhook
+    const panel = q("ml-servers")!.closest(".pt-panel")!;
+    panel.querySelector<HTMLElement>(".pt-panel__action")!.click();
+    await flush();
+    expect(q("ml-server-webhook-create")).toBeNull();
+    expect(document.body.textContent).toContain("保存以后，编辑这台服务器时生成地址");
   });
 
   it("媒体库读不到时写明原因，不画成「还没有」", async () => {

@@ -17,6 +17,7 @@ describe("后台通知的投递在审计里的读法", () => {
     expect(notifyCommandLabel("notify:attendance:daily")).toBe("签到");
     expect(notifyCommandLabel("notify:media:followshow_found")).toBe("追剧：下载了新的集");
     expect(notifyCommandLabel("notify:media:organized")).toBe("入库通知");
+    expect(notifyCommandLabel("notify:media:playback")).toBe("媒体服务器播放");
     expect(notifyCommandLabel("notify:login:tier")).toBe("保号提醒");
     expect(notifyCommandLabel("notify:something_new:x")).toBe("something_new");
     expect(notifyCommandLabel("pause")).toBe("pause");

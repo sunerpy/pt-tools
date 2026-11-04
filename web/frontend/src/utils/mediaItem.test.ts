@@ -1,10 +1,17 @@
 /*
- * 钉子：条目详情页的文字（画板 04、08）。资料行、胶囊、主创；「你的 NAS 上」三行；集卡的播出日、说明与动作；
+ * 钉子：条目详情页的文字（画板 04、08）。资料行、胶囊、主创；「你的 NAS 上」四行（媒体服务器那一行 M6 加）；集卡的播出日、说明与动作；
  * 收起行；种子行；默认打开哪一季；面包屑从哪里来。
  */
 import { describe, expect, it } from "vitest";
 
-import type { ItemDetail, ItemInfo, ItemTorrent, SeasonDetail, SeasonEpisode } from "@/api";
+import type {
+  ItemDetail,
+  ItemInfo,
+  ItemServer,
+  ItemTorrent,
+  SeasonDetail,
+  SeasonEpisode,
+} from "@/api";
 
 import {
   airDayText,
@@ -16,7 +23,9 @@ import {
   defaultSeason,
   deletableView,
   episodeAction,
+  episodeActionLabel,
   episodeNote,
+  episodePlayURL,
   episodeStatePill,
   etaText,
   infoPills,
@@ -26,13 +35,16 @@ import {
   legendCounts,
   lockText,
   nasLines,
+  nasServer,
   originalLine,
   pickSubscription,
+  playTarget,
   runtimeText,
   searchLink,
   seasonTabText,
   seasonTorrents,
   seedingText,
+  serverLine,
   statusLabel,
   subscriptionLabel,
   todayOf,
@@ -191,6 +203,77 @@ describe("你的 NAS 上", () => {
     expect(nasLines({ ...movie, item: { ...movie.item } }, null)[2]!.title).toBe("没有订阅");
   });
 
+  it("媒体服务器那一行：有删了的写哪一集与「忽略」，没有时写同步时间；没有同步过的服务器不列", () => {
+    const now = new Date(2026, 10, 4, 15, 0);
+    const synced = new Date(2026, 10, 4, 14, 0).toISOString();
+    const jf: ItemServer = {
+      server_id: 1,
+      name: "Jellyfin",
+      kind: "jellyfin",
+      synced_at: synced,
+      have: true,
+      episodes: 17,
+      open_url: "https://jf.example.com/web/#/details?id=show",
+      removed: [],
+    };
+    expect(serverLine("tv", jf, now)).toEqual({
+      key: "server",
+      icon: "monitor",
+      title: "Jellyfin 已入库 17 集",
+      desc: "11-04 14:00 同步",
+    });
+    const gone = { ...jf, removed: [{ id: 31, season: 2, episode: 3 }] };
+    expect(serverLine("tv", gone, now)).toMatchObject({
+      desc: "S02E03 在服务器里被删了",
+      warn: true,
+      issues: [31],
+    });
+    expect(
+      serverLine(
+        "tv",
+        { ...gone, removed: [...gone.removed, { id: 32, season: 2, episode: 4 }] },
+        now,
+      ),
+      "「忽略」要忽略这几集的全部问题",
+    ).toMatchObject({ desc: "S02E03 等 2 集在服务器里被删了", issues: [31, 32] });
+    expect(serverLine("movie", { ...jf, episodes: undefined }, now).title).toBe("Jellyfin 已入库");
+    expect(serverLine("movie", { ...gone, have: false }, now)).toMatchObject({
+      title: "Jellyfin 里没有",
+      desc: "在服务器里被删了",
+    });
+    expect(serverLine("tv", { ...jf, have: false, synced_at: undefined }, now).desc).toBe("");
+
+    // 第 4 行：有问题的那台优先，再是有这一部的
+    const emby: ItemServer = {
+      ...jf,
+      server_id: 2,
+      name: "Emby",
+      have: false,
+      open_url: undefined,
+    };
+    expect(nasServer(detail({ servers: [emby, jf] }))?.name).toBe("Jellyfin");
+    expect(nasServer(detail({ servers: [jf, { ...emby, removed: [{ id: 5 }] }] }))?.name).toBe(
+      "Emby",
+    );
+    expect(nasServer(detail({ servers: [emby] }))?.name).toBe("Emby");
+    expect(nasServer(detail()), "没有媒体服务器").toBeNull();
+    expect(nasLines(detail(), null)).toHaveLength(3);
+    expect(nasLines(detail({ servers: [jf] }), null).map((l) => l.key)).toEqual([
+      "library",
+      "seeding",
+      "subscription",
+      "server",
+    ]);
+
+    // 播放：第一台有这一部、给了链接的
+    expect(playTarget(detail({ servers: [emby, jf] }))).toEqual({
+      name: "Jellyfin",
+      url: "https://jf.example.com/web/#/details?id=show",
+    });
+    expect(playTarget(detail({ servers: [emby] }))).toBeNull();
+    expect(playTarget(detail({ servers: [{ ...jf, open_url: "" }] }))).toBeNull();
+  });
+
   it("订阅的说法与选哪一个", () => {
     expect(subscriptionLabel("tv", { id: 1, status: "active", season: 2, follow: false })).toBe(
       "订阅中 · 第 2 季",
@@ -317,9 +400,26 @@ describe("季与集", () => {
       ),
     ).toBe("");
     expect(episodeNote(ep({ state: "skipped" }), season, now, false)).toBe("");
-    expect(episodeAction("waiting_version")).toBe("versions");
-    expect(episodeAction("missing")).toBe("search");
-    expect(episodeAction("library")).toBe("");
+    expect(episodeAction(ep({ state: "waiting_version" }))).toBe("versions");
+    expect(episodeAction(ep({ state: "missing" }))).toBe("search");
+    expect(episodeAction(ep({ state: "library" }))).toBe("");
+    expect(episodeActionLabel(ep({ state: "missing" }))).toBe("搜资源");
+    // 媒体服务器：删了的写「Jellyfin 里没有了」、动作是忽略、没有播放；算作已入库的写「Jellyfin 里有」
+    const removed = ep({
+      version: "2160p",
+      open_url: "u",
+      server_issue: { id: 7, server: "Jellyfin" },
+    });
+    expect(episodeNote(removed, season, now, false)).toBe("Jellyfin 里没有了");
+    expect(episodeAction(removed)).toBe("ignore");
+    expect(episodeActionLabel(removed)).toBe("忽略");
+    expect(episodePlayURL(removed)).toBe("");
+    expect(episodeNote(ep({ source: "server", server: "Jellyfin" }), season, now, false)).toBe(
+      "Jellyfin 里有",
+    );
+    expect(episodePlayURL(ep({ open_url: "https://jf/e1" }))).toBe("https://jf/e1");
+    expect(episodePlayURL(ep({ state: "downloading", open_url: "https://jf/e1" }))).toBe("");
+    expect(episodePlayURL(ep({}))).toBe("");
     expect(daysSinceAir(undefined, now)).toBe(0);
     expect(daysSinceAir("2026-11-01", now)).toBe(0);
   });

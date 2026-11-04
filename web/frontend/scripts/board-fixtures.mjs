@@ -502,6 +502,8 @@ const ENTRY_SEARCH = {
  * （H&R 已满足、H&R 还差 2 天、下载中），第 1 季一个整季包；导演 1 位加演员 14 位（「全部 15 位」），推荐 12 个。
  * 图片路径都不给：无头 Chrome 连不上 TMDB，海报、背景、剧照、头像都走占位（画板「没有背景图用深色渐变」那条）。
  * 还没播的集日期放在 2099 年，播出日那一行的文字不随运行的日子变。
+ * 媒体服务器（M6）：Jellyfin 里有这部剧 17 集，S02E03 在服务器里被删了（画板 04、08 的第 4 行与 E03 集卡）；
+ * 入库了、服务器里有的集给打开链接（播放圆）。电影不给媒体服务器（没有第 4 行、没有播放）。
  */
 const ITEM_TV_ID = 100088;
 const ITEM_PEOPLE = [
@@ -666,6 +668,22 @@ const ITEM_TV = {
     }),
   ],
   recommendations: ITEM_RECS,
+  servers: [
+    {
+      server_id: 1,
+      name: "Jellyfin",
+      kind: "jellyfin",
+      synced_at: "2026-11-04T06:00:00Z",
+      have: true,
+      episodes: 17,
+      seasons: [
+        { n: 1, have: 12, total: 12 },
+        { n: 2, have: 5, total: 12 },
+      ],
+      open_url: "http://jellyfin.invalid/web/#/details?id=s1&serverId=jf",
+      removed: [{ id: 31, season: 2, episode: 3 }],
+    },
+  ],
   errors: [],
 };
 const ITEM_EPISODE_NAMES = ["归来", "旧案", "雨夜", "证人", "回声", "暗涌", "失踪者", "灯塔"];
@@ -692,6 +710,9 @@ const ITEM_TV_S2 = {
         state: "library",
         version: "2160p HHWEB",
         size: (6.8 - n * 0.1) * 1024 ** 3,
+        ...(n === 3
+          ? { server_issue: { id: 31, server: "Jellyfin" } }
+          : { open_url: `http://jellyfin.invalid/web/#/details?id=e${n}&serverId=jf` }),
       };
     if (n === 7)
       return {

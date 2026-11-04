@@ -48,13 +48,18 @@ func organizeNotifier(n *scheduler.MonitorNotifier) organize.Notifier {
 		return nil
 	}
 	return func(ctx context.Context, no organize.Notice) error {
-		// Subject 是种子的 hash（列宽 64），EventKey 是这一批整理（hash 加第一条记录的编号）
+		// Subject 是种子的 hash（列宽 64），EventKey 是这一批整理（hash 加第一条记录的编号）；
+		// 播放通知的 Subject 是服务器，EventKey 带上时刻（同一部再播一次也发）
 		subject, _, _ := strings.Cut(no.Key, ":")
 		if len(subject) > 64 {
 			subject = subject[:64]
 		}
+		kind := no.Kind
+		if kind == "" {
+			kind = "organized"
+		}
 		_, err := n.Enqueue(ctx, scheduler.MonitorNotifyEntry{
-			Source: "media", Subject: subject, Kind: "organized", EventKey: no.Key,
+			Source: "media", Subject: subject, Kind: kind, EventKey: no.Key,
 			Title: no.Title, Text: no.Text, ConfIDs: no.ChannelIDs, Event: no.Event,
 		})
 		return err

@@ -40,7 +40,7 @@ func newSubscribeEnv(t *testing.T, opts ...func(*subscribe.Config)) (*Server, *h
 		&models.MediaQualityProfile{}, &models.MediaSubscription{}, &models.MediaSubscriptionTorrent{}, &models.MediaSubscribeSetting{},
 		&models.MediaDoubanSource{}, &models.MediaDoubanItem{},
 		&models.MediaSubscriptionEpisode{}, &models.MediaEpisodeRule{}, &models.MediaSubscriptionRun{}, &models.MediaLibrary{},
-		&models.MediaTorrentBlock{},
+		&models.MediaTorrentBlock{}, &models.MediaServer{}, &models.MediaServerItem{}, &models.MediaIssue{},
 	))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

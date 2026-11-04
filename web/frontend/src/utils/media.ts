@@ -15,7 +15,9 @@ import type {
   MediaScrapeItem,
   MediaScrapeSources,
   MediaScrapeStatus,
+  MediaServer,
   MediaServerKind,
+  MediaServerSyncResult,
   MediaTransferStatus,
   MediaWordKind,
   MediaWordRule,
@@ -23,6 +25,7 @@ import type {
   OrganizeResult,
   RescrapeResult,
 } from "@/api";
+import { formatShortDateTime } from "@/utils/format";
 
 /** TMDB 的语言（与后端 recognize.Languages 一致，第一个是默认值） */
 export const MEDIA_LANGUAGES: readonly { value: string; label: string }[] = [
@@ -573,6 +576,48 @@ export const MEDIA_SERVER_KINDS: readonly { value: MediaServerKind; label: strin
 
 export function serverKindLabel(kind: string): string {
   return MEDIA_SERVER_KINDS.find((k) => k.value === kind)?.label ?? kind;
+}
+
+/** 媒体服务器的索引那一列：状态、条目数或失败原因，悬停写同步时间与间隔 */
+export function serverIndexView(
+  s: MediaServer,
+  resume?: number,
+): { tone: "ok" | "dang" | "neutral"; label: string; text: string; tip: string } {
+  const synced = s.indexed_at ? `${formatShortDateTime(s.indexed_at)} 同步` : "";
+  const every = `每 ${s.index_hours} 小时同步一次`;
+  if (s.index_hours === 0)
+    return { tone: "neutral", label: "关闭", text: "不同步索引", tip: "索引间隔填 0 是关闭" };
+  if (s.index_error)
+    return {
+      tone: "dang",
+      label: "失败",
+      text: s.index_error,
+      tip: [synced ? `上次成功 ${synced.replace(" 同步", "")}` : "还没成功过", every].join("，"),
+    };
+  if (!s.indexed_at)
+    return {
+      tone: "neutral",
+      label: "还没同步",
+      text: s.enabled ? "启动 1 分钟以后同步，也可以点「同步」" : "启用以后同步",
+      tip: every,
+    };
+  const parts = [`电影 ${s.index_movies}`, `剧 ${s.index_series}`, `集 ${s.index_episodes}`];
+  if (resume !== undefined) parts.push(`继续观看 ${resume}`);
+  return { tone: "ok", label: "正常", text: parts.join(" · "), tip: `${synced}，${every}` };
+}
+
+/** 手动同步完的一句话 */
+export function syncResultText(r: MediaServerSyncResult): string {
+  let text = `同步完成：电影 ${r.movies}、剧 ${r.series}、集 ${r.episodes}`;
+  const changes = [
+    r.added ? `新加 ${r.added}` : "",
+    r.removed ? `没了 ${r.removed}` : "",
+    r.restored ? `又有了 ${r.restored}` : "",
+  ].filter(Boolean);
+  if (changes.length) text += `（${changes.join("、")}）`;
+  if (r.issues) text += `，${r.issues} 项 pt-tools 整理过的在服务器里没了`;
+  if (r.partial) text += "；同步时服务器里的条目变了，这一次没有标删除";
+  return text;
 }
 
 /** 整理计划里一张原盘的说明：「蓝光原盘 · 5 个文件」「DVD 原盘 · 12 个文件」 */

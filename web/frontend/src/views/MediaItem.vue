@@ -3,7 +3,7 @@
  * 条目详情（媒体中心 M3，画板 04 桌面、08 手机）：一部电影或剧集的资料、你的 NAS 上（库里、做种、订阅）、
  * 季与集（每集的状态、播出日、进度）、这一季的种子（能不能删）、演职员与推荐。只读；动作交给现有的弹窗：
  * 搜资源打开按条目搜索，追剧打开订阅弹窗或追剧详情，重新刮削调整理历史的刮削，手动整理打开整理弹窗。
- * 媒体服务器那一行、播放（M6）与删除（M7）还没有。
+ * 媒体服务器（M6）：「你的 NAS 上」第 4 行、「在 Jellyfin 播放」、集卡的播放圆；服务器里删了的先给「忽略」。删除（M7）还没有。
  */
 import {
   type ExploreItem,
@@ -38,7 +38,9 @@ import {
   defaultSeason,
   deletableView,
   episodeAction,
+  episodeActionLabel,
   episodeNote,
+  episodePlayURL,
   episodeStatePill,
   infoPills,
   itemFrom,
@@ -47,6 +49,7 @@ import {
   nasLines,
   originalLine,
   pickSubscription,
+  playTarget,
   searchLink,
   seasonTabText,
   seasonTorrents,
@@ -169,6 +172,8 @@ const pills = computed(() => (info.value ? infoPills(info.value) : []));
 const credits = computed(() => (info.value ? creditsLine(info.value) : ""));
 const original = computed(() => (info.value ? originalLine(info.value) : ""));
 const nas = computed(() => (detail.value ? nasLines(detail.value, sub.value) : []));
+/** 「在 Jellyfin 播放」：桌面在动作行里，手机在「你的 NAS 上」白卡底部 */
+const play = computed(() => (detail.value ? playTarget(detail.value) : null));
 const legend = computed(() => legendCounts(episodes.value));
 const now = ref(new Date());
 /** 开头连续已入库、可以收成一行的集数；展开以后这一行换成「收起」 */
@@ -315,8 +320,37 @@ async function onMore(cmd: string) {
 }
 
 function onEpisodeAction(ep: SeasonEpisode) {
+  const act = episodeAction(ep);
+  if (act === "ignore" && ep.server_issue) void ignoreIssues([ep.server_issue.id]);
   // 等版本看能补这一集的其他版本、缺的去搜：都是按条目搜索这一季
-  if (episodeAction(ep.state)) searchResources(season.value);
+  else if (act) searchResources(season.value);
+}
+
+function openPlay(url: string) {
+  window.open(url, "_blank", "noopener");
+}
+
+/** 点已入库的集卡在媒体服务器里播放（卡上的链接与按钮自己处理） */
+function onEpisodeCard(ep: SeasonEpisode, e: MouseEvent) {
+  const url = episodePlayURL(ep);
+  if (!url || (e.target as HTMLElement | null)?.closest("a, button")) return;
+  openPlay(url);
+}
+
+/** 忽略媒体服务器里删了的问题（M7 才有「处理」）；忽略以后这一项一直没再出现前不再提示 */
+const ignoring = ref(false);
+async function ignoreIssues(ids: number[]) {
+  if (!ids.length || ignoring.value) return;
+  ignoring.value = true;
+  try {
+    await Promise.all(ids.map((id) => organizeApi.dismissIssue(id)));
+    ElMessage.success("已忽略");
+    await load();
+  } catch (e) {
+    ElMessage.error(errText(e, "忽略失败"));
+  } finally {
+    ignoring.value = false;
+  }
 }
 
 // ---- 种子 ----
@@ -526,6 +560,15 @@ const failedFaces = ref(new Set<string>());
             <span>{{ kind === "tv" ? "追剧" : "订阅" }}</span>
           </button>
           <template v-if="!isMobile">
+            <button
+              v-if="play"
+              type="button"
+              class="mi-btn mi-btn--glass"
+              data-testid="mi-play"
+              @click="openPlay(play.url)">
+              <PtIcon name="play" :size="15" />
+              <span>在 {{ play.name }} 播放</span>
+            </button>
             <el-tooltip v-if="detail.nas.library.record_id" content="重新刮削" placement="top">
               <button
                 type="button"
@@ -583,7 +626,20 @@ const failedFaces = ref(new Set<string>());
             <PtIcon :name="l.icon" :size="15" class="mi-nas__icon" />
             <div class="mi-nas__body">
               <div class="mi-nas__head" :title="l.title">{{ l.title }}</div>
-              <div v-if="l.desc" class="mi-nas__desc" :title="l.desc">{{ l.desc }}</div>
+              <div v-if="l.desc" class="mi-nas__desc" :class="{ 'is-warn': l.warn }">
+                <span class="mi-nas__desc-text" :title="l.desc">{{ l.desc }}</span>
+                <template v-if="l.issues?.length">
+                  ·
+                  <button
+                    type="button"
+                    class="mi-nas__ignore"
+                    :disabled="ignoring"
+                    data-testid="mi-server-ignore"
+                    @click="ignoreIssues(l.issues)">
+                    忽略
+                  </button>
+                </template>
+              </div>
             </div>
           </div>
         </div>
@@ -592,12 +648,39 @@ const failedFaces = ref(new Set<string>());
       <div v-if="!nasInHero" class="mi-nas mi-nas--card" data-testid="mi-nas">
         <div class="mi-nas__title">你的 NAS 上</div>
         <div v-for="l in nas" :key="l.key" class="mi-nas__row" :data-testid="`mi-nas-${l.key}`">
-          <PtIcon :name="l.icon" :size="15" class="mi-nas__icon" :class="`is-${l.key}`" />
+          <PtIcon
+            :name="l.icon"
+            :size="15"
+            class="mi-nas__icon"
+            :class="[`is-${l.key}`, { 'is-warn': l.warn }]" />
           <div class="mi-nas__body">
             <div class="mi-nas__head" :title="l.title">{{ l.title }}</div>
-            <div v-if="l.desc" class="mi-nas__desc" :title="l.desc">{{ l.desc }}</div>
+            <div v-if="l.desc" class="mi-nas__desc" :class="{ 'is-warn': l.warn }">
+              <span class="mi-nas__desc-text" :title="l.desc">{{ l.desc }}</span>
+              <template v-if="l.issues?.length">
+                ·
+                <button
+                  type="button"
+                  class="mi-nas__ignore"
+                  :disabled="ignoring"
+                  data-testid="mi-server-ignore"
+                  @click="ignoreIssues(l.issues)">
+                  忽略
+                </button>
+              </template>
+            </div>
           </div>
         </div>
+        <!-- 手机的播放放在白卡底部（画板 08）；桌面窄的时候在大图的动作行里 -->
+        <button
+          v-if="isMobile && play"
+          type="button"
+          class="mi-nas__play"
+          data-testid="mi-play"
+          @click="openPlay(play.url)">
+          <PtIcon name="play" :size="15" />
+          <span>在 {{ play.name }} 播放</span>
+        </button>
       </div>
 
       <div
@@ -664,8 +747,9 @@ const failedFaces = ref(new Set<string>());
             v-for="ep in shownEpisodes"
             :key="ep.episode"
             class="mi-ep"
-            :class="`is-${ep.state}`"
-            :data-testid="`mi-ep-${ep.episode}`">
+            :class="[`is-${ep.state}`, { 'is-playable': episodePlayURL(ep) }]"
+            :data-testid="`mi-ep-${ep.episode}`"
+            @click="onEpisodeCard(ep, $event)">
             <div class="mi-ep__still">
               <img
                 v-if="ep.state !== 'upcoming' && stillOf(ep) && !failedStills.has(ep.episode)"
@@ -679,7 +763,18 @@ const failedFaces = ref(new Set<string>());
                   airDayText(ep, now, false).replace(" · 季终", "")
                 }}</span>
               </template>
-              <PtIcon v-else name="compass" :size="20" />
+              <PtIcon v-else-if="!episodePlayURL(ep)" name="compass" :size="20" />
+              <!-- 已入库、媒体服务器里有这一集：在服务器里播放（点卡片也行） -->
+              <a
+                v-if="episodePlayURL(ep)"
+                class="mi-ep__play"
+                :href="episodePlayURL(ep)"
+                target="_blank"
+                rel="noopener"
+                :aria-label="`播放第 ${ep.episode} 集`"
+                :data-testid="`mi-ep-play-${ep.episode}`">
+                <PtIcon name="play" :size="isMobile ? 12 : 14" />
+              </a>
             </div>
             <div class="mi-ep__title" :title="ep.name">
               E{{ String(ep.episode).padStart(2, "0")
@@ -692,6 +787,7 @@ const failedFaces = ref(new Set<string>());
               </PtStatusPill>
               <span
                 class="mi-ep__note"
+                :class="{ 'is-warn': ep.server_issue }"
                 :title="episodeNote(ep, seasonData!, now, ep.episode === nextUpcoming)">
                 {{ episodeNote(ep, seasonData!, now, ep.episode === nextUpcoming) }}
               </span>
@@ -703,12 +799,13 @@ const failedFaces = ref(new Set<string>());
               tone="info"
               :height="3" />
             <button
-              v-if="episodeAction(ep.state)"
+              v-if="episodeAction(ep)"
               type="button"
               class="mi-link mi-ep__act"
+              :disabled="ignoring && episodeAction(ep) === 'ignore'"
               :data-testid="`mi-ep-act-${ep.episode}`"
               @click="onEpisodeAction(ep)">
-              {{ episodeAction(ep.state) === "versions" ? "看版本" : "搜资源" }}
+              {{ episodeActionLabel(ep) }}
             </button>
           </div>
         </div>
@@ -1206,20 +1303,85 @@ const failedFaces = ref(new Set<string>());
   white-space: nowrap;
 }
 
+/* 说明一行省略；媒体服务器那一行有问题时后面跟「忽略」（不跟着省略） */
 .mi-nas__desc {
-  overflow: hidden;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
   font-size: var(--pt-fz-label);
   line-height: 1.3;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mi-nas__desc-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mi-nas__ignore {
+  flex: 0 0 auto;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: inherit;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.mi-nas__ignore:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.mi-nas__ignore:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .mi-nas--glass .mi-nas__desc {
   color: rgb(255 255 255 / 70%);
 }
 
+/* 深色大图上的 warn 用评分星的金色（画板 04：#F5B544），白卡上用 --pt-warn */
+.mi-nas--glass .mi-nas__desc.is-warn {
+  color: #f5b544;
+}
+
+/* 四行时最后一行不留行距，卡高 252 放得下 */
+.mi-nas--glass .mi-nas__row:last-of-type {
+  min-height: 0;
+}
+
 .mi-nas--card .mi-nas__desc {
   color: var(--pt-t3);
+}
+
+.mi-nas--card .mi-nas__desc.is-warn,
+.mi-nas--card .mi-nas__icon.is-warn {
+  color: var(--pt-warn);
+}
+
+/* 手机白卡底部的「在 Jellyfin 播放」：soft 按钮 315×36，上 8（画板 08） */
+.mi-nas__play {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  margin: 8px 0 6px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: var(--pt-fz-body);
+  color: var(--pt-p);
+  cursor: pointer;
+  background: var(--pt-p-soft);
+  border: 0;
+  border-radius: 6px;
+}
+
+.mi-nas__play:hover {
+  background: var(--pt-p-soft-strong);
 }
 
 .mi-errors {
@@ -1417,6 +1579,29 @@ const failedFaces = ref(new Set<string>());
   object-fit: cover;
 }
 
+.mi-ep.is-playable {
+  cursor: pointer;
+}
+
+/* 播放圆：剧照正中 32（手机 28），黑 0.4 */
+.mi-ep__play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: auto;
+  color: #fff;
+  background: rgb(0 0 0 / 40%);
+  border-radius: 50%;
+}
+
+.mi-ep__play:hover {
+  background: rgb(0 0 0 / 55%);
+}
+
 .mi-ep__clock {
   margin-top: -6px;
 }
@@ -1473,6 +1658,10 @@ const failedFaces = ref(new Set<string>());
   color: var(--pt-t3);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mi-ep__note.is-warn {
+  color: var(--pt-warn);
 }
 
 .mi-ep__bar {
@@ -1965,6 +2154,11 @@ const failedFaces = ref(new Set<string>());
     left: 7px;
     width: 112px;
     height: 63px;
+  }
+
+  .mi-ep__play {
+    width: 28px;
+    height: 28px;
   }
 
   .mi-ep__title {

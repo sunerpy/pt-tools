@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/schedule"
@@ -182,7 +183,8 @@ func (s *Service) calendarEntries(ctx context.Context, from, to string) ([]Calen
 	return entries, errs, nil
 }
 
-// calendarLibrary 是整理记录里已入库的：剧集的各集（按 TMDB 编号、季、集），电影（按 TMDB 编号）。
+// calendarLibrary 是整理记录里已入库的：剧集的各集（按 TMDB 编号、季、集；开了「算作已入库」的媒体服务器里有的集也算），
+// 电影（按 TMDB 编号）。
 func (s *Service) calendarLibrary(ctx context.Context, tv, movies []int) (map[calKey]bool, map[int]bool, error) {
 	eps, films := map[calKey]bool{}, map[int]bool{}
 	db := s.cfg.DB.WithContext(ctx)
@@ -196,6 +198,14 @@ func (s *Service) calendarLibrary(ctx context.Context, tv, movies []int) (map[ca
 			for n := r.Episode; n > 0 && n <= max(r.EpisodeEnd, r.Episode); n++ {
 				eps[calKey{r.TMDBID, r.Season, n}] = true
 			}
+		}
+		// 开了「算作已入库」的媒体服务器里有的集也算（读不到索引时不算，不挡日历）
+		counted, err := serverindex.CountedEpisodes(ctx, s.cfg.DB, tv)
+		if err != nil {
+			s.cfg.Logger.Debugf("[订阅] 读取媒体服务器的索引失败（日历不算服务器里的集）: %v", err)
+		}
+		for k := range counted {
+			eps[calKey{k.TMDBID, k.Season, k.Episode}] = true
 		}
 	}
 	if len(movies) > 0 {

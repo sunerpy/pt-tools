@@ -82,7 +82,7 @@ func TestEmby(t *testing.T) {
 
 	info, err := c.Test(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, Info{Name: "家里的 Emby", Version: "4.8.10.0"}, info)
+	assert.Equal(t, Info{Name: "家里的 Emby", Version: "4.8.10.0", ID: "x"}, info, "服务器编号也读出来（拼打开链接）")
 
 	require.NoError(t, c.RefreshPaths(ctx, []string{"/data/movies/奥本海默 (2023)", "/data/tv/最后生还者 (2023)"}))
 	require.NoError(t, c.RefreshPaths(ctx, nil), "没有目录时不发请求")

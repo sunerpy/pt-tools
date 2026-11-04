@@ -9,8 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -144,15 +147,37 @@ type ItemTorrent struct {
 	Reason         string  `json:"reason"`
 }
 
-// ItemDetail 是条目详情页的数据。Errors 是没取到的部分（演职员、各季、推荐、某个下载器），其余照样给。
+// ItemDetail 是条目详情页的数据。Errors 是没取到的部分（演职员、各季、推荐、某个下载器、媒体服务器的索引），其余照样给。
 type ItemDetail struct {
 	Item            ItemInfo           `json:"item"`
 	Seasons         []ItemSeason       `json:"seasons"`
 	NAS             ItemNAS            `json:"nas"`
+	Servers         []ItemServer       `json:"servers"`
 	Subscriptions   []ItemSubscription `json:"subscriptions"`
 	Torrents        []ItemTorrent      `json:"torrents"`
 	Recommendations []ExploreItem      `json:"recommendations"`
 	Errors          []string           `json:"errors"`
+}
+
+// ItemServer 是一台媒体服务器里有没有这一部（「你的 NAS 上」的媒体服务器那一行与「在 Jellyfin 播放」）：开着、索引开着、
+// 同步过的服务器才列。剧集写服务器里有几集与各季几集；Removed 是 pt-tools 整理过、服务器里删了、还没处理的。
+type ItemServer struct {
+	ServerID uint              `json:"server_id"`
+	Name     string            `json:"name"`
+	Kind     string            `json:"kind"`
+	SyncedAt *time.Time        `json:"synced_at,omitempty"`
+	Have     bool              `json:"have"`
+	Episodes int               `json:"episodes,omitempty"`
+	Seasons  []ItemSeasonHave  `json:"seasons,omitempty"`
+	OpenURL  string            `json:"open_url,omitempty"`
+	Removed  []ItemServerIssue `json:"removed"`
+}
+
+// ItemServerIssue 是一个 server_removed 问题（剧集带季集）。
+type ItemServerIssue struct {
+	ID      uint `json:"id"`
+	Season  int  `json:"season,omitempty"`
+	Episode int  `json:"episode,omitempty"`
 }
 
 // Item 是一部电影或剧集的详情（见 ItemDetail）。TMDB 上没有这个条目时返回 tmdb.ErrNotFound。
@@ -173,7 +198,7 @@ func (s *Service) Item(ctx context.Context, kind string, id int) (*ItemDetail, e
 	}
 	out := &ItemDetail{
 		Item:    itemInfo(kind, d),
-		Seasons: []ItemSeason{}, Subscriptions: []ItemSubscription{}, Torrents: []ItemTorrent{}, Recommendations: []ExploreItem{},
+		Seasons: []ItemSeason{}, Servers: []ItemServer{}, Subscriptions: []ItemSubscription{}, Torrents: []ItemTorrent{}, Recommendations: []ExploreItem{},
 		Errors: []string{},
 	}
 	out.NAS.Library = ItemLibrary{Seasons: []ItemSeasonHave{}, Libraries: []string{}}
@@ -207,6 +232,12 @@ func (s *Service) Item(ctx context.Context, kind string, id int) (*ItemDetail, e
 		s.itemSeasons(ctx, c, out, d, subs, hist)
 	}
 
+	if servers, serr := itemServers(ctx, s.cfg.DB, kind, id); serr != nil {
+		out.Errors = append(out.Errors, "媒体服务器的索引没读到："+serr.Error())
+	} else {
+		out.Servers = servers
+	}
+
 	torrents, errs, err := s.itemTorrents(ctx, kind, id, subs, hist)
 	if err != nil {
 		return nil, err
@@ -221,6 +252,39 @@ func (s *Service) Item(ctx context.Context, kind string, id int) (*ItemDetail, e
 		out.Errors = append(out.Errors, merr.Error())
 	} else {
 		out.Recommendations = items
+	}
+	return out, nil
+}
+
+// itemServers 是各台媒体服务器里有没有这一部（见 ItemServer）。
+func itemServers(ctx context.Context, db *gorm.DB, kind string, id int) ([]ItemServer, error) {
+	pres, err := serverindex.Lookup(ctx, db, kind, id)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := serverindex.ItemIssues(ctx, db, kind, id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ItemServer, 0, len(pres))
+	for _, p := range pres {
+		v := ItemServer{ServerID: p.Server.ID, Name: p.Server.Name, Kind: p.Server.Kind, SyncedAt: p.Server.IndexedAt, Removed: []ItemServerIssue{}}
+		v.Have = p.ItemID != "" || len(p.Episodes) > 0
+		if p.ItemID != "" {
+			v.OpenURL = serverindex.OpenURL(p.Server, p.ItemID)
+		}
+		if kind == models.MediaKindTV {
+			v.Episodes = serverindex.EpisodeCount(p.Episodes)
+			for _, sn := range serverindex.SeasonsOf(p.Episodes) {
+				v.Seasons = append(v.Seasons, ItemSeasonHave{Number: sn[0], Have: sn[1]})
+			}
+		}
+		for _, is := range issues {
+			if is.ServerID == p.Server.ID {
+				v.Removed = append(v.Removed, ItemServerIssue{ID: is.ID, Season: is.Season, Episode: is.Episode})
+			}
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }
@@ -276,6 +340,23 @@ func historyEpisodes(hist []models.MediaTransferHistory) map[int]map[int]bool {
 	return out
 }
 
+// countedSeasons 是开了「算作已入库」的媒体服务器里这部剧有的集（季 → 集）。读不到索引时当作没有（记日志），不挡详情。
+func (s *Service) countedSeasons(ctx context.Context, tmdbID int) map[int]map[int]bool {
+	keys, err := serverindex.CountedEpisodes(ctx, s.cfg.DB, []int{tmdbID})
+	if err != nil {
+		s.cfg.Logger.Debugf("[订阅] 读取媒体服务器的索引失败（季的已入库只算整理记录）: %v", err)
+		return nil
+	}
+	out := map[int]map[int]bool{}
+	for k := range keys {
+		if out[k.Season] == nil {
+			out[k.Season] = map[int]bool{}
+		}
+		out[k.Season][k.Episode] = true
+	}
+	return out
+}
+
 // itemLibrary 填库里的情况（不含每季的集数，见 itemSeasons）。
 func (s *Service) itemLibrary(ctx context.Context, out *ItemDetail, hist []models.MediaTransferHistory) error {
 	lib := &out.NAS.Library
@@ -317,8 +398,10 @@ func versionLabel(m meta.Meta) string {
 }
 
 // itemSeasons 填剧集的各季与每季入库了几集。TMDB 的季列表取不到（或是空的）时按详情里的季数列出，没有名字与集数。
+// 季 tab 的已入库和这一季的集卡一样，开了「算作已入库」的媒体服务器里有的集也算；「库里」那一行只算整理记录。
 func (s *Service) itemSeasons(ctx context.Context, c *tmdb.Client, out *ItemDetail, d *tmdb.Result, subs []models.MediaSubscription, hist []models.MediaTransferHistory) {
 	have := historyEpisodes(hist)
+	counted := s.countedSeasons(ctx, d.ID)
 	list, err := c.Seasons(ctx, d.ID)
 	if err != nil {
 		out.Errors = append(out.Errors, "各季的列表没取到："+err.Error())
@@ -340,8 +423,14 @@ func (s *Service) itemSeasons(ctx context.Context, c *tmdb.Client, out *ItemDeta
 			total = m
 		}
 		got := len(have[ss.Number])
+		tab := got
+		for ep := range counted[ss.Number] {
+			if !have[ss.Number][ep] {
+				tab++
+			}
+		}
 		out.Seasons = append(out.Seasons, ItemSeason{
-			Number: ss.Number, Name: ss.Name, EpisodeCount: total, AirDate: ss.AirDate, PosterPath: ss.PosterPath, Have: got,
+			Number: ss.Number, Name: ss.Name, EpisodeCount: total, AirDate: ss.AirDate, PosterPath: ss.PosterPath, Have: tab,
 		})
 		if ss.Number > 0 {
 			out.Item.EpisodesCount += total
@@ -782,7 +871,8 @@ type SeasonSubscription struct {
 }
 
 // SeasonEpisode 是一季里的一集：状态同按条目搜索（已入库、下载中、等版本、缺、没播；按播出时间追剧的，今天还没到播出时刻的写没播）；
-// 入库的带版本与体积，下载中的带进度。
+// 入库的带版本与体积，下载中的带进度。已入库的另带媒体服务器里的打开链接（服务器里有这一集时）或服务器里删了的问题；
+// Source 是 server 的是算作已入库的集（整理记录里没有、开了「算作已入库」的服务器 Server 里有）。
 type SeasonEpisode struct {
 	Episode int    `json:"episode"`
 	Name    string `json:"name,omitempty"`
@@ -797,6 +887,17 @@ type SeasonEpisode struct {
 	Size       int64      `json:"size,omitempty"`
 	Percent    float64    `json:"percent,omitempty"`
 	ETASeconds int64      `json:"eta_seconds,omitempty"`
+	Source     string     `json:"source,omitempty"`
+	Server     string     `json:"server,omitempty"`
+	OpenURL    string     `json:"open_url,omitempty"`
+	// ServerIssue 是已入库、媒体服务器里却删了的问题（还开着的）
+	ServerIssue *EpisodeIssue `json:"server_issue,omitempty"`
+}
+
+// EpisodeIssue 是一集的 server_removed 问题：编号（忽略时用）与哪台服务器。
+type EpisodeIssue struct {
+	ID     uint   `json:"id"`
+	Server string `json:"server"`
 }
 
 // SeasonDetail 是剧集一季的每一集。Errors 是没取到的部分（某个下载器的进度）。
@@ -882,6 +983,9 @@ func (s *Service) SeasonItem(ctx context.Context, id, n int) (*SeasonDetail, err
 			e.Version = versionLabel(s.parse(ctx, historyName(*st.lib), ""))
 			e.Size = st.lib.Size
 		}
+		if st.server != nil {
+			e.Source, e.Server = models.MediaEpisodeFromServer, st.server.Server.Name
+		}
 		if st.State == models.MediaEpisodeDownloading && st.dl.downloaderID != 0 && st.dl.hash != "" {
 			if t, ok := listFor(st.dl.downloaderID)[strings.ToLower(st.dl.hash)]; ok {
 				e.Percent = min(max(t.Progress, 0), 1) * 100
@@ -892,5 +996,45 @@ func (s *Service) SeasonItem(ctx context.Context, id, n int) (*SeasonDetail, err
 		}
 		out.Episodes = append(out.Episodes, e)
 	}
+	if err := seasonServers(ctx, s.cfg.DB, id, n, out.Episodes); err != nil {
+		out.Errors = append(out.Errors, "媒体服务器的索引没读到："+err.Error())
+	}
 	return out, nil
+}
+
+// seasonServers 给已入库的集写媒体服务器里的打开链接（服务器里有这一集时）与服务器里删了的问题。
+func seasonServers(ctx context.Context, db *gorm.DB, id, n int, eps []SeasonEpisode) error {
+	hits, err := serverindex.SeasonEpisodes(ctx, db, id, n, false)
+	if err != nil {
+		return err
+	}
+	issues, err := serverindex.ItemIssues(ctx, db, models.MediaKindTV, id)
+	if err != nil {
+		return err
+	}
+	servers, err := serverindex.Servers(ctx, db, false)
+	if err != nil {
+		return err
+	}
+	names := map[uint]string{}
+	for _, srv := range servers {
+		names[srv.ID] = srv.Name
+	}
+	for i := range eps {
+		e := &eps[i]
+		if e.State != models.MediaEpisodeLibrary {
+			continue
+		}
+		if hit, ok := hits[e.Episode]; ok {
+			e.OpenURL = serverindex.OpenURL(hit.Server, hit.ItemID)
+			continue
+		}
+		for _, is := range issues {
+			if name, ok := names[is.ServerID]; ok && is.Season == n && is.Episode == e.Episode {
+				e.ServerIssue = &EpisodeIssue{ID: is.ID, Server: name}
+				break
+			}
+		}
+	}
+	return nil
 }

@@ -187,6 +187,8 @@ const (
 	MediaEpisodeFromLibrary      = "library"
 	MediaEpisodeFromSubscription = "subscription"
 	MediaEpisodeFromDownloader   = "downloader"
+	// MediaEpisodeFromServer 是整理记录里没有、开了「算作已入库」的媒体服务器里有（Ref 是「服务器编号:条目编号」）
+	MediaEpisodeFromServer = "server"
 )
 
 // MediaSubscriptionEpisode 是追剧台账里的一集：由入库记录、订阅的种子与下载器里的种子合成，只由重建台账写；

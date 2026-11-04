@@ -5,6 +5,7 @@ import type {
   ItemDetail,
   ItemEpisodeState,
   ItemInfo,
+  ItemServer,
   ItemSubscription,
   ItemTorrent,
   MediaKind,
@@ -13,6 +14,7 @@ import type {
   SubscriptionStatus,
 } from "@/api";
 import { shortSize } from "@/utils/entrySearch";
+import { formatShortDateTime } from "@/utils/format";
 import { CLASSIFY_COUNTRIES, mediaKindLabel } from "@/utils/media";
 import type { RouteLocationRaw } from "vue-router";
 
@@ -197,13 +199,58 @@ export function pickSubscription(
 }
 
 export interface NasLine {
-  key: "library" | "seeding" | "subscription";
+  key: "library" | "seeding" | "subscription" | "server";
   icon: string;
   title: string;
   desc: string;
+  /** 媒体服务器那一行：有 pt-tools 整理过、服务器里没了的（说明用 warn 色，后面是「忽略」）；issues 是要忽略的问题 */
+  warn?: boolean;
+  issues?: number[];
 }
 
-/** 「你的 NAS 上」的三行（媒体服务器那一行在 M6 加） */
+/** 「你的 NAS 上」第 4 行看的那台服务器：有没处理的问题的、服务器里有这一部的、第一台 */
+export function nasServer(d: ItemDetail): ItemServer | null {
+  const list = d.servers ?? [];
+  return list.find((s) => s.removed.length) ?? list.find((s) => s.have) ?? list[0] ?? null;
+}
+
+/** 「在 Jellyfin 播放」：第一台有这一部、给了打开链接的服务器 */
+export function playTarget(d: ItemDetail): { name: string; url: string } | null {
+  const s = (d.servers ?? []).find((x) => x.have && x.open_url);
+  return s ? { name: s.name, url: s.open_url! } : null;
+}
+
+const code = (season?: number, episode?: number) =>
+  `S${String(season ?? 0).padStart(2, "0")}E${String(episode ?? 0).padStart(2, "0")}`;
+
+/** 媒体服务器那一行：「Jellyfin 已入库 17 集」；服务器里删了的写「S02E03 在服务器里被删了」，没有时写同步时间 */
+export function serverLine(kind: MediaKind, s: ItemServer, now = new Date()): NasLine {
+  let title = `${s.name} 里没有`;
+  if (s.have) title = kind === "tv" ? `${s.name} 已入库 ${s.episodes ?? 0} 集` : `${s.name} 已入库`;
+  const removed = s.removed;
+  if (removed.length) {
+    let desc = "在服务器里被删了";
+    if (kind === "tv") {
+      const first = code(removed[0].season, removed[0].episode);
+      desc =
+        removed.length > 1
+          ? `${first} 等 ${removed.length} 集在服务器里被删了`
+          : `${first} 在服务器里被删了`;
+    }
+    return {
+      key: "server",
+      icon: "monitor",
+      title,
+      desc,
+      warn: true,
+      issues: removed.map((r) => r.id),
+    };
+  }
+  const desc = s.synced_at ? `${formatShortDateTime(s.synced_at, now)} 同步` : "";
+  return { key: "server", icon: "monitor", title, desc };
+}
+
+/** 「你的 NAS 上」的四行：库里、做种、订阅、媒体服务器（同步过索引的服务器才有第 4 行） */
 export function nasLines(d: ItemDetail, sub: ItemSubscription | null): NasLine[] {
   const kind = d.item.media_type;
   const lib = d.nas.library;
@@ -228,7 +275,7 @@ export function nasLines(d: ItemDetail, sub: ItemSubscription | null): NasLine[]
   } else if (seed.lowest_ratio !== undefined && seed.count > 0) {
     seedDesc = `分享率最低 ${seed.lowest_ratio.toFixed(2)}`;
   }
-  return [
+  const lines: NasLine[] = [
     { key: "library", icon: "folder-open", title: libTitle, desc: libDesc },
     {
       key: "seeding",
@@ -243,6 +290,9 @@ export function nasLines(d: ItemDetail, sub: ItemSubscription | null): NasLine[]
       desc: sub ? lockText(sub.lock) || "没开版本锁" : "",
     },
   ];
+  const srv = nasServer(d);
+  if (srv) lines.push(serverLine(kind, srv));
+  return lines;
 }
 
 const EP_STATE: Record<ItemEpisodeState, { label: string; tone: Tone }> = {
@@ -330,6 +380,8 @@ export function episodeNote(
 ): string {
   switch (ep.state) {
     case "library":
+      if (ep.server_issue) return `${ep.server_issue.server} 里没有了`;
+      if (ep.source === "server" && ep.server) return `${ep.server} 里有`;
       return [ep.version, ep.size ? shortSize(ep.size) : ""].filter(Boolean).join(" · ");
     case "downloading": {
       if (ep.percent === undefined) return ep.site ? `在 ${ep.site} 下载` : "";
@@ -353,11 +405,23 @@ export function episodeNote(
   return "";
 }
 
-/** 集卡右上的动作：等版本的「看版本」、缺的「搜资源」 */
-export function episodeAction(state: string): "versions" | "search" | "" {
-  if (state === "waiting_version") return "versions";
-  if (state === "missing") return "search";
+/** 集卡右上的动作：等版本的「看版本」、缺的「搜资源」、媒体服务器里删了的「忽略」 */
+export function episodeAction(ep: SeasonEpisode): "versions" | "search" | "ignore" | "" {
+  if (ep.state === "waiting_version") return "versions";
+  if (ep.state === "missing") return "search";
+  if (ep.state === "library" && ep.server_issue) return "ignore";
   return "";
+}
+
+const EP_ACTION_LABEL = { versions: "看版本", search: "搜资源", ignore: "忽略", "": "" } as const;
+
+export function episodeActionLabel(ep: SeasonEpisode): string {
+  return EP_ACTION_LABEL[episodeAction(ep)];
+}
+
+/** 集卡上的播放圆：已入库、媒体服务器里有这一集时 */
+export function episodePlayURL(ep: SeasonEpisode): string {
+  return ep.state === "library" && !ep.server_issue ? (ep.open_url ?? "") : "";
 }
 
 /**

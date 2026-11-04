@@ -350,6 +350,9 @@ func NewDBWithVersionAndHooks(
 		// 种子黑名单与等免费（媒体中心 M2b）
 		&MediaTorrentBlock{},
 		&FreeWatch{},
+		// 媒体服务器索引与待处理问题（媒体中心 M6）
+		&MediaServerItem{},
+		&MediaIssue{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

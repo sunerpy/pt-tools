@@ -381,9 +381,9 @@ func logMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(sr, r)
 		d := time.Since(start).Milliseconds()
 		if sr.status >= 400 {
-			global.GetSlogger().Warnf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, r.URL.Path, sr.status, d, r.RemoteAddr)
+			global.GetSlogger().Warnf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, logPath(r.URL.Path), sr.status, d, r.RemoteAddr)
 		} else {
-			global.GetSlogger().Debugf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, r.URL.Path, sr.status, d, r.RemoteAddr)
+			global.GetSlogger().Debugf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, logPath(r.URL.Path), sr.status, d, r.RemoteAddr)
 		}
 	})
 }

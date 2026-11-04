@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -63,7 +64,7 @@ type Downloaders interface {
 	List(ctx context.Context) ([]models.DownloaderSetting, error)
 }
 
-// Notice 是一条入库通知。Key 相同的只发一次。
+// Notice 是一条入库通知（或媒体服务器的播放通知）。Key 相同的只发一次。
 type Notice struct {
 	Key        string
 	Title      string
@@ -71,7 +72,12 @@ type Notice struct {
 	ChannelIDs []uint
 	// Event 是这条通知对应的事件（消息模板用）
 	Event *notify.Event
+	// Kind 是通知的种类：空串是入库（organized），NoticePlayback 是播放
+	Kind string
 }
+
+// NoticePlayback 是播放通知的种类。
+const NoticePlayback = "playback"
 
 // Notifier 发入库通知（生产环境写 MonitorNotificationLog，由现有的投递器发出）。
 type Notifier func(ctx context.Context, n Notice) error
@@ -139,6 +145,10 @@ type Service struct {
 	rt realtime
 	// imp 是导入已有媒体库的扫描（见 importer.go）
 	imp importer
+	// idx 是媒体服务器索引的同步排期，hooks 是 Webhook 的限流，hookSeq 是播放通知的序号（见 index.go、webhook.go）
+	idx     indexState
+	hooks   hookLimiter
+	hookSeq atomic.Uint64
 
 	// timesMu 保护下面三个时间（见 Runs）：scanAt 是上一次定期扫描；watchTick 是后台节拍上一次做目录监控扫描
 	// （按它排下一次，没有开着的目录时也算），watchAt 是其中真的扫了目录的那一次（页面上的「上次」）
@@ -180,6 +190,7 @@ func New(cfg Config) *Service {
 		backoff:  map[string]backoffState{},
 		retrying: map[uint]bool{},
 		rt:       realtime{sync: make(chan chan struct{}, 1)},
+		idx:      newIndexState(),
 	}
 }
 

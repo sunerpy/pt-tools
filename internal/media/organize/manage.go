@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/metadata"
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/server"
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -464,13 +466,17 @@ func (s *Service) pathMaps(ctx context.Context, dlID uint) ([]models.DownloaderP
 	return maps, nil
 }
 
-// ServerView 是给界面看的媒体服务器：Token 只说有没有。
+// ServerView 是给界面看的媒体服务器：Token 只说有没有，Webhook 只说开没开（令牌只在生成时给一次）。
+// IndexHours 是索引的同步间隔（小时），0 是关着。
 type ServerView struct {
 	models.MediaServer
-	HasToken bool `json:"has_token"`
+	HasToken         bool   `json:"has_token"`
+	IndexHours       int    `json:"index_hours"`
+	Webhook          bool   `json:"webhook"`
+	PlaybackChannels []uint `json:"playback_channels"`
 }
 
-// ServerInput 是新建或修改媒体服务器的请求。Token 为空（nil）时保留原来的。
+// ServerInput 是新建或修改媒体服务器的请求。Token 为空（nil）时保留原来的；后面几项也一样，不给时不改（新建时用默认值）。
 type ServerInput struct {
 	Name         string  `json:"name"`
 	Kind         string  `json:"kind"`
@@ -480,25 +486,65 @@ type ServerInput struct {
 	RefreshMode  string  `json:"refresh_mode"`
 	LocalPrefix  string  `json:"local_prefix"`
 	ServerPrefix string  `json:"server_prefix"`
+	// PlayURL 是打开链接用的地址（浏览器能打开的那个）；空串用 URL
+	PlayURL *string `json:"play_url,omitempty"`
+	// IndexHours 是索引的同步间隔（小时，1–168），0 是关掉索引；新建时默认 DefaultIndexHours
+	IndexHours *int `json:"index_hours,omitempty"`
+	// CountLibrary 是追剧把这台服务器里有的集算作已入库
+	CountLibrary *bool `json:"count_library,omitempty"`
+	// ResumeUserID、ResumeUserName 是继续观看用的用户（Emby、Jellyfin）；空串不取继续观看
+	ResumeUserID   *string `json:"resume_user_id,omitempty"`
+	ResumeUserName *string `json:"resume_user_name,omitempty"`
+	// PlaybackChannels 是播放通知发往的通道；空的不发
+	PlaybackChannels *[]uint `json:"playback_channels,omitempty"`
+}
+
+// 索引的同步间隔。
+const (
+	DefaultIndexHours = 6
+	MaxIndexHours     = 168
+)
+
+// indexHours 是这台服务器的同步间隔（小时），0 是关着。
+func indexHours(r models.MediaServer) int {
+	switch {
+	case r.IndexOff:
+		return 0
+	case r.IndexHours <= 0:
+		return DefaultIndexHours
+	}
+	return r.IndexHours
 }
 
 func viewServer(r models.MediaServer) ServerView {
-	return ServerView{MediaServer: r, HasToken: r.TokenEncrypted != ""}
+	return ServerView{
+		MediaServer: r, HasToken: r.TokenEncrypted != "", IndexHours: indexHours(r), Webhook: r.WebhookTokenHash != "",
+		PlaybackChannels: decodeIDs(r.PlaybackChannels),
+	}
 }
 
-func (in ServerInput) clean() (models.MediaServer, error) {
+// cleanUserID 检查继续观看的用户编号：要拼进接口的路径，不能有斜杠、空格与引号。
+func cleanUserID(id string) error {
+	if len(id) > 64 || strings.ContainsAny(id, "/\\?#%\" \t\r\n") {
+		return fmt.Errorf("%w: 继续观看的用户编号不对", ErrInvalid)
+	}
+	return nil
+}
+
+// clean 检查请求并换成要写的行，第二个返回值是要写的列（给了的那几项）。
+func (in ServerInput) clean() (models.MediaServer, []string, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || utf8.RuneCountInString(name) > 64 {
-		return models.MediaServer{}, fmt.Errorf("%w: 名称不能为空，最多 64 个字", ErrInvalid)
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 名称不能为空，最多 64 个字", ErrInvalid)
 	}
 	switch in.Kind {
 	case models.MediaServerEmby, models.MediaServerJellyfin, models.MediaServerPlex:
 	default:
-		return models.MediaServer{}, fmt.Errorf("%w: 种类要选 emby、jellyfin 或 plex", ErrInvalid)
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 种类要选 emby、jellyfin 或 plex", ErrInvalid)
 	}
 	u, err := server.CheckURL(in.URL)
 	if err != nil {
-		return models.MediaServer{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return models.MediaServer{}, nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	mode := in.RefreshMode
 	switch mode {
@@ -506,15 +552,72 @@ func (in ServerInput) clean() (models.MediaServer, error) {
 		mode = models.MediaRefreshPath
 	case models.MediaRefreshPath, models.MediaRefreshLibrary:
 	default:
-		return models.MediaServer{}, fmt.Errorf("%w: 刷新方式要选 path 或 library", ErrInvalid)
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 刷新方式要选 path 或 library", ErrInvalid)
 	}
 	local, remote := strings.TrimSpace(in.LocalPrefix), strings.TrimSpace(in.ServerPrefix)
 	if (local == "") != (remote == "") || len(local) > 512 || len(remote) > 512 {
-		return models.MediaServer{}, fmt.Errorf("%w: 路径映射的两边要一起填（两边相同时都留空）", ErrInvalid)
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 路径映射的两边要一起填（两边相同时都留空）", ErrInvalid)
 	}
-	return models.MediaServer{
+	row := models.MediaServer{
 		Name: name, Kind: in.Kind, URL: u, Enabled: in.Enabled, RefreshMode: mode, LocalPrefix: local, ServerPrefix: remote,
-	}, nil
+	}
+	cols := []string{"name", "kind", "url", "enabled", "refresh_mode", "local_prefix", "server_prefix", "updated_at"}
+	if in.PlayURL != nil {
+		if p := strings.TrimSpace(*in.PlayURL); p != "" {
+			if row.PlayURL, err = server.CheckURL(p); err != nil {
+				return models.MediaServer{}, nil, fmt.Errorf("%w: 打开链接用的地址：%w", ErrInvalid, err)
+			}
+		}
+		cols = append(cols, "play_url")
+	}
+	if in.IndexHours != nil {
+		h := *in.IndexHours
+		if h < 0 || h > MaxIndexHours {
+			return models.MediaServer{}, nil, fmt.Errorf("%w: 索引的同步间隔要在 0–%d 小时之间（0 是不同步）", ErrInvalid, MaxIndexHours)
+		}
+		row.IndexOff, row.IndexHours = h == 0, h
+		cols = append(cols, "index_off", "index_hours")
+	}
+	if in.CountLibrary != nil {
+		row.CountLibrary = *in.CountLibrary
+		cols = append(cols, "count_library")
+	}
+	if in.ResumeUserID != nil {
+		row.ResumeUserID = strings.TrimSpace(*in.ResumeUserID)
+		if err := cleanUserID(row.ResumeUserID); err != nil {
+			return models.MediaServer{}, nil, err
+		}
+		if in.ResumeUserName != nil {
+			row.ResumeUserName = strings.TrimSpace(*in.ResumeUserName)
+		}
+		if row.ResumeUserID == "" {
+			row.ResumeUserName = ""
+		}
+		if utf8.RuneCountInString(row.ResumeUserName) > 128 {
+			return models.MediaServer{}, nil, fmt.Errorf("%w: 用户名最多 128 个字", ErrInvalid)
+		}
+		cols = append(cols, "resume_user_id", "resume_user_name")
+	}
+	if row.Kind == models.MediaServerPlex {
+		if row.ResumeUserID != "" {
+			return models.MediaServer{}, nil, fmt.Errorf("%w: Plex 不支持继续观看，不用选用户", ErrInvalid)
+		}
+		if !slices.Contains(cols, "resume_user_id") {
+			cols = append(cols, "resume_user_id", "resume_user_name")
+		}
+	}
+	if in.PlaybackChannels != nil {
+		ids, err := cleanIDs(*in.PlaybackChannels, "播放通知的通道")
+		if err != nil {
+			return models.MediaServer{}, nil, err
+		}
+		if len(ids) > 0 {
+			b, _ := json.Marshal(ids)
+			row.PlaybackChannels = string(b)
+		}
+		cols = append(cols, "playback_channels")
+	}
+	return row, cols, nil
 }
 
 // Servers 列出媒体服务器。
@@ -530,13 +633,13 @@ func (s *Service) Servers(ctx context.Context) ([]ServerView, error) {
 	return out, nil
 }
 
-// SaveServer 新建（id 为 0）或修改媒体服务器。Token 加密保存；新建时必须填。
+// SaveServer 新建（id 为 0）或修改媒体服务器。Token 加密保存；新建时必须填。改了种类或地址时清掉这台的索引与问题
+// （多半换了一台服务器，旧的条目编号对不上），下一轮重新同步。
 func (s *Service) SaveServer(ctx context.Context, id uint, in ServerInput) (ServerView, error) {
-	row, err := in.clean()
+	row, cols, err := in.clean()
 	if err != nil {
 		return ServerView{}, err
 	}
-	cols := []string{"name", "kind", "url", "enabled", "refresh_mode", "local_prefix", "server_prefix", "updated_at"}
 	if in.Token != nil {
 		tok := strings.TrimSpace(*in.Token)
 		if tok == "" {
@@ -565,12 +668,27 @@ func (s *Service) SaveServer(ctx context.Context, id uint, in ServerInput) (Serv
 		}
 		err = db.Create(&row).Error
 	} else {
-		res := db.Model(&models.MediaServer{}).Where("id = ?", id).Select(cols).Updates(&row)
-		err = res.Error
-		if err == nil && res.RowsAffected == 0 {
-			return ServerView{}, ErrNotFound
-		}
+		err = db.Transaction(func(tx *gorm.DB) error {
+			var old models.MediaServer
+			if readErr := tx.Where("id = ?", id).Limit(1).Find(&old).Error; readErr != nil {
+				return fmt.Errorf("读取媒体服务器失败: %w", readErr)
+			}
+			if old.ID == 0 {
+				return ErrNotFound
+			}
+			if old.Kind != row.Kind || old.URL != row.URL {
+				if forgetErr := serverindex.Forget(tx, id); forgetErr != nil {
+					return forgetErr
+				}
+				row.ServerUID, row.IndexedAt, row.IndexError, row.IndexMovies, row.IndexSeries, row.IndexEpisodes = "", nil, "", 0, 0, 0
+				cols = append(cols, "server_uid", "indexed_at", "index_error", "index_movies", "index_series", "index_episodes")
+			}
+			return tx.Model(&models.MediaServer{}).Where("id = ?", id).Select(cols).Updates(&row).Error
+		})
 		row.ID = id
+	}
+	if errors.Is(err, ErrNotFound) {
+		return ServerView{}, err
 	}
 	if isUnique(err) {
 		return ServerView{}, fmt.Errorf("%w: 已经有叫「%s」的媒体服务器", ErrInvalid, row.Name)
@@ -585,18 +703,20 @@ func (s *Service) SaveServer(ctx context.Context, id uint, in ServerInput) (Serv
 	return viewServer(out), nil
 }
 
-// DeleteServer 删除媒体服务器。
+// DeleteServer 删除媒体服务器，连同它的索引与 server_removed 问题。
 func (s *Service) DeleteServer(ctx context.Context, id uint) error {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
-	res := s.cfg.DB.WithContext(ctx).Delete(&models.MediaServer{}, id)
-	if res.Error != nil {
-		return fmt.Errorf("删除媒体服务器失败: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Delete(&models.MediaServer{}, id)
+		if res.Error != nil {
+			return fmt.Errorf("删除媒体服务器失败: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return serverindex.Forget(tx, id)
+	})
 }
 
 // ServerTestInput 是测试媒体服务器的请求：ID 不为 0 且没填 Token 时用保存的 Token（可以先改地址再测）。
@@ -607,8 +727,8 @@ type ServerTestInput struct {
 	Token *string `json:"token,omitempty"`
 }
 
-// TestServer 访问一次媒体服务器，返回服务器名称与版本。
-func (s *Service) TestServer(ctx context.Context, in ServerTestInput) (server.Info, error) {
+// testClient 按测试请求建客户端（没填 Token 时用保存的）。
+func (s *Service) testClient(ctx context.Context, in ServerTestInput) (server.Client, error) {
 	token := ""
 	if in.Token != nil {
 		token = strings.TrimSpace(*in.Token)
@@ -616,23 +736,41 @@ func (s *Service) TestServer(ctx context.Context, in ServerTestInput) (server.In
 	if token == "" && in.ID > 0 {
 		var row models.MediaServer
 		if err := s.cfg.DB.WithContext(ctx).Where("id = ?", in.ID).Limit(1).Find(&row).Error; err != nil {
-			return server.Info{}, fmt.Errorf("读取媒体服务器失败: %w", err)
+			return nil, fmt.Errorf("读取媒体服务器失败: %w", err)
 		}
 		if row.ID == 0 {
-			return server.Info{}, ErrNotFound
+			return nil, ErrNotFound
 		}
 		if row.TokenEncrypted != "" {
 			var err error
 			if token, err = s.cfg.Cipher.Decrypt(row.TokenEncrypted); err != nil {
-				return server.Info{}, fmt.Errorf("解密 Token 失败: %w", err)
+				return nil, fmt.Errorf("解密 Token 失败: %w", err)
 			}
 		}
 	}
 	c, err := server.New(server.Config{Kind: in.Kind, URL: in.URL, Token: token, HTTPClient: s.cfg.ServerHTTP})
 	if err != nil {
-		return server.Info{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	return c, nil
+}
+
+// TestServer 访问一次媒体服务器，返回服务器名称与版本。
+func (s *Service) TestServer(ctx context.Context, in ServerTestInput) (server.Info, error) {
+	c, err := s.testClient(ctx, in)
+	if err != nil {
+		return server.Info{}, err
 	}
 	return c.Test(ctx)
+}
+
+// ServerUsers 列出媒体服务器的用户（选继续观看用哪个用户；请求同测试连接）。Plex 回 server.ErrUnsupported。
+func (s *Service) ServerUsers(ctx context.Context, in ServerTestInput) ([]server.User, error) {
+	c, err := s.testClient(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return c.Users(ctx)
 }
 
 // serverClient 按保存的配置建客户端。

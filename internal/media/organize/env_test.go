@@ -274,6 +274,7 @@ func newDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{},
 		&models.MediaLibrary{}, &models.MediaPathMap{}, &models.MediaServer{}, &models.MediaOrganizeSetting{}, &models.MediaReplaceJournal{}, &models.MediaWatchDir{},
+		&models.MediaServerItem{}, &models.MediaIssue{},
 		&models.MediaTransferHistory{}, &models.TorrentInfo{}, &models.TorrentInfoArchive{}, &models.DownloaderSetting{}, &models.DownloaderDirectory{},
 	))
 	return db

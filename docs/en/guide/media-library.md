@@ -294,19 +294,95 @@ NFO files and images come from TMDB by default. Data sources (数据来源) swit
 
 ## Media servers
 
-After organising, pt-tools asks the media servers to scan the new folders. Organising also works without a media server; the server then scans on its own schedule.
+After organising, pt-tools asks the media servers to scan the new folders. For servers with a synced index, the title details page shows whether the server has the title, with a link to play it there. Organising also works without a media server; the server then scans on its own schedule.
 
-| Field         | Description                                                                                                                             |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Kind          | Emby, Jellyfin or Plex                                                                                                                  |
-| Address       | The full address, such as `http://192.168.1.10:8096` (`:32400` for Plex). Redirects are not followed                                    |
-| API key       | For Emby and Jellyfin, create one under "API keys" in the dashboard; for Plex, the X-Plex-Token. Stored encrypted and never shown again |
-| Refresh       | Scan only the organised folders (default), or refresh the whole library                                                                 |
-| Path prefixes | When the media server sees different paths, fill in both prefixes, for example pt-tools' `/media` is `/data/media` in Emby              |
+| Field                                        | Description                                                                                                                                                                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kind                                         | Emby, Jellyfin or Plex                                                                                                                                                                                   |
+| Address                                      | The full address, such as `http://192.168.1.10:8096` (`:32400` for Plex). Redirects are not followed                                                                                                     |
+| API key                                      | For Emby and Jellyfin, create one under "API keys" in the dashboard; for Plex, the X-Plex-Token. Stored encrypted and never shown again                                                                  |
+| Refresh                                      | Scan only the organised folders (default), or refresh the whole library                                                                                                                                  |
+| Path prefixes                                | When the media server sees different paths, fill in both prefixes, for example pt-tools' `/media` is `/data/media` in Emby                                                                               |
+| Address for opening links (打开链接用的地址) | The address that "Play in Jellyfin" on the details page opens. Fill it in when the browser cannot open the address above (a container name such as `http://jellyfin:8096`); empty uses the address above |
+| Index interval (索引间隔)                    | How often the [index](#index) is synced, in hours: 6 by default, at most 168; 0 turns the index off                                                                                                      |
+| Continue-watching user (继续观看的用户)      | Emby and Jellyfin only: click Load users (读取用户) to read the users from the server and pick one. See [Continue watching](#continue-watching)                                                          |
+| Count server episodes as in the library      | Off by default; see [Counting server episodes](#counting-server-episodes)                                                                                                                                |
+| Webhook                                      | Generate the address while editing a saved server; see [Webhook](#webhook)                                                                                                                               |
+| Playback notifications (播放通知)            | Pick channels to be notified when the webhook reports playback starting or stopping; see [Playback notifications](#playback-notifications)                                                               |
 
-Click Test (测试) to check the address and key. The list shows the result of the last notification; a failed notification does not affect organising. With path prefixes set, a folder outside them is not sent to that server as a pt-tools path; the list says why.
+Click Test (测试) to check the address and key. The list shows the result of the last notification and the state of the index; a failed notification does not affect organising. With path prefixes set, a folder outside them is not sent to that server as a pt-tools path; the list says why.
 
-When Jellyfin scans only the organised folders, scan a newly created, empty library in Jellyfin once first: Jellyfin walks up the path to find the item to refresh, and in a library with no items it finds none, so nothing is refreshed. After that first scan, organised titles show up on their own.
+When Jellyfin scans only the organised folders, scan the library in Jellyfin once after the first title is organised into an empty library. Jellyfin walks up the path to a folder it knows, and it only knows a library's folder after scanning it with something inside (scanning it while empty does not count); until then nothing is refreshed, and Jellyfin's real-time monitoring does not watch that folder either. After that scan, organised titles show up on their own.
+
+### Index
+
+The index records which movies, shows and episodes the server has (TMDB, IMDb and TVDB IDs and file paths). It is used for:
+
+- the fourth line of "On your NAS" and Play in Jellyfin on the title details page, and the play button on each episode (see [title details](media-detail.md#on-your-nas));
+- continue watching on the home page, where an episode is matched to its show through the index;
+- [counting server episodes](#counting-server-episodes).
+
+How syncing works:
+
+- Each enabled server is synced in full every "index interval"; servers that were never synced are synced one minute after pt-tools starts. Sync (同步) in the list syncs at once and waits until it finishes.
+- With the [webhook](#webhook) on, a server that reports a new or removed item is synced 2 minutes later; reports within those 2 minutes are merged into one sync.
+- Nothing is written unless everything was read: when reading fails half way, takes over 10 minutes or exceeds 200,000 items, nothing is written, the list says why, and pt-tools tries again after 30 minutes. When items are added or removed on the server during a sync (pages may shift), only new and changed items are written and nothing is marked removed; the next sync catches up.
+- Items no longer on the server are first marked removed and cleared after 90 days. When the kind or address changes, or the server's ID changes (a different server), the old index of that server is cleared before the next sync.
+- File paths are turned into pt-tools paths with the path prefixes above; when that is not possible, only the server path is kept.
+
+### Removed from the server
+
+When a movie or an episode that pt-tools organised into the library disappears from the server (deleted, or its file is gone and the server dropped it on a scan), a sync records an issue:
+
+- the fourth line of "On your NAS" on the title details page shows `S02E03 在服务器里被删了` (removed from the server) in the warning colour, and that episode's card shows `Jellyfin 里没有了` (no longer in Jellyfin);
+- Ignore (忽略) stops the reminder for as long as the item stays away; when the server has the item again, the issue closes on its own.
+
+The matching organise record is found by path first (the server path turned into a pt-tools path equals the record's target path); when the path cannot be turned, movies are matched by TMDB ID, and episodes by TMDB ID, season and episode. Items pt-tools did not organise are not recorded.
+
+### Webhook
+
+With the webhook on, the server tells pt-tools about new items, removed items and playback: new and removed items sync that server's index 2 minutes later, and playback starting or stopping sends a [playback notification](#playback-notifications). The webhook itself neither changes the index nor deletes anything.
+
+Edit the server and click Generate address (生成地址) under Webhook. The address is shown only this once and looks like `http://<pt-tools address>/api/media/servers/1/webhook/<token>`; when the media server reaches pt-tools at a different address than the browser does (for example inside Docker), replace the first part. Regenerate address (重新生成地址) voids the old address, and Turn off (关掉) refuses everything. Only a digest of the token is stored, and logs mask it. Each server may send 60 requests a minute, with bodies of at most 1 MiB.
+
+Enter the address in the media server:
+
+| Server   | Where                                                                                                                                                                                                                                                                                                      |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Jellyfin | Install the Webhook plugin from Dashboard → Plugins → Catalog, restart, then Add Generic Destination in its settings: Webhook Url is this address; tick Item Added, Item Deleted, Playback Start and Playback Stop, the movie, series and episode item types, and Send All Properties (no template needed) |
+| Emby     | Add this address under Settings → Notifications (Webhooks) and pick the new media, deleted, playback start and playback stop events; either application/json or the form data type works                                                                                                                   |
+| Plex     | Add this address under Settings → Webhooks (needs Plex Pass)                                                                                                                                                                                                                                               |
+
+Jellyfin's Webhook plugin collects new and removed items and sends them about every minute and a half (playback starting and stopping goes out at once). Adding the minute Jellyfin itself collects changes before it scans and the 2 minutes pt-tools waits after a request arrives, an organised title reaches the index three to five minutes later. Right after installing the plugin the wait is longer: Jellyfin first runs the plugin's two scheduled tasks that send these one hour after it starts, as long as they have never run. To skip the wait, run Webhook Item Added Notifier and Webhook Item Deleted Notifier once under Dashboard → Scheduled Tasks in Jellyfin, then restart Jellyfin. The plugin keeps what it has collected in memory only: anything not yet sent when Jellyfin restarts is lost, and the scheduled sync at the index interval catches up.
+
+The list and the dialog show when the last request arrived and its event, so you can check the server is sending. A server that is not enabled only has its requests recorded, not handled.
+
+Jellyfin 12.2 with Webhook plugin 22.0.0.0 has been tested end to end; Emby and Plex only against their documentation and sample requests.
+
+### Continue watching
+
+Pick a continue-watching user in the server settings, and the home page lists the movies and episodes that user has not finished in Emby or Jellyfin (up to 12 per server); episodes show the season, episode number and title with a still, and open on the server when clicked. The server list on the media library page shows how many there are. Plex has no such option.
+
+What counts as unfinished follows the server's own rules: by default Jellyfin only keeps the playback position of videos at least 5 minutes long, and counts under 5% watched as unplayed and over 90% as played. For short dramas whose episodes run a few minutes, lower Minimum resume duration under Dashboard → Playback → Resume in Jellyfin.
+
+### Playback notifications
+
+After picking playback notification channels in the server settings, one message is sent each time the webhook reports playback starting or stopping, for example:
+
+```text
+▶️ 开始播放：最后生还者 S01E01「当你迷失在黑暗中」
+Jellyfin · admin · Living Room TV（Jellyfin Web）
+```
+
+Playing the same title again sends another one; when an episode's title is its file name (the server found no metadata), only the show and the episode number are written. Like other background notifications, messages are queued and go out within a minute; they wait out the channel's quiet hours and are retried on failure; the text can be changed under [message templates](notify-channels.md#message-templates), event `media.playback`. Nothing is sent without channels.
+
+### Counting server episodes
+
+With Count server episodes as in the library (把服务器里有的集算作已入库) on, episodes this server has count as in the library for followed shows: episodes with no organise record but present on the server show as in the library (source: media server) in the follow details and the title details, and are not downloaded. This suits titles put into the library outside pt-tools.
+
+- Only show episodes count. Movies ignore this option: movie subscriptions without upgrades already ask the media servers whether they have the movie.
+- For subscriptions with upgrades on, these episodes count as having no version (pt-tools cannot tell what the server's files are): a season pack that fits the quality profile is still downloaded and organised, and the server's own files stay, so the server ends up with two copies. Leave upgrades off for that show to avoid this.
+- With the option, the server or the index turned off, these episodes count as missing again.
 
 ## Notifications
 

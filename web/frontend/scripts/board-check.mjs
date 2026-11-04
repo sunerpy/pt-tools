@@ -3551,7 +3551,8 @@ if (doEntry) {
  * 条目详情不是带式表格页：88 高的页头带面包屑，下面是 1144 宽的大图与几个区块。画板 04 按 1440×1024 画
  * （侧栏 264 + 主区 1176），所以这一趟按 1440 量；手机按画板 08 量 375×812。剧集一部（长夜将尽第 2 季）、电影一部（沙丘2）。
  * 数字来自 docs/design/media-hub-board-spec.md 的 B04 / B08；块与块之间统一 24（偏离 ④）。
- * 依赖后面里程碑的部分不量：播放与媒体服务器那一行（M6）、删除（M7）；「你的 NAS 上」只有三行。
+ * 媒体服务器（M6）：「你的 NAS 上」第 4 行、「在 Jellyfin 播放」（手机在白卡底部）、集卡的播放圆与 E03「Jellyfin 里没有了」。
+ * 依赖后面里程碑的部分不量：删除（M7）；服务器里删了的动作先是「忽略」（画板写「处理」，那是 M7）。
  * 假数据是 board-fixtures.mjs 的 ITEM_TV / ITEM_TV_S2 / ITEM_MOVIE（图片路径都不给，走占位）。
  */
 const ITEM_TV_ROUTE = "/media/item/tv/100088?from=subscriptions&season=2";
@@ -3606,6 +3607,9 @@ const MEASURE_MI = `(() => {
     nas: box(nas),
     nasGlass: Boolean(nas?.classList.contains('mi-nas--glass')),
     nasRows: qa('[data-testid^="mi-nas-"]').map((el) => ({ key: el.getAttribute('data-testid'), t: txt(el), ...box(el) })),
+    play: box(q('[data-testid="mi-play"]')),
+    playText: txt(q('[data-testid="mi-play"]')),
+    playInNas: Boolean(nas && q('[data-testid="mi-play"]') && nas.contains(q('[data-testid="mi-play"]'))),
     seasons: box(q('[data-testid="mi-seasons"]')),
     seasonTitle: box(q('[data-testid="mi-seasons"] .mi-block__title')),
     tabs: qa('[data-testid^="mi-tab-"]').map((el) => ({ t: qa('span', el).map(txt).join(' '), on: el.classList.contains('is-on'), ...box(el) })),
@@ -3622,6 +3626,7 @@ const MEASURE_MI = `(() => {
       air: txt(q('.mi-ep__air', el)),
       state: txt(q('.mi-ep__state', el)),
       act: txt(q('.mi-ep__act', el)),
+      play: box(q('.mi-ep__play', el)),
     })),
     torTitle: box(q('[data-testid="mi-torrents"] .mi-block__title')),
     torTitleText: txt(q('[data-testid="mi-torrents"] .mi-block__title')),
@@ -3754,30 +3759,44 @@ if (doItem) {
       itemFail("hero.overview", `简介 ${m.overview.h} 高，画板两行省略 42`);
     expectBox("hero.credits", m.creditsBox, { x: 504, y: 332 }, 4);
     expectText("hero.credits", m.credits, "导演 陈默 · 主演 周屿、林晚晴、沈川、许曼");
-    /* 动作：y 264，从 224 起、间距 8，h32：搜资源 96、订阅（玻璃按钮）、重新刮削与更多两个方钮 32 */
+    /* 动作：y 264，从 224 起、间距 8，h32：搜资源 96、订阅与「在 Jellyfin 播放」（玻璃按钮）、重新刮削与更多两个方钮 32 */
     const acts = m.acts;
-    if (acts.map((a) => a.t).join("|") !== "搜资源|追剧中 · 第 2 季|重新刮削|更多") {
+    if (
+      acts.map((a) => a.t).join("|") !== "搜资源|追剧中 · 第 2 季|在 Jellyfin 播放|重新刮削|更多"
+    ) {
       itemFail("hero.acts", `动作是「${acts.map((a) => a.t).join("、")}」`);
     } else {
-      const [find, sub, rescrape, more] = acts;
+      const [find, sub, play, rescrape, more] = acts;
       expectBox("hero.acts.search", find, { x: 504, y: 368, w: 96, h: 32 }, 2);
       expectBox("hero.acts.sub", sub, { x: 608, y: 368, h: 32 }, 2);
-      expectBox("hero.acts.rescrape", rescrape, { x: sub.x + sub.w + 8, y: 368, w: 32, h: 32 }, 2);
+      expectBox("hero.acts.play", play, { x: sub.x + sub.w + 8, y: 368, h: 32 }, 2);
+      expectBox(
+        "hero.acts.rescrape",
+        rescrape,
+        { x: play.x + play.w + 8, y: 368, w: 32, h: 32 },
+        2,
+      );
       expectBox("hero.acts.more", more, { x: rescrape.x + 40, y: 368, w: 32, h: 32 }, 2);
     }
-    /* 你的 NAS 上：868,44 248×252，玻璃底；三行（媒体服务器那一行 M6 才有），y 40 起、行距 51 */
+    /* 你的 NAS 上：868,44 248×252，玻璃底；四行，y 40 起、行距 51；第 4 行是媒体服务器（M6） */
     expectBox("nas", m.nas, { x: R - 28 - 248, y: 148, w: 248, h: 252 }, 2);
     if (!m.nasGlass) itemFail("nas", "1440 下「你的 NAS 上」应在大图里（玻璃底）");
     const nasText = m.nasRows.map((r) => r.t).join(" | ");
     expectText(
       "nas.rows",
       nasText,
-      "库里 S01 12/12 · S02 6/12剧集库 · 18 个文件 · 82.6 GB | 做种 4 个种子1 个 H&R 还差 2 天 | 追剧中 · 第 2 季版本锁 HHWEB 2160p",
+      "库里 S01 12/12 · S02 6/12剧集库 · 18 个文件 · 82.6 GB | 做种 4 个种子1 个 H&R 还差 2 天 | 追剧中 · 第 2 季版本锁 HHWEB 2160p | Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 忽略",
     );
-    if (m.nasRows.length === 3) {
+    if (m.nasRows.length === 4) {
       const ys = m.nasRows.map((r) => r.y - m.nas.y);
-      if (!near(ys[0], 40, 2) || !near(ys[1] - ys[0], 51, 2) || !near(ys[2] - ys[1], 51, 2))
-        itemFail("nas.rows", `三行在卡内 y ${ys.join("、")}，画板 40 起、行距 51`);
+      if (!near(ys[0], 40, 2) || ys.slice(1).some((y, i) => !near(y - ys[i], 51, 2)))
+        itemFail("nas.rows", `四行在卡内 y ${ys.join("、")}，画板 40 起、行距 51`);
+      const last = m.nasRows[3];
+      if (last.y + last.h > m.nas.y + m.nas.h - 8)
+        itemFail(
+          "nas.rows",
+          `第 4 行的底 ${last.y + last.h} 出了卡（卡底 ${m.nas.y + m.nas.h}，留 14）`,
+        );
     }
 
     /* 季与集：标题 280,468；季 tab 从 352 起、间距 8、h26；图例右对齐到 1424 */
@@ -3824,6 +3843,16 @@ if (doItem) {
       expectBox("eps[0].still", e0.still, { x: e0.x + 10, y: e0.y + 10, w: 128, h: 72 }, 1);
       expectBox("eps[0].title", e0.titleBox, { x: e0.x + 150, y: e0.y + 12 }, 3);
       expectText("eps[0].title", e0.title, "E01 · 归来");
+      /* 播放圆 58,30 32×32：只给已入库、服务器里有的集；E03 在服务器里被删了，写「Jellyfin 里没有了」、动作「忽略」 */
+      expectBox("eps[0].play", e0.play, { x: e0.x + 58, y: e0.y + 30, w: 32, h: 32 }, 1);
+      const e3 = m.eps[2];
+      if (e3.play) itemFail("eps[2].play", "服务器里删了的集不给播放圆");
+      if (!e3.state.includes("Jellyfin 里没有了") || e3.act !== "忽略")
+        itemFail("eps[2]", `服务器里删了的集写的是「${e3.state}」、动作「${e3.act}」`);
+      const noPlay = m.eps.filter((e, i) => i !== 2 && i < 6 && !e.play).map((e) => e.id);
+      if (noPlay.length)
+        itemFail("eps.play", `入库了、服务器里有的集没有播放圆：${noPlay.join("、")}`);
+      if (m.eps.slice(6).some((e) => e.play)) itemFail("eps.play", "没入库的集不该有播放圆");
       const e7 = m.eps[6];
       if (!e7.state.includes("下载中") || !e7.state.includes("63% · 还要 12 分钟"))
         itemFail("eps[6]", `下载中的集写的是「${e7.state}」`);
@@ -4059,9 +4088,25 @@ if (doItem) {
     }
     /* 「更多」在大图右上角（顶栏留给外壳，见落地偏离 40） */
     expectBox("hero.more", m.more, { y: 72 }, 4, true);
-    /* 你的 NAS 上：行卡 343 宽在 y 416；三行时 180 高（画板四行加播放 276，少一行减 46、没有播放减 50） */
-    expectBox("nas", m.nas, { x: 16, y: 416, w: cw, h: 180 }, 2, true);
+    /* 你的 NAS 上：行卡 343 宽在 y 416；四行加播放 276（画板 08，少一行减 46、没有播放减 50）；行 y 34 起、行距 46 */
+    expectBox("nas", m.nas, { x: 16, y: 416, w: cw, h: 276 }, 2, true);
     if (m.nasGlass) itemFail("nas", "手机上「你的 NAS 上」是大图下面的白卡", true);
+    if (m.nasRows.length !== 4) itemFail("nas.rows", `${m.nasRows.length} 行，画板 4 行`, true);
+    else {
+      const ys = m.nasRows.map((r) => r.y - m.nas.y);
+      if (!near(ys[0], 34, 2) || ys.slice(1).some((y, i) => !near(y - ys[i], 46, 2)))
+        itemFail("nas.rows", `四行在卡内 y ${ys.join("、")}，画板 34 起、行距 46`, true);
+      expectText(
+        "nas.server",
+        m.nasRows[3].t,
+        "Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 忽略",
+        true,
+      );
+    }
+    /* 播放：白卡里 14,226 的 soft 按钮 315×36 */
+    if (!m.playInNas) itemFail("nas.play", "手机的「在 Jellyfin 播放」要在白卡底部", true);
+    expectBox("nas.play", m.play, { x: 30, y: 416 + 226, w: cw - 28, h: 36 }, 2, true);
+    expectText("nas.play", m.playText, "在 Jellyfin 播放", true);
     /* 季与集：标题、横滑 tab（标题下 32）、图例（标题下 74）、收起行（标题下 100，343×44）、集卡（标题下 152，343×80，行距 88） */
     if (m.nas) expectGap("season.gap", m.nas.y + m.nas.h, m.seasonTitle, true);
     if (m.seasonTitle) {
@@ -4089,6 +4134,8 @@ if (doItem) {
           1,
           true,
         );
+        /* E07 起没入库：没有播放圆。展开以后看 E05 的播放圆（50,25 28×28）在探针里量 */
+        if (m.eps.some((e) => e.play)) itemFail("eps.play", "没入库的集不该有播放圆", true);
       }
     }
     /* 这一季的种子：行卡 343 宽，每个种子 64 */
@@ -4129,11 +4176,18 @@ if (doItem) {
         await wait(300);
         const open = document.querySelectorAll('.mi-ep').length;
         const label = (btn.textContent ?? '').trim();
+        const e5 = document.querySelector('[data-testid="mi-ep-5"]');
+        const p5 = e5?.querySelector('.mi-ep__play');
+        const er = e5?.getBoundingClientRect();
+        const pr = p5?.getBoundingClientRect();
+        const playOk = Boolean(er && pr) && Math.abs(pr.left - er.left - 50) <= 1 && Math.abs(pr.top - er.top - 25) <= 1 &&
+          Math.round(pr.width) === 28 && Math.round(pr.height) === 28;
         btn.click();
         await wait(300);
         const closed = document.querySelectorAll('.mi-ep').length;
-        const ok = open === 12 && label === '收起' && closed === 6;
-        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 展开 ' + open + '（' + label + '）收起 ' + closed;
+        const ok = open === 12 && label === '收起' && closed === 6 && playOk;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 展开 ' + open + '（' + label + '）收起 ' + closed +
+          ' E05 播放圆 ' + (pr ? Math.round(pr.left - er.left) + ',' + Math.round(pr.top - er.top) + ' ' + Math.round(pr.width) + '×' + Math.round(pr.height) : '无');
       })()`).catch((e) => `probe 失败：${e.message}`),
     );
     if (probeMiss(fold, "verdict=ok").length > 0) itemFail("probe.fold", `收起行：${fold}`, true);
