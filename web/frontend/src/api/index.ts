@@ -4597,6 +4597,43 @@ export interface ExplorePage {
   total_pages: number;
 }
 
+/**
+ * 探索页的列表：两边都有本周趋势、热门、高分；电影另有正在上映、即将上映，剧集另有正在播出、今天播出；
+ * discover 按出品国家与类型发现，search 按名字搜
+ */
+export type ExploreList =
+  | "trending"
+  | "popular"
+  | "top_rated"
+  | "now_playing"
+  | "upcoming"
+  | "on_the_air"
+  | "airing_today"
+  | "discover"
+  | "search";
+
+/** 番剧日历的一天：weekday 1 是星期一，7 是星期日 */
+export interface BangumiDay {
+  weekday: number;
+  name: string;
+  items: BangumiCalendarItem[];
+}
+
+/** 番剧日历里的一部动画（Bangumi 的条目） */
+export interface BangumiCalendarItem {
+  id: number;
+  name: string;
+  name_cn?: string;
+  air_date?: string;
+  /** 封面（Bangumi 的 https 图片地址） */
+  image?: string;
+  score?: number;
+  votes?: number;
+  rank?: number;
+  /** 在看的人数 */
+  watching?: number;
+}
+
 /** 按条目搜索的请求（POST /api/media/search，只读） */
 export interface MediaSearchInput {
   media_type: MediaKind;
@@ -5129,15 +5166,27 @@ export const subscribeApi = {
   doubanItems: (id: number) => api.get<DoubanItem[]>(`/api/media/douban-sources/${id}/items`),
   explore: (q: {
     kind: MediaKind;
-    list: "trending" | "popular" | "search";
+    list: ExploreList;
     page?: number;
     q?: string;
+    /** 按条件发现（list 是 discover）时的出品国家（例如 CN）与类型编号（几个用 | 隔开） */
+    country?: string;
+    genres?: string;
   }) => {
     const params = new URLSearchParams({ kind: q.kind, list: q.list });
     if (q.page) params.set("page", String(q.page));
     if (q.q) params.set("q", q.q);
+    if (q.country) params.set("country", q.country);
+    if (q.genres) params.set("genres", q.genres);
     return api.get<ExplorePage>(`/api/media/explore?${params.toString()}`);
   },
+  /** 番剧日历：Bangumi 的每日放送（星期一到星期日，缓存 6 小时） */
+  bangumiCalendar: () => api.get<{ days: BangumiDay[] }>("/api/media/explore/bangumi"),
+  /** 番剧日历里的一部在 TMDB 上对应的剧集；找不到时 404，错误里写明搜过的名字 */
+  bangumiTMDB: (id: number) =>
+    api.get<{ media_type: MediaKind; tmdb_id: number; title: string }>(
+      `/api/media/explore/bangumi/${id}`,
+    ),
   /** 按条目搜索：只读，不推送；站点多时要十几秒到一分钟 */
   searchMedia: (data: MediaSearchInput) => api.post<MediaSearchResult>("/api/media/search", data),
   /** 黑名单：全部拉黑的种子，新的在前 */

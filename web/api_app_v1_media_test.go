@@ -101,6 +101,8 @@ func TestAppSubscriptions(t *testing.T) {
 	assert.True(t, page.Items[0].Subscribed)
 	assert.Equal(t, http.StatusBadRequest, appAsWith(t, srv.appExplore, http.MethodGet, "/api/app/v1/explore?kind=book", "", "app:read").Code)
 	assert.Equal(t, http.StatusBadRequest, appAsWith(t, srv.appExplore, http.MethodGet, "/api/app/v1/explore?kind=movie&page=0", "", "app:read").Code)
+	assert.Equal(t, http.StatusBadRequest, appAsWith(t, srv.appExplore, http.MethodGet, "/api/app/v1/explore?kind=movie&list=now_playing", "", "app:read").Code,
+		"App API 只有契约里的三个列表")
 
 	require.Equal(t, http.StatusOK, appWithID(t, srv.appSubscriptionDelete, http.MethodDelete, "/api/app/v1/subscriptions/"+id, id, "").Code)
 	assert.Equal(t, http.StatusNotFound, appWithID(t, srv.appSubscriptionDelete, http.MethodDelete, "/api/app/v1/subscriptions/"+id, id, "").Code)

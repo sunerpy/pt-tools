@@ -637,6 +637,11 @@ func (s *Server) appExplore(w http.ResponseWriter, r *http.Request) {
 	if list == "" {
 		list = tmdb.ListTrending
 	}
+	// App API 的契约只有这三个列表（网页上的更多列表与按条件发现不在里面）
+	if list != tmdb.ListTrending && list != tmdb.ListPopular && list != subscribe.ExploreSearch {
+		appError(w, http.StatusBadRequest, "invalid_argument", "list 要选 trending、popular 或 search")
+		return
+	}
 	res, err := svc.Explore(r.Context(), q.Get("kind"), list, page, q.Get("q"))
 	if err != nil {
 		appSubscribeError(w, err)

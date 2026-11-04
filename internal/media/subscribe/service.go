@@ -123,6 +123,8 @@ type Config struct {
 	HTTP *http.Client
 	// DoubanBase 是豆瓣的地址（测试与 QA 换成假服务）
 	DoubanBase string
+	// Bangumi 是探索页番剧日历用的 Bangumi 客户端（为空时番剧日历回错误）
+	Bangumi BangumiAPI
 }
 
 // Service 是订阅服务。

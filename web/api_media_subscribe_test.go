@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/media/bangumi"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
@@ -61,6 +62,12 @@ func newSubscribeEnv(t *testing.T, opts ...func(*subscribe.Config)) (*Server, *h
 			_, _ = w.Write([]byte(`{"id":278,"results":[]}`))
 		case r.URL.Path == "/3/tv/1001/season/1":
 			_, _ = w.Write([]byte(`{"season_number":1,"air_date":"2026-01-01","episodes":[{"episode_number":1,"name":"第1期上","air_date":"2026-01-01"},{"episode_number":2,"name":"第1期下","air_date":"2026-01-01"}]}`))
+		case r.URL.Path == "/3/discover/tv":
+			assert.Equal(t, "JP", r.URL.Query().Get("with_origin_country"))
+			assert.Equal(t, "16", r.URL.Query().Get("with_genres"))
+			_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"results":[{"id":209867,"name":"葬送的芙莉莲","first_air_date":"2023-09-29","genre_ids":[16]}]}`))
+		case r.URL.Path == "/3/search/tv" && strings.Contains(r.URL.Query().Get("query"), "葬送"):
+			_, _ = w.Write([]byte(`{"results":[{"id":209867,"name":"葬送的芙莉莲","original_name":"葬送のフリーレン","first_air_date":"2023-09-29","genre_ids":[16]}]}`))
 		case r.URL.Path == "/3/search/movie" && strings.Contains(r.URL.Query().Get("query"), "肖申克"):
 			_, _ = w.Write([]byte(`{"results":[{"id":278,"title":"肖申克的救赎","release_date":"1994-09-23"}]}`))
 		case strings.HasPrefix(r.URL.Path, "/3/search/"):
@@ -116,6 +123,8 @@ var subscribeRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/media/douban-sources/1/fetch"},
 	{http.MethodGet, "/api/media/douban-sources/1/items"},
 	{http.MethodGet, "/api/media/explore"},
+	{http.MethodGet, "/api/media/explore/bangumi"},
+	{http.MethodGet, "/api/media/explore/bangumi/1"},
 	{http.MethodPost, "/api/media/search"},
 }
 
@@ -388,4 +397,43 @@ func TestSubscribeAPI_SchedulePreview(t *testing.T) {
 		code := serveAuthed(mux, http.MethodPost, "/api/media/subscriptions/schedule-preview", body).Code
 		assert.Contains(t, []int{http.StatusBadRequest, http.StatusNotFound}, code, body)
 	}
+}
+
+type fakeBangumiCal struct {
+	days []bangumi.CalendarDay
+	err  error
+}
+
+func (f fakeBangumiCal) Calendar(context.Context) ([]bangumi.CalendarDay, error) {
+	return f.days, f.err
+}
+
+// 探索页的按条件发现与番剧日历：日历按星期列出，点一部时找到 TMDB 上的剧集，找不到时 404；Bangumi 读不到时 502。
+func TestSubscribeAPI_ExploreMore(t *testing.T) {
+	cal := fakeBangumiCal{days: []bangumi.CalendarDay{{Weekday: 5, Name: "星期五", Items: []bangumi.CalendarItem{
+		{ID: 500001, Name: "葬送のフリーレン 第2期", NameCN: "葬送的芙莉莲 第二季", AirDate: "2026-01-16", Image: "https://lain.bgm.tv/c.jpg"},
+		{ID: 7, Name: "Nobody"},
+	}}}}
+	mux := newSubscribeServer(t, func(c *subscribe.Config) { c.Bangumi = cal })
+	w := serveAuthed(mux, http.MethodGet, "/api/media/explore?kind=tv&list=discover&country=JP&genres=16&page=1", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"title":"葬送的芙莉莲"`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/explore?kind=tv&list=discover&country=Japan", "").Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/explore?kind=tv&list=now_playing", "").Code, "剧集没有正在上映")
+
+	w = serveAuthed(mux, http.MethodGet, "/api/media/explore/bangumi", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"days":[{"weekday":5,"name":"星期五","items":[{"id":500001,"name":"葬送のフリーレン 第2期","name_cn":"葬送的芙莉莲 第二季"`)
+	w = serveAuthed(mux, http.MethodGet, "/api/media/explore/bangumi/500001", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"media_type":"tv","tmdb_id":209867,"title":"葬送的芙莉莲"}`, w.Body.String())
+	w = serveAuthed(mux, http.MethodGet, "/api/media/explore/bangumi/7", "")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "TMDB 上没找到")
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/explore/bangumi/x", "").Code)
+
+	down := newSubscribeServer(t, func(c *subscribe.Config) { c.Bangumi = fakeBangumiCal{err: errors.New("连不上 Bangumi")} })
+	w = serveAuthed(down, http.MethodGet, "/api/media/explore/bangumi", "")
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "读不到 Bangumi 的番剧日历：连不上 Bangumi")
 }

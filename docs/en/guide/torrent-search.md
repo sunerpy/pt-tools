@@ -65,7 +65,7 @@ One card is one release:
 
 Cards whose episodes are all in the library are folded; click one to open it.
 
-Pushing opens the same push dialog as keyword search. The push carries the title, so when the download completes, library organising uses that title instead of recognising the torrent name (see [library organising](media-library.md#which-files-are-organised)). Torrents that do not fit the profile have a Push anyway (仍然推送) button and can be pushed as well.
+Pushing opens the same push dialog as keyword search. The push carries the title, so when the download completes, library organising uses that title instead of recognising the torrent name (see [library organising](media-library.md#which-files-are-organised)). Torrents that do not fit the profile have a Push anyway (仍然推送) button and can be pushed as well. The dialog adds Create a folder per title (按条目建子目录), following the switch in the subscription settings by default: when on, the torrent goes into a folder named after the title under the save path (each downloader's default save path when none is given), see [per-title download folders](media-subscribe.md#per-title-download-folders); when a downloader's default save path cannot be read, the torrent is pushed to the original save path and the result says so.
 
 The bottom right of each card has Wait for free (等免费) and Don't want (不要), see [waiting for free](#waiting-for-free) and [blocking](#blocking) below.
 

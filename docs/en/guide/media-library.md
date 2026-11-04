@@ -132,7 +132,7 @@ Organising picks the item in this order, and the preview and organise history sa
 4. The item pt-tools recorded when it pushed the torrent (按推送时说明的条目): every torrent a subscription pushes carries one, so it still applies after the subscription is deleted;
 5. Otherwise recognition: the torrent name (and the site title as a subtitle when it differs), looking up the site's IMDb ID first when there is one.
 
-When the item from a subscription or a push is no longer on TMDB (merged or deleted), recognition is used instead and the organise record says so. Seasons and episodes are still read from each file name, not taken from the subscription.
+When the item from a subscription or a push is no longer on TMDB (merged or deleted), recognition is used instead and the organise record says so. Seasons and episodes are still read from each file name, not taken from the subscription. When the followed series uses an [episode group](media-subscribe.md#episode-groups), the season and episode in each file name of the series are first converted from the group to TMDB's default seasons, then named and scraped; an episode the group does not list keeps the season and episode from the file name, and the organise record says so. When the group cannot be read, nothing is organised this time and it is retried later.
 
 ## Discs
 
@@ -158,7 +158,7 @@ A movie's Blu-ray disc (BDMV folder) or DVD (VIDEO_TS folder) goes into the movi
 
 The organise settings show when the periodic scan and directory monitoring last ran and roughly when they run next (these times start over when pt-tools restarts, and the first round after start runs within a minute).
 
-Automatic organising and periodic scans only take torrents in the scope: downloaders, categories, tags and save paths (as the downloader sees them). An empty item means no limit; a filled one must match one of its values. Their automatic retries follow the current settings too: once the switch is turned off or the torrent is out of scope, they are not retried.
+Automatic organising and periodic scans only take torrents in the scope: downloaders, categories, tags and save paths (as the downloader sees them). An empty item means no limit; a filled one must match one of its values. When subscriptions use [per-title download folders](media-subscribe.md#per-title-download-folders), the save paths you fill in must include those folders. Their automatic retries follow the current settings too: once the switch is turned off or the torrent is out of scope, they are not retried.
 
 Manual organising shows a preview first: the recognized title, the chosen library and where each file goes. When the match is wrong, enter a TMDB ID (choose movie or TV) or pick another library of the same type, click Preview again (重新预览), then organise. The organise mode follows the library by default; under Organise mode (整理方式) in the dialog you can pick hard link, copy, symbolic link or move for this run only (the library setting stays as it is), and the preview updates right away. Moving still only organises paused torrents. A torrent organised before keeps the title it was organised with (the preview says 沿用之前整理用的条目); to change it, enter a TMDB ID or delete its records first. Copying large files can take a while; the dialog waits 20 seconds, the work continues in the background and the result appears in the history.
 

@@ -10,3 +10,6 @@ func qaTMDBImageURL() string { return "" }
 
 // qaDoubanURL 在正式构建里总是空串：豆瓣想看从豆瓣拉取。
 func qaDoubanURL() string { return "" }
+
+// qaBangumiURL 在正式构建里总是空串：番剧日历从 Bangumi 取。
+func qaBangumiURL() string { return "" }
