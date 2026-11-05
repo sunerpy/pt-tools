@@ -65,6 +65,8 @@ type Server struct {
 	qbitCompatCtl QbitCompatControl
 	// qbitCompatMu 让存设置与换监听一次只做一个（见 apiQbitCompatPut）
 	qbitCompatMu sync.Mutex
+	// servarr 是 Servarr 兼容入口（媒体中心 M10，Seerr 把 pt-tools 当成 Radarr、Sonarr 用）；为空时 /servarr/ 回 404
+	servarr http.Handler
 	// backupMu 让网页上的「立即备份」与上传恢复一次只做一个（见 api_backup.go）
 	backupMu sync.Mutex
 	// remote 是远程访问的主机端（M15）；为空时直连入口 404，设置接口回 503
@@ -256,6 +258,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerExtensionActionRoutes(mux)
 	s.registerTokenRoutes(mux)
 	s.registerQbitCompatRoutes(mux)
+	s.registerServarrRoutes(mux)
 	s.registerCleanupRoutes(mux)
 	s.registerBackupRoutes(mux)
 	s.registerAppV1Routes(mux)

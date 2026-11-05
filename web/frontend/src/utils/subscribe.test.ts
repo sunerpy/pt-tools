@@ -27,6 +27,8 @@ describe("订阅的文字", () => {
     expect(subStatus("pending")).toEqual({ label: "待确认", tone: "warn" });
     expect(subStatus("weird").label).toBe("weird");
     expect(sourceLabel("douban")).toBe("豆瓣想看");
+    expect(sourceLabel("servarr")).toBe("Seerr");
+    expect(sourceLabel("other")).toBe("other");
     expect(episodeState("missing").label).toBe("缺");
     expect(torrentStatus("replaced").label).toBe("已替换");
   });

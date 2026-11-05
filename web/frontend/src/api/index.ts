@@ -5345,7 +5345,8 @@ export type ApiTokenScope =
   | "app:config"
   | "mcp:read"
   | "mcp:write"
-  | "qbit:compat";
+  | "qbit:compat"
+  | "servarr";
 
 export interface ApiToken {
   id: number;

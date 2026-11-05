@@ -28,6 +28,7 @@
 - [手机 App](./mobile-app.md)：Android App 在外面也能看概览、种子、站点与订阅，按配对时给的权限暂停、删除、推送种子或管理订阅，也能和 AI 助手对话；从 1.0.0-rc.28 起，安装包和服务端发布在同一个 Release 里。App 里可以[编辑追剧与刷流任务](./mobile-app.md#追剧刷流与统计分享)、按周期看刷流收益、生成统计海报；界面是黑白配色，有明亮、暗黑、暖纸、石墨四套主题。
 - [远程访问](./remote-access.md)：手机扫网页上的二维码配对，App 先试直连，连不上再经 relay 连回 pt-tools；连接端到端加密，relay 只转发。默认用内置的托管 relay，也可以自建或关掉 relay 只用直连。
 - [API 令牌](./api-tokens.md)与 [App API](../reference/app-api.md)：脚本和客户端带令牌访问 `/api/app/v1/`，按权限范围读取或修改，不用保存网页的登录密码。
+- [Servarr 兼容入口](./servarr.md)：Seerr 可以把 pt-tools 当成 Radarr 与 Sonarr：请求的电影建成订阅，剧集请求的每一季建成追剧，订阅的状态与整理进库的文件回给 Seerr；在 Seerr 里删除只删订阅，不删文件与种子。兼容的是 Seerr 的固定版本（提交 `dca1af6a`）。
 - [MCP](./mcp.md)：Claude、Cursor、Cherry Studio 这类 MCP 客户端里的 AI 助手可以查看种子、下载器、站点数据、订阅与媒体库，识别种子标题，在你确认以后执行改动（包括管理订阅、整理入库）；改动先回预览（改以前、改以后与影响）。令牌勾了「配置」时还能读改 pt-tools 的配置，内置的 `pt-tools-config` 技能写明怎么改。
 
 ## 通知与 AI 助手

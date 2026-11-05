@@ -402,6 +402,10 @@ type SubscriptionInput struct {
 	Upgrade      bool     `json:"upgrade"`
 	// Pending 为真时建成待确认
 	Pending bool `json:"pending"`
+	// Paused 为真时建成暂停（Servarr 兼容入口：Seerr 加了不监控的条目）；只在新建时用，接口不收
+	Paused bool `json:"-"`
+	// Deferred 为真时建好以后不马上搜，下次搜索按定时排（Servarr 兼容入口：Seerr 设了不自动搜索）；只在新建时用，接口不收
+	Deferred bool `json:"-"`
 	// IncludeKeywords、ExcludeKeywords 是标题的包含词与排除词（见 models.MediaSubscription）：不传时新建为空、修改时不变
 	IncludeKeywords *string `json:"include_keywords,omitempty"`
 	ExcludeKeywords *string `json:"exclude_keywords,omitempty"`
@@ -585,8 +589,11 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 	row.ProfileID, row.Sites, row.DownloaderID = in.ProfileID, encodeList(sites), in.DownloaderID
 	row.Category, row.Tags, row.SavePath = strings.TrimSpace(in.Category), strings.TrimSpace(in.Tags), strings.TrimSpace(in.SavePath)
 	row.Status, row.Upgrade, row.Source = models.MediaSubActive, in.Upgrade, source
-	if in.Pending {
+	switch {
+	case in.Pending:
 		row.Status = models.MediaSubPending
+	case in.Paused:
+		row.Status = models.MediaSubPaused
 	}
 	if in.IncludeKeywords != nil {
 		row.IncludeKeywords = strings.TrimSpace(*in.IncludeKeywords)
@@ -634,6 +641,15 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 	}
 	now := s.cfg.Now()
 	row.CreatedAt, row.UpdatedAt, row.NextSearchAt = now, now, &now
+	if in.Deferred {
+		// 还没有台账：按播出时间的追剧排到一天以后，第一次搜完再按台账排
+		set, serr := s.Settings(ctx)
+		if serr != nil {
+			set.SearchIntervalHours = DefaultSearchIntervalHours
+		}
+		next := s.nextSearch(row, set, nil, now)
+		row.NextSearchAt = &next
+	}
 	if err := s.cfg.DB.WithContext(ctx).Create(row).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "UNIQUE") {
 			return nil, fmt.Errorf("%w: 已经订阅过了", ErrInvalid)

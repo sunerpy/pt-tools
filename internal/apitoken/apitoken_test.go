@@ -162,6 +162,7 @@ func TestHasScope(t *testing.T) {
 	assert.False(t, tok.Has(ScopeAppWrite))
 	assert.False(t, tok.Has("app:*"))
 	assert.True(t, ValidScope(ScopeQbitCompat))
+	assert.True(t, ValidScope(ScopeServarr))
 	assert.False(t, ValidScope("APP:READ"), "精确匹配")
 }
 

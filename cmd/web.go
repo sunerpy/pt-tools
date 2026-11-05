@@ -263,6 +263,8 @@ var webCmd = &cobra.Command{
 		// 兼容入口先建好、交给关闭流程，等信号处理装好以后才开始监听（见下面的 start）；没设监听地址时也建好，
 		// 网页上设了地址以后马上开
 		qbitCompat := newQbitCompat(global.GlobalDB.DB, srv, mgr, store, tokens, appAudit)
+		// Servarr 兼容入口（媒体中心 M10）：主端口的 /servarr/radarr、/servarr/sonarr，凭有 servarr 权限的令牌
+		wireServarr(global.GlobalDB.DB, srv, subscriber, organizer, mediaSvc, tokens, appAudit)
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}

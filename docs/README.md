@@ -56,6 +56,7 @@
 - [API 令牌](guide/api-tokens.md)：给手机 App 与脚本用的令牌：权限、有效期、撤销与审计。
 - [App API](reference/app-api.md)：令牌能调用的接口：认证、约定、错误码与接口清单。
 - [qB 兼容入口](guide/qbit-compat.md)：让 MoviePilot、IYUU、autobrr、Sonarr/Radarr 把 pt-tools 当成 qBittorrent：开启、客户端怎么填、能做什么。
+- [Servarr 兼容入口](guide/servarr.md)：让 Seerr 把 pt-tools 当成 Radarr、Sonarr：Seerr 里怎么填、请求以后建什么订阅、不支持的与审计。
 - [MCP](guide/mcp.md)：让 Claude、Cursor、Cherry Studio 这类 AI 助手调用 pt-tools：令牌、客户端怎么填、工具清单与审计。
 - [AI 助手](guide/assistant.md)：pt-tools 内置的 AI 助手：接哪家大模型、怎么对话、改动类操作怎么确认、数据会发给谁。
 - [远程访问](guide/remote-access.md)：手机 App 扫码配对，经直连或 relay 连回 pt-tools：权限、设备管理、relay 能看到什么与审计。
