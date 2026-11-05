@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /*
- * API 令牌（路线图 M12–M14）：给手机 App（走 /api/app/v1）、qB 兼容入口与 MCP 客户端（/mcp）用的令牌。新建时只显示一次明文；撤销立即生效。
+ * API 令牌（路线图 M12–M14）：给手机 App（走 /api/app/v1）、qB 兼容入口、MCP 客户端（/mcp）与 Seerr（Servarr 兼容入口 /servarr/，
+ * 媒体中心 M10）用的令牌。新建时只显示一次明文；撤销立即生效。
  * 令牌访问不了网页的其他接口，那些仍然要登录。画板没有这一页，沿用媒体页的样式：页头 + 面板，手机上是行卡。
  */
 import { type ApiToken, type ApiTokenScope, mcpApi, tokensApi } from "@/api";
@@ -38,6 +39,11 @@ const SCOPES: readonly { value: ApiTokenScope; label: string; hint: string }[] =
     value: "qbit:compat",
     label: "qB 兼容",
     hint: "登录 qB 兼容入口：MoviePilot、IYUU 这类只认 qBittorrent 的工具用",
+  },
+  {
+    value: "servarr",
+    label: "Servarr 兼容",
+    hint: "Seerr 把 pt-tools 当成 Radarr、Sonarr 用：请求的电影与剧集建成订阅与追剧，订阅的状态回给 Seerr",
   },
   {
     value: "mcp:read",
@@ -200,8 +206,8 @@ onMounted(() => {
 <template>
   <div class="pt-cards pt-cards--wide">
     <PtHeadSub
-      >给手机 App、qB 兼容入口与 MCP 客户端用的令牌：只能访问 App 接口、qB 兼容入口与
-      MCP，网页的其他功能仍然要登录</PtHeadSub
+      >给手机 App、qB 兼容入口、MCP 客户端与 Seerr 用的令牌：只能访问 App 接口、qB 兼容入口、MCP 与
+      Servarr 兼容入口，网页的其他功能仍然要登录</PtHeadSub
     >
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="tk-refresh" @click="load">
@@ -227,7 +233,7 @@ onMounted(() => {
         :sub="
           ds.errorText.value ||
           (ds.state.value === 'empty'
-            ? '新建一个，填进手机 App、qB 兼容客户端或 MCP 客户端；新建时勾选对应的权限'
+            ? '新建一个，填进手机 App、qB 兼容客户端、MCP 客户端或 Seerr；新建时勾选对应的权限'
             : '')
         "
         data-testid="tk-state" />
@@ -293,13 +299,17 @@ onMounted(() => {
           </template>
         </PtRowCard>
       </div>
-      <!-- 三种用途各一句：只写 App 的话，配 qB 客户端或 MCP 的人会以为这里没他们的事 -->
+      <!-- 每种用途各一句：只写 App 的话，配 qB 客户端、MCP 或 Seerr 的人会以为这里没他们的事 -->
       <ul class="tk-tip">
         <li>手机 App：填 pt-tools 的地址和令牌，权限选「读取」「操作」。</li>
         <li>qB 兼容客户端：用户名随意、密码填令牌，权限选「qB 兼容」，见「qB 兼容入口」页。</li>
         <li>
           MCP 客户端：请求头写 <code>Authorization: Bearer 令牌</code>，权限选「MCP 读取」「MCP
           操作」，见「MCP 接入」页。
+        </li>
+        <li>
+          Seerr：在 Seerr 的 Radarr、Sonarr 设置里，API Key 填令牌，URL Base 填
+          <code>/servarr/radarr</code> 或 <code>/servarr/sonarr</code>，权限只选「Servarr 兼容」。
         </li>
         <li>令牌只在新建时显示一次，丢了就撤销再建一个；令牌做的操作记在「操作审计」里。</li>
       </ul>

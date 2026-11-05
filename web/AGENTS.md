@@ -25,6 +25,7 @@ web/
 ├── api_tokens.go                # API token admin (/api/tokens), session only
 ├── api_qbit_compat.go           # qB-compatible entrance settings (/api/qbit-compat), session only
 ├── qbitcompat/                  # qB WebUI API v2 subset on its own port (M13): SID login with qbit:compat tokens
+├── servarr/                     # Radarr/Sonarr v3 subset for Seerr (M10) at /servarr/: servarr-scope tokens, subscriptions only
 ├── api_app_v1*.go               # App API v1: route table with scopes, principals, audit, DTOs
 ├── mcp.go                       # /mcp (M14): Bearer-token MCP endpoint; mcpBackend calls App API v1 routes in-process
 ├── remote.go / api_remote.go    # Remote access (M15): /remote/v1/stream, device dispatcher (App API only), /api/remote* (session only)
@@ -42,7 +43,7 @@ web/
 - Default admin credentials come from `PT_ADMIN_USER`/`PT_ADMIN_PASS`; `PT_ADMIN_RESET=1` performs a startup reset.
 - Extension origins receive narrowly scoped CORS handling in `logMiddleware`.
 - ChatOps routes are registered only when dependencies were injected, and are session-only like every other `/api/*` route.
-- API tokens (`internal/apitoken`) are accepted only by the App API (`/api/app/v1/*`), `/mcp` and the qB-compatible entrance. Token management (`/api/tokens`) and every other route stay session-only through `s.auth`; `TestAppAPI_TokensCannotReachSessionAPIs` pins this through the real mux.
+- API tokens (`internal/apitoken`) are accepted only by the App API (`/api/app/v1/*`), `/mcp`, the qB-compatible entrance and the Servarr-compatible entrance (`/servarr/`). Token management (`/api/tokens`) and every other route stay session-only through `s.auth`; `TestAppAPI_TokensCannotReachSessionAPIs` pins this through the real mux.
 - Remote devices never pass through `buildHandler`: `RemoteDispatcher` mounts only the App API routes and puts the device principal under the unexported `remoteDeviceKey`, which `appPrincipal` checks first. `statusRecorder` must keep `Unwrap()` so the direct WebSocket entrance can hijack the connection through `logMiddleware`.
 - `Shutdown(ctx)` must remain safe before/concurrent with `Serve`; a `Shutdown` that runs before `Serve` makes the later `Serve` return without listening.
 
@@ -80,6 +81,7 @@ Go 1.22+ path patterns and `r.PathValue` are used for some ChatOps routes; do no
 | `/api/chatops/*`                                       | Channels, bindings, audit, RSS delivery logs    |
 | `/api/tokens`, `/api/app/v1/*`, `/mcp`                 | API token admin; App API and MCP for tokens     |
 | `/api/qbit-compat`                                     | qB-compatible entrance settings and status      |
+| `/servarr/radarr/api/v3/*`, `/servarr/sonarr/api/v3/*` | Servarr-compatible entrance for Seerr (tokens)  |
 | `/api/remote*`, `/remote/v1/stream`                    | Remote access settings/devices; direct entrance |
 | `/api/cloak/*`, `/api/extension-actions/*`             | Cloak and extension integration                 |
 | `/api/maintenance/clean`                               | Preview/confirmed maintenance cleanup           |

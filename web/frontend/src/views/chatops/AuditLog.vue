@@ -37,6 +37,8 @@ const CHANNEL_LABELS: Record<string, string> = {
   api_token: "API 令牌",
   // qB 兼容入口的写请求与登录失败（web/qbitcompat）
   qbit_compat: "qB 兼容",
+  // Servarr 兼容入口的写请求（web/servarr，Seerr 经它把 pt-tools 当成 Radarr、Sonarr）
+  servarr: "Servarr 兼容",
   // MCP 写工具的调用（internal/mcp）
   mcp: "MCP",
   // 远程访问的设备经隧道做的写请求与配对（internal/remote）
@@ -56,6 +58,7 @@ const CHANNEL_SHORT: Record<string, string> = {
   wecom_webhook: "企业微信",
   api_token: "API 令牌",
   qbit_compat: "qB 兼容",
+  servarr: "Servarr",
   mcp: "MCP",
   remote_device: "远程设备",
   assistant: "AI 助手",
@@ -294,7 +297,7 @@ const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataSta
 const stateSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return errorText.value;
   if (state.value === "partial") return "统计读数没拿到，日志列表本身确实是空的";
-  // 记的不只是机器人命令：API 令牌、qB 兼容入口、MCP、远程设备、AI 助手的写操作也在这里（见 CHANNEL_LABELS）
+  // 记的不只是机器人命令：API 令牌、qB 兼容入口、Servarr 兼容入口、MCP、远程设备、AI 助手的写操作也在这里（见 CHANNEL_LABELS）
   return hasFilter.value
     ? "换个时间段或清掉筛选再看"
     : "经 ChatOps、API 令牌、qB 兼容入口、MCP、远程设备与 AI 助手做的操作（包括被拒绝的），以及签到、追剧、每日战报等通知的每次投递，都会记在这里";

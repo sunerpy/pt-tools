@@ -75,4 +75,38 @@ describe("审计日志：认得 API 令牌", () => {
     const params = api.list.mock.calls[1]![0] as URLSearchParams;
     expect(params.get("channel_type")).toBe("api_token");
   });
+
+  it("Servarr 兼容入口的写请求：表里写短名，筛选能选它", async () => {
+    api.list.mockResolvedValue({
+      items: [
+        {
+          ...tokenWrite,
+          id: 8,
+          channel_type: "servarr",
+          command: "POST /servarr/radarr/api/v3/movie",
+        },
+      ],
+      total: 1,
+    });
+    const AuditLog = (await import("./AuditLog.vue")).default;
+    view = mountView(AuditLog);
+    await vi.waitFor(() =>
+      expect(document.querySelector(".el-table")?.textContent ?? "").toContain("Servarr"),
+    );
+    // 表里是短名，全名只在筛选的下拉里
+    expect(document.querySelector(".el-table")?.textContent ?? "").not.toContain("Servarr 兼容");
+    expect(document.body.textContent ?? "").not.toContain("servarr ");
+    const chip = document.querySelector("[data-testid=audit-channel-chip]")!;
+    (chip.querySelector<HTMLElement>(".el-select__wrapper") ?? (chip as HTMLElement)).click();
+    await vi.waitFor(() => {
+      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => (o.textContent ?? "").trim() === "通道: Servarr 兼容",
+      );
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    const params = api.list.mock.calls[1]![0] as URLSearchParams;
+    expect(params.get("channel_type")).toBe("servarr");
+  });
 });

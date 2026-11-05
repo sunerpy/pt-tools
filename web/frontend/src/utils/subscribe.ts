@@ -37,9 +37,14 @@ export const SUB_FILTERS: readonly { value: "" | SubscriptionStatus; label: stri
 
 export function sourceLabel(source: string): string {
   return (
-    { manual: "手动", explore: "探索", douban: "豆瓣想看", chatops: "机器人", app: "App" }[
-      source
-    ] ?? source
+    {
+      manual: "手动",
+      explore: "探索",
+      douban: "豆瓣想看",
+      chatops: "机器人",
+      app: "App",
+      servarr: "Seerr",
+    }[source] ?? source
   );
 }
 

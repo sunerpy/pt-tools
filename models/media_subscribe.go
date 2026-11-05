@@ -22,6 +22,8 @@ const (
 	MediaSubFromChatOps = "chatops"
 	// MediaSubFromApp 是经 App API（M12）建的订阅
 	MediaSubFromApp = "app"
+	// MediaSubFromServarr 是 Seerr 经 Servarr 兼容入口（媒体中心 M10）建的订阅
+	MediaSubFromServarr = "servarr"
 )
 
 // 质量档案里「要不要」的取值：空串不限，prefer 优先，require 必须有，avoid 尽量不要（只用于 HDR）。

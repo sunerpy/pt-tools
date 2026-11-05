@@ -1,4 +1,4 @@
-// Package apitoken 管理 API 令牌（路线图 M12）：给 App、MCP 与 qB 兼容入口用，网页登录仍然只认 session。
+// Package apitoken 管理 API 令牌（路线图 M12）：给 App、MCP、qB 兼容入口与 Servarr 兼容入口用，网页登录仍然只认 session。
 //
 // 令牌是 `ptt_<id>_<secret>`，secret 是 32 字节随机数的 base64url。库里只存 secret 的 SHA-256：按 id 找到那一行，
 // 再用常量时间比较散列。高熵的随机令牌不需要 bcrypt，每个请求也不用做一次慢散列。
@@ -37,10 +37,12 @@ const (
 	// ScopeAppConfig 是读、改 pt-tools 的配置（App API 的 /config 与 MCP 的配置工具都要它，另外还要读或写的权限）。
 	// 已有的令牌不会因为升级多出这一项
 	ScopeAppConfig = "app:config"
+	// ScopeServarr 是 Servarr 兼容入口（媒体中心 M10）：Seerr 把 pt-tools 当成 Radarr、Sonarr 用，读写电影订阅与追剧
+	ScopeServarr = "servarr"
 )
 
 // Scopes 是所有权限范围，也是令牌里 scope 的排列顺序。
-var Scopes = []string{ScopeAppRead, ScopeAppWrite, ScopeAppConfig, ScopeMCPRead, ScopeMCPWrite, ScopeQbitCompat}
+var Scopes = []string{ScopeAppRead, ScopeAppWrite, ScopeAppConfig, ScopeMCPRead, ScopeMCPWrite, ScopeQbitCompat, ScopeServarr}
 
 var (
 	ErrInvalid      = errors.New("参数不对")

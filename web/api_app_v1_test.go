@@ -74,7 +74,12 @@ func enableMCPForTest(t *testing.T) {
 
 func (e *appEnv) token(scopes ...string) string {
 	e.t.Helper()
-	_, plain, err := e.tokens.Create(context.Background(), apitoken.CreateInput{Name: "测试 " + strings.Join(scopes, ","), Scopes: scopes}, "admin")
+	// 名字最多 64 个字：权限范围全选时截掉后面的
+	name := []rune("测试 " + strings.Join(scopes, ","))
+	if len(name) > 64 {
+		name = name[:64]
+	}
+	_, plain, err := e.tokens.Create(context.Background(), apitoken.CreateInput{Name: string(name), Scopes: scopes}, "admin")
 	require.NoError(e.t, err)
 	return plain
 }

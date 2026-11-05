@@ -188,6 +188,41 @@ describe("API 令牌", () => {
     expect(q("tk-mcp-off")).toBeNull();
   });
 
+  it("Servarr 兼容的权限：能勾，列表里写名字", async () => {
+    api.list.mockResolvedValue([{ ...phone, id: 9, name: "Seerr", scopes: ["servarr"] }]);
+    const Page = (await import("./ApiTokens.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() => expect(q("tk-table")?.textContent ?? "").toContain("Servarr 兼容"));
+    // 用途说明里有 Seerr 怎么填
+    const tip = document.querySelector(".tk-tip")?.textContent ?? "";
+    expect(tip).toContain("/servarr/radarr");
+    expect(tip).toContain("/servarr/sonarr");
+    const add = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
+      (b.textContent ?? "").includes("新建"),
+    )!;
+    add.click();
+    await vi.waitFor(() => expect(q("token-dialog")).not.toBeNull());
+    const box = [...q("tk-scopes")!.querySelectorAll<HTMLElement>(".el-checkbox")].find((c) =>
+      (c.textContent ?? "").includes("Servarr 兼容"),
+    )!;
+    expect(box.textContent).toContain("Seerr 把 pt-tools 当成 Radarr、Sonarr 用");
+    box.querySelector<HTMLInputElement>("input")!.click();
+    await flush();
+    const name = q("tk-name")!;
+    const input = (name instanceof HTMLInputElement ? name : name.querySelector("input"))!;
+    input.value = "Seerr";
+    input.dispatchEvent(new Event("input"));
+    await flush();
+    api.create.mockResolvedValue({ token: { ...phone, id: 10 }, plaintext: "ptt_10_x" });
+    q("tk-save")!.click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0]![0]).toEqual({
+      name: "Seerr",
+      scopes: ["app:read", "servarr"],
+      expires_in_days: 90,
+    });
+  });
+
   it("新建：名字没填时不发", async () => {
     await mountPage();
     const add = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
