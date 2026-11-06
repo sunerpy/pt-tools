@@ -438,7 +438,10 @@ func TestNASAPI_TrustCertificateThenSave(t *testing.T) {
 	assert.Empty(t, view.HomeSource)
 	assert.True(t, view.LocalEnabled)
 	assert.Equal(t, nas.LocalSupported, view.LocalSupported)
-	assert.Equal(t, []nasKindView{{Name: fakeNASKind, Label: "假 NAS", Username: "optional", Secret: "with_username", Plain: "without_credentials"}}, view.Kinds)
+	assert.Equal(t, []nasKindView{
+		{Name: fakeNASKind, Label: "假 NAS", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
+		{Name: nas.KindTrueNAS, Label: "TrueNAS", Username: "none", Secret: "required", Plain: "never"},
+	}, view.Kinds, "按名字排：测试登记的假类型与 TrueNAS")
 
 	w = e.do(http.MethodGet, "/api/nas/sources/"+idOf(got.ID), nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
