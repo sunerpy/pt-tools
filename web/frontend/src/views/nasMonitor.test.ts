@@ -358,6 +358,44 @@ describe("NAS 监控页", () => {
     expect(q("nm-table"), "留着上一次的").not.toBeNull();
   });
 
+  it("连上了但读不到主机信息（账号没有权限）：「读到的主机」写原因，手机的行卡也写", async () => {
+    const denied = "这个账号没有读主机信息的权限：DSM 只让管理员组（administrators）的账号读";
+    const empty: NasSnapshot = {
+      ...snap({ hostname: "", platform: "", version: "", model: "", cores: 0, uptime_seconds: 0 }),
+      memory: { total: 0, used: 0, available: 0 },
+      facets: {
+        system: { status: "denied", reason: denied },
+        memory: { status: "denied", reason: denied },
+      },
+    };
+    const got = nasView({
+      sources: [
+        source("7", { name: "群晖", snapshot: empty }),
+        source("8", { state: "connecting", snapshot: null }),
+      ],
+    });
+    await mountPage(got);
+    expect(text("nm-host-7")).toBe(denied);
+    expect(text("nm-host-8"), "还没读到时照旧").toBe("还没有读到数据");
+    expect(text("nm-detail-7")).toBe("刚刚更新");
+
+    view?.unmount();
+    view = null;
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("max-width: 768px"),
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    await mountPage(got);
+    expect(q("nm-table")).toBeNull();
+    expect(text("nm-host-7")).toBe(denied);
+    expect(q("nm-host-8"), "行卡上还没读到时不多写一行（状态那行写着正在连）").toBeNull();
+  });
+
   it("手机：一个来源一张行卡", async () => {
     vi.stubGlobal(
       "matchMedia",
