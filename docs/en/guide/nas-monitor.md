@@ -1,6 +1,6 @@
 # NAS monitoring <Badge type="tip" text="1.0 preview" />
 
-System → NAS monitoring (系统 → NAS 监控) decides where the [NAS overview](home-and-health.md#nas-overview) on the home page gets its data: the host pt-tools runs on (the local source) and any NAS you connect (for now [TrueNAS](#truenas)). pt-tools reads these sources in the background and keeps what it reads in memory; the home page and this page show that data, so opening them does not connect to anything again.
+System → NAS monitoring (系统 → NAS 监控) decides where the [NAS overview](home-and-health.md#nas-overview) on the home page gets its data: the host pt-tools runs on (the local source) and any NAS you connect (for now [TrueNAS](#truenas) and [Glances](#glances)). pt-tools reads these sources in the background and keeps what it reads in memory; the home page and this page show that data, so opening them does not connect to anything again.
 
 ## The local source
 
@@ -36,6 +36,69 @@ On the first connection it fills the home page bars with the last 30 minutes of 
 - When the key is deleted or revoked on TrueNAS, the source shows `登录失败` (login failed). Create a new key and edit the source to enter it.
 - On a version older than 25.04, Test connection says `这台 TrueNAS 没有 /api/current 接口（HTTP 404）：要 TrueNAS 25.04 或以后的版本` (this TrueNAS has no /api/current interface; it needs TrueNAS 25.04 or later).
 
+## Glances
+
+[Glances](https://github.com/nicolargo/glances) is a general-purpose system monitor. On a NAS that runs Docker, such as Synology, fnOS, Unraid or OMV, run Glances from its official image and pt-tools reads its REST interface (`http://<address>:61208/api/4/…`). It connects Glances 4 and was verified on 4.5.8; Glances 5 moved its interface to `/api/5` and is not supported yet, which Test connection says. For TrueNAS, use the [TrueNAS](#truenas) source above, which reads more.
+
+It reads:
+
+- Host: host name, system and version, CPU model and logical cores, uptime and load
+- CPU usage, I/O wait and temperature (when the host has a temperature sensor), and memory
+- Network: the combined receive and send speed of the physical interfaces that are up (names such as `eth…`, `en…` or `wl…`); bridges, bonds, VLANs and Docker's virtual interfaces are left out, so the same traffic is not counted twice. When no interface has such a name (for example `ixl0` on FreeBSD), every interface except the virtual ones counts
+- Storage: the file systems of the folders mounted into the Glances container, by used and total size; a disk mounted in several places counts once, and ZFS is added up per pool. Glances gives no health, so the home page shows no health for these pools
+- Disks: temperature only. NVMe disks are named `NVMe 1`, `NVMe 2`; SATA disks need the `drivetemp` module loaded on the NAS. Glances gives no model or size
+- Alerts: Glances gives no alerts of the NAS itself. With Glances's raid plugin turned on, a software RAID (mdadm) array that is not running or is degraded becomes a critical alert (see [Software RAID](#software-raid)); with it off, the alerts block on the home page says why
+- Apps: how many Docker containers are running and how many there are; which can be updated is unknown
+
+pt-tools does not read Glances's history: the home page bars start when it connects, instead of being filled with the last 30 minutes as for TrueNAS.
+
+For a Glances source, the NAS group of the [system check](home-and-health.md#system-check) looks at whether it is connected, the disk temperatures and the software RAID arrays; Glances gives no storage pool health, so that part is not checked.
+
+### Running Glances on the NAS
+
+Create a container from the official image; in compose:
+
+```yaml
+services:
+  glances:
+    image: nicolargo/glances:4.5.8-full
+    restart: unless-stopped
+    network_mode: host # sees the NAS's interfaces, and the host name is the NAS's
+    pid: host
+    environment:
+      - GLANCES_OPT=-w
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # reads the containers
+      - /etc/os-release:/etc/os-release:ro # shows the NAS's own system name
+      - /volume1:/volume1:ro # the storage folders to watch, mounted read-only
+```
+
+- Use a 4.x version tag, not `latest`: `latest` will become Glances 5 later.
+- Use the host network. On the default bridge network Glances sees only its own container's interface; pt-tools recognises this and the network line says `Glances 的容器没用 host 网络…` (the Glances container does not use the host network) instead of showing the container's own traffic as the NAS's.
+- On Synology, create a project in Container Manager and paste the above; the storage folders are `/volume1`, `/volume2`. On fnOS, Unraid and OMV, use their own Docker pages and your own storage folders.
+- In pt-tools, under Add source (添加来源), choose Glances, enter `http://<NAS address>:61208` (an `http://` address without a port uses 61208), click Test connection (测试连接), and save when it connects.
+
+### Authentication
+
+Glances has no authentication by default, so anyone on the local network can read this data. To turn it on (the way the Glances documentation describes):
+
+1. Create the password file inside the container: `docker exec -it glances glances -s --password`, enter the password twice, answer `Yes` when asked whether to save it, then press Ctrl+C. The user name is `glances` by default.
+2. Copy the password file out: `docker cp glances:/root/.config/glances/glances.pwd ./glances.pwd`.
+3. In compose, mount `./glances.pwd:/root/.config/glances/glances.pwd:ro`, change `GLANCES_OPT` to `-w --password`, and recreate the container.
+4. In pt-tools, enter the user name (`glances`, also used when left empty) and the password. With an `http://` address you must tick 我知道账号密码会以明文经过局域网，可能被截获 (I know the user name and password cross the local network unencrypted and may be intercepted); to avoid sending the password unencrypted, put a reverse proxy with https in front of Glances and use an `https://` address.
+
+With a wrong user name or password the source shows `登录失败` (login failed) and is not retried automatically.
+
+### Software RAID
+
+Glances's raid plugin is off by default. To watch software RAID (mdadm) arrays:
+
+1. Copy the configuration file out of the image: `docker cp glances:/etc/glances/glances.conf ./glances.conf`.
+2. In its `[raid]` section, change `disable=True` to `disable=False`.
+3. In compose, mount `./glances.conf:/etc/glances/glances.conf:ro` and recreate the container.
+
+An array that is not running, or that has fewer disks in use than it should (degraded), becomes a critical alert on the home page and in the system check; RAID 0 has no redundancy and is never degraded. With the plugin on but no arrays, the alerts block says `Glances 没有发现软 RAID（mdadm）阵列…` (Glances found no software RAID arrays). RAID built into ZFS or Btrfs is not covered here.
+
 ## The source list
 
 One line per source (a card on a phone):
@@ -60,7 +123,7 @@ One line per source (a card on a phone):
 
 When a source cannot be reached it tries again after 30 seconds, then 1, 2 and 5 minutes. Login failures and certificate problems are not retried automatically, so the NAS does not lock the account; it tries again after you change the settings or click Reconnect. Reconnect tries once right away instead of waiting, and the result appears in a message.
 
-Add source (添加来源) at the top right of the list shows the fields each kind needs, and for TrueNAS how to prepare a read-only API key (see [TrueNAS](#truenas)); the notes below the list say which kinds can be connected.
+Add source (添加来源) at the top right of the list shows the fields each kind needs, for TrueNAS how to prepare a read-only API key (see [TrueNAS](#truenas)), and for Glances how to run it on the NAS (see [Glances](#glances)); the notes below the list say which kinds can be connected.
 
 ## What the home page shows
 
