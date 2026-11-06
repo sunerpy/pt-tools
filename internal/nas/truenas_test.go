@@ -90,6 +90,7 @@ func TestTrueNAS_CollectFull(t *testing.T) {
 	assert.Equal(t, Pool{Name: "Cold", Status: "DEGRADED", Healthy: cold.Healthy, Size: 4_000_000_000_000, Used: 1_000_000_000_000, Free: 3_000_000_000_000, Disks: 1}, cold, "没有根数据集时按裸容量")
 	require.NotNil(t, cold.Healthy)
 	assert.False(t, *cold.Healthy)
+	assert.Equal(t, Facet{Status: FacetOK, Reason: "存储池 Cold 读不到根数据集，容量按裸容量算（含校验盘）"}, snap.Facets[FacetPools])
 
 	require.Len(t, snap.Disks, 4)
 	assert.Equal(t, Disk{Name: "sda", Model: "Virtual_disk", Kind: DiskSSD, Size: 50_000_000_000, Pool: "boot-pool"}, snap.Disks[0], "温度 0 是读不到")
@@ -532,7 +533,11 @@ func TestTrueNASAlertTitle(t *testing.T) {
 		{tnAlert{Klass: "RsyncFailed", Args: map[string]any{"path": "/mnt/a"}}, "Rsync 任务失败：/mnt/a"},
 		{tnAlert{Klass: "AppUpdate", Args: map[string]any{"name": "plex"}}, "应用 plex 有新版本"},
 		{tnAlert{Klass: "AppUpdate", Args: []any{"plex"}, Formatted: "An update is available"}, "An update is available"},
-		{tnAlert{Klass: "CatalogSyncFailed"}, "应用目录同步失败"},
+		{tnAlert{Klass: "CatalogSyncFailed", Formatted: "Failed to sync TRUENAS catalog"}, "应用目录同步失败"},
+		{tnAlert{Klass: "VolumeStatus", Args: map[string]any{"volume": "tank", "state": "DEGRADED"}}, "存储池 tank 状态不健康（DEGRADED）"},
+		{tnAlert{Klass: "VolumeStatus"}, "存储池状态不健康"},
+		{tnAlert{Klass: "SMART", Formatted: "Device: /dev/sdb [SAT], 8 Currently unreadable (pending) sectors.\nmore"}, "S.M.A.R.T. 报错：Device: /dev/sdb [SAT], 8 Currently unreadable (pending) sectors."},
+		{tnAlert{Klass: "ScrubPaused"}, "存储池校验暂停了"},
 		{tnAlert{Klass: "Weird", Formatted: "  "}, "Weird"},
 		{tnAlert{Klass: "Long", Formatted: strings.Repeat("长", 130)}, strings.Repeat("长", 120) + "…"},
 		{tnAlert{Klass: "Token", Formatted: "token=ghp_abcdefghijklmnopqrstuvwxyz0123456789"}, ""},
@@ -544,6 +549,9 @@ func TestTrueNASAlertTitle(t *testing.T) {
 		}
 		assert.Equal(t, tc.want, got, tc.alert.Klass)
 	}
+	long := trueNASAlertTitle(tnAlert{Klass: "ReplicationFailed", Formatted: strings.Repeat("长", 130)})
+	assert.True(t, strings.HasPrefix(long, "复制任务失败："), long)
+	assert.Len(t, []rune(long), 121, "连同中文名一起截到 120 个字")
 	assert.Equal(t, AlertCritical, alertLevel("EMERGENCY"))
 	assert.Equal(t, AlertCritical, alertLevel("ALERT"))
 	assert.Equal(t, AlertInfo, alertLevel("NOTICE"))

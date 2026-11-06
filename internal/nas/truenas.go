@@ -400,6 +400,7 @@ func fillPools(snap *Snapshot, pools []tnPool, err error, datasets []tnDataset, 
 		}
 	}
 	snap.Pools = make([]Pool, 0, len(pools))
+	var raw []string
 	for _, p := range pools {
 		out := Pool{Name: p.Name, Status: p.Status, Size: p.Size, Used: p.Allocated, Free: p.Free, Disks: members[p.Name]}
 		if p.Healthy != nil {
@@ -409,10 +410,17 @@ func fillPools(snap *Snapshot, pools []tnPool, err error, datasets []tnDataset, 
 		if d, ok := roots[p.Name]; ok && d.Used.Parsed != nil && d.Available.Parsed != nil {
 			out.Used, out.Free = *d.Used.Parsed, *d.Available.Parsed
 			out.Size = out.Used + out.Free
+		} else {
+			raw = append(raw, p.Name)
 		}
 		snap.Pools = append(snap.Pools, out)
 	}
-	snap.Facets[FacetPools] = Facet{Status: FacetOK}
+	f := Facet{Status: FacetOK}
+	if len(raw) > 0 {
+		// 界面不显示读到了的那一类的原因，这里只给接口与日志看
+		f.Reason = "存储池 " + strings.Join(raw, "、") + " 读不到根数据集，容量按裸容量算（含校验盘）"
+	}
+	snap.Facets[FacetPools] = f
 }
 
 // fillDisks 列出硬盘：类型按名字（nvme 开头）与 TrueNAS 给的 HDD、SSD 分；温度是 0 或读不到时为空。序列号不要。
