@@ -752,7 +752,12 @@ func nasTestResultView(res *nas.TestResult, err error, secrets ...string) nasTes
 		cert := ce.Cert
 		return nasTestView{Status: nasTestCertificate, Certificate: &cert, Message: ce.Error()}
 	case errors.As(err, &ae) && ae.OTP:
-		return nasTestView{Status: nasTestOTP, Message: nasScrub(ae.Error(), secrets...)}
+		// 弹窗在原因上面写「要验证码」：原因不再带「认证失败：」
+		msg := ae.Reason
+		if msg == "" {
+			msg = ae.Error()
+		}
+		return nasTestView{Status: nasTestOTP, Message: nasScrub(msg, secrets...)}
 	case errors.As(err, &ae):
 		return nasTestView{Status: nasTestAuthFailed, Message: nasScrub(ae.Error(), secrets...)}
 	case errors.Is(err, context.DeadlineExceeded):
