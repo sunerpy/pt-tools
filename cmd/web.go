@@ -273,6 +273,10 @@ var webCmd = &cobra.Command{
 		// 内置 AI 助手（M19）：设置在网页上，默认关着
 		assistantSvc := newAssistantService(runtimeCtx, store, srv)
 		srv.SetAssistantService(assistantSvc)
+		// NAS 监控（首页 NAS 概览 H2）：本机来源默认开着，其余来源在网页上添加
+		nasCollector := newNASCollector(global.GlobalDB.DB, store)
+		nasCollector.Start(runtimeCtx)
+		srv.SetNASCollector(nasCollector)
 		wireAttendanceAI(mgr, store, assistantSvc)
 		wireSubscribeReview(subscriber, assistantSvc)
 		wireAssistantChatOps(assistantSvc, bs)
@@ -302,6 +306,7 @@ var webCmd = &cobra.Command{
 		if assistantSvc != nil {
 			plan.assistant = assistantSvc
 		}
+		plan.nas = nasCollector
 		if dm := mgr.GetDownloaderManager(); dm != nil {
 			plan.downloaders = dm
 		}
@@ -400,7 +405,7 @@ func startVersionChecker() {
 }
 
 // shutdownPlan 是收到 SIGINT/SIGTERM 之后依次执行的关闭步骤，每一步都有时限：
-//  0. qB 兼容入口、远程访问、AI 助手：先关，之后不再有推送与工具调用进来
+//  0. qB 兼容入口、远程访问、AI 助手、NAS 监控：先关，之后不再有推送与工具调用进来，也不再去连 NAS
 //  1. stopBackground：取消 runtime 与 boot context，等 RSS 重试、通道热重载这些后台 goroutine 退出，
 //     之后不会再有人往通知通道里发、也不会再把通道重建起来
 //  2. scheduler：停掉 RSS 任务与各个监控器
@@ -419,6 +424,10 @@ type shutdownPlan struct {
 	// assistant 是内置 AI 助手（M19）：入口都关了以后停掉进行中的回答（含关掉 MCP 会话、待确认标成过期），
 	// 免得后面关下载器时还有工具调用
 	assistant interface {
+		Close(ctx context.Context) error
+	}
+	// nas 是 NAS 监控的采集器（首页 NAS 概览 H2）：和上面几个一起先停，不在关闭途中再去连 NAS
+	nas interface {
 		Close(ctx context.Context) error
 	}
 	stopBackground func()
@@ -472,6 +481,13 @@ func runShutdown(ctx context.Context, plan shutdownPlan) {
 		stepCtx, cancel := context.WithTimeout(ctx, step)
 		if err := plan.assistant.Close(stepCtx); err != nil {
 			log.Warnf("AI 助手关闭出现错误: %v", err)
+		}
+		cancel()
+	}
+	if plan.nas != nil {
+		stepCtx, cancel := context.WithTimeout(ctx, step)
+		if err := plan.nas.Close(stepCtx); err != nil {
+			log.Warnf("NAS 监控关闭出现错误: %v", err)
 		}
 		cancel()
 	}

@@ -17,7 +17,7 @@ import (
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
-// 首页（媒体中心 M8）：今天播出与这周还要播、待处理、继续观看、最近入库与 NAS 状态，每块单独给数据或错误（见 internal/home）。
+// 首页（媒体中心 M8）：今天播出与这周还要播、待处理、继续观看、最近入库、下载器与存储、NAS 概览，每块单独给数据或错误（见 internal/home）。
 // 只认会话。结果缓存 30 秒（?refresh=1 不用缓存）；速度柱的新采样跟着外壳每 30 秒取的 transfer-stats 来。
 
 const (
@@ -39,6 +39,8 @@ type homeResponse struct {
 	Downloaders home.Block `json:"downloaders"`
 	Storage     home.Block `json:"storage"`
 	Status      home.Block `json:"status"`
+	// NAS 是首页 NAS 概览显示的来源与其余来源（见 api_nas.go 的 homeNAS）：只读采集器的内存
+	NAS home.Block `json:"nas"`
 }
 
 // homeCache 是上一次的首页结果；同时来的几个请求等同一次算完。体检跑完时 stale 加一：在这之前算的那份不再用
@@ -127,6 +129,7 @@ func (s *Server) homeData(ctx context.Context, db *gorm.DB, refresh bool) *homeR
 		}},
 		{Name: "downloaders", Get: func(ctx context.Context) (any, error) { return s.homeDownloaders(ctx) }},
 		{Name: "storage", Get: func(ctx context.Context) (any, error) { return s.homeStorage(ctx, db) }},
+		{Name: "nas", Get: func(ctx context.Context) (any, error) { return s.homeNASBlock(ctx, db) }},
 		{Name: "status", Get: func(ctx context.Context) (any, error) {
 			return home.BuildStatus(ctx, home.StatusInput{
 				DB: db, Now: now, Health: last, Backup: s.backupState, Test: s.healthServerTest, HomeURL: serverHomeURL,
@@ -135,7 +138,7 @@ func (s *Server) homeData(ctx context.Context, db *gorm.DB, refresh bool) *homeR
 	}, homePartTimeout)
 	resp := &homeResponse{
 		At: now, Calendar: blocks["calendar"], Todo: blocks["todo"], Resume: blocks["resume"], Recent: blocks["recent"],
-		Downloaders: blocks["downloaders"], Storage: blocks["storage"], Status: blocks["status"],
+		Downloaders: blocks["downloaders"], Storage: blocks["storage"], Status: blocks["status"], NAS: blocks["nas"],
 	}
 	c.at, c.resp, c.gen = now, resp, gen
 	return resp

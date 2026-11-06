@@ -298,10 +298,14 @@ watch([() => cards.value.length, isMobile], () => {
   outline-offset: 2px;
 }
 
+/*
+ * 画板 02 按 1144 宽画：一行五张 216、间距 16。首页加了 NAS 概览以后桌面总比视口高，滚动区的竖向滚动条让出 10，
+ * 内容只剩 1134：卡跟着缩到 214，五张仍是一行放下；更窄时按 206 横滑（两端有翻页按钮）。
+ */
 .hm-tc {
   position: relative;
   display: flex;
-  flex: 0 0 216px;
+  flex: 0 0 max(206px, calc((100% - 64px) / 5));
   flex-direction: column;
   height: 200px;
   overflow: hidden;

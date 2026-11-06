@@ -61,6 +61,9 @@ func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
 		&models.BotToken{},
 		&models.NotificationOutbox{},
 		&models.SiteLoginState{},
+		// NAS 监控：本机来源默认开着，启动以后就在采集；关闭流程要等它退出
+		&models.NasSource{},
+		&models.NasSetting{},
 	))
 	prevDB := global.GlobalDB
 	global.GlobalDB = db

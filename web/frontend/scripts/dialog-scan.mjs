@@ -195,6 +195,8 @@ const NOT_ON_BOARD = {
     "「导入已有文件」（媒体中心 M5）晚于画板 40 定稿：媒体库页每个库的导入弹窗，以及它里面在库目录里浏览的「选一个文件夹」",
   "components/media/MediaDeleteDialog.vue":
     "「删除一部片」（媒体中心 M7）晚于画板 40 定稿：条目详情的删除弹窗，规格是画板 03 的片段「删除这一季」（docs/design/media-hub-board-spec.md）",
+  "components/nas/NasSourceDialog.vue":
+    "「添加 / 编辑来源」（首页 NAS 概览 H2）晚于画板 40 定稿：NAS 监控页接入一个来源的弹窗，测试连接、信任自签证书与验证码都在里面；画板与 docs/design/home-nas-spec.md 都没画这一页，样式沿用远程访问页，字段与行为见 docs/guide/nas-monitor.md",
   "components/home/HomeTodo.vue#drawerTitle":
     "首页「待处理」的抽屉（媒体中心 M8）晚于画板 40 定稿：「全部」与抽屉类的标签打开它，一件事一行；规格在画板 02、07（docs/design/media-hub-board-spec.md）",
   "components/search/EntrySearch.vue#(drawer 无 title)":

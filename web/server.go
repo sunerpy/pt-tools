@@ -37,6 +37,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
+	"github.com/sunerpy/pt-tools/internal/nas"
 	"github.com/sunerpy/pt-tools/internal/remote"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
@@ -74,6 +75,13 @@ type Server struct {
 	// assistant 是内置 AI 助手（M19）；为空时接口回 503
 	assistant *assistant.Service
 	qaHook    func(*http.ServeMux) // qa-build-only test hook installer
+
+	// nasCollector 是「NAS 监控」的采集器（首页 NAS 概览）；为空时接口回 503、首页的 nas 块写原因。
+	// nasPending 暂存测试连接登录产生的新长期凭据，nasTests 让同一个来源 10 秒只测一次，nasMu 让来源与设置的保存一次只做一个（见 api_nas.go）
+	nasCollector *nas.Collector
+	nasPending   nas.Pending
+	nasTests     nasTestLimiter
+	nasMu        sync.Mutex
 
 	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
 	// 两者分别在信号处理 goroutine 与 Serve 所在 goroutine 里读写。
@@ -254,6 +262,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerBlockRoutes(mux)
 	s.registerMediaItemRoutes(mux)
 	s.registerHomeRoutes(mux)
+	s.registerNASRoutes(mux)
 	s.registerFreeWatchRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	s.registerTokenRoutes(mux)

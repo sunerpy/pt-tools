@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -90,6 +91,7 @@ func TestRunShutdown_StopsEverythingInOrder(t *testing.T) {
 		qbitCompat:     recordingStopper{rec: rec, name: "qbit-compat"},
 		remote:         recordingStopper{rec: rec, name: "remote"},
 		assistant:      recordingCloser{rec: rec, name: "assistant"},
+		nas:            recordingCloser{rec: rec, name: "nas"},
 		stopBackground: func() { rec.add("background") },
 		scheduler:      recordingStopper{rec: rec, name: "scheduler"},
 		downloaders:    recordingStopper{rec: rec, name: "downloaders"},
@@ -97,8 +99,8 @@ func TestRunShutdown_StopsEverythingInOrder(t *testing.T) {
 		srv:            recordingStopper{rec: rec, name: "http"},
 	})
 
-	assert.Equal(t, []string{"qbit-compat", "remote", "assistant", "background", "scheduler", "downloaders", "channels", "http"}, rec.list(),
-		"qB 兼容入口、远程访问与 AI 助手最先关：后面关下载器时不再有推送与工具调用进来")
+	assert.Equal(t, []string{"qbit-compat", "remote", "assistant", "nas", "background", "scheduler", "downloaders", "channels", "http"}, rec.list(),
+		"qB 兼容入口、远程访问、AI 助手与 NAS 监控最先关：后面关下载器时不再有推送与工具调用进来")
 }
 
 // 某一步停不下来（比如 RSS 任务卡在下载器请求上）时按步骤时限放弃等待，后面的步骤照常执行。
@@ -117,4 +119,27 @@ func TestRunShutdown_StuckStepIsBounded(t *testing.T) {
 
 	assert.Less(t, time.Since(start), 2*time.Second)
 	assert.Equal(t, []string{"scheduler", "http"}, rec.list())
+}
+
+// failingCloser 是关闭时报错的带 context 的 Close。
+type failingCloser struct {
+	rec  *shutdownRecorder
+	name string
+}
+
+func (c failingCloser) Close(context.Context) error {
+	c.rec.add(c.name)
+	return errors.New("等 NAS 监控的采集退出超时")
+}
+
+// NAS 监控关闭报错（采集没在时限内退出）时只记日志，后面的步骤照常执行。
+func TestRunShutdown_NASCloseErrorContinues(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	rec := &shutdownRecorder{}
+	runShutdown(context.Background(), shutdownPlan{
+		nas:            failingCloser{rec: rec, name: "nas"},
+		stopBackground: func() { rec.add("background") },
+		srv:            recordingStopper{rec: rec, name: "http"},
+	})
+	assert.Equal(t, []string{"nas", "background", "http"}, rec.list())
 }

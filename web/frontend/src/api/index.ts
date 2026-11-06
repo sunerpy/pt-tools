@@ -6020,11 +6020,257 @@ export interface HomeData {
   downloaders: HomeBlock<HomeDownloaders>;
   storage: HomeBlock<HomeDisk[]>;
   status: HomeBlock<HomeStatus>;
+  /** NAS 概览（首页 NAS 概览 H2）：首页显示的那个来源与其余能用的来源 */
+  nas: HomeBlock<HomeNas>;
 }
 
 export const homeApi = {
   /** refresh 为真时不用服务端 30 秒的缓存 */
   get: (refresh = false) => api.get<HomeData>(refresh ? "/api/home?refresh=1" : "/api/home"),
+};
+
+/*
+ * NAS 监控（首页 NAS 概览 H2）：本机来源与接入的 NAS 来源的状态、最新数据与最近的几拍；来源的保存、测试连接与设置。
+ * 数据都在 pt-tools 的内存里（30 秒一拍），GET /api/nas 不对外发请求。
+ */
+
+/** 一个来源现在的情况 */
+export type NasState =
+  | "ok"
+  | "connecting"
+  | "error"
+  | "auth_failed"
+  | "cert_untrusted"
+  | "cert_changed"
+  | "disabled"
+  | "unsupported";
+
+/** 快照里各类数据的键：来源读不到的那类按 facets 写原因，不把没有当成 0 */
+export type NasFacetKey =
+  | "system"
+  | "cpu"
+  | "cpu_temp"
+  | "memory"
+  | "network"
+  | "pools"
+  | "disks"
+  | "alerts"
+  | "apps";
+
+export interface NasFacet {
+  status: "ok" | "unsupported" | "denied" | "error";
+  reason?: string;
+}
+
+export interface NasSystem {
+  hostname: string;
+  platform: string;
+  version: string;
+  model: string;
+  cores: number;
+  uptime_seconds: number;
+}
+
+/** 处理器：percent、iowait 是百分比（0–100），温度读不到时没有 */
+export interface NasCPU {
+  percent: number;
+  iowait?: number;
+  load1: number;
+  load5: number;
+  load15: number;
+  temp_c?: number;
+}
+
+/** 内存（字节） */
+export interface NasMemory {
+  total: number;
+  used: number;
+  available: number;
+}
+
+/** 各网卡合计的速度（字节/秒） */
+export interface NasNetwork {
+  rx_bps: number;
+  tx_bps: number;
+  interfaces: string[] | null;
+}
+
+/** 存储池：size、used、free 是可用容量（字节）；healthy 读不到时没有 */
+export interface NasPool {
+  name: string;
+  status: string;
+  healthy?: boolean;
+  size: number;
+  used: number;
+  free: number;
+  disks: number;
+}
+
+export type NasDiskKind = "hdd" | "ssd" | "nvme" | "unknown";
+
+export interface NasDisk {
+  name: string;
+  model: string;
+  kind: NasDiskKind;
+  size: number;
+  temp_c?: number;
+  pool?: string;
+}
+
+export interface NasAlert {
+  level: "critical" | "warning" | "info";
+  title: string;
+  at?: string;
+}
+
+export interface NasApps {
+  running: number;
+  total: number;
+  upgradable: number;
+}
+
+export interface NasSnapshot {
+  at: string;
+  system: NasSystem;
+  cpu: NasCPU;
+  memory: NasMemory;
+  network: NasNetwork;
+  pools: NasPool[] | null;
+  disks: NasDisk[] | null;
+  alerts: NasAlert[] | null;
+  apps: NasApps;
+  facets: Partial<Record<NasFacetKey, NasFacet>> | null;
+}
+
+/** 历史的一拍：cpu、mem 是百分比，rx、tx 是字节/秒 */
+export interface NasSample {
+  at: string;
+  cpu: number;
+  mem: number;
+  rx: number;
+  tx: number;
+}
+
+/** 一个来源（本机的 id 是 local，接入的来源是数字编号）；不回密钥，只回有没有 */
+export interface NasSource {
+  id: string;
+  name: string;
+  kind: string;
+  enabled: boolean;
+  experimental: boolean;
+  url?: string;
+  has_secret: boolean;
+  tls_pin_sha256?: string;
+  insecure_ack: boolean;
+  state: NasState;
+  message?: string;
+  last_ok_at?: string;
+  next_try_at?: string;
+  snapshot: NasSnapshot | null;
+  history: NasSample[];
+}
+
+/**
+ * 能接入的一种来源：username 是用户名一栏，secret 是要不要密钥（with_username：填了用户名才要），
+ * plain 是 http:// 地址的规则（never：只收 https；without_credentials：不带账号密码时可以；with_ack：要确认明文风险）。
+ */
+export interface NasKind {
+  name: string;
+  label: string;
+  experimental: boolean;
+  username: "none" | "optional" | "required";
+  secret: "required" | "with_username" | "none";
+  plain: "never" | "without_credentials" | "with_ack";
+}
+
+/** GET /api/nas：home 是首页按设置选出的来源（空是没有能显示的） */
+export interface NasView {
+  home_source: string;
+  home: string;
+  local_enabled: boolean;
+  local_supported: boolean;
+  kinds: NasKind[];
+  sources: NasSource[];
+}
+
+/** 编辑一个来源用的字段：不回密钥与长期凭据，只回有没有 */
+export interface NasSourceEdit {
+  id: number;
+  name: string;
+  kind: string;
+  enabled: boolean;
+  url: string;
+  username: string;
+  has_secret: boolean;
+  has_extra: boolean;
+  tls_pin_sha256: string;
+  insecure_ack: boolean;
+}
+
+/** 保存一个来源：secret 为空表示不改（只在类型、地址、账号都没变时）；pending 是测试连接回的暂存凭据 */
+export interface NasSourceInput {
+  name: string;
+  kind: string;
+  enabled: boolean;
+  url: string;
+  username: string;
+  secret?: string;
+  clear_secret?: boolean;
+  tls_pin_sha256: string;
+  insecure_ack: boolean;
+  pending?: string;
+}
+
+/** 测试连接：id 是编辑中的来源（新建时不给），trust_sha256 是这一次确认信任的证书指纹 */
+export interface NasTestInput {
+  id?: number;
+  kind: string;
+  url: string;
+  username?: string;
+  secret?: string;
+  clear_secret?: boolean;
+  otp?: string;
+  trust_sha256?: string;
+  insecure_ack?: boolean;
+}
+
+export interface NasCertInfo {
+  sha256: string;
+  subject: string;
+  issuer: string;
+  not_before: string;
+  not_after: string;
+  dns_names: string[] | null;
+}
+
+/** 测试连接的结果：certificate 是证书不受信任（还没发出凭据），otp_required 是要验证码 */
+export interface NasTestResult {
+  status: "ok" | "certificate" | "otp_required" | "auth_failed" | "error";
+  system?: NasSystem;
+  certificate?: NasCertInfo;
+  message?: string;
+  pending?: string;
+}
+
+/** 首页的 nas 块：首页显示的那个来源（没有时为空）与其余能用的来源 */
+export interface HomeNas {
+  source: NasSource | null;
+  others: { id: string; name: string; kind: string; state: NasState }[];
+}
+
+export const nasApi = {
+  /** 各来源的状态与最新数据（只读 pt-tools 的内存）；signal 用于轮询时放弃太慢的一次 */
+  get: (signal?: AbortSignal) => api.get<NasView>("/api/nas", { signal }),
+  getSource: (id: number) => api.get<NasSourceEdit>(`/api/nas/sources/${id}`),
+  create: (input: NasSourceInput) => api.post<NasSourceEdit>("/api/nas/sources", input),
+  update: (id: number, input: NasSourceInput) =>
+    api.put<NasSourceEdit>(`/api/nas/sources/${id}`, input),
+  remove: (id: number) => api.delete<{ ok: boolean }>(`/api/nas/sources/${id}`),
+  test: (input: NasTestInput) => api.post<NasTestResult>("/api/nas/sources/test", input),
+  /** 重新连接（只试一次）：id 是 local 或数字编号 */
+  retry: (id: string) => api.post<NasSource>(`/api/nas/sources/${id}/retry`),
+  settings: (input: { local_enabled?: boolean; home_source?: string }) =>
+    api.put<NasView>("/api/nas/settings", input),
 };
 
 export type HealthStatus = "ok" | "warn" | "fail" | "skip";

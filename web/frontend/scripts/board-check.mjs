@@ -4499,11 +4499,16 @@ if (doItem) {
 // ------------------------------------------------- 首页与系统体检（画板 02、07，媒体中心 M8）
 
 /*
- * 首页不是带式表格页：页头 64 下面是今天播出、待处理条，再是两栏（左 760：继续观看、最近入库、这周还要播；右 368：NAS 状态）。
- * 画板 02 按 1440×1024 画（侧栏 264 + 主区 1176，内容 1144），手机按画板 07 量 375×812；1200 宽时内容 904 < 1100，NAS 状态落到下面。
- * 数字来自 docs/design/media-hub-board-spec.md 的 02 / 07；手机块与块之间统一 24（偏离 ④）。
- * 假数据是 board-fixtures.mjs 的 HOME（照画板：今天五张卡、待处理六类、继续观看三张、最近入库七张、这周四条、三块盘两台下载器）；
- * localStorage 设了 pt-fixture-home-empty 时回 HOME_EMPTY，量空态。系统体检画板没有，只量不溢出、各组与项都在。
+ * 首页不是带式表格页：页头 64 下面先是满宽的 NAS 概览（首页 NAS 概览 H2），再是今天播出、待处理条，
+ * 最后两栏（左：继续观看、最近入库、这周还要播；右 368：下载器、存储、状态）。
+ * NAS 概览与右栏的数字来自 docs/design/home-nas-spec.md；媒体区块的数字来自 docs/design/media-hub-board-spec.md 的 02 / 07
+ * （画板 02 按 1440×1024 画：侧栏 264 + 主区 1176，内容 1144；手机按画板 07 量 375×812，块与块之间统一 24，偏离 ④），
+ * 整体挪到 NAS 概览下面。加了 NAS 概览以后桌面总比视口高，滚动区的竖向滚动条让出 sb，各处按让出以后的宽量。
+ * 1200 宽时内容 894 < 1100：右栏落到下面；≤ 1080：NAS 概览第二行两列。
+ * 假数据是 board-fixtures.mjs 的 HOME 与 NAS_VIEW（照画板：今天五张卡、待处理六类、继续观看三张、最近入库七张、这周四条、
+ * 三块盘两台下载器；NAS 概览是一台 TrueNAS：三个存储池、八块硬盘、七条告警）。localStorage 设了 pt-fixture-home-empty 时回
+ * HOME_EMPTY 与 NAS_VIEW_EMPTY，量空态；设了 pt-fixture-home-nas=local 时 NAS 概览画本机来源。
+ * 系统体检画板没有，只量不溢出、各组与项都在。
  */
 const doHome = wanted.length === 0 || wanted.includes("/home");
 
@@ -4600,8 +4605,122 @@ const MEASURE_HM = `(() => {
       note: box(q('.hm-wk__note', el)),
       line: (() => { const st = getComputedStyle(el, '::before'); return st.content === 'none' || st.display === 'none' ? null : { left: st.left, top: st.top, w: st.width, h: st.height }; })(),
     })),
-    nas: panel('hm-nas'),
-    nasSec: sec('hm-nas'),
+    /* NAS 概览（H2）：标题行、卡、主机行、四张数值卡、第二行三块（本机来源时两块）、手机的两行摘要 */
+    hn: (() => {
+      const el = q('[data-testid="hn"]');
+      if (!el) return null;
+      const shown = (e) => Boolean(e) && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+      const vbox = (e) => (shown(e) ? box(e) : null);
+      const clip = (e) => (e ? e.scrollWidth - e.clientWidth : 0);
+      return {
+        ...box(el),
+        title: box(q('.hm-sec__title', el)),
+        titleText: txt(q('.hm-sec__title', el)),
+        countText: txt(q('.hm-sec__count', el)),
+        tag: txt(q('.hm-sec__tag', el)),
+        link: box(q('.hm-sec__link', el)),
+        linkText: txt(q('.hm-sec__link', el)),
+        others: box(q('[data-testid="hn-others"]', el)),
+        othersText: txt(q('[data-testid="hn-others"]', el)),
+        live: box(q('[data-testid="hn-live"]', el)),
+        liveText: txt(q('[data-testid="hn-live"]', el)),
+        liveDot: box(q('.hn-live__dot', el)),
+        card: box(q('[data-testid="hn-card"]', el)),
+        empty: box(q('[data-testid="hn-empty"]', el)),
+        emptyIcon: box(q('.hn-empty__icon', el)),
+        emptyTitle: txt(q('.hn-empty__title', el)),
+        emptySub: txt(q('.hn-empty__sub', el)),
+        emptyBtn: box(q('[data-testid="hn-connect"]', el)),
+        emptyBtnText: txt(q('[data-testid="hn-connect"]', el)),
+        host: box(q('[data-testid="hn-host"]', el)),
+        logo: box(q('.hn-host__logo', el)),
+        hostTitle: box(q('.hn-host__title', el)),
+        hostTitleText: txt(q('.hn-host__title', el)),
+        ver: box(q('[data-testid="hn-platform"]', el)),
+        verText: txt(q('[data-testid="hn-platform"]', el)),
+        meta: qa('.hn-host__m', el).map((m) => ({ t: txt(m), ...box(m) })),
+        facts: qa('[data-testid="hn-facts"] > *', el).filter(shown).map((f) => ({ t: txt(f), ...box(f) })),
+        body: box(q('.hn-body', el)),
+        kpis: qa('.hn-kpi', el).map((k) => {
+          const sub = q('.hn-kpi__sub', k);
+          const aside = q('.hn-kpi__aside', k);
+          return {
+            key: (k.getAttribute('data-testid') ?? '').replace('hn-kpi-', ''),
+            ...box(k),
+            ic: box(q('.hn-kpi__ic', k)),
+            label: box(q('.hn-kpi__label', k)),
+            labelText: txt(q('.hn-kpi__label', k)),
+            aside: vbox(aside),
+            asideText: shown(aside) ? txt(aside) : '',
+            asideClip: clip(aside),
+            val: box(q('.hn-kpi__val', k)),
+            valText: txt(q('.hn-kpi__val', k)),
+            valSize: getComputedStyle(q('.hn-kpi__val', k)).fontSize,
+            sub: box(sub),
+            subText: sub ? [...sub.children].filter(shown).map(txt).join('') : '',
+            subClip: clip(sub),
+            bars: box(q('.pt-bars', k)),
+            seg: box(q('.hn-seg', k)),
+            segs: qa('.hn-seg__s', k).map(box),
+            legend: vbox(q('.hn-seg__legend', k)),
+          };
+        }),
+        row: box(q('.hn-row', el)),
+        blks: qa('.hn-blk', el).map((b) => ({
+          key: (b.getAttribute('data-testid') ?? '').replace('hn-', ''),
+          ...box(b),
+          head: box(q('.hn-blk__head', b)),
+          headText: txt(q('.hn-blk__head', b)),
+        })),
+        pools: qa('[data-testid^="hn-pool-"]', el).map((r) => ({
+          ...box(r),
+          name: txt(q('.hn-pool__name', r)),
+          pill: txt(q('.pt-pill', r)),
+          pct: box(q('.hn-pool__pct', r)),
+          pctText: txt(q('.hn-pool__pct', r)),
+          bar: box(q('.pt-progress', r)),
+          sub: txt(q('.hn-pool__sub', r)),
+        })),
+        tiles: qa('[data-testid^="hn-disk-tile-"]', el).map((d) => ({
+          ...box(d),
+          name: txt(q('.hn-disk__name', d)),
+          temp: txt(q('.hn-disk__temp', d)),
+          warn: d.classList.contains('is-warn'),
+          gauge: box(q('.hn-disk__gauge', d)),
+          clip: Math.max(...['.hn-disk__name', '.hn-disk__sub'].map((c) => clip(q(c, d)))),
+        })),
+        localRows: qa('[data-testid="hn-local-storage"] .hn-pool', el).map((r) => ({
+          ...box(r),
+          name: txt(q('.hn-pool__name', r)),
+          pctText: txt(q('.hn-pool__pct', r)),
+          bar: box(q('.pt-progress', r)),
+          sub: txt(q('.hn-pool__sub', r)),
+        })),
+        localConnect: txt(q('[data-testid="hn-local-connect"]', el)),
+        acounts: qa('[data-testid^="hn-acount-"]', el).map((c) => ({ t: txt(c), ...box(c) })),
+        arows: qa('.hn-arow', el).map((r) => ({ t: txt(q('.hn-arow__t', r)), ...box(r) })),
+        apps: box(q('[data-testid="hn-apps"]', el)),
+        appsText: txt(q('[data-testid="hn-apps"]', el)),
+        msums: qa('.hn-msum', el).map((m) => ({ t: txt(m), ...box(m) })),
+      };
+    })(),
+    /* 右栏（H2）：下载器、存储（NAS 概览没画本机的存储时）、状态，各一个区块标题加一张卡 */
+    side: (() => {
+      const el = q('[data-testid="hm-side"]');
+      if (!el) return null;
+      return {
+        ...box(el),
+        secs: qa('.hm-sec', el).map((s) => ({
+          ...box(s),
+          title: box(q('.hm-sec__title', s)),
+          titleText: txt(q('.hm-sec__title', s)),
+          countText: txt(q('.hm-sec__count', s)),
+          link: box(q('.hm-sec__link', s)),
+          linkText: txt(q('.hm-sec__link', s)),
+          card: box(q('.hm-card', s)),
+        })),
+      };
+    })(),
     speed: box(q('[data-testid="hm-speed"]')),
     speedCols: qa('[data-testid="hm-speed"] .hm-speed__col').map((el) => ({
       ...box(el),
@@ -4612,17 +4731,16 @@ const MEASURE_HM = `(() => {
       bars: box(q('.pt-bars', el)),
     })),
     storage: box(q('[data-testid="hm-storage"]')),
-    storageGroup: box(q('[data-testid="hm-storage"] .hm-nas__group')),
     disks: qa('[data-testid^="hm-disk-"]').map((el) => ({
       ...box(el),
       name: box(q('.hm-disk__name', el)),
+      nameText: txt(q('.hm-disk__name', el)),
       free: box(q('.hm-disk__free', el)),
       freeText: txt(q('.hm-disk__free', el)),
       bar: box(q('.hm-disk__bar', el)),
     })),
     dlPart: box(q('[data-testid="hm-downloaders"]')),
-    dlGroup: box(q('[data-testid="hm-downloaders"] .hm-nas__group')),
-    dls: qa('[data-testid^="hm-dl-"]').map((el) => ({
+    dls: qa('[data-testid="hm-downloaders"] .hm-dl').map((el) => ({
       ...box(el),
       dot: box(q('.hm-dl__dot', el)),
       name: box(q('.hm-dl__name', el)),
@@ -4632,7 +4750,7 @@ const MEASURE_HM = `(() => {
     lines: qa('[data-testid^="hm-line-"]').map((el) => ({
       key: el.getAttribute('data-testid'),
       ...box(el),
-      icon: box(q('.hm-line__icon', el)),
+      icon: box(q('.hm-line__ic', el)),
       title: box(q('.hm-line__title', el)),
       titleText: txt(q('.hm-line__title', el)),
       desc: box(q('.hm-line__desc', el)),
@@ -4642,8 +4760,11 @@ const MEASURE_HM = `(() => {
   };
 })()`;
 
-/* 等首页读到数据（今天播出出了卡，或空态那一句），再等过渡走完 */
-async function openHome(metrics, { empty = false } = {}) {
+/*
+ * 等首页读到数据（今天播出出了卡，或空态那一句；NAS 概览出了四张数值卡，或空状态卡），再等过渡走完。
+ * nas 是 NAS 概览画哪一种：truenas（默认，接入的 TrueNAS）或 local（只有本机来源），见 board-fixtures.mjs 的 NAS_VIEW。
+ */
+async function openHome(metrics, { empty = false, nas = "truenas" } = {}) {
   await cdp.send(
     "Emulation.setDeviceMetricsOverride",
     { deviceScaleFactor: 1, ...metrics },
@@ -4651,19 +4772,36 @@ async function openHome(metrics, { empty = false } = {}) {
   );
   await goto(`${BASE}/#/home`);
   await ev(
-    empty
-      ? `localStorage.setItem('pt-fixture-home-empty', '1')`
-      : `localStorage.removeItem('pt-fixture-home-empty')`,
+    [
+      empty
+        ? `localStorage.setItem('pt-fixture-home-empty', '1')`
+        : `localStorage.removeItem('pt-fixture-home-empty')`,
+      nas === "local"
+        ? `localStorage.setItem('pt-fixture-home-nas', 'local')`
+        : `localStorage.removeItem('pt-fixture-home-nas')`,
+    ].join(";"),
   );
   await cdp.send("Page.reload", {}, sessionId);
   await waitReady();
   for (let i = 0; i < 40; i++) {
     const ok = await ev(
       empty
-        ? `Boolean(document.querySelector('[data-testid="hm-today-empty"]'))`
-        : `document.querySelectorAll('.hm-tc').length > 0 && document.querySelectorAll('[data-testid^="hm-line-"]').length === 3`,
+        ? `Boolean(document.querySelector('[data-testid="hm-today-empty"]')) && Boolean(document.querySelector('[data-testid="hn-empty"]'))`
+        : `document.querySelectorAll('.hm-tc').length > 0 && document.querySelectorAll('[data-testid^="hm-line-"]').length === 3 && document.querySelectorAll('.hn-kpi').length === 4`,
     ).catch(() => false);
     if (ok === true) {
+      /* 数值卡的大字从旧值过渡到新值：连着两次读到的一样再量 */
+      let last = null;
+      for (let j = 0; j < 20; j++) {
+        await sleep(200);
+        const now = String(
+          await ev(
+            `[...document.querySelectorAll('[data-testid="hn-kpi-val"]')].map((e) => e.textContent).join('|')`,
+          ).catch(() => ""),
+        );
+        if (now === last) break;
+        last = now;
+      }
       await sleep(600);
       return true;
     }
@@ -4731,15 +4869,20 @@ if (doHome) {
   };
   const rel = (b, o) => (b && o ? { x: b.x - o.x, y: b.y - o.y, w: b.w, h: b.h } : null);
 
-  /* ---- 桌面 1440×1024（画板 02） ---- */
+  /*
+   * ---- 桌面 1440×1024（home-nas-spec.md §2；媒体区块是画板 02，整体在 NAS 概览下面） ----
+   * 首页加了 NAS 概览以后桌面总比视口高，滚动区有竖向滚动条：内容宽与右边让出 sb（画板按没有滚动条画）。
+   */
   consoleErrors = [];
   if (!(await openHome({ width: 1440, height: 1024, mobile: false }))) {
-    homeFail("load", "等了 10 秒还没有今天播出的卡或三条状态行：页面没进首页，或 /api/home 没回来");
+    homeFail(
+      "load",
+      "等了 10 秒还没有今天播出的卡、三条状态行或四张数值卡：页面没进首页，或 /api/home、/api/nas 没回来",
+    );
   } else {
     const m = await ev(MEASURE_HM);
     if (process.env.HM_DUMP) console.log(JSON.stringify(m, null, 1));
     await shot("home-1440");
-    /* 页面比视口长时滚动区有竖向滚动条：内容宽与右边让出 sb（画板按没有滚动条画） */
     const W = 1144 - m.sb;
     const R = 280 + W;
     hmBox("head", m.head, { x: 264, y: 0, w: 1176, h: 64 });
@@ -4749,8 +4892,179 @@ if (doHome) {
     if (m.overflow > 0 || m.innerOverflow > 0)
       homeFail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
 
-    /* 今天播出：标题 280,80，卡 216×200 从 112 起、间距 16，一行五张；卡里剧照 122、状态牌 8,8、时刻牌右下 8、标题 132、副行 152、动作 172 */
-    hmBox("today.title", m.today?.title, { x: 280, y: 80, h: 21 });
+    /* NAS 概览的标题行：标题 280,80；右边依次是「另有 1 个来源」、状态点与更新时间、「NAS 监控 ›」，彼此隔 8 */
+    const H = m.hn;
+    hmBox("nas.title", H?.title, { x: 280, y: 80, h: 21 });
+    if (H?.titleText !== "NAS 概览" || H?.countText !== "TrueNAS")
+      homeFail("nas.title", `标题是「${H?.titleText}」、类型是「${H?.countText}」`);
+    if (!H?.link || !near(H.link.x + H.link.w, R, 2) || H.linkText !== "NAS 监控")
+      homeFail("nas.link", `「NAS 监控」${JSON.stringify(H?.link)}，右边应到 ${R}`);
+    if (!H?.live || !H.liveText.endsWith("更新") || !near(H.live.x + H.live.w, H.link.x - 8, 2))
+      homeFail(
+        "nas.live",
+        `更新时间「${H?.liveText}」${JSON.stringify(H?.live)}：在「NAS 监控」左边 8`,
+      );
+    if (H?.liveDot?.w !== 7 || H?.liveDot?.h !== 7) homeFail("nas.live.dot", "状态点 7×7");
+    if (
+      H?.othersText !== "另有 1 个来源" ||
+      !H?.others ||
+      !near(H.others.x + H.others.w, H.live.x - 8, 2)
+    )
+      homeFail("nas.others", `「${H?.othersText}」${JSON.stringify(H?.others)}：在更新时间左边 8`);
+
+    /* 卡：280,112 满宽；主机行 69 高（标志 40 在卡里 17,15；主机名 69,15；版本牌在主机名右边 8；型号、内存、运行时长在 39，隔 14） */
+    const C = H?.card;
+    hmBox("nas.card", C, { x: 280, y: 112, w: W });
+    hmBox("nas.host", rel(H?.host, C), { x: 1, y: 1, w: W - 2, h: 69 });
+    hmBox("nas.host.logo", rel(H?.logo, C), { x: 17, y: 15, w: 40, h: 40 });
+    hmBox("nas.host.title", rel(H?.hostTitle, C), { x: 69, y: 15, h: 21 });
+    if (H?.hostTitleText !== "truenas")
+      homeFail("nas.host.title", `主机名是「${H?.hostTitleText}」`);
+    if (
+      H?.verText !== "TrueNAS SCALE 25.04.1" ||
+      !H?.ver ||
+      !near(H.ver.x, H.hostTitle.x + H.hostTitle.w + 8, 2) ||
+      H.ver.h !== 20
+    )
+      homeFail(
+        "nas.host.ver",
+        `版本牌「${H?.verText}」${JSON.stringify(H?.ver)}：在主机名右边 8、20 高`,
+      );
+    const metaText = (H?.meta ?? []).map((x) => x.t).join("|");
+    if (metaText !== "Intel Core i5-12400 · 12 核|64.0 GB|已运行 18 天 18 小时")
+      homeFail("nas.host.meta", `主机行第二行是「${metaText}」`);
+    (H?.meta ?? []).forEach((x, i) => {
+      if (!near(x.y - C.y, 39, 2)) homeFail(`nas.host.meta[${i}]`, `y ${x.y - C.y}，应为 39`);
+      if (i > 0 && !near(x.x - (H.meta[i - 1].x + H.meta[i - 1].w), 14, 1))
+        homeFail(`nas.host.meta[${i}]`, "与前一项隔 14");
+    });
+    if (!H?.meta?.[0] || !near(H.meta[0].x - C.x, 69, 2))
+      homeFail("nas.host.meta[0]", "第一项从 69 起");
+    const facts = (H?.facts ?? []).map((x) => x.t).join("|");
+    if (facts !== "2 条严重告警|tank 已用 85%") homeFail("nas.facts", `主机行右边是「${facts}」`);
+    const lastFact = H?.facts?.[H.facts.length - 1];
+    if (!lastFact || !near(lastFact.x + lastFact.w, R - 17, 2) || !near(lastFact.y - C.y, 25, 2))
+      homeFail("nas.facts", `最后一个标签 ${JSON.stringify(lastFact)}：右边到 ${R - 17}、y 25`);
+
+    /* 数值卡：卡里 17,84 起四张一行、间距 12、158 高；图标 24 在 15,13，标签 47，大字 45（26px），副行 78，柱 104（34 高） */
+    const kw = (W - 70) / 4;
+    const kpiText = (k) => `${k.labelText}=${k.valText}（${k.asideText}）${k.subText}`;
+    const wantKpi = [
+      "CPU=26%（12 核）负载 3.7 · IO 等待 1.2% · 52 °C",
+      "内存=61%（共 64.0 GB）已用 39.2 GB · 可用 24.8 GB",
+      "网络=↓3.4 MB/s（enp3s0）上行 1.8 MB/s · 所有网卡合计",
+      "存储=75%（3 个存储池）已用 28.6 TB · 剩余 9.3 TB",
+    ];
+    if ((H?.kpis ?? []).length !== 4)
+      homeFail("nas.kpis", `数值卡 ${H?.kpis?.length} 张，应为 4 张`);
+    (H?.kpis ?? []).forEach((k, i) => {
+      const at = `nas.kpi[${i}]`;
+      hmBox(at, rel(k, C), { x: 17 + (kw + 12) * i, y: 84, w: kw, h: 158 }, 2);
+      hmBox(`${at}.ic`, rel(k.ic, k), { x: 15, y: 13, w: 24, h: 24 });
+      hmBox(`${at}.label`, rel(k.label, k), { x: 47 });
+      hmBox(`${at}.val`, rel(k.val, k), { x: 15, y: 45, w: kw - 30 });
+      hmBox(`${at}.sub`, rel(k.sub, k), { x: 15, y: 78, w: kw - 30, h: 16 });
+      if (k.valSize !== "26px") homeFail(`${at}.val`, `大字 ${k.valSize}，应为 26px`);
+      if (kpiText(k) !== wantKpi[i])
+        homeFail(`${at}.text`, `是「${kpiText(k)}」，应为「${wantKpi[i]}」`);
+      if (k.subClip > 0 || k.asideClip > 0)
+        homeFail(`${at}.clip`, `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`);
+      if (i < 3) hmBox(`${at}.bars`, rel(k.bars, k), { x: 15, y: 104, w: kw - 30, h: 34 });
+      else {
+        /* 存储卡：分段条 108（12 高），三段按容量，图例 132 */
+        hmBox(`${at}.seg`, rel(k.seg, k), { x: 15, y: 108, w: kw - 30, h: 12 });
+        hmBox(`${at}.legend`, rel(k.legend, k), { x: 15, y: 132 });
+        if (k.segs.length !== 3)
+          homeFail(`${at}.seg`, `分段 ${k.segs.length} 段，应为三个池各一段`);
+      }
+    });
+
+    /* 第二行：卡里 17,254 起，存储池 : 硬盘 : 告警 = 1.1 : 1 : 1、间距 12、一样高；块头在块里 15,13 */
+    const row = H?.row;
+    hmBox("nas.row", rel(row, C), { x: 17, y: 254, w: W - 34 });
+    const blkKeys = (H?.blks ?? []).map((b) => b.key).join("|");
+    if (blkKeys !== "pools|disks|alerts") homeFail("nas.blocks", `第二行是「${blkKeys}」`);
+    const unit = (W - 34 - 24) / 3.1;
+    let bx = row?.x ?? 0;
+    (H?.blks ?? []).forEach((b, i) => {
+      const bw = (i === 0 ? 1.1 : 1) * unit;
+      hmBox(`nas.blk[${i}]`, b, { x: bx, y: row?.y, w: bw, h: row?.h }, 2);
+      hmBox(`nas.blk[${i}].head`, rel(b.head, b), { x: 15, y: 13, h: 18 });
+      bx += bw + 12;
+    });
+    const [pb, db, ab] = H?.blks ?? [];
+    /* 存储池：每个池一行（从块里 39 起、71 高），百分比右边到块里 w − 15，条 7 高；≥ 80% 写「快满了」 */
+    if ((H?.pools ?? []).length !== 3)
+      homeFail("nas.pools", `存储池 ${H?.pools?.length} 个，假数据 3 个`);
+    (H?.pools ?? []).forEach((p, i) => {
+      hmBox(`nas.pool[${i}]`, rel(p, pb), { x: 15, y: 39 + 71 * i, w: pb.w - 30 }, 2);
+      hmBox(`nas.pool[${i}].bar`, rel(p.bar, p), { x: 0, w: pb.w - 30, h: 7 });
+      if (!p.pct || !near(p.pct.x + p.pct.w - pb.x, pb.w - 15, 2))
+        homeFail(
+          `nas.pool[${i}].pct`,
+          `百分比 ${JSON.stringify(p.pct)}，右边应到块里 ${pb.w - 15}`,
+        );
+    });
+    const poolText = (H?.pools ?? [])
+      .map((p) => `${p.name} ${p.pill} ${p.pctText} ${p.sub}`)
+      .join("|");
+    if (
+      poolText !==
+      "tank ONLINE 85% 已用 24.7 TB · 共 28.9 TB · 4 块硬盘 · 快满了|fast ONLINE 33% 已用 614 GB · 共 1.8 TB · 2 块硬盘|backup ONLINE 46% 已用 3.3 TB · 共 7.2 TB · 2 块硬盘"
+    )
+      homeFail("nas.pools.text", `存储池是「${poolText}」`);
+    /* 硬盘：方块三列、间距 8、81 高，从块里 15,39 起；sdc 52 °C 到提醒线，nvme1n1 没有温度 */
+    const tw = ((db?.w ?? 0) - 30 - 16) / 3;
+    if ((H?.tiles ?? []).length !== 8)
+      homeFail("nas.disks", `硬盘方块 ${H?.tiles?.length} 个，假数据 8 块`);
+    (H?.tiles ?? []).forEach((t, i) =>
+      hmBox(
+        `nas.disk[${i}]`,
+        rel(t, db),
+        { x: 15 + (tw + 8) * (i % 3), y: 39 + 89 * Math.floor(i / 3), w: tw, h: 81 },
+        2,
+      ),
+    );
+    const tiles = (H?.tiles ?? []).map((t) => `${t.name}=${t.temp}${t.warn ? "!" : ""}`).join("|");
+    if (
+      tiles !==
+      "sda=38°C|sdb=41°C|sdc=52°C!|sdd=40°C|nvme0n1=47°C|nvme1n1=没有温度|sde=36°C|sdf=37°C"
+    )
+      homeFail("nas.disks.text", `硬盘是「${tiles}」`);
+    if (!db?.headText?.includes("最高 52 °C · sdc"))
+      homeFail("nas.disks.head", `块头是「${db?.headText}」`);
+    (H?.tiles ?? []).forEach((t, i) => {
+      if (t.clip > 0)
+        homeFail(`nas.disk[${i}].clip`, `「${t.name}」的名字或类型容量被截断 ${t.clip}px`);
+    });
+    /* 告警：三个计数块（34 高、间距 8）、最新三条（30 高）、底下是应用那一行（贴着块底 15） */
+    const cw3 = ((ab?.w ?? 0) - 30 - 16) / 3;
+    (H?.acounts ?? []).forEach((c, i) =>
+      hmBox(
+        `nas.alert.count[${i}]`,
+        rel(c, ab),
+        { x: 15 + (cw3 + 8) * i, y: 39, w: cw3, h: 34 },
+        2,
+      ),
+    );
+    const counts = (H?.acounts ?? []).map((c) => c.t).join("|");
+    if (counts !== "2严重|1警告|4信息") homeFail("nas.alert.counts", `计数是「${counts}」`);
+    (H?.arows ?? []).forEach((r, i) =>
+      hmBox(`nas.alert.row[${i}]`, rel(r, ab), { x: 15, y: 81 + 30 * i, w: ab.w - 30, h: 30 }, 2),
+    );
+    const arows = (H?.arows ?? []).map((r) => r.t).join("|");
+    if (arows !== "Rsync 任务「每日备份」失败|应用目录同步失败|Rsync 任务「相册」成功")
+      homeFail("nas.alert.rows", `最新三条是「${arows}」`);
+    if (!H?.apps || !near(ab.y + ab.h - (H.apps.y + H.apps.h), 15, 2))
+      homeFail("nas.apps", `应用那一行 ${JSON.stringify(H?.apps)}：底边离块底 15`);
+    if (H?.appsText !== "应用 运行中 5 个 · 共 6 个 · 1 个可更新")
+      homeFail("nas.apps.text", `应用那一行是「${H?.appsText}」`);
+    if (C && row && !near(C.y + C.h - (row.y + row.h), 17, 2))
+      homeFail("nas.card.bottom", `第二行底下到卡底 ${C.y + C.h - (row.y + row.h)}，应为 17`);
+
+    /* 媒体区块整体在 NAS 概览下面 16：画板 02 的 y 全部加 dy；内容宽少了 sb，五张、三张、七张按 1134 平分 */
+    const dy = H ? H.y + H.h + 16 - 80 : 0;
+    hmBox("today.title", m.today?.title, { x: 280, y: 80 + dy, h: 21 });
     if (m.today?.countText !== "5 集") homeFail("today.count", `计数是「${m.today?.countText}」`);
     if (
       !m.today?.link ||
@@ -4759,16 +5073,17 @@ if (doHome) {
     )
       homeFail("today.link", `「看日历」${JSON.stringify(m.today?.link)}，右边应到 ${R}`);
     if (m.tcs.length !== 5) homeFail("today.cards", `今天播出有 ${m.tcs.length} 张卡，假数据 5 张`);
+    const tcw = (W - 64) / 5;
     m.tcs.forEach((c, i) => {
-      hmBox(`today.card[${i}]`, c, { x: 280 + 232 * i, y: 112, w: 216, h: 200 });
-      hmBox(`today.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: 216, h: 122 }, 2);
+      hmBox(`today.card[${i}]`, c, { x: 280 + (tcw + 16) * i, y: 112 + dy, w: tcw, h: 200 });
+      hmBox(`today.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: tcw, h: 122 }, 2);
       hmBox(`today.card[${i}].state`, rel(c.state, c), { x: 8, y: 8, h: 20 }, 2);
       if (c.time) {
         const t = rel(c.time, c);
-        if (!near(t.x + t.w, 208, 2) || !near(t.y + t.h, 114, 2) || t.h !== 20)
+        if (!near(t.x + t.w, tcw - 8, 2) || !near(t.y + t.h, 114, 2) || t.h !== 20)
           homeFail(
             `today.card[${i}].time`,
-            `时刻牌 ${JSON.stringify(t)}：右下各留 8（右边 208、底 114）`,
+            `时刻牌 ${JSON.stringify(t)}：右下各留 8（右边 ${tcw - 8}、底 114）`,
           );
       } else homeFail(`today.card[${i}].time`, "按播出时间追剧的卡要有时刻牌");
       hmBox(`today.card[${i}].title`, rel(c.title, c), { x: 12, y: 132 }, 2);
@@ -4778,11 +5093,11 @@ if (doHome) {
     const acts = m.tcs.map((c) => c.actText).join("|");
     if (acts !== "播出后 2 小时开始搜|播放|下载中，预计 12 分钟|搜资源|播放")
       homeFail("today.acts", `动作行是「${acts}」`);
-    if (m.rowScroll > 0 && m.pages.length === 0)
-      homeFail("today.pages", "一行排不下时两端要有翻页按钮");
+    if (m.rowScroll > 0)
+      homeFail("today.fit", `五张卡一行放不下（多 ${m.rowScroll}px）：有滚动条时卡要缩到 ${tcw}`);
 
-    /* 待处理条：280,328 满宽 48；图标 16,16、标题 40、计数 92、chip 从 132 起 h26 间距 8、「全部」右边到 W − 16 */
-    hmBox("todo", m.todo, { x: 280, y: 328, w: W, h: 48 });
+    /* 待处理条：满宽 48；图标 16,16、标题 40、计数 92、chip 从 132 起 h26 间距 8、「全部」右边到 W − 16 */
+    hmBox("todo", m.todo, { x: 280, y: 328 + dy, w: W, h: 48 });
     hmBox("todo.icon", rel(m.todoIcon, m.todo), { x: 16, y: 16, w: 16, h: 16 }, 2);
     hmBox("todo.title", rel(m.todoTitle, m.todo), { x: 40 }, 2);
     hmBox("todo.count", rel(m.todoCount, m.todo), { x: 92, y: 15, h: 18 }, 2);
@@ -4801,9 +5116,9 @@ if (doHome) {
     if (!all || !near(all.x + all.w, W - 16, 2))
       homeFail("todo.all", `「全部」${JSON.stringify(all)}，右边应到 ${W - 16}`);
 
-    /* 两栏：左栏 760（W − 368 − 16）、右栏 368，都从 392 起、底在 980 */
+    /* 两栏：左栏 W − 368 − 16、右栏 368，都从 392 + dy 起 */
     const LW = W - 368 - 16;
-    hmBox("resume.title", m.resume?.title, { x: 280, y: 392, h: 21 });
+    hmBox("resume.title", m.resume?.title, { x: 280, y: 392 + dy, h: 21 });
     if (m.resume?.tag !== "Jellyfin · admin")
       homeFail("resume.tag", `身份 chip 是「${m.resume?.tag}」`);
     if (
@@ -4817,32 +5132,39 @@ if (doHome) {
       );
     if (m.rcs.length !== 3)
       homeFail("resume.cards", `继续观看有 ${m.rcs.length} 张卡，假数据 3 张`);
+    const rcw = (LW - 34) / 3;
     m.rcs.forEach((c, i) => {
-      hmBox(`resume.card[${i}]`, c, { x: 280 + 259 * i, y: 424, w: 242, h: 182 }, 2);
-      hmBox(`resume.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: 242, h: 136 }, 2);
-      hmBox(`resume.card[${i}].play`, rel(c.play, c), { x: 101, y: 48, w: 40, h: 40 }, 2);
-      hmBox(`resume.card[${i}].track`, rel(c.track, c), { x: 0, y: 132, w: 242, h: 4 }, 2);
+      hmBox(`resume.card[${i}]`, c, { x: 280 + (rcw + 17) * i, y: 424 + dy, w: rcw, h: 182 }, 2);
+      hmBox(`resume.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: rcw - 2, h: 136 }, 2);
+      hmBox(
+        `resume.card[${i}].play`,
+        rel(c.play, c),
+        { x: (rcw - 40) / 2, y: 48, w: 40, h: 40 },
+        2,
+      );
+      hmBox(`resume.card[${i}].track`, rel(c.track, c), { x: 0, y: 132, w: rcw - 2, h: 4 }, 2);
       hmBox(`resume.card[${i}].title`, rel(c.title, c), { x: 12, y: 145 }, 2);
       hmBox(`resume.card[${i}].sub`, rel(c.sub, c), { x: 12, y: 163 }, 2);
     });
-    hmBox("recent.title", m.recent?.title, { x: 280, y: 626, h: 21 });
+    hmBox("recent.title", m.recent?.title, { x: 280, y: 626 + dy, h: 21 });
     if (m.recent?.countText !== "今天 7")
       homeFail("recent.count", `计数是「${m.recent?.countText}」`);
-    const shownPosters = m.pcs.filter((c) => c.x + c.w <= 280 + LW + 1);
+    const pw = (LW - 72) / 7;
+    const shownPosters = m.pcs.filter((c) => c.y === m.pcs[0]?.y && c.x + c.w <= 280 + LW + 1);
     if (shownPosters.length !== 7)
-      homeFail("recent.posters", `一行放得下的海报 ${shownPosters.length} 张，760 宽放 7 张`);
+      homeFail("recent.posters", `一行放得下的海报 ${shownPosters.length} 张，应为 7 张`);
     m.pcs.slice(0, 7).forEach((c, i) => {
       hmBox(
         `recent.poster[${i}]`,
         rel(c.poster, { x: 0, y: 0 }),
-        { x: 280 + 110 * i, y: 658, w: 98, h: 147 },
+        { x: 280 + (pw + 12) * i, y: 658 + dy, w: pw, h: pw * 1.5 },
         2,
       );
       hmBox(`recent.poster[${i}].q`, rel(c.q, c), { x: 6, y: 6, h: 17 }, 2);
-      hmBox(`recent.poster[${i}].title`, rel(c.title, c), { x: 0, y: 153, w: 98 }, 2);
-      hmBox(`recent.poster[${i}].sub`, rel(c.sub, c), { x: 0, y: 171 }, 2);
+      hmBox(`recent.poster[${i}].title`, rel(c.title, c), { x: 0, y: pw * 1.5 + 6, w: pw }, 2);
+      hmBox(`recent.poster[${i}].sub`, rel(c.sub, c), { x: 0, y: pw * 1.5 + 24 }, 2);
     });
-    hmBox("week", m.week, { x: 280, y: 864, w: LW, h: 116 });
+    hmBox("week", m.week, { x: 280, y: 864 + dy, w: LW, h: 116 });
     if (m.week?.headText !== "这周还要播") homeFail("week.head", `卡头是「${m.week?.headText}」`);
     if (m.wks.length !== 4) homeFail("week.cols", `这周还要播有 ${m.wks.length} 列，假数据 4 条`);
     const colW = (LW - 16) / 4;
@@ -4854,50 +5176,78 @@ if (doHome) {
       if (i > 0 && (!c.line || c.line.left !== "-12px" || c.line.h !== "52px"))
         homeFail(`week.col[${i}].rule`, `竖线 ${JSON.stringify(c.line)}：在文字左边 12、52 高`);
     });
-    hmBox("nas", m.nas, { x: R - 368, y: 392, w: 368, h: 588 }, 2);
-    if (m.nas?.headText !== "NAS 状态") homeFail("nas.head", `卡头是「${m.nas?.headText}」`);
-    const N = m.nas;
+
+    /* 右栏（home-nas-spec.md §4）：下载器、存储、状态三个区块，标题 21 高、到卡顶 32，区块间 20 */
+    const S = m.side;
+    hmBox("side", S, { x: R - 368, y: 392 + dy, w: 368 }, 2);
+    const secs = (S?.secs ?? [])
+      .map((x) => `${x.titleText}（${x.countText}）${x.linkText}`)
+      .join("|");
+    if (secs !== "下载器（2 台）任务列表|存储（下载盘与媒体库）|状态（）系统体检")
+      homeFail("side.secs", `右栏是「${secs}」`);
+    (S?.secs ?? []).forEach((x, i) => {
+      hmBox(`side.sec[${i}].title`, x.title, { x: R - 368, h: 21 }, 2);
+      hmBox(`side.sec[${i}].card`, x.card, { x: R - 368, y: x.title.y + 32, w: 368 }, 2);
+      if (x.link && !near(x.link.x + x.link.w, R, 2))
+        homeFail(
+          `side.sec[${i}].link`,
+          `「${x.linkText}」${JSON.stringify(x.link)}，右边应到 ${R}`,
+        );
+      const prev = S.secs[i - 1];
+      if (prev && !near(x.y - (prev.y + prev.h), 20, 1))
+        homeFail(`side.sec[${i}]`, `与上一个区块隔 ${x.y - (prev.y + prev.h)}，应为 20`);
+    });
+    const [dlSec, stSec, lnSec] = S?.secs ?? [];
+    const DC = dlSec?.card;
+    /* 下载器卡：两列速度（17、192，标签 14、大字 32、柱 59 高 26）；下面各台下载器一行 26（圆点 17,120，名字 31,114，速度右边到 351） */
     m.speedCols.forEach((c, i) => {
-      const x = i === 0 ? 16 : 192;
-      hmBox(`nas.speed[${i}].icon`, rel(c.icon, N), { x, y: 44, w: 14, h: 14 }, 2);
-      hmBox(`nas.speed[${i}].label`, rel(c.label, N), { x: x + 20, y: 42 }, 2);
-      hmBox(`nas.speed[${i}].value`, rel(c.value, N), { x, y: 60 }, 2);
-      hmBox(`nas.speed[${i}].bars`, rel(c.bars, N), { x, y: 88, w: 160, h: 26 }, 2);
+      const x = i === 0 ? 17 : 192;
+      hmBox(`dl.speed[${i}].icon`, rel(c.icon, DC), { x, y: 14, w: 14, h: 14 }, 2);
+      hmBox(`dl.speed[${i}].label`, rel(c.label, DC), { x: x + 20, y: 14 }, 2);
+      hmBox(`dl.speed[${i}].value`, rel(c.value, DC), { x, y: 32 }, 2);
+      hmBox(`dl.speed[${i}].bars`, rel(c.bars, DC), { x, y: 59, w: 159, h: 26 }, 2);
     });
     const labels = m.speedCols.map((c) => c.labelText).join("|");
     if (labels !== "下载 · 下载中 4|上传 · 做种 1,284")
-      homeFail("nas.speed.labels", `标签是「${labels}」`);
-    hmBox("nas.storage.group", rel(m.storageGroup, N), { x: 16, y: 142 }, 2);
-    if (m.disks.length !== 3) homeFail("nas.disks", `存储有 ${m.disks.length} 块盘，假数据 3 块`);
-    m.disks.forEach((d, i) => {
-      hmBox(`nas.disk[${i}].name`, rel(d.name, N), { x: 16, y: 164 + 42 * i }, 2);
-      hmBox(`nas.disk[${i}].bar`, rel(d.bar, N), { x: 16, y: 186 + 42 * i, w: 336, h: 5 }, 2);
-      const f = rel(d.free, N);
-      if (!f || !near(f.x + f.w, 352, 2))
-        homeFail(`nas.disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到 352`);
-    });
-    hmBox("nas.dls.group", rel(m.dlGroup, N), { x: 16, y: 308 }, 2);
+      homeFail("dl.speed.labels", `标签是「${labels}」`);
+    if (m.dls.length !== 2) homeFail("dl.rows", `下载器 ${m.dls.length} 台，假数据 2 台`);
     m.dls.forEach((d, i) => {
-      hmBox(`nas.dl[${i}].dot`, rel(d.dot, N), { x: 16, y: 336 + 26 * i, w: 7, h: 7 }, 2);
-      hmBox(`nas.dl[${i}].name`, rel(d.name, N), { x: 30, y: 330 + 26 * i }, 2);
-      const sp = rel(d.speed, N);
-      if (!sp || !near(sp.x + sp.w, 352, 2))
-        homeFail(`nas.dl[${i}].speed`, `速度 ${JSON.stringify(sp)}，右边应到 352`);
+      hmBox(`dl.row[${i}].dot`, rel(d.dot, DC), { x: 17, y: 120 + 26 * i, w: 7, h: 7 }, 2);
+      hmBox(`dl.row[${i}].name`, rel(d.name, DC), { x: 31, y: 114 + 26 * i }, 2);
+      const sp = rel(d.speed, DC);
+      if (!sp || !near(sp.x + sp.w, 351, 2))
+        homeFail(`dl.row[${i}].speed`, `速度 ${JSON.stringify(sp)}，右边应到 351`);
     });
+    /* 存储卡：每块盘一行 42（名字 17,13 + 42i，条 35 + 42i、334×5，剩余右边到 351） */
+    const SC = stSec?.card;
+    if (m.disks.length !== 3) homeFail("disks", `存储有 ${m.disks.length} 块盘，假数据 3 块`);
+    const diskNames = m.disks.map((d) => d.nameText).join("|");
+    if (diskNames !== "下载盘 · qb、tr /downloads|媒体库 · 电影 /media|媒体库 · 剧集 /tv")
+      homeFail("disks.names", `盘的名字是「${diskNames}」（名字与路径之间要有空格）`);
+    m.disks.forEach((d, i) => {
+      hmBox(`disk[${i}].name`, rel(d.name, SC), { x: 17, y: 13 + 42 * i }, 2);
+      hmBox(`disk[${i}].bar`, rel(d.bar, SC), { x: 17, y: 35 + 42 * i, w: 334, h: 5 }, 2);
+      const f = rel(d.free, SC);
+      if (!f || !near(f.x + f.w, 351, 2))
+        homeFail(`disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到 351`);
+    });
+    /* 状态卡：三行各 52（图标 28 在 17,13，标题 55,9，说明 55,28，右侧右边到 351） */
+    const LC = lnSec?.card;
     if (m.lines.length !== 3)
-      homeFail("nas.lines", `状态行有 ${m.lines.length} 条，应是体检、备份、媒体服务器`);
+      homeFail("lines", `状态行有 ${m.lines.length} 条，应是体检、备份、媒体服务器`);
     m.lines.forEach((l, i) => {
-      const y = 406 + 58 * i;
-      hmBox(`nas.line[${i}].icon`, rel(l.icon, N), { x: 16, y: y + 2, w: 16, h: 16 }, 2);
-      hmBox(`nas.line[${i}].title`, rel(l.title, N), { x: 40, y }, 2);
-      hmBox(`nas.line[${i}].desc`, rel(l.desc, N), { x: 40, y: y + 20 }, 2);
-      const rt = rel(l.right, N);
-      if (!rt || !near(rt.x + rt.w, 352, 2))
-        homeFail(`nas.line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到 352`);
+      const y = 52 * i;
+      hmBox(`line[${i}]`, rel(l, LC), { x: 1, y: y + 1, h: 52 }, 2);
+      hmBox(`line[${i}].icon`, rel(l.icon, LC), { x: 17, y: y + 13, w: 28, h: 28 }, 2);
+      hmBox(`line[${i}].title`, rel(l.title, LC), { x: 55, y: y + 9 }, 2);
+      hmBox(`line[${i}].desc`, rel(l.desc, LC), { x: 55, y: y + 28 }, 2);
+      const rt = rel(l.right, LC);
+      if (!rt || !near(rt.x + rt.w, 351, 2))
+        homeFail(`line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到 351`);
     });
     const titles = m.lines.map((l) => l.titleText).join("|");
     if (titles !== "体检：13 项通过，1 项提醒|备份：3 天没成功|Jellyfin 12.2 · 14:00 同步")
-      homeFail("nas.lines.titles", `状态行标题是「${titles}」`);
+      homeFail("lines.titles", `状态行标题是「${titles}」`);
 
     /* 探针：「全部」打开右侧 440 宽的抽屉，一件事一行；点一个去别的页面的 chip，地址带着筛选 */
     const drawer = String(
@@ -4940,21 +5290,55 @@ if (doHome) {
   }
   for (const err of [...new Set(consoleErrors)].slice(0, 3)) homeFail("console", err);
 
-  /* ---- 1200×900：内容 904 < 1100，NAS 状态落到左栏下面、占满宽 ---- */
+  /*
+   * ---- 1200×900：内容 894（< 1100 且 ≤ 1080）：右栏落到左栏下面、占满宽；
+   * NAS 概览的数值卡仍是四张一行（卡里窄到 210 以下，副行换成短的），第二行两列、告警一块跨两列 ----
+   */
   consoleErrors = [];
   if (await openHome({ width: 1200, height: 900, mobile: false })) {
     const m = await ev(MEASURE_HM);
     await shot("home-1200");
     const W = 1200 - 264 - 32 - m.sb;
     const weekBottom = m.week ? m.week.y + m.week.h : 0;
-    hmBox("@1200 nas", m.nas, { x: 280, w: W }, 2, "@1200");
-    if (m.nas && !near(m.nas.y - weekBottom, 16, 2))
+    hmBox("@1200 side", m.side, { x: 280, w: W }, 2, "@1200");
+    if (m.side && !near(m.side.y - weekBottom, 16, 2))
       homeFail(
-        "@1200 nas",
-        `NAS 状态的顶 ${m.nas.y} 到这周还要播的底 ${weekBottom} 应隔 16`,
+        "@1200 side",
+        `右栏的顶 ${m.side.y} 到这周还要播的底 ${weekBottom} 应隔 16`,
         "@1200",
       );
     hmBox("@1200 week", m.week, { x: 280, w: W }, 2, "@1200");
+    hmBox("@1200 nas.card", m.hn?.card, { x: 280, w: W }, 2, "@1200");
+    const kw = (W - 70) / 4;
+    const shorts = (m.hn?.kpis ?? []).map((k) => k.subText).join("|");
+    if (shorts !== "负载 3.7 · 52 °C|已用 39.2 GB|上行 1.8 MB/s|剩余 9.3 TB")
+      homeFail(
+        "@1200 nas.kpi.sub",
+        `卡宽 ${kw}（里面窄到 210 以下）时副行是「${shorts}」`,
+        "@1200",
+      );
+    (m.hn?.kpis ?? []).forEach((k, i) => {
+      hmBox(`@1200 nas.kpi[${i}]`, k, { x: 297 + (kw + 12) * i, w: kw }, 2, "@1200");
+      if (k.subClip > 0 || k.asideClip > 0)
+        homeFail(
+          `@1200 nas.kpi[${i}].clip`,
+          `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`,
+          "@1200",
+        );
+    });
+    const row = m.hn?.row;
+    const [pb, db, ab] = m.hn?.blks ?? [];
+    const half = row ? (row.w - 12) / 2 : 0;
+    hmBox("@1200 nas.blk[0]", pb, { x: row?.x, y: row?.y, w: half }, 2, "@1200");
+    hmBox("@1200 nas.blk[1]", db, { x: (row?.x ?? 0) + half + 12, y: row?.y, w: half }, 2, "@1200");
+    if (pb && db && pb.h !== db.h) homeFail("@1200 nas.blk[0]", "存储池与硬盘两块一样高", "@1200");
+    hmBox(
+      "@1200 nas.blk[2]",
+      ab,
+      { x: row?.x, y: pb ? pb.y + pb.h + 12 : 0, w: row?.w },
+      2,
+      "@1200",
+    );
     if (m.overflow > 0 || m.innerOverflow > 0)
       homeFail("@1200 overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`, "@1200");
     /* 今天播出一行排不下：横向滚，两端有翻页按钮，点「下一页」往后滚 */
@@ -5003,9 +5387,58 @@ if (doHome) {
       if (s?.link && !near(s.link.x + s.link.w, 359 - sb, 2))
         fail(`${k}.link`, `文字链 ${JSON.stringify(s.link)}，右边应到 ${359 - sb}`);
     };
-    sec("today", m.today, 68);
+    /*
+     * NAS 概览在最上面（home-nas-spec.md §5）：标题 16,68，卡 16,100 宽 cw；主机行在卡里 15 起、标志 34；
+     * 数值卡 2×2（间距 8、126 高，大字 22px、柱 22 高，副行写短的）；第二行只有存储池；告警与硬盘各一行摘要（38 高、间距 10）
+     */
+    const H = m.hn;
+    box("nas.title", H?.title, { x: 16, y: 68, h: 21 });
+    if (H?.linkText !== "NAS 监控" || !H?.link || !near(H.link.x + H.link.w, 359 - sb, 2))
+      fail("nas.link", `「NAS 监控」${JSON.stringify(H?.link)}，右边应到 ${359 - sb}`);
+    if (H?.others) fail("nas.others", "手机上标题行不写其余来源（在 NAS 监控里看）");
+    if (!H?.live || !near(H.live.x + H.live.w, H.link.x - 8, 2))
+      fail("nas.live", `更新时间 ${JSON.stringify(H?.live)}：在「NAS 监控」左边 8`);
+    const C = H?.card;
+    box("nas.card", C, { x: 16, y: 100, w: cw });
+    box("nas.host", rel(H?.host, C), { x: 1, y: 1, w: cw - 2 });
+    box("nas.host.logo", rel(H?.logo, C), { x: 15, w: 34, h: 34 });
+    if (H?.facts?.length) fail("nas.facts", "手机上主机行右边不放标签");
+    const kw = (cw - 38) / 2;
+    const hostBottom = H?.host ? H.host.y + H.host.h : 0;
+    (H?.kpis ?? []).forEach((k, i) => {
+      const y0 = hostBottom + 12 + (126 + 8) * Math.floor(i / 2);
+      box(`nas.kpi[${i}]`, k, { x: 16 + 15 + (kw + 8) * (i % 2), y: y0, w: kw, h: 126 });
+      box(`nas.kpi[${i}].ic`, rel(k.ic, k), { x: 13, y: 11, w: 22, h: 22 });
+      if (k.valSize !== "22px") fail(`nas.kpi[${i}].val`, `大字 ${k.valSize}，应为 22px`);
+      if (k.subClip > 0 || k.asideClip > 0)
+        fail(`nas.kpi[${i}].clip`, `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`);
+      if (i < 3) box(`nas.kpi[${i}].bars`, rel(k.bars, k), { x: 13, y: 93, w: kw - 26, h: 22 });
+      else if (k.legend) fail("nas.kpi[3].legend", "手机上存储卡不放图例");
+    });
+    const shortsM = (H?.kpis ?? []).map((k) => k.subText).join("|");
+    if (shortsM !== "负载 3.7 · 52 °C|已用 39.2 GB|上行 1.8 MB/s|剩余 9.3 TB")
+      fail("nas.kpi.sub", `手机上副行是「${shortsM}」`);
+    const blkM = (H?.blks ?? []).map((b) => b.key).join("|");
+    if (blkM !== "pools") fail("nas.blocks", `手机上第二行是「${blkM}」，只列存储池`);
+    const kLast = H?.kpis?.[3];
+    const pbM = H?.blks?.[0];
+    box("nas.pools", pbM, { x: 31, y: kLast ? kLast.y + kLast.h + 10 : 0, w: cw - 30 });
+    const sums = (H?.msums ?? []).map((x) => x.t).join("|");
+    if (sums !== "告警 2 严重 · 1 警告 · 4 信息|硬盘 8 块 · 最高 52 °C（sdc）")
+      fail("nas.msums", `摘要是「${sums}」`);
+    let my = pbM ? pbM.y + pbM.h + 10 : 0;
+    (H?.msums ?? []).forEach((x, i) => {
+      box(`nas.msum[${i}]`, x, { x: 31, y: my, w: cw - 30, h: 38 });
+      my = x.y + x.h + 10;
+    });
+    const lastSum = H?.msums?.[H.msums.length - 1];
+    if (C && lastSum && !near(C.y + C.h - (lastSum.y + lastSum.h), 15, 2))
+      fail("nas.card.bottom", `最后一行摘要到卡底 ${C.y + C.h - (lastSum.y + lastSum.h)}，应为 15`);
+    /* 下面是画板 07 的区块，整体在 NAS 概览下面 24 */
+    const dyM = H ? H.y + H.h + 24 - 68 : 0;
+    sec("today", m.today, 68 + dyM);
     m.tcs.slice(0, 2).forEach((c, i) => {
-      box(`today.card[${i}]`, c, { x: 16 + 252 * i, y: 100, w: 240, h: 196 });
+      box(`today.card[${i}]`, c, { x: 16 + 252 * i, y: 100 + dyM, w: 240, h: 196 });
       box(`today.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: 240, h: 135 });
       box(`today.card[${i}].state`, rel(c.state, c), { x: 8, y: 8, h: 20 });
       box(`today.card[${i}].title`, rel(c.title, c), { x: 12, y: 144 });
@@ -5018,7 +5451,7 @@ if (doHome) {
     else {
       const x0 = Math.round((375 - sb) / 2 - 27);
       m.dots.forEach((d, i) =>
-        box(`today.dot[${i}]`, d, { x: x0 + 12 * i, y: 304, w: 6, h: 6 }, 2),
+        box(`today.dot[${i}]`, d, { x: x0 + 12 * i, y: 304 + dyM, w: 6, h: 6 }, 2),
       );
     }
     const dotsBottom = m.dots.length ? m.dots[0].y + m.dots[0].h : 0;
@@ -5072,7 +5505,7 @@ if (doHome) {
       box(`recent.poster[${i}].sub`, rel(c.sub, c), { x: 0, y: 174 });
     });
     const recentBottom = m.pcs[0] ? m.pcs[0].y + m.pcs[0].h : 0;
-    /* 这周还要播与 NAS 状态：标题在卡外（画板 07 的 week / title、nas / title），卡 343 宽 */
+    /* 这周还要播：标题在卡外（画板 07 的 week / title），卡 343 宽 */
     sec("week", m.weekSec, recentBottom + 24);
     if (m.weekSec?.linkText !== "看日历") fail("week.link", `文字链是「${m.weekSec?.linkText}」`);
     const wc = m.week?.card;
@@ -5084,43 +5517,63 @@ if (doHome) {
       box(`week.row[${i}].note`, rel(c.note, wc), { x: 96, y: 52 * i + 28 }, 2);
     });
     const weekBottom = wc ? wc.y + wc.h : 0;
-    sec("nas", m.nasSec, weekBottom + 24);
-    if (m.nasSec?.linkText !== "系统体检") fail("nas.link", `文字链是「${m.nasSec?.linkText}」`);
-    const nc = m.nas?.card;
-    box("nas.card", nc, { x: 16, y: (m.nasSec?.title?.y ?? 0) + 32, w: cw, h: 368 });
-    /* 两列：画板 148 宽、x 14 与 180（列间 18） */
-    const bw = (cw - 28 - 18) / 2;
+    /*
+     * 右栏的三个区块（home-nas-spec.md §5）：下载器、存储、状态，标题在卡外，在这周还要播下面 24、区块间 24；
+     * 下载器卡只有两列速度（不列各台下载器），存储列下载盘与媒体库各一块，状态三行各 48、没有说明行
+     */
+    const S = m.side;
+    const secsM = (S?.secs ?? [])
+      .map((x) => `${x.titleText}（${x.countText}）${x.linkText}`)
+      .join("|");
+    if (secsM !== "下载器（2 台）任务列表|存储（下载盘与媒体库）|状态（）系统体检")
+      fail("side.secs", `右栏是「${secsM}」`);
+    let sy = weekBottom + 24;
+    (S?.secs ?? []).forEach((x, i) => {
+      box(`side.sec[${i}].title`, x.title, { x: 16, y: sy, h: 21 });
+      box(`side.sec[${i}].card`, x.card, { x: 16, y: sy + 32, w: cw });
+      if (x.link && !near(x.link.x + x.link.w, 359 - sb, 2))
+        fail(
+          `side.sec[${i}].link`,
+          `「${x.linkText}」${JSON.stringify(x.link)}，右边应到 ${359 - sb}`,
+        );
+      sy = x.y + x.h + 24;
+    });
+    const [dlSecM, stSecM, lnSecM] = S?.secs ?? [];
+    const DC = dlSecM?.card;
+    const bw = (cw - 48) / 2;
     m.speedCols.forEach((c, i) => {
-      const x = i === 0 ? 14 : 14 + bw + 18;
-      box(`nas.speed[${i}].icon`, rel(c.icon, nc), { x, y: 16, w: 14, h: 14 });
-      box(`nas.speed[${i}].label`, rel(c.label, nc), { x: x + 20, y: 14 });
-      box(`nas.speed[${i}].value`, rel(c.value, nc), { x, y: 32 });
-      box(`nas.speed[${i}].bars`, rel(c.bars, nc), { x, y: 60, w: bw, h: 24 });
+      const x = i === 0 ? 15 : 15 + bw + 18;
+      box(`dl.speed[${i}].icon`, rel(c.icon, DC), { x, y: 14, w: 14, h: 14 });
+      box(`dl.speed[${i}].label`, rel(c.label, DC), { x: x + 20, y: 14 });
+      box(`dl.speed[${i}].value`, rel(c.value, DC), { x, y: 32 });
+      box(`dl.speed[${i}].bars`, rel(c.bars, DC), { x, y: 59, w: bw, h: 24 });
     });
     if (m.speedCols.map((c) => c.labelText).join("|") !== "下载|上传")
       fail(
-        "nas.speed.labels",
+        "dl.speed.labels",
         `手机上标签只写「下载」「上传」：「${m.speedCols.map((c) => c.labelText).join("|")}」`,
       );
+    if (m.dlPart) fail("dl.rows", "手机上不列各台下载器");
+    const SC = stSecM?.card;
     if (m.disks.length !== 2)
-      fail("nas.disks", `手机上存储列 ${m.disks.length} 块，应是下载盘与媒体库盘各一块`);
+      fail("disks", `手机上存储列 ${m.disks.length} 块，应是下载盘与媒体库盘各一块`);
     m.disks.forEach((d, i) => {
-      box(`nas.disk[${i}].name`, rel(d.name, nc), { x: 14, y: 110 + 42 * i });
-      box(`nas.disk[${i}].bar`, rel(d.bar, nc), { x: 14, y: 132 + 42 * i, w: cw - 28, h: 5 });
-      const f = rel(d.free, nc);
-      if (!f || !near(f.x + f.w, 329 - sb, 2))
-        fail(`nas.disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到 ${329 - sb}`);
+      box(`disk[${i}].name`, rel(d.name, SC), { x: 15, y: 12 + 42 * i });
+      box(`disk[${i}].bar`, rel(d.bar, SC), { x: 15, y: 34 + 42 * i, w: cw - 30, h: 5 });
+      const f = rel(d.free, SC);
+      if (!f || !near(f.x + f.w, cw - 15, 2))
+        fail(`disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到卡里 ${cw - 15}`);
     });
-    if (m.dlPart) fail("nas.dls", "手机上不列下载器那一组");
+    const LCm = lnSecM?.card;
     m.lines.forEach((l, i) => {
-      const y = 214 + 50 * i;
-      box(`nas.line[${i}]`, rel(l, nc), { y, h: 50 }, 2);
-      box(`nas.line[${i}].icon`, rel(l.icon, nc), { x: 14, y: y + 14, w: 16, h: 16 });
-      box(`nas.line[${i}].title`, rel(l.title, nc), { x: 40, y: y + 12 });
-      if (l.desc) fail(`nas.line[${i}].desc`, "手机上状态行没有说明行");
-      const rt = rel(l.right, nc);
-      if (!rt || !near(rt.x + rt.w, 329 - sb, 2))
-        fail(`nas.line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到 ${329 - sb}`);
+      const y = 1 + 48 * i;
+      box(`line[${i}]`, rel(l, LCm), { y, h: 48 }, 2);
+      box(`line[${i}].icon`, rel(l.icon, LCm), { x: 15, y: y + 10, w: 28, h: 28 });
+      box(`line[${i}].title`, rel(l.title, LCm), { x: 53, y: y + 15 });
+      if (l.desc) fail(`line[${i}].desc`, "手机上状态行没有说明行");
+      const rt = rel(l.right, LCm);
+      if (!rt || !near(rt.x + rt.w, cw - 15, 2))
+        fail(`line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到卡里 ${cw - 15}`);
     });
     /* 探针：「全部」打开全屏的列表 */
     const full = String(
@@ -5175,12 +5628,86 @@ if (doHome) {
       fail("week.empty", `这周还要播写的是「${m.weekEmpty}」`);
     const titles = m.lines.map((l) => l.titleText).join("|");
     if (titles !== "体检：没体检过|备份：每天定时备份关着|媒体服务器")
-      fail("nas.lines", `状态行是「${titles}」`);
+      fail("lines", `状态行是「${titles}」`);
+    /* NAS 概览：一个能显示的来源都没有时是一张空状态卡（图标 48、标题、说明与「接入 NAS」），不画数据卡与更新时间 */
+    const H = m.hn;
+    if (H?.emptyTitle !== "还没有 NAS 监控来源")
+      fail("nas.empty", `空状态卡写的是「${H?.emptyTitle}」`);
+    if (!H?.emptySub?.startsWith("接入 TrueNAS 以后") || !H.emptySub.includes("本机来源已关闭"))
+      fail("nas.empty.sub", `说明是「${H?.emptySub}」`);
+    if (H?.emptyBtnText !== "接入 NAS") fail("nas.empty.btn", `按钮是「${H?.emptyBtnText}」`);
+    if (H?.card || H?.live || H?.countText)
+      fail("nas.empty", "没有来源时不画数据卡、更新时间与类型");
+    const mob = where === "@empty375";
+    hmBox(
+      "nas.empty.card",
+      H?.empty,
+      { x: mob ? 16 : 280, y: mob ? 100 : 112, w: (mob ? 343 : 1144) - m.sb },
+      2,
+      where,
+    );
+    hmBox("nas.empty.icon", rel(H?.emptyIcon, H?.empty), { w: 48, h: 48 }, 2, where);
+    const secsE = (m.side?.secs ?? []).map((x) => x.titleText).join("|");
+    if (secsE !== "下载器|存储|状态") fail("side.secs", `右栏是「${secsE}」`);
     if (m.overflow > 0 || m.innerOverflow > 0)
       fail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
     for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
   }
-  await ev(`localStorage.removeItem('pt-fixture-home-empty')`).catch(() => {});
+  /*
+   * ---- 只有本机来源（1440，home-nas-spec.md §3）：网络一格换成下载器速度；第二行是存储（首页的下载盘与媒体库）
+   * 与一块虚线框「接入 NAS」；右栏不再列存储 ----
+   */
+  consoleErrors = [];
+  if (!(await openHome({ width: 1440, height: 1024, mobile: false }, { nas: "local" }))) {
+    homeFail("load", "只有本机来源时首页没读到数据", "@local");
+  } else {
+    const m = await ev(MEASURE_HM);
+    await shot("home-local");
+    const fail = (k, msg) => homeFail(k, msg, "@local");
+    const H = m.hn;
+    if (H?.countText !== "本机") fail("nas.title", `类型是「${H?.countText}」`);
+    if (H?.others) fail("nas.others", "只有本机来源时标题行不写其余来源");
+    if (H?.hostTitleText !== "pt-tools 所在主机" || H?.verText !== "Linux 6.12.15")
+      fail("nas.host", `主机行是「${H?.hostTitleText}」「${H?.verText}」`);
+    if (H?.facts?.length) fail("nas.facts", "本机来源不放提醒标签");
+    const heads = (H?.kpis ?? []).map((k) => `${k.labelText}（${k.asideText}）`).join("|");
+    if (heads !== "CPU（8 核）|内存（共 32.0 GB）|下载器速度（本机读不到网卡）|存储（所在的盘）")
+      fail("nas.kpis", `数值卡是「${heads}」`);
+    const netSub = H?.kpis?.[2]?.subText ?? "";
+    if (!/^上传 .+ · 所有下载器合计$/.test(netSub))
+      fail("nas.kpi[2].sub", `下载器速度的副行是「${netSub}」`);
+    (H?.kpis ?? []).forEach((k, i) => {
+      if (k.subClip > 0 || k.asideClip > 0)
+        fail(`nas.kpi[${i}].clip`, `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`);
+    });
+    const row = H?.row;
+    const keys = (H?.blks ?? []).map((b) => b.key).join("|");
+    if (keys !== "local-storage|local-more") fail("nas.blocks", `第二行是「${keys}」`);
+    const half = row ? (row.w - 12) / 2 : 0;
+    (H?.blks ?? []).forEach((b, i) =>
+      hmBox(
+        `nas.blk[${i}]`,
+        b,
+        { x: (row?.x ?? 0) + (half + 12) * i, y: row?.y, w: half, h: row?.h },
+        2,
+        "@local",
+      ),
+    );
+    const lrows = (H?.localRows ?? []).map((r) => r.name).join("|");
+    if (lrows !== "下载盘 · qb、tr /downloads|媒体库 · 电影 /media|媒体库 · 剧集 /tv")
+      fail("nas.local.rows", `存储列的是「${lrows}」`);
+    if (H?.localConnect !== "接入 NAS")
+      fail("nas.local.connect", `虚线框里的链接是「${H?.localConnect}」`);
+    const secsL = (m.side?.secs ?? []).map((x) => x.titleText).join("|");
+    if (secsL !== "下载器|状态")
+      fail("side.secs", `右栏是「${secsL}」（本机的存储已经画在 NAS 概览里）`);
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      fail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+  }
+  for (const err of [...new Set(consoleErrors)].slice(0, 3)) homeFail("console", err, "@local");
+  await ev(
+    `localStorage.removeItem('pt-fixture-home-empty'); localStorage.removeItem('pt-fixture-home-nas')`,
+  ).catch(() => {});
 
   /*
    * ---- 系统体检（画板没有，照预览 system-check.html，首页 NAS 概览 H1）：1440 与 375 ----
@@ -5538,7 +6065,7 @@ const scope =
   (emptyRoutes.length > 0 ? ` + 空态 ${emptyRoutes.length} 条` : "") +
   (doEntry ? " + 按条目搜索（1440、1200、375）" : "") +
   (doItem ? " + 条目详情（1440 剧集与电影、1200、375）" : "") +
-  (doHome ? " + 首页（1440、1200、375、空态）与系统体检" : "") +
+  (doHome ? " + 首页（1440、1200、375、空态、本机来源）与系统体检" : "") +
   (doLogin ? " + 登录页" : "");
 if (failures.length === 0 && stale.length === 0) {
   /*

@@ -109,6 +109,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/global", label: "全局设置", icon: "settings", rail: true },
       /* 媒体中心 M8：画板没有这一页，沿用 qB 兼容入口页的样式 */
       { path: "/system/check", label: "系统体检", icon: "activity" },
+      /* 首页 NAS 概览 H2：画板没有这一页，沿用远程访问页的样式（来源列表对应设备列表） */
+      { path: "/system/nas", label: "NAS 监控", icon: "server" },
       { path: "/cloak-config", label: "CloakBrowser", icon: "shield" },
       { path: "/api-tokens", label: "API 令牌", icon: "id-card" },
       /* 路线图 M14：画板没有这一页，沿用 qB 兼容入口页的样式 */
@@ -220,6 +222,7 @@ const ROUTE_NAME_TO_NAV: Record<string, string> = {
   "rss-notifications": "/chatops/rss-notifications",
   global: "/global",
   "system-check": "/system/check",
+  "nas-monitor": "/system/nas",
   "cloak-config": "/cloak-config",
   "api-tokens": "/api-tokens",
   mcp: "/mcp",

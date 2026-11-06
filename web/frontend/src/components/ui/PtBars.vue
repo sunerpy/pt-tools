@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, getCurrentScope, onScopeDispose, ref, watch } from "vue";
 
 /**
  * 彩虹柱指标图 —— 设计文档 §4 的 `k.bars`，是本产品指标图形的唯一形态。
@@ -10,6 +10,9 @@ import { computed } from "vue";
  * 归一化与设计稿逐条对齐：取序列最后 n 个点，映射到 0.34–1.0 的高度，所以
  * 最低点也有可见高度，不会出现贴地的空柱；柱内自上而下走一道同色渐变，
  * 末柱恒为满不透明度，读作「当前值」。
+ *
+ * 给了 pushKey（最新一拍的标识，比如它的时间）时，它一变就把新的一拍从右边推进来：柱子先整体
+ * 右移一格（看上去还在原位，新柱在框外），下一帧再滑回原位。系统要求减少动态效果时直接换。
  */
 const props = withDefaults(
   defineProps<{
@@ -33,6 +36,8 @@ const props = withDefaults(
      * 用于每日增量这类「0 就是没有」的序列，否则缺快照、没上传的日子也会画成三分之一高的柱子。
      */
     baseline?: "range" | "zero";
+    /** 最新一拍的标识：变了就播放推进动画（首次给值与没给时不播） */
+    pushKey?: string | number;
   }>(),
   {
     hue: "var(--pt-p)",
@@ -74,6 +79,55 @@ const bars = computed(() => {
   });
 });
 
+/* 推进动画：shift 是柱子整体的右移（px），moving 为真时带过渡滑回 0 */
+const shift = ref(0);
+const moving = ref(false);
+let raf = 0;
+
+function reducedMotion(): boolean {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function stopPush() {
+  if (raf) cancelAnimationFrame(raf);
+  raf = 0;
+  shift.value = 0;
+  moving.value = false;
+}
+
+watch(
+  () => props.pushKey,
+  (now, before) => {
+    if (now === undefined || before === undefined || now === before) return;
+    if (reducedMotion() || typeof requestAnimationFrame !== "function") return;
+    stopPush();
+    // 这一次渲染：新的柱子整体右移一格（每根都落在上一拍自己的位置上）；两帧以后带过渡滑回来
+    shift.value = props.barWidth + props.gap;
+    raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        moving.value = true;
+        shift.value = 0;
+      });
+    });
+  },
+);
+
+if (getCurrentScope()) onScopeDispose(stopPush);
+
+const trackStyle = computed(() => ({
+  gap: `${props.gap}px`,
+  transform: shift.value ? `translateX(${shift.value}px)` : undefined,
+  transition: moving.value ? "transform var(--pt-transition-slow)" : "none",
+}));
+
+function onPushed() {
+  moving.value = false;
+}
+
 function pct(v: number) {
   return `${Math.round(v * 1000) / 10}%`;
 }
@@ -89,12 +143,10 @@ function barStyle(b: { h: number; top: number; bottom: number }) {
 </script>
 
 <template>
-  <div
-    class="pt-bars"
-    :style="{ height: `${height}px`, gap: `${gap}px` }"
-    role="presentation"
-    aria-hidden="true">
-    <i v-for="(b, i) in bars" :key="i" :style="barStyle(b)" />
+  <div class="pt-bars" :style="{ height: `${height}px` }" role="presentation" aria-hidden="true">
+    <div class="pt-bars__track" :style="trackStyle" @transitionend.self="onPushed">
+      <i v-for="(b, i) in bars" :key="i" :style="barStyle(b)" />
+    </div>
   </div>
 </template>
 
@@ -107,8 +159,22 @@ function barStyle(b: { h: number; top: number; bottom: number }) {
   overflow: hidden;
 }
 
+/* 柱子排在一条轨道上：推进动画移的是整条轨道；比框宽时最老的几根从左边裁掉 */
+.pt-bars__track {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  height: 100%;
+}
+
 .pt-bars i {
   display: block;
   flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-bars__track {
+    transition: none !important;
+  }
 }
 </style>
