@@ -191,7 +191,10 @@ const homeNow = computed(() => {
 const kindsText = computed(() => {
   if (!kinds.value.length) return "这个版本还不能接入 NAS，只有本机来源。";
   const names = kinds.value.map((k) => (k.experimental ? `${k.label}（实验性）` : k.label));
-  return `能接入：${names.join("、")}。实验性的还没在足够多的真机上验证过，读到的数据可能不全。`;
+  const text = `能接入：${names.join("、")}。`;
+  return kinds.value.some((k) => k.experimental)
+    ? `${text}实验性的还没在足够多的真机上验证过，读到的数据可能不全。`
+    : text;
 });
 
 // —— 添加、编辑、删除

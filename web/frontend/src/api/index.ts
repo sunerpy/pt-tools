@@ -6283,6 +6283,7 @@ export type HealthGroup =
   | "paths"
   | "libraries"
   | "disks"
+  | "nas"
   | "time"
   | "backup"
   | "secret";

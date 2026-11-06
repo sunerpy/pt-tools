@@ -54,6 +54,7 @@ describe("状态", () => {
       "paths",
       "libraries",
       "disks",
+      "nas",
       "time",
       "backup",
       "secret",
@@ -64,6 +65,7 @@ describe("状态", () => {
 describe("页头的一句话", () => {
   it("没体检过写一次查什么", () => {
     expect(checkHeadline(null)).toContain("一次检查 TMDB");
+    expect(checkHeadline(null)).toContain("磁盘、NAS、时间");
   });
 
   it("时间、用时与结果", () => {
@@ -165,6 +167,8 @@ describe("去处理的链接", () => {
     expect(at("paths", "path:1")).toBe("/media/library");
     expect(at("libraries", "library:3")).toBe("/media/library");
     expect(at("backup", "backup")).toBe("/global");
+    expect(at("nas", "nas:3")).toBe("/system/nas");
+    expect(at("nas", "nas")).toBe("/system/nas");
   });
 
   it("一组的汇总项（没有配、读取失败）到那一组的列表页；磁盘、密钥没有能去改的页面", () => {

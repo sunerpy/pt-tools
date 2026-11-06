@@ -15,6 +15,7 @@ export const HEALTH_GROUPS: readonly { key: HealthGroup; label: string; icon: st
   { key: "paths", label: "路径映射", icon: "arrow-right-left" },
   { key: "libraries", label: "媒体库", icon: "folder-open" },
   { key: "disks", label: "磁盘空间", icon: "hard-drive" },
+  { key: "nas", label: "NAS", icon: "database" },
   { key: "time", label: "时间", icon: "clock" },
   { key: "backup", label: "备份", icon: "archive" },
   { key: "secret", label: "密钥", icon: "key-round" },
@@ -34,7 +35,7 @@ export function healthStatus(status: string): { label: string; icon: string; ton
 /** 页头的一句话：「11-04 09:30 体检 · 用时 3.2 秒 · 2 项失败、1 项提醒」；没体检过时说一次查什么 */
 export function checkHeadline(rep: HealthReport | null, now = new Date()): string {
   if (!rep)
-    return "一次检查 TMDB、站点、下载器、媒体服务器、路径映射、媒体库、磁盘、时间、备份与密钥";
+    return "一次检查 TMDB、站点、下载器、媒体服务器、路径映射、媒体库、磁盘、NAS、时间、备份与密钥";
   const parts = [`${formatShortDateTime(rep.at, now)} 体检`, took(rep)];
   const bad: string[] = [];
   if (rep.fail) bad.push(`${rep.fail} 项失败`);
@@ -135,6 +136,7 @@ const FIX_ROUTES: Partial<Record<HealthGroup, string>> = {
   servers: "/media/library",
   paths: "/media/library",
   libraries: "/media/library",
+  nas: "/system/nas",
   backup: "/global",
 };
 
