@@ -408,8 +408,26 @@ describe("添加来源时的准备步骤", () => {
     expect(g?.steps).toHaveLength(3);
     expect(g?.steps.join("")).toContain("truenas_readonly_administrators");
     expect(g?.steps.join("")).toContain("https");
-    expect(nasKindGuide("synology")).toBeNull();
+    expect(nasKindGuide("fnos")).toBeNull();
     expect(nasKindGuide("")).toBeNull();
+  });
+
+  it("群晖写怎么建管理员组里、只能登录 DSM 的账号，与默认端口、两步验证、失败就停", () => {
+    const g = nasKindGuide("synology");
+    expect(g?.title).toContain("DSM 7");
+    const text = g?.steps.join("") ?? "";
+    for (const want of [
+      "Control Panel → User & Group",
+      "administrators",
+      "No Access",
+      "Deny",
+      "5001",
+      "5000",
+      "验证码",
+      "自动封锁",
+    ]) {
+      expect(text).toContain(want);
+    }
   });
 
   it("Glances 写怎么用官方镜像跑（host 网络、共用进程、挂哪些目录）与默认端口、认证", () => {
@@ -430,8 +448,9 @@ describe("添加来源时的准备步骤", () => {
     }
   });
 
-  it("地址栏的示例按类型给：Glances 是 http 加 61208 端口，其余是 https", () => {
+  it("地址栏的示例按类型给：Glances 是 http 加 61208 端口，群晖带 5001，其余是 https", () => {
     expect(nasUrlPlaceholder("glances")).toBe("http://192.168.1.10:61208");
+    expect(nasUrlPlaceholder("synology")).toBe("https://192.168.1.10:5001");
     expect(nasUrlPlaceholder("truenas")).toBe("https://192.168.1.10");
     expect(nasUrlPlaceholder("")).toBe("https://192.168.1.10");
   });

@@ -64,6 +64,15 @@ const KIND_GUIDES: Record<string, NasKindGuide> = {
       "下面写 http://NAS 的地址:61208（不写端口时按 61208）。Glances 默认不开认证；开了的话填用户名（默认 glances）和密码，经 http 发密码前要勾选明文风险",
     ],
   },
+  synology: {
+    title: "先在群晖上建一个只给 pt-tools 用的账号（DSM 7）",
+    steps: [
+      "在「Control Panel → User & Group」点「Create」建一个用户，设一个强密码；「User Groups」勾选 administrators：DSM 只让管理员组的账号读系统信息与资源监控",
+      "「Permissions」勾最上面的「No Access」，这个账号就进不了共享文件夹；「Applications」先在表头勾「Deny」，再只给「DSM」这一行勾「Allow」（或「By IP」，只允许 pt-tools 所在主机的 IP）",
+      "下面写 DSM 网页的地址（https 默认端口 5001，http 默认 5000）和这个账号的密码，点「测试连接」。账号开了两步验证时填一次验证码，以后 pt-tools 用这台设备的令牌登录；经 http 发密码前要勾选明文风险",
+      "pt-tools 登录失败一次就停下来、等你改好再测，不会反复试密码触发 DSM 的自动封锁",
+    ],
+  },
 };
 
 /** 这类来源的准备步骤；没写的类型为 null */
@@ -71,9 +80,16 @@ export function nasKindGuide(kind: string): NasKindGuide | null {
   return KIND_GUIDES[kind] ?? null;
 }
 
-/** 地址栏的示例：Glances 自己只有 http，默认端口 61208；别的类型写 https */
+/** 地址栏的示例：Glances 自己只有 http，默认端口 61208；群晖写 DSM 的 https 端口 5001；别的类型写 https */
 export function nasUrlPlaceholder(kind: string): string {
-  return kind === "glances" ? "http://192.168.1.10:61208" : "https://192.168.1.10";
+  switch (kind) {
+    case "glances":
+      return "http://192.168.1.10:61208";
+    case "synology":
+      return "https://192.168.1.10:5001";
+    default:
+      return "https://192.168.1.10";
+  }
 }
 
 /** 来源类型的图标 */

@@ -165,7 +165,10 @@ const urlTip = computed(() => {
     case "never":
       return "只收 https:// 地址，只写协议、主机和端口，例如 https://192.168.1.10";
     case "without_credentials":
-      return "写 https:// 地址，只写协议、主机和端口；没设用户名密码时也可以用 http://";
+      // 用户名必填的类型（群晖）总要发账号密码：和 with_ack 一样要先确认
+      if (kind.value?.username !== "required")
+        return "写 https:// 地址，只写协议、主机和端口；没设用户名密码时也可以用 http://";
+      return "写 https:// 地址，只写协议、主机和端口；用 http:// 要先确认明文风险";
     case "with_ack":
       return "写 https:// 地址，只写协议、主机和端口；用 http:// 要先确认明文风险";
     default:
@@ -450,7 +453,7 @@ function expired(cert: NasCertInfo): boolean {
           这个版本不认「{{ form.kind }}」这种来源，只能删除。
         </div>
         <div v-else-if="kind?.experimental" class="field-tip" data-testid="ns-experimental">
-          实验性：还没在足够多的真机上验证过，读到的数据可能不全；连不上时看来源列表里写的原因。
+          实验性：还没在真机上验证过，读到的数据可能不全；连不上时看来源列表里写的原因。
         </div>
       </el-form-item>
 
@@ -476,7 +479,7 @@ function expired(cert: NasCertInfo): boolean {
             autocomplete="off"
             data-testid="ns-url"
             @update:model-value="onUrl" />
-          <div class="field-tip">{{ urlTip }}</div>
+          <div class="field-tip" data-testid="ns-url-tip">{{ urlTip }}</div>
           <div v-if="httpRefused" class="field-tip field-tip--dang" data-testid="ns-http-refused">
             {{ kind?.label }} 只收 https:// 地址。
           </div>

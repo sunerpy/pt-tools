@@ -193,7 +193,7 @@ const kindsText = computed(() => {
   const names = kinds.value.map((k) => (k.experimental ? `${k.label}（实验性）` : k.label));
   const text = `能接入：${names.join("、")}。`;
   return kinds.value.some((k) => k.experimental)
-    ? `${text}实验性的还没在足够多的真机上验证过，读到的数据可能不全。`
+    ? `${text}实验性的还没在真机上验证过，读到的数据可能不全。`
     : text;
 });
 
