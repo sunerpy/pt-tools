@@ -1,6 +1,6 @@
 # NAS 监控 <Badge type="tip" text="1.0 预览版" />
 
-「系统 → NAS 监控」管首页 [NAS 概览](home-and-health.md#nas-概览)的数据从哪来：pt-tools 所在的主机（本机来源）与接入的 NAS（现在能接入 [TrueNAS](#truenas)）。pt-tools 在后台定时读这些来源，读到的数据放在内存里；首页和这一页显示的都是内存里的数据，打开页面不会再去连一次。
+「系统 → NAS 监控」管首页 [NAS 概览](home-and-health.md#nas-概览)的数据从哪来：pt-tools 所在的主机（本机来源）与接入的 NAS（现在能接入 [TrueNAS](#truenas) 与 [Glances](#glances)）。pt-tools 在后台定时读这些来源，读到的数据放在内存里；首页和这一页显示的都是内存里的数据，打开页面不会再去连一次。
 
 ## 本机来源
 
@@ -36,6 +36,69 @@
 - Key 在 TrueNAS 上被删或吊销以后，这个来源变成 `登录失败`。重新建一把，编辑这个来源填上新的 Key。
 - 版本早于 25.04 时，测试连接写 `这台 TrueNAS 没有 /api/current 接口（HTTP 404）：要 TrueNAS 25.04 或以后的版本`。
 
+## Glances
+
+[Glances](https://github.com/nicolargo/glances) 是通用的系统监控程序。群晖、飞牛、Unraid、OMV 这类能跑 Docker 的 NAS 上用官方镜像跑一个 Glances，pt-tools 读它的 REST 接口（`http://<地址>:61208/api/4/…`）。接入 Glances 4，在 4.5.8 上验证过；Glances 5 的接口换成了 `/api/5`，现在不支持，测试连接时会写明。TrueNAS 用上面的 [TrueNAS](#truenas) 来源，读到的更全。
+
+读到的：
+
+- 主机：主机名、系统与版本、CPU 型号与逻辑核数、运行时长与负载
+- CPU 使用率、IO 等待与温度（主机有温度传感器时），内存
+- 网络：连着的物理网卡（`eth`、`en`、`wl` 等开头的）合计的收发速度；网桥、聚合口、VLAN 与 Docker 的虚拟网卡不算，同一份流量不会算两遍。一块这种名字的网卡都没有时（例如 FreeBSD 的 `ixl0`），除了虚拟网卡都算
+- 存储：挂进 Glances 容器的目录所在的文件系统，按已用与总量算；同一块盘挂了几处只算一次，ZFS 按池合计。Glances 不给健康状态，首页的存储池不写健不健康
+- 硬盘：只有温度。NVMe 盘写成 `NVMe 1`、`NVMe 2`；SATA 盘要 NAS 加载了 `drivetemp` 模块才有。Glances 不给型号与容量
+- 告警：Glances 不给 NAS 自己的告警。打开 Glances 的 raid 插件以后，软 RAID（mdadm）阵列没在运行或降级时记一条严重告警（见 [软 RAID](#软-raid)）；没打开时首页的告警一块写原因
+- 应用：Docker 容器运行中、共几个；不知道哪些可以更新
+
+pt-tools 不读 Glances 的历史：首页的柱子从连上以后开始画，不像 TrueNAS 那样补上最近 30 分钟。
+
+[系统体检](home-and-health.md#系统体检)的「NAS」一组对 Glances 来源看连没连上、硬盘温度与软 RAID 阵列；Glances 不给存储池的健康，这一条不看。
+
+### 在 NAS 上跑 Glances
+
+用官方镜像建一个容器，compose 的写法：
+
+```yaml
+services:
+  glances:
+    image: nicolargo/glances:4.5.8-full
+    restart: unless-stopped
+    network_mode: host # 看得到 NAS 的网卡，主机名也是 NAS 的
+    pid: host
+    environment:
+      - GLANCES_OPT=-w
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # 读容器
+      - /etc/os-release:/etc/os-release:ro # 显示 NAS 自己的系统名
+      - /volume1:/volume1:ro # 要看的存储目录，只读挂进去
+```
+
+- 镜像标签写 4.x 的版本号，不用 `latest`：`latest` 以后会换成 Glances 5。
+- 网络要用 host。用默认的 bridge 网络时，Glances 只看得到它自己容器的网卡；pt-tools 认得出这种情况，网络一项写 `Glances 的容器没用 host 网络…`，不把容器自己的流量当成 NAS 的。
+- 群晖在 Container Manager 里新建项目，贴上面的内容，存储目录是 `/volume1`、`/volume2`；飞牛、Unraid、OMV 用各自的 Docker 管理页面，存储目录换成自己的。
+- 在 pt-tools 的「添加来源」里类型选 Glances，地址写 `http://NAS 的地址:61208`（`http://` 地址不写端口时按 61208），点「测试连接」，连上了再保存。
+
+### 认证
+
+Glances 默认不开认证，局域网里谁都能读到这些数据。要开认证（Glances 文档里的做法）：
+
+1. 在容器里生成密码文件：`docker exec -it glances glances -s --password`，输两遍密码，问要不要保存时答 `Yes`，再按 Ctrl+C 退出。用户名默认是 `glances`。
+2. 把密码文件拷出来：`docker cp glances:/root/.config/glances/glances.pwd ./glances.pwd`。
+3. compose 里加一行挂载 `./glances.pwd:/root/.config/glances/glances.pwd:ro`，`GLANCES_OPT` 改成 `-w --password`，重建容器。
+4. 在 pt-tools 里填用户名（`glances`，不填时也按它）和密码。地址是 `http://` 时要勾选「我知道账号密码会以明文经过局域网，可能被截获」；不想明文传密码，就在 Glances 前面放一个带 https 的反向代理，地址写 `https://`。
+
+用户名或密码不对时这个来源变成 `登录失败`，不会自动重试。
+
+### 软 RAID
+
+Glances 默认关着 raid 插件。要看软 RAID（mdadm）阵列：
+
+1. 从镜像里拷出配置文件：`docker cp glances:/etc/glances/glances.conf ./glances.conf`。
+2. 把 `[raid]` 一节的 `disable=True` 改成 `disable=False`。
+3. compose 里挂上 `./glances.conf:/etc/glances/glances.conf:ro`，重建容器。
+
+阵列没在运行，或者在用的盘比应有的少（降级）时，首页与体检记一条严重告警；RAID 0 没有冗余，不算降级。打开了插件却没有阵列时，告警一块写 `Glances 没有发现软 RAID（mdadm）阵列…`。ZFS、Btrfs 自己的 RAID 不在这里。
+
 ## 来源列表
 
 每个来源一行（手机上一张卡）：
@@ -60,7 +123,7 @@
 
 连不上时按 30 秒、1 分钟、2 分钟、5 分钟再试；登录失败与证书的问题不自动重试（一直用错的密码登录，NAS 可能锁住这个账号），改了设置或点「重新连接」以后再试。「重新连接」马上试一次，不等下一次，结果写在提示里。
 
-列表右上角的「添加来源」按类型给出要填的字段，选 TrueNAS 时上面写怎么准备只读的 API Key（见 [TrueNAS](#truenas)）；页面下方的说明写能接入哪些。
+列表右上角的「添加来源」按类型给出要填的字段，选 TrueNAS 时上面写怎么准备只读的 API Key（见 [TrueNAS](#truenas)），选 Glances 时写怎么在 NAS 上跑 Glances（见 [Glances](#glances)）；页面下方的说明写能接入哪些。
 
 ## 首页显示
 

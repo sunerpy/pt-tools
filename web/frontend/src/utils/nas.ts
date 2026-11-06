@@ -56,11 +56,24 @@ const KIND_GUIDES: Record<string, NasKindGuide> = {
       "下面写 TrueNAS 网页的 https 地址、粘贴 Key，点「测试连接」核对并信任它的证书。经 http 用过的 Key 会被 TrueNAS 吊销，所以这里只收 https",
     ],
   },
+  glances: {
+    title: "先在 NAS 上用 Docker 跑 Glances 4（官方镜像，例如 nicolargo/glances:4.5.8-full）",
+    steps: [
+      "用这个镜像建一个容器：网络用 host（network_mode: host），与主机共用进程（pid: host），环境变量 GLANCES_OPT=-w。镜像标签写 4.x 的版本号，不用 latest：latest 以后会换成 pt-tools 还不支持的 Glances 5。群晖用 Container Manager，飞牛、Unraid、OMV 用各自的 Docker",
+      "要看存储就把存储目录只读挂进容器（例如 /volume1:/volume1:ro）；要看容器挂 /var/run/docker.sock:/var/run/docker.sock:ro；要显示 NAS 自己的系统名挂 /etc/os-release:/etc/os-release:ro",
+      "下面写 http://NAS 的地址:61208（不写端口时按 61208）。Glances 默认不开认证；开了的话填用户名（默认 glances）和密码，经 http 发密码前要勾选明文风险",
+    ],
+  },
 };
 
 /** 这类来源的准备步骤；没写的类型为 null */
 export function nasKindGuide(kind: string): NasKindGuide | null {
   return KIND_GUIDES[kind] ?? null;
+}
+
+/** 地址栏的示例：Glances 自己只有 http，默认端口 61208；别的类型写 https */
+export function nasUrlPlaceholder(kind: string): string {
+  return kind === "glances" ? "http://192.168.1.10:61208" : "https://192.168.1.10";
 }
 
 /** 来源类型的图标 */
@@ -430,11 +443,23 @@ export function nasAlertTone(level: NasAlert["level"]): "dang" | "warn" | "info"
   return level === "warning" ? "warn" : "info";
 }
 
+/**
+ * 告警一块的右上角：告警从哪来。Glances 不给 NAS 自己的告警，那里的告警是 pt-tools 按软 RAID 阵列的状态算的；
+ * 其余来源是 NAS 里没关掉的。还不知道类型名时为空。
+ */
+export function nasAlertsAside(kind: string, label: string): string {
+  if (!label) return "";
+  return kind === "glances" ? "按软 RAID 阵列的状态" : `${label} 里没关掉的`;
+}
+
 /** 应用那一行：「运行中 1 个 · 共 3 个 · 没有可更新的」 */
 export function nasAppsText(apps: NasSnapshot["apps"]): string {
   if (apps.total <= 0) return "没有应用";
+  const head = `运行中 ${apps.running} 个 · 共 ${apps.total} 个`;
+  // 来源不知道哪些能更新（Glances 只看得到容器）时不写可更新几个
+  if (apps.updates_unknown) return head;
   const up = apps.upgradable > 0 ? `${apps.upgradable} 个可更新` : "没有可更新的";
-  return `运行中 ${apps.running} 个 · 共 ${apps.total} 个 · ${up}`;
+  return `${head} · ${up}`;
 }
 
 /** 主机行右边的提醒（最多两个）：严重告警的条数、已用超过 80% 的存储池 */

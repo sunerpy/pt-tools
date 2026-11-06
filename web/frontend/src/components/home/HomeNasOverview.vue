@@ -31,6 +31,7 @@ import {
   NAS_USED_WARN,
   type NasStorageSegment,
   nasAlertCounts,
+  nasAlertsAside,
   nasAlertTone,
   nasAppsText,
   nasCpuKpi,
@@ -408,6 +409,10 @@ const diskRows = computed(() =>
 
 const alerts = computed(() => snap.value?.alerts ?? []);
 const alertsReason = computed(() => (snap.value ? nasFacetReason(snap.value, "alerts") : ""));
+/** 告警一块的右上角：告警从哪来（Glances 的是按软 RAID 阵列算的） */
+const alertsAside = computed(() =>
+  src.value ? nasAlertsAside(src.value.kind, kindLabel.value) : "",
+);
 const counts = computed(() => nasAlertCounts(alerts.value));
 const countBoxes = computed(() => [
   { key: "critical", label: "严重", n: counts.value.critical, tone: "dang" },
@@ -755,7 +760,9 @@ const localMore = computed(() =>
                 <PtIcon name="bell" :size="15" class="hn-blk__ic" />
                 <span>告警</span>
                 <span v-if="alerts.length" class="hn-blk__n">{{ alerts.length }}</span>
-                <span v-if="!alertsReason" class="hn-blk__aside">{{ kindLabel }} 里没关掉的</span>
+                <span v-if="!alertsReason && alertsAside" class="hn-blk__aside">{{
+                  alertsAside
+                }}</span>
               </div>
               <p v-if="alertsReason" class="hn-blk__note">{{ alertsReason }}</p>
               <template v-else>

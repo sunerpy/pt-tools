@@ -22,7 +22,7 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { nasKindGuide, nasKindLabel } from "@/utils/nas";
+import { nasKindGuide, nasKindLabel, nasUrlPlaceholder } from "@/utils/nas";
 import { ElMessage } from "element-plus";
 import { computed, reactive, ref, watch } from "vue";
 
@@ -209,7 +209,8 @@ async function start() {
   const n = ++openSeq;
   reset();
   if (props.editId === null) {
-    const first = props.kinds[0];
+    // 默认选第一个不是实验性的类型（服务端按名字排）
+    const first = props.kinds.find((k) => !k.experimental) ?? props.kinds[0];
     form.kind = first?.name ?? "";
     form.name = first?.label ?? "";
     return;
@@ -471,7 +472,7 @@ function expired(cert: NasCertInfo): boolean {
         <el-form-item label="地址">
           <el-input
             :model-value="form.url"
-            placeholder="https://192.168.1.10"
+            :placeholder="nasUrlPlaceholder(form.kind)"
             autocomplete="off"
             data-testid="ns-url"
             @update:model-value="onUrl" />

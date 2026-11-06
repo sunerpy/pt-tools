@@ -1,0 +1,49 @@
+{
+  "cpu_name": "Intel(R) Xeon(R) 6975P-C",
+  "cpu_hz_current": 3583964625.0000005,
+  "cpu_hz": null,
+  "cpu": 34.8,
+  "percpu": [
+    {
+      "key": "cpu_number",
+      "cpu_number": 0,
+      "total": 33.4,
+      "user": 23.4,
+      "system": 2.3,
+      "idle": 66.6,
+      "nice": 4.0,
+      "iowait": 3.7,
+      "irq": 0.0,
+      "softirq": 0.0,
+      "steal": 0.1,
+      "guest": 0.0,
+      "guest_nice": 0.0,
+      "dpc": null,
+      "interrupt": null
+    },
+    {
+      "key": "cpu_number",
+      "cpu_number": 1,
+      "total": 40.9,
+      "user": 30.9,
+      "system": 2.2,
+      "idle": 59.1,
+      "nice": 4.8,
+      "iowait": 2.9,
+      "irq": 0.0,
+      "softirq": 0.0,
+      "steal": 0.0,
+      "guest": 0.0,
+      "guest_nice": 0.0,
+      "dpc": null,
+      "interrupt": null
+    }
+  ],
+  "mem": 44.1,
+  "swap": 92.7,
+  "cpu_log_core": 32,
+  "cpu_phys_core": 16,
+  "load": 37.8,
+  "gpu_mem": 0,
+  "gpu_proc": 0
+}

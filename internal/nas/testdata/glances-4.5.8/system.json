@@ -1,0 +1,8 @@
+{
+  "os_name": "Linux",
+  "hostname": "nas-glances",
+  "platform": "64bit",
+  "os_version": "7.0.0-1014-aws",
+  "linux_distro": "Ubuntu 24.04",
+  "hr_name": "Ubuntu 24.04 64bit / Linux 7.0.0-1014-aws"
+}

@@ -132,11 +132,13 @@ type Alert struct {
 	At    *time.Time `json:"at,omitempty"`
 }
 
-// Apps 是 NAS 上的应用（容器）：运行中、共几个、可更新几个。
+// Apps 是 NAS 上的应用（容器）：运行中、共几个、可更新几个。UpdatesUnknown 为真是来源不知道哪些能更新（Glances 只看得到容器），
+// 这时 Upgradable 不算数。
 type Apps struct {
-	Running    int `json:"running"`
-	Total      int `json:"total"`
-	Upgradable int `json:"upgradable"`
+	Running        int  `json:"running"`
+	Total          int  `json:"total"`
+	Upgradable     int  `json:"upgradable"`
+	UpdatesUnknown bool `json:"updates_unknown,omitempty"`
 }
 
 // Sample 是历史的一拍：CPU 与 Mem 是百分比，Rx、Tx 是字节/秒。存储不进历史（存储卡画各池的分段条）。
