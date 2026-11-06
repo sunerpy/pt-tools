@@ -57,9 +57,10 @@ describe("首页与系统体检的入口（媒体中心 M8）", () => {
     expect(mobileTabFor("/global")).toBe("");
   });
 
-  it("系统体检在「系统」一组、全局设置后面", async () => {
+  it("系统体检在「系统」一组、全局设置后面，NAS 监控紧跟着系统体检", async () => {
     const { NAV_GROUPS } = await import("./navigation");
     const paths = NAV_GROUPS.find((g) => g.title === "系统")!.items.map((i) => i.path);
     expect(paths.indexOf("/system/check")).toBe(paths.indexOf("/global") + 1);
+    expect(paths.indexOf("/system/nas")).toBe(paths.indexOf("/system/check") + 1);
   });
 });

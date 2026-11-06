@@ -51,6 +51,12 @@ const router = createRouter({
       meta: { title: "系统体检" },
     },
     {
+      path: "/system/nas",
+      name: "nas-monitor",
+      component: () => import("@/views/NasMonitor.vue"),
+      meta: { title: "NAS 监控" },
+    },
+    {
       path: "/api-tokens",
       name: "api-tokens",
       component: () => import("@/views/ApiTokens.vue"),
