@@ -26,7 +26,17 @@ Flutter 的配色与组件样式在 apps/mobile/lib/src/app/theme.dart，照 Vol
 
 ## Motion
 
-沿用现有组件的交互反馈，不新增装饰性动效。返回离开有未保存改动的表单时确认；系统返回与页面返回行为一致。
+只用有用途的动效，不加装饰性的常驻动画：
+
+- 数据到了卡片依次出现（淡入并上移 8px），间隔 30ms，最多排到第 12 张，之后的同时出现。
+- 环形图的各段与计数从旧值过渡到新值，不从 0 重跳。
+- 进行中的扫描（如体检进行中环形图上转动的一段弧），结果到了就停。
+- 能点、能去处理的卡片悬停时浮起 2px、投影加深一档；只在有悬停的设备上（`@media (hover: hover)`）。
+- 这次新出现的问题脉冲一次，不循环。
+
+时长只用 `--pt-dur-fast` / `--pt-dur-normal` / `--pt-dur-slow` 与 `--pt-transition-*`，不写字面值（转圈的周期写成 `--pt-dur-slow` 的倍数）。系统要求减少动态效果（`prefers-reduced-motion: reduce`）时没有位移与过渡：动画是 `none`、过渡是 `none`，数字直接到位。系统体检页的这些写在 `web/frontend/src/styles/system-check.css`，board-check 用 `getComputedStyle` 断言两种情况。
+
+其余沿用现有组件的交互反馈。返回离开有未保存改动的表单时确认；系统返回与页面返回行为一致。
 
 ## Accessibility
 
