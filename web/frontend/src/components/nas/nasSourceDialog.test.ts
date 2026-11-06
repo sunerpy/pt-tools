@@ -254,6 +254,18 @@ describe("添加来源", () => {
     await vi.waitFor(() => expect(q("ns-ok")).not.toBeNull());
     expect(text("ns-pin")).toContain("AB:AB:AB:AB:…:AB:AB:AB:AB");
 
+    // 换了地址：这个指纹是 192.168.1.2 的证书，不带给新的地址
+    await type("ns-url", "https://192.168.1.3");
+    expect(q("ns-pin"), "换了地址以后不显示信任的证书").toBeNull();
+    api.test.mockResolvedValueOnce({ status: "ok" });
+    await click("ns-test");
+    await vi.waitFor(() => expect(api.test).toHaveBeenCalledTimes(3));
+    expect(api.test.mock.calls[2]![0].trust_sha256, "新地址的测试不带旧指纹").toBeUndefined();
+
+    // 改回原来的地址：信任的还是那一张
+    await type("ns-url", "https://192.168.1.2");
+    expect(text("ns-pin")).toContain("AB:AB:AB:AB:…:AB:AB:AB:AB");
+
     api.create.mockResolvedValueOnce(edit());
     await click("ns-save");
     await vi.waitFor(() => expect(api.create).toHaveBeenCalled());

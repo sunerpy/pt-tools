@@ -877,8 +877,22 @@ describe("首页的 NAS 概览", () => {
   });
 
   it("本机来源：网络卡是下载器速度，存储是下载盘与媒体库，右栏不再列一遍", async () => {
-    home.get.mockResolvedValue(data(withNas(local(), [], { kinds: [] })));
+    const d = data(withNas(local(), [], { kinds: [] }));
+    // 网络卡的柱是下载器的下载速度：三拍 1、2、3 MB/s（本机来源自己的网卡计数是 0）
+    d.downloaders.data!.speed_history = [1, 2, 3].map((n, i) => ({
+      at: ago(65 - i * 30),
+      down: n * MB,
+      up: 0,
+      answered: 1,
+      total: 1,
+    }));
+    home.get.mockResolvedValue(d);
     await mount();
+    const netBars = [...q("hn-kpi-net")!.querySelectorAll<HTMLElement>(".pt-bars__track i")];
+    expect(netBars.length, "柱跟着下载器速度的采样，不是本机网卡的一拍").toBe(3);
+    const heights = netBars.map((b) => parseFloat(b.style.height));
+    expect(heights[0]).toBeLessThan(heights[1]!);
+    expect(heights[1]).toBeLessThan(heights[2]!);
     expect(q("hn")!.querySelector(".hm-sec__count")?.textContent?.trim()).toBe("本机");
     expect(text("hn-host")).toContain("pt-tools 所在主机");
     expect(q("hn-host")!.querySelector(".hn-host__title")?.getAttribute("title")).toBe(
@@ -970,6 +984,20 @@ describe("首页的 NAS 概览", () => {
     expect(q("hn")!.classList.contains("is-stale")).toBe(true);
     expect(q("hn-kpi-cpu")!.style.getPropertyValue("--hue")).toBe("var(--pt-t4)");
     expect(val("cpu"), "旧数据照常列出来").toBe("3.8%");
+  });
+
+  it("连着但数据晚了三拍以上：更新时间改用提醒色，90 秒以内照常", async () => {
+    home.get.mockResolvedValue(data(withNas(truenas({ last_ok_at: ago(130) }, { at: ago(130) }))));
+    await mount();
+    expect(text("hn-live")).toBe("2 分钟前更新");
+    expect(q("hn-live")!.classList.contains("is-warn")).toBe(true);
+    expect(q("hn")!.classList.contains("is-stale"), "连着的来源不按旧数据画").toBe(false);
+    view?.unmount();
+
+    home.get.mockResolvedValue(data(withNas(truenas({ last_ok_at: ago(80) }, { at: ago(80) }))));
+    await mount();
+    expect(text("hn-live")).toBe("1 分钟前更新");
+    expect(q("hn-live")!.classList.contains("is-ok")).toBe(true);
   });
 
   it("登录失败、还没读到过数据：说明写去哪里处理，卡里写还没有数据", async () => {
