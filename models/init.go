@@ -356,6 +356,9 @@ func NewDBWithVersionAndHooks(
 		// Servarr 兼容入口的标签（媒体中心 M10）
 		&ServarrTag{},
 		&ServarrTagLink{},
+		// NAS 监控的来源与设置（首页 NAS 概览 H2）
+		&NasSource{},
+		&NasSetting{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
