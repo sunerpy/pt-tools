@@ -155,6 +155,13 @@ func TestNASCheck_Source(t *testing.T) {
 		snap.Alerts = []nas.Alert{{Level: nas.AlertCritical, Title: "只有一条没有时间的"}}
 		it = run(nas.Status{Name: "n", State: nas.StateOK, LastOKAt: &now, Snapshot: snap})
 		assert.Contains(t, it.Detail, "1 条严重告警，最新一条：只有一条没有时间的")
+
+		// 中文的类型名（群晖）两边不留空格
+		it = run(nas.Status{Name: "n", Kind: nas.KindSynology, State: nas.StateOK, LastOKAt: &now, Snapshot: snap})
+		assert.Equal(t, "在群晖的告警里看详情并处理；处理好或在那里关掉以后这里不再提醒", it.Hint)
+		snap.Pools = append(snap.Pools, nas.Pool{Name: "/volume2", Status: "降级", Healthy: &no})
+		it = run(nas.Status{Name: "n", Kind: nas.KindSynology, State: nas.StateOK, LastOKAt: &now, Snapshot: snap})
+		assert.Equal(t, "在群晖的存储页里看是哪块盘出了问题；换盘或修复以后这里会恢复", it.Hint)
 	})
 
 	t.Run("认证失败与证书", func(t *testing.T) {
@@ -260,4 +267,17 @@ func TestNASCheck_SeveralSourcesAndOrder(t *testing.T) {
 	items := []Item{{Group: GroupTime}, {Group: GroupNAS}, {Group: GroupDisks}}
 	sortItems(items)
 	assert.Equal(t, []string{GroupDisks, GroupNAS, GroupTime}, []string{items[0].Group, items[1].Group, items[2].Group})
+}
+
+func TestNASInText(t *testing.T) {
+	for in, want := range map[string]string{
+		"":         "",
+		"TrueNAS":  " TrueNAS ",
+		"群晖":       "群晖",
+		"群晖 DSM":   "群晖 DSM ",
+		"DSM 群晖":   " DSM 群晖",
+		"Glances4": " Glances4 ",
+	} {
+		assert.Equal(t, want, nasInText(in), in)
+	}
 }
