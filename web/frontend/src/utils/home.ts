@@ -247,8 +247,14 @@ export function weekLine(e: CalendarEntry): { date: string; title: string; note:
 
 /** 速度的说法：「3.0 MB/s」「512 KB/s」「0 B/s」 */
 export function speedText(bytesPerSec: number): string {
-  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "0 B/s";
-  if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`;
+  const p = speedParts(bytesPerSec);
+  return `${p.num} ${p.unit}`;
+}
+
+/** 速度拆成数字与单位：大字只放数字，单位和「%」一样用小字（窄卡放不下整串大字） */
+export function speedParts(bytesPerSec: number): { num: string; unit: string } {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return { num: "0", unit: "B/s" };
+  if (bytesPerSec < 1024) return { num: String(Math.round(bytesPerSec)), unit: "B/s" };
   const units = ["KB/s", "MB/s", "GB/s"];
   let v = bytesPerSec / 1024;
   let i = 0;
@@ -256,7 +262,7 @@ export function speedText(bytesPerSec: number): string {
     v /= 1024;
     i += 1;
   }
-  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+  return { num: v >= 100 ? String(Math.round(v)) : v.toFixed(1), unit: units[i] };
 }
 
 /** 大小的说法（磁盘）：「1.2 TB」「850 GB」 */

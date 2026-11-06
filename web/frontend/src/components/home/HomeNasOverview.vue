@@ -17,7 +17,15 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useHomeSpeed } from "@/composables/useHomeSpeed";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { useTweenedNumber } from "@/composables/useTweenedNumber";
-import { type Tone, diskBar, mobileDisks, sizeText, speedText, whenText } from "@/utils/home";
+import {
+  type Tone,
+  diskBar,
+  mobileDisks,
+  sizeText,
+  speedParts,
+  speedText,
+  whenText,
+} from "@/utils/home";
 import {
   NAS_LOCAL_ID,
   NAS_USED_WARN,
@@ -244,6 +252,8 @@ const store = computed(() => {
 const cpuShown = useTweenedNumber(() => cpu.value?.value ?? 0);
 const memShown = useTweenedNumber(() => mem.value?.value ?? 0);
 const netShown = useTweenedNumber(() => net.value?.value ?? 0);
+/** 网络卡的大字只放数字，单位和 CPU 的「%」一样用小字：375 宽的两列卡放不下整串「29.8 MB/s」大字 */
+const netParts = computed(() => speedParts(netShown.value));
 const storShown = useTweenedNumber(() => store.value?.sum?.percent ?? 0);
 
 interface KpiTile {
@@ -331,8 +341,9 @@ const kpis = computed<KpiTile[]>(() => {
       aside: n?.aside ?? "",
       asideWide: n?.asideWide,
       hue: hue(2),
-      text: n && n.value !== null ? speedText(netShown.value) : null,
+      text: n && n.value !== null ? netParts.value.num : null,
       pre: "↓",
+      unit: netParts.value.unit,
       sub: n?.sub ?? "",
       short: n?.short,
       bars: n && n.value !== null ? netBars.value : undefined,
