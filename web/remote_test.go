@@ -310,6 +310,9 @@ func TestRemoteAPI_SettingsAndPairing(t *testing.T) {
 func TestRemoteAPI_Devices(t *testing.T) {
 	e := newRemoteEnv(t)
 	d, c := e.device(remote.ScopesFull)
+	// 握手完成以后主机才登记会话（见 internal/remote 的 waitServing）：先经隧道发一个请求，回来了才一定算在线
+	status, _ := tunnel(t, c, http.MethodGet, appPrefix+"/nope", "", nil)
+	require.Equal(t, http.StatusNotFound, status)
 	w := e.do(appReq{method: http.MethodGet, path: "/api/remote/devices", session: true})
 	require.Equal(t, http.StatusOK, w.Code)
 	list := decodeJSON[[]remote.DeviceStatus](t, w)
