@@ -293,8 +293,14 @@ describe("NAS 监控页", () => {
     expect(text("nm-kinds")).toBe("这个版本还不能接入 NAS，只有本机来源。");
     view?.unmount();
 
+    await mountPage(nasView({ kinds: [KINDS[0]!] }));
+    expect(text("nm-kinds"), "没有实验性的类型时不写实验性的说明").toBe("能接入：TrueNAS。");
+    view?.unmount();
+
     await mountPage();
-    expect(text("nm-kinds")).toContain("能接入：TrueNAS、Glances、飞牛（实验性）。");
+    expect(text("nm-kinds")).toBe(
+      "能接入：TrueNAS、Glances、飞牛（实验性）。实验性的还没在足够多的真机上验证过，读到的数据可能不全。",
+    );
     const add = [...q("nm-sources")!.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("添加来源"),
     )!;

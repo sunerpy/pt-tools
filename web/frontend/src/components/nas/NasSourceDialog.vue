@@ -22,7 +22,7 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { nasKindLabel } from "@/utils/nas";
+import { nasKindGuide, nasKindLabel } from "@/utils/nas";
 import { ElMessage } from "element-plus";
 import { computed, reactive, ref, watch } from "vue";
 
@@ -83,6 +83,10 @@ function kindOf(name: string): NasKind | undefined {
 }
 
 const kind = computed(() => kindOf(form.kind));
+/** 添加来源时这类来源的准备步骤（编辑时不再写） */
+const guide = computed(() =>
+  props.editId === null && kind.value ? nasKindGuide(form.kind) : null,
+);
 /** 编辑的来源是这个版本不认的类型：只能删除 */
 const kindMissing = computed(() => original.value !== null && !kind.value);
 const title = computed(() =>
@@ -449,6 +453,16 @@ function expired(cert: NasCertInfo): boolean {
         </div>
       </el-form-item>
 
+      <div v-if="guide" class="pt-note ns-guide" data-testid="ns-guide">
+        <PtIcon name="info" :size="14" class="pt-note__icon" />
+        <div class="ns-result__body">
+          <div class="pt-note__title">{{ guide.title }}</div>
+          <ol class="ns-guide__steps">
+            <li v-for="(step, i) in guide.steps" :key="i">{{ step }}</li>
+          </ol>
+        </div>
+      </div>
+
       <template v-if="!kindMissing">
         <el-form-item label="名字">
           <el-input v-model="form.name" maxlength="64" data-testid="ns-name" />
@@ -694,6 +708,22 @@ function expired(cert: NasCertInfo): boolean {
 
 .ns-ack :deep(.el-checkbox__label) {
   line-height: 20px;
+}
+
+/* 准备步骤：在类型下面、名字上面；编号列表，长句折行 */
+.ns-guide {
+  margin: -4px 0 var(--pt-space-4);
+}
+
+.ns-guide__steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--pt-t2);
+  overflow-wrap: anywhere;
+}
+
+.ns-guide__steps li + li {
+  margin-top: 4px;
 }
 
 /* 信任的证书：一行，指纹用等宽字 */

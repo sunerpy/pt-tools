@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,9 @@ func TestRegisterKind(t *testing.T) {
 	for _, k := range Kinds() {
 		names = append(names, k.Name)
 	}
-	assert.Equal(t, []string{"alpha", "zeta"}, names, "按名字排")
+	// 包里自己登记的类型（truenas…）也在里面
+	assert.True(t, slices.IsSorted(names), "按名字排: %v", names)
+	assert.Subset(t, names, []string{"alpha", "zeta", KindTrueNAS})
 	k, ok := LookupKind("alpha")
 	require.True(t, ok)
 	assert.True(t, k.Experimental)

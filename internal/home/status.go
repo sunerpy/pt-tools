@@ -87,11 +87,11 @@ func firstProblem(rep *health.Report) string {
 	return ""
 }
 
-// problemTitle 是这一项在首页那一行里的名字：站点、下载器与媒体服务器的项在体检页的分组下只写了名字，
+// problemTitle 是这一项在首页那一行里的名字：站点、下载器、媒体服务器与 NAS 的项在体检页的分组下只写了名字，
 // 离开分组要写明是哪一类（「下载器「qb」」）。
 func problemTitle(it health.Item) string {
 	for _, k := range []struct{ prefix, kind string }{
-		{"site:", "站点"}, {"downloader:", "下载器"}, {"server:", "媒体服务器"},
+		{"site:", "站点"}, {"downloader:", "下载器"}, {"server:", "媒体服务器"}, {"nas:", "NAS"},
 	} {
 		if strings.HasPrefix(it.Key, k.prefix) {
 			return k.kind + "「" + it.Title + "」"

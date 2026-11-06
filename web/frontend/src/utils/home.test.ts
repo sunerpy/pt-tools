@@ -24,6 +24,7 @@ import {
   sizeText,
   speedHint,
   speedLabels,
+  speedParts,
   speedText,
   todayCard,
   todayTap,
@@ -289,6 +290,12 @@ describe("NAS 状态", () => {
     expect(speedText(3 * 1024 * 1024)).toBe("3.0 MB/s");
     expect(speedText(150 * 1024)).toBe("150 KB/s");
     expect(speedText(Number.NaN)).toBe("0 B/s");
+    // 首页网络卡大字只放数字、单位用小字：拆开以后拼回去和 speedText 一样
+    expect(speedParts(29.8 * 1024 * 1024)).toEqual({ num: "29.8", unit: "MB/s" });
+    expect(speedParts(150 * 1024)).toEqual({ num: "150", unit: "KB/s" });
+    expect(speedParts(512)).toEqual({ num: "512", unit: "B/s" });
+    expect(speedParts(-1)).toEqual({ num: "0", unit: "B/s" });
+    expect(speedParts(2 * 1024 ** 4)).toEqual({ num: "2048", unit: "GB/s" });
     expect(sizeText(1.2 * 1024 ** 4)).toBe("1.2 TB");
     expect(sizeText(850 * 1024 ** 3)).toBe("850 GB");
     expect(sizeText(512)).toBe("512 B");

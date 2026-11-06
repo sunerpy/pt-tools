@@ -100,6 +100,12 @@ func TestFirstProblem(t *testing.T) {
 	assert.Equal(t, "站点「A」：Cookie 过期了", firstProblem(&health.Report{Items: items[:2]}), "没有失败时写第一项提醒")
 	assert.Equal(t, "备份", firstProblem(&health.Report{Items: items[3:4]}), "没有说明时只写标题")
 	assert.Equal(t, "媒体服务器「家里的 Jellyfin」：连不上", firstProblem(&health.Report{Items: items[4:5]}))
+	assert.Equal(t, "NAS「家里的 TrueNAS」：存储池不健康：Cold（DEGRADED）", firstProblem(&health.Report{Items: []health.Item{
+		{Key: "nas:3", Title: "家里的 TrueNAS", Status: health.StatusFail, Detail: "存储池不健康：Cold（DEGRADED）"},
+	}}), "NAS 的项写明是 NAS")
+	assert.Equal(t, "NAS：还没添加 NAS 来源", firstProblem(&health.Report{Items: []health.Item{
+		{Key: "nas", Title: "NAS", Status: health.StatusWarn, Detail: "还没添加 NAS 来源"},
+	}}), "整组的那一项不套")
 	assert.Equal(t, "媒体库「电影」：目录不可写", firstProblem(&health.Report{Items: items[5:]}), "标题里已经写了是哪一类的照写")
 	assert.Equal(t, "下载器：没有启用的下载器", firstProblem(&health.Report{Items: []health.Item{
 		{Key: "downloaders", Title: "下载器", Status: health.StatusWarn, Detail: "没有启用的下载器"},

@@ -1,4 +1,4 @@
-// Package health 是系统体检（媒体中心 M8）：一次检查 TMDB、站点、下载器、媒体服务器、路径映射、媒体库、磁盘、时间、备份与密钥，
+// Package health 是系统体检（媒体中心 M8）：一次检查 TMDB、站点、下载器、媒体服务器、路径映射、媒体库、磁盘、NAS、时间、备份与密钥，
 // 每项给出状态、说明与怎么修。结果存进 app_meta，体检页与首页读上一次的。不改任何设置；媒体库同「检查」，在库目录里试建一个文件再删掉。
 package health
 
@@ -33,13 +33,15 @@ const (
 	GroupPaths       = "paths"
 	GroupLibraries   = "libraries"
 	GroupDisks       = "disks"
+	GroupNAS         = "nas"
 	GroupTime        = "time"
 	GroupBackup      = "backup"
 	GroupSecret      = "secret"
 )
 
 var groupOrder = []string{
-	GroupTMDB, GroupSites, GroupDownloaders, GroupServers, GroupPaths, GroupLibraries, GroupDisks, GroupTime, GroupBackup, GroupSecret,
+	GroupTMDB, GroupSites, GroupDownloaders, GroupServers, GroupPaths, GroupLibraries, GroupDisks, GroupNAS, GroupTime, GroupBackup,
+	GroupSecret,
 }
 
 const (

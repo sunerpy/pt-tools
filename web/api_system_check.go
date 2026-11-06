@@ -16,11 +16,12 @@ import (
 	"github.com/sunerpy/pt-tools/internal/health"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/nas"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
-// 系统体检（媒体中心 M8）：一次检查 TMDB、站点、下载器、媒体服务器、路径映射、媒体库、磁盘、时间、备份与密钥（见 internal/health），
+// 系统体检（媒体中心 M8）：一次检查 TMDB、站点、下载器、媒体服务器、路径映射、媒体库、磁盘、NAS、时间、备份与密钥（见 internal/health），
 // 结果存进 app_meta。只认会话。
 
 // systemCheckResponse 是体检的结果；从没体检过时 Report 为 null。
@@ -91,9 +92,18 @@ func (s *Server) healthChecks(db *gorm.DB) []health.Check {
 		health.PathMaps(db),
 		health.Libraries(db, s.healthLibraryCheck, func(ctx context.Context) []health.SavePath { return s.savePaths(ctx, db) }),
 		health.Disks(func(ctx context.Context) []health.DiskPath { return s.diskPaths(ctx, db) }),
+		health.NAS(s.nasStatuses(), time.Now),
 		health.Backup(s.backupState, time.Now),
 		health.Secret(crypto.KeyStatus),
 	}
+}
+
+// nasStatuses 是体检读 NAS 来源状态的函数（只读采集器的内存，不连 NAS）；采集器没接上时为空，体检写「NAS 监控没有启动」。
+func (s *Server) nasStatuses() func() []nas.Status {
+	if s.nasCollector == nil {
+		return nil
+	}
+	return s.nasCollector.List
 }
 
 func (s *Server) healthTMDB(ctx context.Context) (*tmdb.Client, error) {

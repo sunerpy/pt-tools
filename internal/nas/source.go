@@ -25,6 +25,13 @@ type ExtraSource interface {
 	TakeExtra() map[string]string
 }
 
+// HistorySource 是能补上过去几拍的来源（TrueNAS 的报表里有最近 30 分钟）：采集器在每次采集成功以后取一次，
+// 比历史里最早的一拍还早的那些放到最前面，首页的柱不用从一拍开始攒。
+type HistorySource interface {
+	// TakeHistory 返回还没交出过的过去几拍；没有时为 nil。
+	TakeHistory() []Sample
+}
+
 var (
 	// ErrAuth 是认证失败（具体原因见 *AuthError）。
 	ErrAuth = errors.New("认证失败")

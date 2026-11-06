@@ -159,8 +159,13 @@ describe("添加来源", () => {
     expect(q("ns-username"), "TrueNAS 没有用户名一栏").toBeNull();
     expect(document.querySelector(".el-dialog")!.textContent).toContain("API Key");
     expect(inputOf("ns-secret").placeholder).toBe("必填");
+    expect(text("ns-guide"), "TrueNAS 写怎么建只读的 API Key").toContain(
+      "truenas_readonly_administrators",
+    );
+    expect(document.querySelectorAll("[data-testid=ns-guide] li")).toHaveLength(3);
 
     await pick("ns-kind", "Glances");
+    expect(q("ns-guide"), "没写准备步骤的类型不显示").toBeNull();
     expect(inputOf("ns-name").value).toBe("Glances");
     expect(q("ns-username")).not.toBeNull();
     expect(document.querySelector(".el-dialog")!.textContent).toContain("密码");
@@ -394,6 +399,7 @@ describe("编辑来源", () => {
     expect(text("ns-kind-fixed")).toBe("TrueNAS");
     expect(inputOf("ns-secret").placeholder).toBe("已保存，不改就留空");
     expect(q("ns-pin")).not.toBeNull();
+    expect(q("ns-guide"), "编辑时不再写准备步骤").toBeNull();
 
     api.test.mockResolvedValueOnce({ status: "ok" });
     await click("ns-test");

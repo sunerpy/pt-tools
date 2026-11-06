@@ -703,3 +703,96 @@ func TestCollector_ScrubsOwnSecrets(t *testing.T) {
 	assert.Equal(t, "设置不对：abc", r.status("3").Message, "短于 4 个字的不换，免得误伤普通文字")
 	assert.Equal(t, "a *** b", scrubSecrets("a token b", SourceConfig{Extra: map[string]string{"k": "token"}}))
 }
+
+// historySource 是第一次采集以后交出一次过去历史的来源（TrueNAS 的报表）。
+type historySource struct {
+	fakeSource
+	once sync.Once
+	past []Sample
+}
+
+func (h *historySource) TakeHistory() []Sample {
+	var out []Sample
+	h.once.Do(func() { out = h.past })
+	return out
+}
+
+func TestCollector_FailingSince(t *testing.T) {
+	now := time.Date(2026, 11, 6, 20, 0, 0, 0, time.UTC)
+	c := &Collector{Now: func() time.Time { return now }}
+	e := &entry{id: "1"}
+	src := &fakeSource{}
+	require.Equal(t, outcomeOK, c.attempt(context.Background(), e, src, true))
+	assert.Nil(t, e.status().FailingSince, "连着的时候为空")
+
+	src.setFn(func(context.Context, bool, int) (*Snapshot, error) { return nil, errors.New("connection refused") })
+	require.Equal(t, outcomeRetryLater, c.attempt(context.Background(), e, src, false))
+	first := now
+	st := e.status()
+	require.NotNil(t, st.FailingSince)
+	assert.Equal(t, first, *st.FailingSince)
+
+	now = now.Add(2 * time.Minute)
+	src.setFn(func(context.Context, bool, int) (*Snapshot, error) { return nil, &AuthError{Reason: "Key 不对"} })
+	require.Equal(t, outcomeParked, c.attempt(context.Background(), e, src, false))
+	st = e.status()
+	require.NotNil(t, st.FailingSince)
+	assert.Equal(t, first, *st.FailingSince, "一直出错时记的是第一次出错的时刻")
+
+	now = now.Add(time.Minute)
+	src.setFn(nil)
+	require.Equal(t, outcomeOK, c.attempt(context.Background(), e, src, true))
+	assert.Nil(t, e.status().FailingSince, "连上以后清掉")
+}
+
+func TestCollector_HistoryBackfill(t *testing.T) {
+	now := time.Date(2026, 11, 6, 20, 0, 0, 0, time.UTC)
+	c := &Collector{Now: func() time.Time { return now }}
+	e := &entry{id: "1"}
+	src := &historySource{past: []Sample{
+		{At: now.Add(-60 * time.Second), CPU: 2},
+		{At: now.Add(-90 * time.Second), CPU: 1},
+		{At: now.Add(-30 * time.Second), CPU: 3},
+		{At: now.Add(-5 * time.Second), CPU: 9}, // 和这一拍挨得太近，不要
+		{At: now.Add(time.Minute), CPU: 9},      // 比这一拍还新，不要
+	}}
+	src.setFn(func(_ context.Context, full bool, _ int) (*Snapshot, error) {
+		s := snapFor(full, 4)
+		s.At = now
+		return s, nil
+	})
+	require.Equal(t, outcomeOK, c.attempt(context.Background(), e, src, true))
+	cpus := func() []float64 {
+		out := []float64{}
+		for _, h := range e.status().History {
+			out = append(out, h.CPU)
+		}
+		return out
+	}
+	assert.Equal(t, []float64{1, 2, 3, 4}, cpus(), "过去的几拍按时间排在这一拍前面")
+
+	now = now.Add(30 * time.Second)
+	require.Equal(t, outcomeOK, c.attempt(context.Background(), e, src, false))
+	assert.Equal(t, []float64{1, 2, 3, 4, 4}, cpus(), "只补一次")
+}
+
+func TestCollector_HistoryBackfillCapped(t *testing.T) {
+	now := time.Date(2026, 11, 6, 20, 0, 0, 0, time.UTC)
+	c := &Collector{Now: func() time.Time { return now }}
+	e := &entry{id: "1"}
+	past := make([]Sample, 0, HistoryLen+5)
+	for i := HistoryLen + 5; i >= 1; i-- {
+		past = append(past, Sample{At: now.Add(-time.Duration(i) * 30 * time.Second), CPU: float64(i)})
+	}
+	src := &historySource{past: past}
+	src.setFn(func(_ context.Context, full bool, _ int) (*Snapshot, error) {
+		s := snapFor(full, 0)
+		s.At = now
+		return s, nil
+	})
+	require.Equal(t, outcomeOK, c.attempt(context.Background(), e, src, true))
+	h := e.status().History
+	require.Len(t, h, HistoryLen)
+	assert.Equal(t, float64(HistoryLen-1), h[0].CPU, "多的丢掉最早的")
+	assert.Equal(t, 0.0, h[HistoryLen-1].CPU, "最后一拍是这一次采集的")
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,6 +58,8 @@ type Status struct {
 	Message      string
 	LastOKAt     *time.Time
 	NextTryAt    *time.Time
+	// FailingSince 是这次从什么时候开始出错（连着的时候为空）：体检按它判断连不上多久了
+	FailingSince *time.Time
 	Snapshot     *Snapshot
 	History      []Sample
 }
@@ -98,6 +101,7 @@ type entry struct {
 	message string
 	lastOK  *time.Time
 	nextTry *time.Time
+	failing *time.Time
 	snap    *Snapshot
 	history []Sample
 
@@ -384,8 +388,12 @@ func (c *Collector) attempt(ctx context.Context, e *entry, src Source, full bool
 	if err != nil {
 		state, msg, parked := classify(err, c.timeout())
 		msg = scrubSecrets(msg, e.cfg)
+		now := c.now()
 		e.mu.Lock()
 		e.state, e.message, e.nextTry = state, msg, nil
+		if e.failing == nil {
+			e.failing = &now
+		}
 		e.mu.Unlock()
 		if parked {
 			return outcomeParked
@@ -396,6 +404,10 @@ func (c *Collector) attempt(ctx context.Context, e *entry, src Source, full bool
 	if snap.At.IsZero() {
 		snap.At = now
 	}
+	var past []Sample
+	if hs, ok := src.(HistorySource); ok {
+		past = hs.TakeHistory()
+	}
 	e.mu.Lock()
 	if full {
 		e.snap = snap.clone()
@@ -403,10 +415,13 @@ func (c *Collector) attempt(ctx context.Context, e *entry, src Source, full bool
 		e.snap = mergeLight(e.snap, snap)
 	}
 	e.history = append(e.history, e.snap.sample())
+	if len(past) > 0 {
+		e.history = withPast(past, e.history)
+	}
 	if len(e.history) > HistoryLen {
 		e.history = append([]Sample(nil), e.history[len(e.history)-HistoryLen:]...)
 	}
-	e.state, e.message, e.nextTry = StateOK, "", nil
+	e.state, e.message, e.nextTry, e.failing = StateOK, "", nil, nil
 	e.lastOK = &now
 	e.mu.Unlock()
 	if xs, ok := src.(ExtraSource); ok && e.id != LocalID && c.SaveExtra != nil {
@@ -453,6 +468,23 @@ func scrubSecrets(msg string, cfg SourceConfig) string {
 		}
 	}
 	return msg
+}
+
+// withPast 把来源补上的过去几拍放到历史前面：只要比现有最早的一拍早半拍（15 秒）以上的，按时间排；
+// 多出 HistoryLen 的由调用方丢掉最早的。
+func withPast(past, history []Sample) []Sample {
+	if len(history) == 0 {
+		return history
+	}
+	cut := history[0].At.Add(-15 * time.Second)
+	keep := make([]Sample, 0, len(past)+len(history))
+	for _, p := range past {
+		if p.At.Before(cut) {
+			keep = append(keep, p)
+		}
+	}
+	sort.Slice(keep, func(i, j int) bool { return keep[i].At.Before(keep[j].At) })
+	return append(keep, history...)
 }
 
 // ErrNoLoop 是这个来源没有在采集（停用了、设置有问题或这个版本不支持），「重新连接」没有用。
@@ -519,6 +551,10 @@ func (e *entry) status() Status {
 	if e.nextTry != nil {
 		t := *e.nextTry
 		st.NextTryAt = &t
+	}
+	if e.failing != nil {
+		t := *e.failing
+		st.FailingSince = &t
 	}
 	return st
 }

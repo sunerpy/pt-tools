@@ -18,6 +18,7 @@ import {
   nasHostFacts,
   nasHottestDisk,
   nasIfaceText,
+  nasKindGuide,
   nasKindIcon,
   nasKindLabel,
   nasLatestAlerts,
@@ -25,9 +26,9 @@ import {
   nasMemKpi,
   nasPctText,
   nasPoolHealth,
+  nasPoolsAside,
   nasPoolSub,
   nasPoolSummary,
-  nasPoolsAside,
   nasProblem,
   nasProblemNote,
   nasRetryText,
@@ -384,5 +385,17 @@ describe("告警、应用与主机行", () => {
       { value: "local", label: "本机" },
       { value: "2", label: "书房（TrueNAS）" },
     ]);
+  });
+});
+
+describe("添加来源时的准备步骤", () => {
+  it("TrueNAS 写怎么建只读用户与 API Key、只收 https；别的类型没有", () => {
+    const g = nasKindGuide("truenas");
+    expect(g?.title).toContain("25.04");
+    expect(g?.steps).toHaveLength(3);
+    expect(g?.steps.join("")).toContain("truenas_readonly_administrators");
+    expect(g?.steps.join("")).toContain("https");
+    expect(nasKindGuide("glances")).toBeNull();
+    expect(nasKindGuide("")).toBeNull();
   });
 });

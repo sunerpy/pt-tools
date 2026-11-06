@@ -233,6 +233,7 @@ func TestSystemCheckAPI(t *testing.T) {
 	assert.Equal(t, health.StatusFail, items["library:1"].Status, "没有整理入库服务")
 	assert.Equal(t, health.StatusSkip, items["servers"].Status)
 	assert.Equal(t, health.StatusSkip, items["backup"].Status, "没做过备份")
+	assert.Equal(t, health.Item{Key: "nas", Group: health.GroupNAS, Title: "NAS", Status: health.StatusSkip, Detail: "NAS 监控没有启动"}, items["nas"])
 	assert.Contains(t, items, "secret")
 	var disks int
 	for _, it := range run.Report.Items {

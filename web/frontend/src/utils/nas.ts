@@ -41,6 +41,28 @@ export function nasKindLabel(kind: string, kinds?: readonly NasKind[] | null): s
   return kinds?.find((k) => k.name === kind)?.label || KIND_LABELS[kind] || kind;
 }
 
+/** 添加来源时写在类型下面的准备步骤：要在 NAS 上先做的事。NAS 网页上的按钮名照它默认的英文界面写 */
+export interface NasKindGuide {
+  title: string;
+  steps: readonly string[];
+}
+
+const KIND_GUIDES: Record<string, NasKindGuide> = {
+  truenas: {
+    title: "先在 TrueNAS 上建一把只读的 API Key（要 TrueNAS 25.04 或以后的版本）",
+    steps: [
+      "在「Credentials → Users」点「Add」，建一个只给 pt-tools 用的用户：打开「Disable Password」，「Auxiliary Groups」选 truenas_readonly_administrators（只读管理员），不勾「SMB User」，不给 sudo",
+      "在右上角的用户菜单点「My API Keys」→「Add」，「Username」选这个用户，保存后复制 Key（只显示这一次）",
+      "下面写 TrueNAS 网页的 https 地址、粘贴 Key，点「测试连接」核对并信任它的证书。经 http 用过的 Key 会被 TrueNAS 吊销，所以这里只收 https",
+    ],
+  },
+};
+
+/** 这类来源的准备步骤；没写的类型为 null */
+export function nasKindGuide(kind: string): NasKindGuide | null {
+  return KIND_GUIDES[kind] ?? null;
+}
+
 /** 来源类型的图标 */
 export function nasKindIcon(kind: string): string {
   switch (kind) {

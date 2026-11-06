@@ -21,6 +21,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/health"
 	"github.com/sunerpy/pt-tools/internal/nas"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -438,7 +439,10 @@ func TestNASAPI_TrustCertificateThenSave(t *testing.T) {
 	assert.Empty(t, view.HomeSource)
 	assert.True(t, view.LocalEnabled)
 	assert.Equal(t, nas.LocalSupported, view.LocalSupported)
-	assert.Equal(t, []nasKindView{{Name: fakeNASKind, Label: "假 NAS", Username: "optional", Secret: "with_username", Plain: "without_credentials"}}, view.Kinds)
+	assert.Equal(t, []nasKindView{
+		{Name: fakeNASKind, Label: "假 NAS", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
+		{Name: nas.KindTrueNAS, Label: "TrueNAS", Username: "none", Secret: "required", Plain: "never"},
+	}, view.Kinds, "按名字排：测试登记的假类型与 TrueNAS")
 
 	w = e.do(http.MethodGet, "/api/nas/sources/"+idOf(got.ID), nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -951,4 +955,42 @@ func TestNASTestLimiter(t *testing.T) {
 	assert.True(t, l.allow("a"))
 	assert.Len(t, l.last, 1, "过期的记录清掉")
 	assert.False(t, (&nasTestLimiter{}).clock().IsZero())
+}
+
+// 体检的「NAS」一组读采集器内存里的状态：连上的来源一项正常，体检本身不连 NAS；没有采集器时写「没有启动」。
+func TestSystemCheck_NASGroup(t *testing.T) {
+	e := setupNASEnv(t)
+	f := newFakeNAS(t, "s3cret", false)
+	in := map[string]any{"kind": fakeNASKind, "url": f.url(), "username": "admin", "secret": "s3cret", "trust_sha256": f.pin()}
+	v, _ := e.test(t, in)
+	require.Equal(t, nasTestOK, v.Status)
+	got := e.save(t, 0, map[string]any{
+		"name": "家里的 NAS", "kind": fakeNASKind, "enabled": true, "url": f.url(), "username": "admin",
+		"secret": "s3cret", "tls_pin_sha256": f.pin(),
+	})
+	e.waitState(t, idOf(got.ID), nas.StateOK)
+	before := len(f.requests())
+
+	items := runNASCheck(t, e.srv)
+	require.Len(t, items, 1, "本机来源不算")
+	assert.Equal(t, "nas:"+idOf(got.ID), items[0].Key)
+	assert.Equal(t, "家里的 NAS", items[0].Title)
+	assert.Equal(t, health.StatusOK, items[0].Status, "%+v", items[0])
+	assert.True(t, strings.HasPrefix(items[0].Detail, "FakeOS 1.0（fake-nas） · "), items[0].Detail)
+	assert.Len(t, f.requests(), before, "体检不连 NAS")
+
+	e.srv.SetNASCollector(nil)
+	assert.Equal(t, []health.Item{{Key: "nas", Group: health.GroupNAS, Title: "NAS", Status: health.StatusSkip, Detail: "NAS 监控没有启动"}}, runNASCheck(t, e.srv))
+}
+
+// runNASCheck 只跑体检里的「NAS」一组。
+func runNASCheck(t *testing.T, srv *Server) []health.Item {
+	t.Helper()
+	for _, c := range srv.healthChecks(global.GlobalDB.DB) {
+		if c.Group == health.GroupNAS {
+			return c.Run(context.Background())
+		}
+	}
+	require.FailNow(t, "体检里没有 NAS 一组")
+	return nil
 }

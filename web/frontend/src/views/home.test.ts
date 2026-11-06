@@ -823,6 +823,11 @@ describe("首页的 NAS 概览", () => {
     expect(kpi("mem")).toContain("共 64.0 GB");
     expect(kpi("mem")).toContain("已用 45.6 GB · 可用 18.4 GB");
     expect(val("net")).toBe("↓9.4MB/s");
+    // 大字只放数字，「↓」与单位和 CPU 的「%」一样是小字（375 宽的两列卡放不下整串大字）
+    const small = [
+      ...q("hn-kpi-net")!.querySelectorAll('[data-testid="hn-kpi-val"] .hn-kpi__unit'),
+    ];
+    expect(small.map((e) => e.textContent?.trim())).toEqual(["↓", "MB/s"]);
     expect(kpi("net")).toContain("ens161np1");
     expect(kpi("net")).toContain("上行 3.6 MB/s · 所有网卡合计");
     expect(val("storage")).toBe("85%");
