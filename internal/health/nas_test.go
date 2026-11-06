@@ -22,7 +22,7 @@ func TestNASCheck_NoSources(t *testing.T) {
 	require.Len(t, got, 1, "本机来源不算")
 	assert.Equal(t, Item{
 		Key: "nas", Group: GroupNAS, Title: "NAS", Status: StatusSkip, Detail: "还没添加 NAS 来源",
-		Hint: "在「系统 → NAS 监控」里添加来源（能接入 Glances、TrueNAS），体检会看它的存储池、告警与硬盘温度",
+		Hint: "在「系统 → NAS 监控」里添加来源（能接入 Glances、群晖、TrueNAS），体检会看它的存储池、告警与硬盘温度",
 	}, got[0])
 
 	got = run([]nas.Status{{ID: "3", Name: "家里", Kind: nas.KindTrueNAS, Enabled: false, State: nas.StateDisabled}})
@@ -36,10 +36,11 @@ func TestNASCheck_NoSources(t *testing.T) {
 }
 
 func TestNASKindLabels(t *testing.T) {
-	assert.Equal(t, "（能接入 Glances、TrueNAS）", nasKindLabels())
+	assert.Equal(t, "（能接入 Glances、群晖、TrueNAS）", nasKindLabels())
 	assert.Equal(t, "TrueNAS", nasKindLabel(nas.KindTrueNAS))
 	assert.Equal(t, "Glances", nasKindLabel(nas.KindGlances))
-	assert.Equal(t, "synology", nasKindLabel("synology"), "这个版本不认的类型写原样")
+	assert.Equal(t, "群晖", nasKindLabel(nas.KindSynology))
+	assert.Equal(t, "qnap", nasKindLabel("qnap"), "这个版本不认的类型写原样")
 	assert.Equal(t, "NAS", nasKindLabel(""))
 }
 
@@ -179,8 +180,8 @@ func TestNASCheck_Source(t *testing.T) {
 	})
 
 	t.Run("不支持与正在连接", func(t *testing.T) {
-		it := run(nas.Status{Name: "n", Kind: "synology", State: nas.StateUnsupported, Message: "这个版本不支持「synology」来源"})
-		assert.Equal(t, Item{Key: "nas:7", Group: GroupNAS, Title: "n", Status: StatusSkip, Detail: "这个版本不支持「synology」来源"}, it)
+		it := run(nas.Status{Name: "n", Kind: "qnap", State: nas.StateUnsupported, Message: "这个版本不支持「qnap」来源"})
+		assert.Equal(t, Item{Key: "nas:7", Group: GroupNAS, Title: "n", Status: StatusSkip, Detail: "这个版本不支持「qnap」来源"}, it)
 		assert.Equal(t, "这个版本不支持这类来源", run(nas.Status{Name: "n", State: nas.StateUnsupported}).Detail)
 		it = run(nas.Status{Name: "n", State: nas.StateConnecting})
 		assert.Equal(t, Item{Key: "nas:7", Group: GroupNAS, Title: "n", Status: StatusSkip, Detail: "正在连接，还没读到数据"}, it)
