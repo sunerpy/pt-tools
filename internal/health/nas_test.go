@@ -63,6 +63,16 @@ func healthySnapshot(at time.Time) *nas.Snapshot {
 	}
 }
 
+// badSnapshot 是存储池不健康、有严重告警、硬盘偏热的快照：用来测过时的快照不当成现在的样子。
+func badSnapshot(at time.Time) *nas.Snapshot {
+	s := healthySnapshot(at)
+	no, hot := false, 60.0
+	s.Pools[0].Healthy = &no
+	s.Alerts = append(s.Alerts, nas.Alert{Level: nas.AlertCritical, Title: "存储池 UniData 状态不健康"})
+	s.Disks[0].TempC = &hot
+	return s
+}
+
 func TestNASCheck_Source(t *testing.T) {
 	now := time.Date(2026, 11, 6, 15, 0, 0, 0, time.Local)
 	ago := func(d time.Duration) *time.Time { v := now.Add(-d); return &v }
@@ -188,10 +198,11 @@ func TestNASCheck_Source(t *testing.T) {
 		assert.Equal(t, "11-06 14:59 起连不上，正在重试：连不上 TrueNAS：dial tcp 10.0.0.2:443: connect: connection refused · 硬盘偏热：sda 60 °C", it.Detail)
 		assert.Contains(t, it.Hint, "超过 3 分钟会记成失败")
 
-		// 超过 3 分钟：失败，快照过时了不看
+		// 超过 3 分钟：失败，快照过时了不看（里面的存储池不健康也不写）
+		old := badSnapshot(now.Add(-200 * time.Second))
 		it = run(nas.Status{
 			Name: "n", State: nas.StateError, Message: "10 秒内没有回应",
-			FailingSince: ago(3 * time.Minute), LastOKAt: ago(200 * time.Second), Snapshot: healthySnapshot(now.Add(-200 * time.Second)),
+			FailingSince: ago(3 * time.Minute), LastOKAt: ago(200 * time.Second), Snapshot: old,
 		})
 		assert.Equal(t, StatusFail, it.Status)
 		assert.Equal(t, "11-06 14:57 起连不上：10 秒内没有回应（最后一次读到是 11-06 14:56）", it.Detail)
@@ -210,7 +221,8 @@ func TestNASCheck_Source(t *testing.T) {
 	})
 
 	t.Run("数据过时", func(t *testing.T) {
-		it := run(nas.Status{Name: "n", State: nas.StateOK, LastOKAt: ago(4 * time.Minute), Snapshot: healthySnapshot(now.Add(-4 * time.Minute))})
+		// 过时的快照不当成现在的样子：里面的存储池不健康、严重告警与硬盘偏热都不写
+		it := run(nas.Status{Name: "n", State: nas.StateOK, LastOKAt: ago(4 * time.Minute), Snapshot: badSnapshot(now.Add(-4 * time.Minute))})
 		assert.Equal(t, StatusWarn, it.Status)
 		assert.Equal(t, "数据过时了：最后一次读到是 11-06 14:56", it.Detail)
 		assert.Contains(t, it.Hint, "重启 pt-tools")

@@ -567,6 +567,12 @@ func TestRPCErrorText(t *testing.T) {
 	long := &rpcError{Code: 1, Message: strings.Repeat("出错 ", 100)}
 	assert.True(t, strings.HasSuffix(long.Error(), "…"))
 	assert.False(t, (&rpcError{Code: -32001}).denied())
+	// Key 每段都短于 redact 认得的长度时，靠 secret 去掉（真 Key 是「编号-64 位」，别的形状也不能漏出来）
+	var withKey rpcError
+	require.NoError(t, json.Unmarshal([]byte(`{"code":-32001,"message":"Method call error","data":{"reason":"[EINVAL] bad key 3-short-Key-parts-a1b2"}}`), &withKey))
+	withKey.secret = "3-short-Key-parts-a1b2"
+	assert.NotContains(t, withKey.Error(), withKey.secret)
+	assert.Contains(t, withKey.Error(), "bad key ***")
 	assert.True(t, (&rpcError{Code: -32601}).missing())
 	assert.False(t, transportError(nil))
 	assert.False(t, transportError(&decodeError{method: "m", err: errors.New("x")}))
