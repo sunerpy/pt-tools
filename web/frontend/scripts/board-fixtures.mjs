@@ -965,6 +965,235 @@ const HOME_WEEK = [
   air_at: HOME_AT(at[0], at[1], offset),
   ...e,
 }));
+/*
+ * 首页 NAS 概览与 NAS 监控（H2，规格 docs/design/home-nas-spec.md）：GET /api/nas 与 /api/home 的 nas 块。
+ * 字段照 internal/nas 的 Snapshot、Sample 与 web/api_nas.go 的 nasView、nasSourceView、homeNAS；
+ * 本机来源的 facets 原因照 internal/nas/local.go。
+ * 默认首页显示一台接入的 TrueNAS（三个存储池、八块硬盘、七条告警、六个应用），本机来源排在它前面（「另有 1 个来源」）；
+ * localStorage 设了 pt-fixture-home-nas=local 时只有本机来源，设了 pt-fixture-home-empty 时一个能显示的来源都没有。
+ * 时间按跑起来那一刻的「现在」写；页面里每取一次都按那时的「现在」整体平移（见 QUERY_AWARE 的 NAS_RESTAMP），
+ * 验收跑得久了「刚刚更新」也不会变成「3 分钟前更新」。
+ */
+const NAS_NOW = Date.now();
+const NAS_T = (sec) => new Date(NAS_NOW + sec * 1000).toISOString();
+const GiB = 1024 ** 3;
+const NAS_KINDS = [
+  {
+    name: "truenas",
+    label: "TrueNAS",
+    experimental: false,
+    username: "none",
+    secret: "required",
+    plain: "never",
+  },
+];
+/* 最近 30 拍（30 秒一拍，最后一拍就是快照）：CPU 17–41%、内存 61–63%、下行 3–8 MB/s、上行 1–2 MB/s */
+const nasHistory = (at, f) =>
+  Array.from({ length: 30 }, (_, i) => ({ at: NAS_T(at - 30 * (29 - i)), ...f(i) }));
+const NAS_TRUENAS_HISTORY = nasHistory(-20, (i) => ({
+  cpu: Math.round((27 + Math.sin(i / 3) * 9 + (i % 4)) * 10) / 10,
+  mem: Math.round((62 + Math.sin(i / 7)) * 10) / 10,
+  rx: Math.round((5.5 + Math.sin(i / 2.5) * 2.5) * 1024 ** 2),
+  tx: Math.round((1.5 + Math.cos(i / 4) * 0.5) * 1024 ** 2),
+}));
+const NAS_LOCAL_HISTORY = nasHistory(-12, (i) => ({
+  cpu: Math.round((12 + Math.sin(i / 2) * 5) * 10) / 10,
+  mem: Math.round((38 + Math.sin(i / 6)) * 10) / 10,
+  rx: 0,
+  tx: 0,
+}));
+const nasLast = (h) => h[h.length - 1];
+const NAS_FACETS_OK = Object.fromEntries(
+  ["system", "cpu", "cpu_temp", "memory", "network", "pools", "disks", "alerts", "apps"].map(
+    (k) => [k, { status: "ok" }],
+  ),
+);
+const NAS_TRUENAS_MEM = 64 * GiB;
+const NAS_TRUENAS_SNAP = {
+  at: NAS_T(-20),
+  system: {
+    hostname: "truenas",
+    platform: "TrueNAS SCALE",
+    version: "25.04.1",
+    model: "Intel Core i5-12400",
+    cores: 12,
+    uptime_seconds: 18 * 86400 + 18 * 3600 + 7 * 60,
+  },
+  cpu: {
+    percent: nasLast(NAS_TRUENAS_HISTORY).cpu,
+    iowait: 1.2,
+    load1: 3.7,
+    load5: 3.2,
+    load15: 2.9,
+    temp_c: 52,
+  },
+  memory: {
+    total: NAS_TRUENAS_MEM,
+    used: Math.round((NAS_TRUENAS_MEM * nasLast(NAS_TRUENAS_HISTORY).mem) / 100),
+    available:
+      NAS_TRUENAS_MEM - Math.round((NAS_TRUENAS_MEM * nasLast(NAS_TRUENAS_HISTORY).mem) / 100),
+  },
+  network: {
+    rx_bps: nasLast(NAS_TRUENAS_HISTORY).rx,
+    tx_bps: nasLast(NAS_TRUENAS_HISTORY).tx,
+    interfaces: ["enp3s0"],
+  },
+  /* 可用容量（根数据集的 used + available，不是 pool.query 的裸容量）：tank 已用 85%，到了「快满了」 */
+  pools: [
+    ["tank", 28.9, 24.7, 4],
+    ["fast", 1.8, 0.6, 2],
+    ["backup", 7.2, 3.3, 2],
+  ].map(([name, size, used, disks]) => ({
+    name,
+    status: "ONLINE",
+    healthy: true,
+    size: Math.round(size * TB),
+    used: Math.round(used * TB),
+    free: Math.round((size - used) * TB),
+    disks,
+  })),
+  /* sdc 52 °C 到了机械盘的提醒线；nvme1n1 读不到温度（没有 temp_c） */
+  disks: [
+    ["sda", "WDC WUH721816ALE6L4", "hdd", 16e12, 38, "tank"],
+    ["sdb", "WDC WUH721816ALE6L4", "hdd", 16e12, 41, "tank"],
+    ["sdc", "WDC WUH721816ALE6L4", "hdd", 16e12, 52, "tank"],
+    ["sdd", "WDC WUH721816ALE6L4", "hdd", 16e12, 40, "tank"],
+    ["nvme0n1", "Samsung SSD 980 PRO 1TB", "nvme", 1e12, 47, "fast"],
+    ["nvme1n1", "Samsung SSD 980 PRO 1TB", "nvme", 1e12, undefined, "fast"],
+    ["sde", "ST8000VN004", "hdd", 8e12, 36, "backup"],
+    ["sdf", "ST8000VN004", "hdd", 8e12, 37, "backup"],
+  ].map(([name, model, kind, size, temp, pool]) => ({
+    name,
+    model,
+    kind,
+    size,
+    ...(temp === undefined ? {} : { temp_c: temp }),
+    pool,
+  })),
+  alerts: [
+    ["critical", "Rsync 任务「每日备份」失败", -2 * 3600],
+    ["critical", "应用目录同步失败", -5 * 3600],
+    ["info", "Rsync 任务「相册」成功", -6 * 3600],
+    ["info", "应用 jellyfin 有新版本", -26 * 3600],
+    ["warning", "存储池 tank 已用 85%", -30 * 3600],
+    ["info", "有可用的系统更新", -3 * 86400],
+    ["info", "Scrub 在存储池 backup 上完成", -4 * 86400],
+  ].map(([level, title, at]) => ({ level, title, at: NAS_T(at) })),
+  apps: { running: 5, total: 6, upgradable: 1 },
+  facets: NAS_FACETS_OK,
+};
+const NAS_LOCAL_MEM = 32 * GiB;
+const NAS_LOCAL_SNAP = {
+  at: NAS_T(-12),
+  system: {
+    hostname: "pt-tools-host",
+    platform: "Linux",
+    version: "6.12.15",
+    model: "AMD EPYC 7R13 Processor",
+    cores: 8,
+    uptime_seconds: 3 * 86400 + 5 * 3600,
+  },
+  cpu: {
+    percent: nasLast(NAS_LOCAL_HISTORY).cpu,
+    iowait: 0.4,
+    load1: 1.0,
+    load5: 0.8,
+    load15: 0.7,
+    temp_c: 48,
+  },
+  memory: {
+    total: NAS_LOCAL_MEM,
+    used: Math.round((NAS_LOCAL_MEM * nasLast(NAS_LOCAL_HISTORY).mem) / 100),
+    available: NAS_LOCAL_MEM - Math.round((NAS_LOCAL_MEM * nasLast(NAS_LOCAL_HISTORY).mem) / 100),
+  },
+  network: { rx_bps: 0, tx_bps: 0, interfaces: null },
+  pools: null,
+  disks: null,
+  alerts: null,
+  apps: { running: 0, total: 0, upgradable: 0 },
+  facets: {
+    ...NAS_FACETS_OK,
+    network: {
+      status: "unsupported",
+      reason: "本机来源不读网卡：容器里的网卡计数只有容器自己的流量，首页这一格用下载器的速度",
+    },
+    pools: {
+      status: "unsupported",
+      reason: "本机来源读不到存储池健康、硬盘与告警，接入 NAS 以后才有",
+    },
+    disks: {
+      status: "unsupported",
+      reason: "本机来源读不到存储池健康、硬盘与告警，接入 NAS 以后才有",
+    },
+    alerts: {
+      status: "unsupported",
+      reason: "本机来源读不到存储池健康、硬盘与告警，接入 NAS 以后才有",
+    },
+    apps: { status: "unsupported", reason: "本机来源读不到 NAS 上的应用，接入 NAS 以后才有" },
+  },
+};
+const NAS_LOCAL = {
+  id: "local",
+  name: "本机",
+  kind: "local",
+  enabled: true,
+  experimental: false,
+  has_secret: false,
+  insecure_ack: false,
+  state: "ok",
+  last_ok_at: NAS_T(-12),
+  snapshot: NAS_LOCAL_SNAP,
+  history: NAS_LOCAL_HISTORY,
+};
+const NAS_TRUENAS = {
+  id: "1",
+  name: "家里的 TrueNAS",
+  kind: "truenas",
+  enabled: true,
+  experimental: false,
+  url: "https://truenas.qa.test",
+  has_secret: true,
+  tls_pin_sha256: "9465" + "0".repeat(56) + "8985",
+  insecure_ack: false,
+  state: "ok",
+  last_ok_at: NAS_T(-20),
+  snapshot: NAS_TRUENAS_SNAP,
+  history: NAS_TRUENAS_HISTORY,
+};
+const nasView = (sources, home, over = {}) => ({
+  home_source: "",
+  home,
+  local_enabled: true,
+  local_supported: true,
+  kinds: NAS_KINDS,
+  sources,
+  ...over,
+});
+/* 同 web/api_nas.go 的 homeNASBlock：首页显示的那个来源，其余能用的来源只给名字与状态 */
+const homeNasOf = (view) => ({
+  source: view.sources.find((s) => s.id === view.home) ?? null,
+  others: view.sources
+    .filter((s) => s.id !== view.home && s.enabled && s.state !== "unsupported")
+    .map(({ id, name, kind, state }) => ({ id, name, kind, state })),
+});
+const NAS_VIEW = nasView([NAS_LOCAL, NAS_TRUENAS], "1");
+const NAS_VIEW_LOCAL = nasView([NAS_LOCAL], "local");
+/* 本机来源关着、也没接入来源（空态那一趟）：首页是「还没有 NAS 监控来源」那张卡 */
+const NAS_VIEW_EMPTY = nasView(
+  [
+    {
+      ...NAS_LOCAL,
+      enabled: false,
+      state: "disabled",
+      last_ok_at: undefined,
+      snapshot: null,
+      history: [],
+    },
+  ],
+  "",
+  { local_enabled: false },
+);
+
 const HOME = {
   at: HOME_AT(14, 20),
   calendar: { data: { today: HOME_TODAY, week: HOME_WEEK, errors: [], subscriptions: 9 } },
@@ -1242,6 +1471,7 @@ const HOME = {
       ],
     },
   },
+  nas: { data: homeNasOf(NAS_VIEW) },
 };
 
 /*
@@ -1261,7 +1491,11 @@ const HOME_EMPTY = {
   status: {
     data: { health: null, backup: { enabled: false, late: false, days: -1 }, servers: [] },
   },
+  nas: { data: homeNasOf(NAS_VIEW_EMPTY) },
 };
+
+/* 只有本机来源的那一趟（localStorage 设了 pt-fixture-home-nas=local）：别的块同 HOME，NAS 概览画本机 */
+const HOME_LOCAL = { ...HOME, nas: { data: homeNasOf(NAS_VIEW_LOCAL) } };
 
 /* 系统体检（M8）：一次体检的结果，十组都有，失败、提醒、跳过各几项（字段照 internal/health 的 Report） */
 const HEALTH_REPORT = {
@@ -1833,6 +2067,8 @@ export const FIXTURES = [
   ["/api/media/search", ENTRY_SEARCH],
   /* 首页与系统体检（M8）：POST /api/system/check（立即体检）也回这一份 */
   ["/api/home", HOME],
+  /* NAS 监控（H2）：首页的 NAS 概览先用 /api/home 的 nas 块，取到这一份以后用它（写操作是 PUT/DELETE，照常打到后端） */
+  ["/api/nas", NAS_VIEW],
   ["/api/system/check", { report: HEALTH_REPORT }],
   /* 条目详情（M3）：季的路径是条目路径的子路径，前缀匹配先命中先用，要排在前面 */
   /* 删除预览（M7）：只给第 2 季的（画板 03 的片段）；执行删除不拦，验收不点「删除」 */
@@ -2148,7 +2384,32 @@ export function emptyStubScript() {
  * 通道走别名归一，见 internal/app/audit_service.go）。它测的是前端有没有把对的参数发出去、
  * 并把回来的行画对；服务端那一侧由 Go 测试用生产值覆盖。
  */
+/*
+ * NAS 的时间整体平移到「现在」：快照、最后成功、下次重试、历史与告警的时间都加上「现在 − 写假数据那一刻」。
+ * 只动 at、last_ok_at、next_try_at 三个键；/api/home 只动 nas 那一块（别的块的时间按今天几点写，不平移）。
+ */
+const NAS_RESTAMP = (pick) => `(body) => {
+    const shift = Date.now() - ${NAS_NOW};
+    const keys = ['at', 'last_ok_at', 'next_try_at'];
+    const walk = (v, k) => {
+      if (Array.isArray(v)) return v.map((x) => walk(x, ''));
+      if (v && typeof v === 'object') {
+        const o = {};
+        for (const [kk, x] of Object.entries(v)) o[kk] = walk(x, kk);
+        return o;
+      }
+      if (typeof v === 'string' && keys.includes(k)) {
+        const t = Date.parse(v);
+        return Number.isNaN(t) ? v : new Date(t + shift).toISOString();
+      }
+      return v;
+    };
+    ${pick}
+  }`;
+
 const QUERY_AWARE = {
+  "/api/nas": NAS_RESTAMP("return walk(body, '');"),
+  "/api/home": NAS_RESTAMP("return Object.assign({}, body, { nas: walk(body.nas, '') });"),
   /* 与 web/api_userinfo_history.go 同义：按 site 回该站的历史；没有快照的站点回空 points */
   "/api/v2/userinfo/history": `(body, params) => {
     const site = params.get('site') ?? '';
@@ -2214,21 +2475,30 @@ export function stubScript(overrides = {}) {
     if (method === 'GET' || method === 'POST') {
       for (const [prefix, body] of table) {
         if (path === prefix || path.startsWith(prefix + '/')) {
-          let out = body;
+          let base = body;
+          /* 首页的空态那一趟（见 HOME_EMPTY）与只有本机来源的那一趟（见 HOME_LOCAL） */
+          if (localStorage.getItem('pt-fixture-home-empty') === '1') {
+            if (path === '/api/home') base = ${JSON.stringify(JSON.stringify(HOME_EMPTY))};
+            if (path === '/api/nas') base = ${JSON.stringify(JSON.stringify(NAS_VIEW_EMPTY))};
+            if (path === '/api/system/check') base = '{"report":null}';
+            /* 没有下载器时外壳取到的总速度也是 0：不然右栏写「0 台」，速度却是另一份假数据里的 93.8 MB/s */
+            if (path === '/api/downloader-torrents/transfer-stats') {
+              base = '{"total_upload_speed":0,"total_download_speed":0,"total_uploaded":0,"total_downloaded":0,"total_session_uploaded":0,"total_session_downloaded":0,"total_free_space":0,"downloaders":[]}';
+            }
+          } else if (localStorage.getItem('pt-fixture-home-nas') === 'local') {
+            if (path === '/api/home') base = ${JSON.stringify(JSON.stringify(HOME_LOCAL))};
+            if (path === '/api/nas') base = ${JSON.stringify(JSON.stringify(NAS_VIEW_LOCAL))};
+          }
+          let out = base;
           const fn = queryAware[prefix];
           if (fn && path === prefix) {
             const qs = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : '';
-            out = JSON.stringify(fn(JSON.parse(body), new URLSearchParams(qs)));
+            out = JSON.stringify(fn(JSON.parse(base), new URLSearchParams(qs)));
           }
           /*
            * 验收用的「站点很多」模式：localStorage 设了 pt-fixture-many-sites 就把聚合接口的站点扩到 40 个
            * （复制的那些名字后面带 -2 / -3 …）。站点表的自适应封顶与拖拽调高只有行数多到溢出时才看得出来。
            */
-          /* 首页的空态那一趟（见 HOME_EMPTY） */
-          if (localStorage.getItem('pt-fixture-home-empty') === '1') {
-            if (path === '/api/home') out = ${JSON.stringify(JSON.stringify(HOME_EMPTY))};
-            if (path === '/api/system/check') out = '{"report":null}';
-          }
           if (path === '/api/v2/userinfo/aggregated' && localStorage.getItem('pt-fixture-many-sites') === '1') {
             const agg = JSON.parse(out);
             const base = agg.perSiteStats;
