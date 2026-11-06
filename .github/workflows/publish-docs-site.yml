@@ -24,6 +24,7 @@ on:
       - "!docs/brand.md"
       - "!docs/design/webui-board-spec.md"
       - "!docs/design/media-hub-board-spec.md"
+      - "!docs/design/home-nas-spec.md"
       - "web/frontend/public/logo.svg"
       - ".github/workflows/publish-docs-site.yml"
   workflow_dispatch:
