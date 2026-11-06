@@ -105,11 +105,14 @@ function key(it: MediaResumeItem): string {
   color: var(--pt-t3);
 }
 
-/* 桌面：按 242 宽自动排，只显示一行（多出来的行高为 0、被裁掉） */
+/*
+ * 桌面：按 232 起自动排，只显示一行（多出来的行高为 0、被裁掉）。画板 760 宽三张 242；
+ * 滚动区有竖向滚动条时左栏只剩 750，最小宽写 242 就只排得下两张，所以从 232 起。
+ */
 .hm-resume {
   display: grid;
   grid-template-rows: auto;
-  grid-template-columns: repeat(auto-fill, minmax(242px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
   grid-auto-rows: 0;
   gap: 0 17px;
   overflow: hidden;

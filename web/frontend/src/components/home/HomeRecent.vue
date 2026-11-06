@@ -74,11 +74,14 @@ function key(it: HomeRecentItem): string {
   color: var(--pt-t3);
 }
 
-/* 桌面：98 宽的海报一行排满，多出来的行高为 0、被裁掉 */
+/*
+ * 桌面：海报一行排满（画板 760 宽七张 98、间距 12），多出来的行高为 0、被裁掉。
+ * 列宽从 96 起平分整行：滚动区有竖向滚动条时左栏只剩 750，固定 98 就只排得下六张。
+ */
 .hm-recent {
   display: grid;
   grid-template-rows: auto;
-  grid-template-columns: repeat(auto-fill, 98px);
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   grid-auto-rows: 0;
   gap: 0 12px;
   overflow: hidden;
@@ -99,8 +102,8 @@ function key(it: HomeRecentItem): string {
 
 .hm-pc__poster {
   position: relative;
-  width: 98px;
-  height: 147px;
+  width: 100%;
+  aspect-ratio: 2 / 3;
   overflow: hidden;
   background: var(--pt-hover);
   border-radius: var(--pt-r-md);

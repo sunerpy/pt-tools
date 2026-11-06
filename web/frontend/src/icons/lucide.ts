@@ -1,5 +1,5 @@
 /**
- * lucide 图标路径数据 —— 与 Penpot 设计稿（G Cockpit）用的是同一份，共 268 个。
+ * lucide 图标路径数据 —— 与 Penpot 设计稿（G Cockpit）用的是同一份，共 270 个。
  *
  * 为什么不装 lucide-vue-next：这里只需要路径字符串，不需要 267 个 Vue 组件；
  * 内联一份 map（gzip 约 12 KB）省掉一个运行时依赖，也保证画板与实现的图标
@@ -275,6 +275,8 @@ export const LUCIDE_ICONS = {
     '<path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/>',
   megaphone:
     '<path d="M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/><path d="M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14"/><path d="M8 6v8"/>',
+  "memory-stick":
+    '<path d="M12 12v-2" /><path d="M12 18v-2" /><path d="M16 12v-2" /><path d="M16 18v-2" /><path d="M2 11h1.5" /><path d="M20 18v-2" /><path d="M20.5 11H22" /><path d="M4 18v-2" /><path d="M8 12v-2" /><path d="M8 18v-2" /><rect x="2" y="6" width="20" height="10" rx="2" />',
   menu: '<path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" />',
   "message-circle":
     '<path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/>',
@@ -423,6 +425,7 @@ export const LUCIDE_ICONS = {
   target:
     '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
   terminal: '<path d="M12 19h8" /><path d="m4 17 6-6-6-6" />',
+  thermometer: '<path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z" />',
   "thumbs-up":
     '<path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/><path d="M7 10v12"/>',
   timer:

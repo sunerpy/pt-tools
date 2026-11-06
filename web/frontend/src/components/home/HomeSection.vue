@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /*
  * 首页的区块标题（画板 02 的「今天播出」「继续观看」「最近入库」，07 的手机区块标题）：16/700 的标题、计数、身份 chip，
- * 右侧主色文字链。标题行 21 高，标题顶到内容顶 32。
+ * 右侧主色文字链（right 插槽放在它左边，NAS 概览用来写更新时间）。标题行 21 高，标题顶到内容顶 32。
  */
 import PtIcon from "@/components/PtIcon";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -27,6 +27,7 @@ defineProps<{
       <span v-if="count" class="hm-sec__count">{{ count }}</span>
       <PtTag v-if="tag" class="hm-sec__tag">{{ tag }}</PtTag>
       <span class="hm-sec__gap" />
+      <slot name="right" />
       <a
         v-if="action && href"
         :href="href"

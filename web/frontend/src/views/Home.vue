@@ -1,12 +1,15 @@
 <script setup lang="ts">
 /*
- * 首页（媒体中心 M8，画板 02 桌面、07 手机）：今天播出、待处理、继续观看、最近入库、这周还要播与 NAS 状态。
+ * 首页（媒体中心 M8；首页 NAS 概览 H2 改成方案 A，规格 docs/design/home-nas-spec.md）：最上面满宽的 NAS 概览，
+ * 下面是今天播出、待处理，两栏的左栏是继续观看、最近入库、这周还要播，右栏是下载器与状态。
  * 数据来自 GET /api/home，每块单独给数据或错误，一块取不到不影响别的；服务端缓存 30 秒，「刷新」不用缓存。
- * NAS 状态的速度跟着外壳每 30 秒取的 transfer-stats 更新。打开网页先到这里（/ 重定向到 /home）。
+ * NAS 概览另外每 30 秒取 GET /api/nas（只读内存）；下载器速度跟着外壳每 30 秒取的 transfer-stats 更新。
+ * 打开网页先到这里（/ 重定向到 /home）。
  */
 import { type HomeData, homeApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
-import HomeNas from "@/components/home/HomeNas.vue";
+import HomeDownloaders from "@/components/home/HomeDownloaders.vue";
+import HomeNasOverview from "@/components/home/HomeNasOverview.vue";
 import HomeRecent from "@/components/home/HomeRecent.vue";
 import HomeResume from "@/components/home/HomeResume.vue";
 import HomeToday from "@/components/home/HomeToday.vue";
@@ -14,8 +17,10 @@ import HomeTodo from "@/components/home/HomeTodo.vue";
 import HomeWeek from "@/components/home/HomeWeek.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { useNasHome } from "@/composables/useNasHome";
 import { useTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { headline, resumeItems, todoTotal } from "@/utils/home";
+import { NAS_LOCAL_ID } from "@/utils/nas";
 import { computed, onMounted, ref } from "vue";
 
 const isMobile = useIsMobile();
@@ -24,10 +29,13 @@ useTmdbImageBase();
 const data = ref<HomeData | null>(null);
 const loading = ref(false);
 const error = ref("");
+/** 点「刷新」的次数：NAS 概览跟着重取 GET /api/nas */
+const refreshes = ref(0);
 let seq = 0;
 
 async function load(refresh = false) {
   const n = ++seq;
+  if (refresh) refreshes.value += 1;
   loading.value = true;
   error.value = "";
   try {
@@ -41,6 +49,13 @@ async function load(refresh = false) {
 }
 
 onMounted(() => void load());
+
+const nas = useNasHome(
+  () => data.value?.nas ?? null,
+  () => refreshes.value,
+);
+/** NAS 概览画的是本机来源时，下载盘与媒体库在概览里，右栏不再列一遍 */
+const showStorage = computed(() => nas.home.value?.source?.id !== NAS_LOCAL_ID);
 
 const sub = computed(() => {
   const d = data.value;
@@ -84,6 +99,13 @@ const resumeServerURL = computed(() => {
       <el-button size="small" @click="load(true)">重试</el-button>
     </div>
 
+    <HomeNasOverview
+      :home="nas.home.value"
+      :view="nas.view.value"
+      :failure="nas.failure.value"
+      :now="nas.now.value"
+      :storage="data?.storage ?? null"
+      :downloaders="data?.downloaders ?? null" />
     <HomeToday :block="data?.calendar ?? null" />
     <HomeTodo :block="data?.todo ?? null" @changed="load(true)" />
 
@@ -93,11 +115,12 @@ const resumeServerURL = computed(() => {
         <HomeRecent :block="data?.recent ?? null" />
         <HomeWeek :block="data?.calendar ?? null" />
       </div>
-      <HomeNas
+      <HomeDownloaders
         :downloaders="data?.downloaders ?? null"
         :storage="data?.storage ?? null"
         :status="data?.status ?? null"
-        :resume-count="resumeCount" />
+        :resume-count="resumeCount"
+        :show-storage="showStorage" />
     </div>
 
     <div v-if="isMobile" class="hm-mrefresh">
@@ -118,7 +141,7 @@ const resumeServerURL = computed(() => {
   container-type: inline-size;
 }
 
-/* 两栏：左栏继续观看、最近入库、这周还要播，右栏 368 宽的 NAS 状态；内容宽不到 1100 时 NAS 状态落到下面 */
+/* 两栏：左栏继续观看、最近入库、这周还要播，右栏 368 宽的下载器与状态；内容宽不到 1100 时右栏落到下面 */
 .hm-cols {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 368px;

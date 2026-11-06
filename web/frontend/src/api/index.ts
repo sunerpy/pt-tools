@@ -6020,6 +6020,8 @@ export interface HomeData {
   downloaders: HomeBlock<HomeDownloaders>;
   storage: HomeBlock<HomeDisk[]>;
   status: HomeBlock<HomeStatus>;
+  /** NAS 概览（首页 NAS 概览 H2）：首页显示的那个来源与其余能用的来源 */
+  nas: HomeBlock<HomeNas>;
 }
 
 export const homeApi = {
