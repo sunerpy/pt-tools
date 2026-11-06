@@ -19,6 +19,7 @@ import { useNasView } from "@/composables/useNasHome";
 import { formatShortDateTime } from "@/utils/format";
 import {
   NAS_LOCAL_ID,
+  nasFacetReason,
   nasHomeOptions,
   nasKindIcon,
   nasKindLabel,
@@ -59,6 +60,11 @@ function kindText(s: NasSource): string {
 /** 「读到的主机」按 · 分成几段，放得下时一段不从中间折行（版本号与型号里的 - 不当成断点） */
 function summaryParts(s: NasSource): string[] {
   return nasSourceSummary(s).split(" · ");
+}
+
+/** 连上了但读不到主机信息时（群晖的账号不在管理员组）的原因：「读到的主机」写它，不写「还没有读到数据」 */
+function hostMissing(s: NasSource): string {
+  return nasSourceSummary(s) ? "" : nasFacetReason(s.snapshot, "system");
 }
 
 function addressText(s: NasSource): string {
@@ -193,7 +199,7 @@ const kindsText = computed(() => {
   const names = kinds.value.map((k) => (k.experimental ? `${k.label}（实验性）` : k.label));
   const text = `能接入：${names.join("、")}。`;
   return kinds.value.some((k) => k.experimental)
-    ? `${text}实验性的还没在足够多的真机上验证过，读到的数据可能不全。`
+    ? `${text}实验性的还没在真机上验证过，读到的数据可能不全。`
     : text;
 });
 
@@ -298,7 +304,9 @@ async function remove(s: NasSource) {
                   ><span class="nm-summary__part">{{ part }}</span></template
                 >
               </span>
-              <span v-else class="nm-sub">还没有读到数据</span>
+              <span v-else class="nm-sub" :data-testid="`nm-host-${row.id}`">{{
+                hostMissing(row) || "还没有读到数据"
+              }}</span>
             </template>
           </el-table-column>
           <el-table-column label="状态" min-width="240">
@@ -375,6 +383,9 @@ async function remove(s: NasSource) {
                   ><template v-if="i"> · </template
                   ><span class="nm-summary__part">{{ part }}</span></template
                 >
+              </div>
+              <div v-else-if="hostMissing(s)" class="nm-sub" :data-testid="`nm-host-${s.id}`">
+                {{ hostMissing(s) }}
               </div>
               <div class="nm-detail" :class="{ 'is-dang': nasProblem(s.state) }">
                 {{ stateDetail(s) }}

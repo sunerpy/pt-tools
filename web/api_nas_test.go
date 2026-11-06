@@ -442,8 +442,9 @@ func TestNASAPI_TrustCertificateThenSave(t *testing.T) {
 	assert.Equal(t, []nasKindView{
 		{Name: fakeNASKind, Label: "假 NAS", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
 		{Name: nas.KindGlances, Label: "Glances", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
+		{Name: nas.KindSynology, Label: "群晖", Experimental: true, Username: "required", Secret: "required", Plain: "without_credentials"},
 		{Name: nas.KindTrueNAS, Label: "TrueNAS", Username: "none", Secret: "required", Plain: "never"},
-	}, view.Kinds, "按名字排：测试登记的假类型、Glances 与 TrueNAS")
+	}, view.Kinds, "按名字排：测试登记的假类型、Glances、群晖与 TrueNAS")
 
 	w = e.do(http.MethodGet, "/api/nas/sources/"+idOf(got.ID), nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -936,7 +937,9 @@ func TestNASTestResultView(t *testing.T) {
 	v := nasTestResultView(nil, fmt.Errorf("登录 hunter22 失败 password=abc"), "hunter22", "abc")
 	assert.Equal(t, nasTestView{Status: nasTestError, Message: "登录 *** 失败 password=***"}, v)
 	v = nasTestResultView(nil, &nas.AuthError{Reason: "验证码 654321 过期了", OTP: true}, "pw", "654321")
-	assert.Equal(t, nasTestView{Status: nasTestOTP, Message: "认证失败：验证码 *** 过期了"}, v)
+	assert.Equal(t, nasTestView{Status: nasTestOTP, Message: "验证码 *** 过期了"}, v)
+	v = nasTestResultView(nil, &nas.AuthError{OTP: true})
+	assert.Equal(t, nasTestView{Status: nasTestOTP, Message: nas.ErrAuth.Error()}, v, "没有原因时写认证失败")
 	v = nasTestResultView(nil, &nas.CertError{Changed: true, Cert: nas.CertInfo{SHA256: "ab"}})
 	assert.Equal(t, nasTestCertificate, v.Status)
 	assert.Equal(t, nas.ErrCertChanged.Error(), v.Message)

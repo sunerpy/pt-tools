@@ -24,7 +24,7 @@ import PtDataState from "@/components/ui/PtDataState.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { nasKindGuide, nasKindLabel, nasUrlPlaceholder } from "@/utils/nas";
 import { ElMessage } from "element-plus";
-import { computed, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -64,6 +64,8 @@ const pending = ref("");
 const otp = ref("");
 /** 请求本身失败的原因（400、429 等）：写在表单下面 */
 const problem = ref("");
+/** 测试结果的末尾（测试以后滚到它那里） */
+const resultsEnd = ref<HTMLElement | null>(null);
 /** 这次在弹窗里信任的证书：属于哪个类型与地址 */
 const trusted = ref<{ target: string; sha256: string } | null>(null);
 /** 点了「不再信任」：保存的指纹不再用 */
@@ -165,7 +167,10 @@ const urlTip = computed(() => {
     case "never":
       return "只收 https:// 地址，只写协议、主机和端口，例如 https://192.168.1.10";
     case "without_credentials":
-      return "写 https:// 地址，只写协议、主机和端口；没设用户名密码时也可以用 http://";
+      // 用户名必填的类型（群晖）总要发账号密码：和 with_ack 一样要先确认
+      if (kind.value?.username !== "required")
+        return "写 https:// 地址，只写协议、主机和端口；没设用户名密码时也可以用 http://";
+      return "写 https:// 地址，只写协议、主机和端口；用 http:// 要先确认明文风险";
     case "with_ack":
       return "写 https:// 地址，只写协议、主机和端口；用 http:// 要先确认明文风险";
     default:
@@ -300,18 +305,29 @@ async function test(extra: { trust?: string; otp?: string } = {}) {
   if (needsAck.value && form.insecure_ack) input.insecure_ack = true;
   testing.value = true;
   problem.value = "";
+  void showResults();
   try {
     const res = await nasApi.test(input);
     result.value = res;
     pending.value = res.status === "ok" ? (res.pending ?? "") : "";
     if (res.status !== "otp_required") otp.value = "";
   } catch (e) {
-    result.value = null;
-    pending.value = "";
+    // 提交验证码时请求本身失败（多半是 10 秒内测过、被限速）：验证码框和填的验证码留着，过几秒再点「提交验证码」
+    if (!extra.otp) {
+      result.value = null;
+      pending.value = "";
+    }
     problem.value = errText(e, "测试失败");
   } finally {
     testing.value = false;
+    void showResults();
   }
+}
+
+/** 结果写在表单最下面：内容长时（群晖的准备步骤有四步）对话框里滚到结果那里 */
+async function showResults() {
+  await nextTick();
+  resultsEnd.value?.scrollIntoView?.({ block: "nearest" });
 }
 
 /** 信任这张证书：记下指纹（保存时钉住），带着它再测一次（这次才会发出凭据） */
@@ -450,7 +466,7 @@ function expired(cert: NasCertInfo): boolean {
           这个版本不认「{{ form.kind }}」这种来源，只能删除。
         </div>
         <div v-else-if="kind?.experimental" class="field-tip" data-testid="ns-experimental">
-          实验性：还没在足够多的真机上验证过，读到的数据可能不全；连不上时看来源列表里写的原因。
+          实验性：还没在真机上验证过，读到的数据可能不全；连不上时看来源列表里写的原因。
         </div>
       </el-form-item>
 
@@ -476,7 +492,7 @@ function expired(cert: NasCertInfo): boolean {
             autocomplete="off"
             data-testid="ns-url"
             @update:model-value="onUrl" />
-          <div class="field-tip">{{ urlTip }}</div>
+          <div class="field-tip" data-testid="ns-url-tip">{{ urlTip }}</div>
           <div v-if="httpRefused" class="field-tip field-tip--dang" data-testid="ns-http-refused">
             {{ kind?.label }} 只收 https:// 地址。
           </div>
@@ -663,6 +679,8 @@ function expired(cert: NasCertInfo): boolean {
           <PtIcon name="circle-x" :size="14" class="pt-note__icon" />
           <span>{{ problem }}</span>
         </div>
+        <!-- 结果的末尾：测试以后滚到这里 -->
+        <div ref="resultsEnd" data-testid="ns-results-end" />
       </template>
     </el-form>
 

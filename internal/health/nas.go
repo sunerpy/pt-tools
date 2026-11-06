@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sunerpy/pt-tools/internal/nas"
 )
@@ -180,7 +181,7 @@ func nasSnapshotProblems(s *nas.Snapshot, label string) []nasProblem {
 		if len(bad) > 0 {
 			out = append(out, nasProblem{
 				StatusFail, "存储池不健康：" + strings.Join(bad, "、"),
-				"在 " + label + " 的存储页里看是哪块盘出了问题；换盘或修复以后这里会恢复",
+				"在" + nasInText(label) + "的存储页里看是哪块盘出了问题；换盘或修复以后这里会恢复",
 			})
 		}
 	}
@@ -199,7 +200,7 @@ func nasSnapshotProblems(s *nas.Snapshot, label string) []nasProblem {
 		if n > 0 {
 			out = append(out, nasProblem{
 				StatusWarn, fmt.Sprintf("%d 条严重告警，最新一条：%s", n, latest.Title),
-				"在 " + label + " 的告警里看详情并处理；处理好或在那里关掉以后这里不再提醒",
+				"在" + nasInText(label) + "的告警里看详情并处理；处理好或在那里关掉以后这里不再提醒",
 			})
 		}
 	}
@@ -218,6 +219,22 @@ func nasSnapshotProblems(s *nas.Snapshot, label string) []nasProblem {
 		}
 	}
 	return out
+}
+
+// nasInText 是嵌进中文句子里的来源类型名：拉丁字母开头或结尾的（TrueNAS、Glances）在那一边留空格，中文的（群晖、飞牛）不留。
+func nasInText(label string) string {
+	if label == "" {
+		return ""
+	}
+	first, _ := utf8.DecodeRuneInString(label)
+	last, _ := utf8.DecodeLastRuneInString(label)
+	if first < utf8.RuneSelf {
+		label = " " + label
+	}
+	if last < utf8.RuneSelf {
+		label += " "
+	}
+	return label
 }
 
 // nasHotLimit 是这类硬盘到多少度要提醒。

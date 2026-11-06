@@ -1,6 +1,6 @@
 # NAS monitoring <Badge type="tip" text="1.0 preview" />
 
-System → NAS monitoring (系统 → NAS 监控) decides where the [NAS overview](home-and-health.md#nas-overview) on the home page gets its data: the host pt-tools runs on (the local source) and any NAS you connect (for now [TrueNAS](#truenas) and [Glances](#glances)). pt-tools reads these sources in the background and keeps what it reads in memory; the home page and this page show that data, so opening them does not connect to anything again.
+System → NAS monitoring (系统 → NAS 监控) decides where the [NAS overview](home-and-health.md#nas-overview) on the home page gets its data: the host pt-tools runs on (the local source) and any NAS you connect (for now [TrueNAS](#truenas), [Glances](#glances) and, experimentally, [Synology](#synology)). pt-tools reads these sources in the background and keeps what it reads in memory; the home page and this page show that data, so opening them does not connect to anything again.
 
 ## The local source
 
@@ -38,7 +38,7 @@ On the first connection it fills the home page bars with the last 30 minutes of 
 
 ## Glances
 
-[Glances](https://github.com/nicolargo/glances) is a general-purpose system monitor. On a NAS that runs Docker, such as Synology, fnOS, Unraid or OMV, run Glances from its official image and pt-tools reads its REST interface (`http://<address>:61208/api/4/…`). It connects Glances 4 and was verified on 4.5.8; Glances 5 moved its interface to `/api/5` and is not supported yet, which Test connection says. For TrueNAS, use the [TrueNAS](#truenas) source above, which reads more.
+[Glances](https://github.com/nicolargo/glances) is a general-purpose system monitor. On a NAS that runs Docker, such as Synology, fnOS, Unraid or OMV, run Glances from its official image and pt-tools reads its REST interface (`http://<address>:61208/api/4/…`). It connects Glances 4 and was verified on 4.5.8; Glances 5 moved its interface to `/api/5` and is not supported yet, which Test connection says. For TrueNAS, use the [TrueNAS](#truenas) source above, which reads more; a Synology NAS can also use the experimental [Synology](#synology) source below, which reads DSM directly.
 
 It reads:
 
@@ -99,16 +99,51 @@ Glances's raid plugin is off by default. To watch software RAID (mdadm) arrays:
 
 An array that is not running, or that has fewer disks in use than it should (degraded), becomes a critical alert on the home page and in the system check; RAID 0 has no redundancy and is never degraded. With the plugin on but no arrays, the alerts block says `Glances 没有发现软 RAID（mdadm）阵列…` (Glances found no software RAID arrays). RAID built into ZFS or Btrfs is not covered here.
 
+## Synology <Badge type="warning" text="experimental" />
+
+Experimental: it connects to the Web API of Synology DSM and has been tested only against a fake service written from the interface format, not on a real device, so some data may be missing; when it cannot connect, the [source list](#the-source-list) says why. A Synology NAS can also run [Glances](#glances).
+
+pt-tools logs in to the DSM Web API (`<address>/webapi/`) with a DSM account: it first looks up the path and version of each interface, then logs in for a session and sends that session with every later request; when the session expires or is taken over, it logs in once more. The account, password and session go in the request body, so they stay out of the access logs of DSM and any reverse proxy. The requests and responses follow the format recorded by [py-synologydsm-api](https://github.com/mib1185/py-synologydsm-api), which the Synology integration of Home Assistant uses, and by the Synology integration of [Homarr](https://github.com/homarr-labs/homarr). It reads:
+
+- Host: model (for example DS920+), DSM version, CPU cores and uptime; DSM gives no host name here, and serial numbers are not read
+- CPU usage (user, system and other added up) and load (DSM reports the load multiplied by 100, and pt-tools divides it back), and the system temperature (the one in DSM's Info Center, shown in the CPU card)
+- Memory: total and used, with used taken from the percentage in DSM's Resource Monitor
+- Network: the combined receive and send speed DSM adds up over its interfaces (`total`)
+- Storage: each volume (`/volume1`, `/volume2`…) with its state, health and capacity, the used and total size DSM reports. A state other than normal, degraded or crashed (for example repairing) is shown as DSM writes it, with no health
+- Disks: name, model, whether it is a hard disk, SSD or NVMe, size, temperature and the volume it belongs to; serial numbers are not read. When the Storage Manager data cannot be read, volumes fall back to the capacity in the system information and the disks part says why
+- Alerts and apps: DSM's notifications and packages (including Container Manager) are not read yet, and these two blocks on the home page say why
+
+For a Synology source, the NAS group of the [system check](home-and-health.md#system-check) looks at whether it is connected, whether the volumes are healthy and the disk temperatures; pt-tools does not read DSM's notifications, so the alerts part is not checked.
+
+### Preparing an account
+
+1. In DSM, go to Control Panel → User & Group and click Create to create a user only for pt-tools, with a strong password.
+2. Under User Groups, tick `administrators`. DSM lets only accounts in the administrators group read the system information and the Resource Monitor (the [Homepage documentation for its Synology widget](https://gethomepage.dev/widgets/services/diskstation/) asks for the same); with an ordinary account, Test connection says `这个账号读不到系统信息：DSM 只让管理员组（administrators）的账号读…` (this account cannot read the system information: DSM allows only the administrators group).
+3. Under Permissions, tick No Access at the top so the account cannot open any shared folder; under Applications, tick Deny in the header, then tick Allow for the DSM row only, or By IP to allow only the IP address of the host pt-tools runs on.
+4. In pt-tools, under Add source (添加来源), choose 群晖 (Synology), enter the address of the DSM web UI and the account and password, click Test connection (测试连接) and save when it connects. DSM listens on port 5001 for `https://` and 5000 for `http://` by default: an `http://` address without a port uses 5000; an `https://` address without a port uses 443 (the address of a reverse proxy), so add `:5001` to connect to DSM directly. DSM uses a self-signed certificate by default; trust it once the fingerprint matches.
+
+- With an `http://` address, the account and password cross the local network unencrypted, and you must tick 我知道账号密码会以明文经过局域网，可能被截获 (I know the account and password cross the local network unencrypted and may be intercepted). When DSM redirects HTTP to HTTPS (a setting under Control Panel → Login Portal), Test connection says `…DSM 开了 HTTPS 跳转，地址改成 https://（默认端口 5001）` (DSM redirects to HTTPS; change the address to https://, port 5001 by default).
+- pt-tools only reads this data and changes no DSM settings.
+- When login fails (wrong user name or password, a disabled account, no permission to sign in to DSM, an expired password and so on), the source shows `登录失败` (login failed) with the reason DSM gave, and it is not retried automatically: DSM's auto block bans an IP address after failed logins. When it has been banned, the reason is `登录失败太多次，DSM 封锁了 pt-tools 所在的 IP…` (too many failed logins; DSM blocked the IP of pt-tools), and you lift the ban under Control Panel → Security → Protection in DSM.
+
+### Two-factor authentication
+
+When the account uses two-factor authentication, the first Test connection asks for a code: enter the 6-digit code from the authenticator app and test again. Once connected, DSM gives pt-tools a device token (it signs in with the device name `pt-tools`), which is stored encrypted when you save; later logins send it and need no code.
+
+- A wrong or expired code says `验证码不对或过期了，重新输入` (the code is wrong or expired; enter it again); enter a new one.
+- When pt-tools is removed from the trusted devices on DSM (or two-factor authentication was turned on for the account after you saved the source), the source shows `登录失败` (login failed) with a reason saying DSM wants a code, and it stops signing in: edit the source, enter a code during Test connection, and save.
+- After changing the address or the account, the old device token is no longer used and you enter a code again.
+
 ## The source list
 
 One line per source (a card on a phone):
 
-| Column  | What it shows                                                                                                                                                                         |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source  | Name, kind and address (`pt-tools 所在的主机`, the host pt-tools runs on, for the local source); experimental kinds are tagged `实验性`, `http://` addresses `明文连接` (unencrypted) |
-| Host    | Host name, CPU model and cores, total memory, platform and version; `还没有读到数据` (nothing read yet) before the first read                                                         |
-| State   | The state and a line explaining it, plus when data was last read when there is a problem                                                                                              |
-| Actions | The switch of the local source; Reconnect (重新连接); Edit (编辑) and Delete (删除) for connected sources                                                                             |
+| Column  | What it shows                                                                                                                                                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source  | Name, kind and address (`pt-tools 所在的主机`, the host pt-tools runs on, for the local source); experimental kinds are tagged `实验性`, `http://` addresses `明文连接` (unencrypted)                                                                         |
+| Host    | Host name, CPU model and cores, total memory, platform and version; `还没有读到数据` (nothing read yet) before the first read; the reason when the source is connected but cannot read host information (a Synology account outside the administrators group) |
+| State   | The state and a line explaining it, plus when data was last read when there is a problem                                                                                                                                                                      |
+| Actions | The switch of the local source; Reconnect (重新连接); Edit (编辑) and Delete (删除) for connected sources                                                                                                                                                     |
 
 | State                                  | Line below                                                                                                                            |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -123,7 +158,7 @@ One line per source (a card on a phone):
 
 When a source cannot be reached it tries again after 30 seconds, then 1, 2 and 5 minutes. Login failures and certificate problems are not retried automatically, so the NAS does not lock the account; it tries again after you change the settings or click Reconnect. Reconnect tries once right away instead of waiting, and the result appears in a message.
 
-Add source (添加来源) at the top right of the list shows the fields each kind needs, for TrueNAS how to prepare a read-only API key (see [TrueNAS](#truenas)), and for Glances how to run it on the NAS (see [Glances](#glances)); the notes below the list say which kinds can be connected.
+Add source (添加来源) at the top right of the list shows the fields each kind needs, for TrueNAS how to prepare a read-only API key (see [TrueNAS](#truenas)), for Glances how to run it on the NAS (see [Glances](#glances)), and for Synology how to create an account for pt-tools (see [Synology](#synology)); experimental kinds carry `（实验性）` (experimental) in the list of kinds, and the notes below the list say which kinds can be connected.
 
 ## What the home page shows
 

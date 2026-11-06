@@ -110,6 +110,14 @@ const KINDS: NasKind[] = [
     secret: "required",
     plain: "with_ack",
   },
+  {
+    name: "synology",
+    label: "群晖",
+    experimental: true,
+    username: "required",
+    secret: "required",
+    plain: "without_credentials",
+  },
 ];
 
 const SHA = "ab".repeat(32);
@@ -185,6 +193,16 @@ describe("添加来源", () => {
     expect(q("ns-experimental")).not.toBeNull();
     expect(q("ns-guide"), "没写准备步骤的类型不显示").toBeNull();
     expect(inputOf("ns-url").placeholder).toBe("https://192.168.1.10");
+
+    await pick("ns-kind", "群晖（实验性）");
+    expect(text("ns-experimental")).toContain("还没在真机上验证过");
+    expect(text("ns-guide"), "群晖写怎么建管理员组里的专用账号").toContain("administrators");
+    expect(document.querySelectorAll("[data-testid=ns-guide] li")).toHaveLength(4);
+    expect(inputOf("ns-url").placeholder, "群晖的地址示例带上 DSM 的 https 端口").toBe(
+      "https://192.168.1.10:5001",
+    );
+    expect(q("ns-username"), "群晖要填用户名").not.toBeNull();
+    expect(inputOf("ns-secret").placeholder).toBe("必填");
   });
 
   it("默认选第一个不是实验性的类型（服务端按名字排，fnos 排在最前）", async () => {
@@ -319,6 +337,29 @@ describe("添加来源", () => {
     });
   });
 
+  it("提交验证码被限速（429）：验证码框与填的验证码留着，写原因，过几秒再提交", async () => {
+    mountDialog();
+    await flush();
+    await pick("ns-kind", "飞牛（实验性）");
+    await type("ns-url", "https://192.168.1.3:5667");
+    await type("ns-username", "admin");
+    await type("ns-secret", "pw");
+    api.test.mockResolvedValueOnce({ status: "otp_required", message: "账号开了两步验证" });
+    await click("ns-test");
+    await vi.waitFor(() => expect(q("ns-otp")).not.toBeNull());
+    await type("ns-otp-input", "123456");
+    api.test.mockRejectedValueOnce(new Error("刚测过，过几秒再试\n"));
+    await click("ns-otp-submit");
+    await vi.waitFor(() => expect(text("ns-problem")).toBe("刚测过，过几秒再试"));
+    expect(q("ns-otp"), "验证码框还在").not.toBeNull();
+    expect(inputOf("ns-otp-input").value).toBe("123456");
+    api.test.mockResolvedValueOnce({ status: "ok", pending: "p-otp" });
+    await click("ns-otp-submit");
+    await vi.waitFor(() => expect(q("ns-ok")).not.toBeNull());
+    expect(q("ns-problem"), "再提交以后原因清掉").toBeNull();
+    expect(api.test.mock.calls[2]![0].otp).toBe("123456");
+  });
+
   it("登录失败、连不上与请求本身失败（429）写出原因", async () => {
     mountDialog();
     await flush();
@@ -387,6 +428,48 @@ describe("添加来源", () => {
     await click("ns-save");
     await vi.waitFor(() => expect(api.create).toHaveBeenCalled());
     expect(api.create.mock.calls[0]![0].insecure_ack).toBe(true);
+  });
+
+  it("地址下面的提示：群晖总要账号密码，写用 http:// 要先确认明文风险", async () => {
+    mountDialog();
+    await flush();
+    await pick("ns-kind", "Glances");
+    expect(text("ns-url-tip")).toBe(
+      "写 https:// 地址，只写协议、主机和端口；没设用户名密码时也可以用 http://",
+    );
+    await pick("ns-kind", "群晖（实验性）");
+    expect(text("ns-url-tip")).toBe(
+      "写 https:// 地址，只写协议、主机和端口；用 http:// 要先确认明文风险",
+    );
+    await pick("ns-kind", "TrueNAS");
+    expect(text("ns-url-tip")).toBe(
+      "只收 https:// 地址，只写协议、主机和端口，例如 https://192.168.1.10",
+    );
+  });
+
+  it("测试连接以后滚到结果那里（准备步骤长时结果在表单最下面）", async () => {
+    const scrolled: Element[] = [];
+    const spy = vi.fn(function (this: Element, _arg?: boolean | ScrollIntoViewOptions) {
+      scrolled.push(this);
+    });
+    const orig = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
+    Element.prototype.scrollIntoView = spy;
+    try {
+      mountDialog();
+      await flush();
+      await pick("ns-kind", "群晖（实验性）");
+      await type("ns-url", "https://192.168.1.5:5001");
+      await type("ns-username", "ptmon");
+      await type("ns-secret", "pw");
+      api.test.mockResolvedValueOnce({ status: "otp_required", message: "账号开了两步验证" });
+      await click("ns-test");
+      await vi.waitFor(() => expect(q("ns-otp")).not.toBeNull());
+      await vi.waitFor(() => expect(scrolled.at(-1)).toBe(q("ns-results-end")));
+      expect(spy.mock.calls.at(-1)![0]).toEqual({ block: "nearest" });
+    } finally {
+      if (orig) Object.defineProperty(Element.prototype, "scrollIntoView", orig);
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it("名字与地址空着时不发请求，写明要填什么", async () => {
@@ -541,10 +624,10 @@ describe("编辑来源", () => {
     expect(q("ns-save")).toBeNull();
     view?.unmount();
 
-    api.getSource.mockResolvedValueOnce(edit({ kind: "synology" }));
+    api.getSource.mockResolvedValueOnce(edit({ kind: "qnap" }));
     mountDialog(7);
     await vi.waitFor(() => expect(q("ns-kind-missing")).not.toBeNull());
-    expect(text("ns-kind-missing")).toBe("这个版本不认「synology」这种来源，只能删除。");
+    expect(text("ns-kind-missing")).toBe("这个版本不认「qnap」这种来源，只能删除。");
     expect(q("ns-save")).toBeNull();
     expect(q("ns-test")).toBeNull();
   });
