@@ -4712,7 +4712,8 @@ if (doHome) {
     }
     failures.push({
       route: `/home${where ? `（${where.replace("@", "")}）` : ""}`,
-      board: where === "@375" ? "07 首页·手机" : where === "@check" ? "系统体检" : "02 首页",
+      board:
+        where === "@375" ? "07 首页·手机" : where.startsWith("@check") ? "系统体检" : "02 首页",
       key,
       msg,
     });
@@ -5181,7 +5182,28 @@ if (doHome) {
   }
   await ev(`localStorage.removeItem('pt-fixture-home-empty')`).catch(() => {});
 
-  /* ---- 系统体检（画板没有）：1440 与 375 不溢出，十组按顺序、每项都在，「有问题的」只留提醒与失败 ---- */
+  /*
+   * ---- 系统体检（画板没有，照预览 system-check.html，首页 NAS 概览 H1）：1440 与 375 ----
+   * 总览卡一张；「需要处理」按失败、提醒排，「去处理」去对应页面；「全部检查项」十组按顺序、每项都在；
+   * 几何（问题卡网格、分组卡瀑布流、手机环形图 92 与 2×2 计数块）；文字换行不裁切；两个筛选；
+   * 动效：正常时卡片有动画与过渡，系统要求减少动态效果时 animationDuration 与 transitionDuration 都是 0s。
+   */
+  const SC_PROBS = "downloader:2,site:pttime,library:1,backup";
+  const SC_GO = "#/downloaders,#/sites/pttime,#/media/library,#/global";
+  const scMotion = (reduced) => `(() => {
+    const durs = (v) => v.split(',').map((s) => parseFloat(s) * (s.trim().endsWith('ms') ? 1 : 1000));
+    const cards = [...document.querySelectorAll('.sc-hero, .sc-prob, .sc-grp')];
+    const bad = [];
+    for (const el of cards) {
+      const cs = getComputedStyle(el);
+      const a = durs(cs.animationDuration);
+      const t = el.classList.contains('sc-hero') ? [] : durs(cs.transitionDuration);
+      const want = ${reduced} ? (d) => d === 0 : (d) => d > 0;
+      if (!a.every(want) || !t.every(want))
+        bad.push((el.dataset.testid || el.className) + ' ' + cs.animationDuration + ' / ' + cs.transitionDuration);
+    }
+    return { cards: cards.length, bad };
+  })()`;
   for (const [where, metrics] of [
     ["@check", { width: 1440, height: 1024, mobile: false }],
     ["@check375", { width: 375, height: 812, mobile: true }],
@@ -5192,48 +5214,170 @@ if (doHome) {
       { deviceScaleFactor: 1, ...metrics },
       sessionId,
     );
-    await goto(`${BASE}/#/system/check`);
-    await cdp.send("Page.reload", {}, sessionId);
-    await waitReady();
-    let ready = false;
-    for (let i = 0; i < 40 && !ready; i++) {
-      ready =
-        (await ev(`document.querySelectorAll('.sc-item').length > 0`).catch(() => false)) === true;
-      if (!ready) await sleep(250);
-    }
+    const loadCheck = async () => {
+      await goto(`${BASE}/#/system/check`);
+      await cdp.send("Page.reload", {}, sessionId);
+      await waitReady();
+      for (let i = 0; i < 40; i++) {
+        const ok = await ev(
+          `document.querySelectorAll('[data-testid^="sc-item-"]').length > 0`,
+        ).catch(() => false);
+        if (ok === true) break;
+        await sleep(250);
+      }
+      /* 卡片依次出现：等动画都放完（最多 3 秒）再量与截图 */
+      await ev(
+        `Promise.race([Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]).then(() => true)`,
+      ).catch(() => {});
+      await sleep(100);
+      return (
+        (await ev(`document.querySelectorAll('[data-testid^="sc-item-"]').length`).catch(() => 0)) >
+        0
+      );
+    };
     const fail = (k, msg) => homeFail(k, msg, where);
-    if (!ready) {
+    if (!(await loadCheck())) {
       fail("load", "系统体检没列出任何一项");
       continue;
     }
-    await sleep(400);
     await shotFull(`system-${where.slice(1)}`, metrics);
+    const runSel =
+      where === "@check"
+        ? '#pt-head-acts [data-testid="sc-run"]'
+        : '.sc-mbar [data-testid="sc-run"]';
     const got = await ev(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const box = (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+      };
       const inner = document.querySelector('.pt-shell__inner');
-      const groups = [...document.querySelectorAll('[data-testid^="sc-group-"]')].map((g) => g.dataset.testid.slice(9));
-      const items = document.querySelectorAll('.sc-item').length;
-      const hints = document.querySelectorAll('.sc-item__hint').length;
-      const run = Boolean(document.querySelector(${JSON.stringify(where === "@check" ? '#pt-head-acts [data-testid="sc-run"]' : '.sc-mbar [data-testid="sc-run"]')}));
-      const clipped = [...document.querySelectorAll('.sc-item__title, .sc-item__detail, .sc-item__hint')]
-        .filter((el) => el.scrollWidth > el.clientWidth + 1).length;
-      const over = Math.max(document.documentElement.scrollWidth - innerWidth, inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0);
-      const radio = [...document.querySelectorAll('.el-radio-button')].find((l) => (l.textContent ?? '').includes('有问题的'));
-      radio?.querySelector('input')?.click();
-      await wait(300);
-      const left = [...document.querySelectorAll('.sc-item')].map((el) => [...el.classList].find((c) => c.startsWith('st-')));
-      return { groups: groups.join(','), items, hints, run, clipped, over, left: left.join(',') };
+      /* 内容区按内容盒量：桌面 .pt-cards 有内边距，手机没有 */
+      const pageEl = document.querySelector('[data-testid="system-check"]');
+      const pcs = getComputedStyle(pageEl);
+      const pb = box(pageEl);
+      const page = {
+        x: pb.x + Math.round(parseFloat(pcs.paddingLeft)),
+        w: pb.w - Math.round(parseFloat(pcs.paddingLeft) + parseFloat(pcs.paddingRight)),
+      };
+      const heroes = [...document.querySelectorAll('[data-testid="sc-hero"]')];
+      const probs = [...document.querySelectorAll('.sc-prob')];
+      const groups = [...document.querySelectorAll('.sc-grp')];
+      const statuses = () => [...document.querySelectorAll('[data-testid^="sc-item-"]')]
+        .map((el) => [...el.classList].find((c) => c.startsWith('st-'))).join(',');
+      const clipped = [...document.querySelectorAll('.sc-prob__title, .sc-prob__detail, .sc-prob__hint, .sc-row__title, .sc-row__detail, .sc-prob, .sc-grp')]
+        .filter((el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
+        .map((el) => el.className.split(' ')[0]);
+      const over = Math.max(document.documentElement.scrollWidth - innerWidth,
+        inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0);
+      const ring = document.querySelector('.sc-ring');
+      const strip = document.querySelector('[data-testid="sc-strip"]');
+      const out = {
+        page,
+        heroes: heroes.length,
+        hero: heroes[0] ? box(heroes[0]) : null,
+        ringW: ring ? Math.round(ring.getBoundingClientRect().width) : 0,
+        tileYs: [...new Set([...document.querySelectorAll('[data-testid^="sc-tile-"]')].map((el) => box(el).y))].length,
+        stripOver: strip ? strip.scrollWidth - strip.clientWidth : 0,
+        probs: probs.map((el) => el.dataset.testid.slice(8)).join(','),
+        probBoxes: probs.map(box),
+        go: probs.map((el) => el.querySelector('[data-testid="sc-prob-go"]')?.getAttribute('href') ?? '').join(','),
+        hints: document.querySelectorAll('.sc-prob__hint').length,
+        groups: groups.map((el) => el.dataset.testid.slice(9)).join(','),
+        groupBoxes: groups.map(box),
+        items: document.querySelectorAll('[data-testid^="sc-item-"]').length,
+        run: Boolean(document.querySelector(${JSON.stringify(runSel)})),
+        clipped,
+        over,
+      };
+      const sw = document.querySelector('[data-testid="sc-filter"]');
+      sw?.click();
+      await wait(400);
+      out.onlyProblems = statuses();
+      sw?.click();
+      await wait(400);
+      document.querySelector('[data-testid="sc-tile-fail"]')?.click();
+      await wait(400);
+      out.onlyFail = statuses();
+      out.chip = (document.querySelector('[data-testid="sc-status-chip"]')?.textContent ?? '').trim();
+      document.querySelector('[data-testid="sc-tile-fail"]')?.click();
+      await wait(400);
+      out.restored = document.querySelectorAll('[data-testid^="sc-item-"]').length;
+      return out;
     })()`);
+    if (got.heroes !== 1) fail("hero", `总览卡有 ${got.heroes} 张`);
+    else if (Math.abs(got.hero.w - got.page.w) > 1)
+      fail("hero.w", `总览卡宽 ${got.hero.w}，内容区宽 ${got.page.w}（应满宽）`);
+    if (got.ringW !== (metrics.mobile ? 92 : 148))
+      fail("ring", `环形图宽 ${got.ringW}，应为 ${metrics.mobile ? 92 : 148}`);
+    if (got.tileYs !== (metrics.mobile ? 2 : 1))
+      fail("tiles", `四个计数块排成 ${got.tileYs} 行（桌面一行，手机 2×2）`);
+    if (metrics.mobile && got.stripOver <= 0)
+      fail("strip", "手机上各组状态条没有横向滚动（十组放不下一行）");
+    if (got.probs !== SC_PROBS) fail("probs", `问题卡依次是「${got.probs}」，应为「${SC_PROBS}」`);
+    if (got.go !== SC_GO) fail("go", `「去处理」去的是「${got.go}」，应为「${SC_GO}」`);
+    if (got.hints !== 4)
+      fail("hints", `问题卡上「怎么修」有 ${got.hints} 条，假数据有问题的 4 项各一条`);
+    if (metrics.mobile) {
+      if (got.probBoxes.some((b) => Math.abs(b.w - got.page.w) > 1 || b.x !== got.probBoxes[0].x))
+        fail("probs.grid", "手机上问题卡不是满宽一列");
+      if (got.groupBoxes.some((b) => Math.abs(b.w - got.page.w) > 1 || b.x !== got.groupBoxes[0].x))
+        fail("groups.grid", "手机上分组卡不是满宽一列");
+    } else {
+      const cols = Math.max(1, Math.floor((got.page.w + 12) / 352));
+      const first = got.probBoxes.slice(0, cols);
+      if (first.some((b) => b.y !== first[0].y))
+        fail("probs.grid", `问题卡第一行没有排满 ${cols} 列`);
+      if (got.probBoxes.some((b) => b.w < 340 || Math.abs(b.w - got.probBoxes[0].w) > 1))
+        fail(
+          "probs.w",
+          `问题卡宽 ${got.probBoxes.map((b) => b.w).join("/")}（应一样宽、不小于 340）`,
+        );
+      const lefts = new Set(got.groupBoxes.map((b) => b.x));
+      if (lefts.size < 2)
+        fail("groups.cols", `分组卡只排了 ${lefts.size} 列（瀑布流，桌面至少两列）`);
+      if (got.groupBoxes.some((b) => b.w < 300))
+        fail("groups.w", `分组卡最窄 ${Math.min(...got.groupBoxes.map((b) => b.w))}px`);
+    }
     if (got.groups !== "tmdb,sites,downloaders,servers,paths,libraries,disks,time,backup,secret")
       fail("groups", `分组是「${got.groups}」`);
     if (got.items !== 15) fail("items", `列了 ${got.items} 项，假数据 15 项`);
-    if (got.hints !== 4) fail("hints", `「怎么修」有 ${got.hints} 条，假数据有问题的 4 项各一条`);
-    if (!got.run) fail("run", "「立即体检」不在该在的地方（桌面在页头，手机在面板顶部）");
-    if (got.clipped > 0) fail("clipped", `有 ${got.clipped} 处说明被截断（应换行）`);
+    if (!got.run) fail("run", "「立即体检」不在该在的地方（桌面在页头，手机在总览卡里）");
+    if (got.clipped.length)
+      fail(
+        "clipped",
+        `有 ${got.clipped.length} 处文字被裁切（应换行）：${got.clipped.slice(0, 3).join("、")}`,
+      );
     if (got.over > 0) fail("overflow", `横向溢出 ${got.over}px`);
-    if (got.left !== "st-warn,st-fail,st-warn,st-warn")
-      fail("filter", `「有问题的」留下的是「${got.left}」`);
+    if (got.onlyProblems !== "st-warn,st-fail,st-warn,st-warn")
+      fail("filter", `「只看有问题的」留下的是「${got.onlyProblems}」`);
+    if (got.onlyFail !== "st-fail" || got.chip !== "只看失败")
+      fail("tile.filter", `点「失败」计数块留下「${got.onlyFail}」、标签「${got.chip}」`);
+    if (got.restored !== 15) fail("tile.reset", `再点一次计数块后列了 ${got.restored} 项`);
+    const normal = await ev(scMotion(false));
+    if (!normal.cards || normal.bad.length)
+      fail(
+        "motion",
+        `正常时有卡片没有动画或过渡：${normal.bad.slice(0, 2).join("；") || "没有卡片"}`,
+      );
     for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
+
+    /* 系统要求减少动态效果：重新打开页面，卡片上没有动画与过渡 */
+    await cdp.send(
+      "Emulation.setEmulatedMedia",
+      { features: [{ name: "prefers-reduced-motion", value: "reduce" }] },
+      sessionId,
+    );
+    if (await loadCheck()) {
+      const reduced = await ev(scMotion(true));
+      if (!reduced.cards || reduced.bad.length)
+        fail(
+          "motion.reduced",
+          `减少动态效果时还有动画或过渡：${reduced.bad.slice(0, 2).join("；") || "没有卡片"}`,
+        );
+      if (where === "@check") await shotFull("system-check-reduced", metrics);
+    } else fail("motion.reduced", "减少动态效果时系统体检没列出任何一项");
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] }, sessionId);
   }
   await cdp.send(
     "Emulation.setDeviceMetricsOverride",
