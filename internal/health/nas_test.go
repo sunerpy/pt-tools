@@ -22,7 +22,7 @@ func TestNASCheck_NoSources(t *testing.T) {
 	require.Len(t, got, 1, "本机来源不算")
 	assert.Equal(t, Item{
 		Key: "nas", Group: GroupNAS, Title: "NAS", Status: StatusSkip, Detail: "还没添加 NAS 来源",
-		Hint: "在「系统 → NAS 监控」里添加来源（能接入 TrueNAS），体检会看它的存储池、告警与硬盘温度",
+		Hint: "在「系统 → NAS 监控」里添加来源（能接入 Glances、TrueNAS），体检会看它的存储池、告警与硬盘温度",
 	}, got[0])
 
 	got = run([]nas.Status{{ID: "3", Name: "家里", Kind: nas.KindTrueNAS, Enabled: false, State: nas.StateDisabled}})
@@ -36,9 +36,10 @@ func TestNASCheck_NoSources(t *testing.T) {
 }
 
 func TestNASKindLabels(t *testing.T) {
-	assert.Equal(t, "（能接入 TrueNAS）", nasKindLabels())
+	assert.Equal(t, "（能接入 Glances、TrueNAS）", nasKindLabels())
 	assert.Equal(t, "TrueNAS", nasKindLabel(nas.KindTrueNAS))
-	assert.Equal(t, "glances", nasKindLabel("glances"), "这个版本不认的类型写原样")
+	assert.Equal(t, "Glances", nasKindLabel(nas.KindGlances))
+	assert.Equal(t, "synology", nasKindLabel("synology"), "这个版本不认的类型写原样")
 	assert.Equal(t, "NAS", nasKindLabel(""))
 }
 

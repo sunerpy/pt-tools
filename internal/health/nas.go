@@ -51,7 +51,7 @@ func NAS(list func() []nas.Status, now func() time.Time) Check {
 	}}
 }
 
-// nasKindLabels 是能接入的来源类型（「（能接入 TrueNAS、Glances）」）；一种都没有时为空。
+// nasKindLabels 是能接入的来源类型（按名字排，例如「（能接入 Glances、TrueNAS）」）；一种都没有时为空。
 func nasKindLabels() string {
 	var labels []string
 	for _, k := range nas.Kinds() {

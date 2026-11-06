@@ -1,0 +1,20 @@
+[
+  {
+    "label": "Composite",
+    "unit": "C",
+    "value": -273,
+    "warning": 69,
+    "critical": 69,
+    "type": "temperature_core",
+    "key": "label"
+  },
+  {
+    "label": "Composite 1",
+    "unit": "C",
+    "value": -273,
+    "warning": 69,
+    "critical": 69,
+    "type": "temperature_core",
+    "key": "label"
+  }
+]
