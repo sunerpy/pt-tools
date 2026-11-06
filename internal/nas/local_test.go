@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 	"time"
@@ -116,7 +117,8 @@ func TestLocal_OldKernelAndNoSensors(t *testing.T) {
 	files["/proc/meminfo"] = "MemTotal: 4000 kB\nMemFree: 1000 kB\nBuffers: 500 kB\nCached: 500 kB\n"
 	files["/proc/cpuinfo"] = "processor\t: 0\nprocessor\t: 1\nHardware\t: BCM2835\nModel\t\t: Raspberry Pi 4 Model B Rev 1.4\n"
 	for p := range files {
-		if filepath.Dir(p) == "/sys/class/hwmon/hwmon1" {
+		// 键是斜杠路径：用 path.Dir，filepath.Dir 在 Windows 上会换成反斜杠、一个也删不掉
+		if path.Dir(p) == "/sys/class/hwmon/hwmon1" {
 			delete(files, p)
 		}
 	}
