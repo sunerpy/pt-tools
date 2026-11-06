@@ -10,8 +10,8 @@
 - [1.0 预览版新功能](guide/whats-new-1.0.md)：0.48.0 之后预览版加入的功能与重要修复。
 - [安装](guide/install.md)：Docker、Linux 与 Windows 的安装方式、环境变量和首次登录。
 - [快速开始](guide/quick-start.md)：添加下载器、站点和 RSS 订阅，确认第一次自动下载。
-- [首页与系统体检](guide/home-and-health.md)：打开网页先到的首页：NAS 概览、今天播出、待处理、继续观看、最近入库、这周还要播，以及下载器、存储与状态；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘、时间、备份与密钥，写明怎么修。
-- [NAS 监控](guide/nas-monitor.md)：首页 NAS 概览的数据从哪来：本机来源读 pt-tools 所在主机的 CPU、内存与负载，选首页显示哪个来源，各来源的状态与重试。
+- [首页与系统体检](guide/home-and-health.md)：打开网页先到的首页：NAS 概览、今天播出、待处理、继续观看、最近入库、这周还要播，以及下载器、存储与状态；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘、NAS、时间、备份与密钥，写明怎么修。
+- [NAS 监控](guide/nas-monitor.md)：首页 NAS 概览的数据从哪来：本机来源读 pt-tools 所在主机的 CPU、内存与负载，TrueNAS 用只读 API Key 读主机、存储池、硬盘、告警与应用，选首页显示哪个来源，各来源的状态与重试。
 - [配置说明](configuration.md)：环境变量、代理、全局设置、下载器、持久化、日志和备份。
 - [升级与备份](guide/upgrade.md)：各安装方式的升级、备份与恢复。
 - [Docker 运行示例](../examples/docker-run.md)、[Docker Compose 示例](../examples/docker-compose.yml)、[二进制运行示例](../examples/binary-run.md)。
