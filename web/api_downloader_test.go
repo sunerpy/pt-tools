@@ -1193,6 +1193,13 @@ func setupTestServer(t *testing.T) (*Server, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}
+	// :memory: 每个连接各是一份库：处理函数起的后台同步（go s.syncDownloaderManager()）没人等，
+	// 会晚到下一个测试里读库，连接池再开的第二个连接是空库，查询报错被当成 404（Windows CI 上见过）。只留一个连接。
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("failed to get sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 
 	// 迁移表
 	db.AutoMigrate(
