@@ -163,9 +163,15 @@ describe("添加来源", () => {
       "truenas_readonly_administrators",
     );
     expect(document.querySelectorAll("[data-testid=ns-guide] li")).toHaveLength(3);
+    expect(inputOf("ns-url").placeholder).toBe("https://192.168.1.10");
 
     await pick("ns-kind", "Glances");
-    expect(q("ns-guide"), "没写准备步骤的类型不显示").toBeNull();
+    expect(text("ns-guide"), "Glances 写怎么用 Docker 跑起来").toContain(
+      "nicolargo/glances:4.5.8-full",
+    );
+    expect(inputOf("ns-url").placeholder, "Glances 的地址示例带上默认端口").toBe(
+      "http://192.168.1.10:61208",
+    );
     expect(inputOf("ns-name").value).toBe("Glances");
     expect(q("ns-username")).not.toBeNull();
     expect(document.querySelector(".el-dialog")!.textContent).toContain("密码");
@@ -177,6 +183,16 @@ describe("添加来源", () => {
     await pick("ns-kind", "飞牛（实验性）");
     expect(inputOf("ns-name").value, "改过的名字不跟着换").toBe("书房的 NAS");
     expect(q("ns-experimental")).not.toBeNull();
+    expect(q("ns-guide"), "没写准备步骤的类型不显示").toBeNull();
+    expect(inputOf("ns-url").placeholder).toBe("https://192.168.1.10");
+  });
+
+  it("默认选第一个不是实验性的类型（服务端按名字排，fnos 排在最前）", async () => {
+    mountDialog(null, [KINDS[2]!, KINDS[1]!, KINDS[0]!]);
+    await flush();
+    expect(inputOf("ns-name").value).toBe("Glances");
+    expect(q("ns-experimental")).toBeNull();
+    expect(text("ns-guide")).toContain("nicolargo/glances:4.5.8-full");
   });
 
   it("测试连接带上填了的字段；连上以后保存带上 pending", async () => {

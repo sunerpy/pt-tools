@@ -881,6 +881,63 @@ describe("首页的 NAS 概览", () => {
     expect(q("hn-local-storage")).toBeNull();
   });
 
+  it("Glances 来源：存储池不写健康，硬盘只有温度，告警写从哪来，应用不写可更新几个", async () => {
+    const GLANCES: NasKind = {
+      name: "glances",
+      label: "Glances",
+      experimental: false,
+      username: "optional",
+      secret: "with_username",
+      plain: "without_credentials",
+    };
+    const src = truenas(
+      {
+        id: "2",
+        name: "书房的 NAS",
+        kind: "glances",
+        url: "http://127.0.0.1:61208",
+        has_secret: false,
+      },
+      {
+        system: {
+          hostname: "nas",
+          platform: "Debian GNU/Linux 12 (bookworm)",
+          version: "6.1.0-28-amd64",
+          model: "Intel(R) N100",
+          cores: 4,
+          uptime_seconds: 86400,
+        },
+        pools: [
+          {
+            name: "/volume1",
+            status: "",
+            size: 16.3 * TB,
+            used: 8.5 * TB,
+            free: 7.8 * TB,
+            disks: 0,
+          },
+        ],
+        disks: [{ name: "NVMe 1", model: "", kind: "nvme", size: 0, temp_c: 41 }],
+        alerts: [],
+        apps: { running: 4, total: 5, upgradable: 0, updates_unknown: true },
+        facets: {},
+      },
+    );
+    home.get.mockResolvedValue(data(withNas(src, [], { kinds: [TRUENAS, GLANCES] })));
+    await mount();
+    expect(text("hn-pools"), "读不到健康时不写「都健康」").not.toContain("都健康");
+    expect(text("hn-pool-0")).toContain("/volume1");
+    expect(text("hn-pool-0")).toContain("已用 8.5 TB · 共 16.3 TB");
+    expect(text("hn-disk-tile-0")).toContain("41°C");
+    expect(text("hn-disk-tile-0")).toContain("NVMe");
+    expect(text("hn-alerts"), "Glances 的告警是 pt-tools 按软 RAID 阵列算的").toContain(
+      "按软 RAID 阵列的状态",
+    );
+    expect(text("hn-alerts")).not.toContain("里没关掉的");
+    expect(text("hn-alerts")).toContain("没有告警");
+    expect(text("hn-apps")).toBe("应用 运行中 4 个 · 共 5 个");
+  });
+
   it("本机来源：网络卡是下载器速度，存储是下载盘与媒体库，右栏不再列一遍", async () => {
     const d = data(withNas(local(), [], { kinds: [] }));
     // 网络卡的柱是下载器的下载速度：三拍 1、2、3 MB/s（本机来源自己的网卡计数是 0）

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { NasAlert, NasDisk, NasPool, NasSnapshot } from "@/api";
 import {
   nasAlertCounts,
+  nasAlertsAside,
   nasAlertTone,
   nasAppsText,
   nasCpuKpi,
@@ -38,6 +39,7 @@ import {
   nasTempGauge,
   nasUpdatedText,
   nasUptimeText,
+  nasUrlPlaceholder,
   nasUsable,
   nasUsedTone,
 } from "./nas";
@@ -334,6 +336,13 @@ describe("告警、应用与主机行", () => {
     expect(nasAlertTone("info")).toBe("info");
   });
 
+  it("告警一块的右上角写告警从哪来：Glances 的是 pt-tools 按软 RAID 阵列算的，其余是 NAS 里没关掉的", () => {
+    expect(nasAlertsAside("truenas", "TrueNAS")).toBe("TrueNAS 里没关掉的");
+    expect(nasAlertsAside("glances", "Glances")).toBe("按软 RAID 阵列的状态");
+    expect(nasAlertsAside("synology", "群晖")).toBe("群晖 里没关掉的");
+    expect(nasAlertsAside("truenas", ""), "还不知道类型名时不写").toBe("");
+  });
+
   it("应用那一行", () => {
     expect(nasAppsText({ running: 1, total: 3, upgradable: 0 })).toBe(
       "运行中 1 个 · 共 3 个 · 没有可更新的",
@@ -342,6 +351,10 @@ describe("告警、应用与主机行", () => {
       "运行中 2 个 · 共 2 个 · 1 个可更新",
     );
     expect(nasAppsText({ running: 0, total: 0, upgradable: 0 })).toBe("没有应用");
+    // Glances 只看得到容器，不知道哪些能更新：不写「没有可更新的」
+    expect(nasAppsText({ running: 4, total: 5, upgradable: 0, updates_unknown: true })).toBe(
+      "运行中 4 个 · 共 5 个",
+    );
   });
 
   it("主机行的提醒：严重告警条数、快满的池（一个写名字，几个写个数），读不到的那类不提醒", () => {
@@ -389,13 +402,37 @@ describe("告警、应用与主机行", () => {
 });
 
 describe("添加来源时的准备步骤", () => {
-  it("TrueNAS 写怎么建只读用户与 API Key、只收 https；别的类型没有", () => {
+  it("TrueNAS 写怎么建只读用户与 API Key、只收 https；没写的类型没有", () => {
     const g = nasKindGuide("truenas");
     expect(g?.title).toContain("25.04");
     expect(g?.steps).toHaveLength(3);
     expect(g?.steps.join("")).toContain("truenas_readonly_administrators");
     expect(g?.steps.join("")).toContain("https");
-    expect(nasKindGuide("glances")).toBeNull();
+    expect(nasKindGuide("synology")).toBeNull();
     expect(nasKindGuide("")).toBeNull();
+  });
+
+  it("Glances 写怎么用官方镜像跑（host 网络、共用进程、挂哪些目录）与默认端口、认证", () => {
+    const g = nasKindGuide("glances");
+    expect(g?.title).toContain("nicolargo/glances:4.5.8-full");
+    const text = g?.steps.join("") ?? "";
+    for (const want of [
+      "network_mode: host",
+      "pid: host",
+      "GLANCES_OPT=-w",
+      "不用 latest",
+      "/var/run/docker.sock",
+      "/etc/os-release",
+      ":61208",
+      "glances",
+    ]) {
+      expect(text).toContain(want);
+    }
+  });
+
+  it("地址栏的示例按类型给：Glances 是 http 加 61208 端口，其余是 https", () => {
+    expect(nasUrlPlaceholder("glances")).toBe("http://192.168.1.10:61208");
+    expect(nasUrlPlaceholder("truenas")).toBe("https://192.168.1.10");
+    expect(nasUrlPlaceholder("")).toBe("https://192.168.1.10");
   });
 });

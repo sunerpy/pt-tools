@@ -6127,6 +6127,8 @@ export interface NasApps {
   running: number;
   total: number;
   upgradable: number;
+  /** 来源不知道哪些能更新（Glances 只看得到容器）；为真时 upgradable 不算数 */
+  updates_unknown?: boolean;
 }
 
 export interface NasSnapshot {
