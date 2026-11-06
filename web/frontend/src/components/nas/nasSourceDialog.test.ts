@@ -337,6 +337,29 @@ describe("添加来源", () => {
     });
   });
 
+  it("提交验证码被限速（429）：验证码框与填的验证码留着，写原因，过几秒再提交", async () => {
+    mountDialog();
+    await flush();
+    await pick("ns-kind", "飞牛（实验性）");
+    await type("ns-url", "https://192.168.1.3:5667");
+    await type("ns-username", "admin");
+    await type("ns-secret", "pw");
+    api.test.mockResolvedValueOnce({ status: "otp_required", message: "账号开了两步验证" });
+    await click("ns-test");
+    await vi.waitFor(() => expect(q("ns-otp")).not.toBeNull());
+    await type("ns-otp-input", "123456");
+    api.test.mockRejectedValueOnce(new Error("刚测过，过几秒再试\n"));
+    await click("ns-otp-submit");
+    await vi.waitFor(() => expect(text("ns-problem")).toBe("刚测过，过几秒再试"));
+    expect(q("ns-otp"), "验证码框还在").not.toBeNull();
+    expect(inputOf("ns-otp-input").value).toBe("123456");
+    api.test.mockResolvedValueOnce({ status: "ok", pending: "p-otp" });
+    await click("ns-otp-submit");
+    await vi.waitFor(() => expect(q("ns-ok")).not.toBeNull());
+    expect(q("ns-problem"), "再提交以后原因清掉").toBeNull();
+    expect(api.test.mock.calls[2]![0].otp).toBe("123456");
+  });
+
   it("登录失败、连不上与请求本身失败（429）写出原因", async () => {
     mountDialog();
     await flush();
@@ -422,6 +445,31 @@ describe("添加来源", () => {
     expect(text("ns-url-tip")).toBe(
       "只收 https:// 地址，只写协议、主机和端口，例如 https://192.168.1.10",
     );
+  });
+
+  it("测试连接以后滚到结果那里（准备步骤长时结果在表单最下面）", async () => {
+    const scrolled: Element[] = [];
+    const spy = vi.fn(function (this: Element, _arg?: boolean | ScrollIntoViewOptions) {
+      scrolled.push(this);
+    });
+    const orig = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
+    Element.prototype.scrollIntoView = spy;
+    try {
+      mountDialog();
+      await flush();
+      await pick("ns-kind", "群晖（实验性）");
+      await type("ns-url", "https://192.168.1.5:5001");
+      await type("ns-username", "ptmon");
+      await type("ns-secret", "pw");
+      api.test.mockResolvedValueOnce({ status: "otp_required", message: "账号开了两步验证" });
+      await click("ns-test");
+      await vi.waitFor(() => expect(q("ns-otp")).not.toBeNull());
+      await vi.waitFor(() => expect(scrolled.at(-1)).toBe(q("ns-results-end")));
+      expect(spy.mock.calls.at(-1)![0]).toEqual({ block: "nearest" });
+    } finally {
+      if (orig) Object.defineProperty(Element.prototype, "scrollIntoView", orig);
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it("名字与地址空着时不发请求，写明要填什么", async () => {
