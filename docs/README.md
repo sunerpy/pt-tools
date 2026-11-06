@@ -10,7 +10,8 @@
 - [1.0 预览版新功能](guide/whats-new-1.0.md)：0.48.0 之后预览版加入的功能与重要修复。
 - [安装](guide/install.md)：Docker、Linux 与 Windows 的安装方式、环境变量和首次登录。
 - [快速开始](guide/quick-start.md)：添加下载器、站点和 RSS 订阅，确认第一次自动下载。
-- [首页与系统体检](guide/home-and-health.md)：打开网页先到的首页：今天播出、待处理、继续观看、最近入库、这周还要播与 NAS 状态；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘、时间、备份与密钥，写明怎么修。
+- [首页与系统体检](guide/home-and-health.md)：打开网页先到的首页：NAS 概览、今天播出、待处理、继续观看、最近入库、这周还要播，以及下载器、存储与状态；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘、时间、备份与密钥，写明怎么修。
+- [NAS 监控](guide/nas-monitor.md)：首页 NAS 概览的数据从哪来：本机来源读 pt-tools 所在主机的 CPU、内存与负载，选首页显示哪个来源，各来源的状态与重试。
 - [配置说明](configuration.md)：环境变量、代理、全局设置、下载器、持久化、日志和备份。
 - [升级与备份](guide/upgrade.md)：各安装方式的升级、备份与恢复。
 - [Docker 运行示例](../examples/docker-run.md)、[Docker Compose 示例](../examples/docker-compose.yml)、[二进制运行示例](../examples/binary-run.md)。
@@ -92,14 +93,14 @@
 
 下表的站点路径都相对于 `https://firlab.app/pt-tools/`，例如 `/en/` 就是 `https://firlab.app/pt-tools/en/`。
 
-| 本目录中的路径                                                                                                                    | 站点路径                      | 说明                                                                                 |
-| --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `index.md`、`en/index.md`                                                                                                         | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
-| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                  | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
-| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`、`design/free-expiry-safety.md` | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
-| `public/screens/`                                                                                                                 | `/screens/*.webp`             | 首页截图，见下文「截图」                                                             |
-| `guide/images/`                                                                                                                   | 随页面发布                    | 页面引用的图片                                                                       |
-| `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/remote-access.md`、`guide/chatops-mcp-agent-design.md`、`readme/`  | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
+| 本目录中的路径                                                                                                                                                                                | 站点路径                      | 说明                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `index.md`、`en/index.md`                                                                                                                                                                     | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
+| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                                                                              | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
+| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`、`design/free-expiry-safety.md`                                                             | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
+| `public/screens/`                                                                                                                                                                             | `/screens/*.webp`             | 首页截图，见下文「截图」                                                             |
+| `guide/images/`                                                                                                                                                                               | 随页面发布                    | 页面引用的图片                                                                       |
+| `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/media-hub-board-spec.md`、`design/home-nas-spec.md`、`design/remote-access.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
 
 `web/frontend/public/logo.svg` 也会同步过去，作为站点图标。
 
