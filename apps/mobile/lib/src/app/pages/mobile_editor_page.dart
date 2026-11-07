@@ -255,6 +255,11 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
                 },
               );
           await _respond(id, data: result);
+        case 'copy':
+          // 只有追剧编辑页能复制（试搜索结果上的标题）；「已复制」由页面自己显示
+          final text = mobileCopyText(widget.page, value['text']);
+          await Clipboard.setData(ClipboardData(text: text));
+          await _respond(id, data: {'copied': true});
         case 'image':
           if (_imageBusy) {
             throw const MobileBridgeError(409, 'Image operation in progress');
