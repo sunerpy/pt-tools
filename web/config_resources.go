@@ -300,8 +300,12 @@ func (s *Server) configResources() []*configResource {
 			Hints: map[string]string{
 				"kind": "movie 或 tv", "mode": "link（硬链接）、copy、move 之类，见网页上的选项",
 				"csf_url": "ChineseSubFinder 的地址，例如 http://192.168.1.10:19035/；空着是不用", "csf_path": "ChineseSubFinder 里看到的这个库的目录；和库目录一样时空着",
+				"download_downloader_id": "新建订阅时带出的下载器（downloaders 的 id）；0 是不指定。只在新建订阅时带出",
+				"download_save_path":     "新建订阅时带出的保存目录：下载器里看到的目录，不是库目录；空着是按下载器的默认。只在新建订阅时带出",
+				"download_category":      "新建订阅时带出的分类。只在新建订阅时带出",
+				"download_tags":          "新建订阅时带出的标签，逗号分隔。只在新建订阅时带出",
 			},
-			Impact: []string{"只影响以后整理的文件：已经放进库的文件不会挪动"},
+			Impact: []string{"只影响以后整理的文件：已经放进库的文件不会挪动", "下载设置只在以后新建订阅时带出：已有的订阅不变"},
 		},
 		{
 			Name: "media_path_maps", Title: "下载器路径映射", Kind: configList, Path: "/api/media/path-maps", ItemPath: "/api/media/path-maps/{id}",

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,13 +37,21 @@ func TestConfigOrganizeResources(t *testing.T) {
 	res = configRoundTrip(t, e.srv, "organize", ConfigChange{Op: "set", Values: map[string]any{"tags": []any{"pt"}}})
 	assert.Equal(t, json.Number("300"), res.Item["min_video_mb"], "没提到的字段不变")
 
+	var dl models.DownloaderSetting
+	require.NoError(t, global.GlobalDB.DB.First(&dl).Error)
 	lib := configRoundTrip(t, e.srv, "libraries", ConfigChange{Op: "add", Values: map[string]any{
 		"name": "电影", "kind": "movie", "path": e.library, "mode": "copy", "enabled": true,
+		"download_downloader_id": dl.ID, "download_save_path": "/downloads/movies", "download_category": "movies", "download_tags": "pt-tools",
 	}})
 	require.NotEmpty(t, lib.ID)
 	lib = configRoundTrip(t, e.srv, "libraries", ConfigChange{Op: "update", ID: lib.ID, Values: map[string]any{"scrape": true}})
 	assert.Equal(t, true, lib.Item["scrape"])
 	assert.Equal(t, "电影", lib.Item["name"])
+	// 只改刮削：新建订阅时带出的下载设置照原样交回
+	assert.Equal(t, json.Number(fmt.Sprint(dl.ID)), lib.Item["download_downloader_id"])
+	assert.Equal(t, "/downloads/movies", lib.Item["download_save_path"])
+	assert.Equal(t, "movies", lib.Item["download_category"])
+	assert.Equal(t, "pt-tools", lib.Item["download_tags"])
 
 	srvRes := configRoundTrip(t, e.srv, "media_servers", ConfigChange{Op: "add", Values: map[string]any{
 		"name": "emby", "kind": "emby", "url": "http://127.0.0.1:8096", "token": "emby-token-123", "enabled": true,
@@ -58,8 +67,6 @@ func TestConfigOrganizeResources(t *testing.T) {
 	wd := configRoundTrip(t, e.srv, "watch_dirs", ConfigChange{Op: "add", Values: map[string]any{"path": t.TempDir(), "enabled": true}})
 	_ = configRoundTrip(t, e.srv, "watch_dirs", ConfigChange{Op: "delete", ID: wd.ID})
 
-	var dl models.DownloaderSetting
-	require.NoError(t, global.GlobalDB.DB.First(&dl).Error)
 	pm := configRoundTrip(t, e.srv, "media_path_maps", ConfigChange{Op: "add", Values: map[string]any{
 		"downloader_id": dl.ID, "downloader_prefix": "/downloads", "local_prefix": e.dlDir,
 	}})
