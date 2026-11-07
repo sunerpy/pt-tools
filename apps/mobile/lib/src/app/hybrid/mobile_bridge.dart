@@ -171,3 +171,9 @@ Map<String, bool> mobileImageResult(String action, bool? completed) =>
     action == 'save'
     ? {'saved': completed == true, 'canceled': completed != true}
     : {'launched': true};
+
+/// The editor's answer to "did a back press close a layer". Android hands the
+/// JavaScript `true` back as `true`, iOS as `1`; a page without the handler
+/// (an older bundle) answers `false`, and so does anything unexpected.
+bool layerClosed(Object? result) =>
+    result == true || result == 1 || result == 'true';

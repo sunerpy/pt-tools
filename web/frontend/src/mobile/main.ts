@@ -9,6 +9,7 @@ import "../styles/shared-components.css";
 import "../styles/atoms.css";
 import "./mobile.css";
 import MobileApp from "./MobileApp.vue";
+import { installBack } from "./back";
 import { appThemeOf } from "./theme";
 const english = new URLSearchParams(location.search).get("lang")?.startsWith("en") ?? false;
 document.documentElement.lang = english ? "en" : "zh-CN";
@@ -24,3 +25,5 @@ document.documentElement.style.colorScheme = dark ? "dark" : "light";
 createApp(MobileApp)
   .use(ElementPlus, { locale: english ? en : zhCn })
   .mount("#app");
+// App 按返回时先关掉编辑页最上面的一层（见 back.ts）
+installBack();

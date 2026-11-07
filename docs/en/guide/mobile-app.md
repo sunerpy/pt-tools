@@ -48,7 +48,7 @@ Read-only devices don't see write actions (pause, delete, send, check in, subscr
 
 ## Following shows, brush tasks and statistics sharing
 
-Subscription lists and details use the app interface. Creating or editing opens an editor bundled with the app. Saving refreshes the original page; leaving an unsaved form asks whether to discard changes.
+Subscription lists and details use the app interface. Creating or editing opens an editor bundled with the app. Saving refreshes the original page; leaving an unsaved form asks whether to discard changes. In the editor, the back key or the back arrow at the top left first closes an open dropdown, the search preview results and the actions on a result; it leaves the editor only when none of them is open.
 
 The editor has four blocks from top to bottom, with Save fixed at the bottom:
 

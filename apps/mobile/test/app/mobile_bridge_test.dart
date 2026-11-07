@@ -7,6 +7,25 @@ import 'package:http/testing.dart';
 import 'package:pt_tools_app/src/app/hybrid/mobile_bridge.dart';
 
 void main() {
+  test(
+    'a back press stays in the editor only when the page closed a layer',
+    () {
+      expect(layerClosed(true), isTrue);
+      expect(layerClosed(1), isTrue);
+      expect(layerClosed('true'), isTrue);
+      for (final no in [
+        false,
+        0,
+        'false',
+        '',
+        null,
+        'null',
+        <String, Object>{},
+      ]) {
+        expect(layerClosed(no), isFalse, reason: '$no');
+      }
+    },
+  );
   test('cancelled save is not a success and sharing never claims delivery', () {
     expect(mobileImageResult('save', false), {
       'saved': false,
