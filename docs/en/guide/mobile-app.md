@@ -48,7 +48,26 @@ Read-only devices don't see write actions (pause, delete, send, check in, subscr
 
 ## Following shows, brush tasks and statistics sharing
 
-Subscription lists and details use the app interface. Creating or editing opens an editor bundled with the app, with site, downloader, quality profile, schedule, version lock, starting episode and title include/exclude settings. Saving refreshes the original page; leaving an unsaved form asks whether to discard changes.
+Subscription lists and details use the app interface. Creating or editing opens an editor bundled with the app. Saving refreshes the original page; leaving an unsaved form asks whether to discard changes.
+
+The editor has four blocks from top to bottom, with Save fixed at the bottom:
+
+| Block                   | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Item                    | When creating: the title, year and season; tap Season 1, Season 2 and so on to switch seasons (the latest season by default, a drop-down when there are many). From the + at the top right of the Media page, enter the type and TMDB ID first and tap Look up. When you already follow this season it says so, and Edit it instead switches to that subscription. When editing, only the title and season are shown and cannot be changed |
+| Organizing and download | Only enabled libraries of the same type are listed; Automatic says which library organizing will use, or that organizing will fail when no library fits. Below it a line sums up the downloader, save folder, category and tags and says which library they came from; Change opens the four fields. The save folder suggests the selected downloader's preset folders, or all of them when the downloader is Default                      |
+| How to search           | Each word of Title includes and Title excludes is a tag: tap × to remove it, and add words in the field below. Quality profile, sites, and Search preview                                                                                                                                                                                                                                                                                  |
+| When to search          | Series: the search schedule (one summary line; tap it to change), the start episode, Lock release version (when locked it shows Locked: CHDWEB 1080p; Clear lets the next downloaded version set the lock), Follow next season and Allow quality upgrades. Films only have Allow quality upgrades                                                                                                                                          |
+
+When creating, the downloader, save folder, category and tags are filled in from the chosen library, with the same rules as the web, see [download settings for new subscriptions](media-library.md#download-settings-for-new-subscriptions): fields you changed yourself stay when you switch libraries, and Use library "X" next to them restores the library's value; when the library's downloader is disabled or deleted the default downloader is used and the summary says so. Editing fills nothing in: after you switch libraries a Use line appears, and the fields change only when you tap it.
+
+Search preview searches the sites once with the season, sites, quality profile, title includes and excludes the form has now; nothing is pushed and the subscription is not saved. The results fill the screen in three tabs, Matching, Rejected and Not this season, as in the web's [trial search](media-subscribe.md#trial-search).
+
+- It waits at most 25 seconds. Cancel stops only this search, and you can try again right away; on a timeout it asks you to choose fewer sites.
+- Tap a group for its actions: Copy title, Copy subtitle, Only or Not this release group, Pick part of the title to add to Title includes or Title excludes, Lock this version, and Start from this torrent when saving (new series only).
+- The actions only change the form and take effect when you tap Save. After you change the form, the results say the conditions changed; tap Try again with the new conditions. The line next to Search preview shows the last result.
+
+On a read-only device the editor can only be viewed, without Search preview or Save. When the host is an older version without these features, the editor works as before: you enter the type, TMDB ID and season yourself, the download settings are not filled in, and there is no Search preview.
 
 More → Brush supports creating, editing, enabling, disabling and deleting tasks, and viewing run records. Deleting requires confirmation. These editors can manage brush tasks without opening the full web administration interface.
 
