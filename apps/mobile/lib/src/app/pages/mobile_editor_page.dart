@@ -255,6 +255,11 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
                 },
               );
           await _respond(id, data: result);
+        case 'copy':
+          // 只有追剧编辑页能复制（试搜索结果上的标题）；「已复制」由页面自己显示
+          final text = mobileCopyText(widget.page, value['text']);
+          await Clipboard.setData(ClipboardData(text: text));
+          await _respond(id, data: {'copied': true});
         case 'image':
           if (_imageBusy) {
             throw const MobileBridgeError(409, 'Image operation in progress');
@@ -315,6 +320,27 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
     if (mounted) Navigator.of(context).pop(changed);
   }
 
+  /// The system back key and the app bar's back arrow: the page first closes
+  /// its top layer (an open dropdown, the try-search action sheet or panel);
+  /// only when nothing was open does the editor leave (asking first when dirty).
+  Future<void> _systemBack() async {
+    if (await _closeLayer()) return;
+    await _back();
+  }
+
+  Future<bool> _closeLayer() async {
+    final c = _controller;
+    if (c == null || !_trusted) return false;
+    try {
+      final r = await c
+          .runJavaScriptReturningResult('window.ptMobileBack?.() === true')
+          .timeout(const Duration(seconds: 2));
+      return layerClosed(r);
+    } on Object {
+      return false;
+    }
+  }
+
   Future<void> _back() async {
     if (_dirty) {
       final s = S.of(context);
@@ -354,12 +380,12 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
     return PopScope(
       canPop: _leaving,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_back());
+        if (!didPop) unawaited(_systemBack());
       },
       child: Scaffold(
         appBar: AppBar(
           title: Text(widget.page == 'poster' ? s.mobileShare : s.mobileEditor),
-          leading: BackButton(onPressed: _back),
+          leading: BackButton(onPressed: _systemBack),
         ),
         body: _controller == null
             ? Center(child: Text(s.mobileUnsupported))

@@ -26,6 +26,7 @@ bool allowedMobileRequest(String verb, String path) {
           '/stats/aggregated',
           '/stats/summary',
           '/subscriptions',
+          '/subscriptions/draft',
           '/media/libraries',
         }.contains(p) ||
         RegExp(r'^/(subscriptions|brush/tasks)/[1-9][0-9]*$').hasMatch(p) ||
@@ -37,10 +38,30 @@ bool allowedMobileRequest(String verb, String path) {
       '/brush/tasks',
       '/brush/tasks/preview',
       '/subscriptions/schedule/preview',
+      '/subscriptions/search/preview',
     }.contains(p);
   }
   return verb == 'PUT' &&
       RegExp(r'^/(subscriptions|brush/tasks)/[1-9][0-9]*$').hasMatch(p);
+}
+
+/// The most characters the subscription editor may put on the clipboard at once.
+const maxCopyChars = 4096;
+
+/// Checks a `copy` message: only the subscription editor may copy, and only
+/// non-empty plain text of at most [maxCopyChars] characters (counted as
+/// characters, not bytes). Other pages get 403, a too long text 413.
+String mobileCopyText(String page, Object? text) {
+  if (page != 'subscription') {
+    throw const MobileBridgeError(403, 'Operation is not allowed');
+  }
+  if (text is! String || text.trim().isEmpty) {
+    throw const MobileBridgeError(400, 'Nothing to copy');
+  }
+  if (text.runes.length > maxCopyChars) {
+    throw const MobileBridgeError(413, 'Text is too long');
+  }
+  return text;
 }
 
 class MobileBridgeError implements Exception {
@@ -150,3 +171,9 @@ Map<String, bool> mobileImageResult(String action, bool? completed) =>
     action == 'save'
     ? {'saved': completed == true, 'canceled': completed != true}
     : {'launched': true};
+
+/// The editor's answer to "did a back press close a layer". Android hands the
+/// JavaScript `true` back as `true`, iOS as `1`; a page without the handler
+/// (an older bundle) answers `false`, and so does anything unexpected.
+bool layerClosed(Object? result) =>
+    result == true || result == 1 || result == 'true';

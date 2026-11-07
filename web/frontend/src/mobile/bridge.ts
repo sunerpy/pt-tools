@@ -44,12 +44,20 @@ function post(message: object) {
 export function notify(method: string, payload: Record<string, unknown> = {}) {
   post({ id: String(++sequence), method, ...payload });
 }
+/** 一次请求的选项：signal 触发时只取消这一次（BridgeError 499「已取消」），表单与别的请求不受影响 */
+export interface CallOptions {
+  signal?: AbortSignal;
+}
+export const CANCELLED_STATUS = 499;
+const cancelled = () => new BridgeError("Cancelled / 已取消", CANCELLED_STATUS);
 export function bridgeCall<T>(
   method: string,
   payload: Record<string, unknown>,
   timeout = 60_000,
+  options: CallOptions = {},
 ): Promise<T> {
   const id = String(++sequence);
+  const { signal } = options;
   window.ptMobileReceive = (reply) => {
     const call = pending.get(reply.id);
     if (!call) return;
@@ -62,8 +70,27 @@ export function bridgeCall<T>(
       );
   };
   return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(cancelled());
+      return;
+    }
+    // 只取消这一次：清计时器、从 pending 删掉、让原生按编号取消；已经结束的请求什么也不做
+    const onAbort = () => {
+      const call = pending.get(id);
+      if (!call) return;
+      clearTimeout(call.timer);
+      pending.delete(id);
+      try {
+        notify("cancel", { requestId: id });
+      } catch {
+        /* channel already gone */
+      }
+      call.reject(cancelled());
+    };
+    const done = () => signal?.removeEventListener("abort", onAbort);
     const timer = setTimeout(() => {
       pending.delete(id);
+      done();
       try {
         notify("cancel", { requestId: id });
       } catch {
@@ -71,12 +98,24 @@ export function bridgeCall<T>(
       }
       reject(new BridgeError("Request timed out / 请求超时"));
     }, timeout);
-    pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
+    pending.set(id, {
+      resolve: (value) => {
+        done();
+        resolve(value as T);
+      },
+      reject: (error) => {
+        done();
+        reject(error);
+      },
+      timer,
+    });
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
       post({ id, method, ...payload });
     } catch (error) {
       clearTimeout(timer);
       pending.delete(id);
+      done();
       reject(error);
     }
   });
@@ -93,14 +132,28 @@ export function cancelPending() {
   }
   pending.clear();
 }
-export function request<T>(path: string, verb = "GET", body?: unknown): Promise<T> {
+export function request<T>(
+  path: string,
+  verb = "GET",
+  body?: unknown,
+  options: CallOptions = {},
+): Promise<T> {
   if (
     !/^\/api\/app\/v1\/[A-Za-z0-9_/-]+(?:\?[^#]*)?$/.test(path) ||
     path.split("?")[0]!.includes("//")
   ) {
     return Promise.reject(new BridgeError("Invalid App API path / 接口路径不允许"));
   }
-  return bridgeCall<T>("request", { path, verb, ...(body === undefined ? {} : { body }) });
+  return bridgeCall<T>(
+    "request",
+    { path, verb, ...(body === undefined ? {} : { body }) },
+    undefined,
+    options,
+  );
+}
+/** 把纯文字放进剪贴板（只有追剧编辑页能用，最多 4096 字；原生在别的页面回 403、太长回 413） */
+export function copyText(text: string) {
+  return bridgeCall<{ copied?: boolean }>("copy", { text }, 10_000);
 }
 export async function nativeReady(): Promise<NativeConfig> {
   if (window.ptMobileConfig) return window.ptMobileConfig;

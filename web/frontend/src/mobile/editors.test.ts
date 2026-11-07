@@ -7,13 +7,23 @@ const api = vi.hoisted(() => ({
   notify: vi.fn(),
   options: vi.fn(),
   subscription: vi.fn(),
+  meta: vi.fn(),
+  libraries: vi.fn(),
 }));
 vi.mock("./bridge", async (original) => ({
   ...(await original<typeof import("./bridge")>()),
   request: api.request,
   notify: api.notify,
 }));
-vi.mock("./api", () => ({ mobileApi: { options: api.options, subscription: api.subscription } }));
+vi.mock("./api", async (original) => ({
+  ...(await original<typeof import("./api")>()),
+  mobileApi: {
+    options: api.options,
+    subscription: api.subscription,
+    meta: api.meta,
+    libraries: api.libraries,
+  },
+}));
 let view: MountedView | undefined;
 afterEach(() => {
   view?.unmount();
@@ -22,6 +32,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 beforeEach(() => {
+  api.meta.mockResolvedValue({ features: [] });
+  api.libraries.mockResolvedValue([]);
   api.options.mockResolvedValue({
     sites: [{ name: "mteam", display_name: "M-Team" }],
     downloaders: [{ id: 1, name: "qB" }],
@@ -74,7 +86,13 @@ describe("mobile editors", () => {
     await vi.waitFor(() =>
       expect(document.querySelector('[role="alert"]')?.textContent).toContain("保存失败"),
     );
-    expect(document.querySelectorAll("textarea")[0]?.value).toBe("WEB\nCHD");
+    // 标题包含显示成一个个词（底层仍是一行一个词）
+    expect(document.querySelector('[data-testid="se-include-tag-0"]')?.textContent?.trim()).toBe(
+      "WEB",
+    );
+    expect(document.querySelector('[data-testid="se-include-tag-1"]')?.textContent?.trim()).toBe(
+      "CHD",
+    );
     expect(api.notify).not.toHaveBeenCalledWith("close", expect.anything());
   });
   it("does not submit from a read-only device", async () => {
