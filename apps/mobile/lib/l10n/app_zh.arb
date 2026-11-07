@@ -309,6 +309,15 @@
       }
     }
   },
+  "subLock": "版本锁 {version}",
+  "@subLock": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "subLockPending": "版本锁（按第一个下载的版本定）",
   "episodesTitle": "剧集",
   "epLibrary": "已入库",
   "epDownloading": "下载中",

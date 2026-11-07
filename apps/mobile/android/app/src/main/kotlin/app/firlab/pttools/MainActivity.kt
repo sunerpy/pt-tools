@@ -20,6 +20,11 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // The editor asks for the API level: from Android 13 the system shows its own copy notice.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.firlab.pttools/platform")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "sdkInt") result.success(Build.VERSION.SDK_INT) else result.notImplemented()
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.firlab.pttools/images")
             .setMethodCallHandler { call, result ->
                 if (call.method != "save" && call.method != "share") {

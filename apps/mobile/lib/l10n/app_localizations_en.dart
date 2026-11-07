@@ -482,6 +482,14 @@ class SEn extends S {
   }
 
   @override
+  String subLock(String version) {
+    return 'Version lock $version';
+  }
+
+  @override
+  String get subLockPending => 'Version lock (set by the first download)';
+
+  @override
   String get episodesTitle => 'Episodes';
 
   @override

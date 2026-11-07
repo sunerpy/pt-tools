@@ -206,6 +206,7 @@ class SubscriptionPage extends ConsumerWidget {
                                   : d.progress.aired,
                             ),
                           ),
+                        if (subLockLine(s, d) case final lock?) Text(lock),
                         if (d.message != null && d.message!.isNotEmpty)
                           Text(
                             d.message!,
@@ -269,6 +270,17 @@ class SubscriptionPage extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// 版本锁的一行（和网页的追剧列表一样）：锁住了写组与分辨率，开着还没定写按第一个下载的版本定，
+/// 没开或不是剧集时为 null。
+String? subLockLine(S s, AppSubscriptionDetail d) {
+  if (d.mediaType != 'tv' || d.lockVersion != true) return null;
+  final version = [
+    d.lockGroup,
+    d.lockResolution,
+  ].whereType<String>().where((v) => v.isNotEmpty).join(' ');
+  return version.isEmpty ? s.subLockPending : s.subLock(version);
 }
 
 class _EpisodeChip extends ConsumerStatefulWidget {

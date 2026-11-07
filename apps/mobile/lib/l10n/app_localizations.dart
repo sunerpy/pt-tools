@@ -937,6 +937,18 @@ abstract class S {
   /// **'下次搜索 {time}'**
   String subNextSearch(String time);
 
+  /// No description provided for @subLock.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本锁 {version}'**
+  String subLock(String version);
+
+  /// No description provided for @subLockPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本锁（按第一个下载的版本定）'**
+  String get subLockPending;
+
   /// No description provided for @episodesTitle.
   ///
   /// In zh, this message translates to:

@@ -12,6 +12,7 @@ import 'package:pt_tools_app/src/app/pages/assistant_page.dart';
 import 'package:pt_tools_app/src/app/providers.dart';
 import 'package:pt_tools_app/src/app/storage.dart';
 import 'package:pt_tools_app/src/app/theme.dart';
+import 'package:pt_tools_app/src/app/widgets/common.dart';
 import 'package:pt_tools_app/src/remote/bytes.dart';
 import 'package:pt_tools_app/src/remote/host_record.dart';
 import 'package:pt_tools_app/src/remote/noise.dart';
@@ -242,6 +243,14 @@ class _World {
   /// 种子列表回 502（下载器连不上）
   bool failTorrents = false;
 
+  /// 探索里第一部是不是已订阅（模拟在网页上删掉或建了这部剧的订阅）
+  bool exploreSubscribed = true;
+
+  /// 订阅 5 的版本锁：开没开、锁住的组与分辨率
+  bool lockOn = true;
+  String lockGroup = 'HHWEB';
+  String lockRes = '1080p';
+
   /// AI 助手启用没有
   bool assistantEnabled = true;
 
@@ -326,6 +335,51 @@ class _World {
         ],
       },
       '/api/app/v1/sites' => _sites,
+      '/api/app/v1/explore' => {
+        'items': [
+          for (final (i, t) in const [
+            '一部名字很长很长的剧集，标题要占满两行',
+            '短名',
+            '第三部',
+          ].indexed)
+            {
+              'id': 100 + i,
+              'media_type': 'tv',
+              'title': t,
+              'year': 2026,
+              'vote_average': 7.9,
+              'in_library': false,
+              'subscribed': i == 0 && exploreSubscribed,
+            },
+        ],
+        'page': 1,
+        'total_pages': 1,
+      },
+      '/api/app/v1/subscriptions' => <Object?>[],
+      '/api/app/v1/subscriptions/5' => {
+        'id': 5,
+        'media_type': 'tv',
+        'tmdb_id': 100,
+        'season': 4,
+        'title': '现在就出发',
+        'status': 'active',
+        'upgrade': false,
+        'source': 'manual',
+        'progress': {
+          'total': 6,
+          'aired': 3,
+          'in_library': 2,
+          'downloading': 0,
+          'missing': 1,
+        },
+        'created_at': 1791400000,
+        'sites': <Object?>[],
+        'lock_version': lockOn,
+        'lock_group': lockGroup,
+        'lock_resolution': lockRes,
+        'episodes': <Object?>[],
+        'torrents': <Object?>[],
+      },
       '/api/app/v1/favicon/hdsky' => const ApiReply(404, {
         'error': 'not_found',
         'message': '没有图标',
@@ -881,6 +935,104 @@ void main() {
     await _settle(tester);
     expect(find.byKey(const Key('more-assistant')), findsNothing);
   });
+
+  /// 媒体 → 探索（默认看电影的热门：罐头不分电影剧集）
+  Future<void> openExplore(WidgetTester tester) async {
+    await tester.tap(find.text('媒体'));
+    await _settle(tester);
+    await tester.tap(find.text('探索'));
+    await _settle(tester);
+  }
+
+  for (final (width, scale) in const [
+    (320.0, 1.0),
+    (390.0, 1.0),
+    (390.0, 1.3),
+    (390.0, 2.0),
+    (600.0, 1.0),
+    (900.0, 1.5),
+  ]) {
+    testWidgets('探索：$width 宽、字号 $scale 倍时卡片不溢出', (tester) async {
+      await _pumpApp(tester);
+      tester.view.physicalSize = Size(width * 3, 2532);
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await _settle(tester);
+      await openExplore(tester);
+      // 溢出时 Flutter 报 RenderFlex overflowed，测试就失败
+      expect(find.text('短名'), findsOneWidget);
+      expect(find.text('已订阅'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '订阅'), findsNWidgets(2));
+      // 同一行的卡片一样高：「已订阅」与同一行那张的「订阅」都在卡片底部，底边对齐
+      final pill = find.ancestor(
+        of: find.text('已订阅'),
+        matching: find.byType(StatusPill),
+      );
+      expect(
+        tester.getBottomLeft(pill).dy,
+        moreOrLessEquals(
+          tester
+              .getBottomLeft(find.widgetWithText(FilledButton, '订阅').first)
+              .dy,
+          epsilon: 0.5,
+        ),
+      );
+    });
+  }
+
+  testWidgets('探索：网页上删掉订阅以后，下拉刷新或离开再回来就更新', (tester) async {
+    final w = await _pumpApp(tester);
+    await _settle(tester);
+    await openExplore(tester);
+    expect(find.text('已订阅'), findsOneWidget);
+
+    w.exploreSubscribed = false;
+    final before = w.requests.where((r) => r.contains('/explore')).length;
+    await tester.fling(find.text('短名'), const Offset(0, 400), 1200);
+    await tester.pump();
+    await _settle(tester, 12);
+    expect(
+      w.requests.where((r) => r.contains('/explore')).length,
+      greaterThan(before),
+      reason: '下拉刷新重新取了探索',
+    );
+    expect(find.text('已订阅'), findsNothing);
+    expect(find.widgetWithText(FilledButton, '订阅'), findsNWidgets(3));
+
+    // 去了别的页再回来：重新取一次
+    w.exploreSubscribed = true;
+    await tester.tap(find.text('概览'));
+    await _settle(tester);
+    await tester.tap(find.text('媒体'));
+    await _settle(tester);
+    expect(find.text('已订阅'), findsOneWidget);
+  });
+
+  for (final (on, group, res, line) in const [
+    (true, 'HHWEB', '1080p', '版本锁 HHWEB 1080p'),
+    (true, '', '2160p', '版本锁 2160p'),
+    (true, '', '', '版本锁（按第一个下载的版本定）'),
+    (false, 'HHWEB', '1080p', null),
+  ]) {
+    testWidgets('订阅详情：版本锁 $on「$group $res」', (tester) async {
+      final w = await _pumpApp(tester);
+      w
+        ..lockOn = on
+        ..lockGroup = group
+        ..lockRes = res;
+      await _settle(tester);
+      ProviderScope.containerOf(tester.element(find.byType(PtToolsApp)))
+          .read(routerProvider)
+          .go('/media/subscriptions/5');
+      await _settle(tester);
+      expect(find.text('现在就出发'), findsWidgets);
+      if (line == null) {
+        expect(find.textContaining('版本锁'), findsNothing);
+      } else {
+        expect(find.text(line), findsOneWidget);
+      }
+    });
+  }
 
   testWidgets('配对页：链接不对时说明原因', (tester) async {
     await _pumpApp(tester, paired: false);

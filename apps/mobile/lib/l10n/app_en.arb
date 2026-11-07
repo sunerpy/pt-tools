@@ -140,6 +140,8 @@
   "subDelete": "Delete subscription",
   "subDeleteConfirm": "Delete this subscription? Torrents in your downloaders and files in your library are kept.",
   "subNextSearch": "Next search {time}",
+  "subLock": "Version lock {version}",
+  "subLockPending": "Version lock (set by the first download)",
   "episodesTitle": "Episodes",
   "epLibrary": "In library",
   "epDownloading": "Downloading",

@@ -177,3 +177,9 @@ Map<String, bool> mobileImageResult(String action, bool? completed) =>
 /// (an older bundle) answers `false`, and so does anything unexpected.
 bool layerClosed(Object? result) =>
     result == true || result == 1 || result == 'true';
+
+/// Whether the system shows its own notice after something is copied, so the
+/// page leaves out its "copied" message: Android does from 13 (API level 33).
+/// An unknown level (older app shell, or the call failed) keeps the page's notice.
+bool systemNotifiesCopy({required bool android, int? sdkInt}) =>
+    android && sdkInt != null && sdkInt >= 33;

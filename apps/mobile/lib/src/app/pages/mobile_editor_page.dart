@@ -70,6 +70,8 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
   static const _assetPath = '/mobile.html';
   MobileAssets? _assets;
   static const _images = MethodChannel('app.firlab.pttools/images');
+  static const _platform = MethodChannel('app.firlab.pttools/platform');
+  int? _sdkInt;
   WebViewController? _controller;
   MobileBridge? _bridge;
   bool _dirty = false;
@@ -256,10 +258,20 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
               );
           await _respond(id, data: result);
         case 'copy':
-          // 只有追剧编辑页能复制（试搜索结果上的标题）；「已复制」由页面自己显示
+          // 只有追剧编辑页能复制（试搜索结果上的标题）。「已复制」由页面显示，
+          // 系统自己会提示时（Android 13 起）回 notified，页面就不再提示一遍
           final text = mobileCopyText(widget.page, value['text']);
           await Clipboard.setData(ClipboardData(text: text));
-          await _respond(id, data: {'copied': true});
+          await _respond(
+            id,
+            data: {
+              'copied': true,
+              'notified': systemNotifiesCopy(
+                android: _android,
+                sdkInt: await _androidSdk(),
+              ),
+            },
+          );
         case 'image':
           if (_imageBusy) {
             throw const MobileBridgeError(409, 'Image operation in progress');
@@ -318,6 +330,19 @@ class _MobileEditorPageState extends ConsumerState<MobileEditorPage> {
     setState(() => _leaving = true);
     await WidgetsBinding.instance.endOfFrame;
     if (mounted) Navigator.of(context).pop(changed);
+  }
+
+  static bool get _android =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// Android 的 API 级别（只问一次）；问不到时是 null，页面照样自己提示「已复制」。
+  Future<int?> _androidSdk() async {
+    if (!_android) return null;
+    try {
+      return _sdkInt ??= await _platform.invokeMethod<int>('sdkInt');
+    } on Object {
+      return null;
+    }
   }
 
   /// The system back key and the app bar's back arrow: the page first closes
