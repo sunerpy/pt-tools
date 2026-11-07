@@ -51,6 +51,18 @@ export interface LibraryDefaults {
   downloaderName: string;
 }
 
+/** 带出用到的媒体库字段（网页的 MediaLibrary 与手机 App API 的库都有） */
+export type DefaultsLibrary = Pick<MediaLibrary, "id" | "name"> &
+  Partial<
+    Pick<
+      MediaLibrary,
+      "download_downloader_id" | "download_save_path" | "download_category" | "download_tags"
+    >
+  >;
+
+/** 带出用到的下载器字段 */
+export type DefaultsDownloader = Pick<DownloaderSetting, "id" | "name" | "enabled">;
+
 export type OrganizeScope = Pick<
   OrganizeSettings,
   "downloaders" | "categories" | "tags" | "save_paths"
@@ -80,11 +92,11 @@ export function userSources(): Sources {
 }
 
 /** effectiveLibrary 是带出设置用的库：选了具体的库用它；选「自动」（0）时用草稿里按类型会整理进的库；都没有时为 null */
-export function effectiveLibrary(
-  libraries: readonly MediaLibrary[],
+export function effectiveLibrary<L extends Pick<MediaLibrary, "id">>(
+  libraries: readonly L[],
   libraryID: number,
   autoLibraryID: number,
-): MediaLibrary | null {
+): L | null {
   const id = libraryID > 0 ? libraryID : autoLibraryID;
   if (id <= 0) return null;
   return libraries.find((l) => l.id === id) ?? null;
@@ -92,8 +104,8 @@ export function effectiveLibrary(
 
 /** libraryDefaults 是媒体库要带出的值；downloaders 为 null 表示读不到下载器列表 */
 export function libraryDefaults(
-  lib: MediaLibrary,
-  downloaders: readonly DownloaderSetting[] | null,
+  lib: DefaultsLibrary,
+  downloaders: readonly DefaultsDownloader[] | null,
 ): LibraryDefaults {
   const id = lib.download_downloader_id || 0;
   let state: DownloaderState = "unset";

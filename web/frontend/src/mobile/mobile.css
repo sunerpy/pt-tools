@@ -165,6 +165,16 @@ body,
   flex: 1;
   margin: 0;
 }
+/* 追剧编辑页的「保存」固定在底部：表单很长，往下翻时也一直看得到 */
+.mobile-actions--fixed {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: 0 -16px;
+  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--pt-border);
+  background: var(--pt-canvas);
+}
 .mobile-section {
   margin-bottom: 20px;
   border: 1px solid var(--pt-border);

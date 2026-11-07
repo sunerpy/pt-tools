@@ -199,6 +199,9 @@ const NOT_ON_BOARD = {
     "「添加 / 编辑来源」（首页 NAS 概览 H2）晚于画板 40 定稿：NAS 监控页接入一个来源的弹窗，测试连接、信任自签证书与验证码都在里面；画板与 docs/design/home-nas-spec.md 都没画这一页，样式沿用远程访问页，字段与行为见 docs/guide/nas-monitor.md",
   "components/media/SubscribePreview.vue":
     "订阅弹窗的「试搜索」抽屉（追剧方案 F2）晚于画板 40 定稿：按还没保存的表单搜一次，三栏结果与结果上的操作见 docs/guide/media-subscribe.md；卡片沿用按条目搜索（画板 06）的写法",
+  "mobile/SubscriptionPreview.vue":
+    "手机 App 追剧编辑页的「试搜索」（追剧方案 F3）晚于画板 40 定稿：占满屏的结果弹层与点一组弹出的操作列表，" +
+    "只在 App 内嵌的编辑页里出现；三栏与操作同网页的试搜索抽屉，见 docs/guide/mobile-app.md",
   "components/home/HomeTodo.vue#drawerTitle":
     "首页「待处理」的抽屉（媒体中心 M8）晚于画板 40 定稿：「全部」与抽屉类的标签打开它，一件事一行；规格在画板 02、07（docs/design/media-hub-board-spec.md）",
   "components/search/EntrySearch.vue#(drawer 无 title)":
