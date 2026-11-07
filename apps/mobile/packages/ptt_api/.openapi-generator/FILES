@@ -63,6 +63,8 @@ lib/model/app_media_match.dart
 lib/model/app_media_meta.dart
 lib/model/app_message.dart
 lib/model/app_meta.dart
+lib/model/app_mobile_directory.dart
+lib/model/app_mobile_downloader_option.dart
 lib/model/app_mobile_option.dart
 lib/model/app_mobile_options.dart
 lib/model/app_mobile_site_option.dart
@@ -87,6 +89,20 @@ lib/model/app_schedule_preview.dart
 lib/model/app_schedule_preview_input.dart
 lib/model/app_search_error.dart
 lib/model/app_search_item.dart
+lib/model/app_search_preview.dart
+lib/model/app_search_preview_episode.dart
+lib/model/app_search_preview_error.dart
+lib/model/app_search_preview_group.dart
+lib/model/app_search_preview_group_span.dart
+lib/model/app_search_preview_input.dart
+lib/model/app_search_preview_item.dart
+lib/model/app_search_preview_member.dart
+lib/model/app_search_preview_movie.dart
+lib/model/app_search_preview_profile.dart
+lib/model/app_search_preview_subscription.dart
+lib/model/app_search_preview_subscription_lock.dart
+lib/model/app_search_preview_unmatched.dart
+lib/model/app_search_preview_verdict.dart
 lib/model/app_search_request.dart
 lib/model/app_search_result.dart
 lib/model/app_site.dart
@@ -102,6 +118,7 @@ lib/model/app_stats_summary.dart
 lib/model/app_subscription.dart
 lib/model/app_subscription_create.dart
 lib/model/app_subscription_detail.dart
+lib/model/app_subscription_draft.dart
 lib/model/app_subscription_run.dart
 lib/model/app_subscription_run_page.dart
 lib/model/app_subscription_status.dart

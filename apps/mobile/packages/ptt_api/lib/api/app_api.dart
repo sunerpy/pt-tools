@@ -1430,6 +1430,75 @@ class AppApi {
     return null;
   }
 
+  /// 新建订阅前读条目（只读）：名字、年份、一共几季与这一季几集、是不是动画、「自动」会整理进哪个库、这一季是不是已经在追
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] mediaType (required):
+  ///
+  /// * [int] tmdbId (required):
+  ///
+  /// * [int] season:
+  ///   剧集的季，不带或 0 是最新一季；电影不用
+  Future<Response> getSubscriptionDraftWithHttpInfo(String mediaType, int tmdbId, { int? season, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/draft';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+      queryParams.addAll(_queryParams('', 'media_type', mediaType));
+      queryParams.addAll(_queryParams('', 'tmdb_id', tmdbId));
+    if (season != null) {
+      queryParams.addAll(_queryParams('', 'season', season));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 新建订阅前读条目（只读）：名字、年份、一共几季与这一季几集、是不是动画、「自动」会整理进哪个库、这一季是不是已经在追
+  ///
+  /// Parameters:
+  ///
+  /// * [String] mediaType (required):
+  ///
+  /// * [int] tmdbId (required):
+  ///
+  /// * [int] season:
+  ///   剧集的季，不带或 0 是最新一季；电影不用
+  Future<AppSubscriptionDraft?> getSubscriptionDraft(String mediaType, int tmdbId, { int? season, Future<void>? abortTrigger, }) async {
+    final response = await getSubscriptionDraftWithHttpInfo(mediaType, tmdbId, season: season, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscriptionDraft',) as AppSubscriptionDraft;
+
+    }
+    return null;
+  }
+
   /// TMDB 图片（海报等），由 pt-tools 按自己的 TMDB 图片地址与代理去取
   ///
   /// Note: This method returns the HTTP [Response].
@@ -2728,6 +2797,63 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSchedulePreview',) as AppSchedulePreview;
+
+    }
+    return null;
+  }
+
+  /// 按编辑页还没保存的表单试搜索（只读：不推送、不写库）
+  ///
+  /// 用表单里的质量档案、标题包含与排除对站点上的种子，别名、集号规则、剧集组与手填的集数按这一季已有的订阅（没有时按 TMDB）。 站点搜索最晚到收到请求以后 25 秒，到点没回来的站点写进 errors（timed_out 为真），已经回来的照常出结果。 搜索结果缓存 10 分钟：只改包含词、排除词或档案再试，不再去站点搜；有站点出错的那次不进缓存。 同一主体还有一次在跑时回 409 busy；所有主体合计同时两次，满了等 2 秒还满回 503 busy（带 Retry-After）。
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [AppSearchPreviewInput] appSearchPreviewInput (required):
+  Future<Response> previewSubscriptionSearchWithHttpInfo(AppSearchPreviewInput appSearchPreviewInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/subscriptions/search/preview';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appSearchPreviewInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 按编辑页还没保存的表单试搜索（只读：不推送、不写库）
+  ///
+  /// 用表单里的质量档案、标题包含与排除对站点上的种子，别名、集号规则、剧集组与手填的集数按这一季已有的订阅（没有时按 TMDB）。 站点搜索最晚到收到请求以后 25 秒，到点没回来的站点写进 errors（timed_out 为真），已经回来的照常出结果。 搜索结果缓存 10 分钟：只改包含词、排除词或档案再试，不再去站点搜；有站点出错的那次不进缓存。 同一主体还有一次在跑时回 409 busy；所有主体合计同时两次，满了等 2 秒还满回 503 busy（带 Retry-After）。
+  ///
+  /// Parameters:
+  ///
+  /// * [AppSearchPreviewInput] appSearchPreviewInput (required):
+  Future<AppSearchPreview?> previewSubscriptionSearch(AppSearchPreviewInput appSearchPreviewInput, { Future<void>? abortTrigger, }) async {
+    final response = await previewSubscriptionSearchWithHttpInfo(appSearchPreviewInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSearchPreview',) as AppSearchPreview;
 
     }
     return null;

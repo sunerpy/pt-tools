@@ -23,6 +23,10 @@ class AppMediaLibrary {
     required this.classifyDir,
     required this.overwriteMode,
     required this.enabled,
+    required this.downloadDownloaderId,
+    required this.downloadSavePath,
+    required this.downloadCategory,
+    required this.downloadTags,
   });
 
   int id;
@@ -52,6 +56,18 @@ class AppMediaLibrary {
 
   bool enabled;
 
+  /// 新建订阅时带出的下载器；0 是不指定（用设置里的默认下载器）
+  int downloadDownloaderId;
+
+  /// 新建订阅时带出的保存目录（下载器里看到的目录，不是库目录）；空的是不带出
+  String downloadSavePath;
+
+  /// 新建订阅时带出的分类；空的是不带出
+  String downloadCategory;
+
+  /// 新建订阅时带出的标签（逗号分开）；空的是不带出
+  String downloadTags;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppMediaLibrary &&
     other.id == id &&
@@ -63,7 +79,11 @@ class AppMediaLibrary {
     other.scrape == scrape &&
     other.classifyDir == classifyDir &&
     other.overwriteMode == overwriteMode &&
-    other.enabled == enabled;
+    other.enabled == enabled &&
+    other.downloadDownloaderId == downloadDownloaderId &&
+    other.downloadSavePath == downloadSavePath &&
+    other.downloadCategory == downloadCategory &&
+    other.downloadTags == downloadTags;
 
   @override
   int get hashCode =>
@@ -77,10 +97,14 @@ class AppMediaLibrary {
     (scrape.hashCode) +
     (classifyDir.hashCode) +
     (overwriteMode.hashCode) +
-    (enabled.hashCode);
+    (enabled.hashCode) +
+    (downloadDownloaderId.hashCode) +
+    (downloadSavePath.hashCode) +
+    (downloadCategory.hashCode) +
+    (downloadTags.hashCode);
 
   @override
-  String toString() => 'AppMediaLibrary[id=$id, name=$name, kind=$kind, anime=$anime, path=$path, mode=$mode, scrape=$scrape, classifyDir=$classifyDir, overwriteMode=$overwriteMode, enabled=$enabled]';
+  String toString() => 'AppMediaLibrary[id=$id, name=$name, kind=$kind, anime=$anime, path=$path, mode=$mode, scrape=$scrape, classifyDir=$classifyDir, overwriteMode=$overwriteMode, enabled=$enabled, downloadDownloaderId=$downloadDownloaderId, downloadSavePath=$downloadSavePath, downloadCategory=$downloadCategory, downloadTags=$downloadTags]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -94,6 +118,10 @@ class AppMediaLibrary {
       json[r'classify_dir'] = this.classifyDir;
       json[r'overwrite_mode'] = this.overwriteMode;
       json[r'enabled'] = this.enabled;
+      json[r'download_downloader_id'] = this.downloadDownloaderId;
+      json[r'download_save_path'] = this.downloadSavePath;
+      json[r'download_category'] = this.downloadCategory;
+      json[r'download_tags'] = this.downloadTags;
     return json;
   }
 
@@ -128,6 +156,14 @@ class AppMediaLibrary {
         assert(json[r'overwrite_mode'] != null, 'Required key "AppMediaLibrary[overwrite_mode]" has a null value in JSON.');
         assert(json.containsKey(r'enabled'), 'Required key "AppMediaLibrary[enabled]" is missing from JSON.');
         assert(json[r'enabled'] != null, 'Required key "AppMediaLibrary[enabled]" has a null value in JSON.');
+        assert(json.containsKey(r'download_downloader_id'), 'Required key "AppMediaLibrary[download_downloader_id]" is missing from JSON.');
+        assert(json[r'download_downloader_id'] != null, 'Required key "AppMediaLibrary[download_downloader_id]" has a null value in JSON.');
+        assert(json.containsKey(r'download_save_path'), 'Required key "AppMediaLibrary[download_save_path]" is missing from JSON.');
+        assert(json[r'download_save_path'] != null, 'Required key "AppMediaLibrary[download_save_path]" has a null value in JSON.');
+        assert(json.containsKey(r'download_category'), 'Required key "AppMediaLibrary[download_category]" is missing from JSON.');
+        assert(json[r'download_category'] != null, 'Required key "AppMediaLibrary[download_category]" has a null value in JSON.');
+        assert(json.containsKey(r'download_tags'), 'Required key "AppMediaLibrary[download_tags]" is missing from JSON.');
+        assert(json[r'download_tags'] != null, 'Required key "AppMediaLibrary[download_tags]" has a null value in JSON.');
         return true;
       }());
 
@@ -142,6 +178,10 @@ class AppMediaLibrary {
         classifyDir: mapValueOfType<bool>(json, r'classify_dir')!,
         overwriteMode: mapValueOfType<String>(json, r'overwrite_mode')!,
         enabled: mapValueOfType<bool>(json, r'enabled')!,
+        downloadDownloaderId: mapValueOfType<int>(json, r'download_downloader_id')!,
+        downloadSavePath: mapValueOfType<String>(json, r'download_save_path')!,
+        downloadCategory: mapValueOfType<String>(json, r'download_category')!,
+        downloadTags: mapValueOfType<String>(json, r'download_tags')!,
       );
     }
     return null;
@@ -199,6 +239,10 @@ class AppMediaLibrary {
     'classify_dir',
     'overwrite_mode',
     'enabled',
+    'download_downloader_id',
+    'download_save_path',
+    'download_category',
+    'download_tags',
   };
 }
 

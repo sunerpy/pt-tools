@@ -82,6 +82,9 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/media/organize/preview", r, s.appOrganizePreview},
 		{http.MethodPost, "/media/organize", w, s.appOrganize},
 		{http.MethodGet, "/subscriptions", r, s.appSubscriptions},
+		// 追剧助手：新建前读草稿；试搜索用 POST 传还没保存的表单，但只读
+		{http.MethodGet, "/subscriptions/draft", r, s.appSubscriptionDraft},
+		{http.MethodPost, "/subscriptions/search/preview", r, s.appSearchPreview},
 		{http.MethodGet, "/subscriptions/{id}", r, s.appSubscriptionDetail},
 		{http.MethodPost, "/subscriptions", w, s.appSubscriptionCreate},
 		{http.MethodPost, "/subscriptions/{id}/status", w, s.appSubscriptionSetStatus},
@@ -354,7 +357,7 @@ type AppPrincipalV struct {
 }
 
 // appFeatures 是这个版本的 App API 提供的功能组。
-var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export", "brush_stats"}
+var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export", "brush_stats", "subscription_assist"}
 
 func (s *Server) appMeta(w http.ResponseWriter, r *http.Request) {
 	p := middleware.PrincipalFrom(r.Context())

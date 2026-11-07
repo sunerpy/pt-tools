@@ -27,6 +27,8 @@ class AppSubscriptionCreate {
     this.savePath,
     this.schedule,
     this.lockVersion,
+    this.lockGroup,
+    this.lockResolution,
     this.startEpisode,
     this.followNextSeason,
     this.libraryId,
@@ -135,6 +137,24 @@ class AppSubscriptionCreate {
   ///
   bool? lockVersion;
 
+  /// 锁住的制作组（只在用户改了锁时发；不给时按第一个下载成功的版本定）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? lockGroup;
+
+  /// 锁住的分辨率，同 lock_group
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? lockResolution;
+
   /// Minimum value: 0
   /// Maximum value: 2000
   ///
@@ -186,6 +206,8 @@ class AppSubscriptionCreate {
     other.savePath == savePath &&
     other.schedule == schedule &&
     other.lockVersion == lockVersion &&
+    other.lockGroup == lockGroup &&
+    other.lockResolution == lockResolution &&
     other.startEpisode == startEpisode &&
     other.followNextSeason == followNextSeason &&
     other.libraryId == libraryId &&
@@ -208,13 +230,15 @@ class AppSubscriptionCreate {
     (savePath == null ? 0 : savePath!.hashCode) +
     (schedule == null ? 0 : schedule!.hashCode) +
     (lockVersion == null ? 0 : lockVersion!.hashCode) +
+    (lockGroup == null ? 0 : lockGroup!.hashCode) +
+    (lockResolution == null ? 0 : lockResolution!.hashCode) +
     (startEpisode == null ? 0 : startEpisode!.hashCode) +
     (followNextSeason == null ? 0 : followNextSeason!.hashCode) +
     (libraryId == null ? 0 : libraryId!.hashCode) +
     (fromTorrent == null ? 0 : fromTorrent!.hashCode);
 
   @override
-  String toString() => 'AppSubscriptionCreate[includeKeywords=$includeKeywords, excludeKeywords=$excludeKeywords, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
+  String toString() => 'AppSubscriptionCreate[includeKeywords=$includeKeywords, excludeKeywords=$excludeKeywords, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -276,6 +300,16 @@ class AppSubscriptionCreate {
     } else {
       json[r'lock_version'] = null;
     }
+    if (this.lockGroup != null) {
+      json[r'lock_group'] = this.lockGroup;
+    } else {
+      json[r'lock_group'] = null;
+    }
+    if (this.lockResolution != null) {
+      json[r'lock_resolution'] = this.lockResolution;
+    } else {
+      json[r'lock_resolution'] = null;
+    }
     if (this.startEpisode != null) {
       json[r'start_episode'] = this.startEpisode;
     } else {
@@ -334,6 +368,8 @@ class AppSubscriptionCreate {
         savePath: mapValueOfType<String>(json, r'save_path'),
         schedule: AppSchedule.fromJson(json[r'schedule']),
         lockVersion: mapValueOfType<bool>(json, r'lock_version'),
+        lockGroup: mapValueOfType<String>(json, r'lock_group'),
+        lockResolution: mapValueOfType<String>(json, r'lock_resolution'),
         startEpisode: mapValueOfType<int>(json, r'start_episode'),
         followNextSeason: mapValueOfType<bool>(json, r'follow_next_season'),
         libraryId: mapValueOfType<int>(json, r'library_id'),

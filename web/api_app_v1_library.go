@@ -33,6 +33,11 @@ type AppMediaLibrary struct {
 	ClassifyDir   bool   `json:"classify_dir"`
 	OverwriteMode string `json:"overwrite_mode"`
 	Enabled       bool   `json:"enabled"`
+	// 新建订阅时带出的下载设置：下载器（0 是不指定）、保存目录、分类与标签（逗号分开），空的是不带出
+	DownloadDownloaderID uint   `json:"download_downloader_id"`
+	DownloadSavePath     string `json:"download_save_path"`
+	DownloadCategory     string `json:"download_category"`
+	DownloadTags         string `json:"download_tags"`
 }
 
 // AppMediaMeta 是从种子标题解析出来的信息。
@@ -188,6 +193,8 @@ func (s *Server) appMediaLibraries(w http.ResponseWriter, r *http.Request) {
 		out = append(out, AppMediaLibrary{
 			ID: l.ID, Name: l.Name, Kind: l.Kind, Anime: l.Anime, Path: l.Path, Mode: l.Mode, Scrape: l.Scrape,
 			ClassifyDir: l.ClassifyDir, OverwriteMode: l.OverwriteMode, Enabled: l.Enabled,
+			DownloadDownloaderID: l.DownloadDownloaderID, DownloadSavePath: l.DownloadSavePath, DownloadCategory: l.DownloadCategory,
+			DownloadTags: l.DownloadTags,
 		})
 	}
 	appJSON(w, out)

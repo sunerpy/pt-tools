@@ -15,6 +15,7 @@ class AppMobileOptions {
   AppMobileOptions({
     this.sites = const [],
     this.downloaders = const [],
+    this.directories = const [],
     this.profiles = const [],
     this.libraries = const [],
     this.errors = const {},
@@ -22,18 +23,24 @@ class AppMobileOptions {
 
   List<AppMobileSiteOption> sites;
 
-  List<AppMobileOption> downloaders;
+  /// 全部下载器，停用的也列出（enabled 为假）
+  List<AppMobileDownloaderOption> downloaders;
+
+  /// 各下载器的预设保存目录，按下载器排
+  List<AppMobileDirectory> directories;
 
   List<AppMobileOption> profiles;
 
   List<AppMobileOption> libraries;
 
+  /// 读不到的那几项（sites、downloaders、directories、quality_profiles、libraries）与原因
   Map<String, String> errors;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppMobileOptions &&
     _deepEquality.equals(other.sites, sites) &&
     _deepEquality.equals(other.downloaders, downloaders) &&
+    _deepEquality.equals(other.directories, directories) &&
     _deepEquality.equals(other.profiles, profiles) &&
     _deepEquality.equals(other.libraries, libraries) &&
     _deepEquality.equals(other.errors, errors);
@@ -43,17 +50,19 @@ class AppMobileOptions {
     // ignore: unnecessary_parenthesis
     (sites.hashCode) +
     (downloaders.hashCode) +
+    (directories.hashCode) +
     (profiles.hashCode) +
     (libraries.hashCode) +
     (errors.hashCode);
 
   @override
-  String toString() => 'AppMobileOptions[sites=$sites, downloaders=$downloaders, profiles=$profiles, libraries=$libraries, errors=$errors]';
+  String toString() => 'AppMobileOptions[sites=$sites, downloaders=$downloaders, directories=$directories, profiles=$profiles, libraries=$libraries, errors=$errors]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'sites'] = this.sites;
       json[r'downloaders'] = this.downloaders;
+      json[r'directories'] = this.directories;
       json[r'profiles'] = this.profiles;
       json[r'libraries'] = this.libraries;
       json[r'errors'] = this.errors;
@@ -75,6 +84,8 @@ class AppMobileOptions {
         assert(json[r'sites'] != null, 'Required key "AppMobileOptions[sites]" has a null value in JSON.');
         assert(json.containsKey(r'downloaders'), 'Required key "AppMobileOptions[downloaders]" is missing from JSON.');
         assert(json[r'downloaders'] != null, 'Required key "AppMobileOptions[downloaders]" has a null value in JSON.');
+        assert(json.containsKey(r'directories'), 'Required key "AppMobileOptions[directories]" is missing from JSON.');
+        assert(json[r'directories'] != null, 'Required key "AppMobileOptions[directories]" has a null value in JSON.');
         assert(json.containsKey(r'profiles'), 'Required key "AppMobileOptions[profiles]" is missing from JSON.');
         assert(json[r'profiles'] != null, 'Required key "AppMobileOptions[profiles]" has a null value in JSON.');
         assert(json.containsKey(r'libraries'), 'Required key "AppMobileOptions[libraries]" is missing from JSON.');
@@ -84,7 +95,8 @@ class AppMobileOptions {
 
       return AppMobileOptions(
         sites: AppMobileSiteOption.listFromJson(json[r'sites']),
-        downloaders: AppMobileOption.listFromJson(json[r'downloaders']),
+        downloaders: AppMobileDownloaderOption.listFromJson(json[r'downloaders']),
+        directories: AppMobileDirectory.listFromJson(json[r'directories']),
         profiles: AppMobileOption.listFromJson(json[r'profiles']),
         libraries: AppMobileOption.listFromJson(json[r'libraries']),
         errors: mapCastOfType<String, String>(json, r'errors') ?? const {},
@@ -137,6 +149,7 @@ class AppMobileOptions {
   static const requiredKeys = <String>{
     'sites',
     'downloaders',
+    'directories',
     'profiles',
     'libraries',
   };

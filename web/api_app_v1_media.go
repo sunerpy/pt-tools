@@ -460,13 +460,16 @@ type AppSubscriptionCreate struct {
 	Upgrade         bool    `json:"upgrade"`
 	// Sites 是只在这些站点找（空的是全部站点）；DownloaderID 是推送到哪个下载器（0 用设置里的）；
 	// Category、Tags、SavePath 是推送时的分类、标签（逗号分开）与保存目录（空的按下载器的默认）
-	Sites            []string        `json:"sites,omitempty"`
-	DownloaderID     uint            `json:"downloader_id,omitempty"`
-	Category         string          `json:"category,omitempty"`
-	Tags             string          `json:"tags,omitempty"`
-	SavePath         string          `json:"save_path,omitempty"`
-	Schedule         *AppSchedule    `json:"schedule,omitempty"`
-	LockVersion      *bool           `json:"lock_version,omitempty"`
+	Sites        []string     `json:"sites,omitempty"`
+	DownloaderID uint         `json:"downloader_id,omitempty"`
+	Category     string       `json:"category,omitempty"`
+	Tags         string       `json:"tags,omitempty"`
+	SavePath     string       `json:"save_path,omitempty"`
+	Schedule     *AppSchedule `json:"schedule,omitempty"`
+	LockVersion  *bool        `json:"lock_version,omitempty"`
+	// LockGroup、LockResolution 是锁住的制作组与分辨率（编辑页只在用户改了锁时发）
+	LockGroup        *string         `json:"lock_group,omitempty"`
+	LockResolution   *string         `json:"lock_resolution,omitempty"`
 	StartEpisode     *int            `json:"start_episode,omitempty"`
 	FollowNextSeason *bool           `json:"follow_next_season,omitempty"`
 	LibraryID        *uint           `json:"library_id,omitempty"`
@@ -504,7 +507,8 @@ func (s *Server) appSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
 		MediaType: in.MediaType, TMDBID: in.TMDBID, Season: in.Season, ProfileID: in.ProfileID, Upgrade: in.Upgrade,
 		IncludeKeywords: in.IncludeKeywords, ExcludeKeywords: in.ExcludeKeywords,
 		Sites: in.Sites, DownloaderID: in.DownloaderID, Category: in.Category, Tags: in.Tags, SavePath: in.SavePath,
-		LockVersion: in.LockVersion, StartEpisode: in.StartEpisode, FollowNextSeason: in.FollowNextSeason, LibraryID: in.LibraryID,
+		LockVersion: in.LockVersion, LockGroup: in.LockGroup, LockResolution: in.LockResolution, StartEpisode: in.StartEpisode,
+		FollowNextSeason: in.FollowNextSeason, LibraryID: in.LibraryID,
 	}
 	if in.Schedule != nil {
 		input.Schedule = in.Schedule.schedule()
