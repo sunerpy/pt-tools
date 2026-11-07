@@ -276,7 +276,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 ### GET /media/libraries
 
-每个媒体库一项：`id`、`name`、`kind`（`movie` 或 `tv`）、`anime`（只收动画）、`path`（pt-tools 里看到的库目录）、`mode`（整理方式，空的是整理设置里的默认方式）、`scrape`（刮削）、`classify_dir`（按二级分类放进子目录）、`overwrite_mode`（空的不替换旧版本，`larger` 新文件更大时替换）、`enabled`。
+每个媒体库一项：`id`、`name`、`kind`（`movie` 或 `tv`）、`anime`（只收动画）、`path`（pt-tools 里看到的库目录）、`mode`（整理方式，空的是整理设置里的默认方式）、`scrape`（刮削）、`classify_dir`（按二级分类放进子目录）、`overwrite_mode`（空的不替换旧版本，`larger` 新文件更大时替换）、`enabled`，以及新建订阅时带出的下载设置 `download_downloader_id`（0 是不指定）、`download_save_path`、`download_category`、`download_tags`（空的是不指定），见[新建订阅时带出的下载设置](../guide/media-library.md#新建订阅时带出的下载设置)。
 
 ### POST /media/recognize
 
@@ -357,14 +357,15 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 剧集是追剧，还可以带：
 
-| 字段                 | 说明                                                                                                                                                                                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schedule`           | 定时（见上文）；不填时按播出时间                                                                                                                                                                                                                  |
-| `lock_version`       | 版本锁：第一集选定以后只要同一个制作组、同一个分辨率（等不到就等，不换别的版本）；不填时打开                                                                                                                                                      |
-| `start_episode`      | 从第几集开始追；之前的集不要                                                                                                                                                                                                                      |
-| `follow_next_season` | 追完以后自动追下一季                                                                                                                                                                                                                              |
-| `library_id`         | 整理进哪个媒体库；不填或 0 时按类型自动选                                                                                                                                                                                                         |
-| `from_torrent`       | 从站点上的一个种子开始追：`site`、`torrent_id`，可选 `title`（只在搜索结果的缓存里没有这个种子时，用作在这个站点上搜索的关键字）。起始集默认取这个种子的集号，建好以后马上推送它（不合质量档案或已经有这几集时不推，原因写在订阅的 `message` 里） |
+| 字段                            | 说明                                                                                                                                                                                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule`                      | 定时（见上文）；不填时按播出时间                                                                                                                                                                                                                  |
+| `lock_version`                  | 版本锁：第一集选定以后只要同一个制作组、同一个分辨率（等不到就等，不换别的版本）；不填时打开                                                                                                                                                      |
+| `lock_group`、`lock_resolution` | 一开始就锁住的制作组与分辨率（`lock_version` 开着时才起作用；留空一项就不限这一项）；不填时第一个下载的版本成为锁。`lock_group` 最长 64 个字，`lock_resolution` 最长 16 字节                                                                      |
+| `start_episode`                 | 从第几集开始追；之前的集不要                                                                                                                                                                                                                      |
+| `follow_next_season`            | 追完以后自动追下一季                                                                                                                                                                                                                              |
+| `library_id`                    | 整理进哪个媒体库；不填或 0 时按类型自动选                                                                                                                                                                                                         |
+| `from_torrent`                  | 从站点上的一个种子开始追：`site`、`torrent_id`，可选 `title`（只在搜索结果的缓存里没有这个种子时，用作在这个站点上搜索的关键字）。起始集默认取这个种子的集号，建好以后马上推送它（不合质量档案或已经有这几集时不推，原因写在订阅的 `message` 里） |
 
 回应是新建的订阅，来源记为 `app`。已经订阅过时回 400，TMDB 上找不到时回 404。带 `from_torrent` 时要从站点取种子并推送，回应会慢一些。
 
@@ -541,21 +542,46 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 
 ## 手机编辑与统计导出
 
-`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`；按周期分段的刷流收益（[`GET /brush/stats`](#get-brushstats)）是 `brush_stats`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
+`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`；按周期分段的刷流收益（[`GET /brush/stats`](#get-brushstats)）是 `brush_stats`；新建订阅的草稿与试搜索（见下文[追剧助手](#追剧助手)）是 `subscription_assist`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
 
-| 方法   | 路径                         | 权限 | 用途                                                                           |
-| ------ | ---------------------------- | ---- | ------------------------------------------------------------------------------ |
-| GET    | `/mobile/options`            | 读取 | 已启用站点、下载器、质量档案与媒体库的编号和名称；部分来源失败由 `errors` 报告 |
-| GET    | `/brush/tasks/{id}`          | 读取 | 安全的刷流编辑配置                                                             |
-| POST   | `/brush/tasks/preview`       | 读取 | 预览刷流改动；请求为 `ConfigChange`，固定资源为刷流任务                        |
-| POST   | `/brush/tasks`               | 操作 | 新建刷流任务                                                                   |
-| PUT    | `/brush/tasks/{id}`          | 操作 | 修改刷流任务                                                                   |
-| DELETE | `/brush/tasks/{id}`          | 操作 | 删除刷流任务；留下的种子交给自动删种                                           |
-| POST   | `/brush/tasks/{id}/status`   | 操作 | 启停任务，请求为 `{"enabled": true}` 或 `false`                                |
-| GET    | `/brush/tasks/{id}/runs`     | 读取 | 分页读取任务运行记录                                                           |
-| GET    | `/stats/aggregated`          | 读取 | 站点聚合统计，使用与网页统计相同的字段与计费下载口径                           |
-| GET    | `/stats/summary?range=today` | 读取 | 周期增量，`range` 接受 `today`、`7d`、`30d`                                    |
+| 方法   | 路径                            | 权限 | 用途                                                                                                                                                          |
+| ------ | ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/mobile/options`               | 读取 | 已启用站点、下载器（`enabled` 写明启用没有，停用的也列出）、下载器预设的保存目录（`directories`）、质量档案与媒体库的编号和名称；部分来源失败由 `errors` 报告 |
+| GET    | `/subscriptions/draft`          | 读取 | 新建订阅以前读一个条目：一共几季、这一季几集、会整理进哪个媒体库、订阅过没有                                                                                  |
+| POST   | `/subscriptions/search/preview` | 读取 | 试搜索：按尚未保存的表单搜一次，不推送、不写库                                                                                                                |
+| GET    | `/brush/tasks/{id}`             | 读取 | 安全的刷流编辑配置                                                                                                                                            |
+| POST   | `/brush/tasks/preview`          | 读取 | 预览刷流改动；请求为 `ConfigChange`，固定资源为刷流任务                                                                                                       |
+| POST   | `/brush/tasks`                  | 操作 | 新建刷流任务                                                                                                                                                  |
+| PUT    | `/brush/tasks/{id}`             | 操作 | 修改刷流任务                                                                                                                                                  |
+| DELETE | `/brush/tasks/{id}`             | 操作 | 删除刷流任务；留下的种子交给自动删种                                                                                                                          |
+| POST   | `/brush/tasks/{id}/status`      | 操作 | 启停任务，请求为 `{"enabled": true}` 或 `false`                                                                                                               |
+| GET    | `/brush/tasks/{id}/runs`        | 读取 | 分页读取任务运行记录                                                                                                                                          |
+| GET    | `/stats/aggregated`             | 读取 | 站点聚合统计，使用与网页统计相同的字段与计费下载口径                                                                                                          |
+| GET    | `/stats/summary?range=today`    | 读取 | 周期增量，`range` 接受 `today`、`7d`、`30d`                                                                                                                   |
 
 运行记录接口使用 `limit`（默认 20，上限 100）和 `offset` 分页，返回 `items` 与 `total`。
 
 刷流新建、修改的请求字段与网页刷流配置一致，仅公开任务配置；这些入口不会授予设备通用的 `app:config` 权限，也不能更改站点凭据或设备权限。写入沿用 App API 的审计。订阅的新建、修改和详情增加 `include_keywords`、`exclude_keywords`，语义与网页的标题包含、标题排除一致。
+
+### 追剧助手
+
+`GET /meta` 的 `features` 里有 `subscription_assist` 时才有这两个接口，都只要「读取」。
+
+`GET /subscriptions/draft?media_type=tv&tmdb_id=1399&season=0`：新建订阅以前读一个条目，不改动任何东西。`season` 只对剧集，0 或不给是最新一季。回应 `media_type`、`tmdb_id`、`season`（剧集换成实际要追的那一季）、`seasons`（一共几季）、`total_episodes`（这一季几集）、`title`、`original_title`、`year`、`poster_path`、`anime`、`auto_library_id`（「按类型自动选」会整理进哪个库，0 是没有能用的库）、`subscription_id`（这一季或这部电影已经有的订阅，0 是没有）。TMDB 上没有这个条目或这一季时回 404。
+
+`POST /subscriptions/search/preview`：按尚未保存的表单搜一次，和网页订阅弹窗里的[试搜索](../guide/media-subscribe.md#试搜索)一样，只读、不推送。请求：
+
+| 字段                                   | 说明                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `media_type`、`tmdb_id`                | 必填                                                                    |
+| `season`                               | 剧集的季，0 或不给是最新一季                                            |
+| `profile_id`                           | 表单里的质量档案；0 或不给是设置里的默认档案（和保存以后一样）          |
+| `sites`                                | 只在这些站点找；不给时是全部启用的站点。没启用的站点不搜，写进 `errors` |
+| `include_keywords`、`exclude_keywords` | 表单里标题包含与排除的原样文字，写法同新建订阅，各最长 1024 字节        |
+| `include_unmatched`                    | 也回对不上这个条目的种子（最多 50 个）                                  |
+
+条目的别名、集号规则与剧集组照旧按库里这一季已有的订阅，没有订阅时按 TMDB。站点的搜索最多等 25 秒（含先读 TMDB 的时间），到点没回来的站点写进 `errors`，`timed_out` 为真；已经回来的站点照常出结果。站点的搜索结果缓存 10 分钟，只改标题包含、排除或质量档案再试会命中缓存；有站点出错的那次不缓存。
+
+回应：`item`（条目，剧集还有 `seasons`、`total_episodes`）、`subscription`（这一季已有的订阅：`id`、`status`、`lock` 锁住的版本；没有时不给）、`profile`（这次打分用的档案，`id` 为 0 是没有质量档案、按分辨率与来源比）、`keywords`（这次搜的词）、`episodes`（每一集的情况：`number`、`state`，下载中的有 `site`）或 `movie`（电影的情况）、`groups`（同一个资源的几个站点的种子合成一组：`meta` 解析出的信息、`verdict` 打分与不符合的全部原因、`span` 覆盖的集、`covers` 能补上的集、`downloading`、`in_library`、`blocked`，以及 `members` 每个站点的种子：标题、副标题、体积、做种、优惠、H&R、拉黑没有与各自的 `verdict`）、`total`、`blocked_count`、`unmatched_count` 与 `unmatched`（对不上的种子与原因）、`errors`、`duration_ms`。回应里没有种子的链接、下载地址与 info hash。
+
+同一个令牌或设备上一次试搜索尚未结束时回 409（`busy`）；全部调用者合计同时最多两次，满了等 2 秒还满时回 503（`busy`）并带 `Retry-After`。客户端取消请求（远程访问的取消、断开连接）时这次试搜索马上结束。

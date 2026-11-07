@@ -27,6 +27,32 @@ On the Explore page, browse TMDB's lists (trending this week, popular and top ra
 
 When you create a subscription, the downloader, category, tags and save folder are filled in from the chosen media library (or the one Choose by type picks), with a note under each field; fields you changed yourself stay when you switch libraries, see [download settings for new subscriptions](media-library.md#download-settings-for-new-subscriptions).
 
+### Trial search
+
+Trial search (试搜索), under Title includes (标题包含) in the dialog, searches the sites once with the quality profile, sites, title includes and excludes the form has now. The results open on the right (full screen on a phone); nothing is pushed and the subscription is not saved. It works when creating and when editing; when editing it uses the form's unsaved changes. Slow sites get at most one minute.
+
+The results have three tabs:
+
+- **Matches (符合条件)**: torrents the quality profile, title includes and excludes, and blocks do not rule out. A match is not necessarily downloaded: each group says which episodes it can fill, or whether those episodes are already in the library or downloading.
+- **Rejected (不符合)**: with every reason, for example 标题含排除词 hdtv (the title contains the exclude word hdtv); blocked torrents say they are blocked.
+- **Not this season (对不上这一季)** (for a film, 对不上这部电影): torrents whose name, year or season does not match the title, with the reason.
+
+At the top: the search words (TMDB's names), how long it took, which episodes of the season are missing, and which sites failed. With the version lock on and a group and resolution locked in the form, groups that do not match it are marked 版本锁不收 (not taken by the version lock); with nothing locked yet, it says the first release that downloads becomes the lock.
+
+The actions on a result only change the form; they take effect when you click Save (保存), or Follow (开始追) and Subscribe (订阅) when creating:
+
+| Action                                                      | What it changes                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Copy title, Copy subtitle (复制标题、复制副标题)            | Copies the selected torrent of a group; when a group has torrents from several sites, click a row to select it                                                                                                                                                                                                                                        |
+| Only / Not this group (只要「组名」、不要「组名」)          | Adds a line with the group to Title includes or Title excludes; shown when a release group was recognized                                                                                                                                                                                                                                             |
+| Pick part of the title (选标题里的一段…)                    | The title is cut at spaces, dots, underscores and brackets; click the first and last block of the part you want (click a block twice to take only it) and add it to Title includes or Title excludes. When the part contains an episode number (for example `S02E03` or `第 3 集`), it warns that adding it to Title includes takes only that episode |
+| Lock this version (锁这个版本)                              | Series: turns the version lock on and locks this group's release group and resolution. A new subscription is locked from the start instead of waiting for the first release that downloads                                                                                                                                                            |
+| Start from this torrent when saved (保存时从这个种子开始追) | New series: pushes this torrent as soon as it is created (as in [Starting from a torrent](#starting-from-a-torrent)) and sets the first episode to the torrent's first episode; a season pack leaves the first episode unchanged. Click 不从它开始 to undo                                                                                            |
+
+A word that is already there is not added again; when adding it would go past 1024 bytes, it is not added and you are asked to remove some words first.
+
+After you change the form, the top of the results says the form changed (表单改过了); click Try again (再试一次) to search with the new form. Site search results are cached for 10 minutes: trying again after changing only Title includes, Title excludes or the quality profile is quick and does not search the sites again; a run with a failing site is not cached, and trying again searches the sites again.
+
 ### Explore
 
 Find by country and genre (按国家与类型找) lists TMDB's films or series by country or region of origin (mainland China, Hong Kong, Taiwan, Japan, South Korea, the United States, the United Kingdom) and genre (animation and documentary; series also have variety, which is TMDB's reality and talk genres), sorted by popularity; either filter can be left open. TMDB lists and search results are cached for 6 hours.
@@ -142,6 +168,8 @@ Two sources feed every subscription, and the results are picked together:
 - **Active search**: films and series on the global interval are searched once per Search interval (主动搜索的间隔), 12 hours by default and at least 6, plus up to 30 minutes of random offset so that the subscriptions do not all search at once; followed series search on their own schedule (see Following a series above). It searches by the English or original title first (with the year for films and the season for series, such as `The Last of Us S02`; a series with an [episode group](#episode-groups) gets no season), then by the Chinese title. A subscription limited to certain sites only searches those; sites under Sites skipped by active search (不参与主动搜索的站点) only contribute through RSS.
 
 To see which releases the sites have right now and pick one yourself, use [search by title](torrent-search.md#search-by-title) on the Torrent search page: it searches and matches the same way, scores releases with the subscription's quality profile and says which episodes each one would fill in.
+
+To see which torrents a subscription would take before you change its title includes, excludes or quality profile, click [Trial search](#trial-search) in the subscribe dialog.
 
 A torrent matches a subscription when:
 
