@@ -33,6 +33,7 @@ func (s *Server) registerSubscribeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/media/subscriptions", s.auth(s.apiSubscriptions))
 	mux.HandleFunc("POST /api/media/subscriptions", s.auth(s.apiSubscriptionCreate))
 	mux.HandleFunc("POST /api/media/subscriptions/schedule-preview", s.auth(s.apiSchedulePreview))
+	mux.HandleFunc("GET /api/media/subscriptions/draft", s.auth(s.apiSubscriptionDraft))
 	mux.HandleFunc("GET /api/media/subscriptions/{id}", s.auth(s.apiSubscriptionGet))
 	mux.HandleFunc("PUT /api/media/subscriptions/{id}", s.auth(s.apiSubscriptionUpdate))
 	mux.HandleFunc("DELETE /api/media/subscriptions/{id}", s.auth(s.apiSubscriptionDelete))
@@ -203,6 +204,34 @@ func (s *Server) apiSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), subscribeSearchTimeout)
 	defer cancel()
 	got, err := svc.CreateSubscription(ctx, in, models.MediaSubFromManual)
+	if err != nil {
+		writeSubscribeError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiSubscriptionDraft handles GET /api/media/subscriptions/draft?media_type=&tmdb_id=&season=：新建订阅前读条目（只读）：
+// 名字、年份、一共几季、这一季的集数、是不是动画、「自动」会整理进哪个库、这一季是不是已经在追。season 不带或 0 是最新一季。
+func (s *Server) apiSubscriptionDraft(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.subscribeService(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	id, err := strconv.Atoi(q.Get("tmdb_id"))
+	if err != nil || id <= 0 {
+		http.Error(w, "tmdb_id 要是正整数", http.StatusBadRequest)
+		return
+	}
+	season := 0
+	if v := q.Get("season"); v != "" {
+		if season, err = strconv.Atoi(v); err != nil {
+			http.Error(w, "season 要是整数", http.StatusBadRequest)
+			return
+		}
+	}
+	got, err := svc.Draft(r.Context(), q.Get("media_type"), id, season)
 	if err != nil {
 		writeSubscribeError(w, err)
 		return
