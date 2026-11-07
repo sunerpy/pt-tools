@@ -118,6 +118,14 @@ const KINDS: NasKind[] = [
     secret: "required",
     plain: "without_credentials",
   },
+  {
+    name: "unraid",
+    label: "Unraid",
+    experimental: true,
+    username: "required",
+    secret: "required",
+    plain: "with_ack",
+  },
 ];
 
 const SHA = "ab".repeat(32);
@@ -188,11 +196,21 @@ describe("添加来源", () => {
     expect(inputOf("ns-secret").placeholder).toBe("必填");
 
     await type("ns-name", "书房的 NAS");
-    await pick("ns-kind", "飞牛（实验性）");
+    await pick("ns-kind", "Unraid（实验性）");
     expect(inputOf("ns-name").value, "改过的名字不跟着换").toBe("书房的 NAS");
     expect(q("ns-experimental")).not.toBeNull();
     expect(q("ns-guide"), "没写准备步骤的类型不显示").toBeNull();
     expect(inputOf("ns-url").placeholder).toBe("https://192.168.1.10");
+
+    await pick("ns-kind", "飞牛（实验性）");
+    expect(text("ns-experimental")).toContain("还没在真机上验证过");
+    expect(text("ns-guide"), "飞牛写怎么建管理员账号").toContain("管理员权限");
+    expect(document.querySelectorAll("[data-testid=ns-guide] li")).toHaveLength(3);
+    expect(inputOf("ns-url").placeholder, "飞牛的地址示例带上它的 https 端口").toBe(
+      "https://192.168.1.10:5667",
+    );
+    expect(q("ns-username"), "飞牛要填用户名").not.toBeNull();
+    expect(inputOf("ns-secret").placeholder).toBe("必填");
 
     await pick("ns-kind", "群晖（实验性）");
     expect(text("ns-experimental")).toContain("还没在真机上验证过");
@@ -430,7 +448,7 @@ describe("添加来源", () => {
     expect(api.create.mock.calls[0]![0].insecure_ack).toBe(true);
   });
 
-  it("地址下面的提示：群晖总要账号密码，写用 http:// 要先确认明文风险", async () => {
+  it("地址下面的提示：群晖总要账号密码，飞牛总要确认，写用 http:// 要先确认明文风险", async () => {
     mountDialog();
     await flush();
     await pick("ns-kind", "Glances");
@@ -438,6 +456,10 @@ describe("添加来源", () => {
       "写 https:// 地址，只写协议、主机和端口；没设用户名密码时也可以用 http://",
     );
     await pick("ns-kind", "群晖（实验性）");
+    expect(text("ns-url-tip")).toBe(
+      "写 https:// 地址，只写协议、主机和端口；用 http:// 要先确认明文风险",
+    );
+    await pick("ns-kind", "飞牛（实验性）");
     expect(text("ns-url-tip")).toBe(
       "写 https:// 地址，只写协议、主机和端口；用 http:// 要先确认明文风险",
     );

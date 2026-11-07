@@ -73,6 +73,14 @@ const KIND_GUIDES: Record<string, NasKindGuide> = {
       "pt-tools 登录失败一次就停下来、等你改好再测，不会反复试密码触发 DSM 的自动封锁",
     ],
   },
+  fnos: {
+    title: "先在飞牛上建一个只给 pt-tools 用的管理员账号（fnOS）",
+    steps: [
+      "在飞牛网页的用户设置里新建一个用户，设一个强密码，给它管理员权限：飞牛只让管理员读存储空间与硬盘",
+      "下面写飞牛网页的地址（https 默认端口 5667，http 默认 5666）和这个账号的用户名、密码，点「测试连接」。账号开了两步验证时填一次验证码，以后 pt-tools 用登录得到的 token 连接，不用再填；用 http 时要先勾选明文风险",
+      "pt-tools 登录失败一次就停下来、等你改好再测，不会反复试密码",
+    ],
+  },
 };
 
 /** 这类来源的准备步骤；没写的类型为 null */
@@ -80,13 +88,18 @@ export function nasKindGuide(kind: string): NasKindGuide | null {
   return KIND_GUIDES[kind] ?? null;
 }
 
-/** 地址栏的示例：Glances 自己只有 http，默认端口 61208；群晖写 DSM 的 https 端口 5001；别的类型写 https */
+/**
+ * 地址栏的示例：Glances 自己只有 http，默认端口 61208；群晖写 DSM 的 https 端口 5001，飞牛写它的 https 端口 5667；
+ * 别的类型写 https
+ */
 export function nasUrlPlaceholder(kind: string): string {
   switch (kind) {
     case "glances":
       return "http://192.168.1.10:61208";
     case "synology":
       return "https://192.168.1.10:5001";
+    case "fnos":
+      return "https://192.168.1.10:5667";
     default:
       return "https://192.168.1.10";
   }
@@ -101,6 +114,8 @@ export function nasKindIcon(kind: string): string {
       return "gauge";
     case "synology":
       return "hard-drive";
+    case "fnos":
+      return "warehouse";
     default:
       return "server";
   }
@@ -465,7 +480,9 @@ export function nasAlertTone(level: NasAlert["level"]): "dang" | "warn" | "info"
  */
 export function nasAlertsAside(kind: string, label: string): string {
   if (!label) return "";
-  return kind === "glances" ? "按软 RAID 阵列的状态" : `${label} 里没关掉的`;
+  if (kind === "glances") return "按软 RAID 阵列的状态";
+  // 拉丁字母结尾的类型名（TrueNAS）与后面的中文之间留空格，中文的（群晖）不留
+  return /[A-Za-z0-9]$/.test(label) ? `${label} 里没关掉的` : `${label}里没关掉的`;
 }
 
 /** 应用那一行：「运行中 1 个 · 共 3 个 · 没有可更新的」 */

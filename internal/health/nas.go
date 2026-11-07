@@ -52,16 +52,21 @@ func NAS(list func() []nas.Status, now func() time.Time) Check {
 	}}
 }
 
-// nasKindLabels 是能接入的来源类型（按名字排，例如「（能接入 Glances、TrueNAS）」）；一种都没有时为空。
+// nasKindLabels 是能接入的来源类型（按名字排，例如「（能接入飞牛、Glances、TrueNAS）」）；一种都没有时为空。
 func nasKindLabels() string {
 	var labels []string
 	for _, k := range nas.Kinds() {
 		labels = append(labels, k.Label)
 	}
+	return nasCanConnect(labels)
+}
+
+// nasCanConnect 写成「（能接入……）」：第一个是拉丁字母开头的（Glances）时与「能接入」之间留空格，紧挨全角括号的一边不留。
+func nasCanConnect(labels []string) string {
 	if len(labels) == 0 {
 		return ""
 	}
-	return "（能接入 " + strings.Join(labels, "、") + "）"
+	return "（能接入" + strings.TrimRight(nasInText(strings.Join(labels, "、")), " ") + "）"
 }
 
 // nasProblem 是一个来源的一个问题：一项里有几个问题时，状态取最坏的，说明依次写，怎么修写最坏的那个的。

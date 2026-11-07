@@ -441,10 +441,11 @@ func TestNASAPI_TrustCertificateThenSave(t *testing.T) {
 	assert.Equal(t, nas.LocalSupported, view.LocalSupported)
 	assert.Equal(t, []nasKindView{
 		{Name: fakeNASKind, Label: "假 NAS", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
+		{Name: nas.KindFnOS, Label: "飞牛", Experimental: true, Username: "required", Secret: "required", Plain: "with_ack"},
 		{Name: nas.KindGlances, Label: "Glances", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
 		{Name: nas.KindSynology, Label: "群晖", Experimental: true, Username: "required", Secret: "required", Plain: "without_credentials"},
 		{Name: nas.KindTrueNAS, Label: "TrueNAS", Username: "none", Secret: "required", Plain: "never"},
-	}, view.Kinds, "按名字排：测试登记的假类型、Glances、群晖与 TrueNAS")
+	}, view.Kinds, "按名字排：测试登记的假类型、飞牛、Glances、群晖与 TrueNAS")
 
 	w = e.do(http.MethodGet, "/api/nas/sources/"+idOf(got.ID), nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -837,6 +838,26 @@ func TestNASAPI_SaveValidation(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "最多接入 20 个来源")
 	assert.Equal(t, http.StatusNotFound, e.saveRaw(99, base()).Code)
 	assert.Equal(t, http.StatusBadRequest, e.do(http.MethodPut, "/api/nas/sources/x", base()).Code)
+}
+
+// 飞牛的 http:// 一律要确认明文风险（明文的 WebSocket 上，登录用的公钥可以被中间人换掉），没填密码的草稿也一样；
+// 确认以后能存，没写端口时补上 5666
+func TestNASAPI_FnOSPlain(t *testing.T) {
+	e := setupNASEnv(t)
+	draft := map[string]any{"name": "飞牛", "kind": nas.KindFnOS, "enabled": false, "url": "http://127.0.0.1", "username": "ptmon"}
+	w := e.saveRaw(0, draft)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "勾选")
+	w = e.do(http.MethodPost, "/api/nas/sources/test", map[string]any{"kind": nas.KindFnOS, "url": "http://127.0.0.1", "username": "ptmon", "secret": "pw"})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "勾选")
+
+	draft["insecure_ack"] = true
+	got := e.save(t, 0, draft)
+	assert.True(t, got.InsecureAck)
+	assert.Equal(t, "http://127.0.0.1:5666", got.URL)
+	got = e.save(t, 0, map[string]any{"name": "飞牛 https", "kind": nas.KindFnOS, "enabled": false, "url": "https://127.0.0.1:5667", "username": "ptmon"})
+	assert.False(t, got.InsecureAck, "https:// 不用确认")
 }
 
 func TestNASAPI_TestValidation(t *testing.T) {
