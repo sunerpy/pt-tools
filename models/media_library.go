@@ -55,15 +55,46 @@ type MediaLibrary struct {
 	SiteSubtitles bool `gorm:"not null;default:false" json:"site_subtitles"`
 	// CSFURL 是 ChineseSubFinder 的地址（空串是不用）；CSFKeyEncrypted 是它的 API Key（加密保存、只写不读）；
 	// CSFPath 是 ChineseSubFinder 里看到的这个库的目录（空串是和 Path 一样）。整理出新视频以后交给它下载字幕
-	CSFURL          string    `gorm:"column:csf_url;size:512;not null;default:''" json:"csf_url"`
-	CSFKeyEncrypted string    `gorm:"column:csf_key_encrypted;type:text;not null;default:''" json:"-"`
-	CSFPath         string    `gorm:"column:csf_path;size:1024;not null;default:''" json:"csf_path"`
-	Enabled         bool      `gorm:"not null;default:false" json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	CSFURL          string `gorm:"column:csf_url;size:512;not null;default:''" json:"csf_url"`
+	CSFKeyEncrypted string `gorm:"column:csf_key_encrypted;type:text;not null;default:''" json:"-"`
+	CSFPath         string `gorm:"column:csf_path;size:1024;not null;default:''" json:"csf_path"`
+	// 下面四项是新建订阅时带出的下载设置：网页与 App 的编辑页在新建时把它们填进表单，服务器在保存与推送订阅时都不补，
+	// 已有的订阅也不跟着变。DownloadDownloaderID 是推到哪个下载器（0 是不指定）；DownloadSavePath 是下载器里看到的保存目录（不是库目录）；
+	// DownloadCategory、DownloadTags 是分类与标签（标签逗号分开）。都可以空着
+	DownloadDownloaderID uint      `gorm:"not null;default:0" json:"download_downloader_id"`
+	DownloadSavePath     string    `gorm:"size:1024;not null;default:''" json:"download_save_path"`
+	DownloadCategory     string    `gorm:"size:128;not null;default:''" json:"download_category"`
+	DownloadTags         string    `gorm:"size:255;not null;default:''" json:"download_tags"`
+	Enabled              bool      `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 func (MediaLibrary) TableName() string { return "media_libraries" }
+
+// ChooseLibrary 在 libs 里给 kind 类型的条目选媒体库：同类型、启用的库里取第一个；条目是动画（anime）时优先取只收动画的库，
+// 同类型里没有这种库时进普通的库；只收动画的库不收别的条目。都没有时返回 nil。返回的是 libs 里的那一项。
+// 整理（媒体库选「自动」时）与新建订阅（编辑页写「自动」会整理进哪个库）共用，两边选的是同一个库。
+func ChooseLibrary(libs []MediaLibrary, kind string, anime bool) *MediaLibrary {
+	var plain, animeLib *MediaLibrary
+	for i := range libs {
+		l := &libs[i]
+		if !l.Enabled || l.Kind != kind {
+			continue
+		}
+		if l.Anime {
+			if animeLib == nil {
+				animeLib = l
+			}
+		} else if plain == nil {
+			plain = l
+		}
+	}
+	if anime && animeLib != nil {
+		return animeLib
+	}
+	return plain
+}
 
 // MediaPathMap 把下载器里看到的路径换成 pt-tools 里看到的路径（pt-tools 在容器里时两边的挂载点不同）。
 // 换算时取最长的匹配前缀；没有匹配时路径不变。

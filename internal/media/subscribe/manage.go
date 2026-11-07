@@ -663,13 +663,19 @@ func (s *Service) CreateSubscription(ctx context.Context, in SubscriptionInput, 
 // draft 按 TMDB 条目拼一份订阅，不写库：名字、原名、年份、IMDb、海报与别名；剧集再取这一季的集数，年份换成这一季的
 // （种子标题里写的多半是它）。剧集的 season 为 0 时取最新的一季。新建订阅与按条目搜索（没有订阅时）共用。
 func (s *Service) draft(ctx context.Context, kind string, id, season int) (*models.MediaSubscription, error) {
+	row, _, err := s.draftWith(ctx, kind, id, season)
+	return row, err
+}
+
+// draftWith 同 draft，另外交出取到的 TMDB 详情：Draft 用它补一共几季与是不是动画，不再多查一次 TMDB。
+func (s *Service) draftWith(ctx context.Context, kind string, id, season int) (*models.MediaSubscription, *tmdb.Result, error) {
 	c, err := s.cfg.Recognizer.TMDB(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	d, err := c.Details(ctx, kind, id)
 	if err != nil {
-		return nil, fmt.Errorf("取 TMDB 条目失败: %w", err)
+		return nil, nil, fmt.Errorf("取 TMDB 条目失败: %w", err)
 	}
 	row := &models.MediaSubscription{
 		MediaType: kind, TMDBID: id, Season: season, Title: d.Title, OriginalTitle: d.OriginalTitle, Year: d.Year,
@@ -681,7 +687,7 @@ func (s *Service) draft(ctx context.Context, kind string, id, season int) (*mode
 	}
 	if kind != models.MediaKindTV {
 		row.Season = 0
-		return row, nil
+		return row, d, nil
 	}
 	if row.Season == 0 {
 		row.Season = max(d.Seasons, 1)
@@ -689,15 +695,15 @@ func (s *Service) draft(ctx context.Context, kind string, id, season int) (*mode
 	se, err := c.Season(ctx, id, row.Season)
 	if err != nil {
 		if errors.Is(err, tmdb.ErrNotFound) {
-			return nil, fmt.Errorf("%w: TMDB 上「%s」没有第 %d 季", ErrInvalid, d.Title, row.Season)
+			return nil, nil, fmt.Errorf("%w: TMDB 上「%s」没有第 %d 季", ErrInvalid, d.Title, row.Season)
 		}
-		return nil, fmt.Errorf("取 TMDB 季详情失败: %w", err)
+		return nil, nil, fmt.Errorf("取 TMDB 季详情失败: %w", err)
 	}
 	row.TotalEpisodes = len(se.Episodes)
 	if y := yearOf(se.AirDate); y > 0 {
 		row.Year = y
 	}
-	return row, nil
+	return row, d, nil
 }
 
 // UpdateSubscription 修改订阅（条目与季不能改）。

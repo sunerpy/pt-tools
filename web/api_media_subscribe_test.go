@@ -100,6 +100,7 @@ var subscribeRoutes = []struct{ method, path string }{
 	{http.MethodPut, "/api/media/quality-profiles/1"},
 	{http.MethodDelete, "/api/media/quality-profiles/1"},
 	{http.MethodGet, "/api/media/subscriptions"},
+	{http.MethodGet, "/api/media/subscriptions/draft?media_type=tv&tmdb_id=1001"},
 	{http.MethodPost, "/api/media/subscriptions"},
 	{http.MethodGet, "/api/media/subscriptions/1"},
 	{http.MethodPut, "/api/media/subscriptions/1"},
@@ -276,6 +277,52 @@ func TestSubscribeAPI_DoubanFetch(t *testing.T) {
 }
 
 // 订阅接口的错误码：参数不对 400、找不到 404、正在处理 409、TMDB 限流 429、超时 504、TMDB 不能访问 502、其他 500
+// 新建订阅前读条目：回应的字段、「自动」会选到的库、这一季在追时的订阅编号；参数不对 400，TMDB 上没有 404
+func TestSubscribeAPI_Draft(t *testing.T) {
+	mux := newSubscribeServer(t)
+	lib := models.MediaLibrary{Name: "综艺", Kind: models.MediaKindTV, Path: "/lib/variety", Enabled: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&lib).Error)
+	w := serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/draft?media_type=tv&tmdb_id=1001", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	keys := make([]string, 0, len(raw))
+	for k := range raw {
+		keys = append(keys, k)
+	}
+	assert.ElementsMatch(t, []string{
+		"media_type", "tmdb_id", "season", "seasons", "total_episodes", "title", "original_title", "year", "poster_path",
+		"anime", "auto_library_id", "subscription_id",
+	}, keys)
+	var d subscribe.SubscriptionDraft
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &d))
+	assert.Equal(t, subscribe.SubscriptionDraft{
+		MediaType: "tv", TMDBID: 1001, Season: 1, Seasons: 1, TotalEpisodes: 2, Title: "假综艺", OriginalTitle: "假综艺", Year: 2026,
+		AutoLibraryID: lib.ID,
+	}, d)
+
+	w = serveAuthed(mux, http.MethodPost, "/api/media/subscriptions", `{"media_type":"tv","tmdb_id":1001,"season":1}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var sub models.MediaSubscription
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sub))
+	w = serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/draft?media_type=tv&tmdb_id=1001&season=1", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &d))
+	assert.Equal(t, sub.ID, d.SubscriptionID)
+
+	w = serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/draft?media_type=movie&tmdb_id=278", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"title":"肖申克的救赎"`)
+	assert.Contains(t, w.Body.String(), `"auto_library_id":0`, "没有电影库")
+	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/draft?media_type=movie&tmdb_id=999", "").Code)
+	for _, q := range []string{
+		"media_type=book&tmdb_id=1001", "media_type=tv", "media_type=tv&tmdb_id=x", "media_type=tv&tmdb_id=-3",
+		"media_type=tv&tmdb_id=1001&season=x", "media_type=tv&tmdb_id=1001&season=-1", "media_type=tv&tmdb_id=1001&season=9",
+	} {
+		assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/media/subscriptions/draft?"+q, "").Code, q)
+	}
+}
+
 func TestWriteSubscribeError(t *testing.T) {
 	for _, c := range []struct {
 		err  error

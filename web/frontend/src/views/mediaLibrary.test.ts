@@ -98,6 +98,23 @@ function fill(id: string, v: string) {
   i.dispatchEvent(new Event("input"));
 }
 
+/** 点开下拉选一项（按选项的文字） */
+async function pick(id: string, text: string) {
+  const sel = q(id)!;
+  (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+  const listId = sel.querySelector("input")?.getAttribute("aria-controls");
+  await vi.waitFor(() => {
+    const opt = [
+      ...(document
+        .getElementById(listId ?? "")
+        ?.querySelectorAll<HTMLElement>(".el-select-dropdown__item") ?? []),
+    ].find((o) => (o.textContent ?? "").trim() === text);
+    expect(opt, `下拉里有「${text}」`).toBeTruthy();
+    opt!.click();
+  });
+  await flush();
+}
+
 const settings = {
   auto_enabled: true,
   auto_since: "2026-10-07T12:00:00Z",
@@ -173,10 +190,17 @@ const server = {
 };
 
 async function mountPage(
-  opts: { libsFail?: boolean; settingsFail?: boolean; library?: Record<string, unknown> } = {},
+  opts: {
+    libsFail?: boolean;
+    settingsFail?: boolean;
+    library?: Record<string, unknown>;
+    downloaders?: Record<string, unknown>[];
+    downloadersFail?: boolean;
+    settings?: Record<string, unknown>;
+  } = {},
 ) {
   if (opts.settingsFail) api.settings.mockRejectedValue(new Error("读取整理设置失败"));
-  else api.settings.mockResolvedValue(settings);
+  else api.settings.mockResolvedValue(opts.settings ?? settings);
   media.settings.mockResolvedValue({
     key_source: "user",
     has_fanart_key: false,
@@ -218,17 +242,21 @@ async function mountPage(
     { id: 8, path: "/media/off", enabled: false, created_at: "", updated_at: "", realtime: "on" },
   ]);
   api.templatePreview.mockResolvedValue({ template: "", preview: "示例路径" });
-  dl.list.mockResolvedValue([
-    {
-      id: 1,
-      name: "qb",
-      type: "qbittorrent",
-      url: "",
-      username: "",
-      is_default: true,
-      enabled: true,
-    },
-  ]);
+  if (opts.downloadersFail) dl.list.mockRejectedValue(new Error("读取下载器失败"));
+  else
+    dl.list.mockResolvedValue(
+      opts.downloaders ?? [
+        {
+          id: 1,
+          name: "qb",
+          type: "qbittorrent",
+          url: "",
+          username: "",
+          is_default: true,
+          enabled: true,
+        },
+      ],
+    );
   notifications.list.mockResolvedValue([
     { id: 2, channel_type: "telegram", name: "TG", enabled: true },
   ]);
@@ -334,6 +362,10 @@ describe("媒体库", () => {
         site_subtitles: false,
         csf_url: "",
         csf_path: "",
+        download_downloader_id: 0,
+        download_save_path: "",
+        download_category: "",
+        download_tags: "",
         enabled: true,
       },
     ]);
@@ -400,6 +432,119 @@ describe("媒体库", () => {
       csf_path: "/csf/movies",
       csf_key: "new-key",
     });
+  });
+
+  it("媒体库：新建订阅时带出的下载设置跟着保存；停用的下载器标出来；下载器删了显示不指定、保存时清成 0；不在整理范围里时提醒", async () => {
+    await mountPage({
+      library: {
+        ...library,
+        kind: "tv",
+        download_downloader_id: 9,
+        download_save_path: "/downloads/tv",
+        download_category: "tv",
+        download_tags: "pt-tools",
+      },
+      downloaders: [
+        {
+          id: 1,
+          name: "qB",
+          type: "qbittorrent",
+          url: "",
+          username: "",
+          is_default: true,
+          enabled: true,
+        },
+        {
+          id: 2,
+          name: "qB-2",
+          type: "qbittorrent",
+          url: "",
+          username: "",
+          is_default: false,
+          enabled: false,
+        },
+      ],
+    });
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-dl-downloader")).not.toBeNull());
+    await flush();
+    expect(q("ml-lib-dl-gone")!.textContent).toContain("原来设的下载器已删除，保存时改成不指定");
+    expect(q("ml-lib-dl-downloader")!.textContent, "删了的下载器显示不指定").toContain("不指定");
+    expect(inputOf("ml-lib-dl-path").value).toBe("/downloads/tv");
+    expect(inputOf("ml-lib-dl-category").value).toBe("tv");
+    expect(q("ml-lib-dl-qb")!.textContent).toContain("默认种子管理模式是「自动」");
+    // 整理范围只收分类 movies、保存目录在 /downloads 下
+    expect(q("ml-lib-dl-scope")!.textContent).toContain(
+      "这样推送的种子下完不会自动整理：分类「tv」不在范围里（movies）",
+    );
+
+    await pick("ml-lib-dl-downloader", "qB-2（已停用）");
+    expect(q("ml-lib-dl-disabled")!.textContent).toContain(
+      "这个下载器停用期间，新建订阅不会带出它",
+    );
+    expect(q("ml-lib-dl-gone"), "选了别的下载器以后不再写删了").toBeNull();
+    await pick("ml-lib-dl-downloader", "qB");
+    expect(q("ml-lib-dl-disabled")).toBeNull();
+
+    fill("ml-lib-dl-category", " movies ");
+    fill("ml-lib-dl-tags", " pt-tools,追剧 ");
+    fill("ml-lib-dl-path", "/data/tv");
+    await flush();
+    expect(q("ml-lib-dl-scope")!.textContent).toContain("保存目录不在范围里（/downloads）");
+    fill("ml-lib-dl-path", " /downloads/tv2 ");
+    await flush();
+    expect(q("ml-lib-dl-scope"), "都在范围里时不提醒").toBeNull();
+
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
+      download_downloader_id: 1,
+      download_save_path: "/downloads/tv2",
+      download_category: "movies",
+      download_tags: "pt-tools,追剧",
+    });
+
+    // 列表里的启用开关照原样带着四项（删了的下载器编号照存，服务器不挡）
+    q("ml-lib-enabled-3")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(2));
+    expect(api.updateLibrary.mock.calls[1]![1]).toMatchObject({
+      enabled: false,
+      download_downloader_id: 9,
+      download_save_path: "/downloads/tv",
+      download_category: "tv",
+      download_tags: "pt-tools",
+    });
+  });
+
+  it("媒体库：库里的下载器删了、保存时发出 0；自动整理与定期扫描都关着时不提醒范围", async () => {
+    await mountPage({
+      settings: { ...settings, auto_enabled: false, scan_enabled: false },
+      library: { ...library, download_downloader_id: 9, download_category: "tv" },
+    });
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-dl-gone")).not.toBeNull());
+    expect(q("ml-lib-dl-scope"), "不自动整理时范围不起作用").toBeNull();
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
+      download_downloader_id: 0,
+      download_category: "tv",
+    });
+  });
+
+  it("媒体库：读不到下载器列表时不改库里存的下载器", async () => {
+    await mountPage({ library: { ...library, download_downloader_id: 9 }, downloadersFail: true });
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-dl-downloader")).not.toBeNull());
+    await flush();
+    expect(q("ml-lib-dl-gone")).toBeNull();
+    expect(q("ml-lib-dl-downloader")!.textContent).toContain("下载器 9");
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({ download_downloader_id: 9 });
   });
 
   it("媒体库：新建时填了 ChineseSubFinder 的地址却没填 Key 不保存；地址没填时测试不发请求", async () => {

@@ -238,6 +238,8 @@ describe("探索", () => {
       media_type: "movie",
       tmdb_id: 693134,
       season: 0,
+      // 电影也能选媒体库：新建时带上，0 是按类型自动选
+      library_id: 0,
     });
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("已订阅：沙丘2"));
     await vi.waitFor(() => expect(api.explore).toHaveBeenCalledTimes(2));

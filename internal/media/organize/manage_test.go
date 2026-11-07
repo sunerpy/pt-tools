@@ -154,6 +154,81 @@ func TestLibraryScrapeItems(t *testing.T) {
 	assert.Equal(t, []string{"thumb"}, tv.ScrapeItems, "剧集只要集截图也行")
 }
 
+// 新建订阅时带出的下载设置：保存、读回、清空；太长与不存在的下载器报错；
+// 库里原来的下载器删了以后，原样带着旧编号保存照常成功（经配置网关只改库的别的字段时不被挡住）
+func TestLibraryDownloadDefaults(t *testing.T) {
+	e := newEnv(t)
+	var qb models.DownloaderSetting
+	require.NoError(t, e.db.First(&qb).Error)
+	in := LibraryInput{
+		Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, Enabled: true,
+		DownloadDownloaderID: qb.ID, DownloadSavePath: " /downloads/tv/ ", DownloadCategory: " tv ", DownloadTags: " pt-tools,追剧 ",
+	}
+	v, err := e.svc.SaveLibrary(e.ctx, 0, in)
+	require.NoError(t, err)
+	assert.Equal(t, qb.ID, v.DownloadDownloaderID)
+	assert.Equal(t, "/downloads/tv/", v.DownloadSavePath, "只去掉首尾空白：是下载器里看到的目录，不按 pt-tools 这边规整")
+	assert.Equal(t, "tv", v.DownloadCategory)
+	assert.Equal(t, "pt-tools,追剧", v.DownloadTags)
+	list, err := e.svc.Libraries(e.ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, v.DownloadSavePath, list[0].DownloadSavePath, "读回")
+	assert.Equal(t, v.DownloadTags, list[0].DownloadTags)
+
+	// 改别的字段时原样带着，不变
+	in.Name = "剧集库"
+	upd, err := e.svc.SaveLibrary(e.ctx, v.ID, in)
+	require.NoError(t, err)
+	assert.Equal(t, "剧集库", upd.Name)
+	assert.Equal(t, qb.ID, upd.DownloadDownloaderID)
+	assert.Equal(t, "tv", upd.DownloadCategory)
+
+	// 四项都清空
+	upd, err = e.svc.SaveLibrary(e.ctx, v.ID, LibraryInput{Name: "剧集库", Kind: models.MediaKindTV, Path: e.tv, Enabled: true})
+	require.NoError(t, err)
+	var row models.MediaLibrary
+	require.NoError(t, e.db.First(&row, v.ID).Error)
+	for _, got := range []any{upd.DownloadDownloaderID, row.DownloadDownloaderID} {
+		assert.Zero(t, got, "清空下载器")
+	}
+	assert.Empty(t, row.DownloadSavePath+row.DownloadCategory+row.DownloadTags, "清空保存目录、分类、标签")
+
+	// 上限：保存目录 1024 字节，分类、标签各 128 字
+	ok := LibraryInput{
+		Name: "上限", Kind: models.MediaKindTV, Path: e.anime, Enabled: true,
+		DownloadSavePath: "/" + strings.Repeat("a", 1023), DownloadCategory: strings.Repeat("类", 128), DownloadTags: strings.Repeat("标", 128),
+	}
+	_, err = e.svc.SaveLibrary(e.ctx, 0, ok)
+	require.NoError(t, err, "刚好到上限")
+	for name, bad := range map[string]LibraryInput{
+		"保存目录": {Name: "x", Kind: models.MediaKindTV, Path: e.anime, DownloadSavePath: "/" + strings.Repeat("a", 1024)},
+		"分类":   {Name: "x", Kind: models.MediaKindTV, Path: e.anime, DownloadCategory: strings.Repeat("类", 129)},
+		"标签":   {Name: "x", Kind: models.MediaKindTV, Path: e.anime, DownloadTags: strings.Repeat("标", 129)},
+		"下载器":  {Name: "x", Kind: models.MediaKindTV, Path: e.anime, DownloadDownloaderID: qb.ID + 99},
+	} {
+		_, err = e.svc.SaveLibrary(e.ctx, 0, bad)
+		require.ErrorIs(t, err, ErrInvalid, name)
+		assert.Contains(t, err.Error(), name, name)
+	}
+	_, err = e.svc.SaveLibrary(e.ctx, v.ID, LibraryInput{Name: "剧集库", Kind: models.MediaKindTV, Path: e.tv, DownloadDownloaderID: qb.ID + 99})
+	require.ErrorIs(t, err, ErrInvalid, "改成不存在的下载器")
+	assert.Contains(t, err.Error(), "下载器不存在")
+
+	// 设上下载器以后它被删了：原样带着旧编号照常保存，改成别的不存在的编号仍然报错
+	_, err = e.svc.SaveLibrary(e.ctx, v.ID, LibraryInput{Name: "剧集库", Kind: models.MediaKindTV, Path: e.tv, Enabled: true, DownloadDownloaderID: qb.ID})
+	require.NoError(t, err)
+	require.NoError(t, e.db.Delete(&models.DownloaderSetting{}, qb.ID).Error)
+	upd, err = e.svc.SaveLibrary(e.ctx, v.ID, LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, Enabled: true, DownloadDownloaderID: qb.ID})
+	require.NoError(t, err, "原样不变的旧编号不检查")
+	assert.Equal(t, "剧集", upd.Name)
+	assert.Equal(t, qb.ID, upd.DownloadDownloaderID)
+	_, err = e.svc.SaveLibrary(e.ctx, v.ID, LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, DownloadDownloaderID: qb.ID + 1})
+	require.ErrorIs(t, err, ErrInvalid)
+	_, err = e.svc.SaveLibrary(e.ctx, 0, LibraryInput{Name: "新库", Kind: models.MediaKindTV, Path: e.anime, DownloadDownloaderID: qb.ID})
+	require.ErrorIs(t, err, ErrInvalid, "新建的库不能用已经删了的下载器")
+}
+
 func TestPathMapsCRUD(t *testing.T) {
 	e := newEnv(t)
 	maps, err := e.svc.PathMaps(e.ctx)

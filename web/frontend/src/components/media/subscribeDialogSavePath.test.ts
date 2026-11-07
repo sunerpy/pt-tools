@@ -15,6 +15,8 @@ const api = vi.hoisted(() => ({
   update: vi.fn(),
   previewSchedule: vi.fn(async () => ({ next: [] })),
   episodeGroups: vi.fn(async () => ({ groups: [] })),
+  // 新建时读的草稿（带出媒体库的下载设置）：这里没有媒体库，不带出
+  draft: vi.fn(async () => null),
 }));
 
 const DLS = [

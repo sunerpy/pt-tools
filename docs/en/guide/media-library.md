@@ -25,16 +25,17 @@ When the downloader and pt-tools see different paths (for example when they run 
 
 Each library takes one kind of title. Create one for movies and one for TV shows; to keep animation apart, add a library with Animation only (只收动画) checked (titles with TMDB's "Animation" genre go there first, and to the regular library when there is no such library). When several libraries share a type, the first one is used.
 
-| Field           | Description                                                                                                                                                         |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Type            | Movie or TV; with Animation only checked it takes animation only                                                                                                    |
-| Library folder  | The path as pt-tools sees it (absolute)                                                                                                                             |
-| Mode            | Hard link (default), copy, symbolic link or move, see below                                                                                                         |
-| Template        | Leave empty for the default, see [naming templates](#naming-templates)                                                                                              |
-| Scraping        | Write NFO files and images; what to write, which image language and which data sources to use, see [scraping](#scraping); turn it off to let the media server do it |
-| Overwrite       | Rewrite NFO files and images on every run; when off, existing files are left alone                                                                                  |
-| Same-name files | Whether to replace an old version pt-tools put into the library, see [files with the same name](#files-with-the-same-name)                                          |
-| Categories      | With Organise by category checked, files go into `<library folder>/<category>/…`, see [secondary categories](#secondary-categories)                                 |
+| Field             | Description                                                                                                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type              | Movie or TV; with Animation only checked it takes animation only                                                                                                             |
+| Library folder    | The path as pt-tools sees it (absolute)                                                                                                                                      |
+| Mode              | Hard link (default), copy, symbolic link or move, see below                                                                                                                  |
+| Template          | Leave empty for the default, see [naming templates](#naming-templates)                                                                                                       |
+| Scraping          | Write NFO files and images; what to write, which image language and which data sources to use, see [scraping](#scraping); turn it off to let the media server do it          |
+| Overwrite         | Rewrite NFO files and images on every run; when off, existing files are left alone                                                                                           |
+| Same-name files   | Whether to replace an old version pt-tools put into the library, see [files with the same name](#files-with-the-same-name)                                                   |
+| Categories        | With Organise by category checked, files go into `<library folder>/<category>/…`, see [secondary categories](#secondary-categories)                                          |
+| Download settings | Downloader, save folder, category and tags filled in when you create a subscription, see [download settings for new subscriptions](#download-settings-for-new-subscriptions) |
 
 | Mode          | Description                                                                                                                              |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -48,6 +49,17 @@ When a move cannot delete the source file (for example because the download fold
 Copying tries copy-on-write first (reflink, on Linux when the download folder and the library are on the same file system that supports it, such as Btrfs or XFS): the library copy shares the data on disk with the source and takes no extra space until one side changes. The mode is still copy, and the organise record says 复制用了写时复制. When the file system doesn't support it, across file systems, or on other operating systems, the file is copied byte by byte as before.
 
 Click Check (检查) while editing a library: it confirms the folder exists and is writable, and for hard links it creates a file in the pt-tools path of each path mapping and tries to hard-link it into the library, which confirms they are on the same file system. The test files are removed afterwards.
+
+### Download settings for new subscriptions
+
+A library can set a downloader, a save folder, a category and tags; all of them can stay empty. When you create a subscription in Follow and subscribe (追剧与订阅) and pick this library, or Choose by type (按类型自动选) picks it, these fields are filled into the subscription form, with a note under each saying which library it came from. You can change them before saving.
+
+- They are filled in only when you create a subscription in the web dialog. Existing subscriptions keep their settings, and nothing is added when a subscription is saved or pushes a torrent. Subscriptions created by the bot, the Douban wish list, Servarr or the AI assistant don't get them.
+- A field you changed yourself (typed, cleared or picked something else) stays when you switch libraries; Use library "X" (换成媒体库「X」的) next to it restores the library's value. Fields that came from a library follow the library when you switch, and a field the new library leaves empty is cleared.
+- Editing an existing subscription fills nothing in: after you switch libraries, a line Apply "X"'s download settings (套用「X」的下载设置) appears, and the fields change only when you click it.
+- A downloader that is disabled or deleted is not filled in; the push uses the default downloader from the settings, and the form says why. When you edit the library after its downloader was deleted, the downloader shows Not set (不指定) and is cleared when you save.
+- The save folder is the folder as the downloader sees it, not the library folder. When qBittorrent's default torrent management mode is Automatic, torrents go to their category's folder (the default folder when there is no category) and the save folder has no effect; with [per-title download folders](media-subscribe.md#per-title-download-folders) turned on in the subscription settings, pt-tools makes qBittorrent use the save folder.
+- With automatic organising or periodic scanning on, editing a library warns when these fields fall outside the [organising scope](#when-organising-runs): torrents pushed this way would not be organised when they finish.
 
 ## Naming templates
 

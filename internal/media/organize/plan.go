@@ -768,7 +768,7 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 			return false
 		}
 	} else {
-		lib = chooseLibrary(libs, kind, p.Match.IsAnimation())
+		lib = models.ChooseLibrary(libs, kind, p.Match.IsAnimation())
 	}
 	if lib == nil {
 		what := "电影"
@@ -792,27 +792,6 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 		p.Category, p.root = cat, filepath.Join(lib.Path, dir)
 	}
 	return true
-}
-
-func chooseLibrary(libs []models.MediaLibrary, kind string, anime bool) *models.MediaLibrary {
-	var plain, animeLib *models.MediaLibrary
-	for i := range libs {
-		l := &libs[i]
-		if !l.Enabled || l.Kind != kind {
-			continue
-		}
-		if l.Anime {
-			if animeLib == nil {
-				animeLib = l
-			}
-		} else if plain == nil {
-			plain = l
-		}
-	}
-	if anime && animeLib != nil {
-		return animeLib
-	}
-	return plain
 }
 
 // showDir 是剧集目录：模板算出的路径（从 root 算起）至少有两级时取第一级；平铺时为空。
