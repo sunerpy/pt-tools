@@ -79,11 +79,21 @@ const KINDS: NasKind[] = [
     name: "fnos",
     label: "飞牛",
     experimental: true,
+    verified: "fnOS 1.2.1000",
     username: "required",
     secret: "required",
     plain: "with_ack",
   },
 ];
+
+const SYNOLOGY: NasKind = {
+  name: "synology",
+  label: "群晖",
+  experimental: true,
+  username: "required",
+  secret: "required",
+  plain: "without_credentials",
+};
 
 function snap(over: Partial<NasSnapshot["system"]> = {}): NasSnapshot {
   return {
@@ -192,6 +202,12 @@ describe("NAS 监控页", () => {
     const fn = text("nm-row-3");
     expect(fn).toContain("飞牛 · http://192.168.1.3:5666");
     expect(fn).toContain("实验性");
+    const pill = [...q("nm-row-3")!.querySelectorAll<HTMLElement>(".pt-pill")].find(
+      (e) => e.textContent?.trim() === "实验性",
+    )!;
+    expect(pill.title, "真机验证过的类型：悬停写按非官方协议接入与验证过的版本").toBe(
+      "实验性：按非官方协议接入，飞牛升级后可能失效（在 fnOS 1.2.1000 上验证过）",
+    );
     expect(fn).toContain("明文连接");
     const table = text("nm-table");
     expect(table).toContain("truenas · i7-12700 · 8 核 · 64.0 GB · TrueNAS SCALE 25.04.1");
@@ -297,9 +313,24 @@ describe("NAS 监控页", () => {
     expect(text("nm-kinds"), "没有实验性的类型时不写实验性的说明").toBe("能接入：TrueNAS。");
     view?.unmount();
 
+    await mountPage(
+      nasView({ kinds: [KINDS[0]!, { ...KINDS[2]!, verified: undefined }, SYNOLOGY] }),
+    );
+    expect(text("nm-kinds"), "实验性的都没在真机上验证过时照旧一句").toBe(
+      "能接入：TrueNAS、飞牛（实验性）、群晖（实验性）。实验性的还没在真机上验证过，读到的数据可能不全。",
+    );
+    view?.unmount();
+
+    await mountPage(nasView({ kinds: [...KINDS, SYNOLOGY] }));
+    expect(text("nm-kinds"), "验证过的写验证过的版本，没验证过的点名").toBe(
+      "能接入：TrueNAS、Glances、飞牛（实验性）、群晖（实验性）。群晖还没在真机上验证过，读到的数据可能不全。" +
+        "飞牛按非官方协议接入，飞牛升级后可能失效（在 fnOS 1.2.1000 上验证过）。",
+    );
+    view?.unmount();
+
     await mountPage();
     expect(text("nm-kinds")).toBe(
-      "能接入：TrueNAS、Glances、飞牛（实验性）。实验性的还没在真机上验证过，读到的数据可能不全。",
+      "能接入：TrueNAS、Glances、飞牛（实验性）。飞牛按非官方协议接入，飞牛升级后可能失效（在 fnOS 1.2.1000 上验证过）。",
     );
     const add = [...q("nm-sources")!.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("添加来源"),

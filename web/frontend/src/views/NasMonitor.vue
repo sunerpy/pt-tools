@@ -29,6 +29,7 @@ import {
   nasStateView,
   nasUpdatedText,
   nasUsable,
+  nasVerifiedNote,
 } from "@/utils/nas";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, ref } from "vue";
@@ -71,9 +72,13 @@ function addressText(s: NasSource): string {
   return isLocal(s) ? "pt-tools 所在的主机" : (s.url ?? "");
 }
 
-function tagsOf(s: NasSource): { text: string; tone: "info" | "warn" }[] {
-  const out: { text: string; tone: "info" | "warn" }[] = [];
-  if (s.experimental) out.push({ text: "实验性", tone: "info" });
+/** 来源下面的标签；在真机上验证过的实验性类型，「实验性」的悬停提示写验证过的版本（标签里放不下这一句） */
+function tagsOf(s: NasSource): { text: string; tone: "info" | "warn"; title?: string }[] {
+  const out: { text: string; tone: "info" | "warn"; title?: string }[] = [];
+  if (s.experimental) {
+    const note = nasVerifiedNote(kinds.value.find((k) => k.name === s.kind));
+    out.push({ text: "实验性", tone: "info", title: note ? `实验性：${note}` : undefined });
+  }
   if (/^http:\/\//i.test(s.url ?? "")) out.push({ text: "明文连接", tone: "warn" });
   return out;
 }
@@ -193,14 +198,26 @@ const homeNow = computed(() => {
     : `自动：显示第一个能用的来源，没有时用本机；现在显示 ${name}。`;
 });
 
-/** 说明里「能接入」那一句 */
+/**
+ * 说明里「能接入」那一句。实验性的类型都没在真机上验证过时照旧写一句；有验证过的时，没验证过的点名，
+ * 验证过的写按非官方协议接入与验证过的版本
+ */
 const kindsText = computed(() => {
   if (!kinds.value.length) return "这个版本还不能接入 NAS，只有本机来源。";
   const names = kinds.value.map((k) => (k.experimental ? `${k.label}（实验性）` : k.label));
-  const text = `能接入：${names.join("、")}。`;
-  return kinds.value.some((k) => k.experimental)
-    ? `${text}实验性的还没在真机上验证过，读到的数据可能不全。`
-    : text;
+  const experimental = kinds.value.filter((k) => k.experimental);
+  const verified = experimental.filter((k) => k.verified);
+  const unverified = experimental.filter((k) => !k.verified);
+  const parts = [`能接入：${names.join("、")}。`];
+  if (unverified.length) {
+    parts.push(
+      verified.length
+        ? `${unverified.map((k) => k.label).join("、")}还没在真机上验证过，读到的数据可能不全。`
+        : "实验性的还没在真机上验证过，读到的数据可能不全。",
+    );
+  }
+  for (const k of verified) parts.push(`${k.label}${nasVerifiedNote(k)}。`);
+  return parts.join("");
 });
 
 // —— 添加、编辑、删除
@@ -288,9 +305,14 @@ async function remove(s: NasSource) {
                     {{ kindText(row) }} · {{ addressText(row) }}
                   </div>
                   <div v-if="tagsOf(row).length" class="nm-tags">
-                    <PtStatusPill v-for="t in tagsOf(row)" :key="t.text" :tone="t.tone" size="sm">{{
-                      t.text
-                    }}</PtStatusPill>
+                    <PtStatusPill
+                      v-for="t in tagsOf(row)"
+                      :key="t.text"
+                      :tone="t.tone"
+                      :title="t.title"
+                      size="sm"
+                      >{{ t.text }}</PtStatusPill
+                    >
                   </div>
                 </div>
               </div>
@@ -368,9 +390,14 @@ async function remove(s: NasSource) {
             <template #meta>
               <span>{{ kindText(s) }}</span>
               <span class="nm-card__addr">{{ addressText(s) }}</span>
-              <PtStatusPill v-for="t in tagsOf(s)" :key="t.text" :tone="t.tone" size="sm">{{
-                t.text
-              }}</PtStatusPill>
+              <PtStatusPill
+                v-for="t in tagsOf(s)"
+                :key="t.text"
+                :tone="t.tone"
+                :title="t.title"
+                size="sm"
+                >{{ t.text }}</PtStatusPill
+              >
             </template>
             <template #status>
               <PtStatusPill :tone="nasStateView(s.state).tone" dot size="sm">{{

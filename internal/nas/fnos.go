@@ -23,6 +23,7 @@ func init() {
 		Name:         KindFnOS,
 		Label:        "飞牛",
 		Experimental: true,
+		Verified:     "fnOS 1.2.1000",
 		Username:     UsernameRequired,
 		Plain:        PlainWithAck,
 		ParseURL:     fnosParseURL,

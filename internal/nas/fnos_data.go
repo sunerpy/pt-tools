@@ -54,9 +54,10 @@ func (r *fnosReader) get(ctx context.Context, req string, params map[string]any,
 	return fnosFacet(err, what), false, nil
 }
 
-// fnosFacet 是一类数据没读成时的情况：4352 是账号不是管理员（存储与容器要管理员），别的照飞牛的原因写。
+// fnosFacet 是一类数据没读成时的情况：4352 是账号不是管理员（存储要管理员），容器要管理员时回 52429312，
+// 别的照飞牛的原因写。
 func fnosFacet(err error, what string) Facet {
-	if fnosErrno(err) == fnosErrNotAdmin {
+	if n := fnosErrno(err); n == fnosErrNotAdmin || n == fnosErrDockerNotAdmin {
 		return Facet{Status: FacetDenied, Reason: "这个账号没有读" + what + "的权限：飞牛只让管理员读，见「添加来源」里飞牛的准备步骤"}
 	}
 	return Facet{Status: FacetError, Reason: err.Error()}
@@ -266,7 +267,9 @@ type fnosMemReply struct {
 	} `json:"data"`
 }
 
-// fillFnosMemory 读内存（每次）：已用是总量减可用（同本机与其他来源）；没给可用时用飞牛的 used。
+// fillFnosMemory 读内存（每次）：已用用飞牛的 used，同飞牛网页上的「已使用」；没给 used 时用总量减可用。
+// fnOS 1.2.1000 真机上 total 含 reserved（固件与内核占着的那块，4 GB 的虚拟机里约 176 MiB），
+// total − available 等于 used + reserved，按它算的占用比飞牛自己显示的高几个百分点。
 func fillFnosMemory(ctx context.Context, r *fnosReader, snap *Snapshot) error {
 	var reply fnosMemReply
 	f, ok, err := r.get(ctx, fnosReqMem, nil, &reply, "内存")
@@ -291,13 +294,14 @@ func fillFnosMem(totalN, availN, usedN synoNum, snap *Snapshot) Facet {
 		return Facet{Status: FacetError, Reason: "飞牛没给内存总量"}
 	}
 	var used uint64
-	if avail, ok := availN.uint(); ok {
-		used = total - min(avail, total)
-	} else if u, ok := usedN.uint(); ok {
+	if u, ok := usedN.uint(); ok {
 		used = min(u, total)
+	} else if avail, ok := availN.uint(); ok {
+		used = total - min(avail, total)
 	} else {
 		return Facet{Status: FacetError, Reason: "飞牛没给内存用量"}
 	}
+	// Available 照 Memory 的约定写成 Total − Used（这样 reserved 也算在可用里，飞牛的网页不显示可用）
 	snap.Memory = Memory{Total: total, Used: used, Available: total - used}
 	return Facet{Status: FacetOK}
 }
@@ -646,6 +650,7 @@ func fillFnosDisks(ctx context.Context, r *fnosReader, snap *Snapshot, diskOf ma
 }
 
 // fnosContainers 是 appcgi.dockermgr.containerList：Docker 的容器（数据在最外层的 rsp 里）。飞牛的容器列表不说哪些能更新。
+// fnOS 1.2.1000 真机上没有容器时（Docker 没启动也一样）回 succ、不带 rsp，飞牛的网页写「暂无容器」。
 type fnosContainers struct {
 	Rsp *[]struct {
 		State string `json:"State"`
@@ -659,14 +664,15 @@ func fillFnosApps(ctx context.Context, r *fnosReader, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	if ok && reply.Rsp == nil {
-		f = Facet{Status: FacetError, Reason: "飞牛没给容器的列表"}
-	}
 	snap.Facets[FacetApps] = f
-	if f.Status != FacetOK {
+	if !ok {
 		return nil
 	}
-	snap.Apps = Apps{Total: len(*reply.Rsp), UpdatesUnknown: true}
+	snap.Apps = Apps{UpdatesUnknown: true}
+	if reply.Rsp == nil {
+		return nil
+	}
+	snap.Apps.Total = len(*reply.Rsp)
 	for _, c := range *reply.Rsp {
 		if strings.EqualFold(c.State, "running") {
 			snap.Apps.Running++

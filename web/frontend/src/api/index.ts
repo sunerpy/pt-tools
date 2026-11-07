@@ -6224,11 +6224,13 @@ export interface NasSource {
 /**
  * 能接入的一种来源：username 是用户名一栏，secret 是要不要密钥（with_username：填了用户名才要），
  * plain 是 http:// 地址的规则（never：只收 https；without_credentials：不带账号密码时可以；with_ack：要确认明文风险）。
+ * verified 是实验性的类型在哪个版本的真机上验证过（例如「fnOS 1.2.1000」），没验证过时不带。
  */
 export interface NasKind {
   name: string;
   label: string;
   experimental: boolean;
+  verified?: string;
   username: "none" | "optional" | "required";
   secret: "required" | "with_username" | "none";
   plain: "never" | "without_credentials" | "with_ack";

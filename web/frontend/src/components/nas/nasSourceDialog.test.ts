@@ -106,6 +106,7 @@ const KINDS: NasKind[] = [
     name: "fnos",
     label: "飞牛",
     experimental: true,
+    verified: "fnOS 1.2.1000",
     username: "required",
     secret: "required",
     plain: "with_ack",
@@ -203,8 +204,13 @@ describe("添加来源", () => {
     expect(inputOf("ns-url").placeholder).toBe("https://192.168.1.10");
 
     await pick("ns-kind", "飞牛（实验性）");
-    expect(text("ns-experimental")).toContain("还没在真机上验证过");
+    expect(text("ns-experimental"), "真机验证过的类型写验证过的版本").toBe(
+      "实验性：按非官方协议接入，飞牛升级后可能失效（在 fnOS 1.2.1000 上验证过）；连不上时看来源列表里写的原因。",
+    );
     expect(text("ns-guide"), "飞牛写怎么建管理员账号").toContain("管理员权限");
+    expect(text("ns-guide"), "普通账号读不到容器：准备步骤写上").toContain(
+      "飞牛只让管理员读存储空间、硬盘与 Docker 容器",
+    );
     expect(document.querySelectorAll("[data-testid=ns-guide] li")).toHaveLength(3);
     expect(inputOf("ns-url").placeholder, "飞牛的地址示例带上它的 https 端口").toBe(
       "https://192.168.1.10:5667",
@@ -213,7 +219,9 @@ describe("添加来源", () => {
     expect(inputOf("ns-secret").placeholder).toBe("必填");
 
     await pick("ns-kind", "群晖（实验性）");
-    expect(text("ns-experimental")).toContain("还没在真机上验证过");
+    expect(text("ns-experimental"), "没在真机上验证过的照旧").toBe(
+      "实验性：还没在真机上验证过，读到的数据可能不全；连不上时看来源列表里写的原因。",
+    );
     expect(text("ns-guide"), "群晖写怎么建管理员组里的专用账号").toContain("administrators");
     expect(document.querySelectorAll("[data-testid=ns-guide] li")).toHaveLength(4);
     expect(inputOf("ns-url").placeholder, "群晖的地址示例带上 DSM 的 https 端口").toBe(

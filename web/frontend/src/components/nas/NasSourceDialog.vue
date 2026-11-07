@@ -22,7 +22,7 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { nasKindGuide, nasKindLabel, nasUrlPlaceholder } from "@/utils/nas";
+import { nasKindGuide, nasKindLabel, nasUrlPlaceholder, nasVerifiedNote } from "@/utils/nas";
 import { ElMessage } from "element-plus";
 import { computed, nextTick, reactive, ref, watch } from "vue";
 
@@ -466,7 +466,9 @@ function expired(cert: NasCertInfo): boolean {
           这个版本不认「{{ form.kind }}」这种来源，只能删除。
         </div>
         <div v-else-if="kind?.experimental" class="field-tip" data-testid="ns-experimental">
-          实验性：还没在真机上验证过，读到的数据可能不全；连不上时看来源列表里写的原因。
+          实验性：{{
+            nasVerifiedNote(kind) || "还没在真机上验证过，读到的数据可能不全"
+          }}；连不上时看来源列表里写的原因。
         </div>
       </el-form-item>
 

@@ -59,6 +59,9 @@ const (
 	fnosDeviceType = "Browser"
 	// fnosErrNotAdmin 是账号不是管理员（pyfnos 的 README：存储的接口要管理员，别的账号回 4352）
 	fnosErrNotAdmin = 4352
+	// fnosErrDockerNotAdmin 是不是管理员的账号读 Docker（appcgi.dockermgr.*）时飞牛回的错误码：在 fnOS 1.2.1000 真机上看到的，
+	// 飞牛的网页也不给普通账号显示 Docker
+	fnosErrDockerNotAdmin = 52429312
 	// fnosMinRSABits 是认的最短 RSA 公钥
 	fnosMinRSABits = 1024
 )

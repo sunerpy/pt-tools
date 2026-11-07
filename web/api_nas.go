@@ -80,10 +80,12 @@ type nasView struct {
 
 // nasKindView 是一种能接入的来源类型：Username 是用户名一栏（none、optional、required），Secret 是要不要密钥
 // （required：总要；with_username：填了用户名才要；none：不要），Plain 是 http:// 地址的规则（never、without_credentials、with_ack）。
+// Verified 是实验性的类型在哪个版本的真机上验证过，没验证过时不带。
 type nasKindView struct {
 	Name         string `json:"name"`
 	Label        string `json:"label"`
 	Experimental bool   `json:"experimental"`
+	Verified     string `json:"verified,omitempty"`
 	Username     string `json:"username"`
 	Secret       string `json:"secret"`
 	Plain        string `json:"plain"`
@@ -314,7 +316,7 @@ func nasKindViews() []nasKindView {
 			username = "none"
 		}
 		out = append(out, nasKindView{
-			Name: k.Name, Label: k.Label, Experimental: k.Experimental, Username: username,
+			Name: k.Name, Label: k.Label, Experimental: k.Experimental, Verified: k.Verified, Username: username,
 			Secret: nasSecretRule(k), Plain: nasPlainRule(k.Plain),
 		})
 	}

@@ -41,6 +41,16 @@ export function nasKindLabel(kind: string, kinds?: readonly NasKind[] | null): s
   return kinds?.find((k) => k.name === kind)?.label || KIND_LABELS[kind] || kind;
 }
 
+/**
+ * 在真机上验证过的实验性类型的说明（没验证过时为空）：按非官方协议接入，NAS 升级后可能失效，写明验证过的版本。
+ * 不带「实验性」三个字，由用的地方加
+ */
+export function nasVerifiedNote(k: Pick<NasKind, "label" | "verified"> | null | undefined): string {
+  return k?.verified
+    ? `按非官方协议接入，${k.label}升级后可能失效（在 ${k.verified} 上验证过）`
+    : "";
+}
+
 /** 添加来源时写在类型下面的准备步骤：要在 NAS 上先做的事。NAS 网页上的按钮名照它默认的英文界面写 */
 export interface NasKindGuide {
   title: string;
@@ -76,7 +86,7 @@ const KIND_GUIDES: Record<string, NasKindGuide> = {
   fnos: {
     title: "先在飞牛上建一个只给 pt-tools 用的管理员账号（fnOS）",
     steps: [
-      "在飞牛网页的用户设置里新建一个用户，设一个强密码，给它管理员权限：飞牛只让管理员读存储空间与硬盘",
+      "在飞牛网页的用户设置里新建一个用户，设一个强密码，给它管理员权限：飞牛只让管理员读存储空间、硬盘与 Docker 容器",
       "下面写飞牛网页的地址（https 默认端口 5667，http 默认 5666）和这个账号的用户名、密码，点「测试连接」。账号开了两步验证时填一次验证码，以后 pt-tools 用登录得到的 token 连接，不用再填；用 http 时要先勾选明文风险",
       "pt-tools 登录失败一次就停下来、等你改好再测，不会反复试密码",
     ],
