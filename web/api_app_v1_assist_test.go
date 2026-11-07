@@ -304,6 +304,118 @@ func TestAppSearchPreviewCancel(t *testing.T) {
 	assert.Empty(t, appPreviewSlots)
 }
 
+// 等全局名额时请求被取消（隧道里的 CANCEL）：处理函数马上返回，不写回应，主体的名额还回去，名额空出来以后同一主体再发回 200。
+func TestAppSearchPreviewCancelWhileWaiting(t *testing.T) {
+	writeWebTestSecretKey(t)
+	oldWait := appPreviewWait
+	appPreviewWait = 10 * time.Second
+	t.Cleanup(func() { appPreviewWait = oldWait })
+	fake := &entrySearchFake{items: []v2.TorrentItem{shawshank("1", "WiKi")}}
+	srv, _ := newSubscribeEnv(t, func(c *subscribe.Config) { c.Search = fake })
+	enableSite(t, srv, "hdsky")
+	body := `{"media_type":"movie","tmdb_id":278}`
+	for range cap(appPreviewSlots) {
+		appPreviewSlots <- struct{}{}
+	}
+	drained := false
+	drain := func() {
+		if drained {
+			return
+		}
+		drained = true
+		for range cap(appPreviewSlots) {
+			<-appPreviewSlots
+		}
+	}
+	t.Cleanup(drain)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- previewAs(t, srv, ctx, "p1", body, false) }()
+	require.Eventually(t, func() bool {
+		appPreviewMu.Lock()
+		defer appPreviewMu.Unlock()
+		return appPreviewBusy[middleware.KindAPIToken+":p1"]
+	}, 5*time.Second, 5*time.Millisecond, "在等名额")
+	cancel()
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("取消以后处理函数没有返回")
+	}
+	assert.Empty(t, w.Body.String(), "没人等回应，不写")
+	assert.Empty(t, fake.queries, "没有搜")
+	appPreviewMu.Lock()
+	assert.Empty(t, appPreviewBusy, "主体的名额还回去了")
+	appPreviewMu.Unlock()
+
+	drain()
+	assert.Equal(t, http.StatusOK, previewAs(t, srv, nil, "p1", body, true).Code)
+}
+
+// 剧集的试搜索：写这一季每一集的状态与每组覆盖哪几集（整季包标 whole）；这一季已经在追时带上订阅与锁住的版本，
+// 每一集的状态照追剧台账（开着锁、还没下到的是 waiting_version）。
+func TestAppSearchPreviewTV(t *testing.T) {
+	writeWebTestSecretKey(t)
+	fake := &entrySearchFake{items: []v2.TorrentItem{
+		{ID: "11", SourceSite: "hdsky", Title: "Fake.Variety.S01E01.2026.1080p.WEB-DL.H264-CHDWEB", SizeBytes: 2 << 30, Seeders: 9},
+		{ID: "12", SourceSite: "hdsky", Title: "Fake.Variety.S01.2026.1080p.WEB-DL.H264-HHWEB", SizeBytes: 4 << 30, Seeders: 5},
+	}}
+	srv, _ := newSubscribeEnv(t, func(c *subscribe.Config) { c.Search = fake })
+	enableSite(t, srv, "hdsky")
+	preview := func() AppSearchPreview {
+		t.Helper()
+		w := previewAs(t, srv, nil, "1", `{"media_type":"tv","tmdb_id":1001,"season":1}`, true)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var got AppSearchPreview
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return got
+	}
+	states := func(got AppSearchPreview) []string {
+		var out []string
+		for i, e := range got.Episodes {
+			assert.Equal(t, i+1, e.Number)
+			out = append(out, e.State)
+		}
+		return out
+	}
+
+	// 还没订阅：没有 subscription，按 TMDB 两集都缺
+	got := preview()
+	assert.Equal(t, 1, got.Item.Season)
+	assert.Nil(t, got.Subscription)
+	assert.Equal(t, []string{"missing", "missing"}, states(got))
+	require.Len(t, got.Episodes, 2)
+	assert.Equal(t, "第1期上", got.Episodes[0].Name)
+	byGroup := map[string]AppSearchPreviewGroup{}
+	for _, g := range got.Groups {
+		byGroup[g.Meta.Group] = g
+	}
+	require.Contains(t, byGroup, "CHDWEB")
+	require.Contains(t, byGroup, "HHWEB")
+	require.NotNil(t, byGroup["CHDWEB"].Span)
+	assert.Equal(t, AppSearchPreviewSpan{Start: 1, End: 1}, *byGroup["CHDWEB"].Span)
+	assert.Equal(t, []int{1}, byGroup["CHDWEB"].Covers)
+	require.NotNil(t, byGroup["HHWEB"].Span)
+	assert.True(t, byGroup["HHWEB"].Span.Whole)
+	assert.Equal(t, []int{1, 2}, byGroup["HHWEB"].Covers, "整季包能补上这一季缺的两集")
+
+	w := appAsWith(t, srv.appSubscriptionCreate, http.MethodPost, "/api/app/v1/subscriptions",
+		`{"media_type":"tv","tmdb_id":1001,"season":1,"lock_version":true,"lock_group":"CHDWEB","lock_resolution":"1080p"}`, "app:write")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var sub AppSubscription
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sub))
+
+	got = preview()
+	require.NotNil(t, got.Subscription)
+	assert.Equal(t, sub.ID, got.Subscription.ID)
+	assert.Equal(t, "active", got.Subscription.Status)
+	require.NotNil(t, got.Subscription.Lock)
+	assert.Equal(t, AppSearchPreviewLock{Group: "CHDWEB", Resolution: "1080p"}, *got.Subscription.Lock)
+	assert.Equal(t, []string{"waiting_version", "waiting_version"}, states(got), "开着锁、还没下到：等锁住的版本")
+}
+
 // 同一条目先后试两次（截止时间不同、包含词不同）：真的多站点搜索带缓存，假站点只被搜了一次。
 func TestAppSearchPreviewCache(t *testing.T) {
 	writeWebTestSecretKey(t)
@@ -378,6 +490,7 @@ func TestAppMobileOptionsDownloadersAndDirectories(t *testing.T) {
 }
 
 // 新建订阅可以带锁住的版本（只在用户改了锁时发）；不认识的字段照旧 400。
+// 新建订阅时可以一开始就锁住版本（试搜索里点了「锁这个版本」）；拼错的字段 400。
 func TestAppSubscriptionCreateLock(t *testing.T) {
 	srv, _ := newSubscribeEnv(t)
 	w := appAsWith(t, srv.appSubscriptionCreate, http.MethodPost, "/api/app/v1/subscriptions",
