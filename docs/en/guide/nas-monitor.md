@@ -1,6 +1,6 @@
 # NAS monitoring <Badge type="tip" text="1.0 preview" />
 
-System → NAS monitoring (系统 → NAS 监控) decides where the [NAS overview](home-and-health.md#nas-overview) on the home page gets its data: the host pt-tools runs on (the local source) and any NAS you connect (for now [TrueNAS](#truenas), [Glances](#glances) and, experimentally, [Synology](#synology)). pt-tools reads these sources in the background and keeps what it reads in memory; the home page and this page show that data, so opening them does not connect to anything again.
+System → NAS monitoring (系统 → NAS 监控) decides where the [NAS overview](home-and-health.md#nas-overview) on the home page gets its data: the host pt-tools runs on (the local source) and any NAS you connect (for now [TrueNAS](#truenas), [Glances](#glances) and, experimentally, [Synology](#synology) and [fnOS](#fnos)). pt-tools reads these sources in the background and keeps what it reads in memory; the home page and this page show that data, so opening them does not connect to anything again.
 
 ## The local source
 
@@ -38,7 +38,7 @@ On the first connection it fills the home page bars with the last 30 minutes of 
 
 ## Glances
 
-[Glances](https://github.com/nicolargo/glances) is a general-purpose system monitor. On a NAS that runs Docker, such as Synology, fnOS, Unraid or OMV, run Glances from its official image and pt-tools reads its REST interface (`http://<address>:61208/api/4/…`). It connects Glances 4 and was verified on 4.5.8; Glances 5 moved its interface to `/api/5` and is not supported yet, which Test connection says. For TrueNAS, use the [TrueNAS](#truenas) source above, which reads more; a Synology NAS can also use the experimental [Synology](#synology) source below, which reads DSM directly.
+[Glances](https://github.com/nicolargo/glances) is a general-purpose system monitor. On a NAS that runs Docker, such as Synology, fnOS, Unraid or OMV, run Glances from its official image and pt-tools reads its REST interface (`http://<address>:61208/api/4/…`). It connects Glances 4 and was verified on 4.5.8; Glances 5 moved its interface to `/api/5` and is not supported yet, which Test connection says. For TrueNAS, use the [TrueNAS](#truenas) source above, which reads more; Synology and fnOS can also use the experimental [Synology](#synology) and [fnOS](#fnos) sources below, which read the NAS directly.
 
 It reads:
 
@@ -134,16 +134,59 @@ When the account uses two-factor authentication, the first Test connection asks 
 - When pt-tools is removed from the trusted devices on DSM (or two-factor authentication was turned on for the account after you saved the source), the source shows `登录失败` (login failed) with a reason saying DSM wants a code, and it stops signing in: edit the source, enter a code during Test connection, and save.
 - After changing the address or the account, the old device token is no longer used and you enter a code again.
 
+## fnOS <Badge type="warning" text="experimental" />
+
+Experimental: it connects through the WebSocket interface the fnOS web UI itself uses. fnOS has not published documentation for this interface; pt-tools has been tested only against a fake service written from the protocol, not on a real device, and an fnOS upgrade may stop it from reading; when it cannot connect, the [source list](#the-source-list) says why. fnOS can also run [Glances](#glances).
+
+pt-tools connects to `<address>/websocket?type=main` on the fnOS web UI (`wss://` for an `https://` address, `ws://` for an `http://` address). The requests and responses follow the format recorded by [pyfnos](https://github.com/Timandes/pyfnos); none of its code is used:
+
+- It first asks fnOS for the RSA public key used to log in. The account and password are encrypted with a one-time AES key, and that key is encrypted with the fnOS public key before it is sent, so only fnOS can decrypt them.
+- After login, fnOS gives a token, a long-lived token and a signing key, and every later request is signed. These three are stored encrypted when you save, and later connections use them instead of the password: when the token expires, the long-lived token gets a new one, and only when neither works (for example after the device was removed on fnOS) does pt-tools log in with the password again.
+- The connection stays open between reads, with a heartbeat every 30 seconds; when it drops, the next read connects again.
+
+It reads:
+
+- Host: host name, fnOS version, CPU model and threads, uptime
+- CPU usage, I/O wait and load, and the CPU temperature (the highest of the temperatures fnOS gives; usually unavailable in a virtual machine)
+- Memory: total and used (total minus available)
+- Network: the combined receive and send speed fnOS adds up, and the interface names (without `lo`)
+- Storage: each storage space (`/vol1`, `/vol2`…) with its capacity and state. The state follows the software RAID arrays under it: degraded, rebuilding, crashed and not running count as unhealthy; syncing and reshaping are shown as they are, with no health
+- Disks: name, model, whether it is a hard disk, SSD or NVMe, size, temperature and the storage space it belongs to; hot spares are not listed and serial numbers are not read; when fnOS reports a temperature of 0 (some NVMe drives do), no temperature is shown
+- Apps: how many Docker containers are running and how many there are; which can be updated is not known
+- Alerts: fnOS notifications are not read yet, and the alerts block on the home page says why; a degraded storage space shows in the storage block
+
+For an fnOS source, the NAS group of the [system check](home-and-health.md#system-check) looks at whether it is connected, whether the storage spaces are healthy and the disk temperatures; pt-tools does not read fnOS notifications, so the alerts part is not checked.
+
+### Preparing an fnOS account
+
+1. In the user settings of the fnOS web UI, create a user only for pt-tools, with a strong password.
+2. Give it administrator rights: fnOS lets only administrators read storage spaces and disks (in the interface notes of [pyfnos](https://github.com/Timandes/pyfnos), the storage interfaces all say they need an administrator and return error code 4352 for an ordinary account). With an ordinary account, the storage and disks blocks say `这个账号没有读…的权限：飞牛只让管理员读…` (this account may not read …: fnOS allows only administrators); when fnOS does not even let it read the host information, Test connection says `这个账号读不到飞牛的主机信息：要用管理员账号…` (this account cannot read the fnOS host information: use an administrator account), and the source cannot be saved.
+3. In pt-tools, under Add source (添加来源), choose 飞牛 (fnOS), enter the address of the fnOS web UI and the account and password, click Test connection (测试连接) and save when it connects. fnOS listens on port 5667 for `https://` and 5666 for `http://` by default: an `http://` address without a port uses 5666; an `https://` address without a port uses 443 (the address of a reverse proxy), so add `:5667` to connect to fnOS directly. fnOS usually uses a self-signed certificate for https; trust it once the fingerprint matches.
+
+- With an `http://` address, pt-tools connects over unencrypted `ws://`. The account and password are encrypted, but a man in the middle could replace the public key fnOS sends with one of its own and decrypt them, so such an address always needs 我知道账号密码会以明文经过局域网，可能被截获 (I know the account and password cross the local network unencrypted and may be intercepted) ticked, even for a draft without a password. When fnOS forces HTTPS, Test connection says `…飞牛开了「强制 HTTPS」，地址改成 https://（默认端口 5667）` (fnOS forces HTTPS; change the address to https://, port 5667 by default).
+- When the address points at some other web page (a wrong port, or a reverse proxy that does not forward WebSocket), it says `这个地址没有飞牛的接口（/websocket 回了 HTTP 404）…` (this address has no fnOS interface) or `回的不是飞牛 fnOS 的数据…` (the reply is not fnOS data), and the account and password are not sent.
+- pt-tools only reads this data and changes no fnOS settings; it does not log out when it disconnects, so the stored token stays usable.
+- When login fails (a wrong user name or password and so on), the source shows `登录失败` (login failed) with the reason fnOS gave (`飞牛说：…（错误码 …）`, fnOS says … (error code …), with any password in it replaced by `***`), and it is not retried automatically: signing in again and again with a wrong password may get the account locked on fnOS.
+
+### Two-factor authentication on fnOS
+
+When the account uses two-factor authentication, the first Test connection asks for a code: enter the 6-digit code from the authenticator app and test again. During verification pt-tools asks fnOS to trust this device (the device name is `pt-tools`), and the device ID is stored with the login credentials; later connections use the token and need no code, and when it has to log in with the password again, fnOS recognises the trusted device and needs no code either.
+
+- A wrong or expired code says `验证码不对或过期了，重新输入` (the code is wrong or expired; enter it again); enter a new one.
+- When fnOS requires two-factor authentication for the account but no authenticator is bound yet, it says `飞牛要求这个账号开两步验证，它还没有绑定验证器…` (fnOS requires two-factor authentication for this account, which has no authenticator bound): log in to the fnOS web UI with the account once, bind one as prompted, and test again.
+- When both the token and the trusted device no longer work (or two-factor authentication was turned on for the account after you saved the source), the source shows `登录失败` (login failed) with a reason starting `飞牛要验证码…` (fnOS wants a code), and it stops signing in: edit the source, enter a code during Test connection, and save.
+- After changing the address or the account, the old token and device ID are no longer used and you enter a code again.
+
 ## The source list
 
 One line per source (a card on a phone):
 
-| Column  | What it shows                                                                                                                                                                                                                                                 |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source  | Name, kind and address (`pt-tools 所在的主机`, the host pt-tools runs on, for the local source); experimental kinds are tagged `实验性`, `http://` addresses `明文连接` (unencrypted)                                                                         |
-| Host    | Host name, CPU model and cores, total memory, platform and version; `还没有读到数据` (nothing read yet) before the first read; the reason when the source is connected but cannot read host information (a Synology account outside the administrators group) |
-| State   | The state and a line explaining it, plus when data was last read when there is a problem                                                                                                                                                                      |
-| Actions | The switch of the local source; Reconnect (重新连接); Edit (编辑) and Delete (删除) for connected sources                                                                                                                                                     |
+| Column  | What it shows                                                                                                                                                                                                                                                     |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source  | Name, kind and address (`pt-tools 所在的主机`, the host pt-tools runs on, for the local source); experimental kinds are tagged `实验性`, `http://` addresses `明文连接` (unencrypted)                                                                             |
+| Host    | Host name, CPU model and cores, total memory, platform and version; `还没有读到数据` (nothing read yet) before the first read; the reason when the source is connected but cannot read host information (a Synology or fnOS account that is not an administrator) |
+| State   | The state and a line explaining it, plus when data was last read when there is a problem                                                                                                                                                                          |
+| Actions | The switch of the local source; Reconnect (重新连接); Edit (编辑) and Delete (删除) for connected sources                                                                                                                                                         |
 
 | State                                  | Line below                                                                                                                            |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -158,7 +201,7 @@ One line per source (a card on a phone):
 
 When a source cannot be reached it tries again after 30 seconds, then 1, 2 and 5 minutes. Login failures and certificate problems are not retried automatically, so the NAS does not lock the account; it tries again after you change the settings or click Reconnect. Reconnect tries once right away instead of waiting, and the result appears in a message.
 
-Add source (添加来源) at the top right of the list shows the fields each kind needs, for TrueNAS how to prepare a read-only API key (see [TrueNAS](#truenas)), for Glances how to run it on the NAS (see [Glances](#glances)), and for Synology how to create an account for pt-tools (see [Synology](#synology)); experimental kinds carry `（实验性）` (experimental) in the list of kinds, and the notes below the list say which kinds can be connected.
+Add source (添加来源) at the top right of the list shows the fields each kind needs, for TrueNAS how to prepare a read-only API key (see [TrueNAS](#truenas)), for Glances how to run it on the NAS (see [Glances](#glances)), and for Synology and fnOS how to create an account for pt-tools (see [Synology](#synology) and [fnOS](#fnos)); experimental kinds carry `（实验性）` (experimental) in the list of kinds, and the notes below the list say which kinds can be connected.
 
 ## What the home page shows
 
