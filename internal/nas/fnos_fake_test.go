@@ -29,14 +29,16 @@ import (
 )
 
 // 假飞牛：握手、加密登录、两步验证、签名校验与 token 重连照 pyfnos（Timandes/pyfnos）的 client.py、specs/twofa-login 与
-// 测试记录的格式写；回应的字段名照 pyfnos 测试里核对的那些，数值是编的（没有飞牛真机，H6 只用假服务）。序列号是假的，
-// 测试核对它不进快照。错误码只有 4352（不是管理员）与 135168（token 过期）来自 pyfnos，别的是编的。
+// 测试记录的格式写；回应的字段名照 pyfnos 测试里核对的那些，数值是编的。序列号是假的，测试核对它不进快照。
+// 错误码 4352（不是管理员）与 135168（token 过期）来自 pyfnos，52429312（不是管理员读 Docker 的容器）是在 fnOS 1.2.1000
+// 真机上看到的，别的是编的。下面几处照 fnOS 1.2.1000 真机的回应写：内存的 total − available 等于 used + reserved
+// （飞牛网页显示的已用是 used），没有容器时容器列表回 succ 但不带 rsp。
 const (
 	fnosCPUBody = `{"data":{"cpu":{"name":"Intel(R) N100","num":1,"core":4,"thread":4,"maxFreq":3400,
 		"temp":[45,47,0],"busy":{"all":23,"user":15,"system":6,"iowait":2,"other":0},
 		"loadavg":{"avg1min":1.25,"avg5min":0.9,"avg15min":0.7}}}}`
 	fnosMemBody = `{"data":{"mem":{"reserved":104857600,"total":16483282944,"free":2147483648,"used":5368709120,
-		"available":11114573824,"cached":8589934592,"buffers":268435456},"swap":{"total":0,"free":0,"used":0}}}`
+		"available":11009716224,"cached":8589934592,"buffers":268435456},"swap":{"total":0,"free":0,"used":0}}}`
 	fnosGenBody = `{"data":{"item":{"netSpeed":{"transmit":131072,"receive":2621440}}}}`
 	fnosNetBody = `{"data":{"ifs":[{"name":"lo","index":1,"ifType":772,"receive":0,"transmit":0},
 		{"name":"enp1s0","index":2,"ifType":1,"receive":2621440,"transmit":131072},
@@ -568,8 +570,11 @@ func (c *fakeFnosConn) data(req, reqid string) ([]byte, bool) {
 		r, c.f.replies[req] = q[0], q[1:]
 	}
 	c.f.mu.Unlock()
-	if !admin && (strings.HasPrefix(req, "stor.") || strings.HasPrefix(req, "appcgi.dockermgr.")) {
+	if !admin && strings.HasPrefix(req, "stor.") {
 		return fakeFnosFail(reqid, fnosErrNotAdmin, "没有权限"), false
+	}
+	if !admin && strings.HasPrefix(req, "appcgi.dockermgr.") {
+		return fakeFnosFail(reqid, fnosErrDockerNotAdmin, ""), false
 	}
 	return c.render(reqid, r)
 }

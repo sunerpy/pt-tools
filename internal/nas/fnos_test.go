@@ -824,8 +824,14 @@ func TestFnOSCollectPartial(t *testing.T) {
 		{"没给内存总量", map[string]fnosFakeReply{fnosReqMem: {body: `{"data":{"mem":{"available":1}}}`}}, func(t *testing.T, snap *Snapshot) {
 			assert.Equal(t, Facet{Status: FacetError, Reason: "飞牛没给内存总量"}, snap.Facets[FacetMemory])
 		}},
-		{"没给可用内存时用 used", map[string]fnosFakeReply{fnosReqMem: {body: `{"data":{"mem":{"total":1000,"used":"1500"}}}`}}, func(t *testing.T, snap *Snapshot) {
+		{"used 比总量大时封顶", map[string]fnosFakeReply{fnosReqMem: {body: `{"data":{"mem":{"total":1000,"used":"1500"}}}`}}, func(t *testing.T, snap *Snapshot) {
 			assert.Equal(t, Memory{Total: 1000, Used: 1000}, snap.Memory)
+		}},
+		{"有 used 时用 used、不用总量减可用（真机上差的是 reserved）", map[string]fnosFakeReply{fnosReqMem: {body: `{"data":{"mem":{"reserved":100,"total":1000,"used":300,"available":600}}}`}}, func(t *testing.T, snap *Snapshot) {
+			assert.Equal(t, Memory{Total: 1000, Used: 300, Available: 700}, snap.Memory)
+		}},
+		{"没给 used 时用总量减可用", map[string]fnosFakeReply{fnosReqMem: {body: `{"data":{"mem":{"total":1000,"available":400}}}`}}, func(t *testing.T, snap *Snapshot) {
+			assert.Equal(t, Memory{Total: 1000, Used: 600, Available: 400}, snap.Memory)
 		}},
 		{"没给内存用量", map[string]fnosFakeReply{fnosReqMem: {body: `{"data":{"mem":{"total":1000}}}`}}, func(t *testing.T, snap *Snapshot) {
 			assert.Equal(t, Facet{Status: FacetError, Reason: "飞牛没给内存用量"}, snap.Facets[FacetMemory])
@@ -853,8 +859,10 @@ func TestFnOSCollectPartial(t *testing.T) {
 		{"没有名字的硬盘不算", map[string]fnosFakeReply{fnosReqDisks: {body: `{"disk":[{"name":" "},{"name":"sde","type":"usb"}]}`}}, func(t *testing.T, snap *Snapshot) {
 			assert.Equal(t, []Disk{{Name: "sde", Kind: DiskUnknown}}, snap.Disks)
 		}},
-		{"没给容器的列表", map[string]fnosFakeReply{fnosReqContainers: {body: `{}`}}, func(t *testing.T, snap *Snapshot) {
-			assert.Equal(t, Facet{Status: FacetError, Reason: "飞牛没给容器的列表"}, snap.Facets[FacetApps])
+		// fnOS 1.2.1000 真机：没有容器时（Docker 没启动也一样）回 succ、不带 rsp，飞牛的网页写「暂无容器」
+		{"没有容器时不带 rsp", map[string]fnosFakeReply{fnosReqContainers: {body: `{"rev":"0.9.30","req":"appcgi.dockermgr.containerList"}`}}, func(t *testing.T, snap *Snapshot) {
+			assert.Equal(t, Apps{UpdatesUnknown: true}, snap.Apps)
+			assert.Equal(t, Facet{Status: FacetOK}, snap.Facets[FacetApps])
 		}},
 		{"没有容器", map[string]fnosFakeReply{fnosReqContainers: {body: `{"rsp":[]}`}}, func(t *testing.T, snap *Snapshot) {
 			assert.Equal(t, Apps{UpdatesUnknown: true}, snap.Apps)
