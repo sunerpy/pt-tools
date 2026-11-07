@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.53](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.52...v1.0.0-rc.53) (2026-11-07)
+
+
+### Features
+
+* **backup:** 每天定时备份数据库、升级前自动备份，网页与命令行都能下载、上传与恢复 ([1a6a3c3](https://github.com/sunerpy/pt-tools/commit/1a6a3c38d57882fd982fc56ea50c92d3923bb066))
+* **health:** 系统体检加「NAS」一组：看 NAS 连没连上、存储池健不健康、有没有严重告警、硬盘热不热 ([c9116c5](https://github.com/sunerpy/pt-tools/commit/c9116c5a1d31a9be1e7ddfda19fe36764dc7fbbe))
+* **home:** 打开网页先到首页，写今天播出、待处理、最近入库与 NAS 状态；系统体检一次查完 TMDB、下载器、媒体库与备份 ([d4a99b8](https://github.com/sunerpy/pt-tools/commit/d4a99b85ce2ca3645cae4c59ae99825b8d531690))
+* **media:** Seerr 能把 pt-tools 当成 Radarr 与 Sonarr，请求的电影建成订阅、剧集的每一季建成追剧，订阅的状态与入库的文件回给 Seerr ([80f2624](https://github.com/sunerpy/pt-tools/commit/80f2624f2f4c3b709355d3f64248dc629adc0231))
+* **media:** 媒体库可以设新建订阅时带出的下载器、保存目录、分类与标签 ([4bcd2b1](https://github.com/sunerpy/pt-tools/commit/4bcd2b155ebf643ac50bee5b555e95085290af27))
+* **media:** 媒体服务器的索引、Webhook、继续观看与播放通知；详情写服务器里有没有、能直接播放，服务器里删了的会提示 ([618e78b](https://github.com/sunerpy/pt-tools/commit/618e78bf7cf2afed78ec0e1e467946a8a3833f1f))
+* **media:** 已有的媒体库能导入成整理记录，订阅不再重复下载；NFO 里的演员名能用中文，刮削没写全的每周补一次 ([75d6365](https://github.com/sunerpy/pt-tools/commit/75d6365d9a98cd3982df6c2c9a9ae59168566a69))
+* **media:** 拉黑不要的种子，订阅不再选它；没免费的种子可以等免费了再自动推送 ([a497b56](https://github.com/sunerpy/pt-tools/commit/a497b566e0927859906817097345a7a66284091f))
+* **media:** 探索页多了上映与播出的列表、按国家与类型找，以及 Bangumi 番剧日历 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **media:** 整理历史写明失败原因、能按条目看与批量处理，认不出的让 AI 认；二级分类写明原因，加了短剧，源路径能浏览选 ([c0854e9](https://github.com/sunerpy/pt-tools/commit/c0854e94d3f1fdb53a68dbb8a36dd0909317b1e6))
+* **media:** 条目详情能删除一部片，库里的文件、种子与订阅一起处理，受保护的种子要单独确认；库里的文件不见了会提示 ([dae8c05](https://github.com/sunerpy/pt-tools/commit/dae8c05e3d0837e88042901fdee91521865b4a2d))
+* **media:** 电影、剧集有了详情页；订阅日历按天列出播出的集，每天可以推送今天的更新 ([1104ec2](https://github.com/sunerpy/pt-tools/commit/1104ec297984fa5c0f419b4526dd31be94e50152))
+* **media:** 电影原盘与 ISO 能整理进媒体库，复制先试写时复制；目录监控收到改动就提前整理 ([5e02302](https://github.com/sunerpy/pt-tools/commit/5e02302eb655f41c16faa179c5f3c4ad791a1f8c))
+* **media:** 种子里没有字幕时到站点上取字幕，也能交给 ChineseSubFinder 下载 ([c17df9e](https://github.com/sunerpy/pt-tools/commit/c17df9e7bcb7838e9627360039e95fea109f83b0))
+* **media:** 订阅与按条目推送能按条目建下载子目录 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **media:** 订阅弹窗里可以试搜索：按还没保存的表单搜一次，从结果上复制标题、加进包含或排除、锁版本、选起点种子 ([4da5b6e](https://github.com/sunerpy/pt-tools/commit/4da5b6ebfd216c945089674d2eec94afa08833d6))
+* **media:** 订阅推送前能让 AI 助手复核候选是不是要的条目，说不是的跳过 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **media:** 订阅推送的种子按订阅的条目整理，推送时记下条目，整理历史写明条目从哪来 ([fd5efb9](https://github.com/sunerpy/pt-tools/commit/fd5efb946bf03d73d738783474738b479c9a0113))
+* **media:** 追剧能选 TMDB 剧集组，种子与文件名里的季集按它换成默认的季集 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **mobile:** 手机追剧编辑页按媒体库带出下载设置，可以试搜索并从结果设条件 ([3eefa48](https://github.com/sunerpy/pt-tools/commit/3eefa4803a59cf623f3d4444412809c16659e2a1))
+* **nas:** 接入 Glances 4：群晖、飞牛、Unraid 等 NAS 上用 Docker 跑的 Glances，首页的 NAS 概览显示它的主机、网络、存储、硬盘温度、容器与软 RAID ([62d22f0](https://github.com/sunerpy/pt-tools/commit/62d22f033630662b00f7c05219e278ce6779c3c3))
+* **nas:** 接入 TrueNAS：用只读 API Key 读主机、存储池、硬盘温度、告警与应用，首页的 NAS 概览显示它 ([c9116c5](https://github.com/sunerpy/pt-tools/commit/c9116c5a1d31a9be1e7ddfda19fe36764dc7fbbe))
+* **nas:** 接入群晖 DSM（实验性，只用假服务测过）：首页的 NAS 概览显示群晖的主机、CPU、内存、网络、存储空间与硬盘 ([3d8383f](https://github.com/sunerpy/pt-tools/commit/3d8383f2fb52ad39af563c9b42e7dd6b6749c4c3))
+* **nas:** 接入飞牛 fnOS（实验性，只用假服务测过）：首页的 NAS 概览显示飞牛的主机、CPU、内存、网络、存储空间、硬盘与容器 ([6b0ed8a](https://github.com/sunerpy/pt-tools/commit/6b0ed8a954010b7e3091b2939c28e2ed0f939779))
+* **search:** 按条目搜索：选一部电影或剧集搜各站点，按质量档案打分、合并同一资源、写明能补上哪几集 ([2491e06](https://github.com/sunerpy/pt-tools/commit/2491e06047192c43f5de2f767e3c118f4291bda8))
+* **web:** 系统体检页改成卡片：总览卡有环形图与计数块，问题集中在「需要处理」、带「去处理」，各组按瀑布流排，结果到了依次出现 ([cf017d8](https://github.com/sunerpy/pt-tools/commit/cf017d856d0a80ad2d0181cea75b8257d78482eb))
+* **web:** 首页最上面是 NAS 概览：主机行、CPU、内存、网络与存储四张数值卡，存储池、硬盘温度与告警；新增「系统 → NAS 监控」，本机来源读 pt-tools 所在主机 ([158f2be](https://github.com/sunerpy/pt-tools/commit/158f2becf2192b2ac1105f0a1579cd7927d9ef7a))
+
+
+### Bug Fixes
+
+* **mobile:** App 探索页卡片不再溢出、可以下拉刷新，订阅详情写出版本锁，编辑页的 TMDB 编号改成普通输入框，Android 13 起复制只提示一次 ([867e2f6](https://github.com/sunerpy/pt-tools/commit/867e2f647e6f6eceb57a84b5656bca0ef3eefce7))
+* **nas:** 飞牛在 fnOS 1.2.1000 真机上验证过：内存已用与飞牛网页一致，没有容器时写 0 个，普通账号的容器写没有权限 ([1c8c343](https://github.com/sunerpy/pt-tools/commit/1c8c343b7d9204e27ee498f6f2de4656eb012c24))
+* **notify:** Telegram 长轮询失败时照常推送，后台通知的重试加上 2 小时、6 小时两档 ([#838](https://github.com/sunerpy/pt-tools/issues/838)) ([bf8adbe](https://github.com/sunerpy/pt-tools/commit/bf8adbe732f3874ee57b65bdd3f472e3ceab65ee))
+* **site:** 跳过 NexusPHP 的第一次下载提示，UHDDolby 只知道编号时用 Cookie 下载，辅种不再把网页当成种子 ([#829](https://github.com/sunerpy/pt-tools/issues/829)) ([fca0b10](https://github.com/sunerpy/pt-tools/commit/fca0b10d74b41c54f58d53b33b9d4f1105ed6273))
+* **web:** 手机上导出的海报，标题与小标签不再折行压住下一行的字 ([#854](https://github.com/sunerpy/pt-tools/issues/854)) ([17d3a1e](https://github.com/sunerpy/pt-tools/commit/17d3a1edcdf10a5c09c4568f922a0f99a5a0fcb2))
+
 ## [1.0.0-rc.52](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.51...v1.0.0-rc.52) (2026-11-02)
 
 
