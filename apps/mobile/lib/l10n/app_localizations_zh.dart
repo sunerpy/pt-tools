@@ -475,6 +475,14 @@ class SZh extends S {
   }
 
   @override
+  String subLock(String version) {
+    return '版本锁 $version';
+  }
+
+  @override
+  String get subLockPending => '版本锁（按第一个下载的版本定）';
+
+  @override
   String get episodesTitle => '剧集';
 
   @override

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -215,6 +216,24 @@ class _ExploreState extends ConsumerState<_Explore> {
   String? _q;
   final _search = TextEditingController();
 
+  /// 上一次是不是显示着。底部换到别的页、上面盖了别的页面（详情、编辑页）时 TickerMode 关掉；
+  /// 回来时重新取一次，别处刚删掉或刚建的订阅就不会还按旧的显示。
+  /// App 回到前台时连接重连，探索本来就会重新取（exploreProvider 看着 onlineEpochProvider）。
+  bool _shown = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shown = TickerMode.valuesOf(context).enabled;
+    if (shown && !_shown) {
+      // 不在构建中改 provider：等这一帧画完
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.invalidate(exploreProvider);
+      });
+    }
+    _shown = shown;
+  }
+
   @override
   void dispose() {
     _search.dispose();
@@ -323,32 +342,87 @@ class _ExploreState extends ConsumerState<_Explore> {
           ),
         ),
         Expanded(
-          child: AsyncBody<AppExplorePage>(
-            value: page,
-            onRetry: () => ref.invalidate(exploreProvider(query)),
-            data: (p) => p.items.isEmpty
-                ? EmptyState(message: s.searchNoResults)
-                : GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 170,
-                          childAspectRatio: 0.52,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 10,
-                        ),
-                    itemCount: p.items.length,
-                    itemBuilder: (context, i) => _ExploreCard(
-                      item: p.items[i],
+          child: RefreshIndicator(
+            onRefresh: () async {
+              try {
+                ref.invalidate(exploreProvider(query));
+                await ref.read(exploreProvider(query).future);
+              } on Object {
+                // 页面显示错误
+              }
+            },
+            child: AsyncBody<AppExplorePage>(
+              value: page,
+              onRetry: () => ref.invalidate(exploreProvider(query)),
+              data: (p) => p.items.isEmpty
+                  ? EmptyState(message: s.searchNoResults)
+                  : _ExploreGrid(
+                      items: p.items,
                       canWrite: canWrite,
-                      onSubscribe: () => unawaited(_subscribe(p.items[i])),
+                      onSubscribe: (it) => unawaited(_subscribe(it)),
                     ),
-                  ),
+            ),
           ),
         ),
       ],
     );
   }
+}
+
+/// 探索的结果按行排：每张卡片最宽 170、间距 10（和以前的格子一样多列）。
+/// 每一行按卡片的内容定高，字号放大或标题占两行时卡片跟着变高，不会溢出；
+/// 同一行的卡片一样高，「订阅」与「已订阅」对齐在底部。
+class _ExploreGrid extends StatelessWidget {
+  const _ExploreGrid({
+    required this.items,
+    required this.canWrite,
+    required this.onSubscribe,
+  });
+  final List<AppExploreItem> items;
+  final bool canWrite;
+  final void Function(AppExploreItem item) onSubscribe;
+
+  static const _maxCard = 170.0;
+  static const _gap = 10.0;
+  static const _padding = EdgeInsets.fromLTRB(16, 12, 16, 24);
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, c) {
+      // 列数照 SliverGridDelegateWithMaxCrossAxisExtent 的算法
+      final columns = math.max(
+        1,
+        ((c.maxWidth - _padding.horizontal) / (_maxCard + _gap)).ceil(),
+      );
+      final rows = (items.length + columns - 1) ~/ columns;
+      return ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: _padding,
+        itemCount: rows,
+        separatorBuilder: (_, _) => const SizedBox(height: _gap),
+        itemBuilder: (context, r) => IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < columns; i++) ...[
+                if (i > 0) const SizedBox(width: _gap),
+                Expanded(
+                  child: r * columns + i < items.length
+                      ? _ExploreCard(
+                          item: items[r * columns + i],
+                          canWrite: canWrite,
+                          onSubscribe: () =>
+                              onSubscribe(items[r * columns + i]),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _ExploreCard extends StatelessWidget {
@@ -368,9 +442,7 @@ class _ExploreCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        LayoutBuilder(
-          builder: (context, c) => Poster(item.posterPath, width: c.maxWidth),
-        ),
+        Poster(item.posterPath, width: double.infinity),
         const SizedBox(height: 6),
         Text(
           item.title,

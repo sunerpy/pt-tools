@@ -210,4 +210,17 @@ void main() {
       expect(await options, {'ok': true});
     },
   );
+
+  test(
+    'the page leaves out its copy notice only where the system shows one',
+    () {
+      // Android 13 is API level 33
+      expect(systemNotifiesCopy(android: true, sdkInt: 33), isTrue);
+      expect(systemNotifiesCopy(android: true, sdkInt: 36), isTrue);
+      expect(systemNotifiesCopy(android: true, sdkInt: 32), isFalse);
+      // an unknown level (older app shell, failed call) keeps the page's notice
+      expect(systemNotifiesCopy(android: true, sdkInt: null), isFalse);
+      expect(systemNotifiesCopy(android: false, sdkInt: 36), isFalse);
+    },
+  );
 }

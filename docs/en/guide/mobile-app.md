@@ -44,11 +44,13 @@ After pairing, the window in the web UI shows that the device is paired and the 
 
 The download figures on Overview and under More → Sites are the billed download (what the sites count toward your ratio after free and discount promotions), not the amount actually transferred. See [Two kinds of download figures](user-stats.md#two-kinds-of-download-figures).
 
+Pull down on Explore to refresh it. It also reloads when you come back to it from another page, so a subscription you deleted in the web UI no longer shows as Subscribed.
+
 Read-only devices don't see write actions (pause, delete, send, check in, subscribe).
 
 ## Following shows, brush tasks and statistics sharing
 
-Subscription lists and details use the app interface. Creating or editing opens an editor bundled with the app. Saving refreshes the original page; leaving an unsaved form asks whether to discard changes. In the editor, the back key or the back arrow at the top left first closes an open dropdown, the search preview results and the actions on a result; it leaves the editor only when none of them is open.
+Subscription lists and details use the app interface. Creating or editing opens an editor bundled with the app. A series' details show its version lock: Version lock CHDWEB 1080p when locked, or Version lock (set by the first download) when it is on and nothing has been downloaded yet. Saving refreshes the original page; leaving an unsaved form asks whether to discard changes. In the editor, the back key or the back arrow at the top left first closes an open dropdown, the search preview results and the actions on a result; it leaves the editor only when none of them is open.
 
 The editor has four blocks from top to bottom, with Save fixed at the bottom:
 
@@ -64,7 +66,7 @@ When creating, the downloader, save folder, category and tags are filled in from
 Search preview searches the sites once with the season, sites, quality profile, title includes and excludes the form has now; nothing is pushed and the subscription is not saved. The results fill the screen in three tabs, Matching, Rejected and Not this season, as in the web's [trial search](media-subscribe.md#trial-search).
 
 - It waits at most 25 seconds. Cancel stops only this search, and you can try again right away; on a timeout it asks you to choose fewer sites.
-- Tap a group for its actions: Copy title, Copy subtitle, Only or Not this release group, Pick part of the title to add to Title includes or Title excludes, Lock this version, and Start from this torrent when saving (new series only).
+- Tap a group for its actions: Copy title, Copy subtitle, Only or Not this release group, Pick part of the title to add to Title includes or Title excludes, Lock this version, and Start from this torrent when saving (new series only). After copying, the page says Title copied; on Android 13 and later the system shows its own notice and the page does not repeat it.
 - The actions only change the form and take effect when you tap Save. After you change the form, the results say the conditions changed; tap Try again with the new conditions. The line next to Search preview shows the last result.
 
 On a read-only device the editor can only be viewed, without Search preview or Save. When the host is an older version without these features, the editor works as before: you enter the type, TMDB ID and season yourself, the download settings are not filled in, and there is no Search preview.

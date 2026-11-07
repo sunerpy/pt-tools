@@ -147,6 +147,8 @@ S = [
     ("subDelete", "删除订阅", "Delete subscription"),
     ("subDeleteConfirm", "删除这个订阅？下载器里的种子与媒体库里的文件不动。", "Delete this subscription? Torrents in your downloaders and files in your library are kept."),
     ("subNextSearch", "下次搜索 {time}", "Next search {time}"),
+    ("subLock", "版本锁 {version}", "Version lock {version}"),
+    ("subLockPending", "版本锁（按第一个下载的版本定）", "Version lock (set by the first download)"),
     ("episodesTitle", "剧集", "Episodes"),
     ("epLibrary", "已入库", "In library"),
     ("epDownloading", "下载中", "Downloading"),

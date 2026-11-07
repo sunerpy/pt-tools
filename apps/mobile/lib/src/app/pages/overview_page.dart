@@ -28,9 +28,17 @@ class OverviewPage extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Center(
-                child: Text(
-                  s.hostVersion(meta.version),
-                  style: Theme.of(context).textTheme.labelMedium,
+                // 大字号时版本号最多占四成宽，放不下就省略，不把顶栏挤出界
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.sizeOf(context).width * 0.4,
+                  ),
+                  child: Text(
+                    s.hostVersion(meta.version),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
                 ),
               ),
             ),

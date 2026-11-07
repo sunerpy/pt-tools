@@ -432,6 +432,27 @@ describe("手机追剧编辑页：条目与带出", () => {
     expect(body).not.toHaveProperty("lock_group");
   });
 
+  it("TMDB 编号是普通输入框：没有加减按钮、一开始空着、只留数字，空着点「查找」提示要填", async () => {
+    await mountEditor({ search: "" });
+    // el-input 把 data-testid 放在里面的 input 上
+    const input = q("se-tmdb") as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    const item = input.closest(".el-form-item")!;
+    expect(item.querySelector(".el-input-number")).toBeNull();
+    expect(item.querySelector(".el-input-number__increase, .el-input-number__decrease")).toBeNull();
+    expect(input.value).toBe("");
+    expect(input.getAttribute("inputmode")).toBe("numeric");
+    press("se-lookup");
+    await flush();
+    expect(api.draft).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("请填写有效的 TMDB 编号");
+    typeIn("se-tmdb", " 12a3 ");
+    await flush();
+    expect(input.value).toBe("123");
+    press("se-lookup");
+    await vi.waitFor(() => expect(api.draft).toHaveBeenCalledWith("tv", 123, 0));
+  });
+
   it("从「+」进来：填 TMDB 编号点「查找」；改了编号以后查到的条目不算了", async () => {
     await mountEditor({ search: "" });
     expect(api.draft).not.toHaveBeenCalled();
@@ -685,6 +706,19 @@ describe("手机追剧编辑页：试搜索", () => {
     bridge.copyText.mockRejectedValueOnce(new BridgeError("Text is too long", 413));
     await act("msp-ok-0", "msp-copy-title");
     expect(ui.error).toHaveBeenCalledWith("复制失败：Text is too long");
+  });
+
+  it("系统自己提示了复制（Android 13 起，App 回 notified）：页面不再提示「已复制」", async () => {
+    await mountEditor();
+    await openPreview();
+    ui.success.mockClear();
+    bridge.copyText.mockResolvedValueOnce({ copied: true, notified: true });
+    await act("msp-ok-0", "msp-copy-title");
+    expect(bridge.copyText).toHaveBeenCalledWith(TITLE);
+    expect(ui.success).not.toHaveBeenCalled();
+    bridge.copyText.mockResolvedValueOnce({ copied: true, notified: false });
+    await act("msp-ok-0", "msp-copy-subtitle");
+    expect(ui.success).toHaveBeenCalledWith("已复制副标题");
   });
 
   it("选标题里的一段：有集号时警告，选别的一段加进排除", async () => {
