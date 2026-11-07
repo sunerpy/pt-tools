@@ -75,6 +75,61 @@ async function embedCss(fonts: PosterFont[]): Promise<string> {
   return parts.join("\n");
 }
 
+/** 预览里排成一行的文字：导出前在原节点上做记号，克隆出来的节点据此改成不折行 */
+const ONE_LINE = "data-poster-one-line";
+
+/**
+ * 元素里的文字在预览里是不是只占一行：逐段文字取行框，后一段既回到前一段的左边、又落到它下面，
+ * 就是换了行（上下叠放的两块字也算）。量不到行框（例如测试环境）时当成不是一行，不做处理。
+ */
+function isOneLine(el: HTMLElement): boolean {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  let prev: DOMRect | null = null;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!n.textContent?.trim()) continue;
+    range.selectNodeContents(n);
+    for (const r of Array.from(range.getClientRects())) {
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (prev && r.left < prev.right - 1 && r.top > prev.top + 1) return false;
+      prev = r;
+    }
+  }
+  return prev !== null;
+}
+
+/**
+ * modern-screenshot 把每个元素的计算宽高原样写进克隆：宽度刚好包住文字的元素（弹性布局里的标题、
+ * 角落的小标签），导出时字只要比预览宽一点点（手机 WebView 里画进 SVG 的字与页面上的宽度不完全一样），
+ * 最后一个字就折到下一行，高度却还是一行，压在下面的文字上。所以预览里排成一行的，导出也不许折行。
+ */
+function markOneLineText(root: HTMLElement): HTMLElement[] {
+  const marked: HTMLElement[] = [];
+  for (const el of root.querySelectorAll("*")) {
+    if (!(el instanceof HTMLElement) || !el.textContent?.trim()) continue;
+    const style = getComputedStyle(el);
+    if (style.whiteSpace !== "normal" || ["inline", "contents", "none"].includes(style.display))
+      continue;
+    if (!isOneLine(el)) continue;
+    el.setAttribute(ONE_LINE, "");
+    marked.push(el);
+  }
+  return marked;
+}
+
+/**
+ * 克隆出来的节点：带记号的连同里面的子元素都改成不折行（子元素的克隆会自带 text-wrap: wrap，
+ * 靠继承压不住），记号本身不进图。
+ */
+export function keepOneLine(cloned: Node): void {
+  if (cloned.nodeType !== Node.ELEMENT_NODE) return;
+  const el = cloned as HTMLElement;
+  if (!el.hasAttribute(ONE_LINE)) return;
+  el.removeAttribute(ONE_LINE);
+  for (const node of [el, ...Array.from(el.querySelectorAll<HTMLElement>("*"))])
+    node.style?.setProperty("white-space", "nowrap");
+}
+
 /**
  * 把海报节点画成 PNG（2 倍）。宽高按节点自己的布局尺寸给：预览为了放进窄屏整体缩放过，
  * getBoundingClientRect 量到的是缩放后的大小。
@@ -83,16 +138,22 @@ export async function posterToBlob(node: HTMLElement, fonts: PosterFont[]): Prom
   const { domToBlob } = await import("modern-screenshot");
   await ensurePosterFonts();
   const cssText = await embedCss(fonts);
-  return domToBlob(node, {
-    scale: 2,
-    type: "image/png",
-    width: node.offsetWidth,
-    height: node.offsetHeight,
-    backgroundColor: null,
-    timeout: 15000,
-    // 没有要打包的字体时也要给一个 cssText：不给时它会去扫整页的 @font-face（Element 的图标字体等）
-    font: { cssText: cssText || "/* system fonts only */" },
-  });
+  const marked = markOneLineText(node);
+  try {
+    return await domToBlob(node, {
+      scale: 2,
+      type: "image/png",
+      width: node.offsetWidth,
+      height: node.offsetHeight,
+      backgroundColor: null,
+      timeout: 15000,
+      // 没有要打包的字体时也要给一个 cssText：不给时它会去扫整页的 @font-face（Element 的图标字体等）
+      font: { cssText: cssText || "/* system fonts only */" },
+      onCloneEachNode: keepOneLine,
+    });
+  } finally {
+    for (const el of marked) el.removeAttribute(ONE_LINE);
+  }
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
