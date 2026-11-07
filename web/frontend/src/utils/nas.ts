@@ -465,7 +465,9 @@ export function nasAlertTone(level: NasAlert["level"]): "dang" | "warn" | "info"
  */
 export function nasAlertsAside(kind: string, label: string): string {
   if (!label) return "";
-  return kind === "glances" ? "按软 RAID 阵列的状态" : `${label} 里没关掉的`;
+  if (kind === "glances") return "按软 RAID 阵列的状态";
+  // 拉丁字母结尾的类型名（TrueNAS）与后面的中文之间留空格，中文的（群晖）不留
+  return /[A-Za-z0-9]$/.test(label) ? `${label} 里没关掉的` : `${label}里没关掉的`;
 }
 
 /** 应用那一行：「运行中 1 个 · 共 3 个 · 没有可更新的」 */

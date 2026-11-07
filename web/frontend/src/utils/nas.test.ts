@@ -339,7 +339,7 @@ describe("告警、应用与主机行", () => {
   it("告警一块的右上角写告警从哪来：Glances 的是 pt-tools 按软 RAID 阵列算的，其余是 NAS 里没关掉的", () => {
     expect(nasAlertsAside("truenas", "TrueNAS")).toBe("TrueNAS 里没关掉的");
     expect(nasAlertsAside("glances", "Glances")).toBe("按软 RAID 阵列的状态");
-    expect(nasAlertsAside("synology", "群晖")).toBe("群晖 里没关掉的");
+    expect(nasAlertsAside("synology", "群晖"), "中文的类型名后面不留空格").toBe("群晖里没关掉的");
     expect(nasAlertsAside("truenas", ""), "还不知道类型名时不写").toBe("");
   });
 
