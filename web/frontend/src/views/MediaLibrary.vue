@@ -41,6 +41,7 @@ import { useDataState } from "@/composables/useDataState";
 import { useDownloaderPaths } from "@/composables/useDownloaderPaths";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
+import { scopeMisses } from "@/utils/subscribeDefaults";
 import {
   CLASSIFY_COUNTRIES,
   CLASSIFY_LANGUAGES,
@@ -116,6 +117,8 @@ const scopePathOptions = computed(() => {
   return opts.filter((o) => !seen.has(o.path) && seen.add(o.path));
 });
 const downloaders = ref<DownloaderSetting[]>([]);
+/** 读到过下载器列表：没读到时不知道库里存的下载器还在不在 */
+const downloadersLoaded = ref(false);
 const channels = ref<NotificationConfig[]>([]);
 
 function fillSettings(s: OrganizeSettings) {
@@ -151,7 +154,10 @@ async function loadOptions() {
     downloadersApi.list(),
     chatopsApi.notifications.list(),
   ]);
-  if (dls.status === "fulfilled") downloaders.value = dls.value ?? [];
+  if (dls.status === "fulfilled") {
+    downloaders.value = dls.value ?? [];
+    downloadersLoaded.value = true;
+  }
   if (chs.status === "fulfilled") channels.value = chs.value ?? [];
 }
 
@@ -200,6 +206,10 @@ const blankLibrary = (kind: MediaKind = "movie"): MediaLibraryInput => ({
   csf_url: "",
   csf_key: "",
   csf_path: "",
+  download_downloader_id: 0,
+  download_save_path: "",
+  download_category: "",
+  download_tags: "",
   enabled: true,
 });
 const libForm = ref<MediaLibraryInput>(blankLibrary());
@@ -238,9 +248,42 @@ function toLibraryInput(l: MediaLibrary): MediaLibraryInput {
     site_subtitles: l.site_subtitles ?? false,
     csf_url: l.csf_url ?? "",
     csf_path: l.csf_path ?? "",
+    download_downloader_id: l.download_downloader_id ?? 0,
+    download_save_path: l.download_save_path ?? "",
+    download_category: l.download_category ?? "",
+    download_tags: l.download_tags ?? "",
     enabled: l.enabled,
   };
 }
+
+// ---- 新建订阅时带出的下载设置 ----
+/** 库里存的下载器已经删了（打开时发现的）：表单改成不指定，保存时清掉 */
+const libDownloaderGone = ref(false);
+/** 下载器的选项：停用的标出来；库里存的下载器不在列表里（读不到列表）时也列出来，免得只显示一个编号 */
+const libDownloaderOptions = computed(() => {
+  const opts = downloaders.value
+    .filter((d): d is DownloaderSetting & { id: number } => typeof d.id === "number")
+    .map((d) => ({ id: d.id, label: d.enabled ? d.name : `${d.name}（已停用）` }));
+  const id = libForm.value.download_downloader_id;
+  if (id > 0 && !opts.some((o) => o.id === id)) opts.push({ id, label: `下载器 ${id}` });
+  return opts;
+});
+const libDownloaderDisabled = computed(() => {
+  const id = libForm.value.download_downloader_id;
+  return id > 0 && downloaders.value.some((d) => d.id === id && !d.enabled);
+});
+/** 自动整理或定期扫描开着、这几项不在整理范围里时：照这样推送的种子下完不会自动整理 */
+const libScopeMisses = computed(() => {
+  const s = settings.value;
+  if (!s || !(s.auto_enabled || s.scan_enabled)) return [];
+  const f = libForm.value;
+  return scopeMisses(s, {
+    downloader_id: f.download_downloader_id,
+    save_path: f.download_save_path,
+    category: f.download_category,
+    tags: f.download_tags,
+  });
+});
 
 // ---- 导入已有文件 ----
 const importVisible = ref(false);
@@ -255,6 +298,11 @@ function openLibrary(l?: MediaLibrary) {
   libForm.value = l
     ? toLibraryInput(l)
     : blankLibrary(libraries.value.some((x) => x.kind === "movie") ? "tv" : "movie");
+  // 下载器删了以后库里还存着它的编号：显示「不指定」并写明，保存时清掉（读不到下载器列表时不动）
+  const dlID = libForm.value.download_downloader_id;
+  libDownloaderGone.value =
+    downloadersLoaded.value && dlID > 0 && !downloaders.value.some((d) => d.id === dlID);
+  if (libDownloaderGone.value) libForm.value.download_downloader_id = 0;
   checkItems.value = [];
   libDialog.value = true;
   void refreshPreview();
@@ -383,6 +431,9 @@ async function saveLibrary() {
       template: f.template.trim(),
       csf_url: csfURL,
       csf_path: f.csf_path.trim(),
+      download_save_path: f.download_save_path.trim(),
+      download_category: f.download_category.trim(),
+      download_tags: f.download_tags.trim(),
     };
     // Key 只在填了时带上：不带时保留保存的
     delete body.csf_key;
@@ -1996,6 +2047,71 @@ onMounted(refresh);
             <div class="field-tip">它那边看到的这个库的路径；和库目录一样时空着</div>
           </el-form-item>
         </div>
+        <div class="ml-dlg-sec">新建订阅时带出的下载设置</div>
+        <div class="field-tip ml-dl-intro" data-testid="ml-lib-dl-intro">
+          新建订阅时选了这个库（或者按类型自动选到这个库），这几项会填进订阅的表单，保存前可以改；已有的订阅不变。都可以空着。
+        </div>
+        <el-form-item label="下载器">
+          <el-select
+            v-model="libForm.download_downloader_id"
+            class="ml-dl-select"
+            data-testid="ml-lib-dl-downloader">
+            <el-option :value="0" label="不指定" />
+            <el-option
+              v-for="o in libDownloaderOptions"
+              :key="o.id"
+              :value="o.id"
+              :label="o.label" />
+          </el-select>
+          <div
+            v-if="libDownloaderGone && libForm.download_downloader_id === 0"
+            class="pt-note pt-note--warn ml-dl-note"
+            data-testid="ml-lib-dl-gone">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>原来设的下载器已删除，保存时改成不指定</span>
+          </div>
+          <div
+            v-else-if="libDownloaderDisabled"
+            class="pt-note pt-note--warn ml-dl-note"
+            data-testid="ml-lib-dl-disabled">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>这个下载器停用期间，新建订阅不会带出它</span>
+          </div>
+        </el-form-item>
+        <el-form-item label="保存目录">
+          <DownloaderPathInput
+            v-model="libForm.download_save_path"
+            :downloader-ids="libForm.download_downloader_id || null"
+            placeholder="空着按下载器的默认目录"
+            data-testid="ml-lib-dl-path" />
+          <div class="field-tip">下载器里看到的目录，不是上面的库目录</div>
+        </el-form-item>
+        <div class="ml-row">
+          <el-form-item label="分类">
+            <el-input
+              v-model="libForm.download_category"
+              placeholder="不加分类就空着"
+              data-testid="ml-lib-dl-category" />
+          </el-form-item>
+          <el-form-item label="标签">
+            <el-input
+              v-model="libForm.download_tags"
+              placeholder="几个标签用逗号分开"
+              data-testid="ml-lib-dl-tags" />
+          </el-form-item>
+        </div>
+        <div class="field-tip ml-dl-qb" data-testid="ml-lib-dl-qb">
+          qBittorrent
+          的默认种子管理模式是「自动」时，种子按分类的目录放（没有分类时放默认目录），这里的保存目录不起作用；订阅设置里开了「下载时按条目建子目录」时，pt-tools
+          让 qBittorrent 照保存目录放。
+        </div>
+        <div
+          v-if="libScopeMisses.length"
+          class="pt-note pt-note--warn ml-dl-note"
+          data-testid="ml-lib-dl-scope">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span>这样推送的种子下完不会自动整理：{{ libScopeMisses.join("；") }}</span>
+        </div>
         <el-form-item label="启用">
           <el-switch v-model="libForm.enabled" data-testid="ml-lib-enabled" />
         </el-form-item>
@@ -2448,6 +2564,23 @@ onMounted(refresh);
 
 .ml-source-warn {
   margin-top: 8px;
+}
+
+/* 新建订阅时带出的下载设置 */
+.ml-dl-intro {
+  margin: 0 0 12px;
+}
+
+.ml-dl-select {
+  width: 100%;
+}
+
+.ml-dl-note {
+  margin-top: 8px;
+}
+
+.ml-dl-qb {
+  margin: -6px 0 12px;
 }
 
 @media (max-width: 767px) {

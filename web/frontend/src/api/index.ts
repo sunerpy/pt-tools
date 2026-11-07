@@ -3519,6 +3519,14 @@ export interface MediaLibraryInput {
   csf_key?: string;
   /** ChineseSubFinder 里看到的这个库的目录；空串是和库目录一样 */
   csf_path: string;
+  /**
+   * 新建订阅时带出的下载设置：订阅弹窗与手机的追剧编辑页在新建时按媒体库把它们填进表单（已有的订阅不跟着变）。
+   * 下载器 0 是不指定；保存目录是下载器里看到的目录，不是库目录；标签逗号分开；都可以空着
+   */
+  download_downloader_id: number;
+  download_save_path: string;
+  download_category: string;
+  download_tags: string;
   enabled: boolean;
 }
 
@@ -4472,6 +4480,28 @@ export interface SubscriptionDetail extends Subscription {
   torrent_list: SubscriptionTorrent[];
 }
 
+/** 新建订阅前读的条目（GET /api/media/subscriptions/draft，只读） */
+export interface SubscriptionDraft {
+  media_type: MediaKind;
+  tmdb_id: number;
+  /** 这一季：请求的 0 换成最新一季；电影是 0 */
+  season: number;
+  /** 一共几季、这一季的集数（电影都是 0） */
+  seasons: number;
+  total_episodes: number;
+  title: string;
+  original_title: string;
+  /** 年份（剧集是这一季的） */
+  year: number;
+  poster_path: string;
+  /** TMDB 类型里有「动画」 */
+  anime: boolean;
+  /** 媒体库选「自动」时整理会选到的库（选法同整理）；没有能用的库时是 0 */
+  auto_library_id: number;
+  /** 这一季已有的订阅；没有时是 0 */
+  subscription_id: number;
+}
+
 export interface SubscriptionInput {
   media_type?: MediaKind;
   tmdb_id?: number;
@@ -5095,6 +5125,12 @@ export interface TorrentBlockResult {
 
 export const subscribeApi = {
   settings: () => api.get<SubscribeSettings>("/api/media/subscribe/settings"),
+  /** 新建订阅前读条目（只读）：剧集不带季或 0 是最新一季 */
+  draft: (q: { media_type: MediaKind; tmdb_id: number; season?: number }) => {
+    const params = new URLSearchParams({ media_type: q.media_type, tmdb_id: String(q.tmdb_id) });
+    if (q.season) params.set("season", String(q.season));
+    return api.get<SubscriptionDraft>(`/api/media/subscriptions/draft?${params.toString()}`);
+  },
   saveSettings: (data: SubscribeSettings) =>
     api.put<SubscribeSettings>("/api/media/subscribe/settings", data),
   profiles: () => api.get<QualityProfileList>("/api/media/quality-profiles"),
