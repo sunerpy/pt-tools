@@ -120,7 +120,7 @@ func TestSearchMediaDraftInvalid(t *testing.T) {
 }
 
 // timedSite 是一个假站点：delay 以后回 items；wait 为真时一直等到 ctx 结束才回错误（站点没有回应）。
-// started 不为空时第一次搜索开始时关掉它。
+// started 不为空时第一次搜索开始时关掉它；onResult 不为空时在回 items 之前调用（比如结果回来的同时调用方取消了）。
 type timedSite struct {
 	v2.Site
 	id       string
@@ -129,6 +129,7 @@ type timedSite struct {
 	wait     bool
 	searches atomic.Int32
 	started  chan struct{}
+	onResult func()
 	once     sync.Once
 }
 
@@ -157,6 +158,9 @@ func (s *timedSite) Search(ctx context.Context, _ v2.SearchQuery) ([]v2.TorrentI
 	copy(out, s.items)
 	for i := range out {
 		out[i].SourceSite = s.id
+	}
+	if s.onResult != nil {
+		s.onResult()
 	}
 	return out, nil
 }
@@ -222,6 +226,19 @@ func TestSearchMediaCallerCancelled(t *testing.T) {
 	_, err := e.svc.SearchMedia(ctx, MediaSearchInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2})
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Less(t, time.Since(start), 10*time.Second)
+}
+
+// 站点的结果回来时调用方已经取消了：回取消错误本身，不再对条目、读库（不是等到读黑名单时才失败）。
+func TestSearchMediaCancelledWhenResultsArrive(t *testing.T) {
+	e := newEnv(t)
+	items := e.tlouItems()
+	ctx, cancel := context.WithCancel(e.ctx)
+	defer cancel()
+	site := &timedSite{id: "hdsky", items: []v2.TorrentItem{items[0]}, onResult: cancel}
+	e.withSites(site)
+	_, err := e.svc.SearchMedia(ctx, MediaSearchInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2})
+	assert.Equal(t, context.Canceled, err)
+	assert.Positive(t, site.searches.Load(), "站点搜过")
 }
 
 // 只改包含词、排除词或档案再试：截止时间不同也命中搜索缓存，不再去站点搜；有站点没回来的那次不进缓存，再试会重新搜。
