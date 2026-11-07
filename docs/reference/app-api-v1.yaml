@@ -625,6 +625,67 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppSchedulePreview" }
         default: { $ref: "#/components/responses/Error" }
+  /subscriptions/draft:
+    get:
+      operationId: getSubscriptionDraft
+      tags: [App]
+      summary: 新建订阅前读条目（只读）：名字、年份、一共几季与这一季几集、是不是动画、「自动」会整理进哪个库、这一季是不是已经在追
+      parameters:
+        - name: media_type
+          in: query
+          required: true
+          schema: { type: string, enum: [movie, tv] }
+        - name: tmdb_id
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: season
+          in: query
+          description: 剧集的季，不带或 0 是最新一季；电影不用
+          schema: { type: integer, minimum: 0, maximum: 200 }
+      responses:
+        "200":
+          description: 条目（TMDB 上没有时回 404）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSubscriptionDraft" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/search/preview:
+    post:
+      operationId: previewSubscriptionSearch
+      tags: [App]
+      summary: 按编辑页还没保存的表单试搜索（只读：不推送、不写库）
+      description: |
+        用表单里的质量档案、标题包含与排除对站点上的种子，别名、集号规则、剧集组与手填的集数按这一季已有的订阅（没有时按 TMDB）。
+        站点搜索最晚到收到请求以后 25 秒，到点没回来的站点写进 errors（timed_out 为真），已经回来的照常出结果。
+        搜索结果缓存 10 分钟：只改包含词、排除词或档案再试，不再去站点搜；有站点出错的那次不进缓存。
+        同一主体还有一次在跑时回 409 busy；所有主体合计同时两次，满了等 2 秒还满回 503 busy（带 Retry-After）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppSearchPreviewInput" }
+      responses:
+        "200":
+          description: 试搜索的结果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSearchPreview" }
+        "409":
+          description: 这个主体的上一次试搜索还没结束（error 是 busy）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppError" }
+        "503":
+          description: 同时试搜索的太多（error 是 busy），或者订阅没有启动（unavailable）
+          headers:
+            Retry-After:
+              description: 过几秒再试（busy 时有）
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppError" }
+        default: { $ref: "#/components/responses/Error" }
   /subscriptions/{id}/episode-rules:
     get:
       operationId: listEpisodeRules
@@ -1756,7 +1817,23 @@ components:
         created_at: { type: integer, format: int64 }
     AppMediaLibrary:
       type: object
-      required: [id, name, kind, anime, path, mode, scrape, classify_dir, overwrite_mode, enabled]
+      required:
+        [
+          id,
+          name,
+          kind,
+          anime,
+          path,
+          mode,
+          scrape,
+          classify_dir,
+          overwrite_mode,
+          enabled,
+          download_downloader_id,
+          download_save_path,
+          download_category,
+          download_tags,
+        ]
       properties:
         id: { type: integer }
         name: { type: string }
@@ -1774,6 +1851,15 @@ components:
           type: string
           description: "目标位置已经有 pt-tools 之前放进库的旧版本时：空的不替换，larger 新文件更大时替换"
         enabled: { type: boolean }
+        download_downloader_id:
+          type: integer
+          description: "新建订阅时带出的下载器；0 是不指定（用设置里的默认下载器）"
+        download_save_path:
+          type: string
+          description: "新建订阅时带出的保存目录（下载器里看到的目录，不是库目录）；空的是不带出"
+        download_category: { type: string, description: "新建订阅时带出的分类；空的是不带出" }
+        download_tags:
+          { type: string, description: "新建订阅时带出的标签（逗号分开）；空的是不带出" }
     AppRecognizeInput:
       type: object
       additionalProperties: false
@@ -2126,6 +2212,11 @@ components:
         # 以下只用于剧集（追剧）：不给的按播出时间搜索、开着版本锁
         schedule: { $ref: "#/components/schemas/AppSchedule" }
         lock_version: { type: boolean }
+        lock_group:
+          type: string
+          maxLength: 64
+          description: 锁住的制作组（只在用户改了锁时发；不给时按第一个下载成功的版本定）
+        lock_resolution: { type: string, maxLength: 16, description: "锁住的分辨率，同 lock_group" }
         start_episode: { type: integer, minimum: 0, maximum: 2000 }
         follow_next_season: { type: boolean }
         library_id: { type: integer, minimum: 0 }
@@ -2142,6 +2233,279 @@ components:
           type: string
           maxLength: 512
           description: 种子标题：只在搜索缓存里没有这个种子时，用作在这个站点上搜索的关键字
+    AppSubscriptionDraft:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          media_type,
+          tmdb_id,
+          season,
+          seasons,
+          total_episodes,
+          title,
+          original_title,
+          year,
+          poster_path,
+          anime,
+          auto_library_id,
+          subscription_id,
+        ]
+      properties:
+        media_type: { type: string, enum: [movie, tv] }
+        tmdb_id: { type: integer }
+        season: { type: integer, description: "这一季：请求的 0 换成最新一季；电影是 0" }
+        seasons: { type: integer, description: "剧集一共几季（电影是 0）" }
+        total_episodes: { type: integer, description: "这一季几集（电影是 0）" }
+        title: { type: string }
+        original_title: { type: string }
+        year: { type: integer, description: "年份（剧集是这一季的）" }
+        poster_path: { type: string, description: "海报经 GET /images/tmdb/{size}/{file} 取" }
+        anime: { type: boolean, description: "TMDB 类型里有「动画」" }
+        auto_library_id:
+          { type: integer, description: "媒体库选「自动」时整理会选到的库；没有能用的库时是 0" }
+        subscription_id: { type: integer, description: "这一季已有的订阅；没有时是 0" }
+    AppSearchPreviewInput:
+      type: object
+      required: [media_type, tmdb_id]
+      additionalProperties: false
+      properties:
+        media_type: { type: string, enum: [movie, tv] }
+        tmdb_id: { type: integer, minimum: 1 }
+        season:
+          {
+            type: integer,
+            minimum: 0,
+            maximum: 200,
+            description: "剧集的季，0 是最新一季；电影不用",
+          }
+        profile_id:
+          type: integer
+          minimum: 0
+          description: 表单里的质量档案；0 是设置里的默认档案（和保存以后一样）
+        sites:
+          type: array
+          maxItems: 100
+          description: 只搜这些站点（没启用的写进 errors，一个都没启用时不搜）；不给或空的是全部启用的站点
+          items: { type: string, maxLength: 64 }
+        include_keywords:
+          { type: string, maxLength: 1024, description: "表单里的标题包含（原样，首尾空白不算）" }
+        exclude_keywords: { type: string, maxLength: 1024, description: "表单里的标题排除" }
+        include_unmatched: { type: boolean, description: "带上对不上这个条目的种子（最多 50 条）" }
+    AppSearchPreview:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          item,
+          keywords,
+          episodes,
+          groups,
+          total,
+          blocked_count,
+          unmatched_count,
+          unmatched,
+          errors,
+          duration_ms,
+        ]
+      properties:
+        item: { $ref: "#/components/schemas/AppSearchPreviewItem" }
+        subscription: { $ref: "#/components/schemas/AppSearchPreviewSubscription" }
+        profile: { $ref: "#/components/schemas/AppSearchPreviewProfile" }
+        keywords:
+          type: array
+          description: 这次在站点上搜的词（按 TMDB 上的名字与订阅的别名）
+          items: { type: string }
+        episodes:
+          type: array
+          description: 这一季每集现在的情况（电影是空的）
+          items: { $ref: "#/components/schemas/AppSearchPreviewEpisode" }
+        movie: { $ref: "#/components/schemas/AppSearchPreviewMovie" }
+        groups:
+          type: array
+          description: 对上这个条目的结果，同一资源一组，排好了序
+          items: { $ref: "#/components/schemas/AppSearchPreviewGroup" }
+        total: { type: integer, description: "对上这个条目的种子数（各组成员数之和）" }
+        blocked_count: { type: integer, description: "对上了、但拉黑了的种子数" }
+        unmatched_count: { type: integer, description: "对不上这个条目的种子数" }
+        unmatched:
+          type: array
+          description: 对不上这个条目的种子（只在请求 include_unmatched 时有，最多 50 条）
+          items: { $ref: "#/components/schemas/AppSearchPreviewUnmatched" }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/AppSearchPreviewError" }
+        duration_ms:
+          { type: integer, format: int64, description: "用了多久（毫秒，从收到请求算起）" }
+    AppSearchPreviewItem:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          media_type,
+          tmdb_id,
+          season,
+          title,
+          original_title,
+          year,
+          poster_path,
+          seasons,
+          total_episodes,
+        ]
+      properties:
+        media_type: { type: string, enum: [movie, tv] }
+        tmdb_id: { type: integer }
+        season: { type: integer, description: "剧集的季（请求的 0 换成了最新一季）；电影是 0" }
+        title: { type: string }
+        original_title: { type: string }
+        year: { type: integer, description: "年份（剧集是这一季的）" }
+        poster_path: { type: string }
+        seasons: { type: integer, description: "剧集一共几季" }
+        total_episodes: { type: integer, description: "这一季几集" }
+    AppSearchPreviewSubscription:
+      type: object
+      additionalProperties: false
+      description: 这一季（电影是这部）已有的订阅；没有时不带
+      required: [id, status]
+      properties:
+        id: { type: integer }
+        status: { type: string }
+        lock:
+          type: object
+          additionalProperties: false
+          description: 锁住的版本；没开版本锁或还没锁定时不带
+          required: [group, resolution]
+          properties:
+            group: { type: string, description: "制作组，认不出时为空" }
+            resolution: { type: string, description: "分辨率，认不出时为空" }
+    AppSearchPreviewProfile:
+      type: object
+      additionalProperties: false
+      description: 这次打分用的质量档案；编号为 0 时是没有档案，按分辨率与来源比
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+    AppSearchPreviewEpisode:
+      type: object
+      additionalProperties: false
+      required: [number, state]
+      properties:
+        number: { type: integer }
+        state:
+          type: string
+          description: library 已入库、downloading 在下载、waiting_version 等锁住的版本、missing 缺、upcoming 还没播
+        site: { type: string, description: "在下载时的来源站点" }
+        air_date: { type: string }
+        name: { type: string }
+    AppSearchPreviewMovie:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: { type: string, description: "library、downloading 或 missing" }
+        site: { type: string }
+    AppSearchPreviewVerdict:
+      type: object
+      additionalProperties: false
+      required: [score, reject]
+      properties:
+        score: { type: integer, description: "0–100 的分" }
+        reject:
+          type: string
+          description: 为空时符合；不为空时是全部原因，例如「标题含排除词 hdtv」
+    AppSearchPreviewGroup:
+      type: object
+      additionalProperties: false
+      required: [group_id, meta, covers, downloading, in_library, blocked, members]
+      properties:
+        group_id: { type: string }
+        meta: { $ref: "#/components/schemas/AppMediaMeta" }
+        verdict: { $ref: "#/components/schemas/AppSearchPreviewVerdict" }
+        span:
+          type: object
+          additionalProperties: false
+          description: 种子里的集（剧集才有）：whole 为真时是整季，否则是 start 到 end
+          required: [start, end, whole]
+          properties:
+            start: { type: integer }
+            end: { type: integer }
+            whole: { type: boolean }
+        covers:
+          type: array
+          description: 能补上的集（缺的与等版本的）
+          items: { type: integer }
+        downloading:
+          type: array
+          description: 这一组里正在下载的集
+          items: { type: integer }
+        in_library: { type: boolean, description: "这一组的集都已入库（电影是库里有）" }
+        blocked: { type: boolean, description: "成员都拉黑了（排在最后）" }
+        members:
+          type: array
+          description: 各站点上的这个资源，第一个是首选（meta 与 verdict 是它的）
+          items: { $ref: "#/components/schemas/AppSearchPreviewMember" }
+    AppSearchPreviewMember:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          site,
+          torrent_id,
+          title,
+          subtitle,
+          size_bytes,
+          seeders,
+          leechers,
+          snatched,
+          uploaded_at,
+          discount,
+          free,
+          free_left_seconds,
+          hr,
+          hr_hours,
+          category,
+          by_imdb,
+          blocked,
+        ]
+      properties:
+        site: { type: string }
+        torrent_id: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        seeders: { type: integer }
+        leechers: { type: integer }
+        snatched: { type: integer }
+        uploaded_at: { type: integer, format: int64 }
+        discount: { type: string, description: "站点的优惠原样" }
+        free: { type: boolean }
+        free_left_seconds:
+          { type: integer, format: int64, description: "免费还剩几秒；不知道结束时间时为 0" }
+        hr: { type: boolean, description: "有 H&R 要求（种子自己有，或者站点整站有）" }
+        hr_hours: { type: integer, description: "要做种多少小时，不知道时为 0" }
+        category: { type: string }
+        by_imdb: { type: boolean, description: "按 IMDb 编号对上的（不是按名字）" }
+        blocked: { type: boolean, description: "拉黑了" }
+        verdict: { $ref: "#/components/schemas/AppSearchPreviewVerdict" }
+    AppSearchPreviewUnmatched:
+      type: object
+      additionalProperties: false
+      required: [site, torrent_id, title, subtitle, reason]
+      properties:
+        site: { type: string }
+        torrent_id: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        reason: { type: string, description: "对不上的原因" }
+    AppSearchPreviewError:
+      type: object
+      additionalProperties: false
+      required: [site, error, timed_out]
+      properties:
+        site: { type: string, description: "站点；为空时是一次搜索" }
+        error: { type: string }
+        timed_out: { type: boolean, description: "到了时限还没有回应" }
     AppSubscriptionUpdate:
       type: object
       additionalProperties: false
@@ -2702,14 +3066,19 @@ components:
         display_name: { type: string }
     AppMobileOptions:
       type: object
-      required: [sites, downloaders, profiles, libraries]
+      required: [sites, downloaders, directories, profiles, libraries]
       properties:
         sites:
           type: array
           items: { $ref: "#/components/schemas/AppMobileSiteOption" }
         downloaders:
           type: array
-          items: { $ref: "#/components/schemas/AppMobileOption" }
+          description: 全部下载器，停用的也列出（enabled 为假）
+          items: { $ref: "#/components/schemas/AppMobileDownloaderOption" }
+        directories:
+          type: array
+          description: 各下载器的预设保存目录，按下载器排
+          items: { $ref: "#/components/schemas/AppMobileDirectory" }
         profiles:
           type: array
           items: { $ref: "#/components/schemas/AppMobileOption" }
@@ -2718,7 +3087,25 @@ components:
           items: { $ref: "#/components/schemas/AppMobileOption" }
         errors:
           type: object
+          description: 读不到的那几项（sites、downloaders、directories、quality_profiles、libraries）与原因
           additionalProperties: { type: string }
+    AppMobileDownloaderOption:
+      type: object
+      required: [id, name, enabled]
+      additionalProperties: false
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        enabled: { type: boolean }
+    AppMobileDirectory:
+      type: object
+      required: [downloader_id, path]
+      additionalProperties: false
+      properties:
+        downloader_id: { type: integer }
+        path: { type: string, description: "下载器里看到的目录" }
+        alias: { type: string, description: "显示用的名字" }
+        is_default: { type: boolean, description: "这个下载器的默认目录" }
     AppBrushConfig:
       type: object
       properties:

@@ -4674,6 +4674,18 @@ export interface MediaSearchInput {
   profile_id?: number;
   sites?: string[];
   include_unmatched?: boolean;
+  /**
+   * 试搜索：还没保存的表单（质量档案、标题包含与排除），给了时按它对种子，不按库里的订阅；不能和 profile_id 同时给。
+   * profile_id 为 0 时是设置里的默认档案（和保存以后一样）
+   */
+  draft?: MediaSearchDraft;
+}
+
+/** 试搜索时还没保存的表单 */
+export interface MediaSearchDraft {
+  profile_id: number;
+  include_keywords: string;
+  exclude_keywords: string;
 }
 
 /** 一集现在的情况：已入库、在下载、等锁住的版本、缺、还没播 */
@@ -4778,7 +4790,8 @@ export interface MediaSearchResult {
   blocked_count: number;
   unmatched_count: number;
   unmatched?: MediaSearchMember[];
-  errors: { site: string; error: string }[];
+  /** 站点（site 为空时是一次搜索）的错误；timed_out 是到了时限还没有回应 */
+  errors: { site: string; error: string; timed_out?: boolean }[];
 }
 
 // ---- 条目详情与订阅日历（媒体中心 M3） ----

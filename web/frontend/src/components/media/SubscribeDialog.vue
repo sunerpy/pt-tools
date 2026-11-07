@@ -12,6 +12,7 @@ import {
   type FollowSchedule,
   type MediaKind,
   type MediaLibrary,
+  type MediaSearchInput,
   type QualityProfile,
   type SeenVersion,
   type Subscription,
@@ -23,9 +24,14 @@ import {
   subscribeApi,
 } from "@/api";
 import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
+import SubscribePreview, {
+  type PreviewFollow,
+  type PreviewLock,
+} from "@/components/media/SubscribePreview.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { loadTmdbImageBase } from "@/composables/useTmdbImageBase";
 import { formatTimeAgo } from "@/utils/format";
+import { addKeyword } from "@/utils/keywordList";
 import { posterURL } from "@/utils/media";
 import {
   CRON_PRESETS,
@@ -131,6 +137,11 @@ const lockVersion = ref(true);
 const lockGroup = ref("");
 const lockRes = ref("");
 const startEpisode = ref<number | undefined>(undefined);
+// 试搜索的抽屉；从这个种子开始追（只在新建剧集时用）：打开弹窗时带进来的，或者在试搜索的结果上选的
+const previewOpen = ref(false);
+const followFrom = ref<FollowTorrent | null>(null);
+/** 在试搜索里选起点种子以前的起始集：「不从它开始」时改回去 */
+let startBeforeFollow: number | undefined;
 const followNext = ref(false);
 const libraryID = ref(0);
 const totalEpisodes = ref<number | undefined>(undefined);
@@ -534,6 +545,7 @@ async function loadOptions() {
 watch(
   () => props.modelValue,
   (open) => {
+    previewOpen.value = false;
     if (!open) return;
     // 「媒体识别」里换了 TMDB 图片地址时，海报从换的地址加载（打开时才读）
     void loadTmdbImageBase();
@@ -564,6 +576,8 @@ watch(
     lockGroup.value = s?.lock_group ?? "";
     lockRes.value = s?.lock_resolution ?? "";
     startEpisode.value = s?.start_episode && s.start_episode > 1 ? s.start_episode : undefined;
+    followFrom.value = !s && props.fromTorrent ? { ...props.fromTorrent } : null;
+    startBeforeFollow = undefined;
     followNext.value = Boolean(s?.follow_next_season);
     libraryID.value = s?.library_id ?? 0;
     totalEpisodes.value = s?.total_episodes_manual ? s.total_episodes : undefined;
@@ -644,9 +658,14 @@ function followInput(): Partial<SubscriptionInput> {
       out.lock_resolution = lockRes.value.trim();
     }
     if (totalEpisodes.value !== totalBefore.value) out.total_episodes = totalEpisodes.value ?? 0;
-  } else if (startEpisode.value) {
+  } else {
     // 从种子开始追时不填起始集，服务端按这个种子的集号定
-    out.start_episode = startEpisode.value;
+    if (startEpisode.value) out.start_episode = startEpisode.value;
+    // 试搜索里点了「锁这个版本」：一开始就锁住它，不等第一个下载成功的版本
+    if (lockVersion.value && !lockEmpty.value) {
+      out.lock_group = lockGroup.value.trim();
+      out.lock_resolution = lockRes.value.trim();
+    }
   }
   // 剧集组只在改了时带上（新建时选了才带）：空串是不用剧集组
   if (episodeGroup.value !== (props.sub?.episode_group_id ?? "")) {
@@ -659,6 +678,75 @@ function followInput(): Partial<SubscriptionInput> {
 function libraryInput(): Partial<SubscriptionInput> {
   if (editing.value && libraryID.value === (props.sub?.library_id ?? 0)) return {};
   return { library_id: libraryID.value };
+}
+
+// ---- 试搜索（追剧方案 F2）：按还没保存的表单搜一次，结果在右侧抽屉里；结果上的操作只改这张表单 ----
+const previewRequest = computed<MediaSearchInput | null>(() => {
+  const id = tmdbID.value;
+  if (!id) return null;
+  const f = form.value;
+  return {
+    media_type: kind.value,
+    tmdb_id: id,
+    season: isTV.value ? (season.value ?? 0) : 0,
+    sites: [...(f.sites ?? [])],
+    include_unmatched: true,
+    draft: {
+      profile_id: f.profile_id || 0,
+      include_keywords: f.include_keywords ?? "",
+      exclude_keywords: f.exclude_keywords ?? "",
+    },
+  };
+});
+/** 表单里的版本锁：关着时为空；开着、还没定版本时组和分辨率都是空串 */
+const previewLock = computed<PreviewLock | null>(() =>
+  isTV.value && lockVersion.value
+    ? { group: lockGroup.value.trim(), resolution: lockRes.value.trim() }
+    : null,
+);
+/** 起点种子是在试搜索里选的（不是打开弹窗时带进来的那个）：可以「不从它开始」 */
+const followPicked = computed(() => {
+  const f = followFrom.value;
+  const p = props.fromTorrent;
+  return Boolean(f) && (!p || p.site !== f?.site || p.torrent_id !== f?.torrent_id);
+});
+
+function addWord(field: "include_keywords" | "exclude_keywords", word: string) {
+  const res = addKeyword(form.value[field] ?? "", word);
+  if (!res.ok) {
+    ElMessage.warning(res.message);
+    return;
+  }
+  form.value[field] = res.text;
+  ElMessage.success(
+    `已加进${field === "include_keywords" ? "标题包含" : "标题排除"}：${word.trim()}`,
+  );
+}
+
+function lockToVersion(v: PreviewLock) {
+  lockVersion.value = true;
+  lockGroup.value = v.group;
+  lockRes.value = v.resolution;
+  ElMessage.success(
+    `版本锁：只收 ${[v.group, v.resolution].filter(Boolean).join(" ")}（保存以后生效）`,
+  );
+}
+
+function followTorrent(v: PreviewFollow) {
+  if (!followPicked.value) startBeforeFollow = startEpisode.value;
+  followFrom.value = { site: v.site, torrent_id: v.torrent_id, title: v.title };
+  // 起始集设成这个种子的第一集；整季包不改起始集
+  if (v.start > 0) startEpisode.value = v.start;
+  ElMessage.success(
+    v.start > 0
+      ? `保存以后从这个种子开始追（从第 ${v.start} 集起）`
+      : "保存以后从这个种子开始追（整季包，起始集不变）",
+  );
+}
+
+function unfollowTorrent() {
+  followFrom.value = props.fromTorrent ? { ...props.fromTorrent } : null;
+  startEpisode.value = startBeforeFollow;
 }
 
 async function save() {
@@ -688,12 +776,12 @@ async function save() {
         media_type: chosen.value.kind,
         tmdb_id: chosen.value.tmdb_id,
         season: isTV.value ? (season.value ?? 0) : 0,
-        ...(isTV.value && props.fromTorrent ? { from_torrent: { ...props.fromTorrent } } : {}),
+        ...(isTV.value && followFrom.value ? { from_torrent: { ...followFrom.value } } : {}),
       });
       if (isTV.value) {
         ElMessage.success(`开始追剧：${saved.title}`);
         // 从种子开始追时，那个种子推没推、为什么，写在订阅的说明里
-        if (props.fromTorrent && saved.message) ElMessage.info(saved.message);
+        if (followFrom.value && saved.message) ElMessage.info(saved.message);
       } else {
         ElMessage.success(`已订阅：${saved.title}`);
       }
@@ -744,11 +832,16 @@ async function save() {
             : "已经订阅过这部电影：再建会提示已经订阅过，要改设置到「追剧与订阅」里改它"
         }}
       </div>
-      <div v-if="!editing && fromTorrent" class="sd__from" data-testid="sd-from">
+      <div v-if="!editing && followFrom" class="sd__from" data-testid="sd-from">
         <div class="sd__label">从这个种子开始追</div>
-        <div class="sd__torrent">{{ fromTorrent.title }}</div>
+        <div class="sd__torrent">{{ followFrom.title }}</div>
         <div class="field-tip">
           建好以后马上推送它（不合质量档案、或者这几集已经有了时不推，原因写在追剧的说明里）；之后按下面的设置追后面的集
+        </div>
+        <div v-if="followPicked">
+          <el-button link type="primary" data-testid="sd-unfollow" @click="unfollowTorrent"
+            >不从它开始</el-button
+          >
         </div>
       </div>
       <el-form class="pt-form" label-position="top" @submit.prevent>
@@ -927,6 +1020,22 @@ async function save() {
             <div class="field-tip">
               锁住的版本等不到时接着等，不换别的版本；某一集要换，在追剧详情里点那一集「换版本」
             </div>
+            <div
+              v-if="lockVersion && !editing && !lockEmpty"
+              class="sd__locked"
+              data-testid="sd-new-lock">
+              一开始就锁住：{{ [lockGroup.trim(), lockRes.trim()].filter(Boolean).join(" ") }}
+              <el-button
+                link
+                type="primary"
+                data-testid="sd-new-lock-clear"
+                @click="
+                  lockGroup = '';
+                  lockRes = '';
+                "
+                >清空</el-button
+              >
+            </div>
             <template v-if="lockVersion && editing">
               <div v-if="lockedNow" class="sd__locked" data-testid="sd-locked">
                 现在锁住：{{ lockedNow }}
@@ -993,7 +1102,7 @@ async function save() {
                 :min="1"
                 :max="2000"
                 controls-position="right"
-                :placeholder="!editing && fromTorrent ? '这个种子的集' : '第 1 集'"
+                :placeholder="!editing && followFrom ? '这个种子的集' : '第 1 集'"
                 data-testid="sd-start" />
             </el-form-item>
             <el-form-item v-if="editing" label="这一季的集数">
@@ -1184,6 +1293,18 @@ async function save() {
             :rows="2"
             placeholder="每行或逗号分隔，留空不限"
             data-testid="sd-include" />
+          <div class="sd__try">
+            <el-button
+              size="small"
+              :disabled="!previewRequest"
+              data-testid="sd-preview"
+              @click="previewOpen = true"
+              >试搜索</el-button
+            >
+            <span class="sd__try-tip"
+              >按现在的档案、站点、包含与排除搜一次，看会收哪些种子；结果上可以复制标题、加进包含或排除</span
+            >
+          </div>
           <div class="field-tip">
             对种子标题与副标题，不分大小写，空格、点、下划线当作一样。只要某个制作组的版本时填它的名字，例如
             CHDWEB；要同时满足几个词时写标题里连着的一段，例如「3Audio Atmos-CHDWEB」。
@@ -1207,6 +1328,18 @@ async function save() {
           </div>
         </el-form-item>
       </el-form>
+      <SubscribePreview
+        v-model="previewOpen"
+        :request="previewRequest"
+        :title="title"
+        :tv="isTV"
+        :can-follow="isTV && !editing"
+        :lock="previewLock"
+        :follow="followFrom"
+        @include="addWord('include_keywords', $event)"
+        @exclude="addWord('exclude_keywords', $event)"
+        @lock="lockToVersion"
+        @follow="followTorrent" />
     </div>
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -1339,6 +1472,22 @@ async function save() {
   font-size: 13px;
   color: var(--pt-t1);
   word-break: break-all;
+}
+
+.sd__try {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.sd__try-tip {
+  flex: 1 1 200px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t3);
 }
 
 .sd__group {

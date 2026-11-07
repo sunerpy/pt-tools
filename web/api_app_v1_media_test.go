@@ -235,7 +235,7 @@ func TestAppTMDBImage(t *testing.T) {
 func TestAppMediaLibraryOrganize(t *testing.T) {
 	e := newOrganizeServer(t)
 	e.srv.SetMediaService(e.rec)
-	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true,"download_save_path":"/downloads/movies","download_category":"movies","download_tags":"pt-tools"}`).Code)
 	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPut, "/api/media/organize/settings", `{"min_video_mb":1}`).Code)
 	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":`+jsonPath(e.dlDir)+`}`).Code)
 
@@ -246,6 +246,11 @@ func TestAppMediaLibraryOrganize(t *testing.T) {
 	require.Len(t, libs, 1)
 	assert.Equal(t, "电影", libs[0].Name)
 	assert.Equal(t, models.MediaKindMovie, libs[0].Kind)
+	// 新建订阅时带出的下载设置（追剧方案 F2）
+	assert.Zero(t, libs[0].DownloadDownloaderID)
+	assert.Equal(t, "/downloads/movies", libs[0].DownloadSavePath)
+	assert.Equal(t, "movies", libs[0].DownloadCategory)
+	assert.Equal(t, "pt-tools", libs[0].DownloadTags)
 
 	w = appAsWith(t, e.srv.appMediaRecognize, http.MethodPost, "/api/app/v1/media/recognize", `{"title":"The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi"}`, "app:read")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

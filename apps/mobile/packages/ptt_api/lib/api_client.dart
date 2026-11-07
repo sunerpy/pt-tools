@@ -291,6 +291,10 @@ class ApiClient {
           return AppMessage.fromJson(value);
         case 'AppMeta':
           return AppMeta.fromJson(value);
+        case 'AppMobileDirectory':
+          return AppMobileDirectory.fromJson(value);
+        case 'AppMobileDownloaderOption':
+          return AppMobileDownloaderOption.fromJson(value);
         case 'AppMobileOption':
           return AppMobileOption.fromJson(value);
         case 'AppMobileOptions':
@@ -339,6 +343,34 @@ class ApiClient {
           return AppSearchError.fromJson(value);
         case 'AppSearchItem':
           return AppSearchItem.fromJson(value);
+        case 'AppSearchPreview':
+          return AppSearchPreview.fromJson(value);
+        case 'AppSearchPreviewEpisode':
+          return AppSearchPreviewEpisode.fromJson(value);
+        case 'AppSearchPreviewError':
+          return AppSearchPreviewError.fromJson(value);
+        case 'AppSearchPreviewGroup':
+          return AppSearchPreviewGroup.fromJson(value);
+        case 'AppSearchPreviewGroupSpan':
+          return AppSearchPreviewGroupSpan.fromJson(value);
+        case 'AppSearchPreviewInput':
+          return AppSearchPreviewInput.fromJson(value);
+        case 'AppSearchPreviewItem':
+          return AppSearchPreviewItem.fromJson(value);
+        case 'AppSearchPreviewMember':
+          return AppSearchPreviewMember.fromJson(value);
+        case 'AppSearchPreviewMovie':
+          return AppSearchPreviewMovie.fromJson(value);
+        case 'AppSearchPreviewProfile':
+          return AppSearchPreviewProfile.fromJson(value);
+        case 'AppSearchPreviewSubscription':
+          return AppSearchPreviewSubscription.fromJson(value);
+        case 'AppSearchPreviewSubscriptionLock':
+          return AppSearchPreviewSubscriptionLock.fromJson(value);
+        case 'AppSearchPreviewUnmatched':
+          return AppSearchPreviewUnmatched.fromJson(value);
+        case 'AppSearchPreviewVerdict':
+          return AppSearchPreviewVerdict.fromJson(value);
         case 'AppSearchRequest':
           return AppSearchRequest.fromJson(value);
         case 'AppSearchResult':
@@ -369,6 +401,8 @@ class ApiClient {
           return AppSubscriptionCreate.fromJson(value);
         case 'AppSubscriptionDetail':
           return AppSubscriptionDetail.fromJson(value);
+        case 'AppSubscriptionDraft':
+          return AppSubscriptionDraft.fromJson(value);
         case 'AppSubscriptionRun':
           return AppSubscriptionRun.fromJson(value);
         case 'AppSubscriptionRunPage':

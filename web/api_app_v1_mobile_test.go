@@ -126,7 +126,7 @@ func TestAppMobileOptionsAdd(t *testing.T) {
 		{"name": "off", "display_name": "Off", "enabled": false},
 		{"name": "unknown"},
 	})
-	o.add("downloaders", []map[string]any{{"id": "3", "name": "qb"}})
+	o.add("downloaders", []map[string]any{{"id": "3", "name": "qb", "enabled": true}, {"id": "4", "name": "tr"}})
 	o.add("quality_profiles", []map[string]any{{"id": float64(5), "name": "4K"}})
 	o.add("libraries", []map[string]any{{"id": json.Number("7"), "name": "电影"}})
 	assert.Equal(t, []AppMobileSiteOption{
@@ -134,7 +134,7 @@ func TestAppMobileOptionsAdd(t *testing.T) {
 		{Name: "plain", DisplayName: "plain"},
 		{Name: "unknown", DisplayName: "unknown"},
 	}, o.Sites, "disabled sites are left out; a missing display name falls back to the name")
-	assert.Equal(t, []AppMobileOption{{ID: 3, Name: "qb"}}, o.Downloaders)
+	assert.Equal(t, []AppMobileDownloaderOption{{ID: 3, Name: "qb", Enabled: true}, {ID: 4, Name: "tr"}}, o.Downloaders, "停用的下载器照旧列出，标 enabled")
 	assert.Equal(t, []AppMobileOption{{ID: 5, Name: "4K"}}, o.Profiles)
 	assert.Equal(t, []AppMobileOption{{ID: 7, Name: "电影"}}, o.Libraries)
 }

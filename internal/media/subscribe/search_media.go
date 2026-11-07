@@ -43,6 +43,20 @@ type MediaSearchInput struct {
 	Sites []string `json:"sites"`
 	// IncludeUnmatched 为真时把对不上这个条目的结果也返回，写明原因
 	IncludeUnmatched bool `json:"include_unmatched"`
+	// Draft 是还没保存的表单（试搜索）：给了它时质量档案、标题包含与排除按它来，不按库里的订阅；不能和 ProfileID 同时给
+	Draft *MediaSearchDraft `json:"draft,omitempty"`
+	// Deadline 只管站点搜索这一段：不为零时站点搜索最晚到这个时间（比 mediaSearchTimeout 早时），到点没回来的站点写进 Errors
+	// 并标 TimedOut，已经回来的照常出结果。只由调用方的代码设（App 的试搜索），请求体里设不了
+	Deadline time.Time `json:"-"`
+}
+
+// MediaSearchDraft 是试搜索时还没保存的表单。ProfileID 为 0 时用设置里的默认档案（和保存这张表单以后一样）；
+// IncludeKeywords、ExcludeKeywords 是表单里的原样文字（写法见 models.MediaSubscription）。
+// 别名、集号规则、剧集组与手填的集数照旧用库里这一季的订阅，没有订阅时按 TMDB。
+type MediaSearchDraft struct {
+	ProfileID       uint   `json:"profile_id"`
+	IncludeKeywords string `json:"include_keywords"`
+	ExcludeKeywords string `json:"exclude_keywords"`
 }
 
 // MediaSearchResult 是按条目搜索的结果。
@@ -188,10 +202,11 @@ type MediaSearchSpan struct {
 	Whole bool `json:"whole,omitempty"`
 }
 
-// MediaSearchError 是一个站点（Site 为空时是一次搜索）的错误。
+// MediaSearchError 是一个站点（Site 为空时是一次搜索）的错误。TimedOut 为真时是到了时限还没有回应。
 type MediaSearchError struct {
-	Site  string `json:"site"`
-	Error string `json:"error"`
+	Site     string `json:"site"`
+	Error    string `json:"error"`
+	TimedOut bool   `json:"timed_out,omitempty"`
 }
 
 // searchHit 是一个对上了条目的结果。
@@ -220,12 +235,29 @@ func (in *MediaSearchInput) check() error {
 	if in.ProfileID < noProfile {
 		return fmt.Errorf("%w: 质量档案不对", ErrInvalid)
 	}
+	if d := in.Draft; d != nil {
+		if in.ProfileID != 0 {
+			return fmt.Errorf("%w: draft 与 profile_id 不能同时给", ErrInvalid)
+		}
+		for _, v := range []struct{ name, v string }{{"标题包含", d.IncludeKeywords}, {"标题排除", d.ExcludeKeywords}} {
+			if len(strings.TrimSpace(v.v)) > maxKeywordsLen {
+				return fmt.Errorf("%w: %s的关键词太长", ErrInvalid, v.name)
+			}
+		}
+	}
 	sites, err := cleanSites(in.Sites)
 	if err != nil {
 		return err
 	}
+	// 站点排好序：搜索缓存的键是整个查询，调用方给的顺序（比如按启用的站点表取的）不同也要命中同一条缓存
+	slices.Sort(sites)
 	in.Sites = sites
 	return nil
+}
+
+// Validate 检查请求（和 SearchMedia 开头的检查一样），不搜索：调用方要先过滤站点、可能不搜时用它，参数不对照样报错。
+func (in MediaSearchInput) Validate() error {
+	return in.check()
 }
 
 // SearchMedia 按条目搜索（见 MediaSearchInput）。这一季已经订阅时按订阅本身对（别名、集号规则、标题关键词），没有时按 TMDB 上的条目。
@@ -268,7 +300,15 @@ func (s *Service) SearchMedia(ctx context.Context, in MediaSearchInput) (*MediaS
 			res.Subscription.Lock = &MediaSearchLock{Group: g, Resolution: r}
 		}
 	}
-	profile, scored, err := s.searchProfile(ctx, sub, set, in.ProfileID)
+	// judge 是打分与判断包含、排除用的订阅：试搜索时是换上表单三项的副本（不写库）
+	judge, profileID := sub, in.ProfileID
+	if d := in.Draft; d != nil {
+		cp := *sub
+		cp.ProfileID = d.ProfileID
+		cp.IncludeKeywords, cp.ExcludeKeywords = strings.TrimSpace(d.IncludeKeywords), strings.TrimSpace(d.ExcludeKeywords)
+		judge, profileID = &cp, int(d.ProfileID)
+	}
+	profile, scored, err := s.searchProfile(ctx, judge, set, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -295,9 +335,13 @@ func (s *Service) SearchMedia(ctx context.Context, in MediaSearchInput) (*MediaS
 	}
 
 	res.Keywords = keywords(sub)
-	items, errs, err := s.searchKeywords(ctx, res.Keywords, in.Sites)
+	items, errs, err := s.searchKeywords(ctx, res.Keywords, in.Sites, in.Deadline)
 	if err != nil {
 		return nil, err
+	}
+	// 调用方取消了（客户端断开、隧道里的 CANCEL）：不再对条目、读库
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, cerr
 	}
 	res.Errors = append(res.Errors, errs...)
 
@@ -327,7 +371,7 @@ func (s *Service) SearchMedia(ctx context.Context, in MediaSearchInput) (*MediaS
 			h.reasons = profile.rejects(cand, sp.count(total), false)
 			h.v = Verdict{Score: profile.points(cand.Meta)}
 		}
-		if why := keywordReject(sub, it); why != "" {
+		if why := keywordReject(judge, it); why != "" {
 			h.reasons = append(h.reasons, why)
 			h.scored = true
 		}
@@ -400,10 +444,15 @@ func (s *Service) searchProfile(ctx context.Context, sub *models.MediaSubscripti
 	return s.profileFor(ctx, sub, set), true, nil
 }
 
-// searchKeywords 用几个关键字同时搜（总时限 mediaSearchTimeout），合并结果并按站点与编号去重；同一个站点的错误只留第一条。
-// 每个关键字都搜失败时报错。
-func (s *Service) searchKeywords(ctx context.Context, kws, sites []string) ([]v2.TorrentItem, []MediaSearchError, error) {
-	sctx, cancel := context.WithTimeout(ctx, mediaSearchTimeout)
+// searchKeywords 用几个关键字同时搜（总时限 mediaSearchTimeout，deadline 不为零且更早时到它为止），合并结果并按站点与编号去重；
+// 同一个站点的错误只留第一条，到了时限还没回应的标 TimedOut。每个关键字都搜失败时报错。
+// 传给多站点搜索的 Timeout 固定是 mediaSearchTimeout：它是搜索缓存键的一部分，跟着剩余时间变就命中不了缓存。
+func (s *Service) searchKeywords(ctx context.Context, kws, sites []string, deadline time.Time) ([]v2.TorrentItem, []MediaSearchError, error) {
+	end := time.Now().Add(mediaSearchTimeout)
+	if !deadline.IsZero() && deadline.Before(end) {
+		end = deadline
+	}
+	sctx, cancel := context.WithDeadline(ctx, end)
 	defer cancel()
 	type out struct {
 		res *v2.MultiSiteSearchResult
@@ -433,7 +482,8 @@ func (s *Service) searchKeywords(ctx context.Context, kws, sites []string) ([]v2
 		for _, e := range o.res.Errors {
 			if !seenErr[e.Site] {
 				seenErr[e.Site] = true
-				errs = append(errs, MediaSearchError{Site: e.Site, Error: e.Error})
+				timedOut := errors.Is(sctx.Err(), context.DeadlineExceeded) && strings.Contains(e.Error, context.DeadlineExceeded.Error())
+				errs = append(errs, MediaSearchError{Site: e.Site, Error: e.Error, TimedOut: timedOut})
 			}
 		}
 		for _, it := range o.res.Items {

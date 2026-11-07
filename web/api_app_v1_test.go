@@ -191,6 +191,8 @@ var appReadPosts = map[string]bool{
 	"POST /media/organize/preview": true,
 	// 定时预览只算接下来几次什么时候搜
 	"POST /subscriptions/schedule/preview": true,
+	// 试搜索按还没保存的表单搜，不推送、不写库
+	"POST /subscriptions/search/preview": true,
 	// AI 助手的对话只动调用者自己的会话：只要 app:read；改动类操作另要确认（POST /assistant/confirmations/{id} 要 app:write）
 	"POST /assistant/conversations":               true,
 	"DELETE /assistant/conversations/{id}":        true,

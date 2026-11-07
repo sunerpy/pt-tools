@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,16 +21,37 @@ type AppMobileSiteOption struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`
 }
+
+// AppMobileDownloaderOption is a downloader choice. Disabled downloaders are listed too (marked
+// enabled=false) so an editor can say why a saved choice no longer takes effect.
+type AppMobileDownloaderOption struct {
+	ID      uint   `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+// AppMobileDirectory is a preset save directory of a downloader (the paths as the downloader sees them).
+type AppMobileDirectory struct {
+	DownloaderID uint   `json:"downloader_id"`
+	Path         string `json:"path"`
+	Alias        string `json:"alias,omitempty"`
+	IsDefault    bool   `json:"is_default,omitempty"`
+}
+
 type AppMobileOptions struct {
-	Sites       []AppMobileSiteOption `json:"sites"`
-	Downloaders []AppMobileOption     `json:"downloaders"`
-	Profiles    []AppMobileOption     `json:"profiles"`
-	Libraries   []AppMobileOption     `json:"libraries"`
-	Errors      map[string]string     `json:"errors,omitempty"`
+	Sites       []AppMobileSiteOption       `json:"sites"`
+	Downloaders []AppMobileDownloaderOption `json:"downloaders"`
+	Directories []AppMobileDirectory        `json:"directories"`
+	Profiles    []AppMobileOption           `json:"profiles"`
+	Libraries   []AppMobileOption           `json:"libraries"`
+	Errors      map[string]string           `json:"errors,omitempty"`
 }
 
 func (s *Server) appMobileOptions(w http.ResponseWriter, r *http.Request) {
-	out := AppMobileOptions{Sites: []AppMobileSiteOption{}, Downloaders: []AppMobileOption{}, Profiles: []AppMobileOption{}, Libraries: []AppMobileOption{}, Errors: map[string]string{}}
+	out := AppMobileOptions{
+		Sites: []AppMobileSiteOption{}, Downloaders: []AppMobileDownloaderOption{}, Directories: []AppMobileDirectory{},
+		Profiles: []AppMobileOption{}, Libraries: []AppMobileOption{}, Errors: map[string]string{},
+	}
 	for _, source := range []string{"sites", "downloaders", "quality_profiles", "libraries"} {
 		state, err := s.ConfigRead(r.Context(), source, "")
 		if err != nil {
@@ -37,7 +60,25 @@ func (s *Server) appMobileOptions(w http.ResponseWriter, r *http.Request) {
 		}
 		out.add(source, state.Items)
 	}
+	if err := out.addDirectories(r); err != nil {
+		out.Errors["directories"] = appRedactAddr(err.Error())
+	}
 	appJSON(w, out)
+}
+
+// addDirectories reads every downloader's preset directories, ordered by downloader and then as configured.
+func (o *AppMobileOptions) addDirectories(r *http.Request) error {
+	if global.GlobalDB == nil {
+		return errors.New("数据库没有初始化")
+	}
+	var rows []models.DownloaderDirectory
+	if err := global.GlobalDB.DB.WithContext(r.Context()).Order("downloader_id, id").Find(&rows).Error; err != nil {
+		return fmt.Errorf("读取下载器目录失败: %w", err)
+	}
+	for _, d := range rows {
+		o.Directories = append(o.Directories, AppMobileDirectory{DownloaderID: d.DownloaderID, Path: d.Path, Alias: d.Alias, IsDefault: d.IsDefault})
+	}
+	return nil
 }
 
 // add puts one configuration resource's items into the choices: only enabled sites (named by
@@ -60,7 +101,8 @@ func (o *AppMobileOptions) add(source string, items []map[string]any) {
 		option := AppMobileOption{ID: uint(id), Name: name}
 		switch source {
 		case "downloaders":
-			o.Downloaders = append(o.Downloaders, option)
+			enabled, _ := item["enabled"].(bool)
+			o.Downloaders = append(o.Downloaders, AppMobileDownloaderOption{ID: option.ID, Name: name, Enabled: enabled})
 		case "quality_profiles":
 			o.Profiles = append(o.Profiles, option)
 		case "libraries":
