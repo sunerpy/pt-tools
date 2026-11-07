@@ -121,6 +121,17 @@ async function loadDraft() {
     if (seq === draftSeq) looking.value = false;
   }
 }
+/**
+ * TMDB 编号用普通输入框：编号不是能加减的数量，也不该一打开就填上 1。
+ * 只留数字，空着是 0（「查找」与保存时提示要填）。
+ */
+const tmdbText = computed({
+  get: () => (form.value.tmdb_id > 0 ? String(form.value.tmdb_id) : ""),
+  set: (v: string) => {
+    const digits = v.replace(/\D/g, "").slice(0, 10);
+    form.value.tmdb_id = digits ? Number(digits) : 0;
+  },
+});
 /** 从「+」进来：填了类型与 TMDB 编号（季可以不填，0 是最新一季）以后点「查找」 */
 async function lookup() {
   if (!Number.isInteger(form.value.tmdb_id) || form.value.tmdb_id <= 0) {
@@ -612,10 +623,10 @@ onMounted(() => void load());
                   :label="t('电影', 'Movie')" /></el-select
             ></el-form-item>
             <el-form-item label="TMDB ID"
-              ><el-input-number
-                v-model="form.tmdb_id"
-                :min="1"
-                :precision="0"
+              ><el-input
+                v-model="tmdbText"
+                inputmode="numeric"
+                :placeholder="t('例如 1396', 'e.g. 1396')"
                 data-testid="se-tmdb"
             /></el-form-item>
             <el-button

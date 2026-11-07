@@ -275,10 +275,13 @@ function done() {
 
 async function copy(text: string, what: "title" | "subtitle") {
   try {
-    await copyText(text);
-    ElMessage.success(
-      what === "title" ? t("已复制标题", "Title copied") : t("已复制副标题", "Subtitle copied"),
-    );
+    const r = await copyText(text);
+    // Android 13 起系统复制以后自己会提示（App 回 notified），页面不再提示一遍
+    if (!r?.notified) {
+      ElMessage.success(
+        what === "title" ? t("已复制标题", "Title copied") : t("已复制副标题", "Subtitle copied"),
+      );
+    }
   } catch (e) {
     ElMessage.error(t(`复制失败：${(e as Error).message}`, `Copy failed: ${(e as Error).message}`));
   }

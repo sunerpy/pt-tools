@@ -151,9 +151,12 @@ export function request<T>(
     options,
   );
 }
-/** 把纯文字放进剪贴板（只有追剧编辑页能用，最多 4096 字；原生在别的页面回 403、太长回 413） */
+/**
+ * 把纯文字放进剪贴板（只有追剧编辑页能用，最多 4096 字；原生在别的页面回 403、太长回 413）。
+ * notified：系统自己已经提示了复制（Android 13 起），页面不用再提示。
+ */
 export function copyText(text: string) {
-  return bridgeCall<{ copied?: boolean }>("copy", { text }, 10_000);
+  return bridgeCall<{ copied?: boolean; notified?: boolean }>("copy", { text }, 10_000);
 }
 export async function nativeReady(): Promise<NativeConfig> {
   if (window.ptMobileConfig) return window.ptMobileConfig;
