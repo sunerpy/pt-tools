@@ -2,8 +2,9 @@
 /*
  * 订阅弹窗：新建（从探索页点「订阅」「追剧」，或从搜索结果的种子开始追）与修改订阅。剧集要选季（不填追最新一季）；
  * 可以选质量档案、只在哪些站点找、推送到哪个下载器、分类、标签、保存目录，打开洗版。条目与季建好以后不能改。
- * 剧集是追剧：什么时候搜索（默认按播出时间）、版本锁（默认开）、从第几集开始、种子按哪个剧集组写季集、整理进哪个媒体库、
- * 追完以后追下一季。
+ * 剧集是追剧：什么时候搜索（默认按播出时间）、版本锁（默认开）、从第几集开始、种子按哪个剧集组写季集、追完以后追下一季。
+ * 整理进哪个媒体库电影、剧集都能选；新建时按选的库（或按类型自动选到的库）带出库里设的下载器、保存目录、分类与标签
+ * （规则在 utils/subscribeDefaults.ts）。2026-11-07 用户：「选择了媒体库 剧集 类型后，应该支持自动带出一些设置」。
  */
 import {
   type DownloaderSetting,
@@ -14,6 +15,7 @@ import {
   type QualityProfile,
   type SeenVersion,
   type Subscription,
+  type SubscriptionDraft,
   type SubscriptionInput,
   downloadersApi,
   organizeApi,
@@ -33,6 +35,21 @@ import {
   intervalText,
   previewTime,
 } from "@/utils/subscribe";
+import {
+  type DownloadField,
+  type DownloadValues,
+  type LibraryDefaults,
+  type Sources,
+  applyAll,
+  bringOut,
+  differs,
+  effectiveLibrary,
+  libraryDefaults,
+  newSources,
+  resetField,
+  sourceNote,
+  userSources,
+} from "@/utils/subscribeDefaults";
 import { ElMessage } from "element-plus";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
@@ -276,7 +293,175 @@ const notSearchingTip = computed(() => {
   }
   return "";
 });
-const tvLibraries = computed(() => libraries.value.filter((l) => l.kind === "tv"));
+// ---- 整理进哪个媒体库：只列同类型、启用着的库；修改时现在选着的库停用了、删了也列出来，看得出选的是什么 ----
+const kindLibraries = computed(() =>
+  libraries.value.filter((l) => l.kind === kind.value && l.enabled),
+);
+const missingLibrary = computed(() => {
+  const id = libraryID.value;
+  if (!id || kindLibraries.value.some((l) => l.id === id)) return null;
+  const l = libraries.value.find((x) => x.id === id);
+  if (!optionsReady.value || (l && l.enabled)) return { id, label: l?.name ?? `媒体库 ${id}` };
+  return { id, label: l ? `${l.name}（已停用）` : `媒体库 ${id}（已删除）` };
+});
+/** 「按类型自动选」：新建时写明会整理进哪个库（按草稿），没有能用的库时写明整理会失败 */
+const autoLibraryLabel = computed(() => {
+  const d = draft.value;
+  if (editing.value || !d) return "按类型自动选";
+  if (d.auto_library_id > 0) {
+    const lib = libraries.value.find((l) => l.id === d.auto_library_id);
+    return lib ? `按类型自动选（会整理进：${lib.name}）` : "按类型自动选";
+  }
+  return `按类型自动选（没有启用的${isTV.value ? "剧集" : "电影"}媒体库，整理会失败）`;
+});
+
+// ---- 新建时按媒体库带出下载设置：库里设的下载器、保存目录、分类、标签，没动过的项才填 ----
+const draft = ref<SubscriptionDraft | null>(null);
+const draftError = ref("");
+/** 下载器、媒体库等选项读完了（带出要等它们） */
+const optionsReady = ref(false);
+/** 读到过下载器列表：没读到时不带出库里设的下载器 */
+const downloadersLoaded = ref(false);
+/** 四项现在的值从哪来（自己填的、来自哪个库） */
+const sources = ref<Sources>(newSources());
+
+/** libDefaults 是现在生效的库要带出的值：选了库用它，选「自动」时用草稿里会整理进的库（修改时没有草稿） */
+const libDefaults = computed<LibraryDefaults | null>(() => {
+  const lib = effectiveLibrary(
+    libraries.value,
+    libraryID.value,
+    editing.value ? 0 : (draft.value?.auto_library_id ?? 0),
+  );
+  return lib ? libraryDefaults(lib, downloadersLoaded.value ? downloaders.value : null) : null;
+});
+
+function downloadValues(): DownloadValues {
+  const f = form.value;
+  return {
+    downloader_id: f.downloader_id || 0,
+    save_path: f.save_path ?? "",
+    category: f.category ?? "",
+    tags: f.tags ?? "",
+  };
+}
+
+/** 只改变了的项：整个换掉表单会打断正在别的输入框里输入的字 */
+function setDownloadValues(v: DownloadValues) {
+  const f = form.value;
+  if (f.downloader_id !== v.downloader_id) f.downloader_id = v.downloader_id;
+  if (f.save_path !== v.save_path) f.save_path = v.save_path;
+  if (f.category !== v.category) f.category = v.category;
+  if (f.tags !== v.tags) f.tags = v.tags;
+}
+
+function applyDefaults(next: { values: DownloadValues; sources: Sources }) {
+  setDownloadValues(next.values);
+  sources.value = next.sources;
+}
+
+watch([libDefaults, optionsReady], () => {
+  if (!props.modelValue || editing.value || !optionsReady.value) return;
+  applyDefaults(bringOut({ values: downloadValues(), sources: sources.value }, libDefaults.value));
+});
+
+/** 自己输入、清空或选了别的：以后换库也不动这一项 */
+function touch(field: DownloadField) {
+  if (sources.value[field].kind !== "user") {
+    sources.value = { ...sources.value, [field]: { kind: "user" } };
+  }
+}
+
+const diffFields = computed(() =>
+  libDefaults.value ? differs(downloadValues(), libDefaults.value) : [],
+);
+const noteOf = (field: DownloadField) =>
+  sourceNote({ values: downloadValues(), sources: sources.value }, field);
+/** 新建时自己填过、和库的不一样的项：旁边给「换成媒体库的」 */
+const canReset = (field: DownloadField) =>
+  !editing.value && sources.value[field].kind === "user" && diffFields.value.includes(field);
+
+function resetDownloadField(field: DownloadField) {
+  applyDefaults(
+    resetField({ values: downloadValues(), sources: sources.value }, field, libDefaults.value),
+  );
+}
+
+/** 修改时换了库、库的下载设置和订阅的不一样：出一条「套用」，点了才换 */
+const applyLibrary = computed(() => {
+  if (!editing.value || libraryID.value === (props.sub?.library_id ?? 0)) return null;
+  return libDefaults.value && diffFields.value.length ? libDefaults.value : null;
+});
+function applyLibraryDefaults() {
+  applyDefaults(applyAll({ values: downloadValues(), sources: sources.value }, libDefaults.value));
+}
+
+const downloaderLabel = (d: DownloaderSetting) => (d.enabled ? d.name : `${d.name}（已停用）`);
+
+/** 头部的一行：新建剧集按草稿写一共几季、这一季几集 */
+const headSub = computed(() => {
+  if (!isTV.value) return "电影";
+  const d = draft.value;
+  if (editing.value || !d || d.media_type !== "tv") return "剧集";
+  const parts = ["剧集"];
+  if (d.seasons > 0) parts.push(`一共 ${d.seasons} 季`);
+  if (d.season > 0)
+    parts.push(
+      d.total_episodes > 0 ? `第 ${d.season} 季 ${d.total_episodes} 集` : `第 ${d.season} 季`,
+    );
+  return parts.join(" · ");
+});
+const seasonPlaceholder = computed(() =>
+  !editing.value && draft.value && season.value == null && draft.value.season > 0
+    ? `最新一季（第 ${draft.value.season} 季）`
+    : "最新一季",
+);
+/** 这一季（这部电影）已经订阅过：再建会被拒 */
+const alreadySubscribed = computed(() => !editing.value && (draft.value?.subscription_id ?? 0) > 0);
+
+let draftSeq = 0;
+let draftKey = "";
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+/** 草稿按条目与季读；同一个条目与季读过就不再读 */
+function currentDraftKey(): string {
+  const c = chosen.value;
+  if (editing.value || !c) return "";
+  return `${c.kind}:${c.tmdb_id}:${c.kind === "tv" ? (season.value ?? 0) : 0}`;
+}
+
+async function loadDraft() {
+  clearTimeout(draftTimer);
+  const key = currentDraftKey();
+  if (key === draftKey) return;
+  draftKey = key;
+  const seq = ++draftSeq;
+  draftError.value = "";
+  const c = chosen.value;
+  if (!key || !c) {
+    draft.value = null;
+    return;
+  }
+  try {
+    const d = await subscribeApi.draft({
+      media_type: c.kind,
+      tmdb_id: c.tmdb_id,
+      season: c.kind === "tv" ? (season.value ?? 0) : 0,
+    });
+    if (seq === draftSeq) draft.value = d ?? null;
+  } catch (e) {
+    if (seq !== draftSeq) return;
+    draft.value = null;
+    // 后端的「参数不对: 」是通用的前缀，这里直接写哪里不对（例如 TMDB 上没有这一季）
+    const msg = ((e as Error)?.message || "").trim().replace(/^参数不对[:：]\s*/, "");
+    draftError.value = msg || "读不到这个条目的信息";
+  }
+}
+
+watch(season, () => {
+  if (!props.modelValue || editing.value || !isTV.value) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => void loadDraft(), 400);
+});
+onBeforeUnmount(() => clearTimeout(draftTimer));
 
 // ---- 剧集组：TMDB 上这部剧没有剧集组、也没选过时不显示 ----
 const episodeGroup = ref("");
@@ -318,7 +503,9 @@ const monthDays = Array.from({ length: 31 }, (_, i) => i + 1);
 const settingsDownloaderID = ref(0);
 const pathDownloaderID = computed(() => form.value.downloader_id || settingsDownloaderID.value);
 
+let optionsSeq = 0;
 async function loadOptions() {
+  const seq = ++optionsSeq;
   const [ps, dls, ss, libs, set] = await Promise.allSettled([
     subscribeApi.profiles(),
     downloadersApi.list(),
@@ -330,7 +517,10 @@ async function loadOptions() {
   if (set.status === "fulfilled")
     settingsDownloaderID.value = set.value?.default_downloader_id ?? 0;
   if (ps.status === "fulfilled") profiles.value = ps.value?.items ?? [];
-  if (dls.status === "fulfilled") downloaders.value = dls.value ?? [];
+  if (dls.status === "fulfilled") {
+    downloaders.value = dls.value ?? [];
+    downloadersLoaded.value = true;
+  }
   if (ss.status === "fulfilled") {
     sites.value = Object.entries(ss.value ?? {})
       .filter(([, c]) => c.enabled)
@@ -338,6 +528,7 @@ async function loadOptions() {
       .sort();
   }
   if (libs.status === "fulfilled") libraries.value = libs.value ?? [];
+  if (seq === optionsSeq) optionsReady.value = true;
 }
 
 watch(
@@ -378,8 +569,15 @@ watch(
     totalEpisodes.value = s?.total_episodes_manual ? s.total_episodes : undefined;
     totalBefore.value = totalEpisodes.value;
     episodeGroup.value = s?.episode_group_id ?? "";
+    // 带出：新建时四项都还没带出过，修改时一律当作自己填的
+    sources.value = s ? userSources() : newSources();
+    optionsReady.value = false;
+    downloadersLoaded.value = false;
+    draft.value = null;
+    draftKey = "";
     void loadOptions();
     void loadGroups();
+    void loadDraft();
   },
   { immediate: true },
 );
@@ -391,7 +589,13 @@ function pickCandidate(id: number) {
     posterFailed.value = false;
     // 剧集组是一部剧的：换了条目要重新选
     episodeGroup.value = "";
+    // 换成别的类型时，原来选的库不是这个类型的了
+    if (libraryID.value && !kindLibraries.value.some((l) => l.id === libraryID.value)) {
+      libraryID.value = 0;
+    }
+    draft.value = null;
     void loadGroups();
+    void loadDraft();
   }
 }
 
@@ -430,7 +634,6 @@ function followInput(): Partial<SubscriptionInput> {
     schedule: scheduleInput(),
     lock_version: lockVersion.value,
     follow_next_season: followNext.value,
-    library_id: libraryID.value,
   };
   if (editing.value) {
     // 修改时 0 是整季
@@ -452,6 +655,12 @@ function followInput(): Partial<SubscriptionInput> {
   return out;
 }
 
+/** 整理进哪个媒体库（电影、剧集都有）：修改时只在改了时带上，库停用了以后改别的设置不会被挡 */
+function libraryInput(): Partial<SubscriptionInput> {
+  if (editing.value && libraryID.value === (props.sub?.library_id ?? 0)) return {};
+  return { library_id: libraryID.value };
+}
+
 async function save() {
   if (
     isTV.value &&
@@ -465,12 +674,17 @@ async function save() {
   try {
     let saved: Subscription;
     if (props.sub) {
-      saved = await subscribeApi.update(props.sub.id, { ...form.value, ...followInput() });
+      saved = await subscribeApi.update(props.sub.id, {
+        ...form.value,
+        ...followInput(),
+        ...libraryInput(),
+      });
       ElMessage.success(isTV.value ? "已保存追剧" : "已保存订阅");
     } else if (chosen.value) {
       saved = await subscribeApi.create({
         ...form.value,
         ...followInput(),
+        ...libraryInput(),
         media_type: chosen.value.kind,
         tmdb_id: chosen.value.tmdb_id,
         season: isTV.value ? (season.value ?? 0) : 0,
@@ -517,8 +731,18 @@ async function save() {
           <div class="sd__name" data-testid="sd-name">
             {{ title }}<template v-if="year"> ({{ year }})</template>
           </div>
-          <div class="sd__sub">{{ isTV ? "剧集" : "电影" }}</div>
+          <div class="sd__sub" data-testid="sd-sub">{{ headSub }}</div>
         </div>
+      </div>
+      <div v-if="draftError" class="field-tip field-tip--warn" data-testid="sd-draft-error">
+        {{ draftError }}
+      </div>
+      <div v-else-if="alreadySubscribed" class="field-tip field-tip--warn" data-testid="sd-already">
+        {{
+          isTV
+            ? "这一季已经在追了：再建会提示已经订阅过，要改设置到「追剧与订阅」里改它"
+            : "已经订阅过这部电影：再建会提示已经订阅过，要改设置到「追剧与订阅」里改它"
+        }}
       </div>
       <div v-if="!editing && fromTorrent" class="sd__from" data-testid="sd-from">
         <div class="sd__label">从这个种子开始追</div>
@@ -544,7 +768,7 @@ async function save() {
             :max="200"
             :disabled="editing"
             controls-position="right"
-            placeholder="最新一季"
+            :placeholder="seasonPlaceholder"
             data-testid="sd-season" />
           <div class="field-tip">
             {{
@@ -813,21 +1037,129 @@ async function save() {
               默认的季集；剧集组里没有的集照默认的季集算，写进运行记录
             </div>
           </el-form-item>
-          <el-form-item label="整理进哪个媒体库">
-            <el-select v-model="libraryID" data-testid="sd-library">
-              <el-option :value="0" label="按类型自动选" />
-              <el-option v-for="l in tvLibraries" :key="l.id" :value="l.id" :label="l.name" />
-            </el-select>
-          </el-form-item>
           <el-form-item label="追完以后">
             <div class="sd__switch">
               <el-switch v-model="followNext" data-testid="sd-follow-next" />
               <span>接着追下一季（TMDB 上有了就建，设置照这一季）</span>
             </div>
           </el-form-item>
-          <div class="sd__group">下载</div>
         </template>
 
+        <div class="sd__group">整理与下载</div>
+        <el-form-item label="整理进哪个媒体库">
+          <el-select v-model="libraryID" data-testid="sd-library">
+            <el-option :value="0" :label="autoLibraryLabel" />
+            <el-option v-for="l in kindLibraries" :key="l.id" :value="l.id" :label="l.name" />
+            <el-option
+              v-if="missingLibrary"
+              :value="missingLibrary.id"
+              :label="missingLibrary.label" />
+          </el-select>
+          <div v-if="!editing" class="field-tip" data-testid="sd-library-tip">
+            下面的下载器、分类、标签与保存目录按这个库在「媒体库」里设的带出，可以改；自己改过的项换库也不变
+          </div>
+          <div v-if="applyLibrary" class="sd__apply" data-testid="sd-apply-bar">
+            <span>媒体库「{{ applyLibrary.library }}」的下载设置和这个订阅的不一样</span>
+            <el-button link type="primary" data-testid="sd-apply" @click="applyLibraryDefaults"
+              >套用「{{ applyLibrary.library }}」的下载设置</el-button
+            >
+          </div>
+        </el-form-item>
+
+        <el-form-item label="下载器">
+          <el-select
+            v-model="form.downloader_id"
+            data-testid="sd-downloader"
+            @update:model-value="touch('downloader_id')">
+            <el-option :value="0" label="用设置里的默认下载器" />
+            <el-option
+              v-for="d in downloaders"
+              :key="d.id"
+              :value="d.id as number"
+              :label="downloaderLabel(d)" />
+          </el-select>
+          <div
+            v-if="noteOf('downloader_id') || canReset('downloader_id')"
+            class="sd__src"
+            data-testid="sd-src-downloader">
+            <span v-if="noteOf('downloader_id')">{{ noteOf("downloader_id") }}</span>
+            <button
+              v-if="canReset('downloader_id')"
+              type="button"
+              class="sd__reset"
+              data-testid="sd-reset-downloader"
+              @click="resetDownloadField('downloader_id')">
+              换成媒体库「{{ libDefaults?.library }}」的
+            </button>
+          </div>
+        </el-form-item>
+        <div class="sd__row">
+          <el-form-item label="分类">
+            <el-input
+              v-model="form.category"
+              placeholder="不填"
+              data-testid="sd-category"
+              @update:model-value="touch('category')" />
+            <div
+              v-if="noteOf('category') || canReset('category')"
+              class="sd__src"
+              data-testid="sd-src-category">
+              <span v-if="noteOf('category')">{{ noteOf("category") }}</span>
+              <button
+                v-if="canReset('category')"
+                type="button"
+                class="sd__reset"
+                data-testid="sd-reset-category"
+                @click="resetDownloadField('category')">
+                换成媒体库「{{ libDefaults?.library }}」的
+              </button>
+            </div>
+          </el-form-item>
+          <el-form-item label="标签">
+            <el-input
+              v-model="form.tags"
+              placeholder="不填，多个用逗号分开"
+              data-testid="sd-tags"
+              @update:model-value="touch('tags')" />
+            <div
+              v-if="noteOf('tags') || canReset('tags')"
+              class="sd__src"
+              data-testid="sd-src-tags">
+              <span v-if="noteOf('tags')">{{ noteOf("tags") }}</span>
+              <button
+                v-if="canReset('tags')"
+                type="button"
+                class="sd__reset"
+                data-testid="sd-reset-tags"
+                @click="resetDownloadField('tags')">
+                换成媒体库「{{ libDefaults?.library }}」的
+              </button>
+            </div>
+          </el-form-item>
+        </div>
+        <el-form-item label="保存目录（下载器里看到的）">
+          <DownloaderPathInput
+            v-model="form.save_path"
+            :downloader-ids="pathDownloaderID"
+            placeholder="不填时用下载器的默认目录"
+            data-testid="sd-save-path"
+            @update:model-value="touch('save_path')" />
+          <div
+            v-if="noteOf('save_path') || canReset('save_path')"
+            class="sd__src"
+            data-testid="sd-src-save-path">
+            <span v-if="noteOf('save_path')">{{ noteOf("save_path") }}</span>
+            <button
+              v-if="canReset('save_path')"
+              type="button"
+              class="sd__reset"
+              data-testid="sd-reset-save-path"
+              @click="resetDownloadField('save_path')">
+              换成媒体库「{{ libDefaults?.library }}」的
+            </button>
+          </div>
+        </el-form-item>
+        <div class="sd__group">怎么找</div>
         <el-form-item label="质量档案">
           <el-select v-model="form.profile_id" data-testid="sd-profile">
             <el-option :value="0" label="用设置里的默认档案" />
@@ -864,34 +1196,6 @@ async function save() {
             :rows="2"
             placeholder="每行或逗号分隔，留空不限"
             data-testid="sd-exclude" />
-        </el-form-item>
-        <el-form-item label="下载器">
-          <el-select v-model="form.downloader_id" data-testid="sd-downloader">
-            <el-option :value="0" label="用设置里的默认下载器" />
-            <el-option
-              v-for="d in downloaders"
-              :key="d.id"
-              :value="d.id as number"
-              :label="d.name" />
-          </el-select>
-        </el-form-item>
-        <div class="sd__row">
-          <el-form-item label="分类">
-            <el-input v-model="form.category" placeholder="不填" data-testid="sd-category" />
-          </el-form-item>
-          <el-form-item label="标签">
-            <el-input
-              v-model="form.tags"
-              placeholder="不填，多个用逗号分开"
-              data-testid="sd-tags" />
-          </el-form-item>
-        </div>
-        <el-form-item label="保存目录（下载器里看到的）">
-          <DownloaderPathInput
-            v-model="form.save_path"
-            :downloader-ids="pathDownloaderID"
-            placeholder="不填时用下载器的默认目录"
-            data-testid="sd-save-path" />
         </el-form-item>
         <el-form-item label="洗版">
           <div class="sd__switch">
@@ -1093,5 +1397,47 @@ async function save() {
 }
 .sd__seen .el-button + .el-button {
   margin-left: 0;
+}
+
+/* 带出的值从哪来：写在输入框下面，「换成媒体库的」是可以点的动作 */
+.sd__src {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin-top: 4px;
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t3);
+}
+
+.sd__reset {
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--pt-p);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.sd__reset:hover,
+.sd__reset:focus-visible {
+  text-decoration: underline;
+}
+
+/* 修改时换了库：一条可以点的「套用」 */
+.sd__apply {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
+  background: var(--pt-bg-surface-muted);
+  border: 1px solid var(--pt-border);
+  border-radius: 6px;
 }
 </style>

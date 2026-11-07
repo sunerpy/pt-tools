@@ -1107,7 +1107,7 @@ describe("订阅", () => {
         },
         lock_version: true,
         follow_next_season: true,
-        library_id: 4,
+        // 没改媒体库时不带 library_id（服务器不带就不改）：订阅选的库后来停用了也照样能保存
         start_episode: 0,
         lock_group: "",
         lock_resolution: "",

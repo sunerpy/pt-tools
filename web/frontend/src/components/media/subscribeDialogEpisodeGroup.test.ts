@@ -16,6 +16,8 @@ const api = vi.hoisted(() => ({
   previewSchedule: vi.fn(async () => ({ next: [] })),
   settings: vi.fn(async () => ({})),
   episodeGroups: vi.fn(),
+  // 新建时读的草稿（带出媒体库的下载设置）：这里没有媒体库，不带出
+  draft: vi.fn(async () => null),
 }));
 
 vi.mock("@/api", async (orig) => {
