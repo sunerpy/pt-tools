@@ -87,6 +87,7 @@ describe("来源的类型与状态", () => {
     expect(nasKindIcon("glances")).toBe("gauge");
     expect(nasKindIcon("synology")).toBe("hard-drive");
     expect(nasKindIcon("truenas")).toBe("server");
+    expect(nasKindIcon("fnos")).toBe("warehouse");
   });
 
   it("状态的文字与颜色；连不上、登录失败与证书的问题算有问题；启用了且能用的才能显示", () => {
@@ -402,13 +403,17 @@ describe("告警、应用与主机行", () => {
 });
 
 describe("添加来源时的准备步骤", () => {
-  it("TrueNAS 写怎么建只读用户与 API Key、只收 https；没写的类型没有", () => {
+  it("TrueNAS 写怎么建只读用户与 API Key、只收 https；飞牛写管理员账号与两个默认端口；没写的类型没有", () => {
     const g = nasKindGuide("truenas");
     expect(g?.title).toContain("25.04");
     expect(g?.steps).toHaveLength(3);
     expect(g?.steps.join("")).toContain("truenas_readonly_administrators");
     expect(g?.steps.join("")).toContain("https");
-    expect(nasKindGuide("fnos")).toBeNull();
+    const fn = nasKindGuide("fnos");
+    expect(fn?.title).toContain("管理员账号");
+    expect(fn?.steps.join(""), "飞牛写清楚两个默认端口").toContain("5667");
+    expect(fn?.steps.join("")).toContain("5666");
+    expect(nasKindGuide("unraid")).toBeNull();
     expect(nasKindGuide("")).toBeNull();
   });
 
