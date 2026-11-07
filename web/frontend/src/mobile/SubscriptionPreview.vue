@@ -369,6 +369,7 @@ onBeforeUnmount(cancel);
     direction="btt"
     size="100%"
     append-to-body
+    class="msp-drawer"
     :title="t(`试搜索：${title}`, `Search preview: ${title}`)"
     data-testid="msp">
     <div class="msp">
@@ -446,7 +447,7 @@ onBeforeUnmount(cancel);
           v-model="tab"
           :options="tabs"
           block
-          class="msp__tabs"
+          class="pt-seg msp__tabs"
           data-testid="msp-tabs" />
 
         <template v-if="tab !== 'unmatched'">
@@ -647,6 +648,8 @@ onBeforeUnmount(cancel);
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  /* 和表单项的内容一样大（14）；不写的话没设字号的字按浏览器的 16 */
+  font-size: var(--pt-fz-body-lg);
 }
 .msp__hint {
   margin: 0;
@@ -690,8 +693,22 @@ onBeforeUnmount(cancel);
   color: var(--pt-dang);
   font-size: var(--pt-fz-sm);
 }
-.msp__tabs {
+/*
+ * 和网页的试搜索一样用 pt-seg（atoms.css）：选中的一格是抬起的「纸」（surface + t1），不是主色实底配白字——
+ * App 的深色主题里主色是浅色墨，白字压上去看不见。手机上按 44 高、13 号字（和按钮一样）。
+ */
+.msp__tabs.pt-seg {
   width: 100%;
+  min-height: 44px;
+  font-size: var(--pt-fz-body);
+}
+/* 三栏平分 350 宽，内边距收窄；再长（电影、英文、多位数）就折成两行，不截断 */
+.msp__tabs.pt-seg :deep(.el-segmented__item) {
+  padding: 6px 4px;
+}
+.msp__tabs.pt-seg :deep(.el-segmented__item-label) {
+  white-space: normal;
+  line-height: 1.3;
 }
 .msp-card {
   display: flex;
@@ -740,6 +757,7 @@ onBeforeUnmount(cancel);
   flex-direction: column;
   gap: 12px;
   padding: 4px 0 max(8px, env(safe-area-inset-bottom));
+  font-size: var(--pt-fz-body-lg);
 }
 .msp-actions__title {
   margin: 0;

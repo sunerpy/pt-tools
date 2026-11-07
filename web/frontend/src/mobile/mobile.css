@@ -217,6 +217,24 @@ body,
   width: 640px;
   transform-origin: top left;
 }
+/* 提示条不接点击，和 Android 的 Toast 一样：它出在顶上，会把试搜索面板右上角的关闭按钮盖住约 3 秒 */
+.el-message {
+  pointer-events: none;
+}
+/* 试搜索面板（整屏的底部抽屉）：标题栏和内容按手机的间距收紧，关闭按钮给够 44 的点按区、图标和内容右边对齐 */
+.msp-drawer .el-drawer__header {
+  margin-bottom: 0;
+  padding: 12px 4px 4px 16px;
+}
+.msp-drawer .el-drawer__close-btn {
+  justify-content: center;
+  align-items: center;
+  width: 44px;
+  height: 44px;
+}
+.msp-drawer .el-drawer__body {
+  padding: 8px 16px 16px;
+}
 /* Element Plus poppers are teleported to body, outside the page container. */
 .el-select-dropdown__item {
   min-height: 44px;

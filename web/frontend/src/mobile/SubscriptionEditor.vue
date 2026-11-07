@@ -580,6 +580,7 @@ onMounted(() => void load());
     <el-button v-if="!options && !forbidden" @click="load">{{ t("重试", "Retry") }}</el-button>
     <el-form
       v-if="options"
+      class="se-form"
       label-position="top"
       :disabled="!canWrite || saving"
       @submit.prevent="save">
@@ -617,9 +618,14 @@ onMounted(() => void load());
                 :precision="0"
                 data-testid="se-tmdb"
             /></el-form-item>
-            <el-button v-if="assist" :loading="looking" data-testid="se-lookup" @click="lookup">{{
-              t("查找", "Look up")
-            }}</el-button>
+            <el-button
+              v-if="assist"
+              class="se-lookup"
+              :loading="looking"
+              data-testid="se-lookup"
+              @click="lookup"
+              >{{ t("查找", "Look up") }}</el-button
+            >
           </template>
           <el-form-item
             v-if="tv && !seasonChoices.length"
@@ -982,6 +988,14 @@ onMounted(() => void load());
   </template>
 </template>
 <style scoped>
+/* 表单自己的字（摘要、定时与开关那几行）和表单项的内容一样大（14）；不写的话按浏览器的 16，比旁边的选择框大一圈 */
+.se-form {
+  font-size: var(--pt-fz-body-lg);
+}
+/* 「查找」和下面的表单项隔开一个表单项的间距 */
+.se-lookup {
+  margin-bottom: 20px;
+}
 .se-line {
   margin-top: -8px;
 }
