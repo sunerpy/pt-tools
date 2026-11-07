@@ -1250,6 +1250,28 @@ func TestFnOSCollectDropped(t *testing.T) {
 	}
 }
 
+// 一条回应在 4 MiB 以内照读：容器多时容器列表远大于 coder/websocket 默认的 32 KiB；超过 4 MiB 时连接断开、不读
+func TestFnosReadLimit(t *testing.T) {
+	containers := func(n int) string {
+		row := `{"Id":"x","Names":["/c"],"State":"running","Status":"Up","Command":"` + strings.Repeat("a", 1000) + `"}`
+		return `{"rsp":[` + strings.TrimSuffix(strings.Repeat(row+",", n), ",") + `]}`
+	}
+	fk := newFakeFnOS(t, false)
+	s := fk.source(fnosSaved(t, fk))
+	fk.set(fnosReqContainers, fnosFakeReply{body: containers(200)}) // 约 210 KiB
+	snap, err := s.Collect(fnosCtx(t), true)
+	require.NoError(t, err)
+	assert.Equal(t, Apps{Running: 200, Total: 200, UpdatesUnknown: true}, snap.Apps)
+
+	big := containers(4300) // 约 4.5 MiB
+	require.Greater(t, len(big), fnosReadLimit)
+	fk.set(fnosReqContainers, fnosFakeReply{body: big})
+	snap, err = s.Collect(fnosCtx(t), true)
+	assert.Nil(t, snap)
+	assert.ErrorContains(t, err, "和飞牛的连接断了")
+	assert.Nil(t, s.conn)
+}
+
 // 写不出去（连接已经关了）：去掉在等的请求号，连接记为不能再用；ctx 已经结束时回 ctx 的错误
 func TestFnosWriteFails(t *testing.T) {
 	fk := newFakeFnOS(t, false)
