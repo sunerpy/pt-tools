@@ -75,7 +75,13 @@ type LibraryInput struct {
 	CSFURL  string  `json:"csf_url"`
 	CSFKey  *string `json:"csf_key,omitempty"`
 	CSFPath string  `json:"csf_path"`
-	Enabled bool    `json:"enabled"`
+	// DownloadDownloaderID、DownloadSavePath、DownloadCategory、DownloadTags 是新建订阅时带出的下载设置（见 models.MediaLibrary），
+	// 都可以空着。下载器要存在；库里原来存的编号原样不变时不检查：下载器删了以后照样能改库的别的字段
+	DownloadDownloaderID uint   `json:"download_downloader_id"`
+	DownloadSavePath     string `json:"download_save_path"`
+	DownloadCategory     string `json:"download_category"`
+	DownloadTags         string `json:"download_tags"`
+	Enabled              bool   `json:"enabled"`
 }
 
 // DefaultTemplate 是这种媒体库的默认模板。
@@ -188,12 +194,23 @@ func (in LibraryInput) clean() (models.MediaLibrary, error) {
 	if err != nil {
 		return models.MediaLibrary{}, err
 	}
+	// 上限同订阅自己的下载选项（subscribe 的 SubscriptionInput.check）；保存目录是下载器里看到的，只去掉首尾空白
+	savePath, category, tags := strings.TrimSpace(in.DownloadSavePath), strings.TrimSpace(in.DownloadCategory), strings.TrimSpace(in.DownloadTags)
+	if len(savePath) > 1024 {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 下载设置里的保存目录太长（最多 1024 字节）", ErrInvalid)
+	}
+	for _, v := range []struct{ name, v string }{{"分类", category}, {"标签", tags}} {
+		if utf8.RuneCountInString(v.v) > 128 {
+			return models.MediaLibrary{}, fmt.Errorf("%w: 下载设置里的%s太长（最多 128 个字）", ErrInvalid, v.name)
+		}
+	}
 	return models.MediaLibrary{
 		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
 		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
 		ScrapeSource: source, ScrapeSources: sources,
 		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, ScrapeActorZh: in.ScrapeActorZh && in.Scrape, ScrapeFill: in.ScrapeFill && in.Scrape,
 		SiteSubtitles: in.SiteSubtitles, CSFURL: csfURL, CSFPath: csfPath,
+		DownloadDownloaderID: in.DownloadDownloaderID, DownloadSavePath: savePath, DownloadCategory: category, DownloadTags: tags,
 		Enabled: in.Enabled,
 	}, nil
 }
@@ -291,6 +308,15 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 	if keyErr != nil {
 		return LibraryView{}, keyErr
 	}
+	if row.DownloadDownloaderID != 0 && row.DownloadDownloaderID != old.DownloadDownloaderID {
+		var n int64
+		if err := db.Model(&models.DownloaderSetting{}).Where("id = ?", row.DownloadDownloaderID).Count(&n).Error; err != nil {
+			return LibraryView{}, fmt.Errorf("读取下载器失败: %w", err)
+		}
+		if n == 0 {
+			return LibraryView{}, fmt.Errorf("%w: 下载设置里的下载器不存在", ErrInvalid)
+		}
+	}
 	if id == 0 {
 		var n int64
 		if err := db.Model(&models.MediaLibrary{}).Count(&n).Error; err != nil {
@@ -311,6 +337,7 @@ func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (Li
 		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang", "scrape_source",
 		"scrape_sources",
 		"classify_dir", "overwrite_mode", "scrape_actor_zh", "scrape_fill", "site_subtitles", "csf_url", "csf_path", "enabled", "updated_at",
+		"download_downloader_id", "download_save_path", "download_category", "download_tags",
 	}
 	if writeKey {
 		cols = append(cols, "csf_key_encrypted")

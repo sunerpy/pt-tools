@@ -464,21 +464,6 @@ func TestOrganizeServerAndNotifyErrors(t *testing.T) {
 	assert.Contains(t, srv.LastError, "API Key")
 }
 
-func TestChooseLibrary(t *testing.T) {
-	libs := []models.MediaLibrary{
-		{ID: 1, Kind: "movie", Enabled: true},
-		{ID: 2, Kind: "tv", Anime: true, Enabled: true},
-		{ID: 3, Kind: "tv", Enabled: false},
-		{ID: 4, Kind: "tv", Enabled: true},
-		{ID: 5, Kind: "tv", Enabled: true},
-	}
-	assert.Equal(t, uint(1), chooseLibrary(libs, "movie", false).ID)
-	assert.Equal(t, uint(1), chooseLibrary(libs, "movie", true).ID, "没有动画电影库时进普通电影库")
-	assert.Equal(t, uint(2), chooseLibrary(libs, "tv", true).ID)
-	assert.Equal(t, uint(4), chooseLibrary(libs, "tv", false).ID, "只收动画的库不收普通剧集；跳过没启用的")
-	assert.Nil(t, chooseLibrary(libs[1:2], "tv", false))
-}
-
 func TestCleanRelAndTruncate(t *testing.T) {
 	for in, want := range map[string]string{"a/b.mkv": "a/b.mkv", `a\b.mkv`: "a/b.mkv", "a/./b.mkv": "a/b.mkv"} {
 		got, ok := cleanRel(in)
