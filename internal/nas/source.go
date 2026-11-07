@@ -120,10 +120,12 @@ type TestResult struct {
 
 // Kind 是一种来源类型。Username 是表单里用户名一栏（UsernameNone、Optional、Required）；NeedsSecret 是填了这个用户名时
 // 要不要密钥（为空表示总要）；Plain 是 http:// 地址的规则；ParseURL 在通用规则之后再按这种来源检查地址（可为空）。
+// Verified 是实验性的类型在哪个版本的真机上验证过（例如「fnOS 1.2.1000」），没在真机上验证过时为空。
 type Kind struct {
 	Name         string
 	Label        string
 	Experimental bool
+	Verified     string
 	Username     string
 	NeedsSecret  func(username string) bool
 	Plain        PlainRule

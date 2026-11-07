@@ -441,11 +441,22 @@ func TestNASAPI_TrustCertificateThenSave(t *testing.T) {
 	assert.Equal(t, nas.LocalSupported, view.LocalSupported)
 	assert.Equal(t, []nasKindView{
 		{Name: fakeNASKind, Label: "假 NAS", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
-		{Name: nas.KindFnOS, Label: "飞牛", Experimental: true, Username: "required", Secret: "required", Plain: "with_ack"},
+		{Name: nas.KindFnOS, Label: "飞牛", Experimental: true, Verified: "fnOS 1.2.1000", Username: "required", Secret: "required", Plain: "with_ack"},
 		{Name: nas.KindGlances, Label: "Glances", Username: "optional", Secret: "with_username", Plain: "without_credentials"},
 		{Name: nas.KindSynology, Label: "群晖", Experimental: true, Username: "required", Secret: "required", Plain: "without_credentials"},
 		{Name: nas.KindTrueNAS, Label: "TrueNAS", Username: "none", Secret: "required", Plain: "never"},
 	}, view.Kinds, "按名字排：测试登记的假类型、飞牛、Glances、群晖与 TrueNAS")
+	var kindsRaw struct {
+		Kinds []map[string]any `json:"kinds"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &kindsRaw))
+	for _, k := range kindsRaw.Kinds {
+		if k["name"] == nas.KindFnOS {
+			assert.Equal(t, "fnOS 1.2.1000", k["verified"], "飞牛带上在哪个版本的真机上验证过")
+		} else {
+			assert.NotContains(t, k, "verified", "没在真机上验证过的类型不带 verified：%v", k["name"])
+		}
+	}
 
 	w = e.do(http.MethodGet, "/api/nas/sources/"+idOf(got.ID), nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
