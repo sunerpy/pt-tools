@@ -85,7 +85,7 @@ export default {
   "cookie.missing": "Missing",
   "cookie.unverified": "Unverified",
   "cookie.unverifiedHint":
-    "The extension doesn't recognize this site's login cookies. Syncing sends them all to pt-tools, which signs in with them once and saves them only if that works; the cookies pt-tools already has are not replaced otherwise",
+    "The extension can't tell from the cookies whether you are signed in to this site: it doesn't recognize their format, or they are only a session cookie. Syncing sends them all to pt-tools, which signs in with them once and saves them only if that works; the cookies pt-tools already has are not replaced otherwise",
 
   "feedback.permissionGranted": "Permissions granted. Features are now enabled.",
   "feedback.requestFailed": "Request failed",
@@ -314,7 +314,8 @@ export default {
     "Opening a site keeps the account active; API-key sites such as M-Team also need a browser login to count as active",
   "mySites.showAll": "Show all {0} sites",
   "mySites.showMine": "Only my sites ({0})",
-  "mySites.empty": "No site login cookies in this browser, and no sites enabled in pt-tools",
+  "mySites.empty":
+    "No site login cookies recognized in this browser, and no sites enabled in pt-tools",
   "mySites.loading": "Loading…",
   "mySites.sync": "Sync",
   "mySites.open": "Open",
@@ -327,7 +328,7 @@ export default {
   "mySites.loginUnknown": "Status unknown",
   "mySites.loginStale": "Login status from {0}; cannot refresh it now: {1}",
   "mySites.goLogin": "Log in",
-  "mySites.cookieUnverified": "pt-tools verifies on sync",
+  "mySites.cookieUnverified": "Click Sync to let pt-tools verify it",
   "mySites.cookieNoLogin": "No login cookies; probably signed out",
   "mySites.updating": "Updating…",
   "mySites.synced": "synced {0}",

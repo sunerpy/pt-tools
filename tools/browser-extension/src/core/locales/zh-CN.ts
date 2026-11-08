@@ -85,7 +85,7 @@ export default {
   "cookie.missing": "缺失",
   "cookie.unverified": "待验证",
   "cookie.unverifiedHint":
-    "这个站点的登录 Cookie 格式扩展没认出，同步时整组交给 pt-tools，由它先用这组 Cookie 登录一次，登录上了才保存，原来的 Cookie 不会被换掉",
+    "扩展从 Cookie 看不出这个站点有没有登录：格式没认出，或者认出的只是会话 Cookie。同步时整组交给 pt-tools，由它先用这组 Cookie 登录一次，登录上了才保存，原来的 Cookie 不会被换掉",
 
   "feedback.permissionGranted": "权限已授予，功能已激活。",
   "feedback.requestFailed": "请求失败",
@@ -301,7 +301,7 @@ export default {
     "打开站点页面可以保号；M-Team 这类用 API Key 的站点，也要用浏览器登录才算活跃",
   "mySites.showAll": "显示全部 {0} 个站点",
   "mySites.showMine": "只看我的站点（{0}）",
-  "mySites.empty": "浏览器里还没有站点的登录 Cookie，pt-tools 里也没有启用的站点",
+  "mySites.empty": "浏览器里没认出站点的登录 Cookie，pt-tools 里也没有启用的站点",
   "mySites.loading": "读取中…",
   "mySites.sync": "同步",
   "mySites.open": "打开",
@@ -314,7 +314,7 @@ export default {
   "mySites.loginUnknown": "状态未知",
   "mySites.loginStale": "登录状态是{0}读到的，现在读不到：{1}",
   "mySites.goLogin": "去登录",
-  "mySites.cookieUnverified": "同步时由 pt-tools 验证",
+  "mySites.cookieUnverified": "点「同步」由 pt-tools 验证",
   "mySites.cookieNoLogin": "没有登录 Cookie，多半没登录",
   "mySites.updating": "更新中…",
   "mySites.synced": "{0}同步",

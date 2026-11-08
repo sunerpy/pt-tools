@@ -395,3 +395,60 @@ describe("checkCookieHealth: BYR 的登录 Cookie", () => {
     expect(health.expireDays).toBeGreaterThanOrEqual(29);
   });
 });
+
+/*
+ * 春天登录用的 SPRINGID 是 PHP 的会话 Cookie：没登录、只打开过站点也会下发，过期时间也不是登录的期限。
+ * issue #863：没有 SSD 账号，扩展照样显示「有效（剩余 314 天）」，定时同步还把它存进了 pt-tools。
+ */
+describe("checkCookieHealth: 春天的 SPRINGID 只是会话", () => {
+  const SSD = KNOWN_SITES.find((site) => site.id === "springsunday") as KnownSite;
+
+  it("有 SPRINGID 也只算待验证：整组交给 pt-tools 验证，不按它算剩余天数", async () => {
+    jar["springsunday.net"] = [cookie("SPRINGID", "0123456789abcdef", 314)];
+    jar[".springsunday.net"] = [cookie("cf_clearance", "clearance", 365)];
+
+    const health = await checkCookieHealth(SSD);
+
+    expect(health.status).toBe("unverified");
+    expect(health.format).toBeNull();
+    expect(health.expireDays).toBeNull();
+    expect(health.hasCookie).toBe(true);
+    expect(health.cookieString).toContain("SPRINGID=0123456789abcdef");
+  });
+
+  it("没有 SPRINGID、只有 Cloudflare 的 Cookie 时照旧算没登录", async () => {
+    jar[".springsunday.net"] = [cookie("cf_clearance", "clearance", 365)];
+
+    const health = await checkCookieHealth(SSD);
+
+    expect(health.status).toBe("missing");
+    expect(health.cookieString).toBe("");
+  });
+});
+
+/*
+ * U2 登录只设 nexusphp_u2，没有 c_secure_uid / c_secure_pass（社区脚本 github.com/Hastbin/u2_scripts 也只填这一个）。
+ * issue #864：网页登录着，扩展一直显示「待验证」。
+ */
+describe("checkCookieHealth: U2 的 nexusphp_u2", () => {
+  const U2 = KNOWN_SITES.find((site) => site.id === "u2dmhy") as KnownSite;
+
+  it("有 nexusphp_u2 就算登录着，可以直接同步，剩余天数按它算", async () => {
+    jar["u2.dmhy.org"] = [cookie("nexusphp_u2", "f".repeat(32), 90)];
+
+    const health = await checkCookieHealth(U2);
+
+    expect(health.status).toBe("valid");
+    expect(health.format).toBe("declared");
+    expect(health.cookieString).toContain(`nexusphp_u2=${"f".repeat(32)}`);
+    expect(health.expireDays).toBeGreaterThanOrEqual(89);
+  });
+
+  it("没有 nexusphp_u2 时不算登录着", async () => {
+    jar[".u2.dmhy.org"] = [cookie("_ga", "GA1.2.3", 365)];
+
+    const health = await checkCookieHealth(U2);
+
+    expect(health.status).toBe("missing");
+  });
+});

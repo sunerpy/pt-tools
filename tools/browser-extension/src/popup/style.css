@@ -627,6 +627,7 @@ body {
 
 .my-sites__list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   max-height: 300px;
   margin: 0;
@@ -693,8 +694,15 @@ body {
   color: var(--muted);
 }
 
+/* 说明可能很长（pt-tools 拒绝保存时的原因）：最多两行，悬停看全文（title），不把行撑宽 */
 .my-site__synced {
+  display: -webkit-box;
+  min-width: 0;
   margin-right: auto;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .my-site__missing {

@@ -40,6 +40,11 @@ export interface KnownSiteStatus {
   hasCookie: boolean;
   lastSync: string | null;
   autoSync: boolean;
+  /**
+   * pt-tools 验证后拒绝保存**现在这组** Cookie 的原因（pt-tools 写给用户的原话）；没被拒绝、Cookie 变了或换了 pt-tools 地址时为空。
+   * 上次存下的站点状态里没有这一项（旧版本存的）。
+   */
+  syncRejected?: string | null;
 }
 
 export interface UnknownSiteStatus {

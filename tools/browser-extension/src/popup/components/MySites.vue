@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /*
- * 弹窗的主列表「我的站点」：只列浏览器里有 Cookie、或 pt-tools 里启用了的站点，每行是 Cookie 状态
+ * 弹窗的主列表「我的站点」：只列 pt-tools 里启用了的、打开了自动同步的、或浏览器里认出登录 Cookie 的站点（见 ../mySites），每行是 Cookie 状态
  * 和 pt-tools 里的保号状态，行尾直接同步 / 打开。批量同步与一键打开在列表头上。
  * 以前这些都折在「全局设置」里：要先展开设置，再在六十多个站点里勾选。
  */
@@ -87,12 +87,22 @@ function syncedText(iso: string | null): string {
   return iso ? t("mySites.synced", ago(iso)) : "";
 }
 
-/** 没登录 Cookie 时总写出来；格式认不出时没同步过才写（同步过一次就说明 pt-tools 验证通过了，写同步时间） */
+/**
+ * 没登录 Cookie 时总写出来；pt-tools 拒绝保存这组 Cookie 时写它给的原因；格式认不出时没同步过才写下一步
+ * （同步过一次就说明 pt-tools 验证通过了，写同步时间）
+ */
 function hintText(row: MySiteRow): string {
   const hint = cookieHint(row.status);
   if (hint === "noLogin") return t("mySites.cookieNoLogin");
+  if (hint === "rejected") return row.status.syncRejected ?? "";
   if (hint === "unverified" && !row.status.lastSync) return t("mySites.cookieUnverified");
   return "";
+}
+
+/** 要提醒的说明（没登录、验证没通过）标成提醒色 */
+function hintWarns(row: MySiteRow): boolean {
+  const hint = cookieHint(row.status);
+  return hint === "noLogin" || hint === "rejected";
 }
 
 function openOne(row: MySiteRow): void {
@@ -170,7 +180,8 @@ function openOne(row: MySiteRow): void {
         <div class="my-site__meta">
           <span
             class="my-site__synced"
-            :class="{ 'my-site__missing': cookieHint(row.status) === 'noLogin' }"
+            :class="{ 'my-site__missing': hintWarns(row) }"
+            :title="hintText(row) || undefined"
             :data-testid="`synced-${row.status.site.id}`"
             >{{ hintText(row) || syncedText(row.status.lastSync) }}</span
           >
