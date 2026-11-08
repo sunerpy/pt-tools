@@ -78,6 +78,8 @@ func NewTempDBDir(dir string) (*models.TorrentDB, error) {
 		&models.BackupSetting{},
 		// 自动删种、做种竞争度、免费结束监控与下载器页的「保留」按刷流记录认刷流任务的种子
 		&models.BrushTask{},
+		// 站点做种容量按辅种记录认出和原种子共用数据的种子（internal.siteSeedingUsage）
+		&models.ReseedRecord{},
 		&models.BrushTorrent{},
 		&models.BrushTorrentSample{},
 		&models.BrushDailyStat{},
