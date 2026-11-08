@@ -271,11 +271,13 @@ After the extension syncs a cookie, the site's credentials in pt-tools are **upd
 
 After saving, the Status (状态) column of the site list shows how the site is doing:
 
-| Status                | Meaning                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| **OK (正常)**         | The site is available and the last login probe succeeded (or none has run yet) |
-| **Problem (异常)**    | The site is unavailable, or the last login probe failed                        |
-| **Disabled (已禁用)** | The site is not enabled                                                        |
+| Status                   | Meaning                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| **OK (正常)**            | The site is available and the last login probe succeeded                                              |
+| **Not probed (未探测)**  | No probe result yet: never probed, or login probing does not apply to this site                       |
+| **Problem (异常)**       | The site is unavailable, or the last login probe failed                                               |
+| **Unsupported (不支持)** | pt-tools has no built-in definition for this site, so it cannot probe the login or read the user info |
+| **Disabled (已禁用)**    | The site is not enabled                                                                               |
 
 A site that its definition marks as unavailable is turned off automatically. The saved cookie, API key and other settings are kept, so once the site is available again you only need to turn it back on.
 

@@ -499,7 +499,8 @@ function matchesSearch(name: string, site: SiteConfig, q: string): boolean {
  * 状态的判定口径（都用本页已经有的两份数据，没有新接口）：
  *   已禁用  !site.enabled
  *   异常    启用中，且「站点暂不可用」或最近一次探测失败（未配置凭证、会话过期、网络错误等）
- *   未探测  启用中，还没有探测结果：从未探测过，或探测对它不适用 / 暂不支持
+ *   未探测  启用中，还没有探测结果：从未探测过，或探测对它不适用
+ *   不支持  启用中，pt-tools 没有它的内置定义（`is_builtin` 为 false）：探测不了登录状态，「未探测」永远不会变（issue #861）
  *   正常    启用中，最近一次探测成功
  * 画板把状态画成四档分段（全部/正常/异常/已禁用），这里做成**可选的 chip**，
  * 因为两边的「全部」不是一回事：画板那张图是 14 个已配置站点（12+2=14，已禁用另算 1），
@@ -507,24 +508,31 @@ function matchesSearch(name: string, site: SiteConfig, q: string): boolean {
  * 把「全部」改成 66 会让默认视图变成 66 行，所以保留原来的「已启用 / 全部」作视图范围，
  * 状态与认证、探测一起做成叠加筛选。
  */
-type SiteStatus = "ok" | "none" | "bad" | "off";
+type SiteStatus = "ok" | "none" | "bad" | "unsupported" | "off";
 
 function statusOf(name: string, site: SiteConfig): SiteStatus {
   if (!site.enabled) return "off";
   if (site.unavailable) return "bad";
   const st = loginState(name)?.last_probe_status;
+  // 没有内置定义的站点：/api/sites 按定义注册表给 is_builtin；探测结果 UNSUPPORTED 也只出现在这种站点上
+  if (site.is_builtin === false || st === "UNSUPPORTED") return "unsupported";
   /*
-   * 从未探测过不算异常：那是「还不知道」，不是「坏了」。中性档（不适用、动态站点暂不支持探测）同理。
+   * 从未探测过不算异常：那是「还不知道」，不是「坏了」。中性档（不适用）同理。
    * 但它也不是「正常」—— 以前这两种都画成绿色的「正常」，新装时一个都没探测过的站点整列都是绿的。
    */
   if (!st || probeStatusSeverity(st) === "info") return "none";
   return isProbeSuccess(st) ? "ok" : "bad";
 }
 
+/** 不支持的站点上的说明：为什么一直探测不了、要支持它或者不用它时怎么办 */
+const UNSUPPORTED_NOTE =
+  "pt-tools 没有这个站点的内置定义：探测不了登录状态，也取不到用户信息。要支持它，请按文档里的「请求新增站点」提交页面数据；不用的话可以删掉这一行";
+
 /** 状态胶囊上的说明：失败给探测结果；还没有结果时说清为什么、下一步是什么 */
 function statusNote(name: string, site: SiteConfig): string {
-  if (statusOf(name, site) !== "none" || loginState(name)?.last_probe_status)
-    return probeNote(name);
+  const status = statusOf(name, site);
+  if (status === "unsupported") return UNSUPPORTED_NOTE;
+  if (status !== "none" || loginState(name)?.last_probe_status) return probeNote(name);
   return probeModeOf(name) === "disabled"
     ? "这个站点设成了不探测登录状态"
     : "还没有探测过登录状态：自动探测会按计划进行，也可以点这一行的「立即探测」";
@@ -657,7 +665,7 @@ const authFilter = ref("");
 const probeFilter = ref("");
 
 const statusCounts = computed(() => {
-  const counts: Record<SiteStatus, number> = { ok: 0, none: 0, bad: 0, off: 0 };
+  const counts: Record<SiteStatus, number> = { ok: 0, none: 0, bad: 0, unsupported: 0, off: 0 };
   for (const [name, site] of allEntries.value) counts[statusOf(name, site)] += 1;
   return counts;
 });
@@ -666,6 +674,7 @@ const STATUS_LABEL: Record<SiteStatus, string> = {
   ok: "正常",
   none: "未探测",
   bad: "异常",
+  unsupported: "不支持",
   off: "已禁用",
 };
 
@@ -676,10 +685,15 @@ function statusTone(k: SiteStatus): "ok" | "dang" | "neutral" {
   return "neutral";
 }
 
-/* 「未探测」那枚只在有这种站点（或正在按它筛）时出现：平常它是 0，摆着只占工具栏的位置 */
+/* 「未探测」「不支持」只在有这种站点（或正在按它筛）时出现：平常是 0，摆着只占工具栏的位置 */
 const statusChips = computed(() =>
-  (["ok", "bad", "none", "off"] as const)
-    .filter((k) => k !== "none" || statusCounts.value.none > 0 || statusFilter.value.has(k))
+  (["ok", "bad", "none", "unsupported", "off"] as const)
+    .filter(
+      (k) =>
+        (k !== "none" && k !== "unsupported") ||
+        statusCounts.value[k] > 0 ||
+        statusFilter.value.has(k),
+    )
     .map((k) => ({
       key: k,
       label: `${STATUS_LABEL[k]} ${statusCounts.value[k]}`,

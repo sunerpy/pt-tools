@@ -727,7 +727,7 @@ func (d *HDDolbyDriver) Attend(ctx context.Context) (AttendResult, error) {
 	}
 	body, err := d.getPage(ctx, cfg.Path)
 	if err != nil {
-		return AttendResult{}, fmt.Errorf("attendance request: %w", err)
+		return AttendResult{}, attendanceRequestError(err, cfg.Path)
 	}
 	if result, ok := cfg.Match(attendancePageText(body)); ok {
 		return result, nil

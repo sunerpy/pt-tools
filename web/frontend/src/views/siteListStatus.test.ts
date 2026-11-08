@@ -43,12 +43,15 @@ vi.mock("@/api", async (orig) => {
           mteam: site(true),
           ourbits: site(true),
           pter: site(false),
+          // 没有内置定义的站点（issue #861）：/api/sites 给 is_builtin: false，探测结果是 UNSUPPORTED
+          kelu: { ...site(true), is_builtin: false },
         }),
       ),
       listLoginStates: vi.fn(() =>
         Promise.resolve([
           state("mteam", { last_probe_status: "OK" }),
           state("ourbits", { last_probe_status: "SESSION_EXPIRED" }),
+          state("kelu", { last_probe_status: "UNSUPPORTED" }),
         ]),
       ),
     },
@@ -127,6 +130,20 @@ describe("站点列表：状态列分出「未探测」", () => {
       expect(document.querySelector("[data-testid=site-status-mteam]")).toBeNull(),
     );
     expect(document.querySelector("[data-testid=site-status-hdsky]")).toBeTruthy();
+  });
+
+  it("没有内置定义的站点显示「不支持」并写明原因，不算进「未探测」", async () => {
+    await mountList();
+    expect(pill("kelu").textContent?.trim()).toBe("不支持");
+    expect(pill("kelu").classList.contains("pt-pill--neutral")).toBe(true);
+    expect(chip("unsupported")).toBe("不支持 1");
+    expect(chip("none")).toBe("未探测 1");
+
+    (document.querySelector("[data-testid=site-status-chip-unsupported]") as HTMLElement).click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=site-status-hdsky]")).toBeNull(),
+    );
+    expect(document.querySelector("[data-testid=site-status-kelu]")).toBeTruthy();
   });
 
   it("首页的「登录探测失败」带着 ?status=abnormal 进来：只看异常的", async () => {

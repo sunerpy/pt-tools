@@ -66,6 +66,36 @@ describe("attendanceView", () => {
     expect(attendanceView(att({})).label).toBe("待安排");
     expect(attendanceView(undefined).label).toBe("-");
     expect(attendanceView(att({ site_enabled: false })).canSign).toBe(false);
+    expect(attendanceView(att({ site_enabled: false })).label).toBe("站点未启用");
+  });
+
+  // issue #862：自动签到关了（或站点停用了）以后，签到监控不再处理这个站点，今天的「待重试」不会发生
+  it("does not promise a retry once automatic sign-in is switched off", () => {
+    const off = attendanceView(
+      att({
+        status: "pending",
+        attendance_enabled: false,
+        attempts: 1,
+        last_error: "签到页面里没有签到成功或今日已签到的文字",
+        next_attempt_at: 1_759_626_600,
+      }),
+    );
+    expect(off).toMatchObject({ label: "未开启", tone: "neutral", canSign: true });
+    expect(off.detail).toContain("没有开启每日自动签到");
+    expect(off.detail).toContain("签到页面里没有签到成功");
+    expect(off.detail).not.toContain("重试");
+
+    const disabled = attendanceView(
+      att({ status: "pending", site_enabled: false, scheduled_at: 1_759_626_000 }),
+    );
+    expect(disabled).toMatchObject({ label: "站点未启用", tone: "neutral", canSign: false });
+    expect(disabled.detail).not.toMatch(/计划/);
+
+    // 今天已经有结果的照旧显示结果
+    expect(attendanceView(att({ status: "failed", attendance_enabled: false })).label).toBe(
+      "签到失败",
+    );
+    expect(attendanceView(att({ status: "signed", site_enabled: false })).label).toBe("已签到");
   });
 });
 
