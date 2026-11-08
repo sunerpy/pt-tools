@@ -314,7 +314,8 @@ export default {
     "Opening a site keeps the account active; API-key sites such as M-Team also need a browser login to count as active",
   "mySites.showAll": "Show all {0} sites",
   "mySites.showMine": "Only my sites ({0})",
-  "mySites.empty": "No site login cookies in this browser, and no sites enabled in pt-tools",
+  "mySites.empty":
+    "No site login cookies recognized in this browser, and no sites enabled in pt-tools",
   "mySites.loading": "Loading…",
   "mySites.sync": "Sync",
   "mySites.open": "Open",
@@ -327,7 +328,7 @@ export default {
   "mySites.loginUnknown": "Status unknown",
   "mySites.loginStale": "Login status from {0}; cannot refresh it now: {1}",
   "mySites.goLogin": "Log in",
-  "mySites.cookieUnverified": "pt-tools verifies on sync",
+  "mySites.cookieUnverified": "Click Sync to let pt-tools verify it",
   "mySites.cookieNoLogin": "No login cookies; probably signed out",
   "mySites.updating": "Updating…",
   "mySites.synced": "synced {0}",

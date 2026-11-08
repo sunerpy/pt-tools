@@ -56,13 +56,39 @@ describe("buildMySites", () => {
   ];
   const logins = [login("mteam", "none"), login("hdsky", "7d"), login("audiences", "none", false)];
 
-  it("默认只列有 Cookie 或 pt-tools 里启用了的站点，要注意的排前面", () => {
+  it("默认只列 pt-tools 里启用了的、或者浏览器里认出了登录 Cookie 的站点，要注意的排前面", () => {
     const rows = buildMySites(sites, logins, false);
     expect(rows.map((r) => r.status.site.id)).toEqual(["hdsky", "ssd", "mteam"]);
     expect(rows[0]!.attention).toBe(true); // 保号快到期
     expect(rows[1]!.attention).toBe(true); // Cookie 过期
     expect(rows[2]!.configured).toBe(true);
     expect(rows[2]!.syncable).toBe(false); // API Key 站点不同步 Cookie
+  });
+
+  /*
+   * issue #863：没账号、只打开过站点也会有统计、Cloudflare 这类 Cookie，春天没登录也有 SPRINGID。
+   * 以前有任意 Cookie 就列进「我的站点」；现在这些站点 pt-tools 里又没启用的，点「显示全部」才列。
+   */
+  it("只有统计这类 Cookie（缺失）或格式认不出（待验证）、pt-tools 里也没启用的，默认不列", () => {
+    const sniffed = status(site("audiences"), "missing", true);
+    const session = status(site("ssd"), "unverified", true);
+    const rows = buildMySites([sniffed, session], [login("audiences", "none", false)], false);
+    expect(rows).toEqual([]);
+    expect(countMine([sniffed, session], [])).toBe(0);
+    const all = buildMySites([sniffed, session], [], true);
+    expect(all.map((r) => r.status.site.id).sort()).toEqual(["audiences", "ssd"]);
+  });
+
+  it("pt-tools 里启用了、或在扩展里打开了自动同步的，Cookie 待验证或缺失也列", () => {
+    const enabledUnverified = status(site("byrpt"), "unverified", true);
+    const enabledMissing = status(site("hdtime"), "missing", true);
+    const autoSyncUnverified = { ...status(site("ssd"), "unverified", true), autoSync: true };
+    const rows = buildMySites(
+      [enabledUnverified, enabledMissing, autoSyncUnverified],
+      [login("byrpt", "none"), login("hdtime", "none")],
+      false,
+    );
+    expect(rows.map((r) => r.status.site.id).sort()).toEqual(["byrpt", "hdtime", "ssd"]);
   });
 
   it("showAll 时连没有 Cookie、pt-tools 里也没启用的站点都列出来", () => {
@@ -131,6 +157,12 @@ describe("cookieHint", () => {
   const s = site("byrpt");
   it("格式认不出时说同步时由 pt-tools 验证", () => {
     expect(cookieHint(status(s, "unverified", true))).toBe("unverified");
+  });
+  // issue #864：pt-tools 验证过、拒绝保存这组 Cookie 时，行上写它给的原因，不再只写「由 pt-tools 验证」
+  it("pt-tools 拒绝保存这组 Cookie 时换成它给的原因", () => {
+    const rejected = { ...status(s, "unverified", true), syncRejected: "没有保存：登录不上" };
+    expect(cookieHint(rejected)).toBe("rejected");
+    expect(cookieHint({ ...rejected, syncRejected: null })).toBe("unverified");
   });
   it("有 Cookie、没有登录用的时说多半没登录；一个 Cookie 也没有时不说", () => {
     expect(cookieHint(status(s, "missing", true))).toBe("noLogin");

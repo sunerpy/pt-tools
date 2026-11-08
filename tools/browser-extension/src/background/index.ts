@@ -38,6 +38,7 @@ import type {
   KnownSiteStatus,
   MessageSender,
   PtToolsConnection,
+  RejectedPush,
   SiteDetectedPayload,
   SiteInfo,
   StatusPayload,
@@ -153,11 +154,28 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   return tab ?? null;
 }
 
+/**
+ * rejectedReason 是 pt-tools 验证后拒绝保存现在这组 Cookie 的原因：以前只记下来免得重复推，行上看不到（issue #864）。
+ * 只认这组 Cookie 本身被拒绝的（指纹同 pushFingerprint）：Cookie 变了、或者换了 pt-tools 地址，上次的原因就不算了。
+ */
+async function rejectedReason(
+  siteId: string,
+  cookieString: string,
+  baseUrl: string,
+  rejected: Record<string, RejectedPush>,
+): Promise<string | null> {
+  const entry = rejected[siteId];
+  if (!entry || !baseUrl || !cookieString) return null;
+  return entry.hash === (await pushFingerprint(baseUrl, cookieString)) ? entry.reason : null;
+}
+
 async function buildKnownSiteStatus(site: KnownSite): Promise<KnownSiteStatus> {
-  const [health, autoSyncMap, lastSyncMap] = await Promise.all([
+  const [health, autoSyncMap, lastSyncMap, rejected, connection] = await Promise.all([
     checkCookieHealth(site),
     getAutoSyncMap(),
     getLastSyncMap(),
+    getSyncRejectedMap(),
+    getConnection(),
   ]);
 
   return {
@@ -167,6 +185,12 @@ async function buildKnownSiteStatus(site: KnownSite): Promise<KnownSiteStatus> {
     hasCookie: health.hasCookie,
     lastSync: lastSyncMap[site.id] ?? null,
     autoSync: autoSyncMap[site.id] ?? false,
+    syncRejected: await rejectedReason(
+      site.id,
+      health.cookieString,
+      connection.baseUrl?.trim() ?? "",
+      rejected,
+    ),
   };
 }
 
@@ -535,9 +559,15 @@ onMessage("GET_TAB_STATUS", async () => resolveCurrentTabStatus());
 
 // 六十多个站点并行读：以前逐个站点串行读 Cookie 和两份存储，弹窗要等它全部读完才显示，打开要好几秒
 onMessage("GET_ALL_SITES_STATUS", async (): Promise<KnownSiteStatus[]> => {
-  const [autoSyncMap, lastSyncMap] = await Promise.all([getAutoSyncMap(), getLastSyncMap()]);
+  const [autoSyncMap, lastSyncMap, rejected, connection] = await Promise.all([
+    getAutoSyncMap(),
+    getLastSyncMap(),
+    getSyncRejectedMap(),
+    getConnection(),
+  ]);
+  const baseUrl = connection.baseUrl?.trim() ?? "";
   const statuses = await Promise.all(
-    KNOWN_SITES.map(async (site) => {
+    KNOWN_SITES.map(async (site): Promise<KnownSiteStatus> => {
       const health = await checkCookieHealth(site);
       return {
         site,
@@ -546,6 +576,7 @@ onMessage("GET_ALL_SITES_STATUS", async (): Promise<KnownSiteStatus[]> => {
         hasCookie: health.hasCookie,
         lastSync: lastSyncMap[site.id] ?? null,
         autoSync: autoSyncMap[site.id] ?? false,
+        syncRejected: await rejectedReason(site.id, health.cookieString, baseUrl, rejected),
       };
     }),
   );

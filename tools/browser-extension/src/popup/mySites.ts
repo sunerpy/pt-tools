@@ -3,8 +3,10 @@ import type { SiteLoginStateRecord } from "../modules/sync";
 
 /**
  * 弹窗「我的站点」的一行：浏览器里的 Cookie 状态，加上 pt-tools 里的登录状态（保号剩几天）。
- * 默认只列「我的」站点 —— 浏览器里有这个站的 Cookie，或者 pt-tools 里启用了它；
- * 以前把六十多个内置站点全列出来，要在一长串里找自己的那几个。
+ * 默认只列「我的」站点：pt-tools 里启用了它、在扩展里打开了它的自动同步，或者浏览器里认出了它的登录 Cookie
+ * （有效、快过期、已过期）；以前把六十多个内置站点全列出来，要在一长串里找自己的那几个。
+ * 只有统计、Cloudflare 这类 Cookie（缺失），或者格式认不出、要 pt-tools 验证的（待验证），又不是上面两种的，
+ * 点「显示全部」才列：没账号、只打开过站点也会有这些 Cookie（issue #863）。
  */
 export interface MySiteRow {
   status: KnownSiteStatus;
@@ -34,6 +36,14 @@ export function loginTone(login?: SiteLoginStateRecord): LoginTone {
   return "ok";
 }
 
+/** 浏览器里认出了这个站点的登录 Cookie：有效、快过期、已过期。用 API Key、Passkey 的站点有任意 Cookie 就算（同 cookie-reader） */
+function loggedInHere(s: KnownSiteStatus): boolean {
+  return (
+    s.hasCookie &&
+    (s.cookieStatus === "valid" || s.cookieStatus === "expiring" || s.cookieStatus === "expired")
+  );
+}
+
 function needsAttention(s: KnownSiteStatus, login?: SiteLoginStateRecord): boolean {
   if (s.hasCookie && (s.cookieStatus === "expired" || s.cookieStatus === "expiring")) return true;
   const tone = loginTone(login);
@@ -41,7 +51,7 @@ function needsAttention(s: KnownSiteStatus, login?: SiteLoginStateRecord): boole
 }
 
 /**
- * 拼出列表：showAll 为 false 时只留有 Cookie 或 pt-tools 里启用了的站点。
+ * 拼出列表：showAll 为 false 时只留 pt-tools 里启用了的、打开了自动同步的、或者浏览器里认出了登录 Cookie 的站点。
  * 排序：要注意的在前，然后是 pt-tools 里启用了的，再按名字。
  */
 export function buildMySites(
@@ -54,7 +64,7 @@ export function buildMySites(
   for (const status of sites) {
     const login = byName.get(status.site.id.toLowerCase());
     const configured = login?.enabled === true;
-    if (!showAll && !status.hasCookie && !configured) continue;
+    if (!showAll && !configured && !status.autoSync && !loggedInHere(status)) continue;
     rows.push({
       status,
       login,
@@ -98,13 +108,14 @@ export function loginLabel(row: MySiteRow, loginsKnown: boolean): LoginLabel {
 }
 
 /**
- * 行上 Cookie 状态旁的说明：格式认不出时说同步时由 pt-tools 先验证；浏览器里有这个站的 Cookie、但没有登录用的时说多半没登录。
+ * 行上 Cookie 状态旁的说明：格式认不出时说点「同步」由 pt-tools 验证，pt-tools 验证过、拒绝保存这组 Cookie 时写它给的原因
+ * （issue #864：以前只写「同步时由 pt-tools 验证」，验证没通过也看不出来）；浏览器里有这个站的 Cookie、但没有登录用的时说多半没登录。
  * 以前写「缺 c_secure_uid…」：站点换了登录 Cookie 的格式（BYR 现在是 auth_token / refresh_token）也这么写，看着像扩展坏了。
  */
-export type CookieHint = "unverified" | "noLogin" | null;
+export type CookieHint = "rejected" | "unverified" | "noLogin" | null;
 
 export function cookieHint(s: KnownSiteStatus): CookieHint {
   if (s.site.syncField !== "cookie") return null;
-  if (s.cookieStatus === "unverified") return "unverified";
+  if (s.cookieStatus === "unverified") return s.syncRejected ? "rejected" : "unverified";
   return s.cookieStatus === "missing" && s.hasCookie ? "noLogin" : null;
 }

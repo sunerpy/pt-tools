@@ -237,6 +237,8 @@ async function handleSyncSite(siteId: string): Promise<void> {
     void loadLogins();
   } catch (error: unknown) {
     showError(error, "feedback.syncFailed");
+    // pt-tools 验证后拒绝保存时后台记下了原因：重读一遍，行上马上换成这个原因，不用关了弹窗再打开（issue #864）
+    void refreshState().catch(() => undefined);
   } finally {
     busySync.value = false;
     syncingId.value = "";
