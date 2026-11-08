@@ -23,13 +23,13 @@
 
 适用于 pt-tools 已经支持、且使用 Cookie 认证的站点。
 
-弹窗的主页面是「我的站点」：浏览器里有这个站点的 Cookie、或者 pt-tools 里启用了这个站点的，都列在这里（其余内置站点点「显示全部」才列出来）。每一行写着浏览器里 Cookie 的状态，和 pt-tools 里这个站点的保号状态（还剩几天、快到期了）；要处理的站点排在前面。
+弹窗的主页面是「我的站点」，默认列出这几种站点：pt-tools 里启用了的，在扩展里打开了「自动同步 Cookie」的，以及浏览器里认出了登录 Cookie 的（「有效」「即将过期」「已过期」）。其余内置站点点「显示全部」才列出来，包括浏览器里只有统计这类 Cookie（「缺失」）或格式认不出（「待验证」）的站点：没有账号、只打开过站点，浏览器里也会有这些 Cookie。每一行写着浏览器里 Cookie 的状态，和 pt-tools 里这个站点的保号状态（还剩几天、快到期了）；要处理的站点排在前面。
 
 打开弹窗时先显示上次读到的结果，标题旁写「更新中…」，读完再换成新的，不用等连上 pt-tools。读不到 pt-tools 的登录状态时（例如 pt-tools 重启过，扩展的登录会话没了），列表照旧显示上次读到的保号状态，上方写明是什么时候读到的；从没读到过时每一行写「状态未知」。点上方的「去登录」到设置里重新登录 pt-tools。
 
-扩展先认登录 Cookie 的格式：站点自己的那一组（OurBits 的 `ourbits_jwt`、春天的 `SPRINGID`、BYR 的 `auth_token` 等），NexusPHP 的 `c_secure_uid` 加 `c_secure_pass`（`c_secure_tracker_ssl` 只是偏好，没有也算登录着），以及新版 NexusPHP（例如星陨阁）只有一个 `c_secure_pass` 的。认出来的显示「有效」和剩余天数，同步时直接推给 pt-tools。站点把 Cookie 设在上一级域名上、或者在 http 下设的（例如 OpenCD）也能认出来。
+扩展先认登录 Cookie 的格式：站点自己的那一组（OurBits 的 `ourbits_jwt`、U2 的 `nexusphp_u2`、BYR 的 `auth_token` 等），NexusPHP 的 `c_secure_uid` 加 `c_secure_pass`（`c_secure_tracker_ssl` 只是偏好，没有也算登录着），以及新版 NexusPHP（例如星陨阁）只有一个 `c_secure_pass` 的。认出来的显示「有效」和剩余天数，同步时直接推给 pt-tools。站点把 Cookie 设在上一级域名上、或者在 http 下设的（例如 OpenCD）也能认出来。春天的 `SPRINGID` 是例外：没登录、只打开过站点也会有它，所以认出来也显示「待验证」，交给 pt-tools 验证。
 
-认不出格式、但有像登录用的 Cookie 时显示「待验证」，同样可以同步：扩展把浏览器发给这个站点的整组 Cookie 交给 pt-tools，pt-tools 先用这组 Cookie 登录一次站点，登录上了才保存；登录不上就不保存、原来的 Cookie 不动，扩展会写明原因（没登录、被人机验证拦下、pt-tools 连不上站点等）。这要 pt-tools 1.0.0-rc.45 或更新的版本，旧版本不会推。定时同步只替 pt-tools 里已启用、或者打开了自动同步的站点这么做；同一组 Cookie 被拒绝一次以后，Cookie 不变就不再重试。
+认不出格式、但有像登录用的 Cookie 时显示「待验证」，没同步过的这一行提示点「同步」由 pt-tools 验证：扩展把浏览器发给这个站点的整组 Cookie 交给 pt-tools，pt-tools 先用这组 Cookie 登录一次站点，登录上了才保存；登录不上就不保存、原来的 Cookie 不动，这一行改写 pt-tools 给的原因（没登录、被人机验证拦下、pt-tools 连不上站点等），再点「同步」会再验证一次。浏览器里的 Cookie 变了以后，这个原因就不再显示。这要 pt-tools 1.0.0-rc.45 或更新的版本，旧版本不会推。定时同步只替 pt-tools 里已启用、或者打开了自动同步的站点这么做；同一组 Cookie 被拒绝一次以后，Cookie 不变就不再重试。
 
 只有统计、Cloudflare、语言偏好这类 Cookie 时显示「缺失」，这一行写「没有登录 Cookie，多半没登录」；登录后会出现「同步」。
 
