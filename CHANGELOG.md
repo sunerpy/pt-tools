@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.54](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.53...v1.0.0-rc.54) (2026-11-08)
+
+
+### Bug Fixes
+
+* **attendance:** 签到地址回 404 时当天直接记失败、写明地址，不再重试；没有内置定义的站点显示「不支持」，关掉自动签到后不再显示「待重试」 ([#868](https://github.com/sunerpy/pt-tools/issues/868)) ([0ba51d7](https://github.com/sunerpy/pt-tools/commit/0ba51d70c3456edc2e4e73634a287aff222aab1f))
+* **extension:** U2 认出登录 Cookie，春天的 SPRINGID 先由 pt-tools 验证，「我的站点」只列启用或登录着的站点，验证没通过时行上写原因 ([#866](https://github.com/sunerpy/pt-tools/issues/866)) ([8408b0a](https://github.com/sunerpy/pt-tools/commit/8408b0aaf4e8a6bdf00936962d7e57f18f55b52f))
+* **reseed:** 辅种的种子和原种子共用的数据在站点做种容量里只算一次，原种子还在时辅种不受上限限制 ([#869](https://github.com/sunerpy/pt-tools/issues/869)) ([8414364](https://github.com/sunerpy/pt-tools/commit/8414364a09ea4b01ade650f576f06e29684564cb))
+
 ## [1.0.0-rc.53](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.52...v1.0.0-rc.53) (2026-11-07)
 
 
