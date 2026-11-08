@@ -935,7 +935,11 @@ describe("媒体库", () => {
       error: "命名模板不能用: Nope",
     });
     fill("ml-lib-template", "{{.Nope}}");
-    await vi.waitFor(() => expect(api.templatePreview).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    // 等的是 300 毫秒防抖之后的第二次预览；改模板后整页重新渲染，happy-dom 里本机就要 1.1 秒左右，
+    // CI 上超过 2 秒（2026-11-08 连着几次超时），所以多给一些时间
+    await vi.waitFor(() => expect(api.templatePreview).toHaveBeenCalledTimes(2), {
+      timeout: 10_000,
+    });
     await flush();
     expect(q("ml-lib-preview")!.textContent).toContain("命名模板不能用");
   });
