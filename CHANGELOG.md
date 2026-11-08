@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **nas:** 接入 Glances 4：群晖、飞牛、Unraid 等 NAS 上用 Docker 跑的 Glances，首页的 NAS 概览显示它的主机、网络、存储、硬盘温度、容器与软 RAID ([62d22f0](https://github.com/sunerpy/pt-tools/commit/62d22f033630662b00f7c05219e278ce6779c3c3))
 * **nas:** 接入 TrueNAS：用只读 API Key 读主机、存储池、硬盘温度、告警与应用，首页的 NAS 概览显示它 ([c9116c5](https://github.com/sunerpy/pt-tools/commit/c9116c5a1d31a9be1e7ddfda19fe36764dc7fbbe))
 * **nas:** 接入群晖 DSM（实验性，只用假服务测过）：首页的 NAS 概览显示群晖的主机、CPU、内存、网络、存储空间与硬盘 ([3d8383f](https://github.com/sunerpy/pt-tools/commit/3d8383f2fb52ad39af563c9b42e7dd6b6749c4c3))
-* **nas:** 接入飞牛 fnOS（实验性，只用假服务测过）：首页的 NAS 概览显示飞牛的主机、CPU、内存、网络、存储空间、硬盘与容器 ([6b0ed8a](https://github.com/sunerpy/pt-tools/commit/6b0ed8a954010b7e3091b2939c28e2ed0f939779))
+* **nas:** 接入飞牛 fnOS（实验性，在 fnOS 1.2.1000 真机上验证过）：首页的 NAS 概览显示飞牛的主机、CPU、内存、网络、存储空间、硬盘与容器 ([6b0ed8a](https://github.com/sunerpy/pt-tools/commit/6b0ed8a954010b7e3091b2939c28e2ed0f939779))
 * **search:** 按条目搜索：选一部电影或剧集搜各站点，按质量档案打分、合并同一资源、写明能补上哪几集 ([2491e06](https://github.com/sunerpy/pt-tools/commit/2491e06047192c43f5de2f767e3c118f4291bda8))
 * **web:** 系统体检页改成卡片：总览卡有环形图与计数块，问题集中在「需要处理」、带「去处理」，各组按瀑布流排，结果到了依次出现 ([cf017d8](https://github.com/sunerpy/pt-tools/commit/cf017d856d0a80ad2d0181cea75b8257d78482eb))
 * **web:** 首页最上面是 NAS 概览：主机行、CPU、内存、网络与存储四张数值卡，存储池、硬盘温度与告警；新增「系统 → NAS 监控」，本机来源读 pt-tools 所在主机 ([158f2be](https://github.com/sunerpy/pt-tools/commit/158f2becf2192b2ac1105f0a1579cd7927d9ef7a))
