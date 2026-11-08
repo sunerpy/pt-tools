@@ -51,7 +51,7 @@ Turn the scan on under the Scheduled scan (定时扫描) tab and pt-tools scans 
 
 pt-tools first compares the tracker host with the addresses of the built-in sites, then the registrable domain: `tracker.hdsky.me` and the site address `hdsky.me` share `hdsky.me`, so the torrent belongs to HDSky. When several sites share a registrable domain, only an exact host match counts. Custom sites are not recognised.
 
-The site seeding capacity (刷流容量上限 in the site details) follows the same rule: a torrent with no pt-tools push record and no site category or tag still counts towards a site when its main tracker belongs to that site. Sites where you added many torrents by hand will show a larger seeding total than before.
+The site seeding capacity (刷流容量上限 in the site details) follows the same rule: a torrent with no pt-tools push record and no site category or tag still counts towards a site when its main tracker belongs to that site. Sites where you added many torrents by hand will show a larger seeding total than before. Cross-seeds are the exception: data they share with the original torrent counts once, see [site seeding capacity for cross-seeds](reseed.md#site-seeding-capacity).
 
 ## API
 
