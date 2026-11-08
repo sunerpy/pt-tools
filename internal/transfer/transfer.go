@@ -638,7 +638,7 @@ func (s *Service) finish(ctx context.Context, j *models.TorrentTransferJob) erro
 		return fmt.Errorf("恢复目标里的种子失败: %w", rErr)
 	}
 	if j.Kind == models.JobKindReseed {
-		// 辅种：数据与原来的种子共用，不移除任何种子；记下这个新种子，站点容量与清理都认得它
+		// 辅种：数据与原来的种子共用，不移除任何种子；记下这个新种子，清理与站点容量都认得它（原种子还在时不重复计入站点做种容量）
 		if recErr := s.recordReseed(ctx, j, targetSet); recErr != nil {
 			return fmt.Errorf("辅种已开始做种，%w，下一轮再试", recErr)
 		}

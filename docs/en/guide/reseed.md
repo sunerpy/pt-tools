@@ -42,7 +42,7 @@ Each configured site has a switch on its row, with Turn all on (全部开启) an
 2. For each torrent IYUU finds, skips it when its site is not taking part, the downloader already has it, this torrent on this site was tried before, or the site has reached today's limit.
 3. Downloads the torrent file from the site (with the site's rate limit), checks that its info hash matches IYUU's, and checks that its file list is exactly the same as the original torrent's in the downloader (every file with the same path and size). A mismatch is recorded as failed and not tried again; a torrent that cannot be downloaded (the site is unavailable, for example), or whose original torrent's file list cannot be read (the downloader is briefly unreachable, for example), is also recorded as failed and tried again after 7 days; a response that is not a torrent file (a login page, a two-step verification page, a download notice page and so on) also counts as not downloaded, and the reason names the page. When a NexusPHP site is downloaded with a cookie and the account still shows the first-time download notice (第一次下载提示), pt-tools continues the way the notice page's Download The Torrent (下载种子文件) button does, without changing the account's setting; the low ratio notice (低分享率提示) and client banned notice (被禁止客户端提示) are not confirmed for you and have to be handled on the site's web page. A torrent the site has deleted (IYUU's index still lists it; on download M-Team answers 種子未找到, or a NexusPHP site's details page says No torrent with this ID) is recorded as Deleted on site (站点已删除), does not count as failed, and is not tried again.
 4. Adds a torrent that passes the checks to the same downloader, paused, with the original torrent's save path and the tags site ID, `pt-tools-reseed` and `pt-tools-reseed-<job number>`, which belongs to this job only (when the job ends qBittorrent deletes it; in Transmission it stays on the torrent).
-5. Once the downloader checks it at 100%, the torrent starts seeding and pt-tools records it (site seeding capacity and auto-delete both see it); below 100% it is removed from the downloader with the data kept, and the original torrent is not affected.
+5. Once the downloader checks it at 100%, the torrent starts seeding and pt-tools records it (auto-delete sees it; for site seeding capacity see [below](#site-seeding-capacity)); below 100% it is removed from the downloader with the data kept, and the original torrent is not affected.
 
 Steps 4 and 5 use the same jobs as [Torrent transfer](torrent-transfer.md): each downloader checks one torrent at a time, and after pt-tools restarts a job continues from the step where it stopped. Cross-seeding never removes an existing torrent.
 
@@ -73,6 +73,18 @@ The run status on the Settings tab shows how many requests each endpoint got tod
 A cross-seed and its original torrent use the same files. When auto-delete (emergency cleanup, seeding competition and Delete other free torrents still unfinished after freeleech included), brushing removal or Delete dead torrents (删除失效种子) in the downloader assistant is about to delete data, pt-tools first checks whether another torrent in the downloader still uses the same data: if one does, only the torrent is removed and the data stays; when all the torrents sharing the data are deleted together, the data is deleted as usual. pt-tools compares the paths where the torrents keep their data: the same path counts as shared (for a qBittorrent multi-file torrent without a subfolder it compares the files).
 
 Deleting a torrent by hand, in the downloader or in a pt-tools torrent list, with its data selected for deletion deletes the files, and the torrents sharing them lose their data too.
+
+## Site seeding capacity
+
+A cross-seed and its original torrent use the same files, stored once on disk, so the site seeding capacity (刷流容量上限 in the site details) counts that data once:
+
+- While the original torrent is still in the same downloader, the cross-seed does not count towards its site's seeding total, and cross-seeding does not check that limit: a cross-seed is added even when the site is already at its limit.
+- Once the original torrent is removed (auto-delete sees that the cross-seed still uses the data, so it removes only the torrent and keeps the data), the data is held by the cross-seed alone and counts towards the cross-seed's site from then on.
+- When several torrents share one copy of the data, only one of them counts: the one that was there first; if all of them were added by cross-seeding, the one added to the downloader earliest.
+
+pt-tools recognises shared data from its own cross-seeding records. Cross-seeds added by other tools, such as the IYUU client or MoviePilot plugins, are not recognised and still count.
+
+Older versions failed to cross-seed when a site's seeding total had reached its limit, with the reason 站点容量已满 (site capacity full). Those records are not retried automatically; filter [Records](#records) by Failed (失败) and retry the ones you select.
 
 ## Records
 

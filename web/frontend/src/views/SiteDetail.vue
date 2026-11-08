@@ -1031,7 +1031,9 @@ function ruleNameOf(id: number): string {
                   :step="10"
                   controls-position="right"
                   style="width: 100%" />
-                <div class="field-tip">该站点做种总量到顶后就不再推新种，避免把盘塞满</div>
+                <div class="field-tip">
+                  该站点做种总量到顶后就不再推新种，避免把盘塞满；辅种的种子和原种子共用文件，原种子还在时不重复计入
+                </div>
               </el-form-item>
             </div>
             <div class="pt-strip">

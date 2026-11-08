@@ -44,7 +44,8 @@ type PushTorrentRequest struct {
 	// Meta 是调用方已经知道的种子信息（刷流从搜索结果里带来）；为空时不覆盖库里已有的值。
 	Meta *PushTorrentMeta
 	// ReuseExistingData 用于转移做种与辅种：数据已经在盘上。强制暂停添加（校验完才开始），
-	// 跳过磁盘预留，站点容量闸门照常；不写种子记录，成功后由调用方更新。
+	// 跳过磁盘预留，站点容量闸门照常（辅种记录里的原种子还在这台下载器里时不占容量，见 siteSeedingUsage）；
+	// 不写种子记录，成功后由调用方更新。
 	ReuseExistingData bool
 	// IMDbID、DoubanID 是调用方已经知道的外部编号（刷流、订阅从搜索结果带来）；为空的不覆盖库里已有的值。
 	IMDbID   string
@@ -375,7 +376,7 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 		if capSize <= 0 && req.Meta != nil && req.Meta.SizeBytes > 0 {
 			capSize = req.Meta.SizeBytes
 		}
-		used, usedErr := getSiteSeedingSizeBytes(ctx, req.SiteID, dl)
+		usage, usedErr := siteSeedingUsage(ctx, req.SiteID, dl, torrentHash)
 		if usedErr != nil {
 			sLogger().Warnf("[站点容量] %s: 获取站点做种总量失败，容量限制启用故拒绝推送: %v", req.SiteID, usedErr)
 			release()
@@ -387,8 +388,12 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 				Status:      PushStatusRejectedCapacity,
 			}, nil
 		}
-		capBytes := int64(capGB * gibiByte)
-		if used+capSize > capBytes {
+		capBytes, used := int64(capGB*gibiByte), usage.used
+		if req.ReuseExistingData && usage.sharedSource != "" {
+			// 辅种：和下载器里的原种子共用数据，加进去不多占空间，也不计入站点做种总量
+			sLogger().Infof("[站点容量] %s: 辅种的种子与下载器里的 %s 共用数据，不占站点做种容量: id=%s",
+				req.SiteID, usage.sharedSource, req.TorrentID)
+		} else if used+capSize > capBytes {
 			usedGB := float64(used) / gibiByte
 			tGB := float64(capSize) / gibiByte
 			sLogger().Warnf("[站点容量] %s: 超过容量上限 (当前做种 %.1f GB + 本次种子 %.1f GB > 上限 %.1f GB)，跳过推送: id=%s",
