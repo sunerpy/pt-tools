@@ -85,7 +85,7 @@ export default {
   "cookie.missing": "缺失",
   "cookie.unverified": "待验证",
   "cookie.unverifiedHint":
-    "这个站点的登录 Cookie 格式扩展没认出，同步时整组交给 pt-tools，由它先用这组 Cookie 登录一次，登录上了才保存，原来的 Cookie 不会被换掉",
+    "扩展从 Cookie 看不出这个站点有没有登录：格式没认出，或者认出的只是会话 Cookie。同步时整组交给 pt-tools，由它先用这组 Cookie 登录一次，登录上了才保存，原来的 Cookie 不会被换掉",
 
   "feedback.permissionGranted": "权限已授予，功能已激活。",
   "feedback.requestFailed": "请求失败",

@@ -7,6 +7,11 @@ export interface KnownSite {
   schema: SiteSchema;
   authMethod: AuthMethod;
   cookieNames: string[];
+  /**
+   * cookieNames 只是一个会话 Cookie（PHP session 这类）：没登录、只打开过站点也会下发，认出来只说明有会话，
+   * 不说明登录着。这样的站点认出了也按「待验证」处理，同步时由 pt-tools 先拿它登录一次、登录上了才保存。
+   */
+  sessionCookie?: boolean;
   syncField: "cookie" | "api_key" | "passkey";
 }
 
@@ -28,7 +33,9 @@ export const KNOWN_SITES: KnownSite[] = [
     authMethod: "cookie",
     // SSD 已迁移到 PHP session 鉴权（session_name=SPRINGID），不再下发传统 NexusPHP 的
     // c_secure_uid / c_secure_pass / c_secure_tracker_ssl 三件套，因此只校验 SPRINGID。
+    // SPRINGID 没登录打开站点也会有（issue #863：没账号也显示「有效」、被推进 pt-tools），要 pt-tools 验证过才算登录着。
     cookieNames: ["SPRINGID"],
+    sessionCookie: true,
     syncField: "cookie",
   },
   {
@@ -608,7 +615,9 @@ export const KNOWN_SITES: KnownSite[] = [
     domains: ["u2.dmhy.org"],
     schema: "NexusPHP",
     authMethod: "cookie",
-    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    // U2 的登录 Cookie 只有 nexusphp_u2，没有 NexusPHP 的 c_secure_uid / c_secure_pass（issue #864：登录着也一直「待验证」）。
+    // 社区脚本也只填这一个：github.com/Hastbin/u2_scripts 的 catch_magic.py，COOKIES = {'nexusphp_u2': ''}。
+    cookieNames: ["nexusphp_u2"],
     syncField: "cookie",
   },
   {

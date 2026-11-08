@@ -4,8 +4,9 @@ import type { SiteCookieData } from "../../core/types";
 
 /**
  * Cookie 状态：valid / expiring / expired 是认出了登录 Cookie 的格式（站点自己声明的、NexusPHP 新旧两种），可以直接同步；
- * unverified 是有像登录用的 Cookie、格式认不出（BYR 现在是 auth_token / refresh_token），整组推给 pt-tools，
- * 由它先拿这组 Cookie 实际登录一次、登录上了才保存；missing 是没有登录 Cookie（只有统计、Cloudflare 这类）。
+ * unverified 是有像登录用的 Cookie、格式认不出（BYR 现在是 auth_token / refresh_token），或者认出的只是会话 Cookie
+ * （春天的 SPRINGID，见 KnownSite.sessionCookie），整组推给 pt-tools，由它先拿这组 Cookie 实际登录一次、登录上了才保存；
+ * missing 是没有登录 Cookie（只有统计、Cloudflare 这类）。
  */
 export type CookieHealthStatus = "valid" | "expiring" | "expired" | "unverified" | "missing";
 
@@ -230,6 +231,17 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
   }
 
   const picked = await pickDomainCookies(site);
+  // 会话 Cookie 站点认出了也只说明有会话（没登录打开站点也会下发，issue #863），过期时间也不是登录的期限：
+  // 按待验证处理，由 pt-tools 先登录一次、登录上了才保存
+  if (site.sessionCookie && picked.format === "declared") {
+    return {
+      status: "unverified",
+      expireDays: null,
+      cookieString: toCookieString(picked.cookies),
+      hasCookie: true,
+      format: null,
+    };
+  }
   if (!picked.format) {
     // 认不出格式：有像登录用的 Cookie 就整组交给 pt-tools 验证；一个都没有就是没登录，不给出可同步的 Cookie
     return {

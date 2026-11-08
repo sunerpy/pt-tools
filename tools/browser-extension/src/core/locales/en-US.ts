@@ -85,7 +85,7 @@ export default {
   "cookie.missing": "Missing",
   "cookie.unverified": "Unverified",
   "cookie.unverifiedHint":
-    "The extension doesn't recognize this site's login cookies. Syncing sends them all to pt-tools, which signs in with them once and saves them only if that works; the cookies pt-tools already has are not replaced otherwise",
+    "The extension can't tell from the cookies whether you are signed in to this site: it doesn't recognize their format, or they are only a session cookie. Syncing sends them all to pt-tools, which signs in with them once and saves them only if that works; the cookies pt-tools already has are not replaced otherwise",
 
   "feedback.permissionGranted": "Permissions granted. Features are now enabled.",
   "feedback.requestFailed": "Request failed",
