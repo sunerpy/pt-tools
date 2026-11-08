@@ -39,6 +39,19 @@ export function attendanceView(a?: SiteAttendance): AttendanceView {
       canSign,
     };
   }
+  /*
+   * 签到监控只处理站点启用、开了自动签到的站点：关掉以后今天的「待签到 / 待重试」不会再发生（issue #862：
+   * 两个开关都关了，页面还写「待重试」）。今天已经有结果的照旧显示结果。
+   */
+  if ((a.status === "pending" || !a.status) && (!a.site_enabled || !a.attendance_enabled)) {
+    const off = a.site_enabled ? "没有开启每日自动签到" : "站点没有启用，不自动签到";
+    return {
+      label: a.site_enabled ? "未开启" : "站点未启用",
+      tone: "neutral",
+      detail: a.last_error ? `${off}。今天上次没签上：${a.last_error}` : off,
+      canSign,
+    };
+  }
   switch (a.status) {
     case "signed":
       return { label: "已签到", tone: "ok", detail: a.message || "今天签到成功", canSign };
@@ -77,9 +90,7 @@ export function attendanceView(a?: SiteAttendance): AttendanceView {
       };
     }
     default:
-      return a.attendance_enabled
-        ? { label: "待安排", tone: "info", detail: "今天还没安排签到时间", canSign }
-        : { label: "未开启", tone: "neutral", detail: "没有开启每日自动签到", canSign };
+      return { label: "待安排", tone: "info", detail: "今天还没安排签到时间", canSign };
   }
 }
 
