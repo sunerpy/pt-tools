@@ -143,7 +143,37 @@ var (
 	ErrAttendanceUnsupported = errors.New("attendance not supported")
 	// ErrAttendanceUnrecognized 表示签到请求成功返回，但页面里既没有签到成功也没有今日已签的文字。
 	ErrAttendanceUnrecognized = errors.New("attendance result not recognized")
+	// ErrAttendancePageNotFound 表示签到地址回了 404 / 410：站点没有这一页（多半改了签到方式），当天重试也签不上。
+	ErrAttendancePageNotFound = errors.New("attendance page not found")
 )
+
+// IsAttendancePageNotFound 报告签到失败是不是因为站点没有签到的那一页：驱动换成了 ErrAttendancePageNotFound，
+// 或者错误链里有 404 / 410 的 HTTPStatusError（要过一关的签到取验证码、题目的那几页）。
+func IsAttendancePageNotFound(err error) bool {
+	if errors.Is(err, ErrAttendancePageNotFound) {
+		return true
+	}
+	_, ok := pageNotFoundStatus(err)
+	return ok
+}
+
+// pageNotFoundStatus 报告站点是不是回了 404 / 410（没有这一页），是时返回状态码。
+func pageNotFoundStatus(err error) (int, bool) {
+	var se *HTTPStatusError
+	if errors.As(err, &se) && (se.Code == http.StatusNotFound || se.Code == http.StatusGone) {
+		return se.Code, true
+	}
+	return 0, false
+}
+
+// attendanceRequestError 包装签到请求的错误：签到地址回了 404 / 410 时换成 ErrAttendancePageNotFound，写上请求的地址；
+// 别的错误照旧加上「attendance request」前缀。
+func attendanceRequestError(err error, path string) error {
+	if code, ok := pageNotFoundStatus(err); ok {
+		return fmt.Errorf("%w: 签到地址 %s 返回 HTTP %d，站点没有这一页", ErrAttendancePageNotFound, path, code)
+	}
+	return fmt.Errorf("attendance request: %w", err)
+}
 
 // Match 在页面文字里找签到结果：先找签到成功，再找今日已签。
 func (c *AttendanceConfig) Match(text string) (AttendResult, bool) {
@@ -258,7 +288,7 @@ func (d *NexusPHPDriver) Attend(ctx context.Context) (AttendResult, error) {
 	}
 	res, err := d.Execute(ctx, req)
 	if err != nil {
-		return AttendResult{}, fmt.Errorf("attendance request: %w", err)
+		return AttendResult{}, attendanceRequestError(err, req.Path)
 	}
 	if result, ok := cfg.Match(attendancePageText(res.RawBody)); ok {
 		return result, nil

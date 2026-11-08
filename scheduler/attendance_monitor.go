@@ -475,8 +475,8 @@ func (m *AttendanceMonitor) attempt(ctx context.Context, repo *models.SiteAttend
 		cols["status"] = models.AttendanceUnsupported
 		cols["last_error"] = attendanceErrorText(runErr)
 		cols["next_attempt_at"] = nil
-	case errors.Is(runErr, v2.ErrAttendanceNeedsAI):
-		// 要 AI 而没有：不改设置重试也没用，当天直接记失败
+	case errors.Is(runErr, v2.ErrAttendanceNeedsAI), v2.IsAttendancePageNotFound(runErr):
+		// 要 AI 而没有、站点没有签到的那一页（404，多半改了签到方式）：不改设置重试也没用，当天直接记失败
 		cols["status"] = models.AttendanceFailed
 		cols["last_error"] = attendanceErrorText(runErr)
 		cols["next_attempt_at"] = nil
@@ -598,6 +598,12 @@ func attendanceErrorText(err error) string {
 		return "Cookie 已失效或没有权限，请重新同步 Cookie"
 	case errors.Is(err, v2.ErrAttendanceNeedsAI):
 		return sentinelReason(err, v2.ErrAttendanceNeedsAI)
+	case errors.Is(err, v2.ErrAttendancePageNotFound):
+		return truncateRunes(sentinelReason(err, v2.ErrAttendancePageNotFound)+attendancePageGoneHint, 300)
+	case v2.IsAttendancePageNotFound(err):
+		var se *v2.HTTPStatusError
+		errors.As(err, &se)
+		return fmt.Sprintf("签到时站点返回 HTTP %d，站点没有这一页%s", se.Code, attendancePageGoneHint)
 	case errors.Is(err, v2.ErrAttendanceChallengeFailed):
 		return truncateRunes(sentinelReason(err, v2.ErrAttendanceChallengeFailed), 300)
 	case errors.Is(err, v2.ErrAttendanceUnrecognized):
@@ -611,6 +617,9 @@ func attendanceErrorText(err error) string {
 		return truncateRunes(err.Error(), 300)
 	}
 }
+
+// attendancePageGoneHint 接在「站点没有签到的那一页」后面：说明为什么当天不再重试（第二天照常再签一次）。
+const attendancePageGoneHint = "：站点多半改了签到方式，今天不再自动重试"
 
 var attendanceStatusLabels = map[string]string{
 	models.AttendanceSigned:      "签到成功",

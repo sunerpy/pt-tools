@@ -511,6 +511,44 @@ func TestAttendance_ChallengeWithoutAIFailsWithReason(t *testing.T) {
 	assert.Contains(t, rig2.row(t, "hdsky").LastError, "AI")
 }
 
+// issue #862：站点没有签到的那一页（观众的 attendance.php 回 404）。以前按一时的错误 10、30 分钟后再试两次，页面一直写「待重试」；
+// 现在当天直接记失败、不再请求，写明是哪个地址、为什么不再重试。手动签到也一样记失败。
+func TestAttendance_PageNotFoundIsFinalForTheDay(t *testing.T) {
+	rig := newAttendanceRig(t, time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), "audiences")
+	rig.sites["audiences"].err = fmt.Errorf("%w: 签到地址 /attendance.php 返回 HTTP 404，站点没有这一页", v2.ErrAttendancePageNotFound)
+	rig.mon.Rand = func(int64) int64 { return 0 }
+	ctx := context.Background()
+	rig.mon.RunOnce(ctx)
+
+	row := rig.row(t, "audiences")
+	assert.Equal(t, models.AttendanceFailed, row.Status)
+	assert.Equal(t, 1, row.Attempts)
+	assert.Nil(t, row.NextAttemptAt)
+	assert.Equal(t, "签到地址 /attendance.php 返回 HTTP 404，站点没有这一页：站点多半改了签到方式，今天不再自动重试", row.LastError)
+
+	rig.at("12:00")
+	rig.mon.RunOnce(ctx)
+	assert.Equal(t, int32(1), rig.sites["audiences"].calls.Load(), "no more requests today")
+	evs := rig.events(t)
+	require.Len(t, evs, 1)
+	assert.Equal(t, models.AttendanceResultFailed, evs[0].Result)
+
+	manual := newAttendanceRig(t, time.Date(2026, 10, 5, 7, 0, 0, 0, time.UTC), "audiences")
+	manual.sites["audiences"].err = rig.sites["audiences"].err
+	got, err := manual.mon.SignNow(ctx, "audiences")
+	require.NoError(t, err)
+	assert.Equal(t, models.AttendanceFailed, got.Status)
+	assert.Zero(t, got.Attempts, "a manual attempt does not count against the automatic ones")
+}
+
+// 别的驱动、要过一关的签到回 404 / 410 时没有换成 ErrAttendancePageNotFound：写状态码，同样说明为什么不再重试；5xx 照旧原样写出。
+func TestAttendanceErrorText_PageNotFound(t *testing.T) {
+	assert.Equal(t, "签到时站点返回 HTTP 410，站点没有这一页：站点多半改了签到方式，今天不再自动重试",
+		attendanceErrorText(fmt.Errorf("取验证码图片: %w", &v2.HTTPStatusError{Code: 410})))
+	assert.Equal(t, "attendance request: HTTP 502: Bad Gateway",
+		attendanceErrorText(fmt.Errorf("attendance request: %w", &v2.HTTPStatusError{Code: 502})))
+}
+
 // 签到失败是凭据问题时：驱动写了具体原因（Rousi 的 API Key 没有签到权限）就显示它，Cookie 站点照旧提示重新同步 Cookie。
 func TestAttendanceErrorText_CredentialReason(t *testing.T) {
 	assert.Equal(t, "Cookie 已失效或没有权限，请重新同步 Cookie", attendanceErrorText(v2.ErrSessionExpired))

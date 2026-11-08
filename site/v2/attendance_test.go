@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -147,6 +148,15 @@ func TestNexusPHPDriver_Attend(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, AttendSigned, res.Status)
 		assert.Equal(t, "act=sign", gotQuery)
+	})
+	// issue #862：观众的 attendance.php 回 404。以前写「attendance request: HTTP 404: Not Found」，还按一时的错误重试两次
+	t.Run("page not found", func(t *testing.T) {
+		srv, hits := fakeAttendanceSite(t, "/somewhere-else.php", attendanceSuccessPage)
+		_, err := newAttendanceDriver(srv.URL, def).Attend(context.Background())
+		require.ErrorIs(t, err, ErrAttendancePageNotFound)
+		assert.ErrorContains(t, err, "签到地址 /attendance.php 返回 HTTP 404")
+		assert.True(t, IsAttendancePageNotFound(err))
+		assert.Zero(t, hits.Load())
 	})
 	t.Run("unsupported site sends no request", func(t *testing.T) {
 		srv, hits := fakeAttendanceSite(t, "/attendance.php", attendanceSuccessPage)
@@ -313,4 +323,17 @@ func TestNexusPHPDriver_AttendMethod(t *testing.T) {
 	bad := &SiteDefinition{ID: "qa", Schema: SchemaNexusPHP, Attendance: &AttendanceConfig{Method: "DELETE"}}
 	_, err = newAttendanceDriver(srv.URL, bad).Attend(context.Background())
 	assert.ErrorContains(t, err, "DELETE")
+}
+
+// 站点没有签到的那一页：驱动换成的 ErrAttendancePageNotFound，或错误链里 404 / 410 的 HTTPStatusError（要过一关的签到取图、取题）都算；
+// 5xx 这类一时的错误不算，照旧加上前缀、按普通失败重试。
+func TestIsAttendancePageNotFound(t *testing.T) {
+	assert.True(t, IsAttendancePageNotFound(fmt.Errorf("取验证码图片: %w", &HTTPStatusError{Code: http.StatusGone})))
+	assert.False(t, IsAttendancePageNotFound(&HTTPStatusError{Code: http.StatusBadGateway}))
+	assert.False(t, IsAttendancePageNotFound(ErrSessionExpired))
+	assert.False(t, IsAttendancePageNotFound(nil))
+
+	err := attendanceRequestError(&HTTPStatusError{Code: http.StatusBadGateway}, "/attendance.php")
+	assert.EqualError(t, err, "attendance request: HTTP 502: Bad Gateway")
+	assert.False(t, IsAttendancePageNotFound(err))
 }

@@ -573,6 +573,15 @@ func TestHDDolbyDriver_Attend(t *testing.T) {
 	require.ErrorIs(t, err, ErrAttendanceUnrecognized)
 }
 
+// 签到地址回 404：记成站点没有这一页（签到监控当天不再重试），写明请求的地址
+func TestHDDolbyDriver_AttendPageNotFound(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	_, err := hddolbyAttendDriver(server.URL, "c_secure_uid=1").Attend(context.Background())
+	require.ErrorIs(t, err, ErrAttendancePageNotFound)
+	assert.ErrorContains(t, err, "签到地址 /attendance.php 返回 HTTP 404")
+}
+
 // 没配 Cookie：不能签到，原因写明要 Cookie；站点定义没写签到时照旧不支持
 func TestHDDolbyDriver_AttendWithoutCookie(t *testing.T) {
 	d := hddolbyAttendDriver("https://www.uhddolby.com", "")
