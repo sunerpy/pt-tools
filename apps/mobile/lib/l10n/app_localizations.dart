@@ -1117,6 +1117,18 @@ abstract class S {
   /// **'本机'**
   String get moreGroupApp;
 
+  /// No description provided for @moreStar.
+  ///
+  /// In zh, this message translates to:
+  /// **'如果 pt-tools 对你有帮助，\n还请动动小手到 GitHub 点个 Star'**
+  String get moreStar;
+
+  /// No description provided for @moreStarCopied.
+  ///
+  /// In zh, this message translates to:
+  /// **'打不开浏览器，仓库地址已复制'**
+  String get moreStarCopied;
+
   /// No description provided for @appearanceTheme.
   ///
   /// In zh, this message translates to:

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -93,8 +94,73 @@ class MorePage extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: 20),
+          const _StarLink(),
         ],
       ),
     );
+  }
+}
+
+/// 项目仓库，Star 提示点开的地址。
+const repoUrl = 'https://github.com/sunerpy/pt-tools';
+
+/// 页面最下面的 Star 提示（用户 2026-11-09 要的）：一行小字，点开在系统浏览器里打开仓库；
+/// 打不开浏览器（没有装、或被系统拦下）时把地址复制下来并提示。
+class _StarLink extends ConsumerWidget {
+  const _StarLink();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = S.of(context);
+    final t = Theme.of(context);
+    return Semantics(
+      link: true,
+      child: InkWell(
+        key: const Key('more-star'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _open(context, ref),
+        child: ConstrainedBox(
+          // 触控目标至少 48 高
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: PtIcon(PtGlyph.star, size: 16, color: context.pt.warn),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    s.moreStar,
+                    style: t.textTheme.bodySmall?.copyWith(
+                      color: t.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _open(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final copiedText = S.of(context).moreStarCopied;
+    var opened = false;
+    try {
+      opened = await ref.read(urlOpenerProvider)(Uri.parse(repoUrl));
+    } on Object {
+      opened = false;
+    }
+    if (opened) return;
+    await Clipboard.setData(const ClipboardData(text: repoUrl));
+    messenger.showSnackBar(SnackBar(content: Text(copiedText)));
   }
 }

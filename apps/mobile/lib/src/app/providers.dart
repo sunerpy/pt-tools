@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ptt_api/api.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../remote/connection.dart';
 import '../remote/host_record.dart';
@@ -16,6 +17,14 @@ const appClientName = 'pt-tools-app/1.0.0';
 const supportedApiLevel = 1;
 
 final hostStoreProvider = Provider<HostStore>((ref) => SecureHostStore());
+
+/// 在系统浏览器里打开一个链接，打开了返回 true（测试里换成记录参数的假实现）。
+typedef UrlOpener = Future<bool> Function(Uri uri);
+
+final urlOpenerProvider = Provider<UrlOpener>(
+  (ref) =>
+      (uri) => launchUrl(uri, mode: LaunchMode.externalApplication),
+);
 
 /// 连接用的通道（测试里换成内存的；null 时用 WebSocket）。
 final channelFactoryProvider = Provider<ChannelFactory?>((ref) => null);

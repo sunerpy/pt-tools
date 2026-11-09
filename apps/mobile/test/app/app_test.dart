@@ -1,8 +1,8 @@
 // 界面测试：整个 App 对着内存里的假主机（罐头 App API）跑，中文界面。
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -533,6 +533,7 @@ Future<_World> _pumpApp(
   HostStore? store,
   Future<void>? hostLoaded,
   AppearanceStore? appearance,
+  UrlOpener? openUrl,
 }) async {
   tester.platformDispatcher.localesTestValue = const [Locale('zh')];
   addTearDown(tester.platformDispatcher.clearLocalesTestValue);
@@ -576,6 +577,7 @@ Future<_World> _pumpApp(
         appearanceStoreProvider.overrideWithValue(
           appearance ?? MemoryAppearanceStore(),
         ),
+        if (openUrl != null) urlOpenerProvider.overrideWithValue(openUrl),
       ],
       child: const PtToolsApp(),
     ),
@@ -607,6 +609,49 @@ void main() {
     expect(w.requests, contains('GET /api/app/v1/stats/summary?range=7d'));
     expect(find.byTooltip('分享统计海报'), findsOneWidget);
     expect(find.textContaining('1.0 GiB'), findsOneWidget);
+  });
+  testWidgets('更多页底部的 Star 提示：点开仓库，打不开浏览器时复制地址', (tester) async {
+    final opened = <Uri>[];
+    var canOpen = true;
+    await _pumpApp(
+      tester,
+      openUrl: (uri) async {
+        opened.add(uri);
+        return canOpen;
+      },
+    );
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    final star = find.text('如果 pt-tools 对你有帮助，\n还请动动小手到 GitHub 点个 Star');
+    await tester.ensureVisible(star);
+    await tester.tap(star);
+    await _settle(tester, 2);
+    expect(opened, [Uri.parse('https://github.com/sunerpy/pt-tools')]);
+    expect(copied, isNull);
+
+    canOpen = false;
+    await tester.tap(star);
+    await _settle(tester, 2);
+    expect(opened, hasLength(2));
+    expect(copied, 'https://github.com/sunerpy/pt-tools');
+    expect(find.text('打不开浏览器，仓库地址已复制'), findsOneWidget);
   });
   testWidgets('刷流显示运行错误与步骤，取消删除不会写入', (tester) async {
     final w = await _pumpApp(tester, mobileFeatures: true);
