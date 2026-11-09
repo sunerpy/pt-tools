@@ -28,16 +28,26 @@ The snapshots, increments, trends and daily report were added in the 1.0 preview
 
 ## Where to look
 
-| Place                                | What it shows                                                                                                                                                     |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User Stats → toolbar "Period"        | Today, this week (last 7 days), this month (last 30 days)                                                                                                         |
-| User Stats → KPI "Total upload"      | The upload increment for the selected period; the bars are the daily upload increments of the last 7 days                                                         |
-| User Stats → "Upload breakdown" card | The 6 sites with the largest upload increment in the period; ranked by current total upload until comparable snapshots exist                                      |
-| Site list (phone)                    | 8 bars on each site card: daily upload increments over the last 8 days                                                                                            |
-| Site detail → "Site stats" card      | The 30-day upload increment and its daily trend                                                                                                                   |
-| Data export (数据导出)               | The share image can include the period increments ("Include period increments" switch and period choice); see [Exporting a share image](#exporting-a-share-image) |
+| Place                                  | What it shows                                                                                                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User Stats → toolbar "Period"          | Today, this week (last 7 days), this month (last 30 days)                                                                                                         |
+| User Stats → KPI "Total upload"        | The upload increment for the selected period; the bars are the daily upload increments of the last 7 days                                                         |
+| User Stats → "Upload breakdown" card   | The 6 sites with the largest upload increment in the period; ranked by current total upload until comparable snapshots exist                                      |
+| Site list (phone)                      | 8 bars on each site card: daily upload increments over the last 8 days                                                                                            |
+| Site detail → "Site stats" card        | The 30-day upload increment and its daily trend                                                                                                                   |
+| Data export (数据导出)                 | The share image can include the period increments ("Include period increments" switch and period choice); see [Exporting a share image](#exporting-a-share-image) |
+| User Stats → "Downloader seeding" card | How many torrents each downloader is seeding right now and their size; see [Downloader seeding](#downloader-seeding)                                              |
 
 Right after installation there is no history yet; increments appear once a second snapshot exists, usually the next day.
+
+## Downloader seeding
+
+The "Downloader seeding" (下载器做种) card at the bottom of the User Stats page reads the torrent lists of the downloaders directly. It has one row per enabled downloader: how many torrents it is seeding right now and their size, with the total of all downloaders in the card header. Compare it with the seeding size the sites report in the "Account totals" (账户总量) card to see which downloader seeds the most, and whether a site's reported figure is off.
+
+- Only torrents whose state is seeding count: uploading, stalledUP and forcedUP in qBittorrent, Seeding in Transmission. Completed torrents that are paused, stopped, queued, being checked or in error are listed in small text under the row ("另有 N 个下载完了没在做种": N more completed but not seeding); incomplete torrents do not count.
+- Each torrent counts with its full size. A reseed and its original torrent share one copy of the data but count once each here, the same way sites report seeding size, so the total is larger than the disk space actually used.
+- A downloader that cannot be reached shows "没连上" (not connected) with the reason underneath, at most two lines; hover over the row to read all of it. It is left out of the total.
+- The card refreshes with the page: when the page opens, after "Sync all" (同步全部) or syncing one site, and every 5 minutes. It is hidden when no downloader is enabled.
 
 ## Exporting a share image
 
@@ -77,11 +87,12 @@ Each channel receives it at most once per day, including across restarts. If a c
 
 ## API
 
-| Endpoint                                                | Description                                                   |
-| ------------------------------------------------------- | ------------------------------------------------------------- |
-| `GET /api/v2/userinfo/history?site=<site>&days=<1–400>` | Daily data and increments of one site over recent days        |
-| `GET /api/v2/userinfo/summary?range=today\|7d\|30d`     | Increments and totals of enabled sites over the period        |
-| `GET /api/v2/userinfo/trends?days=<1–60>`               | Daily increments and totals of enabled sites over recent days |
-| `GET` / `PUT /api/v2/userinfo/daily-report`             | Read or update the daily report settings                      |
+| Endpoint                                                | Description                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| `GET /api/v2/userinfo/history?site=<site>&days=<1–400>` | Daily data and increments of one site over recent days              |
+| `GET /api/v2/userinfo/summary?range=today\|7d\|30d`     | Increments and totals of enabled sites over the period              |
+| `GET /api/v2/userinfo/trends?days=<1–60>`               | Daily increments and totals of enabled sites over recent days       |
+| `GET` / `PUT /api/v2/userinfo/daily-report`             | Read or update the daily report settings                            |
+| `GET /api/downloader-torrents/seeding-stats`            | How many torrents each enabled downloader is seeding and their size |
 
 All of them require a signed-in session.

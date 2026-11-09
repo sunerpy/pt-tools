@@ -1695,6 +1695,31 @@ export interface DownloaderTransferStatItem {
   client_version?: string;
 }
 
+/**
+ * 一台下载器的做种情况（用户统计页的「下载器做种」卡）。体积是种子体积相加：辅种和原种子各算一次，
+ * 和站点上报的做种体积口径一样。`reachable` 为假时这一台没读到种子列表，数都是 0，原因在 `error`。
+ */
+export interface DownloaderSeedingItem {
+  downloader_id: number;
+  downloader_name: string;
+  downloader_type: string;
+  reachable: boolean;
+  error?: string;
+  /** 状态是做种的种子 */
+  seeding_count: number;
+  seeding_size: number;
+  /** 下载完了、没在做种的种子（暂停、停止、排队、校验中、出错） */
+  idle_count: number;
+  idle_size: number;
+}
+
+/** 各启用下载器的做种情况；合计只算读到了的那几台 */
+export interface DownloaderSeedingResponse {
+  total_seeding_count: number;
+  total_seeding_size: number;
+  downloaders: DownloaderSeedingItem[];
+}
+
 export interface DownloaderCapability {
   downloader_id: number;
   downloader_name: string;
@@ -1762,6 +1787,9 @@ export const downloaderTorrentsApi = {
       /** 最近的总速度采样（首页的速度柱，旧的在前）；老后端不返回 */
       speed_history?: SpeedSample[];
     }>("/api/downloader-torrents/transfer-stats", { signal }),
+
+  /** 各启用下载器正在做种的种子数与体积（用户统计页） */
+  seedingStats: () => api.get<DownloaderSeedingResponse>("/api/downloader-torrents/seeding-stats"),
 
   capabilities: () =>
     api.get<{ items: DownloaderCapability[] }>("/api/downloader-torrents/capabilities"),

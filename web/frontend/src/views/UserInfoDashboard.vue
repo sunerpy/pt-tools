@@ -3,6 +3,8 @@ import { useRouter } from "vue-router";
 import {
   type AggregatedStatsResponse,
   type DeltaSummary,
+  type DownloaderSeedingResponse,
+  downloaderTorrentsApi,
   type SiteConfig,
   type SiteLoginState,
   sitesApi,
@@ -87,6 +89,50 @@ const totalsRows = computed(() => {
     { label: "总做种积分", value: formatNumber(s.totalSeedingBonus ?? 0) },
   ];
 });
+/**
+ * 各下载器现在正在做种的种子数与体积（「下载器做种」卡）。和站点上报的做种体积对着看：
+ * 站点的数不对（比如只读到了做种列表的第一页）时，这里是下载器里的实数。
+ * 单独请求、单独失败：读不到只在卡里写一句，不影响站点统计。
+ */
+const seeding = ref<DownloaderSeedingResponse | null>(null);
+const seedingFailed = ref(false);
+let seedingSeq = 0;
+
+async function loadSeeding() {
+  const seq = ++seedingSeq;
+  const res = await downloaderTorrentsApi.seedingStats().catch(() => null);
+  if (seq !== seedingSeq) return;
+  seedingFailed.value = res === null;
+  if (res) seeding.value = res;
+}
+
+/** 每台一行：正在做种的个数与体积，柱长按体积；下载完了没在做种的写在小字里，连不上的写原因 */
+const seedingRows = computed<BreakdownRow[]>(() =>
+  (seeding.value?.downloaders ?? []).map((d) =>
+    d.reachable
+      ? {
+          key: String(d.downloader_id),
+          label: d.downloader_name,
+          value: `${d.seeding_count} 个 · ${formatBytes(d.seeding_size)}`,
+          weight: d.seeding_size,
+          hint:
+            d.idle_count > 0
+              ? `另有 ${d.idle_count} 个下载完了没在做种（${formatBytes(d.idle_size)}）`
+              : undefined,
+        }
+      : {
+          key: String(d.downloader_id),
+          label: d.downloader_name,
+          value: "没连上",
+          weight: 0,
+          tone: "dang",
+          // 原因可能很长（重试说明加原始错误）：小字只留两行，完整的放在悬停提示里
+          hint: d.error,
+          title: d.error,
+        },
+  ),
+);
+
 /** 全库任务计数，画板 KPI 六格里有三格来自这里 */
 const taskStats = ref<TaskStatsResponse | null>(null);
 const sitesByName = ref<Record<string, SiteConfig>>({});
@@ -855,6 +901,7 @@ async function loadData() {
   saveSnapshot(agg);
   void loadPeriod();
   void loadTrends();
+  void loadSeeding();
 
   const [siteMap, states, stats] = await Promise.all([
     sitesApi.list().catch(() => {
@@ -1856,6 +1903,32 @@ onUnmounted(() => {
           </div>
         </dl>
       </PtPanel>
+
+      <!--
+        下载器做种：每台下载器现在正在做种的个数与体积，和上面「账户总量」里各站上报的做种体积对着看。
+        没有启用的下载器时不显示；整个请求失败时只在卡里写一句。
+      -->
+      <PtPanel
+        v-if="seedingRows.length > 0 || seedingFailed"
+        class="pt-cards__full dash-seeding"
+        title="下载器做种"
+        icon="hard-drive"
+        data-testid="userinfo-downloader-seeding"
+        :count="
+          seeding && seedingRows.length > 0
+            ? `${seeding.total_seeding_count} 个 · ${formatBytes(seeding.total_seeding_size)}`
+            : ''
+        ">
+        <PtBreakdown
+          v-if="seedingRows.length > 0"
+          :rows="seedingRows"
+          cols
+          foot="只算下载器里状态是做种的种子，暂停、排队、校验中的写在小字里。辅种和原种子共用一份数据，这里各算一次（站点上报的做种体积也是这样算的），所以合计比硬盘上实际占用的多。" />
+        <p v-else class="dash__ok">
+          没取到下载器的做种情况。
+          <el-button link type="primary" size="small" @click="loadSeeding">重试</el-button>
+        </p>
+      </PtPanel>
     </div>
   </div>
 </template>
@@ -1888,6 +1961,22 @@ onUnmounted(() => {
   margin: 0;
   font-size: var(--pt-fz-sm);
   color: var(--pt-t2);
+}
+
+/*
+ * 下载器做种：几台横着排时各格从上往下排，名字、体积和柱子对齐，不被旁边那台更高的格子拉开；
+ * 连不上的那台原因只留两行（完整的在悬停提示里）
+ */
+.dash-seeding :deep(.bd__row) {
+  align-content: start;
+}
+
+.dash-seeding :deep(.bd__hint) {
+  display: -webkit-box;
+  overflow: hidden;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /*
