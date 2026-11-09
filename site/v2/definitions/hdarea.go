@@ -27,6 +27,11 @@ import (
 //  4. 时魔取自 mybonus.php 的「最终每小时获取：<b …>424.49</b> 个魔力值」：本站不写通用的
 //     「你当前每小时能获取」，且数值外层包了带 style 的 <b>（其内含 font-size: 16px 这类
 //     数字），因此正则必须显式跳过标签而不能「跳过非数字」。
+//  5. 做种体积也取自 mybonus.php：「体积与稀缺分」一节写着「当前状态：做种总积 <b>…GB</b>」。
+//     getusertorrentlistajax.php?type=seeding 一次只回 25 行，要带 page=0、1、2… 一页页翻
+//     （页面上没有翻页链接），按 NexusPHP 通用做法只读第一页，体积就只有前 25 个种子的。
+//     2026-11-09 实测：579 个种子 24 页加起来 5548.17 GiB，这一行写 5548.11 GB，差的是每行两位小数的舍入。
+//     定义里写了 seedingSize，驱动就不再取做种列表；做种数仍取首页的数字。
 var HdareaDefinition = &v2.SiteDefinition{
 	ID:          "hdarea",
 	Name:        "HDArea",
@@ -67,7 +72,7 @@ var HdareaDefinition = &v2.SiteDefinition{
 			},
 			{
 				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
-				Fields:        []string{"bonusPerHour"},
+				Fields:        []string{"bonusPerHour", "seedingSize"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -152,6 +157,17 @@ var HdareaDefinition = &v2.SiteDefinition{
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`(?:最终每小时获取|最終每小時獲取)[：:]\s*(?:<[^>]*>\s*)*([\d.,]+)`}},
 					{Name: "parseNumber"},
+				},
+			},
+			// 「体积与稀缺分」一节：当前状态：做种总积 <b>5548.11 GB</b>。见文件头第 5 条。
+			// 同一节的公式「(公式: GB * …)」与「上限 N 分」里也有数字和 GB，所以从「做种总积」往后找、显式跳过标签。
+			// 繁体界面没见过，按字面也认「做種總積」。
+			"seedingSize": {
+				Selector: []string{"#outer", "body"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`做[种種][总總][积積][：:]?\s*(?:<[^>]*>\s*)*([\d.,]+\s*[KMGTPE]?i?B)`}},
+					{Name: "parseSize"},
 				},
 			},
 			"joinTime": {
