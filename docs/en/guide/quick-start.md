@@ -62,6 +62,10 @@ Copy `secret.key` from the data folder, together with the database, to another d
 
 ## What next
 
+- Subscribe to films and follow series, with finished downloads filed into your media library: under Media → Media library (媒体 → 媒体库), click Add (添加) next to Media library (媒体库) to create a library, and turn on Automatic organising (自动整理) under Organise settings (整理设置); turn on the Subscriptions (订阅) switch in Subscription settings (订阅设置) at the bottom of Media → Follow and subscribe (媒体 → 追剧与订阅); then, in Media → Explore (媒体 → 探索), click Subscribe (订阅) on a film or Follow (追剧) on a series. See [Follow and subscribe](media-subscribe.md) and [Media library organising](media-library.md).
+- Check and manage pt-tools from your phone: under System → Remote access (系统 → 远程访问), turn on Remote access (远程访问) and save, click Add device (添加设备) to show a QR code, and pair with Scan QR code in the app. See [Mobile app](mobile-app.md).
+- Ask about your data and search for torrents in plain language: under System → AI assistant settings (系统 → AI 助手设置), pick a provider, enter the API key, pick a model, click Test connection (测试连接), turn on Enable AI assistant (启用 AI 助手) and save; then chat under Overview → AI assistant (概览 → AI 助手). See [AI assistant](assistant.md).
+- See each day's state on one page: the home page you land on has the NAS overview, today's episodes and the things that need attention, and System → System check (系统 → 系统体检) checks the services and settings. See [Home page and system check](home-and-health.md).
 - Get notifications and send commands from a chat app: [ChatOps quick start](chatops-quickstart.md)
 - Remove old torrents automatically when disk space runs low: [Auto-delete and disk protection](auto-cleanup.md)
 - Get a reminder before an inactive account is disabled: [Login status and key backup](site-login-monitoring.md)

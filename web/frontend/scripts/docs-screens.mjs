@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 /*
- * 文档站截图 —— 首页 hero 与「站点」分屏用的那几张 docs/public/screens/*.webp。
+ * 文档站截图 —— 仓库 README 与文档站首页用的 docs/public/screens/*.webp。
  *
  * 画面来自真实的 Web UI，数据来自 board-fixtures.mjs 的验收假数据：截图里不会出现
  * 真实站点账号、Cookie 或下载器地址，而且每次重拍得到的是同一份数据。
  *
- *   home-{light,dark}.webp         /userinfo   1440 × 900
- *   sites-{light,dark}.webp        /sites      1440 × 900
- *   home-mobile-{light,dark}.webp  /userinfo   375 × 812（移动端布局）
+ *   home-{light,dark}.webp         /userinfo   1440 × 900（README 顶部的那张）
+ *   home-mobile-{light,dark}.webp  /userinfo   375 × 812（移动端布局；firlab 的 og.svg 用它和 home 画 og.png）
  *
  * 首页（2026-11 版式）的两步演示与 showcase 只截页面的一块、按 2 倍或 1.5 倍像素截：图在首页上只有
  * 500–640 px 宽，整屏 1440 宽的截图缩到那么小，字就看不清了。
@@ -33,8 +32,8 @@
  * 指南配图的输出目录默认是 docs/guide/images/chatops，可用 PT_GUIDE_DIR 覆盖。
  * 只重拍其中几张：PT_SHOTS=media-follow,media-history（按文件名前缀，逗号分隔；设了就不拍指南配图）。
  *
- * 换了截图尺寸要同步改 docs/index.md 与 docs/en/index.md 里 home.visual / home.shots 的
- * width、height。提交前逐张看一遍图。
+ * 换了截图尺寸要同步改 docs/index.md 与 docs/en/index.md 里 home.stages.screens 与
+ * home.showcases[].screen 的 width、height。提交前逐张看一遍图。
  *
  * 依赖：只用 Chrome 的 CDP，不装任何浏览器自动化包。Chrome 路径可用 PT_CHROME 覆盖；
  * 登录账号可用 PT_USER / PT_PASS 覆盖。
@@ -542,7 +541,6 @@ const CHAT = `(() => { const c = ${rectOf(".as-chat")};
 /* [路由, 宽, 高, 移动端, 文件名前缀, { dpr, clip }] */
 const SHOTS = [
   ["/userinfo", 1440, 900, false, "home"],
-  ["/sites", 1440, 900, false, "sites"],
   ["/userinfo", 375, 812, true, "home-mobile"],
   ["/media/item/tv/100088", 640, 1100, false, "media-follow", { dpr: 2, clip: STAGE_FOLLOW }],
   ["/media/history", 640, 1100, false, "media-history", { dpr: 2, clip: STAGE_HISTORY }],

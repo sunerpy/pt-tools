@@ -16,7 +16,9 @@
 - [升级与备份](guide/upgrade.md)：各安装方式的升级、备份与恢复。
 - [Docker 运行示例](../examples/docker-run.md)、[Docker Compose 示例](../examples/docker-compose.yml)、[二进制运行示例](../examples/binary-run.md)。
 
-## 站点与认证
+## 站点与下载
+
+### 站点与认证
 
 - [支持站点](sites.md)：当前 67 个内置站点、认证方式与适配备注。
 - [获取 Cookie / API Key](guide/get-cookie-apikey.md)：浏览器扩展同步与手动获取认证信息。
@@ -25,7 +27,7 @@
 - [CookieCloud 导入](guide/cookiecloud.md)：从自建的 CookieCloud 服务取回 Cookie，在本机解密后写进站点，可选定时同步。
 - [请求新增站点](guide/request-new-site.md)：采集、脱敏并提交新站点适配资料。
 
-## RSS 与下载
+### RSS 与下载
 
 - [种子搜索](guide/torrent-search.md)：关键字搜索与按条目搜索：选一部电影或剧集搜各站点，按质量档案打分、合并同一资源、写明能补上哪几集，按解析信息筛选。
 - [RSS 订阅配置](guide/rss-subscription.md)：订阅地址、选项、下载模式与故障排查。
@@ -44,24 +46,24 @@
 - [整理入库](guide/media-library.md)：把下载完的电影与剧集按模板放进媒体库，刮削 NFO 与海报，通知 Emby、Jellyfin、Plex。
 - [媒体识别](guide/media-recognize.md)：解析种子标题、到 TMDB 找对应的电影或剧集，手动纠正与识别词。
 
-## ChatOps 与通知
+## 通知与 AI
 
 - [ChatOps 快速开始](guide/chatops-quickstart.md)：通道选择、命令清单与配置入口。
 - [QQ OneBot（NapCat）](guide/chatops-qq-napcat.md)：反向 WebSocket、绑定与排障。
 - [Telegram Bot](guide/chatops-telegram.md)：BotFather、代理、绑定与排障。
 - [RSS 上新通知](guide/chatops-rss-notify.md)：通知模式、静默时段、digest、重试和配额。
 - [更多通知通道](guide/notify-channels.md)：企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；按事件自定义通知的标题与正文，以及 ChatOps 命令回复与 AI 助手回复的文字（消息模板）；通用 Webhook 的请求方法、请求体与预设（自定义 Webhook）。
+- [AI 助手](guide/assistant.md)：pt-tools 内置的 AI 助手：接哪家大模型、怎么对话、改动类操作怎么确认、数据会发给谁。
 
 ## App 与接口
 
+- [手机 App](guide/mobile-app.md)：配对、连接方式、各页能做什么、隐私与常见问题。
+- [远程访问](guide/remote-access.md)：手机 App 扫码配对，经直连或 relay 连回 pt-tools：权限、设备管理、relay 能看到什么与审计。
+- [MCP](guide/mcp.md)：让 Claude、Cursor、Cherry Studio 这类 AI 助手调用 pt-tools：令牌、客户端怎么填、工具清单与审计。
 - [API 令牌](guide/api-tokens.md)：给手机 App 与脚本用的令牌：权限、有效期、撤销与审计。
 - [App API](reference/app-api.md)：令牌能调用的接口：认证、约定、错误码与接口清单。
 - [qB 兼容入口](guide/qbit-compat.md)：让 MoviePilot、IYUU、autobrr、Sonarr/Radarr 把 pt-tools 当成 qBittorrent：开启、客户端怎么填、能做什么。
 - [Servarr 兼容入口](guide/servarr.md)：让 Seerr 把 pt-tools 当成 Radarr、Sonarr：Seerr 里怎么填、请求以后建什么订阅、不支持的与审计。
-- [MCP](guide/mcp.md)：让 Claude、Cursor、Cherry Studio 这类 AI 助手调用 pt-tools：令牌、客户端怎么填、工具清单与审计。
-- [AI 助手](guide/assistant.md)：pt-tools 内置的 AI 助手：接哪家大模型、怎么对话、改动类操作怎么确认、数据会发给谁。
-- [远程访问](guide/remote-access.md)：手机 App 扫码配对，经直连或 relay 连回 pt-tools：权限、设备管理、relay 能看到什么与审计。
-- [手机 App](guide/mobile-app.md)：配对、连接方式、各页能做什么、隐私与常见问题。
 
 ## 参考
 
@@ -98,7 +100,7 @@
 | `index.md`、`en/index.md`                                                                                                                                                                     | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
 | `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                                                                              | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
 | `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`、`design/free-expiry-safety.md`                                                             | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
-| `public/screens/`                                                                                                                                                                             | `/screens/*.webp`             | 首页截图，见下文「截图」                                                             |
+| `public/screens/`                                                                                                                                                                             | `/screens/*.webp`             | 首页与 README 的截图，见下文「截图」                                                 |
 | `guide/images/`                                                                                                                                                                               | 随页面发布                    | 页面引用的图片                                                                       |
 | `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/media-hub-board-spec.md`、`design/home-nas-spec.md`、`design/remote-access.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
 
@@ -138,35 +140,38 @@ cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://
 
 页面只能使用下面这些组件，其他标签会让同步失败：
 
-| 组件                                                                                 | 用途                                          |
-| ------------------------------------------------------------------------------------ | --------------------------------------------- |
-| `<StatusTag status="available \| preview \| experimental \| building \| planned" />` | 发布状态，以文字显示                          |
-| `<ScreenFigure src dark? width height alt caption? />`                               | 截图；`dark` 是同一画面的深色主题版本         |
-| `<Badge>`                                                                            | VitePress 自带的标记                          |
-| `HomeIndex`、`HomeSteps`、`SplitBlock`、`HomeDeploy`、`HomePrivacy`、`HomeRoadmap`   | 仅用于首页，渲染 `home:` frontmatter 中的数据 |
+| 组件                                                                                 | 用途                                                                                           |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `<StatusTag status="available \| preview \| experimental \| building \| planned" />` | 发布状态，以文字显示                                                                           |
+| `<ScreenFigure src dark? width height alt caption? />`                               | 截图；`dark` 是同一画面的深色主题版本                                                          |
+| `<QrCode src alt caption? size? />`                                                  | 二维码图片，首页收尾用它放微信公众号的二维码                                                   |
+| `<Badge>`                                                                            | VitePress 自带的标记                                                                           |
+| `HomeCapabilities`、`HomeShowcases`、`HomePrivacy`、`HomeFaq`                        | 仅用于首页，各自渲染 `home:` 里的一段                                                          |
+| `<HomeDeploy>`、`<HomeCloser>`                                                       | 仅用于首页，渲染 `home.deploy`、`home.closer`；标签之间写页面自己的 Markdown（安装命令；社区） |
 
 ### 首页数据
 
-两个首页的文字都在 frontmatter 里：VitePress 的 `hero:`（名称、标题、副标题、按钮）和一段由组件渲染的 `home:`。构建时会按 firlab 中的 `pt-tools/src/.vitepress/theme/data/home-schema.ts` 检查 `home:`，缺少字段或多出未知字段都会失败。
+两个首页的文字都在 frontmatter 里：VitePress 的 `hero:`（名称、标题、副标题、按钮）和一段由组件渲染的 `home:`。构建时会按 firlab 中的 `pt-tools/src/.vitepress/theme/data/home-schema.ts` 检查 `home:`，缺少字段或多出未知字段都会失败。页面从上到下依次是 hero、两步演示（`stages`）、能做什么、展示、部署、数据去向、常见问题与收尾；hero 和两步演示由主题直接渲染，后面几段对应正文里的组件，顺序以正文为准。
 
-| 键         | 内容                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------- |
-| `facts`    | 副标题下的事实行：`term`、`text`（至少两条）                                                |
-| `visual`   | hero 右侧的截图：`desktop`，可选 `mobile`；每张有 `light`、`dark`、`width`、`height`、`alt` |
-| `index`    | 功能一览：`title`、`intro`、`groups[].items[]`（`title`、`body`、`status`、`link`）         |
-| `steps`    | 上手步骤：`title`、`items[]`（`title`、`body`，可选 `command`，至少两步）                   |
-| `rules`    | RSS 分屏里的过滤规则示例：`columns`（三列）、`rows[]`（`pattern`、`kind`、`matches`）       |
-| `commands` | ChatOps 分屏里的命令示例：`items[]`（`command`、`body`，至少两条）                          |
-| `shots`    | `<SplitBlock proof="screen" shot="…">` 引用的截图，键名即 `shot` 的值                       |
-| `deploy`   | 部署方式表：`columns`，`rows[]`（`name`、`status`、`cells`，比 `columns` 少一项）           |
-| `privacy`  | 数据去向：`sendsLabel`，`modes[]`（`name`、`sends`、`detail`）                              |
-| `roadmap`  | 路线图：`items[]`（`title`、`body`、`status`），`notPlanned`                                |
+| 键             | 内容                                                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `facts`        | hero 按钮下的事实行：`term`、`text`（2 到 4 条）                                                                                                                     |
+| `stages`       | hero 下的两步演示：`steps`（两句话）、`screens`（两张截图，每张有 `src`、可选 `dark`、`width`、`height`、`alt`）、`caption`                                          |
+| `capabilities` | 能做什么：`title`、可选 `intro`、`items[]`（至少 6 张卡：`icon`、`title`、`status`、`body`、`evidence`、`link`，可选 `wide` 占两列）                                 |
+| `showcases`    | 带截图的展示（至少两段）：`title`、`intro`、`screen`（同 `stages.screens`）、可选 `caption`、`points[]`（2 到 4 条 `title`、`body`）、可选 `guide`（`text`、`link`） |
+| `deploy`       | 部署方式表：`title`、可选 `intro`、`columns`、`rows[]`（`name`、`status`、`cells`，比 `columns` 少一项）、可选 `note`、可选 `guide`                                  |
+| `privacy`      | 数据去向：`title`、可选 `intro`、`sendsLabel`、`modes[]`（`name`、`sends`、`detail`）                                                                                |
+| `faq`          | 常见问题：`title`、可选 `intro`、`items[]`（至少 4 条：`q`、`a`，可选 `guide`）                                                                                      |
+| `closer`       | 收尾：`title`、`body`、`actions[]`（`text`、`link`、`theme` 为 `brand` 或 `alt`，可选 `icon`）                                                                       |
 
-`status` 取值为 `available`、`preview`（只在 1.0 预览版里）、`experimental`、`building` 或 `planned`。
+- `status` 取值为 `available`、`preview`（只在 1.0 预览版里）、`experimental`、`building` 或 `planned`。
+- `evidence` 是卡片上的一行证据：界面里真实出现的一行文字（`kind: code`、`text`），或一组名称（`kind: chips`、`items`）。
+- `icon` 只能用 `home-schema.ts` 里 `ICON_NAMES` 列出的图标名。
+- `link`、`guide.link` 写站内路径，可以带 `#锚点`；构建时检查页面和锚点都存在。文字里只能放网址链接，站内页面放进这两个字段。
 
 ### 截图
 
-截图是 `public/screens/` 和 `guide/images/chatops/` 下的 WebP 文件，来自真实的 Web UI 加载验收假数据（`web/frontend/scripts/board-fixtures.mjs`）后的画面，不会出现真实账号或地址：
+截图是 `public/screens/` 和 `guide/images/chatops/` 下的 WebP 文件。网页的截图来自真实的 Web UI 加载验收假数据（`web/frontend/scripts/board-fixtures.mjs`）后的画面，不会出现真实账号或地址：
 
 ```bash
 make build-frontend
@@ -175,4 +180,8 @@ HOME=$(mktemp -d) /tmp/pt-tools web --host 127.0.0.1 --port 18310 &
 node web/frontend/scripts/docs-screens.mjs http://127.0.0.1:18310
 ```
 
-脚本用 Chrome 的 CDP 截取桌面 1440 × 900 的用户统计页和站点列表、手机 375 × 812 的用户统计页，明暗主题各一张，写回 `public/screens/`；再用明亮主题截取 ChatOps 指南的 8 张配图（通道列表、添加通道、Telegram 与 QQ 的凭证、绑定列表与生成绑定码、操作审计、RSS 通知日志），写回 `guide/images/chatops/`。凭证里的 Token 和用户 ID 是脚本里的示例值；截图里的版本号取 `.release-please-manifest.json` 的当前版本。仓库根目录的 README 与 `readme/README.en.md` 用的也是 `public/screens/` 这几张。Chrome 路径可用 `PT_CHROME` 指定。改了截图尺寸要同步修改两个首页中的 `width` 和 `height`；提交前逐张检查图片。界面的文字或布局变化后重新截图。
+脚本用 Chrome 的 CDP 截图，明暗主题各一张，写回 `public/screens/`：`home` 是桌面 1440 × 900 的用户统计页，仓库根目录的 README 与 `readme/README.en.md` 顶部用的就是它；`home-mobile` 是同一页的手机布局（375 × 812），firlab 的 `pt-tools/src/public/og.svg` 用这两张画分享链接时显示的预览图 `og.png`；首页用的 `media-follow`、`media-history`、`brush`、`assistant` 只截页面的一块，按 2 倍或 1.5 倍像素截，每张截哪里、多大写在脚本开头，实际的宽高每次运行都会打印出来。两步演示里的剧「长夜将尽」是编的，海报和背景图在 `web/frontend/scripts/docs-media/`，那里的 README 写明了它们是怎么生成的。之后再用明亮主题截取 ChatOps 指南的 8 张配图（通道列表、添加通道、Telegram 与 QQ 的凭证、绑定列表与生成绑定码、操作审计、RSS 通知日志），写回 `guide/images/chatops/`。凭证里的 Token 和用户 ID 是脚本里的示例值；截图里的版本号取 `.release-please-manifest.json` 的当前版本。只重拍其中几张时用 `PT_SHOTS=media-follow,media-history`（按文件名前缀）；Chrome 路径可用 `PT_CHROME` 指定。
+
+首页的 `app-overview-*` 是手机 App 的概览页：中文页用 `app-overview-{light,dark}`，英文页用 App 英文界面的 `app-overview-en-{light,dark}`。它们是 Flutter 测试里用 `apps/mobile/test/app/app_test.dart` 的假主机与假数据渲染出来的画面，仓库里尚无重拍脚本，App 的概览页改了以后要另外重拍。
+
+改了截图尺寸要同步修改两个首页中的 `width` 和 `height`；提交前逐张检查图片。界面的文字或布局变化后重新截图。
