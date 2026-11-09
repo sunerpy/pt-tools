@@ -172,6 +172,31 @@
       }
     }
   },
+  "seedingTitle": "下载器做种",
+  "seedingCountSize": "{count} 个 · {size}",
+  "@seedingCountSize": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "seedingIdle": "另有 {count} 个下载完了没在做种（{size}）",
+  "@seedingIdle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "seedingFailed": "没取到下载器的做种情况",
+  "seedingNote": "只算状态是做种的种子。辅种和原种子共用一份数据，这里各算一次（站点上报的做种体积也是这样算的），所以合计比硬盘上实际占用的多。",
   "updatedAt": "站点数据更新于 {time}",
   "@updatedAt": {
     "placeholders": {

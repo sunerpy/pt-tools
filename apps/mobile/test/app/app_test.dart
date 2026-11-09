@@ -163,6 +163,35 @@ final _overview = {
   'updated_at': 1791500000,
 };
 
+/// 下载器做种：一台在做种（另有下载完了没在做种的），一台连不上（原因很长）
+final _seeding = {
+  'total_seeding_count': 3,
+  'total_seeding_size': 101468602368,
+  'items': [
+    {
+      'id': 1,
+      'name': 'qb-nas',
+      'type': 'qbittorrent',
+      'reachable': true,
+      'seeding_count': 3,
+      'seeding_size': 101468602368,
+      'idle_count': 1,
+      'idle_size': 12884901888,
+    },
+    {
+      'id': 2,
+      'name': 'qb-offline',
+      'type': 'qbittorrent',
+      'reachable': false,
+      'error': '下载器 qb-offline 暂不可用，26s 前创建失败，33s 后重试: failed to create downloader qb-offline after 6 attempts: 连接被拒绝，请检查: 1) qBittorrent 是否正在运行 2) WebUI 是否已启用 3) 端口是否正确 (原始错误: Post "<地址>": dial tcp <地址>: connect: connection refused)',
+      'seeding_count': 0,
+      'seeding_size': 0,
+      'idle_count': 0,
+      'idle_size': 0,
+    },
+  ],
+};
+
 /// 站点列表：一个站点，带站点上的用户数据
 final _sites = {
   'items': [
@@ -226,8 +255,15 @@ class _World {
     this.mode = 'device',
     this.mobileFeatures = false,
     this.brushStats = false,
+    this.downloaderSeeding = false,
   });
   final bool mobileFeatures;
+
+  /// 主机提供各台下载器的做种情况（features 里有 downloader_seeding）
+  final bool downloaderSeeding;
+
+  /// 接下来几次 GET /downloaders/seeding 回 502
+  int failSeeding = 0;
 
   /// 主机提供按周期分段的刷流统计（features 里有 brush_stats）
   final bool brushStats;
@@ -284,9 +320,15 @@ class _World {
               'stats_export',
             ],
             if (brushStats) 'brush_stats',
+            if (downloaderSeeding) 'downloader_seeding',
           ],
       '/api/app/v1/overview' => _overview,
       '/api/app/v1/downloaders' => {'items': []},
+      '/api/app/v1/downloaders/seeding' when failSeeding > 0 => () {
+        failSeeding--;
+        return const ApiReply(502, {'error': 'internal', 'message': '主机在重启'});
+      }(),
+      '/api/app/v1/downloaders/seeding' => _seeding,
       '/api/app/v1/stats/summary' => {
         'totalUploaded': 1073741824,
         'totalDownloaded': 1024,
@@ -487,6 +529,7 @@ Future<_World> _pumpApp(
   String mode = 'device',
   bool mobileFeatures = false,
   bool brushStats = false,
+  bool downloaderSeeding = false,
   HostStore? store,
   Future<void>? hostLoaded,
   AppearanceStore? appearance,
@@ -501,6 +544,7 @@ Future<_World> _pumpApp(
     mode: mode,
     mobileFeatures: mobileFeatures,
     brushStats: brushStats,
+    downloaderSeeding: downloaderSeeding,
   );
   late HostRecord rec;
   await tester.runAsync(() async {
@@ -706,6 +750,60 @@ void main() {
     expect(find.text('pt-tools v1.0.0-test'), findsOneWidget);
     expect(w.requests, contains('GET /api/app/v1/overview'));
   });
+
+  testWidgets('概览：每台下载器正在做种的个数与体积，没在做种的写在下面，连不上的写原因', (tester) async {
+    final w = await _pumpApp(tester, downloaderSeeding: true);
+    await _settle(tester);
+    await tester.scrollUntilVisible(find.text('下载器做种'), 200);
+    await tester.scrollUntilVisible(find.textContaining('各算一次'), 200);
+    expect(w.requests, contains('GET /api/app/v1/downloaders/seeding'));
+    // 卡头的合计与 qb-nas 那一行一样
+    expect(find.text('3 个 · 94.5 GiB'), findsNWidgets(2));
+    expect(find.text('另有 1 个下载完了没在做种（12.0 GiB）'), findsOneWidget);
+    expect(find.text('连不上'), findsOneWidget);
+    final reason = tester.widget<Text>(find.textContaining('暂不可用'));
+    expect(reason.maxLines, 2, reason: '原因很长，只留两行');
+  });
+
+  testWidgets('概览：主机的版本没有下载器做种时不显示，也不请求', (tester) async {
+    final w = await _pumpApp(tester);
+    await _settle(tester);
+    await tester.scrollUntilVisible(find.textContaining('更新于'), 200);
+    expect(find.text('下载器做种'), findsNothing);
+    expect(
+      w.requests.where((r) => r.contains('/downloaders/seeding')),
+      isEmpty,
+    );
+  });
+
+  testWidgets('概览：下载器做种读不到时写一句，点重试再读', (tester) async {
+    final w = await _pumpApp(tester, downloaderSeeding: true);
+    w.failSeeding = 1;
+    await _settle(tester);
+    await tester.scrollUntilVisible(find.text('没取到下载器的做种情况'), 200);
+    await tester.tap(find.widgetWithText(TextButton, '重试'));
+    await _settle(tester);
+    await tester.scrollUntilVisible(find.text('下载器做种'), 200);
+    expect(find.text('3 个 · 94.5 GiB'), findsWidgets);
+    expect(
+      w.requests.where((r) => r == 'GET /api/app/v1/downloaders/seeding'),
+      hasLength(2),
+    );
+  });
+
+  for (final (width, scale) in const [(320.0, 2.0), (390.0, 1.3)]) {
+    testWidgets('概览：$width 宽、字号 $scale 倍时下载器做种不溢出', (tester) async {
+      await _pumpApp(tester, downloaderSeeding: true);
+      tester.view.physicalSize = Size(width * 3, 2532);
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await _settle(tester);
+      // 溢出时 Flutter 报 RenderFlex overflowed，测试就失败
+      await tester.scrollUntilVisible(find.textContaining('各算一次'), 200);
+      expect(find.text('qb-nas'), findsOneWidget);
+      expect(find.text('连不上'), findsOneWidget);
+    });
+  }
 
   testWidgets('站点：站点上的下载量写明是计费口径', (tester) async {
     final w = await _pumpApp(tester);
