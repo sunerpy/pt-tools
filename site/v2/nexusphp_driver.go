@@ -1097,7 +1097,16 @@ func (d *NexusPHPDriver) ParseUserDetails(res NexusPHPResponse) (UserInfo, error
 func (d *NexusPHPDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 	// If we have a site definition with UserInfo config, use the definition-based parsing
 	if d.siteDefinition != nil && d.siteDefinition.UserInfo != nil {
-		return d.getUserInfoWithDefinition(ctx)
+		info, err := d.getUserInfoWithDefinition(ctx)
+		if err != nil {
+			return info, err
+		}
+		// 做种数 / 做种体积 在很多新版 NexusPHP 主题里不在 userdetails.php，
+		// 而在 mybonus.php。缺哪个补哪个，失败不影响主流程。
+		if info.Seeding == 0 || info.SeederSize == 0 {
+			d.fillFromMyBonus(ctx, &info)
+		}
+		return info, nil
 	}
 
 	// Fall back to legacy parsing
