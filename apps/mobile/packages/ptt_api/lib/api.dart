@@ -67,6 +67,8 @@ part 'model/app_delta.dart';
 part 'model/app_downloader.dart';
 part 'model/app_downloader_failure.dart';
 part 'model/app_downloader_list.dart';
+part 'model/app_downloader_seeding.dart';
+part 'model/app_downloader_seeding_list.dart';
 part 'model/app_episode.dart';
 part 'model/app_episode_rule.dart';
 part 'model/app_episode_rule_input.dart';

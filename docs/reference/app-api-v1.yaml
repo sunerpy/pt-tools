@@ -128,6 +128,23 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppDownloaderList" }
         default: { $ref: "#/components/responses/Error" }
+  /downloaders/seeding:
+    get:
+      operationId: listDownloaderSeeding
+      tags: [App]
+      summary: 每台启用的下载器正在做种的个数与体积
+      description: >-
+        读各台下载器的种子列表：状态是做种的种子算做种，下载完了但暂停、停止、排队、校验中或出错的另外计数，
+        没下载完的不算。体积按种子大小相加，辅种和原种子各算一次（和站点上报的做种体积口径一样），
+        所以合计比硬盘上实际占用的多。连不上的那台照样列出，reachable 为假、error 写明原因，不计入合计。
+        主机的 GET /meta 的 features 里有 downloader_seeding 时才提供这个接口。
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppDownloaderSeedingList" }
+        default: { $ref: "#/components/responses/Error" }
   /torrents:
     get:
       operationId: listTorrents
@@ -1506,6 +1523,34 @@ components:
         uploaded: { type: integer, format: int64 }
         downloaded: { type: integer, format: int64 }
         free_space: { type: integer, format: int64 }
+    AppDownloaderSeedingList:
+      type: object
+      required: [total_seeding_count, total_seeding_size, items]
+      properties:
+        total_seeding_count: { type: integer, description: "读到了的几台正在做种的种子数合计" }
+        total_seeding_size:
+          { type: integer, format: int64, description: "读到了的几台正在做种的体积合计（字节）" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppDownloaderSeeding" }
+    AppDownloaderSeeding:
+      type: object
+      required: [id, name, type, reachable, seeding_count, seeding_size, idle_count, idle_size]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        type: { type: string, description: "qbittorrent 或 transmission" }
+        reachable: { type: boolean, description: "读到了种子列表；为假时下面的数都是 0" }
+        error: { type: string, description: "读不到时的原因（去掉了地址）" }
+        seeding_count: { type: integer, description: "状态是做种的种子数" }
+        seeding_size: { type: integer, format: int64, description: "状态是做种的种子体积（字节）" }
+        idle_count:
+          {
+            type: integer,
+            description: "下载完了、没在做种的种子数（暂停、停止、排队、校验中、出错）",
+          }
+        idle_size:
+          { type: integer, format: int64, description: "下载完了、没在做种的种子体积（字节）" }
     AppTorrentPage:
       type: object
       required: [items, total, page, page_size, failures]

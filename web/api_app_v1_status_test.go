@@ -13,7 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/version"
 	"github.com/sunerpy/pt-tools/web/middleware"
 )
@@ -100,4 +102,87 @@ func TestAppDownloadersStopsWhenRequestEnds(t *testing.T) {
 	require.Len(t, out.Items, 1)
 	assert.False(t, out.Items[0].Reachable)
 	assert.Contains(t, out.Items[0].Error, "没有读到")
+}
+
+// GET /downloaders/seeding：每台启用的下载器正在做种的个数与体积；连不上的照样列出，原因里没有地址、账号与密码，不计入合计
+func TestAppDownloaderSeeding(t *testing.T) {
+	fake := &fakeDownloader{torrents: []downloader.Torrent{
+		{ID: "s1", State: downloader.TorrentSeeding, Progress: 1, IsCompleted: true, TotalSize: 300},
+		{ID: "p1", State: downloader.TorrentPaused, Progress: 1, IsCompleted: true, TotalSize: 40},
+		{ID: "d1", State: downloader.TorrentDownloading, Progress: 0.5, TotalSize: 1000},
+	}}
+	srv, id := setupServerWithFakeDownloader(t, fake)
+	// 没注册进下载器管理器的那台取不到实例
+	require.NoError(t, global.GlobalDB.DB.Create(&models.DownloaderSetting{Name: "gone", Type: "qbittorrent", URL: "http://admin:secret@127.0.0.1:9", Enabled: true}).Error)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.DownloaderSetting{Name: "off", Type: "qbittorrent", Enabled: false}).Error)
+
+	w := appAs(t, srv.appDownloaderSeeding, http.MethodGet, "/api/app/v1/downloaders/seeding")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "secret")
+	assert.NotContains(t, w.Body.String(), "127.0.0.1")
+	assertNoSecrets(t, w.Body.Bytes())
+	var out AppDownloaderSeedingList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	require.Len(t, out.Items, 2, "停用的不列")
+	assert.Equal(t, AppDownloaderSeeding{
+		ID: id, Name: "qb1", Type: "qbittorrent", Reachable: true,
+		SeedingCount: 1, SeedingSize: 300, IdleCount: 1, IdleSize: 40,
+	}, out.Items[0])
+	assert.Equal(t, "gone", out.Items[1].Name)
+	assert.False(t, out.Items[1].Reachable)
+	assert.NotEmpty(t, out.Items[1].Error)
+	assert.Equal(t, 1, out.TotalSeedingCount)
+	assert.EqualValues(t, 300, out.TotalSeedingSize)
+
+	// 下载器管理器没有初始化：每台都写明这一次没有读到
+	srv.mgr = nil
+	w = appAs(t, srv.appDownloaderSeeding, http.MethodGet, "/api/app/v1/downloaders/seeding")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	require.Len(t, out.Items, 2)
+	assert.False(t, out.Items[0].Reachable)
+	assert.Contains(t, out.Items[0].Error, "没有读到")
+	assert.Zero(t, out.TotalSeedingCount)
+
+	prev := global.GlobalDB
+	global.GlobalDB = nil
+	t.Cleanup(func() { global.GlobalDB = prev })
+	assert.Equal(t, http.StatusServiceUnavailable, appAs(t, srv.appDownloaderSeeding, http.MethodGet, "/api/app/v1/downloaders/seeding").Code)
+}
+
+// 种子列表迟迟不回时不一直等：请求结束（或到了时限）就回，这一台写明没有在时限内读到
+func TestAppDownloaderSeedingStopsWhenRequestEnds(t *testing.T) {
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	srv, _ := setupServerWithFakeDownloader(t, &fakeDownloader{listBlock: block})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/app/v1/downloaders/seeding", nil).WithContext(ctx)
+	req = req.WithContext(middleware.WithPrincipal(req.Context(), &middleware.Principal{Kind: middleware.KindAPIToken, Scopes: []string{"app:read"}}))
+	w := httptest.NewRecorder()
+	start := time.Now()
+	srv.appDownloaderSeeding(w, req)
+	assert.Less(t, time.Since(start), 3*time.Second)
+	require.Equal(t, http.StatusOK, w.Code)
+	validateAppResponse(t, req, w)
+	var out AppDownloaderSeedingList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	require.Len(t, out.Items, 1)
+	assert.False(t, out.Items[0].Reachable)
+	assert.Contains(t, out.Items[0].Error, "没有在时限内读到种子列表")
+}
+
+// 走真实路由：只要 app:read；/meta 的 features 里有 downloader_seeding
+func TestAppDownloaderSeedingRoute(t *testing.T) {
+	e := newAppEnv(t)
+	w := e.do(appReq{method: http.MethodGet, path: appPrefix + "/downloaders/seeding", bearer: e.token(apitoken.ScopeAppRead)})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = e.do(appReq{method: http.MethodGet, path: appPrefix + "/downloaders/seeding"})
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	w = e.do(appReq{method: http.MethodGet, path: appPrefix + "/meta", bearer: e.token(apitoken.ScopeAppRead)})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var meta AppMeta
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &meta))
+	assert.Contains(t, meta.Features, "downloader_seeding")
 }

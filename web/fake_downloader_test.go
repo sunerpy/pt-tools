@@ -38,6 +38,8 @@ type fakeDownloader struct {
 	addErr         error
 	// statusBlock 不为空时 GetClientStatus 等它关掉才回（测请求结束时不再等）
 	statusBlock chan struct{}
+	// listBlock 不为空时 GetAllTorrents 等它关掉才回
+	listBlock chan struct{}
 	// paths、pathsErr 是 GetClientPaths 回的（默认保存路径）
 	paths    []string
 	pathsErr error
@@ -69,6 +71,9 @@ func (f *fakeDownloader) GetIncompletePendingBytes(_ context.Context) (int64, er
 }
 
 func (f *fakeDownloader) GetAllTorrents() ([]downloader.Torrent, error) {
+	if f.listBlock != nil {
+		<-f.listBlock
+	}
 	return f.torrents, f.listErr
 }
 

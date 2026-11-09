@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -70,7 +71,7 @@ func collectSeedingStats(ctx context.Context, dm *downloader.DownloaderManager, 
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
-				results <- result{i: i, item: unreachableSeeding(rec, ctx.Err())}
+				results <- result{i: i, item: seedingTimedOut(rec, ctx.Err())}
 				return
 			}
 			defer func() { <-sem }()
@@ -92,7 +93,7 @@ collect:
 	for i, rec := range records {
 		item := items[i]
 		if !done[i] {
-			item = unreachableSeeding(rec, ctx.Err())
+			item = seedingTimedOut(rec, ctx.Err())
 		}
 		resp.TotalSeedingCount += item.SeedingCount
 		resp.TotalSeedingSize += item.SeedingSize
@@ -123,6 +124,11 @@ func seedingOf(ctx context.Context, dm *downloader.DownloaderManager, rec downlo
 		}
 	}
 	return item
+}
+
+// seedingTimedOut 是请求结束（App API 的时限到了，或网页那边断开）时还没读完的那一台。
+func seedingTimedOut(rec downloaderRecord, err error) DownloaderSeedingItem {
+	return unreachableSeeding(rec, fmt.Errorf("没有在时限内读到种子列表: %w", err))
 }
 
 func unreachableSeeding(rec downloaderRecord, err error) DownloaderSeedingItem {

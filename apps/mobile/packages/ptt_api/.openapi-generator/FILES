@@ -46,6 +46,8 @@ lib/model/app_delta.dart
 lib/model/app_downloader.dart
 lib/model/app_downloader_failure.dart
 lib/model/app_downloader_list.dart
+lib/model/app_downloader_seeding.dart
+lib/model/app_downloader_seeding_list.dart
 lib/model/app_episode.dart
 lib/model/app_episode_rule.dart
 lib/model/app_episode_rule_input.dart
