@@ -23,6 +23,8 @@ export interface BreakdownRow {
   tone?: "primary" | "ok" | "warn" | "dang" | "info" | "mute";
   /** 标签下面那行小字，用来说明这一项是什么 */
   hint?: string;
+  /** 鼠标停在这一行上时显示的完整说明（小字被截短时放原文） */
+  title?: string;
 }
 
 const props = withDefaults(
@@ -54,7 +56,7 @@ function barWidth(row: BreakdownRow): string {
 <template>
   <div class="bd">
     <ul class="bd__list" :class="{ 'is-cols': cols }">
-      <li v-for="row in rows" :key="row.key" class="bd__row">
+      <li v-for="row in rows" :key="row.key" class="bd__row" :title="row.title">
         <span class="bd__k">{{ row.label }}</span>
         <span class="bd__v">{{ row.value }}</span>
         <span class="bd__bar" :class="`is-${row.tone ?? 'primary'}`" aria-hidden="true">

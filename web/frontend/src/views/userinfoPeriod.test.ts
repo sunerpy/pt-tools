@@ -74,6 +74,12 @@ vi.mock("@/api", async (orig) => {
       list: vi.fn(() => Promise.resolve({})),
       listLoginStates: vi.fn(() => Promise.resolve([])),
     },
+    downloaderTorrentsApi: {
+      ...real.downloaderTorrentsApi,
+      seedingStats: vi.fn(() =>
+        Promise.resolve({ total_seeding_count: 0, total_seeding_size: 0, downloaders: [] }),
+      ),
+    },
     tasksApi: { ...real.tasksApi, stats: vi.fn(() => Promise.resolve(null)) },
     siteLevelsApi: { ...real.siteLevelsApi, getAll: vi.fn(() => Promise.resolve({ sites: {} })) },
   };
