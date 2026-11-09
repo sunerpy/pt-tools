@@ -546,6 +546,47 @@
  * 头像盒子和 rail 底部的头像同一个中心（x=32、离底 28），收/展时它也不动。
  * 明暗钮排在登出钮左边 —— 钉住时 rail 不在，主题入口必须仍然一眼可见（用户硬约束）。
  * =========================================================================== */
+/*
+ * Star 提示（用户 2026-11-09）：账号行上面的两行小字（在逗号处断行），整行是链接。
+ * 字色 shell-t2（承载信息的文字到 AA），悬停换 shell-p 并加下划线；星形用 warn 色，只是装饰。
+ * flex:0 0 auto 不参与滚动区的伸缩，导航项再多也不会把它挤出去。
+ */
+.pt-nav__star {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 16px;
+  font-size: var(--pt-fz-label);
+  line-height: 1.5;
+  color: var(--pt-shell-t2);
+  text-decoration: none;
+  border-top: 1px solid var(--pt-shell-border);
+}
+
+.pt-nav__star svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--pt-warn);
+}
+
+.pt-nav__star:hover {
+  color: var(--pt-shell-p);
+}
+
+.pt-nav__star-text span {
+  display: block;
+}
+
+.pt-nav__star:hover .pt-nav__star-text span {
+  text-decoration: underline;
+}
+
+.pt-nav__star:focus-visible {
+  outline: 2px solid var(--pt-shell-p);
+  outline-offset: -2px;
+}
+
 .pt-nav__account {
   display: flex;
   flex: 0 0 auto;
