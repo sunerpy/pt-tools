@@ -59,11 +59,37 @@ vi.mock("element-plus", async (orig) => {
   return { ...real, ElMessage: Object.assign(vi.fn(), ui) };
 });
 
+/*
+ * happy-dom 不排版：主区宽（data-testid=mi）与大图按钮一行的原宽（mi-acts）由用例给，0 表示还没量到。
+ * 只有条目详情页用 useElementSize，别的元素一律 0。
+ */
+const sizes = vi.hoisted(() => ({ page: 0, acts: 0 }));
+vi.mock("@vueuse/core", async (orig) => {
+  const real = await orig<typeof import("@vueuse/core")>();
+  const { computed } = await import("vue");
+  return {
+    ...real,
+    useElementSize: (target: { value?: unknown }) => ({
+      width: computed(() => {
+        const el = target.value;
+        if (!(el instanceof HTMLElement)) return 0;
+        if (el.dataset.testid === "mi") return sizes.page;
+        if (el.dataset.testid === "mi-acts") return sizes.acts;
+        return 0;
+      }),
+      height: computed(() => 0),
+      stop: () => {},
+    }),
+  };
+});
+
 let view: MountedView | null = null;
 let router: Router;
 afterEach(() => {
   view?.unmount();
   view = null;
+  sizes.page = 0;
+  sizes.acts = 0;
   vi.clearAllMocks();
   vi.restoreAllMocks();
 });
@@ -791,6 +817,88 @@ describe("条目详情", () => {
     await mountAt("/media/item/tv/100088?season=2");
     await vi.waitFor(() => expect(q("mi-ep-1")).not.toBeNull());
     expect(q("mi-delete")).toBeNull();
+  });
+
+  it("桌面主区窄、大图的按钮一行放不下时：播放只留图标，重新刮削与删除收进「更多」", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const jf = {
+      server_id: 1,
+      name: "Jellyfin",
+      kind: "jellyfin",
+      synced_at: "2026-11-04T06:00:00Z",
+      have: true,
+      episodes: 17,
+      seasons: [],
+      open_url: "https://jf.example.com/web/#/details?id=show",
+      removed: [],
+    };
+    api.item.mockResolvedValue({ ...tlou, servers: [jf] });
+    api.itemSeason.mockResolvedValue(season2);
+    api.deletePreview.mockResolvedValue({
+      files: [],
+      torrents: [],
+      subscriptions: [],
+      issues: [],
+      errors: [],
+    });
+    organize.rescrape.mockResolvedValue({ records: 3, written: 6 });
+    // 主区 700：大图里不放「你的 NAS 上」，按钮从 224 排起、右边留 28，只有 448；画板 04 的一行原宽 524
+    sizes.page = 700;
+    sizes.acts = 524;
+    await mountAt("/media/item/tv/100088?season=2");
+    await vi.waitFor(() => expect(q("mi-ep-1")).not.toBeNull());
+
+    const playBtn = q("mi-play")!;
+    expect(playBtn.textContent!.trim(), "播放只留图标").toBe("");
+    expect(playBtn.getAttribute("aria-label")).toBe("在 Jellyfin 播放");
+    playBtn.click();
+    expect(open).toHaveBeenCalledWith(
+      "https://jf.example.com/web/#/details?id=show",
+      "_blank",
+      "noopener",
+    );
+    expect(q("mi-rescrape")).toBeNull();
+    expect(q("mi-delete")).toBeNull();
+
+    q("mi-more")!.click();
+    await vi.waitFor(() => expect(q("mi-more-rescrape")).not.toBeNull());
+    expect(q("mi-more-delete")!.textContent!.trim()).toBe("删除第 2 季");
+    expect(q("mi-organize"), "原来「更多」里的几项还在").not.toBeNull();
+    q("mi-more-rescrape")!.click();
+    await vi.waitFor(() => expect(organize.rescrape).toHaveBeenCalledWith(77));
+
+    q("mi-more")!.click();
+    await vi.waitFor(() => expect(q("mi-more-delete")).not.toBeNull());
+    q("mi-more-delete")!.click();
+    await vi.waitFor(() =>
+      expect(api.deletePreview).toHaveBeenCalledWith({
+        media_type: "tv",
+        tmdb_id: 100088,
+        season: 2,
+      }),
+    );
+  });
+
+  it.each([
+    // [主区宽, 按钮一行原宽, 收起]：右边界跟文字列一样，没有「你的 NAS 上」时离大图右边 28，有时（主区 ≥ 1000）离 300
+    [900, 524, false],
+    [776, 524, false],
+    [775, 524, true],
+    [1000, 524, true],
+    [1047, 524, true],
+    [1048, 524, false],
+    [1144, 524, false],
+    [0, 524, false],
+    [700, 0, false],
+  ])("主区 %i、按钮一行原宽 %i：收起 %s（还没量到宽度时照画板排）", async (page, acts, compact) => {
+    sizes.page = page;
+    sizes.acts = acts;
+    api.item.mockResolvedValue(tlou);
+    api.itemSeason.mockResolvedValue(season2);
+    await mountAt("/media/item/tv/100088?season=2");
+    await vi.waitFor(() => expect(q("mi-ep-1")).not.toBeNull());
+    expect(q("mi-rescrape") === null, "重新刮削收进「更多」").toBe(compact);
+    expect(q("mi-delete") === null, "删除收进「更多」").toBe(compact);
   });
 
   it("手机：开头连续入库超过 3 集收成一行，展开以后换成「收起」", async () => {
