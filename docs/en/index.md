@@ -1,13 +1,14 @@
 ---
 layout: home
+markdownStyles: false
 title: "pt-tools: automation for private trackers"
 titleTemplate: false
-description: RSS downloads, seed boosting, IYUU cross-seeding, media library organising, statistics across sites and downloader management, in the web interface and the mobile app, with control from QQ and Telegram. Runs in Docker, on Linux and on Windows.
+description: RSS downloads, seed boosting, IYUU cross-seeding, following shows and organising your media library, statistics across sites and downloader management, in the web interface and the mobile app, with control from QQ and Telegram or through an AI assistant. Runs in Docker, on Linux and on Windows.
 
 hero:
   name: pt-tools
   text: Automation for private trackers
-  tagline: Download, boost and cross-seed with IYUU, and file finished films and shows into your media library; follow every site's statistics and login status, manage qBittorrent and Transmission in one place, and check on all of it from the web, the mobile app, QQ or Telegram.
+  tagline: Download, brush and cross-seed with IYUU, follow shows into your media library, and keep every site's statistics and your qBittorrent and Transmission in one place, from the web, the app, QQ or Telegram.
   actions:
     - theme: brand
       text: Install
@@ -16,250 +17,181 @@ hero:
       text: Quick start
       link: /en/guide/quick-start
     - theme: alt
-      text: What's new in the 1.0 preview
+      text: New in 1.0
       link: /en/guide/whats-new-1.0
-    - theme: alt
-      text: GitHub
-      link: https://github.com/sunerpy/pt-tools
 
 home:
   facts:
     - term: Runs on
-      text: A Docker image (amd64 and arm64), and binaries for Linux and Windows. On macOS, use Docker.
+      text: Docker, Linux, Windows; amd64 and arm64
     - term: Your data
-      text: Settings, history and site credentials stay on your own server; cookies are encrypted with a key generated on that machine.
+      text: On your own server; cookies encrypted
     - term: Docs version
-      text: This site documents the 1.0 preview (v1.0.0-rc.N); features marked Preview are not in the 0.48.0 stable release yet.
+      text: The 1.0 preview; stable is still 0.48.0
 
-  visual:
-    desktop:
-      light: /screens/home-light.webp
-      dark: /screens/home-dark.webp
-      width: 1440
-      height: 900
-      alt: The pt-tools statistics page, with each site's upload, ratio, seeding count, bonus points and class. The interface is in Chinese.
-    mobile:
-      light: /screens/home-mobile-light.webp
-      dark: /screens/home-mobile-dark.webp
-      width: 375
-      height: 812
-      alt: The statistics page on a phone, with the totals at the top and one card per site.
+  stages:
+    steps:
+      - Follow a show, locked to one release
+      - Each new episode is filed into the TV library
+    screens:
+      - src: /screens/media-follow-light.webp
+        dark: /screens/media-follow-dark.webp
+        width: 1280
+        height: 1060
+        alt: The title page of the series 长夜将尽 (The Long Night). The button reads 追剧中 · 第 2 季 (following season 2), and the 你的 NAS 上 (on your NAS) panel lists 12 episodes of season 1 and 6 of season 2 in the library, 4 torrents seeding, and the season 2 follow locked to the HHWEB 2160p release. The interface is in Chinese.
+      - src: /screens/media-history-light.webp
+        dark: /screens/media-history-dark.webp
+        width: 1280
+        height: 1060
+        alt: The organise history (整理历史). The top entry is 长夜将尽 S02E07, matched by its subscription; The.Long.Night.S02E07.2160p.WEB-DL.H265-HHWEB.mkv from the torrent was hard-linked to /media/剧集/长夜将尽 (2025)/Season 02/长夜将尽 - S02E07 - 失踪者.mkv when the download finished, the scrape succeeded, and the entry is marked organised. Below it is the entry for episode 6. The interface is in Chinese.
+    caption: Demo data. 长夜将尽 (The Long Night) is a made-up series, and its poster and backdrop are generated. The two pictures are the title page and the organise history, both in the web interface's narrow layout. A followed show is searched on your sites as each episode airs, keeping to one release; when the download finishes, it is hard-linked into the library by your naming template, with NFO files and artwork.
 
-  index:
+  capabilities:
     title: What pt-tools does
-    intro: Everything at a glance. Features marked Preview ship in the 1.0 preview releases and are not in the 0.48.0 stable release yet; see What's new in the 1.0 preview. Features marked Experimental ship but have not been verified end to end.
-    groups:
-      - name: Sites and statistics
-        items:
-          - title: 67 built-in sites
-            body: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi sites, signing in with a cookie, an API key or a passkey.
-            status: available
-            link: /en/sites
-          - title: Statistics across sites
-            body: Upload, download, ratio, seeding, bonus points and progress to the next class for every site on one page, also exportable as an image to share.
-            status: available
-            link: /en/guide/user-stats
-          - title: Trends and daily report
-            body: A snapshot is kept on each day a site's data is fetched, giving increments and trends for today, this week and this month; the daily report can send the day's increments and any login problems to the channels you choose at a set time. Off by default.
-            status: preview
-            link: /en/guide/user-stats
-          - title: Search across sites
-            body: Search several sites at once, filter and sort by size, seeders and freeleech, and send results straight to a downloader.
-            status: available
-            link: /en/guide/what-is-pt-tools
-          - title: Login status monitoring
-            body: Per-site checks and reminders, so you hear about a site before an inactive account is disabled.
-            status: available
-            link: /en/guide/site-login-monitoring
-          - title: Daily sign-in
-            body: A Sign-in page of its own, where you sign in to supported sites within a time window you set, sign in to all with one click, see the history and push the results, or use the /signin command; captchas and quiz questions can be handed to AI. Off by default.
-            status: preview
-            link: /en/guide/site-login-monitoring#daily-sign-in
-          - title: CookieCloud import
-            body: Fetch the cookies your browser syncs to a self-hosted CookieCloud server, decrypt them on this machine and write them into the sites after a preview; scheduled sync is optional.
-            status: preview
-            link: /en/guide/cookiecloud
-      - name: Automatic RSS downloads
-        items:
-          - title: RSS subscriptions
-            body: Feeds are fetched on a schedule. A feed without filter rules downloads freeleech torrents only.
-            status: available
-            link: /en/guide/rss-subscription
-          - title: Filter rules and TV series
-            body: Match titles with keywords, wildcards or regular expressions, limited by size and by whether a torrent must be free.
-            status: available
-            link: /en/guide/filter-rules-tv-series
-          - title: Brush tasks
-            body: Pick fresh torrents from a site's free list by your conditions, seed them, and remove them by seeding time, ratio or upload speed, within limits on concurrent downloads and size. Off by default.
-            status: preview
-            link: /en/guide/brush
-          - title: Pause or delete when freeleech ends
-            body: A torrent still downloading when its free period ends is paused or deleted, as its subscription chooses, so it does not count against your download.
-            status: available
-            link: /en/configuration
-          - title: Disk protection and auto-delete
-            body: Free space on the downloader is checked before every push; old torrents are removed by seeding time, ratio and other conditions, with H&R torrents kept.
-            status: available
-            link: /en/guide/auto-cleanup
-      - name: Downloaders
-        items:
-          - title: qBittorrent and Transmission
-            body: Add several downloaders; a torrent goes to the one bound to its RSS feed, then its site, then the default.
-            status: available
-            link: /en/configuration
-          - title: Downloader web UI
-            body: Every downloader's torrents, speeds and states in pt-tools, with bulk pause, resume and delete.
-            status: available
-            link: /en/guide/what-is-pt-tools
-          - title: Download folders
-            body: Keep several save folders per downloader and choose one when you push a torrent.
-            status: available
-            link: /en/configuration
-          - title: Downloader assistant
-            body: Find dead torrents a site has deleted, tag torrents with their site by tracker and replace tracker addresses in bulk, each previewed first.
-            status: preview
-            link: /en/guide/downloader-assistant
-          - title: Torrent transfer
-            body: Move finished torrents to another downloader and keep seeding without touching the data; the source copy goes only after a 100% check, and rules can do it on a schedule.
-            status: preview
-            link: /en/guide/torrent-transfer
-          - title: IYUU cross-seeding
-            body: Find torrents with the same data on other sites through IYUU, check their files and add them to the same downloader; they seed only after a 100% check.
-            status: preview
-            link: /en/guide/reseed
-          - title: qB-compatible entrance
-            body: Tools that only talk to qBittorrent, such as MoviePilot, autobrr and Sonarr, can treat pt-tools as one; the torrents they add still pass the disk space and site seeding capacity checks.
-            status: preview
-            link: /en/guide/qbit-compat
-      - name: Media
-        items:
-          - title: Follow and subscribe
-            body: Subscribe to a film or follow a season, search your sites and pick it up from RSS; a followed show is searched when each episode airs and keeps to one release, and variety shows split into parts match too; quality profiles choose the release, upgrades swap in better releases, and a Douban wish list subscribes for you.
-            status: preview
-            link: /en/guide/media-subscribe
-          - title: Title details and calendar
-            body: One page for a film or series with its details, the episodes in your library, the torrents seeding and whether they can be deleted; the calendar lists when each subscribed episode airs and whether it is in the library, and today's updates can be pushed to you every day.
-            status: preview
-            link: /en/guide/media-detail
-          - title: Library organising
-            body: Hard-link finished movies and shows into your library with a naming template, write NFO files and artwork, ask Emby, Jellyfin or Plex to scan, and send a notification.
-            status: preview
-            link: /en/guide/media-library
-          - title: Media recognition
-            body: Parse torrent titles and find the movie or TV show on TMDB; IMDb and Douban IDs from sites are recorded, and wrong matches can be corrected by hand or with recognition words.
-            status: preview
-            link: /en/guide/media-recognize
-      - name: Mobile app and APIs
-        items:
-          - title: Mobile app
-            body: The Android app shows the overview, torrents, sites and subscriptions away from home, and pauses, deletes and pushes torrents or manages subscriptions within the permissions given at pairing.
-            status: preview
-            link: /en/guide/mobile-app
-          - title: Remote access
-            body: Pair by scanning a QR code; the app tries a direct connection first and falls back to a relay. The connection is end-to-end encrypted, the relay only forwards, and no port has to be opened to the internet.
-            status: preview
-            link: /en/guide/remote-access
-          - title: API tokens and the App API
-            body: Scripts and clients reach /api/app/v1/ with a token, reading or changing data within its scopes, without storing the web password.
-            status: preview
-            link: /en/guide/api-tokens
-          - title: MCP
-            body: AI assistants in MCP clients such as Claude, Cursor and Cherry Studio can look at torrents, site data and subscriptions, and make changes after you confirm them.
-            status: preview
-            link: /en/guide/mcp
-      - name: Notifications and ChatOps
-        items:
-          - title: Commands in QQ and Telegram
-            body: Check status, tasks and torrents, pause, resume or delete torrents, add and remove RSS feeds; every command is recorded in the audit log.
-            status: available
-            link: /en/guide/chatops-quickstart
-          - title: New-torrent notifications
-            body: Push results sent to your chat app, with quiet hours, digests, retries and an hourly limit.
-            status: available
-            link: /en/guide/chatops-rss-notify
-          - title: More notification channels
-            body: DingTalk and Feishu group bots, plus Bark, ServerChan and ntfy; they send notifications and do not take commands.
-            status: preview
-            link: /en/guide/notify-channels
-          - title: Message templates
-            body: Customize the title and body of each notification event; command replies and AI assistant replies can use templates too.
-            status: preview
-            link: /en/guide/notify-channels#message-templates
-          - title: WeCom and generic webhooks
-            body: Outbound channels that send notifications but cannot receive commands; the generic webhook sends notifications as JSON to your own system (HMAC-signed), for n8n, Zapier and the like.
-            status: experimental
-            link: /en/guide/notify-channels
-          - title: Custom webhook requests
-            body: Set the request method, format and body template, start from presets such as Discord, Slack and Gotify, and judge success by the response content.
-            status: preview
-            link: /en/guide/notify-channels#custom-webhook
-          - title: AI assistant
-            body: Connect an OpenAI-compatible model to query data, search and push torrents and add subscriptions in plain language; every change waits for your confirmation.
-            status: preview
-            link: /en/guide/assistant
-      - name: Running it
-        items:
-          - title: Browser extension
-            body: PT Tools Helper syncs a site's cookie in one click and collects redacted pages to request support for a new site.
-            status: available
-            link: /en/guide/browser-extension
-          - title: Upgrades and cleanup
-            body: The binary upgrades itself from the web interface; logs, staged torrent files and old backups can be previewed, then removed.
-            status: available
-            link: /en/guide/upgrade
-          - title: Proxies
-            body: Reach sites and downloaders through an HTTP, HTTPS or SOCKS5 proxy, with exclusions by address.
-            status: available
-            link: /en/configuration
-
-  steps:
-    title: From install to the first automatic download
+    intro: Features marked Preview ship in the 1.0 preview releases and are not in the 0.48.0 stable release yet; see What's new in the 1.0 preview. Each card's title opens its guide.
     items:
-      - title: Install
-        command: docker compose up -d
-        body: Start it with Docker Compose and keep /app/.pt-tools on a volume, or run the binary directly.
-      - title: Add a downloader
-        body: In Downloader settings (下载器设置), add qBittorrent or Transmission and check that it connects.
-      - title: Sign in to your sites
-        body: Sync a cookie with the browser extension, import cookies from CookieCloud, or enter the site's API key or passkey.
-      - title: Subscribe to RSS
-        body: Add an RSS feed to a site and choose a downloader. Without filter rules, only freeleech torrents are downloaded.
+      - icon: folder-open
+        title: Following shows and filing them
+        wide: true
+        status: preview
+        body: Subscribe to a film or follow a season. Each episode is searched on your sites as it airs, keeping to one release, and upgrades swap in better ones; finished downloads are hard-linked into your library by a naming template, with NFO files and artwork, and Emby, Jellyfin or Plex is asked to scan. One page per title shows the episodes in your library and whether the torrents seeding can be deleted, and the calendar lists the updates day by day.
+        evidence:
+          kind: code
+          text: The Long Night (2025)/Season 02/The Long Night - S02E07 - The Missing.mkv
+        link: /en/guide/media-subscribe
+      - icon: globe
+        title: Sites and statistics
+        status: available
+        body: 67 built-in sites. The statistics page totals each site's upload, ratio, seeding and progress to the next class; you can search across sites and hear about a site before an inactive account is disabled.
+        evidence:
+          kind: chips
+          items: [Cookie, API key, Passkey]
+        link: /en/sites
+      - icon: rss
+        title: Automatic RSS downloads
+        status: available
+        body: Feeds are fetched on a schedule, and a feed without filter rules downloads freeleech torrents only. Rules can limit the size, and a torrent still downloading when its free period ends is paused or deleted, as its subscription chooses.
+        evidence:
+          kind: chips
+          items: [Keywords, Wildcards, Regular expressions]
+        link: /en/guide/rss-subscription
+      - icon: trending-up
+        title: Brushing and cross-seeding
+        status: preview
+        body: Brush tasks pick fresh freeleech torrents from a site's list by your conditions and remove them by seeding time, ratio and upload speed. IYUU cross-seeding adds torrents with the same data on other sites to the same downloader, and they seed only after a 100% check.
+        evidence:
+          kind: code
+          text: "list 50, matching 4, added 2"
+        link: /en/guide/brush
+      - icon: server
+        title: Downloaders
+        status: available
+        body: Add several qBittorrent and Transmission instances; a torrent goes to the one bound to its RSS feed, then its site, then the default. Free space and the site's seeding limit are checked before every push, and auto-delete keeps H&R torrents.
+        evidence:
+          kind: chips
+          items: [qBittorrent, Transmission]
+        link: /en/configuration
+      - icon: smartphone
+        title: Mobile app and remote access
+        status: preview
+        body: The Android app shows the overview, torrents, sites and subscriptions away from home. Pair it by scanning a QR code; it tries a direct connection first and falls back to a relay. The connection is end-to-end encrypted, no port has to be opened to the internet, and you can run the relay yourself.
+        evidence:
+          kind: code
+          text: pt-tools relay serve
+        link: /en/guide/mobile-app
+      - icon: sparkles
+        title: AI assistant and MCP
+        wide: true
+        status: preview
+        body: Connect an OpenAI-compatible model and ask in plain language, in the web interface, the mobile app, Telegram or QQ, to look up data, search and push torrents and manage subscriptions; MCP clients such as Claude and Cursor can connect too. Every change waits for your confirmation.
+        evidence:
+          kind: chips
+          items:
+            [DeepSeek, Qwen, Kimi, SiliconFlow, Google AI Studio, Groq, OpenRouter, Ollama, OpenAI]
+        link: /en/guide/assistant
+      - icon: bell
+        title: QQ, Telegram and notifications
+        status: available
+        body: Check status and torrents from QQ or Telegram, pause, resume or delete torrents and add RSS feeds, with every command recorded in the audit log. New-torrent notifications support quiet hours, digests and an hourly limit.
+        evidence:
+          kind: chips
+          items: [/status, /tasks, /torrents, /addrss]
+        link: /en/guide/chatops-quickstart
+      - icon: house
+        title: Home page and NAS monitoring
+        status: preview
+        body: The home page puts today's episodes, what needs attention, downloaders and storage in one place. The NAS overview reads CPU, memory, network and storage from the local host, TrueNAS or Glances, with Synology and fnOS as experimental sources.
+        evidence:
+          kind: chips
+          items: [Local, TrueNAS, Glances, Synology, fnOS]
+        link: /en/guide/home-and-health
+      - icon: archive
+        title: Upgrades and backups
+        status: preview
+        body: The database is backed up every day, and once more before the first start on a new version; you can back up, download and restore from the web interface. Binary installs also upgrade from the web interface.
+        evidence:
+          kind: code
+          text: pt-tools db backup
+        link: /en/guide/upgrade#backing-up
 
-  rules:
-    columns: [Rule, Type, Matches]
-    rows:
-      - pattern: 2160p|4K
-        kind: Regular expression
-        matches: Titles containing 2160p or 4K
-      - pattern: "*REMUX*"
-        kind: Wildcard
-        matches: Titles with REMUX anywhere
-      - pattern: Black.Mirror
-        kind: Keyword
-        matches: Release names containing Black.Mirror
-    caption: Rules are tried in order of priority and the first match wins; each rule can also limit the size and require freeleech.
-
-  commands:
-    items:
-      - command: /status
-        body: Speeds, disk space and active tasks
-      - command: /tasks
-        body: RSS tasks and how they are running
-      - command: /torrents
-        body: Torrents per downloader, a page at a time
-      - command: /pause <hash>
-        body: Pause a torrent; a hash prefix is enough
-      - command: /addrss
-        body: Add an RSS feed step by step
-    caption: Only accounts linked with a binding code can send commands, and at present every linked account has admin rights, so give binding codes only to people you trust. The allow lists of a QQ or Telegram channel only decide who may talk to the bot, not who has admin rights; each account is limited to 10 commands a minute by default.
-
-  shots:
-    sites:
-      light: /screens/sites-light.webp
-      dark: /screens/sites-dark.webp
-      width: 1440
-      height: 900
-      alt: The site list, with each site's status, sign-in method, login status and days left before the inactivity limit. The interface is in Chinese.
+  showcases:
+    - title: Brush tasks
+      intro: Pick fresh freeleech torrents from a site's list by your conditions, seed them, and remove them by seeding time, ratio and upload speed. Each run records what it read and why each torrent was skipped.
+      screen:
+        src: /screens/brush-light.webp
+        dark: /screens/brush-dark.webp
+        width: 1764
+        height: 980
+        alt: The brush tasks page (刷流任务). Along the top are 11 torrents seeding, 87.7 GB uploaded and 29.82 GB downloaded today, and a total ratio of 2.97. Below are two tasks, HDSky 免费刷流 and OurBits 刷流, each with its downloader, torrents in progress, today's upload and download, total upload and last run. Bottom left is a bar chart of the last 30 days' earnings, bottom right a note on how brushing works. The interface is in Chinese.
+      caption: Demo data. The brush tasks page in the web interface.
+      points:
+        - title: Freeleech only by default
+          body: Only free and 2x free torrents are taken and H&R is excluded; when a site has site-wide H&R, every torrent from it counts as H&R.
+        - title: The same checks as RSS
+          body: Disk reserve and the site's seeding capacity are checked before a torrent is added, and removal only touches torrents the task added.
+        - title: Earnings by period
+          body: Upload and download by day, week, month, quarter or year, with one bar per day for the last 30 days.
+      guide:
+        text: Brush tasks
+        link: /en/guide/brush
+    - title: Mobile app
+      intro: Once paired by QR code, the Android app shows the overview, torrents, sites and subscriptions away from home, and pauses, deletes and pushes torrents or manages subscriptions within the permissions given at pairing.
+      screen:
+        src: /screens/app-overview-en-light.webp
+        dark: /screens/app-overview-en-dark.webp
+        width: 780
+        height: 1688
+        alt: "The app's overview page: 10.5 TiB uploaded, 2.0 TiB downloaded (billed), a ratio of 5.25, 4,567.8 bonus points, 8 torrents seeding at 1.0 TiB and 2 unread messages; 1.0 GiB uploaded today; the downloaders seed 8 torrents at 1.0 TiB, 3 on qb-nas and 5 on tr-nas."
+      caption: Demo data. The app's Overview page.
+      points:
+        - title: No open port
+          body: The app tries a direct connection first and falls back to a relay; the connection is end-to-end encrypted, and the relay only forwards data it cannot read.
+        - title: Permissions per device
+          body: Choose Full control or Read only when pairing, then change the permission or revoke the device at any time.
+        - title: Released with the server
+          body: The app's installers ship in the same GitHub release as the server.
+      guide:
+        text: Mobile app
+        link: /en/guide/mobile-app
+    - title: AI assistant
+      intro: Connect an OpenAI-compatible model and ask pt-tools in plain language which episode a show is up to or how much you uploaded today, or have it search and push torrents and add subscriptions.
+      screen:
+        src: /screens/assistant-light.webp
+        dark: /screens/assistant-dark.webp
+        width: 1152
+        height: 822
+        alt: A conversation with the AI assistant. Asked which episode of season 2 of 长夜将尽 the follow is up to and whether tonight's episode 7 has downloaded, the assistant called 2 tools and answered that episode 7 has downloaded and been hard-linked into the TV library, episodes 1 to 6 were already there, and episode 8 has not aired yet. Below is the message box, with the model deepseek-v4-flash selected. The interface is in Chinese.
+      caption: Demo data. The assistant called two tools, for the follow and the organise history.
+      points:
+        - title: Changes wait for you
+          body: Pushes, deletions and subscription changes first show a confirmation card with each value before and after and the possible effects; nothing runs until you confirm.
+        - title: Credentials stay out
+          body: Cookies, passkeys and passwords are never sent to the model, and the data its tools return is redacted first.
+        - title: Ask from anywhere
+          body: Chat in the web interface or the mobile app, or message the assistant through the Telegram and QQ bots.
+      guide:
+        text: AI assistant
+        link: /en/guide/assistant
 
   deploy:
     title: Ways to run it
@@ -285,6 +217,9 @@ home:
           - "The release archive, or a PowerShell install script"
           - .pt-tools in your user folder
     note: There is no macOS binary; use Docker on macOS. pt-tools listens on port 8080 by default.
+    guide:
+      text: Install guide
+      link: /en/guide/install
 
   privacy:
     title: Where your data goes
@@ -310,65 +245,59 @@ home:
         sends: Titles, TMDB IDs and torrent info hashes
         detail: TMDB and Douban's public data are contacted when you use the media features; with IYUU cross-seeding on, the info hashes of finished torrents in your downloaders are sent to IYUU for lookup; CookieCloud only ever means your own server.
 
-  roadmap:
-    title: Roadmap
-    intro: Designed but not released. The design documents record contracts; they do not mean a feature is available.
+  faq:
+    title: Questions
     items:
-      - title: Verifying WeCom and generic webhooks
-        body: Both outbound channels are implemented; they leave Experimental once they have been verified end to end.
-        status: planned
-    notPlanned:
-      title: Deliberately not built
-      items:
-        - An AI mode that writes without asking you first
-        - Upgrades, restarts or other destructive actions exposed over MCP
+      - q: How do I get the features marked Preview?
+        a: They are in the 1.0 preview releases (v1.0.0-rc.N), not in the 0.48.0 stable release yet. Install a preview release as the install guide describes; previews are for testing, so back up the data folder before you upgrade.
+        guide:
+          text: Installing a preview release
+          link: /en/guide/install#installing-a-preview-release
+      - q: Will the AI make changes on its own?
+        a: No. The built-in AI assistant asks you to confirm every change before it runs. An MCP write tool first returns only a preview; once you agree in your client, the client's AI calls it again with `confirm=true` to run it, and a token without the MCP write scope cannot use these tools at all.
+        guide:
+          text: MCP tools
+          link: /en/guide/mcp#tools
+      - q: Can MCP upgrade or restart pt-tools?
+        a: No. No MCP tool upgrades, restarts or otherwise interrupts the service, and the update check only reports new versions. Changing the configuration needs the token's separate Config scope, and it too returns a preview first and saves only after you confirm.
+        guide:
+          text: MCP
+          link: /en/guide/mcp
+      - q: Does it work with MoviePilot, Sonarr or Seerr?
+        a: Yes, through two compatible entrances in the 1.0 preview. The qB-compatible entrance lets tools that only talk to qBittorrent treat pt-tools as one, and the torrents they add still pass the disk space and site seeding capacity checks. The Servarr-compatible entrance lets Seerr treat pt-tools as Radarr and Sonarr, turning requested films and series into subscriptions and follows.
+        guide:
+          text: qB-compatible entrance
+          link: /en/guide/qbit-compat
+      - q: Do I have to open a port to reach home from my phone?
+        a: No. The app tries a direct connection first and falls back to a relay; the connection is end-to-end encrypted, and the relay only forwards data it cannot read. With no relay set, the built-in hosted relay is used; you can also run your own or connect directly only.
+        guide:
+          text: Remote access
+          link: /en/guide/remote-access
+      - q: My site is not in the list. What can I do?
+        a: Collect redacted pages with the browser extension and request the new site by following the steps; no code is needed.
+        guide:
+          text: Request a new site
+          link: /en/guide/request-new-site
+
+  closer:
+    title: Install pt-tools
+    body: A Docker image, and binaries for Linux and Windows, under the MIT License. Report problems and suggest features in [GitHub Issues](https://github.com/sunerpy/pt-tools/issues).
+    actions:
+      - text: Install
+        link: /en/guide/install
+        theme: brand
+        icon: download
+      - text: Quick start
+        link: /en/guide/quick-start
+        theme: alt
+        icon: arrow-right
 ---
 
-<HomeIndex />
+<HomeCapabilities />
 
-<HomeSteps />
+<HomeShowcases />
 
-<SplitBlock proof="rules">
-
-## RSS downloads that fetch only what you want
-
-pt-tools fetches every RSS feed on a schedule and pushes the matching torrents to a downloader. A feed with no filter rules downloads freeleech torrents only, which suits building ratio; once rules are attached, only matching torrents are downloaded, which suits following a series or collecting particular releases.
-
-Before a push it checks the downloader's free space and the site's seeding limit, and a torrent still downloading when its free period ends is paused or deleted, as its subscription chooses.
-
-[RSS subscriptions](/en/guide/rss-subscription) · [Filter rules and TV series](/en/guide/filter-rules-tv-series) · [Auto-delete and disk protection](/en/guide/auto-cleanup)
-
-</SplitBlock>
-
-<SplitBlock proof="screen" shot="sites" flip>
-
-## Every site's numbers on one page
-
-The statistics page totals each site's upload, ratio, seeding and progress to the next class; the site list shows how you sign in to each site, whether that still works, and how many days are left before the site's inactivity limit.
-
-Cookie sites sync in one click with the browser extension, or import from CookieCloud; sites such as M-Team use an API key, and Rousi Pro uses a passkey.
-
-[Supported sites](/en/sites) · [Cookies and API keys](/en/guide/get-cookie-apikey) · [CookieCloud import](/en/guide/cookiecloud) · [Login status and key backup](/en/guide/site-login-monitoring)
-
-</SplitBlock>
-
-<SplitBlock proof="commands">
-
-## Check on it from QQ and Telegram
-
-Send commands in a private chat over QQ (through OneBot, for example NapCat) or a Telegram bot to see status and torrents and to pause or resume them; RSS push results arrive in the same chat.
-
-A chat account is linked first with a one-time code generated in the web interface. Every command is recorded in the audit log, which you can search in the web interface.
-
-[ChatOps quick start](/en/guide/chatops-quickstart) · [New-torrent notifications](/en/guide/chatops-rss-notify)
-
-</SplitBlock>
-
-<HomeDeploy />
-
-<HomePrivacy />
-
-## Install
+<HomeDeploy>
 
 Docker Compose is the recommended way. Keep the data folder `/app/.pt-tools` on a volume: its `secret.key` is what decrypts your saved site credentials.
 
@@ -398,16 +327,22 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 
 :::
 
-The install scripts download the latest release and check it against the same release's `checksums.txt` before unpacking. The [install guide](/en/guide/install) covers each option in full, including how to pin a version.
+The install scripts download the latest release and check it against the same release's `checksums.txt` before unpacking.
 
 The commands above install the 0.48.0 stable release. To use the features marked Preview, install a preview release as described in [Installing a preview release](/en/guide/install#installing-a-preview-release); [What's new in the 1.0 preview](/en/guide/whats-new-1.0) lists what it adds.
 
-<HomeRoadmap />
+</HomeDeploy>
 
-## Community
+<HomePrivacy />
+
+<HomeFaq />
+
+<HomeCloser>
 
 - Bug reports and feature requests: [GitHub Issues](https://github.com/sunerpy/pt-tools/issues)
 - Questions and discussion: [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions), the [Telegram group](https://t.me/+7YK2kmWIX0s1Nzdl), or QQ group 274984594
 - WeChat Official Account: 六月水蓝
 
 <QrCode src="/community/wechat-official-account.jpg" alt="QR code of the WeChat Official Account 六月水蓝" caption="Scan with WeChat to follow" />
+
+</HomeCloser>
