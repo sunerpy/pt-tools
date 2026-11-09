@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.55](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.54...v1.0.0-rc.55) (2026-11-09)
+
+
+### Features
+
+* **mobile:** 手机 App 概览页新增「下载器做种」卡，列出每台下载器正在做种的个数与体积 ([#874](https://github.com/sunerpy/pt-tools/issues/874)) ([063b84e](https://github.com/sunerpy/pt-tools/commit/063b84ee5c291b72a934009e0ae7ee9a0754b75d))
+* **userinfo:** 用户统计页新增「下载器做种」卡，列出每台下载器正在做种的个数与体积 ([#873](https://github.com/sunerpy/pt-tools/issues/873)) ([bc87cc8](https://github.com/sunerpy/pt-tools/commit/bc87cc859edf47044b04b32f12421b2bdea916e7))
+
+
+### Bug Fixes
+
+* **site:** HDArea 的做种体积改读魔力值页上的「做种总积」，做种列表一次只回 25 个种子 ([#871](https://github.com/sunerpy/pt-tools/issues/871)) ([cc0a629](https://github.com/sunerpy/pt-tools/commit/cc0a6291b8588449bed491783e52b8c5fc19c2e1))
+
 ## [1.0.0-rc.54](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.53...v1.0.0-rc.54) (2026-11-08)
 
 
