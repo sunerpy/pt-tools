@@ -170,6 +170,8 @@
   "moreAppearance": "Appearance",
   "moreGroupTools": "Features",
   "moreGroupApp": "This phone",
+  "moreStar": "If pt-tools helps you,\nplease give it a star on GitHub",
+  "moreStarCopied": "Could not open a browser. The repository link is copied.",
   "appearanceTheme": "Theme",
   "appearanceFollowSystem": "Follow system",
   "appearanceFollowSystemHelp": "Light when the system is light, Dark when it is dark",

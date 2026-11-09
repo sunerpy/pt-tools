@@ -48,6 +48,9 @@ const versionLine = computed(() => {
   return versionStore.hasUpdate ? `${label} · 有新版本` : `${label} · 已是最新`;
 });
 
+/** 底部 Star 提示链到的仓库 */
+const REPO_URL = "https://github.com/sunerpy/pt-tools";
+
 function logout() {
   window.location.href = "/logout";
 }
@@ -214,6 +217,20 @@ watch(
         </section>
       </template>
     </nav>
+
+    <!--
+      Star 提示（用户 2026-11-09 要的）：整行是链接，在新标签页打开 GitHub 仓库。
+      放在滚动区外面、账号行上面，列表再长也一直在底部；抽屉（手机）里是同一份组件。
+      导航列收起时它跟着收起，底部状态条的「pt-tools」仍然链到仓库。
+    -->
+    <a class="pt-nav__star" :href="REPO_URL" target="_blank" rel="noopener">
+      <PtIcon name="star" :size="14" />
+      <!-- 在逗号处断成两行，不让「点个」被拆到两行（宽 264 的导航列一行放不下整句） -->
+      <span class="pt-nav__star-text">
+        <span>如果 pt-tools 对你有帮助，</span>
+        <span>还请动动小手到 GitHub 点个 Star</span>
+      </span>
+    </a>
 
     <!-- 画板 nav 底部的账号页脚：头像 + 名称/角色 + 登出 -->
     <!--

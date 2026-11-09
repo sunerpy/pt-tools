@@ -581,6 +581,14 @@ class SEn extends S {
   String get moreGroupApp => 'This phone';
 
   @override
+  String get moreStar =>
+      'If pt-tools helps you,\nplease give it a star on GitHub';
+
+  @override
+  String get moreStarCopied =>
+      'Could not open a browser. The repository link is copied.';
+
+  @override
   String get appearanceTheme => 'Theme';
 
   @override

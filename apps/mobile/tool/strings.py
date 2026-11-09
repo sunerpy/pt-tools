@@ -177,6 +177,8 @@ S = [
     ("moreAppearance", "外观", "Appearance"),
     ("moreGroupTools", "功能", "Features"),
     ("moreGroupApp", "本机", "This phone"),
+    ("moreStar", "如果 pt-tools 对你有帮助，\n还请动动小手到 GitHub 点个 Star", "If pt-tools helps you,\nplease give it a star on GitHub"),
+    ("moreStarCopied", "打不开浏览器，仓库地址已复制", "Could not open a browser. The repository link is copied."),
     ("appearanceTheme", "主题", "Theme"),
     ("appearanceFollowSystem", "跟随系统", "Follow system"),
     ("appearanceFollowSystemHelp", "系统是浅色时用「明亮」，深色时用「暗黑」", "Light when the system is light, Dark when it is dark"),

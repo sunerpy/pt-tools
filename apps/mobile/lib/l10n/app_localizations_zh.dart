@@ -574,6 +574,12 @@ class SZh extends S {
   String get moreGroupApp => '本机';
 
   @override
+  String get moreStar => '如果 pt-tools 对你有帮助，\n还请动动小手到 GitHub 点个 Star';
+
+  @override
+  String get moreStarCopied => '打不开浏览器，仓库地址已复制';
+
+  @override
   String get appearanceTheme => '主题';
 
   @override
