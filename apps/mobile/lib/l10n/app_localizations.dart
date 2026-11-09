@@ -631,6 +631,36 @@ abstract class S {
   /// **'剩余 {size}'**
   String freeSpace(String size);
 
+  /// No description provided for @seedingTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载器做种'**
+  String get seedingTitle;
+
+  /// No description provided for @seedingCountSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个 · {size}'**
+  String seedingCountSize(int count, String size);
+
+  /// No description provided for @seedingIdle.
+  ///
+  /// In zh, this message translates to:
+  /// **'另有 {count} 个下载完了没在做种（{size}）'**
+  String seedingIdle(int count, String size);
+
+  /// No description provided for @seedingFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没取到下载器的做种情况'**
+  String get seedingFailed;
+
+  /// No description provided for @seedingNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'只算状态是做种的种子。辅种和原种子共用一份数据，这里各算一次（站点上报的做种体积也是这样算的），所以合计比硬盘上实际占用的多。'**
+  String get seedingNote;
+
   /// No description provided for @updatedAt.
   ///
   /// In zh, this message translates to:

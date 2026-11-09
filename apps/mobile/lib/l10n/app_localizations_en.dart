@@ -305,6 +305,26 @@ class SEn extends S {
   }
 
   @override
+  String get seedingTitle => 'Downloader seeding';
+
+  @override
+  String seedingCountSize(int count, String size) {
+    return '$count · $size';
+  }
+
+  @override
+  String seedingIdle(int count, String size) {
+    return '$count more completed but not seeding ($size)';
+  }
+
+  @override
+  String get seedingFailed => 'Could not read what the downloaders are seeding';
+
+  @override
+  String get seedingNote =>
+      'Only torrents whose state is seeding count. A reseed and its original torrent share one copy of the data but count once each here, the same way sites report seeding size, so the total is larger than the disk space actually used.';
+
+  @override
   String updatedAt(String time) {
     return 'Site data updated $time';
   }

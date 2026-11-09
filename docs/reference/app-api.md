@@ -56,6 +56,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | GET    | `/favicon/{site}`                             | 读取        | 站点图标                                     |
 | GET    | `/torrents`                                   | 读取        | 下载器里的种子                               |
 | GET    | `/downloaders`                                | 读取        | 下载器与它们现在的速度、剩余空间             |
+| GET    | `/downloaders/seeding`                        | 读取        | 每台下载器正在做种的个数与体积               |
 | POST   | `/torrents/actions`                           | 操作        | 暂停、继续、删除种子                         |
 | POST   | `/search`                                     | 读取        | 多站搜索                                     |
 | POST   | `/push`                                       | 操作        | 把搜索到的种子推送到下载器                   |
@@ -179,6 +180,10 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 ### GET /downloaders
 
 启用的下载器：`id`、`name`、`type`（`qbittorrent` 或 `transmission`）、`default`、`reachable`（这一次读到了状态或剩余空间）、`error`（读不到时的原因）、`version`、`upload_speed`、`download_speed`、`uploaded`、`downloaded`（下载器自己记的累计量）、`free_space`。没有下载器的地址、账号与密码。
+
+### GET /downloaders/seeding
+
+每台启用的下载器正在做种的种子，和网页用户统计页的[下载器做种](../guide/user-stats.md#下载器做种)是同一份数。每项有 `id`、`name`、`type`、`reachable`（读到了种子列表）、`error`（读不到时的原因，去掉了地址）、`seeding_count` 与 `seeding_size`（状态是做种的种子个数与体积）、`idle_count` 与 `idle_size`（下载完了、但暂停、停止、排队、校验中或出错的）；`total_seeding_count`、`total_seeding_size` 是读到了的几台的合计。体积按种子大小相加，辅种和原种子各算一次，所以合计比硬盘上实际占用的多。要读每台下载器的整个种子列表，一共最多等 20 秒，没读完的那台写明没有在时限内读到。`GET /meta` 的 `features` 里有 `downloader_seeding` 时才有这个接口。
 
 ### GET /torrents
 

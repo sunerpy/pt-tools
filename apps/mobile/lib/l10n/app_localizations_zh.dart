@@ -300,6 +300,26 @@ class SZh extends S {
   }
 
   @override
+  String get seedingTitle => '下载器做种';
+
+  @override
+  String seedingCountSize(int count, String size) {
+    return '$count 个 · $size';
+  }
+
+  @override
+  String seedingIdle(int count, String size) {
+    return '另有 $count 个下载完了没在做种（$size）';
+  }
+
+  @override
+  String get seedingFailed => '没取到下载器的做种情况';
+
+  @override
+  String get seedingNote =>
+      '只算状态是做种的种子。辅种和原种子共用一份数据，这里各算一次（站点上报的做种体积也是这样算的），所以合计比硬盘上实际占用的多。';
+
+  @override
   String updatedAt(String time) {
     return '站点数据更新于 $time';
   }

@@ -1779,6 +1779,55 @@ class AppApi {
     return null;
   }
 
+  /// 每台启用的下载器正在做种的个数与体积
+  ///
+  /// 读各台下载器的种子列表：状态是做种的种子算做种，下载完了但暂停、停止、排队、校验中或出错的另外计数， 没下载完的不算。体积按种子大小相加，辅种和原种子各算一次（和站点上报的做种体积口径一样）， 所以合计比硬盘上实际占用的多。连不上的那台照样列出，reachable 为假、error 写明原因，不计入合计。 主机的 GET /meta 的 features 里有 downloader_seeding 时才提供这个接口。
+  ///
+  /// Note: This method returns the HTTP [Response].
+  Future<Response> listDownloaderSeedingWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/downloaders/seeding';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 每台启用的下载器正在做种的个数与体积
+  ///
+  /// 读各台下载器的种子列表：状态是做种的种子算做种，下载完了但暂停、停止、排队、校验中或出错的另外计数， 没下载完的不算。体积按种子大小相加，辅种和原种子各算一次（和站点上报的做种体积口径一样）， 所以合计比硬盘上实际占用的多。连不上的那台照样列出，reachable 为假、error 写明原因，不计入合计。 主机的 GET /meta 的 features 里有 downloader_seeding 时才提供这个接口。
+  Future<AppDownloaderSeedingList?> listDownloaderSeeding({ Future<void>? abortTrigger, }) async {
+    final response = await listDownloaderSeedingWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppDownloaderSeedingList',) as AppDownloaderSeedingList;
+
+    }
+    return null;
+  }
+
   /// 启用的下载器与它们现在的速度、剩余空间
   ///
   /// Note: This method returns the HTTP [Response].

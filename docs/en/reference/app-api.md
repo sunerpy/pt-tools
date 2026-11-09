@@ -56,6 +56,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | GET    | `/favicon/{site}`                             | Read             | Site icon                                                                     |
 | GET    | `/torrents`                                   | Read             | Torrents in the downloaders                                                   |
 | GET    | `/downloaders`                                | Read             | Downloaders with their current speed and free space                           |
+| GET    | `/downloaders/seeding`                        | Read             | How many torrents each downloader is seeding and their size                   |
 | POST   | `/torrents/actions`                           | Operate          | Pause, resume and delete torrents                                             |
 | POST   | `/search`                                     | Read             | Multi-site search                                                             |
 | POST   | `/push`                                       | Operate          | Push a search result to a downloader                                          |
@@ -179,6 +180,10 @@ The site icon shown in the web interface. The response is an image, not JSON.
 ### GET /downloaders
 
 The enabled downloaders: `id`, `name`, `type` (`qbittorrent` or `transmission`), `default`, `reachable` (status or free space could be read this time), `error` (why not), `version`, `upload_speed`, `download_speed`, `uploaded`, `downloaded` (the downloader's own totals) and `free_space`. No downloader address, username or password.
+
+### GET /downloaders/seeding
+
+The torrents each enabled downloader is seeding, the same figures as [Downloader seeding](../guide/user-stats.md#downloader-seeding) on the User Stats page of the web UI. Each item has `id`, `name`, `type`, `reachable` (the torrent list could be read), `error` (why not, with addresses removed), `seeding_count` and `seeding_size` (torrents whose state is seeding), and `idle_count` and `idle_size` (completed torrents that are paused, stopped, queued, being checked or in error); `total_seeding_count` and `total_seeding_size` add up the downloaders that could be read. Sizes are summed per torrent, so a reseed and its original count once each and the total is larger than the disk space used. The full torrent list of every downloader is read, waiting at most 20 seconds in all; a downloader not read by then says so. The endpoint exists when `features` from `GET /meta` contains `downloader_seeding`.
 
 ### GET /torrents
 

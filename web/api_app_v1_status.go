@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -68,6 +69,71 @@ func (s *Server) appDownloaders(w http.ResponseWriter, r *http.Request) {
 			d.Error = "这一次没有读到这台下载器（连不上或超时）"
 		}
 		out.Items = append(out.Items, d)
+	}
+	appJSON(w, out)
+}
+
+// AppDownloaderSeeding 是 GET /downloaders/seeding 的一项：一台启用的下载器现在正在做种的种子。不含地址、账号与密码。
+type AppDownloaderSeeding struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Reachable 为假时这一台没读到种子列表，下面的数都是 0，原因在 Error（去掉了地址）
+	Reachable bool   `json:"reachable"`
+	Error     string `json:"error,omitempty"`
+	// SeedingCount、SeedingSize 是状态是做种的种子（qBittorrent 的 uploading、stalledUP、forcedUP，Transmission 的 seed）
+	SeedingCount int   `json:"seeding_count"`
+	SeedingSize  int64 `json:"seeding_size"`
+	// IdleCount、IdleSize 是下载完了、没在做种的种子（暂停、停止、排队、校验中、出错）
+	IdleCount int   `json:"idle_count"`
+	IdleSize  int64 `json:"idle_size"`
+}
+
+// AppDownloaderSeedingList 是 GET /downloaders/seeding：各台的做种情况与合计（合计只算读到了的那几台）。
+// 体积按种子大小相加，辅种和原种子各算一次，和站点上报做种体积的口径一样。
+type AppDownloaderSeedingList struct {
+	TotalSeedingCount int                    `json:"total_seeding_count"`
+	TotalSeedingSize  int64                  `json:"total_seeding_size"`
+	Items             []AppDownloaderSeeding `json:"items"`
+}
+
+// appDownloaderSeeding 是 GET /downloaders/seeding：读各台启用的下载器的种子列表，数正在做种的个数与体积
+// （网页用户统计页「下载器做种」卡的同一份数）。几台同时读，一共最多等 appDownloadersTimeout。
+func (s *Server) appDownloaderSeeding(w http.ResponseWriter, r *http.Request) {
+	if global.GlobalDB == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")
+		return
+	}
+	var settings []models.DownloaderSetting
+	if err := global.GlobalDB.DB.WithContext(r.Context()).Where("enabled = ?", true).Order("id").Find(&settings).Error; err != nil {
+		appError(w, http.StatusInternalServerError, "internal", "读取下载器失败: "+appRedact(err.Error()))
+		return
+	}
+	records := make([]downloaderRecord, 0, len(settings))
+	for _, ds := range settings {
+		records = append(records, downloaderRecord{ID: ds.ID, Name: ds.Name, Type: ds.Type, URL: ds.URL})
+	}
+	var stats DownloaderSeedingResponse
+	if dm := s.getDownloaderManager(); dm != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), appDownloadersTimeout)
+		defer cancel()
+		stats = collectSeedingStats(ctx, dm, records)
+	} else {
+		for _, rec := range records {
+			stats.Downloaders = append(stats.Downloaders, unreachableSeeding(rec, errors.New("这一次没有读到这台下载器（连不上或超时）")))
+		}
+	}
+	out := AppDownloaderSeedingList{
+		TotalSeedingCount: stats.TotalSeedingCount,
+		TotalSeedingSize:  stats.TotalSeedingSize,
+		Items:             make([]AppDownloaderSeeding, 0, len(stats.Downloaders)),
+	}
+	for _, it := range stats.Downloaders {
+		out.Items = append(out.Items, AppDownloaderSeeding{
+			ID: it.DownloaderID, Name: it.DownloaderName, Type: it.DownloaderType,
+			Reachable: it.Reachable, Error: appRedactAddr(it.Error),
+			SeedingCount: it.SeedingCount, SeedingSize: it.SeedingSize, IdleCount: it.IdleCount, IdleSize: it.IdleSize,
+		})
 	}
 	appJSON(w, out)
 }

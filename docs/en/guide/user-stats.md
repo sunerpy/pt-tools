@@ -48,6 +48,7 @@ The "Downloader seeding" (下载器做种) card at the bottom of the User Stats 
 - Each torrent counts with its full size. A reseed and its original torrent share one copy of the data but count once each here, the same way sites report seeding size, so the total is larger than the disk space actually used.
 - A downloader that cannot be reached shows "没连上" (not connected) with the reason underneath, at most two lines; hover over the row to read all of it. It is left out of the total.
 - The card refreshes with the page: when the page opens, after "Sync all" (同步全部) or syncing one site, and every 5 minutes. It is hidden when no downloader is enabled.
+- The mobile app shows the same card at the bottom of Overview; see [Mobile app](mobile-app.md#what-you-can-do).
 
 ## Exporting a share image
 

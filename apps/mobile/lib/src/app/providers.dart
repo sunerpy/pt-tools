@@ -145,6 +145,16 @@ final downloadersProvider = FutureProvider.autoDispose<AppDownloaderList>((
   return _need(await requireApi(ref).listDownloaders());
 });
 
+/// 各台下载器正在做种的个数与体积（概览的「下载器做种」）；主机的版本没有这个接口时为 null
+/// （App API 的 features 里没有 downloader_seeding）。要读每台下载器的整个种子列表，所以不跟着定时刷新。
+final downloaderSeedingProvider =
+    FutureProvider.autoDispose<AppDownloaderSeedingList?>((ref) async {
+      ref.watch(onlineEpochProvider);
+      final meta = await ref.watch(metaProvider.future);
+      if (!meta.features.contains('downloader_seeding')) return null;
+      return _need(await requireApi(ref).listDownloaderSeeding());
+    });
+
 final sitesProvider = FutureProvider.autoDispose<AppSiteList>((ref) async {
   ref.watch(onlineEpochProvider);
   return _need(await requireApi(ref).listSites());
