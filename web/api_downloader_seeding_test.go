@@ -49,7 +49,7 @@ func TestDownloaderSeedingStats_CountsByState(t *testing.T) {
 	assert.Equal(t, int64(300), resp.TotalSeedingSize)
 }
 
-// 连不上、读不到列表的那台照样列出、写明原因，合计只算读到了的；顺序和下载器设置一样。
+// 取不到实例、读不到列表的那台照样列出、写明原因，合计只算读到了的；顺序和下载器设置一样。
 func TestDownloaderSeedingStats_ListsUnreachable(t *testing.T) {
 	server, db := setupTestServer(t)
 	mgr := scheduler.NewManager()
@@ -60,16 +60,24 @@ func TestDownloaderSeedingStats_ListsUnreachable(t *testing.T) {
 		"broken": {listErr: errors.New("list failed")},
 	}
 	dm.RegisterFactory(downloader.DownloaderQBittorrent, func(_ downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
-		if f, ok := fakes[name]; ok {
-			return f, nil
-		}
-		return nil, errors.New("dial tcp: connection refused")
+		return fakes[name], nil
 	})
-	for _, name := range []string{"ok", "broken", "down"} {
-		require.NoError(t, dm.RegisterConfig(name, downloader.NewGenericConfig(
-			downloader.DownloaderQBittorrent, "http://localhost:8080", "u", "p", false,
+	// down 取不到实例：它配成没有注册工厂的类型，GetDownloaderContext 当场返回错误。
+	// 不用「工厂返回连接被拒」：那样 manager 会在后台按重连策略重试约 31 秒，这个
+	// goroutine 比测试活得长，重试时读全局日志器，和后面测试的 setup 改写全局日志器
+	// 构成数据竞争（PR #875 的 CI 就因此失败）。两种失败在处理器里走同一条路径。
+	for _, dl := range []struct {
+		name   string
+		dlType downloader.DownloaderType
+	}{
+		{"ok", downloader.DownloaderQBittorrent},
+		{"broken", downloader.DownloaderQBittorrent},
+		{"down", downloader.DownloaderTransmission},
+	} {
+		require.NoError(t, dm.RegisterConfig(dl.name, downloader.NewGenericConfig(
+			dl.dlType, "http://localhost:8080", "u", "p", false,
 		), false))
-		require.NoError(t, db.Create(&models.DownloaderSetting{Name: name, Type: "qbittorrent", Enabled: true}).Error)
+		require.NoError(t, db.Create(&models.DownloaderSetting{Name: dl.name, Type: "qbittorrent", Enabled: true}).Error)
 	}
 	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "off", Type: "qbittorrent", Enabled: false}).Error)
 	server.mgr = mgr
