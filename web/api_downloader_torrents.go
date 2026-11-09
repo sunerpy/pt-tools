@@ -405,6 +405,7 @@ func (s *Server) apiDownloaderCapabilities(w http.ResponseWriter, r *http.Reques
 func (s *Server) registerDownloaderHubRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
 	mux.HandleFunc("/api/downloader-torrents/transfer-stats", s.auth(s.apiDownloaderTransferStats))
+	mux.HandleFunc("/api/downloader-torrents/seeding-stats", s.auth(s.apiDownloaderSeedingStats))
 	mux.HandleFunc("/api/downloader-torrents/capabilities", s.auth(s.apiDownloaderCapabilities))
 	mux.HandleFunc("/api/downloader-torrents/meta", s.auth(s.apiDownloaderTorrentMeta))
 	mux.HandleFunc("/api/downloader-torrents/batch-action", s.auth(s.apiDownloaderTorrentActions))
