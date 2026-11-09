@@ -532,6 +532,62 @@ func TestUserInfo_SeedingSizeUnknownKeepsListCount(t *testing.T) {
 	assert.Zero(t, info.SeederSize)
 }
 
+// 做种体积读页面上站点写的总数（定义里有一页要取 seedingSize）：那一页取到了却没认出这个数、首页又说在做种时，
+// 体积按没取到算（保存时沿用上一次的），不存成 0；首页说没在做种时就是 0；认出来了就用它，都不去取做种列表。
+// 那一页整页没取到时，缺的字段只记那一页的，不另记一遍做种体积。
+func TestUserInfo_PageSeedingSizeMissing(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		seeding string
+		bonus   string
+		status  int
+		missing []string
+		size    int64
+	}{
+		{"total not found while seeding", "7", `<span id="bph">12.5</span>`, 0, []string{"seederSize"}, 0},
+		{"total not found, nothing seeding", "0", `<span id="bph">12.5</span>`, 0, nil, 0},
+		{"total found", "7", `<span id="bph">12.5</span><span id="total">2.00 GB</span>`, 0, nil, 2 << 30},
+		{"bonus page failed", "7", "", http.StatusBadGateway, []string{"bonusPerHour", "seedingSize"}, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ps := newPartialServer(t, func(path string, _ int, w http.ResponseWriter) bool {
+				switch path {
+				case "/index.php":
+					_, _ = w.Write([]byte(`<html><body><a id="uid" href="userdetails.php?id=888">tester</a><span id="seed">` + c.seeding + `</span></body></html>`))
+					return true
+				case "/mybonus.php":
+					if c.status != 0 {
+						w.WriteHeader(c.status)
+						return true
+					}
+					_, _ = w.Write([]byte(`<html><body>` + c.bonus + `</body></html>`))
+					return true
+				}
+				return false
+			})
+			d := partialDriver(t, ps, 0)
+			def := partialDefinition(0)
+			def.UserInfo.Process[2].Fields = []string{"bonusPerHour", "seedingSize"}
+			def.UserInfo.Selectors["seedingSize"] = FieldSelector{Selector: []string{"#total"}}
+			d.SetSiteDefinition(def)
+			info, err := d.GetUserInfo(context.Background())
+			assert.Equal(t, "tester", info.Username)
+			assert.Equal(t, c.size, info.SeederSize)
+			assert.Zero(t, ps.count("/getusertorrentlistajax.php"), "定义里写了做种体积，不取做种列表")
+			if c.missing == nil {
+				assert.NoError(t, err)
+				return
+			}
+			var partial *PartialUserInfoError
+			require.ErrorAs(t, err, &partial)
+			assert.ElementsMatch(t, c.missing, partial.Missing)
+			if c.status == 0 {
+				assert.ErrorIs(t, partial.Err, ErrSeedingSizeUnknown)
+			}
+		})
+	}
+}
+
 // 首页说在做种、做种列表却什么都没读到（限流提示、出错页，没有表格）：体积按没取到算，不存成 0。
 // 首页说没在做种时，列表没有表格就是真的 0。
 func TestUserInfo_SeedingListEmptyWhileSeeding(t *testing.T) {

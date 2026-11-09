@@ -1301,6 +1301,14 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 		fmt.Printf("[DEBUG] Phase 2 completed in %v\n", time.Since(phase2Start))
 	}
 
+	// 做种体积读页面上站点自己写的总数（定义里有 seedingSize 这一项）时：那一页取到了却没认出这个数、首页又说在做种，
+	// 体积按没取到算（保存时沿用上一次的），不存成 0，和做种列表什么都没读到时一样（站点改了页面时）
+	if !needSeedingStatus && info.Seeding > 0 && !got["seedingSize"] && !slices.Contains(missing, "seedingSize") &&
+		processesDeclare(uiConfig.Process, "seedingSize") {
+		fail([]string{"seederSize"}, fmt.Errorf("%w: seedingSize not found on the page while %d torrents are seeding",
+			ErrSeedingSizeUnknown, info.Seeding))
+	}
+
 	if strings.TrimSpace(info.Username) == "" && firstErr != nil {
 		// 一页都没取到用户名：按第一个失败的原因报（质询、网络错误、HTTP 出错）
 		return UserInfo{}, fmt.Errorf("获取用户信息失败: %w", firstErr)
@@ -1528,6 +1536,11 @@ var defaultLastAccessSelector = FieldSelector{
 }
 
 // declaresLastAccess 报告站点定义自己有没有写最近访问时间的选择器（写了就不用通用写法）。
+// processesDeclare 报告有没有哪一页要取 field。
+func processesDeclare(processes []UserInfoProcess, field string) bool {
+	return slices.ContainsFunc(processes, func(p UserInfoProcess) bool { return slices.Contains(p.Fields, field) })
+}
+
 func declaresLastAccess(uiConfig *UserInfoConfig) bool {
 	if uiConfig == nil {
 		return false

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -170,10 +172,13 @@ const hdareaUserdetailsFixture = `<html><body>
 // mybonus.php：本站不写通用的「你当前每小时能获取」，而是「最终每小时获取」，
 // 且数字外套了一层 <b>；该 <b> 的 style 里还含 font-size: 16px 这类数字，
 // 所以不能简单「跳过非数字」，必须显式跳过标签本身。
+// 「体积与稀缺分」一节的「当前状态：做种总积 <b>…</b>」是做种体积（getusertorrentlistajax.php 一次只回 25 行）。
+// 这一节照 2026-11-09 的页面结构写，规则与公式里的数字是占位的，做种总积也是编的。
 const hdareaMyBonusFixture = `<html><body><div id="outer">
-<table width="940" cellpadding="3"><tr><td>
+<table width="940" cellpadding="3"><tr><td class="text">
 <h1>魔力值到底是什么玩意儿，我怎样才能得到它？</h1>
 做种每小时将得到如下的魔力值 (新版算法，缓存1小时 v2.0)
+<div style="margin-bottom: 10px; border-bottom: 1px dashed #ccc; padding-bottom: 10px;"><b>3. 体积与稀缺分 (Size &amp; Scarcity Score)</b><br><span style="font-size: 12px;">规则：根据 体积、做种时长、稀缺度 综合计算，上限 100 分。<br>(公式: GB * (1+周数*1%) * (1+1/人数) * 0.01)</span><br>当前状态：做种总积 <b>1234.56 GB</b>。<br><table border="0" width="300" style="margin-top:5px; margin-bottom:5px;"><tr><td class="loadbarbg" style="border: none; padding: 0px;"><img class="loadbaryellow" src="pic/trans.gif" style="width: 60px; height: 10px;" alt="20%" /></td></tr></table></div>
 </td></tr></table>
 <table><tr><td><img class="loadbaryellow" src="pic/trans.gif" style="width: 170px; height: 10px;" alt="42.449325553737%" /></td></tr></table>
 <div style='font-size:14px; margin-top:5px;'>最终每小时获取：<b style='color: green; font-size: 16px;'>424.49</b> 个魔力值</div>
@@ -355,8 +360,16 @@ func testHdareaUserInfo(t *testing.T) {
 		}
 		// 取站点自报的「最终每小时获取」（已含各项加成）
 		assert.Equal(t, "424.49", driver.ExtractFieldValuePublic(doc, sel))
+
+		// 做种体积取「做种总积」，不取规则、公式里的数字与 GB
+		size, ok := def.UserInfo.Selectors["seedingSize"]
+		require.True(t, ok, "selector %q not found", "seedingSize")
+		assert.Equal(t, hdareaSeedingTotalBytes, driver.ExtractFieldValuePublic(doc, size))
 	})
 }
+
+// hdareaSeedingTotalBytes 是 mybonus 样本里「做种总积 1234.56 GB」换成的字节数（按 1024 进制）
+const hdareaSeedingTotalBytes = "1325598706237"
 
 // --- Standalone Tests ---
 
@@ -384,4 +397,59 @@ func TestHdarea_UserInfoVariants(t *testing.T) {
 	require.NotEqual(t, hdareaMyBonusFixture, html)
 	doc := FixtureDoc(t, "hdarea_mybonus_cht", html)
 	assert.Equal(t, "424.49", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["bonusPerHour"]))
+
+	// 繁体的「做種總積」（没见过繁体界面的这一节，按字面认）
+	cht := strings.ReplaceAll(hdareaMyBonusFixture, "做种总积", "做種總積")
+	require.NotEqual(t, hdareaMyBonusFixture, cht)
+	doc = FixtureDoc(t, "hdarea_mybonus_cht_size", cht)
+	assert.Equal(t, hdareaSeedingTotalBytes, driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["seedingSize"]))
+}
+
+// 走 GetUserInfo 全流程：做种体积读魔力值页的「做种总积」，不再读 getusertorrentlistajax.php
+// （本站这一页一次只回 25 行，要 page=0、1、2… 一页页翻，只读第一页时体积只有前 25 个种子的）；做种数仍取首页。
+func TestHdarea_GetUserInfo(t *testing.T) {
+	def := getHdareaDef(t)
+
+	var mu sync.Mutex
+	hits := map[string]int{}
+	page := func(body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			hits[r.URL.Path]++
+			mu.Unlock()
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	// 一页 25 行的做种列表：要是还读这一页，体积就只有这一页的
+	var list strings.Builder
+	list.WriteString(`<table data-count="579"><tr><td class="colhead">类型</td><td class="colhead">标题</td><td class="colhead">大小</td></tr>`)
+	for range 25 {
+		list.WriteString(`<tr><td>Movie</td><td>Some.Movie.2024.1080p-XX</td><td>1.00 GB</td></tr>`)
+	}
+	list.WriteString(`</table>`)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/index.php", page(hdareaIndexFixture))
+	mux.HandleFunc("/userdetails.php", page(hdareaUserdetailsFixture))
+	mux.HandleFunc("/mybonus.php", page(hdareaMyBonusFixture))
+	mux.HandleFunc("/getusertorrentlistajax.php", page(list.String()))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1", Selectors: def.Selectors})
+	driver.SetSiteDefinition(def)
+
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Zero(t, hits["/getusertorrentlistajax.php"], "做种体积已经从魔力值页读到，不取做种列表")
+	assert.Equal(t, 1, hits["/mybonus.php"])
+
+	want, err := strconv.ParseInt(hdareaSeedingTotalBytes, 10, 64)
+	require.NoError(t, err)
+	assert.Equal(t, want, info.SeederSize)
+	assert.Equal(t, 487, info.Seeding)
+	assert.InDelta(t, 424.49, info.BonusPerHour, 0.001)
 }
