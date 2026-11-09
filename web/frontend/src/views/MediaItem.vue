@@ -182,6 +182,7 @@ const original = computed(() => (info.value ? originalLine(info.value) : ""));
 const nas = computed(() => (detail.value ? nasLines(detail.value, sub.value) : []));
 /** 「在 Jellyfin 播放」：桌面在动作行里，手机在「你的 NAS 上」白卡底部 */
 const play = computed(() => (detail.value ? playTarget(detail.value) : null));
+const playLabel = computed(() => (play.value ? `在 ${play.value.name} 播放` : ""));
 const legend = computed(() => legendCounts(episodes.value));
 const now = ref(new Date());
 /** 开头连续已入库、可以收成一行的集数；展开以后这一行换成「收起」 */
@@ -245,6 +246,21 @@ const { width: pageWidth } = useElementSize(page);
 const nasInHero = computed(
   () => !isMobile.value && (pageWidth.value === 0 || pageWidth.value >= 1000),
 );
+/**
+ * 大图的按钮一行（画板 04 量的是 1144 宽的大图）在主区窄时放不下：右边界跟文字列一样，没有「你的 NAS 上」时离大图右边 28，
+ * 有时离 300（玻璃卡 248、右边 28、再空 24）。放不下时播放只留图标，重新刮削、删除收进「更多」（同手机）。
+ * 这一行不换行，量到的宽就是原宽；收起以后量到的是收起后的宽，所以用收起前最后一次量到的。量不到宽度（还没排版）时不收。
+ */
+const acts = ref<HTMLElement | null>(null);
+const { width: actsWidth } = useElementSize(acts);
+const fullActsWidth = ref(0);
+const compactActs = computed(() => {
+  if (isMobile.value || pageWidth.value === 0) return false;
+  return fullActsWidth.value > pageWidth.value - 224 - (nasInHero.value ? 300 : 28);
+});
+watch(actsWidth, (w) => {
+  if (!compactActs.value && w > 0) fullActsWidth.value = w;
+});
 /**
  * 桌面上演职员、推荐一行放得下几个放几个（画板 04：每格 108 加 8、海报 116 加 12），不露半个；
  * 演职员点「全部 N 位」展开成多行。手机横滑，全部列出。量不到宽度（还没排版）时不截。
@@ -580,7 +596,7 @@ const failedFaces = ref(new Set<string>());
           {{ info.overview }}
         </p>
         <div v-if="credits" class="mi-hero__credits" :title="credits">{{ credits }}</div>
-        <div class="mi-hero__acts" data-testid="mi-acts">
+        <div ref="acts" class="mi-hero__acts" data-testid="mi-acts">
           <button
             type="button"
             class="mi-btn mi-btn--primary"
@@ -629,16 +645,22 @@ const failedFaces = ref(new Set<string>());
             <span>{{ kind === "tv" ? "追剧" : "订阅" }}</span>
           </button>
           <template v-if="!isMobile">
-            <button
-              v-if="play"
-              type="button"
-              class="mi-btn mi-btn--glass"
-              data-testid="mi-play"
-              @click="openPlay(play.url)">
-              <PtIcon name="play" :size="15" />
-              <span>在 {{ play.name }} 播放</span>
-            </button>
-            <el-tooltip v-if="detail.nas.library.record_id" content="重新刮削" placement="top">
+            <el-tooltip v-if="play" :content="playLabel" placement="top" :disabled="!compactActs">
+              <button
+                type="button"
+                class="mi-btn mi-btn--glass"
+                :class="{ 'mi-btn--square': compactActs }"
+                :aria-label="compactActs ? playLabel : undefined"
+                data-testid="mi-play"
+                @click="openPlay(play.url)">
+                <PtIcon name="play" :size="compactActs ? 16 : 15" />
+                <span v-if="!compactActs">{{ playLabel }}</span>
+              </button>
+            </el-tooltip>
+            <el-tooltip
+              v-if="!compactActs && detail.nas.library.record_id"
+              content="重新刮削"
+              placement="top">
               <button
                 type="button"
                 class="mi-btn mi-btn--glass mi-btn--square"
@@ -649,7 +671,7 @@ const failedFaces = ref(new Set<string>());
                 <PtIcon name="rotate-ccw" :size="16" />
               </button>
             </el-tooltip>
-            <el-tooltip v-if="canDeleteItem" :content="deleteTip" placement="top">
+            <el-tooltip v-if="!compactActs && canDeleteItem" :content="deleteTip" placement="top">
               <button
                 type="button"
                 class="mi-btn mi-btn--glass mi-btn--square"
@@ -669,6 +691,21 @@ const failedFaces = ref(new Set<string>());
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <template v-if="compactActs">
+                    <el-dropdown-item
+                      v-if="detail.nas.library.record_id"
+                      command="rescrape"
+                      :disabled="rescraping"
+                      data-testid="mi-more-rescrape"
+                      >重新刮削</el-dropdown-item
+                    >
+                    <el-dropdown-item
+                      v-if="canDeleteItem"
+                      command="delete"
+                      data-testid="mi-more-delete"
+                      >{{ deleteTip }}</el-dropdown-item
+                    >
+                  </template>
                   <el-dropdown-item command="tmdb">在 TMDB 打开</el-dropdown-item>
                   <el-dropdown-item command="copy">复制 TMDB 编号</el-dropdown-item>
                   <el-dropdown-item command="organize" data-testid="mi-organize"
