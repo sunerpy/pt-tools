@@ -348,7 +348,7 @@ Then run `sudo systemctl restart docker`. ⚠️ The setting **only applies to c
 
 ### Backing up data
 
-**What to back up**: `torrents.db` (all settings and history) and `secret.key` (the key that encrypts site cookies and notification credentials). Back them up and restore them as one unit: a database restored without its original key leaves every saved cookie and notification credential unreadable.
+**What to back up**: `torrents.db` (all settings and history) and `secret.key` (the key that encrypts site cookies, notification credentials and API keys). Back them up and restore them as one unit: a database restored without its original key leaves every saved cookie, notification credential and API key unreadable.
 
 The database runs in WAL mode, so the latest writes may still be in `torrents.db-wal`. Stop pt-tools before copying:
 

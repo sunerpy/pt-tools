@@ -142,7 +142,7 @@ type Options struct {
 // ErrInvalid 是备份文件本身有问题（不是 pt-tools 的备份、内容被改过、数据库损坏、版本太新……）。
 var ErrInvalid = errors.New("备份文件不能用")
 
-// ErrKeyMismatch 是按密钥规则不能恢复：恢复以后生效的密钥解不开备份里保存的 Cookie 与通知凭证。
+// ErrKeyMismatch 是按密钥规则不能恢复：恢复以后生效的密钥解不开备份里加密保存的凭证（Cookie、通知凭证、API Key 等）。
 var ErrKeyMismatch = errors.New("密钥对不上")
 
 // ErrNotFound 是备份目录里没有这份备份（或者文件名不是这里起的）。

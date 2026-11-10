@@ -81,7 +81,7 @@ pt-tools db restore --cancel
 
 ## pt-tools secret
 
-导出或导入用于加密站点 Cookie 和通知凭证的密钥。
+导出或导入用于加密站点 Cookie、通知凭证和各类 API Key 的密钥。
 
 ```bash
 # 把密钥以 base64 文本输出到标准输出

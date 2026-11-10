@@ -36,7 +36,7 @@ Upgrading to a pre-release (an rc version) asks you to confirm first; unless you
 
 ## Backing up
 
-A backup is one `pt-tools-backup-<time>-<reason>.tar.gz` file. It holds a snapshot of the database (all configuration, sites, subscriptions, rules and history) and a description file, plus `secret.key` (the key that encrypts site cookies and notification credentials) when Include the key (带上密钥) is on. The snapshot can be taken while pt-tools is running; there is no need to stop it.
+A backup is one `pt-tools-backup-<time>-<reason>.tar.gz` file. It holds a snapshot of the database (all configuration, sites, subscriptions, rules and history) and a description file, plus `secret.key` (the key that encrypts site cookies, notification credentials and API keys) when Include the key (带上密钥) is on. The snapshot can be taken while pt-tools is running; there is no need to stop it.
 
 Backups are taken at these times:
 
@@ -52,12 +52,12 @@ The settings are under Global settings → Backup (全局设置 → 备份):
 - **Daily scheduled backup** (每天定时备份): on by default. When a scheduled backup fails, pt-tools sends a Backup failed (备份失败) notification to every enabled notification channel, at most once a day, and shows the reason in the Backup and restore (备份与恢复) panel. The pre-upgrade backup does not depend on this switch.
 - **Backup time** (备份时刻) and **Keep** (保留份数): Keep counts scheduled backups only.
 - **Backup folder** (备份目录): empty means `backups` in the data folder. It must be an absolute path; when you save, pt-tools writes a test file there to check that it can. On another disk or network storage, the backups survive a failure of the data disk. In Docker, mount this folder into the container.
-- **Include the key** (带上密钥): on by default. A backup that includes the key can be restored on another machine, or after the original key is lost, but anyone who gets it can decrypt the cookies and notification credentials saved in it, so keep it as carefully as the database. With the switch off, a backup holds the database only, and restoring it needs the key that was in use when it was taken.
+- **Include the key** (带上密钥): on by default. A backup that includes the key can be restored on another machine, or after the original key is lost, but anyone who gets it can decrypt the cookies, notification credentials and API keys saved in it, so keep it as carefully as the database. With the switch off, a backup holds the database only, and restoring it needs the key that was in use when it was taken.
 
 The Backup and restore (备份与恢复) panel further down the same page lists the backups in the backup folder; from there you can download, restore or delete them, or click Back up now (立即备份).
 
 > [!IMPORTANT]
-> Back up and restore the database and the key together. If you restore the database without its original key, the saved cookies and notification credentials cannot be decrypted.
+> Back up and restore the database and the key together. If you restore the database without its original key, the saved cookies, notification credentials and API keys cannot be decrypted.
 
 ### Command-line backup
 
@@ -130,7 +130,7 @@ Instead of a file, you can also supply the base64 key in the environment variabl
 pt-tools checks the key at startup and refuses to start, with the reason in the log, in two cases:
 
 - `secret.key` exists but cannot be read or is not in the expected format (64 hex characters). pt-tools does not overwrite it; put the right file back, or restore your backup with `secret import`.
-- `secret.key` does not exist, yet the database already holds encrypted cookies or notification credentials. This usually means only the database was restored, or the data directory is not mounted correctly; put the original `secret.key` back and start again. If the original key is really lost, start once with the environment variable `PT_TOOLS_ACCEPT_NEW_SECRET_KEY=1`: pt-tools switches to a new key, and you then enter the site cookies and notification credentials again.
+- `secret.key` does not exist, yet the database already holds encrypted credentials (cookies, notification credentials, API keys and so on). This usually means only the database was restored, or the data directory is not mounted correctly; put the original `secret.key` back and start again. If the original key is really lost, start once with the environment variable `PT_TOOLS_ACCEPT_NEW_SECRET_KEY=1`: pt-tools switches to a new key, and you then enter those credentials again.
 
 ## Removing old logs and staged files
 

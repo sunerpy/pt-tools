@@ -49,7 +49,7 @@ func checkGeneratedSecretKey(db *gorm.DB) error {
 	}
 	if os.Getenv(acceptNewSecretKeyEnv) == "1" {
 		if logger := global.GetSloggerSafe(); logger != nil {
-			logger.Warnf("已按 %s=1 启用新生成的 %s：原来加密保存的站点 Cookie 和通知凭证无法解密，需要重新填写",
+			logger.Warnf("已按 %s=1 启用新生成的 %s：原来加密保存的凭证（站点 Cookie、通知通道、各类 API Key 等）无法解密，需要重新填写",
 				acceptNewSecretKeyEnv, path)
 		}
 		return nil
@@ -59,7 +59,7 @@ func checkGeneratedSecretKey(db *gorm.DB) error {
 			logger.Warnf("删除新生成的 %s 失败: %v", path, derr)
 		}
 	}
-	return fmt.Errorf("%w：%s 原本不存在，新生成的密钥解不开已保存的站点 Cookie 和通知凭证。"+
+	return fmt.Errorf("%w：%s 原本不存在，新生成的密钥解不开已加密保存的凭证（站点 Cookie、通知通道、各类 API Key 等）。"+
 		"请把原来的 secret.key 放回 %s（或设置 PT_TOOLS_SECRET_KEY）后重启；"+
 		"确认原密钥已经丢失、愿意重新填写这些凭证时，设置 %s=1 启动一次",
 		ErrSecretKeyRegenerated, path, path, acceptNewSecretKeyEnv)

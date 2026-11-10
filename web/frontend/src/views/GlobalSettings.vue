@@ -649,8 +649,8 @@ async function save() {
                   data-testid="backup-secret-risk">
                   <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
                   <span
-                    >拿到带密钥的备份就能解开里面保存的站点 Cookie
-                    与通知凭证：备份文件要和数据库一样妥善保管，不要放到别人也读得到的地方</span
+                    >拿到带密钥的备份就能解开里面保存的站点 Cookie、通知凭证和 API
+                    Key：备份文件要和数据库一样妥善保管，不要放到别人也读得到的地方</span
                   >
                 </div>
                 <div v-if="backupView?.env_key" class="field-tip" data-testid="backup-env-key">

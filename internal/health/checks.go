@@ -717,12 +717,12 @@ func Secret(status func() (path string, generated bool, err error)) Check {
 		switch {
 		case err != nil:
 			it.Status, it.Detail = StatusFail, path+" 读不出来："+short(err.Error())
-			it.Hint = "换回原来的 secret.key，或用 pt-tools secret import 导入备份的密钥；不然存着的 Cookie 与通知凭证都解不开"
+			it.Hint = "换回原来的 secret.key，或用 pt-tools secret import 导入备份的密钥；不然存着的 Cookie、通知凭证和 API Key 都解不开"
 		case path == "":
 			it.Status, it.Detail = StatusOK, "用的是环境变量 PT_TOOLS_SECRET_KEY"
 		default:
 			if _, statErr := os.Stat(path); statErr != nil {
-				it.Status, it.Detail = StatusFail, path+" 不见了：现在的密钥只在内存里，重启以后存着的 Cookie 与通知凭证都解不开"
+				it.Status, it.Detail = StatusFail, path+" 不见了：现在的密钥只在内存里，重启以后存着的 Cookie、通知凭证和 API Key 都解不开"
 				it.Hint = "在「全局设置」的「备份」里打开「带上密钥」并保存，再在「备份与恢复」里点「立即备份」，把备份里的 secret.key 放回数据目录"
 				break
 			}
