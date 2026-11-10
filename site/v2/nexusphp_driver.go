@@ -109,7 +109,7 @@ func DefaultNexusPHPSelectors() SiteSelectors {
 		Seeders:            "td:nth-child(6)",
 		Leechers:           "td:nth-child(7)",
 		Snatched:           "td:nth-child(8)",
-		DiscountIcon:       "img.pro_free, img.pro_free2up, img.pro_50pctdown, img.pro_30pctdown, img.pro_2up",
+		DiscountIcon:       "img.pro_free, img.pro_free2up, img.pro_50pctdown, img.pro_50pctdown2up, img.pro_30pctdown, img.pro_2up",
 		DiscountEndTime:    "span.free_end_time, span[title*='结束']",
 		DownloadLink:       "a[href*='download.php']",
 		Category:           "td:nth-child(1) img",
@@ -2019,18 +2019,30 @@ func parseDiscountFromElement(elem *goquery.Selection, customMapping map[string]
 		}
 	}
 
+	// 没有站点自己的对照时按图标类名（pro_*）、文字模式的类名（twoup、halfdown…）与 alt 文字认。
+	// 组合优惠先比：pro_50pctdown2up 同时含「50pct」与「2up」，twouphalfdown 含「halfdown」，twoupfree 含「free」
+	has := func(keys ...string) bool {
+		for _, k := range keys {
+			if strings.Contains(combined, k) {
+				return true
+			}
+		}
+		return false
+	}
 	switch {
-	case strings.Contains(combined, "2xfree") || strings.Contains(combined, "free2up"):
+	case has("2xfree", "2x free", "free2up", "twoupfree"):
 		return Discount2xFree
-	case strings.Contains(combined, "free"):
+	case has("free"):
 		return DiscountFree
-	case strings.Contains(combined, "50pct") || strings.Contains(combined, "50%"):
+	case has("50pctdown2up", "2x50", "2x 50", "twouphalfdown"):
+		return Discount2x50
+	case has("50pct", "50%", "halfdown"):
 		return DiscountPercent50
-	case strings.Contains(combined, "30pct") || strings.Contains(combined, "30%"):
+	case has("30pct", "30%", "thirtypercent"):
 		return DiscountPercent30
-	case strings.Contains(combined, "70pct") || strings.Contains(combined, "70%"):
+	case has("70pct", "70%"):
 		return DiscountPercent70
-	case strings.Contains(combined, "2xup") || strings.Contains(combined, "2up"):
+	case has("2xup", "2up", "twoup"):
 		return Discount2xUp
 	default:
 		return DiscountNone

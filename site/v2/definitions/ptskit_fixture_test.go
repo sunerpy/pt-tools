@@ -113,7 +113,8 @@ func testPTSKITSearch(t *testing.T) {
 	assert.Equal(t, 806, items[0].Snatched)
 
 	assert.Equal(t, "35826", items[1].ID)
-	assert.Equal(t, v2.DiscountPercent50, items[1].DiscountLevel)
+	// pro_50pctdown2up 是 2X 50%（以前驱动的通用对照先命中「50pct」，读成了 50%）
+	assert.Equal(t, v2.Discount2x50, items[1].DiscountLevel)
 }
 
 func testPTSKITDetail(t *testing.T) {
