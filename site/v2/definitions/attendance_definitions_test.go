@@ -21,6 +21,7 @@ var attendanceUnsupported = map[string]string{
 	"springsunday": "没有签到",
 	"byrpt":        "没有签到",
 	"tjupt":        "禁止用脚本或程序签到",
+	"audiences":    "已取消签到",
 }
 
 // 不是 NexusPHP、但驱动自己实现了签到的站点：Rousi 走站点的签到接口，HDDolby 用 Cookie 打开 attendance.php。
