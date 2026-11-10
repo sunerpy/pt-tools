@@ -20,7 +20,7 @@
 
 ---
 
-pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流与 IYUU 辅种，订阅电影、追剧并整理进媒体库，每天签到、在封号前提醒，汇总各站点的数据，统一管理 qBittorrent 和 Transmission；手机 App、QQ、Telegram 与内置的 AI 助手都能查看和操作。内置 67 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
+pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流与 IYUU 辅种，订阅电影、追剧并整理进媒体库，每天签到、在封号前提醒，汇总各站点的数据，统一管理 qBittorrent 和 Transmission；手机 App、QQ、Telegram 与内置的 AI 助手都能查看和操作。内置 72 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/home-dark.webp" />
@@ -43,7 +43,7 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 
 ## 基础功能
 
-- **站点与搜索**：67 个内置站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey；在一个页面查看所有站点的上传量、分享率、做种、积分和等级进度；跨站点搜索的结果可以直接推送到下载器，也可以选一部电影或剧集按条目搜索。
+- **站点与搜索**：72 个内置站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey；在一个页面查看所有站点的上传量、分享率、做种、积分和等级进度；跨站点搜索的结果可以直接推送到下载器，也可以选一部电影或剧集按条目搜索。
 - **RSS 自动下载**：定时拉取订阅，用关键词、通配符或正则过滤标题；免费期结束时没下完的种子按每条订阅的设置暂停或删除。
 - **下载器**：可以添加多个 qBittorrent 和 Transmission，按 RSS 订阅、站点、默认下载器的顺序决定推送到哪一个；推送前检查剩余空间和站点做种容量，按做种时长、分享率等条件清理旧种子，并保护 H&R 种子；种子可以[转移](https://firlab.app/pt-tools/guide/torrent-transfer)到另一台下载器继续做种。
 - **ChatOps**：在 QQ（OneBot）和 Telegram 里查看状态、暂停或删除种子、增删 RSS 订阅、追剧，每条命令都记入操作审计；RSS 上新通知支持静默时段、合并摘要、失败重试和每小时配额。
@@ -150,7 +150,7 @@ Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在
 | [ChatOps](https://firlab.app/pt-tools/guide/chatops-quickstart)               | QQ、Telegram、绑定与 RSS 上新通知       |
 | [升级与备份](https://firlab.app/pt-tools/guide/upgrade)                       | 各安装方式的升级、备份与恢复            |
 | [数据与安全](https://firlab.app/pt-tools/reference/security)                  | 数据位置、加密范围、外连与部署建议      |
-| [支持站点](https://firlab.app/pt-tools/sites)                                 | 67 个内置站点及认证方式                 |
+| [支持站点](https://firlab.app/pt-tools/sites)                                 | 72 个内置站点及认证方式                 |
 | [请求新增站点](https://firlab.app/pt-tools/guide/request-new-site)            | 用扩展采集并脱敏提交站点数据            |
 | [常见问题](https://firlab.app/pt-tools/faq)                                   | 认证、RSS、下载器与数据库排障           |
 

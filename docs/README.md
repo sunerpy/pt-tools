@@ -20,7 +20,7 @@
 
 ### 站点与认证
 
-- [支持站点](sites.md)：当前 67 个内置站点、认证方式与适配备注。
+- [支持站点](sites.md)：当前 72 个内置站点、认证方式与适配备注。
 - [获取 Cookie / API Key](guide/get-cookie-apikey.md)：浏览器扩展同步与手动获取认证信息。
 - [浏览器扩展](guide/browser-extension.md)：PT Tools Helper 的安装、Cookie 同步与站点采集。
 - [站点登录状态与密钥备份](guide/site-login-monitoring.md)：登录状态监控、提醒策略、`secret.key` 备份与合规边界。

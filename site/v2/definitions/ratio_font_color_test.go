@@ -22,6 +22,7 @@ func TestAllSites_RatioIgnoresFontColor(t *testing.T) {
 		"lajidui": true, "lemonhd": true, "longpt": true, "nicept": true, "ourbits": true, "ptcafe": true,
 		"ptlover": true, "ptskit": true, "raingfh": true, "tmpt": true, "ubits": true, "xingyunge": true,
 		"zmpt": true, "gamegamept": true, "crabpt": true,
+		"kufei": true, "xingtan": true, "hdkylin": true, "oshenpt": true, "kelu": true,
 	}
 	seen := 0
 	colors := []string{"#ff0000", "#ee0000", "#dd0000", "#cc0000", "#bb0000", "#aa0000", "#990000", "#880000", "#770000", "#660000"}
