@@ -35,13 +35,41 @@ const (
 // ErrNoToken 表示没有配置 IYUU token。
 var ErrNoToken = errors.New("没有设置 IYUU token")
 
+// ErrTokenNotBound 表示 IYUU token 还没有绑定合作站点（#740）：IYUU 回 401「token未注册，请先绑定推荐站点」。
+// 这时站点列表照常能读，报告站点与查询都被拒绝；token 在哪个客户端里绑定过一次都算。
+var ErrTokenNotBound = errors.New("IYUU token 还没有绑定合作站点")
+
+// tokenNotBoundHint 接在 IYUU 的原话后面。绑定要用户在合作站点上的用户数字 ID 与 passkey（iyuuplus-dev 的
+// POST /reseed/users/bind），pt-tools 没有这个功能，所以写明到哪里绑定。
+const tokenNotBoundHint = "这个 token 还没有绑定合作站点：IYUU 要求先用你在一个合作站点上的用户数字 ID 与 passkey 激活它，" +
+	"可以在 IYUUPlus 的「管理中心 → 站点」里点「绑定合作站点」绑定一次，之后在 pt-tools 里就能用；pt-tools 暂时不能替你绑定"
+
 // APIError 是 IYUU 返回的非 0 code（限流除外）。
 type APIError struct {
 	Code int
 	Msg  string
 }
 
-func (e *APIError) Error() string { return fmt.Sprintf("IYUU 返回错误 %d: %s", e.Code, e.Msg) }
+func (e *APIError) Error() string {
+	s := fmt.Sprintf("IYUU 返回错误 %d: %s", e.Code, e.Msg)
+	if e.notBound() {
+		s += "。" + tokenNotBoundHint
+	}
+	return s
+}
+
+// Unwrap 让 errors.Is(err, ErrTokenNotBound) 认出要求先绑定合作站点的 401。
+func (e *APIError) Unwrap() error {
+	if e.notBound() {
+		return ErrTokenNotBound
+	}
+	return nil
+}
+
+// notBound 报告是不是 IYUU 要求先绑定合作站点：401，原话里说要绑定（别的 401 不算）。
+func (e *APIError) notBound() bool {
+	return e.Code == http.StatusUnauthorized && strings.Contains(e.Msg, "绑定")
+}
 
 // RateLimitError 是 IYUU 返回的 429：RetryAfter 之后再试。ResetAt 是限额重置的时刻（429 数据里的 X-RateLimit-Reset，
 // Unix 秒），Limit 是 X-RateLimit-Limit；没给时为零值（与 iyuuplus-dev 的 TooManyRequestsException 读的是同几个字段）。

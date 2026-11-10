@@ -44,6 +44,9 @@ type fakeIYUU struct {
 	queries int
 	// onReport 在 reportExisting 请求里调用（模拟这一轮运行中用户改了设置）
 	onReport func()
+	// reportCode 不为 0 时 reportExisting 回这个 code 与 reportMsg（模拟 token 没绑定合作站点）
+	reportCode int
+	reportMsg  string
 }
 
 func (f *fakeIYUU) server(t *testing.T) *httptest.Server {
@@ -61,6 +64,10 @@ func (f *fakeIYUU) server(t *testing.T) *httptest.Server {
 			f.reports++
 			if f.onReport != nil {
 				f.onReport()
+			}
+			if f.reportCode != 0 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": f.reportCode, "msg": f.reportMsg, "data": []any{}})
+				return
 			}
 			write(0, map[string]any{"sid_sha1": "sum-" + strings.Join(r.PostForm["sid_list[]"], ",")})
 		case "/reseed/index/index":
@@ -481,6 +488,18 @@ func TestRunPreconditions(t *testing.T) {
 	require.Len(t, res.Errors, 1)
 	assert.Contains(t, res.Errors[0], "下载器 9 不可用")
 	assert.Equal(t, 1, res.Downloaders)
+}
+
+// token 没绑定合作站点（#740）：报告站点时 IYUU 回 401，这一轮没法开始，原因里写明到哪里绑定。
+func TestRunTokenNotBound(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	e.iyuu.reportCode, e.iyuu.reportMsg = 401, "token未注册，请先绑定推荐站点"
+	_, err := e.svc.Run(context.Background(), RunOptions{})
+	require.ErrorIs(t, err, iyuu.ErrTokenNotBound)
+	assert.Contains(t, err.Error(), "向 IYUU 报告站点失败: IYUU 返回错误 401: token未注册，请先绑定推荐站点。")
+	assert.Contains(t, err.Error(), "「绑定合作站点」")
+	assert.Zero(t, e.iyuu.queries, "没报告成功就不查询")
 }
 
 func TestFiles(t *testing.T) {
