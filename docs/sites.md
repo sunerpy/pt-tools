@@ -1,8 +1,8 @@
 # 支持站点
 
-当前已适配 **67** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **72** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（63）
+### NexusPHP 系列（68）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                                         |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------------------- |
@@ -69,6 +69,11 @@
 | **PTzone**            | Cookie   | RSS、搜索、用户信息           | ✅       | ptzone.xyz（繁体界面，tg群内提交）                                           |
 | **PigGo**             | Cookie   | RSS、搜索、用户信息           | ✅       | 猪猪（piggo.me，副标题为裸文本节点，等级/H&R 待补采验证，issue #532）        |
 | **TJUPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 北洋园PT（不记下载量，全站 H&R；未报备的程序访问可能封号，禁止自动签到）     |
+| **库非**              | Cookie   | RSS、搜索、用户信息           | ✅       | kufei.org（种子页面没有 H&R 标记，pt-tools 不按 H&R 处理，issue #870）       |
+| **杏坛**              | Cookie   | RSS、搜索、用户信息           | ✅       | xingtan.one（书籍、课程资源，魔力值叫「杏仁值」，issue #880）                |
+| **HDKylin**           | Cookie   | RSS、搜索、用户信息           | ✅       | 麒麟（www.hdkyl.in，issue #881）                                             |
+| **OshenPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | www.oshen.win（issue #882）                                                  |
+| **Kelu**              | Cookie   | RSS、搜索、用户信息           | ✅       | our.kelu.one（成人内容；H&R 情况同库非，issue #861）                         |
 
 > [!WARNING]
 > 北洋园（TJUPT）规定：没在白名单里的程序、脚本用 Cookie 访问站点，会被警告或永久封号；站点自带的 RSS 不用报备。启用这个站点前，先在北洋园论坛的「机器人爬虫/程序脚本报备专帖」回帖报备 pt-tools（用途、用户 ID、IP 段、User-Agent、访问的页面与频率），管理组通过后再在 pt-tools 里启用。

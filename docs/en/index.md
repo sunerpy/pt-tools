@@ -62,7 +62,7 @@ home:
       - icon: globe
         title: Sites and statistics
         status: available
-        body: 67 built-in sites. The statistics page totals each site's upload, ratio, seeding and progress to the next class; you can search across sites and hear about a site before an inactive account is disabled.
+        body: 72 built-in sites. The statistics page totals each site's upload, ratio, seeding and progress to the next class; you can search across sites and hear about a site before an inactive account is disabled.
         evidence:
           kind: chips
           items: [Cookie, API key, Passkey]

@@ -62,7 +62,7 @@ home:
       - icon: globe
         title: 站点与数据
         status: available
-        body: 内置 67 个站点；用户统计页汇总每个站点的上传、分享率、做种与等级进度，跨站点搜索，长期没登录、快要封号之前提醒。
+        body: 内置 72 个站点；用户统计页汇总每个站点的上传、分享率、做种与等级进度，跨站点搜索，长期没登录、快要封号之前提醒。
         evidence:
           kind: chips
           items: [Cookie, API Key, Passkey]

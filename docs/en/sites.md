@@ -1,8 +1,8 @@
 # Supported sites
 
-**67** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi.
+**72** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi.
 
-### NexusPHP sites (63)
+### NexusPHP sites (68)
 
 | Site                  | Sign-in | Features                                   | Status | Notes                                                                                                                     |
 | --------------------- | ------- | ------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------- |
@@ -69,6 +69,11 @@
 | **PTzone**            | Cookie  | RSS, search, user info                     | ✅     | ptzone.xyz (Traditional Chinese interface; submitted in the Telegram group)                                               |
 | **PigGo**             | Cookie  | RSS, search, user info                     | ✅     | 猪猪 (piggo.me; the subtitle is a bare text node; class and H&R still need more samples to verify; issue #532)            |
 | **TJUPT**             | Cookie  | RSS, search, user info, class requirements | ✅     | 北洋园PT (no download counting, H&R on every torrent; unregistered tools risk a ban; no automatic sign-in)                |
+| **库非**              | Cookie  | RSS, search, user info                     | ✅     | Kufei (kufei.org; no torrent page carries an H&R mark, so pt-tools does not treat its torrents as H&R; issue #870)        |
+| **杏坛**              | Cookie  | RSS, search, user info                     | ✅     | XingTan (xingtan.one; books and courses; the bonus points are called 杏仁值; issue #880)                                  |
+| **HDKylin**           | Cookie  | RSS, search, user info                     | ✅     | 麒麟 (www.hdkyl.in; issue #881)                                                                                           |
+| **OshenPT**           | Cookie  | RSS, search, user info                     | ✅     | www.oshen.win (issue #882)                                                                                                |
+| **Kelu**              | Cookie  | RSS, search, user info                     | ✅     | our.kelu.one (adult content; H&R works as on 库非; issue #861)                                                            |
 
 > [!WARNING]
 > TJUPT warns or permanently bans accounts used by programs or scripts that access the site with your cookie unless the program is on its whitelist; the site's own RSS feed needs no registration. Before turning the site on, register pt-tools in the 机器人爬虫/程序脚本报备专帖 topic on the TJUPT forum (purpose, user ID, IP range, User-Agent, pages visited and how often), and turn it on in pt-tools after the staff approve it.

@@ -11,7 +11,7 @@ pt-tools is a self-hosted manager for private trackers (PT sites). It runs on yo
 
 pt-tools is a single program: the web interface and the background jobs run in the same process, and the data is kept in a local SQLite database. It depends on no hosted service.
 
-- **Sites**: every site you add is accessed with your own cookie, API key or passkey. 67 sites are built in; see [Supported sites](../sites.md).
+- **Sites**: every site you add is accessed with your own cookie, API key or passkey. 72 sites are built in; see [Supported sites](../sites.md).
 - **RSS subscriptions**: feeds are fetched at the interval you set, filtered by your rules or by freeleech status, and pushed to a downloader; see [RSS subscriptions](rss-subscription.md).
 - **Downloaders**: qBittorrent and Transmission, as many as you like. Free space and the site's seeding limit are checked before every push.
 - **Seeding**: [brush tasks](brush.md) pick new torrents to seed by your conditions and delete them by rules; [IYUU cross-seeding](reseed.md) seeds the same data on several sites; [torrent transfer](torrent-transfer.md) moves torrents to another downloader.

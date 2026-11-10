@@ -20,7 +20,7 @@
 
 ---
 
-pt-tools is a self-hosted manager for private trackers. It downloads from your RSS feeds, boosts your ratio and cross-seeds with IYUU, subscribes to films and follows series into your media library, checks in daily and reminds you before an inactive account is disabled, collects every site's statistics, and manages qBittorrent and Transmission in one place; the mobile app, QQ, Telegram and the built-in AI assistant can all check on it and act. It supports 67 sites out of the box and runs in Docker, on Linux and on Windows. The full documentation is at **[firlab.app/pt-tools/en](https://firlab.app/pt-tools/en/)**.
+pt-tools is a self-hosted manager for private trackers. It downloads from your RSS feeds, boosts your ratio and cross-seeds with IYUU, subscribes to films and follows series into your media library, checks in daily and reminds you before an inactive account is disabled, collects every site's statistics, and manages qBittorrent and Transmission in one place; the mobile app, QQ, Telegram and the built-in AI assistant can all check on it and act. It supports 72 sites out of the box and runs in Docker, on Linux and on Windows. The full documentation is at **[firlab.app/pt-tools/en](https://firlab.app/pt-tools/en/)**.
 
 The web interface is in Chinese; the screenshot below shows it with demo data.
 
@@ -45,7 +45,7 @@ Everything that changed is in [What's new in 1.0](https://firlab.app/pt-tools/en
 
 ## Core features
 
-- **Sites and search**: 67 built-in sites on NexusPHP, mTorrent, Gazelle, HDDolby, Rousi and other platforms, signed in with a cookie, an API key or a passkey. One page shows upload, download, ratio, seeding, bonus points and class progress for every site; search several sites at once and push results straight to a downloader, or pick a film or series and search by title.
+- **Sites and search**: 72 built-in sites on NexusPHP, mTorrent, Gazelle, HDDolby, Rousi and other platforms, signed in with a cookie, an API key or a passkey. One page shows upload, download, ratio, seeding, bonus points and class progress for every site; search several sites at once and push results straight to a downloader, or pick a film or series and search by title.
 - **RSS downloads**: feeds are fetched on a schedule, and filter rules match titles with keywords, wildcards or regular expressions. A torrent still downloading when its free period ends is paused or deleted, as its feed is set.
 - **Downloaders**: add several qBittorrent and Transmission instances; a torrent goes to the one bound to its RSS feed, then its site, then the default. Free space and the site's seeding capacity are checked before every push, old torrents are removed by seeding time, ratio and other conditions with H&R torrents kept, and torrents can be [transferred](https://firlab.app/pt-tools/en/guide/torrent-transfer) to another downloader to keep seeding.
 - **ChatOps**: from QQ (OneBot) or Telegram, check status, pause or delete torrents, add or remove RSS feeds and follow shows, with every command in the audit log. New-torrent notifications support quiet hours, digests, retries and an hourly limit.
@@ -152,7 +152,7 @@ The documentation site **[firlab.app/pt-tools/en](https://firlab.app/pt-tools/en
 | [ChatOps](https://firlab.app/pt-tools/en/guide/chatops-quickstart)                        | QQ, Telegram, binding and new-torrent notifications            |
 | [Upgrades and backups](https://firlab.app/pt-tools/en/guide/upgrade)                      | Upgrading, backing up and restoring each install               |
 | [Data and security](https://firlab.app/pt-tools/en/reference/security)                    | Where data lives, encryption, outbound connections             |
-| [Supported sites](https://firlab.app/pt-tools/en/sites)                                   | The 67 built-in sites and how each signs in                    |
+| [Supported sites](https://firlab.app/pt-tools/en/sites)                                   | The 72 built-in sites and how each signs in                    |
 | [Requesting a new site](https://firlab.app/pt-tools/en/guide/request-new-site)            | Collecting and submitting redacted site data                   |
 | [FAQ](https://firlab.app/pt-tools/en/faq)                                                 | Sign-in, RSS, downloader and database problems                 |
 
