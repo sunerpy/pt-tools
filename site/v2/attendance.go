@@ -271,6 +271,8 @@ func attendanceRequest(cfg *AttendanceConfig) (NexusPHPRequest, error) {
 
 // Attend 按站点的签到配置发一次请求，按页面文字判断结果。请求经驱动的 Execute，
 // 会话失效、权限错误等与其他页面请求的判断一致。
+// GET 的签到页里认不出结果、却有提交回本页的「立即签到」表单时（新版 NexusPHP，见 attendance_form.go），照按钮的做法提交一次再认；
+// 表单要填验证码时返回 ErrAttendanceCaptchaRequired。
 func (d *NexusPHPDriver) Attend(ctx context.Context) (AttendResult, error) {
 	cfg := ResolveAttendanceConfig(d.attendanceDefinition())
 	if cfg == nil {
@@ -293,7 +295,24 @@ func (d *NexusPHPDriver) Attend(ctx context.Context) (AttendResult, error) {
 	if result, ok := cfg.Match(attendancePageText(res.RawBody)); ok {
 		return result, nil
 	}
-	return AttendResult{}, fmt.Errorf("%w: 页面里没有签到成功或今日已签到的文字", ErrAttendanceUnrecognized)
+	if req.Method != http.MethodGet {
+		return AttendResult{}, unrecognizedAttendance(&res, "")
+	}
+	form, ok := findAttendanceForm(res.Document, req.Path)
+	if !ok {
+		return AttendResult{}, unrecognizedAttendance(&res, "")
+	}
+	if form.captcha {
+		return AttendResult{}, fmt.Errorf("%w: %s", ErrAttendanceCaptchaRequired, attendanceCaptchaReason)
+	}
+	submitted, err := d.Execute(ctx, NexusPHPRequest{Path: req.Path, Method: http.MethodPost, Params: form.values, Referer: req.Path})
+	if err != nil {
+		return AttendResult{}, attendanceRequestError(err, req.Path)
+	}
+	if result, ok := cfg.Match(attendancePageText(submitted.RawBody)); ok {
+		return result, nil
+	}
+	return AttendResult{}, unrecognizedAttendance(&submitted, "提交签到表单后")
 }
 
 // AttendanceUnsupportedReason 报告站点定义是否把签到标记为不支持，支持时返回空串。

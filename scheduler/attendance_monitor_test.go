@@ -541,6 +541,24 @@ func TestAttendance_PageNotFoundIsFinalForTheDay(t *testing.T) {
 	assert.Zero(t, got.Attempts, "a manual attempt does not count against the automatic ones")
 }
 
+// 新版 NexusPHP 的签到表单要填验证码：pt-tools 还不会填，重试也签不上，当天直接记失败，写明要去网页上签到。
+func TestAttendance_CaptchaFormIsFinalForTheDay(t *testing.T) {
+	rig := newAttendanceRig(t, time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), "kufei")
+	rig.sites["kufei"].err = fmt.Errorf("%w: 签到页要输入验证码（站点打开了签到验证码），pt-tools 暂不能自动签到，请在网页上签到", v2.ErrAttendanceCaptchaRequired)
+	rig.mon.Rand = func(int64) int64 { return 0 }
+	ctx := context.Background()
+	rig.mon.RunOnce(ctx)
+
+	row := rig.row(t, "kufei")
+	assert.Equal(t, models.AttendanceFailed, row.Status)
+	assert.Nil(t, row.NextAttemptAt)
+	assert.Equal(t, "签到页要输入验证码（站点打开了签到验证码），pt-tools 暂不能自动签到，请在网页上签到", row.LastError)
+
+	rig.at("12:00")
+	rig.mon.RunOnce(ctx)
+	assert.Equal(t, int32(1), rig.sites["kufei"].calls.Load(), "no more requests today")
+}
+
 // 别的驱动、要过一关的签到回 404 / 410 时没有换成 ErrAttendancePageNotFound：写状态码，同样说明为什么不再重试；5xx 照旧原样写出。
 func TestAttendanceErrorText_PageNotFound(t *testing.T) {
 	assert.Equal(t, "签到时站点返回 HTTP 410，站点没有这一页：站点多半改了签到方式，今天不再自动重试",
