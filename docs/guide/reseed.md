@@ -5,8 +5,19 @@
 ## 开启前
 
 - 需要 IYUU 的 token：在 IYUU 官网 [iyuu.cn](https://iyuu.cn/) 点「开始使用」，用微信扫码登录后拿到，详见 [IYUU 的说明](https://doc.iyuu.cn/)。
+- token 要先[绑定合作站点](#绑定合作站点)才能辅种。没绑定时站点列表照常能读，运行一轮会失败，原因是「向 IYUU 报告站点失败: IYUU 返回错误 401: token未注册，请先绑定推荐站点」。
 - 开启后，pt-tools 会把参与辅种的下载器里已下完种子的 info hash 发给 IYUU（`2025.iyuu.cn`）查询。
 - token 用与站点 Cookie 相同的密钥加密保存在本机；页面和接口都不显示它，只显示「已设置」。
+
+## 绑定合作站点
+
+IYUU 要求 token 先用你在一个合作站点（IYUU 推荐的站点）上的账号激活一次，之后才能报告站点、查询辅种。pt-tools 暂时不能替你绑定，要在 IYUU 的客户端 [IYUUPlus](https://github.com/ledccn/iyuuplus-dev) 里绑定：
+
+1. 在 IYUUPlus 里填上同一个 token，打开「管理中心 → 站点」，点「绑定合作站点」
+2. 选一个你有账号的合作站点，填用户数字 ID（在那个站点点自己的用户名，地址里 `userdetails.php?id=` 后面的数字，不是用户名）和绑定密钥（那个站点的 passkey；IYUUPlus 先算出它的 SHA-1 再发给 IYUU）
+3. 提示「绑定成功」以后回到 pt-tools，点「立即运行」
+
+绑定记在 token 上，一个 token 只要绑定一次；以前在 IYUUPlus 或别的客户端里用过这个 token 辅种的，已经绑定过了。
 
 ## 设置
 

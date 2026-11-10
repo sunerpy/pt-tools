@@ -5,8 +5,19 @@ IYUU cross-seeding (IYUU 辅种), under Download (下载), uses [IYUU](https://d
 ## Before you turn it on
 
 - You need an IYUU token: on the IYUU site [iyuu.cn](https://iyuu.cn/), click 开始使用 and sign in by scanning the code with WeChat to get one; see [IYUU's documentation](https://doc.iyuu.cn/) for details.
+- The token has to be [bound to a partner site](#binding-a-partner-site) before it can cross-seed. Until then the site list loads, but a round fails with 向 IYUU 报告站点失败: IYUU 返回错误 401: token未注册，请先绑定推荐站点 (reporting sites to IYUU failed: token not registered, bind a recommended site first).
 - When it is on, pt-tools sends the info hashes of the finished torrents in the participating downloaders to IYUU (`2025.iyuu.cn`).
 - The token is stored on this machine, encrypted with the same key as the site cookies; the page and the API never show it, only whether it is set.
+
+## Binding a partner site
+
+IYUU needs each token to be activated once with your account on one of its partner sites (the sites IYUU recommends) before it can report sites and query for cross-seeds. pt-tools can't bind a token for you yet, so bind it in [IYUUPlus](https://github.com/ledccn/iyuuplus-dev), IYUU's own client:
+
+1. Enter the same token in IYUUPlus, open 管理中心 → 站点 (Admin → Sites) and click 绑定合作站点 (Bind a partner site)
+2. Pick a partner site you have an account on, and fill in your numeric user ID there (click your user name on that site; it is the number after `userdetails.php?id=` in the address, not your user name) and the binding key (your passkey on that site; IYUUPlus sends IYUU only its SHA-1)
+3. Once it says 绑定成功 (bound), go back to pt-tools and click Run now (立即运行)
+
+The binding belongs to the token, so each token is bound only once; if you have cross-seeded with this token in IYUUPlus or another client before, it is already bound.
 
 ## Settings
 

@@ -17,9 +17,11 @@ import (
 
 // fakeIYUU 按 iyuuplus-dev 客户端的约定回应：校验 token 头、表单字段与 sha1。
 type fakeIYUU struct {
-	t        *testing.T
-	token    string
-	code     int // 不为 0 时所有接口都回这个 code
+	t     *testing.T
+	token string
+	code  int // 不为 0 时所有接口都回这个 code
+	// unbound 时报告站点与查询回 401「token未注册，请先绑定推荐站点」（token 没绑定合作站点），站点列表照常回
+	unbound  bool
 	data     map[string]any
 	lastForm map[string][]string
 }
@@ -41,6 +43,10 @@ func (f *fakeIYUU) server() *httptest.Server {
 		}
 		if f.code != 0 {
 			write(f.code, "服务器错误", map[string]any{})
+			return
+		}
+		if f.unbound && r.URL.Path != "/reseed/sites/index" {
+			write(401, "token未注册，请先绑定推荐站点", []any{})
 			return
 		}
 		switch r.URL.Path {
@@ -169,6 +175,35 @@ func TestClientErrors(t *testing.T) {
 	_, err = c4.Sites(ctx)
 	assert.ErrorContains(t, err, "不是 JSON")
 	assert.False(t, errors.Is(err, ErrNoToken))
+}
+
+// token 没绑定合作站点（#740）：站点列表照常能读，报告站点时 IYUU 回 401，错误里写明怎么绑定。
+func TestClientTokenNotBound(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeIYUU{t: t, token: "tok", unbound: true}
+	c := newClient(t, f)
+
+	sites, err := c.Sites(ctx)
+	require.NoError(t, err)
+	assert.Len(t, sites, 1)
+
+	_, err = c.ReportExisting(ctx, []int{1})
+	require.ErrorIs(t, err, ErrTokenNotBound)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr, "仍是 APIError：查询时按 IYUU 报错重新报告站点的逻辑不变")
+	assert.Equal(t, 401, apiErr.Code)
+	msg := err.Error()
+	assert.Contains(t, msg, "token未注册，请先绑定推荐站点", "保留 IYUU 的原话")
+	assert.Contains(t, msg, "绑定合作站点")
+	assert.Contains(t, msg, "IYUUPlus")
+
+	_, err = c.Query(ctx, []string{"aa"}, "s1")
+	assert.ErrorIs(t, err, ErrTokenNotBound)
+
+	// 别的 401（不是要求绑定）不加这段说明
+	other := &APIError{Code: 401, Msg: "token 无效"}
+	assert.NotErrorIs(t, other, ErrTokenNotBound)
+	assert.Equal(t, "IYUU 返回错误 401: token 无效", other.Error())
 }
 
 // 不跟随重定向：token 在自定义请求头里，跟过去就会发给别的地址。
