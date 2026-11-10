@@ -186,16 +186,7 @@ var HdkylinDefinition = &v2.SiteDefinition{
 		Leechers: "td.rowfollow:nth-child(7)",
 		Snatched: "td.rowfollow:nth-child(8)",
 		// 实测抓取到 pro_free / pro_free2up / pro_50pctdown，其余为 NexusPHP 通用促销图标类名
-		DiscountIcon: "img.pro_free, img.pro_free2up, img.pro_2up, img.pro_50pctdown, img.pro_50pctdown2up, img.pro_30pctdown",
-		// 驱动默认的对照里 pro_50pctdown2up 会先命中「50pct」当成 50%，这里按图标类名逐个对应（长的类名先比）
-		DiscountMapping: map[string]v2.DiscountLevel{
-			"pro_free":         v2.DiscountFree,
-			"pro_free2up":      v2.Discount2xFree,
-			"pro_2up":          v2.Discount2xUp,
-			"pro_50pctdown":    v2.DiscountPercent50,
-			"pro_50pctdown2up": v2.Discount2x50,
-			"pro_30pctdown":    v2.DiscountPercent30,
-		},
+		DiscountIcon:       "img.pro_free, img.pro_free2up, img.pro_2up, img.pro_50pctdown, img.pro_50pctdown2up, img.pro_30pctdown",
 		DownloadLink:       "a[href*='download.php']",
 		Category:           "td.rowfollow:nth-child(1) img[alt]",
 		UploadTime:         "td.rowfollow:nth-child(4) span[title]",

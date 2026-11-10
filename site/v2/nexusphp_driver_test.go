@@ -1348,6 +1348,14 @@ func TestParseDiscountFromElement_Branches(t *testing.T) {
 	assert.Equal(t, DiscountPercent70, parseDiscountFromElement(discountElem(t, "pro_70pctdown", "", ""), nil))
 	assert.Equal(t, Discount2xUp, parseDiscountFromElement(discountElem(t, "pro_2up", "", ""), nil))
 	assert.Equal(t, DiscountNone, parseDiscountFromElement(discountElem(t, "normal", "", ""), nil))
+	// 2X 50%：类名同时含「50pct」与「2up」，要先认成 2X 50%，不能当成 50%
+	assert.Equal(t, Discount2x50, parseDiscountFromElement(discountElem(t, "pro_50pctdown2up", "", ""), nil))
+	assert.Equal(t, Discount2x50, parseDiscountFromElement(discountElem(t, "", "", "2X 50%"), nil))
+	assert.Equal(t, Discount2x50, parseDiscountFromElement(discountElem(t, "twouphalfdown", "", ""), nil))
+	assert.Equal(t, DiscountPercent50, parseDiscountFromElement(discountElem(t, "", "", "50%"), nil))
+	assert.Equal(t, DiscountPercent50, parseDiscountFromElement(discountElem(t, "halfdown", "", ""), nil))
+	assert.Equal(t, Discount2xFree, parseDiscountFromElement(discountElem(t, "twoupfree", "", ""), nil))
+	assert.Equal(t, Discount2xUp, parseDiscountFromElement(discountElem(t, "twoup", "", ""), nil))
 
 	// custom mapping wins
 	custom := map[string]DiscountLevel{"specialtag": Discount2x50}
