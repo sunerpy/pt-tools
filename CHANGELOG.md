@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.56](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.55...v1.0.0-rc.56) (2026-11-10)
+
+
+### Features
+
+* **site:** 新增库非、杏坛、HDKylin、OshenPT、Kelu ([#884](https://github.com/sunerpy/pt-tools/issues/884)) ([0a6be10](https://github.com/sunerpy/pt-tools/commit/0a6be100adab50ca992521703815839705b2fd50))
+* 网页与手机 App 加 Star 提示，链到 GitHub 仓库 ([#875](https://github.com/sunerpy/pt-tools/issues/875)) ([6a50153](https://github.com/sunerpy/pt-tools/commit/6a5015367e2886a059f6e4e099621efc66a8e9f3))
+
+
+### Bug Fixes
+
+* **attendance:** 新版 NexusPHP 的「立即签到」表单提交一次，图片验证码交给 AI 识别；Audiences 已取消签到 ([#883](https://github.com/sunerpy/pt-tools/issues/883)) ([00bdaf5](https://github.com/sunerpy/pt-tools/commit/00bdaf5d843e104e9253d263bf52e91e2e1ded2e))
+* **media:** 条目详情页主区窄时大图的按钮一行放不下，播放只留图标，重新刮削与删除收进「更多」 ([#878](https://github.com/sunerpy/pt-tools/issues/878)) ([f207f1c](https://github.com/sunerpy/pt-tools/commit/f207f1c657b6e58b7f15c324486032c86ea80351))
+* **reseed:** IYUU token 没绑定合作站点时写明怎么绑定 ([#885](https://github.com/sunerpy/pt-tools/issues/885)) ([d1a80c3](https://github.com/sunerpy/pt-tools/commit/d1a80c30ed88a7fc7df9d407df738b95989dfc92)), closes [#740](https://github.com/sunerpy/pt-tools/issues/740)
+* **site:** 用户详情页的上传量、下载量与分享率没取到时按「传输」一行再找 ([#887](https://github.com/sunerpy/pt-tools/issues/887)) ([a1836a4](https://github.com/sunerpy/pt-tools/commit/a1836a44689fe3f4440ee51d816a40befbbe30aa))
+* **site:** 种子列表里的 2X 50% 不再读成 50% ([#886](https://github.com/sunerpy/pt-tools/issues/886)) ([4c4e404](https://github.com/sunerpy/pt-tools/commit/4c4e4042bd1244a90847f563d116e1b6a2341d9f))
+
 ## [1.0.0-rc.55](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.54...v1.0.0-rc.55) (2026-11-09)
 
 
