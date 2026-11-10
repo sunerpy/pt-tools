@@ -443,7 +443,8 @@ func TestAttendance_ChallengeSiteGetsSolver(t *testing.T) {
 
 	assert.Equal(t, models.AttendanceSigned, rig.row(t, "hdsky").Status)
 	assert.Equal(t, models.AttendanceSigned, rig.row(t, "hdtime").Status)
-	assert.EqualValues(t, 1, src.calls.Load(), "只给要过一关的站点取 AI")
+	// HDSky 写明要过一关；HDTime 走 NexusPHP 默认的签到页，新版签到页的表单可能带图片验证码，也备上 AI
+	assert.EqualValues(t, 2, src.calls.Load(), "AI prepared for both")
 
 	// 签到详情：要认验证码的站点记下借助 AI、调了几次模型、用掉多少 token；直接签到的没有
 	evs := rig.events(t)
@@ -541,10 +542,11 @@ func TestAttendance_PageNotFoundIsFinalForTheDay(t *testing.T) {
 	assert.Zero(t, got.Attempts, "a manual attempt does not count against the automatic ones")
 }
 
-// 新版 NexusPHP 的签到表单要填验证码：pt-tools 还不会填，重试也签不上，当天直接记失败，写明要去网页上签到。
+// 新版 NexusPHP 的签到表单要过人机验证（Turnstile 等）：AI 也过不了，重试也签不上，当天直接记失败，写明要去网页上签到。
 func TestAttendance_CaptchaFormIsFinalForTheDay(t *testing.T) {
 	rig := newAttendanceRig(t, time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), "kufei")
-	rig.sites["kufei"].err = fmt.Errorf("%w: 签到页要输入验证码（站点打开了签到验证码），pt-tools 暂不能自动签到，请在网页上签到", v2.ErrAttendanceCaptchaRequired)
+	const reason = "签到页要通过人机验证（Cloudflare Turnstile、reCAPTCHA 或 hCaptcha），AI 也过不了，请在网页上签到"
+	rig.sites["kufei"].err = fmt.Errorf("%w: %s", v2.ErrAttendanceCaptchaRequired, reason)
 	rig.mon.Rand = func(int64) int64 { return 0 }
 	ctx := context.Background()
 	rig.mon.RunOnce(ctx)
@@ -552,11 +554,52 @@ func TestAttendance_CaptchaFormIsFinalForTheDay(t *testing.T) {
 	row := rig.row(t, "kufei")
 	assert.Equal(t, models.AttendanceFailed, row.Status)
 	assert.Nil(t, row.NextAttemptAt)
-	assert.Equal(t, "签到页要输入验证码（站点打开了签到验证码），pt-tools 暂不能自动签到，请在网页上签到", row.LastError)
+	assert.Equal(t, reason, row.LastError)
 
 	rig.at("12:00")
 	rig.mon.RunOnce(ctx)
 	assert.Equal(t, int32(1), rig.sites["kufei"].calls.Load(), "no more requests today")
+}
+
+// 走默认签到页的 NexusPHP 站点签到时遇到图片验证码：有 AI 时由 AI 认，签到详情记成借助 AI；
+// 没开 AI 签到时当天记失败、不重试，原因写明要输入验证码、怎么打开 AI 签到。
+func TestAttendance_DefaultPageCaptchaUsesAI(t *testing.T) {
+	ctx := context.Background()
+	rig := newAttendanceRig(t, time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), "hdtime")
+	rig.sites["hdtime"].needsAI = true
+	rig.mon.SetSolver(&fakeSolverSource{})
+	rig.mon.Rand = func(int64) int64 { return 0 }
+	rig.mon.RunOnce(ctx)
+
+	assert.Equal(t, models.AttendanceSigned, rig.row(t, "hdtime").Status)
+	evs := rig.events(t)
+	require.Len(t, evs, 1)
+	assert.Equal(t, models.AttendanceMethodAICaptcha, evs[0].Method, "the AI read the captcha")
+	assert.Equal(t, 2, evs[0].AICalls)
+
+	off := newAttendanceRig(t, time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), "hdtime")
+	off.sites["hdtime"].needsAI = true
+	off.mon.SetSolver(&fakeSolverSource{err: errors.New("没有打开「用 AI 签到」：在「自动签到」页的签到设置里打开")})
+	off.mon.Rand = func(int64) int64 { return 0 }
+	off.mon.RunOnce(ctx)
+	row := off.row(t, "hdtime")
+	assert.Equal(t, models.AttendanceFailed, row.Status)
+	assert.Nil(t, row.NextAttemptAt)
+	assert.Contains(t, row.LastError, "识别验证码")
+	assert.Contains(t, row.LastError, "没有打开「用 AI 签到」")
+	evs = off.events(t)
+	require.Len(t, evs, 1)
+	assert.Equal(t, models.AttendanceMethodDirect, evs[0].Method, "no AI was used")
+}
+
+// 站点不是 NexusPHP 默认签到（签到标为不支持、不是 NexusPHP）时不取 AI。
+func TestAttendance_NoAIForSitesThatCannotShowTheForm(t *testing.T) {
+	rig := newAttendanceRig(t, time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), "mteam", "rousipro")
+	src := &fakeSolverSource{}
+	rig.mon.SetSolver(src)
+	rig.mon.Rand = func(int64) int64 { return 0 }
+	rig.mon.RunOnce(context.Background())
+	assert.Zero(t, src.calls.Load())
 }
 
 // 别的驱动、要过一关的签到回 404 / 410 时没有换成 ErrAttendancePageNotFound：写状态码，同样说明为什么不再重试；5xx 照旧原样写出。

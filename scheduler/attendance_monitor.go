@@ -162,21 +162,27 @@ func (m *AttendanceMonitor) SetSolver(src AttendanceSolverSource) {
 	m.mu.Unlock()
 }
 
-// withSolver 给要过一关的站点把 AI 放进 ctx；取不到时返回原因（不需要 AI 的站点返回 nil）。
+// withSolver 给签到可能要用 AI 的站点把 AI 放进 ctx，返回这次签到的时限；取不到 AI 时返回原因（用不上 AI 的站点返回 nil）。
+// 站点定义写明要过一关的站点总是要 AI；走 NexusPHP 默认签到的站点打开签到页才知道表单带不带验证码，
+// 所以有 AI 就备上（时限放宽到要等 AI 的长度），没有也照常签，真遇到验证码时才用上返回的原因。
 func (m *AttendanceMonitor) withSolver(ctx context.Context, siteName string) (context.Context, time.Duration, error) {
 	def, _ := v2.GetDefinitionRegistry().Get(siteName)
-	if v2.AttendanceChallengeOf(def) == "" {
+	if !v2.AttendanceMayUseAI(def) {
 		return ctx, attendanceAttemptTimeout, nil
+	}
+	timeout := attendanceAttemptTimeout
+	if v2.AttendanceChallengeOf(def) != "" {
+		timeout = attendanceChallengeTimeout
 	}
 	m.mu.Lock()
 	src := m.solver
 	m.mu.Unlock()
 	if src == nil {
-		return ctx, attendanceChallengeTimeout, errors.New("AI 助手没有启动，不能用 AI 签到")
+		return ctx, timeout, errors.New("AI 助手没有启动，不能用 AI 签到")
 	}
 	solver, err := src.AttendanceSolver(ctx)
 	if err != nil {
-		return ctx, attendanceChallengeTimeout, err
+		return ctx, timeout, err
 	}
 	return v2.WithAttendanceSolver(ctx, solver), attendanceChallengeTimeout, nil
 }
@@ -511,9 +517,14 @@ func (m *AttendanceMonitor) recordEvent(repo *models.SiteAttendanceRepository, s
 	started, finished time.Time, result v2.AttendResult, runErr error, cols map[string]any, usage *v2.AttendanceAIUsage,
 ) {
 	calls, model, prompt, completion := usage.Snapshot()
+	method := AttendanceMethodOf(siteName)
+	if calls > 0 && method == models.AttendanceMethodDirect {
+		// 站点定义没写要过一关，签到页却带了图片验证码，这次是 AI 认的
+		method = models.AttendanceMethodAICaptcha
+	}
 	ev := models.SiteAttendanceEvent{
 		SiteName: siteName, Day: day, Trigger: models.AttendanceTriggerAuto,
-		Method: AttendanceMethodOf(siteName), AIModel: model, AICalls: calls,
+		Method: method, AIModel: model, AICalls: calls,
 		PromptTokens: prompt, CompletionTokens: completion,
 		DurationMs: finished.Sub(started).Milliseconds(), StartedAt: started, FinishedAt: finished,
 	}
