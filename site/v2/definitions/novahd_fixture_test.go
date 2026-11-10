@@ -281,11 +281,53 @@ func testNovaHDUserInfo(t *testing.T) {
 
 // --- Standalone Tests (edge cases beyond suite scope) ---
 
+// novahdUserdetailsTransferFixture 按上游 NexusPHP userdetails.php 的写法：上传量、下载量与分享率都在「传输」一行里，
+// 没有单独的「上传量」一行（#752：这样的页面以前读成 0 B、0 B、0.00）。数值是编造的。
+const novahdUserdetailsTransferFixture = `<html><body>
+<table width="100%" border="1" cellspacing="0" cellpadding="5">
+<tr><td class="rowhead nowrap" valign="top" align="right">加入日期</td><td class="rowfollow" valign="top" align="left">2024-03-05 06:07:08 (<span title="2024-03-05 06:07:08">2年8月前</span>)</td></tr>
+<tr><td class="rowhead nowrap" valign="top" align="right">传输</td><td class="rowfollow" valign="top" align="left"><table border="0" cellspacing="0" cellpadding="0"><tr><td class="embedded"><strong>分享率</strong>:  <font color="#0d6d00">10.004</font></td><td class="embedded">&nbsp;&nbsp;<img src="pic/smilies/163.gif" alt="" /></td></tr><tr><td class="embedded"><strong>上传量</strong>:  12.345 TB</td><td class="embedded">&nbsp;&nbsp;<strong>下载量</strong>:  1.234 TB</td></tr></table></td></tr>
+<tr><td class="rowhead nowrap" valign="top" align="right">等级</td><td class="rowfollow" valign="top" align="left"><img alt="User" title="User" src="pic/user.gif" /></td></tr>
+<tr><td class="rowhead nowrap" valign="top" align="right">魔力值</td><td class="rowfollow" valign="top" align="left">385.0</td></tr>
+</table>
+</body></html>`
+
+// #752：NovaHD 的定义按分开的「上传量」几行写，站点上是标准的「传输」一行；驱动按「传输」一行的通用写法补上这三项。
+func TestNovaHDUserInfo_TransferRow(t *testing.T) {
+	def := getNovaHDDef(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/index.php":
+			_, _ = w.Write([]byte(novahdIndexFixture))
+		case "/userdetails.php":
+			_, _ = w.Write([]byte(novahdUserdetailsTransferFixture))
+		case "/getusertorrentlistajax.php":
+			// 首页说在做种时做种列表不能是空页（空页按体积没取到算）
+			_, _ = w.Write([]byte(`<b>42</b> 条记录 | 总大小：1.000 TB<table><tr><td>大小</td></tr><tr><td>1.000<br />TB</td></tr></table>`))
+		default:
+			_, _ = w.Write([]byte(`<html><body></body></html>`))
+		}
+	}))
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1"})
+	driver.SetSiteDefinition(def)
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(13573471044894), info.Uploaded, "12.345 TB")
+	assert.Equal(t, int64(1356797348675), info.Downloaded, "1.234 TB")
+	assert.InDelta(t, 10.004, info.Ratio, 0.0001)
+	assert.Equal(t, "User", info.LevelName)
+	assert.InDelta(t, 385.0, info.Bonus, 0.01)
+}
+
 func TestNovaHD_Fixtures_NoSecrets(t *testing.T) {
 	fixtures := map[string]string{
 		"search":      novahdSearchFixture,
 		"index":       novahdIndexFixture,
 		"userdetails": novahdUserdetailsFixture,
+		"transfer":    novahdUserdetailsTransferFixture,
 		"mybonus":     novahdMybonusFixture,
 		"detail":      novahdDetailFixture,
 		"detail_hr":   novahdDetailWithHRFixture,

@@ -2246,6 +2246,70 @@ func TestNexusPHPDriver_DefaultTrueTransfer(t *testing.T) {
 	assert.Zero(t, info.TrueDownloaded)
 }
 
+// 定义按分开的「上传量」「下载量」「分享率」几行写、站点用的是标准的「传输」一行时（#752 NovaHD：页面上都是 0 B、0.00），
+// 这一页要取的三项按「传输」一行的通用写法再找；「实际上传量」不当成「上传量」；定义取到了的不动。
+func TestNexusPHPDriver_GetUserInfo_TransferRowFallback(t *testing.T) {
+	transfer := `<table border="0" cellspacing="0" cellpadding="0"><tr><td class="embedded"><strong>分享率</strong>:  <font color="#0d6d00">10.004</font></td></tr>` +
+		`<tr><td class="embedded"><strong>实际上传量</strong>:  99.000 TB</td><td class="embedded">&nbsp;&nbsp;<strong>实际下载量</strong>:  88.000 GB</td></tr>` +
+		`<tr><td class="embedded"><strong>上传量</strong>:  12.345 TB</td><td class="embedded">&nbsp;&nbsp;<strong>下载量</strong>:  1.234 TB</td></tr></table>`
+	extra := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(`<html><body><table>
+				<tr><td class="rowhead nowrap" valign="top" align="right">传输</td><td class="rowfollow" valign="top" align="left">` + transfer + `</td></tr>` + extra + `
+			</table></body></html>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	def := &SiteDefinition{
+		ID: "npxfer", Name: "NPXfer", Schema: SchemaNexusPHP,
+		UserInfo: &UserInfoConfig{
+			Process: []UserInfoProcess{
+				{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+				{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: []string{"uploaded", "downloaded", "ratio"}},
+			},
+			Selectors: map[string]FieldSelector{
+				"id":         {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+				"name":       {Selector: []string{"a[href*='userdetails.php']"}},
+				"uploaded":   {Selector: []string{"td.rowhead:contains('上传量') + td"}, Filters: []Filter{{Name: "parseSize"}}},
+				"downloaded": {Selector: []string{"td.rowhead:contains('下载量') + td"}, Filters: []Filter{{Name: "parseSize"}}},
+				"ratio":      {Selector: []string{"td.rowhead:contains('分享率') + td font", "td.rowhead:contains('分享率') + td"}},
+			},
+		},
+	}
+	get := func() UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+
+	info := get()
+	assert.Equal(t, parseSize("12.345 TB"), info.Uploaded)
+	assert.Equal(t, parseSize("1.234 TB"), info.Downloaded)
+	assert.InDelta(t, 10.004, info.Ratio, 0.0001)
+
+	// 定义自己的写法取到了：照定义的
+	extra = `<tr><td class="rowhead">上传量</td><td>2.000 TB</td></tr><tr><td class="rowhead">下载量</td><td>1.000 TB</td></tr>` +
+		`<tr><td class="rowhead">分享率</td><td><font>2.000</font></td></tr>`
+	info = get()
+	assert.Equal(t, parseSize("2.000 TB"), info.Uploaded)
+	assert.Equal(t, parseSize("1.000 TB"), info.Downloaded)
+	assert.InDelta(t, 2.0, info.Ratio, 0.0001)
+
+	// 「传输」一行里只有实际上传 / 下载：不拿它们当上传量、下载量
+	extra = ""
+	transfer = `<strong>实际上传量</strong>:  99.000 TB <strong>实际下载量</strong>:  88.000 GB`
+	info = get()
+	assert.Zero(t, info.Uploaded)
+	assert.Zero(t, info.Downloaded)
+}
+
 // 详情页：免费且结束时间元素在、值解析不了时是 unknown 并记下原因；元素不在时有效性留空（Promotion 按零结束时间推出 unknown）
 func TestNexusPHPDriver_GetTorrentDetail_DiscountEndValidity(t *testing.T) {
 	pages := map[string]string{
