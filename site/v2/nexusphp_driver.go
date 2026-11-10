@@ -1482,6 +1482,19 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 		}
 	}
 
+	// 这一页要取的上传量、下载量、分享率按定义的写法没取到时，在「传输」一行按通用写法再找一次（#752 NovaHD：
+	// 定义按分开的「上传量」几行写，站点用的是标准的「传输」一行，页面上都是 0 B、0.00）。取到了的不动。
+	if strings.Contains(reqURL, "userdetails.php") {
+		for _, def := range defaultTransferSelectors {
+			if !slices.Contains(process.Fields, def.field) || result[def.field] != "" {
+				continue
+			}
+			if v := d.extractFieldValue(res.Document, def.selector); v != "" {
+				result[def.field] = v
+			}
+		}
+	}
+
 	return result, nil
 }
 
@@ -1511,6 +1524,37 @@ var defaultTrueTransferSelectors = []struct {
 		Filters: []Filter{
 			{Name: "regex", Args: []any{`(?:实际下载量|實際下載量|实际下载|實際下載|真实下载量|真實下載量|真实下载|真實下載)(?:</strong>|</b>)?(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTP]?i?B)`}},
 			{Name: "parseSize"},
+		},
+	}},
+}
+
+// defaultTransferSelectors 是「传输」一行里上传量、下载量与分享率的通用写法（上游 NexusPHP 的 userdetails.php：
+// <strong>上传量</strong>:  1.234 TB）。标签要紧跟在 <strong> / <b> 里，「实际上传量」不会被当成「上传量」。
+var defaultTransferSelectors = []struct {
+	field    string
+	selector FieldSelector
+}{
+	{"uploaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`<(?:strong|b)>\s*(?:上传量|上傳量)\s*</(?:strong|b)>(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTPE]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
+	{"downloaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`<(?:strong|b)>\s*(?:下载量|下載量)\s*</(?:strong|b)>(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTPE]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
+	{"ratio", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`<(?:strong|b)>\s*分享率\s*</(?:strong|b)>(?:<[^>]*>|[\s:：\x{00a0}]|&nbsp;)*([\d.,]+|无限|無限|∞|Inf)`}},
 		},
 	}},
 }
