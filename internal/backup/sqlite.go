@@ -120,6 +120,7 @@ func cipherCheck(db *gorm.DB, decrypt func(string) ([]byte, error)) (noCipher bo
 
 var errCannotDecrypt = errors.New("解不开")
 
+// columnLabel 是加密列所在表的中文叫法（校验失败时告诉用户是哪类凭证解不开）；不认识的表原样返回。
 func columnLabel(table string) string {
 	switch table {
 	case "site_settings":
@@ -128,6 +129,24 @@ func columnLabel(table string) string {
 		return "通知通道的凭证"
 	case "cloak_settings":
 		return "CloakBrowser 令牌"
+	case "media_libraries":
+		return "ChineseSubFinder 的 API Key"
+	case "nas_sources":
+		return "NAS 监控来源的密钥"
+	case "assistant_settings":
+		return "AI 助手的 API Key、代理或语音令牌"
+	case "media_settings":
+		return "TMDB、Fanart.tv、OMDb 的 Key 或媒体代理"
+	case "media_servers":
+		return "媒体服务器的令牌"
+	case "reseed_settings":
+		return "IYUU 令牌"
+	case "cookiecloud_settings":
+		return "CookieCloud 密码"
+	case "site_proxy_settings":
+		return "站点代理"
+	case "remote_settings":
+		return "远程访问的主机密钥"
 	}
 	return table
 }

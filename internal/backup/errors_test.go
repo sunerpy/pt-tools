@@ -17,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/sunerpy/pt-tools/models"
 )
 
 type tarEntry struct {
@@ -231,4 +233,28 @@ func TestSchemaVersionAndCipherCheck_EmptyDB(t *testing.T) {
 	assert.Equal(t, "通知通道的凭证", columnLabel("notification_conf"))
 	assert.Equal(t, "CloakBrowser 令牌", columnLabel("cloak_settings"))
 	assert.Equal(t, "x", columnLabel("x"))
+}
+
+// 加密列清单里的每张表都有中文叫法：校验失败时告诉用户是哪类凭证解不开，而不是表名。
+func TestColumnLabel_CoversEncryptedColumns(t *testing.T) {
+	for _, c := range models.EncryptedColumns {
+		assert.NotEqual(t, c.Table, columnLabel(c.Table), "%s 没有中文叫法", c.Table)
+	}
+}
+
+// 只有某个模块的密钥是密文时也要校验：解不开时报出是哪类凭证，解得开时不算「没有密文」。
+func TestCipherCheck_ModuleSecrets(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "media.db")), &gorm.Config{Logger: logger.Discard})
+	require.NoError(t, err)
+	defer closeDB(t, db)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}))
+	require.NoError(t, db.Create(&models.MediaSetting{ID: 1, TMDBKeyEncrypted: "b2xkLWNpcGhlcg=="}).Error)
+
+	_, err = cipherCheck(db, func(string) ([]byte, error) { return nil, errCannotDecrypt })
+	require.ErrorIs(t, err, errCannotDecrypt)
+	assert.Contains(t, err.Error(), "TMDB")
+
+	none, err := cipherCheck(db, func(string) ([]byte, error) { return []byte("k"), nil })
+	require.NoError(t, err)
+	assert.False(t, none, "库里有 TMDB Key 的密文，不能当成没有密文")
 }

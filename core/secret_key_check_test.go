@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -124,4 +125,26 @@ func TestCheckGeneratedSecretKey_DiscardFailureStillRejects(t *testing.T) {
 
 	err := checkGeneratedSecretKey(keyCheckDB(t, true))
 	require.ErrorIs(t, err, ErrSecretKeyRegenerated)
+}
+
+// 加密列清单里的每一列都算数：库里只有某个模块的密钥（AI 助手的 API Key、TMDB Key、远程访问的主机密钥等）是密文时，
+// 新生成的密钥同样解不开它们，拒绝启动。
+func TestCheckGeneratedSecretKey_EveryEncryptedColumnCounts(t *testing.T) {
+	cols := map[string][]string{}
+	for _, c := range models.EncryptedColumns {
+		cols[c.Table] = append(cols[c.Table], c.Column+" text")
+	}
+	for _, c := range models.EncryptedColumns {
+		t.Run(c.Table+"."+c.Column, func(t *testing.T) {
+			keyTestHome(t, nil)
+			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			// 表里放上清单列出的这张表的全部加密列（只有一列是密文）
+			require.NoError(t, db.Exec("CREATE TABLE "+c.Table+" (id integer primary key, "+strings.Join(cols[c.Table], ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+c.Table+" ("+c.Column+") VALUES (?)", "b2xkLWNpcGhlcg==").Error)
+			err = checkGeneratedSecretKey(db)
+			require.ErrorIs(t, err, ErrSecretKeyRegenerated)
+			assert.Contains(t, err.Error(), "API Key", "提示里写明不只是 Cookie 和通知凭证")
+		})
+	}
 }
