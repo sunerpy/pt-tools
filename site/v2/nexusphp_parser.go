@@ -184,6 +184,12 @@ func valueOrText(s *goquery.Selection, discountMapping map[string]DiscountLevel)
 	return stripTrailingPromotion(text, discountMapping)
 }
 
+// promotionTimeLeftPattern 匹配促销标记后面的剩余时间。上游 NexusPHP 详情页 h1 写成「标题&nbsp;&nbsp;&nbsp;[免费] 剩余时间：1天17时」
+// （functions.php 的 get_torrent_promotion_append，text_will_end_in：简体「剩余时间：」、繁体「剩餘時間：」、英文「 will end in 」）；
+// 有的站点写「优惠剩余时间」。
+var promotionTimeLeftPattern = regexp.MustCompile(`^(?:优惠|優惠)?(?:剩余时间|剩餘時間)|^(?i:will end in)`)
+
+// stripTrailingPromotion 去掉标题文字末尾的促销标记「[免费]」，限时促销时连同后面的剩余时间一起去掉。
 func stripTrailingPromotion(text string, discountMapping map[string]DiscountLevel) string {
 	runes := []rune(text)
 	for start := 0; start < len(runes); {
@@ -197,9 +203,12 @@ func stripTrailingPromotion(text string, discountMapping map[string]DiscountLeve
 			end++
 		}
 		suffix := strings.TrimSpace(string(runes[end:]))
-		if strings.HasPrefix(suffix, "[") && strings.HasSuffix(suffix, "]") &&
-			isKnownPromotionLabel(suffix[1:len(suffix)-1], discountMapping) {
-			return strings.TrimSpace(string(runes[:start]))
+		if label, rest, ok := strings.Cut(suffix, "]"); ok && strings.HasPrefix(label, "[") &&
+			isKnownPromotionLabel(label[1:], discountMapping) {
+			rest = strings.TrimSpace(rest)
+			if rest == "" || promotionTimeLeftPattern.MatchString(rest) {
+				return strings.TrimSpace(string(runes[:start]))
+			}
 		}
 		start = end
 	}
