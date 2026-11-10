@@ -46,7 +46,7 @@ var backupCmd = &cobra.Command{
 
 不带 --output 时放进「全局设置 → 备份」里的目录（默认 ~/.pt-tools/backups）。
 带不带密钥默认按备份设置，--no-secret 只备份数据库。带上密钥的备份要和数据库一样妥善保管：
-拿到它就能解开保存的站点 Cookie 与通知凭证。恢复用 pt-tools db restore。`,
+拿到它就能解开保存的站点 Cookie、通知凭证和 API Key。恢复用 pt-tools db restore。`,
 	Example: `  pt-tools db backup
   pt-tools db backup --output /mnt/backup/
   pt-tools db backup --output /mnt/backup/pt-tools.tar.gz --no-secret`,
@@ -102,7 +102,7 @@ func runDBBackup(ctx context.Context, out io.Writer, output string, noSecret boo
 	}
 	fmt.Fprintf(out, "已备份到 %s（%s）\n", info.Path, utils.FormatBytes(info.Size))
 	if info.Manifest.HasSecret {
-		fmt.Fprintln(out, "这份备份带了密钥：拿到它就能解开保存的站点 Cookie 与通知凭证，请妥善保管。")
+		fmt.Fprintln(out, "这份备份带了密钥：拿到它就能解开保存的站点 Cookie、通知凭证和 API Key，请妥善保管。")
 	} else {
 		fmt.Fprintln(out, "这份备份没带密钥：恢复时要有做备份时的 secret.key（或 PT_TOOLS_SECRET_KEY）。")
 	}

@@ -81,7 +81,7 @@ The key rules for a restore, how it is applied on restart and how a failure is r
 
 ## pt-tools secret
 
-Exports or imports the key that encrypts site cookies and notification credentials.
+Exports or imports the key that encrypts site cookies, notification credentials and API keys.
 
 ```bash
 # Print the key to standard output as base64 text

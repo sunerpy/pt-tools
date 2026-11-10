@@ -235,7 +235,7 @@ func (u *unpacked) check(active ActiveKey) (Plan, error) {
 	case u.manifest.HasSecret:
 		return plan, fmt.Errorf("%w：备份里的密钥解不开它自己数据库里的%s", ErrInvalid, errDetail(err))
 	default:
-		return plan, fmt.Errorf("%w：这份备份没带密钥，现在的密钥解不开它保存的 Cookie 与通知凭证（%s）。"+
+		return plan, fmt.Errorf("%w：这份备份没带密钥，现在的密钥解不开它保存的凭证（%s）。"+
 			"先用 pt-tools secret import 导入做备份时的密钥再恢复",
 			ErrKeyMismatch, errDetail(err))
 	}

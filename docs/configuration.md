@@ -348,7 +348,7 @@ docker run -d \
 
 ### 数据备份
 
-**备份内容**：`torrents.db`（全部配置和历史记录）和 `secret.key`（加密站点 Cookie 与通知凭证的密钥）。两者必须作为一个整体备份和恢复：只恢复数据库、没有原来的密钥时，已保存的 Cookie 和通知凭证都无法解密。
+**备份内容**：`torrents.db`（全部配置和历史记录）和 `secret.key`（加密站点 Cookie、通知凭证和各类 API Key 的密钥）。两者必须作为一个整体备份和恢复：只恢复数据库、没有原来的密钥时，已保存的 Cookie、通知凭证和 API Key 都无法解密。
 
 数据库运行时启用了 WAL 模式，最近的写入可能还在 `torrents.db-wal` 中，因此请先停止 pt-tools 再复制：
 

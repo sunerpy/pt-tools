@@ -90,7 +90,7 @@ func loadKeyLocked() {
 	keyFile := filepath.Join(home, ".pt-tools", "secret.key")
 	keyFilePath = keyFile
 	// 只有文件确实不存在时才生成新密钥。文件在却读不出或内容不对（被截断、写成了 base64、挂错了文件……）时，
-	// 覆盖它会让原密钥永久丢失，已加密的 Cookie 与通知凭证再也解不开，所以只记录错误，由启动检查拒绝启动。
+	// 覆盖它会让原密钥永久丢失，已加密的凭证（Cookie、通知凭证、API Key 等）再也解不开，所以只记录错误，由启动检查拒绝启动。
 	if _, err := os.Stat(keyFile); !errors.Is(err, fs.ErrNotExist) {
 		loadExistingKey(keyFile)
 		return
