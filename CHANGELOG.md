@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.57](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.56...v1.0.0-rc.57) (2026-11-11)
+
+
+### Features
+
+* **site:** 站点设置加「H&R 上传量达标」，下完以后上传够了也算 H&R 做满 ([#892](https://github.com/sunerpy/pt-tools/issues/892)) ([dada036](https://github.com/sunerpy/pt-tools/commit/dada036f3487081f37a48c486ecea06bd3900062))
+* **subscribe:** 订阅设置加「版本锁等满几天改用别的版本」，默认一直等 ([#894](https://github.com/sunerpy/pt-tools/issues/894)) ([30ee733](https://github.com/sunerpy/pt-tools/commit/30ee733d6a003ae51a4fa9350792e349ca0f8d3a))
+
+
+### Bug Fixes
+
+* **backup:** 密钥检查和备份校验补上漏掉的加密列 ([#888](https://github.com/sunerpy/pt-tools/issues/888)) ([2db1e1b](https://github.com/sunerpy/pt-tools/commit/2db1e1bc97b012877f97e5432f67a41cbb5ed14d))
+* **brush:** 优惠类型勾了免费以外的类型时读全部种子列表 ([#890](https://github.com/sunerpy/pt-tools/issues/890)) ([2277644](https://github.com/sunerpy/pt-tools/commit/2277644d8e99f630eb68b0275b0c354e2420268e))
+* **build:** Go 升到 1.26.11（标准库安全修复） ([#893](https://github.com/sunerpy/pt-tools/issues/893)) ([b450c45](https://github.com/sunerpy/pt-tools/commit/b450c458e298636c055fb7151ca17c24dbd3b5ca))
+* **subscribe:** 整理完一个种子以后马上刷新订阅 ([#891](https://github.com/sunerpy/pt-tools/issues/891)) ([858d5c8](https://github.com/sunerpy/pt-tools/commit/858d5c8835f428cd9dd6354ace50d15d161ed0b7))
+
 ## [1.0.0-rc.56](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.55...v1.0.0-rc.56) (2026-11-10)
 
 
