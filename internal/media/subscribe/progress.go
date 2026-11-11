@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -165,6 +166,7 @@ func (s *Service) refresh(ctx context.Context) {
 	for i := range rows {
 		s.refreshTorrent(ctx, &rows[i], set)
 	}
+	s.dropVanished(ctx, rows)
 	var subs []models.MediaSubscription
 	if err = s.cfg.DB.WithContext(ctx).Where("status = ?", models.MediaSubActive).Find(&subs).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 读取订阅失败: %v", err)
@@ -208,6 +210,17 @@ func (s *Service) setTorrent(ctx context.Context, id uint, status, msg string) {
 	}
 }
 
+// historyFor 是这个订阅种子的整理记录：再推过一次的（补当时没下的集）只算那以后的，之前那些集早就入库了，
+// 不能因为它们把这一次标成已入库。
+func (s *Service) historyFor(ctx context.Context, t *models.MediaSubscriptionTorrent) ([]models.MediaTransferHistory, error) {
+	hist, err := s.historyOf(ctx, t.InfoHash)
+	if err != nil || t.RepushedAt == nil {
+		return hist, err
+	}
+	at := *t.RepushedAt
+	return slices.DeleteFunc(hist, func(h models.MediaTransferHistory) bool { return h.CreatedAt.Before(at) }), nil
+}
+
 func (s *Service) historyOf(ctx context.Context, hash string) ([]models.MediaTransferHistory, error) {
 	var hist []models.MediaTransferHistory
 	if hash == "" {
@@ -224,7 +237,7 @@ func (s *Service) historyOf(ctx context.Context, hash string) ([]models.MediaTra
 // 返回这次是不是由它把种子标成了已入库：后台刷新、整理完成的回调与「重新整理」可能同时看同一个种子，
 // 标成已入库是按读到的状态做的条件更新（见 claimTorrent），只有一方成功，洗版替换也只跑一次。
 func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptionTorrent, set Settings) bool {
-	hist, err := s.historyOf(ctx, t.InfoHash)
+	hist, err := s.historyFor(ctx, t)
 	if err != nil {
 		return false
 	}
@@ -265,7 +278,7 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 			}
 		}
 		if retried {
-			if hist, err = s.historyOf(ctx, t.InfoHash); err != nil {
+			if hist, err = s.historyFor(ctx, t); err != nil {
 				return false
 			}
 		}
@@ -303,7 +316,7 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 	if s.cfg.Now().Sub(laterOf(t.CreatedAt, t.UpdatedAt)) > stuckAfter {
 		msg := "7 天还没整理入库，这些集重新算缺的"
 		if t.Adopted && strings.HasPrefix(t.SiteName, models.MediaAdoptedSitePrefix) {
-			msg = "认领的下载器里的种子 7 天还没整理入库（不是 pt-tools 推送的，自动整理不处理它：可以手动整理，或打开定期扫描），这些集重新算缺的"
+			msg = "认领的下载器里的种子 7 天还没整理入库（不是订阅推送的：可以手动整理，或在整理入库里打开定期扫描），这些集重新算缺的"
 		}
 		s.setTorrent(ctx, t.ID, models.MediaSubTorrentFailed, msg)
 	}

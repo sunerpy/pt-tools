@@ -504,9 +504,11 @@ func pushTorrent(ctx context.Context, target pushTarget, connect func() (downloa
 	if taskID == "" {
 		taskID = torrentHash
 	}
+	cols := pushedColumns(target, taskID, req.Policy, snap, decision)
+	maps.Copy(cols, freshAddColumns())
 	err = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
 		Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
-		Updates(pushedColumns(target, taskID, req.Policy, snap, decision)).Error
+		Updates(cols).Error
 	if err != nil {
 		// 种子已经加进下载器，不能报推送失败；把本地记账失败明确告诉调用方。承诺暂停的任务是暂停加入的，保持暂停
 		sLogger().Errorf("[PushTorrent] 种子已推送，但更新本地记录失败: site=%s, id=%s, %v", req.SiteID, req.TorrentID, err)
@@ -656,6 +658,12 @@ func adoptExistingTorrent(dl downloader.Downloader, target pushTarget, req PushT
 	}
 	sLogger().Infof("[PushTorrent] 种子已存在于下载器 %s，已记账: site=%s, id=%s, hash=%s, 补上次的记账=%v", target.Name, req.SiteID, req.TorrentID, hash, ours)
 	return res, nil
+}
+
+// freshAddColumns 是新加进下载器的种子另外要写的列：还没下完。以前下完过、删掉以后再推的也要等这一次下完——
+// 不清掉的话进度监控不再看它，完成事件不发，整理入库不整理这一次下的文件。下载器里本来就有的（补记账）不清。
+func freshAddColumns() map[string]any {
+	return map[string]any{"is_completed": false, "completed_at": nil, "progress": 0}
 }
 
 // pushedColumns 是加入成功后写进种子记录的列：下载器与任务编号、策略、资格快照与暂停计划。

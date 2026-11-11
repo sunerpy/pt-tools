@@ -17,6 +17,10 @@ const (
 	WorkDir = ".pt-tools"
 )
 
+// DownloadSourceBrush 是刷流任务推送的种子记录的 TorrentInfo.DownloadSource。刷流的种子按刷流规则随时会被删掉，
+// 追剧不把它们认领成某一集的来源。
+const DownloadSourceBrush = "brush"
+
 // TorrentInfo 表示种子信息
 type TorrentInfo struct {
 	ID             uint       `gorm:"primaryKey" json:"id"`

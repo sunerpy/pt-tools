@@ -527,6 +527,7 @@ func (s *Service) loop(ctx context.Context) {
 		if now.Sub(lastFill) >= fillCheck {
 			lastFill = now
 			s.scrapeFill(ctx)
+			s.scrapeRetry(ctx)
 		}
 		s.libCheckTick(ctx, &lc)
 	}

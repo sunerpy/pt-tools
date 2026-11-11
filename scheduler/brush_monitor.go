@@ -34,7 +34,7 @@ const (
 	// 采样只为低速规则保留；窗口最长 24 小时，留两倍
 	brushSampleRetention = 48 * time.Hour
 	brushPruneEvery      = time.Hour
-	brushSource          = "brush"
+	brushSource          = models.DownloadSourceBrush
 	// 一轮里连续这么多个种子文件下载或解析失败就停止加种
 	brushMaxFetchFailures = 3
 )

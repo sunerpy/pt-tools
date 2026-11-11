@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/sunerpy/pt-tools/internal/media/metadata"
 )
@@ -199,6 +200,35 @@ func TVShowNFO(it *metadata.Item) ([]byte, error) { return build(showDoc(it), ni
 
 // SeasonNFO 是一季的 NFO（<season>，放在季目录里，文件名 season.nfo）。
 func SeasonNFO(s *metadata.Season) ([]byte, error) { return build(seasonDoc(s), nil) }
+
+// 来源里还没有的一集的内容（FileResult.Lacks）。
+const (
+	LackEpisodeTitle = "集标题"
+	LackEpisodePlot  = "集简介"
+)
+
+// episodeLacks 是一个剧集文件（episode 到 end）的 NFO 里来源还没有的内容：有一集没有标题（写成「第 N 集」）、没有简介。
+// 刚播出的集 TMDB 常常过几天才补上。
+func episodeLacks(s *metadata.Season, episode, end int) []string {
+	title, plot := false, false
+	for n := episode; n <= max(end, episode); n++ {
+		ep := s.Episode(n)
+		if ep == nil || strings.TrimSpace(ep.Title) == "" {
+			title = true
+		}
+		if ep == nil || strings.TrimSpace(ep.Plot) == "" {
+			plot = true
+		}
+	}
+	var out []string
+	if title {
+		out = append(out, LackEpisodeTitle)
+	}
+	if plot {
+		out = append(out, LackEpisodePlot)
+	}
+	return out
+}
 
 // EpisodeNFO 是一个剧集文件的 NFO（<episodedetails>，多集的文件每集一段）。
 func EpisodeNFO(show *metadata.Item, s *metadata.Season, season, episode, end int) ([]byte, error) {

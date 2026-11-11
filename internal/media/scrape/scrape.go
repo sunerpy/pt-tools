@@ -43,6 +43,9 @@ type FileResult struct {
 	Status string
 	Err    string
 	SHA256 string
+	// Lacks 是写进这个 NFO 时来源里还没有的内容（「集标题」「集简介」，剧集的每一集才有）：NFO 照样写，标题兜底成
+	// 「第 N 集」；记成部分刮削，之后自动补刮
+	Lacks []string
 
 	// pre 是决定写这个文件时它的样子：写之前再看一次，变了（期间有人改了、新放了或锁定了）就不换
 	pre fileState
@@ -261,6 +264,7 @@ func (w Writer) Write(ctx context.Context, q metadata.Query, base *metadata.Item
 				docs = seasonDoc(res.Season(f.Season))
 			case NFOEpisode:
 				docs = episodeDoc(res.Item, res.Season(f.Season), f.Season, f.Episode, f.EpisodeEnd)
+				r.Lacks = episodeLacks(res.Season(f.Season), f.Episode, f.EpisodeEnd)
 			}
 			data, err := build(docs, olds[i])
 			if err == nil {

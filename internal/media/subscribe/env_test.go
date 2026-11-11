@@ -542,7 +542,7 @@ func newEnv(t *testing.T) *env {
 			if req.Meta != nil {
 				info.HasHR = req.Meta.HasHR
 			}
-			if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&info).Error; err != nil {
+			if err := db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}}, UpdateAll: true}).Create(&info).Error; err != nil {
 				return nil, err
 			}
 			return &ptinternal.PushTorrentResult{Success: true}, nil
