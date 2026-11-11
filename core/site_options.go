@@ -20,6 +20,7 @@ type SiteOptions struct {
 	DownloadLimitKBs  *int
 	SeedingCapacityGB *float64
 	HRSeedTimeH       *int
+	HRUploadRatio     *float64
 	Cookie            *string
 	APIKey            *string
 	Passkey           *string
@@ -110,6 +111,12 @@ func (s *ConfigStore) UpdateSiteOptions(site models.SiteGroup, o SiteOptions) er
 		}
 		cols["HRSeedTimeH"] = *o.HRSeedTimeH
 	}
+	if o.HRUploadRatio != nil {
+		if err := validateHRUploadRatio(*o.HRUploadRatio); err != nil {
+			return err
+		}
+		cols["HRUploadRatio"] = *o.HRUploadRatio
+	}
 	if len(cols) == 0 {
 		return nil
 	}
@@ -118,6 +125,14 @@ func (s *ConfigStore) UpdateSiteOptions(site models.SiteGroup, o SiteOptions) er
 	}
 	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
 	return nil
+}
+
+// validateHRUploadRatio 检查站点设置「H&R 上传量达标」（#542）：0 是不用，否则在 0.1 到 10 倍之间（NaN、无穷大都不收）。
+func validateHRUploadRatio(v float64) error {
+	if v == 0 || (v >= 0.1 && v <= 10) {
+		return nil
+	}
+	return errors.New("H&R 上传量达标要么是 0（不用），要么在 0.1 到 10 倍之间")
 }
 
 // UpdateRSSInSite 原地改站点下的一条 RSS 订阅（编号不变），按 AppendRSSToSite 的规则校验：名字与地址不能为空，
