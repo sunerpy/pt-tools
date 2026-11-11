@@ -1064,6 +1064,8 @@ type SiteConfigResponse struct {
 	DownloadLimitKBs   int     `json:"download_limit_kbs"`
 	SeedingCapacityGB  float64 `json:"seeding_capacity_gb"`
 	HRSeedTimeH        int     `json:"hr_seed_time_h"`
+	// HRUploadRatio 是「H&R 上传量达标」（#542）：下完以后上传量达到体积的这么多倍也算 H&R 达标，0 是不用
+	HRUploadRatio float64 `json:"hr_upload_ratio"`
 	// HRRuleBuiltin：站点定义里已经写了 H&R 做种时长，用户填的 HRSeedTimeH 只在定义算不出时才用
 	HRRuleBuiltin     bool               `json:"hr_rule_builtin"`
 	RSS               []models.RSSConfig `json:"rss"`
@@ -1099,6 +1101,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				DownloadLimitKBs:  sc.DownloadLimitKBs,
 				SeedingCapacityGB: sc.SeedingCapacityGB,
 				HRSeedTimeH:       sc.HRSeedTimeH,
+				HRUploadRatio:     sc.HRUploadRatio,
 				RSS:               sc.RSS,
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {
@@ -1222,6 +1225,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			DownloadLimitKBs:   sc.DownloadLimitKBs,
 			SeedingCapacityGB:  sc.SeedingCapacityGB,
 			HRSeedTimeH:        sc.HRSeedTimeH,
+			HRUploadRatio:      sc.HRUploadRatio,
 			RSS:                sc.RSS,
 		}
 		defRegistry := v2.GetDefinitionRegistry()

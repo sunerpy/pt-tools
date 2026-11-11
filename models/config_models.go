@@ -243,7 +243,9 @@ type SiteSetting struct {
 	DownloadLimitKBs  int     `gorm:"default:0" json:"download_limit_kbs"`
 	SeedingCapacityGB float64 `gorm:"default:0" json:"seeding_capacity_gb"` // 单站点刷流容量上限(GB)，0=不限制 (#405)
 	// HRSeedTimeH 是用户填的 H&R 做种要求（小时）：站点定义里没有 H&R 做种时长时用它（#727），0=未填
-	HRSeedTimeH       int       `gorm:"default:0" json:"hr_seed_time_h"`
+	HRSeedTimeH int `gorm:"default:0" json:"hr_seed_time_h"`
+	// HRUploadRatio 是用户填的「H&R 上传量达标」（#542）：种子下完以后，上传量达到体积的这么多倍也算 H&R 达标；0=不用
+	HRUploadRatio     float64   `gorm:"default:0" json:"hr_upload_ratio"`
 	AttendanceEnabled bool      `gorm:"default:false" json:"attendance_enabled"` // 每日自动签到，默认关闭；只经 ConfigStore.SetSiteAttendanceEnabled 写
 	IsBuiltin         bool      `json:"is_builtin"`
 	TemplateID        *uint     `gorm:"index" json:"template_id,omitempty"`
@@ -383,6 +385,7 @@ type SiteConfig struct {
 	DownloadLimitKBs  int         `json:"download_limit_kbs"`
 	SeedingCapacityGB float64     `json:"seeding_capacity_gb"`
 	HRSeedTimeH       int         `json:"hr_seed_time_h"`
+	HRUploadRatio     float64     `json:"hr_upload_ratio"`
 	RSS               []RSSConfig `json:"rss"`
 }
 type Config struct {

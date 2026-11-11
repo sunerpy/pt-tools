@@ -32,7 +32,7 @@ func TestAdmitBrushItem(t *testing.T) {
 		task   func(*models.BrushTask)
 		item   func(*v2.TorrentItem)
 		siteHR bool
-		hr     int
+		hr     brushHR
 		ok     bool
 		reason string
 	}{
@@ -61,9 +61,16 @@ func TestAdmitBrushItem(t *testing.T) {
 		{name: "种子带 H&R", item: func(i *v2.TorrentItem) { i.HasHR = true }, reason: "有 H&R"},
 		// M-Team 列表不填 HasHR：站点级开启 H&R 时整站视为 H&R，与 RSS 路径同一规则
 		{name: "HasHR 为空但站点级 H&R", siteHR: true, reason: "有 H&R"},
-		{name: "不排除 H&R 时放行", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, hr: 20, ok: true},
+		{name: "不排除 H&R 时放行", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, hr: brushHR{SeedTimeH: 20}, ok: true},
 		// 要求时长算不出来（站点开了 H&R 却没有时长规则）：删种规则判断不了什么时候能删，宁可不收
 		{name: "不排除 H&R 但要求时长未知：不收", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, reason: "H&R 要求的做种时长未知"},
+		// #542：站点设置里填了「H&R 上传量达标」时，时长未知的 H&R 种子按上传量判断什么时候能删，体积要已知
+		{name: "时长未知但填了上传量达标、体积已知：收", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, hr: brushHR{UploadRatio: 0.9}, ok: true},
+		{
+			name: "时长未知、填了上传量达标但体积未知：不收", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, hr: brushHR{UploadRatio: 0.9},
+			item: func(i *v2.TorrentItem) { i.SizeBytes = 0 }, reason: "H&R 做种时长未知，体积也未知，没法按上传量判断",
+		},
+		{name: "排除 H&R 时填了上传量达标也不收", siteHR: true, hr: brushHR{SeedTimeH: 72, UploadRatio: 0.9}, reason: "有 H&R"},
 		{name: "包含词命中副标题（大小写不敏感）", task: func(t *models.BrushTask) { t.IncludeKeywords = "国语\nREMUX" }, item: func(i *v2.TorrentItem) { i.Subtitle = "国语中字" }, ok: true},
 		{name: "包含词都不命中", task: func(t *models.BrushTask) { t.IncludeKeywords = "remux, 2160p" }, reason: "标题不含任何包含词"},
 		{name: "排除词命中", task: func(t *models.BrushTask) { t.ExcludeKeywords = "web-dl" }, reason: "标题含排除词 web-dl"},
@@ -110,6 +117,7 @@ func TestBrushRemoval(t *testing.T) {
 		bt      models.BrushTorrent
 		tor     downloader.Torrent
 		samples []models.BrushTorrentSample
+		hrRatio float64
 		remove  bool
 		reason  string
 	}{
@@ -160,6 +168,35 @@ func TestBrushRemoval(t *testing.T) {
 			name: "H&R 要求时长未知（0）：一律不删", task: func(t *models.BrushTask) { t.RemoveRatio = 1 },
 			bt: models.BrushTorrent{HasHR: true}, tor: downloader.Torrent{Progress: 1, Ratio: 5, SeedingTime: 1 << 30},
 		},
+		// #542：站点设置里填了「H&R 上传量达标」：下完、上传达到体积的这么多倍也算 H&R 做满，照常按删除条件判
+		{
+			name: "H&R 时长没满、下完以后上传够了：照常按规则删", task: func(t *models.BrushTask) { t.RemoveRatio = 1 },
+			bt:  models.BrushTorrent{HasHR: true, HRSeedTimeH: 72, SizeBytes: 10 * gib},
+			tor: downloader.Torrent{Progress: 1, SeedingTime: 3600, Ratio: 1.5, TotalUploaded: 15 * gib}, hrRatio: 0.9,
+			remove: true, reason: "分享率 1.50",
+		},
+		{
+			name: "H&R 上传够了但没下完：免费到期也不删", bt: models.BrushTorrent{FreeEndAt: &freeEnd, HasHR: true, HRSeedTimeH: 72, SizeBytes: 10 * gib},
+			tor: downloader.Torrent{Progress: 0.4, TotalUploaded: 20 * gib}, hrRatio: 0.9,
+		},
+		{
+			name: "H&R 时长未知、上传够了：照常按规则删", task: func(t *models.BrushTask) { t.RemoveRatio = 1 },
+			bt: models.BrushTorrent{HasHR: true, SizeBytes: 10 * gib}, tor: downloader.Torrent{Progress: 1, Ratio: 1.5, TotalUploaded: 15 * gib}, hrRatio: 0.9,
+			remove: true, reason: "分享率 1.50",
+		},
+		{
+			name: "H&R 时长未知、上传不够：不删", task: func(t *models.BrushTask) { t.RemoveSeedTimeH = 1 },
+			bt: models.BrushTorrent{HasHR: true, SizeBytes: 10 * gib}, tor: downloader.Torrent{Progress: 1, SeedingTime: 1 << 30, TotalUploaded: 5 * gib}, hrRatio: 0.9,
+		},
+		{
+			name: "H&R 记录里没有体积：按下载器给的体积算", task: func(t *models.BrushTask) { t.RemoveRatio = 1 },
+			bt: models.BrushTorrent{HasHR: true}, tor: downloader.Torrent{Progress: 1, Ratio: 1.5, TotalSize: 10 * gib, TotalUploaded: 15 * gib}, hrRatio: 0.9,
+			remove: true, reason: "分享率 1.50",
+		},
+		{
+			name: "没填上传量达标：上传再多也要做满时长", task: func(t *models.BrushTask) { t.RemoveRatio = 1 },
+			bt: models.BrushTorrent{HasHR: true, HRSeedTimeH: 72, SizeBytes: 10 * gib}, tor: downloader.Torrent{Progress: 1, Ratio: 5, SeedingTime: 3600, TotalUploaded: 50 * gib},
+		},
 		{
 			name: "累计上传比窗口起点小（计数清零）：这一轮不按低速删", task: func(t *models.BrushTask) { t.RemoveLowSpeedKBs = 100; t.RemoveLowSpeedWindowMin = 30 },
 			tor:     downloader.Torrent{Progress: 1, SeedingTime: 3600, TotalUploaded: 10},
@@ -180,7 +217,7 @@ func TestBrushRemoval(t *testing.T) {
 			if tc.task != nil {
 				tc.task(&tk)
 			}
-			remove, reason := brushRemoval(tk, tc.bt, tc.tor, tc.samples, brushNow)
+			remove, reason := brushRemoval(tk, tc.bt, tc.tor, tc.samples, tc.hrRatio, brushNow)
 			assert.Equal(t, tc.remove, remove, reason)
 			if tc.remove {
 				assert.Contains(t, reason, tc.reason)
@@ -210,7 +247,7 @@ func TestBrushRemoval_InactiveUsesDownloaderLastActivity(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			remove, reason := brushRemoval(task, tc.bt, downloader.Torrent{Progress: 1, LastActivity: tc.last}, nil, brushNow)
+			remove, reason := brushRemoval(task, tc.bt, downloader.Torrent{Progress: 1, LastActivity: tc.last}, nil, 0, brushNow)
 			assert.Equal(t, tc.remove, remove, reason)
 			if tc.remove {
 				assert.Equal(t, "已 7.0 小时没有上传或下载", reason, "文案不变")

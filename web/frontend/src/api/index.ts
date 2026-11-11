@@ -148,6 +148,8 @@ export interface SiteConfig {
   hr_seed_time_h?: number;
   /** 站点规则里已经写了 H&R 做种要求（这时不用填 hr_seed_time_h） */
   hr_rule_builtin?: boolean;
+  /** H&R 上传量达标（#542）：下完以后上传量达到体积的几倍也算 H&R 达标，0 = 不用 */
+  hr_upload_ratio?: number;
   rss: RSSConfig[];
   urls?: string[];
   web_url?: string;

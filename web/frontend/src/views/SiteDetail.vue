@@ -87,6 +87,7 @@ function emptySiteForm(): SiteConfig {
     download_limit_kbs: 0,
     seeding_capacity_gb: 0,
     hr_seed_time_h: 0,
+    hr_upload_ratio: 0,
     rss: [],
   };
 }
@@ -1060,6 +1061,20 @@ function ruleNameOf(id: number): string {
                   不知道要做种多久时，填站点要求的做种时长：刷流按它决定收不收 H&amp;R
                   种子、什么时候能删，自动删种在做满之前不删。保持 0 时，刷流不收 H&amp;R
                   种子，自动删种也不删它们。
+                </div>
+              </el-form-item>
+              <el-form-item label="H&R 上传量达标（倍）">
+                <el-input-number
+                  v-model="form.hr_upload_ratio"
+                  :min="0"
+                  :max="10"
+                  :step="0.1"
+                  controls-position="right"
+                  style="width: 100%"
+                  data-testid="site-hr-upload-ratio" />
+                <div class="field-tip">
+                  上传量达到种子体积的几倍也算 H&amp;R 达标（如 0.9），0
+                  是不用；只在站点规则写明可以这样达标时填。只算下完的种子
                 </div>
               </el-form-item>
             </div>
