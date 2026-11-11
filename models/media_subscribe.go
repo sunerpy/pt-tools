@@ -352,8 +352,11 @@ type MediaSubscribeSetting struct {
 	SubdirEnabled  bool   `gorm:"not null;default:false" json:"subdir_enabled"`
 	SubdirTemplate string `gorm:"size:255;not null;default:''" json:"subdir_template"`
 	// AIReviewEnabled 为真时推送订阅的候选以前让 AI 助手的模型复核；AIReviewScope 是 name（空串也是，只复核按名字对上的）或 all
-	AIReviewEnabled bool      `gorm:"column:ai_review_enabled;not null;default:false" json:"ai_review_enabled"`
-	AIReviewScope   string    `gorm:"column:ai_review_scope;size:8;not null;default:''" json:"ai_review_scope"`
+	AIReviewEnabled bool   `gorm:"column:ai_review_enabled;not null;default:false" json:"ai_review_enabled"`
+	AIReviewScope   string `gorm:"column:ai_review_scope;size:8;not null;default:''" json:"ai_review_scope"`
+	// UnlockAfterDays 是追剧开着版本锁时，一集等锁住的版本满几天以后改用别的版本（同用户点「这一集换别的版本」）；
+	// 0 是一直等（默认）
+	UnlockAfterDays int       `gorm:"not null;default:0" json:"unlock_after_days"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 

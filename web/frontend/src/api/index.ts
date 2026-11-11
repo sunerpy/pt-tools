@@ -4305,6 +4305,8 @@ export interface SubscribeSettings {
   ai_review_enabled: boolean;
   /** name 只复核按名字对上的（按 IMDb 编号对上的不问），all 全部 */
   ai_review_scope: "name" | "all";
+  /** 追剧开着版本锁时，一集等锁住的版本满几天以后改用别的版本（同「这一集换别的版本」）；0 是一直等 */
+  unlock_after_days: number;
 }
 
 export interface QualityProfile {

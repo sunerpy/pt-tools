@@ -178,6 +178,7 @@ const sform = ref<SubscribeSettings>({
   subdir_template: "{title} ({year})",
   ai_review_enabled: false,
   ai_review_scope: "name",
+  unlock_after_days: 0,
 });
 const settingsFailed = ref(false);
 const savingSettings = ref(false);
@@ -779,6 +780,21 @@ onBeforeUnmount(() => clearInterval(autoTimer));
                 </el-select>
               </el-form-item>
             </div>
+            <!-- 追剧的版本锁久等不到锁住的版本时：等满几天改用别的版本（0 是一直等） -->
+            <el-form-item label="版本锁等满几天改用别的版本">
+              <el-input-number
+                v-model="sform.unlock_after_days"
+                :min="0"
+                :max="90"
+                :step="1"
+                step-strictly
+                controls-position="right"
+                data-testid="ms-unlock-after-days" />
+              <div class="field-tip">
+                追剧开着版本锁时，一集等锁住的版本满这么多天（开始等以后至少搜过一次），就像点了「这一集换别的版本」一样改用别的版本，并马上搜一次；0
+                是一直等
+              </div>
+            </el-form-item>
             <!-- 媒体中心 M3：每天推送今天播出的集（同订阅日历的今天） -->
             <el-form-item label="今日更新">
               <div class="ms-switch">
