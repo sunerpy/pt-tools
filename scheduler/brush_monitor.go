@@ -649,13 +649,14 @@ func withProgress(bt models.BrushTorrent, t downloader.Torrent) models.BrushTorr
 // 只有一个分区读失败时另一个照常用，错误记进本轮结果；全都读失败才让这一轮失败。别的站点读一次。
 func (m *BrushMonitor) listBrushItems(ctx context.Context, site v2.Site, task models.BrushTask, res *BrushRunResult) ([]v2.TorrentItem, error) {
 	sections := brushSections(task, site.Kind())
+	freeOnly := brushListFreeOnly(task)
 	var items []v2.TorrentItem
 	var read []string
 	var failed []error
 	seen := map[string]bool{}
 	for _, section := range sections {
 		searchCtx, cancel := context.WithTimeout(ctx, brushSearchTimeout)
-		got, err := site.Search(searchCtx, v2.SearchQuery{FreeOnly: true, Section: section})
+		got, err := site.Search(searchCtx, v2.SearchQuery{FreeOnly: freeOnly, Section: section})
 		cancel()
 		if err != nil {
 			if len(sections) > 1 {
@@ -731,10 +732,13 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 		return err
 	}
 	res.Listed = len(items)
-	if res.Scope != "" {
+	switch {
+	case res.Scope != "":
 		res.step(brushStepList, "读取 %s：%d 个", res.Scope, len(items))
-	} else {
-		res.step(brushStepList, "读取 %s 的免费种子列表：%d 个", task.SiteName, len(items))
+	case brushListFreeOnly(*task):
+		res.step(brushStepList, "读取 %s 的免费种子列表第 1 页：%d 个", task.SiteName, len(items))
+	default:
+		res.step(brushStepList, "读取 %s 的全部种子列表第 1 页（本地按优惠类型挑）：%d 个", task.SiteName, len(items))
 	}
 
 	var def *v2.SiteDefinition
