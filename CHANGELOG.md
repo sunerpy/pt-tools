@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.58](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.57...v1.0.0-rc.58) (2026-11-11)
+
+
+### Bug Fixes
+
+* **media:** 追剧不认领刷流的种子、被删的种子马上重新找，缺集信息的刮削自动补 ([#895](https://github.com/sunerpy/pt-tools/issues/895)) ([ad14e2b](https://github.com/sunerpy/pt-tools/commit/ad14e2b74e9b8cda330621c4c5db56a2abf41bf0))
+
 ## [1.0.0-rc.57](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.56...v1.0.0-rc.57) (2026-11-11)
 
 
