@@ -114,7 +114,7 @@ Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在
 
 ### 从源码构建
 
-需要 Go `1.26.10`、Node.js `25.2.0` 和 pnpm `10.25.0`，运行 `make build-local`，详见[开发指南](docs/development.md)。
+需要 Go `1.26.11`、Node.js `25.2.0` 和 pnpm `10.25.0`，运行 `make build-local`，详见[开发指南](docs/development.md)。
 
 ## 快速开始
 
@@ -158,7 +158,7 @@ Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在
 
 ## 开发
 
-仓库固定使用 Go `1.26.10`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整的本地门禁：
+仓库固定使用 Go `1.26.11`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整的本地门禁：
 
 ```bash
 make check
