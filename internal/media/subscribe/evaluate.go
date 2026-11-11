@@ -316,6 +316,8 @@ type scored struct {
 	sp span
 	// titleOverSubtitle：副标题写错了期号，按标题的集号收下的（推送成功以后给这个组记集号规则）
 	titleOverSubtitle bool
+	// repush 不为空时这是订阅已经下载过的种子，再推一次补上推送时设成不下载、现在又缺了的集（见 repush.go）
+	repush *models.MediaSubscriptionTorrent
 }
 
 // evaluate 从候选种子里挑这个订阅要的并推送（调用方持有 s.mu），返回结果说明。剧集先重建台账（认领下载器里已有的种子），
@@ -347,10 +349,15 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 	var rejects []string
 	byKeywords, blocked := false, 0
 	for _, c := range cands {
-		if slices.ContainsFunc(linked, func(t models.MediaSubscriptionTorrent) bool {
+		// 订阅已经下载过的种子不再推；推送时设成不下载的集现在又缺了的例外，再推一次补上
+		var repush *models.MediaSubscriptionTorrent
+		if i := slices.IndexFunc(linked, func(t models.MediaSubscriptionTorrent) bool {
 			return strings.EqualFold(t.SiteName, c.Site) && t.TorrentID == c.Item.ID
-		}) {
-			continue
+		}); i >= 0 {
+			if !repushable(linked[i], lg) {
+				continue
+			}
+			repush = &linked[i]
 		}
 		sp, match, why := mt.matchMapped(c.Meta, c.Item)
 		if !match {
@@ -381,7 +388,7 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 			step(ctx, stepReject, "%s：%s", c.Item.Title, v.Reject)
 			continue
 		}
-		ok = append(ok, scored{c: c, v: v, sp: sp, titleOverSubtitle: mt.mapper.titleOverSubtitle(c.Meta, c.Item.Title, c.Item.Subtitle, sp)})
+		ok = append(ok, scored{c: c, v: v, sp: sp, titleOverSubtitle: mt.mapper.titleOverSubtitle(c.Meta, c.Item.Title, c.Item.Subtitle, sp), repush: repush})
 	}
 	if len(ok) == 0 {
 		switch {
@@ -796,6 +803,9 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		},
 		Policy:   policy,
 		Snapshot: snap,
+		// 再推的种子还在下载器里时照样按这次的策略与优惠记账：以前那次的免费早就结束了，按旧的记录改回没下完，
+		// 免费到期处理会马上暂停或删掉它
+		AdoptExisting: o.repush != nil,
 	})
 	if err != nil {
 		return fmt.Sprintf("推送 %s 失败：%v", o.c.Item.Title, err)
@@ -808,12 +818,31 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		}
 		return fmt.Sprintf("推送 %s 失败：%s", o.c.Item.Title, reason)
 	}
-	var kept []int
-	if plan != nil && len(plan.unwanted) > 0 && !res.Skipped {
+	var kept, skipped []int
+	switch {
+	case o.repush != nil && res.Skipped:
+		// 再推的种子还在下载器里：把缺的集的文件改回下载，下完时整理入库再整理这几集
+		mp := s.fileMapper(ctx, sub, o.c.Meta)
+		if plan != nil {
+			mp = plan.mp
+		}
+		got, n, werr := s.wantFiles(ctx, dlID, hash, mp, want)
+		switch {
+		case werr != nil:
+			return fmt.Sprintf("没能把 %s 里缺的集改回下载：%v", o.c.Item.Title, werr)
+		case n == 0:
+			return fmt.Sprintf("%s 里的 %s 本来就在下载，没有要改回的文件：可以在追剧详情里重新整理这个种子", o.c.Item.Title, episodeList(got))
+		}
+		kept = got
+		// 下载器里这个种子另外那些设成不下载的集照旧不下
+		skipped = slices.DeleteFunc(skippedOf(*o.repush), func(n int) bool { return slices.Contains(got, n) })
+		step(ctx, stepInfo, "%s 还在下载器里：把 %s 的文件改回下载", o.c.Item.Title, episodeList(got))
+		s.resetCompleted(ctx, o.c.Site, o.c.Item.ID)
+	case plan != nil && len(plan.unwanted) > 0 && !res.Skipped:
 		got, n, serr := s.selectFiles(ctx, dlID, hash, plan.mp, want)
 		switch {
 		case serr == nil && n > 0:
-			kept = got
+			kept, skipped = got, plan.unwanted
 			step(ctx, stepInfo, "只下缺的 %s：种子里另外 %d 个视频文件（%s）设成了不下载", episodeList(got), n, episodeList(plan.unwanted))
 		case errors.Is(serr, downloader.ErrCapabilityUnsupported):
 			step(ctx, stepInfo, "下载器不支持只下种子里的部分文件，整个种子都会下载（%s 不缺）", episodeList(plan.unwanted))
@@ -822,6 +851,18 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 		}
 	}
 	now := s.cfg.Now()
+	if o.repush != nil {
+		switch {
+		case len(kept) > 0:
+		case plan != nil && len(plan.wanted) > 0:
+			kept = plan.wanted
+		default:
+			kept = wantedSkipped(*o.repush, want)
+		}
+		s.markRepushed(ctx, o.repush, hash, dlID, kept, skipped, now)
+		s.notify(ctx, sub, o, set, kept)
+		return "下载了 " + o.c.Item.Title + "（再下一次，只下 " + episodeList(kept) + "）"
+	}
 	row := models.MediaSubscriptionTorrent{
 		SubscriptionID: sub.ID, SiteName: o.c.Site, TorrentID: o.c.Item.ID, InfoHash: hash, Title: truncate(o.c.Item.Title, 512),
 		Subtitle: truncate(o.c.Item.Subtitle, 512), Score: o.v.Score, Episode: o.sp.Start, EpisodeEnd: o.sp.End, Complete: o.sp.Whole,
@@ -833,9 +874,13 @@ func (s *Service) pushTorrent(ctx context.Context, sub *models.MediaSubscription
 	}
 	switch {
 	case len(kept) > 0:
-		// 只下了缺的集：种子里只算这几集
+		// 只下了缺的集：种子里只算这几集；设成不下载的集记下来，之后又缺了时再推一次补上
 		b, _ := json.Marshal(kept)
 		row.CoveredEpisodes = string(b)
+		if len(skipped) > 0 {
+			sb, _ := json.Marshal(skipped)
+			row.SkippedEpisodes = string(sb)
+		}
 	case o.sp.Whole && sub.MediaType == models.MediaKindTV:
 		// 整季包按种子的文件列表核对实际有哪几集：缺的集下一轮照常一集一集补
 		eps := []int(nil)

@@ -315,8 +315,13 @@ type MediaSubscriptionTorrent struct {
 	Complete   bool `gorm:"not null;default:false" json:"complete"`
 	// CoveredEpisodes 是整季包推送以后按种子的文件列表核对出的集（JSON 数组）；为空时按 Episode、EpisodeEnd、Complete 算
 	CoveredEpisodes string `gorm:"type:text;not null;default:''" json:"-"`
-	SizeBytes       int64  `gorm:"not null;default:0" json:"size_bytes"`
-	DownloaderID    uint   `gorm:"not null;default:0" json:"downloader_id"`
+	// SkippedEpisodes 是推送时在下载器里设成了不下载的集（JSON 数组，只下当时缺的集时才有）：这些集之后又缺了时
+	// 再推一次这个种子补上（见 repushable）
+	SkippedEpisodes string `gorm:"type:text;not null;default:''" json:"-"`
+	// RepushedAt 是为了补当时没下的集再推一次的时间：之后的整理记录才算这一次的（之前那些集早就入库了）
+	RepushedAt   *time.Time `json:"-"`
+	SizeBytes    int64      `gorm:"not null;default:0" json:"size_bytes"`
+	DownloaderID uint       `gorm:"not null;default:0" json:"downloader_id"`
 	// HasHR 是推送时知道的 H&R 要求（站点整站有，或者这个种子有）：洗版删旧种子时留着做种
 	HasHR bool `gorm:"not null;default:false" json:"has_hr"`
 	// Adopted 是推送时下载器里已经有这个种子（不是订阅加进去的）：洗版时不删

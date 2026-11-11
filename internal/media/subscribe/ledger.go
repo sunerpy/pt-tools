@@ -274,6 +274,18 @@ func recentHashes[T any](refs []T, of func(T) (uint, string, time.Time)) map[uin
 	return out
 }
 
+// brushPushed 报告下载器里的这个种子（info hash，小写）是刷流任务推送的。读不出来时当作是（不认领：
+// 最坏是追剧自己再下一份）。
+func (s *Service) brushPushed(ctx context.Context, hash string) bool {
+	var n int64
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.TorrentInfo{}).
+		Where("LOWER(torrent_hash) = ? AND download_source = ?", hash, models.DownloadSourceBrush).Count(&n).Error; err != nil {
+		s.cfg.Logger.Warnf("[订阅] 查种子是不是刷流下的失败: %v", err)
+		return true
+	}
+	return n > 0
+}
+
 // adoptedSite 是认领的下载器里的种子记在订阅种子表里的站点名。
 func adoptedSite(downloaderID uint) string {
 	return models.MediaAdoptedSitePrefix + strconv.FormatUint(uint64(downloaderID), 10)
@@ -328,6 +340,12 @@ func (s *Service) adopt(ctx context.Context, sub *models.MediaSubscription, set 
 			}
 		}
 		if !useful {
+			continue
+		}
+		// 刷流下的种子按刷流的规则随时会删（免费快到期、上传慢），认领了就挡住这几集、种子删了还要等很久才重新找
+		// （2026-11-04 刷流的季包被认领成第 44 集的来源，几小时后删了，这一集一直没下）
+		if s.brushPushed(ctx, hash) {
+			step(ctx, stepInfo, "%s 是刷流下的种子，刷流会按自己的规则删掉，不认领", t.Name)
 			continue
 		}
 		eps, sure := s.selectedEpisodes(ctx, mp.forTorrent(m), dl, t, sp)

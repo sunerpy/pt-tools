@@ -48,7 +48,9 @@ type fakeTMDB struct {
 	personDown bool
 	// groupDown 为真时剧集组（/tv/episode_group/…）回 503
 	groupDown bool
-	hits      map[string]int
+	// bareEpisodes 为真时最后生还者第 1 季的集还没有标题、简介与截图（刚播出，TMDB 还没补上）
+	bareEpisodes bool
+	hits         map[string]int
 }
 
 func (f *fakeTMDB) setDown(v bool) {
@@ -64,6 +66,7 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 		f.hits[r.URL.Path]++
 		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images")) || (f.detailsDown && r.URL.Path == "/3/movie/872585") ||
 			(f.personDown && strings.HasPrefix(r.URL.Path, "/3/person/")) || (f.groupDown && strings.HasPrefix(r.URL.Path, "/3/tv/episode_group/"))
+		bare := f.bareEpisodes
 		f.mu.Unlock()
 		if strings.HasPrefix(r.URL.Path, "/t/p/") {
 			w.Header().Set("Content-Type", "image/jpeg")
@@ -105,10 +108,13 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 		case r.URL.Path == "/3/tv/100088":
 			_, _ = w.Write([]byte(`{"id":100088,"name":"最后生还者","original_name":"The Last of Us","first_air_date":"2023-01-15","overview":"末日之后。",
 				"poster_path":"/tlou.jpg","backdrop_path":"/tlou-bd.jpg","number_of_seasons":2,"genres":[{"id":18,"name":"剧情"}],"origin_country":["US"],"external_ids":{"imdb_id":"tt3581920"}}`))
+		case r.URL.Path == "/3/tv/100088/season/1" && bare:
+			_, _ = w.Write([]byte(`{"season_number":1,"name":"第 1 季","poster_path":"/tlou-s1.jpg","air_date":"2023-01-15",
+				"episodes":[{"id":11,"episode_number":1,"name":"","air_date":"2023-01-15"},{"id":12,"episode_number":2,"name":"","air_date":"2023-01-22"}]}`))
 		case r.URL.Path == "/3/tv/100088/season/1":
 			_, _ = w.Write([]byte(`{"season_number":1,"name":"第 1 季","poster_path":"/tlou-s1.jpg","air_date":"2023-01-15",
-				"episodes":[{"id":11,"episode_number":1,"name":"当你迷失在黑暗中","still_path":"/e1.jpg","air_date":"2023-01-15"},
-				{"id":12,"episode_number":2,"name":"感染","still_path":"/e2.jpg","air_date":"2023-01-22"}]}`))
+				"episodes":[{"id":11,"episode_number":1,"name":"当你迷失在黑暗中","overview":"乔尔遇到了艾莉。","still_path":"/e1.jpg","air_date":"2023-01-15"},
+				{"id":12,"episode_number":2,"name":"感染","overview":"他们穿过城市。","still_path":"/e2.jpg","air_date":"2023-01-22"}]}`))
 		case r.URL.Path == "/3/tv/episode_group/"+tlouDVD:
 			// 最后生还者的 DVD 分季：第 2 组是第 2 季的第 1、3、2 集
 			_, _ = w.Write([]byte(`{"id":"` + tlouDVD + `","name":"DVD","type":3,"groups":[

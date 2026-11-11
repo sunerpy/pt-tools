@@ -145,6 +145,11 @@ type Service struct {
 	seasonAt map[uint]time.Time
 	// dls 缓存下载器的种子列表（认领下载器里的种子用）
 	dls dlCache
+	// gone 记下下载中的订阅种子在下载器里第一次看不到的时间（订阅种子的编号 → 时间，见 dropVanished）；
+	// reorg 记下再推过一次的种子上次由订阅让整理入库整理的时间（见 organizeRepushed）。都由 goneMu 保护
+	goneMu sync.Mutex
+	gone   map[uint]time.Time
+	reorg  map[uint]time.Time
 	// prunedAt 是上次清理运行记录的时间
 	pruneMu  sync.Mutex
 	prunedAt time.Time
@@ -198,7 +203,7 @@ func New(cfg Config) *Service {
 	}
 	return &Service{
 		cfg: cfg, offers: make(chan Candidate, offerQueue), cache: parseCache{m: map[string]parsed{}}, doubanBusy: map[uint]bool{},
-		seasonAt: map[uint]time.Time{}, dls: dlCache{m: map[uint]dlList{}}, doneAt: map[uint]time.Time{},
+		seasonAt: map[uint]time.Time{}, dls: dlCache{m: map[uint]dlList{}}, doneAt: map[uint]time.Time{}, gone: map[uint]time.Time{}, reorg: map[uint]time.Time{},
 		after: make(chan string, afterOrganizeQueue),
 	}
 }

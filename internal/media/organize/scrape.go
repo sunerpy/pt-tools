@@ -192,11 +192,19 @@ func (s *Service) recordScraped(ctx context.Context, targets []scrapeTarget, rep
 		problems := append(append([]string(nil), rep.Errors...), rep.Notes...)
 		failed, fine := 0, 0
 		var missing []string
+		lacking := false
 		for _, f := range rep.Files {
 			own := strings.HasPrefix(f.Path, stem+".") || strings.HasPrefix(f.Path, stem+"-")
 			shared := scrape.IsDirArtifact(filepath.Base(f.Path)) && slices.Contains(dirs, filepath.Dir(f.Path))
 			if !own && !shared {
 				continue
+			}
+			// 这一集的 NFO 写成了，只是来源里还没有集标题或简介：算部分刮削（之后自动补刮），说明里写明缺什么
+			for _, l := range f.Lacks {
+				lacking = true
+				if !slices.Contains(missing, l) {
+					missing = append(missing, l)
+				}
 			}
 			switch f.Status {
 			case scrape.FileFailed:
@@ -220,7 +228,7 @@ func (s *Service) recordScraped(ctx context.Context, targets []scrapeTarget, rep
 		}
 		status := models.MediaScrapeOK
 		switch {
-		case failed == 0 && len(rep.Errors) == 0:
+		case failed == 0 && len(rep.Errors) == 0 && !lacking:
 		case fine == 0:
 			status = models.MediaScrapeFailed
 		default:
