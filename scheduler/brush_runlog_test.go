@@ -68,7 +68,7 @@ func TestBrushRun_RecordsStepsAndCounts(t *testing.T) {
 	removed := stepTexts(run, brushStepRemove)
 	require.Len(t, removed, 1)
 	assert.True(t, strings.HasPrefix(removed[0], "T-done：分享率"), removed[0])
-	assert.Equal(t, []string{"读取 hdsky 的免费种子列表：3 个"}, stepTexts(run, brushStepList))
+	assert.Equal(t, []string{"读取 hdsky 的全部种子列表第 1 页（本地按优惠类型挑）：3 个"}, stepTexts(run, brushStepList))
 	assert.Equal(t, []string{
 		"任务名下在做 0 个种子（下载中 0 个，共 0.00 GB），今天已加入 2.00 GB",
 		"不符合条件 2 个、符合条件 1 个",

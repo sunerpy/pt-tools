@@ -71,8 +71,9 @@ func TestBrushMonitor_MTeamSections(t *testing.T) {
 			res, err := r.mon.RunTask(context.Background(), task.ID)
 			require.NoError(t, err)
 			assert.Equal(t, c.wantRead, searchedSections(r))
+			// M-Team 的驱动不看 FreeOnly（mtorrent_driver.go），请求和以前一样；标记按任务的优惠类型给
 			for _, q := range r.site.searches {
-				assert.True(t, q.FreeOnly)
+				assert.Equal(t, brushListFreeOnly(*task), q.FreeOnly)
 			}
 			assert.Equal(t, c.wantScope, res.Scope)
 			assert.Equal(t, len(c.wantAdded), res.Listed)

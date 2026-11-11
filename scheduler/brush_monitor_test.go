@@ -191,7 +191,7 @@ func TestBrushMonitor_AdmitsWithinLimits(t *testing.T) {
 	assert.Equal(t, 2, res.Added, "同时下载数上限 2")
 	assert.Contains(t, res.Stopped, "达到上限")
 	require.Len(t, r.site.searches, 1, "每个周期只请求一次列表")
-	assert.True(t, r.site.searches[0].FreeOnly)
+	assert.False(t, r.site.searches[0].FreeOnly, "默认的优惠类型（免费 + 2X 免费）读不带筛选的第一页，在本地挑")
 
 	require.Len(t, r.pushes, 2)
 	assert.Equal(t, "4", r.pushes[0].TorrentID, "下载人数多的先进")

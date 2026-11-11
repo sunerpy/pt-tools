@@ -72,6 +72,14 @@ func brushAllowedDiscounts(task models.BrushTask) map[v2.DiscountLevel]bool {
 	return out
 }
 
+// brushListFreeOnly 报告这一轮让站点只列免费种（NexusPHP 的 spstate=2、Unit3D 的 freeleech、Gazelle 的 freetorrent）：
+// 允许的优惠恰好只有「免费」时为真。勾了别的类型（默认就勾着 2X 免费）时读不带筛选的第一页，交给 admitBrushItem 在本地挑：
+// 站点的免费筛选只列「免费」，2X 免费、50% 这些读不到。M-Team 等不看这个标记、本来就在本地挑的站点不受影响。
+func brushListFreeOnly(task models.BrushTask) bool {
+	allowed := brushAllowedDiscounts(task)
+	return len(allowed) == 1 && allowed[v2.DiscountFree]
+}
+
 // brushRequiresFree 报告任务只收免费优惠（允许的优惠全是免费级别）：推送要求免费。
 func brushRequiresFree(task models.BrushTask) bool {
 	for lv := range brushAllowedDiscounts(task) {
