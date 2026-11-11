@@ -153,6 +153,9 @@ func (s *Service) OrganizeTorrent(ctx context.Context, subID, torrentID uint) (*
 		s.manualRun(ctx, &sub, fmt.Sprintf("重新整理「%s」没有成功：%v", t.Title, err))
 		return nil, err
 	}
+	// 整理已经排上（或做完）了：后面的读写不跟着请求取消。以前请求在这时取消（关了页面），失败的种子改不回等整理，
+	// 整理在后台做成了也一直留在失败（后台刷新与整理完成的回调都只看下载中的种子）
+	ctx = context.WithoutCancel(ctx)
 	// 标成失败的种子改回等整理（7 天从现在重新算），整理在后台排队时之后每一拍照样看它；整理成了的马上标成已入库
 	set, _ := s.Settings(ctx)
 	if t.Status == models.MediaSubTorrentFailed {

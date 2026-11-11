@@ -166,6 +166,8 @@ type Service struct {
 	// mediaFor 是订阅的条目与媒体库的查询（订阅服务在整理服务之后建好，见 SetMediaFor）
 	mediaMu  sync.RWMutex
 	mediaFor MediaFor
+	// afterOrganize 是整理完一个下载器里的种子、有文件入库以后的回调（订阅马上刷新这个种子，见 SetAfterOrganize）
+	afterOrganize func(infoHash string)
 }
 
 // SetMediaFor 接上订阅的条目与媒体库的查询（为空时都自动识别、按类型自动选库）。
@@ -173,6 +175,21 @@ func (s *Service) SetMediaFor(f MediaFor) {
 	s.mediaMu.Lock()
 	s.mediaFor = f
 	s.mediaMu.Unlock()
+}
+
+// SetAfterOrganize 接上整理完成的回调：后台 worker 每整理完一个下载器里的种子、有文件入库（新整理的或本来就整理好的）以后
+// 调用它，参数是下载器读出来的小写 info hash（不是任务编号：Transmission 的任务编号是十进制数字）。不管有没有人在等这次整理
+// 的结果都调（手动整理等不到先回了、请求取消了也一样）；回调在 worker 里同步调用，不能阻塞。为空时不调。
+func (s *Service) SetAfterOrganize(f func(infoHash string)) {
+	s.mediaMu.Lock()
+	s.afterOrganize = f
+	s.mediaMu.Unlock()
+}
+
+func (s *Service) afterOrganizeHook() func(string) {
+	s.mediaMu.RLock()
+	defer s.mediaMu.RUnlock()
+	return s.afterOrganize
 }
 
 func (s *Service) followMedia() MediaFor {
