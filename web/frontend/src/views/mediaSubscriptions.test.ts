@@ -124,6 +124,7 @@ const settings = {
   subdir_template: "{title} ({year})",
   ai_review_enabled: false,
   ai_review_scope: "name",
+  unlock_after_days: 0,
 };
 
 const base = {
@@ -846,6 +847,33 @@ describe("订阅", () => {
       today_time: "21:15",
       today_channels: [2],
     });
+  });
+
+  it("设置：版本锁等满几天改用别的版本，默认 0 是一直等；改了以后随设置一起保存", async () => {
+    await mountPage();
+    const field = q("ms-unlock-after-days")!;
+    const input = (field.querySelector("input") ?? field) as HTMLInputElement;
+    expect(input.value).toBe("0");
+    const item = field.closest(".el-form-item") as HTMLElement;
+    expect(item.textContent).toContain("这一集换别的版本");
+    expect(item.textContent).toContain("0 是一直等");
+    input.value = "7";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    api.saveSettings.mockResolvedValue({ ...settings, unlock_after_days: 7 });
+    q("ms-save-settings")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({ ...settings, unlock_after_days: 7 });
+  });
+
+  it("设置：读到的等满几天照样显示", async () => {
+    api.settings.mockResolvedValue({ ...settings, unlock_after_days: 5 });
+    await mountPage({ keepSettings: true });
+    const field = q("ms-unlock-after-days")!;
+    expect((field.querySelector("input") ?? field) as HTMLInputElement).toHaveProperty(
+      "value",
+      "5",
+    );
   });
 
   it("设置没读到时不能保存，避免用默认值盖掉真正的设置", async () => {

@@ -182,6 +182,17 @@ func (s *Service) refresh(ctx context.Context) {
 				s.cfg.Logger.Debugf("[订阅] 重建「%s」的追剧台账失败: %v", sub.Title, err)
 				continue
 			}
+			// 等版本满了设置的天数的集改用别的版本：放开以后再重建一次，这几集回到「缺」，不再提醒，同一拍后面的搜索马上找
+			if s.autoUnlock(ctx, sub, lg, set) {
+				s.mu.Lock()
+				nlg, rerr := s.rebuildLedger(ctx, sub, rebuildOpts{set: set})
+				s.mu.Unlock()
+				if rerr != nil {
+					s.cfg.Logger.Debugf("[订阅] 重建「%s」的追剧台账失败: %v", sub.Title, rerr)
+					continue
+				}
+				lg = nlg
+			}
 			s.remindWaiting(ctx, sub, lg, set)
 		}
 		s.checkDone(ctx, sub, set, lg)

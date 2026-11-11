@@ -199,3 +199,56 @@ func (s *Service) remindWaiting(ctx context.Context, sub *models.MediaSubscripti
 		s.cfg.Logger.Warnf("[订阅] 记下提醒时间失败: %v", err)
 	}
 }
+
+// autoUnlock 是设置里的「等满几天改用别的版本」（UnlockAfterDays，0 是一直等，默认）：台账重建以后，等锁住的版本满这么多天、
+// 开始等以后也搜过一次的集，像用户点「这一集换别的版本」一样不再受版本锁限制（写 manual_unlock），订阅马上搜一次，
+// 记一条运行记录。用户已经放开的集不算。有集放开时返回真，调用方重建台账，让这几集回到「缺」。
+func (s *Service) autoUnlock(ctx context.Context, sub *models.MediaSubscription, lg *ledger, set Settings) bool {
+	if lg == nil || set.UnlockAfterDays <= 0 {
+		return false
+	}
+	g, r, ok := lockOf(sub)
+	if !ok {
+		return false
+	}
+	now := s.cfg.Now()
+	wait := time.Duration(set.UnlockAfterDays) * 24 * time.Hour
+	var unlocked []int
+	for _, row := range lg.rows {
+		if row.State != models.MediaEpisodeWaitingVersion || row.ManualUnlock || row.WaitingSince == nil {
+			continue
+		}
+		// 开始等以后搜过一次还没有才算（同 remindWaiting）
+		if sub.LastSearchAt == nil || !sub.LastSearchAt.After(*row.WaitingSince) || now.Sub(*row.WaitingSince) < wait {
+			continue
+		}
+		// 条件更新：用户刚好也点了「这一集换别的版本」时只算一次
+		res := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscriptionEpisode{}).
+			Where("subscription_id = ? AND episode = ? AND manual_unlock = ?", sub.ID, row.Episode, false).
+			Updates(map[string]any{"manual_unlock": true, "updated_at": now})
+		if res.Error != nil {
+			s.cfg.Logger.Warnf("[订阅] 按设置放开「%s」第 %d 集的版本锁失败: %v", subTitle(sub), row.Episode, res.Error)
+			continue
+		}
+		if res.RowsAffected == 1 {
+			unlocked = append(unlocked, row.Episode)
+		}
+	}
+	if len(unlocked) == 0 {
+		return false
+	}
+	if sub.Status == models.MediaSubActive {
+		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).Update("next_search_at", now).Error; err != nil {
+			s.cfg.Logger.Warnf("[订阅] 把「%s」的下次搜索提前失败: %v", subTitle(sub), err)
+		} else {
+			sub.NextSearchAt = &now
+		}
+	}
+	msg := fmt.Sprintf("%s等 %s 的版本满 %d 天，按设置改用别的版本", episodesText(unlocked), lockText(g, r), set.UnlockAfterDays)
+	rctx, run := s.startRun(ctx, sub, models.MediaRunSchedule)
+	step(rctx, stepInfo, "%s", msg)
+	markRun(rctx, func(rl *runLog) { rl.changed = true })
+	s.finishRun(rctx, sub, run, msg, false)
+	s.cfg.Logger.Infof("[订阅] 「%s」%s", subTitle(sub), msg)
+	return true
+}

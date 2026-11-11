@@ -23,6 +23,8 @@ const (
 	DefaultSearchIntervalHours = 12
 	MinSearchIntervalHours     = 6
 	maxSearchIntervalHours     = 168
+	// maxUnlockAfterDays 是「等满几天改用别的版本」最多几天
+	maxUnlockAfterDays = 90
 )
 
 // Settings 是订阅的设置。
@@ -46,6 +48,8 @@ type Settings struct {
 	// ReviewByName（只复核按名字对上的，默认）或 ReviewAll
 	AIReviewEnabled bool   `json:"ai_review_enabled"`
 	AIReviewScope   string `json:"ai_review_scope"`
+	// UnlockAfterDays 是追剧开着版本锁时，一集等锁住的版本满几天以后改用别的版本（见 autoUnlock）；0 是一直等
+	UnlockAfterDays int `json:"unlock_after_days"`
 }
 
 func decodeIDs(raw string) []uint {
@@ -84,7 +88,7 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		NotifyChannels: orEmpty(decodeIDs(row.NotifyChannels)), UpgradeOld: row.UpgradeOld,
 		TodayEnabled: row.TodayEnabled, TodayTime: row.TodayTime, TodayChannels: orEmpty(decodeIDs(row.TodayChannels)),
 		SubdirEnabled: row.SubdirEnabled, SubdirTemplate: row.SubdirTemplate,
-		AIReviewEnabled: row.AIReviewEnabled, AIReviewScope: row.AIReviewScope,
+		AIReviewEnabled: row.AIReviewEnabled, AIReviewScope: row.AIReviewScope, UnlockAfterDays: row.UnlockAfterDays,
 	}
 	if out.AIReviewScope == "" {
 		out.AIReviewScope = ReviewByName
@@ -126,6 +130,9 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 			return Settings{}, fmt.Errorf("%w: 默认的质量档案不存在", ErrInvalid)
 		}
 	}
+	if in.UnlockAfterDays < 0 || in.UnlockAfterDays > maxUnlockAfterDays {
+		return Settings{}, fmt.Errorf("%w: 等满几天改用别的版本要在 0 到 %d 天之间（0 是一直等）", ErrInvalid, maxUnlockAfterDays)
+	}
 	if len(in.NotifyChannels) > 20 || len(in.TodayChannels) > 20 {
 		return Settings{}, fmt.Errorf("%w: 通知通道最多 20 个", ErrInvalid)
 	}
@@ -153,14 +160,15 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 		NotifyChannels: encodeIDs(in.NotifyChannels), UpgradeOld: in.UpgradeOld,
 		TodayEnabled: in.TodayEnabled, TodayTime: fmt.Sprintf("%02d:%02d", h, m), TodayChannels: encodeIDs(in.TodayChannels),
 		SubdirEnabled: in.SubdirEnabled, SubdirTemplate: tpl,
-		AIReviewEnabled: in.AIReviewEnabled, AIReviewScope: in.AIReviewScope, UpdatedAt: s.cfg.Now(),
+		AIReviewEnabled: in.AIReviewEnabled, AIReviewScope: in.AIReviewScope, UnlockAfterDays: in.UnlockAfterDays,
+		UpdatedAt: s.cfg.Now(),
 	}
 	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"enabled", "search_interval_hours", "search_skip_sites", "default_profile_id", "default_downloader_id", "notify_channels", "upgrade_old",
 			"today_enabled", "today_time", "today_channels", "subdir_enabled", "subdir_template", "ai_review_enabled", "ai_review_scope",
-			"updated_at",
+			"unlock_after_days", "updated_at",
 		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存订阅设置失败: %w", err)
