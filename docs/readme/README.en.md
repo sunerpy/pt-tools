@@ -116,7 +116,7 @@ The Android app (most phones need `pt-tools-app-arm64-v8a.apk`) is in the same r
 
 ### Build from source
 
-With Go `1.26.10`, Node.js `25.2.0` and pnpm `10.25.0`, run `make build-local`; see the [development guide](../development.md) (in Chinese).
+With Go `1.26.11`, Node.js `25.2.0` and pnpm `10.25.0`, run `make build-local`; see the [development guide](../development.md) (in Chinese).
 
 ## Quick start
 
@@ -160,7 +160,7 @@ Features, fixes and upgrade notes for each version are in [Releases](https://git
 
 ## Development
 
-The repository pins Go `1.26.10`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local gate:
+The repository pins Go `1.26.11`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local gate:
 
 ```bash
 make check
