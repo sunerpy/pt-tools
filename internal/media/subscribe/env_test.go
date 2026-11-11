@@ -270,6 +270,8 @@ type fakeOrganizer struct {
 	rescraped []uint
 	// onOrganize 在「重新整理」时调用（模拟整理写下记录）
 	onOrganize func(organize.Request)
+	// queuedOnCancel 为真时，onOrganize 以后请求的 ctx 已取消就回 Queued（和真的整理服务一样：等不到结果先回，整理在后台继续）
+	queuedOnCancel bool
 }
 
 func (f *fakeOrganizer) setRetrying(id uint, on bool) {
@@ -310,13 +312,19 @@ func (f *fakeOrganizer) Retry(_ context.Context, id uint) (*organize.Result, err
 	return &organize.Result{}, nil
 }
 
-func (f *fakeOrganizer) Organize(_ context.Context, req organize.Request) (*organize.Result, error) {
+func (f *fakeOrganizer) Organize(ctx context.Context, req organize.Request) (*organize.Result, error) {
 	f.mu.Lock()
 	f.organized = append(f.organized, req)
 	hook := f.onOrganize
 	f.mu.Unlock()
 	if hook != nil {
 		hook(req)
+	}
+	f.mu.Lock()
+	queued := f.queuedOnCancel // 在 onOrganize 以后读：测试在 onOrganize 里决定结果是不是在取消以前送到了
+	f.mu.Unlock()
+	if queued && ctx.Err() != nil {
+		return &organize.Result{Queued: true}, nil
 	}
 	return &organize.Result{Created: 1}, nil
 }

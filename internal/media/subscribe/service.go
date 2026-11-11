@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -162,9 +163,16 @@ type Service struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	running bool
+
+	// after 是整理服务整理完一个种子以后交来的 info hash（见 AfterOrganize），后台循环马上刷新它
+	after chan string
 }
 
-const offerQueue = 256
+const (
+	offerQueue = 256
+	// afterOrganizeQueue 是整理完成回调的队列长度：满了丢掉，下一拍的后台刷新照样会处理那些种子
+	afterOrganizeQueue = 64
+)
 
 // New 建订阅服务；Start 以后才接 RSS 与定时搜索。
 func New(cfg Config) *Service {
@@ -191,6 +199,20 @@ func New(cfg Config) *Service {
 	return &Service{
 		cfg: cfg, offers: make(chan Candidate, offerQueue), cache: parseCache{m: map[string]parsed{}}, doubanBusy: map[uint]bool{},
 		seasonAt: map[uint]time.Time{}, dls: dlCache{m: map[uint]dlList{}}, doneAt: map[uint]time.Time{},
+		after: make(chan string, afterOrganizeQueue),
+	}
+}
+
+// AfterOrganize 是整理服务整理完一个下载器里的种子、有文件入库以后的回调（见 organize.Service.SetAfterOrganize）：
+// 不阻塞地交给后台循环，循环马上刷新订阅里这个种子，不等下一拍。队列满了丢掉，下一拍的刷新兜底。
+func (s *Service) AfterOrganize(infoHash string) {
+	h := strings.ToLower(strings.TrimSpace(infoHash))
+	if h == "" {
+		return
+	}
+	select {
+	case s.after <- h:
+	default:
 	}
 }
 
@@ -263,6 +285,9 @@ func (s *Service) loop(ctx context.Context) {
 			return
 		case <-t.C:
 			s.Tick(ctx)
+		case h := <-s.after:
+			// 和 Tick 串行：台账重建、完成判断不和后台刷新并发
+			s.refreshHash(ctx, h)
 		}
 	}
 }

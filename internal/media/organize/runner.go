@@ -213,7 +213,22 @@ func (s *Service) worker(ctx context.Context) {
 			if j.done != nil {
 				j.done <- jobResult{res: res, err: err}
 			}
+			s.notifyOrganized(res, err)
 		}
+	}
+}
+
+// notifyOrganized 在整理完一个下载器里的种子、有文件入库（新整理的或本来就整理好的）以后调用整理完成的回调（见 SetAfterOrganize）。
+// 不看有没有人在等结果；按计划判断是不是下载器里的种子：指定的路径就是下载器里的种子时也算，监控目录的项、别的路径不算。
+func (s *Service) notifyOrganized(res *Result, err error) {
+	if err != nil || res == nil || res.Plan == nil || res.Plan.DownloaderID == 0 || res.Plan.Hash == "" {
+		return
+	}
+	if res.Created == 0 && res.Done == 0 {
+		return
+	}
+	if f := s.afterOrganizeHook(); f != nil {
+		f(res.Plan.Hash)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
+	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
@@ -46,6 +47,11 @@ func TestNewSubscribeService(t *testing.T) {
 	stopSubscribeService(svc)
 	stopSubscribeService(nil)
 	assert.Empty(t, qaDoubanURL(), "正式构建里豆瓣地址不能改")
+
+	// 有整理服务时接上订阅的条目查询与整理完成的回调
+	withOrganizer := newSubscribeService(ctx, mgr, newMediaService(store), organize.New(organize.Config{DB: db}), nil, nil)
+	require.NotNil(t, withOrganizer)
+	stopSubscribeService(withOrganizer)
 }
 
 func TestSubscribeNotifierDisabled(t *testing.T) {

@@ -69,6 +69,8 @@ func newSubscribeService(ctx context.Context, mgr *scheduler.Manager, rec *recog
 	if organizer != nil {
 		// 订阅推送或认领的种子按订阅的条目整理，放进订阅指定的媒体库
 		organizer.SetMediaFor(svc.MediaFor)
+		// 整理完一个种子马上刷新订阅里的它（标成已入库、更新追剧台账），不等订阅后台的下一拍
+		organizer.SetAfterOrganize(svc.AfterOrganize)
 	}
 	svc.Start(ctx)
 	internal.SetSubscriptionOffer(svc.Offer)

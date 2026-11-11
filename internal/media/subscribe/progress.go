@@ -210,19 +210,21 @@ func (s *Service) historyOf(ctx context.Context, hash string) ([]models.MediaTra
 
 // refreshTorrent 看订阅下载的一个种子整理得怎样：有文件入了库、别的文件也不再自动重试时标成已入库
 // （洗版时接着换掉旧版本）；过了 7 天还没入库的标成失败。还要重试的：记录里有重试时间，或者整理服务说它排上队了。
-func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptionTorrent, set Settings) {
+// 返回这次是不是由它把种子标成了已入库：后台刷新、整理完成的回调与「重新整理」可能同时看同一个种子，
+// 标成已入库是按读到的状态做的条件更新（见 claimTorrent），只有一方成功，洗版替换也只跑一次。
+func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptionTorrent, set Settings) bool {
 	hist, err := s.historyOf(ctx, t.InfoHash)
 	if err != nil {
-		return
+		return false
 	}
 	sub, err := s.subRow(ctx, t.SubscriptionID)
 	if errors.Is(err, ErrNotFound) {
 		// 订阅已经删掉了（推送和删除撞上，删除以后才记下这个种子）：记录留着没有用
 		s.cfg.DB.WithContext(ctx).Delete(&models.MediaSubscriptionTorrent{}, t.ID)
-		return
+		return false
 	}
 	if err != nil {
-		return
+		return false
 	}
 	// 洗版的新版本和旧版本整理到同一个文件名时，整理记成「目标已有同名文件」：先删掉旧版本库里的那个文件再重试；
 	// 新版本还是没整理成时把旧版本整理回来，库里不缺这个文件
@@ -253,7 +255,7 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 		}
 		if retried {
 			if hist, err = s.historyOf(ctx, t.InfoHash); err != nil {
-				return
+				return false
 			}
 		}
 	}
@@ -273,7 +275,10 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 		if notDone > 0 {
 			msg = fmt.Sprintf("已整理入库，%d 个文件没整理成", notDone)
 		}
-		s.setTorrent(ctx, t.ID, models.MediaSubTorrentDone, msg)
+		if !s.claimTorrent(ctx, t.ID, t.Status, models.MediaSubTorrentDone, msg) {
+			// 别的路径已经标成了已入库（状态不再是读到的那样）：洗版替换由它做过了
+			return false
+		}
 		if sub.Upgrade {
 			s.replaceOlder(ctx, &sub, t, hist, set)
 			if t.Complete {
@@ -281,7 +286,7 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 				s.relock(ctx, &sub, t)
 			}
 		}
-		return
+		return true
 	}
 	// 7 天从推送（或者手动重新整理）那时算：手动重新整理会把种子改回等整理、记下更新时间
 	if s.cfg.Now().Sub(laterOf(t.CreatedAt, t.UpdatedAt)) > stuckAfter {
@@ -290,6 +295,56 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 			msg = "认领的下载器里的种子 7 天还没整理入库（不是 pt-tools 推送的，自动整理不处理它：可以手动整理，或打开定期扫描），这些集重新算缺的"
 		}
 		s.setTorrent(ctx, t.ID, models.MediaSubTorrentFailed, msg)
+	}
+	return false
+}
+
+// claimTorrent 把种子的状态从 from 改成 to（条件更新）：状态已经不是 from 时不改，返回假。
+func (s *Service) claimTorrent(ctx context.Context, id uint, from, to, msg string) bool {
+	res := s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscriptionTorrent{}).Where("id = ? AND status = ?", id, from).
+		Updates(map[string]any{"status": to, "message": truncate(msg, 1024), "updated_at": s.cfg.Now()})
+	if res.Error != nil {
+		s.cfg.Logger.Warnf("[订阅] 更新种子记录失败: %v", res.Error)
+		return false
+	}
+	return res.RowsAffected == 1
+}
+
+// refreshHash 在整理服务整理完一个种子以后马上刷新订阅里这个种子（见 AfterOrganize）：只看下载中的，
+// 由这次标成已入库的种子所属订阅马上重建台账、看完成没有（同「重新整理」以后的 afterOrganize）。总开关关着时不做。
+func (s *Service) refreshHash(ctx context.Context, hash string) {
+	set, err := s.Settings(ctx)
+	if err != nil || !set.Enabled {
+		return
+	}
+	var rows []models.MediaSubscriptionTorrent
+	if err = s.cfg.DB.WithContext(ctx).Where("info_hash = ? AND status = ?", strings.ToLower(hash), models.MediaSubTorrentDownloading).
+		Order("id").Find(&rows).Error; err != nil {
+		s.cfg.Logger.Warnf("[订阅] 读取下载中的种子失败: %v", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	var subIDs []uint
+	seen := map[uint]bool{}
+	for i := range rows {
+		if s.refreshTorrent(ctx, &rows[i], set) && !seen[rows[i].SubscriptionID] {
+			seen[rows[i].SubscriptionID] = true
+			subIDs = append(subIDs, rows[i].SubscriptionID)
+		}
+	}
+	short := hash
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	s.cfg.Logger.Infof("[订阅] 整理入库以后马上刷新了 %d 个种子（%s）", len(rows), short)
+	for _, id := range subIDs {
+		sub, err := s.subRow(ctx, id)
+		if err != nil {
+			continue
+		}
+		s.afterOrganize(ctx, &sub, set)
 	}
 }
 
