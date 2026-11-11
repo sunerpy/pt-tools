@@ -113,11 +113,18 @@ func splitKeywords(s string) []string {
 
 const gib = 1024 * 1024 * 1024
 
+// brushHR 是一个种子的 H&R 要求：SeedTimeH 是做种要求（小时，站点定义按体积算出或站点设置里填的，0 是未知），
+// UploadRatio 是站点设置里填的「H&R 上传量达标」（#542，下完以后上传量达到体积的这么多倍也算达标，0 是不用）。
+type brushHR struct {
+	SeedTimeH   int
+	UploadRatio float64
+}
+
 // admitBrushItem 判断一条搜索结果能不能进入刷流。siteHR 是站点定义的整站 H&R（与 RSS 路径同一规则：
 // hasHR = item.HasHR || def.HREnabled）。M-Team 的搜索忽略 FreeOnly、结果里会混入非免费种，所以优惠类型一律在这里判。
 //
-// hrSeedTimeH 是这个种子的 H&R 做种要求（小时，站点定义按体积算出）；有 H&R 但算不出时拒收。
-func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, hrSeedTimeH int, now time.Time) (bool, string) {
+// hr 是这个种子的 H&R 要求；有 H&R 时要算得出什么时候能删：做种要求已知，或填了上传量要求、体积也已知，否则拒收。
+func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, hr brushHR, now time.Time) (bool, string) {
 	if item.ID == "" {
 		return false, "没有种子 ID"
 	}
@@ -171,9 +178,14 @@ func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, hrS
 	if task.ExcludeHR && (item.HasHR || siteHR) {
 		return false, "有 H&R"
 	}
-	if (item.HasHR || siteHR) && hrSeedTimeH <= 0 {
-		// 不排除 H&R 时也只收算得出做种要求的：要求时长未知，删种规则就没法判断什么时候可以删
-		return false, brushRejectHRUnknown
+	if (item.HasHR || siteHR) && hr.SeedTimeH <= 0 {
+		// 不排除 H&R 时也只收算得出什么时候能删的：做种要求未知时只能按上传量判断，那就要填了上传量要求、体积也已知
+		switch {
+		case hr.UploadRatio <= 0:
+			return false, brushRejectHRUnknown
+		case item.SizeBytes <= 0:
+			return false, brushRejectHRNoSize
+		}
 	}
 	text := strings.ToLower(item.Title + " " + item.Subtitle)
 	if inc := splitKeywords(task.IncludeKeywords); len(inc) > 0 {
@@ -214,11 +226,19 @@ func sortBrushCandidates(items []v2.TorrentItem) {
 // （第一条是窗口起点之前最近的一条），只在低速规则里用到。
 //
 // H&R 保护与自动清理（cleanup_monitor 的 hrInfo）同一判断：有 H&R 且要求的做种时长还没满时一律不删，
-// 包括免费到期还没下完的情况 —— 删掉未完成的 H&R 种子同样会被站点记一次 H&R。
-func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.Torrent, samples []models.BrushTorrentSample, now time.Time) (bool, string) {
-	// 要求时长未知（<= 0）时按未满处理，一律不删（fail-closed）；入场时已经拒收这类种子，这里兜底
-	if bt.HasHR && (bt.HRSeedTimeH <= 0 || t.SeedingTime < int64(bt.HRSeedTimeH)*3600) {
-		return false, ""
+// 包括免费到期还没下完的情况 —— 删掉未完成的 H&R 种子同样会被站点记一次 H&R。hrRatio 是站点设置里现在填的
+// 「H&R 上传量达标」（#542，0 是不用）：下完、上传量达到体积的这么多倍也算做满（体积用记录的，没有时用下载器给的）。
+func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.Torrent, samples []models.BrushTorrentSample, hrRatio float64, now time.Time) (bool, string) {
+	if bt.HasHR {
+		// 要求时长未知（<= 0）时按未满处理（fail-closed），只有上传量能放行；入场时已经拒收两样都判断不了的种子，这里兜底
+		size := bt.SizeBytes
+		if size <= 0 {
+			size = t.TotalSize
+		}
+		seeded := bt.HRSeedTimeH > 0 && t.SeedingTime >= int64(bt.HRSeedTimeH)*3600
+		if !seeded && !hrUploadMet(hrRatio, size, t.TotalUploaded, t.Progress) {
+			return false, ""
+		}
 	}
 	completed := brushCompleted(t)
 	if task.RemoveFreeExpiredIncomplete && !completed && bt.FreeEndAt != nil {

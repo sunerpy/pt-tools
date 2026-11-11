@@ -112,6 +112,9 @@ type BrushReject struct {
 // brushRejectHRUnknown 是有 H&R、做种要求未知时的拒收原因：站点定义里没有、站点设置里也没填（#727）。
 const brushRejectHRUnknown = "H&R 要求的做种时长未知"
 
+// brushRejectHRNoSize 是有 H&R、做种要求未知、站点设置里填了上传量要求（#542），但看不出体积时的拒收原因。
+const brushRejectHRNoSize = "H&R 做种时长未知，体积也未知，没法按上传量判断"
+
 // rejectSummary 是一个都不符合时写进 Summary 的原因（最多两条）；要求未知时提示去站点设置里填。
 func (r BrushRunResult) rejectSummary() string {
 	if r.Eligible > 0 || len(r.Rejected) == 0 {
@@ -509,6 +512,8 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 	}
 	sharing := downloader.NewDataSharing(all, downloader.FilesOf(dl))
 	removed := map[string]bool{} // 这一轮已删掉的（键见 downloader.TorrentKey）
+	// H&R 上传量要求（#542）按删除时站点设置里填的算：记录写成以后才填的也算，和自动删种的 H&R 保护一样
+	hrRatio := ptinternal.SiteHRUploadRatio(task.SiteName)
 	for i := range rows {
 		bt := rows[i]
 		now := m.cfg.Clock.Now()
@@ -540,7 +545,7 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 				res.addError(err.Error())
 			}
 		}
-		remove, reason := brushRemoval(*task, bt, t, samples, now)
+		remove, reason := brushRemoval(*task, bt, t, samples, hrRatio, now)
 		if !remove || !canRemove {
 			kept = append(kept, withProgress(bt, t))
 			continue
@@ -746,8 +751,9 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 		def = d
 	}
 	siteHR := def != nil && def.HREnabled
-	// 站点定义里没有 H&R 做种时长时用站点设置里填的（#727）：入场判断与删种保护都按它
+	// 站点定义里没有 H&R 做种时长时用站点设置里填的（#727）：入场判断与删种保护都按它；上传量要求（#542）也一起读
 	hrSettingH := ptinternal.SiteHRSeedTimeH(task.SiteName)
+	hrRatio := ptinternal.SiteHRUploadRatio(task.SiteName)
 	// 同一站点的加种串行：「读已加过的种子 → 推送 → 记录」之间不能插进另一个任务的同一段，
 	// 否则两个任务会同时把同一个种子各加一份（库里另有 site_name+torrent_id 唯一约束兜底）
 	unlock := m.lockSite(task.SiteName)
@@ -773,9 +779,9 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 				continue
 			}
 		}
-		hr := 0
+		hr := brushHR{UploadRatio: hrRatio}
 		if it.HasHR || siteHR {
-			hr = v2.ResolveHRSeedTimeH(def, it.SizeBytes, hrSettingH)
+			hr.SeedTimeH = v2.ResolveHRSeedTimeH(def, it.SizeBytes, hrSettingH)
 		}
 		ok, why := admitBrushItem(*task, it, siteHR, hr, now)
 		if ok {

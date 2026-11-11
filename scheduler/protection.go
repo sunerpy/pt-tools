@@ -2,11 +2,14 @@ package scheduler
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
+	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -20,9 +23,33 @@ import (
 type hrInfo struct {
 	HasHR       bool
 	HRSeedTimeH int
+	// UploadRatio 是站点设置里填的「H&R 上传量达标」（#542）：下完以后上传量达到体积的这么多倍也算达标，0 是不按上传量
+	UploadRatio float64
+	// SizeBytes 是记录里的种子体积（0 是没记），按上传量判断时用
+	SizeBytes int64
 }
 
-// loadHRInfo 读出每个种子（info hash，小写）的 H&R 要求：记录上记的、站点定义的整站 H&R，或站点设置里填的做种要求（#727）。
+// hrUploadMet 报告种子是不是按上传量做满了 H&R（#542）：站点设置里填了上传量要求（ratio > 0）、体积已知、
+// 种子下完了，并且累计上传不少于体积的 ratio 倍。自动删种（hrGuard）与刷流删种（brushRemoval）共用这一个判断。
+func hrUploadMet(ratio float64, sizeBytes, uploaded int64, progress float64) bool {
+	if ratio <= 0 || sizeBytes <= 0 || progress < 1 {
+		return false
+	}
+	return float64(uploaded) >= ratio*float64(sizeBytes)
+}
+
+// formatUploadedRatio 是给人看的已传倍数：最多两位小数、去掉末尾的 0，向下取（还差一点时不显示成已经够了）。
+func formatUploadedRatio(v float64) string {
+	return strconv.FormatFloat(math.Floor(v*100+1e-9)/100, 'f', -1, 64)
+}
+
+// formatRequiredRatio 是给人看的要求倍数：按填的值写（最多三位小数）。
+func formatRequiredRatio(v float64) string {
+	return strconv.FormatFloat(math.Round(v*1000)/1000, 'f', -1, 64)
+}
+
+// loadHRInfo 读出每个种子（info hash，小写）的 H&R 要求：记录上记的、站点定义的整站 H&R，或站点设置里填的做种要求（#727），
+// 以及站点设置里填的上传量要求（#542）和记录里的体积。
 // 读库出错时返回错误：调用方按读不到处理，这一轮不删（宁可不删也不删掉 H&R 没做满的种子）。
 func loadHRInfo(db *gorm.DB) (map[string]hrInfo, error) {
 	result := make(map[string]hrInfo)
@@ -31,17 +58,21 @@ func loadHRInfo(db *gorm.DB) (map[string]hrInfo, error) {
 	for _, def := range v2.GetDefinitionRegistry().GetAll() {
 		defs[def.ID] = def
 	}
-	// 站点设置里填的 H&R 做种要求（#727）：站点定义里没有时用它
+	// 站点设置里填的 H&R 做种要求（#727，站点定义里没有时用它）与上传量要求（#542）
 	settingH := make(map[string]int)
+	settingRatio := make(map[string]float64)
 	var settings []struct {
-		Name        string
-		HRSeedTimeH int
+		Name          string
+		HRSeedTimeH   int
+		HRUploadRatio float64
 	}
-	if err := db.Model(&models.SiteSetting{}).Select("name, hr_seed_time_h").Where("hr_seed_time_h > 0").Scan(&settings).Error; err != nil {
+	if err := db.Model(&models.SiteSetting{}).Select("name, hr_seed_time_h, hr_upload_ratio").
+		Where("hr_seed_time_h > 0 OR hr_upload_ratio > 0").Scan(&settings).Error; err != nil {
 		return nil, fmt.Errorf("读取站点的 H&R 设置失败: %w", err)
 	}
 	for _, s := range settings {
-		settingH[s.Name] = s.HRSeedTimeH
+		settingH[s.Name] = max(s.HRSeedTimeH, 0)
+		settingRatio[s.Name] = ptinternal.UsableHRUploadRatio(s.HRUploadRatio)
 	}
 
 	type hrRecord struct {
@@ -79,18 +110,26 @@ func loadHRInfo(db *gorm.DB) (map[string]hrInfo, error) {
 		default:
 			continue
 		}
-		cur, seen := result[hash]
-		switch {
-		case !seen:
-			result[hash] = info
-		case cur.HRSeedTimeH <= 0 || info.HRSeedTimeH <= 0:
-			// 同一个哈希有几条记录（跨站辅种等）：取最严的——有一条要求未知就按未知保护
-			result[hash] = hrInfo{HasHR: true}
-		default:
-			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: max(cur.HRSeedTimeH, info.HRSeedTimeH)}
+		info.UploadRatio, info.SizeBytes = settingRatio[r.SiteName], max(r.TorrentSize, 0)
+		if cur, seen := result[hash]; seen {
+			info = mergeHRInfo(cur, info)
 		}
+		result[hash] = info
 	}
 	return result, nil
+}
+
+// mergeHRInfo 合并同一个哈希的几条记录（跨站辅种等），取最严的：有一条做种要求未知就按未知；
+// 有一条的站点没填上传量要求就不按上传量放行，都填了取最大的倍数；体积取最大的。
+func mergeHRInfo(a, b hrInfo) hrInfo {
+	out := hrInfo{HasHR: true, SizeBytes: max(a.SizeBytes, b.SizeBytes)}
+	if a.HRSeedTimeH > 0 && b.HRSeedTimeH > 0 {
+		out.HRSeedTimeH = max(a.HRSeedTimeH, b.HRSeedTimeH)
+	}
+	if a.UploadRatio > 0 && b.UploadRatio > 0 {
+		out.UploadRatio = max(a.UploadRatio, b.UploadRatio)
+	}
+	return out
 }
 
 // 保护规则（Protection.Rule）：前两条与 H&R 是 hard，后两条是 soft。
@@ -132,6 +171,7 @@ func tagProtection(t downloader.Torrent, protectTags []string) string {
 }
 
 // hrGuard 是 H&R 保护：有 H&R 而做种时长没满，或要求未知（站点定义里没有、站点设置也没填，#727）。
+// 站点设置里填了「H&R 上传量达标」（#542）时，下完、上传量够了也不保护；体积用记录里的，没有时用下载器给的。
 func hrGuard(t downloader.Torrent, hr map[string]hrInfo) Protection {
 	info, ok := hr[strings.ToLower(t.InfoHash)]
 	if !ok || !info.HasHR {
@@ -141,13 +181,33 @@ func hrGuard(t downloader.Torrent, hr map[string]hrInfo) Protection {
 	if requiredSeedTimeS > 0 && t.SeedingTime >= requiredSeedTimeS {
 		return Protection{}
 	}
-	if requiredSeedTimeS <= 0 {
+	size := info.SizeBytes
+	if size <= 0 {
+		size = t.TotalSize
+	}
+	if hrUploadMet(info.UploadRatio, size, t.TotalUploaded, t.Progress) {
+		return Protection{}
+	}
+	byUpload := info.UploadRatio > 0 && size > 0
+	uploaded := ""
+	if byUpload {
+		uploaded = "已传 " + formatUploadedRatio(float64(max(t.TotalUploaded, 0))/float64(size)) + " 倍"
+		if t.Progress < 1 {
+			uploaded += "（还没下完，下完才按上传量算）"
+		}
+	}
+	switch {
+	case requiredSeedTimeS <= 0 && byUpload:
+		return Protection{Rule: GuardHR, Text: fmt.Sprintf("H&R：站点没有给出做种时长，要求上传 %s 倍体积，%s", formatRequiredRatio(info.UploadRatio), uploaded)}
+	case requiredSeedTimeS <= 0:
 		return Protection{Rule: GuardHR, Text: "H&R：站点没有给出做种要求，一直保护（可以在站点设置里填「H&R 做种要求」）"}
 	}
-	return Protection{
-		Rule: GuardHR, Text: fmt.Sprintf("H&R：要求做种 %d 小时，已做 %.1f 小时", info.HRSeedTimeH, float64(t.SeedingTime)/3600),
-		Hours: info.HRSeedTimeH, Left: requiredSeedTimeS - max(t.SeedingTime, 0),
+	text := fmt.Sprintf("H&R：要求做种 %d 小时，已做 %.1f 小时", info.HRSeedTimeH, float64(t.SeedingTime)/3600)
+	if byUpload {
+		text = fmt.Sprintf("H&R：要求做种 %d 小时或上传 %s 倍体积，已做 %.1f 小时、%s",
+			info.HRSeedTimeH, formatRequiredRatio(info.UploadRatio), float64(t.SeedingTime)/3600, uploaded)
 	}
+	return Protection{Rule: GuardHR, Text: text, Hours: info.HRSeedTimeH, Left: requiredSeedTimeS - max(t.SeedingTime, 0)}
 }
 
 // hardGuard 是任何自动删除都遵守的保护：保留标签 → 保护标签 → H&R（打开了「保护 H&R 种子」时）。

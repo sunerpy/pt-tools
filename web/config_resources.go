@@ -440,14 +440,15 @@ func configString(field string, v any) (string, error) {
 func (s *Server) configSitesResource() *configResource {
 	return &configResource{
 		Name: "sites", Title: "站点", Kind: configList, IDField: "name", NameField: "display_name",
-		Desc: "PT 站点：启用、Cookie / API Key / Passkey、上传下载限速、刷流容量上限、H&R 做种要求、每日自动签到。" +
+		Desc: "PT 站点：启用、Cookie / API Key / Passkey、上传下载限速、刷流容量上限、H&R 做种要求与上传量达标、每日自动签到。" +
 			"站点本身来自内置的站点定义（不能新增、删除）；认证方式与地址在网页上改。",
-		Fields:  []string{"enabled", "upload_limit_kbs", "download_limit_kbs", "seeding_capacity_gb", "hr_seed_time_h", "attendance_enabled"},
+		Fields:  []string{"enabled", "upload_limit_kbs", "download_limit_kbs", "seeding_capacity_gb", "hr_seed_time_h", "hr_upload_ratio", "attendance_enabled"},
 		Secrets: map[string]string{"cookie": "has_cookie", "api_key": "", "passkey": ""},
 		Ops:     []string{configOpUpdate},
 		Hints: map[string]string{
 			"enabled":             "启用时要有认证方式要的凭据（auth_method：cookie、api_key、cookie_and_api_key、passkey）",
 			"seeding_capacity_gb": "0 不限", "hr_seed_time_h": "站点定义里没有 H&R 做种时长时按它（小时），0 是没填",
+			"hr_upload_ratio":    "种子下完以后上传量达到体积的几倍也算 H&R 达标（0.1 到 10），0 是不用；只在站点规则写明可以这样达标时填，填错会让 H&R 种子提前被删",
 			"attendance_enabled": "每天自动签到；不支持签到的站点开不了",
 		},
 		Impact: []string{"改了凭据或启用状态以后 pt-tools 刷新站点并检查一次登录状态", impactReload},
@@ -490,7 +491,7 @@ func (s *Server) configSitesLoad(ctx context.Context) (any, error) {
 			"has_cookie": strings.TrimSpace(row.CookieEncrypted) != "" || strings.TrimSpace(row.Cookie) != "",
 			"api_key":    row.APIKey, "passkey": row.Passkey, "upload_limit_kbs": row.UploadLimitKBs,
 			"download_limit_kbs": row.DownloadLimitKBs, "seeding_capacity_gb": row.SeedingCapacityGB,
-			"hr_seed_time_h": row.HRSeedTimeH, "attendance_enabled": row.AttendanceEnabled, "rss_count": rssBy[row.ID],
+			"hr_seed_time_h": row.HRSeedTimeH, "hr_upload_ratio": row.HRUploadRatio, "attendance_enabled": row.AttendanceEnabled, "rss_count": rssBy[row.ID],
 			"unavailable": unavailable, "is_builtin": row.IsBuiltin,
 		}))
 	}
@@ -523,6 +524,10 @@ func (s *Server) configSitesSave(_ context.Context, _, id string, _, _, changed 
 			var n int
 			n, err = configInt(k, v)
 			o.HRSeedTimeH, opts = &n, true
+		case "hr_upload_ratio":
+			var f float64
+			f, err = configFloat(k, v)
+			o.HRUploadRatio, opts = &f, true
 		case "cookie", "api_key", "passkey":
 			var str string
 			str, err = configString(k, v)

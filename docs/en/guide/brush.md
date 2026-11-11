@@ -29,7 +29,7 @@ Each round requests the first page of the site's torrent list once (subject to t
 - **At most N seeders** and **at least N leechers**: pick busy torrents with little competition.
 - **Published within**: only take recent torrents; 0 means no limit.
 - **Title includes / excludes**: one per line or comma separated, case-insensitive, matched against the title and subtitle.
-- **Exclude H&R**: on by default. When the site has site-wide H&R enabled, every torrent from it counts as H&R (the same rule RSS downloads use). With the option off, only H&R torrents whose required seeding time is known are taken: when the site's built-in rules have no seeding time, fill in H&R seeding requirement (hours) (H&R 做种要求（小时）) in the site's settings. Until it is filled in, such torrents are not taken (the removal rules cannot tell when a torrent may go), and the run result says how many were skipped because the H&R seeding time is unknown (H&R 要求的做种时长未知).
+- **Exclude H&R**: on by default. When the site has site-wide H&R enabled, every torrent from it counts as H&R (the same rule RSS downloads use). With the option off, only H&R torrents whose required seeding time is known are taken: when the site's built-in rules have no seeding time, fill in H&R seeding requirement (hours) (H&R 做种要求（小时）) in the site's settings. Until it is filled in, such torrents are not taken (the removal rules cannot tell when a torrent may go), and the run result says how many were skipped because the H&R seeding time is unknown (H&R 要求的做种时长未知). When the site's rules say that uploading a multiple of the size also meets H&R, you can fill in H&R upload target (times) (H&R 上传量达标（倍）) instead: H&R torrents with an unknown seeding time are then taken too, except those whose size the list does not show (the run result says H&R 做种时长未知，体积也未知，没法按上传量判断).
 
 For M-Team tasks, the run result starts with the sections that were read, for example "M-Team 综合区、成人区第 1 页：列表 200 个、符合条件 3 个、加入 2 个" (general and adult sections, page 1: 200 listed, 3 eligible, 2 added). It sums up both lists; it is not the verdict on any single torrent.
 
@@ -55,7 +55,7 @@ A torrent is removed as soon as any rule matches. By default its data is deleted
 - **No activity for N hours**: measured from the last time the downloader recorded an upload or download of data for the torrent (qBittorrent and Transmission both record it), the same time auto-delete uses for inactivity. When the downloader does not report that time, brushing uses its own samples and removes the torrent when neither upload nor download grew in that time.
 - **Free period ending before download completes**: on by default. If the discount ends before the next check, the torrent is removed in this round, so nothing is downloaded after the free period at the normal rate.
 
-H&R torrents are never removed before they reach the site's required seeding time, including when the free period ends before they finish downloading.
+H&R torrents are never removed before they reach the site's required seeding time, including when the free period ends before they finish downloading. With H&R upload target (H&R 上传量达标) filled in the site's settings, a finished torrent that has uploaded enough also counts as met, and the removal rules apply to it as usual; unfinished torrents are not judged by upload.
 
 A download counts as complete when it is at 100% and not in a checking or error state; torrents being checked or with missing files are not complete.
 

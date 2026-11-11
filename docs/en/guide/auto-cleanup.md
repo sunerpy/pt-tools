@@ -174,7 +174,7 @@ To hold on to a torrent (for example a free torrent an RSS feed pushed that you 
 ### Preview and the last run
 
 - Preview what would be deleted (预览会删哪些) runs the flow above with the rules on the page (unsaved ones too) without deleting anything. For each downloader it shows how many torrents the downloader has in total, how many are in scope, how many are protected, which ones would be deleted or paused, and why (the condition it meets, or low disk space and emergency cleanup; seeding competition shows the seeder and leecher counts). Torrents whose data other torrents still use are marked as deleting the torrent only and keeping the data, and torrents that competition would pause are marked as pause only. An actual run works with the torrents in the downloader at that time.
-- The protected torrents this round keeps can be expanded in the preview, each with the protection rule it hits: the keep tag, the protected tag it carries, the H&R seeding time required and done so far (always protected when the site gives no requirement), downloading or being checked, or how many hours of the minimum keep time are left. Torrents a brush task is managing (recognised by the brush task's records, not by the `pt-tools-brush` tag) are deleted by the brush task's own rules; the preview shows how many there are.
+- The protected torrents this round keeps can be expanded in the preview, each with the protection rule it hits: the keep tag, the protected tag it carries, the H&R seeding time required and done so far (with H&R upload target (H&R 上传量达标) filled in, also the upload multiple required and uploaded so far; always protected when the site gives no requirement), downloading or being checked, or how many hours of the minimum keep time are left. Torrents a brush task is managing (recognised by the brush task's records, not by the `pt-tools-brush` tag) are deleted by the brush task's own rules; the preview shows how many there are.
 - Below the card is the last run's result (how many each downloader deleted and paused, and why a downloader couldn't be checked or a deletion or pause failed) and roughly when the next run is. These start over when pt-tools restarts.
 
 ## H&R protection
@@ -186,8 +186,11 @@ H&R (Hit and Run) is a rule on some private trackers: after downloading a torren
 1. When pt-tools downloads a torrent, it records the H&R flag and the required seeding time that the site returns
 2. Auto-delete checks the H&R information in the database. For sites whose built-in definition declares H&R rules, the required seeding time is worked out from those rules even when a torrent has no H&R flag of its own
 3. When the site's built-in rules have no seeding time, the H&R seeding requirement (hours) (H&R 做种要求（小时）) filled in the site's settings is used; once it is filled in, torrents pushed earlier use it too
-4. A torrent with an H&R requirement that has not yet seeded long enough is protected and not deleted; when the required seeding time is unknown (no built-in rule and nothing filled in), the torrent is protected as well
-5. Sites and torrents without an H&R requirement are not affected
+4. When the site's rules say that uploading a multiple of the torrent's size also meets H&R, fill in H&R upload target (times) (H&R 上传量达标（倍）) in the site's settings (for example 0.9): once a torrent has finished downloading and its total upload reaches that multiple of its size, its H&R counts as met, even if it has not seeded long enough or the site gives no seeding time. Unfinished torrents are not judged by upload; the size is the one recorded when the torrent was pushed, or the downloader's when none was recorded. The default is 0 (not used), so only seeding time counts; once it is filled in, torrents pushed earlier use it too
+5. A torrent with an H&R requirement that has not yet seeded long enough (and, with an upload target filled in, has not uploaded enough either) is protected and not deleted; when the required seeding time is unknown (no built-in rule and nothing filled in), the torrent is protected as well
+6. Sites and torrents without an H&R requirement are not affected
+
+> **Note**: a wrong H&R upload target lets H&R torrents be deleted too early, and the site records an H&R. Leave it at 0 unless the site's rules say H&R can be met by upload.
 
 > **Note**: not every site provides H&R information. When a site returns no H&R flag and its built-in definition has no H&R rules either, pt-tools cannot recognise H&R torrents. Set a reasonable minimum keep time as an extra safeguard.
 
