@@ -10,8 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -577,4 +579,139 @@ func TestSameEntry(t *testing.T) {
 		t.Skipf("建不了软链接: %v", err)
 	}
 	assert.True(t, sameEntry(f, filepath.Join(dir, "alias", "Show", "S01E01.mkv")), "媒体库路径是软链接")
+}
+
+// 查纠正出错（库读不了）：这次不整理，写明原因、可以重试；库里的文件与记录都不动。
+func TestChangeItemCorrectionReadFails(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv})
+	e.lastOfUs()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	before := e.history()
+	require.NoError(t, e.db.Migrator().DropTable(&models.MediaOverride{}))
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	assert.Contains(t, p.Problem, "读取手动纠正失败")
+	assert.Equal(t, before, e.history())
+}
+
+// 新位置已经是这个文件（之前自己放过同一个文件的硬链接）：不再放，记录改过去，旧位置的照常删。
+func TestChangeItemNewTargetAlreadyPlaced(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv})
+	e.lastOfUs()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	e.tlouToBreakingBad()
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	for _, it := range p.Items {
+		require.NoError(t, os.MkdirAll(filepath.Dir(it.Target), 0o755))
+		require.NoError(t, os.Link(it.Source, it.Target))
+	}
+	p, err = e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	for _, it := range p.Items {
+		assert.Equal(t, ItemChange, it.Status)
+		assert.Contains(t, it.Message, "新位置已经是这个文件")
+	}
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Changed, res.Messages)
+	for _, r := range e.history() {
+		assert.Equal(t, bbID, r.TMDBID)
+		assert.True(t, strings.HasPrefix(r.TargetPath, filepath.Join(e.tv, "绝命毒师 (2008)")), r.TargetPath)
+		_, serr := os.Stat(r.TargetPath)
+		assert.NoError(t, serr)
+	}
+	_, err = os.Stat(filepath.Join(e.tv, "最后生还者 (2023)"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// 旧位置的字幕被人改过：换条目以后它留着，写明；别的照常删。
+func TestChangeItemKeepsEditedOldSubtitle(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv})
+	e.lastOfUs()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	var sub string
+	for _, r := range e.history() {
+		for _, x := range decodeExtras(r.Extras) {
+			if x.Kind == "" && sub == "" {
+				sub = x.Target
+			}
+		}
+	}
+	require.NotEmpty(t, sub, "整理出了字幕")
+	require.NoError(t, os.Remove(sub))
+	require.NoError(t, os.WriteFile(sub, []byte("edited by hand"), 0o644))
+	e.tlouToBreakingBad()
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Changed, res.Messages)
+	assert.Contains(t, strings.Join(res.Messages, "\n"), "换条目以后旧位置的这个文件留着")
+	assert.FileExists(t, sub, "改过的字幕留着")
+}
+
+// 新的整理记录写不进去：这次放到新位置的文件撤回，旧的文件与记录都不动。
+func TestChangeItemRecordWriteFails(t *testing.T) {
+	e := newEnv(t)
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.library(LibraryInput{Name: "剧集", Kind: models.MediaKindTV, Path: e.tv})
+	e.lastOfUs()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	before := e.history()
+	e.tlouToBreakingBad()
+	name := "test:fail_change_record"
+	require.NoError(t, e.db.Callback().Create().Before("gorm:create").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "media_transfer_histories" {
+			_ = tx.AddError(errors.New("disk I/O error"))
+		}
+	}))
+	t.Cleanup(func() { _ = e.db.Callback().Create().Remove(name) })
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	assert.Zero(t, res.Changed)
+	assert.Equal(t, 2, res.Failed)
+	assert.Contains(t, strings.Join(res.Messages, "\n"), "这次放到新位置的文件已撤回")
+	assert.Equal(t, before, e.history(), "记录不变")
+	for _, r := range before {
+		assert.FileExists(t, r.TargetPath, "旧的还在")
+	}
+	var left []string
+	_ = filepath.WalkDir(filepath.Join(e.tv, "绝命毒师 (2008)"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			left = append(left, p)
+		}
+		return nil
+	})
+	assert.Empty(t, left, "新位置没留下文件")
+}
+
+func TestChangeHelpers(t *testing.T) {
+	assert.Equal(t, "", encodeExtras(nil))
+	assert.Equal(t, uint(5), firstNonZero(0, 5))
+	assert.Equal(t, uint(3), firstNonZero(3, 5))
+	p := &Plan{Match: &tmdb.Result{MediaType: models.MediaKindTV, ID: 1}, Library: &models.MediaLibrary{ID: 1}}
+	assert.False(t, entryChanged(&models.MediaTransferHistory{MediaType: models.MediaKindTV}, p), "记录没有条目")
+	assert.False(t, entryChanged(&models.MediaTransferHistory{MediaType: models.MediaKindTV, TMDBID: 2}, &Plan{}), "计划没有条目")
+	assert.True(t, entryChanged(&models.MediaTransferHistory{MediaType: models.MediaKindTV, TMDBID: 2, LibraryID: 1}, p))
+	assert.False(t, entryChanged(&models.MediaTransferHistory{MediaType: models.MediaKindTV, TMDBID: 1, LibraryID: 9}, p), "只是库不同")
+
+	// 同一个共用文件记了两次：留文件编号和现在对得上的那条
+	dir := t.TempDir()
+	nfo := filepath.Join(dir, "tvshow.nfo")
+	require.NoError(t, os.WriteFile(nfo, []byte("x"), 0o644))
+	id, err := transfer.FileID(nfo)
+	require.NoError(t, err)
+	stale := extra{Target: nfo, FileID: "stale", Kind: extraMeta}
+	fresh := extra{Target: nfo, FileID: id, Kind: extraMeta}
+	assert.Equal(t, []extra{fresh}, mergeShared([]extra{stale}, []extra{fresh}))
+	assert.Equal(t, []extra{fresh}, mergeShared([]extra{fresh}, []extra{stale}))
 }

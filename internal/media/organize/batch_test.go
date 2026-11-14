@@ -270,6 +270,7 @@ func TestBatchQueuedNotes(t *testing.T) {
 	assert.Equal(t, BatchItem{ID: 2, OK: true, Message: "已经在整理队列里"}, queued(2, queueDup))
 	assert.Equal(t, BatchItem{ID: 3, OK: true, Message: "排进了整理队列"}, queued(3, queueAdded))
 	assert.Equal(t, "没有可整理的视频文件", resultNote(&Result{Plan: &Plan{Problem: "没有可整理的视频文件"}}))
+	assert.Equal(t, "新入库 0 个，已在库里 1 个，跳过 0 个，失败 0 个，换了 2 个文件的条目", resultNote(&Result{Done: 1, Changed: 2}))
 }
 
 // 批量删除：只删记录、连文件删；移动整理的不连文件删，写明原因

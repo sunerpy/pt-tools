@@ -178,6 +178,28 @@ func TestOrganizePreviews(t *testing.T) {
 	assert.Contains(t, text, "认不出是什么片")
 }
 
+// 整理的预览里有换条目的文件：换位置的写出原来的与新的位置和删旧文件的影响，位置不变的写只改记录、重新刮削。
+func TestOrganizePreviewChanges(t *testing.T) {
+	e := newEnv(t)
+	plan := `{"downloader":"qb","name":"Show.S01","library":{"name":"剧集"},"mode":"hardlink","items":[` +
+		`{"rel":"E01.mkv","size":1024,"target":"/media/剧集/新的/E01.mkv","prior_target":"/media/剧集/旧的/E01.mkv","status":"change"},` +
+		`{"rel":"E02.mkv","size":1024,"target":"/media/剧集/Shows/E02.mkv","prior_target":"/media/剧集/Shows/E02.mkv","status":"change"}]}`
+	e.backend.reply = func(req Request) Response {
+		if req.Path == "/media/organize/preview" {
+			return Response{Status: http.StatusOK, Body: []byte(plan)}
+		}
+		return Response{Status: http.StatusOK, Body: []byte(`{}`)}
+	}
+	text, isErr, _ := e.call("organize_media", map[string]any{"downloader_id": 1, "hash": "abc"})
+	require.False(t, isErr, text)
+	p := decodePreview(t, text)
+	require.Len(t, p.Changes, 3)
+	assert.Equal(t, "换条目：/media/剧集/旧的/E01.mkv → /media/剧集/新的/E01.mkv", p.Changes[1].After)
+	assert.Contains(t, p.Changes[2].After, "位置不变")
+	assert.Contains(t, impactText(p), "有 1 个文件之前按别的条目整理过：先在新位置放好，再删掉旧位置里 pt-tools 放的文件")
+	assert.Contains(t, impactText(p), "有 1 个文件之前按别的条目整理过、位置不变：只改整理记录，按新条目重新刮削")
+}
+
 // 只有 mcp:write 的令牌也能看写工具的预览（预览的读带着 Preview，App API 那边按读放行）。
 func TestPreviewNeedsOnlyWriteScope(t *testing.T) {
 	e := newEnv(t)

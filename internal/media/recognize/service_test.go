@@ -516,6 +516,25 @@ func TestPick(t *testing.T) {
 	assert.Nil(t, pick(exact, nil))
 }
 
+// Correction 只查手动纠正（套用识别词解析），不访问 TMDB：没有纠正时为 nil，有时给出类型、编号与纠正的编号。
+func TestCorrection(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	ctx := context.Background()
+	title := "Some.Unknown.Movie.2020.1080p"
+	got, err := s.Correction(ctx, Input{Title: title})
+	require.NoError(t, err)
+	assert.Nil(t, got)
+	ov, err := s.SetOverride(ctx, OverrideInput{Title: title, MediaType: tmdb.KindMovie, TMDBID: 278})
+	require.NoError(t, err)
+	got, err = s.Correction(ctx, Input{Title: "Some.Unknown.Movie.2020.2160p.WEB-DL-GRP"})
+	require.NoError(t, err)
+	require.NotNil(t, got, "换了分辨率、制作组也对得上")
+	assert.Equal(t, Correction{MediaType: tmdb.KindMovie, TMDBID: 278, OverrideID: ov.ID}, *got)
+	_, err = s.Correction(ctx, Input{})
+	assert.Error(t, err, "标题与副标题都空")
+}
+
 // 标题里只有年份（判成电影）、同名电影在 TMDB 上没有年份：不认定、列出候选，也不改认成同名的剧集（剧集首播早于标题年份不扣分）。
 func TestRecognizeUndatedMovieNotSwappedForTV(t *testing.T) {
 	s, _ := newService(t)
