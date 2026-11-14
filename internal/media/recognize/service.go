@@ -24,6 +24,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/omdb"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
 	"github.com/sunerpy/pt-tools/internal/media/words"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -56,6 +57,10 @@ type Config struct {
 	FanartBaseURL, OMDbBaseURL string
 	// FanartImageHosts 是允许下载 Fanart.tv 图片的主机；为空时只认 fanart.tv 自己的（测试里换成假服务的）。
 	FanartImageHosts []string
+	// TVDBBaseURL 是 TheTVDB 的接口地址（到 /v4 为止）；为空时用官方地址（测试与 qa 构建可指向假服务）。
+	TVDBBaseURL string
+	// TVDBImageHosts 是允许下载 TheTVDB 图片的主机；为空时只认 thetvdb.com 自己的（测试与 qa 构建换成假服务的）。
+	TVDBImageHosts []string
 }
 
 // Service 是媒体识别服务。
@@ -65,6 +70,9 @@ type Service struct {
 	mu    sync.Mutex // 串行化设置、纠正与识别词的写入
 	// limiter 是所有 TMDB 请求共用的限速额度：每次识别都会新建客户端，额度不能跟着重置
 	limiter *rate.Limiter
+	// tvdbTokens、tvdbLimiter 是 TheTVDB 客户端共用的登录令牌与限速额度（每次刮削都会新建客户端）
+	tvdbTokens  *tvdb.Tokens
+	tvdbLimiter *rate.Limiter
 	// httpMu 保护按代理地址缓存的 http.Client（同一个代理共用连接池）
 	httpMu    sync.Mutex
 	httpProxy string
@@ -73,7 +81,10 @@ type Service struct {
 
 // New 建一个服务，顺便清掉过期的 TMDB 缓存。
 func New(cfg Config) *Service {
-	s := &Service{cfg: cfg, cache: tmdb.NewDBCache(cfg.DB), limiter: tmdb.NewLimiter(cfg.RatePerSecond)}
+	s := &Service{
+		cfg: cfg, cache: tmdb.NewDBCache(cfg.DB), limiter: tmdb.NewLimiter(cfg.RatePerSecond),
+		tvdbTokens: tvdb.NewTokens(), tvdbLimiter: tvdb.NewLimiter(0),
+	}
 	_ = s.cache.Purge()
 	return s
 }
@@ -126,9 +137,12 @@ type Settings struct {
 	HasFanartKey       bool `json:"has_fanart_key"`
 	HasFanartClientKey bool `json:"has_fanart_client_key"`
 	HasOMDbKey         bool `json:"has_omdb_key"`
+	// HasTVDBKey、HasTVDBPIN 说 TheTVDB 的 API Key 与订阅 PIN 填了没有
+	HasTVDBKey bool `json:"has_tvdb_key"`
+	HasTVDBPIN bool `json:"has_tvdb_pin"`
 }
 
-// SettingsInput 是保存设置的参数。TMDBKey、ProxyURL、APIBaseURL、ImageBaseURL、FanartKey、OMDbKey 为 nil 时不改，
+// SettingsInput 是保存设置的参数。TMDBKey、ProxyURL、APIBaseURL、ImageBaseURL、FanartKey、OMDbKey、TVDBKey、TVDBPIN 为 nil 时不改，
 // 为空串时清除（两个地址清除以后用官方地址）。ProxyURL 与 Settings 返回的（密码换成 *** 的）地址相同时也不改。
 type SettingsInput struct {
 	TMDBKey      *string `json:"tmdb_api_key,omitempty"`
@@ -141,6 +155,9 @@ type SettingsInput struct {
 	FanartKey       *string `json:"fanart_api_key,omitempty"`
 	FanartClientKey *string `json:"fanart_client_key,omitempty"`
 	OMDbKey         *string `json:"omdb_api_key,omitempty"`
+	// TVDBKey、TVDBPIN 是 TheTVDB 的 API Key 与订阅 PIN（user-supported 的 Key 才要 PIN），为 nil 时不改，为空串时清除
+	TVDBKey *string `json:"tvdb_api_key,omitempty"`
+	TVDBPIN *string `json:"tvdb_pin,omitempty"`
 }
 
 func (s *Service) load(ctx context.Context) (models.MediaSetting, error) {
@@ -185,6 +202,7 @@ func (s *Service) view(row models.MediaSetting) Settings {
 		HasTMDBKey: row.TMDBKeyEncrypted != "", KeySource: keySource(row), BuiltinKey: tmdb.Builtin() != "",
 		Language: row.Language, APIBaseURL: row.APIBaseURL, ImageBaseURL: row.ImageBaseURL,
 		HasFanartKey: row.FanartKeyEncrypted != "", HasFanartClientKey: row.FanartClientKeyEncrypted != "", HasOMDbKey: row.OMDbKeyEncrypted != "",
+		HasTVDBKey: row.TVDBKeyEncrypted != "", HasTVDBPIN: row.TVDBPINEncrypted != "",
 	}
 	if out.Language == "" {
 		out.Language = Languages[0]
@@ -241,10 +259,14 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 		in   *string
 		dst  *string
 		name string
+		re   *regexp.Regexp
+		bad  string
 	}{
-		{in.FanartKey, &row.FanartKeyEncrypted, "Fanart.tv"},
-		{in.FanartClientKey, &row.FanartClientKeyEncrypted, "Fanart.tv 个人"},
-		{in.OMDbKey, &row.OMDbKeyEncrypted, "OMDb"},
+		{in.FanartKey, &row.FanartKeyEncrypted, "Fanart.tv API Key", plainKeyRe, "只有字母与数字"},
+		{in.FanartClientKey, &row.FanartClientKeyEncrypted, "Fanart.tv 个人 API Key", plainKeyRe, "只有字母与数字"},
+		{in.OMDbKey, &row.OMDbKeyEncrypted, "OMDb API Key", plainKeyRe, "只有字母与数字"},
+		{in.TVDBKey, &row.TVDBKeyEncrypted, "TheTVDB API Key", tvdbKeyRe, "字母、数字与短横线，8 到 64 个"},
+		{in.TVDBPIN, &row.TVDBPINEncrypted, "TheTVDB 订阅 PIN", tvdbPINRe, "字母与数字，4 到 64 个"},
 	} {
 		if k.in == nil {
 			continue
@@ -253,12 +275,12 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 		switch {
 		case key == "":
 			*k.dst = ""
-		case !plainKeyRe.MatchString(key):
-			return Settings{}, fmt.Errorf("%w: %s API Key 格式不对（只有字母与数字）", ErrInvalid, k.name)
+		case !k.re.MatchString(key):
+			return Settings{}, fmt.Errorf("%w: %s 格式不对（%s）", ErrInvalid, k.name, k.bad)
 		default:
 			enc, err := s.cfg.Cipher.Encrypt(key)
 			if err != nil {
-				return Settings{}, fmt.Errorf("加密 %s API Key 失败: %w", k.name, err)
+				return Settings{}, fmt.Errorf("加密 %s 失败: %w", k.name, err)
 			}
 			*k.dst = enc
 		}
@@ -299,7 +321,7 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"tmdb_key_encrypted", "language", "proxy_encrypted", "api_base_url", "image_base_url",
-			"fanart_key_encrypted", "fanart_client_key_encrypted", "omdb_key_encrypted", "updated_at",
+			"fanart_key_encrypted", "fanart_client_key_encrypted", "omdb_key_encrypted", "tvdb_key_encrypted", "tvdb_pin_encrypted", "updated_at",
 		}),
 	}).Create(&row).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存媒体识别设置失败: %w", err)
@@ -398,6 +420,12 @@ func (s *Service) TestTMDB(ctx context.Context) error {
 // plainKeyRe 是 Fanart.tv 与 OMDb 的 API Key 的样子（Fanart.tv 是 32 位十六进制，OMDb 是 8 位）。
 var plainKeyRe = regexp.MustCompile(`^[A-Za-z0-9]{6,64}$`)
 
+// tvdbKeyRe、tvdbPINRe 是 TheTVDB 的 API Key（v4 的是 UUID）与订阅 PIN 的样子。
+var (
+	tvdbKeyRe = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
+	tvdbPINRe = regexp.MustCompile(`^[A-Za-z0-9]{4,64}$`)
+)
+
 // sourceKey 解密一个刮削来源的 API Key；没填时返回空串。
 func (s *Service) sourceKey(enc, name string) (string, error) {
 	if enc == "" {
@@ -455,6 +483,45 @@ func (s *Service) OMDb(ctx context.Context) (*omdb.Client, error) {
 		return nil, err
 	}
 	return omdb.New(omdb.Options{APIKey: key, BaseURL: s.cfg.OMDbBaseURL, HTTP: hc, Cache: s.cache})
+}
+
+// TVDB 按当前设置建 TheTVDB 客户端（刮削时取每一集的标题、简介与截图，走媒体识别的代理，和 TMDB 共用缓存，客户端之间共用
+// 登录令牌与限速）：填的 Key，填了订阅 PIN 时一起登录；没填 Key 时返回 tvdb.ErrNoKey。
+func (s *Service) TVDB(ctx context.Context) (*tvdb.Client, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.sourceKey(row.TVDBKeyEncrypted, "TheTVDB")
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, tvdb.ErrNoKey
+	}
+	pin := ""
+	if row.TVDBPINEncrypted != "" {
+		if pin, err = s.cfg.Cipher.Decrypt(row.TVDBPINEncrypted); err != nil {
+			return nil, fmt.Errorf("解密 TheTVDB 订阅 PIN 失败: %w", err)
+		}
+	}
+	hc, _, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return tvdb.New(tvdb.Options{
+		APIKey: key, PIN: pin, BaseURL: s.cfg.TVDBBaseURL, ImageHosts: s.cfg.TVDBImageHosts, HTTP: hc, Cache: s.cache,
+		Tokens: s.tvdbTokens, Limiter: s.tvdbLimiter,
+	})
+}
+
+// TestTVDB 用当前设置登录一次 TheTVDB 并取一部剧，确认 API Key、订阅 PIN 与代理可用。
+func (s *Service) TestTVDB(ctx context.Context) error {
+	c, err := s.TVDB(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Validate(ctx)
 }
 
 // TestFanart 用当前设置访问一次 Fanart.tv，确认 API Key 与代理可用。

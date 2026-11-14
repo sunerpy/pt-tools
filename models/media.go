@@ -14,6 +14,10 @@ type MediaSetting struct {
 	FanartKeyEncrypted       string `gorm:"type:text;default:''" json:"-"`
 	FanartClientKeyEncrypted string `gorm:"type:text;default:''" json:"-"`
 	OMDbKeyEncrypted         string `gorm:"column:omdb_key_encrypted;type:text;default:''" json:"-"`
+	// TVDBKeyEncrypted、TVDBPINEncrypted 是刮削用的 TheTVDB 的 API Key 与订阅 PIN（加密保存，只写不读）；没有 Key 时不用这个来源，
+	// PIN 只有 user-supported 的 Key 才要
+	TVDBKeyEncrypted string `gorm:"column:tvdb_key_encrypted;type:text;default:''" json:"-"`
+	TVDBPINEncrypted string `gorm:"column:tvdb_pin_encrypted;type:text;default:''" json:"-"`
 	// APIBaseURL、ImageBaseURL 是换掉的 TMDB 接口地址与图片地址（镜像或自建中转），空 = 官方地址
 	APIBaseURL   string    `gorm:"size:512;default:''" json:"api_base_url"`
 	ImageBaseURL string    `gorm:"size:512;default:''" json:"image_base_url"`

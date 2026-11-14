@@ -913,6 +913,58 @@ describe("媒体库", () => {
     expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({ overwrite_mode: "larger" });
   });
 
+  it("媒体库：剧集的每一集可以选 TheTVDB；没填它的 Key 时提示，填了不提示", async () => {
+    await mountPage({
+      library: { ...library, kind: "tv", scrape: true, scrape_items: ["nfo", "thumb"] },
+    });
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-source-episode")).not.toBeNull());
+    await flush();
+    const sel = q("ml-lib-source-episode")!;
+    (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+    await vi.waitFor(() => {
+      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => (o.textContent ?? "").trim() === "TheTVDB",
+      );
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    await flush();
+    await vi.waitFor(() =>
+      expect(q("ml-lib-source-warn")?.textContent).toContain(
+        "每一集选了 TheTVDB，还没在「媒体识别」里填 TheTVDB 的 Key：用 TMDB 的",
+      ),
+    );
+    api.updateLibrary.mockResolvedValue(library);
+    q("ml-lib-save")!.click();
+    await vi.waitFor(() => expect(api.updateLibrary).toHaveBeenCalledTimes(1));
+    expect(api.updateLibrary.mock.calls[0]![1]).toMatchObject({
+      scrape_sources: { plot: "", rating: "", episode: "tvdb", artwork: "" },
+    });
+    view?.unmount();
+
+    await mountPage({
+      library: {
+        ...library,
+        kind: "tv",
+        scrape: true,
+        scrape_items: ["nfo"],
+        scrape_sources: { plot: "", rating: "", episode: "tvdb", artwork: "" },
+      },
+    });
+    media.settings.mockResolvedValue({
+      key_source: "user",
+      has_fanart_key: false,
+      has_omdb_key: false,
+      has_tvdb_key: true,
+    });
+    q("ml-lib-edit-3")!.click();
+    await vi.waitFor(() => expect(q("ml-lib-source-episode")).not.toBeNull());
+    await flush();
+    await flush();
+    expect(q("ml-lib-source-warn")).toBeNull();
+  });
+
   it("媒体库：勾选按二级分类放进子目录时带上 classify_dir", async () => {
     await mountPage();
     q("ml-lib-edit-3")!.click();

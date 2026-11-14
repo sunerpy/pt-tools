@@ -10,7 +10,7 @@ import (
 // Sources 是媒体库的数据来源：每一项选一个优先的来源，那个来源找不到或没有这一项时用 TMDB 的。空串是 TMDB。
 //   - Plot：电影、剧集与每一季的简介（豆瓣与 Bangumi 一季是一个条目，剧集的简介用第 1 季的）；
 //   - Rating：主要的评分（NFO 里写在最后，Jellyfin 与 Emby 显示它）；取到的其它来源的评分也写进 NFO；
-//   - Episode：每一集的标题与简介（只有剧集有）；
+//   - Episode：每一集的标题与简介（只有剧集有）：TMDB、Bangumi 或 TheTVDB；
 //   - Artwork：海报、背景、Logo 与季海报先用哪个来源的；Fanart.tv 才有的几种图（clearart、横幅、横版海报、碟片）
 //     总是用 Fanart.tv 的。
 //
@@ -26,7 +26,7 @@ type Sources struct {
 var (
 	PlotSources    = []string{"", SourceDouban, SourceBangumi}
 	RatingSources  = []string{"", SourceDouban, SourceBangumi, SourceOMDb}
-	EpisodeSources = []string{"", SourceBangumi}
+	EpisodeSources = []string{"", SourceBangumi, SourceTVDB}
 	ArtworkSources = []string{"", SourceFanart}
 )
 

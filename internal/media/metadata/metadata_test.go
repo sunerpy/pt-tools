@@ -22,6 +22,8 @@ type fakeTMDB struct {
 	extrasErr error
 	imagesErr error
 	calls     map[string]int
+	// aired 不为空时是最后生还者第 1 季每一集的播出日期（按集号）
+	aired map[int]string
 }
 
 func (f *fakeTMDB) hit(k string) {
@@ -82,10 +84,14 @@ func (f *fakeTMDB) Season(_ context.Context, tvID, n int) (*tmdb.Season, error) 
 	f.hit("season")
 	switch {
 	case tvID == 100088 && n == 1:
-		return &tmdb.Season{Number: 1, Name: "第 1 季", Overview: "TMDB 第一季", AirDate: "2023-01-15", PosterPath: "/s1.jpg", Episodes: []tmdb.Episode{
+		s := &tmdb.Season{Number: 1, Name: "第 1 季", Overview: "TMDB 第一季", AirDate: "2023-01-15", PosterPath: "/s1.jpg", Episodes: []tmdb.Episode{
 			{ID: 11, Number: 1, Name: "当你迷失在黑暗中", StillPath: "/e1.jpg", VoteAverage: 8.2, VoteCount: 10, Directors: []string{"D"}},
 			{ID: 12, Number: 2, Name: "感染", StillPath: "/e2.jpg"},
-		}}, nil
+		}}
+		for i := range s.Episodes {
+			s.Episodes[i].AirDate = f.aired[s.Episodes[i].Number]
+		}
+		return s, nil
 	case tvID == 100088 && n == 2:
 		return &tmdb.Season{Number: 2, AirDate: "2025-04-13"}, nil
 	case tvID == 209867 && n == 1:

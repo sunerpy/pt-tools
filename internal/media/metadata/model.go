@@ -1,5 +1,5 @@
 // Package metadata 是刮削用的元数据：与来源无关的电影、剧集、季、集与图片，各个来源（TMDB、豆瓣、Bangumi、
-// Fanart.tv、OMDb）的适配，以及按媒体库的设置把几个来源的数据合在一起（每一项记下来自哪个来源）。
+// Fanart.tv、OMDb、TheTVDB）的适配，以及按媒体库的设置把几个来源的数据合在一起（每一项记下来自哪个来源）。
 // 识别与整理仍以 TMDB 的条目为准：这里只决定 NFO 与图片里写什么。
 package metadata
 
@@ -14,6 +14,7 @@ const (
 	SourceBangumi = "bangumi"
 	SourceFanart  = "fanart"
 	SourceOMDb    = "omdb"
+	SourceTVDB    = "tvdb"
 )
 
 // SourceName 是来源给人看的名字。
@@ -29,6 +30,8 @@ func SourceName(id string) string {
 		return "Fanart.tv"
 	case SourceOMDb:
 		return "OMDb"
+	case SourceTVDB:
+		return "TheTVDB"
 	}
 	return id
 }

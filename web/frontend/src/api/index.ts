@@ -3307,6 +3307,9 @@ export interface MediaSettings {
   has_fanart_key: boolean;
   has_fanart_client_key: boolean;
   has_omdb_key: boolean;
+  /** 刮削用的 TheTVDB 的 API Key 与订阅 PIN 填了没有（只写不读） */
+  has_tvdb_key: boolean;
+  has_tvdb_pin: boolean;
 }
 
 /** 保存设置：语言以外的项不传时不改，传空串时清除 */
@@ -3321,10 +3324,14 @@ export interface MediaSettingsUpdate {
   /** Fanart.tv 的个人 Key（可选，和项目的 Key 一起发，新上传的图片更快能用） */
   fanart_client_key?: string;
   omdb_api_key?: string;
+  /** TheTVDB 的 API Key（填了才用 TheTVDB） */
+  tvdb_api_key?: string;
+  /** TheTVDB 的订阅 PIN（user-supported 的 Key 才要） */
+  tvdb_pin?: string;
 }
 
-/** 测试连接的来源：TMDB、Fanart.tv、OMDb */
-export type MediaTestSource = "tmdb" | "fanart" | "omdb";
+/** 测试连接的来源：TMDB、Fanart.tv、OMDb、TheTVDB */
+export type MediaTestSource = "tmdb" | "fanart" | "omdb" | "tvdb";
 
 /** 标题解析结果（internal/media/meta）：没解析出来的字段不出现 */
 export interface MediaMeta {
@@ -3510,8 +3517,8 @@ export interface MediaScrapeSources {
   plot: "" | "douban" | "bangumi";
   /** 主要的评分：TMDB、豆瓣、Bangumi、IMDb（经 OMDb，要填它的 Key） */
   rating: "" | "douban" | "bangumi" | "omdb";
-  /** 每一集的标题与简介（只有剧集）：TMDB、Bangumi */
-  episode: "" | "bangumi";
+  /** 每一集的标题与简介（只有剧集）：TMDB、Bangumi、TheTVDB（要填它的 Key） */
+  episode: "" | "bangumi" | "tvdb";
   /** 海报、背景、Logo 与季海报先用哪个来源的：TMDB、Fanart.tv（要填它的 Key） */
   artwork: "" | "fanart";
 }

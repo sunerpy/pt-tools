@@ -41,13 +41,15 @@ When scraping, organising can use these sources besides TMDB; choose them part b
 | Bangumi   | Chinese plots, ratings and episode titles for anime                                               | None                                          |
 | Fanart.tv | HD logos, clearart, banners, landscape and disc art, plus posters, backgrounds and season posters | A project API key; a personal key is optional |
 | OMDb      | IMDb, Rotten Tomatoes and Metacritic ratings, and certifications                                  | An API key                                    |
+| TheTVDB   | Episode titles, plots and stills for series                                                       | An API key; a subscriber PIN for some keys    |
 
-Enter the Fanart.tv and OMDb keys under Other scraping sources (刮削的其它来源). They are stored encrypted, and the page only shows whether one is set; after saving, click Test (测试) to check it works:
+Enter the Fanart.tv, OMDb and TheTVDB keys under Other scraping sources (刮削的其它来源). They are stored encrypted, and the page only shows whether one is set; after saving, click Test (测试) to check it works:
 
 - Fanart.tv: sign in to fanart.tv, request a project API key on its Get an API Key page and enter it as the project API key. The personal key is optional; when set, it is sent along with the project key and newly uploaded images become available sooner.
 - OMDb: request a key at omdbapi.com; a free key allows 1,000 requests a day, and titles already looked up are cached for a while.
+- TheTVDB: request an API key on the [thetvdb.com](https://thetvdb.com/api-information) developer dashboard. TheTVDB has no free keys: a key is either licensed under an agreement with TheTVDB, or a user-supported project key, in which case everyone who uses it also needs a TheTVDB [subscription](https://thetvdb.com/subscribe) (about US$12 a year) and enters the PIN it gives them as the subscriber PIN (订阅 PIN). pt-tools logs in with the key (and PIN); the token it gets is kept in memory only and reused for up to a month, and episode lists are cached for a day. As TheTVDB requires, the page shows "Metadata provided by TheTVDB. Please consider adding missing information or subscribing." with a link to thetvdb.com.
 
-Both go through the proxy above. Clearing a key stops using that source: images only Fanart.tv has are no longer written, and library parts that chose it use TMDB's.
+All of them go through the proxy above. Clearing a key stops using that source: images only Fanart.tv has are no longer written, episodes without a still on TMDB no longer get TheTVDB's, and library parts that chose it use TMDB's.
 
 ## Recognition preview
 

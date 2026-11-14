@@ -19,6 +19,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -73,7 +74,7 @@ func uniqueFiles(in []scrape.File) []scrape.File {
 	return out
 }
 
-// resolver 是这次刮削能用的来源：TMDB（c 为空时没有）、豆瓣、Bangumi，以及在「媒体识别」里填了 Key 的 Fanart.tv 与 OMDb。
+// resolver 是这次刮削能用的来源：TMDB（c 为空时没有）、豆瓣、Bangumi，以及在「媒体识别」里填了 Key 的 Fanart.tv、OMDb 与 TheTVDB。
 // 填了 Key 却建不了客户端（例如解不开）时返回说明。
 func (s *Service) resolver(ctx context.Context, c *tmdb.Client) (*metadata.Resolver, []string) {
 	var ps []metadata.Provider
@@ -96,6 +97,15 @@ func (s *Service) resolver(ctx context.Context, c *tmdb.Client) (*metadata.Resol
 		ps = append(ps, metadata.NewOMDb(oc))
 	} else if !errors.Is(err, omdb.ErrNoKey) {
 		msgs = append(msgs, "OMDb 不能用（"+err.Error()+"），没有写 IMDb 等评分")
+	}
+	if tc, err := s.cfg.Recognizer.TVDB(ctx); err == nil {
+		lang := "zh-CN"
+		if c != nil {
+			lang = firstNonEmpty(c.Language(), lang)
+		}
+		ps = append(ps, metadata.NewTVDB(tc, lang))
+	} else if !errors.Is(err, tvdb.ErrNoKey) {
+		msgs = append(msgs, "TheTVDB 不能用（"+err.Error()+"），每一集与集截图用 TMDB 的")
 	}
 	return metadata.NewResolver(ps...), msgs
 }

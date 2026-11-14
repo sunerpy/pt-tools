@@ -3,6 +3,7 @@ package organize
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +51,9 @@ type fakeTMDB struct {
 	groupDown bool
 	// bareEpisodes 为真时最后生还者第 1 季的集还没有标题、简介与截图（刚播出，TMDB 还没补上）
 	bareEpisodes bool
-	hits         map[string]int
+	// tvdbID 不为 0 时最后生还者的详情里带这个 TVDB 编号
+	tvdbID int
+	hits   map[string]int
 }
 
 func (f *fakeTMDB) setDown(v bool) {
@@ -66,7 +69,7 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 		f.hits[r.URL.Path]++
 		down := f.down || (f.imagesDown && strings.HasSuffix(r.URL.Path, "/images")) || (f.detailsDown && r.URL.Path == "/3/movie/872585") ||
 			(f.personDown && strings.HasPrefix(r.URL.Path, "/3/person/")) || (f.groupDown && strings.HasPrefix(r.URL.Path, "/3/tv/episode_group/"))
-		bare := f.bareEpisodes
+		bare, tvdbID := f.bareEpisodes, f.tvdbID
 		f.mu.Unlock()
 		if strings.HasPrefix(r.URL.Path, "/t/p/") {
 			w.Header().Set("Content-Type", "image/jpeg")
@@ -106,8 +109,12 @@ func newFakeTMDB(t *testing.T) *fakeTMDB {
 		case r.URL.Path == "/3/search/tv" && (strings.Contains(q, "Last of Us") || strings.Contains(q, "最后生还者")):
 			_, _ = w.Write([]byte(`{"results":[{"id":100088,"name":"最后生还者","original_name":"The Last of Us","first_air_date":"2023-01-15","popularity":500,"genre_ids":[18]}]}`))
 		case r.URL.Path == "/3/tv/100088":
+			ext := `{"imdb_id":"tt3581920"}`
+			if tvdbID > 0 {
+				ext = fmt.Sprintf(`{"imdb_id":"tt3581920","tvdb_id":%d}`, tvdbID)
+			}
 			_, _ = w.Write([]byte(`{"id":100088,"name":"最后生还者","original_name":"The Last of Us","first_air_date":"2023-01-15","overview":"末日之后。",
-				"poster_path":"/tlou.jpg","backdrop_path":"/tlou-bd.jpg","number_of_seasons":2,"genres":[{"id":18,"name":"剧情"}],"origin_country":["US"],"external_ids":{"imdb_id":"tt3581920"}}`))
+				"poster_path":"/tlou.jpg","backdrop_path":"/tlou-bd.jpg","number_of_seasons":2,"genres":[{"id":18,"name":"剧情"}],"origin_country":["US"],"external_ids":` + ext + `}`))
 		case r.URL.Path == "/3/tv/100088/season/1" && bare:
 			_, _ = w.Write([]byte(`{"season_number":1,"name":"第 1 季","poster_path":"/tlou-s1.jpg","air_date":"2023-01-15",
 				"episodes":[{"id":11,"episode_number":1,"name":"","air_date":"2023-01-15"},{"id":12,"episode_number":2,"name":"","air_date":"2023-01-22"}]}`))

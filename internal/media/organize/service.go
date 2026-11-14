@@ -26,6 +26,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/omdb"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -52,6 +53,7 @@ type Recognizer interface {
 	TMDB(ctx context.Context) (*tmdb.Client, error)
 	Fanart(ctx context.Context) (*fanart.Client, error)
 	OMDb(ctx context.Context) (*omdb.Client, error)
+	TVDB(ctx context.Context) (*tvdb.Client, error)
 }
 
 // Downloaders 取下载器（生产环境包装 DownloaderManager 与下载器设置表）。

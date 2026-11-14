@@ -148,8 +148,9 @@ async function testTMDB() {
   }
 }
 
-// ---- 刮削的其它来源：Fanart.tv 与 OMDb 的 Key（加密保存、只写不读） ----
-type SourceKey = "fanart" | "fanart_client" | "omdb";
+// ---- 刮削的其它来源：Fanart.tv、OMDb 与 TheTVDB 的 Key（加密保存、只写不读） ----
+type SourceKey = "fanart" | "fanart_client" | "omdb" | "tvdb" | "tvdb_pin";
+type TestableSource = "fanart" | "omdb" | "tvdb";
 const SOURCE_KEYS: Record<
   SourceKey,
   { field: keyof MediaSettingsUpdate; has: keyof MediaSettings; name: string; after: string }
@@ -172,10 +173,35 @@ const SOURCE_KEYS: Record<
     name: "OMDb API Key",
     after: "清除后不再写 IMDb、烂番茄与 Metacritic 的评分，评分来源选了 IMDb 的媒体库用 TMDB 的。",
   },
+  tvdb: {
+    field: "tvdb_api_key",
+    has: "has_tvdb_key",
+    name: "TheTVDB API Key",
+    after:
+      "清除后不再用 TheTVDB：每一集选了它的媒体库用 TMDB 的标题与简介，TMDB 没有截图的集也不再用它的截图。",
+  },
+  tvdb_pin: {
+    field: "tvdb_pin",
+    has: "has_tvdb_pin",
+    name: "TheTVDB 订阅 PIN",
+    after: "清除后只用 API Key 登录：要订阅 PIN 的 Key（user-supported）登录不了。",
+  },
 };
-const sourceForm = ref<Record<SourceKey, string>>({ fanart: "", fanart_client: "", omdb: "" });
+const emptySourceForm = (): Record<SourceKey, string> => ({
+  fanart: "",
+  fanart_client: "",
+  omdb: "",
+  tvdb: "",
+  tvdb_pin: "",
+});
+const SOURCE_NAMES: Record<TestableSource, string> = {
+  fanart: "Fanart.tv",
+  omdb: "OMDb",
+  tvdb: "TheTVDB",
+};
+const sourceForm = ref<Record<SourceKey, string>>(emptySourceForm());
 const sourceSaving = ref(false);
-const sourceTesting = ref<"" | "fanart" | "omdb">("");
+const sourceTesting = ref<"" | TestableSource>("");
 const hasKey = (k: SourceKey) => Boolean(settings.value?.[SOURCE_KEYS[k].has]);
 const sourcePlaceholder = (k: SourceKey, empty: string) =>
   hasKey(k) ? "已设置；要更换时填写新的" : empty;
@@ -196,7 +222,7 @@ async function saveSources(clear?: SourceKey) {
   sourceSaving.value = true;
   try {
     settings.value = await mediaApi.saveSettings(body);
-    sourceForm.value = { fanart: "", fanart_client: "", omdb: "" };
+    sourceForm.value = emptySourceForm();
     ElMessage.success(clear ? "已清除" : "已保存");
   } catch (e) {
     ElMessage.error(errText(e, "保存失败"));
@@ -218,9 +244,9 @@ async function clearSourceKey(k: SourceKey) {
   await saveSources(k);
 }
 
-async function testSource(source: "fanart" | "omdb") {
+async function testSource(source: TestableSource) {
   sourceTesting.value = source;
-  const name = source === "fanart" ? "Fanart.tv" : "OMDb";
+  const name = SOURCE_NAMES[source];
   try {
     await mediaApi.testSource(source);
     ElMessage.success(`${name} 连接正常`);
@@ -788,6 +814,49 @@ onMounted(refresh);
                 >
               </div>
             </el-form-item>
+            <el-form-item label="TheTVDB API Key">
+              <div class="md-inline">
+                <el-input
+                  v-model="sourceForm.tvdb"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="sourcePlaceholder('tvdb', '没填时不用 TheTVDB')"
+                  data-testid="media-tvdb-key" />
+                <el-button
+                  v-if="hasKey('tvdb')"
+                  data-testid="media-clear-tvdb"
+                  @click="clearSourceKey('tvdb')"
+                  >清除</el-button
+                >
+                <el-button
+                  :disabled="!hasKey('tvdb')"
+                  :loading="sourceTesting === 'tvdb'"
+                  data-testid="media-test-tvdb"
+                  @click="testSource('tvdb')"
+                  >测试</el-button
+                >
+              </div>
+            </el-form-item>
+            <el-form-item label="TheTVDB 订阅 PIN（user-supported 的 Key 才要）">
+              <div class="md-inline">
+                <el-input
+                  v-model="sourceForm.tvdb_pin"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="
+                    sourcePlaceholder('tvdb_pin', '订阅 TheTVDB 以后在账号页面看到的 PIN')
+                  "
+                  data-testid="media-tvdb-pin" />
+                <el-button
+                  v-if="hasKey('tvdb_pin')"
+                  data-testid="media-clear-tvdb-pin"
+                  @click="clearSourceKey('tvdb_pin')"
+                  >清除</el-button
+                >
+              </div>
+            </el-form-item>
             <div class="md-actions">
               <el-button
                 type="primary"
@@ -800,10 +869,25 @@ onMounted(refresh);
             </div>
           </el-form>
           <p class="md-tip">
-            刮削时除了 TMDB，还可以用这两个来源（在「媒体库」里按项选）：Fanart.tv 有高清 Logo、
+            刮削时除了 TMDB，还可以用这几个来源（在「媒体库」里按项选）：Fanart.tv 有高清 Logo、
             clearart、横幅、横版海报与碟片图，在 fanart.tv 注册后到「Get an API Key」页面申请项目的
             Key；OMDb 给 IMDb、烂番茄与 Metacritic 的评分，在 omdbapi.com 申请（免费的每天 1000
-            次）。两个都经上面的代理访问；Key 加密保存，只写不读。豆瓣与 Bangumi 不用 Key。
+            次）；TheTVDB 给剧集每一集的标题、简介与截图，在
+            <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer"
+              >thetvdb.com</a
+            >
+            的开发者后台申请 API Key，user-supported 的 Key 还要填
+            <a href="https://thetvdb.com/subscribe" target="_blank" rel="noopener noreferrer"
+              >订阅</a
+            >
+            以后拿到的 PIN。都经上面的代理访问；Key 与 PIN 加密保存，只写不读。豆瓣与 Bangumi 不用
+            Key。
+          </p>
+          <p class="md-tip" data-testid="media-tvdb-attribution">
+            <a href="https://thetvdb.com" target="_blank" rel="noopener noreferrer"
+              >Metadata provided by TheTVDB. Please consider adding missing information or
+              subscribing.</a
+            >
           </p>
         </PtPanel>
       </div>

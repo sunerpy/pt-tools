@@ -2,9 +2,11 @@ package recognize
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/omdb"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -656,4 +659,87 @@ func TestCandidates(t *testing.T) {
 	got, err = s.Candidates(ctx, Input{Title: "Nothing.Matches.Here.2020"}, 8)
 	require.NoError(t, err)
 	assert.Empty(t, got)
+}
+
+// TheTVDB：Key 与订阅 PIN 加密保存、只说有没有；没填 Key 时 ErrNoKey；测试时用填的 Key 与 PIN 登录（没有 PIN 时不带）；
+// 格式不对的不收；清除以后不再有。
+func TestTVDBSettings(t *testing.T) {
+	var mu sync.Mutex
+	var logins []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v4/login":
+			var in map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			mu.Lock()
+			logins = append(logins, in)
+			mu.Unlock()
+			if in["apikey"] != "aaaa-bbbb-cccc" || in["pin"] != "PIN42" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"token":"tok"}}`))
+		case "/v4/series/81189":
+			if r.Header.Get("Authorization") != "Bearer tok" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"id":81189}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}))
+	s := New(Config{DB: db, Cipher: fakeCipher{}, TVDBBaseURL: srv.URL + "/v4"})
+	ctx := context.Background()
+
+	_, err = s.TVDB(ctx)
+	require.ErrorIs(t, err, tvdb.ErrNoKey)
+	require.ErrorIs(t, s.TestTVDB(ctx), tvdb.ErrNoKey)
+
+	got, err := s.SaveSettings(ctx, SettingsInput{TVDBKey: ptr(" aaaa-bbbb-cccc ")})
+	require.NoError(t, err)
+	assert.True(t, got.HasTVDBKey)
+	assert.False(t, got.HasTVDBPIN)
+	err = s.TestTVDB(ctx)
+	require.ErrorIs(t, err, tvdb.ErrUnauthorized, "这个 Key 要 PIN")
+	assert.NotContains(t, err.Error(), "aaaa-bbbb-cccc")
+	mu.Lock()
+	assert.Equal(t, map[string]any{"apikey": "aaaa-bbbb-cccc"}, logins[0], "没有 PIN 时不带 pin")
+	mu.Unlock()
+
+	got, err = s.SaveSettings(ctx, SettingsInput{TVDBPIN: ptr("PIN42")})
+	require.NoError(t, err)
+	assert.True(t, got.HasTVDBKey, "只改 PIN 时 Key 不动")
+	assert.True(t, got.HasTVDBPIN)
+	var row models.MediaSetting
+	require.NoError(t, db.First(&row, 1).Error)
+	assert.NotContains(t, row.TVDBKeyEncrypted, "aaaa-bbbb-cccc", "加密保存")
+	assert.NotContains(t, row.TVDBPINEncrypted, "PIN42")
+	require.NoError(t, s.TestTVDB(ctx))
+	view, err := s.Settings(ctx)
+	require.NoError(t, err)
+	b, err := json.Marshal(view)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "aaaa-bbbb-cccc")
+	assert.NotContains(t, string(b), "PIN42")
+	assert.Contains(t, string(b), `"has_tvdb_key":true,"has_tvdb_pin":true`)
+
+	for _, bad := range []SettingsInput{{TVDBKey: ptr("short")}, {TVDBKey: ptr("has space key")}, {TVDBPIN: ptr("p1")}, {TVDBPIN: ptr("PIN-42")}} {
+		_, err = s.SaveSettings(ctx, bad)
+		require.ErrorIs(t, err, ErrInvalid)
+	}
+	_, err = s.SaveSettings(ctx, SettingsInput{TVDBPIN: ptr("PIN-42")})
+	assert.Contains(t, err.Error(), "TheTVDB 订阅 PIN 格式不对")
+
+	got, err = s.SaveSettings(ctx, SettingsInput{TVDBKey: ptr(""), TVDBPIN: ptr("")})
+	require.NoError(t, err)
+	assert.False(t, got.HasTVDBKey)
+	assert.False(t, got.HasTVDBPIN)
+	_, err = s.TVDB(ctx)
+	require.ErrorIs(t, err, tvdb.ErrNoKey)
 }
