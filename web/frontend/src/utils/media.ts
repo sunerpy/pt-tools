@@ -566,6 +566,7 @@ const ITEM_STATUS: Record<OrganizeItemStatus, { label: string; tone: Tone }> = {
   done: { label: "已在库里", tone: "ok" },
   exists: { label: "目标已有文件", tone: "warn" },
   replace: { label: "替换旧版本", tone: "info" },
+  change: { label: "换条目", tone: "info" },
   failed: { label: "整理不了", tone: "dang" },
 };
 
@@ -664,9 +665,16 @@ export interface Outcome {
 export function organizeOutcome(res: OrganizeResult): Outcome {
   if (res.queued) return { level: "info", text: "整理还在后台进行，稍后刷新看结果" };
   if (res.plan?.problem) return { level: "warning", text: res.plan.problem };
+  const changed = res.changed ? `，换了 ${res.changed} 个文件的条目` : "";
   if (res.failed)
-    return { level: "warning", text: `新入库 ${res.created} 个，失败 ${res.failed} 个` };
-  return { level: "success", text: `新入库 ${res.created} 个，已在库里 ${res.done} 个` };
+    return {
+      level: "warning",
+      text: `新入库 ${res.created} 个${changed}，失败 ${res.failed} 个`,
+    };
+  return {
+    level: "success",
+    text: `新入库 ${res.created} 个${changed}，已在库里 ${res.done} 个`,
+  };
 }
 
 /** 重新刮削的结果写成一句提示（整理历史与订阅详情共用） */

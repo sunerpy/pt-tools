@@ -32,6 +32,7 @@ import {
   wordKindLabel,
   failKindFrom,
   historyStatusFrom,
+  organizeOutcome,
 } from "./media";
 
 describe("媒体识别的显示工具", () => {
@@ -306,5 +307,19 @@ describe("地址里带的整理历史筛选", () => {
     expect(failKindFrom("exists")).toBe("exists");
     expect(failKindFrom("nope")).toBe("");
     expect(failKindFrom(null)).toBe("");
+  });
+});
+
+describe("整理结果的提示", () => {
+  it("写出换了条目的文件数；没换时不写", () => {
+    const base = { created: 1, done: 2, skipped: 0, failed: 0 };
+    expect(organizeOutcome(base).text).toBe("新入库 1 个，已在库里 2 个");
+    expect(organizeOutcome({ ...base, created: 0, changed: 3 }).text).toBe(
+      "新入库 0 个，换了 3 个文件的条目，已在库里 2 个",
+    );
+    expect(organizeOutcome({ ...base, failed: 1, changed: 1 })).toEqual({
+      level: "warning",
+      text: "新入库 1 个，换了 1 个文件的条目，失败 1 个",
+    });
   });
 });

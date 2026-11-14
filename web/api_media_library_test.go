@@ -77,6 +77,9 @@ func newOrganizeServer(t *testing.T) *organizeTestEnv {
 			_, _ = w.Write([]byte(`{"results":[]}`))
 		case r.URL.Path == "/3/movie/278":
 			_, _ = w.Write([]byte(`{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23","imdb_id":"tt0111161"}`))
+		case r.URL.Path == "/3/movie/279":
+			// 手动纠正换到的另一部（换条目的测试用）
+			_, _ = w.Write([]byte(`{"id":279,"title":"救赎","original_title":"Redemption","release_date":"1994-01-01"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

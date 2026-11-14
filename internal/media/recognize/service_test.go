@@ -64,6 +64,11 @@ func fakeTMDB(t *testing.T) *httptest.Server {
 				{"id":150540,"title":"头脑特工队","original_title":"Inside Out","release_date":"2015-06-09","popularity":200}]}`))
 		case r.URL.Path == "/3/search/movie" && (strings.Contains(q, "Oppenheimer") || strings.Contains(q, "奥本海默")):
 			_, _ = w.Write([]byte(`{"results":[]}`))
+		case r.URL.Path == "/3/search/movie" && strings.Contains(q, "Zorro"):
+			// 同名的电影在 TMDB 上没有上映日期；同名的剧集是 1990 年首播的
+			_, _ = w.Write([]byte(`{"results":[{"id":9001,"title":"Zorro","original_title":"Zorro","popularity":5}]}`))
+		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Zorro"):
+			_, _ = w.Write([]byte(`{"results":[{"id":9002,"name":"Zorro","original_name":"Zorro","first_air_date":"1990-01-05","popularity":4}]}`))
 		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Game of Thrones"):
 			_, _ = w.Write([]byte(`{"results":[{"id":1399,"name":"权力的游戏","original_name":"Game of Thrones","first_air_date":"2011-04-17","popularity":300}]}`))
 		case strings.HasPrefix(r.URL.Path, "/3/search/"):
@@ -511,6 +516,22 @@ func TestPick(t *testing.T) {
 	assert.Nil(t, pick(exact, nil))
 }
 
+// 标题里只有年份（判成电影）、同名电影在 TMDB 上没有年份：不认定、列出候选，也不改认成同名的剧集（剧集首播早于标题年份不扣分）。
+func TestRecognizeUndatedMovieNotSwappedForTV(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	res, err := s.Recognize(context.Background(), Input{Title: "Zorro.2024.1080p.WEB-DL.H264-GRP"})
+	require.NoError(t, err)
+	assert.Nil(t, res.Match, "没有年份的同名候选不直接认定")
+	require.NotEmpty(t, res.Candidates)
+	ids := []int{}
+	for _, c := range res.Candidates {
+		ids = append(ids, c.ID)
+	}
+	assert.Contains(t, ids, 9001)
+	assert.NotContains(t, ids, 9002, "没有补搜剧集")
+}
+
 func TestScore(t *testing.T) {
 	m := meta.Meta{NameEN: "Shogun", Year: 2024, Type: meta.TypeTV, Season: 1}
 	assert.Equal(t, 1.0, titleScore(m, tmdb.Result{Title: "幕府将军", OriginalTitle: "Shōgun"}), "去掉重音再比")
@@ -526,8 +547,14 @@ func TestScore(t *testing.T) {
 	tv := meta.Meta{NameEN: "House of the Dragon", Year: 2024, Type: meta.TypeTV, Season: 2}
 	assert.InDelta(t, 1.15, score(tv, tmdb.Result{Title: "House of the Dragon", Year: 2022, MediaType: tmdb.KindTV}, 0), 0.001, "后面几季不扣分")
 
-	assert.NotNil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 1.0}}))
-	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 0.9}}))
+	assert.NotNil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 1.0}}))
+	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 0.9}}))
+	// 标题里有年份、候选没有年份（同名的冷门条目常常没有日期）：核对不了年份，不认定，在有年份的里面挑
+	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 1.15}}))
+	got := pick(movie, []Candidate{{Result: tmdb.Result{ID: 1, Title: "Dune"}, Score: 1.15}, {Result: tmdb.Result{ID: 2, Title: "Dune", Year: 2021}, Score: 1.1}})
+	require.NotNil(t, got)
+	assert.Equal(t, 2, got.ID)
+	assert.NotNil(t, pick(meta.Meta{NameEN: "Dune", Type: meta.TypeMovie}, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 1.05}}), "标题里没有年份时照旧")
 	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Other"}, Score: 2}}), "名字对不上分再高也不认")
 
 	assert.Equal(t, 0.0, titleScore(meta.Meta{NameEN: "Inside Out"}, tmdb.Result{Title: "Inside Out 2"}), "续集编号对不上")

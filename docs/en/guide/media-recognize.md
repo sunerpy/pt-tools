@@ -69,7 +69,7 @@ Search results are cached for a day and entry details for a week. Without a usab
 
 ## Corrections
 
-A correction applies to the parsed name (plus the year for movies, not for shows): other titles with the same name, such as a different resolution or release group, are recognized as the corrected entry. It is keyed by the English name when there is one, with the Chinese name as an alias, so it applies whether or not the subtitle has the Chinese name. Delete it under Corrections (手动纠正) to search by name again.
+A correction applies to the parsed name (plus the year for movies, not for shows): other titles with the same name, such as a different resolution or release group, are recognized as the corrected entry. It is keyed by the English name when there is one, with the Chinese name as an alias, so it applies whether or not the subtitle has the Chinese name. Delete it under Corrections (手动纠正) to search by name again. A torrent organised before keeps its earlier entry when organised again; when that entry came from recognition, a correction wins: click Organise again (重新整理) in organise history, check the preview, and the organised files move to the corrected entry (see [when organising runs](media-library.md#when-organising-runs)).
 
 ## Recognition words
 

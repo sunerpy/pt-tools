@@ -454,11 +454,12 @@ type organizePlan struct {
 	} `json:"library"`
 	Mode  string `json:"mode"`
 	Items []struct {
-		Rel     string `json:"rel"`
-		Size    int64  `json:"size"`
-		Target  string `json:"target"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
+		Rel         string `json:"rel"`
+		Size        int64  `json:"size"`
+		Target      string `json:"target"`
+		Status      string `json:"status"`
+		Message     string `json:"message"`
+		PriorTarget string `json:"prior_target"`
 	} `json:"items"`
 	Skipped int    `json:"skipped"`
 	Problem string `json:"problem"`
@@ -492,7 +493,7 @@ func planPreview(tool string, plan organizePlan) (Preview, error) {
 	}
 	p.Summary = fmt.Sprintf("把下载器「%s」里的「%s」整理进%s", plan.Downloader, plan.Name, lib)
 	var total int64
-	exists := 0
+	exists, changed, inPlace := 0, 0, 0
 	for _, it := range plan.Items {
 		switch it.Status {
 		case "done":
@@ -505,6 +506,15 @@ func planPreview(tool string, plan organizePlan) (Preview, error) {
 		after := it.Target
 		if it.Status == "replace" {
 			after += "（替换已有的文件）"
+		}
+		if it.Status == "change" {
+			if it.Target == it.PriorTarget {
+				inPlace++
+				after = "换条目：位置不变（" + it.Target + "），整理记录改成这个条目、重新刮削"
+			} else {
+				changed++
+				after = "换条目：" + it.PriorTarget + " → " + it.Target
+			}
 		}
 		if it.Status == "failed" {
 			after = "整理不了：" + it.Message
@@ -523,6 +533,12 @@ func planPreview(tool string, plan organizePlan) (Preview, error) {
 	p.Impact = append(p.Impact, modeImpact(orDefaultMode(plan.Mode), total))
 	if exists > 0 {
 		p.Impact = append(p.Impact, fmt.Sprintf("有 %d 个文件的目标位置已经有同名文件：不覆盖，记为已存在", exists))
+	}
+	if changed > 0 {
+		p.Impact = append(p.Impact, fmt.Sprintf("有 %d 个文件之前按别的条目整理过：先在新位置放好，再删掉旧位置里 pt-tools 放的文件", changed))
+	}
+	if inPlace > 0 {
+		p.Impact = append(p.Impact, fmt.Sprintf("有 %d 个文件之前按别的条目整理过、位置不变：只改整理记录，按新条目重新刮削", inPlace))
 	}
 	p.Impact = append(p.Impact, "按设置写 NFO 与海报，并通知媒体服务器扫描")
 	return p, nil
@@ -583,7 +599,7 @@ func retryPreview(ctx context.Context, d *Deps, c Caller, id uint) (Preview, err
 		if it.Message != "" {
 			before += "，" + oneLine(it.Message, 80)
 		}
-		p.Changes = []Change{{Label: "整理记录 " + utoa(id), Before: before, After: "按现在的设置重新整理"}}
+		p.Changes = []Change{{Label: "整理记录 " + utoa(id), Before: before, After: "按现在的设置重新整理（已整理的文件只有条目变了时才换位置）"}}
 		if it.TargetPath != "" {
 			p.Changes = append(p.Changes, Change{Label: "目标位置", After: it.TargetPath})
 		}

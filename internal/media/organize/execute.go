@@ -75,6 +75,8 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		return res, nil
 	}
 	var created []*PlanItem
+	// changes 是这次换了条目的文件（见 changeItem）：都处理完以后再删旧位置的文件
+	var changes changeSet
 	s.recordISOSkips(ctx, p, trigger, res)
 	for i := range p.Items {
 		it := &p.Items[i]
@@ -106,7 +108,23 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 				created = append(created, it)
 			}
 			continue
+		case ItemChange:
+			if trigger != models.MediaTriggerManual || req.Auto {
+				// 自动整理不换已整理文件的条目：库里的文件与记录都不动
+				res.Done++
+				continue
+			}
+			if s.changeItem(ctx, p, it, trigger, res, &changes) && !it.inPlace {
+				created = append(created, it)
+			}
+			continue
 		case ItemDone:
+			if it.keep {
+				// 条目变了、这个文件不换（见 changeState）：库里的文件与记录都不动，不补字幕（字幕的目标是按这次的条目算的）
+				res.Done++
+				res.Messages = append(res.Messages, filepath.Base(it.Source)+"："+it.Message)
+				continue
+			}
 			if it.row != nil && it.row.Mode == models.MediaModeExisting {
 				// 种子的文件就是导入时就在库里的那个（种子下载在库目录里）：记录照旧
 				res.Done++
@@ -191,6 +209,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		res.Created++
 		created = append(created, it)
 	}
+	res.Messages = append(res.Messages, s.finishChanges(ctx, p, changes)...)
 	if len(created) > 0 {
 		// 站点字幕先放（媒体服务器刷新时看得到）；ChineseSubFinder 在刮削之后（剧集要读每一集的 NFO）
 		res.Messages = append(res.Messages, s.siteSubtitles(ctx, p, created)...)

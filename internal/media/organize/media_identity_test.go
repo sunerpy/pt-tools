@@ -69,13 +69,13 @@ func TestRecognizeOrder(t *testing.T) {
 	assert.Equal(t, tlouID, p.Match.ID)
 	assert.Equal(t, sourceManual, p.Source)
 
-	// 之前整理用过的条目（例如手动纠正过）排在订阅的前面
+	// 之前整理用过的条目（例如手动指定过）排在订阅的前面；手动指定的沿用时来源照旧是手动指定
 	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash, MediaType: models.MediaKindTV, TMDBID: tlouID})
 	require.NoError(t, err)
 	require.Positive(t, res.Created)
 	p = preview(Request{})
 	assert.Equal(t, tlouID, p.Match.ID)
-	assert.Equal(t, sourceHistory, p.Source)
+	assert.Equal(t, sourceManual, p.Source)
 }
 
 // 订阅或推送时说明的条目在 TMDB 上不在了：退回自动识别，预览与整理记录里写明；TMDB 暂时出错时稍后重试，不改识别。

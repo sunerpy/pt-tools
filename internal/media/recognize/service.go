@@ -655,8 +655,9 @@ func (s *Service) match(ctx context.Context, c *tmdb.Client, m meta.Meta, imdb s
 	if err != nil {
 		return err
 	}
-	// 只靠年份判成电影的（没有季集标记）也可能是剧集：电影里没有可靠匹配时补搜剧集（电影的搜索读缓存）
-	if pick(m, cands) == nil && m.Type == meta.TypeMovie {
+	// 只靠年份判成电影的（没有季集标记）也可能是剧集：电影里没有可靠匹配时补搜剧集（电影的搜索读缓存）。
+	// 电影里有一个只因为 TMDB 上没有年份才没认定的同名候选时不补搜：不认定、列出候选，不改认成同名的剧集
+	if pick(m, cands) == nil && m.Type == meta.TypeMovie && pickFrom(m, cands) == nil {
 		if cands, err = s.search(ctx, c, m, []string{tmdb.KindMovie, tmdb.KindTV}); err != nil {
 			return err
 		}
@@ -703,6 +704,31 @@ func (s *Service) Candidates(ctx context.Context, in Input, limit int) ([]Candid
 	return cands, nil
 }
 
+// Correction 是一个标题的手动纠正：类型、TMDB 编号与纠正的编号。
+type Correction struct {
+	MediaType  string
+	TMDBID     int
+	OverrideID uint
+}
+
+// Correction 找这个标题的手动纠正（套用识别词解析以后按名字找，同 Recognize 的第一步，见 findOverride）；没有时返回 nil、nil。
+// 不访问 TMDB：整理入库用它看沿用的条目要不要换成纠正的。
+func (s *Service) Correction(ctx context.Context, in Input) (*Correction, error) {
+	in, err := cleanInput(in)
+	if err != nil {
+		return nil, err
+	}
+	m, _, err := s.parse(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	ov, err := s.findOverride(ctx, m)
+	if err != nil || ov.ID == 0 {
+		return nil, err
+	}
+	return &Correction{MediaType: ov.MediaType, TMDBID: ov.TMDBID, OverrideID: ov.ID}, nil
+}
+
 // findOverride 找这个解析结果的手动纠正：先按英文名、再按中文名找主键，最后按中文名找别名。没有时返回零值。
 func (s *Service) findOverride(ctx context.Context, m meta.Meta) (models.MediaOverride, error) {
 	en, cn := overrideKey(m, m.NameEN), overrideKey(m, m.NameCN)
@@ -744,6 +770,10 @@ const otherTitlesTop = 3
 // 中文搜索结果里只有中文名与原名。只看排在前面的几个候选，名字要完全相同、总分过线才认。
 func pickByOtherTitles(ctx context.Context, c *tmdb.Client, m meta.Meta, cands []Candidate) *Candidate {
 	for i := range cands[:min(otherTitlesTop, len(cands))] {
+		if m.Year > 0 && cands[i].Year == 0 {
+			// 年份核对不了（见 pick）
+			continue
+		}
 		titles, err := c.Titles(ctx, cands[i].MediaType, cands[i].ID)
 		if err != nil {
 			continue

@@ -22,6 +22,10 @@ class AppOrganizeItem {
     required this.status,
     this.message,
     this.historyId,
+    this.priorTarget,
+    this.priorMediaType,
+    this.priorTmdbId,
+    this.priorTitle,
   });
 
   /// 种子里的相对路径
@@ -62,7 +66,7 @@ class AppOrganizeItem {
   ///
   int? episodeEnd;
 
-  /// pending 要整理，done 库里已经有了，exists 目标被别的文件占着（不覆盖），replace 换掉 pt-tools 之前放进库的旧版本，failed 整理不了
+  /// pending 要整理，done 库里已经有了，exists 目标被别的文件占着（不覆盖），replace 换掉 pt-tools 之前放进库的旧版本，change 之前整理过、这次条目变了，换到新位置（prior_* 是之前的），failed 整理不了。条目变了、这个文件不换时是 done，message 写明原因
   AppOrganizeItemStatusEnum status;
 
   ///
@@ -81,6 +85,36 @@ class AppOrganizeItem {
   ///
   int? historyId;
 
+  /// 之前整理时放进库里的位置（这次条目变了时才有）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? priorTarget;
+
+  /// 之前整理时的条目类型
+  AppOrganizeItemPriorMediaTypeEnum? priorMediaType;
+
+  /// 之前整理时的 TMDB 编号
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? priorTmdbId;
+
+  /// 之前整理时的条目名
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? priorTitle;
+
   @override
   bool operator ==(Object other) => identical(this, other) || other is AppOrganizeItem &&
     other.rel == rel &&
@@ -91,7 +125,11 @@ class AppOrganizeItem {
     other.episodeEnd == episodeEnd &&
     other.status == status &&
     other.message == message &&
-    other.historyId == historyId;
+    other.historyId == historyId &&
+    other.priorTarget == priorTarget &&
+    other.priorMediaType == priorMediaType &&
+    other.priorTmdbId == priorTmdbId &&
+    other.priorTitle == priorTitle;
 
   @override
   int get hashCode =>
@@ -104,10 +142,14 @@ class AppOrganizeItem {
     (episodeEnd == null ? 0 : episodeEnd!.hashCode) +
     (status.hashCode) +
     (message == null ? 0 : message!.hashCode) +
-    (historyId == null ? 0 : historyId!.hashCode);
+    (historyId == null ? 0 : historyId!.hashCode) +
+    (priorTarget == null ? 0 : priorTarget!.hashCode) +
+    (priorMediaType == null ? 0 : priorMediaType!.hashCode) +
+    (priorTmdbId == null ? 0 : priorTmdbId!.hashCode) +
+    (priorTitle == null ? 0 : priorTitle!.hashCode);
 
   @override
-  String toString() => 'AppOrganizeItem[rel=$rel, size=$size, target=$target, season=$season, episode=$episode, episodeEnd=$episodeEnd, status=$status, message=$message, historyId=$historyId]';
+  String toString() => 'AppOrganizeItem[rel=$rel, size=$size, target=$target, season=$season, episode=$episode, episodeEnd=$episodeEnd, status=$status, message=$message, historyId=$historyId, priorTarget=$priorTarget, priorMediaType=$priorMediaType, priorTmdbId=$priorTmdbId, priorTitle=$priorTitle]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -144,6 +186,26 @@ class AppOrganizeItem {
     } else {
       json[r'history_id'] = null;
     }
+    if (this.priorTarget != null) {
+      json[r'prior_target'] = this.priorTarget;
+    } else {
+      json[r'prior_target'] = null;
+    }
+    if (this.priorMediaType != null) {
+      json[r'prior_media_type'] = this.priorMediaType;
+    } else {
+      json[r'prior_media_type'] = null;
+    }
+    if (this.priorTmdbId != null) {
+      json[r'prior_tmdb_id'] = this.priorTmdbId;
+    } else {
+      json[r'prior_tmdb_id'] = null;
+    }
+    if (this.priorTitle != null) {
+      json[r'prior_title'] = this.priorTitle;
+    } else {
+      json[r'prior_title'] = null;
+    }
     return json;
   }
 
@@ -177,6 +239,10 @@ class AppOrganizeItem {
         status: AppOrganizeItemStatusEnum.fromJson(json[r'status'])!,
         message: mapValueOfType<String>(json, r'message'),
         historyId: mapValueOfType<int>(json, r'history_id'),
+        priorTarget: mapValueOfType<String>(json, r'prior_target'),
+        priorMediaType: AppOrganizeItemPriorMediaTypeEnum.fromJson(json[r'prior_media_type']),
+        priorTmdbId: mapValueOfType<int>(json, r'prior_tmdb_id'),
+        priorTitle: mapValueOfType<String>(json, r'prior_title'),
       );
     }
     return null;
@@ -230,12 +296,13 @@ class AppOrganizeItem {
   };
 }
 
-/// pending 要整理，done 库里已经有了，exists 目标被别的文件占着（不覆盖），replace 换掉 pt-tools 之前放进库的旧版本，failed 整理不了
+/// pending 要整理，done 库里已经有了，exists 目标被别的文件占着（不覆盖），replace 换掉 pt-tools 之前放进库的旧版本，change 之前整理过、这次条目变了，换到新位置（prior_* 是之前的），failed 整理不了。条目变了、这个文件不换时是 done，message 写明原因
 enum AppOrganizeItemStatusEnum {
   pending._(r'pending'),
   done._(r'done'),
   exists._(r'exists'),
   replace._(r'replace'),
+  change._(r'change'),
   failed._(r'failed'),
   ;
 
@@ -299,6 +366,7 @@ class AppOrganizeItemStatusEnumTypeTransformer {
         case r'done': return AppOrganizeItemStatusEnum.done;
         case r'exists': return AppOrganizeItemStatusEnum.exists;
         case r'replace': return AppOrganizeItemStatusEnum.replace;
+        case r'change': return AppOrganizeItemStatusEnum.change;
         case r'failed': return AppOrganizeItemStatusEnum.failed;
         default:
           if (!allowNull) {
@@ -311,6 +379,84 @@ class AppOrganizeItemStatusEnumTypeTransformer {
 
   /// The singleton instance of this transformer.
   static AppOrganizeItemStatusEnumTypeTransformer? _instance;
+}
+
+
+/// 之前整理时的条目类型
+enum AppOrganizeItemPriorMediaTypeEnum {
+  movie._(r'movie'),
+  tv._(r'tv'),
+  ;
+
+  /// Instantiate a new enum with the provided value.
+  const AppOrganizeItemPriorMediaTypeEnum._(this._value);
+
+  /// The underlying value of this enum member.
+  final String _value;
+
+  @override
+  String toString() => _value;
+
+  /// Encodes this enum as a value suitable for JSON.
+  String toJson() => _value;
+
+  /// Returns the instance of [AppOrganizeItemPriorMediaTypeEnum] that was successfully decoded
+  /// from the passed [value] on success, null otherwise.
+  static AppOrganizeItemPriorMediaTypeEnum? fromJson(dynamic value) => AppOrganizeItemPriorMediaTypeEnumTypeTransformer().decode(value);
+
+  /// Returns a [List] containing instances of [AppOrganizeItemPriorMediaTypeEnum]
+  /// that were successfully decoded from the passed [JSON][json].
+  static List<AppOrganizeItemPriorMediaTypeEnum> listFromJson(dynamic json, {bool growable = false,}) {
+    final result = <AppOrganizeItemPriorMediaTypeEnum>[];
+    if (json is List && json.isNotEmpty) {
+      for (final row in json) {
+        final value = AppOrganizeItemPriorMediaTypeEnum.fromJson(row);
+        if (value != null) {
+          result.add(value);
+        }
+      }
+    }
+    return result.toList(growable: growable);
+  }
+}
+
+/// Transformation class that can [encode] an instance of [AppOrganizeItemPriorMediaTypeEnum] to String,
+/// and [decode] dynamic data back to [AppOrganizeItemPriorMediaTypeEnum].
+class AppOrganizeItemPriorMediaTypeEnumTypeTransformer {
+  factory AppOrganizeItemPriorMediaTypeEnumTypeTransformer() => _instance ??= const AppOrganizeItemPriorMediaTypeEnumTypeTransformer._();
+
+  const AppOrganizeItemPriorMediaTypeEnumTypeTransformer._();
+
+  String encode(AppOrganizeItemPriorMediaTypeEnum data) => data._value;
+
+  /// Returns the instance of [AppOrganizeItemPriorMediaTypeEnum] that was successfully decoded
+  /// from the passed [data] value on success, null otherwise.
+  ///
+  /// If [allowNull] is true and the [dynamic value][data] cannot be decoded successfully,
+  /// then null is returned. However, if [allowNull] is false and the [dynamic value][data]
+  /// cannot be decoded successfully, then an [UnimplementedError] is thrown.
+  ///
+  /// The [allowNull] is very handy when an API changes and a new enum value is added or removed,
+  /// and users are still using an old app with the old code.
+  AppOrganizeItemPriorMediaTypeEnum? decode(dynamic data, {bool allowNull = true}) {
+    if (data is AppOrganizeItemPriorMediaTypeEnum) {
+      return data;
+    }
+    if (data != null) {
+      switch (data) {
+        case r'movie': return AppOrganizeItemPriorMediaTypeEnum.movie;
+        case r'tv': return AppOrganizeItemPriorMediaTypeEnum.tv;
+        default:
+          if (!allowNull) {
+            throw ArgumentError('Unknown enum value to decode: $data');
+          }
+      }
+    }
+    return null;
+  }
+
+  /// The singleton instance of this transformer.
+  static AppOrganizeItemPriorMediaTypeEnumTypeTransformer? _instance;
 }
 
 

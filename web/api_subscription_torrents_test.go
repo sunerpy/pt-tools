@@ -118,7 +118,7 @@ func TestAppSubscriptionTorrentOrganizeAndScrape(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
 	assert.Equal(t, 1, res.Done)
 	require.Len(t, org.organized, 1)
-	assert.Equal(t, organize.Request{DownloaderID: 3, Hash: "abc123", MediaType: models.MediaKindTV, TMDBID: 1001}, org.organized[0])
+	assert.Equal(t, organize.Request{DownloaderID: 3, Hash: "abc123", MediaType: models.MediaKindTV, TMDBID: 1001, Auto: true}, org.organized[0], "订阅的重新整理不换已整理文件的条目")
 
 	w = appWithTorrent(t, srv.appSubscriptionTorrentScrape, "/api/app/v1/subscriptions/"+id+"/torrents/"+torrent+"/scrape", id, torrent)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

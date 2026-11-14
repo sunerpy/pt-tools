@@ -458,6 +458,35 @@ describe("整理历史", () => {
     );
   });
 
+  it("已整理的记录有「重新整理」：打开整理弹窗先预览；导入的、原盘、失败的没有", async () => {
+    await mountPage(false, [
+      row({ id: 8, mode: "existing", trigger: "import" }),
+      row({ id: 9, disc_files: 5 }),
+      row({
+        id: 10,
+        downloader_id: 0,
+        watch_dir_id: 3,
+        torrent_name: "Show.S01E01.mkv",
+        info_hash: "watch:3:x",
+      }),
+    ]);
+    expect(q("mh-reorganize-1")).not.toBeNull();
+    expect(q("mh-reorganize-3"), "移动整理的也能预览（预览写明为什么不换）").not.toBeNull();
+    expect(q("mh-reorganize-2"), "失败的用重试").toBeNull();
+    expect(q("mh-reorganize-4"), "跳过的用重试").toBeNull();
+    expect(q("mh-reorganize-8"), "导入的已有文件").toBeNull();
+    expect(q("mh-reorganize-9"), "原盘").toBeNull();
+    expect(q("mh-reorganize-10")).not.toBeNull();
+
+    api.libraries.mockResolvedValue([]);
+    api.preview.mockResolvedValue(manualPlan);
+    q("mh-reorganize-1")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({ downloader_id: 1, hash: "abc" }),
+    );
+    expect(api.retry, "先预览，不直接整理").not.toHaveBeenCalled();
+  });
+
   it("手动整理时选过整理方式的记录：带着那个方式重新打开", async () => {
     await mountPage(false, [
       row({

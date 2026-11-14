@@ -49,6 +49,8 @@ type Cipher interface {
 // 返回 fanart.ErrNoKey、omdb.ErrNoKey。
 type Recognizer interface {
 	Recognize(ctx context.Context, in recognize.Input) (*recognize.Result, error)
+	// Correction 是这个标题的手动纠正（没有时 nil、nil），不访问 TMDB
+	Correction(ctx context.Context, in recognize.Input) (*recognize.Correction, error)
 	Parse(ctx context.Context, title, subtitle string) (meta.Meta, error)
 	TMDB(ctx context.Context) (*tmdb.Client, error)
 	Fanart(ctx context.Context) (*fanart.Client, error)

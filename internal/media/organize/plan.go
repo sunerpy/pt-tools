@@ -34,6 +34,11 @@ type Request struct {
 	LibraryID  uint   `json:"library_id,omitempty"`
 	// Mode 是这次用的整理方式（hardlink、copy、symlink、move），手动整理时可以选；空串跟媒体库
 	Mode string `json:"mode,omitempty"`
+	// Auto 表示这是自动发起的整理（失败的自动重试、订阅补整理与重新整理）：已整理的文件条目变了也不换（见 ItemChange），
+	// 只有用户自己点的整理才换
+	Auto bool `json:"-"`
+	// retried 表示请求是按一条整理记录重试的（见 retryRequest）：带着的条目是那条记录的，不算这次明确指定的
+	retried bool
 }
 
 // queueHash 是排队去重、退避与重试分组用的种子标识：目录监控的一项用 watchHash，指定的路径用 pathHash。
@@ -101,6 +106,9 @@ const (
 	ItemExists  = "exists"  // 目标位置被别的文件占着，不覆盖
 	ItemReplace = "replace" // 目标位置是 pt-tools 之前放进库的旧版本，按覆盖策略换成这个
 	ItemFailed  = "failed"  // 整理不了，Message 写明原因
+	// ItemChange 是已经整理过、这次条目变了（加了纠正、手动填了别的编号）的文件：先在新位置放好、记录改成这次的，
+	// 再删掉旧位置里 pt-tools 放的文件（见 itemState、changeItem）。只有用户自己点的整理才换
+	ItemChange = "change"
 )
 
 // 覆盖策略（MediaLibrary.OverwriteMode）：目标位置已经有 pt-tools 之前放进这个库的同一部（同一集）的旧版本时怎么办。
@@ -133,6 +141,12 @@ type PlanItem struct {
 	HistoryID    uint           `json:"history_id,omitempty"`
 	// Disc 不为空时这一项是一张原盘：Source 是原盘根目录，Target 是电影目录
 	Disc *DiscInfo `json:"disc,omitempty"`
+	// PriorTarget、PriorMediaType、PriorTMDBID、PriorTitle 是这个文件之前整理时的位置与条目：这次条目变了时才有
+	// （状态是 change，或者不换、写明了原因的 done）
+	PriorTarget    string `json:"prior_target,omitempty"`
+	PriorMediaType string `json:"prior_media_type,omitempty"`
+	PriorTMDBID    int    `json:"prior_tmdb_id,omitempty"`
+	PriorTitle     string `json:"prior_title,omitempty"`
 
 	meta     meta.Meta
 	row      *models.MediaTransferHistory
@@ -151,6 +165,14 @@ type PlanItem struct {
 	failKind string
 	// groupNote 是按追剧选的剧集组换算这个文件的季集的说明（见 regroup）：写进整理记录
 	groupNote string
+	// prior 是换条目以前的整理记录（值拷贝，见 ItemChange）：换好以后按它删掉旧位置的文件
+	prior *models.MediaTransferHistory
+	// keep 表示条目变了、但这个文件不换（移动整理的、导入的、源文件不在、新位置被占着）：库里的文件与记录都原样不动
+	keep bool
+	// inPlace 表示换条目时位置不变（新旧目标相同）：只改记录、重新刮削
+	inPlace bool
+	// placed 表示换条目时新位置已经是这个文件，不用再放
+	placed bool
 }
 
 // fail 把这一项标成整理不了，记下原因与分类。
@@ -220,6 +242,10 @@ type Plan struct {
 	group *epgroup.Map
 	// matchNote 是条目来源上要写进整理记录的说明（订阅或推送时说明的条目在 TMDB 上找不到了、改成自动识别）
 	matchNote string
+	// explicit 表示这次的条目是请求里明确指定的（整理弹窗、App、助手填了编号；不含重试带着的记录的条目）
+	explicit bool
+	// corrected 表示这次的条目是手动纠正给的（沿用的条目被纠正换掉了，或者本来就和纠正的一样）
+	corrected bool
 	// skip 表示 Problem 不是出错（例如剧集原盘）：记成跳过，不重试
 	skip bool
 	// isoSkips 是剧集里不整理的 ISO 镜像：每个写一条跳过的记录
@@ -258,11 +284,13 @@ func (p *Plan) showDir(target string) string {
 
 // Result 是一次整理的结果。
 type Result struct {
-	Plan     *Plan    `json:"plan"`
-	Created  int      `json:"created"`
-	Done     int      `json:"done"`
-	Skipped  int      `json:"skipped"`
-	Failed   int      `json:"failed"`
+	Plan    *Plan `json:"plan"`
+	Created int   `json:"created"`
+	Done    int   `json:"done"`
+	Skipped int   `json:"skipped"`
+	Failed  int   `json:"failed"`
+	// Changed 是换了条目的文件数（见 ItemChange），不算在 Created 里
+	Changed  int      `json:"changed"`
 	Messages []string `json:"messages,omitempty"`
 	// Queued 表示整理还在后台进行（等不到结果就先回了），稍后到整理历史里看
 	Queued bool `json:"queued,omitempty"`
@@ -401,20 +429,50 @@ func (s *Service) torrentRecord(ctx context.Context, hash string) models.Torrent
 	}
 }
 
-// priorEntry 是之前整理这些文件时用的条目：先看已经整理好的记录，再看手动整理时指定过条目的记录。
-func priorEntry(p *Plan) (string, int) {
+// priorEntry 是之前整理这些文件时用的条目所在的记录：先看已经整理好的记录，再看手动整理时指定过条目的记录。没有时为 nil。
+func priorEntry(p *Plan) *models.MediaTransferHistory {
 	for _, done := range []bool{true, false} {
 		for _, it := range p.Items {
 			r := it.row
 			if r == nil || r.TMDBID <= 0 || (r.MediaType != tmdb.KindMovie && r.MediaType != tmdb.KindTV) {
 				continue
 			}
-			if done && r.Status == models.MediaTransferDone || !done && r.Trigger == models.MediaTriggerManual {
-				return r.MediaType, r.TMDBID
+			if done && r.Status == models.MediaTransferDone || !done && manualEntry(*r) {
+				return r
 			}
 		}
 	}
-	return "", 0
+	return nil
+}
+
+// pinnedEntry 报告这条记录的条目是不是明确指定的（手动指定、订阅的、推送时说明的）：只看 MatchSource。
+// 升级前的老记录没有来源，手动整理的算明确指定。自动识别来的（搜索、IMDb、纠正）与沿用来的（history，原来的来源已经不知道了）不算：
+// 之后有了对得上的纠正时用纠正的条目。
+func pinnedEntry(r models.MediaTransferHistory) bool {
+	switch r.MatchSource {
+	case sourceManual, sourceSubscription, sourcePush:
+		return true
+	case "":
+		return r.Trigger == models.MediaTriggerManual
+	}
+	return false
+}
+
+// manualEntry 报告这条记录的条目是不是手动指定的（老记录看是不是手动整理的）：重试时沿用它的条目与媒体库。
+func manualEntry(r models.MediaTransferHistory) bool {
+	return r.MatchSource == sourceManual || (r.MatchSource == "" && r.Trigger == models.MediaTriggerManual)
+}
+
+// priorSource 是沿用这条记录的条目时记下的来源：明确指定的记它原来的来源（老记录记 manual），重试、补字幕重写记录以后还是明确指定的；
+// 其余记 history。
+func priorSource(r models.MediaTransferHistory) string {
+	if !pinnedEntry(r) {
+		return sourceHistory
+	}
+	if r.MatchSource == "" {
+		return sourceManual
+	}
+	return r.MatchSource
 }
 
 // buildPlan 检查请求，按来源分给指定的路径、目录监控的一项或下载器里的种子。
@@ -669,10 +727,28 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	p.siteName, p.doubanID, p.siteTitle = info.SiteName, info.DoubanID, info.Title
 	p.siteTorrentID = firstNonEmpty(info.DetailID, info.TorrentID)
 	source := sourceManual
+	p.explicit = req.TMDBID > 0 && !req.retried
 	if req.TMDBID == 0 {
 		// 之前整理过（比如手动指定过条目）：沿用那个条目，库里的文件名与重新整理时一致
-		if kind, id := priorEntry(p); id > 0 {
-			req.MediaType, req.TMDBID, source = kind, id, sourceHistory
+		if r := priorEntry(p); r != nil {
+			req.MediaType, req.TMDBID, source = r.MediaType, r.TMDBID, priorSource(*r)
+			// 之前的条目是自动识别来的、现在有了对得上的纠正（这个种子也没有订阅或推送时说明的条目）：用纠正的
+			if !pinnedEntry(*r) && (p.follow == nil || p.follow.TMDBID <= 0) && info.TMDBID <= 0 {
+				corr, cerr := s.cfg.Recognizer.Correction(ctx, recognizeInput(t.Name, info))
+				if cerr != nil {
+					p.FailKind = models.MediaFailRecognize
+					p.Problem, p.retryable = "读取手动纠正失败："+cerr.Error(), true
+					return false
+				}
+				if corr != nil && validKind(corr.MediaType) && corr.TMDBID > 0 {
+					p.corrected = true
+					if corr.MediaType != req.MediaType || corr.TMDBID != req.TMDBID {
+						p.matchNote = fmt.Sprintf("手动纠正把它认成 TMDB %s %d，不再沿用之前整理用的 %s %d", corr.MediaType, corr.TMDBID, req.MediaType, req.TMDBID)
+						p.Notes = append(p.Notes, p.matchNote)
+						req.MediaType, req.TMDBID, source = corr.MediaType, corr.TMDBID, recognize.SourceOverride
+					}
+				}
+			}
 		}
 	}
 	if f := p.follow; req.TMDBID == 0 && f != nil && validKind(f.MediaType) && f.TMDBID > 0 {
@@ -707,10 +783,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 			return false
 		}
 	}
-	in := recognize.Input{Title: t.Name, IMDbID: info.IMDbID}
-	if info.Title != "" && info.Title != t.Name {
-		in.Subtitle = info.Title
-	}
+	in := recognizeInput(t.Name, info)
 	p.recognizeIn = in
 	res, err := s.cfg.Recognizer.Recognize(ctx, in)
 	if err != nil {
@@ -738,8 +811,17 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	return true
 }
 
+// recognizeInput 是识别这个种子用的输入：种子名，站点标题不同时作副标题，站点给的 IMDb 编号。
+func recognizeInput(name string, info models.TorrentInfo) recognize.Input {
+	in := recognize.Input{Title: name, IMDbID: info.IMDbID}
+	if info.Title != "" && info.Title != name {
+		in.Subtitle = info.Title
+	}
+	return in
+}
+
 // pickLibrary 选媒体库：指定了就用指定的（要启用、类型相同）；订阅推送或认领的种子用订阅指定的库（同样当作指定的）；
-// 否则在同类型里选，动画优先进只收动画的库。
+// 否则接着用这个种子之前整理进的库（见 priorLibrary），再否则在同类型里选，动画优先进只收动画的库。
 func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 	var libs []models.MediaLibrary
 	if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&libs).Error; err != nil {
@@ -767,7 +849,7 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 			}
 			return false
 		}
-	} else {
+	} else if lib = priorLibrary(libs, p, kind); lib == nil {
 		lib = models.ChooseLibrary(libs, kind, p.Match.IsAnimation())
 	}
 	if lib == nil {
@@ -792,6 +874,25 @@ func (s *Service) pickLibrary(ctx context.Context, p *Plan, req Request) bool {
 		p.Category, p.root = cat, filepath.Join(lib.Path, dir)
 	}
 	return true
+}
+
+// priorLibrary 是这个种子之前整理进的媒体库（先看已经整理好的记录）：还启用着、类型和这次的条目相同时接着用。
+// 同一个种子的文件不分到两个库；加了纠正换条目时也留在原来的库里（之前是手动选的库时尤其要紧）。没有时为 nil。
+func priorLibrary(libs []models.MediaLibrary, p *Plan, kind string) *models.MediaLibrary {
+	for _, done := range []bool{true, false} {
+		for _, it := range p.Items {
+			r := it.row
+			if r == nil || r.LibraryID == 0 || (r.Status == models.MediaTransferDone) != done {
+				continue
+			}
+			for i := range libs {
+				if libs[i].ID == r.LibraryID && libs[i].Kind == kind {
+					return &libs[i]
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // showDir 是剧集目录：模板算出的路径（从 root 算起）至少有两级时取第一级；平铺时为空。

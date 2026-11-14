@@ -206,12 +206,17 @@ func TestBatchRetry(t *testing.T) {
 		assert.Empty(t, r.FailKind)
 	}
 
-	// 重试以后还是整理不了：写明原因
+	// 重试以后还是整理不了：写明原因。这几条是手动点的整理、条目是自动识别的（没填编号），不沿用当时的媒体库
 	_, err = e.svc.SaveLibrary(e.ctx, e.libraryID(models.MediaKindMovie), LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Enabled: false})
 	require.NoError(t, err)
 	res, err = e.svc.Batch(e.ctx, []uint{rows[0].ID}, BatchRetry)
 	require.NoError(t, err)
 	assert.True(t, res.Items[0].OK, "重试做了，整理不了的原因写在说明里")
+	assert.Contains(t, res.Items[0].Message, "没有启用的电影媒体库")
+	// 手动指定过条目的（来源是 manual）沿用那个条目与媒体库
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", rows[0].ID).Update("match_source", sourceManual).Error)
+	res, err = e.svc.Batch(e.ctx, []uint{rows[0].ID}, BatchRetry)
+	require.NoError(t, err)
 	assert.Contains(t, res.Items[0].Message, "指定的媒体库不存在、没有启用", "手动指定过条目的沿用那个条目与媒体库")
 
 	for _, bad := range [][]uint{nil, {0}, make([]uint, maxBatch+1)} {

@@ -15,6 +15,7 @@ import {
   type MediaLibrary,
   type MediaMode,
   type OrganizePlan,
+  type OrganizePlanItem,
   type OrganizeRequest,
   type OrganizeResult,
   mediaApi,
@@ -99,7 +100,7 @@ const aiError = ref("");
 const aiUnavailable = ref("");
 /** 这次打开问没问过 AI 能不能用（问一次） */
 let aiStatusAsked: Promise<boolean> | null = null;
-/** 整理前把 AI 认出的条目记成纠正（以后同名的种子直接用这个条目） */
+/** 整理前把 AI 认出的条目记成纠正（以后同名、没整理过的种子直接用这个条目） */
 const aiSaveOverride = ref(true);
 /** 打开时要认一次（整理历史里点的「让 AI 认」），预览回来以后看 */
 let aiOnOpen = false;
@@ -222,14 +223,31 @@ watch(
   { immediate: true },
 );
 
-const pending = computed(() => plan.value?.items.filter((i) => i.status === "pending").length ?? 0);
+/** 要整理的项：待整理的与换条目的 */
+const toRun = (i: OrganizePlanItem) => i.status === "pending" || i.status === "change";
+const pending = computed(() => plan.value?.items.filter(toRun).length ?? 0);
 /** 按钮上写的文件数：一张原盘是它放进库的文件数 */
 const pendingFiles = computed(
-  () =>
-    plan.value?.items
-      .filter((i) => i.status === "pending")
-      .reduce((n, i) => n + (i.disc ? i.disc.files : 1), 0) ?? 0,
+  () => plan.value?.items.filter(toRun).reduce((n, i) => n + (i.disc ? i.disc.files : 1), 0) ?? 0,
 );
+/** 换条目的项（之前按别的条目整理过）：说明里写之前的条目 */
+const changing = computed(() => plan.value?.items.filter((i) => i.status === "change") ?? []);
+/** 换条目的说明：几个文件、之前的条目、整理时怎么换（换位置的先放新的再删旧的；位置不变的只改记录、重新刮削） */
+const changeNote = computed(() => {
+  const moved = changing.value.filter((i) => i.target !== i.prior_target).length;
+  const how =
+    moved === 0
+      ? "库里的文件位置不变，整理时只改整理记录、按新条目重新刮削。"
+      : "整理时先在新位置放好，再删掉旧位置里 pt-tools 放的文件（复制方式整理的会暂时多占一份空间）" +
+        (moved < changing.value.length ? "；位置不变的只改整理记录、重新刮削。" : "。");
+  return `${changing.value.length} 个文件之前按${priorEntry.value || "别的条目"}整理过，这次的条目变了：${how}`;
+});
+const priorEntry = computed(() => {
+  const it = changing.value[0];
+  if (!it?.prior_tmdb_id) return "";
+  const kind = it.prior_media_type ? mediaKindLabel(it.prior_media_type) : "";
+  return `${it.prior_title ? `「${it.prior_title}」` : ""}（${kind} TMDB ${it.prior_tmdb_id}）`;
+});
 /** 指定路径时输入框里的路径改过了、还没重新预览 */
 const pathChanged = computed(
   () => pathMode.value && plan.value !== null && sourcePath.value.trim() !== previewedPath.value,
@@ -443,6 +461,7 @@ const resultText = computed(() => {
   if (!r) return "";
   if (r.queued) return "整理还在后台进行（文件较大时会这样），稍后在「整理历史」里看结果。";
   const parts = [`新入库 ${r.created} 个`];
+  if (r.changed) parts.push(`换了 ${r.changed} 个文件的条目`);
   if (r.done) parts.push(`已在库里 ${r.done} 个`);
   if (r.skipped) parts.push(`跳过 ${r.skipped} 个`);
   if (r.failed) parts.push(`失败 ${r.failed} 个`);
@@ -567,7 +586,7 @@ const resultHint = computed(() =>
             v-if="aiChosen && override.id === aiChosen.id && override.type === aiChosen.media_type"
             v-model="aiSaveOverride"
             data-testid="organize-ai-override"
-            >整理时记成纠正：以后名字一样的种子直接认成这个条目</el-checkbox
+            >整理时记成纠正：以后名字一样、没整理过的种子直接认成这个条目</el-checkbox
           >
         </div>
         <div v-if="plan.notes?.length" class="od__notes" data-testid="organize-notes">
@@ -618,6 +637,13 @@ const resultHint = computed(() =>
           </div>
         </div>
 
+        <div
+          v-if="changing.length"
+          class="pt-note pt-note--warn"
+          data-testid="organize-change-note">
+          <PtIcon name="arrow-right-left" :size="14" class="pt-note__icon" />
+          <span>{{ changeNote }}</span>
+        </div>
         <div v-if="plan.items.length" class="od__items" data-testid="organize-items">
           <div v-for="it in plan.items" :key="it.source" class="od__item">
             <div class="od__item-head">
@@ -631,6 +657,13 @@ const resultHint = computed(() =>
                 discLabel(it.disc)
               }}</span>
               <span class="od__rel" :title="it.rel">{{ it.rel }}</span>
+            </div>
+            <div
+              v-if="it.status === 'change' && it.prior_target && it.prior_target !== it.target"
+              class="od__target od__prior"
+              data-testid="organize-prior-target">
+              <PtIcon name="corner-down-right" :size="13" />
+              <span :title="it.prior_target">原来：{{ inLibrary(it.prior_target) }}</span>
             </div>
             <div v-if="it.target" class="od__target">
               <PtIcon name="corner-down-right" :size="13" />
@@ -971,6 +1004,11 @@ const resultHint = computed(() =>
   font-size: 12px;
   color: var(--pt-t2);
   word-break: break-all;
+}
+/* 换条目的项：原来的位置（换完会删掉），比新位置淡一些 */
+.od__prior {
+  color: var(--pt-t3);
+  text-decoration: line-through;
 }
 
 .od__subs {

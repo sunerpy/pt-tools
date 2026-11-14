@@ -2004,10 +2004,18 @@ components:
         episode_end: { type: integer }
         status:
           type: string
-          enum: [pending, done, exists, replace, failed]
-          description: "pending 要整理，done 库里已经有了，exists 目标被别的文件占着（不覆盖），replace 换掉 pt-tools 之前放进库的旧版本，failed 整理不了"
+          enum: [pending, done, exists, replace, change, failed]
+          description: "pending 要整理，done 库里已经有了，exists 目标被别的文件占着（不覆盖），replace 换掉 pt-tools 之前放进库的旧版本，change 之前整理过、这次条目变了，换到新位置（prior_* 是之前的），failed 整理不了。条目变了、这个文件不换时是 done，message 写明原因"
         message: { type: string }
         history_id: { type: integer }
+        prior_target:
+          { type: string, description: "之前整理时放进库里的位置（这次条目变了时才有）" }
+        prior_media_type:
+          type: string
+          enum: [movie, tv]
+          description: "之前整理时的条目类型"
+        prior_tmdb_id: { type: integer, description: "之前整理时的 TMDB 编号" }
+        prior_title: { type: string, description: "之前整理时的条目名" }
     AppOrganizePlan:
       type: object
       required: [downloader_id, downloader, hash, name, items, skipped]
@@ -2034,6 +2042,11 @@ components:
         done: { type: integer, description: "库里已经有了的" }
         skipped: { type: integer }
         failed: { type: integer }
+        changed:
+          {
+            type: integer,
+            description: "换了条目的文件数（不算在 created 里）；旧版本的服务端不给",
+          }
         messages:
           type: array
           items: { type: string }

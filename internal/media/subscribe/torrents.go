@@ -146,8 +146,9 @@ func (s *Service) OrganizeTorrent(ctx context.Context, subID, torrentID uint) (*
 	if t.InfoHash == "" || t.DownloaderID == 0 {
 		return nil, fmt.Errorf("%w: 这个种子没有记下下载器或 info hash，到下载器里手动整理", ErrInvalid)
 	}
+	// Auto：已经整理好的文件不动（条目或媒体库和订阅现在的不同也不换，见 organize.ItemChange）
 	res, err := s.cfg.Organizer.Organize(ctx, organize.Request{
-		DownloaderID: t.DownloaderID, Hash: t.InfoHash, MediaType: sub.MediaType, TMDBID: sub.TMDBID, LibraryID: sub.LibraryID,
+		DownloaderID: t.DownloaderID, Hash: t.InfoHash, MediaType: sub.MediaType, TMDBID: sub.TMDBID, LibraryID: sub.LibraryID, Auto: true,
 	})
 	if err != nil {
 		s.manualRun(ctx, &sub, fmt.Sprintf("重新整理「%s」没有成功：%v", t.Title, err))

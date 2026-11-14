@@ -404,6 +404,9 @@ describe("过程时间线", () => {
     expect(resultPreview('{"items":[{}],"total":5}')).toBe("共 5 项");
     expect(resultPreview('{"message":"已暂停\\n两个种子"}')).toBe("已暂停 两个种子");
     expect(resultPreview('{"created":2,"failed":1}')).toBe("整理出 2 个文件，失败 1 个");
+    expect(resultPreview('{"created":0,"failed":0,"changed":3}')).toBe(
+      "整理出 0 个文件，换了 3 个文件的条目",
+    );
     expect(resultPreview('{"ok":true}')).toBe("成功");
     expect(resultPreview("站点超时")).toBe("站点超时");
     expect(resultPreview("x".repeat(200)).endsWith("…")).toBe(true);
