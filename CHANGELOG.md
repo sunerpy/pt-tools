@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.59](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.58...v1.0.0-rc.59) (2026-11-14)
+
+
+### Features
+
+* **media:** 刮削加 TheTVDB：每一集的标题与简介可以选它，TMDB 没有的集截图用它的 ([#898](https://github.com/sunerpy/pt-tools/issues/898)) ([8f26912](https://github.com/sunerpy/pt-tools/commit/8f26912339a28ca8f9e6883bee2495bca97d21ed))
+
+
+### Bug Fixes
+
+* **media:** 加了纠正以后已整理的文件能换到新条目，没有年份的同名候选不直接认定 ([#900](https://github.com/sunerpy/pt-tools/issues/900)) ([622393c](https://github.com/sunerpy/pt-tools/commit/622393cbe449ff5679867d2ce9acb99ea56fd208))
+
 ## [1.0.0-rc.58](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.57...v1.0.0-rc.58) (2026-11-11)
 
 
