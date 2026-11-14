@@ -12,9 +12,11 @@ func newMediaService(store *core.ConfigStore) *recognize.Service {
 		return nil
 	}
 	return recognize.New(recognize.Config{
-		DB:           global.GlobalDB.DB,
-		Cipher:       storeCipher{store: store},
-		BaseURL:      qaTMDBBaseURL(),
-		ImageBaseURL: qaTMDBImageURL(),
+		DB:             global.GlobalDB.DB,
+		Cipher:         storeCipher{store: store},
+		BaseURL:        qaTMDBBaseURL(),
+		ImageBaseURL:   qaTMDBImageURL(),
+		TVDBBaseURL:    qaTVDBBaseURL(),
+		TVDBImageHosts: qaTVDBImageHosts(),
 	})
 }

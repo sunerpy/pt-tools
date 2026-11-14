@@ -21,12 +21,14 @@ var EncryptedColumns = []EncryptedColumn{
 	{"assistant_settings", "api_key_encrypted"},
 	{"assistant_settings", "proxy_encrypted"},
 	{"assistant_settings", "voice_token_encrypted"},
-	// 媒体识别与刮削：TMDB Key、代理、Fanart.tv 的项目 Key 与个人 Key、OMDb Key
+	// 媒体识别与刮削：TMDB Key、代理、Fanart.tv 的项目 Key 与个人 Key、OMDb Key、TheTVDB 的 Key 与订阅 PIN
 	{"media_settings", "tmdb_key_encrypted"},
 	{"media_settings", "proxy_encrypted"},
 	{"media_settings", "fanart_key_encrypted"},
 	{"media_settings", "fanart_client_key_encrypted"},
 	{"media_settings", "omdb_key_encrypted"},
+	{"media_settings", "tvdb_key_encrypted"},
+	{"media_settings", "tvdb_pin_encrypted"},
 	// 媒体服务器（Jellyfin、Emby、Plex）的令牌
 	{"media_servers", "token_encrypted"},
 	// IYUU 令牌

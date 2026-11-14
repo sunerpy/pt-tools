@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -86,7 +88,7 @@ func TestMediaAPI_SettingsAndRecognize(t *testing.T) {
 	w := serveAuthed(mux, http.MethodGet, "/api/media/settings", "")
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, `{"has_tmdb_key":false,"key_source":"none","builtin_key":false,"language":"zh-CN","proxy_url":"","api_base_url":"","image_base_url":"",
-		"has_fanart_key":false,"has_fanart_client_key":false,"has_omdb_key":false}`, w.Body.String())
+		"has_fanart_key":false,"has_fanart_client_key":false,"has_omdb_key":false,"has_tvdb_key":false,"has_tvdb_pin":false}`, w.Body.String())
 
 	// 刮削用的 Fanart.tv 与 OMDb 的 Key：只写不读；没填时测试回 400，来源写错回 400
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/settings/test?source=fanart", "").Code)
@@ -99,6 +101,16 @@ func TestMediaAPI_SettingsAndRecognize(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"has_fanart_key":true`)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"omdb_api_key":"a b"}`).Code)
 	require.Equal(t, http.StatusOK, serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"fanart_api_key":"","omdb_api_key":""}`).Code)
+
+	// TheTVDB 的 Key 与订阅 PIN：只写不读；没填时测试回 400；格式不对回 400；清除
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/media/settings/test?source=tvdb", "").Code)
+	w = serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"tvdb_api_key":"tvdbsecret-0000-1111","tvdb_pin":"PINSECRET42"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "tvdbsecret")
+	assert.NotContains(t, w.Body.String(), "PINSECRET42")
+	assert.Contains(t, w.Body.String(), `"has_tvdb_key":true,"has_tvdb_pin":true`)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"tvdb_pin":"p 1"}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"tvdb_api_key":"","tvdb_pin":""}`).Code)
 
 	// TMDB 接口地址与图片地址：只写域名时补全；格式不对回 400；清空回到官方地址
 	w = serveAuthed(mux, http.MethodPut, "/api/media/settings", `{"api_base_url":"api.tmdb.org","image_base_url":"static.example.com"}`)
@@ -183,4 +195,16 @@ func TestMediaAPI_OverridesAndWords(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodPut, "/api/media/words/999", `{"kind":"block","pattern":"x"}`).Code)
 	assert.Equal(t, http.StatusOK, serveAuthed(mux, http.MethodDelete, "/api/media/words/"+id, "").Code)
 	assert.Equal(t, http.StatusNotFound, serveAuthed(mux, http.MethodDelete, "/api/media/words/"+id, "").Code)
+}
+
+// TheTVDB 的错误对应的状态码：没填、登录不了 400，太频繁 429，连不上 502。
+func TestWriteMediaErrorTVDB(t *testing.T) {
+	for err, want := range map[error]int{
+		tvdb.ErrNoKey: http.StatusBadRequest, tvdb.ErrUnauthorized: http.StatusBadRequest,
+		tvdb.ErrRateLimited: http.StatusTooManyRequests, fmt.Errorf("x: %w", tvdb.ErrUnavailable): http.StatusBadGateway,
+	} {
+		w := httptest.NewRecorder()
+		writeMediaError(w, err)
+		assert.Equal(t, want, w.Code, err.Error())
+	}
 }

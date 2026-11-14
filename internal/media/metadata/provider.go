@@ -30,6 +30,8 @@ type ArtRequest struct {
 	Seasons   []int
 	ImageLang string
 	RecogLang string
+	// Thumbs 是要写截图的集：TMDB 没有其中一集的截图时去问 TheTVDB（见 Resolver.Resolve）
+	Thumbs []EpisodeRef
 }
 
 // Provider 是一个来源。下面几个接口按能力实现，一个来源可以实现其中几个。

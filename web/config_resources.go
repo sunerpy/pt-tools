@@ -171,11 +171,11 @@ func (s *Server) configResources() []*configResource {
 		{
 			Name: "media", Title: "媒体识别（TMDB）", Kind: configObject, Path: "/api/media/settings", SetMethod: http.MethodPut,
 			Desc: "识别种子标题对应的电影与剧集用的 TMDB：API Key（没填时用发布版本内置的，key_source 写着现在用哪个）、语言、代理与换掉的接口地址；" +
-				"以及刮削用的 Fanart.tv 与 OMDb 的 API Key（填了才用这两个来源）。",
-			Fields: jsonFields[recognize.SettingsInput]("tmdb_api_key", "fanart_api_key", "fanart_client_key", "omdb_api_key"),
+				"以及刮削用的 Fanart.tv、OMDb 与 TheTVDB 的 API Key（填了才用这几个来源；TheTVDB 的订阅 PIN 是 user-supported 的 Key 才要）。",
+			Fields: jsonFields[recognize.SettingsInput]("tmdb_api_key", "fanart_api_key", "fanart_client_key", "omdb_api_key", "tvdb_api_key", "tvdb_pin"),
 			Secrets: map[string]string{
 				"tmdb_api_key": "has_tmdb_key", "fanart_api_key": "has_fanart_key", "fanart_client_key": "has_fanart_client_key",
-				"omdb_api_key": "has_omdb_key",
+				"omdb_api_key": "has_omdb_key", "tvdb_api_key": "has_tvdb_key", "tvdb_pin": "has_tvdb_pin",
 			},
 			Ops:   []string{configOpSet},
 			Hints: map[string]string{"language": "例如 zh-CN", "api_base_url": "空着用官方地址", "image_base_url": "空着用官方地址"},

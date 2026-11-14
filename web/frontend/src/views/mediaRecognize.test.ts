@@ -127,6 +127,8 @@ async function mountPage(
     has_fanart_key: opts.fanart ?? false,
     has_fanart_client_key: false,
     has_omdb_key: false,
+    has_tvdb_key: false,
+    has_tvdb_pin: false,
   });
   api.overrides.mockResolvedValue([]);
   api.words.mockResolvedValue([]);
@@ -247,6 +249,57 @@ describe("媒体识别", () => {
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(2));
     expect(api.saveSettings.mock.calls[1]![0]).toEqual({ language: "zh-CN", fanart_api_key: "" });
     expect(ui.confirm.mock.calls[0]![1]).toBe("清除 Fanart.tv 项目的 API Key");
+  });
+
+  it("刮削的其它来源：TheTVDB 的 Key 与订阅 PIN、测试与署名", async () => {
+    await mountPage();
+    expect((q("media-test-tvdb") as HTMLButtonElement).disabled, "没填 Key 不能测试").toBe(true);
+    expect(q("media-clear-tvdb-pin")).toBeNull();
+    const attribution = q("media-tvdb-attribution")!;
+    expect(attribution.textContent).toContain(
+      "Metadata provided by TheTVDB. Please consider adding missing information or",
+    );
+    expect(attribution.querySelector("a")!.getAttribute("href")).toBe("https://thetvdb.com");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
+      language: "zh-CN",
+      proxy_url: "",
+      has_fanart_key: false,
+      has_fanart_client_key: false,
+      has_omdb_key: false,
+      has_tvdb_key: true,
+      has_tvdb_pin: true,
+    });
+    fill("media-tvdb-key", " aaaa-bbbb-cccc ");
+    fill("media-tvdb-pin", "PIN42");
+    q("media-sources-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      language: "zh-CN",
+      tvdb_api_key: "aaaa-bbbb-cccc",
+      tvdb_pin: "PIN42",
+    });
+    await flush();
+    expect(inputOf("media-tvdb-pin").value, "保存后清空，不回显").toBe("");
+    expect(inputOf("media-tvdb-pin").placeholder).toContain("已设置");
+
+    api.testSource.mockRejectedValue(new Error("TheTVDB 登录不了：API Key 或订阅 PIN 不对"));
+    q("media-test-tvdb")!.click();
+    await vi.waitFor(() => expect(api.testSource).toHaveBeenCalledWith("tvdb"));
+    await vi.waitFor(() =>
+      expect(ui.error).toHaveBeenCalledWith("TheTVDB 登录不了：API Key 或订阅 PIN 不对"),
+    );
+    api.testSource.mockResolvedValue({ ok: true });
+    q("media-test-tvdb")!.click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("TheTVDB 连接正常"));
+
+    ui.confirm.mockResolvedValue("confirm");
+    q("media-clear-tvdb-pin")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(2));
+    expect(api.saveSettings.mock.calls[1]![0]).toEqual({ language: "zh-CN", tvdb_pin: "" });
+    expect(ui.confirm.mock.calls[0]![1]).toBe("清除 TheTVDB 订阅 PIN");
   });
 
   it("设置：内置 Key —— 不填也能测试连接；清除自己的 Key 改用内置的；换了接口地址时写明用不了内置的", async () => {

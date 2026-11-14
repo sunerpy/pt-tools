@@ -419,6 +419,7 @@ export const SCRAPE_SOURCE_OPTIONS: {
   episode: [
     { value: "", label: "TMDB" },
     { value: "bangumi", label: "Bangumi（只用于动画）" },
+    { value: "tvdb", label: "TheTVDB" },
   ],
   artwork: [
     { value: "", label: "TMDB" },

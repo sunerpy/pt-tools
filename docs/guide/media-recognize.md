@@ -41,13 +41,15 @@ pt-tools 能解析种子标题，再到 TMDB 找对应的电影或剧集。[整�
 | Bangumi   | 动画的中文简介、评分与每一集的中文标题                              | 不用                          |
 | Fanart.tv | 高清 Logo、Clearart、横幅、横版海报、碟片图，以及海报、背景与季海报 | 项目的 API Key；个人 Key 可选 |
 | OMDb      | IMDb、烂番茄与 Metacritic 的评分，以及分级                          | API Key                       |
+| TheTVDB   | 剧集每一集的标题、简介与截图                                        | API Key；订阅 PIN 视 Key 而定 |
 
-Fanart.tv 与 OMDb 的 Key 填在「刮削的其它来源」里，加密保存，界面只显示是否已设置；保存后点「测试」确认能用：
+Fanart.tv、OMDb 与 TheTVDB 的 Key 填在「刮削的其它来源」里，加密保存，界面只显示是否已设置；保存后点「测试」确认能用：
 
 - Fanart.tv：在 fanart.tv 注册登录后，到「Get an API Key」页面申请项目（project）的 API Key，填进「项目的 API Key」。个人（personal）Key 可以不填；填了以后和项目的 Key 一起发，新上传的图片更快能用。
 - OMDb：在 omdbapi.com 申请，免费的 Key 每天 1000 次；查过的条目缓存一段时间。
+- TheTVDB：在 [thetvdb.com](https://thetvdb.com/api-information) 的开发者后台申请 API Key。TheTVDB 没有免费的 Key：要么是和它协商的授权 Key，要么是 user-supported 的项目 Key，后一种每个使用的人还要[订阅](https://thetvdb.com/subscribe) TheTVDB（约 12 美元一年），把订阅以后拿到的 PIN 填进「订阅 PIN」。pt-tools 用 Key（与 PIN）登录，拿到的令牌只存在内存里，一个月内重复用；每一集的列表缓存一天。按 TheTVDB 的要求，页面上写着「Metadata provided by TheTVDB. Please consider adding missing information or subscribing.」并链接到 thetvdb.com。
 
-两个都经上面的代理访问。清除 Key 以后不再用这个来源：只有 Fanart.tv 有的图片不写，媒体库里选了它们的项用 TMDB 的。
+这几个来源都经上面的代理访问。清除 Key 以后不再用这个来源：只有 Fanart.tv 有的图片不写，TMDB 没有截图的集不再用 TheTVDB 的，媒体库里选了它们的项用 TMDB 的。
 
 ## 识别预览
 

@@ -309,12 +309,14 @@ function openLibrary(l?: MediaLibrary) {
   void loadSourceKeys();
 }
 
-/** 「媒体识别」里填了 Fanart.tv 与 OMDb 的 Key 没有（读不到时为 null，不提示） */
-const sourceKeys = ref<{ fanart: boolean; omdb: boolean } | null>(null);
+/** 「媒体识别」里填了 Fanart.tv、OMDb 与 TheTVDB 的 Key 没有（读不到时为 null，不提示） */
+const sourceKeys = ref<{ fanart: boolean; omdb: boolean; tvdb: boolean } | null>(null);
 async function loadSourceKeys() {
   try {
     const s = await mediaApi.settings();
-    sourceKeys.value = s ? { fanart: s.has_fanart_key, omdb: s.has_omdb_key } : null;
+    sourceKeys.value = s
+      ? { fanart: s.has_fanart_key, omdb: s.has_omdb_key, tvdb: s.has_tvdb_key }
+      : null;
   } catch {
     sourceKeys.value = null;
   }
@@ -344,6 +346,9 @@ const sourceWarnings = computed(() => {
   }
   if (!keys.omdb && f.scrape_sources.rating === "omdb") {
     out.push("评分选了 IMDb，还没在「媒体识别」里填 OMDb 的 Key：用 TMDB 的");
+  }
+  if (!keys.tvdb && f.kind === "tv" && f.scrape_sources.episode === "tvdb") {
+    out.push("每一集选了 TheTVDB，还没在「媒体识别」里填 TheTVDB 的 Key：用 TMDB 的");
   }
   return out;
 });
@@ -1966,7 +1971,9 @@ onMounted(refresh);
               的；取到的其它来源的评分也写进
               NFO，主要的评分写在最后（媒体服务器显示它）。豆瓣按中文名与年份找同一部（剧集按季找），站点给了豆瓣编号的电影直接用编号；豆瓣没有开放的接口，每
               2 秒最多请求一次。Bangumi 只用于动画（TMDB 类型里有「动画」的），日文的简介不用。IMDb
-              的评分经 OMDb 取、Fanart.tv 的图片也要 Key，都在「媒体识别」里填。
+              的评分经 OMDb 取、Fanart.tv 的图片也要 Key，都在「媒体识别」里填。TheTVDB 按 TMDB 上的
+              TVDB 编号找，只用识别语言的标题与简介，播出日期和 TMDB 对不上的季不用；填了它的 Key
+              以后，TMDB 没有截图的集也用它的截图。
             </div>
             <div
               v-for="w in sourceWarnings"

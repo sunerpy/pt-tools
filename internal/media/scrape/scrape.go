@@ -215,6 +215,10 @@ func (w Writer) Write(ctx context.Context, q metadata.Query, base *metadata.Item
 			if f.Art == metadata.ArtSeasonPoster || f.Art == metadata.ArtThumb {
 				need.Art.Seasons = addOnce(need.Art.Seasons, f.Season)
 			}
+			if f.Art == metadata.ArtThumb {
+				// TMDB 没有这一集的截图时去问 TheTVDB（填了它的 Key 时）
+				need.Art.Thumbs = append(need.Art.Thumbs, metadata.EpisodeRef{Season: f.Season, Episode: f.Episode})
+			}
 		}
 	}
 	resolver := w.Resolver

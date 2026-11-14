@@ -82,7 +82,7 @@ describe("媒体识别的显示工具", () => {
       "bangumi",
       "omdb",
     ]);
-    expect(SCRAPE_SOURCE_OPTIONS.episode.map((o) => o.value)).toEqual(["", "bangumi"]);
+    expect(SCRAPE_SOURCE_OPTIONS.episode.map((o) => o.value)).toEqual(["", "bangumi", "tvdb"]);
     expect(SCRAPE_SOURCE_OPTIONS.artwork.map((o) => o.value)).toEqual(["", "fanart"]);
     expect(SCRAPE_SOURCE_FIELDS.map((f) => f.key)).toEqual([
       "plot",

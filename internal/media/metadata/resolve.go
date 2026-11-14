@@ -41,6 +41,8 @@ func isNil(p Provider) bool {
 		return v == nil
 	case *OMDb:
 		return v == nil
+	case *TVDB:
+		return v == nil
 	}
 	return false
 }
@@ -174,7 +176,7 @@ func (res *Result) Summary(eps []EpisodeRef) string {
 // sourceList 是几个来源的名字：别的来源在前、TMDB 在后。
 func sourceList(set map[string]bool) string {
 	var names []string
-	for _, id := range []string{SourceDouban, SourceBangumi, SourceOMDb, SourceFanart, SourceTMDB} {
+	for _, id := range []string{SourceDouban, SourceBangumi, SourceTVDB, SourceOMDb, SourceFanart, SourceTMDB} {
 		if set[id] {
 			names = append(names, SourceName(id))
 		}
@@ -200,13 +202,15 @@ func fieldsUsing(src Sources, source string) string {
 	return strings.Join(f, "与")
 }
 
-// applies 报告这个来源能不能用于这个条目：Bangumi 只有动画，OMDb 要有 IMDb 编号。
+// applies 报告这个来源能不能用于这个条目：Bangumi 只有动画，OMDb 要有 IMDb 编号，TheTVDB 只有剧集。
 func applies(source string, q Query) bool {
 	switch source {
 	case SourceBangumi:
 		return q.Anime
 	case SourceOMDb:
 		return q.IDs[IDIMDb] != ""
+	case SourceTVDB:
+		return q.Kind == KindTV
 	}
 	return true
 }
@@ -264,7 +268,14 @@ func (r *Resolver) Resolve(ctx context.Context, q Query, base *Item, src Sources
 	// 先取 TMDB 的完整信息：别的来源要用它的编号（Fanart.tv 的剧集要 TVDB 编号）
 	wantFanart := len(need.Art.Kinds) > 0 && r.Has(SourceFanart) && (src.Artwork == SourceFanart ||
 		slices.ContainsFunc(need.Art.Kinds, func(k string) bool { return FanartOnly(k) || k == ArtLogo }))
-	if need.Item || (wantFanart && q.Kind == KindTV) {
+	// TheTVDB：每一集选了它，或者要写集截图（TMDB 没有的用它的）；按 TVDB 编号找（要用到它时才取，见 resolveTVDB）
+	wantTVDB := q.Kind == KindTV && r.Has(SourceTVDB) &&
+		((src.Episode == SourceTVDB && len(need.Episodes) > 0) || slices.Contains(need.Art.Kinds, ArtThumb))
+	if q.Kind == KindTV && src.Episode == SourceTVDB && len(need.Episodes) > 0 && !r.Has(SourceTVDB) {
+		note(missing(SourceTVDB, src))
+	}
+	itemTried := need.Item || (wantFanart && q.Kind == KindTV)
+	if itemTried {
 		fetchItem(SourceTMDB)
 		if t := snaps[SourceTMDB]; t != nil {
 			q.IDs = mergeIDs(q.IDs, t.IDs)
@@ -391,6 +402,10 @@ func (r *Resolver) Resolve(ctx context.Context, q Query, base *Item, src Sources
 		}
 	}
 
+	if wantTVDB {
+		res.resolveTVDB(ctx, q, src, need, tmdbSeasons, otherSeasons, itemTried && snaps[SourceTMDB] == nil)
+	}
+
 	res.composeItem(snaps, src)
 	for _, n := range seasonSet {
 		s := tmdbSeasons[n]
@@ -420,6 +435,113 @@ func (r *Resolver) Resolve(ctx context.Context, q Query, base *Item, src Sources
 		res.Used["episode"] = SourceTMDB
 	}
 	return res
+}
+
+// resolveTVDB 问 TheTVDB（TMDB 的季详情与图片都取完以后）：每一集选了 TheTVDB 时要写每一集 NFO 的季，以及有一集要写截图、
+// TMDB 却没有这一集截图的季。播出日期和 TMDB 对不上（差一天以上）的季整季不用；对得上的季，每一集选了它时放进 otherSeasons
+// 合并（只合并有文字的集），截图放进 res.art、排在 TMDB 后面。出错或返回说明以后，后面的季不再问它。
+// TVDB 编号在 TMDB 的完整信息里：前面没取过时这里才取（不用 TheTVDB 时不多一次请求）；前面取过却没取到（itemFailed，
+// 错误已经写过）时不问 TheTVDB。
+func (res *Result) resolveTVDB(ctx context.Context, q Query, src Sources, need Need, tmdbSeasons map[int]*Season,
+	other map[string]map[int]*Season, itemFailed bool,
+) {
+	p, _ := res.resolver.providers[SourceTVDB].(SeasonSource)
+	if p == nil {
+		return
+	}
+	tmdbThumb := func(season, episode int) bool {
+		for _, a := range res.art[SourceTMDB] {
+			if a.Kind == ArtThumb && a.Season == season && a.Episode == episode {
+				return true
+			}
+		}
+		return false
+	}
+	var ask []int
+	if src.Episode == SourceTVDB {
+		ask = append(ask, need.Episodes...)
+	}
+	for _, t := range need.Art.Thumbs {
+		if !tmdbThumb(t.Season, t.Episode) {
+			ask = append(ask, t.Season)
+		}
+	}
+	// 第 0 季（特别篇）不用
+	ask = slices.DeleteFunc(sortedUnion(ask), func(n int) bool { return n < 1 })
+	if len(ask) == 0 || itemFailed {
+		return
+	}
+	if q.IDs[IDTVDB] == "" && !need.Item {
+		if t, _ := res.resolver.providers[SourceTMDB].(ItemSource); t != nil {
+			it, err := t.Item(ctx, q)
+			if err != nil {
+				res.Errors = append(res.Errors, fmt.Sprintf("TMDB 的完整信息取不到（%v），不知道 TVDB 编号，每一集与集截图没有用 TheTVDB", err))
+				return
+			}
+			if it != nil {
+				q.IDs = mergeIDs(q.IDs, it.IDs)
+			}
+		}
+	}
+	aligned := map[int]*Season{}
+	for _, n := range ask {
+		episodes := src.Episode == SourceTVDB && slices.Contains(need.Episodes, n)
+		s, err := p.Season(ctx, q, SeasonRef{Number: n, Episodes: true})
+		var nt Note
+		switch {
+		case errors.As(err, &nt):
+			res.Notes = append(res.Notes, string(nt))
+		case err != nil && episodes:
+			res.Errors = append(res.Errors, unavailable(SourceTVDB, src, err))
+		case err != nil:
+			res.Errors = append(res.Errors, artUnavailable(SourceTVDB, err))
+		case s == nil:
+			if episodes {
+				res.Notes = append(res.Notes, fmt.Sprintf("TheTVDB 上没找到第 %d 季，这一季的%s用 TMDB 的", n, fieldsUsing(src, SourceTVDB)))
+			}
+			continue
+		default:
+			if x := misalignedEpisode(tmdbSeasons[n], s); x > 0 {
+				res.Notes = append(res.Notes, fmt.Sprintf("TheTVDB 上第 %d 季的集号和 TMDB 对不上（第 %d 集的播出日期不同），这一季的每一集与集截图用 TMDB 的", n, x))
+				continue
+			}
+			aligned[n] = s
+			if episodes {
+				if other[SourceTVDB] == nil {
+					other[SourceTVDB] = map[int]*Season{}
+				}
+				other[SourceTVDB][n] = withText(s)
+			}
+			continue
+		}
+		// 出错或说明（没有 TVDB 编号、集太多）：后面的季不再问
+		break
+	}
+	if len(aligned) == 0 || !slices.Contains(need.Art.Kinds, ArtThumb) {
+		return
+	}
+	ap, _ := res.resolver.providers[SourceTVDB].(ArtSource)
+	if ap == nil {
+		return
+	}
+	seasons := make([]int, 0, len(aligned))
+	for n := range aligned {
+		seasons = append(seasons, n)
+	}
+	slices.Sort(seasons)
+	arts, err := ap.Art(ctx, q, ArtRequest{Kinds: []string{ArtThumb}, Seasons: seasons})
+	var nt Note
+	switch {
+	case errors.As(err, &nt):
+		res.Notes = append(res.Notes, string(nt))
+	case err != nil:
+		res.Errors = append(res.Errors, artUnavailable(SourceTVDB, err))
+	}
+	for k := range arts {
+		arts[k].Source = SourceTVDB
+	}
+	res.art[SourceTVDB] = arts
+	res.artOrder = append(res.artOrder, SourceTVDB)
 }
 
 // composeItem 把几个来源的电影或剧集合在一起：TMDB 的完整信息（取不到时是识别出的条目）为底，
@@ -550,9 +672,9 @@ func unavailable(id string, src Sources, err error) string {
 	return fmt.Sprintf("%s取不到（%v），%s用 TMDB 的", SourceLead(id), err, what)
 }
 
-// missing 是设置里选了、却没有这个来源时的说明（Fanart.tv 与 OMDb 要在媒体识别里填 API Key）。
+// missing 是设置里选了、却没有这个来源时的说明（Fanart.tv、OMDb 与 TheTVDB 要在媒体识别里填 API Key）。
 func missing(id string, src Sources) string {
-	if id == SourceFanart || id == SourceOMDb {
+	if id == SourceFanart || id == SourceOMDb || id == SourceTVDB {
 		return fmt.Sprintf("%s选了 %s，但没有填它的 API Key（在「媒体识别」里填），用 TMDB 的", fieldsUsing(src, id), SourceName(id))
 	}
 	return fmt.Sprintf("%s选了 %s，但它现在不能用，用 TMDB 的", fieldsUsing(src, id), SourceName(id))
