@@ -120,8 +120,14 @@ func score(m meta.Meta, r tmdb.Result, rank int) float64 {
 }
 
 // pick 返回可以认定的候选（候选已按分数从高到低排好）：名字至少部分相同、总分过线；
-// 名字只是部分相同时还要比第二名高出 AcceptMargin。没有时返回 nil。
+// 名字只是部分相同时还要比第二名高出 AcceptMargin。标题里有年份时，TMDB 上没有年份的候选不认定（年份核对不了，
+// 同名的冷门条目常常没有日期），在剩下的里面挑；它们照样留在候选列表里。没有时返回 nil。
 func pick(m meta.Meta, cands []Candidate) *Candidate {
+	return pickFrom(m, dated(m, cands))
+}
+
+// pickFrom 是 pick 不看年份核对的那一半：名字与分数过线、部分相同时领先第二名。
+func pickFrom(m meta.Meta, cands []Candidate) *Candidate {
 	if len(cands) == 0 {
 		return nil
 	}
@@ -133,6 +139,20 @@ func pick(m meta.Meta, cands []Candidate) *Candidate {
 		return nil
 	}
 	return &cands[0]
+}
+
+// dated 是能核对年份的候选：标题里没有年份时是全部，有年份时去掉 TMDB 上没有年份的。
+func dated(m meta.Meta, cands []Candidate) []Candidate {
+	if m.Year <= 0 {
+		return cands
+	}
+	out := make([]Candidate, 0, len(cands))
+	for _, c := range cands {
+		if c.Year > 0 {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // overrideKey 是用一个名字算出的纠正键：类型、名字，电影另加年份（同名的翻拍片按年份区分）；

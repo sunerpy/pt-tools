@@ -280,5 +280,9 @@ func resultNote(r *Result) string {
 	if r.Plan != nil && r.Plan.Problem != "" {
 		return r.Plan.Problem
 	}
-	return fmt.Sprintf("新入库 %d 个，已在库里 %d 个，跳过 %d 个，失败 %d 个", r.Created, r.Done, r.Skipped, r.Failed)
+	note := fmt.Sprintf("新入库 %d 个，已在库里 %d 个，跳过 %d 个，失败 %d 个", r.Created, r.Done, r.Skipped, r.Failed)
+	if r.Changed > 0 {
+		note += fmt.Sprintf("，换了 %d 个文件的条目", r.Changed)
+	}
+	return note
 }

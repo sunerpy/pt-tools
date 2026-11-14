@@ -65,6 +65,7 @@ func TestTorrentViewsAndActions(t *testing.T) {
 	assert.Equal(t, tor.DownloaderID, req.DownloaderID)
 	assert.Equal(t, models.MediaKindTV, req.MediaType)
 	assert.Equal(t, 100088, req.TMDBID)
+	assert.True(t, req.Auto, "已经整理好的文件不动：条目或媒体库和订阅现在的不同也不换")
 
 	// 重新刮削：按整理好的那条记录
 	sr, err := e.svc.RescrapeTorrent(e.ctx, tv.ID, tor.ID)

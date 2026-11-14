@@ -495,11 +495,11 @@ func TestPlanReusesPriorEntryAndMarksItems(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Created)
 
-	// 之后不指定条目再预览：沿用之前整理用的条目，库里已经有了
+	// 之后不指定条目再预览：沿用之前整理用的条目（手动指定的，来源照旧），库里已经有了
 	p, err = e.svc.Preview(e.ctx, req)
 	require.NoError(t, err)
 	require.Empty(t, p.Problem)
-	assert.Equal(t, sourceHistory, p.Source)
+	assert.Equal(t, sourceManual, p.Source)
 	assert.Equal(t, 872585, p.Match.ID)
 	assert.Equal(t, ItemDone, p.Items[0].Status)
 

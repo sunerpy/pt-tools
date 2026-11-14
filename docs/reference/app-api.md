@@ -273,7 +273,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 ### POST /media/history/{id}/retry
 
-重新整理这条记录对应的种子（多半是失败的那条），手动整理时指定过的条目与媒体库照旧。回应同 `POST /media/organize`。记录不存在时回 404。
+重新整理这条记录对应的种子（多半是失败的那条）。手动指定过的条目与媒体库照旧；条目是自动识别来的、现在有了对得上的纠正时换成纠正的条目，同一个种子里自动识别来的已整理文件跟着换到新位置（换好的项在回应的 `plan` 里是 `done`，`changed` 是换了几个；想先看要换哪些，用 `POST /media/organize/preview`，这些项在预览里是 `change`）。回应同 `POST /media/organize`。记录不存在时回 404。
 
 ### POST /media/history/{id}/scrape
 
@@ -296,12 +296,12 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 `{"downloader_id": 1, "hash": "…"}`：下载器里的一个种子，`hash` 用 `GET /torrents` 的 `info_hash`（没有时用 `task_id`）。可以加 `media_type` 与 `tmdb_id`（一起给）指定 TMDB 条目，加 `library_id` 指定媒体库；不给时自动识别、按类型选库。只算整理计划，不改动任何东西。回应：
 
 - `downloader_id`、`downloader`、`hash`、`name`（种子名）、`match`（同上）、`library`（`id`、`name`）、`category`（二级分类）、`mode`；
-- `items`：每个视频一项，`rel`（种子里的相对路径）、`size`、`target`（放进库里的位置）、`season`、`episode`、`episode_end`、`status`（`pending` 要整理、`done` 库里已经有了、`exists` 目标被别的文件占着、`replace` 换掉 pt-tools 之前放进库的旧版本、`failed` 整理不了）、`message`；
+- `items`：每个视频一项，`rel`（种子里的相对路径）、`size`、`target`（放进库里的位置）、`season`、`episode`、`episode_end`、`status`（`pending` 要整理、`done` 库里已经有了、`exists` 目标被别的文件占着、`replace` 换掉 pt-tools 之前放进库的旧版本、`change` 之前按别的条目整理过、这次换到新位置、`failed` 整理不了）、`message`；`change` 的项与条目变了但这个文件不换的 `done` 项还有之前整理时的 `prior_target`（位置，和 `target` 相同时只改整理记录、重新刮削）、`prior_media_type`、`prior_tmdb_id`、`prior_title`；
 - `skipped`：不整理的文件（样片、太小的、不是视频的）有几个；`problem`：不为空时整个种子整理不了（例如找不到文件、要设路径映射）。
 
 ### POST /media/organize
 
-参数同预览。按媒体库的方式（硬链接、复制或移动）整理，刮削，通知媒体服务器扫描，和网页上的手动整理一样。回应 `plan`（同预览）、`created`（这次整理出的文件数）、`done`、`skipped`、`failed`、`messages`、`queued`（还在后台进行，稍后看整理历史）。全部失败时回应仍是 200，操作审计里记为出错。一次整理最多等 60 秒，超时回 504（`timeout`），整理照样在后台进行。
+参数同预览。按媒体库的方式（硬链接、复制或移动）整理，刮削，通知媒体服务器扫描，和网页上的手动整理一样。回应 `plan`（同预览）、`created`（这次整理出的文件数）、`done`、`skipped`、`failed`、`changed`（换了条目的文件数，不算在 `created` 里）、`messages`、`queued`（还在后台进行，稍后看整理历史）。全部失败时回应仍是 200，操作审计里记为出错。一次整理最多等 60 秒，超时回 504（`timeout`），整理照样在后台进行。
 
 ### GET /subscriptions
 

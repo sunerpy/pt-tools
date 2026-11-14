@@ -381,27 +381,34 @@ const organizeVisible = ref(false);
 const organizeTarget = ref<OrganizeTarget | null>(null);
 /** 没识别出来的记录：打开整理弹窗，预览以后马上让 AI 认一次 */
 const canAskAI = (r: MediaHistoryItem) => failKindOf(r) === "recognize";
-function askAI(r: MediaHistoryItem) {
+/** 这条记录所在的种子、监控目录项或指定的路径的整理弹窗（ai 为真时预览以后马上让 AI 认） */
+function targetOf(r: MediaHistoryItem, ai: boolean): OrganizeTarget {
   if (r.manual_path)
-    organizeTarget.value = {
-      source_path: r.manual_path,
-      ai: true,
-      ...(r.chosen_mode ? { mode: r.chosen_mode } : {}),
-    };
-  else if (r.watch_dir_id)
-    organizeTarget.value = {
-      watch_dir_id: r.watch_dir_id,
-      entry: r.torrent_name,
-      name: r.torrent_name,
-      ai: true,
-    };
-  else
-    organizeTarget.value = {
-      downloader_id: r.downloader_id,
-      hash: r.task_id || r.info_hash,
-      name: r.torrent_name,
-      ai: true,
-    };
+    return { source_path: r.manual_path, ai, ...(r.chosen_mode ? { mode: r.chosen_mode } : {}) };
+  if (r.watch_dir_id)
+    return { watch_dir_id: r.watch_dir_id, entry: r.torrent_name, name: r.torrent_name, ai };
+  return {
+    downloader_id: r.downloader_id,
+    hash: r.task_id || r.info_hash,
+    name: r.torrent_name,
+    ai,
+  };
+}
+function askAI(r: MediaHistoryItem) {
+  organizeTarget.value = targetOf(r, true);
+  organizeVisible.value = true;
+}
+/**
+ * 已整理的记录可以重新整理（先预览）：加了纠正以后用，条目变了的文件换到新位置。只给能重新出计划的记录：
+ * 下载器里的种子、指定路径的、目录监控的；导入的（库里原有的文件）与原盘不给
+ */
+const canReorganize = (r: MediaHistoryItem) =>
+  r.status === "done" &&
+  r.mode !== "existing" &&
+  !r.disc_files &&
+  (r.downloader_id > 0 || Boolean(r.manual_path) || Boolean(r.watch_dir_id));
+function reorganize(r: MediaHistoryItem) {
+  organizeTarget.value = targetOf(r, false);
   organizeVisible.value = true;
 }
 /** 打开「手动整理」：从页头打开时路径是空的；从一条记录打开时带上当时填的路径 */
@@ -644,7 +651,7 @@ onMounted(load);
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="" width="190" align="right">
+        <el-table-column label="" width="250" align="right">
           <template #default="{ row }">
             <el-button
               v-if="canAskAI(row)"
@@ -667,6 +674,13 @@ onMounted(load);
               :data-testid="`mh-manual-${row.id}`"
               @click="openManual(row.manual_path, row.chosen_mode)"
               >手动整理</el-button
+            >
+            <el-button
+              v-if="canReorganize(row)"
+              link
+              :data-testid="`mh-reorganize-${row.id}`"
+              @click="reorganize(row)"
+              >重新整理</el-button
             >
             <el-button
               v-if="canRescrape(row)"
@@ -736,6 +750,9 @@ onMounted(load);
               size="small"
               @click="openManual(r.manual_path, r.chosen_mode)"
               >手动整理</el-button
+            >
+            <el-button v-if="canReorganize(r)" size="small" @click="reorganize(r)"
+              >重新整理</el-button
             >
             <el-button
               v-if="canRescrape(r)"

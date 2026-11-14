@@ -18,6 +18,7 @@ class AppOrganizeResult {
     required this.done,
     required this.skipped,
     required this.failed,
+    this.changed,
     this.messages = const [],
     required this.queued,
   });
@@ -40,6 +41,15 @@ class AppOrganizeResult {
 
   int failed;
 
+  /// 换了条目的文件数（不算在 created 里）；旧版本的服务端不给
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? changed;
+
   List<String> messages;
 
   /// 还在后台进行（等不到结果就先回了），稍后看整理历史
@@ -52,6 +62,7 @@ class AppOrganizeResult {
     other.done == done &&
     other.skipped == skipped &&
     other.failed == failed &&
+    other.changed == changed &&
     _deepEquality.equals(other.messages, messages) &&
     other.queued == queued;
 
@@ -63,11 +74,12 @@ class AppOrganizeResult {
     (done.hashCode) +
     (skipped.hashCode) +
     (failed.hashCode) +
+    (changed == null ? 0 : changed!.hashCode) +
     (messages.hashCode) +
     (queued.hashCode);
 
   @override
-  String toString() => 'AppOrganizeResult[plan=$plan, created=$created, done=$done, skipped=$skipped, failed=$failed, messages=$messages, queued=$queued]';
+  String toString() => 'AppOrganizeResult[plan=$plan, created=$created, done=$done, skipped=$skipped, failed=$failed, changed=$changed, messages=$messages, queued=$queued]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -80,6 +92,11 @@ class AppOrganizeResult {
       json[r'done'] = this.done;
       json[r'skipped'] = this.skipped;
       json[r'failed'] = this.failed;
+    if (this.changed != null) {
+      json[r'changed'] = this.changed;
+    } else {
+      json[r'changed'] = null;
+    }
       json[r'messages'] = this.messages;
       json[r'queued'] = this.queued;
     return json;
@@ -117,6 +134,7 @@ class AppOrganizeResult {
         done: mapValueOfType<int>(json, r'done')!,
         skipped: mapValueOfType<int>(json, r'skipped')!,
         failed: mapValueOfType<int>(json, r'failed')!,
+        changed: mapValueOfType<int>(json, r'changed'),
         messages: json[r'messages'] is Iterable
             ? (json[r'messages'] as Iterable).cast<String>().toList(growable: false)
             : const [],

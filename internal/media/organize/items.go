@@ -173,18 +173,94 @@ func (s *Service) subtitleKey(ctx context.Context, p *Plan) func(transfer.File) 
 	}
 }
 
-// itemState 看库里是不是已经有这个文件。
+// itemState 看库里是不是已经有这个文件。已经整理过、这次条目变了的，见 changeState。
 func (s *Service) itemState(ctx context.Context, p *Plan, it *PlanItem) string {
 	if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.TargetPath != "" {
 		if _, err := os.Lstat(it.row.TargetPath); err == nil {
-			it.Target = it.row.TargetPath
-			if ours(it.row) {
-				return ItemDone
+			if !ours(it.row) {
+				it.Target = it.row.TargetPath
+				it.Message = "库里的文件已经不是当初整理出的那个（换成了别的文件或改过），不会覆盖"
+				return ItemExists
 			}
-			it.Message = "库里的文件已经不是当初整理出的那个（换成了别的文件或改过），不会覆盖"
-			return ItemExists
+			if entryChanged(it.row, p) && (p.explicit || p.corrected && !pinnedEntry(*it.row)) {
+				return s.changeState(ctx, p, it)
+			}
+			it.Target = it.row.TargetPath
+			return ItemDone
 		}
 	}
+	return s.targetState(ctx, p, it)
+}
+
+// entryChanged 报告已整理的这条记录的条目和这次的不同。只看条目（类型与 TMDB 编号），不看媒体库：请求里不带媒体库时
+// 选出的库可能和记录的不同，只换了库的文件不动。换不换还要看条目是怎么来的（见 itemState）：请求里明确指定的才换明确指定过的
+// （手动、订阅、推送时说明的）记录；没有明确指定时只有手动纠正给的条目才换，而且只换自动识别来的记录。
+func entryChanged(row *models.MediaTransferHistory, p *Plan) bool {
+	if row.TMDBID <= 0 || p.Match == nil || p.Library == nil {
+		return false
+	}
+	return row.MediaType != p.Match.MediaType || row.TMDBID != p.Match.ID
+}
+
+// sameEntry 报告两个路径是不是库里同一个位置：字符串相同，或者在同一个目录里（媒体库路径是软链接、挂载别名）、
+// 文件名只差大小写、而且是同一个文件。判断不了时当作不同。硬链接方式整理的新旧位置本来就是同一个文件，所以还要比目录。
+func sameEntry(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	if !strings.EqualFold(filepath.Base(a), filepath.Base(b)) {
+		return false
+	}
+	da, aerr := os.Stat(filepath.Dir(a))
+	db, berr := os.Stat(filepath.Dir(b))
+	if aerr != nil || berr != nil || !os.SameFile(da, db) {
+		return false
+	}
+	fa, aerr := os.Lstat(a)
+	fb, berr := os.Lstat(b)
+	return aerr == nil && berr == nil && os.SameFile(fa, fb)
+}
+
+// changeState 是已整理、条目变了的文件的状态：能换的是 ItemChange（位置不变时 inPlace）；不能换的（移动整理的、
+// 导入的、源文件不在、新位置被别的文件或另一个版本占着）是 ItemDone 加 keep，库里的文件与记录都不动，写明原因。
+func (s *Service) changeState(ctx context.Context, p *Plan, it *PlanItem) string {
+	row := *it.row
+	it.prior = &row
+	it.PriorTarget, it.PriorMediaType, it.PriorTMDBID, it.PriorTitle = row.TargetPath, row.MediaType, row.TMDBID, row.Title
+	keep := func(msg string) string {
+		it.keep, it.Target, it.Message = true, row.TargetPath, msg
+		return ItemDone
+	}
+	switch row.Mode {
+	case models.MediaModeMove:
+		return keep("移动整理的文件（库里唯一的一份）不换条目，还在原来的位置")
+	case models.MediaModeExisting:
+		return keep("导入时就在库里的文件不换条目，还在原来的位置")
+	}
+	if _, err := os.Stat(it.Source); err != nil {
+		return keep("下载目录里的源文件不在了，换不了条目，还在原来的位置")
+	}
+	if sameEntry(it.Target, row.TargetPath) {
+		it.inPlace = true
+		it.Message = "库里的文件位置不变：整理记录改成这个条目，重新刮削"
+		return ItemChange
+	}
+	switch st := s.targetState(ctx, p, it); st {
+	case ItemPending:
+		it.Message = "换条目：先在新位置放好，再删掉旧位置里 pt-tools 放的文件"
+		return ItemChange
+	case ItemDone:
+		it.placed = true
+		it.Message = "换条目：新位置已经是这个文件，删掉旧位置里 pt-tools 放的文件"
+		return ItemChange
+	}
+	msg := it.Message
+	it.replaces = nil
+	return keep("换条目：新位置已经有文件（" + msg + "），这次不换，还在原来的位置")
+}
+
+// targetState 看算出的目标位置上有没有文件、是不是这个文件，被 pt-tools 整理的旧版本占着时按覆盖策略看换不换。
+func (s *Service) targetState(ctx context.Context, p *Plan, it *PlanItem) string {
 	dstInfo, err := os.Lstat(it.Target)
 	if err != nil {
 		return ItemPending

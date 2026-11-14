@@ -3834,7 +3834,8 @@ export interface WatchOrganizeRequest extends OrganizeRequestOptions {
 
 export type OrganizeRequest = TorrentOrganizeRequest | PathOrganizeRequest | WatchOrganizeRequest;
 
-export type OrganizeItemStatus = "pending" | "done" | "exists" | "replace" | "failed";
+/** change：之前整理过、这次条目变了（加了纠正、填了别的编号），换到新位置；prior_* 是之前的位置与条目 */
+export type OrganizeItemStatus = "pending" | "done" | "exists" | "replace" | "change" | "failed";
 
 export interface OrganizePlanItem {
   rel: string;
@@ -3851,6 +3852,11 @@ export interface OrganizePlanItem {
   history_id?: number;
   /** 这一项是一张原盘（BDMV 蓝光、VIDEO_TS DVD）：source 是原盘根目录，target 是电影目录 */
   disc?: { kind: "BDMV" | "VIDEO_TS"; files: number };
+  /** 之前整理时的位置与条目：这次条目变了时才有（状态是 change，或者不换、message 写明原因的 done） */
+  prior_target?: string;
+  prior_media_type?: MediaKind;
+  prior_tmdb_id?: number;
+  prior_title?: string;
 }
 
 /**
@@ -3902,6 +3908,8 @@ export interface OrganizeResult {
   done: number;
   skipped: number;
   failed: number;
+  /** 换了条目的文件数（不算在 created 里） */
+  changed?: number;
   messages?: string[];
   /** 整理还在后台进行（复制大文件时），稍后在整理历史里看 */
   queued?: boolean;

@@ -111,7 +111,8 @@ type AppLibraryRef struct {
 }
 
 // AppOrganizeItem 是整理计划里的一个视频文件。Status：pending 要整理，done 库里已经有了，exists 目标被别的文件占着（不覆盖），
-// replace 换掉 pt-tools 之前放进库的旧版本，failed 整理不了（message 写明原因）。
+// replace 换掉 pt-tools 之前放进库的旧版本，change 之前整理过、这次条目变了，换到新位置（prior_* 是之前的位置与条目），
+// failed 整理不了（message 写明原因）。条目变了、这个文件不换时状态是 done，message 写明原因，prior_* 照样有。
 type AppOrganizeItem struct {
 	Rel        string `json:"rel"`
 	Size       int64  `json:"size"`
@@ -122,6 +123,11 @@ type AppOrganizeItem struct {
 	Status     string `json:"status"`
 	Message    string `json:"message,omitempty"`
 	HistoryID  uint   `json:"history_id,omitempty"`
+	// PriorTarget、PriorMediaType、PriorTMDBID、PriorTitle 是之前整理时的位置与条目（这次条目变了时才有）
+	PriorTarget    string `json:"prior_target,omitempty"`
+	PriorMediaType string `json:"prior_media_type,omitempty"`
+	PriorTMDBID    int    `json:"prior_tmdb_id,omitempty"`
+	PriorTitle     string `json:"prior_title,omitempty"`
 }
 
 // AppOrganizePlan 是一个种子的整理计划（预览与执行共用）：problem 不为空时整个种子整理不了。
@@ -142,13 +148,15 @@ type AppOrganizePlan struct {
 
 // AppOrganizeResult 是 POST /media/organize 与 /media/history/{id}/retry 的结果：queued 为真时整理还在后台进行，稍后看整理历史。
 type AppOrganizeResult struct {
-	Plan     *AppOrganizePlan `json:"plan,omitempty"`
-	Created  int              `json:"created"`
-	Done     int              `json:"done"`
-	Skipped  int              `json:"skipped"`
-	Failed   int              `json:"failed"`
-	Messages []string         `json:"messages"`
-	Queued   bool             `json:"queued"`
+	Plan    *AppOrganizePlan `json:"plan,omitempty"`
+	Created int              `json:"created"`
+	Done    int              `json:"done"`
+	Skipped int              `json:"skipped"`
+	Failed  int              `json:"failed"`
+	// Changed 是换了条目的文件数（不算在 created 里）
+	Changed  int      `json:"changed"`
+	Messages []string `json:"messages"`
+	Queued   bool     `json:"queued"`
 }
 
 // appOrganizeError 写整理与识别的错误（同网页的 writeOrganizeError，换成 App 的错误码）。
@@ -286,6 +294,7 @@ func appPlanOf(p *organize.Plan) *AppOrganizePlan {
 		out.Items = append(out.Items, AppOrganizeItem{
 			Rel: it.Rel, Size: it.Size, Target: it.Target, Season: it.Season, Episode: it.Episode, EpisodeEnd: it.EpisodeEnd,
 			Status: it.Status, Message: appRedactAddr(it.Message), HistoryID: it.HistoryID,
+			PriorTarget: it.PriorTarget, PriorMediaType: it.PriorMediaType, PriorTMDBID: it.PriorTMDBID, PriorTitle: it.PriorTitle,
 		})
 	}
 	return out
@@ -297,6 +306,7 @@ func appResultOf(res *organize.Result) AppOrganizeResult {
 		return out
 	}
 	out.Plan, out.Created, out.Done, out.Skipped, out.Failed, out.Queued = appPlanOf(res.Plan), res.Created, res.Done, res.Skipped, res.Failed, res.Queued
+	out.Changed = res.Changed
 	for _, m := range res.Messages {
 		out.Messages = append(out.Messages, appRedactAddr(m))
 	}

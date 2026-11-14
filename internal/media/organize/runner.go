@@ -592,8 +592,10 @@ func (s *Service) retryDue(ctx context.Context, set Settings) {
 			continue
 		}
 		req := requestOf(r)
+		// 自动重试：已整理的文件条目变了也不换（见 ItemChange）
+		req.Auto, req.retried = true, true
 		// 失败是在手动指定条目以后的（记录里有条目），重试沿用这个条目
-		if trigger == models.MediaTriggerManual && r.TMDBID > 0 {
+		if manualEntry(r) && r.TMDBID > 0 {
 			req.MediaType, req.TMDBID, req.LibraryID = r.MediaType, r.TMDBID, r.LibraryID
 		}
 		j := job{req: req, trigger: trigger, retryIDs: ids, lease: lease}

@@ -112,8 +112,9 @@ func (s *Service) organizeRepushed(ctx context.Context, t *models.MediaSubscript
 	if err != nil {
 		return
 	}
+	// 自动补整理（Auto）：已整理的文件条目与订阅的不同时也不换，只有用户自己点的整理才换
 	res, err := s.cfg.Organizer.Organize(ctx, organize.Request{
-		DownloaderID: t.DownloaderID, Hash: t.InfoHash, MediaType: sub.MediaType, TMDBID: sub.TMDBID, LibraryID: sub.LibraryID,
+		DownloaderID: t.DownloaderID, Hash: t.InfoHash, MediaType: sub.MediaType, TMDBID: sub.TMDBID, LibraryID: sub.LibraryID, Auto: true,
 	})
 	if err != nil {
 		s.cfg.Logger.Warnf("[订阅] 再下的「%s」下完了还没整理入库，让整理入库整理没有成功: %v", t.Title, err)

@@ -208,6 +208,94 @@ describe("整理入库弹窗", () => {
     expect(q("organize-result")!.textContent).toContain("稍后在「整理历史」里看结果");
   });
 
+  it("换条目：写明之前的条目与原来的位置，能点整理，结果写出换了几个", async () => {
+    const changed = {
+      ...plan,
+      source: "override",
+      items: [
+        {
+          ...plan.items[0],
+          status: "change",
+          prior_target: "/media/movies/旧的 (1990)/旧的 (1990).mkv",
+          prior_media_type: "movie",
+          prior_tmdb_id: 111,
+          prior_title: "旧的",
+        },
+      ],
+    };
+    api.preview.mockResolvedValue(changed);
+    const OrganizeDialog = (await import("./OrganizeDialog.vue")).default;
+    const Host = defineComponent({
+      setup() {
+        const open = ref(true);
+        return () =>
+          h(OrganizeDialog, {
+            modelValue: open.value,
+            "onUpdate:modelValue": (v: boolean) => (open.value = v),
+            target: { downloader_id: 1, hash: "abc", name: "Oppenheimer" },
+          });
+      },
+    });
+    api.libraries.mockResolvedValue([]);
+    view = mountView(Host);
+    await vi.waitFor(() => expect(q("organize-change-note")).not.toBeNull());
+    expect(q("organize-change-note")!.textContent).toContain(
+      "1 个文件之前按「旧的」（电影 TMDB 111）整理过",
+    );
+    expect(q("organize-change-note")!.textContent).toContain("先在新位置放好，再删掉旧位置");
+    expect(q("organize-prior-target")!.textContent).toContain("原来：旧的 (1990)/旧的 (1990).mkv");
+    expect(q("organize-items")!.textContent).toContain("换条目");
+    expect((q("organize-run") as HTMLButtonElement).disabled, "换条目的能整理").toBe(false);
+    expect(q("organize-run")!.textContent).toContain("整理 1 个文件");
+    api.organize.mockResolvedValue({
+      plan: { ...changed, items: [{ ...changed.items[0], status: "done" }] },
+      created: 0,
+      done: 0,
+      skipped: 0,
+      failed: 0,
+      changed: 1,
+    });
+    q("organize-run")!.click();
+    await vi.waitFor(() => expect(q("organize-result")).not.toBeNull());
+    expect(q("organize-result")!.textContent).toContain("新入库 0 个，换了 1 个文件的条目");
+  });
+
+  it("换条目、位置不变：说明写只改整理记录、重新刮削，不说删旧位置", async () => {
+    const same = {
+      ...plan,
+      source: "override",
+      items: [
+        {
+          ...plan.items[0],
+          status: "change",
+          prior_target: plan.items[0].target,
+          prior_media_type: "movie",
+          prior_tmdb_id: 111,
+          prior_title: "旧的",
+        },
+      ],
+    };
+    api.preview.mockResolvedValue(same);
+    const OrganizeDialog = (await import("./OrganizeDialog.vue")).default;
+    const Host = defineComponent({
+      setup() {
+        const open = ref(true);
+        return () =>
+          h(OrganizeDialog, {
+            modelValue: open.value,
+            "onUpdate:modelValue": (v: boolean) => (open.value = v),
+            target: { downloader_id: 1, hash: "abc", name: "Oppenheimer" },
+          });
+      },
+    });
+    api.libraries.mockResolvedValue([]);
+    view = mountView(Host);
+    await vi.waitFor(() => expect(q("organize-change-note")).not.toBeNull());
+    const note = q("organize-change-note")!.textContent ?? "";
+    expect(note).toContain("库里的文件位置不变，整理时只改整理记录、按新条目重新刮削");
+    expect(note).not.toContain("删掉旧位置");
+  });
+
   it("识别不对：填 TMDB 编号、换库后重新预览；整理不了时不能点整理", async () => {
     await mountDialog();
     api.preview.mockResolvedValue({

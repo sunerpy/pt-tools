@@ -206,12 +206,17 @@ func TestBatchRetry(t *testing.T) {
 		assert.Empty(t, r.FailKind)
 	}
 
-	// 重试以后还是整理不了：写明原因
+	// 重试以后还是整理不了：写明原因。这几条是手动点的整理、条目是自动识别的（没填编号），不沿用当时的媒体库
 	_, err = e.svc.SaveLibrary(e.ctx, e.libraryID(models.MediaKindMovie), LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Enabled: false})
 	require.NoError(t, err)
 	res, err = e.svc.Batch(e.ctx, []uint{rows[0].ID}, BatchRetry)
 	require.NoError(t, err)
 	assert.True(t, res.Items[0].OK, "重试做了，整理不了的原因写在说明里")
+	assert.Contains(t, res.Items[0].Message, "没有启用的电影媒体库")
+	// 手动指定过条目的（来源是 manual）沿用那个条目与媒体库
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", rows[0].ID).Update("match_source", sourceManual).Error)
+	res, err = e.svc.Batch(e.ctx, []uint{rows[0].ID}, BatchRetry)
+	require.NoError(t, err)
 	assert.Contains(t, res.Items[0].Message, "指定的媒体库不存在、没有启用", "手动指定过条目的沿用那个条目与媒体库")
 
 	for _, bad := range [][]uint{nil, {0}, make([]uint, maxBatch+1)} {
@@ -265,6 +270,7 @@ func TestBatchQueuedNotes(t *testing.T) {
 	assert.Equal(t, BatchItem{ID: 2, OK: true, Message: "已经在整理队列里"}, queued(2, queueDup))
 	assert.Equal(t, BatchItem{ID: 3, OK: true, Message: "排进了整理队列"}, queued(3, queueAdded))
 	assert.Equal(t, "没有可整理的视频文件", resultNote(&Result{Plan: &Plan{Problem: "没有可整理的视频文件"}}))
+	assert.Equal(t, "新入库 0 个，已在库里 1 个，跳过 0 个，失败 0 个，换了 2 个文件的条目", resultNote(&Result{Done: 1, Changed: 2}))
 }
 
 // 批量删除：只删记录、连文件删；移动整理的不连文件删，写明原因

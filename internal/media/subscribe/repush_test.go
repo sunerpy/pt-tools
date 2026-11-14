@@ -192,7 +192,7 @@ func TestRepushedTorrentOrganizedWhenEventMissed(t *testing.T) {
 
 	// 下完了，没有新的整理记录：整理一次，一小时内不再重复
 	e.relist(otherTorrent, inDL)
-	require.Equal(t, []organize.Request{{DownloaderID: 1, Hash: rh, MediaType: models.MediaKindTV, TMDBID: 231620}}, organized())
+	require.Equal(t, []organize.Request{{DownloaderID: 1, Hash: rh, MediaType: models.MediaKindTV, TMDBID: 231620, Auto: true}}, organized())
 	e.advance(30 * time.Minute)
 	e.svc.refresh(e.ctx)
 	assert.Len(t, organized(), 1)

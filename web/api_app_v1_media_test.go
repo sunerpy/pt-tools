@@ -336,6 +336,28 @@ func TestAppMediaLibraryOrganize(t *testing.T) {
 	_, err = os.Stat(strings.TrimSuffix(target, ".mkv") + ".nfo")
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, appWithID(t, e.srv.appMediaHistoryScrape, http.MethodPost, "/api/app/v1/media/history/99/scrape", "99", "").Code)
+
+	// 加了纠正：预览里这个文件是换条目（带着之前的位置与条目），整理以后换到新位置，changed 是 1
+	_, err = e.rec.SetOverride(context.Background(), recognize.OverrideInput{Title: "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi", MediaType: models.MediaKindMovie, TMDBID: 279})
+	require.NoError(t, err)
+	w = appAsWith(t, e.srv.appOrganizePreview, http.MethodPost, "/api/app/v1/media/organize/preview", body, "app:read")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &plan))
+	require.Len(t, plan.Items, 1)
+	assert.Equal(t, "change", plan.Items[0].Status)
+	assert.Equal(t, target, plan.Items[0].PriorTarget)
+	assert.Equal(t, 278, plan.Items[0].PriorTMDBID)
+	assert.Equal(t, models.MediaKindMovie, plan.Items[0].PriorMediaType)
+	assert.Equal(t, "肖申克的救赎", plan.Items[0].PriorTitle)
+	w = appAsWith(t, e.srv.appOrganize, http.MethodPost, "/api/app/v1/media/organize", body, "app:write")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+	assert.Equal(t, 1, res.Changed, res.Messages)
+	assert.Zero(t, res.Created)
+	_, err = os.Stat(filepath.Join(e.library, "救赎 (1994)"))
+	require.NoError(t, err, "换到新条目的目录")
+	_, err = os.Stat(target)
+	assert.ErrorIs(t, err, os.ErrNotExist, "旧位置的文件删了")
 }
 
 // 没有整理入库或媒体识别服务时回 503

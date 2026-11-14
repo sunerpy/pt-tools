@@ -273,7 +273,7 @@ Organise history, most recently updated first. Parameters: `status` (`done`, `fa
 
 ### POST /media/history/{id}/retry
 
-Organises the torrent of this record again (usually a failed one); an entry and library chosen by hand earlier are kept. Responds like `POST /media/organize`. A missing record gets 404.
+Organises the torrent of this record again (usually a failed one). An entry and library chosen by hand earlier are kept; an entry that came from recognition is replaced when a correction now matches, and the torrent's organised files whose entry came from recognition move to the new location as well (in the response's `plan` those items are `done`, and `changed` counts them; to see beforehand which ones would move, call `POST /media/organize/preview`, where they are `change`). Responds like `POST /media/organize`. A missing record gets 404.
 
 ### POST /media/history/{id}/scrape
 
@@ -296,12 +296,12 @@ One item per library: `id`, `name`, `kind` (`movie` or `tv`), `anime` (anime onl
 `{"downloader_id": 1, "hash": "…"}`: a torrent in a downloader; use `info_hash` from `GET /torrents` as `hash` (`task_id` when there is no `info_hash`). Add `media_type` and `tmdb_id` together to choose the TMDB entry, and `library_id` to choose the library; without them pt-tools recognises the torrent and picks the library by type. Only the plan is computed; nothing changes. Responds with:
 
 - `downloader_id`, `downloader`, `hash`, `name` (the torrent name), `match` (as above), `library` (`id`, `name`), `category` (the sub-category) and `mode`;
-- `items`: one per video, with `rel` (path inside the torrent), `size`, `target` (where it goes in the library), `season`, `episode`, `episode_end`, `status` (`pending` to organise, `done` already in the library, `exists` the target is taken by another file, `replace` replaces an older version pt-tools put there, `failed` cannot be organised) and `message`;
+- `items`: one per video, with `rel` (path inside the torrent), `size`, `target` (where it goes in the library), `season`, `episode`, `episode_end`, `status` (`pending` to organise, `done` already in the library, `exists` the target is taken by another file, `replace` replaces an older version pt-tools put there, `change` organised before under another entry and moving to the new target this time, `failed` cannot be organised) and `message`; `change` items, and `done` items whose entry changed but which stay put, also carry what they were organised as: `prior_target` (the old location; when it equals `target` only the record changes and the title is scraped again), `prior_media_type`, `prior_tmdb_id` and `prior_title`;
 - `skipped`: how many files are left out (samples, too small, not video); `problem`: when set, the whole torrent cannot be organised (for example the files are not found and a path mapping is needed).
 
 ### POST /media/organize
 
-Same parameters as the preview. Organises the torrent the library's way (hard link, copy or move), scrapes and asks the media servers to scan, like organising by hand on the web page. Responds with `plan` (as in the preview), `created` (files organised this time), `done`, `skipped`, `failed`, `messages` and `queued` (still running in the background; check the history later). When everything fails the response is still 200 and the audit log records an error. Organising waits at most 60 seconds; after that it responds with 504 (`timeout`) and keeps going in the background.
+Same parameters as the preview. Organises the torrent the library's way (hard link, copy or move), scrapes and asks the media servers to scan, like organising by hand on the web page. Responds with `plan` (as in the preview), `created` (files organised this time), `done`, `skipped`, `failed`, `changed` (files moved to another entry, not counted in `created`), `messages` and `queued` (still running in the background; check the history later). When everything fails the response is still 200 and the audit log records an error. Organising waits at most 60 seconds; after that it responds with 504 (`timeout`) and keeps going in the background.
 
 ### GET /subscriptions
 

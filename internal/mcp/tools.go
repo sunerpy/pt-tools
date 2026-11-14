@@ -624,7 +624,9 @@ func registerMediaTools(s *sdk.Server, d *Deps) {
 		min:   map[string]float64{"downloader_id": 1, "tmdb_id": 0, "library_id": 0},
 		enums: map[string][]any{"media_type": {"movie", "tv"}},
 		description: "Show what organize_media would do with a downloaded torrent, without changing anything: the recognized TMDB entry, the library, " +
-			"and each video's target path and status (pending, done, exists, replace, failed).",
+			"and each video's target path and status (pending, done, exists, replace, change, failed). change means the video was organized before " +
+			"under another entry (prior_target is the old path): organizing moves it to the new target and removes what pt-tools put at the old one; " +
+			"when target equals prior_target only the record changes and the title is scraped again.",
 	}, func(in organizePreviewIn) (call, error) {
 		body, err := organizeBody(in.DownloaderID, in.Hash, in.MediaType, in.TMDBID, in.LibraryID)
 		if err != nil {

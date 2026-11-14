@@ -481,7 +481,9 @@ export function resultPreview(raw: string): string {
     }
     if (typeof o.message === "string" && o.message) return oneLine(o.message);
     if (typeof o.created === "number" && typeof o.failed === "number") {
-      return `整理出 ${o.created} 个文件${o.failed ? `，失败 ${o.failed} 个` : ""}`;
+      const changed =
+        typeof o.changed === "number" && o.changed > 0 ? `，换了 ${o.changed} 个文件的条目` : "";
+      return `整理出 ${o.created} 个文件${changed}${o.failed ? `，失败 ${o.failed} 个` : ""}`;
     }
     if (o.ok === true || o.success === true) return "成功";
   }

@@ -298,7 +298,9 @@ async function correct(id: number | undefined, type: MediaKind) {
   correcting.value = true;
   try {
     await mediaApi.setOverride({ ...recognizedInput.value, tmdb_id: id, media_type: type });
-    ElMessage.success("已纠正：同一个名字的标题之后都识别成这一条");
+    ElMessage.success(
+      "已纠正：之后识别同名的标题都用这一条；已经整理的，到整理历史里点「重新整理」换过去",
+    );
     await Promise.all([rerun(), loadOverrides()]);
   } catch (e) {
     ElMessage.error(errText(e, "纠正失败"));

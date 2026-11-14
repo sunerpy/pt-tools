@@ -182,10 +182,12 @@ func (s *Service) Retry(ctx context.Context, id uint) (*Result, error) {
 	return s.Organize(ctx, retryRequest(row))
 }
 
-// retryRequest 是重试这条记录的请求：之前手动指定过条目的，沿用那个条目与媒体库。
+// retryRequest 是重试这条记录的请求：之前手动指定过条目的（见 manualEntry），沿用那个条目与媒体库；带着的条目不算这次明确指定的
+// （见 Plan.explicit），同一个种子里条目不同的已整理文件不跟着换。
 func retryRequest(row models.MediaTransferHistory) Request {
 	req := requestOf(row)
-	if row.Trigger == models.MediaTriggerManual && row.TMDBID > 0 {
+	req.retried = true
+	if manualEntry(row) && row.TMDBID > 0 {
 		req.MediaType, req.TMDBID, req.LibraryID = row.MediaType, row.TMDBID, row.LibraryID
 	}
 	return req
@@ -314,6 +316,12 @@ func hasVideo(dir string) bool {
 	return found || (err != nil && !errors.Is(err, os.ErrNotExist))
 }
 
+// dirShared 报告这一项是不是目录里几条记录共用的刮削文件（tvshow.nfo、season.nfo、海报等）。原盘的电影目录里只有这一张原盘：
+// 它的 movie.nfo 是这条记录自己的（别的电影目录里的 movie.nfo 是几个版本共用的）。
+func dirShared(e extra, disc bool) bool {
+	return e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)) && (!disc || filepath.Base(e.Target) != scrape.MovieNFOName)
+}
+
 // removeLibraryFiles 删掉一条记录在库里整理出的文件（调用方持有 s.mu）：视频与字幕按文件编号或软链接指向确认；
 // 刮削写的文件只删记录里有、文件编号还对得上的，目录里的那几个要等目录里不再有视频时才删，还有视频时转给目录里另一条记录。
 // 最后删空目录。换掉或改过的文件留着，返回它们的说明；转交失败时返回错误，调用方不要删记录。
@@ -339,8 +347,7 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 	var shared, discFiles []extra
 	for _, e := range decodeExtras(row.Extras) {
 		switch {
-		// 原盘的电影目录里只有这一张原盘：它的 movie.nfo 是这条记录自己的（别的电影目录里的 movie.nfo 是几个版本共用的）
-		case e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)) && (!disc || filepath.Base(e.Target) != scrape.MovieNFOName):
+		case dirShared(e, disc):
 			shared = append(shared, e)
 		case e.Kind == extraMeta || e.Kind == extraSiteSub:
 			// 刮削写的文件与站点字幕是 pt-tools 写的普通文件：按文件编号确认（软链接方式整理的视频也一样）
