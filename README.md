@@ -33,7 +33,7 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
   <img src="./docs/public/screens/home-light.webp" alt="pt-tools 的用户统计页：各站点的上传量、分享率、做种数、积分和等级" width="1440" />
 </picture>
 
-<details>
+<details open>
 <summary>追剧、刷流、AI 助手与手机 App 的截图（演示数据）</summary>
 
 <picture>

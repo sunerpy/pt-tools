@@ -35,7 +35,7 @@ The web interface is in Chinese; the screenshot below shows it with demo data.
   <img src="../public/screens/home-light.webp" alt="The pt-tools user statistics page: upload, ratio, seeding, bonus points and class for every site" width="1440" />
 </picture>
 
-<details>
+<details open>
 <summary>Screenshots of following shows, brushing, the AI assistant and the mobile app (demo data)</summary>
 
 <picture>
