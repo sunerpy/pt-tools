@@ -107,6 +107,37 @@ describe("绑定页：通道一栏", () => {
     expect(titles).not.toContain("待绑定");
   });
 
+  it("飞书应用机器人：通道写「飞书」，名单里的 open_id 能直接绑定", async () => {
+    api.listBindings.mockResolvedValue({ bindings: [], pending: [] });
+    api.channels.mockResolvedValue({
+      channels: [
+        {
+          conf_id: 5,
+          name: "飞书机器人",
+          channel_type: "feishu_app",
+          enabled: true,
+          runtime_state: "connected",
+          notify_target: "ou_7f3a9c2d1e",
+          notify_via: "admin",
+          users: [{ user_id: "ou_7f3a9c2d1e", roles: ["admin"], bound: false }],
+        },
+      ],
+    });
+    ui.confirm.mockResolvedValue("confirm");
+    api.bindDirect.mockResolvedValue({ id: 9 });
+    await mountPage();
+    const text = document.querySelector("[data-testid=binding-channels]")!.textContent ?? "";
+    expect(text).toContain("飞书机器人");
+    expect(text).toContain("飞书");
+    expect(text).not.toContain("feishu_app");
+    const btn = [
+      ...document.querySelectorAll<HTMLButtonElement>("button[aria-label^='绑定 ']"),
+    ][0]!;
+    btn.click();
+    await vi.waitFor(() => expect(api.bindDirect).toHaveBeenCalledWith(5, "ou_7f3a9c2d1e"));
+    expect(ui.confirm.mock.calls[0]![0]).toContain("绑定 飞书 账号");
+  });
+
   it("点「绑定」确认后直接绑定，再刷新", async () => {
     api.listBindings.mockResolvedValue({ bindings: [], pending: [] });
     api.channels.mockResolvedValue({ channels: [CHANNEL] });

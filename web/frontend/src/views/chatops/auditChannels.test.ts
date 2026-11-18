@@ -110,3 +110,38 @@ describe("审计日志：认得 API 令牌", () => {
     expect(params.get("channel_type")).toBe("servarr");
   });
 });
+
+describe("审计日志：认得飞书应用机器人", () => {
+  it("表里写「飞书」，筛选里是全名，选了发 channel_type=feishu_app", async () => {
+    api.list.mockResolvedValue({
+      items: [
+        {
+          ...tokenWrite,
+          id: 9,
+          channel_type: "feishu_app",
+          channel_user_id: "ou_admin",
+          command: "status",
+        },
+      ],
+      total: 1,
+    });
+    const AuditLog = (await import("./AuditLog.vue")).default;
+    view = mountView(AuditLog);
+    await vi.waitFor(() =>
+      expect(document.querySelector(".el-table")?.textContent ?? "").toContain("飞书"),
+    );
+    expect(document.body.textContent ?? "").not.toContain("feishu_app");
+    const chip = document.querySelector("[data-testid=audit-channel-chip]")!;
+    (chip.querySelector<HTMLElement>(".el-select__wrapper") ?? (chip as HTMLElement)).click();
+    await vi.waitFor(() => {
+      const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => (o.textContent ?? "").trim() === "通道: 飞书应用机器人",
+      );
+      expect(opt).toBeTruthy();
+      opt!.click();
+    });
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    const params = api.list.mock.calls[1]![0] as URLSearchParams;
+    expect(params.get("channel_type")).toBe("feishu_app");
+  });
+});
