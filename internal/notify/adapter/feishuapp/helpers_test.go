@@ -155,12 +155,19 @@ func (r *fakeRunner) Start(ctx context.Context) error {
 
 func (r *fakeRunner) CloseAndWait(ctx context.Context) error {
 	if r.stuck {
-		<-ctx.Done()
-		return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.closed:
+			return nil
+		}
 	}
-	r.once.Do(func() { close(r.closed) })
+	r.release()
 	return nil
 }
+
+// release 放开卡住的 runner（测试收尾用）。
+func (r *fakeRunner) release() { r.once.Do(func() { close(r.closed) }) }
 
 // Emit 像 SDK 一样调收消息的回调，返回回调的结果（nil 时 SDK 回 200，否则回 500 让平台重推）。
 func (r *fakeRunner) Emit(ctx context.Context, ev *larkim.P2MessageReceiveV1) error {

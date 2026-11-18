@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -99,11 +100,19 @@ func (f *fakeOpenAPI) sent() []fakeMessage {
 	return append([]fakeMessage(nil), f.messages...)
 }
 
-// testAPI 用真的 lark.Client 连假接口。SDK 的 token 缓存是进程级的，按 app_id 分键：每个用例用不同的 app_id。
-func testAPI(t *testing.T, f *fakeOpenAPI, appID string) apiSender {
+// testAPI 用真的 lark.Client 连假接口。SDK 的 token 缓存是进程级的，按 app_id 分键：每个用例（连同 -count 的每一轮）
+// 用不同的 app_id。
+func testAPI(t *testing.T, f *fakeOpenAPI, prefix string) apiSender {
 	t.Helper()
-	cfg := &Config{AppID: appID, AppSecret: "api-secret-" + appID, Domain: DomainFeishu}
+	appID := uniqueAppID(prefix)
+	cfg := &Config{AppID: appID, AppSecret: "api-secret-" + prefix, Domain: DomainFeishu}
 	return newLarkAPIAt(f.srv.URL, cfg, sdkLogger{log: func() *zap.SugaredLogger { return zap.NewNop().Sugar() }})
+}
+
+var appIDSeq atomic.Int64
+
+func uniqueAppID(prefix string) string {
+	return prefix + "_" + strconv.FormatInt(time.Now().UnixNano(), 36) + strconv.FormatInt(appIDSeq.Add(1), 10)
 }
 
 func TestLarkAPI_SendText(t *testing.T) {
@@ -117,7 +126,7 @@ func TestLarkAPI_SendText(t *testing.T) {
 	sent := f.sent()
 	require.Len(t, sent, 1)
 	assert.Equal(t, fakeMessage{ReceiveIDType: "open_id", ReceiveID: "ou_a", MsgType: "text", Content: `{"text":"你好"}`}, sent[0])
-	assert.Equal(t, "Bearer t-g1044fakefaketokencli_api_send", f.auths[0])
+	assert.True(t, strings.HasPrefix(f.auths[0], "Bearer t-g1044fakefaketokencli_api_send_"), f.auths[0])
 
 	_, err = api.SendText(context.Background(), "chat_id", "oc_b", `{"text":"2"}`)
 	require.NoError(t, err)

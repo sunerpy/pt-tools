@@ -48,15 +48,28 @@ type Channel struct {
 	now       func() time.Time
 
 	limiters *limiterSet
+	queues   *userQueues
 
 	inited    atomic.Bool
 	closed    atomic.Bool
 	ws        atomic.Int32
+	conflict  atomic.Bool // app_id 被同一进程里的另一个通道占着
+	botFailed atomic.Bool // 取不到本应用机器人的信息
+	botID     atomic.Pointer[string]
 	closeOnce sync.Once
 
-	// 生命周期：Init 时建好，Close 时取消
-	ctx    context.Context
-	cancel context.CancelFunc
+	// 生命周期：Init 时建好，Close 时取消（监督循环、队列工作协程、进行中的处理、后台提示都收到取消）
+	ctx     context.Context
+	cancel  context.CancelFunc
+	started bool // 监督循环已经起了（c.mu 保护）
+
+	runnerMu sync.Mutex
+	runner   wsRunner
+
+	// goMu 保护 stopping 与 wg.Add：Close 开始以后不再起新协程
+	goMu     sync.Mutex
+	stopping bool
+	wg       sync.WaitGroup
 
 	// 退避与重试的时长，0 取默认值（测试里调小）
 	backoffBase   time.Duration
@@ -75,6 +88,7 @@ func New() *Channel {
 		newRunner: newLarkRunner,
 		now:       time.Now,
 		limiters:  newLimiterSet(sendRate, sendBurst),
+		queues:    newUserQueues(),
 	}
 }
 
@@ -115,16 +129,27 @@ func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 	return nil
 }
 
-// OnInbound 登记收到消息以后交给谁（MessageChain.Process）。
+// OnInbound 登记收到消息以后交给谁（MessageChain.Process）。第一次传入非空的 handler 时才起监督协程去连长连接
+// 并取机器人信息（见包注释）；生产里 initEnabledChannels 在 Init 成功后马上调它，热重载也一样。
 func (c *Channel) OnInbound(handler notify.InboundHandler) {
 	c.mu.Lock()
 	c.handler = handler
+	start := handler != nil && c.cfg != nil && !c.started && !c.closed.Load()
+	if start {
+		c.started = true
+	}
 	c.mu.Unlock()
+	if start {
+		c.spawn(c.supervise)
+		c.spawn(c.loadBotInfo)
+	}
 }
 
-// Healthy 报告通道能不能正常工作：已经初始化、没有关闭、长连接没有报错。
+// Healthy 报告通道能不能正常工作：已经初始化、没有关闭、长连接没有报错、app_id 没有被别的通道占着、
+// 取得到机器人信息。为 false 时界面显示「异常」。
 func (c *Channel) Healthy() bool {
-	return c.inited.Load() && !c.closed.Load() && c.ws.Load() != wsFailed
+	return c.inited.Load() && !c.closed.Load() && c.ws.Load() != wsFailed &&
+		!c.conflict.Load() && !c.botFailed.Load()
 }
 
 // LinkState 报告长连接是不是真的连上了：连上以后是 connected，其余时候是 waiting。
@@ -141,18 +166,40 @@ func (c *Channel) setWS(state int32) {
 	}
 }
 
-// Close 只执行一次：标记关闭、取消生命周期。ctx 到期就返回 ctx.Err()，不卡关机。
+// Close 只执行一次：标记关闭，取消生命周期，释放 app_id 登记（热重载时新实例马上能接手），
+// 再等 SDK 客户端与自己的协程退出。ctx 到期就返回 ctx.Err()，不卡关机。
 func (c *Channel) Close(ctx context.Context) error {
 	c.closeOnce.Do(func() {
 		c.closed.Store(true)
+		c.goMu.Lock()
+		c.stopping = true
+		c.goMu.Unlock()
 		c.mu.RLock()
-		cancel := c.cancel
+		cancel, cfg := c.cancel, c.cfg
 		c.mu.RUnlock()
 		if cancel != nil {
 			cancel()
 		}
+		if cfg != nil {
+			apps.release(cfg.AppID, c)
+		}
 	})
-	return ctx.Err()
+	if r := c.currentRunner(); r != nil {
+		if err := r.CloseAndWait(ctx); err != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *Channel) logger() *zap.SugaredLogger {

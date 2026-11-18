@@ -1,0 +1,106 @@
+package feishuapp
+
+import (
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// fakeClock 是可以手动拨动的时钟。
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+func TestDedupe_TTLAndForget(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_800_000_000, 0)}
+	d := newDedupe(time.Hour, 100)
+	d.now = clock.now
+
+	assert.False(t, d.check("a"))
+	assert.True(t, d.check("a"), "重推的同一条")
+	clock.add(59 * time.Minute)
+	assert.True(t, d.check("a"))
+	clock.add(2 * time.Minute)
+	assert.False(t, d.check("a"), "过期以后重新算")
+
+	assert.False(t, d.check("b"))
+	d.forget("b")
+	assert.False(t, d.check("b"), "移出表以后能再处理")
+	assert.True(t, d.check("b"))
+}
+
+func TestDedupe_EvictsOldestWhenFull(t *testing.T) {
+	d := newDedupe(time.Hour, 3)
+	for i := range 4 {
+		assert.False(t, d.check(strconv.Itoa(i)))
+	}
+	assert.False(t, d.check("0"), "最旧的被挤掉了")
+	assert.True(t, d.check("3"))
+	assert.LessOrEqual(t, len(d.at), 3)
+}
+
+func TestDedupe_ForgetThenReAddSurvivesStaleEntry(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_800_000_000, 0)}
+	d := newDedupe(time.Hour, 100)
+	d.now = clock.now
+	require.False(t, d.check("k"))
+	d.forget("k")
+	clock.add(30 * time.Minute)
+	require.False(t, d.check("k"))
+	clock.add(40 * time.Minute) // 第一次记下的已经过期，第二次的还没有
+	assert.True(t, d.check("k"), "过期的旧顺序项不能把新记下的删掉")
+}
+
+func TestThrottle(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_800_000_000, 0)}
+	th := newThrottle(10 * time.Minute)
+	th.now = clock.now
+	assert.True(t, th.allow("ou_a"))
+	assert.False(t, th.allow("ou_a"))
+	assert.True(t, th.allow("ou_b"))
+	clock.add(10 * time.Minute)
+	assert.True(t, th.allow("ou_a"))
+
+	for i := range throttleMax {
+		th.allow("ou_" + strconv.Itoa(i))
+	}
+	clock.add(11 * time.Minute)
+	assert.True(t, th.allow("ou_new"))
+	assert.Less(t, len(th.last), throttleMax, "满了以后清掉过期的")
+}
+
+func TestAppRegistry(t *testing.T) {
+	r := newAppRegistry()
+	a := &Channel{confID: 1}
+	b := &Channel{confID: 2}
+	_, ok := r.claim("cli_x", a)
+	require.True(t, ok)
+	_, ok = r.claim("cli_x", a)
+	assert.True(t, ok, "自己重复登记没问题")
+	holder, ok := r.claim("cli_x", b)
+	assert.False(t, ok)
+	assert.Equal(t, uint(1), holder)
+	r.release("cli_x", b)
+	_, ok = r.claim("cli_x", b)
+	assert.False(t, ok, "别人释放不了我的登记")
+	r.release("cli_x", a)
+	_, ok = r.claim("cli_x", b)
+	assert.True(t, ok)
+}
