@@ -197,7 +197,8 @@ func (c *Channel) Close(ctx context.Context) error {
 		c.mu.RUnlock()
 		if cancel != nil {
 			// 在队列锁里取消：drain 在同一把锁里看过 ctx 才取出消息，所以取消以后不会再取出任何一条，
-			// 排着队的都留给 seal 交接；取消以前已经取出的那一条就是正在处理的，随 ctx 取消
+			// 排着队的都留给 seal 交接；取消以前已经取出的那一条，交给 MessageChain 以前会再看一次 ctx，取消了就放回队首
+			// 一起交接，已经交给 MessageChain 的就是正在处理的，随 ctx 取消
 			c.queues.mu.Lock()
 			cancel()
 			c.queues.mu.Unlock()

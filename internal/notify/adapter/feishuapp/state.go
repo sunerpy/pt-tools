@@ -267,6 +267,8 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 			if items.busy == nil {
 				items.busy = map[string]<-chan struct{}{}
 			}
+			// 这个人在本编号也有一条还开着时保留本编号的：要两个编号的旧实例里同时各有一条在跑，得先有跨实例的并行，
+			// 而这里的完成信号正是为了排除它，所以不合并两个信号
 			if _, mine := items.busy[user]; !mine {
 				items.busy[user] = ch
 			}

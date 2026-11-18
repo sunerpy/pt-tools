@@ -162,7 +162,8 @@ func (c *Channel) startDrainLocked(userID string, uq *userQueue) bool {
 // ctx 取消以后不再取出消息：先拿处理槽，再在锁里看一次 ctx 与 sealed 才取出，取消了就不取，
 // 消息留在队首，由 seal 交给下一个实例。Close 也在这把锁里取消 ctx，所以「取出」与「取消」有确定的先后：
 // 取消以前取出的那一条就是正在处理的，随 ctx 取消（与 Telegram、QQ 一致）。取出以后到 deliver 之间没有会阻塞的步骤。
-// 交接时旧实例正在处理的那条如果不理会取消、继续跑，新实例接手的同一个人的后续消息会和它同时处理。
+// 交接时旧实例正在处理的那条如果不理会取消、继续跑，它的完成信号随 seal 交出去，新实例里这个人的下一条等它收尾，
+// 不会同时处理。
 func (c *Channel) drain(userID string, uq *userQueue) {
 	q := c.queues
 	idle := c.timing(c.queueIdle, defaultQueueIdle)

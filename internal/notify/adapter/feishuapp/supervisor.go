@@ -58,7 +58,7 @@ func (c *Channel) supervise() {
 	defer func() {
 		// 先等本实例的队列工作协程退出，再交出排队的消息：取出了还没交给 MessageChain 的那条已经放回队首，
 		// 正在处理的通常也已经收尾。处理函数不理会取消、过了 handoffWait 还没收尾时照常交接，同时带上那几个人的
-		// 完成信号：新实例马上连上、别人的消息照常处理，这个人的下一条等那条收尾（最多 previousWait）
+		// 完成信号：新实例马上连上、别人的消息照常处理，这个人的下一条等那条收尾（不设上限）
 		if wait := c.timing(c.handoffWait, defaultHandoffWait); !waitGroupTimeout(&c.drains, wait) {
 			c.logger().Warnf("飞书应用机器人(%d): 正在处理的消息 %s内没收尾，排着队的照常交接（这个人的下一条等它收尾）",
 				c.confID, durationText(wait))
