@@ -36,7 +36,17 @@ The web interface is in Chinese; the screenshot below shows it with demo data.
 </picture>
 
 <details open>
-<summary>Screenshots of following shows, brushing, the AI assistant and the mobile app (demo data)</summary>
+<summary>Screenshots of the home page, the system check, following shows, brushing, the AI assistant and the mobile app (demo data)</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../guide/images/home/home-page-dark.webp" />
+  <img src="../guide/images/home/home-page-light.webp" alt="The home page: the NAS overview of a TrueNAS host (CPU, memory, network, storage, storage pools, disk temperatures and alerts) and the episodes airing today" width="1440" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../guide/images/home/system-check-dark.webp" />
+  <img src="../guide/images/home/system-check-light.webp" alt="The system check: 4 items need attention, listing a downloader that cannot be reached, an expired cookie, a media library path and a failed backup, each with a link to fix it" width="1440" />
+</picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../public/screens/media-follow-dark.webp" />

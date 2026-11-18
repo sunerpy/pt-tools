@@ -179,6 +179,8 @@ pt-tools 连飞牛网页的 `<地址>/websocket?type=main`（`https://` 地址�
 
 ## 来源列表
 
+![NAS 监控页：来源列表里是本机与一台 TrueNAS，都已连上；下面是说明与「首页显示」的选择](images/home/nas-monitor-light.webp)
+
 每个来源一行（手机上一张卡）：
 
 | 列         | 内容                                                                                                                                                              |
