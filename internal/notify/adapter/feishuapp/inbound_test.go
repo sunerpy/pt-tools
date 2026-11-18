@@ -594,6 +594,8 @@ func TestClose_CancelsUnderQueueLock(t *testing.T) {
 	defer unlock.Do(c.queues.mu.Unlock) // 断言失败时也放开，免得收尾的 seal 一直等锁
 	closed := make(chan error, 1)
 	go func() { closed <- c.Close(context.Background()) }()
+	// 先确认 Close 已经开始（标了关闭），再看它在锁放开以前不取消；否则 Close 没被调度到时旧实现也会误通过
+	require.Eventually(t, c.closed.Load, 5*time.Second, time.Millisecond, "Close 已经开始")
 	require.Never(t, func() bool { return c.ctx.Err() != nil }, 100*time.Millisecond, 5*time.Millisecond,
 		"拿着队列锁时 Close 不能取消 ctx")
 	unlock.Do(c.queues.mu.Unlock)
@@ -651,7 +653,7 @@ func TestReload_AdoptIgnoresQueueLimitAndRechecksLists(t *testing.T) {
 		mine = append(mine, newQueued(in, base.Add(time.Duration(i)*time.Second), "om_a"+strconv.Itoa(i)))
 	}
 	gone = append(gone, newQueued(notify.InboundMessage{ChannelType: ChannelType, SourceConfID: 7, ChannelUserID: "ou_removed", Text: "/delete 1"}, base, "om_gone"))
-	apps.release("cli_test", owner, map[string][]*queued{"ou_admin": mine, "ou_removed": gone})
+	apps.release("cli_test", owner, handoff{items: map[string][]*queued{"ou_admin": mine, "ou_removed": gone}})
 
 	var logs *observer.ObservedLogs
 	_, _, rec := reloadChannel(t, testConfig, func(c *Channel) { logs = observedLogger(c) })
@@ -687,8 +689,8 @@ func TestEnqueue_RefusesAfterSealOrClose(t *testing.T) {
 	assert.Equal(t, 0, closing.queuedUsers(), "不收的不留空队列")
 	assert.True(t, closing.enqueue("ou_admin", newQueued(in, time.Now(), "om_e4"), true), "接手的照样放进队列")
 	left := closing.queues.seal()
-	require.Len(t, left["ou_admin"], 1, "seal 交出来")
-	assert.Equal(t, "om_e4", left["ou_admin"][0].messageID)
+	require.Len(t, left.items["ou_admin"], 1, "seal 交出来")
+	assert.Equal(t, "om_e4", left.items["ou_admin"][0].messageID)
 }
 
 func TestWaitClaim(t *testing.T) {
@@ -750,13 +752,13 @@ func TestReload_WaitsForInflightBeforeHandoff(t *testing.T) {
 	assert.NotZero(t, h.ended.Load(), "旧实例那条先收尾")
 }
 
-// 等正在处理的那条收尾有上限（handoffWait）：过了上限照常交接，记一条 Warn。
-func TestReload_HandoffWaitIsBounded(t *testing.T) {
+// 等正在处理的那条收尾有上限（handoffWait）：过了上限照常交接，记一条 Warn；新实例马上处理别人的消息，
+// 这个人后面的消息等旧实例里他那条收尾以后才处理，两条不同时跑。
+func TestReload_HandoffWaitIsBoundedButUserStaysSerial(t *testing.T) {
 	c1, _, runners1, _ := startChannel(t, testConfig)
 	c1.handoffWait = 50 * time.Millisecond
 	logs := observedLogger(c1)
 	h := newStubbornHandler()
-	defer close(h.release)
 	c1.OnInbound(h.handle)
 	r1 := runners1.last()
 	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_b1", "ou_admin", "slow")))
@@ -766,15 +768,53 @@ func TestReload_HandoffWaitIsBounded(t *testing.T) {
 		t.Fatal("slow 没开始处理")
 	}
 	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_b2", "ou_admin", "/status")))
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_b3", "ou_user", "/sites")))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	require.Error(t, c1.Close(ctx))
 	_, _, rec2 := reloadChannel(t, testConfig, nil)
 	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond,
-		"过了上限照常交接")
-	assert.Zero(t, h.ended.Load(), "旧实例那条还在跑")
+		"过了上限照常交接：别人的消息马上处理")
+	assert.Equal(t, "/sites", rec2.got()[0].Text)
+	require.Never(t, func() bool { return len(rec2.got()) > 1 }, 150*time.Millisecond, 5*time.Millisecond,
+		"旧实例里 ou_admin 那条没收尾，他后面的消息还在等")
 	assert.Contains(t, logJoined(logs.All()), "内没收尾")
+
+	close(h.release)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "/status", rec2.got()[1].Text)
+	assert.NotZero(t, h.ended.Load(), "旧实例那条先收尾")
+}
+
+// 上一个实例里那条一直不收尾时，这个人后面的消息最多等 previousWait，之后接着处理并记一条 Warn。
+func TestReload_PreviousWaitIsCapped(t *testing.T) {
+	c1, _, runners1, _ := startChannel(t, testConfig)
+	c1.handoffWait = 20 * time.Millisecond
+	h := newStubbornHandler()
+	defer close(h.release)
+	c1.OnInbound(h.handle)
+	r1 := runners1.last()
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_c1", "ou_admin", "slow")))
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow 没开始处理")
+	}
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_c2", "ou_admin", "/status")))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.Error(t, c1.Close(ctx))
+	var logs *observer.ObservedLogs
+	_, _, rec2 := reloadChannel(t, testConfig, func(c *Channel) {
+		c.previousWait = 100 * time.Millisecond
+		logs = observedLogger(c)
+	})
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond, "等够上限以后接着处理")
+	assert.Equal(t, "/status", rec2.got()[0].Text)
+	assert.Zero(t, h.ended.Load(), "旧实例那条还在跑")
+	assert.Contains(t, logJoined(logs.All()), "没收尾，接着处理他后面的消息")
 }
 
 // 取出一条以后、交给 MessageChain 以前 ctx 被取消（Close 正好落在这里）：这条放回队首交接，不在旧实例里处理。

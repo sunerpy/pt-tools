@@ -116,7 +116,7 @@ func TestAppRegistry(t *testing.T) {
 	holder, ok, wake, _ := r.claim("cli_x", b)
 	assert.False(t, ok)
 	assert.Equal(t, uint(1), holder)
-	r.release("cli_x", b, nil)
+	r.release("cli_x", b, handoff{})
 	_, ok, _, _ = r.claim("cli_x", b)
 	assert.False(t, ok, "别人释放不了我的登记")
 	select {
@@ -124,7 +124,7 @@ func TestAppRegistry(t *testing.T) {
 		t.Fatal("还没释放就叫醒了")
 	default:
 	}
-	r.release("cli_x", a, nil)
+	r.release("cli_x", a, handoff{})
 	select {
 	case <-wake:
 	default:
@@ -142,21 +142,21 @@ func TestAppRegistry_LeftoversGoToSameConf(t *testing.T) {
 	old := &Channel{confID: 7}
 	_, ok, _, _ := r.claim("cli_m", old)
 	require.True(t, ok)
-	r.release("cli_m", &Channel{confID: 7}, map[string][]*queued{"ou_a": {item}})
+	r.release("cli_m", &Channel{confID: 7}, handoff{items: map[string][]*queued{"ou_a": {item}}})
 	assert.Empty(t, r.left, "不是登记的主人：什么都不做")
-	r.release("cli_m", old, map[string][]*queued{"ou_a": {item}})
+	r.release("cli_m", old, handoff{items: map[string][]*queued{"ou_a": {item}}})
 
 	other := &Channel{confID: 8}
 	_, ok, _, got := r.claim("cli_m", other)
 	require.True(t, ok)
-	assert.Empty(t, got, "别的通道编号拿不到")
-	r.release("cli_m", other, nil)
+	assert.True(t, got.empty(), "别的通道编号拿不到")
+	r.release("cli_m", other, handoff{})
 
 	next := &Channel{confID: 7}
 	_, ok, _, got = r.claim("cli_m", next)
 	require.True(t, ok)
-	assert.Equal(t, map[string][]*queued{"ou_a": {item}}, got)
-	r.release("cli_m", next, nil)
+	assert.Equal(t, map[string][]*queued{"ou_a": {item}}, got.items)
+	r.release("cli_m", next, handoff{})
 	_, _, _, got = r.claim("cli_m", &Channel{confID: 7})
-	assert.Empty(t, got, "取走以后就没有了")
+	assert.True(t, got.empty(), "取走以后就没有了")
 }

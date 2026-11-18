@@ -56,18 +56,18 @@ func (c *Channel) supervise() {
 	c.mu.RUnlock()
 	claimed := false
 	defer func() {
-		// 先等本实例的队列工作协程退出，再交出排队的消息：正在处理的那条收尾以后，同一个人交接过去的下一条
-		// 才开始处理，不会同时跑；取出了还没交给 MessageChain 的那条也已经放回队首。处理函数不理会取消、
-		// 过了 handoffWait 还没收尾时照常交接（新实例这段时间连不上，飞书会重推这期间的消息）
+		// 先等本实例的队列工作协程退出，再交出排队的消息：取出了还没交给 MessageChain 的那条已经放回队首，
+		// 正在处理的通常也已经收尾。处理函数不理会取消、过了 handoffWait 还没收尾时照常交接，同时带上那几个人的
+		// 完成信号：新实例马上连上、别人的消息照常处理，这个人的下一条等那条收尾（最多 previousWait）
 		if wait := c.timing(c.handoffWait, defaultHandoffWait); !waitGroupTimeout(&c.drains, wait) {
-			c.logger().Warnf("飞书应用机器人(%d): 正在处理的消息 %s内没收尾，排着队的照常交接（同一个人的下一条可能和它同时处理）",
+			c.logger().Warnf("飞书应用机器人(%d): 正在处理的消息 %s内没收尾，排着队的照常交接（这个人的下一条等它收尾）",
 				c.confID, durationText(wait))
 		}
 		left := c.queues.seal()
 		if !claimed {
 			return // 没登记过就没连过长连接，也就收不到消息
 		}
-		if n := countQueued(left); n > 0 {
+		if n := countQueued(left.items); n > 0 {
 			c.logger().Infof("飞书应用机器人(%d): 关闭时还有 %d 条排队的消息没开始处理，交给重建以后的通道接着处理"+
 				"（%s内没有接手就丢掉；进程退出时不处理）", c.confID, n, durationText(apps.ttl()))
 		}

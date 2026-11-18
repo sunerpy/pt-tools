@@ -210,9 +210,9 @@ type leftKey struct {
 	confID uint
 }
 
-// leftover 是一个实例关闭时留下、还没人取的消息。
+// leftover 是一个实例关闭时留下、还没人取的消息与完成信号。
 type leftover struct {
-	items map[string][]*queued
+	items handoff
 	timer *time.Timer
 	log   func() *zap.SugaredLogger
 }
@@ -226,7 +226,7 @@ func newAppRegistry() *appRegistry {
 
 // claim 登记 c 使用 appID，并取走同一个通道编号留下的消息。已被另一个实例占着时返回那个实例的通道编号、
 // false，以及它释放时会关闭的 wake。
-func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wake <-chan struct{}, items map[string][]*queued) {
+func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wake <-chan struct{}, items handoff) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if cur := r.owners[appID]; cur != nil && cur != c {
@@ -235,7 +235,7 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 			ch = make(chan struct{})
 			r.waiters[appID] = ch
 		}
-		return cur.confID, false, ch, nil
+		return cur.confID, false, ch, handoff{}
 	}
 	r.owners[appID] = c
 	k := leftKey{appID: appID, confID: c.confID}
@@ -249,14 +249,14 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 
 // release 只释放 c 自己的登记，同时留下它排着队、还没开始处理的消息（交给同一个通道编号的下一个实例），
 // 并叫醒在等这个 app_id 的实例。
-func (r *appRegistry) release(appID string, c *Channel, items map[string][]*queued) {
+func (r *appRegistry) release(appID string, c *Channel, items handoff) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.owners[appID] != c {
 		return
 	}
 	delete(r.owners, appID)
-	if countQueued(items) > 0 {
+	if !items.empty() {
 		// c 是登记的主人，登记时已经取走了这个通道编号以前留下的，这里不会有旧的一份
 		k := leftKey{appID: appID, confID: c.confID}
 		l := &leftover{items: items, log: c.logger}
@@ -278,8 +278,10 @@ func (r *appRegistry) expire(k leftKey, l *leftover) {
 	}
 	delete(r.left, k)
 	r.mu.Unlock()
-	l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
-		k.confID, countQueued(l.items), durationText(r.ttl()))
+	if n := countQueued(l.items.items); n > 0 {
+		l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
+			k.confID, n, durationText(r.ttl()))
+	}
 }
 
 // ttl 是留下的消息等多久没人取就丢掉。

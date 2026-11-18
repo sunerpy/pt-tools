@@ -87,6 +87,7 @@ type Channel struct {
 	queueIdle     time.Duration
 	gather        time.Duration
 	handoffWait   time.Duration
+	previousWait  time.Duration
 	noticeTimeout time.Duration
 }
 
