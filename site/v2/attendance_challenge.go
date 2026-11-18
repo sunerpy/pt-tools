@@ -24,7 +24,7 @@ const (
 	// ChallengeHDSkyCaptcha 是 HDSky 的签到验证码：POST /image_code_ajax.php 取 imagehash，
 	// 认 /image.php?action=regimage&imagehash=… 上的 6 位字符，POST /showup.php 提交。
 	ChallengeHDSkyCaptcha AttendanceChallenge = "hdsky_captcha"
-	// ChallengeOpenCDCaptcha 是 OpenCD 签到插件的验证码：GET /plugin_sign-in.php 取表单里的 imagehash 与验证码图片，
+	// ChallengeOpenCDCaptcha 是 OpenCD 签到插件的验证码：GET /plugin_sign-in.php 取表单里的 csrf_token、imagehash 与验证码图片，
 	// POST /plugin_sign-in.php?cmd=signin 提交。
 	ChallengeOpenCDCaptcha AttendanceChallenge = "opencd_captcha"
 	// ChallengeBakaQuiz 是 CHDBits、52PT 的签到答题（bakatest.php）：单选或多选，选项的值是 1、2、4、8，
@@ -287,8 +287,28 @@ func (d *NexusPHPDriver) attendHDSky(ctx context.Context, s AttendanceSolver) (A
 
 var openCDSignedPattern = regexp.MustCompile(`(?:今天|今日)?(?:已经|已經)?(?:签到|簽到)过了|已(?:经|經)?(?:签到|簽到)`)
 
-// attendOpenCD：每次打开签到页拿新的 imagehash 与验证码，认图后提交；页面上没有签到表单、写着已签到时算今天已签。
+const (
+	// openCDSignLogLink 是首页顶栏「查看簽到記錄」的地址：今天签过以后顶栏的签到按钮（onclick 调 signin(this)）换成它，
+	// 站点的 base.js 签到成功时也这样换（2026-11-17 在真站点上核对过签过以后的首页；flexget 的 open.py 同样按它认今天已签）。
+	openCDSignLogLink = "plugin_sign-in.php?cmd=show-log"
+	// openCDSignInButton 是顶栏签到按钮调的函数，还在就是今天没签
+	openCDSignInButton = "signin("
+	// openCDCSRFFailed 是签到插件的 CSRF 校验没过时回的话（HTTP 403，纯文本）
+	openCDCSRFFailed = "CSRF token verification failed"
+)
+
+// attendOpenCD：首页顶栏已经是「查看簽到記錄」、没有签到按钮时算今天已签，不打开签到页、不调 AI；
+// 否则打开签到页拿表单（csrf_token、imagehash 与验证码图片），认图后连同表单里的隐藏字段一起提交，
+// 认错了重新打开签到页换一张，最多 captchaTries 次。签到页不管今天签没签都显示表单，签没签要看首页；
+// csrf_token 是 Cookie 里 c_csrf 的值（请求没带 c_csrf 时站点回 Set-Cookie 发一个，同一个客户端之后的请求会带上）。
 func (d *NexusPHPDriver) attendOpenCD(ctx context.Context, s AttendanceSolver) (AttendResult, error) {
+	home, err := d.Execute(ctx, NexusPHPRequest{Path: "/index.php"})
+	if err != nil {
+		return AttendResult{}, fmt.Errorf("打开首页: %w", err)
+	}
+	if body := string(home.RawBody); strings.Contains(body, openCDSignLogLink) && !strings.Contains(body, openCDSignInButton) {
+		return AttendResult{Status: AttendAlready, Message: "今天已经签到过"}, nil
+	}
 	reason := "验证码一直没认对"
 	for range captchaTries {
 		page, err := d.Execute(ctx, NexusPHPRequest{Path: "/plugin_sign-in.php"})
@@ -316,11 +336,22 @@ func (d *NexusPHPDriver) attendOpenCD(ctx context.Context, s AttendanceSolver) (
 			reason = "AI 认出的验证码不是 6 位"
 			continue
 		}
+		// 照网页上的做法（jQuery 的 form.serialize()）提交表单里的字段：隐藏字段（csrf_token、imagehash）加上认出的验证码
+		values := url.Values{}
+		form.Find("input[type='hidden'][name]").Each(func(_ int, in *goquery.Selection) {
+			values.Add(in.AttrOr("name", ""), in.AttrOr("value", ""))
+		})
+		values.Set("imagestring", code)
 		res, err := d.Execute(ctx, NexusPHPRequest{
 			Path: "/plugin_sign-in.php?cmd=signin", Method: http.MethodPost, Referer: "/plugin_sign-in.php",
-			Params: url.Values{"imagehash": {hash}, "imagestring": {code}},
+			Params: values,
 		})
 		if err != nil {
+			if errors.Is(err, ErrInvalidCredentials) && strings.Contains(string(res.RawBody), openCDCSRFFailed) {
+				// 站点回 403，驱动按「Cookie 失效」报；其实是 csrf_token 与 Cookie 里的 c_csrf 对不上，换一张验证码也一样
+				return AttendResult{}, fmt.Errorf("%w: 站点的 CSRF 校验没通过（%s），请从浏览器重新同步 OpenCD 的 Cookie，要包含 c_csrf",
+					ErrInvalidCredentials, openCDCSRFFailed)
+			}
 			return AttendResult{}, fmt.Errorf("提交签到: %w", err)
 		}
 		var out struct {
@@ -341,6 +372,10 @@ func (d *NexusPHPDriver) attendOpenCD(ctx context.Context, s AttendanceSolver) (
 				msg += "，连续 " + v + " 天"
 			}
 			return AttendResult{Status: AttendSigned, Message: msg}, nil
+		}
+		if openCDSignedPattern.MatchString(out.Msg) {
+			// 首页还没换成「查看簽到記錄」（例如刚在别处签过）：站点说今天签过了，不用再换验证码
+			return AttendResult{Status: AttendAlready, Message: "今天已经签到过"}, nil
 		}
 		reason = "验证码没认对"
 		if out.Msg != "" {
