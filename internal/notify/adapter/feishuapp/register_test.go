@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -309,7 +310,8 @@ func TestRegisterApp_URLErrorsDropQuery(t *testing.T) {
 	require.ErrorAs(t, err, &ue)
 	assert.Equal(t, "parse", ue.Op)
 
-	// 连不上：*url.Error 的地址是接口地址，没有查询参数，内容照旧
+	// 连不上：*url.Error 的地址是接口地址，没有查询参数，内容照旧；原来的网络错误还拿得到
+	// （「拒绝连接」的原文各平台不同，Windows 是 connectex: No connection could be made…，不比对原文）
 	gone := httptest.NewServer(http.NotFoundHandler())
 	addr := gone.URL
 	gone.Close()
@@ -317,7 +319,9 @@ func TestRegisterApp_URLErrorsDropQuery(t *testing.T) {
 	_, err = RegisterApp(context.Background(), func(string, int) {})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `飞书一键创建失败: Post "`+addr+`/oauth/v1/app/registration": `)
-	assert.Contains(t, err.Error(), "connection refused")
+	var oe *net.OpError
+	require.ErrorAs(t, err, &oe)
+	assert.Equal(t, "dial", oe.Op)
 }
 
 // 正式构建里不改地址（SDK 默认 accounts.feishu.cn，Lark 租户由它自己切到 accounts.larksuite.com）；
