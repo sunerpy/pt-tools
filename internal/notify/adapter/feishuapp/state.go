@@ -278,9 +278,37 @@ func (r *appRegistry) expire(k leftKey, l *leftover) {
 	}
 	delete(r.left, k)
 	r.mu.Unlock()
-	if n := countQueued(l.items.items); n > 0 {
+	unacked := 0
+	for _, list := range l.items.items {
+		for _, it := range list {
+			if it.unacked {
+				// 关闭中排进来、回了 500 的：平台还会重推，删掉去重记录，重推到时能照常处理
+				seenMessages.forget(it.key)
+				unacked++
+			}
+		}
+	}
+	if n := countQueued(l.items.items) - unacked; n > 0 {
 		l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
 			k.confID, n, durationText(r.ttl()))
+	}
+	// 还没收尾的那几个人的完成信号不随消息一起过期：重建的实例晚来也要等那一条收尾
+	open := map[string]<-chan struct{}{}
+	for user, ch := range l.items.busy {
+		select {
+		case <-ch:
+		default:
+			open[user] = ch
+		}
+	}
+	if len(open) > 0 {
+		r.mu.Lock()
+		if _, taken := r.left[k]; !taken {
+			kept := &leftover{items: handoff{busy: open}, log: l.log}
+			kept.timer = time.AfterFunc(r.leftTTL, func() { r.expire(k, kept) })
+			r.left[k] = kept
+		}
+		r.mu.Unlock()
 	}
 }
 

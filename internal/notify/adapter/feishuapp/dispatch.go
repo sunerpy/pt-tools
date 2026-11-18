@@ -19,8 +19,6 @@ const (
 	defaultQueueIdle = time.Minute
 	// defaultGather 是每一条进队以后，工作协程至少等多久才取它（测试里调小）。
 	defaultGather = 200 * time.Millisecond
-	// defaultPreviousWait 是接手以后，一个人的下一条最多等上一个实例里他那条收尾多久（处理函数不理会取消、一直不返回时）
-	defaultPreviousWait = 5 * time.Minute
 )
 
 /*
@@ -53,6 +51,9 @@ type queued struct {
 	arrived time.Time
 	// messageID 只用于日志
 	messageID string
+	// key 是去重键；unacked 表示这条是关闭中排进来、回了 500 的（没交出去就过期时要把去重记录删掉）
+	key     string
+	unacked bool
 }
 
 // before 报告 a 是不是排在 b 前面。
@@ -83,7 +84,8 @@ type userQueue struct {
 	running bool
 	// busy 在取出一条交给 MessageChain 时建、处理完关闭：交接时带给下一个实例，让这个人的下一条等它
 	busy chan struct{}
-	// waitFor 是上一个实例里这个人正在处理的那条的完成信号：工作协程取下一条以前先等它（最多 previousWait）
+	// waitFor 是上一个实例里这个人正在处理的那条的完成信号：工作协程取下一条以前先等它收尾（不设上限，
+	// 与同一个实例里「一条处理完才处理下一条」一样）
 	waitFor <-chan struct{}
 }
 
@@ -276,21 +278,37 @@ func (c *Channel) drain(userID string, uq *userQueue) {
 	}
 }
 
-// waitPrevious 等上一个实例里这个人正在处理的那条收尾，最多 previousWait；ctx 取消时返回 false。
+// waitPrevious 等上一个实例里这个人正在处理的那条收尾；ctx 取消时返回 false（信号随 seal 交给再下一个实例）。
+// 不设上限：同一个实例里一条没处理完，这个人的下一条也一直等着，交接以后保持同样的保证。
 func (c *Channel) waitPrevious(userID string, prev <-chan struct{}) bool {
-	limit := c.timing(c.previousWait, defaultPreviousWait)
-	timer := time.NewTimer(limit)
-	defer timer.Stop()
 	select {
 	case <-prev:
 		return true
 	case <-c.ctx.Done():
 		return false
-	case <-timer.C:
-		c.logger().Warnf("飞书应用机器人(%d): 上一个实例里 open_id=%s 的那条消息 %s内没收尾，接着处理他后面的消息",
-			c.confID, userID, durationText(limit))
-		return true
 	}
+}
+
+// stash 把关闭中收到的一条排进队列留给交接（不起工作协程，仍受每人 8 条的上限），标成 unacked。
+// seal 以后不收。
+func (c *Channel) stash(userID string, it *queued) bool {
+	q := c.queues
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.sealed {
+		return false
+	}
+	uq := q.queues[userID]
+	if uq == nil {
+		uq = &userQueue{wake: make(chan struct{}, 1)}
+		q.queues[userID] = uq
+	}
+	if len(uq.items) >= userQueueSize {
+		return false
+	}
+	it.unacked = true
+	uq.insert(it)
+	return true
 }
 
 // seal 交出所有排着队、还没开始处理的消息（按人分好，各自按发出时间排好），以及还有一条在处理（或者自己也在等

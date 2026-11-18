@@ -787,34 +787,100 @@ func TestReload_HandoffWaitIsBoundedButUserStaysSerial(t *testing.T) {
 	assert.NotZero(t, h.ended.Load(), "旧实例那条先收尾")
 }
 
-// 上一个实例里那条一直不收尾时，这个人后面的消息最多等 previousWait，之后接着处理并记一条 Warn。
-func TestReload_PreviousWaitIsCapped(t *testing.T) {
+// 上一个实例里那条一直不收尾时，这个人后面的消息一直等它（不设上限，与同一个实例里的保证一样）；
+// 完成信号经过再一次热重载也照样传下去，信号也不随留下的消息一起过期。
+func TestReload_BusySignalSurvivesReloadsAndTTL(t *testing.T) {
 	c1, _, runners1, _ := startChannel(t, testConfig)
 	c1.handoffWait = 20 * time.Millisecond
 	h := newStubbornHandler()
-	defer close(h.release)
 	c1.OnInbound(h.handle)
 	r1 := runners1.last()
-	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_c1", "ou_admin", "slow")))
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_d1", "ou_admin", "slow")))
 	select {
 	case <-h.started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("slow 没开始处理")
 	}
-	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_c2", "ou_admin", "/status")))
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_d2", "ou_admin", "/status")))
+	apps.mu.Lock()
+	apps.leftTTL = 50 * time.Millisecond
+	apps.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	require.Error(t, c1.Close(ctx))
-	var logs *observer.ObservedLogs
-	_, _, rec2 := reloadChannel(t, testConfig, func(c *Channel) {
-		c.previousWait = 100 * time.Millisecond
-		logs = observedLogger(c)
-	})
-	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond, "等够上限以后接着处理")
-	assert.Equal(t, "/status", rec2.got()[0].Text)
-	assert.Zero(t, h.ended.Load(), "旧实例那条还在跑")
-	assert.Contains(t, logJoined(logs.All()), "没收尾，接着处理他后面的消息")
+	// 留下的消息过期以后才来接手：消息丢掉，完成信号还在
+	time.Sleep(150 * time.Millisecond)
+	c2, _, rec2 := reloadChannel(t, testConfig, nil)
+	require.NoError(t, c2.Close(context.Background()), "第二次热重载")
+	_, runners3, rec3 := reloadChannel(t, testConfig, nil)
+	r3 := runners3.waitRunner(t, 1)
+	got := func() []notify.InboundMessage { return append(rec2.got(), rec3.got()...) }
+	require.NoError(t, r3.Emit(context.Background(), msgEvent("om_d3", "ou_admin", "/sites")))
+	require.Never(t, func() bool { return len(got()) > 0 }, 300*time.Millisecond, 10*time.Millisecond,
+		"旧实例那条没收尾以前，这个人的消息一直等着")
+
+	close(h.release)
+	require.Eventually(t, func() bool { return len(got()) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "/sites", got()[0].Text, "过期的那条丢掉，新来的处理")
+}
+
+// 关闭中 SDK 还调进来的消息：照常排进交接队列，回 500；新实例按发出时间把它和关闭前排着的一起处理，
+// 平台重推的副本按去重表丢掉。
+func TestReload_ClosingCallbackJoinsHandoff(t *testing.T) {
+	c1, _, runners1, _ := startChannel(t, testConfig)
+	h := newStubbornHandler()
+	c1.OnInbound(h.handle)
+	r1 := runners1.last()
+	base := time.Now().Add(-time.Minute)
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_k0", "ou_admin", "slow", createdAt(base))))
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow 没开始处理")
+	}
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_k2", "ou_admin", "确认", createdAt(base.Add(2*time.Second)))))
+
+	closed := make(chan error, 1)
+	go func() { closed <- c1.Close(context.Background()) }()
+	require.Eventually(t, c1.closed.Load, 5*time.Second, time.Millisecond)
+	late := msgEvent("om_k1", "ou_admin", "/delete 1", createdAt(base.Add(time.Second)))
+	require.ErrorIs(t, r1.Emit(context.Background(), late), errClosing, "关闭中仍回 500，平台保留重推")
+	close(h.release) // 旧实例那条收尾，交接
+	require.NoError(t, <-closed)
+
+	_, runners2, rec2 := reloadChannel(t, testConfig, nil)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []string{"/delete 1", "确认"}, rec2.texts(), "按发出时间处理")
+	r2 := runners2.waitRunner(t, 1)
+	require.NoError(t, r2.Emit(context.Background(), late), "平台重推的副本回 200")
+	time.Sleep(50 * time.Millisecond)
+	assert.Len(t, rec2.got(), 2, "重推的副本按重复丢掉")
+}
+
+// 关闭中排进来、回了 500 的消息没人接手、过期时，去重记录删掉：平台之后的重推能照常处理。
+func TestReload_UnackedForgottenOnExpire(t *testing.T) {
+	c1, _, runners1, _ := startChannel(t, testConfig)
+	apps.mu.Lock()
+	apps.leftTTL = 50 * time.Millisecond
+	apps.mu.Unlock()
+	h := newStubbornHandler()
+	c1.OnInbound(h.handle)
+	r1 := runners1.last()
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_u0", "ou_admin", "slow")))
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow 没开始处理")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- c1.Close(context.Background()) }()
+	require.Eventually(t, c1.closed.Load, 5*time.Second, time.Millisecond)
+	require.ErrorIs(t, r1.Emit(context.Background(), msgEvent("om_u1", "ou_admin", "/status")), errClosing)
+	close(h.release)
+	require.NoError(t, <-closed)
+	require.Eventually(t, func() bool { return !seenMessages.check("cli_test\x00om_u1") }, 5*time.Second, 10*time.Millisecond,
+		"过期以后去重记录删掉")
 }
 
 // 取出一条以后、交给 MessageChain 以前 ctx 被取消（Close 正好落在这里）：这条放回队首交接，不在旧实例里处理。

@@ -41,10 +41,11 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 	if openID == "" || messageID == "" {
 		return nil
 	}
-	if c.closed.Load() {
-		// 热重载时旧实例还没断开：回 500 让平台重推，新实例会接手
-		return errClosing
-	}
+	// closing：Close 已经开始，SDK 在取消以前起的消息任务还会调到这里（它在 Start 返回以前等这些任务结束，
+	// supervise 在 Start 返回以后才 seal）。这时照常解析、去重、按发出时间排进队列留给交接（不起工作协程），
+	// 但仍回 500：进程退出或通道停用、没人接手时，平台会重推，不会因为回了 200 而丢；有人接手时，新实例处理
+	// 交过去的那份，平台重推的副本按去重表丢掉。没交出去就过期的，过期时把去重记录删掉（state.go 的 expire）。
+	closing := c.closed.Load()
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
@@ -67,12 +68,20 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 		return errBotUnknown
 	}
 	if seenMessages.check(key) {
+		if closing {
+			return errClosing
+		}
 		return nil
 	}
 	if group && !mentionsBot(msg.Mentions, botID) {
 		// 应用开了「获取群组中所有消息」时群里每句话都会推过来，只认 @ 了本机器人的
 		log.Debugf("飞书应用机器人(%d): 群消息没有 @ 本机器人，忽略 message_id=%s", c.confID, messageID)
 		return nil
+	}
+	if closing && (!cfg.permitted(openID) || expired(c.now(), msg.CreateTime)) {
+		// 只回一句提示的消息：关闭中发不出提示，留给重推以后的新实例
+		seenMessages.forget(key)
+		return errClosing
 	}
 	if !cfg.permitted(openID) {
 		log.Infof("飞书应用机器人(%d): 拒绝名单外的消息 open_id=%s chat_type=%s message_id=%s", c.confID, openID, chatType, messageID)
@@ -106,7 +115,17 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 	if group {
 		in.MessageType = "group"
 	}
-	if !c.enqueue(openID, newQueued(in, sent, messageID), false) {
+	it := newQueued(in, sent, messageID)
+	it.key = key
+	if closing {
+		if !c.stash(openID, it) {
+			seenMessages.forget(key)
+		} else {
+			log.Infof("飞书应用机器人(%d): 关闭中收到消息，排进交接队列、回 500 open_id=%s message_id=%s", c.confID, openID, messageID)
+		}
+		return errClosing
+	}
+	if !c.enqueue(openID, it, false) {
 		seenMessages.forget(key)
 		log.Warnf("飞书应用机器人(%d): 处理不过来，请平台重推 open_id=%s message_id=%s", c.confID, openID, messageID)
 		if c.closed.Load() {
@@ -122,6 +141,12 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 		sleepCtx(ctx, d)
 	}
 	return nil
+}
+
+// expired 报告这条消息是不是发出超过 expireAfter 才到。
+func expired(now time.Time, ms *string) bool {
+	created, ok := createTime(ms)
+	return ok && now.Sub(created) > expireAfter
 }
 
 func createTime(ms *string) (time.Time, bool) {
