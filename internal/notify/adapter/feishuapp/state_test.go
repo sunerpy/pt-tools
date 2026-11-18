@@ -230,3 +230,33 @@ func TestAppRegistry_OtherConfClaimForgetsUnacked(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []*queued{acked}, back.items["ou_a"], "回了 500 的不再交给 #7，免得和重推的那份各处理一次")
 }
+
+// #7 → #8 → #7：#8 接手时把 #7 还开着的信号 A 移走（#7 不留副本）；A 收尾以后 #8 留下还开着的信号 B，
+// #7 再接手时拿到的是 B，不是早就关闭的 A。
+func TestAppRegistry_BusySignalMovesAcrossConfs(t *testing.T) {
+	resetForTest()
+	defer resetForTest()
+	r := newAppRegistry()
+	defer r.reset()
+	c7 := &Channel{confID: 7}
+	_, ok, _, _ := r.claim("cli_m3", c7)
+	require.True(t, ok)
+	a := make(chan struct{})
+	r.release("cli_m3", c7, handoff{busy: map[string]<-chan struct{}{"ou_a": a}})
+
+	c8 := &Channel{confID: 8}
+	_, ok, _, got := r.claim("cli_m3", c8)
+	require.True(t, ok)
+	assert.Equal(t, (<-chan struct{})(a), got.busy["ou_a"], "#8 接过 A")
+	r.mu.Lock()
+	_, stale := r.left[leftKey{appID: "cli_m3", confID: 7}]
+	r.mu.Unlock()
+	assert.False(t, stale, "#7 不留 A 的副本")
+
+	close(a)
+	b := make(chan struct{})
+	r.release("cli_m3", c8, handoff{busy: map[string]<-chan struct{}{"ou_a": b}})
+	_, ok, _, back := r.claim("cli_m3", &Channel{confID: 7})
+	require.True(t, ok)
+	assert.Equal(t, (<-chan struct{})(b), back.busy["ou_a"], "#7 再接手时等的是还开着的 B")
+}

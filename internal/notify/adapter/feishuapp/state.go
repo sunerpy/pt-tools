@@ -244,6 +244,12 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 		delete(r.left, k)
 		items = l.items
 	}
+	// 完成信号只留还没关闭的：已经收尾的那一条不用再等，也不能挡住下面别的编号交过来的、还开着的信号
+	for user, ch := range items.busy {
+		if signalDone(ch) {
+			delete(items.busy, user)
+		}
+	}
 	// 同一个应用换了通道编号接手（例如删掉 #7、马上用同一个应用建了 #8）：别的编号留下的、关闭中回了 500 的消息
 	// 交不到这个实例，平台会把它们重推到这里。删掉它们的去重记录并从留下的消息里拿掉，重推到时照常处理；
 	// 留着的话重推会被当成重复回 200，消息就丢了
@@ -251,12 +257,12 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 		if lk.appID != appID || lk.confID == c.confID {
 			continue
 		}
-		// 那边还有一条在处理的人：重推到这里的消息也要等那一条收尾，完成信号一并交给这个实例
+		// 那边还有一条在处理的人：重推到这里的消息也要等那一条收尾。完成信号从那边移到这个实例（不留副本：
+		// 现在由这个实例维护这道屏障，关闭时随 seal 再交下去）
 		for user, ch := range l.items.busy {
-			select {
-			case <-ch:
+			delete(l.items.busy, user)
+			if signalDone(ch) {
 				continue
-			default:
 			}
 			if items.busy == nil {
 				items.busy = map[string]<-chan struct{}{}
@@ -280,8 +286,22 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 				l.items.items[user] = kept
 			}
 		}
+		if l.items.empty() {
+			l.timer.Stop()
+			delete(r.left, lk)
+		}
 	}
 	return 0, true, nil, items
+}
+
+// signalDone 报告完成信号是不是已经关闭（那一条收尾了）。
+func signalDone(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 // release 只释放 c 自己的登记，同时留下它排着队、还没开始处理的消息（交给同一个通道编号的下一个实例），
