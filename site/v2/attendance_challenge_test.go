@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -209,43 +210,95 @@ func TestAttendHDSkyCaptcha(t *testing.T) {
 	})
 }
 
-// fakeOpenCD 模拟 OpenCD 的签到插件：plugin_sign-in.php 的表单里给 imagehash 与验证码图片，
-// cmd=signin 核对答案（CODE0<序号>）。
+// fakeOpenCD 模拟 OpenCD 的签到插件，照 2026-11-17 在真站点上看到的样子：
+//   - 请求没带 c_csrf 时站点用 Set-Cookie 发一个（HttpOnly）；签到表单里的 csrf_token 就是这个值；
+//   - plugin_sign-in.php 不管今天签没签都显示表单（csrf_token、imagehash、验证码图片），cmd=signin 先核对
+//     csrf_token 与 Cookie 里的 c_csrf，不一样时回 HTTP 403 和纯文本「CSRF token verification failed」，再核对验证码（CODE0<序号>）；
+//   - 首页顶栏今天签过以后是「查看簽到記錄」的链接，没签时是调用 signin(this) 的签到按钮。
 type fakeOpenCD struct {
-	t       *testing.T
-	mu      sync.Mutex
-	issued  int
-	already bool
-	posts   []string
+	t      *testing.T
+	mu     sync.Mutex
+	issued int
+	// signed 是今天签过了
+	signed bool
+	// homeStale 为真时首页一直显示签到按钮（例如别处刚签完）
+	homeStale bool
+	// homeBoth 为真时首页顶栏既有签到按钮又有「查看簽到記錄」
+	homeBoth bool
+	// noForm 为真时签到页没有表单、只写着今天签过了
+	noForm bool
+	// badToken 为真时表单里的 csrf_token 和 Cookie 对不上（站点改了校验方式）
+	badToken bool
+	csrfSet  int
+	posts    []url.Values
 }
+
+const fakeOpenCDToken = "f00dfacecafe"
 
 func (f *fakeOpenCD) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	csrf := ""
+	if c, err := r.Cookie("c_csrf"); err == nil {
+		csrf = c.Value
+	} else {
+		csrf = fakeOpenCDToken
+		f.csrfSet++
+		http.SetCookie(w, &http.Cookie{Name: "c_csrf", Value: csrf, Path: "/", HttpOnly: true})
+	}
 	switch {
+	case r.URL.Path == "/index.php":
+		signIn := `[<a href="javascript:void(0);" onclick="signin(this);"><b>簽到</b></a>]`
+		signLog := `[<a href='/plugin_sign-in.php?cmd=show-log' style='color:blue;' target='_blank'>查看簽到記錄</a>]`
+		bar := signIn
+		switch {
+		case f.homeBoth:
+			bar = signIn + " " + signLog
+		case f.signed && !f.homeStale:
+			bar = signLog
+		}
+		_, _ = fmt.Fprintf(w, `<html><body><div class="infos-bar">%s [<a href="blackjack.php">21點</a>]</div></body></html>`, bar)
 	case r.URL.Path == "/plugin_sign-in.php" && r.Method == http.MethodGet:
-		if f.already {
+		if f.noForm {
 			_, _ = w.Write([]byte(`<html><body><p>您今天已经签到过了，明天再来吧</p></body></html>`))
 			return
 		}
 		f.issued++
-		_, _ = fmt.Fprintf(w, `<html><body><form id="frmSignin" method="post">
-<img src="image.php?action=regimage&amp;imagehash=h%d" alt="CAPTCHA" />
-<input type="hidden" name="imagehash" value="h%d" />
-<input type="text" name="imagestring" />
-<input type="submit" value="签到" /></form></body></html>`, f.issued, f.issued)
+		token := csrf
+		if f.badToken {
+			token = "not-" + csrf
+		}
+		_, _ = fmt.Fprintf(w, `<html><body><form enctype="multipart/form-data" action="plugin_sign-in.php?cmd=signin" method="post" id="frmSignin"><input type="hidden" name="csrf_token" value="%s">
+<table><tbody><tr><td><input type="hidden" name="imagehash" value="h%d">
+<img src="image.php?action=regimage&amp;imagehash=h%d" border="0">
+<div><input type="text" autocomplete="off" id="imagestring" name="imagestring" value="">
+<button id="ok" onclick="javascript:do_signin(this);return false;">签到</button>
+<button onclick="javascript:jQuery(parent.window.document.body).find('#i_signin').remove();return false;">算了</button></div>
+</td></tr></tbody></table></form></body></html>`, token, f.issued, f.issued)
 	case r.URL.Path == "/image.php":
 		assert.Equal(f.t, fmt.Sprintf("h%d", f.issued), r.URL.Query().Get("imagehash"))
 		_, _ = w.Write(testCaptchaPNG(f.t))
 	case r.URL.Path == "/plugin_sign-in.php" && r.Method == http.MethodPost:
 		assert.Equal(f.t, "signin", r.URL.Query().Get("cmd"))
 		require.NoError(f.t, r.ParseForm())
-		f.posts = append(f.posts, r.PostForm.Encode())
-		if r.PostForm.Get("imagestring") == "CODE0"+strings.TrimPrefix(r.PostForm.Get("imagehash"), "h") {
-			_, _ = w.Write([]byte(`{"state":"success","signindays":"3","integral":"10"}`))
+		f.posts = append(f.posts, r.PostForm)
+		if r.PostForm.Get("csrf_token") == "" || r.PostForm.Get("csrf_token") != csrf {
+			w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte("CSRF token verification failed"))
 			return
 		}
-		_, _ = w.Write([]byte(`{"state":"false","msg":"验证码错误"}`))
+		if r.PostForm.Get("imagestring") != "CODE0"+strings.TrimPrefix(r.PostForm.Get("imagehash"), "h") {
+			_, _ = w.Write([]byte(`{"state":"false","msg":"验证码错误"}`))
+			return
+		}
+		if f.signed {
+			// 真站点今天签过以后验证码认对了回什么没见过（认错时照样是「验证码错误」），这里按这类插件常见的说法
+			_, _ = w.Write([]byte(`{"state":"false","msg":"您今天已经签到过了"}`))
+			return
+		}
+		f.signed = true
+		_, _ = w.Write([]byte(`{"state":"success","signindays":"3","integral":"10"}`))
 	default:
 		http.NotFound(w, r)
 	}
@@ -258,16 +311,37 @@ func TestAttendOpenCDCaptcha(t *testing.T) {
 		t.Cleanup(srv.Close)
 		return f, srv
 	}
+	// withCookie 是用这组 Cookie 建的 OpenCD 驱动（CookieCloud、扩展同步过来的 Cookie 带着 c_csrf）
+	withCookie := func(baseURL, cookie string) *NexusPHPDriver {
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: baseURL, Cookie: cookie})
+		d.SetSiteDefinition(&SiteDefinition{ID: "qa", Schema: SchemaNexusPHP, Attendance: &AttendanceConfig{Challenge: ChallengeOpenCDCaptcha}})
+		return d
+	}
 
-	t.Run("认对验证码就签到成功，写明奖励与连续天数", func(t *testing.T) {
-		_, srv := newSite(t)
-		res, err := challengeDriver(srv.URL, ChallengeOpenCDCaptcha).Attend(
+	t.Run("连同表单里的 csrf_token 提交，签到成功，写明奖励与连续天数", func(t *testing.T) {
+		site, srv := newSite(t)
+		res, err := withCookie(srv.URL, "c_secure_uid=1; c_secure_pass=2; c_csrf="+fakeOpenCDToken).Attend(
 			WithAttendanceSolver(context.Background(), &fakeSolver{captchas: []string{"CODE01"}}),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, AttendSigned, res.Status)
 		assert.Contains(t, res.Message, "10")
 		assert.Contains(t, res.Message, "3")
+		require.Len(t, site.posts, 1)
+		assert.Equal(t, fakeOpenCDToken, site.posts[0].Get("csrf_token"))
+		assert.Equal(t, "h1", site.posts[0].Get("imagehash"))
+		assert.Equal(t, "CODE01", site.posts[0].Get("imagestring"))
+		assert.Zero(t, site.csrfSet, "Cookie 里有 c_csrf，站点不用再发")
+	})
+
+	t.Run("保存的 Cookie 里没有 c_csrf：用站点这次发的那个", func(t *testing.T) {
+		site, srv := newSite(t)
+		res, err := challengeDriver(srv.URL, ChallengeOpenCDCaptcha).Attend(
+			WithAttendanceSolver(context.Background(), &fakeSolver{captchas: []string{"CODE01"}}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, AttendSigned, res.Status)
+		assert.Equal(t, 1, site.csrfSet, "只在第一个请求发一次，之后的请求带着它")
 	})
 
 	t.Run("认错了重新打开签到页拿新验证码", func(t *testing.T) {
@@ -287,11 +361,58 @@ func TestAttendOpenCDCaptcha(t *testing.T) {
 		)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrAttendanceChallengeFailed)
+		assert.Contains(t, err.Error(), "验证码错误")
+	})
+
+	t.Run("首页顶栏已经是「查看簽到記錄」：今天签过，不打开签到页、不调 AI", func(t *testing.T) {
+		site, srv := newSite(t)
+		site.signed = true
+		solver := &fakeSolver{}
+		res, err := challengeDriver(srv.URL, ChallengeOpenCDCaptcha).Attend(WithAttendanceSolver(context.Background(), solver))
+		require.NoError(t, err)
+		assert.Equal(t, AttendAlready, res.Status)
+		assert.Empty(t, solver.images)
+		assert.Zero(t, site.issued)
+	})
+
+	t.Run("首页顶栏还有签到按钮时照样签到", func(t *testing.T) {
+		site, srv := newSite(t)
+		site.homeBoth = true
+		res, err := challengeDriver(srv.URL, ChallengeOpenCDCaptcha).Attend(
+			WithAttendanceSolver(context.Background(), &fakeSolver{captchas: []string{"CODE01"}}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, AttendSigned, res.Status)
+	})
+
+	t.Run("提交后站点说今天已经签过：记为已签到，不再换验证码", func(t *testing.T) {
+		site, srv := newSite(t)
+		site.signed, site.homeStale = true, true
+		solver := &fakeSolver{captchas: []string{"CODE01", "CODE02"}}
+		res, err := challengeDriver(srv.URL, ChallengeOpenCDCaptcha).Attend(WithAttendanceSolver(context.Background(), solver))
+		require.NoError(t, err)
+		assert.Equal(t, AttendAlready, res.Status)
+		assert.Len(t, solver.images, 1)
+	})
+
+	t.Run("CSRF 校验没过：写明是 CSRF，不说 Cookie 失效，也不再换验证码", func(t *testing.T) {
+		site, srv := newSite(t)
+		site.badToken = true
+		solver := &fakeSolver{captchas: []string{"CODE01", "CODE02", "CODE03"}}
+		_, err := challengeDriver(srv.URL, ChallengeOpenCDCaptcha).Attend(WithAttendanceSolver(context.Background(), solver))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+		assert.Contains(t, err.Error(), "CSRF")
+		assert.Contains(t, err.Error(), "c_csrf")
+		assert.True(t, strings.HasPrefix(err.Error(), ErrInvalidCredentials.Error()+": "),
+			"原因紧跟在 ErrInvalidCredentials 后面，签到记录才显示它而不是「Cookie 已失效」：%v", err)
+		assert.Len(t, solver.images, 1)
+		assert.Len(t, site.posts, 1)
 	})
 
 	t.Run("签到页没有表单、写着已签到", func(t *testing.T) {
 		site, srv := newSite(t)
-		site.already = true
+		site.noForm = true
 		solver := &fakeSolver{}
 		res, err := challengeDriver(srv.URL, ChallengeOpenCDCaptcha).Attend(WithAttendanceSolver(context.Background(), solver))
 		require.NoError(t, err)
