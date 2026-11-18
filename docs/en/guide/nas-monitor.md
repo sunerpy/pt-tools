@@ -179,6 +179,8 @@ When the account uses two-factor authentication, the first Test connection asks 
 
 ## The source list
 
+![The NAS monitoring page: the source list holds the local host and a TrueNAS, both connected; below are the notes and the choice of what the home page shows](../../guide/images/home/nas-monitor-light.webp)
+
 One line per source (a card on a phone):
 
 | Column  | What it shows                                                                                                                                                                                                                                                      |

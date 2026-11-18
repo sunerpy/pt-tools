@@ -34,7 +34,17 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 </picture>
 
 <details open>
-<summary>追剧、刷流、AI 助手与手机 App 的截图（演示数据）</summary>
+<summary>首页、系统体检、追剧、刷流、AI 助手与手机 App 的截图（演示数据）</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/guide/images/home/home-page-dark.webp" />
+  <img src="./docs/guide/images/home/home-page-light.webp" alt="首页：TrueNAS 的 NAS 概览（CPU、内存、网络、存储，存储池、硬盘温度与告警）和今天播出的集" width="1440" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/guide/images/home/system-check-dark.webp" />
+  <img src="./docs/guide/images/home/system-check-light.webp" alt="系统体检：4 项要处理，列出连不上的下载器、过期的 Cookie、媒体库路径与备份失败，每项带「去处理」" width="1440" />
+</picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/media-follow-dark.webp" />

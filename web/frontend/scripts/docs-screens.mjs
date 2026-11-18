@@ -16,6 +16,10 @@
  *   brush-{light,dark}.webp          /brush                 1440 宽，去掉导航列与状态条，到页面内容的底
  *                                                           （窄于 1181 时 KPI 带退成 3 列、任务表挤在一起）
  *   assistant-{light,dark}.webp      /assistant             1100 × 640，只截对话那一栏
+ * 首页、系统体检与 NAS 监控的整屏截图（1440 × 900）放在 docs/guide/images/home（PT_HOME_DIR 可以覆盖）：
+ *   home-page-{light,dark}.webp      /home
+ *   system-check-{light,dark}.webp   /system/check
+ *   nas-monitor-{light,dark}.webp    /system/nas
  * 实际像素宽高每次运行都会打印出来，改了截取区域要同步改首页 frontmatter 里这几张图的 width、height。
  *
  * 另有 ChatOps 指南的配图（docs/guide/images/chatops/*.webp，明亮主题 1440 × 900）：通道列表、
@@ -63,6 +67,8 @@ if (!existsSync(CHROME)) {
 }
 const outDir = resolve(outArg ?? join(here, "../../../docs/public/screens"));
 mkdirSync(outDir, { recursive: true });
+const HOME_DIR = resolve(process.env.PT_HOME_DIR ?? join(here, "../../../docs/guide/images/home"));
+mkdirSync(HOME_DIR, { recursive: true });
 const guideDir = resolve(
   process.env.PT_GUIDE_DIR ?? join(here, "../../../docs/guide/images/chatops"),
 );
@@ -547,6 +553,10 @@ const SHOTS = [
   ["/media/history", 640, 1100, false, "media-history", { dpr: 2, clip: STAGE_HISTORY }],
   ["/brush", 1440, 900, false, "brush", { dpr: 1.5, clip: CONTENT_OF(".brush-page") }],
   ["/assistant", 1100, 640, false, "assistant", { dpr: 1.5, clip: CHAT }],
+  /* 首页、系统体检与 NAS 监控：放在指南的配图目录里（home-and-health、nas-monitor 与 README 都引用这里） */
+  ["/home", 1440, 900, false, "home-page", { dir: HOME_DIR }],
+  ["/system/check", 1440, 900, false, "system-check", { dir: HOME_DIR }],
+  ["/system/nas", 1440, 900, false, "nas-monitor", { dir: HOME_DIR }],
 ];
 
 /* ChatOps 指南配图：[路由, 文件名, 截图前的动作]。动作返回 false 表示没找到要点的东西，按失败处理 */
@@ -768,7 +778,7 @@ try {
         quality: 85,
         ...(clip && { clip: { ...clip, scale: 1 } }),
       });
-      const file = join(outDir, `${name}-${mode}.webp`);
+      const file = join(opts.dir ?? outDir, `${name}-${mode}.webp`);
       writeFileSync(file, Buffer.from(shot.data, "base64"));
       const [w, h] = clip ? [clip.width, clip.height] : [width, height];
       console.log(`${file}  ${Math.round(w * dpr)} × ${Math.round(h * dpr)}`);

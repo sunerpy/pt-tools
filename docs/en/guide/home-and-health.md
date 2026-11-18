@@ -12,6 +12,8 @@ Each block on the home page is read on its own: when one cannot be read, only th
 
 On the desktop the NAS overview is at the top, with airing today and needs attention below it; further down, continue watching, recently added and later this week are on the left, and downloaders, storage and status on the right; in a narrow window the right-hand blocks move below. On a phone everything is in one column, with the NAS overview first.
 
+![The home page: the NAS overview of a TrueNAS host at the top (cards for CPU, memory, network and storage, then storage pools, disk temperatures and alerts), with the episodes airing today below](../../guide/images/home/home-page-light.webp)
+
 ## NAS overview
 
 The card at the top of the home page shows the current CPU, memory, network and storage of one machine. The data comes from the sources in System → NAS monitoring (系统 → NAS 监控; see [NAS monitoring](nas-monitor.md)): the host pt-tools runs on (the local source) or a NAS you connect. Which one the home page shows is chosen on that page; by default it is the first usable source, or the local one when there is none.
@@ -110,6 +112,8 @@ Times on the right of the status lines show only the time for today (`08:00`) an
 ## System check
 
 Open it from System → System check (系统 → 系统体检), or System check › (系统体检 ›) at the top right of the status block on the home page. The page shows the result of the last check: the line under the title gives the time of the check, how long it took and the result (for example `11-04 09:30 体检 · 用时 3.2 秒 · 1 项失败、1 项提醒`). Below it are three parts, top to bottom:
+
+![The system check: the ring on the left says 4 items need attention, the counts of passed, warning, failed and skipped items are on the right; below, Needs attention lists a downloader that cannot be reached, an expired cookie, a media library path and a failed backup, each with a link to fix it](../../guide/images/home/system-check-light.webp)
 
 - **Overview**: the ring on the left is split into failed, warning, OK and skipped by the number of items, with the number of items to deal with in the middle (`都正常`, all OK, when there is nothing). On the right are the time and item count of the last check, four count tiles and a status chip for each area. Clicking a count tile lists only the items in that state; clicking it again clears it. Clicking an area's chip scrolls to that area below (clearing the filters first if they hide it).
 - **Needs attention (需要处理)**: one card per failed or warning item, failures first. Each card says how the item stands, how to fix it, and Fix it (去处理): a site goes to that site's details, downloaders to Downloader settings (下载器设置), media servers, path mappings and media libraries to Media library (媒体库), TMDB and time to Media recognition (媒体识别), NAS to NAS monitoring (NAS 监控), and backups to Global settings (全局设置). Disk space and the encryption key have nothing to change on a page, so they get no link. After Run check (立即体检), items that got worse than before the check (new problems, or a warning that became a failure) are tagged `新出现` (new). When there is nothing to deal with, this part only says `没有要处理的项` (nothing to deal with).
