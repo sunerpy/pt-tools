@@ -1273,7 +1273,7 @@ func TestServe_RootIconsAreServedOutsideAuth(t *testing.T) {
 	}
 	require.Subset(t, icons, []string{"/favicon.ico", "/favicon-32x32.png", "/favicon-16x16.png", "/apple-touch-icon.png"},
 		"index.html 引用的图标清单变了，请核对这条测试与 Serve() 里的免鉴权白名单")
-	icons = append(icons, "/logo.svg", "/wordmark.svg") // 登录页的品牌图
+	icons = append(icons, "/logo.svg", "/logo-dark.svg", "/wordmark.svg") // 登录页的品牌图（明亮、暗黑两个方标与字标）
 
 	writeWebTestSecretKey(t)
 	srv := setupServer(t)

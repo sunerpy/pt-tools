@@ -47,7 +47,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary coverage-gate coverage-gate-check coverage-parity build-extension generate-icons check-sites plan-inventory-check build test check toolchain-check docs-check embed-placeholder
+.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary coverage-gate coverage-gate-check coverage-parity build-extension brand-icons check-sites plan-inventory-check build test check toolchain-check docs-check embed-placeholder
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -393,10 +393,9 @@ build-extension: check-sites
 	pnpm --dir tools/browser-extension run pack
 	@echo "Extension packaged: tools/browser-extension/pt-tools-helper.zip"
 
-# 从 public/pt-tools.png 一键生成所有尺寸图标（前端 + 扩展）
-generate-icons:
-	@echo "Generating icons from public/pt-tools.png..."
-	node --experimental-strip-types scripts/generate-icons.ts
+# 从品牌矢量（docs/brand.md）渲染网页、扩展、手机 App 与 NAS 应用商店用的全部位图
+brand-icons:
+	uv run --with cairosvg==2.7.1 --with pillow==12.0.0 python3 scripts/brand/render.py
 
 # 检查扩展内置站点与 Go 项目定义一致
 check-sites:

@@ -322,7 +322,7 @@ func (s *Server) buildHandler() http.Handler {
 	// 登录后又被 "/" 兜底换成 index.html，浏览器永远拿不到图片。
 	// 清单与 web/frontend/index.html 的 <link> 保持一致（TestServe_RootIconsAreServedOutsideAuth 守着）。
 	for _, asset := range []string{
-		"logo.svg", "wordmark.svg", "favicon.ico",
+		"logo.svg", "logo-dark.svg", "wordmark.svg", "favicon.ico",
 		"favicon-32x32.png", "favicon-16x16.png", "apple-touch-icon.png",
 	} {
 		mux.HandleFunc("/"+asset, func(w http.ResponseWriter, r *http.Request) {
@@ -707,9 +707,9 @@ const loginHTML = `{{define "login"}}
 <body class="login-page">
 <div class="login-layout">
   <aside class="login-brand">
-    <img class="login-brand__mark" src="/wordmark.svg" width="232" height="60" alt="pt-tools">
-    <img class="login-brand__badge login-brand__badge--plated" src="/logo.svg" width="52" height="52" alt="pt-tools">
-    <svg class="login-brand__badge login-brand__badge--mono" width="52" height="52" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="pt-tools"><path d="M192 320 L384 512 L192 704" fill="none" stroke="currentColor" stroke-width="128" stroke-linecap="round" stroke-linejoin="round"/><rect x="576" y="384" width="320" height="256" fill="currentColor"/></svg>
+    <img class="login-brand__mark" src="/wordmark.svg" width="232" height="55" alt="pt-tools">
+    <img class="login-brand__badge login-brand__badge--light" src="/logo.svg" width="52" height="52" alt="pt-tools">
+    <img class="login-brand__badge login-brand__badge--dark" src="/logo-dark.svg" width="52" height="52" alt="pt-tools">
     <p class="login-brand__tagline">集中管理站点、RSS 与下载任务</p>
     <ul class="login-brand__features">
       <li class="login-feature">

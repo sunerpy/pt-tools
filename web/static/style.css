@@ -454,9 +454,8 @@ body.login-page {
   border-right: 1px solid var(--pt-chrome-border);
 }
 
-/* 字标是 docs/brand.md 给「需要出现产品名的地方（登录页…）」指定的变体，自带
- * #0B1220 底板，规则要求「不要再套一层背景」，所以这里只给宽度不加任何底色；
- * 方标（两个变体）只在移动端露出 */
+/* 字标是 docs/brand.md 给深色表面用的横版（纯白徽标加浅色字，透明底）：这一栏在所有配色下都是深色，
+ * 只给宽度不加任何底色；方标（明亮、暗黑两个变体）只在移动端露出 */
 .login-brand__mark {
   display: block;
   width: 232px;
@@ -765,21 +764,17 @@ body.login-page {
   }
 
   /* 方标这里落在 --pt-canvas 上，按 docs/brand.md「判断标准是表面明暗」选变体：
-     浅色画布用自带底板的彩色版，深色画布用单色版并取该表面的主文字色。
-     底板圆角写在 SVG 里（rx=204.8，即 20%），不要再叠 CSS border-radius。 */
+     浅色画布用墨黑底板的 logo.svg，深色画布用纯白底板的 logo-dark.svg。
+     超椭圆底板写在 SVG 里，不要再叠 CSS border-radius。 */
   .login-brand__badge {
     width: 52px;
     height: 52px;
     margin: 44px auto 0;
   }
 
-  html.light .login-brand__badge--plated,
-  html.dark .login-brand__badge--mono {
+  html.light .login-brand__badge--light,
+  html.dark .login-brand__badge--dark {
     display: block;
-  }
-
-  .login-brand__badge--mono {
-    color: var(--pt-t1);
   }
 
   .login-brand__foot {
