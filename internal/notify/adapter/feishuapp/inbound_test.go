@@ -857,3 +857,56 @@ func TestInbound_OrdersAcrossBusyQueueGap(t *testing.T) {
 	require.Eventually(t, func() bool { return len(rec.got()) == 4 }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, []string{"m0", "m1", "/delete 1", "确认"}, rec.texts())
 }
+
+// 处理槽被别人占满时，一个人的工作协程在等槽；等槽期间排到队首的新消息也要等够 gather 才取，
+// 比它先发、晚到几毫秒的那条仍排在它前面。
+func TestInbound_GatherHoldsAfterWaitingForSlot(t *testing.T) {
+	users := make([]string, maxHandlers)
+	for i := range users {
+		users[i] = "ou_slot" + strconv.Itoa(i)
+	}
+	raw := `{"app_id":"cli_test","app_secret":"sec-ret-value","admin_users":["ou_x","` + strings.Join(users, `","`) + `"]}`
+	c, _, runners, _ := startChannel(t, raw)
+	c.gather = 100 * time.Millisecond
+	release := make(chan struct{})
+	defer close(release)
+	started := make(chan struct{}, maxHandlers)
+	var mu sync.Mutex
+	var order []string
+	c.OnInbound(func(_ context.Context, msg notify.InboundMessage) error {
+		if msg.Text == "busy" {
+			started <- struct{}{}
+			<-release
+			return nil
+		}
+		mu.Lock()
+		order = append(order, msg.Text)
+		mu.Unlock()
+		return nil
+	})
+	got := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), order...)
+	}
+	r := runners.last()
+	for i, u := range users {
+		require.NoError(t, r.Emit(context.Background(), msgEvent("om_busy"+strconv.Itoa(i), u, "busy")))
+	}
+	for range users {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("处理槽没被占满")
+		}
+	}
+	base := time.Now().Add(-time.Minute)
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_xc", "ou_x", "C", createdAt(base.Add(3*time.Second)))))
+	time.Sleep(150 * time.Millisecond) // C 早就等够了 gather，ou_x 的工作协程在等处理槽
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_xb", "ou_x", "B", createdAt(base.Add(2*time.Second)))))
+	release <- struct{}{} // 放开一个处理槽
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_xa", "ou_x", "A", createdAt(base.Add(time.Second)))))
+	require.Eventually(t, func() bool { return len(got()) == 3 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []string{"A", "B", "C"}, got())
+}

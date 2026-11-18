@@ -230,7 +230,9 @@ func (c *Channel) drain(userID string, uq *userQueue) {
 			return
 		}
 		q.mu.Lock()
-		if q.sealed || c.ctx.Err() != nil || len(uq.items) == 0 {
+		// 等处理槽的时候队首可能换成了刚到的一条（比原来的队首先发）：它也要等够 gather 才取，
+		// 否则比它先发、晚到几毫秒的帧只能排在后面。没等够就放回处理槽，下一轮接着等
+		if q.sealed || c.ctx.Err() != nil || len(uq.items) == 0 || time.Until(uq.items[0].arrived.Add(gather)) > 0 {
 			q.mu.Unlock()
 			<-q.slots
 			if c.ctx.Err() != nil {
