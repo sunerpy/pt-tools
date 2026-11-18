@@ -29,6 +29,10 @@ import (
  *
  * 一个进程同时只有一个在等扫码的（Serve 只建一次路由）：再开始一个会取消上一个；查状态与取消都带编号，
  * 只作用于那一个，旧标签页取消不了新开的。链接与二维码只在开始接口的回应里给一次。
+ *
+ * 取消（网页取消、被新开的取代）回的是定下来的结果：先让后台协程停下，再等它知道一键创建的结果。取消的那一刻
+ * SDK 可能正好读完了带凭据的那次轮询（应用已经建在飞书），这时照常保存，回 saving 或 done，不回 canceled：
+ * 网页只在 canceled 时提示二维码作废、去删多出来的应用，不能叫人删掉通道正用着的应用。上一个正在保存时不取代它。
  */
 
 // 一键创建的状态。
@@ -49,6 +53,10 @@ const (
 	msgFeishuRegNotWired = "这个版本没有接入一键创建"
 	msgFeishuRegNoLink   = "飞书没有及时返回二维码"
 	msgFeishuRegManual   = "可以重新生成二维码，或者改用「填写 App ID 与 App Secret」"
+	msgFeishuRegSaving   = "上一个一键创建已经在飞书建好应用，正在保存通道，稍等几秒再试"
+	msgFeishuRegUnsettle = "上一个一键创建还没结束，稍等几秒再试"
+	msgFeishuRegCanceled = "已取消"
+	msgFeishuRegReplaced = "开始新的一键创建时取消了这一个"
 )
 
 // feishuReg 是一次一键创建。链接与二维码只在开始接口的回应里给一次，这里不存；App Secret 也不存。
@@ -62,7 +70,12 @@ type feishuReg struct {
 	confID    uint
 	endedAt   time.Time // 到终态的时间：终态留 keep 这么久
 	cancel    context.CancelFunc
-	logf      func(warn bool, format string, args ...any)
+	// cancelMsg 是取消以后写进 message 的原因（谁先要求取消用谁的）
+	cancelMsg string
+	// ran 在后台协程知道一键创建的结果、写好随后的状态以后关上：拿到了凭据是 saving，没拿到是终态。
+	// 取消与取代等它，回给网页的是定下来的状态
+	ran  chan struct{}
+	logf func(warn bool, format string, args ...any)
 }
 
 // view 是查状态与取消的回应：不带链接与二维码。调用方持有 mu。
@@ -108,6 +121,7 @@ type feishuRegistrar struct {
 	linkWait    time.Duration // 开始接口等链接最多多久
 	jobTimeout  time.Duration // 一次一键创建最多多久（链接 10 分钟内有效）
 	saveTimeout time.Duration // 保存通道、绑定与审计最多多久
+	cancelWait  time.Duration // 取消以后最多等多久后台协程知道结果（SDK 的请求与等待都认 ctx，通常几毫秒）
 	keep        time.Duration // 终态留多久
 	now         func() time.Time
 
@@ -119,7 +133,7 @@ type feishuRegistrar struct {
 func newFeishuRegistrar(deps *ChatOpsDeps) *feishuRegistrar {
 	r := &feishuRegistrar{
 		linkWait: 20 * time.Second, jobTimeout: 15 * time.Minute, saveTimeout: 30 * time.Second,
-		keep: 30 * time.Minute, now: time.Now,
+		cancelWait: 5 * time.Second, keep: 30 * time.Minute, now: time.Now,
 	}
 	if deps.FeishuRegister != nil && deps.NotificationSvc != nil && deps.BindingSvc != nil {
 		r.run = deps.FeishuRegister
@@ -153,6 +167,7 @@ type feishuRegisterBody struct {
 }
 
 // start 是 POST /api/chatops/feishu-app/register：取消上一个，起一个新的；等到链接（最多 linkWait）回链接与二维码。
+// 上一个在保存通道（或者取消的那一刻拿到了凭据）时回 409，不取代它。
 func (r *feishuRegistrar) start(w http.ResponseWriter, req *http.Request) {
 	if !r.ready(w) {
 		return
@@ -173,22 +188,18 @@ func (r *feishuRegistrar) start(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), r.jobTimeout)
-	j := &feishuReg{id: newFeishuRegID(), name: name, state: feishuRegPending, cancel: cancel, logf: regLogger()}
+	j := &feishuReg{
+		id: newFeishuRegID(), name: name, state: feishuRegPending, cancel: cancel,
+		ran: make(chan struct{}), logf: regLogger(),
+	}
 	// 后台协程拿到链接时送进来一次；没拿到链接就结束时关上（见 runJob）
 	qr := make(chan feishuRegQR, 1)
 
-	r.mu.Lock()
-	if old := r.cur; old != nil {
-		switch old.state {
-		case feishuRegPending:
-			r.endLocked(old, feishuRegCanceled, "开始了新的一键创建，这个已经取消")
-			old.cancel()
-		case feishuRegSaving:
-			old.logf(false, "id=%s 被新的一键创建取代，但飞书已经建好应用，照常建完通道", shortRegID(old.id))
-		}
+	if msg := r.replace(req.Context(), j); msg != "" {
+		cancel()
+		writeChatopsErr(w, http.StatusConflict, "busy", msg)
+		return
 	}
-	r.cur = j
-	r.mu.Unlock()
 	j.logf(false, "开始 id=%s name=%q", shortRegID(j.id), name)
 
 	r.jobs.Add(1)
@@ -225,6 +236,57 @@ func (r *feishuRegistrar) start(w http.ResponseWriter, req *http.Request) {
 	out := feishuRegisterStart{ID: j.id, URL: link.url, QRSVG: svg, ExpiresAt: j.expiresAt, State: j.state}
 	r.mu.Unlock()
 	writeJSON(w, out)
+}
+
+// replace 把 j 设成当前这一个，成功时返回空串。上一个还在等扫码的先取消，再等后台协程知道结果（最多 cancelWait）：
+// 取消的那一刻拿到了凭据、或者本来就在保存通道的不取代，返回原因（409），免得那一边的网页按编号查不到它、
+// 把建好的通道当成作废；等不到结果的也不取代。
+func (r *feishuRegistrar) replace(ctx context.Context, j *feishuReg) string {
+	for {
+		r.mu.Lock()
+		old := r.cur
+		switch {
+		case old == nil || !old.endedAt.IsZero():
+			r.cur = j
+			r.mu.Unlock()
+			return ""
+		case old.state == feishuRegSaving:
+			r.mu.Unlock()
+			return msgFeishuRegSaving
+		}
+		r.requestCancelLocked(old, msgFeishuRegReplaced)
+		r.mu.Unlock()
+		old.logf(false, "取消 id=%s：开始了新的一键创建", shortRegID(old.id))
+		if !r.awaitRun(ctx, old) {
+			return msgFeishuRegUnsettle
+		}
+		// 再看一遍：没拿到凭据的已经是终态，取代它；拿到了的是 saving
+	}
+}
+
+// requestCancelLocked 让还在等扫码的作业停下（调用方持有 mu）。状态由后台协程按一键创建的结果写：
+// 取消的那一刻拿到了凭据就照常保存。
+func (r *feishuRegistrar) requestCancelLocked(j *feishuReg, msg string) {
+	if j.state != feishuRegPending {
+		return
+	}
+	if j.cancelMsg == "" {
+		j.cancelMsg = msg
+	}
+	j.cancel()
+}
+
+// awaitRun 等后台协程知道一键创建的结果，最多 cancelWait；没等到（或者网页断开）返回 false。
+func (r *feishuRegistrar) awaitRun(ctx context.Context, j *feishuReg) bool {
+	t := time.NewTimer(r.cancelWait)
+	defer t.Stop()
+	select {
+	case <-j.ran:
+		return true
+	case <-t.C:
+	case <-ctx.Done():
+	}
+	return false
 }
 
 // endedBeforeLink 回应拿到链接以前就结束的作业：被取代或取消时 409，其他 502。
@@ -283,31 +345,33 @@ func (r *feishuRegistrar) status(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, out)
 }
 
-// cancelOne 是 POST /api/chatops/feishu-app/register/{id}/cancel：只在 pending 时起作用。
+// cancelOne 是 POST /api/chatops/feishu-app/register/{id}/cancel：只在 pending 时起作用。回的是定下来的状态：
+// 没拿到凭据是 canceled；取消的那一刻拿到了凭据是 saving 或 done（取消不起作用）；最多等 cancelWait，
+// 等不到结果时回 pending，网页接着按编号查。
 func (r *feishuRegistrar) cancelOne(w http.ResponseWriter, req *http.Request) {
 	if !r.ready(w) {
 		return
 	}
 	r.mu.Lock()
 	j := r.lookupLocked(req.PathValue("id"))
-	var out feishuRegisterStatus
 	if j != nil {
-		if j.state == feishuRegPending {
-			r.endLocked(j, feishuRegCanceled, "已取消")
-			j.cancel()
-		}
-		out = j.view()
+		r.requestCancelLocked(j, msgFeishuRegCanceled)
 	}
 	r.mu.Unlock()
 	if j == nil {
 		writeChatopsErr(w, http.StatusNotFound, "not_found", msgFeishuRegGone)
 		return
 	}
+	r.awaitRun(req.Context(), j)
+	r.mu.Lock()
+	out := j.view()
+	r.mu.Unlock()
 	writeJSON(w, out)
 }
 
 // runJob 是一次一键创建的后台协程：等飞书的结果；拿到凭据（飞书那边应用已经建好）以后建通道并绑定。
 // 链接只往 qr 送一次（SDK 本来也只给一次）；没给链接就结束时，先写好状态再关上 qr，开始接口按状态回应。
+// 知道结果、写好随后的状态（终态或 saving）以后关上 ran。
 func (r *feishuRegistrar) runJob(ctx context.Context, j *feishuReg, qr chan<- feishuRegQR) {
 	defer r.jobs.Done()
 	defer j.cancel()
@@ -321,10 +385,14 @@ func (r *feishuRegistrar) runJob(ctx context.Context, j *feishuReg, qr chan<- fe
 		r.mu.Lock()
 		if j.state == feishuRegPending {
 			state, msg := feishuRegOutcome(err)
+			if state == feishuRegCanceled && j.cancelMsg != "" {
+				msg = j.cancelMsg
+			}
 			r.endLocked(j, state, msg)
 		}
 		state, msg := j.state, j.message
 		r.mu.Unlock()
+		close(j.ran)
 		noLink()
 		j.logf(false, "结束 id=%s state=%s message=%q", shortRegID(j.id), state, msg)
 		return
@@ -332,12 +400,13 @@ func (r *feishuRegistrar) runJob(ctx context.Context, j *feishuReg, qr chan<- fe
 
 	// 应用已经建在飞书了：之后的取消与「被新的取代」都不再影响它，丢掉凭据反而留下一个没人管的应用
 	r.mu.Lock()
-	was, current := j.state, r.cur == j
+	late := j.state != feishuRegPending || j.cancelMsg != "" || r.cur != j
 	j.state, j.message, j.endedAt, j.appID = feishuRegSaving, "", time.Time{}, a.AppID
 	r.mu.Unlock()
+	close(j.ran)
 	noLink()
-	if was != feishuRegPending || !current {
-		j.logf(false, "id=%s 已经不是在等的那一个，但飞书已经建好应用（App ID %s），照常建完通道", shortRegID(j.id), a.AppID)
+	if late {
+		j.logf(false, "id=%s 已经要求取消，但飞书那时已经建好应用（App ID %s），照常建完通道", shortRegID(j.id), a.AppID)
 	}
 
 	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), r.saveTimeout)
@@ -399,7 +468,7 @@ func feishuRegOutcome(err error) (state, msg string) {
 	case errors.Is(err, feishuapp.ErrRegisterExpired):
 		return feishuRegExpired, err.Error()
 	case errors.Is(err, context.Canceled):
-		return feishuRegCanceled, "已取消"
+		return feishuRegCanceled, msgFeishuRegCanceled
 	default:
 		return feishuRegFailed, err.Error() + "。" + msgFeishuRegManual
 	}

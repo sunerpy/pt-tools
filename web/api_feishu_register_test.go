@@ -111,6 +111,29 @@ func (f *fakeFeishuRun) next(t *testing.T) *fakeRegCall {
 	}
 }
 
+// none 断言没有新的一键创建调用。
+func (f *fakeFeishuRun) none(t *testing.T) {
+	t.Helper()
+	select {
+	case c := <-f.calls:
+		t.Fatalf("不该再调一键创建（第 %d 次）", c.n)
+	default:
+	}
+}
+
+func (f *fakeFeishuRun) setIgnoreCtx(v bool) {
+	f.mu.Lock()
+	f.ignoreCtx = v
+	f.mu.Unlock()
+}
+
+// finishWhenCanceled 等这次调用的 ctx 被取消以后才给出结果：模拟取消的那一刻 SDK 正好读完了带凭据的那次轮询。
+// 在单独的协程里跑（不用 t）；测试结束时 newRegEnv 也会取消还在等的，所以它总会结束。
+func finishWhenCanceled(c *fakeRegCall, a *feishuapp.RegisteredApp, err error) {
+	<-c.ctx.Done()
+	c.finish(a, err)
+}
+
 type fakeBind struct {
 	confID uint
 	openID string
@@ -543,8 +566,9 @@ func TestFeishuRegister_WrongID(t *testing.T) {
 	assert.Equal(t, feishuRegPending, out["state"])
 }
 
-// 飞书已经建好应用（saving）以后，取消与「被新的取代」都不影响它：保存用的 ctx 没被取消，通道照常建完、绑定、记审计。
-func TestFeishuRegister_SavingSurvivesCancelAndSupersede(t *testing.T) {
+// 飞书已经建好应用（saving）以后：取消不起作用；再开始一个回 409、不取代它（取代了的话，旧标签页按编号查不到它，
+// 会把已经建好的通道当成作废，提示去删应用）。保存用的 ctx 没被取消，通道照常建完、绑定、记审计；建完以后可以再开始。
+func TestFeishuRegister_SavingSurvivesCancelAndBlocksStart(t *testing.T) {
 	e := newRegEnv(t)
 	e.st.gate = make(chan struct{})
 	a := e.start(t, "")
@@ -556,34 +580,102 @@ func TestFeishuRegister_SavingSurvivesCancelAndSupersede(t *testing.T) {
 	code, out := e.cancel(t, a.ID)
 	assert.Equal(t, http.StatusOK, code)
 	assert.Equal(t, feishuRegSaving, out["state"], "saving 时取消不起作用")
-	b := e.start(t, "")
-	e.run.next(t)
+	w := e.do(t, http.MethodPost, "/api/chatops/feishu-app/register", nil)
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "上一个一键创建已经在飞书建好应用，正在保存通道，稍等几秒再试")
+	e.run.none(t)
 	close(e.st.gate)
 
-	require.Eventually(t, func() bool {
-		_, _, binds, audits := e.st.snapshot()
-		return len(binds) == 1 && len(audits) == 1
-	}, 3*time.Second, 10*time.Millisecond)
-	creates, ctxErrs, _, _ := e.st.snapshot()
-	require.Len(t, creates, 1)
+	st := e.waitState(t, a.ID, feishuRegDone)
+	assert.EqualValues(t, 41, st["conf_id"])
+	_, ctxErrs, binds, audits := e.st.snapshot()
+	require.Len(t, ctxErrs, 1)
 	assert.NoError(t, ctxErrs[0], "保存用的 ctx 不受作业 ctx 取消的影响")
-	code, _ = e.status(t, a.ID)
-	assert.Equal(t, http.StatusNotFound, code, "被新的取代以后，旧的不再是当前这一个")
+	assert.Len(t, binds, 1)
+	assert.Len(t, audits, 1)
+	b := e.start(t, "")
+	e.run.next(t)
 	_, out = e.status(t, b.ID)
 	assert.Equal(t, feishuRegPending, out["state"])
 }
 
-// 取消的那一刻飞书正好建好应用：凭据已经拿到，照常建完通道（丢掉的话飞书那边留下一个没人管的应用）。
+// 取消的那一刻飞书正好给了凭据（SDK 已经读完那次轮询，应用已经建在飞书）：取消不起作用，回的是 saving，
+// 不是 canceled（网页按回应提示，不能叫人去删通道正用着的应用）；通道照常建完。
 func TestFeishuRegister_CredentialsAfterCancel(t *testing.T) {
 	e := newRegEnv(t)
+	e.st.gate = make(chan struct{})
 	e.run.ignoreCtx = true
 	s := e.start(t, "")
 	call := e.run.next(t)
-	_, out := e.cancel(t, s.ID)
-	assert.Equal(t, feishuRegCanceled, out["state"])
-	call.finish(scannedApp(), nil)
+	go finishWhenCanceled(call, scannedApp(), nil)
+	code, out := e.cancel(t, s.ID)
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, feishuRegSaving, out["state"], "拿到凭据以后取消不起作用")
+	assert.Equal(t, "cli_scan_app", out["app_id"])
+	close(e.st.gate)
 	st := e.waitState(t, s.ID, feishuRegDone)
 	assert.EqualValues(t, 41, st["conf_id"])
+}
+
+// 取消以后迟迟不知道结果（SDK 不理取消；实际上它的请求与等待都认 ctx）：最多等 cancelWait，回 pending；
+// 之后照后台协程的结果走（这里没拿到凭据，终态 canceled）。
+func TestFeishuRegister_CancelWaitIsBounded(t *testing.T) {
+	e := newRegEnv(t)
+	e.run.ignoreCtx = true
+	e.r.cancelWait = 50 * time.Millisecond
+	s := e.start(t, "")
+	call := e.run.next(t)
+	began := time.Now()
+	code, out := e.cancel(t, s.ID)
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, feishuRegPending, out["state"], "还不知道结果")
+	assert.Less(t, time.Since(began), 2*time.Second)
+	waitCtxDone(t, call.ctx)
+	call.finish(nil, context.Canceled)
+	st := e.waitState(t, s.ID, feishuRegCanceled)
+	assert.Equal(t, "已取消", st["message"])
+}
+
+// 再开始一个时上一个还在等扫码：先取消它、等它的结果。取消的那一刻飞书正好给了凭据的不取代（409），
+// 它照常建完通道，编号照旧查得到。
+func TestFeishuRegister_StartKeepsPreviousThatGotCredentials(t *testing.T) {
+	e := newRegEnv(t)
+	e.st.gate = make(chan struct{})
+	e.run.ignoreCtx = true
+	a := e.start(t, "")
+	callA := e.run.next(t)
+	go finishWhenCanceled(callA, scannedApp(), nil)
+	w := e.do(t, http.MethodPost, "/api/chatops/feishu-app/register", nil)
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "正在保存通道")
+	e.run.none(t)
+	_, out := e.status(t, a.ID)
+	assert.Equal(t, feishuRegSaving, out["state"])
+	close(e.st.gate)
+	e.waitState(t, a.ID, feishuRegDone)
+}
+
+// 上一个取消以后迟迟不知道结果：最多等 cancelWait，回 409「还没结束」，不取代它；它结束以后可以再开始。
+func TestFeishuRegister_StartWhilePreviousUnsettled(t *testing.T) {
+	e := newRegEnv(t)
+	e.run.ignoreCtx = true
+	e.r.cancelWait = 50 * time.Millisecond
+	a := e.start(t, "")
+	callA := e.run.next(t)
+	w := e.do(t, http.MethodPost, "/api/chatops/feishu-app/register", nil)
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "上一个一键创建还没结束，稍等几秒再试")
+	e.run.none(t)
+	waitCtxDone(t, callA.ctx)
+	callA.finish(nil, context.Canceled)
+	st := e.waitState(t, a.ID, feishuRegCanceled)
+	assert.Equal(t, "开始新的一键创建时取消了这一个", st["message"])
+
+	e.run.setIgnoreCtx(false)
+	b := e.start(t, "")
+	e.run.next(t)
+	_, out := e.status(t, b.ID)
+	assert.Equal(t, feishuRegPending, out["state"])
 }
 
 // 20 秒（测试里调小）内没拿到链接：取消作业、终态 failed，回 504。
