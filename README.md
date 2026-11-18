@@ -89,7 +89,7 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 - **站点与搜索**：72 个内置站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey；在一个页面查看所有站点的上传量、分享率、做种、积分和等级进度；跨站点搜索的结果可以直接推送到下载器，也可以选一部电影或剧集按条目搜索。
 - **RSS 自动下载**：定时拉取订阅，用关键词、通配符或正则过滤标题；免费期结束时没下完的种子按每条订阅的设置暂停或删除。
 - **下载器**：可以添加多个 qBittorrent 和 Transmission，按 RSS 订阅、站点、默认下载器的顺序决定推送到哪一个；推送前检查剩余空间和站点做种容量，按做种时长、分享率等条件清理旧种子，并保护 H&R 种子；种子可以[转移](https://firlab.app/pt-tools/guide/torrent-transfer)到另一台下载器继续做种。
-- **ChatOps**：在 QQ（OneBot）、Telegram 和[飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu)里查看状态、暂停或删除种子、增删 RSS 订阅、追剧，每条命令都记入操作审计；RSS 上新通知支持静默时段、合并摘要、失败重试和每小时配额。
+- **ChatOps**：在 QQ（OneBot）、Telegram 和[飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu)（扫码就能建好机器人）里查看状态、暂停或删除种子、增删 RSS 订阅、追剧，每条命令都记入操作审计；RSS 上新通知支持静默时段、合并摘要、失败重试和每小时配额。
 - **浏览器扩展**：[PT Tools Helper](tools/browser-extension/README.md) 一键或定时同步站点 Cookie，并采集脱敏后的页面数据，用于申请新增站点。
 - **部署与维护**：Docker 镜像（amd64、arm64）与 Linux、Windows 二进制，1Panel、Unraid、飞牛 fnOS 上有应用定义；二进制部署可以在 Web 界面升级；每天定时备份数据库，可以在网页上恢复；访问站点和下载器可以走 HTTP、HTTPS 或 SOCKS5 代理，也可以只让选中的站点走代理。
 
