@@ -625,7 +625,7 @@ func TestCompareDownloaderTorrentItem(t *testing.T) {
 	sortFields := []string{
 		"downloader_name", "downloader_type", "title", "progress", "seeds",
 		"connections", "size", "upload_speed", "download_speed", "added_at",
-		"completed_at", "ratio", "state", "eta", "unknown_default",
+		"completed_at", "ratio", "state", "eta", "total_speed", "unknown_default",
 	}
 	for _, f := range sortFields {
 		t.Run(f, func(t *testing.T) {
@@ -988,6 +988,63 @@ func TestApiDownloaderTorrents_WithData(t *testing.T) {
 		var resp DownloaderTorrentsResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, 1, resp.Total)
+	})
+}
+
+// 「活动中」只看此刻有没有在传数据：做种但没人下载（qB 的 stalledUP）、下载但没速度（stalledDL）都不算，
+// 状态不限；「总速度」按上传加下载排。
+func TestApiDownloaderTorrents_ActiveFilterAndTotalSpeedSort(t *testing.T) {
+	fake := &fakeDownloader{torrents: []downloader.Torrent{
+		{ID: "idle-seed", Name: "Idle Seed", State: downloader.TorrentSeeding, DateAdded: 400},
+		{ID: "uploading", Name: "Uploading", State: downloader.TorrentSeeding, UploadSpeed: 500, DateAdded: 100},
+		{ID: "stalled-dl", Name: "Stalled DL", State: downloader.TorrentDownloading, DateAdded: 300},
+		{ID: "downloading", Name: "Downloading", State: downloader.TorrentDownloading, UploadSpeed: 100, DownloadSpeed: 300, DateAdded: 200},
+		{ID: "paused-dl", Name: "Paused Fetching", State: downloader.TorrentPaused, DownloadSpeed: 50, DateAdded: 50},
+	}}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	list := func(t *testing.T, query string) DownloaderTorrentsResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		server.apiDownloaderTorrents(w, httptest.NewRequest(http.MethodGet, "/api/downloader-torrents?"+query, nil))
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp DownloaderTorrentsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp
+	}
+	ids := func(items []DownloaderTorrentItem) []string {
+		out := make([]string, 0, len(items))
+		for _, it := range items {
+			out = append(out, it.TaskID)
+		}
+		return out
+	}
+
+	t.Run("active filter keeps only transferring tasks", func(t *testing.T) {
+		resp := list(t, "state=active")
+		assert.Equal(t, 3, resp.Total)
+		assert.ElementsMatch(t, []string{"uploading", "downloading", "paused-dl"}, ids(resp.Items))
+	})
+
+	t.Run("total speed sorts by upload plus download", func(t *testing.T) {
+		resp := list(t, "sort_by=total_speed&sort_order=desc")
+		require.Equal(t, 5, resp.Total)
+		// 两个速度为 0 的按添加日期：降序时新加的在前
+		assert.Equal(t, []string{"uploading", "downloading", "paused-dl", "idle-seed", "stalled-dl"}, ids(resp.Items))
+
+		resp = list(t, "sort_by=total_speed&sort_order=asc")
+		assert.Equal(t, []string{"stalled-dl", "idle-seed", "paused-dl", "downloading", "uploading"}, ids(resp.Items))
+	})
+
+	t.Run("active filter with total speed and paging", func(t *testing.T) {
+		resp := list(t, "state=active&sort_by=total_speed&sort_order=desc&page_size=2&page=1")
+		assert.Equal(t, 3, resp.Total)
+		assert.Equal(t, []string{"uploading", "downloading"}, ids(resp.Items))
+	})
+
+	t.Run("active combines with search", func(t *testing.T) {
+		resp := list(t, "state=active&search=seed")
+		assert.Equal(t, 0, resp.Total)
 	})
 }
 
