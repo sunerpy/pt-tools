@@ -205,6 +205,10 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 
 	q.Search = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 	q.State = strings.TrimSpace(r.URL.Query().Get("state"))
+	// 「活动中」不是下载器的一种状态，是「此刻在传数据」；只有这个网页接口认它，App API 的 state 不变
+	if q.State == torrentFilterActive {
+		q.State, q.Active = "", true
+	}
 	downloaderIDStr := strings.TrimSpace(r.URL.Query().Get("downloader_id"))
 	q.SortBy = strings.TrimSpace(r.URL.Query().Get("sort_by"))
 	q.SortOrder = strings.TrimSpace(r.URL.Query().Get("sort_order"))
@@ -229,10 +233,16 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
+// torrentFilterActive 是网页「状态」里的「活动中」：上传或下载速度大于 0 的任务，不管下载器报的是哪种状态。
+// qBittorrent 把没人下载的做种（stalledUP）算作做种、没速度的下载（stalledDL）算作下载，光看状态挑不出它们。
+const torrentFilterActive = "active"
+
 // torrentQuery 是聚合各下载器种子列表的筛选、排序与分页。Search 要先转成小写；PageSize 为 0 时不分页。
+// Active 只留此刻在传数据的任务（见 torrentFilterActive）。
 type torrentQuery struct {
 	Page, PageSize               int
 	Search, State, Category, Tag string
+	Active                       bool
 	DownloaderID                 *uint
 	SortBy, SortOrder            string
 }
@@ -273,6 +283,9 @@ func (s *Server) collectDownloaderTorrents(ctx context.Context, q torrentQuery) 
 
 		for _, t := range torrents {
 			if q.State != "" && string(t.State) != q.State {
+				continue
+			}
+			if q.Active && t.UploadSpeed <= 0 && t.DownloadSpeed <= 0 {
 				continue
 			}
 
@@ -1058,6 +1071,12 @@ func compareDownloaderTorrentItem(a, b DownloaderTorrentItem, sortBy string) int
 		return compareInt64(a.UploadSpeed, b.UploadSpeed)
 	case "download_speed":
 		return compareInt64(a.DownloadSpeed, b.DownloadSpeed)
+	case "total_speed":
+		// 大多数任务速度是 0：速度相同按添加日期排，不然这一大片的先后每次刷新都可能换
+		if c := compareInt64(a.UploadSpeed+a.DownloadSpeed, b.UploadSpeed+b.DownloadSpeed); c != 0 {
+			return c
+		}
+		return compareInt64(a.AddedAt, b.AddedAt)
 	case "added_at":
 		return compareInt64(a.AddedAt, b.AddedAt)
 	case "completed_at":

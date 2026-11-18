@@ -200,6 +200,11 @@ const sidebarStyle = computed(() => ({
 
 const sortOptions = [
   { label: "添加日期", value: "added_at" },
+  /*
+   * 上传加下载：不筛选时也能把此刻在传数据的任务排到最前，速度相同的按添加日期（后端）。
+   * 放在第二位是因为下拉框一屏只露出前 8 项，排在「下载速度」后面要滚动才看得到。
+   */
+  { label: "总速度", value: "total_speed" },
   { label: "完成日期", value: "completed_at" },
   { label: "标题", value: "title" },
   { label: "进度", value: "progress" },
@@ -245,7 +250,10 @@ const torrentStateCounters = computed(() => {
   let paused = 0;
   let stopped = 0;
   let error = 0;
+  let active = 0;
   for (const torrent of torrents.value) {
+    /* 和后端 state=active 同一个条件：此刻在传数据，不看状态 */
+    if (torrent.upload_speed > 0 || torrent.download_speed > 0) active += 1;
     const normalizedState = normalizeTorrentState(torrent.state);
     switch (normalizedState) {
       case "downloading":
@@ -267,13 +275,14 @@ const torrentStateCounters = computed(() => {
         break;
     }
   }
-  return { downloading, seeding, paused, stopped, error };
+  return { downloading, seeding, paused, stopped, error, active };
 });
 const downloadingCount = computed(() => torrentStateCounters.value.downloading);
 const seedingCount = computed(() => torrentStateCounters.value.seeding);
 const pausedCount = computed(() => torrentStateCounters.value.paused);
 const stoppedCount = computed(() => torrentStateCounters.value.stopped);
 const errorCount = computed(() => torrentStateCounters.value.error);
+const activeCount = computed(() => torrentStateCounters.value.active);
 const allCategories = ref<string[]>([]);
 const allTags = ref<string[]>([]);
 /**
@@ -1934,6 +1943,19 @@ function toggleSidebar() {
               <span class="hub__pick-l">全部</span>
               <span class="hub__pick-n">{{ total }}</span>
             </button>
+            <!--
+              「活动中」不是下载器的一种状态：qBittorrent 把没人下载的做种（stalledUP）也算做种中，
+              这里只留此刻上传或下载速度大于 0 的任务，筛选在后端做（state=active）
+            -->
+            <button
+              type="button"
+              class="hub__pick is-act"
+              :class="{ 'is-on': filters.state === 'active' }"
+              @click="applyQuickState('active')">
+              <PtIcon name="activity" :size="14" />
+              <span class="hub__pick-l">活动中</span>
+              <span class="hub__pick-n">{{ activeCount }}</span>
+            </button>
             <button
               type="button"
               class="hub__pick is-dl"
@@ -2832,6 +2854,10 @@ function toggleSidebar() {
 .hub__pick.is-on {
   color: var(--pt-p);
   background: var(--pt-p-soft);
+}
+
+.hub__pick.is-act :deep(svg) {
+  color: var(--pt-p);
 }
 
 .hub__pick.is-dl :deep(svg) {
