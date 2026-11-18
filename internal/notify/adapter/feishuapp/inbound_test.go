@@ -650,3 +650,34 @@ func TestReload_AdoptIgnoresQueueLimitAndRechecksLists(t *testing.T) {
 	assert.Contains(t, joined, "接手上一个实例留下的 11 条消息")
 	assert.Contains(t, joined, "1 条消息的发送人已经不在名单里")
 }
+
+// 交出排队的消息以后（seal）不再收：onMessage 拿到 false 会把这条移出去重表、回 500，让平台重推给新实例。
+// 通道正在关闭时新收到的也不收；接手上一个实例留下的照样放进队列（不起工作协程），等 seal 再交出去。
+func TestEnqueue_RefusesAfterSealOrClose(t *testing.T) {
+	c, _, _ := newTestChannel(t, testConfig)
+	in := notify.InboundMessage{ChannelType: ChannelType, SourceConfID: 7, ChannelUserID: "ou_admin", Text: "x"}
+	c.queues.seal()
+	assert.False(t, c.enqueue("ou_admin", newQueued(in, time.Now(), "om_e1"), false))
+	assert.False(t, c.enqueue("ou_admin", newQueued(in, time.Now(), "om_e2"), true), "seal 以后接手的也不收")
+
+	closing, _, _ := newTestChannel(t, testConfig)
+	closing.goMu.Lock()
+	closing.stopping = true // Close 已经开始、ctx 还没取消的那一刻
+	closing.goMu.Unlock()
+	assert.False(t, closing.enqueue("ou_admin", newQueued(in, time.Now(), "om_e3"), false), "正在关闭：新收到的不收")
+	assert.Equal(t, 0, closing.queuedUsers(), "不收的不留空队列")
+	assert.True(t, closing.enqueue("ou_admin", newQueued(in, time.Now(), "om_e4"), true), "接手的照样放进队列")
+	left := closing.queues.seal()
+	require.Len(t, left["ou_admin"], 1, "seal 交出来")
+	assert.Equal(t, "om_e4", left["ou_admin"][0].messageID)
+}
+
+func TestWaitClaim(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.False(t, waitClaim(ctx, nil, time.Hour), "ctx 取消时不再等")
+	wake := make(chan struct{})
+	close(wake)
+	assert.True(t, waitClaim(context.Background(), wake, time.Hour), "释放时马上醒")
+	assert.True(t, waitClaim(context.Background(), nil, time.Millisecond), "定时重试兜底")
+}
