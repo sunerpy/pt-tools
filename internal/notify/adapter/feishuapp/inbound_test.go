@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -243,6 +244,8 @@ func TestInbound_GroupBeforeBotKnownAsksForRedelivery(t *testing.T) {
 	group := msgEvent("om_g", "ou_admin", "@_user_1 /status", inGroup("oc_group", bot))
 	require.Error(t, r.Emit(context.Background(), group), "回 500，让平台稍后重推")
 	assert.False(t, seenMessages.check("cli_test\x00om_g"), "没有记进去重表")
+	// 同一条的另一份投递正好已经记进去重表（两份并发到达）：这一份仍回 500，不会被当成重复吞掉
+	require.Error(t, r.Emit(context.Background(), group), "判断在去重以前")
 	seenMessages.forget("cli_test\x00om_g")
 	assert.Contains(t, logJoined(logs.All()), "om_g")
 	require.NoError(t, r.Emit(context.Background(), msgEvent("om_g0", "ou_admin", "/status", inGroup("oc_group"))), "没 @ 任何人的群消息照常忽略")
@@ -696,4 +699,121 @@ func TestWaitClaim(t *testing.T) {
 	close(wake)
 	assert.True(t, waitClaim(context.Background(), wake, time.Hour), "释放时马上醒")
 	assert.True(t, waitClaim(context.Background(), nil, time.Millisecond), "定时重试兜底")
+}
+
+// stubbornHandler 是不理会取消的处理函数（像 qB 慢时的 GetAllTorrents，用的是 context.Background 加超时）：
+// 文字为 slow 的那条等 release 关闭才返回。started 在它开始时关闭，ended 记下它结束的时刻。
+type stubbornHandler struct {
+	release chan struct{}
+	started chan struct{}
+	once    sync.Once
+	ended   atomic.Int64
+}
+
+func newStubbornHandler() *stubbornHandler {
+	return &stubbornHandler{release: make(chan struct{}), started: make(chan struct{})}
+}
+
+func (s *stubbornHandler) handle(_ context.Context, msg notify.InboundMessage) error {
+	if msg.Text == "slow" {
+		s.once.Do(func() { close(s.started) })
+		<-s.release
+		s.ended.Store(time.Now().UnixNano())
+	}
+	return nil
+}
+
+// 热重载时旧实例里那条不理会取消、还在跑：交接要等它收尾，新实例才处理同一个人排在后面的消息，两条不同时跑。
+func TestReload_WaitsForInflightBeforeHandoff(t *testing.T) {
+	c1, _, runners1, _ := startChannel(t, testConfig)
+	h := newStubbornHandler()
+	c1.OnInbound(h.handle)
+	r1 := runners1.last()
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_w1", "ou_admin", "slow")))
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow 没开始处理")
+	}
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_w2", "ou_admin", "/status")))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	require.Error(t, c1.Close(ctx), "处理函数不理会取消，Close 到时限返回")
+	_, _, rec2 := reloadChannel(t, testConfig, nil)
+	require.Never(t, func() bool { return len(rec2.got()) > 0 }, 200*time.Millisecond, 5*time.Millisecond,
+		"旧实例那条没收尾以前，新实例不处理同一个人的下一条")
+
+	close(h.release)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "/status", rec2.got()[0].Text)
+	assert.NotZero(t, h.ended.Load(), "旧实例那条先收尾")
+}
+
+// 等正在处理的那条收尾有上限（handoffWait）：过了上限照常交接，记一条 Warn。
+func TestReload_HandoffWaitIsBounded(t *testing.T) {
+	c1, _, runners1, _ := startChannel(t, testConfig)
+	c1.handoffWait = 50 * time.Millisecond
+	logs := observedLogger(c1)
+	h := newStubbornHandler()
+	defer close(h.release)
+	c1.OnInbound(h.handle)
+	r1 := runners1.last()
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_b1", "ou_admin", "slow")))
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow 没开始处理")
+	}
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_b2", "ou_admin", "/status")))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	require.Error(t, c1.Close(ctx))
+	_, _, rec2 := reloadChannel(t, testConfig, nil)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond,
+		"过了上限照常交接")
+	assert.Zero(t, h.ended.Load(), "旧实例那条还在跑")
+	assert.Contains(t, logJoined(logs.All()), "内没收尾")
+}
+
+// 取出一条以后、交给 MessageChain 以前 ctx 被取消（Close 正好落在这里）：这条放回队首交接，不在旧实例里处理。
+func TestDrain_PutsBackWhenCancelledAfterTake(t *testing.T) {
+	c1, _, runners1, rec1 := startChannel(t, testConfig)
+	c1.afterTake = func() {
+		c1.queues.mu.Lock() // 与 Close 一样在队列锁里取消
+		c1.cancel()
+		c1.queues.mu.Unlock()
+	}
+	require.NoError(t, runners1.last().Emit(context.Background(), msgEvent("om_pb", "ou_admin", "/status")))
+	require.Never(t, func() bool { return len(rec1.got()) > 0 }, 100*time.Millisecond, 5*time.Millisecond,
+		"取消以后旧实例不处理")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, c1.Close(ctx))
+
+	_, _, rec2 := reloadChannel(t, testConfig, nil)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond, "交给新实例")
+	assert.Equal(t, "/status", rec2.got()[0].Text)
+	time.Sleep(50 * time.Millisecond)
+	assert.Len(t, rec2.got(), 1, "只处理一次")
+}
+
+// 队列不空时到的帧也要等过 gather 才取：前一条刚处理完，比它先发、晚到几毫秒的那条仍排在它前面。
+func TestInbound_OrdersAcrossBusyQueueGap(t *testing.T) {
+	c, _, runners, rec := startChannel(t, testConfig)
+	c.gather = 200 * time.Millisecond
+	rec.block = make(chan struct{})
+	r := runners.last()
+	base := time.Now().Add(-time.Minute)
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_q0", "ou_admin", "m0", createdAt(base))))
+	require.Eventually(t, func() bool { return len(rec.got()) == 1 }, 5*time.Second, time.Millisecond, "m0 正在处理")
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_q1", "ou_admin", "m1", createdAt(base.Add(time.Second)))))
+	time.Sleep(300 * time.Millisecond) // m1 早就等够了 gather
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_q3", "ou_admin", "确认", createdAt(base.Add(3*time.Second)))))
+	close(rec.block) // m0 收尾，m1 马上处理；「确认」刚进队，还要等 gather
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_q2", "ou_admin", "/delete 1", createdAt(base.Add(2*time.Second)))))
+	require.Eventually(t, func() bool { return len(rec.got()) == 4 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []string{"m0", "m1", "/delete 1", "确认"}, rec.texts())
 }

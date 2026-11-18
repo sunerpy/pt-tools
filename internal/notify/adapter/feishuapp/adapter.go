@@ -68,6 +68,11 @@ type Channel struct {
 	// linked：这一轮 Start 里长连接连上过（onReady / onReconnected），监督循环据此决定下一轮复用还是新建客户端
 	linked atomic.Bool
 
+	// drains 是队列工作协程的计数：supervise 收尾时先等它们退出（最多 handoffWait）再交接
+	drains sync.WaitGroup
+	// afterTake 只在测试里设：工作协程取出一条消息以后、再看一次 ctx 以前调用
+	afterTake func()
+
 	// goMu 保护 stopping 与 wg.Add：Close 开始以后不再起新协程
 	goMu     sync.Mutex
 	stopping bool
@@ -81,6 +86,7 @@ type Channel struct {
 	claimRetry    time.Duration
 	queueIdle     time.Duration
 	gather        time.Duration
+	handoffWait   time.Duration
 	noticeTimeout time.Duration
 }
 

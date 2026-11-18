@@ -53,9 +53,6 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 	}
 
 	key := cfg.AppID + "\x00" + messageID
-	if seenMessages.check(key) {
-		return nil
-	}
 	chatType := deref(msg.ChatType)
 	group := chatType != "p2p"
 	chatID := deref(msg.ChatId)
@@ -64,10 +61,13 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 	botID := c.botOpenID()
 	if group && botID == "" && len(msg.Mentions) > 0 {
 		// 还没取到本机器人的 open_id（刚启动、刚热重载，或者取机器人信息失败在重试）：判断不了有没有 @ 它，
-		// 移出去重表、回 500，让平台稍后重推，取到以后照常处理。没 @ 任何人的群消息不可能是给它的，下面照常忽略。
-		seenMessages.forget(key)
+		// 回 500，让平台稍后重推，取到以后照常处理。没 @ 任何人的群消息不可能是给它的，下面照常忽略。
+		// 这一步在去重以前：不记进去重表，同一条的两份投递同时到也都回 500，不会有一份被当成重复吞掉
 		log.Infof("飞书应用机器人(%d): 还没取到机器人信息，判断不了群消息有没有 @ 机器人，请飞书稍后重推 message_id=%s", c.confID, messageID)
 		return errBotUnknown
+	}
+	if seenMessages.check(key) {
+		return nil
 	}
 	if group && !mentionsBot(msg.Mentions, botID) {
 		// 应用开了「获取群组中所有消息」时群里每句话都会推过来，只认 @ 了本机器人的

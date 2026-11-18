@@ -17,7 +17,7 @@ const (
 	maxHandlers = 16
 	// defaultQueueIdle 是工作协程空闲多久退出。
 	defaultQueueIdle = time.Minute
-	// defaultGather 是队列从空变成有消息以后，工作协程先等多久再取（测试里调小）。
+	// defaultGather 是每一条进队以后，工作协程至少等多久才取它（测试里调小）。
 	defaultGather = 200 * time.Millisecond
 )
 
@@ -28,13 +28,14 @@ const (
  * 没有 create_time 的按收到的时间。这样「/delete x」和随后的「确认」不会颠倒。
  *
  * 为什么要排：SDK 每收一帧就开一个 goroutine 调 onMessage（ws/client_session.go:175、client_message.go:34），
- * 几乎同时到的几帧谁先进队要看谁先抢到锁。所以队列从空变成有消息时，工作协程先等 gather（200ms）再取，
- * 让这几帧按发出时间排好；处理过程中新到的消息直接按时间插进还没开始的那部分。
- * 保证的是：同一个窗口里到的、排着队还没开始的消息按发出时间处理；已经开始处理的那条不会被后到的消息插队，
- * 比窗口晚到的更早的消息也只能排进还没开始的那部分。QQ 每条消息一个 goroutine，不保证顺序。
+ * 几乎同时到的几帧谁先进队要看谁先抢到锁。所以每一条进队以后，工作协程至少等 gather（200ms）才取它：
+ * 比它先发、在这 200ms 里到的帧会按发出时间插到它前面。排在慢消息后面的消息早就等够了，不多等。
+ * 保证的是：同一个人相隔 200ms 以内到的消息按发出时间处理；已经开始处理的那条不会被后到的消息插队，
+ * 晚到 200ms 以上的更早的消息只能排进还没开始的那部分。QQ 每条消息一个 goroutine，不保证顺序。
  *
  * 热重载（cmd 关掉全部通道再重建）时，排队、还没开始处理的消息由 seal 交出来，经 apps 登记表交给同一个通道
- * 重建以后的实例（见 state.go）；正在处理的那一条随 ctx 取消，与 Telegram、QQ 一致。
+ * 重建以后的实例（见 state.go）；正在处理的那一条随 ctx 取消，与 Telegram、QQ 一致。交出以前先等它收尾
+ * （最多 handoffWait，10 秒），同一个人交接过去的下一条不会和它同时处理。
  */
 
 // arrivalSeq 是进程级的进队顺序（进入 onMessage 的先后）：同一毫秒发出的消息按它排；交接给新实例以后仍然有序。
@@ -46,6 +47,8 @@ type queued struct {
 	// sent 是发出时间（create_time）；没有时是收到的时间
 	sent time.Time
 	seq  uint64
+	// arrived 是进队的时刻：工作协程要等它过了 gather 才取这一条（交接过来的早就过了）
+	arrived time.Time
 	// messageID 只用于日志
 	messageID string
 }
@@ -59,7 +62,7 @@ func (a *queued) before(b *queued) bool {
 }
 
 func newQueued(in notify.InboundMessage, sent time.Time, messageID string) *queued {
-	return &queued{in: in, sent: sent, seq: arrivalSeq.Add(1), messageID: messageID}
+	return &queued{in: in, sent: sent, seq: arrivalSeq.Add(1), arrived: time.Now(), messageID: messageID}
 }
 
 type userQueues struct {
@@ -73,8 +76,6 @@ type userQueues struct {
 type userQueue struct {
 	// items 是还没开始处理的消息，按 before 排好
 	items []*queued
-	// readyAt：队列从空变成有消息时记下，工作协程等到这一刻再取
-	readyAt time.Time
 	// wake 叫醒空闲的工作协程（容量 1）
 	wake    chan struct{}
 	running bool
@@ -84,11 +85,8 @@ func newUserQueues() *userQueues {
 	return &userQueues{queues: map[string]*userQueue{}, slots: make(chan struct{}, maxHandlers)}
 }
 
-// insert 按发出时间把 it 插进还没开始的那部分；队列原来是空的就从现在起等 gather。
-func (uq *userQueue) insert(it *queued, gather time.Duration) {
-	if len(uq.items) == 0 {
-		uq.readyAt = time.Now().Add(gather)
-	}
+// insert 按发出时间把 it 插进还没开始的那部分。
+func (uq *userQueue) insert(it *queued) {
 	i := sort.Search(len(uq.items), func(i int) bool { return it.before(uq.items[i]) })
 	uq.items = slices.Insert(uq.items, i, it)
 	select {
@@ -115,21 +113,30 @@ func (c *Channel) enqueue(userID string, it *queued, adopting bool) bool {
 		return false
 	}
 	if !uq.running {
-		if c.spawn(func() { c.drain(userID, uq) }) {
+		// drains 计数在 q.mu 里加：Close 也在 q.mu 里取消 ctx，取消以后上面就直接返回了，
+		// 所以 supervise 收尾时等 drains 一定在所有 Add 之后
+		c.drains.Add(1)
+		if c.spawn(func() {
+			defer c.drains.Done()
+			c.drain(userID, uq)
+		}) {
 			uq.running = true
-		} else if !adopting {
-			// 通道正在关闭：不起工作协程，这条也不收
-			if len(uq.items) == 0 {
-				delete(q.queues, userID)
+		} else {
+			c.drains.Done()
+			if !adopting {
+				// 通道正在关闭：不起工作协程，这条也不收
+				if len(uq.items) == 0 {
+					delete(q.queues, userID)
+				}
+				return false
 			}
-			return false
 		}
 	}
-	uq.insert(it, c.timing(c.gather, defaultGather))
+	uq.insert(it)
 	return true
 }
 
-// drain 是一个人的工作协程：等到 readyAt 以后按顺序处理，空闲 queueIdle 以后退出；通道关闭时马上退出。
+// drain 是一个人的工作协程：按顺序处理（每条进队以后至少等 gather），空闲 queueIdle 以后退出；通道关闭时马上退出。
 // ctx 取消以后不再取出消息：先拿处理槽，再在锁里看一次 ctx 与 sealed 才取出，取消了就不取，
 // 消息留在队首，由 seal 交给下一个实例。Close 也在这把锁里取消 ctx，所以「取出」与「取消」有确定的先后：
 // 取消以前取出的那一条就是正在处理的，随 ctx 取消（与 Telegram、QQ 一致）。取出以后到 deliver 之间没有会阻塞的步骤。
@@ -137,6 +144,7 @@ func (c *Channel) enqueue(userID string, it *queued, adopting bool) bool {
 func (c *Channel) drain(userID string, uq *userQueue) {
 	q := c.queues
 	idle := c.timing(c.queueIdle, defaultQueueIdle)
+	gather := c.timing(c.gather, defaultGather)
 	timer := time.NewTimer(idle)
 	defer timer.Stop()
 	for {
@@ -146,7 +154,12 @@ func (c *Channel) drain(userID string, uq *userQueue) {
 			return
 		}
 		n := len(uq.items)
-		wait := time.Until(uq.readyAt)
+		var wait time.Duration
+		if n > 0 {
+			// 每一条进队以后都要等过 gather 才取：比它先发、晚到 gather 以内的帧会插到它前面。
+			// 排在慢消息后面的早就等够了，不多等
+			wait = time.Until(uq.items[0].arrived.Add(gather))
+		}
 		q.mu.Unlock()
 
 		if n == 0 {
@@ -197,6 +210,25 @@ func (c *Channel) drain(userID string, uq *userQueue) {
 		uq.items[0] = nil
 		uq.items = uq.items[1:]
 		q.mu.Unlock()
+		if c.afterTake != nil {
+			c.afterTake()
+		}
+		if c.ctx.Err() != nil {
+			// 取出以后、交给 MessageChain 以前被取消：放回队首，留给交接。supervise 收尾时先等工作协程退出
+			// 再 seal，所以这里在 seal 之前（只有等过了 handoffWait 才可能晚于 seal）
+			q.mu.Lock()
+			sealed := q.sealed
+			if !sealed {
+				uq.items = slices.Insert(uq.items, 0, it)
+			}
+			q.mu.Unlock()
+			<-q.slots
+			if sealed {
+				c.logger().Warnf("飞书应用机器人(%d): 关闭时一条消息刚取出、没赶上交接，没有处理 open_id=%s message_id=%s",
+					c.confID, it.in.ChannelUserID, it.messageID)
+			}
+			return
+		}
 		c.deliver(it.in)
 		<-q.slots
 	}

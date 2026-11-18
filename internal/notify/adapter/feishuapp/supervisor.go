@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,8 @@ const (
 	defaultClientErrWait = 10 * time.Minute
 	// defaultClaimRetry：app_id 被另一个通道占着时多久重试一次登记
 	defaultClaimRetry = time.Minute
+	// defaultHandoffWait：关闭时等正在处理的消息收尾多久再交接（处理函数理会取消时马上就收尾）
+	defaultHandoffWait = 10 * time.Second
 )
 
 func (c *Channel) timing(v, def time.Duration) time.Duration {
@@ -53,6 +56,13 @@ func (c *Channel) supervise() {
 	c.mu.RUnlock()
 	claimed := false
 	defer func() {
+		// 先等本实例的队列工作协程退出，再交出排队的消息：正在处理的那条收尾以后，同一个人交接过去的下一条
+		// 才开始处理，不会同时跑；取出了还没交给 MessageChain 的那条也已经放回队首。处理函数不理会取消、
+		// 过了 handoffWait 还没收尾时照常交接（新实例这段时间连不上，飞书会重推这期间的消息）
+		if wait := c.timing(c.handoffWait, defaultHandoffWait); !waitGroupTimeout(&c.drains, wait) {
+			c.logger().Warnf("飞书应用机器人(%d): 正在处理的消息 %s内没收尾，排着队的照常交接（同一个人的下一条可能和它同时处理）",
+				c.confID, durationText(wait))
+		}
 		left := c.queues.seal()
 		if !claimed {
 			return // 没登记过就没连过长连接，也就收不到消息
@@ -151,6 +161,23 @@ func durationText(d time.Duration) string {
 		return fmt.Sprintf("%d 分钟", int(d/time.Minute))
 	}
 	return d.String()
+}
+
+// waitGroupTimeout 等 wg 归零，最多 d；超时返回 false（等的协程在 wg 归零以后自己退出）。
+func waitGroupTimeout(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // waitClaim 等占着登记的实例释放（wake 关闭）或 retry 到期；ctx 取消时返回 false。
