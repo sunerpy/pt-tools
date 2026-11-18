@@ -34,16 +34,21 @@ type AttendanceConfig struct {
 const defaultAttendancePath = "/attendance.php"
 
 // NexusPHP 签到插件的页面文字。信息量大的规则排在前面，摘取的提示语更有用。
+// 繁体是 NexusPHP 自带的 lang/cht/lang_attendance.php（用户选了繁體中文，或 DiscFan 这类默认繁体的站点）。
 var (
 	nexusPHPAttendanceSuccess = []string{
 		`这是您的第\s*\d+\s*次签到`,
+		`這是您的第\s*\d+\s*次簽到`,
 		`本次签到获得`,
+		`本次簽到獲得`,
 		`签到已成功`,
 		`签到成功`,
+		`簽到成功`,
 		`(?i)attendance successful`,
 	}
 	nexusPHPAttendanceAlready = []string{
 		`今天已经签到过`,
+		`今天已經簽到過`,
 		`今日已签到`,
 		`今天已签到`,
 		`(?i)already attended`,

@@ -113,6 +113,9 @@ const discfanIndexFixture = `<html><body>
 				<font class = 'color_bonus'>魔力值 </font>[<a href="mybonus.php">使用</a>]: 1,234,567.8                 <a href="medal.php">[勛章]</a>
 				<font class = 'color_invite'>邀請 </font>[<a href="invite.php?id=99001">發送</a>]: 3(0)                                <br />
 				<font class="color_ratio">分享率：</font> 2.000                <font class='color_uploaded'>上傳量：</font> 2.500 TB                <font class='color_downloaded'> 下載量：</font> 1.250 TB                <font class='color_active'>當前活動：</font> <img class="arrowup" alt="Torrents seeding" title="當前做種" src="pic/trans.gif" />42  <img class="arrowdown" alt="Torrents leeching" title="當前下載" src="pic/trans.gif" />3&nbsp;&nbsp;
+				<font class='color_connectable'>可連接：</font><b><font color="green">是</font></b>
+				<font class='color_bonus'>H&R: </font> [<a href="myhr.php">1/<font color="red">2</font>/5</a>]
+				<font class='color_bonus'>認領: </font> [<a href="claim.php?uid=99001">0/1000</a>]
 			</span>
 		</td>
 	</tr></table></td>
@@ -250,6 +253,8 @@ func testDiscfanUserInfo(t *testing.T) {
 			"seeding":  "42",
 			"leeching": "3",
 			"bonus":    "1.2345678e+06",
+			// 「H&R: [1/2/5]」：考察中 / 未達標 / 封號上限，未達標是中间那个
+			"hnrUnsatisfied": "2",
 		}
 		for field, expected := range fields {
 			t.Run(field, func(t *testing.T) {
@@ -297,6 +302,91 @@ func TestDiscfan_UserInfo_LastAccessParsed(t *testing.T) {
 	ts, err := strconv.ParseInt(raw, 10, 64)
 	require.NoError(t, err, "lastAccessAt should be a unix timestamp, got %q", raw)
 	assert.Greater(t, ts, int64(0), "lastAccessAt must be > 0")
+}
+
+// 走真实的 GetUserInfo：首页取顶栏（含 H&R 未達標数），再按顶栏里的用户 ID 取用户详情页的「傳送」一行。
+func TestDiscfan_GetUserInfo(t *testing.T) {
+	def := getDiscfanDef(t)
+	var detailQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/index.php":
+			_, _ = w.Write([]byte(discfanIndexFixture))
+		case "/userdetails.php":
+			detailQuery = r.URL.RawQuery
+			_, _ = w.Write([]byte(discfanUserdetailsFixture))
+		case "/getusertorrentlistajax.php":
+			_, _ = w.Write([]byte(`<b>42</b> 條記錄 | 總大小：1.000 TB<table><tr><td>大小</td></tr><tr><td>1.000<br />TB</td></tr></table>`))
+		default:
+			_, _ = w.Write([]byte(`<html><body></body></html>`))
+		}
+	}))
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1"})
+	driver.SetSiteDefinition(def)
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, "id=99001", detailQuery)
+	assert.Equal(t, "99001", info.UserID)
+	assert.Equal(t, "ptuser01", info.Username)
+	assert.Equal(t, int64(2748779069440), info.Uploaded) // 2.500 TB
+	assert.Equal(t, int64(1374389534720), info.Downloaded)
+	assert.InDelta(t, 2.0, info.Ratio, 0.0001)
+	assert.Equal(t, int64(536870912000), info.TrueUploaded)
+	assert.Equal(t, 42, info.Seeding)
+	assert.Equal(t, 2, info.HnRUnsatisfied)
+	assert.Equal(t, "Power User", info.LevelName)
+	assert.Equal(t, int64(1785100544), info.LastAccess)
+}
+
+// DiscFan 是繁体界面，签到插件的回执是繁体字（NexusPHP lang/cht/lang_attendance.php）：
+// 站点不写 Attendance，走 NexusPHP 默认的 GET /attendance.php，默认规则要认得繁体回执。
+func TestDiscfan_AttendanceTraditionalResponses(t *testing.T) {
+	const header = `<table id="info_block"><tr><td>歡迎回來, <a href="userdetails.php?id=99001">ptuser01</a> <a href="attendance.php" class="">[簽到已得10, 補簽卡: 0]</a></td></tr></table>`
+	cases := []struct {
+		name    string
+		body    string
+		want    v2.AttendStatus
+		message string
+	}{
+		{"signed", header + `<h2>簽到成功</h2><table><tr><td class="text"><p>這是您的第 <b>2</b> 次簽到，已連續簽到 <b>1</b> 天，本次簽到獲得 <b>10</b> 個魔力值。</p></td></tr></table>`, v2.AttendSigned, "這是您的第 2 次簽到"},
+		{"already", header + `<h2>抱歉</h2><table><tr><td class="text">您今天已經簽到過了，請勿重複刷新。</td></tr></table>`, v2.AttendAlready, "您今天已經簽到過了"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var method, path string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				method, path = r.Method, r.URL.Path
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(`<html><body>` + tc.body + `</body></html>`))
+			}))
+			defer srv.Close()
+			d := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: srv.URL, Cookie: "c_secure_uid=1"})
+			d.SetSiteDefinition(getDiscfanDef(t))
+			res, err := d.Attend(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, res.Status)
+			assert.Contains(t, res.Message, tc.message)
+			assert.Equal(t, http.MethodGet, method)
+			assert.Equal(t, "/attendance.php", path)
+		})
+	}
+
+	// 只有页头的「[簽到已得10, …]」、没有回执：不能当成签到成功或今日已签
+	t.Run("header only", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<html><head><title>DiscFan :: 首頁</title></head><body>` + header + `<h2>最新公告</h2></body></html>`))
+		}))
+		defer srv.Close()
+		d := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: srv.URL, Cookie: "c_secure_uid=1"})
+		d.SetSiteDefinition(getDiscfanDef(t))
+		_, err := d.Attend(context.Background())
+		require.ErrorIs(t, err, v2.ErrAttendanceUnrecognized)
+	})
 }
 
 func TestDiscfan_Fixtures_NoSecrets(t *testing.T) {

@@ -23,8 +23,15 @@ const (
 	attendanceAlreadyPage = `<html><body><table id="info_block"><tr><td>欢迎回来 <a href="attendance.php">[签到已得60]</a></td></tr></table>
 <h2>抱歉</h2><table><tr><td class="text">您今天已经签到过了，请勿重复刷新。</td></tr></table></body></html>`
 	attendanceEnglishSuccess = `<html><body><h2>Attendance successful</h2><p>This is your <b>12</b> attendance.</p></body></html>`
-	attendanceUnknownPage    = `<html><body><table id="info_block"><tr><td>欢迎回来</td></tr></table><h2>404 Not Found</h2></body></html>`
-	attendanceLoginPage      = `<html><body><form method="post" action="takelogin.php"><input name="username"/></form></body></html>`
+	// 繁体界面（用户在控制面板选了繁體中文，或 DiscFan 这类默认繁体的站点）：文字取自 NexusPHP 的 lang/cht/lang_attendance.php，
+	// 页头的「[簽到已得10, 補簽卡: 0]」不能被当成回执
+	attendanceTraditionalSuccess = `<html><body><table id="info_block"><tr><td>歡迎回來 <a href="attendance.php">[簽到已得10, 補簽卡: 0]</a></td></tr></table>
+<h2>簽到成功</h2><table><tr><td class="text"><p>這是您的第 <b>2</b> 次簽到，已連續簽到 <b>1</b> 天，本次簽到獲得 <b>10</b> 個魔力值。點擊白色背景的圓點進行補簽。你目前擁有補簽卡 <b>0</b> 張。</p></td></tr></table></body></html>`
+	attendanceTraditionalAlready = `<html><body><table id="info_block"><tr><td>歡迎回來 <a href="attendance.php">[簽到已得10, 補簽卡: 0]</a></td></tr></table>
+<h2>抱歉</h2><table><tr><td class="text">您今天已經簽到過了，請勿重複刷新。</td></tr></table></body></html>`
+	attendanceTraditionalHeaderOnly = `<html><body><table id="info_block"><tr><td>歡迎回來 <a href="attendance.php">[簽到已得10, 補簽卡: 0]</a></td></tr></table><h2>404 Not Found</h2></body></html>`
+	attendanceUnknownPage           = `<html><body><table id="info_block"><tr><td>欢迎回来</td></tr></table><h2>404 Not Found</h2></body></html>`
+	attendanceLoginPage             = `<html><body><form method="post" action="takelogin.php"><input name="username"/></form></body></html>`
 )
 
 func pageText(t *testing.T, html string) string {
@@ -55,6 +62,9 @@ func TestAttendanceConfig_MatchDefaultNexusPHP(t *testing.T) {
 		{name: "success", page: attendanceSuccessPage, want: AttendSigned, matched: true, message: "这是您的第 128 次签到"},
 		{name: "already signed", page: attendanceAlreadyPage, want: AttendAlready, matched: true, message: "您今天已经签到过了"},
 		{name: "english success", page: attendanceEnglishSuccess, want: AttendSigned, matched: true},
+		{name: "traditional success", page: attendanceTraditionalSuccess, want: AttendSigned, matched: true, message: "這是您的第 2 次簽到"},
+		{name: "traditional already signed", page: attendanceTraditionalAlready, want: AttendAlready, matched: true, message: "您今天已經簽到過了"},
+		{name: "traditional header only", page: attendanceTraditionalHeaderOnly, matched: false},
 		{name: "unrelated page", page: attendanceUnknownPage, matched: false},
 	}
 	for _, tc := range cases {
