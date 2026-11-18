@@ -23,7 +23,8 @@ const (
 
 /*
  * 按用户串行：每个 open_id 一条队列，有消息时才起工作协程，空闲一分钟退出；全局 16 个处理槽。
- * 同一个人的消息一条处理完才处理下一条，排队的按发出时间（create_time，毫秒）排，同一毫秒按收到的先后，
+ * 同一个人的消息一条处理完才处理下一条，排队的按发出时间（create_time，毫秒）排，同一毫秒按进入 onMessage 的先后
+ * （SDK 先开 goroutine 再调我们，帧在连接上的先后拿不到；同一个人在同一毫秒发出两条，人手发消息时不会出现），
  * 没有 create_time 的按收到的时间。这样「/delete x」和随后的「确认」不会颠倒。
  *
  * 为什么要排：SDK 每收一帧就开一个 goroutine 调 onMessage（ws/client_session.go:175、client_message.go:34），
@@ -36,7 +37,7 @@ const (
  * 重建以后的实例（见 state.go）；正在处理的那一条随 ctx 取消，与 Telegram、QQ 一致。
  */
 
-// arrivalSeq 是进程级的收到顺序：同一毫秒发出的消息按它排；交接给新实例以后仍然有序。
+// arrivalSeq 是进程级的进队顺序（进入 onMessage 的先后）：同一毫秒发出的消息按它排；交接给新实例以后仍然有序。
 var arrivalSeq atomic.Uint64
 
 // queued 是排着队、还没开始处理的一条消息。
@@ -129,8 +130,10 @@ func (c *Channel) enqueue(userID string, it *queued, adopting bool) bool {
 }
 
 // drain 是一个人的工作协程：等到 readyAt 以后按顺序处理，空闲 queueIdle 以后退出；通道关闭时马上退出。
-// ctx 取消以后绝不再调 deliver：先拿处理槽，再在锁里看一次 ctx 与 sealed 才取出，取消了就不取，
-// 消息留在队首，由 seal 交给下一个实例。取出以后到 deliver 之间没有会阻塞的步骤。
+// ctx 取消以后不再取出消息：先拿处理槽，再在锁里看一次 ctx 与 sealed 才取出，取消了就不取，
+// 消息留在队首，由 seal 交给下一个实例。Close 也在这把锁里取消 ctx，所以「取出」与「取消」有确定的先后：
+// 取消以前取出的那一条就是正在处理的，随 ctx 取消（与 Telegram、QQ 一致）。取出以后到 deliver 之间没有会阻塞的步骤。
+// 交接时旧实例正在处理的那条如果不理会取消、继续跑，新实例接手的同一个人的后续消息会和它同时处理。
 func (c *Channel) drain(userID string, uq *userQueue) {
 	q := c.queues
 	idle := c.timing(c.queueIdle, defaultQueueIdle)

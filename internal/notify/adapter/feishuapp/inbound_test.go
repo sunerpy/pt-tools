@@ -582,6 +582,22 @@ func TestReload_NoDeliverAfterCancelWhileWaitingForSlot(t *testing.T) {
 	assert.Equal(t, users[maxHandlers], rec2.got()[0].ChannelUserID)
 }
 
+// Close 在队列锁里取消 ctx：drain 在同一把锁里看 ctx 才取出消息，「取出」与「取消」因此有确定的先后，
+// 不会有一条消息在检查 ctx 以后、交给 MessageChain 以前被取消，既不算正在处理、也没留给交接。
+func TestClose_CancelsUnderQueueLock(t *testing.T) {
+	c, _, _, _ := startChannel(t, testConfig)
+	c.queues.mu.Lock()
+	var unlock sync.Once
+	defer unlock.Do(c.queues.mu.Unlock) // 断言失败时也放开，免得收尾的 seal 一直等锁
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close(context.Background()) }()
+	require.Never(t, func() bool { return c.ctx.Err() != nil }, 100*time.Millisecond, 5*time.Millisecond,
+		"拿着队列锁时 Close 不能取消 ctx")
+	unlock.Do(c.queues.mu.Unlock)
+	require.Eventually(t, func() bool { return c.ctx.Err() != nil }, 5*time.Second, time.Millisecond)
+	require.NoError(t, <-closed)
+}
+
 // 留下的消息只交给通道编号相同的实例；过了时限没人取就丢掉，记一条 Warn 写明几条。
 func TestReload_LeftoversOnlyForSameConfAndExpire(t *testing.T) {
 	c1, _, runners1, rec1 := startChannel(t, testConfig)

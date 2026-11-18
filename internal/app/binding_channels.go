@@ -12,7 +12,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sunerpy/pt-tools/internal/notify/adapter/feishuapp"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -138,11 +138,11 @@ func readChannelLists(row models.NotificationConf) (channelLists, error) {
 				return out, fmt.Errorf("解析 %s default_chat_id 失败: %w", row.ChannelType, err)
 			}
 		}
-		if row.ChannelType == feishuapp.ChannelType {
+		if row.ChannelType == "feishu_app" {
 			// 与适配器解析配置时同一套规则（去掉首尾空白、跳过空项、去重）：配置网关、AI 助手或直接调接口
 			// 写进来的名单不经过网页表单的整理，这里不规整的话，带空格的项绑定以后和入站的 open_id 对不上
-			out.admins = feishuapp.NormalizeIDs(out.admins)
-			out.allowed = feishuapp.NormalizeIDs(out.allowed)
+			out.admins = notify.NormalizeIDs(out.admins)
+			out.allowed = notify.NormalizeIDs(out.allowed)
 			out.defaultChat = strings.TrimSpace(out.defaultChat)
 		}
 	}
