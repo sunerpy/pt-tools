@@ -34,7 +34,7 @@ type wsHooks struct {
 	onError        func(err error)
 }
 
-// wsRunner 是长连接客户端：生产实现是 larkws.Client。客户端停下以后不能再 Start，每一轮都要新建。
+// wsRunner 是长连接客户端：生产实现是 larkws.Client。连上过的客户端停下以后不能再 Start（见 supervise 的注释）。
 type wsRunner interface {
 	Start(ctx context.Context) error
 	CloseAndWait(ctx context.Context) error
@@ -214,4 +214,12 @@ func newLarkRunnerAt(base string, cfg *Config, hooks wsHooks, log larkcore.Logge
 func isClientError(err error) bool {
 	var ce *larkws.ClientError
 	return errors.As(err, &ce)
+}
+
+// sdkTerminalMsg 是 SDK 的 errClientTerminal（ws/error.go:12，没有导出）：这个客户端已经停在终态，不能再 Start。
+const sdkTerminalMsg = "websocket client cannot be restarted"
+
+// isTerminalClient 报告 Start 是不是因为客户端已经停在终态而直接返回。
+func isTerminalClient(err error) bool {
+	return err != nil && strings.Contains(err.Error(), sdkTerminalMsg)
 }

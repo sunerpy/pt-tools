@@ -29,8 +29,16 @@ func (c *Channel) timing(v, def time.Duration) time.Duration {
 /*
  * supervise 是长连接的监督循环，参照 Telegram 的 runInbound：
  *  1. 先登记 app_id，被同一进程里的另一个通道占着时不连、标异常，每分钟重试；
- *  2. 每一轮都新建 SDK 客户端（停下以后不能再 Start），Start 阻塞运行，断线重连由 SDK 自己做；
- *  3. Start 只在 ctx 取消、不可重试的错误或服务端下发的重试次数用完时返回：后两种标异常、退避、重建。
+ *  2. Start 阻塞运行，断线重连由 SDK 自己做；
+ *  3. Start 只在 ctx 取消、不可重试的错误或服务端下发的重试次数用完时返回：后两种标异常、退避、再 Start。
+ *
+ * 客户端只在必要时新建。SDK 每新建一个客户端就留下一个停不掉的定时协程（上游缺陷：ws/client.go:227 的
+ * larkcache.New(30s) 在 cache/cache.go:53 起协程、:12 靠 finalizer 停，可协程一直引用着 cache，finalizer 不会跑）。
+ * SDK 只在 ctx 取消、Close，或者连上过以后失败时把客户端标成终态（ws/client_lifecycle.go:125-128），
+ * 所以这一轮没连上过（凭据错误、网络不通）就下一轮接着用它，凭据错误时不会每 10 分钟多漏一个；
+ * 热重载（每个新实例一个）与连上过以后结束的那一轮仍各新建一个，数量跟着改设置、断线重建的次数增长，不随时间自己涨。
+ * 「连上过」不只看 onReady：连接刚建好就失效时 SDK 已经记下 everConnected（client_session.go:53-55），
+ * 却不调回调（:71-72）。所以复用的客户端 Start 回「cannot be restarted」时，丢掉它、马上新建一个重试。
  */
 func (c *Channel) supervise() {
 	ctx := c.ctx
@@ -54,14 +62,29 @@ func (c *Channel) supervise() {
 	defer apps.release(cfg.AppID, c)
 
 	wait := c.timing(c.backoffBase, defaultBackoffBase)
+	var r wsRunner
+	reused := false // r 已经 Start 过（这一轮是复用）
 	for {
+		if r == nil {
+			r, reused = c.newRunner(cfg, c.hooks(), c.sdkLogger()), false
+		}
 		started := time.Now()
-		r := c.newRunner(cfg, c.hooks(), c.sdkLogger())
+		c.linked.Store(false)
 		c.setRunner(r)
 		err := r.Start(ctx)
 		c.setRunner(nil)
 		if ctx.Err() != nil {
 			return
+		}
+		if reused && isTerminalClient(err) {
+			// SDK 认为它连上过（见上面的注释）：换一个新的马上重试，这一轮不算失败
+			r = nil
+			continue
+		}
+		if c.linked.Load() {
+			r = nil // 连上过：SDK 已经把它标成终态
+		} else {
+			reused = true
 		}
 		if err == nil {
 			err = errors.New("长连接意外结束")
@@ -105,6 +128,7 @@ func jitter(d time.Duration) time.Duration {
 // hooks 是交给 SDK 的回调：只改原子变量，不阻塞，也不在里面调 CloseAndWait（会等自己）。
 func (c *Channel) hooks() wsHooks {
 	connected := func() {
+		c.linked.Store(true)
 		c.setWS(wsConnected)
 		c.logger().Infof("飞书应用机器人(%d): 长连接已连上", c.confID)
 	}

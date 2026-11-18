@@ -42,6 +42,8 @@ type fakeFeishu struct {
 	acks     chan wsAck
 	messages []fakeMessage
 	pings    atomic.Int32
+	// endpoints 是 /callback/ws/endpoint 被调了几次（每次 Start 或重连各一次）
+	endpoints atomic.Int32
 }
 
 type wsAck struct {
@@ -79,6 +81,7 @@ func newFakeFeishu(t *testing.T, appID, secret string) *fakeFeishu {
 }
 
 func (f *fakeFeishu) endpoint(w http.ResponseWriter, r *http.Request) {
+	f.endpoints.Add(1)
 	var req larkws.BootstrapRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	w.Header().Set("Content-Type", "application/json")
@@ -194,18 +197,19 @@ func (f *fakeFeishu) waitAck(t *testing.T) wsAck {
 	}
 }
 
-// protocolChannel 建一个用真 SDK 连假飞书的通道；setup 在 Init 以前调用（可为空）。
+// protocolChannel 建一个用真 SDK 连假飞书的通道；setup 在 Init 以前、工厂与默认时长设好以后调用（可为空），
+// 可以改时长、包一层工厂。
 func protocolChannel(t *testing.T, f *fakeFeishu, confID uint, secret string, setup func(*Channel)) (*Channel, *chainRecorder) {
 	t.Helper()
 	c := New()
-	if setup != nil {
-		setup(c)
-	}
 	c.newAPI = func(cfg *Config, log larkcore.Logger) apiSender { return newLarkAPIAt(f.srv.URL, cfg, log) }
 	c.newRunner = func(cfg *Config, h wsHooks, log larkcore.Logger) wsRunner {
 		return newLarkRunnerAt(f.srv.URL, cfg, h, log)
 	}
 	c.clientErrWait = time.Hour
+	if setup != nil {
+		setup(c)
+	}
 	raw := `{"app_id":"` + f.appID + `","app_secret":"` + secret + `","admin_users":["ou_admin"]}`
 	require.NoError(t, c.Init(context.Background(), confOf(confID, raw)))
 	t.Cleanup(func() {
@@ -266,6 +270,26 @@ func TestProtocol_InvalidCredentialsMarksError(t *testing.T) {
 	require.Eventually(t, func() bool { return strings.Contains(logJoined(logs.All()), "1000040346") }, 10*time.Second, 5*time.Millisecond)
 	assert.Equal(t, 0, f.connCount())
 	assert.NotContains(t, logJoined(logs.All()), "wrong-secret")
+}
+
+// 凭据一直不对：真的 SDK 客户端没连上过，下一轮接着用它再 Start，不新建（每新建一个，SDK 就多留一个定时协程）。
+func TestProtocol_InvalidCredentialsReusesClient(t *testing.T) {
+	resetProcessState(t)
+	appID := uniqueAppID("cli_proto_reuse")
+	f := newFakeFeishu(t, appID, "right-secret")
+	var built atomic.Int32
+	c, _ := protocolChannel(t, f, 24, "wrong-secret", func(c *Channel) {
+		c.clientErrWait = 20 * time.Millisecond
+		inner := c.newRunner
+		c.newRunner = func(cfg *Config, h wsHooks, log larkcore.Logger) wsRunner {
+			built.Add(1)
+			return inner(cfg, h, log)
+		}
+	})
+	require.Eventually(t, func() bool { return f.endpoints.Load() >= 4 }, 10*time.Second, 5*time.Millisecond, "凭据错误时每轮都会再试")
+	assert.Equal(t, int32(1), built.Load(), "四轮都用同一个客户端")
+	assert.False(t, c.Healthy())
+	assert.Equal(t, 0, f.connCount())
 }
 
 // 热重载：关掉旧实例再建新实例，服务端始终只有一条连接（同一应用的第二个客户端会把事件随机抢走）。

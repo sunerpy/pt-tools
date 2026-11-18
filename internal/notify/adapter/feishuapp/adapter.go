@@ -65,6 +65,8 @@ type Channel struct {
 
 	runnerMu sync.Mutex
 	runner   wsRunner
+	// linked：这一轮 Start 里长连接连上过（onReady / onReconnected），监督循环据此决定下一轮复用还是新建客户端
+	linked atomic.Bool
 
 	// goMu 保护 stopping 与 wg.Add：Close 开始以后不再起新协程
 	goMu     sync.Mutex
