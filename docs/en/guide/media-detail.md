@@ -1,4 +1,4 @@
-# Title details and the subscription calendar <Badge type="tip" text="1.0 preview" />
+# Title details and the subscription calendar
 
 The title details page puts a film or series as TMDB describes it next to where it stands on your side: how many episodes are in the library, which torrents are seeding, the subscription, whether the media server has it, whether each episode is in the library, and which torrents were downloaded for it; when you no longer want a title, you delete its library files, torrents and subscription from here. The subscription calendar lists, day by day, when each episode of a subscribed series airs and when a subscribed film is released, and whether it is in the library yet; once a day it can also push today's updates to your notification channels.
 

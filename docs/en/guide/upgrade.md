@@ -4,7 +4,7 @@ This page covers upgrading pt-tools, backing up and restoring its data, and remo
 
 ## Upgrading
 
-The database schema is migrated automatically on start, so an upgrade needs nothing done to the data. The first time a new version starts, pt-tools takes a backup automatically before it migrates the database (see [Backing up](#backing-up)), so there is no need to back up by hand before upgrading; for an extra copy, click Back up now (立即备份) in the web interface first.
+The database schema is migrated automatically on start, so an upgrade needs nothing done to the data. The first time a new version starts, pt-tools takes a backup automatically before it migrates the database (see [Backing up](#backing-up)), so there is no need to back up by hand before upgrading; for an extra copy, click Back up now (立即备份) in the web interface first (0.48.0 has no such button; when upgrading from 0.48.0, copy the data directory instead).
 
 ### Docker
 
@@ -117,7 +117,7 @@ A backup taken by a newer version of pt-tools (with a newer database version) ca
 
 ### Without the restore feature
 
-To go back to an older version (for example from a preview release to 0.48.0), which has no restore feature: stop pt-tools, extract the pre-upgrade backup (`pt-tools-backup-<time>-pre-upgrade.tar.gz`), put its `torrents.db` and `secret.key` in the data folder (and delete `torrents.db-wal` and `torrents.db-shm` there), then start the older version.
+To go back to an older version (for example from 1.0 to 0.48.0), which has no restore feature: stop pt-tools, extract the pre-upgrade backup (`pt-tools-backup-<time>-pre-upgrade.tar.gz`), put its `torrents.db` and `secret.key` in the data folder (and delete `torrents.db-wal` and `torrents.db-shm` there), then start the older version.
 
 If you only have the base64 copy of the key, write it back with `secret import` (`--force` is needed when a key file already exists):
 

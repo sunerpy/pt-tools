@@ -1,4 +1,4 @@
-# NAS 监控 <Badge type="tip" text="1.0 预览版" />
+# NAS 监控
 
 「系统 → NAS 监控」管首页 [NAS 概览](home-and-health.md#nas-概览)的数据从哪来：pt-tools 所在的主机（本机来源）与接入的 NAS（现在能接入 [TrueNAS](#truenas)、[Glances](#glances)，以及实验性的[群晖](#群晖)与[飞牛](#飞牛)）。pt-tools 在后台定时读这些来源，读到的数据放在内存里；首页和这一页显示的都是内存里的数据，打开页面不会再去连一次。
 

@@ -2,8 +2,6 @@
 
 The User Stats page summarizes upload, download, ratio, bonus and seeding data across your sites. pt-tools stores a snapshot for a site on each day its data is fetched successfully, and uses the snapshots to compute daily, weekly and monthly increments, draw trends on the page, and optionally send the previous day's increments (or today's up to the send time) to a notification channel (the daily report, off by default).
 
-The snapshots, increments, trends and daily report were added in the 1.0 preview; the Statistics (用户统计) page itself was already in 0.48.0.
-
 ## Where the data comes from
 
 - Every time pt-tools successfully fetches a site's user data, it updates the site's record and writes that day's snapshot; fetching several times a day keeps only the last one.
@@ -69,7 +67,7 @@ There are two periods (统计范围):
 - **Previous day** (前一天, the default): the report covers the whole previous day. The send time only decides when you receive it, so a morning send time still gives a complete day.
 - **Today up to the send time** (当天截至发送时刻): the report covers today from midnight to the send time. Uploads, check-ins and brushing after the send time are not counted, so today's numbers are complete only when the send time is close to midnight (the latest send time you can pick is 23:45).
 
-The title says which day the report covers: 📊 每日战报 2026-10-30（前一天） for the previous day and 📊 每日战报 2026-10-31（截至 22:03） for today up to 22:03, and the lines start with 昨日 (yesterday) or 今日 (today). Earlier 1.0 preview builds only had the today period; after upgrading, a daily report that is already on covers the previous day, and choosing Today up to the send time brings back the old behaviour.
+The title says which day the report covers: 📊 每日战报 2026-10-30（前一天） for the previous day and 📊 每日战报 2026-10-31（截至 22:03） for today up to 22:03, and the lines start with 昨日 (yesterday) or 今日 (today).
 
 Each day at the send time, plus a fixed per-installation offset of up to 10 minutes (picked at random the first time it is needed and then kept, no later than 23:59), pt-tools sends one report:
 

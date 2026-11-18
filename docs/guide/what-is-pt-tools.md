@@ -18,7 +18,7 @@ pt-tools 是一个独立的程序，Web 界面和后台任务在同一个进程�
 - **AI 助手**：在「系统 → AI 助手设置」接上一个大模型以后，可以在网页、手机 App、Telegram 或 QQ 里用自然语言查数据、搜索和推送种子、管理订阅；改动类操作每次都要你确认才执行。见 [AI 助手](assistant.md)。
 - **手机 App 与接口**：手机 App 在「系统 → 远程访问」扫码配对，经直连或 relay 连回 pt-tools，连接端到端加密，见[手机 App](mobile-app.md)；脚本与 MCP 客户端用 [API 令牌](api-tokens.md)接入，MoviePilot、IYUU、Sonarr 这类工具可以经 [qB 兼容入口](qbit-compat.md)把 pt-tools 当成 qBittorrent，Seerr 可以经 [Servarr 兼容入口](servarr.md)把它当成 Radarr、Sonarr。
 
-其中刷流、辅种、转移做种、追剧与媒体库、首页、手机 App、AI 助手等是 1.0 预览版加入的功能，正式版 0.48.0 尚未包含，见 [1.0 预览版新功能](whats-new-1.0.md)。
+1.0 相对 0.48.0 加入的功能见 [1.0 新功能](whats-new-1.0.md)。
 
 ## 界面中的页面
 

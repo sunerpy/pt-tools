@@ -261,8 +261,6 @@ ufw allow 6701/tcp
 
 For incoming messages there is no difference: a QQ number in either list may talk to the bot, messages from numbers in neither list are ignored, and with both lists empty nobody can use the bot. Neither list grants admin rights. The only difference is who receives messages: the test message and notifications without their own recipient (daily report, sign-in, followed shows, login reminders, RSS push notifications and so on) go to the first Admin QQ number as a private message; if there is none, to the first Allowed QQ number; if both are empty, to the first linked account. With none of them the notification cannot be delivered, and the reason (QQ 通道无可用收件人, no recipient on the QQ channel) is recorded in the audit log.
 
-> Preview releases up to 1.0.0-rc.44 looked up a recipient only for the test message, so notifications such as the daily report failed on QQ channels (the log said QQ 适配器: 缺少目标 chat_id, missing target chat_id) while the test message got through. Later versions fix this.
-
 - When a listed QQ number that is not linked sends a command, the bot replies 请先 /bind <绑定码> 完成绑定 ("link first with /bind followed by the code") and runs nothing.
 - A linked QQ number can run every command, including the admin commands.
 

@@ -21,7 +21,7 @@ pt-tools is a single program: the web interface and the background jobs run in t
 - **AI assistant**: once a language model is connected under System → AI assistant settings (系统 → AI 助手设置), you can ask about your data, search for and push torrents and manage subscriptions in plain language, on the web, in the mobile app, or in Telegram or QQ. Every action that changes something waits for you to confirm it. See [AI assistant](assistant.md).
 - **Mobile app and APIs**: the mobile app pairs by scanning a QR code from System → Remote access (系统 → 远程访问) and connects back to pt-tools directly or through a relay, end-to-end encrypted; see [Mobile app](mobile-app.md). Scripts and MCP clients connect with [API tokens](api-tokens.md). Tools such as MoviePilot, IYUU and Sonarr can treat pt-tools as qBittorrent through the [qB-compatible entrance](qbit-compat.md), and Seerr can treat it as Radarr and Sonarr through the [Servarr-compatible entrance](servarr.md).
 
-Seed boosting, cross-seeding, torrent transfer, following and the media library, the home page, the mobile app and the AI assistant are among the features added in the 1.0 preview and are not in the 0.48.0 stable release yet; see [What's new in the 1.0 preview](whats-new-1.0.md).
+[What's new in 1.0](whats-new-1.0.md) lists what 1.0 adds over 0.48.0.
 
 ## The pages of the interface
 

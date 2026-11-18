@@ -1,4 +1,4 @@
-# Servarr 兼容入口 <Badge type="tip" text="1.0 预览版" />
+# Servarr 兼容入口
 
 Servarr 兼容入口让 [Seerr](https://github.com/seerr-team/seerr) 把 pt-tools 当成 Radarr 与 Sonarr 用：在 Seerr 里请求的电影建成 pt-tools 的电影订阅，剧集请求的每一季建成一条追剧；pt-tools 搜索、推送、整理入库以后，Seerr 扫描时看到的是这些订阅的状态与库里的文件。订阅照常按质量档案挑资源、经过磁盘空间与站点做种容量的检查，见[追剧与订阅](media-subscribe.md)。
 

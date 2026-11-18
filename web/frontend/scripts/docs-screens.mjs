@@ -22,7 +22,7 @@
  * 添加通道弹窗、Telegram 与 QQ 通道的凭证、绑定列表与生成绑定码弹窗、操作审计、RSS 通知日志。
  * 凭证里的 Token、用户 ID 都是示例值（见下方 GUIDE_STUBS），不是真实账号。
  *
- * 截图里的版本号取 .release-please-manifest.json 的当前版本，并显示「已是最新」：验收假数据故意给的是
+ * 截图里的版本号取 .release-please-manifest.json 的当前版本（PT_VERSION 可以覆盖），并显示「已是最新」：验收假数据故意给的是
  * 「有新版本」（画板 42 的验收状态），那个状态不该出现在文档截图里。
  *
  * 用法（需要一个已经跑起来的 pt-tools 服务，前端 dist 必须是当前源码构建出来的；
@@ -69,7 +69,8 @@ const guideDir = resolve(
 mkdirSync(guideDir, { recursive: true });
 
 const fixture = (prefix) => FIXTURES.find(([p]) => p === prefix)?.[1];
-const release = `v${JSON.parse(readFileSync(join(here, "../../../.release-please-manifest.json"), "utf8"))["."]}`;
+// PT_VERSION 覆盖版本号：发版以前拍要写进这一版的截图时用（例如 PT_VERSION=1.0.0）
+const release = `v${process.env.PT_VERSION ?? JSON.parse(readFileSync(join(here, "../../../.release-please-manifest.json"), "utf8"))["."]}`;
 const VERSION_STUBS = {
   "/api/version": { ...fixture("/api/version"), version: release },
   "/api/version/check": {

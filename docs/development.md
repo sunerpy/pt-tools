@@ -624,10 +624,10 @@ make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 
 #### 预览版（RC）
 
-`release-please-config.json` 根包里的 `"prerelease": true` 是预览版开关，与 `"versioning": "prerelease"`、`"prerelease-type": "rc.1"` 配合使用：
+现在按稳定版发版：`release-please-config.json` 的根包里没有预览版的设置，release PR 的版本不带后缀。预览版和稳定版一样只从受保护的 `main` 发布；要先发几个预览版时，在根包里加上 `"versioning": "prerelease"`、`"prerelease": true` 与 `"prerelease-type": "rc.1"`，其中 `"prerelease": true` 是开关：
 
 - 开启时，release PR 的版本带 `-rc.N`：从稳定版开始取下一个版本的 `rc.1`（`0.48.0` → `0.49.0-rc.1`），之后只递增 `N`（`0.49.0-rc.1` → `0.49.0-rc.2`）。draft 标为预发布，公开时不设为 Latest；安装说明使用 `.github/release-notes/rc-footer.md`；不提交 Edge 商店；容器镜像只推版本号标签，不更新 `latest` 与 `主.次`、`主` 标签。
-- 删除 `"prerelease": true` 即回到稳定版：下一个 release PR 去掉后缀（`0.49.0-rc.2` → `0.49.0`），另外两项可以保留。
+- 删除 `"prerelease": true` 即回到稳定版：下一个 release PR 去掉后缀（`0.49.0-rc.2` → `0.49.0`），另外两项可以保留。三项都删掉时，默认的版本策略会把 `-rc.N` 原样带到下一版（`1.0.0-rc.60` 加一个 feat 是 `1.1.0-rc.60`），而且没有了开关，这一版会按稳定版公开、设为 Latest、提交 Edge：所以那次合进 `main` 的提交正文要带 `Release-As: X.Y.Z`（1.0.0 就是这样发的），合并 release PR 以前核对标题正好是 `chore: release X.Y.Z`。
 - 扩展 manifest 的版本只能从 `rc.N`（N 为 1–65534）推导（`.github/scripts/extension-version.sh`），所以 `prerelease-type` 必须是 `rc.1`，不能写成 `rc` 或 `beta`。
 - 手机 App 的构建号也从版本推导（`.github/scripts/mobile-build-number.sh`），`rc.N` 的 N 不能超过 98，次版本与修订号不能超过 99，见下面的[手机 App 发版](#手机-app-发版)。
 
@@ -663,9 +663,9 @@ Key 随二进制分发，能被取出来，不当作秘密；放在 Secret 里�
 
 用 `--keep-previous` 部署时，脚本退出以前另起一个脱离 ssh 会话的看门狗：`--pending-timeout` 秒（默认 900，`0` 不起）以后这次部署仍然没有收尾，就换回旧容器（第一次部署时删掉新容器与占位容器）。它按容器 ID 只认这次部署的两个容器，已经收尾、回滚过或者又部署过就什么都不做；日志在 `/tmp/deploy-relay-<name>.watchdog.<uid>.log`。服务器在这期间重启时看门狗也不在了，要手动收尾。
 
-`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器；收尾在服务器上其实已经做完（之后这一步被取消、ssh 没有带回结果）时，这一步只给提示，不报失败。收尾时核对服务器上跑的仍是这次的镜像，看门狗已经换回旧容器时收尾失败。runner 中途丢失时由看门狗在 900 秒以后换回旧容器。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
+`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器；收尾在服务器上其实已经做完（之后这一步被取消、ssh 没有带回结果）时，这一步只给提示，不报失败。收尾时核对服务器上跑的仍是这次的镜像，看门狗已经换回旧容器时收尾失败。runner 中途丢失时由看门狗在 900 秒以后换回旧容器。也可以在受保护的 `main` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
 
-部署用的 secret 放在 GitHub Environment `hosted-relay` 里，并在仓库设置里把这个 Environment 的部署分支限定为 `main` 与 `v1.0.0-rc`（需要的话再加审批）；`release.yml` 不把仓库的 secret 传给它。
+部署用的 secret 放在 GitHub Environment `hosted-relay` 里，并在仓库设置里把这个 Environment 的部署分支限定为 `main`（需要的话再加审批）；`release.yml` 不把仓库的 secret 传给它。
 
 | 名称                                                  | 放在哪里                 | 用途                                                                                       |
 | ----------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
@@ -684,7 +684,7 @@ Key 随二进制分发，能被取出来，不当作秘密；放在 Secret 里�
 「变量」可以是仓库变量，也可以放在 `hosted-relay` 里。在服务器上手动部署、收尾或回滚也用同一个脚本：
 
 ```bash
-bash scripts/deploy-relay.sh --image sunerpy/pt-tools:v1.0.0-rc.19 --public-url wss://relay.example.com --client-ip-header X-Real-IP
+bash scripts/deploy-relay.sh --image sunerpy/pt-tools:v1.0.0 --public-url wss://relay.example.com --client-ip-header X-Real-IP
 bash scripts/deploy-relay.sh --finalize    # 用 --keep-previous 部署过、检查通过以后删掉旧容器
 bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署时删掉新容器）
 ```
@@ -709,7 +709,7 @@ PR 改到打包流程（`.github/actions/build-android-release`）、Android 工
 | `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` | `mobile-release` 的 secret | keystore 口令、密钥别名与密钥口令                                               |
 | `ANDROID_CERT_SHA256`                                                    | 变量                       | 签名证书的 SHA-256（`apksigner verify --print-certs` 的写法），正式发版必须设好 |
 
-`mobile-release` 的部署分支限定为 `main` 与 `v1.0.0-rc`（`Release` workflow 也只在这两个分支上运行）。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`。别名别用项目名这类日志里常见的词：secret 的值在 Actions 日志里会被换成 `***`。
+`mobile-release` 的部署分支限定为 `main`（`Release` workflow 也只在 `main` 上运行）。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`。别名别用项目名这类日志里常见的词：secret 的值在 Actions 日志里会被换成 `***`。
 
 ```bash
 keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias ptt-app-signing -keyalg RSA -keysize 4096 -validity 10000

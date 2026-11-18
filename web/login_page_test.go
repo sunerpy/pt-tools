@@ -119,6 +119,7 @@ func TestLoginPageRendersBoardContent(t *testing.T) {
 		loginFootNote,
 		`src="/wordmark.svg"`,
 		`src="/logo.svg"`,
+		`src="/logo-dark.svg"`,
 		`id="loginAlert"`,
 		`class="login-reveal"`,
 	} {
@@ -170,7 +171,7 @@ func TestLoginBrandAssetsAreNotBehindAuth(t *testing.T) {
 	srv := NewServer(nil, nil)
 	mux := http.NewServeMux()
 	distFS := mustSub(staticFS, "static/dist")
-	for _, asset := range []string{"logo.svg", "wordmark.svg", "favicon.ico"} {
+	for _, asset := range []string{"logo.svg", "logo-dark.svg", "wordmark.svg", "favicon.ico"} {
 		mux.HandleFunc("/"+asset, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, distFS, asset)
 		})
@@ -182,7 +183,7 @@ func TestLoginBrandAssetsAreNotBehindAuth(t *testing.T) {
 	// 登录页未登录就要显示品牌图，所以这几条路径不能落到 "/" 兜底的 302。
 	// 这里不断言 200：make embed-placeholder 构出来的 dist 里没有这些文件，
 	// 那种情况下 404 是对的，302 才是错的。
-	for _, path := range []string{"/logo.svg", "/wordmark.svg", "/favicon.ico"} {
+	for _, path := range []string{"/logo.svg", "/logo-dark.svg", "/wordmark.svg", "/favicon.ico"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		assert.NotEqual(t, http.StatusFound, rec.Code, "%s 被重定向到了登录页", path)

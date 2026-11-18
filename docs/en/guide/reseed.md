@@ -1,4 +1,4 @@
-# IYUU cross-seeding <Badge type="tip" text="1.0 preview" />
+# IYUU cross-seeding
 
 IYUU cross-seeding (IYUU 辅种), under Download (下载), uses [IYUU](https://doc.iyuu.cn/) to find torrents on other sites that carry the same data, and adds them to the same downloader: the data is stored once and seeds on several sites. It is off by default. The page has five tabs, Statistics (统计), Settings (设置), Sites (站点), Rounds (轮次) and Records (记录); once a token is set it opens on Statistics.
 

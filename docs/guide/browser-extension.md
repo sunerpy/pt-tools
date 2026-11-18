@@ -29,7 +29,7 @@
 
 扩展先认登录 Cookie 的格式：站点自己的那一组（OurBits 的 `ourbits_jwt`、U2 的 `nexusphp_u2`、BYR 的 `auth_token` 等），NexusPHP 的 `c_secure_uid` 加 `c_secure_pass`（`c_secure_tracker_ssl` 只是偏好，没有也算登录着），以及新版 NexusPHP（例如星陨阁）只有一个 `c_secure_pass` 的。认出来的显示「有效」和剩余天数，同步时直接推给 pt-tools。站点把 Cookie 设在上一级域名上、或者在 http 下设的（例如 OpenCD）也能认出来。春天的 `SPRINGID` 是例外：没登录、只打开过站点也会有它，所以认出来也显示「待验证」，交给 pt-tools 验证。
 
-认不出格式、但有像登录用的 Cookie 时显示「待验证」，没同步过的这一行提示点「同步」由 pt-tools 验证：扩展把浏览器发给这个站点的整组 Cookie 交给 pt-tools，pt-tools 先用这组 Cookie 登录一次站点，登录上了才保存；登录不上就不保存、原来的 Cookie 不动，这一行改写 pt-tools 给的原因（没登录、被人机验证拦下、pt-tools 连不上站点等），再点「同步」会再验证一次。浏览器里的 Cookie 变了以后，这个原因就不再显示。这要 pt-tools 1.0.0-rc.45 或更新的版本，旧版本不会推。定时同步只替 pt-tools 里已启用、或者打开了自动同步的站点这么做；同一组 Cookie 被拒绝一次以后，Cookie 不变就不再重试。
+认不出格式、但有像登录用的 Cookie 时显示「待验证」，没同步过的这一行提示点「同步」由 pt-tools 验证：扩展把浏览器发给这个站点的整组 Cookie 交给 pt-tools，pt-tools 先用这组 Cookie 登录一次站点，登录上了才保存；登录不上就不保存、原来的 Cookie 不动，这一行改写 pt-tools 给的原因（没登录、被人机验证拦下、pt-tools 连不上站点等），再点「同步」会再验证一次。浏览器里的 Cookie 变了以后，这个原因就不再显示。这要 pt-tools 1.0.0 或更新的版本，旧版本不会推。定时同步只替 pt-tools 里已启用、或者打开了自动同步的站点这么做；同一组 Cookie 被拒绝一次以后，Cookie 不变就不再重试。
 
 只有统计、Cloudflare、语言偏好这类 Cookie 时显示「缺失」，这一行写「没有登录 Cookie，多半没登录」；登录后会出现「同步」。
 

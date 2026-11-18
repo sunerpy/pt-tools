@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="./web/frontend/public/logo.png" alt="pt-tools" width="128" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./web/frontend/public/logo-dark.svg" />
+  <img src="./web/frontend/public/logo.svg" alt="pt-tools" width="128" />
+</picture>
 
 # pt-tools
 
@@ -22,17 +25,47 @@
 
 pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流与 IYUU 辅种，订阅电影、追剧并整理进媒体库，每天签到、在封号前提醒，汇总各站点的数据，统一管理 qBittorrent 和 Transmission；手机 App、QQ、Telegram 与内置的 AI 助手都能查看和操作。内置 72 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
 
+> [!TIP]
+> **不会配置，或者懒得一项项填？交给 AI。** 在「AI 助手」里填一个大模型的 API Key，直接告诉它要加哪个下载器、站点、RSS 订阅或通知通道，它列出改以前、改以后，你点确认才保存。也可以打开 [MCP](https://firlab.app/pt-tools/guide/mcp)，给令牌勾上「配置」，让你自己的 Agent（WorkBuddy、Qwen Code、Codex、Claude Code、Cursor 等）帮你读改 pt-tools 的配置。见[让助手改配置](https://firlab.app/pt-tools/guide/assistant#改配置)。
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/home-dark.webp" />
   <img src="./docs/public/screens/home-light.webp" alt="pt-tools 的用户统计页：各站点的上传量、分享率、做种数、积分和等级" width="1440" />
 </picture>
 
+<details open>
+<summary>追剧、刷流、AI 助手与手机 App 的截图（演示数据）</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/media-follow-dark.webp" />
+  <img src="./docs/public/screens/media-follow-light.webp" alt="剧集「长夜将尽」的条目详情页：追剧中 · 第 2 季，库里第 1 季 12 集、第 2 季 6 集，版本锁 HHWEB 2160p" width="640" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/brush-dark.webp" />
+  <img src="./docs/public/screens/brush-light.webp" alt="刷流任务页：在做种子、今日上传与下载、累计分享率，两个刷流任务和最近 30 天的收益" width="1440" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/assistant-dark.webp" />
+  <img src="./docs/public/screens/assistant-light.webp" alt="AI 助手回答追剧进度：第 7 集已经下好并硬链接进剧集库" width="960" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/app-overview-dark.webp" />
+  <img src="./docs/public/screens/app-overview-light.webp" alt="手机 App 的概览页：上传、下载、分享率、魔力与下载器做种" width="300" />
+</picture>
+
+「长夜将尽」是编的剧，海报与背景图是生成的。
+
+</details>
+
 ## 1.0 亮点
 
+- **[AI 助手](https://firlab.app/pt-tools/guide/assistant)与 [MCP](https://firlab.app/pt-tools/guide/mcp)**：接上 OpenAI 兼容的大模型（DeepSeek、通义千问、Kimi、硅基流动、OpenRouter、Ollama 等），在网页、App、Telegram 或 QQ 里用自然语言查数据、搜索与推送种子、追剧和管理订阅、整理媒体库，还能[帮你改配置](https://firlab.app/pt-tools/guide/assistant#改配置)（下载器、站点、RSS、通知通道等，密钥只写不读）；改动类操作每次都先列出改以前、改以后，你确认了才执行。打开 MCP 以后，WorkBuddy、Qwen Code、Codex、Claude Code、Cursor 这类支持 MCP 的 Agent 也能调用同一套工具。
 - **[追剧与媒体库](https://firlab.app/pt-tools/guide/media-subscribe)**：订阅电影、追剧集的一季，pt-tools 到各站点搜索并按质量档案挑资源，下载完按命名模板[整理进媒体库](https://firlab.app/pt-tools/guide/media-library)、刮削 NFO 与海报、通知 Emby、Jellyfin 或 Plex，每部片的[详情页与订阅日历](https://firlab.app/pt-tools/guide/media-detail)写明每一集入库了没有。
 - **[刷流](https://firlab.app/pt-tools/guide/brush)与 [IYUU 辅种](https://firlab.app/pt-tools/guide/reseed)**：从站点的免费列表里按条件挑新种做种、按规则删种，收益按天统计；IYUU 找出其他站点上数据相同的种子，校验到 100% 才开始做种，数据只存一份。
 - **[手机 App](https://firlab.app/pt-tools/guide/mobile-app)与[远程访问](https://firlab.app/pt-tools/guide/remote-access)**：Android App 扫网页上的二维码配对，先试直连、连不上再经 relay 连回 pt-tools，连接端到端加密，在外面也能看概览、管理种子与订阅。
-- **[AI 助手](https://firlab.app/pt-tools/guide/assistant)与 [MCP](https://firlab.app/pt-tools/guide/mcp)**：接上 OpenAI 兼容的大模型，在网页、App、Telegram 或 QQ 里用自然语言查数据、搜索与推送种子、管理订阅，改动类操作每次都要你确认；Claude、Cursor 这类 MCP 客户端也能调用同一套工具。
 - **[首页、NAS 监控与系统体检](https://firlab.app/pt-tools/guide/home-and-health)**：打开网页先到首页，上面是 NAS 的 CPU、内存、网络与存储（数据来自本机、TrueNAS、Glances 等[来源](https://firlab.app/pt-tools/guide/nas-monitor)）、今天播出的集与待处理的事；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘与备份，写明怎么修。
 - **[通知通道与消息模板](https://firlab.app/pt-tools/guide/notify-channels)**：除了 QQ 和 Telegram，通知还能发到企业微信、钉钉、飞书群机器人、Bark、Server 酱、ntfy 与自定义 Webhook，每类事件的标题与正文都可以用模板改写。
 - **[签到与封号提醒](https://firlab.app/pt-tools/guide/site-login-monitoring)**：按站点开启每日签到，验证码与签到题可以交给 AI；长期未登录、快要封号之前提醒你去登录。
@@ -111,6 +144,10 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 解压后运行 `pt-tools web --host 0.0.0.0 --port 8080`。没有 macOS 二进制，macOS 请使用 Docker。systemd 服务、Windows 与更多 Docker 示例见[安装](https://firlab.app/pt-tools/guide/install)、[二进制运行指南](examples/binary-run.md)和[Docker 示例](examples/docker-run.md)。
 
 Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在同一个 Release 里，版本号与服务端相同，见[手机 App](https://firlab.app/pt-tools/guide/mobile-app)。
+
+### 从 0.48 升级
+
+换成新的镜像或二进制，照常启动即可：数据库结构在启动时自动迁移，迁移以前会先自动备份一次。要回到 0.48.0，用这份升级前备份恢复，步骤见[升级与备份](https://firlab.app/pt-tools/guide/upgrade)。
 
 ### 从源码构建
 

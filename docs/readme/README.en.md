@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="../../web/frontend/public/logo.png" alt="pt-tools" width="128" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../web/frontend/public/logo-dark.svg" />
+  <img src="../../web/frontend/public/logo.svg" alt="pt-tools" width="128" />
+</picture>
 
 # pt-tools
 
@@ -22,6 +25,9 @@
 
 pt-tools is a self-hosted manager for private trackers. It downloads from your RSS feeds, boosts your ratio and cross-seeds with IYUU, subscribes to films and follows series into your media library, checks in daily and reminds you before an inactive account is disabled, collects every site's statistics, and manages qBittorrent and Transmission in one place; the mobile app, QQ, Telegram and the built-in AI assistant can all check on it and act. It supports 72 sites out of the box and runs in Docker, on Linux and on Windows. The full documentation is at **[firlab.app/pt-tools/en](https://firlab.app/pt-tools/en/)**.
 
+> [!TIP]
+> **Not sure how to set it up, or don't want to fill in every form? Let AI do it.** Give the AI assistant an API key for a model, then tell it which downloader, site, RSS feed or notification channel to add; it lists the before and after, and saves only when you confirm. Or turn on [MCP](https://firlab.app/pt-tools/en/guide/mcp), tick Config on the token, and let your own agent (WorkBuddy, Qwen Code, Codex, Claude Code, Cursor and others) read and change the pt-tools configuration. See [changing the configuration with the assistant](https://firlab.app/pt-tools/en/guide/assistant#changing-the-configuration).
+
 The web interface is in Chinese; the screenshot below shows it with demo data.
 
 <picture>
@@ -29,12 +35,39 @@ The web interface is in Chinese; the screenshot below shows it with demo data.
   <img src="../public/screens/home-light.webp" alt="The pt-tools user statistics page: upload, ratio, seeding, bonus points and class for every site" width="1440" />
 </picture>
 
+<details open>
+<summary>Screenshots of following shows, brushing, the AI assistant and the mobile app (demo data)</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/media-follow-dark.webp" />
+  <img src="../public/screens/media-follow-light.webp" alt="The title page of the series 长夜将尽 (The Long Night): following season 2, 12 episodes of season 1 and 6 of season 2 in the library, locked to the HHWEB 2160p release" width="640" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/brush-dark.webp" />
+  <img src="../public/screens/brush-light.webp" alt="The brush tasks page: torrents seeding, today's upload and download, overall ratio, two brush tasks and the last 30 days of earnings" width="1440" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/assistant-dark.webp" />
+  <img src="../public/screens/assistant-light.webp" alt="The AI assistant answering how far a followed show has got: episode 7 is downloaded and hard-linked into the TV library" width="960" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/app-overview-en-dark.webp" />
+  <img src="../public/screens/app-overview-en-light.webp" alt="The mobile app's overview: upload, download, ratio, bonus points and torrents seeding in each downloader" width="300" />
+</picture>
+
+长夜将尽 (The Long Night) is a made-up series; its poster and backdrop are generated.
+
+</details>
+
 ## 1.0 highlights
 
+- **[AI assistant](https://firlab.app/pt-tools/en/guide/assistant) and [MCP](https://firlab.app/pt-tools/en/guide/mcp)**: connect an OpenAI-compatible model (DeepSeek, Qwen, Kimi, SiliconFlow, OpenRouter, Ollama and others) and, in plain language on the web, in the app, or in Telegram or QQ, ask about your data, search for and push torrents, follow shows and manage subscriptions, organise your media library, and even [change the configuration](https://firlab.app/pt-tools/en/guide/assistant#changing-the-configuration) (downloaders, sites, RSS feeds, notification channels and more; keys are write-only). Every change first lists the before and after and runs only after you confirm. With MCP turned on, agents that speak MCP, such as WorkBuddy, Qwen Code, Codex, Claude Code and Cursor, can use the same tools.
 - **[Following and the media library](https://firlab.app/pt-tools/en/guide/media-subscribe)**: subscribe to a film or follow one season of a series, and pt-tools searches your sites and picks releases by your quality profile; finished downloads are [filed into your library](https://firlab.app/pt-tools/en/guide/media-library) by naming templates with NFO files and posters, Emby, Jellyfin or Plex is told to scan, and each title's [details page and the subscription calendar](https://firlab.app/pt-tools/en/guide/media-detail) show which episodes are in the library.
 - **[Seed boosting](https://firlab.app/pt-tools/en/guide/brush) and [IYUU cross-seeding](https://firlab.app/pt-tools/en/guide/reseed)**: pick fresh torrents from a site's free list by your conditions, delete them by rules and track the earnings per day; IYUU finds torrents with the same data on other sites, which start seeding only after a 100 % check, with the data stored once.
 - **[Mobile app](https://firlab.app/pt-tools/en/guide/mobile-app) and [remote access](https://firlab.app/pt-tools/en/guide/remote-access)**: the Android app pairs by scanning a QR code in the web interface and connects back directly or, failing that, through a relay, end-to-end encrypted, so you can see the overview and manage torrents and subscriptions away from home.
-- **[AI assistant](https://firlab.app/pt-tools/en/guide/assistant) and [MCP](https://firlab.app/pt-tools/en/guide/mcp)**: connect an OpenAI-compatible model and ask about your data, search for and push torrents and manage subscriptions in plain language on the web, in the app, or in Telegram or QQ, with every change waiting for your confirmation; MCP clients such as Claude and Cursor can use the same tools.
 - **[Home page, NAS monitoring and system check](https://firlab.app/pt-tools/en/guide/home-and-health)**: the web interface opens on a home page with your NAS's CPU, memory, network and storage (from the local host, TrueNAS, Glances and other [sources](https://firlab.app/pt-tools/en/guide/nas-monitor)), the episodes airing today and the things that need attention; the system check tests TMDB, sites, downloaders, media libraries, disks and backups in one go and says how to fix each problem.
 - **[Notification channels and message templates](https://firlab.app/pt-tools/en/guide/notify-channels)**: besides QQ and Telegram, notifications can go to WeCom, DingTalk and Feishu group bots, Bark, ServerChan, ntfy and custom webhooks, and the title and body of each kind of event can be rewritten with templates.
 - **[Check-in and inactivity reminders](https://firlab.app/pt-tools/en/guide/site-login-monitoring)**: turn on daily sign-in per site, with captchas and quiz questions handed to AI, and get a reminder to sign in before an inactive account is disabled.
@@ -113,6 +146,10 @@ Download from [Releases](https://github.com/sunerpy/pt-tools/releases). Every re
 Unpack it and run `pt-tools web --host 0.0.0.0 --port 8080`. There is no macOS binary; on macOS, use Docker. For a systemd service, Windows and more Docker examples, see [Install](https://firlab.app/pt-tools/en/guide/install), the [binary guide](../../examples/binary-run.md) and the [Docker examples](../../examples/docker-run.md).
 
 The Android app (most phones need `pt-tools-app-arm64-v8a.apk`) is in the same release and has the same version number as the server; see [Mobile app](https://firlab.app/pt-tools/en/guide/mobile-app).
+
+### Upgrading from 0.48
+
+Switch to the new image or binary and start it as usual: the database schema is migrated on startup, and a backup is made automatically before the migration. To go back to 0.48.0, restore that pre-upgrade backup as described in [Upgrades and backups](https://firlab.app/pt-tools/en/guide/upgrade).
 
 ### Build from source
 

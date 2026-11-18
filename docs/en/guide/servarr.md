@@ -1,4 +1,4 @@
-# Servarr-compatible entrance <Badge type="tip" text="1.0 preview" />
+# Servarr-compatible entrance
 
 The Servarr-compatible entrance lets [Seerr](https://github.com/seerr-team/seerr) use pt-tools as its Radarr and Sonarr: a movie requested in Seerr becomes a pt-tools movie subscription, and each season of a series request becomes a followed season. Once pt-tools searches, pushes and organises into the library, Seerr's scans see the state of those subscriptions and the files in the library. The subscriptions pick releases by quality profile and go through the disk space and site seeding capacity checks as usual; see [Follow and subscribe](media-subscribe.md).
 

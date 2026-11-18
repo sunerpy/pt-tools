@@ -4,7 +4,7 @@ name: Mobile
 
 on:
   pull_request:
-    branches: [main, v1.0.0-rc]
+    branches: [main]
     paths:
       - "apps/mobile/**"
       - "web/frontend/**"
@@ -16,7 +16,7 @@ on:
       - ".github/workflows/mobile.yml"
       - ".github/actions/setup-flutter/**"
   push:
-    branches: [main, v1.0.0-rc]
+    branches: [main]
     paths:
       - "apps/mobile/**"
       - "web/frontend/**"

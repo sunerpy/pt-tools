@@ -5,8 +5,6 @@ Download → Torrent search (下载 → 种子搜索) searches your sites for to
 - **Keyword search**: type a keyword and press Enter. The results are a table, as in 0.48.0.
 - **Search by title**: while typing, pick a film or series from the drop-down. pt-tools searches every site for that title, scores each result against a quality profile, merges copies of the same release into one card and, for a series, says which episodes a release would fill in.
 
-Search by title, the parsed tags in the results and Filters (筛选), [blocking](#blocking) torrents you do not want and [waiting for free](#waiting-for-free) before downloading were added in the 1.0 preview.
-
 ## Keyword search
 
 Type a keyword and press Enter or click Search (搜索). With no sites selected every enabled site is searched; the row below the box narrows it to a few. Sites that support categories each get a button that filters by the site's own categories. A search waits at most 30 seconds; sites that did not answer are listed under Sites without results (没返回的站点) and do not hold up the others.

@@ -1,4 +1,4 @@
-# 远程访问 <Badge type="tip" text="1.0 预览版" />
+# 远程访问
 
 远程访问让 pt-tools 的手机 App 在外面也能看种子、站点数据与订阅，并按你给的权限暂停、删除、推送种子或管理订阅。手机扫网页上的二维码完成配对，之后 App 经直连地址或 relay 连回这台 pt-tools。连接是端到端加密的：relay 只转发，看不到内容。
 
@@ -15,7 +15,7 @@ App 有两条路连回 pt-tools，配对时两条都会写进二维码，App 先
 
 - 两种方式里跑的都是同一种加密会话（Noise 协议），在局域网的明文 HTTP 上也是加密的。
 - 设备只能调用 [App API](../reference/app-api.md)：网页的设置、站点、下载器、通知通道、令牌管理等接口在加密通道里都不存在。
-- 协议的细节见仓库里的[远程访问协议](https://github.com/sunerpy/pt-tools/blob/v1.0.0-rc/docs/design/remote-access.md)。
+- 协议的细节见仓库里的[远程访问协议](https://github.com/sunerpy/pt-tools/blob/main/docs/design/remote-access.md)。
 
 ## 打开远程访问
 

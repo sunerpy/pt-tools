@@ -2,7 +2,7 @@
 # 在托管 relay 的服务器上部署或升级 relay 容器（Docker）。.github/workflows/relay-deploy.yml 经 ssh 把它送过去执行
 # （ssh host 'bash -s -- <参数>' < scripts/deploy-relay.sh），也可以在服务器上直接跑。
 #
-#   deploy-relay.sh --image sunerpy/pt-tools@sha256:… --public-url wss://relay.example.com --expect-version v1.0.0-rc.19 \
+#   deploy-relay.sh --image sunerpy/pt-tools@sha256:… --public-url wss://relay.example.com --expect-version v1.0.0 \
 #     [--port 8443] [--bind 127.0.0.1] [--name pt-tools-relay] [--drain-grace 5s] [--client-ip-header X-Real-IP] \
 #     [--max-connections N] [--daily-bytes-per-host N] [--ready-timeout 60] [--no-pull] [--keep-previous [--pending-timeout 900]]
 #   deploy-relay.sh --finalize [--name pt-tools-relay] [--image <部署时的 --image>]   # 外面检查通过：删掉留着的旧容器
@@ -202,7 +202,7 @@ rollback)
   ;;
 esac
 
-[ -n "$image" ] || die "要用 --image 给出镜像，例如 sunerpy/pt-tools:v1.0.0-rc.19 或 sunerpy/pt-tools@sha256:…"
+[ -n "$image" ] || die "要用 --image 给出镜像，例如 sunerpy/pt-tools:v1.0.0 或 sunerpy/pt-tools@sha256:…"
 case "$public_url" in
 ws://* | wss://*) ;;
 *) die "--public-url 要以 ws:// 或 wss:// 开头，是 App 与 pt-tools 里填的地址" ;;

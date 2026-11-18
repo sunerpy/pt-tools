@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs><linearGradient id="ad-23-seed-ink-t" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1024"><stop offset="0" stop-color="#31353C"/><stop offset="1" stop-color="#131518"/></linearGradient><radialGradient id="ad-23-seed-ink-s" gradientUnits="userSpaceOnUse" cx="300" cy="150" r="820"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.1"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient></defs>
+  <g transform="translate(512 512) scale(0.666667) translate(-512 -512)"><path d="M-256 -256 H1280 V1280 H-256 Z" fill="url(#ad-23-seed-ink-t)"/><path d="M-256 -256 H1280 V1280 H-256 Z" fill="url(#ad-23-seed-ink-s)"/></g>
+</svg>

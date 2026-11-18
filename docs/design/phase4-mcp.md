@@ -1,7 +1,7 @@
 # MCP Server 设计
 
-> **状态**：已实现，随 1.0.0-rc 预览版发布。用法见 [MCP 使用说明](../guide/mcp.md)。
-> **代码入口**：[`internal/mcp`](https://github.com/sunerpy/pt-tools/tree/v1.0.0-rc/internal/mcp)（工具、权限、审计）、`web/mcp.go`（`/mcp` 与进程内调用 App API）、`cmd/mcp.go`（stdio 桥）
+> **状态**：已实现，随 1.0.0 发布。用法见 [MCP 使用说明](../guide/mcp.md)。
+> **代码入口**：[`internal/mcp`](https://github.com/sunerpy/pt-tools/tree/main/internal/mcp)（工具、权限、审计）、`web/mcp.go`（`/mcp` 与进程内调用 App API）、`cmd/mcp.go`（stdio 桥）
 > **关联设计**：[`chatops-mcp-agent.md`](chatops-mcp-agent.md) §8
 
 ---

@@ -144,12 +144,12 @@ watch(
       画板：品牌 + 版本行 + 跳转框是一个 98 高的整块，分隔线在它们之后。
       logo 放在和 rail 品牌**同一个** 32×32 盒子里（x=16, y=14）：侧栏收起/展开是同一块
       在两个宽度之间过渡，logo 钉在原位不动，只有右边的文字淡入淡出。
-      和 rail 一样用彩色版（plated，自带底板）—— 用户要求彩色 logo；理由见 AppRail 里那段注释。
+      和 rail 一样用带底板的徽标，跟着主题换墨黑或纯白。
     -->
     <div class="pt-nav__head">
       <div class="pt-nav__brand">
         <router-link to="/home" class="pt-nav__logo" aria-label="pt-tools 首页">
-          <PtLogo variant="plated" :size="28" />
+          <PtLogo :size="28" />
         </router-link>
         <span class="pt-nav__brand-text">
           <span class="pt-nav__brand-name">pt-tools</span>
