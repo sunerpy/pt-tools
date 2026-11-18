@@ -11,7 +11,7 @@ QA 验证，依赖 `T17/T18/T22/T24/T25/T32` 实现的测试钩子端点。
 ## 测试钩子端点（仅 `qa` build tag 启用）
 
 ```bash
-go build -tags qa -o dist/pt-tools-qa .   # 启用 /test/telegram/inject、/test/qq/inject
+go build -tags qa -o dist/pt-tools-qa .   # 启用 /test/telegram/inject、/test/qq/inject、/test/feishu/inject
 make build-local                          # 生产构建：无此端点（请求返回 404）
 ```
 
@@ -19,9 +19,30 @@ make build-local                          # 生产构建：无此端点（请求
 
 - `POST /test/telegram/inject` — body `{"text":"...","from":{"id":12345},"conf_id":1}`，注入入站消息直入 chain
 - `POST /test/qq/inject` — 同上，QQ 入站
+- `POST /test/feishu/inject` — 飞书应用机器人入站。发送人是 open_id（字符串），写在 `from.user_id`（设了它就不看 `from.id`）；`message_type` 是 `private` 或 `group`，`chat_id` 是会话 ID：
+
+  ```json
+  {
+    "text": "/status",
+    "from": { "user_id": "ou_qa_user" },
+    "conf_id": 1,
+    "chat_id": "oc_p2p_ou_qa_user",
+    "message_type": "private"
+  }
+  ```
+
+  照 Telegram 的写法只给 `from.id`（数字）的话，ChannelUserID 是数字串，和名单、绑定里 `ou_` 开头的 open_id 对不上，命令会被当成没绑定。
 
 绕过权限直接调 `internal/chatops.MessageChain.Process(ctx, notify.InboundMessage)`，
-仅供 QA 脚本使用，**生产构建不含**。
+仅供 QA 脚本使用，**生产构建不含**。注入端点不经过飞书适配器（名单、去重、排队都不走）；要测适配器本身，
+用下面两个环境变量把它连到本地的假飞书。
+
+`qa` 构建里飞书应用机器人另外认两个环境变量（正式构建里没有）：
+
+| 变量                           | 说明                                                                                                                                      |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `PT_TOOLS_QA_FEISHU_BASE_URL`  | 开放平台的地址改连到这里（例如 `http://127.0.0.1:18431`）：换 token、发消息、取机器人信息与长连接的引导请求都发给它，长连接的地址由它下发 |
+| `PT_TOOLS_QA_FEISHU_SLOW_ONCE` | 设成 `1` 时，第一条消息的应答晚 4 秒，让假服务按同一个 message_id 重推一次，用来验证去重                                                  |
 
 ## 共享配置（环境变量）
 
