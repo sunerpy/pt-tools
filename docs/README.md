@@ -7,7 +7,7 @@
 ## 开始使用
 
 - [pt-tools 是什么](guide/what-is-pt-tools.md)：工作方式、界面各页的用途与适用场景。
-- [1.0 预览版新功能](guide/whats-new-1.0.md)：0.48.0 之后预览版加入的功能与重要修复。
+- [1.0 新功能](guide/whats-new-1.0.md)：1.0 相对 0.48.0 加入的功能与重要修复。
 - [安装](guide/install.md)：Docker、Linux 与 Windows 的安装方式、环境变量和首次登录。
 - [快速开始](guide/quick-start.md)：添加下载器、站点和 RSS 订阅，确认第一次自动下载。
 - [首页与系统体检](guide/home-and-health.md)：打开网页先到的首页：NAS 概览、今天播出、待处理、继续观看、最近入库、这周还要播，以及下载器、存储与状态；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘、NAS、时间、备份与密钥，写明怎么修。
@@ -133,7 +133,7 @@ cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://
 - **规范书面语**：中文页不用口语（还没、没能、免得、搭的、咋、啥、搞定、折腾），英文页不用 just、gonna、stuff。中文与英文、数字之间留空格。
 - **用户页不写内部实现**：不出现 `UnifiedPTSite`、`ConfigStore`、`DiskBudget`、`MessageChain` 之类的代码名和 `§` 符号；`reference/developers.md` 例外。同步脚本会拒绝这些词。
 - **未发布的能力单独说明**：实验性、开发中和计划中的功能用 `<StatusTag>` 标出，不能写成已经可用。
-- **预览版的能力要标出来**：文档站按 1.0 预览版发布。只在预览版里的功能，首页条目用 `status: preview`，整页都是新功能的页面在标题后加 `<Badge type="tip" text="1.0 预览版" />`（英文页 `text="1.0 preview"`），只有一部分是新功能的页面在开头或对应小节写明哪些是预览版加入的，都写进 [1.0 预览版新功能](guide/whats-new-1.0.md)。链到仓库里只在 v1.0.0-rc 上的文件（例如 `docs/design/remote-access.md`、`docs/reference/app-api-v1.yaml`）时，GitHub 链接写 `blob/v1.0.0-rc/…`，`blob/main/…` 在 main 上打不开。1.0 正式版发布、合回 main 以后，去掉这些标记，并把这些链接改回 `main`。
+- **只在预览版里的能力要标出来**：预览版是版本号带 `-rc.N`、在 GitHub Releases 里标为 Pre-release 的版本。只在预览版里、正式版里没有的功能：首页条目用 `status: preview`；整页都是这类功能的页面在标题后加 `<Badge type="tip" text="X.Y 预览版" />`（英文页 `text="X.Y preview"`，X.Y 是将要包含这些功能的正式版）；只有一部分是这类功能的页面，在开头或对应小节写明哪些只在预览版里。这些功能都列进 X.Y 的新功能页（如 [1.0 新功能](guide/whats-new-1.0.md)）。X.Y 正式版发布以后去掉这些标记：首页条目改成 `status: available`，删掉 Badge 和页面里的预览版说明（整句删掉，不改写成「X.Y 加入的」）。
 - **不出现真实凭证**：文字和截图里不能有真实域名下的 Cookie、Passkey、Token 或下载器地址。
 
 ### 可用组件
@@ -164,7 +164,7 @@ cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://
 | `faq`          | 常见问题：`title`、可选 `intro`、`items[]`（至少 4 条：`q`、`a`，可选 `guide`）                                                                                      |
 | `closer`       | 收尾：`title`、`body`、`actions[]`（`text`、`link`、`theme` 为 `brand` 或 `alt`，可选 `icon`）                                                                       |
 
-- `status` 取值为 `available`、`preview`（只在 1.0 预览版里）、`experimental`、`building` 或 `planned`。
+- `status` 取值为 `available`、`preview`（只在预览版里，正式版里没有）、`experimental`、`building` 或 `planned`。
 - `evidence` 是卡片上的一行证据：界面里真实出现的一行文字（`kind: code`、`text`），或一组名称（`kind: chips`、`items`）。
 - `icon` 只能用 `home-schema.ts` 里 `ICON_NAMES` 列出的图标名。
 - `link`、`guide.link` 写站内路径，可以带 `#锚点`；构建时检查页面和锚点都存在。文字里只能放网址链接，站内页面放进这两个字段。

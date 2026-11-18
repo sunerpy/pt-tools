@@ -117,7 +117,7 @@ docker exec pt-tools pt-tools secret export > secret.b64
 
 ### 不用恢复功能
 
-要回到旧版本（例如从预览版回到 0.48.0），旧版本里没有恢复功能：停掉 pt-tools，解开升级前备份（`pt-tools-backup-<时间>-pre-upgrade.tar.gz`），把里面的 `torrents.db` 与 `secret.key` 放回数据目录（同时删掉数据目录里的 `torrents.db-wal`、`torrents.db-shm`），再启动旧版本。
+要回到旧版本（例如从 1.0 回到 0.48.0），旧版本里没有恢复功能：停掉 pt-tools，解开升级前备份（`pt-tools-backup-<时间>-pre-upgrade.tar.gz`），把里面的 `torrents.db` 与 `secret.key` 放回数据目录（同时删掉数据目录里的 `torrents.db-wal`、`torrents.db-shm`），再启动旧版本。
 
 只有 base64 形式的密钥备份时，用 `secret import` 写回（已有密钥文件时需要加 `--force`）：
 

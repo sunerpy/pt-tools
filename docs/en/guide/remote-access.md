@@ -1,4 +1,4 @@
-# Remote access <Badge type="tip" text="1.0 preview" />
+# Remote access
 
 Remote access lets the pt-tools mobile app show your torrents, site statistics and subscriptions while you are away from home, and, with the permissions you grant, pause, delete and push torrents or manage subscriptions. You pair a phone by scanning a QR code in the web interface; from then on the app reaches this pt-tools through a direct address or through a relay. The connection is end-to-end encrypted: a relay only forwards it and cannot read it.
 
@@ -15,7 +15,7 @@ The app has two ways back to pt-tools. Pairing puts both into the QR code; the a
 
 - Both ways carry the same encrypted session (the Noise protocol), so the traffic is encrypted even over plain HTTP on a local network.
 - A device can call only the [App API](../reference/app-api.md): settings, sites, downloaders, notification channels, token management and the rest of the web interface do not exist inside the encrypted tunnel.
-- The protocol is specified in [the remote access protocol](https://github.com/sunerpy/pt-tools/blob/v1.0.0-rc/docs/design/remote-access.md) (Chinese).
+- The protocol is specified in [the remote access protocol](https://github.com/sunerpy/pt-tools/blob/main/docs/design/remote-access.md) (Chinese).
 
 ## Turn it on
 

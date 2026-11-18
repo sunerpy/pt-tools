@@ -1,4 +1,4 @@
-# NAS monitoring <Badge type="tip" text="1.0 preview" />
+# NAS monitoring
 
 System → NAS monitoring (系统 → NAS 监控) decides where the [NAS overview](home-and-health.md#nas-overview) on the home page gets its data: the host pt-tools runs on (the local source) and any NAS you connect (for now [TrueNAS](#truenas), [Glances](#glances) and, experimentally, [Synology](#synology) and [fnOS](#fnos)). pt-tools reads these sources in the background and keeps what it reads in memory; the home page and this page show that data, so opening them does not connect to anything again.
 

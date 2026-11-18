@@ -1,4 +1,4 @@
-# App API <Badge type="tip" text="1.0 预览版" />
+# App API
 
 App API 是给手机 App 和脚本用的接口，地址都以 `/api/app/v1` 开头。它只开放 App 要用的功能：回应里没有站点 Cookie、API Key、Passkey、密码、RSS 地址与下载链接，错误信息里的网址也去掉了查询串。[配置接口](#配置)是例外：字段名照网页的接口（会有 `password`、`cookie` 这些键），密钥的值换成 `<已设置>` 或空串，要另外的「配置」权限。
 
@@ -22,7 +22,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - 时间是 Unix 时间戳（秒）。大小、上传量与下载量的单位是字节，速度的单位是字节每秒，进度是 0 到 100 的百分数。
 - 分页的接口接受查询参数 `page`（从 1 开始）与 `page_size`（默认 20，上限见各接口），回应是 `{"items": [...], "total": 总数, "page": 页码, "page_size": 每页条数}`。
 - 兼容性：`GET /meta` 返回的 `remote_api_level` 现在是 1，只在有不兼容的改动时加一。新增接口或字段不算不兼容，客户端应忽略不认识的字段。
-- 契约：机器可读的描述是仓库里的 [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/v1.0.0-rc/docs/reference/app-api-v1.yaml)（OpenAPI 3.0）。pt-tools 的测试用它核对每个接口的真实回应，手机 App 的 Dart 模型也由它生成。
+- 契约：机器可读的描述是仓库里的 [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/main/docs/reference/app-api-v1.yaml)（OpenAPI 3.0）。pt-tools 的测试用它核对每个接口的真实回应，手机 App 的 Dart 模型也由它生成。
 
 ## 错误
 
@@ -313,8 +313,6 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - 在哪里找、推到哪里：`profile_id`（质量档案，0 用设置里的默认）、`sites`（只在这些站点找，空的是全部站点）、`downloader_id`（0 用设置里的）、`category`、`tags`（逗号分开）、`save_path`（空的按下载器的默认）；
 - `progress`：`total`、`required`（要追的集数：起始集以后、没跳过的）、`aired`、`in_library`、`downloading`、`waiting`（在等锁住的版本的集数，也算在 `missing` 里）、`skipped`（不追的集数）与 `missing`（缺的集号）；
 - 追剧（剧集）的设置：`schedule`（定时，见下文）、`lock_version`（版本锁）、`lock_group` 与 `lock_resolution`（锁住的制作组与分辨率，尚未定下时为空）、`start_episode`（从第几集开始追，0 与 1 是整季）、`follow_next_season`（追完以后自动追下一季）、`next_season_id`（自动建的下一季的订阅）、`library_id`（整理进哪个媒体库，0 按类型自动选）、`completed_at`（追完的时间）。
-
-`required`、`waiting`、`skipped`、追剧的设置与在哪里找、推到哪里的字段是 1.0 预览版加的，更早的版本不给，App 要能处理没有这些字段的回应。
 
 #### 定时
 

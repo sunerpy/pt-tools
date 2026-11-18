@@ -17,7 +17,7 @@ hero:
       text: 快速开始
       link: /guide/quick-start
     - theme: alt
-      text: 1.0 预览版新功能
+      text: 1.0 新功能
       link: /guide/whats-new-1.0
 
 home:
@@ -26,8 +26,6 @@ home:
       text: Docker、Linux、Windows，amd64 与 arm64
     - term: 数据位置
       text: 存在你自己的服务器上，Cookie 加密保存
-    - term: 文档版本
-      text: 按 1.0 预览版编写，正式版仍是 0.48.0
 
   stages:
     steps:
@@ -48,12 +46,12 @@ home:
 
   capabilities:
     title: pt-tools 能做什么
-    intro: 标「预览版」的功能在 1.0 预览版里，尚未包含在正式版 0.48.0 中，新增内容见「1.0 预览版新功能」。点卡片的标题看对应的文档。
+    intro: 点卡片的标题看对应的文档。
     items:
       - icon: folder-open
         title: 追剧与整理入库
         wide: true
-        status: preview
+        status: available
         body: 订阅电影或追一季剧集，按播出时间到各站点去搜，只要同一个版本，洗版换更好的；下载完按模板硬链接进媒体库，写好 NFO 与海报，通知 Emby、Jellyfin、Plex 扫描。条目详情一页看库里有几集、在做种的种子能不能删，日历按天列出更新。
         evidence:
           kind: code
@@ -77,7 +75,7 @@ home:
         link: /guide/rss-subscription
       - icon: trending-up
         title: 刷流与辅种
-        status: preview
+        status: available
         body: 刷流任务从站点的种子列表里按条件挑免费新种，按做种时长、分享率与上传速度删除；IYUU 辅种把别的站点上数据相同的种子加进同一台下载器，校验到 100% 才做种。
         evidence:
           kind: code
@@ -93,7 +91,7 @@ home:
         link: /configuration
       - icon: smartphone
         title: 手机 App 与远程访问
-        status: preview
+        status: available
         body: Android App 在外面也能看概览、种子、站点与订阅。扫码配对，先试直连，连不上经 relay 连回 pt-tools；连接端到端加密，不用把端口开放到公网，relay 也可以自己部署。
         evidence:
           kind: code
@@ -102,7 +100,7 @@ home:
       - icon: sparkles
         title: AI 助手与 MCP
         wide: true
-        status: preview
+        status: available
         body: 接一个 OpenAI 兼容的大模型，在网页、手机 App 或 Telegram、QQ 里用自然语言查数据、搜索与推送种子、管理订阅；Claude、Cursor 这类 MCP 客户端也能接进来。改动类操作每次都要你确认。
         evidence:
           kind: chips
@@ -119,7 +117,7 @@ home:
         link: /guide/chatops-quickstart
       - icon: house
         title: 首页与 NAS 监控
-        status: preview
+        status: available
         body: 首页把今天播出的集、要处理的事、下载器与存储放在一起；NAS 概览读本机、TrueNAS、Glances 的 CPU、内存、网络与存储，群晖与飞牛是实验性的来源。
         evidence:
           kind: chips
@@ -127,7 +125,7 @@ home:
         link: /guide/home-and-health
       - icon: archive
         title: 升级与备份
-        status: preview
+        status: available
         body: 每天定时备份数据库，换成新版本第一次启动时先自动备份一次；可以在网页上立即备份、下载与恢复。二进制部署可以在网页里升级。
         evidence:
           kind: code
@@ -248,11 +246,11 @@ home:
   faq:
     title: 常见问题
     items:
-      - q: 标「预览版」的功能怎么用上？
-        a: 这些功能在 1.0 预览版（v1.0.0-rc.N）里，尚未包含在正式版 0.48.0 中。按「安装预览版」的步骤安装；预览版用于测试，升级前先备份数据目录。
+      - q: 从 0.48.0 升级到 1.0.0 要注意什么？
+        a: 数据目录原样保留，尤其是其中的 `secret.key`，没有它已保存的 Cookie 和通知凭证都解不开。Docker 拉取新的 `latest` 镜像（写了版本号的改成 `v1.0.0`），用同一个数据目录重新创建容器。1.0.0 第一次启动时，先把数据库和密钥备份到数据目录下的 `backups`，再自动迁移数据库结构；要回到 0.48.0，用这份升级前备份换回数据。
         guide:
-          text: 安装预览版
-          link: /guide/install#安装预览版
+          text: 升级与备份
+          link: /guide/upgrade
       - q: AI 会不会自己执行写操作？
         a: 不会。内置 AI 助手的改动类操作每次都弹出确认，你点了才执行。MCP 的写工具第一次调用只回一份预览，你在客户端里同意以后，客户端的 AI 带上 `confirm=true` 再调一次才执行；令牌没有 MCP 写入权限时，这些工具都用不了。
         guide:
@@ -264,7 +262,7 @@ home:
           text: MCP 接入
           link: /guide/mcp
       - q: 能和 MoviePilot、Sonarr、Seerr 一起用吗？
-        a: 能，两个兼容入口都在 1.0 预览版里。qB 兼容入口让只认 qBittorrent 的工具把 pt-tools 当成一台 qBittorrent，加的种子照常经过磁盘空间和站点做种容量的检查；Servarr 兼容入口让 Seerr 把 pt-tools 当成 Radarr 与 Sonarr，请求的电影与剧集建成订阅和追剧。
+        a: 能，有两个兼容入口。qB 兼容入口让只认 qBittorrent 的工具把 pt-tools 当成一台 qBittorrent，加的种子照常经过磁盘空间和站点做种容量的检查；Servarr 兼容入口让 Seerr 把 pt-tools 当成 Radarr 与 Sonarr，请求的电影与剧集建成订阅和追剧。
         guide:
           text: qB 兼容入口
           link: /guide/qbit-compat
@@ -328,8 +326,6 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 :::
 
 安装脚本会下载最新版本，并按同一版本的 `checksums.txt` 校验 SHA-256 后再解压。
-
-上面的命令安装的是正式版 0.48.0。要使用标「预览版」的功能，请按[安装预览版](/guide/install#安装预览版)里的步骤安装；新增内容见 [1.0 预览版新功能](/guide/whats-new-1.0)。
 
 </HomeDeploy>
 

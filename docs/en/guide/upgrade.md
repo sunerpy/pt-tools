@@ -117,7 +117,7 @@ A backup taken by a newer version of pt-tools (with a newer database version) ca
 
 ### Without the restore feature
 
-To go back to an older version (for example from a preview release to 0.48.0), which has no restore feature: stop pt-tools, extract the pre-upgrade backup (`pt-tools-backup-<time>-pre-upgrade.tar.gz`), put its `torrents.db` and `secret.key` in the data folder (and delete `torrents.db-wal` and `torrents.db-shm` there), then start the older version.
+To go back to an older version (for example from 1.0 to 0.48.0), which has no restore feature: stop pt-tools, extract the pre-upgrade backup (`pt-tools-backup-<time>-pre-upgrade.tar.gz`), put its `torrents.db` and `secret.key` in the data folder (and delete `torrents.db-wal` and `torrents.db-shm` there), then start the older version.
 
 If you only have the base64 copy of the key, write it back with `secret import` (`--force` is needed when a key file already exists):
 

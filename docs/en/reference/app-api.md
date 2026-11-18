@@ -1,4 +1,4 @@
-# App API <Badge type="tip" text="1.0 preview" />
+# App API
 
 The App API is the interface for the mobile app and for scripts; every address starts with `/api/app/v1`. It exposes only what an app needs: responses never contain site cookies, API keys, passkeys, passwords, RSS addresses or download links, and addresses inside error messages have their query strings removed. The [configuration endpoints](#configuration) are the exception: their field names follow the web endpoints (so keys such as `password` and `cookie` appear), secret values are replaced by `<已设置>` or an empty string, and they need the extra Config permission.
 
@@ -22,7 +22,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - Times are Unix timestamps in seconds. Sizes and uploaded or downloaded amounts are in bytes, speeds in bytes per second, and progress is a percentage from 0 to 100.
 - Paged endpoints accept the query parameters `page` (starting at 1) and `page_size` (20 by default; each endpoint states its maximum) and respond with `{"items": [...], "total": count, "page": page, "page_size": size}`.
 - Compatibility: `remote_api_level` in `GET /meta` is currently 1 and goes up only for incompatible changes. New endpoints or fields are not incompatible changes, so clients should ignore fields they do not know.
-- Contract: the machine-readable description is [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/v1.0.0-rc/docs/reference/app-api-v1.yaml) (OpenAPI 3.0) in the repository. pt-tools' tests check every endpoint's real responses against it, and the mobile app's Dart models are generated from it.
+- Contract: the machine-readable description is [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/main/docs/reference/app-api-v1.yaml) (OpenAPI 3.0) in the repository. pt-tools' tests check every endpoint's real responses against it, and the mobile app's Dart models are generated from it.
 
 ## Errors
 
@@ -313,8 +313,6 @@ Parameters: `status` (`active`, `paused`, `pending`, `done`) and `q` (keyword). 
 - where to look and where to push: `profile_id` (the quality profile; 0 uses the default from the settings), `sites` (search only these sites; empty means all), `downloader_id` (0 uses the one from the settings), `category`, `tags` (comma-separated) and `save_path` (empty uses the downloader's default);
 - `progress`: `total`, `required` (episodes to follow: from the start episode on, not skipped), `aired`, `in_library`, `downloading`, `waiting` (episodes waiting for the locked version, also counted in `missing`), `skipped` (episodes not followed) and `missing` (the missing episode numbers);
 - the follow settings of a TV show: `schedule` (see below), `lock_version` (the version lock), `lock_group` and `lock_resolution` (the locked release group and resolution, empty until decided), `start_episode` (the episode to start from; 0 and 1 mean the whole season), `follow_next_season` (follow the next season when this one is done), `next_season_id` (the subscription created for the next season), `library_id` (the media library to organise into; 0 picks one by type) and `completed_at` (when it was done).
-
-`required`, `waiting`, `skipped`, the follow settings and the where-to-look fields were added in the 1.0 preview. Earlier versions leave them out, so the app has to cope with responses without them.
 
 #### Schedule
 

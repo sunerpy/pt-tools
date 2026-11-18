@@ -1,4 +1,4 @@
-# AI assistant <Badge type="tip" text="1.0 preview" />
+# AI assistant
 
 pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask, on the web, in the mobile app or in notification channels (Telegram, QQ), about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader, manage subscriptions, recognize torrent titles, organize finished movies and TV shows into your media library, and read or change pt-tools' own configuration. Every action that changes something waits for you to confirm it, and the confirmation card shows what changes from what to what and the possible impact. On the web you can also connect [Voltip](#voice-input) and talk instead of typing.
 

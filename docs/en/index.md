@@ -26,8 +26,6 @@ home:
       text: Docker, Linux, Windows; amd64 and arm64
     - term: Your data
       text: On your own server; cookies encrypted
-    - term: Docs version
-      text: The 1.0 preview; stable is still 0.48.0
 
   stages:
     steps:
@@ -48,12 +46,12 @@ home:
 
   capabilities:
     title: What pt-tools does
-    intro: Features marked Preview ship in the 1.0 preview releases and are not in the 0.48.0 stable release yet; see What's new in the 1.0 preview. Each card's title opens its guide.
+    intro: Each card's title opens its guide.
     items:
       - icon: folder-open
         title: Following shows and filing them
         wide: true
-        status: preview
+        status: available
         body: Subscribe to a film or follow a season. Each episode is searched on your sites as it airs, keeping to one release, and upgrades swap in better ones; finished downloads are hard-linked into your library by a naming template, with NFO files and artwork, and Emby, Jellyfin or Plex is asked to scan. One page per title shows the episodes in your library and whether the torrents seeding can be deleted, and the calendar lists the updates day by day.
         evidence:
           kind: code
@@ -77,7 +75,7 @@ home:
         link: /en/guide/rss-subscription
       - icon: trending-up
         title: Brushing and cross-seeding
-        status: preview
+        status: available
         body: Brush tasks pick fresh freeleech torrents from a site's list by your conditions and remove them by seeding time, ratio and upload speed. IYUU cross-seeding adds torrents with the same data on other sites to the same downloader, and they seed only after a 100% check.
         evidence:
           kind: code
@@ -93,7 +91,7 @@ home:
         link: /en/configuration
       - icon: smartphone
         title: Mobile app and remote access
-        status: preview
+        status: available
         body: The Android app shows the overview, torrents, sites and subscriptions away from home. Pair it by scanning a QR code; it tries a direct connection first and falls back to a relay. The connection is end-to-end encrypted, no port has to be opened to the internet, and you can run the relay yourself.
         evidence:
           kind: code
@@ -102,7 +100,7 @@ home:
       - icon: sparkles
         title: AI assistant and MCP
         wide: true
-        status: preview
+        status: available
         body: Connect an OpenAI-compatible model and ask in plain language, in the web interface, the mobile app, Telegram or QQ, to look up data, search and push torrents and manage subscriptions; MCP clients such as Claude and Cursor can connect too. Every change waits for your confirmation.
         evidence:
           kind: chips
@@ -119,7 +117,7 @@ home:
         link: /en/guide/chatops-quickstart
       - icon: house
         title: Home page and NAS monitoring
-        status: preview
+        status: available
         body: The home page puts today's episodes, what needs attention, downloaders and storage in one place. The NAS overview reads CPU, memory, network and storage from the local host, TrueNAS or Glances, with Synology and fnOS as experimental sources.
         evidence:
           kind: chips
@@ -127,7 +125,7 @@ home:
         link: /en/guide/home-and-health
       - icon: archive
         title: Upgrades and backups
-        status: preview
+        status: available
         body: The database is backed up every day, and once more before the first start on a new version; you can back up, download and restore from the web interface. Binary installs also upgrade from the web interface.
         evidence:
           kind: code
@@ -248,11 +246,11 @@ home:
   faq:
     title: Questions
     items:
-      - q: How do I get the features marked Preview?
-        a: They are in the 1.0 preview releases (v1.0.0-rc.N), not in the 0.48.0 stable release yet. Install a preview release as the install guide describes; previews are for testing, so back up the data folder before you upgrade.
+      - q: What should I check when upgrading from 0.48.0 to 1.0.0?
+        a: Keep the data folder as it is, above all its `secret.key`, which decrypts the saved cookies and notification credentials. With Docker, pull the new `latest` image (or change a pinned version tag to `v1.0.0`) and recreate the container with the same data folder. On its first start, 1.0.0 backs up the database and the key to `backups` in the data folder, then migrates the database schema by itself; to go back to 0.48.0, restore the data from that pre-upgrade backup.
         guide:
-          text: Installing a preview release
-          link: /en/guide/install#installing-a-preview-release
+          text: Upgrades and backups
+          link: /en/guide/upgrade
       - q: Will the AI make changes on its own?
         a: No. The built-in AI assistant asks you to confirm every change before it runs. An MCP write tool first returns only a preview; once you agree in your client, the client's AI calls it again with `confirm=true` to run it, and a token without the MCP write scope cannot use these tools at all.
         guide:
@@ -264,7 +262,7 @@ home:
           text: MCP
           link: /en/guide/mcp
       - q: Does it work with MoviePilot, Sonarr or Seerr?
-        a: Yes, through two compatible entrances in the 1.0 preview. The qB-compatible entrance lets tools that only talk to qBittorrent treat pt-tools as one, and the torrents they add still pass the disk space and site seeding capacity checks. The Servarr-compatible entrance lets Seerr treat pt-tools as Radarr and Sonarr, turning requested films and series into subscriptions and follows.
+        a: Yes, through two compatible entrances. The qB-compatible entrance lets tools that only talk to qBittorrent treat pt-tools as one, and the torrents they add still pass the disk space and site seeding capacity checks. The Servarr-compatible entrance lets Seerr treat pt-tools as Radarr and Sonarr, turning requested films and series into subscriptions and follows.
         guide:
           text: qB-compatible entrance
           link: /en/guide/qbit-compat
@@ -328,8 +326,6 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 :::
 
 The install scripts download the latest release and check it against the same release's `checksums.txt` before unpacking.
-
-The commands above install the 0.48.0 stable release. To use the features marked Preview, install a preview release as described in [Installing a preview release](/en/guide/install#installing-a-preview-release); [What's new in the 1.0 preview](/en/guide/whats-new-1.0) lists what it adds.
 
 </HomeDeploy>
 

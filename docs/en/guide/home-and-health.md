@@ -1,4 +1,4 @@
-# Home page and system check <Badge type="tip" text="1.0 preview" />
+# Home page and system check
 
 The home page puts what you look at every day on one page: the CPU, memory, network, storage pools, disk temperatures and alerts of your NAS, whether today's episodes are in the library, what needs your attention, what you left unfinished on the media server, what was added recently, what airs later this week, and the state of download speeds, disk space, downloaders, the system check and backups. The system check examines the services and settings pt-tools relies on in one pass, and for each item says how it stands and how to fix it.
 

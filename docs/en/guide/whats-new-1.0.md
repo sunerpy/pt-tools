@@ -1,8 +1,8 @@
-# What's new in the 1.0 preview <Badge type="tip" text="1.0 preview" />
+# What's new in 1.0
 
-The 1.0 preview (versions such as `1.0.0-rc.N`; the first few previews were `0.49.0-rc.N`) adds seed boosting (brush tasks), IYUU cross-seeding, media library organising, the mobile app, remote access, the AI assistant and more on top of 0.48.0. This site documents the preview: pages marked "1.0 preview" and features marked "Preview" on the home page are only in the preview releases, not in the 0.48.0 stable release; the 1.0 stable release will include all of them.
+1.0 adds seed boosting (brush tasks), IYUU cross-seeding, media library organising, the mobile app, remote access, the AI assistant and more on top of 0.48.0. This page lists the new features and the important fixes by area.
 
-The preview releases are for testing and are not recommended for production yet. See [Installing a preview release](./install.md#installing-a-preview-release) to install one, and back up the data folder before upgrading. The changes in each preview are listed under the Pre-release versions on [GitHub Releases](https://github.com/sunerpy/pt-tools/releases).
+When you upgrade from 0.48.0, the first start of 1.0.0 takes a backup before it migrates the database; [Upgrades and backups](./upgrade.md) describes upgrading and going back. The changes in each release are listed on [GitHub Releases](https://github.com/sunerpy/pt-tools/releases).
 
 ## Brushing and seeding
 
@@ -25,7 +25,7 @@ The preview releases are for testing and are not recommended for production yet.
 
 ## Mobile app and APIs
 
-- [Mobile app](./mobile-app.md): the Android app shows the overview, torrents, sites and subscriptions away from home, pauses, deletes and pushes torrents or manages subscriptions within the permissions given at pairing, and talks to the AI assistant; since 1.0.0-rc.28 its packages are published in the same Release as the server. The app can [edit followed series and brush tasks](./mobile-app.md#following-shows-brush-tasks-and-statistics-sharing), show brush earnings by period and make statistics posters; it uses black-and-white styling with four themes (Light, Dark, Warm, Graphite).
+- [Mobile app](./mobile-app.md): the Android app shows the overview, torrents, sites and subscriptions away from home, pauses, deletes and pushes torrents or manages subscriptions within the permissions given at pairing, and talks to the AI assistant; its packages are published in the same Release as the server. The app can [edit followed series and brush tasks](./mobile-app.md#following-shows-brush-tasks-and-statistics-sharing), show brush earnings by period and make statistics posters; it uses black-and-white styling with four themes (Light, Dark, Warm, Graphite).
 - [Remote access](./remote-access.md): pair by scanning the QR code in the web UI; the app tries a direct connection first and falls back to a relay. The connection is end-to-end encrypted and the relay only forwards. The built-in hosted relay is used by default; you can run your own relay or turn relays off and connect directly only.
 - [API tokens](./api-tokens.md) and the [App API](../reference/app-api.md): scripts and clients reach `/api/app/v1/` with a token, reading or changing data within its scopes, without storing the web password.
 - [Servarr-compatible entrance](./servarr.md): Seerr can use pt-tools as its Radarr and Sonarr: a requested movie becomes a subscription and each requested season of a series a followed season, and the subscriptions' state and the files organised into the library go back to Seerr; deleting in Seerr removes only the subscription, never files or torrents. It is compatible with one fixed version of Seerr (commit `dca1af6a`).
