@@ -196,10 +196,13 @@ func (c *Channel) hooks() wsHooks {
 	}
 }
 
-// loadBotInfo 取本应用机器人的 open_id（群里判断有没有 @ 它要用）。取不到时标异常、按退避重试；
-// 取到以前群消息一律忽略，私聊照常。
+// loadBotInfo 取本应用机器人的 open_id（群里判断有没有 @ 它要用），取到以后写进进程级缓存。取不到时标异常、
+// 按退避重试；取到以前群里 @ 了人的消息请平台稍后重推（见 onMessage），私聊照常。
 func (c *Channel) loadBotInfo() {
 	ctx := c.ctx
+	c.mu.RLock()
+	key := botCacheKey(c.cfg)
+	c.mu.RUnlock()
 	wait := c.timing(c.backoffBase, defaultBackoffBase)
 	maxWait := c.timing(c.backoffMax, defaultBackoffMax)
 	for {
@@ -211,13 +214,14 @@ func (c *Channel) loadBotInfo() {
 		}
 		if err == nil {
 			id := info.OpenID
+			botIDs.set(key, id)
 			c.botID.Store(&id)
 			c.botFailed.Store(false)
 			c.logger().Infof("飞书应用机器人(%d): 机器人 open_id=%s", c.confID, id)
 			return
 		}
 		c.botFailed.Store(true)
-		c.logger().Warnf("飞书应用机器人(%d): 获取机器人信息失败（取到以前群里的消息一律忽略）: %v；%s 后重试",
+		c.logger().Warnf("飞书应用机器人(%d): 获取机器人信息失败（取到以前群里 @ 机器人的消息会请飞书稍后重推）: %v；%s 后重试",
 			c.confID, c.red.wrap(err), wait)
 		if !sleepCtx(ctx, jitter(wait)) {
 			return

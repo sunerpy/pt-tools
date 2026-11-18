@@ -226,9 +226,12 @@ func TestInbound_GroupNeedsBotMention(t *testing.T) {
 	assert.Equal(t, "@别的机器人 hi", got[1].Text)
 }
 
-func TestInbound_GroupIgnoredUntilBotKnown(t *testing.T) {
+// 还没取到本机器人的 open_id 时，判断不了群消息有没有 @ 它：带 @ 的群消息移出去重表、回 500，让平台稍后重推，
+// 取到以后重推的那次照常处理；不带 @ 的群消息不可能是给它的，照常忽略；私聊照常。
+func TestInbound_GroupBeforeBotKnownAsksForRedelivery(t *testing.T) {
 	c, api, runners := newTestChannel(t, testConfig)
 	api.botErr = errors.New("获取机器人信息失败: code=230006")
+	logs := observedLogger(c)
 	rec := &chainRecorder{}
 	c.OnInbound(rec.handle)
 	r := runners.waitRunner(t, 1)
@@ -237,10 +240,56 @@ func TestInbound_GroupIgnoredUntilBotKnown(t *testing.T) {
 	require.Eventually(t, func() bool { return !c.Healthy() }, 5*time.Second, time.Millisecond, "取不到机器人信息时标异常")
 
 	bot := mention("@_user_1", "ou_bot", "pt-tools", "bot")
-	require.NoError(t, r.Emit(context.Background(), msgEvent("om_g", "ou_admin", "@_user_1 /status", inGroup("oc_group", bot))))
+	group := msgEvent("om_g", "ou_admin", "@_user_1 /status", inGroup("oc_group", bot))
+	require.Error(t, r.Emit(context.Background(), group), "回 500，让平台稍后重推")
+	assert.False(t, seenMessages.check("cli_test\x00om_g"), "没有记进去重表")
+	seenMessages.forget("cli_test\x00om_g")
+	assert.Contains(t, logJoined(logs.All()), "om_g")
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_g0", "ou_admin", "/status", inGroup("oc_group"))), "没 @ 任何人的群消息照常忽略")
 	require.NoError(t, r.Emit(context.Background(), msgEvent("om_p", "ou_admin", "/help")))
 	require.Eventually(t, func() bool { return len(rec.got()) == 1 }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, "/help", rec.got()[0].Text, "私聊照常")
+
+	// 取到机器人信息以后，平台重推的那次照常处理
+	api.mu.Lock()
+	api.botErr = nil
+	api.mu.Unlock()
+	require.Eventually(t, func() bool { return c.botOpenID() == "ou_bot" }, 5*time.Second, time.Millisecond)
+	require.NoError(t, r.Emit(context.Background(), group))
+	require.Eventually(t, func() bool { return len(rec.got()) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "/status", rec.got()[1].Text)
+}
+
+// 机器人的 open_id 按「域名 + App ID」放在进程级的缓存里：热重载以后的新实例直接用，不再去取，
+// 刚连上就能处理群里 @ 它的消息。
+func TestBotInfo_CachedAcrossReload(t *testing.T) {
+	c1, api1, _, _ := startChannel(t, testConfig)
+	require.Equal(t, 1, api1.botCallCount())
+	require.NoError(t, c1.Close(context.Background()))
+
+	var api2 *fakeAPI
+	c2, runners2, rec2 := reloadChannel(t, testConfig, func(c *Channel) {
+		inner := c.newAPI
+		c.newAPI = func(cfg *Config, log larkcore.Logger) apiSender {
+			a := inner(cfg, log).(*fakeAPI)
+			a.botErr = errors.New("不该再去取")
+			api2 = a
+			return a
+		}
+	})
+	require.Eventually(t, func() bool { return c2.botOpenID() == "ou_bot" }, 5*time.Second, time.Millisecond)
+	r2 := runners2.waitRunner(t, 1)
+	bot := mention("@_user_1", "ou_bot", "pt-tools", "bot")
+	require.NoError(t, r2.Emit(context.Background(), msgEvent("om_cached", "ou_admin", "@_user_1 /status", inGroup("oc_group", bot))))
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 0, api2.botCallCount(), "有缓存时不再去取")
+	assert.True(t, c2.Healthy())
+
+	// 换了平台（Lark）就是另一个应用：没有缓存，照常去取
+	c3, api3, _, _ := startChannel(t, `{"app_id":"cli_test","app_secret":"sec-ret-value","domain":"lark","admin_users":["ou_admin"]}`)
+	assert.Equal(t, 1, api3.botCallCount())
+	assert.Equal(t, "ou_bot", c3.botOpenID())
 }
 
 func TestInbound_IgnoresBotsAndNonText(t *testing.T) {

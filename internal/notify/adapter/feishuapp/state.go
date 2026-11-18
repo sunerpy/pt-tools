@@ -29,6 +29,9 @@ var (
 	denyNotices = newThrottle(denyNoticeEvery)
 	// apps 是 app_id → 正在用它的通道实例：同一进程里两条配置用同一个应用时，第二条不连长连接。
 	apps = newAppRegistry()
+	// botIDs 是本应用机器人的 open_id，按「开放平台地址 + App ID」缓存：热重载以后的新实例直接用，
+	// 刚连上就能判断群消息有没有 @ 它。
+	botIDs = &botIDCache{m: map[string]string{}}
 )
 
 // resetForTest 清空进程级的状态，测试用。
@@ -36,6 +39,7 @@ func resetForTest() {
 	seenMessages.reset()
 	denyNotices.reset()
 	apps.reset()
+	botIDs.reset()
 }
 
 // dedupe 是带过期的去重表，最多 max 条，满了丢最旧的。
@@ -133,6 +137,17 @@ func (t *throttle) allow(key string) bool {
 			}
 		}
 	}
+	if len(t.last) >= throttleMax {
+		// 清掉过期的以后仍然满（这段时间里来的全是不同的人）：丢掉最旧的一条，表不超过上限
+		var oldest string
+		var oldestAt time.Time
+		for k, v := range t.last {
+			if oldest == "" || v.Before(oldestAt) {
+				oldest, oldestAt = k, v
+			}
+		}
+		delete(t.last, oldest)
+	}
 	t.last[key] = now
 	return true
 }
@@ -142,6 +157,33 @@ func (t *throttle) reset() {
 	defer t.mu.Unlock()
 	t.last = map[string]time.Time{}
 	t.now = time.Now
+}
+
+// botIDCache 是进程级的机器人 open_id 缓存。
+type botIDCache struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+// botCacheKey 是缓存的键：开放平台地址（飞书或 Lark）+ App ID。
+func botCacheKey(cfg *Config) string { return baseURL(cfg) + "\x00" + cfg.AppID }
+
+func (b *botIDCache) get(key string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.m[key]
+}
+
+func (b *botIDCache) set(key, openID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.m[key] = openID
+}
+
+func (b *botIDCache) reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.m = map[string]string{}
 }
 
 // defaultLeftoverTTL：关闭时留下的消息多久没有同一个通道的新实例来取就丢掉（通道被停用、删除或改了 App ID）。

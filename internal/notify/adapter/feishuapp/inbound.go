@@ -17,8 +17,9 @@ import (
 const expireAfter = 30 * time.Minute
 
 var (
-	errClosing   = errors.New("飞书应用机器人通道正在关闭，请平台稍后重推")
-	errQueueFull = errors.New("飞书应用机器人：这个人排队的消息太多，请平台稍后重推")
+	errClosing    = errors.New("飞书应用机器人通道正在关闭，请平台稍后重推")
+	errQueueFull  = errors.New("飞书应用机器人：这个人排队的消息太多，请平台稍后重推")
+	errBotUnknown = errors.New("飞书应用机器人：还没取到机器人信息，判断不了群消息有没有 @ 它，请平台稍后重推")
 )
 
 // onMessage 处理一条「接收消息」事件。平台要求 3 秒内应答且不报错，否则重推：这里只做内存操作，
@@ -61,6 +62,13 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 	log := c.logger()
 
 	botID := c.botOpenID()
+	if group && botID == "" && len(msg.Mentions) > 0 {
+		// 还没取到本机器人的 open_id（刚启动、刚热重载，或者取机器人信息失败在重试）：判断不了有没有 @ 它，
+		// 移出去重表、回 500，让平台稍后重推，取到以后照常处理。没 @ 任何人的群消息不可能是给它的，下面照常忽略。
+		seenMessages.forget(key)
+		log.Infof("飞书应用机器人(%d): 还没取到机器人信息，判断不了群消息有没有 @ 机器人，请飞书稍后重推 message_id=%s", c.confID, messageID)
+		return errBotUnknown
+	}
 	if group && !mentionsBot(msg.Mentions, botID) {
 		// 应用开了「获取群组中所有消息」时群里每句话都会推过来，只认 @ 了本机器人的
 		log.Debugf("飞书应用机器人(%d): 群消息没有 @ 本机器人，忽略 message_id=%s", c.confID, messageID)

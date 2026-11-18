@@ -134,6 +134,7 @@ func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 
 // OnInbound 登记收到消息以后交给谁（MessageChain.Process）。第一次传入非空的 handler 时才起监督协程去连长连接
 // 并取机器人信息（见包注释）；生产里 initEnabledChannels 在 Init 成功后马上调它，热重载也一样。
+// 进程里已经取到过这个应用的机器人 open_id（热重载以前的实例取的）就直接用，不再去取。
 func (c *Channel) OnInbound(handler notify.InboundHandler) {
 	c.mu.Lock()
 	c.handler = handler
@@ -141,10 +142,17 @@ func (c *Channel) OnInbound(handler notify.InboundHandler) {
 	if start {
 		c.started = true
 	}
+	cfg := c.cfg
 	c.mu.Unlock()
 	if start {
+		cached := botIDs.get(botCacheKey(cfg))
+		if cached != "" {
+			c.botID.Store(&cached)
+		}
 		c.spawn(c.supervise)
-		c.spawn(c.loadBotInfo)
+		if cached == "" {
+			c.spawn(c.loadBotInfo)
+		}
 	}
 }
 

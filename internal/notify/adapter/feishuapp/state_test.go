@@ -88,6 +88,23 @@ func TestThrottle(t *testing.T) {
 	assert.Less(t, len(th.last), throttleMax, "满了以后清掉过期的")
 }
 
+// 名单外提示的节流表有硬上限：清掉过期的以后仍然满了（10 分钟里来的全是不同的人），就丢掉最旧的一条。
+func TestThrottle_HardCap(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(1_800_000_000, 0)}
+	th := newThrottle(10 * time.Minute)
+	th.now = clock.now
+	for i := range throttleMax {
+		require.True(t, th.allow("ou_"+strconv.Itoa(i)))
+		clock.add(time.Millisecond)
+	}
+	for i := range 50 {
+		assert.True(t, th.allow("ou_new"+strconv.Itoa(i)))
+		assert.LessOrEqual(t, len(th.last), throttleMax, "表不超过上限")
+	}
+	assert.True(t, th.allow("ou_0"), "最旧的被挤掉了，再来时又能提示")
+	assert.False(t, th.allow("ou_new49"), "新的还在表里")
+}
+
 func TestAppRegistry(t *testing.T) {
 	r := newAppRegistry()
 	a := &Channel{confID: 1}
