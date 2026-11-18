@@ -76,6 +76,12 @@ describe("飞书应用机器人的详情", () => {
     expect(field("fs-default-chat").value).toBe("oc_group");
     expect(document.body.textContent).toContain("使用长连接接收事件");
     expect(document.body.textContent).toContain("飞书应用机器人 凭证");
+    // 这一页的状态胶囊只看启用与否；「已连接」要到通道列表里看
+    expect(document.body.textContent).toContain("通道列表里显示「已连接」以后");
+    // 映射卡与安全卡：飞书应用机器人必填 App ID 与 App Secret，App Secret 加密落库
+    expect(document.body.textContent).toContain("必填 app_id、app_secret");
+    expect(document.body.textContent).toContain("Webhook Key、App Secret 以及代理凭据");
+    expect(field("fs-default-chat").placeholder).toContain("on_");
 
     fill("fs-admin-users", " ou_admin ,ou_new\nou_admin  ou_x ");
     fill("fs-allowed-users", "");
@@ -108,15 +114,32 @@ describe("飞书应用机器人的详情", () => {
     expect(api.update).not.toHaveBeenCalled();
   });
 
-  it("App ID 为空时不保存", async () => {
-    api.get.mockResolvedValue({ ...DETAIL, app_id: "" });
-    await mountDetail();
-    await vi.waitFor(() => expect(document.body.textContent).toContain("飞书机器人"));
-    await vi.waitFor(() => expect(buttonByText("保存凭证").disabled).toBe(false));
-    buttonByText("保存凭证").click();
-    await vi.waitFor(() =>
-      expect(document.body.textContent).toContain("飞书应用机器人通道需填写 App ID 与 App Secret"),
-    );
-    expect(api.update).not.toHaveBeenCalled();
-  });
+  /*
+   * 原来这条等的是 body 全文里出现提示，可这句话一直写在「操作提示文案」卡里，第一次检查就通过，
+   * 接着断言 update 没被调用时 handleSaveCredentials 还停在 await validate()：删掉检查也照样通过。
+   * 现在查弹出来的 .el-message（卡里的文字不算）：它出现时校验已经结束、走到了显式检查，再断言没有保存。
+   * 用只有空白的值：el-form 的必填规则不拦它（留空由表单的「请填写 App ID」拦，happy-dom 里不渲染内联错误），
+   * 拦它的只有这一步检查。
+   */
+  for (const [what, patch] of [
+    ["App ID", { app_id: "   " }],
+    ["App Secret", { app_secret: "  " }],
+  ] as const) {
+    it(`${what} 只有空白时提示并且不保存`, async () => {
+      api.get.mockResolvedValue({ ...DETAIL, ...patch });
+      await mountDetail();
+      await vi.waitFor(() => expect(document.body.textContent).toContain("飞书机器人"));
+      await vi.waitFor(() => expect(buttonByText("保存凭证").disabled).toBe(false));
+      buttonByText("保存凭证").click();
+      await vi.waitFor(() =>
+        expect(toastTexts()).toContain("飞书应用机器人通道需填写 App ID 与 App Secret"),
+      );
+      expect(api.update).not.toHaveBeenCalled();
+    });
+  }
 });
+
+/** 弹出来的 ElMessage（不含「操作提示文案」卡里的文字） */
+function toastTexts(): string[] {
+  return [...document.querySelectorAll(".el-message")].map((e) => (e.textContent ?? "").trim());
+}

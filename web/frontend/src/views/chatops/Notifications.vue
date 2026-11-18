@@ -904,9 +904,17 @@ function getChannelLabel(type: string) {
         </div>
         <div v-if="newChannel.channel_type === 'feishu_app'" class="pt-note">
           <PtIcon name="info" :size="14" class="pt-note__icon" />
-          <span
-            >创建后到通道详情填管理员 open_id。先私聊机器人发一条消息，它会回你的 open_id。</span
-          >
+          <span>
+            创建以后，等通道列表里显示「已连接」，到飞书开发者后台把事件订阅方式改成「使用长连接接收事件」、
+            添加「接收消息 v2.0」并发布版本；然后私聊机器人发一条消息，它会回你的
+            open_id，填进通道详情的「管理员 open_id」。步骤见
+            <a
+              href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/chatops-feishu.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              >飞书应用机器人文档</a
+            >第 5–7 节。
+          </span>
         </div>
       </el-form>
 

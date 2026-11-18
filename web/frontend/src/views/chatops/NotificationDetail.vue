@@ -139,7 +139,7 @@ const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; whe
     kind: "提示",
     tone: "warn",
     text: "飞书应用机器人通道需填写 App ID 与 App Secret",
-    when: "飞书应用机器人的 App ID 或 App Secret 为空时保存凭证 —— 不会提交",
+    when: "飞书应用机器人的 App ID 或 App Secret 只有空白时保存凭证 —— 不会提交（留空时表单先提示「请填写」）",
   },
   {
     kind: "提示",
@@ -167,15 +167,16 @@ const basicRules: FormRules = {
 };
 
 /**
- * 画板 37 的 p-map：四种 channel_type 各自的显示名与唯一必填项。
+ * 画板 37 的 p-map：各 channel_type 的显示名与必填项。
  *
  * 取值不是抄的：类型字符串是各适配器 `RegisterChannel` 的注册名
  * （internal/notify/adapter/*），必填项与下面的 `credRules` 同源 —— 两处要一起改。
+ * 飞书应用机器人有两个必填项（credRules 与后端 parseConfig 都要求 App ID 与 App Secret）。
  */
 const channelTypeMap = [
   { type: "telegram", label: "Telegram", must: "bot_token" },
   { type: "qq_onebot", label: "QQ (OneBot)", must: "listen_addr" },
-  { type: "feishu_app", label: "飞书应用机器人", must: "app_id" },
+  { type: "feishu_app", label: "飞书应用机器人", must: "app_id、app_secret" },
   { type: "webhook", label: "Webhook", must: "endpoint_url" },
   { type: "wecom_webhook", label: "WeCom Webhook", must: "webhook_key" },
   ...OUTBOUND_CHANNELS.map((c) => ({
@@ -949,7 +950,7 @@ const previewText = computed(() => {
                   <PtIcon name="info" :size="14" class="pt-note__icon" />
                   <span>
                     保存后到飞书开发者后台，把「事件与回调」的订阅方式改成「使用长连接接收事件」并添加「接收消息
-                    v2.0」：这一步要求通道已经显示「已连接」。步骤见
+                    v2.0」：这一步要在通道列表里显示「已连接」以后做（这一页的状态只看启用与否）。步骤见
                     <a
                       href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/chatops-feishu.md"
                       target="_blank"
@@ -993,7 +994,7 @@ const previewText = computed(() => {
                   <el-form-item label="默认会话 ID（可选）">
                     <el-input
                       v-model="conf.default_chat_id"
-                      placeholder="oc_…（群）或 ou_…（个人）"
+                      placeholder="oc_…（群）、ou_…（个人）或 on_…（union_id）"
                       data-testid="fs-default-chat" />
                     <div class="field-tip">
                       每日战报、签到这类通知发到这里；留空时发给第一个管理员 open_id
@@ -1318,7 +1319,7 @@ const previewText = computed(() => {
           <PtPanel title="密钥与安全" icon="shield-check">
             <ul class="sec">
               <li>
-                Bot Token、Access Token、HMAC Secret、Webhook Key 以及代理凭据都以
+                Bot Token、Access Token、HMAC Secret、Webhook Key、App Secret 以及代理凭据都以
                 <strong>AES-256-GCM</strong> 加密后落库，不存明文。
               </li>
               <li>

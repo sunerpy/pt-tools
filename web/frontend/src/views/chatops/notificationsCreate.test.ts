@@ -157,7 +157,9 @@ describe("新建通知通道", () => {
     await openDialog();
     fill("name-input", "飞书");
     await pickType("feishu_app");
-    expect(document.body.textContent).toContain("先私聊机器人发一条消息，它会回你的 open_id");
+    // 名单外提示要等订阅了「接收消息 v2.0」、发布了版本以后事件才推过来：先写前置步骤，再写拿 open_id
+    expect(document.body.textContent).toContain("添加「接收消息 v2.0」并发布版本");
+    expect(document.body.textContent).toContain("私聊机器人发一条消息，它会回你的 open_id");
     fill("new-app_id", " cli_a1b2 ");
     fill("new-app_secret", " sec ");
     buttonByText("创建通道").click();
