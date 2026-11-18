@@ -5,13 +5,13 @@ name: Relay
 
 on:
   pull_request:
-    branches: [main, v1.0.0-rc]
+    branches: [main]
     paths:
       - "relay/**"
       - "internal/remote/**"
       - ".github/workflows/relay.yml"
   push:
-    branches: [main, v1.0.0-rc]
+    branches: [main]
     paths:
       - "relay/**"
       - "internal/remote/**"

@@ -5,8 +5,8 @@
 # （服务器在这期间重启时看门狗也不在了，要登录服务器用 scripts/deploy-relay.sh --finalize 或 --rollback 收尾）。
 #
 # release.yml 发布成功以后调用（vars.DEPLOY_RELAY 为 'true' 时，带上这次推送的镜像 digest）；也可以手动触发，dry_run 只做检查、不连服务器。
-# 两种触发都只在受保护的 main 或 v1.0.0-rc 上。
-# GitHub Environment「hosted-relay」（部署分支限定为 main 与 v1.0.0-rc，可以加审批）里的 secret：RELAY_SSH_HOST、RELAY_SSH_USER、
+# 两种触发都只在受保护的 main 上。
+# GitHub Environment「hosted-relay」（部署分支限定为 main，可以加审批）里的 secret：RELAY_SSH_HOST、RELAY_SSH_USER、
 # RELAY_SSH_KEY（部署用的私钥）、RELAY_SSH_KNOWN_HOSTS（服务器的主机密钥，ssh-keyscan 的结果，不接受陌生主机）。
 # 变量：RELAY_HOSTNAME（对外的主机名，App 与 pt-tools 里填 wss://<它>），可选 RELAY_IMAGE（默认 sunerpy/pt-tools）、RELAY_PORT（服务器上 relay 听的端口，
 # 默认 8443，反向代理把 WebSocket 转到这里）、RELAY_BIND（这个端口绑定的地址，默认 127.0.0.1；ALB 这类从别的机器连过来时填服务器的私网地址）、
@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要部署的 pt-tools 版本（已经公开的 release，例如 v1.0.0-rc.19）"
+        description: "要部署的 pt-tools 版本（已经公开的 release，例如 v1.0.0）"
         required: true
         type: string
       dry_run:
@@ -66,9 +66,9 @@ jobs:
         run: |
           set -euo pipefail
           case "$RUN_REF" in
-          refs/heads/main | refs/heads/v1.0.0-rc) ;;
+          refs/heads/main) ;;
           *)
-            echo "::error title=Relay deploy::deploy only from main or v1.0.0-rc, not ${RUN_REF}"
+            echo "::error title=Relay deploy::deploy only from main, not ${RUN_REF}"
             exit 1
             ;;
           esac

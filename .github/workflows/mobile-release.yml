@@ -8,7 +8,7 @@ name: Mobile Release
 
 on:
   pull_request:
-    branches: [main, v1.0.0-rc]
+    branches: [main]
     paths:
       - ".github/workflows/mobile-release.yml"
       - ".github/actions/build-android-release/**"
