@@ -117,7 +117,7 @@ func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 		return err
 	}
 	red := redactor{secret: cfg.AppSecret}
-	// 在锁外建 client：lark.NewClient 构造时就会写一行日志
+	// 在锁外建 client：不在持有 c.mu 时调用外部的构造函数（它拿到的 logger 会回头读通道状态）
 	api := c.newAPI(cfg, sdkLogger{log: c.logger, red: red})
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
