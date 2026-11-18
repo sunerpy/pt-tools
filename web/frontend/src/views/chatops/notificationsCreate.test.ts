@@ -77,6 +77,12 @@ async function pickMode(label: string) {
   await flush();
 }
 
+/** 新建对话框是不是开着（关掉以后 el-dialog 的内容还在 DOM 里，只是遮罩被 v-show 藏起来） */
+function dialogOpen() {
+  const overlay = q("add-channel-dialog")?.closest<HTMLElement>(".el-overlay");
+  return !!overlay && overlay.style.display !== "none";
+}
+
 function regStarted(id: string) {
   return {
     id,
@@ -393,9 +399,10 @@ describe("新建通知通道", () => {
     await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-6"));
     expect(api.regCancel).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(document.body.textContent).toContain("二维码已经作废，不要再扫"));
+    expect(dialogOpen()).toBe(false);
     // 再打开对话框：不接着原来的二维码
     q("add-channel-btn")!.click();
-    await vi.waitFor(() => expect(q("name-input")).not.toBeNull());
+    await vi.waitFor(() => expect(dialogOpen()).toBe(true));
     await pickType("feishu_app");
     expect(q("feishu-reg-qr")).toBeNull();
     expect(buttonByText("生成二维码")).toBeTruthy();
@@ -453,7 +460,7 @@ describe("新建通知通道", () => {
     );
     await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
     expect(router.push, "对话框开着，不跳走").not.toHaveBeenCalled();
-    expect(q("name-input"), "也不关掉又打开的对话框").not.toBeNull();
+    expect(dialogOpen(), "也不关掉又打开的对话框").toBe(true);
     expect(document.body.textContent).not.toContain("二维码已经作废");
   });
 
@@ -481,7 +488,7 @@ describe("新建通知通道", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
-  it("飞书应用机器人：取消没送到时不说作废，写明二维码过期以前仍然有效", async () => {
+  it("飞书应用机器人：取消两次都没送到：不说作废，也不断言结果，请用户过一会儿看列表", async () => {
     await openDialog();
     await pickType("feishu_app");
     api.regStart.mockResolvedValue(regStarted("reg-11"));
@@ -490,15 +497,40 @@ describe("新建通知通道", () => {
     buttonByText("生成二维码").click();
     await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
     buttonByText("关闭").click();
-    await vi.waitFor(() =>
-      expect(document.querySelector(".el-message--warning")?.textContent).toContain(
-        "没能取消这个二维码：过期以前扫码确认的话，通道照常会建好",
-      ),
+    await vi.waitFor(
+      () =>
+        expect(document.querySelector(".el-message--warning")?.textContent).toContain(
+          "没能取消这个二维码（网络出错）：扫过的话，过一会儿看看通道列表里有没有刚建好的通道",
+        ),
+      { timeout: 6000 },
     );
+    expect(api.regCancel, "隔 2 秒再试一次").toHaveBeenCalledTimes(2);
     expect(document.body.textContent).not.toContain("二维码已经作废");
+    expect(document.body.textContent).not.toContain("通道照常会建好");
   });
 
-  it("飞书应用机器人：取消时那一个已经被别处取代（404）：不再提示", async () => {
+  it("飞书应用机器人：取消第一次没送到、再试一次成功：按回应提示", async () => {
+    await openDialog();
+    await pickType("feishu_app");
+    api.regStart.mockResolvedValue(regStarted("reg-22"));
+    api.regStatus.mockResolvedValue({ id: "reg-22", state: "pending", expires_at: "" });
+    api.regCancel
+      .mockRejectedValueOnce(new Error("Network Error"))
+      .mockResolvedValue({ id: "reg-22", state: "canceled", expires_at: "", message: "已取消" });
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
+    buttonByText("关闭").click();
+    await vi.waitFor(
+      () => expect(document.body.textContent).toContain("二维码已经作废，不要再扫"),
+      {
+        timeout: 6000,
+      },
+    );
+    expect(api.regCancel).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).not.toContain("没能取消");
+  });
+
+  it("飞书应用机器人：取消时那一个已经被别处取代（404）：刷新列表，提示先看列表再删应用", async () => {
     await openDialog();
     await pickType("feishu_app");
     api.regStart.mockResolvedValue(regStarted("reg-12"));
@@ -513,9 +545,15 @@ describe("新建通知通道", () => {
     await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
     buttonByText("关闭").click();
     await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-12"));
-    await flush();
-    await flush();
-    expect(document.querySelector(".el-message")).toBeNull();
+    // 被取代时那一个可能已经建好了：刷新列表；提示不叫人直接删应用
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain(
+        "这个二维码已经被新的取代或过期：扫过的话，先看通道列表里有没有刚建好的通道，没有再到开发者后台删掉多出来的应用",
+      ),
+    );
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    expect(api.regCancel).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain("二维码已经作废，不要再扫");
   });
 
   it("飞书应用机器人：生成二维码的请求在路上时不能换类型、创建方式与名称", async () => {
@@ -664,7 +702,9 @@ describe("新建通知通道", () => {
       expires_at: "",
     }));
     let fail!: (e: unknown) => void;
-    api.regCancel.mockReturnValueOnce(new Promise((_, rej) => (fail = rej)));
+    api.regCancel
+      .mockReturnValueOnce(new Promise((_, rej) => (fail = rej)))
+      .mockRejectedValue(new Error("Network Error"));
     buttonByText("生成二维码").click();
     await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
     buttonByText("关闭").click();
@@ -675,9 +715,34 @@ describe("新建通知通道", () => {
     buttonByText("生成二维码").click();
     await vi.waitFor(() => expect(q("feishu-reg-open")?.getAttribute("href")).toContain("reg-19"));
     fail(new Error("Network Error"));
+    await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledTimes(2), { timeout: 6000 });
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("没能取消这个二维码");
+    expect(q("feishu-reg-open")!.getAttribute("href"), "新的二维码还在").toContain("reg-19");
+  });
+
+  it("飞书应用机器人：生成二维码的请求在路上时关掉对话框再打开：新对话框不被锁住，旧请求回来时被取消", async () => {
+    await openDialog();
+    await pickType("feishu_app");
+    let release!: (v: unknown) => void;
+    api.regStart.mockReturnValueOnce(new Promise((r) => (release = r)));
+    api.regCancel.mockResolvedValue({ id: "reg-23", state: "canceled", expires_at: "" });
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(api.regStart).toHaveBeenCalled());
+    await flush();
+    expect(inputOf("name-input").disabled, "请求在路上时锁住").toBe(true);
+    buttonByText("取消").click();
+    await vi.waitFor(() => expect(dialogOpen()).toBe(false));
+    q("add-channel-btn")!.click();
+    await vi.waitFor(() => expect(dialogOpen()).toBe(true));
+    await flush();
+    expect(inputOf("name-input").disabled, "新打开的对话框不被上一轮的请求锁住").toBe(false);
+    release(regStarted("reg-23"));
+    await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-23"));
+    await flush();
+    expect(inputOf("name-input").disabled).toBe(false);
+    expect(q("feishu-reg-qr"), "上一轮的二维码不显示").toBeNull();
   });
 
   it("飞书应用机器人：离开页面时也按编号取消", async () => {

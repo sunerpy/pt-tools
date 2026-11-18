@@ -440,9 +440,10 @@ async function startFeishuRegister() {
     regRounds.value += 1;
     regTimer = setInterval(() => void pollRegister(), REG_POLL_MS);
   } catch (e: unknown) {
-    ElMessage.error(apiErrorDetail(e, "生成二维码失败"));
+    if (session === regSession) ElMessage.error(apiErrorDetail(e, "生成二维码失败"));
   } finally {
-    regStarting.value = false;
+    // 关掉对话框时已经放下了（见 dropRegister）；这时可能已经是新一轮在开始，不去动它
+    if (session === regSession) regStarting.value = false;
   }
 }
 
@@ -512,18 +513,44 @@ async function dropRegister(notify: boolean) {
   regStatus.value = null;
   regGone.value = false;
   regRounds.value = 0;
+  // 在路上的「开始」属于这一轮：放下 regStarting，新打开的对话框不被它锁住（它回来时发现换了一轮，自己取消）
+  regStarting.value = false;
   if (!cur || !busy) return;
-  let st: FeishuRegisterStatus;
-  try {
-    st = await chatopsApi.feishuRegister.cancel(cur.id);
-  } catch (e: unknown) {
-    // 404：已经被别处新开的取代或过期，那一边会提示；别的错误：取消没送到，二维码过期以前仍然有效
-    if (notify && !regStale(gen) && !(e instanceof ApiError && e.status === 404)) {
-      ElMessage.warning("没能取消这个二维码：过期以前扫码确认的话，通道照常会建好");
+  const st = await cancelRegister(cur.id);
+  if (!notify) return;
+  if (st === "gone") {
+    // 已经被别处新开的取代或过期：那一个可能已经建好了，刷新列表，提示先看列表
+    if (!regStale(gen)) {
+      void loadNotifications();
+      ElMessage.info(
+        "这个二维码已经被新的取代或过期：扫过的话，先看通道列表里有没有刚建好的通道，没有再到开发者后台删掉多出来的应用（按 App ID 认，通道详情里填着的不要删）",
+      );
     }
     return;
   }
-  if (notify) await settleDropped(st, gen);
+  if (st === null) {
+    // 两次都没送到：不知道取消有没有生效，不下结论
+    if (!regStale(gen)) {
+      ElMessage.warning(
+        "没能取消这个二维码（网络出错）：扫过的话，过一会儿看看通道列表里有没有刚建好的通道",
+      );
+    }
+    return;
+  }
+  await settleDropped(st, gen);
+}
+
+/** 按编号取消；网络出错时隔 2 秒再试一次。回定下来的状态；404 时回 "gone"，两次都失败时回 null */
+async function cancelRegister(id: string): Promise<FeishuRegisterStatus | "gone" | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, REG_POLL_MS));
+    try {
+      return await chatopsApi.feishuRegister.cancel(id);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) return "gone";
+    }
+  }
+  return null;
 }
 
 /**
@@ -559,7 +586,9 @@ async function settleDropped(first: FeishuRegisterStatus, gen: number) {
   if (unmounted) return;
   if (st.state === "canceled") {
     if (!regStale(gen)) {
-      ElMessage.info("二维码已经作废，不要再扫；已经扫了的话，请到飞书开发者后台删掉多出来的应用");
+      ElMessage.info(
+        "二维码已经作废，不要再扫；已经扫了的话，请到飞书开发者后台删掉多出来的应用（按 App ID 认，通道详情里填着的不要删）",
+      );
     }
   } else if (st.state === "done") {
     await finishRegister(st);
@@ -1131,7 +1160,8 @@ function getChannelLabel(type: string) {
             <div v-if="regRounds > 1 || regGone" class="pt-note pt-note--warn fsreg__void">
               <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
               <span
-                >作废的二维码不要再扫；扫过的话，先看通道列表里有没有刚建好的通道，没有再到开发者后台删掉多出来的应用。</span
+                >作废的二维码不要再扫；扫过的话，先看通道列表里有没有刚建好的通道，没有再到开发者后台删掉多出来的应用（按
+                App ID 认，通道详情里填着的不要删）。</span
               >
             </div>
           </div>
