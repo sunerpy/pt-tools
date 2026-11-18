@@ -179,7 +179,7 @@ Feishu checks for an online client when saving this setting. Make sure the chann
 Search the run logs (`运行日志`) for `飞书应用机器人`. Common causes:
 
 - A wrong App ID or App Secret (depending on how Feishu answers, the log says `长连接被飞书拒绝`, the long connection was rejected by Feishu, or `长连接出错`, a long connection error): correct it and save the credentials, and the channel reconnects at once.
-- The bot feature of the app is not enabled: the status also shows Error while the bot info cannot be read. In the meantime pt-tools cannot tell whether a group message @-mentions the bot, so it asks Feishu to push group messages that @-mention anyone again later and handles them once the bot info is read; private chats work as usual.
+- The bot feature of the app is not enabled: the status also shows Error while the bot info cannot be read. In the meantime pt-tools cannot tell whether a group message @-mentions the bot, so it asks Feishu to push group messages that @-mention anyone again later (per Feishu's docs at most 4 more pushes per message, each logging an Info line `还没取到机器人信息`) and handles them once the bot info is read; private chats work as usual.
 - The same Feishu app is configured on two channels: only the one that started first connects, and the other shows Error, see the next question.
 
 ---
