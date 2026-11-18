@@ -210,12 +210,19 @@ func TestAppRegistry_OtherConfClaimForgetsUnacked(t *testing.T) {
 	unacked := newQueued(notify.InboundMessage{ChannelUserID: "ou_a", Text: "b"}, time.Unix(1_800_000_001, 0), "om_b")
 	unacked.key, unacked.unacked = "cli_o\x00om_b", true
 	require.False(t, seenMessages.check(unacked.key))
-	r.release("cli_o", old, handoff{items: map[string][]*queued{"ou_a": {acked, unacked}}})
+	busyOpen, busyDone := make(chan struct{}), make(chan struct{})
+	close(busyDone)
+	r.release("cli_o", old, handoff{
+		items: map[string][]*queued{"ou_a": {acked, unacked}},
+		busy:  map[string]<-chan struct{}{"ou_a": busyOpen, "ou_b": busyDone},
+	})
 
 	other := &Channel{confID: 8}
 	_, ok, _, got := r.claim("cli_o", other)
 	require.True(t, ok)
-	assert.True(t, got.empty(), "别的编号拿不到 #7 留下的")
+	assert.Empty(t, got.items, "别的编号拿不到 #7 留下的消息")
+	require.Len(t, got.busy, 1, "还在处理的那个人的完成信号交给 #8（收尾了的不交）")
+	assert.Equal(t, (<-chan struct{})(busyOpen), got.busy["ou_a"])
 	assert.False(t, seenMessages.check(unacked.key), "重推到 #8 时不会被当成重复")
 	r.release("cli_o", other, handoff{})
 

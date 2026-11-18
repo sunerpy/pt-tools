@@ -976,3 +976,53 @@ func TestInbound_GatherHoldsAfterWaitingForSlot(t *testing.T) {
 	require.Eventually(t, func() bool { return len(got()) == 3 }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, []string{"A", "B", "C"}, got())
 }
+
+// 同一个应用换了通道编号接手（#7 删掉、马上建 #8）：#7 里用户正在处理的那条不理会取消、还在跑，
+// 他关闭中回了 500 的下一条重推到 #8，要等 #7 那条收尾才处理，只处理一次。
+func TestReload_OtherConfWaitsForBusyAndTakesRedelivery(t *testing.T) {
+	c7, _, runners7, _ := startChannel(t, testConfig)
+	h := newStubbornHandler()
+	c7.OnInbound(h.handle)
+	r7 := runners7.last()
+	require.NoError(t, r7.Emit(context.Background(), msgEvent("om_o1", "ou_admin", "slow")))
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow 没开始处理")
+	}
+	c7.handoffWait = 20 * time.Millisecond
+	closed := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		closed <- c7.Close(ctx)
+	}()
+	require.Eventually(t, c7.closed.Load, 5*time.Second, time.Millisecond)
+	next := msgEvent("om_o2", "ou_admin", "/status")
+	require.ErrorIs(t, r7.Emit(context.Background(), next), errClosing)
+	require.Error(t, <-closed, "#7 那条不理会取消，Close 到时限返回")
+
+	c8 := New()
+	runners8 := &fakeRunners{}
+	c8.newAPI = func(*Config, larkcore.Logger) apiSender { return &fakeAPI{bot: botInfo{OpenID: "ou_bot"}} }
+	c8.newRunner = runners8.factory
+	shortenTimings(c8)
+	require.NoError(t, c8.Init(context.Background(), confOf(8, testConfig)))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c8.Close(ctx)
+	})
+	rec8 := &chainRecorder{}
+	c8.OnInbound(rec8.handle)
+	r8 := runners8.waitRunner(t, 1)
+	require.NoError(t, r8.Emit(context.Background(), next), "平台重推到 #8：不当成重复")
+	require.Never(t, func() bool { return len(rec8.got()) > 0 }, 200*time.Millisecond, 5*time.Millisecond,
+		"#7 那条没收尾以前，这个人的消息在 #8 也等着")
+	close(h.release)
+	require.Eventually(t, func() bool { return len(rec8.got()) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "/status", rec8.got()[0].Text)
+	require.NoError(t, r8.Emit(context.Background(), next), "再推一次按重复丢掉")
+	time.Sleep(50 * time.Millisecond)
+	assert.Len(t, rec8.got(), 1)
+}

@@ -251,6 +251,20 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 		if lk.appID != appID || lk.confID == c.confID {
 			continue
 		}
+		// 那边还有一条在处理的人：重推到这里的消息也要等那一条收尾，完成信号一并交给这个实例
+		for user, ch := range l.items.busy {
+			select {
+			case <-ch:
+				continue
+			default:
+			}
+			if items.busy == nil {
+				items.busy = map[string]<-chan struct{}{}
+			}
+			if _, mine := items.busy[user]; !mine {
+				items.busy[user] = ch
+			}
+		}
 		for user, list := range l.items.items {
 			kept := list[:0]
 			for _, it := range list {
