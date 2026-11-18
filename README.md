@@ -72,12 +72,12 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 
 ## 1.0 亮点
 
-- **[AI 助手](https://firlab.app/pt-tools/guide/assistant)与 [MCP](https://firlab.app/pt-tools/guide/mcp)**：接上 OpenAI 兼容的大模型（DeepSeek、通义千问、Kimi、硅基流动、OpenRouter、Ollama 等），在网页、App、Telegram 或 QQ 里用自然语言查数据、搜索与推送种子、追剧和管理订阅、整理媒体库，还能[帮你改配置](https://firlab.app/pt-tools/guide/assistant#改配置)（下载器、站点、RSS、通知通道等，密钥只写不读）；改动类操作每次都先列出改以前、改以后，你确认了才执行。打开 MCP 以后，WorkBuddy、Qwen Code、Codex、Claude Code、Cursor 这类支持 MCP 的 Agent 也能调用同一套工具。
+- **[AI 助手](https://firlab.app/pt-tools/guide/assistant)与 [MCP](https://firlab.app/pt-tools/guide/mcp)**：接上 OpenAI 兼容的大模型（DeepSeek、通义千问、Kimi、硅基流动、OpenRouter、Ollama 等），在网页、App、Telegram、QQ 或飞书里用自然语言查数据、搜索与推送种子、追剧和管理订阅、整理媒体库，还能[帮你改配置](https://firlab.app/pt-tools/guide/assistant#改配置)（下载器、站点、RSS、通知通道等，密钥只写不读）；改动类操作每次都先列出改以前、改以后，你确认了才执行。打开 MCP 以后，WorkBuddy、Qwen Code、Codex、Claude Code、Cursor 这类支持 MCP 的 Agent 也能调用同一套工具。
 - **[追剧与媒体库](https://firlab.app/pt-tools/guide/media-subscribe)**：订阅电影、追剧集的一季，pt-tools 到各站点搜索并按质量档案挑资源，下载完按命名模板[整理进媒体库](https://firlab.app/pt-tools/guide/media-library)、刮削 NFO 与海报、通知 Emby、Jellyfin 或 Plex，每部片的[详情页与订阅日历](https://firlab.app/pt-tools/guide/media-detail)写明每一集入库了没有。
 - **[刷流](https://firlab.app/pt-tools/guide/brush)与 [IYUU 辅种](https://firlab.app/pt-tools/guide/reseed)**：从站点的免费列表里按条件挑新种做种、按规则删种，收益按天统计；IYUU 找出其他站点上数据相同的种子，校验到 100% 才开始做种，数据只存一份。
 - **[手机 App](https://firlab.app/pt-tools/guide/mobile-app)与[远程访问](https://firlab.app/pt-tools/guide/remote-access)**：Android App 扫网页上的二维码配对，先试直连、连不上再经 relay 连回 pt-tools，连接端到端加密，在外面也能看概览、管理种子与订阅。
 - **[首页、NAS 监控与系统体检](https://firlab.app/pt-tools/guide/home-and-health)**：打开网页先到首页，上面是 NAS 的 CPU、内存、网络与存储（数据来自本机、TrueNAS、Glances 等[来源](https://firlab.app/pt-tools/guide/nas-monitor)）、今天播出的集与待处理的事；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘与备份，写明怎么修。
-- **[通知通道与消息模板](https://firlab.app/pt-tools/guide/notify-channels)**：除了 QQ 和 Telegram，通知还能发到企业微信、钉钉、飞书群机器人、Bark、Server 酱、ntfy 与自定义 Webhook，每类事件的标题与正文都可以用模板改写。
+- **[通知通道与消息模板](https://firlab.app/pt-tools/guide/notify-channels)**：除了 QQ、Telegram 和[飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu)，通知还能发到企业微信、钉钉、飞书群机器人、Bark、Server 酱、ntfy 与自定义 Webhook，每类事件的标题与正文都可以用模板改写。
 - **[签到与封号提醒](https://firlab.app/pt-tools/guide/site-login-monitoring)**：按站点开启每日签到，验证码与签到题可以交给 AI；长期未登录、快要封号之前提醒你去登录。
 - **[数据统计与分享图](https://firlab.app/pt-tools/guide/user-stats)**：每天存一份各站点的数据快照，按日、周、月看增量与走势，每日战报发到通知通道，统计可以[导出成分享图](https://firlab.app/pt-tools/guide/user-stats#导出分享图)（五种样式）。
 - **[qB 兼容](https://firlab.app/pt-tools/guide/qbit-compat)与 [Servarr 兼容入口](https://firlab.app/pt-tools/guide/servarr)**：MoviePilot、IYUU、Sonarr 这类工具可以把 pt-tools 当成 qBittorrent（加的种子照常经过磁盘空间与做种容量的检查），Seerr 可以把它当成 Radarr 与 Sonarr，请求的电影与剧集建成订阅。
@@ -89,7 +89,7 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 - **站点与搜索**：72 个内置站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey；在一个页面查看所有站点的上传量、分享率、做种、积分和等级进度；跨站点搜索的结果可以直接推送到下载器，也可以选一部电影或剧集按条目搜索。
 - **RSS 自动下载**：定时拉取订阅，用关键词、通配符或正则过滤标题；免费期结束时没下完的种子按每条订阅的设置暂停或删除。
 - **下载器**：可以添加多个 qBittorrent 和 Transmission，按 RSS 订阅、站点、默认下载器的顺序决定推送到哪一个；推送前检查剩余空间和站点做种容量，按做种时长、分享率等条件清理旧种子，并保护 H&R 种子；种子可以[转移](https://firlab.app/pt-tools/guide/torrent-transfer)到另一台下载器继续做种。
-- **ChatOps**：在 QQ（OneBot）和 Telegram 里查看状态、暂停或删除种子、增删 RSS 订阅、追剧，每条命令都记入操作审计；RSS 上新通知支持静默时段、合并摘要、失败重试和每小时配额。
+- **ChatOps**：在 QQ（OneBot）、Telegram 和[飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu)里查看状态、暂停或删除种子、增删 RSS 订阅、追剧，每条命令都记入操作审计；RSS 上新通知支持静默时段、合并摘要、失败重试和每小时配额。
 - **浏览器扩展**：[PT Tools Helper](tools/browser-extension/README.md) 一键或定时同步站点 Cookie，并采集脱敏后的页面数据，用于申请新增站点。
 - **部署与维护**：Docker 镜像（amd64、arm64）与 Linux、Windows 二进制，1Panel、Unraid、飞牛 fnOS 上有应用定义；二进制部署可以在 Web 界面升级；每天定时备份数据库，可以在网页上恢复；访问站点和下载器可以走 HTTP、HTTPS 或 SOCKS5 代理，也可以只让选中的站点走代理。
 
@@ -177,7 +177,7 @@ Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在
 ## 用法
 
 - **Web 界面**：站点、RSS、过滤规则、下载器、媒体库、自动清理和通知都在 Web 界面里配置；手机浏览器里同样的页面以卡片显示。
-- **ChatOps**：QQ 和 Telegram 支持 `/help`、`/status`、`/version`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/signin`、`/addrss`、`/delrss`，订阅与追剧的 `/sub`、`/follow`、`/subs`、`/runs`、`/today`、`/unlock`，AI 助手的 `/newchat`，以及 `/bind` 和 `/unbind`。通道的两栏名单决定谁能与机器人对话；用绑定码完成绑定的账号都能执行管理命令，所以绑定码只发给信任的人。见 [ChatOps 快速开始](https://firlab.app/pt-tools/guide/chatops-quickstart)。
+- **ChatOps**：QQ、Telegram 和飞书应用机器人支持 `/help`、`/status`、`/version`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/signin`、`/addrss`、`/delrss`，订阅与追剧的 `/sub`、`/follow`、`/subs`、`/runs`、`/today`、`/unlock`，AI 助手的 `/newchat`，以及 `/bind` 和 `/unbind`。通道的两栏名单决定谁能与机器人对话；用绑定码完成绑定的账号都能执行管理命令，所以绑定码只发给信任的人。见 [ChatOps 快速开始](https://firlab.app/pt-tools/guide/chatops-quickstart)。
 - **命令行**：`pt-tools web` 启动服务，`pt-tools db backup`、`pt-tools db restore` 备份与恢复数据，`pt-tools secret` 导出、导入加密密钥，`pt-tools clean` 预览并清理已轮转的日志、暂存种子和旧备份，`pt-tools mcp` 把 MCP 工具接给只支持 stdio 的客户端，`pt-tools relay serve` 自己运行远程访问的 relay，见[命令行](https://firlab.app/pt-tools/reference/cli)。
 
 ## 文档
@@ -194,7 +194,7 @@ Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在
 | [过滤规则与追剧](https://firlab.app/pt-tools/guide/filter-rules-tv-series)    | 关键词、通配符与正则规则                |
 | [自动删种与磁盘保护](https://firlab.app/pt-tools/guide/auto-cleanup)          | 清理条件、H&R 保护与剩余空间检查        |
 | [登录状态与密钥备份](https://firlab.app/pt-tools/guide/site-login-monitoring) | 登录探测、封号提醒、每日签到与密钥备份  |
-| [ChatOps](https://firlab.app/pt-tools/guide/chatops-quickstart)               | QQ、Telegram、绑定与 RSS 上新通知       |
+| [ChatOps](https://firlab.app/pt-tools/guide/chatops-quickstart)               | QQ、Telegram、飞书、绑定与 RSS 上新通知 |
 | [升级与备份](https://firlab.app/pt-tools/guide/upgrade)                       | 各安装方式的升级、备份与恢复            |
 | [数据与安全](https://firlab.app/pt-tools/reference/security)                  | 数据位置、加密范围、外连与部署建议      |
 | [支持站点](https://firlab.app/pt-tools/sites)                                 | 72 个内置站点及认证方式                 |

@@ -2,7 +2,7 @@
 
 ## Role
 
-This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, generic webhook, WeCom webhook, and the outbound-only Bark, ServerChan, ntfy, DingTalk, and Feishu adapters.
+This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, the Feishu app bot (`feishu_app`, inbound and outbound), generic webhook, WeCom webhook, and the outbound-only Bark, ServerChan, ntfy, DingTalk, and Feishu group-bot adapters.
 
 ## Core Interface
 
@@ -31,6 +31,7 @@ internal/notify/
 └── adapter/
     ├── telegram/                # Inbound/outbound + callback actions
     ├── qq/                      # OneBot/NapCat inbound/outbound
+    ├── feishuapp/               # Feishu/Lark custom-app bot: SDK long connection in, im/v1 text out
     ├── webhook/                 # Stateless generic webhook
     ├── wecom/                   # WeCom webhook (sends through outbound/)
     ├── bark/ serverchan/ ntfy/  # Outbound-only push services
@@ -55,7 +56,9 @@ internal/notify/
 
 ## Stateful Adapter Warning
 
-Do not create a second live Telegram or QQ listener for outbox delivery: it can collide on polling, ports, or connection ownership. Outbox retries go through the production live-channel manager (`OutboxWorker.SetLiveSender`); the factory path is only a fallback for stateless webhook adapters and decrypts `ConfigJSON` first. Changes here require explicit lifecycle tests.
+Do not create a second live Telegram, QQ or Feishu app listener for outbox delivery: it can collide on polling, ports, or connection ownership. Outbox retries go through the production live-channel manager (`OutboxWorker.SetLiveSender`); the factory path is only a fallback for stateless webhook adapters and decrypts `ConfigJSON` first. Changes here require explicit lifecycle tests.
+
+The Feishu app long connection runs in cluster mode: when one app has several connections, each event goes to one of them at random, so a second client silently steals events. `feishuapp.Init` only parses the config and builds the send client; the long connection starts on the first `OnInbound` (the `checkConf` path and the outbox fallback never call it), a process-wide `app_id` registry keeps two configurations from sharing one app, and `Close` releases the registration before waiting so a hot reload can reconnect at once. Inbound handling acks within the platform's 3-second limit: it dedupes by `message_id` process-wide (survives hot reload), refuses messages older than 30 minutes, and hands commands to a per-user FIFO queue. The SDK's Debug logs (full message bodies) are dropped.
 
 Telegram `Healthy()` follows the latest `getUpdates` result (`pollHealthTransport`): telego retries a failing long poll internally without closing the updates channel, so transport-level results are the only signal. `runInbound` restarts the long poll with backoff if the updates channel closes while the poll context is alive.
 

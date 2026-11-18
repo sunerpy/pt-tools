@@ -1,6 +1,6 @@
 # ChatOps quick start
 
-pt-tools has a built-in ChatOps layer: from a **QQ private chat** or a **Telegram private chat** you can check download status, control tasks and receive event notifications at any time, without opening a browser.
+pt-tools has a built-in ChatOps layer: from a private chat in **QQ**, **Telegram** or **Feishu** you can check download status, control tasks and receive event notifications at any time, without opening a browser.
 
 ---
 
@@ -11,7 +11,7 @@ The idea is the same as in Hermes or MoviePilot: you send a command to a bot in 
 Highlights:
 
 - **Built-in commands** covering status queries, torrent control, task management and site sign-in
-- **Linked accounts only**: only an account linked with a binding code can run commands; QQ and Telegram channels also check the sender against the channel's allow lists first
+- **Linked accounts only**: only an account linked with a binding code can run commands; QQ, Telegram and Feishu app bot channels also check the sender against the channel's allow lists first
 - **Binding codes**: an 8-character one-time code, valid for 5 minutes by default (from 1 hour up to no expiry if you choose), generated in the web UI and sent to the person whose account you want to link
 - **An audit trail**: the result, latency and sender of every command are recorded in the `action_audit` table
 - **Encryption at rest**: credentials such as the bot token and the access token are stored encrypted with AES-GCM, so a screenshot never shows them in plain text
@@ -21,14 +21,15 @@ Highlights:
 
 ## Supported channels
 
-| Channel                          | Protocol                     | Inbound commands | Outbound notifications | Recommended for                                                                                  |
-| -------------------------------- | ---------------------------- | :--------------: | :--------------------: | ------------------------------------------------------------------------------------------------ |
-| **QQ OneBot**                    | OneBot v11 reverse WebSocket |        ✅        |           ✅           | People whose everyday chat app is QQ                                                             |
-| **Telegram**                     | Bot API long polling         |        ✅        |           ✅           | People outside mainland China, or who need notifications over the open internet                  |
-| **WeCom group bot**              | WeCom webhook                |        ❌        |           ✅           | Outbound notifications (alerts in a group); see [More notification channels](notify-channels.md) |
-| **DingTalk / Feishu group bots** | Webhook (optional signing)   |        ❌        |           ✅           | Outbound notifications; see [More notification channels](notify-channels.md)                     |
-| **Bark / ServerChan / ntfy**     | Their push APIs              |        ❌        |           ✅           | Notifications on your phone; see [More notification channels](notify-channels.md)                |
-| **Generic webhook** ⚠️           | HMAC-SHA256 HTTP             |        ❌        |    🧪 Experimental     | Custom integrations such as n8n or Zapier; implemented but **not yet verified end to end**       |
+| Channel                          | Protocol                       | Inbound commands | Outbound notifications | Recommended for                                                                                  |
+| -------------------------------- | ------------------------------ | :--------------: | :--------------------: | ------------------------------------------------------------------------------------------------ |
+| **QQ OneBot**                    | OneBot v11 reverse WebSocket   |        ✅        |           ✅           | People whose everyday chat app is QQ                                                             |
+| **Telegram**                     | Bot API long polling           |        ✅        |           ✅           | People outside mainland China, or who need notifications over the open internet                  |
+| **Feishu app bot**               | Long connection (official SDK) |        ✅        |           ✅           | Teams that use Feishu; see [Feishu app bot](chatops-feishu.md)                                   |
+| **WeCom group bot**              | WeCom webhook                  |        ❌        |           ✅           | Outbound notifications (alerts in a group); see [More notification channels](notify-channels.md) |
+| **DingTalk / Feishu group bots** | Webhook (optional signing)     |        ❌        |           ✅           | Outbound notifications; see [More notification channels](notify-channels.md)                     |
+| **Bark / ServerChan / ntfy**     | Their push APIs                |        ❌        |           ✅           | Notifications on your phone; see [More notification channels](notify-channels.md)                |
+| **Generic webhook** ⚠️           | HMAC-SHA256 HTTP               |        ❌        |    🧪 Experimental     | Custom integrations such as n8n or Zapier; implemented but **not yet verified end to end**       |
 
 > Inbound commands (chat app → pt-tools) need a two-way connection; the webhook channels only push outbound.
 
@@ -41,9 +42,11 @@ Do you want to send commands to pt-tools from a chat app?
 │
 ├── Yes → Is QQ your main chat app?
 │        ├── Yes → QQ OneBot (NapCat)  →  docs/en/guide/chatops-qq-napcat.md
-│        └── No → Can you reach Telegram?
-│                  ├── Yes → Telegram bot  →  docs/en/guide/chatops-telegram.md
-│                  └── No → Use Telegram through a proxy
+│        └── No → Does your team use Feishu?
+│                  ├── Yes → Feishu app bot  →  docs/en/guide/chatops-feishu.md
+│                  └── No → Can you reach Telegram?
+│                            ├── Yes → Telegram bot  →  docs/en/guide/chatops-telegram.md
+│                            └── No → Use Telegram through a proxy
 │
 └── Only outbound notifications (events pushed to a group)?
      ├── A WeCom, DingTalk or Feishu group → the matching group bot (docs/en/guide/notify-channels.md)
@@ -96,6 +99,7 @@ Continue with the guide for the channel you chose:
 
 - **QQ (NapCat)** → [QQ through OneBot (NapCat)](chatops-qq-napcat.md)
 - **Telegram** → [Telegram bot](chatops-telegram.md)
+- **Feishu app bot** → [Feishu app bot](chatops-feishu.md)
 
 Once it is set up, open the audit log page of the web UI (`/chatops/audit`) to confirm that commands run and are recorded.
 

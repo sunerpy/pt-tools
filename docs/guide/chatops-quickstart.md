@@ -1,6 +1,6 @@
 # ChatOps 快速开始
 
-pt-tools 内置了一套 ChatOps 层，让你可以通过 **QQ 私聊** 或 **Telegram 私聊** 随时查看下载状态、控制任务、接收事件通知，不需要打开浏览器。
+pt-tools 内置了一套 ChatOps 层，让你可以通过 **QQ**、**Telegram** 或**飞书**的私聊随时查看下载状态、控制任务、接收事件通知，不需要打开浏览器。
 
 ---
 
@@ -11,7 +11,7 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 功能亮点：
 
 - **内置命令**覆盖状态查询、种子控制、任务管理和站点签到
-- **绑定后才能使用**，只有用绑定码完成绑定的账号才能执行命令；QQ 和 Telegram 通道还会先按通道里的名单过滤发送者
+- **绑定后才能使用**，只有用绑定码完成绑定的账号才能执行命令；QQ、Telegram 和飞书应用机器人通道还会先按通道里的名单过滤发送者
 - **绑定码机制**，8 字符一次性码，默认 5 分钟有效（可选 1 小时到永久），通过 Web UI 生成再发给需要绑定的用户
 - **操作审计**，每条命令的执行结果、延迟、触发用户全部记录到 `action_audit` 表
 - **AES-GCM 加密落库**，Bot Token / Access Token 等凭证加密存储，截图不泄漏明文
@@ -25,6 +25,7 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 | --------------------------- | ------------------------- | :------: | :-------: | ---------------------------------------------------------------- |
 | **QQ OneBot**               | OneBot v11 反向 WebSocket |    ✅    |    ✅     | 国内用户、日常 QQ 就是主要 IM                                    |
 | **Telegram**                | Bot API 长轮询            |    ✅    |    ✅     | 海外用户、需要对接外网通知                                       |
+| **飞书应用机器人**          | 长连接（官方 SDK）        |    ✅    |    ✅     | 团队用飞书，见[飞书应用机器人](chatops-feishu.md)                |
 | **企业微信群机器人**        | 企业微信 Webhook          |    ❌    |    ✅     | 出站推送（群内告警），见[更多通知通道](notify-channels.md)       |
 | **钉钉 / 飞书群机器人**     | Webhook（可加签）         |    ❌    |    ✅     | 出站推送，见[更多通知通道](notify-channels.md)                   |
 | **Bark / Server 酱 / ntfy** | 各自的推送接口            |    ❌    |    ✅     | 推到手机，见[更多通知通道](notify-channels.md)                   |
@@ -41,9 +42,11 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 │
 ├── 是 → 国内用 QQ 作为主要 IM？
 │        ├── 是 → QQ OneBot (NapCat)  →  docs/guide/chatops-qq-napcat.md
-│        └── 否 → 能访问 Telegram？
-│                  ├── 是 → Telegram Bot  →  docs/guide/chatops-telegram.md
-│                  └── 否 → 挂代理后再用 Telegram
+│        └── 否 → 团队用飞书？
+│                  ├── 是 → 飞书应用机器人  →  docs/guide/chatops-feishu.md
+│                  └── 否 → 能访问 Telegram？
+│                            ├── 是 → Telegram Bot  →  docs/guide/chatops-telegram.md
+│                            └── 否 → 挂代理后再用 Telegram
 │
 └── 只需要出站通知（事件推送到群）？
      ├── 企业微信、钉钉、飞书群 → 对应的群机器人（docs/guide/notify-channels.md）
@@ -96,6 +99,7 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 
 - **QQ (NapCat)** → [chatops-qq-napcat.md](chatops-qq-napcat.md)
 - **Telegram** → [chatops-telegram.md](chatops-telegram.md)
+- **飞书应用机器人** → [chatops-feishu.md](chatops-feishu.md)
 
 配置完成后，建议打开 Web UI 的操作审计页面（`/chatops/audit`），确认命令正常执行并被记录。
 

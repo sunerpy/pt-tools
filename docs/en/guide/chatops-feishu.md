@@ -1,0 +1,216 @@
+# Feishu app bot
+
+This page explains how to connect a Feishu (Lark) **custom app bot** to pt-tools: message the bot in a private chat or @ it in a group to send ChatOps commands and talk to the AI assistant, and receive background notifications such as the daily report, sign-ins and series tracking in Feishu.
+
+pt-tools receives events over the **long connection** of the official Feishu Go SDK: pt-tools connects out to the Feishu Open Platform, so no public address or open port is needed. Deployment is the same as with Telegram's long polling.
+
+> [!NOTE]
+> This page is about the Feishu app bot (`飞书应用机器人`, channel type `feishu_app`), which receives commands. The [Feishu group bot](notify-channels.md#feishu-lark-group-bot) in More notification channels is a custom bot in a group that only sends notifications and cannot receive commands; the two are configured separately.
+
+---
+
+## 1. Before you start
+
+- A Feishu organization account that can create a **custom app** (`企业自建应用`) on the [Feishu Open Platform](https://open.feishu.cn/app). The long connection only works for custom apps.
+- Publishing an app needs approval from an administrator of the organization. For personal use you can create a separate test organization in which you are the administrator, so publishing does not wait for anyone else.
+- The machine running pt-tools can reach `open.feishu.cn` (`open.larksuite.com` for Lark). If it needs a proxy, see section 11.
+
+---
+
+## 2. Creating the app and enabling the bot
+
+1. Open the [Feishu Open Platform](https://open.feishu.cn/app), click Create custom app (`创建企业自建应用`), and enter a name (such as `pt-tools`) and a description.
+2. Under Add features (`添加应用能力`), add Bot (`机器人`).
+3. Under Credentials & Basic Info (`凭证与基础信息`), find the **App ID** (starting with `cli_`) and the **App Secret**. You need both in the next step.
+
+> [!WARNING]
+> The App Secret is the password of the app. Do not post it in public groups or screenshots, and do not commit it to a code repository. If it leaks, reset it under Credentials & Basic Info.
+
+---
+
+## 3. Granting permissions
+
+Under Permissions & Scopes (`权限管理`), search for and enable these three:
+
+| Permission                         | Name                                  | Required | Used for                                    |
+| ---------------------------------- | ------------------------------------- | :------: | ------------------------------------------- |
+| `im:message.p2p_msg:readonly`      | Read private messages sent to the bot |   Yes    | Sending commands in a private chat          |
+| `im:message.group_at_msg:readonly` | Receive group messages that @ the bot |    No    | Sending commands by @-ing the bot in groups |
+| `im:message:send_as_bot`           | Send messages as the app              |   Yes    | Replying to commands, background notices    |
+
+pt-tools needs no contacts permission and does not read user names. A broader permission such as reading all group messages does no harm: pt-tools ignores every group message that does not @ this bot.
+
+---
+
+## 4. Creating the channel in pt-tools
+
+Open the pt-tools Web UI, go to ChatOps → Notifications (`消息通知`) and click **Add channel** (`添加通道`):
+
+1. Select **Feishu app bot** (`飞书应用机器人`) as the channel type, enter a channel name, the App ID and the App Secret, keep the platform at Feishu (`飞书`, or choose Lark (`Lark 国际版`)), and click **Create channel** (`创建通道`).
+2. The channel connects to Feishu as soon as it is created. Watch its status in the channel list: **Connected** (`已连接`) means the long connection is up, which the next step needs.
+3. Open the channel detail and complete the fields below under **Credentials & connection** (`凭证与连接`), then click **Save credentials** (`保存凭证`). The channel reconnects with the new settings after saving.
+
+| Field                                         | Value                   | Notes                                                                                                       |
+| --------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| App ID                                        | `cli_a1b2c3d4e5f6`      | The App ID under Credentials & Basic Info                                                                   |
+| App Secret                                    | The app's App Secret    | Stored encrypted; shown only in the channel detail after login                                              |
+| Platform (`平台`)                             | Feishu / Lark           | Feishu by default                                                                                           |
+| Administrator open_id (`管理员 open_id`)      | open_ids, `ou_…`        | Separate several with commas or new lines; notifications go to the first one when no default chat ID is set |
+| Allowed users' open_id (`允许的用户 open_id`) | open_ids, `ou_…`        | They can also talk to the bot                                                                               |
+| Default chat ID (`默认会话 ID（可选）`)       | `oc_…` or `ou_…`        | Where notifications such as the daily report go: `oc_` is a group (or a private chat), `ou_` a person       |
+| Proxy URL (`代理 URL（可选）`)                | `http://127.0.0.1:1080` | Used by this channel only, see section 11                                                                   |
+
+- Both lists only accept open_ids (starting with `ou_`). A user_id, union_id or anything else is rejected on saving, with the offending entry named. To find your open_id, see section 7.
+- **Only people in one of the two lists can talk to the bot**; with both lists empty, no message is handled. When someone outside the lists messages the bot privately, they get a reply with their open_id (at most one every 10 minutes per person); in groups the bot stays silent.
+- A notification without a recipient goes to the first of: the default chat ID → the first administrator open_id → the first account bound on this channel. When none exists, the notification cannot be sent, and the channel section of ChatOps bindings (`ChatOps 绑定`) says why.
+
+---
+
+## 5. Subscribing to events over the long connection
+
+Back on the app page of the Feishu Open Platform, open **Events & Callbacks** (`事件与回调`) → **Event configuration** (`事件配置`):
+
+1. Set the subscription mode to **Receive events through persistent connection** (`使用长连接接收事件`) and save. Feishu checks for an online client when saving, so the pt-tools channel must show Connected at this point, or saving fails.
+2. Click Add events (`添加事件`), then search for and add **Receive messages v2.0** (`接收消息 v2.0`, `im.message.receive_v1`).
+
+This one event is all pt-tools needs. Subscribing to other events does no harm: pt-tools only handles received messages.
+
+---
+
+## 6. Publishing a version
+
+Changes to permissions and events take effect only after a version is published:
+
+1. Open **App Release** (`应用发布`) → **Version Management & Release** (`版本管理与发布`), click Create version (`创建版本`), and enter a version number and release notes.
+2. Under Availability (`可用范围`), add the people (or departments) who will use the bot. People outside the availability cannot find the bot, and notifications pt-tools sends to them fail (error code 230013).
+3. Submit for release and wait for an administrator to approve it. In a test organization, approve it yourself.
+
+Publish a new version whenever you change permissions or event subscriptions later.
+
+---
+
+## 7. Getting an open_id
+
+An open_id is a user's ID within this app and starts with `ou_`. **The same person has a different open_id in each app**, so the lists and bindings have to be set up again after switching to another app.
+
+The easiest way: search for the bot in Feishu and send it a private message (such as `/help`). While you are not in the lists, the bot replies (in Chinese) that you are not in its lists, followed by your open_id:
+
+```
+你不在这个 pt-tools 机器人的名单里，发来的消息没有处理。
+你的 open_id 是 ou_7f3a9c2d1e…
+请 pt-tools 的管理员在通道设置里把它填进「管理员 open_id」或「允许的用户 open_id」。
+```
+
+Enter this open_id in Administrator open_id in the channel detail and save. You can also look it up in the API Explorer of the Open Platform (see [How to obtain an Open ID](https://open.feishu.cn/document/uAjLw4CM/ugTN1YjL4UTN24CO1UjN/trouble-shooting/how-to-obtain-openid)).
+
+---
+
+## 8. Binding and testing commands
+
+### Sending a test message
+
+Click **Send test** (`发测试消息`) on the channel card in the list, or **Send test message** (`发送测试消息`) under Connectivity test (`连通性测试`) in the channel detail. When the test message from the bot arrives in Feishu, sending works.
+
+### Binding
+
+The lists only decide who can talk to the bot; **running commands also requires binding**. Open ChatOps → ChatOps bindings (`ChatOps 绑定`):
+
+- The Channels section at the top lists each account in the Feishu channel's lists and whether it is bound. Click **Bind** (`绑定`) next to an unbound account in the lists, and it can use commands once you confirm.
+- Or click **Generate bind code** (`生成绑定码`), choose the Feishu channel, get an 8-character code, and send `/bind <code>` to the bot in a **private chat**. The bot confirms the binding.
+
+Currently **every bound account has administrator rights** and can pause or delete torrents and manage RSS subscriptions. Only give bind codes to people you trust.
+
+### Testing commands
+
+Send `/help` to the bot in a private chat; it replies with the full command list. Then send `/status` to check a read operation. For the command list, see [ChatOps quick start](chatops-quickstart.md#built-in-commands).
+
+---
+
+## 9. Using the bot in groups
+
+1. Enable the `im:message.group_at_msg:readonly` permission from section 3 and publish a version.
+2. Add the bot to the group: group settings → Group bots (`群机器人`) → Add bot (`添加机器人`), then choose this app.
+3. **@ the bot** followed by the command, such as `@pt-tools /status`. pt-tools ignores messages that do not @ the bot, including ones that only @ other people or other bots.
+
+In a group, the sender also has to be in the lists and bound. Replies go to the group where every member can see them, bind codes included, so **bind in a private chat**. To send notifications such as the daily report to a group, enter the group's chat ID (starting with `oc_`) as the default chat ID.
+
+---
+
+## 10. The AI assistant and confirmations
+
+After enabling Notification channels (`通知渠道（ChatOps）`) under System → AI assistant settings (`AI 助手设置`), text that does not start with `/` goes to the AI assistant (in groups, still @ the bot). For changes such as pausing or deleting torrents, the assistant first asks for confirmation; reply `确认` (confirm) to run it, or anything else to cancel. Only the person who started the conversation can confirm; replies from other group members do not count. See [AI assistant](assistant.md#in-notification-channels).
+
+Feishu has no card buttons here: confirmations are text replies, and new RSS notifications have no Download now / Ignore buttons (the same as QQ).
+
+---
+
+## 11. Proxy
+
+Networks in mainland China can usually reach `open.feishu.cn` directly. If a proxy is needed, there are two ways:
+
+- **Environment variables**: pt-tools follows `HTTPS_PROXY` / `HTTP_PROXY` and `NO_PROXY`. If the deployment sets `HTTPS_PROXY` for other sites and Feishu should connect directly, add `feishu.cn` (`larksuite.com` for Lark) to `NO_PROXY`.
+- **Proxy URL of the channel**: enter it in Proxy URL in the channel detail, and only this channel uses it. `http://` and `socks5://` are supported; the long connection does not support proxies with the `https://` scheme.
+
+---
+
+## 12. FAQ
+
+### Q: The bot does not react to my messages
+
+Check in this order:
+
+1. Is the channel status Connected (ChatOps → Notifications)?
+2. Is the subscription mode under Events & Callbacks set to the persistent connection, and is Receive messages v2.0 added?
+3. After changing permissions and events, did you **publish a version** and get it approved?
+4. Are you within the app's availability?
+5. Private chats need `im:message.p2p_msg:readonly`, groups need `im:message.group_at_msg:readonly`, and in groups you must @ the bot.
+6. Is your open_id in the channel's lists, and are you bound before running commands? (The channel section of ChatOps bindings shows the last interaction and its result.)
+
+---
+
+### Q: Saving the persistent connection mode fails
+
+Feishu checks for an online client when saving this setting. Make sure the channel shows Connected in pt-tools, then save again on the Open Platform.
+
+---
+
+### Q: The channel status shows Error (`异常`)
+
+Search the run logs (`运行日志`) for `飞书应用机器人`. Common causes:
+
+- A wrong App ID or App Secret (the log says the long connection was rejected by Feishu): correct it and save the credentials, and the channel reconnects at once.
+- The bot feature of the app is not enabled: the status also shows Error while the bot info cannot be read, and group messages are ignored in the meantime; private chats work as usual.
+- The same Feishu app is configured on two channels: only the one that started first connects, and the other shows Error, see the next question.
+
+---
+
+### Q: Can two pt-tools instances, or two channels, share one app?
+
+**No**. The long connection works in cluster mode: when an app has several connections, each message goes to one of them at random, so the others miss it, which looks like messages being dropped at random. Use one app for one channel of one pt-tools instance; with several machines, create one app per machine.
+
+---
+
+### Q: After changing another notification setting, replies come a little later
+
+Changing any notification channel reconnects all channels once. Feishu pushes messages sent during those few seconds again about 15 seconds later, and pt-tools handles them as usual without running them twice.
+
+---
+
+### Q: Notifications fail with error code 230013 or 230002
+
+- **230013**: the recipient is outside the app's availability. Add them under Version Management & Release and publish a new version.
+- **230002**: the bot is not in this group. Add the bot to the group, or change the default chat ID.
+
+Other error codes and their causes appear in Recent notifications (`最近的通知`) and in the action audit.
+
+---
+
+### Q: The bot replies that a message was sent N minutes ago and was not run
+
+While pt-tools is offline, Feishu pushes the messages from that time again after 1 hour and after 6 hours. Messages that arrive more than 30 minutes after they were sent are not run, so that an old `/delete` does not take effect once pt-tools is back online. Send it again if you still need it.
+
+---
+
+### Q: Is Lark supported?
+
+Yes. Choose Lark (`Lark 国际版`) as the platform when creating the channel, and create the app on the [Lark Open Platform](https://open.larksuite.com/app) with the same steps. This part follows the official documentation and **has not been tested** on Lark.
