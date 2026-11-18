@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/larksuite/oapi-sdk-go/v3/scene/registration"
@@ -16,7 +17,8 @@ import (
  *
  * SDK 的几处行为（scene/registration/registration.go）：
  *   - 开始与轮询都是表单 POST，device_code 在请求体里；网络错误里只有不带查询参数的接口地址，RegisterAppError
- *     只有 code 与 description，所以这里返回的错误里没有凭据。
+ *     只有 code 与 description，所以这里返回的错误里没有凭据。解析 verification_uri_complete 失败时 url.Parse 的
+ *     错误带着整条链接（含一次性的 user_code），registerError 只留问号以前的部分。
  *   - 请求都用调用方的 ctx（http.NewRequestWithContext），ctx 取消或到期时马上结束；轮询另有链接有效期
  *     （expire_in，通常 10 分钟）的时限。
  *   - 用 http.DefaultClient：跟随 HTTPS_PROXY / NO_PROXY，不认通道级 proxy_url（建应用的时候通道还不存在）。
@@ -107,6 +109,18 @@ func registerError(ctx context.Context, err error) error {
 		// 链接的有效期或调用方的时限到的时候，请求正好在路上（SDK 只在两次轮询之间的等待里认出过期）
 		return ErrRegisterExpired
 	default:
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = &url.Error{Op: ue.Op, URL: withoutQuery(ue.URL), Err: ue.Err}
+		}
 		return fmt.Errorf("飞书一键创建失败: %w", err)
 	}
+}
+
+// withoutQuery 去掉地址里问号或井号以后的部分。
+func withoutQuery(s string) string {
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }

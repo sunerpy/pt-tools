@@ -285,6 +285,41 @@ func TestRegisterApp_OtherErrors(t *testing.T) {
 	assert.Zero(t, qrCalls, "开始就失败时没有链接")
 }
 
+// 账号服务给的链接解析不了：url.Parse 的错误里本来带着整条链接（含一次性的 user_code），这里只留问号以前的部分；
+// 网络错误（地址本来就不带查询参数）照旧，原来的错误还拿得到。
+func TestRegisterApp_URLErrorsDropQuery(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_code":               "dc_qa_device",
+			"verification_uri_complete": "http://bad host/page/launcher?user_code=UC-LEAK-0001#frag",
+			"interval":                  1,
+			"expire_in":                 600,
+		})
+	}))
+	defer bad.Close()
+	saved := registerBaseURL
+	t.Cleanup(func() { registerBaseURL = saved })
+	registerBaseURL = func() string { return bad.URL }
+	_, err := RegisterApp(context.Background(), func(string, int) {})
+	require.Error(t, err)
+	assert.Equal(t, `飞书一键创建失败: parse "http://bad host/page/launcher": invalid character " " in host name`, err.Error())
+	assert.NotContains(t, err.Error(), "UC-LEAK-0001")
+	var ue *url.Error
+	require.ErrorAs(t, err, &ue)
+	assert.Equal(t, "parse", ue.Op)
+
+	// 连不上：*url.Error 的地址是接口地址，没有查询参数，内容照旧
+	gone := httptest.NewServer(http.NotFoundHandler())
+	addr := gone.URL
+	gone.Close()
+	registerBaseURL = func() string { return addr }
+	_, err = RegisterApp(context.Background(), func(string, int) {})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `飞书一键创建失败: Post "`+addr+`/oauth/v1/app/registration": `)
+	assert.Contains(t, err.Error(), "connection refused")
+}
+
 // 正式构建里不改地址（SDK 默认 accounts.feishu.cn，Lark 租户由它自己切到 accounts.larksuite.com）；
 // 预填按计划 E3；onQR 为空时 SDK 要的回调也在。
 func TestRegisterOptions(t *testing.T) {
