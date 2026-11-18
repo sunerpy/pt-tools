@@ -17,5 +17,5 @@ func wireQATestHooks(srv *web.Server, bs *chatopsBootstrap) {
 	}
 	web.SetQAInboundProcessor(bs.Chain())
 	srv.SetQAHook(web.RegisterQATestHooks)
-	global.GetSlogger().Warn("[QA] test hook endpoints /test/telegram/inject and /test/qq/inject ENABLED (qa build only)")
+	global.GetSlogger().Warn("[QA] test hook endpoints /test/telegram/inject, /test/qq/inject and /test/feishu/inject ENABLED (qa build only)")
 }

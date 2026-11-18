@@ -726,8 +726,8 @@ func (s *Server) configNotifyChannelsResource() *configResource {
 	return &configResource{
 		Name: "notify_channels", Title: "通知通道", Kind: configList,
 		Path: "/api/chatops/notifications", ItemPath: "/api/chatops/notifications/{id}",
-		Desc: "Telegram、QQ、企业微信、钉钉、飞书、Bark、ntfy、Server 酱、Webhook 等通知通道。各通道的配置写成 config.<键>" +
-			"（例如 config.default_chat_id）；令牌、密钥、地址这类键只写不读。新增要给 channel_type。",
+		Desc: "Telegram、QQ、飞书应用机器人、企业微信、钉钉、飞书群机器人、Bark、ntfy、Server 酱、Webhook 等通知通道。" +
+			"各通道的配置写成 config.<键>（例如 config.default_chat_id）；令牌、密钥、地址这类键只写不读。新增要给 channel_type。",
 		Fields:  []string{"name", "enabled", "quiet_hours_start", "quiet_hours_end"},
 		AddOnly: []string{"channel_type"}, Prefix: notifyPrefix,
 		secretKey: func(field string) bool {
@@ -736,7 +736,8 @@ func (s *Server) configNotifyChannelsResource() *configResource {
 		Required: []string{"channel_type", "name"},
 		Ops:      []string{configOpAdd, configOpUpdate, configOpDelete},
 		Hints: map[string]string{
-			"channel_type":      "telegram、qq、wecom、dingtalk、feishu、bark、ntfy、serverchan、webhook",
+			"channel_type": "telegram、qq_onebot、feishu_app（飞书应用机器人，能收命令）、wecom_webhook、dingtalk、" +
+				"feishu（飞书群机器人，只发通知）、bark、ntfy、serverchan、webhook",
 			"quiet_hours_start": "HH:MM，免打扰开始；空着不免打扰", "quiet_hours_end": "HH:MM",
 		},
 		Impact: []string{"保存以后通道按新配置重新连接；配置不对时这个通道发不出消息"},
