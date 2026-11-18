@@ -115,7 +115,9 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 		return errQueueFull
 	}
 	// 不记正文：/addrss 带着 RSS 地址里的 passkey
-	log.Infof("飞书应用机器人(%d): 收到消息 open_id=%s chat_type=%s message_id=%s len=%d", c.confID, openID, chatType, messageID, len(text))
+	// chat_id 要写：群的会话 ID（oc_ 开头）用户只能从这一行拿，填进「默认会话 ID」
+	log.Infof("飞书应用机器人(%d): 收到消息 open_id=%s chat_type=%s chat_id=%s message_id=%s len=%d",
+		c.confID, openID, chatType, chatID, messageID, len(text))
 	if d := qaSlowAck(); d > 0 {
 		sleepCtx(ctx, d)
 	}

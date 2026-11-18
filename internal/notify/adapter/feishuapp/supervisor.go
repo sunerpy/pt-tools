@@ -209,6 +209,7 @@ func (c *Channel) loadBotInfo() {
 		reqCtx, cancel := context.WithTimeout(ctx, httpTimeout+5*time.Second)
 		info, _, err := c.api.BotInfo(reqCtx)
 		cancel()
+		err = withTokenHint(err)
 		if ctx.Err() != nil {
 			return
 		}

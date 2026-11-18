@@ -3,6 +3,8 @@ package feishuapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,9 +15,12 @@ import (
 	"testing"
 	"time"
 
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 // fakeOpenAPI 是开放平台的假接口：换 tenant_access_token、发消息、取机器人信息。
@@ -56,7 +61,7 @@ func newFakeOpenAPI(t *testing.T) *fakeOpenAPI {
 		code := f.tokenCode
 		f.mu.Unlock()
 		if code != 0 {
-			_, _ = io.WriteString(w, `{"code":10014,"msg":"app secret invalid"}`)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "msg": "token request failed"})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "ok", "tenant_access_token": "t-g1044fakefaketoken" + body.AppID, "expire": 7200})
@@ -203,4 +208,39 @@ func TestParseResult(t *testing.T) {
 	res = parseResult(200, h, []byte(`{"msg":"no code"}`))
 	assert.Equal(t, codeNotJSON, res.Code, "没有 code 不算成功")
 	assert.True(t, strings.Contains(parseResult(500, http.Header{}, nil).Msg, "JSON"))
+}
+
+// 换 tenant_access_token 失败（App ID、App Secret 填错，应用被停用）时也给中文提示。错误码与含义照飞书官方的
+// 「服务端错误码说明」（https://open.feishu.cn/document/ukTMukTMukTM/ugjM14COyUjL4ITN）。
+func TestSend_TokenErrorHints(t *testing.T) {
+	cases := map[int]string{
+		10005:    "App ID",
+		10014:    "停用",
+		10015:    "App Secret 不对",
+		20002:    "对不上",
+		99991543: "App ID 或 App Secret 不对",
+		10003:    "",
+	}
+	for code, hint := range cases {
+		f := newFakeOpenAPI(t)
+		f.tokenCode = code
+		c, _, _ := newTestChannel(t, testConfig)
+		real := testAPI(t, f, "cli_api_tokenhint")
+		c.api = real
+		err := c.Send(context.Background(), notify.Notification{Text: "x", UserID: "ou_a"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), strconv.Itoa(code))
+		if hint == "" {
+			assert.NotContains(t, err.Error(), "（", code)
+			continue
+		}
+		assert.Contains(t, err.Error(), hint, code)
+	}
+}
+
+func TestTokenHint_PointerCodeError(t *testing.T) {
+	assert.Contains(t, tokenHint(&larkcore.CodeError{Code: 10015}), "App Secret")
+	assert.Contains(t, tokenHint(fmt.Errorf("wrapped: %w", larkcore.CodeError{Code: 10014})), "停用")
+	assert.Empty(t, tokenHint(errors.New("dial tcp: refused")))
+	assert.Empty(t, tokenHint(nil))
 }

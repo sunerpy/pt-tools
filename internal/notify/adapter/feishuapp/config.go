@@ -135,12 +135,14 @@ func defaultChatID(raw json.RawMessage) (string, error) {
 	return s, nil
 }
 
-// checkProxyURL 只认 http 与 socks5：长连接用的 gorilla/websocket 不支持 https 协议的代理。
+// checkProxyURL 只认 http 与 socks5：长连接用的 gorilla/websocket 不支持 https 协议的代理。端口必须写：
+// gorilla 把 socks5 的地址原样交给拨号（x_net_proxy.go），没有端口时长连接报 missing port in address，
+// 而发消息走的 net/http 会自己补端口，看起来能发、收不到。
 // 地址里可能带用户名与密码，所以错误里不写它。
 func checkProxyURL(raw string) error {
 	bad := errors.New("代理地址要以 http:// 或 socks5:// 开头，并带上主机与端口")
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "socks5") {
+	if err != nil || u.Hostname() == "" || u.Port() == "" || (u.Scheme != "http" && u.Scheme != "socks5") {
 		return bad
 	}
 	return nil

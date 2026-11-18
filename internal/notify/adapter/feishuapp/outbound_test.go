@@ -109,6 +109,45 @@ func TestSend_TruncatesLongText(t *testing.T) {
 	assert.Greater(t, len(got), maxContentBytes/2, "截断不能截得太狠")
 }
 
+// SDK 把 content 再 JSON 编码一次放进请求体（json.Marshal，HTML 转义开着）：< > & 各变成 6 个字节，引号与反斜杠翻倍。
+// 截断按这一层的长度算，请求体不超过 150 KB。
+func TestSend_TruncatesByRequestBodySize(t *testing.T) {
+	for name, long := range map[string]string{
+		"a&b":    strings.Repeat("a&b", 80*1024),
+		`x"y\`:   strings.Repeat(`x"y\`, 40*1024),
+		"<>":     strings.Repeat("<>", 80*1024),
+		"RSS 地址": strings.Repeat("https://pt.example/rss?passkey=abc&uid=1&linktype=dl\n", 4096),
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, api, _ := newTestChannel(t, testConfig)
+			require.NoError(t, c.Send(context.Background(), notify.Notification{Text: long, UserID: "ou_a"}))
+			sent := api.sent()[0]
+			body, err := json.Marshal(map[string]string{"receive_id": sent.id, "msg_type": "text", "content": sent.content})
+			require.NoError(t, err)
+			assert.LessOrEqual(t, len(body), 150*1000, "按 SDK 的方式序列化的请求体不超过 150 KB")
+			assert.Greater(t, len(body), 120*1024, "截断不能截得太狠")
+			assert.True(t, strings.HasSuffix(decodeText(t, sent.content), truncatedSuffix))
+		})
+	}
+}
+
+// 飞书应用机器人的 text 消息会把 [文字](链接) 渲染成链接：种子标题能伪造一个看不见真实地址的链接。
+// 发出去之前把 ]( 换成全角的 ］(，链接地址照样以文字显示；<at 照旧中和。
+func TestSend_NeutralizesHiddenLinks(t *testing.T) {
+	c, api, _ := newTestChannel(t, testConfig)
+	require.NoError(t, c.Send(context.Background(), notify.Notification{
+		Title:  "新种子",
+		Text:   `[官方通知：点此领取邀请](https://evil.example/x) 与 <at user_id="all"></at>`,
+		Link:   "https://pt.example/details.php?id=1",
+		UserID: "oc_g",
+	}))
+	got := decodeText(t, api.sent()[0].content)
+	assert.NotContains(t, got, "](")
+	assert.Contains(t, got, "[官方通知：点此领取邀请］(https://evil.example/x)")
+	assert.NotContains(t, strings.ToLower(got), "<at")
+	assert.Contains(t, got, "https://pt.example/details.php?id=1", "普通的链接照样发")
+}
+
 func TestTextContent_ShortTextUntouched(t *testing.T) {
 	assert.Equal(t, `{"text":"a<b>&"}`, textContent("a<b>&"))
 }
@@ -119,7 +158,28 @@ func TestSend_PerRecipientLimiter(t *testing.T) {
 	assert.Same(t, a, c.limiters.get("ou_a"))
 	assert.NotSame(t, a, c.limiters.get("ou_b"))
 	assert.InDelta(t, 4, float64(a.Limit()), 0.001)
-	assert.Equal(t, 4, a.Burst())
+	assert.Equal(t, 1, a.Burst())
+}
+
+// 同一用户、同一群各 5 QPS：每秒 4 条、桶里最多 1 个令牌，任意 1 秒的窗口里最多发出 5 条。
+// 按令牌桶给出的发送时刻算（不用真的等）。
+func TestSend_LimiterAtMostFivePerSecond(t *testing.T) {
+	l := newLimiterSet(sendRate, sendBurst).get("ou_same")
+	start := time.Unix(1_800_000_000, 0)
+	var at []time.Time
+	for range 40 {
+		at = append(at, start.Add(l.ReserveN(start, 1).DelayFrom(start)))
+	}
+	for i := range at {
+		n := 0
+		for _, t2 := range at[i:] {
+			if t2.Sub(at[i]) < time.Second {
+				n++
+			}
+		}
+		assert.LessOrEqual(t, n, 5, "从第 %d 条起的 1 秒里发了 %d 条", i, n)
+	}
+	assert.Equal(t, 9750*time.Millisecond, at[39].Sub(at[0]), "之后每 250ms 一条")
 }
 
 func TestLimiterSet_ResetsWhenFull(t *testing.T) {

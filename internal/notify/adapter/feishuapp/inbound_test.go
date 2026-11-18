@@ -382,6 +382,8 @@ func TestInbound_LogsWithoutText(t *testing.T) {
 		}
 	}
 	assert.True(t, strings.Contains(logJoined(logs.All()), "om_l1"), "日志里有 message_id")
+	// 默认会话 ID 从这一行拿：群里 @ 机器人发一条消息，日志里有 chat_id
+	assert.Contains(t, logJoined(logs.All()), "chat_id=oc_p2p_ou_admin")
 }
 
 // Close 取消进行中的处理（与 Telegram、QQ 一致）。

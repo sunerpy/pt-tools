@@ -39,6 +39,9 @@ func TestCheckConfig(t *testing.T) {
 		{name: "代理协议不对", raw: `{"app_id":"cli_a1","app_secret":"s","proxy_url":"ftp://proxy:21"}`, wantErr: "代理地址"},
 		{name: "https 代理不支持长连接", raw: `{"app_id":"cli_a1","app_secret":"s","proxy_url":"https://proxy:443"}`, wantErr: "代理地址"},
 		{name: "代理没有主机", raw: `{"app_id":"cli_a1","app_secret":"s","proxy_url":"http://"}`, wantErr: "代理地址"},
+		// 长连接用的 gorilla/websocket 不会给 socks5 补默认端口：拨号报 missing port in address
+		{name: "socks5 代理没写端口", raw: `{"app_id":"cli_a1","app_secret":"s","proxy_url":"socks5://127.0.0.1"}`, wantErr: "端口"},
+		{name: "http 代理没写端口", raw: `{"app_id":"cli_a1","app_secret":"s","proxy_url":"http://proxy.lan"}`, wantErr: "端口"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
