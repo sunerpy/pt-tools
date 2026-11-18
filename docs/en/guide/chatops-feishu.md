@@ -194,7 +194,7 @@ Search the run logs (`运行日志`) for `飞书应用机器人`. Common causes:
 
 Changing any notification channel reconnects all channels once:
 
-- The message being handled at that moment is cancelled (part of it may already have run, and it is not retried); messages still waiting in line are handled after the reconnect, each exactly once.
+- The message being handled at that moment is cancelled (part of it may already have run, and it is not retried); messages still waiting in line are handled after the reconnect, each exactly once. If the message being handled cannot stop right away (for example a slow downloader), the reconnect waits for it to finish, up to 10 seconds.
 - Several messages from the same person are handled in the order they were sent.
 - According to the Feishu documentation, messages sent during those few seconds are usually pushed again about 15 seconds later, and pt-tools handles them as usual without running them twice.
 
