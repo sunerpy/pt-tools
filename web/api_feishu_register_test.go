@@ -590,7 +590,7 @@ func TestFeishuRegister_SavingSurvivesCancelAndBlocksStart(t *testing.T) {
 	assert.EqualValues(t, 41, st["conf_id"])
 	_, ctxErrs, binds, audits := e.st.snapshot()
 	require.Len(t, ctxErrs, 1)
-	assert.NoError(t, ctxErrs[0], "保存用的 ctx 不受作业 ctx 取消的影响")
+	assert.NoError(t, ctxErrs[0], "保存时 ctx 没有出错（作业 ctx 被取消的情况见 CredentialsAfterCancel）")
 	assert.Len(t, binds, 1)
 	assert.Len(t, audits, 1)
 	b := e.start(t, "")
@@ -615,6 +615,10 @@ func TestFeishuRegister_CredentialsAfterCancel(t *testing.T) {
 	close(e.st.gate)
 	st := e.waitState(t, s.ID, feishuRegDone)
 	assert.EqualValues(t, 41, st["conf_id"])
+	// 作业的 ctx 这时已经取消了：保存用的是 WithoutCancel 派生的 ctx，不受影响
+	_, ctxErrs, _, _ := e.st.snapshot()
+	require.Len(t, ctxErrs, 1)
+	assert.NoError(t, ctxErrs[0], "保存用的 ctx 不受作业 ctx 取消的影响")
 }
 
 // 取消以后迟迟不知道结果（SDK 不理取消；实际上它的请求与等待都认 ctx）：最多等 cancelWait，回 pending；
@@ -653,6 +657,9 @@ func TestFeishuRegister_StartKeepsPreviousThatGotCredentials(t *testing.T) {
 	assert.Equal(t, feishuRegSaving, out["state"])
 	close(e.st.gate)
 	e.waitState(t, a.ID, feishuRegDone)
+	_, ctxErrs, _, _ := e.st.snapshot()
+	require.Len(t, ctxErrs, 1)
+	assert.NoError(t, ctxErrs[0], "被取代时取消了作业 ctx，保存用的 ctx 不受影响")
 }
 
 // 上一个取消以后迟迟不知道结果：最多等 cancelWait，回 409「还没结束」，不取代它；它结束以后可以再开始。
