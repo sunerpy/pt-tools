@@ -374,6 +374,10 @@ let regSession = 0;
 let regTimer: ReturnType<typeof setInterval> | undefined;
 let regPolling = false;
 const REG_POLL_MS = 2000;
+/** 关掉对话框以后最多再问多少次（保存通道最多 30 秒） */
+const REG_FOLLOW_ROUNDS = 30;
+/** 离开页面以后不再接着问、不再跳转 */
+let unmounted = false;
 
 const REG_STATES: Record<string, { label: string; tone: "ok" | "warn" | "dang" | "info" }> = {
   pending: { label: "等待扫码与确认", tone: "info" },
@@ -391,6 +395,8 @@ const regState = computed(() => (regGone.value ? "gone" : (regStatus.value?.stat
 const regBusy = computed(
   () => !!reg.value && (regState.value === "pending" || regState.value === "saving"),
 );
+/** 生成二维码的请求还在路上，或者已经开始了：类型、创建方式与名称都不能改 */
+const regLocked = computed(() => regBusy.value || regStarting.value);
 /** 结束了但没建成：按钮换成「重新生成」 */
 const regEnded = computed(() => !!reg.value && !regBusy.value);
 const regReason = computed(() => {
@@ -455,8 +461,10 @@ async function pollRegister() {
   } catch (e: unknown) {
     if (reg.value?.id !== cur.id) return;
     if (e instanceof ApiError && e.status === 404) {
+      // 被别处新开的取代时，这一个可能已经建好了：刷新列表，提示里写明先看列表
       regGone.value = true;
       stopRegPoll();
+      void loadNotifications();
     }
     // 别的错误（网络抖动）：下一次再问
   } finally {
@@ -464,7 +472,10 @@ async function pollRegister() {
   }
 }
 
-/** 建好了：提示、关掉对话框、刷新列表并打开这个通道的详情页 */
+/**
+ * 建好了：提示、关掉对话框、刷新列表并打开这个通道的详情页。关掉对话框以后才知道建好的（见 settleDropped），
+ * 对话框又打开了时不关它、不跳走。
+ */
 async function finishRegister(st: FeishuRegisterStatus) {
   if (st.message) {
     // 带提示时是绑定没成之类：原文写明要去绑定页手动绑定，多留一会儿
@@ -472,36 +483,69 @@ async function finishRegister(st: FeishuRegisterStatus) {
   } else {
     ElMessage.success("已经建好通道，正在连接飞书");
   }
-  // 先清掉：关对话框时不取消已经建好的这一个
-  reg.value = null;
-  regStatus.value = null;
-  addDialogVisible.value = false;
+  if (reg.value?.id === st.id) {
+    // 先清掉：关对话框时不取消已经建好的这一个
+    reg.value = null;
+    regStatus.value = null;
+    addDialogVisible.value = false;
+  }
   await loadNotifications();
-  if (st.conf_id) router.push(`/chatops/notifications/${st.conf_id}`);
+  if (st.conf_id && !addDialogVisible.value && !unmounted) {
+    router.push(`/chatops/notifications/${st.conf_id}`);
+  }
 }
 
 /**
- * 不再看这一个（关掉对话框、离开页面、换走扫码模式）：停止轮询；还在等的按编号取消
- * （saving 以后取消不起作用，后端照常建完）。notify 为真时写明二维码作废。
+ * 不再看这一个（关掉对话框、离开页面、换走扫码模式）：停止轮询；还在等的按编号取消。取消回的是后端定下来的结果：
+ * 那一刻飞书正好已经给了应用时取消不起作用，回 saving 或 done，这时不能说二维码作废了（会叫人删掉通道正用着的应用），
+ * 接着问到结果再提示。notify 为假（离开页面）时只取消、不提示。
  */
 async function dropRegister(notify: boolean) {
   regSession += 1;
   stopRegPoll();
   const cur = reg.value;
   const busy = regBusy.value;
-  const pending = regState.value === "pending";
   reg.value = null;
   regStatus.value = null;
   regGone.value = false;
   regRounds.value = 0;
   if (!cur || !busy) return;
+  let st: FeishuRegisterStatus;
   try {
-    await chatopsApi.feishuRegister.cancel(cur.id);
-  } catch {
-    /* 十分钟以后自己过期 */
+    st = await chatopsApi.feishuRegister.cancel(cur.id);
+  } catch (e: unknown) {
+    // 404：已经被别处新开的取代或过期，那一边会提示；别的错误：取消没送到，二维码过期以前仍然有效
+    if (notify && !(e instanceof ApiError && e.status === 404)) {
+      ElMessage.warning("没能取消这个二维码：过期以前扫码确认的话，通道照常会建好");
+    }
+    return;
   }
-  if (notify && pending) {
+  if (notify) await settleDropped(st);
+}
+
+/** 关掉对话框以后这一个的结果：还没定下来（正在保存，或者取消还没生效）就每 2 秒再问，最多一分钟 */
+async function settleDropped(first: FeishuRegisterStatus) {
+  let st = first;
+  for (let round = 0; st.state === "pending" || st.state === "saving"; round++) {
+    if (round >= REG_FOLLOW_ROUNDS || unmounted) return;
+    await new Promise((r) => setTimeout(r, REG_POLL_MS));
+    try {
+      st = await chatopsApi.feishuRegister.status(st.id);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) {
+        await loadNotifications();
+        return;
+      }
+      // 网络抖动：下一次再问
+    }
+  }
+  if (st.state === "canceled") {
     ElMessage.info("二维码已经作废，不要再扫；已经扫了的话，请到飞书开发者后台删掉多出来的应用");
+  } else if (st.state === "done") {
+    await finishRegister(st);
+  } else if (st.state === "failed" && st.app_id && st.message) {
+    // 飞书那边已经建好应用、保存通道没成：原文写了 App ID 与怎么手动补建，留到用户关掉
+    ElMessage({ type: "warning", message: st.message, duration: 0, showClose: true });
   }
 }
 
@@ -509,7 +553,10 @@ watch(isFeishuScan, (on) => {
   if (!on && reg.value) void dropRegister(true);
 });
 
-onBeforeUnmount(() => void dropRegister(false));
+onBeforeUnmount(() => {
+  unmounted = true;
+  void dropRegister(false);
+});
 
 onMounted(async () => {
   await Promise.all([loadNotifications(), loadRecent(), loadStats()]);
@@ -978,7 +1025,7 @@ function getChannelLabel(type: string) {
       @closed="dropRegister(true)">
       <el-form class="pt-form" label-position="top" @submit.prevent>
         <el-form-item label="通道类型">
-          <el-select v-model="newChannel.channel_type" style="width: 100%" :disabled="regBusy">
+          <el-select v-model="newChannel.channel_type" style="width: 100%" :disabled="regLocked">
             <el-option
               v-for="opt in channelTypeOptions"
               :key="opt.value"
@@ -994,7 +1041,7 @@ function getChannelLabel(type: string) {
             class="pt-seg fsmode"
             :options="FEISHU_MODES"
             :props="{ label: 'label', value: 'value' }"
-            :disabled="regBusy"
+            :disabled="regLocked"
             :block="isMobile"
             data-testid="feishu-mode" />
         </el-form-item>
@@ -1003,7 +1050,7 @@ function getChannelLabel(type: string) {
           <el-input
             v-model="newChannel.name"
             placeholder="例如：我的 Telegram 机器人"
-            :disabled="regBusy"
+            :disabled="regLocked"
             data-testid="name-input" />
           <div class="field-tip">只用于在列表里区分通道，随时可改</div>
         </el-form-item>
@@ -1063,7 +1110,9 @@ function getChannelLabel(type: string) {
             </a>
             <div v-if="regRounds > 1 || regGone" class="pt-note pt-note--warn fsreg__void">
               <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-              <span>之前的二维码已经作废，不要再扫；扫了的话请到开发者后台删掉多出来的应用。</span>
+              <span
+                >作废的二维码不要再扫；扫过的话，先看通道列表里有没有刚建好的通道，没有再到开发者后台删掉多出来的应用。</span
+              >
             </div>
           </div>
           <div class="pt-note" data-testid="feishu-reg-intro">
