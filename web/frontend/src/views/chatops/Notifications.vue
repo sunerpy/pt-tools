@@ -577,7 +577,8 @@ async function settleDropped(first: FeishuRegisterStatus, gen: number) {
       st = await chatopsApi.feishuRegister.status(st.id);
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 404) {
-        await loadNotifications();
+        // 查状态的请求在路上时离开了页面：不再刷新
+        if (!unmounted) await loadNotifications();
         return;
       }
       // 网络抖动：下一次再问
