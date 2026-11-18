@@ -37,7 +37,6 @@ func (c *Channel) supervise() {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
-	log := c.logger()
 	for warned := false; ; warned = true {
 		holder, ok := apps.claim(cfg.AppID, c)
 		if ok {
@@ -45,7 +44,7 @@ func (c *Channel) supervise() {
 		}
 		c.conflict.Store(true)
 		if !warned {
-			log.Warnf("飞书应用机器人(%d): 同一个飞书应用已被通道 #%d 使用，这个通道不连长连接（一个应用只能给一个通道用），每分钟重试一次", c.confID, holder)
+			c.logger().Warnf("飞书应用机器人(%d): 同一个飞书应用已被通道 #%d 使用，这个通道不连长连接（一个应用只能给一个通道用），每分钟重试一次", c.confID, holder)
 		}
 		if !sleepCtx(ctx, c.timing(c.claimRetry, defaultClaimRetry)) {
 			return
@@ -71,9 +70,9 @@ func (c *Channel) supervise() {
 		var delay time.Duration
 		delay, wait = c.nextDelay(err, time.Since(started), wait)
 		if isClientError(err) {
-			log.Warnf("飞书应用机器人(%d): 长连接被飞书拒绝: %v；%s 后重试（改对 App ID、App Secret 并保存以后会马上重连）", c.confID, c.red.wrap(err), delay)
+			c.logger().Warnf("飞书应用机器人(%d): 长连接被飞书拒绝: %v；%s 后重试（改对 App ID、App Secret 并保存以后会马上重连）", c.confID, c.red.wrap(err), delay)
 		} else {
-			log.Warnf("飞书应用机器人(%d): 长连接中断: %v；%s 后重连", c.confID, c.red.wrap(err), delay.Round(time.Second))
+			c.logger().Warnf("飞书应用机器人(%d): 长连接中断: %v；%s 后重连", c.confID, c.red.wrap(err), delay.Round(time.Second))
 		}
 		if !sleepCtx(ctx, jitter(delay)) {
 			return
