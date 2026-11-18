@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import {
+  ApiError,
   chatopsApi,
+  type FeishuRegisterStart,
+  type FeishuRegisterStatus,
   type NotificationConfig,
   type NotifyStatsView,
   type RecentNotification,
@@ -326,13 +329,187 @@ function blankChannel(type = "telegram", name = ""): Partial<NotificationConfig>
 
 const newChannel = ref<Partial<NotificationConfig>>(blankChannel());
 
-/* 换类型时清掉上一个类型填的字段（只留名称）：钉钉和飞书都有 webhook_url，留着会带着错的地址创建 */
+/*
+ * 飞书应用机器人的两种建法：扫码一键创建（默认）在扫码人的企业里建好应用，后端直接建通道并把扫码人绑定；
+ * 手动填写 App ID 与 App Secret 和以前一样。
+ */
+const FEISHU_MODES = [
+  { label: "扫码一键创建（推荐）", value: "scan" },
+  { label: "填写 App ID 与 App Secret", value: "manual" },
+];
+const FEISHU_REG_DEFAULT_NAME = "飞书应用机器人";
+const feishuMode = ref<"scan" | "manual">("scan");
+const isFeishuScan = computed(
+  () => newChannel.value.channel_type === "feishu_app" && feishuMode.value === "scan",
+);
+
+/*
+ * 换类型时清掉上一个类型填的字段（只留名称）：钉钉和飞书都有 webhook_url，留着会带着错的地址创建。
+ * 选飞书应用机器人时名称没填就给默认的「飞书应用机器人」，换走时把这个默认名去掉。
+ */
 watch(
   () => newChannel.value.channel_type,
   (type, prev) => {
-    if (type !== prev) newChannel.value = blankChannel(type, newChannel.value.name);
+    if (type === prev) return;
+    let name = newChannel.value.name ?? "";
+    if (type === "feishu_app" && !name) name = FEISHU_REG_DEFAULT_NAME;
+    else if (prev === "feishu_app" && name === FEISHU_REG_DEFAULT_NAME) name = "";
+    newChannel.value = blankChannel(type, name);
   },
 );
+
+/*
+ * 扫码一键创建的这一次。编号只放在组件的内存里，不进地址栏与浏览器存储：页面刷新或关掉对话框以后
+ * 不接着原来的二维码（后端那一个留在等扫码，直到过期或被新开的取代），要重新点「生成二维码」。
+ */
+const reg = ref<FeishuRegisterStart | null>(null);
+const regStatus = ref<FeishuRegisterStatus | null>(null);
+/** 查状态回 404：被别处新开的取代，或者结束太久已经清掉 */
+const regGone = ref(false);
+const regStarting = ref(false);
+/** 这次对话框里生成过几次二维码：第二次起写明之前的已经作废 */
+const regRounds = ref(0);
+/** 关对话框、离开页面时加一：在路上的「开始」回来时发现换了一轮，就把它取消 */
+let regSession = 0;
+let regTimer: ReturnType<typeof setInterval> | undefined;
+let regPolling = false;
+const REG_POLL_MS = 2000;
+
+const REG_STATES: Record<string, { label: string; tone: "ok" | "warn" | "dang" | "info" }> = {
+  pending: { label: "等待扫码与确认", tone: "info" },
+  saving: { label: "正在保存通道", tone: "info" },
+  done: { label: "已建好", tone: "ok" },
+  denied: { label: "已在飞书里取消", tone: "warn" },
+  expired: { label: "已过期", tone: "warn" },
+  canceled: { label: "已取消", tone: "warn" },
+  failed: { label: "没有建成", tone: "dang" },
+  gone: { label: "已作废", tone: "dang" },
+};
+
+const regState = computed(() => (regGone.value ? "gone" : (regStatus.value?.state ?? "pending")));
+/** 还在等飞书或正在保存：这时不换类型、不改名称（名称在开始时就发出去了），点遮罩也不关对话框 */
+const regBusy = computed(
+  () => !!reg.value && (regState.value === "pending" || regState.value === "saving"),
+);
+/** 结束了但没建成：按钮换成「重新生成」 */
+const regEnded = computed(() => !!reg.value && !regBusy.value);
+const regReason = computed(() => {
+  if (!reg.value || regBusy.value) return "";
+  if (regGone.value) return "这个一键创建已经被新的取代或过期";
+  return regStatus.value?.message ?? "";
+});
+const regQrSrc = computed(() =>
+  reg.value ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(reg.value.qr_svg)}` : "",
+);
+/** 「N 分钟内有效」：按开始时给的过期时间算一次 */
+const regMinutes = computed(() => {
+  if (!reg.value) return 0;
+  const ms = new Date(reg.value.expires_at).getTime() - Date.now();
+  return Number.isFinite(ms) ? Math.max(1, Math.round(ms / 60_000)) : 10;
+});
+
+function stopRegPoll() {
+  if (regTimer) clearInterval(regTimer);
+  regTimer = undefined;
+}
+
+async function startFeishuRegister() {
+  const name = (newChannel.value.name ?? "").trim() || FEISHU_REG_DEFAULT_NAME;
+  const session = regSession;
+  stopRegPoll();
+  regStarting.value = true;
+  try {
+    const started = await chatopsApi.feishuRegister.start(name);
+    if (session !== regSession) {
+      // 等二维码的时候对话框关了：没人扫得到它，取消
+      await chatopsApi.feishuRegister.cancel(started.id).catch(() => undefined);
+      return;
+    }
+    reg.value = started;
+    regStatus.value = { id: started.id, state: started.state, expires_at: started.expires_at };
+    regGone.value = false;
+    regRounds.value += 1;
+    regTimer = setInterval(() => void pollRegister(), REG_POLL_MS);
+  } catch (e: unknown) {
+    ElMessage.error(apiErrorDetail(e, "生成二维码失败"));
+  } finally {
+    regStarting.value = false;
+  }
+}
+
+/** 每 2 秒按编号问一次（上一次还没回来就跳过） */
+async function pollRegister() {
+  const cur = reg.value;
+  if (!cur || regPolling) return;
+  regPolling = true;
+  try {
+    const st = await chatopsApi.feishuRegister.status(cur.id);
+    if (reg.value?.id !== cur.id) return; // 关掉了，或者已经换成新的一个
+    regStatus.value = st;
+    if (st.state === "done") {
+      stopRegPoll();
+      await finishRegister(st);
+    } else if (st.state !== "pending" && st.state !== "saving") {
+      stopRegPoll();
+    }
+  } catch (e: unknown) {
+    if (reg.value?.id !== cur.id) return;
+    if (e instanceof ApiError && e.status === 404) {
+      regGone.value = true;
+      stopRegPoll();
+    }
+    // 别的错误（网络抖动）：下一次再问
+  } finally {
+    regPolling = false;
+  }
+}
+
+/** 建好了：提示、关掉对话框、刷新列表并打开这个通道的详情页 */
+async function finishRegister(st: FeishuRegisterStatus) {
+  if (st.message) {
+    // 带提示时是绑定没成之类：原文写明要去绑定页手动绑定，多留一会儿
+    ElMessage({ type: "warning", message: st.message, duration: 10_000, showClose: true });
+  } else {
+    ElMessage.success("已经建好通道，正在连接飞书");
+  }
+  // 先清掉：关对话框时不取消已经建好的这一个
+  reg.value = null;
+  regStatus.value = null;
+  addDialogVisible.value = false;
+  await loadNotifications();
+  if (st.conf_id) router.push(`/chatops/notifications/${st.conf_id}`);
+}
+
+/**
+ * 不再看这一个（关掉对话框、离开页面、换走扫码模式）：停止轮询；还在等的按编号取消
+ * （saving 以后取消不起作用，后端照常建完）。notify 为真时写明二维码作废。
+ */
+async function dropRegister(notify: boolean) {
+  regSession += 1;
+  stopRegPoll();
+  const cur = reg.value;
+  const busy = regBusy.value;
+  const pending = regState.value === "pending";
+  reg.value = null;
+  regStatus.value = null;
+  regGone.value = false;
+  regRounds.value = 0;
+  if (!cur || !busy) return;
+  try {
+    await chatopsApi.feishuRegister.cancel(cur.id);
+  } catch {
+    /* 十分钟以后自己过期 */
+  }
+  if (notify && pending) {
+    ElMessage.info("二维码已经作废，不要再扫；已经扫了的话，请到飞书开发者后台删掉多出来的应用");
+  }
+}
+
+watch(isFeishuScan, (on) => {
+  if (!on && reg.value) void dropRegister(true);
+});
+
+onBeforeUnmount(() => void dropRegister(false));
 
 onMounted(async () => {
   await Promise.all([loadNotifications(), loadRecent(), loadStats()]);
@@ -359,7 +536,9 @@ function setNewField(key: string, v: unknown) {
 }
 
 function openAddDialog() {
+  if (reg.value) void dropRegister(true);
   newChannel.value = blankChannel();
+  feishuMode.value = "scan";
   addDialogVisible.value = true;
 }
 
@@ -787,15 +966,19 @@ function getChannelLabel(type: string) {
       </PtPanel>
     </div>
 
+    <!-- 扫码一键创建在等扫码时，点遮罩不关对话框：关掉会让二维码作废 -->
     <el-dialog
       v-model="addDialogVisible"
       class="pt-dialog"
       title="添加通知通道"
-      width="520px"
-      align-center>
+      :width="isMobile ? '94%' : '520px'"
+      align-center
+      :close-on-click-modal="!regBusy"
+      data-testid="add-channel-dialog"
+      @closed="dropRegister(true)">
       <el-form class="pt-form" label-position="top" @submit.prevent>
         <el-form-item label="通道类型">
-          <el-select v-model="newChannel.channel_type" style="width: 100%">
+          <el-select v-model="newChannel.channel_type" style="width: 100%" :disabled="regBusy">
             <el-option
               v-for="opt in channelTypeOptions"
               :key="opt.value"
@@ -805,10 +988,22 @@ function getChannelLabel(type: string) {
           </el-select>
         </el-form-item>
 
+        <el-form-item v-if="newChannel.channel_type === 'feishu_app'" label="创建方式">
+          <el-segmented
+            v-model="feishuMode"
+            class="pt-seg fsmode"
+            :options="FEISHU_MODES"
+            :props="{ label: 'label', value: 'value' }"
+            :disabled="regBusy"
+            :block="isMobile"
+            data-testid="feishu-mode" />
+        </el-form-item>
+
         <el-form-item label="通道名称" required>
           <el-input
             v-model="newChannel.name"
             placeholder="例如：我的 Telegram 机器人"
+            :disabled="regBusy"
             data-testid="name-input" />
           <div class="field-tip">只用于在列表里区分通道，随时可改</div>
         </el-form-item>
@@ -838,7 +1033,56 @@ function getChannelLabel(type: string) {
           <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
         </el-form-item>
 
-        <template v-if="newChannel.channel_type === 'feishu_app'">
+        <!-- 扫码一键创建：二维码、在浏览器里打开、有效期与状态；链接与二维码只在开始时给一次 -->
+        <template v-if="isFeishuScan">
+          <div v-if="reg" class="fsreg" data-testid="feishu-reg-qr">
+            <img
+              class="fsreg__qr"
+              :class="{ 'fsreg__qr--used': !regBusy }"
+              :src="regQrSrc"
+              alt="一键创建飞书应用机器人的二维码，用飞书扫描"
+              width="240"
+              height="240" />
+            <div class="fsreg__state">
+              <PtStatusPill :tone="REG_STATES[regState]!.tone" dot data-testid="feishu-reg-state">{{
+                REG_STATES[regState]!.label
+              }}</PtStatusPill>
+              <span v-if="regBusy" class="fsreg__sub">二维码 {{ regMinutes }} 分钟内有效</span>
+            </div>
+            <p v-if="regReason" class="fsreg__reason" data-testid="feishu-reg-reason">
+              {{ regReason }}
+            </p>
+            <a
+              v-if="regBusy"
+              class="fsreg__open"
+              :href="reg.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="feishu-reg-open">
+              <PtIcon name="external-link" :size="14" /><span>在浏览器里打开</span>
+            </a>
+            <div v-if="regRounds > 1 || regGone" class="pt-note pt-note--warn fsreg__void">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <span>之前的二维码已经作废，不要再扫；扫了的话请到开发者后台删掉多出来的应用。</span>
+            </div>
+          </div>
+          <div class="pt-note" data-testid="feishu-reg-intro">
+            <PtIcon name="info" :size="14" class="pt-note__icon" />
+            <span>
+              用要接 pt-tools
+              的那个企业的飞书账号扫码；应用名在飞书的确认页上可以改；建好以后不用发布版本；
+              扫码的人自动成为管理员并直接绑定；凭证和别的通道一样，只在通道详情页里看得到。步骤见
+              <a
+                href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/chatops-feishu.md#扫码一键创建推荐"
+                target="_blank"
+                rel="noopener noreferrer"
+                >飞书应用机器人文档</a
+              >。
+            </span>
+          </div>
+        </template>
+
+        <template v-if="newChannel.channel_type === 'feishu_app' && feishuMode === 'manual'">
           <el-form-item label="App ID" required>
             <el-input v-model="newChannel.app_id" placeholder="cli_…" data-testid="new-app_id" />
             <div class="field-tip">开发者后台「凭证与基础信息」里的 App ID</div>
@@ -902,7 +1146,9 @@ function getChannelLabel(type: string) {
           <PtIcon name="info" :size="14" class="pt-note__icon" />
           <span>OneBot 的连接地址与 token 在通道创建后，到「设置」里补全。</span>
         </div>
-        <div v-if="newChannel.channel_type === 'feishu_app'" class="pt-note">
+        <div
+          v-if="newChannel.channel_type === 'feishu_app' && feishuMode === 'manual'"
+          class="pt-note">
           <PtIcon name="info" :size="14" class="pt-note__icon" />
           <span>
             创建以后，等通道列表里显示「已连接」，到飞书开发者后台把事件订阅方式改成「使用长连接接收事件」、
@@ -919,20 +1165,118 @@ function getChannelLabel(type: string) {
       </el-form>
 
       <template #footer>
-        <el-button @click="addDialogVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="submitting"
-          data-testid="save-btn"
-          @click="handleCreate">
-          创建通道
-        </el-button>
+        <template v-if="isFeishuScan">
+          <el-button data-testid="feishu-reg-close" @click="addDialogVisible = false">{{
+            reg ? "关闭" : "取消"
+          }}</el-button>
+          <el-button
+            v-if="!regBusy"
+            type="primary"
+            :loading="regStarting"
+            data-testid="feishu-reg-start"
+            @click="startFeishuRegister">
+            {{ regEnded ? "重新生成" : "生成二维码" }}
+          </el-button>
+        </template>
+        <template v-else>
+          <el-button @click="addDialogVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="submitting"
+            data-testid="save-btn"
+            @click="handleCreate">
+            创建通道
+          </el-button>
+        </template>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
+/*
+ * 创建方式的分段：等扫码时停用，选中那档仍是设计系统的「纸」（Element 默认换成主色浅底）；
+ * 手机上两档占满一行，长的那档折成两行，不在控件里横着滚、也不被截掉。
+ */
+.fsmode {
+  --el-segmented-item-selected-disabled-bg-color: var(--pt-surface);
+}
+
+@media (max-width: 768px) {
+  .fsmode :deep(.el-segmented__item) {
+    padding: 4px 8px;
+  }
+
+  .fsmode :deep(.el-segmented__item-label) {
+    white-space: normal;
+  }
+}
+
+/*
+ * 扫码一键创建：二维码居中（与远程访问的配对二维码同一个写法，白底、结束以后模糊掉），
+ * 下面一行状态与有效期，一行原因，「在浏览器里打开」。
+ */
+.fsreg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-3);
+  align-items: center;
+  margin-bottom: var(--pt-space-3);
+}
+
+.fsreg__qr {
+  width: 240px;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  background: #fff;
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+}
+
+.fsreg__qr--used {
+  filter: blur(6px) grayscale(1);
+}
+
+.fsreg__state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+  align-items: center;
+  justify-content: center;
+}
+
+.fsreg__sub {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.fsreg__reason {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.fsreg__open {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-p);
+  text-decoration: none;
+}
+
+.fsreg__open:hover {
+  text-decoration: underline;
+}
+
+/* 作废提示占满一行，和下面的说明对齐 */
+.fsreg__void {
+  align-self: stretch;
+}
+
 /* 画板 22 的 chip-0「类型: 全部」与紧凑列表视图 */
 .ch-chip {
   flex: 0 0 auto;
