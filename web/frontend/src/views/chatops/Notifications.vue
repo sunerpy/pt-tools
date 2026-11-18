@@ -36,6 +36,12 @@ import {
 const channelTypeOptions = [
   { value: "telegram", label: "Telegram", icon: "send", color: "var(--pt-info)" },
   { value: "qq_onebot", label: "QQ (OneBot)", icon: "message-square", color: "var(--pt-ok)" },
+  {
+    value: "feishu_app",
+    label: "飞书应用机器人",
+    icon: "messages-square",
+    color: "var(--pt-warn)",
+  },
   { value: "webhook", label: "Webhook", icon: "link", color: "var(--pt-p)" },
   {
     value: "wecom_webhook",
@@ -104,6 +110,7 @@ const typeFilter = ref("");
 const CHANNEL_LABELS: Record<string, string> = {
   telegram: "Telegram",
   qq_onebot: "QQ (OneBot)",
+  feishu_app: "飞书应用机器人",
   webhook: "Webhook",
   wecom_webhook: "WeCom Webhook",
   ...Object.fromEntries(OUTBOUND_CHANNELS.map((c) => [c.type, c.label])),
@@ -293,13 +300,16 @@ const headSub = computed(() => {
 const stateSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return errorText.value;
   if (state.value === "loading") return "正在读取通知通道";
-  return "接上 Telegram / QQ / Webhook / 企业微信，就能收到任务结果与告警，也能反过来发命令";
+  return "接上 Telegram / QQ / 飞书 / Webhook / 企业微信，就能收到任务结果与告警，也能反过来发命令";
 });
 
 const addDialogVisible = ref(false);
 const submitting = ref(false);
 
-/** 新建表单的初值：只有通用字段与 Telegram / Webhook / 企业微信的必填项，只出站通道的字段按需写入 */
+/**
+ * 新建表单的初值：只有通用字段与 Telegram / Webhook / 企业微信 / 飞书应用机器人的必填项，只出站通道的字段按需写入。
+ * 飞书的平台默认 feishu：Element Plus 2.14.3 的选择框不认 null。
+ */
 function blankChannel(type = "telegram", name = ""): Partial<NotificationConfig> {
   return {
     channel_type: type,
@@ -308,6 +318,9 @@ function blankChannel(type = "telegram", name = ""): Partial<NotificationConfig>
     bot_token: "",
     endpoint_url: "",
     webhook_key: "",
+    app_id: "",
+    app_secret: "",
+    domain: "feishu",
   };
 }
 
@@ -356,6 +369,7 @@ const CREATE_FIELDS: Record<string, (keyof NotificationConfig)[]> = {
   webhook: ["endpoint_url"],
   wecom_webhook: ["webhook_key"],
   qq_onebot: [],
+  feishu_app: ["app_id", "app_secret", "domain"],
 };
 
 function createBody(): Omit<NotificationConfig, "id"> {
@@ -382,6 +396,13 @@ async function handleCreate() {
 
   if (newChannel.value.channel_type === "telegram" && !newChannel.value.bot_token) {
     ElMessage.warning("Telegram 通道需填写 Bot Token");
+    return;
+  }
+  if (
+    newChannel.value.channel_type === "feishu_app" &&
+    (!newChannel.value.app_id?.trim() || !newChannel.value.app_secret?.trim())
+  ) {
+    ElMessage.warning("飞书应用机器人通道需填写 App ID 与 App Secret");
     return;
   }
   const problem = outboundProblem(
@@ -817,6 +838,26 @@ function getChannelLabel(type: string) {
           <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
         </el-form-item>
 
+        <template v-if="newChannel.channel_type === 'feishu_app'">
+          <el-form-item label="App ID" required>
+            <el-input v-model="newChannel.app_id" placeholder="cli_…" data-testid="new-app_id" />
+            <div class="field-tip">开发者后台「凭证与基础信息」里的 App ID</div>
+          </el-form-item>
+          <el-form-item label="App Secret" required>
+            <el-input
+              v-model="newChannel.app_secret"
+              type="password"
+              show-password
+              data-testid="new-app_secret" />
+          </el-form-item>
+          <el-form-item label="平台">
+            <el-select v-model="newChannel.domain" style="width: 100%" data-testid="new-domain">
+              <el-option label="飞书" value="feishu" data-testid="domain-feishu" />
+              <el-option label="Lark 国际版" value="lark" data-testid="domain-lark" />
+            </el-select>
+          </el-form-item>
+        </template>
+
         <!-- 只出站的通道：新建时就填全部字段，自建服务器的地址与鉴权不用等创建后再补 -->
         <template v-for="f in outboundChannel(newChannel.channel_type)?.fields ?? []" :key="f.key">
           <el-form-item :label="f.label" :required="f.required">
@@ -860,6 +901,20 @@ function getChannelLabel(type: string) {
         <div v-if="newChannel.channel_type === 'qq_onebot'" class="pt-note">
           <PtIcon name="info" :size="14" class="pt-note__icon" />
           <span>OneBot 的连接地址与 token 在通道创建后，到「设置」里补全。</span>
+        </div>
+        <div v-if="newChannel.channel_type === 'feishu_app'" class="pt-note">
+          <PtIcon name="info" :size="14" class="pt-note__icon" />
+          <span>
+            创建以后，等通道列表里显示「已连接」，到飞书开发者后台把事件订阅方式改成「使用长连接接收事件」、
+            添加「接收消息 v2.0」并发布版本；然后私聊机器人发一条消息，它会回你的
+            open_id，填进通道详情的「管理员 open_id」。步骤见
+            <a
+              href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/chatops-feishu.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              >飞书应用机器人文档</a
+            >第 5–7 节。
+          </span>
         </div>
       </el-form>
 

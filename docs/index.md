@@ -101,16 +101,16 @@ home:
         title: AI 助手与 MCP
         wide: true
         status: available
-        body: 接一个 OpenAI 兼容的大模型，在网页、手机 App 或 Telegram、QQ 里用自然语言查数据、搜索与推送种子、管理订阅；Claude、Cursor 这类 MCP 客户端也能接进来。改动类操作每次都要你确认。
+        body: 接一个 OpenAI 兼容的大模型，在网页、手机 App 或 Telegram、QQ、飞书里用自然语言查数据、搜索与推送种子、管理订阅；Claude、Cursor 这类 MCP 客户端也能接进来。改动类操作每次都要你确认。
         evidence:
           kind: chips
           items:
             [DeepSeek, 通义千问, Kimi, 硅基流动, Google AI Studio, Groq, OpenRouter, Ollama, OpenAI]
         link: /guide/assistant
       - icon: bell
-        title: QQ、Telegram 与通知
+        title: QQ、Telegram、飞书与通知
         status: available
-        body: 在 QQ、Telegram 里查看运行状态和种子，暂停、恢复或删除种子，添加 RSS 订阅，每条命令都记入操作审计；RSS 上新推送支持静默时段、合并摘要和每小时配额。
+        body: 在 QQ、Telegram、飞书里查看运行状态和种子，暂停、恢复或删除种子，添加 RSS 订阅，每条命令都记入操作审计；RSS 上新推送支持静默时段、合并摘要和每小时配额。
         evidence:
           kind: chips
           items: [/status, /tasks, /torrents, /addrss]
@@ -186,7 +186,7 @@ home:
         - title: 凭证不交给模型
           body: Cookie、Passkey 与密码不会发给模型，工具查到的数据先脱敏。
         - title: 哪里都能问
-          body: 网页、手机 App 都能对话，Telegram 与 QQ 的机器人也能把消息转给助手。
+          body: 网页、手机 App 都能对话，Telegram、QQ 与飞书的机器人也能把消息转给助手。
       guide:
         text: AI 助手
         link: /guide/assistant

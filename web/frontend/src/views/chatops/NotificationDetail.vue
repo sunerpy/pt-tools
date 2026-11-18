@@ -29,6 +29,7 @@ import { useRoute, useRouter } from "vue-router";
 const CHANNEL_META: Record<string, { label: string; icon: string; color: string }> = {
   telegram: { label: "Telegram", icon: "send", color: "var(--pt-info)" },
   qq_onebot: { label: "QQ (OneBot)", icon: "message-square", color: "var(--pt-ok)" },
+  feishu_app: { label: "飞书应用机器人", icon: "messages-square", color: "var(--pt-warn)" },
   webhook: { label: "Webhook", icon: "link", color: "var(--pt-p)" },
   wecom_webhook: { label: "WeCom Webhook", icon: "message-circle", color: "var(--pt-warn)" },
   ...Object.fromEntries(
@@ -67,6 +68,12 @@ const tgForm = reactive({
   admin_users_text: "",
   allowed_users_text: "",
   default_chat_id_text: "",
+});
+
+/* 飞书应用机器人的两栏名单：编辑框里是文字，保存时按 parseOpenIdList 拆成 open_id 数组 */
+const fsForm = reactive({
+  admin_users_text: "",
+  allowed_users_text: "",
 });
 
 interface TestResult {
@@ -128,6 +135,18 @@ const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; whe
     text: "请求头要是 JSON 对象，键和值都是文字",
     when: "Webhook 的请求头不是这个格式时保存凭证 —— 不会提交",
   },
+  {
+    kind: "提示",
+    tone: "warn",
+    text: "飞书应用机器人通道需填写 App ID 与 App Secret",
+    when: "飞书应用机器人的 App ID 或 App Secret 只有空白时保存凭证 —— 不会提交（留空时表单先提示「请填写」）",
+  },
+  {
+    kind: "提示",
+    tone: "warn",
+    text: "名单里要填 open_id，以 ou_ 开头：… 不是",
+    when: "飞书应用机器人的名单里有不是 open_id 的项时保存凭证 —— 不会提交",
+  },
 ];
 
 /** 画板 head 88 的 sub（11.5/400 t3）：这条记录的身份 —— ID 与通道类型 */
@@ -148,14 +167,16 @@ const basicRules: FormRules = {
 };
 
 /**
- * 画板 37 的 p-map：四种 channel_type 各自的显示名与唯一必填项。
+ * 画板 37 的 p-map：各 channel_type 的显示名与必填项。
  *
  * 取值不是抄的：类型字符串是各适配器 `RegisterChannel` 的注册名
  * （internal/notify/adapter/*），必填项与下面的 `credRules` 同源 —— 两处要一起改。
+ * 飞书应用机器人有两个必填项（credRules 与后端 parseConfig 都要求 App ID 与 App Secret）。
  */
 const channelTypeMap = [
   { type: "telegram", label: "Telegram", must: "bot_token" },
   { type: "qq_onebot", label: "QQ (OneBot)", must: "listen_addr" },
+  { type: "feishu_app", label: "飞书应用机器人", must: "app_id、app_secret" },
   { type: "webhook", label: "Webhook", must: "endpoint_url" },
   { type: "wecom_webhook", label: "WeCom Webhook", must: "webhook_key" },
   ...OUTBOUND_CHANNELS.map((c) => ({
@@ -193,6 +214,11 @@ const credRules = computed<FormRules>(() => {
             trigger: "blur",
           },
         ],
+      };
+    case "feishu_app":
+      return {
+        app_id: [{ required: true, message: "请填写 App ID", trigger: "blur" }],
+        app_secret: [{ required: true, message: "请填写 App Secret", trigger: "blur" }],
       };
     case "webhook":
       return {
@@ -236,6 +262,8 @@ function resetConf() {
   tgForm.admin_users_text = "";
   tgForm.allowed_users_text = "";
   tgForm.default_chat_id_text = "";
+  fsForm.admin_users_text = "";
+  fsForm.allowed_users_text = "";
   testResult.value = null;
 }
 
@@ -270,6 +298,11 @@ async function loadDetail() {
       tgForm.allowed_users_text = userIdListToText(sink.allowed_users);
       const dcid = sink.default_chat_id;
       tgForm.default_chat_id_text = dcid != null && dcid !== "" ? String(dcid) : "";
+    } else if (conf.channel_type === "feishu_app") {
+      const sink = conf as unknown as Record<string, unknown>;
+      fsForm.admin_users_text = userIdListToText(sink.admin_users);
+      fsForm.allowed_users_text = userIdListToText(sink.allowed_users);
+      if (!conf.domain) conf.domain = "feishu";
     }
     loaded.value = true;
     if (conf.channel_type === "webhook") void loadWebhookEvents();
@@ -292,6 +325,21 @@ function parseUserIdList(raw: unknown): number[] {
     .filter(Boolean)
     .map((x) => Number(x))
     .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+/**
+ * 飞书应用机器人的名单：按逗号、分号、空白与换行分开，去掉首尾空白、去重。不能用 parseUserIdList ——
+ * 它只留正整数，会把 open_id 全部丢掉。第一项不是 ou_ 开头的写进 bad（与后端的检查同一条规则）。
+ */
+function parseOpenIdList(raw: string): { ids: string[]; bad?: string } {
+  const ids: string[] = [];
+  for (const item of raw.split(/[,，;；\s]+/)) {
+    const id = item.trim();
+    if (!id || ids.includes(id)) continue;
+    if (!id.startsWith("ou_")) return { ids, bad: id };
+    ids.push(id);
+  }
+  return { ids };
 }
 
 function userIdListToText(raw: unknown): string {
@@ -338,6 +386,19 @@ async function handleSaveCredentials() {
     ElMessage.warning("请求头要是 JSON 对象，键和值都是文字");
     return;
   }
+  const fsAdmins = parseOpenIdList(fsForm.admin_users_text);
+  const fsAllowed = parseOpenIdList(fsForm.allowed_users_text);
+  const fsBad = fsAdmins.bad ?? fsAllowed.bad;
+  if (conf.channel_type === "feishu_app") {
+    if (!conf.app_id?.trim() || !conf.app_secret?.trim()) {
+      ElMessage.warning("飞书应用机器人通道需填写 App ID 与 App Secret");
+      return;
+    }
+    if (fsBad !== undefined) {
+      ElMessage({ type: "warning", message: `名单里要填 open_id，以 ou_ 开头：${fsBad} 不是` });
+      return;
+    }
+  }
 
   saving.value = true;
   try {
@@ -383,6 +444,17 @@ async function handleSaveCredentials() {
       case "wecom_webhook":
         payload.webhook_key = conf.webhook_key;
         break;
+      case "feishu_app": {
+        const sink = payload as unknown as Record<string, unknown>;
+        sink.app_id = (conf.app_id ?? "").trim();
+        sink.app_secret = (conf.app_secret ?? "").trim();
+        sink.domain = conf.domain || "feishu";
+        sink.admin_users = fsAdmins.ids;
+        sink.allowed_users = fsAllowed.ids;
+        sink.default_chat_id = String(conf.default_chat_id ?? "").trim();
+        sink.proxy_url = (conf.proxy_url ?? "").trim();
+        break;
+      }
       default: {
         // 只出站的通道：字段来自 utils/notifyChannels，整份发出（没填的发空值，后端按空处理）
         const sink = payload as unknown as Record<string, unknown>;
@@ -852,6 +924,96 @@ const previewText = computed(() => {
                 </el-form-item>
               </template>
 
+              <!-- 飞书应用机器人 -->
+              <template v-if="conf.channel_type === 'feishu_app'">
+                <div class="field-row">
+                  <el-form-item label="App ID" prop="app_id">
+                    <el-input v-model="conf.app_id" placeholder="cli_…" data-testid="fs-app-id" />
+                    <div class="field-tip">开发者后台「凭证与基础信息」里的 App ID</div>
+                  </el-form-item>
+                  <el-form-item label="App Secret" prop="app_secret">
+                    <el-input
+                      v-model="conf.app_secret"
+                      type="password"
+                      show-password
+                      data-testid="fs-app-secret" />
+                  </el-form-item>
+                </div>
+                <el-form-item label="平台">
+                  <el-select v-model="conf.domain" style="width: 100%" data-testid="fs-domain">
+                    <el-option label="飞书" value="feishu" />
+                    <el-option label="Lark 国际版" value="lark" />
+                  </el-select>
+                </el-form-item>
+
+                <div class="pt-note cred-note" data-testid="fs-ws-note">
+                  <PtIcon name="info" :size="14" class="pt-note__icon" />
+                  <span>
+                    保存后到飞书开发者后台，把「事件与回调」的订阅方式改成「使用长连接接收事件」并添加「接收消息
+                    v2.0」：这一步要在通道列表里显示「已连接」以后做（这一页的状态只看启用与否）。步骤见
+                    <a
+                      href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/chatops-feishu.md"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >飞书应用机器人文档</a
+                    >。
+                  </span>
+                </div>
+
+                <div class="field-head">谁可以用这个机器人</div>
+
+                <el-form-item label="管理员 open_id">
+                  <el-input
+                    v-model="fsForm.admin_users_text"
+                    type="textarea"
+                    :rows="2"
+                    placeholder="ou_ 开头的 open_id，多个用逗号或换行分开"
+                    data-testid="fs-admin-users" />
+                  <div class="field-tip">
+                    这里和下面「允许的用户
+                    open_id」里的人才能与机器人对话；两栏都留空时谁发来的消息都不处理。 不知道自己的
+                    open_id 时，先私聊机器人发一条消息，它会回你的 open_id
+                  </div>
+                </el-form-item>
+                <el-form-item label="允许的用户 open_id">
+                  <el-input
+                    v-model="fsForm.allowed_users_text"
+                    type="textarea"
+                    :rows="2"
+                    placeholder="ou_ 开头的 open_id"
+                    data-testid="fs-allowed-users" />
+                  <div class="field-tip">
+                    同样能与机器人对话。open_id
+                    按应用区分，换了应用要重新填。管理命令目前对每个完成绑定的账号开放
+                  </div>
+                </el-form-item>
+
+                <div class="field-head">出站推送</div>
+
+                <div class="field-row">
+                  <el-form-item label="默认会话 ID（可选）">
+                    <el-input
+                      v-model="conf.default_chat_id"
+                      placeholder="oc_…（群）、ou_…（个人）或 on_…（union_id）"
+                      data-testid="fs-default-chat" />
+                    <div class="field-tip">
+                      每日战报、签到这类通知发到这里；留空时发给第一个管理员 open_id
+                    </div>
+                  </el-form-item>
+                  <el-form-item label="代理 URL（可选）">
+                    <el-input
+                      v-model="conf.proxy_url"
+                      placeholder="http://127.0.0.1:1080 或 socks5://host:1080"
+                      clearable
+                      data-testid="fs-proxy" />
+                    <div class="field-tip">
+                      留空走系统的 <code>HTTPS_PROXY</code> /
+                      <code>NO_PROXY</code>；填了则本通道单独走它
+                    </div>
+                  </el-form-item>
+                </div>
+              </template>
+
               <!-- Webhook -->
               <template v-if="conf.channel_type === 'webhook'">
                 <div class="field-row">
@@ -1157,7 +1319,7 @@ const previewText = computed(() => {
           <PtPanel title="密钥与安全" icon="shield-check">
             <ul class="sec">
               <li>
-                Bot Token、Access Token、HMAC Secret、Webhook Key 以及代理凭据都以
+                Bot Token、Access Token、HMAC Secret、Webhook Key、App Secret 以及代理凭据都以
                 <strong>AES-256-GCM</strong> 加密后落库，不存明文。
               </li>
               <li>

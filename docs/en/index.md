@@ -101,16 +101,16 @@ home:
         title: AI assistant and MCP
         wide: true
         status: available
-        body: Connect an OpenAI-compatible model and ask in plain language, in the web interface, the mobile app, Telegram or QQ, to look up data, search and push torrents and manage subscriptions; MCP clients such as Claude and Cursor can connect too. Every change waits for your confirmation.
+        body: Connect an OpenAI-compatible model and ask in plain language, in the web interface, the mobile app, Telegram, QQ or Feishu, to look up data, search and push torrents and manage subscriptions; MCP clients such as Claude and Cursor can connect too. Every change waits for your confirmation.
         evidence:
           kind: chips
           items:
             [DeepSeek, Qwen, Kimi, SiliconFlow, Google AI Studio, Groq, OpenRouter, Ollama, OpenAI]
         link: /en/guide/assistant
       - icon: bell
-        title: QQ, Telegram and notifications
+        title: QQ, Telegram, Feishu and notifications
         status: available
-        body: Check status and torrents from QQ or Telegram, pause, resume or delete torrents and add RSS feeds, with every command recorded in the audit log. New-torrent notifications support quiet hours, digests and an hourly limit.
+        body: Check status and torrents from QQ, Telegram or Feishu, pause, resume or delete torrents and add RSS feeds, with every command recorded in the audit log. New-torrent notifications support quiet hours, digests and an hourly limit.
         evidence:
           kind: chips
           items: [/status, /tasks, /torrents, /addrss]
@@ -186,7 +186,7 @@ home:
         - title: Credentials stay out
           body: Cookies, passkeys and passwords are never sent to the model, and the data its tools return is redacted first.
         - title: Ask from anywhere
-          body: Chat in the web interface or the mobile app, or message the assistant through the Telegram and QQ bots.
+          body: Chat in the web interface or the mobile app, or message the assistant through the Telegram, QQ and Feishu bots.
       guide:
         text: AI assistant
         link: /en/guide/assistant

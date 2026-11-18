@@ -1,6 +1,6 @@
 # RSS 上新通知
 
-pt-tools 在 RSS 自动下载之外，还可以把"上新"事件通过 **QQ 私聊** 或 **Telegram 私聊** 实时推给你。
+pt-tools 在 RSS 自动下载之外，还可以把"上新"事件通过 **QQ**、**Telegram** 或**飞书**的私聊实时推给你。
 本指南帮你快速打开这个开关，并把通知质量调到最舒服的状态。
 
 ---
@@ -23,6 +23,7 @@ pt-tools 在 RSS 自动下载之外，还可以把"上新"事件通过 **QQ 私�
 
 - [QQ OneBot (NapCat) 配置](chatops-qq-napcat.md)
 - [Telegram Bot 配置](chatops-telegram.md)
+- [飞书应用机器人配置](chatops-feishu.md)
 
 ---
 
@@ -30,7 +31,7 @@ pt-tools 在 RSS 自动下载之外，还可以把"上新"事件通过 **QQ 私�
 
 ### 第 1 步：准备通知通道
 
-按 [ChatOps 快速开始](chatops-quickstart.md) 创建至少一个通知通道（QQ 或 Telegram）。
+按 [ChatOps 快速开始](chatops-quickstart.md) 创建至少一个通知通道（QQ、Telegram 或飞书应用机器人）。
 
 在 ChatOps → 消息通知 中确认通道已启用，状态为「已连接」或「运行中」，并且测试消息能收到。
 
@@ -201,6 +202,7 @@ filtered 通知（仅 Telegram）会附带两个按钮：
 > 不在列表里的用户点按钮会收到"您没有权限执行此操作"的提示。
 
 > QQ 通道目前不支持内联按钮（OneBot 协议无对应 message segment）。filtered 通知到 QQ 时只有正文。
+> 飞书应用机器人与 QQ 一样，filtered 通知只有正文，没有「立即下载 / 忽略」按钮。
 
 ---
 
@@ -305,5 +307,6 @@ DELETE FROM rss_notification_log;
 - [ChatOps 快速开始](chatops-quickstart.md)
 - [QQ OneBot (NapCat) 配置](chatops-qq-napcat.md)
 - [Telegram Bot 配置](chatops-telegram.md)
+- [飞书应用机器人配置](chatops-feishu.md)
 - [RSS 订阅配置指南](rss-subscription.md)
 - [过滤规则与追剧指南](filter-rules-tv-series.md)

@@ -1,6 +1,6 @@
 # More notification channels
 
-Besides [QQ](chatops-qq-napcat.md) and [Telegram](chatops-telegram.md), which also take commands, pt-tools can push notifications to these outbound-only channels: WeCom group bots, DingTalk group bots, Feishu (Lark) group bots, Bark, ServerChan (Server 酱) and ntfy. They only send; you cannot send commands from them.
+Besides [QQ](chatops-qq-napcat.md), [Telegram](chatops-telegram.md) and the [Feishu app bot](chatops-feishu.md), which also take commands, pt-tools can push notifications to these outbound-only channels: WeCom group bots, DingTalk group bots, Feishu (Lark) group bots, Bark, ServerChan (Server 酱) and ntfy. They only send; you cannot send commands from them.
 
 In ChatOps → Notifications (消息通知), click Add channel (添加通道), choose the type, and enter a name and the settings. For Bark or ntfy on your own server, enter the server address and credentials in this step: the channel is enabled as soon as it is created, and with the address left empty it first sends to the default public server. After creating it, click Send test message (发送测试消息) to check that it arrives; you can change the settings later in the channel's settings. Credentials are stored encrypted like other channels and are not shown in the list.
 
@@ -43,6 +43,8 @@ DingTalk requires at least one security setting per bot: with signing, enter the
 | Signing secret (optional) | Enter it when signature verification (签名校验) is on                                                                                       |
 
 The signature uses the current time; Feishu rejects messages when the clock of the machine running pt-tools is more than an hour off.
+
+A group bot only sends notifications and cannot receive commands. To send commands and talk to the AI assistant from Feishu, use the [Feishu app bot](chatops-feishu.md): a custom app that receives messages over a long connection and can also send background notifications.
 
 ## Bark
 

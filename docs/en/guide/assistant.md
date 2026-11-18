@@ -1,6 +1,6 @@
 # AI assistant
 
-pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask, on the web, in the mobile app or in notification channels (Telegram, QQ), about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader, manage subscriptions, recognize torrent titles, organize finished movies and TV shows into your media library, and read or change pt-tools' own configuration. Every action that changes something waits for you to confirm it, and the confirmation card shows what changes from what to what and the possible impact. On the web you can also connect [Voltip](#voice-input) and talk instead of typing.
+pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask, on the web, in the mobile app or in notification channels (Telegram, QQ, Feishu), about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader, manage subscriptions, recognize torrent titles, organize finished movies and TV shows into your media library, and read or change pt-tools' own configuration. Every action that changes something waits for you to confirm it, and the confirmation card shows what changes from what to what and the possible impact. On the web you can also connect [Voltip](#voice-input) and talk instead of typing.
 
 The assistant runs inside pt-tools. It calls the same tools as [MCP](mcp.md), executed through the [App API](../reference/app-api.md), so it sees the same data with the same redaction as the app. Any OpenAI-compatible Chat Completions endpoint works, as long as the model supports tool calling (function calling).
 
@@ -170,7 +170,7 @@ With [Voltip](https://voltip.firlab.app/)'s local service connected, the chat pa
 
 ## In notification channels
 
-With **Notification channels (ChatOps)** turned on in **System → AI assistant settings**, messages from bound Telegram and QQ accounts that are not commands (do not start with `/`) go to the AI assistant; commands stay commands.
+With **Notification channels (ChatOps)** turned on in **System → AI assistant settings**, messages from bound Telegram, QQ and Feishu accounts that are not commands (do not start with `/`) go to the AI assistant; commands stay commands.
 
 - Each binding keeps using one conversation, so earlier turns are part of the context; send `/newchat` to start a new one (after the previous answer finishes).
 - The answer is generated in the background and sent when it is ready. A binding gets one answer at a time: a message sent while the previous question is still being answered gets a "still answering" reply.

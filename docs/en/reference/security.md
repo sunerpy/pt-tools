@@ -18,7 +18,7 @@ Everything is in the data folder: the folder mounted at `/app/.pt-tools` in Dock
 These are encrypted with AES-256-GCM, using the key in `secret.key`, before they are written to the database:
 
 - site cookies;
-- notification channel credentials, such as a Telegram bot token or a OneBot access token;
+- notification channel credentials, such as a Telegram bot token, a OneBot access token or the App Secret of a Feishu app bot;
 - the CloakBrowser access token;
 - the proxy address of the site proxy in Global settings, which may include a user name and password;
 - the host keys of [remote access](../guide/remote-access.md).
@@ -45,15 +45,15 @@ The notification channel list never returns credentials; they are decrypted and 
 
 ## What it connects to
 
-| Destination                          | Why                                                                                                                                                                                                   |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status                                                                                                                               |
-| The downloaders you configure        | Pushing torrents and reading tasks and free space                                                                                                                                                     |
-| The notification channels you enable | Sending notifications; Telegram receives commands by long polling                                                                                                                                     |
-| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                                                                                                                                   |
-| TMDB and other media data sources    | Recognition, subscriptions and scraping: TMDB; Douban and Bangumi only when a library's data sources choose them; Fanart.tv, OMDb and TheTVDB only after you enter their keys under media recognition |
-| A CloakBrowser Manager               | Only after you set its endpoint, token and profile ID, as a fallback for login checks                                                                                                                 |
-| The relays you enter                 | Only with remote access on: an outgoing connection that forwards the app's encrypted connections                                                                                                      |
+| Destination                          | Why                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status                                                                                                                                                                                                                                                                                                |
+| The downloaders you configure        | Pushing torrents and reading tasks and free space                                                                                                                                                                                                                                                                                                                      |
+| The notification channels you enable | Sending notifications; Telegram receives commands by long polling. The Feishu app bot gets the long connection address, obtains access tokens and sends messages through `open.feishu.cn` (`open.larksuite.com` for Lark), and the long connection itself, which receives commands, goes to the address Feishu hands out (a host under `feishu.cn` or `larksuite.com`) |
+| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                                                                                                                                                                                                                                                                                                    |
+| TMDB and other media data sources    | Recognition, subscriptions and scraping: TMDB; Douban and Bangumi only when a library's data sources choose them; Fanart.tv, OMDb and TheTVDB only after you enter their keys under media recognition                                                                                                                                                                  |
+| A CloakBrowser Manager               | Only after you set its endpoint, token and profile ID, as a fallback for login checks                                                                                                                                                                                                                                                                                  |
+| The relays you enter                 | Only with remote access on: an outgoing connection that forwards the app's encrypted connections                                                                                                                                                                                                                                                                       |
 
 The [CloakBrowser fallback](../guide/site-login-monitoring.md#cloakbrowser-fallback) hands the site's cookies to the CloakBrowser you deploy, which then opens the site's pages.
 
@@ -70,7 +70,7 @@ When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; 
 
 - Do not expose the web port directly to the internet. For remote access, put it behind a reverse proxy with HTTPS, or reach it over a VPN. The session cookie is not marked Secure, so over plain HTTP someone on the same network could capture it, and the same goes for API tokens.
 - Back up `torrents.db` and `secret.key` together and encrypt the backup; see [Upgrades and backups](../guide/upgrade.md).
-- ChatOps runs commands only from accounts linked with a binding code, and QQ and Telegram channels also check the sender against the channel's allow lists first. At present every linked account has admin rights and can pause or delete torrents and manage subscriptions, so give binding codes only to people you trust. Every command is recorded in the audit log, with arguments such as tokens and passkeys redacted before they are written.
+- ChatOps runs commands only from accounts linked with a binding code, and QQ, Telegram and Feishu app bot channels also check the sender against the channel's allow lists first. At present every linked account has admin rights and can pause or delete torrents and manage subscriptions, so give binding codes only to people you trust. Every command is recorded in the audit log, with arguments such as tokens and passkeys redacted before they are written.
 
 ## Trust model of remote access
 

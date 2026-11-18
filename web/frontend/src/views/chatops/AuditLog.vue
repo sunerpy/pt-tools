@@ -31,6 +31,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 const CHANNEL_LABELS: Record<string, string> = {
   telegram: "Telegram",
   qq_onebot: "QQ (OneBot)",
+  feishu_app: "飞书应用机器人",
   webhook: "Webhook",
   wecom_webhook: "企业微信",
   // App API 的令牌做的写请求（web/api_app_v1.go 的 recordAppWrite），不是消息通道
@@ -54,6 +55,7 @@ const CHANNEL_LABELS: Record<string, string> = {
 const CHANNEL_SHORT: Record<string, string> = {
   telegram: "Telegram",
   qq_onebot: "QQ",
+  feishu_app: "飞书",
   webhook: "Webhook",
   wecom_webhook: "企业微信",
   api_token: "API 令牌",

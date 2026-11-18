@@ -27,7 +27,7 @@ cmd/
 
 ## Root and Registration
 
-`rootCmd.Run` delegates to `webCmd.Run`, so `pt-tools` and `pt-tools web` have the same runtime path. `root.go` imports site definitions and the webhook adapter for registration; `web.go` imports QQ, Telegram, and WeCom adapters.
+`rootCmd.Run` delegates to `webCmd.Run`, so `pt-tools` and `pt-tools web` have the same runtime path. `root.go` imports site definitions and the webhook adapter for registration; `web.go` imports the QQ, Telegram, Feishu app (`feishuapp`), WeCom and the outbound-only adapters.
 
 When adding a command:
 

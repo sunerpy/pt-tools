@@ -6,9 +6,9 @@
 //
 //	go build -tags qa ./...
 //
-// It exposes `/test/telegram/inject` and `/test/qq/inject` so QA scripts
-// (scripts/qa/*.sh) can inject inbound messages directly into the
-// chatops MessageChain, bypassing the real Telegram / OneBot transports.
+// It exposes `/test/telegram/inject`, `/test/qq/inject` and `/test/feishu/inject`
+// so QA scripts (scripts/qa/*.sh) can inject inbound messages directly into the
+// chatops MessageChain, bypassing the real Telegram / OneBot / Feishu transports.
 //
 // **Production builds MUST NOT include this file.** A vanilla
 // `go build ./...` or `make build-local` will skip it; the routes return
@@ -42,17 +42,21 @@ type TestInboundProcessor interface {
 // requiring any modification to server.go.
 var qaInbound atomic.Value
 
-// qaInjectRequest is the JSON body shape accepted by both
-// /test/telegram/inject and /test/qq/inject.
+// qaInjectRequest is the JSON body shape accepted by all inject endpoints.
+// MessageType is optional ("private" | "group").
 type qaInjectRequest struct {
-	Text   string         `json:"text"`
-	From   qaInjectSender `json:"from"`
-	ConfID uint           `json:"conf_id"`
-	ChatID string         `json:"chat_id"`
+	Text        string         `json:"text"`
+	From        qaInjectSender `json:"from"`
+	ConfID      uint           `json:"conf_id"`
+	ChatID      string         `json:"chat_id"`
+	MessageType string         `json:"message_type"`
 }
 
+// qaInjectSender identifies the sender: numeric ID for Telegram / QQ, or a
+// string UserID (Feishu open_id, ou_…) that takes precedence when set.
 type qaInjectSender struct {
 	ID       int64  `json:"id"`
+	UserID   string `json:"user_id"`
 	Username string `json:"username"`
 }
 
@@ -80,15 +84,16 @@ func loadQAInbound() TestInboundProcessor {
 	return w.p
 }
 
-// RegisterQATestHooks attaches /test/telegram/inject and /test/qq/inject
-// to the given mux. T32 (cmd/web.go) is responsible for invoking this
-// in qa builds after Server construction.
+// RegisterQATestHooks attaches the inject endpoints to the given mux.
+// T32 (cmd/web.go) is responsible for invoking this in qa builds after
+// Server construction.
 func RegisterQATestHooks(mux *http.ServeMux) {
 	if mux == nil {
 		panic("RegisterQATestHooks: nil mux")
 	}
 	mux.HandleFunc("POST /test/telegram/inject", qaInjectHandler("telegram"))
 	mux.HandleFunc("POST /test/qq/inject", qaInjectHandler("qq_onebot"))
+	mux.HandleFunc("POST /test/feishu/inject", qaInjectHandler("feishu_app"))
 }
 
 func qaInjectHandler(channelType string) http.HandlerFunc {
@@ -107,12 +112,17 @@ func qaInjectHandler(channelType string) http.HandlerFunc {
 			})
 			return
 		}
+		userID := fmt.Sprintf("%d", req.From.ID)
+		if req.From.UserID != "" {
+			userID = req.From.UserID
+		}
 		msg := notify.InboundMessage{
 			ChannelType:   channelType,
 			SourceConfID:  req.ConfID,
-			ChannelUserID: fmt.Sprintf("%d", req.From.ID),
+			ChannelUserID: userID,
 			Username:      req.From.Username,
 			ChatID:        req.ChatID,
+			MessageType:   req.MessageType,
 			Text:          req.Text,
 		}
 		if err := proc.Process(r.Context(), msg); err != nil {

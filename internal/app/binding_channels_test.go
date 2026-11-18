@@ -152,3 +152,99 @@ func TestBindDirect(t *testing.T) {
 	require.NoError(t, db.Model(&models.ChannelBinding{}).Count(&count).Error)
 	assert.Equal(t, int64(2), count)
 }
+
+// 飞书应用机器人：名单是 open_id（字符串数组），绑定页列出名单、绑定情况与通知发给谁。
+func TestListChannels_FeishuApp(t *testing.T) {
+	db := setupBindingChannelsDB(t)
+	withChat := createConf(t, db, "feishu_app", "飞书", `{"app_id":"cli_a","app_secret":"s","admin_users":["ou_admin"],"allowed_users":["ou_user"],"default_chat_id":"oc_group"}`)
+	adminOnly := createConf(t, db, "feishu_app", "飞书2", `{"app_id":"cli_b","app_secret":"s","admin_users":["ou_admin2"],"allowed_users":["ou_user2"]}`)
+	allowedOnly := createConf(t, db, "feishu_app", "飞书3", `{"app_id":"cli_c","app_secret":"s","allowed_users":["ou_user3"]}`)
+	none := createConf(t, db, "feishu_app", "飞书4", `{"app_id":"cli_d","app_secret":"s","allowed_users":["ou_user4"]}`)
+	createConf(t, db, "feishu", "群机器人", `{"webhook_url":"https://open.feishu.cn/open-apis/bot/v2/hook/x"}`)
+	require.NoError(t, db.Create(&models.ChannelBinding{NotificationConfID: allowedOnly.ID, ChannelType: "feishu_app", ChannelUserID: "ou_user3", PtAdmin: true, Allowed: true}).Error)
+	require.NoError(t, db.Create(&models.ActionAudit{
+		NotificationConfID: withChat.ID, ChannelType: "feishu_app", ChannelUserID: "ou_admin",
+		Command: "status", Result: "success", ArgsJSON: "{}",
+	}).Error)
+
+	views, err := NewBindingService(db, "admin").ListChannels(context.Background())
+	require.NoError(t, err)
+	require.Len(t, views, 4, "群机器人只出站，不列")
+	byID := map[uint]ChannelBindingView{}
+	for _, v := range views {
+		byID[v.ConfID] = v
+	}
+
+	v := byID[withChat.ID]
+	assert.Equal(t, "feishu_app", v.ChannelType)
+	assert.Equal(t, "oc_group", v.NotifyTarget)
+	assert.Equal(t, NotifyViaDefaultChat, v.NotifyVia)
+	require.Len(t, v.Users, 2)
+	assert.Equal(t, "ou_admin", v.Users[0].UserID)
+	assert.Equal(t, []string{RoleAdmin}, v.Users[0].Roles)
+	require.NotNil(t, v.Users[0].Last)
+	assert.Equal(t, "status", v.Users[0].Last.Command)
+	assert.Equal(t, []string{RoleAllowed}, v.Users[1].Roles)
+
+	assert.Equal(t, "ou_admin2", byID[adminOnly.ID].NotifyTarget)
+	assert.Equal(t, NotifyViaAdmin, byID[adminOnly.ID].NotifyVia)
+	assert.Equal(t, "ou_user3", byID[allowedOnly.ID].NotifyTarget)
+	assert.Equal(t, NotifyViaBinding, byID[allowedOnly.ID].NotifyVia, "不退到允许名单，用绑定的账号")
+	assert.True(t, byID[allowedOnly.ID].Users[0].Bound)
+	assert.Contains(t, byID[none.ID].NotifyError, "飞书应用机器人通道无可用收件人")
+}
+
+func TestBindDirect_FeishuApp(t *testing.T) {
+	db := setupBindingChannelsDB(t)
+	fs := createConf(t, db, "feishu_app", "飞书", `{"app_id":"cli_a","app_secret":"s","admin_users":["ou_admin"],"allowed_users":["ou_user"]}`)
+	group := createConf(t, db, "feishu", "群机器人", `{"webhook_url":"https://open.feishu.cn/open-apis/bot/v2/hook/x"}`)
+	svc := NewBindingService(db, "admin")
+	ctx := context.Background()
+
+	got, err := svc.BindDirect(ctx, fs.ID, "ou_admin")
+	require.NoError(t, err)
+	assert.Equal(t, "feishu_app", got.ChannelType)
+	assert.Equal(t, "ou_admin", got.ChannelUserID)
+	_, err = svc.BindDirect(ctx, fs.ID, "ou_user")
+	require.NoError(t, err)
+	_, err = svc.BindDirect(ctx, fs.ID, "ou_stranger")
+	require.ErrorIs(t, err, ErrBindNotInWhitelist)
+	_, err = svc.BindDirect(ctx, group.ID, "ou_admin")
+	require.ErrorIs(t, err, ErrBindUnsupportedChannel, "群机器人不收命令")
+}
+
+func TestReadChannelLists_FeishuAppBadLists(t *testing.T) {
+	setupTestKey(t)
+	for _, raw := range []string{
+		`{"admin_users":"ou_a"}`,
+		`{"allowed_users":{"x":1}}`,
+		`{"default_chat_id":["oc_a"]}`,
+	} {
+		cipher, err := crypto.Encrypt([]byte(raw))
+		require.NoError(t, err)
+		_, err = readChannelLists(models.NotificationConf{ChannelType: "feishu_app", ConfigJSON: cipher})
+		require.Error(t, err, raw)
+		assert.Contains(t, err.Error(), "feishu_app", raw)
+	}
+}
+
+// 飞书应用机器人的名单与适配器（feishuapp.parseConfig）同一套规则：去掉首尾空白、跳过空项、去重。
+// 带空格的项不规整的话，绑定记录的 ChannelUserID 带着空格，和入站的 open_id 对不上。
+func TestReadChannelLists_FeishuAppNormalizes(t *testing.T) {
+	setupTestKey(t)
+	cipher, err := crypto.Encrypt([]byte(`{"admin_users":[""," ou_a ","ou_a","ou_b"],"allowed_users":["ou_c","","ou_c "],"default_chat_id":" oc_g "}`))
+	require.NoError(t, err)
+	lists, err := readChannelLists(models.NotificationConf{ChannelType: "feishu_app", ConfigJSON: cipher})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ou_a", "ou_b"}, lists.admins)
+	assert.Equal(t, []string{"ou_c"}, lists.allowed)
+	assert.Equal(t, "oc_g", lists.defaultChat)
+	assert.Equal(t, []string{RoleAdmin}, lists.rolesOf("ou_a"))
+
+	// Telegram 照旧：这次只改飞书应用机器人
+	tg, err := crypto.Encrypt([]byte(`{"admin_users":[1,1],"default_chat_id":"-100"}`))
+	require.NoError(t, err)
+	lists, err = readChannelLists(models.NotificationConf{ChannelType: "telegram", ConfigJSON: tg})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1", "1"}, lists.admins)
+}

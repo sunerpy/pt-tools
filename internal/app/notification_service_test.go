@@ -1196,3 +1196,85 @@ func TestPush_RecipientBeforeOutbox(t *testing.T) {
 	require.NoError(t, db.Model(&models.NotificationOutbox{}).Count(&count).Error)
 	assert.Equal(t, int64(1), count, "没有收件人的通知不进 outbox")
 }
+
+// 飞书应用机器人：默认会话 ID → 第一个管理员 open_id → 第一个绑定的账号，与 Telegram 一样不退到允许名单。
+// 不带收件人的通知（测试、每日战报、签到、追剧、登录提醒、RSS）都按它补上。
+func TestPushSync_FillsDefaultRecipient_FeishuApp(t *testing.T) {
+	setupTestKey(t)
+	cases := []struct {
+		name     string
+		config   string
+		binding  string
+		want     map[string]string
+		wantFail string
+	}{
+		{
+			name: "默认会话 ID", config: `{"app_id":"cli_a","app_secret":"s","default_chat_id":"oc_group","admin_users":["ou_admin"]}`,
+			want: map[string]string{"chat_id": "oc_group"},
+		},
+		{
+			name: "没有默认会话时第一个管理员", config: `{"app_id":"cli_a","app_secret":"s","admin_users":["ou_admin","ou_b"],"allowed_users":["ou_c"]}`,
+			want: map[string]string{"chat_id": "ou_admin"},
+		},
+		{
+			name: "名单只有允许的用户时用绑定的账号", config: `{"app_id":"cli_a","app_secret":"s","allowed_users":["ou_c"]}`, binding: "ou_bound",
+			want: map[string]string{"chat_id": "ou_bound"},
+		},
+		{
+			name: "没有收件人", config: `{"app_id":"cli_a","app_secret":"s","allowed_users":["ou_c"]}`,
+			wantFail: "飞书应用机器人通道无可用收件人",
+		},
+		// 名单与默认会话 ID 按适配器的规则规整（去掉首尾空白、跳过空项、去重）：适配器认为合法的配置，通知也要找得到收件人
+		{
+			name: "管理员名单里有空项", config: `{"app_id":"cli_a","app_secret":"s","admin_users":["","ou_admin"]}`,
+			want: map[string]string{"chat_id": "ou_admin"},
+		},
+		{
+			name: "默认会话 ID 只有空白", config: `{"app_id":"cli_a","app_secret":"s","default_chat_id":" ","admin_users":[" ou_admin "]}`,
+			want: map[string]string{"chat_id": "ou_admin"},
+		},
+		{
+			name: "默认会话 ID 带空白", config: `{"app_id":"cli_a","app_secret":"s","default_chat_id":" oc_group "}`,
+			want: map[string]string{"chat_id": "oc_group"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+			cipher, err := crypto.Encrypt([]byte(tc.config))
+			require.NoError(t, err)
+			row := models.NotificationConf{ChannelType: "feishu_app", Name: "飞书", ConfigJSON: cipher, Enabled: true}
+			require.NoError(t, db.Create(&row).Error)
+			if tc.binding != "" {
+				require.NoError(t, db.Create(&models.ChannelBinding{
+					NotificationConfID: row.ID, ChannelType: "feishu_app", ChannelUserID: tc.binding, PtAdmin: true, Allowed: true,
+				}).Error)
+			}
+			mgr := &mockNotifyManager{}
+			svc := NewNotificationService(db, mgr, time.Second)
+			err = svc.PushSync(context.Background(), Notification{Title: "每日战报", Text: "今日上传 1 GB", SourceConfID: row.ID})
+			if tc.wantFail != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantFail)
+				assert.Zero(t, mgr.callCount())
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, mgr.sent, 1)
+			assert.Equal(t, tc.want, mgr.sent[0].Targets, "飞书不需要 message_type")
+		})
+	}
+}
+
+func TestTestConf_FeishuAppBadConfig(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{"app_id":"cli_a","app_secret":"s","admin_users":7}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "feishu_app", Name: "飞书", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+	err = NewNotificationService(db, &mockNotifyManager{}, 0).TestConf(context.Background(), row.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "admin_users")
+}

@@ -13,7 +13,7 @@ import (
 // cmd 的副作用导入把每个通知适配器都注册进默认注册表：漏了导入，配置了的通道启动时会被跳过。
 func TestNotifyAdaptersRegistered(t *testing.T) {
 	types := notify.DefaultRegistry().Types()
-	for _, want := range []string{"telegram", "qq_onebot", "webhook", "wecom_webhook", "bark", "serverchan", "ntfy", "dingtalk", "feishu"} {
+	for _, want := range []string{"telegram", "qq_onebot", "webhook", "wecom_webhook", "bark", "serverchan", "ntfy", "dingtalk", "feishu", "feishu_app"} {
 		assert.Contains(t, types, want)
 	}
 }
@@ -35,5 +35,24 @@ func TestOutboundAdaptersCheckConfig(t *testing.T) {
 		require.True(t, ok, "%s 要支持保存前检查", typ)
 		assert.NoError(t, checker.CheckConfig(&models.NotificationConf{ChannelType: typ, ConfigJSON: tc.good}), typ)
 		assert.Error(t, checker.CheckConfig(&models.NotificationConf{ChannelType: typ, ConfigJSON: tc.bad}), typ)
+	}
+}
+
+// 飞书应用机器人也在保存前检查配置：凭据缺了、名单里填的不是 open_id 时拒绝保存。
+func TestFeishuAppAdapterCheckConfig(t *testing.T) {
+	ch, err := notify.DefaultRegistry().Make("feishu_app")
+	require.NoError(t, err)
+	checker, ok := ch.(notify.ConfigChecker)
+	require.True(t, ok)
+	assert.NoError(t, checker.CheckConfig(&models.NotificationConf{
+		ChannelType: "feishu_app",
+		ConfigJSON:  `{"app_id":"cli_a1","app_secret":"s","admin_users":["ou_a"]}`,
+	}))
+	for _, bad := range []string{
+		`{"app_id":"cli_a1"}`,
+		`{"app_id":"cli_a1","app_secret":"s","admin_users":["123"]}`,
+		`{"app_id":"cli_a1","app_secret":"s","domain":"x"}`,
+	} {
+		assert.Error(t, checker.CheckConfig(&models.NotificationConf{ChannelType: "feishu_app", ConfigJSON: bad}), bad)
 	}
 }

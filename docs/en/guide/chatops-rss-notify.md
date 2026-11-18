@@ -1,6 +1,6 @@
 # New-torrent notifications
 
-Besides downloading through RSS, pt-tools can tell you about new torrents as they appear, through a **QQ private chat** or a **Telegram private chat**. This guide shows how to turn it on and how to tune the notifications until they suit you.
+Besides downloading through RSS, pt-tools can tell you about new torrents as they appear, through a private chat in **QQ**, **Telegram** or **Feishu**. This guide shows how to turn it on and how to tune the notifications until they suit you.
 
 ---
 
@@ -21,6 +21,7 @@ Notifications are delivered through ChatOps notification channels, so **you need
 
 - [QQ through OneBot (NapCat)](chatops-qq-napcat.md)
 - [Telegram bot](chatops-telegram.md)
+- [Feishu app bot](chatops-feishu.md)
 
 ---
 
@@ -28,7 +29,7 @@ Notifications are delivered through ChatOps notification channels, so **you need
 
 ### Step 1: prepare a notification channel
 
-Create at least one notification channel (QQ or Telegram) as described in the [ChatOps quick start](chatops-quickstart.md).
+Create at least one notification channel (QQ, Telegram or Feishu app bot) as described in the [ChatOps quick start](chatops-quickstart.md).
 
 Under ChatOps → Notifications (消息通知), check that the channel is enabled, that its status is Connected (已连接) or Running (运行中), and that its test message arrives.
 
@@ -198,6 +199,7 @@ After a button is pressed:
 > A user who is not listed gets the notice 您没有权限执行此操作 ("you are not allowed to do this").
 
 > QQ channels do not support inline buttons at present (OneBot has no matching message segment). Detailed notifications sent to QQ carry the text only.
+> The same goes for the Feishu app bot: detailed notifications carry the text only, without Download now / Ignore buttons.
 
 ---
 
@@ -301,5 +303,6 @@ Yes, with the same text. QQ has no inline buttons, so they come without Download
 - [ChatOps quick start](chatops-quickstart.md)
 - [QQ through OneBot (NapCat)](chatops-qq-napcat.md)
 - [Telegram bot](chatops-telegram.md)
+- [Feishu app bot](chatops-feishu.md)
 - [RSS subscriptions](rss-subscription.md)
 - [Filter rules and TV series](filter-rules-tv-series.md)

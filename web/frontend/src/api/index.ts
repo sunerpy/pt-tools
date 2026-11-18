@@ -1858,6 +1858,10 @@ export interface NotificationConfig {
   success_template?: string;
   webhook_key?: string;
   proxy_url?: string;
+  /** 飞书应用机器人：开发者后台「凭证与基础信息」里的 App ID 与 App Secret，平台是 feishu 或 lark */
+  app_id?: string;
+  app_secret?: string;
+  domain?: string;
   // 只出站的通道（Bark、Server 酱、ntfy、钉钉、飞书），字段见 utils/notifyChannels
   server_url?: string;
   device_key?: string;
@@ -1903,6 +1907,9 @@ const NOTIFICATION_DYNAMIC_FIELDS = [
   "success_template",
   "webhook_key",
   "proxy_url",
+  "app_id",
+  "app_secret",
+  "domain",
   "server_url",
   "device_key",
   "group",

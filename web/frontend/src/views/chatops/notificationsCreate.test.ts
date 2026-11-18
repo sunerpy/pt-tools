@@ -153,6 +153,59 @@ describe("新建通知通道", () => {
     });
   });
 
+  it("飞书应用机器人：只发 App ID、App Secret 与平台，平台默认飞书", async () => {
+    await openDialog();
+    fill("name-input", "飞书");
+    await pickType("feishu_app");
+    // 名单外提示要等订阅了「接收消息 v2.0」、发布了版本以后事件才推过来：先写前置步骤，再写拿 open_id
+    expect(document.body.textContent).toContain("添加「接收消息 v2.0」并发布版本");
+    expect(document.body.textContent).toContain("私聊机器人发一条消息，它会回你的 open_id");
+    fill("new-app_id", " cli_a1b2 ");
+    fill("new-app_secret", " sec ");
+    buttonByText("创建通道").click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0]![0]).toEqual({
+      channel_type: "feishu_app",
+      name: "飞书",
+      enabled: true,
+      app_id: "cli_a1b2",
+      app_secret: "sec",
+      domain: "feishu",
+    });
+  });
+
+  it("飞书应用机器人：可以选 Lark 国际版", async () => {
+    await openDialog();
+    fill("name-input", "Lark");
+    await pickType("feishu_app");
+    fill("new-app_id", "cli_x");
+    fill("new-app_secret", "s");
+    q("domain-lark")!.click();
+    await flush();
+    buttonByText("创建通道").click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    expect(api.create.mock.calls[0]![0]).toMatchObject({
+      channel_type: "feishu_app",
+      domain: "lark",
+    });
+  });
+
+  it("飞书应用机器人：缺 App ID 或 App Secret 时不提交", async () => {
+    await openDialog();
+    fill("name-input", "飞书");
+    await pickType("feishu_app");
+    fill("new-app_id", "cli_x");
+    buttonByText("创建通道").click();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("飞书应用机器人通道需填写 App ID 与 App Secret"),
+    );
+    fill("new-app_id", "");
+    fill("new-app_secret", "s");
+    buttonByText("创建通道").click();
+    await flush();
+    expect(api.create).not.toHaveBeenCalled();
+  });
+
   it("后端拒绝时提示里只有原因，不是整段 JSON", async () => {
     await openDialog();
     fill("name-input", "Bark");

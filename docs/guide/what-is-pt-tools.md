@@ -2,7 +2,7 @@
 
 本页介绍 pt-tools 的用途、工作方式和 Web 界面中的各个页面，帮助你判断它是否适合自己。
 
-pt-tools 是一个自托管的 PT（Private Tracker）站点管理工具。它在你自己的服务器、NAS 或电脑上运行，把多个 PT 站点、下载器和聊天通知放进同一个 Web 界面：定时拉取 RSS 订阅并把符合条件的种子推送到下载器，刷流、辅种和转移做种，订阅电影、追剧并把下载完的影视整理进媒体库，汇总各站点的用户数据和登录状态；可以在手机 App、QQ 或 Telegram 上查看和控制，也可以用自然语言交给内置的 AI 助手处理。
+pt-tools 是一个自托管的 PT（Private Tracker）站点管理工具。它在你自己的服务器、NAS 或电脑上运行，把多个 PT 站点、下载器和聊天通知放进同一个 Web 界面：定时拉取 RSS 订阅并把符合条件的种子推送到下载器，刷流、辅种和转移做种，订阅电影、追剧并把下载完的影视整理进媒体库，汇总各站点的用户数据和登录状态；可以在手机 App、QQ、Telegram 或飞书上查看和控制，也可以用自然语言交给内置的 AI 助手处理。
 
 ## 工作方式
 
@@ -15,7 +15,7 @@ pt-tools 是一个独立的程序，Web 界面和后台任务在同一个进程�
 - **追剧与媒体库**：订阅一部电影、追一部剧集的一季以后，pt-tools 到各站点搜索，RSS 里出现时也会下载，按质量档案挑资源；下载完以后识别、按模板放进媒体库，并通知 Emby、Jellyfin 或 Plex。页面在「媒体」分组里，见[追剧与订阅](media-subscribe.md)和[整理入库](media-library.md)。
 - **首页**：打开网页先到首页，上面是 NAS 概览、今天播出的集、待处理的事，以及下载器、存储与备份的状况；「系统 → 系统体检」一次检查 pt-tools 用到的服务与设置。见[首页与系统体检](home-and-health.md)。
 - **通知与 ChatOps**：推送结果和系统事件可以发到聊天软件；绑定过的聊天账号可以发送命令，见 [ChatOps 快速开始](chatops-quickstart.md)。
-- **AI 助手**：在「系统 → AI 助手设置」接上一个大模型以后，可以在网页、手机 App、Telegram 或 QQ 里用自然语言查数据、搜索和推送种子、管理订阅；改动类操作每次都要你确认才执行。见 [AI 助手](assistant.md)。
+- **AI 助手**：在「系统 → AI 助手设置」接上一个大模型以后，可以在网页、手机 App、Telegram、QQ 或飞书里用自然语言查数据、搜索和推送种子、管理订阅；改动类操作每次都要你确认才执行。见 [AI 助手](assistant.md)。
 - **手机 App 与接口**：手机 App 在「系统 → 远程访问」扫码配对，经直连或 relay 连回 pt-tools，连接端到端加密，见[手机 App](mobile-app.md)；脚本与 MCP 客户端用 [API 令牌](api-tokens.md)接入，MoviePilot、IYUU、Sonarr 这类工具可以经 [qB 兼容入口](qbit-compat.md)把 pt-tools 当成 qBittorrent，Seerr 可以经 [Servarr 兼容入口](servarr.md)把它当成 Radarr、Sonarr。
 
 1.0 相对 0.48.0 加入的功能见 [1.0 新功能](whats-new-1.0.md)。

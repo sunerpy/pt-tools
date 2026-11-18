@@ -41,7 +41,7 @@ const pendingBindings = ref<ChatOpBinding[]>([]);
 const activeBindings = ref<ChatOpBinding[]>([]);
 const configs = ref<NotificationConfig[]>([]);
 /**
- * 能收命令的通道（Telegram、QQ）：机器人在不在线、通知发给谁、名单里每个账号绑定了没有。
+ * 能收命令的通道（Telegram、QQ、飞书应用机器人）：机器人在不在线、通知发给谁、名单里每个账号绑定了没有。
  * 2026-10-28 用户以为「机器人接上了就是绑定了」—— 机器人在线、通知照常发，账号却发过 /unbind，
  * 页面只列绑定行时三件事混在一起看不出来（见 utils/bindingChannels.ts）。
  */
@@ -78,7 +78,7 @@ const activeSub = computed(() =>
   subFor("还没有账号完成绑定：在上面的通道里点「绑定」，或者生成一个绑定码"),
 );
 const channelsSub = computed(() =>
-  subFor("先在「消息通知」里加一个 Telegram 或 QQ 通道，再回来绑定账号"),
+  subFor("先在「消息通知」里加一个 Telegram、QQ 或飞书应用机器人通道，再回来绑定账号"),
 );
 
 /** 有绑定数据但渠道配置没拿到：在内容上方挂一条提示，而不是假装一切正常 */
@@ -203,12 +203,16 @@ function runtimeOf(ch: ChatOpsBindingChannel) {
   );
 }
 
-const CHANNEL_NAMES: Record<string, string> = { telegram: "Telegram", qq_onebot: "QQ" };
+const CHANNEL_NAMES: Record<string, string> = {
+  telegram: "Telegram",
+  qq_onebot: "QQ",
+  feishu_app: "飞书",
+};
 
 /** 通知（每日战报、签到、追剧…）发给谁：「默认 Chat ID 12***7890」；没有收件人时写原因 */
 function notifyLine(ch: ChatOpsBindingChannel): string {
   if (ch.notify_target) {
-    return `${notifyViaText(ch.notify_via)} ${maskUserId(ch.notify_target)}`.trim();
+    return `${notifyViaText(ch.notify_via, ch.channel_type)} ${maskUserId(ch.notify_target)}`.trim();
   }
   return ch.notify_error || "";
 }
@@ -822,7 +826,8 @@ function getConfNameByConfId(confId?: number) {
           internal/app/binding_service.go 的 ConsumeCode 给每个新绑定写 PtAdmin: true，
           MessageChain 判管理员命令只看这个字段。通道凭证里的两栏名单只决定谁能和机器人说话：
           Telegram 见 adapter/telegram/inbound.go 的 permitted（不在名单里回一条拒绝），
-          QQ 见 adapter/qq/inbound.go 的 isUserAllowed（不在名单里直接忽略）。
+          QQ 见 adapter/qq/inbound.go 的 isUserAllowed（不在名单里直接忽略），
+          飞书见 adapter/feishuapp/inbound.go 的 onMessage（私聊回一条带 open_id 的提示，群里不回）。
         -->
         <li>
           绑定之后这个聊天账号才能发命令，而且目前<strong>每个完成绑定的账号都拥有管理员权限</strong>，
@@ -831,8 +836,8 @@ function getConfNameByConfId(confId?: number) {
         <li>
           通道凭证里的两栏名单（Telegram 的 <code>admin_users</code> /
           <code>allowed_users</code>，QQ 的 <code>admin_qq_users</code> /
-          <code>allowed_qq_users</code>）只决定谁能和机器人说话，
-          两栏都空时谁都用不了；它们不决定谁是管理员。
+          <code>allowed_qq_users</code>，飞书应用机器人的「管理员 open_id」/「允许的用户
+          open_id」）只决定谁能和机器人说话， 两栏都空时谁都用不了；它们不决定谁是管理员。
         </li>
       </ol>
     </PtPanel>

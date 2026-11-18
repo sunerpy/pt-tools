@@ -312,6 +312,33 @@ func TestConfigNotifyChannels(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// 飞书应用机器人：App Secret 与代理地址只写不读，App ID、名单与默认会话可读；类型提示写的是注册表里的真实 ID。
+func TestConfigNotifyChannels_FeishuApp(t *testing.T) {
+	e := newConfigEnv(t)
+	ctx := context.Background()
+	res, err := e.srv.ConfigApply(ctx, "notify_channels", ConfigChange{Op: "add", Values: map[string]any{
+		"channel_type": "feishu_app", "name": "飞书", "enabled": true,
+		"config": map[string]any{
+			"app_id": "cli_gateway", "app_secret": "gw-app-secret-value", "domain": "feishu",
+			"admin_users": []any{"ou_admin"}, "default_chat_id": "oc_group", "proxy_url": "http://user:pw@proxy:3128",
+		},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, ConfigSecretSet, res.Item["config.app_secret"])
+	assert.Equal(t, ConfigSecretSet, res.Item["config.proxy_url"])
+	assert.Equal(t, "cli_gateway", res.Item["config.app_id"])
+	assert.Equal(t, "oc_group", res.Item["config.default_chat_id"])
+	assert.NotContains(t, configJSON(t, res), "gw-app-secret-value")
+	assert.NotContains(t, configJSON(t, res), "user:pw")
+	assert.Equal(t, "gw-app-secret-value", e.channelConfig(t, res.ID)["app_secret"])
+
+	hint := e.srv.configNotifyChannelsResource().Hints["channel_type"]
+	for _, typ := range []string{"telegram", "qq_onebot", "wecom_webhook", "feishu_app", "feishu"} {
+		assert.Contains(t, hint, typ)
+	}
+	assert.NotContains(t, hint, "qq、", "提示要写注册表里的真实 ID")
+}
+
 // channelConfig 读通知通道解密以后的配置。
 func (e *appEnv) channelConfig(t *testing.T, id string) map[string]any {
 	t.Helper()
