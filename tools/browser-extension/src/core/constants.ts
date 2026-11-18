@@ -7,6 +7,11 @@ export interface KnownSite {
   schema: SiteSchema;
   authMethod: AuthMethod;
   cookieNames: string[];
+  /**
+   * cookieNames 只是一个会话 Cookie（PHP session 这类）：没登录、只打开过站点也会下发，认出来只说明有会话，
+   * 不说明登录着。这样的站点认出了也按「待验证」处理，同步时由 pt-tools 先拿它登录一次、登录上了才保存。
+   */
+  sessionCookie?: boolean;
   syncField: "cookie" | "api_key" | "passkey";
 }
 
@@ -28,7 +33,9 @@ export const KNOWN_SITES: KnownSite[] = [
     authMethod: "cookie",
     // SSD 已迁移到 PHP session 鉴权（session_name=SPRINGID），不再下发传统 NexusPHP 的
     // c_secure_uid / c_secure_pass / c_secure_tracker_ssl 三件套，因此只校验 SPRINGID。
+    // SPRINGID 没登录打开站点也会有（issue #863：没账号也显示「有效」、被推进 pt-tools），要 pt-tools 验证过才算登录着。
     cookieNames: ["SPRINGID"],
+    sessionCookie: true,
     syncField: "cookie",
   },
   {
@@ -51,8 +58,8 @@ export const KNOWN_SITES: KnownSite[] = [
   },
   {
     id: "hddolby",
-    name: "HDDolby",
-    domains: ["www.hddolby.com"],
+    name: "UHDDolby",
+    domains: ["www.uhddolby.com"],
     schema: "HDDolby",
     authMethod: "cookie",
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl", "c_secure_login"],
@@ -199,7 +206,9 @@ export const KNOWN_SITES: KnownSite[] = [
     domains: ["byr.pt"],
     schema: "NexusPHP",
     authMethod: "cookie",
-    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    // 2026-10 起 BYR 登录后是 auth_token（JWT，15 分钟）、refresh_token、session_id，没有 c_secure_* 三件套；
+    // auth_token 过期后站点换发一对新的，pt-tools 那边会接着用换发后的（site/v2 的 SessionCookies）
+    cookieNames: ["auth_token", "refresh_token", "session_id"],
     syncField: "cookie",
   },
   {
@@ -424,7 +433,9 @@ export const KNOWN_SITES: KnownSite[] = [
     domains: ["ourbits.club"],
     schema: "NexusPHP",
     authMethod: "cookie",
-    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    // OurBits 登录只设一个 ourbits_jwt（JWT，30 天到期），不再下发 c_secure_* 三件套；
+    // 另有 Cloudflare 的 cf_clearance，同步时一起带上，但不算登录 Cookie。
+    cookieNames: ["ourbits_jwt"],
     syncField: "cookie",
   },
   {
@@ -604,13 +615,69 @@ export const KNOWN_SITES: KnownSite[] = [
     domains: ["u2.dmhy.org"],
     schema: "NexusPHP",
     authMethod: "cookie",
-    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    // U2 的登录 Cookie 只有 nexusphp_u2，没有 NexusPHP 的 c_secure_uid / c_secure_pass（issue #864：登录着也一直「待验证」）。
+    // 社区脚本也只填这一个：github.com/Hastbin/u2_scripts 的 catch_magic.py，COOKIES = {'nexusphp_u2': ''}。
+    cookieNames: ["nexusphp_u2"],
     syncField: "cookie",
   },
   {
     id: "ptzone",
     name: "PTzone",
     domains: ["ptzone.xyz"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "tjupt",
+    name: "TJUPT",
+    domains: ["tjupt.org", "www.tjupt.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "kufei",
+    name: "库非",
+    domains: ["kufei.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "xingtan",
+    name: "杏坛",
+    domains: ["xingtan.one"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "hdkylin",
+    name: "HDKylin",
+    domains: ["www.hdkyl.in"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "oshenpt",
+    name: "OshenPT",
+    domains: ["www.oshen.win"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "kelu",
+    name: "Kelu",
+    domains: ["our.kelu.one"],
     schema: "NexusPHP",
     authMethod: "cookie",
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
@@ -655,8 +722,18 @@ export const STORAGE_KEYS = {
   autoSyncMap: "pt_tools_auto_sync_map",
   lastSyncMap: "pt_tools_last_sync_map",
   lastVisitMap: "pt_tools_last_visit_map",
-  autoOpenTabsOnSync: "pt_tools_auto_open_tabs",
   batchTabQueue: "pt_tools_batch_tab_queue",
+  // 定时同步与 CookieCloud（M22）
+  syncSchedule: "pt_tools_sync_schedule",
+  syncHashMap: "pt_tools_sync_hash_map",
+  // 被 pt-tools 验证拒绝的那组 Cookie 的指纹与原因：Cookie 没变就不再推（见 background/scheduled-sync）
+  syncRejectedMap: "pt_tools_sync_rejected_map",
+  syncRun: "pt_tools_sync_run",
+  cookieCloudConfig: "pt_tools_cookiecloud_config",
+  cookieCloudState: "pt_tools_cookiecloud_state",
+  // 弹窗打开时先显示的上次结果（见 core/snapshots.ts）
+  sitesSnapshot: "pt_tools_sites_snapshot",
+  loginSnapshot: "pt_tools_login_snapshot",
 } as const;
 
 /**

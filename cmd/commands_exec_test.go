@@ -49,10 +49,13 @@ func TestDbInitCmd_Run(t *testing.T) {
 	captureStdout(t, func() { initCmd.Run(&cobra.Command{}, nil) })
 }
 
-func TestBackupCmd_EmptyOutput(t *testing.T) {
+// 恢复命令没给 --input、也没有 --cancel：报错，不动任何东西。
+func TestRestoreCmd_NoInput(t *testing.T) {
+	cliKeyHome(t, cliKey(1))
 	c := &cobra.Command{}
-	c.Flags().String("output", "", "")
-	captureStdout(t, func() { backupCmd.Run(c, nil) })
+	c.Flags().String("input", "", "")
+	c.Flags().Bool("cancel", false, "")
+	assert.ErrorContains(t, restoreCmd.RunE(c, nil), "--input")
 }
 
 func TestTaskCmd_Run(t *testing.T) {
@@ -88,7 +91,7 @@ func TestPersistentCheckCfg_EmptyDownloadDir_NoExit(t *testing.T) {
 	// We only assert the success branch here (covered separately); this test
 	// documents the guard by ensuring a populated dir passes without exit.
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	store := core.NewConfigStore(db)
@@ -99,6 +102,7 @@ func TestPersistentCheckCfg_EmptyDownloadDir_NoExit(t *testing.T) {
 func TestInitConfigAndDBFile_CreatesTree(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	captureStdout(t, func() { initConfigAndDBFile(&cobra.Command{}, nil) })
 	_, err := os.Stat(filepath.Join(home, models.WorkDir, "downloads"))
 	require.NoError(t, err)

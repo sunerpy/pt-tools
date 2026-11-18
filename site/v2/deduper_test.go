@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewDeduper(t *testing.T) {
@@ -279,4 +280,39 @@ func TestDeduper_MergeDuplicates_DiscountEndTime(t *testing.T) {
 	// Should keep the better discount (2xFree) with its end time
 	assert.Equal(t, Discount2xFree, result[0].DiscountLevel)
 	assert.Equal(t, later, result[0].DiscountEndTime)
+}
+
+// 合并重复项时优惠的几个字段要一起换：只换级别与结束时间会把对方的 unknown 变成 free_until
+func TestDeduper_MergeDuplicates_DiscountSnapshotStaysConsistent(t *testing.T) {
+	d := NewDeduper()
+	now := time.Now()
+	later := now.Add(24 * time.Hour)
+	fetched := now.Add(-time.Minute)
+
+	result := d.Deduplicate([]TorrentItem{
+		{ID: "1", InfoHash: "hash1", DiscountLevel: DiscountNone},
+		{
+			ID: "2", InfoHash: "hash1", DiscountLevel: DiscountFree, DiscountEndTime: later,
+			DiscountValidity: FreeUnknown, DiscountSource: "promotion_rule", DiscountErr: "promotionRule.startTime: 时间格式无法解析", FetchedAt: fetched,
+		},
+	})
+	require.Len(t, result, 1)
+	assert.Equal(t, DiscountFree, result[0].DiscountLevel)
+	assert.Equal(t, FreeUnknown, result[0].DiscountValidity)
+	assert.Equal(t, "promotion_rule", result[0].DiscountSource)
+	assert.Equal(t, "promotionRule.startTime: 时间格式无法解析", result[0].DiscountErr)
+	assert.True(t, fetched.Equal(result[0].FetchedAt))
+	assert.Equal(t, FreeUnknown, result[0].Promotion(now).Validity)
+
+	// 反过来：换成可信的优惠时，旧的 unknown 与诊断说明不能留下
+	result = d.Deduplicate([]TorrentItem{
+		{ID: "1", InfoHash: "hash2", DiscountLevel: DiscountFree, DiscountValidity: FreeUnknown, DiscountErr: "discountEndTime: 时间格式无法解析"},
+		{ID: "2", InfoHash: "hash2", DiscountLevel: Discount2xFree, DiscountEndTime: later, DiscountSource: "base"},
+	})
+	require.Len(t, result, 1)
+	assert.Equal(t, Discount2xFree, result[0].DiscountLevel)
+	assert.Empty(t, result[0].DiscountValidity)
+	assert.Empty(t, result[0].DiscountErr)
+	assert.Equal(t, "base", result[0].DiscountSource)
+	assert.Equal(t, FreeUntil, result[0].Promotion(now).Validity)
 }

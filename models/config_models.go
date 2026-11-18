@@ -87,13 +87,17 @@ type SettingsGlobal struct {
 	CleanupDelFreeExpired bool    `json:"cleanup_del_free_expired" gorm:"default:true"`
 	CleanupDiskProtect    bool    `json:"cleanup_disk_protect" gorm:"default:true"`
 	CleanupMinDiskSpaceGB float64 `json:"cleanup_min_disk_space_gb" gorm:"default:50"`
-	CleanupProtectDL      bool    `json:"cleanup_protect_dl" gorm:"default:false"`
-	CleanupProtectHR      bool    `json:"cleanup_protect_hr" gorm:"default:true"`
-	CleanupMinRetainH     int     `json:"cleanup_min_retain_h" gorm:"default:24"`
-	CleanupProtectTags    string  `json:"cleanup_protect_tags" gorm:"size:256"`
+	// CleanupEmergency 是空间低于下限时紧急清理（自动删种按优先级多挑种子删、推送遇到空间不足时提前开始一轮检查）；
+	// 只在 CleanupDiskProtect 开着时起作用。v16 以前没有这个开关，紧急清理跟着磁盘空间保护一起开
+	CleanupEmergency   bool   `json:"cleanup_emergency" gorm:"default:true"`
+	CleanupProtectDL   bool   `json:"cleanup_protect_dl" gorm:"default:false"`
+	CleanupProtectHR   bool   `json:"cleanup_protect_hr" gorm:"default:true"`
+	CleanupMinRetainH  int    `json:"cleanup_min_retain_h" gorm:"default:24"`
+	CleanupProtectTags string `json:"cleanup_protect_tags" gorm:"size:256"`
 
-	// 免费结束自动删除
-	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"` // 免费期结束时自动删除未完成的种子及数据
+	// 免费结束自动删除：v17 起不再生效，免费结束时删除还是暂停每条 RSS 自己选（RSSSubscription.FreeEndDelete）。
+	// 列留着升级前的值，只给迁移换算与回退到旧版用，保存全局设置时不改它
+	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"`
 
 	// 免费期结束前提前处理的安全余量（分钟）。>0 时暂停/删除提前 N 分钟触发，规避删除延迟与
 	// tracker 汇报滞后导致的超额下载量；0 = 到点处理（旧行为）。生效范围 [0,60]。
@@ -102,11 +106,45 @@ type SettingsGlobal struct {
 	// 默认下载模式（RSS 级别可 override）
 	DefaultFilterMode FilterMode `json:"default_filter_mode" gorm:"size:16;default:'auto_free'"`
 
-	// 做种竞争度监控（Peer Ratio Monitor）
-	PeerRatioEnabled     bool    `json:"peer_ratio_enabled" gorm:"default:false"`     // 是否启用做种竞争度监控
-	PeerRatioMaxSL       float64 `json:"peer_ratio_max_sl" gorm:"default:30.0"`       // Seeder/Leecher 比值上限
-	PeerRatioIntervalMin int     `json:"peer_ratio_interval_min" gorm:"default:10"`   // 检查间隔（分钟）
-	PeerRatioRemoveData  bool    `json:"peer_ratio_remove_data" gorm:"default:false"` // 超标时删除种子及数据（否则仅暂停）
+	// 做种竞争度：自动删种的一条删除条件（v16 以前是单独的监控），跟着自动删种的检查间隔。
+	// PeerRatioRemoveData 为真时超标的种子删除（连不连数据跟着 CleanupRemoveData），否则只暂停。
+	// PeerRatioIntervalMin 是原来竞争度监控的检查间隔：新版不再读写，只在 v16 迁移时换算成自动删种的间隔
+	PeerRatioEnabled     bool    `json:"peer_ratio_enabled" gorm:"default:false"`
+	PeerRatioMaxSL       float64 `json:"peer_ratio_max_sl" gorm:"default:30.0"` // Seeder/Leecher 比值上限
+	PeerRatioIntervalMin int     `json:"peer_ratio_interval_min" gorm:"default:10"`
+	PeerRatioRemoveData  bool    `json:"peer_ratio_remove_data" gorm:"default:false"`
+
+	// 每日签到时间窗（HH:MM，进程时区）：各站每天在窗口内随机取一个时刻签到。
+	// 只经 ConfigStore.SaveAttendanceWindow 写；SaveGlobalSettings 不改这两列。
+	AttendanceWindowStart string `json:"attendance_window_start" gorm:"size:5;default:'08:00'"`
+	AttendanceWindowEnd   string `json:"attendance_window_end" gorm:"size:5;default:'10:00'"`
+	// AttendanceAIEnabled 让 AI 过签到的验证码与答题（HDSky、OpenCD 识别验证码，CHDBits、52PT 答题），默认关闭。
+	// AttendanceVisionModel 是识别验证码用的模型（要能看图，用 AI 助手的服务商与 Key），空时用 AI 助手的模型。
+	// 只经 ConfigStore.SaveAttendanceAI 写；SaveGlobalSettings 不改这两列。
+	AttendanceAIEnabled   bool   `json:"attendance_ai_enabled" gorm:"default:false"`
+	AttendanceVisionModel string `json:"attendance_vision_model" gorm:"size:128"`
+	// AttendanceNotifyEnabled 每天所有站点签完后推一条签到结果，默认开（以前一直推给所有启用的通道）；
+	// AttendanceNotifyChannelIDs 是推到哪些通知通道（JSON 数组），空表示所有启用的通道。
+	// 只经 ConfigStore.SaveAttendanceNotify 写；SaveGlobalSettings 不改这两列。
+	AttendanceNotifyEnabled    bool   `json:"attendance_notify_enabled" gorm:"default:true"`
+	AttendanceNotifyChannelIDs string `json:"attendance_notify_channel_ids" gorm:"size:512;default:'[]'"`
+
+	// 每日战报：每天在设定时刻（HH:MM，进程时区）加上本安装固定的偏移后，把当天的数据增量发到选定的通道。
+	// 只经 ConfigStore.SaveDailyReportSettings 写；SaveGlobalSettings 不改这几列。
+	DailyReportEnabled    bool   `json:"daily_report_enabled" gorm:"default:false"`
+	DailyReportTime       string `json:"daily_report_time" gorm:"size:5;default:'22:00'"`
+	DailyReportChannelIDs string `json:"daily_report_channel_ids" gorm:"size:512;default:'[]'"`
+	// DailyReportScope 是统计范围：previous_day（前一天整天，默认，已有的安装加列时也是它）或 today（当天截至发送时刻）。
+	DailyReportScope string `json:"daily_report_scope" gorm:"size:16;default:'previous_day'"`
+	// DailyReportOffsetSeconds 是本安装固定的 1–600 秒偏移，首次用到时随机分配；0 表示还没分配。
+	// 各安装错开发送时刻，不在同一分钟一起打通知接口。
+	DailyReportOffsetSeconds int `json:"-" gorm:"default:0"`
+
+	// 下载器助手的失效种子定时扫描：只通知、不删种。只经 ConfigStore.SaveDeadTorrentScanSettings 写。
+	// 间隔为 0 时按 24 小时。列的默认值都是零值（GORM 新建时会把零值换成 default）。
+	DeadTorrentScanEnabled    bool   `json:"dead_torrent_scan_enabled" gorm:"default:false"`
+	DeadTorrentScanIntervalH  int    `json:"dead_torrent_scan_interval_h" gorm:"default:0"`
+	DeadTorrentScanChannelIDs string `json:"dead_torrent_scan_channel_ids" gorm:"size:512;default:''"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -176,32 +214,39 @@ type QbitSettings struct {
 // 单行表（约定 ID=1）。Token 仅以 AES-GCM 密文形式落库，
 // 字段名 `TokenEncrypted` 与 SiteSetting.CookieEncrypted 保持一致。
 type CloakSettings struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Endpoint       string    `gorm:"size:512" json:"endpoint"`
-	TokenEncrypted string    `gorm:"size:1024" json:"-"` // 永远不出现在 JSON
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             uint   `gorm:"primaryKey" json:"id"`
+	Endpoint       string `gorm:"size:512" json:"endpoint"`
+	TokenEncrypted string `gorm:"size:1024" json:"-"` // 永远不出现在 JSON
+	// ProfileID 是登录探测后备使用的 CloakBrowser profile；与 Endpoint、Token 三项齐全才启用后备。
+	ProfileID string    `gorm:"size:128" json:"profile_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // SiteSetting 站点设置（统一表，合并原 DynamicSiteSetting）
 type SiteSetting struct {
-	ID                uint      `gorm:"primaryKey" json:"id"`
-	Name              string    `gorm:"uniqueIndex;size:64;not null" json:"name"`
-	DisplayName       string    `gorm:"size:128" json:"display_name"`
-	BaseURL           string    `gorm:"size:512" json:"base_url"`
-	Enabled           bool      `json:"enabled"`
-	AuthMethod        string    `gorm:"size:16;not null" json:"auth_method"`
-	Cookie            string    `gorm:"size:2048" json:"cookie,omitempty"`
-	CookieEncrypted   string    `gorm:"type:text" json:"cookie_encrypted,omitempty"`
-	APIKey            string    `gorm:"size:512" json:"api_key,omitempty"`
-	APIUrl            string    `gorm:"size:512" json:"api_url,omitempty"`
-	APIUrls           string    `gorm:"size:2048" json:"api_urls,omitempty"`
-	Passkey           string    `gorm:"size:512" json:"passkey,omitempty"`
-	DownloaderID      *uint     `gorm:"index" json:"downloader_id,omitempty"`
-	ParserConfig      string    `gorm:"type:text" json:"parser_config,omitempty"`
-	UploadLimitKBs    int       `gorm:"default:0" json:"upload_limit_kbs"`
-	DownloadLimitKBs  int       `gorm:"default:0" json:"download_limit_kbs"`
-	SeedingCapacityGB float64   `gorm:"default:0" json:"seeding_capacity_gb"` // 单站点刷流容量上限(GB)，0=不限制 (#405)
+	ID                uint    `gorm:"primaryKey" json:"id"`
+	Name              string  `gorm:"uniqueIndex;size:64;not null" json:"name"`
+	DisplayName       string  `gorm:"size:128" json:"display_name"`
+	BaseURL           string  `gorm:"size:512" json:"base_url"`
+	Enabled           bool    `json:"enabled"`
+	AuthMethod        string  `gorm:"size:16;not null" json:"auth_method"`
+	Cookie            string  `gorm:"size:2048" json:"cookie,omitempty"`
+	CookieEncrypted   string  `gorm:"type:text" json:"cookie_encrypted,omitempty"`
+	APIKey            string  `gorm:"size:512" json:"api_key,omitempty"`
+	APIUrl            string  `gorm:"size:512" json:"api_url,omitempty"`
+	APIUrls           string  `gorm:"size:2048" json:"api_urls,omitempty"`
+	Passkey           string  `gorm:"size:512" json:"passkey,omitempty"`
+	DownloaderID      *uint   `gorm:"index" json:"downloader_id,omitempty"`
+	ParserConfig      string  `gorm:"type:text" json:"parser_config,omitempty"`
+	UploadLimitKBs    int     `gorm:"default:0" json:"upload_limit_kbs"`
+	DownloadLimitKBs  int     `gorm:"default:0" json:"download_limit_kbs"`
+	SeedingCapacityGB float64 `gorm:"default:0" json:"seeding_capacity_gb"` // 单站点刷流容量上限(GB)，0=不限制 (#405)
+	// HRSeedTimeH 是用户填的 H&R 做种要求（小时）：站点定义里没有 H&R 做种时长时用它（#727），0=未填
+	HRSeedTimeH int `gorm:"default:0" json:"hr_seed_time_h"`
+	// HRUploadRatio 是用户填的「H&R 上传量达标」（#542）：种子下完以后，上传量达到体积的这么多倍也算 H&R 达标；0=不用
+	HRUploadRatio     float64   `gorm:"default:0" json:"hr_upload_ratio"`
+	AttendanceEnabled bool      `gorm:"default:false" json:"attendance_enabled"` // 每日自动签到，默认关闭；只经 ConfigStore.SetSiteAttendanceEnabled 写
 	IsBuiltin         bool      `json:"is_builtin"`
 	TemplateID        *uint     `gorm:"index" json:"template_id,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
@@ -223,6 +268,7 @@ type RSSSubscription struct {
 	DownloaderID    *uint      `gorm:"index" json:"downloader_id"`    // 指定下载器，nil 表示使用默认下载器
 	IsExample       bool       `json:"is_example"`                    // 是否为示例配置，示例配置不会被执行
 	PauseOnFreeEnd  bool       `gorm:"default:false" json:"pause_on_free_end"`
+	FreeEndDelete   bool       `gorm:"default:false" json:"free_end_delete"`  // 免费结束时删除而不是暂停：只在 PauseOnFreeEnd 为真时有意义，推送时写进种子记录
 	FilterMode      FilterMode `gorm:"size:16;default:''" json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
 
 	NotifyMode              string `gorm:"column:notify_mode;default:''" json:"notify_mode"`
@@ -248,7 +294,8 @@ type RSSConfig struct {
 	FilterRuleIDs   []uint     `json:"filter_rule_ids"` // 关联的过滤规则 ID 列表
 	IsExample       bool       `json:"is_example"`      // 是否为示例配置，示例配置不会被执行
 	PauseOnFreeEnd  bool       `json:"pause_on_free_end"`
-	FilterMode      FilterMode `json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
+	FreeEndDelete   bool       `json:"free_end_delete"` // 免费结束时删除而不是暂停，只在 PauseOnFreeEnd 为真时有意义
+	FilterMode      FilterMode `json:"filter_mode"`     // 空字符串表示使用全局 DefaultFilterMode
 
 	NotifyMode              string `json:"notify_mode"`
 	NotifyConfIDs           string `json:"notify_conf_ids"`
@@ -337,6 +384,8 @@ type SiteConfig struct {
 	UploadLimitKBs    int         `json:"upload_limit_kbs"`
 	DownloadLimitKBs  int         `json:"download_limit_kbs"`
 	SeedingCapacityGB float64     `json:"seeding_capacity_gb"`
+	HRSeedTimeH       int         `json:"hr_seed_time_h"`
+	HRUploadRatio     float64     `json:"hr_upload_ratio"`
 	RSS               []RSSConfig `json:"rss"`
 }
 type Config struct {

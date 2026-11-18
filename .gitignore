@@ -11,7 +11,7 @@ examples/docs
 examples/*.ts
 jsons
 node_modules
-pt-tools
+/pt-tools
 pt-tools-helper.zip
 vendor
 
@@ -21,3 +21,9 @@ dist
 Dockerfile-*
 tmp
 __pycache__/
+
+# relay 的 Cloudflare 版：wrangler 的本地状态
+relay/cloudflare/.wrangler/
+
+# Vue editors are rebuilt for every mobile test/build/release.
+/apps/mobile/assets/mobile/

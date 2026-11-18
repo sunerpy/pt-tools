@@ -215,9 +215,10 @@ func TestDiskProtect_FailClosedOnFreeSpaceError(t *testing.T) {
 		"GetClientFreeSpace 失败时应 fail-closed（拒绝），而非 fail-open（旧实现）")
 }
 
-// TestDiskProtect_PendingErrorTreatedAsZero 验证 GetIncompletePendingBytes 出错时
-// 退化为 0（保守但仍生效）—— 不应整体 fail-closed，因为 pending 查询是辅助信号。
-func TestDiskProtect_PendingErrorTreatedAsZero(t *testing.T) {
+// TestDiskProtect_FailClosedOnPendingError 验证 GetIncompletePendingBytes 出错时同样 fail-closed：
+// 读不到下载中任务的待占用量，可用空间会被高估这部分体积，一批推送就可能越过保底线。
+// （此前退化为 0 继续推送；与「磁盘保护启用时空间读取失败即拒绝」的约定不一致。）
+func TestDiskProtect_FailClosedOnPendingError(t *testing.T) {
 	setUpDiskProtectTest(t)
 	dir := t.TempDir()
 	path, hash := makeTorrentFile(t, dir)
@@ -231,13 +232,15 @@ func TestDiskProtect_PendingErrorTreatedAsZero(t *testing.T) {
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
 	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(100*gb, nil)
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), errors.New("api fail"))
-	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
-		Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
+	// AddTorrentFileEx 不应被调用
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
 	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
 		path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
-	require.NoError(t, err, "GetIncompletePendingBytes 失败应退化为 0，不阻止推送")
+	require.ErrorIs(t, err, downloader.ErrInsufficientSpace)
+	_, statErr := os.Stat(path)
+	require.NoError(t, statErr, "种子文件留在暂存目录，下一轮再试")
+	assert.Zero(t, GetDiskBudget().Reserved(), "拒绝时不占预留")
 }
 
 // TestDiskProtect_ConcurrentPushesSerializeAndReject 是 Issue #299 race 的端到端回归。
@@ -305,7 +308,8 @@ func makeUniqueTorrentFile(t *testing.T, dir, nameSuffix string) (string, string
 	var buf bytes.Buffer
 	torrent := map[string]any{"info": map[string]any{"name": "abc-" + nameSuffix}}
 	require.NoError(t, bencode.NewEncoder(&buf).Encode(torrent))
-	path := filepath.Join(dir, "x-"+nameSuffix+".torrent")
+	// 与生产命名一致：<站点>-<种子编号>.torrent，nameSuffix 就是对应记录的种子编号（暂存推送按文件名取记录）
+	path := filepath.Join(dir, "springsunday-"+nameSuffix+".torrent")
 	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
 	h, err := qbit.ComputeTorrentHashWithPath(path)
 	require.NoError(t, err)
@@ -343,7 +347,7 @@ func TestDiskProtect_RealRSSPath_SuccessKeepsReservation(t *testing.T) {
 	}
 	jobs := make([]job, workers)
 	for i := 0; i < workers; i++ {
-		path, hash := makeUniqueTorrentFile(t, dir, fmt.Sprintf("w%d", i))
+		path, hash := makeUniqueTorrentFile(t, dir, fmt.Sprintf("race-w%d", i))
 		pushed := false
 		future := time.Now().Add(1 * time.Hour)
 		ti := &models.TorrentInfo{

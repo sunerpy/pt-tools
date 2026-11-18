@@ -278,3 +278,20 @@ func TestNexusParseUserPageSkipsEmptyCells(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, ll.IsZero())
 }
+
+// M1d：后备打开的是站点的 userdetails 页。仓库里的站点定义（hdsky、btschool 等）按「最近动向」取访问时间，
+// 值的后面带着相对时间，例如「2026-10-02 10:00:00 (3天前)」，与主通道的 split " (" 规则一致。
+func TestNexusParseUserPageRealUserdetailsLayout(t *testing.T) {
+	html := `<table>
+<tr><td class="rowhead">加入日期</td><td class="rowfollow">2020-01-01 00:00:00 (<span title="2020-01-01 00:00:00">6年前</span>)</td></tr>
+<tr><td class="rowhead">最近动向</td><td class="rowfollow">2026-10-02 10:00:00 (<span title="2026-10-02 10:00:00">3天前</span>)</td></tr>
+</table>`
+	_, la, err := parseNexusPHPUserPage(html)
+	require.NoError(t, err)
+	assert.True(t, la.Equal(time.Date(2026, 10, 2, 2, 0, 0, 0, time.UTC)), "got %v", la)
+
+	traditional := `<table><tr><td class="rowhead">最近動向</td><td class="rowfollow">2026-10-02 10:00:00 (3天前)</td></tr></table>`
+	_, la, err = parseNexusPHPUserPage(traditional)
+	require.NoError(t, err)
+	assert.True(t, la.Equal(time.Date(2026, 10, 2, 2, 0, 0, 0, time.UTC)), "got %v", la)
+}

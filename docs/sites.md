@@ -1,8 +1,8 @@
 # 支持站点
 
-当前已适配 **66** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **72** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（62）
+### NexusPHP 系列（68）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                                         |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------------------- |
@@ -19,7 +19,7 @@
 | **HDFans**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
 | **LemonHD**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **BTSCHOOL**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
-| **BYRPT**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
+| **BYRPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
 | **Audiences**         | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **CarPT**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **52PT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
@@ -32,7 +32,7 @@
 | **TMPT**              | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **UBits**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                                                   |
 | **CrabPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 蟹黄堡（crabpt.vip）                                                         |
-| **GameGamePT**        | Cookie   | RSS、搜索、用户信息           | ✅       | GGPT（gamegamept.com）                                                       |
+| **GameGamePT**        | Cookie   | RSS、搜索、用户信息           | ✅       | GGPT（gamegamept.com，整站 H&R，做种要求在站点设置里填，issue #727）         |
 | **Dubhe**             | Cookie   | RSS、搜索、用户信息           | ✅       | 天枢（dubhe.site）                                                           |
 | **PTCafe**            | Cookie   | RSS、搜索、用户信息           | ✅       | 咖啡（ptcafe.club）                                                          |
 | **CyanBug**           | Cookie   | RSS、搜索、用户信息           | ✅       | 大青虫（cyanbug.net）                                                        |
@@ -41,7 +41,7 @@
 | **HDVideo**           | Cookie   | RSS、搜索、用户信息           | ✅       | HD视频（hdvideo.top）                                                        |
 | **GTKPW**             | Cookie   | RSS、搜索、用户信息           | ✅       | 多镜像（pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com）             |
 | **NicePT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 好趣（www.nicept.net，繁体）                                                 |
-| **OurBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ourbits.club，issue #329）                                           |
+| **OurBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ourbits.club，issue #329），促销种子显示方式选图标或文字             |
 | **Mua**               | Cookie   | RSS、搜索、用户信息           | ✅       | 二次元站点（mua.xloli.cc，userdetails 走 uuid，issue #339）                  |
 | **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
 | **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
@@ -50,8 +50,8 @@
 | **PandaPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（pandapt.net，info_block 取上传/下载/魔力，issue #416）               |
 | **PTFans**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptfans.cc，含 H&R，info_block 取数据，issue #417）                   |
 | **KamePT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（kamept.com，info_block 含做种积分，issue #418）                      |
-| **PTCHDBits**         | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptchdbits.co，详情页 img.pro_free 促销，issue 请求）                 |
-| **PTerClub**          | Cookie   | RSS、搜索、用户信息           | ✅       | 猫站（pterclub.net，魔力值=猫粮，info_block 取数据）                         |
+| **PTCHDBits**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配（ptchdbits.co；文字与图标促销都认；H&R 只算 H3/H5 种子，按 120 小时） |
+| **PTerClub**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 猫站（pterclub.net，魔力值=猫粮，无 H&R，自动签到不算登录）                  |
 | **PTHome**            | Cookie   | RSS、搜索、用户信息           | ✅       | 铂金家（pthome.net，info_block 取上传/下载/魔力/做种积分）                   |
 | **TangPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 糖果（www.tangpt.top，CHD 模板，issue #456）                                 |
 | **T-Baozi**           | Cookie   | RSS、搜索、用户信息           | ✅       | 包子（p.t-baozi.cc，info_block 取数据，issue #457）                          |
@@ -68,15 +68,27 @@
 | **U2分享園@動漫花園** | Cookie   | RSS、搜索、用户信息           | ✅       | U2 / 動漫花園（u2.dmhy.org，详情页无隐藏标题域，标题走文本解析，issue #497） |
 | **PTzone**            | Cookie   | RSS、搜索、用户信息           | ✅       | ptzone.xyz（繁体界面，tg群内提交）                                           |
 | **PigGo**             | Cookie   | RSS、搜索、用户信息           | ✅       | 猪猪（piggo.me，副标题为裸文本节点，等级/H&R 待补采验证，issue #532）        |
+| **TJUPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 北洋园PT（不记下载量，全站 H&R；未报备的程序访问可能封号，禁止自动签到）     |
+| **库非**              | Cookie   | RSS、搜索、用户信息           | ✅       | kufei.org（种子页面没有 H&R 标记，pt-tools 不按 H&R 处理，issue #870）       |
+| **杏坛**              | Cookie   | RSS、搜索、用户信息           | ✅       | xingtan.one（书籍、课程资源，魔力值叫「杏仁值」，issue #880）                |
+| **HDKylin**           | Cookie   | RSS、搜索、用户信息           | ✅       | 麒麟（www.hdkyl.in，issue #881）                                             |
+| **OshenPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | www.oshen.win（issue #882）                                                  |
+| **Kelu**              | Cookie   | RSS、搜索、用户信息           | ✅       | our.kelu.one（成人内容；H&R 情况同库非，issue #861）                         |
+
+> [!WARNING]
+> 北洋园（TJUPT）规定：没在白名单里的程序、脚本用 Cookie 访问站点，会被警告或永久封号；站点自带的 RSS 不用报备。启用这个站点前，先在北洋园论坛的「机器人爬虫/程序脚本报备专帖」回帖报备 pt-tools（用途、用户 ID、IP 段、User-Agent、访问的页面与频率），管理组通过后再在 pt-tools 里启用。
 
 ### 其他架构（4）
 
-| 站点          | 站点类型                | 认证方式         | 支持功能                      | 适配情况 | 备注                               |
-| ------------- | ----------------------- | ---------------- | ----------------------------- | -------- | ---------------------------------- |
-| **M-Team**    | mTorrent                | API Key          | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                           |
-| **HDDolby**   | HDDolby (NexusPHP 衍生) | Cookie + API Key | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，两步验证有问题请提交 issue |
-| **Rousi Pro** | Rousi                   | Passkey          | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue         |
-| **MooKo**     | Gazelle                 | Cookie           | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue         |
+| 站点          | 站点类型                | 认证方式                        | 支持功能                            | 适配情况 | 备注                                                |
+| ------------- | ----------------------- | ------------------------------- | ----------------------------------- | -------- | --------------------------------------------------- |
+| **M-Team**    | mTorrent                | API Key                         | RSS、搜索、用户信息、等级要求       | ✅       | 完全适配                                            |
+| **UHDDolby**  | HDDolby (NexusPHP 衍生) | API Key（RSS key），Cookie 可选 | RSS、搜索、用户信息、签到、等级要求 | ✅       | 高清杜比；Cookie 用于时魔、签到和辅种等按编号的下载 |
+| **Rousi Pro** | Rousi                   | Passkey                         | RSS、搜索、用户信息                 | ✅       | 已适配，有问题请提交 issue                          |
+| **MooKo**     | Gazelle                 | Cookie                          | RSS、搜索、用户信息、等级要求       | ✅       | 已适配，有问题请提交 issue                          |
+
+> [!NOTE]
+> 高清杜比换了域名，现在是 `www.uhddolby.com`，站点名改成 UHDDolby，API Key 填 RSS 页的 RSSKEY，见[获取 UHDDolby 的 RSS key](guide/get-cookie-apikey.md#uhddolby-rss-key-获取方法)。下载器里旧种子的 tracker 还是 `t.hddolby.com`，在[下载器助手](guide/downloader-assistant.md#替换-tracker)里把 `https://t.hddolby.com` 替换成 `https://www.uhddolby.com`，先预览再执行。站方提醒不要用 Transmission 自带的批量替换，会把 tracker 地址改坏。
 
 > **扩展站点支持**：如需支持其他站点，欢迎提交 [Issue](https://github.com/sunerpy/pt-tools/issues) 或 [Pull Request](https://github.com/sunerpy/pt-tools/pulls)。
 >

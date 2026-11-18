@@ -8,8 +8,11 @@ This page covers installing pt-tools with Docker, as a Linux binary or as a Wind
 | `docker run`   | The same                    | A single command, handy for trying it out                |
 | Linux binary   | Linux amd64 and arm64       | The install script checks SHA-256; can run under systemd |
 | Windows binary | Windows amd64 and arm64     | A PowerShell install script, or unpack it yourself       |
+| NAS            | 1Panel, Unraid and fnOS     | Install from the app definitions in `deploy/`            |
 
 There is no macOS binary; use Docker on macOS.
+
+This site documents the 1.0 preview. The commands below install the 0.48.0 stable release by default, which does not have the features marked "1.0 preview"; to use them, install a preview release as described in [Installing a preview release](#installing-a-preview-release).
 
 ## Docker Compose (recommended)
 
@@ -24,6 +27,8 @@ services:
       PT_HOST: "0.0.0.0"
       PT_PORT: "8080"
       TZ: "Asia/Shanghai"
+      PUID: "1000"
+      PGID: "1000"
     ports:
       - "8080:8080"
     volumes:
@@ -47,7 +52,7 @@ docker compose up -d
 
 The `logging` section caps the container's standard output log. Without it, Docker's log file keeps growing for as long as the container runs, which matters on a NAS in particular; see [Configuration](../configuration.md).
 
-The image is published on Docker Hub (`sunerpy/pt-tools`) and on GHCR (`ghcr.io/sunerpy/pt-tools`, with a build attestation); both are the same image.
+The image is published on Docker Hub (`sunerpy/pt-tools`) and on GHCR (`ghcr.io/sunerpy/pt-tools`, with a build attestation); both are the same image. If pulling from Docker Hub is slow where you are, set `registry-mirrors` in Docker's `daemon.json`; the image name stays the same.
 
 ## docker run
 
@@ -72,6 +77,24 @@ docker run -d \
 | `PT_ADMIN_PASS`   | Initial admin password                                         | `adminadmin`    |
 | `PT_ADMIN_RESET`  | Set to `1` to reset the admin password to the two values above | Not set         |
 | `HTTP_PROXY` etc. | Proxies; see [Configuration](../configuration.md)              | Not set         |
+
+## NAS
+
+The `deploy/` folder in the repository has app definitions for 1Panel, Unraid and fnOS. The steps below install from those files directly, without an app store. All three map the data folder to `/app/.pt-tools` in the container; keep that folder across upgrades and reinstalls, and back up the `secret.key` inside it.
+
+The container runs as the user given by `PUID` and `PGID`, and hands the files under `/app` to that user on startup. Group ID 100, common on NAS systems, already exists in the image (the `users` group) and is used as is. This needs image 1.0.0-rc.4 or later: earlier images fail to start when `PGID` is a group that already exists in the image (the log says `addgroup: gid in use`).
+
+### 1Panel
+
+Copy the whole `deploy/1panel/pt-tools` folder to `/opt/1panel/resource/apps/local/pt-tools` on the server, refresh the local app list in the 1Panel app store, then install pt-tools and fill in the web port and time zone. Data lives in `data/` under the app folder.
+
+### Unraid
+
+Download `deploy/unraid/pt-tools.xml` to `/boot/config/plugins/dockerMan/templates-user/my-pt-tools.xml` on the flash drive, click **Add Container** on the Docker page and pick pt-tools from the Template list. The template defaults to `PUID=99` and `PGID=100` (Unraid's nobody and users), with data in `/mnt/user/appdata/pt-tools`.
+
+### fnOS
+
+Create a Compose project in the fnOS Docker app using [the Compose file above](#docker-compose-recommended). Replace `./data` with a folder in a shared folder (for example `/vol1/1000/docker/pt-tools`) and set `PUID` and `PGID` to the owner of that folder (check with `ls -n`). `deploy/fnos` is the packaging for the third-party app center fnos-apps.
 
 ## Linux binary
 
@@ -151,6 +174,17 @@ To install a particular version, set `$env:TOOL_VERSION = "v0.48.0"` first. You 
 ```
 
 The data is kept in the `.pt-tools` folder in your user folder.
+
+## Installing a preview release
+
+The preview releases are the versions marked Pre-release on [GitHub Releases](https://github.com/sunerpy/pt-tools/releases), numbered like `v1.0.0-rc.N`. The `latest` image tag and the install scripts still install the stable release by default, so name the preview version explicitly. The examples below use `v1.0.0-rc.36`; replace it with the latest preview on the Releases page.
+
+- Docker: use the image `sunerpy/pt-tools:v1.0.0-rc.36` (or `ghcr.io/sunerpy/pt-tools:v1.0.0-rc.36`) and recreate the container. Previews do not update the `latest` tag, so change the version yourself when a new preview comes out.
+- Linux: `curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.sh | TOOL_VERSION=v1.0.0-rc.36 sh`.
+- Windows: set `$env:TOOL_VERSION = "v1.0.0-rc.36"` first, then run the install command above.
+- Mobile app: in current previews its packages are in the same Release as the server; see [Mobile app](./mobile-app.md#install).
+
+The preview releases are for testing and are not recommended for production yet. Before upgrading from the stable release, save the data folder as described in [Backing up](./upgrade.md#backing-up): a preview migrates the database schema when it starts, so to go back to 0.48.0, restore the data folder you backed up before upgrading.
 
 ## Signing in for the first time
 

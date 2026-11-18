@@ -29,7 +29,6 @@ import (
 	"github.com/sunerpy/pt-tools/internal/filter"
 	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
-	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
@@ -44,7 +43,7 @@ func TestProcessTorrentsWithDownloaderByRSS_DisabledDownloader(t *testing.T) {
 	require.NoError(t, db.DB.Create(&ds).Error)
 
 	err := ProcessTorrentsWithDownloaderByRSS(context.Background(),
-		models.RSSConfig{DownloaderID: &dlID}, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"))
+		models.RSSConfig{DownloaderID: &dlID}, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "未启用")
 }
@@ -79,7 +78,7 @@ func TestProcessTorrentsWithDownloaderByRSS_SuccessAndSweep(t *testing.T) {
 	require.NoError(t, db.UpsertTorrent(ti))
 
 	require.NoError(t, ProcessTorrentsWithDownloaderByRSS(context.Background(),
-		models.RSSConfig{}, dir, "cat", "tag", models.SiteGroup("springsunday")))
+		models.RSSConfig{}, dir, "cat", "tag", models.SiteGroup("springsunday"), nil))
 
 	got, gerr := db.GetTorrentBySiteAndID("springsunday", "tsucc")
 	require.NoError(t, gerr)
@@ -180,7 +179,7 @@ func TestAttemptDownloadWithContext_Success(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	dir := t.TempDir()
-	hash, err := attemptDownloadWithContext(context.Background(), srv.URL, "My Title", dir)
+	hash, err := attemptDownloadWithContext(context.Background(), "", srv.URL, "My Title", dir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, hash)
 	_, statErr := os.Stat(filepath.Join(dir, "My Title.torrent"))
@@ -192,9 +191,45 @@ func TestAttemptDownloadWithContext_HTTPError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	_, err := attemptDownloadWithContext(context.Background(), srv.URL, "t", t.TempDir())
+	_, err := attemptDownloadWithContext(context.Background(), "", srv.URL, "t", t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 状态码错误")
+}
+
+// closingServer 接受连接后直接断开，客户端拿到的是带完整请求地址的传输层错误。
+func closingServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		conn, _, err := hj.Hijack()
+		require.NoError(t, err)
+		_ = conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// 种子下载地址常带 passkey，连接失败时错误文本（会写进日志）不能带出来。
+func TestAttemptDownloadWithContext_TransportErrorRedactsPasskey(t *testing.T) {
+	srv := closingServer(t)
+	_, err := attemptDownloadWithContext(context.Background(), "", srv.URL+"/download.php?id=1&passkey=TOPSECRET", "t", t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "下载种子失败")
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+}
+
+// RSS 地址常带 passkey，拉取失败时错误文本（会写进日志）不能带出来。
+func TestFetchRSSFeed_TransportErrorRedactsPasskey(t *testing.T) {
+	srv := closingServer(t)
+	_, err := fetchRSSFeedWithContext(context.Background(), srv.URL+"/torrentrss.php?passkey=TOPSECRET&rows=10")
+	require.Error(t, err)
+	// 连上以后被断开：说明里有主机名，没有查询串
+	assert.Contains(t, err.Error(), "127.0.0.1")
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+	var fe *RSSFetchError
+	require.ErrorAs(t, err, &fe)
+	assert.NotContains(t, fe.Err.Error(), "TOPSECRET", "原错误链里的地址也要脱敏")
 }
 
 func TestAttemptDownloadWithContext_InvalidTorrent(t *testing.T) {
@@ -203,7 +238,7 @@ func TestAttemptDownloadWithContext_InvalidTorrent(t *testing.T) {
 		_, _ = w.Write([]byte("<html>not a torrent</html>"))
 	}))
 	t.Cleanup(srv.Close)
-	_, err := attemptDownloadWithContext(context.Background(), srv.URL, "t", t.TempDir())
+	_, err := attemptDownloadWithContext(context.Background(), "", srv.URL, "t", t.TempDir())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "不是有效种子文件")
 }
@@ -213,7 +248,7 @@ func TestDownloadTorrent_RetryThenFail(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	_, err := downloadTorrent(srv.URL, "t", t.TempDir(), 2, time.Millisecond)
+	_, err := downloadTorrent("", srv.URL, "t", t.TempDir(), 2, time.Millisecond)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "下载失败")
 }
@@ -225,7 +260,7 @@ func TestDownloadTorrent_Success(t *testing.T) {
 		_, _ = w.Write(buf.Bytes())
 	}))
 	t.Cleanup(srv.Close)
-	hash, err := downloadTorrent(srv.URL, "ok", t.TempDir(), 2, time.Millisecond)
+	hash, err := downloadTorrent("", srv.URL, "ok", t.TempDir(), 2, time.Millisecond)
 	require.NoError(t, err)
 	assert.NotEmpty(t, hash)
 }
@@ -249,7 +284,7 @@ func TestAttemptDownload_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK); _, _ = w.Write(data) }))
 	defer srv.Close()
 	dir := t.TempDir()
-	hash, err := attemptDownload(srv.URL, "a/b:c*?", dir)
+	hash, err := attemptDownload("", srv.URL, "a/b:c*?", dir)
 	require.NoError(t, err)
 	require.NotEmpty(t, hash)
 	p := filepath.Join(dir, "abc.torrent")
@@ -273,7 +308,7 @@ func TestDownloadTorrent_RetryThenSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
-	hash, err := downloadTorrent(srv.URL, "title", dir, 2, time.Millisecond*10)
+	hash, err := downloadTorrent("", srv.URL, "title", dir, 2, time.Millisecond*10)
 	require.NoError(t, err)
 	require.NotEmpty(t, hash)
 }
@@ -286,7 +321,7 @@ func TestSanitizeTitle(t *testing.T) {
 func TestAttemptDownload_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer srv.Close()
-	if _, err := attemptDownload(srv.URL, "bad", t.TempDir()); err == nil {
+	if _, err := attemptDownload("", srv.URL, "bad", t.TempDir()); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -294,7 +329,7 @@ func TestAttemptDownload_HTTPError(t *testing.T) {
 func TestDownloadTorrent_FailAllRetries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer srv.Close()
-	if _, err := downloadTorrent(srv.URL, "bad", t.TempDir(), 2, 0); err == nil {
+	if _, err := downloadTorrent("", srv.URL, "bad", t.TempDir(), 2, 0); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -321,7 +356,7 @@ func (s *siteFail) Context() context.Context { return context.Background() }
 
 func TestFetchRSS_NoEnclosuresAndDetailFail(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -357,7 +392,7 @@ func (s *rssSiteStub) Context() context.Context { return context.Background() }
 
 func TestFetchAndDownloadFreeRSS_Basic(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -401,7 +436,7 @@ func (s *linkURLSiteStub) Context() context.Context { return context.Background(
 // item 不再被静默丢弃，torrentURL 回退使用 item.Link。
 func TestFetchAndDownloadFreeRSS_FallbackToLink(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -458,7 +493,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { re
 
 func TestProcessTorrentsWithDBUpdate_ContinueOnErrors(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -504,7 +539,7 @@ func TestProcessTorrentsWithDBUpdate_ContinueOnErrors(t *testing.T) {
 
 func TestProcessTorrentsWithDBUpdate_Basic(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -520,7 +555,7 @@ func TestProcessTorrentsWithDBUpdate_Basic(t *testing.T) {
 
 func TestProcessTorrentsWithDBUpdate_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -531,7 +566,7 @@ func TestProcessTorrentsWithDBUpdate_EmptyDir(t *testing.T) {
 
 func TestDownloadWorker_DisabledSite(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -550,7 +585,7 @@ func TestDownloadWorker_DisabledSite(t *testing.T) {
 
 func TestDownloadWorker_ChannelClosedEarly(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -566,7 +601,7 @@ func TestDownloadWorker_ChannelClosedEarly(t *testing.T) {
 
 func TestDownloadWorker_Table(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -674,7 +709,7 @@ func TestFetchRSS_Errors(t *testing.T) {
 		t.Fatalf("expected error when db nil")
 	}
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -696,7 +731,7 @@ func TestFetchRSS_Errors(t *testing.T) {
 }
 
 func TestFetchRSS_WithGomock(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -887,7 +922,7 @@ func TestAttemptDownloadWithContext(t *testing.T) {
 
 	dir := t.TempDir()
 	ctx := context.Background()
-	hash, err := attemptDownloadWithContext(ctx, srv.URL, "test-title", dir)
+	hash, err := attemptDownloadWithContext(ctx, "", srv.URL, "test-title", dir)
 	require.NoError(t, err)
 	require.NotEmpty(t, hash)
 }
@@ -904,7 +939,7 @@ func TestAttemptDownloadWithContext_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 立即取消
 
-	_, err := attemptDownloadWithContext(ctx, srv.URL, "test-title", dir)
+	_, err := attemptDownloadWithContext(ctx, "", srv.URL, "test-title", dir)
 	require.Error(t, err)
 }
 
@@ -923,7 +958,7 @@ func TestFetchRSSFeed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	result, err := fetchRSSFeed(srv.URL)
+	result, err := fetchRSSFeed("", srv.URL)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "Test Feed", result.Title)
@@ -942,14 +977,14 @@ func TestFetchRSSFeed_BrowserUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchRSSFeed(srv.URL)
+	_, err := fetchRSSFeed("", srv.URL)
 	require.NoError(t, err)
 	require.Contains(t, gotUA, "Mozilla/5.0", "RSS fetcher must send a browser-like UA")
 }
 
 // TestFetchRSSFeed_InvalidURL 测试无效 URL
 func TestFetchRSSFeed_InvalidURL(t *testing.T) {
-	_, err := fetchRSSFeed("://invalid")
+	_, err := fetchRSSFeed("", "://invalid")
 	require.Error(t, err)
 }
 
@@ -961,7 +996,7 @@ func TestFetchRSSFeed_InvalidContent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchRSSFeed(srv.URL)
+	_, err := fetchRSSFeed("", srv.URL)
 	require.Error(t, err)
 }
 
@@ -1025,6 +1060,9 @@ func TestProcessSingleTorrentWithDownloader_Expired(t *testing.T) {
 	ti := &models.TorrentInfo{
 		SiteName:    string(models.SiteGroup("springsunday")),
 		TorrentHash: &hash,
+		IsFree:      true,
+		FreeLevel:   "free",
+		RequireFree: true, // 免费通道的记录
 		FreeEndTime: &past,
 	}
 	require.NoError(t, db.UpsertTorrent(ti))
@@ -1088,7 +1126,7 @@ func TestProcessTorrentsWithDownloaderByRSS_NoDownloader(t *testing.T) {
 	_ = setupDB(t)
 
 	rssCfg := models.RSSConfig{}
-	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"))
+	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "获取下载器失败")
 }
@@ -1297,7 +1335,7 @@ func TestProcessSingleTorrentWithDownloader_MaxRetryExceeded(t *testing.T) {
 	mockDl := sm.NewMockDownloader(ctrl)
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
-	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	// 超过最大重试次数的直接删除，不再联系下载器
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
 	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
@@ -1392,7 +1430,7 @@ func TestProcessTorrentsWithDownloaderByRSS_EmptyDir(t *testing.T) {
 	rssCfg := models.RSSConfig{}
 
 	// 由于没有实际的 qBittorrent 服务器，会返回连接错误
-	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, emptyDir, "cat", "tag", models.SiteGroup("springsunday"))
+	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, emptyDir, "cat", "tag", models.SiteGroup("springsunday"), nil)
 	// 可能成功（空目录）或返回连接错误
 	_ = err
 }
@@ -1678,16 +1716,15 @@ func TestFilterTorrentFilesBySite(t *testing.T) {
 	require.Equal(t, "/app/.pt-tools/downloads/AGSvpt-222.torrent", filtered[1])
 }
 
-func TestFilterTorrentFilesBySite_FallbackAllWhenNoPrefixMatch(t *testing.T) {
+func TestFilterTorrentFilesBySite_NoFallbackToOtherFiles(t *testing.T) {
+	// 暂存目录按标签共用：没有本站点前缀的文件不归这个站点处理（以前没有匹配时会退回处理全部文件）
 	files := []string{
 		"/app/.pt-tools/downloads/file-a.torrent",
-		"/app/.pt-tools/downloads/file-b.torrent",
+		"/app/.pt-tools/downloads/mteam-333.torrent",
 	}
 
 	filtered := filterTorrentFilesBySite(files, models.SiteGroup("agsvpt"))
-	require.Len(t, filtered, 2)
-	require.Equal(t, files[0], filtered[0])
-	require.Equal(t, files[1], filtered[1])
+	require.Empty(t, filtered)
 }
 
 func TestShouldSkipSiteDownload(t *testing.T) {
@@ -2276,29 +2313,6 @@ func TestBuildSkipReason(t *testing.T) {
 	}
 }
 
-func TestCalcHRSeedTimeForTorrent(t *testing.T) {
-	// nil def -> fallback.
-	assert.Equal(t, 72, calcHRSeedTimeForTorrent(nil, 72, 1<<30))
-
-	// def with no rules -> fallback.
-	defFlat := &v2.SiteDefinition{HREnabled: true, HRSeedTimeHours: 48}
-	assert.Equal(t, 24, calcHRSeedTimeForTorrent(defFlat, 24, 1<<30))
-
-	// def with size-tiered rules -> picks matching tier.
-	defRules := &v2.SiteDefinition{
-		HREnabled:       true,
-		HRSeedTimeHours: 10,
-		HRSeedTimeRules: []v2.HRSeedTimeRule{
-			{MinSizeGB: 0, MaxSizeGB: 50, SeedTimeH: 100},
-			{MinSizeGB: 50, MaxSizeGB: 0, SeedTimeH: 200},
-		},
-	}
-	// 10 GiB -> tier 1 (100h)
-	assert.Equal(t, 100, calcHRSeedTimeForTorrent(defRules, 10, 10*(1<<30)))
-	// 80 GiB -> tier 2 (200h)
-	assert.Equal(t, 200, calcHRSeedTimeForTorrent(defRules, 10, 80*(1<<30)))
-}
-
 func TestExtractTorrentRef(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -2344,7 +2358,7 @@ func (n *noopPT) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSC
 func (n *noopPT) Context() context.Context { return context.Background() }
 
 func TestProcessTorrentsWithDBUpdate_NoFail(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db

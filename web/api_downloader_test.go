@@ -19,9 +19,12 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 // ==== merged from api_downloader_cov2_test.go ====
@@ -600,6 +603,31 @@ func TestReserveDownloaderAddDiskBudget_MoreBranches(t *testing.T) {
 	})
 }
 
+// 手动添加遇到空间不足时，打开了自动删种与「空间低于下限时紧急清理」才发磁盘空间不足（让自动删种提前开始一轮）。
+func TestReserveDownloaderAddDiskBudget_DiskSpaceLowEvent(t *testing.T) {
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.SettingsGlobal{}))
+	gs, err := server.store.GetGlobalSettings()
+	require.NoError(t, err)
+	require.NoError(t, server.store.SaveGlobalSettings(gs))
+	for _, emergency := range []bool{true, false} {
+		require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).Where("1 = 1").Updates(map[string]any{
+			"cleanup_disk_protect": true, "cleanup_min_disk_space_gb": 10, "cleanup_enabled": true, "cleanup_emergency": emergency,
+		}).Error)
+		_, ch, cancel := events.Subscribe(8)
+		_, err := reserveDownloaderAddDiskBudget(context.Background(), &fakeDownloader{freSpace: 1 << 30, name: "qb1"}, minimalTorrentBytes(5<<30), "")
+		require.Error(t, err)
+		got := false
+		for len(ch) > 0 {
+			if ev := <-ch; ev.Type == events.DiskSpaceLow && ev.Source == "downloader-add" {
+				got = true
+			}
+		}
+		cancel()
+		assert.Equal(t, emergency, got, "cleanup_emergency=%v", emergency)
+	}
+}
+
 func TestApiDownloaderTorrentDetail_FilesFallback(t *testing.T) {
 	fake := &fakeDownloader{
 		torrents: sampleTorrents(),
@@ -680,16 +708,19 @@ func TestReserveDownloaderAddDiskBudget(t *testing.T) {
 	fake := &fakeDownloader{freSpace: 100 * 1024 * 1024 * 1024, name: "qb1"}
 	ctx := context.Background()
 
-	t.Run("disk protect off returns 0", func(t *testing.T) {
+	t.Run("disk protect off reserves nothing", func(t *testing.T) {
 		gs, err := server.store.GetGlobalSettings()
 		require.NoError(t, err)
 		require.NoError(t, server.store.SaveGlobalSettings(gs))
 		require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).
 			Where("1 = 1").Update("cleanup_disk_protect", false).Error)
 
-		size, err := reserveDownloaderAddDiskBudget(ctx, fake, minimalTorrentBytes(1024), "")
+		before := ptinternal.GetDiskBudget().Reserved()
+		release, err := reserveDownloaderAddDiskBudget(ctx, fake, minimalTorrentBytes(1024), "")
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), size)
+		assert.Equal(t, before, ptinternal.GetDiskBudget().Reserved())
+		release()
+		assert.Equal(t, before, ptinternal.GetDiskBudget().Reserved())
 	})
 
 	t.Run("disk protect on rejects magnet without bytes", func(t *testing.T) {
@@ -710,10 +741,56 @@ func TestReserveDownloaderAddDiskBudget(t *testing.T) {
 		require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).
 			Where("1 = 1").Updates(map[string]any{"cleanup_disk_protect": true, "cleanup_min_disk_space_gb": 10}).Error)
 
-		size, err := reserveDownloaderAddDiskBudget(ctx, fake, minimalTorrentBytes(1024), "")
+		before := ptinternal.GetDiskBudget().Reserved()
+		release, err := reserveDownloaderAddDiskBudget(ctx, fake, minimalTorrentBytes(1024), "")
 		require.NoError(t, err)
-		assert.Equal(t, int64(1024), size)
+		assert.Equal(t, before+1024, ptinternal.GetDiskBudget().Reserved())
+		release()
+		assert.Equal(t, before, ptinternal.GetDiskBudget().Reserved(), "添加失败时归还")
 	})
+}
+
+// snapshotFakeDownloader 给得出种子列表：待占用与种子 hash 出自同一份快照（snap）。
+type snapshotFakeDownloader struct {
+	*fakeDownloader
+	snap downloader.PendingSnapshot
+}
+
+func (d *snapshotFakeDownloader) GetIncompletePendingBytes(context.Context) (int64, error) {
+	return d.snap.Bytes, nil
+}
+
+func (d *snapshotFakeDownloader) IncompletePendingSnapshot(context.Context) (downloader.PendingSnapshot, error) {
+	return d.snap, nil
+}
+
+// 手动添加也不把已经出现在下载器里的种子算两遍：可用 100 GB、保底 10 GB，先加 40 GB；它出现在下载器里
+// （待占用 40 GB）以后再加 45 GB 照样能加（以前「待占用 40 + 预留 40」被拒），只剩新加的这份预留
+func TestReserveDownloaderAddDiskBudget_DropsVisible(t *testing.T) {
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.SettingsGlobal{}))
+	gs, err := server.store.GetGlobalSettings()
+	require.NoError(t, err)
+	require.NoError(t, server.store.SaveGlobalSettings(gs))
+	require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).
+		Where("1 = 1").Updates(map[string]any{"cleanup_disk_protect": true, "cleanup_min_disk_space_gb": 10}).Error)
+	budget := ptinternal.GetDiskBudget()
+	budget.Reset()
+	t.Cleanup(budget.Reset)
+	ctx := context.Background()
+
+	first := minimalTorrentBytes(40 << 30)
+	firstHash, err := qbit.ComputeTorrentHash(first)
+	require.NoError(t, err)
+	dl := &snapshotFakeDownloader{fakeDownloader: &fakeDownloader{freSpace: 100 << 30, name: "qb1"}}
+	_, err = reserveDownloaderAddDiskBudget(ctx, dl, first, "")
+	require.NoError(t, err)
+	require.Equal(t, int64(40<<30), budget.Reserved())
+
+	dl.snap = downloader.PendingSnapshot{Bytes: 40 << 30, Hashes: map[string]struct{}{firstHash: {}}}
+	_, err = reserveDownloaderAddDiskBudget(ctx, dl, minimalTorrentBytes(45<<30), "")
+	require.NoError(t, err)
+	assert.Equal(t, int64(45<<30), budget.Reserved())
 }
 
 func TestApiAddDownloaderTorrent_Base64Path(t *testing.T) {
@@ -1116,6 +1193,13 @@ func setupTestServer(t *testing.T) (*Server, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}
+	// :memory: 每个连接各是一份库：处理函数起的后台同步（go s.syncDownloaderManager()）没人等，
+	// 会晚到下一个测试里读库，连接池再开的第二个连接是空库，查询报错被当成 404（Windows CI 上见过）。只留一个连接。
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("failed to get sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 
 	// 迁移表
 	db.AutoMigrate(
@@ -1138,6 +1222,7 @@ func setupTestServer(t *testing.T) (*Server, *gorm.DB) {
 
 	store := core.NewConfigStore(global.GlobalDB)
 	server := NewServer(store, nil)
+	t.Cleanup(server.background.Wait)
 
 	return server, db
 }

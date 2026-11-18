@@ -45,7 +45,7 @@ func TestApiAllSiteLevels(t *testing.T) {
 }
 
 func TestSetChatOpsDeps_And_SessionChecker(t *testing.T) {
-	s := &Server{sessions: map[string]string{"valid": "admin"}}
+	s := &Server{sessions: sessionsWith("valid", "admin")}
 
 	s.SetChatOpsDeps(&ChatOpsDeps{})
 	assert.NotNil(t, s.chatopsDeps)
@@ -69,7 +69,7 @@ func TestSetChatOpsDeps_And_SessionChecker(t *testing.T) {
 }
 
 func TestRegisterChatOpsIfWired_NoDeps(t *testing.T) {
-	s := &Server{sessions: map[string]string{}}
+	s := &Server{sessions: newSessionStore()}
 	mux := http.NewServeMux()
 	s.registerChatOpsIfWired(mux)
 	// With no deps, no routes registered; a chatops path should 404.

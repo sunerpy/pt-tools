@@ -20,6 +20,8 @@ type DigestItem struct {
 	LogID uint
 	Title string
 	Text  string
+	// Event 是这一条自己的事件：只有一条时照它发，多条时从里面取站点与种子拼成 rss.digest
+	Event *Event
 }
 
 // DigestFlushFunc 在窗口结束（条数达阈值或定时器到期）时被调用，由实现方完成

@@ -1,0 +1,885 @@
+// Package recognize 是媒体识别服务：套用识别词、解析标题，再到 TMDB 找对应的条目
+// （有 IMDb 编号时直接查找，否则按中英文名和年份搜索打分），支持按 TMDB 编号手动纠正。
+// 也管 TMDB 的设置（API Key 与代理加密保存、只写不读）与识别词。
+package recognize
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"unicode/utf8"
+
+	"golang.org/x/time/rate"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/sunerpy/pt-tools/internal/media/fanart"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/omdb"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
+	"github.com/sunerpy/pt-tools/internal/media/words"
+	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
+)
+
+var (
+	// ErrInvalid 表示参数不对（错误信息写明哪一项）。
+	ErrInvalid = errors.New("参数无效")
+	// ErrNotFound 表示要改或删的记录不存在。
+	ErrNotFound = errors.New("记录不存在")
+)
+
+// Cipher 加解密 API Key 与代理地址（生产环境是 ConfigStore 的 EncryptCookie / DecryptCookie）。
+type Cipher interface {
+	Encrypt(plain string) (string, error)
+	Decrypt(cipherText string) (string, error)
+}
+
+// Config 是服务的依赖。
+type Config struct {
+	DB     *gorm.DB
+	Cipher Cipher
+	// BaseURL 是 TMDB 接口地址；为空时用官方地址（qa 构建可指向假服务）。
+	BaseURL string
+	// ImageBaseURL 是 TMDB 图片地址（到 /t/p/ 为止）；为空时用官方地址（qa 构建可指向假服务）。
+	ImageBaseURL string
+	// RatePerSecond 是 TMDB 请求的限速（为 0 时用客户端的默认值）。
+	RatePerSecond float64
+	// FanartBaseURL、OMDbBaseURL 是 Fanart.tv 与 OMDb 的接口地址；为空时用官方地址（测试与 qa 构建可指向假服务）。
+	FanartBaseURL, OMDbBaseURL string
+	// FanartImageHosts 是允许下载 Fanart.tv 图片的主机；为空时只认 fanart.tv 自己的（测试里换成假服务的）。
+	FanartImageHosts []string
+	// TVDBBaseURL 是 TheTVDB 的接口地址（到 /v4 为止）；为空时用官方地址（测试与 qa 构建可指向假服务）。
+	TVDBBaseURL string
+	// TVDBImageHosts 是允许下载 TheTVDB 图片的主机；为空时只认 thetvdb.com 自己的（测试与 qa 构建换成假服务的）。
+	TVDBImageHosts []string
+}
+
+// Service 是媒体识别服务。
+type Service struct {
+	cfg   Config
+	cache *tmdb.DBCache
+	mu    sync.Mutex // 串行化设置、纠正与识别词的写入
+	// limiter 是所有 TMDB 请求共用的限速额度：每次识别都会新建客户端，额度不能跟着重置
+	limiter *rate.Limiter
+	// tvdbTokens、tvdbLimiter 是 TheTVDB 客户端共用的登录令牌与限速额度（每次刮削都会新建客户端）
+	tvdbTokens  *tvdb.Tokens
+	tvdbLimiter *rate.Limiter
+	// httpMu 保护按代理地址缓存的 http.Client（同一个代理共用连接池）
+	httpMu    sync.Mutex
+	httpProxy string
+	httpOne   *http.Client
+}
+
+// New 建一个服务，顺便清掉过期的 TMDB 缓存。
+func New(cfg Config) *Service {
+	s := &Service{
+		cfg: cfg, cache: tmdb.NewDBCache(cfg.DB), limiter: tmdb.NewLimiter(cfg.RatePerSecond),
+		tvdbTokens: tvdb.NewTokens(), tvdbLimiter: tvdb.NewLimiter(0),
+	}
+	_ = s.cache.Purge()
+	return s
+}
+
+// httpClient 是走 proxy 的 http.Client：代理没变时复用上一次的。
+func (s *Service) httpClient(proxy string) (*http.Client, error) {
+	s.httpMu.Lock()
+	defer s.httpMu.Unlock()
+	if s.httpOne != nil && s.httpProxy == proxy {
+		return s.httpOne, nil
+	}
+	hc, err := tmdb.NewHTTPClient(proxy)
+	if err != nil {
+		return nil, err
+	}
+	s.httpOne, s.httpProxy = hc, proxy
+	return hc, nil
+}
+
+// Languages 是可选的 TMDB 语言（第一个是默认值）。
+var Languages = []string{"zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP"}
+
+// 长度上限。
+const (
+	maxInputLen = 512
+	maxWords    = 500
+)
+
+// 识别现在用的 TMDB API Key（Settings.KeySource）。
+const (
+	KeyUser    = "user"    // 自己填的
+	KeyBuiltin = "builtin" // 没填，用构建时内置的
+	KeyNone    = "none"    // 没有能用的：没填，这个版本也没有内置的，或者换了接口地址（内置的只发给官方地址）
+)
+
+// Settings 是给界面看的设置：API Key 只说有没有（HasTMDBKey 是自己填的那个）；代理地址里的密码换成 ***。
+// APIBaseURL、ImageBaseURL 是换掉的地址，空 = 官方地址。
+type Settings struct {
+	HasTMDBKey bool `json:"has_tmdb_key"`
+	// KeySource 是识别现在用哪个 Key（KeyUser、KeyBuiltin、KeyNone）
+	KeySource string `json:"key_source"`
+	// BuiltinKey 表示这个版本内置了 Key（发布的 Release 与 Docker 镜像有，从源码编译的没有）
+	BuiltinKey   bool   `json:"builtin_key"`
+	Language     string `json:"language"`
+	ProxyURL     string `json:"proxy_url"`
+	APIBaseURL   string `json:"api_base_url"`
+	ImageBaseURL string `json:"image_base_url"`
+	// HasFanartKey、HasOMDbKey 说刮削用的 Fanart.tv（项目的 Key）与 OMDb 的 API Key 填了没有，HasFanartClientKey 说
+	// Fanart.tv 的个人 Key 填了没有
+	HasFanartKey       bool `json:"has_fanart_key"`
+	HasFanartClientKey bool `json:"has_fanart_client_key"`
+	HasOMDbKey         bool `json:"has_omdb_key"`
+	// HasTVDBKey、HasTVDBPIN 说 TheTVDB 的 API Key 与订阅 PIN 填了没有
+	HasTVDBKey bool `json:"has_tvdb_key"`
+	HasTVDBPIN bool `json:"has_tvdb_pin"`
+}
+
+// SettingsInput 是保存设置的参数。TMDBKey、ProxyURL、APIBaseURL、ImageBaseURL、FanartKey、OMDbKey、TVDBKey、TVDBPIN 为 nil 时不改，
+// 为空串时清除（两个地址清除以后用官方地址）。ProxyURL 与 Settings 返回的（密码换成 *** 的）地址相同时也不改。
+type SettingsInput struct {
+	TMDBKey      *string `json:"tmdb_api_key,omitempty"`
+	Language     string  `json:"language"`
+	ProxyURL     *string `json:"proxy_url,omitempty"`
+	APIBaseURL   *string `json:"api_base_url,omitempty"`
+	ImageBaseURL *string `json:"image_base_url,omitempty"`
+	// FanartKey、OMDbKey 是刮削用的 Fanart.tv（项目的 Key）与 OMDb 的 API Key，FanartClientKey 是 Fanart.tv 的个人 Key
+	// （可选；加上以后新上传的图片更快能用，见 Fanart、OMDb）
+	FanartKey       *string `json:"fanart_api_key,omitempty"`
+	FanartClientKey *string `json:"fanart_client_key,omitempty"`
+	OMDbKey         *string `json:"omdb_api_key,omitempty"`
+	// TVDBKey、TVDBPIN 是 TheTVDB 的 API Key 与订阅 PIN（user-supported 的 Key 才要 PIN），为 nil 时不改，为空串时清除
+	TVDBKey *string `json:"tvdb_api_key,omitempty"`
+	TVDBPIN *string `json:"tvdb_pin,omitempty"`
+}
+
+func (s *Service) load(ctx context.Context) (models.MediaSetting, error) {
+	var row models.MediaSetting
+	if err := s.cfg.DB.WithContext(ctx).Where("id = 1").Limit(1).Find(&row).Error; err != nil {
+		return row, fmt.Errorf("读取媒体识别设置失败: %w", err)
+	}
+	return row, nil
+}
+
+// maskProxy 把代理地址里的密码换成 ***。
+func maskProxy(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	if _, ok := u.User.Password(); ok {
+		u.User = url.UserPassword(u.User.Username(), "***")
+	}
+	return strings.Replace(u.String(), "%2A%2A%2A", "***", 1)
+}
+
+// keySource 是这份设置下识别用哪个 Key（见 KeyUser 等）。
+func keySource(row models.MediaSetting) string {
+	switch {
+	case row.TMDBKeyEncrypted != "":
+		return KeyUser
+	case tmdb.Builtin() != "" && builtinAllowed(row.APIBaseURL):
+		return KeyBuiltin
+	}
+	return KeyNone
+}
+
+// builtinAllowed 报告内置 Key 能不能发给用户换的接口地址：没换（官方地址；qa 构建是假服务），或者换成 TMDB
+// 官方的另一个域名。内置 Key 是所有用户共用的，不发给镜像与自建的中转。
+func builtinAllowed(apiBase string) bool {
+	return apiBase == "" || tmdb.IsOfficialAPIBase(apiBase)
+}
+
+func (s *Service) view(row models.MediaSetting) Settings {
+	out := Settings{
+		HasTMDBKey: row.TMDBKeyEncrypted != "", KeySource: keySource(row), BuiltinKey: tmdb.Builtin() != "",
+		Language: row.Language, APIBaseURL: row.APIBaseURL, ImageBaseURL: row.ImageBaseURL,
+		HasFanartKey: row.FanartKeyEncrypted != "", HasFanartClientKey: row.FanartClientKeyEncrypted != "", HasOMDbKey: row.OMDbKeyEncrypted != "",
+		HasTVDBKey: row.TVDBKeyEncrypted != "", HasTVDBPIN: row.TVDBPINEncrypted != "",
+	}
+	if out.Language == "" {
+		out.Language = Languages[0]
+	}
+	if row.ProxyEncrypted != "" {
+		if p, err := s.cfg.Cipher.Decrypt(row.ProxyEncrypted); err == nil {
+			out.ProxyURL = maskProxy(p)
+		}
+	}
+	return out
+}
+
+// Settings 读设置。
+func (s *Service) Settings(ctx context.Context) (Settings, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return Settings{}, err
+	}
+	return s.view(row), nil
+}
+
+// SaveSettings 保存设置。
+func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings, error) {
+	lang := strings.TrimSpace(in.Language)
+	if lang == "" {
+		lang = Languages[0]
+	}
+	if !slices.Contains(Languages, lang) {
+		return Settings{}, fmt.Errorf("%w: 语言只能是 %s", ErrInvalid, strings.Join(Languages, "、"))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, err := s.load(ctx)
+	if err != nil {
+		return Settings{}, err
+	}
+	row.ID, row.Language = 1, lang
+	if in.TMDBKey != nil {
+		key := strings.TrimSpace(*in.TMDBKey)
+		switch {
+		case key == "":
+			row.TMDBKeyEncrypted = ""
+		case !tmdb.ValidKey(key):
+			return Settings{}, fmt.Errorf("%w: TMDB API Key 格式不对（v3 的 API Key 或 v4 的读取令牌）", ErrInvalid)
+		default:
+			enc, err := s.cfg.Cipher.Encrypt(key)
+			if err != nil {
+				return Settings{}, fmt.Errorf("加密 TMDB API Key 失败: %w", err)
+			}
+			row.TMDBKeyEncrypted = enc
+		}
+	}
+	for _, k := range []struct {
+		in   *string
+		dst  *string
+		name string
+		re   *regexp.Regexp
+		bad  string
+	}{
+		{in.FanartKey, &row.FanartKeyEncrypted, "Fanart.tv API Key", plainKeyRe, "只有字母与数字"},
+		{in.FanartClientKey, &row.FanartClientKeyEncrypted, "Fanart.tv 个人 API Key", plainKeyRe, "只有字母与数字"},
+		{in.OMDbKey, &row.OMDbKeyEncrypted, "OMDb API Key", plainKeyRe, "只有字母与数字"},
+		{in.TVDBKey, &row.TVDBKeyEncrypted, "TheTVDB API Key", tvdbKeyRe, "字母、数字与短横线，8 到 64 个"},
+		{in.TVDBPIN, &row.TVDBPINEncrypted, "TheTVDB 订阅 PIN", tvdbPINRe, "字母与数字，4 到 64 个"},
+	} {
+		if k.in == nil {
+			continue
+		}
+		key := strings.TrimSpace(*k.in)
+		switch {
+		case key == "":
+			*k.dst = ""
+		case !k.re.MatchString(key):
+			return Settings{}, fmt.Errorf("%w: %s 格式不对（%s）", ErrInvalid, k.name, k.bad)
+		default:
+			enc, err := s.cfg.Cipher.Encrypt(key)
+			if err != nil {
+				return Settings{}, fmt.Errorf("加密 %s 失败: %w", k.name, err)
+			}
+			*k.dst = enc
+		}
+	}
+	if in.ProxyURL != nil {
+		proxy := strings.TrimSpace(*in.ProxyURL)
+		switch {
+		case proxy == "":
+			row.ProxyEncrypted = ""
+		case proxy == s.view(row).ProxyURL:
+			// 界面原样提交了密码换成 *** 的地址：不改
+		default:
+			if _, err := tmdb.ParseProxyURL(proxy); err != nil {
+				return Settings{}, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+			}
+			enc, err := s.cfg.Cipher.Encrypt(proxy)
+			if err != nil {
+				return Settings{}, fmt.Errorf("加密代理地址失败: %w", err)
+			}
+			row.ProxyEncrypted = enc
+		}
+	}
+	if in.APIBaseURL != nil {
+		u, err := tmdb.NormalizeAPIBaseURL(*in.APIBaseURL)
+		if err != nil {
+			return Settings{}, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+		}
+		row.APIBaseURL = u
+	}
+	if in.ImageBaseURL != nil {
+		u, err := tmdb.NormalizeImageBaseURL(*in.ImageBaseURL)
+		if err != nil {
+			return Settings{}, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+		}
+		row.ImageBaseURL = u
+	}
+	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"tmdb_key_encrypted", "language", "proxy_encrypted", "api_base_url", "image_base_url",
+			"fanart_key_encrypted", "fanart_client_key_encrypted", "omdb_key_encrypted", "tvdb_key_encrypted", "tvdb_pin_encrypted", "updated_at",
+		}),
+	}).Create(&row).Error; err != nil {
+		return Settings{}, fmt.Errorf("保存媒体识别设置失败: %w", err)
+	}
+	return s.view(row), nil
+}
+
+// client 按当前设置建 TMDB 客户端：用自己填的 Key，没填时用内置的；没有能用的 Key 时返回 tmdb.ErrNoKey。
+func (s *Service) client(ctx context.Context) (*tmdb.Client, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var key string
+	switch keySource(row) {
+	case KeyUser:
+		if key, err = s.cfg.Cipher.Decrypt(row.TMDBKeyEncrypted); err != nil {
+			return nil, fmt.Errorf("解密 TMDB API Key 失败: %w", err)
+		}
+	case KeyBuiltin:
+		key = tmdb.Builtin()
+	default:
+		if tmdb.Builtin() != "" {
+			return nil, fmt.Errorf("%w：换了 TMDB 接口地址时不用内置的 Key（内置的只发给 TMDB 官方地址），要填自己的", tmdb.ErrNoKey)
+		}
+		return nil, tmdb.ErrNoKey
+	}
+	hc, imageBase, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	// 用户换了地址就用换的；没换时用配置里的（qa 构建指向假服务），都没有时客户端用官方地址
+	base := row.APIBaseURL
+	if base == "" {
+		base = s.cfg.BaseURL
+	}
+	return tmdb.New(tmdb.Options{
+		APIKey: key, BaseURL: base, ImageBaseURL: imageBase, Language: s.view(row).Language,
+		Cache: s.cache, Limiter: s.limiter, HTTPClient: hc,
+	})
+}
+
+// transport 是按设置里的代理发请求的客户端，以及图片地址（用户换的，其次配置里的；空串是官方地址）。
+func (s *Service) transport(row models.MediaSetting) (*http.Client, string, error) {
+	proxy := ""
+	if row.ProxyEncrypted != "" {
+		var err error
+		if proxy, err = s.cfg.Cipher.Decrypt(row.ProxyEncrypted); err != nil {
+			return nil, "", fmt.Errorf("解密代理地址失败: %w", err)
+		}
+	}
+	hc, err := s.httpClient(proxy)
+	if err != nil {
+		return nil, "", err
+	}
+	imageBase := row.ImageBaseURL
+	if imageBase == "" {
+		imageBase = s.cfg.ImageBaseURL
+	}
+	return hc, imageBase, nil
+}
+
+// TMDB 按当前设置建 TMDB 客户端（整理入库时取详情、季详情与图片）；没有 API Key 时返回 tmdb.ErrNoKey。
+func (s *Service) TMDB(ctx context.Context) (*tmdb.Client, error) {
+	return s.client(ctx)
+}
+
+// Images 按当前设置（图片地址与代理）建只取图片的客户端：图片服务器不用 API Key。
+func (s *Service) Images(ctx context.Context) (*tmdb.ImageClient, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hc, imageBase, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return tmdb.NewImageClient(imageBase, hc), nil
+}
+
+// Parse 套用启用的识别词后解析一个标题（整理入库时解析每个文件名）。
+func (s *Service) Parse(ctx context.Context, title, subtitle string) (meta.Meta, error) {
+	m, _, err := s.parse(ctx, Input{Title: title, Subtitle: subtitle})
+	return m, err
+}
+
+// TestTMDB 用当前设置访问一次 TMDB，确认 API Key 与代理可用。
+func (s *Service) TestTMDB(ctx context.Context) error {
+	c, err := s.client(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Validate(ctx)
+}
+
+// plainKeyRe 是 Fanart.tv 与 OMDb 的 API Key 的样子（Fanart.tv 是 32 位十六进制，OMDb 是 8 位）。
+var plainKeyRe = regexp.MustCompile(`^[A-Za-z0-9]{6,64}$`)
+
+// tvdbKeyRe、tvdbPINRe 是 TheTVDB 的 API Key（v4 的是 UUID）与订阅 PIN 的样子。
+var (
+	tvdbKeyRe = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
+	tvdbPINRe = regexp.MustCompile(`^[A-Za-z0-9]{4,64}$`)
+)
+
+// sourceKey 解密一个刮削来源的 API Key；没填时返回空串。
+func (s *Service) sourceKey(enc, name string) (string, error) {
+	if enc == "" {
+		return "", nil
+	}
+	key, err := s.cfg.Cipher.Decrypt(enc)
+	if err != nil {
+		return "", fmt.Errorf("解密 %s API Key 失败: %w", name, err)
+	}
+	return key, nil
+}
+
+// Fanart 按当前设置建 Fanart.tv 客户端（刮削时取图片，走媒体识别的代理，和 TMDB 共用缓存）：项目的 Key，填了个人 Key 时一起发；
+// 没填项目的 Key 时返回 fanart.ErrNoKey。
+func (s *Service) Fanart(ctx context.Context) (*fanart.Client, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.sourceKey(row.FanartKeyEncrypted, "Fanart.tv")
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, fanart.ErrNoKey
+	}
+	client, err := s.sourceKey(row.FanartClientKeyEncrypted, "Fanart.tv 个人")
+	if err != nil {
+		return nil, err
+	}
+	hc, _, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return fanart.New(fanart.Options{
+		APIKey: key, ClientKey: client, BaseURL: s.cfg.FanartBaseURL, ImageHosts: s.cfg.FanartImageHosts, HTTP: hc, Cache: s.cache,
+	})
+}
+
+// OMDb 按当前设置建 OMDb 客户端（刮削时取 IMDb 等评分，走媒体识别的代理，和 TMDB 共用缓存）；没填 API Key 时返回 omdb.ErrNoKey。
+func (s *Service) OMDb(ctx context.Context) (*omdb.Client, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.sourceKey(row.OMDbKeyEncrypted, "OMDb")
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, omdb.ErrNoKey
+	}
+	hc, _, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return omdb.New(omdb.Options{APIKey: key, BaseURL: s.cfg.OMDbBaseURL, HTTP: hc, Cache: s.cache})
+}
+
+// TVDB 按当前设置建 TheTVDB 客户端（刮削时取每一集的标题、简介与截图，走媒体识别的代理，和 TMDB 共用缓存，客户端之间共用
+// 登录令牌与限速）：填的 Key，填了订阅 PIN 时一起登录；没填 Key 时返回 tvdb.ErrNoKey。
+func (s *Service) TVDB(ctx context.Context) (*tvdb.Client, error) {
+	row, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.sourceKey(row.TVDBKeyEncrypted, "TheTVDB")
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, tvdb.ErrNoKey
+	}
+	pin := ""
+	if row.TVDBPINEncrypted != "" {
+		if pin, err = s.cfg.Cipher.Decrypt(row.TVDBPINEncrypted); err != nil {
+			return nil, fmt.Errorf("解密 TheTVDB 订阅 PIN 失败: %w", err)
+		}
+	}
+	hc, _, err := s.transport(row)
+	if err != nil {
+		return nil, err
+	}
+	return tvdb.New(tvdb.Options{
+		APIKey: key, PIN: pin, BaseURL: s.cfg.TVDBBaseURL, ImageHosts: s.cfg.TVDBImageHosts, HTTP: hc, Cache: s.cache,
+		Tokens: s.tvdbTokens, Limiter: s.tvdbLimiter,
+	})
+}
+
+// TestTVDB 用当前设置登录一次 TheTVDB 并取一部剧，确认 API Key、订阅 PIN 与代理可用。
+func (s *Service) TestTVDB(ctx context.Context) error {
+	c, err := s.TVDB(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Validate(ctx)
+}
+
+// TestFanart 用当前设置访问一次 Fanart.tv，确认 API Key 与代理可用。
+func (s *Service) TestFanart(ctx context.Context) error {
+	c, err := s.Fanart(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Validate(ctx)
+}
+
+// TestOMDb 用当前设置访问一次 OMDb，确认 API Key 与代理可用。
+func (s *Service) TestOMDb(ctx context.Context) error {
+	c, err := s.OMDb(ctx)
+	if err != nil {
+		return err
+	}
+	return c.Validate(ctx)
+}
+
+// Input 是识别的输入。
+type Input struct {
+	Title    string `json:"title"`
+	Subtitle string `json:"subtitle"`
+	IMDbID   string `json:"imdb_id"`
+}
+
+// Candidate 是一个打过分的候选条目。
+type Candidate struct {
+	tmdb.Result
+	Score float64 `json:"score"`
+}
+
+// 识别结果的来源。
+const (
+	SourceNone     = "none"
+	SourceOverride = "override"
+	SourceIMDb     = "imdb"
+	SourceSearch   = "search"
+)
+
+// Result 是识别结果。TMDB 出错时 Meta 照样有，Error 写明原因。
+type Result struct {
+	Meta       meta.Meta    `json:"meta"`
+	Summary    string       `json:"summary"`
+	RuleHits   []uint       `json:"rule_hits,omitempty"`
+	Match      *tmdb.Result `json:"match,omitempty"`
+	Source     string       `json:"source"`
+	Score      float64      `json:"score,omitempty"`
+	Candidates []Candidate  `json:"candidates,omitempty"`
+	OverrideID uint         `json:"override_id,omitempty"`
+	Message    string       `json:"message,omitempty"`
+	Error      string       `json:"error,omitempty"`
+}
+
+func cleanInput(in Input) (Input, error) {
+	in.Title, in.Subtitle, in.IMDbID = strings.TrimSpace(in.Title), strings.TrimSpace(in.Subtitle), strings.TrimSpace(in.IMDbID)
+	if in.Title == "" && in.Subtitle == "" {
+		return in, fmt.Errorf("%w: 标题与副标题不能都为空", ErrInvalid)
+	}
+	if utf8.RuneCountInString(in.Title) > maxInputLen || utf8.RuneCountInString(in.Subtitle) > maxInputLen {
+		return in, fmt.Errorf("%w: 标题与副标题最多 %d 个字", ErrInvalid, maxInputLen)
+	}
+	return in, nil
+}
+
+// parse 套用启用的识别词后解析标题。
+func (s *Service) parse(ctx context.Context, in Input) (meta.Meta, []uint, error) {
+	var rules []models.MediaWordRule
+	if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&rules).Error; err != nil {
+		return meta.Meta{}, nil, fmt.Errorf("读取识别词失败: %w", err)
+	}
+	applied := words.Apply(rules, in.Title, in.Subtitle)
+	m := meta.Parse(applied.Title, applied.Subtitle)
+	applied.ApplyOffset(&m)
+	return m, applied.Hits, nil
+}
+
+// Recognize 识别一个标题：先看手动纠正，再按 IMDb 编号查找，最后按名字搜索打分。
+func (s *Service) Recognize(ctx context.Context, in Input) (*Result, error) {
+	in, err := cleanInput(in)
+	if err != nil {
+		return nil, err
+	}
+	m, hits, err := s.parse(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	res := &Result{Meta: m, Summary: m.String(), RuleHits: hits, Source: SourceNone}
+	c, err := s.client(ctx)
+	if errors.Is(err, tmdb.ErrNoKey) {
+		res.Message = "没有填写 TMDB API Key，只做了标题解析"
+		return res, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.match(ctx, c, m, v2.NormalizeIMDbID(in.IMDbID), res); err != nil {
+		res.Error = err.Error()
+	}
+	if res.Match == nil && res.Error == "" {
+		res.Message = "TMDB 上没有找到可靠的匹配：可以在候选里选一个，或填 TMDB 编号纠正"
+	}
+	return res, nil
+}
+
+func (s *Service) match(ctx context.Context, c *tmdb.Client, m meta.Meta, imdb string, res *Result) error {
+	ov, err := s.findOverride(ctx, m)
+	if err != nil {
+		return err
+	}
+	if ov.ID != 0 {
+		d, detailErr := c.Details(ctx, ov.MediaType, ov.TMDBID)
+		if detailErr != nil {
+			return detailErr
+		}
+		res.Match, res.Source, res.OverrideID = d, SourceOverride, ov.ID
+		return nil
+	}
+	if imdb != "" {
+		found, findErr := c.Find(ctx, imdb)
+		if findErr != nil && !errors.Is(findErr, tmdb.ErrNotFound) {
+			return findErr
+		}
+		if r := pickFound(m, found); r != nil {
+			res.Match, res.Source = s.details(ctx, c, *r), SourceIMDb
+			return nil
+		}
+	}
+	cands, err := s.search(ctx, c, m, primaryKinds(m))
+	if err != nil {
+		return err
+	}
+	// 只靠年份判成电影的（没有季集标记）也可能是剧集：电影里没有可靠匹配时补搜剧集（电影的搜索读缓存）。
+	// 电影里有一个只因为 TMDB 上没有年份才没认定的同名候选时不补搜：不认定、列出候选，不改认成同名的剧集
+	if pick(m, cands) == nil && m.Type == meta.TypeMovie && pickFrom(m, cands) == nil {
+		if cands, err = s.search(ctx, c, m, []string{tmdb.KindMovie, tmdb.KindTV}); err != nil {
+			return err
+		}
+	}
+	best := pick(m, cands)
+	if best == nil {
+		best = pickByOtherTitles(ctx, c, m, cands)
+	}
+	if best != nil {
+		res.Match, res.Source, res.Score = s.details(ctx, c, best.Result), SourceSearch, best.Score
+	}
+	if len(cands) > 5 {
+		cands = cands[:5]
+	}
+	res.Candidates = cands
+	return nil
+}
+
+// maxCandidates 是 Candidates 一次最多回几个候选。
+const maxCandidates = 20
+
+// Candidates 是一个标题在 TMDB 上的候选：套用识别词解析以后电影与剧集都搜，按分数排，最多 limit 个（1 到 20）。
+// 不看手动纠正与 IMDb 编号：给自动识别认不出的标题让人或 AI 挑。解析出的名字为空时没有候选；没填 TMDB API Key 时返回 tmdb.ErrNoKey。
+func (s *Service) Candidates(ctx context.Context, in Input, limit int) ([]Candidate, error) {
+	in, err := cleanInput(in)
+	if err != nil {
+		return nil, err
+	}
+	m, _, err := s.parse(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cands, err := s.search(ctx, c, m, []string{tmdb.KindMovie, tmdb.KindTV})
+	if err != nil {
+		return nil, err
+	}
+	if limit = min(max(limit, 1), maxCandidates); len(cands) > limit {
+		cands = cands[:limit]
+	}
+	return cands, nil
+}
+
+// Correction 是一个标题的手动纠正：类型、TMDB 编号与纠正的编号。
+type Correction struct {
+	MediaType  string
+	TMDBID     int
+	OverrideID uint
+}
+
+// Correction 找这个标题的手动纠正（套用识别词解析以后按名字找，同 Recognize 的第一步，见 findOverride）；没有时返回 nil、nil。
+// 不访问 TMDB：整理入库用它看沿用的条目要不要换成纠正的。
+func (s *Service) Correction(ctx context.Context, in Input) (*Correction, error) {
+	in, err := cleanInput(in)
+	if err != nil {
+		return nil, err
+	}
+	m, _, err := s.parse(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	ov, err := s.findOverride(ctx, m)
+	if err != nil || ov.ID == 0 {
+		return nil, err
+	}
+	return &Correction{MediaType: ov.MediaType, TMDBID: ov.TMDBID, OverrideID: ov.ID}, nil
+}
+
+// findOverride 找这个解析结果的手动纠正：先按英文名、再按中文名找主键，最后按中文名找别名。没有时返回零值。
+func (s *Service) findOverride(ctx context.Context, m meta.Meta) (models.MediaOverride, error) {
+	en, cn := overrideKey(m, m.NameEN), overrideKey(m, m.NameCN)
+	var keys []string
+	for _, k := range []string{en, cn} {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return models.MediaOverride{}, nil
+	}
+	q := s.cfg.DB.WithContext(ctx).Where("key IN ?", keys)
+	if cn != "" {
+		q = q.Or("alt_key = ?", cn)
+	}
+	var rows []models.MediaOverride
+	if err := q.Find(&rows).Error; err != nil {
+		return models.MediaOverride{}, fmt.Errorf("读取手动纠正失败: %w", err)
+	}
+	for _, want := range []func(models.MediaOverride) bool{
+		func(o models.MediaOverride) bool { return en != "" && o.Key == en },
+		func(o models.MediaOverride) bool { return cn != "" && o.Key == cn },
+		func(o models.MediaOverride) bool { return cn != "" && o.AltKey == cn },
+	} {
+		for _, o := range rows {
+			if want(o) {
+				return o, nil
+			}
+		}
+	}
+	return models.MediaOverride{}, nil
+}
+
+// otherTitlesTop 是名字对不上时再看英文名与别名的候选数。
+const otherTitlesTop = 3
+
+// pickByOtherTitles 用 TMDB 的英文名与别名再比一次：种子名常用英文名或罗马音（Your Name、Sousou no Frieren），
+// 中文搜索结果里只有中文名与原名。只看排在前面的几个候选，名字要完全相同、总分过线才认。
+func pickByOtherTitles(ctx context.Context, c *tmdb.Client, m meta.Meta, cands []Candidate) *Candidate {
+	for i := range cands[:min(otherTitlesTop, len(cands))] {
+		if m.Year > 0 && cands[i].Year == 0 {
+			// 年份核对不了（见 pick）
+			continue
+		}
+		titles, err := c.Titles(ctx, cands[i].MediaType, cands[i].ID)
+		if err != nil {
+			continue
+		}
+		for _, t := range titles {
+			alt := cands[i].Result
+			alt.Title, alt.OriginalTitle = t, ""
+			if titleScore(m, alt) < 1 {
+				continue
+			}
+			if sc := score(m, alt, i); sc >= AcceptScore {
+				out := cands[i]
+				out.Score = sc
+				return &out
+			}
+		}
+	}
+	return nil
+}
+
+// primaryKinds 是先搜的类型：剧集只搜剧集，电影先搜电影，类型不明时都搜。
+func primaryKinds(m meta.Meta) []string {
+	switch m.Type {
+	case meta.TypeMovie:
+		return []string{tmdb.KindMovie}
+	case meta.TypeTV:
+		return []string{tmdb.KindTV}
+	}
+	return []string{tmdb.KindMovie, tmdb.KindTV}
+}
+
+// details 用详情补全匹配到的条目（搜索与查找结果里没有 IMDb 编号，中文简介为空时详情里有英文的）；
+// 取详情失败时用原来的结果。
+func (s *Service) details(ctx context.Context, c *tmdb.Client, r tmdb.Result) *tmdb.Result {
+	if d, err := c.Details(ctx, r.MediaType, r.ID); err == nil {
+		return d
+	}
+	return &r
+}
+
+// pickFound 从 IMDb 查找结果里取一个：剧集优先取剧集，其余优先取电影。
+func pickFound(m meta.Meta, found []tmdb.Result) *tmdb.Result {
+	if len(found) == 0 {
+		return nil
+	}
+	want := tmdb.KindMovie
+	if m.Type == meta.TypeTV {
+		want = tmdb.KindTV
+	}
+	for i := range found {
+		if found[i].MediaType == want {
+			return &found[i]
+		}
+	}
+	return &found[0]
+}
+
+// search 用中文名与英文名分别搜索 kinds 里的类型，合并后打分排序。
+func (s *Service) search(ctx context.Context, c *tmdb.Client, m meta.Meta, kinds []string) ([]Candidate, error) {
+	var names []string
+	for _, n := range []string{m.NameCN, m.NameEN} {
+		if n = strings.TrimSpace(n); n != "" && !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	type key struct {
+		kind string
+		id   int
+	}
+	best := map[key]Candidate{}
+	for _, kind := range kinds {
+		for _, name := range names {
+			found, err := c.Search(ctx, kind, name, m.Year)
+			if err != nil {
+				return nil, err
+			}
+			if len(found) == 0 && kind == tmdb.KindMovie && m.Year > 0 {
+				// 上映年份可能差一年（各地上映时间不同）：不带年份再搜一次
+				if found, err = c.Search(ctx, kind, name, 0); err != nil {
+					return nil, err
+				}
+			}
+			for rank, r := range found {
+				if rank >= 10 {
+					break
+				}
+				cand := Candidate{Result: r, Score: score(m, r, rank)}
+				k := key{r.MediaType, r.ID}
+				if old, ok := best[k]; !ok || cand.Score > old.Score {
+					best[k] = cand
+				}
+			}
+		}
+	}
+	out := make([]Candidate, 0, len(best))
+	for _, c := range best {
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		if out[i].Popularity != out[j].Popularity {
+			return out[i].Popularity > out[j].Popularity
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}

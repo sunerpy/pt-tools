@@ -119,13 +119,18 @@ func TestDBBindingLookup_FindByChannelUser(t *testing.T) {
 	lookup := &dbBindingLookup{db: db}
 	ctx := context.Background()
 
-	info, ok, err := lookup.FindByChannelUser(ctx, "telegram", "u1")
+	info, ok, err := lookup.FindByChannelUser(ctx, 7, "telegram", "u1")
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, uint(7), info.ConfID)
 	assert.True(t, info.PtAdmin)
 
-	_, ok, err = lookup.FindByChannelUser(ctx, "telegram", "missing")
+	_, ok, err = lookup.FindByChannelUser(ctx, 7, "telegram", "missing")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// 绑定属于通知通道配置 7：同一用户经另一个 Bot（配置 8）发来的消息找不到这条绑定
+	_, ok, err = lookup.FindByChannelUser(ctx, 8, "telegram", "u1")
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
@@ -137,12 +142,16 @@ func TestCommandsBindingResolver_FindByChannelUser(t *testing.T) {
 	}).Error)
 	resolver := &commandsBindingResolver{lookup: &dbBindingLookup{db: db}}
 
-	id, ok, err := resolver.FindByChannelUser(context.Background(), "qq_onebot", "abc")
+	id, ok, err := resolver.FindByChannelUser(context.Background(), 1, "qq_onebot", "abc")
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, uint(42), id)
 
-	_, ok, err = resolver.FindByChannelUser(context.Background(), "qq_onebot", "none")
+	_, ok, err = resolver.FindByChannelUser(context.Background(), 2, "qq_onebot", "abc")
+	require.NoError(t, err)
+	assert.False(t, ok, "别的通道配置下没有这条绑定")
+
+	_, ok, err = resolver.FindByChannelUser(context.Background(), 1, "qq_onebot", "none")
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
@@ -180,6 +189,46 @@ func TestLiveNotifyManager_Send(t *testing.T) {
 		require.Len(t, ch.recorded, 1)
 		assert.Equal(t, "body", ch.recorded[0].Text)
 	})
+}
+
+// outbox 的重试经运行中的通道实例投递，标题、正文、按钮原样带过去。
+func TestOutboxLiveSender_ForwardsToLiveChannel(t *testing.T) {
+	ch := &stubNotifyChannel{}
+	sender := outboxLiveSender{m: newLiveNotifyManager(map[uint]notify.Channel{5: ch})}
+	buttons := [][]notify.Button{{{Text: "立即下载", CallbackData: "dl:1"}}}
+	require.NoError(t, sender.Send(context.Background(), 5, notify.Notification{Title: "t", Text: "body", Buttons: buttons}))
+	require.Len(t, ch.recorded, 1)
+	assert.Equal(t, "body", ch.recorded[0].Text)
+	assert.Equal(t, uint(5), ch.recorded[0].SourceConfID)
+	assert.Equal(t, buttons, ch.recorded[0].Buttons)
+
+	require.Error(t, sender.Send(context.Background(), 9, notify.Notification{Text: "x"}), "通道没在运行时返回错误，留给 outbox 退避重试")
+}
+
+// 业务通知发出前套用全局消息模板，事件一起交给通道（Webhook 请求体要用）；ChatOps 的回复不套模板。
+func TestLiveNotifyManager_AppliesTemplates(t *testing.T) {
+	ch := &stubNotifyChannel{}
+	m := newLiveNotifyManager(map[uint]notify.Channel{5: ch})
+	m.templates = notify.NewTemplates(nil)
+	m.templates.Replace([]notify.TemplateSource{{EventType: notify.EventTest, Title: "测试 · {{.channel}}"}})
+	ev, title, text := notify.SampleEvent(notify.EventTest)
+	require.NoError(t, m.Send(context.Background(), 5, app.Notification{Event: ev, Title: title, Text: text, SourceConfID: 5}))
+	require.Len(t, ch.recorded, 1)
+	assert.Equal(t, "测试 · 我的 Telegram", ch.recorded[0].Title)
+	assert.Equal(t, text, ch.recorded[0].Text, "只配了标题")
+	assert.Same(t, ev, ch.recorded[0].Event)
+
+	// outbox 重试经 outboxLiveSender，事件一起带过去，照样套模板
+	require.NoError(t, outboxLiveSender{m: m}.Send(context.Background(), 5, notify.Notification{Event: ev, Title: title, Text: text}))
+	require.Len(t, ch.recorded, 2)
+	assert.Equal(t, "测试 · 我的 Telegram", ch.recorded[1].Title)
+	assert.Same(t, ev, ch.recorded[1].Event)
+
+	// 回复不是业务通知：原样发
+	require.NoError(t, m.Reply(context.Background(), notify.InboundMessage{SourceConfID: 5, ChatID: "1"}, chatops.Reply{Text: "{{.channel}}"}))
+	require.Len(t, ch.recorded, 3)
+	assert.Equal(t, "{{.channel}}", ch.recorded[2].Text)
+	assert.Nil(t, ch.recorded[2].Event)
 }
 
 func TestLiveNotifyManager_SetChannels_NilResets(t *testing.T) {

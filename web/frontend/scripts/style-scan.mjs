@@ -43,11 +43,11 @@ const INTENTIONAL = {
   "src/views/CloakBrowserConfig.vue .cloak-page": "布局由同节点的 pt-cards--main 给",
   "src/views/DownloaderSettings.vue .downloader-page": "布局由同节点的 pt-cards--wide 给",
   "src/views/DownloaderSettings.vue .dl-cards": "布局由同节点的 pt-cards--2 给",
-  "src/views/chatops/Bindings.vue .bindings-page": "布局由同节点的 pt-cards--lead 给",
+  "src/views/chatops/Bindings.vue .bindings-page": "布局由同节点的 pt-cards--wide / --aside 给",
   "src/views/chatops/NotificationDetail.vue .notify-detail-page":
     "布局由同节点的 pt-cards--wide 给",
   "src/views/UserDataExport.vue .export-page":
-    "只用来挂 SVG 滤镜与 Teleport（文件内注释已说明），栏宽由里层 .export-cols pt-cards--main 给",
+    "只是页面根节点（挂 Teleport 的那一层），栏宽由里层 .export-cols pt-cards--main 给",
 
   /* BEM 的外层壳：间距与排布都在子元素上 */
   "src/components/ui/PtBreakdown.vue .bd": "排布在 .bd__list 上（flex/grid 都在那里）",
@@ -64,10 +64,10 @@ const INTENTIONAL = {
     "列宽与对齐由同节点的 .vt-cell / .align-center 给",
 
   /* 其余 */
+  "src/components/home/HomeTodo.vue .hm-todo-drawer":
+    "el-drawer 的外观由 Element Plus 给，这个名字只用于定位（board-check 与测试找抽屉）",
   "src/components/VersionChecker.vue .initial": "默认态，样式由 .status-state 给，不需要单独一条",
   "src/views/LogViewer.vue .virtual-spacer": "高度是虚拟滚动算出来的行内样式，没有静态样式",
-  "src/components/V2DeprecationBanner.vue .v2-deprecation-alert":
-    "外观由同节点的 pt-note 给，这个名字只用于定位",
 };
 
 function walk(dir) {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 func init() {
@@ -31,12 +32,14 @@ func helpHandler(_ context.Context, _ []string, src chatops.Source) (chatops.Rep
 
 	var b strings.Builder
 	b.WriteString(tr(src.ReplyLang, "可用命令：\n", "Available commands:\n"))
+	items := make([]map[string]any, 0, len(visible))
 	for _, s := range visible {
 		flag := ""
 		if s.AdminOnly {
 			flag = " [admin]"
 		}
 		fmt.Fprintf(&b, "/%s%s — %s\n", s.Name, flag, s.Description)
+		items = append(items, map[string]any{"name": s.Name, "description": s.Description, "admin": s.AdminOnly})
 	}
-	return chatops.Reply{Text: strings.TrimRight(b.String(), "\n")}, nil
+	return eventReply(strings.TrimRight(b.String(), "\n"), notify.EventReplyHelp, map[string]any{"items": items}), nil
 }

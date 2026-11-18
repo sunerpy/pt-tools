@@ -74,14 +74,12 @@ func (d *Deduper) mergeDuplicates(items []TorrentItem) TorrentItem {
 
 		// Prefer free torrents
 		if item.IsFree() && !best.IsFree() {
-			best.DiscountLevel = item.DiscountLevel
-			best.DiscountEndTime = item.DiscountEndTime
+			copyDiscount(&best, item)
 		}
 
 		// Prefer better discount
 		if DiscountPriority(item.DiscountLevel) > DiscountPriority(best.DiscountLevel) {
-			best.DiscountLevel = item.DiscountLevel
-			best.DiscountEndTime = item.DiscountEndTime
+			copyDiscount(&best, item)
 		}
 
 		// Merge tags
@@ -99,6 +97,17 @@ func (d *Deduper) mergeDuplicates(items []TorrentItem) TorrentItem {
 	}
 
 	return best
+}
+
+// copyDiscount 把 src 的优惠整体换到 dst：级别、结束时间、有效性、来源、诊断说明与取得时间一起换，
+// 只换前两项会把 src 的 unknown 变成 free_until（或把 dst 旧的 unknown 留在新优惠上）。
+func copyDiscount(dst *TorrentItem, src TorrentItem) {
+	dst.DiscountLevel = src.DiscountLevel
+	dst.DiscountEndTime = src.DiscountEndTime
+	dst.DiscountValidity = src.DiscountValidity
+	dst.DiscountSource = src.DiscountSource
+	dst.DiscountErr = src.DiscountErr
+	dst.FetchedAt = src.FetchedAt
 }
 
 // mergeTags merges two tag lists, removing duplicates

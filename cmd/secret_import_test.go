@@ -28,6 +28,7 @@ func feedStdin(t *testing.T, s string, fn func()) {
 func TestRunSecretImport_SuccessForce(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i)
@@ -51,6 +52,7 @@ func TestRunSecretImport_SuccessForce(t *testing.T) {
 func TestRunSecretImport_RefusesOverwrite(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := filepath.Join(home, ".pt-tools")
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	existing := []byte("existing-key-content-do-not-clobber")
@@ -70,7 +72,11 @@ func TestRunSecretImport_RefusesOverwrite(t *testing.T) {
 }
 
 func TestRunSecretImport_InvalidBase64(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	var got error
 	feedStdin(t, "@@@not-base64@@@\n", func() {
 		captureStdout(t, func() { got = runSecretImport(true) })
@@ -79,7 +85,11 @@ func TestRunSecretImport_InvalidBase64(t *testing.T) {
 }
 
 func TestRunSecretImport_WrongLength(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	short := base64.StdEncoding.EncodeToString(make([]byte, 16))
 	var got error
 	feedStdin(t, short+"\n", func() {
@@ -100,6 +110,7 @@ var (
 func TestRunSecretImport_RenameError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	keyDir := filepath.Join(home, ".pt-tools")
 	require.NoError(t, os.MkdirAll(filepath.Join(keyDir, "secret.key"), 0o755))
 
@@ -132,6 +143,7 @@ func TestRunSecretImport_StdinReadError(t *testing.T) {
 // decoded.
 func TestRunSecretImport_HomeError(t *testing.T) {
 	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
 	key := make([]byte, 32)
 	enc := base64.StdEncoding.EncodeToString(key)
 
@@ -151,6 +163,7 @@ func TestRunSecretImport_WriteTempError(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	keyDir := filepath.Join(home, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o755))
 	require.NoError(t, os.Chmod(keyDir, 0o555))
@@ -176,6 +189,7 @@ func TestRunSecretImport_MkdirError(t *testing.T) {
 	homeFile := filepath.Join(dir, "home-as-file")
 	require.NoError(t, os.WriteFile(homeFile, []byte("x"), 0o644))
 	t.Setenv("HOME", homeFile)
+	t.Setenv("USERPROFILE", homeFile)
 
 	key := make([]byte, 32)
 	enc := base64.StdEncoding.EncodeToString(key)

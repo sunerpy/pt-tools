@@ -1,0 +1,483 @@
+// Package organize 是整理入库服务：种子下载完成后识别出电影或剧集，按媒体库的模板与整理方式放进库里，
+// 写 NFO 与图片，通知媒体服务器扫描，发入库通知。触发方式有三种：pt-tools 推送的种子下载完成（事件，
+// 另有定时补查）、按范围定期扫描下载器、在任务列表与下载器页面手动整理。整理记录按源文件去重。
+package organize
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/sunerpy/pt-tools/internal/media/douban"
+	"github.com/sunerpy/pt-tools/internal/media/fanart"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/metadata"
+	"github.com/sunerpy/pt-tools/internal/media/omdb"
+	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+)
+
+var (
+	// ErrInvalid 表示参数不对（错误信息写明哪一项）。
+	ErrInvalid = errors.New("参数无效")
+	// ErrNotFound 表示要改或删的记录不存在。
+	ErrNotFound = errors.New("记录不存在")
+)
+
+// Cipher 加解密媒体服务器的 Token（生产环境是 ConfigStore 的 EncryptCookie / DecryptCookie）。
+type Cipher interface {
+	Encrypt(plain string) (string, error)
+	Decrypt(cipherText string) (string, error)
+}
+
+// Recognizer 是识别服务（生产环境是 *recognize.Service）。Fanart 与 OMDb 是刮削用的另外两个来源，没填 API Key 时
+// 返回 fanart.ErrNoKey、omdb.ErrNoKey。
+type Recognizer interface {
+	Recognize(ctx context.Context, in recognize.Input) (*recognize.Result, error)
+	// Correction 是这个标题的手动纠正（没有时 nil、nil），不访问 TMDB
+	Correction(ctx context.Context, in recognize.Input) (*recognize.Correction, error)
+	Parse(ctx context.Context, title, subtitle string) (meta.Meta, error)
+	TMDB(ctx context.Context) (*tmdb.Client, error)
+	Fanart(ctx context.Context) (*fanart.Client, error)
+	OMDb(ctx context.Context) (*omdb.Client, error)
+	TVDB(ctx context.Context) (*tvdb.Client, error)
+}
+
+// Downloaders 取下载器（生产环境包装 DownloaderManager 与下载器设置表）。
+type Downloaders interface {
+	// Get 按下载器 ID 取实例与设置。
+	Get(ctx context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error)
+	// ByName 按名字取（完成事件里只有名字）。
+	ByName(ctx context.Context, name string) (downloader.Downloader, models.DownloaderSetting, error)
+	// List 是启用的下载器。
+	List(ctx context.Context) ([]models.DownloaderSetting, error)
+}
+
+// Notice 是一条入库通知（或媒体服务器的播放通知）。Key 相同的只发一次。
+type Notice struct {
+	Key        string
+	Title      string
+	Text       string
+	ChannelIDs []uint
+	// Event 是这条通知对应的事件（消息模板用）
+	Event *notify.Event
+	// Kind 是通知的种类：空串是入库（organized），NoticePlayback 是播放
+	Kind string
+}
+
+// NoticePlayback 是播放通知的种类。
+const NoticePlayback = "playback"
+
+// Notifier 发入库通知（生产环境写 MonitorNotificationLog，由现有的投递器发出）。
+type Notifier func(ctx context.Context, n Notice) error
+
+// Config 是服务的依赖。
+type Config struct {
+	DB          *gorm.DB
+	Cipher      Cipher
+	Recognizer  Recognizer
+	Downloaders Downloaders
+	Notify      Notifier
+	Logger      *zap.SugaredLogger
+	// Now 为空时用 time.Now（测试里换成假的时钟）
+	Now func() time.Time
+	// ServerHTTP 为空时用 server.NewHTTPClient（测试里换成 httptest 的）
+	ServerHTTP *http.Client
+	// Douban 是刮削时补充简介与评分用的豆瓣（媒体库的数据来源选了豆瓣时才用）；为空时用 TMDB 的
+	Douban Douban
+	// Bangumi 是刮削动画时补充中文简介、评分与每一集标题用的 Bangumi（媒体库的数据来源选了它时才用）；为空时用 TMDB 的
+	Bangumi metadata.BangumiAPI
+	// SubtitleSites 是下载站点字幕用的站点（媒体库开了「下载站点字幕」时才用）；为空时不取站点字幕
+	SubtitleSites SubtitleSites
+	// CSFHTTP 为空时用 csf.NewHTTPClient（测试里换成 httptest 的）
+	CSFHTTP *http.Client
+}
+
+// MediaHint 是订阅（追剧）推送或认领的种子要的条目与媒体库。
+type MediaHint struct {
+	// LibraryID 是订阅指定的媒体库，0 是没指定（按类型自动选）
+	LibraryID uint
+	// MediaType、TMDBID 是订阅的条目
+	MediaType string
+	TMDBID    int
+	// EpisodeGroup 是追剧选的 TMDB 剧集组（空串是没选）：文件名里的季集按它换成 TMDB 默认的季集再命名
+	EpisodeGroup string
+}
+
+// MediaFor 按下载器里种子的编号找订阅推送或认领的种子，回那个订阅的条目与媒体库。不是订阅的种子 found 为假；
+// 查不了时返回错误（这次整理不自动识别、不自动选库，稍后重试）。
+type MediaFor func(ctx context.Context, downloaderID uint, hash string) (hint MediaHint, found bool, err error)
+
+// Douban 在豆瓣上找条目（生产环境是 *douban.Client）。
+type Douban interface {
+	// Find 按名字与年份找同一部（剧集是同一季），没找到时返回 nil、nil
+	Find(ctx context.Context, q douban.Query) (*douban.Subject, error)
+	// Subject 按豆瓣编号取条目
+	Subject(ctx context.Context, kind, id string) (*douban.Subject, error)
+}
+
+// Service 是整理入库服务。
+type Service struct {
+	cfg Config
+	// mu 串行化整理：一次只整理一个种子，同一个文件不会被两种触发方式同时整理
+	mu sync.Mutex
+	// setMu 串行化设置、媒体库、路径映射与媒体服务器的写入
+	setMu sync.Mutex
+
+	jobs    chan job
+	qmu     sync.Mutex
+	queued  map[string]bool
+	backoff map[string]backoffState
+	// retrying 是到期重试排上队、还没整理完的记录（retryDue 先清掉了它们的重试时间，见 Retrying）
+	retrying map[uint]bool
+	// watchBusy 是扫描排上了、还没整理完的目录监控的项（按 queueHash），整理完就拿掉：整理期间的扫描不再排它
+	watchBusy map[string]bool
+
+	runMu   sync.Mutex
+	running bool
+
+	// rt 是实时目录监控（见 realtime.go）
+	rt realtime
+	// imp 是导入已有媒体库的扫描（见 importer.go）
+	imp importer
+	// idx 是媒体服务器索引的同步排期，hooks 是 Webhook 的限流，hookSeq 是播放通知的序号（见 index.go、webhook.go）
+	idx     indexState
+	hooks   hookLimiter
+	hookSeq atomic.Uint64
+
+	// timesMu 保护下面三个时间（见 Runs）：scanAt 是上一次定期扫描；watchTick 是后台节拍上一次做目录监控扫描
+	// （按它排下一次，没有开着的目录时也算），watchAt 是其中真的扫了目录的那一次（页面上的「上次」）
+	timesMu                    sync.Mutex
+	scanAt, watchTick, watchAt time.Time
+	cancel                     context.CancelFunc
+	wg                         sync.WaitGroup
+
+	// mediaFor 是订阅的条目与媒体库的查询（订阅服务在整理服务之后建好，见 SetMediaFor）
+	mediaMu  sync.RWMutex
+	mediaFor MediaFor
+	// afterOrganize 是整理完一个下载器里的种子、有文件入库以后的回调（订阅马上刷新这个种子，见 SetAfterOrganize）
+	afterOrganize func(infoHash string)
+}
+
+// SetMediaFor 接上订阅的条目与媒体库的查询（为空时都自动识别、按类型自动选库）。
+func (s *Service) SetMediaFor(f MediaFor) {
+	s.mediaMu.Lock()
+	s.mediaFor = f
+	s.mediaMu.Unlock()
+}
+
+// SetAfterOrganize 接上整理完成的回调：后台 worker 每整理完一个下载器里的种子、有文件入库（新整理的或本来就整理好的）以后
+// 调用它，参数是下载器读出来的小写 info hash（不是任务编号：Transmission 的任务编号是十进制数字）。不管有没有人在等这次整理
+// 的结果都调（手动整理等不到先回了、请求取消了也一样）；回调在 worker 里同步调用，不能阻塞。为空时不调。
+func (s *Service) SetAfterOrganize(f func(infoHash string)) {
+	s.mediaMu.Lock()
+	s.afterOrganize = f
+	s.mediaMu.Unlock()
+}
+
+func (s *Service) afterOrganizeHook() func(string) {
+	s.mediaMu.RLock()
+	defer s.mediaMu.RUnlock()
+	return s.afterOrganize
+}
+
+func (s *Service) followMedia() MediaFor {
+	s.mediaMu.RLock()
+	defer s.mediaMu.RUnlock()
+	return s.mediaFor
+}
+
+// New 建一个服务（还没开始后台循环，见 Start）。
+func New(cfg Config) *Service {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = zap.NewNop().Sugar()
+	}
+	return &Service{
+		cfg:      cfg,
+		jobs:     make(chan job, jobQueueSize),
+		queued:   map[string]bool{},
+		backoff:  map[string]backoffState{},
+		retrying: map[uint]bool{},
+		rt:       realtime{sync: make(chan chan struct{}, 1)},
+		idx:      newIndexState(),
+	}
+}
+
+// 默认值与上限。
+const (
+	DefaultScanIntervalMin = 60
+	MinScanIntervalMin     = 10
+	MaxScanIntervalMin     = 1440
+	DefaultMinVideoMB      = 50
+	MaxMinVideoMB          = 10240
+	maxScopeItems          = 50
+	maxScopeItemLen        = 512
+)
+
+// Settings 是给界面看与保存用的整理设置。
+type Settings struct {
+	AutoEnabled         bool       `json:"auto_enabled"`
+	AutoSince           *time.Time `json:"auto_since,omitempty"`
+	ScanEnabled         bool       `json:"scan_enabled"`
+	ScanIntervalMin     int        `json:"scan_interval_min"`
+	Downloaders         []uint     `json:"downloaders"`
+	Categories          []string   `json:"categories"`
+	Tags                []string   `json:"tags"`
+	SavePaths           []string   `json:"save_paths"`
+	MinVideoMB          int        `json:"min_video_mb"`
+	NotifyChannels      []uint     `json:"notify_channels"`
+	DeleteLinksOnRemove bool       `json:"delete_links_on_remove"`
+	// WatchIntervalMin 是扫描监控目录的间隔（分钟）
+	WatchIntervalMin int `json:"watch_interval_min"`
+	// WatchRealtime 是实时目录监控：监控目录里有改动时提前扫描那一项（默认开）
+	WatchRealtime bool `json:"watch_realtime"`
+}
+
+// SettingsInput 是保存设置的请求（AutoSince 由服务在打开自动整理时记下）。
+type SettingsInput struct {
+	AutoEnabled         bool     `json:"auto_enabled"`
+	ScanEnabled         bool     `json:"scan_enabled"`
+	ScanIntervalMin     int      `json:"scan_interval_min"`
+	Downloaders         []uint   `json:"downloaders"`
+	Categories          []string `json:"categories"`
+	Tags                []string `json:"tags"`
+	SavePaths           []string `json:"save_paths"`
+	MinVideoMB          int      `json:"min_video_mb"`
+	NotifyChannels      []uint   `json:"notify_channels"`
+	DeleteLinksOnRemove bool     `json:"delete_links_on_remove"`
+	// WatchIntervalMin 是扫描监控目录的间隔（分钟）；0 用默认值
+	WatchIntervalMin int `json:"watch_interval_min"`
+	// WatchRealtime 是实时目录监控；不给时不改
+	WatchRealtime *bool `json:"watch_realtime,omitempty"`
+}
+
+func (s *Service) loadSettings(ctx context.Context) (models.MediaOrganizeSetting, error) {
+	var row models.MediaOrganizeSetting
+	err := s.cfg.DB.WithContext(ctx).Where("id = ?", 1).Limit(1).Find(&row).Error
+	if err != nil {
+		return row, fmt.Errorf("读取整理设置失败: %w", err)
+	}
+	row.ID = 1
+	return row, nil
+}
+
+func decodeIDs(raw string) []uint {
+	var ids []uint
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &ids)
+	}
+	if ids == nil {
+		ids = []uint{}
+	}
+	return ids
+}
+
+func splitList(raw, sep string) []string {
+	out := []string{}
+	for _, p := range strings.Split(raw, sep) {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func viewSettings(row models.MediaOrganizeSetting) Settings {
+	v := Settings{
+		AutoEnabled: row.AutoEnabled, AutoSince: row.AutoSince, ScanEnabled: row.ScanEnabled,
+		ScanIntervalMin: row.ScanIntervalMin, Downloaders: decodeIDs(row.ScopeDownloaders),
+		Categories: splitList(row.ScopeCategories, ","), Tags: splitList(row.ScopeTags, ","),
+		SavePaths: splitList(row.ScopeSavePaths, "\n"), MinVideoMB: row.MinVideoMB,
+		NotifyChannels: decodeIDs(row.NotifyChannels), DeleteLinksOnRemove: row.DeleteLinksOnRemove,
+		WatchIntervalMin: row.WatchIntervalMin, WatchRealtime: !row.WatchRealtimeOff,
+	}
+	if v.ScanIntervalMin <= 0 {
+		v.ScanIntervalMin = DefaultScanIntervalMin
+	}
+	if v.WatchIntervalMin <= 0 {
+		v.WatchIntervalMin = DefaultWatchIntervalMin
+	}
+	if v.MinVideoMB <= 0 {
+		v.MinVideoMB = DefaultMinVideoMB
+	}
+	return v
+}
+
+// Settings 返回当前的整理设置（没有保存过时是默认值）。
+func (s *Service) Settings(ctx context.Context) (Settings, error) {
+	row, err := s.loadSettings(ctx)
+	if err != nil {
+		return Settings{}, err
+	}
+	return viewSettings(row), nil
+}
+
+func cleanStrings(in []string, what, sep string) ([]string, error) {
+	out := []string{}
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" || slices.Contains(out, v) {
+			continue
+		}
+		if len(v) > maxScopeItemLen || strings.Contains(v, sep) {
+			return nil, fmt.Errorf("%w: %s「%s」太长或含有分隔符", ErrInvalid, what, v)
+		}
+		out = append(out, v)
+	}
+	if len(out) > maxScopeItems {
+		return nil, fmt.Errorf("%w: %s最多 %d 项", ErrInvalid, what, maxScopeItems)
+	}
+	return out, nil
+}
+
+func cleanIDs(in []uint, what string) ([]uint, error) {
+	out := []uint{}
+	for _, id := range in {
+		if id == 0 {
+			return nil, fmt.Errorf("%w: %s编号无效", ErrInvalid, what)
+		}
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	if len(out) > maxScopeItems {
+		return nil, fmt.Errorf("%w: %s最多 %d 项", ErrInvalid, what, maxScopeItems)
+	}
+	return out, nil
+}
+
+// SaveSettings 保存整理设置。打开自动整理时记下时间：只整理之后下载完成的种子。
+func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings, error) {
+	if in.ScanIntervalMin == 0 {
+		in.ScanIntervalMin = DefaultScanIntervalMin
+	}
+	if in.ScanIntervalMin < MinScanIntervalMin || in.ScanIntervalMin > MaxScanIntervalMin {
+		return Settings{}, fmt.Errorf("%w: 扫描间隔要在 %d 到 %d 分钟之间", ErrInvalid, MinScanIntervalMin, MaxScanIntervalMin)
+	}
+	if in.WatchIntervalMin == 0 {
+		in.WatchIntervalMin = DefaultWatchIntervalMin
+	}
+	if in.WatchIntervalMin < MinWatchIntervalMin || in.WatchIntervalMin > MaxWatchIntervalMin {
+		return Settings{}, fmt.Errorf("%w: 目录监控的扫描间隔要在 %d 到 %d 分钟之间", ErrInvalid, MinWatchIntervalMin, MaxWatchIntervalMin)
+	}
+	if in.MinVideoMB == 0 {
+		in.MinVideoMB = DefaultMinVideoMB
+	}
+	if in.MinVideoMB < 1 || in.MinVideoMB > MaxMinVideoMB {
+		return Settings{}, fmt.Errorf("%w: 视频最小体积要在 1 到 %d MB 之间", ErrInvalid, MaxMinVideoMB)
+	}
+	dls, err := cleanIDs(in.Downloaders, "下载器")
+	if err != nil {
+		return Settings{}, err
+	}
+	chans, err := cleanIDs(in.NotifyChannels, "通知通道")
+	if err != nil {
+		return Settings{}, err
+	}
+	cats, err := cleanStrings(in.Categories, "分类", ",")
+	if err != nil {
+		return Settings{}, err
+	}
+	tags, err := cleanStrings(in.Tags, "标签", ",")
+	if err != nil {
+		return Settings{}, err
+	}
+	paths, err := cleanStrings(in.SavePaths, "保存路径", "\n")
+	if err != nil {
+		return Settings{}, err
+	}
+	// 保存以后实时监控按新的开关重新核对（在放开 setMu 以后）
+	defer s.resyncRealtime(ctx)
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	row, err := s.loadSettings(ctx)
+	if err != nil {
+		return Settings{}, err
+	}
+	switch {
+	case !in.AutoEnabled:
+		row.AutoSince = nil
+	case !row.AutoEnabled || row.AutoSince == nil:
+		now := s.cfg.Now()
+		row.AutoSince = &now
+	}
+	dlJSON, _ := json.Marshal(dls)
+	chJSON, _ := json.Marshal(chans)
+	row.AutoEnabled, row.ScanEnabled, row.ScanIntervalMin = in.AutoEnabled, in.ScanEnabled, in.ScanIntervalMin
+	row.ScopeDownloaders, row.NotifyChannels = string(dlJSON), string(chJSON)
+	row.ScopeCategories, row.ScopeTags, row.ScopeSavePaths = strings.Join(cats, ","), strings.Join(tags, ","), strings.Join(paths, "\n")
+	row.MinVideoMB, row.DeleteLinksOnRemove, row.WatchIntervalMin = in.MinVideoMB, in.DeleteLinksOnRemove, in.WatchIntervalMin
+	if in.WatchRealtime != nil {
+		row.WatchRealtimeOff = !*in.WatchRealtime
+	}
+	row.UpdatedAt = s.cfg.Now()
+	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"auto_enabled", "auto_since", "scan_enabled", "scan_interval_min", "scope_downloaders", "scope_categories",
+			"scope_tags", "scope_save_paths", "min_video_mb", "notify_channels", "delete_links_on_remove", "watch_interval_min",
+			"watch_realtime_off", "updated_at",
+		}),
+	}).Create(&row).Error; err != nil {
+		return Settings{}, fmt.Errorf("保存整理设置失败: %w", err)
+	}
+	return viewSettings(row), nil
+}
+
+// scope 是自动整理与定期扫描的范围。
+type scope struct {
+	downloaders []uint
+	categories  []string
+	tags        []string
+	savePaths   []string
+}
+
+func scopeOf(v Settings) scope {
+	return scope{downloaders: v.Downloaders, categories: v.Categories, tags: v.Tags, savePaths: v.SavePaths}
+}
+
+// match 报告种子在不在范围里：每一项为空时不限制，不为空时要满足其中之一。
+func (sc scope) match(dlID uint, t downloader.Torrent) bool {
+	if len(sc.downloaders) > 0 && !slices.Contains(sc.downloaders, dlID) {
+		return false
+	}
+	if len(sc.categories) > 0 && !slices.ContainsFunc(sc.categories, func(c string) bool { return strings.EqualFold(c, t.Category) }) {
+		return false
+	}
+	if len(sc.tags) > 0 {
+		have := splitList(t.Tags, ",")
+		if !slices.ContainsFunc(sc.tags, func(want string) bool {
+			return slices.ContainsFunc(have, func(h string) bool { return strings.EqualFold(h, want) })
+		}) {
+			return false
+		}
+	}
+	if len(sc.savePaths) > 0 {
+		maps := make([]models.DownloaderPathMap, 0, len(sc.savePaths))
+		for _, p := range sc.savePaths {
+			maps = append(maps, models.DownloaderPathMap{SourcePrefix: p, TargetPrefix: p})
+		}
+		if _, ok := models.MapTransferPath(maps, t.SavePath); !ok {
+			return false
+		}
+	}
+	return true
+}

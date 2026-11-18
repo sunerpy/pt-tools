@@ -16,6 +16,8 @@ var AudiencesDefinition = &v2.SiteDefinition{
 	TimezoneOffset: "+0800",
 	RateLimit:      0.5,
 	RateBurst:      2,
+	// issue #862：站点已取消签到，attendance.php 回 404
+	Attendance: &v2.AttendanceConfig{Unsupported: "Audiences 已取消签到（站点上没有签到页了）"},
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id"},
 		RequestDelay: 500,

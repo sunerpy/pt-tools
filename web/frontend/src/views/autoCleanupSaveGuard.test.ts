@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /*
- * 钉子：自动清理页的全局配置没读回来时，两颗「保存设置」都不能点。
+ * 钉子：自动清理页的全局配置没读回来时，「保存设置」不能点。
  *
  * 读失败（或还在读）时表单停在一整套前端默认值上；save() 会先 GET 一次现有配置，
  * 再用表单里的删种策略整段覆盖上去 —— 等于把服务端真实的删种条件换成默认值。
@@ -20,6 +20,10 @@ vi.mock("@/api", async (orig) => {
   return {
     ...real,
     globalApi: { get: api.getGlobal, save: api.saveGlobal },
+    cleanupApi: {
+      status: vi.fn().mockResolvedValue({ enabled: false, interval_min: 30 }),
+      preview: vi.fn(),
+    },
     maintenanceApi: { preview: vi.fn(), clean: vi.fn() },
   };
 });
@@ -43,7 +47,7 @@ async function mountPage() {
   view = mountView(AutoCleanup);
 }
 
-/** 自动删种卡与做种竞争度卡各有一颗，共用同一份 save() */
+/** 自动删种卡上的一颗（做种竞争度已经并进自动删种，不再有自己的卡） */
 function saveButtons(): HTMLButtonElement[] {
   return [...document.querySelectorAll<HTMLButtonElement>("button")].filter(
     (b) => (b.textContent ?? "").trim() === "保存设置",
@@ -57,15 +61,15 @@ afterEach(() => {
 });
 
 describe("自动清理：配置没读回来时不许保存", () => {
-  it("还在加载：两颗保存键都禁用", async () => {
+  it("还在加载：保存键禁用", async () => {
     api.getGlobal.mockReturnValue(new Promise(() => {}));
     await mountPage();
 
-    await vi.waitFor(() => expect(saveButtons()).toHaveLength(2));
+    await vi.waitFor(() => expect(saveButtons()).toHaveLength(1));
     for (const b of saveButtons()) expect(b.disabled).toBe(true);
   });
 
-  it("加载失败：两颗保存键都禁用，点了也不会把默认值写回服务端", async () => {
+  it("加载失败：保存键禁用，点了也不会把默认值写回服务端", async () => {
     api.getGlobal.mockRejectedValue(new Error("数据库连接失败"));
     await mountPage();
 
@@ -84,7 +88,7 @@ describe("自动清理：配置没读回来时不许保存", () => {
     await mountPage();
 
     await vi.waitFor(() => {
-      expect(saveButtons()).toHaveLength(2);
+      expect(saveButtons()).toHaveLength(1);
       for (const b of saveButtons()) expect(b.disabled).toBe(false);
     });
     saveButtons()[0]!.click();
@@ -93,5 +97,87 @@ describe("自动清理：配置没读回来时不许保存", () => {
     expect(payload.cleanup_max_seed_time_h).toBe(240);
     expect(payload.cleanup_min_ratio).toBe(3);
     expect(payload.cleanup_protect_tags).toBe("keep");
+  });
+});
+
+describe("自动清理：内置的保留标签", () => {
+  it("保护标签前面固定显示 pt-tools-keep，保存时不记进保护标签", async () => {
+    api.getGlobal.mockResolvedValue(structuredClone(SETTINGS));
+    api.saveGlobal.mockResolvedValue(undefined);
+    await mountPage();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="ac-keep-tag"]')).not.toBeNull(),
+    );
+    const keep = document.querySelector('[data-testid="ac-keep-tag"]')!;
+    expect(keep.textContent).toContain("pt-tools-keep");
+    expect(keep.querySelector(".el-tag__close")).toBeNull();
+
+    await vi.waitFor(() => {
+      for (const b of saveButtons()) expect(b.disabled).toBe(false);
+    });
+    saveButtons()[0]!.click();
+    await vi.waitFor(() => expect(api.saveGlobal).toHaveBeenCalledTimes(1));
+    expect(api.saveGlobal.mock.calls[0]![0].cleanup_protect_tags).toBe("keep");
+  });
+});
+
+describe("自动清理：做种竞争度是一条删除条件", () => {
+  it("没有单独的竞争度卡；勾上竞争度、改上限与处理方式、关掉紧急清理以后一起保存", async () => {
+    api.getGlobal.mockResolvedValue({
+      ...structuredClone(SETTINGS),
+      cleanup_disk_protect: true,
+      cleanup_emergency: true,
+      peer_ratio_enabled: false,
+      peer_ratio_max_sl: 30,
+      peer_ratio_remove_data: false,
+    });
+    api.saveGlobal.mockResolvedValue(undefined);
+    await mountPage();
+    await vi.waitFor(() => {
+      for (const b of saveButtons()) expect(b.disabled).toBe(false);
+    });
+    expect(document.body.textContent).not.toContain("做种竞争度监控");
+    expect(document.querySelector('[data-testid="ac-peer-max"]')).toBeNull();
+
+    document.querySelector<HTMLElement>('[data-testid="ac-peer-switch"] input')!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="ac-peer-max"]')).not.toBeNull(),
+    );
+    const max = document.querySelector<HTMLInputElement>('[data-testid="ac-peer-max"] input')!;
+    max.value = "8";
+    max.dispatchEvent(new Event("input", { bubbles: true }));
+    max.dispatchEvent(new Event("change", { bubbles: true }));
+    const del = [
+      ...document.querySelectorAll<HTMLElement>('[data-testid="ac-peer-action"] label'),
+    ].find((l) => (l.textContent ?? "").includes("删除"))!;
+    del.click();
+    document.querySelector<HTMLElement>('[data-testid="ac-emergency"] input')!.click();
+
+    saveButtons()[0]!.click();
+    await vi.waitFor(() => expect(api.saveGlobal).toHaveBeenCalledTimes(1));
+    const payload = api.saveGlobal.mock.calls[0]![0];
+    expect(payload.peer_ratio_enabled).toBe(true);
+    expect(payload.peer_ratio_max_sl).toBe(8);
+    expect(payload.peer_ratio_remove_data).toBe(true);
+    expect(payload.cleanup_emergency).toBe(false);
+  });
+});
+
+describe("自动清理：免费到期的兜底", () => {
+  it("写明只管 RSS 里没选免费结束时处理的免费种子，不受最短保种时间挡", async () => {
+    api.getGlobal.mockResolvedValue(structuredClone(SETTINGS));
+    await mountPage();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="ac-free-expired"]')).not.toBeNull(),
+    );
+    const item = document
+      .querySelector('[data-testid="ac-free-expired"]')!
+      .closest(".el-form-item")!;
+    const text = item.textContent ?? "";
+    expect(text).toContain("其他免费种子免费过了没下完就删");
+    expect(text).toContain("没选免费结束时暂停或删除");
+    expect(text).toContain("最短保种时间");
+    expect(text).not.toContain("与上面的管理范围无关");
   });
 });

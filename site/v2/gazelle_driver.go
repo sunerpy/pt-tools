@@ -19,6 +19,8 @@ type GazelleRequest struct {
 	Action string
 	// Params are the query parameters
 	Params url.Values
+	// RawBody 为 true 时响应体按原始字节返回（种子文件下载），不按 JSON 解析
+	RawBody bool
 }
 
 // GazelleResponse represents a response from Gazelle API
@@ -114,6 +116,7 @@ type GazelleDriver struct {
 	Cookie     string
 	httpClient *SiteHTTPClient
 	userAgent  string
+	siteID     string
 }
 
 // GazelleDriverConfig holds configuration for creating a Gazelle driver
@@ -123,6 +126,8 @@ type GazelleDriverConfig struct {
 	Cookie     string
 	HTTPClient *SiteHTTPClient // Use SiteHTTPClient instead of *http.Client
 	UserAgent  string
+	// SiteID 是站点在 pt-tools 里注册的 ID：搜索结果的代理下载地址 /api/site/{id}/… 按它找站点
+	SiteID string
 }
 
 // NewGazelleDriver creates a new Gazelle driver
@@ -140,6 +145,7 @@ func NewGazelleDriver(config GazelleDriverConfig) *GazelleDriver {
 			IdleConnTimeout:   30 * time.Second,
 			DisableKeepAlives: true,
 			UserAgent:         userAgent,
+			SiteID:            config.SiteID,
 		})
 	}
 
@@ -149,6 +155,7 @@ func NewGazelleDriver(config GazelleDriverConfig) *GazelleDriver {
 		Cookie:     config.Cookie,
 		httpClient: httpClient,
 		userAgent:  userAgent,
+		siteID:     config.SiteID,
 	}
 }
 
@@ -185,8 +192,12 @@ func (d *GazelleDriver) Execute(ctx context.Context, req GazelleRequest) (Gazell
 
 	fullURL := d.BaseURL + "/ajax.php?" + params.Encode()
 
+	accept := "application/json"
+	if req.RawBody {
+		accept = "application/x-bittorrent, */*"
+	}
 	headers := map[string]string{
-		"Accept":     "application/json",
+		"Accept":     accept,
 		"User-Agent": d.userAgent,
 	}
 
@@ -208,12 +219,24 @@ func (d *GazelleDriver) Execute(ctx context.Context, req GazelleRequest) (Gazell
 		StatusCode: resp.StatusCode,
 	}
 
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+	}
+
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return result, ErrInvalidCredentials
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", ErrRateLimited)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return result, &HTTPStatusError{Code: resp.StatusCode}
+	}
+
+	if req.RawBody {
+		return result, nil
 	}
 
 	if err := json.Unmarshal(resp.Body, &result); err != nil {
@@ -269,8 +292,13 @@ func (d *GazelleDriver) ParseSearch(res GazelleResponse) ([]TorrentItem, error) 
 				}
 			}
 
-			// Build download URL
-			item.DownloadURL = fmt.Sprintf("%s/torrents.php?action=download&id=%d", d.BaseURL, t.TorrentID)
+			// 搜索页下载、推送都走 pt-tools 的代理地址（由服务端带 API Key 或 Cookie 取种子）：
+			// 站点页面上的链接网页里跨站取不到，推送也只认代理地址（2026-10-26）
+			if d.siteID != "" {
+				item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%d/download", d.siteID, t.TorrentID)
+			} else {
+				item.DownloadURL = fmt.Sprintf("%s/torrents.php?action=download&id=%d", d.BaseURL, t.TorrentID)
+			}
 
 			items = append(items, item)
 		}
@@ -336,17 +364,15 @@ func (d *GazelleDriver) PrepareDownload(torrentID string) (GazelleRequest, error
 	params.Set("id", torrentID)
 
 	return GazelleRequest{
-		Action: "download",
-		Params: params,
+		Action:  "download",
+		Params:  params,
+		RawBody: true,
 	}, nil
 }
 
 // ParseDownload extracts torrent file data from the response
 func (d *GazelleDriver) ParseDownload(res GazelleResponse) ([]byte, error) {
-	if len(res.RawBody) == 0 {
-		return nil, ErrParseError
-	}
-	return res.RawBody, nil
+	return parseRawTorrentDownload(res.RawBody)
 }
 
 type gazelleTorrentDetailResponse struct {
@@ -403,6 +429,7 @@ func (d *GazelleDriver) GetTorrentDetail(ctx context.Context, guid, link, title 
 		detailTitle = title
 	}
 
+	// 接口没有免费结束时间：DiscountEndTime 留空，免费的规范状态由 Promotion 推出 unknown（不是长期免费）
 	item := &TorrentItem{
 		ID:            torrentID,
 		Title:         detailTitle,
@@ -412,6 +439,7 @@ func (d *GazelleDriver) GetTorrentDetail(ctx context.Context, guid, link, title 
 		Snatched:      torrent.Snatches,
 		SourceSite:    d.BaseURL,
 		DiscountLevel: parseGazelleDiscount(torrent.IsFreeleech, torrent.IsNeutralLeech, torrent.IsPersonalFL),
+		FetchedAt:     time.Now().UTC(),
 	}
 
 	if torrent.Time != "" {
@@ -561,6 +589,7 @@ func createGazelleSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 		BaseURL: config.BaseURL,
 		APIKey:  opts.APIKey,
 		Cookie:  opts.Cookie,
+		SiteID:  config.ID,
 	})
 
 	return NewBaseSite(driver, BaseSiteConfig{

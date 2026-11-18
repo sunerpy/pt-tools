@@ -1,0 +1,349 @@
+package models
+
+import "time"
+
+// 媒体库的种类。
+const (
+	MediaKindMovie = "movie"
+	MediaKindTV    = "tv"
+)
+
+// 整理方式。空串当作硬链接。
+const (
+	MediaModeHardlink = "hardlink"
+	MediaModeCopy     = "copy"
+	MediaModeSymlink  = "symlink"
+	MediaModeMove     = "move"
+	// MediaModeExisting 是导入已有媒体库时记下的文件：导入时就在库里，不是 pt-tools 放进去的（源与目标是同一个文件）。
+	// 只出现在整理记录里，不能选作整理方式
+	MediaModeExisting = "existing"
+)
+
+// MediaLibrary 是一个媒体库：一类条目（电影或剧集，可以只收动画）整理到哪个目录、怎么命名、怎么整理、要不要刮削。
+// 列的默认值一律是零值（GORM 新建时会把零值换成 default）。
+type MediaLibrary struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null;default:'';uniqueIndex" json:"name"`
+	Kind string `gorm:"size:8;not null;default:''" json:"kind"`
+	// Anime 为真时只收 TMDB 类型里有「动画」的条目；同类型里没有这种库时，动画也进普通的库
+	Anime bool `gorm:"not null;default:false" json:"anime"`
+	// Path 是 pt-tools 里看到的库目录（绝对路径）
+	Path string `gorm:"size:1024;not null;default:''" json:"path"`
+	// Template 是命名模板（text/template，不写扩展名）；空串用默认模板
+	Template        string `gorm:"size:1024;not null;default:''" json:"template"`
+	Mode            string `gorm:"size:16;not null;default:''" json:"mode"`
+	Scrape          bool   `gorm:"not null;default:false" json:"scrape"`
+	ScrapeOverwrite bool   `gorm:"not null;default:false" json:"scrape_overwrite"`
+	// ScrapeItems 是刮削要写的内容（逗号分隔，见 scrape.AllItems）；空串是默认的那几项（Logo 以外都写）
+	ScrapeItems string `gorm:"size:128;not null;default:''" json:"-"`
+	// ScrapeImageLang 是海报与 Logo 优先用的语言：空串用 TMDB 给的那张；zh、en、ja；none 是没有文字的
+	ScrapeImageLang string `gorm:"size:8;not null;default:''" json:"scrape_image_lang"`
+	// ScrapeSource 是旧版本的「简介与评分」：空串用 TMDB 的；douban 用豆瓣的（找不到时用 TMDB 的）。ScrapeSources 为空时还按它
+	ScrapeSource string `gorm:"size:16;not null;default:''" json:"scrape_source"`
+	// ScrapeSources 是每一项的数据来源（JSON，见 metadata.Sources：简介、评分、每一集、图片）；空串是都用 TMDB 的
+	ScrapeSources string `gorm:"size:256;not null;default:''" json:"-"`
+	// ClassifyDir 为真时按二级分类（MediaOrganizeSetting.ClassifyRules）放进库目录下的分类目录
+	ClassifyDir bool `gorm:"not null;default:false" json:"classify_dir"`
+	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办：空串不替换，larger 新文件更大时替换
+	OverwriteMode string `gorm:"size:16;not null;default:''" json:"overwrite_mode"`
+	// ScrapeActorZh 为真时刮削的演员名用 TMDB 上的中文译名（前 15 位，没有译名的用原名）
+	ScrapeActorZh bool `gorm:"not null;default:false" json:"scrape_actor_zh"`
+	// ScrapeFill 为真时每周对刮削结果是部分成功或失败的记录补刮一次，ScrapeFilledAt 是上一次补刮的时间
+	ScrapeFill     bool       `gorm:"not null;default:false" json:"scrape_fill"`
+	ScrapeFilledAt *time.Time `json:"scrape_filled_at,omitempty"`
+	// SiteSubtitles 为真时整理出新视频以后到站点上取字幕：种子里没有字幕、种子是从支持的站点（NexusPHP）推送的时
+	SiteSubtitles bool `gorm:"not null;default:false" json:"site_subtitles"`
+	// CSFURL 是 ChineseSubFinder 的地址（空串是不用）；CSFKeyEncrypted 是它的 API Key（加密保存、只写不读）；
+	// CSFPath 是 ChineseSubFinder 里看到的这个库的目录（空串是和 Path 一样）。整理出新视频以后交给它下载字幕
+	CSFURL          string `gorm:"column:csf_url;size:512;not null;default:''" json:"csf_url"`
+	CSFKeyEncrypted string `gorm:"column:csf_key_encrypted;type:text;not null;default:''" json:"-"`
+	CSFPath         string `gorm:"column:csf_path;size:1024;not null;default:''" json:"csf_path"`
+	// 下面四项是新建订阅时带出的下载设置：网页与 App 的编辑页在新建时把它们填进表单，服务器在保存与推送订阅时都不补，
+	// 已有的订阅也不跟着变。DownloadDownloaderID 是推到哪个下载器（0 是不指定）；DownloadSavePath 是下载器里看到的保存目录（不是库目录）；
+	// DownloadCategory、DownloadTags 是分类与标签（标签逗号分开）。都可以空着
+	DownloadDownloaderID uint      `gorm:"not null;default:0" json:"download_downloader_id"`
+	DownloadSavePath     string    `gorm:"size:1024;not null;default:''" json:"download_save_path"`
+	DownloadCategory     string    `gorm:"size:128;not null;default:''" json:"download_category"`
+	DownloadTags         string    `gorm:"size:255;not null;default:''" json:"download_tags"`
+	Enabled              bool      `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+func (MediaLibrary) TableName() string { return "media_libraries" }
+
+// ChooseLibrary 在 libs 里给 kind 类型的条目选媒体库：同类型、启用的库里取第一个；条目是动画（anime）时优先取只收动画的库，
+// 同类型里没有这种库时进普通的库；只收动画的库不收别的条目。都没有时返回 nil。返回的是 libs 里的那一项。
+// 整理（媒体库选「自动」时）与新建订阅（编辑页写「自动」会整理进哪个库）共用，两边选的是同一个库。
+func ChooseLibrary(libs []MediaLibrary, kind string, anime bool) *MediaLibrary {
+	var plain, animeLib *MediaLibrary
+	for i := range libs {
+		l := &libs[i]
+		if !l.Enabled || l.Kind != kind {
+			continue
+		}
+		if l.Anime {
+			if animeLib == nil {
+				animeLib = l
+			}
+		} else if plain == nil {
+			plain = l
+		}
+	}
+	if anime && animeLib != nil {
+		return animeLib
+	}
+	return plain
+}
+
+// MediaPathMap 把下载器里看到的路径换成 pt-tools 里看到的路径（pt-tools 在容器里时两边的挂载点不同）。
+// 换算时取最长的匹配前缀；没有匹配时路径不变。
+type MediaPathMap struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	DownloaderID     uint      `gorm:"not null;uniqueIndex:idx_media_path_map" json:"downloader_id"`
+	DownloaderPrefix string    `gorm:"size:512;not null;uniqueIndex:idx_media_path_map" json:"downloader_prefix"`
+	LocalPrefix      string    `gorm:"size:512;not null;default:''" json:"local_prefix"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+func (MediaPathMap) TableName() string { return "media_path_maps" }
+
+// MediaWatchDir 是监控的目录：放进来的视频（不是下载器里的种子，例如手动拷进来、别的工具下载的）按媒体库整理。
+// 目录下的每一项（一个文件，或一个文件夹）当作一个种子：名字用来识别，里面的视频按媒体库的方式整理。
+type MediaWatchDir struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Path 是 pt-tools 里看到的目录（绝对路径）
+	Path      string    `gorm:"size:1024;not null;uniqueIndex" json:"path"`
+	Enabled   bool      `gorm:"not null;default:false" json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (MediaWatchDir) TableName() string { return "media_watch_dirs" }
+
+// 媒体服务器的种类与刷新方式。
+const (
+	MediaServerEmby     = "emby"
+	MediaServerJellyfin = "jellyfin"
+	MediaServerPlex     = "plex"
+
+	// MediaRefreshPath 只通知整理到的目录（空串也是这个）；MediaRefreshLibrary 刷新整个媒体库。
+	MediaRefreshPath    = "path"
+	MediaRefreshLibrary = "library"
+)
+
+// MediaServer 是整理完后要通知的媒体服务器。Token（Emby、Jellyfin 的 API Key 或 Plex 的 Token）加密保存、只写不读。
+// LocalPrefix → ServerPrefix 把 pt-tools 里的路径换成媒体服务器里看到的路径，两边一样时都留空。
+// 索引（见 internal/media/serverindex）按 IndexHours 定期把服务器里的电影、剧与集记进 media_server_items。
+type MediaServer struct {
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	Name           string     `gorm:"size:64;not null;default:'';uniqueIndex" json:"name"`
+	Kind           string     `gorm:"size:16;not null;default:''" json:"kind"`
+	URL            string     `gorm:"size:512;not null;default:''" json:"url"`
+	TokenEncrypted string     `gorm:"type:text;not null;default:''" json:"-"`
+	Enabled        bool       `gorm:"not null;default:false" json:"enabled"`
+	RefreshMode    string     `gorm:"size:16;not null;default:''" json:"refresh_mode"`
+	LocalPrefix    string     `gorm:"size:512;not null;default:''" json:"local_prefix"`
+	ServerPrefix   string     `gorm:"size:512;not null;default:''" json:"server_prefix"`
+	LastError      string     `gorm:"size:1024;not null;default:''" json:"last_error"`
+	LastRefreshAt  *time.Time `json:"last_refresh_at,omitempty"`
+	// PlayURL 是打开链接用的地址（浏览器能打开的那个）；空串用 URL
+	PlayURL string `gorm:"size:512;not null;default:''" json:"play_url"`
+	// ServerUID 是服务器自己的编号（Emby、Jellyfin 的 Id，Plex 的 machineIdentifier）：拼打开链接，认出换了一台服务器
+	ServerUID string `gorm:"column:server_uid;size:64;not null;default:''" json:"-"`
+	// IndexOff 为真时不同步索引（默认同步，存反过来的，零值就是开）；IndexHours 是同步间隔（小时），0 用默认值
+	IndexOff   bool `gorm:"not null;default:false" json:"-"`
+	IndexHours int  `gorm:"not null;default:0" json:"-"`
+	// IndexedAt 是上一次同步成功的时间，IndexError 是最近一次同步失败的原因（成功时清空），后面三个是同步到的条目数
+	IndexedAt     *time.Time `json:"indexed_at,omitempty"`
+	IndexError    string     `gorm:"size:1024;not null;default:''" json:"index_error"`
+	IndexMovies   int        `gorm:"not null;default:0" json:"index_movies"`
+	IndexSeries   int        `gorm:"not null;default:0" json:"index_series"`
+	IndexEpisodes int        `gorm:"not null;default:0" json:"index_episodes"`
+	// CountLibrary 为真时追剧把这台服务器里有的集算作已入库（整理记录里没有的也算）
+	CountLibrary bool `gorm:"not null;default:false" json:"count_library"`
+	// ResumeUserID、ResumeUserName 是继续观看用的用户（Emby、Jellyfin）；空串不取继续观看
+	ResumeUserID   string `gorm:"size:64;not null;default:''" json:"resume_user_id"`
+	ResumeUserName string `gorm:"size:128;not null;default:''" json:"resume_user_name"`
+	// WebhookTokenHash 是 Webhook 令牌的 SHA-256（十六进制，令牌本身不存）；空串没开 Webhook。
+	// WebhookAt、WebhookEvent 是最近一次收到的时间与事件
+	WebhookTokenHash string     `gorm:"size:64;not null;default:''" json:"-"`
+	WebhookAt        *time.Time `json:"webhook_at,omitempty"`
+	WebhookEvent     string     `gorm:"size:64;not null;default:''" json:"webhook_event"`
+	// PlaybackChannels 是播放通知发往的通道 ID（JSON 数组）；空的不发
+	PlaybackChannels string    `gorm:"type:text;not null;default:''" json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+func (MediaServer) TableName() string { return "media_servers" }
+
+// MediaOrganizeSetting 是整理入库的设置（只有一行，ID 为 1）。
+type MediaOrganizeSetting struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// AutoEnabled：pt-tools 推送的种子下载完成后自动整理。AutoSince 是打开的时间，只整理之后完成的种子
+	AutoEnabled bool       `gorm:"not null;default:false" json:"auto_enabled"`
+	AutoSince   *time.Time `json:"auto_since,omitempty"`
+	// ScanEnabled：按范围定期扫描下载器里已完成的种子（不是 pt-tools 推送的也整理）
+	ScanEnabled     bool `gorm:"not null;default:false" json:"scan_enabled"`
+	ScanIntervalMin int  `gorm:"not null;default:0" json:"scan_interval_min"`
+	// 范围：下载器 ID（JSON 数组）、分类与标签（逗号分隔）、保存路径前缀（换行分隔）；空的一项不限制
+	ScopeDownloaders string `gorm:"type:text;not null;default:''" json:"-"`
+	ScopeCategories  string `gorm:"size:1024;not null;default:''" json:"-"`
+	ScopeTags        string `gorm:"size:1024;not null;default:''" json:"-"`
+	ScopeSavePaths   string `gorm:"type:text;not null;default:''" json:"-"`
+	// MinVideoMB 是视频文件的最小体积（MB），更小的当作样片跳过；0 用默认值
+	MinVideoMB int `gorm:"not null;default:0" json:"min_video_mb"`
+	// NotifyChannels 是入库通知发往的通道 ID（JSON 数组）；空的不通知
+	NotifyChannels string `gorm:"type:text;not null;default:''" json:"-"`
+	// DeleteLinksOnRemove：种子连数据一起删掉后，把从它整理出的硬链接与软链接也删掉（复制的文件不删）
+	DeleteLinksOnRemove bool `gorm:"not null;default:false" json:"delete_links_on_remove"`
+	// WatchIntervalMin 是目录监控扫描的间隔（分钟）；0 用默认值
+	WatchIntervalMin int `gorm:"not null;default:0" json:"watch_interval_min"`
+	// WatchRealtimeOff 是关掉了实时目录监控（默认开着，存反过来的，零值就是开）
+	WatchRealtimeOff bool `gorm:"not null;default:false" json:"-"`
+	// ClassifyRules 是二级分类的规则（JSON，见 organize.ClassifyRules）；空串是没有规则
+	ClassifyRules string    `gorm:"type:text;not null;default:''" json:"-"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+func (MediaOrganizeSetting) TableName() string { return "media_organize_settings" }
+
+// 整理记录的状态与触发方式。
+const (
+	MediaTransferDone    = "done"
+	MediaTransferFailed  = "failed"
+	MediaTransferSkipped = "skipped"
+	// MediaTransferRemoved 是库里的文件已经删掉的记录（删除记录时连文件一起删，或种子连数据删掉后清理了入库链接）
+	MediaTransferRemoved = "removed"
+
+	MediaTriggerAuto   = "auto"
+	MediaTriggerScan   = "scan"
+	MediaTriggerManual = "manual"
+	// MediaTriggerWatch 是目录监控发现的（不是下载器里的种子）
+	MediaTriggerWatch = "watch"
+	// MediaTriggerImport 是导入已有媒体库时记下的（见 MediaModeExisting）
+	MediaTriggerImport = "import"
+)
+
+// 失败与跳过的整理记录的分类（FailKind）。整理成的记录为空；升级前的失败、跳过记录也为空，当作其他。
+const (
+	// MediaFailRecognize 是没识别出来（没填 TMDB Key、TMDB 上没有可靠的匹配、取不到条目详情）
+	MediaFailRecognize = "recognize"
+	// MediaFailLibrary 是没有媒体库、媒体库不对（类型、命名模板、二级分类）
+	MediaFailLibrary = "library"
+	// MediaFailPath 是 pt-tools 里找不到文件，要加路径映射
+	MediaFailPath = "path"
+	// MediaFailFilesystem 是跨文件系统、没有权限这类文件系统的问题
+	MediaFailFilesystem = "filesystem"
+	// MediaFailExists 是目标位置已经有别的文件
+	MediaFailExists = "exists"
+	// MediaFailSource 是源文件不在了
+	MediaFailSource = "source"
+	// MediaFailDisc 是整理不了的原盘与镜像（剧集原盘、几张原盘、剧集里的 ISO 等）
+	MediaFailDisc = "disc"
+	// MediaFailOther 是其他
+	MediaFailOther = "other"
+)
+
+// MediaFailKinds 是所有的失败分类，按页面上的顺序。
+var MediaFailKinds = []string{
+	MediaFailRecognize, MediaFailLibrary, MediaFailPath, MediaFailFilesystem,
+	MediaFailExists, MediaFailSource, MediaFailDisc, MediaFailOther,
+}
+
+// 刮削的结果（整理记录的 ScrapeStatus）。空串是没刮削过（媒体库关着刮削，或升级前整理的）。
+const (
+	MediaScrapeOK = "ok"
+	// MediaScrapePartial 是有的文件没写成、或有来源出错（用了 TMDB 的），ScrapeNote 写明
+	MediaScrapePartial = "partial"
+	// MediaScrapeFailed 是出了错、什么也没写成
+	MediaScrapeFailed = "failed"
+)
+
+// MediaTransferHistory 是一个视频文件的整理记录。源文件（pt-tools 里的路径）唯一：同一个文件只整理一次，
+// 同一事件重复到达或几种触发方式碰到一起都不会重复整理。字幕跟着视频一起整理，目标路径记在 Extras 里。
+type MediaTransferHistory struct {
+	ID             uint   `gorm:"primaryKey" json:"id"`
+	DownloaderID   uint   `gorm:"not null;default:0;index" json:"downloader_id"`
+	DownloaderName string `gorm:"size:64;not null;default:''" json:"downloader_name"`
+	// WatchDirID 是目录监控的目录（MediaWatchDir）：不为 0 时这条不是下载器里的种子，DownloaderID 为 0，TorrentName 是目录下那一项的名字
+	WatchDirID  uint   `gorm:"not null;default:0;index" json:"watch_dir_id"`
+	InfoHash    string `gorm:"size:64;not null;default:'';index" json:"info_hash"`
+	TaskID      string `gorm:"size:128;not null;default:''" json:"task_id"`
+	TorrentName string `gorm:"size:512;not null;default:''" json:"torrent_name"`
+	LibraryID   uint   `gorm:"not null;default:0;index" json:"library_id"`
+	SourcePath  string `gorm:"size:2048;not null;uniqueIndex" json:"source_path"`
+	// SaveRoot 是整理时种子保存目录在 pt-tools 里的路径：清理入库链接前确认它还在（下载目录没挂载时不清理）
+	SaveRoot   string `gorm:"size:2048;not null;default:''" json:"-"`
+	TargetPath string `gorm:"size:2048;not null;default:''" json:"target_path"`
+	// Extras 是一起整理的字幕与刮削写的文件（JSON 数组，带文件编号）：删除库里的文件时只删这些
+	Extras string `gorm:"type:text;not null;default:''" json:"-"`
+	Mode   string `gorm:"size:16;not null;default:''" json:"mode"`
+	// ChosenMode 是手动整理时选的整理方式（空串是跟媒体库）：重试按它整理，Mode 是实际用的方式
+	ChosenMode string `gorm:"size:16;not null;default:''" json:"chosen_mode"`
+	MediaType  string `gorm:"size:8;not null;default:''" json:"media_type"`
+	TMDBID     int    `gorm:"column:tmdb_id;not null;default:0" json:"tmdb_id"`
+	Title      string `gorm:"size:255;not null;default:''" json:"title"`
+	Year       int    `gorm:"not null;default:0" json:"year"`
+	Season     int    `gorm:"not null;default:0" json:"season"`
+	Episode    int    `gorm:"not null;default:0" json:"episode"`
+	EpisodeEnd int    `gorm:"not null;default:0" json:"episode_end"`
+	Size       int64  `gorm:"not null;default:0" json:"size"`
+	Status     string `gorm:"size:16;not null;default:'';index" json:"status"`
+	Message    string `gorm:"size:1024;not null;default:''" json:"message"`
+	// FailKind 是失败与跳过的分类（MediaFailRecognize 等）；整理成的为空，升级前的失败、跳过记录也为空（当作其他）
+	FailKind string `gorm:"size:16;not null;default:''" json:"fail_kind"`
+	Attempts int    `gorm:"not null;default:0" json:"attempts"`
+	// NextRetryAt 是失败后下次自动重试的时间；为空的不自动重试（例如没识别出来，要先纠正）
+	NextRetryAt *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
+	// TargetFileID 是整理出的文件的设备号与 inode（Windows 是卷序列号与文件索引），删除库里的文件前用它确认还是这个文件
+	TargetFileID string `gorm:"size:64;not null;default:''" json:"-"`
+	// SourceFileID 是整理时源文件的编号（同 TargetFileID 的格式）：目录监控按它认同一个位置上是不是换成了另一个文件。
+	// 下载器的种子不记（种子按 info hash 认）
+	SourceFileID string `gorm:"size:64;not null;default:''" json:"-"`
+	// RootPath 是整理时算剧集目录、电影有没有自己的目录的起点：库目录，按二级分类放进子目录时是分类目录（重新刮削用）。
+	// 升级前的记录为空
+	RootPath string `gorm:"size:2048;not null;default:''" json:"-"`
+	// ScrapeStatus 是上一次刮削的结果（MediaScrapeOK 等），ScrapeNote 是出的问题与说明，ScrapedAt 是刮削的时间
+	ScrapeStatus string     `gorm:"size:16;not null;default:''" json:"scrape_status"`
+	ScrapeNote   string     `gorm:"size:1024;not null;default:''" json:"scrape_note"`
+	ScrapedAt    *time.Time `json:"scraped_at,omitempty"`
+	Trigger      string     `gorm:"size:16;not null;default:''" json:"trigger"`
+	// MatchSource 是条目从哪来：manual（手动指定）、history（沿用之前整理用的）、subscription（订阅的）、push（推送时说明的），
+	// 或者媒体识别的来源（纠正、IMDb 编号、搜索等）。升级前的记录为空
+	MatchSource string `gorm:"size:16;not null;default:''" json:"match_source"`
+	// KeepLinks 是在条目详情里删除时选了留着库里的文件、种子连数据删掉了：打开了「删种时一并删除入库链接」也不删这条的入库链接。
+	// 同一个源文件重新整理时清掉
+	KeepLinks bool      `gorm:"not null;default:false" json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (MediaTransferHistory) TableName() string { return "media_transfer_histories" }
+
+// MediaReplaceJournal 是一次进行中的「同名文件替换」（覆盖策略）：新文件先放在 Temp，旧文件挪到 Backup，
+// 新文件放到 Target 以后与两条整理记录在同一个事务里写好并标成 Committed，收尾删掉 Backup 后删掉这一行。
+// 中途 pt-tools 退出了，下次启动时按它恢复：没写好记录的撤回（旧文件放回原处），写好了的收尾。
+type MediaReplaceJournal struct {
+	ID uint `gorm:"primaryKey"`
+	// OldID 是被换掉的整理记录
+	OldID uint `gorm:"not null;default:0"`
+	// Source 与 Mode 是新文件的源文件与整理方式
+	Source string `gorm:"size:2048;not null;default:''"`
+	Mode   string `gorm:"size:16;not null;default:''"`
+	Target string `gorm:"size:2048;not null;default:''"`
+	Temp   string `gorm:"size:2048;not null;default:''"`
+	// TempID 是放好的临时文件的文件编号（新文件放到 Target 以后还是它）
+	TempID string `gorm:"size:64;not null;default:''"`
+	Backup string `gorm:"size:2048;not null;default:''"`
+	// BackupID 是挪到 Backup 的旧文件的文件编号（确认过是旧记录放的那个以后记下），收尾时只删编号还对得上的
+	BackupID string `gorm:"size:64;not null;default:''"`
+	// Subs 是新文件的字幕（JSON 数组，每项 source、target）：旧字幕删掉以后才放，收尾时放好并记进新记录
+	Subs      string    `gorm:"type:text;not null;default:''"`
+	Committed bool      `gorm:"not null;default:false"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (MediaReplaceJournal) TableName() string { return "media_replace_journals" }

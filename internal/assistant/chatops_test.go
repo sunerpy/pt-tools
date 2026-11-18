@@ -1,0 +1,353 @@
+package assistant
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/mcp"
+	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/models"
+)
+
+type fakeReplier struct {
+	mu   sync.Mutex
+	sent []string
+	wake chan struct{}
+}
+
+func newFakeReplier() *fakeReplier { return &fakeReplier{wake: make(chan struct{}, 64)} }
+
+func (f *fakeReplier) Reply(_ context.Context, _ notify.InboundMessage, r chatops.Reply) error {
+	f.mu.Lock()
+	f.sent = append(f.sent, r.Text)
+	f.mu.Unlock()
+	f.wake <- struct{}{}
+	return nil
+}
+
+func (f *fakeReplier) texts() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.sent...)
+}
+
+// waitFor 等到发出去的回复里有一条含 want。
+func (f *fakeReplier) waitFor(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		for _, s := range f.texts() {
+			if strings.Contains(s, want) {
+				return
+			}
+		}
+		select {
+		case <-f.wake:
+		case <-deadline:
+			t.Fatalf("等不到含「%s」的回复，已发：%q", want, f.texts())
+		}
+	}
+}
+
+func chatopsEnv(t *testing.T) (*env, *ChatOpsHandler, *fakeReplier) {
+	t.Helper()
+	e := newEnv(t)
+	_, err := e.svc.SaveSettings(context.Background(), SettingsInput{
+		Enabled: true, BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model", ChatOps: true,
+	})
+	require.NoError(t, err)
+	rp := newFakeReplier()
+	return e, NewChatOpsHandler(e.svc, rp), rp
+}
+
+func inbound(text string, admin bool) chatops.InboundAssistantMessage {
+	return chatops.InboundAssistantMessage{
+		Msg: notify.InboundMessage{ChannelType: "telegram", SourceConfID: 7, ChannelUserID: "u-1", ChatID: "c-1", Text: text},
+		Src: chatops.Source{ChannelType: "telegram", ChannelConfID: 7, ChannelUserID: "u-1", Username: "alice", BindingID: 3, PtAdmin: admin},
+	}
+}
+
+var chatopsAdmin = Actor{Owner: "chatops:3", Entry: models.AssistantEntryChatOps}
+
+func TestChatOpsAnswersAsyncInRollingConversation(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	ctx := context.Background()
+	assert.True(t, h.Enabled(ctx))
+	e.llm.push(reply{text: "**站点**都正常。"}, reply{text: "还在呢。"})
+
+	r, result := h.Handle(ctx, inbound("站点怎么样", true))
+	assert.Equal(t, "success", result)
+	assert.Empty(t, r.Text, "不在入站路径上等回答")
+	rp.waitFor(t, "站点都正常。")
+	assert.NotContains(t, strings.Join(rp.texts(), "\n"), "**", "通知渠道按纯文本发")
+
+	// 等第一个运行结束再发第二条（滚动会话：同一个会话）
+	conv, ok, err := e.svc.LatestConversation(ctx, chatopsAdmin)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Eventually(t, func() bool { return !e.svc.isRunning(conv.ID) }, 5*time.Second, 10*time.Millisecond)
+	_, result = h.Handle(ctx, inbound("还在吗", true))
+	assert.Equal(t, "success", result)
+	rp.waitFor(t, "还在呢。")
+	again, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
+	assert.Equal(t, conv.ID, again.ID, "同一个绑定接着用同一个会话")
+	second := e.llm.requests()[1].Messages
+	assert.Equal(t, "站点怎么样", second[1]["content"], "历史里有上一轮")
+	assert.Equal(t, models.AssistantEntryChatOps, conv.Entry)
+}
+
+func TestChatOpsBusyRepliesImmediately(t *testing.T) {
+	e, h, _ := chatopsEnv(t)
+	block := make(chan struct{})
+	defer close(block)
+	e.llm.push(reply{text: "想想", block: block})
+	ctx := context.Background()
+	_, result := h.Handle(ctx, inbound("第一个", true))
+	require.Equal(t, "success", result)
+	<-e.llm.started
+	r, result := h.Handle(ctx, inbound("第二个", true))
+	assert.Equal(t, "denied:busy", result)
+	assert.Contains(t, r.Text, "还在回答")
+}
+
+func TestChatOpsConfirmationByReply(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	e.svc.confirmUnit = time.Minute
+	e.llm.push(call("c1", "pause_torrent", `{"downloader_id":1,"task_id":"abc"}`), reply{text: "暂停好了。"})
+	ctx := context.Background()
+	_, result := h.Handle(ctx, inbound("暂停 abc", true))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "需要你确认：暂停下载器「qb」里的「Fake.Movie.2026」")
+	assert.Empty(t, e.backend.writes())
+
+	// 两条「确认」同时到：只有一条算数，操作执行一次
+	var wg sync.WaitGroup
+	results := make([]string, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, results[i] = h.Handle(ctx, inbound("确认！", true))
+		}()
+	}
+	wg.Wait()
+	// 赢的一条批准；另一条要么撞上条件更新（已经处理过），要么到得晚、确认已经没了，当成新问题撞上进行中的运行
+	approved := 0
+	for _, r := range results {
+		switch r {
+		case "success":
+			approved++
+		case "denied:decided", "denied:busy":
+		default:
+			t.Errorf("意外的结果 %s", r)
+		}
+	}
+	assert.Equal(t, 1, approved)
+	rp.waitFor(t, "暂停好了。")
+	assert.Len(t, e.backend.writes(), 1, "只执行一次")
+	audits := e.audit.all()
+	require.Len(t, audits, 1)
+	assert.Equal(t, "chatops:3", audits[0].ChannelUserID)
+	assert.Equal(t, "assistant", audits[0].ChannelType)
+}
+
+func TestChatOpsOtherTextDenies(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	e.svc.confirmUnit = time.Minute
+	e.llm.push(call("c1", "delete_torrent", `{"downloader_id":1,"task_id":"abc"}`), reply{text: "没有删。"})
+	ctx := context.Background()
+	h.Handle(ctx, inbound("删掉 abc", true))
+	rp.waitFor(t, "需要你确认")
+	r, result := h.Handle(ctx, inbound("算了，先看看下载器", true))
+	assert.Equal(t, "denied:user", result, "审计结果用 success / denied:* / error:* 的写法")
+	assert.Contains(t, r.Text, "已取消")
+	rp.waitFor(t, "没有删。")
+	assert.Empty(t, e.backend.writes())
+}
+
+func TestChatOpsTimeoutNotice(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	e.svc.confirmUnit = 50 * time.Millisecond
+	e.llm.push(call("c1", "pause_torrent", `{"downloader_id":1,"task_id":"abc"}`), reply{text: "没有执行。"})
+	h.Handle(context.Background(), inbound("暂停 abc", true))
+	rp.waitFor(t, "确认超时，没有执行：暂停下载器「qb」")
+	assert.Empty(t, e.backend.writes())
+}
+
+func TestChatOpsNonAdminHasNoWriteTools(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	e.llm.push(call("c1", "pause_torrent", `{"downloader_id":1,"task_id":"abc"}`), reply{text: "这里不能暂停。"})
+	_, result := h.Handle(context.Background(), inbound("暂停 abc", false))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "这里不能暂停。")
+	for _, w := range writeTools {
+		assert.NotContains(t, e.llm.requests()[0].toolNames(), w)
+	}
+	for _, c := range append(slices.Clone(mcp.ConfigTools), mcp.SkillTool) {
+		assert.NotContains(t, e.llm.requests()[0].toolNames(), c, "非管理员绑定也拿不到配置工具")
+	}
+	assert.Empty(t, e.backend.requests())
+	for _, s := range rp.texts() {
+		assert.NotContains(t, s, "需要你确认")
+	}
+}
+
+// 管理员绑定能改配置：拿得到配置工具。
+func TestChatOpsAdminHasConfigTools(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	e.llm.push(reply{text: "好的。"})
+	_, result := h.Handle(context.Background(), inbound("看看下载器配置", true))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "好的。")
+	names := e.llm.requests()[0].toolNames()
+	for _, c := range append(slices.Clone(mcp.ConfigTools), mcp.SkillTool) {
+		assert.Contains(t, names, c)
+	}
+}
+
+func TestChatOpsNewChatAndSwitch(t *testing.T) {
+	e, h, _ := chatopsEnv(t)
+	ctx := context.Background()
+	src := inbound("", true).Src
+	require.NoError(t, h.NewChat(ctx, src))
+	first, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
+	require.NoError(t, h.NewChat(ctx, src))
+	second, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
+	assert.NotEqual(t, first.ID, second.ID, "/newchat 以后用新会话")
+
+	_, err := e.svc.SaveSettings(ctx, SettingsInput{Enabled: true, BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.NoError(t, err)
+	assert.False(t, h.Enabled(ctx), "ChatOps 开关关着")
+	assert.Error(t, h.NewChat(ctx, src))
+}
+
+func TestChatOpsEventText(t *testing.T) {
+	got, fields := chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "assistant", Content: "## 标题\n**粗**"}}, "")
+	assert.Equal(t, "标题\n粗", got)
+	assert.Equal(t, map[string]any{"kind": "answer"}, fields)
+	got, _ = chatopsEventText(Event{Type: EventMessage, Message: &MessageView{
+		Role: "assistant", Content: "我查一下", ToolCalls: []ToolCallView{{ID: "c1", Name: "list_tasks"}},
+	}}, "")
+	assert.Empty(t, got, "带工具调用的中间消息不发")
+	got, _ = chatopsEventText(Event{Type: EventDelta, Text: "增量"}, "")
+	assert.Empty(t, got)
+	got, fields = chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "notice", Content: "已停止回答。"}}, "")
+	assert.Equal(t, "已停止回答。", got)
+	assert.Equal(t, map[string]any{"kind": "notice"}, fields)
+	expires := time.Date(2026, 10, 12, 8, 10, 0, 0, time.Local)
+	en, fields := chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
+		Status: "pending", Summary: "x", ExpiresAt: expires,
+	}}, "en")
+	assert.Contains(t, en, "Please confirm: x")
+	assert.NotContains(t, en, "Changes:", "没有预览时不写改动")
+	assert.Equal(t, map[string]any{"kind": "confirm", "summary": "x", "expires": "08:10", "changes": "", "impact": ""}, fields)
+	// 有预览：改动与影响一行一项写在确认消息里，密钥只写改了
+	zh, fields := chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
+		Status: "pending", Summary: "暂停「Dune」", ExpiresAt: expires,
+		Changes: []mcp.Change{{Label: "状态", Before: "做种中", After: "已暂停"}, {Label: "Cookie", Secret: true}},
+		Impact:  []string{"停止做种"},
+	}}, "")
+	assert.Equal(t, "需要你确认：暂停「Dune」\n改动：\n- 状态：做种中 → 已暂停\n- Cookie：已更新（不显示）\n影响：\n- 停止做种\n回复「确认」执行，回复别的内容取消（08:10 以前有效）。", zh)
+	assert.Equal(t, "- 停止做种", fields["impact"])
+	got, fields = chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
+		Status: "expired", DecidedBy: decidedByTimeout, Summary: "x",
+	}}, "")
+	assert.Equal(t, "确认超时，没有执行：x", got)
+	assert.Equal(t, map[string]any{"kind": "timeout", "summary": "x"}, fields)
+	assert.True(t, isYes(" OK. "))
+	assert.True(t, isYes("确认！"))
+	assert.False(t, isYes("确认一下这个是什么"))
+}
+
+// 旧回答在跑时不能开新对话；开了新会话以后，旧会话的时间再被更新也不会把下一条消息带回旧会话
+func TestChatOpsNewChatSticksWhileOldRunFinishes(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	block := make(chan struct{})
+	e.llm.push(reply{text: "旧的回答", block: block}, reply{text: "新的回答"})
+	ctx := context.Background()
+	_, result := h.Handle(ctx, inbound("旧问题", true))
+	require.Equal(t, "success", result)
+	<-e.llm.started
+	old, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
+	// 旧回答还在跑：不能开新对话，也不能在别的会话里再起一次运行（回「确认」会认错待确认）
+	assert.ErrorContains(t, h.NewChat(ctx, inbound("", true).Src), "还没结束")
+	_, result = h.Handle(ctx, inbound("插一句", true))
+	assert.Equal(t, "denied:busy", result)
+	close(block)
+	rp.waitFor(t, "旧的回答")
+	require.Eventually(t, func() bool { return !e.svc.isRunning(old.ID) }, 5*time.Second, 10*time.Millisecond)
+	require.NoError(t, h.NewChat(ctx, inbound("", true).Src))
+	// 旧会话结束时更新了时间，也不会把下一条消息带回旧会话
+	e.svc.touch(ctx, old.ID, "")
+	_, result = h.Handle(ctx, inbound("新问题", true))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "新的回答")
+	cur, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
+	assert.NotEqual(t, old.ID, cur.ID)
+	second := e.llm.requests()[1].Messages
+	for _, m := range second {
+		assert.NotEqual(t, "旧问题", m["content"], "新会话不带旧上下文")
+	}
+}
+
+// 第一次同时到的两条消息只建一个会话
+func TestChatOpsConcurrentFirstMessagesShareOneConversation(t *testing.T) {
+	e, h, _ := chatopsEnv(t)
+	block := make(chan struct{})
+	defer close(block)
+	e.llm.push(reply{text: "想想", block: block})
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	results := make([]string, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, results[i] = h.Handle(ctx, inbound("你好", true))
+		}()
+	}
+	wg.Wait()
+	assert.ElementsMatch(t, []string{"success", "denied:busy"}, results)
+	var n int64
+	require.NoError(t, e.db.Model(&models.AssistantConversation{}).Where("owner = ?", "chatops:3").Count(&n).Error)
+	assert.Equal(t, int64(1), n)
+}
+
+// 发到通知渠道以前按 assistant.reply 套用模板：先套再分条，模板加的结尾只出现一次（在最后一条里）；
+// 即时答复带着 kind=status 的事件，由 MessageChain 套用。
+func TestChatOpsAppliesAssistantTemplate(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	set := notify.NewTemplates(nil)
+	set.Replace([]notify.TemplateSource{{
+		EventType: notify.EventAssistantReply,
+		Text:      "{{if eq .kind \"answer\"}}🤖 {{.text}}\n—— 来自 AI 助手{{else}}{{.text}}{{end}}",
+	}})
+	h.SetTemplates(set)
+	ctx := context.Background()
+
+	line := strings.Repeat("字", 99) + "\n"
+	long := strings.Repeat(line, 50) // 5000 个字：分两条发
+	e.llm.push(reply{text: long})
+	_, result := h.Handle(ctx, inbound("说点长的", true))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "—— 来自 AI 助手")
+	sent := rp.texts()
+	require.Len(t, sent, 2)
+	assert.True(t, strings.HasPrefix(sent[0], "🤖 字"), "开头在第一条")
+	assert.NotContains(t, sent[0], "来自 AI 助手")
+	assert.True(t, strings.HasSuffix(sent[1], "—— 来自 AI 助手"), "结尾只在最后一条")
+
+	r := chatReply("上一个问题还在回答，等它说完再问。")
+	require.NotNil(t, r.Event)
+	assert.Equal(t, notify.EventAssistantReply, r.Event.Type)
+	assert.Equal(t, "status", r.Event.Fields["kind"])
+	assert.Equal(t, "上一个问题还在回答，等它说完再问。", set.ApplyText(r.Event, r.Text), "status 走模板的 else 分支")
+}

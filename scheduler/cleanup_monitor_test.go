@@ -100,7 +100,8 @@ func TestProcessDownloader_GetAllError(t *testing.T) {
 	assert.Empty(t, fake.removedBatch)
 }
 
-func TestProcessDownloader_SkipsPeerRatioPaused(t *testing.T) {
+// 竞争度暂停着的种子照样按常规条件删（以前常规条件跳过它们）。
+func TestProcessDownloader_DeletesPeerRatioPaused(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	cm := newCleanupMonitorWithFake(t, fake)
 
@@ -113,7 +114,7 @@ func TestProcessDownloader_SkipsPeerRatioPaused(t *testing.T) {
 	tor := seedingTorrent("p1", hash, "PeerPaused", 100, 1.0)
 	fake.torrents = []downloader.Torrent{tor}
 
-	// Mark it paused-for-peer-ratio in DB so isPausedForPeerRatio returns true.
+	// 记录标着竞争度暂停
 	pushed := true
 	require.NoError(t, cm.db.Create(&models.TorrentInfo{
 		SiteName: "s", TorrentID: "p1", TorrentHash: &hash, IsPushed: &pushed,
@@ -121,7 +122,7 @@ func TestProcessDownloader_SkipsPeerRatioPaused(t *testing.T) {
 	}).Error)
 
 	cm.processDownloader(cfg, fake, "qb1")
-	assert.Empty(t, fake.removedBatch, "peer-ratio-paused torrent must be skipped")
+	assert.Equal(t, [][]string{{"p1"}}, fake.removedBatch, "做种超过 72 小时，照常删")
 }
 
 func TestProcessDownloader_RemoveError(t *testing.T) {
@@ -262,17 +263,27 @@ func TestUpdateDatabase_MarksExpired(t *testing.T) {
 	require.NotNil(t, info.LastCheckTime)
 }
 
-func TestIsPausedForPeerRatio(t *testing.T) {
+// 竞争度读的推送记录：只有这台下载器上 pt-tools 推送过的，标着竞争度暂停、手动开始过的分得清。
+func TestPeerRecordsOn(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
-	hash := "prhash"
-	pushed := true
-	require.NoError(t, cm.db.Create(&models.TorrentInfo{
-		SiteName: "s", TorrentID: "pr1", TorrentHash: &hash, IsPushed: &pushed,
-		IsPausedBySystem: true, PauseReason: PauseReasonPeerRatio, Title: "PR",
-	}).Error)
+	pushedRecord(t, cm.db, "qb1", "paused", "HP", func(ti *models.TorrentInfo) {
+		ti.IsPausedBySystem, ti.PauseReason = true, PauseReasonPeerRatio
+	})
+	pushedRecord(t, cm.db, "qb1", "free-end", "hf", func(ti *models.TorrentInfo) {
+		ti.IsPausedBySystem, ti.PauseReason = true, "免费期结束，下载未完成"
+	})
+	pushedRecord(t, cm.db, "qb1", "started", "hs", func(ti *models.TorrentInfo) { ti.PeerPauseOverridden = true })
+	pushedRecord(t, cm.db, "qb2", "other", "ho", nil)
+	hash := "hn"
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "staged", TorrentHash: &hash, DownloaderName: "qb1"}).Error)
 
-	assert.True(t, cm.isPausedForPeerRatio(hash))
-	assert.False(t, cm.isPausedForPeerRatio("nonexistent"))
+	recs, err := cm.peerRecordsOn("qb1")
+	require.NoError(t, err)
+	assert.Equal(t, []peerRecord{{Hash: "hp", Paused: true}}, recs["hp"])
+	assert.Equal(t, []peerRecord{{Hash: "hf"}}, recs["hf"], "免费结束的暂停不算竞争度暂停")
+	assert.Equal(t, []peerRecord{{Hash: "hs", Overridden: true}}, recs["hs"])
+	assert.NotContains(t, recs, "ho", "别的下载器上的")
+	assert.NotContains(t, recs, "hn", "推送前的暂存记录")
 }
 
 func TestGetManagedHashes_IncludesArchive(t *testing.T) {
@@ -306,7 +317,8 @@ func TestGetHRInfoMap_ReadsHRRows(t *testing.T) {
 		HRSeedTimeH: 120, Title: "HR",
 	}).Error)
 
-	m := cm.getHRInfoMap()
+	m, err := loadHRInfo(cm.db)
+	require.NoError(t, err)
 	info, ok := m["hrhashupper"]
 	require.True(t, ok, "hash should be lowercased in map")
 	assert.True(t, info.HasHR)
@@ -335,6 +347,9 @@ func newTestCleanupMonitor(t *testing.T) *CleanupMonitor {
 	return NewCleanupMonitor(db.DB, nil)
 }
 
+// cleanupTestDL 是删种判断所在的下载器：免费到期只看推到这个下载器的记录
+const cleanupTestDL = "qb1"
+
 func baseCfg() *models.SettingsGlobal {
 	return &models.SettingsGlobal{
 		CleanupEnabled:       true,
@@ -344,6 +359,8 @@ func baseCfg() *models.SettingsGlobal {
 		CleanupProtectDL:     true,
 		CleanupProtectHR:     true,
 		CleanupMinRetainH:    0,
+		// 库里的默认值：空间低于下限时紧急清理
+		CleanupEmergency: true,
 	}
 }
 
@@ -368,8 +385,8 @@ func TestShouldDelete_OR_SeedTimeExceeded(t *testing.T) {
 	t1 := seedingTorrent("1", "aaa", "T1", 73, 0.5)
 	t2 := seedingTorrent("2", "bbb", "T2", 71, 0.5)
 
-	assert.True(t, cm.shouldDelete(cfg, t1))
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestShouldDelete_OR_RatioReached(t *testing.T) {
@@ -380,8 +397,8 @@ func TestShouldDelete_OR_RatioReached(t *testing.T) {
 	t1 := seedingTorrent("1", "aaa", "T1", 10, 2.5)
 	t2 := seedingTorrent("2", "bbb", "T2", 10, 1.5)
 
-	assert.True(t, cm.shouldDelete(cfg, t1))
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestShouldDelete_OR_Inactive(t *testing.T) {
@@ -395,8 +412,50 @@ func TestShouldDelete_OR_Inactive(t *testing.T) {
 	t2 := seedingTorrent("2", "bbb", "T2", 49, 0.5)
 	t2.UploadSpeed = 1024
 
-	assert.True(t, cm.shouldDelete(cfg, t1))
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
+}
+
+// 「不活跃」按下载器给的最后一次上传或下载的时间判，不看检查那一刻的速度：平时有上传、这一刻恰好是 0 的不删；
+// 没给最后活动时间时依次按下完的时间、加进下载器的时间算；正在传的、暂停的、排队的不算不活跃。
+func TestShouldDelete_InactiveByLastActivity(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMaxInactiveH = 12
+	now := time.Now()
+	ago := func(h float64) int64 { return now.Add(-time.Duration(h * float64(time.Hour))).Unix() }
+
+	recent := seedingTorrent("1", "h1", "Recent", 100, 0.5)
+	recent.LastActivity = ago(1)
+	assert.False(t, cm.shouldDelete(cfg, recent, cleanupTestDL), "一小时前还有上传，不算不活跃")
+
+	idle := seedingTorrent("2", "h2", "Idle", 100, 0.5)
+	idle.LastActivity = ago(13)
+	assert.Equal(t, []string{"做种中，最近 12 小时没有上传或下载"}, cm.deleteReasons(cfg, idle, cleanupTestDL))
+
+	busy := seedingTorrent("3", "h3", "Busy", 100, 0.5)
+	busy.LastActivity, busy.UploadSpeed = ago(13), 512
+	assert.False(t, cm.shouldDelete(cfg, busy, cleanupTestDL), "这一刻正在上传：最后活动时间还没跟上也算活跃")
+
+	byDone := seedingTorrent("4", "h4", "ByDone", 100, 0.5)
+	byDone.CompletionOn = ago(13)
+	assert.True(t, cm.shouldDelete(cfg, byDone, cleanupTestDL), "没给最后活动时间时按下完的时间")
+	byDone.CompletionOn = ago(2)
+	assert.False(t, cm.shouldDelete(cfg, byDone, cleanupTestDL), "两小时前才下完")
+
+	byAdded := seedingTorrent("5", "h5", "ByAdded", 100, 0.5)
+	byAdded.DateAdded = ago(13)
+	assert.True(t, cm.shouldDelete(cfg, byAdded, cleanupTestDL), "也没有下完的时间时按加进下载器的时间")
+
+	unknown := seedingTorrent("6", "h6", "Unknown", 100, 0.5)
+	unknown.DateAdded = 0
+	assert.False(t, cm.shouldDelete(cfg, unknown, cleanupTestDL), "时间都不知道时不算不活跃")
+
+	for _, st := range []downloader.TorrentState{downloader.TorrentPaused, downloader.TorrentStopped, downloader.TorrentQueued, downloader.TorrentDownloading} {
+		other := seedingTorrent("7", "h7", "Other", 100, 0.5)
+		other.State, other.LastActivity = st, ago(100)
+		assert.False(t, cm.shouldDelete(cfg, other, cleanupTestDL), "只算正在做种的：%s 不算", st)
+	}
 }
 
 func TestShouldDelete_OR_AnyConditionSufficient(t *testing.T) {
@@ -407,15 +466,15 @@ func TestShouldDelete_OR_AnyConditionSufficient(t *testing.T) {
 
 	// Given: seed time exceeded but ratio not reached
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 1.0)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: ratio reached but seed time not exceeded
 	t2 := seedingTorrent("2", "bbb", "T2", 10, 5.0)
-	assert.True(t, cm.shouldDelete(cfg, t2))
+	assert.True(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 
 	// Given: neither condition met
 	t3 := seedingTorrent("3", "ccc", "T3", 10, 1.0)
-	assert.False(t, cm.shouldDelete(cfg, t3))
+	assert.False(t, cm.shouldDelete(cfg, t3, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_AllConditionsRequired(t *testing.T) {
@@ -427,19 +486,19 @@ func TestShouldDelete_AND_AllConditionsRequired(t *testing.T) {
 
 	// Given: both conditions met
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 3.0)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: only seed time met
 	t2 := seedingTorrent("2", "bbb", "T2", 100, 1.0)
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 
 	// Given: only ratio met
 	t3 := seedingTorrent("3", "ccc", "T3", 10, 3.0)
-	assert.False(t, cm.shouldDelete(cfg, t3))
+	assert.False(t, cm.shouldDelete(cfg, t3, cleanupTestDL))
 
 	// Given: neither met
 	t4 := seedingTorrent("4", "ddd", "T4", 10, 1.0)
-	assert.False(t, cm.shouldDelete(cfg, t4))
+	assert.False(t, cm.shouldDelete(cfg, t4, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_SingleConditionAlwaysMatches(t *testing.T) {
@@ -451,7 +510,7 @@ func TestShouldDelete_AND_SingleConditionAlwaysMatches(t *testing.T) {
 
 	// Given: only seed time configured, seed time exceeded
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 0.5)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_NoConditions(t *testing.T) {
@@ -459,7 +518,7 @@ func TestShouldDelete_NoConditions(t *testing.T) {
 	cfg := baseCfg()
 
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 5.0)
-	assert.False(t, cm.shouldDelete(cfg, t1))
+	assert.False(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_FreeExpiredIncomplete(t *testing.T) {
@@ -471,21 +530,49 @@ func TestShouldDelete_FreeExpiredIncomplete(t *testing.T) {
 	hash := "abc123def456"
 	pushed := true
 	torrentInfo := models.TorrentInfo{
-		SiteName:    "testsite",
-		TorrentID:   "t1",
-		TorrentHash: &hash,
-		FreeEndTime: &expired,
-		IsPushed:    &pushed,
-		Title:       "Test",
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &expired,
+		IsFree:         true,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Test",
 	}
 	require.NoError(t, cm.db.Create(&torrentInfo).Error)
 
 	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.5, State: downloader.TorrentDownloading}
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: completed torrent with expired free → should NOT delete
 	t2 := downloader.Torrent{ID: "2", InfoHash: hash, Progress: 1.0, State: downloader.TorrentSeeding}
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
+}
+
+// 过滤规则下载的半价种子：以前 RSS 把半价的结束时间记成了 free_end_time，库里留着这样的记录；
+// 「删除免费到期未完成的种子」只认免费的，不删它（开了删除数据时连数据一起删）
+func TestShouldDelete_FreeExpiredSkipsNonFree(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupDelFreeExpired = true
+
+	ended := time.Now().Add(-1 * time.Hour)
+	hash := "half-price-hash"
+	pushed := true
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &ended,
+		FreeLevel:      "PERCENT_50",
+		IsFree:         false,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Half Price",
+	}).Error)
+
+	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.4, State: downloader.TorrentDownloading}
+	assert.False(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_FreeExpiredDisabled(t *testing.T) {
@@ -497,17 +584,18 @@ func TestShouldDelete_FreeExpiredDisabled(t *testing.T) {
 	hash := "abc123def456"
 	pushed := true
 	torrentInfo := models.TorrentInfo{
-		SiteName:    "testsite",
-		TorrentID:   "t1",
-		TorrentHash: &hash,
-		FreeEndTime: &expired,
-		IsPushed:    &pushed,
-		Title:       "Test",
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &expired,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Test",
 	}
 	require.NoError(t, cm.db.Create(&torrentInfo).Error)
 
 	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.5}
-	assert.False(t, cm.shouldDelete(cfg, t1))
+	assert.False(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestSplitProtected_Downloading(t *testing.T) {
@@ -796,7 +884,7 @@ func TestEmergencyCleanup_DeletesUntilSpaceSufficient(t *testing.T) {
 	}
 
 	// Given: 60GB free, need 100GB → need 40GB more
-	result := cm.emergencyCleanup(cfg, candidates, nil, 60)
+	result := cm.emergencyCleanup(cfg, downloader.NewDataSharing(candidates, nil), candidates, nil, 60)
 	totalFreed := int64(0)
 	for _, t := range result {
 		totalFreed += t.TotalSize
@@ -817,13 +905,46 @@ func TestEmergencyCleanup_SkipsAlreadyMarked(t *testing.T) {
 		{ID: "2", Name: "New", TotalSize: 50 << 30, State: downloader.TorrentSeeding},
 	}
 
-	result := cm.emergencyCleanup(cfg, candidates, already, 60)
+	result := cm.emergencyCleanup(cfg, downloader.NewDataSharing(candidates, nil), candidates, already, 60)
 	ids := make(map[string]int)
 	for _, t := range result {
 		ids[t.ID]++
 	}
 	assert.Equal(t, 1, ids["1"])
 	assert.Equal(t, 1, ids["2"])
+}
+
+// 按常规规则已要删的种子也会释放空间：先算进去，够了就不再额外删。
+func TestEmergencyCleanup_CountsAlreadyMarkedSpace(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMinDiskSpaceGB = 100 // 目标 = 100 + 缓冲 20 = 120 GB
+
+	already := []downloader.Torrent{{ID: "old", TotalSize: 70 << 30, State: downloader.TorrentSeeding}}
+	candidates := []downloader.Torrent{
+		already[0],
+		{ID: "extra", TotalSize: 50 << 30, State: downloader.TorrentPaused, Ratio: 3},
+	}
+
+	// 当前 60 GB，还差 60 GB；已选中的 70 GB 已经够了
+	result := cm.emergencyCleanup(cfg, downloader.NewDataSharing(candidates, nil), candidates, already, 60)
+	require.Len(t, result, 1)
+	assert.Equal(t, "old", result[0].ID, "不再额外删除")
+}
+
+// 保留数据文件时紧急清理释放不了空间，不额外删任务。
+func TestEmergencyCleanup_SkipsExtrasWhenKeepingData(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMinDiskSpaceGB = 100
+	cfg.CleanupRemoveData = false
+
+	already := []downloader.Torrent{{ID: "rule", TotalSize: 10 << 30}}
+	candidates := []downloader.Torrent{already[0], {ID: "extra", TotalSize: 500 << 30, State: downloader.TorrentPaused}}
+
+	result := cm.emergencyCleanup(cfg, downloader.NewDataSharing(candidates, nil), candidates, already, 5)
+	require.Len(t, result, 1)
+	assert.Equal(t, "rule", result[0].ID, "只保留按删除条件选中的种子")
 }
 
 func TestSplitTags(t *testing.T) {
@@ -855,7 +976,7 @@ func TestShouldDelete_DefaultModeIsOR(t *testing.T) {
 	cfg.CleanupMaxSeedTimeH = 72
 
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 0.5)
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_ThreeConditions(t *testing.T) {
@@ -869,12 +990,12 @@ func TestShouldDelete_AND_ThreeConditions(t *testing.T) {
 	// Given: all three met
 	t1 := seedingTorrent("1", "aaa", "T1", 49, 1.5)
 	t1.UploadSpeed = 0
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: two of three met (inactive not met because upload speed > 0)
 	t2 := seedingTorrent("2", "bbb", "T2", 49, 1.5)
 	t2.UploadSpeed = 1024
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestShouldDelete_FreeExpiredBypassesAndOr(t *testing.T) {
@@ -889,17 +1010,19 @@ func TestShouldDelete_FreeExpiredBypassesAndOr(t *testing.T) {
 	hash := "free-expired-hash"
 	pushed := true
 	require.NoError(t, cm.db.Create(&models.TorrentInfo{
-		SiteName:    "testsite",
-		TorrentID:   "t1",
-		TorrentHash: &hash,
-		FreeEndTime: &expired,
-		IsPushed:    &pushed,
-		Title:       "Free Expired",
+		SiteName:       "testsite",
+		TorrentID:      "t1",
+		TorrentHash:    &hash,
+		FreeEndTime:    &expired,
+		IsFree:         true,
+		IsPushed:       &pushed,
+		DownloaderName: cleanupTestDL,
+		Title:          "Free Expired",
 	}).Error)
 
 	// Given: AND mode with impossible conditions, but free expired
 	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.3, State: downloader.TorrentDownloading}
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 }
 
 func TestShouldDelete_OR_SlowSeed(t *testing.T) {
@@ -911,22 +1034,22 @@ func TestShouldDelete_OR_SlowSeed(t *testing.T) {
 	// Given: seeded 72h but ratio only 0.05 → low-efficiency, should delete
 	t1 := seedingTorrent("1", "aaa", "Slow", 72, 0.05)
 	t1.IsCompleted = true
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: seeded 72h and ratio 0.5 → above threshold, keep
 	t2 := seedingTorrent("2", "bbb", "OK", 72, 0.5)
 	t2.IsCompleted = true
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 
 	// Given: seeded only 24h with low ratio → not enough time yet, keep
 	t3 := seedingTorrent("3", "ccc", "Young", 24, 0.02)
 	t3.IsCompleted = true
-	assert.False(t, cm.shouldDelete(cfg, t3))
+	assert.False(t, cm.shouldDelete(cfg, t3, cleanupTestDL))
 
 	// Given: not completed yet → keep (still downloading)
 	t4 := seedingTorrent("4", "ddd", "Incomplete", 72, 0.01)
 	t4.IsCompleted = false
-	assert.False(t, cm.shouldDelete(cfg, t4))
+	assert.False(t, cm.shouldDelete(cfg, t4, cleanupTestDL))
 }
 
 func TestShouldDelete_AND_SlowSeedWithOtherConditions(t *testing.T) {
@@ -940,12 +1063,12 @@ func TestShouldDelete_AND_SlowSeedWithOtherConditions(t *testing.T) {
 	// Given: both seed time exceeded AND slow seed → delete
 	t1 := seedingTorrent("1", "aaa", "Both", 72, 0.05)
 	t1.IsCompleted = true
-	assert.True(t, cm.shouldDelete(cfg, t1))
+	assert.True(t, cm.shouldDelete(cfg, t1, cleanupTestDL))
 
 	// Given: seed time exceeded but ratio above slow threshold → slow condition fails → AND fails
 	t2 := seedingTorrent("2", "bbb", "NotSlow", 72, 0.5)
 	t2.IsCompleted = true
-	assert.False(t, cm.shouldDelete(cfg, t2))
+	assert.False(t, cm.shouldDelete(cfg, t2, cleanupTestDL))
 }
 
 func TestDrainAndDebounce_ReturnsAfterQuiet(t *testing.T) {
@@ -1165,10 +1288,52 @@ func TestGetHRInfoMap_FromDefinitionAndDB(t *testing.T) {
 		SiteName: "agsvpt", TorrentID: "t2", TorrentHash: &h2, HasHR: false, TorrentSize: 10 << 30,
 	}).Error)
 
-	m := cm.getHRInfoMap()
+	m, err := loadHRInfo(cm.db)
+	require.NoError(t, err)
 	require.Contains(t, m, "aaaa1111")
 	assert.Equal(t, 96, m["aaaa1111"].HRSeedTimeH)
 	if _, ok := m["bbbb2222"]; ok {
 		assert.True(t, m["bbbb2222"].HasHR)
 	}
+}
+
+// 刷流任务正在管的种子（有进行中的刷流记录）由刷流任务自己的规则删除，全局自动清理的常规规则不碰它们；
+// 低空间紧急清理仍然覆盖全部种子。
+func TestProcessDownloader_BrushTorrentsOnlyInEmergency(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 72
+	cfg.CleanupProtectDL = false
+	cfg.CleanupProtectHR = false
+	cfg.CleanupDiskProtect = false
+
+	brush := seedingTorrent("b1", "hashbrush", "Brush", 100, 1.0)
+	brush.Tags = "hdsky,pt-tools-brush,pt-brush-1"
+	addActiveBrush(t, cm.db, "qb1", "hashbrush")
+	// 带刷流标签、但刷流任务已经不管了（记录结束了，或者是手动打的标签）：按常规规则删
+	ended := seedingTorrent("e1", "hashended", "Ended", 100, 1.0)
+	ended.Tags = "hdsky,pt-tools-brush,pt-brush-2"
+	bt := addActiveBrush(t, cm.db, "qb1", "hashended")
+	require.NoError(t, cm.db.Model(&models.BrushTorrent{}).Where("id = ?", bt.ID).Update("state", models.BrushTorrentGone).Error)
+	plain := seedingTorrent("p1", "hashplain", "Plain", 100, 1.0)
+	fake.torrents = []downloader.Torrent{brush, ended, plain}
+
+	res := cm.processDownloader(cfg, fake, "qb1")
+	assert.Equal(t, 1, res.Brush)
+	require.Len(t, fake.removedBatch, 1)
+	assert.ElementsMatch(t, []string{"e1", "p1"}, fake.removedBatch[0], "刷流任务正在管的种子不进常规规则（按刷流记录认，不按标签）")
+
+	// 低空间紧急清理：刷流种子也在候选里
+	fake.removedBatch = nil
+	fake.torrents = []downloader.Torrent{brush}
+	cfg.CleanupMaxSeedTimeH = 0
+	cfg.CleanupDiskProtect = true
+	cfg.CleanupMinDiskSpaceGB = 100
+	cfg.CleanupRemoveData = true
+	fake.diskInfo = downloader.DiskInfo{FreeSpace: 1 << 30}
+	cm.processDownloader(cfg, fake, "qb1")
+	require.Len(t, fake.removedBatch, 1)
+	assert.Equal(t, []string{"b1"}, fake.removedBatch[0])
 }

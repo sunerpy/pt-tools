@@ -1,0 +1,366 @@
+package v2
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"html"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+	"sync"
+	"unicode"
+)
+
+// AttendanceConfig 描述站点的每日签到：按 Method 请求 Path，按返回页面的文字判断结果。
+// NexusPHP 站点不配置时使用 DefaultNexusPHPAttendance；签到要识别验证码或答题、而 pt-tools 写好了流程的站点
+// 设置 Challenge（要有 AI，见 attendance_challenge.go）；没有签到或流程没写的站点设置 Unsupported，值是界面上显示的原因。
+type AttendanceConfig struct {
+	// Path 是签到请求的路径，可以带查询参数（如 /attendance-ajax.php?act=sign）。
+	Path string `json:"path,omitempty"`
+	// Method 是请求方法，GET（默认）或 POST；POST 时 Path 里的查询参数作为表单提交。
+	Method string `json:"method,omitempty"`
+	// SuccessPatterns 匹配「本次签到成功」的页面文字（正则）；为空时用 NexusPHP 的默认规则。
+	SuccessPatterns []string `json:"successPatterns,omitempty"`
+	// AlreadyPatterns 匹配「今天已经签到过」的页面文字（正则）；为空时用 NexusPHP 的默认规则。
+	AlreadyPatterns []string `json:"alreadyPatterns,omitempty"`
+	// Unsupported 非空表示该站不支持自动签到，值是原因。
+	Unsupported string `json:"unsupported,omitempty"`
+	// Challenge 非空表示签到要先过一关（识别验证码或答题），按这一关的流程签到，不用 Path 与 Patterns。
+	Challenge AttendanceChallenge `json:"challenge,omitempty"`
+}
+
+const defaultAttendancePath = "/attendance.php"
+
+// NexusPHP 签到插件的页面文字。信息量大的规则排在前面，摘取的提示语更有用。
+// 繁体是 NexusPHP 自带的 lang/cht/lang_attendance.php（用户选了繁體中文，或 DiscFan 这类默认繁体的站点）。
+var (
+	nexusPHPAttendanceSuccess = []string{
+		`这是您的第\s*\d+\s*次签到`,
+		`這是您的第\s*\d+\s*次簽到`,
+		`本次签到获得`,
+		`本次簽到獲得`,
+		`签到已成功`,
+		`签到成功`,
+		`簽到成功`,
+		`(?i)attendance successful`,
+	}
+	nexusPHPAttendanceAlready = []string{
+		`今天已经签到过`,
+		`今天已經簽到過`,
+		`今日已签到`,
+		`今天已签到`,
+		`(?i)already attended`,
+	}
+)
+
+// DefaultNexusPHPAttendance 返回 NexusPHP 签到插件的默认配置：GET /attendance.php。
+func DefaultNexusPHPAttendance() *AttendanceConfig {
+	return &AttendanceConfig{
+		Path:            defaultAttendancePath,
+		Method:          http.MethodGet,
+		SuccessPatterns: append([]string(nil), nexusPHPAttendanceSuccess...),
+		AlreadyPatterns: append([]string(nil), nexusPHPAttendanceAlready...),
+	}
+}
+
+// ResolveAttendanceConfig 返回站点生效的签到配置：以站点定义里的配置为准，缺的字段用 NexusPHP 的默认值补齐；
+// 不是 NexusPHP 架构又没有配置的站点返回 nil，表示不支持。
+func ResolveAttendanceConfig(def *SiteDefinition) *AttendanceConfig {
+	if def == nil {
+		return nil
+	}
+	if def.Attendance == nil {
+		if def.Schema != SchemaNexusPHP {
+			return nil
+		}
+		return DefaultNexusPHPAttendance()
+	}
+	cfg := *def.Attendance
+	if cfg.Unsupported != "" {
+		return &cfg
+	}
+	if cfg.Path == "" {
+		cfg.Path = defaultAttendancePath
+	}
+	if cfg.Method == "" {
+		cfg.Method = http.MethodGet
+	}
+	if len(cfg.SuccessPatterns) == 0 {
+		cfg.SuccessPatterns = append([]string(nil), nexusPHPAttendanceSuccess...)
+	}
+	if len(cfg.AlreadyPatterns) == 0 {
+		cfg.AlreadyPatterns = append([]string(nil), nexusPHPAttendanceAlready...)
+	}
+	return &cfg
+}
+
+// AttendanceSupport 只看站点定义判断能否自动签到，不支持时返回原因，供界面在不创建站点实例时展示。
+func AttendanceSupport(def *SiteDefinition) (bool, string) {
+	if def == nil {
+		return false, "站点没有内置定义"
+	}
+	cfg := ResolveAttendanceConfig(def)
+	switch {
+	case cfg == nil:
+		return false, "该站点的架构暂不支持签到"
+	case cfg.Unsupported != "":
+		return false, cfg.Unsupported
+	}
+	return true, ""
+}
+
+// AttendStatus 是一次签到的结果。
+type AttendStatus string
+
+const (
+	// AttendSigned 表示本次签到成功。
+	AttendSigned AttendStatus = "signed"
+	// AttendAlready 表示今天已经签到过。
+	AttendAlready AttendStatus = "already"
+)
+
+// AttendResult 是一次签到的结果与页面上的一句提示。
+type AttendResult struct {
+	Status  AttendStatus
+	Message string
+}
+
+// Attender 由能签到的驱动实现。
+type Attender interface {
+	Attend(ctx context.Context) (AttendResult, error)
+}
+
+// AttendanceCapable 由 BaseSite 实现：SupportsAttendance 报告能否签到，Attend 先经过本站的限速器再签到。
+type AttendanceCapable interface {
+	SupportsAttendance() bool
+	Attend(ctx context.Context) (AttendResult, error)
+}
+
+// attendanceSupportReporter 由驱动可选实现，报告站点定义是否把签到标记为不支持。
+type attendanceSupportReporter interface {
+	AttendanceUnsupportedReason() string
+}
+
+var (
+	// ErrAttendanceUnsupported 表示站点不支持自动签到（架构不支持，或站点定义标记为不支持）。
+	ErrAttendanceUnsupported = errors.New("attendance not supported")
+	// ErrAttendanceUnrecognized 表示签到请求成功返回，但页面里既没有签到成功也没有今日已签的文字。
+	ErrAttendanceUnrecognized = errors.New("attendance result not recognized")
+	// ErrAttendancePageNotFound 表示签到地址回了 404 / 410：站点没有这一页（多半改了签到方式），当天重试也签不上。
+	ErrAttendancePageNotFound = errors.New("attendance page not found")
+)
+
+// IsAttendancePageNotFound 报告签到失败是不是因为站点没有签到的那一页：驱动换成了 ErrAttendancePageNotFound，
+// 或者错误链里有 404 / 410 的 HTTPStatusError（要过一关的签到取验证码、题目的那几页）。
+func IsAttendancePageNotFound(err error) bool {
+	if errors.Is(err, ErrAttendancePageNotFound) {
+		return true
+	}
+	_, ok := pageNotFoundStatus(err)
+	return ok
+}
+
+// pageNotFoundStatus 报告站点是不是回了 404 / 410（没有这一页），是时返回状态码。
+func pageNotFoundStatus(err error) (int, bool) {
+	var se *HTTPStatusError
+	if errors.As(err, &se) && (se.Code == http.StatusNotFound || se.Code == http.StatusGone) {
+		return se.Code, true
+	}
+	return 0, false
+}
+
+// attendanceRequestError 包装签到请求的错误：签到地址回了 404 / 410 时换成 ErrAttendancePageNotFound，写上请求的地址；
+// 别的错误照旧加上「attendance request」前缀。
+func attendanceRequestError(err error, path string) error {
+	if code, ok := pageNotFoundStatus(err); ok {
+		return fmt.Errorf("%w: 签到地址 %s 返回 HTTP %d，站点没有这一页", ErrAttendancePageNotFound, path, code)
+	}
+	return fmt.Errorf("attendance request: %w", err)
+}
+
+// Match 在页面文字里找签到结果：先找签到成功，再找今日已签。
+func (c *AttendanceConfig) Match(text string) (AttendResult, bool) {
+	if c == nil {
+		return AttendResult{}, false
+	}
+	text = collapseSpaces(text)
+	if loc := firstPatternMatch(c.SuccessPatterns, text); loc != nil {
+		return AttendResult{Status: AttendSigned, Message: attendanceSnippet(text, loc)}, true
+	}
+	if loc := firstPatternMatch(c.AlreadyPatterns, text); loc != nil {
+		return AttendResult{Status: AttendAlready, Message: attendanceSnippet(text, loc)}, true
+	}
+	return AttendResult{}, false
+}
+
+var attendancePatternCache sync.Map
+
+func firstPatternMatch(patterns []string, text string) []int {
+	for _, p := range patterns {
+		re, ok := attendancePatternCache.Load(p)
+		if !ok {
+			compiled, err := regexp.Compile(p)
+			if err != nil {
+				continue
+			}
+			re, _ = attendancePatternCache.LoadOrStore(p, compiled)
+		}
+		if loc := re.(*regexp.Regexp).FindStringIndex(text); loc != nil {
+			return loc
+		}
+	}
+	return nil
+}
+
+func collapseSpaces(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+var (
+	attendanceScriptPattern = regexp.MustCompile(`(?is)<(script|style)\b.*?</(script|style)>`)
+	attendanceTagPattern    = regexp.MustCompile(`<[^>]*>`)
+)
+
+// attendancePageText 把签到页转成纯文本：去掉脚本和样式，标签换成空格，再还原实体。
+// 标签换空格而不是直接删掉，相邻元素的文字（如「签到成功」标题和下一段）才不会粘成一句。
+// JSON 返回里的 HTML 片段同样适用。
+func attendancePageText(body []byte) string {
+	text := attendanceScriptPattern.ReplaceAllString(string(body), " ")
+	text = attendanceTagPattern.ReplaceAllString(text, " ")
+	return collapseSpaces(html.UnescapeString(text))
+}
+
+// attendanceSnippet 取匹配所在的那句话：向前补到空白或句读为止（最多 20 字），向后取到句号为止，总长不超过 120 字。
+func attendanceSnippet(text string, loc []int) string {
+	const maxBack, maxLen = 20, 120
+	runes := []rune(text)
+	start := len([]rune(text[:loc[0]]))
+	end := len([]rune(text[:loc[1]]))
+	for back := 0; start > 0 && back < maxBack; back++ {
+		r := runes[start-1]
+		if unicode.IsSpace(r) || strings.ContainsRune("。！？!?，,；;：:", r) {
+			break
+		}
+		start--
+	}
+	for end < len(runes) && end-start < maxLen {
+		r := runes[end]
+		end++
+		if strings.ContainsRune("。！？!?\n", r) || (r == '.' && end-start > 1) {
+			break
+		}
+	}
+	return strings.TrimSpace(string(runes[start:end]))
+}
+
+func attendanceRequest(cfg *AttendanceConfig) (NexusPHPRequest, error) {
+	method := strings.ToUpper(strings.TrimSpace(cfg.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+	if method != http.MethodGet && method != http.MethodPost {
+		return NexusPHPRequest{}, fmt.Errorf("unsupported attendance method %q", cfg.Method)
+	}
+	u, err := url.Parse(cfg.Path)
+	if err != nil {
+		return NexusPHPRequest{}, fmt.Errorf("invalid attendance path %q: %w", cfg.Path, err)
+	}
+	req := NexusPHPRequest{Path: u.Path, Method: method}
+	if q := u.Query(); len(q) > 0 {
+		req.Params = q
+	}
+	return req, nil
+}
+
+// Attend 按站点的签到配置发一次请求，按页面文字判断结果。请求经驱动的 Execute，
+// 会话失效、权限错误等与其他页面请求的判断一致。
+// GET 的签到页里认不出结果、却有提交回本页的「立即签到」表单时（新版 NexusPHP，见 attendance_form.go），照按钮的做法提交再认：
+// 表单带 NexusPHP 图片验证码时让 AI 认（ctx 里没有 AI 时返回 ErrAttendanceNeedsAI），要过人机验证组件时返回 ErrAttendanceCaptchaRequired。
+func (d *NexusPHPDriver) Attend(ctx context.Context) (AttendResult, error) {
+	cfg := ResolveAttendanceConfig(d.attendanceDefinition())
+	if cfg == nil {
+		return AttendResult{}, ErrAttendanceUnsupported
+	}
+	if cfg.Unsupported != "" {
+		return AttendResult{}, fmt.Errorf("%w: %s", ErrAttendanceUnsupported, cfg.Unsupported)
+	}
+	if cfg.Challenge != "" {
+		return d.attendWithChallenge(ctx, cfg.Challenge)
+	}
+	req, err := attendanceRequest(cfg)
+	if err != nil {
+		return AttendResult{}, err
+	}
+	res, err := d.Execute(ctx, req)
+	if err != nil {
+		return AttendResult{}, attendanceRequestError(err, req.Path)
+	}
+	if result, ok := cfg.Match(attendancePageText(res.RawBody)); ok {
+		return result, nil
+	}
+	if req.Method != http.MethodGet {
+		return AttendResult{}, unrecognizedAttendance(&res, "")
+	}
+	form, ok := findAttendanceForm(res.Document, req.Path)
+	if !ok {
+		return AttendResult{}, unrecognizedAttendance(&res, "")
+	}
+	return d.submitAttendanceForm(ctx, cfg, req.Path, form)
+}
+
+// AttendanceUnsupportedReason 报告站点定义是否把签到标记为不支持，支持时返回空串。
+func (d *NexusPHPDriver) AttendanceUnsupportedReason() string {
+	cfg := ResolveAttendanceConfig(d.attendanceDefinition())
+	if cfg == nil {
+		return "该站点的架构暂不支持签到"
+	}
+	return cfg.Unsupported
+}
+
+func (d *NexusPHPDriver) attendanceDefinition() *SiteDefinition {
+	if d.siteDefinition != nil {
+		return d.siteDefinition
+	}
+	return &SiteDefinition{Schema: SchemaNexusPHP}
+}
+
+// SupportsAttendance 报告站点能否自动签到：驱动实现了签到，且站点定义没有标记为不支持。
+func (b *BaseSite[Req, Res]) SupportsAttendance() bool {
+	if _, ok := any(b.driver).(Attender); !ok {
+		return false
+	}
+	if r, ok := any(b.driver).(attendanceSupportReporter); ok && r.AttendanceUnsupportedReason() != "" {
+		return false
+	}
+	return true
+}
+
+// AttendanceUnsupportedReason 是这个站点实例不能签到的原因（例如 UHDDolby 没配 Cookie）；能签到时为空。
+func (b *BaseSite[Req, Res]) AttendanceUnsupportedReason() string {
+	if _, ok := any(b.driver).(Attender); !ok {
+		return "该站点的架构暂不支持签到"
+	}
+	if r, ok := any(b.driver).(attendanceSupportReporter); ok {
+		return r.AttendanceUnsupportedReason()
+	}
+	return ""
+}
+
+// Attend 签到一次。与 GetUserInfo 一样先经过本站的限速器——不能像 GetDetailFetcher 那样把驱动直接交出去。
+func (b *BaseSite[Req, Res]) Attend(ctx context.Context) (AttendResult, error) {
+	a, ok := any(b.driver).(Attender)
+	if !ok {
+		return AttendResult{}, ErrAttendanceUnsupported
+	}
+	if r, ok := any(b.driver).(attendanceSupportReporter); ok {
+		if reason := r.AttendanceUnsupportedReason(); reason != "" {
+			return AttendResult{}, fmt.Errorf("%w: %s", ErrAttendanceUnsupported, reason)
+		}
+	}
+	if err := b.limiter.Wait(ctx); err != nil {
+		return AttendResult{}, fmt.Errorf("rate limit: %w", err)
+	}
+	return a.Attend(ctx)
+}

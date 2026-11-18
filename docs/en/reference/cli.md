@@ -12,16 +12,76 @@ Starts the web interface and the background jobs. Running `pt-tools` with no com
 pt-tools web --host 0.0.0.0 --port 8080
 ```
 
-| Option   | Meaning              | Default   |
-| -------- | -------------------- | --------- |
-| `--host` | Address to listen on | `0.0.0.0` |
-| `--port` | Port to listen on    | `8080`    |
+| Option               | Meaning                                                                                                                                                                                                                                         | Default   |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `--host`             | Address to listen on                                                                                                                                                                                                                            | `0.0.0.0` |
+| `--port`             | Port to listen on                                                                                                                                                                                                                               | `8080`    |
+| `--qbit-compat-addr` | Listen address of the [qB-compatible entrance](../guide/qbit-compat.md), such as `0.0.0.0:8081`; when empty, the environment variable `PT_QBIT_COMPAT_ADDR` is used, then the address set on the web page, and without any of them it stays off | Off       |
 
 The Docker image sets both through the environment variables `PT_HOST` and `PT_PORT`; the other variables are listed in [Install](../guide/install.md) and [Configuration](../configuration.md).
 
+## pt-tools mcp
+
+Connects the [MCP](../guide/mcp.md) tools of a running pt-tools to standard input and output, for MCP clients that only speak stdio, such as Claude Desktop. It connects to the pt-tools given by `--url` and forwards its tools as they are. It opens no database and starts no scheduler, so it can run on the client's machine.
+
+```bash
+PT_TOOLS_MCP_TOKEN=ptt_1_xxxxxxxx pt-tools mcp --url http://192.168.1.10:8080
+```
+
+| Option    | Meaning                                                                                                                                                                            | Default                 |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `--url`   | Address of pt-tools; `/mcp` is appended when only the host and port are given. When empty, the environment variable `PT_TOOLS_MCP_URL` is used                                     | `http://127.0.0.1:8080` |
+| `--token` | API token with MCP read (MCP 读取) or MCP write (MCP 操作). When empty, the environment variable `PT_TOOLS_MCP_TOKEN` is used; on the command line it shows up in the process list | None                    |
+
+Once connected it prints one line to standard error; standard output carries only the MCP protocol.
+
+## pt-tools relay serve
+
+Runs a relay for [remote access](../guide/remote-access.md): the mobile app and pt-tools both connect to it and it forwards their encrypted connections without being able to read them. Run it yourself on a VPS or NAS with a public address. It opens no database and does not read or write `~/.pt-tools`.
+
+```bash
+pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
+```
+
+| Option                      | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Default        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `--public-url`              | The relay's public address (`ws://` or `wss://`), the one you enter in the app and in pt-tools; hosts sign against it, so it must match the address actually used. Required                                                                                                                                                                                                                                                                                    | None           |
+| `--listen`                  | Listen address                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `0.0.0.0:8443` |
+| `--max-streams-per-host`    | How many phone connections one pt-tools may have at once; extra ones are closed with 4429                                                                                                                                                                                                                                                                                                                                                                      | `16`           |
+| `--daily-bytes-per-host`    | Bytes forwarded per pt-tools per day (reset at 00:00 UTC), both directions together; over the limit its phone connections close until the reset. `0` means no limit                                                                                                                                                                                                                                                                                            | `0`            |
+| `--max-conn-per-ip-per-min` | New connections per IP address per minute; a negative value means no limit                                                                                                                                                                                                                                                                                                                                                                                     | `30`           |
+| `--client-ip-header`        | Take the client IP from this request header (behind a reverse proxy, for example `X-Real-IP`); when the header lists several addresses, the last one (added by the proxy) counts. Set it only when every request comes through the proxy                                                                                                                                                                                                                       | None           |
+| `--tls-cert`, `--tls-key`   | TLS certificate and key files; without them the relay speaks plain WebSocket and leaves TLS to a reverse proxy                                                                                                                                                                                                                                                                                                                                                 | None           |
+| `--disabled`                | Pause the service: every connection is closed with 4503                                                                                                                                                                                                                                                                                                                                                                                                        | off            |
+| `--max-connections`         | How many connections may be open at once (pt-tools and phones together); new ones get HTTP 503 when it is full, open ones are not affected. A negative value means no limit                                                                                                                                                                                                                                                                                    | `10000`        |
+| `--drain-grace`             | After SIGTERM, stop accepting new connections (`/ready` returns 503), wait this long, then close every connection (close code 1012; pt-tools and the app reconnect within a few seconds). Set a few seconds when a load balancer drains by `/ready`; at most 5 minutes. In Docker, give `docker stop` a few seconds more than this (`-t`, 10 seconds by default; `stop_grace_period` in Compose), or the container is killed before the connections are closed | `0s`           |
+| `--metrics`                 | Serve `GET /metrics` (Prometheus text with aggregate counts only, no hostId or IP); `--metrics=false` turns it off                                                                                                                                                                                                                                                                                                                                             | on             |
+
+Each option can also come from an environment variable: `PT_TOOLS_RELAY_LISTEN`, `PT_TOOLS_RELAY_PUBLIC_URL`, `PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`, `PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`, `PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`, `PT_TOOLS_RELAY_CLIENT_IP_HEADER`, `PT_TOOLS_RELAY_TLS_CERT`, `PT_TOOLS_RELAY_TLS_KEY`, `PT_TOOLS_RELAY_DISABLED=true`, `PT_TOOLS_RELAY_MAX_CONNECTIONS`, `PT_TOOLS_RELAY_DRAIN_GRACE` (for example `5s`) and `PT_TOOLS_RELAY_METRICS=false`. A value that does not parse (a number that is not an integer, a switch that is not `true`/`false`, a duration without a unit), a negative `--max-streams-per-host` or `--daily-bytes-per-host`, or a `--drain-grace` outside 0 to 5 minutes stops it from starting; a negative `--max-conn-per-ip-per-min` or `--max-connections` still means no limit. The Docker image runs it when `PT_MODE=relay` is set. `GET /healthz` returns the status and the version; `GET /ready` returns 200 while it accepts new connections and 503 while draining, full or paused, so use it for health checks.
+
+## pt-tools db
+
+Backs up and restores the data. Neither command migrates the database, and both work while pt-tools is running.
+
+```bash
+pt-tools db backup                                   # into the folder from the backup settings
+pt-tools db backup --output /mnt/backup/ --no-secret # into another folder, without the key
+pt-tools db restore --input /mnt/backup/pt-tools-backup-20261102-043000-scheduled.tar.gz
+pt-tools db restore --cancel
+```
+
+| Subcommand | Option           | Description                                                                                                                         |
+| ---------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `backup`   | `--output`, `-o` | Backup file or folder; by default the folder from Global settings → Backup (全局设置 → 备份). An existing file is never overwritten |
+|            | `--no-secret`    | Leave `secret.key` out; without it the backup settings decide                                                                       |
+| `restore`  | `--input`, `-i`  | Checks the backup and stages it; it is applied **when pt-tools restarts**                                                           |
+|            | `--cancel`       | Cancels a restore that has not been applied yet                                                                                     |
+
+The key rules for a restore, how it is applied on restart and how a failure is rolled back are described in [Upgrades and backups](../guide/upgrade.md#restoring).
+
 ## pt-tools secret
 
-Exports or imports the key that encrypts site cookies and notification credentials.
+Exports or imports the key that encrypts site cookies, notification credentials and API keys.
 
 ```bash
 # Print the key to standard output as base64 text
@@ -60,7 +120,7 @@ The categories:
 
 - `logs`: rotated log backups. The log file being written is never removed.
 - `staging`: `.torrent` files in `downloads/` that were pushed, are orphaned or are past their retention.
-- `backups`: configuration backups made automatically; only the most recent N are kept.
+- `backups`: old configuration backups (`.json`) left automatically by database migrations; only the most recent N are kept. Backup files (`.tar.gz`) are not part of it.
 
 `torrents.db`, `secret.key` and the log being written are never removed, whatever the options.
 
@@ -83,7 +143,7 @@ pt-tools completion zsh > "${fpath[1]}/_pt-tools"
 
 ## Less common commands
 
-These commands do not appear in `pt-tools --help` and are for particular situations only.
+These commands are for particular situations only; `config` does not appear in `pt-tools --help`.
 
 | Command                    | Purpose                                                                                                                                                                       |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

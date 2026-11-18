@@ -1,0 +1,72 @@
+# 手机 App 的打包验证。App 跟 pt-tools 用同一个版本、同一个 Release 发布：release.yml 的 mobile job 用 Environment
+#「mobile-release」里的 keystore 签名，APK 和归档、扩展一起传到 draft，任一步失败整个 Release 停在 draft。
+# 以前单独发的 mobile-v* Release（mobile-v1.0.0-rc.1）留作历史，不再新建。
+#
+# PR 改到打包流程、Android 工程或构建号脚本时跑这里：用现生成的测试密钥按正式的方式构建一遍（版本号、构建号的推导与核对
+# 都一样），不碰任何 secret，也没有写权限与 OIDC。产物文件名带 -test-signed，不能发布。
+name: Mobile Release
+
+on:
+  pull_request:
+    branches: [main, v1.0.0-rc]
+    paths:
+      - ".github/workflows/mobile-release.yml"
+      - ".github/actions/build-android-release/**"
+      - ".github/actions/setup-flutter/**"
+      - ".github/scripts/mobile-build-number.sh"
+      - ".github/scripts/mobile-build-number.test.sh"
+      - "apps/mobile/android/**"
+      - "apps/mobile/tool/build_web.sh"
+      - "web/frontend/**"
+      - ".github/actions/build-mobile-web/**"
+      - "apps/mobile/pubspec.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # 只验证流程能走通。没有 secret、没有写权限、没有 OIDC
+  verify:
+    name: Mobile Release · Verify (test-signed)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test the build number mapping
+        run: bash .github/scripts/mobile-build-number.test.sh
+
+      - name: Read the version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]#]*\).*$/\1/p' apps/mobile/pubspec.yaml)
+          build_number=$(bash .github/scripts/mobile-build-number.sh "$version")
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >>"$GITHUB_OUTPUT"
+          echo "version $version, build number $build_number"
+
+      - name: Build, sign and verify (throwaway key)
+        uses: ./.github/actions/build-android-release
+        with:
+          version: ${{ steps.meta.outputs.version }}
+          build-name: ${{ steps.meta.outputs.version }}
+          build-number: ${{ steps.meta.outputs.build_number }}
+
+      - name: Upload test-signed APKs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pt-tools-app-${{ steps.meta.outputs.version }}-test-signed
+          path: upload
+          if-no-files-found: error
+          retention-days: 3

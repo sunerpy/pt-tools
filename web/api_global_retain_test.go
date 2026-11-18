@@ -154,3 +154,61 @@ func TestAPIGlobal_RetainRoundTrip(t *testing.T) {
 	assert.Equal(t, 5, resp.MaxRetry)
 	assert.Equal(t, int32(4), resp.DefaultConcurrency)
 }
+
+// 「空间低于下限时紧急清理」能经全局设置存成关、再打开；竞争度原来的检查间隔不再收（v16 起跟着自动删种的间隔）。
+func TestAPIGlobal_CleanupEmergencyAndPeerInterval(t *testing.T) {
+	srv := setupServer(t)
+	dir := t.TempDir()
+	require.NoError(t, srv.store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, CleanupEmergency: true}))
+	require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).Where("1 = 1").Update("peer_ratio_interval_min", 20).Error)
+
+	w := postGlobal(t, srv, map[string]any{"download_dir": dir, "cleanup_emergency": false, "peer_ratio_interval_min": 99})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got, err := srv.store.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.False(t, got.CleanupEmergency)
+	assert.Equal(t, 20, got.PeerRatioIntervalMin)
+
+	w = postGlobal(t, srv, map[string]any{"download_dir": dir, "cleanup_emergency": true})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got, err = srv.store.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.True(t, got.CleanupEmergency)
+}
+
+// 全局设置接口不再收「免费结束自动删除」（v17 起每条 RSS 自己选）：带上它也不改库里的值。
+func TestAPIGlobal_IgnoresLegacyAutoDeleteOnFreeEnd(t *testing.T) {
+	srv := setupServer(t)
+	dir := t.TempDir()
+	require.NoError(t, srv.store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir}))
+	w := postGlobal(t, srv, map[string]any{"download_dir": dir, "auto_delete_on_free_end": true})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got, err := srv.store.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.False(t, got.AutoDeleteOnFreeEnd)
+}
+
+// GET /api/global 不再给新版不读写的两项：竞争度原来的检查间隔（v16）与全局的免费结束自动删除（v17）。
+// 两列留在库里给回退到旧版用，读设置不改它们。
+func TestAPIGlobal_GetOmitsLegacyKeys(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, srv.store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir()}))
+	require.NoError(t, global.GlobalDB.DB.Model(&models.SettingsGlobal{}).Where("1 = 1").
+		Updates(map[string]any{"auto_delete_on_free_end": true, "peer_ratio_interval_min": 20}).Error)
+
+	w := httptest.NewRecorder()
+	srv.apiGlobal(w, httptest.NewRequest(http.MethodGet, "/api/global", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.NotContains(t, body, "auto_delete_on_free_end")
+	assert.NotContains(t, body, "peer_ratio_interval_min")
+	assert.Contains(t, body, "download_dir")
+	assert.Contains(t, body, "cleanup_interval_min")
+	assert.Contains(t, body, "peer_ratio_max_sl")
+
+	got, err := srv.store.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.True(t, got.AutoDeleteOnFreeEnd)
+	assert.Equal(t, 20, got.PeerRatioIntervalMin)
+}

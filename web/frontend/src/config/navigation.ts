@@ -1,7 +1,7 @@
 import type { LucideIconName } from "../icons/lucide";
 
 /**
- * 导航结构 —— 与 Penpot 设计稿 G Cockpit 的 `D.nav` 一一对应（6 组 / 19 个路由）。
+ * 导航结构 —— 与 Penpot 设计稿 G Cockpit 的 `D.nav` 一一对应（6 组 / 19 个路由），后来各里程碑加的页面在注释里写明来历。
  * 分组顺序、图标名和文案都以设计稿为准；改这里等于改设计稿，先对一下画板。
  */
 export interface NavItem {
@@ -29,15 +29,23 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     title: "概览",
     items: [
+      /* 媒体中心 M8：画板 02 的首页（今天播出、待处理、继续观看、最近入库与 NAS 状态），打开网页先到这里 */
+      { path: "/home", label: "首页", icon: "house", rail: true },
       { path: "/userinfo", label: "用户统计", icon: "gauge", rail: true },
       { path: "/userinfo/export", label: "数据导出", icon: "file-down" },
+      /* 路线图 M19：画板没有这一页 */
+      { path: "/assistant", label: "AI 助手", icon: "sparkles" },
     ],
   },
   {
     title: "站点",
     items: [
       { path: "/sites", label: "站点列表", icon: "globe", badge: "sites", rail: true },
+      /* 第三批：签到的开关、结果与设置原来散在站点列表和全局设置里，单独成页 */
+      { path: "/attendance", label: "自动签到", icon: "calendar-check" },
       { path: "/supported-sites", label: "已支持站点", icon: "badge-check" },
+      /* 路线图 M7：画板没有这一页，沿用站点组列表页的样式 */
+      { path: "/cookiecloud", label: "CookieCloud 导入", icon: "cloud-download" },
     ],
   },
   {
@@ -45,13 +53,37 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { path: "/search", label: "种子搜索", icon: "search", rail: true },
       { path: "/tasks", label: "任务列表", icon: "list-checks", badge: "tasks", rail: true },
+      /* 媒体中心 M2b：画板 06 的导航画在任务列表后面（画板那枚「新」徽标不做），页面沿用下载组的列表页样式 */
+      { path: "/free-watch", label: "等免费", icon: "hourglass" },
       { path: "/paused", label: "暂停任务", icon: "circle-pause", badge: "paused", rail: true },
+      /* 路线图 M3：画板没有这一页，沿用下载组的列表页样式 */
+      { path: "/brush", label: "刷流任务", icon: "trending-up" },
       /*
        * 画板 18 把控制台画在外壳里（head 64 → bar-64 → 左列 276 / 右 788），
        * 不再是新标签页里的独立控制台，所以这一项走站内跳转。
        */
       { path: "/downloader-hub", label: "下载器 Web UI", icon: "app-window" },
       { path: "/downloaders", label: "下载器设置", icon: "server" },
+      /* 路线图 M4：画板没有这一页，沿用下载组的列表页样式 */
+      { path: "/downloader-assistant", label: "下载器助手", icon: "wrench" },
+      /* 路线图 M5：画板没有这一页，沿用下载组的列表页样式 */
+      { path: "/transfer", label: "转移做种", icon: "arrow-right-left" },
+      /* 路线图 M6：画板没有这一页，沿用下载组的列表页样式 */
+      { path: "/reseed", label: "IYUU 辅种", icon: "share-2" },
+      { path: "/qbit-compat", label: "qB 兼容入口", icon: "door-open" },
+    ],
+  },
+  {
+    /* 路线图 M9–M11 的媒体自动化：画板没有这一组，沿用列表页的样式 */
+    title: "媒体",
+    items: [
+      { path: "/media/explore", label: "探索", icon: "compass" },
+      /* 媒体中心 M3：画板 04 的导航把日历画在探索后面（那枚「新」徽标不做）；页面画板没画，沿用媒体页的样式 */
+      { path: "/media/calendar", label: "日历", icon: "calendar-days" },
+      { path: "/media/subscriptions", label: "追剧与订阅", icon: "bookmark" },
+      { path: "/media/library", label: "媒体库", icon: "folder-open" },
+      { path: "/media/history", label: "整理历史", icon: "history" },
+      { path: "/media/recognize", label: "媒体识别", icon: "scan" },
     ],
   },
   {
@@ -65,6 +97,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "ChatOps",
     items: [
       { path: "/chatops/notifications", label: "消息通知", icon: "bell", rail: true },
+      { path: "/chatops/templates", label: "消息模板", icon: "file-text" },
       { path: "/chatops/bindings", label: "ChatOps 绑定", icon: "link" },
       { path: "/chatops/audit", label: "操作审计", icon: "shield-check" },
       { path: "/chatops/rss-notifications", label: "RSS 通知日志", icon: "rss" },
@@ -74,7 +107,18 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "系统",
     items: [
       { path: "/global", label: "全局设置", icon: "settings", rail: true },
+      /* 媒体中心 M8：画板没有这一页，沿用 qB 兼容入口页的样式 */
+      { path: "/system/check", label: "系统体检", icon: "activity" },
+      /* 首页 NAS 概览 H2：画板没有这一页，沿用远程访问页的样式（来源列表对应设备列表） */
+      { path: "/system/nas", label: "NAS 监控", icon: "server" },
       { path: "/cloak-config", label: "CloakBrowser", icon: "shield" },
+      { path: "/api-tokens", label: "API 令牌", icon: "id-card" },
+      /* 路线图 M14：画板没有这一页，沿用 qB 兼容入口页的样式 */
+      { path: "/mcp", label: "MCP 接入", icon: "bot" },
+      /* 路线图 M15：画板没有这一页，沿用 qB 兼容入口页的样式 */
+      { path: "/remote", label: "远程访问", icon: "smartphone" },
+      /* 路线图 M19：画板没有这一页，沿用 qB 兼容入口页的样式 */
+      { path: "/assistant/settings", label: "AI 助手设置", icon: "sliders-horizontal" },
       { path: "/logs", label: "运行日志", icon: "scroll-text" },
       { path: "/password", label: "修改密码", icon: "key-round" },
     ],
@@ -91,13 +135,22 @@ export const MOBILE_TABS: readonly {
   label: string;
   icon: LucideIconName;
   path?: string;
+  /** 除了 path，在这些页面上也点亮 */
+  also?: readonly string[];
 }[] = [
-  { key: "overview", label: "概览", icon: "gauge", path: "/userinfo" },
+  /* 媒体中心 M8：「概览」改指首页（画板 07 的底栏）；原来它指的用户统计也还点亮它 */
+  { key: "overview", label: "概览", icon: "gauge", path: "/home", also: ["/userinfo"] },
   { key: "sites", label: "站点", icon: "globe", path: "/sites" },
   { key: "tasks", label: "任务", icon: "list-checks", path: "/tasks" },
   { key: "search", label: "搜索", icon: "search", path: "/search" },
   { key: "me", label: "我的", icon: "user" },
 ] as const;
+
+/** 手机底栏在这一页点亮哪个 tab；没有对应的 tab 时是空串 */
+export function mobileTabFor(activePath: string): string {
+  const hit = MOBILE_TABS.find((t) => t.path === activePath || t.also?.includes(activePath));
+  return hit?.key ?? "";
+}
 
 /** 所有导航项打平，供标题解析与高亮匹配使用 */
 export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
@@ -132,25 +185,48 @@ export const RAIL_FOOT_ITEM: NavItem | undefined = NAV_ITEMS.find((i) => i.path 
  * 在这里显式映射，避免详情页把整组导航的高亮丢掉。
  */
 const ROUTE_NAME_TO_NAV: Record<string, string> = {
+  home: "/home",
   userinfo: "/userinfo",
   "userinfo-export": "/userinfo/export",
+  assistant: "/assistant",
+  "assistant-settings": "/assistant/settings",
   sites: "/sites",
   "site-detail": "/sites",
+  attendance: "/attendance",
+  cookiecloud: "/cookiecloud",
   "supported-sites": "/supported-sites",
   search: "/search",
   tasks: "/tasks",
+  "free-watch": "/free-watch",
   paused: "/paused",
   "downloader-hub": "/downloader-hub",
   downloaders: "/downloaders",
   "filter-rules": "/filter-rules",
   cleanup: "/cleanup",
+  "downloader-assistant": "/downloader-assistant",
+  transfer: "/transfer",
+  reseed: "/reseed",
+  brush: "/brush",
+  "qbit-compat": "/qbit-compat",
+  "media-explore": "/media/explore",
+  "media-calendar": "/media/calendar",
+  "media-subscriptions": "/media/subscriptions",
+  "media-library": "/media/library",
+  "media-history": "/media/history",
+  "media-recognize": "/media/recognize",
   notifications: "/chatops/notifications",
   "notification-detail": "/chatops/notifications",
+  "notify-templates": "/chatops/templates",
   bindings: "/chatops/bindings",
   "audit-log": "/chatops/audit",
   "rss-notifications": "/chatops/rss-notifications",
   global: "/global",
+  "system-check": "/system/check",
+  "nas-monitor": "/system/nas",
   "cloak-config": "/cloak-config",
+  "api-tokens": "/api-tokens",
+  mcp: "/mcp",
+  remote: "/remote",
   logs: "/logs",
   password: "/password",
 };

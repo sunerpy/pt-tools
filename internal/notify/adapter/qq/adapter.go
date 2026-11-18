@@ -30,6 +30,8 @@ const (
 	qqPingInterval = 30 * time.Second
 	// qqPongTimeout 是单次 ping 写控制帧的超时。
 	qqPongTimeout = 10 * time.Second
+	// qqMaxConcurrentHandlers 是同时处理的入站消息上限，超出的消息丢弃并记日志，避免刷屏时协程和数据库写入无界堆积。
+	qqMaxConcurrentHandlers = 16
 )
 
 type qqConfig struct {
@@ -62,6 +64,8 @@ type QQChannel struct {
 
 	handlerMu      sync.RWMutex
 	inboundHandler notify.InboundHandler
+	// handlerSlots 限制同时处理的入站消息数；为 nil 时不限制。
+	handlerSlots chan struct{}
 
 	closeOnce sync.Once
 }
@@ -71,6 +75,7 @@ func New() *QQChannel {
 		adminUsers:   make(map[int64]struct{}),
 		allowedUsers: make(map[int64]struct{}),
 		pg:           newPaginator(20, 5*time.Minute),
+		handlerSlots: make(chan struct{}, qqMaxConcurrentHandlers),
 	}
 }
 
@@ -87,6 +92,11 @@ func (q *QQChannel) Init(ctx context.Context, conf *models.NotificationConf) err
 	cfg, err := parseConfig(conf.ConfigJSON)
 	if err != nil {
 		return fmt.Errorf("QQ 适配器: 解析 config_json 失败: %w", err)
+	}
+	// 反向 WS 的事件（含 user_id）完全由连接方提供；监听在非本机地址又不设 token 时，
+	// 能连上端口的人就能冒充已绑定的管理员发命令。
+	if cfg.ListenAddr != "" && cfg.AccessToken == "" && !isLoopbackListenAddr(cfg.ListenAddr) {
+		return fmt.Errorf("QQ 适配器: 监听地址 %s 不是本机地址，必须设置 Access Token", cfg.ListenAddr)
 	}
 	q.cfg = cfg
 	q.adminUsers = toIDSet(cfg.AdminQQUsers)
@@ -166,7 +176,10 @@ func (q *QQChannel) wsHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := newNapCatCaller(conn, hello.SelfID)
-	q.caller.Store(c)
+	// 新连接替换旧连接时主动关掉旧的：旧读循环随之退出，且它只在 caller 仍是自己时才清空。
+	if old := q.caller.Swap(c); old != nil {
+		_ = old.conn.Close()
+	}
 	q.healthy.Store(true)
 	qqLogger().Infof("QQ 适配器(%d): [wss] 连接Websocket服务器: %s 成功, 账号: %d", q.confID, r.RemoteAddr, hello.SelfID)
 
@@ -204,8 +217,10 @@ func checkAccessToken(req *http.Request, token string) int {
 // 此机制无效，需要切换到 forward-WS 或 HTTP webhook 才能彻底解决。
 func (q *QQChannel) listenCaller(c *napCatCaller) {
 	defer func() {
-		q.caller.Store(nil)
-		q.healthy.Store(false)
+		// 已被新连接替换时不能清空，否则会把新连接的 caller 置空，之后所有发送都报「尚未握手」。
+		if q.caller.CompareAndSwap(c, nil) {
+			q.healthy.Store(false)
+		}
 		_ = c.conn.Close()
 		qqLogger().Infof("QQ 适配器(%d): [wss] WebSocket 连接断开, 账号: %d", q.confID, c.selfID)
 	}()
@@ -305,6 +320,10 @@ func (q *QQChannel) Close(_ context.Context) error {
 		if q.listener != nil {
 			_ = q.listener.Close()
 		}
+		// upgrade 之后的 WebSocket 不归 http.Server 管，Close 不会断开它，要单独关掉。
+		if c := q.caller.Swap(nil); c != nil {
+			_ = c.conn.Close()
+		}
 		if q.pg != nil {
 			q.pg.Stop()
 		}
@@ -337,6 +356,20 @@ func parseConfig(raw string) (qqConfig, error) {
 		cfg.Path = "/onebot/v11/ws"
 	}
 	return cfg, nil
+}
+
+// isLoopbackListenAddr 判断监听地址是否只对本机开放（127.0.0.0/8、::1、localhost）。
+// 主机名为空（":6701"）或 0.0.0.0 会监听所有网卡，不算本机。
+func isLoopbackListenAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func toIDSet(ids []int64) map[int64]struct{} {

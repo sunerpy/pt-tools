@@ -23,7 +23,7 @@
  * 依赖：只用 Chrome 的 CDP，不装任何浏览器自动化包。Chrome 路径可用 PT_CHROME 覆盖。
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyStubScript, stubScript } from "./board-fixtures.mjs";
@@ -49,11 +49,9 @@ const EXPECT = {
     titles: ["上传构成", "等级分布", "需要关注"],
     /*
      * 画板 10 的 bar-64：seg（全部站点/正常/异常/保号预警）+ q + chip-0「周期: 本周」
-     * + chip-1「排序: 分享率」+ 右端三枚图标钮。周期那枚没落地（聚合接口没有历史序列），
-     * 偏离见 ALLOWED_GAPS。
+     * + chip-1「排序: 分享率」+ 右端三枚图标钮。周期那枚由每日快照支撑（summary / trends）。
      */
     needsSeg: true,
-    /* 「周期」按画板列进来，落地没有 —— 让它红，原因在 ALLOWED_GAPS 里 */
     controls: ["全部站点", "正常", "异常", "保号预警", "排序", "列设置", "导出", "周期"],
     /* 画板 10 的行高与十列（docs/design/webui-board-spec.md §6）；差异见 ALLOWED_GAPS */
     gridRowHeight: 34,
@@ -290,6 +288,37 @@ const EXPECT = {
      * 出现在具体档位下，并且被筛掉的条数要写在表格上方。
      */
     probes: [
+      /*
+       * 「筛选」浮层（媒体中心 M2a，按解析信息筛）：勾「1080p」以后表格只剩那几行，
+       * 行数等于选项上写的数。排在分类那条探针前面，在没动过的状态上点，点完再取消。
+       */
+      {
+        desc: "筛选浮层：勾 1080p，表格行数变成选项上的数，取消后回到原数",
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const rows = () => document.querySelectorAll('.el-table__body tbody tr').length;
+          const btn = document.querySelector('[data-testid="search-facets-btn"]');
+          if (!btn) return 'no-facets-btn';
+          btn.click();
+          await wait(500);
+          const opt = document.querySelector('[data-testid="es-facet-resolution-1080p"]');
+          if (!opt) return 'no-option';
+          const n = Number((opt.querySelector('.es-facets__n')?.textContent ?? '').trim());
+          const before = rows();
+          opt.click();
+          await wait(500);
+          const after = rows();
+          const label = (btn.textContent ?? '').replace(/\s+/g, ' ').trim();
+          opt.click();
+          await wait(500);
+          const back = rows();
+          btn.click();
+          await wait(300);
+          const ok = n > 0 && after === n && after < before && back === before && label === '筛选 · 1';
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 选项 ' + n + ' 行 ' + before + '→' + after + '→' + back + ' 按钮 ' + label;
+        })()`,
+      },
       {
         desc: "分类 + 仅免费 + 一并显示：说明里的条数与表格真会多出来的行数一致",
         want: "verdict=ok",
@@ -337,6 +366,8 @@ const EXPECT = {
       "音乐",
       "排序",
       "列设置",
+      /* 按解析信息筛的浮层（媒体中心 M2a，画板 06 的筛选组）；画板 15 没画 */
+      "筛选",
     ],
     /* 画板 15 的表头 */
     gridColumns: ["站点", "标题", "大小", "优惠", "上传", "下载", "完成", "发布时间", "操作"],
@@ -484,9 +515,19 @@ const EXPECT = {
             if (raw.includes('/api/downloader-torrents/')) seen.push(raw);
             return realFetch(input, init);
           };
-          const pickMode = (label) => {
-            const el = [...document.querySelectorAll('.el-segmented__item')]
+          /*
+           * 行高、详情位置、数据范围收进了工具栏的「视图」面板（以前是四组没有组名的分段平铺在带上）。
+           * 面板第一次点开才渲染，所以找不到档位时先点开它再找。
+           */
+          const pickMode = async (label) => {
+            const find = () => [...document.querySelectorAll('.el-segmented__item')]
               .find((b) => (b.textContent ?? '').trim() === label);
+            let el = find();
+            if (!el) {
+              document.querySelector('[data-testid=hub-view-btn]')?.click();
+              await wait(400);
+              el = find();
+            }
             if (!el) return false;
             el.click();
             return true;
@@ -502,7 +543,7 @@ const EXPECT = {
           const esc = () => document.dispatchEvent(
             new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
           );
-          if (!pickMode('侧边')) { window.fetch = realFetch; return 'no-mode-seg'; }
+          if (!(await pickMode('侧边抽屉'))) { window.fetch = realFetch; return 'no-mode-seg'; }
           await wait(400);
           if (!(await openRow())) { window.fetch = realFetch; return 'no-detail-btn'; }
           const drawer = document.querySelector('.hub__drawer');
@@ -510,7 +551,7 @@ const EXPECT = {
           const dtext = drawer ? (drawer.textContent ?? '').replace(/\\s+/g, ' ') : '';
           esc();
           await wait(500);
-          if (!pickMode('下方')) { window.fetch = realFetch; return 'no-mode-seg-2'; }
+          if (!(await pickMode('表格下方'))) { window.fetch = realFetch; return 'no-mode-seg-2'; }
           await wait(400);
           if (!(await openRow())) { window.fetch = realFetch; return 'no-detail-btn-2'; }
           const inline = document.querySelector('.hub__detail');
@@ -653,9 +694,9 @@ const EXPECT = {
         })()`,
       },
       {
-        desc: "状态栏调度器浮层 = 画板 41 的 sched-pop（300 宽，含状态与同步口径）",
-        /* 胶囊里是状态本身（运行中 / 已停止 / 状态未知），不是又一遍「调度器」 */
-        want: "宽 300|调度器|状态未知|最后同步|停止所有任务|启动所有任务",
+        desc: "状态栏 RSS 任务浮层 = 画板 41 的 sched-pop（300 宽：状态与原因、作用范围、自动启动开关、停止 / 启动）",
+        /* 2026-10「调度器」改名「RSS 任务」：状态取 /api/control/status，「最后同步 · 间隔」那行换成了状态说明 */
+        want: "宽 300|RSS 任务|刷流、辅种|程序启动时自动运行|停止|启动",
         js: `(async () => {
           const cell = document.querySelector('.pt-status__cell--btn');
           if (!cell) return 'no-cell';
@@ -767,9 +808,13 @@ const EXPECT = {
   "/chatops/bindings": {
     board: "24 ChatOps 绑定",
     kind: CARD,
+    /*
+     * 2026-10-29 加了「通道」一栏（机器人状态、通知发给谁、名单里谁绑定了）放在最前面；
+     * 「待绑定」只在有没用掉的绑定码时出现（假数据里有一个码，所以这里有它）。偏离见 ALLOWED_GAPS。
+     */
     cards: [612, 612, 612], // p-pending / p-active / p-note（落地 1080，偏离见 ALLOWED_GAPS）
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["待绑定", "已绑定", "绑定是怎么走的"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["通道", "待绑定", "已绑定", "绑定是怎么走的"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
     probes: [
       {
         /*
@@ -931,9 +976,13 @@ const EXPECT = {
   "/global": {
     board: "27 系统设置",
     kind: CARD,
-    cards: [1080], // p-cfg（画板另有一条 warn 提示，那是状态不是常驻卡）
-    minCards: 1, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["全局配置"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    /*
+     * p-cfg（画板另有一条 warn 提示，那是状态不是常驻卡）+ 备份与恢复。
+     * 「备份与恢复」是 1.0 媒体中心 M0 加的卡，画板 27 没画；与 p-cfg 同宽，排在它下面。
+     */
+    cards: [1080, 1080],
+    minCards: 2, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["全局配置", "备份与恢复"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/cloak-config": {
     board: "28 CloakBrowser",
@@ -1312,12 +1361,6 @@ const ALLOWED_GAPS = {
    * RSS 流水：已下载 / 已推送 / 已过期，在 apiTasks 里是逐个 AND 的可叠加标记。
    * 两者不是同一套词汇 —— 那五档属于下载器控制台（画板 18），那一页确实有它们。
    */
-  "/userinfo controls(周期)":
-    OWNER_OK +
-    "画板 10 的 chip-0 是「周期: 本周」，落地没有：聚合接口只回当前快照，没有历史序列，" +
-    "按周期筛在数据上不成立 —— 产品一条历史快照都不存，要做得新增快照表 + 采集任务 + 迁移。" +
-    OWNER_DECISION,
-
   "/tasks controls.seg":
     OWNER_OK +
     "画板 16 的分段是五档下载器状态（全部/下载中/做种中/等待中/已暂停）；这一页是 RSS 流水，" +
@@ -1354,7 +1397,9 @@ const ALLOWED_GAPS = {
     "**owner 当初决定保留**（原话：用画板的样式设计，但要保留现有的头像、未读角标、" +
     "真实数据、入站、剩余天数、操作）；2026-09-30 用户又提「表格列数量过多」，" +
     "所以三列仍在，但没存过列偏好时默认收进「列设置」，勾上即回来。这是记录在案的取舍。" +
-    "站点列也按这个决定保留了头像与未读角标；行高与单元格形状则按画板压回 34。",
+    "站点列也按这个决定保留了头像与未读角标；行高与单元格形状则按画板压回 34。" +
+    "画板的「数据量」列落地叫「上传 / 下载（计费）」，「真实数据」改叫「实际传输」：" +
+    "账号的下载量要写明是站点计费的口径、和实际传输分开（docs/design/free-expiry-safety.md 附录 B.2.17）。",
 
   /*
    * 移动画板 30 / 31 的筛选区与行卡走势图。两条都不是「忘了做」：
@@ -1363,19 +1408,13 @@ const ALLOWED_GAPS = {
     "画板 30 的筛选是一排 26 高的 chip（全部/正常/异常/已禁用 各带计数）。" +
     "落地现在是「已启用/全部」分段 + 三枚状态 chip（正常/异常/已禁用，带计数）+ 搜索 + " +
     "「批量」菜单 + 新增站点，两行共 81 —— 比画板高，但已经从 240 压下来，且入口一个没少。" +
-    "还高的那部分是画板移动稿上根本没画的三个入口（探测已启用 / 打开已启用 / 新增站点）；" +
+    "还高的那部分是画板移动稿上根本没画的三个入口（探测启用站点 / 打开启用站点 / 新增站点）；" +
     "「全部」两边也不是一回事：画板那张图是 14 个已配置站点，这个产品的 /api/sites 回的是" +
     "全部 66 个内置定义，所以状态做成可叠加的 chip 而不是画板那种四档互斥分段。",
   "/tasks@375 filterRow":
     "画板 31 的筛选是一条 294×30 的分段器；落地是三个可叠加的筛选 chip + 搜索框 + 站点下拉。" +
     "那三个 chip 是可组合的（apiTasks 里逐个 AND），收成画板那条互斥分段器会删掉组合筛选能力 —— " +
     "这正是第九轮修掉的缺陷，不能为了对齐画板再改回去。",
-  "/sites@375 rowCards.spark":
-    OWNER_OK +
-    "画板 30 的行卡里有一条 120×18 的 8 根柱走势图，落地没有：后端没有按站点的历史序列接口。" +
-    "perSiteStats 只给当前快照（uploaded / ratio / seeding …），造一条假的走势比不画更糟。" +
-    "依赖与「周期」那条同一套历史快照。" +
-    OWNER_DECISION,
 
   /*
    * 这张表现在是空的 —— 上一轮登记的偏离都实现掉了。
@@ -1616,14 +1655,6 @@ await goto(`${BASE}/`);
 await ev(
   `fetch('/login', { method: 'POST', body: new URLSearchParams({ username: ${JSON.stringify(USER)}, password: ${JSON.stringify(PASS)} }) })`,
 );
-/*
- * v2 升级横幅不在任何画板的构成里，关掉它才能量到画板的坐标。
- *
- * **代价要说清**：关掉它之后，这份验收就完全看不见它对首屏的影响了 ——
- * 一次评审正是指出「开场那 252px」一路绿灯，原因就在这一行。所以下面单独量一次
- * 它在首屏的高度（`bannerCost`），让这笔账出现在报告里，而不是被这一行悄悄抹掉。
- */
-await ev(`localStorage.setItem('pt_tools_v2_banner_dismissed_v1', '1')`);
 /*
  * 喂假数据 —— 画板的页脚带、多选条和一部分卡片只有有数据时才渲染，
  * 空库量出来的「没有页脚带」是没数据而不是没实现，不喂就分不开这两件事。
@@ -2863,34 +2894,3023 @@ if (emptyRoutes.length > 0) {
   }
 }
 
+// ------------------------------------------------- 按条目搜索（画板 06、09、10，媒体中心 M2a）
+
 /*
- * 单独量一次 v2 横幅的首屏代价。
- *
- * 上面为了对齐画板坐标把它关掉了，代价是这份验收完全看不见它 —— 而真实的首次访问
- * 是带着它的。这里把 localStorage 那把开关放回去、重进一次 /userinfo，量两个数：
- * 横幅自己多高、表格带因此被推到哪里。只报数不判失败：它是一条已登记的偏离，
- * 但数字必须出现在报告里，不能被那一行 setItem 抹掉。
+ * 按条目搜索不是带式表格页：64 高的搜索带代替页头，左栏 256，结果区是 888 宽的分组卡片。
+ * 画板 06 按 1440×1024 画（侧栏 264 + 主区 1176），所以这一趟按 1440 量，不按上面的 1376；
+ * 视口 < 1280 时左栏收进抽屉，另量一次 1200；手机按画板 09、10 量 375×812。
+ * 数字来自 docs/design/media-hub-board-spec.md 的 B06 / B09；假数据是 board-fixtures.mjs 的 ENTRY_SEARCH
+ * （五组：两个站点的同一资源、整组已入库、锁定的版本、正在下载、不符合档案；第六组拉黑了，默认不显示，M2b）。
+ * 条目从地址带进来（探索页的「搜资源」就是这么跳的），不经候选下拉。
  */
-let bannerCost = null;
-if (!wanted.length || wanted.includes("/userinfo")) {
-  await ev(`localStorage.removeItem('pt_tools_v2_banner_dismissed_v1')`);
-  await goto(`${BASE}/#/userinfo`);
-  /*
-   * 必须真的重载：横幅的 visible 是在 onMounted 里读 localStorage 定的，
-   * 而 hash 导航不会重新挂载 App.vue —— 只清掉那个键、不重载，量到的永远是 0。
-   */
+const ENTRY_ROUTE = "/search?media_type=tv&tmdb_id=231620";
+const doEntry =
+  wanted.length === 0 || wanted.includes("/search") || wanted.includes("/search?entry");
+
+const MEASURE_ES = `(() => {
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const q = (sel, root = document) => root.querySelector(sel);
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const band = q('[data-testid="es-head"]');
+  const rail = q('.es-body__rail');
+  const btn = (root, label) => [...(root?.querySelectorAll('button') ?? [])].find((b) => txt(b) === label);
+  return {
+    band: box(band),
+    query: box(q('.es-q .el-input__wrapper', band ?? document)),
+    token: box(q('[data-testid="es-token"]')),
+    tokenText: txt(q('[data-testid="es-token"]')),
+    kbd: box(q('.pt-kbd', band ?? document)),
+    search: box(btn(band, '搜索')),
+    history: box(q('button[aria-label="最近搜索"]', band ?? document)),
+    merge: box(q('.es-merge', band ?? document)),
+    controls: [...(band?.querySelectorAll('button, label, input[placeholder]') ?? [])]
+      .flatMap((el) => [txt(el), el.getAttribute('aria-label') ?? '', el.getAttribute('placeholder') ?? ''])
+      .filter(Boolean),
+    facetRow: Boolean(q('.pt-band__row--facet', band ?? document)),
+    rail: box(rail),
+    railPos: rail ? getComputedStyle(rail).position : '',
+    railTop: rail ? getComputedStyle(rail).top : '',
+    poster: box(q('.es-rail__item > *', rail ?? document)),
+    railTitle: txt(q('.es-rail__title', rail ?? document)),
+    railLines: [...(rail?.querySelectorAll('.es-rail__line') ?? [])].map(txt),
+    seasons: [...(rail?.querySelectorAll('.es-rail__season') ?? [])].map((el) => ({ t: txt(el), on: el.classList.contains('is-on'), ...box(el) })),
+    eps: [...(rail?.querySelectorAll('.es-eps__cell') ?? [])].map((el) => ({ t: txt(el), cls: el.className, ...box(el) })),
+    note: txt(q('[data-testid="es-ep-note"]', rail ?? document)),
+    profile: box(q('[data-testid="es-profile"]', rail ?? document)),
+    /* 选中项的文字在 .el-select__placeholder 上；第一个 .el-select__selected-item 是空的输入框外壳 */
+    profileText: txt(q('[data-testid="es-profile"] .el-select__placeholder', rail ?? document)),
+    facetGroups: [...(rail?.querySelectorAll('.es-facets__label') ?? [])].map(txt),
+    moreFacets: txt(q('[data-testid="es-more-facets"]', rail ?? document)),
+    summary: box(q('[data-testid="es-summary"]')),
+    summaryText: txt(q('[data-testid="es-summary"]')),
+    siteErrors: txt(q('[data-testid="es-site-errors"]')),
+    sorts: [...document.querySelectorAll('[data-testid^="es-sort-"]')].map((el) => ({ t: txt(el), on: el.classList.contains('is-on'), ...box(el) })),
+    cards: [...document.querySelectorAll('[data-testid^="es-card-"]')].map((el) => ({
+      key: el.getAttribute('data-testid'),
+      ...box(el),
+      members: el.querySelectorAll('[data-testid="es-member"]').length,
+      score: box(q('[data-testid="es-score"]', el)),
+      scoreText: txt(q('[data-testid="es-score"]', el)),
+      pill: txt(q('.es-card__pill', el)),
+      lock: txt(q('.es-card__lock', el)),
+      more: txt(q('[data-testid="es-more"]', el)),
+      /* 脚注右边的「等免费」「不要」（M2b）：位置、图标与字 */
+      acts: [...el.querySelectorAll('.es-card__acts .es-act')].map((b) => ({
+        t: txt(b),
+        disabled: b.disabled,
+        icon: box(b.querySelector('svg')),
+        color: getComputedStyle(b).color,
+        ...box(b),
+      })),
+      text: txt(el).slice(0, 400),
+    })),
+    unmatched: txt(q('[data-testid="es-unmatched-line"]')),
+    narrow: Boolean(q('.es-narrow')),
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  };
+})()`;
+
+/* 没加载完就量：先等概况那一行出来（第一次搜索要等假数据回来） */
+async function waitEntry() {
+  for (let i = 0; i < 40; i++) {
+    const ok = await ev(`Boolean(document.querySelector('[data-testid="es-summary"]'))`).catch(
+      () => false,
+    );
+    if (ok === true) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
+/* 打开一个视口下的按条目搜索：先换视口再整页重载，页面按新视口挂载（手机、窄屏的判断都在挂载时读） */
+async function openEntry(metrics) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { deviceScaleFactor: 1, ...metrics },
+    sessionId,
+  );
+  await goto(`${BASE}/#${ENTRY_ROUTE}`);
   await cdp.send("Page.reload", {}, sessionId);
   await waitReady();
-  await sleep(2600);
-  bannerCost = await ev(`(() => {
-    const b = document.querySelector('.v2-deprecation-banner');
-    const grid = document.querySelector('.pt-band--grid');
+  const ok = await waitEntry();
+  /* 卡片的展开、筛选都是过渡后的几何：等动画走完再量 */
+  await sleep(500);
+  return ok;
+}
+
+if (doEntry) {
+  const entryFail = (key, msg, mobile = false) => {
+    const gapKey = `/search?entry${mobile ? "@375" : ""} ${key}`;
+    if (ALLOWED_GAPS[gapKey]) {
+      gapsUsed.add(gapKey);
+      return;
+    }
+    failures.push({
+      route: `/search（按条目${mobile ? "，375" : ""}）`,
+      board: mobile ? "09/10 按条目搜索·手机" : "06 按条目搜索",
+      key,
+      msg,
+    });
+  };
+  const expectBox = (key, got, want, tol = 4, mobile = false) => {
+    if (!got) {
+      entryFail(key, "找不到这一块", mobile);
+      return;
+    }
+    const diffs = Object.entries(want)
+      .filter(([k, v]) => !near(got[k], v, tol))
+      .map(([k, v]) => `${k} ${got[k]}≠${v}`);
+    if (diffs.length > 0)
+      entryFail(key, `${diffs.join("，")}（实测 ${JSON.stringify(got)}）`, mobile);
+  };
+
+  /* ---- 桌面 1440×1024（画板 06） ---- */
+  consoleErrors = [];
+  if (!(await openEntry({ width: 1440, height: 1024, mobile: false }))) {
+    entryFail(
+      "load",
+      "等了 10 秒还没有结果概况：页面没进按条目搜索，或 POST /api/media/search 没回来",
+    );
+  } else {
+    const m = await ev(MEASURE_ES);
+    expectBox("band", m.band, { x: 264, y: 0, w: 1176, h: 64 });
+    expectBox("query", m.query, { x: 280, y: 13, w: 640, h: 38 });
+    expectBox("token", m.token, { x: 316, h: 26 }, 6);
+    if (m.tokenText !== "长夜将尽 · 2025 · 剧集")
+      entryFail("token.text", `条目标记写的是「${m.tokenText}」`);
+    /* ⌘K 在输入框里 9 下、20 高（画板 06 kbd 30×20）；行高没写死时它跟着输入框的行高变成 40 高、顶出框外 */
+    expectBox("kbd", m.kbd, { y: 22, h: 20 }, 2);
+    expectBox("search", m.search, { x: 928, y: 13, w: 74, h: 38 }, 6);
+    expectBox("history", m.history, { x: 1010, y: 13, w: 38, h: 38 }, 6);
+    if (!m.merge) entryFail("merge", "搜索带上没有「合并同一资源」开关");
+    else if (!near(m.merge.x + m.merge.w, 1424, 6))
+      entryFail("merge", `开关的右边在 ${m.merge.x + m.merge.w}，画板 1424`);
+    for (const label of [
+      "搜索",
+      "最近搜索",
+      "合并同一资源",
+      "再输入关键字可以缩小范围",
+      "去掉条目，回到关键字搜索",
+    ]) {
+      if (!m.controls.some((t) => t.includes(label)))
+        entryFail(`controls(${label})`, `搜索带里找不到「${label}」`);
+    }
+    /* 按条目搜时搜索带只有一排：保存搜索与站点那一排属于关键字模式 */
+    if (m.controls.some((t) => t.includes("保存搜索")))
+      entryFail("controls(保存搜索)", "按条目搜时不该有「保存搜索」");
+    if (m.facetRow) entryFail("facetRow", "按条目搜时不该有站点那一排");
+
+    expectBox("rail", m.rail, { x: 264, y: 64, w: 256, h: 932 });
+    if (m.railPos !== "sticky" || m.railTop !== "64px")
+      entryFail("rail.sticky", `左栏 position ${m.railPos}、top ${m.railTop}，画板 sticky 64px`);
+    expectBox("rail.poster", m.poster, { x: 280, y: 80, w: 56, h: 84 });
+    if (m.railTitle !== "长夜将尽") entryFail("rail.title", `条目名「${m.railTitle}」`);
+    const lines = m.railLines.join(" | ");
+    if (lines !== "2025 · 剧集 · 追剧中 | 版本锁 HHWEB 2160p")
+      entryFail("rail.lines", `两行说明是「${lines}」`);
+    const seasonText = m.seasons.map((s) => s.t + (s.on ? "*" : "")).join(" ");
+    if (seasonText !== "第 1 季 第 2 季*") entryFail("rail.seasons", `季是「${seasonText}」`);
+    if (m.seasons.some((s) => !near(s.h, 26, 1)))
+      entryFail("rail.seasons", `季的高度 ${m.seasons.map((s) => s.h).join("/")}，画板 26`);
+    if (m.eps.length !== 8) entryFail("rail.eps", `每集格子 ${m.eps.length} 个，这一季 8 集`);
+    else {
+      const sizes = [...new Set(m.eps.map((e) => `${e.w}×${e.h}`))];
+      if (sizes.join() !== "34×24")
+        entryFail("rail.eps", `格子尺寸 ${sizes.join("、")}，画板 34×24`);
+      /* 每行 6 个，列距 38、行距 30（格子 34 加 4、24 加 6） */
+      const e0 = m.eps[0];
+      const e1 = m.eps[1];
+      const e6 = m.eps[6];
+      if (
+        !near(e0.x, 280, 2) ||
+        !near(e1.x - e0.x, 38, 1) ||
+        !near(e6.x, e0.x, 1) ||
+        !near(e6.y - e0.y, 30, 1)
+      ) {
+        entryFail(
+          "rail.eps",
+          `格子位置 ${JSON.stringify([e0, e1, e6].map(({ x, y }) => [x, y]))}，画板首格 280、列距 38、每行 6 个、行距 30`,
+        );
+      }
+      const states = m.eps.map(
+        (e) => (e.cls.match(/is-(library|downloading|waiting_version|missing|upcoming)/) ?? [])[1],
+      );
+      const wantStates = [
+        "library",
+        "library",
+        "library",
+        "library",
+        "library",
+        "library",
+        "downloading",
+        "waiting_version",
+      ];
+      if (states.join() !== wantStates.join())
+        entryFail("rail.eps", `格子的状态 ${states.join("/")}`);
+    }
+    if (m.note !== "缺 E08（等版本）· E07 下载中") entryFail("rail.note", `一句话是「${m.note}」`);
+    expectBox("rail.profile", m.profile, { x: 280, w: 224, h: 30 }, 4);
+    if (m.profileText !== "档案：默认（2160p 优先）")
+      entryFail("rail.profile", `档案下拉写的是「${m.profileText}」`);
+    /* 假数据里没有流媒体平台，平台那一组没有选项、不出现（筛选组只列有选项的） */
+    const groups = m.facetGroups.join("、");
+    if (groups !== "分辨率、来源、HDR、制作组、中字与优惠")
+      entryFail("rail.facets", `筛选组是「${groups}」`);
+    if (m.moreFacets !== "更多筛选：编码、季集、站点")
+      entryFail("rail.more", `「更多筛选」写的是「${m.moreFacets}」`);
+
+    expectBox("summary", m.summary, { x: 536, y: 80 }, 4);
+    if (m.summaryText !== "6 条结果 · 合并成 5 组 · 符合档案 4")
+      entryFail("summary", `概况是「${m.summaryText}」`);
+    if (m.siteErrors !== "1 个站点没回应")
+      entryFail("siteErrors", `站点错误写的是「${m.siteErrors}」`);
+    const sortText = m.sorts.map((s) => s.t + (s.on ? "*" : "")).join(" ");
+    if (sortText !== "档案分* 做种 体积 发布时间") entryFail("sorts", `排序是「${sortText}」`);
+    else {
+      const last = m.sorts[m.sorts.length - 1];
+      if (!near(last.x + last.w, 1424, 4) || m.sorts.some((s) => !near(s.h, 24, 1))) {
+        entryFail(
+          "sorts",
+          `排序的右边 ${last.x + last.w}、高 ${m.sorts.map((s) => s.h).join("/")}，画板右对齐到 1424、高 24`,
+        );
+      }
+    }
+
+    /* 卡片：888 宽从 536 起；默认只显示首选一行 = 150 高，整组已入库折叠 = 108 高；卡距 12，第一张 y 112 */
+    const wantCards = [
+      ["es-card-h:9f2c0d8e41b7a3c5", 150, 1],
+      ["es-card-h:04aa71c3e9d25b80", 108, 0],
+      ["es-card-h:c71e5a90b2d4f618", 150, 1],
+      ["es-card-s:pthome:77310", 150, 1],
+      ["es-card-s:pttime:351098", 150, 1],
+    ];
+    if (m.cards.map((c) => c.key).join() !== wantCards.map(([k]) => k).join()) {
+      entryFail("cards", `卡片是 ${m.cards.map((c) => c.key).join("、")}`);
+    } else {
+      let y = 112;
+      wantCards.forEach(([key, h, members], i) => {
+        const c = m.cards[i];
+        expectBox(`card[${i}]`, c, { x: 536, y, w: 888, h }, 2);
+        if (c.members !== members)
+          entryFail(`card[${i}].members`, `${key} 显示了 ${c.members} 行成员，应为 ${members}`);
+        y += h + 12;
+      });
+      const [c0, c1, , c3, c4] = m.cards;
+      expectBox("card[0].score", c0.score, { x: 552, y: 128, w: 48, h: 48 }, 2);
+      if (c0.scoreText !== "92档案分")
+        entryFail("card[0].score", `档案分写的是「${c0.scoreText}」`);
+      if (c0.pill !== "能补上 E08") entryFail("card[0].pill", `覆盖结果是「${c0.pill}」`);
+      if (c0.lock !== "不是锁定的版本（HHWEB）")
+        entryFail("card[0].lock", `版本提醒是「${c0.lock}」`);
+      if (!c0.more.startsWith("另有 1 个站点：CHDBits"))
+        entryFail("card[0].more", `脚注是「${c0.more}」`);
+      for (const want of ["OurBits", "首选", "做种 41", "免费 18 时", "无 H&R", "推送"]) {
+        if (!c0.text.includes(want)) entryFail(`card[0](${want})`, "首选那一行没有这一项");
+      }
+      if (c1.pill !== "库里都有了" || !c1.text.includes("这一组的集都已入库，默认折叠")) {
+        entryFail(
+          "card[1]",
+          `整组已入库的卡：覆盖结果「${c1.pill}」，正文「${c1.text.slice(0, 80)}」`,
+        );
+      }
+      if (c3.pill !== "E07 正在下载（HDSky）")
+        entryFail("card[3].pill", `覆盖结果是「${c3.pill}」`);
+      if (
+        c4.pill !== "不符合：分辨率 1080p 不在档案里" ||
+        c4.scoreText !== "—不符合" ||
+        !c4.text.includes("仍然推送")
+      ) {
+        entryFail("card[4]", `不符合档案的卡：覆盖结果「${c4.pill}」，档案分「${c4.scoreText}」`);
+      }
+      /*
+       * 脚注右边（画板 06，M2b）：「等免费」「不要」，图标 13 t3 加 12 t3 字，右对齐到卡内 872，「不要」在最右，两项间 12；
+       * 脚注在 y = 卡高 − 30、16 高。整组已入库折叠的卡没有脚注。
+       */
+      const acts = c0.acts;
+      if (acts.map((a) => a.t).join("|") !== "等免费|不要") {
+        entryFail("card[0].acts", `脚注右边是「${acts.map((a) => a.t).join("、")}」`);
+      } else {
+        const [watch, no] = acts;
+        const footY = c0.y + c0.h - 30;
+        if (
+          !near(no.x + no.w, c0.x + 872, 4) ||
+          !near(no.x - (watch.x + watch.w), 12, 2) ||
+          acts.some((a) => !near(a.y, footY, 3) || !near(a.h, 16, 2)) ||
+          acts.some((a) => !a.icon || !near(a.icon.w, 13, 1)) ||
+          acts.some((a) => a.disabled)
+        ) {
+          entryFail(
+            "card[0].acts",
+            `位置 ${JSON.stringify(acts)}，画板「不要」右边在 ${c0.x + 872}、两项间 12、y ${footY}、高 16、图标 13，都点得了`,
+          );
+        }
+      }
+      if (c1.acts.length !== 0) entryFail("card[1].acts", "折叠的卡不该有脚注右边的两项");
+    }
+    /* 最后一行（画板 06 的 blocked 行）：拉黑的一条写标题与原因，再写没对上的条数 */
+    if (
+      m.unmatched !==
+      "已拉黑 1 条：Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL-XXWEB（不要这个种子：音画不同步）· 对不上这个条目的 3 条没显示"
+    )
+      entryFail("unmatched", `最后一行是「${m.unmatched}」`);
+    if (m.overflow > 0) entryFail("overflow", `横向溢出 ${m.overflow}px`);
+
+    /*
+     * 探针：点了才看得出的效果。每条都返回 verdict=ok 或 MISMATCH 加实测，
+     * 并在故意改坏的构建上跑过一遍确认会红（见 state/pt-tools-media-hub/m2a/qa-notes.md）。
+     */
+    const ENTRY_PROBES = [
+      {
+        key: "probe.expand",
+        desc: "展开一组：成员两行、卡高 186，第二个站点的按钮是「推送这个」；再点收起回到 150",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const card = () => document.querySelector('[data-testid="es-card-h:9f2c0d8e41b7a3c5"]');
+          const more = card()?.querySelector('[data-testid="es-more"]');
+          if (!more) return 'no-more';
+          more.click();
+          await wait(400);
+          const h1 = Math.round(card().getBoundingClientRect().height);
+          const rows = card().querySelectorAll('[data-testid="es-member"]').length;
+          const soft = (card().querySelector('[data-testid="es-push-CHDBits-286014"]')?.textContent ?? '').trim();
+          const fold = (card().querySelector('[data-testid="es-more"]')?.textContent ?? '').trim();
+          card().querySelector('[data-testid="es-more"]').click();
+          await wait(400);
+          const h2 = Math.round(card().getBoundingClientRect().height);
+          const ok = Math.abs(h1 - 186) <= 2 && rows === 2 && soft === '推送这个' && fold.startsWith('收起') && Math.abs(h2 - 150) <= 2;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 展开高 ' + h1 + ' 行 ' + rows + ' 按钮 ' + soft + ' 脚注 ' + fold + ' 收起高 ' + h2;
+        })()`,
+      },
+      {
+        key: "probe.facet",
+        desc: "勾「1080p」：只剩不符合档案那一组，同组 2160p 的数不变、制作组 CHDWEB 变 0，概况跟着变",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const n = (k, v) => (document.querySelector('[data-testid="es-facet-' + k + '-' + v + '"] .es-facets__n')?.textContent ?? '').trim();
+          const opt = document.querySelector('[data-testid="es-facet-resolution-1080p"]');
+          if (!opt) return 'no-facet';
+          const before = [n('resolution', '2160p'), n('group', 'CHDWEB')].join('/');
+          opt.click();
+          await wait(400);
+          const cards = [...document.querySelectorAll('[data-testid^="es-card-"]')].map((el) => el.getAttribute('data-testid'));
+          const after = [n('resolution', '2160p'), n('group', 'CHDWEB')].join('/');
+          const sum = (document.querySelector('[data-testid="es-summary"]')?.textContent ?? '').trim();
+          opt.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = before === '5/2' && after === '5/0' && cards.join() === 'es-card-s:pttime:351098' &&
+            sum === '1 条结果 · 合并成 1 组 · 符合档案 0' && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 计数 ' + before + '→' + after + ' 卡 ' + cards.join(',') + ' 概况 ' + sum + ' 取消后 ' + back;
+        })()`,
+      },
+      {
+        key: "probe.unfold",
+        desc: "点折叠的卡：展开成一行成员、150 高",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const card = () => document.querySelector('[data-testid="es-card-h:04aa71c3e9d25b80"]');
+          if (!card()) return 'no-card';
+          card().click();
+          await wait(400);
+          const h = Math.round(card().getBoundingClientRect().height);
+          const rows = card().querySelectorAll('[data-testid="es-member"]').length;
+          return 'verdict=' + (Math.abs(h - 150) <= 2 && rows === 1 ? 'ok' : 'MISMATCH') + ' 高 ' + h + ' 行 ' + rows;
+        })()`,
+      },
+      {
+        key: "probe.episode",
+        desc: "点 E07 的格子：只剩包含 E07 的那一组，概况旁出现「只看 E07」；再点取消",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const cell = document.querySelector('[data-testid="es-ep-7"]');
+          if (!cell) return 'no-cell';
+          cell.click();
+          await wait(400);
+          const cards = [...document.querySelectorAll('[data-testid^="es-card-"]')].map((el) => el.getAttribute('data-testid'));
+          const chip = (document.querySelector('.es-sum__chip')?.textContent ?? '').trim();
+          cell.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = cards.join() === 'es-card-s:pthome:77310' && chip === '只看 E07' && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡 ' + cards.join(',') + ' 提示 ' + chip + ' 取消后 ' + back;
+        })()`,
+      },
+      {
+        key: "probe.blocked",
+        desc: "点「已拉黑 1 条」：拉黑的那张卡排在最后、灰显、成员行写已拉黑与「移出黑名单」，没有「不要」；再点收起",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const link = document.querySelector('[data-testid="es-show-blocked"]');
+          if (!link) return 'no-link';
+          link.click();
+          await wait(400);
+          const cards = [...document.querySelectorAll('[data-testid^="es-card-"]')];
+          const last = cards[cards.length - 1];
+          const key = last?.getAttribute('data-testid') ?? '';
+          const text = (last?.textContent ?? '').replace(/\s+/g, ' ');
+          const unblock = Boolean(last?.querySelector('[data-testid="es-unblock-HDFans-66120"]'));
+          const noBlock = !last?.querySelector('[data-testid="es-act-block"]');
+          const dim = last?.classList.contains('is-blocked') ?? false;
+          const line = (document.querySelector('[data-testid="es-unmatched-line"]')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+          link.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = cards.length === 6 && key === 'es-card-s:hdfans:66120' && text.includes('已拉黑') &&
+            unblock && noBlock && dim && line.includes('灰显在上面') && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡 ' + cards.length + ' 最后 ' + key + ' 已拉黑 ' + text.includes('已拉黑') +
+            ' 移出 ' + unblock + ' 没有不要 ' + noBlock + ' 灰显 ' + dim + ' 最后一行 ' + line + ' 收起后 ' + back;
+        })()`,
+      },
+      {
+        key: "probe.merge",
+        desc: "关掉「合并同一资源」：一个成员一张卡，概况不写组数；再打开回到 5 组",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const sw = document.querySelector('[data-testid="es-merge"]');
+          if (!sw) return 'no-switch';
+          sw.click();
+          await wait(400);
+          const n = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const sum = (document.querySelector('[data-testid="es-summary"]')?.textContent ?? '').trim();
+          sw.click();
+          await wait(400);
+          const back = document.querySelectorAll('[data-testid^="es-card-"]').length;
+          const ok = n === 6 && sum === '6 条结果 · 符合档案 5' && back === 5;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡 ' + n + ' 概况 ' + sum + ' 打开后 ' + back;
+        })()`,
+      },
+    ];
+    for (const p of ENTRY_PROBES) {
+      const r = String(await ev(p.js).catch((e) => `probe 失败：${e.message}`));
+      if (probeMiss(r, "verdict=ok").length > 0) entryFail(p.key, `${p.desc}：${r}`);
+    }
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) entryFail("console", err);
+  }
+
+  /* ---- 桌面窄屏 1200×1024：左栏收成一排，筛选在右侧 296 宽的抽屉里 ---- */
+  consoleErrors = [];
+  if (await openEntry({ width: 1200, height: 1024, mobile: false })) {
+    const r = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        if (document.querySelector('.es-body__rail')) return 'MISMATCH 窄屏还有常驻左栏';
+        const row = document.querySelector('.es-narrow');
+        const btn = document.querySelector('[data-testid="es-drawer-btn"]');
+        if (!row || !btn) return 'no-narrow';
+        btn.click();
+        await wait(600);
+        const drawer = [...document.querySelectorAll('.es-drawer')].find((el) => el.getBoundingClientRect().width > 0);
+        const w = drawer ? Math.round(drawer.getBoundingClientRect().width) : 0;
+        const rail = drawer?.querySelector('.es-rail');
+        const ok = Boolean(rail) && Math.abs(w - 296) <= 2 && (row.textContent ?? '').includes('长夜将尽 第 2 季');
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 抽屉宽 ' + w + ' 左栏在抽屉里 ' + Boolean(rail) + ' 一排 ' + (row.textContent ?? '').replace(/\\s+/g, ' ').trim().slice(0, 40);
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(r, "verdict=ok").length > 0) entryFail("narrow", `视口 1200：${r}`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) entryFail("console(1200)", err);
+  } else {
+    entryFail("narrow", "视口 1200 下没进按条目搜索");
+  }
+
+  /* ---- 手机 375×812（画板 09、10） ---- */
+  consoleErrors = [];
+  if (!(await openEntry({ ...M_VIEWPORT, mobile: true }))) {
+    entryFail("load", "等了 10 秒还没有结果概况", true);
+  } else {
+    const mm = await ev(`(() => {
+      const box = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+      };
+      const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+      const ctl = document.querySelector('.es-mctl');
+      const scroller = document.querySelector('.pt-shell__content');
+      return {
+        /* 模拟视口里的竖向滚动条占 10 宽（真机是浮在上面的），内容列跟着窄这么多 */
+        sb: scroller ? scroller.offsetWidth - scroller.clientWidth : 0,
+        sub: txt(document.querySelector('#pt-mhead-sub')),
+        query: box(document.querySelector('.es-q .el-input__wrapper')),
+        token: txt(document.querySelector('[data-testid="es-token"]')),
+        bandButtons: [...(document.querySelector('[data-testid="es-head"]')?.querySelectorAll('button') ?? [])].map(txt).filter(Boolean),
+        season: box(ctl?.querySelector('.es-mctl__season')),
+        profile: box(ctl?.querySelector('.es-mctl__profile')),
+        filter: box(ctl?.querySelector('[data-testid="es-mfilter"]')),
+        filterText: txt(ctl?.querySelector('[data-testid="es-mfilter"]')),
+        item: box(document.querySelector('.es-mitem')),
+        itemTitle: txt(document.querySelector('.es-mitem__title')),
+        eps: [...document.querySelectorAll('.es-mitem .es-eps__cell')].map(box),
+        summary: box(document.querySelector('[data-testid="es-summary"]')),
+        summaryText: txt(document.querySelector('[data-testid="es-summary"]')),
+        sum: box(document.querySelector('.es-sum')),
+        sort: box(document.querySelector('.es-sum__msort')),
+        sortText: txt(document.querySelector('.es-sum__msort .el-select__placeholder')),
+        /* 选中的字有没有被省略号截掉：textContent 看不出来，要比滚动宽度 */
+        sortClipped: (() => {
+          const el = document.querySelector('.es-sum__msort .el-select__placeholder span') ?? document.querySelector('.es-sum__msort .el-select__placeholder');
+          return el ? el.scrollWidth > el.clientWidth : true;
+        })(),
+        warn: box(document.querySelector('[data-testid="es-site-errors"]')),
+        cards: [...document.querySelectorAll('[data-testid^="es-mcard-"]')].map(box),
+        /* 第一张卡底部两半（画板 09，M2b）：每半的盒子、字、图标，中间的竖线 */
+        acts: (() => {
+          const el = document.querySelector('[data-testid^="es-mcard-"] .es-mcard__acts');
+          if (!el) return null;
+          return {
+            ...box(el),
+            halves: [...el.querySelectorAll('.es-mact')].map((b) => ({ t: txt(b), icon: box(b.querySelector('svg')), ...box(b) })),
+            split: box(el.querySelector('.es-mcard__split')),
+          };
+        })(),
+        rail: Boolean(document.querySelector('.es-body__rail')),
+        overflow: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    })()`);
+    if (mm.sub !== "按条目 · 长夜将尽 第 2 季")
+      entryFail("topbar.sub", `顶栏副标题是「${mm.sub}」`, true);
+    const cw = 343 - mm.sb;
+    expectBox("query", mm.query, { x: 16, y: 64, w: cw, h: 44 }, 2, true);
+    /* 手机的条目标记 150 宽，画板 09 只写名字与类型 */
+    if (mm.token !== "长夜将尽 · 剧集")
+      entryFail("token.text", `条目标记写的是「${mm.token}」`, true);
+    if (mm.bandButtons.includes("搜索"))
+      entryFail("band", "手机上按条目搜时搜索带里不该有「搜索」按钮（画板 09 只有输入框）", true);
+    expectBox("ctl.season", mm.season, { x: 16, y: 116, w: 92, h: 36 }, 2, true);
+    /* 档案下拉吃掉内容列剩下的宽度，滚动条让出来的 10 也从它身上扣 */
+    expectBox("ctl.profile", mm.profile, { x: 116, y: 116, w: 136 - mm.sb, h: 36 }, 2, true);
+    expectBox("ctl.filter", mm.filter, { x: 260 - mm.sb, y: 116, w: 99, h: 36 }, 2, true);
+    if (mm.filterText !== "筛选")
+      entryFail("ctl.filter", `筛选按钮写的是「${mm.filterText}」`, true);
+    expectBox("item", mm.item, { x: 16, y: 164, w: cw, h: 118 }, 2, true);
+    if (mm.itemTitle !== "长夜将尽 第 2 季")
+      entryFail("item.title", `条目卡标题是「${mm.itemTitle}」`, true);
+    const msizes = [...new Set(mm.eps.map((e) => `${e.w}×${e.h}`))];
+    if (mm.eps.length !== 8 || msizes.join() !== "38×22")
+      entryFail(
+        "item.eps",
+        `格子 ${mm.eps.length} 个，尺寸 ${msizes.join("、")}，画板 38×22`,
+        true,
+      );
+    expectBox("summary", mm.summary, { x: 16, y: 300 }, 8, true);
+    if (mm.summaryText !== "6 条 · 合并成 5 组 · 符合档案 4")
+      entryFail("summary", `概况是「${mm.summaryText}」`, true);
+    /* 排序：h26 的胶囊，右对齐到内容列右边（画板 359），选中「档案分」时 82 宽（画板 71，照它给字会被省略，见规格的落地偏离） */
+    expectBox("sort", mm.sort, { y: 297, w: 82, h: 26 }, 3, true);
+    if (mm.sortClipped) entryFail("sort", "排序下拉里选中的字被省略号截掉了", true);
+    if (mm.sort && !near(mm.sort.x + mm.sort.w, 16 + cw, 2))
+      entryFail("sort", `排序的右边在 ${mm.sort.x + mm.sort.w}，应在 ${16 + cw}`, true);
+    if (mm.sortText !== "档案分") entryFail("sort", `排序写的是「${mm.sortText}」`, true);
+    /* 「1 个站点没回应」在概况那一行下面单独一行（画板 09 的概况一行没有它） */
+    if (!mm.warn || !mm.sort || mm.warn.y < mm.sort.y + mm.sort.h || mm.warn.x !== 16) {
+      entryFail("siteErrors", `站点错误没有单独一行：${JSON.stringify(mm.warn)}`, true);
+    }
+    if (mm.cards.length !== 5) entryFail("cards", `结果卡 ${mm.cards.length} 张，应为 5`, true);
+    else {
+      /* 第一张卡在概况（这里多一行站点错误）下面 8；画板没有错误那一行，卡从 332 起 */
+      expectBox("cards[0]", mm.cards[0], { x: 16, y: mm.sum.y + mm.sum.h + 8, w: cw }, 2, true);
+      const gaps = mm.cards.slice(1).map((c, i) => c.y - (mm.cards[i].y + mm.cards[i].h));
+      /* 卡高带小数，取整后卡距会在 8、9 之间跳 */
+      if (gaps.some((g) => Math.abs(g - 8) > 1) || mm.cards.some((c) => c.x !== 16 || c.w !== cw)) {
+        entryFail(
+          "cards",
+          `卡距 ${gaps.join("/")}、宽 ${mm.cards.map((c) => c.w).join("/")}，画板 8 与 ${cw}`,
+          true,
+        );
+      }
+    }
+    /* 底部两半：贯穿整张卡（上面 1px 分隔线），每半 171 宽（滚动条让出的宽度两半分）、44 高，图标 14；中间竖线 28 高 */
+    const ma = mm.acts;
+    if (!ma) entryFail("acts", "第一张结果卡底部没有「等免费」「不要」", true);
+    else {
+      const half = (cw - 1) / 2;
+      const ok =
+        ma.halves.map((h) => h.t).join("|") === "等免费|不要" &&
+        near(ma.x, 17, 2) &&
+        near(ma.w, cw - 2, 2) &&
+        ma.halves.every((h) => near(h.w, half - 1, 2) && near(h.h, 44, 1)) &&
+        ma.halves.every((h) => h.icon && near(h.icon.w, 14, 1)) &&
+        ma.split &&
+        near(ma.split.h, 28, 1) &&
+        near(ma.split.x, ma.x + ma.halves[0].w, 1);
+      if (!ok)
+        entryFail(
+          "acts",
+          `底部两半 ${JSON.stringify(ma)}，画板每半 171 宽、44 高、图标 14、中间竖线 28 高`,
+          true,
+        );
+    }
+    if (mm.rail) entryFail("rail", "手机上不该有左栏", true);
+    if (mm.overflow > 0) entryFail("overflow", `横向溢出 ${mm.overflow}px`, true);
+
+    const panel = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const btn = document.querySelector('[data-testid="es-mfilter"]');
+        if (!btn) return 'no-filter';
+        btn.click();
+        await wait(700);
+        const sheet = [...document.querySelectorAll('.es-mpanel')].find((el) => el.getBoundingClientRect().height > 0);
+        if (!sheet) return 'no-sheet';
+        const r = sheet.getBoundingClientRect();
+        const pill = [...sheet.querySelectorAll('[data-testid="es-mfacet-resolution"] button')].find((b) => (b.textContent ?? '').includes('1080p'));
+        if (!pill) return 'no-pill';
+        pill.click();
+        await wait(300);
+        const apply = sheet.querySelector('[data-testid="es-mpanel-apply"]');
+        const applyText = (apply?.textContent ?? '').trim();
+        const before = document.querySelectorAll('[data-testid^="es-mcard-"]').length;
+        apply.click();
+        await wait(700);
+        const after = document.querySelectorAll('[data-testid^="es-mcard-"]').length;
+        const label = (btn.textContent ?? '').replace(/\\s+/g, ' ').trim();
+        const ok = Math.round(r.top) === 120 && Math.round(r.height) === 692 && applyText === '看 1 条结果' && before === 5 && after === 1 && label === '筛选 · 1';
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 面板 y ' + Math.round(r.top) + ' 高 ' + Math.round(r.height) +
+          ' 按钮 ' + applyText + ' 卡 ' + before + '→' + after + ' 筛选按钮 ' + label;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(panel, "verdict=ok").length > 0)
+      entryFail("probe.panel", `筛选面板：${panel}`, true);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) entryFail("console", err, true);
+  }
+  /* 后面的登录页一趟自己设视口；这里恢复桌面口径，免得以后在这一段后面加的检查拿到手机视口 */
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+}
+
+// ------------------------------------------------- 条目详情（画板 04、08，媒体中心 M3）
+
+/*
+ * 条目详情不是带式表格页：88 高的页头带面包屑，下面是 1144 宽的大图与几个区块。画板 04 按 1440×1024 画
+ * （侧栏 264 + 主区 1176），所以这一趟按 1440 量；手机按画板 08 量 375×812。剧集一部（长夜将尽第 2 季）、电影一部（沙丘2）。
+ * 数字来自 docs/design/media-hub-board-spec.md 的 B04 / B08；块与块之间统一 24（偏离 ④）。
+ * 媒体服务器（M6）：「你的 NAS 上」第 4 行、「在 Jellyfin 播放」（手机在白卡底部）、集卡的播放圆与 E03「Jellyfin 里没有了」。
+ * 依赖后面里程碑的部分不量：删除（M7）；服务器里删了的动作先是「忽略」（画板写「处理」，那是 M7）。
+ * 假数据是 board-fixtures.mjs 的 ITEM_TV / ITEM_TV_S2 / ITEM_MOVIE（图片路径都不给，走占位）。
+ */
+const ITEM_TV_ROUTE = "/media/item/tv/100088?from=subscriptions&season=2";
+const ITEM_MOVIE_ROUTE = "/media/item/movie/693134?from=explore";
+const doItem = wanted.length === 0 || wanted.includes("/media/item");
+
+const MEASURE_MI = `(() => {
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const q = (sel, root = document) => root.querySelector(sel);
+  const qa = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const hero = q('[data-testid="mi-hero"]');
+  const nas = q('[data-testid="mi-nas"]');
+  const scroller = document.querySelector('.pt-shell__content');
+  return {
+    sb: scroller ? scroller.offsetWidth - scroller.clientWidth : 0,
+    head: box(q('.pt-head')),
+    /* 面包屑的分隔是外壳的 chevron 图标（同其他详情页），按段取字再用斜杠连起来比画板的写法 */
+    crumbs: qa('.pt-head__crumbs a, .pt-head__crumbs span').map(txt).join(' / '),
+    headTitle: txt(q('.pt-head__title')),
+    mheadSub: txt(q('#pt-mhead-sub')),
+    hero: box(hero),
+    poster: box(q('.mi-hero__poster', hero ?? document)),
+    title: box(q('[data-testid="mi-title"]')),
+    titleText: txt(q('[data-testid="mi-title"]')),
+    titleSize: q('[data-testid="mi-title"]') ? getComputedStyle(q('[data-testid="mi-title"]')).fontSize : '',
+    original: txt(q('.mi-hero__original')),
+    originalBox: box(q('.mi-hero__original')),
+    pills: qa('[data-testid="mi-pills"] .mi-glass').map(txt),
+    /* 看得见的胶囊（没被两行的高度截掉的）与几行 */
+    pillsShown: (() => {
+      const c = q('[data-testid="mi-pills"]');
+      if (!c) return { n: 0, rows: 0 };
+      const cr = c.getBoundingClientRect();
+      const shown = qa('.mi-glass', c).filter((el) => el.getBoundingClientRect().bottom <= cr.bottom + 0.5);
+      return { n: shown.length, rows: new Set(shown.map((el) => Math.round(el.getBoundingClientRect().top))).size };
+    })(),
+    pillsBox: box(q('[data-testid="mi-pills"]')),
+    ratingText: txt(q('[data-testid="mi-rating"]')),
+    rating: box(q('[data-testid="mi-rating"]')),
+    imdb: box(q('[data-testid="mi-imdb"]')),
+    tvdb: box(q('[data-testid="mi-tvdb"]')),
+    overview: box(q('[data-testid="mi-overview"]')),
+    credits: txt(q('.mi-hero__credits')),
+    creditsBox: box(q('.mi-hero__credits')),
+    acts: qa('[data-testid="mi-acts"] .mi-btn').map((el) => ({ t: txt(el) || el.getAttribute('aria-label'), ...box(el) })),
+    more: box(q('.mi-hero__more')),
+    nas: box(nas),
+    nasGlass: Boolean(nas?.classList.contains('mi-nas--glass')),
+    nasRows: qa('[data-testid^="mi-nas-"]').map((el) => ({ key: el.getAttribute('data-testid'), t: txt(el), ...box(el) })),
+    play: box(q('[data-testid="mi-play"]')),
+    playText: txt(q('[data-testid="mi-play"]')),
+    playInNas: Boolean(nas && q('[data-testid="mi-play"]') && nas.contains(q('[data-testid="mi-play"]'))),
+    seasons: box(q('[data-testid="mi-seasons"]')),
+    seasonTitle: box(q('[data-testid="mi-seasons"] .mi-block__title')),
+    tabs: qa('[data-testid^="mi-tab-"]').map((el) => ({ t: qa('span', el).map(txt).join(' '), on: el.classList.contains('is-on'), ...box(el) })),
+    legend: box(q('[data-testid="mi-legend"]')),
+    legendText: txt(q('[data-testid="mi-legend"]')),
+    collapse: box(q('[data-testid="mi-collapse"]')),
+    collapseText: txt(q('[data-testid="mi-collapse"]')),
+    eps: qa('.mi-ep').map((el) => ({
+      id: el.getAttribute('data-testid'),
+      ...box(el),
+      still: box(q('.mi-ep__still', el)),
+      title: txt(q('.mi-ep__title', el)),
+      titleBox: box(q('.mi-ep__title', el)),
+      air: txt(q('.mi-ep__air', el)),
+      state: txt(q('.mi-ep__state', el)),
+      act: txt(q('.mi-ep__act', el)),
+      play: box(q('.mi-ep__play', el)),
+    })),
+    torTitle: box(q('[data-testid="mi-torrents"] .mi-block__title')),
+    torTitleText: txt(q('[data-testid="mi-torrents"] .mi-block__title')),
+    torSub: txt(q('[data-testid="mi-torrents"] .mi-block__sub')),
+    torList: box(q('[data-testid="mi-torrents"] .mi-list')),
+    torEmpty: txt(q('[data-testid="mi-torrents-empty"]')),
+    rows: qa('[data-testid="mi-trow"]').map((el) => ({
+      ...box(el),
+      t: txt(el),
+      cells: [...el.children].map((c) => ({ t: txt(c), ...box(c) })),
+    })),
+    castTitle: box(q('[data-testid="mi-cast"] .mi-block__title')),
+    castAll: txt(q('[data-testid="mi-cast-all"]')),
+    castAllBox: box(q('[data-testid="mi-cast-all"]')),
+    people: qa('.mi-person').map((el) => ({
+      ...box(el),
+      face: box(q('.mi-person__face', el)),
+      name: txt(q('.mi-person__name', el)),
+      nameBox: box(q('.mi-person__name', el)),
+      role: txt(q('.mi-person__role', el)),
+    })),
+    cast: box(q('.mi-cast')),
+    recTitle: box(q('[data-testid="mi-recs"] .mi-block__title')),
+    recSub: txt(q('[data-testid="mi-recs"] .mi-block__sub')),
+    recs: qa('.mi-rec').map((el) => ({
+      ...box(el),
+      poster: box(q('.mi-rec__poster', el)),
+      tag: txt(q('.mi-rec__tag', el)),
+      name: txt(q('.mi-rec__name', el)),
+    })),
+    recBox: box(q('.mi-recs')),
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  };
+})()`;
+
+/*
+ * 删除弹窗（画板 03 的片段「删除这一季」，M7）：点开以后按弹窗内的坐标量，再点「仍然删除」看摘要跟着变，最后关掉。
+ * open 是打开它的脚本（桌面点大图的「删除」，手机点「更多」里的删除）。
+ */
+const measureDelete = (open) => `(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const opened = await (async () => { ${open} })();
+  if (opened !== true) return { err: String(opened) };
+  let dlg = null;
+  for (let i = 0; i < 40; i++) {
+    await wait(150);
+    dlg = document.querySelector('.md-dialog');
+    if (dlg && dlg.querySelectorAll('[data-testid="delete-torrent"]').length === 3) break;
+  }
+  if (!dlg || dlg.querySelectorAll('[data-testid="delete-torrent"]').length !== 3) return { err: 'no-dialog' };
+  await wait(500);
+  const r0 = dlg.getBoundingClientRect();
+  const rel = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left - r0.left), y: Math.round(r.top - r0.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const q = (sel, root = dlg) => root.querySelector(sel);
+  const qa = (sel, root = dlg) => [...root.querySelectorAll(sel)];
+  const inner = (el) => el?.querySelector('.el-checkbox__inner, .el-radio__inner') ?? null;
+  /* 字本身的框（块元素的框是整行宽，右对齐的字量不出来） */
+  const textRel = (el) => {
+    if (!el) return null;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const r = range.getBoundingClientRect();
+    return { x: Math.round(r.left - r0.left), y: Math.round(r.top - r0.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const title = q('.el-dialog__title');
+  const out = {
+    dlg: { x: Math.round(r0.left), y: Math.round(r0.top), w: Math.round(r0.width), h: Math.round(r0.height) },
+    fullscreen: dlg.classList.contains('is-fullscreen'),
+    header: rel(q('.el-dialog__header')),
+    title: rel(title),
+    titleText: txt(title),
+    titleFont: title ? getComputedStyle(title).fontSize + '/' + getComputedStyle(title).fontWeight : '',
+    close: rel(q('.el-dialog__headerbtn .el-dialog__close')),
+    filesCheck: rel(inner(q('[data-testid="delete-files-check"]'))),
+    filesChecked: Boolean(q('[data-testid="delete-files-check"] input')?.checked),
+    filesTitle: rel(q('[data-testid="delete-files"] .md-row__title')),
+    filesSub: rel(q('[data-testid="delete-files"] .md-row__sub')),
+    filesSubText: txt(q('[data-testid="delete-files"] .md-row__sub')),
+    filesMore: rel(q('[data-testid="delete-files-more"]')),
+    secs: qa('.md-sec').map(rel),
+    torTitle: rel(q('[data-testid="delete-torrents"] .md-sec__title')),
+    torTitleText: txt(q('[data-testid="delete-torrents"] .md-sec__title')),
+    tors: qa('[data-testid="delete-torrent"]').map((el) => ({
+      ...rel(el),
+      check: rel(inner(q('[data-testid="delete-torrent-check"]', el))),
+      checked: Boolean(q('[data-testid="delete-torrent-check"] input', el)?.checked),
+      title: txt(q('.md-row__title', el)),
+      titleBox: rel(q('.md-row__title', el)),
+      sub: txt(q('.md-row__sub', el)),
+      subBox: rel(q('.md-row__sub', el)),
+      subText: rel(q('.md-guard span', el)),
+      how: rel(q('[data-testid="delete-torrent-how"]', el)),
+      howText: txt(q('[data-testid="delete-torrent-how"]', el)),
+      force: rel(inner(q('[data-testid="delete-torrent-force"]', el))),
+      forceLabel: rel(q('[data-testid="delete-torrent-force"] .el-checkbox__label', el)),
+      main: rel(q('.md-tor__main', el)),
+      ruled: q('.md-tor__main', el) ? getComputedStyle(q('.md-tor__main', el)).borderBottomWidth : '',
+    })),
+    subTitle: rel(q('[data-testid="delete-subscription"] .md-sec__title')),
+    subs: qa('.md-sub').map((el) => ({
+      radio: rel(inner(el)),
+      title: txt(q('.md-row__title', el)),
+      titleBox: rel(q('.md-row__title', el)),
+      sub: txt(q('.md-row__sub', el)),
+      on: Boolean(q('.el-radio.is-checked', el)),
+    })),
+    footer: rel(q('.el-dialog__footer')),
+    summary: textRel(q('[data-testid="delete-summary"]')),
+    summaryText: txt(q('[data-testid="delete-summary"]')),
+    buttons: qa('.el-dialog__footer .el-button').map((b) => ({ t: txt(b), ...rel(b) })),
+    runBg: q('[data-testid="delete-run"]') ? getComputedStyle(q('[data-testid="delete-run"]')).backgroundColor : '',
+    overflow: Math.round(q('.el-dialog__body').scrollWidth - q('.el-dialog__body').clientWidth),
+  };
+  q('[data-testid="delete-torrent-force"] input')?.click();
+  await wait(250);
+  out.forcedSummary = txt(q('[data-testid="delete-summary"]'));
+  out.forcedChecked = Boolean(qa('[data-testid="delete-torrent-check"] input')[1]?.checked);
+  q('.el-dialog__headerbtn')?.click();
+  await wait(600);
+  return out;
+})()`;
+
+/* 等页面读到条目（剧集还要等这一季的集出来），再等过渡走完 */
+async function openItem(metrics, route, tv) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { deviceScaleFactor: 1, ...metrics },
+    sessionId,
+  );
+  await goto(`${BASE}/#${route}`);
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitReady();
+  for (let i = 0; i < 40; i++) {
+    const ok = await ev(
+      tv
+        ? `document.querySelectorAll('.mi-ep').length > 0`
+        : `Boolean(document.querySelector('[data-testid="mi-title"]'))`,
+    ).catch(() => false);
+    if (ok === true) {
+      await sleep(500);
+      return true;
+    }
+    await sleep(250);
+  }
+  return false;
+}
+
+if (doItem) {
+  const itemFail = (key, msg, mobile = false) => {
+    const gapKey = `/media/item${mobile ? "@375" : ""} ${key}`;
+    if (ALLOWED_GAPS[gapKey]) {
+      gapsUsed.add(gapKey);
+      return;
+    }
+    failures.push({
+      route: `/media/item${mobile ? "（375）" : ""}`,
+      board: mobile ? "08 条目详情·手机" : "04 条目详情",
+      key,
+      msg,
+    });
+  };
+  const expectBox = (key, got, want, tol = 4, mobile = false) => {
+    if (!got) {
+      itemFail(key, "找不到这一块", mobile);
+      return;
+    }
+    const diffs = Object.entries(want)
+      .filter(([k, v]) => !near(got[k], v, tol))
+      .map(([k, v]) => `${k} ${got[k]}≠${v}`);
+    if (diffs.length > 0)
+      itemFail(key, `${diffs.join("，")}（实测 ${JSON.stringify(got)}）`, mobile);
+  };
+  const expectText = (key, got, want, mobile = false) => {
+    if (got !== want) itemFail(key, `写的是「${got}」，应为「${want}」`, mobile);
+  };
+  /* 块与块：上一块的底到下一块标题的顶 24（偏离 ④） */
+  const expectGap = (key, prevBottom, next, mobile = false) => {
+    if (!next) itemFail(key, "找不到下一块的标题", mobile);
+    else if (!near(next.y - prevBottom, 24, 2))
+      itemFail(
+        key,
+        `上一块的底 ${prevBottom} 到标题 ${next.y} 是 ${next.y - prevBottom}，统一 24`,
+        mobile,
+      );
+  };
+
+  /* ---- 桌面 1440×1024，剧集（画板 04） ---- */
+  consoleErrors = [];
+  if (!(await openItem({ width: 1440, height: 1024, mobile: false }, ITEM_TV_ROUTE, true))) {
+    itemFail("load", "等了 10 秒还没有集卡：页面没进条目详情，或条目、季的接口没回来");
+  } else {
+    const m = await ev(MEASURE_MI);
+    if (process.env.MI_DUMP) console.log(JSON.stringify(m, null, 1));
+    /* 页面比视口长，滚动区有竖向滚动条（无头 Chrome 里 10 宽，画板按没有滚动条画）：内容宽 W 与右边都让出 sb */
+    const W = 1144 - m.sb;
+    const R = 280 + W;
+    expectBox("head", m.head, { x: 264, y: 0, w: 1176, h: 88 }, 2);
+    expectText("head.crumbs", m.crumbs, "媒体 / 追剧与订阅 / 长夜将尽");
+    expectText("head.title", m.headTitle, "长夜将尽");
+
+    /* 大图 1144×340：海报 28,44 168×252；文字列从 224 起（名字 40、原名 80、胶囊 110、评分 142、简介 178、主创 228、动作 264） */
+    expectBox("hero", m.hero, { x: 280, y: 104, w: W, h: 340 }, 2);
+    expectBox("hero.poster", m.poster, { x: 308, y: 148, w: 168, h: 252 }, 2);
+    expectBox("hero.title", m.title, { x: 504, y: 144 }, 4);
+    if (m.titleSize !== "28px") itemFail("hero.title", `名字 ${m.titleSize}，画板 28/700`);
+    expectBox("hero.original", m.originalBox, { x: 504, y: 184 }, 4);
+    expectText("hero.original", m.original, "The Long Night · 2025 · 2 季 24 集");
+    expectBox("hero.pills", m.pillsBox, { x: 504, y: 214, h: 22 }, 4);
+    expectText("hero.pills", m.pills.join("|"), "剧集|悬疑|犯罪|剧情|中国大陆|每集 45 分钟|连载中");
+    expectBox("hero.rating", m.rating, { x: 504, y: 246 }, 6);
+    if (!m.ratingText.includes("8.4") || !m.ratingText.includes("TMDB 1,204 人评分"))
+      itemFail("hero.rating", `评分那一行是「${m.ratingText}」`);
+    expectBox("hero.imdb", m.imdb, { y: 248, h: 20 }, 4);
+    if (!m.tvdb) itemFail("hero.tvdb", "有 TVDB 编号时要有 TVDB 胶囊");
+    expectBox("hero.overview", m.overview, { x: 504, y: 282, w: 600 }, 4);
+    if (m.overview && !near(m.overview.h, 42, 2))
+      itemFail("hero.overview", `简介 ${m.overview.h} 高，画板两行省略 42`);
+    expectBox("hero.credits", m.creditsBox, { x: 504, y: 332 }, 4);
+    expectText("hero.credits", m.credits, "导演 陈默 · 主演 周屿、林晚晴、沈川、许曼");
+    /* 动作：y 264，从 224 起、间距 8，h32：搜资源 96、订阅与「在 Jellyfin 播放」（玻璃按钮）、重新刮削、删除（M7）与更多三个方钮 32 */
+    const acts = m.acts;
+    if (
+      acts.map((a) => a.t).join("|") !==
+      "搜资源|追剧中 · 第 2 季|在 Jellyfin 播放|重新刮削|删除第 2 季|更多"
+    ) {
+      itemFail("hero.acts", `动作是「${acts.map((a) => a.t).join("、")}」`);
+    } else {
+      const [find, sub, play, rescrape, del, more] = acts;
+      expectBox("hero.acts.search", find, { x: 504, y: 368, w: 96, h: 32 }, 2);
+      expectBox("hero.acts.sub", sub, { x: 608, y: 368, h: 32 }, 2);
+      expectBox("hero.acts.play", play, { x: sub.x + sub.w + 8, y: 368, h: 32 }, 2);
+      expectBox(
+        "hero.acts.rescrape",
+        rescrape,
+        { x: play.x + play.w + 8, y: 368, w: 32, h: 32 },
+        2,
+      );
+      expectBox("hero.acts.delete", del, { x: rescrape.x + 40, y: 368, w: 32, h: 32 }, 2);
+      expectBox("hero.acts.more", more, { x: del.x + 40, y: 368, w: 32, h: 32 }, 2);
+    }
+    /* 你的 NAS 上：868,44 248×252，玻璃底；四行，y 40 起、行距 51；第 4 行是媒体服务器（M6） */
+    expectBox("nas", m.nas, { x: R - 28 - 248, y: 148, w: 248, h: 252 }, 2);
+    if (!m.nasGlass) itemFail("nas", "1440 下「你的 NAS 上」应在大图里（玻璃底）");
+    const nasText = m.nasRows.map((r) => r.t).join(" | ");
+    expectText(
+      "nas.rows",
+      nasText,
+      "库里 S01 12/12 · S02 6/12剧集库 · 18 个文件 · 82.6 GB | 做种 4 个种子1 个 H&R 还差 2 天 | 追剧中 · 第 2 季版本锁 HHWEB 2160p | Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 处理 · 忽略",
+    );
+    if (m.nasRows.length === 4) {
+      const ys = m.nasRows.map((r) => r.y - m.nas.y);
+      if (!near(ys[0], 40, 2) || ys.slice(1).some((y, i) => !near(y - ys[i], 51, 2)))
+        itemFail("nas.rows", `四行在卡内 y ${ys.join("、")}，画板 40 起、行距 51`);
+      const last = m.nasRows[3];
+      if (last.y + last.h > m.nas.y + m.nas.h - 8)
+        itemFail(
+          "nas.rows",
+          `第 4 行的底 ${last.y + last.h} 出了卡（卡底 ${m.nas.y + m.nas.h}，留 14）`,
+        );
+    }
+
+    /* 季与集：标题 280,468；季 tab 从 352 起、间距 8、h26；图例右对齐到 1424 */
+    expectBox("season.title", m.seasonTitle, { x: 280, y: 468 }, 2);
+    expectText(
+      "season.tabs",
+      m.tabs.map((t) => t.t + (t.on ? "*" : "")).join(" | "),
+      "第 1 季 12/12 | 第 2 季 6/12* | 特别篇 0/2",
+    );
+    if (m.tabs.length === 3) {
+      const [t1, t2, t3] = m.tabs;
+      expectBox("season.tab1", t1, { x: 352, y: 466, h: 26 }, 2);
+      if (!near(t2.x - (t1.x + t1.w), 8, 1) || !near(t3.x - (t2.x + t2.w), 8, 1))
+        itemFail(
+          "season.tabs",
+          `tab 间距 ${t2.x - (t1.x + t1.w)}、${t3.x - (t2.x + t2.w)}，画板 8`,
+        );
+    }
+    if (!m.legend || !near(m.legend.x + m.legend.w, R, 2))
+      itemFail(
+        "season.legend",
+        `图例的右边在 ${m.legend ? m.legend.x + m.legend.w : "无"}，画板右对齐到 ${R}`,
+      );
+    expectText("season.legend", m.legendText, "已入库 6 下载中 1 等版本 1 还没播 4");
+    if (m.collapse) itemFail("season.collapse", "一季 12 集时桌面不收起");
+    /* 集卡三列（auto-fill、最小 340），列距 17：1144 宽时 370×92 在 x 280、667、1054，行距 104；剧照 10,10 128×72，标题 150,12 */
+    const cardW = (W - 34) / 3;
+    if (m.eps.length !== 12) itemFail("eps", `集卡 ${m.eps.length} 张，这一季 12 集`);
+    else {
+      m.eps.forEach((e, i) => {
+        const want = {
+          x: 280 + (i % 3) * (cardW + 17),
+          y: 504 + Math.floor(i / 3) * 104,
+          w: cardW,
+          h: 92,
+        };
+        if (Object.entries(want).some(([k, v]) => !near(e[k], v, 2)))
+          itemFail(
+            `eps[${i}]`,
+            `${e.id} 在 ${JSON.stringify({ x: e.x, y: e.y, w: e.w, h: e.h })}，画板 ${JSON.stringify(want)}`,
+          );
+      });
+      const e0 = m.eps[0];
+      expectBox("eps[0].still", e0.still, { x: e0.x + 10, y: e0.y + 10, w: 128, h: 72 }, 1);
+      expectBox("eps[0].title", e0.titleBox, { x: e0.x + 150, y: e0.y + 12 }, 3);
+      expectText("eps[0].title", e0.title, "E01 · 归来");
+      /* 播放圆 58,30 32×32：只给已入库、服务器里有的集；E03 在服务器里被删了，写「Jellyfin 里没有了」、动作「处理」「忽略」 */
+      expectBox("eps[0].play", e0.play, { x: e0.x + 58, y: e0.y + 30, w: 32, h: 32 }, 1);
+      const e3 = m.eps[2];
+      if (e3.play) itemFail("eps[2].play", "服务器里删了的集不给播放圆");
+      /* 两个动作之间的「·」是单独的元素（字之间的空隙靠 gap），textContent 连在一起 */
+      if (!e3.state.includes("Jellyfin 里没有了") || e3.act !== "处理·忽略")
+        itemFail("eps[2]", `服务器里删了的集写的是「${e3.state}」、动作「${e3.act}」`);
+      const noPlay = m.eps.filter((e, i) => i !== 2 && i < 6 && !e.play).map((e) => e.id);
+      if (noPlay.length)
+        itemFail("eps.play", `入库了、服务器里有的集没有播放圆：${noPlay.join("、")}`);
+      if (m.eps.slice(6).some((e) => e.play)) itemFail("eps.play", "没入库的集不该有播放圆");
+      const e7 = m.eps[6];
+      if (!e7.state.includes("下载中") || !e7.state.includes("63% · 还要 12 分钟"))
+        itemFail("eps[6]", `下载中的集写的是「${e7.state}」`);
+      const e8 = m.eps[7];
+      if (
+        !e8.state.includes("等版本") ||
+        !e8.state.includes("锁定 HHWEB 2160p") ||
+        e8.act !== "看版本"
+      )
+        itemFail("eps[7]", `等版本的集写的是「${e8.state}」、动作「${e8.act}」`);
+      const e9 = m.eps[8];
+      if (!e9.state.includes("还没播") || !e9.state.includes("播出后 2 小时开始搜"))
+        itemFail("eps[8]", `下一集写的是「${e9.state}」`);
+      const e12 = m.eps[11];
+      if (!e12.air.endsWith("· 季终")) itemFail("eps[11]", `最后一集的播出日是「${e12.air}」`);
+    }
+
+    /* 这一季的种子：标题 16/700，说明在标题右 24；列表 1144 宽、每行 50；列 x 16、100、460、500、576、800、1108 */
+    const lastEp = m.eps[m.eps.length - 1];
+    if (lastEp) expectGap("torrents.gap", lastEp.y + lastEp.h, m.torTitle);
+    expectText("torrents.title", m.torTitleText, "这一季的种子");
+    expectText(
+      "torrents.sub",
+      m.torSub,
+      "删除时按这几条保护：下载中、最短保种 24 小时、H&R、保留与保护标签",
+    );
+    if (m.torTitle)
+      expectBox("torrents.list", m.torList, { x: 280, y: m.torTitle.y + 32, w: W }, 2);
+    if (m.rows.length !== 3) itemFail("torrents.rows", `种子 ${m.rows.length} 行，这一季 3 个`);
+    else {
+      m.rows.forEach((r, i) => {
+        if (!near(r.h, 50, 1)) itemFail(`torrents.rows[${i}]`, `行高 ${r.h}，画板 50`);
+      });
+      const r0 = m.rows[0];
+      const cellX = r0.cells.map((c) => c.x - 280);
+      /* 站点、种子、下载器、状态、数据、能不能删、更多 */
+      const want = [16, 100, 460, 500, 576, 800, 1108];
+      const off = want
+        .map((w, i) => `${cellX[i]}/${w}`)
+        .filter((s) => {
+          const [a, b] = s.split("/").map(Number);
+          return Math.abs(a - b) > 16;
+        });
+      if (off.length > 0) itemFail("torrents.cols", `各列 x（实测/画板）${off.join("、")}`);
+      expectText(
+        "torrents.row0",
+        r0.t,
+        "OurBitsS02E01–E04 · 2160p HHWEB · 27.3 GBqb做种中分享率 1.31 · 做种 18 天H&R 已满足",
+      );
+      if (!m.rows[1].t.includes("H&R 还差 2 天") || !m.rows[2].t.includes("受保护：下载中"))
+        itemFail("torrents.guard", `能不能删：${m.rows.map((r) => r.cells[5]?.t).join("、")}`);
+    }
+
+    /* 演职员：每格 108 宽、间距 8，头像 72 圆在格内 18；一行放得下几个放几个；右侧「全部 15 位」右对齐到 1424 */
+    if (m.torList) expectGap("cast.gap", m.torList.y + m.torList.h, m.castTitle);
+    expectText("cast.all", m.castAll, "全部 15 位");
+    if (m.castAllBox && !near(m.castAllBox.x + m.castAllBox.w, R, 2))
+      itemFail(
+        "cast.all",
+        `「全部 15 位」的右边在 ${m.castAllBox.x + m.castAllBox.w}，画板右对齐到 ${R}`,
+      );
+    /* 收起时一行放得下几个放几个、不露半个：W 宽放 floor((W + 8) / 116) 位，其余不渲染 */
+    const castFit = Math.floor((W + 8) / 116);
+    if (m.people.length !== castFit || m.people.some((p) => p.y !== m.people[0].y || p.x + p.w > R))
+      itemFail(
+        "cast.row",
+        `收起时 ${m.people.length} 位（${[...new Set(m.people.map((p) => p.y))].length} 行），${W} 宽放 ${castFit} 位（108 + 8）、一行、不出右边`,
+      );
+    if (m.people[0]) {
+      const p0 = m.people[0];
+      expectBox("cast[0]", p0, { x: 280, y: m.castTitle.y + 36, w: 108 }, 2);
+      expectBox("cast[0].face", p0.face, { x: 298, y: p0.y, w: 72, h: 72 }, 1);
+      expectText("cast[0]", `${p0.name}/${p0.role}`, "陈默/导演");
+      if (m.people[1] && !near(m.people[1].x - p0.x, 116, 1))
+        itemFail("cast.pitch", `格距 ${m.people[1].x - p0.x}，画板 116`);
+    }
+    /* 推荐：海报 116×174（偏离 ⑤），间距 12；标牌写已入库、已订阅 */
+    if (m.cast) expectGap("recs.gap", m.cast.y + m.cast.h, m.recTitle);
+    expectText("recs.sub", m.recSub, "TMDB 按这部剧推荐，标出库里有的和已订阅的");
+    const recFit = Math.floor((W + 12) / 128);
+    if (m.recs.length !== recFit || m.recs.some((r) => r.y !== m.recs[0].y || r.x + r.w > R))
+      itemFail(
+        "recs.row",
+        `推荐 ${m.recs.length} 个，${W} 宽一行放 ${recFit} 个（116 + 12）、不出右边`,
+      );
+    if (m.recs[0]) {
+      const r0 = m.recs[0];
+      expectBox("recs[0].poster", r0.poster, { x: 280, y: m.recTitle.y + 32, w: 116, h: 174 }, 2);
+      if (m.recs[1] && !near(m.recs[1].x - r0.x, 128, 1))
+        itemFail("recs.pitch", `间距 ${m.recs[1].x - r0.x - 116}，画板 12`);
+      expectText(
+        "recs.tags",
+        m.recs
+          .slice(0, 6)
+          .map((r) => r.tag || "-")
+          .join(" "),
+        "已入库 已订阅 - - 已入库 已订阅",
+      );
+    }
+    if (m.overflow > 0) itemFail("overflow", `横向溢出 ${m.overflow}px`);
+
+    /* 探针：换到第 1 季 —— 路由跟着换，集与种子跟着这一季 */
+    const tab = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const t1 = document.querySelector('[data-testid="mi-tab-1"]');
+        if (!t1) return 'no-tab';
+        t1.click();
+        for (let i = 0; i < 20; i++) {
+          await wait(150);
+          const first = document.querySelector('.mi-ep .mi-ep__title');
+          if (first && (first.textContent ?? '').includes('第 1 集')) break;
+        }
+        const eps = document.querySelectorAll('.mi-ep').length;
+        const first = (document.querySelector('.mi-ep .mi-ep__title')?.textContent ?? '').trim();
+        const rows = [...document.querySelectorAll('[data-testid="mi-trow"]')].map((r) => (r.textContent ?? '').replace(/\\s+/g, ' '));
+        const ok = location.hash.includes('season=1') && t1.classList.contains('is-on') && eps === 12 &&
+          first === 'E01 · 第 1 集' && rows.length === 1 && rows[0].includes('S01 整季');
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' ' + location.hash + ' 集 ' + eps + ' 第一集 ' + first + ' 种子 ' + rows.join(' / ');
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(tab, "verdict=ok").length > 0) itemFail("probe.season", `换季：${tab}`);
+    /* 探针：「全部 15 位」展开成多行，再点收起 */
+    const castProbe = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const btn = document.querySelector('[data-testid="mi-cast-all"]');
+        if (!btn) return 'no-cast-all';
+        const rowsOf = () => new Set([...document.querySelectorAll('.mi-person')].map((p) => Math.round(p.getBoundingClientRect().top))).size;
+        const visible = () => document.querySelectorAll('.mi-person').length;
+        const before = visible();
+        btn.click();
+        await wait(300);
+        const open = visible();
+        const rows = rowsOf();
+        const label = (btn.textContent ?? '').trim();
+        btn.click();
+        await wait(300);
+        const after = visible();
+        const ok = before === ${castFit} && open === 15 && rows === 2 && label === '收起' && after === before;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 看得到 ' + before + '→' + open + '（' + rows + ' 行，按钮 ' + label + '）→' + after;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(castProbe, "verdict=ok").length > 0)
+      itemFail("probe.cast", `全部演职员：${castProbe}`);
+
+    /*
+     * 删除弹窗（画板 03 的片段，弹窗内坐标）：600×568；标题 24,18 16/700，关闭 560,20；库文件勾选框 24,74、标题 46,70、说明 46,90，
+     * 「看文件」右边到 576（画板 580，同画板 04 的右对齐到内容边）；分隔 y 120；种子块标题 24,132，三行 y 154 起、行距 54，
+     * 勾选框 y + 4，下拉 456,y + 2 120×28，「仍然删除」框 492,y + 8；分隔 y 322；订阅块标题 24,334，单选 y 356 起、行距 46；
+     * 页脚分隔 y 508，摘要 24 竖直居中，「取消」424、「删除」504（72×32，y 522，底色 dang）。
+     */
+    const d = await ev(
+      measureDelete(`
+        /* 前面的探针换到了第 1 季：换回第 2 季（假数据的删除预览是第 2 季的） */
+        const tab = document.querySelector('[data-testid="mi-tab-2"]');
+        if (!tab) return 'no-tab-2';
+        if (!tab.classList.contains('is-on')) {
+          tab.click();
+          for (let i = 0; i < 20 && !(document.querySelector('.mi-ep .mi-ep__title')?.textContent ?? '').includes('归来'); i++) await wait(150);
+        }
+        const b = document.querySelector('[data-testid="mi-delete"]');
+        if (!b) return 'no-delete-button';
+        b.click();
+        return true;
+      `),
+    ).catch((e) => ({ err: `probe 失败：${e.message}` }));
+    if (process.env.MI_DUMP) console.log(JSON.stringify(d, null, 1));
+    if (d.err) itemFail("delete", `删除弹窗：${d.err}`);
+    else {
+      const del = (key, got, want, tol = 2) => expectBox(`delete.${key}`, got, want, tol);
+      del("dialog", d.dlg, { w: 600, h: 568 }, 4);
+      del("header", d.header, { x: 0, y: 0, w: 600, h: 57 });
+      del("title", d.title, { x: 24, y: 18 });
+      expectText("delete.title", d.titleText, "删除《长夜将尽》第 2 季");
+      if (d.titleFont !== "16px/700") itemFail("delete.title", `标题 ${d.titleFont}，画板 16/700`);
+      del("close", d.close, { x: 560, y: 20, w: 16, h: 16 });
+      del("files.check", d.filesCheck, { x: 24, y: 74, w: 14, h: 14 });
+      del("files.title", d.filesTitle, { x: 46, y: 70 });
+      del("files.sub", d.filesSub, { x: 46, y: 90 });
+      expectText(
+        "delete.files.sub",
+        d.filesSubText,
+        "6 个文件 · 41.2 GB · 都是硬链接，种子里的数据不受影响",
+      );
+      if (!d.filesChecked) itemFail("delete.files.check", "库里的文件默认要勾上");
+      if (
+        !d.filesMore ||
+        !near(d.filesMore.x + d.filesMore.w, 576, 4) ||
+        !near(d.filesMore.y, 72, 2)
+      )
+        itemFail(
+          "delete.files.more",
+          `「看文件」在 ${JSON.stringify(d.filesMore)}，画板右边到 580、y 72`,
+        );
+      if (d.secs.length !== 3)
+        itemFail("delete.secs", `${d.secs.length} 块，画板三块（库文件、种子、订阅）`);
+      else {
+        /* 块的下沿是分隔线：120、322，订阅块一直到页脚分隔 508 */
+        const bottoms = d.secs.map((b) => b.y + b.h);
+        if (!near(bottoms[0], 121, 1) || !near(bottoms[1], 323, 1) || !near(bottoms[2], 508, 1))
+          itemFail(
+            "delete.rules",
+            `三块的下沿 ${bottoms.join("、")}，画板分隔在 120、322、页脚 508`,
+          );
+      }
+      del("torrents.title", d.torTitle, { x: 24, y: 132 });
+      expectText("delete.torrents.title", d.torTitleText, "种子（每台下载器分开判断）");
+      expectText(
+        "delete.torrents",
+        d.tors.map((t) => `${t.title}/${t.sub}/${t.checked ? "勾" : "不勾"}`).join(" | "),
+        "OurBits · S02E01–E04 · qb/分享率 1.31 · 做种 18 天 · H&R 已满足/勾 | HDSky · S02E05–E06 · tr/受保护：H&R 要求做种 7 天，还差 2 天/不勾 | HDSky · S02E07 · qb/受保护：还在下载（63%）/不勾",
+      );
+      d.tors.forEach((t, i) => {
+        const y = 154 + i * 54;
+        del(`torrents[${i}].check`, t.check, { x: 24, y: y + 4, w: 14, h: 14 });
+        del(`torrents[${i}].title`, t.titleBox, { x: 46, y });
+        del(`torrents[${i}].sub`, t.subBox, { x: 46, y: y + 20 });
+        if (i < 2 && t.ruled !== "1px") itemFail(`delete.torrents[${i}].rule`, "种子之间要有分隔");
+        if (i < 2) del(`torrents[${i}].rule`, t.main, { x: 46, w: 530, h: 47 });
+        if (i === 2 && t.ruled !== "0px") itemFail("delete.torrents[2].rule", "最后一行没有分隔");
+      });
+      const [t0, t1, t2] = d.tors;
+      if (t0) del("torrents[0].how", t0.how, { x: 456, y: 156, w: 120, h: 28 });
+      if (t0 && t0.howText !== "连数据一起删")
+        itemFail("delete.torrents[0].how", `下拉写的是「${t0.howText}」`);
+      for (const [i, t] of [
+        [1, t1],
+        [2, t2],
+      ]) {
+        if (!t) continue;
+        if (t.how) itemFail(`delete.torrents[${i}].how`, "受保护的没勾「仍然删除」时没有下拉");
+        del(`torrents[${i}].force`, t.force, { x: 492, y: 154 + i * 54 + 8, w: 14, h: 14 });
+        del(`torrents[${i}].subText`, t.subText, { x: 62 });
+      }
+      del("subscription.title", d.subTitle, { x: 24, y: 334 });
+      expectText(
+        "delete.subscription",
+        d.subs.map((o) => `${o.title}${o.on ? "*" : ""}/${o.sub}`).join(" | "),
+        "暂停追剧*/推荐：不暂停的话，台账会把删掉的集当成缺的，再去下一遍 | 删除订阅/以后不再找这一季 | 保留，继续追/只删这次选的文件和种子",
+      );
+      d.subs.forEach((o, i) => {
+        const y = 356 + i * 46;
+        del(`subscription[${i}].radio`, o.radio, { x: 24, y: y + 4, w: 14, h: 14 });
+        del(`subscription[${i}].title`, o.titleBox, { x: 46, y });
+      });
+      del("footer", d.footer, { x: 0, y: 508, w: 600, h: 60 });
+      /* 摘要按字本身的框量：左边 24，竖直居中于页脚（画板 17 高的行在 y 530，中线 538.5） */
+      del("summary", d.summary, { x: 24 });
+      if (d.summary && !near(d.summary.y + d.summary.h / 2, 538.5, 2))
+        itemFail(
+          "delete.summary",
+          `摘要的中线在 ${d.summary.y + d.summary.h / 2}，画板 538.5（页脚 508…568 居中）`,
+        );
+      expectText(
+        "delete.summary",
+        d.summaryText,
+        "将删除 6 个库文件、1 个种子（连数据），暂停追剧",
+      );
+      expectText("delete.buttons", d.buttons.map((b) => b.t).join("|"), "取消|删除");
+      if (d.buttons.length === 2) {
+        del("buttons.cancel", d.buttons[0], { x: 424, y: 522, w: 72, h: 32 });
+        del("buttons.delete", d.buttons[1], { x: 504, y: 522, w: 72, h: 32 });
+      }
+      if (d.runBg !== "rgb(179, 35, 24)")
+        itemFail("delete.buttons.delete", `「删除」底色 ${d.runBg}，画板 --pt-dang #B32318`);
+      if (d.overflow > 0) itemFail("delete.overflow", `正文横向溢出 ${d.overflow}px`);
+      if (d.forcedSummary !== "将删除 6 个库文件、2 个种子（连数据），暂停追剧" || !d.forcedChecked)
+        itemFail(
+          "delete.force",
+          `勾了「仍然删除」以后：${d.forcedSummary}，第二行${d.forcedChecked ? "" : "没"}勾上`,
+        );
+    }
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("console", err);
+  }
+
+  /* ---- 桌面 1200×1024：主区窄于 1000，「你的 NAS 上」移出大图，换成大图下面的白卡（B04 布局规则） ---- */
+  consoleErrors = [];
+  if (!(await openItem({ width: 1200, height: 1024, mobile: false }, ITEM_TV_ROUTE, true))) {
+    itemFail("narrow.load", "视口 1200 下没进条目详情");
+  } else {
+    const m = await ev(MEASURE_MI);
+    const W = 1200 - 264 - 32 - m.sb;
+    expectBox("narrow.hero", m.hero, { x: 280, y: 104, w: W, h: 340 }, 2);
+    if (m.nasGlass) itemFail("narrow.nas", "主区窄于 1000 时「你的 NAS 上」不该在大图里");
+    expectBox("narrow.nas", m.nas, { x: 280, y: 104 + 340 + 24, w: W }, 2);
+    /* 文字列伸到大图右边 28：简介最宽 600，W − 224 − 28 不到 600 时取它 */
+    expectBox("narrow.overview", m.overview, { x: 504, w: Math.min(600, W - 224 - 28) }, 2);
+    if (m.nas) expectGap("narrow.season.gap", m.nas.y + m.nas.h, m.seasonTitle);
+    /* 两列集卡：(W − 17) / 2，最小 340 */
+    const cardW = (W - 17) / 2;
+    if (
+      m.eps.length !== 12 ||
+      m.eps.some((e, i) => !near(e.w, cardW, 2) || !near(e.x, 280 + (i % 2) * (cardW + 17), 2))
+    )
+      itemFail(
+        "narrow.eps",
+        `集卡 ${m.eps.length} 张，宽 ${[...new Set(m.eps.map((e) => e.w))].join("、")}，应为两列 ${cardW.toFixed(1)}`,
+      );
+    if (m.overflow > 0) itemFail("narrow.overflow", `横向溢出 ${m.overflow}px`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("narrow.console", err);
+  }
+
+  /* ---- 桌面 1440×1024，电影 ---- */
+  consoleErrors = [];
+  if (!(await openItem({ width: 1440, height: 1024, mobile: false }, ITEM_MOVIE_ROUTE, false))) {
+    itemFail("movie.load", "等了 10 秒还没有条目");
+  } else {
+    const m = await ev(MEASURE_MI);
+    if (process.env.MI_DUMP) console.log(JSON.stringify(m, null, 1));
+    expectText("movie.crumbs", m.crumbs, "媒体 / 探索 / 沙丘2");
+    expectBox("movie.hero", m.hero, { x: 280, y: 104, w: 1144 - m.sb, h: 340 }, 2);
+    expectText("movie.original", m.original, "Dune: Part Two · 2024 · 2 小时 46 分");
+    expectText("movie.pills", m.pills.join("|"), "电影|科幻|冒险|美国|已上映");
+    if (m.seasons) itemFail("movie.seasons", "电影不该有「季与集」");
+    expectText(
+      "movie.nas.library",
+      m.nasRows[0]?.t ?? "",
+      "库里有 · 2160p FRDS电影库 · 1 个文件 · 58.2 GB",
+    );
+    expectText("movie.nas.subscription", m.nasRows[2]?.t ?? "", "已完成没开版本锁");
+    expectText("movie.torrents.title", m.torTitleText, "这部片的种子");
+    expectGap("movie.torrents.gap", m.hero ? m.hero.y + m.hero.h : 0, m.torTitle);
+    if (m.rows.length !== 1 || !m.rows[0].t.startsWith("CHDBits2160p FRDS · 58.2 GB"))
+      itemFail("movie.torrents.rows", `种子：${m.rows.map((r) => r.t).join(" / ")}`);
+    expectText("movie.recs.sub", m.recSub, "TMDB 按这部片推荐，标出库里有的和已订阅的");
+    if (m.overflow > 0) itemFail("movie.overflow", `横向溢出 ${m.overflow}px`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("movie.console", err);
+  }
+
+  /* ---- 手机 375×812，剧集（画板 08） ---- */
+  consoleErrors = [];
+  if (!(await openItem({ ...M_VIEWPORT, mobile: true }, ITEM_TV_ROUTE, true))) {
+    itemFail("load", "等了 10 秒还没有集卡", true);
+  } else {
+    const m = await ev(MEASURE_MI);
+    if (process.env.MI_DUMP) console.log(JSON.stringify(m, null, 1));
+    const cw = 343 - m.sb;
+    expectText("topbar.sub", m.mheadSub, "剧集 · 2025 · 追剧中", true);
+    /* 大图 375×348 不留边、贴住顶栏（52）；海报 16,20 108×162；名字 136,20；简介 16,196；动作 y 292 h40 */
+    expectBox("hero", m.hero, { x: 0, y: 52, w: 375 - m.sb, h: 348 }, 2, true);
+    expectBox("hero.poster", m.poster, { x: 16, y: 72, w: 108, h: 162 }, 2, true);
+    expectBox("hero.title", m.title, { x: 136, y: 72 }, 4, true);
+    expectBox("hero.overview", m.overview, { x: 16, y: 248, w: cw }, 4, true);
+    if (m.imdb) itemFail("hero.imdb", "手机不放 IMDb", true);
+    /* 资料胶囊从 136,156 起两行（画板 08：类型、三个题材一行，国家、片长、状态一行），一个都不能被截掉 */
+    expectBox("hero.pills", m.pillsBox, { x: 136, y: 156 }, 4, true);
+    if (m.pillsShown.n !== m.pills.length || m.pillsShown.rows !== 2)
+      itemFail(
+        "hero.pills",
+        `胶囊 ${m.pills.length} 个，看得见 ${m.pillsShown.n} 个、${m.pillsShown.rows} 行（画板两行全部看得见）`,
+        true,
+      );
+    const acts = m.acts;
+    if (acts.map((a) => a.t).join("|") !== "搜资源|追剧中 · 第 2 季")
+      itemFail("hero.acts", `动作是「${acts.map((a) => a.t).join("、")}」`, true);
+    else {
+      expectBox("hero.acts.search", acts[0], { x: 16, y: 344, h: 40 }, 2, true);
+      expectBox("hero.acts.sub", acts[1], { y: 344, h: 40 }, 2, true);
+      if (
+        !near(acts[1].x + acts[1].w, 16 + cw, 2) ||
+        !near(acts[1].x - (acts[0].x + acts[0].w), 8, 2)
+      )
+        itemFail("hero.acts", `两个按钮 ${JSON.stringify(acts)}，画板平分 343、中间 8`, true);
+    }
+    /* 「更多」在大图右上角（顶栏留给外壳，见落地偏离 40） */
+    expectBox("hero.more", m.more, { y: 72 }, 4, true);
+    /* 你的 NAS 上：行卡 343 宽在 y 416；四行加播放 276（画板 08，少一行减 46、没有播放减 50）；行 y 34 起、行距 46 */
+    expectBox("nas", m.nas, { x: 16, y: 416, w: cw, h: 276 }, 2, true);
+    if (m.nasGlass) itemFail("nas", "手机上「你的 NAS 上」是大图下面的白卡", true);
+    if (m.nasRows.length !== 4) itemFail("nas.rows", `${m.nasRows.length} 行，画板 4 行`, true);
+    else {
+      const ys = m.nasRows.map((r) => r.y - m.nas.y);
+      if (!near(ys[0], 34, 2) || ys.slice(1).some((y, i) => !near(y - ys[i], 46, 2)))
+        itemFail("nas.rows", `四行在卡内 y ${ys.join("、")}，画板 34 起、行距 46`, true);
+      expectText(
+        "nas.server",
+        m.nasRows[3].t,
+        "Jellyfin 已入库 17 集S02E03 在服务器里被删了 · 处理 · 忽略",
+        true,
+      );
+    }
+    /* 播放：白卡里 14,226 的 soft 按钮 315×36 */
+    if (!m.playInNas) itemFail("nas.play", "手机的「在 Jellyfin 播放」要在白卡底部", true);
+    expectBox("nas.play", m.play, { x: 30, y: 416 + 226, w: cw - 28, h: 36 }, 2, true);
+    expectText("nas.play", m.playText, "在 Jellyfin 播放", true);
+    /* 季与集：标题、横滑 tab（标题下 32）、图例（标题下 74）、收起行（标题下 100，343×44）、集卡（标题下 152，343×80，行距 88） */
+    if (m.nas) expectGap("season.gap", m.nas.y + m.nas.h, m.seasonTitle, true);
+    if (m.seasonTitle) {
+      const t = m.seasonTitle.y;
+      if (m.tabs[0]) expectBox("season.tab1", m.tabs[0], { x: 16, y: t + 32, h: 30 }, 2, true);
+      expectBox("season.legend", m.legend, { x: 16, y: t + 74 }, 3, true);
+      expectBox("season.collapse", m.collapse, { x: 16, y: t + 100, w: cw, h: 44 }, 2, true);
+      expectText("season.collapse", m.collapseText, "E01–E06 · 6 集都已入库展开", true);
+      if (m.eps.length !== 6)
+        itemFail("eps", `收起以后 ${m.eps.length} 张集卡，应为 6（E07–E12）`, true);
+      else {
+        m.eps.forEach((e, i) => {
+          const want = { x: 16, y: t + 152 + i * 88, w: cw, h: 80 };
+          if (Object.entries(want).some(([k, v]) => !near(e[k], v, 2)))
+            itemFail(
+              `eps[${i}]`,
+              `${e.id} 在 ${JSON.stringify({ x: e.x, y: e.y, w: e.w, h: e.h })}，画板 ${JSON.stringify(want)}`,
+              true,
+            );
+        });
+        expectBox(
+          "eps[0].still",
+          m.eps[0].still,
+          { x: 24, y: m.eps[0].y + 8, w: 112, h: 63 },
+          1,
+          true,
+        );
+        /* E07 起没入库：没有播放圆。展开以后看 E05 的播放圆（50,25 28×28）在探针里量 */
+        if (m.eps.some((e) => e.play)) itemFail("eps.play", "没入库的集不该有播放圆", true);
+      }
+    }
+    /* 这一季的种子：行卡 343 宽，每个种子 64 */
+    const lastEp = m.eps[m.eps.length - 1];
+    if (lastEp) expectGap("torrents.gap", lastEp.y + lastEp.h, m.torTitle, true);
+    /* 行在卡内 14（加 1px 边框是 15，横向差的 1px 不补，同 M2a 的落地偏离 16），每个 64 */
+    if (m.torList) expectBox("torrents.list", m.torList, { x: 16, w: cw }, 2, true);
+    if (
+      m.rows.length !== 3 ||
+      m.rows.some((r) => !near(r.h, 64, 1) || !near(r.x, 31, 1) || !near(r.w, cw - 30, 1))
+    )
+      itemFail(
+        "torrents.rows",
+        `种子行 ${JSON.stringify(m.rows.map(({ x, y, w, h }) => ({ x, y, w, h })))}，画板卡内 14 起、315 宽、每个 64`,
+        true,
+      );
+    /* 演职员：横滑，每格 76、间距 8，头像 64；推荐：海报 104×156、间距 12 */
+    if (m.people[0]) {
+      expectBox("cast[0]", m.people[0], { x: 16, w: 76 }, 2, true);
+      expectBox("cast[0].face", m.people[0].face, { x: 22, w: 64, h: 64 }, 1, true);
+      if (m.people[1] && !near(m.people[1].x - m.people[0].x, 84, 1))
+        itemFail("cast.pitch", `格距 ${m.people[1].x - m.people[0].x}，画板 84`, true);
+    } else itemFail("cast", "没有演职员", true);
+    if (m.recs[0]) {
+      expectBox("recs[0].poster", m.recs[0].poster, { x: 16, w: 104, h: 156 }, 2, true);
+      if (m.recs[1] && !near(m.recs[1].x - m.recs[0].x, 116, 1))
+        itemFail("recs.pitch", `间距 ${m.recs[1].x - m.recs[0].x - 104}，画板 12`, true);
+    } else itemFail("recs", "没有推荐", true);
+    if (m.overflow > 0) itemFail("overflow", `横向溢出 ${m.overflow}px`, true);
+
+    /* 探针：收起行「展开」以后 12 张、换成「收起」，再点回到 6 张 */
+    const fold = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const btn = document.querySelector('[data-testid="mi-expand"]');
+        if (!btn) return 'no-expand';
+        btn.click();
+        await wait(300);
+        const open = document.querySelectorAll('.mi-ep').length;
+        const label = (btn.textContent ?? '').trim();
+        const e5 = document.querySelector('[data-testid="mi-ep-5"]');
+        const p5 = e5?.querySelector('.mi-ep__play');
+        const er = e5?.getBoundingClientRect();
+        const pr = p5?.getBoundingClientRect();
+        const playOk = Boolean(er && pr) && Math.abs(pr.left - er.left - 50) <= 1 && Math.abs(pr.top - er.top - 25) <= 1 &&
+          Math.round(pr.width) === 28 && Math.round(pr.height) === 28;
+        btn.click();
+        await wait(300);
+        const closed = document.querySelectorAll('.mi-ep').length;
+        const ok = open === 12 && label === '收起' && closed === 6 && playOk;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 展开 ' + open + '（' + label + '）收起 ' + closed +
+          ' E05 播放圆 ' + (pr ? Math.round(pr.left - er.left) + ',' + Math.round(pr.top - er.top) + ' ' + Math.round(pr.width) + '×' + Math.round(pr.height) : '无');
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(fold, "verdict=ok").length > 0) itemFail("probe.fold", `收起行：${fold}`, true);
+    /* 探针：点简介展开全文（盖在大图上），大图高度不变，再点收起 */
+    const ov = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const p = document.querySelector('[data-testid="mi-overview"]');
+        const hero = document.querySelector('[data-testid="mi-hero"]');
+        if (!p || !hero) return 'no-overview';
+        const h0 = Math.round(p.getBoundingClientRect().height);
+        p.click();
+        await wait(300);
+        const r = p.getBoundingClientRect();
+        const hr = hero.getBoundingClientRect();
+        const full = p.scrollHeight <= p.clientHeight + 1 || getComputedStyle(p).overflowY === 'auto';
+        const inside = r.top >= hr.top && r.bottom <= hr.bottom + 0.5;
+        const heroH = Math.round(hr.height);
+        p.click();
+        await wait(300);
+        const h1 = Math.round(p.getBoundingClientRect().height);
+        const ok = r.height > h0 && full && inside && heroH === 348 && h1 === h0;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 高 ' + h0 + '→' + Math.round(r.height) + '→' + h1 + ' 在大图里 ' + inside + ' 大图 ' + heroH;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(ov, "verdict=ok").length > 0) itemFail("probe.overview", `简介展开：${ov}`, true);
+
+    /* 删除弹窗在手机上是全屏页（画板 03 的片段，宽度换成 375 − 32）：「更多」里的删除打开；摘要一行、按钮一行 */
+    const md = await ev(
+      measureDelete(`
+        document.querySelector('.mi-hero__more [data-testid="mi-more"]')?.click();
+        for (let i = 0; i < 20 && !document.querySelector('[data-testid="mi-more-delete"]'); i++) await wait(100);
+        const item = document.querySelector('[data-testid="mi-more-delete"]');
+        if (!item) return 'no-more-delete';
+        item.click();
+        return true;
+      `),
+    ).catch((e) => ({ err: `probe 失败：${e.message}` }));
+    if (process.env.MI_DUMP) console.log(JSON.stringify(md, null, 1));
+    if (md.err) itemFail("delete", `删除弹窗：${md.err}`, true);
+    else {
+      const del = (key, got, want, tol = 2) => expectBox(`delete.${key}`, got, want, tol, true);
+      if (!md.fullscreen) itemFail("delete", "手机上删除弹窗要全屏", true);
+      del("dialog", md.dlg, { x: 0, y: 0, w: 375, h: 812 });
+      del("title", md.title, { x: 16 });
+      del("files.check", md.filesCheck, { x: 16, w: 14, h: 14 });
+      del("files.title", md.filesTitle, { x: 38 });
+      if (!md.filesMore || !near(md.filesMore.x + md.filesMore.w, 359, 2))
+        itemFail(
+          "delete.files.more",
+          `「看文件」的右边 ${md.filesMore ? md.filesMore.x + md.filesMore.w : "无"}，应到 359`,
+          true,
+        );
+      if (md.tors.length === 3) {
+        del("torrents[0].title", md.tors[0].titleBox, { x: 38 });
+        if (!md.tors[0].how || !near(md.tors[0].how.x + md.tors[0].how.w, 359, 2))
+          itemFail(
+            "delete.torrents[0].how",
+            `下拉在 ${JSON.stringify(md.tors[0].how)}，右边应到 359`,
+            true,
+          );
+      }
+      /* 页脚：摘要占一行，取消、删除在下一行靠右 */
+      const [c, r] = md.buttons;
+      if (!md.summary || !c || !r || md.summary.y + md.summary.h > c.y || !near(r.x + r.w, 359, 2))
+        itemFail(
+          "delete.footer",
+          `摘要 ${JSON.stringify(md.summary)}、按钮 ${JSON.stringify(md.buttons)}：摘要在上一行，按钮靠右到 359`,
+          true,
+        );
+      if (md.overflow > 0) itemFail("delete.overflow", `正文横向溢出 ${md.overflow}px`, true);
+    }
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) itemFail("console", err, true);
+  }
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+}
+
+// ------------------------------------------------- 首页与系统体检（画板 02、07，媒体中心 M8）
+
+/*
+ * 首页不是带式表格页：页头 64 下面先是满宽的 NAS 概览（首页 NAS 概览 H2），再是今天播出、待处理条，
+ * 最后两栏（左：继续观看、最近入库、这周还要播；右 368：下载器、存储、状态）。
+ * NAS 概览与右栏的数字来自 docs/design/home-nas-spec.md；媒体区块的数字来自 docs/design/media-hub-board-spec.md 的 02 / 07
+ * （画板 02 按 1440×1024 画：侧栏 264 + 主区 1176，内容 1144；手机按画板 07 量 375×812，块与块之间统一 24，偏离 ④），
+ * 整体挪到 NAS 概览下面。加了 NAS 概览以后桌面总比视口高，滚动区的竖向滚动条让出 sb，各处按让出以后的宽量。
+ * 1200 宽时内容 894 < 1100：右栏落到下面；≤ 1080：NAS 概览第二行两列。
+ * 假数据是 board-fixtures.mjs 的 HOME 与 NAS_VIEW（照画板：今天五张卡、待处理六类、继续观看三张、最近入库七张、这周四条、
+ * 三块盘两台下载器；NAS 概览是一台 TrueNAS：三个存储池、八块硬盘、七条告警）。localStorage 设了 pt-fixture-home-empty 时回
+ * HOME_EMPTY 与 NAS_VIEW_EMPTY，量空态；设了 pt-fixture-home-nas=local 时 NAS 概览画本机来源。
+ * 系统体检画板没有，只量不溢出、各组与项都在。
+ */
+const doHome = wanted.length === 0 || wanted.includes("/home");
+
+const MEASURE_HM = `(() => {
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const q = (sel, root = document) => root.querySelector(sel);
+  const qa = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const txt = (el) => (el?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const sec = (id) => {
+    const el = q('[data-testid="' + id + '"]');
+    if (!el) return null;
     return {
-      banner: b ? Math.round(b.getBoundingClientRect().height) : 0,
-      firstContentTop: grid ? Math.round(grid.getBoundingClientRect().top) : null,
+      ...box(el),
+      title: box(q('.hm-sec__title', el)),
+      titleText: txt(q('.hm-sec__title', el)),
+      count: box(q('.hm-sec__count', el)),
+      countText: txt(q('.hm-sec__count', el)),
+      tag: txt(q('.hm-sec__tag', el)),
+      link: box(q('.hm-sec__link', el)),
+      linkText: txt(q('.hm-sec__link', el)),
+      empty: txt(q('.hm-empty', el)),
     };
-  })()`);
-  await ev(`localStorage.setItem('pt_tools_v2_banner_dismissed_v1', '1')`);
+  };
+  const panel = (id) => {
+    const el = q('[data-testid="' + id + '"]');
+    if (!el) return null;
+    return { ...box(el), head: box(q('.pt-panel__head', el)), headText: txt(q('.pt-panel__title', el)), card: box(q('.hm-mcard', el)) };
+  };
+  const scroller = document.querySelector('.pt-shell__content');
+  const inner = document.querySelector('.pt-shell__inner');
+  return {
+    sb: scroller ? scroller.offsetWidth - scroller.clientWidth : 0,
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+    innerOverflow: inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0,
+    head: box(q('.pt-head')),
+    headSub: txt(q('#pt-head-sub')),
+    mheadSub: txt(q('#pt-mhead-sub')),
+    refresh: box(q('#pt-head-acts [data-testid="hm-refresh"]')),
+    mrefresh: box(q('.hm-mrefresh [data-testid="hm-refresh"]')),
+    today: sec('hm-today'),
+    tcs: qa('.hm-tc').map((el) => ({
+      id: el.getAttribute('data-testid'),
+      ...box(el),
+      img: box(q('.hm-tc__img', el)),
+      state: box(q('.hm-tc__state', el)),
+      stateText: txt(q('.hm-tc__state', el)),
+      time: box(q('.hm-tc__time', el)),
+      title: box(q('.hm-tc__title', el)),
+      sub: box(q('.hm-tc__sub', el)),
+      subText: txt(q('.hm-tc__sub', el)),
+      act: box(q('.hm-tc__act, .hm-tc__note', el)),
+      actText: txt(q('.hm-tc__act, .hm-tc__note', el)),
+    })),
+    row: box(q('[data-testid="hm-today-row"]')),
+    rowScroll: (() => { const r = q('[data-testid="hm-today-row"]'); return r ? r.scrollWidth - r.clientWidth : 0; })(),
+    pages: qa('.hm-today__page').map(box),
+    dots: qa('[data-testid="hm-today-dots"] > *').map(box),
+    todo: box(q('[data-testid="hm-todo"]')),
+    todoIcon: box(q('[data-testid="hm-todo"] .hm-todo__icon')),
+    todoTitle: box(q('[data-testid="hm-todo"] .hm-todo__title')),
+    todoCount: box(q('[data-testid="hm-todo-count"]')),
+    todoNote: txt(q('[data-testid="hm-todo-empty"]')),
+    chips: qa('[data-testid^="hm-chip-"]').map((el) => ({ t: txt(el), ...box(el) })),
+    todoAll: box(q('[data-testid="hm-todo-all"]')),
+    resume: sec('hm-resume'),
+    rcs: qa('.hm-rc').map((el) => ({
+      ...box(el),
+      img: box(q('.hm-rc__img', el)),
+      play: box(q('.hm-rc__play', el)),
+      track: box(q('.hm-rc__track', el)),
+      title: box(q('.hm-rc__title', el)),
+      sub: box(q('.hm-rc__sub', el)),
+      subText: txt(q('.hm-rc__sub', el)),
+    })),
+    recent: sec('hm-recent'),
+    pcs: qa('.hm-pc').map((el) => ({
+      ...box(el),
+      poster: box(q('.hm-pc__poster', el)),
+      q: box(q('.hm-pc__q', el)),
+      title: box(q('.hm-pc__title', el)),
+      sub: box(q('.hm-pc__sub', el)),
+    })),
+    week: panel('hm-week'),
+    weekSec: sec('hm-week'),
+    weekEmpty: txt(q('[data-testid="hm-week-empty"]')),
+    wks: qa('.hm-wk').map((el) => ({
+      ...box(el),
+      date: box(q('.hm-wk__date', el)),
+      title: box(q('.hm-wk__title', el)),
+      note: box(q('.hm-wk__note', el)),
+      line: (() => { const st = getComputedStyle(el, '::before'); return st.content === 'none' || st.display === 'none' ? null : { left: st.left, top: st.top, w: st.width, h: st.height }; })(),
+    })),
+    /* NAS 概览（H2）：标题行、卡、主机行、四张数值卡、第二行三块（本机来源时两块）、手机的两行摘要 */
+    hn: (() => {
+      const el = q('[data-testid="hn"]');
+      if (!el) return null;
+      const shown = (e) => Boolean(e) && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+      const vbox = (e) => (shown(e) ? box(e) : null);
+      const clip = (e) => (e ? e.scrollWidth - e.clientWidth : 0);
+      return {
+        ...box(el),
+        title: box(q('.hm-sec__title', el)),
+        titleText: txt(q('.hm-sec__title', el)),
+        countText: txt(q('.hm-sec__count', el)),
+        tag: txt(q('.hm-sec__tag', el)),
+        link: box(q('.hm-sec__link', el)),
+        linkText: txt(q('.hm-sec__link', el)),
+        others: box(q('[data-testid="hn-others"]', el)),
+        othersText: txt(q('[data-testid="hn-others"]', el)),
+        live: box(q('[data-testid="hn-live"]', el)),
+        liveText: txt(q('[data-testid="hn-live"]', el)),
+        liveDot: box(q('.hn-live__dot', el)),
+        card: box(q('[data-testid="hn-card"]', el)),
+        empty: box(q('[data-testid="hn-empty"]', el)),
+        emptyIcon: box(q('.hn-empty__icon', el)),
+        emptyTitle: txt(q('.hn-empty__title', el)),
+        emptySub: txt(q('.hn-empty__sub', el)),
+        emptyBtn: box(q('[data-testid="hn-connect"]', el)),
+        emptyBtnText: txt(q('[data-testid="hn-connect"]', el)),
+        host: box(q('[data-testid="hn-host"]', el)),
+        logo: box(q('.hn-host__logo', el)),
+        hostTitle: box(q('.hn-host__title', el)),
+        hostTitleText: txt(q('.hn-host__title', el)),
+        ver: box(q('[data-testid="hn-platform"]', el)),
+        verText: txt(q('[data-testid="hn-platform"]', el)),
+        meta: qa('.hn-host__m', el).map((m) => ({ t: txt(m), ...box(m) })),
+        facts: qa('[data-testid="hn-facts"] > *', el).filter(shown).map((f) => ({ t: txt(f), ...box(f) })),
+        body: box(q('.hn-body', el)),
+        kpis: qa('.hn-kpi', el).map((k) => {
+          const sub = q('.hn-kpi__sub', k);
+          const aside = q('.hn-kpi__aside', k);
+          return {
+            key: (k.getAttribute('data-testid') ?? '').replace('hn-kpi-', ''),
+            ...box(k),
+            ic: box(q('.hn-kpi__ic', k)),
+            label: box(q('.hn-kpi__label', k)),
+            labelText: txt(q('.hn-kpi__label', k)),
+            aside: vbox(aside),
+            asideText: shown(aside) ? txt(aside) : '',
+            asideClip: clip(aside),
+            val: box(q('.hn-kpi__val', k)),
+            valText: txt(q('.hn-kpi__val', k)),
+            valSize: getComputedStyle(q('.hn-kpi__val', k)).fontSize,
+            sub: box(sub),
+            subText: sub ? [...sub.children].filter(shown).map(txt).join('') : '',
+            subClip: clip(sub),
+            bars: box(q('.pt-bars', k)),
+            seg: box(q('.hn-seg', k)),
+            segs: qa('.hn-seg__s', k).map(box),
+            legend: vbox(q('.hn-seg__legend', k)),
+          };
+        }),
+        row: box(q('.hn-row', el)),
+        blks: qa('.hn-blk', el).map((b) => ({
+          key: (b.getAttribute('data-testid') ?? '').replace('hn-', ''),
+          ...box(b),
+          head: box(q('.hn-blk__head', b)),
+          headText: txt(q('.hn-blk__head', b)),
+        })),
+        pools: qa('[data-testid^="hn-pool-"]', el).map((r) => ({
+          ...box(r),
+          name: txt(q('.hn-pool__name', r)),
+          pill: txt(q('.pt-pill', r)),
+          pct: box(q('.hn-pool__pct', r)),
+          pctText: txt(q('.hn-pool__pct', r)),
+          bar: box(q('.pt-progress', r)),
+          sub: txt(q('.hn-pool__sub', r)),
+        })),
+        tiles: qa('[data-testid^="hn-disk-tile-"]', el).map((d) => ({
+          ...box(d),
+          name: txt(q('.hn-disk__name', d)),
+          temp: txt(q('.hn-disk__temp', d)),
+          warn: d.classList.contains('is-warn'),
+          gauge: box(q('.hn-disk__gauge', d)),
+          clip: Math.max(...['.hn-disk__name', '.hn-disk__sub'].map((c) => clip(q(c, d)))),
+        })),
+        localRows: qa('[data-testid="hn-local-storage"] .hn-pool', el).map((r) => ({
+          ...box(r),
+          name: txt(q('.hn-pool__name', r)),
+          pctText: txt(q('.hn-pool__pct', r)),
+          bar: box(q('.pt-progress', r)),
+          sub: txt(q('.hn-pool__sub', r)),
+        })),
+        localConnect: txt(q('[data-testid="hn-local-connect"]', el)),
+        acounts: qa('[data-testid^="hn-acount-"]', el).map((c) => ({ t: txt(c), ...box(c) })),
+        arows: qa('.hn-arow', el).map((r) => ({ t: txt(q('.hn-arow__t', r)), ...box(r) })),
+        apps: box(q('[data-testid="hn-apps"]', el)),
+        appsText: txt(q('[data-testid="hn-apps"]', el)),
+        msums: qa('.hn-msum', el).map((m) => ({ t: txt(m), ...box(m) })),
+      };
+    })(),
+    /* 右栏（H2）：下载器、存储（NAS 概览没画本机的存储时）、状态，各一个区块标题加一张卡 */
+    side: (() => {
+      const el = q('[data-testid="hm-side"]');
+      if (!el) return null;
+      return {
+        ...box(el),
+        secs: qa('.hm-sec', el).map((s) => ({
+          ...box(s),
+          title: box(q('.hm-sec__title', s)),
+          titleText: txt(q('.hm-sec__title', s)),
+          countText: txt(q('.hm-sec__count', s)),
+          link: box(q('.hm-sec__link', s)),
+          linkText: txt(q('.hm-sec__link', s)),
+          card: box(q('.hm-card', s)),
+        })),
+      };
+    })(),
+    speed: box(q('[data-testid="hm-speed"]')),
+    speedCols: qa('[data-testid="hm-speed"] .hm-speed__col').map((el) => ({
+      ...box(el),
+      icon: box(q('.hm-speed__icon', el)),
+      label: box(q('.hm-speed__label span', el)),
+      labelText: txt(q('.hm-speed__label span', el)),
+      value: box(q('.hm-speed__value', el)),
+      bars: box(q('.pt-bars', el)),
+    })),
+    storage: box(q('[data-testid="hm-storage"]')),
+    disks: qa('[data-testid^="hm-disk-"]').map((el) => ({
+      ...box(el),
+      name: box(q('.hm-disk__name', el)),
+      nameText: txt(q('.hm-disk__name', el)),
+      free: box(q('.hm-disk__free', el)),
+      freeText: txt(q('.hm-disk__free', el)),
+      bar: box(q('.hm-disk__bar', el)),
+    })),
+    dlPart: box(q('[data-testid="hm-downloaders"]')),
+    dls: qa('[data-testid="hm-downloaders"] .hm-dl').map((el) => ({
+      ...box(el),
+      dot: box(q('.hm-dl__dot', el)),
+      name: box(q('.hm-dl__name', el)),
+      speed: box(q('.hm-dl__speed', el)),
+    })),
+    linesPart: box(q('[data-testid="hm-lines"]')),
+    lines: qa('[data-testid^="hm-line-"]').map((el) => ({
+      key: el.getAttribute('data-testid'),
+      ...box(el),
+      icon: box(q('.hm-line__ic', el)),
+      title: box(q('.hm-line__title', el)),
+      titleText: txt(q('.hm-line__title', el)),
+      desc: box(q('.hm-line__desc', el)),
+      right: box(q('.hm-line__right, .hm-line__act', el)),
+      rightText: txt(q('.hm-line__right, .hm-line__act', el)),
+    })),
+  };
+})()`;
+
+/*
+ * 等首页读到数据（今天播出出了卡，或空态那一句；NAS 概览出了四张数值卡，或空状态卡），再等过渡走完。
+ * nas 是 NAS 概览画哪一种：truenas（默认，接入的 TrueNAS）或 local（只有本机来源），见 board-fixtures.mjs 的 NAS_VIEW。
+ */
+async function openHome(metrics, { empty = false, nas = "truenas" } = {}) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { deviceScaleFactor: 1, ...metrics },
+    sessionId,
+  );
+  await goto(`${BASE}/#/home`);
+  await ev(
+    [
+      empty
+        ? `localStorage.setItem('pt-fixture-home-empty', '1')`
+        : `localStorage.removeItem('pt-fixture-home-empty')`,
+      nas === "local"
+        ? `localStorage.setItem('pt-fixture-home-nas', 'local')`
+        : `localStorage.removeItem('pt-fixture-home-nas')`,
+    ].join(";"),
+  );
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitReady();
+  for (let i = 0; i < 40; i++) {
+    const ok = await ev(
+      empty
+        ? `Boolean(document.querySelector('[data-testid="hm-today-empty"]')) && Boolean(document.querySelector('[data-testid="hn-empty"]'))`
+        : `document.querySelectorAll('.hm-tc').length > 0 && document.querySelectorAll('[data-testid^="hm-line-"]').length === 3 && document.querySelectorAll('.hn-kpi').length === 4`,
+    ).catch(() => false);
+    if (ok === true) {
+      /* 数值卡的大字从旧值过渡到新值：连着两次读到的一样再量 */
+      let last = null;
+      for (let j = 0; j < 20; j++) {
+        await sleep(200);
+        const now = String(
+          await ev(
+            `[...document.querySelectorAll('[data-testid="hn-kpi-val"]')].map((e) => e.textContent).join('|')`,
+          ).catch(() => ""),
+        );
+        if (now === last) break;
+        last = now;
+      }
+      await sleep(600);
+      return true;
+    }
+    await sleep(250);
+  }
+  return false;
+}
+
+if (doHome) {
+  /* HM_SHOTS=<目录> 时每一趟量完存一张截图（整页，验收时逐张看） */
+  const shot = async (name) => {
+    if (!process.env.HM_SHOTS) return;
+    const { data } = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+    writeFileSync(join(process.env.HM_SHOTS, `${name}.png`), Buffer.from(data, "base64"));
+  };
+  /* 整页：外壳的内容区自己滚，把视口临时拉高到放得下全部内容再截，截完换回来 */
+  const shotFull = async (name, metrics) => {
+    if (!process.env.HM_SHOTS) return;
+    const extra = await ev(`(() => {
+      const sc = document.querySelector('.pt-shell__content');
+      return sc ? sc.scrollHeight - sc.clientHeight : 0;
+    })()`).catch(() => 0);
+    if (extra > 0) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { deviceScaleFactor: 1, ...metrics, height: metrics.height + extra },
+        sessionId,
+      );
+      await sleep(400);
+    }
+    await shot(name);
+    if (extra > 0) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { deviceScaleFactor: 1, ...metrics },
+        sessionId,
+      );
+      await sleep(300);
+    }
+  };
+  const homeFail = (key, msg, where = "") => {
+    const gapKey = `/home${where} ${key}`;
+    if (ALLOWED_GAPS[gapKey]) {
+      gapsUsed.add(gapKey);
+      return;
+    }
+    failures.push({
+      route: `/home${where ? `（${where.replace("@", "")}）` : ""}`,
+      board:
+        where === "@375" ? "07 首页·手机" : where.startsWith("@check") ? "系统体检" : "02 首页",
+      key,
+      msg,
+    });
+  };
+  const hmBox = (key, got, want, tol = 2, where = "") => {
+    if (!got) {
+      homeFail(key, "找不到这一块", where);
+      return;
+    }
+    const diffs = Object.entries(want)
+      .filter(([k, v]) => !near(got[k], v, tol))
+      .map(([k, v]) => `${k} ${got[k]}≠${v}`);
+    if (diffs.length > 0)
+      homeFail(key, `${diffs.join("，")}（实测 ${JSON.stringify(got)}）`, where);
+  };
+  const rel = (b, o) => (b && o ? { x: b.x - o.x, y: b.y - o.y, w: b.w, h: b.h } : null);
+
+  /*
+   * ---- 桌面 1440×1024（home-nas-spec.md §2；媒体区块是画板 02，整体在 NAS 概览下面） ----
+   * 首页加了 NAS 概览以后桌面总比视口高，滚动区有竖向滚动条：内容宽与右边让出 sb（画板按没有滚动条画）。
+   */
+  consoleErrors = [];
+  if (!(await openHome({ width: 1440, height: 1024, mobile: false }))) {
+    homeFail(
+      "load",
+      "等了 10 秒还没有今天播出的卡、三条状态行或四张数值卡：页面没进首页，或 /api/home、/api/nas 没回来",
+    );
+  } else {
+    const m = await ev(MEASURE_HM);
+    if (process.env.HM_DUMP) console.log(JSON.stringify(m, null, 1));
+    await shot("home-1440");
+    const W = 1144 - m.sb;
+    const R = 280 + W;
+    hmBox("head", m.head, { x: 264, y: 0, w: 1176, h: 64 });
+    if (!m.refresh) homeFail("head.refresh", "页头右侧没有「刷新」");
+    if (!m.headSub.startsWith("今天 5 集播出 · 其中 2 集已入库 · "))
+      homeFail("head.sub", `副标题是「${m.headSub}」`);
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      homeFail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+
+    /* NAS 概览的标题行：标题 280,80；右边依次是「另有 1 个来源」、状态点与更新时间、「NAS 监控 ›」，彼此隔 8 */
+    const H = m.hn;
+    hmBox("nas.title", H?.title, { x: 280, y: 80, h: 21 });
+    if (H?.titleText !== "NAS 概览" || H?.countText !== "TrueNAS")
+      homeFail("nas.title", `标题是「${H?.titleText}」、类型是「${H?.countText}」`);
+    if (!H?.link || !near(H.link.x + H.link.w, R, 2) || H.linkText !== "NAS 监控")
+      homeFail("nas.link", `「NAS 监控」${JSON.stringify(H?.link)}，右边应到 ${R}`);
+    if (!H?.live || !H.liveText.endsWith("更新") || !near(H.live.x + H.live.w, H.link.x - 8, 2))
+      homeFail(
+        "nas.live",
+        `更新时间「${H?.liveText}」${JSON.stringify(H?.live)}：在「NAS 监控」左边 8`,
+      );
+    if (H?.liveDot?.w !== 7 || H?.liveDot?.h !== 7) homeFail("nas.live.dot", "状态点 7×7");
+    if (
+      H?.othersText !== "另有 1 个来源" ||
+      !H?.others ||
+      !near(H.others.x + H.others.w, H.live.x - 8, 2)
+    )
+      homeFail("nas.others", `「${H?.othersText}」${JSON.stringify(H?.others)}：在更新时间左边 8`);
+
+    /* 卡：280,112 满宽；主机行 69 高（标志 40 在卡里 17,15；主机名 69,15；版本牌在主机名右边 8；型号、内存、运行时长在 39，隔 14） */
+    const C = H?.card;
+    hmBox("nas.card", C, { x: 280, y: 112, w: W });
+    hmBox("nas.host", rel(H?.host, C), { x: 1, y: 1, w: W - 2, h: 69 });
+    hmBox("nas.host.logo", rel(H?.logo, C), { x: 17, y: 15, w: 40, h: 40 });
+    hmBox("nas.host.title", rel(H?.hostTitle, C), { x: 69, y: 15, h: 21 });
+    if (H?.hostTitleText !== "truenas")
+      homeFail("nas.host.title", `主机名是「${H?.hostTitleText}」`);
+    if (
+      H?.verText !== "TrueNAS SCALE 25.04.1" ||
+      !H?.ver ||
+      !near(H.ver.x, H.hostTitle.x + H.hostTitle.w + 8, 2) ||
+      H.ver.h !== 20
+    )
+      homeFail(
+        "nas.host.ver",
+        `版本牌「${H?.verText}」${JSON.stringify(H?.ver)}：在主机名右边 8、20 高`,
+      );
+    const metaText = (H?.meta ?? []).map((x) => x.t).join("|");
+    if (metaText !== "Intel Core i5-12400 · 12 核|64.0 GB|已运行 18 天 18 小时")
+      homeFail("nas.host.meta", `主机行第二行是「${metaText}」`);
+    (H?.meta ?? []).forEach((x, i) => {
+      if (!near(x.y - C.y, 39, 2)) homeFail(`nas.host.meta[${i}]`, `y ${x.y - C.y}，应为 39`);
+      if (i > 0 && !near(x.x - (H.meta[i - 1].x + H.meta[i - 1].w), 14, 1))
+        homeFail(`nas.host.meta[${i}]`, "与前一项隔 14");
+    });
+    if (!H?.meta?.[0] || !near(H.meta[0].x - C.x, 69, 2))
+      homeFail("nas.host.meta[0]", "第一项从 69 起");
+    const facts = (H?.facts ?? []).map((x) => x.t).join("|");
+    if (facts !== "2 条严重告警|tank 已用 85%") homeFail("nas.facts", `主机行右边是「${facts}」`);
+    const lastFact = H?.facts?.[H.facts.length - 1];
+    if (!lastFact || !near(lastFact.x + lastFact.w, R - 17, 2) || !near(lastFact.y - C.y, 25, 2))
+      homeFail("nas.facts", `最后一个标签 ${JSON.stringify(lastFact)}：右边到 ${R - 17}、y 25`);
+
+    /* 数值卡：卡里 17,84 起四张一行、间距 12、158 高；图标 24 在 15,13，标签 47，大字 45（26px），副行 78，柱 104（34 高） */
+    const kw = (W - 70) / 4;
+    const kpiText = (k) => `${k.labelText}=${k.valText}（${k.asideText}）${k.subText}`;
+    const wantKpi = [
+      "CPU=26%（12 核）负载 3.7 · IO 等待 1.2% · 52 °C",
+      "内存=61%（共 64.0 GB）已用 39.2 GB · 可用 24.8 GB",
+      "网络=↓3.4 MB/s（enp3s0）上行 1.8 MB/s · 所有网卡合计",
+      "存储=75%（3 个存储池）已用 28.6 TB · 剩余 9.3 TB",
+    ];
+    if ((H?.kpis ?? []).length !== 4)
+      homeFail("nas.kpis", `数值卡 ${H?.kpis?.length} 张，应为 4 张`);
+    (H?.kpis ?? []).forEach((k, i) => {
+      const at = `nas.kpi[${i}]`;
+      hmBox(at, rel(k, C), { x: 17 + (kw + 12) * i, y: 84, w: kw, h: 158 }, 2);
+      hmBox(`${at}.ic`, rel(k.ic, k), { x: 15, y: 13, w: 24, h: 24 });
+      hmBox(`${at}.label`, rel(k.label, k), { x: 47 });
+      hmBox(`${at}.val`, rel(k.val, k), { x: 15, y: 45, w: kw - 30 });
+      hmBox(`${at}.sub`, rel(k.sub, k), { x: 15, y: 78, w: kw - 30, h: 16 });
+      if (k.valSize !== "26px") homeFail(`${at}.val`, `大字 ${k.valSize}，应为 26px`);
+      if (kpiText(k) !== wantKpi[i])
+        homeFail(`${at}.text`, `是「${kpiText(k)}」，应为「${wantKpi[i]}」`);
+      if (k.subClip > 0 || k.asideClip > 0)
+        homeFail(`${at}.clip`, `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`);
+      if (i < 3) hmBox(`${at}.bars`, rel(k.bars, k), { x: 15, y: 104, w: kw - 30, h: 34 });
+      else {
+        /* 存储卡：分段条 108（12 高），三段按容量，图例 132 */
+        hmBox(`${at}.seg`, rel(k.seg, k), { x: 15, y: 108, w: kw - 30, h: 12 });
+        hmBox(`${at}.legend`, rel(k.legend, k), { x: 15, y: 132 });
+        if (k.segs.length !== 3)
+          homeFail(`${at}.seg`, `分段 ${k.segs.length} 段，应为三个池各一段`);
+      }
+    });
+
+    /* 第二行：卡里 17,254 起，存储池 : 硬盘 : 告警 = 1.1 : 1 : 1、间距 12、一样高；块头在块里 15,13 */
+    const row = H?.row;
+    hmBox("nas.row", rel(row, C), { x: 17, y: 254, w: W - 34 });
+    const blkKeys = (H?.blks ?? []).map((b) => b.key).join("|");
+    if (blkKeys !== "pools|disks|alerts") homeFail("nas.blocks", `第二行是「${blkKeys}」`);
+    const unit = (W - 34 - 24) / 3.1;
+    let bx = row?.x ?? 0;
+    (H?.blks ?? []).forEach((b, i) => {
+      const bw = (i === 0 ? 1.1 : 1) * unit;
+      hmBox(`nas.blk[${i}]`, b, { x: bx, y: row?.y, w: bw, h: row?.h }, 2);
+      hmBox(`nas.blk[${i}].head`, rel(b.head, b), { x: 15, y: 13, h: 18 });
+      bx += bw + 12;
+    });
+    const [pb, db, ab] = H?.blks ?? [];
+    /* 存储池：每个池一行（从块里 39 起、71 高），百分比右边到块里 w − 15，条 7 高；≥ 80% 写「快满了」 */
+    if ((H?.pools ?? []).length !== 3)
+      homeFail("nas.pools", `存储池 ${H?.pools?.length} 个，假数据 3 个`);
+    (H?.pools ?? []).forEach((p, i) => {
+      hmBox(`nas.pool[${i}]`, rel(p, pb), { x: 15, y: 39 + 71 * i, w: pb.w - 30 }, 2);
+      hmBox(`nas.pool[${i}].bar`, rel(p.bar, p), { x: 0, w: pb.w - 30, h: 7 });
+      if (!p.pct || !near(p.pct.x + p.pct.w - pb.x, pb.w - 15, 2))
+        homeFail(
+          `nas.pool[${i}].pct`,
+          `百分比 ${JSON.stringify(p.pct)}，右边应到块里 ${pb.w - 15}`,
+        );
+    });
+    const poolText = (H?.pools ?? [])
+      .map((p) => `${p.name} ${p.pill} ${p.pctText} ${p.sub}`)
+      .join("|");
+    if (
+      poolText !==
+      "tank ONLINE 85% 已用 24.7 TB · 共 28.9 TB · 4 块硬盘 · 快满了|fast ONLINE 33% 已用 614 GB · 共 1.8 TB · 2 块硬盘|backup ONLINE 46% 已用 3.3 TB · 共 7.2 TB · 2 块硬盘"
+    )
+      homeFail("nas.pools.text", `存储池是「${poolText}」`);
+    /* 硬盘：方块三列、间距 8、81 高，从块里 15,39 起；sdc 52 °C 到提醒线，nvme1n1 没有温度 */
+    const tw = ((db?.w ?? 0) - 30 - 16) / 3;
+    if ((H?.tiles ?? []).length !== 8)
+      homeFail("nas.disks", `硬盘方块 ${H?.tiles?.length} 个，假数据 8 块`);
+    (H?.tiles ?? []).forEach((t, i) =>
+      hmBox(
+        `nas.disk[${i}]`,
+        rel(t, db),
+        { x: 15 + (tw + 8) * (i % 3), y: 39 + 89 * Math.floor(i / 3), w: tw, h: 81 },
+        2,
+      ),
+    );
+    const tiles = (H?.tiles ?? []).map((t) => `${t.name}=${t.temp}${t.warn ? "!" : ""}`).join("|");
+    if (
+      tiles !==
+      "sda=38°C|sdb=41°C|sdc=52°C!|sdd=40°C|nvme0n1=47°C|nvme1n1=没有温度|sde=36°C|sdf=37°C"
+    )
+      homeFail("nas.disks.text", `硬盘是「${tiles}」`);
+    if (!db?.headText?.includes("最高 52 °C · sdc"))
+      homeFail("nas.disks.head", `块头是「${db?.headText}」`);
+    (H?.tiles ?? []).forEach((t, i) => {
+      if (t.clip > 0)
+        homeFail(`nas.disk[${i}].clip`, `「${t.name}」的名字或类型容量被截断 ${t.clip}px`);
+    });
+    /* 告警：三个计数块（34 高、间距 8）、最新三条（30 高）、底下是应用那一行（贴着块底 15） */
+    const cw3 = ((ab?.w ?? 0) - 30 - 16) / 3;
+    (H?.acounts ?? []).forEach((c, i) =>
+      hmBox(
+        `nas.alert.count[${i}]`,
+        rel(c, ab),
+        { x: 15 + (cw3 + 8) * i, y: 39, w: cw3, h: 34 },
+        2,
+      ),
+    );
+    const counts = (H?.acounts ?? []).map((c) => c.t).join("|");
+    if (counts !== "2严重|1警告|4信息") homeFail("nas.alert.counts", `计数是「${counts}」`);
+    (H?.arows ?? []).forEach((r, i) =>
+      hmBox(`nas.alert.row[${i}]`, rel(r, ab), { x: 15, y: 81 + 30 * i, w: ab.w - 30, h: 30 }, 2),
+    );
+    const arows = (H?.arows ?? []).map((r) => r.t).join("|");
+    if (arows !== "Rsync 任务「每日备份」失败|应用目录同步失败|Rsync 任务「相册」成功")
+      homeFail("nas.alert.rows", `最新三条是「${arows}」`);
+    if (!H?.apps || !near(ab.y + ab.h - (H.apps.y + H.apps.h), 15, 2))
+      homeFail("nas.apps", `应用那一行 ${JSON.stringify(H?.apps)}：底边离块底 15`);
+    if (H?.appsText !== "应用 运行中 5 个 · 共 6 个 · 1 个可更新")
+      homeFail("nas.apps.text", `应用那一行是「${H?.appsText}」`);
+    if (C && row && !near(C.y + C.h - (row.y + row.h), 17, 2))
+      homeFail("nas.card.bottom", `第二行底下到卡底 ${C.y + C.h - (row.y + row.h)}，应为 17`);
+
+    /* 媒体区块整体在 NAS 概览下面 16：画板 02 的 y 全部加 dy；内容宽少了 sb，五张、三张、七张按 1134 平分 */
+    const dy = H ? H.y + H.h + 16 - 80 : 0;
+    hmBox("today.title", m.today?.title, { x: 280, y: 80 + dy, h: 21 });
+    if (m.today?.countText !== "5 集") homeFail("today.count", `计数是「${m.today?.countText}」`);
+    if (
+      !m.today?.link ||
+      !near(m.today.link.x + m.today.link.w, R, 2) ||
+      m.today.linkText !== "看日历"
+    )
+      homeFail("today.link", `「看日历」${JSON.stringify(m.today?.link)}，右边应到 ${R}`);
+    if (m.tcs.length !== 5) homeFail("today.cards", `今天播出有 ${m.tcs.length} 张卡，假数据 5 张`);
+    const tcw = (W - 64) / 5;
+    m.tcs.forEach((c, i) => {
+      hmBox(`today.card[${i}]`, c, { x: 280 + (tcw + 16) * i, y: 112 + dy, w: tcw, h: 200 });
+      hmBox(`today.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: tcw, h: 122 }, 2);
+      hmBox(`today.card[${i}].state`, rel(c.state, c), { x: 8, y: 8, h: 20 }, 2);
+      if (c.time) {
+        const t = rel(c.time, c);
+        if (!near(t.x + t.w, tcw - 8, 2) || !near(t.y + t.h, 114, 2) || t.h !== 20)
+          homeFail(
+            `today.card[${i}].time`,
+            `时刻牌 ${JSON.stringify(t)}：右下各留 8（右边 ${tcw - 8}、底 114）`,
+          );
+      } else homeFail(`today.card[${i}].time`, "按播出时间追剧的卡要有时刻牌");
+      hmBox(`today.card[${i}].title`, rel(c.title, c), { x: 12, y: 132 }, 2);
+      hmBox(`today.card[${i}].sub`, rel(c.sub, c), { x: 12, y: 152 }, 2);
+      hmBox(`today.card[${i}].act`, rel(c.act, c), { x: 12, y: 172 }, 2);
+    });
+    const acts = m.tcs.map((c) => c.actText).join("|");
+    if (acts !== "播出后 2 小时开始搜|播放|下载中，预计 12 分钟|搜资源|播放")
+      homeFail("today.acts", `动作行是「${acts}」`);
+    if (m.rowScroll > 0)
+      homeFail("today.fit", `五张卡一行放不下（多 ${m.rowScroll}px）：有滚动条时卡要缩到 ${tcw}`);
+
+    /* 待处理条：满宽 48；图标 16,16、标题 40、计数 92、chip 从 132 起 h26 间距 8、「全部」右边到 W − 16 */
+    hmBox("todo", m.todo, { x: 280, y: 328 + dy, w: W, h: 48 });
+    hmBox("todo.icon", rel(m.todoIcon, m.todo), { x: 16, y: 16, w: 16, h: 16 }, 2);
+    hmBox("todo.title", rel(m.todoTitle, m.todo), { x: 40 }, 2);
+    hmBox("todo.count", rel(m.todoCount, m.todo), { x: 92, y: 15, h: 18 }, 2);
+    if (m.chips.length !== 6)
+      homeFail("todo.chips", `待处理有 ${m.chips.length} 个 chip，假数据 6 类`);
+    m.chips.forEach((c, i) => {
+      const r = rel(c, m.todo);
+      if (i === 0) hmBox("todo.chip[0]", r, { x: 132, y: 11, h: 26 }, 2);
+      else {
+        const prev = m.chips[i - 1];
+        if (!near(c.x - (prev.x + prev.w), 8, 1) || !near(r.y, 11, 1) || c.h !== 26)
+          homeFail(`todo.chip[${i}]`, `「${c.t}」${JSON.stringify(r)}：同一行、间距 8、h26`);
+      }
+    });
+    const all = rel(m.todoAll, m.todo);
+    if (!all || !near(all.x + all.w, W - 16, 2))
+      homeFail("todo.all", `「全部」${JSON.stringify(all)}，右边应到 ${W - 16}`);
+
+    /* 两栏：左栏 W − 368 − 16、右栏 368，都从 392 + dy 起 */
+    const LW = W - 368 - 16;
+    hmBox("resume.title", m.resume?.title, { x: 280, y: 392 + dy, h: 21 });
+    if (m.resume?.tag !== "Jellyfin · admin")
+      homeFail("resume.tag", `身份 chip 是「${m.resume?.tag}」`);
+    if (
+      !m.resume?.link ||
+      !near(m.resume.link.x + m.resume.link.w, 280 + LW, 2) ||
+      m.resume.linkText !== "在 Jellyfin 打开"
+    )
+      homeFail(
+        "resume.link",
+        `「在 Jellyfin 打开」${JSON.stringify(m.resume?.link)}，右边应到 ${280 + LW}`,
+      );
+    if (m.rcs.length !== 3)
+      homeFail("resume.cards", `继续观看有 ${m.rcs.length} 张卡，假数据 3 张`);
+    const rcw = (LW - 34) / 3;
+    m.rcs.forEach((c, i) => {
+      hmBox(`resume.card[${i}]`, c, { x: 280 + (rcw + 17) * i, y: 424 + dy, w: rcw, h: 182 }, 2);
+      hmBox(`resume.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: rcw - 2, h: 136 }, 2);
+      hmBox(
+        `resume.card[${i}].play`,
+        rel(c.play, c),
+        { x: (rcw - 40) / 2, y: 48, w: 40, h: 40 },
+        2,
+      );
+      hmBox(`resume.card[${i}].track`, rel(c.track, c), { x: 0, y: 132, w: rcw - 2, h: 4 }, 2);
+      hmBox(`resume.card[${i}].title`, rel(c.title, c), { x: 12, y: 145 }, 2);
+      hmBox(`resume.card[${i}].sub`, rel(c.sub, c), { x: 12, y: 163 }, 2);
+    });
+    hmBox("recent.title", m.recent?.title, { x: 280, y: 626 + dy, h: 21 });
+    if (m.recent?.countText !== "今天 7")
+      homeFail("recent.count", `计数是「${m.recent?.countText}」`);
+    const pw = (LW - 72) / 7;
+    const shownPosters = m.pcs.filter((c) => c.y === m.pcs[0]?.y && c.x + c.w <= 280 + LW + 1);
+    if (shownPosters.length !== 7)
+      homeFail("recent.posters", `一行放得下的海报 ${shownPosters.length} 张，应为 7 张`);
+    m.pcs.slice(0, 7).forEach((c, i) => {
+      hmBox(
+        `recent.poster[${i}]`,
+        rel(c.poster, { x: 0, y: 0 }),
+        { x: 280 + (pw + 12) * i, y: 658 + dy, w: pw, h: pw * 1.5 },
+        2,
+      );
+      hmBox(`recent.poster[${i}].q`, rel(c.q, c), { x: 6, y: 6, h: 17 }, 2);
+      hmBox(`recent.poster[${i}].title`, rel(c.title, c), { x: 0, y: pw * 1.5 + 6, w: pw }, 2);
+      hmBox(`recent.poster[${i}].sub`, rel(c.sub, c), { x: 0, y: pw * 1.5 + 24 }, 2);
+    });
+    hmBox("week", m.week, { x: 280, y: 864 + dy, w: LW, h: 116 });
+    if (m.week?.headText !== "这周还要播") homeFail("week.head", `卡头是「${m.week?.headText}」`);
+    if (m.wks.length !== 4) homeFail("week.cols", `这周还要播有 ${m.wks.length} 列，假数据 4 条`);
+    const colW = (LW - 16) / 4;
+    m.wks.forEach((c, i) => {
+      hmBox(`week.col[${i}].date`, rel(c.date, m.week), { x: 16 + colW * i, y: 42 }, 2);
+      hmBox(`week.col[${i}].title`, rel(c.title, m.week), { x: 16 + colW * i, y: 60 }, 2);
+      hmBox(`week.col[${i}].note`, rel(c.note, m.week), { x: 16 + colW * i, y: 80 }, 2);
+      if (i === 0 && c.line) homeFail("week.col[0].rule", "第一列前不要竖线");
+      if (i > 0 && (!c.line || c.line.left !== "-12px" || c.line.h !== "52px"))
+        homeFail(`week.col[${i}].rule`, `竖线 ${JSON.stringify(c.line)}：在文字左边 12、52 高`);
+    });
+
+    /* 右栏（home-nas-spec.md §4）：下载器、存储、状态三个区块，标题 21 高、到卡顶 32，区块间 20 */
+    const S = m.side;
+    hmBox("side", S, { x: R - 368, y: 392 + dy, w: 368 }, 2);
+    const secs = (S?.secs ?? [])
+      .map((x) => `${x.titleText}（${x.countText}）${x.linkText}`)
+      .join("|");
+    if (secs !== "下载器（2 台）任务列表|存储（下载盘与媒体库）|状态（）系统体检")
+      homeFail("side.secs", `右栏是「${secs}」`);
+    (S?.secs ?? []).forEach((x, i) => {
+      hmBox(`side.sec[${i}].title`, x.title, { x: R - 368, h: 21 }, 2);
+      hmBox(`side.sec[${i}].card`, x.card, { x: R - 368, y: x.title.y + 32, w: 368 }, 2);
+      if (x.link && !near(x.link.x + x.link.w, R, 2))
+        homeFail(
+          `side.sec[${i}].link`,
+          `「${x.linkText}」${JSON.stringify(x.link)}，右边应到 ${R}`,
+        );
+      const prev = S.secs[i - 1];
+      if (prev && !near(x.y - (prev.y + prev.h), 20, 1))
+        homeFail(`side.sec[${i}]`, `与上一个区块隔 ${x.y - (prev.y + prev.h)}，应为 20`);
+    });
+    const [dlSec, stSec, lnSec] = S?.secs ?? [];
+    const DC = dlSec?.card;
+    /* 下载器卡：两列速度（17、192，标签 14、大字 32、柱 59 高 26）；下面各台下载器一行 26（圆点 17,120，名字 31,114，速度右边到 351） */
+    m.speedCols.forEach((c, i) => {
+      const x = i === 0 ? 17 : 192;
+      hmBox(`dl.speed[${i}].icon`, rel(c.icon, DC), { x, y: 14, w: 14, h: 14 }, 2);
+      hmBox(`dl.speed[${i}].label`, rel(c.label, DC), { x: x + 20, y: 14 }, 2);
+      hmBox(`dl.speed[${i}].value`, rel(c.value, DC), { x, y: 32 }, 2);
+      hmBox(`dl.speed[${i}].bars`, rel(c.bars, DC), { x, y: 59, w: 159, h: 26 }, 2);
+    });
+    const labels = m.speedCols.map((c) => c.labelText).join("|");
+    if (labels !== "下载 · 下载中 4|上传 · 做种 1,284")
+      homeFail("dl.speed.labels", `标签是「${labels}」`);
+    if (m.dls.length !== 2) homeFail("dl.rows", `下载器 ${m.dls.length} 台，假数据 2 台`);
+    m.dls.forEach((d, i) => {
+      hmBox(`dl.row[${i}].dot`, rel(d.dot, DC), { x: 17, y: 120 + 26 * i, w: 7, h: 7 }, 2);
+      hmBox(`dl.row[${i}].name`, rel(d.name, DC), { x: 31, y: 114 + 26 * i }, 2);
+      const sp = rel(d.speed, DC);
+      if (!sp || !near(sp.x + sp.w, 351, 2))
+        homeFail(`dl.row[${i}].speed`, `速度 ${JSON.stringify(sp)}，右边应到 351`);
+    });
+    /* 存储卡：每块盘一行 42（名字 17,13 + 42i，条 35 + 42i、334×5，剩余右边到 351） */
+    const SC = stSec?.card;
+    if (m.disks.length !== 3) homeFail("disks", `存储有 ${m.disks.length} 块盘，假数据 3 块`);
+    const diskNames = m.disks.map((d) => d.nameText).join("|");
+    if (diskNames !== "下载盘 · qb、tr /downloads|媒体库 · 电影 /media|媒体库 · 剧集 /tv")
+      homeFail("disks.names", `盘的名字是「${diskNames}」（名字与路径之间要有空格）`);
+    m.disks.forEach((d, i) => {
+      hmBox(`disk[${i}].name`, rel(d.name, SC), { x: 17, y: 13 + 42 * i }, 2);
+      hmBox(`disk[${i}].bar`, rel(d.bar, SC), { x: 17, y: 35 + 42 * i, w: 334, h: 5 }, 2);
+      const f = rel(d.free, SC);
+      if (!f || !near(f.x + f.w, 351, 2))
+        homeFail(`disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到 351`);
+    });
+    /* 状态卡：三行各 52（图标 28 在 17,13，标题 55,9，说明 55,28，右侧右边到 351） */
+    const LC = lnSec?.card;
+    if (m.lines.length !== 3)
+      homeFail("lines", `状态行有 ${m.lines.length} 条，应是体检、备份、媒体服务器`);
+    m.lines.forEach((l, i) => {
+      const y = 52 * i;
+      hmBox(`line[${i}]`, rel(l, LC), { x: 1, y: y + 1, h: 52 }, 2);
+      hmBox(`line[${i}].icon`, rel(l.icon, LC), { x: 17, y: y + 13, w: 28, h: 28 }, 2);
+      hmBox(`line[${i}].title`, rel(l.title, LC), { x: 55, y: y + 9 }, 2);
+      hmBox(`line[${i}].desc`, rel(l.desc, LC), { x: 55, y: y + 28 }, 2);
+      const rt = rel(l.right, LC);
+      if (!rt || !near(rt.x + rt.w, 351, 2))
+        homeFail(`line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到 351`);
+    });
+    const titles = m.lines.map((l) => l.titleText).join("|");
+    if (titles !== "体检：13 项通过，1 项提醒|备份：3 天没成功|Jellyfin 12.2 · 14:00 同步")
+      homeFail("lines.titles", `状态行标题是「${titles}」`);
+
+    /* 探针：「全部」打开右侧 440 宽的抽屉，一件事一行；点一个去别的页面的 chip，地址带着筛选 */
+    const drawer = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        document.querySelector('[data-testid="hm-todo-all"]')?.click();
+        let d = null;
+        for (let i = 0; i < 20; i++) {
+          await wait(100);
+          d = [...document.querySelectorAll('.hm-todo-drawer')].find((e) => e.getBoundingClientRect().width > 0);
+          if (d) break;
+        }
+        if (!d) return 'no-drawer';
+        await wait(400);
+        const r = d.getBoundingClientRect();
+        const rows = d.querySelectorAll('.hm-row').length;
+        const acts = [...d.querySelectorAll('.hm-row .el-button')].map((b) => (b.textContent ?? '').trim()).join(',');
+        const over = d.scrollWidth - d.clientWidth;
+        d.querySelector('.el-drawer__close-btn')?.click();
+        await wait(500);
+        const ok = Math.round(r.width) === 440 && Math.round(r.right) === innerWidth && rows === 7 && acts.includes('处理,忽略') && over <= 0;
+        return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 宽 ' + Math.round(r.width) + ' 右 ' + Math.round(r.right) + ' 行 ' + rows + ' 按钮 ' + acts + ' 溢出 ' + over;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(drawer, "verdict=ok").length > 0)
+      homeFail("probe.drawer", `待处理抽屉：${drawer}`);
+    const chip = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        document.querySelector('[data-testid="hm-chip-organize_failed"]')?.click();
+        for (let i = 0; i < 20 && !location.hash.startsWith('#/media/history'); i++) await wait(100);
+        const at = location.hash;
+        history.back();
+        for (let i = 0; i < 20 && !location.hash.startsWith('#/home'); i++) await wait(100);
+        return 'verdict=' + (at === '#/media/history?status=failed' ? 'ok' : 'MISMATCH') + ' ' + at;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(chip, "verdict=ok").length > 0)
+      homeFail("probe.chip", `「整理失败」chip：${chip}`);
+  }
+  for (const err of [...new Set(consoleErrors)].slice(0, 3)) homeFail("console", err);
+
+  /*
+   * ---- 1200×900：内容 894（< 1100 且 ≤ 1080）：右栏落到左栏下面、占满宽；
+   * NAS 概览的数值卡仍是四张一行（卡里窄到 210 以下，副行换成短的），第二行两列、告警一块跨两列 ----
+   */
+  consoleErrors = [];
+  if (await openHome({ width: 1200, height: 900, mobile: false })) {
+    const m = await ev(MEASURE_HM);
+    await shot("home-1200");
+    const W = 1200 - 264 - 32 - m.sb;
+    const weekBottom = m.week ? m.week.y + m.week.h : 0;
+    hmBox("@1200 side", m.side, { x: 280, w: W }, 2, "@1200");
+    if (m.side && !near(m.side.y - weekBottom, 16, 2))
+      homeFail(
+        "@1200 side",
+        `右栏的顶 ${m.side.y} 到这周还要播的底 ${weekBottom} 应隔 16`,
+        "@1200",
+      );
+    hmBox("@1200 week", m.week, { x: 280, w: W }, 2, "@1200");
+    hmBox("@1200 nas.card", m.hn?.card, { x: 280, w: W }, 2, "@1200");
+    const kw = (W - 70) / 4;
+    const shorts = (m.hn?.kpis ?? []).map((k) => k.subText).join("|");
+    if (shorts !== "负载 3.7 · 52 °C|已用 39.2 GB|上行 1.8 MB/s|剩余 9.3 TB")
+      homeFail(
+        "@1200 nas.kpi.sub",
+        `卡宽 ${kw}（里面窄到 210 以下）时副行是「${shorts}」`,
+        "@1200",
+      );
+    (m.hn?.kpis ?? []).forEach((k, i) => {
+      hmBox(`@1200 nas.kpi[${i}]`, k, { x: 297 + (kw + 12) * i, w: kw }, 2, "@1200");
+      if (k.subClip > 0 || k.asideClip > 0)
+        homeFail(
+          `@1200 nas.kpi[${i}].clip`,
+          `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`,
+          "@1200",
+        );
+    });
+    const row = m.hn?.row;
+    const [pb, db, ab] = m.hn?.blks ?? [];
+    const half = row ? (row.w - 12) / 2 : 0;
+    hmBox("@1200 nas.blk[0]", pb, { x: row?.x, y: row?.y, w: half }, 2, "@1200");
+    hmBox("@1200 nas.blk[1]", db, { x: (row?.x ?? 0) + half + 12, y: row?.y, w: half }, 2, "@1200");
+    if (pb && db && pb.h !== db.h) homeFail("@1200 nas.blk[0]", "存储池与硬盘两块一样高", "@1200");
+    hmBox(
+      "@1200 nas.blk[2]",
+      ab,
+      { x: row?.x, y: pb ? pb.y + pb.h + 12 : 0, w: row?.w },
+      2,
+      "@1200",
+    );
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      homeFail("@1200 overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`, "@1200");
+    /* 今天播出一行排不下：横向滚，两端有翻页按钮，点「下一页」往后滚 */
+    const page = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const row = document.querySelector('[data-testid="hm-today-row"]');
+        const next = document.querySelector('[data-testid="hm-today-next"]');
+        if (!row || !next) return 'no-pager ' + Boolean(row) + ' ' + Boolean(next);
+        const s0 = row.scrollLeft;
+        next.click();
+        await wait(900);
+        const s1 = row.scrollLeft;
+        const prev = Boolean(document.querySelector('[data-testid="hm-today-prev"]'));
+        const rows = new Set([...row.querySelectorAll('.hm-tc')].map((c) => Math.round(c.getBoundingClientRect().top))).size;
+        return 'verdict=' + (s1 > s0 && prev && rows === 1 ? 'ok' : 'MISMATCH') + ' 滚 ' + s0 + '→' + s1 + ' 上一页 ' + prev + ' 行 ' + rows;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(page, "verdict=ok").length > 0)
+      homeFail("@1200 probe.pager", `今天播出翻页：${page}`, "@1200");
+  } else homeFail("@1200 load", "1200 下首页没读到数据", "@1200");
+  for (const err of [...new Set(consoleErrors)].slice(0, 3))
+    homeFail("@1200 console", err, "@1200");
+
+  /* ---- 手机 375×812（画板 07）：区块标题 16,y；标题顶到内容顶 32；块与块之间统一 24（偏离 ④） ---- */
+  consoleErrors = [];
+  if (!(await openHome({ width: 375, height: 812, mobile: true }))) {
+    homeFail("load", "手机上首页没读到数据", "@375");
+  } else {
+    const m = await ev(MEASURE_HM);
+    if (process.env.HM_DUMP) console.log(JSON.stringify(m, null, 1));
+    await shotFull("home-375", { width: 375, height: 812, mobile: true });
+    const fail = (k, msg) => homeFail(k, msg, "@375");
+    const box = (k, got, want, tol = 2) => hmBox(k, got, want, tol, "@375");
+    /* 无头 Chrome 的竖向滚动条占 sb（画板按没有滚动条画）：卡宽 343 − sb，右边 359 − sb，卡里右边 329 − sb */
+    const sb = m.sb;
+    const cw = 343 - sb;
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      fail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+    if (m.mheadSub !== "今天 5 集播出 · 7 件事要处理")
+      fail("head.sub", `顶栏副标题是「${m.mheadSub}」（画板 07 不写入库的那段）`);
+    if (m.refresh) fail("head.refresh", "手机上页头不放「刷新」（在页面底部）");
+    if (!m.mrefresh) fail("refresh", "手机上页面底部要有「刷新」");
+    const sec = (k, s, y) => {
+      box(`${k}.title`, s?.title, { x: 16, y, h: 21 });
+      if (s?.link && !near(s.link.x + s.link.w, 359 - sb, 2))
+        fail(`${k}.link`, `文字链 ${JSON.stringify(s.link)}，右边应到 ${359 - sb}`);
+    };
+    /*
+     * NAS 概览在最上面（home-nas-spec.md §5）：标题 16,68，卡 16,100 宽 cw；主机行在卡里 15 起、标志 34；
+     * 数值卡 2×2（间距 8、126 高，大字 22px、柱 22 高，副行写短的）；第二行只有存储池；告警与硬盘各一行摘要（38 高、间距 10）
+     */
+    const H = m.hn;
+    box("nas.title", H?.title, { x: 16, y: 68, h: 21 });
+    if (H?.linkText !== "NAS 监控" || !H?.link || !near(H.link.x + H.link.w, 359 - sb, 2))
+      fail("nas.link", `「NAS 监控」${JSON.stringify(H?.link)}，右边应到 ${359 - sb}`);
+    if (H?.others) fail("nas.others", "手机上标题行不写其余来源（在 NAS 监控里看）");
+    if (!H?.live || !near(H.live.x + H.live.w, H.link.x - 8, 2))
+      fail("nas.live", `更新时间 ${JSON.stringify(H?.live)}：在「NAS 监控」左边 8`);
+    const C = H?.card;
+    box("nas.card", C, { x: 16, y: 100, w: cw });
+    box("nas.host", rel(H?.host, C), { x: 1, y: 1, w: cw - 2 });
+    box("nas.host.logo", rel(H?.logo, C), { x: 15, w: 34, h: 34 });
+    if (H?.facts?.length) fail("nas.facts", "手机上主机行右边不放标签");
+    const kw = (cw - 38) / 2;
+    const hostBottom = H?.host ? H.host.y + H.host.h : 0;
+    (H?.kpis ?? []).forEach((k, i) => {
+      const y0 = hostBottom + 12 + (126 + 8) * Math.floor(i / 2);
+      box(`nas.kpi[${i}]`, k, { x: 16 + 15 + (kw + 8) * (i % 2), y: y0, w: kw, h: 126 });
+      box(`nas.kpi[${i}].ic`, rel(k.ic, k), { x: 13, y: 11, w: 22, h: 22 });
+      if (k.valSize !== "22px") fail(`nas.kpi[${i}].val`, `大字 ${k.valSize}，应为 22px`);
+      if (k.subClip > 0 || k.asideClip > 0)
+        fail(`nas.kpi[${i}].clip`, `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`);
+      if (i < 3) box(`nas.kpi[${i}].bars`, rel(k.bars, k), { x: 13, y: 93, w: kw - 26, h: 22 });
+      else if (k.legend) fail("nas.kpi[3].legend", "手机上存储卡不放图例");
+    });
+    const shortsM = (H?.kpis ?? []).map((k) => k.subText).join("|");
+    if (shortsM !== "负载 3.7 · 52 °C|已用 39.2 GB|上行 1.8 MB/s|剩余 9.3 TB")
+      fail("nas.kpi.sub", `手机上副行是「${shortsM}」`);
+    const blkM = (H?.blks ?? []).map((b) => b.key).join("|");
+    if (blkM !== "pools") fail("nas.blocks", `手机上第二行是「${blkM}」，只列存储池`);
+    const kLast = H?.kpis?.[3];
+    const pbM = H?.blks?.[0];
+    box("nas.pools", pbM, { x: 31, y: kLast ? kLast.y + kLast.h + 10 : 0, w: cw - 30 });
+    const sums = (H?.msums ?? []).map((x) => x.t).join("|");
+    if (sums !== "告警 2 严重 · 1 警告 · 4 信息|硬盘 8 块 · 最高 52 °C（sdc）")
+      fail("nas.msums", `摘要是「${sums}」`);
+    let my = pbM ? pbM.y + pbM.h + 10 : 0;
+    (H?.msums ?? []).forEach((x, i) => {
+      box(`nas.msum[${i}]`, x, { x: 31, y: my, w: cw - 30, h: 38 });
+      my = x.y + x.h + 10;
+    });
+    const lastSum = H?.msums?.[H.msums.length - 1];
+    if (C && lastSum && !near(C.y + C.h - (lastSum.y + lastSum.h), 15, 2))
+      fail("nas.card.bottom", `最后一行摘要到卡底 ${C.y + C.h - (lastSum.y + lastSum.h)}，应为 15`);
+    /* 下面是画板 07 的区块，整体在 NAS 概览下面 24 */
+    const dyM = H ? H.y + H.h + 24 - 68 : 0;
+    sec("today", m.today, 68 + dyM);
+    m.tcs.slice(0, 2).forEach((c, i) => {
+      box(`today.card[${i}]`, c, { x: 16 + 252 * i, y: 100 + dyM, w: 240, h: 196 });
+      box(`today.card[${i}].img`, rel(c.img, c), { x: 0, y: 0, w: 240, h: 135 });
+      box(`today.card[${i}].state`, rel(c.state, c), { x: 8, y: 8, h: 20 });
+      box(`today.card[${i}].title`, rel(c.title, c), { x: 12, y: 144 });
+      box(`today.card[${i}].sub`, rel(c.sub, c), { x: 12, y: 164 });
+    });
+    if (!m.tcs[0]?.subText?.includes("20:00 播出"))
+      fail("today.sub", `时刻要并进副行：「${m.tcs[0]?.subText}」`);
+    if (m.tcs.some((c) => c.act)) fail("today.acts", "手机上没有动作行（整张卡可点）");
+    if (m.dots.length !== 5) fail("today.dots", `翻页圆点 ${m.dots.length} 个，五张卡五个`);
+    else {
+      const x0 = Math.round((375 - sb) / 2 - 27);
+      m.dots.forEach((d, i) =>
+        box(`today.dot[${i}]`, d, { x: x0 + 12 * i, y: 304 + dyM, w: 6, h: 6 }, 2),
+      );
+    }
+    const dotsBottom = m.dots.length ? m.dots[0].y + m.dots[0].h : 0;
+    /* 待处理卡：343 宽，标题行在卡里；chip h30 从 14,42 起 */
+    box("todo", m.todo, { x: 16, w: cw });
+    if (m.todo && !near(m.todo.y - dotsBottom, 24, 2))
+      fail("todo.gap", `圆点的底 ${dotsBottom} 到待处理卡 ${m.todo.y} 应隔 24`);
+    box("todo.icon", rel(m.todoIcon, m.todo), { x: 14, y: 13, w: 16, h: 16 });
+    box("todo.title", rel(m.todoTitle, m.todo), { x: 38, y: 11 });
+    box("todo.count", rel(m.todoCount, m.todo), { x: 90, y: 11 });
+    const allM = rel(m.todoAll, m.todo);
+    if (!allM || !near(allM.x + allM.w, 329 - sb, 2) || !near(allM.y, 12, 2))
+      fail("todo.all", `「全部」${JSON.stringify(allM)}，右边到 ${329 - sb}、y 12`);
+    if (m.chips.length) {
+      box("todo.chip[0]", rel(m.chips[0], m.todo), { x: 14, y: 42, h: 30 });
+      const tops = [...new Set(m.chips.map((c) => c.y))].sort((a, b) => a - b);
+      for (let i = 1; i < tops.length; i++)
+        if (!near(tops[i] - tops[i - 1], 36, 1))
+          fail("todo.chips", `chip 的行距 ${tops[i] - tops[i - 1]}，应为 36`);
+      const last = Math.max(...m.chips.map((c) => c.y + c.h));
+      if (m.todo && !near(m.todo.y + m.todo.h - last, 8, 2))
+        fail("todo.bottom", `最后一行 chip 底下留 ${m.todo.y + m.todo.h - last}，应为 8`);
+      if (m.chips.some((c) => c.x + c.w > m.todo.x + 329 - sb + 1))
+        fail("todo.wrap", "chip 要在卡里右边 14 以内换行");
+    }
+    const todoBottom = m.todo ? m.todo.y + m.todo.h : 0;
+    sec("resume", m.resume, todoBottom + 24);
+    if (m.resume?.linkText !== "Jellyfin")
+      fail("resume.link", `手机上文字链只写服务器名：「${m.resume?.linkText}」`);
+    const rTop = m.resume?.title ? m.resume.title.y + 32 : 0;
+    m.rcs.slice(0, 1).forEach((c) => {
+      box("resume.card[0]", c, { x: 16, y: rTop, w: 240, h: 188 });
+      box("resume.card[0].img", rel(c.img, c), { x: 0, y: 0, w: 240, h: 135 });
+      box("resume.card[0].play", rel(c.play, c), { x: 100, y: 47, w: 40, h: 40 });
+      box("resume.card[0].track", rel(c.track, c), { x: 0, y: 131, w: 240, h: 4 });
+      box("resume.card[0].title", rel(c.title, c), { x: 12, y: 144 });
+      box("resume.card[0].sub", rel(c.sub, c), { x: 12, y: 163 });
+    });
+    if (m.rcs[1]) box("resume.card[1]", m.rcs[1], { x: 268, y: rTop, w: 240, h: 188 });
+    const resumeBottom = rTop + 188;
+    sec("recent", m.recent, resumeBottom + 24);
+    const pTop = m.recent?.title ? m.recent.title.y + 32 : 0;
+    m.pcs.slice(0, 3).forEach((c, i) => {
+      box(`recent.poster[${i}]`, rel(c.poster, { x: 0, y: 0 }), {
+        x: 16 + 112 * i,
+        y: pTop,
+        w: 100,
+        h: 150,
+      });
+      box(`recent.poster[${i}].title`, rel(c.title, c), { x: 0, y: 156, w: 100 });
+      box(`recent.poster[${i}].sub`, rel(c.sub, c), { x: 0, y: 174 });
+    });
+    const recentBottom = m.pcs[0] ? m.pcs[0].y + m.pcs[0].h : 0;
+    /* 这周还要播：标题在卡外（画板 07 的 week / title），卡 343 宽 */
+    sec("week", m.weekSec, recentBottom + 24);
+    if (m.weekSec?.linkText !== "看日历") fail("week.link", `文字链是「${m.weekSec?.linkText}」`);
+    const wc = m.week?.card;
+    box("week.card", wc, { x: 16, y: (m.weekSec?.title?.y ?? 0) + 32, w: cw, h: 208 });
+    m.wks.forEach((c, i) => {
+      box(`week.row[${i}]`, rel(c, wc), { x: 14, y: 52 * i, h: 52 }, 2);
+      box(`week.row[${i}].date`, rel(c.date, wc), { x: 14, y: 52 * i + 17 }, 2);
+      box(`week.row[${i}].title`, rel(c.title, wc), { x: 96, y: 52 * i + 9 }, 2);
+      box(`week.row[${i}].note`, rel(c.note, wc), { x: 96, y: 52 * i + 28 }, 2);
+    });
+    const weekBottom = wc ? wc.y + wc.h : 0;
+    /*
+     * 右栏的三个区块（home-nas-spec.md §5）：下载器、存储、状态，标题在卡外，在这周还要播下面 24、区块间 24；
+     * 下载器卡只有两列速度（不列各台下载器），存储列下载盘与媒体库各一块，状态三行各 48、没有说明行
+     */
+    const S = m.side;
+    const secsM = (S?.secs ?? [])
+      .map((x) => `${x.titleText}（${x.countText}）${x.linkText}`)
+      .join("|");
+    if (secsM !== "下载器（2 台）任务列表|存储（下载盘与媒体库）|状态（）系统体检")
+      fail("side.secs", `右栏是「${secsM}」`);
+    let sy = weekBottom + 24;
+    (S?.secs ?? []).forEach((x, i) => {
+      box(`side.sec[${i}].title`, x.title, { x: 16, y: sy, h: 21 });
+      box(`side.sec[${i}].card`, x.card, { x: 16, y: sy + 32, w: cw });
+      if (x.link && !near(x.link.x + x.link.w, 359 - sb, 2))
+        fail(
+          `side.sec[${i}].link`,
+          `「${x.linkText}」${JSON.stringify(x.link)}，右边应到 ${359 - sb}`,
+        );
+      sy = x.y + x.h + 24;
+    });
+    const [dlSecM, stSecM, lnSecM] = S?.secs ?? [];
+    const DC = dlSecM?.card;
+    const bw = (cw - 48) / 2;
+    m.speedCols.forEach((c, i) => {
+      const x = i === 0 ? 15 : 15 + bw + 18;
+      box(`dl.speed[${i}].icon`, rel(c.icon, DC), { x, y: 14, w: 14, h: 14 });
+      box(`dl.speed[${i}].label`, rel(c.label, DC), { x: x + 20, y: 14 });
+      box(`dl.speed[${i}].value`, rel(c.value, DC), { x, y: 32 });
+      box(`dl.speed[${i}].bars`, rel(c.bars, DC), { x, y: 59, w: bw, h: 24 });
+    });
+    if (m.speedCols.map((c) => c.labelText).join("|") !== "下载|上传")
+      fail(
+        "dl.speed.labels",
+        `手机上标签只写「下载」「上传」：「${m.speedCols.map((c) => c.labelText).join("|")}」`,
+      );
+    if (m.dlPart) fail("dl.rows", "手机上不列各台下载器");
+    const SC = stSecM?.card;
+    if (m.disks.length !== 2)
+      fail("disks", `手机上存储列 ${m.disks.length} 块，应是下载盘与媒体库盘各一块`);
+    m.disks.forEach((d, i) => {
+      box(`disk[${i}].name`, rel(d.name, SC), { x: 15, y: 12 + 42 * i });
+      box(`disk[${i}].bar`, rel(d.bar, SC), { x: 15, y: 34 + 42 * i, w: cw - 30, h: 5 });
+      const f = rel(d.free, SC);
+      if (!f || !near(f.x + f.w, cw - 15, 2))
+        fail(`disk[${i}].free`, `剩余 ${JSON.stringify(f)}，右边应到卡里 ${cw - 15}`);
+    });
+    const LCm = lnSecM?.card;
+    m.lines.forEach((l, i) => {
+      const y = 1 + 48 * i;
+      box(`line[${i}]`, rel(l, LCm), { y, h: 48 }, 2);
+      box(`line[${i}].icon`, rel(l.icon, LCm), { x: 15, y: y + 10, w: 28, h: 28 });
+      box(`line[${i}].title`, rel(l.title, LCm), { x: 53, y: y + 15 });
+      if (l.desc) fail(`line[${i}].desc`, "手机上状态行没有说明行");
+      const rt = rel(l.right, LCm);
+      if (!rt || !near(rt.x + rt.w, cw - 15, 2))
+        fail(`line[${i}].right`, `右侧 ${JSON.stringify(rt)}，右边应到卡里 ${cw - 15}`);
+    });
+    /* 探针：「全部」打开全屏的列表 */
+    const full = String(
+      await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        document.querySelector('[data-testid="hm-todo-all"]')?.click();
+        let d = null;
+        for (let i = 0; i < 20; i++) {
+          await wait(100);
+          d = [...document.querySelectorAll('.hm-todo-drawer')].find((e) => e.getBoundingClientRect().width > 0);
+          if (d) break;
+        }
+        if (!d) return 'no-drawer';
+        await wait(400);
+        const r = d.getBoundingClientRect();
+        const over = d.scrollWidth - d.clientWidth;
+        d.querySelector('.el-drawer__close-btn')?.click();
+        await wait(500);
+        return 'verdict=' + (Math.round(r.width) === innerWidth && over <= 0 ? 'ok' : 'MISMATCH') + ' 宽 ' + Math.round(r.width) + ' 溢出 ' + over;
+      })()`).catch((e) => `probe 失败：${e.message}`),
+    );
+    if (probeMiss(full, "verdict=ok").length > 0) fail("probe.drawer", `手机上「全部」：${full}`);
+  }
+  for (const err of [...new Set(consoleErrors)].slice(0, 3)) homeFail("console", err, "@375");
+
+  /* ---- 空态（1440 与 375）：今天播出、待处理、最近入库、这周还要播各写一句，继续观看整块不显示 ---- */
+  for (const [where, metrics] of [
+    ["@empty", { width: 1440, height: 1024, mobile: false }],
+    ["@empty375", { width: 375, height: 812, mobile: true }],
+  ]) {
+    consoleErrors = [];
+    if (!(await openHome(metrics, { empty: true }))) {
+      homeFail("load", "空态下首页没读到数据", where);
+      continue;
+    }
+    const m = await ev(MEASURE_HM);
+    await shotFull(`home-${where.slice(1)}`, metrics);
+    const fail = (k, msg) => homeFail(k, msg, where);
+    if (m.today?.empty !== "还没有追剧") fail("today.empty", `今天播出写的是「${m.today?.empty}」`);
+    if (m.today?.linkText !== "去探索")
+      fail("today.link", `没有追剧时文字链是「${m.today?.linkText}」`);
+    if (m.todoNote !== "没有要处理的事") fail("todo.empty", `待处理写的是「${m.todoNote}」`);
+    if (m.resume) fail("resume", "没连媒体服务器时继续观看整块不显示");
+    if (m.recent?.empty !== "最近没有入库")
+      fail("recent.empty", `最近入库写的是「${m.recent?.empty}」`);
+    if (m.today?.countText || m.recent?.countText)
+      fail(
+        "counts",
+        `没有数据时标题旁不写计数：「${m.today?.countText}」「${m.recent?.countText}」`,
+      );
+    if (m.weekEmpty !== "这周没有要播的集")
+      fail("week.empty", `这周还要播写的是「${m.weekEmpty}」`);
+    const titles = m.lines.map((l) => l.titleText).join("|");
+    if (titles !== "体检：没体检过|备份：每天定时备份关着|媒体服务器")
+      fail("lines", `状态行是「${titles}」`);
+    /* NAS 概览：一个能显示的来源都没有时是一张空状态卡（图标 48、标题、说明与「接入 NAS」），不画数据卡与更新时间 */
+    const H = m.hn;
+    if (H?.emptyTitle !== "还没有 NAS 监控来源")
+      fail("nas.empty", `空状态卡写的是「${H?.emptyTitle}」`);
+    if (!H?.emptySub?.startsWith("接入 TrueNAS 以后") || !H.emptySub.includes("本机来源已关闭"))
+      fail("nas.empty.sub", `说明是「${H?.emptySub}」`);
+    if (H?.emptyBtnText !== "接入 NAS") fail("nas.empty.btn", `按钮是「${H?.emptyBtnText}」`);
+    if (H?.card || H?.live || H?.countText)
+      fail("nas.empty", "没有来源时不画数据卡、更新时间与类型");
+    const mob = where === "@empty375";
+    hmBox(
+      "nas.empty.card",
+      H?.empty,
+      { x: mob ? 16 : 280, y: mob ? 100 : 112, w: (mob ? 343 : 1144) - m.sb },
+      2,
+      where,
+    );
+    hmBox("nas.empty.icon", rel(H?.emptyIcon, H?.empty), { w: 48, h: 48 }, 2, where);
+    const secsE = (m.side?.secs ?? []).map((x) => x.titleText).join("|");
+    if (secsE !== "下载器|存储|状态") fail("side.secs", `右栏是「${secsE}」`);
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      fail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
+  }
+  /*
+   * ---- 只有本机来源（1440，home-nas-spec.md §3）：网络一格换成下载器速度；第二行是存储（首页的下载盘与媒体库）
+   * 与一块虚线框「接入 NAS」；右栏不再列存储 ----
+   */
+  consoleErrors = [];
+  if (!(await openHome({ width: 1440, height: 1024, mobile: false }, { nas: "local" }))) {
+    homeFail("load", "只有本机来源时首页没读到数据", "@local");
+  } else {
+    const m = await ev(MEASURE_HM);
+    await shot("home-local");
+    const fail = (k, msg) => homeFail(k, msg, "@local");
+    const H = m.hn;
+    if (H?.countText !== "本机") fail("nas.title", `类型是「${H?.countText}」`);
+    if (H?.others) fail("nas.others", "只有本机来源时标题行不写其余来源");
+    if (H?.hostTitleText !== "pt-tools 所在主机" || H?.verText !== "Linux 6.12.15")
+      fail("nas.host", `主机行是「${H?.hostTitleText}」「${H?.verText}」`);
+    if (H?.facts?.length) fail("nas.facts", "本机来源不放提醒标签");
+    const heads = (H?.kpis ?? []).map((k) => `${k.labelText}（${k.asideText}）`).join("|");
+    if (heads !== "CPU（8 核）|内存（共 32.0 GB）|下载器速度（本机读不到网卡）|存储（所在的盘）")
+      fail("nas.kpis", `数值卡是「${heads}」`);
+    const netSub = H?.kpis?.[2]?.subText ?? "";
+    if (!/^上传 .+ · 所有下载器合计$/.test(netSub))
+      fail("nas.kpi[2].sub", `下载器速度的副行是「${netSub}」`);
+    (H?.kpis ?? []).forEach((k, i) => {
+      if (k.subClip > 0 || k.asideClip > 0)
+        fail(`nas.kpi[${i}].clip`, `文字被截断：副行多 ${k.subClip}px、右上角多 ${k.asideClip}px`);
+    });
+    const row = H?.row;
+    const keys = (H?.blks ?? []).map((b) => b.key).join("|");
+    if (keys !== "local-storage|local-more") fail("nas.blocks", `第二行是「${keys}」`);
+    const half = row ? (row.w - 12) / 2 : 0;
+    (H?.blks ?? []).forEach((b, i) =>
+      hmBox(
+        `nas.blk[${i}]`,
+        b,
+        { x: (row?.x ?? 0) + (half + 12) * i, y: row?.y, w: half, h: row?.h },
+        2,
+        "@local",
+      ),
+    );
+    const lrows = (H?.localRows ?? []).map((r) => r.name).join("|");
+    if (lrows !== "下载盘 · qb、tr /downloads|媒体库 · 电影 /media|媒体库 · 剧集 /tv")
+      fail("nas.local.rows", `存储列的是「${lrows}」`);
+    if (H?.localConnect !== "接入 NAS")
+      fail("nas.local.connect", `虚线框里的链接是「${H?.localConnect}」`);
+    const secsL = (m.side?.secs ?? []).map((x) => x.titleText).join("|");
+    if (secsL !== "下载器|状态")
+      fail("side.secs", `右栏是「${secsL}」（本机的存储已经画在 NAS 概览里）`);
+    if (m.overflow > 0 || m.innerOverflow > 0)
+      fail("overflow", `横向溢出 ${Math.max(m.overflow, m.innerOverflow)}px`);
+  }
+  for (const err of [...new Set(consoleErrors)].slice(0, 3)) homeFail("console", err, "@local");
+  await ev(
+    `localStorage.removeItem('pt-fixture-home-empty'); localStorage.removeItem('pt-fixture-home-nas')`,
+  ).catch(() => {});
+
+  /*
+   * ---- 系统体检（画板没有，照预览 system-check.html，首页 NAS 概览 H1）：1440 与 375 ----
+   * 总览卡一张；「需要处理」按失败、提醒排，「去处理」去对应页面；「全部检查项」十组按顺序、每项都在；
+   * 几何（问题卡网格、分组卡瀑布流、手机环形图 92 与 2×2 计数块）；文字换行不裁切；两个筛选；
+   * 动效：正常时卡片有动画与过渡，系统要求减少动态效果时 animationDuration 与 transitionDuration 都是 0s。
+   */
+  const SC_PROBS = "downloader:2,site:pttime,library:1,backup";
+  const SC_GO = "#/downloaders,#/sites/pttime,#/media/library,#/global";
+  const scMotion = (reduced) => `(() => {
+    const durs = (v) => v.split(',').map((s) => parseFloat(s) * (s.trim().endsWith('ms') ? 1 : 1000));
+    const cards = [...document.querySelectorAll('.sc-hero, .sc-prob, .sc-grp')];
+    const bad = [];
+    for (const el of cards) {
+      const cs = getComputedStyle(el);
+      const a = durs(cs.animationDuration);
+      const t = el.classList.contains('sc-hero') ? [] : durs(cs.transitionDuration);
+      const want = ${reduced} ? (d) => d === 0 : (d) => d > 0;
+      if (!a.every(want) || !t.every(want))
+        bad.push((el.dataset.testid || el.className) + ' ' + cs.animationDuration + ' / ' + cs.transitionDuration);
+    }
+    return { cards: cards.length, bad };
+  })()`;
+  for (const [where, metrics] of [
+    ["@check", { width: 1440, height: 1024, mobile: false }],
+    ["@check375", { width: 375, height: 812, mobile: true }],
+  ]) {
+    consoleErrors = [];
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { deviceScaleFactor: 1, ...metrics },
+      sessionId,
+    );
+    const loadCheck = async () => {
+      await goto(`${BASE}/#/system/check`);
+      await cdp.send("Page.reload", {}, sessionId);
+      await waitReady();
+      for (let i = 0; i < 40; i++) {
+        const ok = await ev(
+          `document.querySelectorAll('[data-testid^="sc-item-"]').length > 0`,
+        ).catch(() => false);
+        if (ok === true) break;
+        await sleep(250);
+      }
+      /* 卡片依次出现：等动画都放完（最多 3 秒）再量与截图 */
+      await ev(
+        `Promise.race([Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]).then(() => true)`,
+      ).catch(() => {});
+      await sleep(100);
+      return (
+        (await ev(`document.querySelectorAll('[data-testid^="sc-item-"]').length`).catch(() => 0)) >
+        0
+      );
+    };
+    const fail = (k, msg) => homeFail(k, msg, where);
+    if (!(await loadCheck())) {
+      fail("load", "系统体检没列出任何一项");
+      continue;
+    }
+    await shotFull(`system-${where.slice(1)}`, metrics);
+    const runSel =
+      where === "@check"
+        ? '#pt-head-acts [data-testid="sc-run"]'
+        : '.sc-mbar [data-testid="sc-run"]';
+    const got = await ev(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const box = (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+      };
+      const inner = document.querySelector('.pt-shell__inner');
+      /* 内容区按内容盒量：桌面 .pt-cards 有内边距，手机没有 */
+      const pageEl = document.querySelector('[data-testid="system-check"]');
+      const pcs = getComputedStyle(pageEl);
+      const pb = box(pageEl);
+      const page = {
+        x: pb.x + Math.round(parseFloat(pcs.paddingLeft)),
+        w: pb.w - Math.round(parseFloat(pcs.paddingLeft) + parseFloat(pcs.paddingRight)),
+      };
+      const heroes = [...document.querySelectorAll('[data-testid="sc-hero"]')];
+      const probs = [...document.querySelectorAll('.sc-prob')];
+      const groups = [...document.querySelectorAll('.sc-grp')];
+      const statuses = () => [...document.querySelectorAll('[data-testid^="sc-item-"]')]
+        .map((el) => [...el.classList].find((c) => c.startsWith('st-'))).join(',');
+      const clipped = [...document.querySelectorAll('.sc-prob__title, .sc-prob__detail, .sc-prob__hint, .sc-row__title, .sc-row__detail, .sc-prob, .sc-grp')]
+        .filter((el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
+        .map((el) => el.className.split(' ')[0]);
+      const over = Math.max(document.documentElement.scrollWidth - innerWidth,
+        inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0);
+      const ring = document.querySelector('.sc-ring');
+      const strip = document.querySelector('[data-testid="sc-strip"]');
+      const out = {
+        page,
+        heroes: heroes.length,
+        hero: heroes[0] ? box(heroes[0]) : null,
+        ringW: ring ? Math.round(ring.getBoundingClientRect().width) : 0,
+        tileYs: [...new Set([...document.querySelectorAll('[data-testid^="sc-tile-"]')].map((el) => box(el).y))].length,
+        stripOver: strip ? strip.scrollWidth - strip.clientWidth : 0,
+        probs: probs.map((el) => el.dataset.testid.slice(8)).join(','),
+        probBoxes: probs.map(box),
+        go: probs.map((el) => el.querySelector('[data-testid="sc-prob-go"]')?.getAttribute('href') ?? '').join(','),
+        hints: document.querySelectorAll('.sc-prob__hint').length,
+        groups: groups.map((el) => el.dataset.testid.slice(9)).join(','),
+        groupBoxes: groups.map(box),
+        items: document.querySelectorAll('[data-testid^="sc-item-"]').length,
+        run: Boolean(document.querySelector(${JSON.stringify(runSel)})),
+        clipped,
+        over,
+      };
+      const sw = document.querySelector('[data-testid="sc-filter"]');
+      sw?.click();
+      await wait(400);
+      out.onlyProblems = statuses();
+      sw?.click();
+      await wait(400);
+      document.querySelector('[data-testid="sc-tile-fail"]')?.click();
+      await wait(400);
+      out.onlyFail = statuses();
+      out.chip = (document.querySelector('[data-testid="sc-status-chip"]')?.textContent ?? '').trim();
+      document.querySelector('[data-testid="sc-tile-fail"]')?.click();
+      await wait(400);
+      out.restored = document.querySelectorAll('[data-testid^="sc-item-"]').length;
+      return out;
+    })()`);
+    if (got.heroes !== 1) fail("hero", `总览卡有 ${got.heroes} 张`);
+    else if (Math.abs(got.hero.w - got.page.w) > 1)
+      fail("hero.w", `总览卡宽 ${got.hero.w}，内容区宽 ${got.page.w}（应满宽）`);
+    if (got.ringW !== (metrics.mobile ? 92 : 148))
+      fail("ring", `环形图宽 ${got.ringW}，应为 ${metrics.mobile ? 92 : 148}`);
+    if (got.tileYs !== (metrics.mobile ? 2 : 1))
+      fail("tiles", `四个计数块排成 ${got.tileYs} 行（桌面一行，手机 2×2）`);
+    if (metrics.mobile && got.stripOver <= 0)
+      fail("strip", "手机上各组状态条没有横向滚动（十组放不下一行）");
+    if (got.probs !== SC_PROBS) fail("probs", `问题卡依次是「${got.probs}」，应为「${SC_PROBS}」`);
+    if (got.go !== SC_GO) fail("go", `「去处理」去的是「${got.go}」，应为「${SC_GO}」`);
+    if (got.hints !== 4)
+      fail("hints", `问题卡上「怎么修」有 ${got.hints} 条，假数据有问题的 4 项各一条`);
+    if (metrics.mobile) {
+      if (got.probBoxes.some((b) => Math.abs(b.w - got.page.w) > 1 || b.x !== got.probBoxes[0].x))
+        fail("probs.grid", "手机上问题卡不是满宽一列");
+      if (got.groupBoxes.some((b) => Math.abs(b.w - got.page.w) > 1 || b.x !== got.groupBoxes[0].x))
+        fail("groups.grid", "手机上分组卡不是满宽一列");
+    } else {
+      const cols = Math.max(1, Math.floor((got.page.w + 12) / 352));
+      const first = got.probBoxes.slice(0, cols);
+      if (first.some((b) => b.y !== first[0].y))
+        fail("probs.grid", `问题卡第一行没有排满 ${cols} 列`);
+      if (got.probBoxes.some((b) => b.w < 340 || Math.abs(b.w - got.probBoxes[0].w) > 1))
+        fail(
+          "probs.w",
+          `问题卡宽 ${got.probBoxes.map((b) => b.w).join("/")}（应一样宽、不小于 340）`,
+        );
+      const lefts = new Set(got.groupBoxes.map((b) => b.x));
+      if (lefts.size < 2)
+        fail("groups.cols", `分组卡只排了 ${lefts.size} 列（瀑布流，桌面至少两列）`);
+      if (got.groupBoxes.some((b) => b.w < 300))
+        fail("groups.w", `分组卡最窄 ${Math.min(...got.groupBoxes.map((b) => b.w))}px`);
+    }
+    if (got.groups !== "tmdb,sites,downloaders,servers,paths,libraries,disks,time,backup,secret")
+      fail("groups", `分组是「${got.groups}」`);
+    if (got.items !== 15) fail("items", `列了 ${got.items} 项，假数据 15 项`);
+    if (!got.run) fail("run", "「立即体检」不在该在的地方（桌面在页头，手机在总览卡里）");
+    if (got.clipped.length)
+      fail(
+        "clipped",
+        `有 ${got.clipped.length} 处文字被裁切（应换行）：${got.clipped.slice(0, 3).join("、")}`,
+      );
+    if (got.over > 0) fail("overflow", `横向溢出 ${got.over}px`);
+    if (got.onlyProblems !== "st-warn,st-fail,st-warn,st-warn")
+      fail("filter", `「只看有问题的」留下的是「${got.onlyProblems}」`);
+    if (got.onlyFail !== "st-fail" || got.chip !== "只看失败")
+      fail("tile.filter", `点「失败」计数块留下「${got.onlyFail}」、标签「${got.chip}」`);
+    if (got.restored !== 15) fail("tile.reset", `再点一次计数块后列了 ${got.restored} 项`);
+    const normal = await ev(scMotion(false));
+    if (!normal.cards || normal.bad.length)
+      fail(
+        "motion",
+        `正常时有卡片没有动画或过渡：${normal.bad.slice(0, 2).join("；") || "没有卡片"}`,
+      );
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
+
+    /* 系统要求减少动态效果：重新打开页面，卡片上没有动画与过渡 */
+    await cdp.send(
+      "Emulation.setEmulatedMedia",
+      { features: [{ name: "prefers-reduced-motion", value: "reduce" }] },
+      sessionId,
+    );
+    if (await loadCheck()) {
+      const reduced = await ev(scMotion(true));
+      if (!reduced.cards || reduced.bad.length)
+        fail(
+          "motion.reduced",
+          `减少动态效果时还有动画或过渡：${reduced.bad.slice(0, 2).join("；") || "没有卡片"}`,
+        );
+      if (where === "@check") await shotFull("system-check-reduced", metrics);
+    } else fail("motion.reduced", "减少动态效果时系统体检没列出任何一项");
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] }, sessionId);
+  }
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
 }
 
 // ------------------------------------------------- 登录页（画板 43）
@@ -2988,17 +6008,15 @@ const stale = Object.keys(ALLOWED_GAPS).filter(
   (k) =>
     !gapsUsed.has(k) &&
     /* --route 只跑子集时，别把没跑到的路由的偏离判成多余。移动端的键是 `<路由>@375 <项>` */
-    (wanted.length === 0 || wanted.some((r) => k.startsWith(`${r} `) || k.startsWith(`${r}@375 `))),
+    (wanted.length === 0 ||
+      wanted.some((r) => k.startsWith(`${r} `) || k.startsWith(`${r}@375 `)) ||
+      (doEntry && k.startsWith("/search?entry")) ||
+      (doItem && k.startsWith("/media/item")) ||
+      (doHome && k.startsWith("/home"))),
 );
 
 for (const f of failures) {
   console.log(`✗ ${f.route.padEnd(28)} [画板 ${f.board}] ${f.key}: ${f.msg}`);
-}
-if (bannerCost) {
-  console.log(
-    `· v2 横幅的首屏代价：横幅 ${bannerCost.banner}px，表格带被推到 ` +
-      `${bannerCost.firstContentTop}（画板 104）。上面的几何是在关掉它之后量的。`,
-  );
 }
 /*
  * 同一条原因会被很多路由触发（rail 那条外壳级偏离每页都量得到），逐条打出来是 21 行
@@ -3045,6 +6063,9 @@ for (const k of stale) {
 const scope =
   `桌面 ${routes.length} 条 + 移动 ${mobileRoutes.length} 条` +
   (emptyRoutes.length > 0 ? ` + 空态 ${emptyRoutes.length} 条` : "") +
+  (doEntry ? " + 按条目搜索（1440、1200、375）" : "") +
+  (doItem ? " + 条目详情（1440 剧集与电影、1200、375）" : "") +
+  (doHome ? " + 首页（1440、1200、375、空态、本机来源）与系统体检" : "") +
   (doLogin ? " + 登录页" : "");
 if (failures.length === 0 && stale.length === 0) {
   /*

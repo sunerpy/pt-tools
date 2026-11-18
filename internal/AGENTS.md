@@ -20,7 +20,10 @@ internal/
 ├── crypto/                                        # AES-GCM key handling
 ├── events/                                        # In-process pub/sub
 ├── extension/                                     # Browser-extension pending actions
-└── mcp/                                           # Future interface contract only
+├── mcp/                                           # MCP tools, scope checks, audit
+├── assistant/                                     # Built-in AI assistant: runs, confirmations, events, retention
+├── redact/                                        # Credential masking for text leaving pt-tools
+└── remote/                                        # Remote access host: pairing, Noise IK, tunnel, relay client
 ```
 
 ## Unified Site Contract
@@ -69,6 +72,7 @@ When disk protection is enabled:
 - Failure to read free space is a rejection, not permission to proceed.
 - A torrent that would cross the reserve threshold is skipped while later feed items may continue.
 - A failed add releases its reservation.
+- Read pending bytes through `PendingForGate`: it drops the reservations of torrents already listed in that downloader, from the same torrent list the pending bytes come from, so nothing is counted twice or missed. Reservations nobody sees expire after 15 minutes.
 - Site `SeedingCapacityGB` is another fail-closed mutation gate.
 
 Do not call a downloader add method from new RSS/Web paths merely because the interface permits it. Route mutations through the safe push service.
@@ -89,9 +93,17 @@ Do not call a downloader add method from new RSS/Web paths merely because the in
 
 `maintenance.Cleaner` is whitelist-based. It may manage rotated logs, staged torrent files, and old backups only. Preserve path containment, symlink/redline checks, and dry-run behavior.
 
+## Remote Access
+
+`internal/remote` is the host side of remote access (wire format v1 in `docs/design/remote-access.md`, vectors in `testdata/`). A session is a Noise_IK_25519_ChaChaPoly_BLAKE2s channel (the device initiates; prologue binds `pt-tools-remote-v1` and the hostId) carried by the direct WebSocket `/remote/v1/stream` or a relay stream. Each transport message holds one tunnel frame; requests are buffered until `REQ_END` and dispatched through the `Dispatcher` interface (`web.Server.RemoteDispatcher`), which only mounts App API v1. Pairing is one window at a time (32-byte secret, 10 minutes, one use, 5 failures) and only pairing sessions may call `POST /remote/v1/pair`. Host keys are stored encrypted through the `Cipher` given to `Store` (ConfigStore's AES key). Revoking a device, changing its scopes, turning remote access off and rotating host keys close the affected sessions with `GOAWAY`; a session registered after one of these changes is re-checked (`stillValid`). `client.go` is the Go device side for tests, QA and interop. `relayserver` is the self-hosted relay (no DB, no secret key: `crypto.skipKeyAtStart` also skips `relay`), and `relaytest` is the black-box conformance suite that both relays must pass (`Run` per profile: main, limits, disabled; `RunHostInterop` drives a real `Host` through a relay).
+
 ## MCP Status
 
-`internal/mcp/contract.go` enumerates future tools and JSON Schemas. It has no transport, authentication server, or tool dispatcher. Keep docs and code explicit about this distinction.
+`internal/mcp` defines the MCP tools on go-sdk (pinned v1.8.0): typed inputs with `jsonschema` tags, scope checks (`mcp:read` / `mcp:write`, exact), `confirm=true` for write tools, and audit of every write-tool call (`channel_type` `mcp`). Tools never touch the DB or downloaders: they call App API v1 through the `Backend` interface (`web.mcpBackend`). Transports live elsewhere: `/mcp` in `web/mcp.go` (stateless streamable HTTP, Bearer tokens only) and the stdio bridge `pt-tools mcp` in `cmd/mcp.go` (no DB, no scheduler). `ToolNames` is the authoritative list.
+
+## AI Assistant
+
+`internal/assistant` is the only owner of assistant runs, pending confirmations and conversation retention. A run calls an OpenAI-compatible Chat Completions endpoint through `openai.NewChatCompletionService` (not `openai.NewClient`, which reads `OPENAI_*` environment variables) and gets its tools from a fresh `internal/mcp` server per run (`Config.Tools`, i.e. `web.Server.AssistantToolServer`) over in-memory transports; the caller is `mcp.Caller{Kind: KindAssistant, Subject: <owner>}`, audited under channel `assistant`. Write tools are offered without `confirm`; each write becomes an `AssistantConfirmation` decided only by `UPDATE … WHERE status='pending'` (`RowsAffected == 1` wins: user, timeout, cancel and shutdown all go through `decide`), and the run executes once with `confirm=true` only when the stored status is `approved`. Owners are namespaced (`web:`, `token:`, `device:`, `chatops:`) and every query filters by owner. Stored and streamed text passes `internal/redact`; pasted torrent URLs and `push_torrent.torrent_url` are resolved to site + torrent ID before the model or the database sees them. Reasoning content is stored only to be sent back to the model (thinking modes with tools require it) and is never exposed. `Close` cancels runs and expires pending confirmations; `Start` expires the ones left by a restart.
 
 ## Local Guides
 

@@ -37,6 +37,21 @@ func (f *fakeMTorrentSite) Download(_ context.Context, _ string) ([]byte, error)
 }
 func (f *fakeMTorrentSite) Close() error { return nil }
 
+// 个人资料取到了、只有做种体积这类不必需的接口没取到（*PartialUserInfoError）：登录是好的，按取到的部分判断。
+func TestProbeMTorrentPartialIsOK(t *testing.T) {
+	accessTS := time.Date(2026, 11, 2, 2, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	site := &fakeMTorrentSite{
+		info: v2.UserInfo{Username: "tester", LastAccess: accessTS.Unix()},
+		err:  &v2.PartialUserInfoError{Missing: []string{"seederSize"}, Err: errors.New("seeding list page 1: HTTP 502")},
+	}
+	res, err := ProbeMTorrent(context.Background(), site, NewFakeClock(time.Date(2026, 11, 2, 3, 0, 0, 0, time.UTC)))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, OK, res.Status)
+	require.NotNil(t, res.LastAccessAt)
+	assert.Equal(t, accessTS.Unix(), res.LastAccessAt.Unix())
+}
+
 func TestProbeMTorrentHappy(t *testing.T) {
 	// API returned a valid lastModifiedDate -> LastAccess populated.
 	accessTS := time.Date(2026, 5, 15, 12, 0, 0, 0, time.FixedZone("CST", 8*3600))

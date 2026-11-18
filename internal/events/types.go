@@ -13,13 +13,18 @@ type TorrentAddedPayload struct {
 }
 
 // EvtTorrentCompleted: Published when a torrent download completes (100% downloaded).
-// Triggered by downloader status update monitors (future integration with downloader APIs).
+// 由 scheduler/free_end_monitor.go 在把 pt-tools 推送的种子标记为完成时发布；整理入库订阅它。
 const EvtTorrentCompleted EventType = "torrent.completed"
 
 type TorrentCompletedPayload struct {
 	TorrentID string `json:"torrent_id"`
 	SiteName  string `json:"site_name"`
 	Title     string `json:"title"`
+	// DownloaderID 与 DownloaderName 是种子所在的下载器；TaskID 是下载器里的编号，InfoHash 是种子的 hash
+	DownloaderID   uint   `json:"downloader_id,omitempty"`
+	DownloaderName string `json:"downloader_name,omitempty"`
+	TaskID         string `json:"task_id,omitempty"`
+	InfoHash       string `json:"info_hash,omitempty"`
 }
 
 // EvtTorrentFailed: Published when a torrent fails to download (error state in downloader).

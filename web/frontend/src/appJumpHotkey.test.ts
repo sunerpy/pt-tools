@@ -42,7 +42,7 @@ vi.mock("./components/shell/AppRail.vue", async () => {
 });
 vi.mock("./components/shell/AppStatusBar.vue", () => ({ default: { render: () => null } }));
 vi.mock("./components/shell/MobileChrome.vue", () => ({ default: { render: () => null } }));
-vi.mock("./components/V2DeprecationBanner.vue", () => ({ default: { render: () => null } }));
+vi.mock("./components/shell/RssTaskBanner.vue", () => ({ default: { render: () => null } }));
 vi.mock("./stores/logLevel", () => ({ useLogLevelStore: () => ({ fetchLogLevel: vi.fn() }) }));
 vi.mock("./stores/version", () => ({
   useVersionStore: () => ({ fetchVersionInfo: vi.fn(), checkForUpdates: vi.fn() }),
@@ -55,6 +55,8 @@ vi.mock("@/api", async (orig) => {
   const real = await orig<typeof import("@/api")>();
   return {
     ...real,
+    // 推送弹窗的「等免费」先读能等免费的站点（媒体中心 M2b）
+    freeWatchApi: { ...real.freeWatchApi, sites: vi.fn(() => Promise.resolve({ sites: [] })) },
     searchApi: {
       getSites: vi.fn(() => Promise.resolve([])),
       multiSite: vi.fn(),

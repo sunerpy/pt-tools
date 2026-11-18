@@ -21,6 +21,8 @@ type Unit3DRequest struct {
 	Method string
 	// Params are the query parameters
 	Params url.Values
+	// RawBody 为 true 时响应体按原始字节返回（种子文件下载），不按 JSON 解析
+	RawBody bool
 }
 
 // Unit3DResponse represents a response from Unit3D API
@@ -95,6 +97,8 @@ type Unit3DDriverConfig struct {
 	APIKey     string
 	HTTPClient *SiteHTTPClient // Use SiteHTTPClient instead of *http.Client
 	UserAgent  string
+	// SiteID 是站点在 pt-tools 里注册的 ID：全局设置里的「站点代理」按它判定走不走代理
+	SiteID string
 }
 
 // NewUnit3DDriver creates a new Unit3D driver
@@ -112,6 +116,7 @@ func NewUnit3DDriver(config Unit3DDriverConfig) *Unit3DDriver {
 			IdleConnTimeout:   30 * time.Second,
 			DisableKeepAlives: true,
 			UserAgent:         userAgent,
+			SiteID:            config.SiteID,
 		})
 	}
 
@@ -157,8 +162,12 @@ func (d *Unit3DDriver) Execute(ctx context.Context, req Unit3DRequest) (Unit3DRe
 		fullURL += "?" + req.Params.Encode()
 	}
 
+	accept := "application/json"
+	if req.RawBody {
+		accept = "application/x-bittorrent, */*"
+	}
 	headers := map[string]string{
-		"Accept":        "application/json",
+		"Accept":        accept,
 		"User-Agent":    d.userAgent,
 		"Authorization": "Bearer " + d.APIKey,
 	}
@@ -173,12 +182,24 @@ func (d *Unit3DDriver) Execute(ctx context.Context, req Unit3DRequest) (Unit3DRe
 		StatusCode: resp.StatusCode,
 	}
 
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+	}
+
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return result, ErrInvalidCredentials
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", ErrRateLimited)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return result, &HTTPStatusError{Code: resp.StatusCode}
+	}
+
+	if req.RawBody {
+		return result, nil
 	}
 
 	if err := json.Unmarshal(resp.Body, &result); err != nil {
@@ -218,10 +239,13 @@ func (d *Unit3DDriver) ParseSearch(res Unit3DResponse) ([]TorrentItem, error) {
 			}
 		}
 
-		// Parse freeleech end time
-		if t.FreeleechEnds != "" {
-			if endTime, err := time.Parse(time.RFC3339, t.FreeleechEnds); err == nil {
+		// Parse freeleech end time. 只认带时区的 RFC3339：不带时区的写法定不下时刻，和其他解析不了的值一样，
+		// 免费的有效性记为 unknown（不猜时区，也不当成没有结束时间）。
+		if ends := strings.TrimSpace(t.FreeleechEnds); ends != "" {
+			if endTime, err := time.Parse(time.RFC3339, ends); err == nil {
 				item.DiscountEndTime = endTime
+			} else {
+				NoteDiscountTimeUnparsable(&item, "freeleech_ends")
 			}
 		}
 
@@ -322,15 +346,13 @@ func (d *Unit3DDriver) PrepareDownload(torrentID string) (Unit3DRequest, error) 
 	return Unit3DRequest{
 		Endpoint: fmt.Sprintf("/api/torrents/%s/download", torrentID),
 		Method:   "GET",
+		RawBody:  true,
 	}, nil
 }
 
 // ParseDownload extracts torrent file data from the response
 func (d *Unit3DDriver) ParseDownload(res Unit3DResponse) ([]byte, error) {
-	if len(res.RawBody) == 0 {
-		return nil, ErrParseError
-	}
-	return res.RawBody, nil
+	return parseRawTorrentDownload(res.RawBody)
 }
 
 // parseUnit3DDiscount parses Unit3D freeleech status to DiscountLevel
@@ -385,6 +407,7 @@ func createUnit3DSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 	driver := NewUnit3DDriver(Unit3DDriverConfig{
 		BaseURL: config.BaseURL,
 		APIKey:  opts.APIKey,
+		SiteID:  config.ID,
 	})
 
 	return NewBaseSite(driver, BaseSiteConfig{

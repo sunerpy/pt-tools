@@ -35,6 +35,9 @@ func mergeSelectors(dst, src *SiteSelectors) {
 	if src.DiscountIcon != "" {
 		dst.DiscountIcon = src.DiscountIcon
 	}
+	if src.DiscountMapping != nil {
+		dst.DiscountMapping = src.DiscountMapping
+	}
 	if src.DiscountEndTime != "" {
 		dst.DiscountEndTime = src.DiscountEndTime
 	}
@@ -52,6 +55,12 @@ func mergeSelectors(dst, src *SiteSelectors) {
 	}
 	if src.Subtitle != "" {
 		dst.Subtitle = src.Subtitle
+	} else if src.SubtitleSelector != nil {
+		// 只写了 SubtitleSelector：不沿用默认的 Subtitle，否则 ParseSearch 先看 Subtitle，用不上它
+		dst.Subtitle = ""
+	}
+	if src.SubtitleSelector != nil {
+		dst.SubtitleSelector = src.SubtitleSelector
 	}
 	if src.UserInfoUsername != "" {
 		dst.UserInfoUsername = src.UserInfoUsername

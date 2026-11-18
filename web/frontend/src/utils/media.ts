@@ -1,0 +1,688 @@
+import { ref } from "vue";
+import type {
+  ClassifyNote,
+  ClassifyRule,
+  MediaFailKind,
+  MediaHistoryBatchResult,
+  MediaHistoryItem,
+  MediaImageLang,
+  MediaKind,
+  MediaMatchSource,
+  MediaMeta,
+  MediaMode,
+  MediaOverwriteMode,
+  MediaRecognizeResult,
+  MediaScrapeItem,
+  MediaScrapeSources,
+  MediaScrapeStatus,
+  MediaServer,
+  MediaServerKind,
+  MediaServerSyncResult,
+  MediaTransferStatus,
+  MediaWordKind,
+  MediaWordRule,
+  OrganizeItemStatus,
+  OrganizeResult,
+  RescrapeResult,
+} from "@/api";
+import { formatShortDateTime } from "@/utils/format";
+
+/** TMDB 的语言（与后端 recognize.Languages 一致，第一个是默认值） */
+export const MEDIA_LANGUAGES: readonly { value: string; label: string }[] = [
+  { value: "zh-CN", label: "简体中文" },
+  { value: "zh-TW", label: "繁体中文（台湾）" },
+  { value: "zh-HK", label: "繁体中文（香港）" },
+  { value: "en-US", label: "English" },
+  { value: "ja-JP", label: "日本語" },
+];
+
+export function mediaKindLabel(kind?: string): string {
+  if (kind === "movie") return "电影";
+  if (kind === "tv") return "剧集";
+  return "类型未知";
+}
+
+const SOURCE_LABELS: Record<MediaRecognizeResult["source"], string> = {
+  override: "手动纠正",
+  imdb: "按 IMDb 编号",
+  search: "按名字搜索",
+  none: "没有匹配",
+};
+
+export function mediaSourceLabel(source: MediaRecognizeResult["source"]): string {
+  return SOURCE_LABELS[source] ?? source;
+}
+
+const MATCH_SOURCE_LABELS: Record<string, string> = {
+  manual: "手动指定",
+  history: "沿用之前整理用的条目",
+  subscription: "按订阅的条目",
+  push: "按推送时说明的条目",
+  nfo: "按 NFO 里的 TMDB 编号",
+  "nfo-imdb": "按 NFO 里的 IMDb 编号",
+  dirname: "按目录名里的 TMDB 编号",
+};
+
+/** 整理时条目从哪来（预览与整理记录里显示）；升级前的记录没有，回空串 */
+export function matchSourceLabel(source?: MediaMatchSource | ""): string {
+  if (!source) return "";
+  return MATCH_SOURCE_LABELS[source] ?? mediaSourceLabel(source as MediaRecognizeResult["source"]);
+}
+
+const WORD_KIND_LABELS: Record<MediaWordKind, string> = {
+  block: "屏蔽",
+  replace: "替换",
+  offset: "集数偏移",
+};
+
+export const MEDIA_WORD_KINDS: readonly { value: MediaWordKind; label: string }[] = (
+  Object.keys(WORD_KIND_LABELS) as MediaWordKind[]
+).map((value) => ({ value, label: WORD_KIND_LABELS[value] }));
+
+export function wordKindLabel(kind: MediaWordKind): string {
+  return WORD_KIND_LABELS[kind] ?? kind;
+}
+
+/** 一条识别词做什么（给列表看） */
+export function wordEffect(r: Pick<MediaWordRule, "kind" | "replacement" | "offset">): string {
+  switch (r.kind) {
+    case "block":
+      return "从标题与副标题里去掉";
+    case "replace":
+      return r.replacement ? `换成「${r.replacement}」` : "换成空";
+    case "offset":
+      return `集数 ${r.offset > 0 ? "+" : ""}${r.offset}`;
+  }
+  return "";
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** 季与集：S01E01-E03、S01-S05、S02（全 30 集）、第 5 集；不是剧集时为空串 */
+export function episodeText(m: MediaMeta): string {
+  const parts: string[] = [];
+  if (m.season)
+    parts.push(m.season_end ? `S${pad(m.season)}-S${pad(m.season_end)}` : `S${pad(m.season)}`);
+  if (m.episode) {
+    const ep = m.episode_end ? `E${pad(m.episode)}-E${pad(m.episode_end)}` : `E${pad(m.episode)}`;
+    if (parts.length) parts[0] += ep;
+    else parts.push(m.episode_end ? `第 ${m.episode}-${m.episode_end} 集` : `第 ${m.episode} 集`);
+  }
+  if (m.total_episodes) parts.push(`全 ${m.total_episodes} 集`);
+  else if (m.complete && m.season && !m.episode) parts.push("整季");
+  return parts.length > 1 ? `${parts[0]}（${parts.slice(1).join("，")}）` : (parts[0] ?? "");
+}
+
+/** 解析结果里的各项，按 类型、年份、季集、画质、音轨、版本、语言、制作组 排列 */
+export function metaTags(m: MediaMeta): string[] {
+  const tags: string[] = [];
+  if (m.type) tags.push(mediaKindLabel(m.type));
+  if (m.year) tags.push(String(m.year));
+  const ep = episodeText(m);
+  if (ep) tags.push(ep);
+  if (m.resolution) tags.push(m.resolution);
+  if (m.source) tags.push(m.remux ? `${m.source} Remux` : m.source);
+  else if (m.remux) tags.push("Remux");
+  if (m.platform) tags.push(m.platform);
+  if (m.video_codec) tags.push(m.bit_depth ? `${m.video_codec} ${m.bit_depth}bit` : m.video_codec);
+  if (m.fps) tags.push(`${m.fps}fps`);
+  tags.push(...(m.hdr ?? []));
+  const audio = (m.audio ?? []).join(" ");
+  if (audio || m.channels) tags.push([audio, m.channels].filter(Boolean).join(" "));
+  tags.push(...(m.edition ?? []));
+  if (m.version) tags.push(m.version);
+  if (m.three_d) tags.push("3D");
+  if (m.chinese_subs) tags.push("中字");
+  if (m.mandarin) tags.push("国语");
+  if (m.cantonese) tags.push("粤语");
+  if (m.group) tags.push(`制作组 ${m.group}`);
+  return tags;
+}
+
+/** TMDB 网页上这个条目的地址 */
+export function tmdbPageURL(kind: MediaKind, id: number): string {
+  return `https://www.themoviedb.org/${kind}/${id}`;
+}
+
+/** TMDB 官方的图片地址（到尺寸之前为止） */
+export const DEFAULT_TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/";
+/** 网页上海报用的图片地址：「媒体识别」里换了就用换的（见 composables/useTmdbImageBase） */
+const tmdbImageBase = ref(DEFAULT_TMDB_IMAGE_BASE);
+/** 正在读设置里的图片地址：读到以前不给海报地址，免得先去连官方地址、失败后海报被藏起来 */
+const tmdbImageBasePending = ref(false);
+
+/** setTmdbImageBase 设置海报用的图片地址；空串或没有时用官方地址 */
+export function setTmdbImageBase(base?: string): void {
+  const b = (base ?? "").trim();
+  tmdbImageBase.value = b ? (b.endsWith("/") ? b : `${b}/`) : DEFAULT_TMDB_IMAGE_BASE;
+  tmdbImageBasePending.value = false;
+}
+
+/** setTmdbImageBasePending 标记开始或结束读设置（结束时图片地址不变） */
+export function setTmdbImageBasePending(pending: boolean): void {
+  tmdbImageBasePending.value = pending;
+}
+
+/** TMDB 海报地址（浏览器按设置里的图片地址直接加载）；没有海报、或还在读图片地址时为空串 */
+export function posterURL(path?: string, size = "w185"): string {
+  if (!path || tmdbImageBasePending.value) return "";
+  return `${tmdbImageBase.value}${size}/${path.replace(/^\//, "")}`;
+}
+
+// ---- 整理入库（M10） ----
+
+export const MEDIA_MODES: readonly { value: MediaMode; label: string; hint: string }[] = [
+  {
+    value: "hardlink",
+    label: "硬链接",
+    hint: "不多占空间，种子照常做种；下载目录与媒体库要在同一个分区（Docker 里是同一个卷）",
+  },
+  { value: "copy", label: "复制", hint: "多占一份空间，跨分区也能用" },
+  {
+    value: "symlink",
+    label: "软链接",
+    hint: "不占空间；媒体服务器要能用同一个路径读到下载目录，删种后链接失效",
+  },
+  { value: "move", label: "移动", hint: "文件搬进库里，种子不能再做种；只能整理已暂停的种子" },
+];
+
+export function modeLabel(mode?: string): string {
+  // 导入已有媒体库时记下的文件：导入时就在库里，不是 pt-tools 放进去的
+  if (mode === "existing") return "已有文件";
+  return MEDIA_MODES.find((m) => m.value === (mode || "hardlink"))?.label ?? mode ?? "";
+}
+
+/**
+ * 刮削内容（和后端 scrape.AllItems 一致，界面上的顺序）：tvOnly 的只有剧集有，movieOnly 的只有电影有；
+ * fanartOnly 的只有 Fanart.tv 有，要在「媒体识别」里填它的 API Key 才写
+ */
+export const SCRAPE_ITEMS: readonly {
+  value: MediaScrapeItem;
+  label: string;
+  file: string;
+  tvOnly?: boolean;
+  movieOnly?: boolean;
+  fanartOnly?: boolean;
+}[] = [
+  { value: "nfo", label: "NFO", file: "电影、剧集、季与每一集的 .nfo" },
+  { value: "poster", label: "海报", file: "poster.jpg" },
+  { value: "fanart", label: "背景图", file: "fanart.jpg" },
+  { value: "logo", label: "Logo", file: "clearlogo.png" },
+  {
+    value: "clearart",
+    label: "Clearart",
+    file: "clearart.png（只有 Fanart.tv 有）",
+    fanartOnly: true,
+  },
+  { value: "banner", label: "横幅", file: "banner.jpg（只有 Fanart.tv 有）", fanartOnly: true },
+  {
+    value: "landscape",
+    label: "横版海报",
+    file: "landscape.jpg（只有 Fanart.tv 有）",
+    fanartOnly: true,
+  },
+  {
+    value: "discart",
+    label: "碟片图",
+    file: "discart.png（只有 Fanart.tv 有）",
+    movieOnly: true,
+    fanartOnly: true,
+  },
+  { value: "season_poster", label: "季海报", file: "season01-poster.jpg", tvOnly: true },
+  { value: "thumb", label: "集截图", file: "<文件名>-thumb.jpg", tvOnly: true },
+];
+
+/** 没选过刮削内容时写的那几项（和后端 scrape.DefaultItems 一致）：Logo 与只有 Fanart.tv 有的以外都写 */
+export const DEFAULT_SCRAPE_ITEMS: readonly MediaScrapeItem[] = [
+  "nfo",
+  "poster",
+  "fanart",
+  "season_poster",
+  "thumb",
+];
+
+/** 这种媒体库能选的刮削内容：电影没有季海报与集截图，剧集没有碟片图 */
+export function scrapeItemsFor(kind: MediaKind): (typeof SCRAPE_ITEMS)[number][] {
+  return SCRAPE_ITEMS.filter((i) => (kind === "tv" ? !i.movieOnly : !i.tvOnly));
+}
+
+/** TMDB 的类型（编号与中文名），二级分类按它们分 */
+export const TMDB_GENRES: Record<MediaKind, readonly { id: number; name: string }[]> = {
+  movie: [
+    { id: 28, name: "动作" },
+    { id: 12, name: "冒险" },
+    { id: 16, name: "动画" },
+    { id: 35, name: "喜剧" },
+    { id: 80, name: "犯罪" },
+    { id: 99, name: "纪录" },
+    { id: 18, name: "剧情" },
+    { id: 10751, name: "家庭" },
+    { id: 14, name: "奇幻" },
+    { id: 36, name: "历史" },
+    { id: 27, name: "恐怖" },
+    { id: 10402, name: "音乐" },
+    { id: 9648, name: "悬疑" },
+    { id: 10749, name: "爱情" },
+    { id: 878, name: "科幻" },
+    { id: 10770, name: "电视电影" },
+    { id: 53, name: "惊悚" },
+    { id: 10752, name: "战争" },
+    { id: 37, name: "西部" },
+  ],
+  tv: [
+    { id: 10759, name: "动作冒险" },
+    { id: 16, name: "动画" },
+    { id: 35, name: "喜剧" },
+    { id: 80, name: "犯罪" },
+    { id: 99, name: "纪录" },
+    { id: 18, name: "剧情" },
+    { id: 10751, name: "家庭" },
+    { id: 10762, name: "儿童" },
+    { id: 9648, name: "悬疑" },
+    { id: 10763, name: "新闻" },
+    { id: 10764, name: "真人秀" },
+    { id: 10765, name: "科幻奇幻" },
+    { id: 10766, name: "肥皂剧" },
+    { id: 10767, name: "脱口秀" },
+    { id: 10768, name: "战争政治" },
+    { id: 37, name: "西部" },
+  ],
+};
+
+/** 二级分类里常用的原始语言（ISO 639-1；TMDB 把粤语记作 cn）；不在这里的可以直接输入代码 */
+export const CLASSIFY_LANGUAGES: readonly { value: string; label: string }[] = [
+  { value: "zh", label: "中文" },
+  { value: "cn", label: "粤语" },
+  { value: "en", label: "英语" },
+  { value: "ja", label: "日语" },
+  { value: "ko", label: "韩语" },
+  { value: "fr", label: "法语" },
+  { value: "de", label: "德语" },
+  { value: "es", label: "西班牙语" },
+  { value: "th", label: "泰语" },
+  { value: "hi", label: "印地语" },
+];
+
+/** 二级分类里常用的出品国家或地区（ISO 3166-1）；不在这里的可以直接输入代码 */
+export const CLASSIFY_COUNTRIES: readonly { value: string; label: string }[] = [
+  { value: "CN", label: "中国大陆" },
+  { value: "HK", label: "中国香港" },
+  { value: "TW", label: "中国台湾" },
+  { value: "US", label: "美国" },
+  { value: "GB", label: "英国" },
+  { value: "JP", label: "日本" },
+  { value: "KR", label: "韩国" },
+  { value: "FR", label: "法国" },
+  { value: "DE", label: "德国" },
+  { value: "ES", label: "西班牙" },
+  { value: "IT", label: "意大利" },
+  { value: "RU", label: "俄罗斯" },
+  { value: "IN", label: "印度" },
+  { value: "TH", label: "泰国" },
+  { value: "SG", label: "新加坡" },
+  { value: "CA", label: "加拿大" },
+  { value: "AU", label: "澳大利亚" },
+];
+
+/** classifyRuleSummary 是一条二级分类的条件，写成一句话 */
+export function classifyRuleSummary(kind: MediaKind, rule: ClassifyRule): string {
+  const label = (list: readonly { value: string; label: string }[], v: string) =>
+    list.find((x) => x.value === v)?.label ?? v;
+  const parts: string[] = [];
+  if (rule.genres?.length) {
+    const names = rule.genres.map(
+      (id) => TMDB_GENRES[kind].find((g) => g.id === id)?.name ?? String(id),
+    );
+    parts.push(`类型：${names.join("、")}`);
+  }
+  if (rule.languages?.length) {
+    parts.push(`语言：${rule.languages.map((l) => label(CLASSIFY_LANGUAGES, l)).join("、")}`);
+  }
+  if (rule.countries?.length) {
+    parts.push(`国家或地区：${rule.countries.map((c) => label(CLASSIFY_COUNTRIES, c)).join("、")}`);
+  }
+  const short: string[] = [];
+  if (rule.max_runtime) short.push(`片长不超过 ${rule.max_runtime} 分钟`);
+  if (rule.keywords?.length) short.push(`标题含「${rule.keywords.join("」「")}」`);
+  if (short.length) parts.push(short.join("或"));
+  return parts.length ? parts.join("；") : "不限条件：前面都对不上的放进这里";
+}
+
+/**
+ * classifyNoteText 把二级分类的说明写成一句话：「第 6 条「短剧」：片长 8 分钟（不超过 15 分钟）」，
+ * 都没对上时「3 条规则都没对上，放在库目录里」
+ */
+export function classifyNoteText(kind: MediaKind, note: ClassifyNote): string {
+  if (!note.rule) return `${note.rules} 条规则都没对上，放在库目录里`;
+  const label = (list: readonly { value: string; label: string }[], v: string) =>
+    list.find((x) => x.value === v)?.label ?? v;
+  const parts: string[] = [];
+  if (note.genres?.length) {
+    const names = note.genres.map(
+      (id) => TMDB_GENRES[kind].find((g) => g.id === id)?.name ?? String(id),
+    );
+    parts.push(`类型是${names.join("、")}`);
+  }
+  if (note.languages?.length) {
+    parts.push(`原始语言是${note.languages.map((l) => label(CLASSIFY_LANGUAGES, l)).join("、")}`);
+  }
+  if (note.countries?.length) {
+    parts.push(
+      `出品国家或地区有${note.countries.map((c) => label(CLASSIFY_COUNTRIES, c)).join("、")}`,
+    );
+  }
+  if (note.runtime) parts.push(`片长 ${note.runtime} 分钟（不超过 ${note.max_runtime} 分钟）`);
+  if (note.keyword) parts.push(`标题里有「${note.keyword}」`);
+  const why = parts.length ? parts.join("，") : "不限条件";
+  return `对上第 ${note.rule} 条「${note.name}」：${why}`;
+}
+
+/** 图片语言（和后端 scrape.ImageLangs 一致） */
+export const IMAGE_LANGS: readonly { value: MediaImageLang; label: string }[] = [
+  { value: "", label: "跟识别语言（TMDB 默认的那张）" },
+  { value: "zh", label: "中文" },
+  { value: "en", label: "英文" },
+  { value: "ja", label: "日文" },
+  { value: "none", label: "无文字" },
+];
+
+/** 数据来源的每一项（和后端 metadata.Sources 一致）：tvOnly 的只有剧集有 */
+export const SCRAPE_SOURCE_FIELDS: readonly {
+  key: keyof MediaScrapeSources;
+  label: string;
+  tvOnly?: boolean;
+}[] = [
+  { key: "plot", label: "简介" },
+  { key: "rating", label: "评分" },
+  { key: "episode", label: "每一集", tvOnly: true },
+  { key: "artwork", label: "图片" },
+];
+
+/** 每一项可选的来源（和后端 metadata 的 PlotSources 等一致）；空串是 TMDB */
+export const SCRAPE_SOURCE_OPTIONS: {
+  readonly [K in keyof MediaScrapeSources]: readonly {
+    value: MediaScrapeSources[K];
+    label: string;
+  }[];
+} = {
+  plot: [
+    { value: "", label: "TMDB" },
+    { value: "douban", label: "豆瓣" },
+    { value: "bangumi", label: "Bangumi（只用于动画）" },
+  ],
+  rating: [
+    { value: "", label: "TMDB" },
+    { value: "douban", label: "豆瓣" },
+    { value: "bangumi", label: "Bangumi（只用于动画）" },
+    { value: "omdb", label: "IMDb（经 OMDb）" },
+  ],
+  episode: [
+    { value: "", label: "TMDB" },
+    { value: "bangumi", label: "Bangumi（只用于动画）" },
+    { value: "tvdb", label: "TheTVDB" },
+  ],
+  artwork: [
+    { value: "", label: "TMDB" },
+    { value: "fanart", label: "Fanart.tv" },
+  ],
+};
+
+/** 全用 TMDB 的数据来源 */
+export const tmdbSources = (): MediaScrapeSources => ({
+  plot: "",
+  rating: "",
+  episode: "",
+  artwork: "",
+});
+
+/** 命名模板的预设：默认的三家都认；目录名里带上 TMDB 编号时按媒体服务器的写法 */
+export function templatePresets(kind: MediaKind): { label: string; template: string }[] {
+  const dir = "{{.Title}}{{if .Year}} ({{.Year}}){{end}}";
+  const file =
+    kind === "tv"
+      ? "Season {{.Season}}/{{.Title}} - {{.SeasonEpisode}}{{if .EpisodeTitle}} - {{.EpisodeTitle}}{{end}}"
+      : "{{.Title}}{{if .Year}} ({{.Year}}){{end}}{{if .Quality}} - {{.Quality}}{{end}}";
+  return [
+    { label: "默认", template: "" },
+    { label: "Emby（带 tmdbid=）", template: `${dir} [tmdbid={{.TMDBID}}]/${file}` },
+    { label: "Jellyfin（带 tmdbid-）", template: `${dir} [tmdbid-{{.TMDBID}}]/${file}` },
+    { label: "Plex（带 {tmdb-}）", template: `${dir} {tmdb-{{.TMDBID}}}/${file}` },
+  ];
+}
+
+/** 模板里能用的变量（给编辑框旁边的说明） */
+export const TEMPLATE_VARS: readonly { name: string; desc: string }[] = [
+  { name: ".Title", desc: "标题（TMDB，按设置的语言）" },
+  { name: ".OriginalTitle", desc: "原名" },
+  { name: ".Year", desc: "年份（剧集是首播年份）" },
+  { name: ".TMDBID", desc: "TMDB 编号" },
+  { name: ".IMDbID", desc: "IMDb 编号" },
+  { name: ".Season", desc: "季" },
+  { name: ".Episode", desc: "集" },
+  { name: ".SeasonEpisode", desc: "S01E02，多集时 S01E02-E03" },
+  { name: ".EpisodeTitle", desc: "这一集的标题" },
+  { name: ".Quality", desc: "分辨率、来源、HDR、编码，如 2160p WEB-DL HDR10 H.265" },
+  { name: ".Resolution", desc: "分辨率" },
+  { name: ".Source", desc: "来源，如 BluRay、WEB-DL" },
+  { name: ".VideoCodec", desc: "视频编码" },
+  { name: ".HDR", desc: "HDR 格式" },
+  { name: ".Audio", desc: "音轨" },
+  { name: ".Group", desc: "制作组" },
+  { name: ".Edition", desc: "版本说明" },
+];
+
+type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
+
+const HISTORY_STATUS: Record<MediaTransferStatus, { label: string; tone: Tone }> = {
+  done: { label: "已整理", tone: "ok" },
+  failed: { label: "失败", tone: "dang" },
+  skipped: { label: "跳过", tone: "warn" },
+  removed: { label: "已删除", tone: "neutral" },
+};
+
+export function historyStatus(status: string): { label: string; tone: Tone } {
+  return HISTORY_STATUS[status as MediaTransferStatus] ?? { label: status, tone: "neutral" };
+}
+
+const SCRAPE_STATUS: Record<MediaScrapeStatus, { label: string; tone: Tone }> = {
+  ok: { label: "刮削成功", tone: "ok" },
+  partial: { label: "部分刮削", tone: "warn" },
+  failed: { label: "刮削失败", tone: "dang" },
+};
+
+/** 整理记录上一次刮削的结果；没刮削过（媒体库关着刮削、升级前整理的）时为 null */
+export function scrapeStatus(status: string): { label: string; tone: Tone } | null {
+  return SCRAPE_STATUS[status as MediaScrapeStatus] ?? null;
+}
+
+/** 失败与跳过的分类（和后端 models.MediaFailKinds 一样的顺序） */
+export const FAIL_KINDS: readonly { value: MediaFailKind; label: string }[] = [
+  { value: "recognize", label: "没识别出来" },
+  { value: "library", label: "媒体库" },
+  { value: "path", label: "路径映射" },
+  { value: "filesystem", label: "文件系统" },
+  { value: "exists", label: "目标已有文件" },
+  { value: "source", label: "源文件不在了" },
+  { value: "disc", label: "原盘与镜像" },
+  { value: "other", label: "其他" },
+];
+
+/** 一条失败或跳过的记录的分类；升级前的记录没有分类，算其他。整理成的、已删除的记录没有分类（空串） */
+export function failKindOf(r: Pick<MediaHistoryItem, "status" | "fail_kind">): "" | MediaFailKind {
+  if (r.status !== "failed" && r.status !== "skipped") return "";
+  return r.fail_kind || "other";
+}
+
+export function failKindLabel(kind: "" | MediaFailKind): string {
+  return FAIL_KINDS.find((k) => k.value === kind)?.label ?? "";
+}
+
+/** 批量操作的结果写成一句提示：都成了、有的不成（列出前两条原因） */
+export function batchOutcome(res: MediaHistoryBatchResult, done: string): Outcome {
+  if (!res.failed) return { level: "success", text: `${done} ${res.ok} 条` };
+  const why = res.items
+    .filter((i) => !i.ok && i.message)
+    .slice(0, 2)
+    .map((i) => i.message)
+    .join("；");
+  return {
+    level: "warning",
+    text: `${done} ${res.ok} 条，${res.failed} 条没做成${why ? `：${why}` : ""}`,
+  };
+}
+
+export const HISTORY_FILTERS: readonly { value: "" | MediaTransferStatus; label: string }[] = [
+  { value: "", label: "全部" },
+  { value: "done", label: "已整理" },
+  { value: "failed", label: "失败" },
+  { value: "skipped", label: "跳过" },
+  { value: "removed", label: "已删除" },
+];
+
+/** 地址里带的状态筛选（首页的待处理带着进来，例如 ?status=failed）；不认得的当全部 */
+export function historyStatusFrom(q: unknown): "" | MediaTransferStatus {
+  return HISTORY_FILTERS.find((f) => f.value && f.value === q)?.value ?? "";
+}
+
+/** 地址里带的分类筛选（例如 ?kind=recognize）；不认得的当没有 */
+export function failKindFrom(q: unknown): "" | MediaFailKind {
+  return FAIL_KINDS.find((k) => k.value === q)?.value ?? "";
+}
+
+export function triggerLabel(trigger: string): string {
+  return (
+    {
+      auto: "下载完成后自动",
+      scan: "定期扫描",
+      manual: "手动",
+      watch: "目录监控",
+      import: "导入已有文件",
+    }[trigger] ?? trigger
+  );
+}
+
+const ITEM_STATUS: Record<OrganizeItemStatus, { label: string; tone: Tone }> = {
+  pending: { label: "待整理", tone: "info" },
+  done: { label: "已在库里", tone: "ok" },
+  exists: { label: "目标已有文件", tone: "warn" },
+  replace: { label: "替换旧版本", tone: "info" },
+  change: { label: "换条目", tone: "info" },
+  failed: { label: "整理不了", tone: "dang" },
+};
+
+/** 覆盖策略（和后端 organize.OverwriteNever 等一致）：目标位置已经有 pt-tools 之前放进库的旧版本时怎么办 */
+export const OVERWRITE_MODES: readonly { value: MediaOverwriteMode; label: string }[] = [
+  { value: "", label: "不替换" },
+  { value: "larger", label: "新文件更大时替换" },
+];
+
+export function itemStatus(status: OrganizeItemStatus): { label: string; tone: Tone } {
+  return ITEM_STATUS[status] ?? { label: status, tone: "neutral" };
+}
+
+export const MEDIA_SERVER_KINDS: readonly { value: MediaServerKind; label: string }[] = [
+  { value: "emby", label: "Emby" },
+  { value: "jellyfin", label: "Jellyfin" },
+  { value: "plex", label: "Plex" },
+];
+
+export function serverKindLabel(kind: string): string {
+  return MEDIA_SERVER_KINDS.find((k) => k.value === kind)?.label ?? kind;
+}
+
+/** 媒体服务器的索引那一列：状态、条目数或失败原因，悬停写同步时间与间隔 */
+export function serverIndexView(
+  s: MediaServer,
+  resume?: number,
+): { tone: "ok" | "dang" | "neutral"; label: string; text: string; tip: string } {
+  const synced = s.indexed_at ? `${formatShortDateTime(s.indexed_at)} 同步` : "";
+  const every = `每 ${s.index_hours} 小时同步一次`;
+  if (s.index_hours === 0)
+    return { tone: "neutral", label: "关闭", text: "不同步索引", tip: "索引间隔填 0 是关闭" };
+  if (s.index_error)
+    return {
+      tone: "dang",
+      label: "失败",
+      text: s.index_error,
+      tip: [synced ? `上次成功 ${synced.replace(" 同步", "")}` : "还没成功过", every].join("，"),
+    };
+  if (!s.indexed_at)
+    return {
+      tone: "neutral",
+      label: "还没同步",
+      text: s.enabled ? "启动 1 分钟以后同步，也可以点「同步」" : "启用以后同步",
+      tip: every,
+    };
+  const parts = [`电影 ${s.index_movies}`, `剧 ${s.index_series}`, `集 ${s.index_episodes}`];
+  if (resume !== undefined) parts.push(`继续观看 ${resume}`);
+  return { tone: "ok", label: "正常", text: parts.join(" · "), tip: `${synced}，${every}` };
+}
+
+/** 手动同步完的一句话 */
+export function syncResultText(r: MediaServerSyncResult): string {
+  let text = `同步完成：电影 ${r.movies}、剧 ${r.series}、集 ${r.episodes}`;
+  const changes = [
+    r.added ? `新加 ${r.added}` : "",
+    r.removed ? `没了 ${r.removed}` : "",
+    r.restored ? `又有了 ${r.restored}` : "",
+  ].filter(Boolean);
+  if (changes.length) text += `（${changes.join("、")}）`;
+  if (r.issues) text += `，${r.issues} 项 pt-tools 整理过的在服务器里没了`;
+  if (r.partial) text += "；同步时服务器里的条目变了，这一次没有标删除";
+  return text;
+}
+
+/** 整理计划里一张原盘的说明：「蓝光原盘 · 5 个文件」「DVD 原盘 · 12 个文件」 */
+export function discLabel(disc: { kind: string; files: number }): string {
+  return `${disc.kind === "VIDEO_TS" ? "DVD 原盘" : "蓝光原盘"} · ${disc.files} 个文件`;
+}
+
+/** S01E02，多集时 S01E02-E03；没有集数时只写季 */
+export function seasonEpisode(season?: number, episode?: number, end?: number): string {
+  const s = `S${pad(season ?? 0)}`;
+  if (!episode) return s;
+  return end && end > episode ? `${s}E${pad(episode)}-E${pad(end)}` : `${s}E${pad(episode)}`;
+}
+
+/** 整理记录对应的条目：标题（年份），剧集再加季集 */
+export function historyEntry(
+  r: Pick<MediaHistoryItem, "title" | "year" | "media_type" | "season" | "episode" | "episode_end">,
+): string {
+  if (!r.title) return "";
+  const name = r.year ? `${r.title} (${r.year})` : r.title;
+  return r.media_type === "tv"
+    ? `${name} ${seasonEpisode(r.season, r.episode, r.episode_end)}`
+    : name;
+}
+
+/** 提示的级别与文字（ElMessage 的 success、warning、info） */
+export interface Outcome {
+  level: "success" | "warning" | "info";
+  text: string;
+}
+
+/** 重新整理一个种子的结果写成一句提示（整理历史与订阅详情共用） */
+export function organizeOutcome(res: OrganizeResult): Outcome {
+  if (res.queued) return { level: "info", text: "整理还在后台进行，稍后刷新看结果" };
+  if (res.plan?.problem) return { level: "warning", text: res.plan.problem };
+  const changed = res.changed ? `，换了 ${res.changed} 个文件的条目` : "";
+  if (res.failed)
+    return {
+      level: "warning",
+      text: `新入库 ${res.created} 个${changed}，失败 ${res.failed} 个`,
+    };
+  return {
+    level: "success",
+    text: `新入库 ${res.created} 个${changed}，已在库里 ${res.done} 个`,
+  };
+}
+
+/** 重新刮削的结果写成一句提示（整理历史与订阅详情共用） */
+export function rescrapeOutcome(res: RescrapeResult): Outcome {
+  if (res.queued) return { level: "info", text: "重新刮削还在后台进行，稍后刷新看结果" };
+  const sources = res.sources ? `（${res.sources}）` : "";
+  const text = `刮削了 ${res.records} 条记录，写了 ${res.written} 个文件${sources}`;
+  if (res.messages?.length)
+    return { level: "warning", text: `${text}；${res.messages.join("；")}` };
+  return { level: "success", text };
+}

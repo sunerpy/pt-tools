@@ -183,6 +183,10 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 
 	resp, err := q.client.Do(req)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// 调用方取消或到时，不代表下载器连不上
+			return fmt.Errorf("登录未完成: %w", ctxErr)
+		}
 		q.healthy = false
 		return q.wrapConnectionError(err)
 	}
@@ -344,7 +348,8 @@ func (q *QbitClient) doRequestWithRetry(req *http.Request) (*http.Response, erro
 
 	if resp.StatusCode == http.StatusForbidden {
 		resp.Body.Close()
-		if authErr := q.Authenticate(); authErr != nil {
+		// 重新登录也受这次请求的 ctx 约束
+		if authErr := q.AuthenticateWithContext(req.Context()); authErr != nil {
 			return nil, fmt.Errorf("re-authentication failed: %w", authErr)
 		}
 		newReq := req.Clone(req.Context())
@@ -935,37 +940,46 @@ var qbitActiveDLStates = map[string]struct{}{
 // 故意保留种子级容错：单个种子的 amount_left 解析失败仅跳过该条；
 // 整体只在 HTTP/auth 层失败时返回错误。
 func (q *QbitClient) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	snap, err := q.IncompletePendingSnapshot(ctx)
+	return snap.Bytes, err
+}
+
+// IncompletePendingSnapshot 用同一次 torrents/info 算出待占用（同 GetIncompletePendingBytes），并记下所有种子的 hash。
+func (q *QbitClient) IncompletePendingSnapshot(ctx context.Context) (downloader.PendingSnapshot, error) {
 	url := fmt.Sprintf("%s/api/v2/torrents/info", q.baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return 0, fmt.Errorf("构建请求失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("构建请求失败: %w", err)
 	}
 
 	resp, err := q.client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("请求 torrents/info 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("请求 torrents/info 失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if !q.isSuccessStatus(resp.StatusCode) {
-		return 0, fmt.Errorf("torrents/info 返回 %d", resp.StatusCode)
+		return downloader.PendingSnapshot{}, fmt.Errorf("torrents/info 返回 %d", resp.StatusCode)
 	}
 	var torrents []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&torrents); err != nil {
-		return 0, fmt.Errorf("解析 torrents/info 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("解析 torrents/info 失败: %w", err)
 	}
 
-	var total int64
+	snap := downloader.PendingSnapshot{Hashes: make(map[string]struct{}, len(torrents))}
 	for _, t := range torrents {
+		if hash, _ := t["hash"].(string); hash != "" {
+			snap.Hashes[strings.ToLower(hash)] = struct{}{}
+		}
 		state, _ := t["state"].(string)
 		if _, active := qbitActiveDLStates[state]; !active {
 			continue
 		}
 		amountLeft, _ := t["amount_left"].(float64)
 		if amountLeft > 0 {
-			total += int64(amountLeft)
+			snap.Bytes += int64(amountLeft)
 		}
 	}
-	return total, nil
+	return snap, nil
 }
 
 // GetAllTorrents 获取所有种子列表
@@ -1005,7 +1019,8 @@ func (q *QbitClient) GetAllTorrents() ([]downloader.Torrent, error) {
 // mapQbitTorrent 将 qBittorrent 种子信息映射到通用 Torrent 结构
 func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 	t := downloader.Torrent{
-		ClientID: q.name,
+		ClientID:   q.name,
+		SwarmSeeds: -1, SwarmLeechers: -1,
 	}
 
 	if hash, ok := qt["hash"].(string); ok {
@@ -1068,11 +1083,22 @@ func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 	if completionOn, ok := qt["completion_on"].(float64); ok {
 		t.CompletionOn = int64(completionOn)
 	}
+	// last_activity 是最后一次上传或下载数据的时间；没有过活动时 qB 给 0 或负数，当作不知道
+	if lastActivity, ok := qt["last_activity"].(float64); ok && lastActivity > 0 {
+		t.LastActivity = int64(lastActivity)
+	}
 	if numSeeds, ok := qt["num_seeds"].(float64); ok {
 		t.NumSeeds = int(numSeeds)
 	}
 	if numLeechs, ok := qt["num_leechs"].(float64); ok {
 		t.NumPeers = int(numLeechs)
+	}
+	// num_complete、num_incomplete 是 tracker 报的整个种子群的做种与下载人数；qB 不知道时给 -1
+	if v, ok := qt["num_complete"].(float64); ok {
+		t.SwarmSeeds = max(int(v), -1)
+	}
+	if v, ok := qt["num_incomplete"].(float64); ok {
+		t.SwarmLeechers = max(int(v), -1)
 	}
 	if availability, ok := qt["availability"].(float64); ok {
 		t.Availability = availability
@@ -1325,12 +1351,21 @@ func (q *QbitClient) AddTorrentEx(torrentURL string, opt downloader.AddTorrentOp
 			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
 	}
+	// 5.2 以前 torrents/add 一律回 200：Ok. 是加进去了，Fails. 是一个都没加（种子无效或已经在下载器里）
+	if strings.TrimSpace(string(bodyBytes)) == "Fails." {
+		return downloader.AddTorrentResult{Success: false, Message: "添加失败（种子无效或已经在下载器里）"}, fmt.Errorf("add failed")
+	}
 
 	return downloader.AddTorrentResult{Success: true, Message: "Torrent added successfully"}, nil
 }
 
 // AddTorrentFileEx 添加种子文件到下载器（新接口）
 func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	return q.AddTorrentFileExContext(context.Background(), fileData, opt)
+}
+
+// AddTorrentFileExContext 同 AddTorrentFileEx，上传请求受 ctx 约束：ctx 取消或超时时请求跟着结束。
+func (q *QbitClient) AddTorrentFileExContext(ctx context.Context, fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -1362,7 +1397,7 @@ func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrent
 		return downloader.AddTorrentResult{Success: false, Message: closeErr.Error()}, closeErr
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", uploadURL, body)
+	req, err := http.NewRequestWithContext(ctx, "POST", uploadURL, body)
 	if err != nil {
 		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
 	}
@@ -1417,6 +1452,10 @@ func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrent
 			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
 	}
+	// 5.2 以前 torrents/add 一律回 200：Ok. 是加进去了，Fails. 是一个都没加（种子无效或已经在下载器里）
+	if strings.TrimSpace(string(bodyBytes)) == "Fails." {
+		return downloader.AddTorrentResult{Success: false, Message: "添加失败（种子无效或已经在下载器里）"}, fmt.Errorf("add failed")
+	}
 
 	return downloader.AddTorrentResult{
 		Success: true,
@@ -1441,6 +1480,12 @@ func (q *QbitClient) writeAddTorrentOptions(writer *multipart.Writer, opt downlo
 	if opt.SavePath != "" {
 		if err := writer.WriteField("savepath", opt.SavePath); err != nil {
 			return fmt.Errorf("failed to write savepath: %w", err)
+		}
+		// 要照这个目录放：关掉自动管理（默认用自动管理时 qBittorrent 按分类的路径放，忽略 savepath）
+		if opt.ForceSavePath {
+			if err := writer.WriteField("autoTMM", "false"); err != nil {
+				return fmt.Errorf("failed to write autoTMM: %w", err)
+			}
 		}
 	}
 
@@ -1561,6 +1606,16 @@ func (q *QbitClient) SetTorrentTags(id, tags string) error {
 	return q.postForm("/api/v2/torrents/addTags", data)
 }
 
+// RemoveTag 删掉 pt-tools 加的、每个任务独有的标签：deleteTags 把它从所有种子和标签列表里一起删掉，id 不用。
+func (q *QbitClient) RemoveTag(_, tag string) error {
+	data := url.Values{}
+	data.Set("tags", tag)
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/deleteTags", data)
+}
+
 // SetTorrentSavePath 设置种子保存路径
 func (q *QbitClient) SetTorrentSavePath(id, path string) error {
 	data := url.Values{}
@@ -1619,7 +1674,10 @@ func (q *QbitClient) GetTorrentTrackers(id string) ([]downloader.TorrentTracker,
 	if err := q.getJSON(fmt.Sprintf("/api/v2/torrents/trackers?hash=%s", url.QueryEscape(id)), &qTrackers); err != nil {
 		return nil, err
 	}
+	return parseQbitTrackers(qTrackers), nil
+}
 
+func parseQbitTrackers(qTrackers []map[string]any) []downloader.TorrentTracker {
 	trackers := make([]downloader.TorrentTracker, 0, len(qTrackers))
 	for _, item := range qTrackers {
 		tracker := downloader.TorrentTracker{}
@@ -1645,8 +1703,7 @@ func (q *QbitClient) GetTorrentTrackers(id string) ([]downloader.TorrentTracker,
 		}
 		trackers = append(trackers, tracker)
 	}
-
-	return trackers, nil
+	return trackers
 }
 
 // GetDiskInfo 获取磁盘信息

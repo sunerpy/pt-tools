@@ -22,6 +22,7 @@ var U2DMHYDefinition = &v2.SiteDefinition{
 	Aka:            []string{"U2", "動漫花園"},
 	Description:    "以动漫资源为主的 PT 站点，使用 UCoin 经济体系",
 	Schema:         v2.SchemaNexusPHP,
+	Attendance:     &v2.AttendanceConfig{Unsupported: "签到要从动态图片验证码里认出番剧名，暂不支持自动签到"},
 	URLs:           []string{"https://u2.dmhy.org/"},
 	FaviconURL:     "https://u2.dmhy.org/favicon.ico",
 	AuthMethod:     v2.AuthMethodCookie,
@@ -173,7 +174,7 @@ var U2DMHYDefinition = &v2.SiteDefinition{
 		Snatched: "td.rowfollow:nth-child(8)",
 		// 实际抓取到的促销图标只有 pro_free2up / pro_2up / pro_50pctdown，
 		// 其余为 NexusPHP 通用类名，一并保留以便站点后续启用
-		DiscountIcon: "img.pro_free, img.pro_free2up, img.pro_2up, img.pro_50pctdown, img.pro_30pctdown",
+		DiscountIcon: "img.pro_free, img.pro_free2up, img.pro_2up, img.pro_50pctdown, img.pro_50pctdown2up, img.pro_30pctdown",
 		// 故意不配置 DiscountMapping：搜索页解析走 parseDiscountFromElement，它用
 		// strings.Contains 遍历 map，而 "pro_free" 是 "pro_free2up" 的前缀，
 		// 显式映射会因 map 遍历顺序随机而把 2X Free 误判为 Free。

@@ -2,14 +2,17 @@
 
 本页介绍用 Docker、Linux 二进制和 Windows 二进制安装 pt-tools 的步骤，以及首次登录和数据目录的说明。
 
-| 方式           | 适用系统                 | 说明                                            |
-| -------------- | ------------------------ | ----------------------------------------------- |
-| Docker Compose | 任何能运行 Docker 的系统 | 推荐。升级只需要拉取新镜像                      |
-| `docker run`   | 同上                     | 单条命令，适合临时试用                          |
-| Linux 二进制   | Linux amd64、arm64       | 安装脚本会校验 SHA-256；可以注册为 systemd 服务 |
-| Windows 二进制 | Windows amd64、arm64     | PowerShell 安装脚本或手动解压                   |
+| 方式           | 适用系统                  | 说明                                            |
+| -------------- | ------------------------- | ----------------------------------------------- |
+| Docker Compose | 任何能运行 Docker 的系统  | 推荐。升级只需要拉取新镜像                      |
+| `docker run`   | 同上                      | 单条命令，适合临时试用                          |
+| Linux 二进制   | Linux amd64、arm64        | 安装脚本会校验 SHA-256；可以注册为 systemd 服务 |
+| Windows 二进制 | Windows amd64、arm64      | PowerShell 安装脚本或手动解压                   |
+| NAS            | 1Panel、Unraid、飞牛 fnOS | 用 `deploy/` 里的应用定义安装                   |
 
 不提供 macOS 二进制，macOS 请使用 Docker。
+
+本站文档按 1.0 预览版编写。下面的命令默认安装正式版 0.48.0，其中没有标「1.0 预览版」的功能；要使用这些功能，按[安装预览版](#安装预览版)安装预览版。
 
 ## Docker Compose（推荐）
 
@@ -24,6 +27,8 @@ services:
       PT_HOST: "0.0.0.0"
       PT_PORT: "8080"
       TZ: "Asia/Shanghai"
+      PUID: "1000"
+      PGID: "1000"
     ports:
       - "8080:8080"
     volumes:
@@ -47,7 +52,7 @@ docker compose up -d
 
 `logging` 一节限制容器标准输出日志的大小。不设置时，长时间运行会让 Docker 的日志文件持续增长，NAS 用户尤其需要注意，详见[配置说明](../configuration.md)。
 
-镜像同时发布在 Docker Hub（`sunerpy/pt-tools`）和 GHCR（`ghcr.io/sunerpy/pt-tools`，附带构建证明），两者内容相同。
+镜像同时发布在 Docker Hub（`sunerpy/pt-tools`）和 GHCR（`ghcr.io/sunerpy/pt-tools`，附带构建证明），两者内容相同。国内拉取 Docker Hub 较慢时，可以在 Docker 的 `daemon.json` 里配置 `registry-mirrors`（镜像加速地址），镜像名不用改。
 
 ## docker run
 
@@ -72,6 +77,24 @@ docker run -d \
 | `PT_ADMIN_PASS`  | 初始管理员密码                          | `adminadmin`    |
 | `PT_ADMIN_RESET` | 设为 `1` 时按上面两个变量重置管理员密码 | 未设置          |
 | `HTTP_PROXY` 等  | 代理，见[配置说明](../configuration.md) | 未设置          |
+
+## NAS
+
+仓库的 `deploy/` 目录里有 1Panel、Unraid 和飞牛 fnOS 的应用定义，下面是不经应用商店、直接用这些文件安装的方法。三者都把数据目录映射到容器的 `/app/.pt-tools`，升级、重装时保留这个目录并备份其中的 `secret.key`。
+
+容器以 `PUID`、`PGID` 指定的用户运行，启动时把 `/app` 下的文件交给这个用户。NAS 上常用的组 ID 100 在镜像里已经存在（`users` 组），直接沿用。这需要 1.0.0-rc.4 或更新的镜像：更早的版本在 `PGID` 是镜像里已有的组时启动失败（日志里是 `addgroup: gid in use`）。
+
+### 1Panel
+
+把 `deploy/1panel/pt-tools` 整个目录复制到服务器的 `/opt/1panel/resource/apps/local/pt-tools`，在 1Panel 的应用商店里刷新本地应用列表，找到 pt-tools 安装，填写网页端口和时区。数据在应用目录下的 `data/` 里。
+
+### Unraid
+
+把 `deploy/unraid/pt-tools.xml` 下载到 U 盘的 `/boot/config/plugins/dockerMan/templates-user/my-pt-tools.xml`，在 Docker 页面点 **Add Container**，从 Template 下拉框里选 pt-tools。模板默认 `PUID=99`、`PGID=100`（Unraid 的 nobody 与 users），数据目录是 `/mnt/user/appdata/pt-tools`。
+
+### 飞牛 fnOS
+
+在 fnOS 的 Docker 应用里新建一个 Compose 项目，内容用[上面的 Compose 文件](#docker-compose推荐)，把 `./data` 换成共享文件夹里的一个目录（例如 `/vol1/1000/docker/pt-tools`），再按这个目录所属用户设置 `PUID`、`PGID`（用 `ls -n` 查看）。`deploy/fnos` 是提交给第三方应用中心 fnos-apps 的打包配置。
 
 ## Linux 二进制
 
@@ -151,6 +174,17 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 ```
 
 数据保存在用户目录下的 `.pt-tools` 文件夹中。
+
+## 安装预览版
+
+预览版发布在 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 里标为 Pre-release 的版本中，版本号形如 `v1.0.0-rc.N`。`latest` 镜像标签和安装脚本默认安装的仍是正式版；预览版要写明版本号，下面以 `v1.0.0-rc.36` 为例，实际请换成 Releases 页面上最新的预览版。
+
+- Docker：把镜像写成 `sunerpy/pt-tools:v1.0.0-rc.36`（或 `ghcr.io/sunerpy/pt-tools:v1.0.0-rc.36`），再重新创建容器。预览版不会更新 `latest` 标签，有新的预览版时要手动改版本号。
+- Linux：`curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.sh | TOOL_VERSION=v1.0.0-rc.36 sh`。
+- Windows：先设置 `$env:TOOL_VERSION = "v1.0.0-rc.36"`，再运行上面的安装命令。
+- 手机 App：现在的预览版里，安装包和服务端在同一个 Release 里，见[手机 App](./mobile-app.md#安装)。
+
+预览版用于测试，不建议直接用在生产环境。从正式版升级前先按[备份](./upgrade.md#备份)保存数据目录：预览版启动时会迁移数据库结构，要回到 0.48.0 时请换回升级前备份的数据目录。
 
 ## 首次登录
 

@@ -11,7 +11,7 @@ import (
 )
 
 func TestPersistentCheckCfg_DownloadDirEmpty_ExitPath(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	cmd := &cobra.Command{}

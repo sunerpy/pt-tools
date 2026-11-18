@@ -12,16 +12,76 @@
 pt-tools web --host 0.0.0.0 --port 8080
 ```
 
-| 参数     | 说明     | 默认值    |
-| -------- | -------- | --------- |
-| `--host` | 监听地址 | `0.0.0.0` |
-| `--port` | 监听端口 | `8080`    |
+| 参数                 | 说明                                                                                                                                        | 默认值    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `--host`             | 监听地址                                                                                                                                    | `0.0.0.0` |
+| `--port`             | 监听端口                                                                                                                                    | `8080`    |
+| `--qbit-compat-addr` | [qB 兼容入口](../guide/qbit-compat.md)的监听地址（如 `0.0.0.0:8081`）；不填时看环境变量 `PT_QBIT_COMPAT_ADDR`，再看网页上设的，都没有就不开 | 不开      |
 
 Docker 镜像通过环境变量 `PT_HOST`、`PT_PORT` 设置这两项，其余环境变量见[安装](../guide/install.md)和[配置说明](../configuration.md)。
 
+## pt-tools mcp
+
+把运行中的 pt-tools 的 [MCP](../guide/mcp.md) 工具接到标准输入输出，给 Claude Desktop 这类只支持 stdio 的 MCP 客户端用。它连上 `--url` 指定的 pt-tools，把那里的工具原样转发；不打开数据库，也不启动调度器，所以可以放在客户端那台机器上运行。
+
+```bash
+PT_TOOLS_MCP_TOKEN=ptt_1_xxxxxxxx pt-tools mcp --url http://192.168.1.10:8080
+```
+
+| 参数      | 说明                                                                                                               | 默认值                  |
+| --------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| `--url`   | pt-tools 的地址；只给主机与端口时补上 `/mcp`。不填时看环境变量 `PT_TOOLS_MCP_URL`                                  | `http://127.0.0.1:8080` |
+| `--token` | 有「MCP 读取」或「MCP 操作」权限的 API 令牌。不填时看环境变量 `PT_TOOLS_MCP_TOKEN`；放在命令行里会出现在进程列表中 | 无                      |
+
+连接成功时在标准错误输出一行提示，标准输出只用于 MCP 协议。
+
+## pt-tools relay serve
+
+运行[远程访问](../guide/remote-access.md)的 relay：手机 App 与 pt-tools 都连到它，由它转发加密以后的连接，看不到内容。适合放在有公网地址的 VPS 或 NAS 上自己部署。它不打开数据库，也不读写 `~/.pt-tools`。
+
+```bash
+pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
+```
+
+| 参数                        | 说明                                                                                                                                                                                                                                                                                                                     | 默认值         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------- |
+| `--public-url`              | relay 对外的地址（`ws://` 或 `wss://`），App 与 pt-tools 里填的就是它；主机按它签名，必须和实际访问的地址一致。必填                                                                                                                                                                                                      | 无             |
+| `--listen`                  | 监听地址                                                                                                                                                                                                                                                                                                                 | `0.0.0.0:8443` |
+| `--max-streams-per-host`    | 每台 pt-tools 同时连着的手机连接上限，多的以 4429 关闭                                                                                                                                                                                                                                                                   | `16`           |
+| `--daily-bytes-per-host`    | 每台 pt-tools 每天（00:00 UTC 重置）转发的字节上限，两个方向合计；超额以后它的手机连接全部断开，直到重置。`0` 表示不限                                                                                                                                                                                                   | `0`            |
+| `--max-conn-per-ip-per-min` | 每个 IP 每分钟新建连接的上限，负数表示不限                                                                                                                                                                                                                                                                               | `30`           |
+| `--client-ip-header`        | 从这个请求头取客户端 IP（放在反向代理之后时，例如 `X-Real-IP`）；头里有多个地址时取最后一个（代理追加的）。只有确定请求都经过代理时才设                                                                                                                                                                                  | 无             |
+| `--tls-cert`、`--tls-key`   | TLS 证书与私钥文件；不填时是明文，交给反向代理做 TLS                                                                                                                                                                                                                                                                     | 无             |
+| `--disabled`                | 暂停服务：所有连接以 4503 关闭                                                                                                                                                                                                                                                                                           | 关             |
+| `--max-connections`         | 同时连着的连接上限（pt-tools 与手机合计），满了新连接回 HTTP 503，已经连着的不受影响；负数表示不限                                                                                                                                                                                                                       | `10000`        |
+| `--drain-grace`             | 收到 SIGTERM 以后先不接新连接（`/ready` 回 503），等这么久再关掉所有连接（关闭码 1012，pt-tools 与 App 几秒内重连）。前面有负载均衡按 `/ready` 摘流量时设几秒，最长 5 分钟。在 Docker 里用时，`docker stop` 的等待时间（`-t`，默认 10 秒；Compose 是 `stop_grace_period`）要比它多几秒，否则容器在关连接以前就被强制结束 | `0s`           |
+| `--metrics`                 | 提供 `GET /metrics`（Prometheus 文本，只有聚合的计数，没有 hostId 与 IP）；`--metrics=false` 关掉                                                                                                                                                                                                                        | 开             |
+
+每个参数也可以用环境变量给出：`PT_TOOLS_RELAY_LISTEN`、`PT_TOOLS_RELAY_PUBLIC_URL`、`PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`、`PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`、`PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`、`PT_TOOLS_RELAY_CLIENT_IP_HEADER`、`PT_TOOLS_RELAY_TLS_CERT`、`PT_TOOLS_RELAY_TLS_KEY`、`PT_TOOLS_RELAY_DISABLED=true`、`PT_TOOLS_RELAY_MAX_CONNECTIONS`、`PT_TOOLS_RELAY_DRAIN_GRACE`（例如 `5s`）、`PT_TOOLS_RELAY_METRICS=false`；值写错（数字不是整数、开关不是 `true`/`false`、时长没有单位），或者 `--max-streams-per-host`、`--daily-bytes-per-host` 是负数、`--drain-grace` 超出 0 到 5 分钟时不启动（`--max-conn-per-ip-per-min`、`--max-connections` 的负数仍表示不限）。Docker 镜像设 `PT_MODE=relay` 时运行它。`GET /healthz` 返回运行状态与版本；`GET /ready` 在接新连接时回 200，排空、满了、暂停服务时回 503，健康检查用它。
+
+## pt-tools db
+
+备份与恢复数据。两个命令都不迁移数据库，pt-tools 在运行时也能用。
+
+```bash
+pt-tools db backup                                   # 放进备份设置里的目录
+pt-tools db backup --output /mnt/backup/ --no-secret # 放到别的目录，不带密钥
+pt-tools db restore --input /mnt/backup/pt-tools-backup-20261102-043000-scheduled.tar.gz
+pt-tools db restore --cancel
+```
+
+| 子命令    | 参数             | 说明                                                                    |
+| --------- | ---------------- | ----------------------------------------------------------------------- |
+| `backup`  | `--output`, `-o` | 备份文件或目录，默认是「全局设置 → 备份」里的目录；文件已经存在时不覆盖 |
+|           | `--no-secret`    | 不带上 `secret.key`；不加时按备份设置                                   |
+| `restore` | `--input`, `-i`  | 校验这份备份，通过后放进待恢复，**重启 pt-tools 以后生效**              |
+|           | `--cancel`       | 取消尚未生效的恢复                                                      |
+
+恢复的密钥规则、重启时怎么换上与失败时怎么回退，见[升级与备份](../guide/upgrade.md#恢复)。
+
 ## pt-tools secret
 
-导出或导入用于加密站点 Cookie 和通知凭证的密钥。
+导出或导入用于加密站点 Cookie、通知凭证和各类 API Key 的密钥。
 
 ```bash
 # 把密钥以 base64 文本输出到标准输出
@@ -60,7 +120,7 @@ pt-tools clean --confirm --keep-backups 10
 
 - `logs`：已轮转的日志备份。正在写入的日志文件不会被删除。
 - `staging`：`downloads/` 下已经推送、已失效或超过保留期的 `.torrent` 文件。
-- `backups`：自动生成的历史配置备份，只保留最近 N 份。
+- `backups`：迁移数据库时自动留下的旧配置备份（`.json`），只保留最近 N 份。备份文件（`.tar.gz`）不归它管。
 
 `torrents.db`、`secret.key` 和正在写入的日志在任何情况下都不会被删除。
 
@@ -83,7 +143,7 @@ pt-tools completion zsh > "${fpath[1]}/_pt-tools"
 
 ## 较少使用的命令
 
-下面的命令不在 `pt-tools --help` 中显示，只在特定情况下使用。
+下面的命令只在特定情况下使用，`config` 不在 `pt-tools --help` 中显示。
 
 | 命令                       | 用途                                                                                                                        |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |

@@ -4,6 +4,8 @@ import { computed, onMounted, ref } from "vue";
 import { initI18n, t, type MessageKey } from "../core/i18n";
 import { createMessage, sendToBackground } from "../core/messages";
 import { hasRequiredPermissions, requestCorePermissions } from "../core/permissions";
+import { loadLoginSnapshot, loadSitesSnapshot } from "../core/snapshots";
+import { getConnection } from "../core/storage";
 import type {
   AutoCollectPayload,
   BatchOpenTabsResult,
@@ -19,11 +21,10 @@ import type {
   ToggleAutoSyncPayload,
 } from "../core/types";
 import { createGitHubIssue, createExportZip, downloadZip } from "../modules/export";
-import { friendlyErrorMessage } from "../modules/sync";
+import { friendlyErrorMessage, type SiteLoginStateRecord } from "../modules/sync";
 import { useToast } from "./composables/useToast";
-import CookieStatus from "./components/CookieStatus.vue";
-import DefaultView from "./components/DefaultView.vue";
 import KnownSiteView from "./components/KnownSiteView.vue";
+import MySites from "./components/MySites.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import ToastStack from "./components/ToastStack.vue";
 import UnknownSiteView from "./components/UnknownSiteView.vue";
@@ -64,8 +65,21 @@ const connection = ref<PtToolsConnection>({
   connected: false,
   lastSync: null,
 });
-const isSettingsOpen = ref(false);
+/** 主页面是「当前页 + 我的站点」，设置单独一页（右上角的按钮） */
+const view = ref<"main" | "settings">("main");
 const permissionsGranted = ref(true);
+
+/** 三样东西分开读、谁先回来先显示谁：以前等它们全回来才渲染，打开弹窗要好几秒 */
+const sitesLoading = ref(true);
+const connChecking = ref(true);
+const logins = ref<SiteLoginStateRecord[]>([]);
+const loginError = ref("");
+/** 这次打开已经读到新的站点状态 / 登录状态；在那之前显示的是上次存下的（core/snapshots.ts） */
+const sitesFresh = ref(false);
+const loginsFresh = ref(false);
+/** 显示的登录状态是上次存下的那份时，读到它的时间（ISO） */
+const loginsAt = ref("");
+const syncingId = ref("");
 
 const busySync = ref(false);
 const busyCapture = ref(false);
@@ -88,7 +102,23 @@ const knownStatus = computed(() =>
 const unknownStatus = computed(() =>
   tabStatus.value.mode === "unknown" ? (tabStatus.value.unknown ?? null) : null,
 );
-const showSettingsExpanded = computed(() => isSettingsOpen.value);
+/** 上次连上过的，检查期间先照旧显示已连接，检查完再改；没连上过的才显示「连接中」 */
+const connPending = computed(() => connChecking.value && !connection.value.connected);
+const connLabel = computed(() => {
+  if (!connection.value.baseUrl?.trim()) return t("conn.notConfigured");
+  if (connPending.value) return t("conn.checking");
+  return connection.value.connected ? t("conn.connected") : t("conn.disconnected");
+});
+const connTone = computed(() =>
+  connPending.value ? "muted" : connection.value.connected ? "ok" : "bad",
+);
+const connHost = computed(() => {
+  try {
+    return new URL(connection.value.baseUrl).host;
+  } catch {
+    return "";
+  }
+});
 
 async function requestMessage<K extends MessageType, T>(
   type: K,
@@ -102,17 +132,87 @@ async function requestMessage<K extends MessageType, T>(
   return parsed.data;
 }
 
-async function refreshState(): Promise<void> {
-  const [nextTabStatus, statusPayload, sites] = await Promise.all([
-    requestMessage<"GET_TAB_STATUS", TabSiteStatus>("GET_TAB_STATUS", {}),
-    requestMessage<"GET_STATUS", StatusPayload>("GET_STATUS", {}),
-    requestMessage<"GET_ALL_SITES_STATUS", KnownSiteStatus[]>("GET_ALL_SITES_STATUS", {}),
-  ]);
-
-  tabStatus.value = nextTabStatus;
+async function loadStatus(): Promise<void> {
+  const statusPayload = await requestMessage<"GET_STATUS", StatusPayload>("GET_STATUS", {});
   activeSession.value = statusPayload.activeSession;
-  connection.value = statusPayload.connection;
-  allSites.value = sites;
+  connection.value = { ...statusPayload.connection, connected: connection.value.connected };
+}
+
+async function loadTab(): Promise<void> {
+  tabStatus.value = await requestMessage<"GET_TAB_STATUS", TabSiteStatus>("GET_TAB_STATUS", {});
+}
+
+async function loadSites(): Promise<void> {
+  try {
+    allSites.value = await requestMessage<"GET_ALL_SITES_STATUS", KnownSiteStatus[]>(
+      "GET_ALL_SITES_STATUS",
+      {},
+    );
+    sitesFresh.value = true;
+  } finally {
+    sitesLoading.value = false;
+  }
+}
+
+/**
+ * 先显示上次的结果：站点状态、登录状态、连接状态都直接从存储里读，不等 service worker 和网络；
+ * 这次读到的回来以后就不再用它。以前每次打开都要等 ping 完再取登录状态，网络慢时空等好几秒。
+ */
+async function restoreSnapshot(): Promise<void> {
+  const [stored, sites] = await Promise.all([getConnection(), loadSitesSnapshot()]);
+  if (sites && !sitesFresh.value) {
+    allSites.value = sites.data;
+    sitesLoading.value = false;
+  }
+  if (connChecking.value) {
+    connection.value = { ...stored };
+  }
+  const cached = await loadLoginSnapshot(stored.baseUrl);
+  if (cached && !loginsFresh.value) {
+    logins.value = cached.data;
+    loginsAt.value = cached.at;
+  }
+}
+
+/** 页头的连接状态：单独 ping 一次 pt-tools（最多 4 秒），连上以后再取登录状态 */
+async function checkConnection(): Promise<void> {
+  connChecking.value = true;
+  try {
+    const conn = await requestMessage<"CHECK_CONNECTION", PtToolsConnection>(
+      "CHECK_CONNECTION",
+      {},
+    );
+    connection.value = conn;
+  } catch {
+    connection.value = { ...connection.value, connected: false };
+  } finally {
+    connChecking.value = false;
+  }
+  if (connection.value.connected) {
+    await loadLogins();
+  } else if (connection.value.baseUrl?.trim()) {
+    loginError.value = t("conn.disconnected");
+  }
+}
+
+async function loadLogins(): Promise<void> {
+  try {
+    logins.value = await requestMessage<"GET_SITE_LOGIN_STATE", SiteLoginStateRecord[]>(
+      "GET_SITE_LOGIN_STATE",
+      {},
+    );
+    loginsFresh.value = true;
+    loginsAt.value = "";
+    loginError.value = "";
+  } catch (error: unknown) {
+    // 读不到时留着上次的登录状态（若有），横幅写明是什么时候的
+    loginError.value = error instanceof Error ? friendlyErrorMessage(error.message) : "";
+  }
+}
+
+/** 同步、开关这类操作之后刷新：当前页和站点列表，连接状态不必每次重测 */
+async function refreshState(): Promise<void> {
+  await Promise.all([loadStatus(), loadTab(), loadSites()]);
 }
 
 function siteNameById(siteId: string): string {
@@ -122,14 +222,26 @@ function siteNameById(siteId: string): string {
 
 async function handleSyncSite(siteId: string): Promise<void> {
   busySync.value = true;
+  syncingId.value = siteId;
   try {
-    await requestMessage<"SYNC_SITE_COOKIES", { ok: true }>("SYNC_SITE_COOKIES", { siteId });
+    const result = await requestMessage<"SYNC_SITE_COOKIES", { ok: true; warning?: string }>(
+      "SYNC_SITE_COOKIES",
+      { siteId },
+    );
     await refreshState();
-    toast.success(t("feedback.syncSuccess", siteNameById(siteId)));
+    if (result.warning) {
+      toast.warning(t("feedback.syncedWithWarning", siteNameById(siteId), result.warning));
+    } else {
+      toast.success(t("feedback.syncSuccess", siteNameById(siteId)));
+    }
+    void loadLogins();
   } catch (error: unknown) {
     showError(error, "feedback.syncFailed");
+    // pt-tools 验证后拒绝保存时后台记下了原因：重读一遍，行上马上换成这个原因，不用关了弹窗再打开（issue #864）
+    void refreshState().catch(() => undefined);
   } finally {
     busySync.value = false;
+    syncingId.value = "";
   }
 }
 
@@ -209,6 +321,7 @@ async function handleTestConnection(payload: {
   try {
     const result = await requestMessage<"SYNC_COOKIES", PtToolsConnection>("SYNC_COOKIES", payload);
     await refreshState();
+    void checkConnection();
     if (result.connected) {
       toast.success(t("feedback.connectionSuccess"));
     } else {
@@ -228,9 +341,10 @@ async function handleSaveSettings(payload: { baseUrl: string }): Promise<void> {
       baseUrl: payload.baseUrl,
     });
     await refreshState();
+    void checkConnection();
     if (result.connected) {
       toast.success(t("feedback.settingsSaved"));
-      isSettingsOpen.value = false;
+      view.value = "main";
     } else {
       toast.warning(t("feedback.settingsSavedNotConnected", payload.baseUrl));
     }
@@ -296,6 +410,17 @@ async function handleBatchSync(siteIds: string[]): Promise<void> {
     });
     await refreshState();
     const total = result.synced.length + result.failed.length;
+    const warnings = result.warnings ?? [];
+    if (warnings.length > 0) {
+      toast.warning(
+        t(
+          "feedback.batchWarnings",
+          warnings.length,
+          warnings.map((w) => `${siteNameById(w.siteId)}：${w.warning}`).join("；"),
+        ),
+      );
+    }
+    void loadLogins();
     if (total === 0) {
       toast.warning(t("feedback.noSyncable"));
     } else if (result.failed.length === 0) {
@@ -351,9 +476,16 @@ onMounted(async () => {
   permissionsGranted.value = await hasRequiredPermissions();
 
   if (permissionsGranted.value) {
-    void refreshState().catch((error: unknown) => {
-      showError(error, "feedback.initFailed");
-    });
+    // 各读各的：连接状态、当前页、站点列表谁先回来先显示谁
+    const fail = (error: unknown) => showError(error, "feedback.initFailed");
+    void restoreSnapshot().catch(() => undefined);
+    void loadStatus().catch(fail);
+    void loadTab().catch(fail);
+    void loadSites().catch(fail);
+    void checkConnection();
+  } else {
+    sitesLoading.value = false;
+    connChecking.value = false;
   }
 
   chrome.runtime.onMessage.addListener((message: unknown) => {
@@ -366,7 +498,8 @@ onMounted(async () => {
       return;
     }
 
-    void refreshState();
+    void loadStatus();
+    void loadTab();
   });
 });
 </script>
@@ -374,9 +507,22 @@ onMounted(async () => {
 <template>
   <main class="popup-root">
     <header class="app-header">
-      <h1>{{ t("app.title") }}</h1>
-      <button type="button" class="settings-trigger" @click="isSettingsOpen = !isSettingsOpen">
-        {{ t("app.settings") }}
+      <h1>{{ view === "settings" ? t("app.settingsTitle") : t("app.title") }}</h1>
+      <span
+        v-if="view === 'main'"
+        class="conn-chip"
+        :class="`tone-${connTone}`"
+        :title="connection.baseUrl"
+        data-testid="conn-chip">
+        <i class="conn-dot" />{{ connLabel
+        }}<template v-if="connHost && !connPending"> · {{ connHost }}</template>
+      </span>
+      <button
+        type="button"
+        class="settings-trigger"
+        data-testid="settings-trigger"
+        @click="view = view === 'main' ? 'settings' : 'main'">
+        {{ view === "main" ? t("app.settings") : t("app.back") }}
       </button>
     </header>
 
@@ -391,6 +537,15 @@ onMounted(async () => {
         {{ t("permission.grant") }}
       </button>
     </section>
+
+    <template v-else-if="view === 'settings'">
+      <SettingsPanel
+        :connection="connection"
+        :busy="busySettings"
+        @test="handleTestConnection"
+        @save="handleSaveSettings"
+        @check-update="handleCheckExtensionUpdate" />
+    </template>
 
     <template v-else>
       <section v-if="knownStatus" class="view-shell">
@@ -415,9 +570,20 @@ onMounted(async () => {
           @auto-collect="handleAutoCollect" />
       </section>
 
-      <section v-else class="view-shell">
-        <DefaultView :sites="allSites" :connection="connection" />
-      </section>
+      <MySites
+        :sites="allSites"
+        :sites-loading="sitesLoading"
+        :refreshing="!sitesFresh && allSites.length > 0"
+        :logins="logins"
+        :logins-known="loginsFresh || loginsAt !== ''"
+        :logins-at="loginsAt"
+        :login-error="loginError"
+        :busy="busySync || busySettings"
+        :syncing-id="syncingId"
+        @sync="handleSyncSite"
+        @sync-all="handleBatchSync"
+        @open-all="handleBatchOpen"
+        @login="view = 'settings'" />
 
       <section
         v-if="activeSession && activeSession.pages.length > 0"
@@ -434,30 +600,6 @@ onMounted(async () => {
           <button type="button" class="btn ghost" :disabled="busyExport" @click="handleCreateIssue">
             {{ t("collect.createIssue") }}
           </button>
-        </div>
-      </section>
-
-      <section class="global-section">
-        <div class="section-header" @click="isSettingsOpen = !isSettingsOpen">
-          <h2>{{ t("settings.title") }}</h2>
-          <span class="toggle-icon">{{ showSettingsExpanded ? "▾" : "▸" }}</span>
-        </div>
-        <SettingsPanel
-          v-show="showSettingsExpanded"
-          :connection="connection"
-          :busy="busySettings"
-          :sites="allSites"
-          @test="handleTestConnection"
-          @save="handleSaveSettings"
-          @batch-sync="handleBatchSync"
-          @batch-open="handleBatchOpen"
-          @check-update="handleCheckExtensionUpdate" />
-        <div v-if="knownStatus && !showSettingsExpanded" class="quick-cookie-status">
-          <span class="quick-cookie-label">{{ t("known.cookieStatus") }}</span>
-          <CookieStatus
-            :status="knownStatus.cookieStatus"
-            :days="knownStatus.cookieExpireDays"
-            compact />
         </div>
       </section>
     </template>

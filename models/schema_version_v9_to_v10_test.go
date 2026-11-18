@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,7 @@ func setupV9MigrationDB(t *testing.T) (*gorm.DB, map[string]*time.Time) {
 	if err != nil {
 		t.Fatalf("创建 v9 测试数据库失败: %v", err)
 	}
+	t.Cleanup(func() { closeTestGorm(db) })
 	if err := db.AutoMigrate(&SchemaVersion{}, &v9SiteLoginState{}); err != nil {
 		t.Fatalf("迁移 v9 基础表失败: %v", err)
 	}
@@ -131,17 +133,21 @@ func TestMigrationV9ToV10Forward(t *testing.T) {
 	if err != nil {
 		t.Fatalf("获取版本失败: %v", err)
 	}
-	if version != 10 {
-		t.Fatalf("schema version = %d, want 10", version)
+	// 迁移链会继续跑到最新版本（v11 起清除明文 Cookie）。
+	if version != CurrentSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, CurrentSchemaVersion)
 	}
 	if hooks.backupCalls.Load() < 1 {
 		t.Fatal("backup hook 未调用")
+	}
+	if backups := hooks.backupList(); !slices.Contains(backups, "site_login_states v9→v10") {
+		t.Fatalf("备份文件名要带这一步迁移的版本：%v", backups)
 	}
 }
 
 func TestMigrationV9ToV10Rollback(t *testing.T) {
 	db, _ := setupV9MigrationDB(t)
-	failingBackup := func(_ *gorm.DB, table string) (string, error) {
+	failingBackup := func(_ *gorm.DB, table string, _, _ int) (string, error) {
 		return "", fmt.Errorf("backup %s failed", table)
 	}
 	sm := NewSchemaManagerWithHooks(db, "test", failingBackup, nil, nil)

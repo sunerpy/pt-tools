@@ -29,14 +29,14 @@ func emptyDB(t *testing.T) *gorm.DB {
 
 func TestDBBindingLookup_FindByChannelUser_QueryError(t *testing.T) {
 	lookup := &dbBindingLookup{db: emptyDB(t)}
-	_, ok, err := lookup.FindByChannelUser(context.Background(), "telegram", "u")
+	_, ok, err := lookup.FindByChannelUser(context.Background(), 1, "telegram", "u")
 	require.Error(t, err)
 	assert.False(t, ok)
 }
 
 func TestCommandsBindingResolver_QueryError(t *testing.T) {
 	resolver := &commandsBindingResolver{lookup: &dbBindingLookup{db: emptyDB(t)}}
-	_, ok, err := resolver.FindByChannelUser(context.Background(), "telegram", "u")
+	_, ok, err := resolver.FindByChannelUser(context.Background(), 1, "telegram", "u")
 	require.Error(t, err)
 	assert.False(t, ok)
 }
@@ -53,12 +53,6 @@ func TestChatopsRSSWizardService_ListErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoginReminderConfLister_QueryError(t *testing.T) {
-	lister := loginReminderConfLister{db: emptyDB(t)}
-	_, err := lister.ListNotificationConfs(context.Background())
-	require.Error(t, err)
-}
-
 func TestWireLoginReminderMonitor_NilDB(t *testing.T) {
 	global.InitLogger(zap.NewNop())
 	prev := global.GlobalDB
@@ -67,7 +61,7 @@ func TestWireLoginReminderMonitor_NilDB(t *testing.T) {
 
 	mgr := scheduler.NewManager()
 	t.Cleanup(mgr.StopAll)
-	wireLoginReminderMonitor(mgr, nil, nil, nil)
+	wireLoginReminderMonitor(mgr, nil, nil, nil, nil)
 	assert.Nil(t, mgr.GetLoginReminderMonitor(), "nil DB must skip monitor wiring")
 }
 
@@ -75,7 +69,7 @@ func TestLoginReminderResolver_Resolve_Success(t *testing.T) {
 	global.InitLogger(zap.NewNop())
 	t.Setenv("PT_TOOLS_SECRET_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
 
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	store := core.NewConfigStore(db)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 
@@ -30,6 +31,8 @@ func publishNotificationConfigChanged() {
 // Notification 是 NotificationService 与 NotifyManager 之间传递的最小消息载荷。
 // TODO(T15): 替换为 internal/notify 包内的 notify.Notification 完整结构。
 type Notification struct {
+	// Event 是这条通知对应的事件（消息模板与 Webhook 请求体用）；没有时照内置的标题与正文发。
+	Event        *notify.Event     `json:"event,omitempty"`
 	Title        string            `json:"title"`
 	Text         string            `json:"text"`
 	SourceConfID uint              `json:"source_conf_id,omitempty"`
@@ -157,10 +160,14 @@ type NotificationService interface {
 // ErrConfNotFound 当 conf id 不存在时返回。
 var ErrConfNotFound = errors.New("notification conf not found")
 
+// ErrInvalidConf 表示通道配置没通过适配器的检查：保存前就拦下，不等热重载时才失败。
+var ErrInvalidConf = errors.New("通道配置无效")
+
 type notificationService struct {
 	db          *gorm.DB
 	manager     NotifyManager
 	pushTimeout time.Duration
+	registry    *notify.Registry // 检查配置用；默认是 notify.DefaultRegistry()
 }
 
 // NewNotificationService 构造一个 NotificationService。pushTimeout 为同步投递的最长等待时间，
@@ -169,7 +176,23 @@ func NewNotificationService(db *gorm.DB, manager NotifyManager, pushTimeout time
 	if pushTimeout <= 0 {
 		pushTimeout = 5 * time.Second
 	}
-	return &notificationService{db: db, manager: manager, pushTimeout: pushTimeout}
+	return &notificationService{db: db, manager: manager, pushTimeout: pushTimeout, registry: notify.DefaultRegistry()}
+}
+
+// checkConf 用通道类型对应的适配器检查明文配置（不发请求）。类型没注册、或适配器不支持检查时放行。
+func (s *notificationService) checkConf(typ string, plain []byte) error {
+	ch, err := s.registry.Make(typ)
+	if err != nil {
+		return nil
+	}
+	checker, ok := ch.(notify.ConfigChecker)
+	if !ok {
+		return nil
+	}
+	if err := checker.CheckConfig(&models.NotificationConf{ChannelType: typ, ConfigJSON: string(plain)}); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidConf, err.Error())
+	}
+	return nil
 }
 
 func (s *notificationService) ListConfs(ctx context.Context) ([]NotificationConfDTO, error) {
@@ -240,6 +263,9 @@ func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq)
 	if len(req.ConfigJSON) == 0 {
 		return NotificationConfDTO{}, errors.New("config_json 不能为空")
 	}
+	if err := s.checkConf(req.ChannelType, req.ConfigJSON); err != nil {
+		return NotificationConfDTO{}, err
+	}
 
 	cipherStr, err := crypto.Encrypt([]byte(req.ConfigJSON))
 	if err != nil {
@@ -252,7 +278,19 @@ func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq)
 		ConfigJSON:  cipherStr,
 		Enabled:     req.Enabled,
 	}
-	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		// Enabled 列带 gorm 默认值 true：Create 会跳过零值 false，库里存成启用。停用的要显式写一次
+		if !req.Enabled {
+			if err := tx.Model(&row).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			row.Enabled = false
+		}
+		return nil
+	}); err != nil {
 		return NotificationConfDTO{}, fmt.Errorf("创建通知通道失败: %w", err)
 	}
 	publishNotificationConfigChanged()
@@ -288,7 +326,8 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 	if req.QuietHoursEnd != nil {
 		updates["quiet_hours_end"] = *req.QuietHoursEnd
 	}
-	if len(req.ConfigJSON) > 0 {
+	// 改了配置或类型时，用合并后的配置按（新的）类型检查一遍再存
+	if req.ChannelType != nil || len(req.ConfigJSON) > 0 {
 		// 合并策略：解密 DB 现有配置 → 与 partial 新值 merge（新值覆盖、缺失键保留）→ 重新加密。
 		// 避免前端只发部分字段时把其他原有字段（admin_users / default_chat_id 等）覆盖掉。
 		var existingRow models.NotificationConf
@@ -312,23 +351,34 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 			}
 		}
 
-		var newMap map[string]json.RawMessage
-		if perr := json.Unmarshal([]byte(req.ConfigJSON), &newMap); perr != nil {
-			return fmt.Errorf("解析新配置失败: %w", perr)
-		}
-		for k, v := range newMap {
-			existingMap[k] = v
+		if len(req.ConfigJSON) > 0 {
+			var newMap map[string]json.RawMessage
+			if perr := json.Unmarshal([]byte(req.ConfigJSON), &newMap); perr != nil {
+				return fmt.Errorf("解析新配置失败: %w", perr)
+			}
+			for k, v := range newMap {
+				existingMap[k] = v
+			}
 		}
 
 		merged, merr := json.Marshal(existingMap)
 		if merr != nil {
 			return fmt.Errorf("合并配置失败: %w", merr)
 		}
-		cipherStr, err := crypto.Encrypt(merged)
-		if err != nil {
-			return fmt.Errorf("加密通道配置失败: %w", err)
+		typ := existingRow.ChannelType
+		if req.ChannelType != nil {
+			typ = *req.ChannelType
 		}
-		updates["config_json"] = cipherStr
+		if err := s.checkConf(typ, merged); err != nil {
+			return err
+		}
+		if len(req.ConfigJSON) > 0 {
+			cipherStr, err := crypto.Encrypt(merged)
+			if err != nil {
+				return fmt.Errorf("加密通道配置失败: %w", err)
+			}
+			updates["config_json"] = cipherStr
+		}
 	}
 	if len(updates) == 0 {
 		return nil
@@ -369,27 +419,57 @@ func (s *notificationService) TestConf(ctx context.Context, id uint) error {
 	if err != nil {
 		return fmt.Errorf("查询通知通道失败: %w", err)
 	}
-	chatID, err := s.testChatID(ctx, row)
-	if err != nil {
-		return err
-	}
-	targets := map[string]string(nil)
-	if chatID != "" {
-		targets = map[string]string{"chat_id": chatID}
-		if row.ChannelType == "qq_onebot" {
-			targets["message_type"] = "private"
-		}
-	}
+	// 测试消息与业务通知用同一个收件人（withRecipient）：测试能收到，每日战报、签到这些通知就也能收到
 	return s.PushSync(ctx, Notification{
+		Event:        notify.NewEvent(notify.EventTest, time.Now(), map[string]any{"channel": row.Name}),
 		Title:        "pt-tools 测试通知",
 		Text:         "如果你看到此消息，说明通道配置正常。",
 		SourceConfID: row.ID,
-		UserID:       chatID,
-		Targets:      targets,
 	})
 }
 
+// withRecipient 给没有指定收件人的通知补上通道的默认收件人，规则与测试消息相同（testChatID）：
+// QQ 私聊发给第一个管理员 QQ，没有时第一个允许 QQ，再没有时第一个完成绑定的账号；
+// Telegram 先用默认 Chat ID，没有时同样退到第一个管理员用户与第一个绑定的账号。
+//
+// 每日战报、签到、追剧、登录提醒与 RSS 推送都不带收件人：Telegram 自己会退到默认 Chat ID，
+// QQ 没有这一步，以前一律报「缺少目标 chat_id」，而测试消息因为另外挑了收件人照常能发。
+// 其它通道（Webhook、钉钉…）不需要收件人，原样返回。找不到收件人时返回原因：发出去也只会被通道拒绝。
+func (s *notificationService) withRecipient(ctx context.Context, n Notification) (Notification, error) {
+	if n.Targets["chat_id"] != "" || n.UserID != "" || n.SourceConfID == 0 {
+		return n, nil
+	}
+	var row models.NotificationConf
+	if err := s.db.WithContext(ctx).Select("id", "channel_type", "config_json").First(&row, n.SourceConfID).Error; err != nil {
+		// 读不到通道就原样交给通道：通道不存在时 manager 会说「未运行」
+		return n, nil
+	}
+	if row.ChannelType != "qq_onebot" && row.ChannelType != "telegram" {
+		return n, nil
+	}
+	chatID, err := s.testChatID(ctx, row)
+	if err != nil {
+		return n, err
+	}
+	targets := make(map[string]string, len(n.Targets)+2)
+	maps.Copy(targets, n.Targets)
+	targets["chat_id"] = chatID
+	if row.ChannelType == "qq_onebot" {
+		targets["message_type"] = "private"
+	}
+	n.Targets = targets
+	return n, nil
+}
+
 func (s *notificationService) testChatID(ctx context.Context, row models.NotificationConf) (string, error) {
+	return defaultRecipient(ctx, s.db, row)
+}
+
+// defaultRecipient 是没有指定收件人的通知（测试消息、每日战报、签到…）发给谁：
+// QQ 是第一个管理员 QQ，没有时第一个允许 QQ，再没有时第一个完成绑定的账号；
+// Telegram 是默认 Chat ID，没有时第一个管理员用户，再没有时第一个完成绑定的账号。
+// 其它通道不需要收件人，返回空串。绑定页上「通知发给谁」也读它。
+func defaultRecipient(ctx context.Context, db *gorm.DB, row models.NotificationConf) (string, error) {
 	switch row.ChannelType {
 	case "qq_onebot":
 		chatID, err := qqTestChatID(row)
@@ -399,10 +479,10 @@ func (s *notificationService) testChatID(ctx context.Context, row models.Notific
 		if chatID != "" {
 			return chatID, nil
 		}
-		if bindingChatID, err := s.firstBindingChatID(ctx, row.ID); err != nil || bindingChatID != "" {
+		if bindingChatID, err := firstBindingUser(ctx, db, row.ID); err != nil || bindingChatID != "" {
 			return bindingChatID, err
 		}
-		return "", errors.New("QQ 通道无可用收件人：请配置至少一个 admin_qq_users 或先完成一次绑定")
+		return "", errors.New("QQ 通道无可用收件人：在通道设置里填写管理员 QQ 或允许 QQ，或者先完成一次绑定")
 	case "telegram":
 		chatID, err := telegramTestChatID(row)
 		if err != nil {
@@ -411,10 +491,10 @@ func (s *notificationService) testChatID(ctx context.Context, row models.Notific
 		if chatID != "" {
 			return chatID, nil
 		}
-		if bindingChatID, err := s.firstBindingChatID(ctx, row.ID); err != nil || bindingChatID != "" {
+		if bindingChatID, err := firstBindingUser(ctx, db, row.ID); err != nil || bindingChatID != "" {
 			return bindingChatID, err
 		}
-		return "", errors.New("Telegram 通道无可用收件人：请配置 default_chat_id、至少一个 admin_users 或先完成一次绑定")
+		return "", errors.New("Telegram 通道无可用收件人：在通道设置里填写默认 Chat ID 或管理员用户，或者先完成一次绑定")
 	default:
 		return "", nil
 	}
@@ -509,8 +589,13 @@ func rawStringOrInt64Slice(raw json.RawMessage) ([]string, error) {
 }
 
 func (s *notificationService) firstBindingChatID(ctx context.Context, confID uint) (string, error) {
+	return firstBindingUser(ctx, s.db, confID)
+}
+
+// firstBindingUser 是这个通道上第一个完成绑定的账号（管理员优先）；没有时为空串。
+func firstBindingUser(ctx context.Context, db *gorm.DB, confID uint) (string, error) {
 	var binding models.ChannelBinding
-	err := s.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Where("notification_conf_id = ?", confID).
 		Order("pt_admin DESC, allowed DESC, id ASC").
 		First(&binding).Error
@@ -524,7 +609,13 @@ func (s *notificationService) firstBindingChatID(ctx context.Context, confID uin
 }
 
 // Push 同步投递：尝试在 pushTimeout 内调用 NotifyManager.Send；超时或失败则转为 outbox 异步队列。
+// 收件人在入队之前补上：outbox 的重试直接交给通道，不再经过这里。
 func (s *notificationService) Push(ctx context.Context, n Notification) error {
+	n, err := s.withRecipient(ctx, n)
+	if err != nil {
+		// 没有收件人时排进 outbox 也只会一直失败，直接把原因交回调用方（RSS 通知记进失败原因）
+		return err
+	}
 	if s.manager == nil {
 		return s.Enqueue(ctx, n, n.SourceConfID)
 	}
@@ -552,6 +643,10 @@ func (s *notificationService) Push(ctx context.Context, n Notification) error {
 func (s *notificationService) PushSync(ctx context.Context, n Notification) error {
 	if s.manager == nil {
 		return errors.New("通知管理器未初始化")
+	}
+	n, err := s.withRecipient(ctx, n)
+	if err != nil {
+		return err
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, s.pushTimeout)
 	defer cancel()

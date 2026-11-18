@@ -1,0 +1,89 @@
+/*
+ * 导出海报各样式共用的部分：海报本身、打码、站点图标。
+ *
+ * 海报是图片内容：颜色、字号、间距都写死在各样式里，不用本站的主题令牌 —— 导出的 PNG 落在别人的聊天窗口里，
+ * 跟本站当前是亮色还是暗色主题没有关系。宽度固定 640，导出按 2 倍出图；预览按容器宽度整体缩放。
+ */
+.poster {
+  position: relative;
+  box-sizing: border-box;
+  width: 640px;
+  overflow: hidden;
+  font-family:
+    "Noto Sans SC",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  text-align: left;
+  -webkit-font-smoothing: antialiased;
+}
+
+.poster *,
+.poster *::before,
+.poster *::after {
+  box-sizing: border-box;
+}
+
+/* 打码：首字 + 圆角遮盖条，条宽随字数。条是当前文字色的 22%，暗底亮底都成立；原文不在 DOM 里 */
+.poster-mk {
+  display: inline-flex;
+  gap: 0.18em;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.poster-mk > i {
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 0.78em;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 0.4em;
+}
+
+.poster-mk-text {
+  white-space: nowrap;
+}
+
+/* 站点图标：favicon、首字母块，或打码时的 4×4 色块 */
+.poster-logo {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+}
+
+.poster-logo--img {
+  background: #fff;
+}
+
+.poster-logo--img > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 色块要撑满各自的格子：.poster-logo 的居中对齐会把空的 <b> 缩成 0 高 */
+.poster-logo--mask {
+  display: inline-grid;
+  grid-template-rows: repeat(4, 1fr);
+  grid-template-columns: repeat(4, 1fr);
+  place-items: stretch;
+}
+
+.poster-logo--mask > b {
+  display: block;
+}

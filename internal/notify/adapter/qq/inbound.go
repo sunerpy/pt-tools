@@ -32,8 +32,9 @@ func (q *QQChannel) HandleRawEvent(payload []byte) error {
 		qqLogger().Debugf("QQ 适配器(%d): 收到事件 post_type=%s msg_type=%s user=%d group=%d",
 			q.confID, evt.PostType, evt.MessageType, evt.UserID, evt.GroupID)
 	} else {
-		qqLogger().Infof("QQ 适配器(%d): 收到事件 post_type=%s msg_type=%s user=%d group=%d text=%q",
-			q.confID, evt.PostType, evt.MessageType, evt.UserID, evt.GroupID, evt.RawMessage)
+		// 不记录消息正文：/addrss 等命令会带 RSS 地址里的 passkey，白名单外的人发来的内容也不该进日志。
+		qqLogger().Infof("QQ 适配器(%d): 收到事件 post_type=%s msg_type=%s user=%d group=%d len=%d",
+			q.confID, evt.PostType, evt.MessageType, evt.UserID, evt.GroupID, len(evt.RawMessage))
 	}
 	if evt.PostType != "message" {
 		return nil
@@ -55,11 +56,19 @@ func (q *QQChannel) HandleRawEvent(payload []byte) error {
 	handler := q.inboundHandler
 	q.handlerMu.RUnlock()
 	if handler == nil {
-		warnLogger().Warnf("QQ 适配器(%d): inboundHandler 未设置，丢弃消息 text=%q", q.confID, text)
+		warnLogger().Warnf("QQ 适配器(%d): inboundHandler 未设置，丢弃消息 len=%d", q.confID, len(text))
 		return nil
 	}
 
-	qqLogger().Infof("QQ 适配器(%d): 路由到 ChatOps user=%d text=%q", q.confID, evt.UserID, text)
+	if q.handlerSlots != nil {
+		select {
+		case q.handlerSlots <- struct{}{}:
+		default:
+			warnLogger().Warnf("QQ 适配器(%d): 同时处理的消息已达上限 %d，丢弃 user=%d 的消息", q.confID, cap(q.handlerSlots), evt.UserID)
+			return nil
+		}
+	}
+	qqLogger().Infof("QQ 适配器(%d): 路由到 ChatOps user=%d len=%d", q.confID, evt.UserID, len(text))
 	ctx := context.Background()
 	if q.lifecycleCtx != nil {
 		ctx = q.lifecycleCtx
@@ -71,6 +80,9 @@ func (q *QQChannel) HandleRawEvent(payload []byte) error {
 	// response can only be dispatched by the same read goroutine that's blocked
 	// inside the handler.
 	go func(ctx context.Context, msg inboundMessage) {
+		if q.handlerSlots != nil {
+			defer func() { <-q.handlerSlots }()
+		}
 		if err := handler(ctx, msg); err != nil {
 			warnLogger().Warnf("QQ 适配器(%d): ChatOps handler 异常: %v", q.confID, err)
 		}

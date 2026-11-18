@@ -1,0 +1,15 @@
+#!/bin/bash
+FILE_PATH="${TRIM_APPDEST}/docker/docker-compose.yaml"
+# 读不到 compose 文件或容器名时算作没在运行，不能报告成正常
+is_docker_running () {
+    [ -f "$FILE_PATH" ] || return 1
+    DOCKER_NAME=$(grep -m1 "container_name" "$FILE_PATH" | awk -F ':' '{print $2}' | xargs)
+    [ -n "$DOCKER_NAME" ] || return 1
+    [ "$(docker inspect --format '{{.State.Running}}' "$DOCKER_NAME" 2>/dev/null)" = "true" ]
+}
+case $1 in
+start) exit 0 ;;
+stop) exit 0 ;;
+status) if is_docker_running; then exit 0; else exit 3; fi ;;
+*) exit 1 ;;
+esac

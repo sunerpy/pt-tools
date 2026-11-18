@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,7 +52,8 @@ const byrptSearchFixture = `<html><body>
 const byrptIndexFixture = `<html><body>
 <td class="bottom navbar-user-data">
 欢迎, <span class='nowrap'><a class='ExtremeUser_Name' href='/userdetails.php?id=308953'><span style='font-weight: bold'>nav_user</span></a></span>
-<span class='color_bonus'>魔力值 </span>[<a href="mybonus.php">明细</a>]: 1424274.9
+<span class='color_bonus'>魔力值 </span>
+                                [<a href="mybonus.php">明细</a>]: 1,424,274.9
 <span class="color_ratio">分享率：</span>8.26
 <span class='color_uploaded'>上传量：</span>8.610 TiB
 <span class='color_downloaded'> 下载量：</span>1.042 TiB
@@ -65,8 +67,20 @@ const byrptUserdetailsFixture = `<html><body>
 <tr><td class="rowhead nowrap">加入日期</td><td class="rowfollow">2021-04-13 18:05:04 (<span title='2021-04-13 18:05:04'>4年 11月前</span>)</td></tr>
 <tr><td class="rowhead nowrap">传输</td><td class="rowfollow"><table class='block-left'><tr><td class="embedded"><strong>分享率</strong>: <span>165.662</span></td></tr><tr><td class="embedded"><strong>上传量</strong>: 113.666 TiB</td><td class="embedded">&nbsp;&nbsp;<strong>下载量</strong>: 702.60 GiB</td></tr></table></td></tr>
 <tr><td class="rowhead nowrap">等级</td><td class="rowfollow"><img alt="Ultimate User" title="Ultimate User" src="pic/ultimate.gif" /></td></tr>
-<tr><td class="rowhead nowrap">魔力值</td><td class="rowfollow">1192520.0</td></tr>
+<tr><td class="rowhead nowrap">魔力值</td><td class="rowfollow">1192520.0&nbsp;&nbsp;&nbsp;<a class="altlink" href="/mybonus.php">魔力值历史</a></td></tr>
 </table>
+</body></html>`
+
+// 魔力值页的「做种详情」（mybonus.php?show=seed）：时魔那一句的写法照站点（2026-10-31 核对），前面是计算公式的说明
+const byrptBonusFixture = `<html><body>
+<ul><li><b>B0</b>为参数，代表用户1小时获得魔力值的上限。<b>B0</b> = 100</li><li><b>L</b>为参数。<b>L</b> = 300</li></ul>
+<div style="text-align: center" class="big bold">你当前每小时能获取98.481个魔力值 (A = 2228.5)</div>
+<table style="width: 400px"><tbody><tr><td class="loadbarbg" style="border: none; padding: 0"><img class="loadbargreen" src="pic/trans.gif" /></td></tr></tbody></table>
+</body></html>`
+
+// 不带参数的魔力值页：兑换列表，没有时魔那一句
+const byrptBonusShopFixture = `<html><body>
+<table><tr><td class="colhead">项目</td><td class="colhead">价格</td></tr><tr><td>1.0 GB 上传量</td><td>300</td></tr></table>
 </body></html>`
 
 const byrptDetailFixture = `<html><body>
@@ -157,6 +171,49 @@ func testBYRPTUserInfo(t *testing.T) {
 	assert.Equal(t, "165.662", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "Ultimate User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "1618308304", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+
+	bonusDoc := FixtureDoc(t, "byrpt_mybonus_seed", byrptBonusFixture)
+	assert.Equal(t, "98.481", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]), "不是括号里的 A 值，也不是公式里的数")
+	tagged := FixtureDoc(t, "byrpt_mybonus_tagged", `<html><body><div>你当前每小时能获取<b>98.481</b>个魔力值 (A = 2228.5)</div></body></html>`)
+	assert.Equal(t, "98.481", driver.ExtractFieldValuePublic(tagged, def.UserInfo.Selectors["bonusPerHour"]), "数字包在标签里也取得到")
+}
+
+// 魔力值从首页顶栏读。用户详情页的「魔力值」一格是「1192520.0 魔力值历史」，没有冒号，按顶栏写法的规则读出 0；
+// 详情页又读在首页之后，以前把首页读到的值盖成 0（生产上 BYR 的魔力值一直是 0，2026-10-31）。
+func TestBYRPTUserInfo_BonusSurvivesUserdetails(t *testing.T) {
+	def := getBYRPTDef(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/index.php":
+			_, _ = w.Write([]byte(byrptIndexFixture))
+		case "/userdetails.php":
+			_, _ = w.Write([]byte(byrptUserdetailsFixture))
+		case "/mybonus.php":
+			// 时魔只在「做种详情」里
+			if r.URL.Query().Get("show") == "seed" {
+				_, _ = w.Write([]byte(byrptBonusFixture))
+			} else {
+				_, _ = w.Write([]byte(byrptBonusShopFixture))
+			}
+		case "/getusertorrentlistajax.php":
+			// 首页说在做种时做种列表不能是空页（空页按体积没取到算）
+			_, _ = w.Write([]byte(`<b>10</b> 条记录 | 总大小：1.000 TB<table><tr><td>大小</td></tr><tr><td>1.000<br />TB</td></tr></table>`))
+		default:
+			_, _ = w.Write([]byte(`<html><body></body></html>`))
+		}
+	}))
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1"})
+	driver.SetSiteDefinition(def)
+
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 1424274.9, info.Bonus, 0.01, "首页顶栏的魔力值不能被详情页那一格盖掉")
+	assert.InDelta(t, 98.481, info.BonusPerHour, 0.0001, "时魔从魔力值页读（生产上以前一直是 0）")
+	assert.Equal(t, int64(124977088682786), info.Uploaded)
+	assert.Equal(t, 10, info.Seeding)
 }
 
 func TestBYRPT_Fixtures_NoSecrets(t *testing.T) {
@@ -164,6 +221,8 @@ func TestBYRPT_Fixtures_NoSecrets(t *testing.T) {
 		"search":   byrptSearchFixture,
 		"index":    byrptIndexFixture,
 		"userinfo": byrptUserdetailsFixture,
+		"mybonus":  byrptBonusFixture,
+		"shop":     byrptBonusShopFixture,
 		"detail":   byrptDetailFixture,
 		"halfdown": byrptDetailWithHalfDownFixture,
 	}
@@ -172,4 +231,46 @@ func TestBYRPT_Fixtures_NoSecrets(t *testing.T) {
 			RequireNoSecrets(t, name, data)
 		})
 	}
+}
+
+// 等级规则（2026-10-31 站点规则页）：升级看注册天数、上传量和分享率；详情页读到的等级名都对得上表里的等级。
+func TestBYRPTLevelRequirements(t *testing.T) {
+	def := getBYRPTDef(t)
+	levels := def.LevelRequirements
+	require.Len(t, levels, 17)
+
+	for _, l := range levels {
+		assert.Equal(t, l.ID, v2.GuessUserLevelID(&v2.UserInfo{LevelName: l.Name}, levels), l.Name)
+		for _, aka := range l.NameAka {
+			assert.Equal(t, l.ID, v2.GuessUserLevelID(&v2.UserInfo{LevelName: aka}, levels), aka)
+		}
+	}
+
+	// 普通等级：ID 从 0 连续往上，看的是上传量不是下载量
+	for i, l := range levels[:10] {
+		assert.Equal(t, i, l.ID, l.Name)
+		assert.Empty(t, l.GroupType, l.Name)
+		assert.Empty(t, l.Downloaded, l.Name)
+	}
+
+	// 页面上的上传量（GiB）：刚好达到时升到这一级，差 1 字节就还是上一级
+	pageGiB := map[int]int64{2: 32, 3: 512, 4: 1024, 5: 2048, 6: 4096, 7: 8192, 8: 32768, 9: 131072}
+	joined := time.Date(2015, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	for id, gib := range pageGiB {
+		l := levels[id]
+		reached := &v2.UserInfo{Uploaded: gib << 30, Ratio: l.Ratio, JoinDate: joined}
+		assert.Equal(t, id, v2.GuessUserLevelID(reached, levels), "%s：上传 %d GiB", l.Name, gib)
+		short := &v2.UserInfo{Uploaded: gib<<30 - 1, Ratio: l.Ratio, JoinDate: joined}
+		assert.Equal(t, id-1, v2.GuessUserLevelID(short, levels), "%s：差 1 字节", l.Name)
+	}
+
+	// 详情页那个账号（Ultimate User，上传约 113.7 TiB）：下一级是 Nexus Master，差的是上传量
+	info := &v2.UserInfo{LevelName: "Ultimate User", Uploaded: 124977088682786, Downloaded: 754411005542, Ratio: 165.662, JoinDate: 1618308304}
+	progress := v2.CalculateSiteLevelProgress(info, levels)
+	require.NotNil(t, progress)
+	require.NotNil(t, progress.NextLevel)
+	assert.Equal(t, "Nexus Master", progress.NextLevel.Name)
+	assert.Contains(t, progress.UnmetRequirements, "uploaded")
+	assert.NotContains(t, progress.UnmetRequirements, "ratio")
+	assert.NotContains(t, progress.UnmetRequirements, "interval")
 }

@@ -32,7 +32,11 @@ func TestEncryptCookieRoundTrip(t *testing.T) {
 
 func TestEncryptCookieKeyMissing(t *testing.T) {
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	observedCore, observedLogs := observer.New(zapcore.WarnLevel)
 	originalLogger := global.GlobalLogger
 	global.GlobalLogger = zap.New(observedCore)
@@ -74,6 +78,7 @@ func writeTestSecretKey(t *testing.T) {
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 	keyDir := filepath.Join(homeDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
 	keyFile := filepath.Join(keyDir, "secret.key")
@@ -81,14 +86,22 @@ func writeTestSecretKey(t *testing.T) {
 }
 
 func TestEncryptCookie_EnvKey(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	t.Setenv("PT_TOOLS_SECRET_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
 	s := NewConfigStore(nil)
 	require.NoError(t, s.ensureCookieKeyAvailable())
 }
 
 func TestEncryptCookie_EnvKeyInvalid(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	t.Setenv("PT_TOOLS_SECRET_KEY", "not-32-bytes")
 	s := NewConfigStore(nil)
 	_, err := s.EncryptCookie("x")
@@ -97,7 +110,11 @@ func TestEncryptCookie_EnvKeyInvalid(t *testing.T) {
 }
 
 func TestDecryptCookie_KeyMissing(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	s := NewConfigStore(nil)
 	_, err := s.DecryptCookie("garbage")

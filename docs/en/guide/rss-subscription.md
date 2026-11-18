@@ -21,7 +21,7 @@ This is the core of fully automatic ratio building and of following series.
 
 How you get the RSS link depends on the software the site runs.
 
-### NexusPHP sites (such as HDSky and HDDolby)
+### NexusPHP sites (such as HDSky and SpringSunday)
 
 These sites usually authenticate with a cookie, and the RSS link may contain your `passkey`. Never share your RSS link.
 
@@ -39,6 +39,8 @@ These sites usually authenticate with a cookie, and the RSS link may contain you
 - `rows`: the number of torrents returned (10 to 50 is a good range)
 - `linktype`: the link type; it normally has to include `dl` so the feed carries direct download links
 - `passkey`: your personal key; **never share it**
+
+UHDDolby's RSS links expire (after 90 days by default, at most 180, chosen when you generate the link). Generate a new one before it expires and replace both the RSS address in pt-tools and the API key in the site settings, which is the same RSSKEY.
 
 ### mTorrent sites (such as M-Team)
 
@@ -60,23 +62,27 @@ These newer sites usually use an API key or a dedicated RSS generator page.
 2. Switch to the RSS subscriptions (RSS 订阅) tab and click Add RSS (添加 RSS).
 3. Enter a name and the link, set the options below as needed, then save.
 
-After saving, the subscription runs in the background at its check interval. Pushed torrents appear under Downloads → Task list (下载 → 任务列表); when nothing is pushed, System → Logs (系统 → 运行日志) records why.
+Use the link the site's RSS page gives you. A link copied from an example that still has a placeholder address such as `https://hdsky.xxx/…` never fetches anything: pt-tools warns while you type it and refuses to save it. Ones saved earlier are marked Placeholder address, not fetched (占位地址，不会去拉) in the list and RSS tasks skip them (with a line in the logs); replace the link with the real one.
+
+Try it (试一下) next to the link fetches the feed once without saving. When it works it says how many items came back and the newest title; when it does not, it says which step failed: the domain does not resolve, the connection is refused, reset or times out, the site answers with an HTTP status (a Cloudflare challenge is named as such), or it returns a web page instead of RSS. The message never contains the passkey from the link.
+
+After saving, the subscription is fetched at its check interval while RSS tasks are running. While they are not running (auto-start is off by default, so they must be started by hand after each program start) the subscription is not fetched; the switch is RSS tasks (RSS 任务) at the left end of the status bar at the bottom, see [Starting and stopping RSS tasks](../configuration.md#starting-and-stopping-rss-tasks). Pushed torrents appear under Downloads → Task list (下载 → 任务列表); when nothing is pushed, System → Logs (系统 → 运行日志) records why.
 
 ## Subscription options
 
-| Option                                    | Meaning                                                                                                                             | Default            |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| **Name (名称)**                           | A name to recognise the subscription by                                                                                             | Required           |
-| **Check interval (检查间隔)**             | How often the feed is fetched, in minutes, from 5 to 1440                                                                           | `10`               |
-| **Link (链接)**                           | The site's RSS address                                                                                                              | Required           |
-| **Category (分类)**                       | The category set when the torrent is pushed to the downloader                                                                       | Empty              |
-| **Tag (标签)**                            | The tag added when the torrent is pushed to the downloader                                                                          | Empty              |
-| **Downloader (下载器)**                   | Which downloader to push to; a downloader that is not enabled cannot be chosen                                                      | Default downloader |
-| **Download folder (下载路径)**            | One of the downloader's preset folders, or a path you type after switching to Custom (自定义); empty means the downloader's default | Empty              |
-| **Filter rules (过滤规则)**               | The filter rules attached to the subscription; you can choose several                                                               | None               |
-| **Download mode (下载模式)**              | Follow global, Smart, Filter rules only or Free only; see below                                                                     | Follow global      |
-| **Pause at freeleech end (免费结束暂停)** | Pauses the torrent automatically if it has not finished when its freeleech period ends                                              | Off                |
-| **Notification mode (通知模式)**          | Whether to send a notification for new torrents; see [New-torrent notifications](chatops-rss-notify.md)                             | No notifications   |
+| Option                                                | Meaning                                                                                                           | Default            |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------ |
+| **Name (名称)**                                       | A name to recognise the subscription by                                                                           | Required           |
+| **Check interval (检查间隔)**                         | How often the feed is fetched, in minutes, from 5 to 1440                                                         | `10`               |
+| **Link (链接)**                                       | The site's RSS address                                                                                            | Required           |
+| **Category (分类)**                                   | The category set when the torrent is pushed to the downloader                                                     | Empty              |
+| **Tag (标签)**                                        | The tag added when the torrent is pushed to the downloader                                                        | Empty              |
+| **Downloader (下载器)**                               | Which downloader to push to; a downloader that is not enabled cannot be chosen                                    | Default downloader |
+| **Download folder (下载路径)**                        | Pick one of the downloader's preset folders from the list, or type any path; empty means the downloader's default | Empty              |
+| **Filter rules (过滤规则)**                           | The filter rules attached to the subscription; you can choose several                                             | None               |
+| **Download mode (下载模式)**                          | Follow global, Smart, Filter rules only or Free only; see below                                                   | Follow global      |
+| **Unfinished when freeleech ends (免费结束时没下完)** | Do nothing, Pause or Delete; see Freeleech eligibility and pausing below                                          | Pause              |
+| **Notification mode (通知模式)**                      | Whether to send a notification for new torrents; see [New-torrent notifications](chatops-rss-notify.md)           | No notifications   |
 
 ### Download modes
 
@@ -89,6 +95,35 @@ After saving, the subscription runs in the background at its check interval. Pus
 
 A freeleech torrent is pushed only if it can also finish within its freeleech period; how that is judged is explained under the speed limit and minimum freeleech time settings in [Configuration](../configuration.md). The maximum and minimum torrent sizes in the global settings apply in every mode.
 
+## Freeleech eligibility and pausing
+
+The freeleech path (free torrents in Smart and Free only modes) and filter rules with Free only (仅免费) on require freeleech. Before such a torrent is pushed to the downloader, pt-tools must hold freeleech information read in the current round:
+
+- **Free until a given time**: pushed only if more than the safety margin is left. The safety margin is Act early, minutes before freeleech ends (免费期结束前提前处理) in the global settings, and at least 5 minutes.
+- **End time unknown**: the site marks the torrent free but gives no end time, or the end time cannot be parsed. This is not treated as permanently free and the torrent is not pushed. The torrent file stays in the staging directory and is read again next round; once an end time is read, it is pushed. If you do want such torrents, attach a filter rule with Free only off.
+- **Not free, or free has ended**: not pushed, and the staged torrent file is deleted.
+
+A torrent that was not pushed last round (for example because the disk was full) has its site details read again before this round's push. If the item is no longer in the RSS feed or the details cannot be read, it is not pushed and last round's information is not reused. Filter rules with Free only off, Download now (立即下载) in a notification and manual pushes do not require freeleech; they push torrents that are not free as well.
+
+Every round reads the site details of every item in the feed, and torrents skipped earlier are decided again: if one becomes free later, or you change the filter rules or size limits, it is downloaded in the next round. Torrents already pushed are not pushed again, but when freeleech is shortened, extended or cancelled, the pause or delete chosen in Unfinished when freeleech ends and the auto-cleanup option Delete other free torrents still unfinished after freeleech (其他免费种子免费过了没下完就删) both follow the newly read end time; the task's source and matched filter rule are also updated from this round's decision (hit counts on the filter rules page still count the rule that pushed the torrent). More items mean more requests to the site; for sites that are strict about request rates, such as M-Team, do not set the interval too short.
+
+Subscriptions of the same site that share a tag share a staging directory. Each torrent belongs to the subscription that first decided to download it; only that subscription pushes or cleans it up, with its own downloader, download path and Unfinished when freeleech ends choice. Other subscriptions leave it alone.
+
+For subscriptions where Unfinished when freeleech ends is Pause or Delete:
+
+- With Delete, a torrent still unfinished at the end is deleted with its data (only the torrent, when another torrent still uses the data); torrents with the [keep tag](auto-cleanup.md#keeping-torrents), a protected tag or an H&R requirement not yet met are not deleted but paused, and the Paused tasks page shows why. With Pause it is only paused, and you can resume or delete it on the Paused tasks page.
+- The choice is written to the torrent's record when it is pushed: changing it on the subscription later applies only to torrents pushed after that, and torrents already waiting for the end of freeleech are handled as chosen when they were pushed.
+- The torrent is added to the downloader paused, and starts only after its task ID and the end-of-freeleech handling are recorded (it stays paused if the downloader is set not to start automatically).
+- If the site gave no freeleech end time, the torrent is only added paused and is not started automatically.
+- If the planned pause time (the freeleech end time minus the Act early minutes) has already passed or is less than a minute away, the torrent is also only added paused and is not started.
+- Download now (立即下载) in a notification uses this subscription's downloader, path and Unfinished when freeleech ends choice.
+- At handling time pt-tools reads the record again: if freeleech was extended, it waits for the new time. After pausing it reads the torrent back from the downloader, and only a paused state counts as success.
+- A failed pause or deletion is retried indefinitely (starting at 30 seconds and doubling, at most every 10 minutes). After 3 failures in a row, one Free-end pause failing (免费结束暂停失败) alert is sent to every enabled notification channel.
+
+A subscription set to Do nothing neither pauses nor deletes when freeleech ends; when auto-delete has Delete other free torrents still unfinished after freeleech on, that option handles the torrent, see [Auto-delete](auto-cleanup.md#deletion-conditions).
+
+In the task list, the Free end (免费结束) column shows End time unknown (结束时间未知) or Permanently free (长期免费); hovering shows when the information was read and when the pause is planned. Tasks needing attention (需要关注的任务) lists torrents held back because the end time is unknown and torrents whose pause keeps failing.
+
 ### Filter rules
 
 Filter rules are created under Rules → Filter rules (规则 → 过滤规则) and then attached to a subscription:
@@ -98,12 +133,14 @@ Filter rules are created under Rules → Filter rules (规则 → 过滤规则) 
 - **Free only**: when on, the rule lets through freeleech torrents only.
 - **Purpose**: the rule controls downloading, new-torrent notifications, or both.
 
+You can try a rule before using it: in Dry run (试跑) on the filter rules page pick a rule and a data source and click Run this rule (试跑这条) to see which torrents it would match (read-only: nothing is pushed or saved). With an RSS subscription as the source the feed is fetched once and each item's details are read, matching the item's RSS title and judging freeleech and size from the details, the same way RSS tasks do; without one, the most recently recorded torrents are used (offline). The result dialog names the data source, and changing it there runs the test again; Test match (测试匹配) in the rule editor works the same way.
+
 The syntax and examples for following a series are in [Filter rules and TV series](filter-rules-tv-series.md).
 
 ## Good practice
 
 1. **Choose a sensible interval.** Do not set a very short interval (under 5 minutes, for example): it puts load on the site's server and can get your account banned. `10` to `30` minutes is a good range.
-2. **Test before you automate.** Before attaching rules, try them with Test match (测试匹配) on the filter rules page, which fetches live data from a subscription; after turning the subscription on, watch the logs to confirm the results are what you expect.
+2. **Test before you automate.** Before attaching rules, try them in Dry run (试跑) on the filter rules page with a subscription as the data source, which fetches live data; after turning the subscription on, watch the logs to confirm the results are what you expect.
 3. **Use the site's own filters.** If the site's RSS generator lets you choose categories (films only, for example), filter there when you generate the link, so less has to be processed locally.
 4. **Keep categories apart.** Give the torrents downloaded through RSS their own downloader category, which makes it easier to automate a media library later (Jellyfin, for example).
 5. **Protect your passkey.** When you share a configuration or a screenshot, always hide the `passkey` or `apikey` parameter of the RSS link.
@@ -112,8 +149,8 @@ The syntax and examples for following a series are in [Filter rules and TV serie
 
 ### 1. Fetching the feed fails (HTTP 403/401)
 
-- **Cause**: the credentials have expired or the passkey is wrong.
-- **Fix**: check that the passkey in the link is correct; for a site that needs a cookie, make sure pt-tools has a valid cookie for it.
+- **Cause**: the credentials have expired or the passkey is wrong. Cloudflare in front of the site also answers 403 when it blocks the connection (the message then says a Cloudflare challenge blocked it).
+- **Fix**: check that the passkey in the link is correct; for a site that needs a cookie, make sure pt-tools has a valid cookie for it. A challenge is usually brief, so try again later; if it keeps happening, send this site through a proxy in the Site proxy (站点代理) part of Global settings, see [Configuration](../configuration.md#site-proxy-in-global-settings).
 
 ### 2. The feed is fetched but nothing is downloaded
 
@@ -129,7 +166,17 @@ The syntax and examples for following a series are in [Filter rules and TV serie
 - **Cause**: the downloader cannot be reached, or the folder does not exist or is not writable.
 - **Fix**: check the downloader's connectivity; make sure the download folder exists on the machine the downloader runs on and is writable.
 
-### 4. The promotion status is not recognised
+### 4. Downloading the torrent file fails (connection reset, timeout)
+
+- **Cause**: the network to the site or its download node is briefly unavailable, which is common for sites behind Cloudflare.
+- **Fix**: pt-tools retries twice after this kind of error or a server error (5xx). This applies to every site. The waits back off exponentially (about 2 and then 4 seconds, each plus a little random time), and each retry first waits for the site's rate limit; for sites that first fetch a download address (M-Team, NexusPHP) only that address is fetched again. A retried error says how many times it was tried. If it still fails, check the proxy and the network; follows and subscriptions search again after 30 minutes, see [follows and subscriptions](media-subscribe.md).
+
+### 5. The promotion status is not recognised
 
 - **Cause**: some sites' feeds do not carry promotion information, or pt-tools does not yet handle the site's particular fields.
 - **Fix**: update pt-tools to the latest version, or rely on reading the torrent's details page, where the site supports it.
+
+### 6. The domain cannot be found (no such host)
+
+- **Cause**: the domain in the link does not resolve. Most often the link was copied from an example and still has a placeholder address such as `hdsky.xxx`, with the `xxx` part never replaced by the address the site gives you; the domain may also be mistyped, or DNS may not work on this machine.
+- **Fix**: copy the link again from the site's RSS page, edit this RSS on the site page, paste the link and click Try it (试一下) to confirm it fetches torrents.

@@ -1,5 +1,5 @@
 # 参数区分构建环境与基础镜像来源
-ARG BUILD_IMAGE=golang:1.26.7
+ARG BUILD_IMAGE=golang:1.26.11
 ARG BASE_IMAGE=alpine:3.20.3
 ARG NODE_IMAGE=node:25.2.0-alpine
 ARG BUILD_ENV=local
@@ -22,6 +22,8 @@ ARG BUILD_ENV
 ARG TAG=unknown
 ARG BUILD_TIME=unknown
 ARG COMMIT_ID=unknown
+# 托管 relay 的地址（docker.yml 从 secret PT_TOOLS_RELAY_URL 传进来；地址随二进制公开，build-arg 会出现在镜像历史里），没给时为空
+ARG RELAY_URL=""
 ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
 ARG TARGETARCH
 ARG GOPROXY
@@ -57,19 +59,27 @@ COPY *.go /app/
 # 从前端构建阶段拷贝构建产物
 COPY --from=frontend-builder /app/web/static/dist /app/web/static/dist
 
-# 构建或接受外部二进制，并统一执行 upx 压缩
-RUN --mount=type=bind,source=.,target=/context,ro set -eux; \
+# 构建或接受外部二进制，并统一执行 upx 压缩。
+# 内置的 TMDB API Key 用 BuildKit secret 传（docker.yml 从 secret PT_TOOLS_TMDB_KEY 给 id=tmdb_key），不用 build-arg：
+# build-arg 会写进镜像历史与 provenance。没给时为空，用户要自己填。编译这一步关掉 -x，免得 Key 打进构建日志。
+RUN --mount=type=bind,source=.,target=/context,ro --mount=type=secret,id=tmdb_key set -eux; \
   if [ -f /context/dist/pt-tools-linux-${TARGETARCH} ]; then \
     echo "Using provided binary from dist for ${TARGETARCH}"; \
     cp /context/dist/pt-tools-linux-${TARGETARCH} /app/pt-tools && chmod +x /app/pt-tools; \
   else \
     go env -w CGO_ENABLED=0; \
     go env; \
+    set +x; \
+    TMDB_KEY=""; \
+    if [ -f /run/secrets/tmdb_key ]; then TMDB_KEY=$(cat /run/secrets/tmdb_key); fi; \
     go build -ldflags="-s -w \
       -X github.com/sunerpy/pt-tools/version.Version=${TAG} \
       -X github.com/sunerpy/pt-tools/version.BuildTime=${BUILD_TIME} \
-      -X github.com/sunerpy/pt-tools/version.CommitID=${COMMIT_ID}" \
+      -X github.com/sunerpy/pt-tools/version.CommitID=${COMMIT_ID} \
+      -X github.com/sunerpy/pt-tools/internal/remote.DefaultRelayURL=${RELAY_URL} \
+      -X github.com/sunerpy/pt-tools/internal/media/tmdb.BuiltinKey=${TMDB_KEY}" \
       -mod=readonly -o pt-tools; \
+    set -x; \
   fi; \
   if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends upx-ucl || true; fi; \
   if command -v apk >/dev/null 2>&1; then apk add --no-cache upx || true; fi; \
@@ -81,7 +91,7 @@ FROM ${BASE_IMAGE}
 LABEL MAINTAINER="nkuzhangshn@gmail.com"
 ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
 WORKDIR /app
-ENV PUID=1000 PGUID=1000
+ENV PUID=1000 PGID=1000
 ENV TZ=Asia/Shanghai PATH=$PATH:/app/bin HOME=/app
 ENV PT_HOST=0.0.0.0 PT_PORT=8080
 

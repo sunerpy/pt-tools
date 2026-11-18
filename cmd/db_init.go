@@ -32,6 +32,8 @@ var initCmd = &cobra.Command{
 creates any required tables. Use this command when deploying the application
 for the first time or after clearing the database.`,
 	Example: `  pt-tools db init`,
+	// 什么都不做（数据库由 pt-tools web 启动时自动迁移），只是留着不让旧脚本报错，不在帮助里列出
+	Hidden: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("Initializing the database...")
 		// 初始化数据库的具体逻辑

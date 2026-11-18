@@ -5,6 +5,9 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -654,22 +657,16 @@ func TestPerformUpgradeReachesReplaceAndFails(t *testing.T) {
 	copy(bin, []byte("ELF-fake-binary"))
 	archive := buildTarGz(t, GetBinaryName(env.OS), bin)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(archive)
-	}))
+	release, srv := serveRelease(t, assetName, archive, sha256Hex(archive))
 	defer srv.Close()
 
 	u := NewUpgrader()
-	release := &ReleaseInfo{
-		Version: "v9.9.9",
-		Assets:  []ReleaseAsset{{Name: assetName, DownloadURL: srv.URL}},
-	}
 	u.performUpgrade(context.Background(), release, "")
 
 	p := u.GetProgress()
 	assert.Equal(t, UpgradeStatusFailed, p.Status,
 		"replace against non-pt-tools test binary must fail safely")
-	assert.NotEmpty(t, p.Error)
+	assert.Contains(t, p.Error, "替换", "校验通过后才走到替换这一步")
 }
 
 func TestPerformUpgradeDownloadFailure(t *testing.T) {
@@ -679,7 +676,11 @@ func TestPerformUpgradeDownloadFailure(t *testing.T) {
 	if assetName == "" {
 		t.Skip("unsupported platform")
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+checksumAssetName {
+			_, _ = fmt.Fprintf(w, "%s  %s\n", strings.Repeat("ab", 32), assetName)
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -687,7 +688,10 @@ func TestPerformUpgradeDownloadFailure(t *testing.T) {
 	u := NewUpgrader()
 	u.performUpgrade(context.Background(), &ReleaseInfo{
 		Version: "v9.9.9",
-		Assets:  []ReleaseAsset{{Name: assetName, DownloadURL: srv.URL}},
+		Assets: []ReleaseAsset{
+			{Name: assetName, DownloadURL: srv.URL + "/asset"},
+			{Name: checksumAssetName, DownloadURL: srv.URL + "/" + checksumAssetName},
+		},
 	}, "")
 	p := u.GetProgress()
 	assert.Equal(t, UpgradeStatusFailed, p.Status)
@@ -701,8 +705,48 @@ func TestPerformUpgradeExtractFailure(t *testing.T) {
 	if assetName == "" {
 		t.Skip("unsupported platform")
 	}
+	body := []byte("this is not a valid archive")
+	release, srv := serveRelease(t, assetName, body, sha256Hex(body))
+	defer srv.Close()
+
+	u := NewUpgrader()
+	u.performUpgrade(context.Background(), release, "")
+	p := u.GetProgress()
+	assert.Equal(t, UpgradeStatusFailed, p.Status)
+	assert.Contains(t, p.Error, "解压", "invalid archive body must fail the upgrade at extraction")
+}
+
+// 安装包的 SHA-256 与发布清单不一致时不解压、不替换。
+func TestPerformUpgrade_RejectsChecksumMismatch(t *testing.T) {
+	clearProxyForUpgrade(t)
+	env := DetectEnvironment()
+	assetName := GetAssetNameForPlatform(env.OS, env.Arch)
+	if assetName == "" {
+		t.Skip("unsupported platform")
+	}
+	archive := []byte("tampered archive")
+	release, srv := serveRelease(t, assetName, archive, sha256Hex([]byte("the real archive")))
+	defer srv.Close()
+
+	u := NewUpgrader()
+	u.performUpgrade(context.Background(), release, "")
+	p := u.GetProgress()
+	assert.Equal(t, UpgradeStatusFailed, p.Status)
+	assert.Contains(t, p.Error, "校验")
+}
+
+// 没有校验清单的版本不升级：安装包会直接替换当前可执行文件，核对不了就不能装。
+func TestPerformUpgrade_RequiresChecksumAsset(t *testing.T) {
+	clearProxyForUpgrade(t)
+	env := DetectEnvironment()
+	assetName := GetAssetNameForPlatform(env.OS, env.Arch)
+	if assetName == "" {
+		t.Skip("unsupported platform")
+	}
+	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("this is not a valid archive"))
+		hits++
+		_, _ = w.Write([]byte("archive"))
 	}))
 	defer srv.Close()
 
@@ -713,7 +757,135 @@ func TestPerformUpgradeExtractFailure(t *testing.T) {
 	}, "")
 	p := u.GetProgress()
 	assert.Equal(t, UpgradeStatusFailed, p.Status)
-	assert.NotEmpty(t, p.Error, "invalid archive body must fail the upgrade")
+	assert.Contains(t, p.Error, checksumAssetName)
+	assert.Zero(t, hits, "缺校验清单时不下载安装包")
+}
+
+// 校验清单拿不到、拿到了但不能用时都不安装：每种情况都在下载安装包之前失败。
+func TestFetchExpectedChecksum_Failures(t *testing.T) {
+	clearProxyForUpgrade(t)
+	const asset = "pt-tools-linux-amd64.tar.gz"
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		wantErr string
+	}{
+		{"http error", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }, "HTTP 404"},
+		{"asset missing", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, "%s  pt-tools-windows-amd64.exe.zip\n", strings.Repeat("ab", 32))
+		}, "没有 " + asset},
+		{"too large", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(strings.Repeat("x", maxChecksumFileBytes+1)))
+		}, "过大"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(tc.handler)
+			defer srv.Close()
+			_, err := NewUpgrader().fetchExpectedChecksum(context.Background(), srv.URL+"/checksums.txt", asset, "")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+
+	t.Run("unreachable", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		url := srv.URL + "/checksums.txt"
+		srv.Close()
+		_, err := NewUpgrader().fetchExpectedChecksum(context.Background(), url, asset, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "下载校验清单失败")
+	})
+
+	t.Run("bad url", func(t *testing.T) {
+		_, err := NewUpgrader().fetchExpectedChecksum(context.Background(), "http://[::1", asset, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "下载校验清单失败")
+	})
+}
+
+// 清单下载失败时整个升级失败，安装包一次都不请求。
+func TestPerformUpgrade_ChecksumDownloadFailureStopsBeforeArchive(t *testing.T) {
+	clearProxyForUpgrade(t)
+	env := DetectEnvironment()
+	assetName := GetAssetNameForPlatform(env.OS, env.Arch)
+	if assetName == "" {
+		t.Skip("unsupported platform")
+	}
+	var archiveHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+checksumAssetName {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		archiveHits++
+	}))
+	defer srv.Close()
+
+	u := NewUpgrader()
+	u.performUpgrade(context.Background(), &ReleaseInfo{
+		Version: "v9.9.9",
+		Assets: []ReleaseAsset{
+			{Name: assetName, DownloadURL: srv.URL + "/asset"},
+			{Name: checksumAssetName, DownloadURL: srv.URL + "/" + checksumAssetName},
+		},
+	}, "")
+	p := u.GetProgress()
+	assert.Equal(t, UpgradeStatusFailed, p.Status)
+	assert.Contains(t, p.Error, "校验清单")
+	assert.Zero(t, archiveHits)
+}
+
+func TestVerifyFileSHA256_Errors(t *testing.T) {
+	err := verifyFileSHA256(filepath.Join(t.TempDir(), "missing"), strings.Repeat("ab", 32))
+	require.ErrorIs(t, err, ErrChecksumMismatch)
+
+	// 目录能打开但读不出内容
+	err = verifyFileSHA256(t.TempDir(), strings.Repeat("ab", 32))
+	require.ErrorIs(t, err, ErrChecksumMismatch)
+
+	f := filepath.Join(t.TempDir(), "a")
+	require.NoError(t, os.WriteFile(f, []byte("abc"), 0o600))
+	require.NoError(t, verifyFileSHA256(f, strings.ToUpper(sha256Hex([]byte("abc")))), "摘要大小写不敏感")
+}
+
+func TestLookupChecksum(t *testing.T) {
+	sum := strings.Repeat("0a", 32)
+	list := []byte("\n" + strings.Repeat("ff", 32) + "  pt-tools-windows-amd64.exe.zip\n" +
+		strings.ToUpper(sum) + " *pt-tools-linux-amd64.tar.gz\n" +
+		"garbage line\n")
+	got, ok := lookupChecksum(list, "pt-tools-linux-amd64.tar.gz")
+	require.True(t, ok)
+	assert.Equal(t, sum, got)
+
+	_, ok = lookupChecksum(list, "pt-tools-linux-arm64.tar.gz")
+	assert.False(t, ok)
+	_, ok = lookupChecksum([]byte("nothex  pt-tools-linux-amd64.tar.gz\n"), "pt-tools-linux-amd64.tar.gz")
+	assert.False(t, ok, "摘要不是 64 位十六进制时不采纳")
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// serveRelease 起一个同时提供安装包和 checksums.txt 的假发布源，checksums.txt 里写 sum。
+func serveRelease(t *testing.T, assetName string, archive []byte, sum string) (*ReleaseInfo, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+checksumAssetName {
+			_, _ = fmt.Fprintf(w, "%s  %s\n", sum, assetName)
+			return
+		}
+		_, _ = w.Write(archive)
+	}))
+	return &ReleaseInfo{
+		Version: "v9.9.9",
+		Assets: []ReleaseAsset{
+			{Name: assetName, DownloadURL: srv.URL + "/" + assetName},
+			{Name: checksumAssetName, DownloadURL: srv.URL + "/" + checksumAssetName},
+		},
+	}, srv
 }
 
 func TestPerformUpgradeNoAsset(t *testing.T) {

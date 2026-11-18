@@ -17,6 +17,10 @@ const (
 	WorkDir = ".pt-tools"
 )
 
+// DownloadSourceBrush 是刷流任务推送的种子记录的 TorrentInfo.DownloadSource。刷流的种子按刷流规则随时会被删掉，
+// 追剧不把它们认领成某一集的来源。
+const DownloadSourceBrush = "brush"
+
 // TorrentInfo 表示种子信息
 type TorrentInfo struct {
 	ID             uint       `gorm:"primaryKey" json:"id"`
@@ -41,6 +45,9 @@ type TorrentInfo struct {
 	LastError      string     `gorm:"default:''" json:"lastError"`
 	DownloadSource string     `gorm:"size:32;default:'free_download'" json:"downloadSource"` // free_download or filter_rule
 	FilterRuleID   *uint      `gorm:"index" json:"filterRuleId"`                             // ID of the matched filter rule
+	// PushedFilterRuleID 是把这个种子推进下载器的 RSS 过滤规则（推送时记下，之后不改）。FilterRuleID 是 RSS 最近一次判断命中的
+	// 规则，每轮刷新；规则命中数按它统计已推送的种子（「这条规则真的下过几个」）
+	PushedFilterRuleID *uint `gorm:"default:null" json:"pushedFilterRuleId"`
 
 	// 免费结束管理相关字段
 	DownloaderID     *uint      `gorm:"index" json:"downloaderId"`                // 推送到的下载器 ID
@@ -48,6 +55,7 @@ type TorrentInfo struct {
 	CompletedAt      *time.Time `gorm:"default:null" json:"completedAt"`          // 下载完成时间
 	IsPausedBySystem bool       `gorm:"default:false" json:"isPausedBySystem"`    // 是否被系统自动暂停
 	PauseOnFreeEnd   bool       `gorm:"default:false" json:"pauseOnFreeEnd"`      // 免费结束时是否暂停（来自 RSS 配置）
+	FreeEndDelete    bool       `gorm:"default:false" json:"freeEndDelete"`       // 免费结束时删除而不是暂停（推送时按 RSS 的选择写下）
 	PausedAt         *time.Time `gorm:"default:null" json:"pausedAt"`             // 系统暂停时间
 	PauseReason      string     `gorm:"size:256;default:''" json:"pauseReason"`   // 暂停原因
 	IsCompleted      bool       `gorm:"default:false;index" json:"isCompleted"`   // 下载是否已完成
@@ -59,48 +67,106 @@ type TorrentInfo struct {
 	CheckCount       int        `gorm:"default:0" json:"checkCount"`  // 进度检查次数
 	Seeders          int        `gorm:"default:0" json:"seeders"`
 	Leechers         int        `gorm:"default:0" json:"leechers"`
+	// PeerPauseOverridden 是做种竞争度暂停过、用户又手动开始了的种子（在下载器里或「暂停任务」页）：
+	// 自动删种的竞争度不再暂停它，其他删除条件照常
+	PeerPauseOverridden bool `gorm:"default:false" json:"peerPauseOverridden"`
+	// IMDbID、DoubanID 是站点给的外部编号（详情页或接口里有时才有），媒体识别优先用它们
+	IMDbID   string `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
+	DoubanID string `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
+	// MediaType、TMDBID、MediaSeason 是推送时说明的条目（订阅推送、网页上按条目推送时写；RSS、刷流、辅种、qB 兼容入口不写）：
+	// 整理入库没有手动指定、之前也没整理过、不是订阅的种子时按它整理，不再识别。空串与 0 是不知道
+	MediaType   string `gorm:"column:media_type;size:8;default:''" json:"mediaType"`
+	TMDBID      int    `gorm:"column:tmdb_id;default:0" json:"tmdbId"`
+	MediaSeason int    `gorm:"column:media_season;default:0" json:"mediaSeason"`
+
+	// 免费资格（docs/design/free-expiry-safety.md）：每次读到站点详情都按规范快照整套写入。
+	// FreeValidity 是 not_free / free_until / free_permanent / unknown；空串是还没按新规则验证过的旧记录。
+	FreeValidity     string     `gorm:"size:16;default:''" json:"freeValidity"`
+	FreeVerifiedAt   *time.Time `gorm:"default:null" json:"freeVerifiedAt"`         // 最近一次成功读到资格的时间
+	FreeStatusSource string     `gorm:"size:32;default:''" json:"freeStatusSource"` // base / promotion_rule / mall_single_free / adapter / legacy
+	FreeStatusError  string     `gorm:"size:256;default:''" json:"freeStatusError"` // 读取资格时的问题（结束时间无法解析等），不含原始响应
+	// DetailID 是取站点详情用的种子编号（从 RSS 条目链接里取，不含密钥）；推送前重新验证资格时用
+	DetailID string `gorm:"size:64;default:''" json:"detailId"`
+	// SourceRSSID 是这个种子的所有者 RSS：第一次决定下载（进入暂存）的那条。其他 RSS 不改它的策略字段，也不处理它的暂存文件
+	SourceRSSID *uint `gorm:"column:source_rss_id;index" json:"sourceRssId"`
+	// RequireFree 是入场是否以免费为前提（免费通道、要求免费的过滤规则、要求免费的订阅与刷流）
+	RequireFree bool `gorm:"default:false" json:"requireFree"`
+
+	// 免费结束暂停的执行记录：计划时间（结束时间减提前量）、实际发出请求的时间；确认暂停的时间是 PausedAt。
+	PausePlannedAt   *time.Time `gorm:"default:null" json:"pausePlannedAt"`
+	PauseRequestedAt *time.Time `gorm:"default:null" json:"pauseRequestedAt"`
+	// FreeEndFailures 是到期处理连续失败的次数（与推送重试的 RetryCount 分开）；FreeEndAlertedAt 是已经告警的时间
+	FreeEndFailures  int        `gorm:"default:0" json:"freeEndFailures"`
+	FreeEndAlertedAt *time.Time `gorm:"default:null" json:"freeEndAlertedAt"`
+	// PushPendingAt 是承诺到期暂停的推送在加入下载器之前写下的标记：加入后补记账成功才清掉。
+	// 还留着标记说明加入后记账失败了，对账时按下载器与哈希找回任务、补记账（任务保持暂停，不自动开始）
+	PushPendingAt *time.Time `gorm:"default:null" json:"pushPendingAt"`
+	// FreeEndedAt 是已推送、原来免费的种子后来读到「不免费」时记下的免费结束时间（不晚于读到的时间）。
+	// 刷新资格会把 is_free、free_end_time 改成当前事实；自动删种的「免费到期未完成删除」靠它认出免费已经结束
+	FreeEndedAt *time.Time `gorm:"default:null" json:"freeEndedAt"`
 }
 
 // TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）
 type TorrentInfoArchive struct {
-	ID                uint       `gorm:"primaryKey" json:"id"`
-	OriginalID        uint       `gorm:"index" json:"originalId"`
-	SiteName          string     `gorm:"index" json:"siteName"`
-	TorrentID         string     `gorm:"index" json:"torrentId"`
-	TorrentHash       *string    `gorm:"index" json:"torrentHash"`
-	IsFree            bool       `json:"isFree"`
-	IsDownloaded      bool       `json:"isDownloaded"`
-	IsPushed          *bool      `json:"isPushed"`
-	IsSkipped         bool       `json:"isSkipped"`
-	FreeLevel         string     `json:"freeLevel"`
-	FreeEndTime       *time.Time `json:"freeEndTime"`
-	PushTime          *time.Time `json:"pushTime"`
-	Title             string     `json:"title"`
-	Category          string     `json:"category"`
-	Tag               string     `json:"tag"`
-	OriginalCreatedAt time.Time  `json:"originalCreatedAt"`
-	OriginalUpdatedAt time.Time  `json:"originalUpdatedAt"`
-	IsExpired         bool       `json:"isExpired"`
-	LastCheckTime     *time.Time `json:"lastCheckTime"`
-	RetryCount        int        `json:"retryCount"`
-	LastError         string     `json:"lastError"`
-	DownloadSource    string     `json:"downloadSource"`
-	FilterRuleID      *uint      `json:"filterRuleId"`
-	DownloaderID      *uint      `json:"downloaderId"`
-	DownloaderName    string     `json:"downloaderName"`
-	CompletedAt       *time.Time `json:"completedAt"`
-	IsPausedBySystem  bool       `json:"isPausedBySystem"`
-	PauseOnFreeEnd    bool       `json:"pauseOnFreeEnd"`
-	PausedAt          *time.Time `json:"pausedAt"`
-	PauseReason       string     `json:"pauseReason"`
-	IsCompleted       bool       `json:"isCompleted"`
-	Progress          float64    `json:"progress"`
-	TorrentSize       int64      `json:"torrentSize"`
-	DownloaderTaskID  string     `json:"downloaderTaskId"`
-	HasHR             bool       `json:"hasHR"`
-	HRSeedTimeH       int        `json:"hrSeedTimeH"`
-	CheckCount        int        `json:"checkCount"`
-	ArchivedAt        time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
+	ID                 uint       `gorm:"primaryKey" json:"id"`
+	OriginalID         uint       `gorm:"index" json:"originalId"`
+	SiteName           string     `gorm:"index" json:"siteName"`
+	TorrentID          string     `gorm:"index" json:"torrentId"`
+	TorrentHash        *string    `gorm:"index" json:"torrentHash"`
+	IsFree             bool       `json:"isFree"`
+	IsDownloaded       bool       `json:"isDownloaded"`
+	IsPushed           *bool      `json:"isPushed"`
+	IsSkipped          bool       `json:"isSkipped"`
+	FreeLevel          string     `json:"freeLevel"`
+	FreeEndTime        *time.Time `json:"freeEndTime"`
+	PushTime           *time.Time `json:"pushTime"`
+	Title              string     `json:"title"`
+	Category           string     `json:"category"`
+	Tag                string     `json:"tag"`
+	OriginalCreatedAt  time.Time  `json:"originalCreatedAt"`
+	OriginalUpdatedAt  time.Time  `json:"originalUpdatedAt"`
+	IsExpired          bool       `json:"isExpired"`
+	LastCheckTime      *time.Time `json:"lastCheckTime"`
+	RetryCount         int        `json:"retryCount"`
+	LastError          string     `json:"lastError"`
+	DownloadSource     string     `json:"downloadSource"`
+	FilterRuleID       *uint      `json:"filterRuleId"`
+	PushedFilterRuleID *uint      `json:"pushedFilterRuleId"`
+	DownloaderID       *uint      `json:"downloaderId"`
+	DownloaderName     string     `json:"downloaderName"`
+	CompletedAt        *time.Time `json:"completedAt"`
+	IsPausedBySystem   bool       `json:"isPausedBySystem"`
+	PauseOnFreeEnd     bool       `json:"pauseOnFreeEnd"`
+	PausedAt           *time.Time `json:"pausedAt"`
+	PauseReason        string     `json:"pauseReason"`
+	IsCompleted        bool       `json:"isCompleted"`
+	Progress           float64    `json:"progress"`
+	TorrentSize        int64      `json:"torrentSize"`
+	DownloaderTaskID   string     `json:"downloaderTaskId"`
+	HasHR              bool       `json:"hasHR"`
+	HRSeedTimeH        int        `json:"hrSeedTimeH"`
+	CheckCount         int        `json:"checkCount"`
+	IMDbID             string     `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
+	DoubanID           string     `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
+	// 推送时说明的条目（同 TorrentInfo）：归档以后种子照样在下载器里做种，整理入库照样按它整理
+	MediaType   string `gorm:"column:media_type;size:8;default:''" json:"mediaType"`
+	TMDBID      int    `gorm:"column:tmdb_id;default:0" json:"tmdbId"`
+	MediaSeason int    `gorm:"column:media_season;default:0" json:"mediaSeason"`
+	// 免费资格、归属与暂停记录：与 TorrentInfo 同名的列，归档时原样复制
+	FreeValidity     string     `gorm:"size:16;default:''" json:"freeValidity"`
+	FreeVerifiedAt   *time.Time `json:"freeVerifiedAt"`
+	FreeStatusSource string     `gorm:"size:32;default:''" json:"freeStatusSource"`
+	FreeStatusError  string     `gorm:"size:256;default:''" json:"freeStatusError"`
+	SourceRSSID      *uint      `gorm:"column:source_rss_id" json:"sourceRssId"`
+	RequireFree      bool       `json:"requireFree"`
+	PausePlannedAt   *time.Time `json:"pausePlannedAt"`
+	PauseRequestedAt *time.Time `json:"pauseRequestedAt"`
+	FreeEndFailures  int        `json:"freeEndFailures"`
+	FreeEndAlertedAt *time.Time `json:"freeEndAlertedAt"`
+	DetailID         string     `gorm:"size:64;default:''" json:"detailId"`
+	PushPendingAt    *time.Time `json:"pushPendingAt"`
+	FreeEndedAt      *time.Time `json:"freeEndedAt"`
+	ArchivedAt       time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
 }
 
 func (t *TorrentInfo) GetExpired() bool {
@@ -127,15 +193,18 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 
 // NewDBWithVersion 初始化并返回 TorrentDB（带应用版本）
 func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, error) {
-	return NewDBWithVersionAndHooks(gormLg, appVersion, nil, nil, nil)
+	return NewDBWithVersionAndHooks(gormLg, appVersion, nil, nil, nil, nil)
 }
 
+// NewDBWithVersionAndHooks 打开数据库并迁移。beforeMigrate 在设置好 WAL 之后、AutoMigrate 与编号迁移之前调用
+// （升级前备份用）；它返回的错误只记日志，不阻止打开数据库。
 func NewDBWithVersionAndHooks(
 	gormLg zapgorm2.Logger,
 	appVersion string,
-	backupFn func(db *gorm.DB, table string) (path string, err error),
+	backupFn func(db *gorm.DB, table string, fromVer, toVer int) (path string, err error),
 	encryptFn func(plain string) (cipher string, err error),
 	decryptFn func(cipher string) (plain string, err error),
+	beforeMigrate func(db *gorm.DB) error,
 ) (*TorrentDB, error) {
 	// 确保工作目录存在
 	homeDir, _ := os.UserHomeDir()
@@ -177,38 +246,13 @@ func NewDBWithVersionAndHooks(
 	if err := db.Exec("PRAGMA synchronous=NORMAL;").Error; err != nil {
 		return nil, fmt.Errorf("无法设置 synchronous 模式: %w", err)
 	}
-	// 自动迁移表结构（包括版本表）
-	if err := db.AutoMigrate(
-		&SchemaVersion{}, // 版本表必须最先迁移
-		&TorrentInfo{},
-		&TorrentInfoArchive{},
-		&AdminUser{},
-		&SettingsGlobal{},
-		&QbitSettings{},
-		&SiteSetting{},
-		&RSSSubscription{},
-		// New tables for downloader and site extensibility
-		&DownloaderSetting{},
-		&DownloaderDirectory{},
-		&SiteTemplate{},
-		// Filter rules for RSS filtering
-		&FilterRule{},
-		// RSS-Filter association table for many-to-many relationship
-		&RSSFilterAssociation{},
-		// Favicon cache for site icons
-		&FaviconCache{},
-		&SiteRateLimit{},
-		// ChatOps subsystem (additive; not bumping CurrentSchemaVersion)
-		&NotificationConf{},
-		&ChannelBinding{},
-		&ActionAudit{},
-		&BotToken{},
-		&NotificationOutbox{},
-		&RSSNotificationLog{},
-		&SiteLoginState{},
-		&MigrationState{},
-		&CloakSettings{},
-	); err != nil {
+	if beforeMigrate != nil {
+		if err := beforeMigrate(db); err != nil && gormLg.ZapLogger != nil {
+			gormLg.ZapLogger.Sugar().Warnf("迁移前的钩子出错，照常打开数据库: %v", err)
+		}
+	}
+	// 自动迁移表结构（包括版本表），表的清单见 AllModels
+	if err := db.AutoMigrate(AllModels()...); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
 
@@ -235,6 +279,8 @@ func NewDBWithVersionAndHooks(
 			AutoStart:              false,
 			RetainHours:            24,
 			MaxRetry:               3,
+			// 新安装提前 5 分钟暂停，留出 tracker 汇报延迟；已有安装保持原值（gorm 默认值仍是 0，明确设成 0 的不会被改）
+			FreeEndAdvanceMinutes: 5,
 		}
 		if err := db.Create(&def).Error; err != nil {
 			return nil, fmt.Errorf("写入默认全局设置失败: %w", err)

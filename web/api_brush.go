@@ -1,0 +1,741 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"gorm.io/gorm"
+
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/scheduler"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/utils"
+)
+
+// 刷流任务接口：任务的增删改查、立即运行一轮、运行记录、任务名下的种子与每日收益。全部只认 session（s.auth）。
+
+const (
+	brushRunAPITimeout = 6 * time.Minute
+	maxBrushStatDays   = 90
+	// 运行记录一页默认 20 条、最多 100 条
+	defaultBrushRunPage = 20
+	maxBrushRunPage     = 100
+)
+
+// BrushTaskRequest 是新建 / 修改刷流任务的请求体；字段含义见 models.BrushTask。
+type BrushTaskRequest struct {
+	Name                        string  `json:"name"`
+	Enabled                     bool    `json:"enabled"`
+	SiteName                    string  `json:"site_name"`
+	DownloaderID                uint    `json:"downloader_id"`
+	SavePath                    string  `json:"save_path"`
+	Category                    string  `json:"category"`
+	Tags                        string  `json:"tags"`
+	IntervalMin                 int     `json:"interval_min"`
+	Section                     string  `json:"section"`
+	Discounts                   string  `json:"discounts"`
+	MinFreeRemainMin            int     `json:"min_free_remain_min"`
+	MinSizeGB                   float64 `json:"min_size_gb"`
+	MaxSizeGB                   float64 `json:"max_size_gb"`
+	MaxSeeders                  int     `json:"max_seeders"`
+	MinLeechers                 int     `json:"min_leechers"`
+	MaxPublishAgeMin            int     `json:"max_publish_age_min"`
+	ExcludeHR                   bool    `json:"exclude_hr"`
+	IncludeKeywords             string  `json:"include_keywords"`
+	ExcludeKeywords             string  `json:"exclude_keywords"`
+	MaxDownloading              int     `json:"max_downloading"`
+	MaxTotalSizeGB              float64 `json:"max_total_size_gb"`
+	MaxDailyDownloadGB          float64 `json:"max_daily_download_gb"`
+	RemoveSeedTimeH             float64 `json:"remove_seed_time_h"`
+	RemoveRatio                 float64 `json:"remove_ratio"`
+	RemoveLowSpeedKBs           float64 `json:"remove_low_speed_kbs"`
+	RemoveLowSpeedWindowMin     int     `json:"remove_low_speed_window_min"`
+	RemoveInactiveH             float64 `json:"remove_inactive_h"`
+	RemoveFreeExpiredIncomplete bool    `json:"remove_free_expired_incomplete"`
+	RemoveWithData              bool    `json:"remove_with_data"`
+}
+
+// BrushStatView 是一段时间的收益。
+type BrushStatView struct {
+	Uploaded   int64 `json:"uploaded"`
+	Downloaded int64 `json:"downloaded"`
+	Added      int   `json:"added"`
+	Removed    int   `json:"removed"`
+}
+
+// BrushTaskView 是任务列表 / 详情里的一项：配置加上当前状态与收益。
+type BrushTaskView struct {
+	models.BrushTask
+	DownloaderName   string        `json:"downloader_name"`
+	SiteEnabled      bool          `json:"site_enabled"`
+	ActiveCount      int           `json:"active_count"`
+	DownloadingCount int           `json:"downloading_count"`
+	ActiveSizeBytes  int64         `json:"active_size_bytes"`
+	Today            BrushStatView `json:"today"`
+	Total            BrushStatView `json:"total"`
+}
+
+// BrushRunResponse 是「立即运行」的结果；Error 不为空表示这一轮没跑完（站点或下载器出错）。
+type BrushRunResponse struct {
+	Result scheduler.BrushRunResult `json:"result"`
+	Error  string                   `json:"error,omitempty"`
+}
+
+// BrushStatsSeriesPoint 是一段时间（一天、一周、一个月、一个季度或一年）的收益。
+type BrushStatsSeriesPoint struct {
+	// Date 是这一段的第一天，End 是最后一天（按天时两者相同；最后一段的 End 可能在今天以后）
+	Date string `json:"date"`
+	End  string `json:"end"`
+	BrushStatView
+}
+
+// BrushStatsTask 是一个任务最近若干段的收益。
+type BrushStatsTask struct {
+	TaskID uint                    `json:"task_id"`
+	Name   string                  `json:"name"`
+	Series []BrushStatsSeriesPoint `json:"series"`
+}
+
+// BrushStatsResponse 是最近若干段各任务与合计的收益（按进程时区分天，周从周一开始）。
+// 最后一段是当前这一段（今天、本周、本月、本季度、今年），只算到今天。
+type BrushStatsResponse struct {
+	// Granularity 是分段：day、week、month、quarter、year；Periods 是几段
+	Granularity string `json:"granularity"`
+	Periods     int    `json:"periods"`
+	// Days 是从第一段的第一天到今天一共几天
+	Days   int                     `json:"days"`
+	From   string                  `json:"from"`
+	To     string                  `json:"to"`
+	Dates  []string                `json:"dates"`
+	Tasks  []BrushStatsTask        `json:"tasks"`
+	Totals []BrushStatsSeriesPoint `json:"totals"`
+}
+
+// 刷流收益的分段与每种分段默认、最多几段（与辅种统计共用 utils 里的分段）。
+const (
+	BrushGranDay     = utils.PeriodDay
+	BrushGranWeek    = utils.PeriodWeek
+	BrushGranMonth   = utils.PeriodMonth
+	BrushGranQuarter = utils.PeriodQuarter
+	BrushGranYear    = utils.PeriodYear
+)
+
+// parseBrushStatsQuery 读分段与段数：granularity（默认 day）、periods（默认按分段，见 utils.PeriodLimits）；
+// 老的 days=N（1–90）等于按天的 N 段。不认识的值返回给用户看的错误。
+func parseBrushStatsQuery(q interface{ Get(string) string }) (string, int, error) {
+	gran := strings.TrimSpace(q.Get("granularity"))
+	if gran == "" {
+		gran = BrushGranDay
+	}
+	lim, ok := utils.PeriodLimits[gran]
+	if !ok {
+		return "", 0, errors.New("granularity 只能是 day、week、month、quarter、year")
+	}
+	periods := lim.Default
+	if raw := q.Get("periods"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > lim.Max {
+			return "", 0, fmt.Errorf("periods 应为 1–%d 的整数", lim.Max)
+		}
+		periods = v
+	} else if raw := q.Get("days"); raw != "" && gran == BrushGranDay {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > maxBrushStatDays {
+			return "", 0, fmt.Errorf("days 应为 1–%d 的整数", maxBrushStatDays)
+		}
+		periods = v
+	}
+	return gran, periods, nil
+}
+
+func (s *Server) registerBrushRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/brush/tasks", s.auth(s.apiBrushTasks))
+	mux.HandleFunc("/api/brush/tasks/", s.auth(s.apiBrushTaskDetail))
+	mux.HandleFunc("/api/brush/stats", s.auth(s.apiBrushStats))
+}
+
+func brushRepo(w http.ResponseWriter) (*models.BrushRepository, bool) {
+	if global.GlobalDB == nil {
+		http.Error(w, "数据库未初始化", http.StatusServiceUnavailable)
+		return nil, false
+	}
+	return models.NewBrushRepository(global.GlobalDB.DB), true
+}
+
+func (s *Server) brushMonitor() *scheduler.BrushMonitor {
+	if s == nil || s.mgr == nil {
+		return nil
+	}
+	return s.mgr.GetBrushMonitor()
+}
+
+// apiBrushTasks handles GET（列表）/ POST（新建）/api/brush/tasks
+func (s *Server) apiBrushTasks(w http.ResponseWriter, r *http.Request) {
+	repo, ok := brushRepo(w)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		tasks, err := repo.ListTasks()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		views, err := brushTaskViews(tasks)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, views)
+	case http.MethodPost:
+		task, status, err := decodeBrushTask(r, &models.BrushTask{})
+		if err != nil {
+			http.Error(w, err.Error(), status)
+			return
+		}
+		if err := repo.SaveTask(task); err != nil {
+			http.Error(w, brushSaveError(err), brushSaveStatus(err))
+			return
+		}
+		s.writeBrushTask(w, repo, task.ID, http.StatusCreated)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// apiBrushTaskDetail handles /api/brush/tasks/{id}、/{id}/run、/{id}/runs、/{id}/torrents
+func (s *Server) apiBrushTaskDetail(w http.ResponseWriter, r *http.Request) {
+	repo, ok := brushRepo(w)
+	if !ok {
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/brush/tasks/"), "/")
+	idPart, action, _ := strings.Cut(rest, "/")
+	id64, err := strconv.ParseUint(idPart, 10, 64)
+	if err != nil || id64 == 0 {
+		http.Error(w, "无效的刷流任务 ID", http.StatusBadRequest)
+		return
+	}
+	id := uint(id64)
+	switch action {
+	case "":
+		s.brushTaskCRUD(w, r, repo, id)
+	case "run":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		s.runBrushTask(w, r, repo, id)
+	case "runs":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		listBrushRuns(w, r, repo, id)
+	case "torrents":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		listBrushTorrents(w, r, repo, id)
+	default:
+		http.Error(w, "未知的刷流接口", http.StatusNotFound)
+	}
+}
+
+func (s *Server) brushTaskCRUD(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeBrushTask(w, repo, id, http.StatusOK)
+	case http.MethodPut:
+		existing, err := repo.GetTask(id)
+		if err != nil {
+			http.Error(w, err.Error(), brushLookupStatus(err))
+			return
+		}
+		task, status, err := decodeBrushTask(r, existing)
+		if err != nil {
+			http.Error(w, err.Error(), status)
+			return
+		}
+		// 一轮运行用的是开始时读到的配置：正在运行时不改，免得关掉的任务在这一轮里还接着加种
+		err = s.brushMonitor().WithTaskLock(id, func() error { return repo.SaveTask(task) })
+		switch {
+		case errors.Is(err, scheduler.ErrBrushBusy):
+			http.Error(w, "任务正在运行一轮，稍后再保存", http.StatusConflict)
+			return
+		case err != nil:
+			http.Error(w, brushSaveError(err), brushSaveStatus(err))
+			return
+		}
+		s.writeBrushTask(w, repo, id, http.StatusOK)
+	case http.MethodDelete:
+		// 留下的种子：交给自动删种（默认）或者保留，见 BrushDeleteHandover、BrushDeleteKeep
+		keep := false
+		switch r.URL.Query().Get("torrents") {
+		case "", BrushDeleteHandover:
+		case BrushDeleteKeep:
+			keep = true
+		default:
+			http.Error(w, "torrents 只能是 handover（交给自动删种）或 keep（保留）", http.StatusBadRequest)
+			return
+		}
+		resp := BrushDeleteResponse{Success: true}
+		err := s.brushMonitor().WithTaskLock(id, func() error {
+			if keep {
+				return s.keepBrushTorrentsAndDelete(r.Context(), repo, id, &resp)
+			}
+			return repo.DeleteTask(id)
+		})
+		switch {
+		case errors.Is(err, scheduler.ErrBrushBusy):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, models.ErrBrushTaskNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, errBrushKeepIncomplete):
+			// 下载器连不上或标签加不上：任务没删，回 502，正文列出保留失败的种子
+			resp.Success = false
+			resp.Error = fmt.Sprintf("有 %d 个种子保留失败，任务没有删除", len(resp.Failed))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(resp)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			writeJSON(w, resp)
+		}
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) writeBrushTask(w http.ResponseWriter, repo *models.BrushRepository, id uint, status int) {
+	task, err := repo.GetTask(id)
+	if err != nil {
+		http.Error(w, err.Error(), brushLookupStatus(err))
+		return
+	}
+	views, err := brushTaskViews([]models.BrushTask{*task})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(views[0])
+}
+
+func (s *Server) runBrushTask(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
+	mon := s.brushMonitor()
+	if mon == nil {
+		http.Error(w, "刷流服务未启动", http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := repo.GetTask(id); err != nil {
+		http.Error(w, err.Error(), brushLookupStatus(err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), brushRunAPITimeout)
+	defer cancel()
+	res, err := mon.RunTaskManual(ctx, id)
+	switch {
+	case errors.Is(err, scheduler.ErrBrushBusy):
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	case errors.Is(err, models.ErrBrushTaskNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	case errors.Is(err, scheduler.ErrBrushStopped):
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	case err != nil:
+		// 这一轮没跑完（站点或下载器出错）：原因写进了任务的「上次运行」，这里如实回 502
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	// 跑完了：个别种子下载或删除失败记在 result.errors 里
+	writeJSON(w, BrushRunResponse{Result: res})
+}
+
+// BrushRunView 是一轮运行记录，带上解开的步骤。
+type BrushRunView struct {
+	models.BrushRun
+	Steps []models.BrushRunStep `json:"steps"`
+}
+
+// BrushRunPage 是运行记录的一页（新的在前）。
+type BrushRunPage struct {
+	Items []BrushRunView `json:"items"`
+	Total int64          `json:"total"`
+}
+
+// listBrushRuns handles GET /api/brush/tasks/{id}/runs?limit=&offset=
+func listBrushRuns(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
+	if _, err := repo.GetTask(id); err != nil {
+		http.Error(w, err.Error(), brushLookupStatus(err))
+		return
+	}
+	q := r.URL.Query()
+	limit, offset := defaultBrushRunPage, 0
+	if raw := q.Get("limit"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > maxBrushRunPage {
+			http.Error(w, fmt.Sprintf("limit 应为 1–%d 的整数", maxBrushRunPage), http.StatusBadRequest)
+			return
+		}
+		limit = v
+	}
+	if raw := q.Get("offset"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 0 {
+			http.Error(w, "offset 应为不小于 0 的整数", http.StatusBadRequest)
+			return
+		}
+		offset = v
+	}
+	rows, total, err := repo.ListRuns(id, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	page := BrushRunPage{Items: make([]BrushRunView, 0, len(rows)), Total: total}
+	for _, row := range rows {
+		page.Items = append(page.Items, BrushRunView{BrushRun: row, Steps: row.StepList()})
+	}
+	writeJSON(w, page)
+}
+
+func listBrushTorrents(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
+	if _, err := repo.GetTask(id); err != nil {
+		http.Error(w, err.Error(), brushLookupStatus(err))
+		return
+	}
+	q := r.URL.Query()
+	state := q.Get("state")
+	switch state {
+	case "", models.BrushTorrentActive, models.BrushTorrentRemoved, models.BrushTorrentGone:
+	default:
+		http.Error(w, "state 只能是 active、removed 或 gone", http.StatusBadRequest)
+		return
+	}
+	page, _ := strconv.Atoi(q.Get("page"))
+	pageSize, _ := strconv.Atoi(q.Get("page_size"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 50
+	}
+	rows, total, err := repo.ListTorrents(id, state, page, pageSize)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"items": rows, "total": total, "page": page, "page_size": pageSize})
+}
+
+// apiBrushStats handles GET /api/brush/stats?days=
+func (s *Server) apiBrushStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	repo, ok := brushRepo(w)
+	if !ok {
+		return
+	}
+	gran, periods, err := parseBrushStatsQuery(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp, err := buildBrushStats(repo, time.Now(), gran, periods)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+// buildBrushStats 按分段汇总每日收益：最近 periods 段，最后一段是 now 所在的那一段（只算到今天）。
+func buildBrushStats(repo *models.BrushRepository, now time.Time, gran string, periods int) (BrushStatsResponse, error) {
+	const dayFmt = "2006-01-02"
+	first := utils.PeriodAdd(utils.PeriodStart(now, gran), gran, -(periods - 1))
+	starts := make([]time.Time, periods)
+	for i := range periods {
+		starts[i] = utils.PeriodAdd(first, gran, i)
+	}
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	from, to := first.Format(dayFmt), today.Format(dayFmt)
+	dates := make([]string, periods)
+	blank := func() []BrushStatsSeriesPoint {
+		out := make([]BrushStatsSeriesPoint, periods)
+		for i, st := range starts {
+			out[i].Date = st.Format(dayFmt)
+			out[i].End = utils.PeriodAdd(st, gran, 1).AddDate(0, 0, -1).Format(dayFmt)
+		}
+		return out
+	}
+	for i, st := range starts {
+		dates[i] = st.Format(dayFmt)
+	}
+	tasks, err := repo.ListTasks()
+	if err != nil {
+		return BrushStatsResponse{}, err
+	}
+	stats, err := repo.DailyStats(0, from, to)
+	if err != nil {
+		return BrushStatsResponse{}, err
+	}
+	resp := BrushStatsResponse{
+		Granularity: gran, Periods: periods, Days: int(today.Sub(first).Round(24*time.Hour)/(24*time.Hour)) + 1,
+		From: from, To: to, Dates: dates, Totals: blank(), Tasks: make([]BrushStatsTask, 0, len(tasks)),
+	}
+	byTask := make(map[uint]int, len(tasks))
+	for _, t := range tasks {
+		byTask[t.ID] = len(resp.Tasks)
+		resp.Tasks = append(resp.Tasks, BrushStatsTask{TaskID: t.ID, Name: t.Name, Series: blank()})
+	}
+	for _, st := range stats {
+		d, err := time.ParseInLocation(dayFmt, st.Day, now.Location())
+		if err != nil {
+			continue
+		}
+		// 这一天落在哪一段：第一个起点晚于它的那一段的前一段
+		i := sort.Search(len(starts), func(k int) bool { return starts[k].After(d) }) - 1
+		if i < 0 {
+			continue
+		}
+		add := func(p *BrushStatsSeriesPoint) {
+			p.Uploaded += st.Uploaded
+			p.Downloaded += st.Downloaded
+			p.Added += st.Added
+			p.Removed += st.Removed
+		}
+		add(&resp.Totals[i])
+		if ti, ok := byTask[st.TaskID]; ok {
+			add(&resp.Tasks[ti].Series[i])
+		}
+	}
+	return resp, nil
+}
+
+// brushTaskViews 给任务补上下载器名、站点是否启用、在做的种子数与收益。
+func brushTaskViews(tasks []models.BrushTask) ([]BrushTaskView, error) {
+	db := global.GlobalDB.DB
+	repo := models.NewBrushRepository(db)
+	totals, err := repo.TaskTotals()
+	if err != nil {
+		return nil, err
+	}
+	today := time.Now().Format("2006-01-02")
+	todayStats, err := repo.DailyStats(0, today, today)
+	if err != nil {
+		return nil, err
+	}
+	todayBy := make(map[uint]models.BrushDailyStat, len(todayStats))
+	for _, st := range todayStats {
+		todayBy[st.TaskID] = st
+	}
+	var dls []models.DownloaderSetting
+	if err := db.Select("id", "name").Find(&dls).Error; err != nil {
+		return nil, fmt.Errorf("读取下载器失败: %w", err)
+	}
+	dlNames := make(map[uint]string, len(dls))
+	for _, d := range dls {
+		dlNames[d.ID] = d.Name
+	}
+	var sites []models.SiteSetting
+	if err := db.Select("name", "enabled").Find(&sites).Error; err != nil {
+		return nil, fmt.Errorf("读取站点失败: %w", err)
+	}
+	siteOn := make(map[string]bool, len(sites))
+	for _, st := range sites {
+		siteOn[st.Name] = st.Enabled
+	}
+	out := make([]BrushTaskView, 0, len(tasks))
+	for _, t := range tasks {
+		v := BrushTaskView{BrushTask: t, DownloaderName: dlNames[t.DownloaderID], SiteEnabled: siteOn[t.SiteName]}
+		active, err := repo.ActiveTorrents(t.ID)
+		if err != nil {
+			return nil, err
+		}
+		v.ActiveCount = len(active)
+		for _, bt := range active {
+			v.ActiveSizeBytes += bt.SizeBytes
+			if bt.Progress < 1 {
+				v.DownloadingCount++
+			}
+		}
+		if st, ok := todayBy[t.ID]; ok {
+			v.Today = BrushStatView{Uploaded: st.Uploaded, Downloaded: st.Downloaded, Added: st.Added, Removed: st.Removed}
+		}
+		if st, ok := totals[t.ID]; ok {
+			v.Total = BrushStatView{Uploaded: st.Uploaded, Downloaded: st.Downloaded, Added: st.Added, Removed: st.Removed}
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// decodeBrushTask 解析请求体、校验后写到 into 上（保留 ID 与运行状态列）；返回出错时的 HTTP 状态码。
+func decodeBrushTask(r *http.Request, into *models.BrushTask) (*models.BrushTask, int, error) {
+	var req BrushTaskRequest
+	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 64<<10)).Decode(&req); err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("请求格式错误: %w", err)
+	}
+	if status, err := validateBrushTask(&req); err != nil {
+		return nil, status, err
+	}
+	t := into
+	t.Name, t.Enabled, t.SiteName, t.DownloaderID = req.Name, req.Enabled, req.SiteName, req.DownloaderID
+	t.SavePath, t.Category, t.Tags, t.IntervalMin = req.SavePath, req.Category, req.Tags, req.IntervalMin
+	t.Section = req.Section
+	t.Discounts, t.MinFreeRemainMin, t.MinSizeGB, t.MaxSizeGB = req.Discounts, req.MinFreeRemainMin, req.MinSizeGB, req.MaxSizeGB
+	t.MaxSeeders, t.MinLeechers, t.MaxPublishAgeMin, t.ExcludeHR = req.MaxSeeders, req.MinLeechers, req.MaxPublishAgeMin, req.ExcludeHR
+	t.IncludeKeywords, t.ExcludeKeywords = req.IncludeKeywords, req.ExcludeKeywords
+	t.MaxDownloading, t.MaxTotalSizeGB, t.MaxDailyDownloadGB = req.MaxDownloading, req.MaxTotalSizeGB, req.MaxDailyDownloadGB
+	t.RemoveSeedTimeH, t.RemoveRatio = req.RemoveSeedTimeH, req.RemoveRatio
+	t.RemoveLowSpeedKBs, t.RemoveLowSpeedWindowMin, t.RemoveInactiveH = req.RemoveLowSpeedKBs, req.RemoveLowSpeedWindowMin, req.RemoveInactiveH
+	t.RemoveFreeExpiredIncomplete, t.RemoveWithData = req.RemoveFreeExpiredIncomplete, req.RemoveWithData
+	return t, 0, nil
+}
+
+// validateBrushTask 校验并规整请求（去空白、把优惠类型写成大写、窗口缺省 30 分钟）。
+// 返回的状态码区分参数错误（400）与读库失败（500）。开启的任务要求站点和下载器都已启用；关闭的任务可以先存成草稿。
+func validateBrushTask(req *BrushTaskRequest) (int, error) {
+	bad := func(format string, args ...any) (int, error) {
+		return http.StatusBadRequest, fmt.Errorf(format, args...)
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.SiteName = strings.TrimSpace(req.SiteName)
+	req.SavePath = strings.TrimSpace(req.SavePath)
+	req.Category = strings.TrimSpace(req.Category)
+	req.Tags = strings.TrimSpace(req.Tags)
+	switch n := utf8.RuneCountInString(req.Name); {
+	case n == 0:
+		return bad("任务名称不能为空")
+	case n > 64:
+		return bad("任务名称不能超过 64 个字")
+	}
+	if req.SiteName == "" {
+		return bad("请选择站点")
+	}
+	def, ok := v2.GetDefinitionRegistry().Get(req.SiteName)
+	if !ok {
+		return bad("站点 %s 没有内置定义，刷流只支持内置站点", req.SiteName)
+	}
+	// 分区只对 M-Team 有意义；别的站点一律存成空
+	req.Section = strings.ToLower(strings.TrimSpace(req.Section))
+	if def.Schema != v2.SchemaMTorrent {
+		req.Section = ""
+	} else if !slices.Contains(scheduler.BrushSections, req.Section) {
+		return bad("不认识的分区 %s（normal 综合区、adult 成人区、all 两个都读）", req.Section)
+	}
+	var site models.SiteSetting
+	if err := global.GlobalDB.DB.Select("id", "enabled").Where("name = ?", req.SiteName).First(&site).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return bad("站点 %s 还没有配置", req.SiteName)
+		}
+		return http.StatusInternalServerError, fmt.Errorf("读取站点失败: %w", err)
+	}
+	if req.DownloaderID == 0 {
+		return bad("请选择下载器")
+	}
+	var dl models.DownloaderSetting
+	if err := global.GlobalDB.DB.Select("id", "enabled").First(&dl, req.DownloaderID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return bad("选中的下载器已经不存在")
+		}
+		return http.StatusInternalServerError, fmt.Errorf("读取下载器失败: %w", err)
+	}
+	if req.Enabled && !site.Enabled {
+		return bad("站点 %s 未启用，先在站点列表里启用再开启任务", req.SiteName)
+	}
+	if req.Enabled && !dl.Enabled {
+		return bad("选中的下载器未启用，先启用它再开启任务")
+	}
+	if req.IntervalMin < 5 || req.IntervalMin > 1440 {
+		return bad("检查间隔应为 5–1440 分钟")
+	}
+	if req.MaxDownloading < 1 || req.MaxDownloading > 50 {
+		return bad("同时下载数应为 1–50")
+	}
+	var levels []string
+	allowed := map[string]bool{}
+	for _, lv := range scheduler.BrushDiscountLevels {
+		allowed[string(lv)] = true
+	}
+	for raw := range strings.SplitSeq(req.Discounts, ",") {
+		lv := strings.ToUpper(strings.TrimSpace(raw))
+		if lv == "" {
+			continue
+		}
+		if !allowed[lv] {
+			return bad("不认识的优惠类型 %s", lv)
+		}
+		levels = append(levels, lv)
+	}
+	req.Discounts = strings.Join(levels, ",")
+	for name, v := range map[string]float64{
+		"最小体积": req.MinSizeGB, "最大体积": req.MaxSizeGB, "任务总体积": req.MaxTotalSizeGB, "每日下载量": req.MaxDailyDownloadGB,
+		"做种时长": req.RemoveSeedTimeH, "分享率": req.RemoveRatio, "上传速度阈值": req.RemoveLowSpeedKBs, "无活动时长": req.RemoveInactiveH,
+	} {
+		if v < 0 {
+			return bad("%s不能是负数", name)
+		}
+	}
+	for name, v := range map[string]int{"免费剩余时间": req.MinFreeRemainMin, "做种人数上限": req.MaxSeeders, "下载人数下限": req.MinLeechers, "发布时长上限": req.MaxPublishAgeMin} {
+		if v < 0 {
+			return bad("%s不能是负数", name)
+		}
+	}
+	if req.MaxSizeGB > 0 && req.MinSizeGB > req.MaxSizeGB {
+		return bad("最小体积不能大于最大体积")
+	}
+	if req.RemoveLowSpeedWindowMin == 0 {
+		req.RemoveLowSpeedWindowMin = 30
+	}
+	if req.RemoveLowSpeedKBs > 0 && (req.RemoveLowSpeedWindowMin < 5 || req.RemoveLowSpeedWindowMin > 1440) {
+		return bad("低速判断的时间窗应为 5–1440 分钟")
+	}
+	if utf8.RuneCountInString(req.IncludeKeywords) > 1000 || utf8.RuneCountInString(req.ExcludeKeywords) > 1000 {
+		return bad("关键词不能超过 1000 个字")
+	}
+	if utf8.RuneCountInString(req.Tags) > 200 || utf8.RuneCountInString(req.Category) > 120 || utf8.RuneCountInString(req.SavePath) > 500 {
+		return bad("标签、分类或保存路径太长")
+	}
+	return 0, nil
+}
+
+func brushLookupStatus(err error) int {
+	if errors.Is(err, models.ErrBrushTaskNotFound) {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
+
+func brushSaveStatus(err error) int {
+	if strings.Contains(strings.ToLower(err.Error()), "unique") {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
+}
+
+func brushSaveError(err error) string {
+	if brushSaveStatus(err) == http.StatusConflict {
+		return "已经有同名的刷流任务"
+	}
+	return err.Error()
+}

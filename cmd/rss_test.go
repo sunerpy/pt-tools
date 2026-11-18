@@ -35,7 +35,7 @@ func (s *ptStub) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSC
 func (s *ptStub) Context() context.Context { return context.Background() }
 func TestGetInterval_DefaultAndConfigured(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestGetInterval_DefaultAndConfigured(t *testing.T) {
 
 func TestProcessRSS_WithStub(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestRunRSSJob_SingleMode(t *testing.T) {
 	// invalid URL will cause fetchRSS to fail; but runRSSJob calls executeTask first
 	// set up DB to avoid early returns in getInterval
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -127,7 +127,7 @@ func (s *errSite) Context() context.Context { return context.Background() }
 
 func TestExecuteTask_ErrorPath_NoPanic(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestRunSiteJobs_WithSingleMode(t *testing.T) {
 
 func TestGenTorrentsWithRSSOnce_NoRSS(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestGenTorrentsWithRSSOnce_NoRSS(t *testing.T) {
 
 func TestGenTorrentsWithRSS_PersistentCancel(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestGenTorrentsWithRSS_PersistentCancel(t *testing.T) {
 // TestGenTorrentsWithRSSOnce_WithEnabledSites 测试启用站点的情况
 func TestGenTorrentsWithRSSOnce_WithEnabledSites(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestGenTorrentsWithRSSOnce_WithEnabledSites(t *testing.T) {
 // TestGenTorrentsWithRSSOnce_WithDisabledSites 测试禁用站点的情况
 func TestGenTorrentsWithRSSOnce_WithDisabledSites(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestGenTorrentsWithRSSOnce_WithDisabledSites(t *testing.T) {
 // TestGenTorrentsWithRSS_EmptyDownloadDir 测试空下载目录的情况
 func TestGenTorrentsWithRSS_EmptyDownloadDir(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestGenTorrentsWithRSS_EmptyDownloadDir(t *testing.T) {
 // TestGetInterval_ZeroGlobalInterval 测试全局间隔为0的情况
 func TestGetInterval_ZeroGlobalInterval(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestGetInterval_ZeroGlobalInterval(t *testing.T) {
 // TestRunRSSJob_PersistentModeCancel 测试持续模式取消
 func TestRunRSSJob_PersistentModeCancel(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestRunRSSJob_PersistentModeCancel(t *testing.T) {
 // TestGenTorrentsWithRSSOnce_WithMTEAM 测试 MTEAM 站点
 func TestGenTorrentsWithRSSOnce_WithMTEAM(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestGenTorrentsWithRSSOnce_WithMTEAM(t *testing.T) {
 // TestGenTorrentsWithRSSOnce_WithHDSKY 测试 HDSKY 站点
 func TestGenTorrentsWithRSSOnce_WithHDSKY(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestGenTorrentsWithRSSOnce_WithHDSKY(t *testing.T) {
 // TestGenTorrentsWithRSSOnce_WithUnknownSite 测试未知站点
 func TestGenTorrentsWithRSSOnce_WithUnknownSite(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestGenTorrentsWithRSSOnce_WithUnknownSite(t *testing.T) {
 // TestGenTorrentsWithRSS_WithAutoStart 测试自动启动
 func TestGenTorrentsWithRSS_WithAutoStart(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestGenTorrentsWithRSS_WithAutoStart(t *testing.T) {
 // TestExecuteTask_Success 测试任务执行成功
 func TestExecuteTask_Success(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -480,7 +480,7 @@ func TestExecuteTask_Success(t *testing.T) {
 // TestProcessRSS_SendTorrentError 测试发送种子错误
 func TestProcessRSS_SendTorrentError(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}

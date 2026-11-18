@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<channel>
+  <title>QA 的收藏</title>
+  <link>https://www.douban.com/people/qa/</link>
+  <description><![CDATA[QA 的收藏：想看、在看和看过的书和电影，想听、在听和听过的音乐]]></description>
+  <language>zh-cn</language>
+    <item>
+        <title>想看沙丘2</title>
+        <link>https://movie.douban.com/subject/35575567/</link>
+        <description><![CDATA[
+    <table><tr>
+    <td width="80px"><a href="https://movie.douban.com/subject/35575567/" title="Dune: Part Two">
+    <img src="https://img3.doubanio.com/view/photo/s_ratio_poster/public/p1.jpg" alt="Dune: Part Two"></a></td>
+    <td><p>推荐: 力荐</p></td></tr></table>
+]]></description>
+        <guid isPermaLink="false">https://www.douban.com/people/qa/interests/1</guid>
+    </item>
+    <item>
+        <title>想看最后生还者 第二季</title>
+        <link>https://movie.douban.com/subject/36000001/</link>
+        <description><![CDATA[<a href="https://movie.douban.com/subject/36000001/" title="The Last of Us Season 2"><img src="x.jpg"></a>]]></description>
+    </item>
+    <item>
+        <title>在看黑客军团 第四季</title>
+        <link>https://movie.douban.com/subject/27605486/</link>
+        <description><![CDATA[<a href="https://movie.douban.com/subject/27605486/" title="Mr. Robot"><img src="x.jpg"></a>]]></description>
+    </item>
+    <item>
+        <title>看过我不是药神</title>
+        <link>https://movie.douban.com/subject/26752088/</link>
+        <description><![CDATA[<a href="https://movie.douban.com/subject/26752088/" title="我不是药神"><img src="x.jpg"></a>]]></description>
+    </item>
+    <item>
+        <title>想看三体</title>
+        <link>https://book.douban.com/subject/2567698/</link>
+        <description><![CDATA[<a href="https://book.douban.com/subject/2567698/" title="三体"><img src="x.jpg"></a>]]></description>
+    </item>
+    <item>
+        <title>想看不存在的电影 Relaxin&#39;</title>
+        <link>https://movie.douban.com/subject/99999999/</link>
+        <description><![CDATA[<a href="https://movie.douban.com/subject/99999999/" title="Relaxin&#39; Nowhere"><img src="x.jpg"></a>]]></description>
+    </item>
+</channel>
+</rss>

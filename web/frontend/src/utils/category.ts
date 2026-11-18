@@ -5,8 +5,8 @@
  *   M-Team   `电影/HD`、`影剧/综艺/HD`、`纪录片`、`音乐(无损)`、`演唱会`、
  *            `PC游戏`、`TV游戏`、`动画`、`H-Anime`、`H-Comic`…
  *            （site/v2/mtorrent_driver.go 的 mteamCategoryMap）
- *   HDDolby  `Movies/SD`、`TV/HD`、`Documentary`、`Animation`、`Music`、
- *            `Sports`、`Games`…（site/v2/hddolby_driver.go 的 getCategoryName）
+ *   HDDolby  `电影`、`电视剧`、`综艺`、`纪录片`、`动漫`、`音乐视频`、`音乐`、
+ *            `体育`、`游戏`…（site/v2/hddolby_driver.go 的 hddolbyCategories）
  *   Unit3D   站点自己配的 `Category.Name`，内容不可枚举
  *   NexusPHP 从列表页的分类图标上刮下来的文字，同样不可枚举
  *

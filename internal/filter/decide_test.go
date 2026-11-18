@@ -789,3 +789,56 @@ func TestBuildDecisionReason_FreeOnlyReasons(t *testing.T) {
 	assert.False(t, d2.ShouldDownload)
 	assert.Contains(t, d2.Reason, "免费期")
 }
+
+// #556 的后续：规则用途能存进库以后，RSS 可能只关联了通知规则。通知规则不参与下载，
+// 也不该关掉免费通道——否则 auto_free 下免费种子全被拒绝。关联了下载或两者的规则时照旧关掉。
+func TestDecide_AutoFreeMode_NotifyOnlyRulesKeepFreeChannel(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	notifyOnly := createTestRSSSubscription(t, db, "rss-notify-only")
+	createRuleForDecide(t, db, svc, notifyOnly.ID, &models.FilterRule{
+		Name: "notify-2160p", Pattern: "2160p", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, Enabled: true, Priority: 100, Purpose: string(PurposeNotify),
+	})
+	withBoth := createTestRSSSubscription(t, db, "rss-both")
+	createRuleForDecide(t, db, svc, withBoth.ID, &models.FilterRule{
+		Name: "both-2160p", Pattern: "2160p", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, Enabled: true, Priority: 100, Purpose: string(PurposeBoth),
+	})
+
+	decide := func(rssID uint, title string, isFree bool) Decision {
+		return svc.Decide(DecisionContext{
+			Input:      MatchInput{Title: title, SizeGB: 5},
+			IsFree:     isFree,
+			CanFinish:  true,
+			GlobalSize: 100,
+			FilterMode: models.FilterModeAutoFree,
+		}, rssID)
+	}
+
+	// 只关联了通知规则：免费种子走免费通道；命中通知规则的付费种子不下载（通知规则不批准下载）
+	d := decide(notifyOnly.ID, "Documentary.1080p", true)
+	assert.True(t, d.ShouldDownload)
+	assert.Equal(t, SourceFreeDownload, d.Source)
+	assert.False(t, decide(notifyOnly.ID, "Movie.2160p", false).ShouldDownload)
+
+	// 关联了 both 规则：和下载规则一样，命中的下载、不命中的免费种子不下载
+	assert.Equal(t, SourceFilterRule, decide(withBoth.ID, "Movie.2160p", false).Source)
+	assert.False(t, decide(withBoth.ID, "Documentary.1080p", true).ShouldDownload)
+}
+
+func TestPurposeHelpers(t *testing.T) {
+	for in, want := range map[string]Purpose{
+		"": PurposeDownload, "download": PurposeDownload, "notify": PurposeNotify,
+		"both": PurposeBoth, "legacy": PurposeDownload,
+	} {
+		assert.Equal(t, want, NormalizePurpose(in), in)
+	}
+	rules := []models.FilterRule{{Purpose: "notify"}}
+	assert.False(t, HasRulesFor(rules, PurposeDownload))
+	assert.True(t, HasRulesFor(rules, PurposeNotify))
+	assert.True(t, HasRulesFor(append(rules, models.FilterRule{Purpose: ""}), PurposeDownload), "空值是下载规则")
+	assert.True(t, HasRulesFor([]models.FilterRule{{Purpose: "both"}}, PurposeDownload))
+	assert.False(t, HasRulesFor(nil, PurposeDownload))
+}

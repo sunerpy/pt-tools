@@ -44,6 +44,18 @@ curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/${TAG_NAME}/script
 Edge Add-ons 商店**。其 manifest 版本为 `<M.m.p>.<N>`（N 为 RC 序号），
 低于稳定版的 `<M.m.p>.65535`，因此安装预发版后仍可正常升级到稳定版。
 
+### Android App
+
+从本页 Assets 区下载，按手机的 CPU 架构选：
+
+| Architecture                | File                           |
+| --------------------------- | ------------------------------ |
+| arm64-v8a（大多数手机）     | `pt-tools-app-arm64-v8a.apk`   |
+| armeabi-v7a（较老的 32 位） | `pt-tools-app-armeabi-v7a.apk` |
+| x86_64（模拟器）            | `pt-tools-app-x86_64.apk`      |
+
+App 与服务端是同一个版本。用法见[手机 App](https://github.com/sunerpy/pt-tools/blob/${TAG_NAME}/docs/guide/mobile-app.md)。
+
 ### Verify Integrity
 
 ```bash

@@ -4,6 +4,7 @@ import PtIcon from "@/components/PtIcon";
 import PtProgress from "@/components/ui/PtProgress.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { formatShortDateTime } from "@/utils/format";
+import { hasKeepTag, KEEP_TIP } from "@/utils/keepTag";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 type SortChangePayload = {
@@ -37,7 +38,10 @@ const emit = defineEmits<{
         | "recheck"
         | "detail"
         | "set_category"
-        | "set_tags";
+        | "set_tags"
+        | "organize"
+        | "keep"
+        | "unkeep";
       row: DownloaderTorrentItem;
     },
   ): void;
@@ -150,7 +154,10 @@ function emitContextAction(
     | "recheck"
     | "detail"
     | "set_category"
-    | "set_tags",
+    | "set_tags"
+    | "organize"
+    | "keep"
+    | "unkeep",
 ) {
   if (!contextRow.value) return;
   emit("context-action", { action, row: contextRow.value });
@@ -253,6 +260,7 @@ watch(
       class="pt-grid"
       :class="tableClassName()"
       :max-height="props.maxHeight"
+      scrollbar-always-on
       :row-key="(row: DownloaderTorrentItem) => `${row.downloader_id}:${row.task_id}`"
       :row-class-name="rowClassName"
       @cell-mouse-enter="onCellMouseEnter"
@@ -294,14 +302,21 @@ watch(
           :show-overflow-tooltip="false"
           class-name="title-cell pt-cell-strong">
           <template #default="{ row }">
-            <span class="title-text">{{ row.title }}</span>
+            <span v-if="hasKeepTag(row.tags)" class="title-line">
+              <PtTag class="keep-mark" :title="KEEP_TIP" data-testid="row-keep-mark">
+                <template #icon><PtIcon name="shield-check" :size="11" /></template>
+                保留
+              </PtTag>
+              <span class="title-text">{{ row.title }}</span>
+            </span>
+            <span v-else class="title-text">{{ row.title }}</span>
           </template>
         </el-table-column>
         <el-table-column
           v-else-if="columnKey === 'progress' && isVisible('progress')"
           label="进度"
           prop="progress"
-          width="170"
+          width="150"
           sortable="custom">
           <template #default="{ row }">
             <div class="pg">
@@ -328,7 +343,7 @@ watch(
           v-else-if="columnKey === 'size' && isVisible('size')"
           label="大小"
           prop="size"
-          width="120"
+          width="104"
           align="right"
           sortable="custom">
           <template #default="{ row }">{{ formatSize(row.size) }}</template>
@@ -337,7 +352,7 @@ watch(
           v-else-if="columnKey === 'upload_speed' && isVisible('upload_speed')"
           label="上传速度"
           prop="upload_speed"
-          width="130"
+          width="112"
           align="right"
           sortable="custom">
           <template #default="{ row }">{{ formatSize(row.upload_speed) }}/s</template>
@@ -346,7 +361,7 @@ watch(
           v-else-if="columnKey === 'download_speed' && isVisible('download_speed')"
           label="下载速度"
           prop="download_speed"
-          width="130"
+          width="112"
           align="right"
           sortable="custom">
           <template #default="{ row }">{{ formatSize(row.download_speed) }}/s</template>
@@ -355,7 +370,7 @@ watch(
           v-else-if="columnKey === 'added_at' && isVisible('added_at')"
           label="添加日期"
           prop="added_at"
-          width="170"
+          width="136"
           sortable="custom"
           class-name="pt-cell-muted">
           <template #default="{ row }">
@@ -368,7 +383,7 @@ watch(
           v-else-if="columnKey === 'completed_at' && isVisible('completed_at')"
           label="完成日期"
           prop="completed_at"
-          width="170"
+          width="136"
           sortable="custom"
           class-name="pt-cell-muted">
           <template #default="{ row }">
@@ -390,7 +405,7 @@ watch(
           v-else-if="columnKey === 'state' && isVisible('state')"
           label="状态"
           prop="state"
-          width="120"
+          width="104"
           sortable="custom"
           class-name="pt-cell-1line"
           :show-overflow-tooltip="false" />
@@ -416,7 +431,8 @@ watch(
           sortable="custom"
           :show-overflow-tooltip="false" />
       </template>
-      <el-table-column label="操作" width="92" class-name="action-column pt-cell-act">
+      <!-- 列多时表格要横着滚：操作列钉在右边，滚到哪都点得到「详情」 -->
+      <el-table-column label="操作" width="92" fixed="right" class-name="action-column pt-cell-act">
         <template #default="{ row }">
           <el-button link type="primary" @click="emitDetail(row)">
             <PtIcon name="info" :size="14" /><span>详情</span>
@@ -439,10 +455,21 @@ watch(
         <button type="button" @click="emitContextAction('resume')">开始</button>
         <button type="button" @click="emitContextAction('recheck')">复检</button>
         <div class="menu-divider" />
+        <div class="menu-group-title">媒体</div>
+        <button type="button" @click="emitContextAction('organize')">整理入库</button>
         <div class="menu-divider" />
         <div class="menu-group-title">分类/标签</div>
         <button type="button" @click="emitContextAction('set_category')">设置分类</button>
         <button type="button" @click="emitContextAction('set_tags')">设置标签</button>
+        <button
+          v-if="contextRow && hasKeepTag(contextRow.tags)"
+          type="button"
+          @click="emitContextAction('unkeep')">
+          取消保留
+        </button>
+        <button v-else type="button" :title="KEEP_TIP" @click="emitContextAction('keep')">
+          保留
+        </button>
         <div class="menu-group-title">危险操作</div>
         <button type="button" class="danger" @click="emitContextAction('delete')">删除任务</button>
         <button type="button" class="danger" @click="emitContextAction('delete_with_files')">
@@ -560,6 +587,23 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 带保留标记的标题：标记在前、不压缩，标题照旧单行截断 */
+.pt-grid :deep(.title-line) {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.pt-grid :deep(.title-line .keep-mark) {
+  flex: none;
+}
+
+.pt-grid :deep(.title-line .title-text) {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 行左缘的状态渐变：让下载/做种/错误三种行在长列表里能被扫出来 */

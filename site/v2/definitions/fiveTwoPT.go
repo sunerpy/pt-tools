@@ -10,6 +10,7 @@ var FiveTwoPTDefinition = &v2.SiteDefinition{
 	Aka:             []string{"我爱PT"},
 	Description:     "低调地在这个PT校园快乐成长 快乐分享",
 	Schema:          v2.SchemaNexusPHP,
+	Attendance:      &v2.AttendanceConfig{Challenge: v2.ChallengeBakaQuiz},
 	URLs:            []string{"https://52pt.site/"},
 	FaviconURL:      "https://52pt.site/favicon.ico",
 	TimezoneOffset:  "+0800",
@@ -60,7 +61,7 @@ var FiveTwoPTDefinition = &v2.SiteDefinition{
 				Selector: []string{"td.rowhead:contains('BT时间') + td", "td.rowhead:contains('传输') + td", "td.rowhead:contains('分享率') + td font", "td.rowhead:contains('分享率') + td", "td.rowhead:contains('Ratio') + td font", "td.rowhead:contains('Ratio') + td", "#info_block"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)[^\d∞]*([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)(?:<[^>]*>|[\s\p{Zs}：:])*([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},

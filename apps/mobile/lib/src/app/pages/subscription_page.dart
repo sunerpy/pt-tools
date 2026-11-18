@@ -1,0 +1,375 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:ptt_api/api.dart';
+
+import '../../../l10n/app_localizations.dart';
+import '../format.dart';
+import '../hybrid/mobile_api.dart';
+import '../icons.dart';
+import '../providers.dart';
+import '../theme.dart';
+import '../widgets/common.dart';
+import 'media_page.dart';
+import 'mobile_editor_page.dart';
+
+/// 订阅详情：海报、进度、每一集的状态、下载过的种子；完全控制的设备可以暂停/恢复、立即搜索、删除。
+class SubscriptionPage extends ConsumerWidget {
+  const SubscriptionPage({super.key, required this.id});
+  final int id;
+
+  Future<void> _run(
+    BuildContext context,
+    WidgetRef ref,
+    Future<String?> Function(AppApi api) f,
+  ) async {
+    final s = S.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final msg = await f(ref.read(apiProvider)!);
+      if (msg != null) messenger.showSnackBar(SnackBar(content: Text(msg)));
+    } on Object catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(s.errorPrefix(describeError(e, s)))),
+      );
+    }
+    ref.invalidate(subscriptionProvider(id));
+    ref.invalidate(subscriptionsProvider);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = S.of(context);
+    final detail = ref.watch(subscriptionProvider(id));
+    final canWrite = ref.watch(canWriteProvider);
+    final d = detail.value;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(d?.title ?? s.tabSubscriptions),
+        actions: [
+          if (canWrite && d != null)
+            PopupMenuButton<String>(
+              icon: const PtIcon(PtGlyph.moreVertical),
+              onSelected: (v) async {
+                switch (v) {
+                  case 'edit':
+                    if (await openMobileEditor(
+                      context,
+                      ref,
+                      'subscription',
+                      id: id,
+                    )) {
+                      ref.invalidate(subscriptionProvider(id));
+                      ref.invalidate(subscriptionsProvider);
+                    }
+                  case 'toggle':
+                    await _run(context, ref, (api) async {
+                      await api.setSubscriptionStatus(
+                        id,
+                        AppSubscriptionStatus(
+                          status: AppSubscriptionStatusStatusEnum.fromJson(
+                            d.status == 'paused' ? 'active' : 'paused',
+                          )!,
+                        ),
+                      );
+                      return null;
+                    });
+                  case 'search':
+                    await _run(
+                      context,
+                      ref,
+                      (api) async =>
+                          (await api.searchSubscription(id))?.message,
+                    );
+                  case 'delete':
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (c) => AlertDialog(
+                        title: Text(s.subDelete),
+                        content: Text(s.subDeleteConfirm),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(c, false),
+                            child: Text(s.cancel),
+                          ),
+                          FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Theme.of(c).colorScheme.error,
+                              foregroundColor: Theme.of(c).colorScheme.onError,
+                            ),
+                            onPressed: () => Navigator.pop(c, true),
+                            child: Text(s.actionDelete),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok == true && context.mounted) {
+                      await _run(context, ref, (api) async {
+                        await api.deleteSubscription(id);
+                        return null;
+                      });
+                      if (context.mounted) context.go('/media');
+                    }
+                }
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'edit', child: Text(s.mobileEditor)),
+                PopupMenuItem(
+                  value: 'toggle',
+                  child: Text(d.status == 'paused' ? s.subResume : s.subPause),
+                ),
+                if (d.status != 'paused')
+                  PopupMenuItem(value: 'search', child: Text(s.subSearchNow)),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text(
+                    s.subDelete,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          try {
+            ref.invalidate(subscriptionProvider(id));
+            await ref.read(subscriptionProvider(id).future);
+          } on Object {
+            // 页面显示错误
+          }
+        },
+        child: AsyncBody<AppSubscriptionDetail>(
+          value: detail,
+          onRetry: () => ref.invalidate(subscriptionProvider(id)),
+          data: (d) => ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Poster(d.posterPath, width: 100),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          d.title,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        if (d.originalTitle != null &&
+                            d.originalTitle != d.title)
+                          Text(
+                            d.originalTitle!,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            StatusPill(
+                              text: subStatusLabel(s, d.status),
+                              color: switch (d.status) {
+                                'active' => context.pt.ok,
+                                'pending' => context.pt.warn,
+                                _ => Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              },
+                            ),
+                            if (d.mediaType == 'tv' && d.season > 0)
+                              StatusPill(
+                                text: 'S${d.season.toString().padLeft(2, '0')}',
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            if (d.upgrade)
+                              StatusPill(
+                                text: s.subUpgrade,
+                                color: context.pt.violet,
+                              ),
+                          ],
+                        ),
+                        if (d.mediaType == 'tv')
+                          Text(
+                            s.subProgress(
+                              d.progress.inLibrary,
+                              d.progress.aired == 0
+                                  ? d.progress.total
+                                  : d.progress.aired,
+                            ),
+                          ),
+                        if (subLockLine(s, d) case final lock?) Text(lock),
+                        if (d.message != null && d.message!.isNotEmpty)
+                          Text(
+                            d.message!,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        if (d.nextSearchAt != null && d.nextSearchAt! > 0)
+                          Text(
+                            s.subNextSearch(formatTime(d.nextSearchAt!)),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (d.episodes.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                RowGroup(
+                  title: s.episodesTitle,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final e in d.episodes) _EpisodeChip(e, id),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (d.torrents.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                RowGroup(
+                  title: s.subTorrentsTitle,
+                  children: [
+                    for (final t in d.torrents)
+                      ListTile(
+                        leading: SiteIcon(t.site, size: 28),
+                        title: Text(
+                          t.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          [
+                            t.status,
+                            formatBytes(t.size),
+                            formatTime(t.createdAt),
+                          ].join(' · '),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 版本锁的一行（和网页的追剧列表一样）：锁住了写组与分辨率，开着还没定写按第一个下载的版本定，
+/// 没开或不是剧集时为 null。
+String? subLockLine(S s, AppSubscriptionDetail d) {
+  if (d.mediaType != 'tv' || d.lockVersion != true) return null;
+  final version = [
+    d.lockGroup,
+    d.lockResolution,
+  ].whereType<String>().where((v) => v.isNotEmpty).join(' ');
+  return version.isEmpty ? s.subLockPending : s.subLock(version);
+}
+
+class _EpisodeChip extends ConsumerStatefulWidget {
+  const _EpisodeChip(this.e, this.id);
+  final AppEpisode e;
+  final int id;
+  @override
+  ConsumerState<_EpisodeChip> createState() => _EpisodeChipState();
+}
+
+class _EpisodeChipState extends ConsumerState<_EpisodeChip> {
+  bool _busy = false;
+  Future<void> _action() async {
+    if (_busy || !ref.read(canWriteProvider)) return;
+    final s = S.of(context);
+    final e = widget.e;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                e.manualSkip == true ? s.mobileRestore : s.mobileSkipped,
+              ),
+              onTap: () => Navigator.pop(c, 'skip'),
+            ),
+            ListTile(
+              title: Text(s.mobileUnlock),
+              onTap: () => Navigator.pop(c, 'unlock'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await mobileApi(
+        ref,
+        '/subscriptions/${widget.id}/episodes/${e.number}/$action',
+        verb: 'POST',
+        body: action == 'skip'
+            ? {'skip': e.manualSkip != true}
+            : {'unlock': true},
+      );
+      ref.invalidate(subscriptionProvider(widget.id));
+      ref.invalidate(subscriptionsProvider);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(describeError(error, s))));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final e = widget.e;
+    final (bg, label) = switch (e.state) {
+      'library' => (context.pt.ok, s.epLibrary),
+      'downloading' => (context.pt.info, s.epDownloading),
+      'missing' => (scheme.error, s.epMissing),
+      _ => (scheme.onSurfaceVariant, s.epUpcoming),
+    };
+    return Tooltip(
+      message: '${e.name ?? ''} ${e.airDate ?? ''} $label'.trim(),
+      child: InkWell(
+        onTap: ref.watch(canWriteProvider) && !_busy ? _action : null,
+        child: Container(
+          width: 48,
+          height: 44,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bg.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: bg.withValues(alpha: 0.35)),
+          ),
+          child: Text(
+            _busy ? '…' : '${e.number}',
+            style: TextStyle(color: bg, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
+    );
+  }
+}

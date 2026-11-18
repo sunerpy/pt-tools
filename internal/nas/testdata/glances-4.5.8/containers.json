@@ -1,0 +1,86 @@
+[
+  {
+    "key": "name",
+    "name": "app-1",
+    "id": "0000000000000000000000000000000000000000000000000000000000000001",
+    "status": "running",
+    "created": "2026-11-06T00:00:00Z",
+    "command": "",
+    "io": {
+      "cumulative_ior": 6107136,
+      "cumulative_iow": 1527808,
+      "time_since_update": 240,
+      "ior": 413696,
+      "iow": 1527808
+    },
+    "cpu": {
+      "total": 0.21506558400999376,
+      "limit": 32.0
+    },
+    "memory": {
+      "usage": 107520000,
+      "limit": 66320371712,
+      "inactive_file": 5689344
+    },
+    "network": {},
+    "io_rx": 1723,
+    "io_wx": 6365,
+    "cpu_percent": 0.21506558400999376,
+    "memory_percent": null,
+    "network_rx": null,
+    "network_tx": null,
+    "ports": "",
+    "uptime": "4 mins",
+    "image": ["example/app:1"],
+    "cpu_limit": 32.0,
+    "memory_usage": 107520000,
+    "memory_inactive_file": 5689344,
+    "memory_limit": 66320371712,
+    "engine": "docker"
+  },
+  {
+    "key": "name",
+    "name": "app-2",
+    "id": "0000000000000000000000000000000000000000000000000000000000000002",
+    "status": "running",
+    "created": "2026-11-06T00:00:00Z",
+    "command": "",
+    "io": {
+      "cumulative_ior": 2109976576,
+      "cumulative_iow": 5645606912,
+      "time_since_update": 240,
+      "ior": 8192,
+      "iow": 0
+    },
+    "cpu": {
+      "total": 0.012026307547760726,
+      "limit": 32.0
+    },
+    "memory": {
+      "usage": 90562560,
+      "limit": 66320371712,
+      "inactive_file": 2519040
+    },
+    "network": {
+      "cumulative_rx": 1049280,
+      "cumulative_tx": 93397,
+      "time_since_update": 240,
+      "rx": 336,
+      "tx": 0
+    },
+    "io_rx": 34,
+    "io_wx": 0,
+    "cpu_percent": 0.012026307547760726,
+    "memory_percent": null,
+    "network_rx": 1,
+    "network_tx": 0,
+    "ports": "",
+    "uptime": "a week",
+    "image": ["example/app:1"],
+    "cpu_limit": 32.0,
+    "memory_usage": 90562560,
+    "memory_inactive_file": 2519040,
+    "memory_limit": 66320371712,
+    "engine": "docker"
+  }
+]

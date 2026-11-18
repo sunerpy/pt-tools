@@ -279,3 +279,25 @@ func TestTransmissionAddTorrentFileEx_NegativeLimitIgnored(t *testing.T) {
 	setCalls := rpcCallsByMethod(*calls, "torrent-set")
 	assert.Empty(t, setCalls, "negative limit must be treated as unset")
 }
+
+// 逗号分隔的多个标签逐个成为 label：Transmission 不接受带逗号的 label（"labels cannot contain comma"）。
+func TestTransmissionAddTorrentFileEx_SplitsTagsIntoLabels(t *testing.T) {
+	srv, mu, calls := newRecordingTransmissionServer(t)
+	defer srv.Close()
+	cli := newTransmissionTestClient(t, srv.URL)
+
+	_, err := cli.AddTorrentFileEx([]byte("fake-torrent"), downloader.AddTorrentOptions{
+		Category: "movies",
+		Tags:     "hdsky, 4k,,pt-tools-transfer,movies",
+	})
+	require.NoError(t, err)
+	_, err = cli.AddTorrentEx("magnet:?xt=urn:btih:abc", downloader.AddTorrentOptions{Tags: "a,b"})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	addCalls := rpcCallsByMethod(*calls, "torrent-add")
+	require.Len(t, addCalls, 2)
+	assert.Equal(t, []any{"movies", "hdsky", "4k", "pt-tools-transfer"}, addCalls[0].Args["labels"], "分类在前，重复的不再加")
+	assert.Equal(t, []any{"a", "b"}, addCalls[1].Args["labels"])
+}

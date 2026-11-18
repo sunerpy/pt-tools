@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,9 +23,12 @@ import (
 
 // TorrentDetailForTest 用于测试的种子详情
 type TorrentDetailForTest struct {
-	Title  string // 种子标题（优先使用中文名）
-	Tag    string // 种子标签/副标题
-	IsFree bool   // 是否免费
+	Title     string // 种子标题（优先使用中文名）
+	Tag       string // 种子标签/副标题
+	IsFree    bool   // 是否免费
+	SizeBytes int64  // 种子大小（详情里的，没有时用 RSS 附件的长度；都没有是 0）
+	// DetailMissing 是详情没取到：标题与标签按 RSS 条目里的，免费状态不知道（按非免费算）
+	DetailMissing bool
 }
 
 var mtorrentDetailLimiter = struct {
@@ -39,9 +43,10 @@ func GetTorrentDetailForTest(ctx context.Context, siteName models.SiteGroup, ite
 		return nil, fmt.Errorf("RSS item 为空")
 	}
 
-	// 默认使用 RSS 条目的标题和分类
+	// 默认使用 RSS 条目的标题、分类与附件长度
 	result := &TorrentDetailForTest{
-		Title: item.Title,
+		Title:     item.Title,
+		SizeBytes: rssEnclosureSize(item),
 	}
 	if len(item.Categories) > 0 {
 		result.Tag = strings.Join(item.Categories, ",")
@@ -54,6 +59,7 @@ func GetTorrentDetailForTest(ctx context.Context, siteName models.SiteGroup, ite
 			detail, err := fetchMTorrentDetail(ctx, siteName, item)
 			if err != nil {
 				sLogger().Debugf("[TorrentDetail] 获取 %s 种子详情失败: %v", siteName, err)
+				result.DetailMissing = true
 				return result, nil
 			}
 			if name := detail.GetName(); name != "" {
@@ -63,20 +69,29 @@ func GetTorrentDetailForTest(ctx context.Context, siteName models.SiteGroup, ite
 				result.Tag = subTitle
 			}
 			result.IsFree = detail.IsFree()
+			if n, err := strconv.ParseInt(strings.TrimSpace(detail.Size), 10, 64); err == nil && n > 0 {
+				result.SizeBytes = n
+			}
 			sLogger().Debugf("[TorrentDetail] %s: Name=%s, SubTitle=%s, IsFree=%v", siteName, result.Title, result.Tag, result.IsFree)
 			return result, nil
 		case v2.SchemaNexusPHP:
 			detail, err := fetchNexusPHPDetail(ctx, siteName, item)
 			if err != nil {
 				sLogger().Debugf("[TorrentDetail] 获取 %s 种子详情失败: %v", siteName, err)
+				result.DetailMissing = true
 				return result, nil
 			}
 			sLogger().Debugf("[TorrentDetail] %s: Name=%s, SubTitle=%s, IsFree=%v", siteName, detail.Title, detail.Tag, detail.IsFree)
+			if detail.SizeBytes <= 0 {
+				detail.SizeBytes = result.SizeBytes
+			}
 			return detail, nil
 		}
 	}
 
 	sLogger().Debugf("[TorrentDetail] 未知站点类型: %s，使用 RSS 条目信息", siteName)
+	// 这类站点不取详情：免费状态不知道
+	result.DetailMissing = true
 	return result, nil
 }
 
@@ -96,10 +111,8 @@ func fetchMTorrentDetail(ctx context.Context, siteName models.SiteGroup, item *g
 	// API 路径需要加上 /api 前缀
 	apiPath := fmt.Sprintf("%s/api/torrent/detail", sc.APIUrl)
 
-	session := requests.NewSession().WithTimeout(30 * time.Second)
-	if proxyURL := httpclient.ResolveProxyFromEnvironment(apiPath); proxyURL != "" {
-		session = session.WithProxy(proxyURL)
-	}
+	// 站点代理开着时按站点判定，关着时按环境变量；无论走不走代理都显式 WithProxy（清掉 Transport 池里残留的代理）
+	session := httpclient.NewSession().WithTimeout(30 * time.Second).WithProxy(httpclient.ResolveSiteProxyOrEnv(string(siteName), apiPath))
 	defer func() { _ = session.Close() }()
 
 	req, err := requests.NewPost(apiPath).WithBody(strings.NewReader(data)).Build()
@@ -179,8 +192,22 @@ func fetchNexusPHPDetail(ctx context.Context, siteName models.SiteGroup, item *g
 
 	// 直接使用 v2.TorrentItem 的方法
 	return &TorrentDetailForTest{
-		Title:  torrentItem.Title,
-		Tag:    torrentItem.GetSubTitle(),
-		IsFree: torrentItem.IsFree(),
+		Title:     torrentItem.Title,
+		Tag:       torrentItem.GetSubTitle(),
+		IsFree:    torrentItem.IsFree(),
+		SizeBytes: torrentItem.SizeBytes,
 	}, nil
+}
+
+// rssEnclosureSize 是 RSS 条目附件（种子）的长度；站点不写或写得不对时是 0。
+func rssEnclosureSize(item *gofeed.Item) int64 {
+	for _, e := range item.Enclosures {
+		if e == nil {
+			continue
+		}
+		if n, err := strconv.ParseInt(strings.TrimSpace(e.Length), 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
 }

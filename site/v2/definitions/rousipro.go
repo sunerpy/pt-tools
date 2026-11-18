@@ -1,9 +1,12 @@
 package definitions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,7 +23,7 @@ var RousiProDefinition = &v2.SiteDefinition{
 	ID:          "rousipro",
 	Name:        "Rousi Pro",
 	Aka:         []string{"Rousi", "肉丝"},
-	Description: "综合性PT站点，使用Bearer Token认证",
+	Description: "综合性PT站点，使用个人 API Key 认证",
 	Schema:      v2.SchemaRousi,
 	AuthMethod:  v2.AuthMethodPasskey,
 	RateLimit:   2.0,
@@ -30,7 +33,9 @@ var RousiProDefinition = &v2.SiteDefinition{
 	},
 	FaviconURL:     "https://rousi.pro/favicon.ico",
 	TimezoneOffset: "+0800",
-	CreateDriver:   createRousiDriver,
+	// 签到走 Rousi 的接口（见 rousiDriver.Attend），这里只标出支持签到；路径和方法不参与签到流程
+	Attendance:   &v2.AttendanceConfig{Path: rousiAttendanceEndpoint, Method: http.MethodPost},
+	CreateDriver: createRousiDriver,
 }
 
 func init() {
@@ -46,7 +51,7 @@ func createRousiDriver(config v2.SiteConfig, logger *zap.Logger) (v2.Site, error
 	}
 
 	if opts.Passkey == "" {
-		return nil, fmt.Errorf("Rousi 站点需要配置 Passkey（从站点账户设置-Passkey中获取）")
+		return nil, fmt.Errorf("Rousi 站点需要配置个人 API Key（在 Rousi 的「账户 → API Key」页面创建，不是 Tracker Passkey）")
 	}
 
 	siteDef := v2.GetDefinitionRegistry().GetOrDefault(config.ID)
@@ -60,6 +65,7 @@ func createRousiDriver(config v2.SiteConfig, logger *zap.Logger) (v2.Site, error
 		BaseURL:     baseURL,
 		Passkey:     opts.Passkey,
 		LoginCookie: opts.Cookie,
+		SiteID:      config.ID,
 	})
 
 	if siteDef != nil {
@@ -80,6 +86,12 @@ type rousiRequest struct {
 	Endpoint string
 	Method   string
 	Params   map[string]string
+	// Body 是 JSON 请求体（POST 时用），为空时不带请求体。
+	Body []byte
+	// Headers 是额外的请求头，同名时覆盖默认的（签到接口的 API Key 放在 api-token 头里）。
+	Headers map[string]string
+	// RawBody 为 true 时响应体按原始字节返回（种子文件下载），不按 JSON 解析。
+	RawBody bool
 }
 
 type rousiResponse struct {
@@ -163,6 +175,8 @@ type rousiDriverConfig struct {
 	LoginCookie string
 	HTTPClient  *v2.SiteHTTPClient
 	UserAgent   string
+	// SiteID 是站点在 pt-tools 里注册的 ID：全局设置里的「站点代理」按它判定走不走代理
+	SiteID string
 }
 
 func newRousiDriver(config rousiDriverConfig) *rousiDriver {
@@ -180,6 +194,7 @@ func newRousiDriver(config rousiDriverConfig) *rousiDriver {
 		httpClient = v2.NewSiteHTTPClient(v2.SiteHTTPClientConfig{
 			Timeout:   30 * time.Second,
 			UserAgent: userAgent,
+			SiteID:    config.SiteID,
 		})
 	}
 
@@ -214,10 +229,18 @@ func (d *rousiDriver) Execute(ctx context.Context, req rousiRequest) (rousiRespo
 		"Authorization": "Bearer " + d.Passkey,
 		"User-Agent":    d.userAgent,
 	}
+	for k, v := range req.Headers {
+		headers[k] = v
+	}
+	var body io.Reader
+	if len(req.Body) > 0 {
+		body = bytes.NewReader(req.Body)
+	}
 
-	resp, err := d.httpClient.DoRequest(ctx, method, fullURL, nil, headers)
+	resp, err := d.httpClient.DoRequest(ctx, method, fullURL, body, headers)
 	if err != nil {
-		return rousiResponse{}, fmt.Errorf("request failed: %w", err)
+		// 下载地址的路径里带 passkey，传输层错误会原样带出完整 URL，这里先隐去再返回。
+		return rousiResponse{}, fmt.Errorf("request failed: %w", d.redactPasskey(err))
 	}
 
 	result := rousiResponse{
@@ -229,11 +252,19 @@ func (d *rousiDriver) Execute(ctx context.Context, req rousiRequest) (rousiRespo
 		return result, v2.ErrInvalidCredentials
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", v2.ErrRateLimited)
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if len(resp.Body) > 0 {
 			_ = json.Unmarshal(resp.Body, &result)
 		}
 		return result, fmt.Errorf("API error: HTTP %d - %s", resp.StatusCode, result.Message)
+	}
+
+	if req.RawBody {
+		return result, nil
 	}
 
 	if len(resp.Body) > 0 {
@@ -252,9 +283,9 @@ func (d *rousiDriver) PrepareSearch(query v2.SearchQuery) (rousiRequest, error) 
 	if query.Keyword != "" {
 		params["keyword"] = query.Keyword
 	}
-	// API page starts from 1, not 0
+	// SearchQuery.Page 与 Rousi API 都从 1 开始，直接透传
 	if query.Page > 0 {
-		params["page"] = strconv.Itoa(query.Page + 1)
+		params["page"] = strconv.Itoa(query.Page)
 	} else {
 		params["page"] = "1"
 	}
@@ -280,7 +311,7 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 	siteID := d.getSiteID()
 
 	for _, t := range searchData.Torrents {
-		discount, discountEnd := d.parsePromotion(t.Promotion)
+		discount, discountEnd, untilErr := d.parsePromotion(t.Promotion)
 
 		item := v2.TorrentItem{
 			ID:              t.UUID,
@@ -294,8 +325,12 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 			DiscountEndTime: discountEnd,
 			Category:        t.CategoryName,
 			URL:             fmt.Sprintf("%s/torrent/%s", d.BaseURL, t.UUID),
-			DownloadURL:     fmt.Sprintf("%s/api/torrent/%s/download/%s", d.BaseURL, t.UUID, d.Passkey),
-			SourceSite:      siteID,
+			// 下载走 pt-tools 的代理地址，passkey 只在服务端拼接，不随搜索结果下发给浏览器。
+			DownloadURL: fmt.Sprintf("/api/site/%s/torrent/%s/download", siteID, t.UUID),
+			SourceSite:  siteID,
+		}
+		if untilErr != nil {
+			v2.NoteDiscountTimeUnparsable(&item, "promotion.until")
 		}
 
 		if t.CreatedAt != "" {
@@ -312,9 +347,13 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 	return items, nil
 }
 
-func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, time.Time) {
+var errRousiUntilFormat = errors.New("unrecognized promotion until format")
+
+// parsePromotion 返回优惠级别、结束时间，以及生效中的促销 until 非空却所有写法都解析不了时的错误
+// （这时结束时间留空；调用方要把它记成 unknown，不能当成没有结束时间）。
+func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, time.Time, error) {
 	if promo == nil || !promo.IsActive {
-		return v2.DiscountNone, time.Time{}
+		return v2.DiscountNone, time.Time{}, nil
 	}
 
 	if logger := global.GetSloggerSafe(); logger != nil {
@@ -323,17 +362,21 @@ func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, t
 	}
 
 	var endTime time.Time
-	if promo.Until != "" {
+	var untilErr error
+	if until := strings.TrimSpace(promo.Until); until != "" {
+		untilErr = errRousiUntilFormat
 		for _, layout := range []string{
 			time.RFC3339,
 			"2006-01-02T15:04:05-0700",
 			"2006-01-02 15:04:05",
 		} {
-			if t, err := time.Parse(layout, promo.Until); err == nil {
-				if layout == "2006-01-02 15:04:05" {
-					t = t.In(time.FixedZone("CST", 8*3600))
-				}
-				endTime = t
+			parse := time.Parse
+			if layout == "2006-01-02 15:04:05" {
+				// 不带时区的时间按北京时间解释；time.Parse 会当成 UTC，事后 In(CST) 只改显示时区，时刻会晚 8 小时。
+				parse = v2.ParseTimeInCST
+			}
+			if t, err := parse(layout, until); err == nil {
+				endTime, untilErr = t, nil
 				break
 			}
 		}
@@ -364,7 +407,7 @@ func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, t
 			level = v2.DiscountNone
 		}
 	}
-	return level, endTime
+	return level, endTime, untilErr
 }
 
 func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
@@ -425,6 +468,8 @@ func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 		}
 	}
 
+	// last_active_at 是保号依据：Rousi 只在网页访问时更新它（2026-10-23 实测），用 API Key 取资料、签到都不会刷新。
+	// 签到不算活跃（用户的选择）：只认站点自己的记录，保号要定期用浏览器登录。
 	if userData.LastActiveAt != "" {
 		if accessTime, err := time.Parse(time.RFC3339, userData.LastActiveAt); err == nil {
 			info.LastAccess = accessTime.Unix()
@@ -436,10 +481,72 @@ func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 	return info, nil
 }
 
+// rousiAttendanceEndpoint 是 Rousi 的签到接口。个人 API Key 放在 api-token 头里，要有「执行签到」（attendance:claim）权限；
+// 请求体 {"mode":"fixed"} 是固定奖励。返回 200 + code 0 是签到成功，400 + code 1 +「今日已签到」是今天签过了
+// （2026-10-24 用真实 Key 验证过这两种返回）。Rousi 的「账户 → API Key」页写明同一把 Key 可以给外部工具签到；
+// 网页自己的签到接口 /api/v1/me/attendance 只认登录会话，API Key 用不了。出处还有 MoviePilot-Plugins 的
+// plugins.v2/autosignin/sites/rousipro.py。
+const rousiAttendanceEndpoint = "/api/points/attendance"
+
+type rousiAttendanceReward struct {
+	BaseReward    json.Number `json:"base_reward"`
+	TotalReward   json.Number `json:"total_reward"`
+	Reward        json.Number `json:"reward"`
+	CurrentStreak int         `json:"current_streak"`
+	TotalDays     int         `json:"total_days"`
+}
+
+// Attend 签到一次。今天已经签过时返回「今天已签到」；API Key 失效或没有签到权限时返回 ErrInvalidCredentials，并说明怎么处理。
+func (d *rousiDriver) Attend(ctx context.Context) (v2.AttendResult, error) {
+	res, err := d.Execute(ctx, rousiRequest{
+		Endpoint: rousiAttendanceEndpoint,
+		Method:   http.MethodPost,
+		Body:     []byte(`{"mode":"fixed"}`),
+		Headers:  map[string]string{"api-token": d.Passkey},
+	})
+	switch {
+	case err == nil && res.IsSuccess():
+		return v2.AttendResult{Status: v2.AttendSigned, Message: rousiAttendMessage(res.Data)}, nil
+	case res.StatusCode == http.StatusBadRequest && res.Code == 1 && strings.Contains(res.Message, "已签到"):
+		return v2.AttendResult{Status: v2.AttendAlready, Message: res.Message}, nil
+	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
+		return v2.AttendResult{}, fmt.Errorf("%w: Rousi 拒绝了签到：API Key 已失效或没有签到权限。在 Rousi「账户 → API Key」勾上「执行签到」（attendance:claim）并轮换 Key（已有的 Key 改权限要轮换后才生效），再把新 Key 填到 pt-tools 的站点设置",
+			v2.ErrInvalidCredentials)
+	case err != nil:
+		return v2.AttendResult{}, fmt.Errorf("Rousi 签到失败: %w", err)
+	default:
+		msg := strings.TrimSpace(res.Message)
+		if msg == "" {
+			msg = fmt.Sprintf("code=%d", res.Code)
+		}
+		return v2.AttendResult{}, fmt.Errorf("Rousi 签到失败: %s", msg)
+	}
+}
+
+// rousiAttendMessage 把签到成功的返回写成一句话：有奖励和连续天数时带上，没有时只说签到成功。
+func rousiAttendMessage(data json.RawMessage) string {
+	var r rousiAttendanceReward
+	if len(data) == 0 || json.Unmarshal(data, &r) != nil {
+		return "签到成功"
+	}
+	msg := "签到成功"
+	for _, n := range []json.Number{r.TotalReward, r.Reward, r.BaseReward} {
+		if n != "" && n != "0" {
+			msg += "，获得 " + n.String() + " 魔力"
+			break
+		}
+	}
+	if r.CurrentStreak > 0 {
+		msg += fmt.Sprintf("，已连续签到 %d 天", r.CurrentStreak)
+	}
+	return msg
+}
+
 func (d *rousiDriver) PrepareDownload(torrentID string) (rousiRequest, error) {
 	return rousiRequest{
 		Endpoint: fmt.Sprintf("/api/torrent/%s/download/%s", torrentID, d.Passkey),
 		Method:   http.MethodGet,
+		RawBody:  true,
 	}, nil
 }
 
@@ -447,8 +554,28 @@ func (d *rousiDriver) ParseDownload(res rousiResponse) ([]byte, error) {
 	if len(res.RawBody) == 0 {
 		return nil, fmt.Errorf("empty download response")
 	}
+	if err := v2.ValidateTorrentFile(res.RawBody); err != nil {
+		return nil, fmt.Errorf("下载内容不是有效的种子文件: %w", err)
+	}
 	return res.RawBody, nil
 }
+
+// redactPasskey 把错误文本里的 passkey 换成 ***，同时保留原错误链，errors.Is 仍可用。
+func (d *rousiDriver) redactPasskey(err error) error {
+	if err == nil || d.Passkey == "" || !strings.Contains(err.Error(), d.Passkey) {
+		return err
+	}
+	return &redactedError{err: err, secret: d.Passkey}
+}
+
+type redactedError struct {
+	err    error
+	secret string
+}
+
+func (e *redactedError) Error() string { return strings.ReplaceAll(e.err.Error(), e.secret, "***") }
+
+func (e *redactedError) Unwrap() error { return e.err }
 
 func (d *rousiDriver) getSiteID() string {
 	if d.siteDefinition != nil {
@@ -484,7 +611,9 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		// 不能返回 (nil, nil)：调用方会把空详情当成功结果解引用。
+		// 错误里不带编号：它取自 RSS 链接，链接带查询参数时可能含密钥
+		return nil, fmt.Errorf("RousiPro 详情返回 HTTP 404: %w: %w", v2.ErrTorrentDetailUnavailable, v2.ErrTorrentNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API error: HTTP %d", resp.StatusCode)
@@ -502,7 +631,7 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string
 		return nil, fmt.Errorf("API error: %s", result.Message)
 	}
 
-	discount, discountEnd := d.parsePromotion(result.Data.Promotion)
+	discount, discountEnd, untilErr := d.parsePromotion(result.Data.Promotion)
 
 	item := &v2.TorrentItem{
 		ID:              result.Data.UUID,
@@ -515,6 +644,10 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string
 		SourceSite:      d.getSiteID(),
 		DiscountLevel:   discount,
 		DiscountEndTime: discountEnd,
+		FetchedAt:       time.Now().UTC(),
+	}
+	if untilErr != nil {
+		v2.NoteDiscountTimeUnparsable(item, "promotion.until")
 	}
 
 	if result.Data.CreatedAt != "" {

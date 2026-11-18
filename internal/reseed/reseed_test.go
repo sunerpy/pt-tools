@@ -1,0 +1,791 @@
+package reseed
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/zeebo/bencode"
+	"gorm.io/gorm"
+
+	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/iyuu"
+	"github.com/sunerpy/pt-tools/internal/transfer"
+	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
+)
+
+// ---------- 假 IYUU ----------
+
+type fakeIYUU struct {
+	mu      sync.Mutex
+	sites   []map[string]any
+	results map[string]any // 源 hash → {torrent: [...]}
+	// queryCodes 依次作为 /reseed/index/index 的 code 返回（用完后返回 0）
+	queryCodes []int
+	retryAfter int
+	// resetAt 不为 0 时，429 的数据里带 X-RateLimit-Reset（Unix 秒）与 X-RateLimit-Limit
+	resetAt int64
+	reports int
+	queries int
+	// onReport 在 reportExisting 请求里调用（模拟这一轮运行中用户改了设置）
+	onReport func()
+	// reportCode 不为 0 时 reportExisting 回这个 code 与 reportMsg（模拟 token 没绑定合作站点）
+	reportCode int
+	reportMsg  string
+}
+
+func (f *fakeIYUU) server(t *testing.T) *httptest.Server {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		write := func(code int, data any) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "msg": "m", "data": data})
+		}
+		_ = r.ParseForm()
+		switch r.URL.Path {
+		case "/reseed/sites/index":
+			write(0, map[string]any{"sites": f.sites})
+		case "/reseed/sites/reportExisting":
+			f.reports++
+			if f.onReport != nil {
+				f.onReport()
+			}
+			if f.reportCode != 0 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": f.reportCode, "msg": f.reportMsg, "data": []any{}})
+				return
+			}
+			write(0, map[string]any{"sid_sha1": "sum-" + strings.Join(r.PostForm["sid_list[]"], ",")})
+		case "/reseed/index/index":
+			f.queries++
+			if len(f.queryCodes) > 0 {
+				code := f.queryCodes[0]
+				f.queryCodes = f.queryCodes[1:]
+				if code != 0 {
+					data := map[string]any{"Retry-After": f.retryAfter}
+					if f.resetAt != 0 {
+						data["X-RateLimit-Reset"], data["X-RateLimit-Limit"] = f.resetAt, 100
+					}
+					write(code, data)
+					return
+				}
+			}
+			var asked []string
+			_ = json.Unmarshal([]byte(r.PostForm.Get("hash")), &asked)
+			out := map[string]any{}
+			for _, h := range asked {
+				if v, ok := f.results[h]; ok {
+					out[h] = v
+				}
+			}
+			write(0, out)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// ---------- 假下载器与站点 ----------
+
+type fakeDL struct {
+	downloader.Downloader
+	torrents []downloader.Torrent
+	files    map[string][]downloader.TorrentFile
+}
+
+func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) { return f.torrents, nil }
+
+func (f *fakeDL) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
+	if fs, ok := f.files[id]; ok {
+		return fs, nil
+	}
+	return nil, errors.New("no files")
+}
+
+type fakeSite struct {
+	v2.Site
+	data map[string][]byte
+	// gone 是站点上已经删了的种子：下载时站点回「种子未找到」
+	gone      map[string]bool
+	downloads map[string]int
+	// onDownload 在下载时调用（模拟下载中途这一轮被停止）；返回错误时下载失败
+	onDownload func(ctx context.Context) error
+}
+
+func (s *fakeSite) Download(ctx context.Context, id string) ([]byte, error) {
+	if s.downloads == nil {
+		s.downloads = map[string]int{}
+	}
+	s.downloads[id]++
+	if s.onDownload != nil {
+		if err := s.onDownload(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if s.gone[id] {
+		return nil, fmt.Errorf("parse download: %w（M-Team：種子未找到）", v2.ErrTorrentNotFound)
+	}
+	if d, ok := s.data[id]; ok {
+		return d, nil
+	}
+	return nil, errors.New("404")
+}
+
+type plainCipher struct{}
+
+func (plainCipher) Encrypt(p string) (string, error) { return "enc:" + p, nil }
+func (plainCipher) Decrypt(c string) (string, error) {
+	if !strings.HasPrefix(c, "enc:") {
+		return "", errors.New("bad")
+	}
+	return strings.TrimPrefix(c, "enc:"), nil
+}
+
+// torrentWith 生成一个多文件种子，返回内容与 info hash。
+func torrentWith(t *testing.T, name string, files map[string]int64, salt string) ([]byte, string) {
+	t.Helper()
+	list := []map[string]any{}
+	for p, size := range files {
+		list = append(list, map[string]any{"length": size, "path": strings.Split(p, "/")})
+	}
+	var buf bytes.Buffer
+	require.NoError(t, bencode.NewEncoder(&buf).Encode(map[string]any{
+		"announce": "https://tracker.example/" + salt,
+		"info":     map[string]any{"name": name, "files": list, "piece length": 16384, "pieces": "01234567890123456789", "source": salt},
+	}))
+	h, err := qbit.ComputeTorrentHash(buf.Bytes())
+	require.NoError(t, err)
+	return buf.Bytes(), h
+}
+
+type env struct {
+	t     *testing.T
+	db    *gorm.DB
+	svc   *Service
+	iyuu  *fakeIYUU
+	dl    *fakeDL
+	site  *fakeSite
+	now   time.Time
+	slept []time.Duration
+	// 源种子
+	srcHash string
+	// siteIDs 是 pt-tools 里已配置的站点（默认只有 hdsky）
+	siteIDs []string
+}
+
+func newEnv(t *testing.T) *env {
+	t.Helper()
+	// 测试库不刷盘（同 core.NewTempDBDir）：Windows runner 上每次写都要刷盘，一条 SQL 能慢到几秒
+	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "r.db")+"?_pragma=journal_mode(MEMORY)&_pragma=synchronous(OFF)"), &gorm.Config{})
+	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
+	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.ReseedRun{}, &models.ReseedAttempt{}, &models.ReseedIYUUDaily{}, &models.ReseedDailySkip{}, &models.TorrentTransferJob{},
+		&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.DownloaderPathMap{}, &models.TransferRule{}, &models.NotificationConf{}))
+	require.NoError(t, db.Create(&models.DownloaderSetting{ID: 1, Name: "qb", Type: "qbittorrent", URL: "http://x", Enabled: true}).Error)
+	e := &env{t: t, db: db, now: time.Date(2026, 10, 7, 10, 0, 0, 0, time.Local), site: &fakeSite{data: map[string][]byte{}}, siteIDs: []string{"hdsky"}}
+	e.iyuu = &fakeIYUU{sites: []map[string]any{
+		{"id": 1, "site": "hdsky", "nickname": "天空", "base_url": "hdsky.me"},
+		{"id": 2, "site": "ourbits", "nickname": "我堡", "base_url": "ourbits.club"},
+		{"id": 3, "site": "nowhere", "nickname": "无", "base_url": "nowhere.example"},
+	}, results: map[string]any{}}
+	srv := e.iyuu.server(t)
+	_, src := torrentWith(t, "Movie", map[string]int64{"a.mkv": 100, "sub/b.srt": 1}, "src")
+	e.srcHash = src
+	e.dl = &fakeDL{
+		torrents: []downloader.Torrent{
+			{ID: src, InfoHash: strings.ToUpper(src), Name: "Movie", SavePath: "/data/movies", TotalSize: 101, Progress: 1, IsCompleted: true, State: downloader.TorrentSeeding, Category: "movies"},
+			{ID: "partial", InfoHash: "partial", Progress: 0.5, State: downloader.TorrentDownloading},
+		},
+		files: map[string][]downloader.TorrentFile{src: {{Name: "Movie/a.mkv", Size: 100}, {Name: "Movie\\sub\\b.srt", Size: 1}}},
+	}
+	dls := transfer.DownloadersFunc(func(_ context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error) {
+		if id != 1 {
+			return nil, models.DownloaderSetting{}, errors.New("下载器未启用")
+		}
+		return e.dl, models.DownloaderSetting{ID: 1, Name: "qb"}, nil
+	})
+	resolver := v2.NewTrackerResolverFrom(
+		&v2.SiteDefinition{ID: "hdsky", Schema: v2.SchemaNexusPHP, URLs: []string{"https://hdsky.me/"}},
+		&v2.SiteDefinition{ID: "ourbits", Schema: v2.SchemaNexusPHP, URLs: []string{"https://ourbits.club/"}},
+	)
+	tr := transfer.New(transfer.Config{
+		DB: db, Downloaders: dls, Resolver: resolver, Now: func() time.Time { return e.now },
+		Push: func(context.Context, ptinternal.PushTorrentRequest) (*ptinternal.PushTorrentResult, error) {
+			return &ptinternal.PushTorrentResult{Success: true}, nil
+		},
+	})
+	e.svc = New(Config{
+		DB: db, Cipher: plainCipher{}, Transfer: tr, Downloaders: dls,
+		Sites: func(name string) (v2.Site, bool) {
+			if name == "hdsky" {
+				return e.site, true
+			}
+			return nil, false
+		},
+		SiteIDs:  func() []string { return e.siteIDs },
+		Resolver: resolver,
+		NewClient: func(token string) *iyuu.Client {
+			c := iyuu.New(token)
+			c.BaseURL = srv.URL
+			return c
+		},
+		Now: func() time.Time { return e.now },
+		// 等待只记下来、把假时钟往前拨，不真等
+		Sleep: func(_ context.Context, d time.Duration) error {
+			e.slept = append(e.slept, d)
+			e.now = e.now.Add(d)
+			return nil
+		},
+	})
+	return e
+}
+
+// enable 开启辅种；两次请求 IYUU 之间默认不隔（测 IYUU 调用口的用例自己设）。
+func (e *env) enable(mod func(*SettingsUpdate)) {
+	e.t.Helper()
+	tok, gap := "tok", 0
+	u := SettingsUpdate{Enabled: true, Token: &tok, IYUUMinIntervalSeconds: &gap}
+	if mod != nil {
+		mod(&u)
+	}
+	_, err := e.svc.SaveSettings(context.Background(), u)
+	require.NoError(e.t, err)
+}
+
+// candidate 在 hdsky 上放一个可辅种的种子（files 与源一致时能通过核对），返回它的 info hash。
+func (e *env) candidate(id string, files map[string]int64) string {
+	data, h := torrentWith(e.t, "Movie", files, "c"+id)
+	e.site.data[id] = data
+	return h
+}
+
+// records 是第一页（最多 100 条）记录。
+func (e *env) records(f RecordFilter) []RecordView {
+	e.t.Helper()
+	page, err := e.svc.Records(context.Background(), f, 1, 100)
+	require.NoError(e.t, err)
+	return page.Items
+}
+
+func (e *env) setResults(cands ...map[string]any) {
+	e.iyuu.results[e.srcHash] = map[string]any{"torrent": cands}
+}
+
+// ---------- 测试 ----------
+
+func TestSettings(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	got, err := e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.False(t, got.Enabled)
+	assert.False(t, got.HasToken)
+	assert.Equal(t, models.ReseedDefaultIntervalHours, got.IntervalHours)
+	assert.Equal(t, models.ReseedDefaultMaxPerSitePerDay, got.MaxPerSitePerDay)
+
+	_, err = e.svc.SaveSettings(ctx, SettingsUpdate{Enabled: true})
+	assert.ErrorIs(t, err, ErrInvalid, "开启要先填 token")
+	_, err = e.svc.SaveSettings(ctx, SettingsUpdate{IntervalHours: 200})
+	assert.ErrorIs(t, err, ErrInvalid)
+	_, err = e.svc.SaveSettings(ctx, SettingsUpdate{MaxPerSitePerDay: -1})
+	assert.ErrorIs(t, err, ErrInvalid)
+
+	tok := " tok "
+	got, err = e.svc.SaveSettings(ctx, SettingsUpdate{Enabled: true, Token: &tok, IntervalHours: 6, DownloaderIDs: []uint{1, 1, 0}, SiteNames: &[]string{"hdsky", " hdsky"}, MaxPerSitePerDay: 3})
+	require.NoError(t, err)
+	assert.True(t, got.HasToken)
+	assert.Equal(t, []uint{1}, got.DownloaderIDs)
+	assert.Equal(t, []string{"hdsky"}, got.SiteNames)
+	assert.Equal(t, models.ReseedSitesSelected, got.SiteMode)
+	var row models.ReseedSetting
+	require.NoError(t, e.db.First(&row, 1).Error)
+	assert.Equal(t, "enc:tok", row.TokenEncrypted, "token 加密保存")
+
+	// 不带 token 修改：保留原来的
+	got, err = e.svc.SaveSettings(ctx, SettingsUpdate{Enabled: false, IntervalHours: 6})
+	require.NoError(t, err)
+	assert.True(t, got.HasToken)
+	assert.False(t, got.Enabled, "关掉的开关原样保存")
+	empty := ""
+	got, err = e.svc.SaveSettings(ctx, SettingsUpdate{Token: &empty})
+	require.NoError(t, err)
+	assert.False(t, got.HasToken, "空串清除 token")
+
+	assert.False(t, e.svc.Due(ctx), "没开启")
+	e.enable(nil)
+	assert.True(t, e.svc.Due(ctx), "没运行过")
+	require.NoError(t, e.svc.RecordRun(ctx, e.now, "ok"))
+	assert.False(t, e.svc.Due(ctx))
+	e.now = e.now.Add(13 * time.Hour)
+	assert.True(t, e.svc.Due(ctx))
+}
+
+func TestSiteMap(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	_, err := e.svc.SiteMap(ctx)
+	assert.ErrorIs(t, err, iyuu.ErrNoToken)
+	e.enable(nil)
+	items, err := e.svc.SiteMap(ctx)
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.Equal(t, SiteMapItem{SID: 1, IYUUSite: "hdsky", Nickname: "天空", Host: "hdsky.me", SiteName: "hdsky", Configured: true, Selected: true}, items[0])
+	byName := map[string]SiteMapItem{}
+	for _, it := range items {
+		byName[it.IYUUSite] = it
+	}
+	assert.Equal(t, "ourbits", byName["ourbits"].SiteName, "认得出来")
+	assert.False(t, byName["ourbits"].Configured, "pt-tools 里没配置")
+	assert.Empty(t, byName["nowhere"].SiteName)
+
+	e.enable(func(u *SettingsUpdate) { u.SiteNames = &[]string{"ourbits"} })
+	items, err = e.svc.SiteMap(ctx)
+	require.NoError(t, err)
+	assert.False(t, items[0].Selected, "选了别的站点时 hdsky 不在范围内")
+}
+
+// 一轮辅种：文件一致的建任务、文件不一致的记失败、站点不在范围 / 下载器里已有的跳过；第二轮不重复尝试。
+func TestRun(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	good := e.candidate("11", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	bad := e.candidate("12", map[string]int64{"a.mkv": 100})
+	e.setResults(
+		map[string]any{"sid": 1, "torrent_id": 11, "info_hash": strings.ToUpper(good)},
+		map[string]any{"sid": 1, "torrent_id": "12", "info_hash": bad},
+		map[string]any{"sid": 2, "torrent_id": 13, "info_hash": "ffff"},
+		map[string]any{"sid": 1, "torrent_id": 14, "info_hash": "partial"},
+		map[string]any{"sid": 1, "torrent_id": 15, "info_hash": "eeee"},
+	)
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Downloaders)
+	assert.Equal(t, 1, res.Hashes, "只查已经下完的种子")
+	assert.Equal(t, 5, res.Candidates)
+	assert.Equal(t, 1, res.Created)
+	assert.Equal(t, 2, res.Failed, "文件不一致、下载失败")
+	assert.Equal(t, 1, res.Skipped[SkipNotSelected])
+	assert.Equal(t, 1, res.Skipped[SkipExists])
+	assert.Contains(t, res.Summary(), "加入 1 个")
+
+	var jobs []models.TorrentTransferJob
+	require.NoError(t, e.db.Find(&jobs).Error)
+	require.Len(t, jobs, 1)
+	j := jobs[0]
+	assert.Equal(t, models.JobKindReseed, j.Kind)
+	assert.Equal(t, good, j.InfoHash)
+	assert.Equal(t, models.TransferExported, j.State)
+	assert.Equal(t, "/data/movies", j.TargetSavePath)
+	assert.Equal(t, "hdsky", j.Tags)
+	assert.Equal(t, "11", j.TorrentID)
+
+	recs := e.records(RecordFilter{})
+	require.Len(t, recs, 3)
+	states := map[string]RecordView{}
+	for _, r := range recs {
+		states[r.TorrentID] = r
+	}
+	assert.Equal(t, models.ReseedQueued, states["11"].State)
+	assert.Equal(t, models.TransferExported, states["11"].JobState)
+	assert.Contains(t, states["12"].Message, "文件列表与原种子不一致")
+	assert.Contains(t, states["15"].Message, "下载种子失败")
+
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Zero(t, res.Created)
+	assert.Equal(t, 3, res.Skipped[SkipTried], "同一站点同一种子只尝试一次")
+	assert.Equal(t, 1, e.iyuu.reports, "7 天内站点没变：sid_sha1 用缓存的")
+}
+
+// 每个站点每天有上限；过了午夜重新计数。
+func TestRunDailyLimit(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(func(u *SettingsUpdate) { u.MaxPerSitePerDay = 1 })
+	a := e.candidate("21", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	b := e.candidate("22", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 21, "info_hash": a}, map[string]any{"sid": 1, "torrent_id": 22, "info_hash": b})
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created)
+	assert.Equal(t, 1, res.Skipped[SkipDailyLimit])
+	e.now = e.now.Add(24 * time.Hour)
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "第二天接着加")
+}
+
+// 限流：等待不长时等一次再查；太长就停下这一轮。IYUU 报错时重新报告站点再查一次。
+func TestRunRateLimitAndRefresh(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	e.enable(nil)
+	good := e.candidate("31", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 31, "info_hash": good})
+	e.iyuu.queryCodes, e.iyuu.retryAfter = []int{429}, 5
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, []time.Duration{5 * time.Second}, e.slept)
+	assert.Equal(t, 1, res.Created)
+
+	e2 := newEnv(t)
+	e2.enable(nil)
+	e2.iyuu.queryCodes, e2.iyuu.retryAfter = []int{429}, 600
+	res, err = e2.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Contains(t, res.Stopped, e2.now.Add(600*time.Second).Format("01-02 15:04:05")+" 以后再试", "写冷却到什么时候")
+	assert.Empty(t, e2.slept, "等太久就不等")
+
+	e3 := newEnv(t)
+	e3.enable(nil)
+	g3 := e3.candidate("41", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e3.setResults(map[string]any{"sid": 1, "torrent_id": 41, "info_hash": g3})
+	e3.iyuu.queryCodes = []int{400}
+	res, err = e3.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, e3.iyuu.reports, "报错后重新报告一次站点")
+	assert.Equal(t, 1, res.Created)
+
+	e4 := newEnv(t)
+	e4.enable(nil)
+	e4.iyuu.queryCodes = []int{400, 400}
+	res, err = e4.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	require.Len(t, res.Errors, 1)
+	assert.Contains(t, res.Errors[0], "查询 IYUU 失败")
+}
+
+func TestRunPreconditions(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	_, err := e.svc.Run(ctx, RunOptions{})
+	assert.ErrorIs(t, err, iyuu.ErrNoToken)
+	e.enable(func(u *SettingsUpdate) { u.SiteNames = &[]string{"ourbits"} })
+	_, err = e.svc.Run(ctx, RunOptions{})
+	assert.ErrorIs(t, err, ErrNoSites, "选中的站点 pt-tools 里没配置")
+
+	e2 := newEnv(t)
+	e2.enable(func(u *SettingsUpdate) { u.DownloaderIDs = []uint{1, 9} })
+	res, err := e2.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	require.Len(t, res.Errors, 1)
+	assert.Contains(t, res.Errors[0], "下载器 9 不可用")
+	assert.Equal(t, 1, res.Downloaders)
+}
+
+// token 没绑定合作站点（#740）：报告站点时 IYUU 回 401，这一轮没法开始，原因里写明到哪里绑定。
+func TestRunTokenNotBound(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	e.iyuu.reportCode, e.iyuu.reportMsg = 401, "token未注册，请先绑定推荐站点"
+	_, err := e.svc.Run(context.Background(), RunOptions{})
+	require.ErrorIs(t, err, iyuu.ErrTokenNotBound)
+	assert.Contains(t, err.Error(), "向 IYUU 报告站点失败: IYUU 返回错误 401: token未注册，请先绑定推荐站点。")
+	assert.Contains(t, err.Error(), "「绑定合作站点」")
+	assert.Zero(t, e.iyuu.queries, "没报告成功就不查询")
+}
+
+func TestFiles(t *testing.T) {
+	data, _ := torrentWith(t, "Movie", map[string]int64{"a.mkv": 100, "sub/b.srt": 1}, "x")
+	got, err := TorrentFiles(data)
+	require.NoError(t, err)
+	same, _ := SameFiles(got, []FileEntry{{Path: "Movie/sub/b.srt", Size: 1}, {Path: "Movie/a.mkv", Size: 100}})
+	assert.True(t, same, "顺序无关")
+	same, why := SameFiles(got, []FileEntry{{Path: "Movie/a.mkv", Size: 100}, {Path: "Movie/sub/b.srt", Size: 2}})
+	assert.False(t, same)
+	assert.Contains(t, why, "大小不同")
+	same, why = SameFiles(got, []FileEntry{{Path: "Other/a.mkv", Size: 100}, {Path: "Movie/sub/b.srt", Size: 1}})
+	assert.False(t, same)
+	assert.Contains(t, why, "文件不同")
+	same, why = SameFiles(got, nil)
+	assert.False(t, same)
+	assert.Contains(t, why, "文件数不同")
+
+	var buf bytes.Buffer
+	require.NoError(t, bencode.NewEncoder(&buf).Encode(map[string]any{"info": map[string]any{"name": "one.iso", "length": 7}}))
+	single, err := TorrentFiles(buf.Bytes())
+	require.NoError(t, err)
+	assert.Equal(t, []FileEntry{{Path: "one.iso", Size: 7}}, single)
+	_, err = TorrentFiles([]byte("nope"))
+	assert.Error(t, err)
+	buf.Reset()
+	require.NoError(t, bencode.NewEncoder(&buf).Encode(map[string]any{"info": map[string]any{"length": 7}}))
+	_, err = TorrentFiles(buf.Bytes())
+	assert.Error(t, err)
+}
+
+// 下载种子失败（站点暂时不可用等）7 天后可以再试；核对没通过的不再试。
+func TestRunRetriesDownloadFailuresLater(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	good := e.candidate("51", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	data := e.site.data["51"]
+	delete(e.site.data, "51") // 站点暂时下载不到
+	bad := e.candidate("52", map[string]int64{"a.mkv": 100})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 51, "info_hash": good}, map[string]any{"sid": 1, "torrent_id": 52, "info_hash": bad})
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Failed)
+
+	e.site.data["51"] = data
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Skipped[SkipTried], "7 天之内不重试")
+
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "下载失败的过了 7 天再试，这次成功")
+	assert.Equal(t, 1, res.Skipped[SkipTried], "文件不一致的不再试")
+	var recs []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&recs).Error)
+	require.Len(t, recs, 2, "重试更新原来那条记录")
+	assert.Equal(t, models.ReseedQueued, recs[0].State)
+	assert.False(t, recs[0].Retryable)
+	assert.Equal(t, models.ReseedFailed, recs[1].State)
+}
+
+// 一轮运行中清除 token：旧设置不会把 token 和 sid_sha1 写回去，这一轮停下、不再用旧 token 查询。
+func TestRunTokenClearedMidRun(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(func(u *SettingsUpdate) { u.IntervalHours = 6 })
+	good := e.candidate("61", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 61, "info_hash": good})
+	empty := ""
+	e.iyuu.onReport = func() {
+		_, err := e.svc.SaveSettings(ctx, SettingsUpdate{Token: &empty, IntervalHours: 8})
+		assert.NoError(t, err)
+	}
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Contains(t, res.Stopped, "token 已清除或更换")
+	assert.Zero(t, e.iyuu.queries, "不再用旧 token 查询")
+	var row models.ReseedSetting
+	require.NoError(t, e.db.First(&row, 1).Error)
+	assert.Empty(t, row.TokenEncrypted, "旧设置不会把 token 写回来")
+	assert.Empty(t, row.SidSha1, "旧 token 的 sid_sha1 不写进缓存")
+	assert.Equal(t, 8, row.IntervalHours, "这一轮里保存的设置保留")
+	assert.False(t, row.Enabled)
+}
+
+// 保存设置只写配置项：上次运行结果和 sid_sha1 缓存不受影响（没换 token 时）。
+func TestSaveSettingsKeepsRunState(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	require.NoError(t, e.svc.RecordRun(ctx, e.now, "ok"))
+	require.NoError(t, e.db.Model(&models.ReseedSetting{}).Where("id = 1").
+		Updates(map[string]any{"sid_sha1": "s", "sid_key": "1", "sid_at": e.now}).Error)
+	got, err := e.svc.SaveSettings(ctx, SettingsUpdate{Enabled: true, IntervalHours: 6})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", got.LastResult)
+	assert.True(t, got.HasToken)
+	var row models.ReseedSetting
+	require.NoError(t, e.db.First(&row, 1).Error)
+	assert.Equal(t, "s", row.SidSha1, "没换 token 时缓存保留")
+	assert.Equal(t, 6, row.IntervalHours)
+}
+
+// 清除已结束的辅种任务：任务结果先写进记录（记录不再指向任务，更新时间不变），没结束的任务和它的记录不动；
+// 记录指向的任务不在了时标出来，不当成还在进行。
+func TestClearFinishedJobs(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	a := e.candidate("71", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	b := e.candidate("72", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 71, "info_hash": a}, map[string]any{"sid": 1, "torrent_id": 72, "info_hash": b})
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Created)
+	var recs []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&recs).Error)
+	require.Len(t, recs, 2)
+	require.NotNil(t, recs[0].JobID)
+	require.NoError(t, e.db.Model(&models.TorrentTransferJob{}).Where("id = ?", *recs[0].JobID).
+		Updates(map[string]any{"state": models.TransferRolledBack, "message": "校验只到 20.0%"}).Error)
+
+	n, err := e.svc.ClearFinishedJobs(ctx)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	var after []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&after).Error)
+	assert.Equal(t, models.ReseedRolledBack, after[0].State)
+	assert.Equal(t, "校验只到 20.0%", after[0].Message)
+	assert.Nil(t, after[0].JobID)
+	assert.True(t, after[0].UpdatedAt.Equal(recs[0].UpdatedAt), "更新时间不变")
+	assert.Equal(t, models.ReseedQueued, after[1].State, "没结束的任务不动")
+	assert.NotNil(t, after[1].JobID)
+	var jobs int64
+	require.NoError(t, e.db.Model(&models.TorrentTransferJob{}).Count(&jobs).Error)
+	assert.EqualValues(t, 1, jobs)
+
+	// 任务被别的途径删掉了：标出来
+	require.NoError(t, e.db.Where("id = ?", *after[1].JobID).Delete(&models.TorrentTransferJob{}).Error)
+	views := e.records(RecordFilter{})
+	byID := map[string]RecordView{}
+	for _, v := range views {
+		byID[v.TorrentID] = v
+	}
+	assert.True(t, byID["72"].JobMissing)
+	assert.False(t, byID["71"].JobMissing)
+	assert.Equal(t, models.ReseedRolledBack, byID["71"].State)
+}
+
+// 记录按最后一次尝试的时间排：7 天后重试的排在前面。
+func TestRecordsOrderByLastAttempt(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	good := e.candidate("81", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	data := e.site.data["81"]
+	delete(e.site.data, "81")
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 81, "info_hash": good})
+	_, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	e.now = e.now.Add(time.Hour)
+	other := e.candidate("82", map[string]int64{"a.mkv": 100})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 81, "info_hash": good}, map[string]any{"sid": 1, "torrent_id": 82, "info_hash": other})
+	_, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+
+	e.site.data["81"] = data
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	_, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	views := e.records(RecordFilter{})
+	require.Len(t, views, 2)
+	assert.Equal(t, "81", views[0].TorrentID, "刚重试过的在前面")
+	assert.Equal(t, models.ReseedQueued, views[0].State)
+}
+
+// 读不到原种子的文件列表（下载器暂时连不上）：还没核对，记为可重试，过 7 天再试。
+func TestRunRetriesWhenSourceFilesUnavailable(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	good := e.candidate("91", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 91, "info_hash": good})
+	files := e.dl.files[e.srcHash]
+	delete(e.dl.files, e.srcHash)
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Failed)
+	var rec models.ReseedRecord
+	require.NoError(t, e.db.Where("torrent_id = ?", "91").First(&rec).Error)
+	assert.True(t, rec.Retryable)
+	assert.Contains(t, rec.Message, "读取原种子的文件列表失败")
+
+	e.dl.files[e.srcHash] = files
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "过了 7 天再试，这次读到了")
+}
+
+// 下一轮的时间：开着、有 token 时才有；没跑过或已经到点是现在，否则是上一轮加间隔
+func TestSettingsNextRun(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	got, err := e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, got.NextRunAt, "没开启")
+	e.enable(nil)
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, got.NextRunAt)
+	assert.WithinDuration(t, e.now, *got.NextRunAt, 0, "没跑过：下一次检查时跑")
+	require.NoError(t, e.svc.RecordRun(ctx, e.now, "ok"))
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.WithinDuration(t, e.now.Add(time.Duration(got.IntervalHours)*time.Hour), *got.NextRunAt, 0)
+	e.now = e.now.Add(100 * time.Hour)
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.WithinDuration(t, e.now, *got.NextRunAt, 0, "已经到点：下一次检查时跑")
+}
+
+// IYUU 的索引里还有、站点上已经删了的种子（2026-10-30 生产：M-Team 回「種子未找到」）：不算失败，记为「站点上已删除」，
+// 过了重试间隔也不再去下（以前记为可重试，7 天后又下一次，每次都报错）。
+func TestRunSkipsTorrentGoneFromSite(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	gone := e.candidate("61", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	delete(e.site.data, "61")
+	e.site.gone = map[string]bool{"61": true}
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 61, "info_hash": gone})
+
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Zero(t, res.Failed, "站点上删了不算失败")
+	assert.Equal(t, 1, res.Gone)
+	assert.Contains(t, res.Summary(), "站点已删除 1 个")
+	var rec models.ReseedRecord
+	require.NoError(t, e.db.Where("info_hash = ?", gone).First(&rec).Error)
+	assert.Equal(t, models.ReseedGone, rec.State)
+	assert.False(t, rec.Retryable)
+	assert.Contains(t, rec.Message, "站点上已经没有这个种子")
+
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Skipped[SkipTried], "过了重试间隔也不再试")
+	assert.Equal(t, 1, e.site.downloads["61"], "只下过一次")
+}
+
+// 站点回的不是种子文件（2026-11-02 织梦：Cookie 下载拿到「第一次下载提示」页）：记为可重试的失败、写明拿到的是什么，
+// 不再当成「info hash 不符」以后都不试；种子的 info hash 真的对不上时照旧不再试。
+func TestRunRetriesWhenSiteReturnsWebPage(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	files := map[string]int64{"a.mkv": 100, "sub/b.srt": 1}
+	page := e.candidate("71", files)
+	real := e.site.data["71"]
+	e.site.data["71"] = []byte(`<html><head><title>织梦 :: 下载提示 - Powered by NexusPHP</title></head><body><h2>第一次下载提示</h2>` +
+		`<form action="?" method="post"><input type="hidden" name="id" value="71" /><input type="hidden" name="type" value="firsttime" />` +
+		`<input type="checkbox" name="hidenotice" value="1" checked="checked" /></form></body></html>`)
+	e.candidate("72", files)
+	_, wrong := torrentWith(t, "Movie", files, "wrong")
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 71, "info_hash": page}, map[string]any{"sid": 1, "torrent_id": 72, "info_hash": wrong})
+
+	res, err := e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Failed)
+	var recs []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&recs).Error)
+	require.Len(t, recs, 2)
+	assert.True(t, recs[0].Retryable, "拿到网页是站点那边的状态，过一段时间再试")
+	assert.Contains(t, recs[0].Message, "不是种子文件")
+	assert.Contains(t, recs[0].Message, "第一次下载提示")
+	assert.NotContains(t, recs[0].Message, "info hash")
+	assert.False(t, recs[1].Retryable)
+	assert.Contains(t, recs[1].Message, "info hash 不符")
+
+	e.site.data["71"] = real
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx, RunOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "过了 7 天再下，这次拿到种子")
+	assert.Equal(t, 1, res.Skipped[SkipTried], "info hash 不符的不再试")
+}

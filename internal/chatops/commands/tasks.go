@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 func init() {
@@ -25,17 +26,24 @@ func tasksHandler(ctx context.Context, _ []string, src chatops.Source) (chatops.
 	if err != nil {
 		return errReply(src.ReplyLang, "查询任务失败: %v", "list jobs failed: %v", err), nil
 	}
-	if len(jobs) == 0 {
-		return okReply(tr(src.ReplyLang, "无 RSS 任务", "no RSS jobs")), nil
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, tr(src.ReplyLang, "RSS 任务（%d）\n", "RSS Jobs (%d)\n"), len(jobs))
+	items := make([]map[string]any, 0, len(jobs))
+	running := 0
 	for _, j := range jobs {
 		state := "stopped"
 		if j.Running {
 			state = "running"
+			running++
 		}
-		fmt.Fprintf(&b, "[%s] %s/%s\n", state, j.SiteName, j.RSSName)
+		items = append(items, map[string]any{"site": j.SiteName, "rss": j.RSSName, "state": state})
 	}
-	return okReply(strings.TrimRight(b.String(), "\n")), nil
+	fields := map[string]any{"count": len(jobs), "running": running, "items": items}
+	if len(jobs) == 0 {
+		return eventReply(tr(src.ReplyLang, "无 RSS 任务", "no RSS jobs"), notify.EventReplyTasks, fields), nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, tr(src.ReplyLang, "RSS 任务（%d）\n", "RSS Jobs (%d)\n"), len(jobs))
+	for _, it := range items {
+		fmt.Fprintf(&b, "[%s] %s/%s\n", it["state"], it["site"], it["rss"])
+	}
+	return eventReply(strings.TrimRight(b.String(), "\n"), notify.EventReplyTasks, fields), nil
 }

@@ -19,6 +19,7 @@ tools/browser-extension/
 ├── src/modules/
 │   ├── collector/               # Detect/capture/sanitize tracker metadata
 │   ├── sync/                    # pt-tools HTTP client, cookies, errors
+│   ├── cookiecloud/             # CookieCloud crypto (MD5 + WebCrypto AES-CBC), upload/merge, settings store
 │   └── export/                  # ZIP/GitHub export helpers
 └── src/popup/                    # Vue popup and login-status/settings panels
 ```
@@ -37,7 +38,8 @@ Do not add an extension-only built-in site without a Go definition.
 ## Security
 
 - Request only the narrow host/cookie permissions needed for enabled sites.
-- Never send tracker cookies anywhere except the user-configured pt-tools endpoint.
+- Never send tracker cookies anywhere except the user-configured pt-tools endpoint and the user-configured CookieCloud server; CookieCloud only ever gets ciphertext (the password stays in the browser), the upload merges into the existing data and refuses to overwrite data it cannot decrypt unless the user confirms. Keep the crypto vectors in `modules/cookiecloud/crypto.test.ts` and `internal/cookiecloud` `TestDecryptExtensionVectors` identical.
+- Settings messages (`SAVE_*`, `UPLOAD_COOKIECLOUD`, `RUN_SYNC_NOW`, `GET_SYNC_SETTINGS`) are refused from content scripts (`requireExtensionPage`); the popup never receives the stored CookieCloud password.
 - Sanitize captured HTML/metadata before persistence/export.
 - Do not log cookies, bearer tokens, API keys, or full authenticated URLs.
 - Treat the pt-tools base URL and credentials as untrusted input; use the shared timeout/error helpers.

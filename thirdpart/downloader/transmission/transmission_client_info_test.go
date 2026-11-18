@@ -209,6 +209,24 @@ func TestTrGetIncompletePendingBytes(t *testing.T) {
 	assert.Equal(t, int64(1500), got)
 }
 
+// 一次 torrent-get 同时给出待占用与所有种子的 hash（小写；做种的也算）
+func TestTrIncompletePendingSnapshot(t *testing.T) {
+	srv := rpcServer(t, map[string]any{"torrent-get": map[string]any{
+		"torrents": []map[string]any{
+			{"hashString": "AAAA", "status": 4, "leftUntilDone": 1000},
+			{"hashString": "bbbb", "status": 6, "leftUntilDone": 0},
+			{"status": 0, "leftUntilDone": 500},
+		},
+	}})
+	defer srv.Close()
+
+	var s downloader.PendingSnapshotter = covClient(srv.URL)
+	snap, err := s.IncompletePendingSnapshot(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1500), snap.Bytes)
+	assert.Equal(t, map[string]struct{}{"aaaa": {}, "bbbb": {}}, snap.Hashes)
+}
+
 func TestTrGetDiskInfo(t *testing.T) {
 	srv := rpcServer(t, map[string]any{
 		"session-get": map[string]any{"download-dir": "/downloads"},

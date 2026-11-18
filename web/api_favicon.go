@@ -194,12 +194,13 @@ func (fs *FaviconService) fetchAndSave(siteID, siteName, faviconURL string) erro
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	session := requests.NewSession().WithTimeout(30 * time.Second)
+	session := httpclient.NewSession().WithTimeout(30 * time.Second)
 	// 始终显式设置代理（即使为空）。requests 库的 Session 从全局 transport 池
 	// 复用 *http.Transport，若仅在有代理时调用 WithProxy，池中残留的代理配置
 	// 会污染后续对 NO_PROXY 主机（如 127.0.0.1）的请求，导致其错误地走代理。
 	// 显式传入解析结果（空字符串会清空代理）可保证每次请求的代理配置与当前目标一致。
-	session = session.WithProxy(httpclient.ResolveProxyFromEnvironment(faviconURL))
+	// 全局设置的「站点代理」开着时按站点判定，关着时按环境变量。
+	session = session.WithProxy(httpclient.ResolveSiteProxyOrEnv(siteID, faviconURL))
 	defer func() { _ = session.Close() }()
 
 	req, err := requests.NewGet(faviconURL).Build()
@@ -315,7 +316,11 @@ func (s *Server) apiFavicon(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "站点ID不能为空", http.StatusBadRequest)
 		return
 	}
+	s.serveSiteFavicon(w, r, siteID)
+}
 
+// serveSiteFavicon 回一个站点的图标：库里没有时按站点定义里的地址取一次（查询串 nofetch=1 时不取），取不到回占位图。
+func (s *Server) serveSiteFavicon(w http.ResponseWriter, r *http.Request, siteID string) {
 	if faviconService == nil {
 		initFaviconService()
 	}

@@ -3,6 +3,7 @@ package models
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -20,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 10
+const CurrentSchemaVersion = 17
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -46,10 +47,11 @@ type Migration struct {
 
 // SchemaManager 架构版本管理器
 type SchemaManager struct {
-	db            *gorm.DB
-	migrations    []Migration
-	appVersion    string
-	BackupTable   func(db *gorm.DB, table string) (path string, err error)
+	db         *gorm.DB
+	migrations []Migration
+	appVersion string
+	// BackupTable 在迁移改表前把整张表存一份；fromVer、toVer 是这一步迁移的版本，写进备份文件名
+	BackupTable   func(db *gorm.DB, table string, fromVer, toVer int) (path string, err error)
 	EncryptCookie func(plain string) (cipher string, err error)
 	DecryptCookie func(cipher string) (plain string, err error)
 }
@@ -68,7 +70,7 @@ func NewSchemaManager(db *gorm.DB, appVersion string) *SchemaManager {
 func NewSchemaManagerWithHooks(
 	db *gorm.DB,
 	appVersion string,
-	backupFn func(db *gorm.DB, table string) (path string, err error),
+	backupFn func(db *gorm.DB, table string, fromVer, toVer int) (path string, err error),
 	encryptFn func(plain string) (cipher string, err error),
 	decryptFn func(cipher string) (plain string, err error),
 ) *SchemaManager {
@@ -142,6 +144,55 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     10,
 		Description: "site_login_state: add 4 columns (ApiLastLoginAt, CookieLastLoginAt, ProbeMode, LastConsistencyCheck)",
 		Up:          sm.migrateV9ToV10,
+	})
+
+	// v10 -> v11: 清除 site_settings.cookie 里的明文 Cookie，只保留密文
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     11,
+		Description: "site_settings: encrypt remaining plaintext cookies and clear the plaintext column",
+		Up:          sm.migrateV10ToV11,
+	})
+
+	// v11 -> v12: torrent_infos 按旧的 is_free / free_end_time 回填免费状态与是否要求免费
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     12,
+		Description: "torrent_infos: backfill free_validity (no end time is unknown, never permanent) and require_free",
+		Up:          sm.migrateV11ToV12,
+	})
+
+	// v12 -> v13: 没有下载器编号的旧种子记录按下载器名字补上编号（删种按编号认下载器）
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     13,
+		Description: "torrent_infos, torrent_info_archives: backfill downloader_id from downloader_name",
+		Up:          sm.migrateV12ToV13,
+	})
+
+	// v13 -> v14: 已推送的种子记下把它推进下载器的规则（filter_rule_id 从此每轮刷新）
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     14,
+		Description: "torrent_infos, torrent_info_archives: backfill pushed_filter_rule_id from filter_rule_id for pushed rows",
+		Up:          sm.migrateV13ToV14,
+	})
+
+	// v14 -> v15: 升级前的辅种记录补上尝试行（统计面板与每站每天的名额按尝试行算）
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     15,
+		Description: "reseed_attempts: backfill one attempt per existing reseed_records row",
+		Up:          sm.migrateV14ToV15,
+	})
+
+	// v15 -> v16: 做种竞争度并进自动删种：只开了竞争度的安装打开自动删种，只按竞争度处理
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     16,
+		Description: "settings_globals: merge the peer ratio monitor into cleanup for installs that only enabled peer ratio",
+		Up:          sm.migrateV15ToV16,
+	})
+
+	// v16 -> v17: 免费结束时删除还是暂停改成每条 RSS 自己选，沿用升级前的全局「免费结束自动删除」
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     17,
+		Description: "rss_subscriptions/torrent_infos: per-RSS free_end_delete carried over from the global auto_delete_on_free_end",
+		Up:          sm.migrateV16ToV17,
 	})
 }
 
@@ -525,7 +576,7 @@ func (sm *SchemaManager) migrateV8ToV9(db *gorm.DB) error {
 		return fmt.Errorf("v9 migration requires crypto hooks")
 	}
 
-	if _, err := sm.BackupTable(db, "site_settings"); err != nil {
+	if _, err := sm.BackupTable(db, "site_settings", 8, 9); err != nil {
 		return fmt.Errorf("v8→v9: backup site_settings: %w", err)
 	}
 
@@ -606,7 +657,7 @@ func (sm *SchemaManager) migrateV9ToV10(db *gorm.DB) error {
 		return sm.recordV10MigrationState(db)
 	}
 
-	if _, err := sm.BackupTable(db, "site_login_states"); err != nil {
+	if _, err := sm.BackupTable(db, "site_login_states", 9, 10); err != nil {
 		return fmt.Errorf("v9→v10: backup site_login_states: %w", err)
 	}
 
@@ -646,6 +697,262 @@ func (sm *SchemaManager) recordV10MigrationState(db *gorm.DB) error {
 	}
 	if err := UpsertMigrationState(db, 10, time.Now().UTC()); err != nil {
 		return fmt.Errorf("v9→v10: record migration state: %w", err)
+	}
+	return nil
+}
+
+// migrateV10ToV11 清除 site_settings.cookie 里的明文 Cookie：v9 加密存量 Cookie 时没有清掉明文列，
+// 之后的保存入口也一直把明文写在密文旁边。没有密文、或密文解不开的行先用明文重新加密，
+// 避免丢掉唯一能用的副本；已有可用密文的行只清明文。整批在一个事务里，任何一行失败都回滚。
+//
+// 这一步不做表备份：备份文件会把要清除的明文再写一份到磁盘。每行清除前都已确认密文能解出可用的 Cookie，
+// 运行时本来就优先读密文，所以清掉明文不改变任何站点实际使用的 Cookie。
+func (sm *SchemaManager) migrateV10ToV11(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&SiteSetting{}) {
+		return nil
+	}
+	type cookieRow struct {
+		ID              uint
+		Name            string
+		Cookie          string
+		CookieEncrypted string
+	}
+	var rows []cookieRow
+	if err := db.Raw(
+		"SELECT id, name, cookie, cookie_encrypted FROM site_settings WHERE cookie IS NOT NULL AND cookie != ''",
+	).Scan(&rows).Error; err != nil {
+		return fmt.Errorf("v10→v11: query plaintext cookies: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	if sm.EncryptCookie == nil || sm.DecryptCookie == nil {
+		return errors.New("v11 migration requires crypto hooks")
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, row := range rows {
+			updates := map[string]any{"cookie": ""}
+			usable := strings.TrimSpace(row.CookieEncrypted) != ""
+			if usable {
+				if _, err := sm.DecryptCookie(row.CookieEncrypted); err != nil {
+					usable = false
+				}
+			}
+			if !usable {
+				cipherText, err := sm.EncryptCookie(row.Cookie)
+				if err != nil {
+					return fmt.Errorf("v10→v11: encrypt cookie for site %s: %w", row.Name, err)
+				}
+				plain, err := sm.DecryptCookie(cipherText)
+				if err != nil || plain != row.Cookie {
+					return fmt.Errorf("v10→v11: decrypt check failed for site %s", row.Name)
+				}
+				updates["cookie_encrypted"] = cipherText
+			}
+			if err := tx.Model(&SiteSetting{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("v10→v11: clear plaintext cookie for site %s: %w", row.Name, err)
+			}
+		}
+		return nil
+	})
+}
+
+// migrateV11ToV12 回填旧记录的免费状态（docs/design/free-expiry-safety.md §9）。只写还没有状态的行：
+// 免费且有结束时间是 free_until；免费但没有结束时间是 unknown，不推断成永久；其余是 not_free。来源记成 legacy，
+// 验证时间留空（旧数据不算验证过，要求免费的暂存项推送前会重新取详情）。要求免费只回填 RSS 的免费通道
+// 与要求免费的过滤规则。不动推送、暂停、下载器字段：不自动删除、暂停或恢复任何任务。
+func (sm *SchemaManager) migrateV11ToV12(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&TorrentInfo{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		pending := "(free_validity = '' OR free_validity IS NULL)"
+		strictRule := "0"
+		if tx.Migrator().HasTable(&FilterRule{}) {
+			strictRule = "filter_rule_id IN (SELECT id FROM filter_rules WHERE require_free = 1)"
+		}
+		if err := tx.Exec(`UPDATE torrent_infos SET
+			require_free = CASE
+				WHEN download_source = 'free_download' OR download_source = '' OR download_source IS NULL THEN 1
+				WHEN download_source = 'filter_rule' AND ` + strictRule + ` THEN 1
+				ELSE 0 END
+			WHERE ` + pending).Error; err != nil {
+			return fmt.Errorf("v11→v12: backfill require_free: %w", err)
+		}
+		if err := tx.Exec(`UPDATE torrent_infos SET
+			free_validity = CASE
+				WHEN is_free = 1 AND free_end_time IS NOT NULL THEN 'free_until'
+				WHEN is_free = 1 THEN 'unknown'
+				ELSE 'not_free' END,
+			free_status_source = 'legacy'
+			WHERE ` + pending).Error; err != nil {
+			return fmt.Errorf("v11→v12: backfill free_validity: %w", err)
+		}
+		return nil
+	})
+}
+
+// migrateV12ToV13 给没有下载器编号的旧种子记录（2026-01 以前推送的）按现在的下载器名字补上编号：下载器可以改名、名字也可能
+// 被后建的下载器复用，删种从此只按编号认下载器。名字对不上任何下载器的留空（认不出是哪个下载器的），已有编号的不动。
+// 叫这个名字的下载器是在推送以后才建的，说明名字被复用过（原来的下载器改了名），记录不是它的，也留空；
+// 没有推送时间时按记录的创建时间比，两样都没有的留空。时间按时刻比较（julianday）。
+func (sm *SchemaManager) migrateV12ToV13(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&DownloaderSetting{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for table, recordTime := range map[string]string{
+			"torrent_infos":         "COALESCE(torrent_infos.push_time, torrent_infos.created_at)",
+			"torrent_info_archives": "COALESCE(torrent_info_archives.push_time, torrent_info_archives.original_created_at)",
+		} {
+			if !tx.Migrator().HasTable(table) || !tx.Migrator().HasColumn(table, "downloader_id") {
+				continue
+			}
+			owner := `FROM downloader_settings ds WHERE ds.name = ` + table + `.downloader_name
+				AND julianday(ds.created_at) <= julianday(` + recordTime + `)`
+			if err := tx.Exec(`UPDATE ` + table + ` SET downloader_id = (SELECT ds.id ` + owner + `)
+				WHERE downloader_id IS NULL AND downloader_name != '' AND EXISTS (SELECT 1 ` + owner + `)`).Error; err != nil {
+				return fmt.Errorf("v12→v13: backfill %s.downloader_id: %w", table, err)
+			}
+		}
+		return nil
+	})
+}
+
+// migrateV13ToV14 给已推送的种子记下「把它推进下载器的规则」（pushed_filter_rule_id）：RSS 从此每轮按这一轮的判断刷新
+// filter_rule_id，规则命中数要按推送时的规则统计。升级前 RSS 不刷新已推送的记录，filter_rule_id 就是推送时的值，照抄；
+// 没推送的不填，已经填了的不动。
+func (sm *SchemaManager) migrateV13ToV14(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, table := range []string{"torrent_infos", "torrent_info_archives"} {
+			if !tx.Migrator().HasTable(table) || !tx.Migrator().HasColumn(table, "pushed_filter_rule_id") {
+				continue
+			}
+			if err := tx.Exec(`UPDATE ` + table + ` SET pushed_filter_rule_id = filter_rule_id
+				WHERE is_pushed = 1 AND pushed_filter_rule_id IS NULL AND filter_rule_id IS NOT NULL`).Error; err != nil {
+				return fmt.Errorf("v13→v14: backfill %s.pushed_filter_rule_id: %w", table, err)
+			}
+		}
+		return nil
+	})
+}
+
+// migrateV14ToV15 给升级前的每条辅种记录补一行尝试（backfilled = 1，没有轮次，开始与结束时间取记录的更新时间）：
+// 统计面板按尝试行与任务结果算，每站每天的名额也按尝试行算，补上以后升级当天已经试过的个数不变。
+// 失败、站点已删除照抄；有任务的记为建成、任务编号照抄（任务还在时结果从任务表读）；任务已经清除、记录写着
+// 已辅种、已撤回、已取消的记为建成，任务结果按记录，完成时间取记录的更新时间（真正的完成时间已经不知道，近似）。
+// 整个回填在一个事务里，事务开头先查有没有回填行，有就什么都不做：执行器先提交 Up 再另写版本号，
+// 两步之间退出时下次会再跑一次 v15，回填全有或全无，所以有回填行就说明已经做完。
+func (sm *SchemaManager) migrateV14ToV15(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&ReseedRecord{}) || !db.Migrator().HasTable(&ReseedAttempt{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		var done int64
+		if err := tx.Model(&ReseedAttempt{}).Where("backfilled = ?", true).Count(&done).Error; err != nil {
+			return fmt.Errorf("v14→v15: check reseed_attempts: %w", err)
+		}
+		if done > 0 {
+			return nil
+		}
+		if err := tx.Exec(`INSERT INTO reseed_attempts
+			(run_id, started_at, finished_at, site_name, info_hash, torrent_id, name, downloader_id,
+			 outcome, message, job_id, job_state, job_finished_at, backfilled)
+			SELECT NULL, updated_at, updated_at, site_name, info_hash, torrent_id, name, downloader_id,
+				CASE state WHEN 'failed' THEN 'failed' WHEN 'gone' THEN 'gone' ELSE 'created' END,
+				CASE WHEN state IN ('failed', 'gone') THEN message ELSE '' END,
+				job_id,
+				CASE state WHEN 'done' THEN 'source_removed' WHEN 'rolled_back' THEN 'rolled_back'
+					WHEN 'canceled' THEN 'canceled' ELSE '' END,
+				CASE WHEN state IN ('done', 'rolled_back', 'canceled') THEN updated_at ELSE NULL END,
+				1
+			FROM reseed_records ORDER BY id`).Error; err != nil {
+			return fmt.Errorf("v14→v15: backfill reseed_attempts: %w", err)
+		}
+		return nil
+	})
+}
+
+// migrateV15ToV16 把做种竞争度监控并进自动删种：竞争度从此是自动删种的一条删除条件，跟着自动删种的检查间隔，
+// 自动删种关着时不判断。升级前只开了竞争度、没开自动删种的安装打开自动删种、只管 pt-tools 推送的种子，
+// 检查间隔沿用竞争度原来的（小于 5 分钟时按 10 分钟，与原来的竞争度监控一样），常规删除条件全部清零，
+// 不删免费到期没下完的、不做紧急清理：升级前后都只按竞争度处理。其他安装不改设置（cleanup_emergency 是加列时的默认值 1，
+// 与升级前一样做紧急清理）。有要改的行时先备份 settings_globals（要求备份钩子，同 v9）；改过的行自动删种已经开着，重跑不再命中。
+func (sm *SchemaManager) migrateV15ToV16(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&SettingsGlobal{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&SettingsGlobal{}, "CleanupEmergency") {
+		if err := db.Migrator().AddColumn(&SettingsGlobal{}, "CleanupEmergency"); err != nil {
+			return fmt.Errorf("v15→v16: add cleanup_emergency: %w", err)
+		}
+	}
+	peerOnly := func(tx *gorm.DB) *gorm.DB {
+		return tx.Model(&SettingsGlobal{}).Where("peer_ratio_enabled = ? AND cleanup_enabled = ?", true, false)
+	}
+	var n int64
+	if err := peerOnly(db).Count(&n).Error; err != nil {
+		return fmt.Errorf("v15→v16: query settings_globals: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if sm.BackupTable == nil {
+		return errors.New("v16 migration requires backup hook")
+	}
+	if _, err := sm.BackupTable(db, "settings_globals", 15, 16); err != nil {
+		return fmt.Errorf("v15→v16: backup settings_globals: %w", err)
+	}
+	if err := peerOnly(db).Updates(map[string]any{
+		"cleanup_enabled": true,
+		"cleanup_scope":   "database",
+		"cleanup_interval_min": gorm.Expr("CASE WHEN peer_ratio_interval_min IS NULL OR peer_ratio_interval_min < ? THEN ? ELSE peer_ratio_interval_min END",
+			MinPeerRatioIntervalMin, DefaultPeerRatioIntervalMin),
+		"cleanup_max_seed_time_h":  0,
+		"cleanup_min_ratio":        0,
+		"cleanup_max_inactive_h":   0,
+		"cleanup_slow_seed_time_h": 0,
+		"cleanup_slow_max_ratio":   0,
+		"cleanup_del_free_expired": false,
+		"cleanup_emergency":        false,
+	}).Error; err != nil {
+		return fmt.Errorf("v15→v16: merge peer ratio into cleanup: %w", err)
+	}
+	return nil
+}
+
+// migrateV16ToV17 把免费结束时的处理从全局开关改成每条 RSS 自己选（free_end_delete，只在 pause_on_free_end 开着时有意义）：
+// 升级前开着全局「免费结束自动删除」时，开着免费结束处理的 RSS 与已推送的种子记录都记成删除，升级前已经在等到期处理的种子
+// 处理方式不变；没开时都是暂停（新列的默认值）。只写新加的列，原有的列（含全局 auto_delete_on_free_end）不动，回退到旧版时
+// 旧版读到的仍是升级前的值，所以不用备份。重跑结果一样。
+func (sm *SchemaManager) migrateV16ToV17(db *gorm.DB) error {
+	mig := db.Migrator()
+	tables := []any{&RSSSubscription{}, &TorrentInfo{}}
+	for _, model := range tables {
+		if mig.HasTable(model) && !mig.HasColumn(model, "FreeEndDelete") {
+			if err := mig.AddColumn(model, "FreeEndDelete"); err != nil {
+				return fmt.Errorf("v16→v17: add free_end_delete: %w", err)
+			}
+		}
+	}
+	if !mig.HasTable(&SettingsGlobal{}) {
+		return nil
+	}
+	var n int64
+	if err := db.Model(&SettingsGlobal{}).Where("auto_delete_on_free_end = ?", true).Count(&n).Error; err != nil {
+		return fmt.Errorf("v16→v17: query settings_globals: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	for _, model := range tables {
+		if !mig.HasTable(model) {
+			continue
+		}
+		if err := db.Model(model).Where("pause_on_free_end = ?", true).Update("free_end_delete", true).Error; err != nil {
+			return fmt.Errorf("v16→v17: carry over free_end_delete: %w", err)
+		}
 	}
 	return nil
 }

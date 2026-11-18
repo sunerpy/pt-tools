@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,13 +30,18 @@ const (
 type cloakConfigGetResponse struct {
 	Endpoint       string  `json:"endpoint"`
 	HasToken       bool    `json:"has_token"`
+	ProfileID      string  `json:"profile_id"`
 	ManagerVersion *string `json:"manager_version,omitempty"`
 }
 
 type cloakConfigPutRequest struct {
-	Endpoint string  `json:"endpoint"`
-	Token    *string `json:"token,omitempty"`
+	Endpoint  string  `json:"endpoint"`
+	Token     *string `json:"token,omitempty"`
+	ProfileID *string `json:"profile_id,omitempty"`
 }
+
+// cloakProfileIDPattern 限定 profile ID 的字符：Manager 客户端把它直接拼进 /api/profiles/<id>/ 路径。
+var cloakProfileIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 type cloakTestRequest struct {
 	Endpoint  string `json:"endpoint,omitempty"`
@@ -71,8 +77,9 @@ func (s *Server) handleCloakConfigGet(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, cloakConfigGetResponse{
-		Endpoint: snap.Endpoint,
-		HasToken: snap.HasToken,
+		Endpoint:  snap.Endpoint,
+		HasToken:  snap.HasToken,
+		ProfileID: snap.ProfileID,
 	})
 }
 
@@ -100,7 +107,16 @@ func (s *Server) handleCloakConfigPut(w http.ResponseWriter, r *http.Request) {
 	if req.Token != nil {
 		token = *req.Token
 	}
-	if err := s.store.SaveCloakConfig(endpoint, token, false); err != nil {
+	var profileID *string
+	if req.ProfileID != nil {
+		trimmed := strings.TrimSpace(*req.ProfileID)
+		if trimmed != "" && !cloakProfileIDPattern.MatchString(trimmed) {
+			writeJSONError(w, "Profile ID 只能包含字母、数字、点、下划线和连字符，最长 128 个字符", http.StatusBadRequest)
+			return
+		}
+		profileID = &trimmed
+	}
+	if err := s.store.SaveCloakConfig(endpoint, token, false, profileID); err != nil {
 		writeJSONError(w, fmt.Sprintf("保存 CloakBrowser 配置失败: %v", err), http.StatusInternalServerError)
 		return
 	}

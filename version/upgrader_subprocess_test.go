@@ -3,6 +3,9 @@ package version_test
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -75,12 +78,17 @@ func TestPerformUpgrade_SubprocessSuccess(t *testing.T) {
 	copy(fake, []byte("#!/bin/sh\necho new\n"))
 	archive := buildTarGzForHelper(t, "pt-tools", fake)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	sum := sha256.Sum256(archive)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/checksums.txt" {
+			_, _ = fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), r.URL.Query().Get("asset"))
+			return
+		}
 		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
 
-	cmd := exec.Command(bin, "upgrade", srv.URL)
+	cmd := exec.Command(bin, "upgrade", srv.URL+"/asset", srv.URL+"/checksums.txt")
 	cmd.Env = append(
 		os.Environ(),
 		"HTTP_PROXY=", "http_proxy=", "HTTPS_PROXY=", "https_proxy=",
@@ -140,7 +148,10 @@ func main() {
 		asset := version.GetAssetName()
 		rel := &version.ReleaseInfo{
 			Version: "v9.9.9",
-			Assets:  []version.ReleaseAsset{{Name: asset, DownloadURL: os.Args[2]}},
+			Assets: []version.ReleaseAsset{
+				{Name: asset, DownloadURL: os.Args[2]},
+				{Name: "checksums.txt", DownloadURL: os.Args[3] + "?asset=" + asset},
+			},
 		}
 		if err := u.Upgrade(context.Background(), rel, ""); err != nil {
 			fmt.Printf("upgrade-error=%v\n", err)

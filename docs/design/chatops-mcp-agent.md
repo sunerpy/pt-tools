@@ -615,12 +615,12 @@ type Event struct {
 
 本文最初用于规划 ChatOps、MCP 与 Agent 的演进路径。当前仓库状态如下：
 
-| 层级           | 状态                              | 当前入口                                                    |
-| -------------- | --------------------------------- | ----------------------------------------------------------- |
-| 通知与 ChatOps | 已实现                            | Web UI、QQ OneBot、Telegram、企业微信 Webhook、通用 Webhook |
-| 应用服务层     | 已实现并持续收敛                  | `internal/app/`                                             |
-| MCP Server     | 仅保留工具契约，尚无可运行 Server | [`phase4-mcp.md`](phase4-mcp.md)                            |
-| AI Agent       | 设计阶段，不承诺交付日期          | [`phase5-agent.md`](phase5-agent.md)                        |
+| 层级           | 状态                               | 当前入口                                                          |
+| -------------- | ---------------------------------- | ----------------------------------------------------------------- |
+| 通知与 ChatOps | 已实现                             | Web UI、QQ OneBot、Telegram、企业微信 Webhook、通用 Webhook       |
+| 应用服务层     | 已实现并持续收敛                   | `internal/app/`                                                   |
+| MCP Server     | 已实现（`/mcp` 与 `pt-tools mcp`） | [`phase4-mcp.md`](phase4-mcp.md)、[MCP 使用说明](../guide/mcp.md) |
+| AI Agent       | 设计阶段，不承诺交付日期           | [`phase5-agent.md`](phase5-agent.md)                              |
 
 ChatOps 的安装与运维说明已拆分到用户指南，避免设计文档重复维护配置步骤：
 

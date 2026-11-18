@@ -6,11 +6,11 @@ This page explains how to obtain a site's credentials (a cookie, an API key or a
 
 pt-tools supports three ways of authenticating with a site:
 
-| Method      | Sites                                | Characteristics                                | Recommended setup                                |
-| ----------- | ------------------------------------ | ---------------------------------------------- | ------------------------------------------------ |
-| **Cookie**  | HDSky, SpringSunday, HDDolby, NovaHD | The traditional way; expires from time to time | ✅ Synced automatically by the browser extension |
-| **API key** | M-Team                               | Valid for a long time                          | Entered by hand                                  |
-| **Passkey** | Rousi Pro                            | Valid for a long time                          | Entered by hand                                  |
+| Method      | Sites                        | Characteristics                                                             | Recommended setup                                |
+| ----------- | ---------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
+| **Cookie**  | HDSky, SpringSunday, NovaHD  | The traditional way; expires from time to time                              | ✅ Synced automatically by the browser extension |
+| **API key** | M-Team, UHDDolby (RSS key)   | M-Team's lasts a long time; UHDDolby's RSS key expires after 30 to 180 days | Entered by hand                                  |
+| **Passkey** | Rousi Pro (personal API key) | Valid for a long time                                                       | Entered by hand                                  |
 
 **For sites that use a cookie, the browser extension is strongly recommended.** It saves you copying and pasting by hand, and updates the cookie when it expires.
 
@@ -70,14 +70,11 @@ After the sync, the site's cookie in pt-tools is updated; there is nothing to fi
 
 If you are signed in to several sites, you can sync all their cookies in one go:
 
-1. Click the extension's icon
-2. Expand **Global Settings** at the bottom
-3. **Batch Cookie Sync** lists every built-in site
-4. Each site shows its cookie status (Valid, Expiring Soon, Expired or Missing)
-5. Tick the sites you want to sync (or click **Select All**)
-6. Click **🔄 Sync Selected**
+1. Click the extension's icon; its main page is **My sites**: every site with a cookie in the browser or enabled in pt-tools (the other built-in sites appear after Show all)
+2. Each site shows its cookie status (Valid, Expiring Soon, Expired or Missing) and its keep-alive status in pt-tools
+3. Click **Sync all** above the list to sync every site whose cookie is valid, or **Sync** on a row to sync only that site
 
-> **Note**: sites that use an API key or a passkey (such as M-Team and Rousi Pro) are greyed out and cannot be selected; their credentials are entered in pt-tools by hand.
+> **Note**: sites that use an API key or a passkey (such as M-Team and Rousi Pro) have no Sync; their credentials are entered in pt-tools by hand.
 
 ### Turning on automatic sync
 
@@ -101,7 +98,7 @@ If you would rather not install the extension, or the site uses an API key or a 
 
 A cookie is a small piece of data a website stores in the browser to keep you signed in. Sites recognise a signed-in user by the cookie.
 
-**Sites**: HDSky, SpringSunday, HDDolby, NovaHD and the other sites that run NexusPHP.
+**Sites**: HDSky, SpringSunday, NovaHD and the other sites that run NexusPHP.
 
 ### Getting it by hand in Chrome or Edge
 
@@ -218,6 +215,30 @@ The API key is shown only once after it is generated. Copy it straight away and 
 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
+### Getting a Rousi Pro personal API key
+
+Rousi Pro uses passkey authentication in pt-tools, but the field takes the site's personal API key, not the tracker passkey:
+
+1. Sign in to Rousi Pro in a browser and open Account → API Key (账户 → API Key, `https://rousi.pro/account/api-key`).
+2. Grant Read account profile (读取账户资料), Read and search torrents (读取与搜索种子) and Download torrents (下载种子); for automatic sign-in, also grant Sign in (执行签到).
+3. Click Create API Key (创建 API Key). The key is shown only once, so copy it.
+4. Enter it in the Passkey field of Rousi Pro's site details in pt-tools.
+
+Each account has one personal API key, which other tools such as MoviePilot share. Rotating it revokes the old key in every tool at once, so replace it in pt-tools as well; changed permissions on an existing key take effect only after rotating it.
+
+### Getting the UHDDolby RSS key
+
+UHDDolby (HDDolby, 高清杜比, now at `www.uhddolby.com`) searches, downloads and reports user data through the site's API, and the API key is the RSSKEY from the RSS page:
+
+1. Sign in to UHDDolby in a browser and open Control panel → RSS (控制面板 → RSS 订阅, `https://www.uhddolby.com/getrss.php`).
+2. Choose how long the RSS link stays valid (RSS链接有效期; 90 days by default, at most 180) and generate the link.
+3. Copy the RSSKEY the page shows and enter it in the API Key / RSS Key field of UHDDolby's site details in pt-tools.
+
+- When the RSS link expires its RSSKEY stops working, and searching and downloading in pt-tools report that the API key (RSS key) is wrong or has expired. Generate a new one on the RSS page before it expires and replace it.
+- The cookie is optional. It is used for bonus per hour, sign-in and downloads that only know the torrent ID, such as cross-seeding and transfers: the download addresses the site's API gives are only in search results, so when pt-tools only has the ID it downloads with the cookie, the same as clicking Download on the web page. Without a cookie there is no bonus per hour or sign-in, and downloading by ID only works for torrents in recent search results, so cross-seeding older torrents fails; everything else works. It is the cookie the browser extension syncs.
+- The site enforces two-step verification. The first time the cookie is used from the network pt-tools runs on, the site may ask for a two-step code first; bonus per hour, sign-in and downloads by ID then fail with that reason, while searching, user data and downloads from search results or RSS go through the API and keep working.
+- The site's API allows at most 50 requests an hour and blocks you for 4 hours after that; pt-tools stays within this limit. You can download at most 60 torrents an hour (100 for VIP); more gets you blacklisted for 4 hours.
+
 ### Keeping an API key safe
 
 1. **Never share it**: an API key is as good as your account password
@@ -250,11 +271,15 @@ After the extension syncs a cookie, the site's credentials in pt-tools are **upd
 
 After saving, the Status (状态) column of the site list shows how the site is doing:
 
-| Status                | Meaning                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| **OK (正常)**         | The site is available and the last login probe succeeded (or none has run yet) |
-| **Problem (异常)**    | The site is unavailable, or the last login probe failed                        |
-| **Disabled (已禁用)** | The site is not enabled                                                        |
+| Status                   | Meaning                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| **OK (正常)**            | The site is available and the last login probe succeeded                                              |
+| **Not probed (未探测)**  | No probe result yet: never probed, or login probing does not apply to this site                       |
+| **Problem (异常)**       | The site is unavailable, or the last login probe failed                                               |
+| **Unsupported (不支持)** | pt-tools has no built-in definition for this site, so it cannot probe the login or read the user info |
+| **Disabled (已禁用)**    | The site is not enabled                                                                               |
+
+A site that its definition marks as unavailable is turned off automatically. The saved cookie, API key and other settings are kept, so once the site is available again you only need to turn it back on.
 
 Click Probe now (立即探测) on the row to check the login status at once; see [Login status and key backup](site-login-monitoring.md).
 
@@ -266,7 +291,7 @@ Click Probe now (立即探测) on the row to check the login status at once; see
 | Lifetime      | Renewed automatically            | One to four weeks        | Long                        |
 | How it is set | Pushed by the extension          | Pasted by hand           | Pasted by hand              |
 | Security      | Average                          | Average                  | Better                      |
-| Sites         | NexusPHP                         | NexusPHP                 | mTorrent                    |
+| Sites         | NexusPHP                         | NexusPHP                 | M-Team, UHDDolby            |
 
 ## Troubleshooting
 

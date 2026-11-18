@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sunerpy/pt-tools/utils/httpclient"
+
 	"github.com/sunerpy/requests"
 	"go.uber.org/zap"
 )
@@ -214,7 +216,7 @@ type FailoverHTTPClient struct {
 func NewFailoverHTTPClient(config URLFailoverConfig, opts ...FailoverOption) *FailoverHTTPClient {
 	logger := zap.NewNop()
 
-	session := requests.NewSession().
+	session := httpclient.NewSession().
 		WithTimeout(config.Timeout).
 		WithIdleTimeout(30 * time.Second).
 		WithMaxIdleConns(10).

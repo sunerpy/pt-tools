@@ -24,7 +24,10 @@ type SiteValidationRequest struct {
 
 // SiteValidationResponse 站点验证响应
 type SiteValidationResponse struct {
-	Valid        bool     `json:"valid"`
+	Valid bool `json:"valid"`
+	// Verified 表示是否真的连接站点验证过凭证。目前只检查必填字段，恒为 false：
+	// 动态站点不在 site/v2 的定义注册表里，建不出驱动去发身份请求。
+	Verified     bool     `json:"verified"`
 	Message      string   `json:"message"`
 	FreeTorrents []string `json:"free_torrents,omitempty"` // 免费种子预览
 }
@@ -114,8 +117,9 @@ func (s *Server) apiSiteValidate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "cookie_and_api_key":
-		if req.Cookie == "" || req.APIKey == "" {
-			writeJSON(w, SiteValidationResponse{Valid: false, Message: "Cookie和API Key都不能为空"})
+		// Cookie 可选：时魔、签到与只知道种子编号的下载用它
+		if req.APIKey == "" {
+			writeJSON(w, SiteValidationResponse{Valid: false, Message: "API Key不能为空"})
 			return
 		}
 	case "passkey":
@@ -124,19 +128,17 @@ func (s *Server) apiSiteValidate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "rss_passkey":
-		writeJSON(w, SiteValidationResponse{Valid: true, Message: "RSS Passkey 认证暂不支持预验证"})
+		writeJSON(w, SiteValidationResponse{Valid: true, Message: "RSS Passkey 认证暂不支持在线验证"})
 		return
 	default:
 		writeJSON(w, SiteValidationResponse{Valid: false, Message: "不支持的认证方式"})
 		return
 	}
 
-	// TODO: 实际验证逻辑 - 尝试连接站点并获取免费种子
-	// 这里返回模拟结果
+	// 这里只检查了必填字段，没有连接站点：不能说「验证成功」，否则填错域名、Cookie 过期也显示成功
 	response := SiteValidationResponse{
-		Valid:        true,
-		Message:      "站点配置验证成功",
-		FreeTorrents: []string{}, // 实际实现时填充免费种子列表
+		Valid:   true,
+		Message: "必填字段齐全，但没有连接站点验证凭证（暂不支持在线验证），保存后搜索或订阅一次确认可用",
 	}
 
 	global.GetSlogger().Infof("[Site] 验证站点配置: name=%s, auth_method=%s", req.Name, req.AuthMethod)
@@ -194,7 +196,7 @@ func (s *Server) listDynamicSites(w http.ResponseWriter, _ *http.Request) {
 		responses[i] = resp
 	}
 	if len(sitesToDisable) > 0 {
-		go s.disableUnavailableSites(sitesToDisable)
+		s.goBackground(func() { s.disableUnavailableSites(sitesToDisable) })
 	}
 
 	writeJSON(w, responses)
@@ -232,7 +234,6 @@ func (s *Server) createDynamicSite(w http.ResponseWriter, r *http.Request) {
 		BaseURL:         req.BaseURL,
 		Enabled:         true,
 		AuthMethod:      req.AuthMethod,
-		Cookie:          req.Cookie,
 		CookieEncrypted: cookieCipherText,
 		APIKey:          req.APIKey,
 		APIURL:          req.APIURL,
@@ -337,8 +338,8 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "cookie_and_api_key":
-		if req.Cookie == "" || req.APIKey == "" {
-			http.Error(w, "Cookie和API Key都不能为空", http.StatusBadRequest)
+		if req.APIKey == "" {
+			http.Error(w, "API Key不能为空", http.StatusBadRequest)
 			return
 		}
 	case "passkey":
@@ -377,7 +378,6 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 		BaseURL:         templateExport.BaseURL,
 		Enabled:         true,
 		AuthMethod:      templateExport.AuthMethod,
-		Cookie:          req.Cookie,
 		CookieEncrypted: cookieCipherText,
 		APIKey:          req.APIKey,
 		Passkey:         req.Passkey,

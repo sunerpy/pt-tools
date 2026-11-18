@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,9 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sunerpy/requests"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // mteamCategoryMap maps M-Team category IDs to human-readable names
@@ -180,11 +182,14 @@ type MTorrentSearchData struct {
 	Total FlexInt           `json:"total"`
 }
 
-// MTorrentPromotionRule represents an additional promotion rule from M-Team API
+// MTorrentPromotionRule represents an additional promotion rule from M-Team API.
+// 接口里的促销规则没有状态字段，只能按起止时间判断是否生效；Categories、Teams 是适用范围，空列表表示全站。
 type MTorrentPromotionRule struct {
-	Discount  string `json:"discount"`
-	StartTime string `json:"startTime,omitempty"`
-	EndTime   string `json:"endTime,omitempty"`
+	Discount   string         `json:"discount"`
+	StartTime  string         `json:"startTime,omitempty"`
+	EndTime    string         `json:"endTime,omitempty"`
+	Categories MTorrentIDList `json:"categories"`
+	Teams      MTorrentIDList `json:"teams"`
 }
 
 // MallSingleFree represents a mall single free from M-Team API
@@ -192,6 +197,76 @@ type MallSingleFree struct {
 	Status    string `json:"status,omitempty"`
 	StartDate string `json:"startDate,omitempty"`
 	EndDate   string `json:"endDate,omitempty"`
+}
+
+// MTorrentID 是可能以字符串或数字出现的编号（例如种子的 team）。解不开时当作没有，不报错：
+// 新读取的字段不能让原本能解析的整页结果失败。
+type MTorrentID string
+
+// UnmarshalJSON 接受字符串或数字；null、对象、数组当作没有
+func (id *MTorrentID) UnmarshalJSON(data []byte) error {
+	v, _ := decodeMTorrentID(data)
+	*id = MTorrentID(v)
+	return nil
+}
+
+// MTorrentIDList 是促销规则里的编号列表（categories、teams），元素可能是字符串也可能是数字。
+// 解不开时不报错（一个字段异常不该让整页结果都解析失败），记为 Invalid：无法证明覆盖，促销不适用。
+type MTorrentIDList struct {
+	Values  []string
+	Invalid bool
+}
+
+// UnmarshalJSON 接受字符串或数字组成的数组；null 当作空列表
+func (l *MTorrentIDList) UnmarshalJSON(data []byte) error {
+	*l = MTorrentIDList{}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		l.Invalid = true
+		return nil
+	}
+	for _, r := range raw {
+		v, ok := decodeMTorrentID(r)
+		if !ok {
+			l.Invalid = true
+			continue
+		}
+		l.Values = append(l.Values, v)
+	}
+	return nil
+}
+
+// covers 报告范围是否覆盖 id：空列表表示全站适用；列表非空时 id 必须在列表里，id 缺失就无法证明覆盖。
+func (l MTorrentIDList) covers(id string) bool {
+	if l.Invalid {
+		return false
+	}
+	if len(l.Values) == 0 {
+		return true
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, v := range l.Values {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeMTorrentID 把字符串或数字形式的编号解成去掉首尾空白的字符串；其他形式返回 ok=false
+func decodeMTorrentID(data []byte) (string, bool) {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		return strings.TrimSpace(s), true
+	}
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err == nil {
+		return n.String(), true
+	}
+	return "", false
 }
 
 // MTorrentTorrent represents a torrent in M-Team API response
@@ -211,6 +286,11 @@ type MTorrentTorrent struct {
 		MallSingleFree  *MallSingleFree        `json:"mallSingleFree,omitempty"`
 	} `json:"status"`
 	Category string `json:"category"`
+	// Team 是制作组编号，用来判断促销规则的 teams 范围
+	Team MTorrentID `json:"team"`
+	// IMDb、Douban 是条目链接（或编号），用 NormalizeIMDbID、NormalizeDoubanID 规整
+	IMDb   string `json:"imdb"`
+	Douban string `json:"douban"`
 }
 
 // MTorrentUserInfo represents user info from M-Team API
@@ -254,6 +334,8 @@ type MTorrentDriver struct {
 	userAgent      string
 	useFailover    bool
 	siteDefinition *SiteDefinition
+	// now 是判断优惠是否生效用的时钟，测试用来固定时间；为空时用 time.Now
+	now func() time.Time
 }
 
 // MTorrentDriverConfig holds configuration for creating an M-Team driver
@@ -265,6 +347,8 @@ type MTorrentDriverConfig struct {
 	HTTPClient  *SiteHTTPClient // Use SiteHTTPClient instead of *http.Client
 	UserAgent   string
 	UseFailover bool // Enable multi-URL failover
+	// SiteID 是站点在 pt-tools 里注册的 ID：全局设置里的「站点代理」按它判定走不走代理
+	SiteID string
 }
 
 // NewMTorrentDriver creates a new M-Team driver
@@ -282,6 +366,7 @@ func NewMTorrentDriver(config MTorrentDriverConfig) *MTorrentDriver {
 			IdleConnTimeout:   30 * time.Second,
 			DisableKeepAlives: true,
 			UserAgent:         userAgent,
+			SiteID:            config.SiteID,
 		})
 	}
 
@@ -334,7 +419,17 @@ func (d *MTorrentDriver) GetSiteDefinition() *SiteDefinition {
 	return d.siteDefinition
 }
 
-// PrepareSearch converts a SearchQuery to an M-Team request
+// MTeamSectionNormal、MTeamSectionAdult 是 M-Team 搜索接口的 mode：综合区与成人区。
+const (
+	MTeamSectionNormal = "normal"
+	MTeamSectionAdult  = "adult"
+)
+
+// PrepareSearch converts a SearchQuery to an M-Team request.
+//
+// mode 取 query.Section，只认 normal 和 adult，空值或别的值都用 normal（综合区）。
+// 有意忽略 FreeOnly，不往请求里加 discount 筛选：单种免费（mallSingleFree）的种子本身的优惠不是 FREE，
+// 交给服务端按 discount 筛会把它漏掉；免费与否由 evaluateMTorrentDiscount 在本地判断。
 func (d *MTorrentDriver) PrepareSearch(query SearchQuery) (MTorrentRequest, error) {
 	pageSize := query.PageSize
 	if pageSize <= 0 {
@@ -346,8 +441,12 @@ func (d *MTorrentDriver) PrepareSearch(query SearchQuery) (MTorrentRequest, erro
 		pageNumber = 1
 	}
 
+	mode := MTeamSectionNormal
+	if query.Section == MTeamSectionAdult {
+		mode = MTeamSectionAdult
+	}
 	body := MTorrentSearchRequest{
-		Mode:       "normal",
+		Mode:       mode,
 		Keyword:    query.Keyword,
 		PageNumber: pageNumber,
 		PageSize:   pageSize,
@@ -426,11 +525,6 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 		"x-api-key":    d.APIKey,
 	}
 
-	// Debug log for download requests
-	if strings.Contains(req.Endpoint, "genDlToken") {
-		fmt.Printf("[DEBUG MTorrent] genDlToken request: URL=%s, ContentType=%s, Body=%s\n", fullURL, contentType, string(bodyBytes))
-	}
-
 	resp, err := d.httpClient.Post(ctx, fullURL, bodyBytes, headers)
 	if err != nil {
 		return MTorrentResponse{}, fmt.Errorf("execute request: %w", err)
@@ -441,9 +535,8 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 		StatusCode: resp.StatusCode,
 	}
 
-	// Debug log for download response
-	if strings.Contains(req.Endpoint, "genDlToken") {
-		fmt.Printf("[DEBUG MTorrent] genDlToken response: StatusCode=%d, Body=%s\n", resp.StatusCode, string(resp.Body))
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
 	}
 
 	// Check for authentication errors
@@ -451,8 +544,12 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 		return result, ErrInvalidCredentials
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", ErrRateLimited)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return result, &HTTPStatusError{Code: resp.StatusCode}
 	}
 
 	// Parse JSON response
@@ -480,22 +577,23 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 			searchData.Data[0].Name, searchData.Data[0].SmallDescr)
 	}
 
+	now := d.clock()
 	items := make([]TorrentItem, 0, len(searchData.Data))
 	for _, t := range searchData.Data {
-		discount, discountEndTime := parseMTorrentDiscountWithPromotionAndMallSingleFree(t.Status.Discount, t.Status.DiscountEndTime, t.Status.PromotionRule, t.Status.MallSingleFree)
 		item := TorrentItem{
-			ID:              t.ID,
-			Title:           t.Name,
-			Subtitle:        t.SmallDescr,
-			SizeBytes:       parseSize(t.Size),
-			Seeders:         t.Status.Seeders.Int(),
-			Leechers:        t.Status.Leechers.Int(),
-			Snatched:        t.Status.TimesCompleted.Int(),
-			SourceSite:      d.BaseURL,
-			Category:        getMTeamCategoryName(t.Category),
-			DiscountLevel:   discount,
-			DiscountEndTime: discountEndTime,
+			ID:         t.ID,
+			Title:      t.Name,
+			Subtitle:   t.SmallDescr,
+			SizeBytes:  parseSize(t.Size),
+			Seeders:    t.Status.Seeders.Int(),
+			Leechers:   t.Status.Leechers.Int(),
+			Snatched:   t.Status.TimesCompleted.Int(),
+			SourceSite: d.BaseURL,
+			Category:   getMTeamCategoryName(t.Category),
+			IMDbID:     NormalizeIMDbID(t.IMDb),
+			DoubanID:   NormalizeDoubanID(t.Douban),
 		}
+		applyMTorrentDiscount(&item, evaluateMTorrentDiscount(&t, now))
 
 		// Parse upload time
 		if t.CreatedDate != "" {
@@ -507,7 +605,7 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 		// Build download URL
 		// For M-Team sites, direct download is not possible, we set a proxy download URL
 		// The frontend should call /api/site/{siteId}/torrent/{id}/download for actual download
-		item.DownloadURL = fmt.Sprintf("/api/site/mteam/torrent/%s/download", t.ID)
+		item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%s/download", d.getSiteID(), t.ID)
 		// Build detail URL using web URL (not API URL)
 		item.URL = fmt.Sprintf("%s/detail/%s", d.WebURL, t.ID)
 
@@ -582,6 +680,13 @@ func (d *MTorrentDriver) ParseUserInfo(res MTorrentResponse) (UserInfo, error) {
 		}
 	}
 
+	// 最近登录：登录探测把它写进 API 登录时间
+	if userData.MemberStatus.LastLogin != "" {
+		if loginTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.MemberStatus.LastLogin); err == nil {
+			info.LastLogin = loginTime.Unix()
+		}
+	}
+
 	// Parse last access from lastBrowse
 	if userData.MemberStatus.LastBrowse != "" {
 		if accessTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.MemberStatus.LastBrowse); err == nil {
@@ -637,49 +742,115 @@ func (d *MTorrentDriver) PrepareDownload(torrentID string) (MTorrentRequest, err
 	}, nil
 }
 
+// rawURLRe 是原始响应里的地址：签名下载地址的 sign 参数本身就是凭证，写进错误前先脱敏。
+var rawURLRe = regexp.MustCompile(`https?://[^\s"'<>\\]+`)
+
+// sanitizeRawURLs 把原始响应文本里的地址换成脱敏后的样子（凭证参数打码），其余原样留着便于排查。
+func sanitizeRawURLs(raw string) string {
+	return rawURLRe.ReplaceAllStringFunc(raw, utils.SanitizeURL)
+}
+
 // ParseDownload extracts torrent file data from the response
 func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
+	return d.ParseDownloadContext(context.Background(), res)
+}
+
+// ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消（BaseSite 下载时用它）。
+func (d *MTorrentDriver) ParseDownloadContext(ctx context.Context, res MTorrentResponse) ([]byte, error) {
 	if !res.Code.IsSuccess() {
+		if mteamTorrentMissing(res.Message) {
+			return nil, fmt.Errorf("%w（M-Team：%s）", ErrTorrentNotFound, strings.TrimSpace(res.Message))
+		}
 		// Log raw response for debugging
 		rawBody := string(res.RawBody)
 		if len(rawBody) > 500 {
 			rawBody = rawBody[:500] + "..."
 		}
-		return nil, fmt.Errorf("API error: %s - %s (raw: %s)", res.Code.String(), res.Message, rawBody)
+		return nil, fmt.Errorf("API error: %s - %s (raw: %s)", res.Code.String(), sanitizeRawURLs(res.Message), sanitizeRawURLs(rawBody))
 	}
 
 	// M-Team returns the download URL directly as a string in the data field
 	// Example: {"code":"0","message":"SUCCESS","data":"https://api.m-team.cc/api/rss/dlv2?sign=..."}
 	var downloadURL string
 	if err := json.Unmarshal(res.Data, &downloadURL); err != nil {
-		return nil, fmt.Errorf("parse download URL: %w (raw: %s)", err, string(res.Data))
+		return nil, fmt.Errorf("parse download URL: %w (raw: %s)", err, sanitizeRawURLs(string(res.Data)))
 	}
 
 	if downloadURL == "" {
-		return nil, fmt.Errorf("empty download URL in response (data: %s)", string(res.Data))
+		return nil, fmt.Errorf("empty download URL in response (data: %s)", sanitizeRawURLs(string(res.Data)))
 	}
+	return d.fetchTorrentFile(ctx, downloadURL)
+}
 
-	// Debug log
+// mteamTorrentFetchTimeout 是取签名下载地址之后拉一次种子文件的超时；测试里会调小。
+var mteamTorrentFetchTimeout = 30 * time.Second
+
+// fetchTorrentFile 拉签名地址指向的种子文件：签名地址会跳到走 Cloudflare 的下载节点，连接被重置、超时时有发生，
+// 一时的错误按指数退避重拉同一个签名地址（见 retryTransient，不再调取下载令牌的接口），调用方取消时不再试。签名地址本身
+// 就是凭证（sign 参数），它跳转到的下载节点地址也带签名：日志和错误信息里只出现脱敏后的地址。
+func (d *MTorrentDriver) fetchTorrentFile(ctx context.Context, downloadURL string) ([]byte, error) {
+	safeURL := utils.SanitizeURL(downloadURL)
 	if DebugUserInfo {
-		fmt.Printf("[DEBUG MTorrent] Download URL: %s\n", downloadURL)
+		fmt.Printf("[DEBUG MTorrent] Download URL: %s\n", safeURL)
 	}
+	return retryTransient(ctx, nil, func() ([]byte, error) { return d.fetchTorrentOnce(ctx, downloadURL, safeURL) })
+}
 
-	// Fetch the actual torrent file using requests library
-	resp, err := requests.Get(downloadURL, requests.WithHeader("User-Agent", d.userAgent))
+// fetchTorrentOnce 拉一次种子文件。第二段请求同样走驱动的 HTTP 客户端（代理设置一致），每次设上限超时。
+func (d *MTorrentDriver) fetchTorrentOnce(ctx context.Context, downloadURL, safeURL string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, mteamTorrentFetchTimeout)
+	defer cancel()
+	resp, err := d.httpClient.Get(ctx, downloadURL, map[string]string{
+		"User-Agent": d.userAgent,
+		"Accept":     "application/x-bittorrent, */*",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("fetch torrent file: %w", err)
+		return nil, fmt.Errorf("fetch torrent file from %s: %w", safeURL, redactURLsInError(err))
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, downloadURL)
+		return nil, fmt.Errorf("%w fetching torrent from %s", &HTTPStatusError{Code: resp.StatusCode}, safeURL)
 	}
 
-	data := resp.Bytes()
+	data := resp.Body
 	if err := ValidateTorrentFile(data); err != nil {
-		return nil, fmt.Errorf("invalid torrent response from %s: size=%d, preview=%q, err=%w", downloadURL, len(data), torrentResponsePreview(data), err)
+		if apiErr := mteamDownloadAPIError(data); apiErr != nil {
+			return nil, apiErr
+		}
+		return nil, fmt.Errorf("invalid torrent response from %s: size=%d, preview=%q, err=%w", safeURL, len(data), torrentResponsePreview(data), err)
 	}
 
 	return data, nil
+}
+
+// mteamDownloadAPIError 认出下载节点在种子文件的位置上回的 API 错误，例如种子删了以后的
+// {"code":"1","data":null,"message":"種子未找到"}（2026-10-30 生产，IYUU 辅种）。种子不在了是 ErrTorrentNotFound：
+// 辅种不再为它重试；别的错误带上站点的原话与 code。不是这种回应时返回 nil。错误里不写下载地址（里面有账号的 uid）。
+func mteamDownloadAPIError(data []byte) error {
+	body := bytes.TrimSpace(data)
+	if len(body) == 0 || body[0] != '{' {
+		return nil
+	}
+	var r MTorrentResponse
+	if json.Unmarshal(body, &r) != nil || r.Code == "" || r.Code.IsSuccess() {
+		return nil
+	}
+	msg := strings.TrimSpace(r.Message)
+	if mteamTorrentMissing(msg) {
+		return fmt.Errorf("%w（M-Team：%s）", ErrTorrentNotFound, msg)
+	}
+	return fmt.Errorf("M-Team 没有给种子文件（code %s：%s）", r.Code.String(), sanitizeRawURLs(msg))
+}
+
+// mteamTorrentMissing 报告 M-Team 的回应是不是说这个种子不在了（繁体、简体与英文的说法）。
+func mteamTorrentMissing(message string) bool {
+	m := strings.ToLower(strings.TrimSpace(message))
+	for _, s := range []string{"種子未找到", "种子未找到", "種子不存在", "种子不存在", "torrent not found"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func torrentResponsePreview(data []byte) string {
@@ -733,46 +904,169 @@ func parseMTorrentDiscount(discount string) DiscountLevel {
 	}
 }
 
-func parseMTorrentDiscountWithPromotionAndMallSingleFree(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, mallSingleFree *MallSingleFree) (DiscountLevel, time.Time) {
-	return parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEndTime, promotion, mallSingleFree, time.Now())
+// M-Team 优惠的来源（TorrentItem.DiscountSource）
+const (
+	mteamSourceBase           = "base"
+	mteamSourcePromotionRule  = "promotion_rule"
+	mteamSourceMallSingleFree = "mall_single_free"
+)
+
+// mteamTimeLayout 是 M-Team 接口的时间格式：北京时间，不带时区
+const mteamTimeLayout = "2006-01-02 15:04:05"
+
+// mteamDiscount 是一条 M-Team 种子优惠的严格解析结果
+type mteamDiscount struct {
+	Level   DiscountLevel
+	EndTime time.Time // 零值：没有可信的结束时间
+	// Validity：免费时是 free_until 或 unknown，不是免费时是 not_free。
+	// M-Team 没有「长期有效」的明确标记，所以从不给 free_permanent。
+	Validity FreeValidity
+	Source   string // base、promotion_rule、mall_single_free；没有生效的优惠时为空
+	Err      string // 读取时遇到的问题（字段名: 问题类型），多条用「; 」连接
 }
 
+// mteamCandidate 是一条当前生效（或因时间无法解析而可能生效）的优惠
+type mteamCandidate struct {
+	level   DiscountLevel
+	end     time.Time // 零值：没有结束时间（缺失或无法解析）
+	trusted bool      // 起止时间都可信，且结束时间晚于现在
+	source  string
+}
+
+// better 报告 c 是否比 o 更该作为结果：下载计费比例低的优先；同比例时结束时间可信的优先；
+// 都可信时结束更晚的优先（免费期取最长的那段）；最后看优惠本身（2X 免费优于免费）。
+func (c mteamCandidate) better(o mteamCandidate) bool {
+	if cr, or := c.level.GetDownloadRatio(), o.level.GetDownloadRatio(); cr != or {
+		return cr < or
+	}
+	if c.trusted != o.trusted {
+		return c.trusted
+	}
+	if c.trusted && !c.end.Equal(o.end) {
+		return c.end.After(o.end)
+	}
+	return IsBetterDiscount(c.level, o.level)
+}
+
+// evaluateMTorrentDiscount 在 now 时严格解析一条种子的优惠。基础优惠、promotionRule、mallSingleFree 三者都看，
+// 只留下当前生效的（时间无法解析的算「可能生效」，但不可信），再按 better 选出结果。
+// 缺失或无法解析的结束时间不当作长期免费；基础优惠的结束时间已过就不再有效，不论哪一级。
+func evaluateMTorrentDiscount(t *MTorrentTorrent, now time.Time) mteamDiscount {
+	var notes []string
+	var cands []mteamCandidate
+
+	if level := parseMTorrentDiscount(t.Status.Discount); level != DiscountNone {
+		if end, active, trusted := mteamWindow("", "", "discountEndTime", t.Status.DiscountEndTime, now, &notes); active {
+			cands = append(cands, mteamCandidate{level: level, end: end, trusted: trusted, source: mteamSourceBase})
+		}
+	}
+
+	// promotionRule 没有状态字段：适用范围覆盖这条种子、且在起止时间内才算生效
+	if p := t.Status.PromotionRule; p != nil {
+		if level := parseMTorrentDiscount(p.Discount); level != DiscountNone && mteamPromotionCovers(p, t, &notes) {
+			end, active, trusted := mteamWindow("promotionRule.startTime", p.StartTime, "promotionRule.endTime", p.EndTime, now, &notes)
+			if active {
+				cands = append(cands, mteamCandidate{level: level, end: end, trusted: trusted, source: mteamSourcePromotionRule})
+			}
+		}
+	}
+
+	// 商城单种免费只认进行中（ONGOING）；没有结束时间同样是未知，不是长期免费
+	if m := t.Status.MallSingleFree; m != nil && strings.EqualFold(strings.TrimSpace(m.Status), "ONGOING") {
+		end, active, trusted := mteamWindow("mallSingleFree.startDate", m.StartDate, "mallSingleFree.endDate", m.EndDate, now, &notes)
+		if active {
+			cands = append(cands, mteamCandidate{level: DiscountFree, end: end, trusted: trusted, source: mteamSourceMallSingleFree})
+		}
+	}
+
+	result := mteamDiscount{Level: DiscountNone, Validity: FreeNotFree, Err: joinDiscountNotes(notes...)}
+	if len(cands) == 0 {
+		return result
+	}
+	best := cands[0]
+	for _, c := range cands[1:] {
+		if c.better(best) {
+			best = c
+		}
+	}
+	result.Level, result.EndTime, result.Source = best.level, best.end, best.source
+	switch {
+	case !IsFreeTorrent(best.level):
+		result.Validity = FreeNotFree
+	case best.trusted:
+		result.Validity = FreeUntil
+	default:
+		result.Validity = FreeUnknown
+	}
+	return result
+}
+
+// mteamWindow 按起止时间判断一条优惠在 now 时是否生效。空的起止时间表示这一端没有约束（没有结束时间
+// 不等于长期有效，只是结束时间未知）；非空但无法解析的时间记进 notes，这条优惠变成「可能生效、不可信」。
+// active=false 表示确定不生效：还没开始，或已经结束（结束时间不晚于 now）。
+func mteamWindow(startField, start, endField, end string, now time.Time, notes *[]string) (endAt time.Time, active, trusted bool) {
+	startAt, startErr := parseMTeamTime(start)
+	if startErr != nil {
+		*notes = append(*notes, DiscountTimeParseNote(startField))
+	}
+	endAt, endErr := parseMTeamTime(end)
+	if endErr != nil {
+		*notes = append(*notes, DiscountTimeParseNote(endField))
+	}
+	if !startAt.IsZero() && startAt.After(now) {
+		return time.Time{}, false, false
+	}
+	if !endAt.IsZero() && !endAt.After(now) {
+		return time.Time{}, false, false
+	}
+	return endAt, true, startErr == nil && endErr == nil && !endAt.IsZero()
+}
+
+// parseMTeamTime 解析 M-Team 的时间字段；空串返回零时间且没有错误（这一端没有约束）
+func parseMTeamTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	return ParseTimeInCST(mteamTimeLayout, value)
+}
+
+// mteamPromotionCovers 报告促销规则的适用范围是否覆盖这条种子；范围解不开时记下原因，当作不覆盖
+func mteamPromotionCovers(p *MTorrentPromotionRule, t *MTorrentTorrent, notes *[]string) bool {
+	if p.Categories.Invalid {
+		*notes = append(*notes, discountFormatParseNote("promotionRule.categories"))
+	}
+	if p.Teams.Invalid {
+		*notes = append(*notes, discountFormatParseNote("promotionRule.teams"))
+	}
+	return p.Categories.covers(t.Category) && p.Teams.covers(string(t.Team))
+}
+
+// applyMTorrentDiscount 把严格解析的结果写进 TorrentItem 的优惠字段
+func applyMTorrentDiscount(item *TorrentItem, d mteamDiscount) {
+	item.DiscountLevel = d.Level
+	item.DiscountEndTime = d.EndTime
+	item.DiscountValidity = d.Validity
+	item.DiscountSource = d.Source
+	item.DiscountErr = d.Err
+}
+
+// clock 返回判断优惠是否生效用的当前时间
+func (d *MTorrentDriver) clock() time.Time {
+	if d.now != nil {
+		return d.now()
+	}
+	return time.Now()
+}
+
+// parseMTorrentDiscountWithPromotionAndMallSingleFreeAt 只返回级别与结束时间（兼容旧调用）；
+// 有效性、来源与诊断说明见 evaluateMTorrentDiscount。不带种子的分类与制作组，有范围限制的促销不会生效。
 func parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, mallSingleFree *MallSingleFree, now time.Time) (DiscountLevel, time.Time) {
-	baseLevel := parseMTorrentDiscount(baseDiscount)
-	var baseEnd time.Time
-	if baseEndTime != "" {
-		baseEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", baseEndTime)
-	}
-
-	if promotion != nil && promotion.Discount != "" {
-		var promoStart, promoEnd time.Time
-		if promotion.StartTime != "" {
-			promoStart, _ = ParseTimeInCST("2006-01-02 15:04:05", promotion.StartTime)
-		}
-		if promotion.EndTime != "" {
-			promoEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", promotion.EndTime)
-		}
-
-		promoActive := (promoStart.IsZero() || !now.Before(promoStart)) && (promoEnd.IsZero() || now.Before(promoEnd))
-		if promoActive {
-			promoLevel := parseMTorrentDiscount(promotion.Discount)
-			if IsBetterDiscount(promoLevel, baseLevel) {
-				return promoLevel, promoEnd
-			}
-			if promoLevel == baseLevel && promoEnd.After(baseEnd) {
-				return promoLevel, promoEnd
-			}
-		}
-	} else if mallSingleFree != nil && mallSingleFree.Status == "ONGOING" && mallSingleFree.StartDate != "" && mallSingleFree.EndDate != "" {
-		var singleFreeStart, singleFreeEnd time.Time
-		singleFreeStart, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.StartDate)
-		singleFreeEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.EndDate)
-		if (singleFreeStart.IsZero() || !now.Before(singleFreeStart)) && (singleFreeEnd.IsZero() || now.Before(singleFreeEnd)) {
-			return DiscountFree, singleFreeEnd
-		}
-	}
-
-	return baseLevel, baseEnd
+	var t MTorrentTorrent
+	t.Status.Discount, t.Status.DiscountEndTime = baseDiscount, baseEndTime
+	t.Status.PromotionRule, t.Status.MallSingleFree = promotion, mallSingleFree
+	d := evaluateMTorrentDiscount(&t, now)
+	return d.Level, d.EndTime
 }
 
 // ============================================================================
@@ -813,6 +1107,17 @@ type MTorrentPeerStatResponse struct {
 		UploadCount  string `json:"uploadCount"`
 	} `json:"data"`
 }
+
+// 做种体积从个人页「目前做種」列表（/api/member/getUserTorrentList）各页加起来：每页的条数（M-Team 认 200，500 回「參數錯誤」），
+// 与最多读的页数。做种更多、超过上限时体积按没取到算（保存时沿用上一次的），不读一半就当总数。
+const (
+	mtorrentSeedingPageSize = 200
+	mtorrentMaxSeedingPages = 25
+)
+
+// mtorrentSeedingPageDelay 是读做种列表时每两页之间等的时间：2026-11-02 连着读两页，第 2 页回「請求過於頻繁」，
+// 隔 1 秒读完了 4 页。被限流的那一页等两倍的时间再读一次。测试里改成 0。
+var mtorrentSeedingPageDelay = 1500 * time.Millisecond
 
 // PrepareGetBonusPerHour prepares a request for fetching bonus per hour
 func (d *MTorrentDriver) PrepareGetBonusPerHour() (MTorrentRequest, error) {
@@ -954,6 +1259,116 @@ func (d *MTorrentDriver) GetPeerStatistics(ctx context.Context) (*PeerStatistics
 	return d.ParsePeerStatistics(res)
 }
 
+// MTorrentPeerStatusResponse 是 /api/tracker/myPeerStatus 的返回：网页页头「當前活動」后面的做种数与下载数
+type MTorrentPeerStatusResponse struct {
+	Data struct {
+		Seeder  json.Number `json:"seeder"`
+		Leecher json.Number `json:"leecher"`
+	} `json:"data"`
+}
+
+// GetPeerStatus 取正在做种与正在下载的种子数（/api/tracker/myPeerStatus）
+func (d *MTorrentDriver) GetPeerStatus(ctx context.Context) (seeder, leecher int, err error) {
+	res, err := d.Execute(ctx, MTorrentRequest{Endpoint: "/api/tracker/myPeerStatus", Method: "POST", Body: map[string]any{}})
+	if err != nil {
+		return 0, 0, err
+	}
+	if !res.Code.IsSuccess() {
+		return 0, 0, fmt.Errorf("%w: %s - %s", ErrPeerStatsUnavailable, res.Code.String(), res.Message)
+	}
+	var status MTorrentPeerStatusResponse
+	if err = json.Unmarshal(res.RawBody, &status); err != nil {
+		return 0, 0, fmt.Errorf("parse peer status: %w", err)
+	}
+	s, err := status.Data.Seeder.Int64()
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse seeder %q: %w", status.Data.Seeder, err)
+	}
+	l, err := status.Data.Leecher.Int64()
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse leecher %q: %w", status.Data.Leecher, err)
+	}
+	return int(s), int(l), nil
+}
+
+// MTorrentUserTorrentListResponse 是 /api/member/getUserTorrentList 的返回（个人页「目前做種」用的接口）
+type MTorrentUserTorrentListResponse struct {
+	Data struct {
+		Total      json.Number `json:"total"`
+		TotalPages json.Number `json:"totalPages"`
+		Data       []struct {
+			Torrent struct {
+				Size json.Number `json:"size"`
+			} `json:"torrent"`
+		} `json:"data"`
+	} `json:"data"`
+}
+
+// GetSeedingSize 把个人页「目前做種」列表（type=SEEDING）各页的种子体积加起来，返回做种数与体积。
+// 个人页「保種總體積」用的 /api/member/seedingStats 不认 API Key（401），myPeerStatistics 对 API Key 全返回 0，只能这样算。
+// 页数超过 mtorrentMaxSeedingPages 时报错，不读一半就当总数。
+func (d *MTorrentDriver) GetSeedingSize(ctx context.Context, userID string) (count int, size int64, err error) {
+	uid, err := strconv.ParseInt(strings.TrimSpace(userID), 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("seeding list needs the user id, got %q: %w", userID, err)
+	}
+	readPage := func(page int) (MTorrentResponse, error) {
+		return d.Execute(ctx, MTorrentRequest{
+			Endpoint: "/api/member/getUserTorrentList",
+			Method:   "POST",
+			Body:     map[string]any{"userid": uid, "type": "SEEDING", "pageNumber": page, "pageSize": mtorrentSeedingPageSize},
+		})
+	}
+	for page := 1; ; page++ {
+		if page > 1 && !sleepContext(ctx, mtorrentSeedingPageDelay) {
+			return 0, 0, fmt.Errorf("seeding list page %d: %w", page, ctx.Err())
+		}
+		res, err := readPage(page)
+		if err == nil && !res.Code.IsSuccess() && mtorrentRateLimited(res) {
+			if !sleepContext(ctx, 2*mtorrentSeedingPageDelay) {
+				return 0, 0, fmt.Errorf("seeding list page %d: %w", page, ctx.Err())
+			}
+			res, err = readPage(page)
+		}
+		if err != nil {
+			return 0, 0, fmt.Errorf("seeding list page %d: %w", page, err)
+		}
+		if !res.Code.IsSuccess() {
+			return 0, 0, fmt.Errorf("seeding list page %d: %s - %s", page, res.Code.String(), res.Message)
+		}
+		var list MTorrentUserTorrentListResponse
+		if err = json.Unmarshal(res.RawBody, &list); err != nil {
+			return 0, 0, fmt.Errorf("parse seeding list page %d: %w", page, err)
+		}
+		pages, err := list.Data.TotalPages.Int64()
+		if err != nil {
+			return 0, 0, fmt.Errorf("parse seeding list totalPages %q: %w", list.Data.TotalPages, err)
+		}
+		if pages > mtorrentMaxSeedingPages {
+			return 0, 0, fmt.Errorf("seeding list has %d pages, more than %d", pages, mtorrentMaxSeedingPages)
+		}
+		for _, row := range list.Data.Data {
+			n, err := row.Torrent.Size.Int64()
+			if err != nil {
+				return 0, 0, fmt.Errorf("parse torrent size %q: %w", row.Torrent.Size, err)
+			}
+			size += n
+		}
+		if int64(page) >= pages || len(list.Data.Data) == 0 {
+			total, err := list.Data.Total.Int64()
+			if err != nil {
+				return 0, 0, fmt.Errorf("parse seeding list total %q: %w", list.Data.Total, err)
+			}
+			return int(total), size, nil
+		}
+	}
+}
+
+// mtorrentRateLimited 报告 M-Team 回的是不是「請求過於頻繁」（返回码 4）
+func mtorrentRateLimited(res MTorrentResponse) bool {
+	return strings.Contains(res.Message, "頻繁") || strings.Contains(res.Message, "频繁")
+}
+
 // GetUserInfo fetches complete user information including extended stats
 // Uses parallel requests for independent API calls to improve performance
 func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
@@ -962,7 +1377,8 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 	var info UserInfo
 	var bonusPerHour float64
 	var unread, total int
-	var peerStats *PeerStatistics
+	var seeder, leecher int
+	var bonusErr, messageErr, statusErr error
 	var mu sync.Mutex
 
 	// Use errgroup for cleaner parallel execution with error handling
@@ -991,37 +1407,27 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 		return nil
 	})
 
-	// 2. Get bonus per hour (non-critical - errors are ignored)
+	// 2-4 不是必需的：没取到时整次不失败，按没取到的字段交回去（*PartialUserInfoError），保存时沿用上一次的
 	g.Go(func() error {
 		bonus, err := d.GetBonusPerHour(gctx)
-		if err == nil {
-			mu.Lock()
-			bonusPerHour = bonus
-			mu.Unlock()
-		}
-		return nil // Don't fail the whole operation
-	})
-
-	// 3. Get unread message count (non-critical)
-	g.Go(func() error {
-		u, t, err := d.GetUnreadMessageCount(gctx)
-		if err == nil {
-			mu.Lock()
-			unread = u
-			total = t
-			mu.Unlock()
-		}
+		mu.Lock()
+		bonusPerHour, bonusErr = bonus, err
+		mu.Unlock()
 		return nil
 	})
-
-	// 4. Get peer statistics (non-critical)
 	g.Go(func() error {
-		stats, err := d.GetPeerStatistics(gctx)
-		if err == nil && stats != nil {
-			mu.Lock()
-			peerStats = stats
-			mu.Unlock()
-		}
+		u, t, err := d.GetUnreadMessageCount(gctx)
+		mu.Lock()
+		unread, total, messageErr = u, t, err
+		mu.Unlock()
+		return nil
+	})
+	// 做种数与下载数：网页页头「當前活動」用的 myPeerStatus。myPeerStatistics 现在（2026-11）对 API Key 全返回 0
+	g.Go(func() error {
+		s, l, err := d.GetPeerStatus(gctx)
+		mu.Lock()
+		seeder, leecher, statusErr = s, l, err
+		mu.Unlock()
 		return nil
 	})
 
@@ -1030,24 +1436,54 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 		return UserInfo{}, err
 	}
 
-	// Merge results
-	info.BonusPerHour = bonusPerHour
-	info.UnreadMessageCount = unread
-	info.TotalMessageCount = total
+	var missing []string
+	var firstErr error
+	miss := func(err error, fields ...string) {
+		missing = append(missing, fields...)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if bonusErr != nil {
+		miss(bonusErr, "bonusPerHour")
+	} else {
+		info.BonusPerHour = bonusPerHour
+	}
+	if messageErr != nil {
+		miss(messageErr, "messageCount")
+	} else {
+		info.UnreadMessageCount = unread
+		info.TotalMessageCount = total
+	}
+	if statusErr != nil {
+		miss(statusErr, "leeching")
+	} else {
+		info.Seeding, info.SeederCount = seeder, seeder
+		info.Leeching, info.LeecherCount = leecher, leecher
+	}
 
-	if peerStats != nil {
-		info.SeederCount = peerStats.SeederCount
-		info.SeederSize = peerStats.SeederSize
-		info.LeecherCount = peerStats.LeecherCount
-		info.LeecherSize = peerStats.LeecherSize
-		info.Seeding = peerStats.SeederCount
-		info.Leeching = peerStats.LeecherCount
+	// 做种体积：个人页「目前做種」列表各页加起来，要用户编号，所以等个人资料取到以后再取。没在做种时不用读
+	if statusErr != nil || seeder > 0 {
+		count, size, err := d.GetSeedingSize(ctx, info.UserID)
+		switch {
+		case err != nil:
+			miss(err, "seederSize")
+		default:
+			info.SeederSize = size
+			if statusErr != nil {
+				// 做种数没取到：用列表的总条数
+				info.Seeding, info.SeederCount = count, count
+			}
+		}
 	}
 
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] MTorrent GetUserInfo completed in %v\n", time.Since(startTime))
 	}
 
+	if len(missing) > 0 {
+		return info, &PartialUserInfoError{Missing: missing, Err: firstErr}
+	}
 	return info, nil
 }
 
@@ -1072,17 +1508,20 @@ func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _, _ string
 		return nil, fmt.Errorf("parse torrent detail: %w", err)
 	}
 
-	discount, discountEndTime := parseMTorrentDiscountWithPromotionAndMallSingleFree(detail.Status.Discount, detail.Status.DiscountEndTime, detail.Status.PromotionRule, detail.Status.MallSingleFree)
+	// 详情是实时请求：取得数据的时间既是判断优惠是否生效的时间，也是 FetchedAt
+	fetchedAt := d.clock()
 	item := &TorrentItem{
-		ID:              detail.ID,
-		Title:           detail.Name,
-		Seeders:         int(detail.Status.Seeders),
-		Leechers:        int(detail.Status.Leechers),
-		Snatched:        int(detail.Status.TimesCompleted),
-		SourceSite:      d.getSiteID(),
-		DiscountLevel:   discount,
-		DiscountEndTime: discountEndTime,
+		ID:         detail.ID,
+		Title:      detail.Name,
+		Seeders:    int(detail.Status.Seeders),
+		Leechers:   int(detail.Status.Leechers),
+		Snatched:   int(detail.Status.TimesCompleted),
+		SourceSite: d.getSiteID(),
+		IMDbID:     NormalizeIMDbID(detail.IMDb),
+		DoubanID:   NormalizeDoubanID(detail.Douban),
+		FetchedAt:  fetchedAt.UTC(),
 	}
+	applyMTorrentDiscount(item, evaluateMTorrentDiscount(&detail, fetchedAt))
 
 	if detail.SmallDescr != "" {
 		item.Tags = []string{detail.SmallDescr}
@@ -1125,6 +1564,7 @@ func createMTorrentSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 		BaseURL:     config.BaseURL,
 		APIKey:      opts.APIKey,
 		LoginCookie: opts.Cookie,
+		SiteID:      config.ID,
 	})
 
 	if siteDef != nil {

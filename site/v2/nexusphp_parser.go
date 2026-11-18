@@ -21,7 +21,15 @@ type NexusPHPParserConfig struct {
 	EndTimeSelector  string
 	SizeSelector     string
 	SizeRegex        string
+	IMDbRegex        string
+	DoubanRegex      string
 }
+
+// 详情页里 IMDb 与豆瓣链接的默认格式（链接上或简介正文里，如「◎IMDb链接」「◎豆瓣链接」）
+const (
+	defaultIMDbRegex   = `imdb\.com/title/(tt\d{5,10})`
+	defaultDoubanRegex = `movie\.douban\.com/subject/(\d{4,12})`
+)
 
 // DefaultNexusPHPParserConfig 返回默认配置，适用于大多数 NexusPHP 站点
 func DefaultNexusPHPParserConfig() NexusPHPParserConfig {
@@ -36,6 +44,8 @@ func DefaultNexusPHPParserConfig() NexusPHPParserConfig {
 		EndTimeSelector:  "h1 span[title]",
 		SizeSelector:     "td.rowhead:contains('基本信息')",
 		SizeRegex:        `大小：[^\d]*([\d.]+)\s*(GB|MB|KB|TB)`,
+		IMDbRegex:        defaultIMDbRegex,
+		DoubanRegex:      defaultDoubanRegex,
 	}
 }
 
@@ -66,7 +76,11 @@ type TorrentDetailInfo struct {
 	SizeMB        float64
 	DiscountLevel DiscountLevel
 	DiscountEnd   time.Time
-	HasHR         bool
+	// DiscountErr 是读取优惠时遇到的问题：有优惠、结束时间元素也在，但值无法解析（只写字段名与错误类型）
+	DiscountErr string
+	HasHR       bool
+	IMDbID      string
+	DoubanID    string
 }
 
 // NexusPHPDetailParser 接口定义
@@ -80,8 +94,10 @@ type NexusPHPDetailParser interface {
 
 // NexusPHPParser 通用 NexusPHP 详情页解析器
 type NexusPHPParser struct {
-	config    NexusPHPParserConfig
-	sizeRegex *regexp.Regexp
+	config      NexusPHPParserConfig
+	sizeRegex   *regexp.Regexp
+	imdbRegex   *regexp.Regexp
+	doubanRegex *regexp.Regexp
 }
 
 // NewNexusPHPParser 创建通用解析器
@@ -90,9 +106,15 @@ func NewNexusPHPParser(options ...NexusPHPParserOption) *NexusPHPParser {
 	for _, opt := range options {
 		opt(&config)
 	}
+	return newNexusPHPParser(config)
+}
+
+func newNexusPHPParser(config NexusPHPParserConfig) *NexusPHPParser {
 	return &NexusPHPParser{
-		config:    config,
-		sizeRegex: regexp.MustCompile(config.SizeRegex),
+		config:      config,
+		sizeRegex:   regexp.MustCompile(config.SizeRegex),
+		imdbRegex:   regexp.MustCompile(config.IMDbRegex),
+		doubanRegex: regexp.MustCompile(config.DoubanRegex),
 	}
 }
 
@@ -133,11 +155,14 @@ func NewNexusPHPParserFromDefinition(def *SiteDefinition) *NexusPHPParser {
 	if dp.SizeRegex != "" {
 		config.SizeRegex = dp.SizeRegex
 	}
-
-	return &NexusPHPParser{
-		config:    config,
-		sizeRegex: regexp.MustCompile(config.SizeRegex),
+	if dp.IMDbRegex != "" {
+		config.IMDbRegex = dp.IMDbRegex
 	}
+	if dp.DoubanRegex != "" {
+		config.DoubanRegex = dp.DoubanRegex
+	}
+
+	return newNexusPHPParser(config)
 }
 
 func (p *NexusPHPParser) ParseTitleAndID(doc *goquery.Selection) (title, torrentID string) {
@@ -159,6 +184,12 @@ func valueOrText(s *goquery.Selection, discountMapping map[string]DiscountLevel)
 	return stripTrailingPromotion(text, discountMapping)
 }
 
+// promotionTimeLeftPattern 匹配促销标记后面的剩余时间。上游 NexusPHP 详情页 h1 写成「标题&nbsp;&nbsp;&nbsp;[免费] 剩余时间：1天17时」
+// （functions.php 的 get_torrent_promotion_append，text_will_end_in：简体「剩余时间：」、繁体「剩餘時間：」、英文「 will end in 」）；
+// 有的站点写「优惠剩余时间」。
+var promotionTimeLeftPattern = regexp.MustCompile(`^(?:优惠|優惠)?(?:剩余时间|剩餘時間)|^(?i:will end in)`)
+
+// stripTrailingPromotion 去掉标题文字末尾的促销标记「[免费]」，限时促销时连同后面的剩余时间一起去掉。
 func stripTrailingPromotion(text string, discountMapping map[string]DiscountLevel) string {
 	runes := []rune(text)
 	for start := 0; start < len(runes); {
@@ -172,9 +203,12 @@ func stripTrailingPromotion(text string, discountMapping map[string]DiscountLeve
 			end++
 		}
 		suffix := strings.TrimSpace(string(runes[end:]))
-		if strings.HasPrefix(suffix, "[") && strings.HasSuffix(suffix, "]") &&
-			isKnownPromotionLabel(suffix[1:len(suffix)-1], discountMapping) {
-			return strings.TrimSpace(string(runes[:start]))
+		if label, rest, ok := strings.Cut(suffix, "]"); ok && strings.HasPrefix(label, "[") &&
+			isKnownPromotionLabel(label[1:], discountMapping) {
+			rest = strings.TrimSpace(rest)
+			if rest == "" || promotionTimeLeftPattern.MatchString(rest) {
+				return strings.TrimSpace(string(runes[:start]))
+			}
 		}
 		start = end
 	}
@@ -231,6 +265,13 @@ func renderedPromotionAliases(level DiscountLevel) []string {
 }
 
 func (p *NexusPHPParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, time.Time) {
+	discount, endTime, _ := p.parseDiscount(doc)
+	return discount, endTime
+}
+
+// parseDiscount 返回优惠级别、结束时间与读取问题。有优惠、结束时间元素的 title 非空却无法解析时，
+// 结束时间留空并返回诊断说明——不能悄悄当成「没有结束时间」。没有优惠时结束时间无关，不记问题。
+func (p *NexusPHPParser) parseDiscount(doc *goquery.Selection) (DiscountLevel, time.Time, string) {
 	discount := DiscountNone
 	doc.Find(p.config.DiscountSelector).EachWithBreak(func(_ int, el *goquery.Selection) bool {
 		class, exists := el.Attr("class")
@@ -246,14 +287,18 @@ func (p *NexusPHPParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, t
 		return true
 	})
 
-	var endTime time.Time
-	if attr := doc.Find(p.config.EndTimeSelector).First().AttrOr("title", ""); attr != "" {
-		if t, err := ParseTimeInCST(p.config.TimeLayout, attr); err == nil {
-			endTime = t
-		}
+	value := strings.TrimSpace(doc.Find(p.config.EndTimeSelector).First().AttrOr("title", ""))
+	if value == "" {
+		return discount, time.Time{}, ""
 	}
-
-	return discount, endTime
+	endTime, err := ParseTimeInCST(p.config.TimeLayout, value)
+	if err != nil {
+		if discount == DiscountNone {
+			return discount, time.Time{}, ""
+		}
+		return discount, time.Time{}, DiscountTimeParseNote("discountEndTime")
+	}
+	return discount, endTime, ""
 }
 
 func (p *NexusPHPParser) ParseHR(doc *goquery.Selection) bool {
@@ -291,16 +336,35 @@ func (p *NexusPHPParser) ParseSizeMB(doc *goquery.Selection) float64 {
 	return sizeMB
 }
 
+// ParseExternalIDs 在详情页 HTML 里找 IMDb 与豆瓣编号（各取第一处匹配），并规整成 tt… 与数字编号。
+func (p *NexusPHPParser) ParseExternalIDs(doc *goquery.Selection) (imdbID, doubanID string) {
+	html, err := doc.Html()
+	if err != nil {
+		return "", ""
+	}
+	if m := p.imdbRegex.FindStringSubmatch(html); len(m) > 1 {
+		imdbID = NormalizeIMDbID(m[1])
+	}
+	if m := p.doubanRegex.FindStringSubmatch(html); len(m) > 1 {
+		doubanID = NormalizeDoubanID(m[1])
+	}
+	return imdbID, doubanID
+}
+
 func (p *NexusPHPParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo {
 	title, torrentID := p.ParseTitleAndID(doc)
-	discount, endTime := p.ParseDiscount(doc)
+	discount, endTime, discountErr := p.parseDiscount(doc)
+	imdbID, doubanID := p.ParseExternalIDs(doc)
 	return &TorrentDetailInfo{
 		TorrentID:     torrentID,
 		Title:         title,
 		SizeMB:        p.ParseSizeMB(doc),
 		DiscountLevel: discount,
 		DiscountEnd:   endTime,
+		DiscountErr:   discountErr,
 		HasHR:         p.ParseHR(doc),
+		IMDbID:        imdbID,
+		DoubanID:      doubanID,
 	}
 }
 

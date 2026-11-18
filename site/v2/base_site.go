@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -122,8 +123,8 @@ func (b *BaseSite[Req, Res]) Search(ctx context.Context, query SearchQuery) ([]T
 		return nil, fmt.Errorf("prepare search: %w", err)
 	}
 
-	// Execute request
-	res, err := b.driver.Execute(ctx, req)
+	// Execute request：一时的错误（网络、5xx）按指数退避再发，每次重试先等限速的令牌（见 retryTransient）
+	res, err := retryTransient(ctx, b.limiter.Wait, func() (Res, error) { return b.driver.Execute(ctx, req) })
 	if err != nil {
 		b.logger.Error("Failed to execute search request", zap.Error(err))
 		return nil, fmt.Errorf("execute search: %w", err)
@@ -162,9 +163,12 @@ func (b *BaseSite[Req, Res]) GetUserInfo(ctx context.Context) (UserInfo, error) 
 	b.logger.Debug("Fetching user info", zap.String("site", b.name))
 
 	// Delegate to driver which handles all API calls
-	info, err := b.driver.GetUserInfo(ctx)
-	if err != nil {
-		b.logger.Error("Failed to fetch user info", zap.Error(err))
+	info, err := b.getUserInfo(ctx)
+	// 只取到一部分（*PartialUserInfoError）时把取到的部分一起交回去，由 UserInfoService 补上缺的字段再保存；
+	// 失败的原因由调用方记（UserInfoService 一次失败只记一行）
+	var partial *PartialUserInfoError
+	if err != nil && !errors.As(err, &partial) {
+		b.logger.Debug("Failed to fetch user info", zap.Error(err))
 		return UserInfo{}, fmt.Errorf("get user info: %w", err)
 	}
 
@@ -176,10 +180,28 @@ func (b *BaseSite[Req, Res]) GetUserInfo(ctx context.Context) (UserInfo, error) 
 		"User info fetched",
 		zap.String("site", b.name),
 		zap.String("username", info.Username),
+		zap.Bool("partial", partial != nil),
 		zap.Duration("duration", time.Since(startTime)),
 	)
 
+	if partial != nil {
+		return info, fmt.Errorf("get user info: %w", err)
+	}
 	return info, nil
+}
+
+// userInfoPageRetrier 是取用户信息时自己按页重试的驱动（有站点定义的 NexusPHP 站点，见 fetchUserInfoPage）。
+type userInfoPageRetrier interface {
+	retriesUserInfoPages() bool
+}
+
+// getUserInfo 交给驱动取用户信息。自己按页重试的驱动直接取；别的驱动（M-Team、Rousi 等走 API 的站点）一次取完，
+// 遇到一时的错误时整次按指数退避重试，每次重试先等限速的令牌（见 retryTransient）。
+func (b *BaseSite[Req, Res]) getUserInfo(ctx context.Context) (UserInfo, error) {
+	if r, ok := any(b.driver).(userInfoPageRetrier); ok && r.retriesUserInfoPages() {
+		return b.driver.GetUserInfo(ctx)
+	}
+	return retryTransient(ctx, b.limiter.Wait, func() (UserInfo, error) { return b.driver.GetUserInfo(ctx) })
 }
 
 // Download downloads a torrent file by ID
@@ -188,13 +210,35 @@ func (b *BaseSite[Req, Res]) Download(ctx context.Context, torrentID string) ([]
 	if err := b.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit: %w", err)
 	}
+	return b.download(ctx, torrentID)
+}
 
+// selfDownloader 是自己按种子编号取种子文件的驱动：要的东西不在 PrepareDownload 那一个请求里。HDDolby 的下载地址要带
+// downhash（只在搜索结果里）或者用 Cookie 下载，PrepareDownload 只给得出 /download.php?id=，站点回的是登录页
+// （2026-11-02 辅种）。BaseSite 下载时驱动实现了它就交给它。
+type selfDownloader interface {
+	Download(ctx context.Context, torrentID string) ([]byte, error)
+}
+
+// download 执行一次下载，不取限速令牌；调用方负责先 limiter.Wait，保证一次下载只消耗一个令牌。
+func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]byte, error) {
 	startTime := time.Now()
 	b.logger.Debug(
 		"Downloading torrent",
 		zap.String("site", b.name),
 		zap.String("torrentID", torrentID),
 	)
+
+	if sd, ok := any(b.driver).(selfDownloader); ok {
+		// 一时的错误（网络、5xx）按指数退避再下，每次重试先等限速的令牌（同 DownloadWithHash）
+		data, err := retryTransient(ctx, b.limiter.Wait, func() ([]byte, error) { return sd.Download(ctx, torrentID) })
+		if err != nil {
+			b.logDownloadFailure(torrentID, err)
+			return nil, fmt.Errorf("download: %w", err)
+		}
+		b.logDownloaded(torrentID, len(data), startTime)
+		return data, nil
+	}
 
 	// Prepare request
 	req, err := b.driver.PrepareDownload(torrentID)
@@ -203,29 +247,46 @@ func (b *BaseSite[Req, Res]) Download(ctx context.Context, torrentID string) ([]
 		return nil, fmt.Errorf("prepare download: %w", err)
 	}
 
-	// Execute request
-	res, err := b.driver.Execute(ctx, req)
+	// Execute request：一时的错误（网络、5xx）按指数退避再发，每次重试先等限速的令牌（见 retryTransient）
+	res, err := retryTransient(ctx, b.limiter.Wait, func() (Res, error) { return b.driver.Execute(ctx, req) })
 	if err != nil {
 		b.logger.Error("Failed to execute download request", zap.Error(err))
 		return nil, fmt.Errorf("execute download: %w", err)
 	}
 
-	// Parse response
-	data, err := b.driver.ParseDownload(res)
+	// Parse response（两段式下载的驱动用带 ctx 的版本，第二段请求跟着调用方取消）
+	var data []byte
+	if p, ok := any(b.driver).(ContextDownloadParser[Res]); ok {
+		data, err = p.ParseDownloadContext(ctx, res)
+	} else {
+		data, err = b.driver.ParseDownload(res)
+	}
 	if err != nil {
-		b.logger.Error("Failed to parse download response", zap.Error(err))
+		b.logDownloadFailure(torrentID, err)
 		return nil, fmt.Errorf("parse download: %w", err)
 	}
 
+	b.logDownloaded(torrentID, len(data), startTime)
+	return data, nil
+}
+
+// logDownloadFailure 记下没下到种子的原因。站点上已经没有这个种子（删了；IYUU 辅种常遇到）是站点的状态不是故障，记警告。
+func (b *BaseSite[Req, Res]) logDownloadFailure(torrentID string, err error) {
+	if errors.Is(err, ErrTorrentNotFound) {
+		b.logger.Warn("Torrent not found on site", zap.String("torrentID", torrentID), zap.Error(err))
+		return
+	}
+	b.logger.Error("Failed to parse download response", zap.String("torrentID", torrentID), zap.Error(err))
+}
+
+func (b *BaseSite[Req, Res]) logDownloaded(torrentID string, size int, startTime time.Time) {
 	b.logger.Info(
 		"Torrent downloaded",
 		zap.String("site", b.name),
 		zap.String("torrentID", torrentID),
-		zap.Int("size", len(data)),
+		zap.Int("size", size),
 		zap.Duration("duration", time.Since(startTime)),
 	)
-
-	return data, nil
 }
 
 // Close releases any resources held by the site
@@ -236,6 +297,14 @@ func (b *BaseSite[Req, Res]) Close() error {
 	b.loggedIn = false
 	b.logger.Info("Site closed", zap.String("site", b.name))
 	return nil
+}
+
+// CurrentCookie 是驱动现在用的那组 Cookie（续期过就是换发后的，见 session_cookies.go）；驱动没有续期会话时 ok 为假。
+func (b *BaseSite[Req, Res]) CurrentCookie() (string, bool) {
+	if h, ok := any(b.driver).(SessionCookieHolder); ok {
+		return h.CurrentCookie()
+	}
+	return "", false
 }
 
 // GetDriver returns the underlying driver (for testing purposes)
@@ -255,9 +324,41 @@ func (b *BaseSite[Req, Res]) DownloadWithHash(ctx context.Context, torrentID, ha
 	}
 
 	if hd, ok := any(b.driver).(HashDownloader); ok {
-		return hd.DownloadWithHash(ctx, torrentID, hash)
+		// 一时的错误（网络、5xx）按指数退避再下，每次重试先等限速的令牌
+		return retryTransient(ctx, b.limiter.Wait, func() ([]byte, error) { return hd.DownloadWithHash(ctx, torrentID, hash) })
 	}
-	return b.Download(ctx, torrentID)
+	// 上面已取过令牌，回退路径不能再走 Download，否则一次下载会等两次限速。
+	return b.download(ctx, torrentID)
+}
+
+// Subtitles 是这个站点的字幕（驱动实现了 SubtitleProvider 时；不支持时为 nil）：每次请求先等限速的令牌，
+// 一时的错误（网络、5xx）按指数退避再发，重试前同样先等令牌（同下载种子）。
+func (b *BaseSite[Req, Res]) Subtitles() SubtitleProvider {
+	p, ok := any(b.driver).(SubtitleProvider)
+	if !ok {
+		return nil
+	}
+	return limitedSubtitles{p: p, wait: b.limiter.Wait}
+}
+
+// limitedSubtitles 给驱动的字幕请求加上站点的限速与重试（见 BaseSite.Subtitles）。
+type limitedSubtitles struct {
+	p    SubtitleProvider
+	wait func(context.Context) error
+}
+
+func (l limitedSubtitles) ListSubtitles(ctx context.Context, torrentID string) ([]Subtitle, error) {
+	if err := l.wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit: %w", err)
+	}
+	return retryTransient(ctx, l.wait, func() ([]Subtitle, error) { return l.p.ListSubtitles(ctx, torrentID) })
+}
+
+func (l limitedSubtitles) DownloadSubtitle(ctx context.Context, sub Subtitle) (SubtitleFile, error) {
+	if err := l.wait(ctx); err != nil {
+		return SubtitleFile{}, fmt.Errorf("rate limit: %w", err)
+	}
+	return retryTransient(ctx, l.wait, func() (SubtitleFile, error) { return l.p.DownloadSubtitle(ctx, sub) })
 }
 
 func (b *BaseSite[Req, Res]) GetDetailFetcher() TorrentDetailFetcher {

@@ -1,12 +1,16 @@
 import { GITHUB_NEW_ISSUE_URL } from "../../core/constants";
 import { getMessages, t } from "../../core/i18n";
 import type { CollectionSession } from "../../core/types";
+import { sanitizeUrl } from "../collector/sanitizer";
 
 export function generateIssueBody(session: CollectionSession): string {
   const zh = getMessages("zh-CN");
   const en = getMessages("en-US");
   const bi = (key: keyof typeof zh): string => `${zh[key]} / ${en[key]}`;
-  const pageTypes = session.pages.map((page) => `- ${page.pageType}: ${page.url}`).join("\n");
+  // Issue 是公开的：页面地址里的 passkey 等凭证要先去掉
+  const pageTypes = session.pages
+    .map((page) => `- ${page.pageType}: ${sanitizeUrl(page.url)}`)
+    .join("\n");
   const timestamp = new Date().toISOString();
 
   return [

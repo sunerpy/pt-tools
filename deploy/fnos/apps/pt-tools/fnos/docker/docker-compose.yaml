@@ -1,0 +1,21 @@
+services:
+  pt-tools:
+    image: ${DOCKER_MIRROR}docker.io/sunerpy/pt-tools:${VERSION}
+    container_name: pt-tools
+    ports:
+      - "${TRIM_SERVICE_PORT}:8080"
+    volumes:
+      # 数据库、加密密钥 secret.key、日志与暂存种子都在这里；卸载时选择保留数据即可在重装后继续使用
+      - ${TRIM_PKGVAR:?}/data:/app/.pt-tools
+    environment:
+      - TZ=Asia/Shanghai
+      - PT_HOST=0.0.0.0
+      - PT_PORT=8080
+      - PUID=${TRIM_UID}
+      - PGID=${TRIM_GID}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped

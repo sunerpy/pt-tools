@@ -1,0 +1,688 @@
+package organize
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/sunerpy/pt-tools/internal/events"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+)
+
+func (e *env) historyCount(hash string) int64 {
+	var n int64
+	require.NoError(e.t, e.db.Model(&models.MediaTransferHistory{}).Where("info_hash = ?", hash).Count(&n).Error)
+	return n
+}
+
+// drain 把队列里的种子一个个整理完（后台循环没在跑时用）。
+func (e *env) drain() int {
+	n := 0
+	for {
+		select {
+		case j := <-e.svc.jobs:
+			_, _ = e.svc.handle(e.ctx, j)
+			n++
+		default:
+			return n
+		}
+	}
+}
+
+func completedEvent(t *testing.T, hash string) events.Event {
+	t.Helper()
+	b, err := json.Marshal(events.TorrentCompletedPayload{Title: hash, DownloaderName: "qb", TaskID: hash, InfoHash: hash})
+	require.NoError(t, err)
+	return events.Event{Type: events.EvtTorrentCompleted, Payload: b}
+}
+
+func TestOnEvent(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.oppenheimer()
+	e.lastOfUs()
+
+	e.svc.onEvent(e.ctx, completedEvent(t, oppHash))
+	assert.Len(t, e.svc.jobs, 0, "没打开自动整理：不排队")
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1, Categories: []string{"movies"}})
+	e.svc.onEvent(e.ctx, events.Event{Type: events.EvtDiskLow})
+	e.svc.onEvent(e.ctx, events.Event{Type: events.EvtTorrentCompleted, Payload: []byte(`{"title":"x"}`)})
+	assert.Len(t, e.svc.jobs, 0, "别的事件、没有下载器的事件不排队")
+
+	e.svc.onEvent(e.ctx, completedEvent(t, oppHash))
+	e.svc.onEvent(e.ctx, completedEvent(t, oppHash))
+	e.svc.onEvent(e.ctx, completedEvent(t, tlouHash))
+	assert.Len(t, e.svc.jobs, 2, "同一个种子只排一次")
+	assert.Equal(t, 2, e.drain())
+	assert.Equal(t, int64(1), e.historyCount(oppHash))
+	assert.Equal(t, models.MediaTriggerAuto, e.history()[0].Trigger)
+	assert.Zero(t, e.historyCount(tlouHash), "分类不在范围里")
+}
+
+func TestCompletedEventThroughBus(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.oppenheimer()
+	e.svc.Start()
+	t.Cleanup(e.svc.Stop)
+	require.NoError(t, events.PublishWithPayload(events.EvtTorrentCompleted, events.TorrentCompletedPayload{
+		Title: oppName, DownloaderName: "qb", TaskID: oppHash, InfoHash: oppHash,
+	}))
+	require.Eventually(t, func() bool { return e.historyCount(oppHash) == 1 }, 5*time.Second, 20*time.Millisecond)
+}
+
+func TestOrganizeQueuedWhenRunning(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.oppenheimer()
+	e.svc.Start()
+	e.svc.Start() // 重复调用无副作用
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "在跑时排进队列，等到结果")
+	_, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: "nope"})
+	require.ErrorIs(t, err, ErrNotFound)
+	_, err = e.svc.Organize(e.ctx, Request{})
+	require.ErrorIs(t, err, ErrInvalid)
+	e.svc.Stop()
+	e.svc.Stop()
+	assert.False(t, e.svc.isRunning())
+}
+
+func TestSweepCompletedPushedTorrents(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	set := e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	require.NotNil(t, set.AutoSince)
+	e.oppenheimer()
+	e.lastOfUs()
+	pushed := true
+	dlID := uint(1)
+	before := set.AutoSince.Add(-time.Hour)
+	after := set.AutoSince.Add(time.Minute)
+	opp, tlou := oppHash, tlouHash
+	require.NoError(t, e.db.Create(&[]models.TorrentInfo{
+		{SiteName: "s", TorrentID: "1", TorrentHash: &opp, IsPushed: &pushed, IsCompleted: true, CompletedAt: &after, DownloaderID: &dlID, DownloaderName: "qb", DownloaderTaskID: oppHash},
+		{SiteName: "s", TorrentID: "2", TorrentHash: &tlou, IsPushed: &pushed, IsCompleted: true, CompletedAt: &before, DownloaderID: &dlID, DownloaderName: "qb", DownloaderTaskID: tlouHash},
+	}).Error)
+
+	e.svc.sweep(e.ctx, set)
+	assert.Equal(t, 1, e.drain(), "只补查打开自动整理以后完成的")
+	assert.Equal(t, int64(1), e.historyCount(oppHash))
+	assert.Zero(t, e.historyCount(tlouHash))
+
+	e.svc.sweep(e.ctx, set)
+	assert.Zero(t, e.drain(), "已经有整理记录的不再补查")
+
+	// 下载器里找不到的进退避：下一轮补查不排它
+	gone := "4444444444444444444444444444444444444444"
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "3", TorrentHash: &gone, IsPushed: &pushed, IsCompleted: true, CompletedAt: &after, DownloaderID: &dlID, DownloaderName: "qb", DownloaderTaskID: gone}).Error)
+	e.svc.sweep(e.ctx, set)
+	assert.Equal(t, 1, e.drain())
+	e.svc.sweep(e.ctx, set)
+	assert.Zero(t, e.drain(), "退避期内不排")
+	e.advance(25 * time.Minute)
+	e.svc.sweep(e.ctx, set)
+	assert.Equal(t, 1, e.drain(), "退避过了再试")
+}
+
+func TestScanDownloaders(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	set := e.settings(SettingsInput{ScanEnabled: true, MinVideoMB: 1, Tags: []string{"keep"}, SavePaths: []string{"/downloads"}})
+	e.oppenheimer()
+	e.lastOfUs()
+	e.addTorrent("5555555555555555555555555555555555555555", "Tagged.Show.S01E01.mkv", map[string]int{"Tagged.Show.S01E01.mkv": 2}, func(t *downloader.Torrent) { t.Tags = "a, Keep" })
+	e.dl.mu.Lock()
+	tr := e.dl.torrents[oppHash]
+	tr.Tags = "keep"
+	e.dl.torrents[oppHash] = tr
+	e.dl.mu.Unlock()
+
+	e.svc.scan(e.ctx, set)
+	assert.Equal(t, 2, e.drain(), "只扫带 keep 标签的（不分大小写）")
+	assert.Equal(t, int64(1), e.historyCount(oppHash))
+	assert.Zero(t, e.historyCount(tlouHash))
+	assert.Equal(t, models.MediaTriggerScan, e.history()[0].Trigger)
+
+	e.svc.scan(e.ctx, set)
+	assert.Zero(t, e.drain(), "有整理记录的不再扫")
+
+	set.Downloaders = []uint{9}
+	e.svc.scan(e.ctx, set)
+	assert.Zero(t, e.drain(), "范围里没有这个下载器")
+
+	e.dl.listErr = assert.AnError
+	set.Downloaders = nil
+	e.svc.scan(e.ctx, set)
+	assert.Zero(t, e.drain())
+}
+
+func TestRetryDue(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	require.Contains(t, res.Plan.Problem, "识别失败")
+	e.tmdb.setDown(false)
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "还没到重试时间")
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	queued := e.history()
+	require.Len(t, queued, 1)
+	require.NotNil(t, queued[0].NextRetryAt, "排上队以后记录里留着租约到期的时间：整理以前重启也不丢")
+	assert.Equal(t, e.Now().Add(retryLease).Truncate(time.Second), queued[0].NextRetryAt.UTC())
+	assert.True(t, e.svc.Retrying(queued[0].ID), "还在重试")
+	assert.Equal(t, 1, e.drain())
+	assert.False(t, e.svc.Retrying(queued[0].ID), "整理完以后清掉")
+	rows := e.history()
+	require.Len(t, rows, 1)
+	assert.Equal(t, models.MediaTransferDone, rows[0].Status)
+	assert.Nil(t, rows[0].NextRetryAt)
+	assert.Zero(t, rows[0].Attempts)
+	assert.Equal(t, models.MediaTriggerManual, rows[0].Trigger, "沿用原来的触发方式")
+
+	// 超过重试次数后不再自动重试
+	e.tmdb.setDown(true)
+	e.addTorrent("6666666666666666666666666666666666666666", "Other.2019.mkv", map[string]int{"Other.2019.mkv": 2}, nil)
+	for range len(retryDelays) + 1 {
+		_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: "6666666666666666666666666666666666666666"})
+		require.NoError(t, err)
+	}
+	var row models.MediaTransferHistory
+	require.NoError(t, e.db.Where("info_hash = ?", "6666666666666666666666666666666666666666").First(&row).Error)
+	assert.Equal(t, len(retryDelays)+1, row.Attempts)
+	assert.Nil(t, row.NextRetryAt)
+}
+
+func TestEnqueueDedupAndFull(t *testing.T) {
+	e := newEnv(t)
+	j := job{req: Request{DownloaderID: 1, Hash: "x"}, trigger: models.MediaTriggerScan}
+	assert.True(t, e.svc.enqueue(j))
+	assert.True(t, e.svc.enqueue(j), "已经在队列里的不重复放")
+	assert.Len(t, e.svc.jobs, 1)
+	for i := range jobQueueSize - 1 {
+		require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: string(rune('a'+i%26)) + time.Duration(i).String()}}))
+	}
+	assert.False(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: "overflow"}}), "队列满了")
+}
+
+func TestScopeMatch(t *testing.T) {
+	tr := downloader.Torrent{Category: "Movies", Tags: "pt, keep", SavePath: "/data/downloads/movies"}
+	assert.True(t, scope{}.match(1, tr), "空范围不限制")
+	assert.True(t, scope{downloaders: []uint{1, 2}, categories: []string{"movies"}, tags: []string{"KEEP"}, savePaths: []string{"/data/downloads"}}.match(1, tr))
+	assert.False(t, scope{downloaders: []uint{2}}.match(1, tr))
+	assert.False(t, scope{categories: []string{"tv"}}.match(1, tr))
+	assert.False(t, scope{tags: []string{"other"}}.match(1, tr))
+	assert.False(t, scope{savePaths: []string{"/data/down"}}.match(1, tr), "按路径分段匹配")
+}
+
+// 别的下载器里同一个 hash 的整理记录不影响这个下载器的补查与扫描
+func TestSweepAndScanPerDownloader(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	set := e.settings(SettingsInput{AutoEnabled: true, ScanEnabled: true, MinVideoMB: 1})
+	e.oppenheimer()
+	require.NoError(t, e.db.Create(&models.MediaTransferHistory{DownloaderID: 2, InfoHash: oppHash, SourcePath: "/other/downloader/file.mkv", Status: models.MediaTransferDone}).Error)
+	pushed := true
+	dlID := uint(1)
+	after := set.AutoSince.Add(time.Minute)
+	opp := oppHash
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "1", TorrentHash: &opp, IsPushed: &pushed, IsCompleted: true, CompletedAt: &after, DownloaderID: &dlID, DownloaderName: "qb", DownloaderTaskID: oppHash}).Error)
+	e.svc.sweep(e.ctx, set)
+	assert.Len(t, e.svc.jobs, 1, "补查只看这个下载器的记录")
+	e.drain()
+	require.NoError(t, e.db.Where("downloader_id = ? AND info_hash = ?", 1, oppHash).Delete(&models.MediaTransferHistory{}).Error)
+	e.svc.scan(e.ctx, set)
+	assert.Len(t, e.svc.jobs, 1, "扫描只看这个下载器的记录")
+}
+
+// 队列满了排不上时，失败记录的重试时间不会被清掉
+func TestRetryDueKeepsScheduleWhenQueueFull(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	for i := range jobQueueSize {
+		require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 9, Hash: time.Duration(i).String()}}))
+	}
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	var row models.MediaTransferHistory
+	require.NoError(t, e.db.First(&row).Error)
+	require.NotNil(t, row.NextRetryAt, "排不上时保留重试时间")
+	assert.False(t, e.svc.Retrying(row.ID), "排不上时不算正在重试")
+	assert.Equal(t, e.now.Add(tickInterval), row.NextRetryAt.UTC(), "下一拍再试")
+}
+
+// 自动整理失败后的重试按现在的设置：自动整理关了、种子不在范围里时不整理
+func TestRetryFollowsCurrentAutomation(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerAuto}))
+	e.drain()
+	row := e.history()[0]
+	require.Equal(t, models.MediaTransferFailed, row.Status)
+	require.Equal(t, models.MediaTriggerAuto, row.Trigger)
+	require.NotNil(t, row.NextRetryAt)
+	e.tmdb.setDown(false)
+	due := func() {
+		t.Helper()
+		require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("1 = 1").Update("next_retry_at", e.Now()).Error)
+		e.svc.retryDue(e.ctx, e.currentSettings())
+		e.drain()
+	}
+
+	e.settings(SettingsInput{MinVideoMB: 1})
+	due()
+	assert.Equal(t, models.MediaTransferFailed, e.history()[0].Status, "自动整理关掉以后不再重试")
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1, Categories: []string{"tv"}})
+	due()
+	assert.Equal(t, models.MediaTransferFailed, e.history()[0].Status, "不在范围里不重试")
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1, Categories: []string{"movies"}})
+	due()
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+}
+
+// 完成事件带了下载器名字，补查与扫描只有编号：排队去重与退避用同一个键
+func TestJobKeyIgnoresNameWithID(t *testing.T) {
+	e := newEnv(t)
+	assert.Equal(t, jobKey(1, "", "ABC"), jobKey(1, "qb", "abc"))
+	assert.NotEqual(t, jobKey(0, "qb", "abc"), jobKey(0, "", "abc"), "只有名字时按名字")
+	ev := job{req: Request{DownloaderID: 1, Hash: "abc"}, dlName: "qb", trigger: models.MediaTriggerAuto}
+	require.True(t, e.svc.enqueue(ev))
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: "abc"}, trigger: models.MediaTriggerAuto}))
+	assert.Len(t, e.svc.jobs, 1, "补查不重复排完成事件已经排上的种子")
+	e.svc.fail(e.ctx, ev)
+	assert.True(t, e.svc.backedOff(1, "abc"), "完成事件失败后，补查与扫描看得到退避")
+}
+
+// 到期重试还没整理就出错（下载器连不上）：重试时间按退避恢复，之后还会自动重试
+func TestRetryKeptOnDownloaderError(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	e.tmdb.setDown(false)
+
+	e.dl.getErr = assert.AnError
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferFailed, row.Status)
+	require.NotNil(t, row.NextRetryAt, "重试时间恢复了")
+	assert.True(t, row.NextRetryAt.After(e.Now()))
+
+	e.dl.getErr = nil
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+}
+
+// 到期重试时这个种子已经在队列里（别的触发方式排上的）：重试时间恢复成下一拍，不因为那个任务出错而丢掉
+func TestRetryDueWhenAlreadyQueued(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerScan}))
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	row := e.history()[0]
+	require.NotNil(t, row.NextRetryAt, "没排上，重试时间留着")
+	assert.True(t, row.NextRetryAt.After(e.Now()))
+
+	e.dl.getErr = assert.AnError
+	e.drain()
+	assert.NotNil(t, e.history()[0].NextRetryAt, "排着的那个任务出错也不丢")
+}
+
+// restart 模拟 pt-tools 重启：队列与「正在重试」这些内存里的状态都没了，库还是那个
+func (e *env) restart() {
+	e.t.Helper()
+	e.svc = New(Config{DB: e.db, Cipher: fakeCipher{}, Recognizer: e.rec, Downloaders: e.dls, Now: e.Now})
+}
+
+// 到期重试排上队以后、整理以前重启：记录里的重试时间是租约到期的时间，过了租约还会自动重试（以前清空了就再也不试）
+func TestRetrySurvivesRestartBeforeOrganize(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	e.tmdb.setDown(false)
+
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	e.restart() // 排上的任务没来得及整理
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "租约没到期以前不重排")
+	e.advance(retryLease + time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+	assert.Nil(t, e.history()[0].NextRetryAt)
+}
+
+// 自动整理关着时，到期的自动整理失败记录不排队、保持到期；打开以后下一拍就重试（以前关着的那一次就把重试时间清掉了）
+func TestRetryWaitsWhileAutomationOff(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerAuto}))
+	e.drain()
+	e.tmdb.setDown(false)
+
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.advance(11 * time.Minute)
+	before := e.history()[0].NextRetryAt
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "自动整理关着不排队")
+	require.NotNil(t, e.history()[0].NextRetryAt, "重试时间还在")
+	assert.Equal(t, before.UTC(), e.history()[0].NextRetryAt.UTC())
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+}
+
+// 到期重试时种子不在自动整理范围里：不整理，过一阵再看（范围可能会改），不是一直清空不再试
+func TestRetryOutOfScopeTriesLater(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerAuto}))
+	e.drain()
+	e.tmdb.setDown(false)
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1, Categories: []string{"tv"}})
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferFailed, row.Status)
+	require.NotNil(t, row.NextRetryAt)
+	assert.Equal(t, e.Now().Add(retryOutOfScope).UTC(), row.NextRetryAt.UTC())
+}
+
+// 到期重试整理完了，但这一次没有改写某条记录（例如它的文件已经不在种子里）：租约清掉，不会每隔一个租约就重试一次
+func TestRetryClearsLeaseOnRowsTheRunDidNotTouch(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.oppenheimer()
+	due := e.Now()
+	stale := models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Gone.2023.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &due, Trigger: models.MediaTriggerManual,
+	}
+	require.NoError(t, e.db.Create(&stale).Error)
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	var got models.MediaTransferHistory
+	require.NoError(t, e.db.First(&got, stale.ID).Error)
+	assert.Equal(t, models.MediaTransferFailed, got.Status)
+	assert.Nil(t, got.NextRetryAt, "这一次没有改写的记录不再重试")
+}
+
+func (e *env) currentSettings() Settings {
+	e.t.Helper()
+	set, err := e.svc.Settings(e.ctx)
+	require.NoError(e.t, err)
+	return set
+}
+
+// raceAfterQuery 在 retryDue 的某一次读取（match 认 SQL）以后，模拟一次同时进行的整理改写记录
+func (e *env) raceAfterQuery(match func(sql string) bool, write func(db *gorm.DB)) {
+	e.t.Helper()
+	fired := false
+	require.NoError(e.t, e.db.Callback().Query().After("gorm:query").Register("qa:race", func(tx *gorm.DB) {
+		if fired || tx.Statement.Table != "media_transfer_histories" || !match(tx.Statement.SQL.String()) {
+			return
+		}
+		fired = true
+		write(e.db.Session(&gorm.Session{NewDB: true}))
+	}))
+	e.t.Cleanup(func() { _ = e.db.Callback().Query().Remove("qa:race") })
+}
+
+// raceAfterPendingRead：读完这个种子待重试的记录以后、写租约以前
+func (e *env) raceAfterPendingRead(write func(db *gorm.DB)) {
+	e.raceAfterQuery(func(sql string) bool { return strings.Contains(sql, "info_hash") }, write)
+}
+
+// raceAfterDueRead：读到哪些记录到期以后、读这个种子待重试的记录以前
+func (e *env) raceAfterDueRead(write func(db *gorm.DB)) {
+	e.raceAfterQuery(func(sql string) bool {
+		return !strings.Contains(sql, "info_hash") && strings.Contains(sql, "next_retry_at <=")
+	}, write)
+}
+
+// 读到待重试以后、写租约以前，同时进行的整理已经整理成功：不给它写租约（成功的记录不会显示「自动重试」），也不再排一次
+func TestRetryDueSkipsRowsOrganizedMeanwhile(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	id := e.history()[0].ID
+	e.advance(11 * time.Minute)
+
+	e.raceAfterPendingRead(func(db *gorm.DB) {
+		require.NoError(t, db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).
+			Updates(map[string]any{"status": models.MediaTransferDone, "next_retry_at": nil, "attempts": 0}).Error)
+	})
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "已经整理好了，不再排")
+	assert.False(t, e.svc.Retrying(id))
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferDone, row.Status)
+	assert.Nil(t, row.NextRetryAt, "成功的记录没有重试时间")
+}
+
+// 同时进行的整理又失败了、写了新的退避：保留它，不改成租约、不马上再试一次
+func TestRetryDueKeepsBackoffWrittenMeanwhile(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	id := e.history()[0].ID
+	e.advance(11 * time.Minute)
+
+	next := e.Now().Add(30 * time.Minute)
+	e.raceAfterPendingRead(func(db *gorm.DB) {
+		require.NoError(t, db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).
+			Updates(map[string]any{"next_retry_at": &next, "attempts": 2}).Error)
+	})
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "新的退避没到期，不排")
+	row := e.history()[0]
+	require.NotNil(t, row.NextRetryAt)
+	assert.Equal(t, next.UTC(), row.NextRetryAt.UTC(), "新的退避没被租约盖掉")
+	assert.Equal(t, 2, row.Attempts)
+}
+
+// 读到到期以后、读这个种子的记录以前，同时进行的整理又失败了、写了新的退避：第二次读到的是新的退避（没到期），不领租约、不排
+func TestRetryDueKeepsBackoffWrittenBeforePendingRead(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	id := e.history()[0].ID
+	e.advance(11 * time.Minute)
+
+	next := e.Now().Add(30 * time.Minute)
+	e.raceAfterDueRead(func(db *gorm.DB) {
+		require.NoError(t, db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).
+			Updates(map[string]any{"next_retry_at": &next, "attempts": 2}).Error)
+	})
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "新的退避没到期，不排")
+	row := e.history()[0]
+	require.NotNil(t, row.NextRetryAt)
+	assert.Equal(t, next.UTC(), row.NextRetryAt.UTC(), "新的退避没被租约盖掉")
+	assert.Equal(t, 2, row.Attempts)
+}
+
+// 开关关着的触发方式的到期记录很多（超过一轮的名额）时，不能一直挡住后面能做的重试
+func TestRetryDueSkipsSwitchedOffRowsBeyondTheRoundLimit(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1}) // 自动整理关着
+	e.oppenheimer()
+	due := e.Now().Add(-time.Hour)
+	for i := range maxPerRound + 5 {
+		require.NoError(t, e.db.Create(&models.MediaTransferHistory{
+			DownloaderID: 1, InfoHash: fmt.Sprintf("%040d", i), SourcePath: filepath.Join(e.dlDir, fmt.Sprintf("auto-%d.mkv", i)),
+			Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &due, Trigger: models.MediaTriggerAuto,
+		}).Error)
+	}
+	later := e.Now().Add(-time.Minute)
+	manual := models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Oppenheimer.2023.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &later, Trigger: models.MediaTriggerManual,
+	}
+	require.NoError(t, e.db.Create(&manual).Error)
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.True(t, e.svc.Retrying(manual.ID), "手动整理失败的那条排上了")
+	assert.Equal(t, 1, e.drain())
+	var autoDue int64
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("trigger = ? AND next_retry_at = ?", models.MediaTriggerAuto, due).Count(&autoDue).Error)
+	assert.Equal(t, int64(maxPerRound+5), autoDue, "关着的那些保持到期")
+}
+
+// 同一个种子里先到期的记录是关着的触发方式、后面还有手动的：手动的照样重试
+func TestRetryDueMixedTriggersOnOneTorrent(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1}) // 自动整理关着
+	e.oppenheimer()
+	early, later := e.Now().Add(-time.Hour), e.Now().Add(-time.Minute)
+	require.NoError(t, e.db.Create(&models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Extra.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &early, Trigger: models.MediaTriggerAuto,
+	}).Error)
+	manual := models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Oppenheimer.2023.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &later, Trigger: models.MediaTriggerManual,
+	}
+	require.NoError(t, e.db.Create(&manual).Error)
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.True(t, e.svc.Retrying(manual.ID), "手动的那条排上了")
+	assert.Equal(t, 1, e.drain())
+}
+
+// 上一次与下一次扫描：后台没在跑时没有下一次；这次启动以后还没扫过时下一次是现在；扫过以后是上一次加间隔
+func TestRuns(t *testing.T) {
+	e := newEnv(t)
+	set := e.settings(SettingsInput{ScanEnabled: true, ScanIntervalMin: 30, WatchIntervalMin: 10})
+	rt := e.svc.Runs(e.ctx, set)
+	assert.Nil(t, rt.ScanNext, "后台没在跑")
+	assert.Nil(t, rt.ScanLast)
+
+	e.svc.runMu.Lock()
+	e.svc.running = true
+	e.svc.runMu.Unlock()
+	t.Cleanup(func() {
+		e.svc.runMu.Lock()
+		e.svc.running = false
+		e.svc.runMu.Unlock()
+	})
+	rt = e.svc.Runs(e.ctx, set)
+	require.NotNil(t, rt.ScanNext)
+	assert.Equal(t, e.Now(), *rt.ScanNext, "还没扫过：下一拍就扫")
+	assert.Nil(t, rt.WatchNext, "没有开着的监控目录")
+	in := filepath.Join(e.root, "incoming")
+	require.NoError(t, os.MkdirAll(in, 0o755))
+	_, err := e.svc.SaveWatchDir(e.ctx, 0, WatchDirInput{Path: in, Enabled: true})
+	require.NoError(t, err)
+	e.svc.markRun(&e.svc.scanAt, e.Now())
+	e.svc.markRun(&e.svc.watchTick, e.Now())
+	e.svc.watchScan(e.ctx, set)
+	rt = e.svc.Runs(e.ctx, set)
+	assert.Equal(t, e.Now(), *rt.ScanLast)
+	assert.Equal(t, e.Now().Add(30*time.Minute), *rt.ScanNext)
+	assert.Equal(t, e.Now().Add(10*time.Minute), *rt.WatchNext)
+
+	set.ScanEnabled = false
+	assert.Nil(t, e.svc.Runs(e.ctx, set).ScanNext, "定期扫描关着")
+}
+
+// 后台节拍在没有开着的目录时也算做过一次目录监控扫描：之后开了目录，下一次按那一拍加间隔排，不是现在；
+// 页面上的「上次」只算真的扫了目录的
+func TestRunsWatchTickWithoutDirs(t *testing.T) {
+	e := newEnv(t)
+	set := e.settings(SettingsInput{WatchIntervalMin: 10})
+	e.svc.runMu.Lock()
+	e.svc.running = true
+	e.svc.runMu.Unlock()
+	t.Cleanup(func() {
+		e.svc.runMu.Lock()
+		e.svc.running = false
+		e.svc.runMu.Unlock()
+	})
+	// 这一拍没有开着的目录
+	e.svc.markRun(&e.svc.watchTick, e.Now())
+	e.svc.watchScan(e.ctx, set)
+	in := filepath.Join(e.root, "incoming")
+	require.NoError(t, os.MkdirAll(in, 0o755))
+	_, err := e.svc.SaveWatchDir(e.ctx, 0, WatchDirInput{Path: in, Enabled: true})
+	require.NoError(t, err)
+	e.advance(3 * time.Minute)
+	rt := e.svc.Runs(e.ctx, set)
+	assert.Nil(t, rt.WatchLast, "那一拍没扫到目录：不算上次")
+	require.NotNil(t, rt.WatchNext)
+	assert.Equal(t, e.Now().Add(7*time.Minute), *rt.WatchNext, "按那一拍加间隔排")
+}

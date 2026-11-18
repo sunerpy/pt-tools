@@ -1,0 +1,10 @@
+#!/bin/bash
+# pt-tools Docker app — the compose file is used as-is; only the data directory needs creating.
+
+# NOTE: Do not pre-compute paths from TRIM_* at script source time (see shared/cmd/AGENTS.md):
+# install variables are loaded after this file is sourced.
+
+service_postinst() {
+    mkdir -p "${TRIM_PKGVAR}/data" 2>/dev/null || true
+    chown -R "${TRIM_UID}:${TRIM_GID}" "${TRIM_PKGVAR}/data" 2>/dev/null || true
+}

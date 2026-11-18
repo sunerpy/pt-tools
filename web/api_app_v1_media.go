@@ -1,0 +1,716 @@
+package web
+
+import (
+	"errors"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/media/organize"
+	"github.com/sunerpy/pt-tools/internal/media/subscribe"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/models"
+)
+
+// App API v1 的刷流、整理历史、订阅与探索。
+
+// ---- 刷流 ----
+
+// AppBrushStat 是一段时间的刷流收益。
+type AppBrushStat struct {
+	Uploaded   int64 `json:"uploaded"`
+	Downloaded int64 `json:"downloaded"`
+	Added      int   `json:"added"`
+	Removed    int   `json:"removed"`
+}
+
+// AppBrushTask 是 GET /brush/tasks 的一项。
+type AppBrushTask struct {
+	ID          uint         `json:"id"`
+	Name        string       `json:"name"`
+	Enabled     bool         `json:"enabled"`
+	Site        string       `json:"site"`
+	SiteEnabled bool         `json:"site_enabled"`
+	Downloader  string       `json:"downloader"`
+	Active      int          `json:"active"`
+	Downloading int          `json:"downloading"`
+	ActiveSize  int64        `json:"active_size"`
+	Today       AppBrushStat `json:"today"`
+	Total       AppBrushStat `json:"total"`
+}
+
+func (s *Server) appBrushTasks(w http.ResponseWriter, r *http.Request) {
+	if global.GlobalDB == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")
+		return
+	}
+	tasks, err := models.NewBrushRepository(global.GlobalDB.DB).ListTasks()
+	if err != nil {
+		appError(w, http.StatusInternalServerError, "internal", "读取刷流任务失败: "+err.Error())
+		return
+	}
+	views, err := brushTaskViews(tasks)
+	if err != nil {
+		appError(w, http.StatusInternalServerError, "internal", "读取刷流任务失败: "+err.Error())
+		return
+	}
+	out := make([]AppBrushTask, 0, len(views))
+	for _, v := range views {
+		out = append(out, AppBrushTask{
+			ID: v.ID, Name: v.Name, Enabled: v.Enabled, Site: v.SiteName, SiteEnabled: v.SiteEnabled, Downloader: v.DownloaderName,
+			Active: v.ActiveCount, Downloading: v.DownloadingCount, ActiveSize: v.ActiveSizeBytes,
+			Today: AppBrushStat(v.Today), Total: AppBrushStat(v.Total),
+		})
+	}
+	appJSON(w, out)
+}
+
+// AppBrushPeriod 是一段时间（一天、一周、一个月、一个季度或一年）的刷流收益。
+type AppBrushPeriod struct {
+	// Start 是这一段的第一天，End 是最后一天（yyyy-mm-dd，主机时区；最后一段的 End 可能在今天以后）
+	Start string `json:"start"`
+	End   string `json:"end"`
+	AppBrushStat
+}
+
+// AppBrushTaskPeriods 是一个任务各段的收益。
+type AppBrushTaskPeriods struct {
+	ID      uint             `json:"id"`
+	Name    string           `json:"name"`
+	Periods []AppBrushPeriod `json:"periods"`
+}
+
+// AppBrushStats 是 GET /brush/stats：最近若干段全部刷流任务的合计与每个任务的收益，最后一段是当前这一段（只算到今天）。
+type AppBrushStats struct {
+	Granularity string                `json:"granularity"`
+	Periods     int                   `json:"periods"`
+	From        string                `json:"from"`
+	To          string                `json:"to"`
+	Totals      []AppBrushPeriod      `json:"totals"`
+	Tasks       []AppBrushTaskPeriods `json:"tasks"`
+}
+
+func appBrushPeriods(series []BrushStatsSeriesPoint) []AppBrushPeriod {
+	out := make([]AppBrushPeriod, 0, len(series))
+	for _, p := range series {
+		out = append(out, AppBrushPeriod{Start: p.Date, End: p.End, AppBrushStat: AppBrushStat(p.BrushStatView)})
+	}
+	return out
+}
+
+// appBrushStats 是 GET /brush/stats?granularity=day|week|month|quarter|year&periods=N（与网页刷流任务页的统计同一份数据）。
+func (s *Server) appBrushStats(w http.ResponseWriter, r *http.Request) {
+	if global.GlobalDB == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")
+		return
+	}
+	q := r.URL.Query()
+	if q.Has("days") {
+		appError(w, http.StatusBadRequest, "bad_request", "用 granularity 与 periods 选范围")
+		return
+	}
+	gran, periods, err := parseBrushStatsQuery(q)
+	if err != nil {
+		appError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	resp, err := buildBrushStats(models.NewBrushRepository(global.GlobalDB.DB), time.Now(), gran, periods)
+	if err != nil {
+		appError(w, http.StatusInternalServerError, "internal", "读取刷流统计失败: "+err.Error())
+		return
+	}
+	out := AppBrushStats{
+		Granularity: resp.Granularity, Periods: resp.Periods, From: resp.From, To: resp.To,
+		Totals: appBrushPeriods(resp.Totals), Tasks: make([]AppBrushTaskPeriods, 0, len(resp.Tasks)),
+	}
+	for _, t := range resp.Tasks {
+		out.Tasks = append(out.Tasks, AppBrushTaskPeriods{ID: t.TaskID, Name: t.Name, Periods: appBrushPeriods(t.Series)})
+	}
+	appJSON(w, out)
+}
+
+// ---- 整理历史 ----
+
+// AppMediaHistory 是 GET /media/history 的一项。
+type AppMediaHistory struct {
+	ID          uint   `json:"id"`
+	MediaType   string `json:"media_type"`
+	TMDBID      int    `json:"tmdb_id"`
+	Title       string `json:"title"`
+	Year        int    `json:"year,omitempty"`
+	Season      int    `json:"season,omitempty"`
+	Episode     int    `json:"episode,omitempty"`
+	EpisodeEnd  int    `json:"episode_end,omitempty"`
+	TorrentName string `json:"torrent_name"`
+	Library     string `json:"library,omitempty"`
+	TargetPath  string `json:"target_path,omitempty"`
+	Mode        string `json:"mode"`
+	Size        int64  `json:"size"`
+	Status      string `json:"status"`
+	Message     string `json:"message,omitempty"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
+func (s *Server) appMediaHistory(w http.ResponseWriter, r *http.Request) {
+	if s.organizer == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "整理入库没有启动")
+		return
+	}
+	page, size, ok := appPaging(r, 100)
+	if !ok {
+		appError(w, http.StatusBadRequest, "invalid_argument", "page 从 1 开始，page_size 在 1 到 100 之间")
+		return
+	}
+	q := r.URL.Query()
+	kw := strings.TrimSpace(q.Get("q"))
+	if len(kw) > 200 {
+		appError(w, http.StatusBadRequest, "invalid_argument", "关键字太长")
+		return
+	}
+	res, err := s.organizer.History(r.Context(), organize.HistoryQuery{Status: q.Get("status"), Keyword: kw, Limit: size, Offset: (page - 1) * size})
+	if err != nil {
+		if errors.Is(err, organize.ErrInvalid) {
+			appError(w, http.StatusBadRequest, "invalid_argument", err.Error())
+			return
+		}
+		appError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	out := AppPage[AppMediaHistory]{Items: make([]AppMediaHistory, 0, len(res.Items)), Total: int(res.Total), Page: page, PageSize: size}
+	for _, h := range res.Items {
+		out.Items = append(out.Items, AppMediaHistory{
+			ID: h.ID, MediaType: h.MediaType, TMDBID: h.TMDBID, Title: h.Title, Year: h.Year, Season: h.Season, Episode: h.Episode,
+			EpisodeEnd: h.EpisodeEnd, TorrentName: h.TorrentName, Library: h.LibraryName, TargetPath: h.TargetPath, Mode: h.Mode,
+			Size: h.Size, Status: h.Status, Message: appRedactAddr(h.Message), CreatedAt: h.CreatedAt.Unix(),
+		})
+	}
+	appJSON(w, out)
+}
+
+// ---- 订阅 ----
+
+// AppProgress 是订阅的进度。剧集：Required 是要追的集（起始集以后、没跳过的），Waiting 是在等锁住的版本的（也算在 Missing 里），
+// Skipped 是不追的。
+type AppProgress struct {
+	Total       int   `json:"total"`
+	Required    int   `json:"required"`
+	Aired       int   `json:"aired"`
+	InLibrary   int   `json:"in_library"`
+	Downloading int   `json:"downloading"`
+	Waiting     int   `json:"waiting"`
+	Skipped     int   `json:"skipped"`
+	Missing     []int `json:"missing"`
+}
+
+// AppSchedule 是追剧主动搜索的定时：kind 为空时沿用全局间隔；airtime 按播出时间（at 是播出时刻，空的按 20:00）、
+// interval 每隔 interval_minutes 分钟（30 分钟到 7 天，从上次搜索算起）、
+// daily / every_days / weekly / monthly 按 at 的钟点（every 是每隔几天，days 是星期几 0–6 或几号 1–31）、
+// cron 按 cron 表达式（分 时 日 月 星期，几条用分号分开）。字段和 subscribe.Schedule 一一对应。
+type AppSchedule struct {
+	Kind            string `json:"kind"`
+	At              string `json:"at,omitempty"`
+	Every           int    `json:"every,omitempty"`
+	Days            []int  `json:"days,omitempty"`
+	AirDelayHours   int    `json:"air_delay_hours,omitempty"`
+	AirRetryHours   int    `json:"air_retry_hours,omitempty"`
+	AirWindowDays   int    `json:"air_window_days,omitempty"`
+	IntervalMinutes int    `json:"interval_minutes,omitempty"`
+	Cron            string `json:"cron,omitempty"`
+}
+
+func (a AppSchedule) schedule() *subscribe.Schedule {
+	sc := subscribe.Schedule(a)
+	return &sc
+}
+
+// AppSubscription 是一个订阅。
+type AppSubscription struct {
+	IncludeKeywords string      `json:"include_keywords"`
+	ExcludeKeywords string      `json:"exclude_keywords"`
+	ID              uint        `json:"id"`
+	MediaType       string      `json:"media_type"`
+	TMDBID          int         `json:"tmdb_id"`
+	Season          int         `json:"season"`
+	Title           string      `json:"title"`
+	OriginalTitle   string      `json:"original_title,omitempty"`
+	Year            int         `json:"year,omitempty"`
+	PosterPath      string      `json:"poster_path,omitempty"`
+	Status          string      `json:"status"`
+	Upgrade         bool        `json:"upgrade"`
+	Source          string      `json:"source"`
+	TotalEpisodes   int         `json:"total_episodes,omitempty"`
+	Progress        AppProgress `json:"progress"`
+	Message         string      `json:"message,omitempty"`
+	LastSearchAt    *int64      `json:"last_search_at,omitempty"`
+	NextSearchAt    *int64      `json:"next_search_at,omitempty"`
+	CreatedAt       int64       `json:"created_at"`
+	// ProfileID 是质量档案（0 用设置里的默认）；Sites 是只在这些站点找（空的是全部站点）；DownloaderID 是推送到哪个下载器
+	// （0 用设置里的）；Category、Tags、SavePath 是推送时的分类、标签与保存目录
+	ProfileID    uint     `json:"profile_id"`
+	Sites        []string `json:"sites"`
+	DownloaderID uint     `json:"downloader_id"`
+	Category     string   `json:"category,omitempty"`
+	Tags         string   `json:"tags,omitempty"`
+	SavePath     string   `json:"save_path,omitempty"`
+	// 以下是追剧（剧集）的设置
+	Schedule         AppSchedule `json:"schedule"`
+	LockVersion      bool        `json:"lock_version"`
+	LockGroup        string      `json:"lock_group,omitempty"`
+	LockResolution   string      `json:"lock_resolution,omitempty"`
+	StartEpisode     int         `json:"start_episode,omitempty"`
+	FollowNextSeason bool        `json:"follow_next_season"`
+	NextSeasonID     uint        `json:"next_season_id,omitempty"`
+	LibraryID        uint        `json:"library_id,omitempty"`
+	CompletedAt      *int64      `json:"completed_at,omitempty"`
+}
+
+// AppEpisode 是剧集一集的情况：library、downloading、missing、waiting_version（等锁住的版本）、upcoming 或 skipped（不追）。
+type AppEpisode struct {
+	Number  int    `json:"number"`
+	Name    string `json:"name,omitempty"`
+	AirDate string `json:"air_date,omitempty"`
+	State   string `json:"state"`
+	// Source 是状态从哪里来的（library、subscription、downloader），Version 是现在的版本（制作组与分辨率）
+	Source       string `json:"source,omitempty"`
+	Version      string `json:"version,omitempty"`
+	ManualSkip   bool   `json:"manual_skip,omitempty"`
+	ManualUnlock bool   `json:"manual_unlock,omitempty"`
+}
+
+func appEpisode(e subscribe.EpisodeState) AppEpisode {
+	return AppEpisode{
+		Number: e.Number, Name: e.Name, AirDate: e.AirDate, State: e.State, Source: e.Source, Version: e.Version,
+		ManualSkip: e.ManualSkip, ManualUnlock: e.ManualUnlock,
+	}
+}
+
+// AppSubscriptionTorrent 是订阅下载过的一个种子，带上每个视频文件整理、刮削得怎样。ID 是重新整理、重新刮削用的编号；
+// can_organize 为真时能重新整理（有整理没成、不在自动重试的文件，或者种子标成了失败），can_rescrape 为真时能重新刮削。
+type AppSubscriptionTorrent struct {
+	ID          uint             `json:"id"`
+	Site        string           `json:"site"`
+	TorrentID   string           `json:"torrent_id"`
+	Title       string           `json:"title"`
+	Status      string           `json:"status"`
+	Episode     int              `json:"episode,omitempty"`
+	EpisodeEnd  int              `json:"episode_end,omitempty"`
+	Complete    bool             `json:"complete"`
+	Size        int64            `json:"size"`
+	Message     string           `json:"message,omitempty"`
+	CreatedAt   int64            `json:"created_at"`
+	Files       []AppTorrentFile `json:"files"`
+	CanOrganize bool             `json:"can_organize"`
+	CanRescrape bool             `json:"can_rescrape"`
+}
+
+// AppTorrentFile 是种子里一个视频文件的整理记录：status 是 done、failed、skipped 或 removed，
+// scrape_status 是 ok、partial、failed 或空（没刮削过）；retrying 为真时整理队列正在重试它。
+type AppTorrentFile struct {
+	ID           uint   `json:"id"`
+	Name         string `json:"name"`
+	Episode      int    `json:"episode,omitempty"`
+	EpisodeEnd   int    `json:"episode_end,omitempty"`
+	Status       string `json:"status"`
+	Message      string `json:"message,omitempty"`
+	ScrapeStatus string `json:"scrape_status,omitempty"`
+	ScrapeNote   string `json:"scrape_note,omitempty"`
+	NextRetryAt  *int64 `json:"next_retry_at,omitempty"`
+	Retrying     bool   `json:"retrying,omitempty"`
+}
+
+func appSubscriptionTorrent(t subscribe.TorrentView) AppSubscriptionTorrent {
+	out := AppSubscriptionTorrent{
+		ID: t.ID, Site: t.SiteName, TorrentID: t.TorrentID, Title: t.Title, Status: t.Status, Episode: t.Episode, EpisodeEnd: t.EpisodeEnd,
+		Complete: t.Complete, Size: t.SizeBytes, Message: appRedactAddr(t.Message), CreatedAt: t.CreatedAt.Unix(),
+		Files: make([]AppTorrentFile, 0, len(t.Files)), CanOrganize: t.CanOrganize, CanRescrape: t.CanRescrape,
+	}
+	for _, f := range t.Files {
+		out.Files = append(out.Files, AppTorrentFile{
+			ID: f.ID, Name: f.Name, Episode: f.Episode, EpisodeEnd: f.EpisodeEnd, Status: f.Status, Message: appRedactAddr(f.Message),
+			ScrapeStatus: f.ScrapeStatus, ScrapeNote: appRedactAddr(f.ScrapeNote), NextRetryAt: unixPtr(f.NextRetryAt), Retrying: f.Retrying,
+		})
+	}
+	return out
+}
+
+// AppSubscriptionDetail 是 GET /subscriptions/{id}：订阅、每一集与下载过的种子。
+type AppSubscriptionDetail struct {
+	AppSubscription
+	Episodes []AppEpisode             `json:"episodes"`
+	Torrents []AppSubscriptionTorrent `json:"torrents"`
+}
+
+func appSubscription(v subscribe.SubscriptionView) AppSubscription {
+	sub := v.MediaSubscription
+	out := AppSubscription{
+		IncludeKeywords: sub.IncludeKeywords, ExcludeKeywords: sub.ExcludeKeywords,
+		ID: sub.ID, MediaType: sub.MediaType, TMDBID: sub.TMDBID, Season: sub.Season, Title: sub.Title, OriginalTitle: sub.OriginalTitle,
+		Year: sub.Year, PosterPath: sub.PosterPath, Status: sub.Status, Upgrade: sub.Upgrade, Source: sub.Source,
+		TotalEpisodes: sub.TotalEpisodes, Message: appRedactAddr(sub.Message), LastSearchAt: unixPtr(sub.LastSearchAt),
+		NextSearchAt: unixPtr(sub.NextSearchAt), CreatedAt: sub.CreatedAt.Unix(), Progress: AppProgress{Missing: []int{}},
+		Schedule: AppSchedule(v.Schedule), LockVersion: sub.LockVersion, LockGroup: sub.LockGroup, LockResolution: sub.LockResolution,
+		StartEpisode: sub.StartEpisode, FollowNextSeason: sub.FollowNextSeason, NextSeasonID: sub.NextSeasonID, LibraryID: sub.LibraryID,
+		CompletedAt: unixPtr(sub.CompletedAt), ProfileID: sub.ProfileID, Sites: append([]string{}, v.Sites...),
+		DownloaderID: sub.DownloaderID, Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath,
+	}
+	if len(out.Schedule.Days) == 0 {
+		out.Schedule.Days = nil
+	}
+	if p := v.Progress; p != nil {
+		out.Progress = AppProgress{
+			Total: p.Total, Required: p.Required, Aired: p.Aired, InLibrary: p.InLibrary, Downloading: p.Downloading,
+			Waiting: p.Waiting, Skipped: p.Skipped, Missing: append([]int{}, p.Missing...),
+		}
+	}
+	return out
+}
+
+func (s *Server) appSubscribeService(w http.ResponseWriter) (*subscribe.Service, bool) {
+	if s.subscriber == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "订阅没有启动")
+		return nil, false
+	}
+	return s.subscriber, true
+}
+
+// appSubscribeError 写订阅的错误：参数不对 400，找不到 404，TMDB 的错误按种类回。
+func appSubscribeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, subscribe.ErrInvalid), errors.Is(err, tmdb.ErrNoKey), errors.Is(err, tmdb.ErrUnauthorized):
+		appError(w, http.StatusBadRequest, "invalid_argument", err.Error())
+	case errors.Is(err, subscribe.ErrNotFound), errors.Is(err, tmdb.ErrNotFound):
+		appError(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, subscribe.ErrBusy):
+		appError(w, http.StatusConflict, "busy", err.Error())
+	case errors.Is(err, tmdb.ErrRateLimited):
+		appError(w, http.StatusTooManyRequests, "rate_limited", err.Error())
+	case errors.Is(err, tmdb.ErrUnavailable):
+		appError(w, http.StatusBadGateway, "upstream", err.Error())
+	default:
+		appError(w, http.StatusInternalServerError, "internal", err.Error())
+	}
+}
+
+func appID(w http.ResponseWriter, r *http.Request) (uint, bool) {
+	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+	if err != nil || id == 0 {
+		appError(w, http.StatusBadRequest, "invalid_argument", "编号不对")
+		return 0, false
+	}
+	return uint(id), true
+}
+
+func (s *Server) appSubscriptions(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	list, err := svc.Subscriptions(r.Context(), subscribe.SubscriptionQuery{Status: q.Get("status"), Keyword: q.Get("q")})
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	out := make([]AppSubscription, 0, len(list))
+	for _, v := range list {
+		out = append(out, appSubscription(v))
+	}
+	appJSON(w, out)
+}
+
+func (s *Server) appSubscriptionDetail(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := appID(w, r)
+	if !ok {
+		return
+	}
+	d, err := svc.Subscription(r.Context(), id)
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	out := AppSubscriptionDetail{AppSubscription: appSubscription(d.SubscriptionView), Episodes: []AppEpisode{}, Torrents: []AppSubscriptionTorrent{}}
+	if d.Progress != nil {
+		for _, e := range d.Progress.Episodes {
+			out.Episodes = append(out.Episodes, appEpisode(e))
+		}
+	}
+	for _, t := range d.TorrentList {
+		out.Torrents = append(out.Torrents, appSubscriptionTorrent(t))
+	}
+	appJSON(w, out)
+}
+
+// AppSubscriptionCreate 是 POST /subscriptions：订阅一部电影或剧集的一季（Season 为 0 时订最新一季）。
+// ProfileID 为 0 时用设置里的默认质量档案。剧集是追剧：没给定时与版本锁时按播出时间搜索、开着版本锁；
+// FromTorrent 是从站点上的这个种子开始追（起始集默认取它的集号）。
+type AppSubscriptionCreate struct {
+	IncludeKeywords *string `json:"include_keywords,omitempty"`
+	ExcludeKeywords *string `json:"exclude_keywords,omitempty"`
+	MediaType       string  `json:"media_type"`
+	TMDBID          int     `json:"tmdb_id"`
+	Season          int     `json:"season"`
+	ProfileID       uint    `json:"profile_id"`
+	Upgrade         bool    `json:"upgrade"`
+	// Sites 是只在这些站点找（空的是全部站点）；DownloaderID 是推送到哪个下载器（0 用设置里的）；
+	// Category、Tags、SavePath 是推送时的分类、标签（逗号分开）与保存目录（空的按下载器的默认）
+	Sites        []string     `json:"sites,omitempty"`
+	DownloaderID uint         `json:"downloader_id,omitempty"`
+	Category     string       `json:"category,omitempty"`
+	Tags         string       `json:"tags,omitempty"`
+	SavePath     string       `json:"save_path,omitempty"`
+	Schedule     *AppSchedule `json:"schedule,omitempty"`
+	LockVersion  *bool        `json:"lock_version,omitempty"`
+	// LockGroup、LockResolution 是锁住的制作组与分辨率（编辑页只在用户改了锁时发）
+	LockGroup        *string         `json:"lock_group,omitempty"`
+	LockResolution   *string         `json:"lock_resolution,omitempty"`
+	StartEpisode     *int            `json:"start_episode,omitempty"`
+	FollowNextSeason *bool           `json:"follow_next_season,omitempty"`
+	LibraryID        *uint           `json:"library_id,omitempty"`
+	FromTorrent      *AppFromTorrent `json:"from_torrent,omitempty"`
+}
+
+// AppFromTorrent 是一键追剧时选中的种子：Title 可选，只在搜索缓存里没有这个种子时用作在这个站点搜索的关键字。
+type AppFromTorrent struct {
+	Site      string `json:"site"`
+	TorrentID string `json:"torrent_id"`
+	Title     string `json:"title,omitempty"`
+}
+
+func (s *Server) appSubscriptionCreate(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	var in AppSubscriptionCreate
+	if !appDecode(w, r, &in) {
+		return
+	}
+	if in.MediaType != models.MediaKindMovie && in.MediaType != models.MediaKindTV {
+		appError(w, http.StatusBadRequest, "invalid_argument", "media_type 要选 movie 或 tv")
+		return
+	}
+	if bad := svc.UnknownSites(in.Sites); len(bad) > 0 {
+		appError(w, http.StatusBadRequest, "invalid_argument", "这些站点没有配置或没启用："+strings.Join(bad, "、"))
+		return
+	}
+	if !appCheckDownloader(w, r, svc, in.DownloaderID) {
+		return
+	}
+	input := subscribe.SubscriptionInput{
+		MediaType: in.MediaType, TMDBID: in.TMDBID, Season: in.Season, ProfileID: in.ProfileID, Upgrade: in.Upgrade,
+		IncludeKeywords: in.IncludeKeywords, ExcludeKeywords: in.ExcludeKeywords,
+		Sites: in.Sites, DownloaderID: in.DownloaderID, Category: in.Category, Tags: in.Tags, SavePath: in.SavePath,
+		LockVersion: in.LockVersion, LockGroup: in.LockGroup, LockResolution: in.LockResolution, StartEpisode: in.StartEpisode,
+		FollowNextSeason: in.FollowNextSeason, LibraryID: in.LibraryID,
+	}
+	if in.Schedule != nil {
+		input.Schedule = in.Schedule.schedule()
+	}
+	if in.FromTorrent != nil {
+		input.FromTorrent = &subscribe.FromTorrent{Site: in.FromTorrent.Site, TorrentID: in.FromTorrent.TorrentID, Title: in.FromTorrent.Title}
+	}
+	subscribe.FollowDefaults(&input)
+	sub, err := svc.CreateSubscription(r.Context(), input, models.MediaSubFromApp)
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	appJSON(w, s.appSubscriptionView(r, svc, sub))
+}
+
+// appSubscriptionView 是改动以后的订阅（带上定时；读不到进度时进度为空）。
+func (s *Server) appSubscriptionView(r *http.Request, svc *subscribe.Service, sub *models.MediaSubscription) AppSubscription {
+	if d, err := svc.Subscription(r.Context(), sub.ID); err == nil {
+		return appSubscription(d.SubscriptionView)
+	}
+	return appSubscription(subscribe.SubscriptionView{MediaSubscription: *sub, Schedule: subscribe.ScheduleOf(sub)})
+}
+
+// AppSubscriptionStatus 是 POST /subscriptions/{id}/status：active 开始（或接着）找，paused 暂停。
+type AppSubscriptionStatus struct {
+	Status string `json:"status"`
+}
+
+func (s *Server) appSubscriptionSetStatus(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := appID(w, r)
+	if !ok {
+		return
+	}
+	var in AppSubscriptionStatus
+	if !appDecode(w, r, &in) {
+		return
+	}
+	sub, err := svc.SetStatus(r.Context(), id, in.Status)
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	appJSON(w, s.appSubscriptionView(r, svc, sub))
+}
+
+func (s *Server) appSubscriptionSearch(w http.ResponseWriter, r *http.Request) {
+	if !appNoBody(w, r) {
+		return
+	}
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := appID(w, r)
+	if !ok {
+		return
+	}
+	msg, err := svc.SearchNow(r.Context(), id)
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	appJSON(w, map[string]string{"message": appRedactAddr(msg)})
+}
+
+func (s *Server) appSubscriptionDelete(w http.ResponseWriter, r *http.Request) {
+	if !appNoBody(w, r) {
+		return
+	}
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	id, ok := appID(w, r)
+	if !ok {
+		return
+	}
+	if err := svc.DeleteSubscription(r.Context(), id); err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	appJSON(w, map[string]bool{"ok": true})
+}
+
+// ---- 探索 ----
+
+// AppExploreItem 是 TMDB 的一个条目，标上已入库、已订阅。
+type AppExploreItem struct {
+	ID             int     `json:"id"`
+	MediaType      string  `json:"media_type"`
+	Title          string  `json:"title"`
+	OriginalTitle  string  `json:"original_title,omitempty"`
+	Year           int     `json:"year,omitempty"`
+	Overview       string  `json:"overview,omitempty"`
+	PosterPath     string  `json:"poster_path,omitempty"`
+	VoteAverage    float64 `json:"vote_average,omitempty"`
+	InLibrary      bool    `json:"in_library"`
+	Subscribed     bool    `json:"subscribed"`
+	SubscriptionID uint    `json:"subscription_id,omitempty"`
+}
+
+// AppExplorePage 是 GET /explore 的回应。
+type AppExplorePage struct {
+	Items      []AppExploreItem `json:"items"`
+	Page       int              `json:"page"`
+	TotalPages int              `json:"total_pages"`
+}
+
+func (s *Server) appExplore(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appSubscribeService(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	page := 1
+	if v := q.Get("page"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			appError(w, http.StatusBadRequest, "invalid_argument", "page 从 1 开始")
+			return
+		}
+		page = n
+	}
+	list := q.Get("list")
+	if list == "" {
+		list = tmdb.ListTrending
+	}
+	// App API 的契约只有这三个列表（网页上的更多列表与按条件发现不在里面）
+	if list != tmdb.ListTrending && list != tmdb.ListPopular && list != subscribe.ExploreSearch {
+		appError(w, http.StatusBadRequest, "invalid_argument", "list 要选 trending、popular 或 search")
+		return
+	}
+	res, err := svc.Explore(r.Context(), q.Get("kind"), list, page, q.Get("q"))
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	out := AppExplorePage{Items: make([]AppExploreItem, 0, len(res.Items)), Page: res.Page, TotalPages: res.TotalPages}
+	for _, it := range res.Items {
+		out.Items = append(out.Items, AppExploreItem{
+			ID: it.ID, MediaType: it.MediaType, Title: it.Title, OriginalTitle: it.OriginalTitle, Year: it.Year, Overview: it.Overview,
+			PosterPath: it.PosterPath, VoteAverage: it.VoteAverage, InLibrary: it.InLibrary, Subscribed: it.Subscribed, SubscriptionID: it.SubscriptionID,
+		})
+	}
+	appJSON(w, out)
+}
+
+var (
+	// 只给海报尺寸，不给原图（原图可能有好几 MB）
+	appImageSizeRe = regexp.MustCompile(`^(?:w92|w154|w185|w342|w500|w780)$`)
+	appImageFileRe = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$`)
+	// 同时最多取这么多张图（每张最多读进 10 MiB 内存），排队超过 appImageWait 回 503
+	appImageSlots = make(chan struct{}, 4)
+	appImageWait  = 10 * time.Second
+)
+
+// appTMDBImage 是 GET /images/tmdb/{size}/{file}：pt-tools 按自己的 TMDB 图片地址与代理去取海报，
+// App 不直接连 TMDB（国内常常连不上，也不让 TMDB 看到这台手机）。file 是 poster_path 去掉开头的 /。
+func (s *Server) appTMDBImage(w http.ResponseWriter, r *http.Request) {
+	size, file := r.PathValue("size"), r.PathValue("file")
+	if !appImageSizeRe.MatchString(size) || !appImageFileRe.MatchString(file) {
+		appError(w, http.StatusBadRequest, "invalid_argument", "图片尺寸或文件名不对")
+		return
+	}
+	if s.media == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "媒体识别没有启动")
+		return
+	}
+	// 只取图片，不要 API Key：清除 Key 以后已有订阅、记录里的海报照样能显示
+	c, err := s.media.Images(r.Context())
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	wait := time.NewTimer(appImageWait)
+	defer wait.Stop()
+	select {
+	case appImageSlots <- struct{}{}:
+		defer func() { <-appImageSlots }()
+	case <-wait.C:
+		w.Header().Set("Retry-After", "5")
+		appError(w, http.StatusServiceUnavailable, "busy", "取图片的请求太多，稍后再试")
+		return
+	case <-r.Context().Done():
+		return
+	}
+	b, err := c.Image(r.Context(), "/"+file, size)
+	switch {
+	case errors.Is(err, tmdb.ErrNotFound):
+		appError(w, http.StatusNotFound, "not_found", "TMDB 上没有这张图片")
+		return
+	case err != nil:
+		appError(w, http.StatusBadGateway, "upstream", "取 TMDB 图片失败: "+appRedactAddr(err.Error()))
+		return
+	}
+	w.Header().Set("Content-Type", http.DetectContentType(b))
+	// TMDB 的图片地址不变内容：让 App 缓存一天
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	_, _ = w.Write(b)
+}

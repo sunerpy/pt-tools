@@ -288,14 +288,22 @@ func (t *TransmissionClient) createRequestWithContext(ctx context.Context, metho
 
 // doRequest 执行 RPC 请求
 func (t *TransmissionClient) doRequest(method string, args any) (*rpcResponse, error) {
+	return t.doRequestContext(context.Background(), method, args)
+}
+
+// doRequestContext 执行 RPC 请求；请求受 ctx 约束。
+func (t *TransmissionClient) doRequestContext(ctx context.Context, method string, args any) (*rpcResponse, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.client == nil {
 		return nil, fmt.Errorf("client is closed")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-	req, err := t.createRequest(method, args)
+	req, err := t.createRequestWithContext(ctx, method, args)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +318,7 @@ func (t *TransmissionClient) doRequest(method string, args any) (*rpcResponse, e
 	if resp.StatusCode == http.StatusConflict {
 		t.sessionID = resp.Header.Get("X-Transmission-Session-Id")
 		// 重试请求
-		req, err = t.createRequest(method, args)
+		req, err = t.createRequestWithContext(ctx, method, args)
 		if err != nil {
 			return nil, err
 		}
@@ -632,31 +640,41 @@ var trActiveDLStatus = map[int]struct{}{
 //
 // 与 qBit 实现保持一致的状态约定：暂停种子也计入（用户可恢复）；checking
 // 状态 leftUntilDone 通常为 0 但保留以防边界场景。
-func (t *TransmissionClient) GetIncompletePendingBytes(_ context.Context) (int64, error) {
-	args := torrentGetArgs{Fields: []string{"id", "status", "leftUntilDone"}}
+func (t *TransmissionClient) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	snap, err := t.IncompletePendingSnapshot(ctx)
+	return snap.Bytes, err
+}
+
+// IncompletePendingSnapshot 用同一次 torrent-get 算出待占用（同 GetIncompletePendingBytes），并记下所有种子的 hash。
+func (t *TransmissionClient) IncompletePendingSnapshot(_ context.Context) (downloader.PendingSnapshot, error) {
+	args := torrentGetArgs{Fields: []string{"id", "hashString", "status", "leftUntilDone"}}
 	resp, err := t.doRequest("torrent-get", args)
 	if err != nil {
-		return 0, fmt.Errorf("torrent-get 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("torrent-get 失败: %w", err)
 	}
 	var getResp struct {
 		Torrents []struct {
-			Status        int   `json:"status"`
-			LeftUntilDone int64 `json:"leftUntilDone"`
+			HashString    string `json:"hashString"`
+			Status        int    `json:"status"`
+			LeftUntilDone int64  `json:"leftUntilDone"`
 		} `json:"torrents"`
 	}
 	if err := json.Unmarshal(resp.Arguments, &getResp); err != nil {
-		return 0, fmt.Errorf("解析 torrent-get 失败: %w", err)
+		return downloader.PendingSnapshot{}, fmt.Errorf("解析 torrent-get 失败: %w", err)
 	}
-	var total int64
+	snap := downloader.PendingSnapshot{Hashes: make(map[string]struct{}, len(getResp.Torrents))}
 	for _, tt := range getResp.Torrents {
+		if tt.HashString != "" {
+			snap.Hashes[strings.ToLower(tt.HashString)] = struct{}{}
+		}
 		if _, active := trActiveDLStatus[tt.Status]; !active {
 			continue
 		}
 		if tt.LeftUntilDone > 0 {
-			total += tt.LeftUntilDone
+			snap.Bytes += tt.LeftUntilDone
 		}
 	}
-	return total, nil
+	return snap, nil
 }
 
 // torrentFullInfo 完整的种子信息结构
@@ -679,6 +697,7 @@ type torrentFullInfo struct {
 	ETA                int64    `json:"eta"`
 	SecondsSeeding     int64    `json:"secondsSeeding"`
 	DoneDate           int64    `json:"doneDate"`
+	ActivityDate       int64    `json:"activityDate"` // 最后一次上传或下载数据的时间（没有过活动时为 0）
 	PeersSendingToUs   int      `json:"peersSendingToUs"`
 	PeersGettingFromUs int      `json:"peersGettingFromUs"`
 	PeersConnected     int      `json:"peersConnected"`
@@ -717,7 +736,7 @@ func (t *TransmissionClient) GetAllTorrents() ([]downloader.Torrent, error) {
 			"id", "name", "hashString", "status", "percentDone",
 			"rateDownload", "rateUpload", "totalSize", "leftUntilDone", "uploadedEver",
 			"downloadedEver", "uploadRatio", "addedDate", "downloadDir", "labels",
-			"eta", "secondsSeeding", "trackers", "doneDate", "peersSendingToUs",
+			"eta", "secondsSeeding", "trackers", "doneDate", "activityDate", "peersSendingToUs",
 			"peersGettingFromUs", "peersConnected", "desiredAvailable",
 		},
 	}
@@ -761,6 +780,7 @@ func (t *TransmissionClient) mapTransmissionTorrent(tt torrentFullInfo) download
 		ETA:             tt.ETA,
 		SeedingTime:     tt.SecondsSeeding,
 		CompletionOn:    tt.DoneDate,
+		LastActivity:    max(tt.ActivityDate, 0),
 		NumSeeds:        tt.PeersGettingFromUs,
 		NumPeers:        tt.PeersSendingToUs,
 		Availability:    tt.DesiredAvailable,
@@ -769,6 +789,8 @@ func (t *TransmissionClient) mapTransmissionTorrent(tt torrentFullInfo) download
 		TotalDownloaded: tt.DownloadedEver,
 		ClientID:        t.name,
 		Raw:             tt,
+		// 整个种子群的人数在 trackerStats 里，列表不读它（见 GetAllTorrentTrackers）
+		SwarmSeeds: -1, SwarmLeechers: -1,
 	}
 
 	if len(tt.Trackers) > 0 {
@@ -884,14 +906,7 @@ func (t *TransmissionClient) AddTorrentEx(torrentURL string, opt downloader.AddT
 	}
 
 	// Transmission 使用 labels 代替 category/tags
-	var labels []string
-	if opt.Category != "" {
-		labels = append(labels, opt.Category)
-	}
-	if opt.Tags != "" {
-		labels = append(labels, opt.Tags)
-	}
-	if len(labels) > 0 {
+	if labels := addLabels(opt.Category, opt.Tags); len(labels) > 0 {
 		args["labels"] = labels
 	}
 
@@ -907,10 +922,11 @@ func (t *TransmissionClient) AddTorrentEx(torrentURL string, opt downloader.AddT
 
 	if addResp.TorrentDuplicate != nil {
 		return downloader.AddTorrentResult{
-			Success: true,
-			Message: "Torrent already exists",
-			ID:      fmt.Sprintf("%d", addResp.TorrentDuplicate.ID),
-			Hash:    addResp.TorrentDuplicate.HashString,
+			Success:   true,
+			Message:   "Torrent already exists",
+			ID:        fmt.Sprintf("%d", addResp.TorrentDuplicate.ID),
+			Hash:      addResp.TorrentDuplicate.HashString,
+			Duplicate: true,
 		}, nil
 	}
 
@@ -928,6 +944,11 @@ func (t *TransmissionClient) AddTorrentEx(torrentURL string, opt downloader.AddT
 
 // AddTorrentFileEx 添加种子文件到下载器（新接口）
 func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	return t.AddTorrentFileExContext(context.Background(), fileData, opt)
+}
+
+// AddTorrentFileExContext 同 AddTorrentFileEx，torrent-add 与随后的 torrent-set、torrent-start 都受 ctx 约束。
+func (t *TransmissionClient) AddTorrentFileExContext(ctx context.Context, fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
 	// Transmission 使用 base64 编码的种子文件
 	metainfo := base64.StdEncoding.EncodeToString(fileData)
 
@@ -952,18 +973,11 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 	}
 
 	// Transmission 使用 labels 代替 category/tags
-	var labels []string
-	if opt.Category != "" {
-		labels = append(labels, opt.Category)
-	}
-	if opt.Tags != "" {
-		labels = append(labels, opt.Tags)
-	}
-	if len(labels) > 0 {
+	if labels := addLabels(opt.Category, opt.Tags); len(labels) > 0 {
 		args["labels"] = labels
 	}
 
-	resp, err := t.doRequest("torrent-add", args)
+	resp, err := t.doRequestContext(ctx, "torrent-add", args)
 	if err != nil {
 		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
 	}
@@ -997,7 +1011,7 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 			setArgs["downloadLimit"] = dlBytes / 1024
 			setArgs["downloadLimited"] = true
 		}
-		if _, err := t.doRequest("torrent-set", setArgs); err != nil {
+		if _, err := t.doRequestContext(ctx, "torrent-set", setArgs); err != nil {
 			return downloader.AddTorrentResult{
 				Success: false,
 				Message: fmt.Sprintf("torrent added but failed to set speed limits: %v", err),
@@ -1008,7 +1022,7 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 
 		// 如果用户本来希望自动启动（opt.AddAtPaused=false），此时触发 start
 		if !opt.AddAtPaused {
-			if _, err := t.doRequest("torrent-start", map[string]any{"ids": []int{torrentID}}); err != nil {
+			if _, err := t.doRequestContext(ctx, "torrent-start", map[string]any{"ids": []int{torrentID}}); err != nil {
 				return downloader.AddTorrentResult{
 					Success: false,
 					Message: fmt.Sprintf("torrent added with limits but failed to start: %v", err),
@@ -1021,10 +1035,11 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 
 	if duplicate {
 		return downloader.AddTorrentResult{
-			Success: true,
-			Message: "Torrent already exists",
-			ID:      fmt.Sprintf("%d", torrentID),
-			Hash:    hashString,
+			Success:   true,
+			Message:   "Torrent already exists",
+			ID:        fmt.Sprintf("%d", torrentID),
+			Hash:      hashString,
+			Duplicate: true,
 		}, nil
 	}
 
@@ -1069,6 +1084,21 @@ func normalizeTransmissionIDs(ids []string) []any {
 		normalized = append(normalized, trimmed)
 	}
 	return normalized
+}
+
+// addLabels 是加种时的 labels：分类在前，逗号分隔的标签逐个跟上，去掉空的和重复的。
+// Transmission 不接受带逗号的 label（labels cannot contain comma），所以不能把整串标签当成一个。
+func addLabels(category, tags string) []string {
+	labels := make([]string, 0, 4)
+	seen := map[string]bool{}
+	for _, l := range append([]string{strings.TrimSpace(category)}, splitLabels(tags)...) {
+		if l == "" || seen[l] {
+			continue
+		}
+		seen[l] = true
+		labels = append(labels, l)
+	}
+	return labels
 }
 
 func splitLabels(tags string) []string {
@@ -1179,9 +1209,14 @@ func (t *TransmissionClient) SetTorrentTags(id, tags string) error {
 		return nil
 	}
 
+	// 去掉全部标签时要发空数组：nil 会编码成 null
+	labels := splitLabels(tags)
+	if labels == nil {
+		labels = []string{}
+	}
 	_, err := t.doRequest("torrent-set", map[string]any{
 		"ids":    ids,
-		"labels": splitLabels(tags),
+		"labels": labels,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set torrent tags: %w", err)
@@ -1295,8 +1330,12 @@ func (t *TransmissionClient) GetTorrentTrackers(id string) ([]downloader.Torrent
 		return nil, downloader.ErrTorrentNotFound
 	}
 
-	trackers := make([]downloader.TorrentTracker, 0, len(getResp.Torrents[0].TrackerStats))
-	for _, tracker := range getResp.Torrents[0].TrackerStats {
+	return mapTrackerStats(getResp.Torrents[0].TrackerStats), nil
+}
+
+func mapTrackerStats(stats []transmissionTrackerStat) []downloader.TorrentTracker {
+	trackers := make([]downloader.TorrentTracker, 0, len(stats))
+	for _, tracker := range stats {
 		url := tracker.Announce
 		if url == "" {
 			url = tracker.Host
@@ -1311,8 +1350,7 @@ func (t *TransmissionClient) GetTorrentTrackers(id string) ([]downloader.Torrent
 			Message: tracker.LastAnnounceResult,
 		})
 	}
-
-	return trackers, nil
+	return trackers
 }
 
 func (t *TransmissionClient) GetDiskInfo() (downloader.DiskInfo, error) {

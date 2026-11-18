@@ -86,8 +86,13 @@ const BOARD_40 = [
   },
 
   // --- ElMessageBox 确认（画板 19–37）
-  { tile: "19 确认 · 停止所有任务", file: "stores/runtime.ts", needle: "停止所有任务" },
-  { tile: "20 确认 · 启动所有任务", file: "stores/runtime.ts", needle: "启动所有任务" },
+  // 2026-10「调度器」改名「RSS 任务」，确认文案跟着改；小图名照画板原样
+  { tile: "19 确认 · 停止所有任务", file: "stores/runtime.ts", needle: "确定停止 RSS 任务吗" },
+  {
+    tile: "20 确认 · 启动所有任务",
+    file: "stores/runtime.ts",
+    needle: "按当前配置启动 RSS 任务吗",
+  },
   { tile: "21 确认 · 批量删除记录", file: "views/TaskList.vue", needle: "ElMessageBox.confirm" },
   { tile: "22 确认 · 删除站点", file: "views/SiteList.vue", needle: "ElMessageBox.confirm" },
   { tile: "23 确认 · 删除 RSS", file: "views/SiteDetail.vue", needle: "ElMessageBox.confirm" },
@@ -135,8 +140,43 @@ const BOARD_40 = [
  * 这不是豁免：它同样会被打印出来给 owner 看。
  */
 const NOT_ON_BOARD = {
+  "views/ApiTokens.vue":
+    "API 令牌页（路线图 M12）晚于画板 40 定稿：新建令牌与只显示一次明文的弹窗不在那张清点图里",
+  "views/RemoteAccess.vue":
+    "远程访问页（路线图 M15）晚于画板 40 定稿：添加设备（二维码与倒计时）的弹窗不在那张清点图里",
+  "views/BrushTasks.vue":
+    "刷流任务页（路线图 M3）晚于画板 40 定稿：任务编辑弹窗、删除任务的弹窗（选留下的种子交给自动删种还是保留）与种子抽屉都不在那张清点图里",
+  "components/brush/BrushRunsDrawer.vue":
+    "刷流任务的运行记录抽屉（2026-10-27）晚于画板 40 定稿：每一轮的状态与步骤，与种子抽屉同一种样式",
+  "components/reseed/ReseedRunDrawer.vue":
+    "辅种轮次的详情抽屉（2026-10-30）晚于画板 40 定稿：每一轮的计数、步骤与尝试，与刷流运行记录抽屉同一种样式",
+  "views/Reseed.vue":
+    "IYUU 辅种页（路线图 M6）晚于画板 40 定稿：停止一轮的确认弹窗（可勾选一起取消等待中的任务）不在那张清点图里",
+  "views/TorrentTransfer.vue":
+    "转移做种页（路线图 M5）晚于画板 40 定稿：定时规则的编辑弹窗不在那张清点图里",
+  "views/MediaRecognize.vue":
+    "媒体识别页（路线图 M9）晚于画板 40 定稿：识别词的添加 / 编辑弹窗不在那张清点图里",
+  "views/MediaLibrary.vue":
+    "媒体库页（路线图 M10、M23）晚于画板 40 定稿：媒体库、二级分类、路径映射、媒体服务器的编辑弹窗不在那张清点图里",
+  "views/MediaHistory.vue":
+    "整理历史页（路线图 M10）晚于画板 40 定稿：删除记录（可连库里的文件一起删）的确认弹窗不在那张清点图里",
+  "components/media/OrganizeDialog.vue":
+    "「整理入库」（路线图 M10）晚于画板 40 定稿：任务列表与下载器 Web UI 共用这个弹窗；整理历史与媒体库页用它手动整理一个文件或目录（标题是「手动整理」）",
+  "views/MediaSubscriptions.vue":
+    "订阅页（路线图 M11）晚于画板 40 定稿：豆瓣想看的条目弹窗不在那张清点图里",
+  "components/media/SubscribeDialog.vue":
+    "「订阅」（路线图 M11）晚于画板 40 定稿：探索页与订阅页共用这个弹窗",
+  "components/media/SubscriptionDetailDialog.vue":
+    "订阅详情（路线图 M11）晚于画板 40 定稿：分集与下载过的种子",
+  "components/media/QualityProfileDialog.vue": "质量档案的添加与修改（路线图 M11）晚于画板 40 定稿",
+  "components/media/DoubanSourceDialog.vue":
+    "豆瓣想看来源的添加与修改（路线图 M11）晚于画板 40 定稿",
+  "components/downloader/TransferDialog.vue":
+    "「转移到其他下载器」（路线图 M5）晚于画板 40 定稿：下载器 Web UI 与任务列表的批量操作共用这个弹窗",
   "views/DynamicSiteSettings.vue":
     "动态站点两个弹窗：路由在 router/index.ts 里已注释掉，画板刻意不画（design-system.md 的说明）",
+  "views/AutoCleanup.vue#cpTitle":
+    "自动删种的「预览会删哪些」（路线图 M23）晚于画板 40 定稿：只读的结果弹窗，不在那张清点图里",
   "views/SiteList.vue#导入站点模板":
     "「导入站点模板」弹窗晚于画板 40 定稿，功能已上线但没进那张清点图",
   "views/SiteDetail.vue#编辑 RSS 订阅":
@@ -145,6 +185,29 @@ const NOT_ON_BOARD = {
     "列表页的只读详情弹窗，画板把通道详情画成了独立路由（板 23/37）",
   "components/shell/MobileChrome.vue":
     "底栏「我的」的上拉面板 —— 它的规格在画板 34（移动 · 我的），不在这张清点图里",
+  "components/search/EntrySearch.vue#筛选":
+    "按条目搜索（媒体中心 M2a）晚于画板 40 定稿：视口窄于 1280 时左栏收进这个抽屉，内容就是画板 06 的左栏",
+  "components/search/BlockDialog.vue":
+    "「不要这个种子」（媒体中心 M2b）晚于画板 40 定稿：按条目搜索、关键字搜索与订阅详情共用，写原因、作用范围，订阅详情里还能顺手删种",
+  "views/FreeWatches.vue":
+    "等免费页（媒体中心 M2b）晚于画板 40 定稿：改到期时间的弹窗不在那张清点图里",
+  "components/media/ImportLibraryDialog.vue":
+    "「导入已有文件」（媒体中心 M5）晚于画板 40 定稿：媒体库页每个库的导入弹窗，以及它里面在库目录里浏览的「选一个文件夹」",
+  "components/media/MediaDeleteDialog.vue":
+    "「删除一部片」（媒体中心 M7）晚于画板 40 定稿：条目详情的删除弹窗，规格是画板 03 的片段「删除这一季」（docs/design/media-hub-board-spec.md）",
+  "components/nas/NasSourceDialog.vue":
+    "「添加 / 编辑来源」（首页 NAS 概览 H2）晚于画板 40 定稿：NAS 监控页接入一个来源的弹窗，测试连接、信任自签证书与验证码都在里面；画板与 docs/design/home-nas-spec.md 都没画这一页，样式沿用远程访问页，字段与行为见 docs/guide/nas-monitor.md",
+  "components/media/SubscribePreview.vue":
+    "订阅弹窗的「试搜索」抽屉（追剧方案 F2）晚于画板 40 定稿：按还没保存的表单搜一次，三栏结果与结果上的操作见 docs/guide/media-subscribe.md；卡片沿用按条目搜索（画板 06）的写法",
+  "mobile/SubscriptionPreview.vue":
+    "手机 App 追剧编辑页的「试搜索」（追剧方案 F3）晚于画板 40 定稿：占满屏的结果弹层与点一组弹出的操作列表，" +
+    "只在 App 内嵌的编辑页里出现；三栏与操作同网页的试搜索抽屉，见 docs/guide/mobile-app.md",
+  "components/home/HomeTodo.vue#drawerTitle":
+    "首页「待处理」的抽屉（媒体中心 M8）晚于画板 40 定稿：「全部」与抽屉类的标签打开它，一件事一行；规格在画板 02、07（docs/design/media-hub-board-spec.md）",
+  "components/search/EntrySearch.vue#(drawer 无 title)":
+    "按条目搜索（媒体中心 M2a）在手机上的筛选面板：规格在画板 10（媒体中心那一组），不在画板 40 的清点图里",
+  "views/MediaItem.vue#(drawer 无 title)":
+    "条目详情（媒体中心 M3）在手机上点一行种子从底部弹出的操作（在下载器里打开、删除这个种子、不要这个种子）：画板 08 写了「点一行打开底部菜单」，不在画板 40 的清点图里",
   "views/chatops/RSSNotifications.vue#通知详情":
     "移动端专用：行卡替代了桌面表格的展开行，详情只能放弹窗。画板 26 画的是桌面展开行，" +
     "画板 40 定稿时移动端行卡还没落地，所以两张图上都没有它。桌面走展开行，不会用到这个弹窗。",

@@ -26,6 +26,7 @@ func setupBindingTestDB(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=busy_timeout(5000)", t.Name())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
@@ -44,6 +45,12 @@ func newBindingService(t *testing.T) (BindingService, *gorm.DB) {
 	db := setupBindingTestDB(t)
 	svc := NewBindingService(db, "admin-1")
 	return svc, db
+}
+
+// seedConf 建一条通知通道配置：绑定码只能在签发它的通道（同 ID、同类型）上兑换。
+func seedConf(t *testing.T, db *gorm.DB, id uint, channelType string) {
+	t.Helper()
+	require.NoError(t, db.Create(&models.NotificationConf{ID: id, ChannelType: channelType, Name: fmt.Sprintf("conf-%d", id)}).Error)
 }
 
 func TestIssueCode_HappyPath(t *testing.T) {
@@ -143,10 +150,11 @@ func TestConsumeCode_HappyPath(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
 
+	seedConf(t, db, 9, "telegram")
 	issued, err := svc.IssueCode(ctx, 9, "tg-main", 5*time.Minute)
 	require.NoError(t, err)
 
-	binding, err := svc.ConsumeCode(ctx, issued.Code, "telegram", "user-42")
+	binding, err := svc.ConsumeCode(ctx, issued.Code, 9, "telegram", "user-42")
 	require.NoError(t, err)
 	assert.NotZero(t, binding.ID)
 	assert.Equal(t, uint(9), binding.ConfID)
@@ -173,6 +181,7 @@ func TestConsumeCode_HappyPath(t *testing.T) {
 func TestConsumeCode_Expired(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
 
 	issued, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 	require.NoError(t, err)
@@ -181,22 +190,23 @@ func TestConsumeCode_Expired(t *testing.T) {
 		Where("code_or_token_hash = ?", issued.Code).
 		UpdateColumn("expires_at", time.Now().Add(-time.Minute)).Error)
 
-	_, err = svc.ConsumeCode(ctx, issued.Code, "telegram", "u")
+	_, err = svc.ConsumeCode(ctx, issued.Code, 1, "telegram", "u")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrCodeUsedOrExpired))
 }
 
 func TestConsumeCode_Used(t *testing.T) {
-	svc, _ := newBindingService(t)
+	svc, db := newBindingService(t)
 	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
 
 	issued, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 	require.NoError(t, err)
 
-	_, err = svc.ConsumeCode(ctx, issued.Code, "telegram", "u1")
+	_, err = svc.ConsumeCode(ctx, issued.Code, 1, "telegram", "u1")
 	require.NoError(t, err)
 
-	_, err = svc.ConsumeCode(ctx, issued.Code, "telegram", "u2")
+	_, err = svc.ConsumeCode(ctx, issued.Code, 1, "telegram", "u2")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrCodeUsedOrExpired))
 }
@@ -205,14 +215,15 @@ func TestConsumeCode_Unknown(t *testing.T) {
 	svc, _ := newBindingService(t)
 	ctx := context.Background()
 
-	_, err := svc.ConsumeCode(ctx, "NOTEXIST", "telegram", "u")
+	_, err := svc.ConsumeCode(ctx, "NOTEXIST", 1, "telegram", "u")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrCodeUsedOrExpired))
 }
 
 func TestConsumeCode_Race(t *testing.T) {
-	svc, _ := newBindingService(t)
+	svc, db := newBindingService(t)
 	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
 
 	issued, err := svc.IssueCode(ctx, 1, "race-test", 5*time.Minute)
 	require.NoError(t, err)
@@ -227,7 +238,7 @@ func TestConsumeCode_Race(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			<-start
-			_, e := svc.ConsumeCode(ctx, issued.Code, "telegram", "user-"+string(rune('A'+idx)))
+			_, e := svc.ConsumeCode(ctx, issued.Code, 1, "telegram", "user-"+string(rune('A'+idx)))
 			results <- e
 		}(i)
 	}
@@ -250,17 +261,19 @@ func TestConsumeCode_Race(t *testing.T) {
 }
 
 func TestListBindings(t *testing.T) {
-	svc, _ := newBindingService(t)
+	svc, db := newBindingService(t)
 	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
+	seedConf(t, db, 2, "qq")
 
 	c1, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
-	_, err = svc.ConsumeCode(ctx, c1.Code, "telegram", "ua")
+	_, err = svc.ConsumeCode(ctx, c1.Code, 1, "telegram", "ua")
 	require.NoError(t, err)
 
 	c2, err := svc.IssueCode(ctx, 2, "b", 5*time.Minute)
 	require.NoError(t, err)
-	_, err = svc.ConsumeCode(ctx, c2.Code, "qq", "ub")
+	_, err = svc.ConsumeCode(ctx, c2.Code, 2, "qq", "ub")
 	require.NoError(t, err)
 
 	list, err := svc.ListBindings(ctx)
@@ -271,10 +284,11 @@ func TestListBindings(t *testing.T) {
 func TestRevoke(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
 
 	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
-	binding, err := svc.ConsumeCode(ctx, c.Code, "telegram", "u")
+	binding, err := svc.ConsumeCode(ctx, c.Code, 1, "telegram", "u")
 	require.NoError(t, err)
 
 	require.NoError(t, svc.Revoke(ctx, binding.ID))
@@ -287,10 +301,11 @@ func TestRevoke(t *testing.T) {
 func TestSetReplyLang(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
 
 	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
-	binding, err := svc.ConsumeCode(ctx, c.Code, "telegram", "u")
+	binding, err := svc.ConsumeCode(ctx, c.Code, 1, "telegram", "u")
 	require.NoError(t, err)
 
 	require.NoError(t, svc.SetReplyLang(ctx, binding.ID, "en"))
@@ -301,12 +316,13 @@ func TestSetReplyLang(t *testing.T) {
 }
 
 func TestSetReplyLang_Invalid(t *testing.T) {
-	svc, _ := newBindingService(t)
+	svc, db := newBindingService(t)
 	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
 
 	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
-	binding, err := svc.ConsumeCode(ctx, c.Code, "telegram", "u")
+	binding, err := svc.ConsumeCode(ctx, c.Code, 1, "telegram", "u")
 	require.NoError(t, err)
 
 	err = svc.SetReplyLang(ctx, binding.ID, "fr")
@@ -389,12 +405,54 @@ func TestListBindings_ReturnsDTOs(t *testing.T) {
 
 func TestConsumeCode_MissingArgs(t *testing.T) {
 	svc, _ := newBindingService(t)
-	_, err := svc.ConsumeCode(context.Background(), "", "telegram", "u")
+	_, err := svc.ConsumeCode(context.Background(), "", 1, "telegram", "u")
 	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
-	_, err = svc.ConsumeCode(context.Background(), "c", "", "u")
+	_, err = svc.ConsumeCode(context.Background(), "c", 0, "telegram", "u")
 	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
-	_, err = svc.ConsumeCode(context.Background(), "c", "telegram", "")
+	_, err = svc.ConsumeCode(context.Background(), "c", 1, "", "u")
 	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
+	_, err = svc.ConsumeCode(context.Background(), "c", 1, "telegram", "")
+	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
+}
+
+// 绑定码只能在签发它的通知通道上兑换：别的通道拿到也用不了，且不会把码消耗掉。
+func TestConsumeCode_RejectsOtherConf(t *testing.T) {
+	svc, db := newBindingService(t)
+	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
+	seedConf(t, db, 2, "telegram")
+
+	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
+	require.NoError(t, err)
+
+	_, err = svc.ConsumeCode(ctx, c.Code, 2, "telegram", "u")
+	require.ErrorIs(t, err, ErrCodeWrongChannel)
+
+	var token models.BotToken
+	require.NoError(t, db.Where("code_or_token_hash = ?", c.Code).First(&token).Error)
+	assert.Nil(t, token.UsedAt, "通道不符时不消耗绑定码")
+
+	binding, err := svc.ConsumeCode(ctx, c.Code, 1, "telegram", "u")
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), binding.ConfID)
+}
+
+// 消息来源的通道类型必须与签发通道一致，不能用 Telegram 通道的码从 QQ 兑换。
+func TestConsumeCode_RejectsChannelTypeMismatch(t *testing.T) {
+	svc, db := newBindingService(t)
+	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
+
+	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
+	require.NoError(t, err)
+	_, err = svc.ConsumeCode(ctx, c.Code, 1, "qq_onebot", "10001")
+	require.ErrorIs(t, err, ErrCodeWrongChannel)
+
+	// 签发通道已被删除时同样拒绝
+	c2, err := svc.IssueCode(ctx, 5, "gone", 5*time.Minute)
+	require.NoError(t, err)
+	_, err = svc.ConsumeCode(ctx, c2.Code, 5, "telegram", "u")
+	require.ErrorIs(t, err, ErrCodeWrongChannel)
 }
 
 func TestConsumeCode_LookupError(t *testing.T) {
@@ -406,7 +464,7 @@ func TestConsumeCode_LookupError(t *testing.T) {
 	require.NoError(t, sqlDB.Close())
 
 	svc := NewBindingService(db, "admin")
-	_, err = svc.ConsumeCode(context.Background(), "code", "telegram", "u")
+	_, err = svc.ConsumeCode(context.Background(), "code", 1, "telegram", "u")
 	require.Error(t, err)
 }
 
@@ -415,4 +473,50 @@ func TestRevoke_DBError(t *testing.T) {
 	svc := NewBindingService(db, "admin")
 	err := svc.Revoke(context.Background(), 1)
 	require.Error(t, err)
+}
+
+// 钉子（2026-10-29 用户：「为什么我绑定了之后待绑定里还有一个绑定码」）：在通道栏直接绑定不消耗绑定码，
+// 永久的码只有用掉才消失，以前又没有作废的入口，没用掉的码就一直挂在「待绑定」里。
+func TestRevokeCode_RemovesUnusedCodeOnly(t *testing.T) {
+	svc, db := newBindingService(t)
+	ctx := context.Background()
+	seedConf(t, db, 1, "telegram")
+
+	keep, err := svc.IssueCode(ctx, 1, "保留", 0)
+	require.NoError(t, err)
+	drop, err := svc.IssueCode(ctx, 1, "", 0)
+	require.NoError(t, err)
+	require.NotZero(t, drop.ID, "签发时带上编号，页面按编号作废（码本身不进地址）")
+
+	pending, err := svc.ListPendingCodes(ctx)
+	require.NoError(t, err)
+	ids := map[uint]bool{}
+	for _, p := range pending {
+		ids[p.ID] = true
+	}
+	assert.True(t, ids[keep.ID] && ids[drop.ID], "待绑定列表带编号")
+
+	got, err := svc.RevokeCode(ctx, drop.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), got.ConfID)
+	pending, err = svc.ListPendingCodes(ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, keep.Code, pending[0].Code)
+
+	// 作废了的码不能再兑换
+	_, err = svc.ConsumeCode(ctx, drop.Code, 1, "telegram", "u1")
+	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
+
+	// 再作废一次、作废不存在的码：not found
+	_, err = svc.RevokeCode(ctx, drop.ID)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	_, err = svc.RevokeCode(ctx, 9999)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+	// 已经用掉的码是绑定的来历，不能作废
+	_, err = svc.ConsumeCode(ctx, keep.Code, 1, "telegram", "u2")
+	require.NoError(t, err)
+	_, err = svc.RevokeCode(ctx, keep.ID)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 }

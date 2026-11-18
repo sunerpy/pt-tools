@@ -7,10 +7,14 @@
       "release-type": "go",
       "package-name": "pt-tools",
       "bump-minor-pre-major": true,
+      "versioning": "prerelease",
+      "prerelease": true,
+      "prerelease-type": "rc.1",
       "include-v-in-tag": true,
       "draft": true,
       "force-tag-creation": true,
       "changelog-path": "CHANGELOG.md",
+      "exclude-paths": ["relay/cloudflare"],
       "extra-files": [
         {
           "type": "json",
@@ -21,6 +25,10 @@
           "type": "json",
           "path": ".github/scaffold.json",
           "jsonpath": "$.placeholders.CURRENT_VERSION"
+        },
+        {
+          "type": "generic",
+          "path": "apps/mobile/pubspec.yaml"
         }
       ]
     }

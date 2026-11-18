@@ -367,6 +367,23 @@ func TestBaseSite_DownloadWithHash_NoHashDownloader(t *testing.T) {
 	assert.Equal(t, []byte("data"), data)
 }
 
+// 驱动不支持按 hash 下载时回退普通下载，整个过程只能取一次限速令牌。
+func TestBaseSite_DownloadWithHash_FallbackTakesOneToken(t *testing.T) {
+	driver := &MockDriver{}
+	// 突发 1、每秒 0.001 个令牌：第二次 Wait 要等约 1000 秒，2 秒的 deadline 内必然失败
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, RateLimit: 0.001, RateBurst: 1, Logger: zap.NewNop()})
+
+	driver.On("PrepareDownload", "12345").Return("req", nil)
+	driver.On("Execute", mock.Anything, "req").Return("resp", nil)
+	driver.On("ParseDownload", "resp").Return([]byte("data"), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	data, err := site.DownloadWithHash(ctx, "12345", "hashval")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("data"), data)
+}
+
 func TestBaseSite_GetDetailFetcher_Nil(t *testing.T) {
 	driver := &MockDriver{}
 	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, Logger: zap.NewNop()})
@@ -465,3 +482,32 @@ func TestBaseSite_DownloadWithHash_RateLimitCanceled(t *testing.T) {
 // ---------------------------------------------------------------------------
 // ParseSizeMB — TB and KB unit branches
 // ---------------------------------------------------------------------------
+
+// ctxParseDriver 是实现了 ContextDownloadParser 的驱动：记下解析下载时拿到的 ctx。
+type ctxParseDriver struct {
+	hashDriver
+	got context.Context
+}
+
+type ctxProbeKey struct{}
+
+func (c *ctxParseDriver) ParseDownload(string) ([]byte, error) {
+	return nil, errors.New("不该调这个")
+}
+
+func (c *ctxParseDriver) ParseDownloadContext(ctx context.Context, _ string) ([]byte, error) {
+	c.got = ctx
+	return []byte("data"), nil
+}
+
+// 两段式下载的驱动拿到调用方的 ctx（第二段请求跟着调用方取消）。
+func TestBaseSite_Download_PassesContextToParser(t *testing.T) {
+	d := &ctxParseDriver{}
+	site := NewBaseSite[string, string](d, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteMTorrent, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	ctx := context.WithValue(context.Background(), ctxProbeKey{}, "调用方")
+	data, err := site.Download(ctx, "7")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("data"), data)
+	require.NotNil(t, d.got)
+	assert.Equal(t, "调用方", d.got.Value(ctxProbeKey{}))
+}

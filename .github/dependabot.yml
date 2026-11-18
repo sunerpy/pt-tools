@@ -1,4 +1,8 @@
 version: 2
+
+# 依赖更新按生态合并：小版本与补丁每周合成一个 PR，大版本单独开 PR 逐个审核；GitHub Actions 全部合成一个 PR。
+# rebase-strategy: disabled —— main 每次合并后不再重建所有旧的依赖分支、重跑 CI；要合并的 PR 落后时，
+# 在 PR 里评论 `@dependabot rebase`。
 updates:
   # Go modules
   - package-ecosystem: "gomod"
@@ -6,20 +10,33 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    rebase-strategy: disabled
+    open-pull-requests-limit: 2
+    groups:
+      go-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "deps(go)"
     labels:
       - "dependencies"
       - "go"
 
-  # GitHub Actions
+  # GitHub Actions（workflow 里全部按完整 SHA 固定，Dependabot 会连同版本注释一起更新）
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    rebase-strategy: disabled
+    open-pull-requests-limit: 2
+    groups:
+      github-actions:
+        patterns:
+          - "*"
     commit-message:
       prefix: "ci"
     labels:
@@ -32,7 +49,21 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    rebase-strategy: disabled
+    open-pull-requests-limit: 2
+    groups:
+      frontend-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # TypeScript 7 是原生实现，不再导出 vue-tsc 依赖的 typescript/lib/tsc
+      # （#466 的 Frontend Build 报 ERR_PACKAGE_PATH_NOT_EXPORTED）。vue-tsc 支持之前不升大版本。
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     commit-message:
       prefix: "deps(pnpm)"
     labels:

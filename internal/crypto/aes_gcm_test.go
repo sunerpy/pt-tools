@@ -154,6 +154,7 @@ func TestResetForTest(t *testing.T) {
 func TestInitKeyFromFile(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 
 	key := make([]byte, 32)
@@ -189,6 +190,7 @@ func TestInitKeyFromFile(t *testing.T) {
 func TestInitKeyGenerated(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 
 	testResetEncryptor()

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sunerpy/pt-tools/global"
@@ -164,6 +165,17 @@ func sanitizeFilename(name string) string {
 	return result
 }
 
+// 批量下载的上限：一次最多打包的种子数、请求体大小、同时下载数。
+// 原来条目数和字节数都不设限，每项一个 goroutine 同时发出，全部下载完留在内存里再打包。
+const (
+	maxBatchDownloadItems = 200
+	maxBatchDownloadBody  = 1 << 20
+	batchDownloadWorkers  = 8
+)
+
+// batchDownloadMaxBytes 是打包进一个 tar.gz 的种子总字节数上限，超出的条目不进归档（测试里调小）。
+var batchDownloadMaxBytes int64 = 256 << 20
+
 // BatchDownloadRequest represents a request for batch torrent download
 type BatchDownloadRequest struct {
 	Torrents []BatchDownloadItem `json:"torrents"`
@@ -184,6 +196,7 @@ func (s *Server) apiBatchTorrentDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxBatchDownloadBody)
 	var req BatchDownloadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
@@ -192,6 +205,11 @@ func (s *Server) apiBatchTorrentDownload(w http.ResponseWriter, r *http.Request)
 
 	if len(req.Torrents) == 0 {
 		http.Error(w, "No torrents specified", http.StatusBadRequest)
+		return
+	}
+	if len(req.Torrents) > maxBatchDownloadItems {
+		http.Error(w, fmt.Sprintf("一次最多打包 %d 个种子，当前选了 %d 个", maxBatchDownloadItems, len(req.Torrents)),
+			http.StatusBadRequest)
 		return
 	}
 
@@ -216,30 +234,37 @@ func (s *Server) apiBatchTorrentDownload(w http.ResponseWriter, r *http.Request)
 	}
 
 	results := make([]downloadResult, len(req.Torrents))
-	var wg sync.WaitGroup
-
-	for i, item := range req.Torrents {
-		wg.Add(1)
-		go func(idx int, t BatchDownloadItem) {
-			defer wg.Done()
-
-			site := orchestrator.GetSite(t.SiteID)
-			if site == nil {
-				results[idx] = downloadResult{err: fmt.Errorf("site not found: %s", t.SiteID)}
-				return
-			}
-
-			data, err := site.Download(ctx, t.TorrentID)
-			if err != nil {
-				results[idx] = downloadResult{err: fmt.Errorf("download failed for %s/%s: %v", t.SiteID, t.TorrentID, err)}
-				return
-			}
-
-			filename := generateTorrentFilename(t.SiteID, t.TorrentID, t.Title)
-			results[idx] = downloadResult{filename: filename, data: data}
-		}(i, item)
+	var totalBytes atomic.Int64
+	download := func(t BatchDownloadItem) downloadResult {
+		site := orchestrator.GetSite(t.SiteID)
+		if site == nil {
+			return downloadResult{err: fmt.Errorf("site not found: %s", t.SiteID)}
+		}
+		data, err := site.Download(ctx, t.TorrentID)
+		if err != nil {
+			return downloadResult{err: fmt.Errorf("download failed for %s/%s: %v", t.SiteID, t.TorrentID, err)}
+		}
+		if totalBytes.Add(int64(len(data))) > batchDownloadMaxBytes {
+			totalBytes.Add(-int64(len(data)))
+			return downloadResult{err: fmt.Errorf("%s/%s 超出打包总大小上限 %d MiB", t.SiteID, t.TorrentID, batchDownloadMaxBytes>>20)}
+		}
+		return downloadResult{filename: generateTorrentFilename(t.SiteID, t.TorrentID, t.Title), data: data}
 	}
 
+	// 固定数量的 worker 依次领取条目；站点请求另有 site/v2 的限速
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(batchDownloadWorkers, len(req.Torrents)) {
+		wg.Go(func() {
+			for idx := range jobs {
+				results[idx] = download(req.Torrents[idx])
+			}
+		})
+	}
+	for i := range req.Torrents {
+		jobs <- i
+	}
+	close(jobs)
 	wg.Wait()
 
 	// Count successful downloads

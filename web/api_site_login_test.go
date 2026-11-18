@@ -52,7 +52,7 @@ func newRouteTestServer(t *testing.T) (*http.ServeMux, func()) {
 
 	srv := &Server{
 		mgr:      mgr,
-		sessions: map[string]string{"sess-test": "admin"},
+		sessions: sessionsWith("sess-test", "admin"),
 	}
 
 	mux := http.NewServeMux()
@@ -254,11 +254,14 @@ func newProbeSingleFlightServer(t *testing.T, resolveDelay time.Duration) (*Serv
 	resolver := &slowResolver{delay: resolveDelay}
 	mon := scheduler.NewLoginReminderMonitor(scheduler.LoginReminderConfig{
 		DB:        db,
-		Router:    nil,
 		Resolver:  resolver,
 		Decryptor: stubDecryptor{},
 		Clock:     sitelogin.NewFakeClock(time.Now()),
 		Logger:    zap.NewNop().Sugar(),
+		// 测试站点名不在定义注册表里；这里只关心单飞锁，统一视为内置站点。
+		DefinitionLookup: func(name string) (*v2.SiteDefinition, bool) {
+			return &v2.SiteDefinition{ID: name, Schema: v2.SchemaNexusPHP}, true
+		},
 	})
 
 	mgr := scheduler.NewManager()
@@ -266,7 +269,7 @@ func newProbeSingleFlightServer(t *testing.T, resolveDelay time.Duration) (*Serv
 
 	srv := &Server{
 		mgr:      mgr,
-		sessions: map[string]string{"sess-test": "admin"},
+		sessions: sessionsWith("sess-test", "admin"),
 	}
 	cleanup := func() {
 		mgr.SetLoginReminderMonitor(nil)
@@ -494,7 +497,7 @@ func TestApiSiteLoginStateList_NilDB(t *testing.T) {
 	global.GlobalDB = nil
 	t.Cleanup(func() { global.GlobalDB = prev })
 
-	srv := &Server{sessions: map[string]string{"sess-test": "admin"}}
+	srv := &Server{sessions: sessionsWith("sess-test", "admin")}
 	rec := httptest.NewRecorder()
 	srv.apiSiteLoginStateList(rec, authedRequest(http.MethodGet, "/api/sites/login-state", nil))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
@@ -884,7 +887,7 @@ func newSiteLoginTestServer(t *testing.T) (*Server, func()) {
 	global.GlobalDB = &models.TorrentDB{DB: db}
 
 	srv := &Server{
-		sessions: map[string]string{"sess-test": "admin"},
+		sessions: sessionsWith("sess-test", "admin"),
 	}
 	cleanup := func() { global.GlobalDB = prevDB }
 	return srv, cleanup

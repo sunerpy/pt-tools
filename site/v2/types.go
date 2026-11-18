@@ -33,6 +33,21 @@ var (
 	ErrNetworkError       = errors.New("network error")
 	ErrCircuitOpen        = errors.New("circuit breaker open")
 	ErrNotImplemented     = errors.New("not implemented")
+	// ErrEmptyUsername 表示取回的用户信息没有用户名，通常说明拿到的不是登录后的页面。
+	ErrEmptyUsername = errors.New("parsed empty username")
+	// ErrUserInfoPersist 表示用户信息已经取到、但保存失败；UserInfoService.FetchAndSave 此时会同时返回取到的数据。
+	ErrUserInfoPersist = errors.New("persist user info failed")
+	// ErrCloudflareChallenge 表示站点返回的是 Cloudflare 质询页：请求被反爬拦截，凭证本身未必有问题。
+	ErrCloudflareChallenge = errors.New("cloudflare challenge")
+	// ErrTorrentDetailUnavailable 表示读不到这个种子的详情（站点上找不到，或缓存里没有）。
+	// 调用方要当作取详情失败处理，不能当成「不是免费」，也不能沿用旧数据。
+	ErrTorrentDetailUnavailable = errors.New("torrent detail unavailable")
+	// ErrUnexpectedPage 表示站点回的不是种子列表：一个种子都没有，页面也不像登录以后的站点页面（拦截、维护、验证页等）。
+	ErrUnexpectedPage = errors.New("站点返回的不是种子列表页面")
+	// ErrInvalidTorrentID 表示种子或字幕的编号不是站点认的写法（NexusPHP 的是数字，RSS 的 guid 是 info hash），不发请求。
+	ErrInvalidTorrentID = errors.New("种子编号不对")
+	// ErrSubtitleNotFound 表示站点上没有这份字幕（NexusPHP 的 downloadsubs.php 回「Not found」「File not found」）。
+	ErrSubtitleNotFound = errors.New("站点上没有这份字幕")
 )
 
 // SiteKind represents the type of PT site architecture
@@ -175,6 +190,72 @@ var FreeDiscountLevels = []DiscountLevel{
 	Discount2xFree,
 }
 
+// FreeValidity 是免费资格的规范状态（docs/design/free-expiry-safety.md §4.1）。
+type FreeValidity string
+
+const (
+	// FreeNotFree：不是免费，或免费已经结束
+	FreeNotFree FreeValidity = "not_free"
+	// FreeUntil：免费，结束时间可信（EndsAt）
+	FreeUntil FreeValidity = "free_until"
+	// FreePermanent：站点明确表示长期有效的免费
+	FreePermanent FreeValidity = "free_permanent"
+	// FreeUnknown：免费但结束时间缺失或无法解析，不能当作免费放行的凭据
+	FreeUnknown FreeValidity = "unknown"
+)
+
+// PromotionSnapshot 是一次读取站点得到的优惠快照。不变量：free_until 一定有晚于 VerifiedAt 的 EndsAt；
+// free_permanent 只来自站点明确语义；unknown 不是免费放行的凭据。EndsAt 一律是绝对时间。
+type PromotionSnapshot struct {
+	Level      DiscountLevel
+	Validity   FreeValidity
+	EndsAt     *time.Time
+	VerifiedAt time.Time
+	Source     string
+	Err        string
+}
+
+// FreeFor 报告快照在 now 时能不能当作免费放行：长期免费，或者免费到 EndsAt 且 EndsAt-now 大于 margin。
+func (s PromotionSnapshot) FreeFor(now time.Time, margin time.Duration) bool {
+	switch s.Validity {
+	case FreePermanent:
+		return true
+	case FreeUntil:
+		return s.EndsAt != nil && s.EndsAt.Sub(now) > margin
+	}
+	return false
+}
+
+// Promotion 把驱动给出的优惠字段整理成规范快照。verifiedAt 是读到这份数据的时间。
+func (t *TorrentItem) Promotion(verifiedAt time.Time) PromotionSnapshot {
+	s := PromotionSnapshot{Level: t.DiscountLevel, VerifiedAt: verifiedAt, Source: t.DiscountSource, Err: t.DiscountErr}
+	if !t.DiscountEndTime.IsZero() {
+		end := t.DiscountEndTime.UTC()
+		s.EndsAt = &end
+	}
+	if !IsFreeTorrent(t.DiscountLevel) {
+		s.Validity = FreeNotFree
+		return s
+	}
+	switch t.DiscountValidity {
+	case FreePermanent:
+		s.Validity, s.EndsAt = FreePermanent, nil
+		return s
+	case FreeNotFree, FreeUnknown:
+		s.Validity = t.DiscountValidity
+		return s
+	}
+	switch {
+	case s.EndsAt == nil:
+		s.Validity = FreeUnknown
+	case !s.EndsAt.After(verifiedAt):
+		s.Validity = FreeNotFree
+	default:
+		s.Validity = FreeUntil
+	}
+	return s
+}
+
 // IsFreeTorrent checks if the given discount level results in free download
 func IsFreeTorrent(level DiscountLevel) bool {
 	for _, freeLevel := range FreeDiscountLevels {
@@ -235,6 +316,8 @@ type SearchQuery struct {
 	SortBy string `json:"sortBy,omitempty"`
 	// OrderDesc specifies descending order when true
 	OrderDesc bool `json:"orderDesc,omitempty"`
+	// Section 是站点分区：M-Team 取 normal（综合区）或 adult（成人区），空值按 normal；其他站点忽略
+	Section string `json:"section,omitempty"`
 }
 
 // Validate validates the search query
@@ -280,12 +363,25 @@ type TorrentItem struct {
 	DiscountLevel DiscountLevel `json:"discountLevel"`
 	// DiscountEndTime is when the discount expires
 	DiscountEndTime time.Time `json:"discountEndTime,omitempty"`
+	// DiscountValidity 是站点驱动按原始响应给出的免费有效性（见 Promotion）。为空时按保守规则推导：
+	// 免费但没有结束时间为 unknown（零时间不等于永久），结束时间已过为 not_free。只有站点明确表示长期有效才写 free_permanent。
+	DiscountValidity FreeValidity `json:"discountValidity,omitempty"`
+	// DiscountSource 是优惠来自哪里：base、promotion_rule、mall_single_free，或适配层（adapter）
+	DiscountSource string `json:"discountSource,omitempty"`
+	// DiscountErr 是读取优惠时遇到的问题（例如结束时间无法解析），只写字段名与错误类型，不放原始响应
+	DiscountErr string `json:"discountErr,omitempty"`
+	// FetchedAt 是底层数据实际取得的时间（缓存命中时是缓存刷新的时间）；为零时调用方按调用时间算
+	FetchedAt time.Time `json:"fetchedAt,omitempty"`
 	// HasHR indicates if the torrent has H&R requirements
 	HasHR bool `json:"hasHR,omitempty"`
 	// DownloadURL is the direct download URL
 	DownloadURL string `json:"downloadUrl,omitempty"`
 	// Category is the torrent category
 	Category string `json:"category,omitempty"`
+	// IMDbID 是 IMDb 编号（tt 开头），站点给了时才有
+	IMDbID string `json:"imdbId,omitempty"`
+	// DoubanID 是豆瓣电影条目的数字编号，站点给了时才有
+	DoubanID string `json:"doubanId,omitempty"`
 }
 
 // IsFree returns true if the torrent is currently free
@@ -370,7 +466,8 @@ type UserInfo struct {
 	UserID string `json:"userId"`
 	// Uploaded is the total uploaded bytes
 	Uploaded int64 `json:"uploaded"`
-	// Downloaded is the total downloaded bytes
+	// Downloaded is the total downloaded bytes as the site bills them (计费下载量): free and
+	// discount promotions already applied, the figure that counts toward ratio
 	Downloaded int64 `json:"downloaded"`
 	// Ratio is the upload/download ratio
 	Ratio float64 `json:"ratio"`
@@ -420,9 +517,10 @@ type UserInfo struct {
 	HnRUnsatisfied int `json:"hnrUnsatisfied,omitempty"`
 	// HnRPreWarning is the number of H&R pre-warnings
 	HnRPreWarning int `json:"hnrPreWarning,omitempty"`
-	// TrueUploaded is the true uploaded bytes (some sites track separately)
+	// TrueUploaded is the actual uploaded bytes, reported separately by some sites (实际上传量)
 	TrueUploaded int64 `json:"trueUploaded,omitempty"`
-	// TrueDownloaded is the true downloaded bytes
+	// TrueDownloaded is the actual downloaded bytes before promotions (实际下载量). It grows on
+	// free torrents while Downloaded does not; daily snapshots do not keep it.
 	TrueDownloaded int64 `json:"trueDownloaded,omitempty"`
 	// Uploads is the number of torrents uploaded by user
 	Uploads int `json:"uploads,omitempty"`
@@ -450,7 +548,7 @@ type LevelProgress struct {
 type AggregatedStats struct {
 	// TotalUploaded is the sum of all uploaded bytes
 	TotalUploaded int64 `json:"totalUploaded"`
-	// TotalDownloaded is the sum of all downloaded bytes
+	// TotalDownloaded is the sum of all billed downloaded bytes (UserInfo.Downloaded)
 	TotalDownloaded int64 `json:"totalDownloaded"`
 	// AverageRatio is the average ratio across all sites
 	AverageRatio float64 `json:"averageRatio"`
@@ -495,6 +593,8 @@ var (
 	ErrBonusInfoUnavailable    = errors.New("bonus info unavailable")
 	ErrMessageCountUnavailable = errors.New("message count unavailable")
 	ErrPeerStatsUnavailable    = errors.New("peer statistics unavailable")
+	// ErrSeedingSizeUnknown 是做种列表里认不出体积列：做种数照样有，体积按没取到算（保存时沿用上一次的），不当成 0
+	ErrSeedingSizeUnknown = errors.New("seeding size column not found")
 )
 
 // Site is the core interface for interacting with a PT site
@@ -541,14 +641,54 @@ type HashDownloader interface {
 	DownloadWithHash(ctx context.Context, torrentID, hash string) ([]byte, error)
 }
 
+// ContextDownloadParser 是驱动可选实现的解析下载：带上调用方的 ctx。两段式下载（先取签名地址、再拉种子文件）的
+// 第二段请求要跟着调用方取消、受它的期限约束；BaseSite 下载时驱动实现了它就用它，不调 ParseDownload。
+type ContextDownloadParser[Res any] interface {
+	ParseDownloadContext(ctx context.Context, res Res) ([]byte, error)
+}
+
 // TorrentDetailFetcher is an optional interface for drivers that can fetch torrent details
 // from RSS item metadata. This is used by RSS processing to get discount info, size, etc.
 // Drivers that implement this interface can be used with GetTorrentDetails in unified_site.go.
 type TorrentDetailFetcher interface {
 	// GetTorrentDetail fetches detailed torrent info given an RSS item's GUID and link.
 	// The guid is typically the torrent ID, and link is the detail page URL.
-	// Returns nil TorrentItem if the torrent is not found (without error).
+	// 能判断出找不到种子、或读不到详情时，返回包装了 ErrTorrentDetailUnavailable 的错误，不返回 (nil, nil)，
+	// 也不返回一个「没有优惠」的占位结果（那等于声称不是免费）。
+	// 实时请求得到的结果写 FetchedAt；结果来自缓存时 FetchedAt 是缓存刷新的时间。
 	GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error)
+}
+
+// Subtitle 是站点上一个种子的一份字幕（NexusPHP 详情页「字幕」一行里的一项）。
+type Subtitle struct {
+	// ID 是字幕的编号（downloadsubs.php 的 subid）；TorrentID 是字幕挂在哪个种子上（torrentid，同一部别的种子的字幕也会列出来）
+	ID        string `json:"id"`
+	TorrentID string `json:"torrent_id"`
+	// Title 是列表上写的标题（多数是上传时的文件名）
+	Title string `json:"title"`
+	// Language 是列表上写的语言（国旗图的 alt 或 title，例如「简体中文」）；Flag 是国旗图的文件名（例如 china.gif）。站点没写时为空
+	Language string `json:"language,omitempty"`
+	Flag     string `json:"flag,omitempty"`
+}
+
+// SubtitleFile 是下载下来的一份字幕：Name 是站点给的文件名（只留最后一段，没有时为空）。
+type SubtitleFile struct {
+	Name string
+	Data []byte
+}
+
+// SubtitleProvider 是能列出、下载种子字幕的驱动（可选接口，现在只有 NexusPHP）。
+type SubtitleProvider interface {
+	// ListSubtitles 是这个种子的字幕（站点上没有时是空的）；种子不在了返回包装了 ErrTorrentNotFound 的错误
+	ListSubtitles(ctx context.Context, torrentID string) ([]Subtitle, error)
+	// DownloadSubtitle 下载列表里的一份字幕；站点上没有了返回包装了 ErrSubtitleNotFound 的错误
+	DownloadSubtitle(ctx context.Context, sub Subtitle) (SubtitleFile, error)
+}
+
+// SubtitleSource 是能给出 SubtitleProvider 的站点（BaseSite）：驱动支持字幕时返回的 SubtitleProvider 每次请求先等站点限速的令牌、
+// 一时的错误按退避重试；不支持时返回 nil。
+type SubtitleSource interface {
+	Subtitles() SubtitleProvider
 }
 
 // DetailFetcherProvider is an optional interface for Site implementations that can provide

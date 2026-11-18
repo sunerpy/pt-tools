@@ -15,16 +15,20 @@ func ProbeGazelle(ctx context.Context, site sitev2.Site, clock Clock) (*ProbeRes
 	}
 
 	info, err := site.GetUserInfo(ctx)
+	return classifyGazelleResult(info, err), nil
+}
+
+func classifyGazelleResult(info sitev2.UserInfo, err error) *ProbeResult {
 	if err != nil {
-		return classifyGazelleError(err), nil
+		return classifyGazelleError(err)
 	}
 
 	if info.LastAccess == 0 {
 		return &ProbeResult{
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPCookie,
-			Diagnostic: "gazelle response missing stats.LastAccess",
-		}, nil
+			Diagnostic: diagNoLastAccess,
+		}
 	}
 
 	access := time.Unix(info.LastAccess, 0).UTC()
@@ -33,11 +37,13 @@ func ProbeGazelle(ctx context.Context, site sitev2.Site, clock Clock) (*ProbeRes
 		Source:       ProbeSourceHTTPCookie,
 		LastAccessAt: &access,
 		LastLoginAt:  nil,
-	}, nil
+	}
 }
 
 func classifyGazelleError(err error) *ProbeResult {
 	switch {
+	case errors.Is(err, sitev2.ErrCloudflareChallenge):
+		return &ProbeResult{Status: CHALLENGE, Source: ProbeSourceHTTPCookie, RawError: err, Diagnostic: err.Error()}
 	case errors.Is(err, sitev2.ErrSessionExpired), errors.Is(err, sitev2.ErrInvalidCredentials), errors.Is(err, sitev2.ErrAuthFailed):
 		return &ProbeResult{Status: SESSION_EXPIRED, Source: ProbeSourceHTTPCookie, RawError: err, Diagnostic: err.Error()}
 	case errors.Is(err, sitev2.ErrCircuitOpen), errors.Is(err, sitev2.ErrRateLimited):

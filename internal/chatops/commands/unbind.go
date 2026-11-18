@@ -20,7 +20,7 @@ func unbindHandler(ctx context.Context, _ []string, src chatops.Source) (chatops
 	if svc == nil || svc.Binding == nil || svc.Bindings == nil {
 		return errReply(src.ReplyLang, "绑定服务不可用", "binding service unavailable"), nil
 	}
-	id, ok, err := svc.Bindings.FindByChannelUser(ctx, src.ChannelType, src.ChannelUserID)
+	id, ok, err := svc.Bindings.FindByChannelUser(ctx, src.ChannelConfID, src.ChannelType, src.ChannelUserID)
 	if err != nil {
 		return errReply(src.ReplyLang, "查询绑定失败: %v", "lookup binding failed: %v", err), nil
 	}

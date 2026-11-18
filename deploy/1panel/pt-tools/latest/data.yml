@@ -1,0 +1,39 @@
+additionalProperties:
+  formFields:
+    - default: 8080
+      edit: true
+      envKey: PANEL_APP_PORT_HTTP
+      labelEn: Web UI port
+      labelZh: 网页端口
+      label:
+        en: Web UI port
+        es-es: Puerto de la interfaz web
+        ja: Web UI ポート
+        ms: Port UI web
+        pt-br: Porta da interface web
+        ru: Порт веб-интерфейса
+        ko: 웹 UI 포트
+        zh-Hant: 網頁埠
+        zh: 网页端口
+        tr: Web arayüzü portu
+      required: true
+      rule: paramPort
+      type: number
+    - default: Asia/Shanghai
+      edit: true
+      envKey: TIME_ZONE
+      labelEn: Time zone
+      labelZh: 时区
+      label:
+        en: Time zone
+        es-es: Zona horaria
+        ja: タイムゾーン
+        ms: Zon waktu
+        pt-br: Fuso horário
+        ru: Часовой пояс
+        ko: 시간대
+        zh-Hant: 時區
+        zh: 时区
+        tr: Saat dilimi
+      required: true
+      type: text

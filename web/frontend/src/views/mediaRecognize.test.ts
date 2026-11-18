@@ -1,0 +1,596 @@
+// @vitest-environment happy-dom
+/*
+ * 钉子：媒体识别页。设置里 API Key 只在填了时才发出，清除要确认；刮削的其它来源（Fanart.tv、OMDb）的 Key 也是；
+ * 识别结果显示解析出的各项、匹配条目与来源、候选；选候选或填编号纠正后重新识别；TMDB 出错时写明原因；识别词与纠正的增删改。
+ */
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { buttonByText, type MountedView, mountView } from "@/test-mount";
+import { posterURL, setTmdbImageBase } from "@/utils/media";
+
+const api = vi.hoisted(() => ({
+  settings: vi.fn(),
+  saveSettings: vi.fn(),
+  testTMDB: vi.fn(),
+  testSource: vi.fn(),
+  recognize: vi.fn(),
+  overrides: vi.fn(),
+  setOverride: vi.fn(),
+  deleteOverride: vi.fn(),
+  words: vi.fn(),
+  createWord: vi.fn(),
+  updateWord: vi.fn(),
+  deleteWord: vi.fn(),
+}));
+const ui = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  confirm: vi.fn(),
+}));
+
+vi.mock("@/api", async (orig) => {
+  const real = await orig<typeof import("@/api")>();
+  return { ...real, mediaApi: api };
+});
+
+vi.mock("element-plus", async (orig) => {
+  const real = await orig<typeof import("element-plus")>();
+  return {
+    ...real,
+    ElMessage: Object.assign(vi.fn(), {
+      success: ui.success,
+      error: ui.error,
+      warning: ui.warning,
+      info: vi.fn(),
+    }),
+    ElMessageBox: { ...real.ElMessageBox, confirm: ui.confirm },
+  };
+});
+
+let view: MountedView | null = null;
+afterEach(() => {
+  view?.unmount();
+  view = null;
+  vi.clearAllMocks();
+  setTmdbImageBase();
+});
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid=${id}]`);
+function inputOf(id: string): HTMLInputElement {
+  const el = q(id);
+  if (!el) throw new Error(`找不到 ${id}`);
+  return (el instanceof HTMLInputElement ? el : el.querySelector("input")) as HTMLInputElement;
+}
+function fill(id: string, v: string) {
+  const i = inputOf(id);
+  i.value = v;
+  i.dispatchEvent(new Event("input"));
+}
+
+const match = {
+  id: 278,
+  media_type: "movie" as const,
+  title: "肖申克的救赎",
+  original_title: "The Shawshank Redemption",
+  year: 1994,
+  overview: "希望让人自由。",
+  poster_path: "/p.jpg",
+  imdb_id: "tt0111161",
+};
+
+const recognized = {
+  meta: {
+    name_en: "The Shawshank Redemption",
+    year: 1994,
+    type: "movie",
+    resolution: "1080p",
+    source: "BluRay",
+    group: "WiKi",
+  },
+  summary: "The Shawshank Redemption 1994",
+  match,
+  source: "search",
+  score: 1.4,
+  candidates: [
+    { ...match, score: 1.4 },
+    {
+      id: 5000,
+      media_type: "movie",
+      title: "Shawshank: The Redeeming Feature",
+      original_title: "Shawshank: The Redeeming Feature",
+      year: 2001,
+      score: 0.4,
+    },
+  ],
+};
+
+async function mountPage(
+  opts: {
+    hasKey?: boolean;
+    keySource?: "user" | "builtin" | "none";
+    builtinKey?: boolean;
+    api?: string;
+    image?: string;
+    fanart?: boolean;
+  } = {},
+) {
+  api.settings.mockResolvedValue({
+    has_tmdb_key: opts.hasKey ?? false,
+    key_source: opts.keySource ?? (opts.hasKey ? "user" : "none"),
+    builtin_key: opts.builtinKey ?? false,
+    language: "zh-CN",
+    proxy_url: "",
+    api_base_url: opts.api ?? "",
+    image_base_url: opts.image ?? "",
+    has_fanart_key: opts.fanart ?? false,
+    has_fanart_client_key: false,
+    has_omdb_key: false,
+    has_tvdb_key: false,
+    has_tvdb_pin: false,
+  });
+  api.overrides.mockResolvedValue([]);
+  api.words.mockResolvedValue([]);
+  const Page = (await import("./MediaRecognize.vue")).default;
+  view = mountView(Page);
+  await vi.waitFor(() => expect(api.settings).toHaveBeenCalled());
+  await flush();
+  await flush();
+}
+
+describe("媒体识别", () => {
+  it("设置：只在填了 Key 时发出；清除要确认；没有 Key 时不能测试连接", async () => {
+    await mountPage();
+    const attribution = q("media-attribution")!;
+    expect(attribution.textContent, "TMDB 要求的署名原文").toContain(
+      "uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB",
+    );
+    expect(attribution.querySelector("img[alt=TMDB]"), "TMDB 的标志").not.toBeNull();
+    expect((q("media-test") as HTMLButtonElement).disabled).toBe(true);
+    expect(q("media-key-source")!.textContent).toContain("没有内置的 Key");
+
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
+      language: "en-US",
+      proxy_url: "http://127.0.0.1:7890",
+    });
+    fill("media-proxy", " http://127.0.0.1:7890 ");
+    q("media-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      language: "zh-CN",
+      proxy_url: "http://127.0.0.1:7890",
+      api_base_url: "",
+      image_base_url: "",
+    });
+    await flush();
+
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: true,
+      key_source: "user",
+      builtin_key: false,
+      language: "en-US",
+      proxy_url: "http://127.0.0.1:7890",
+    });
+    fill("media-key", " k-123456789012345 ");
+    q("media-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(2));
+    expect(api.saveSettings.mock.calls[1]![0]).toMatchObject({ tmdb_api_key: "k-123456789012345" });
+    await flush();
+    expect(inputOf("media-key").value, "保存后清空输入框，不回显").toBe("");
+    expect((q("media-test") as HTMLButtonElement).disabled).toBe(false);
+    expect(q("media-key-source")!.textContent).toContain("正在用自己填的 Key");
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
+      language: "en-US",
+      proxy_url: "",
+    });
+    q("media-clear-key")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(3));
+    expect(api.saveSettings.mock.calls[2]![0]).toMatchObject({ tmdb_api_key: "" });
+
+    api.testTMDB.mockRejectedValue(new Error("TMDB API Key 无效"));
+    await mountPage({ hasKey: true });
+    q("media-test")!.click();
+    await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("TMDB API Key 无效"));
+  });
+
+  it("刮削的其它来源：只发填了的 Key（不带 TMDB 那边的修改），测试与清除", async () => {
+    await mountPage();
+    expect((q("media-test-fanart") as HTMLButtonElement).disabled, "没填 Key 不能测试").toBe(true);
+    expect(q("media-clear-fanart")).toBeNull();
+    fill("media-proxy", "http://changed:1");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
+      language: "zh-CN",
+      proxy_url: "",
+      has_fanart_key: true,
+      has_fanart_client_key: false,
+      has_omdb_key: true,
+    });
+    fill("media-fanart-key", " fanartproject0123 ");
+    fill("media-omdb-key", "omdbkey1");
+    q("media-sources-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      language: "zh-CN",
+      fanart_api_key: "fanartproject0123",
+      omdb_api_key: "omdbkey1",
+    });
+    await flush();
+    expect(inputOf("media-fanart-key").value, "保存后清空，不回显").toBe("");
+    expect(inputOf("media-proxy").value, "TMDB 那边没保存的修改留着").toBe("http://changed:1");
+    expect((q("media-test-fanart") as HTMLButtonElement).disabled).toBe(false);
+
+    api.testSource.mockRejectedValue(new Error("Fanart.tv API Key 无效"));
+    q("media-test-fanart")!.click();
+    await vi.waitFor(() => expect(api.testSource).toHaveBeenCalledWith("fanart"));
+    await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("Fanart.tv API Key 无效"));
+    api.testSource.mockResolvedValue({ ok: true });
+    q("media-test-omdb")!.click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("OMDb 连接正常"));
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.saveSettings.mockResolvedValue({
+      language: "zh-CN",
+      key_source: "none",
+      has_omdb_key: true,
+    });
+    q("media-clear-fanart")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(2));
+    expect(api.saveSettings.mock.calls[1]![0]).toEqual({ language: "zh-CN", fanart_api_key: "" });
+    expect(ui.confirm.mock.calls[0]![1]).toBe("清除 Fanart.tv 项目的 API Key");
+  });
+
+  it("刮削的其它来源：TheTVDB 的 Key 与订阅 PIN、测试与署名", async () => {
+    await mountPage();
+    expect((q("media-test-tvdb") as HTMLButtonElement).disabled, "没填 Key 不能测试").toBe(true);
+    expect(q("media-clear-tvdb-pin")).toBeNull();
+    const attribution = q("media-tvdb-attribution")!;
+    expect(attribution.textContent).toContain(
+      "Metadata provided by TheTVDB. Please consider adding missing information or",
+    );
+    expect(attribution.querySelector("a")!.getAttribute("href")).toBe("https://thetvdb.com");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "none",
+      builtin_key: false,
+      language: "zh-CN",
+      proxy_url: "",
+      has_fanart_key: false,
+      has_fanart_client_key: false,
+      has_omdb_key: false,
+      has_tvdb_key: true,
+      has_tvdb_pin: true,
+    });
+    fill("media-tvdb-key", " aaaa-bbbb-cccc ");
+    fill("media-tvdb-pin", "PIN42");
+    q("media-sources-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toEqual({
+      language: "zh-CN",
+      tvdb_api_key: "aaaa-bbbb-cccc",
+      tvdb_pin: "PIN42",
+    });
+    await flush();
+    expect(inputOf("media-tvdb-pin").value, "保存后清空，不回显").toBe("");
+    expect(inputOf("media-tvdb-pin").placeholder).toContain("已设置");
+
+    api.testSource.mockRejectedValue(new Error("TheTVDB 登录不了：API Key 或订阅 PIN 不对"));
+    q("media-test-tvdb")!.click();
+    await vi.waitFor(() => expect(api.testSource).toHaveBeenCalledWith("tvdb"));
+    await vi.waitFor(() =>
+      expect(ui.error).toHaveBeenCalledWith("TheTVDB 登录不了：API Key 或订阅 PIN 不对"),
+    );
+    api.testSource.mockResolvedValue({ ok: true });
+    q("media-test-tvdb")!.click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("TheTVDB 连接正常"));
+
+    ui.confirm.mockResolvedValue("confirm");
+    q("media-clear-tvdb-pin")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(2));
+    expect(api.saveSettings.mock.calls[1]![0]).toEqual({ language: "zh-CN", tvdb_pin: "" });
+    expect(ui.confirm.mock.calls[0]![1]).toBe("清除 TheTVDB 订阅 PIN");
+  });
+
+  it("设置：内置 Key —— 不填也能测试连接；清除自己的 Key 改用内置的；换了接口地址时写明用不了内置的", async () => {
+    await mountPage({ keySource: "builtin", builtinKey: true });
+    expect(q("media-key-source")!.textContent).toContain("正在用内置的 Key");
+    expect(inputOf("media-key").placeholder).toContain("留空用内置的 Key");
+    expect((q("media-test") as HTMLButtonElement).disabled, "内置的 Key 也能测试连接").toBe(false);
+    view?.unmount();
+
+    await mountPage({ hasKey: true, builtinKey: true });
+    expect(q("media-key-source")!.textContent).toContain("清除后改用内置的 Key");
+    ui.confirm.mockResolvedValue("confirm");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: false,
+      key_source: "builtin",
+      builtin_key: true,
+      language: "zh-CN",
+      proxy_url: "",
+    });
+    q("media-clear-key")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(ui.confirm.mock.calls[0]![0]).toContain("改用内置的 Key");
+    view?.unmount();
+
+    await mountPage({ keySource: "none", builtinKey: true, api: "https://tmdb.example.com/3" });
+    expect(q("media-key-source")!.textContent).toContain("内置的只发给 TMDB 官方地址");
+    expect((q("media-test") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("设置：TMDB 接口地址与图片地址回显、去掉首尾空格后保存", async () => {
+    await mountPage({ hasKey: true, api: "https://api.tmdb.org/3" });
+    expect(inputOf("media-api-base").value).toBe("https://api.tmdb.org/3");
+    expect(inputOf("media-image-base").placeholder).toContain("image.tmdb.org");
+    api.saveSettings.mockResolvedValue({
+      has_tmdb_key: true,
+      language: "zh-CN",
+      proxy_url: "",
+      api_base_url: "https://api.tmdb.org/3",
+      image_base_url: "https://static.example.com/t/p/",
+    });
+    fill("media-image-base", " static.example.com ");
+    q("media-save")!.click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings.mock.calls[0]![0]).toMatchObject({
+      api_base_url: "https://api.tmdb.org/3",
+      image_base_url: "static.example.com",
+    });
+    await flush();
+    expect(inputOf("media-image-base").value, "回显服务端规整后的地址").toBe(
+      "https://static.example.com/t/p/",
+    );
+    expect(posterURL("/p.jpg"), "网页上的海报改从新地址加载").toBe(
+      "https://static.example.com/t/p/w185/p.jpg",
+    );
+  });
+
+  it("设置：网页用 https 打开、图片地址是 http 时提示浏览器会拦下海报", async () => {
+    const dom = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
+    const prev = window.location.href;
+    dom.setURL("https://pt.example.com/");
+    try {
+      await mountPage({ hasKey: true });
+      expect(q("media-image-mixed")).toBeNull();
+      fill("media-image-base", " http://10.0.0.2:9000/img/");
+      await flush();
+      expect(q("media-image-mixed")!.textContent).toContain("请换成 https 地址");
+      fill("media-image-base", "https://static.example.com/");
+      await flush();
+      expect(q("media-image-mixed")).toBeNull();
+    } finally {
+      dom.setURL(prev);
+    }
+  });
+
+  it("识别：显示解析结果、匹配条目与来源、候选；选候选后纠正并重新识别", async () => {
+    await mountPage({ hasKey: true });
+    q("media-recognize")!.click();
+    await flush();
+    expect(ui.warning).toHaveBeenCalledWith("先填写标题");
+    expect(api.recognize).not.toHaveBeenCalled();
+
+    api.recognize.mockResolvedValue(recognized);
+    fill("media-title", " The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi ");
+    fill("media-imdb", "tt0111161");
+    q("media-recognize")!.click();
+    await vi.waitFor(() => expect(q("media-match")).not.toBeNull());
+    expect(api.recognize).toHaveBeenCalledWith({
+      title: "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi",
+      subtitle: "",
+      imdb_id: "tt0111161",
+    });
+    expect(q("media-summary")!.textContent).toContain("The Shawshank Redemption 1994");
+    const tags = q("media-tags")!.textContent ?? "";
+    for (const t of ["电影", "1994", "1080p", "BluRay", "制作组 WiKi"]) expect(tags).toContain(t);
+    const matchText = q("media-match")!.textContent ?? "";
+    expect(matchText).toContain("肖申克的救赎（The Shawshank Redemption）");
+    expect(matchText).toContain("按名字搜索");
+    expect(matchText).toContain("tt0111161");
+    expect(q("media-match")!.querySelector("a")!.getAttribute("href")).toBe(
+      "https://www.themoviedb.org/movie/278",
+    );
+    expect(q("media-match")!.querySelector("img")!.getAttribute("src")).toBe(
+      "https://image.tmdb.org/t/p/w185/p.jpg",
+    );
+    expect((q("media-pick-movie-278") as HTMLButtonElement).disabled, "已经是这一条").toBe(true);
+
+    api.setOverride.mockResolvedValue({ id: 1 });
+    api.recognize.mockResolvedValue({
+      ...recognized,
+      source: "override",
+      match: { ...match, id: 5000 },
+    });
+    api.overrides.mockResolvedValue([
+      {
+        id: 1,
+        key: "k",
+        label: "The Shawshank Redemption 1994",
+        tmdb_id: 5000,
+        media_type: "movie",
+        title: "Shawshank: The Redeeming Feature",
+      },
+    ]);
+    q("media-pick-movie-5000")!.click();
+    await vi.waitFor(() => expect(api.setOverride).toHaveBeenCalledTimes(1));
+    expect(api.setOverride.mock.calls[0]![0]).toEqual({
+      title: "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi",
+      subtitle: "",
+      tmdb_id: 5000,
+      media_type: "movie",
+    });
+    await vi.waitFor(() => expect(api.recognize).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(q("media-overrides")?.textContent).toContain("Shawshank: The Redeeming Feature"),
+    );
+  });
+
+  it("识别：TMDB 出错时写明原因；没有匹配时给出提示", async () => {
+    await mountPage({ hasKey: true });
+    api.recognize.mockResolvedValue({
+      meta: { name_en: "X" },
+      summary: "X",
+      source: "none",
+      error: "TMDB API Key 无效",
+    });
+    fill("media-title", "X.1080p");
+    q("media-recognize")!.click();
+    await vi.waitFor(() => expect(q("media-error")?.textContent).toContain("TMDB API Key 无效"));
+
+    api.recognize.mockResolvedValue({
+      meta: {},
+      summary: "",
+      source: "none",
+      message: "没有填写 TMDB API Key，只做了标题解析",
+    });
+    q("media-recognize")!.click();
+    await vi.waitFor(() => expect(q("media-message")?.textContent).toContain("只做了标题解析"));
+    expect(q("media-summary")!.textContent).toContain("没解析出名字");
+
+    // 新一次识别失败：旧结果清掉，页面里写明原因（不只是一闪而过的提示）
+    api.recognize.mockRejectedValue(new Error("TMDB 暂时不能访问: HTTP 502"));
+    q("media-recognize")!.click();
+    await vi.waitFor(() =>
+      expect(q("media-recognize-error")?.textContent).toContain("TMDB 暂时不能访问"),
+    );
+    expect(q("media-result")).toBeNull();
+
+    api.recognize.mockResolvedValue({ meta: {}, summary: "Y", source: "none" });
+    q("media-recognize")!.click();
+    await vi.waitFor(() => expect(q("media-result")).not.toBeNull());
+    expect(q("media-recognize-error")).toBeNull();
+  });
+
+  it("按 TMDB 编号纠正：没填编号时提示", async () => {
+    await mountPage({ hasKey: true });
+    api.recognize.mockResolvedValue({ ...recognized, candidates: [] });
+    fill("media-title", "Some.Movie.2020");
+    q("media-recognize")!.click();
+    await vi.waitFor(() => expect(q("media-manual-save")).not.toBeNull());
+    q("media-manual-save")!.click();
+    await flush();
+    expect(ui.warning).toHaveBeenCalledWith("填写 TMDB 编号");
+    expect(api.setOverride).not.toHaveBeenCalled();
+  });
+
+  it("识别词：添加、开关、删除；纠正：删除要确认", async () => {
+    await mountPage();
+    api.createWord.mockResolvedValue({});
+    buttonByText("添加").click();
+    await vi.waitFor(() => expect(q("media-word-pattern")).not.toBeNull());
+    q("media-word-save")!.click();
+    await flush();
+    expect(ui.warning).toHaveBeenCalledWith("填写匹配的文字");
+    fill("media-word-pattern", "TSR");
+    fill("media-word-replacement", "The.Shawshank.Redemption");
+    api.words.mockResolvedValue([
+      {
+        id: 3,
+        kind: "replace",
+        pattern: "TSR",
+        replacement: "The.Shawshank.Redemption",
+        offset: 0,
+        is_regex: false,
+        enabled: true,
+        note: "",
+      },
+    ]);
+    q("media-word-save")!.click();
+    await vi.waitFor(() => expect(api.createWord).toHaveBeenCalledTimes(1));
+    expect(api.createWord.mock.calls[0]![0]).toEqual({
+      kind: "replace",
+      pattern: "TSR",
+      replacement: "The.Shawshank.Redemption",
+      offset: 0,
+      is_regex: false,
+      enabled: true,
+      note: "",
+    });
+    await vi.waitFor(() =>
+      expect(q("media-words")?.textContent).toContain("换成「The.Shawshank.Redemption」"),
+    );
+
+    api.updateWord.mockResolvedValue({});
+    q("media-word-enabled-3")!.click();
+    await vi.waitFor(() => expect(api.updateWord).toHaveBeenCalledTimes(1));
+    expect(api.updateWord.mock.calls[0]![0]).toBe(3);
+    expect(api.updateWord.mock.calls[0]![1], "只发接口收的字段，不带 id").toEqual({
+      kind: "replace",
+      pattern: "TSR",
+      replacement: "The.Shawshank.Redemption",
+      offset: 0,
+      is_regex: false,
+      enabled: false,
+      note: "",
+    });
+
+    ui.confirm.mockRejectedValueOnce("cancel");
+    q("media-word-del-3")!.click();
+    await flush();
+    expect(api.deleteWord).not.toHaveBeenCalled();
+    ui.confirm.mockResolvedValue("confirm");
+    api.deleteWord.mockResolvedValue({});
+    q("media-word-del-3")!.click();
+    await vi.waitFor(() => expect(api.deleteWord).toHaveBeenCalledWith(3));
+  });
+
+  it("集数偏移不能为 0", async () => {
+    await mountPage();
+    buttonByText("添加").click();
+    await vi.waitFor(() => expect(q("media-word-kind")).not.toBeNull());
+    const offsetRadio = [
+      ...document.querySelectorAll<HTMLElement>("[data-testid=media-word-kind] label"),
+    ].find((l) => l.textContent?.includes("集数偏移"))!;
+    offsetRadio.click();
+    await flush();
+    fill("media-word-pattern", "Some.Show");
+    q("media-word-save")!.click();
+    await flush();
+    expect(ui.warning).toHaveBeenCalledWith("集数偏移不能为 0");
+    expect(api.createWord).not.toHaveBeenCalled();
+  });
+
+  it("两个列表：加载中不写「还没有」；刷新失败时留着旧行并写明是旧的；第一次就失败时显示错误", async () => {
+    let resolveWords: (v: unknown) => void = () => {};
+    api.settings.mockResolvedValue({ has_tmdb_key: true, language: "zh-CN", proxy_url: "" });
+    api.overrides.mockRejectedValue(new Error("HTTP 502"));
+    api.words.mockReturnValue(new Promise((r) => (resolveWords = r)));
+    const Page = (await import("./MediaRecognize.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() => expect(api.words).toHaveBeenCalled());
+    await flush();
+    expect(q("media-words-state")?.textContent).not.toContain("还没有识别词");
+    expect(q("media-words-state")?.textContent).toContain("加载中");
+    await vi.waitFor(() => expect(q("media-overrides-state")?.textContent).toContain("HTTP 502"));
+    expect(q("media-overrides-state")?.textContent).not.toContain("还没有纠正");
+
+    resolveWords([
+      {
+        id: 1,
+        kind: "block",
+        pattern: "[禁转]",
+        replacement: "",
+        offset: 0,
+        is_regex: false,
+        enabled: true,
+        note: "",
+      },
+    ]);
+    await vi.waitFor(() => expect(q("media-words")?.textContent).toContain("[禁转]"));
+    api.words.mockRejectedValue(new Error("HTTP 500"));
+    q("media-refresh")!.click();
+    await vi.waitFor(() => expect(q("media-words-stale")?.textContent).toContain("HTTP 500"));
+    expect(q("media-words")?.textContent, "旧行留着").toContain("[禁转]");
+  });
+});

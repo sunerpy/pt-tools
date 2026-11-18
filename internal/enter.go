@@ -54,6 +54,46 @@ func ScheduleTorrentForMonitoring(torrent models.TorrentInfo) {
 	}
 }
 
+// SubscriptionOfferFunc 把 RSS 取到详情的种子交给订阅（实现不能阻塞：订阅自己排队处理）。
+type SubscriptionOfferFunc func(site string, item v2.TorrentItem)
+
+var (
+	subscriptionOfferMu sync.RWMutex
+	subscriptionOfferF  SubscriptionOfferFunc
+)
+
+// SetSubscriptionOffer 登记订阅的入口（启动时由 cmd 接上；为 nil 时 RSS 不交给订阅）。
+func SetSubscriptionOffer(f SubscriptionOfferFunc) {
+	subscriptionOfferMu.Lock()
+	defer subscriptionOfferMu.Unlock()
+	subscriptionOfferF = f
+}
+
+// offerToSubscriptions 把 RSS 里取到详情的种子交给订阅。详情里没有种子编号时从 RSS 条目的链接里取（取不到用 GUID）。
+func offerToSubscriptions(site string, detail *v2.TorrentItem, feedItem *gofeed.Item) {
+	subscriptionOfferMu.RLock()
+	f := subscriptionOfferF
+	subscriptionOfferMu.RUnlock()
+	if f == nil || detail == nil {
+		return
+	}
+	it := *detail
+	if it.SourceSite == "" {
+		it.SourceSite = site
+	}
+	if it.ID == "" && feedItem != nil {
+		if _, ref := extractTorrentRef(feedItem); ref != "" {
+			it.ID = ref
+		} else {
+			it.ID = feedItem.GUID
+		}
+	}
+	if it.Title == "" && feedItem != nil {
+		it.Title = feedItem.Title
+	}
+	f(site, it)
+}
+
 func SetGlobalDownloaderManager(dm *downloader.DownloaderManager) {
 	dlManagerMu.Lock()
 	defer dlManagerMu.Unlock()

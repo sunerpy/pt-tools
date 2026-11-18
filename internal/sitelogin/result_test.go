@@ -24,12 +24,41 @@ func TestProbeStatusValues(t *testing.T) {
 		{"KEY_ERROR", KEY_ERROR, "KEY_ERROR"},
 		{"UNKNOWN", UNKNOWN, "UNKNOWN"},
 		{"NOT_APPLICABLE", NOT_APPLICABLE, "NOT_APPLICABLE"},
+		{"NOT_CONFIGURED", NOT_CONFIGURED, "NOT_CONFIGURED"},
+		{"UNSUPPORTED", UNSUPPORTED, "UNSUPPORTED"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, string(tt.status))
 			assert.Equal(t, tt.want, tt.status.String())
+		})
+	}
+}
+
+func TestProbeStatusClassification(t *testing.T) {
+	tests := []struct {
+		status     ProbeStatus
+		failure    bool
+		credential bool
+	}{
+		{OK, false, false},
+		{NOT_CONFIGURED, false, false},
+		{UNSUPPORTED, false, false},
+		{NOT_APPLICABLE, false, false},
+		{"", false, false},
+		{SESSION_EXPIRED, true, true},
+		{KEY_ERROR, true, true},
+		{CHALLENGE, true, false},
+		{RATE_LIMITED, true, false},
+		{NETWORK_ERROR, true, false},
+		{PARSE_ERROR, true, false},
+		{UNKNOWN, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			assert.Equal(t, tt.failure, tt.status.IsFailure())
+			assert.Equal(t, tt.credential, tt.status.IsCredentialFailure())
 		})
 	}
 }

@@ -24,7 +24,7 @@ func bindHandler(ctx context.Context, args []string, src chatops.Source) (chatop
 	if svc == nil || svc.Binding == nil {
 		return errReply(src.ReplyLang, "绑定服务不可用", "binding service unavailable"), nil
 	}
-	if _, err := svc.Binding.ConsumeCode(ctx, code, src.ChannelType, src.ChannelUserID); err != nil {
+	if _, err := svc.Binding.ConsumeCode(ctx, code, src.ChannelConfID, src.ChannelType, src.ChannelUserID); err != nil {
 		return errReply(src.ReplyLang, "绑定失败: %v", "bind failed: %v", err), nil
 	}
 	return okReply(tr(src.ReplyLang, "绑定成功", "bound successfully")), nil

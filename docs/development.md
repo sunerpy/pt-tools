@@ -6,7 +6,7 @@
 
 | 依赖        | 版本要求 | 说明                                   |
 | ----------- | -------- | -------------------------------------- |
-| **Go**      | 1.26.7   | 后端开发语言；以 `go.mod` 为准         |
+| **Go**      | 1.26.11  | 后端开发语言；以 `go.mod` 为准         |
 | **Node.js** | 25.2.0   | 前端构建环境；以 `.node-version` 为准  |
 | **pnpm**    | 10.25.0  | 前端包管理器；以 `packageManager` 为准 |
 
@@ -16,8 +16,8 @@
 
 ```bash
 # Linux（下载官方归档）
-wget https://go.dev/dl/go1.26.7.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.26.7.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.26.11.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.26.11.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
 # macOS (使用 Homebrew)
@@ -615,12 +615,21 @@ make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 浏览器扩展与 pt-tools 主程序使用**同一个版本和同一个 Release**，不再使用独立的 `ext-v*` tag：
 
 1. Conventional Commit 合入受保护的 `main` 后，release-please 更新版本、`CHANGELOG.md` 和扩展 `package.json`。
-2. 合并 release PR 后，同一次 `Release` workflow 创建 draft，并并行构建 Go 归档、扩展 `zip/crx` 与容器镜像。
+2. 合并 release PR 后，同一次 `Release` workflow 创建 draft，并行构建 Go 归档、扩展 `zip/crx` 与手机 App 的 APK；三者都成功以后才推容器镜像（镜像一推就公开了）。
 3. 所有承诺产物和 `checksums.txt` 校验通过后，workflow 才把 draft 切换为公开 Release；任一必需 job 失败都会保留 draft。
 4. 稳定版公开后，`Publish to Edge Add-ons` 作为发布后的副作用提交 `pt-tools-helper.zip`；RC 不提交商店。
 
 > [!IMPORTANT]
-> 不要手工创建 release tag，也不要通过 `ext-v*` tag 发布扩展。普通发版由 release-please 管理；`workflow_dispatch` 只用于重建一个**已经存在且仍为 draft** 的 tag。
+> 不要手工创建 release tag，也不要通过 `ext-v*` tag 发布扩展。普通发版由 release-please 管理；`workflow_dispatch` 只用于重建一个**已经存在且仍为 draft** 的 tag，而且这个 tag 的提交必须在触发它的受保护分支上（是那个分支当前的提交或它的祖先）：下游 job 会带着签名密钥和镜像仓库凭据跑 tag 里的代码。
+
+#### 预览版（RC）
+
+`release-please-config.json` 根包里的 `"prerelease": true` 是预览版开关，与 `"versioning": "prerelease"`、`"prerelease-type": "rc.1"` 配合使用：
+
+- 开启时，release PR 的版本带 `-rc.N`：从稳定版开始取下一个版本的 `rc.1`（`0.48.0` → `0.49.0-rc.1`），之后只递增 `N`（`0.49.0-rc.1` → `0.49.0-rc.2`）。draft 标为预发布，公开时不设为 Latest；安装说明使用 `.github/release-notes/rc-footer.md`；不提交 Edge 商店；容器镜像只推版本号标签，不更新 `latest` 与 `主.次`、`主` 标签。
+- 删除 `"prerelease": true` 即回到稳定版：下一个 release PR 去掉后缀（`0.49.0-rc.2` → `0.49.0`），另外两项可以保留。
+- 扩展 manifest 的版本只能从 `rc.N`（N 为 1–65534）推导（`.github/scripts/extension-version.sh`），所以 `prerelease-type` 必须是 `rc.1`，不能写成 `rc` 或 `beta`。
+- 手机 App 的构建号也从版本推导（`.github/scripts/mobile-build-number.sh`），`rc.N` 的 N 不能超过 98，次版本与修订号不能超过 99，见下面的[手机 App 发版](#手机-app-发版)。
 
 Edge 商店发布需要仓库 Secrets：
 
@@ -631,6 +640,82 @@ Edge 商店发布需要仓库 Secrets：
 | `EDGE_API_KEY`    | Publish API 密钥      |
 
 仓库变量 `PUBLISH_EDGE=false` 可在发布链验收时跳过商店提交；变量缺失或不是 `false` 时保持默认发布行为。Edge 提交不影响已经通过资产门禁并公开的 GitHub Release，但除「前一次 submission 仍在审核」之外的 API 或包错误仍会让该 job 失败，需单独排查。
+
+## 托管 relay 与手机 App 的发版
+
+### 默认 relay 地址
+
+发版构建内置托管 relay 的地址（网页「远程访问」里因此会出现「填入托管 relay」）：`.goreleaser.yaml` 与 `Dockerfile` 从仓库 Secret `PT_TOOLS_RELAY_URL`（`wss://` 开头）读入 `internal/remote.DefaultRelayURL`，没设时为空。地址随二进制公开，不是秘密；放在 Secret 里只是为了不进仓库、不改代码就能换。
+
+`pt-tools version` 的 `Default relay:` 一行显示 `configured`、`none` 或 `invalid`（不打印地址）。`Release` workflow 在 GoReleaser 之后检查 linux-amd64 归档：Secret 设了却不是 `configured` 时这个 job 失败，draft 不发布。
+
+### 内置的 TMDB Key
+
+发版构建内置一个 TMDB API Key，用户不填自己的 Key 也能识别、整理与订阅（和 Jellyfin、tinyMediaManager 一样）：`.goreleaser.yaml` 从仓库 Secret `PT_TOOLS_TMDB_KEY`（v3 的 API Key 或 v4 的读取令牌）读入 `internal/media/tmdb.BuiltinKey`；`Dockerfile` 自己编译时用 BuildKit secret `tmdb_key`（`docker.yml` 从同一个 Secret 传），不用 build-arg，免得 Key 写进镜像历史与 provenance。没设时为空，用户要在「媒体识别」里填自己的 Key；本地 `make build` 不注入。
+
+Key 随二进制分发，能被取出来，不当作秘密；放在 Secret 里是为了不进仓库、能换。用户填了自己的 Key 时用自己的；用户把 TMDB 接口地址换成镜像或中转时不用内置的（内置的只发给 `api.themoviedb.org` 与 `api.tmdb.org`）。
+
+`pt-tools version` 的 `TMDB key:` 一行显示 `configured`、`none` 或 `invalid`（不打印 Key）。`Release` workflow 和默认 relay 一样检查 linux-amd64 归档：Secret 设了却不是 `configured` 时这个 job 失败，draft 不发布。
+
+### 部署托管 relay
+
+托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。负载均衡器从别的机器连过来时（例如 AWS ALB），用 `--bind`（workflow 里是变量 `RELAY_BIND`）把端口绑到服务器的私网地址，安全组只放行负载均衡器；客户端 IP 取负载均衡器写的头（ALB 是 `X-Forwarded-For`，relay 取最后一个地址），`/metrics` 不要对外，在负载均衡器上挡掉。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。同一个容器名上的部署、收尾、回滚与看门狗用 `flock` 排队（锁文件 `/tmp/deploy-relay-<name>.lock`），服务器上要有 util-linux 的 `flock` 与 `setsid`。
+
+用 `--keep-previous` 部署时，脚本退出以前另起一个脱离 ssh 会话的看门狗：`--pending-timeout` 秒（默认 900，`0` 不起）以后这次部署仍然没有收尾，就换回旧容器（第一次部署时删掉新容器与占位容器）。它按容器 ID 只认这次部署的两个容器，已经收尾、回滚过或者又部署过就什么都不做；日志在 `/tmp/deploy-relay-<name>.watchdog.<uid>.log`。服务器在这期间重启时看门狗也不在了，要手动收尾。
+
+`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器；收尾在服务器上其实已经做完（之后这一步被取消、ssh 没有带回结果）时，这一步只给提示，不报失败。收尾时核对服务器上跑的仍是这次的镜像，看门狗已经换回旧容器时收尾失败。runner 中途丢失时由看门狗在 900 秒以后换回旧容器。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
+
+部署用的 secret 放在 GitHub Environment `hosted-relay` 里，并在仓库设置里把这个 Environment 的部署分支限定为 `main` 与 `v1.0.0-rc`（需要的话再加审批）；`release.yml` 不把仓库的 secret 传给它。
+
+| 名称                                                  | 放在哪里                 | 用途                                                                                       |
+| ----------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| `DEPLOY_RELAY`                                        | 仓库变量                 | 为 `true` 时发版以后部署；默认不部署                                                       |
+| `DEPLOY_RELAY_PRERELEASE`                             | 仓库变量                 | 为 `true` 时预览版（RC）也部署；默认只部署稳定版                                           |
+| `RELAY_HOSTNAME`                                      | 变量                     | 对外的主机名，App 与 pt-tools 里填 `wss://<它>`                                            |
+| `RELAY_IMAGE`、`RELAY_PORT`、`RELAY_DRAIN_GRACE`      | 变量                     | 镜像（默认 `sunerpy/pt-tools`）、服务器上听的端口（默认 8443）、排空时间（默认 `5s`）      |
+| `RELAY_BIND`                                          | 变量                     | 端口绑定的地址，默认 `127.0.0.1`；负载均衡器在别的机器上时填服务器的私网地址               |
+| `RELAY_CLIENT_IP_HEADER`                              | 变量                     | 反向代理写客户端 IP 的头（例如 `X-Real-IP`，AWS ALB 是 `X-Forwarded-For`），按 IP 限流时设 |
+| `RELAY_MAX_CONNECTIONS`、`RELAY_DAILY_BYTES_PER_HOST` | 变量                     | 连接数上限、每台 pt-tools 每天的转发量；不设时用 relay 的默认值                            |
+| `RELAY_SSH_PORT`                                      | 变量                     | 服务器的 ssh 端口，默认 22                                                                 |
+| `RELAY_SSH_HOST`、`RELAY_SSH_USER`                    | `hosted-relay` 的 secret | 服务器的地址与部署用户（要能用 docker）                                                    |
+| `RELAY_SSH_KEY`                                       | `hosted-relay` 的 secret | 部署用的 ssh 私钥（只给这一个用途）                                                        |
+| `RELAY_SSH_KNOWN_HOSTS`                               | `hosted-relay` 的 secret | 服务器的主机密钥（`ssh-keyscan -p <端口> <主机>` 的输出），不接受陌生主机                  |
+
+「变量」可以是仓库变量，也可以放在 `hosted-relay` 里。在服务器上手动部署、收尾或回滚也用同一个脚本：
+
+```bash
+bash scripts/deploy-relay.sh --image sunerpy/pt-tools:v1.0.0-rc.19 --public-url wss://relay.example.com --client-ip-header X-Real-IP
+bash scripts/deploy-relay.sh --finalize    # 用 --keep-previous 部署过、检查通过以后删掉旧容器
+bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署时删掉新容器）
+```
+
+`--finalize --image <部署时的 --image>` 先核对这次部署仍待收尾（还有 `<name>-previous`）、`<name>` 跑的是这个镜像，不是时失败、不删旧容器（同一个镜像重新部署时，看门狗换回的旧容器镜像也一样，只看镜像分不出来）。`--rollback` 时没有 `<name>-previous`、`<name>` 正常在跑，说明没有待收尾的部署（已经收尾，或者看门狗已经换回），以 3 退出并打印正在跑的镜像。
+
+### 手机 App 发版
+
+App 和 pt-tools 主程序、浏览器扩展使用**同一个版本和同一个 Release**，不再单独打 `mobile-v*` tag（最早单独发布的 `mobile-v1.0.0-rc.1` 留作历史）：
+
+1. release PR 同时改 `apps/mobile/pubspec.yaml` 的 `version`（`release-please-config.json` 的 `extra-files`，那一行带 `# x-release-please-version`）。只改 `apps/mobile` 的提交也会让 pt-tools 发版、写进更新日志。
+2. 合并 release PR 后，`Release` workflow 的 `mobile` job 和归档、扩展并行：版本取 release tag，构建号由 `.github/scripts/mobile-build-number.sh` 推导；构建按 CPU 架构拆分的 release APK（arm64-v8a、armeabi-v7a、x86_64），用 Environment `mobile-release` 里的 keystore 签名；`apksigner` 核对每个 APK 都是变量 `ANDROID_CERT_SHA256` 给的那张证书，`aapt2` 核对 versionName 与 versionCode。
+3. APK 改名为 `pt-tools-app-<ABI>.apk`，由 `Assemble checksums` 传到 draft、写进 `checksums.txt`，再和其他资产一起由 `Publish Release` 校验、生成构建来源证明以后公开。缺签名密钥、`pubspec.yaml` 的版本和 release tag 对不上、构建或核对失败时，`mobile` job 失败，整个 Release 停在 draft。
+
+构建号 = 主版本×1000000 + 次版本×10000 + 修订号×100 + RC 序号（正式版记 99），例如 `1.0.0-rc.28` → `1000028`、`1.0.0` → `1000099`、`1.0.1-rc.1` → `1000101`。它随版本单调变大，同一个版本重建时不变；Android 只看它决定能不能覆盖安装（按 ABI 拆包时 Flutter 再加上 ABI×1000）。所以次版本、修订号不能超过 99，`rc.N` 的 N 不能超过 98。`mobile-v1.0.0-rc.1` 的构建号是 1，比之后的都小，可以直接覆盖安装。
+
+PR 改到打包流程（`.github/actions/build-android-release`）、Android 工程、构建号脚本或 `pubspec.yaml` 时，`Mobile Release` 的 `Verify (test-signed)` 用现生成的密钥按同样的方式构建一遍，并跑构建号脚本的用例：不碰任何 secret、没有写权限（产物文件名带 `-test-signed`，不能发布）。
+
+| 名称                                                                     | 放在哪里                   | 用途                                                                            |
+| ------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------- |
+| `ANDROID_KEYSTORE_BASE64`                                                | `mobile-release` 的 secret | keystore 文件的 base64（`base64 -w0 release.jks`）                              |
+| `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` | `mobile-release` 的 secret | keystore 口令、密钥别名与密钥口令                                               |
+| `ANDROID_CERT_SHA256`                                                    | 变量                       | 签名证书的 SHA-256（`apksigner verify --print-certs` 的写法），正式发版必须设好 |
+
+`mobile-release` 的部署分支限定为 `main` 与 `v1.0.0-rc`（`Release` workflow 也只在这两个分支上运行）。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`。别名别用项目名这类日志里常见的词：secret 的值在 Actions 日志里会被换成 `***`。
+
+```bash
+keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias ptt-app-signing -keyalg RSA -keysize 4096 -validity 10000
+```
+
+本机构建签名的 release APK：设好 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 以后在 `apps/mobile` 里运行 `flutter build apk --release --split-per-abi`；没有设时 release 构建用 debug 签名，只能自己装着试。
 
 ---
 

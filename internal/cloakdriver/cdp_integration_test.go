@@ -6,7 +6,9 @@ package cloakdriver
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +35,7 @@ func TestCDPCookieInjectionRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(ctx, cdpURL)
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 
@@ -62,7 +64,7 @@ func TestCDPClearBeforeInject(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(ctx, cdpURL)
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 
@@ -94,7 +96,7 @@ func TestCDPContextCancellationIntegration(t *testing.T) {
 	parent, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(parent, cdpURL)
+	sess, err := NewCDPSession(parent, cdpURL, nil)
 	require.NoError(t, err)
 	defer sess.Close()
 
@@ -109,4 +111,74 @@ func TestCDPContextCancellationIntegration(t *testing.T) {
 		return
 	}
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+// M1d：后备注入的 Cookie 来自站点配置里的 Cookie 串（http.ParseCookie），没有 Domain 与 Path，
+// 必须按要打开的地址设置，否则 Chrome 拒绝 Network.setCookie。
+func TestCDPCookieInjectionFromCookieHeader(t *testing.T) {
+	cdpURL := cdpURLOrSkip(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
+	require.NoError(t, err)
+	defer sess.Close()
+
+	cookies, err := http.ParseCookie("c_secure_uid=93012; c_secure_pass=abc")
+	require.NoError(t, err)
+	target := "https://tracker.example/userdetails.php?id=93012"
+	require.NoError(t, sess.InjectCookies(sess.TaskContext(), target, cookies))
+
+	got, err := sess.GetCookies(sess.TaskContext(), target)
+	require.NoError(t, err)
+	byName := map[string]string{}
+	for _, c := range got {
+		byName[c.Name] = c.Value
+		assert.Equal(t, "tracker.example", c.Domain, c.Name)
+		assert.Equal(t, "/", c.Path, c.Name)
+	}
+	assert.Equal(t, "93012", byName["c_secure_uid"])
+	assert.Equal(t, "abc", byName["c_secure_pass"])
+}
+
+// 打开页面、等选择器出现、取整页 HTML，并且请求带上注入的 Cookie：探测驱动走的就是这条路
+// （chromedp v0.21 换成泛型接口以后 Navigate、WaitVisible、OuterHTML 都改了写法）。
+func TestCDPLoadPageAndExtractSendsInjectedCookies(t *testing.T) {
+	cdpURL := cdpURLOrSkip(t)
+	gotCookie := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/favicon.ico" {
+			http.NotFound(w, r)
+			return
+		}
+		gotCookie <- r.Header.Get("Cookie")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><div id="info">用户 93012</div></body></html>`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sess, err := NewCDPSession(ctx, cdpURL, nil)
+	require.NoError(t, err)
+	defer sess.Close()
+
+	cookies, err := http.ParseCookie("c_secure_uid=93012; c_secure_pass=abc")
+	require.NoError(t, err)
+	target := srv.URL + "/userdetails.php?id=93012"
+	// 和探测驱动一样：注入与打开页面各用一个从 TaskContext 派生的超时 ctx，前一个取消了标签页也要还在
+	injectCtx, injectCancel := context.WithTimeout(sess.TaskContext(), 10*time.Second)
+	require.NoError(t, sess.InjectCookies(injectCtx, target, cookies))
+	injectCancel()
+
+	navCtx, navCancel := context.WithTimeout(sess.TaskContext(), 10*time.Second)
+	defer navCancel()
+	var html string
+	require.NoError(t, sess.LoadPageAndExtract(navCtx, target, "#info", func(h string) error {
+		html = h
+		return nil
+	}))
+	assert.Contains(t, html, `<div id="info">用户 93012</div>`)
+	cookie := <-gotCookie
+	assert.True(t, strings.Contains(cookie, "c_secure_uid=93012") && strings.Contains(cookie, "c_secure_pass=abc"), cookie)
 }

@@ -60,6 +60,8 @@ type SiteHTTPClient struct {
 	maxIdle   int
 	keepAlive bool
 	logger    *zap.Logger
+	// siteID 是这个客户端所属的站点：全局设置里的「站点代理」按它判定走不走代理
+	siteID string
 }
 
 // SiteHTTPClientConfig holds configuration for SiteHTTPClient
@@ -71,6 +73,8 @@ type SiteHTTPClientConfig struct {
 	ProxyURL          string
 	UserAgent         string
 	Logger            *zap.Logger
+	// SiteID 是这个客户端所属站点的注册表 ID：全局设置里的「站点代理」按它判定走不走代理，为空时按环境变量
+	SiteID string
 }
 
 // DefaultSiteHTTPClientConfig returns default configuration
@@ -90,7 +94,7 @@ func NewSiteHTTPClient(config SiteHTTPClientConfig) *SiteHTTPClient {
 		config.Logger = zap.NewNop()
 	}
 
-	session := requests.NewSession().
+	session := httpclient.NewSession().
 		WithTimeout(config.Timeout).
 		WithIdleTimeout(config.IdleConnTimeout).
 		WithMaxIdleConns(config.MaxIdleConns).
@@ -109,6 +113,7 @@ func NewSiteHTTPClient(config SiteHTTPClientConfig) *SiteHTTPClient {
 		maxIdle:   config.MaxIdleConns,
 		keepAlive: !config.DisableKeepAlives,
 		logger:    config.Logger,
+		siteID:    config.SiteID,
 	}
 }
 
@@ -122,6 +127,19 @@ type HTTPResponse struct {
 // IsSuccess returns true if status code is 2xx
 func (r *HTTPResponse) IsSuccess() bool {
 	return r.StatusCode >= 200 && r.StatusCode < 300
+}
+
+// IsCloudflareChallenge 判断响应是不是 Cloudflare 的质询页（403/503）：Cloudflare 给质询响应加的
+// cf-mitigated: challenge 头，或质询页特有的 cf_chl_opt 脚本变量、/cdn-cgi/challenge-platform/ 资源路径。
+// 这类响应不能当成凭证无效处理。
+func (r *HTTPResponse) IsCloudflareChallenge() bool {
+	if r == nil || (r.StatusCode != http.StatusForbidden && r.StatusCode != http.StatusServiceUnavailable) {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Headers.Get("Cf-Mitigated")), "challenge") {
+		return true
+	}
+	return bytes.Contains(r.Body, []byte("cf_chl_opt")) || bytes.Contains(r.Body, []byte("/cdn-cgi/challenge-platform/"))
 }
 
 // IsError returns true if status code is 4xx or 5xx
@@ -163,21 +181,23 @@ func (c *SiteHTTPClient) DoRequest(ctx context.Context, method, url string, body
 
 	activeSession := c.session
 	if c.proxyURL == "" {
-		envProxyURL := httpclient.ResolveProxyFromEnvironment(url)
-		if envProxyURL != "" {
-			activeSession = requests.NewSession().
+		// 站点代理开着时按这个客户端所属的站点判定（没选中的站点直连），关着时按环境变量；每个请求判定一次，换了设置不用重建客户端
+		if proxyURL := httpclient.ResolveSiteProxyOrEnv(c.siteID, url); proxyURL != "" {
+			activeSession = httpclient.NewSession().
 				WithTimeout(c.timeout).
 				WithIdleTimeout(c.idleTime).
 				WithMaxIdleConns(c.maxIdle).
 				WithKeepAlive(c.keepAlive).
-				WithProxy(envProxyURL)
+				WithProxy(proxyURL)
 			defer func() { _ = activeSession.Close() }()
 		}
 	}
 
 	resp, err := activeSession.DoWithContext(ctx, req)
 	if err != nil {
-		return nil, err
+		// 传输层失败（DNS、拒绝连接、超时、断开）统一带上 ErrNetworkError，登录探测据此判为网络错误、
+		// 允许走 CloakBrowser 后备；原错误链保留，errors.As 仍能取到 *url.Error。
+		return nil, fmt.Errorf("%w: %w", ErrNetworkError, err)
 	}
 
 	return &HTTPResponse{
@@ -253,7 +273,7 @@ func (p *HTTPClientPool) GetSession(siteID string) requests.Session {
 		return session
 	}
 
-	session = requests.NewSession().
+	session = httpclient.NewSession().
 		WithTimeout(p.config.Timeout).
 		WithIdleTimeout(p.config.IdleConnTimeout).
 		WithMaxIdleConns(p.config.MaxIdleConns).
@@ -523,7 +543,9 @@ func (m *SessionManager) IsSessionValid(siteID string) bool {
 	session.mu.RLock()
 	defer session.mu.RUnlock()
 
-	if !session.ExpiresAt.IsZero() && time.Now().After(session.ExpiresAt) {
+	// 到了过期时间就算失效（含正好等于）：InvalidateSession 把过期时间设成「现在」，时钟粒度粗的系统上
+	// 紧接着读到的时间可能和它一样（#542）
+	if !session.ExpiresAt.IsZero() && !time.Now().Before(session.ExpiresAt) {
 		return false
 	}
 
@@ -632,7 +654,7 @@ func NewRequestsClient(config HTTPClientConfig, retryConfig RetryConfig, logger 
 		logger = zap.NewNop()
 	}
 
-	session := requests.NewSession().
+	session := httpclient.NewSession().
 		WithTimeout(config.Timeout).
 		WithIdleTimeout(config.IdleConnTimeout).
 		WithMaxIdleConns(config.MaxIdleConns).

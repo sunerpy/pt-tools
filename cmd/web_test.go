@@ -72,13 +72,15 @@ func migrateChatOpsTablesForTest(t *testing.T, db *models.TorrentDB) {
 // TestCmdWeb_StartsWithDisabledChatOps verifies that bootstrapChatOps runs
 // cleanly when no NotificationConf rows exist (disabled chatops).
 func TestCmdWeb_StartsWithDisabledChatOps(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	migrateChatOpsTablesForTest(t, db)
 	global.GlobalDB = db
 
 	store := core.NewConfigStore(db)
 	mgr := scheduler.NewManager()
+	// 不停掉的话，它的配置事件协程会在后续测试发布 ConfigChanged 时 reload、读写全局变量（-count>1 时报数据竞争）。
+	t.Cleanup(mgr.StopAll)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -103,7 +105,7 @@ func TestCmdWeb_StartsWithDisabledChatOps(t *testing.T) {
 // the failure must be logged and the channel marked disabled, never panic
 // or block the boot.
 func TestCmdWeb_StartsWithEnabledTelegramConf_NoCrash(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	migrateChatOpsTablesForTest(t, db)
 	global.GlobalDB = db
@@ -134,6 +136,7 @@ func TestCmdWeb_StartsWithEnabledTelegramConf_NoCrash(t *testing.T) {
 
 	store := core.NewConfigStore(db)
 	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

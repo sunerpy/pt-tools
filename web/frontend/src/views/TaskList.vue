@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { type TaskItem, type TaskListResponse, tasksApi, type TaskStatsResponse } from "@/api";
+import TransferDialog from "@/components/downloader/TransferDialog.vue";
+import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
@@ -13,6 +15,7 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { formatShortDateTime } from "@/utils/format";
+import { freeEndLabel, freeStatusReasons } from "@/utils/freeStatus";
 import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
@@ -20,6 +23,8 @@ type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
 const isMobile = useIsMobile();
 const tasks = ref<TaskItem[]>([]);
+/** 转移做种（路线图 M5）：勾选的记录里已经推送到下载器的那些，按下载器和 info hash 交给转移对话框 */
+const transferDialogVisible = ref(false);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -134,6 +139,25 @@ const filters = ref({
 });
 const selectedIds = ref<number[]>([]);
 
+/** 整理入库（路线图 M10）：推送到下载器、记得下载器与 hash 的任务才能整理 */
+const organizeVisible = ref(false);
+const organizeTarget = ref<OrganizeTarget | null>(null);
+const canOrganize = (t: TaskItem) => Boolean(t.isPushed && t.downloaderId && t.torrentHash);
+function openOrganize(t: TaskItem) {
+  if (!canOrganize(t)) return;
+  organizeTarget.value = {
+    downloader_id: t.downloaderId as number,
+    hash: t.torrentHash,
+    name: t.title,
+  };
+  organizeVisible.value = true;
+}
+const transferItems = computed(() =>
+  tasks.value
+    .filter((t) => selectedIds.value.includes(t.id) && t.downloaderId && t.torrentHash)
+    .map((t) => ({ source_id: t.downloaderId as number, hash: t.torrentHash })),
+);
+
 // 站点列表（从任务中提取）
 const siteOptions = computed(() => {
   const sites = new Set<string>();
@@ -247,6 +271,7 @@ const warnRows = computed<BreakdownRow[]>(() => {
     if (t.retryCount > 0) reasons.push(`重试过 ${t.retryCount} 次`);
     if (t.lastError) reasons.push(t.lastError);
     if (!t.isDownloaded && !t.isExpired && t.freeEndTime) reasons.push("免费期内还没下载");
+    reasons.push(...freeStatusReasons(t));
     if (reasons.length === 0) continue;
     out.push({
       key: String(t.id),
@@ -509,17 +534,22 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
       否则刷新入口会连着页头一起消失。
     -->
     <Teleport v-if="!isMobile" to="#pt-head-acts">
-      <button
-        type="button"
-        class="tl-headico"
-        :disabled="loading"
-        aria-label="刷新任务列表"
-        @click="loadTasks">
-        <PtIcon
-          :name="loading ? 'loader-circle' : 'refresh-cw'"
-          :size="16"
-          :class="loading ? 'pt-spin' : undefined" />
-      </button>
+      <el-tooltip content="刷新任务列表" placement="bottom">
+        <!-- 包一层：加载中按钮是 disabled 的，禁用的按钮不发 mouseenter -->
+        <span class="pt-tip-anchor">
+          <button
+            type="button"
+            class="tl-headico"
+            :disabled="loading"
+            aria-label="刷新任务列表"
+            @click="loadTasks">
+            <PtIcon
+              :name="loading ? 'loader-circle' : 'refresh-cw'"
+              :size="16"
+              :class="loading ? 'pt-spin' : undefined" />
+          </button>
+        </span>
+      </el-tooltip>
     </Teleport>
 
     <!--
@@ -579,23 +609,27 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
       <template #right>
         <!-- 画板 bar-64 右端的 bi-columns-3 -->
-        <el-popover placement="bottom-end" trigger="click" :width="180">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="tasks-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="tb__cols">
-            <label v-for="c in OPTIONAL_TASK_COLS" :key="c.key" class="tb__cols-row">
-              <el-checkbox :model-value="taskColShown(c.key)" @change="toggleTaskCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="180">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="tasks-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="tb__cols">
+                <label v-for="c in OPTIONAL_TASK_COLS" :key="c.key" class="tb__cols-row">
+                  <el-checkbox :model-value="taskColShown(c.key)" @change="toggleTaskCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
         <el-tooltip content="按当前筛选导出本页 CSV" placement="top">
@@ -683,10 +717,17 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           1376 下列宽合计原来 1184 > 表宽 1102，横滚 82：标题最小宽度 280 → 240，
           三列时间 150 → 124（换成「09-30 20:00」紧凑格式之后 150 是按旧的长格式留的），合计 1092。
         -->
-        <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
+        <el-table-column label="标题" min-width="216" class-name="pt-cell-strong">
           <template #default="{ row }">
             <div class="title-cell">
-              <span class="title-text">{{ row.title || "-" }}</span>
+              <!-- 标题是认出这条任务的依据，单行截断以后悬停看完整的 -->
+              <el-tooltip
+                :content="row.title"
+                :disabled="!row.title"
+                placement="top"
+                :show-after="400">
+                <span class="title-text">{{ row.title || "-" }}</span>
+              </el-tooltip>
               <span v-if="row.category || row.tag" class="title-meta">
                 <PtTag v-if="row.category">{{ row.category }}</PtTag>
                 <PtTag v-if="row.tag">{{ row.tag }}</PtTag>
@@ -732,11 +773,9 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
         <el-table-column v-if="taskColShown('freeEnd')" label="免费结束" width="124">
           <template #default="{ row }">
-            <!-- 紧凑格式单行显示（之前「2026/9/30 20:00:00」在 150 宽里折两行），完整时间在 title -->
-            <span
-              :class="row.isExpired ? 'cell-dang' : 'cell-mute'"
-              :title="formatTime(row.freeEndTime)">
-              {{ formatShortDateTime(row.freeEndTime) }}
+            <!-- 紧凑格式单行显示（之前「2026/9/30 20:00:00」在 150 宽里折两行），完整时间与资格读取时间在 title -->
+            <span :class="`cell-${freeEndLabel(row).tone}`" :title="freeEndLabel(row).title">
+              {{ freeEndLabel(row).text }}
             </span>
           </template>
         </el-table-column>
@@ -762,11 +801,24 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="96" fixed="right">
+        <!-- 状态列多出 24 给「整理入库」图标钮，标题列最小宽度相应收 24，合计不变 -->
+        <el-table-column label="状态" width="120" fixed="right">
           <template #default="{ row }">
-            <PtStatusPill :tone="getStatusTone(row)" size="sm">
-              {{ getStatusText(row) }}
-            </PtStatusPill>
+            <span class="tl-status">
+              <PtStatusPill :tone="getStatusTone(row)" size="sm">
+                {{ getStatusText(row) }}
+              </PtStatusPill>
+              <el-tooltip v-if="canOrganize(row)" content="整理入库" placement="top">
+                <button
+                  type="button"
+                  class="pt-band__iconbtn tl-organize"
+                  :aria-label="`整理入库 ${row.title}`"
+                  :data-testid="`tl-organize-${row.id}`"
+                  @click="openOrganize(row)">
+                  <PtIcon name="folder-open" :size="14" />
+                </button>
+              </el-tooltip>
+            </span>
           </template>
         </el-table-column>
       </el-table>
@@ -802,9 +854,9 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
               {{ getDiscount(task).text }}
             </PtStatusPill>
             <span>{{ formatSize(task.torrentSize) }}</span>
-            <span :class="task.isExpired ? 'cell-dang' : undefined">
+            <span :class="`cell-${freeEndLabel(task).tone}`" :title="freeEndLabel(task).title">
               <PtIcon name="clock" :size="11" />
-              {{ formatTime(task.freeEndTime) }}
+              {{ freeEndLabel(task).text }}
             </span>
           </template>
 
@@ -812,6 +864,12 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
             <PtStatusPill dot :tone="getStatusTone(task)" size="sm">
               {{ getStatusText(task) }}
             </PtStatusPill>
+          </template>
+
+          <template v-if="canOrganize(task)" #actions>
+            <el-button size="small" @click="openOrganize(task)">
+              <PtIcon name="folder-open" :size="13" /><span>整理入库</span>
+            </el-button>
           </template>
 
           <template v-if="task.torrentSize > 0" #progress>
@@ -841,10 +899,19 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
       <el-button size="small" @click="clearSelection">
         <PtIcon name="x" :size="14" /><span>取消选择</span>
       </el-button>
+      <el-button
+        size="small"
+        :disabled="!transferItems.length"
+        data-testid="tl-transfer"
+        @click="transferDialogVisible = true">
+        <PtIcon name="arrow-right-left" :size="14" /><span>转移到…</span>
+      </el-button>
       <el-button type="danger" plain size="small" @click="handleBatchDelete">
         <PtIcon name="trash-2" :size="14" /><span>删除 {{ selectedIds.length }} 条</span>
       </el-button>
     </div>
+    <TransferDialog v-model="transferDialogVisible" :items="transferItems" />
+    <OrganizeDialog v-model="organizeVisible" :target="organizeTarget" />
 
     <!-- 页脚带 —— 画板 gfoot-518 1112×34：左口径说明，右分页 -->
     <div v-if="total > 0" class="pt-band--foot tl-foot">
@@ -935,6 +1002,17 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 }
 
 /* 画板 toolbar：搜索框 220×28 */
+.tl-status {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.tl-organize {
+  width: 24px;
+  height: 24px;
+}
+
 .tl-q {
   flex: 0 0 auto;
   width: 220px;
@@ -1093,6 +1171,10 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
 .cell-dang {
   color: var(--pt-dang);
+}
+
+.cell-warn {
+  color: var(--pt-warn);
 }
 
 /*

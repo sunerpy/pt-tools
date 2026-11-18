@@ -1,6 +1,6 @@
 import type { CapturedPage } from "../../core/types";
 import { detectPageType, detectSiteSchema } from "./detector";
-import { sanitizeHtml } from "./sanitizer";
+import { sanitizeHtml, sanitizeUrl } from "./sanitizer";
 
 export function captureCurrentPage(): CapturedPage {
   const rawHtml = document.documentElement.outerHTML;
@@ -10,7 +10,7 @@ export function captureCurrentPage(): CapturedPage {
 
   return {
     pageType,
-    url: window.location.href,
+    url: sanitizeUrl(window.location.href),
     html,
     capturedAt: new Date().toISOString(),
     detectedSchema,

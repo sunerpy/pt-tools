@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,7 +36,7 @@ const mteamSearchFixtureJSON = `{
                 "leechers": 5,
                 "timesCompleted": 300,
                 "discount": "FREE",
-                "discountEndTime": "2026-03-01 12:00:00"
+                "discountEndTime": "2099-03-01 12:00:00"
             },
             "category": "402"
         },
@@ -135,15 +136,40 @@ func testMTeamSearch(t *testing.T) {
 	assert.Equal(t, v2.DiscountFree, free.DiscountLevel)
 	assert.Equal(t, "影剧/综艺/HD", free.Category)
 	assert.Equal(t, driver.BaseURL, free.SourceSite)
-	assert.Equal(t, 2026, free.DiscountEndTime.Year())
+	assert.Equal(t, 2099, free.DiscountEndTime.Year())
 	assert.Equal(t, 3, int(free.DiscountEndTime.Month()))
 	assert.Equal(t, 1, free.DiscountEndTime.Day())
+	assert.Equal(t, "base", free.DiscountSource)
+	assert.Equal(t, v2.FreeUntil, free.Promotion(time.Now()).Validity)
 
 	normal := items[1]
 	assert.Equal(t, "12346", normal.ID)
 	assert.Equal(t, v2.DiscountNone, normal.DiscountLevel)
 	assert.Equal(t, "影剧/综艺/HD", normal.Category)
 	assert.Equal(t, driver.BaseURL, normal.SourceSite)
+	assert.Equal(t, v2.FreeNotFree, normal.Promotion(time.Now()).Validity)
+
+	t.Run("ExpiredOrMissingEndTime", func(t *testing.T) {
+		raw := `{
+    "data": [
+        {"id": "20001", "name": "Expired.Free", "size": "1024", "category": "402",
+         "status": {"discount": "FREE", "discountEndTime": "2020-01-01 00:00:00"}},
+        {"id": "20002", "name": "No.End.Free", "size": "1024", "category": "402",
+         "status": {"discount": "FREE", "discountEndTime": null}}
+    ],
+    "total": 2
+}`
+		RequireNoSecrets(t, "mteam_expiry", raw)
+		items, err := driver.ParseSearch(v2.MTorrentResponse{Code: "0", Message: "success", Data: json.RawMessage(raw)})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		// 基础免费的结束时间已过：不再是免费
+		assert.Equal(t, v2.DiscountNone, items[0].DiscountLevel)
+		assert.Equal(t, v2.FreeNotFree, items[0].Promotion(time.Now()).Validity)
+		// 没有结束时间：未知，不是长期免费
+		assert.Equal(t, v2.DiscountFree, items[1].DiscountLevel)
+		assert.Equal(t, v2.FreeUnknown, items[1].Promotion(time.Now()).Validity)
+	})
 
 	t.Run("EmptyResult", func(t *testing.T) {
 		raw := `{"data":[],"total":0}`

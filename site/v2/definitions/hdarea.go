@@ -1,6 +1,8 @@
 package definitions
 
 import (
+	"net/http"
+
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -9,7 +11,7 @@ import (
 // 站点为 NexusPHP 1.5 魔改（页面自称 "Powered by HDAREA(基于NexusPHP1.5修改)"），详情页保留
 // input[name='torrent_name'] / input[name='detail_torrent_id'] 隐藏域，userdetails.php 的
 // 「传输」行是标准的 <strong>上传量</strong> 合并单元格，因此多数选择器与 btschool 一致。
-// 需要单独适配的三处：
+// 需要单独适配的四处：
 //
 //  1. torrents.php 上存在 **两个** table.torrents：
 //     第一个是「预告区（前 5 最新预告）」面板，表头为 td.colhead_notice（colspan=10），
@@ -22,12 +24,30 @@ import (
 //     但同一子表里的豆瓣评分 <span title="豆瓣评分"> 也是 span[title]，必须用 font[color]
 //     限定范围；不同促销等级的 font color 取值不同（免费 #0000FF、2X 免费 #00CC66），
 //     故只判断属性存在而不判断取值。
+//  4. 时魔取自 mybonus.php 的「最终每小时获取：<b …>424.49</b> 个魔力值」：本站不写通用的
+//     「你当前每小时能获取」，且数值外层包了带 style 的 <b>（其内含 font-size: 16px 这类
+//     数字），因此正则必须显式跳过标签而不能「跳过非数字」。
+//  5. 做种体积也取自 mybonus.php：「体积与稀缺分」一节写着「当前状态：做种总积 <b>…GB</b>」。
+//     getusertorrentlistajax.php?type=seeding 一次只回 25 行，要带 page=0、1、2… 一页页翻
+//     （页面上没有翻页链接），按 NexusPHP 通用做法只读第一页，体积就只有前 25 个种子的。
+//     2026-11-09 实测：579 个种子 24 页加起来 5548.17 GiB，这一行写 5548.11 GB，差的是每行两位小数的舍入。
+//     定义里写了 seedingSize，驱动就不再取做种列表；做种数仍取首页的数字。
 var HdareaDefinition = &v2.SiteDefinition{
-	ID:             "hdarea",
-	Name:           "HDArea",
-	Aka:            []string{"高清视界", "High Definition Area"},
-	Description:    "HDArea 高清设备交流分享平台",
-	Schema:         v2.SchemaNexusPHP,
+	ID:          "hdarea",
+	Name:        "HDArea",
+	Aka:         []string{"高清视界", "High Definition Area"},
+	Description: "HDArea 高清设备交流分享平台",
+	Schema:      v2.SchemaNexusPHP,
+	// 签到由首页的 JS 触发（common.js 里的 sign_in()：ajax.post('sign_in.php', ..., 'action=sign_in')）：
+	// POST sign_in.php，表单体只有 action=sign_in（驱动在 POST 时把 Path 的查询参数作为表单体提交）。
+	// 返回纯文本，成功时含「此次签到您获得」，重复签到时含「请不要重复签到」；会话失效仍跳 login.php，
+	// 由驱动统一判为 ErrSessionExpired。
+	Attendance: &v2.AttendanceConfig{
+		Path:            "/sign_in.php?action=sign_in",
+		Method:          http.MethodPost,
+		SuccessPatterns: []string{`此次签到您获得`},
+		AlreadyPatterns: []string{`请不要重复签到`},
+	},
 	URLs:           []string{"https://hdarea.club/"},
 	FaviconURL:     "https://hdarea.club/favicon.ico",
 	AuthMethod:     v2.AuthMethodCookie,
@@ -49,6 +69,10 @@ var HdareaDefinition = &v2.SiteDefinition{
 					"uploaded", "downloaded", "ratio",
 					"levelName", "joinTime", "lastAccessAt",
 				},
+			},
+			{
+				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
+				Fields:        []string{"bonusPerHour", "seedingSize"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -122,6 +146,28 @@ var HdareaDefinition = &v2.SiteDefinition{
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>\s*(\d+)`}},
 					{Name: "parseNumber"},
+				},
+			},
+			// 本站不写通用的「你当前每小时能获取」，而是「最终每小时获取：<b …>424.49</b> 个魔力值」。
+			// 数值外层的 <b> 带 style（含 font-size: 16px），因此必须显式跳过标签，
+			// 不能用「跳过非数字」的写法，否则会抓到 16px 里的 16。
+			"bonusPerHour": {
+				Selector: []string{"#outer", "body"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:最终每小时获取|最終每小時獲取)[：:]\s*(?:<[^>]*>\s*)*([\d.,]+)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			// 「体积与稀缺分」一节：当前状态：做种总积 <b>5548.11 GB</b>。见文件头第 5 条。
+			// 同一节的公式「(公式: GB * …)」与「上限 N 分」里也有数字和 GB，所以从「做种总积」往后找、显式跳过标签。
+			// 繁体界面没见过，按字面也认「做種總積」。
+			"seedingSize": {
+				Selector: []string{"#outer", "body"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`做[种種][总總][积積][：:]?\s*(?:<[^>]*>\s*)*([\d.,]+\s*[KMGTPE]?i?B)`}},
+					{Name: "parseSize"},
 				},
 			},
 			"joinTime": {

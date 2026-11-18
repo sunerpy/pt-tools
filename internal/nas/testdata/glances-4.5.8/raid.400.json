@@ -1,0 +1,3 @@
+{
+  "detail": "Unknown plugin raid (available plugins: ['memswap', 'load', 'alert', 'uptime', 'containers', 'network', 'mem', 'quicklook', 'psutilversion', 'percpu', 'processlist', 'sensors', 'ip', 'amps', 'folders', 'system', 'fs', 'diskio', 'processcount', 'cpu', 'wifi', 'programlist', 'help', 'core', 'ports', 'gpu', 'version', 'now'])"
+}

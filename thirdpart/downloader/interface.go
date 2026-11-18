@@ -70,8 +70,11 @@ type Torrent struct {
 	SeedingTime     int64        // 做种时间(秒)
 	Tracker         string       // 主 Tracker URL
 	CompletionOn    int64        // 完成时间 (Unix timestamp), 0=未完成
+	LastActivity    int64        // 最后一次上传或下载数据的时间 (Unix timestamp), 0=下载器没给
 	NumSeeds        int          // 种子数
 	NumPeers        int          // 下载者数
+	SwarmSeeds      int          // 整个种子群里的做种人数（tracker 报的，不只是连上的），-1=不知道
+	SwarmLeechers   int          // 整个种子群里的下载人数（qBit 在列表里给；TR 要另读 tracker 状态，见 BulkTrackerReader），-1=不知道
 	Availability    float64      // 可用性 (0.0-1.0+)
 	ContentPath     string       // 内容路径 (文件/文件夹的完整路径)
 	TotalUploaded   int64        // 总上传量 (bytes)
@@ -128,6 +131,10 @@ type AddTorrentOptions struct {
 	// 空字符串表示使用下载器默认路径
 	SavePath string
 
+	// ForceSavePath 为真时一定按 SavePath 放：qBittorrent 另外传 autoTMM=false（默认用自动管理时会忽略 SavePath）；
+	// Transmission 本来就按 download-dir。只有「按条目建子目录」设置它
+	ForceSavePath bool
+
 	// Category 种子分类（可选）
 	Category string
 
@@ -179,6 +186,8 @@ type AddTorrentResult struct {
 	Message any    // 消息（错误信息或成功信息）
 	ID      string // 种子ID（成功时返回）
 	Hash    string // 种子哈希
+	// Duplicate 是下载器里原来就有这个种子、这次没有新加（Transmission 的 torrent-duplicate；qBittorrent 这时回失败）
+	Duplicate bool
 }
 
 // TorrentFilter 种子过滤条件

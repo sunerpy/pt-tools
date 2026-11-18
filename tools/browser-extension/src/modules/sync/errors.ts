@@ -8,6 +8,8 @@ export type PtToolsErrorCode =
   | "server_error"
   | "invalid_response"
   | "ping_failed"
+  /** pt-tools 验证一组 Cookie 时没有保存（422：没登录上；409：这个站点正在做登录检查）：消息是 pt-tools 写给用户的原话 */
+  | "verify_failed"
   | "unknown";
 
 const ERROR_CODE_PREFIX_RE = /^\[(?<code>[a-z_]+)]\s*/;
@@ -43,11 +45,15 @@ const FRIENDLY_KEY: Record<PtToolsErrorCode, MessageKey> = {
   server_error: "error.serverError",
   invalid_response: "error.invalidResponseFromPtTools",
   ping_failed: "error.pingFailed",
+  verify_failed: "feedback.requestFailed",
   unknown: "feedback.requestFailed",
 };
 
 export function friendlyErrorMessage(raw: string): string {
   const { code, message } = parseErrorString(raw);
+  if (code === "verify_failed" && message) {
+    return message;
+  }
   const key = FRIENDLY_KEY[code];
   if (code === "client_error" || code === "server_error") {
     return t(key, message);

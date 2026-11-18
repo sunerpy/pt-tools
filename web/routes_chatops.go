@@ -1,34 +1,17 @@
 package web
 
 import (
-	"context"
 	"net/http"
-	"time"
 
 	"github.com/sunerpy/pt-tools/internal/app"
-	"github.com/sunerpy/pt-tools/web/middleware"
 )
-
-type TokenDTO struct {
-	ID        uint       `json:"id"`
-	Kind      string     `json:"kind"`
-	Scope     string     `json:"scope"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-}
-
-type TokenAdminStore interface {
-	ListTokens(ctx context.Context) ([]TokenDTO, error)
-	CreateToken(ctx context.Context, kind, scope string, ttl time.Duration) (TokenDTO, string, error)
-	DeleteToken(ctx context.Context, id uint) error
-}
 
 type ChatOpsDeps struct {
 	NotificationSvc app.NotificationService
 	BindingSvc      app.BindingService
 	AuditSvc        app.AuditService
-	BotTokenStore   middleware.BotTokenStore
-	TokenAdmin      TokenAdminStore
+	// TemplateSvc 是全局消息模板（M21）；为 nil 时模板接口回 503
+	TemplateSvc app.TemplateService
 }
 
 func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth func(http.Handler) http.Handler) {
@@ -42,23 +25,30 @@ func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth fu
 	}
 
 	mux.Handle("GET /api/chatops/notifications", wrap(h.listNotifications))
+	mux.Handle("GET /api/chatops/notifications/stats", wrap(h.notifyStats))
+	mux.Handle("GET /api/chatops/notifications/recent", wrap(h.notifyRecent))
 	mux.Handle("GET /api/chatops/notifications/{id}", wrap(h.getNotification))
 	mux.Handle("POST /api/chatops/notifications", wrap(h.createNotification))
 	mux.Handle("PUT /api/chatops/notifications/{id}", wrap(h.updateNotification))
 	mux.Handle("DELETE /api/chatops/notifications/{id}", wrap(h.deleteNotification))
 	mux.Handle("POST /api/chatops/notifications/{id}/test", wrap(h.testNotification))
 
+	mux.Handle("GET /api/chatops/templates", wrap(h.listTemplates))
+	mux.Handle("POST /api/chatops/templates/preview", wrap(h.previewTemplate))
+	mux.Handle("PUT /api/chatops/templates/{type}", wrap(h.saveTemplate))
+	mux.Handle("DELETE /api/chatops/templates/{type}", wrap(h.resetTemplate))
+	mux.Handle("POST /api/chatops/webhook/preview", wrap(h.previewWebhook))
+
 	mux.Handle("GET /api/chatops/bindings", wrap(h.listBindings))
+	mux.Handle("GET /api/chatops/bindings/channels", wrap(h.listBindingChannels))
+	mux.Handle("POST /api/chatops/bindings", wrap(h.bindDirect))
 	mux.Handle("POST /api/chatops/bindings/issue-code", wrap(h.issueBindCode))
+	mux.Handle("DELETE /api/chatops/bindings/codes/{id}", wrap(h.revokeBindCode))
 	mux.Handle("DELETE /api/chatops/bindings/{id}", wrap(h.revokeBinding))
 	mux.Handle("PATCH /api/chatops/bindings/{id}", wrap(h.patchBinding))
 
 	mux.Handle("GET /api/chatops/audit", wrap(h.queryAudit))
 	mux.Handle("GET /api/chatops/audit/stats", wrap(h.auditStats))
-
-	mux.Handle("POST /api/chatops/tokens", wrap(h.createToken))
-	mux.Handle("GET /api/chatops/tokens", wrap(h.listTokens))
-	mux.Handle("DELETE /api/chatops/tokens/{id}", wrap(h.deleteToken))
 
 	mux.Handle("GET /api/chatops/rss-notifications", wrap(h.listRSSNotifications))
 	mux.Handle("POST /api/chatops/rss-notifications/{id}/retry", wrap(h.retryRSSNotification))
@@ -69,12 +59,13 @@ func (s *Server) SetChatOpsDeps(deps *ChatOpsDeps) {
 	s.chatopsDeps = deps
 }
 
+// registerChatOpsIfWired 注册 ChatOps 的管理接口：和其他 /api/* 一样只认 session（通知详情会解密通道凭证，
+// API 令牌与远程设备都不能访问，见路线图 M12）。
 func (s *Server) registerChatOpsIfWired(mux *http.ServeMux) {
 	if s.chatopsDeps == nil {
 		return
 	}
-	requireAuth := middleware.RequireAuth(s.chatopsDeps.BotTokenStore, s.sessionChecker)
-	RegisterChatOpsRoutes(mux, s.chatopsDeps, requireAuth)
+	RegisterChatOpsRoutes(mux, s.chatopsDeps, func(h http.Handler) http.Handler { return s.auth(h.ServeHTTP) })
 }
 
 func (s *Server) sessionChecker(_ http.ResponseWriter, r *http.Request) bool {
@@ -82,5 +73,5 @@ func (s *Server) sessionChecker(_ http.ResponseWriter, r *http.Request) bool {
 	if err != nil || sid.Value == "" {
 		return false
 	}
-	return s.sessions[sid.Value] != ""
+	return s.sessions.valid(sid.Value)
 }

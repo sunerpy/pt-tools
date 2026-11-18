@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 
 import type { CollectionSession, PageType } from "../../core/types";
+import { sanitizeHtml, sanitizeUrl } from "../collector/sanitizer";
 
 const PAGE_FILE_NAMES: Partial<Record<PageType, string>> = {
   search: "search.html",
@@ -41,7 +42,8 @@ export async function createExportZip(session: CollectionSession): Promise<Blob>
     const count = counters.get(base) ?? 0;
     counters.set(base, count + 1);
     const fileName = count === 0 ? base : base.replace(".html", `-${count + 1}.html`);
-    zip.file(fileName, page.html);
+    // 导出前再脱敏一次：旧版本采集、存在本地的页面没经过新的脱敏规则
+    zip.file(fileName, sanitizeHtml(page.html));
   }
 
   const metadata = {
@@ -51,7 +53,7 @@ export async function createExportZip(session: CollectionSession): Promise<Blob>
     createdAt: session.createdAt,
     pages: session.pages.map((page) => ({
       pageType: page.pageType,
-      url: page.url,
+      url: sanitizeUrl(page.url),
       capturedAt: page.capturedAt,
       detectedSchema: page.detectedSchema,
     })),

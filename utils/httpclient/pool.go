@@ -63,7 +63,7 @@ var (
 
 // NewPool 创建新的连接池
 func NewPool(config PoolConfig) *Pool {
-	session := requests.NewSession().
+	session := NewSession().
 		WithTimeout(config.Timeout).
 		WithIdleTimeout(config.IdleTimeout).
 		WithMaxIdleConns(config.MaxIdleConns).
@@ -106,7 +106,7 @@ func (p *Pool) GetConfig() PoolConfig {
 // AcquireSession 从对象池获取 Session（高性能场景）
 // 使用完毕后需调用 ReleaseSession
 func AcquireSession() requests.Session {
-	return requests.AcquireSession()
+	return requests.AcquireSession().WithProxy("")
 }
 
 // ReleaseSession 释放 Session 回对象池

@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/fatih/color"
@@ -79,8 +81,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) {
 		sLogger().Warn("收到退出信号，正在退出...")
 		cancel()
 	}()
-	lockPath := "/tmp/pt-tools.lock" // Windows 下自动映射为 C:\tmp\...
-	locker, err := utils.NewLocker(lockPath)
+	locker, err := utils.NewLocker(runLockPath())
 	if err != nil {
 		color.Red("无法打开锁文件: %v", err)
 		os.Exit(1)
@@ -110,4 +111,13 @@ func runCmdFunc(cmd *cobra.Command, args []string) {
 		_ = cmd.Usage()
 		os.Exit(1)
 	}
+}
+
+// runLockPath 是 run 命令的单实例锁文件：Linux、macOS 上是 /tmp/pt-tools.lock。Windows 上没有 /tmp（会落到当前盘的
+// \tmp，这个目录不在时锁文件打不开、run 起不来），放在系统的临时目录里（#542）。
+func runLockPath() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.TempDir(), "pt-tools.lock")
+	}
+	return "/tmp/pt-tools.lock"
 }

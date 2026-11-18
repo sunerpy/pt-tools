@@ -2,12 +2,17 @@
 import { useRouter } from "vue-router";
 import {
   type AggregatedStatsResponse,
+  type DeltaSummary,
+  type DownloaderSeedingResponse,
+  downloaderTorrentsApi,
   type SiteConfig,
   type SiteLoginState,
   sitesApi,
   tasksApi,
   type TaskStatsResponse,
   userInfoApi,
+  type UserInfoRange,
+  type UserInfoTrendsResponse,
 } from "@/api";
 import LevelTooltip from "@/components/LevelTooltip.vue";
 import PtIcon from "@/components/PtIcon";
@@ -21,6 +26,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { type ReminderTier, useLoginState } from "@/composables/useLoginState";
 import { useSiteLevelsStore } from "@/stores/siteLevels";
+import { isInteractiveClick, ROW_LINK_CLASS } from "@/utils/rowClick";
 import {
   formatBytes,
   formatDate,
@@ -66,12 +72,15 @@ const syncing = ref(false);
 const syncingSite = ref<string | null>(null);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
 
-/** 账户总量卡的 7 项（KPI 带里已有的总上传、平均分享率不重复），取值与格式沿用 main 那一排汇总卡 */
+/**
+ * 账户总量卡的 7 项（KPI 带里已有的总上传、平均分享率不重复），取值与格式沿用 main 那一排汇总卡。
+ * 下载量是各站计费口径的合计（按免费、折扣折算以后计入分享率的数）；实际下载只有部分站点报，不做合计。
+ */
 const totalsRows = computed(() => {
   const s = aggregatedStats.value;
   if (!s) return [];
   return [
-    { label: "总下载量", value: formatBytes(s.totalDownloaded) },
+    { label: "总下载量（计费）", value: formatBytes(s.totalDownloaded) },
     { label: "做种数", value: String(s.totalSeeding) },
     { label: "下载中", value: String(s.totalLeeching) },
     { label: "做种体积", value: formatBytes(s.totalSeederSize ?? 0) },
@@ -80,11 +89,65 @@ const totalsRows = computed(() => {
     { label: "总做种积分", value: formatNumber(s.totalSeedingBonus ?? 0) },
   ];
 });
+/**
+ * 各下载器现在正在做种的种子数与体积（「下载器做种」卡）。和站点上报的做种体积对着看：
+ * 站点的数不对（比如只读到了做种列表的第一页）时，这里是下载器里的实数。
+ * 单独请求、单独失败：读不到只在卡里写一句，不影响站点统计。
+ */
+const seeding = ref<DownloaderSeedingResponse | null>(null);
+const seedingFailed = ref(false);
+let seedingSeq = 0;
+
+async function loadSeeding() {
+  const seq = ++seedingSeq;
+  const res = await downloaderTorrentsApi.seedingStats().catch(() => null);
+  if (seq !== seedingSeq) return;
+  seedingFailed.value = res === null;
+  if (res) seeding.value = res;
+}
+
+/** 每台一行：正在做种的个数与体积，柱长按体积；下载完了没在做种的写在小字里，连不上的写原因 */
+const seedingRows = computed<BreakdownRow[]>(() =>
+  (seeding.value?.downloaders ?? []).map((d) =>
+    d.reachable
+      ? {
+          key: String(d.downloader_id),
+          label: d.downloader_name,
+          value: `${d.seeding_count} 个 · ${formatBytes(d.seeding_size)}`,
+          weight: d.seeding_size,
+          hint:
+            d.idle_count > 0
+              ? `另有 ${d.idle_count} 个下载完了没在做种（${formatBytes(d.idle_size)}）`
+              : undefined,
+        }
+      : {
+          key: String(d.downloader_id),
+          label: d.downloader_name,
+          value: "没连上",
+          weight: 0,
+          tone: "dang",
+          // 原因可能很长（重试说明加原始错误）：小字只留两行，完整的放在悬停提示里
+          hint: d.error,
+          title: d.error,
+        },
+  ),
+);
+
 /** 全库任务计数，画板 KPI 六格里有三格来自这里 */
 const taskStats = ref<TaskStatsResponse | null>(null);
 const sitesByName = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
 const isMobile = useIsMobile();
+
+/** 点行（手机上点卡片）进站点详情；点到行里的头像、按钮这些控件时照旧做它们自己的事 */
+function openSiteDetail(site: string, event?: Event) {
+  if (isInteractiveClick(event)) return;
+  router.push(`/sites/${site}`);
+}
+
+function onSiteRowClick(row: { site: string }, _column: unknown, event: Event) {
+  openSiteDetail(row.site, event);
+}
 const { effectiveLastActive, daysRemaining, reminderTier, tierLabel } = useLoginState(loginStates);
 
 /**
@@ -180,6 +243,8 @@ interface KpiRow {
   series?: number[];
   /** 柱图画的是什么 —— 每格含义不同，必须说出来，否则读者只能猜 */
   seriesHint?: string;
+  /** 每日增量这类 0 就是没有的序列用 zero（见 PtBars 的 baseline） */
+  seriesBaseline?: "range" | "zero";
 }
 
 /**
@@ -252,7 +317,8 @@ function deltaPill(
  * 后三项里的任务口径来自 `/api/tasks/stats`（站点统计接口没有这些数）。
  *
  * 柱图的含义每格不同，都是真数据，没有一格是编的：
- *   站点数量 / 总上传量 / 平均分享率 → 按站点的构成（perSiteStats）
+ *   站点数量 / 平均分享率 → 按站点的构成（perSiteStats）
+ *   总上传量 → 有每日快照时是最近 7 天每天的上传增量（trends），pill 是所选周期的增量；还没有可比快照时退回按站点的构成
  *   活跃任务 / 今日推送 / 免费种子   → 最近 7 天按天（tasks/stats 的 daily）
  * pill 同理：任务那三格能跟「今天 / 昨天」比，站点那三格只能跟上次查看比。
  */
@@ -322,19 +388,35 @@ const kpiItems = computed<KpiRow[]>(() => {
       delta: today ? `今日新增 ${today.free}` : "无数据",
       deltaTone: today && today.free > 0 ? "ok" : "neutral",
     },
-    {
-      label: "总上传量",
-      value: formatBytes(stats.totalUploaded),
-      icon: "upload",
-      series: topN((r) => r.uploaded),
-      seriesHint: "每根一个站点：上传量构成",
-      ...uploadPill,
-    },
+    periodSites.value.length > 0 && summary.value
+      ? {
+          label: "总上传量",
+          value: formatBytes(stats.totalUploaded),
+          icon: "upload",
+          ...(uploadTrendSeries.value
+            ? {
+                series: uploadTrendSeries.value,
+                seriesHint: "每根一天：最近 7 天每天全部站点的上传增量",
+                seriesBaseline: "zero" as const,
+              }
+            : { series: topN((r) => r.uploaded), seriesHint: "每根一个站点：上传量构成" }),
+          delta: `${periodLabel.value} +${formatBytes(summary.value.totalUploaded)}`,
+          deltaTone: summary.value.totalUploaded > 0 ? ("ok" as const) : ("neutral" as const),
+        }
+      : {
+          label: "总上传量",
+          value: formatBytes(stats.totalUploaded),
+          icon: "upload",
+          series: topN((r) => r.uploaded),
+          seriesHint: "每根一个站点：上传量构成",
+          ...uploadPill,
+        },
     {
       label: "平均分享率",
       value: formatRatio(stats.averageRatio),
       icon: "gauge",
-      series: topN((r) => r.ratio),
+      // 无穷（只上传、没下载，记成 9999999）不画柱子：平均分享率也不计入它，画进来别的柱子全被压扁
+      series: topN((r) => (r.ratio < 1000 ? r.ratio : 0)),
       seriesHint: "每根一个站点：分享率构成",
       ...ratioPill,
     },
@@ -359,8 +441,7 @@ const kpiItems = computed<KpiRow[]>(() => {
  * 落地此前这条带上**只有动作按钮**，一个筛选都没有 —— 而这一页是十四列的表，
  * 最需要的就是筛与排。现在补上 seg、搜索、排序 chip 与列设置、导出。
  *
- * 「周期」那枚 chip 没有落地：聚合接口只回当前快照，没有历史序列，
- * 按周期筛在数据上不成立（登记在 ALLOWED_GAPS 里）。
+ * 「周期」那枚 chip 现在由每日快照支撑（见 PERIOD_OPTIONS），不再登记在 ALLOWED_GAPS 里。
  */
 type SiteFilter = "all" | "ok" | "bad" | "warn";
 
@@ -384,6 +465,56 @@ const SORT_OPTIONS = [
 
 type RowSortKey = (typeof SORT_OPTIONS)[number]["value"];
 const rowSort = ref<RowSortKey>("ratio");
+
+/**
+ * 画板 10 的 chip-0「周期: 本周」。周期决定 KPI 带「总上传量」那一格的增量与柱图、
+ * 以及「上传构成」卡按哪段时间的增量排；数据来自每日快照（/api/v2/userinfo/summary、trends）。
+ */
+const PERIOD_OPTIONS: { label: string; value: UserInfoRange }[] = [
+  { label: "今日", value: "today" },
+  { label: "本周", value: "7d" },
+  { label: "本月", value: "30d" },
+];
+const period = ref<UserInfoRange>("7d");
+const periodLabel = computed(
+  () => PERIOD_OPTIONS.find((o) => o.value === period.value)?.label ?? "",
+);
+/** 周期内各站的增量；接口失败时为 null，KPI 与上传构成退回只看当前值 */
+const summary = ref<DeltaSummary | null>(null);
+/** 最近 7 天每天的增量，KPI 柱图用。柱图固定画 7 根（PtKpiBar 的 count），跟所选周期无关 */
+const trends = ref<UserInfoTrendsResponse | null>(null);
+let periodSeq = 0;
+let trendsSeq = 0;
+
+async function loadPeriod() {
+  const seq = ++periodSeq;
+  const sum = await userInfoApi.getSummary(period.value).catch(() => null);
+  // 切换周期期间旧请求回来：丢掉，免得把上一档的数字配到这一档的标签上
+  if (seq !== periodSeq) return;
+  summary.value = sum;
+}
+
+async function loadTrends() {
+  const seq = ++trendsSeq;
+  const tr = await userInfoApi.getTrends(7).catch(() => null);
+  if (seq !== trendsSeq) return;
+  trends.value = tr;
+}
+
+watch(period, () => void loadPeriod());
+
+/**
+ * KPI「总上传量」的柱：最近 7 天每天的上传增量，按 0 基线画（没有增量的日子只有 2px 的底）。
+ * 全是 0 也照画 —— 画板要求每格都有柱，0 基线下它读作「这几天没有增量」，不会被看成持平的走势；
+ * 只有走势接口没拿到时才是 undefined，那一格回落到按站点的上传构成。
+ */
+const uploadTrendSeries = computed(() => {
+  const values = (trends.value?.totals ?? []).map((p) => p.uploaded);
+  return values.length > 0 ? values : undefined;
+});
+
+/** 周期内有可比基线的站点（只有一份快照的站点算不出增量，不进构成） */
+const periodSites = computed(() => (summary.value?.sites ?? []).filter((d) => d.hasBaseline));
 
 /*
  * 桌面表格的排序跟着「排序」下拉走。
@@ -482,7 +613,7 @@ function onTableSortChange({ prop, order }: { prop: string; order: string | null
 const USERINFO_COLS_KEY = "pt-tools-userinfo-cols-v1";
 
 const OPTIONAL_USERINFO_COLS = [
-  { key: "trueData", label: "真实数据" },
+  { key: "trueData", label: "实际传输" },
   { key: "seedSize", label: "做种体积" },
   { key: "bonus", label: "积分" },
   { key: "bph", label: "时魔/h" },
@@ -495,7 +626,7 @@ const OPTIONAL_USERINFO_COLS = [
 type OptionalUserinfoCol = (typeof OPTIONAL_USERINFO_COLS)[number]["key"];
 
 /*
- * 没设过列偏好的用户，默认先收起三列低频列：真实数据（多数站点不报，整列是「-」）、入站日期、剩余天数
+ * 没设过列偏好的用户，默认先收起三列低频列：实际传输（多数站点不报，整列是「-」）、入站日期、剩余天数
  * （保号预警另有「需要关注的站点」卡与「保号预警」分段）。用户原话「表格列数量过多」——
  * 14 列 min-width 合计约 1780，1920 宽也要横滚；收起后 11 列，与画板 10 的十列 + 操作一致。
  * 这三列仍在「列设置」里，勾上就回来；已经存过偏好的用户按他们自己的来。
@@ -531,6 +662,16 @@ function toggleUserinfoCol(key: OptionalUserinfoCol) {
 
 const colShown = (key: OptionalUserinfoCol) => !hiddenUserinfoCols.value.has(key);
 
+/**
+ * 站点有没有另外报实际传输量（实际上传、实际下载，没按优惠折算）。
+ *
+ * 只要报了其中一个就显示：原来只在实际上传量与上传量不同时才显示，M-Team 这类站点
+ * 免费下载时只有实际下载在涨、实际上传与上传相同，实际下载就看不到了。
+ */
+function hasTrueData(row: { trueUploaded?: number; trueDownloaded?: number }): boolean {
+  return (row.trueUploaded ?? 0) > 0 || (row.trueDownloaded ?? 0) > 0;
+}
+
 /** 「更多」菜单里的四个低频动作 —— 与原来那四枚按钮是同一个动作，不是另一套逻辑 */
 function onMoreCommand(cmd: string) {
   if (cmd === "autoRefresh") return toggleAutoRefresh();
@@ -543,14 +684,14 @@ function onMoreCommand(cmd: string) {
  * 导出当前筛选出的这批站点（画板 bar-64 的 bi-file-down）。
  *
  * 列固定按画板那十列的口径导，不跟着「列设置」变：列设置是**看**的偏好，
- * 而导出是拿数据走，少一列就是少一份信息。
+ * 而导出是拿数据走，少一列就是少一份信息。下载那一列是站点计费的口径，表头写明。
  */
 function exportCsv() {
   const head = [
     "站点",
     "等级",
     "上传",
-    "下载",
+    "下载（计费）",
     "分享率",
     "做种",
     "做种体积",
@@ -645,8 +786,28 @@ const siteRows = computed(() => {
  * 不额外请求接口 —— 聚合接口没有历史序列，所以这里画的是「当前的构成」而不是趋势。
  */
 
-/** p-up：上传量最大的几个站点占了多少 */
+/**
+ * p-up：周期内上传增量最大的几个站点占了多少；还没有可比的快照（刚装好、只同步过一次）时，
+ * 退回当前累计上传量的构成。
+ */
+const uploadByPeriod = computed(() => periodSites.value.length > 0);
+
 const uploadRows = computed<BreakdownRow[]>(() => {
+  if (uploadByPeriod.value) {
+    return [...periodSites.value]
+      .sort((a, b) => b.uploaded - a.uploaded)
+      .slice(0, 6)
+      .map((d) => ({
+        key: d.site,
+        label: d.site,
+        value: `+${formatBytes(d.uploaded)}`,
+        weight: d.uploaded,
+        tone: "primary" as const,
+        hint:
+          `下载（计费）+${formatBytes(d.downloaded)} · ${getSiteBonusName(d.site)} +${formatNumber(Math.round(d.bonus))}` +
+          (d.negative ? " · 有数值回退，按 0 计" : ""),
+      }));
+  }
   const rows = [...siteRows.value].sort((a, b) => b.uploaded - a.uploaded).slice(0, 6);
   return rows.map((r) => ({
     key: r.site,
@@ -658,7 +819,11 @@ const uploadRows = computed<BreakdownRow[]>(() => {
   }));
 });
 
-const uploadTotal = computed(() => siteRows.value.reduce((n, r) => n + r.uploaded, 0));
+const uploadTotal = computed(() =>
+  uploadByPeriod.value
+    ? (summary.value?.totalUploaded ?? 0)
+    : siteRows.value.reduce((n, r) => n + r.uploaded, 0),
+);
 
 /** p-dist：等级分布。等级名是站点各自的说法，按名字归组就是画板那张分布 */
 const levelRows = computed<BreakdownRow[]>(() => {
@@ -734,6 +899,9 @@ async function loadData() {
   aggregatedStats.value = agg;
   /* 写新快照，但不动本次读到的 prevSnapshot —— 否则这次渲染就没得比了 */
   saveSnapshot(agg);
+  void loadPeriod();
+  void loadTrends();
+  void loadSeeding();
 
   const [siteMap, states, stats] = await Promise.all([
     sitesApi.list().catch(() => {
@@ -983,7 +1151,22 @@ onUnmounted(() => {
           <PtIcon name="search" :size="15" />
         </template>
       </el-input>
-      <el-select v-model="rowSort" class="ui-chip" size="small" data-testid="userinfo-sort">
+      <el-select
+        v-model="period"
+        class="ui-chip ui-chip--period"
+        size="small"
+        data-testid="userinfo-period">
+        <el-option
+          v-for="o in PERIOD_OPTIONS"
+          :key="o.value"
+          :label="`周期: ${o.label}`"
+          :value="o.value" />
+      </el-select>
+      <el-select
+        v-model="rowSort"
+        class="ui-chip ui-chip--sort"
+        size="small"
+        data-testid="userinfo-sort">
         <el-option
           v-for="o in SORT_OPTIONS"
           :key="o.value"
@@ -993,23 +1176,27 @@ onUnmounted(() => {
 
       <template #right>
         <!-- 画板 bar-64 右端的 bi-columns-3：十四列里哪几列要看，自己定 -->
-        <el-popover placement="bottom-end" trigger="click" :width="180">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="userinfo-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="ui-cols">
-            <label v-for="c in OPTIONAL_USERINFO_COLS" :key="c.key" class="ui-cols__row">
-              <el-checkbox :model-value="colShown(c.key)" @change="toggleUserinfoCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="180">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="userinfo-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="ui-cols">
+                <label v-for="c in OPTIONAL_USERINFO_COLS" :key="c.key" class="ui-cols__row">
+                  <el-checkbox :model-value="colShown(c.key)" @change="toggleUserinfoCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <!-- 画板 bar-64 右端的 bi-file-down -->
         <el-tooltip content="按当前筛选导出 CSV" placement="top">
@@ -1052,7 +1239,8 @@ onUnmounted(() => {
           </template>
         </el-dropdown>
 
-        <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
+        <!-- 次要动作用默认钮：type="info" 是一块实心灰，在这一排里比主操作「同步全部」还抢眼 -->
+        <el-button size="small" @click="$router.push('/userinfo/export')">
           <PtIcon name="share-2" :size="14" />
           <span>导出分享</span>
         </el-button>
@@ -1088,8 +1276,10 @@ onUnmounted(() => {
           style="width: 100%"
           :style="siteTableStyle"
           :default-sort="{ prop: rowSort, order: SORT_ORDER[rowSort] }"
+          :row-class-name="() => ROW_LINK_CLASS"
           highlight-current-row
-          @sort-change="onTableSortChange">
+          @sort-change="onTableSortChange"
+          @row-click="onSiteRowClick">
           <!-- 站点列：带消息徽章和悬停效果 -->
           <el-table-column
             prop="site"
@@ -1145,14 +1335,24 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
-          <!-- 上传/下载量：双行布局带图标 -->
+          <!--
+            上传 / 下载（计费）：站点记账的数。下载量是计费口径（按免费、折扣折算以后计入分享率），
+            跟站点另外报的实际传输量不是一回事，所以表头写明「计费」，实际传输另有一列。
+          -->
           <el-table-column
             prop="uploaded"
-            label="数据量"
+            label="上传 / 下载（计费）"
             min-width="170"
             sortable
             align="right"
             class-name="pt-cell-num">
+            <template #header>
+              <el-tooltip
+                content="站点记账的上传量与计费下载量：下载量按免费、折扣折算以后计入分享率。站点另外报的实际传输量在「实际传输」列（在「列设置」里打开）"
+                placement="top">
+                <span class="th-help">上传 / 下载（计费）</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
               <!--
               画板 td-*-2 的形状是一行「↑38.4 TB ↓4.2 TB」，箭头是**字符**不是图标 ——
@@ -1165,19 +1365,30 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
-          <!-- 真实数据（如果不同） -->
+          <!-- 实际传输：站点另外报的实际上传、实际下载（没按优惠折算），站点报了就显示 -->
           <el-table-column
             v-if="colShown('trueData')"
             prop="trueUploaded"
-            label="真实数据"
+            label="实际传输"
             min-width="170"
             sortable
             align="right"
             class-name="pt-cell-num">
+            <template #header>
+              <el-tooltip
+                content="站点另外报的实际上传、实际下载量，没按优惠折算。下载免费种子时实际下载会增长、计费下载量不变，这是正常的。多数站点不报这两个数"
+                placement="top">
+                <span class="th-help">实际传输</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
-              <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="io">
-                <span class="io__r is-up">↑{{ formatBytes(row.trueUploaded) }}</span>
-                <span class="io__r is-dn">↓{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
+              <div v-if="hasTrueData(row)" class="io">
+                <span class="io__r is-up">
+                  ↑{{ row.trueUploaded ? formatBytes(row.trueUploaded) : "-" }}
+                </span>
+                <span class="io__r is-dn">
+                  ↓{{ row.trueDownloaded ? formatBytes(row.trueDownloaded) : "-" }}
+                </span>
               </div>
               <span v-else class="nil">-</span>
             </template>
@@ -1457,7 +1668,11 @@ onUnmounted(() => {
           </template>
         </PtDataState>
 
-        <article v-for="row in siteRows" :key="row.site" class="card">
+        <article
+          v-for="row in siteRows"
+          :key="row.site"
+          class="card is-link"
+          @click="openSiteDetail(row.site, $event)">
           <header class="card__head">
             <div class="site">
               <el-badge
@@ -1496,6 +1711,7 @@ onUnmounted(() => {
               </span>
               <span class="io__r is-dn">
                 <PtIcon name="download" :size="13" />{{ formatBytes(row.downloaded) }}
+                <span class="io__tag">计费</span>
               </span>
             </div>
             <PtStatusPill :tone="ratioTone(row.ratio)">{{ formatRatio(row.ratio) }}</PtStatusPill>
@@ -1532,6 +1748,15 @@ onUnmounted(() => {
               class="stat">
               <span class="stat__l"><PtIcon name="medal" :size="11" />做种积分</span>
               <span class="stat__v is-ok">{{ formatNumber(row.seedingBonus) }}</span>
+            </div>
+            <!-- 站点另外报的实际传输量（没按优惠折算），报了才显示；上面那行的下载量是计费口径 -->
+            <div v-if="(row.trueUploaded ?? 0) > 0" class="stat">
+              <span class="stat__l"><PtIcon name="upload" :size="11" />实际上传</span>
+              <span class="stat__v">{{ formatBytes(row.trueUploaded ?? 0) }}</span>
+            </div>
+            <div v-if="(row.trueDownloaded ?? 0) > 0" class="stat">
+              <span class="stat__l"><PtIcon name="download" :size="11" />实际下载</span>
+              <span class="stat__v">{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
             </div>
             <div class="stat">
               <span class="stat__l"><PtIcon name="calendar" :size="11" />入站</span>
@@ -1623,11 +1848,20 @@ onUnmounted(() => {
       三张都由 perSiteStats 现算，没有额外请求。
     -->
     <div v-if="siteRows.length > 0" class="pt-cards pt-cards--2">
-      <PtPanel title="上传构成" icon="upload" :count="formatBytes(uploadTotal)">
+      <PtPanel
+        title="上传构成"
+        icon="upload"
+        :count="
+          uploadByPeriod ? `${periodLabel} +${formatBytes(uploadTotal)}` : formatBytes(uploadTotal)
+        ">
         <PtBreakdown
           :rows="uploadRows"
           :total="uploadTotal"
-          foot="柱长是该站点上传量占全部站点上传量的比例，只列前 6 个。" />
+          :foot="
+            uploadByPeriod
+              ? `柱长是该站点${periodLabel}的上传增量占全部站点的比例，只列前 6 个；数值回退（站点重置、魔力兑换）的那一项按 0 计。下载增量只有计费口径：每日快照不存实际下载量。`
+              : '还没有可比的历史快照，先按当前累计上传量排；每天同步一次之后这里改看所选周期的增量。只列前 6 个。'
+          " />
       </PtPanel>
 
       <PtPanel title="等级分布" icon="award" :count="`${levelRows.length} 种`">
@@ -1669,6 +1903,32 @@ onUnmounted(() => {
           </div>
         </dl>
       </PtPanel>
+
+      <!--
+        下载器做种：每台下载器现在正在做种的个数与体积，和上面「账户总量」里各站上报的做种体积对着看。
+        没有启用的下载器时不显示；整个请求失败时只在卡里写一句。
+      -->
+      <PtPanel
+        v-if="seedingRows.length > 0 || seedingFailed"
+        class="pt-cards__full dash-seeding"
+        title="下载器做种"
+        icon="hard-drive"
+        data-testid="userinfo-downloader-seeding"
+        :count="
+          seeding && seedingRows.length > 0
+            ? `${seeding.total_seeding_count} 个 · ${formatBytes(seeding.total_seeding_size)}`
+            : ''
+        ">
+        <PtBreakdown
+          v-if="seedingRows.length > 0"
+          :rows="seedingRows"
+          cols
+          foot="只算下载器里状态是做种的种子，暂停、排队、校验中的写在小字里。辅种和原种子共用一份数据，这里各算一次（站点上报的做种体积也是这样算的），所以合计比硬盘上实际占用的多。" />
+        <p v-else class="dash__ok">
+          没取到下载器的做种情况。
+          <el-button link type="primary" size="small" @click="loadSeeding">重试</el-button>
+        </p>
+      </PtPanel>
     </div>
   </div>
 </template>
@@ -1701,6 +1961,22 @@ onUnmounted(() => {
   margin: 0;
   font-size: var(--pt-fz-sm);
   color: var(--pt-t2);
+}
+
+/*
+ * 下载器做种：几台横着排时各格从上往下排，名字、体积和柱子对齐，不被旁边那台更高的格子拉开；
+ * 连不上的那台原因只留两行（完整的在悬停提示里）
+ */
+.dash-seeding :deep(.bd__row) {
+  align-content: start;
+}
+
+.dash-seeding :deep(.bd__hint) {
+  display: -webkit-box;
+  overflow: hidden;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /*
@@ -1759,6 +2035,18 @@ onUnmounted(() => {
 .ui-chip {
   flex: 0 0 auto;
   width: 150px;
+}
+
+/*
+ * 加了「周期」之后两枚 chip 按文字收窄：「周期: 本周」「排序: 分享率」各自放得下就够。
+ * 都按 150 时左组 788 + 右组 340 超过 1376 下的 1070，右组被挤到第二行、带高 77（画板 40）。
+ */
+.ui-chip--period {
+  width: 104px;
+}
+
+.ui-chip--sort {
+  width: 116px;
 }
 
 .ui-chip :deep(.el-select__wrapper) {
@@ -1900,6 +2188,13 @@ onUnmounted(() => {
 
 .io__r.is-dn {
   color: var(--pt-dang);
+}
+
+/* 行卡里下载量后面的「计费」：口径标注，用最弱一档的字，不和数字抢 */
+.io__tag {
+  font-size: var(--pt-fz-foot);
+  font-weight: 400;
+  color: var(--pt-t3);
 }
 
 /* 缺值统一用最弱的文字色，避免和真实数字抢注意力 */
@@ -2102,6 +2397,10 @@ onUnmounted(() => {
   /* 卡间距跟画板 30 / 31 一样是 8；这里原来是 12，全站十二个行卡列表里只有它一个不一样 */
   gap: var(--pt-space-2);
   padding: var(--pt-pad) 0;
+}
+
+.card.is-link {
+  cursor: pointer;
 }
 
 .card {

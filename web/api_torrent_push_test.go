@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -373,3 +374,109 @@ func TestProcessTorrentPush_DownloadPath(t *testing.T) {
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }
+
+// 网页推送带上条目（按条目搜索的结果里推送）：写进种子记录，批量推送的每一项也带；不合法的不写。
+func TestProcessTorrentPush_Media(t *testing.T) {
+	writeWebTestSecretKey(t)
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.SiteSetting{}, &models.SettingsGlobal{}))
+	require.NoError(t, db.Create(&models.SettingsGlobal{DownloadDir: "downloads", CleanupDiskProtect: false}).Error)
+	mock := qbitMockServer(t)
+	defer mock.Close()
+	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "qbmock", Type: "qbittorrent", URL: mock.URL, Enabled: true}).Error)
+	withOrchestrator(t, &fakeV2Site{id: "hdsky", name: "HDSky", data: minimalTorrentBytes(4096)})
+	media := func(id string) (string, int, int) {
+		t.Helper()
+		var ti models.TorrentInfo
+		require.NoError(t, db.Where("site_name = ? AND torrent_id = ?", "hdsky", id).First(&ti).Error)
+		return ti.MediaType, ti.TMDBID, ti.MediaSeason
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/push", nil)
+
+	server.processTorrentPush(req, TorrentPushRequest{
+		DownloadURL: "/api/site/hdsky/torrent/1/download", DownloaderIDs: []uint{1}, TorrentTitle: "t1",
+		MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2,
+	})
+	kind, id, season := media("1")
+	assert.Equal(t, []any{models.MediaKindTV, 100088, 2}, []any{kind, id, season})
+
+	server.processBatchTorrentPush(req, BatchTorrentPushRequest{
+		Torrents: []TorrentPushItem{
+			{DownloadURL: "/api/site/hdsky/torrent/2/download", TorrentTitle: "t2", MediaType: models.MediaKindMovie, TMDBID: 872585},
+			{DownloadURL: "/api/site/hdsky/torrent/3/download", TorrentTitle: "t3", MediaType: "book", TMDBID: 1},
+		},
+		DownloaderIDs: []uint{1},
+	})
+	kind, id, season = media("2")
+	assert.Equal(t, []any{models.MediaKindMovie, 872585, 0}, []any{kind, id, season})
+	kind, id, _ = media("3")
+	assert.Equal(t, []any{"", 0}, []any{kind, id}, "不合法的条目不写")
+}
+
+// qbitCaptureServer 同 qbitMockServer，另外记下加种子时传的字段。
+func qbitCaptureServer(t *testing.T, fields *map[string][]string) *httptest.Server {
+	t.Helper()
+	inner := qbitMockServer(t)
+	t.Cleanup(inner.Close)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/torrents/add" {
+			_ = r.ParseMultipartForm(1 << 20)
+			*fields = r.MultipartForm.Value
+			_, _ = w.Write([]byte("Ok."))
+			return
+		}
+		proxyReq, _ := http.NewRequestWithContext(r.Context(), r.Method, inner.URL+r.URL.RequestURI(), r.Body)
+		resp, err := http.DefaultClient.Do(proxyReq)
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// 按条目推送时选了「按条目建子目录」：保存路径下按订阅设置里的模板建一级子目录，要 qBittorrent 照这个目录放；
+// 算不出来时照原来的保存路径推送，结果里写明。
+func TestProcessTorrentPush_ItemSubdir(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv, _ := newSubscribeEnv(t)
+	db := global.GlobalDB.DB
+	require.NoError(t, db.AutoMigrate(&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.SiteSetting{}, &models.SettingsGlobal{}))
+	require.NoError(t, db.Create(&models.SettingsGlobal{DownloadDir: "downloads", CleanupDiskProtect: false}).Error)
+	var fields map[string][]string
+	mock := qbitCaptureServer(t, &fields)
+	dl := models.DownloaderSetting{Name: "qbmock", Type: "qbittorrent", URL: mock.URL, Enabled: true}
+	require.NoError(t, db.Create(&dl).Error)
+	withOrchestrator(t, &fakeV2Site{id: "hdsky", name: "HDSky", data: minimalTorrentBytes(4096)})
+
+	push := func(id, savePath string) TorrentPushResponse {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/push", nil)
+		return srv.processTorrentPush(req, TorrentPushRequest{
+			DownloadURL: "/api/site/hdsky/torrent/" + id + "/download", DownloaderIDs: []uint{dl.ID}, TorrentTitle: "Shawshank." + id,
+			SavePath: savePath, MediaType: models.MediaKindMovie, TMDBID: 278, ItemSubdir: true,
+		})
+	}
+	resp := push("1", "/data/movies")
+	require.Len(t, resp.Results, 1)
+	assert.True(t, resp.Results[0].Success, resp.Results[0].Message)
+	assert.Equal(t, "推送成功；放进 /data/movies/肖申克的救赎 (1994)", resp.Results[0].Message)
+	assert.Equal(t, []string{"/data/movies/肖申克的救赎 (1994)"}, fields["savepath"])
+	assert.Equal(t, []string{"false"}, fields["autoTMM"])
+
+	// 没填保存路径、读不到下载器的默认保存路径（这里订阅服务没接下载器）：照原来的推送
+	resp = push("2", "")
+	require.Len(t, resp.Results, 1)
+	assert.True(t, resp.Results[0].Success)
+	assert.Contains(t, resp.Results[0].Message, "没有建子目录：读不到下载器的默认保存路径")
+	assert.NotContains(t, fields, "savepath")
+	assert.NotContains(t, fields, "autoTMM")
+
+	srv.subscriber = nil
+	resp = push("3", "/data/movies")
+	assert.Contains(t, resp.Results[0].Message, "没有建子目录：订阅服务没有启动")
+	assert.Equal(t, []string{"/data/movies"}, fields["savepath"])
+}

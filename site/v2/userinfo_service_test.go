@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // MockSite is a mock implementation of the Site interface
@@ -142,6 +143,38 @@ func TestUserInfoService_FetchAndSave(t *testing.T) {
 	assert.Equal(t, int64(1000000), info.Uploaded)
 
 	mockSite.AssertExpectations(t)
+}
+
+// 取到用户数据的那条日志并列写明两种下载量：计费的总在，实际的只在站点报了时才有
+func TestUserInfoService_FetchAndSave_LogsBilledAndActualDownload(t *testing.T) {
+	core, logs := observer.New(zap.InfoLevel)
+	service := NewUserInfoService(UserInfoServiceConfig{Logger: zap.New(core)})
+	ctx := context.Background()
+
+	mteam := &MockSite{}
+	mteam.On("ID").Return("mteam")
+	mteam.On("GetUserInfo", ctx).Return(UserInfo{Site: "mteam", Username: "u", Uploaded: 300, Downloaded: 100, TrueDownloaded: 900}, nil)
+	hdsky := &MockSite{}
+	hdsky.On("ID").Return("hdsky")
+	hdsky.On("GetUserInfo", ctx).Return(UserInfo{Site: "hdsky", Username: "u", Uploaded: 300, Downloaded: 100}, nil)
+	service.RegisterSite(mteam)
+	service.RegisterSite(hdsky)
+
+	_, err := service.FetchAndSave(ctx, "mteam")
+	require.NoError(t, err)
+	_, err = service.FetchAndSave(ctx, "hdsky")
+	require.NoError(t, err)
+
+	saved := logs.FilterMessage("User info fetched and saved").All()
+	require.Len(t, saved, 2)
+	m := saved[0].ContextMap()
+	assert.Equal(t, "mteam", m["site"])
+	assert.Equal(t, int64(100), m["downloaded_billed"], "计费下载量")
+	assert.Equal(t, int64(900), m["downloaded_actual"], "站点报的实际下载量")
+	h := saved[1].ContextMap()
+	assert.Equal(t, "hdsky", h["site"])
+	assert.Equal(t, int64(100), h["downloaded_billed"])
+	assert.NotContains(t, h, "downloaded_actual", "站点不报实际下载时不写这一项")
 }
 
 func TestUserInfoService_FetchAndSave_SiteNotFound(t *testing.T) {
@@ -375,3 +408,46 @@ func TestUserInfoService_FetchAndSaveAllWithConcurrency_Empty(t *testing.T) {
 // ---------------------------------------------------------------------------
 // createHDDolbySite — factory path
 // ---------------------------------------------------------------------------
+
+// M1b：用户名为空时返回 ErrEmptyUsername，登录探测据此记为解析失败；不保存。
+func TestUserInfoService_FetchAndSave_EmptyUsername(t *testing.T) {
+	service := NewUserInfoService(UserInfoServiceConfig{})
+	ctx := context.Background()
+
+	mockSite := &MockSite{}
+	mockSite.On("ID").Return("hdsky")
+	mockSite.On("GetUserInfo", ctx).Return(UserInfo{Site: "hdsky", LastAccess: 1700000000}, nil)
+	service.RegisterSite(mockSite)
+
+	_, err := service.FetchAndSave(ctx, "hdsky")
+	require.ErrorIs(t, err, ErrEmptyUsername)
+	_, err = service.GetUserInfo(ctx, "hdsky")
+	assert.Error(t, err, "nothing is saved or cached")
+}
+
+type failingSaveRepo struct {
+	UserInfoRepo
+	err error
+}
+
+func (r failingSaveRepo) Save(context.Context, UserInfo) error { return r.err }
+
+// M1b：保存失败时同时返回取到的数据和包装 ErrUserInfoPersist 的错误，站点可达这一事实不丢；失败的保存不进缓存。
+func TestUserInfoService_FetchAndSave_PersistFailureReturnsInfo(t *testing.T) {
+	repo := failingSaveRepo{UserInfoRepo: NewInMemoryUserInfoRepo(), err: errors.New("disk full")}
+	service := NewUserInfoService(UserInfoServiceConfig{Repo: repo})
+	ctx := context.Background()
+
+	want := UserInfo{Site: "hdsky", Username: "tester", LastAccess: 1700000000}
+	mockSite := &MockSite{}
+	mockSite.On("ID").Return("hdsky")
+	mockSite.On("GetUserInfo", ctx).Return(want, nil)
+	service.RegisterSite(mockSite)
+
+	info, err := service.FetchAndSave(ctx, "hdsky")
+	require.ErrorIs(t, err, ErrUserInfoPersist)
+	assert.ErrorContains(t, err, "disk full")
+	assert.Equal(t, want, info)
+	_, err = service.GetUserInfo(ctx, "hdsky")
+	assert.Error(t, err, "a failed save is not cached")
+}

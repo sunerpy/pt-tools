@@ -44,7 +44,7 @@ func TestCmdExitDispatch(t *testing.T) {
 	}
 	switch target {
 	case "run_invalid_mode":
-		_ = os.Remove("/tmp/pt-tools.lock")
+		_ = os.Remove(runLockPath())
 		c := &cobra.Command{}
 		c.Flags().String("mode", "bogus", "")
 		_ = c.Flags().Set("mode", "bogus")
@@ -52,7 +52,9 @@ func TestCmdExitDispatch(t *testing.T) {
 	case "completion_unsupported":
 		completionCmd.Run(completionCmd, []string{"fish"})
 	case "initconfig_home_error":
+		// Windows 上 os.UserHomeDir 读 USERPROFILE
 		os.Unsetenv("HOME")
+		os.Unsetenv("USERPROFILE")
 		initConfigAndDBFile(&cobra.Command{}, nil)
 	case "run_flag_error_special":
 		fn := runCmd.FlagErrorFunc()
@@ -128,7 +130,7 @@ type cmdErr string
 func (e cmdErr) Error() string { return string(e) }
 
 func runLockHeldSubprocess() {
-	l, err := utils.NewLocker("/tmp/pt-tools.lock")
+	l, err := utils.NewLocker(runLockPath())
 	if err != nil {
 		os.Exit(3)
 	}

@@ -2,7 +2,7 @@
 
 ## Role
 
-This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, generic webhook, and WeCom webhook.
+This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, generic webhook, WeCom webhook, and the outbound-only Bark, ServerChan, ntfy, DingTalk, and Feishu adapters.
 
 ## Core Interface
 
@@ -32,7 +32,10 @@ internal/notify/
     ├── telegram/                # Inbound/outbound + callback actions
     ├── qq/                      # OneBot/NapCat inbound/outbound
     ├── webhook/                 # Stateless generic webhook
-    └── wecom/                   # WeCom webhook
+    ├── wecom/                   # WeCom webhook (sends through outbound/)
+    ├── bark/ serverchan/ ntfy/  # Outbound-only push services
+    ├── dingtalk/ feishu/        # Outbound-only group bots (official hosts only, optional signing)
+    └── outbound/                # Shared HTTP client for the outbound-only adapters (see below)
 ```
 
 ## Delivery Paths
@@ -42,14 +45,35 @@ internal/notify/
 - `OutboxWorker` retries due rows at bounded backoff and marks exhausted rows dead.
 - RSS delivery adds a separate idempotency row in `RSSNotificationLog`, applies quota/quiet-hour policy, and may use `DigestBuffer` before sending.
 
+## Events and Message Templates (M21)
+
+- Every business notification carries `Notification.Event` (`event.go`): type, time and typed variables. Producers build it only with `NewEvent(type, at, fields)`; it keeps only the variables declared in the catalog (`events.go`), converts numbers by the declared kind (`int` → int64, `float` → float64, never by the JSON literal) and caps lists at 100 entries (`items_more`). `Event.UnmarshalJSON` runs the same normalization, so the outbox, `RSSNotificationLog` and `MonitorNotificationLog` retries render exactly like the live send.
+- `Templates` (`templates.go`) holds the global per-event templates loaded from `models.NotificationTemplate`; `Apply` re-renders title/text and keeps the built-in text when there is no template, rendering fails, or the result is empty. It runs in `cmd`'s `liveNotifyManager.Send` and in `OutboxWorker.sendViaNewChannel`; ChatOps replies are never templated.
+- `tmpl/` is the sandbox around `text/template`: no `define`/`template`/`block`, `range` only over catalog list variables, at most two levels, a static worst-case budget of 200000 steps (every node, command and argument counts, a range multiplies its body by 100; Go 1.22+ ranges over integers, so this is the only bound on iterations, and it also bounds the unmetered builtins `len`/`slice`/`and`/`or`/`not`, field and variable lookups) and at most 64 declared variables (variable lookups scan the stack), number-aware comparisons, a `printf` with widths and precisions up to 256 and no `*`/`[n]`, source and output caps, and a 64 KiB cap on every function result that can grow and on the summed arguments of the functions that concatenate them (`printf`, `print`, `println`, `html`, `js`, `urlquery`): function results feed other functions before the output cap sees them. On top of that every function charges its arguments and result to a 4 MiB budget shared by one render, so loops cannot add up; `Template.exec` binds a fresh function map with a new budget on a clone for every execution. A new function must charge the same budget. Keep these when adding functions.
+
+- The generic `webhook` adapter renders its own request (`adapter/webhook/request.go`): method, body format (`json`/`text`/`form`/`custom`), a body template and a URL template limited to path and query (the rendered scheme and host must equal the literal prefix's). An empty body template sends the legacy JSON plus `event`. `CheckConfig` renders every event's sample, and a `json` body must be valid JSON. The editor's presets live in `web/frontend/src/utils/webhookPresets.json`; `TestWebhook_PresetsPassCheck` runs each through `CheckConfig`. Only 2xx is success; transport errors keep only the innermost layer without the URL (`reason`), because the query may carry tokens. `POST /api/chatops/webhook/preview` renders without sending.
+
 ## Stateful Adapter Warning
 
-Do not create a second live Telegram or QQ listener for outbox delivery: it can collide on polling, ports, or connection ownership. Reuse the production live-channel manager for stateful transports. The current outbox factory path is reliable for stateless webhook adapters; changes here require explicit lifecycle tests.
+Do not create a second live Telegram or QQ listener for outbox delivery: it can collide on polling, ports, or connection ownership. Outbox retries go through the production live-channel manager (`OutboxWorker.SetLiveSender`); the factory path is only a fallback for stateless webhook adapters and decrypts `ConfigJSON` first. Changes here require explicit lifecycle tests.
+
+Telegram `Healthy()` follows the latest `getUpdates` result (`pollHealthTransport`): telego retries a failing long poll internally without closing the updates channel, so transport-level results are the only signal. `runInbound` restarts the long poll with backoff if the updates channel closes while the poll context is alive.
+
+## Outbound-only Adapters
+
+Bark, ServerChan, ntfy, DingTalk, Feishu and WeCom send through `outbound.Client.PostJSON`:
+
+- The request is bound to the caller's `ctx`: a timed-out send is canceled, so it cannot arrive late and then be delivered again by the outbox.
+- No environment proxy, no redirects (a 3xx is a failure), responses capped at 64 KiB.
+- Every connection is checked after DNS (`net.Dialer.Control`): link-local (including `169.254.169.254`), multicast and reserved addresses are never dialed; loopback and private ranges only when the request sets `AllowPrivate` (the user's `allow_private` switch on Bark/ntfy). DingTalk and Feishu webhooks must be the official HTTPS hosts.
+- HTTP errors carry only the status code. Adapters pick whitelisted fields (`code`/`message`, `errcode`/`errmsg`) and pass them through `outbound.Clean` with the configured secrets. Success needs the explicit success field (Bark `code==200`, ServerChan `code==0`, DingTalk/WeCom `errcode==0`, Feishu `code==0` or legacy `StatusCode==0`, ntfy a message `id`); a missing field is a failure.
+- They implement `notify.ConfigChecker`; `NotificationService` calls it with the merged plaintext config before create/update, so a bad config is rejected with `ErrInvalidConf` (HTTP 400) instead of failing at hot reload.
+- Tests point official hosts at a local TLS server with `outbound.NewClient(outbound.Options{Divert: addr})`. The `qa` build reads the same divert from `PT_TOOLS_QA_NOTIFY_DIVERT`; release builds have no such switch.
 
 ## Adding an Adapter
 
 1. Implement the full `Channel` interface under `adapter/<type>`.
-2. Parse and validate only that adapter's decrypted `ConfigJSON` during `Init`.
+2. Parse and validate only that adapter's decrypted `ConfigJSON` during `Init`; implement `ConfigChecker` when that validation needs no I/O.
 3. Register a factory with `notify.RegisterChannel`.
 4. Add the production side-effect import in `cmd/root.go` or `cmd/web.go`.
 5. Test init failure, outbound success/error, health, inbound callback (if supported), and bounded `Close`.

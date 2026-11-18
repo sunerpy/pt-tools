@@ -246,3 +246,28 @@ func TestCachedSearchOrchestrator_CleanupCache(t *testing.T) {
 	removed := cached.CleanupCache()
 	assert.Equal(t, 1, removed)
 }
+
+func TestSearchCache_ItemIndex(t *testing.T) {
+	c := NewSearchCache(SearchCacheConfig{TTL: time.Minute})
+	c.Set(MultiSiteSearchQuery{SearchQuery: SearchQuery{Keyword: "natural high"}}, &MultiSiteSearchResult{
+		Items: []TorrentItem{{ID: "1273390", SourceSite: "mteam", Title: "Natural.High.S04E04.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB"}, {ID: "9", Title: "没有站点的不索引"}},
+	})
+	it, ok := c.Item("MTeam", "1273390")
+	require.True(t, ok, "站点名不分大小写")
+	assert.Equal(t, "Natural.High.S04E04.2023.2160p.TX.WEB-DL.H.265.DDP2.0-HHWEB", it.Title)
+	_, ok = c.Item("mteam", "1273391")
+	assert.False(t, ok, "种子编号要完全相同")
+	_, ok = c.Item("", "9")
+	assert.False(t, ok)
+
+	c.items[itemKey("mteam", "1273390")] = itemCacheEntry{item: it, expiresAt: time.Now().Add(-time.Second)}
+	_, ok = c.Item("mteam", "1273390")
+	assert.False(t, ok, "过期的不算")
+	c.Cleanup()
+	assert.Empty(t, c.items, "清理时一起删掉过期的种子")
+
+	c.Set(MultiSiteSearchQuery{SearchQuery: SearchQuery{Keyword: "x"}}, &MultiSiteSearchResult{Items: []TorrentItem{{ID: "1", SourceSite: "a"}}})
+	c.Clear()
+	_, ok = c.Item("a", "1")
+	assert.False(t, ok)
+}

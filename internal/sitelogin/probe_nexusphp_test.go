@@ -246,3 +246,42 @@ func TestProbeNexusPHPUnknown(t *testing.T) {
 		assert.Contains(t, res.Diagnostic, "未配置或已失效")
 	})
 }
+
+// HTTP 主通道：NexusPHP 有用户名没最近动向时按探测时间记；HDDolby 同样的结果照旧是解析失败。
+func TestHTTPTransportNexusPHPAccessFallback(t *testing.T) {
+	now := time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
+	site := &fakeSite{info: v2.UserInfo{Username: "someone"}}
+
+	res, err := HTTPTransport{}.FetchUserInfo(context.Background(), &v2.SiteDefinition{Schema: v2.SchemaNexusPHP}, site, newProbeClock(now))
+	require.NoError(t, err)
+	assert.Equal(t, OK, res.Status)
+	require.NotNil(t, res.LastAccessAt)
+	assert.Equal(t, now, *res.LastAccessAt)
+
+	res, err = HTTPTransport{}.FetchUserInfo(context.Background(), &v2.SiteDefinition{Schema: v2.SchemaHDDolby}, site, newProbeClock(now))
+	require.NoError(t, err)
+	assert.Equal(t, PARSE_ERROR, res.Status)
+}
+
+// 只少了几页（userdetails 过不了质询）而用户名到手了：登录是好的，最近访问按这次探测算，不当成质询或网络错误
+func TestProbeNexusPHPPartialIsOK(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	clock := newProbeClock(now)
+	partial := fmt.Errorf("get user info: %w", &v2.PartialUserInfoError{
+		Missing: []string{"uploaded", "lastAccessAt"}, Err: fmt.Errorf("HTTP 403: %w", v2.ErrCloudflareChallenge),
+	})
+	site := &fakeSite{info: v2.UserInfo{Username: "tester"}, err: partial}
+
+	res, err := HTTPTransport{}.FetchUserInfo(context.Background(), &v2.SiteDefinition{ID: "hdsky", Schema: v2.SchemaNexusPHP}, site, clock)
+	require.NoError(t, err)
+	assert.Equal(t, OK, res.Status)
+	require.NotNil(t, res.LastAccessAt)
+	assert.Equal(t, now, *res.LastAccessAt)
+
+	res = ClassifyUserInfo(&v2.SiteDefinition{ID: "hdsky", Schema: v2.SchemaNexusPHP}, v2.UserInfo{Username: "tester"}, partial, clock)
+	assert.Equal(t, OK, res.Status)
+
+	// 连用户名都没有：照样按质询归类
+	res = ClassifyUserInfo(&v2.SiteDefinition{ID: "hdsky", Schema: v2.SchemaNexusPHP}, v2.UserInfo{}, partial, clock)
+	assert.NotEqual(t, OK, res.Status)
+}

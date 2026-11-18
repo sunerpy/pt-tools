@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
@@ -80,7 +82,7 @@ func makeTorrentFile(t *testing.T, dir string) (string, string) {
 func setupDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -329,7 +331,7 @@ func seedQbitDownloader(t *testing.T, url string) uint {
 }
 
 func setupFactoryTestDB(t *testing.T) func() {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -355,7 +357,7 @@ func nexusDetailServer(t *testing.T) *httptest.Server {
 
 func setupUnifiedDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -366,11 +368,22 @@ func setupUnifiedDB(t *testing.T) *models.TorrentDB {
 func boolPtrUS(b bool) *bool { return &b }
 
 func setupTestDB(t *testing.T) func() {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
 	return func() {
 		// cleanup if needed
 	}
+}
+
+// pushLoopLegacy 用没有 RSS 编号的暂存推送跑推送循环（不按归属过滤，本次尝试从现在算）。
+func pushLoopLegacy(ctx context.Context, dl downloader.Downloader, dlInfo *DownloaderInfo, dir string, files []string,
+	category, tags, downloadPath string, siteName models.SiteGroup, pauseOnFreeEnd bool, retainHours int,
+) pushLoopResult {
+	sp := &stagedPush{
+		rss: models.RSSConfig{PauseOnFreeEnd: pauseOnFreeEnd}, dl: dl, dlInfo: dlInfo, category: category,
+		tags: tags, downloadPath: downloadPath, siteName: siteName, attemptStart: time.Now(),
+	}
+	return runPushLoop(ctx, sp, dir, files, retainHours)
 }

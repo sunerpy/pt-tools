@@ -1,0 +1,316 @@
+package scheduler
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+)
+
+// 刷流的入场与删种判断都是纯函数：输入任务配置和一条搜索结果 / 一个下载器里的种子，输出判定和原因，便于表驱动测试。
+
+// BrushDiscountLevels 是刷流入场可选的优惠类型（与 site/v2 的 DiscountLevel 取值一致）。
+var BrushDiscountLevels = []v2.DiscountLevel{
+	v2.DiscountFree, v2.Discount2xFree, v2.DiscountPercent30, v2.DiscountPercent50,
+	v2.DiscountPercent70, v2.Discount2xUp, v2.Discount2x50,
+}
+
+// 刷流任务的分区（BrushTask.Section），只对 M-Team：综合区、成人区、两个都读；空值等于综合区。
+const (
+	BrushSectionNormal = v2.MTeamSectionNormal
+	BrushSectionAdult  = v2.MTeamSectionAdult
+	BrushSectionAll    = "all"
+)
+
+// BrushSections 是分区的全部取值（含空值）。
+var BrushSections = []string{"", BrushSectionNormal, BrushSectionAdult, BrushSectionAll}
+
+// brushSections 是这一轮要读的分区：M-Team 按任务设置（两个都读时先综合区、后成人区），
+// 别的站点只读一次、不带分区（库里留着旧值也一样，不会把同一张列表读两遍）。
+func brushSections(task models.BrushTask, kind v2.SiteKind) []string {
+	if kind != v2.SiteMTorrent {
+		return []string{""}
+	}
+	switch task.Section {
+	case BrushSectionAdult:
+		return []string{BrushSectionAdult}
+	case BrushSectionAll:
+		return []string{BrushSectionNormal, BrushSectionAdult}
+	default:
+		return []string{BrushSectionNormal}
+	}
+}
+
+// brushSectionLabel 是分区的中文名；别的站点（空值）为空。
+func brushSectionLabel(section string) string {
+	switch section {
+	case BrushSectionNormal:
+		return "综合区"
+	case BrushSectionAdult:
+		return "成人区"
+	}
+	return ""
+}
+
+// brushAllowedDiscounts 解析任务的 Discounts；为空时只收免费（FREE、2XFREE）。
+func brushAllowedDiscounts(task models.BrushTask) map[v2.DiscountLevel]bool {
+	out := map[v2.DiscountLevel]bool{}
+	for raw := range strings.SplitSeq(task.Discounts, ",") {
+		if lv := v2.DiscountLevel(strings.ToUpper(strings.TrimSpace(raw))); lv != "" {
+			out[lv] = true
+		}
+	}
+	if len(out) == 0 {
+		for _, lv := range v2.FreeDiscountLevels {
+			out[lv] = true
+		}
+	}
+	return out
+}
+
+// brushListFreeOnly 报告这一轮让站点只列免费种（NexusPHP 的 spstate=2、Unit3D 的 freeleech、Gazelle 的 freetorrent）：
+// 允许的优惠恰好只有「免费」时为真。勾了别的类型（默认就勾着 2X 免费）时读不带筛选的第一页，交给 admitBrushItem 在本地挑：
+// 站点的免费筛选只列「免费」，2X 免费、50% 这些读不到。M-Team 等不看这个标记、本来就在本地挑的站点不受影响。
+func brushListFreeOnly(task models.BrushTask) bool {
+	allowed := brushAllowedDiscounts(task)
+	return len(allowed) == 1 && allowed[v2.DiscountFree]
+}
+
+// brushRequiresFree 报告任务只收免费优惠（允许的优惠全是免费级别）：推送要求免费。
+func brushRequiresFree(task models.BrushTask) bool {
+	for lv := range brushAllowedDiscounts(task) {
+		if !v2.IsFreeTorrent(lv) {
+			return false
+		}
+	}
+	return true
+}
+
+// brushSnapshot 是列表结果的资格快照：取得时间用驱动给的，没有时用这一轮读列表的时间。
+func brushSnapshot(it v2.TorrentItem, searchAt time.Time) *v2.PromotionSnapshot {
+	verified := it.FetchedAt
+	if verified.IsZero() {
+		verified = searchAt
+	}
+	s := it.Promotion(verified)
+	return &s
+}
+
+// splitKeywords 按换行与逗号拆关键词，去空、转小写。
+func splitKeywords(s string) []string {
+	var out []string
+	for _, line := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == ',' || r == '，' }) {
+		if kw := strings.ToLower(strings.TrimSpace(line)); kw != "" {
+			out = append(out, kw)
+		}
+	}
+	return out
+}
+
+const gib = 1024 * 1024 * 1024
+
+// brushHR 是一个种子的 H&R 要求：SeedTimeH 是做种要求（小时，站点定义按体积算出或站点设置里填的，0 是未知），
+// UploadRatio 是站点设置里填的「H&R 上传量达标」（#542，下完以后上传量达到体积的这么多倍也算达标，0 是不用）。
+type brushHR struct {
+	SeedTimeH   int
+	UploadRatio float64
+}
+
+// admitBrushItem 判断一条搜索结果能不能进入刷流。siteHR 是站点定义的整站 H&R（与 RSS 路径同一规则：
+// hasHR = item.HasHR || def.HREnabled）。M-Team 的搜索忽略 FreeOnly、结果里会混入非免费种，所以优惠类型一律在这里判。
+//
+// hr 是这个种子的 H&R 要求；有 H&R 时要算得出什么时候能删：做种要求已知，或填了上传量要求、体积也已知，否则拒收。
+func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, hr brushHR, now time.Time) (bool, string) {
+	if item.ID == "" {
+		return false, "没有种子 ID"
+	}
+	allowed := brushAllowedDiscounts(task)
+	if !allowed[item.DiscountLevel] {
+		return false, fmt.Sprintf("优惠类型 %s 不在允许范围", item.DiscountLevel)
+	}
+	if !item.DiscountEndTime.IsZero() {
+		if !item.DiscountEndTime.After(now) {
+			return false, "优惠已到期"
+		}
+		if task.MinFreeRemainMin > 0 && item.DiscountEndTime.Sub(now) < time.Duration(task.MinFreeRemainMin)*time.Minute {
+			return false, fmt.Sprintf("优惠剩余不足 %d 分钟", task.MinFreeRemainMin)
+		}
+	}
+	if brushRequiresFree(task) {
+		// 只收免费：结束时间未知（缺失或解析不了）不能当长期免费
+		switch item.Promotion(now).Validity {
+		case v2.FreeUnknown:
+			return false, "免费结束时间未知"
+		case v2.FreeNotFree:
+			return false, "不是免费"
+		}
+	}
+	if task.MinSizeGB > 0 || task.MaxSizeGB > 0 {
+		if item.SizeBytes <= 0 {
+			return false, "体积未知"
+		}
+		sizeGB := float64(item.SizeBytes) / gib
+		if task.MinSizeGB > 0 && sizeGB < task.MinSizeGB {
+			return false, fmt.Sprintf("体积 %.2f GB 小于 %.2f GB", sizeGB, task.MinSizeGB)
+		}
+		if task.MaxSizeGB > 0 && sizeGB > task.MaxSizeGB {
+			return false, fmt.Sprintf("体积 %.2f GB 大于 %.2f GB", sizeGB, task.MaxSizeGB)
+		}
+	}
+	if task.MaxSeeders > 0 && item.Seeders > task.MaxSeeders {
+		return false, fmt.Sprintf("做种 %d 人多于 %d", item.Seeders, task.MaxSeeders)
+	}
+	if task.MinLeechers > 0 && item.Leechers < task.MinLeechers {
+		return false, fmt.Sprintf("下载 %d 人少于 %d", item.Leechers, task.MinLeechers)
+	}
+	if task.MaxPublishAgeMin > 0 {
+		if item.UploadedAt <= 0 {
+			return false, "发布时间未知"
+		}
+		if age := now.Sub(time.Unix(item.UploadedAt, 0)); age > time.Duration(task.MaxPublishAgeMin)*time.Minute {
+			return false, fmt.Sprintf("发布已 %d 分钟，超过 %d 分钟", int(age.Minutes()), task.MaxPublishAgeMin)
+		}
+	}
+	if task.ExcludeHR && (item.HasHR || siteHR) {
+		return false, "有 H&R"
+	}
+	if (item.HasHR || siteHR) && hr.SeedTimeH <= 0 {
+		// 不排除 H&R 时也只收算得出什么时候能删的：做种要求未知时只能按上传量判断，那就要填了上传量要求、体积也已知
+		switch {
+		case hr.UploadRatio <= 0:
+			return false, brushRejectHRUnknown
+		case item.SizeBytes <= 0:
+			return false, brushRejectHRNoSize
+		}
+	}
+	text := strings.ToLower(item.Title + " " + item.Subtitle)
+	if inc := splitKeywords(task.IncludeKeywords); len(inc) > 0 {
+		hit := false
+		for _, kw := range inc {
+			if strings.Contains(text, kw) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return false, "标题不含任何包含词"
+		}
+	}
+	for _, kw := range splitKeywords(task.ExcludeKeywords) {
+		if strings.Contains(text, kw) {
+			return false, fmt.Sprintf("标题含排除词 %s", kw)
+		}
+	}
+	return true, ""
+}
+
+// sortBrushCandidates 把候选按下载人数多、做种人数少、发布新排在前面：抢在人多的时候进场，上传空间最大。
+func sortBrushCandidates(items []v2.TorrentItem) {
+	sort.SliceStable(items, func(a, b int) bool {
+		x, y := items[a], items[b]
+		if x.Leechers != y.Leechers {
+			return x.Leechers > y.Leechers
+		}
+		if x.Seeders != y.Seeders {
+			return x.Seeders < y.Seeders
+		}
+		return x.UploadedAt > y.UploadedAt
+	})
+}
+
+// brushRemoval 判断一个刷流种子这一轮要不要删，返回原因。samples 是 SamplesSince(now - 窗口) 的结果
+// （第一条是窗口起点之前最近的一条），只在低速规则里用到。
+//
+// H&R 保护与自动清理（cleanup_monitor 的 hrInfo）同一判断：有 H&R 且要求的做种时长还没满时一律不删，
+// 包括免费到期还没下完的情况 —— 删掉未完成的 H&R 种子同样会被站点记一次 H&R。hrRatio 是站点设置里现在填的
+// 「H&R 上传量达标」（#542，0 是不用）：下完、上传量达到体积的这么多倍也算做满（体积用记录的，没有时用下载器给的）。
+func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.Torrent, samples []models.BrushTorrentSample, hrRatio float64, now time.Time) (bool, string) {
+	if bt.HasHR {
+		// 要求时长未知（<= 0）时按未满处理（fail-closed），只有上传量能放行；入场时已经拒收两样都判断不了的种子，这里兜底
+		size := bt.SizeBytes
+		if size <= 0 {
+			size = t.TotalSize
+		}
+		seeded := bt.HRSeedTimeH > 0 && t.SeedingTime >= int64(bt.HRSeedTimeH)*3600
+		if !seeded && !hrUploadMet(hrRatio, size, t.TotalUploaded, t.Progress) {
+			return false, ""
+		}
+	}
+	completed := brushCompleted(t)
+	if task.RemoveFreeExpiredIncomplete && !completed && bt.FreeEndAt != nil {
+		// 下一轮检查之前就会到期的，这一轮就删：等到下一轮，到期之后那段已经按非免费计了下载
+		interval := time.Duration(max(task.IntervalMin, 1)) * time.Minute
+		if !now.Before(bt.FreeEndAt.Add(-interval)) {
+			return true, "免费即将到期，尚未下完"
+		}
+	}
+	if task.RemoveSeedTimeH > 0 && completed && float64(t.SeedingTime) >= task.RemoveSeedTimeH*3600 {
+		return true, fmt.Sprintf("做种 %.1f 小时，达到 %.1f 小时", float64(t.SeedingTime)/3600, task.RemoveSeedTimeH)
+	}
+	if task.RemoveRatio > 0 && t.Ratio >= task.RemoveRatio {
+		return true, fmt.Sprintf("分享率 %.2f，达到 %.2f", t.Ratio, task.RemoveRatio)
+	}
+	if task.RemoveLowSpeedKBs > 0 && completed && task.RemoveLowSpeedWindowMin > 0 && len(samples) > 0 {
+		window := time.Duration(task.RemoveLowSpeedWindowMin) * time.Minute
+		start := samples[0]
+		// 整个窗口都在做种、而且采样覆盖了整个窗口才判：刚下完或刚开始采样的种子不算。
+		// 累计上传比窗口起点还小，是下载器重启或种子重新加入后计数清零了：这一轮不判，等新的完整窗口
+		if t.SeedingTime >= int64(window.Seconds()) && !start.At.After(now.Add(-window)) && t.TotalUploaded >= start.Uploaded {
+			elapsed := now.Sub(start.At).Seconds()
+			if elapsed > 0 {
+				speed := float64(t.TotalUploaded-start.Uploaded) / elapsed / 1024
+				if speed < task.RemoveLowSpeedKBs {
+					return true, fmt.Sprintf("最近 %d 分钟平均上传 %.1f KB/s，低于 %.1f KB/s", task.RemoveLowSpeedWindowMin, max(speed, 0), task.RemoveLowSpeedKBs)
+				}
+			}
+		}
+	}
+	if task.RemoveInactiveH > 0 {
+		if last, ok := brushLastActivity(bt, t); ok {
+			idle := now.Sub(last)
+			if idle >= time.Duration(task.RemoveInactiveH*float64(time.Hour)) {
+				return true, fmt.Sprintf("已 %.1f 小时没有上传或下载", idle.Hours())
+			}
+		}
+	}
+	return false, ""
+}
+
+// brushLastActivity 是种子最后一次上传或下载数据的时间：先看下载器记的（qB 的 last_activity、Transmission 的 activityDate，
+// 与自动删种的「不活跃」同一个来源），下载器没给时用刷流自己采样记下的（累计上传或下载量涨了的那次采样）。都不知道时 ok 为假。
+func brushLastActivity(bt models.BrushTorrent, t downloader.Torrent) (time.Time, bool) {
+	if t.LastActivity > 0 {
+		return time.Unix(t.LastActivity, 0), true
+	}
+	if bt.LastActivityAt != nil {
+		return *bt.LastActivityAt, true
+	}
+	return time.Time{}, false
+}
+
+// brushCompleted 报告种子是否已经下完：进度 100%，并且不在校验、出错这类进度还不可信的状态里
+// （qBittorrent 的 checkingResumeData、missingFiles 也可能报 100%）。暂停的已完成种子算完成。
+func brushCompleted(t downloader.Torrent) bool {
+	if t.Progress < 1 {
+		return false
+	}
+	switch t.State {
+	case downloader.TorrentChecking, downloader.TorrentError:
+		return false
+	}
+	return true
+}
+
+// hasTag 报告种子的标签（qB tags / TR labels，逗号分隔）里是否有 tag（大小写不敏感）。
+func hasTag(t downloader.Torrent, tag string) bool {
+	for raw := range strings.SplitSeq(t.Tags+","+t.Label, ",") {
+		if strings.EqualFold(strings.TrimSpace(raw), tag) {
+			return true
+		}
+	}
+	return false
+}

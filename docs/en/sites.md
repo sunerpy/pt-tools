@@ -1,8 +1,8 @@
 # Supported sites
 
-**66** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi.
+**72** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi.
 
-### NexusPHP sites (62)
+### NexusPHP sites (68)
 
 | Site                  | Sign-in | Features                                   | Status | Notes                                                                                                                     |
 | --------------------- | ------- | ------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------- |
@@ -19,7 +19,7 @@
 | **HDFans**            | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **LemonHD**           | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **BTSCHOOL**          | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
-| **BYRPT**             | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
+| **BYRPT**             | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **Audiences**         | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **CarPT**             | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **52PT**              | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
@@ -32,7 +32,7 @@
 | **TMPT**              | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **UBits**             | Cookie  | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **CrabPT**            | Cookie  | RSS, search, user info                     | ✅     | 蟹黄堡 (crabpt.vip)                                                                                                       |
-| **GameGamePT**        | Cookie  | RSS, search, user info                     | ✅     | GGPT (gamegamept.com)                                                                                                     |
+| **GameGamePT**        | Cookie  | RSS, search, user info                     | ✅     | GGPT (gamegamept.com, site-wide H&R; fill in the seeding requirement in the site settings, issue #727)                    |
 | **Dubhe**             | Cookie  | RSS, search, user info                     | ✅     | 天枢 (dubhe.site)                                                                                                         |
 | **PTCafe**            | Cookie  | RSS, search, user info                     | ✅     | 咖啡 (ptcafe.club)                                                                                                        |
 | **CyanBug**           | Cookie  | RSS, search, user info                     | ✅     | 大青虫 (cyanbug.net)                                                                                                      |
@@ -41,7 +41,7 @@
 | **HDVideo**           | Cookie  | RSS, search, user info                     | ✅     | HD视频 (hdvideo.top)                                                                                                      |
 | **GTKPW**             | Cookie  | RSS, search, user info                     | ✅     | Several mirrors (pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com)                                                  |
 | **NicePT**            | Cookie  | RSS, search, user info                     | ✅     | 好趣 (www.nicept.net, Traditional Chinese)                                                                                |
-| **OurBits**           | Cookie  | RSS, search, user info                     | ✅     | Supported (ourbits.club, issue #329)                                                                                      |
+| **OurBits**           | Cookie  | RSS, search, user info                     | ✅     | Supported (ourbits.club, issue #329); set the site's 促销种子显示方式 (promotion display) to icon (图标) or text (文字)   |
 | **Mua**               | Cookie  | RSS, search, user info                     | ✅     | Anime site (mua.xloli.cc; user details are addressed by UUID; issue #339)                                                 |
 | **1PTBar**            | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
 | **lajidui**           | Cookie  | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                                                                     |
@@ -50,8 +50,8 @@
 | **PandaPT**           | Cookie  | RSS, search, user info                     | ✅     | Supported (pandapt.net; upload, download and bonus are read from info_block; issue #416)                                  |
 | **PTFans**            | Cookie  | RSS, search, user info                     | ✅     | Supported (ptfans.cc; has H&R; data is read from info_block; issue #417)                                                  |
 | **KamePT**            | Cookie  | RSS, search, user info                     | ✅     | Supported (kamept.com; info_block includes the seeding points; issue #418)                                                |
-| **PTCHDBits**         | Cookie  | RSS, search, user info                     | ✅     | Supported (ptchdbits.co; promotion read from img.pro_free on the details page; requested in an issue)                     |
-| **PTerClub**          | Cookie  | RSS, search, user info                     | ✅     | 猫站 (pterclub.net; its bonus points are called 猫粮; data is read from info_block)                                       |
+| **PTCHDBits**         | Cookie  | RSS, search, user info, class requirements | ✅     | Supported (ptchdbits.co; text and icon promotion display; H&R only on H3/H5 torrents, counted as 120 hours)               |
+| **PTerClub**          | Cookie  | RSS, search, user info, class requirements | ✅     | 猫站 (pterclub.net; bonus points are called 猫粮; no H&R; automatic sign-in does not count as a login)                    |
 | **PTHome**            | Cookie  | RSS, search, user info                     | ✅     | 铂金家 (pthome.net; upload, download, bonus and seeding points are read from info_block)                                  |
 | **TangPT**            | Cookie  | RSS, search, user info                     | ✅     | 糖果 (www.tangpt.top; CHD template; issue #456)                                                                           |
 | **T-Baozi**           | Cookie  | RSS, search, user info                     | ✅     | 包子 (p.t-baozi.cc; data is read from info_block; issue #457)                                                             |
@@ -68,15 +68,27 @@
 | **U2分享園@動漫花園** | Cookie  | RSS, search, user info                     | ✅     | U2 / 動漫花園 (u2.dmhy.org; the details page has no hidden title field, so the title is parsed from the text; issue #497) |
 | **PTzone**            | Cookie  | RSS, search, user info                     | ✅     | ptzone.xyz (Traditional Chinese interface; submitted in the Telegram group)                                               |
 | **PigGo**             | Cookie  | RSS, search, user info                     | ✅     | 猪猪 (piggo.me; the subtitle is a bare text node; class and H&R still need more samples to verify; issue #532)            |
+| **TJUPT**             | Cookie  | RSS, search, user info, class requirements | ✅     | 北洋园PT (no download counting, H&R on every torrent; unregistered tools risk a ban; no automatic sign-in)                |
+| **库非**              | Cookie  | RSS, search, user info                     | ✅     | Kufei (kufei.org; no torrent page carries an H&R mark, so pt-tools does not treat its torrents as H&R; issue #870)        |
+| **杏坛**              | Cookie  | RSS, search, user info                     | ✅     | XingTan (xingtan.one; books and courses; the bonus points are called 杏仁值; issue #880)                                  |
+| **HDKylin**           | Cookie  | RSS, search, user info                     | ✅     | 麒麟 (www.hdkyl.in; issue #881)                                                                                           |
+| **OshenPT**           | Cookie  | RSS, search, user info                     | ✅     | www.oshen.win (issue #882)                                                                                                |
+| **Kelu**              | Cookie  | RSS, search, user info                     | ✅     | our.kelu.one (adult content; H&R works as on 库非; issue #861)                                                            |
+
+> [!WARNING]
+> TJUPT warns or permanently bans accounts used by programs or scripts that access the site with your cookie unless the program is on its whitelist; the site's own RSS feed needs no registration. Before turning the site on, register pt-tools in the 机器人爬虫/程序脚本报备专帖 topic on the TJUPT forum (purpose, user ID, IP range, User-Agent, pages visited and how often), and turn it on in pt-tools after the staff approve it.
 
 ### Other platforms (4)
 
-| Site          | Platform                        | Sign-in          | Features                                   | Status | Notes                                                                    |
-| ------------- | ------------------------------- | ---------------- | ------------------------------------------ | ------ | ------------------------------------------------------------------------ |
-| **M-Team**    | mTorrent                        | API Key          | RSS, search, user info, class requirements | ✅     | Fully supported                                                          |
-| **HDDolby**   | HDDolby (derived from NexusPHP) | Cookie + API Key | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if two-step verification causes problems |
-| **Rousi Pro** | Rousi                           | Passkey          | RSS, search, user info                     | ✅     | Supported; please open an issue if something is wrong                    |
-| **MooKo**     | Gazelle                         | Cookie           | RSS, search, user info, class requirements | ✅     | Supported; please open an issue if something is wrong                    |
+| Site          | Platform                        | Sign-in                            | Features                                            | Status | Notes                                                                                                                |
+| ------------- | ------------------------------- | ---------------------------------- | --------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
+| **M-Team**    | mTorrent                        | API Key                            | RSS, search, user info, class requirements          | ✅     | Fully supported                                                                                                      |
+| **UHDDolby**  | HDDolby (derived from NexusPHP) | API key (RSS key), cookie optional | RSS, search, user info, sign-in, class requirements | ✅     | HDDolby (高清杜比); the cookie is used for bonus per hour, sign-in and downloads by torrent ID such as cross-seeding |
+| **Rousi Pro** | Rousi                           | Passkey                            | RSS, search, user info                              | ✅     | Supported; please open an issue if something is wrong                                                                |
+| **MooKo**     | Gazelle                         | Cookie                             | RSS, search, user info, class requirements          | ✅     | Supported; please open an issue if something is wrong                                                                |
+
+> [!NOTE]
+> HDDolby (高清杜比) has moved to `www.uhddolby.com` and is now called UHDDolby. Its API key is the RSSKEY from the RSS page; see [Getting the UHDDolby RSS key](guide/get-cookie-apikey.md#getting-the-uhddolby-rss-key). Torrents already in your downloader still announce to `t.hddolby.com`: in the [downloader assistant](guide/downloader-assistant.md#replacing-trackers), replace `https://t.hddolby.com` with `https://www.uhddolby.com`, preview first and then apply. The site's staff warn against Transmission's own batch replace, which breaks the tracker addresses.
 
 > **More sites**: to have another site supported, open an [issue](https://github.com/sunerpy/pt-tools/issues) or a [pull request](https://github.com/sunerpy/pt-tools/pulls).
 >

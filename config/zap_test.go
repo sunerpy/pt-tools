@@ -13,7 +13,11 @@ import (
 )
 
 func TestDefaultZapInitLogger(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	lg, err := DefaultZapConfig.InitLogger()
 	require.NoError(t, err)
 	require.NotNil(t, lg)
@@ -59,6 +63,7 @@ func TestApplyEnvOverrides(t *testing.T) {
 func TestPruneOldLogs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	logDir := filepath.Join(home, ".pt-tools", "logs")
 	require.NoError(t, os.MkdirAll(logDir, 0o755))
 
@@ -103,7 +108,11 @@ func TestPruneOldLogs(t *testing.T) {
 }
 
 func TestPruneOldLogs_MissingDir(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	z := DefaultZapConfig
 	assert.NoError(t, z.PruneOldLogs(), "missing log dir should not error")
 }
@@ -132,6 +141,7 @@ func TestSetAndGetLogLevel(t *testing.T) {
 func TestInitLoggerAllOptions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("POD_NAME", "pt-tools-pod-1")
 
 	z := DefaultZapConfig
@@ -142,6 +152,7 @@ func TestInitLoggerAllOptions(t *testing.T) {
 
 	lg, err := z.InitLogger()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = CloseLogFiles() })
 	require.NotNil(t, lg)
 	lg.Info("hello from init logger test")
 	lg.Error("error line to exercise high priority core")
@@ -154,7 +165,11 @@ func TestInitLoggerAllOptions(t *testing.T) {
 }
 
 func TestInitLoggerConsoleDisabledNoPod(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	t.Setenv("POD_NAME", "")
 
 	z := DefaultZapConfig
@@ -165,13 +180,18 @@ func TestInitLoggerConsoleDisabledNoPod(t *testing.T) {
 
 	lg, err := z.InitLogger()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = CloseLogFiles() })
 	require.NotNil(t, lg)
 	lg.Info("no console output line")
 	_ = lg.Sync()
 }
 
 func TestInitLoggerInvalidLevel(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	z := DefaultZapConfig
 	z.Level = "not-a-real-level"
 	lg, err := z.InitLogger()

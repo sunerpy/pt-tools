@@ -4,7 +4,7 @@ This page covers building pt-tools from source, submitting a change and editing 
 
 ## Building from source
 
-The repository pins Go `1.26.7`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local checks:
+The repository pins Go `1.26.11`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local checks:
 
 ```bash
 git clone https://github.com/sunerpy/pt-tools.git
@@ -49,5 +49,5 @@ The writing conventions, the format of the home page's data and the screenshot p
 These design documents are in Chinese only. They record interface contracts and future directions; they do not mean a feature is released.
 
 - [ChatOps, MCP and agent architecture](../../design/chatops-mcp-agent.md)
-- [MCP server contract](../../design/phase4-mcp.md)
+- [MCP server design](../../design/phase4-mcp.md)
 - [AI agent design](../../design/phase5-agent.md)

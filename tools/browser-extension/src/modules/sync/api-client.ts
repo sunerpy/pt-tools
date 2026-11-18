@@ -12,7 +12,18 @@ interface LoginResponse {
 interface PingResponse {
   status?: string;
   version?: string;
+  /** 这个 pt-tools 认得的可选能力（rc.38 起）；旧版本没有这个字段 */
+  features?: unknown;
 }
+
+/** pt-tools 认得 PUT /api/sites/{id} 的 keep_enabled：停用的站点只存凭据、不启用（见 web/api_credential.go） */
+export const FEATURE_CREDENTIAL_KEEP_ENABLED = "site_credential_keep_enabled";
+
+/**
+ * pt-tools 认得 PUT /api/sites/{id} 的 verify_cookie：先拿这组 Cookie 实际登录一次，登录上了才保存（见 web/credential_verify.go）。
+ * 扩展认不出格式的 Cookie 只推给认得它的 pt-tools：旧版本会不验证直接保存，可能换掉能用的那组。
+ */
+export const FEATURE_CREDENTIAL_VERIFY = "site_credential_verify";
 
 interface SiteConfigEntry {
   enabled?: boolean;
@@ -79,11 +90,27 @@ export class PtToolsApiClient {
     return result?.success !== false;
   }
 
-  async syncSiteCredential(site: KnownSite, credential: string): Promise<void> {
+  /**
+   * 把凭据推给 pt-tools。成功时 pt-tools 可能带一句 warning：凭据存下了、但站点还缺别的凭据（HDDolby 还要
+   * API Key）所以暂不启用 —— 调用方要把它告诉用户，不能当成什么都没发生。
+   */
+  async syncSiteCredential(
+    site: KnownSite,
+    credential: string,
+    opts: { keepEnabled?: boolean; verifyCookie?: boolean } = {},
+  ): Promise<{ warning?: string }> {
     const siteId = site.id.toLowerCase();
     const payload: SyncSiteCredentialPayload = {
       [site.syncField]: credential,
     };
+    // 定时同步推没启用的站点时带上：只存 Cookie，不替用户启用（旧版 pt-tools 不认，调用方先看 features）
+    if (opts.keepEnabled) {
+      payload.keep_enabled = true;
+    }
+    // 格式认不出的 Cookie：要 pt-tools 先验证、登录上了才保存（调用方先看 features）
+    if (opts.verifyCookie) {
+      payload.verify_cookie = true;
+    }
 
     const visitMap = await getLastVisitMap();
     const lastVisitAt = visitMap[siteId];
@@ -101,8 +128,19 @@ export class PtToolsApiClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
+      if (opts.verifyCookie && (response.status === 409 || response.status === 422)) {
+        throw new PtToolsApiError(
+          "verify_failed",
+          text.trim() || `HTTP ${response.status}`,
+          response.status,
+        );
+      }
       classifyHttpResponse(response, text);
     }
+    const body = (await this.safeJson(response)) as { warning?: unknown } | null;
+    return typeof body?.warning === "string" && body.warning.trim()
+      ? { warning: body.warning }
+      : {};
   }
 
   async reportVisit(siteId: string, ts: number | Date): Promise<void> {
@@ -181,12 +219,32 @@ export class PtToolsApiClient {
     });
   }
 
-  async ping(): Promise<void> {
+  /** features 读 /api/ping 里这个 pt-tools 认得的可选能力；读不到、旧版本没有这个字段时返回空数组 */
+  async features(timeoutMs?: number): Promise<string[]> {
     const response = await fetchWithTimeout(`${this.baseUrl}/api/ping`, {
       method: "GET",
       headers: { Accept: "application/json" },
       credentials: "include",
       redirect: "manual",
+      timeoutMs,
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const result = (await this.safeJson(response)) as PingResponse | null;
+    const features = result?.features;
+    return Array.isArray(features)
+      ? features.filter((f): f is string => typeof f === "string")
+      : [];
+  }
+
+  async ping(timeoutMs?: number): Promise<void> {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/ping`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      credentials: "include",
+      redirect: "manual",
+      timeoutMs,
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");

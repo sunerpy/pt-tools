@@ -628,3 +628,30 @@ func TestQuery_ResultAndChannelTypeUseProductionValues(t *testing.T) {
 		assert.True(t, strings.HasPrefix(it.Result, "denied"), "命中了不该命中的 %q", it.Result)
 	}
 }
+
+// 审计页「消息通知」一档：只要后台通知的投递（notify:…），「命令与接口」一档反过来。
+func TestQuery_CategorySeparatesNotificationsFromActions(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	now := time.Now()
+	for i, cmd := range []string{"help", "notify:daily_report:daily", "app:brush.update", "notify:media:followshow_found"} {
+		require.NoError(t, db.Create(&models.ActionAudit{
+			ChannelType: "telegram", Command: cmd, ArgsJSON: "{}", Result: "success", CreatedAt: now.Add(time.Duration(i) * time.Second),
+		}).Error)
+	}
+	items, total, err := svc.Query(context.Background(), AuditQuery{Category: "notify"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+	for _, it := range items {
+		assert.True(t, strings.HasPrefix(it.Command, NotifyCommandPrefix), it.Command)
+	}
+	items, total, err = svc.Query(context.Background(), AuditQuery{Category: "action"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+	for _, it := range items {
+		assert.False(t, strings.HasPrefix(it.Command, NotifyCommandPrefix), it.Command)
+	}
+	_, total, err = svc.Query(context.Background(), AuditQuery{})
+	require.NoError(t, err)
+	assert.Equal(t, 4, total)
+}

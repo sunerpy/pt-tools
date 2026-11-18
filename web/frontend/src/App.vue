@@ -6,11 +6,13 @@ import AppNav from "./components/shell/AppNav.vue";
 import AppRail from "./components/shell/AppRail.vue";
 import AppStatusBar from "./components/shell/AppStatusBar.vue";
 import MobileChrome from "./components/shell/MobileChrome.vue";
-import V2DeprecationBanner from "./components/V2DeprecationBanner.vue";
+import RssTaskBanner from "./components/shell/RssTaskBanner.vue";
+import { detailTitle } from "./composables/useDetailTitle";
 import { activeNavPath, NAV_GROUPS, NAV_ITEMS } from "./config/navigation";
 import { useLogLevelStore } from "./stores/logLevel";
 import { useRuntimeStore } from "./stores/runtime";
 import { useVersionStore } from "./stores/version";
+import { ITEM_FROM, itemFrom } from "./utils/mediaItem";
 
 /**
  * 应用外壳 —— Penpot 页面 G Cockpit 板 41（全局外壳）。
@@ -113,7 +115,7 @@ const navToggleLabel = computed(() => {
  * 详情页 —— 画板里只有这两类页面的 head 是 88 高且带面包屑（13 站点详情 / 23 通道详情）。
  * 其余页面一律 64 高，标题下面那一行是实时摘要而不是面包屑。
  */
-const DETAIL_ROUTES = new Set(["site-detail", "notification-detail"]);
+const DETAIL_ROUTES = new Set(["site-detail", "notification-detail", "media-item"]);
 const isDetail = computed(() => typeof route.name === "string" && DETAIL_ROUTES.has(route.name));
 
 /**
@@ -146,7 +148,15 @@ const hasHead = computed(
  */
 const isImmersive = computed(() => false);
 
-const activePath = computed(() => activeNavPath(route.name));
+/*
+ * 条目详情从探索、追剧与订阅、整理历史、种子搜索、日历都能进来（画板 04 的面包屑中间那段写从哪里进来的），
+ * 导航高亮跟着进来的那一页走。
+ */
+const itemFromView = computed(() => ITEM_FROM[itemFrom(route.query.from)]);
+
+const activePath = computed(() =>
+  route.name === "media-item" ? itemFromView.value.path : activeNavPath(route.name),
+);
 
 const navItem = computed(() => NAV_ITEMS.find((i) => i.path === activePath.value));
 
@@ -163,23 +173,32 @@ const pageTitle = computed(() => {
   if (route.name === "site-detail" && typeof route.params.name === "string") {
     return route.params.name;
   }
+  // 条目详情的标题是条目的名字：页面读到数据以后才知道
+  if (route.name === "media-item" && detailTitle.value) return detailTitle.value;
   const metaTitle = route.meta.title;
   if (typeof metaTitle === "string" && metaTitle) return metaTitle;
   return navItem.value?.label ?? "pt-tools";
 });
 
-/** 面包屑的根。产品里没有独立首页，/userinfo（用户统计）就是首页 */
-const HOME_PATH = "/userinfo";
+/** 面包屑的根：首页（媒体中心 M8 以前没有独立首页，根是用户统计） */
+const HOME_PATH = "/home";
 
 /**
  * 面包屑，规则是「链上不出现指向当前页的链接」。
  *
  * 之前根节点恒为「首页 → /userinfo」，而 /userinfo 本身就是用户统计页，
  * 于是在这一页上点「首页」原地不动，看着像坏了。当前页就是首页时直接省掉根节点，
- * 链读作「概览 › 用户统计」。
+ * 链读作「概览 › 首页」。
  */
 const crumbs = computed(() => {
   const out: { label: string; to?: string }[] = [];
+  // 条目详情三节（画板 04）：「媒体 / 从哪里进来的那一页 / 条目名」
+  if (route.name === "media-item") {
+    out.push({ label: "媒体" });
+    out.push({ label: itemFromView.value.label, to: itemFromView.value.path });
+    out.push({ label: pageTitle.value });
+    return out;
+  }
   /*
    * 详情页只有两节：所属列表页 + 这一条的名字（画板 13 的 crumb 就是
    * 「站点列表 › PTerClub」）。「首页」和分组名对回上一层没有帮助 —— 分组名根本
@@ -189,7 +208,12 @@ const crumbs = computed(() => {
     if (activePath.value !== HOME_PATH) out.push({ label: "首页", to: HOME_PATH });
     if (groupTitle.value) out.push({ label: groupTitle.value });
   }
-  if (navItem.value && navItem.value.label !== pageTitle.value) {
+  // 导航项就是当前页时不放链接（页面标题与导航名不同的页，例如「消息通知配置」与「消息通知」）
+  if (
+    navItem.value &&
+    navItem.value.label !== pageTitle.value &&
+    navItem.value.path !== route.path
+  ) {
     out.push({ label: navItem.value.label, to: navItem.value.path });
   }
   out.push({ label: pageTitle.value });
@@ -339,7 +363,7 @@ watch(
 
       <div class="pt-shell__content">
         <div class="pt-shell__inner">
-          <V2DeprecationBanner />
+          <RssTaskBanner />
           <router-view v-slot="{ Component }">
             <transition name="fade" mode="out-in">
               <component :is="Component" />

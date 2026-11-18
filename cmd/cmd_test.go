@@ -15,7 +15,7 @@ import (
 )
 
 func setupCmdTest(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 }
@@ -37,7 +37,8 @@ func TestRootHasWebSubcommand(t *testing.T) {
 
 func TestConfigInit_CreatesDirs(t *testing.T) {
 	home := t.TempDir()
-	os.Setenv("HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := filepath.Join(home, models.WorkDir)
 	require.NoError(t, chekcAndInitDownloadPath(dir))
 	// verify created paths
@@ -54,7 +55,7 @@ func TestVersionCmd_Prints(t *testing.T) {
 
 func TestRunCmdFunc_ModeSwitchAndInvalid(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 1, DefaultEnabled: true}))
@@ -74,15 +75,26 @@ func TestRunCmd_InvalidModeShowsUsage(t *testing.T) {
 }
 
 func TestBackupCmd_Run(t *testing.T) {
-	// exercise backup command path
+	// 经 cobra 的参数走一遍备份与恢复（在单独的家目录里，不动 TestMain 的密钥）
+	cliKeyHome(t, cliKey(1))
+	openServiceDB(t)
+	file := filepath.Join(t.TempDir(), "backup.tar.gz")
 	c := &cobra.Command{}
-	c.Flags().String("output", t.TempDir()+"/backup.db", "")
-	backupCmd.Run(c, []string{})
+	c.Flags().String("output", file, "")
+	c.Flags().Bool("no-secret", false, "")
+	require.NoError(t, backupCmd.RunE(c, []string{}))
+	r := &cobra.Command{}
+	r.Flags().String("input", file, "")
+	r.Flags().Bool("cancel", false, "")
+	require.NoError(t, restoreCmd.RunE(r, []string{}))
+	assert.NotNil(t, backupCmd.PersistentPreRun, "不走 db 的 InitRuntime")
+	backupCmd.PersistentPreRun(backupCmd, nil)
 }
 
 func TestInitConfigAndDBFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	initConfigAndDBFile(&cobra.Command{}, []string{})
 }
 

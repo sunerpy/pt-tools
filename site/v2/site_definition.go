@@ -341,14 +341,16 @@ func validateURL(rawURL string) error {
 }
 
 type SiteDefinition struct {
-	ID                string           `json:"id"`
-	Name              string           `json:"name"`
-	Aka               []string         `json:"aka,omitempty"`
-	Description       string           `json:"description,omitempty"`
-	Schema            Schema           `json:"schema"`
-	URLs              []string         `json:"urls"`
-	WebURL            string           `json:"webUrl,omitempty"`
-	LegacyURLs        []string         `json:"legacyUrls,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Aka         []string `json:"aka,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Schema      Schema   `json:"schema"`
+	URLs        []string `json:"urls"`
+	WebURL      string   `json:"webUrl,omitempty"`
+	LegacyURLs  []string `json:"legacyUrls,omitempty"`
+	// TrackerHosts 是 tracker 用的主机名或可注册域，只在它们与站点地址的可注册域不同时才需要写。
+	TrackerHosts      []string         `json:"trackerHosts,omitempty"`
 	FaviconURL        string           `json:"faviconUrl,omitempty"`
 	Unavailable       bool             `json:"unavailable,omitempty"`
 	UnavailableReason string           `json:"unavailableReason,omitempty"`
@@ -371,6 +373,13 @@ type SiteDefinition struct {
 	LevelRequirements []SiteLevelRequirement    `json:"levelRequirements,omitempty"`
 	Selectors         *SiteSelectors            `json:"selectors,omitempty"`
 	DetailParser      *DetailParserConfig       `json:"detailParser,omitempty"`
+	// Attendance 是每日签到配置；为空时 NexusPHP 站点用 DefaultNexusPHPAttendance，其他架构不支持签到。
+	Attendance *AttendanceConfig `json:"attendance,omitempty"`
+
+	// SessionCookies 是站点会续期换发的登录 Cookie（BYR：auth_token 15 分钟过期，过期后站点用 refresh_token 换发一对新的，
+	// refresh_token 也换）。写了的 NexusPHP 站点：同一个实例的请求排队发，响应里换了这些 Cookie 就用新值接着请求，
+	// 并经 SessionCookieSink 存回站点设置（见 session_cookies.go）。没写的站点照旧只用存着的那组。
+	SessionCookies []string `json:"sessionCookies,omitempty"`
 
 	// CreateDriver is an optional custom driver factory for this site.
 	// If nil, the driver is created based on Schema field.
@@ -457,6 +466,9 @@ type DetailParserConfig struct {
 	EndTimeSelector  string                   `json:"endTimeSelector,omitempty"`
 	SizeSelector     string                   `json:"sizeSelector,omitempty"`
 	SizeRegex        string                   `json:"sizeRegex,omitempty"`
+	// IMDbRegex、DoubanRegex 在详情页 HTML 里找外部编号（第一个分组是编号，取第一处匹配）；为空时用默认的链接格式。
+	IMDbRegex   string `json:"imdbRegex,omitempty"`
+	DoubanRegex string `json:"doubanRegex,omitempty"`
 }
 
 // DefaultDetailParserConfig returns default config for standard NexusPHP sites
@@ -498,6 +510,24 @@ type HRSeedTimeRule struct {
 //  1. HRCalcSeedTime — custom function (site-specific logic, e.g., ratio-based, tier-based)
 //  2. HRSeedTimeRules — built-in size-tiered rules
 //  3. HRSeedTimeHours — flat site-wide fallback
+//
+// ResolveHRSeedTimeH 是一个种子的 H&R 做种要求（小时）：站点定义能算出来时按定义（固定值、按体积分档或自定义规则），
+// 算不出时用站点设置里用户填的值 settingH（#727）；都没有时为 0，表示要求未知——刷流不收这类有 H&R 的种子、
+// 自动删种保护它们。def 可以为 nil。
+func ResolveHRSeedTimeH(def *SiteDefinition, sizeBytes int64, settingH int) int {
+	if def != nil {
+		if h := def.CalcHRSeedTimeH(sizeBytes); h > 0 {
+			return h
+		}
+	}
+	return max(settingH, 0)
+}
+
+// HasHRSeedTimeRule 报告站点定义里写了 H&R 做种时长（固定值、按体积分档或自定义规则）。
+func (d *SiteDefinition) HasHRSeedTimeRule() bool {
+	return d.HRCalcSeedTime != nil || len(d.HRSeedTimeRules) > 0 || d.HRSeedTimeHours > 0
+}
+
 func (d *SiteDefinition) CalcHRSeedTimeH(sizeBytes int64) int {
 	if d.HRCalcSeedTime != nil {
 		return d.HRCalcSeedTime(sizeBytes)

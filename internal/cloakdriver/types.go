@@ -6,6 +6,7 @@ package cloakdriver
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 )
 
@@ -15,6 +16,10 @@ type ProfileLaunchResult struct {
 	CdpURL    string    `json:"cdp_url"`
 	VncURL    string    `json:"vnc_url,omitempty"`
 	StartedAt time.Time `json:"started_at"`
+	// CdpHeader 不为 nil 时，CdpURL 是经 Manager 转发的 websocket 地址：连接时原样使用（不去查 /json/version），
+	// 握手带上这些请求头（Manager 的 Bearer 令牌）。新版 Manager（v0.1.x）的 cdp_url 是相对路径
+	// /api/profiles/{id}/cdp，转发也要令牌，LaunchProfile 会把它补成完整地址并填上这里。
+	CdpHeader http.Header `json:"-"`
 }
 
 // ProfileStatus is what Manager returns from GET /api/profiles/{id}/status.

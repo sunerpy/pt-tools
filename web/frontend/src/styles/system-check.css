@@ -1,0 +1,78 @@
+/*
+ * 系统体检页（首页 NAS 概览 H1）的卡片与动效，ScHero、ScProblem、ScGroupCard 与 SystemCheck.vue 共用。
+ *
+ * 卡面同首页的卡：面色、1px 发丝线、一层很淡的投影。动效只有几种，都有用途（DESIGN.md「Motion」）：
+ *   .sc-rv   数据到了卡片依次出现：间隔 30ms，最多排到第 12 张（之后同时出现）
+ *   .sc-new  这次新出现的问题脉冲一次
+ *   .sc-lift 能点、能去处理的卡悬停浮起
+ * 体检进行中旧结果照常显示（区块标题旁写「上一次的结果」），不用 opacity 压暗：压暗后文字的对比度不在任何令牌上
+ * （paletteContrast.test.ts 守着）。系统要求减少动态效果时这些全部关掉：没有位移、没有过渡。
+ */
+.sc-card {
+  position: relative;
+  min-width: 0;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-sm);
+}
+
+.sc-rv {
+  animation: sc-rise var(--pt-dur-normal) cubic-bezier(0.2, 0, 0, 1) backwards;
+  animation-delay: calc(min(var(--sc-i, 0), 12) * 30ms);
+}
+
+@keyframes sc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.sc-rv.sc-new {
+  animation:
+    sc-rise var(--pt-dur-normal) cubic-bezier(0.2, 0, 0, 1) backwards,
+    sc-pulse calc(var(--pt-dur-slow) * 3) ease-out 1;
+  animation-delay:
+    calc(min(var(--sc-i, 0), 12) * 30ms),
+    calc(min(var(--sc-i, 0), 12) * 30ms + var(--pt-dur-normal));
+}
+
+@keyframes sc-pulse {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc-tone, var(--pt-dang)) 45%, transparent);
+  }
+
+  to {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+
+.sc-lift {
+  transition:
+    transform var(--pt-transition-fast),
+    box-shadow var(--pt-transition-fast),
+    border-color var(--pt-transition-fast);
+}
+
+@media (hover: hover) {
+  .sc-lift:hover {
+    box-shadow: var(--pt-shadow-md);
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-rv,
+  .sc-rv.sc-new {
+    animation: none;
+  }
+
+  .sc-lift {
+    transition: none;
+  }
+
+  .sc-lift:hover {
+    transform: none;
+  }
+}

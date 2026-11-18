@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  type BatchTorrentActionResult,
   type DownloaderCapability,
   type DownloaderFailure,
   downloaderTorrentsApi,
@@ -9,9 +10,12 @@ import {
   type DownloaderTorrentItem,
   type TorrentActionTarget,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import DownloaderTorrentDetail from "@/components/downloader/DownloaderTorrentDetail.vue";
 import DownloaderTorrentTable from "@/components/downloader/DownloaderTorrentTable.vue";
 import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTorrentVirtualTable.vue";
+import TransferDialog from "@/components/downloader/TransferDialog.vue";
+import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -24,8 +28,10 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { hasKeepTag, KEEP_TIP } from "@/utils/keepTag";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 const COLUMN_STORAGE_KEY = "downloader-hub-visible-columns-v1";
 const COLUMN_ORDER_STORAGE_KEY = "downloader-hub-column-order-v1";
@@ -64,22 +70,20 @@ const ALL_COLUMN_KEYS = [
   "category",
   "tags",
 ];
+/*
+ * 默认只开判断一个任务要不要动手时真正要看的几列。以前十五列全开，表宽两千多，
+ * 1440 屏上右栏只看得到「标题 · 进度 · 做种数 · 连接数 · 大小」，速率、分享率、状态都要横着滚才找得到。
+ * 其余列还在「显示列」里，勾上就回来；已经改过列的用户按他们存下的来（只有改过才会存）。
+ */
 const DEFAULT_VISIBLE_COLUMNS = [
   "status_bar",
   "title",
   "progress",
-  "seeds",
-  "connections",
   "size",
   "upload_speed",
   "download_speed",
-  "added_at",
-  "completed_at",
   "ratio",
   "state",
-  "eta",
-  "category",
-  "tags",
 ];
 
 const isMobile = useIsMobile();
@@ -134,9 +138,17 @@ const capabilities = ref<DownloaderCapability[]>([]);
  */
 const loadFailures = ref<DownloaderFailure[]>([]);
 
+/*
+ * 条目详情的「在下载器里打开」带着下载器与种子的 hash 进来（?downloader_id=…&search=…）：打开时先按它筛。
+ * 没有路由（组件测试）时 useRoute 是 undefined。
+ */
+const routeQuery = useRoute()?.query ?? {};
 const filters = ref({
-  search: "",
-  downloaderId: "all",
+  search: typeof routeQuery.search === "string" ? routeQuery.search.trim() : "",
+  downloaderId:
+    typeof routeQuery.downloader_id === "string" && /^\d+$/.test(routeQuery.downloader_id)
+      ? routeQuery.downloader_id
+      : "all",
   state: "",
   category: "",
   tag: "",
@@ -188,6 +200,11 @@ const sidebarStyle = computed(() => ({
 
 const sortOptions = [
   { label: "添加日期", value: "added_at" },
+  /*
+   * 上传加下载：不筛选时也能把此刻在传数据的任务排到最前，速度相同的按添加日期（后端）。
+   * 放在第二位是因为下拉框一屏只露出前 8 项，排在「下载速度」后面要滚动才看得到。
+   */
+  { label: "总速度", value: "total_speed" },
   { label: "完成日期", value: "completed_at" },
   { label: "标题", value: "title" },
   { label: "进度", value: "progress" },
@@ -203,13 +220,40 @@ const sortOptions = [
 ];
 
 const selectedCount = computed(() => selectedRows.value.length);
+/** 转移做种（路线图 M5）：勾选的种子按所在下载器和 info hash 交给转移对话框 */
+const transferDialogVisible = ref(false);
+const transferItems = computed(() =>
+  selectedRows.value
+    .filter((row) => row.info_hash)
+    .map((row) => ({ source_id: row.downloader_id, hash: row.info_hash })),
+);
+/** 整理入库（路线图 M10）：一次整理一个下载完的种子（progress 是 0–100） */
+const organizeVisible = ref(false);
+const organizeTarget = ref<OrganizeTarget | null>(null);
+const organizeRow = computed(() =>
+  selectedRows.value.length === 1 && selectedRows.value[0].progress >= 100
+    ? selectedRows.value[0]
+    : null,
+);
+function openOrganize(row: DownloaderTorrentItem | null) {
+  if (!row) return;
+  organizeTarget.value = {
+    downloader_id: row.downloader_id,
+    hash: row.info_hash || row.task_id,
+    name: row.title,
+  };
+  organizeVisible.value = true;
+}
 const torrentStateCounters = computed(() => {
   let downloading = 0;
   let seeding = 0;
   let paused = 0;
   let stopped = 0;
   let error = 0;
+  let active = 0;
   for (const torrent of torrents.value) {
+    /* 和后端 state=active 同一个条件：此刻在传数据，不看状态 */
+    if (torrent.upload_speed > 0 || torrent.download_speed > 0) active += 1;
     const normalizedState = normalizeTorrentState(torrent.state);
     switch (normalizedState) {
       case "downloading":
@@ -231,13 +275,14 @@ const torrentStateCounters = computed(() => {
         break;
     }
   }
-  return { downloading, seeding, paused, stopped, error };
+  return { downloading, seeding, paused, stopped, error, active };
 });
 const downloadingCount = computed(() => torrentStateCounters.value.downloading);
 const seedingCount = computed(() => torrentStateCounters.value.seeding);
 const pausedCount = computed(() => torrentStateCounters.value.paused);
 const stoppedCount = computed(() => torrentStateCounters.value.stopped);
 const errorCount = computed(() => torrentStateCounters.value.error);
+const activeCount = computed(() => torrentStateCounters.value.active);
 const allCategories = ref<string[]>([]);
 const allTags = ref<string[]>([]);
 /**
@@ -452,8 +497,8 @@ const densityOptions = [
 ];
 
 const detailModeOptions = [
-  { label: "侧边", value: "drawer" },
-  { label: "下方", value: "inline" },
+  { label: "侧边抽屉", value: "drawer" },
+  { label: "表格下方", value: "inline" },
 ];
 
 /* 视图范围与渲染方式原先是侧栏里的两个 el-switch，收起侧栏就摸不到，
@@ -465,7 +510,7 @@ const scopeOptions = [
 
 const renderOptions = [
   { label: "常规", value: false },
-  { label: "虚拟", value: true },
+  { label: "虚拟列表", value: true },
 ];
 
 function clearFilters() {
@@ -1325,8 +1370,21 @@ function capabilityByDownloader(downloaderId: number): DownloaderCapability | un
   return capabilities.value.find((item) => item.downloader_id === downloaderId);
 }
 
+/** 选中的种子都带保留标签：批量条那枚按钮是「取消保留」 */
+const selectedAllKept = computed(
+  () => selectedRows.value.length > 0 && selectedRows.value.every((row) => hasKeepTag(row.tags)),
+);
+
 function selectedCanUse(
-  action: "pause" | "resume" | "delete" | "delete_with_files" | "set_location" | "recheck",
+  action:
+    | "pause"
+    | "resume"
+    | "delete"
+    | "delete_with_files"
+    | "set_location"
+    | "recheck"
+    | "keep"
+    | "unkeep",
 ): boolean {
   if (selectedRows.value.length === 0) return false;
   return selectedRows.value.every((row) => {
@@ -1345,6 +1403,9 @@ function selectedCanUse(
         return cap.can_set_location;
       case "recheck":
         return cap.can_recheck;
+      case "keep":
+      case "unkeep":
+        return Boolean(cap.can_keep);
       default:
         return false;
     }
@@ -1382,8 +1443,26 @@ async function confirmDelete(
   }
 }
 
+/**
+ * 保留、取消保留的结果提示：失败的写出原因（种子已经不在了、刷流记录没改等），不只报个数 ——
+ * 「已加保留标签，刷流记录没改」这类部分失败要让人看见。
+ */
+function reportKeepResult(
+  action: "keep" | "unkeep",
+  resp: { success_count: number; failed_count: number; results?: BatchTorrentActionResult[] },
+) {
+  const label = action === "keep" ? "保留" : "取消保留";
+  if (resp.failed_count === 0) {
+    ElMessage.success(`${label}：成功 ${resp.success_count} 个`);
+    return;
+  }
+  const failed = (resp.results ?? []).find((r) => !r.success);
+  const why = failed?.message ? `（${failed.message}）` : "";
+  ElMessage.warning(`${label}：成功 ${resp.success_count}，失败 ${resp.failed_count}${why}`);
+}
+
 async function batchAction(
-  action: "pause" | "resume" | "delete" | "delete_with_files" | "recheck",
+  action: "pause" | "resume" | "delete" | "delete_with_files" | "recheck" | "keep" | "unkeep",
 ) {
   if (selectedCount.value === 0) {
     ElMessage.warning("请先选择任务");
@@ -1406,13 +1485,22 @@ async function batchAction(
       action,
       targets,
     });
-    ElMessage.success(`完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    if (action === "keep" || action === "unkeep") {
+      reportKeepResult(action, resp);
+    } else {
+      ElMessage.success(`完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    }
     await loadTorrents();
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "批量操作失败");
   } finally {
     actionLoading.value = false;
   }
+}
+
+/** 转移任务建好后刷新一次列表：后台很快会把种子暂停加入目标下载器 */
+function onTransferCreated() {
+  void loadTorrents();
 }
 
 function openSetLocationDialog() {
@@ -1551,9 +1639,16 @@ async function handleContextAction(payload: {
     | "recheck"
     | "detail"
     | "set_category"
-    | "set_tags";
+    | "set_tags"
+    | "organize"
+    | "keep"
+    | "unkeep";
   row: DownloaderTorrentItem;
 }) {
+  if (payload.action === "organize") {
+    openOrganize(payload.row);
+    return;
+  }
   if (payload.action === "detail") {
     await openDetail(payload.row);
     return;
@@ -1578,7 +1673,11 @@ async function handleContextAction(payload: {
       action: payload.action,
       targets: [{ downloader_id: payload.row.downloader_id, task_id: payload.row.task_id }],
     });
-    ElMessage.success(`右键操作完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    if (payload.action === "keep" || payload.action === "unkeep") {
+      reportKeepResult(payload.action, resp);
+    } else {
+      ElMessage.success(`右键操作完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
+    }
     await loadTorrents();
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "右键操作失败");
@@ -1643,22 +1742,62 @@ function toggleSidebar() {
       </el-tooltip>
 
       <template #right>
-        <el-tooltip content="行高" placement="bottom">
-          <el-segmented v-model="tableDensity" class="pt-seg" :options="densityOptions" />
-        </el-tooltip>
-        <el-tooltip content="详情展示位置" placement="bottom">
-          <el-segmented v-model="detailMode" class="pt-seg" :options="detailModeOptions" />
-        </el-tooltip>
-        <el-tooltip content="数据范围" placement="bottom">
-          <el-segmented v-model="showAllTasks" class="pt-seg" :options="scopeOptions" />
-        </el-tooltip>
-        <el-tooltip content="列表渲染方式，仅全部范围可选" placement="bottom">
-          <el-segmented
-            v-model="useVirtualList"
-            class="pt-seg"
-            :options="renderOptions"
-            :disabled="!showAllTasks" />
-        </el-tooltip>
+        <!--
+          画板 18 的 bar-64 上是一枚 chip「视图」。以前这里平铺四组没有组名的分段
+          （紧凑/标准、侧边/下方、分页/全部、常规/虚拟），要悬停才知道各管什么；
+          分页时「虚拟」还亮着选中色，可它只在「全部」下才起作用。现在收进一个面板，每组带名字，
+          渲染方式只在「全部」下出现。
+        -->
+        <el-popover placement="bottom-end" trigger="click" :width="276">
+          <template #reference>
+            <el-button size="small" data-testid="hub-view-btn">
+              <PtIcon name="sliders-horizontal" :size="14" /><span>视图</span>
+            </el-button>
+          </template>
+          <div class="hub__view" data-testid="hub-view-panel">
+            <div class="hub__view-row">
+              <span class="hub__view-k">行高</span>
+              <el-segmented
+                v-model="tableDensity"
+                class="pt-seg"
+                size="small"
+                :options="densityOptions" />
+            </div>
+            <div class="hub__view-row">
+              <span class="hub__view-k">任务详情</span>
+              <el-segmented
+                v-model="detailMode"
+                class="pt-seg"
+                size="small"
+                :options="detailModeOptions" />
+            </div>
+            <div class="hub__view-row">
+              <span class="hub__view-k">数据范围</span>
+              <el-segmented
+                v-model="showAllTasks"
+                class="pt-seg"
+                size="small"
+                :options="scopeOptions"
+                data-testid="hub-scope-seg" />
+            </div>
+            <div v-if="showAllTasks" class="hub__view-row">
+              <span class="hub__view-k">渲染方式</span>
+              <el-segmented
+                v-model="useVirtualList"
+                class="pt-seg"
+                size="small"
+                :options="renderOptions"
+                data-testid="hub-render-seg" />
+            </div>
+            <p class="hub__view-tip">
+              {{
+                showAllTasks
+                  ? "「全部」一次取回所有任务；任务多时用虚拟列表，滚动更顺"
+                  : "「分页」按页取任务；要一次看全部时切到「全部」"
+              }}
+            </p>
+          </div>
+        </el-popover>
         <!-- 画板 38 的 pop-col 是 260 宽（原来写成 264） -->
         <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
         <el-tooltip content="导出本页为 CSV" placement="bottom">
@@ -1671,43 +1810,47 @@ function toggleSidebar() {
             <PtIcon name="file-down" :size="15" />
           </button>
         </el-tooltip>
-        <el-popover placement="bottom-end" :width="260" trigger="click">
-          <template #reference>
-            <button type="button" class="hub__ico" aria-label="显示列">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="hub__cols-head">
-            <span>显示列</span>
-            <el-button text type="primary" size="small" @click="restoreDefaultColumns">
-              恢复默认
-            </el-button>
-          </div>
-          <el-checkbox-group v-model="visibleColumns" class="hub__cols">
-            <el-checkbox
-              v-for="item in columnOptions"
-              :key="item.value"
-              :value="item.value"
-              :label="item.label" />
-          </el-checkbox-group>
-          <div class="hub__cols-head">
-            <span>拖拽排序</span>
-          </div>
-          <div class="hub__order">
-            <div
-              v-for="columnKey in columnOrder"
-              :key="columnKey"
-              class="hub__order-item"
-              :class="{ 'is-off': !visibleColumns.includes(columnKey) }"
-              draggable="true"
-              @dragstart="onColumnDragStart(columnKey)"
-              @dragover.prevent
-              @drop="onColumnDrop(columnKey)">
-              <PtIcon name="grip-vertical" :size="13" />
-              <span>{{ getColumnLabel(columnKey) }}</span>
-            </div>
-          </div>
-        </el-popover>
+        <el-tooltip content="显示列" placement="bottom">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" :width="260" trigger="click">
+              <template #reference>
+                <button type="button" class="hub__ico" aria-label="显示列">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="hub__cols-head">
+                <span>显示列</span>
+                <el-button text type="primary" size="small" @click="restoreDefaultColumns">
+                  恢复默认
+                </el-button>
+              </div>
+              <el-checkbox-group v-model="visibleColumns" class="hub__cols">
+                <el-checkbox
+                  v-for="item in columnOptions"
+                  :key="item.value"
+                  :value="item.value"
+                  :label="item.label" />
+              </el-checkbox-group>
+              <div class="hub__cols-head">
+                <span>拖拽排序</span>
+              </div>
+              <div class="hub__order">
+                <div
+                  v-for="columnKey in columnOrder"
+                  :key="columnKey"
+                  class="hub__order-item"
+                  :class="{ 'is-off': !visibleColumns.includes(columnKey) }"
+                  draggable="true"
+                  @dragstart="onColumnDragStart(columnKey)"
+                  @dragover.prevent
+                  @drop="onColumnDrop(columnKey)">
+                  <PtIcon name="grip-vertical" :size="13" />
+                  <span>{{ getColumnLabel(columnKey) }}</span>
+                </div>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
       </template>
     </PtToolbar>
 
@@ -1799,6 +1942,19 @@ function toggleSidebar() {
               <PtIcon name="list" :size="14" />
               <span class="hub__pick-l">全部</span>
               <span class="hub__pick-n">{{ total }}</span>
+            </button>
+            <!--
+              「活动中」不是下载器的一种状态：qBittorrent 把没人下载的做种（stalledUP）也算做种中，
+              这里只留此刻上传或下载速度大于 0 的任务，筛选在后端做（state=active）
+            -->
+            <button
+              type="button"
+              class="hub__pick is-act"
+              :class="{ 'is-on': filters.state === 'active' }"
+              @click="applyQuickState('active')">
+              <PtIcon name="activity" :size="14" />
+              <span class="hub__pick-l">活动中</span>
+              <span class="hub__pick-n">{{ activeCount }}</span>
             </button>
             <button
               type="button"
@@ -1969,7 +2125,7 @@ function toggleSidebar() {
 
             <div v-show="selectedCount > 0" class="pt-strip hub__bulk">
               <PtIcon name="check-check" :size="14" />
-              <span>已选 {{ selectedCount }} 项</span>
+              <span class="hub__bulk-n">已选 {{ selectedCount }} 项</span>
               <span class="pt-strip__end hub__bulk-acts">
                 <el-button
                   size="small"
@@ -1999,6 +2155,41 @@ function toggleSidebar() {
                   @click="openSetLocationDialog">
                   <PtIcon name="move" :size="13" /><span>路径</span>
                 </el-button>
+                <el-button
+                  size="small"
+                  :disabled="!transferItems.length"
+                  data-testid="hub-transfer"
+                  @click="transferDialogVisible = true">
+                  <PtIcon name="arrow-right-left" :size="13" /><span>转移到…</span>
+                </el-button>
+                <el-tooltip
+                  content="一次整理一个下载完的种子"
+                  placement="top"
+                  :disabled="Boolean(organizeRow)">
+                  <span>
+                    <el-button
+                      size="small"
+                      :disabled="!organizeRow"
+                      data-testid="hub-organize"
+                      @click="openOrganize(organizeRow)">
+                      <PtIcon name="folder-open" :size="13" /><span>整理入库</span>
+                    </el-button>
+                  </span>
+                </el-tooltip>
+                <!-- 选中的都保留着时是「取消保留」，否则是「保留」：一枚按钮，批量条已经很挤 -->
+                <el-tooltip :content="KEEP_TIP" placement="top" :show-after="400">
+                  <span>
+                    <el-button
+                      size="small"
+                      :loading="actionLoading"
+                      :disabled="!selectedCanUse(selectedAllKept ? 'unkeep' : 'keep')"
+                      data-testid="hub-keep"
+                      @click="batchAction(selectedAllKept ? 'unkeep' : 'keep')">
+                      <PtIcon :name="selectedAllKept ? 'shield' : 'shield-check'" :size="13" />
+                      <span>{{ selectedAllKept ? "取消保留" : "保留" }}</span>
+                    </el-button>
+                  </span>
+                </el-tooltip>
                 <el-button
                   size="small"
                   type="danger"
@@ -2122,6 +2313,13 @@ function toggleSidebar() {
                   <template #title>{{ row.title || "-" }}</template>
 
                   <template #meta>
+                    <PtTag
+                      v-if="hasKeepTag(row.tags)"
+                      :title="KEEP_TIP"
+                      data-testid="hub-keep-mark">
+                      <template #icon><PtIcon name="shield-check" :size="11" /></template>
+                      保留
+                    </PtTag>
                     <PtTag>{{ row.downloader_name }}</PtTag>
                     <span>{{ formatSize(row.size) }}</span>
                     <span v-if="row.category">
@@ -2194,14 +2392,19 @@ function toggleSidebar() {
                     </span>
                   </template>
                 </span>
+                <!--
+                  任务不到最小的一页（50）时不画分页：只有一条任务也摆出每页条数、页码与跳页，比数据本身还占地方。
+                  手机上收成「上一页 · 页码 · 下一页」，整套放不下 390 宽。
+                -->
                 <el-pagination
-                  v-if="!showAllTasks"
+                  v-if="!showAllTasks && total > 50"
                   v-model:current-page="page"
                   v-model:page-size="pageSize"
                   class="pt-pager"
                   :total="total"
                   :page-sizes="[50, 100, 200]"
-                  layout="sizes, prev, pager, next, jumper"
+                  :pager-count="isMobile ? 5 : 7"
+                  :layout="isMobile ? 'prev, pager, next' : 'sizes, prev, pager, next, jumper'"
                   @size-change="loadTorrents"
                   @current-change="loadTorrents" />
               </div>
@@ -2308,11 +2511,18 @@ function toggleSidebar() {
       </div>
     </div>
 
+    <TransferDialog
+      v-model="transferDialogVisible"
+      :items="transferItems"
+      @created="onTransferCreated" />
+    <OrganizeDialog v-model="organizeVisible" :target="organizeTarget" />
+
     <el-dialog
       v-model="locationDialogVisible"
       class="pt-dialog"
       title="批量修改存储路径"
-      width="480px">
+      width="480px"
+      align-center>
       <el-input v-model="newLocation" placeholder="例如 /downloads/tv" />
       <template #footer>
         <el-button @click="locationDialogVisible = false">取消</el-button>
@@ -2322,7 +2532,12 @@ function toggleSidebar() {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="addDialogVisible" class="pt-dialog" title="添加种子到下载器" width="620px">
+    <el-dialog
+      v-model="addDialogVisible"
+      class="pt-dialog"
+      title="添加种子到下载器"
+      width="620px"
+      align-center>
       <el-form class="pt-form" label-position="top">
         <el-form-item label="下载器">
           <el-select v-model="addForm.downloaderIds" multiple clearable collapse-tags>
@@ -2359,7 +2574,11 @@ function toggleSidebar() {
         </el-form-item>
         <div class="field-row">
           <el-form-item label="保存路径">
-            <el-input v-model="addForm.savePath" placeholder="可选" />
+            <DownloaderPathInput
+              v-model="addForm.savePath"
+              :downloader-ids="addForm.downloaderIds"
+              placeholder="可选"
+              data-testid="hub-add-save-path" />
           </el-form-item>
           <el-form-item label="分类">
             <el-input v-model="addForm.category" placeholder="可选" />
@@ -2540,10 +2759,15 @@ function toggleSidebar() {
   background: var(--pt-p);
 }
 
-/* 内缩已经由 .hub__layout 给了，这里再加一层 padding 会让 p-grid 缩到 788 以内 */
+/*
+ * 内缩已经由 .hub__layout 给了，这里再加一层 padding 会让 p-grid 缩到 788 以内。
+ * 高度按内容来，不再 flex: 1 撑满：左栏三张卡把这一栏拉到一屏多高，只有一条任务时
+ * 任务卡也被拉成半屏空白，「速率」「这一页的口径」被挤到首屏下沿。任务多时表格自己有
+ * max-height（按视口算），卡的高度照样到屏底。
+ */
 .hub__main {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: var(--pt-space-3);
   min-width: 0;
@@ -2630,6 +2854,10 @@ function toggleSidebar() {
 .hub__pick.is-on {
   color: var(--pt-p);
   background: var(--pt-p-soft);
+}
+
+.hub__pick.is-act :deep(svg) {
+  color: var(--pt-p);
 }
 
 .hub__pick.is-dl :deep(svg) {
@@ -2744,15 +2972,28 @@ function toggleSidebar() {
 
 /* ---------- 批量操作条 ---------- */
 /* 紧贴工具条下方，所以去掉 .pt-strip 自带的上沿，改在下沿分隔表头 */
+/* 按钮放不下一行时折到下一行（靠右），不把「已选 N 项」挤成一竖条、也不把删除按钮挤出面板 */
 .hub__bulk {
+  height: auto;
+  min-height: var(--pt-row-head-h);
+  padding-block: var(--pt-space-1);
   border-top: 0;
   border-bottom: 1px solid var(--pt-border);
 }
 
+.hub__bulk-n {
+  flex: none;
+  white-space: nowrap;
+}
+
 .hub__bulk-acts {
-  display: inline-flex;
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   gap: var(--pt-space-1);
   align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 /* ---------- 部分失败提示条 ---------- */
@@ -2780,9 +3021,36 @@ function toggleSidebar() {
   overflow-wrap: anywhere;
 }
 
+/* 「视图」面板：一组一行，左边组名、右边分段 */
+.hub__view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.hub__view-row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hub__view-k {
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t2);
+}
+
+.hub__view-tip {
+  margin: var(--pt-space-1) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t3);
+}
+
 /* ---------- 表格区 ---------- */
 .hub__panel {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
 }
 

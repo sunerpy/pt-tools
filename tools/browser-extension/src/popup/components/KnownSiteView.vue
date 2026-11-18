@@ -55,6 +55,16 @@ function handleAutoCollect(): void {
       <span>{{ t("known.cookieStatus") }}</span>
       <CookieStatus :status="status.cookieStatus" :days="status.cookieExpireDays" />
     </p>
+    <p v-if="isCookieSyncable && status.cookieStatus === 'unverified'" class="muted-line">
+      {{ t("cookie.unverifiedHint") }}
+    </p>
+    <p
+      v-if="isCookieSyncable && status.cookieStatus === 'unverified' && status.syncRejected"
+      class="my-sites__note"
+      role="status"
+      data-testid="known-sync-rejected">
+      {{ status.syncRejected }}
+    </p>
 
     <template v-if="isCookieSyncable">
       <button

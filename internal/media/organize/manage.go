@@ -1,0 +1,921 @@
+package organize
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"unicode/utf8"
+
+	"gorm.io/gorm"
+
+	"github.com/sunerpy/pt-tools/internal/media/csf"
+	"github.com/sunerpy/pt-tools/internal/media/metadata"
+	"github.com/sunerpy/pt-tools/internal/media/scrape"
+	"github.com/sunerpy/pt-tools/internal/media/server"
+	"github.com/sunerpy/pt-tools/internal/media/serverindex"
+	"github.com/sunerpy/pt-tools/internal/media/transfer"
+	"github.com/sunerpy/pt-tools/models"
+)
+
+// 数量上限。
+const (
+	maxLibraries = 50
+	maxPathMaps  = 200
+	maxServers   = 20
+)
+
+// LibraryView 是给界面看的媒体库：带上实际用的模板与示例渲染的结果，以及刮削要写的内容（没选过时是默认的那几项）。
+type LibraryView struct {
+	models.MediaLibrary
+	ScrapeItems []string `json:"scrape_items"`
+	// ScrapeSources 是每一项的数据来源（空串是 TMDB；旧版本选了豆瓣的是简介与评分都用豆瓣）
+	ScrapeSources     metadata.Sources `json:"scrape_sources"`
+	EffectiveTemplate string           `json:"effective_template"`
+	Preview           string           `json:"preview"`
+	// HasCSFKey 说有没有保存 ChineseSubFinder 的 API Key（Key 只写不读）
+	HasCSFKey bool `json:"has_csf_key"`
+}
+
+// LibraryInput 是新建或修改媒体库的请求。
+type LibraryInput struct {
+	Name            string `json:"name"`
+	Kind            string `json:"kind"`
+	Anime           bool   `json:"anime"`
+	Path            string `json:"path"`
+	Template        string `json:"template"`
+	Mode            string `json:"mode"`
+	Scrape          bool   `json:"scrape"`
+	ScrapeOverwrite bool   `json:"scrape_overwrite"`
+	// ScrapeItems 是刮削要写的内容（scrape.AllItems 里的名字）；不带时是默认的那几项
+	ScrapeItems []string `json:"scrape_items"`
+	// ScrapeImageLang 是海报与 Logo 优先用的语言（scrape.ImageLangs）
+	ScrapeImageLang string `json:"scrape_image_lang"`
+	// ScrapeSource 是旧版本的「简介与评分」（scrape.Sources）：不带 ScrapeSources 时按它，douban 是简介与评分都用豆瓣
+	ScrapeSource string `json:"scrape_source"`
+	// ScrapeSources 是每一项的数据来源（简介、评分、每一集、图片；空串或 tmdb 是 TMDB，见 metadata.Sources）
+	ScrapeSources *metadata.Sources `json:"scrape_sources,omitempty"`
+	// ClassifyDir 为真时按二级分类放进库目录下的分类目录
+	ClassifyDir bool `json:"classify_dir"`
+	// OverwriteMode 是目标位置已经有 pt-tools 之前放进库的同一部（同一集）的旧版本时怎么办（OverwriteNever、OverwriteLarger）
+	OverwriteMode string `json:"overwrite_mode"`
+	// ScrapeActorZh 为真时演员名用中文译名；ScrapeFill 为真时每周补刮一次（都要开着刮削）
+	ScrapeActorZh bool `json:"scrape_actor_zh"`
+	ScrapeFill    bool `json:"scrape_fill"`
+	// SiteSubtitles 为真时整理出新视频以后到站点上取字幕（种子里没有字幕、种子是从支持的站点推送的时）
+	SiteSubtitles bool `json:"site_subtitles"`
+	// CSFURL 是 ChineseSubFinder 的地址（空串是不用，同时清掉 Key）；CSFKey 是它的 API Key，不带（nil）或空串时保留原来的；
+	// CSFPath 是 ChineseSubFinder 里看到的这个库的目录（空串是和库目录一样）
+	CSFURL  string  `json:"csf_url"`
+	CSFKey  *string `json:"csf_key,omitempty"`
+	CSFPath string  `json:"csf_path"`
+	// DownloadDownloaderID、DownloadSavePath、DownloadCategory、DownloadTags 是新建订阅时带出的下载设置（见 models.MediaLibrary），
+	// 都可以空着。下载器要存在；库里原来存的编号原样不变时不检查：下载器删了以后照样能改库的别的字段
+	DownloadDownloaderID uint   `json:"download_downloader_id"`
+	DownloadSavePath     string `json:"download_save_path"`
+	DownloadCategory     string `json:"download_category"`
+	DownloadTags         string `json:"download_tags"`
+	Enabled              bool   `json:"enabled"`
+}
+
+// DefaultTemplate 是这种媒体库的默认模板。
+func DefaultTemplate(kind string) string {
+	if kind == models.MediaKindTV {
+		return transfer.DefaultTVTemplate
+	}
+	return transfer.DefaultMovieTemplate
+}
+
+func effectiveTemplate(l models.MediaLibrary) string {
+	if strings.TrimSpace(l.Template) != "" {
+		return l.Template
+	}
+	return DefaultTemplate(l.Kind)
+}
+
+func viewLibrary(l models.MediaLibrary) LibraryView {
+	v := LibraryView{
+		MediaLibrary: l, ScrapeItems: scrape.ParseItems(l.ScrapeItems).List(), EffectiveTemplate: effectiveTemplate(l),
+		ScrapeSources: metadata.ParseSources(l.ScrapeSources, l.ScrapeSource).ForKind(l.Kind),
+	}
+	v.Preview, _ = transfer.Check(v.EffectiveTemplate, l.Kind)
+	v.HasCSFKey = l.CSFKeyEncrypted != ""
+	return v
+}
+
+// isAbs 报告路径是不是绝对路径（Unix 的 /…，或 Windows 的盘符与 \\ 开头）。
+func isAbs(p string) bool {
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/')
+}
+
+func cleanDir(p, what string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" || !isAbs(p) {
+		return "", fmt.Errorf("%w: %s要填绝对路径", ErrInvalid, what)
+	}
+	if len(p) > 1024 || !utf8.ValidString(p) {
+		return "", fmt.Errorf("%w: %s太长", ErrInvalid, what)
+	}
+	c := filepath.Clean(p)
+	if c == "/" || c == `\` || (len(c) <= 3 && len(c) >= 2 && c[1] == ':') {
+		return "", fmt.Errorf("%w: %s不能是根目录", ErrInvalid, what)
+	}
+	return c, nil
+}
+
+func (in LibraryInput) clean() (models.MediaLibrary, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" || utf8.RuneCountInString(name) > 64 {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 名称不能为空，最多 64 个字", ErrInvalid)
+	}
+	if in.Kind != models.MediaKindMovie && in.Kind != models.MediaKindTV {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 类型要选电影（movie）或剧集（tv）", ErrInvalid)
+	}
+	path, err := cleanDir(in.Path, "库目录")
+	if err != nil {
+		return models.MediaLibrary{}, err
+	}
+	mode, err := transfer.NormalizeMode(in.Mode)
+	if err != nil {
+		return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	tpl := strings.TrimSpace(in.Template)
+	if utf8.RuneCountInString(tpl) > 1024 {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 模板最多 1024 个字", ErrInvalid)
+	}
+	if tpl != "" {
+		if _, err = transfer.Check(tpl, in.Kind); err != nil {
+			return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		}
+	}
+	items, err := scrape.NormalizeItems(in.ScrapeItems)
+	if err != nil {
+		return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	if in.Scrape && in.ScrapeItems != nil && (items == "" || !scrape.ParseItems(items).Any(in.Kind == models.MediaKindTV)) {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 刮削内容至少选一项（季海报与集截图只有剧集有）；不想刮削就关掉刮削", ErrInvalid)
+	}
+	lang := strings.TrimSpace(in.ScrapeImageLang)
+	if !slices.Contains(scrape.ImageLangs, lang) {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 图片语言要选 zh、en、ja、none 或留空", ErrInvalid)
+	}
+	source := strings.TrimSpace(in.ScrapeSource)
+	if !slices.Contains(scrape.Sources, source) {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 简介与评分的来源要选 douban 或留空（TMDB）", ErrInvalid)
+	}
+	src := metadata.ParseSources("", source)
+	if in.ScrapeSources != nil {
+		src = in.ScrapeSources.Clean()
+	}
+	src = src.ForKind(in.Kind)
+	sources, err := src.Normalize()
+	if err != nil {
+		return models.MediaLibrary{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	// 旧版本只认 ScrapeSource：简介与评分都用豆瓣时也写上，换回旧版本时照样用豆瓣
+	source = ""
+	if src.Plot == metadata.SourceDouban && src.Rating == metadata.SourceDouban {
+		source = scrape.SourceDouban
+	}
+	overwrite := strings.TrimSpace(in.OverwriteMode)
+	if overwrite != OverwriteNever && overwrite != OverwriteLarger {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 同名文件要选 larger（新文件更大时替换）或留空（不替换）", ErrInvalid)
+	}
+	csfURL, csfPath, err := cleanCSF(in.CSFURL, in.CSFPath)
+	if err != nil {
+		return models.MediaLibrary{}, err
+	}
+	// 上限同订阅自己的下载选项（subscribe 的 SubscriptionInput.check）；保存目录是下载器里看到的，只去掉首尾空白
+	savePath, category, tags := strings.TrimSpace(in.DownloadSavePath), strings.TrimSpace(in.DownloadCategory), strings.TrimSpace(in.DownloadTags)
+	if len(savePath) > 1024 {
+		return models.MediaLibrary{}, fmt.Errorf("%w: 下载设置里的保存目录太长（最多 1024 字节）", ErrInvalid)
+	}
+	for _, v := range []struct{ name, v string }{{"分类", category}, {"标签", tags}} {
+		if utf8.RuneCountInString(v.v) > 128 {
+			return models.MediaLibrary{}, fmt.Errorf("%w: 下载设置里的%s太长（最多 128 个字）", ErrInvalid, v.name)
+		}
+	}
+	return models.MediaLibrary{
+		Name: name, Kind: in.Kind, Anime: in.Anime, Path: path, Template: tpl, Mode: mode,
+		Scrape: in.Scrape, ScrapeOverwrite: in.ScrapeOverwrite && in.Scrape, ScrapeItems: items, ScrapeImageLang: lang,
+		ScrapeSource: source, ScrapeSources: sources,
+		ClassifyDir: in.ClassifyDir, OverwriteMode: overwrite, ScrapeActorZh: in.ScrapeActorZh && in.Scrape, ScrapeFill: in.ScrapeFill && in.Scrape,
+		SiteSubtitles: in.SiteSubtitles, CSFURL: csfURL, CSFPath: csfPath,
+		DownloadDownloaderID: in.DownloadDownloaderID, DownloadSavePath: savePath, DownloadCategory: category, DownloadTags: tags,
+		Enabled: in.Enabled,
+	}, nil
+}
+
+// cleanCSF 检查 ChineseSubFinder 的地址（规整成以 / 结尾）与它那边的库目录（绝对路径：/… 或 Windows 的盘符、\\ 开头）。
+func cleanCSF(rawURL, dir string) (string, string, error) {
+	u := strings.TrimSpace(rawURL)
+	if u != "" {
+		var err error
+		if u, err = csf.NormalizeURL(u); err != nil {
+			return "", "", fmt.Errorf("%w: %w", ErrInvalid, err)
+		}
+		if len(u) > 512 {
+			return "", "", fmt.Errorf("%w: ChineseSubFinder 的地址太长", ErrInvalid)
+		}
+	}
+	dir = strings.TrimSpace(dir)
+	if dir != "" && (!isAbs(dir) || len(dir) > 1024 || !utf8.ValidString(dir)) {
+		return "", "", fmt.Errorf("%w: 「ChineseSubFinder 里的库目录」要填它那边的绝对路径", ErrInvalid)
+	}
+	return u, dir, nil
+}
+
+// libraryCSFKey 定下保存的 ChineseSubFinder 的 Key：没填地址时清掉；填了新 Key 时加密保存；都没有时沿用 old（新建时没有）。
+// 填了地址却没有 Key 时报错。返回要不要写 csf_key_encrypted 这一列。
+func (s *Service) libraryCSFKey(row *models.MediaLibrary, in LibraryInput, old string) (bool, error) {
+	if row.CSFURL == "" {
+		row.CSFKeyEncrypted = ""
+		return true, nil
+	}
+	key := ""
+	if in.CSFKey != nil {
+		key = strings.TrimSpace(*in.CSFKey)
+	}
+	if key != "" {
+		enc, err := s.cfg.Cipher.Encrypt(key)
+		if err != nil {
+			return false, fmt.Errorf("加密 API Key 失败: %w", err)
+		}
+		row.CSFKeyEncrypted = enc
+		return true, nil
+	}
+	if old == "" {
+		return false, fmt.Errorf("%w: 填了 ChineseSubFinder 的地址就要填它的 API Key", ErrInvalid)
+	}
+	return false, nil
+}
+
+// Libraries 列出媒体库。
+func (s *Service) Libraries(ctx context.Context) ([]LibraryView, error) {
+	var rows []models.MediaLibrary
+	if err := s.cfg.DB.WithContext(ctx).Order("id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取媒体库失败: %w", err)
+	}
+	out := make([]LibraryView, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, viewLibrary(r))
+	}
+	return out, nil
+}
+
+func isUnique(err error) bool {
+	return err != nil && (errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "UNIQUE constraint failed"))
+}
+
+// SaveLibrary 新建（id 为 0）或修改媒体库。
+func (s *Service) SaveLibrary(ctx context.Context, id uint, in LibraryInput) (LibraryView, error) {
+	row, err := in.clean()
+	if err != nil {
+		return LibraryView{}, err
+	}
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	db := s.cfg.DB.WithContext(ctx)
+	// 和 SaveWatchDir 反过来查：库在监控目录里时，库里的文件会被当成放进来的视频再整理一遍
+	var dirs []models.MediaWatchDir
+	if err := db.Find(&dirs).Error; err != nil {
+		return LibraryView{}, fmt.Errorf("读取监控目录失败: %w", err)
+	}
+	for _, d := range dirs {
+		if overlaps(d.Path, row.Path) {
+			return LibraryView{}, fmt.Errorf("%w: 媒体库的目录不能是监控目录 %s，也不能在它里面或包含它", ErrInvalid, d.Path)
+		}
+	}
+	var old models.MediaLibrary
+	if id > 0 {
+		if err := db.Where("id = ?", id).Limit(1).Find(&old).Error; err != nil {
+			return LibraryView{}, fmt.Errorf("读取媒体库失败: %w", err)
+		}
+		if old.ID == 0 {
+			return LibraryView{}, ErrNotFound
+		}
+	}
+	writeKey, keyErr := s.libraryCSFKey(&row, in, old.CSFKeyEncrypted)
+	if keyErr != nil {
+		return LibraryView{}, keyErr
+	}
+	if row.DownloadDownloaderID != 0 && row.DownloadDownloaderID != old.DownloadDownloaderID {
+		var n int64
+		if err := db.Model(&models.DownloaderSetting{}).Where("id = ?", row.DownloadDownloaderID).Count(&n).Error; err != nil {
+			return LibraryView{}, fmt.Errorf("读取下载器失败: %w", err)
+		}
+		if n == 0 {
+			return LibraryView{}, fmt.Errorf("%w: 下载设置里的下载器不存在", ErrInvalid)
+		}
+	}
+	if id == 0 {
+		var n int64
+		if err := db.Model(&models.MediaLibrary{}).Count(&n).Error; err != nil {
+			return LibraryView{}, fmt.Errorf("读取媒体库失败: %w", err)
+		}
+		if n >= maxLibraries {
+			return LibraryView{}, fmt.Errorf("%w: 最多 %d 个媒体库", ErrInvalid, maxLibraries)
+		}
+		if err := db.Create(&row).Error; err != nil {
+			if isUnique(err) {
+				return LibraryView{}, fmt.Errorf("%w: 已经有叫「%s」的媒体库", ErrInvalid, row.Name)
+			}
+			return LibraryView{}, fmt.Errorf("保存媒体库失败: %w", err)
+		}
+		return viewLibrary(row), nil
+	}
+	cols := []string{
+		"name", "kind", "anime", "path", "template", "mode", "scrape", "scrape_overwrite", "scrape_items", "scrape_image_lang", "scrape_source",
+		"scrape_sources",
+		"classify_dir", "overwrite_mode", "scrape_actor_zh", "scrape_fill", "site_subtitles", "csf_url", "csf_path", "enabled", "updated_at",
+		"download_downloader_id", "download_save_path", "download_category", "download_tags",
+	}
+	if writeKey {
+		cols = append(cols, "csf_key_encrypted")
+	}
+	res := db.Model(&models.MediaLibrary{}).Where("id = ?", id).Select(cols).Updates(&row)
+	if res.Error != nil {
+		if isUnique(res.Error) {
+			return LibraryView{}, fmt.Errorf("%w: 已经有叫「%s」的媒体库", ErrInvalid, row.Name)
+		}
+		return LibraryView{}, fmt.Errorf("保存媒体库失败: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return LibraryView{}, ErrNotFound
+	}
+	var out models.MediaLibrary
+	if err := db.First(&out, id).Error; err != nil {
+		return LibraryView{}, fmt.Errorf("读取媒体库失败: %w", err)
+	}
+	return viewLibrary(out), nil
+}
+
+// DeleteLibrary 删除媒体库（库里的文件与整理记录不动）。
+func (s *Service) DeleteLibrary(ctx context.Context, id uint) error {
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	res := s.cfg.DB.WithContext(ctx).Delete(&models.MediaLibrary{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("删除媒体库失败: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CheckItem 是一项检查的结果。
+type CheckItem struct {
+	Name    string `json:"name"`
+	OK      bool   `json:"ok"`
+	Message string `json:"message,omitempty"`
+}
+
+// LibraryCheckInput 是检查库目录的请求。
+type LibraryCheckInput struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+}
+
+func probeName() string {
+	var b [6]byte
+	_, _ = rand.Read(b[:])
+	return ".pt-tools-probe-" + hex.EncodeToString(b[:])
+}
+
+// CheckLibrary 检查库目录：存在、可写；硬链接时用每条路径映射的 pt-tools 路径试建一个硬链接，
+// 确认下载目录与库在同一个文件系统。检查完删掉试建的文件。
+func (s *Service) CheckLibrary(ctx context.Context, in LibraryCheckInput) ([]CheckItem, error) {
+	dir, err := cleanDir(in.Path, "库目录")
+	if err != nil {
+		return nil, err
+	}
+	mode, err := transfer.NormalizeMode(in.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	var items []CheckItem
+	info, err := os.Stat(dir)
+	switch {
+	case err != nil:
+		return append(items, CheckItem{Name: "库目录存在", Message: fmt.Sprintf("pt-tools 里找不到 %s（Docker 里要把媒体库挂进容器）", dir)}), nil
+	case !info.IsDir():
+		return append(items, CheckItem{Name: "库目录存在", Message: dir + " 不是目录"}), nil
+	}
+	items = append(items, CheckItem{Name: "库目录存在", OK: true})
+	probe := filepath.Join(dir, probeName())
+	if err := os.WriteFile(probe, []byte("pt-tools"), 0o644); err != nil {
+		return append(items, CheckItem{Name: "库目录可写", Message: err.Error()}), nil
+	}
+	defer os.Remove(probe)
+	items = append(items, CheckItem{Name: "库目录可写", OK: true})
+	if mode != models.MediaModeHardlink {
+		return items, nil
+	}
+	var maps []models.MediaPathMap
+	if err := s.cfg.DB.WithContext(ctx).Order("downloader_id, id").Find(&maps).Error; err != nil {
+		return nil, fmt.Errorf("读取路径映射失败: %w", err)
+	}
+	if len(maps) == 0 {
+		return append(items, CheckItem{
+			Name: "硬链接", OK: true,
+			Message: "没有路径映射，没有可试的下载目录：下载目录与 pt-tools 看到的路径相同时，也可以加一条两边相同的映射来检查",
+		}), nil
+	}
+	seen := map[string]bool{}
+	for _, m := range maps {
+		if seen[m.LocalPrefix] {
+			continue
+		}
+		seen[m.LocalPrefix] = true
+		items = append(items, probeLink(m.LocalPrefix, dir))
+	}
+	return items, nil
+}
+
+// probeLink 在 from 里建一个文件，再硬链接到 to 里，报告能不能建。
+func probeLink(from, to string) CheckItem {
+	item := CheckItem{Name: "硬链接：" + from}
+	src := filepath.Join(from, probeName())
+	if err := os.WriteFile(src, []byte("pt-tools"), 0o644); err != nil {
+		item.Message = fmt.Sprintf("在下载目录里建文件失败（pt-tools 要能写下载目录才能试）: %v", err)
+		return item
+	}
+	defer os.Remove(src)
+	dst := filepath.Join(to, probeName())
+	_, err := transfer.Transfer(src, dst, models.MediaModeHardlink)
+	_ = os.Remove(dst)
+	if err != nil {
+		item.Message = err.Error()
+		return item
+	}
+	item.OK = true
+	return item
+}
+
+// PathMapInput 是新建或修改路径映射的请求。
+type PathMapInput struct {
+	DownloaderID     uint   `json:"downloader_id"`
+	DownloaderPrefix string `json:"downloader_prefix"`
+	LocalPrefix      string `json:"local_prefix"`
+}
+
+// PathMaps 列出路径映射。
+func (s *Service) PathMaps(ctx context.Context) ([]models.MediaPathMap, error) {
+	var rows []models.MediaPathMap
+	if err := s.cfg.DB.WithContext(ctx).Order("downloader_id, id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取路径映射失败: %w", err)
+	}
+	return rows, nil
+}
+
+// SavePathMap 新建（id 为 0）或修改路径映射。
+func (s *Service) SavePathMap(ctx context.Context, id uint, in PathMapInput) (models.MediaPathMap, error) {
+	prefix := strings.TrimSpace(in.DownloaderPrefix)
+	if prefix == "" || len(prefix) > 512 {
+		return models.MediaPathMap{}, fmt.Errorf("%w: 下载器里的路径不能为空，最多 512 个字符", ErrInvalid)
+	}
+	local, err := cleanDir(in.LocalPrefix, "pt-tools 里的路径")
+	if err != nil {
+		return models.MediaPathMap{}, err
+	}
+	if len(local) > 512 {
+		return models.MediaPathMap{}, fmt.Errorf("%w: pt-tools 里的路径最多 512 个字符", ErrInvalid)
+	}
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	db := s.cfg.DB.WithContext(ctx)
+	var dl int64
+	if cntErr := db.Model(&models.DownloaderSetting{}).Where("id = ?", in.DownloaderID).Count(&dl).Error; cntErr != nil {
+		return models.MediaPathMap{}, fmt.Errorf("读取下载器失败: %w", cntErr)
+	}
+	if dl == 0 {
+		return models.MediaPathMap{}, fmt.Errorf("%w: 下载器不存在", ErrInvalid)
+	}
+	row := models.MediaPathMap{DownloaderID: in.DownloaderID, DownloaderPrefix: prefix, LocalPrefix: local}
+	if id == 0 {
+		var n int64
+		if cntErr := db.Model(&models.MediaPathMap{}).Count(&n).Error; cntErr != nil {
+			return models.MediaPathMap{}, fmt.Errorf("读取路径映射失败: %w", cntErr)
+		}
+		if n >= maxPathMaps {
+			return models.MediaPathMap{}, fmt.Errorf("%w: 最多 %d 条路径映射", ErrInvalid, maxPathMaps)
+		}
+		err = db.Create(&row).Error
+	} else {
+		res := db.Model(&models.MediaPathMap{}).Where("id = ?", id).
+			Select("downloader_id", "downloader_prefix", "local_prefix", "updated_at").Updates(&row)
+		err = res.Error
+		if err == nil && res.RowsAffected == 0 {
+			return models.MediaPathMap{}, ErrNotFound
+		}
+		row.ID = id
+	}
+	if isUnique(err) {
+		return models.MediaPathMap{}, fmt.Errorf("%w: 这个下载器已经有「%s」的映射", ErrInvalid, prefix)
+	}
+	if err != nil {
+		return models.MediaPathMap{}, fmt.Errorf("保存路径映射失败: %w", err)
+	}
+	var out models.MediaPathMap
+	if err := db.First(&out, row.ID).Error; err != nil {
+		return models.MediaPathMap{}, fmt.Errorf("读取路径映射失败: %w", err)
+	}
+	return out, nil
+}
+
+// DeletePathMap 删除路径映射。
+func (s *Service) DeletePathMap(ctx context.Context, id uint) error {
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	res := s.cfg.DB.WithContext(ctx).Delete(&models.MediaPathMap{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("删除路径映射失败: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// localPath 把下载器里的路径换成 pt-tools 里的路径；没有匹配的映射时原样返回。
+func (s *Service) localPath(ctx context.Context, dlID uint, p string) (string, bool, error) {
+	maps, err := s.pathMaps(ctx, dlID)
+	if err != nil {
+		return "", false, err
+	}
+	out, ok := models.MapTransferPath(maps, p)
+	return out, ok, nil
+}
+
+// pathMaps 是这个下载器的路径映射。
+func (s *Service) pathMaps(ctx context.Context, dlID uint) ([]models.DownloaderPathMap, error) {
+	var rows []models.MediaPathMap
+	if err := s.cfg.DB.WithContext(ctx).Where("downloader_id = ?", dlID).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取路径映射失败: %w", err)
+	}
+	maps := make([]models.DownloaderPathMap, 0, len(rows))
+	for _, r := range rows {
+		maps = append(maps, models.DownloaderPathMap{SourcePrefix: r.DownloaderPrefix, TargetPrefix: r.LocalPrefix})
+	}
+	return maps, nil
+}
+
+// ServerView 是给界面看的媒体服务器：Token 只说有没有，Webhook 只说开没开（令牌只在生成时给一次）。
+// IndexHours 是索引的同步间隔（小时），0 是关着。
+type ServerView struct {
+	models.MediaServer
+	HasToken         bool   `json:"has_token"`
+	IndexHours       int    `json:"index_hours"`
+	Webhook          bool   `json:"webhook"`
+	PlaybackChannels []uint `json:"playback_channels"`
+}
+
+// ServerInput 是新建或修改媒体服务器的请求。Token 为空（nil）时保留原来的；后面几项也一样，不给时不改（新建时用默认值）。
+type ServerInput struct {
+	Name         string  `json:"name"`
+	Kind         string  `json:"kind"`
+	URL          string  `json:"url"`
+	Token        *string `json:"token,omitempty"`
+	Enabled      bool    `json:"enabled"`
+	RefreshMode  string  `json:"refresh_mode"`
+	LocalPrefix  string  `json:"local_prefix"`
+	ServerPrefix string  `json:"server_prefix"`
+	// PlayURL 是打开链接用的地址（浏览器能打开的那个）；空串用 URL
+	PlayURL *string `json:"play_url,omitempty"`
+	// IndexHours 是索引的同步间隔（小时，1–168），0 是关掉索引；新建时默认 DefaultIndexHours
+	IndexHours *int `json:"index_hours,omitempty"`
+	// CountLibrary 是追剧把这台服务器里有的集算作已入库
+	CountLibrary *bool `json:"count_library,omitempty"`
+	// ResumeUserID、ResumeUserName 是继续观看用的用户（Emby、Jellyfin）；空串不取继续观看
+	ResumeUserID   *string `json:"resume_user_id,omitempty"`
+	ResumeUserName *string `json:"resume_user_name,omitempty"`
+	// PlaybackChannels 是播放通知发往的通道；空的不发
+	PlaybackChannels *[]uint `json:"playback_channels,omitempty"`
+}
+
+// 索引的同步间隔。
+const (
+	DefaultIndexHours = 6
+	MaxIndexHours     = 168
+)
+
+// indexHours 是这台服务器的同步间隔（小时），0 是关着。
+func indexHours(r models.MediaServer) int {
+	switch {
+	case r.IndexOff:
+		return 0
+	case r.IndexHours <= 0:
+		return DefaultIndexHours
+	}
+	return r.IndexHours
+}
+
+func viewServer(r models.MediaServer) ServerView {
+	return ServerView{
+		MediaServer: r, HasToken: r.TokenEncrypted != "", IndexHours: indexHours(r), Webhook: r.WebhookTokenHash != "",
+		PlaybackChannels: decodeIDs(r.PlaybackChannels),
+	}
+}
+
+// cleanUserID 检查继续观看的用户编号：要拼进接口的路径，不能有斜杠、空格与引号。
+func cleanUserID(id string) error {
+	if len(id) > 64 || strings.ContainsAny(id, "/\\?#%\" \t\r\n") {
+		return fmt.Errorf("%w: 继续观看的用户编号不对", ErrInvalid)
+	}
+	return nil
+}
+
+// clean 检查请求并换成要写的行，第二个返回值是要写的列（给了的那几项）。
+func (in ServerInput) clean() (models.MediaServer, []string, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" || utf8.RuneCountInString(name) > 64 {
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 名称不能为空，最多 64 个字", ErrInvalid)
+	}
+	switch in.Kind {
+	case models.MediaServerEmby, models.MediaServerJellyfin, models.MediaServerPlex:
+	default:
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 种类要选 emby、jellyfin 或 plex", ErrInvalid)
+	}
+	u, err := server.CheckURL(in.URL)
+	if err != nil {
+		return models.MediaServer{}, nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	mode := in.RefreshMode
+	switch mode {
+	case "":
+		mode = models.MediaRefreshPath
+	case models.MediaRefreshPath, models.MediaRefreshLibrary:
+	default:
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 刷新方式要选 path 或 library", ErrInvalid)
+	}
+	local, remote := strings.TrimSpace(in.LocalPrefix), strings.TrimSpace(in.ServerPrefix)
+	if (local == "") != (remote == "") || len(local) > 512 || len(remote) > 512 {
+		return models.MediaServer{}, nil, fmt.Errorf("%w: 路径映射的两边要一起填（两边相同时都留空）", ErrInvalid)
+	}
+	row := models.MediaServer{
+		Name: name, Kind: in.Kind, URL: u, Enabled: in.Enabled, RefreshMode: mode, LocalPrefix: local, ServerPrefix: remote,
+	}
+	cols := []string{"name", "kind", "url", "enabled", "refresh_mode", "local_prefix", "server_prefix", "updated_at"}
+	if in.PlayURL != nil {
+		if p := strings.TrimSpace(*in.PlayURL); p != "" {
+			if row.PlayURL, err = server.CheckURL(p); err != nil {
+				return models.MediaServer{}, nil, fmt.Errorf("%w: 打开链接用的地址：%w", ErrInvalid, err)
+			}
+		}
+		cols = append(cols, "play_url")
+	}
+	if in.IndexHours != nil {
+		h := *in.IndexHours
+		if h < 0 || h > MaxIndexHours {
+			return models.MediaServer{}, nil, fmt.Errorf("%w: 索引的同步间隔要在 0–%d 小时之间（0 是不同步）", ErrInvalid, MaxIndexHours)
+		}
+		row.IndexOff, row.IndexHours = h == 0, h
+		cols = append(cols, "index_off", "index_hours")
+	}
+	if in.CountLibrary != nil {
+		row.CountLibrary = *in.CountLibrary
+		cols = append(cols, "count_library")
+	}
+	if in.ResumeUserID != nil {
+		row.ResumeUserID = strings.TrimSpace(*in.ResumeUserID)
+		if err := cleanUserID(row.ResumeUserID); err != nil {
+			return models.MediaServer{}, nil, err
+		}
+		if in.ResumeUserName != nil {
+			row.ResumeUserName = strings.TrimSpace(*in.ResumeUserName)
+		}
+		if row.ResumeUserID == "" {
+			row.ResumeUserName = ""
+		}
+		if utf8.RuneCountInString(row.ResumeUserName) > 128 {
+			return models.MediaServer{}, nil, fmt.Errorf("%w: 用户名最多 128 个字", ErrInvalid)
+		}
+		cols = append(cols, "resume_user_id", "resume_user_name")
+	}
+	if row.Kind == models.MediaServerPlex {
+		if row.ResumeUserID != "" {
+			return models.MediaServer{}, nil, fmt.Errorf("%w: Plex 不支持继续观看，不用选用户", ErrInvalid)
+		}
+		if !slices.Contains(cols, "resume_user_id") {
+			cols = append(cols, "resume_user_id", "resume_user_name")
+		}
+	}
+	if in.PlaybackChannels != nil {
+		ids, err := cleanIDs(*in.PlaybackChannels, "播放通知的通道")
+		if err != nil {
+			return models.MediaServer{}, nil, err
+		}
+		if len(ids) > 0 {
+			b, _ := json.Marshal(ids)
+			row.PlaybackChannels = string(b)
+		}
+		cols = append(cols, "playback_channels")
+	}
+	return row, cols, nil
+}
+
+// Servers 列出媒体服务器。
+func (s *Service) Servers(ctx context.Context) ([]ServerView, error) {
+	var rows []models.MediaServer
+	if err := s.cfg.DB.WithContext(ctx).Order("id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取媒体服务器失败: %w", err)
+	}
+	out := make([]ServerView, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, viewServer(r))
+	}
+	return out, nil
+}
+
+// SaveServer 新建（id 为 0）或修改媒体服务器。Token 加密保存；新建时必须填。改了种类或地址时清掉这台的索引与问题
+// （多半换了一台服务器，旧的条目编号对不上），下一轮重新同步。
+func (s *Service) SaveServer(ctx context.Context, id uint, in ServerInput) (ServerView, error) {
+	row, cols, err := in.clean()
+	if err != nil {
+		return ServerView{}, err
+	}
+	if in.Token != nil {
+		tok := strings.TrimSpace(*in.Token)
+		if tok == "" {
+			return ServerView{}, fmt.Errorf("%w: API Key 或 Token 不能为空", ErrInvalid)
+		}
+		if _, cfgErr := server.New(server.Config{Kind: row.Kind, URL: row.URL, Token: tok}); cfgErr != nil {
+			return ServerView{}, fmt.Errorf("%w: %w", ErrInvalid, cfgErr)
+		}
+		if row.TokenEncrypted, err = s.cfg.Cipher.Encrypt(tok); err != nil {
+			return ServerView{}, fmt.Errorf("加密 Token 失败: %w", err)
+		}
+		cols = append(cols, "token_encrypted")
+	} else if id == 0 {
+		return ServerView{}, fmt.Errorf("%w: 新建时要填 API Key 或 Token", ErrInvalid)
+	}
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	db := s.cfg.DB.WithContext(ctx)
+	if id == 0 {
+		var n int64
+		if cntErr := db.Model(&models.MediaServer{}).Count(&n).Error; cntErr != nil {
+			return ServerView{}, fmt.Errorf("读取媒体服务器失败: %w", cntErr)
+		}
+		if n >= maxServers {
+			return ServerView{}, fmt.Errorf("%w: 最多 %d 个媒体服务器", ErrInvalid, maxServers)
+		}
+		err = db.Create(&row).Error
+	} else {
+		err = db.Transaction(func(tx *gorm.DB) error {
+			var old models.MediaServer
+			if readErr := tx.Where("id = ?", id).Limit(1).Find(&old).Error; readErr != nil {
+				return fmt.Errorf("读取媒体服务器失败: %w", readErr)
+			}
+			if old.ID == 0 {
+				return ErrNotFound
+			}
+			if old.Kind != row.Kind || old.URL != row.URL {
+				if forgetErr := serverindex.Forget(tx, id); forgetErr != nil {
+					return forgetErr
+				}
+				row.ServerUID, row.IndexedAt, row.IndexError, row.IndexMovies, row.IndexSeries, row.IndexEpisodes = "", nil, "", 0, 0, 0
+				cols = append(cols, "server_uid", "indexed_at", "index_error", "index_movies", "index_series", "index_episodes")
+			}
+			return tx.Model(&models.MediaServer{}).Where("id = ?", id).Select(cols).Updates(&row).Error
+		})
+		row.ID = id
+	}
+	if errors.Is(err, ErrNotFound) {
+		return ServerView{}, err
+	}
+	if isUnique(err) {
+		return ServerView{}, fmt.Errorf("%w: 已经有叫「%s」的媒体服务器", ErrInvalid, row.Name)
+	}
+	if err != nil {
+		return ServerView{}, fmt.Errorf("保存媒体服务器失败: %w", err)
+	}
+	var out models.MediaServer
+	if err := db.First(&out, row.ID).Error; err != nil {
+		return ServerView{}, fmt.Errorf("读取媒体服务器失败: %w", err)
+	}
+	return viewServer(out), nil
+}
+
+// DeleteServer 删除媒体服务器，连同它的索引与 server_removed 问题。
+func (s *Service) DeleteServer(ctx context.Context, id uint) error {
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	return s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Delete(&models.MediaServer{}, id)
+		if res.Error != nil {
+			return fmt.Errorf("删除媒体服务器失败: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return serverindex.Forget(tx, id)
+	})
+}
+
+// ServerTestInput 是测试媒体服务器的请求：ID 不为 0 且没填 Token 时用保存的 Token（可以先改地址再测）。
+type ServerTestInput struct {
+	ID    uint    `json:"id"`
+	Kind  string  `json:"kind"`
+	URL   string  `json:"url"`
+	Token *string `json:"token,omitempty"`
+}
+
+// testClient 按测试请求建客户端（没填 Token 时用保存的）。
+func (s *Service) testClient(ctx context.Context, in ServerTestInput) (server.Client, error) {
+	token := ""
+	if in.Token != nil {
+		token = strings.TrimSpace(*in.Token)
+	}
+	if token == "" && in.ID > 0 {
+		var row models.MediaServer
+		if err := s.cfg.DB.WithContext(ctx).Where("id = ?", in.ID).Limit(1).Find(&row).Error; err != nil {
+			return nil, fmt.Errorf("读取媒体服务器失败: %w", err)
+		}
+		if row.ID == 0 {
+			return nil, ErrNotFound
+		}
+		if row.TokenEncrypted != "" {
+			var err error
+			if token, err = s.cfg.Cipher.Decrypt(row.TokenEncrypted); err != nil {
+				return nil, fmt.Errorf("解密 Token 失败: %w", err)
+			}
+		}
+	}
+	c, err := server.New(server.Config{Kind: in.Kind, URL: in.URL, Token: token, HTTPClient: s.cfg.ServerHTTP})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	return c, nil
+}
+
+// TestServer 访问一次媒体服务器，返回服务器名称与版本。
+func (s *Service) TestServer(ctx context.Context, in ServerTestInput) (server.Info, error) {
+	c, err := s.testClient(ctx, in)
+	if err != nil {
+		return server.Info{}, err
+	}
+	return c.Test(ctx)
+}
+
+// ServerUsers 列出媒体服务器的用户（选继续观看用哪个用户；请求同测试连接）。Plex 回 server.ErrUnsupported。
+func (s *Service) ServerUsers(ctx context.Context, in ServerTestInput) ([]server.User, error) {
+	c, err := s.testClient(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return c.Users(ctx)
+}
+
+// serverClient 按保存的配置建客户端。
+func (s *Service) serverClient(r models.MediaServer) (server.Client, error) {
+	token, err := s.cfg.Cipher.Decrypt(r.TokenEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("解密 Token 失败: %w", err)
+	}
+	return server.New(server.Config{Kind: r.Kind, URL: r.URL, Token: token, HTTPClient: s.cfg.ServerHTTP})
+}
+
+// InLibrary 问启用的媒体服务器条目是不是已经入库（订阅判断电影完成用）：有一台说有就算有；
+// 都问不到时返回最后一个错误。没有启用的媒体服务器时返回 false。
+func (s *Service) InLibrary(ctx context.Context, kind string, tmdbID int, imdbID, title string) (bool, error) {
+	var servers []models.MediaServer
+	if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&servers).Error; err != nil {
+		return false, fmt.Errorf("读取媒体服务器失败: %w", err)
+	}
+	var lastErr error
+	for _, srv := range servers {
+		c, err := s.serverClient(srv)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		ok, err := c.Exists(ctx, server.Query{Kind: kind, TMDBID: tmdbID, IMDbID: imdbID, Title: title})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, lastErr
+}
+
+// serverPath 把 pt-tools 里的路径换成媒体服务器里看到的路径；配置了路径映射而路径不在映射里时第二个返回值为 false。
+func serverPath(r models.MediaServer, p string) (string, bool) {
+	if r.LocalPrefix == "" {
+		return p, true
+	}
+	return models.MapTransferPath([]models.DownloaderPathMap{{SourcePrefix: r.LocalPrefix, TargetPrefix: r.ServerPrefix}}, p)
+}

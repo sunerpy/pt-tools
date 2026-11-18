@@ -548,6 +548,9 @@ func (dm *DownloaderManager) storeInstance(name string, dl Downloader, gen uint6
 // 必须用 errors.Is 判断：它会被 flight 与失败冷却层层包装。
 var ErrDownloaderNotConfigured = errors.New("no config found for downloader")
 
+// ErrNoDefaultDownloader 表示没有设置默认下载器（区别于设置了、但连不上）。
+var ErrNoDefaultDownloader = errors.New("no default downloader configured")
+
 // resolveFactory 取出配置、对应工厂和当前配置代次，只在锁内读 map，不调用工厂
 func (dm *DownloaderManager) resolveFactory(
 	name string,
@@ -662,7 +665,7 @@ func (dm *DownloaderManager) GetDefaultDownloader() (Downloader, error) {
 	dm.mu.RUnlock()
 
 	if defaultName == "" {
-		return nil, fmt.Errorf("no default downloader configured")
+		return nil, ErrNoDefaultDownloader
 	}
 
 	return dm.GetDownloader(defaultName)

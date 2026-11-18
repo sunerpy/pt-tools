@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/internal/notify/adapter/outbound"
 	"github.com/sunerpy/pt-tools/models"
 )
 
 type WeComChannel struct {
 	webhookKey string
 	msgType    string
+	client     *outbound.Client // 为空时用 outbound.Default()
 }
 
 func (w *WeComChannel) Type() string {
@@ -33,11 +36,10 @@ func (w *WeComChannel) Init(ctx context.Context, conf *models.NotificationConf) 
 		return fmt.Errorf("解析 wecom webhook 配置失败: %w", err)
 	}
 
-	if cfg.WebhookKey == "" {
+	w.webhookKey = strings.TrimSpace(cfg.WebhookKey)
+	if w.webhookKey == "" {
 		return errors.New("wecom webhook_key 为空")
 	}
-
-	w.webhookKey = cfg.WebhookKey
 	w.msgType = cfg.MsgType
 	if w.msgType == "" {
 		w.msgType = "markdown"
@@ -47,6 +49,11 @@ func (w *WeComChannel) Init(ctx context.Context, conf *models.NotificationConf) 
 	}
 
 	return nil
+}
+
+// CheckConfig 只检查配置、不发请求：保存配置前调用。
+func (w *WeComChannel) CheckConfig(conf *models.NotificationConf) error {
+	return (&WeComChannel{}).Init(context.Background(), conf)
 }
 
 func (w *WeComChannel) SupportsInbound() bool {

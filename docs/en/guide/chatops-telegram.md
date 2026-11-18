@@ -93,11 +93,13 @@ Open the pt-tools web UI, go to ChatOps → Notifications (消息通知) and cli
 
 ### What the fields mean
 
-| Field             | Purpose                                                                                               |
-| ----------------- | ----------------------------------------------------------------------------------------------------- |
-| `allowed_users`   | The Telegram user_ids that may talk to the bot                                                        |
-| `admin_users`     | May also talk to the bot; when `default_chat_id` is empty, the test message goes to the first of them |
-| `default_chat_id` | Where notifications go: pt-tools delivers the notifications it sends to this chat_id                  |
+| Field             | Purpose                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowed_users`   | The Telegram user_ids that may talk to the bot                                                                                                          |
+| `admin_users`     | May also talk to the bot; when `default_chat_id` is empty, the test message and notifications go to the first of them                                   |
+| `default_chat_id` | Where notifications go: pt-tools delivers the notifications it sends (daily report, sign-in, followed shows, login reminders and so on) to this chat_id |
+
+A notification without its own recipient looks for one in this order: `default_chat_id`, then the first of `admin_users`, then the first account linked on this channel. With none of them the notification cannot be delivered, and the reason is recorded in the audit log (see [ChatOps quick start](chatops-quickstart.md#viewing-the-audit-log)).
 
 - **Incoming messages**: only user_ids listed in `allowed_users` or `admin_users` can talk to the bot; anyone else receives a refusal (`denied:not_in_whitelist`). **When both lists are empty, every message is refused**; outbound notifications are not affected.
 - **Command permissions**: being able to talk to the bot is not enough to run commands; the account must also be linked with a binding code. At present **every linked account has admin rights**: it can run `/pause`, `/resume`, `/delete`, `/addrss`, `/delrss` and `/unbind`, whether it is listed in `allowed_users` or in `admin_users`. So give binding codes only to people you trust.
@@ -146,13 +148,17 @@ In the web UI, open ChatOps → ChatOps binding (ChatOps 绑定) and click **Gen
 
 > Once generated, the code appears in the Pending (待绑定) list: 8 characters, without easily confused characters such as 0/O/1/I/L.
 
-Copy the 8-character code (such as `A3F7KP2M`) and send it to the bot in a private Telegram chat:
+The **Channels** panel (通道) at the top of the ChatOps bindings page lists three things per channel: whether the bot is connected, where notifications without their own recipient go, and whether each account in `admin_users` and `allowed_users` is linked (with the last command it sent and the result, for example "/help refused: not linked yet"). A connected bot that delivers notifications does not mean the account is linked: commands need a link. Next to a listed account that is not linked there is a **Link** button (绑定); after you confirm, it has the same effect as a binding code and is recorded in the audit log. Linking this way does not use up a binding code: codes generated earlier and never used stay in the Pending list (待绑定); void one you no longer need with its **Void** button (作废). A code with no expiry stays there until it is used or voided.
+
+With a binding code, copy the 8-character code (such as `A3F7KP2M`) and send it to the bot in a private Telegram chat:
 
 ```
 /bind A3F7KP2M
 ```
 
 When the bot replies 绑定成功 ("linked"), you are done. Your account then appears in the Linked users (已绑定用户) list.
+
+> A link belongs to the channel you picked when you generated the code. The code works only with that channel's bot; sending it to another bot fails. To send commands through several channels, link the account on each of them.
 
 ![The list of linked accounts](../../guide/images/chatops/chatops-bindings-list.webp)
 
@@ -222,6 +228,8 @@ If you are not sure of the port, look for the "allow LAN connections" section in
 ---
 
 ### Q: The channel's status shows Problem (异常), or the test message is not delivered
+
+The status follows receiving (long polling): it shows Problem when the latest getUpdates failed, for example when Telegram answers 502/504 or another pt-tools instance polls the same bot. Notifications are still sent while receiving fails; when one cannot be delivered, Recent notifications (最近的通知) and the audit log show the reason Telegram gave.
 
 **Cause 1**: `api.telegram.org` cannot be reached; set up a proxy (see section 6).
 

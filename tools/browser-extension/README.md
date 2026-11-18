@@ -35,6 +35,8 @@ PT 站点数据采集助手，一键采集站点数据、同步 Cookie 到 pt-to
 
 批量同步：在「全局设置」→「批量同步 Cookie」中勾选多个站点一键同步。
 
+定时同步：在「全局设置」→「定时同步」按间隔自动同步（只推 Cookie 有变化的站点）；也可以把 PT 站点的 Cookie 端对端加密以后上传到自建的 CookieCloud 服务端，pt-tools 用「CookieCloud 导入」取回。
+
 > M-Team（API Key）、Rousi Pro（Passkey）等非 Cookie 鉴权站点需在 pt-tools 中手动配置。
 
 ### 功能二：采集站点数据（请求新增站点支持）
@@ -95,6 +97,7 @@ src/
 ├── modules/
 │   ├── collector/  # 页面检测、HTML 采集、自动脱敏
 │   ├── sync/       # Cookie 读取、pt-tools API 客户端
+│   ├── cookiecloud/ # CookieCloud 的加密、上传与合并
 │   └── export/     # ZIP 打包、GitHub Issue 创建
 └── utils/          # URL/DOM 工具
 ```

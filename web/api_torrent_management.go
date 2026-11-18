@@ -13,6 +13,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/scheduler"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -461,6 +462,10 @@ func (s *Server) apiResumeTorrent(w http.ResponseWriter, r *http.Request) {
 		"paused_at":           nil,
 		"pause_reason":        "",
 		"last_check_time":     now,
+	}
+	// 竞争度暂停的种子手动恢复了：自动删种的竞争度以后不再暂停它（别的删除条件照常）
+	if torrent.PauseReason == scheduler.PauseReasonPeerRatio {
+		updates["peer_pause_overridden"] = true
 	}
 	if err := db.Model(&torrent).Updates(updates).Error; err != nil {
 		global.GetSlogger().Errorf("更新种子恢复状态失败 (种子:%s): %v", torrent.Title, err)

@@ -14,7 +14,11 @@ import (
 )
 
 func TestInitRuntimeSetsGlobals(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	lg, err := InitRuntime()
 	require.NoError(t, err)
 	assert.NotNil(t, lg)
@@ -22,7 +26,11 @@ func TestInitRuntimeSetsGlobals(t *testing.T) {
 }
 
 func TestGetLoggerReturnsGlobal(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	lg, err := InitRuntime()
 	require.NoError(t, err)
 	got := GetLogger()
@@ -31,7 +39,7 @@ func TestGetLoggerReturnsGlobal(t *testing.T) {
 }
 
 func TestNewTempDBDir_MigratesAll(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	require.NotNil(t, db)
 	_ = db.UpsertTorrent(&models.TorrentInfo{SiteName: "cmct", TorrentID: "x"})

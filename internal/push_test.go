@@ -5,10 +5,14 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -16,9 +20,11 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/events"
 	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 func TestPushTorrent_DiskProtectReserveThenAddFails(t *testing.T) {
@@ -96,6 +102,7 @@ func TestPushTorrent_AddResultNotSuccessBranch(t *testing.T) {
 	assert.False(t, res.Success)
 }
 
+// 读不到下载中任务的待占用空间时 fail-closed（此前当作 0 继续推送）。
 func TestPushTorrent_DiskProtectPendingBytesError(t *testing.T) {
 	db := setupDB(t)
 	t.Cleanup(func() { global.GlobalDB = nil })
@@ -131,7 +138,8 @@ func TestPushTorrent_DiskProtectPendingBytesError(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.True(t, res.Success, "pending-bytes read failure is non-fatal (treated as 0)")
+	assert.False(t, res.Success, "读不到待占用空间时拒绝推送")
+	assert.Contains(t, res.Message, "待占用空间")
 }
 
 func TestPushTorrent_DiskProtectReservedMakesNegativeClamped(t *testing.T) {
@@ -882,4 +890,221 @@ func TestApplySiteSpeedLimits(t *testing.T) {
 	applySiteSpeedLimits(opts, "mteam")
 	assert.Equal(t, 100, opts.UploadSpeedLimitKBs)
 	assert.Equal(t, 200, opts.DownloadSpeedLimitKBs)
+}
+
+// qB 兼容入口要的推送选项：暂停添加、改名（qB 的 rename 经 AdvanceOptions 传下去）、调用方给的限速与站点限速取更严的
+func TestPushTorrent_CompatOptions(t *testing.T) {
+	_ = setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	GetDiskBudget().Reset()
+	t.Cleanup(func() { GetDiskBudget().Reset() })
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "springsunday", AuthMethod: "cookie", UploadLimitKBs: 500}).Error)
+	ds := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, AutoStart: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&ds).Error)
+
+	ctrl := gomock.NewController(t)
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().CheckTorrentExists(gomock.Any()).Return(false, nil).AnyTimes()
+	mockDl.EXPECT().GetName().Return("qb").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(1)<<50, nil).AnyTimes()
+	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
+	mockDl.EXPECT().GetAllTorrents().Return(nil, nil).AnyTimes()
+	mockDl.EXPECT().Close().Return(nil).AnyTimes()
+	var captured []downloader.AddTorrentOptions
+	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+			captured = append(captured, opt)
+			return downloader.AddTorrentResult{Success: true}, nil
+		}).AnyTimes()
+	t.Cleanup(SwapPushDownloaderFactory(func(models.DownloaderSetting) (downloader.Downloader, error) { return mockDl, nil }))
+
+	push := func(id string, req PushTorrentRequest) {
+		t.Helper()
+		req.SiteID, req.TorrentID, req.DownloaderID = "springsunday", id, ds.ID
+		req.TorrentData = makeSizedTorrentBytes(t, "compat-"+id, 1*gb)
+		res, err := PushTorrentToDownloader(context.Background(), req)
+		require.NoError(t, err)
+		require.True(t, res.Success, res.Message)
+	}
+	push("1", PushTorrentRequest{AddPaused: true, Rename: " 新名字 ", UpLimitKBs: 2000, DlLimitKBs: 300})
+	push("2", PushTorrentRequest{UpLimitKBs: 100})
+	push("3", PushTorrentRequest{})
+	require.Len(t, captured, 3)
+	assert.True(t, captured[0].AddAtPaused, "要求暂停添加")
+	assert.Equal(t, "新名字", captured[0].AdvanceOptions["rename"])
+	assert.Equal(t, 500, captured[0].UploadSpeedLimitKBs, "站点 500 比调用方的 2000 严")
+	assert.Equal(t, 300, captured[0].DownloadSpeedLimitKBs, "站点不限下载时用调用方的")
+	assert.Equal(t, 100, captured[1].UploadSpeedLimitKBs, "调用方的 100 比站点 500 严")
+	assert.False(t, captured[2].AddAtPaused, "下载器自动开始、调用方没要求暂停")
+	assert.Nil(t, captured[2].AdvanceOptions)
+	assert.Equal(t, 500, captured[2].UploadSpeedLimitKBs)
+}
+
+// ctxAdder 是支持按 ctx 添加的下载器（qB、Transmission 都是）：记下拿到的 ctx。
+type ctxAdder struct {
+	*sm.MockDownloader
+	got context.Context
+}
+
+func (c *ctxAdder) AddTorrentFileExContext(ctx context.Context, _ []byte, _ downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	c.got = ctx
+	return downloader.AddTorrentResult{Success: true}, nil
+}
+
+// 下载器支持按 ctx 添加时，推送把调用方的 ctx 传下去（超时、关闭时的取消能让上传停下）
+func TestPushTorrent_UsesContextAdder(t *testing.T) {
+	_ = setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	GetDiskBudget().Reset()
+	t.Cleanup(func() { GetDiskBudget().Reset() })
+	ds := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, AutoStart: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&ds).Error)
+	ctrl := gomock.NewController(t)
+	m := sm.NewMockDownloader(ctrl)
+	m.EXPECT().CheckTorrentExists(gomock.Any()).Return(false, nil).AnyTimes()
+	m.EXPECT().GetName().Return("qb").AnyTimes()
+	m.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	m.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(1)<<50, nil).AnyTimes()
+	m.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
+	m.EXPECT().GetAllTorrents().Return(nil, nil).AnyTimes()
+	m.EXPECT().Close().Return(nil).AnyTimes()
+	dl := &ctxAdder{MockDownloader: m}
+	t.Cleanup(SwapPushDownloaderFactory(func(models.DownloaderSetting) (downloader.Downloader, error) { return dl, nil }))
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	res, err := PushTorrentToDownloader(ctx, PushTorrentRequest{SiteID: "s", TorrentID: "1", TorrentData: makeSizedTorrentBytes(t, "ctx", gb), DownloaderID: ds.ID})
+	require.NoError(t, err)
+	require.True(t, res.Success, res.Message)
+	require.NotNil(t, dl.got)
+	dl1, ok1 := ctx.Deadline()
+	dl2, ok2 := dl.got.Deadline()
+	assert.True(t, ok1 && ok2 && dl1.Equal(dl2), "拿到的是调用方的 ctx")
+}
+
+// listingQbitServer 是把加进来的种子列在 torrents/info 里的假 qBittorrent（state downloading、amount_left 是整个体积）；
+// list 为假时加了也不列（下载器里还看不到）。
+func listingQbitServer(t *testing.T, freeSpace int64, list bool) *httptest.Server {
+	t.Helper()
+	var mu sync.Mutex
+	added := []map[string]any{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v2/auth/login":
+			_, _ = w.Write([]byte("Ok."))
+		case r.URL.Path == "/api/v2/app/version":
+			_, _ = w.Write([]byte("v4.6.0"))
+		case strings.HasPrefix(r.URL.Path, "/api/v2/torrents/properties"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.URL.Path == "/api/v2/sync/maindata":
+			_, _ = w.Write([]byte(`{"server_state":{"free_space_on_disk":` + itoa(freeSpace) + `}}`))
+		case r.URL.Path == "/api/v2/torrents/info":
+			mu.Lock()
+			b, _ := json.Marshal(added)
+			mu.Unlock()
+			_, _ = w.Write(b)
+		case r.URL.Path == "/api/v2/torrents/add":
+			f, _, err := r.FormFile("torrents")
+			if err == nil {
+				data, _ := io.ReadAll(f)
+				h, _ := qbit.ComputeTorrentHash(data)
+				size, _ := qbit.ComputeTorrentSize(data)
+				if list {
+					mu.Lock()
+					added = append(added, map[string]any{"hash": h, "name": h, "state": "downloading", "amount_left": size, "size": size})
+					mu.Unlock()
+				}
+			}
+			_, _ = w.Write([]byte("Ok."))
+		default:
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// 推送成功的种子出现在下载器里以后，下一次推送不再把它算两遍（下载中待占用里有它，预留丢掉）。
+// 可用 100 GB、保底 5 GB：每个 45 GB 时第二个照样能推（以前「待占用 45 + 预留 45」被拒）；
+// 每个 60 GB 时第二个不管看不看得到都被拒：看得到时算在待占用里，看不到时还按预留算
+func TestPushTorrent_DiskProtectVisibleTorrentNotCountedTwice(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		list         bool
+		size         int64
+		secondOK     bool
+		reservedLeft int64
+	}{
+		{"看得到、两个装得下", true, 45 * gb, true, 45 * gb},
+		{"看不到、按预留算", false, 60 * gb, false, 60 * gb},
+		{"看得到、按待占用算", true, 60 * gb, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupDB(t)
+			t.Cleanup(func() { global.GlobalDB = nil })
+			GetDiskBudget().Reset()
+			t.Cleanup(func() { GetDiskBudget().Reset() })
+			require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
+				DownloadDir: t.TempDir(), CleanupDiskProtect: true, CleanupMinDiskSpaceGB: 5,
+			}))
+			dlID := seedQbitDownloader(t, listingQbitServer(t, 100*gb, tc.list).URL)
+			push := func(id string) *PushTorrentResult {
+				res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+					SiteID: "springsunday", TorrentID: id, TorrentData: makeSizedTorrentBytes(t, id, tc.size), DownloaderID: dlID,
+				})
+				require.NoError(t, err)
+				require.NotNil(t, res)
+				return res
+			}
+			first := push("vis-1")
+			require.True(t, first.Success, first.Message)
+			assert.Equal(t, tc.size, GetDiskBudget().Reserved(), "推送成功：预留到下载器里出现为止")
+			second := push("vis-2")
+			assert.Equal(t, tc.secondOK, second.Success, second.Message)
+			assert.Equal(t, tc.reservedLeft, GetDiskBudget().Reserved())
+		})
+	}
+}
+
+// 推送遇到空间不足时，打开了自动删种与「空间低于下限时紧急清理」才发磁盘空间不足（让自动删种提前开始一轮）。
+func TestPushTorrent_DiskSpaceLowEventFollowsEmergency(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		cleanup, emergency bool
+		want               bool
+	}{
+		{"都开着", true, true, true},
+		{"紧急清理关着", true, false, false},
+		{"自动删种关着", false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupDB(t)
+			t.Cleanup(func() { global.GlobalDB = nil })
+			GetDiskBudget().Reset()
+			t.Cleanup(func() { GetDiskBudget().Reset() })
+			require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
+				DownloadDir: t.TempDir(), CleanupDiskProtect: true, CleanupMinDiskSpaceGB: 5,
+				CleanupEnabled: tc.cleanup, CleanupEmergency: tc.emergency,
+			}))
+			_, ch, cancel := events.Subscribe(8)
+			t.Cleanup(cancel)
+			srv := fakeQbitServer(t, false, gb)
+			dlID := seedQbitDownloaderNamed(t, "qb-low", srv.URL)
+
+			res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+				SiteID: "springsunday", TorrentID: "low", TorrentData: makeSizedTorrentBytes(t, "m", gb), DownloaderID: dlID,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, res)
+			assert.Equal(t, PushStatusRejectedDisk, res.Status)
+			got := false
+			for len(ch) > 0 {
+				if ev := <-ch; ev.Type == events.DiskSpaceLow && ev.Source == "push" {
+					got = true
+				}
+			}
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }

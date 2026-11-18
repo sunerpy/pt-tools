@@ -105,8 +105,12 @@ vi.mock("element-plus", async (orig) => {
 
 let view: MountedView | null = null;
 
-async function mountHub() {
+async function mountHub(opts: { columns?: string[] } = {}) {
   localStorage.clear();
+  // 默认列只开常看的几列；要测的列不在默认里时，像用户在「显示列」里勾过一样存一份
+  if (opts.columns) {
+    localStorage.setItem("downloader-hub-visible-columns-v1", JSON.stringify(opts.columns));
+  }
   api.list.mockResolvedValue({
     items: [row("a1", "任务甲"), row("b2", "任务乙")],
     total: 2,
@@ -214,7 +218,7 @@ describe("下载器 Web UI：删除先确认", () => {
  */
 describe("下载器 Web UI：未完成任务的完成日期", () => {
   it("completed_at = -1 显示「-」，不显示 1970；添加日期照常显示", async () => {
-    await mountHub();
+    await mountHub({ columns: ["title", "progress", "added_at", "completed_at"] });
     const body = document.querySelector(".el-table__body")!;
     expect(body.textContent).not.toContain("1970");
     expect(body.textContent).not.toContain("1969");
@@ -228,5 +232,108 @@ describe("下载器 Web UI：未完成任务的完成日期", () => {
     };
     expect(cell("添加日期")).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(cell("完成日期")).toBe("-");
+  });
+});
+
+describe("下载器 Web UI：默认列与视图面板", () => {
+  it("没改过列时只开常看的几列：速率、分享率、状态在，做种数、连接数、日期不在", async () => {
+    await mountHub();
+    const heads = [...document.querySelectorAll<HTMLElement>(".el-table__header th")].map(
+      (th) => th.textContent?.trim() ?? "",
+    );
+    for (const want of ["标题", "进度", "大小", "上传速度", "下载速度", "分享率", "状态", "操作"]) {
+      expect(heads).toContain(want);
+    }
+    for (const gone of ["做种数", "连接数", "添加日期", "完成日期", "ETA", "分类", "标签"]) {
+      expect(heads).not.toContain(gone);
+    }
+  });
+
+  it("「视图」面板里每组带名字；分页时没有渲染方式，切到「全部」才出现", async () => {
+    await mountHub();
+    buttonByText("视图").click();
+    const panel = await vi.waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-testid=hub-view-panel]");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    for (const k of ["行高", "任务详情", "数据范围"]) expect(panel.textContent).toContain(k);
+    expect(document.querySelector("[data-testid=hub-render-seg]")).toBeNull();
+
+    const all = [...panel.querySelectorAll<HTMLElement>(".el-segmented__item")].find(
+      (el) => el.textContent?.trim() === "全部",
+    )!;
+    all.querySelector<HTMLInputElement>("input")?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=hub-render-seg]")).toBeTruthy(),
+    );
+  });
+});
+
+/*
+ * 「活动中」与「总速度」：做种里有一大片没人下载的（qB 的 stalledUP），光看「做种中」挑不出
+ * 此刻真在传数据的任务。「活动中」交给后端按速度筛（state=active，分页与总数才对），
+ * 计数和别的状态一样按已加载的这一页算；「总速度」按上传加下载排。
+ */
+describe("下载器 Web UI：活动中与总速度", () => {
+  function lastListParams(): URLSearchParams {
+    const calls = api.list.mock.calls;
+    return calls[calls.length - 1][0] as URLSearchParams;
+  }
+
+  it("「活动中」排在「全部」后面，计数是这一页里上传或下载速度大于 0 的任务", async () => {
+    localStorage.clear();
+    api.list.mockResolvedValue({
+      items: [
+        { ...row("a1", "上传中"), upload_speed: 2048 },
+        { ...row("b2", "没人下载"), upload_speed: 0 },
+        { ...row("c3", "下载中"), state: "downloading", progress: 40, download_speed: 4096 },
+      ],
+      total: 3,
+      failures: [],
+    });
+    const DownloaderHub = (await import("./DownloaderHub.vue")).default;
+    view = mountView(DownloaderHub);
+    await vi.waitFor(() => expect(document.querySelectorAll("tr.torrent-row")).toHaveLength(3));
+
+    const picks = [...document.querySelectorAll<HTMLElement>(".hub__pick")];
+    expect(picks.slice(0, 3).map((el) => el.querySelector(".hub__pick-l")?.textContent)).toEqual([
+      "全部",
+      "活动中",
+      "下载中",
+    ]);
+    expect(picks[1].querySelector(".hub__pick-n")?.textContent).toBe("2");
+  });
+
+  it("点「活动中」按 state=active 重新请求，按钮亮起", async () => {
+    await mountHub();
+    const before = api.list.mock.calls.length;
+    const pick = [...document.querySelectorAll<HTMLElement>(".hub__pick")].find(
+      (el) => el.querySelector(".hub__pick-l")?.textContent === "活动中",
+    )!;
+    pick.click();
+    await vi.waitFor(() => expect(api.list.mock.calls.length).toBeGreaterThan(before));
+    expect(lastListParams().get("state")).toBe("active");
+    await vi.waitFor(() => expect(pick.classList.contains("is-on")).toBe(true));
+  });
+
+  it("「总速度」紧跟「添加日期」（下拉框一屏只露出前 8 项），选它按 sort_by=total_speed 请求", async () => {
+    await mountHub();
+    document.querySelector<HTMLElement>(".hub__sort .el-select__wrapper")!.click();
+    const option = await vi.waitFor(() => {
+      const el = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (item) => item.textContent?.trim() === "总速度",
+      );
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    const labels = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].map(
+      (item) => item.textContent?.trim(),
+    );
+    expect(labels.slice(0, 2)).toEqual(["添加日期", "总速度"]);
+    const before = api.list.mock.calls.length;
+    option.click();
+    await vi.waitFor(() => expect(api.list.mock.calls.length).toBeGreaterThan(before));
+    expect(lastListParams().get("sort_by")).toBe("total_speed");
   });
 });

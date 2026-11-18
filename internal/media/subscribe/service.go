@@ -1,0 +1,348 @@
+// Package subscribe 是订阅：按电影或剧集的一季找资源（RSS 拉到的种子与定时主动搜索），按质量档案挑、推送到下载器，
+// 剧集按 TMDB 的分集找缺的集；洗版时接着找更好的版本，入库后替换旧文件；豆瓣想看定时建订阅。
+package subscribe
+
+import (
+	"context"
+	"errors"
+	"math/rand/v2"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+
+	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/organize"
+	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+)
+
+// 错误。接口层按它们回 400 / 404。
+var (
+	ErrInvalid  = errors.New("参数不对")
+	ErrNotFound = errors.New("没有这条记录")
+	// ErrBusy 是同一件事正在做（例如这个豆瓣来源正在拉取）
+	ErrBusy = errors.New("正在处理")
+)
+
+// Recognizer 是媒体识别（生产环境是 *recognize.Service）。
+type Recognizer interface {
+	Recognize(ctx context.Context, in recognize.Input) (*recognize.Result, error)
+	Parse(ctx context.Context, title, subtitle string) (meta.Meta, error)
+	TMDB(ctx context.Context) (*tmdb.Client, error)
+}
+
+// Searcher 是多站点搜索（生产环境是 CachedSearchOrchestrator）。
+type Searcher interface {
+	Search(ctx context.Context, q v2.MultiSiteSearchQuery) (*v2.MultiSiteSearchResult, error)
+}
+
+// SitesFunc 按站点名取共享的站点实例（下载种子文件用，与搜索、登录探测共用限速）。
+type SitesFunc func(name string) (v2.Site, bool)
+
+// PushFunc 是推送入口（生产环境是 internal.PushTorrentToDownloader，磁盘与站点容量闸门都在里面）。
+type PushFunc func(ctx context.Context, req ptinternal.PushTorrentRequest) (*ptinternal.PushTorrentResult, error)
+
+// Downloaders 按编号取下载器（洗版以后删旧种子用）。
+type Downloaders interface {
+	Get(ctx context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error)
+}
+
+// Library 报告条目在不在媒体服务器里（没有配媒体服务器时返回 false；生产环境是 *organize.Service）。
+type Library interface {
+	InLibrary(ctx context.Context, kind string, tmdbID int, imdbID, title string) (bool, error)
+}
+
+// Organizer 是订阅要用的整理入库的动作（生产环境是 *organize.Service）：洗版换掉旧版本、重新整理，
+// 以及追剧详情里的「重新整理」「重新刮削」。
+type Organizer interface {
+	Retire(ctx context.Context, id uint, reason string) ([]string, error)
+	Retry(ctx context.Context, id uint) (*organize.Result, error)
+	// Retrying 报告失败的记录是不是正在重试（排上队以后记录里的重试时间是空的）
+	Retrying(id uint) bool
+	// Organize 整理下载器里的一个种子（按手动整理处理：指定了条目时用那个条目）
+	Organize(ctx context.Context, req organize.Request) (*organize.Result, error)
+	// Rescrape 重新刮削一条整理记录所在的电影或剧集
+	Rescrape(ctx context.Context, id uint) (*organize.RescrapeResult, error)
+}
+
+// Notice 是一条订阅的通知：下载了订阅的资源，或豆瓣想看拉取连续失败。
+type Notice struct {
+	Channels []uint
+	Kind     string
+	Subject  string
+	EventKey string
+	Title    string
+	Body     string
+	ImageURL string
+	// Event 是这条通知对应的事件（消息模板用）
+	Event *notify.Event
+}
+
+// 通知的种类。
+const (
+	NoticeDownloaded     = "subscribe_downloaded"
+	NoticeDoubanAbnormal = "douban_abnormal"
+	// 追剧（剧集按自己的定时搜索的）：下载了新的集、锁住的版本久等不到、连续几次没搜成
+	NoticeFollowFound   = "followshow_found"
+	NoticeFollowWaiting = "followshow_waiting"
+	NoticeFollowFailed  = "followshow_failed"
+)
+
+// Notifier 发通知（生产环境经监控通知投递器）。
+type Notifier func(ctx context.Context, n Notice) error
+
+// Config 是订阅服务的依赖。
+type Config struct {
+	DB          *gorm.DB
+	Recognizer  Recognizer
+	Search      Searcher
+	Sites       SitesFunc
+	SiteNames   func() []string
+	Push        PushFunc
+	Downloaders Downloaders
+	Library     Library
+	Organizer   Organizer
+	// Deleter 是条目详情里「删除一部片」要用的整理入库的动作（生产环境是 *organize.Service）；Guard 是删种的保护规则
+	// （生产环境是 scheduler.SeedGuard）。为空时删除预览与执行回错误，条目详情里的种子一律当作受保护
+	Deleter LibraryDeleter
+	Guard   GuardFunc
+	Notify  Notifier
+	Logger  *zap.SugaredLogger
+	Now     func() time.Time
+	// Jitter 是主动搜索与豆瓣拉取的随机偏移（测试里换成固定的）
+	Jitter func(limit time.Duration) time.Duration
+	// HTTP 拉豆瓣用（为空时用带超时的默认客户端，走系统代理）
+	HTTP *http.Client
+	// DoubanBase 是豆瓣的地址（测试与 QA 换成假服务）
+	DoubanBase string
+	// Bangumi 是探索页番剧日历用的 Bangumi 客户端（为空时番剧日历回错误）
+	Bangumi BangumiAPI
+}
+
+// Service 是订阅服务。
+type Service struct {
+	cfg Config
+	// mu 串行化评估与推送：RSS 与主动搜索同时找到同一个种子时只推一次
+	mu     sync.Mutex
+	offers chan Candidate
+	cache  parseCache
+
+	// doubanBusy 记下正在拉取的豆瓣来源：定时拉取与「立即拉取」不同时处理同一个来源
+	doubanMu   sync.Mutex
+	doubanBusy map[uint]bool
+
+	// seasonAt 记下每个追剧上次不读缓存地问 TMDB 这一季的时间
+	seasonMu sync.Mutex
+	seasonAt map[uint]time.Time
+	// dls 缓存下载器的种子列表（认领下载器里的种子用）
+	dls dlCache
+	// gone 记下下载中的订阅种子在下载器里第一次看不到的时间（订阅种子的编号 → 时间，见 dropVanished）；
+	// reorg 记下再推过一次的种子上次由订阅让整理入库整理的时间（见 organizeRepushed）。都由 goneMu 保护
+	goneMu sync.Mutex
+	gone   map[uint]time.Time
+	reorg  map[uint]time.Time
+	// prunedAt 是上次清理运行记录的时间
+	pruneMu  sync.Mutex
+	prunedAt time.Time
+	// doneAt 记下每个完成的追剧上次看有没有新的集、下一季的时间
+	doneMu sync.Mutex
+	doneAt map[uint]time.Time
+	// today 记下今日更新今天处理过没有
+	todayMu sync.Mutex
+	today   todayState
+	// reviewer 是推送前的 AI 复核（见 review.go）；reviews 记下每个订阅的每个种子复核的结论
+	reviewMu sync.Mutex
+	reviewer Reviewer
+	reviews  map[reviewKey]reviewEntry
+
+	runMu   sync.Mutex
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	running bool
+
+	// after 是整理服务整理完一个种子以后交来的 info hash（见 AfterOrganize），后台循环马上刷新它
+	after chan string
+}
+
+const (
+	offerQueue = 256
+	// afterOrganizeQueue 是整理完成回调的队列长度：满了丢掉，下一拍的后台刷新照样会处理那些种子
+	afterOrganizeQueue = 64
+)
+
+// New 建订阅服务；Start 以后才接 RSS 与定时搜索。
+func New(cfg Config) *Service {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = zap.NewNop().Sugar()
+	}
+	if cfg.Jitter == nil {
+		cfg.Jitter = func(limit time.Duration) time.Duration {
+			if limit <= 0 {
+				return 0
+			}
+			return time.Duration(rand.Int64N(int64(limit)))
+		}
+	}
+	if cfg.HTTP == nil {
+		cfg.HTTP = &http.Client{Timeout: 20 * time.Second}
+	}
+	if cfg.DoubanBase == "" {
+		cfg.DoubanBase = "https://www.douban.com"
+	}
+	return &Service{
+		cfg: cfg, offers: make(chan Candidate, offerQueue), cache: parseCache{m: map[string]parsed{}}, doubanBusy: map[uint]bool{},
+		seasonAt: map[uint]time.Time{}, dls: dlCache{m: map[uint]dlList{}}, doneAt: map[uint]time.Time{}, gone: map[uint]time.Time{}, reorg: map[uint]time.Time{},
+		after: make(chan string, afterOrganizeQueue),
+	}
+}
+
+// AfterOrganize 是整理服务整理完一个下载器里的种子、有文件入库以后的回调（见 organize.Service.SetAfterOrganize）：
+// 不阻塞地交给后台循环，循环马上刷新订阅里这个种子，不等下一拍。队列满了丢掉，下一拍的刷新兜底。
+func (s *Service) AfterOrganize(infoHash string) {
+	h := strings.ToLower(strings.TrimSpace(infoHash))
+	if h == "" {
+		return
+	}
+	select {
+	case s.after <- h:
+	default:
+	}
+}
+
+// Offer 把 RSS 拉到的种子交给订阅（不阻塞；队列满时丢掉，主动搜索还会找到）。
+func (s *Service) Offer(site string, item v2.TorrentItem) {
+	select {
+	case s.offers <- Candidate{Site: site, Item: item, From: fromRSS, SeenAt: offerSeenAt(item, s.cfg.Now())}:
+	default:
+		s.cfg.Logger.Debugf("[订阅] RSS 队列已满，丢掉 %s", item.Title)
+	}
+}
+
+// tickInterval 是后台循环的节拍（测试里调短）。
+var tickInterval = time.Minute
+
+// Start 启动后台：处理 RSS 交来的种子，每分钟看一次到期的搜索、下载中的种子与豆瓣想看。
+func (s *Service) Start(ctx context.Context) {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if s.running {
+		return
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	s.cancel, s.running = cancel, true
+	s.wg.Add(2)
+	go func() {
+		defer s.wg.Done()
+		s.offerLoop(ctx)
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.loop(ctx)
+	}()
+}
+
+// Stop 停掉后台并等它退出。
+func (s *Service) Stop() {
+	s.runMu.Lock()
+	if !s.running {
+		s.runMu.Unlock()
+		return
+	}
+	s.cancel()
+	s.running = false
+	s.runMu.Unlock()
+	s.wg.Wait()
+}
+
+func (s *Service) offerLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case c := <-s.offers:
+			set, err := s.Settings(ctx)
+			if err != nil || !set.Enabled {
+				continue
+			}
+			s.considerOffer(ctx, c)
+		}
+	}
+}
+
+func (s *Service) loop(ctx context.Context) {
+	t := time.NewTicker(tickInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.Tick(ctx)
+		case h := <-s.after:
+			// 和 Tick 串行：台账重建、完成判断不和后台刷新并发
+			s.refreshHash(ctx, h)
+		}
+	}
+}
+
+// Tick 做一轮后台工作：下载中的种子入库了没有、订阅完成了没有、到期的主动搜索与豆瓣想看、到点的今日更新。总开关关着时什么都不做。
+func (s *Service) Tick(ctx context.Context) {
+	set, err := s.Settings(ctx)
+	if err != nil || !set.Enabled {
+		return
+	}
+	s.refresh(ctx)
+	s.searchDue(ctx, set)
+	s.doubanDue(ctx)
+	s.todayDue(ctx, set)
+}
+
+// parseCache 按标题缓存解析结果（RSS 一小时能拉到几百个种子，识别词要读库）。
+type parseCache struct {
+	mu sync.Mutex
+	m  map[string]parsed
+}
+
+type parsed struct {
+	m  meta.Meta
+	at time.Time
+}
+
+const (
+	parseCacheSize = 4096
+	parseCacheTTL  = 30 * time.Minute
+)
+
+func (s *Service) parse(ctx context.Context, title, subtitle string) meta.Meta {
+	key := title + "\x00" + subtitle
+	now := s.cfg.Now()
+	s.cache.mu.Lock()
+	if p, ok := s.cache.m[key]; ok && now.Sub(p.at) < parseCacheTTL {
+		s.cache.mu.Unlock()
+		return p.m
+	}
+	s.cache.mu.Unlock()
+	m, err := s.cfg.Recognizer.Parse(ctx, title, subtitle)
+	if err != nil {
+		m = meta.Parse(title, subtitle)
+	}
+	s.cache.mu.Lock()
+	if len(s.cache.m) >= parseCacheSize {
+		s.cache.m = map[string]parsed{}
+	}
+	s.cache.m[key] = parsed{m: m, at: now}
+	s.cache.mu.Unlock()
+	return m
+}

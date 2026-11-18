@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // BindingInfo is the subset of binding data needed by the chain.
@@ -57,20 +59,40 @@ type Replier interface {
 	Reply(ctx context.Context, msg notify.InboundMessage, reply Reply) error
 }
 
-// BindingLookup resolves a (channel, user) pair to a BindingInfo.
+// BindingLookup resolves a (notification conf, channel, user) triple to a BindingInfo.
+// 绑定属于具体的通知通道配置：同一个用户在另一个 Bot/通道上发消息，不能沿用这里的绑定。
 type BindingLookup interface {
-	FindByChannelUser(ctx context.Context, channelType, channelUserID string) (BindingInfo, bool, error)
+	FindByChannelUser(ctx context.Context, confID uint, channelType, channelUserID string) (BindingInfo, bool, error)
 }
 
 // BindCodeConsumer consumes a /bind <code> request. Implemented by app.BindingService.
+// confID 是消息来源的通知通道配置，绑定码只能在签发它的那个通道上兑换。
 type BindCodeConsumer interface {
-	ConsumeCode(ctx context.Context, code, channelType, channelUserID string) error
+	ConsumeCode(ctx context.Context, code string, confID uint, channelType, channelUserID string) error
 }
 
 // AuditRecorder writes a single audit row. Implemented by app.AuditService.
 type AuditRecorder interface {
 	Record(ctx context.Context, e AuditEntry) error
 }
+
+// AssistantHandler 接管绑定用户的非命令消息（内置 AI 助手，路线图 M19）。Handle 只登记、立即返回：
+// 回答由助手在后台经 Replier 异步发出，不在入站路径上等模型（Telegram 的长轮询是同步调用 Process 的）。
+type AssistantHandler interface {
+	// Enabled 报告现在要不要把非命令消息交给助手（助手启用、ChatOps 开关打开）。
+	Enabled(ctx context.Context) bool
+	// Handle 处理一条非命令消息，返回立即回复（可以为空）与审计结果。
+	Handle(ctx context.Context, msg InboundAssistantMessage) (Reply, string)
+}
+
+// InboundAssistantMessage 是交给助手的一条消息：原始入站消息（回复要用）与绑定信息。
+type InboundAssistantMessage struct {
+	Msg notify.InboundMessage
+	Src Source
+}
+
+// assistantRef 包一层，好放进 atomic.Pointer（链在通道启动以后才接上助手）。
+type assistantRef struct{ h AssistantHandler }
 
 // MessageChain dispatches inbound messages through the permission gate per
 // plan T22 (binding → allowed → command parse → session → registry →
@@ -84,7 +106,26 @@ type MessageChain struct {
 	sessions    SessionStoreAPI
 	replier     Replier
 	now         func() time.Time
+	logf        func(format string, args ...any)
+	assistant   atomic.Pointer[assistantRef]
+	// templates 是消息模板：回复发出去以前按回复的事件套用（ChatOps 命令回复组），为 nil 时用内置文字
+	templates *notify.Templates
 }
+
+// SetTemplates 接上消息模板（在通道启动以前调用）。
+func (mc *MessageChain) SetTemplates(t *notify.Templates) { mc.templates = t }
+
+// SetAssistant 接上内置 AI 助手（nil 摘掉）：之后绑定用户的非命令消息交给它。可以在通道运行中调用。
+func (mc *MessageChain) SetAssistant(h AssistantHandler) {
+	if h == nil {
+		mc.assistant.Store(nil)
+		return
+	}
+	mc.assistant.Store(&assistantRef{h: h})
+}
+
+// SetLogf 注入日志函数，用于记录审计写入失败。
+func (mc *MessageChain) SetLogf(fn func(format string, args ...any)) { mc.logf = fn }
 
 // NewMessageChain wires the dependencies. replier may be nil when there is
 // no outbound channel (e.g. CLI debugging).
@@ -118,10 +159,10 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	text := strings.TrimSpace(msg.Text)
 	cmdName, args := parseCommand(text)
 
-	binding, hasBinding, err := mc.bindings.FindByChannelUser(ctx, msg.ChannelType, msg.ChannelUserID)
+	binding, hasBinding, err := mc.bindings.FindByChannelUser(ctx, msg.SourceConfID, msg.ChannelType, msg.ChannelUserID)
 	if err != nil {
 		mc.recordAudit(ctx, msg, 0, cmdName, args, "error:lookup_binding", start)
-		mc.tryReply(ctx, msg, Reply{Text: "内部错误，请稍后重试"})
+		mc.tryReply(ctx, msg, cmdName, Reply{Text: "内部错误，请稍后重试", Failed: true})
 		return err
 	}
 
@@ -130,13 +171,13 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 			return mc.executeBind(ctx, msg, args, start)
 		}
 		mc.recordAudit(ctx, msg, 0, cmdName, args, "denied:not_bound", start)
-		mc.tryReply(ctx, msg, Reply{Text: "请先 /bind <绑定码> 完成绑定"})
+		mc.tryReply(ctx, msg, cmdName, Reply{Text: "请先 /bind <绑定码> 完成绑定", Failed: true})
 		return nil
 	}
 
 	if !binding.Allowed {
 		mc.recordAudit(ctx, msg, binding.ConfID, cmdName, args, "denied:not_allowed", start)
-		mc.tryReply(ctx, msg, Reply{Text: "该绑定已被禁用"})
+		mc.tryReply(ctx, msg, cmdName, Reply{Text: "该绑定已被禁用", Failed: true})
 		return nil
 	}
 
@@ -157,18 +198,40 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 		if state.Handler != nil {
 			reply, herr := state.Handler(ctx, []string{text}, src)
 			result := "success"
-			if herr != nil {
+			switch {
+			case herr != nil:
 				result = "error:session_handler"
+			case reply.Failed:
+				result = "error:session_failed"
 			}
 			mc.recordAudit(ctx, msg, binding.ConfID, "session:"+state.Step, args, result, start)
-			mc.tryReply(ctx, msg, reply)
+			if herr != nil {
+				reply.Failed = true
+			}
+			mc.tryReply(ctx, msg, "session:"+state.Step, reply)
 			return nil
 		}
 	}
 
 	if cmdName == "" {
+		// 按钮回调（RSS 通知的下载 / 忽略）由通道自己处理，不当成和助手说话
+		if ref := mc.assistant.Load(); ref != nil && !msg.IsCallback && ref.h.Enabled(ctx) {
+			// 消息原文不进审计（可能很长、也可能带私事）；工具调用由助手另记
+			if !mc.rateLimiter.Allow(msg.ChannelType, msg.ChannelUserID, "assistant") {
+				mc.recordAudit(ctx, msg, binding.ConfID, "assistant", nil, "denied:rate_limit", start)
+				return nil
+			}
+			reply, result := ref.h.Handle(ctx, InboundAssistantMessage{Msg: msg, Src: src})
+			mc.recordAudit(ctx, msg, binding.ConfID, "assistant", nil, result, start)
+			mc.tryReply(ctx, msg, "", reply)
+			return nil
+		}
+		if msg.IsCallback {
+			// 按钮回调的动作通道已经做了（RSS 的下载、忽略），这里不再回「只识别命令」
+			return nil
+		}
 		mc.recordAudit(ctx, msg, binding.ConfID, "", nil, "user_message_hinted", start)
-		mc.tryReply(ctx, msg, Reply{
+		mc.tryReply(ctx, msg, "", Reply{
 			Text: "🤖 我只识别命令消息（以 / 开头）。\n\n发送 /help 查看支持的命令清单。",
 		})
 		return nil
@@ -177,7 +240,7 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	spec, ok := mc.registry.Get(cmdName)
 	if !ok {
 		mc.recordAudit(ctx, msg, binding.ConfID, cmdName, args, "denied:unknown_command", start)
-		mc.tryReply(ctx, msg, Reply{Text: "命令未知，发送 /help 查看"})
+		mc.tryReply(ctx, msg, cmdName, Reply{Text: "命令未知，发送 /help 查看", Failed: true})
 		return nil
 	}
 
@@ -188,7 +251,7 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 
 	if spec.AdminOnly && !binding.PtAdmin {
 		mc.recordAudit(ctx, msg, binding.ConfID, spec.Name, args, "denied:not_admin", start)
-		mc.tryReply(ctx, msg, Reply{Text: "需管理员权限"})
+		mc.tryReply(ctx, msg, spec.Name, Reply{Text: "需管理员权限", Failed: true})
 		return nil
 	}
 
@@ -198,18 +261,25 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	}
 	reply, herr := spec.Handler(ctx, args, src)
 	result := "success"
-	if herr != nil {
+	switch {
+	case herr != nil:
 		result = "error:handler"
+	case reply.Failed:
+		// 处理器把业务错误写进回复、返回 nil error：按回复的 Failed 记失败
+		result = "error:command_failed"
 	}
 	mc.recordAudit(ctx, msg, binding.ConfID, spec.Name, args, result, start)
-	mc.tryReply(ctx, msg, reply)
+	if herr != nil {
+		reply.Failed = true
+	}
+	mc.tryReply(ctx, msg, spec.Name, reply)
 	return nil
 }
 
 func (mc *MessageChain) executeBind(ctx context.Context, msg notify.InboundMessage, args []string, start time.Time) error {
 	if len(args) == 0 {
 		mc.recordAudit(ctx, msg, 0, "bind", args, "denied:missing_code", start)
-		mc.tryReply(ctx, msg, Reply{Text: "用法: /bind <绑定码>"})
+		mc.tryReply(ctx, msg, "bind", Reply{Text: "用法: /bind <绑定码>", Failed: true})
 		return nil
 	}
 	code := args[0]
@@ -217,13 +287,13 @@ func (mc *MessageChain) executeBind(ctx context.Context, msg notify.InboundMessa
 		mc.recordAudit(ctx, msg, 0, "bind", args, "error:no_binding_service", start)
 		return errors.New("binding service unavailable")
 	}
-	if err := mc.bindCoder.ConsumeCode(ctx, code, msg.ChannelType, msg.ChannelUserID); err != nil {
+	if err := mc.bindCoder.ConsumeCode(ctx, code, msg.SourceConfID, msg.ChannelType, msg.ChannelUserID); err != nil {
 		mc.recordAudit(ctx, msg, 0, "bind", args, "error:bind_failed", start)
-		mc.tryReply(ctx, msg, Reply{Text: "绑定失败：" + err.Error()})
+		mc.tryReply(ctx, msg, "bind", Reply{Text: "绑定失败：" + err.Error(), Failed: true})
 		return nil
 	}
 	mc.recordAudit(ctx, msg, 0, "bind", args, "success", start)
-	mc.tryReply(ctx, msg, Reply{Text: "绑定成功"})
+	mc.tryReply(ctx, msg, "bind", Reply{Text: "绑定成功"})
 	return nil
 }
 
@@ -234,9 +304,9 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 	latency := mc.now().Sub(start).Milliseconds()
 	argsMap := map[string]any{}
 	if len(args) > 0 {
-		argsMap["args"] = args
+		argsMap["args"] = auditArgs(command, args)
 	}
-	_ = mc.auditSvc.Record(ctx, AuditEntry{
+	if err := mc.auditSvc.Record(ctx, AuditEntry{
 		NotificationConfID: confID,
 		ChannelType:        msg.ChannelType,
 		ChannelUserID:      msg.ChannelUserID,
@@ -244,17 +314,68 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 		Args:               argsMap,
 		Result:             result,
 		LatencyMs:          latency,
-	})
+	}); err != nil && mc.logf != nil {
+		// 命令可能已经生效（比如已经暂停了种子），审计却没写进去：至少留一条日志
+		mc.logf("ChatOps 审计写入失败 command=%s result=%s channel=%s user=%s: %v",
+			command, result, msg.ChannelType, msg.ChannelUserID, err)
+	}
 }
 
-func (mc *MessageChain) tryReply(ctx context.Context, msg notify.InboundMessage, reply Reply) {
+// auditArgs 返回写进审计的参数副本：/bind 的绑定码整体隐去，像 URL 的参数（如 /addrss 带的 RSS 地址）
+// 把 passkey、token 等查询参数脱敏。审计的键名脱敏只看键名，管不到位置参数里的内容。
+func auditArgs(command string, args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		switch {
+		case command == "bind":
+			out[i] = "[REDACTED]"
+		case strings.Contains(a, "://"):
+			out[i] = utils.SanitizeURL(a)
+		default:
+			out[i] = a
+		}
+	}
+	return out
+}
+
+// tryReply 套用消息模板以后发出回复。command 是这条回复对应的命令（不带 /），给 reply.other 用。
+// 模板写出来的回复可能很长：超过一条消息的上限时分几条发（见 SplitReply），按钮跟在最后一条上；一条发不出去就不再发后面的。
+func (mc *MessageChain) tryReply(ctx context.Context, msg notify.InboundMessage, command string, reply Reply) {
 	if mc.replier == nil || reply.SilentDrop {
 		return
 	}
 	if reply.Text == "" && len(reply.Buttons) == 0 {
 		return
 	}
-	_ = mc.replier.Reply(ctx, msg, reply)
+	reply = mc.applyTemplate(command, reply)
+	if reply.Text == "" {
+		_ = mc.replier.Reply(ctx, msg, reply)
+		return
+	}
+	parts := SplitReply(reply.Text, "")
+	for i, part := range parts {
+		r := reply
+		r.Text = part
+		if i < len(parts)-1 {
+			r.Buttons = nil
+		}
+		if err := mc.replier.Reply(ctx, msg, r); err != nil {
+			return
+		}
+	}
+}
+
+// applyTemplate 按回复的事件（没有时是 reply.other）套用正文模板；模板出错或渲染为空时保留内置文字，按钮原样保留。
+func (mc *MessageChain) applyTemplate(command string, reply Reply) Reply {
+	if mc.templates == nil || reply.Text == "" {
+		return reply
+	}
+	ev := reply.Event
+	if ev == nil {
+		ev = notify.NewEvent(notify.EventReplyOther, mc.now(), map[string]any{"command": command, "ok": !reply.Failed})
+	}
+	reply.Text = mc.templates.ApplyText(ev, reply.Text)
+	return reply
 }
 
 func parseCommand(text string) (string, []string) {

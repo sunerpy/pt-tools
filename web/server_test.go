@@ -664,7 +664,11 @@ func TestApiFilterRuleHits(t *testing.T) {
 // 日志目录还不存在时（一条日志都没写过）要回空清单而不是 500。
 func TestApiLogFiles_MissingDir(t *testing.T) {
 	srv := setupServer(t)
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 
 	w := httptest.NewRecorder()
 	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
@@ -694,6 +698,7 @@ func TestApiLogFiles_BothBranchesReturnSameShape(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
 			if tc.makeDir {
 				require.NoError(t, os.MkdirAll(filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory), 0o755))
 			}
@@ -722,6 +727,7 @@ func TestApiLogFiles_ListsRotated(t *testing.T) {
 	srv := setupServer(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
@@ -812,6 +818,41 @@ func TestDisableUnavailableSites(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sc.Enabled)
 	assert.False(t, *sc.Enabled)
+}
+
+// 自动禁用不可用站点只关掉开关：认证方式、Cookie、API Key、地址、限速和 RSS 都保留，站点恢复可用后重新启用即可。
+func TestDisableUnavailableSites_KeepsCredentials(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "uid=1; pass=keep", APIUrl: "https://hdsky.me",
+		UploadLimitKBs: 512, RSS: []models.RSSConfig{{Name: "r", URL: "https://hdsky.me/rss", IntervalMinutes: 10}},
+	}))
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "api_key", APIKey: "key-keep", APIUrl: "https://api.m-team.cc",
+	}))
+
+	// 列表里混进一个不存在的站点：记一条警告，其他站点照常停用。
+	srv.disableUnavailableSites([]models.SiteGroup{"no-such-site", "hdsky", "mteam"})
+
+	hd, err := srv.store.GetSiteConf(models.SiteGroup("hdsky"))
+	require.NoError(t, err)
+	require.NotNil(t, hd.Enabled)
+	assert.False(t, *hd.Enabled)
+	assert.Equal(t, "cookie", hd.AuthMethod)
+	assert.Equal(t, "uid=1; pass=keep", hd.Cookie)
+	assert.Equal(t, "https://hdsky.me", hd.APIUrl)
+	assert.Equal(t, 512, hd.UploadLimitKBs)
+	require.Len(t, hd.RSS, 1)
+
+	mt, err := srv.store.GetSiteConf(models.SiteGroup("mteam"))
+	require.NoError(t, err)
+	require.NotNil(t, mt.Enabled)
+	assert.False(t, *mt.Enabled)
+	assert.Equal(t, "api_key", mt.AuthMethod)
+	assert.Equal(t, "key-keep", mt.APIKey)
 }
 
 func TestHashAndVerifyPassword_Roundtrip(t *testing.T) {
@@ -912,6 +953,7 @@ func TestApiStopStartAll(t *testing.T) {
 func TestApiLogs_Error(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 	srv := &Server{}
 
 	w := httptest.NewRecorder()
@@ -1236,7 +1278,7 @@ func TestServe_RootIconsAreServedOutsideAuth(t *testing.T) {
 	writeWebTestSecretKey(t)
 	srv := setupServer(t)
 	const sid = "root-icon-session"
-	srv.sessions[sid] = "admin" // 在 Serve 起 goroutine 之前写入，不与处理器并发
+	srv.sessions.put(sid, "admin") // 在 Serve 起 goroutine 之前写入，不与处理器并发
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -1398,12 +1440,15 @@ func TestApiSites_DeleteError(t *testing.T) {
 
 // ==== merged from server_test.go ====
 func setupServer(t *testing.T) *Server {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
 	mgr := newTestManager(t)
-	return NewServer(core.NewConfigStore(db), mgr)
+	srv := NewServer(core.NewConfigStore(db), mgr)
+	// 后注册先执行：等后台任务结束，再由 TempDir 清理数据库目录
+	t.Cleanup(srv.background.Wait)
+	return srv
 }
 
 func TestAPISiteDetailDoesNotExposeCookieFields(t *testing.T) {
@@ -1421,7 +1466,7 @@ func TestAPISiteDetailDoesNotExposeCookieFields(t *testing.T) {
 
 	var site models.SiteSetting
 	require.NoError(t, global.GlobalDB.DB.Where("name = ?", "hdsky").First(&site).Error)
-	require.Equal(t, plainCookie, site.Cookie)
+	require.Empty(t, site.Cookie, "the cookie is stored only encrypted")
 	require.NotEmpty(t, site.CookieEncrypted)
 
 	recorder := httptest.NewRecorder()
@@ -1440,6 +1485,7 @@ func writeWebTestSecretKey(t *testing.T) {
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 	keyDir := filepath.Join(homeDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(keyDir, "secret.key"), []byte(strings.Repeat("b", 64)), 0o600))
@@ -1492,7 +1538,7 @@ func TestServer_AuthAndLogin(t *testing.T) {
 	t.Run("logout clears session", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/logout", nil)
-		srv.sessions["sid1"] = "admin"
+		srv.sessions.put("sid1", "admin")
 		req.AddCookie(&http.Cookie{Name: "session", Value: "sid1"})
 		srv.logoutHandler(rr, req)
 		assert.True(t, rr.Code == http.StatusFound || rr.Code == 0)
@@ -1508,7 +1554,7 @@ func TestServer_AuthAndLogin(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/global", nil)
 		sid := "sid-ok"
-		srv.sessions[sid] = "admin"
+		srv.sessions.put(sid, "admin")
 		req.AddCookie(&http.Cookie{Name: "session", Value: sid})
 		h := srv.auth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 		h(rr, req)
@@ -1578,7 +1624,7 @@ func TestServer_APIs(t *testing.T) {
 		rr := httptest.NewRecorder()
 		// enable autostart to hit reload path
 		require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, DefaultEnabled: true, AutoStart: true}))
-		body := bytes.NewBufferString(`{"download_dir":"` + t.TempDir() + `","default_interval_minutes":5}`)
+		body := bytes.NewBufferString(`{"download_dir":` + jsonPath(t.TempDir()) + `,"default_interval_minutes":5}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/global", body)
 		srv.apiGlobal(rr, req)
 		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
@@ -1681,7 +1727,7 @@ func TestServer_APIs(t *testing.T) {
 	})
 	t.Run("start all cfg not ready", func(t *testing.T) {
 		// use isolated DB and seed empty download dir to trigger BadRequest
-		db, _ := core.NewTempDBDir(t.TempDir())
+		db, _ := core.OpenTestDB(t)
 		store := core.NewConfigStore(db)
 		_ = db.DB.Create(&models.SettingsGlobal{DownloadDir: ""}).Error
 		srv2 := NewServer(store, newTestManager(t))
@@ -1753,6 +1799,7 @@ func TestServer_APIs(t *testing.T) {
 	t.Run("logs no file", func(t *testing.T) {
 		// change home dir env to non-existent path to trigger error
 		t.Setenv("HOME", t.TempDir()+"/noexist")
+		t.Setenv("USERPROFILE", t.TempDir()+"/noexist")
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
 		srv.apiLogs(rr, req)
@@ -1762,6 +1809,7 @@ func TestServer_APIs(t *testing.T) {
 		// prepare large log file under HOME/pt-tools/logs/all.log
 		home := t.TempDir()
 		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
 		p := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
 		require.NoError(t, os.MkdirAll(p, 0o755))
 		f := filepath.Join(p, "all.log")
@@ -1857,7 +1905,7 @@ func TestServer_APIs(t *testing.T) {
 		assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
 	})
 	t.Run("start all success when ready", func(t *testing.T) {
-		db, _ := core.NewTempDBDir(t.TempDir())
+		db, _ := core.OpenTestDB(t)
 		store := core.NewConfigStore(db)
 		_ = store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, DefaultEnabled: true})
 		srv2 := NewServer(store, newTestManager(t))
@@ -1869,13 +1917,13 @@ func TestServer_APIs(t *testing.T) {
 }
 
 func TestServe_RootRedirectAndStatic(t *testing.T) {
-	db, _ := core.NewTempDBDir(t.TempDir())
+	db, _ := core.OpenTestDB(t)
 	global.InitLogger(zap.NewNop())
 	srv := NewServer(core.NewConfigStore(db), newTestManager(t))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
-		if err != nil || sid.Value == "" || srv.sessions[sid.Value] == "" {
+		if err != nil || sid.Value == "" || !srv.sessions.valid(sid.Value) {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
@@ -2170,7 +2218,7 @@ func TestLoginHandler_MethodNotAllowed(t *testing.T) {
 // TestLoginHandler_AutoCreateAdmin 测试自动创建管理员
 func TestLoginHandler_AutoCreateAdmin(t *testing.T) {
 	// 使用新的数据库，确保没有管理员
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	srv := NewServer(core.NewConfigStore(db), newTestManager(t))
@@ -2386,6 +2434,7 @@ func TestApiLogFiles_BaseFilesAreNotRotated(t *testing.T) {
 	srv := setupServer(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
@@ -2422,4 +2471,32 @@ func TestApiLogFiles_BaseFilesAreNotRotated(t *testing.T) {
 	assert.True(t, rotated["error-2026-08-30T12-30-00.123.log.gz"])
 	assert.True(t, active["all.log"], "页面 tail 的是 all.log")
 	assert.False(t, active["debug.log"])
+}
+
+// 已推送的种子按「把它推进下载器的规则」计数（pushed_filter_rule_id，推送时记下、之后不改）：
+// RSS 每轮刷新 filter_rule_id，免费结束或规则改了以后它会变，命中数不能跟着掉。没推送的仍按 filter_rule_id。
+func TestApiFilterRuleHits_PushedCountsPushTimeRule(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+	one, two := uint(1), uint(2)
+	pushed := true
+	create := func(id string, rule *uint, cols map[string]any) {
+		ti := models.TorrentInfo{SiteName: "a", TorrentID: id, FilterRuleID: rule}
+		require.NoError(t, global.GlobalDB.DB.Create(&ti).Error)
+		if cols != nil {
+			require.NoError(t, global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", ti.ID).Updates(cols).Error)
+		}
+	}
+	create("p1", nil, map[string]any{"is_pushed": &pushed, "pushed_filter_rule_id": one})  // 规则 1 推的，现在不再命中
+	create("p2", &two, map[string]any{"is_pushed": &pushed, "pushed_filter_rule_id": nil}) // 免费通道推的，现在命中规则 2
+	create("u1", &two, nil)                                                                // 没推送，命中规则 2
+
+	w := httptest.NewRecorder()
+	srv.apiFilterRuleHits(w, httptest.NewRequest(http.MethodGet, "/api/filter-rules/hits", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var got struct {
+		Hits map[string]int64 `json:"hits"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, map[string]int64{"1": 1, "2": 1}, got.Hits)
 }

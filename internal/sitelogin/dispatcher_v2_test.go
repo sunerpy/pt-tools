@@ -2,6 +2,7 @@ package sitelogin
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,3 +124,55 @@ func (s *countingDispatchSite) GetUserInfo(ctx context.Context) (v2.UserInfo, er
 	s.calls++
 	return s.fakeDispatchSite.GetUserInfo(ctx)
 }
+
+// M1d：后备只在返回 OK 时替换主通道结果；其他状态（含 NOT_APPLICABLE）与出错时保留主通道状态，只附上后备的说明。
+func TestProbeWithFallback_KeepsPrimaryUnlessFallbackOK(t *testing.T) {
+	cases := []struct {
+		name     string
+		fallback *mockTransport
+		wantNote string
+	}{
+		{"fallback challenged too", &mockTransport{name: "cloak", result: &ProbeResult{Status: CHALLENGE, Diagnostic: "still blocked"}}, "still blocked"},
+		{"fallback not applicable", &mockTransport{name: "cloak", result: &ProbeResult{Status: NOT_APPLICABLE, Diagnostic: "no cookie"}}, "no cookie"},
+		{"fallback parse error without diagnostic", &mockTransport{name: "cloak", result: &ProbeResult{Status: PARSE_ERROR}}, "PARSE_ERROR"},
+		{"fallback errored", &mockTransport{name: "cloak", err: assert.AnError}, assert.AnError.Error()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			primary := &mockTransport{name: "http", result: &ProbeResult{Status: NETWORK_ERROR, Diagnostic: "dial timeout"}}
+			got, err := ProbeWithFallback(context.Background(), &v2.SiteDefinition{ID: "fake", Schema: v2.SchemaNexusPHP}, &fakeDispatchSite{}, newDispatchClock(), primary, tc.fallback)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			assert.Equal(t, NETWORK_ERROR, got.Status, "the primary status stays")
+			assert.Equal(t, "dial timeout", got.Diagnostic)
+			assert.Contains(t, got.FallbackNote, "CloakBrowser")
+			assert.Contains(t, got.FallbackNote, tc.wantNote)
+			assert.Equal(t, 1, tc.fallback.calls)
+		})
+	}
+}
+
+func TestCloakPlaceholderTransportRemoved(t *testing.T) {
+	// 占位的 CloakTransport 已删除：后备由 internal/cloakdriver/transport 提供。
+	transports := []Transport{HTTPTransport{}, UserInfoServiceTransport{}}
+	for _, tr := range transports {
+		assert.NotEqual(t, "cloak", tr.Name())
+	}
+}
+
+// M1d：site/v2 把 Cloudflare 质询页报成 ErrCloudflareChallenge（错误正文不一定带 cloudflare 字样）；
+// 有后备的四种架构都按这个哨兵归为 CHALLENGE，后备才会执行。Gazelle 以前会把它当成会话过期。
+func TestClassifyUserInfo_CloudflareChallengeSentinel(t *testing.T) {
+	err := fmt.Errorf("fetch user info from x: %w", fmt.Errorf("HTTP 403: %w", errSentinelOnly{v2.ErrCloudflareChallenge}))
+	for _, schema := range []v2.Schema{v2.SchemaNexusPHP, v2.SchemaUnit3D, v2.SchemaGazelle, v2.SchemaMTorrent} {
+		got := ClassifyUserInfo(&v2.SiteDefinition{ID: "x", Schema: schema}, v2.UserInfo{}, err, NewRealClock())
+		assert.Equal(t, CHALLENGE, got.Status, schema)
+		assert.True(t, isFallbackEligible(got.Status), schema)
+	}
+}
+
+// errSentinelOnly 包住哨兵但给出与之无关的文字，确保分类靠 errors.Is 而不是字符串匹配。
+type errSentinelOnly struct{ sentinel error }
+
+func (e errSentinelOnly) Error() string { return "blocked by upstream" }
+func (e errSentinelOnly) Unwrap() error { return e.sentinel }

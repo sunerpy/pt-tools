@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  attendanceApi,
   chatopsApi,
   downloaderDirectoriesApi,
   type DownloaderDirectory,
@@ -9,15 +10,20 @@ import {
   filterRulesApi,
   type NotificationConfig,
   type RSSConfig,
+  type SiteAttendance,
   type SiteConfig,
   type SiteLoginState,
   sitesApi,
   type TaskItem,
   tasksApi,
+  type UserInfoHistoryResponse,
   type UserInfoResponse,
   userInfoApi,
 } from "@/api";
+import DownloaderPathInput from "@/components/downloader/DownloaderPathInput.vue";
 import PtIcon from "@/components/PtIcon";
+import PtBars from "@/components/ui/PtBars.vue";
+import { dailyUploadSeries } from "@/utils/dailySeries";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -25,8 +31,12 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
+import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
+import { attendanceChallengeText, attendanceView } from "@/utils/attendanceStatus";
+import { formatRatio, formatShortDateTime } from "@/utils/format";
+import { isPlaceholderRssUrl, rssBelongsToSite, rssHost } from "@/utils/rss";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const route = useRoute();
@@ -64,22 +74,25 @@ const allFilterRules = ref<FilterRule[]>([]);
 const availableConfs = ref<NotificationConfig[]>([]);
 const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
 
-// 新增：是否使用自定义路径
-const newRssUseCustomPath = ref(false);
-const editRssUseCustomPath = ref(false);
+/** 详情读回来之前的默认空表单（首次加载与切站时用） */
+function emptySiteForm(): SiteConfig {
+  return {
+    enabled: false,
+    auth_method: "cookie",
+    cookie: "",
+    api_key: "",
+    api_url: "",
+    passkey: "",
+    upload_limit_kbs: 0,
+    download_limit_kbs: 0,
+    seeding_capacity_gb: 0,
+    hr_seed_time_h: 0,
+    hr_upload_ratio: 0,
+    rss: [],
+  };
+}
 
-const form = ref<SiteConfig>({
-  enabled: false,
-  auth_method: "cookie",
-  cookie: "",
-  api_key: "",
-  api_url: "",
-  passkey: "",
-  upload_limit_kbs: 0,
-  download_limit_kbs: 0,
-  seeding_capacity_gb: 0,
-  rss: [],
-});
+const form = ref<SiteConfig>(emptySiteForm());
 const savedCookieHidden = computed(() => form.value.has_cookie === true && !form.value.cookie);
 
 // 示例 RSS 配置（不存入数据库，仅用于展示）
@@ -142,7 +155,7 @@ const showingExamples = computed(() => {
 const apiKeyPlaceholder = computed(() => {
   const name = siteName.value.toLowerCase();
   if (name === "hddolby") {
-    return "从站点 RSS 订阅页面获取 RSS Key";
+    return "从站点 RSS 订阅页面获取 RSSKEY";
   }
   return "从 M-Team 个人设置中获取";
 });
@@ -157,6 +170,7 @@ const newRss = reactive<RSSConfig>({
   download_path: "",
   filter_rule_ids: [],
   pause_on_free_end: false,
+  free_end_delete: false,
   filter_mode: "",
   notify_mode: "",
   notify_conf_ids: "[]",
@@ -175,13 +189,94 @@ const editingRss = reactive<RSSConfig>({
   download_path: "",
   filter_rule_ids: [],
   pause_on_free_end: false,
+  free_end_delete: false,
   filter_mode: "",
   notify_mode: "",
   notify_conf_ids: "[]",
   max_notifications_per_hour: 100,
 });
 const editingRssIndex = ref(-1);
+
+/** RSS 的「免费结束时没下完」：不处理、暂停、删除，存成 pause_on_free_end 与 free_end_delete 两项 */
+type FreeEndAction = "none" | "pause" | "delete";
+
+function freeEndActionOf(r: RSSConfig): FreeEndAction {
+  if (!r.pause_on_free_end) return "none";
+  return r.free_end_delete ? "delete" : "pause";
+}
+
+function setFreeEndAction(r: RSSConfig, v: FreeEndAction) {
+  r.pause_on_free_end = v !== "none";
+  r.free_end_delete = v === "delete";
+}
+
+type RadioValue = string | number | boolean | undefined;
+const setNewFreeEnd = (v: RadioValue) => setFreeEndAction(newRss, v as FreeEndAction);
+const setEditFreeEnd = (v: RadioValue) => setFreeEndAction(editingRss, v as FreeEndAction);
 const updatingRss = ref(false);
+
+/**
+ * RSS 链接的提醒：示例里的占位地址（hdsky.xxx 这类）取不到任何种子，保存时拦下；
+ * 域名不像是这个站点的只提醒（多半是贴错了站点的链接），不拦。
+ */
+function rssUrlProblem(raw: string): { block: boolean; text: string } | null {
+  const url = raw.trim();
+  if (!url) return null;
+  if (isPlaceholderRssUrl(url)) {
+    return {
+      block: true,
+      text: `这是示例里的占位地址（${rssHost(url)}），取不到任何种子：填站点 RSS 页上给你的链接`,
+    };
+  }
+  const siteUrls = [...(form.value.urls || []), form.value.api_url];
+  if (rssHost(url) && !rssBelongsToSite(url, siteUrls)) {
+    const site = siteUrls.map((u) => (u ? rssHost(u.includes("://") ? u : `https://${u}`) : ""));
+    const known = [...new Set(site.filter(Boolean))].join("、");
+    return {
+      block: false,
+      text: `链接的域名 ${rssHost(url)} 不像是这个站点的${known ? `（${known}）` : ""}，确认没贴错站点`,
+    };
+  }
+  return null;
+}
+
+const newRssProblem = computed(() => rssUrlProblem(newRss.url));
+const editRssProblem = computed(() => rssUrlProblem(editingRss.url));
+
+/** 「试一下」链接的结果：ok 时是取到几条，否则是说明哪一步出了问题；链接改了就清掉 */
+const rssLinkTest = reactive({ loading: false, url: "", ok: false, text: "" });
+
+async function testRssLink(raw: string) {
+  const url = raw.trim();
+  if (!url) {
+    ElMessage.error("先填链接");
+    return;
+  }
+  rssLinkTest.loading = true;
+  rssLinkTest.url = url;
+  rssLinkTest.text = "";
+  try {
+    // 带上当前站点：站点代理按 RSS 所属的站点判定走不走代理
+    const res = await sitesApi.testRssLink(url, siteName.value);
+    if (rssLinkTest.url !== url) return;
+    rssLinkTest.ok = true;
+    const latest = res.titles?.[0] ? `，最新一条「${res.titles[0]}」` : "";
+    rssLinkTest.text = `能用：取到 ${res.count} 条${latest}`;
+  } catch (e) {
+    if (rssLinkTest.url !== url) return;
+    rssLinkTest.ok = false;
+    rssLinkTest.text = ((e as Error)?.message || "试的时候出错了").trim();
+  } finally {
+    if (rssLinkTest.url === url) rssLinkTest.loading = false;
+  }
+}
+
+/** 这个链接的试验结果（链接改了以后不显示旧结果） */
+function rssLinkTestFor(raw: string) {
+  return rssLinkTest.url && rssLinkTest.url === raw.trim() && !rssLinkTest.loading
+    ? rssLinkTest
+    : null;
+}
 
 function parseConfIDs(raw: string | undefined): number[] {
   if (!raw) return [];
@@ -208,6 +303,27 @@ const editingRssConfIDs = computed<number[]>({
 });
 
 onMounted(loadDetail);
+
+/*
+ * 只改路由参数（/sites/A → /sites/B）时 Vue Router 复用这个组件，onMounted 不会再跑。
+ * 不重新加载的话页面上还是 A 的表单、loaded 仍为真，点「保存配置」就把 A 的整份配置写到 B。
+ * 切站时先上锁、清空表单（A 的订阅行不能挂在 B 的页面上被删改）、关掉弹窗、清掉右栏 A 的数据，
+ * 再加载 B；A 还没回来的请求由 run 的请求序号作废。
+ */
+watch(siteName, (name, prev) => {
+  if (!name || name === prev) return;
+  loaded.value = false;
+  form.value = emptySiteForm();
+  rssDialogVisible.value = false;
+  editRssDialogVisible.value = false;
+  loginState.value = null;
+  siteAttendance.value = null;
+  siteStats.value = null;
+  siteHistory.value = null;
+  siteTasks.value = [];
+  sitePushed.value = [];
+  void loadDetail();
+});
 
 async function loadDetail() {
   // 并行加载站点配置、下载器列表、过滤规则列表、下载器目录、通知通道列表
@@ -245,12 +361,6 @@ function getDirectoriesForDownloader(downloaderId: number | undefined): Download
   return downloaderDirectories.value[downloaderId] || [];
 }
 
-// 检查路径是否为预设目录
-function isPresetDirectory(path: string, downloaderId: number | undefined): boolean {
-  const dirs = getDirectoriesForDownloader(downloaderId);
-  return dirs.some((d) => d.path === path);
-}
-
 // 获取路径的显示名称（优先显示别名）
 function getPathDisplayName(path: string, downloaderId: number | undefined): string {
   const dirs = getDirectoriesForDownloader(downloaderId);
@@ -279,6 +389,25 @@ function blockedByLoadState(): boolean {
       : "站点详情没有加载成功，先重试加载再修改，避免覆盖现有配置",
   );
   return true;
+}
+
+/**
+ * RSS 写操作成功之后重新读一次详情，拿到数据库里的真实 ID。
+ * 读取失败不等于写操作失败：不报「添加失败 / 删除失败」，只提示刷新，返回 false 让调用方把本地列表补成已生效的样子。
+ * 读取期间切到了别的站点时丢弃结果（返回 true，没有本地列表需要补）。
+ */
+async function reloadSiteForm(): Promise<boolean> {
+  const name = siteName.value;
+  try {
+    const data = await sitesApi.get(name);
+    if (name !== siteName.value) return true;
+    form.value = { ...data, rss: data.rss || [] };
+    return true;
+  } catch {
+    if (name !== siteName.value) return true;
+    ElMessage.warning("操作已生效，但重新读取站点详情失败，请刷新页面后再继续修改");
+    return false;
+  }
 }
 
 async function save() {
@@ -313,12 +442,12 @@ function openAddRssDialog() {
     download_path: "",
     filter_rule_ids: [],
     pause_on_free_end: true,
+    free_end_delete: false,
     filter_mode: "",
     notify_mode: "",
     notify_conf_ids: "[]",
     max_notifications_per_hour: 100,
   });
-  newRssUseCustomPath.value = false;
   rssDialogVisible.value = true;
 }
 
@@ -332,6 +461,10 @@ async function addRss() {
     ElMessage.error("链接必须以 http:// 或 https:// 开头");
     return;
   }
+  if (newRssProblem.value?.block) {
+    ElMessage.error(newRssProblem.value.text);
+    return;
+  }
 
   // 检查重复 RSS URL
   const normalizedUrl = newRss.url.trim().toLowerCase();
@@ -343,36 +476,39 @@ async function addRss() {
   }
 
   addingRss.value = true;
-  console.log("[RSS] 开始添加 RSS:", newRss.name, newRss.url);
+  // 只记名称：RSS 链接通常带 passkey，不能进控制台
+  console.log("[RSS] 开始添加 RSS:", newRss.name);
+  // 保存期间可能切到别的站点（form 会换成新站点的对象），失败回退只动这一站的表单
+  const target = form.value;
   try {
-    if (!form.value.rss) {
-      form.value.rss = [];
+    if (!target.rss) {
+      target.rss = [];
     }
-    form.value.rss.push({
+    target.rss.push({
       ...newRss,
       interval_minutes: Math.max(5, Math.min(1440, newRss.interval_minutes || 10)),
       downloader_id: newRss.downloader_id || undefined,
       download_path: newRss.download_path || "",
       filter_rule_ids: newRss.filter_rule_ids || [],
       pause_on_free_end: newRss.pause_on_free_end || false,
+      free_end_delete: (newRss.pause_on_free_end && newRss.free_end_delete) || false,
       filter_mode: newRss.filter_mode || "",
       notify_mode: newRss.notify_mode || "",
       notify_conf_ids: newRss.notify_conf_ids || "[]",
       max_notifications_per_hour: newRss.max_notifications_per_hour ?? 100,
     });
-    await sitesApi.save(siteName.value, form.value);
-    // 重新加载数据以获取数据库中的真实 ID
-    const data = await sitesApi.get(siteName.value);
-    form.value = {
-      ...data,
-      rss: data.rss || [],
-    };
+    try {
+      await sitesApi.save(siteName.value, target);
+    } catch (e: unknown) {
+      // 添加失败时，移除刚添加的 RSS
+      target.rss.pop();
+      ElMessage.error((e as Error).message || "添加失败");
+      return;
+    }
     ElMessage.success("RSS 添加成功");
     rssDialogVisible.value = false;
-  } catch (e: unknown) {
-    // 添加失败时，移除刚添加的 RSS
-    form.value.rss.pop();
-    ElMessage.error((e as Error).message || "添加失败");
+    // 重新加载数据以获取数据库中的真实 ID；读取失败时本地列表里已经有这条，和库里一致
+    await reloadSiteForm();
   } finally {
     addingRss.value = false;
   }
@@ -391,20 +527,22 @@ async function deleteRss(index: number) {
 
     console.log("[RSS] 开始删除 RSS:", rss.name, "id:", rss.id);
     if (rss.id) {
+      const target = form.value;
       await sitesApi.deleteRss(siteName.value, rss.id);
       console.log("[RSS] 删除 RSS 成功:", rss.name);
-      // 重新加载数据以确保数据一致性
-      const data = await sitesApi.get(siteName.value);
-      form.value = {
-        ...data,
-        rss: data.rss || [],
-      };
+      ElMessage.success("已删除");
+      // 重新加载数据以确保数据一致性。读取失败时从本地列表移除这条：
+      // 否则它还挂在表单里，之后点「保存配置」会把刚删掉的订阅重新建回去
+      if (!(await reloadSiteForm())) {
+        const i = target.rss.indexOf(rss);
+        if (i >= 0) target.rss.splice(i, 1);
+      }
     } else {
       // 没有 ID 的 RSS（未保存到数据库），直接从前端列表移除
       console.log("[RSS] RSS 无 ID，仅从前端移除:", rss.name);
       form.value.rss.splice(index, 1);
+      ElMessage.success("已删除");
     }
-    ElMessage.success("已删除");
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
       console.error("[RSS] 删除 RSS 失败:", e);
@@ -429,15 +567,12 @@ function openEditRssDialog(index: number) {
     download_path: rss.download_path || "",
     filter_rule_ids: rss.filter_rule_ids || [],
     pause_on_free_end: rss.pause_on_free_end || false,
+    free_end_delete: rss.free_end_delete || false,
     filter_mode: rss.filter_mode || "",
     notify_mode: rss.notify_mode || "",
     notify_conf_ids: rss.notify_conf_ids || "[]",
     max_notifications_per_hour: rss.max_notifications_per_hour ?? 100,
   });
-  // 检查当前路径是否为预设目录，如果不是则启用自定义输入
-  editRssUseCustomPath.value = rss.download_path
-    ? !isPresetDirectory(rss.download_path, rss.downloader_id)
-    : false;
   editRssDialogVisible.value = true;
 }
 
@@ -449,6 +584,12 @@ async function updateRss() {
   }
   if (!editingRss.url.startsWith("http://") && !editingRss.url.startsWith("https://")) {
     ElMessage.error("链接必须以 http:// 或 https:// 开头");
+    return;
+  }
+  // 地址没改时不拦（升级前照着示例建的那条，改别的设置照样能存）；改了的才按占位地址拦
+  const before = form.value.rss[editingRssIndex.value]?.url?.trim();
+  if (editRssProblem.value?.block && before !== editingRss.url.trim()) {
+    ElMessage.error(editRssProblem.value.text);
     return;
   }
 
@@ -463,11 +604,15 @@ async function updateRss() {
   }
 
   updatingRss.value = true;
-  console.log("[RSS] 开始更新 RSS:", editingRss.name, editingRss.url);
+  // 只记名称：RSS 链接通常带 passkey，不能进控制台
+  console.log("[RSS] 开始更新 RSS:", editingRss.name);
+  const target = form.value;
+  const index = editingRssIndex.value;
+  const previous = target.rss[index];
 
   try {
     // 更新本地数据
-    form.value.rss[editingRssIndex.value] = {
+    target.rss[index] = {
       id: editingRss.id,
       name: editingRss.name,
       url: editingRss.url,
@@ -478,6 +623,7 @@ async function updateRss() {
       download_path: editingRss.download_path || "",
       filter_rule_ids: editingRss.filter_rule_ids || [],
       pause_on_free_end: editingRss.pause_on_free_end || false,
+      free_end_delete: (editingRss.pause_on_free_end && editingRss.free_end_delete) || false,
       filter_mode: editingRss.filter_mode || "",
       notify_mode: editingRss.notify_mode || "",
       notify_conf_ids: editingRss.notify_conf_ids || "[]",
@@ -485,19 +631,21 @@ async function updateRss() {
     };
 
     // 保存到服务器
-    await sitesApi.save(siteName.value, form.value);
+    try {
+      await sitesApi.save(siteName.value, target);
+    } catch (e: unknown) {
+      console.error("[RSS] 更新 RSS 失败:", e);
+      ElMessage.error((e as Error).message || "更新失败");
+      // 没保存成功：本地也退回原值，免得之后点「保存配置」把这次没保存上的改动带上去
+      if (previous) target.rss[index] = previous;
+      return;
+    }
     ElMessage.success("RSS 更新成功");
     editRssDialogVisible.value = false;
-  } catch (e: unknown) {
-    console.error("[RSS] 更新 RSS 失败:", e);
-    ElMessage.error((e as Error).message || "更新失败");
+    // 重新加载数据以确保数据一致性；读取失败时本地已是保存成功的值
+    await reloadSiteForm();
   } finally {
-    // 无论成功或失败，都重新加载数据以确保数据一致性
-    const data = await sitesApi.get(siteName.value);
-    form.value = {
-      ...data,
-      rss: data.rss || [],
-    };
+    // 读取失败也要复位，否则保存键一直转圈
     updatingRss.value = false;
   }
 }
@@ -506,19 +654,8 @@ function goBack() {
   router.push("/sites");
 }
 
-function toggleNewRssCustomPath() {
-  newRssUseCustomPath.value = !newRssUseCustomPath.value;
-  if (!newRssUseCustomPath.value) {
-    newRss.download_path = "";
-  }
-}
-
-function toggleEditRssCustomPath() {
-  editRssUseCustomPath.value = !editRssUseCustomPath.value;
-  if (!editRssUseCustomPath.value) {
-    editingRss.download_path = "";
-  }
-}
+/** Rousi Pro 的 Passkey 一栏填的是个人 API Key（站点 API Key 页的说明），表单里写明 */
+const isRousi = computed(() => siteName.value.toLowerCase() === "rousipro");
 
 const authMethodLabel = computed(() => {
   switch (form.value.auth_method) {
@@ -618,17 +755,58 @@ const PROBE_LABEL: Record<string, string> = {
   disabled: "不探测",
 };
 
+/** 判定活跃的依据，与站点列表的说明一致 */
+const ACTIVE_SOURCE_LABEL: Record<string, string> = {
+  last_access: "站点最近访问",
+  api_last_login: "站点最近登录",
+  cookie_last_login: "站点最近登录",
+  last_login: "站点最近登录",
+  last_visit: "浏览器访问",
+  none: "-",
+  unknown: "-",
+};
+
 const loginState = ref<SiteLoginState | null>(null);
+const siteAttendance = ref<SiteAttendance | null>(null);
+const attendanceShown = computed(() => attendanceView(siteAttendance.value ?? undefined));
+/** 卡片里只放「状态（时间）」，整句提示放进 title，长句不会把行标签挤成两行 */
+const attendanceToday = computed(() => {
+  const a = siteAttendance.value;
+  const v = attendanceShown.value;
+  if (!a) return v.label;
+  const when =
+    a.status === "pending"
+      ? (a.next_attempt_at ?? a.scheduled_at)
+      : a.status === ""
+        ? undefined
+        : a.last_attempt_at;
+  return when ? `${v.label}（${formatShortDateTime(when * 1000)}）` : v.label;
+});
+const signing = ref(false);
 const siteStats = ref<UserInfoResponse | null>(null);
+/** 最近 30 天每天的数据与增量（每日快照）；拿不到时为 null，卡片里就不画走势 */
+const siteHistory = ref<UserInfoHistoryResponse | null>(null);
+/** 30 天每天一格的上传增量：缺快照的日子补 0，柱子之间的间隔就是真实的天数 */
+const uploadTrend = computed(() => {
+  const h = siteHistory.value;
+  return h ? dailyUploadSeries(h.points, h.from, h.to) : [];
+});
+/** 至少有一天算得出增量才画（只有一份快照时没有可比的基线） */
+const hasUploadTrend = computed(() =>
+  (siteHistory.value?.points ?? []).some((p) => p.spanDays > 0),
+);
+const uploadTrendTotal = computed(() => uploadTrend.value.reduce((n, v) => n + v, 0));
 const siteTasks = ref<TaskItem[]>([]);
 const sitePushed = ref<TaskItem[]>([]);
 const deleting = ref(false);
 
 async function loadSideCards() {
   const name = siteName.value;
-  const [states, stats, tasks, pushed] = await Promise.all([
+  const [states, attendanceList, stats, history, tasks, pushed] = await Promise.all([
     sitesApi.listLoginStates().catch(() => [] as SiteLoginState[]),
+    attendanceApi.list().catch(() => [] as SiteAttendance[]),
     userInfoApi.getSite(name).catch(() => null),
+    userInfoApi.getHistory(name, 30).catch(() => null),
     tasksApi
       .list(new URLSearchParams({ site: name, page: "1", page_size: "20" }))
       .catch(() => null),
@@ -636,10 +814,31 @@ async function loadSideCards() {
       .list(new URLSearchParams({ site: name, pushed: "1", page: "1", page_size: "20" }))
       .catch(() => null),
   ]);
+  // 请求期间已切到别的站点：这是上一站的数据，不能落到当前页面上
+  if (name !== siteName.value) return;
   loginState.value = (states ?? []).find((st) => st.site_name === name) ?? null;
+  siteAttendance.value = (attendanceList ?? []).find((a) => a.site_name === name) ?? null;
   siteStats.value = stats;
+  siteHistory.value = history;
   siteTasks.value = tasks?.items ?? [];
   sitePushed.value = pushed?.items ?? [];
+}
+
+/** 立即签到一次；结果写回卡片，不必重新加载整页 */
+async function signNow() {
+  if (signing.value) return;
+  signing.value = true;
+  try {
+    const res = await attendanceApi.signNow(siteName.value);
+    siteAttendance.value = res;
+    const v = attendanceView(res);
+    if (res.status === "signed" || res.status === "already") ElMessage.success(v.detail);
+    else ElMessage.warning(`签到未成功：${res.last_error || v.detail}`);
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "签到失败");
+  } finally {
+    signing.value = false;
+  }
 }
 
 /**
@@ -833,7 +1032,50 @@ function ruleNameOf(id: number): string {
                   :step="10"
                   controls-position="right"
                   style="width: 100%" />
-                <div class="field-tip">该站点做种总量到顶后就不再推新种，避免把盘塞满</div>
+                <div class="field-tip">
+                  该站点做种总量到顶后就不再推新种，避免把盘塞满；辅种的种子和原种子共用文件，原种子还在时不重复计入
+                </div>
+              </el-form-item>
+            </div>
+            <div class="pt-strip">
+              <PtIcon name="shield" :size="13" />
+              <span>H&amp;R</span>
+              <span class="pt-strip__end">0 = 不知道</span>
+            </div>
+            <div class="settings-body">
+              <el-form-item label="H&R 做种要求（小时）">
+                <el-input-number
+                  v-model="form.hr_seed_time_h"
+                  :min="0"
+                  :max="8760"
+                  :step="24"
+                  :disabled="form.hr_rule_builtin"
+                  controls-position="right"
+                  style="width: 100%"
+                  data-testid="site-hr-seed-time" />
+                <div v-if="form.hr_rule_builtin" class="field-tip">
+                  站点规则里已经写了 H&amp;R 做种要求，按站点规则算，这里不用填
+                </div>
+                <div v-else class="field-tip">
+                  站点有 H&amp;R、但 pt-tools
+                  不知道要做种多久时，填站点要求的做种时长：刷流按它决定收不收 H&amp;R
+                  种子、什么时候能删，自动删种在做满之前不删。保持 0 时，刷流不收 H&amp;R
+                  种子，自动删种也不删它们。
+                </div>
+              </el-form-item>
+              <el-form-item label="H&R 上传量达标（倍）">
+                <el-input-number
+                  v-model="form.hr_upload_ratio"
+                  :min="0"
+                  :max="10"
+                  :step="0.1"
+                  controls-position="right"
+                  style="width: 100%"
+                  data-testid="site-hr-upload-ratio" />
+                <div class="field-tip">
+                  上传量达到种子体积的几倍也算 H&amp;R 达标（如 0.9），0
+                  是不用；只在站点规则写明可以这样达标时填。只算下完的种子
+                </div>
               </el-form-item>
             </div>
           </el-form>
@@ -877,6 +1119,14 @@ function ruleNameOf(id: number): string {
               <header class="rss__head">
                 <span class="rss__name">{{ row.name }}</span>
                 <PtTag v-if="row.is_example">示例</PtTag>
+                <PtStatusPill
+                  v-else-if="isPlaceholderRssUrl(row.url)"
+                  tone="warn"
+                  size="sm"
+                  :data-testid="`rss-placeholder-${row.id}`"
+                  title="地址还是示例里的占位地址，RSS 任务不会去拉它：点编辑换成站点 RSS 页上给你的链接"
+                  >占位地址，不会去拉</PtStatusPill
+                >
                 <span class="rss__int">
                   <PtIcon name="timer" :size="12" />
                   {{ row.interval_minutes }} 分钟
@@ -890,8 +1140,11 @@ function ruleNameOf(id: number): string {
               <div v-if="row.category || row.tag || row.pause_on_free_end" class="rss__tags">
                 <PtTag v-if="row.category">{{ row.category }}</PtTag>
                 <PtTag v-if="row.tag">{{ row.tag }}</PtTag>
-                <PtStatusPill v-if="row.pause_on_free_end" tone="warn" size="sm">
-                  免费结束暂停
+                <PtStatusPill
+                  v-if="row.pause_on_free_end"
+                  :tone="row.free_end_delete ? 'dang' : 'warn'"
+                  size="sm">
+                  {{ row.free_end_delete ? "免费结束删除" : "免费结束暂停" }}
                 </PtStatusPill>
               </div>
 
@@ -1061,11 +1314,12 @@ function ruleNameOf(id: number): string {
                   :placeholder="apiKeyPlaceholder" />
                 <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
                   前往站点「<a
-                    href="https://www.hddolby.com/getrss.php"
+                    href="https://www.uhddolby.com/getrss.php"
                     target="_blank"
                     rel="noopener">
                     控制面板 - RSS 订阅 </a
-                  >」页面，复制「本次加密密钥（RssKEY）」
+                  >」页面生成 RSS 链接，复制其中的 RSSKEY。RSS 链接默认 90 天有效（最长 180
+                  天），过期后要重新生成并填到这里
                 </div>
               </el-form-item>
               <el-form-item label="API URL">
@@ -1075,7 +1329,7 @@ function ruleNameOf(id: number): string {
             </template>
 
             <template v-if="form.auth_method === 'cookie_and_api_key'">
-              <el-form-item label="Cookie">
+              <el-form-item label="Cookie（可选）">
                 <div v-if="savedCookieHidden" class="pt-note pt-note--ok cred-note">
                   <PtIcon name="shield" :size="14" class="pt-note__icon" />
                   <span>Cookie 已保存，出于安全原因不会回显；留空保存不会覆盖已存的值</span>
@@ -1084,7 +1338,7 @@ function ruleNameOf(id: number): string {
                   v-model="form.cookie"
                   type="textarea"
                   :rows="3"
-                  placeholder="从浏览器开发者工具中获取（用于获取时魔等信息）；已保存 Cookie 时可留空" />
+                  placeholder="时魔、签到，以及辅种、转种这类只知道种子编号的下载用它，搜索与用户数据走 API Key；已保存 Cookie 时可留空" />
               </el-form-item>
               <el-form-item label="API Key / RSS Key">
                 <el-input
@@ -1094,11 +1348,12 @@ function ruleNameOf(id: number): string {
                   :placeholder="apiKeyPlaceholder" />
                 <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
                   前往站点「<a
-                    href="https://www.hddolby.com/getrss.php"
+                    href="https://www.uhddolby.com/getrss.php"
                     target="_blank"
                     rel="noopener">
                     控制面板 - RSS 订阅 </a
-                  >」页面，复制「本次加密密钥（RssKEY）」
+                  >」页面生成 RSS 链接，复制其中的 RSSKEY。RSS 链接默认 90 天有效（最长 180
+                  天），过期后要重新生成并填到这里
                 </div>
               </el-form-item>
               <el-form-item label="API URL">
@@ -1107,13 +1362,27 @@ function ruleNameOf(id: number): string {
               </el-form-item>
             </template>
 
-            <el-form-item v-if="form.auth_method === 'passkey'" label="Passkey">
+            <el-form-item
+              v-if="form.auth_method === 'passkey'"
+              :label="isRousi ? 'Passkey（个人 API Key）' : 'Passkey'">
               <el-input
                 v-model="form.passkey"
                 type="password"
                 show-password
-                placeholder="从站点个人设置中获取 Passkey" />
-              <div class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
+                :placeholder="
+                  isRousi
+                    ? '粘贴 Rousi「账户 → API Key」页创建的 Key'
+                    : '从站点个人设置中获取 Passkey'
+                "
+                data-testid="sd-passkey" />
+              <!-- Rousi 的 API Key 页写明：外部工具填这把个人 API Key，不要填 Tracker Passkey；每个工具只能用授予的权限 -->
+              <div v-if="isRousi" class="field-tip" data-testid="sd-passkey-tip">
+                填 Rousi「<a href="https://rousi.pro/account/api-key" target="_blank" rel="noopener"
+                  >账户 → API Key</a
+                >」页创建的个人 API Key，不是 Tracker
+                Passkey。权限勾选读取账户资料、读取与搜索种子、下载种子； 要自动签到再勾选执行签到。
+              </div>
+              <div v-else class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
             </el-form-item>
           </el-form>
           <!--
@@ -1156,7 +1425,7 @@ function ruleNameOf(id: number): string {
             </li>
           </ul>
           <p class="sd-foot">
-            凭据在本机库里以 AES-GCM 加密存放，页面不回显已存的值。要改就去
+            凭据在本机数据库里以 AES-GCM 加密存放，页面不回显已存的值。要改就去
             <el-button link type="primary" @click="tab = 'cred'">凭据分区</el-button>。
           </p>
         </PtPanel>
@@ -1196,10 +1465,90 @@ function ruleNameOf(id: number): string {
               <span class="sd-kv__k">最近探测</span>
               <span class="sd-kv__v">{{ formatWhen(loginState.last_probe_at) }}</span>
             </li>
+            <li v-if="loginState.last_probe_status" class="sd-kv__row">
+              <span class="sd-kv__k">探测结果</span>
+              <span
+                class="sd-kv__v"
+                :class="{ 'is-warn': !isProbeSuccess(loginState.last_probe_status) }"
+                data-testid="sd-probe-status">
+                {{ probeStatusLabel(loginState.last_probe_status) }}
+              </span>
+            </li>
+            <!-- 探测没通过时写明原因：只写「解析失败 (PARSE_ERROR)」看不出是 Cookie 失效、站点改版还是别的 -->
+            <li
+              v-if="
+                loginState.last_probe_status &&
+                !isProbeSuccess(loginState.last_probe_status) &&
+                loginState.last_probe_error?.trim()
+              "
+              class="sd-kv__note"
+              data-testid="sd-probe-error">
+              {{ loginState.last_probe_error?.trim() }}
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">判定依据</span>
+              <span class="sd-kv__v" data-testid="sd-active-source">
+                {{ ACTIVE_SOURCE_LABEL[loginState.effective_source ?? "none"] ?? "-" }}
+              </span>
+            </li>
+            <li v-if="loginState.probe_mode === 'auto'" class="sd-kv__row">
+              <span class="sd-kv__k">下次探测</span>
+              <span class="sd-kv__v" data-testid="sd-next-probe">{{
+                formatWhen(loginState.next_probe_at)
+              }}</span>
+            </li>
+            <li v-if="(loginState.first_failure_at ?? 0) > 0" class="sd-kv__row">
+              <span class="sd-kv__k">连续失败自</span>
+              <span class="sd-kv__v is-warn" data-testid="sd-failing-since">{{
+                formatWhen(loginState.first_failure_at)
+              }}</span>
+            </li>
+            <li v-if="(loginState.access_stale_since ?? 0) > 0" class="sd-kv__row">
+              <span class="sd-kv__k">访问状态</span>
+              <span class="sd-kv__v is-warn" data-testid="sd-access-stale">
+                访问未生效，需要手动登录
+              </span>
+            </li>
+            <li v-if="siteAttendance" class="sd-kv__row">
+              <span class="sd-kv__k">每日签到</span>
+              <span
+                class="sd-kv__v"
+                :title="attendanceChallengeText(siteAttendance.challenge)"
+                data-testid="sd-attendance-enabled">
+                {{
+                  !siteAttendance.supported
+                    ? "不支持"
+                    : siteAttendance.attendance_enabled
+                      ? "已开启"
+                      : "未开启"
+                }}{{ siteAttendance.challenge && siteAttendance.supported ? "（用 AI）" : "" }}
+              </span>
+            </li>
+            <li v-if="siteAttendance" class="sd-kv__row">
+              <span class="sd-kv__k">今日签到</span>
+              <span
+                class="sd-kv__v"
+                :class="{
+                  'is-warn': attendanceShown.tone === 'dang' || attendanceShown.tone === 'warn',
+                }"
+                :title="attendanceShown.detail"
+                data-testid="sd-attendance-today">
+                {{ attendanceToday }}
+              </span>
+            </li>
           </ul>
           <p v-else class="sd-empty">还没有这个站点的探测记录。</p>
           <p class="sd-foot">
             阈值与提醒在站点列表页按站点配置；这里只回显，避免同一份配置两个写入口。
+            <el-button
+              v-if="attendanceShown.canSign"
+              link
+              type="primary"
+              :loading="signing"
+              data-testid="sd-attend-now"
+              @click="signNow">
+              立即签到
+            </el-button>
           </p>
         </PtPanel>
 
@@ -1210,10 +1559,20 @@ function ruleNameOf(id: number): string {
               <span class="sd-kv__k">等级</span>
               <span class="sd-kv__v">{{ siteStats.levelName || siteStats.rank || "-" }}</span>
             </li>
+            <!-- 下载量是站点计费的口径；站点另外报了实际传输量（没按优惠折算）时多一行 -->
             <li class="sd-kv__row">
-              <span class="sd-kv__k">上传 / 下载</span>
+              <span class="sd-kv__k">上传 / 下载（计费）</span>
               <span class="sd-kv__v">
                 {{ formatTB(siteStats.uploaded) }} / {{ formatTB(siteStats.downloaded) }}
+              </span>
+            </li>
+            <li
+              v-if="(siteStats.trueUploaded ?? 0) > 0 || (siteStats.trueDownloaded ?? 0) > 0"
+              class="sd-kv__row"
+              data-testid="site-true-transfer">
+              <span class="sd-kv__k">实际上传 / 下载</span>
+              <span class="sd-kv__v">
+                {{ formatTB(siteStats.trueUploaded) }} / {{ formatTB(siteStats.trueDownloaded) }}
               </span>
             </li>
             <li class="sd-kv__row">
@@ -1221,7 +1580,7 @@ function ruleNameOf(id: number): string {
               <span
                 class="sd-kv__v"
                 :class="{ 'is-warn': (siteStats.ratio ?? 0) > 0 && (siteStats.ratio ?? 0) < 1 }">
-                {{ (siteStats.ratio ?? 0).toFixed(2) }}
+                {{ formatRatio(siteStats.ratio ?? 0) }}
               </span>
             </li>
             <li class="sd-kv__row">
@@ -1231,6 +1590,18 @@ function ruleNameOf(id: number): string {
             <li class="sd-kv__row">
               <span class="sd-kv__k">更新于</span>
               <span class="sd-kv__v">{{ formatWhen(siteStats.lastUpdate) }}</span>
+            </li>
+            <li v-if="hasUploadTrend" class="sd-kv__row sd-trend" data-testid="site-upload-trend">
+              <span class="sd-kv__k">30 天上传 +{{ formatTB(uploadTrendTotal) }}</span>
+              <PtBars
+                v-if="uploadTrend.some((v) => v > 0)"
+                :values="uploadTrend"
+                baseline="zero"
+                :count="30"
+                :bar-width="4"
+                :gap="2"
+                :height="22"
+                hue="var(--pt-kpi-1)" />
             </li>
           </ul>
           <p v-else class="sd-empty">还没有同步过这个站点的用户数据。</p>
@@ -1284,7 +1655,31 @@ function ruleNameOf(id: number): string {
           </el-form-item>
         </div>
         <el-form-item label="链接" required>
-          <el-input v-model="newRss.url" placeholder="https://..." />
+          <div class="rss-link">
+            <el-input v-model="newRss.url" placeholder="https://..." data-testid="rss-new-url" />
+            <!-- 占位地址取不到任何种子（下面已经写明），试也没用 -->
+            <el-button
+              :loading="rssLinkTest.loading && rssLinkTest.url === newRss.url.trim()"
+              :disabled="newRssProblem?.block"
+              data-testid="rss-new-test"
+              @click="testRssLink(newRss.url)"
+              >试一下</el-button
+            >
+          </div>
+          <div
+            v-if="newRssProblem"
+            class="field-tip"
+            :class="newRssProblem.block ? 'field-tip--dang' : 'field-tip--warn'"
+            data-testid="rss-new-problem">
+            {{ newRssProblem.text }}
+          </div>
+          <div
+            v-if="rssLinkTestFor(newRss.url)"
+            class="field-tip"
+            :class="rssLinkTestFor(newRss.url)!.ok ? 'field-tip--ok' : 'field-tip--dang'"
+            data-testid="rss-new-test-result">
+            {{ rssLinkTestFor(newRss.url)!.text }}
+          </div>
         </el-form-item>
         <div class="field-row">
           <el-form-item label="分类">
@@ -1314,38 +1709,12 @@ function ruleNameOf(id: number): string {
           <div class="field-tip">留空用默认下载器；灰色项表示该下载器未启用</div>
         </el-form-item>
         <el-form-item label="下载路径">
-          <div class="path-pick">
-            <el-select
-              v-if="!newRssUseCustomPath"
-              v-model="newRss.download_path"
-              placeholder="使用下载器默认路径"
-              clearable
-              style="flex: 1">
-              <el-option value="" label="使用下载器默认路径" />
-              <el-option
-                v-for="dir in getDirectoriesForDownloader(newRss.downloader_id)"
-                :key="dir.id"
-                :label="`${dir.alias || dir.path}${dir.is_default ? '（默认）' : ''}`"
-                :value="dir.path" />
-            </el-select>
-            <el-input
-              v-else
-              v-model="newRss.download_path"
-              placeholder="如 /downloads/movies"
-              style="flex: 1" />
-            <el-button
-              :type="newRssUseCustomPath ? 'primary' : 'default'"
-              @click="toggleNewRssCustomPath">
-              <PtIcon :name="newRssUseCustomPath ? 'check' : 'pencil'" :size="14" />
-              <span>{{ newRssUseCustomPath ? "选预设" : "自定义" }}</span>
-            </el-button>
-          </div>
-          <div class="field-tip">
-            <template v-if="getDirectoriesForDownloader(newRss.downloader_id).length > 0">
-              可以挑下载器里预设的目录，也可以切到「自定义」手输
-            </template>
-            <template v-else>当前下载器没设目录，切「自定义」手输，或留空用默认路径</template>
-          </div>
+          <DownloaderPathInput
+            v-model="newRss.download_path"
+            :downloader-ids="newRss.downloader_id"
+            placeholder="留空用下载器的默认路径"
+            data-testid="rss-new-path" />
+          <div class="field-tip">点开可以选下载器里预设的目录，也可以直接输入路径</div>
         </el-form-item>
 
         <div class="field-head">过滤与暂停</div>
@@ -1371,11 +1740,26 @@ function ruleNameOf(id: number): string {
           </el-radio-group>
           <div class="field-tip">
             <strong>智能</strong>：没规则就只下免费种，有规则就只下命中的。全局大小上限始终生效。
+            免费种要在推送前读到结束时间：站点没给结束时间的不当长期免费，等下一轮重新读取；确实要下载就用「不要求免费」的过滤规则。
           </div>
         </el-form-item>
-        <el-form-item label="免费结束暂停">
-          <span class="sw"><el-switch v-model="newRss.pause_on_free_end" /></span>
-          <div class="field-tip">免费期结束时若还没下完，自动暂停任务</div>
+        <el-form-item label="免费结束时没下完">
+          <el-radio-group
+            :model-value="freeEndActionOf(newRss)"
+            size="small"
+            data-testid="rss-free-end"
+            @update:model-value="setNewFreeEnd">
+            <el-radio-button value="none">不处理</el-radio-button>
+            <el-radio-button value="pause">暂停</el-radio-button>
+            <el-radio-button value="delete">删除</el-radio-button>
+          </el-radio-group>
+          <div class="field-tip">
+            选暂停或删除的种子先暂停加入，登记好到期处理才开始；站点没有给出免费结束时间的只暂停加入、不自动开始。
+            删除连数据一起删（数据还被别的种子用着时只删种子），带保留标签、保护标签或 H&R
+            没做满的种子不删、改成暂停。
+            改了只对之后推送的种子生效。选不处理时，自动删种打开了「其他免费种子免费过了没下完就删」的按它处理。
+            通知里的「立即下载」也按这条 RSS 的设置。
+          </div>
         </el-form-item>
 
         <div class="field-head">通知</div>
@@ -1450,7 +1834,33 @@ function ruleNameOf(id: number): string {
           </el-form-item>
         </div>
         <el-form-item label="链接" required>
-          <el-input v-model="editingRss.url" placeholder="https://..." />
+          <div class="rss-link">
+            <el-input
+              v-model="editingRss.url"
+              placeholder="https://..."
+              data-testid="rss-edit-url" />
+            <el-button
+              :loading="rssLinkTest.loading && rssLinkTest.url === editingRss.url.trim()"
+              :disabled="editRssProblem?.block"
+              data-testid="rss-edit-test"
+              @click="testRssLink(editingRss.url)"
+              >试一下</el-button
+            >
+          </div>
+          <div
+            v-if="editRssProblem"
+            class="field-tip"
+            :class="editRssProblem.block ? 'field-tip--dang' : 'field-tip--warn'"
+            data-testid="rss-edit-problem">
+            {{ editRssProblem.text }}
+          </div>
+          <div
+            v-if="rssLinkTestFor(editingRss.url)"
+            class="field-tip"
+            :class="rssLinkTestFor(editingRss.url)!.ok ? 'field-tip--ok' : 'field-tip--dang'"
+            data-testid="rss-edit-test-result">
+            {{ rssLinkTestFor(editingRss.url)!.text }}
+          </div>
         </el-form-item>
         <div class="field-row">
           <el-form-item label="分类">
@@ -1480,38 +1890,12 @@ function ruleNameOf(id: number): string {
           <div class="field-tip">留空用默认下载器；灰色项表示该下载器未启用</div>
         </el-form-item>
         <el-form-item label="下载路径">
-          <div class="path-pick">
-            <el-select
-              v-if="!editRssUseCustomPath"
-              v-model="editingRss.download_path"
-              placeholder="使用下载器默认路径"
-              clearable
-              style="flex: 1">
-              <el-option value="" label="使用下载器默认路径" />
-              <el-option
-                v-for="dir in getDirectoriesForDownloader(editingRss.downloader_id)"
-                :key="dir.id"
-                :label="`${dir.alias || dir.path}${dir.is_default ? '（默认）' : ''}`"
-                :value="dir.path" />
-            </el-select>
-            <el-input
-              v-else
-              v-model="editingRss.download_path"
-              placeholder="如 /downloads/movies"
-              style="flex: 1" />
-            <el-button
-              :type="editRssUseCustomPath ? 'primary' : 'default'"
-              @click="toggleEditRssCustomPath">
-              <PtIcon :name="editRssUseCustomPath ? 'check' : 'pencil'" :size="14" />
-              <span>{{ editRssUseCustomPath ? "选预设" : "自定义" }}</span>
-            </el-button>
-          </div>
-          <div class="field-tip">
-            <template v-if="getDirectoriesForDownloader(editingRss.downloader_id).length > 0">
-              可以挑下载器里预设的目录，也可以切到「自定义」手输
-            </template>
-            <template v-else>当前下载器没设目录，切「自定义」手输，或留空用默认路径</template>
-          </div>
+          <DownloaderPathInput
+            v-model="editingRss.download_path"
+            :downloader-ids="editingRss.downloader_id"
+            placeholder="留空用下载器的默认路径"
+            data-testid="rss-edit-path" />
+          <div class="field-tip">点开可以选下载器里预设的目录，也可以直接输入路径</div>
         </el-form-item>
 
         <div class="field-head">过滤与暂停</div>
@@ -1537,11 +1921,26 @@ function ruleNameOf(id: number): string {
           </el-radio-group>
           <div class="field-tip">
             <strong>智能</strong>：没规则就只下免费种，有规则就只下命中的。全局大小上限始终生效。
+            免费种要在推送前读到结束时间：站点没给结束时间的不当长期免费，等下一轮重新读取；确实要下载就用「不要求免费」的过滤规则。
           </div>
         </el-form-item>
-        <el-form-item label="免费结束暂停">
-          <span class="sw"><el-switch v-model="editingRss.pause_on_free_end" /></span>
-          <div class="field-tip">免费期结束时若还没下完，自动暂停任务</div>
+        <el-form-item label="免费结束时没下完">
+          <el-radio-group
+            :model-value="freeEndActionOf(editingRss)"
+            size="small"
+            data-testid="rss-free-end"
+            @update:model-value="setEditFreeEnd">
+            <el-radio-button value="none">不处理</el-radio-button>
+            <el-radio-button value="pause">暂停</el-radio-button>
+            <el-radio-button value="delete">删除</el-radio-button>
+          </el-radio-group>
+          <div class="field-tip">
+            选暂停或删除的种子先暂停加入，登记好到期处理才开始；站点没有给出免费结束时间的只暂停加入、不自动开始。
+            删除连数据一起删（数据还被别的种子用着时只删种子），带保留标签、保护标签或 H&R
+            没做满的种子不删、改成暂停。
+            改了只对之后推送的种子生效。选不处理时，自动删种打开了「其他免费种子免费过了没下完就删」的按它处理。
+            通知里的「立即下载」也按这条 RSS 的设置。
+          </div>
         </el-form-item>
 
         <div class="field-head">通知</div>
@@ -1597,6 +1996,23 @@ function ruleNameOf(id: number): string {
 </template>
 
 <style scoped>
+/* RSS 链接：输入框占满，「试一下」跟在右边 */
+.rss-link {
+  display: flex;
+  gap: var(--pt-space-2);
+  width: 100%;
+}
+
+.rss-link .el-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 站点统计卡里 30 天上传走势：标签在左、柱在右，与上面几行同一个 kv 节奏 */
+.sd-trend {
+  align-items: flex-end;
+}
+
 /* 带与卡片层各自管留白，这一层只负责纵向堆叠 */
 .site-detail-page {
   display: flex;
@@ -1664,6 +2080,14 @@ function ruleNameOf(id: number): string {
 
 .sd-kv__v.is-warn {
   color: var(--pt-warn);
+}
+
+/* 探测失败的原因：一整行、可以折行，跟在「探测结果」下面 */
+.sd-kv__note {
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+  word-break: break-word;
 }
 
 .sd-list {
@@ -1793,12 +2217,6 @@ function ruleNameOf(id: number): string {
 
 .urls a:hover {
   text-decoration: underline;
-}
-
-/* 自定义路径的输入框和「切换来源」按钮必须同一行，不然读起来像两个独立字段 */
-.path-pick {
-  display: flex;
-  gap: var(--pt-space-2);
 }
 
 /*

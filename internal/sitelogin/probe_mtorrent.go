@@ -12,30 +12,45 @@ import (
 func ProbeMTorrent(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult, error) {
 	_ = clock
 	info, err := site.GetUserInfo(ctx)
+	// 只少了做种体积、时魔这类不必需的接口而个人资料到手了：登录是好的，按取到的部分判断
+	return classifyMTorrentResult(info, v2.IgnorePartial(info, err)), nil
+}
+
+func classifyMTorrentResult(info v2.UserInfo, err error) *ProbeResult {
 	if err != nil {
-		return classifyMTorrentError(err), nil
+		return classifyMTorrentError(err)
 	}
 
 	if info.LastAccess <= 0 {
 		return &ProbeResult{
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPAPIKey,
-			Diagnostic: "M-Team profile returned no lastModifiedDate / lastBrowse",
-		}, nil
+			Diagnostic: "M-Team 的个人资料接口没有返回最近访问时间（lastBrowse），可能是接口改了；请反馈",
+		}
 	}
 
 	accessAt := time.Unix(info.LastAccess, 0).UTC()
-	return &ProbeResult{
+	result := &ProbeResult{
 		Status:       OK,
 		Source:       ProbeSourceHTTPAPIKey,
 		LastAccessAt: &accessAt,
-	}, nil
+	}
+	if info.LastLogin > 0 {
+		loginAt := time.Unix(info.LastLogin, 0).UTC()
+		result.LastLoginAt = &loginAt
+	}
+	return result
 }
 
 func classifyMTorrentError(err error) *ProbeResult {
 	switch {
+	case errors.Is(err, v2.ErrCloudflareChallenge):
+		return &ProbeResult{Status: CHALLENGE, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrSessionExpired):
 		return &ProbeResult{Status: SESSION_EXPIRED, Source: ProbeSourceHTTPAPIKey, RawError: err}
+	case errors.Is(err, v2.ErrInvalidCredentials):
+		// M-Team 用 API Key 认证，401/403 是密钥失效
+		return &ProbeResult{Status: KEY_ERROR, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrCircuitOpen), errors.Is(err, v2.ErrRateLimited):
 		return &ProbeResult{Status: RATE_LIMITED, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, v2.ErrNetworkError):

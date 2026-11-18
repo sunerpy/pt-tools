@@ -31,3 +31,22 @@ if (typeof document !== "undefined") {
     });
   }
 }
+
+/*
+ * happy-dom 的 MutationObserver、ResizeObserver 没有 Symbol.toStringTag：Vue 的 ref 把它们当成普通对象包成 Proxy，
+ * 经 Proxy 调 observe 时读不到私有字段就抛错（浏览器里这两个类有 toStringTag，Vue 不会包）。
+ * Element-Plus-X 的 BubbleList 把 observer 存在 ref 里，所以补上和浏览器一样的标签。
+ */
+if (typeof document !== "undefined") {
+  for (const name of ["MutationObserver", "ResizeObserver", "IntersectionObserver"] as const) {
+    const ctor = (globalThis as Record<string, unknown>)[name] as
+      | { prototype?: object }
+      | undefined;
+    if (ctor?.prototype && !(Symbol.toStringTag in ctor.prototype)) {
+      Object.defineProperty(ctor.prototype, Symbol.toStringTag, {
+        value: name,
+        configurable: true,
+      });
+    }
+  }
+}

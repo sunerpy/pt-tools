@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeebo/bencode"
+
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 // makeSingleFileTorrent encodes a minimal single-file .torrent with given length.
@@ -103,6 +105,32 @@ func TestGetIncompletePendingBytes_AggregatesActiveStates(t *testing.T) {
 	require.NoError(t, err)
 	// 50G + 30G + 20G = 100G；其他状态（uploading/pausedUP/error）不计入
 	assert.Equal(t, int64(100000000000), got)
+}
+
+// 一次 torrents/info 同时给出待占用与下载器里所有种子的 hash（小写；做种、出错的也算）：
+// 磁盘保护用它丢掉下载器里已经能看到的种子的预留，同一份列表里待占用已经算上了它们
+func TestIncompletePendingSnapshot_BytesAndHashes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v2/torrents/info", r.URL.Path)
+		_, _ = w.Write([]byte(`[
+			{"hash": "AAAA", "state": "downloading", "amount_left": 50},
+			{"hash": "bbbb", "state": "uploading",   "amount_left": 0},
+			{"hash": "cccc", "state": "error",       "amount_left": 7},
+			{"state": "stalledDL", "amount_left": 3}
+		]`))
+	}))
+	defer server.Close()
+
+	q := NewQbitClientForTesting(server.Client(), server.URL)
+	var s downloader.PendingSnapshotter = q
+	snap, err := s.IncompletePendingSnapshot(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, int64(53), snap.Bytes, "和 GetIncompletePendingBytes 一样只算下载中的状态")
+	assert.Equal(t, map[string]struct{}{"aaaa": {}, "bbbb": {}, "cccc": {}}, snap.Hashes)
+
+	got, err := q.GetIncompletePendingBytes(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, snap.Bytes, got)
 }
 
 // TestGetIncompletePendingBytes_IncludesPausedDL 验证 pausedDL 计入聚合。

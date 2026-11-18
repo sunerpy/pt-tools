@@ -196,7 +196,7 @@ func TestRunPushLoop_TooLargeSkippedSmallPushed(t *testing.T) {
 		Return(downloader.AddTorrentResult{Success: true}, nil).Times(2)
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
-	result := runPushLoop(context.Background(), mockDl, dlInfo, dir,
+	result := pushLoopLegacy(context.Background(), mockDl, dlInfo, dir,
 		[]string{bigPath, s1Path, s2Path}, "cat", "tag", "", issue450Site, false, 0)
 
 	assert.Equal(t, 2, result.success)
@@ -223,7 +223,7 @@ func TestRunPushLoop_DiskFullStops(t *testing.T) {
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
-	result := runPushLoop(context.Background(), mockDl, dlInfo, dir,
+	result := pushLoopLegacy(context.Background(), mockDl, dlInfo, dir,
 		[]string{p1, p2, p3}, "cat", "tag", "", issue450Site, false, 0)
 
 	assert.True(t, result.diskFull)
@@ -254,7 +254,7 @@ func TestRunPushLoop_TooLargeThenDiskFull(t *testing.T) {
 	)
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
-	result := runPushLoop(context.Background(), mockDl, dlInfo, dir,
+	result := pushLoopLegacy(context.Background(), mockDl, dlInfo, dir,
 		[]string{bigPath, s1Path, s2Path}, "cat", "tag", "", issue450Site, false, 0)
 
 	assert.Equal(t, 1, result.skippedTooLarge)
@@ -279,7 +279,7 @@ func TestRunPushLoop_SweepRunsOnDiskFullBreak(t *testing.T) {
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
-	result := runPushLoop(context.Background(), mockDl, dlInfo, dir,
+	result := pushLoopLegacy(context.Background(), mockDl, dlInfo, dir,
 		[]string{smallPath, stalePath}, "cat", "tag", "", issue450Site, false, 24)
 
 	assert.True(t, result.diskFull)

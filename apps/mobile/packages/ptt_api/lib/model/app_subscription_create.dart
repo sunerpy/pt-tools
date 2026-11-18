@@ -1,0 +1,506 @@
+//
+// AUTO-GENERATED FILE, DO NOT MODIFY!
+//
+// @dart=2.18
+
+// ignore_for_file: unused_element, unused_import
+// ignore_for_file: always_put_required_named_parameters_first
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: lines_longer_than_80_chars
+
+part of openapi.api;
+
+class AppSubscriptionCreate {
+  /// Returns a new [AppSubscriptionCreate] instance.
+  AppSubscriptionCreate({
+    this.includeKeywords,
+    this.excludeKeywords,
+    required this.mediaType,
+    required this.tmdbId,
+    this.season,
+    this.profileId,
+    this.upgrade,
+    this.sites = const [],
+    this.downloaderId,
+    this.category,
+    this.tags,
+    this.savePath,
+    this.schedule,
+    this.lockVersion,
+    this.lockGroup,
+    this.lockResolution,
+    this.startEpisode,
+    this.followNextSeason,
+    this.libraryId,
+    this.fromTorrent,
+  });
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? includeKeywords;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? excludeKeywords;
+
+  AppSubscriptionCreateMediaTypeEnum mediaType;
+
+  /// Minimum value: 1
+  int tmdbId;
+
+  /// Minimum value: 0
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? season;
+
+  /// Minimum value: 0
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? profileId;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? upgrade;
+
+  /// 只在这些站点找（不给或空的是全部站点）
+  List<String> sites;
+
+  /// 推送到哪个下载器（0 用设置里的）
+  ///
+  /// Minimum value: 0
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? downloaderId;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? category;
+
+  /// 逗号分开
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? tags;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? savePath;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  AppSchedule? schedule;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? lockVersion;
+
+  /// 锁住的制作组（只在用户改了锁时发；不给时按第一个下载成功的版本定）
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? lockGroup;
+
+  /// 锁住的分辨率，同 lock_group
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  String? lockResolution;
+
+  /// Minimum value: 0
+  /// Maximum value: 2000
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? startEpisode;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  bool? followNextSeason;
+
+  /// Minimum value: 0
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  int? libraryId;
+
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  AppFromTorrent? fromTorrent;
+
+  @override
+  bool operator ==(Object other) => identical(this, other) || other is AppSubscriptionCreate &&
+    other.includeKeywords == includeKeywords &&
+    other.excludeKeywords == excludeKeywords &&
+    other.mediaType == mediaType &&
+    other.tmdbId == tmdbId &&
+    other.season == season &&
+    other.profileId == profileId &&
+    other.upgrade == upgrade &&
+    _deepEquality.equals(other.sites, sites) &&
+    other.downloaderId == downloaderId &&
+    other.category == category &&
+    other.tags == tags &&
+    other.savePath == savePath &&
+    other.schedule == schedule &&
+    other.lockVersion == lockVersion &&
+    other.lockGroup == lockGroup &&
+    other.lockResolution == lockResolution &&
+    other.startEpisode == startEpisode &&
+    other.followNextSeason == followNextSeason &&
+    other.libraryId == libraryId &&
+    other.fromTorrent == fromTorrent;
+
+  @override
+  int get hashCode =>
+    // ignore: unnecessary_parenthesis
+    (includeKeywords == null ? 0 : includeKeywords!.hashCode) +
+    (excludeKeywords == null ? 0 : excludeKeywords!.hashCode) +
+    (mediaType.hashCode) +
+    (tmdbId.hashCode) +
+    (season == null ? 0 : season!.hashCode) +
+    (profileId == null ? 0 : profileId!.hashCode) +
+    (upgrade == null ? 0 : upgrade!.hashCode) +
+    (sites.hashCode) +
+    (downloaderId == null ? 0 : downloaderId!.hashCode) +
+    (category == null ? 0 : category!.hashCode) +
+    (tags == null ? 0 : tags!.hashCode) +
+    (savePath == null ? 0 : savePath!.hashCode) +
+    (schedule == null ? 0 : schedule!.hashCode) +
+    (lockVersion == null ? 0 : lockVersion!.hashCode) +
+    (lockGroup == null ? 0 : lockGroup!.hashCode) +
+    (lockResolution == null ? 0 : lockResolution!.hashCode) +
+    (startEpisode == null ? 0 : startEpisode!.hashCode) +
+    (followNextSeason == null ? 0 : followNextSeason!.hashCode) +
+    (libraryId == null ? 0 : libraryId!.hashCode) +
+    (fromTorrent == null ? 0 : fromTorrent!.hashCode);
+
+  @override
+  String toString() => 'AppSubscriptionCreate[includeKeywords=$includeKeywords, excludeKeywords=$excludeKeywords, mediaType=$mediaType, tmdbId=$tmdbId, season=$season, profileId=$profileId, upgrade=$upgrade, sites=$sites, downloaderId=$downloaderId, category=$category, tags=$tags, savePath=$savePath, schedule=$schedule, lockVersion=$lockVersion, lockGroup=$lockGroup, lockResolution=$lockResolution, startEpisode=$startEpisode, followNextSeason=$followNextSeason, libraryId=$libraryId, fromTorrent=$fromTorrent]';
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{};
+    if (this.includeKeywords != null) {
+      json[r'include_keywords'] = this.includeKeywords;
+    } else {
+      json[r'include_keywords'] = null;
+    }
+    if (this.excludeKeywords != null) {
+      json[r'exclude_keywords'] = this.excludeKeywords;
+    } else {
+      json[r'exclude_keywords'] = null;
+    }
+      json[r'media_type'] = this.mediaType;
+      json[r'tmdb_id'] = this.tmdbId;
+    if (this.season != null) {
+      json[r'season'] = this.season;
+    } else {
+      json[r'season'] = null;
+    }
+    if (this.profileId != null) {
+      json[r'profile_id'] = this.profileId;
+    } else {
+      json[r'profile_id'] = null;
+    }
+    if (this.upgrade != null) {
+      json[r'upgrade'] = this.upgrade;
+    } else {
+      json[r'upgrade'] = null;
+    }
+      json[r'sites'] = this.sites;
+    if (this.downloaderId != null) {
+      json[r'downloader_id'] = this.downloaderId;
+    } else {
+      json[r'downloader_id'] = null;
+    }
+    if (this.category != null) {
+      json[r'category'] = this.category;
+    } else {
+      json[r'category'] = null;
+    }
+    if (this.tags != null) {
+      json[r'tags'] = this.tags;
+    } else {
+      json[r'tags'] = null;
+    }
+    if (this.savePath != null) {
+      json[r'save_path'] = this.savePath;
+    } else {
+      json[r'save_path'] = null;
+    }
+    if (this.schedule != null) {
+      json[r'schedule'] = this.schedule;
+    } else {
+      json[r'schedule'] = null;
+    }
+    if (this.lockVersion != null) {
+      json[r'lock_version'] = this.lockVersion;
+    } else {
+      json[r'lock_version'] = null;
+    }
+    if (this.lockGroup != null) {
+      json[r'lock_group'] = this.lockGroup;
+    } else {
+      json[r'lock_group'] = null;
+    }
+    if (this.lockResolution != null) {
+      json[r'lock_resolution'] = this.lockResolution;
+    } else {
+      json[r'lock_resolution'] = null;
+    }
+    if (this.startEpisode != null) {
+      json[r'start_episode'] = this.startEpisode;
+    } else {
+      json[r'start_episode'] = null;
+    }
+    if (this.followNextSeason != null) {
+      json[r'follow_next_season'] = this.followNextSeason;
+    } else {
+      json[r'follow_next_season'] = null;
+    }
+    if (this.libraryId != null) {
+      json[r'library_id'] = this.libraryId;
+    } else {
+      json[r'library_id'] = null;
+    }
+    if (this.fromTorrent != null) {
+      json[r'from_torrent'] = this.fromTorrent;
+    } else {
+      json[r'from_torrent'] = null;
+    }
+    return json;
+  }
+
+  /// Returns a new [AppSubscriptionCreate] instance and imports its values from
+  /// [value] if it's a [Map], null otherwise.
+  // ignore: prefer_constructors_over_static_methods
+  static AppSubscriptionCreate? fromJson(dynamic value) {
+    if (value is Map) {
+      final json = value.cast<String, dynamic>();
+
+      // Ensure that the map contains the required keys.
+      // Note 1: the values aren't checked for validity beyond being non-null.
+      // Note 2: this code is stripped in release mode!
+      assert(() {
+        assert(json.containsKey(r'media_type'), 'Required key "AppSubscriptionCreate[media_type]" is missing from JSON.');
+        assert(json[r'media_type'] != null, 'Required key "AppSubscriptionCreate[media_type]" has a null value in JSON.');
+        assert(json.containsKey(r'tmdb_id'), 'Required key "AppSubscriptionCreate[tmdb_id]" is missing from JSON.');
+        assert(json[r'tmdb_id'] != null, 'Required key "AppSubscriptionCreate[tmdb_id]" has a null value in JSON.');
+        return true;
+      }());
+
+      return AppSubscriptionCreate(
+        includeKeywords: mapValueOfType<String>(json, r'include_keywords'),
+        excludeKeywords: mapValueOfType<String>(json, r'exclude_keywords'),
+        mediaType: AppSubscriptionCreateMediaTypeEnum.fromJson(json[r'media_type'])!,
+        tmdbId: mapValueOfType<int>(json, r'tmdb_id')!,
+        season: mapValueOfType<int>(json, r'season'),
+        profileId: mapValueOfType<int>(json, r'profile_id'),
+        upgrade: mapValueOfType<bool>(json, r'upgrade'),
+        sites: json[r'sites'] is Iterable
+            ? (json[r'sites'] as Iterable).cast<String>().toList(growable: false)
+            : const [],
+        downloaderId: mapValueOfType<int>(json, r'downloader_id'),
+        category: mapValueOfType<String>(json, r'category'),
+        tags: mapValueOfType<String>(json, r'tags'),
+        savePath: mapValueOfType<String>(json, r'save_path'),
+        schedule: AppSchedule.fromJson(json[r'schedule']),
+        lockVersion: mapValueOfType<bool>(json, r'lock_version'),
+        lockGroup: mapValueOfType<String>(json, r'lock_group'),
+        lockResolution: mapValueOfType<String>(json, r'lock_resolution'),
+        startEpisode: mapValueOfType<int>(json, r'start_episode'),
+        followNextSeason: mapValueOfType<bool>(json, r'follow_next_season'),
+        libraryId: mapValueOfType<int>(json, r'library_id'),
+        fromTorrent: AppFromTorrent.fromJson(json[r'from_torrent']),
+      );
+    }
+    return null;
+  }
+
+  static List<AppSubscriptionCreate> listFromJson(dynamic json, {bool growable = false,}) {
+    final result = <AppSubscriptionCreate>[];
+    if (json is List && json.isNotEmpty) {
+      for (final row in json) {
+        final value = AppSubscriptionCreate.fromJson(row);
+        if (value != null) {
+          result.add(value);
+        }
+      }
+    }
+    return result.toList(growable: growable);
+  }
+
+  static Map<String, AppSubscriptionCreate> mapFromJson(dynamic json) {
+    final map = <String, AppSubscriptionCreate>{};
+    if (json is Map && json.isNotEmpty) {
+      json = json.cast<String, dynamic>(); // ignore: parameter_assignments
+      for (final entry in json.entries) {
+        final value = AppSubscriptionCreate.fromJson(entry.value);
+        if (value != null) {
+          map[entry.key] = value;
+        }
+      }
+    }
+    return map;
+  }
+
+  // maps a json object with a list of AppSubscriptionCreate-objects as value to a dart map
+  static Map<String, List<AppSubscriptionCreate>> mapListFromJson(dynamic json, {bool growable = false,}) {
+    final map = <String, List<AppSubscriptionCreate>>{};
+    if (json is Map && json.isNotEmpty) {
+      // ignore: parameter_assignments
+      json = json.cast<String, dynamic>();
+      for (final entry in json.entries) {
+        map[entry.key] = AppSubscriptionCreate.listFromJson(entry.value, growable: growable,);
+      }
+    }
+    return map;
+  }
+
+  /// The list of required keys that must be present in a JSON.
+  static const requiredKeys = <String>{
+    'media_type',
+    'tmdb_id',
+  };
+}
+
+
+enum AppSubscriptionCreateMediaTypeEnum {
+  movie._(r'movie'),
+  tv._(r'tv'),
+  ;
+
+  /// Instantiate a new enum with the provided value.
+  const AppSubscriptionCreateMediaTypeEnum._(this._value);
+
+  /// The underlying value of this enum member.
+  final String _value;
+
+  @override
+  String toString() => _value;
+
+  /// Encodes this enum as a value suitable for JSON.
+  String toJson() => _value;
+
+  /// Returns the instance of [AppSubscriptionCreateMediaTypeEnum] that was successfully decoded
+  /// from the passed [value] on success, null otherwise.
+  static AppSubscriptionCreateMediaTypeEnum? fromJson(dynamic value) => AppSubscriptionCreateMediaTypeEnumTypeTransformer().decode(value);
+
+  /// Returns a [List] containing instances of [AppSubscriptionCreateMediaTypeEnum]
+  /// that were successfully decoded from the passed [JSON][json].
+  static List<AppSubscriptionCreateMediaTypeEnum> listFromJson(dynamic json, {bool growable = false,}) {
+    final result = <AppSubscriptionCreateMediaTypeEnum>[];
+    if (json is List && json.isNotEmpty) {
+      for (final row in json) {
+        final value = AppSubscriptionCreateMediaTypeEnum.fromJson(row);
+        if (value != null) {
+          result.add(value);
+        }
+      }
+    }
+    return result.toList(growable: growable);
+  }
+}
+
+/// Transformation class that can [encode] an instance of [AppSubscriptionCreateMediaTypeEnum] to String,
+/// and [decode] dynamic data back to [AppSubscriptionCreateMediaTypeEnum].
+class AppSubscriptionCreateMediaTypeEnumTypeTransformer {
+  factory AppSubscriptionCreateMediaTypeEnumTypeTransformer() => _instance ??= const AppSubscriptionCreateMediaTypeEnumTypeTransformer._();
+
+  const AppSubscriptionCreateMediaTypeEnumTypeTransformer._();
+
+  String encode(AppSubscriptionCreateMediaTypeEnum data) => data._value;
+
+  /// Returns the instance of [AppSubscriptionCreateMediaTypeEnum] that was successfully decoded
+  /// from the passed [data] value on success, null otherwise.
+  ///
+  /// If [allowNull] is true and the [dynamic value][data] cannot be decoded successfully,
+  /// then null is returned. However, if [allowNull] is false and the [dynamic value][data]
+  /// cannot be decoded successfully, then an [UnimplementedError] is thrown.
+  ///
+  /// The [allowNull] is very handy when an API changes and a new enum value is added or removed,
+  /// and users are still using an old app with the old code.
+  AppSubscriptionCreateMediaTypeEnum? decode(dynamic data, {bool allowNull = true}) {
+    if (data is AppSubscriptionCreateMediaTypeEnum) {
+      return data;
+    }
+    if (data != null) {
+      switch (data) {
+        case r'movie': return AppSubscriptionCreateMediaTypeEnum.movie;
+        case r'tv': return AppSubscriptionCreateMediaTypeEnum.tv;
+        default:
+          if (!allowNull) {
+            throw ArgumentError('Unknown enum value to decode: $data');
+          }
+      }
+    }
+    return null;
+  }
+
+  /// The singleton instance of this transformer.
+  static AppSubscriptionCreateMediaTypeEnumTypeTransformer? _instance;
+}
+
+

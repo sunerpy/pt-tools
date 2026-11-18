@@ -1,12 +1,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -115,34 +117,34 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 	}
 	fileEncoder := zapcore.NewJSONEncoder(encCfg)
 
-	allWriter := zapcore.AddSync(&lumberjack.Logger{
+	allWriter := zapcore.AddSync(trackLogFile(&lumberjack.Logger{
 		Filename:   filepath.Join(zapPath, "all.log"),
 		MaxSize:    z.MaxSize,
 		MaxBackups: z.MaxBackups,
 		MaxAge:     z.MaxAge,
 		Compress:   z.Compress,
-	})
-	debugWriter := zapcore.AddSync(&lumberjack.Logger{
+	}))
+	debugWriter := zapcore.AddSync(trackLogFile(&lumberjack.Logger{
 		Filename:   filepath.Join(zapPath, "debug.log"),
 		MaxSize:    z.MaxSize,
 		MaxBackups: z.MaxBackups,
 		MaxAge:     z.MaxAge,
 		Compress:   z.Compress,
-	})
-	infoWriter := zapcore.AddSync(&lumberjack.Logger{
+	}))
+	infoWriter := zapcore.AddSync(trackLogFile(&lumberjack.Logger{
 		Filename:   filepath.Join(zapPath, "info.log"),
 		MaxSize:    z.MaxSize,
 		MaxBackups: z.MaxBackups,
 		MaxAge:     z.MaxAge,
 		Compress:   z.Compress,
-	})
-	errorWriter := zapcore.AddSync(&lumberjack.Logger{
+	}))
+	errorWriter := zapcore.AddSync(trackLogFile(&lumberjack.Logger{
 		Filename:   filepath.Join(zapPath, "error.log"),
 		MaxSize:    z.MaxSize,
 		MaxBackups: z.MaxBackups,
 		MaxAge:     z.MaxAge,
 		Compress:   z.Compress,
-	})
+	}))
 
 	allPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 		return lvl >= AtomicLogLevel.Level()
@@ -196,6 +198,35 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 	}
 	logger := zap.New(core, options...)
 	return logger, nil
+}
+
+var (
+	logFilesMu sync.Mutex
+	logFiles   []*lumberjack.Logger
+)
+
+// trackLogFile 记下 InitLogger 打开的日志文件，CloseLogFiles 能把它们关掉。
+func trackLogFile(l *lumberjack.Logger) *lumberjack.Logger {
+	logFilesMu.Lock()
+	logFiles = append(logFiles, l)
+	logFilesMu.Unlock()
+	return l
+}
+
+// CloseLogFiles 关掉 InitLogger 打开过的日志文件（之后再写会重新打开）。
+// 测试结束时调用：Windows 上打开着的文件删不掉，t.TempDir() 的清理会失败。
+func CloseLogFiles() error {
+	logFilesMu.Lock()
+	files := logFiles
+	logFiles = nil
+	logFilesMu.Unlock()
+	var errs []error
+	for _, l := range files {
+		if err := l.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // SetLogLevel 动态设置日志级别

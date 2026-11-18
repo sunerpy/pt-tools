@@ -259,8 +259,10 @@ func findDefinitionsDir(t *testing.T) string {
 		"../../../site/v2/definitions",
 	}
 
+	// 按本机的分隔符比（Windows 上是 site\v2\definitions）
+	suffix := filepath.FromSlash("site/v2/definitions")
 	wd, _ := os.Getwd()
-	if strings.HasSuffix(wd, "site/v2/definitions") {
+	if strings.HasSuffix(wd, suffix) {
 		return wd
 	}
 
@@ -269,12 +271,12 @@ func findDefinitionsDir(t *testing.T) string {
 		if err != nil {
 			continue
 		}
-		if strings.HasSuffix(abs, "site/v2/definitions") {
+		if strings.HasSuffix(abs, suffix) {
 			if _, err := os.Stat(abs); err == nil {
 				return abs
 			}
 		}
-		full := filepath.Join(abs, "site/v2/definitions")
+		full := filepath.Join(abs, suffix)
 		if _, err := os.Stat(full); err == nil {
 			return full
 		}
@@ -333,6 +335,35 @@ func TestAllSites_FixtureCoverage(t *testing.T) {
 			} else {
 				t.Run("UserInfo", suite.UserInfo)
 			}
+		})
+	}
+}
+
+// 保号探测要最近访问时间：NexusPHP 站点要么自己写 lastAccessAt 选择器（并在某一步的 Fields 里），
+// 要么有一步取 userdetails.php（驱动在那一页上按通用写法找「最近动向」）。两样都没有，探测就只能退回按本次访问时间记。
+func TestNexusPHPDefinitionsProvideLastAccess(t *testing.T) {
+	for _, def := range v2.GetDefinitionRegistry().GetAll() {
+		if def.Schema != v2.SchemaNexusPHP || def.UserInfo == nil || def.Unavailable {
+			continue
+		}
+		t.Run(def.ID, func(t *testing.T) {
+			_, declared := def.UserInfo.Selectors["lastAccessAt"]
+			inFields, userdetails := false, false
+			for _, p := range def.UserInfo.Process {
+				if strings.Contains(p.RequestConfig.URL, "userdetails.php") {
+					userdetails = true
+				}
+				for _, f := range p.Fields {
+					if f == "lastAccessAt" {
+						inFields = true
+					}
+				}
+			}
+			if declared {
+				assert.True(t, inFields, "写了 lastAccessAt 选择器，但没有哪一步的 Fields 带上它")
+				return
+			}
+			assert.True(t, userdetails, "没有 lastAccessAt 选择器，也没有取 userdetails.php 的一步")
 		})
 	}
 }

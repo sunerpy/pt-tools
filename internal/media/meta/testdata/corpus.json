@@ -1,0 +1,747 @@
+[
+  {
+    "title": "The.Shawshank.Redemption.1994.1080p.BluRay.x264.DTS-WiKi",
+    "expect": {
+      "name_en": "The Shawshank Redemption",
+      "year": 1994,
+      "type": "movie",
+      "resolution": "1080p",
+      "source": "BluRay",
+      "video_codec": "H.264",
+      "audio": ["DTS"],
+      "group": "WiKi"
+    }
+  },
+  {
+    "title": "Oppenheimer 2023 2160p UHD Blu-ray Remux DV HDR HEVC TrueHD 7.1 Atmos-FGT",
+    "expect": {
+      "name_en": "Oppenheimer",
+      "year": 2023,
+      "type": "movie",
+      "resolution": "2160p",
+      "source": "UHD BluRay",
+      "remux": true,
+      "hdr": ["DV", "HDR"],
+      "video_codec": "H.265",
+      "audio": ["TrueHD", "Atmos"],
+      "channels": "7.1",
+      "group": "FGT"
+    }
+  },
+  {
+    "title": "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
+    "expect": {
+      "name_en": "Dune Part Two",
+      "year": 2024,
+      "type": "movie",
+      "resolution": "2160p",
+      "source": "WEB-DL",
+      "audio": ["Atmos", "DDP"],
+      "channels": "5.1",
+      "hdr": ["DV", "HDR"],
+      "video_codec": "H.265",
+      "group": "FLUX"
+    }
+  },
+  {
+    "title": "28 Years Later 2025 BluRay 1080p x265 10bit DDP7.1 MNHD-FRDS",
+    "expect": {
+      "name_en": "28 Years Later",
+      "year": 2025,
+      "type": "movie",
+      "resolution": "1080p",
+      "source": "BluRay",
+      "video_codec": "H.265",
+      "bit_depth": 10,
+      "audio": ["DDP"],
+      "channels": "7.1",
+      "group": "FRDS"
+    }
+  },
+  {
+    "title": "Bloodshot 2020 2160p UHD Blu-ray HDR HEVC TrueHD 7.1 Atmos-BeyondHD",
+    "expect": {
+      "name_en": "Bloodshot",
+      "year": 2020,
+      "source": "UHD BluRay",
+      "hdr": ["HDR"],
+      "group": "BeyondHD"
+    }
+  },
+  {
+    "title": "Havana Nights 2004 1080p Blu-ray AVC DTS-HD MA 7.1-NiXFLiX",
+    "expect": {
+      "name_en": "Havana Nights",
+      "year": 2004,
+      "source": "BluRay",
+      "video_codec": "H.264",
+      "audio": ["DTS-HD MA"],
+      "channels": "7.1",
+      "group": "NiXFLiX"
+    }
+  },
+  {
+    "title": "I Am Waiting 1957 1080p BluRay AVC LPCM 2.0-Runrun@Audies",
+    "expect": {
+      "name_en": "I Am Waiting",
+      "year": 1957,
+      "audio": ["LPCM"],
+      "channels": "2.0",
+      "group": "Audies"
+    }
+  },
+  {
+    "title": "Burning Stars 2024 2160p 60fps WEB-DL HEVC AV3A5.1 8Audios-QHstudIo",
+    "expect": {
+      "name_en": "Burning Stars",
+      "year": 2024,
+      "resolution": "2160p",
+      "fps": 60,
+      "source": "WEB-DL",
+      "audio": ["AV3A"],
+      "channels": "5.1",
+      "group": "QHstudIo"
+    }
+  },
+  {
+    "title": "Wasteman.2025.REMUX.Bluray.1080p.AVC.DTS-HDMA5.1-CHD",
+    "expect": {
+      "name_en": "Wasteman",
+      "year": 2025,
+      "remux": true,
+      "source": "BluRay",
+      "audio": ["DTS-HD MA"],
+      "channels": "5.1",
+      "group": "CHD"
+    }
+  },
+  {
+    "title": "La fille de d'Artagnan 1994 1080p Blu-ray",
+    "expect": {
+      "name_en": "La fille de d'Artagnan",
+      "year": 1994,
+      "source": "BluRay",
+      "group": ""
+    }
+  },
+  {
+    "title": "Lock Up 1989 UHD Blu-ray",
+    "expect": {
+      "name_en": "Lock Up",
+      "year": 1989,
+      "resolution": "2160p",
+      "source": "UHD BluRay"
+    }
+  },
+  {
+    "title": "Hamnet 2025 UHD BluRay 2160p REMUX DV HDR HEVC Atmos.TrueHD.7.1-UBits",
+    "expect": {
+      "name_en": "Hamnet",
+      "year": 2025,
+      "remux": true,
+      "hdr": ["DV", "HDR"],
+      "audio": ["TrueHD", "Atmos"],
+      "channels": "7.1",
+      "group": "UBits"
+    }
+  },
+  {
+    "title": "Blade.Runner.2049.2017.Hybrid.2160p.UHD.BluRay.REMUX.DV.HDR10Plus.HEVC.TrueHD.7.1.Atmos-FraMeSToR",
+    "expect": {
+      "name_en": "Blade Runner 2049",
+      "year": 2017,
+      "edition": ["Hybrid"],
+      "hdr": ["DV", "HDR10+"],
+      "group": "FraMeSToR"
+    }
+  },
+  {
+    "title": "2001.A.Space.Odyssey.1968.2160p.UHD.BluRay.x265.10bit.HDR.DTS-HD.MA.5.1-SWTYBLZ",
+    "expect": {
+      "name_en": "2001 A Space Odyssey",
+      "year": 1968,
+      "audio": ["DTS-HD MA"],
+      "channels": "5.1",
+      "group": "SWTYBLZ"
+    }
+  },
+  {
+    "title": "1917.2019.1080p.BluRay.x264-SPARKS",
+    "expect": {
+      "name_en": "1917",
+      "year": 2019,
+      "type": "movie",
+      "group": "SPARKS"
+    }
+  },
+  {
+    "title": "2046.2004.1080p.BluRay.x264.DTS-CHD",
+    "expect": {
+      "name_en": "2046",
+      "year": 2004,
+      "group": "CHD"
+    }
+  },
+  {
+    "title": "Detective.Chinatown.1900.2025.2160p.WEB-DL.H265.HDR.DDP5.1-OurTV",
+    "subtitle": "唐探1900 | 导演: 陈思诚 | 主演: 王宝强 刘昊然 [国语/中字]",
+    "expect": {
+      "name_en": "Detective Chinatown 1900",
+      "name_cn": "唐探1900",
+      "year": 2025,
+      "mandarin": true,
+      "chinese_subs": true,
+      "group": "OurTV"
+    }
+  },
+  {
+    "title": "Avatar.The.Way.of.Water.2022.IMAX.2160p.DSNP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-HHWEB",
+    "expect": {
+      "name_en": "Avatar The Way of Water",
+      "year": 2022,
+      "edition": ["IMAX"],
+      "platform": "Disney+",
+      "group": "HHWEB"
+    }
+  },
+  {
+    "title": "The.Lord.of.the.Rings.The.Return.of.the.King.2003.EXTENDED.2160p.UHD.BluRay.REMUX.HDR.HEVC.TrueHD.7.1.Atmos-FGT",
+    "expect": {
+      "name_en": "The Lord of the Rings The Return of the King",
+      "year": 2003,
+      "edition": ["Extended"],
+      "remux": true
+    }
+  },
+  {
+    "title": "Spider-Man.Across.the.Spider-Verse.2023.2160p.WEB-DL.DDP5.1.Atmos.HDR10Plus.HEVC-CMRG",
+    "expect": {
+      "name_en": "Spider-Man Across the Spider-Verse",
+      "year": 2023,
+      "hdr": ["HDR10+"],
+      "group": "CMRG"
+    }
+  },
+  {
+    "title": "Mission.Impossible.Dead.Reckoning.Part.One.2023.REPACK.1080p.BluRay.x264-SPARKS",
+    "expect": {
+      "name_en": "Mission Impossible Dead Reckoning Part One",
+      "year": 2023,
+      "version": "REPACK",
+      "group": "SPARKS"
+    }
+  },
+  {
+    "title": "The.Matrix.1999.REMASTERED.1080p.BluRay.x264-SPARKS",
+    "expect": {
+      "name_en": "The Matrix",
+      "year": 1999,
+      "edition": ["Remastered"]
+    }
+  },
+  {
+    "title": "Avengers.Endgame.2019.3D.1080p.BluRay.Half-SBS.x264.DTS-HD.MA.7.1-FGT",
+    "expect": {
+      "name_en": "Avengers Endgame",
+      "year": 2019,
+      "three_d": true,
+      "group": "FGT"
+    }
+  },
+  {
+    "title": "Harry Potter 4K Remux",
+    "expect": {
+      "name_en": "Harry Potter",
+      "year": 0,
+      "resolution": "2160p",
+      "remux": true,
+      "type": ""
+    }
+  },
+  {
+    "title": "Hell 2025",
+    "expect": {
+      "name_en": "Hell",
+      "year": 2025,
+      "type": "movie"
+    }
+  },
+  {
+    "title": "流浪地球2 The Wandering Earth II 2023 2160p WEB-DL H265 HDR DDP5.1-OurTV",
+    "expect": {
+      "name_cn": "流浪地球2",
+      "name_en": "The Wandering Earth II",
+      "year": 2023,
+      "type": "movie",
+      "video_codec": "H.265",
+      "group": "OurTV"
+    }
+  },
+  {
+    "title": "满江红.Full.River.Red.2023.2160p.WEB-DL.H265.10bit.DDP5.1-HHWEB",
+    "expect": {
+      "name_cn": "满江红",
+      "name_en": "Full River Red",
+      "year": 2023,
+      "bit_depth": 10
+    }
+  },
+  {
+    "title": "[流浪地球].The.Wandering.Earth.2019.1080p.BluRay.x264.DTS-HD.MA.5.1-CMCT",
+    "expect": {
+      "name_cn": "流浪地球",
+      "name_en": "The Wandering Earth",
+      "year": 2019,
+      "group": "CMCT"
+    }
+  },
+  {
+    "title": "Animal Impossible 2022 不可思议的动物 2160p WEB-DL",
+    "expect": {
+      "name_en": "Animal Impossible",
+      "name_cn": "不可思议的动物",
+      "year": 2022
+    }
+  },
+  {
+    "title": "让子弹飞 Let the Bullets Fly 2010 1080p BluRay x264 DTS-HDChina",
+    "expect": {
+      "name_cn": "让子弹飞",
+      "name_en": "Let the Bullets Fly",
+      "year": 2010,
+      "group": "HDChina"
+    }
+  },
+  {
+    "title": "霸王别姬 Farewell My Concubine 1993 1080p BluRay x265 10bit FLAC-CMCT",
+    "expect": {
+      "name_cn": "霸王别姬",
+      "name_en": "Farewell My Concubine",
+      "year": 1993,
+      "audio": ["FLAC"]
+    }
+  },
+  {
+    "title": "The.Last.of.Us.S01E01.2023.2160p.HMAX.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
+    "expect": {
+      "name_en": "The Last of Us",
+      "year": 2023,
+      "type": "tv",
+      "season": 1,
+      "episode": 1,
+      "platform": "HBO Max",
+      "group": "FLUX"
+    }
+  },
+  {
+    "title": "House.of.the.Dragon.S02.2024.2160p.MAX.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-HHWEB",
+    "expect": {
+      "name_en": "House of the Dragon",
+      "year": 2024,
+      "type": "tv",
+      "season": 2,
+      "episode": 0,
+      "complete": true,
+      "platform": "Max"
+    }
+  },
+  {
+    "title": "Breaking.Bad.S01-S05.Complete.1080p.BluRay.x264-ROVERS",
+    "expect": {
+      "name_en": "Breaking Bad",
+      "type": "tv",
+      "season": 1,
+      "season_end": 5,
+      "complete": true,
+      "group": "ROVERS"
+    }
+  },
+  {
+    "title": "The.Boys.S04E01-E03.2024.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX",
+    "expect": {
+      "name_en": "The Boys",
+      "year": 2024,
+      "season": 4,
+      "episode": 1,
+      "episode_end": 3,
+      "platform": "Amazon",
+      "video_codec": "H.264"
+    }
+  },
+  {
+    "title": "Shogun.2024.S01E01.Anjin.2160p.DSNP.WEB-DL.DDP5.1.HDR.H.265-NTb",
+    "expect": {
+      "name_en": "Shogun",
+      "year": 2024,
+      "season": 1,
+      "episode": 1,
+      "group": "NTb"
+    }
+  },
+  {
+    "title": "Ashes to Crown 2026 S01E21 2160p WEB-DL",
+    "expect": {
+      "name_en": "Ashes to Crown",
+      "year": 2026,
+      "type": "tv",
+      "season": 1,
+      "episode": 21,
+      "group": ""
+    }
+  },
+  {
+    "title": "Teepee Time S03 2017 1080p CBC WEB-DL",
+    "expect": {
+      "name_en": "Teepee Time",
+      "year": 2017,
+      "season": 3,
+      "complete": true,
+      "platform": "CBC"
+    }
+  },
+  {
+    "title": "Friends.1994.S01-S10.Complete.1080p.BluRay.x265.10bit-WiKi",
+    "expect": {
+      "name_en": "Friends",
+      "year": 1994,
+      "season": 1,
+      "season_end": 10,
+      "complete": true
+    }
+  },
+  {
+    "title": "Game.of.Thrones.S08E06.The.Iron.Throne.1080p.AMZN.WEB-DL.DDP5.1.H.264-GoT",
+    "expect": {
+      "name_en": "Game of Thrones",
+      "season": 8,
+      "episode": 6,
+      "group": "GoT"
+    }
+  },
+  {
+    "title": "Our.Planet.II.2023.S01.2160p.NF.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
+    "expect": {
+      "name_en": "Our Planet II",
+      "year": 2023,
+      "season": 1,
+      "platform": "Netflix"
+    }
+  },
+  {
+    "title": "Andor.S02E01-E03.2025.2160p.DSNP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
+    "expect": {
+      "name_en": "Andor",
+      "season": 2,
+      "episode": 1,
+      "episode_end": 3
+    }
+  },
+  {
+    "title": "Severance.S02E10.Cold.Harbor.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.H.265-FLUX",
+    "expect": {
+      "name_en": "Severance",
+      "season": 2,
+      "episode": 10,
+      "platform": "Apple TV+"
+    }
+  },
+  {
+    "title": "繁花 Blossoms Shanghai S01 2023 2160p WEB-DL H265 HDR DDP5.1-HHWEB",
+    "subtitle": "繁花 全30集 | 导演: 王家卫 | 主演: 胡歌 马伊琍 唐嫣 [国语/中字]",
+    "expect": {
+      "name_cn": "繁花",
+      "name_en": "Blossoms Shanghai",
+      "type": "tv",
+      "season": 1,
+      "total_episodes": 30,
+      "complete": true,
+      "mandarin": true,
+      "chinese_subs": true
+    }
+  },
+  {
+    "title": "庆余年 第二季 Joy of Life S02 2024 1080p WEB-DL H264 AAC-OurTV",
+    "subtitle": "庆余年 第二季 第01-08集 | 国语中字",
+    "expect": {
+      "name_cn": "庆余年",
+      "name_en": "Joy of Life",
+      "season": 2,
+      "episode": 1,
+      "episode_end": 8,
+      "mandarin": true,
+      "chinese_subs": true
+    }
+  },
+  {
+    "title": "The First Jasmine 2026 S01E34 2160p WEB-DL",
+    "subtitle": "虚构副标题 第34集 | 国语 | 中字",
+    "expect": {
+      "name_en": "The First Jasmine",
+      "name_cn": "虚构副标题",
+      "season": 1,
+      "episode": 34
+    }
+  },
+  {
+    "title": "[狂飙].The.Knockout.S01.2023.2160p.WEB-DL.H265.AAC-HHWEB",
+    "subtitle": "狂飙 全39集 国语中字",
+    "expect": {
+      "name_cn": "狂飙",
+      "name_en": "The Knockout",
+      "season": 1,
+      "total_episodes": 39,
+      "complete": true
+    }
+  },
+  {
+    "title": "长相思 第一季 Lost You Forever S01E01-E10 2024 2160p WEB-DL HEVC 10bit DDP5.1-QHstudIo",
+    "expect": {
+      "name_cn": "长相思",
+      "name_en": "Lost You Forever",
+      "season": 1,
+      "episode": 1,
+      "episode_end": 10
+    }
+  },
+  {
+    "title": "三体.Three-Body.S01E01.2023.2160p.WEB-DL.H265.DDP5.1-OurTV",
+    "expect": {
+      "name_cn": "三体",
+      "name_en": "Three-Body",
+      "season": 1,
+      "episode": 1,
+      "group": "OurTV"
+    }
+  },
+  {
+    "title": "[ANi] 葬送的芙莉莲 - 01 [1080P][Baha][WEB-DL][AAC AVC][CHT][MP4]",
+    "expect": {
+      "name_cn": "葬送的芙莉莲",
+      "type": "tv",
+      "episode": 1,
+      "resolution": "1080p",
+      "platform": "Baha",
+      "source": "WEB-DL",
+      "video_codec": "H.264",
+      "audio": ["AAC"],
+      "chinese_subs": true,
+      "group": "ANi"
+    }
+  },
+  {
+    "title": "[Nekomoe kissaten&LoliHouse] Sousou no Frieren - 28 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv",
+    "expect": {
+      "name_en": "Sousou no Frieren",
+      "type": "tv",
+      "episode": 28,
+      "source": "WEBRip",
+      "video_codec": "H.265",
+      "bit_depth": 10,
+      "group": "Nekomoe kissaten&LoliHouse"
+    }
+  },
+  {
+    "title": "[Sakurato] Spy x Family Season 2 [01][AVC-8bit 1080p AAC][CHS]",
+    "expect": {
+      "name_en": "Spy x Family",
+      "season": 2,
+      "episode": 1,
+      "bit_depth": 8,
+      "chinese_subs": true,
+      "group": "Sakurato"
+    }
+  },
+  {
+    "title": "Frieren.Beyond.Journeys.End.S01E28.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG",
+    "expect": {
+      "name_en": "Frieren Beyond Journeys End",
+      "season": 1,
+      "episode": 28,
+      "platform": "Crunchyroll",
+      "channels": "2.0",
+      "group": "VARYG"
+    }
+  },
+  {
+    "title": "The.Wandering.Earth.II.2023.2160p.WEB-DL.H265.HDR.DDP5.1-OurTV",
+    "subtitle": "流浪地球2 | 导演: 郭帆 | 主演: 吴京 刘德华 [国语/中字]",
+    "expect": {
+      "name_cn": "流浪地球2",
+      "name_en": "The Wandering Earth II",
+      "year": 2023,
+      "mandarin": true,
+      "chinese_subs": true
+    }
+  },
+  {
+    "title": "Oppenheimer.2023.1080p.BluRay.x264.DTS-HD.MA.5.1-WiKi",
+    "subtitle": "奥本海默 / 奥本海默传 | 类型: 剧情 传记 历史 [简繁英字幕]",
+    "expect": {
+      "name_cn": "奥本海默",
+      "chinese_subs": true,
+      "mandarin": false
+    }
+  },
+  {
+    "title": "Dune.Part.Two.2024.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.TrueHD.7.1.Atmos-FGT",
+    "subtitle": "沙丘2 / 沙丘：第二部 *杜比视界* [中英字幕]",
+    "expect": {
+      "name_cn": "沙丘2",
+      "chinese_subs": true
+    }
+  },
+  {
+    "title": "Pacific.Rim.2013.1080p.BluRay.x264.DTS-HD.MA.7.1-HDChina",
+    "subtitle": "环太平洋 Pacific Rim 2013",
+    "expect": {
+      "name_cn": "环太平洋",
+      "name_en": "Pacific Rim"
+    }
+  },
+  {
+    "title": "Sample.Movie.2025.1080p.BluRay.x264-GRP",
+    "subtitle": "【示例电影 / Sample Movie】10bit HEVC版本 简繁英双语字幕",
+    "expect": {
+      "name_cn": "示例电影",
+      "chinese_subs": true
+    }
+  },
+  {
+    "title": "Sample.Show.S01.1080p.WEB-DL.H264-GRP",
+    "subtitle": "【示例剧集 第一季 / Sample Show S01】中英字幕",
+    "expect": {
+      "name_cn": "示例剧集",
+      "season": 1
+    }
+  },
+  {
+    "title": "Spirited.Away.2001.1080p.BluRay.x264.DTS-HD.MA.5.1-CtrlHD",
+    "subtitle": "千与千寻 / 神隐少女 [国日双语/简繁字幕]",
+    "expect": {
+      "name_cn": "千与千寻",
+      "name_en": "Spirited Away",
+      "year": 2001,
+      "mandarin": true,
+      "chinese_subs": true,
+      "cantonese": false
+    }
+  },
+  {
+    "title": "Infernal.Affairs.2002.1080p.BluRay.x264.DTS-HD.MA.5.1-CHD",
+    "subtitle": "无间道 [国粤双语/简繁中字]",
+    "expect": {
+      "name_cn": "无间道",
+      "mandarin": true,
+      "cantonese": true,
+      "chinese_subs": true
+    }
+  },
+  {
+    "title": "Top.Gun.Maverick.2022.IMAX.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-HHWEB",
+    "expect": {
+      "name_en": "Top Gun Maverick",
+      "year": 2022,
+      "edition": ["IMAX"]
+    }
+  },
+  {
+    "title": "Her Blaze 2026 S01E08 2160p 60fps WEB-DL HEVC 10bit HDR Vivid",
+    "expect": {
+      "name_en": "Her Blaze",
+      "season": 1,
+      "episode": 8,
+      "fps": 60,
+      "hdr": ["HDR Vivid"]
+    }
+  },
+  {
+    "title": "Mad.Max.Fury.Road.2015.1080p.BluRay.x264-SPARKS",
+    "expect": {
+      "name_en": "Mad Max Fury Road",
+      "year": 2015,
+      "platform": ""
+    }
+  },
+  {
+    "title": "The.Office.US.S01E01.Pilot.720p.WEB-DL.DD5.1.H.264-NTb",
+    "expect": {
+      "name_en": "The Office US",
+      "season": 1,
+      "episode": 1,
+      "resolution": "720p",
+      "audio": ["DD"],
+      "channels": "5.1"
+    }
+  },
+  {
+    "title": "奔跑吧 Keep Running S12E01 2024 2160p WEB-DL H265 AAC-HHWEB",
+    "expect": {
+      "name_cn": "奔跑吧",
+      "name_en": "Keep Running",
+      "season": 12,
+      "episode": 1
+    }
+  },
+  {
+    "title": "Interstellar.2014.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-PTHOME",
+    "expect": {
+      "name_en": "Interstellar",
+      "year": 2014,
+      "group": "PTHOME"
+    }
+  },
+  {
+    "title": "测试电影 Test Movie 1080p",
+    "subtitle": "测试电影 / Test Movie / 2025",
+    "expect": {
+      "name_cn": "测试电影",
+      "name_en": "Test Movie",
+      "year": 2025,
+      "type": "movie"
+    }
+  },
+  {
+    "title": "Some.Anime.EP05.1080p.WEB-DL.AAC.H.264-ADWeb",
+    "expect": {
+      "name_en": "Some Anime",
+      "type": "tv",
+      "episode": 5,
+      "group": "ADWeb"
+    }
+  },
+  {
+    "title": "Some.Show.E01-E12.2025.1080p.WEB-DL.H264.AAC-OurTV",
+    "expect": {
+      "name_en": "Some Show",
+      "episode": 1,
+      "episode_end": 12,
+      "type": "tv"
+    }
+  },
+  {
+    "title": "满江红 2023 2160p WEB-DL H265 DDP5.1-HHWEB",
+    "expect": {
+      "name_cn": "满江红",
+      "name_en": "",
+      "year": 2023,
+      "type": "movie",
+      "group": "HHWEB"
+    }
+  },
+  {
+    "title": "Inside.Out.2.2024.1080p.WEB-DL.DDP5.1.H.264-FLUX",
+    "expect": {
+      "name_en": "Inside Out 2",
+      "year": 2024,
+      "type": "movie"
+    }
+  },
+  {
+    "title": "Dune.Prophecy.2024.2160p.WEB-DL.H265-GRP",
+    "expect": {
+      "name_en": "Dune Prophecy",
+      "year": 2024,
+      "type": "movie"
+    }
+  }
+]

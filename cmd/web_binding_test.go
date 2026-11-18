@@ -23,7 +23,7 @@ func newBindingDB(t *testing.T) *gorm.DB {
 	global.InitLogger(zap.NewNop())
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.BotToken{}, &models.ChannelBinding{}))
+	require.NoError(t, db.AutoMigrate(&models.BotToken{}, &models.ChannelBinding{}, &models.NotificationConf{}))
 	return db
 }
 
@@ -32,15 +32,16 @@ func TestBindingConsumerAdapter_ConsumeCode(t *testing.T) {
 	svc := app.NewBindingService(db, "system")
 	ctx := context.Background()
 
+	require.NoError(t, db.Create(&models.NotificationConf{ID: 1, ChannelType: "telegram", Name: "tg"}).Error)
 	// Issue a bind code, then consume it through the adapter (error-only shape).
 	dto, err := svc.IssueCode(ctx, 1, "label", time.Hour)
 	require.NoError(t, err)
 
 	adapter := &bindingConsumerAdapter{svc: svc}
-	require.NoError(t, adapter.ConsumeCode(ctx, dto.Code, "telegram", "user-1"))
+	require.NoError(t, adapter.ConsumeCode(ctx, dto.Code, 1, "telegram", "user-1"))
 
 	// Second consume of the same code fails (already used).
-	err = adapter.ConsumeCode(ctx, dto.Code, "telegram", "user-2")
+	err = adapter.ConsumeCode(ctx, dto.Code, 1, "telegram", "user-2")
 	require.Error(t, err)
 }
 

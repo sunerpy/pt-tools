@@ -16,6 +16,10 @@ import (
 //     无法用普通 CSS 选择器命中，需要走 SubtitleSelector（html + regex 跳过标签块）。
 //  4. 促销结束时间没有独立可选中的稳定元素，仅存在于促销图标的 onmouseover 提示中
 //     （HTML 实体编码），交由驱动的 parseDiscountEndTimeFromOnmouseover 兜底解析。
+//     没写时限的免费（图标只有 title="免費"，没有 onmouseover）结束时间未知，不当成长期免费：NexusPHP 在全站促销期间
+//     也这样渲染（get_torrent_promotion_append 只在没有全站促销时生成剩余时间），列表上分不出来。
+//     2026-11-15 的免费列表首页 53 个里有 44 个是这样（issue #901），刷流按「免费结束时间未知」跳过。
+//  5. 页头有 H&R 插件的计数「H&R: [考察中/未達標/封號上限]」，列表与详情页里没有种子带 hitandrun 标记，不设 HREnabled。
 var DiscFanDefinition = &v2.SiteDefinition{
 	ID:             "discfan",
 	Name:           "DiscFan",
@@ -34,7 +38,7 @@ var DiscFanDefinition = &v2.SiteDefinition{
 		Process: []v2.UserInfoProcess{
 			{
 				RequestConfig: v2.RequestConfig{URL: "/index.php", ResponseType: "document"},
-				Fields:        []string{"id", "name", "seeding", "leeching", "bonus"},
+				Fields:        []string{"id", "name", "seeding", "leeching", "bonus", "hnrUnsatisfied"},
 			},
 			{
 				RequestConfig: v2.RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
@@ -70,6 +74,14 @@ var DiscFanDefinition = &v2.SiteDefinition{
 				Attr:     "html",
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`class="arrowup"[^>]*>\s*(\d+)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			// 页头 H&R 插件的计数「H&R: [<a href="myhr.php">0/<font color="red">0</font>/5</a>]」：考察中 / 未達標 / 封號上限
+			"hnrUnsatisfied": {
+				Selector: []string{"#info_block a[href*='myhr.php']"},
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`^\s*\d+\s*/\s*(\d+)\s*/`}},
 					{Name: "parseNumber"},
 				},
 			},

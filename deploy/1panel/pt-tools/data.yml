@@ -1,0 +1,33 @@
+name: pt-tools
+tags:
+  - 实用工具
+title: PT 站点自动化管理：RSS 下载、签到、保号、刷流与数据统计
+description: PT 站点自动化管理：RSS 下载、签到、保号、刷流与数据统计
+additionalProperties:
+  key: pt-tools
+  name: pt-tools
+  tags:
+    - Tool
+  shortDescZh: PT 站点自动化：RSS 下载、签到、保号、刷流、数据统计
+  shortDescEn: PT site automation - RSS downloads, check-in, account keep-alive, seed boosting and stats
+  type: website
+  crossVersionUpdate: true
+  limit: 0
+  recommend: 0
+  website: https://firlab.app/pt-tools/
+  github: https://github.com/sunerpy/pt-tools
+  document: https://firlab.app/pt-tools/guide/install
+  description:
+    en: "Automate private tracker sites: RSS downloads, multi-site search and statistics, check-in, login keep-alive reminders and seed boosting, with unified qBittorrent and Transmission management and QQ and Telegram ChatOps."
+    es-es: "Automatiza sitios de trackers privados: descargas por RSS, búsqueda y estadísticas multisitio, registro diario, avisos para mantener la cuenta activa y seeding de impulso, con gestión unificada de qBittorrent y Transmission y ChatOps por QQ y Telegram."
+    ja: プライベートトラッカーの自動化ツール：RSS 自動ダウンロード、複数サイトの検索と統計、チェックイン、アカウント維持のリマインダー、ブースト用シード管理。qBittorrent と Transmission を一元管理し、QQ と Telegram の ChatOps に対応。
+    ms: "Automasikan laman tracker persendirian: muat turun RSS, carian dan statistik berbilang laman, daftar masuk harian, peringatan mengekalkan akaun dan penyemaian rangsangan, dengan pengurusan qBittorrent dan Transmission bersatu serta ChatOps QQ dan Telegram."
+    pt-br: "Automatize sites de trackers privados: downloads por RSS, busca e estatísticas em vários sites, check-in, lembretes para manter a conta ativa e seeding de impulso, com gerenciamento unificado do qBittorrent e do Transmission e ChatOps via QQ e Telegram."
+    ru: "Автоматизация приватных трекеров: загрузка по RSS, поиск и статистика по нескольким сайтам, ежедневная отметка, напоминания о поддержании аккаунта и раздачи для набора рейтинга; единое управление qBittorrent и Transmission, ChatOps через QQ и Telegram."
+    ko: "프라이빗 트래커 자동화: RSS 자동 다운로드, 여러 사이트 검색과 통계, 출석 체크, 계정 유지 알림, 부스트 시딩을 지원하며 qBittorrent와 Transmission을 통합 관리하고 QQ 및 Telegram ChatOps를 제공합니다."
+    zh-Hant: PT 站點自動化管理：RSS 自動下載、多站點搜尋與資料統計、簽到、登入保號提醒、刷流，統一管理 qBittorrent 和 Transmission，支援 QQ 與 Telegram ChatOps。
+    zh: PT 站点自动化管理：RSS 自动下载、多站点搜索与数据统计、签到、登录保号提醒、刷流，统一管理 qBittorrent 和 Transmission，支持 QQ 与 Telegram ChatOps。
+    tr: "Özel tracker sitelerini otomatikleştirin: RSS ile indirme, çoklu site arama ve istatistikleri, günlük giriş, hesap koruma hatırlatmaları ve oran artırma amaçlı paylaşım; qBittorrent ve Transmission'ı tek yerden yönetin, QQ ve Telegram üzerinden ChatOps kullanın."
+  architectures:
+    - amd64
+    - arm64

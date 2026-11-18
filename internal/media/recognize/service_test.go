@@ -1,0 +1,791 @@
+package recognize
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/sunerpy/pt-tools/internal/media/fanart"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/omdb"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/media/tvdb"
+	"github.com/sunerpy/pt-tools/models"
+)
+
+type fakeCipher struct{}
+
+func (fakeCipher) Encrypt(p string) (string, error) { return "enc:" + reverse(p), nil }
+func (fakeCipher) Decrypt(c string) (string, error) {
+	return reverse(strings.TrimPrefix(c, "enc:")), nil
+}
+
+func reverse(s string) string {
+	r := []rune(s)
+	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
+		r[i], r[j] = r[j], r[i]
+	}
+	return string(r)
+}
+
+const goodKey = "0123456789abcdef0123456789abcdef"
+
+// fakeTMDB 认 goodKey；肖申克的救赎与权力的游戏能搜到。
+func fakeTMDB(t *testing.T) *httptest.Server {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("api_key") != goodKey {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"status_code":7}`))
+			return
+		}
+		q := r.URL.Query().Get("query")
+		switch {
+		case r.URL.Path == "/3/configuration":
+			_, _ = w.Write([]byte(`{}`))
+		case r.URL.Path == "/3/search/movie" && (strings.Contains(q, "Shawshank") || strings.Contains(q, "肖申克")):
+			_, _ = w.Write([]byte(`{"results":[
+				{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23","popularity":100},
+				{"id":5000,"title":"Shawshank: The Redeeming Feature","original_title":"Shawshank: The Redeeming Feature","release_date":"2001-01-01","popularity":2}]}`))
+		case r.URL.Path == "/3/search/movie" && strings.Contains(q, "Inside Out"):
+			_, _ = w.Write([]byte(`{"results":[
+				{"id":1022789,"title":"头脑特工队2","original_title":"Inside Out 2","release_date":"2024-06-11","popularity":500},
+				{"id":150540,"title":"头脑特工队","original_title":"Inside Out","release_date":"2015-06-09","popularity":200}]}`))
+		case r.URL.Path == "/3/search/movie" && (strings.Contains(q, "Oppenheimer") || strings.Contains(q, "奥本海默")):
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		case r.URL.Path == "/3/search/movie" && strings.Contains(q, "Zorro"):
+			// 同名的电影在 TMDB 上没有上映日期；同名的剧集是 1990 年首播的
+			_, _ = w.Write([]byte(`{"results":[{"id":9001,"title":"Zorro","original_title":"Zorro","popularity":5}]}`))
+		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Zorro"):
+			_, _ = w.Write([]byte(`{"results":[{"id":9002,"name":"Zorro","original_name":"Zorro","first_air_date":"1990-01-05","popularity":4}]}`))
+		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Game of Thrones"):
+			_, _ = w.Write([]byte(`{"results":[{"id":1399,"name":"权力的游戏","original_name":"Game of Thrones","first_air_date":"2011-04-17","popularity":300}]}`))
+		case strings.HasPrefix(r.URL.Path, "/3/search/"):
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		case r.URL.Path == "/3/find/tt0111161":
+			_, _ = w.Write([]byte(`{"movie_results":[{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23"}],"tv_results":[]}`))
+		case r.URL.Path == "/3/movie/278":
+			_, _ = w.Write([]byte(`{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23","overview":"希望让人自由。","imdb_id":"tt0111161"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"status_code":34}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func newService(t *testing.T) (*Service, *gorm.DB) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}))
+	srv := fakeTMDB(t)
+	return New(Config{DB: db, Cipher: fakeCipher{}, BaseURL: srv.URL + "/3", RatePerSecond: 1000}), db
+}
+
+func ptr(s string) *string { return &s }
+
+func withKey(t *testing.T, s *Service) {
+	t.Helper()
+	_, err := s.SaveSettings(context.Background(), SettingsInput{TMDBKey: ptr(goodKey)})
+	require.NoError(t, err)
+}
+
+func TestSettings(t *testing.T) {
+	s, db := newService(t)
+	ctx := context.Background()
+	got, err := s.Settings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyNone}, got)
+
+	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(" " + goodKey + " "), Language: "en-US", ProxyURL: ptr("http://user:pw@127.0.0.1:7890")})
+	require.NoError(t, err)
+	assert.Equal(t, Settings{HasTMDBKey: true, KeySource: KeyUser, Language: "en-US", ProxyURL: "http://user:***@127.0.0.1:7890"}, got)
+	var row models.MediaSetting
+	require.NoError(t, db.First(&row, 1).Error)
+	assert.NotContains(t, row.TMDBKeyEncrypted, goodKey, "API Key 加密保存")
+	assert.NotContains(t, row.ProxyEncrypted, "pw@", "代理地址加密保存")
+
+	// 原样提交密码换成 *** 的地址：不改；不带 Key 时不改 Key
+	got, err = s.SaveSettings(ctx, SettingsInput{Language: "en-US", ProxyURL: ptr("http://user:***@127.0.0.1:7890")})
+	require.NoError(t, err)
+	assert.True(t, got.HasTMDBKey)
+	c, err := s.client(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	proxy, _ := fakeCipher{}.Decrypt(func() string { _ = db.First(&row, 1); return row.ProxyEncrypted }())
+	assert.Equal(t, "http://user:pw@127.0.0.1:7890", proxy)
+
+	for _, bad := range []SettingsInput{
+		{Language: "fr-FR"},
+		{TMDBKey: ptr("short")},
+		{TMDBKey: ptr(goodKey + " x")},
+		{ProxyURL: ptr("ftp://127.0.0.1:21")},
+	} {
+		_, saveErr := s.SaveSettings(ctx, bad)
+		assert.ErrorIs(t, saveErr, ErrInvalid)
+	}
+
+	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(""), ProxyURL: ptr("")})
+	require.NoError(t, err)
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyNone}, got, "清除 Key 与代理；语言留空时用默认值")
+	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrNoKey)
+}
+
+// 内置 Key：没填自己的 Key 时用它；填了自己的就用自己的；换成镜像或中转的接口地址时不用内置的（只发给官方地址）
+func TestBuiltinKey(t *testing.T) {
+	old := tmdb.BuiltinKey
+	t.Cleanup(func() { tmdb.BuiltinKey = old })
+	tmdb.BuiltinKey = goodKey
+	s, _ := newService(t)
+	ctx := context.Background()
+
+	got, err := s.Settings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyBuiltin, BuiltinKey: true}, got)
+	require.NoError(t, s.TestTMDB(ctx), "用内置 Key 访问（假服务只认 goodKey）")
+	res, err := s.Recognize(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p.BluRay.x264"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match, res.Message)
+	assert.Equal(t, 278, res.Match.ID)
+
+	// 自己的 Key 优先（这里故意填一个假服务不认的）
+	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr("fedcba9876543210fedcba9876543210")})
+	require.NoError(t, err)
+	assert.Equal(t, KeyUser, got.KeySource)
+	assert.True(t, got.HasTMDBKey)
+	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrUnauthorized)
+
+	// 清掉自己的 Key、接口地址换成中转：内置 Key 不发过去
+	var mirrorHits atomic.Int32
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mirrorHits.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(mirror.Close)
+	got, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(""), APIBaseURL: ptr(mirror.URL)})
+	require.NoError(t, err)
+	assert.Equal(t, KeyNone, got.KeySource)
+	assert.True(t, got.BuiltinKey)
+	err = s.TestTMDB(ctx)
+	require.ErrorIs(t, err, tmdb.ErrNoKey)
+	assert.Contains(t, err.Error(), "官方地址")
+	assert.Zero(t, mirrorHits.Load(), "内置 Key 没有发给中转")
+
+	// 换成 TMDB 官方的另一个域名：还能用内置的（这里不发请求）
+	got, err = s.SaveSettings(ctx, SettingsInput{APIBaseURL: ptr("api.tmdb.org")})
+	require.NoError(t, err)
+	assert.Equal(t, KeyBuiltin, got.KeySource)
+
+	// 没有内置 Key（从源码编译）
+	tmdb.BuiltinKey = ""
+	got, err = s.SaveSettings(ctx, SettingsInput{APIBaseURL: ptr("")})
+	require.NoError(t, err)
+	assert.Equal(t, Settings{Language: "zh-CN", KeySource: KeyNone}, got)
+	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrNoKey)
+}
+
+// 换了 TMDB 接口地址与图片地址：请求发到换的地址；清空以后回到默认（这里是 qa 构建给的假服务）
+func TestCustomTMDBBaseURLs(t *testing.T) {
+	s, db := newService(t)
+	ctx := context.Background()
+	var mirrorHits atomic.Int32
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mirrorHits.Add(1)
+		if r.URL.Path != "/3/configuration" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(mirror.Close)
+
+	got, err := s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr(goodKey), APIBaseURL: ptr(mirror.URL + "/"), ImageBaseURL: ptr("static.example.com")})
+	require.NoError(t, err)
+	assert.Equal(t, mirror.URL+"/3", got.APIBaseURL)
+	assert.Equal(t, "https://static.example.com/t/p/", got.ImageBaseURL, "只写域名时补上 /t/p/")
+	require.NoError(t, s.TestTMDB(ctx))
+	assert.Equal(t, int32(1), mirrorHits.Load(), "测试连接走换的接口地址")
+	c, err := s.TMDB(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "https://static.example.com/t/p/w500/a.jpg", c.PosterURL("/a.jpg", "w500"))
+	var row models.MediaSetting
+	require.NoError(t, db.First(&row, 1).Error)
+	assert.Equal(t, mirror.URL+"/3", row.APIBaseURL)
+
+	// 不带这两项时不改
+	got, err = s.SaveSettings(ctx, SettingsInput{Language: "zh-CN"})
+	require.NoError(t, err)
+	assert.Equal(t, mirror.URL+"/3", got.APIBaseURL)
+
+	for _, bad := range []SettingsInput{{APIBaseURL: ptr("ftp://api.tmdb.org")}, {ImageBaseURL: ptr("https://u:p@image.tmdb.org")}} {
+		_, saveErr := s.SaveSettings(ctx, bad)
+		assert.ErrorIs(t, saveErr, ErrInvalid)
+	}
+
+	got, err = s.SaveSettings(ctx, SettingsInput{APIBaseURL: ptr(""), ImageBaseURL: ptr("")})
+	require.NoError(t, err)
+	assert.Empty(t, got.APIBaseURL)
+	assert.Empty(t, got.ImageBaseURL)
+	require.NoError(t, s.TestTMDB(ctx), "清空以后回到默认地址")
+	assert.Equal(t, int32(1), mirrorHits.Load())
+	c, err = s.TMDB(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "https://image.tmdb.org/t/p/w500/a.jpg", c.PosterURL("/a.jpg", "w500"))
+}
+
+// 只取图片的客户端不要 API Key，用设置里的图片地址
+func TestImagesWithoutKey(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	img := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mirror/w92/a.png" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("PNG"))
+	}))
+	t.Cleanup(img.Close)
+	_, err := s.SaveSettings(ctx, SettingsInput{ImageBaseURL: ptr(img.URL + "/mirror")})
+	require.NoError(t, err)
+	_, err = s.TMDB(ctx)
+	require.ErrorIs(t, err, tmdb.ErrNoKey)
+	c, err := s.Images(ctx)
+	require.NoError(t, err)
+	b, err := c.Image(ctx, "/a.png", "w92")
+	require.NoError(t, err)
+	assert.Equal(t, "PNG", string(b))
+}
+
+func TestTestTMDB(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	_, err := s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr("BADKEY0123456789abcdef")})
+	require.NoError(t, err)
+	assert.ErrorIs(t, s.TestTMDB(ctx), tmdb.ErrUnauthorized)
+	withKey(t, s)
+	assert.NoError(t, s.TestTMDB(ctx))
+}
+
+func TestRecognize(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	_, err := s.Recognize(ctx, Input{})
+	require.ErrorIs(t, err, ErrInvalid)
+
+	// 没有 API Key：只做标题解析
+	res, err := s.Recognize(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi"})
+	require.NoError(t, err)
+	assert.Equal(t, SourceNone, res.Source)
+	assert.Equal(t, "The Shawshank Redemption", res.Meta.NameEN)
+	assert.Equal(t, "The Shawshank Redemption 1994", res.Summary)
+	assert.Contains(t, res.Message, "没有填写 TMDB API Key")
+
+	withKey(t, s)
+	res, err = s.Recognize(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p.BluRay.x264-WiKi"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match)
+	assert.Equal(t, SourceSearch, res.Source)
+	assert.Equal(t, 278, res.Match.ID)
+	assert.Equal(t, "tt0111161", res.Match.IMDbID, "认定后用详情补全（搜索结果里没有 IMDb 编号）")
+	assert.Equal(t, "希望让人自由。", res.Match.Overview)
+	assert.InDelta(t, 1.4, res.Score, 0.001, "名字相同 1 + 年份相同 0.25 + 类型 0.05 + 排第一 0.1")
+	require.NotEmpty(t, res.Candidates)
+	assert.Equal(t, 278, res.Candidates[0].ID)
+
+	// 年份对不上：不认定，给出候选
+	res, err = s.Recognize(ctx, Input{Title: "The.Shawshank.Redemption.1971.1080p.BluRay"})
+	require.NoError(t, err)
+	assert.Nil(t, res.Match)
+	assert.NotEmpty(t, res.Candidates)
+	assert.Contains(t, res.Message, "没有找到可靠的匹配")
+
+	// 中文名也能搜（副标题里的）
+	res, err = s.Recognize(ctx, Input{Title: "TSR.1994.1080p", Subtitle: "肖申克的救赎 | 主演: 蒂姆·罗宾斯"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match)
+	assert.Equal(t, 278, res.Match.ID)
+
+	// 有 IMDb 编号时直接查找
+	res, err = s.Recognize(ctx, Input{Title: "Whatever.1080p", IMDbID: "https://www.imdb.com/title/tt0111161/"})
+	require.NoError(t, err)
+	assert.Equal(t, SourceIMDb, res.Source)
+	assert.Equal(t, 278, res.Match.ID)
+
+	// 剧集按剧集搜：后面几季的年份晚于首播年份不扣分；取不到详情时用搜索结果
+	res, err = s.Recognize(ctx, Input{Title: "Game.of.Thrones.S08E06.2019.1080p.WEB-DL"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match)
+	assert.Equal(t, 1399, res.Match.ID)
+	assert.Equal(t, "Game of Thrones", res.Match.OriginalTitle)
+	assert.Equal(t, tmdb.KindTV, res.Match.MediaType)
+
+	// TMDB 出错：解析结果照样返回，写明原因（搜过的名字读缓存，与 Key 无关，所以换一个没搜过的）
+	_, err = s.SaveSettings(ctx, SettingsInput{TMDBKey: ptr("BADKEY0123456789abcdef")})
+	require.NoError(t, err)
+	res, err = s.Recognize(ctx, Input{Title: "Unseen.Title.2001.1080p"})
+	require.NoError(t, err)
+	assert.Equal(t, "Unseen Title", res.Meta.NameEN)
+	assert.Equal(t, tmdb.ErrUnauthorized.Error(), res.Error)
+	assert.Empty(t, res.Message)
+
+	_, err = s.Recognize(ctx, Input{Title: strings.Repeat("长", maxInputLen+1)})
+	assert.ErrorIs(t, err, ErrInvalid)
+}
+
+func TestOverrides(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	withKey(t, s)
+	_, err := s.SetOverride(ctx, OverrideInput{Title: "Some.Unknown.Movie.2020.1080p", TMDBID: 278, MediaType: "music"})
+	require.ErrorIs(t, err, ErrInvalid)
+	_, err = s.SetOverride(ctx, OverrideInput{Title: "Some.Unknown.Movie.2020.1080p", TMDBID: 0, MediaType: tmdb.KindMovie})
+	require.ErrorIs(t, err, ErrInvalid)
+	_, err = s.SetOverride(ctx, OverrideInput{Title: "1080p", TMDBID: 278, MediaType: tmdb.KindMovie})
+	require.ErrorIs(t, err, ErrInvalid, "解析不出名字")
+	_, err = s.SetOverride(ctx, OverrideInput{Title: "Some.Unknown.Movie.2020.1080p", TMDBID: 999, MediaType: tmdb.KindMovie})
+	require.ErrorIs(t, err, ErrInvalid, "TMDB 上没有这个条目")
+
+	ov, err := s.SetOverride(ctx, OverrideInput{Title: "Some.Unknown.Movie.2020.1080p", Subtitle: "某部电影", TMDBID: 278, MediaType: tmdb.KindMovie})
+	require.NoError(t, err)
+	assert.Equal(t, "肖申克的救赎", ov.Title)
+	assert.Equal(t, "某部电影 / Some Unknown Movie 2020", ov.Label)
+
+	// 同一个解析结果（换了分辨率、制作组）都按纠正识别
+	res, err := s.Recognize(ctx, Input{Title: "Some.Unknown.Movie.2020.2160p.WEB-DL-GRP", Subtitle: "某部电影"})
+	require.NoError(t, err)
+	assert.Equal(t, SourceOverride, res.Source)
+	assert.Equal(t, 278, res.Match.ID)
+	assert.Equal(t, ov.ID, res.OverrideID)
+
+	// 再纠正一次覆盖原来的
+	_, err = s.SetOverride(ctx, OverrideInput{Title: "Some.Unknown.Movie.2020.720p", Subtitle: "某部电影", TMDBID: 278, MediaType: tmdb.KindMovie})
+	require.NoError(t, err)
+	list, err := s.Overrides(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+
+	require.NoError(t, s.DeleteOverride(ctx, list[0].ID))
+	assert.ErrorIs(t, s.DeleteOverride(ctx, list[0].ID), ErrNotFound)
+	res, err = s.Recognize(ctx, Input{Title: "Some.Unknown.Movie.2020.2160p", Subtitle: "某部电影"})
+	require.NoError(t, err)
+	assert.NotEqual(t, SourceOverride, res.Source)
+}
+
+func TestWords(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	withKey(t, s)
+	_, err := s.SaveWord(ctx, models.MediaWordRule{Kind: "drop", Pattern: "x"})
+	require.ErrorIs(t, err, ErrInvalid)
+	_, err = s.SaveWord(ctx, models.MediaWordRule{ID: 99, Kind: models.MediaWordBlock, Pattern: "x"})
+	require.ErrorIs(t, err, ErrNotFound)
+
+	w, err := s.SaveWord(ctx, models.MediaWordRule{Kind: models.MediaWordReplace, Pattern: "TSR", Replacement: "The.Shawshank.Redemption", Enabled: true, Note: " 简称 ", Offset: 5})
+	require.NoError(t, err)
+	assert.Equal(t, "简称", w.Note)
+	assert.Zero(t, w.Offset, "替换规则不留偏移")
+	res, err := s.Recognize(ctx, Input{Title: "TSR.1994.1080p.BluRay"})
+	require.NoError(t, err)
+	assert.Equal(t, []uint{w.ID}, res.RuleHits)
+	require.NotNil(t, res.Match)
+	assert.Equal(t, 278, res.Match.ID)
+
+	// 停用后不再套用
+	w.Enabled = false
+	w, err = s.SaveWord(ctx, *w)
+	require.NoError(t, err)
+	assert.False(t, w.Enabled)
+	res, err = s.Recognize(ctx, Input{Title: "TSR.1994.1080p.BluRay"})
+	require.NoError(t, err)
+	assert.Empty(t, res.RuleHits)
+
+	off, err := s.SaveWord(ctx, models.MediaWordRule{Kind: models.MediaWordOffset, Pattern: "Some.Show", Offset: -12, Enabled: true, Replacement: "x"})
+	require.NoError(t, err)
+	assert.Empty(t, off.Replacement)
+	res, err = s.Recognize(ctx, Input{Title: "Some.Show.S02E13.1080p"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Meta.Episode)
+
+	list, err := s.Words(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	require.NoError(t, s.DeleteWord(ctx, w.ID))
+	assert.ErrorIs(t, s.DeleteWord(ctx, w.ID), ErrNotFound)
+}
+
+// 只靠年份判成电影的标题，电影里没有可靠匹配时补搜剧集。
+func TestRecognizeFallsBackToTV(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	res, err := s.Recognize(context.Background(), Input{Title: "Game.of.Thrones.2019.1080p.BluRay"})
+	require.NoError(t, err)
+	assert.Equal(t, meta.TypeMovie, res.Meta.Type, "解析只看到年份")
+	require.NotNil(t, res.Match)
+	assert.Equal(t, 1399, res.Match.ID)
+	assert.Equal(t, tmdb.KindTV, res.Match.MediaType)
+}
+
+// 续集编号对不上（Inside Out 对 Inside Out 2）不算名字相同；同名的旧片年份差太多也不认定。
+func TestRecognizeSequelNumbers(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	res, err := s.Recognize(context.Background(), Input{Title: "Inside.Out.2024.1080p.WEB-DL"})
+	require.NoError(t, err)
+	assert.Nil(t, res.Match)
+	require.Len(t, res.Candidates, 2)
+	res, err = s.Recognize(context.Background(), Input{Title: "Inside.Out.2.2024.1080p.WEB-DL"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match)
+	assert.Equal(t, 1022789, res.Match.ID)
+}
+
+// 纠正保存英文名为主键、中文名为别名：同一个标题有没有中文副标题都命中；只有中文名的标题也命中。
+func TestOverrideAliases(t *testing.T) {
+	s, db := newService(t)
+	ctx := context.Background()
+	withKey(t, s)
+	// 先只按中文名纠正过一次
+	cnOnly, err := s.SetOverride(ctx, OverrideInput{Title: "奥本海默 2023 1080p", TMDBID: 278, MediaType: tmdb.KindMovie})
+	require.NoError(t, err)
+	assert.Equal(t, "movie|奥本海默|2023", cnOnly.Key)
+
+	ov, err := s.SetOverride(ctx, OverrideInput{Title: "Oppenheimer.2023.1080p.BluRay", Subtitle: "奥本海默 | 中字", TMDBID: 278, MediaType: tmdb.KindMovie})
+	require.NoError(t, err)
+	assert.Equal(t, "movie|oppenheimer|2023", ov.Key)
+	assert.Equal(t, "movie|奥本海默|2023", ov.AltKey)
+	var n int64
+	require.NoError(t, db.Model(&models.MediaOverride{}).Count(&n).Error)
+	assert.EqualValues(t, 1, n, "带英文名的纠正取代了只按中文名的那条")
+
+	for _, in := range []Input{
+		{Title: "Oppenheimer.2023.2160p.WEB-DL"},
+		{Title: "Oppenheimer.2023.2160p.WEB-DL", Subtitle: "奥本海默 | 国语"},
+		{Title: "奥本海默 2023 2160p WEB-DL"},
+	} {
+		res, err := s.Recognize(ctx, in)
+		require.NoError(t, err)
+		assert.Equal(t, SourceOverride, res.Source, in.Title+" "+in.Subtitle)
+		assert.Equal(t, ov.ID, res.OverrideID)
+	}
+}
+
+// 所有 TMDB 客户端共用服务的限速额度：每次识别新建客户端也不会重置。
+func TestSharedLimiter(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}))
+	srv := fakeTMDB(t)
+	s := New(Config{DB: db, Cipher: fakeCipher{}, BaseURL: srv.URL + "/3", RatePerSecond: 0.5})
+	withKey(t, s)
+	require.NoError(t, s.TestTMDB(context.Background()))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	assert.Error(t, s.TestTMDB(ctx), "第二次要等限速，100ms 内等不到")
+	c1, err := s.client(context.Background())
+	require.NoError(t, err)
+	c2, err := s.client(context.Background())
+	require.NoError(t, err)
+	assert.NotSame(t, c1, c2)
+}
+
+func TestPick(t *testing.T) {
+	m := meta.Meta{NameEN: "The Office US", Year: 2005, Type: meta.TypeTV}
+	us := Candidate{Result: tmdb.Result{Title: "The Office", Year: 2005, MediaType: tmdb.KindTV}, Score: 1.15}
+	uk := Candidate{Result: tmdb.Result{Title: "The Office", Year: 2001, MediaType: tmdb.KindTV}, Score: 1.1}
+	assert.Nil(t, pick(m, []Candidate{us, uk}), "名字只是部分相同、和第二名差不到 0.1：只列候选")
+	uk.Score = 0.5
+	assert.NotNil(t, pick(m, []Candidate{us, uk}))
+	exact := meta.Meta{NameEN: "Dune", Year: 2021, Type: meta.TypeMovie}
+	a := Candidate{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 1.4}
+	b := Candidate{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 1.35}
+	assert.NotNil(t, pick(exact, []Candidate{a, b}), "名字完全相同时不看分差")
+	assert.Nil(t, pick(exact, nil))
+}
+
+// Correction 只查手动纠正（套用识别词解析），不访问 TMDB：没有纠正时为 nil，有时给出类型、编号与纠正的编号。
+func TestCorrection(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	ctx := context.Background()
+	title := "Some.Unknown.Movie.2020.1080p"
+	got, err := s.Correction(ctx, Input{Title: title})
+	require.NoError(t, err)
+	assert.Nil(t, got)
+	ov, err := s.SetOverride(ctx, OverrideInput{Title: title, MediaType: tmdb.KindMovie, TMDBID: 278})
+	require.NoError(t, err)
+	got, err = s.Correction(ctx, Input{Title: "Some.Unknown.Movie.2020.2160p.WEB-DL-GRP"})
+	require.NoError(t, err)
+	require.NotNil(t, got, "换了分辨率、制作组也对得上")
+	assert.Equal(t, Correction{MediaType: tmdb.KindMovie, TMDBID: 278, OverrideID: ov.ID}, *got)
+	_, err = s.Correction(ctx, Input{})
+	assert.Error(t, err, "标题与副标题都空")
+}
+
+// 标题里只有年份（判成电影）、同名电影在 TMDB 上没有年份：不认定、列出候选，也不改认成同名的剧集（剧集首播早于标题年份不扣分）。
+func TestRecognizeUndatedMovieNotSwappedForTV(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	res, err := s.Recognize(context.Background(), Input{Title: "Zorro.2024.1080p.WEB-DL.H264-GRP"})
+	require.NoError(t, err)
+	assert.Nil(t, res.Match, "没有年份的同名候选不直接认定")
+	require.NotEmpty(t, res.Candidates)
+	ids := []int{}
+	for _, c := range res.Candidates {
+		ids = append(ids, c.ID)
+	}
+	assert.Contains(t, ids, 9001)
+	assert.NotContains(t, ids, 9002, "没有补搜剧集")
+}
+
+func TestScore(t *testing.T) {
+	m := meta.Meta{NameEN: "Shogun", Year: 2024, Type: meta.TypeTV, Season: 1}
+	assert.Equal(t, 1.0, titleScore(m, tmdb.Result{Title: "幕府将军", OriginalTitle: "Shōgun"}), "去掉重音再比")
+	assert.Equal(t, 0.75, titleScore(meta.Meta{NameEN: "The Office US"}, tmdb.Result{Title: "The Office"}))
+	assert.Equal(t, 0.0, titleScore(meta.Meta{NameEN: "Hell"}, tmdb.Result{Title: "Hellboy"}), "短的不到长的六成不算包含")
+	assert.Equal(t, 1.0, titleScore(meta.Meta{NameEN: "Mission Impossible Dead Reckoning Part One"}, tmdb.Result{OriginalTitle: "Mission: Impossible - Dead Reckoning Part One"}))
+	assert.Equal(t, 0.0, titleScore(meta.Meta{}, tmdb.Result{Title: "x"}))
+
+	movie := meta.Meta{NameEN: "Dune", Year: 2021, Type: meta.TypeMovie}
+	assert.InDelta(t, 1.4, score(movie, tmdb.Result{Title: "Dune", Year: 2021, MediaType: tmdb.KindMovie}, 0), 0.001)
+	assert.InDelta(t, 0.75, score(movie, tmdb.Result{Title: "Dune", Year: 1984, MediaType: tmdb.KindMovie}, 2), 0.001, "同名不同年的翻拍片扣分")
+	assert.InDelta(t, 1.2, score(movie, tmdb.Result{Title: "Dune", Year: 2022, MediaType: tmdb.KindMovie}, 1), 0.001, "差一年 +0.1、排第二 +0.05")
+	tv := meta.Meta{NameEN: "House of the Dragon", Year: 2024, Type: meta.TypeTV, Season: 2}
+	assert.InDelta(t, 1.15, score(tv, tmdb.Result{Title: "House of the Dragon", Year: 2022, MediaType: tmdb.KindTV}, 0), 0.001, "后面几季不扣分")
+
+	assert.NotNil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 1.0}}))
+	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 0.9}}))
+	// 标题里有年份、候选没有年份（同名的冷门条目常常没有日期）：核对不了年份，不认定，在有年份的里面挑
+	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 1.15}}))
+	got := pick(movie, []Candidate{{Result: tmdb.Result{ID: 1, Title: "Dune"}, Score: 1.15}, {Result: tmdb.Result{ID: 2, Title: "Dune", Year: 2021}, Score: 1.1}})
+	require.NotNil(t, got)
+	assert.Equal(t, 2, got.ID)
+	assert.NotNil(t, pick(meta.Meta{NameEN: "Dune", Type: meta.TypeMovie}, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 1.05}}), "标题里没有年份时照旧")
+	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Other"}, Score: 2}}), "名字对不上分再高也不认")
+
+	assert.Equal(t, 0.0, titleScore(meta.Meta{NameEN: "Inside Out"}, tmdb.Result{Title: "Inside Out 2"}), "续集编号对不上")
+	assert.Equal(t, 0.0, titleScore(meta.Meta{NameEN: "The Wandering Earth"}, tmdb.Result{Title: "The Wandering Earth II"}))
+	assert.Equal(t, 0.0, titleScore(meta.Meta{NameCN: "流浪地球"}, tmdb.Result{Title: "流浪地球2"}))
+	assert.Equal(t, 0.75, titleScore(meta.Meta{NameEN: "Blade Runner 2049 Final"}, tmdb.Result{Title: "Blade Runner 2049"}))
+}
+
+func TestOverrideKey(t *testing.T) {
+	p, a := overrideKeys(meta.Meta{Year: 2020})
+	assert.Empty(t, p)
+	assert.Empty(t, a)
+	p, a = overrideKeys(meta.Meta{NameEN: "Dune", NameCN: "沙丘", Year: 2021, Type: meta.TypeMovie})
+	assert.Equal(t, "movie|dune|2021", p)
+	assert.Equal(t, "movie|沙丘|2021", a)
+	p, a = overrideKeys(meta.Meta{NameCN: "繁花", Year: 2023, Type: meta.TypeTV})
+	assert.Equal(t, "tv|繁花", p, "剧集不带年份")
+	assert.Empty(t, a)
+	long := overrideKey(meta.Meta{NameEN: strings.Repeat("a", 300)}, strings.Repeat("a", 300))
+	assert.True(t, strings.HasPrefix(long, "h|"))
+	assert.LessOrEqual(t, len(long), 255)
+}
+
+func TestMaskProxy(t *testing.T) {
+	assert.Equal(t, "socks5://u:***@1.2.3.4:1080", maskProxy("socks5://u:p@1.2.3.4:1080"))
+	assert.Equal(t, "http://127.0.0.1:7890", maskProxy("http://127.0.0.1:7890"))
+	assert.Equal(t, "http://u@h:1", maskProxy("http://u@h:1"))
+}
+
+// 刮削用的 Fanart.tv 与 OMDb 的 Key：加密保存、只说填了没有；没填时建不了客户端；测试按设置访问一次
+func TestSourceKeys(t *testing.T) {
+	var fanartKey, fanartClient, omdbKey atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/fanart/movies/550":
+			fanartKey.Store(r.Header.Get("api-key"))
+			fanartClient.Store(r.Header.Get("client-key"))
+			if r.Header.Get("api-key") != "fanartkey0123456789abcdef0123456" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"name":"Fight Club"}`))
+		case "/omdb/":
+			omdbKey.Store(r.URL.Query().Get("apikey"))
+			if r.URL.Query().Get("apikey") != "omdbkey1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"Response":"False","Error":"Invalid API key!"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"Response":"True","imdbID":"tt0137523","Title":"Fight Club","imdbRating":"8.8"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}))
+	s := New(Config{DB: db, Cipher: fakeCipher{}, FanartBaseURL: srv.URL + "/fanart", OMDbBaseURL: srv.URL + "/omdb/"})
+	ctx := context.Background()
+
+	_, err = s.Fanart(ctx)
+	assert.ErrorIs(t, err, fanart.ErrNoKey)
+	_, err = s.OMDb(ctx)
+	assert.ErrorIs(t, err, omdb.ErrNoKey)
+	assert.ErrorIs(t, s.TestFanart(ctx), fanart.ErrNoKey)
+
+	got, err := s.SaveSettings(ctx, SettingsInput{
+		FanartKey: ptr(" fanartkey0123456789abcdef0123456 "), FanartClientKey: ptr("personal0123456789"), OMDbKey: ptr("omdbkey1"),
+	})
+	require.NoError(t, err)
+	assert.True(t, got.HasFanartKey)
+	assert.True(t, got.HasFanartClientKey)
+	assert.True(t, got.HasOMDbKey)
+	var row models.MediaSetting
+	require.NoError(t, db.First(&row, 1).Error)
+	assert.NotContains(t, row.FanartKeyEncrypted, "fanartkey", "加密保存")
+	assert.NotContains(t, row.OMDbKeyEncrypted, "omdbkey1")
+	require.NoError(t, s.TestFanart(ctx))
+	require.NoError(t, s.TestOMDb(ctx))
+	assert.Equal(t, "fanartkey0123456789abcdef0123456", fanartKey.Load())
+	assert.Equal(t, "personal0123456789", fanartClient.Load(), "个人 Key 和项目的 Key 一起发")
+	assert.Equal(t, "omdbkey1", omdbKey.Load())
+
+	// 不带 Key 时不改；格式不对的不收
+	got, err = s.SaveSettings(ctx, SettingsInput{Language: "zh-CN"})
+	require.NoError(t, err)
+	assert.True(t, got.HasFanartKey)
+	for _, bad := range []SettingsInput{{FanartKey: ptr("has space key")}, {OMDbKey: ptr("abc")}, {OMDbKey: ptr("key;drop")}} {
+		_, err = s.SaveSettings(ctx, bad)
+		assert.ErrorIs(t, err, ErrInvalid)
+	}
+	_, err = s.SaveSettings(ctx, SettingsInput{OMDbKey: ptr("wrongkey")})
+	require.NoError(t, err)
+	assert.ErrorIs(t, s.TestOMDb(ctx), omdb.ErrUnauthorized)
+
+	got, err = s.SaveSettings(ctx, SettingsInput{FanartKey: ptr(""), FanartClientKey: ptr(""), OMDbKey: ptr("")})
+	require.NoError(t, err)
+	assert.False(t, got.HasFanartKey)
+	assert.False(t, got.HasFanartClientKey)
+	assert.False(t, got.HasOMDbKey)
+}
+
+// 候选：电影与剧集都搜、按分数排、按 limit 截；没填 Key 时报 ErrNoKey
+func TestCandidates(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+	_, err := s.Candidates(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p"}, 8)
+	require.ErrorIs(t, err, tmdb.ErrNoKey)
+	_, err = s.Candidates(ctx, Input{}, 8)
+	require.ErrorIs(t, err, ErrInvalid)
+
+	withKey(t, s)
+	got, err := s.Candidates(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p"}, 8)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, 278, got[0].ID)
+	assert.Equal(t, 5000, got[1].ID)
+	assert.Greater(t, got[0].Score, got[1].Score)
+
+	got, err = s.Candidates(ctx, Input{Title: "The.Shawshank.Redemption.1994.1080p"}, 0)
+	require.NoError(t, err)
+	assert.Len(t, got, 1, "limit 至少 1")
+	got, err = s.Candidates(ctx, Input{Title: "Game.of.Thrones.2011"}, 50)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "只靠年份判成电影的也搜剧集")
+	assert.Equal(t, tmdb.KindTV, got[0].MediaType)
+	got, err = s.Candidates(ctx, Input{Title: "Nothing.Matches.Here.2020"}, 8)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+// TheTVDB：Key 与订阅 PIN 加密保存、只说有没有；没填 Key 时 ErrNoKey；测试时用填的 Key 与 PIN 登录（没有 PIN 时不带）；
+// 格式不对的不收；清除以后不再有。
+func TestTVDBSettings(t *testing.T) {
+	var mu sync.Mutex
+	var logins []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v4/login":
+			var in map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			mu.Lock()
+			logins = append(logins, in)
+			mu.Unlock()
+			if in["apikey"] != "aaaa-bbbb-cccc" || in["pin"] != "PIN42" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"token":"tok"}}`))
+		case "/v4/series/81189":
+			if r.Header.Get("Authorization") != "Bearer tok" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"id":81189}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}))
+	s := New(Config{DB: db, Cipher: fakeCipher{}, TVDBBaseURL: srv.URL + "/v4"})
+	ctx := context.Background()
+
+	_, err = s.TVDB(ctx)
+	require.ErrorIs(t, err, tvdb.ErrNoKey)
+	require.ErrorIs(t, s.TestTVDB(ctx), tvdb.ErrNoKey)
+
+	got, err := s.SaveSettings(ctx, SettingsInput{TVDBKey: ptr(" aaaa-bbbb-cccc ")})
+	require.NoError(t, err)
+	assert.True(t, got.HasTVDBKey)
+	assert.False(t, got.HasTVDBPIN)
+	err = s.TestTVDB(ctx)
+	require.ErrorIs(t, err, tvdb.ErrUnauthorized, "这个 Key 要 PIN")
+	assert.NotContains(t, err.Error(), "aaaa-bbbb-cccc")
+	mu.Lock()
+	assert.Equal(t, map[string]any{"apikey": "aaaa-bbbb-cccc"}, logins[0], "没有 PIN 时不带 pin")
+	mu.Unlock()
+
+	got, err = s.SaveSettings(ctx, SettingsInput{TVDBPIN: ptr("PIN42")})
+	require.NoError(t, err)
+	assert.True(t, got.HasTVDBKey, "只改 PIN 时 Key 不动")
+	assert.True(t, got.HasTVDBPIN)
+	var row models.MediaSetting
+	require.NoError(t, db.First(&row, 1).Error)
+	assert.NotContains(t, row.TVDBKeyEncrypted, "aaaa-bbbb-cccc", "加密保存")
+	assert.NotContains(t, row.TVDBPINEncrypted, "PIN42")
+	require.NoError(t, s.TestTVDB(ctx))
+	view, err := s.Settings(ctx)
+	require.NoError(t, err)
+	b, err := json.Marshal(view)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "aaaa-bbbb-cccc")
+	assert.NotContains(t, string(b), "PIN42")
+	assert.Contains(t, string(b), `"has_tvdb_key":true,"has_tvdb_pin":true`)
+
+	for _, bad := range []SettingsInput{{TVDBKey: ptr("short")}, {TVDBKey: ptr("has space key")}, {TVDBPIN: ptr("p1")}, {TVDBPIN: ptr("PIN-42")}} {
+		_, err = s.SaveSettings(ctx, bad)
+		require.ErrorIs(t, err, ErrInvalid)
+	}
+	_, err = s.SaveSettings(ctx, SettingsInput{TVDBPIN: ptr("PIN-42")})
+	assert.Contains(t, err.Error(), "TheTVDB 订阅 PIN 格式不对")
+
+	got, err = s.SaveSettings(ctx, SettingsInput{TVDBKey: ptr(""), TVDBPIN: ptr("")})
+	require.NoError(t, err)
+	assert.False(t, got.HasTVDBKey)
+	assert.False(t, got.HasTVDBPIN)
+	_, err = s.TVDB(ctx)
+	require.ErrorIs(t, err, tvdb.ErrNoKey)
+}

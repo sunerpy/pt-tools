@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sanitizeHtml } from "./sanitizer";
+import { sanitizeHtml, sanitizeUrl } from "./sanitizer";
 
 /**
  * Counts `<tr` start tags that a real HTML tokenizer would see, i.e. tags that are
@@ -158,5 +158,54 @@ describe("sanitizeHtml", () => {
     expect(sanitized).toContain("基本信息");
     expect(sanitized).toContain(`<input name="torrent_name"`);
     expect(sanitized).not.toContain("abcdef0123456789");
+  });
+});
+
+/*
+ * 页面地址原样进 site-info.json 和 Issue 正文：详情、下载页的地址常带 passkey 等凭证。
+ * HTML 原来只按固定的几种写法脱敏，密码框、CSRF 隐藏字段与 meta 里的值照样留着。
+ */
+describe("sanitizeUrl", () => {
+  it("把查询参数里的凭证换成 REMOVED，其余参数保留", () => {
+    const out = sanitizeUrl(
+      "https://tracker.example/download.php?id=42&passkey=0123456789abcdef0123&token=t0k&downhash=dh",
+    );
+    expect(out).toContain("id=42");
+    expect(out).not.toContain("0123456789abcdef0123");
+    expect(out).not.toContain("t0k");
+    expect(out).not.toContain("=dh");
+    expect(out).toContain("passkey=REMOVED");
+  });
+
+  it("去掉地址里的用户名与密码", () => {
+    expect(sanitizeUrl("https://alice:hunter2@tracker.example/index.php")).not.toContain("hunter2");
+  });
+
+  it("解析不了的地址也做字符串脱敏", () => {
+    expect(sanitizeUrl("not a url passkey=0123456789abcdef0123")).not.toContain(
+      "0123456789abcdef0123",
+    );
+  });
+});
+
+describe("sanitizeHtml: 表单与 meta 里的秘密", () => {
+  it("清空密码框与可疑隐藏字段的值，普通隐藏字段保留", () => {
+    const out = sanitizeHtml(
+      '<form><input type="password" name="pw" value="hunter2">' +
+        "<input type='hidden' name='csrf_token' value='abc123xyz'>" +
+        '<input type="hidden" name="id" value="42"></form>',
+    );
+    expect(out).not.toContain("hunter2");
+    expect(out).not.toContain("abc123xyz");
+    expect(out).toContain('value="42"');
+    expect(out).toContain("</form>");
+  });
+
+  it("清空 CSRF meta 的 content", () => {
+    const out = sanitizeHtml(
+      '<head><meta name="csrf-token" content="s3cr3tvalue"><title>x</title></head>',
+    );
+    expect(out).not.toContain("s3cr3tvalue");
+    expect(out).toContain("<title>x</title>");
   });
 });

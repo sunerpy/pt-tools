@@ -1,0 +1,15 @@
+appname         = pt-tools
+version         = 0.0.0
+display_name    = pt-tools
+platform        = x86
+maintainer      = sunerpy
+maintainer_url  = https://github.com/sunerpy/pt-tools
+distributor     = conversun
+distributor_url = https://github.com/conversun/fnos-apps
+desktop_uidir   = ui
+desktop_applaunchname = pt-tools.Application
+service_port    = 8080
+checkport       = false
+desc            = PT 站点自动化管理：RSS 自动下载、多站点搜索与数据统计、签到、登录保号提醒、刷流，统一管理 qBittorrent 和 Transmission。默认账号 admin，密码 adminadmin，首次登录后请修改。
+source          = thirdparty
+checksum        = 

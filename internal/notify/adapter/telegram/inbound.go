@@ -2,8 +2,11 @@ package telegram
 
 import (
 	"context"
+	"errors"
+	"math/rand/v2"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mymmrac/telego"
 
@@ -12,9 +15,19 @@ import (
 
 const denyMessage = "您没有权限执行此操作。"
 
+// 长轮询意外结束后重启的退避：从 defaultRestartBase 起翻倍，最长 defaultRestartMax。
+const (
+	defaultRestartBase = time.Second
+	defaultRestartMax  = time.Minute
+)
+
+// runInbound 监督长轮询：启动失败或 updates channel 在 poll context 还活着时被关掉，
+// 都标记不健康、记日志，按退避重启，直到 Close 取消 poll context。
+// 原来出错就返回，入站命令从此停掉而 Healthy() 仍可能为真，只能重启进程或改配置触发热重载才恢复。
 func (c *TelegramChannel) runInbound(ctx context.Context, src updateSource) {
 	c.mu.RLock()
 	done := c.pollDone
+	base, maxWait := c.restartBase, c.restartMax
 	c.mu.RUnlock()
 	defer func() {
 		if done != nil {
@@ -25,24 +38,64 @@ func (c *TelegramChannel) runInbound(ctx context.Context, src updateSource) {
 	if src == nil {
 		return
 	}
-
-	updates, err := src(ctx)
-	if err != nil {
-		c.logger.Warnf("telegram: 启动 long-poll 失败 conf=%d: %v", c.confID, err)
-		c.markUnhealthy()
-		return
+	if base <= 0 {
+		base = defaultRestartBase
+	}
+	if maxWait < base {
+		maxWait = max(defaultRestartMax, base)
 	}
 
+	wait := base
+	for {
+		started := time.Now()
+		updates, err := src(ctx)
+		if err == nil {
+			c.markHealthyIfPolling(ctx)
+			if !c.consumeUpdates(ctx, updates) {
+				return
+			}
+			err = errors.New("updates channel 意外关闭")
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		c.logger.Warnf("telegram: long-poll 中断 conf=%d: %v，%s 后重启", c.confID, err, wait)
+		c.markUnhealthy()
+		if time.Since(started) > maxWait {
+			wait = base // 上一轮跑了足够久，不是连续失败，退避从头算
+		}
+		timer := time.NewTimer(wait + rand.N(wait/2+1))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		wait = min(wait*2, maxWait)
+	}
+}
+
+// consumeUpdates 处理 updates 直到 channel 关闭（返回 true）或 ctx 结束（返回 false）。
+func (c *TelegramChannel) consumeUpdates(ctx context.Context, updates <-chan telego.Update) bool {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case upd, ok := <-updates:
 			if !ok {
-				return
+				return true
 			}
 			c.handleUpdate(ctx, upd)
 		}
+	}
+}
+
+// markHealthyIfPolling 在长轮询（重新）启动成功后恢复健康；Close 已取消 ctx 时不动。
+func (c *TelegramChannel) markHealthyIfPolling(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ctx.Err() == nil {
+		c.healthy = true
 	}
 }
 

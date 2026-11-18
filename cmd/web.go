@@ -19,6 +19,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/internal/chatops"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
@@ -34,7 +35,12 @@ import (
 	// Side-effect imports register notify channel adapters into the notify
 	// default registry during process init so that bootstrapChatOps can
 	// instantiate per-conf channel implementations.
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/bark"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/dingtalk"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/feishu"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/ntfy"
 	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/qq"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/serverchan"
 	telegramadapter "github.com/sunerpy/pt-tools/internal/notify/adapter/telegram"
 	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/wecom"
 )
@@ -58,6 +64,8 @@ var webCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		version.CleanupOldBinary()
 
+		// 只有 Web 服务在启动时换上网页或命令行放好的待恢复备份（别的子命令也走 InitRuntime）
+		core.EnablePendingRestore()
 		if _, err := core.InitRuntime(); err != nil {
 			color.Red("初始化失败: %v", err)
 			return
@@ -73,6 +81,10 @@ var webCmd = &cobra.Command{
 		if err := store.SyncSites(registeredSites); err != nil {
 			global.GetSlogger().Warnf("同步站点到数据库失败: %v", err)
 		}
+		// 站点代理（全局设置）要在站点实例、调度器发出第一个站点请求之前装上
+		if err := store.LoadSiteProxyPolicy(); err != nil {
+			global.GetSlogger().Warnf("[站点代理] %v", err)
+		}
 
 		gl, _ := store.GetGlobalOnly()
 		if strings.TrimSpace(gl.DownloadDir) == "" {
@@ -85,11 +97,12 @@ var webCmd = &cobra.Command{
 		mgr := scheduler.NewManager()
 		mgr.InitFreeEndMonitor()
 
+		var userInfoService *v2.UserInfoService
 		userInfoRepo, err := v2.NewDBUserInfoRepo(global.GlobalDB.DB)
 		if err != nil {
 			global.GetSlogger().Warnf("初始化 UserInfoRepo 失败: %v", err)
 		} else {
-			userInfoService := v2.NewUserInfoService(v2.UserInfoServiceConfig{
+			userInfoService = v2.NewUserInfoService(v2.UserInfoServiceConfig{
 				Repo:     userInfoRepo,
 				CacheTTL: 5 * time.Minute,
 				Logger:   global.GetLogger(),
@@ -108,6 +121,8 @@ var webCmd = &cobra.Command{
 			global.GetSlogger().Info("SearchOrchestrator 初始化成功")
 
 			web.InitSiteRegistry(siteRegistry)
+			// 会续期的站点（BYR）换发的 Cookie 存回站点设置，重启以后接着用（见 site/v2/session_cookies.go）
+			v2.SetSessionCookieSink(renewedCookieSink(store))
 			sites, siteErr := store.ListSites()
 			if siteErr != nil {
 				global.GetSlogger().Warnf("读取站点配置失败: %v", siteErr)
@@ -148,6 +163,9 @@ var webCmd = &cobra.Command{
 
 		runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 		defer runtimeCancel()
+		// background 跟踪依赖 runtimeCtx 的后台 goroutine（RSS 重试、通道热重载）：
+		// 关闭时先取消 context 并等它们退出，之后就不会再有人重建通知通道
+		var background sync.WaitGroup
 
 		if bs != nil {
 			rssNotifier := app.NewRSSNotifier(global.GlobalDB.DB, bs.Deps().NotificationSvc)
@@ -162,40 +180,8 @@ var webCmd = &cobra.Command{
 			}
 
 			notifySvc := bs.Deps().NotificationSvc
-			db := global.GlobalDB.DB
-			digestFlush := func(ctx context.Context, confID uint, items []notify.DigestItem) {
-				title, text := notify.CombineDigest(items)
-				err := notifySvc.Push(ctx, app.Notification{
-					Title: title, Text: text, SourceConfID: confID,
-				})
-				now := time.Now()
-				ids := make([]uint, len(items))
-				for i, it := range items {
-					ids[i] = it.LogID
-				}
-				if err == nil {
-					db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
-						Where("id IN ?", ids).
-						Updates(map[string]any{
-							"result":       "sent",
-							"delivered_at": now,
-							"updated_at":   now,
-							"attempts":     gorm.Expr("attempts + 1"),
-						})
-					chatopsLogger().Infof("RSS digest 已投递 conf_id=%d items=%d", confID, len(items))
-					return
-				}
-				nextRetry := now.Add(5 * time.Second)
-				db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
-					Where("id IN ?", ids).
-					Updates(map[string]any{
-						"attempts":      gorm.Expr("attempts + 1"),
-						"next_retry_at": nextRetry,
-						"last_error":    err.Error(),
-						"updated_at":    now,
-					})
-				chatopsLogger().Warnf("RSS digest 投递失败 conf_id=%d items=%d err=%v", confID, len(items), err)
-			}
+			// 摘要刷写只发送仍是 pending 的行：被 filtered 抑制或已发出的不再发，只剩一条时保留按钮
+			digestFlush := app.NewRSSDigestFlush(global.GlobalDB.DB, notifySvc, chatopsLogger().Infof)
 			digestBuf := notify.NewDigestBuffer(runtimeCtx, digestFlush)
 
 			if rn, ok := rssNotifier.(interface {
@@ -207,7 +193,8 @@ var webCmd = &cobra.Command{
 			}
 
 			retryWorker := app.NewRSSRetryWorker(global.GlobalDB.DB, notifySvc)
-			go retryWorker.Run(runtimeCtx)
+			retryWorker.SetLogf(chatopsLogger().Warnf)
+			background.Go(func() { retryWorker.Run(runtimeCtx) })
 
 			fetcher := func(ctx context.Context, siteName, torrentID string) ([]byte, error) {
 				orchestrator := web.GetSearchOrchestrator()
@@ -221,36 +208,111 @@ var webCmd = &cobra.Command{
 				return site.Download(ctx, torrentID)
 			}
 			callbackActions := app.NewRSSCallbackActions(global.GlobalDB.DB, fetcher)
+			// 按钮推送继承 RSS 的到期暂停：推送前读一次详情拿到免费结束时间
+			callbackActions.SetDetailLookup(func(ctx context.Context, siteName, torrentID string) (*v2.TorrentItem, error) {
+				orchestrator := web.GetSearchOrchestrator()
+				if orchestrator == nil {
+					return nil, errors.New("搜索编排器未初始化")
+				}
+				site := orchestrator.GetSite(siteName)
+				if site == nil {
+					return nil, fmt.Errorf("站点 %s 未注册", siteName)
+				}
+				provider, ok := site.(v2.DetailFetcherProvider)
+				if !ok || provider.GetDetailFetcher() == nil {
+					return nil, fmt.Errorf("站点 %s 不支持读取种子详情", siteName)
+				}
+				return provider.GetDetailFetcher().GetTorrentDetail(ctx, torrentID, "", "")
+			})
 			registeredCallbackChannels := 0
-			for _, ch := range bs.channels {
+			bs.eachChannel(func(ch notify.Channel) {
 				if setter, ok := ch.(interface {
 					SetCallbackActionHandler(telegramadapter.CallbackActionHandler)
 				}); ok {
 					setter.SetCallbackActionHandler(callbackActions)
 					registeredCallbackChannels++
 				}
-			}
+			})
 
 			internal.SetRSSNotifier(&rssNotifierAdapter{inner: rssNotifier})
 			chatopsLogger().Infof("RSS notifier 已就绪")
 			chatopsLogger().Infof("RSS retry worker 已启动")
 			chatopsLogger().Infof("RSS callback actions 已注册 channels=%d", registeredCallbackChannels)
 
-			go runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions)
+			background.Go(func() { runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions) })
 		}
 
-		wireLoginReminderMonitor(mgr, store, siteRegistry, bs)
+		monitorNotifier := wireLoginReminderMonitor(mgr, store, siteRegistry, bs, userInfoService)
+		wireBrushMonitor(mgr, userInfoService)
+		wireTransferWorker(mgr, userInfoService)
+		wireReseedWorker(mgr, userInfoService, store, monitorNotifier)
+		wireCookieCloudWorker(mgr, store, siteRegistry)
+		wireBackupJob(mgr, store, monitorNotifier)
+		wireFreeWatchWorker(mgr, store, monitorNotifier)
 
 		srv := web.NewServer(store, mgr)
+		mediaSvc := newMediaService(store)
+		srv.SetMediaService(mediaSvc)
+		organizer := newOrganizeService(store, mgr, mediaSvc, monitorNotifier, userInfoService)
+		srv.SetOrganizeService(organizer)
+		subscriber := newSubscribeService(runtimeCtx, mgr, mediaSvc, organizer, userInfoService, monitorNotifier)
+		srv.SetSubscribeService(subscriber)
+		// API 令牌与 App API（M12）：令牌做的写操作记进操作审计；qB 兼容入口（M13）用同一个令牌库
+		tokens, appAudit := apitoken.New(global.GlobalDB.DB), app.NewAuditService(global.GlobalDB.DB)
+		srv.SetAPITokens(tokens, appAudit)
+		// 兼容入口先建好、交给关闭流程，等信号处理装好以后才开始监听（见下面的 start）；没设监听地址时也建好，
+		// 网页上设了地址以后马上开
+		qbitCompat := newQbitCompat(global.GlobalDB.DB, srv, mgr, store, tokens, appAudit)
+		// Servarr 兼容入口（媒体中心 M10）：主端口的 /servarr/radarr、/servarr/sonarr，凭有 servarr 权限的令牌
+		wireServarr(global.GlobalDB.DB, srv, subscriber, organizer, mediaSvc, tokens, appAudit)
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}
+		// 远程访问（M15）：设备只能经隧道调用 App API；默认关着，打开以后才有直连入口与 relay 连接
+		remoteHost := newRemoteHost(store, srv, monitorNotifier)
+		// 内置 AI 助手（M19）：设置在网页上，默认关着
+		assistantSvc := newAssistantService(runtimeCtx, store, srv)
+		srv.SetAssistantService(assistantSvc)
+		// NAS 监控（首页 NAS 概览 H2）：本机来源默认开着，其余来源在网页上添加
+		nasCollector := newNASCollector(global.GlobalDB.DB, store)
+		nasCollector.Start(runtimeCtx)
+		srv.SetNASCollector(nasCollector)
+		wireAttendanceAI(mgr, store, assistantSvc)
+		wireSubscribeReview(subscriber, assistantSvc)
+		wireAssistantChatOps(assistantSvc, bs)
 		wireQATestHooks(srv, bs)
 		if cfg, _ := store.Load(); cfg != nil {
 			maybeAutoStartReload(mgr, cfg)
 		}
 
-		shutdownDone := installShutdownHandler(srv, bs)
+		plan := shutdownPlan{
+			stopBackground: func() {
+				runtimeCancel()
+				bootCancel()
+				background.Wait()
+				stopSubscribeService(subscriber)
+				if organizer != nil {
+					organizer.Stop()
+				}
+			},
+			scheduler: mgr,
+			bs:        bs,
+			srv:       srv,
+		}
+		plan.qbitCompat = qbitCompat
+		if remoteHost != nil {
+			plan.remote = remoteHost
+		}
+		if assistantSvc != nil {
+			plan.assistant = assistantSvc
+		}
+		plan.nas = nasCollector
+		if dm := mgr.GetDownloaderManager(); dm != nil {
+			plan.downloaders = dm
+		}
+		shutdownDone := installShutdownHandler(plan)
+		// 信号处理装好以后才开始接请求：之前收到信号会直接退出，正在加的种子来不及收尾
+		qbitCompat.start()
 
 		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
 		go startVersionChecker()
@@ -287,6 +349,7 @@ func init() {
 	rootCmd.AddCommand(webCmd)
 	webCmd.Flags().StringVar(&host, "host", "0.0.0.0", "服务绑定主机")
 	webCmd.Flags().IntVar(&port, "port", 8080, "服务监听端口")
+	webCmd.Flags().StringVar(&qbitCompatAddr, "qbit-compat-addr", "", "qB 兼容入口的监听地址（如 0.0.0.0:8081）；不填时看环境变量 PT_QBIT_COMPAT_ADDR，都没有就不开")
 }
 
 func getRegisteredSitesFromRegistry(registry *v2.SiteRegistry) []models.RegisteredSite {
@@ -341,36 +404,143 @@ func startVersionChecker() {
 	}
 }
 
-// installShutdownHandler traps SIGINT/SIGTERM and tears down the ChatOps
-// subsystem in reverse-dependency order, then shuts down the main HTTP server
-// so Serve returns and the process exits cleanly without os.Exit.
-// Returns a done channel closed after both shutdowns complete; main should
-// block on it after Serve returns to ensure shutdown logs are flushed.
-func installShutdownHandler(srv *web.Server, bs *chatopsBootstrap) <-chan struct{} {
+// shutdownPlan 是收到 SIGINT/SIGTERM 之后依次执行的关闭步骤，每一步都有时限：
+//  0. qB 兼容入口、远程访问、AI 助手、NAS 监控：先关，之后不再有推送与工具调用进来，也不再去连 NAS
+//  1. stopBackground：取消 runtime 与 boot context，等 RSS 重试、通道热重载这些后台 goroutine 退出，
+//     之后不会再有人往通知通道里发、也不会再把通道重建起来
+//  2. scheduler：停掉 RSS 任务与各个监控器
+//  3. downloaders：关闭下载器实例
+//  4. bs：关闭通知通道、outbox 与会话
+//  5. srv：HTTP 最后关，前面几步执行期间进行中的请求还能拿到响应
+//
+// 原来只做第 4、5 步：RSS 任务、监控器和下载器都没停，热重载还可能在关闭途中把通道建回来。
+type shutdownPlan struct {
+	// qbitCompat 是 qB 兼容入口（M13，没开时为 nil）：最先关，免得后面关下载器时还有请求进来
+	qbitCompat interface {
+		Shutdown(ctx context.Context) error
+	}
+	// remote 是远程访问的主机端（M15）：和兼容入口一起先关（断开 relay 与设备会话），理由相同
+	remote interface{ Close() }
+	// assistant 是内置 AI 助手（M19）：入口都关了以后停掉进行中的回答（含关掉 MCP 会话、待确认标成过期），
+	// 免得后面关下载器时还有工具调用
+	assistant interface {
+		Close(ctx context.Context) error
+	}
+	// nas 是 NAS 监控的采集器（首页 NAS 概览 H2）：和上面几个一起先停，不在关闭途中再去连 NAS
+	nas interface {
+		Close(ctx context.Context) error
+	}
+	stopBackground func()
+	scheduler      interface{ StopAll() }
+	downloaders    interface{ CloseAll() }
+	bs             *chatopsBootstrap
+	srv            interface {
+		Shutdown(ctx context.Context) error
+	}
+	// stepTimeout 是单步的等待上限，0 取 chatopsShutdownPerStep。
+	stepTimeout time.Duration
+}
+
+// installShutdownHandler 注册 SIGINT/SIGTERM，收到后按 plan 关闭，返回的 channel 在关闭完成后关闭；
+// main 在 Serve 返回后等它，保证关闭日志写完。
+// signal.Notify 在返回之前注册：信号若在 Serve 起来之前到达，同样会被这里接住，
+// 而 web.Server.Shutdown 会让之后的 Serve 不再监听。
+func installShutdownHandler(plan shutdownPlan) <-chan struct{} {
 	done := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		defer close(done)
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		ctx, cancel := context.WithTimeout(context.Background(), chatopsShutdownBudget)
 		defer cancel()
-		if bs != nil {
-			if err := bs.Shutdown(ctx); err != nil {
-				global.GetSlogger().Warnf("ChatOps 子系统关闭出现错误: %v", err)
-			} else {
-				global.GetSlogger().Info("ChatOps 子系统已优雅关闭")
-			}
-		}
-		if srv != nil {
-			if err := srv.Shutdown(ctx); err != nil {
-				global.GetSlogger().Warnf("Web 服务关闭出现错误: %v", err)
-			} else {
-				global.GetSlogger().Info("Web 服务已优雅关闭")
-			}
-		}
+		runShutdown(ctx, plan)
 	}()
 	return done
+}
+
+func runShutdown(ctx context.Context, plan shutdownPlan) {
+	log := global.GetSlogger()
+	step := plan.stepTimeout
+	if step <= 0 {
+		step = chatopsShutdownPerStep
+	}
+	if plan.qbitCompat != nil {
+		stepCtx, cancel := context.WithTimeout(ctx, step)
+		if err := plan.qbitCompat.Shutdown(stepCtx); err != nil {
+			log.Warnf("qB 兼容入口关闭出现错误: %v", err)
+		}
+		cancel()
+	}
+	if plan.remote != nil {
+		if !runBounded(ctx, step, plan.remote.Close) {
+			log.Warnf("关闭远程访问超时（%s），继续关闭", step)
+		}
+	}
+	if plan.assistant != nil {
+		stepCtx, cancel := context.WithTimeout(ctx, step)
+		if err := plan.assistant.Close(stepCtx); err != nil {
+			log.Warnf("AI 助手关闭出现错误: %v", err)
+		}
+		cancel()
+	}
+	if plan.nas != nil {
+		stepCtx, cancel := context.WithTimeout(ctx, step)
+		if err := plan.nas.Close(stepCtx); err != nil {
+			log.Warnf("NAS 监控关闭出现错误: %v", err)
+		}
+		cancel()
+	}
+	if plan.stopBackground != nil {
+		if !runBounded(ctx, step, plan.stopBackground) {
+			log.Warnf("等待后台任务退出超时（%s），继续关闭", step)
+		}
+	}
+	if plan.scheduler != nil {
+		if runBounded(ctx, step, plan.scheduler.StopAll) {
+			log.Info("调度器已停止")
+		} else {
+			log.Warnf("调度器停止超时（%s），RSS 任务或监控器仍在收尾，继续关闭", step)
+		}
+	}
+	if plan.downloaders != nil {
+		if !runBounded(ctx, step, plan.downloaders.CloseAll) {
+			log.Warnf("关闭下载器超时（%s），继续关闭", step)
+		}
+	}
+	if plan.bs != nil {
+		if err := plan.bs.Shutdown(ctx); err != nil {
+			log.Warnf("ChatOps 子系统关闭出现错误: %v", err)
+		} else {
+			log.Info("ChatOps 子系统已优雅关闭")
+		}
+	}
+	if plan.srv != nil {
+		if err := plan.srv.Shutdown(ctx); err != nil {
+			log.Warnf("Web 服务关闭出现错误: %v", err)
+		} else {
+			log.Info("Web 服务已优雅关闭")
+		}
+	}
+}
+
+// runBounded 执行 fn，最多等 timeout 或 ctx 结束；等不到时返回 false，fn 留在后台跑完。
+func runBounded(ctx context.Context, timeout time.Duration, fn func()) bool {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // chatopsBootstrap holds wired ChatOps + Notify subsystem handles so the web
@@ -379,15 +549,24 @@ func installShutdownHandler(srv *web.Server, bs *chatopsBootstrap) <-chan struct
 // of the system must remain available even when a single notification channel
 // is misconfigured.
 type chatopsBootstrap struct {
-	deps      *web.ChatOpsDeps
-	registry  *notify.Registry
-	outbox    *notify.OutboxWorker
-	manager   *liveNotifyManager
-	channels  map[uint]notify.Channel
-	sessions  *chatops.SessionStore
-	chain     *chatops.MessageChain
+	deps     *web.ChatOpsDeps
+	registry *notify.Registry
+	outbox   *notify.OutboxWorker
+	manager  *liveNotifyManager
+	sessions *chatops.SessionStore
+	chain    *chatops.MessageChain
+
+	// mu 保护 channels 与 closed：热重载在后台 goroutine 里关旧建新、整表替换，
+	// Shutdown 在信号处理 goroutine 里遍历关闭，原来两边都不加锁。
+	mu       sync.Mutex
+	channels map[uint]notify.Channel
+	closed   bool // Shutdown 之后为真：热重载不再建通道
+
 	closeOnce sync.Once
 }
+
+// errChatOpsShutDown 表示 ChatOps 已关闭，热重载不再执行。
+var errChatOpsShutDown = errors.New("ChatOps 已关闭，跳过通道热重载")
 
 func (b *chatopsBootstrap) Deps() *web.ChatOpsDeps {
 	if b == nil {
@@ -407,7 +586,21 @@ func (b *chatopsBootstrap) ChannelCount() int {
 	if b == nil {
 		return 0
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return len(b.channels)
+}
+
+// eachChannel 在锁内逐个访问当前的通道实例。
+func (b *chatopsBootstrap) eachChannel(fn func(notify.Channel)) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, ch := range b.channels {
+		fn(ch)
+	}
 }
 
 // Shutdown closes adapters first, then stops the outbox worker, then the
@@ -420,7 +613,16 @@ func (b *chatopsBootstrap) Shutdown(ctx context.Context) error {
 	var firstErr error
 	b.closeOnce.Do(func() {
 		log := chatopsLogger()
-		for confID, ch := range b.channels {
+		// 先在锁内摘下通道表并标记关闭：之后的热重载直接返回，live 投递也不再拿到这些实例
+		b.mu.Lock()
+		b.closed = true
+		channels := b.channels
+		b.channels = map[uint]notify.Channel{}
+		if b.manager != nil {
+			b.manager.SetChannels(nil)
+		}
+		b.mu.Unlock()
+		for confID, ch := range channels {
 			stepCtx, cancel := context.WithTimeout(ctx, chatopsShutdownPerStep)
 			if err := ch.Close(stepCtx); err != nil {
 				log.Warnf("ChatOps 通道关闭失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
@@ -463,12 +665,21 @@ func bootstrapChatOps(
 	auditSvc := app.NewAuditService(db)
 	bindingSvc := app.NewBindingService(db, chatopsBindingCreator)
 	liveManager := newLiveNotifyManager(nil)
+	// 全局消息模板：库里的先读进来，保存与恢复默认时由 TemplateService 整体替换
+	liveManager.templates = notify.NewTemplates(chatopsLogger().Warnf)
+	templateSvc := app.NewTemplateService(db, liveManager.templates)
+	if err := templateSvc.Load(ctx); err != nil {
+		chatopsLogger().Warnf("读取消息模板失败，先用内置文字: %v", err)
+	}
 	notifSvc := app.NewNotificationService(db, liveManager, chatopsPushTimeout)
 	taskSvc := app.NewTaskService(mgr)
 	siteSvc := app.NewSiteService(store, nil)
 	torrentSvc := app.NewTorrentService(mgr.GetDownloaderManager())
 
 	outbox := notify.NewOutboxWorker(db, registry, chatopsOutboxInterval)
+	// 重试经运行中的通道投递：按配置另建实例会抢 QQ 端口、和 Telegram 长轮询抢更新，库里的配置也是密文
+	outbox.SetLiveSender(outboxLiveSender{m: liveManager})
+	outbox.SetTemplates(liveManager.templates)
 	outbox.Start(ctx)
 
 	rateLimiter := chatops.NewRateLimiter()
@@ -486,6 +697,7 @@ func bootstrapChatOps(
 		RSSWizard:  &chatopsRSSWizardService{store: store, db: db},
 		Bindings:   &commandsBindingResolver{lookup: bindings},
 		Sessions:   sessionStore,
+		Attendance: attendanceCommands{mgr: mgr},
 	})
 
 	chain := chatops.NewMessageChain(
@@ -497,6 +709,8 @@ func bootstrapChatOps(
 		sessionStore,
 		liveManager,
 	)
+	chain.SetLogf(log.Warnf)
+	chain.SetTemplates(liveManager.templates)
 
 	channels, err := initEnabledChannels(ctx, db, registry, chain.Process, log)
 	if err != nil {
@@ -508,6 +722,7 @@ func bootstrapChatOps(
 		NotificationSvc: notifSvc,
 		BindingSvc:      bindingSvc,
 		AuditSvc:        auditSvc,
+		TemplateSvc:     templateSvc,
 	}
 
 	return &chatopsBootstrap{
@@ -641,6 +856,8 @@ func (s *chatopsRSSWizardService) ListNotificationChannels(ctx context.Context) 
 type liveNotifyManager struct {
 	mu       sync.RWMutex
 	channels map[uint]notify.Channel
+	// templates 是全局消息模板：业务通知发出前在这里套用（ChatOps 的回复不套）
+	templates *notify.Templates
 }
 
 func newLiveNotifyManager(channels map[uint]notify.Channel) *liveNotifyManager {
@@ -666,9 +883,9 @@ func (m *liveNotifyManager) SetChannels(channels map[uint]notify.Channel) {
 
 // ChannelState 实现 app.ChannelStater：把这一条通道的实例状态告诉上层。
 //
-// **不把 Healthy() 当「已连接」**：这四个适配器的 Healthy() 含义都只是构造/启动成功
-// （QQ 绑上端口就 true，而 NapCat 没握手时发送会明确失败；Telegram 造出 bot 就 true；
-// Webhook 只判 config != nil；WeCom 恒 true）。所以 Healthy() 只够说「运行中」。
+// **不把 Healthy() 当「已连接」**：这四个适配器的 Healthy() 含义大多只是构造/启动成功
+// （QQ 绑上端口就 true，而 NapCat 没握手时发送会明确失败；Telegram 跟着最近一次 getUpdates 的结果，
+// 令牌失效、网络断开时为 false；Webhook 只判 config != nil；WeCom 恒 true）。所以 Healthy() 只够说「运行中」。
 // 只有实现了 notify.LinkStater 且确认对端接上的通道，才报「已连接」。
 //
 // map 里没有这一条时返回空串，由 app 层结合「配置启不启用」判成异常还是停用。
@@ -705,19 +922,35 @@ func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notific
 	if !ok || ch == nil {
 		return fmt.Errorf("通知通道未运行 conf_id=%d", confID)
 	}
-	if err := ch.Send(ctx, notify.Notification{
+	if err := ch.Send(ctx, m.templates.Apply(notify.Notification{
+		Event:        n.Event,
 		Title:        n.Title,
 		Text:         n.Text,
 		SourceConfID: n.SourceConfID,
 		UserID:       n.UserID,
 		Targets:      n.Targets,
 		Buttons:      n.Buttons,
-	}); err != nil {
+	})); err != nil {
 		chatopsLogger().Warnf("实时通知投递失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
 		return err
 	}
 	chatopsLogger().Infof("实时通知投递成功 conf_id=%d type=%s", confID, ch.Type())
 	return nil
+}
+
+// outboxLiveSender 让 notify.OutboxWorker 经 liveNotifyManager 投递重试。
+type outboxLiveSender struct{ m *liveNotifyManager }
+
+func (s outboxLiveSender) Send(ctx context.Context, confID uint, n notify.Notification) error {
+	return s.m.Send(ctx, confID, app.Notification{
+		Event:        n.Event,
+		Title:        n.Title,
+		Text:         n.Text,
+		SourceConfID: confID,
+		UserID:       n.UserID,
+		Targets:      n.Targets,
+		Buttons:      n.Buttons,
+	})
 }
 
 // Reply implements chatops.Replier — sends a reply to the inbound user via the
@@ -769,8 +1002,8 @@ type dbBindingLookup struct {
 	db *gorm.DB
 }
 
-func (l *dbBindingLookup) FindByChannelUser(ctx context.Context, channelType, channelUserID string) (chatops.BindingInfo, bool, error) {
-	row, ok, err := l.findRow(ctx, channelType, channelUserID)
+func (l *dbBindingLookup) FindByChannelUser(ctx context.Context, confID uint, channelType, channelUserID string) (chatops.BindingInfo, bool, error) {
+	row, ok, err := l.findRow(ctx, confID, channelType, channelUserID)
 	if err != nil || !ok {
 		return chatops.BindingInfo{}, ok, err
 	}
@@ -785,10 +1018,10 @@ func (l *dbBindingLookup) FindByChannelUser(ctx context.Context, channelType, ch
 	}, true, nil
 }
 
-func (l *dbBindingLookup) findRow(ctx context.Context, channelType, channelUserID string) (models.ChannelBinding, bool, error) {
+func (l *dbBindingLookup) findRow(ctx context.Context, confID uint, channelType, channelUserID string) (models.ChannelBinding, bool, error) {
 	var row models.ChannelBinding
 	err := l.db.WithContext(ctx).
-		Where("channel_type = ? AND channel_user_id = ?", channelType, channelUserID).
+		Where("notification_conf_id = ? AND channel_type = ? AND channel_user_id = ?", confID, channelType, channelUserID).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return models.ChannelBinding{}, false, nil
@@ -805,8 +1038,8 @@ type commandsBindingResolver struct {
 	lookup *dbBindingLookup
 }
 
-func (r *commandsBindingResolver) FindByChannelUser(ctx context.Context, channelType, channelUserID string) (uint, bool, error) {
-	row, ok, err := r.lookup.findRow(ctx, channelType, channelUserID)
+func (r *commandsBindingResolver) FindByChannelUser(ctx context.Context, confID uint, channelType, channelUserID string) (uint, bool, error) {
+	row, ok, err := r.lookup.findRow(ctx, confID, channelType, channelUserID)
 	if err != nil || !ok {
 		return 0, ok, err
 	}
@@ -819,8 +1052,8 @@ type bindingConsumerAdapter struct {
 	svc app.BindingService
 }
 
-func (a *bindingConsumerAdapter) ConsumeCode(ctx context.Context, code, channelType, channelUserID string) error {
-	_, err := a.svc.ConsumeCode(ctx, code, channelType, channelUserID)
+func (a *bindingConsumerAdapter) ConsumeCode(ctx context.Context, code string, confID uint, channelType, channelUserID string) error {
+	_, err := a.svc.ConsumeCode(ctx, code, confID, channelType, channelUserID)
 	return err
 }
 
@@ -913,6 +1146,13 @@ func reloadChatOpsChannels(
 	callbackActions telegramadapter.CallbackActionHandler,
 ) error {
 	log := chatopsLogger()
+
+	// 整个「关旧、建新、换表」在锁内完成，不和 Shutdown 交错；Shutdown 之后不再建通道
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	if bs.closed {
+		return errChatOpsShutDown
+	}
 
 	for confID, ch := range bs.channels {
 		stepCtx, stepCancel := context.WithTimeout(ctx, chatopsShutdownPerStep)

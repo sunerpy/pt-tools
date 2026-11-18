@@ -27,12 +27,14 @@ const testSite = models.SiteGroup("springsunday")
 // 返回 homeDir 与已迁移的 TorrentDB（DB 文件不在白名单三根内，且被红线保护）。
 func setupCleanerHome(t *testing.T) (string, *models.TorrentDB) {
 	t.Helper()
-	home := t.TempDir()
+	// 清理器报告的是解析过符号链接的路径：Windows 上会把 RUNNER~1 这种短文件名展开，macOS 上 /var 是指向 /private/var 的链接
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	work := filepath.Join(home, models.WorkDir)
 	for _, d := range []string{"logs", "downloads", "backups"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(work, d), 0o755))
 	}
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	return home, db
 }
@@ -251,7 +253,7 @@ func TestCleaner_EscapeRootSymlink(t *testing.T) {
 	work := filepath.Join(home, models.WorkDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(work, "logs"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(work, "backups"), 0o755))
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
 		DownloadDir: t.TempDir(), RetainHours: 24, MaxRetry: 3,

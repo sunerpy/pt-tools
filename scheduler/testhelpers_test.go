@@ -30,14 +30,20 @@ type schedFakeDownloader struct {
 	removeErr   error
 	pauseErr    error
 	getErr      error
+	// pauseNoop：暂停接口返回成功，但种子状态不变（模拟下载器没真的暂停）
+	pauseNoop bool
 
 	// per-torrent GetTorrent override keyed by id
 	torrentByID map[string]downloader.Torrent
+	// beforeSecondList 在第二次读种子列表前调用一次（自动删种判断以后、删除锁里复查以前），模拟这期间种子变了
+	beforeSecondList func()
+	listCalls        int
 
 	// recorded side effects
 	removedBatch    [][]string
 	removedSingle   []string
 	pausedIDs       []string
+	resumedIDs      []string
 	removeDataFlags []bool
 	closeCount      int
 }
@@ -71,6 +77,10 @@ func (f *schedFakeDownloader) GetIncompletePendingBytes(_ context.Context) (int6
 }
 
 func (f *schedFakeDownloader) GetAllTorrents() ([]downloader.Torrent, error) {
+	f.listCalls++
+	if f.listCalls == 2 && f.beforeSecondList != nil {
+		f.beforeSecondList()
+	}
 	return f.torrents, f.getAllErr
 }
 
@@ -106,10 +116,26 @@ func (f *schedFakeDownloader) PauseTorrent(id string) error {
 		return f.pauseErr
 	}
 	f.pausedIDs = append(f.pausedIDs, id)
+	if f.pauseNoop {
+		return nil
+	}
+	// 和真的下载器一样：暂停以后再读，状态是暂停
+	if t, ok := f.torrentByID[id]; ok {
+		t.State = downloader.TorrentPaused
+		f.torrentByID[id] = t
+	}
+	for i := range f.torrents {
+		if f.torrents[i].ID == id || f.torrents[i].InfoHash == id {
+			f.torrents[i].State = downloader.TorrentPaused
+		}
+	}
 	return nil
 }
 
-func (f *schedFakeDownloader) ResumeTorrent(_ string) error { return nil }
+func (f *schedFakeDownloader) ResumeTorrent(id string) error {
+	f.resumedIDs = append(f.resumedIDs, id)
+	return nil
+}
 
 func (f *schedFakeDownloader) RemoveTorrent(id string, removeData bool) error {
 	if f.removeErr != nil {
@@ -120,7 +146,17 @@ func (f *schedFakeDownloader) RemoveTorrent(id string, removeData bool) error {
 	return nil
 }
 
-func (f *schedFakeDownloader) PauseTorrents(_ []string) error { return nil }
+func (f *schedFakeDownloader) PauseTorrents(ids []string) error {
+	if f.pauseErr != nil {
+		return f.pauseErr
+	}
+	for _, id := range ids {
+		if err := f.PauseTorrent(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (f *schedFakeDownloader) ResumeTorrents(_ []string) error {
 	return nil

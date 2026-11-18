@@ -32,7 +32,10 @@ vi.mock("@/api", async (orig) => {
     filterRulesApi: { list: vi.fn(() => Promise.resolve([])) },
     downloaderDirectoriesApi: { listAll: vi.fn(() => Promise.resolve({})) },
     chatopsApi: { notifications: { list: vi.fn(() => Promise.resolve([])) } },
-    userInfoApi: { getSite: vi.fn(() => Promise.resolve(null)) },
+    userInfoApi: {
+      getSite: vi.fn(() => Promise.resolve(null)),
+      getHistory: vi.fn(() => Promise.resolve({ points: [] })),
+    },
     tasksApi: { list: vi.fn(() => Promise.resolve({ items: [], total: 0 })) },
   };
 });

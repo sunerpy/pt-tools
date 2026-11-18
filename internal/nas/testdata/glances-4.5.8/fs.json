@@ -1,0 +1,57 @@
+[
+  {
+    "device_name": "/dev/root",
+    "fs_type": "ext4",
+    "mnt_point": "/data",
+    "options": "ro,relatime,discard,errors=remount-ro,commit=30",
+    "size": 518933680128,
+    "used": 191310761984,
+    "free": 327606140928,
+    "percent": 36.9,
+    "key": "mnt_point"
+  },
+  {
+    "device_name": "/dev/root",
+    "fs_type": "ext4",
+    "mnt_point": "/usr/lib/os-release",
+    "options": "ro,relatime,discard,errors=remount-ro,commit=30",
+    "size": 518933680128,
+    "used": 191310761984,
+    "free": 327606140928,
+    "percent": 36.9,
+    "key": "mnt_point"
+  },
+  {
+    "device_name": "/dev/root",
+    "fs_type": "ext4",
+    "mnt_point": "/etc/resolv.conf",
+    "options": "rw,relatime,discard,errors=remount-ro,commit=30",
+    "size": 518933680128,
+    "used": 191310761984,
+    "free": 327606140928,
+    "percent": 36.9,
+    "key": "mnt_point"
+  },
+  {
+    "device_name": "/dev/root",
+    "fs_type": "ext4",
+    "mnt_point": "/etc/hostname",
+    "options": "rw,relatime,discard,errors=remount-ro,commit=30",
+    "size": 518933680128,
+    "used": 191310761984,
+    "free": 327606140928,
+    "percent": 36.9,
+    "key": "mnt_point"
+  },
+  {
+    "device_name": "/dev/root",
+    "fs_type": "ext4",
+    "mnt_point": "/etc/hosts",
+    "options": "rw,relatime,discard,errors=remount-ro,commit=30",
+    "size": 518933680128,
+    "used": 191310761984,
+    "free": 327606140928,
+    "percent": 36.9,
+    "key": "mnt_point"
+  }
+]

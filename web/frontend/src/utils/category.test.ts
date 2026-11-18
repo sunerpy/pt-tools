@@ -64,20 +64,17 @@ describe("bucketOf：M-Team 的真实分类名", () => {
 
 describe("bucketOf：HDDolby 的真实分类名", () => {
   it.each([
-    ["Movies/SD", "movie"],
-    ["Movies/UHD", "movie"],
-    ["Movies/Remux", "movie"],
-    ["TV/SD", "tv"],
-    ["TV/HD", "tv"],
-    ["TV/BluRay", "tv"],
-    // 漏收过：里面没有「动漫」二字
-    ["Animation", "anime"],
-    ["Music", "music"],
+    ["电影", "movie"],
+    ["电视剧", "tv"],
+    ["综艺", "tv"],
+    ["动漫", "anime"],
+    ["音乐视频", "music"],
+    ["音乐", "music"],
   ])("%s → %s", (input, want) => {
     expect(bucketOf(input)).toBe(want);
   });
 
-  it.each([["Documentary"], ["Sports"], ["Games"], ["Software"]])("%s 不归任何桶", (input) => {
+  it.each([["纪录片"], ["体育"], ["游戏"], ["学习"], ["其他"]])("%s 不归任何桶", (input) => {
     expect(bucketOf(input)).toBe("");
   });
 });
@@ -168,6 +165,7 @@ describe("verdictOfItem：分类优先、标签兜底，且分「站点没给」
     expect(verdictOfItem({ category: "影剧/综艺/HD" })).toBe("tv");
     expect(verdictOfItem({ category: "动画" })).toBe("anime");
     expect(verdictOfItem({ category: "音乐(无损)" })).toBe("music");
+    expect(verdictOfItem({ category: "电视剧" })).toBe("tv");
     expect(verdictOfItem({ category: "Animation" })).toBe("anime");
   });
 

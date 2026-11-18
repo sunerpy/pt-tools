@@ -1,0 +1,7 @@
+# openapi-generator 不生成这些文件（CI、发布到 pub 用的，本仓库不需要）
+.travis.yml
+git_push.sh
+.gitignore
+README.md
+doc/**
+test/**

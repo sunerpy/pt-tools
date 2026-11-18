@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,9 +16,8 @@ import (
 
 func TestSecretExportImportRoundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	keyDir := filepath.Join(tmpDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
@@ -73,9 +73,9 @@ func TestSecretImportRefusesOverwriteWithoutForce(t *testing.T) {
 		w.WriteString(encoded + "\n")
 	}()
 
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	t.Setenv("USERPROFILE", tmpDir)
 
 	err = runSecretImport(false)
 	assert.Error(t, err)
@@ -108,9 +108,9 @@ func TestSecretImportInvalidLength(t *testing.T) {
 		w.WriteString(encoded + "\n")
 	}()
 
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	t.Setenv("USERPROFILE", tmpDir)
 
 	err = runSecretImport(false)
 	assert.Error(t, err)
@@ -119,9 +119,8 @@ func TestSecretImportInvalidLength(t *testing.T) {
 
 func TestSecretExportSize(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	keyDir := filepath.Join(tmpDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
@@ -173,9 +172,9 @@ func TestSecretImportAtomicWrite(t *testing.T) {
 		w.WriteString(encoded + "\n")
 	}()
 
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	t.Setenv("USERPROFILE", tmpDir)
 
 	err = runSecretImport(true)
 	require.NoError(t, err)
@@ -187,6 +186,8 @@ func TestSecretImportAtomicWrite(t *testing.T) {
 
 	stat, err := os.Stat(keyPath)
 	require.NoError(t, err)
-	perms := stat.Mode().Perm()
-	assert.Equal(t, perms, os.FileMode(0o600))
+	if runtime.GOOS != "windows" {
+		// Windows 上的权限位只有只读一项，0o600 读出来是 0o666
+		assert.Equal(t, os.FileMode(0o600), stat.Mode().Perm())
+	}
 }

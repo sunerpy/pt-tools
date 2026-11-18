@@ -174,7 +174,8 @@ func testTangPTSearch(t *testing.T) {
 
 	second := items[1]
 	assert.Equal(t, "34917", second.ID)
-	assert.Equal(t, v2.DiscountPercent50, second.DiscountLevel)
+	// pro_50pctdown2up 是 2X 50%（以前驱动的通用对照先命中「50pct」，读成了 50%）
+	assert.Equal(t, v2.Discount2x50, second.DiscountLevel)
 	assert.False(t, second.DiscountEndTime.IsZero(), "discount end time should be parsed from onmouseover")
 	assert.Equal(t, 2026, second.DiscountEndTime.Year())
 	assert.Equal(t, 8, int(second.DiscountEndTime.Month()))

@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,7 +19,11 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
+	"golang.org/x/net/html"
+	"golang.org/x/net/publicsuffix"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // NexusPHPRequest represents a request to a NexusPHP site
@@ -26,6 +34,8 @@ type NexusPHPRequest struct {
 	Params url.Values
 	// Method is the HTTP method (default: GET)
 	Method string
+	// Referer 不为空时作为 Referer 请求头；以 / 开头的按站点地址补全（签到的验证码接口会看它）
+	Referer string
 }
 
 // NexusPHPResponse wraps a goquery document for parsing
@@ -36,6 +46,8 @@ type NexusPHPResponse struct {
 	RawBody []byte
 	// StatusCode is the HTTP status code
 	StatusCode int
+	// Header 是响应头（下载字幕时取 Content-Disposition 里的文件名）
+	Header http.Header
 }
 
 // SiteSelectors defines CSS selectors for parsing NexusPHP pages
@@ -97,7 +109,7 @@ func DefaultNexusPHPSelectors() SiteSelectors {
 		Seeders:            "td:nth-child(6)",
 		Leechers:           "td:nth-child(7)",
 		Snatched:           "td:nth-child(8)",
-		DiscountIcon:       "img.pro_free, img.pro_free2up, img.pro_50pctdown, img.pro_30pctdown, img.pro_2up",
+		DiscountIcon:       "img.pro_free, img.pro_free2up, img.pro_50pctdown, img.pro_50pctdown2up, img.pro_30pctdown, img.pro_2up",
 		DiscountEndTime:    "span.free_end_time, span[title*='结束']",
 		DownloadLink:       "a[href*='download.php']",
 		Category:           "td:nth-child(1) img",
@@ -138,7 +150,10 @@ type NexusPHPDriver struct {
 	userAgent      string
 	useFailover    bool
 	siteName       SiteName
+	siteID         string
 	siteDefinition *SiteDefinition
+	// session 是会续期的登录会话（定义里写了 SessionCookies 才有，见 session_cookies.go）：请求排队发，续期换发的 Cookie 换进来
+	session *sessionCookies
 }
 
 // NexusPHPDriverConfig holds configuration for creating a NexusPHP driver
@@ -150,6 +165,8 @@ type NexusPHPDriverConfig struct {
 	UserAgent   string
 	UseFailover bool     // Enable multi-URL failover
 	SiteName    SiteName // Site name for failover URL lookup
+	// SiteID 是站点在 pt-tools 里注册的 ID：搜索结果的代理下载地址 /api/site/{id}/… 按它找站点
+	SiteID string
 }
 
 // NewNexusPHPDriver creates a new NexusPHP driver
@@ -172,6 +189,7 @@ func NewNexusPHPDriver(config NexusPHPDriverConfig) *NexusPHPDriver {
 			IdleConnTimeout:   30 * time.Second,
 			DisableKeepAlives: true,
 			UserAgent:         userAgent,
+			SiteID:            config.SiteID,
 		})
 	}
 
@@ -183,6 +201,7 @@ func NewNexusPHPDriver(config NexusPHPDriverConfig) *NexusPHPDriver {
 		userAgent:   userAgent,
 		useFailover: config.UseFailover,
 		siteName:    config.SiteName,
+		siteID:      config.SiteID,
 	}
 
 	// Initialize failover client if enabled and site name is provided
@@ -219,6 +238,35 @@ func NewNexusPHPDriverWithFailover(siteName SiteName, cookie string) *NexusPHPDr
 // SetSiteDefinition sets the site definition for custom parsing
 func (d *NexusPHPDriver) SetSiteDefinition(def *SiteDefinition) {
 	d.siteDefinition = def
+	d.session = nil
+	if def != nil && len(def.SessionCookies) > 0 {
+		id := d.siteID
+		if id == "" {
+			id = def.ID
+		}
+		d.session = joinSessionCookies(id, def.SessionCookies, d.Cookie)
+	}
+}
+
+// CurrentCookie 是现在用的那组 Cookie（续期过就是换发后的）；站点没有续期会话时 ok 为假。
+func (d *NexusPHPDriver) CurrentCookie() (string, bool) {
+	if d.session == nil {
+		return "", false
+	}
+	return d.session.current(), true
+}
+
+// sendWithCookie 发一个带站点 Cookie 的请求。会续期的站点（定义里写了 SessionCookies）排队发、用续期换发的 Cookie。
+func (d *NexusPHPDriver) sendWithCookie(headers map[string]string, do func(headers map[string]string) (*HTTPResponse, error)) (*HTTPResponse, error) {
+	if d.session == nil {
+		headers["Cookie"] = d.Cookie
+		return do(headers)
+	}
+	return d.session.send(func(cookie string) (*HTTPResponse, error) {
+		withCookie := maps.Clone(headers)
+		withCookie["Cookie"] = cookie
+		return do(withCookie)
+	})
 }
 
 // GetSiteDefinition returns the site definition
@@ -280,16 +328,22 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		method = "GET"
 	}
 
+	post := strings.EqualFold(method, http.MethodPost)
 	fullURL := baseURL + req.Path
-	if len(req.Params) > 0 {
+	if len(req.Params) > 0 && !post {
 		fullURL += "?" + req.Params.Encode()
 	}
 
 	headers := map[string]string{
-		"Cookie":          d.Cookie,
 		"User-Agent":      d.userAgent,
 		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+	}
+	if ref := req.Referer; ref != "" {
+		if strings.HasPrefix(ref, "/") {
+			ref = baseURL + ref
+		}
+		headers["Referer"] = ref
 	}
 
 	// Print curl command for debugging
@@ -297,7 +351,16 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		fmt.Printf("\n[CURL] %s\n", buildCurlCommand(method, fullURL, headers))
 	}
 
-	resp, err := d.httpClient.Get(ctx, fullURL, headers)
+	if post {
+		// POST 时参数作为表单提交（目前只有配置了 POST 的签到会走这里）。
+		headers["Content-Type"] = "application/x-www-form-urlencoded"
+	}
+	resp, err := d.sendWithCookie(headers, func(h map[string]string) (*HTTPResponse, error) {
+		if post {
+			return d.httpClient.Post(ctx, fullURL, []byte(req.Params.Encode()), h)
+		}
+		return d.httpClient.Get(ctx, fullURL, h)
+	})
 	if err != nil {
 		return NexusPHPResponse{}, fmt.Errorf("execute request: %w", err)
 	}
@@ -305,6 +368,11 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	result := NexusPHPResponse{
 		RawBody:    resp.Body,
 		StatusCode: resp.StatusCode,
+		Header:     resp.Headers,
+	}
+
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
 	}
 
 	// Check for authentication errors
@@ -312,8 +380,12 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		return result, ErrInvalidCredentials
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", ErrRateLimited)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return result, &HTTPStatusError{Code: resp.StatusCode}
 	}
 
 	// Parse HTML document
@@ -323,17 +395,62 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	}
 	result.Document = doc
 
-	// Check if we're on a login page (cookie expired or invalid)
+	// Check if we're on a login page (cookie expired or invalid)；错误里写上返回页面的标题，看得出站点回的是哪一页
 	if isLoginPage(doc) {
-		return result, ErrSessionExpired
+		return result, withPageTitle(ErrSessionExpired, doc)
 	}
 
 	// Check if 2FA verification is required
 	if is2FAPage(doc) {
-		return result, Err2FARequired
+		return result, withPageTitle(Err2FARequired, doc)
 	}
 
 	return result, nil
+}
+
+// nexusMissingTorrentTexts 是种子不在了时详情页上的话：上游 NexusPHP 的 details.php 查不到种子时
+// stderr(std_error, std_no_torrent_id)，lang/chs、cht、en 的 lang_details.php 依次是这三句。
+var nexusMissingTorrentTexts = []string{"没有该ID的种子", "沒有該ID的種子", "No torrent with this ID"}
+
+// nexusTorrentMissing 报告详情页是不是「没有该ID的种子」这类页面，返回页面上的那句话（站点删了这个种子）。
+func nexusTorrentMissing(doc *goquery.Document) (string, bool) {
+	if doc == nil {
+		return "", false
+	}
+	text := strings.Join(strings.Fields(doc.Find("body").Text()), " ")
+	lower := strings.ToLower(text)
+	for _, s := range nexusMissingTorrentTexts {
+		if strings.Contains(lower, strings.ToLower(s)) {
+			return s, true
+		}
+	}
+	return "", false
+}
+
+// pageTitleLimit 是错误里写的页面标题最多多少个字。
+const pageTitleLimit = 60
+
+// pageTitle 是页面的标题（空白合并、截到 pageTitleLimit 个字）。
+func pageTitle(doc *goquery.Document) string {
+	return truncateRunes(strings.Join(strings.Fields(doc.Find("title").First().Text()), " "), pageTitleLimit)
+}
+
+// withPageTitle 在 err 后面写上返回页面的标题；errors.Is 照样认 err。页面没有标题时原样返回。
+func withPageTitle(err error, doc *goquery.Document) error {
+	title := pageTitle(doc)
+	if title == "" {
+		return err
+	}
+	return fmt.Errorf("%w（页面标题：%s）", err, title)
+}
+
+// truncateRunes 把 s 截到 n 个字，截掉了就在后面加「…」。
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // isLoginPage checks if the HTML document is a login page
@@ -371,26 +488,42 @@ func isLoginPage(doc *goquery.Document) bool {
 }
 
 // is2FAPage checks if the HTML document is a 2FA verification page
+// 只认二次验证页自己的特征：跳到 take2fa.php 的脚本、提交到 2FA 地址的表单（只看地址的路径）、标题写着二次验证
+// （2FA 要是单独的词）。以前脚本里、表单地址里出现「2fa」三个字母就算：HDSky 的列表里每个种子有两个下载表单，地址带
+// 32 位十六进制的 sign 参数（每次打开都换），一页 100 个 sign 里有「2fa」的机会约一半，免费列表因此时常被当成二次验证页，
+// 刷流报「please check cookie or 2FA settings」（2026-10-27，01:58 以后 24 轮里有 10 轮）。
 func is2FAPage(doc *goquery.Document) bool {
-	// Check for 2FA redirect script
-	scripts := doc.Find("script").Text()
-	if strings.Contains(scripts, "take2fa.php") || strings.Contains(scripts, "2fa") {
+	if strings.Contains(doc.Find("script").Text(), "take2fa.php") {
 		return true
 	}
-
-	// Check for 2FA form
-	if doc.Find("form[action*='2fa']").Length() > 0 || doc.Find("form[action*='take2fa']").Length() > 0 {
+	found := false
+	doc.Find("form[action]").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		action, _ := s.Attr("action")
+		found = is2FAAction(action)
+		return !found
+	})
+	if found {
 		return true
 	}
-
-	// Check title for 2FA keywords
-	title := strings.ToLower(doc.Find("title").Text())
-	if strings.Contains(title, "二次验证") || strings.Contains(title, "2fa") || strings.Contains(title, "两步验证") {
-		return true
-	}
-
-	return false
+	title := doc.Find("title").First().Text()
+	return strings.Contains(title, "二次验证") || strings.Contains(title, "两步验证") || word2FA.MatchString(title)
 }
+
+// is2FAAction 报告表单是不是提交到二次验证的地址：路径里有 2fa 这个词（take2fa.php、/2fa/verify），查询参数不算。
+func is2FAAction(action string) bool {
+	u, err := url.Parse(strings.TrimSpace(action))
+	if err != nil {
+		return false
+	}
+	return path2FA.MatchString(u.Path)
+}
+
+// word2FA 匹配标题里单独的「2FA」（前后不是字母或数字），种子名里的「2Fast」这类不算；path2FA 匹配路径里的
+// 2fa、take2fa 这一段（前后是开头、结尾、斜杠或点）。
+var (
+	word2FA = regexp.MustCompile(`(?i)(^|[^a-z0-9])2fa([^a-z0-9]|$)`)
+	path2FA = regexp.MustCompile(`(?i)(^|[/.])(take)?2fa([/.]|$)`)
+)
 
 // buildCurlCommand generates a curl command string for debugging
 func buildCurlCommand(method, url string, headers map[string]string) string {
@@ -468,13 +601,16 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		}
 
 		// Parse discount end time
+		endTimeUnparsable := false
 		endTimeElem := s.Find(d.Selectors.DiscountEndTime)
 		if endTimeElem.Length() > 0 {
+			value := endTimeElem.Text()
 			if title, exists := endTimeElem.Attr("title"); exists {
-				item.DiscountEndTime = parseTime(title)
-			} else {
-				item.DiscountEndTime = parseTime(endTimeElem.Text())
+				value = title
 			}
+			endTime, err := parseDiscountEndTime(value)
+			item.DiscountEndTime = endTime
+			endTimeUnparsable = err != nil
 		}
 
 		// Fallback: parse discount end time from onmouseover attribute of discount icon
@@ -482,20 +618,24 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		// Format: domTT_activate(..., '<span title="2026-01-18 22:37:47">1时19分</span>', ...)
 		if item.DiscountEndTime.IsZero() && discountElem.Length() > 0 {
 			if onmouseover, exists := discountElem.Attr("onmouseover"); exists && onmouseover != "" {
-				item.DiscountEndTime = parseDiscountEndTimeFromOnmouseover(onmouseover)
+				endTime, err := parseDiscountEndTimeFromOnmouseover(onmouseover)
+				item.DiscountEndTime = endTime
+				if err != nil {
+					endTimeUnparsable = true
+				}
 			}
+		}
+
+		// 结束时间元素的值非空却解析不了、优惠图标的提示里也取不到：结束时间不可信，
+		// 不能当成「没有结束时间」，免费的有效性是 unknown
+		if endTimeUnparsable && item.DiscountEndTime.IsZero() {
+			NoteDiscountTimeUnparsable(&item, "discountEndTime")
 		}
 
 		// Parse download link - use proxy URL instead of direct link for authentication handling
 		// The backend proxy will handle cookie/passkey authentication
 		if item.ID != "" {
-			// Use proxy download URL that handles authentication
-			siteID := string(d.siteName)
-			if siteID == "" {
-				// Fallback to extracting site ID from BaseURL
-				siteID = extractSiteIDFromURL(d.BaseURL)
-			}
-			item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%s/download", siteID, item.ID)
+			item.DownloadURL = fmt.Sprintf("/api/site/%s/torrent/%s/download", d.getSiteID(), item.ID)
 		} else {
 			// If no ID, try to get direct link (may not work without passkey)
 			downloadElem := s.Find(d.Selectors.DownloadLink)
@@ -537,7 +677,73 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		items = append(items, item)
 	})
 
+	// 一个种子都没读到、没有列表的行、页面又不像登录以后的站点页面：站点回的是别的页面（拦截、维护、验证……），
+	// 报出来并写上标题，不当成「列表是空的」（刷流会记成成功、列表 0 个，看不出出了什么事）。搜不到东西的正常页面
+	// 照样有顶部的用户信息栏，不受影响
+	if len(items) == 0 && res.Document.Find(d.Selectors.TableRows).Length() == 0 && !looksSignedIn(res.Document) {
+		return nil, unexpectedPageError(res.Document)
+	}
 	return items, nil
+}
+
+// looksSignedIn 报告页面像不像登录以后的站点页面：有退出登录、个人信息、控制面板、站内信的链接，或者顶部的用户信息栏。
+func looksSignedIn(doc *goquery.Document) bool {
+	return doc.Find("a[href*='logout'], a[href*='userdetails.php'], a[href*='usercp.php'], a[href*='messages.php'], #info_block").Length() > 0
+}
+
+// unexpectedPageTextLimit 是错误里写的页面开头文字最多多少个字。
+const unexpectedPageTextLimit = 80
+
+// unexpectedPageError 说明站点回了别的页面：写上标题与正文开头的一段文字（不含脚本与样式，都截短），
+// 看得出是拦截、维护还是验证页。
+func unexpectedPageError(doc *goquery.Document) error {
+	var text string
+	if body := doc.Find("body").First(); body.Length() > 0 {
+		text = visibleText(body.Nodes[0], unexpectedPageTextLimit)
+	}
+	var parts []string
+	if title := pageTitle(doc); title != "" {
+		parts = append(parts, "页面标题："+title)
+	}
+	if text != "" {
+		parts = append(parts, "开头："+text)
+	}
+	if len(parts) == 0 {
+		return ErrUnexpectedPage
+	}
+	return fmt.Errorf("%w（%s）", ErrUnexpectedPage, strings.Join(parts, "；"))
+}
+
+// visibleText 是 n 下面看得见的文字（跳过脚本、样式），各段之间空一格，截到 limit 个字。
+func visibleText(n *html.Node, limit int) string {
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		// 一个字最多 4 个字节：攒够 4·limit 个字节就一定够 limit 个字了
+		if b.Len() > 4*limit {
+			return
+		}
+		switch n.Type {
+		case html.TextNode:
+			if f := strings.Fields(n.Data); len(f) > 0 {
+				if b.Len() > 0 {
+					b.WriteByte(' ')
+				}
+				b.WriteString(strings.Join(f, " "))
+			}
+			return
+		case html.ElementNode:
+			switch n.Data {
+			case "script", "style", "noscript", "template":
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return truncateRunes(b.String(), limit)
 }
 
 // TorrentDetail contains detailed information from a torrent detail page
@@ -898,8 +1104,17 @@ func (d *NexusPHPDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 	return d.getUserInfoLegacy(ctx)
 }
 
-// getUserInfoWithDefinition fetches user info using site definition selectors
-// Uses concurrent requests where possible to improve performance
+// retriesUserInfoPages 报告取用户信息时是不是按页重试（有站点定义时一页一页地取、每页自己重试，见 fetchUserInfoPage）：
+// 是的话 BaseSite 不再整次重试。
+func (d *NexusPHPDriver) retriesUserInfoPages() bool {
+	return d.siteDefinition != nil && d.siteDefinition.UserInfo != nil
+}
+
+// getUserInfoWithDefinition fetches user info using site definition selectors.
+// 先取不依赖别的页面的（index.php 这类），再取要用户 ID 的（userdetails.php）与做种情况。定义里写了 RequestDelay 的站点
+// 一页一页地取、中间隔 RequestDelay（几页同时请求容易招来 Cloudflare 质询），其余的并发。每一页一时的网络错误与质询先重试
+// （fetchUserInfoPage）；还是没取到的页面不让整次失败：用户名到手了就回取到的部分，错误是 *PartialUserInfoError，
+// 写明缺哪些字段（保存时沿用上一次的）。登录失效、要二次验证时整次失败。
 func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInfo, error) {
 	startTime := time.Now()
 	def := d.siteDefinition
@@ -912,7 +1127,23 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 
 	// Store parsed values for use in subsequent requests
 	parsedValues := make(map[string]any)
-	var mu sync.Mutex // Protect parsedValues and info
+	var mu sync.Mutex // Protect parsedValues, info and the failures below
+	// 没取到的页面：缺的字段与第一个失败的原因；got 是别的页取到了的字段（几页都写了的字段，比如用户名，有一页取到就不算缺）
+	var missing []string
+	var firstErr error
+	got := make(map[string]bool)
+	fail := func(fields []string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, f := range fields {
+			if !slices.Contains(missing, f) {
+				missing = append(missing, f)
+			}
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	// First pass: identify which processes have dependencies
 	independentProcesses := []int{}
@@ -936,45 +1167,54 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 		}
 	}
 
-	// Phase 1: Execute all independent processes in parallel using errgroup
+	delay := time.Duration(uiConfig.RequestDelay) * time.Millisecond
+	sequential := delay > 0
+	// processStep 取一页：取到的值并进 parsedValues 与 info；没取到时记下缺的字段，登录失效这类错误中止整次获取。
+	// 调用方的时限已经到了（或取消了）时不再请求，这一页算缺
+	processStep := func(idx int, params map[string]any) func(context.Context) error {
+		process := uiConfig.Process[idx]
+		return func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				fail(process.Fields, err)
+				return nil
+			}
+			values, err := d.executeProcess(ctx, uiConfig, process, params)
+			if err != nil {
+				if fatalUserInfoError(err) {
+					return err
+				}
+				fail(process.Fields, err)
+			}
+			mu.Lock()
+			for k, v := range values {
+				parsedValues[k] = v
+				d.setUserInfoField(&info, k, v)
+				got[k] = true
+			}
+			mu.Unlock()
+			return nil
+		}
+	}
+
+	// Phase 1: processes without dependencies
 	phase1Start := time.Now()
 	if len(independentProcesses) > 0 {
 		if DebugUserInfo {
-			fmt.Printf("[DEBUG] Phase 1: Executing %d independent processes in parallel\n", len(independentProcesses))
+			fmt.Printf("[DEBUG] Phase 1: Executing %d independent processes (sequential=%v)\n", len(independentProcesses), sequential)
 		}
-
-		g, gctx := errgroup.WithContext(ctx)
+		steps := make([]func(context.Context) error, 0, len(independentProcesses))
 		for _, idx := range independentProcesses {
-			idx := idx // capture loop variable
-			g.Go(func() error {
-				values, err := d.executeProcess(gctx, uiConfig, uiConfig.Process[idx], parsedValues)
-				if err != nil {
-					return err // Return critical errors like session expired
-				}
-				mu.Lock()
-				for k, v := range values {
-					parsedValues[k] = v
-					d.setUserInfoField(&info, k, v)
-				}
-				mu.Unlock()
-				return nil
-			})
+			steps = append(steps, processStep(idx, parsedValues))
 		}
-
-		if err := g.Wait(); err != nil {
-			return UserInfo{}, fmt.Errorf("phase 1 parallel execution failed: %w", err)
+		if err := runUserInfoSteps(ctx, sequential, delay, steps); err != nil {
+			return UserInfo{}, fmt.Errorf("phase 1 failed: %w", err)
 		}
 	}
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] Phase 1 completed in %v\n", time.Since(phase1Start))
 	}
 
-	// Apply RequestDelay between phases if configured
-	if uiConfig.RequestDelay > 0 {
-		time.Sleep(time.Duration(uiConfig.RequestDelay) * time.Millisecond)
-	}
-
-	// Phase 2: Execute dependent processes AND FetchSeedingStatus in parallel
+	// Phase 2: processes that need values from phase 1, and the seeding status
 	phase2Start := time.Now()
 	needSeedingStatus := false
 	if uiConfig.Selectors != nil {
@@ -985,44 +1225,53 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 	}
 
 	if len(dependentProcesses) > 0 || (needSeedingStatus && info.UserID != "") {
-		if DebugUserInfo {
-			fmt.Printf("[DEBUG] Phase 2: Executing %d dependent processes", len(dependentProcesses))
-			if needSeedingStatus && info.UserID != "" {
-				fmt.Printf(" + seeding status fetch")
-			}
-			fmt.Printf(" in parallel\n")
+		// 第二轮的请求只读第一轮的结果：给一份拷贝，并发写 parsedValues 时不会和读撞上
+		params := make(map[string]any, len(parsedValues))
+		for k, v := range parsedValues {
+			params[k] = v
 		}
-
-		g, gctx := errgroup.WithContext(ctx)
-
-		// Launch dependent processes
+		steps := make([]func(context.Context) error, 0, len(dependentProcesses)+1)
 		for _, idx := range dependentProcesses {
-			idx := idx // capture loop variable
-			g.Go(func() error {
-				values, err := d.executeProcess(gctx, uiConfig, uiConfig.Process[idx], parsedValues)
-				if err != nil {
-					return err // Return critical errors like session expired
-				}
-				mu.Lock()
-				for k, v := range values {
-					parsedValues[k] = v
-					d.setUserInfoField(&info, k, v)
-				}
-				mu.Unlock()
-				return nil
-			})
+			steps = append(steps, processStep(idx, params))
 		}
-
-		// Launch seeding status fetch if needed (non-blocking error)
 		if needSeedingStatus && info.UserID != "" {
 			userID := info.UserID // capture
-			g.Go(func() error {
-				seeding, seedingSize, err := d.FetchSeedingStatus(gctx, userID)
+			steps = append(steps, func(ctx context.Context) error {
+				if err := ctx.Err(); err != nil {
+					fail([]string{"seederSize"}, err)
+					return nil
+				}
+				seeding, seedingSize, err := d.FetchSeedingStatus(ctx, userID)
+				mu.Lock()
+				indexSeeding := info.Seeding
+				mu.Unlock()
+				if err == nil && seedingSize == 0 && seeding == 0 && indexSeeding > 0 {
+					// 首页说在做种、列表却什么都没读到（限流提示、出错页，没有表格）：不当成真的 0
+					err = fmt.Errorf("%w: seeding list is empty while %d torrents are seeding", ErrSeedingSizeUnknown, indexSeeding)
+				}
+				if errors.Is(err, ErrSeedingSizeUnknown) {
+					// 做种列表认不出体积列：做种数照样用，体积算没取到（保存时沿用上一次的），不存成 0
+					fail([]string{"seederSize"}, err)
+					mu.Lock()
+					if seeding > 0 && info.Seeding == 0 {
+						info.Seeding = seeding
+						info.SeederCount = seeding
+					}
+					mu.Unlock()
+					return nil
+				}
 				if err != nil {
 					if DebugUserInfo {
 						fmt.Printf("[DEBUG] FetchSeedingStatus error: %v\n", err)
 					}
-					// Don't fail the whole operation for seeding status
+					if fatalUserInfoError(err) {
+						return err
+					}
+					// 做种体积一时没取到（质询、网络错误、站点出错、时限到了）：不让整次失败，保存时沿用上一次的。
+					// 站点没有做种列表这一页（404 这类）时和以前一样不管它
+					if temporaryFetchError(err) || ctx.Err() != nil {
+						fail([]string{"seederSize"}, withContextErr(ctx, err))
+					}
 					return nil
 				}
 				if seedingSize > 0 {
@@ -1040,13 +1289,29 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 				return nil
 			})
 		}
-
-		if err := g.Wait(); err != nil {
-			return UserInfo{}, fmt.Errorf("phase 2 parallel execution failed: %w", err)
+		// 两轮之间也隔 RequestDelay（时限到了就不等了：第二轮的每一页自己记下没取到）
+		if len(independentProcesses) > 0 && delay > 0 {
+			sleepContext(ctx, delay)
+		}
+		if err := runUserInfoSteps(ctx, sequential, delay, steps); err != nil {
+			return UserInfo{}, fmt.Errorf("phase 2 failed: %w", err)
 		}
 	}
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] Phase 2 completed in %v\n", time.Since(phase2Start))
+	}
+
+	// 做种体积读页面上站点自己写的总数（定义里有 seedingSize 这一项）时：那一页取到了却没认出这个数、首页又说在做种，
+	// 体积按没取到算（保存时沿用上一次的），不存成 0，和做种列表什么都没读到时一样（站点改了页面时）
+	if !needSeedingStatus && info.Seeding > 0 && !got["seedingSize"] && !slices.Contains(missing, "seedingSize") &&
+		processesDeclare(uiConfig.Process, "seedingSize") {
+		fail([]string{"seederSize"}, fmt.Errorf("%w: seedingSize not found on the page while %d torrents are seeding",
+			ErrSeedingSizeUnknown, info.Seeding))
+	}
+
+	if strings.TrimSpace(info.Username) == "" && firstErr != nil {
+		// 一页都没取到用户名：按第一个失败的原因报（质询、网络错误、HTTP 出错）
+		return UserInfo{}, fmt.Errorf("获取用户信息失败: %w", firstErr)
 	}
 
 	// Calculate ratio if not set
@@ -1058,7 +1323,85 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 		fmt.Printf("[DEBUG] getUserInfoWithDefinition total time: %v\n", time.Since(startTime))
 	}
 
+	missing = slices.DeleteFunc(missing, func(f string) bool { return got[f] })
+	if len(missing) > 0 {
+		return info, &PartialUserInfoError{Missing: missing, Err: firstErr}
+	}
 	return info, nil
+}
+
+// temporaryFetchError 是一时取不到：质询、网络错误、限流、站点出错（5xx）。
+func temporaryFetchError(err error) bool {
+	var status *HTTPStatusError
+	return errors.Is(err, ErrCloudflareChallenge) || errors.Is(err, ErrNetworkError) || errors.Is(err, ErrRateLimited) ||
+		(errors.As(err, &status) && status.Code >= 500)
+}
+
+// fatalUserInfoError 是要中止整次获取的错误：登录失效、凭证无效、要二次验证（别的页面也一样取不到）。
+func fatalUserInfoError(err error) bool {
+	return errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, Err2FARequired)
+}
+
+// runUserInfoSteps 跑一组请求：sequential 时一个接一个、中间隔 delay，否则并发。返回第一个要中止整次获取的错误。
+// 调用方的时限到了不算中止：剩下的每一步自己记下没取到（见 processStep），用户名到手了照样回取到的部分。
+func runUserInfoSteps(ctx context.Context, sequential bool, delay time.Duration, steps []func(context.Context) error) error {
+	if !sequential {
+		g, gctx := errgroup.WithContext(ctx)
+		for _, step := range steps {
+			g.Go(func() error { return step(gctx) })
+		}
+		return g.Wait()
+	}
+	for i, step := range steps {
+		if i > 0 {
+			sleepContext(ctx, delay)
+		}
+		if err := step(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fetchUserInfoPage 取用户信息的一页：一次请求最多等 userInfoAttemptTimeout；一时的网络错误（连接被重置、断开、超时）
+// 隔一会儿再试（最多 userInfoNetRetries 次），Cloudflare 质询隔几秒再试一次。剩下的时间不够时不再试。
+func (d *NexusPHPDriver) fetchUserInfoPage(ctx context.Context, req NexusPHPRequest) (NexusPHPResponse, error) {
+	netTries, challengeTries := 0, 0
+	for {
+		actx, cancel := withAttemptTimeout(ctx)
+		res, err := d.Execute(actx, req)
+		cancel()
+		if err == nil || ctx.Err() != nil {
+			return res, withContextErr(ctx, err)
+		}
+		wait, again := retryWait(err, netTries, challengeTries)
+		if !again {
+			return res, err
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait+userInfoMinAttempt {
+			return res, err
+		}
+		if errors.Is(err, ErrCloudflareChallenge) {
+			challengeTries++
+		} else {
+			netTries++
+		}
+		if DebugUserInfo {
+			fmt.Printf("[DEBUG] %s: %v, retry in %v\n", req.Path, err, wait)
+		}
+		if !sleepContext(ctx, wait) {
+			return res, withContextErr(ctx, err)
+		}
+	}
+}
+
+// withContextErr 在调用方的时限到了（或取消了）时把 ctx 的错误并进 err：原因分类按超时算（FetchFailureReason）。
+func withContextErr(ctx context.Context, err error) error {
+	ctxErr := ctx.Err()
+	if err == nil || ctxErr == nil || errors.Is(err, ctxErr) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ctxErr, err)
 }
 
 // executeProcess executes a single process and returns the parsed values
@@ -1092,13 +1435,10 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 		Method: "GET",
 	}
 
-	res, err := d.Execute(ctx, req)
+	res, err := d.fetchUserInfoPage(ctx, req)
 	if err != nil {
-		// Return critical errors like session expired
-		if errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) {
-			return result, err
-		}
-		return result, nil // Ignore other errors, return empty result
+		// 交给调用方：登录失效这类中止整次获取；别的（质询、网络错误、HTTP 出错）只是少了这一页的字段
+		return result, err
 	}
 
 	if res.Document == nil {
@@ -1122,7 +1462,136 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 		}
 	}
 
+	// 定义里没写 lastAccessAt 的站点，在用户详情页上按 NexusPHP 的通用写法找「最近动向」：
+	// 保号探测靠它判断最近一次访问，取不到就报解析失败（AGSVPT、星陨阁等十几个站点都是这样）。
+	if !declaresLastAccess(uiConfig) && strings.Contains(reqURL, "userdetails.php") {
+		if v := d.extractFieldValue(res.Document, defaultLastAccessSelector); v != "" && v != "0" {
+			result["lastAccessAt"] = v
+		}
+	}
+
+	// 同样，定义里没写实际上传 / 下载的站点，在用户详情页「传输」一行按通用写法找（#332：PTtime 等页面上有、定义里没写的站点）。
+	if strings.Contains(reqURL, "userdetails.php") {
+		for _, def := range defaultTrueTransferSelectors {
+			if _, declared := uiConfig.Selectors[def.field]; declared {
+				continue
+			}
+			if v := d.extractFieldValue(res.Document, def.selector); v != "" && v != "0" {
+				result[def.field] = v
+			}
+		}
+	}
+
+	// 这一页要取的上传量、下载量、分享率按定义的写法没取到时，在「传输」一行按通用写法再找一次（#752 NovaHD：
+	// 定义按分开的「上传量」几行写，站点用的是标准的「传输」一行，页面上都是 0 B、0.00）。取到了的不动。
+	if strings.Contains(reqURL, "userdetails.php") {
+		for _, def := range defaultTransferSelectors {
+			if !slices.Contains(process.Fields, def.field) || result[def.field] != "" {
+				continue
+			}
+			if v := d.extractFieldValue(res.Document, def.selector); v != "" {
+				result[def.field] = v
+			}
+		}
+	}
+
 	return result, nil
+}
+
+// transferRows 是 NexusPHP 用户详情页「传输」一行的几种写法
+var transferRows = []string{
+	"td.rowhead:contains('传输') + td",
+	"td.rowhead:contains('傳輸') + td",
+	"td.rowhead:contains('傳送') + td",
+}
+
+// defaultTrueTransferSelectors 是「传输」一行里实际（真实）上传、下载量的通用写法：标签后面跟着冒号和大小。
+var defaultTrueTransferSelectors = []struct {
+	field    string
+	selector FieldSelector
+}{
+	{"trueUploaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`(?:实际上传量|實際上傳量|实际上传|實際上傳|真实上传量|真實上傳量|真实上传|真實上傳)(?:</strong>|</b>)?(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTP]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
+	{"trueDownloaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`(?:实际下载量|實際下載量|实际下载|實際下載|真实下载量|真實下載量|真实下载|真實下載)(?:</strong>|</b>)?(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTP]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
+}
+
+// defaultTransferSelectors 是「传输」一行里上传量、下载量与分享率的通用写法（上游 NexusPHP 的 userdetails.php：
+// <strong>上传量</strong>:  1.234 TB）。标签要紧跟在 <strong> / <b> 里，「实际上传量」不会被当成「上传量」。
+var defaultTransferSelectors = []struct {
+	field    string
+	selector FieldSelector
+}{
+	{"uploaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`<(?:strong|b)>\s*(?:上传量|上傳量)\s*</(?:strong|b)>(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTPE]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
+	{"downloaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`<(?:strong|b)>\s*(?:下载量|下載量)\s*</(?:strong|b)>(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTPE]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
+	{"ratio", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`<(?:strong|b)>\s*分享率\s*</(?:strong|b)>(?:<[^>]*>|[\s:：\x{00a0}]|&nbsp;)*([\d.,]+|无限|無限|∞|Inf)`}},
+		},
+	}},
+}
+
+// defaultLastAccessSelector 是 NexusPHP 用户详情页「最近动向 / 上次访问」一行的通用写法（简繁与英文界面）。
+var defaultLastAccessSelector = FieldSelector{
+	Selector: []string{
+		"td.rowhead:contains('最近动向') + td",
+		"td.rowhead:contains('最近動向') + td",
+		"td.rowhead:contains('最后活动') + td",
+		"td.rowhead:contains('最後活動') + td",
+		"td.rowhead:contains('最后访问') + td",
+		"td.rowhead:contains('最後訪問') + td",
+		"td.rowhead:contains('上次访问') + td",
+		"td.rowhead:contains('上次訪問') + td",
+		"td.rowhead:contains('Last access') + td",
+		"td.rowhead:contains('Last seen') + td",
+	},
+	Filters: []Filter{
+		{Name: "regex", Args: []any{`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
+		{Name: "parseTime"},
+	},
+}
+
+// declaresLastAccess 报告站点定义自己有没有写最近访问时间的选择器（写了就不用通用写法）。
+// processesDeclare 报告有没有哪一页要取 field。
+func processesDeclare(processes []UserInfoProcess, field string) bool {
+	return slices.ContainsFunc(processes, func(p UserInfoProcess) bool { return slices.Contains(p.Fields, field) })
+}
+
+func declaresLastAccess(uiConfig *UserInfoConfig) bool {
+	if uiConfig == nil {
+		return false
+	}
+	_, a := uiConfig.Selectors["lastAccessAt"]
+	_, b := uiConfig.Selectors["lastAccess"]
+	return a || b
 }
 
 // extractFieldValue extracts a field value from the document using the selector config
@@ -1272,7 +1741,8 @@ func (d *NexusPHPDriver) setUserInfoField(info *UserInfo, fieldName, value strin
 		info.TrueUploaded = parseSize(value)
 	case "trueDownloaded":
 		info.TrueDownloaded = parseSize(value)
-	case "seederSize":
+	// 定义里写了 seedingSize 就不再取做种列表（见 getUserInfoWithDefinition），值要记进做种体积
+	case "seederSize", "seedingSize":
 		info.SeederSize = parseSize(value)
 	case "leecherSize":
 		info.LeecherSize = parseSize(value)
@@ -1380,6 +1850,16 @@ func (d *NexusPHPDriver) PrepareDownload(torrentID string) (NexusPHPRequest, err
 // ParseDownload extracts torrent file data from the response
 // For NexusPHP, the response is a detail page - we need to extract the download URL and fetch the torrent
 func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
+	return d.ParseDownloadContext(context.Background(), res)
+}
+
+// nexusTorrentFetchTimeout 是从详情页取到下载地址以后拉一次种子文件的超时；测试里会调小。
+var nexusTorrentFetchTimeout = 30 * time.Second
+
+// ParseDownloadContext 同 ParseDownload：拉种子文件的第二段请求跟着 ctx 取消，一时的错误按指数退避重拉同一个下载地址
+// （见 retryTransient，不再重取详情页）。账号开着「第一次下载提示」时带上 letdown=1 再拉一次（见 fetchSkippingFirstNotice）。
+// BaseSite 下载时用它。
+func (d *NexusPHPDriver) ParseDownloadContext(ctx context.Context, res NexusPHPResponse) ([]byte, error) {
 	if res.Document == nil {
 		// If we have raw body (torrent file directly), return it
 		if len(res.RawBody) > 0 {
@@ -1395,49 +1875,113 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 	}
 
 	if detail.DownloadURL == "" {
-		return nil, fmt.Errorf("no download URL found in detail page")
-	}
-
-	// Build full download URL
-	downloadURL := detail.DownloadURL
-	if !strings.HasPrefix(downloadURL, "http") {
-		// Relative URL - prepend base URL
-		if strings.HasPrefix(downloadURL, "/") {
-			downloadURL = d.BaseURL + downloadURL
-		} else {
-			downloadURL = d.BaseURL + "/" + downloadURL
+		if text, ok := nexusTorrentMissing(res.Document); ok {
+			return nil, fmt.Errorf("%w（详情页：%s）", ErrTorrentNotFound, text)
 		}
+		return nil, withPageTitle(errors.New("no download URL found in detail page"), res.Document)
 	}
 
-	// Fetch the actual torrent file
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	downloadURL, sameSite, err := d.resolveDetailDownloadURL(detail.DownloadURL)
+	if err != nil {
+		return nil, err
+	}
 
 	headers := map[string]string{
-		"Cookie":          d.Cookie,
 		"User-Agent":      d.userAgent,
 		"Accept":          "application/x-bittorrent,*/*",
 		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 		"Referer":         d.BaseURL + "/",
 	}
+	// 链接取自详情页，简介等区域是用户内容；只有指向站点自己的域名时才附带 Cookie，
+	// 外域链接照常请求（passkey 下载链接不依赖 Cookie），但不把站点 Cookie 交给第三方。
+	return retryTransient(ctx, nil, func() ([]byte, error) {
+		return fetchSkippingFirstNotice(downloadURL, func(u string) ([]byte, error) { return d.fetchTorrentOnce(ctx, u, headers, sameSite) })
+	})
+}
 
-	resp, err := d.httpClient.Get(ctx, downloadURL, headers)
+// fetchTorrentOnce 拉一次种子文件（每次设上限超时）。下载地址带 passkey：错误里的地址一律脱敏。
+// 拿到的不是种子文件（登录页、「下载提示」页等）时返回包着 ErrNotTorrentFile 的错误（见 CheckTorrentFile）。
+func (d *NexusPHPDriver) fetchTorrentOnce(ctx context.Context, downloadURL string, headers map[string]string, withCookie bool) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, nexusTorrentFetchTimeout)
+	defer cancel()
+
+	get := func(h map[string]string) (*HTTPResponse, error) { return d.httpClient.Get(ctx, downloadURL, h) }
+	var resp *HTTPResponse
+	var err error
+	if withCookie {
+		resp, err = d.sendWithCookie(maps.Clone(headers), get)
+	} else {
+		resp, err = get(headers)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("fetch torrent file: %w", err)
+		return nil, fmt.Errorf("fetch torrent file: %w", redactURLsInError(err))
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, downloadURL)
+		return nil, fmt.Errorf("%w fetching torrent from %s", &HTTPStatusError{Code: resp.StatusCode}, utils.SanitizeURL(downloadURL))
 	}
 
 	if len(resp.Body) == 0 {
 		return nil, fmt.Errorf("empty torrent file response")
+	}
+	if err := CheckTorrentFile(resp.Body); err != nil {
+		return nil, err
 	}
 
 	return resp.Body, nil
 }
 
 // Helper functions
+
+// resolveDetailDownloadURL 把详情页里的下载链接补成绝对地址，并判断它是否指向站点自己的域名。
+// 相对链接沿用原来的拼接方式；绝对链接只接受 http/https。
+func (d *NexusPHPDriver) resolveDetailDownloadURL(href string) (string, bool, error) {
+	href = strings.TrimSpace(href)
+	if u, err := url.Parse(href); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+		return u.String(), d.isSiteHost(u.Hostname()), nil
+	} else if err == nil && u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" {
+		return "", false, fmt.Errorf("unsupported download URL scheme %q", u.Scheme)
+	}
+	if strings.HasPrefix(href, "/") {
+		return d.BaseURL + href, true, nil
+	}
+	return d.BaseURL + "/" + href, true, nil
+}
+
+// isSiteHost 判断 host 是否属于本站：与 BaseURL 或站点定义里任一地址同主机，或同属一个可注册域名
+// （如 pt.example.com 与 dl.example.com）。IP 地址只做精确匹配。
+func (d *NexusPHPDriver) isSiteHost(host string) bool {
+	candidates := []string{d.BaseURL}
+	if d.siteDefinition != nil {
+		candidates = append(candidates, d.siteDefinition.URLs...)
+	}
+	target := registrableDomain(host)
+	for _, c := range candidates {
+		u, err := url.Parse(c)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		if strings.EqualFold(u.Hostname(), host) {
+			return true
+		}
+		if target != "" && strings.EqualFold(registrableDomain(u.Hostname()), target) {
+			return true
+		}
+	}
+	return false
+}
+
+// registrableDomain 返回 host 的可注册域名（eTLD+1）；IP 或无法判断时返回空串。
+func registrableDomain(host string) string {
+	if host == "" || net.ParseIP(host) != nil {
+		return ""
+	}
+	domain, err := publicsuffix.EffectiveTLDPlusOne(strings.ToLower(host))
+	if err != nil {
+		return ""
+	}
+	return domain
+}
 
 // extractTorrentID extracts the torrent ID from a URL
 func extractTorrentID(href string) string {
@@ -1502,24 +2046,47 @@ func parseDiscountFromElement(elem *goquery.Selection, customMapping map[string]
 	alt = strings.ToLower(alt)
 
 	combined := class + " " + src + " " + alt
-	for keyword, level := range customMapping {
+	// 长的关键词先比：twoupfree 同时包含 free 与 twoup，按 map 的随机顺序会时而当成免费、时而当成 2x 上传
+	keywords := make([]string, 0, len(customMapping))
+	for keyword := range customMapping {
+		keywords = append(keywords, keyword)
+	}
+	slices.SortFunc(keywords, func(a, b string) int {
+		if len(a) != len(b) {
+			return len(b) - len(a)
+		}
+		return strings.Compare(a, b)
+	})
+	for _, keyword := range keywords {
 		if strings.Contains(combined, strings.ToLower(keyword)) {
-			return level
+			return customMapping[keyword]
 		}
 	}
 
+	// 没有站点自己的对照时按图标类名（pro_*）、文字模式的类名（twoup、halfdown…）与 alt 文字认。
+	// 组合优惠先比：pro_50pctdown2up 同时含「50pct」与「2up」，twouphalfdown 含「halfdown」，twoupfree 含「free」
+	has := func(keys ...string) bool {
+		for _, k := range keys {
+			if strings.Contains(combined, k) {
+				return true
+			}
+		}
+		return false
+	}
 	switch {
-	case strings.Contains(combined, "2xfree") || strings.Contains(combined, "free2up"):
+	case has("2xfree", "2x free", "free2up", "twoupfree"):
 		return Discount2xFree
-	case strings.Contains(combined, "free"):
+	case has("free"):
 		return DiscountFree
-	case strings.Contains(combined, "50pct") || strings.Contains(combined, "50%"):
+	case has("50pctdown2up", "2x50", "2x 50", "twouphalfdown"):
+		return Discount2x50
+	case has("50pct", "50%", "halfdown"):
 		return DiscountPercent50
-	case strings.Contains(combined, "30pct") || strings.Contains(combined, "30%"):
+	case has("30pct", "30%", "thirtypercent"):
 		return DiscountPercent30
-	case strings.Contains(combined, "70pct") || strings.Contains(combined, "70%"):
+	case has("70pct", "70%"):
 		return DiscountPercent70
-	case strings.Contains(combined, "2xup") || strings.Contains(combined, "2up"):
+	case has("2xup", "2up", "twoup"):
 		return Discount2xUp
 	default:
 		return DiscountNone
@@ -1528,12 +2095,43 @@ func parseDiscountFromElement(elem *goquery.Selection, customMapping map[string]
 
 var discountEndTimeInOnmouseoverRegex = regexp.MustCompile(`title=(?:&quot;|")(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:&quot;|")`)
 
-func parseDiscountEndTimeFromOnmouseover(onmouseover string) time.Time {
+// parseDiscountEndTimeFromOnmouseover 从优惠图标的 onmouseover 提示里取结束时间：提示里没有时间时返回零时间且没有错误；
+// 有时间却解析不了（例如日期越界）返回错误。
+func parseDiscountEndTimeFromOnmouseover(onmouseover string) (time.Time, error) {
 	matches := discountEndTimeInOnmouseoverRegex.FindStringSubmatch(onmouseover)
-	if len(matches) >= 2 {
-		return parseTime(matches[1])
+	if len(matches) < 2 {
+		return time.Time{}, nil
 	}
-	return time.Time{}
+	return parseDiscountEndTime(matches[1])
+}
+
+// discountEndTimeLayouts 是列表页优惠结束时间不带时区的写法，按北京时间解释（与详情页解析一致；
+// time.Parse 会当成 UTC，结束时刻晚 8 小时）。都带年份：不带年份的写法定不下时刻，按无法解析处理。
+var discountEndTimeLayouts = []string{
+	"2006-01-02 15:04:05",
+	"2006-01-02 15:04",
+	"2006/01/02 15:04:05",
+	"2006/01/02 15:04",
+}
+
+var errDiscountEndTimeFormat = errors.New("unrecognized discount end time format")
+
+// parseDiscountEndTime 解析列表页里的优惠结束时间：空值返回零时间且没有错误（没有结束时间）；非空但无法解析返回错误。
+// 带时区的 RFC3339 照原样，不带时区的写法按北京时间。
+func parseDiscountEndTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	for _, layout := range discountEndTimeLayouts {
+		if t, err := ParseTimeInCST(layout, value); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, errDiscountEndTimeFormat
 }
 
 // parseTime parses various time formats
@@ -1551,6 +2149,8 @@ func parseTime(timeStr string) time.Time {
 		"2006/01/02 15:04",
 		"01-02 15:04",
 		time.RFC3339,
+		// 日期和时间之间只隔一个 <br>：TJUPT 列表的时间格是「2026-10-31<br>20:35:49」，没有 title，取文字时两段连在一起
+		"2006-01-0215:04:05",
 	}
 
 	for _, format := range formats {
@@ -1567,9 +2167,10 @@ func parseRatio(ratioStr string) float64 {
 	ratioStr = strings.TrimSpace(ratioStr)
 	ratioStr = strings.ReplaceAll(ratioStr, ",", "")
 
-	// Handle special cases
-	if strings.Contains(strings.ToLower(ratioStr), "inf") || strings.Contains(ratioStr, "∞") {
-		return -1 // Infinite ratio
+	// 无穷（只上传、没下载）：NexusPHP 写「无限」「無限」「Inf.」，也有站写 ∞
+	if strings.Contains(strings.ToLower(ratioStr), "inf") || strings.Contains(ratioStr, "∞") ||
+		strings.Contains(ratioStr, "无限") || strings.Contains(ratioStr, "無限") {
+		return InfiniteRatio
 	}
 
 	value, _ := strconv.ParseFloat(ratioStr, 64)
@@ -1742,6 +2343,9 @@ func (d *NexusPHPDriver) PrepareUserSeedingPage(userID, listType string) (NexusP
 	}, nil
 }
 
+// totalSizeSummaryPattern 匹配做种列表开头「<b>条数</b>条记录 - 总大小体积」这种汇总（TJUPT），条数与体积是全部做种的合计。
+var totalSizeSummaryPattern = regexp.MustCompile(`<b>(\d+)</b>\s*条记录\s*-\s*总大小[：:]?\s*([\d.]+\s*[KMGTP]?i?B)`)
+
 // ParseSeedingStatus parses the seeding status from the AJAX response
 // Implements two parsing strategies based on NexusPHP.ts:
 // 1. Direct parsing: Look for summary text like "10 | 100 GB" or "<b>94</b>条记录，共计<b>2.756 TB</b>"
@@ -1766,6 +2370,12 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 		return seeding, seedingSize, nil
 	}
 
+	// Method 1c: TJUPT 的写法「<b>58</b>条记录 - 总大小3.127 TiB」：体积直接跟在「总大小」后面，不在 <b> 里，
+	// 外面也没有 div（下面 1b 认不出）。表格累加会从第一行的标题里猜体积列，北洋园的标题常带方括号里的版本号、体积，容易猜错
+	if matches := totalSizeSummaryPattern.FindStringSubmatch(bodyStr); len(matches) >= 3 {
+		return int(parseFloat(matches[1])), parseSize(matches[2]), nil
+	}
+
 	// Method 1b: Try to parse direct summary text (e.g., "10 | 100 GB")
 	// Look for div containing " | " which typically shows "count | size"
 	divSeeding := doc.Find("div > div:contains(' | ')")
@@ -1773,8 +2383,9 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 		text := strings.TrimSpace(divSeeding.First().Text())
 		parts := strings.Split(text, "|")
 		if len(parts) >= 2 {
-			// Parse seeding count from first part
-			seeding = int(parseFloat(strings.TrimSpace(parts[0])))
+			// Parse seeding count from first part. Upstream NexusPHP puts the record label after the
+			// number ("94 条记录 | 总大小：2.756 TB", "94 records | Total size: ..."), so take the number only.
+			seeding = int(parseFloat(extractNumber(parts[0])))
 			// Parse seeding size from second part
 			seedingSize = parseSize(strings.TrimSpace(parts[1]))
 			if DebugUserInfo {
@@ -1785,61 +2396,117 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 	}
 
 	// Method 2: Fallback - parse table rows and accumulate sizes
-	// Find all rows except the header row
-	rows := doc.Find("table:last tr:not(:first-child)")
-	if rows.Length() == 0 {
-		// Also try without :last if only one table exists
-		rows = doc.Find("table tr:not(:first-child)")
-	}
-
-	if rows.Length() == 0 {
+	// 列表是最后一张不在别的表格里的表格（上游把汇总、分页放在它前面）；第一行是表头
+	table := doc.Find("table").FilterFunction(func(_ int, s *goquery.Selection) bool {
+		return s.ParentsFiltered("table").Length() == 0
+	}).Last()
+	allRows := table.Find("tr").FilterFunction(func(_ int, tr *goquery.Selection) bool {
+		return tr.Closest("table").IsSelection(table)
+	})
+	if allRows.Length() < 2 {
 		if DebugUserInfo {
 			fmt.Printf("[DEBUG] ParseSeedingStatus: no table rows found\n")
 		}
 		return 0, 0, nil
 	}
-
+	rows := allRows.Slice(1, goquery.ToEnd)
 	seeding = rows.Length()
 
-	// Auto-detect size column index by finding the first column that matches size pattern
-	sizeIndex := -1
-	sizePattern := regexp.MustCompile(`(?i)[\d.]+\s*[KMGTP]?i?B`)
-
-	// Check first row to determine size column
-	firstRow := rows.First()
-	firstRow.Find("td").Each(func(i int, td *goquery.Selection) {
-		if sizeIndex < 0 && sizePattern.MatchString(td.Text()) {
-			sizeIndex = i
-		}
-	})
-
-	if sizeIndex < 0 {
-		// Default to column index 2 if not found (common in NexusPHP)
-		sizeIndex = 2
-	}
-
+	// 体积列按表头找，找不到再看第一行里整格就是体积的格子。不按「第一行里第一个像体积的格子」猜：
+	// 标题里的「1940 Blu-ray」「10bit」也像，猜成标题列以后「The Movie 2160p UHD」会被读成 2160 PiB
+	sizeIndex := seedingSizeColumn(allRows.First(), rows.First())
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] ParseSeedingStatus Method2: detected sizeIndex=%d, rowCount=%d\n", sizeIndex, seeding)
 	}
+	if sizeIndex < 0 {
+		// 找不到体积列：做种数照样报，体积按没取到（保存时沿用上一次的）
+		return seeding, 0, ErrSeedingSizeUnknown
+	}
 
-	// Accumulate sizes from all rows
+	// 只加真是体积的格子
+	parsed := 0
 	rows.Each(func(i int, row *goquery.Selection) {
-		tds := row.Find("td")
-		if tds.Length() > sizeIndex {
-			sizeText := strings.TrimSpace(tds.Eq(sizeIndex).Text())
-			size := parseSize(sizeText)
+		cells := row.ChildrenFiltered("td, th")
+		if cells.Length() <= sizeIndex {
+			return
+		}
+		sizeText := cells.Eq(sizeIndex).Text()
+		size, ok := parseSizeCell(sizeText)
+		if ok {
 			seedingSize += size
-			if DebugUserInfo && i < 3 { // Only log first 3 rows for debugging
-				fmt.Printf("[DEBUG]   Row %d: sizeText=%q, parsed=%d\n", i, sizeText, size)
-			}
+			parsed++
+		}
+		if DebugUserInfo && i < 3 { // Only log first 3 rows for debugging
+			fmt.Printf("[DEBUG]   Row %d: sizeText=%q, parsed=%d\n", i, sizeText, size)
 		}
 	})
+	if parsed == 0 {
+		// 体积列一格也读不出来：同样按没取到算，不当成 0
+		return seeding, 0, ErrSeedingSizeUnknown
+	}
 
 	if DebugUserInfo {
 		fmt.Printf("[DEBUG] ParseSeedingStatus Method2: total seeding=%d, seedingSize=%d\n", seeding, seedingSize)
 	}
 
 	return seeding, seedingSize, nil
+}
+
+// sizeHeaderPattern 认做种列表表头里的体积列：「大小」「體積」「体积」「Size」。上游 NexusPHP 的表头是
+// <img class="size" alt="size" title="大小" />，所以也看 img 的 title、alt 与 class。
+var sizeHeaderPattern = regexp.MustCompile(`(?i)大小|體積|体积|\bsize\b`)
+
+// sizeCellPattern 是整格就是一个体积：数字加单位（B、KB…EB，可带 i），格子里不能有别的字。
+var sizeCellPattern = regexp.MustCompile(`(?i)^([\d.,]+)\s*([KMGTPE]?)i?B$`)
+
+// seedingSizeColumn 找做种列表里体积那一列：先按表头，找不到再看第一行里整格就是体积的格子；都找不到返回 -1。
+func seedingSizeColumn(header, first *goquery.Selection) int {
+	index := -1
+	header.ChildrenFiltered("td, th").EachWithBreak(func(i int, cell *goquery.Selection) bool {
+		texts := []string{cell.Text()}
+		cell.Find("img").Each(func(_ int, img *goquery.Selection) {
+			for _, attr := range []string{"title", "alt", "class"} {
+				if v, ok := img.Attr(attr); ok {
+					texts = append(texts, v)
+				}
+			}
+		})
+		for _, t := range texts {
+			if sizeHeaderPattern.MatchString(t) {
+				index = i
+				return false
+			}
+		}
+		return true
+	})
+	if index >= 0 {
+		return index
+	}
+	first.ChildrenFiltered("td, th").EachWithBreak(func(i int, cell *goquery.Selection) bool {
+		if _, ok := parseSizeCell(cell.Text()); ok {
+			index = i
+			return false
+		}
+		return true
+	})
+	return index
+}
+
+// parseSizeCell 解析整格就是一个体积的格子（「90.55<br />GB」的文字是「90.55GB」），按 1024 进位；格子里有别的字时 ok 为假。
+func parseSizeCell(text string) (int64, bool) {
+	m := sizeCellPattern.FindStringSubmatch(strings.Join(strings.Fields(text), ""))
+	if m == nil {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", ""), 64)
+	if err != nil {
+		return 0, false
+	}
+	multiplier := float64(1)
+	if unit := strings.ToUpper(m[2]); unit != "" {
+		multiplier = math.Pow(1024, float64(strings.Index("KMGTPE", unit)+1))
+	}
+	return int64(value * multiplier), true
 }
 
 // FetchSeedingStatus fetches the seeding status (count and size) for a user
@@ -1854,7 +2521,7 @@ func (d *NexusPHPDriver) FetchSeedingStatus(ctx context.Context, userID string) 
 		fmt.Printf("[DEBUG] FetchSeedingStatus: requesting %s?%s\n", req.Path, req.Params.Encode())
 	}
 
-	res, err := d.Execute(ctx, req)
+	res, err := d.fetchUserInfoPage(ctx, req)
 	if err != nil {
 		if DebugUserInfo {
 			fmt.Printf("[DEBUG] FetchSeedingStatus: request error: %v\n", err)
@@ -1955,6 +2622,7 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 		return nil, ErrParseError
 	}
 
+	fetchedAt := time.Now().UTC()
 	parser := NewNexusPHPParserFromDefinition(d.GetSiteDefinition())
 	detailInfo := parser.ParseAll(res.Document.Selection)
 
@@ -1966,14 +2634,27 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 		DiscountEndTime: detailInfo.DiscountEnd,
 		HasHR:           detailInfo.HasHR,
 		SourceSite:      d.getSiteID(),
+		IMDbID:          detailInfo.IMDbID,
+		DoubanID:        detailInfo.DoubanID,
+		FetchedAt:       fetchedAt,
 	}
+	// 结束时间元素在、值解析不了：免费的有效性是 unknown（元素不在时不写，由 Promotion 按零结束时间推出 unknown）
+	markDiscountUnreliable(item, detailInfo.DiscountErr)
 
 	return item, nil
 }
 
+// getSiteID 是站点在 pt-tools 里的 ID。从域名猜只是最后的办法：不少站点的域名与 ID 对不上
+// （pt.xingyungept.org 是 xingyunge、open.cd 是 opencd），按猜的 ID 拼的下载地址找不到站点（2026-10-26）。
 func (d *NexusPHPDriver) getSiteID() string {
+	if d.siteID != "" {
+		return d.siteID
+	}
 	if d.siteDefinition != nil {
 		return d.siteDefinition.ID
+	}
+	if d.siteName != "" {
+		return string(d.siteName)
 	}
 	return extractSiteIDFromURL(d.BaseURL)
 }
@@ -2026,6 +2707,7 @@ func createNexusPHPSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 		BaseURL:   config.BaseURL,
 		Cookie:    opts.Cookie,
 		Selectors: &selectors,
+		SiteID:    config.ID,
 	})
 
 	if siteDef != nil {

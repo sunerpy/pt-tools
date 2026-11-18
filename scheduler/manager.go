@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -29,29 +31,57 @@ type JobStatus struct {
 }
 
 type Manager struct {
-	mu                   sync.Mutex
-	jobs                 map[string]*job
-	wg                   sync.WaitGroup
-	lastVersion          int64
-	downloaderManager    *downloader.DownloaderManager
-	freeEndMonitor       *FreeEndMonitor
-	cleanupMonitor       *CleanupMonitor
-	peerRatioMonitor     *PeerRatioMonitor
+	mu sync.Mutex
+	// monMu 串行化换监控（配置重载）与 StopAll：换的时候要在 mu 外停旧监控（见 detach），
+	// 有了它，同时进行的两次重载不会让新旧两个监控一起跑，StopAll 也会等正在换的那次停完旧的再返回。
+	monMu             sync.Mutex
+	jobs              map[string]*job
+	wg                sync.WaitGroup
+	lastVersion       int64
+	downloaderManager *downloader.DownloaderManager
+	freeEndMonitor    *FreeEndMonitor
+	// freeEndNotifier 是免费结束监控的告警投递器（暂停连续失败时发），重建监控器时接上
+	freeEndNotifier *MonitorNotifier
+	cleanupMonitor  *CleanupMonitor
+	// cleanupHist 是最近一轮自动删种的结果，换监控（配置重载）时留着
+	cleanupHist          *CleanupHistory
 	loginReminderMonitor *LoginReminderMonitor
+	attendanceMonitor    *AttendanceMonitor
+	dailyReportJob       *DailyReportJob
+	backupJob            *BackupJob
+	brushMonitor         *BrushMonitor
+	deadTorrentMonitor   *DeadTorrentMonitor
+	transferWorker       *TransferWorker
+	freeWatchWorker      *FreeWatchWorker
+	reseedWorker         *ReseedWorker
+	cookieCloudWorker    *CookieCloudWorker
 	eventCancel          func()
-	stopped              bool
+	// eventDone 在处理配置变更的协程退出时关闭：StopAll 等它，停下以后不会再有一次 Reload 在跑
+	eventDone chan struct{}
+	stopped   bool
+	// jobsWanted / jobsPaused 记录用户在网页上点的「启动 / 停止 RSS 任务」：
+	// 手动启动后配置变更照常重启任务；手动停止后配置变更不再把任务拉起来，直到再次手动启动。
+	jobsWanted bool
+	jobsPaused bool
+	// reloading 是正在进行的 Reload 次数；lastDecision 是最近一次 Reload / StartAll / StopJobs 的结论：
+	// RSSRunning 表示决定运行，其余是没有启动任务的原因，空串表示程序启动以后还没有决定过。状态查询（RSSStatus）用它们。
+	reloading    int
+	lastDecision RSSState
 }
 
 func NewManager() *Manager {
 	m := &Manager{
 		jobs:              map[string]*job{},
 		downloaderManager: downloader.NewDownloaderManager(),
+		cleanupHist:       &CleanupHistory{},
 	}
 
 	id, ch, cancel := events.Subscribe(64)
 	_ = id
 	m.eventCancel = cancel
+	m.eventDone = make(chan struct{})
 	go func() {
+		defer close(m.eventDone)
 		defer cancel()
 		var pendingVersion int64
 		var timer *time.Timer
@@ -105,7 +135,6 @@ func (m *Manager) InitFreeEndMonitor() {
 	m.initDownloaderManager()
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
-	m.initPeerRatioMonitor()
 }
 
 // GetDownloaderManager 获取下载器管理器
@@ -134,7 +163,13 @@ func (m *Manager) Start(site models.SiteGroup, r models.RSSConfig, runner func(c
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.jobs[k] = &job{cancel: cancel, startedAt: time.Now()}
-	go runner(ctx)
+	// 在启动协程之前登记：等待方（Reload/StopJobs/StopAll）随时 Wait 都能等到这个任务，
+	// 不会出现计数还是 0、Wait 已返回而旧任务稍后才开始运行的窗口。
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		runner(ctx)
+	}()
 }
 
 func (m *Manager) Stop(site models.SiteGroup, rssName string) {
@@ -180,45 +215,62 @@ func (m *Manager) Reload(cfg *models.Config) {
 		global.GetSlogger().Warn("配置未就绪：数据库未初始化，任务不启动")
 		return
 	}
+	// 先停掉旧任务再判断新配置：旧任务带着旧配置，新配置不让运行（下载目录清空等）时它们也必须停下。
+	m.mu.Lock()
+	wasRunning := len(m.jobs) > 0
+	m.reloading++
+	m.mu.Unlock()
+	// 每条退出路径都记下结论，状态查询据此说明任务为什么没有运行
+	decision := RSSRunning
+	defer func() {
+		m.mu.Lock()
+		m.reloading--
+		m.lastDecision = decision
+		m.mu.Unlock()
+	}()
+	m.cancelJobsAndWait()
+
 	if cfg == nil || cfg.Global.DownloadDir == "" {
+		decision = RSSNotReady
 		global.GetSlogger().Warn("配置未就绪：下载目录为空，任务不启动")
 		return
 	}
-	if !cfg.Global.AutoStart {
-		global.GetSlogger().Info("任务设置为手动启动，跳过自动启动")
+	m.mu.Lock()
+	paused, wanted := m.jobsPaused, m.jobsWanted
+	m.mu.Unlock()
+	if paused {
+		decision = RSSPaused
+		global.GetSlogger().Info("RSS 任务已手动停止，配置变更后不自动启动")
 		return
 	}
-	// 简化：等待当前执行中的任务结束或超时后重启
-	m.mu.Lock()
-	for _, j := range m.jobs {
-		j.cancel()
+	// 自动启动只管程序启动时要不要跑；用户手动启动过（或任务正在运行）时，配置变更要按新配置重启。
+	if !cfg.Global.AutoStart && !wanted && !wasRunning {
+		decision = RSSManual
+		global.GetSlogger().Info("RSS 任务设置为手动启动，跳过自动启动")
+		return
 	}
-	done := make(chan struct{})
-	go func() { m.wg.Wait(); close(done) }()
-	m.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-	}
-	m.mu.Lock()
-	m.jobs = map[string]*job{}
-	m.mu.Unlock()
 
 	// 初始化下载器管理器
 	m.initDownloaderManager()
 
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
-	m.initPeerRatioMonitor()
 
 	defaultDl, err := m.downloaderManager.GetDefaultDownloader()
 	if err != nil {
-		global.GetSlogger().Warnf("未配置默认下载器，任务不启动: %v", err)
+		if errors.Is(err, downloader.ErrNoDefaultDownloader) {
+			decision = RSSNoDownloader
+			global.GetSlogger().Warnf("未配置默认下载器，任务不启动: %v", err)
+		} else {
+			decision = RSSDownloaderUnhealthy
+			global.GetSlogger().Errorf("连接默认下载器失败，任务不启动: %v", err)
+		}
 		return
 	}
 
 	// 对默认下载器进行健康检查
 	if ok, pingErr := defaultDl.Ping(); !ok {
+		decision = RSSDownloaderUnhealthy
 		global.GetSlogger().Errorf("默认下载器健康检查失败，任务不启动: %v", pingErr)
 		return
 	}
@@ -239,11 +291,11 @@ func (m *Manager) Reload(cfg *models.Config) {
 					continue
 				}
 				if !validRSS(r.URL) {
-					global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
+					global.GetSlogger().Warnf("跳过无效RSS（地址不对或是示例里的占位地址）: %s %s", string(site), r.Name)
 					continue
 				}
 				rr := r
-				m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJobUnified(ctx, rr, impl) })
+				m.Start(site, rr, func(ctx context.Context) { runRSSJobUnified(ctx, rr, impl) })
 			}
 		}
 	}
@@ -331,19 +383,56 @@ func (m *Manager) checkDownloaderHealthAsync(setting models.DownloaderSetting) {
 	}(setting)
 }
 
+// detach 持 mu 摘下一个监控（StopAll 以后返回 false），由调用方在 mu 外停掉旧的（调用方持 monMu）：
+// 旧监控的这一轮可能在等推送锁，而持推送锁的推送会回调 Manager 取 mu，持 mu 等它停下会互相卡住。
+func (m *Manager) detach(take func() func()) (stop func(), ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped {
+		return nil, false
+	}
+	return take(), true
+}
+
+// SetFreeEndNotifier 接上免费结束监控的告警投递器；正在运行的监控器立即换上，之后重建的也用它。
+func (m *Manager) SetFreeEndNotifier(n *MonitorNotifier) {
+	m.mu.Lock()
+	m.freeEndNotifier = n
+	mon := m.freeEndMonitor
+	m.mu.Unlock()
+	if mon != nil {
+		mon.SetNotifier(n)
+	}
+}
+
 func (m *Manager) initFreeEndMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
+	m.monMu.Lock()
+	defer m.monMu.Unlock()
+	stopOld, ok := m.detach(func() func() {
+		old := m.freeEndMonitor
+		m.freeEndMonitor = nil
+		if old == nil {
+			return nil
+		}
+		return old.Stop
+	})
+	if !ok {
+		return // StopAll 以后不再起新的监控
+	}
+	if stopOld != nil {
+		stopOld()
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if m.freeEndMonitor != nil {
-		m.freeEndMonitor.Stop()
+	if m.stopped {
+		return // 停旧的时候 StopAll 来了（它在等 monMu）
 	}
-
 	m.freeEndMonitor = NewFreeEndMonitor(global.GlobalDB.DB, m.downloaderManager)
+	m.freeEndMonitor.SetNotifier(m.freeEndNotifier)
 	if err := m.freeEndMonitor.Start(); err != nil {
 		global.GetSlogger().Errorf("启动免费结束监控器失败: %v", err)
 		return
@@ -359,33 +448,38 @@ func (m *Manager) initFreeEndMonitor() {
 	})
 }
 
+// initCleanupMonitor 换上新的自动删种监控。配置变更时的重载在别的 goroutine 里，会和 StopAll 同时进行：
+// 整个过程持 monMu，字段的读写持 mu，旧的在 mu 外停（见 detach）。
 func (m *Manager) initCleanupMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
-
-	if m.cleanupMonitor != nil {
-		m.cleanupMonitor.Stop()
-	}
-
-	m.cleanupMonitor = NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
-	if err := m.cleanupMonitor.Start(); err != nil {
-		global.GetSlogger().Errorf("启动自动删种监控器失败: %v", err)
-	}
-}
-
-func (m *Manager) initPeerRatioMonitor() {
-	if global.GlobalDB == nil {
+	m.monMu.Lock()
+	defer m.monMu.Unlock()
+	stopOld, ok := m.detach(func() func() {
+		old := m.cleanupMonitor
+		m.cleanupMonitor = nil
+		if old == nil {
+			return nil
+		}
+		return old.Stop
+	})
+	if !ok {
 		return
 	}
-
-	if m.peerRatioMonitor != nil {
-		m.peerRatioMonitor.Stop()
+	if stopOld != nil {
+		stopOld()
 	}
 
-	m.peerRatioMonitor = NewPeerRatioMonitor(global.GlobalDB.DB, m.downloaderManager)
-	if err := m.peerRatioMonitor.Start(); err != nil {
-		global.GetSlogger().Errorf("启动竞争度监控器失败: %v", err)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped {
+		return
+	}
+	m.cleanupMonitor = NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
+	m.cleanupMonitor.hist = m.cleanupHist
+	if err := m.cleanupMonitor.Start(); err != nil {
+		global.GetSlogger().Errorf("启动自动删种监控器失败: %v", err)
 	}
 }
 
@@ -420,53 +514,124 @@ func validRSS(raw string) bool {
 	if host == "" {
 		return false
 	}
-	if host == "rss.m-team.xxx" {
-		return false
-	}
-	return true
+	// 示例里的占位地址（hdsky.xxx 这类）永远取不到：不为它开任务
+	return !models.IsPlaceholderRSSHost(host)
 }
 
-// StopAll 取消所有任务并等待当前执行结束
-func (m *Manager) StopAll() {
+// cancelJobsAndWait 取消全部 RSS 任务，等它们退出（最多 30 秒）后清空任务表。
+func (m *Manager) cancelJobsAndWait() {
 	m.mu.Lock()
-	m.stopped = true
 	for _, j := range m.jobs {
 		j.cancel()
 	}
+	m.mu.Unlock()
 	done := make(chan struct{})
 	go func() { m.wg.Wait(); close(done) }()
-	m.mu.Unlock()
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
+		global.GetSlogger().Warn("等待 RSS 任务退出超时（30 秒），继续执行")
 	}
 	m.mu.Lock()
 	m.jobs = map[string]*job{}
-	if m.freeEndMonitor != nil {
-		m.freeEndMonitor.Stop()
-		m.freeEndMonitor = nil
-	}
-	if m.cleanupMonitor != nil {
-		m.cleanupMonitor.Stop()
-		m.cleanupMonitor = nil
-	}
-	if m.peerRatioMonitor != nil {
-		m.peerRatioMonitor.Stop()
-		m.peerRatioMonitor = nil
-	}
-	if m.loginReminderMonitor != nil {
-		m.loginReminderMonitor.Stop()
-		m.loginReminderMonitor = nil
-	}
+	m.mu.Unlock()
+}
+
+// StopJobs 停止全部 RSS 任务（网页上的「停止 RSS 任务」）。免费到期、自动删种（含做种竞争度）、
+// 登录提醒和签到监控继续运行，配置热重载也照常；之后的配置变更不会把任务重新拉起，直到 StartAll。
+func (m *Manager) StopJobs() {
+	m.mu.Lock()
+	m.jobsPaused, m.jobsWanted = true, false
+	m.lastDecision = RSSPaused
+	m.mu.Unlock()
+	m.cancelJobsAndWait()
+}
+
+// StopAll 是进程退出前的最终关闭：取消所有任务并等待结束，停掉全部监控器和配置事件订阅。
+// 之后不能再用 StartAll 恢复；网页上的「停止 RSS 任务」用 StopJobs。
+func (m *Manager) StopAll() {
+	m.mu.Lock()
+	m.stopped = true
+	// CookieCloud 同步写完 Cookie 后会回调 Manager（取登录探测），要在锁外停，否则停止时互相等待
+	ccw := m.cookieCloudWorker
+	m.cookieCloudWorker = nil
+	// 先退掉配置变更的订阅，并等正在处理的那一次（可能在 Reload）做完：之后不会再有任务被它拉起来，
+	// 也不会在调用方（例如测试换回 global.GlobalDB）以后还读全局状态。等的时候不拿锁，Reload 要用 mu 与 monMu
 	if m.eventCancel != nil {
 		m.eventCancel()
 		m.eventCancel = nil
 	}
+	done := m.eventDone
 	m.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	if ccw != nil {
+		ccw.Stop()
+	}
+	m.cancelJobsAndWait()
+	// 等正在换监控的那次停完旧的；之后再有重载看到 stopped 不会再起
+	m.monMu.Lock()
+	defer m.monMu.Unlock()
+	m.mu.Lock()
+	// 先全部摘下，解锁 mu 以后再停（见 detach）
+	var stops []func()
+	if m.freeEndMonitor != nil {
+		stops = append(stops, m.freeEndMonitor.Stop)
+		m.freeEndMonitor = nil
+	}
+	if m.cleanupMonitor != nil {
+		stops = append(stops, m.cleanupMonitor.Stop)
+		m.cleanupMonitor = nil
+	}
+	if m.brushMonitor != nil {
+		stops = append(stops, m.brushMonitor.Stop)
+		m.brushMonitor = nil
+	}
+	if m.deadTorrentMonitor != nil {
+		stops = append(stops, m.deadTorrentMonitor.Stop)
+		m.deadTorrentMonitor = nil
+	}
+	if m.reseedWorker != nil {
+		stops = append(stops, m.reseedWorker.Stop)
+		m.reseedWorker = nil
+	}
+	if m.transferWorker != nil {
+		stops = append(stops, m.transferWorker.Stop)
+		m.transferWorker = nil
+	}
+	if m.freeWatchWorker != nil {
+		stops = append(stops, m.freeWatchWorker.Stop)
+		m.freeWatchWorker = nil
+	}
+	if m.dailyReportJob != nil {
+		stops = append(stops, m.dailyReportJob.Stop)
+		m.dailyReportJob = nil
+	}
+	if m.backupJob != nil {
+		stops = append(stops, m.backupJob.Stop)
+		m.backupJob = nil
+	}
+	if m.attendanceMonitor != nil {
+		stops = append(stops, m.attendanceMonitor.Stop)
+		m.attendanceMonitor = nil
+	}
+	if m.loginReminderMonitor != nil {
+		stops = append(stops, m.loginReminderMonitor.Stop)
+		m.loginReminderMonitor = nil
+	}
+	m.mu.Unlock()
+	for _, stop := range stops {
+		stop()
+	}
 }
 
-// StartAll 按配置启动所有任务（不做停止）
+// StartAll 按配置启动所有任务（不做停止），并记下用户要求运行任务。
 func (m *Manager) StartAll(cfg *models.Config) {
+	m.mu.Lock()
+	m.jobsPaused, m.jobsWanted = false, true
+	m.lastDecision = RSSRunning
+	m.mu.Unlock()
 	for site, sc := range cfg.Sites {
 		if sc.Enabled != nil && *sc.Enabled {
 			// 使用统一的工厂函数创建站点实现
@@ -480,8 +645,12 @@ func (m *Manager) StartAll(cfg *models.Config) {
 					global.GetSlogger().Debugf("跳过RSS配置: %s %s (示例或空URL)", string(site), r.Name)
 					continue
 				}
+				if !validRSS(r.URL) {
+					global.GetSlogger().Warnf("跳过无效RSS（地址不对或是示例里的占位地址）: %s %s", string(site), r.Name)
+					continue
+				}
 				rr := r
-				m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJobUnified(ctx, rr, impl) })
+				m.Start(site, rr, func(ctx context.Context) { runRSSJobUnified(ctx, rr, impl) })
 			}
 		}
 	}
@@ -522,6 +691,8 @@ func executeTaskUnified(ctx context.Context, cfg models.RSSConfig, siteImpl inte
 }
 
 func processRSSUnified(ctx context.Context, cfg models.RSSConfig, ptSite internal.UnifiedPTSite) error {
+	// 取详情与推送共用这一轮的开始时间：推送只认这一轮读到的免费资格
+	ctx = internal.WithRSSAttempt(ctx, time.Now())
 	if err := internal.FetchAndDownloadFreeRSSUnified(ctx, ptSite, cfg); err != nil {
 		return err
 	}
@@ -583,4 +754,198 @@ func (m *Manager) GetLoginReminderMonitor() *LoginReminderMonitor {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.loginReminderMonitor
+}
+
+// SetAttendanceMonitor 登记每日签到监控；替换旧实例时先停掉旧的。
+func (m *Manager) SetAttendanceMonitor(mon *AttendanceMonitor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.attendanceMonitor != nil && m.attendanceMonitor != mon {
+		m.attendanceMonitor.Stop()
+	}
+	m.attendanceMonitor = mon
+}
+
+// SetDailyReportJob 登记每日战报任务；替换旧实例时先停掉旧的。
+func (m *Manager) SetDailyReportJob(job *DailyReportJob) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.dailyReportJob != nil && m.dailyReportJob != job {
+		m.dailyReportJob.Stop()
+	}
+	m.dailyReportJob = job
+}
+
+// SetBackupJob 登记定时备份任务；替换旧实例时先停掉旧的。
+func (m *Manager) SetBackupJob(job *BackupJob) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.backupJob != nil && m.backupJob != job {
+		m.backupJob.Stop()
+	}
+	m.backupJob = job
+}
+
+// SetDeadTorrentMonitor 登记失效种子定时扫描；替换旧实例时先停掉旧的。
+func (m *Manager) SetDeadTorrentMonitor(mon *DeadTorrentMonitor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deadTorrentMonitor != nil && m.deadTorrentMonitor != mon {
+		m.deadTorrentMonitor.Stop()
+	}
+	m.deadTorrentMonitor = mon
+}
+
+// GetDeadTorrentMonitor 返回失效种子定时扫描（未接线时为 nil）。
+func (m *Manager) GetDeadTorrentMonitor() *DeadTorrentMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deadTorrentMonitor
+}
+
+// SetTransferWorker 登记转移做种后台；替换旧实例时先停掉旧的。
+func (m *Manager) SetTransferWorker(w *TransferWorker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.transferWorker != nil && m.transferWorker != w {
+		m.transferWorker.Stop()
+	}
+	m.transferWorker = w
+}
+
+// GetTransferWorker 返回转移做种后台（未接线时为 nil）。
+func (m *Manager) GetTransferWorker() *TransferWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.transferWorker
+}
+
+// SetFreeWatchWorker 登记等免费后台；替换旧实例时先停掉旧的。
+func (m *Manager) SetFreeWatchWorker(w *FreeWatchWorker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.freeWatchWorker != nil && m.freeWatchWorker != w {
+		m.freeWatchWorker.Stop()
+	}
+	m.freeWatchWorker = w
+}
+
+// GetFreeWatchWorker 返回等免费后台（未接线时为 nil）。
+func (m *Manager) GetFreeWatchWorker() *FreeWatchWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.freeWatchWorker
+}
+
+// SetReseedWorker 登记辅种后台；替换旧实例时先停掉旧的。
+func (m *Manager) SetReseedWorker(w *ReseedWorker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reseedWorker != nil && m.reseedWorker != w {
+		m.reseedWorker.Stop()
+	}
+	m.reseedWorker = w
+}
+
+// GetReseedWorker 返回辅种后台（未接线时为 nil）。
+func (m *Manager) GetReseedWorker() *ReseedWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reseedWorker
+}
+
+// SetCookieCloudWorker 登记 CookieCloud 定时同步；替换旧实例时先停掉旧的（在锁外停，理由见 StopAll）。
+func (m *Manager) SetCookieCloudWorker(w *CookieCloudWorker) {
+	m.mu.Lock()
+	old := m.cookieCloudWorker
+	m.cookieCloudWorker = w
+	m.mu.Unlock()
+	if old != nil && old != w {
+		old.Stop()
+	}
+}
+
+// GetCookieCloudWorker 返回 CookieCloud 定时同步（未接线时为 nil）。
+func (m *Manager) GetCookieCloudWorker() *CookieCloudWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cookieCloudWorker
+}
+
+// TransferDownloader 按下载器 ID 取管理器里的实例与配置（转移做种用）；下载器不存在、未启用或连不上时返回错误。
+func (m *Manager) TransferDownloader(ctx context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error) {
+	if global.GlobalDB == nil {
+		return nil, models.DownloaderSetting{}, errors.New("数据库未初始化")
+	}
+	var ds models.DownloaderSetting
+	if err := global.GlobalDB.DB.WithContext(ctx).First(&ds, id).Error; err != nil {
+		return nil, ds, fmt.Errorf("下载器 %d 不存在: %w", id, err)
+	}
+	if !ds.Enabled {
+		return nil, ds, fmt.Errorf("下载器 %s 未启用", ds.Name)
+	}
+	dl, err := m.downloaderManager.GetDownloaderContext(ctx, ds.Name)
+	if err != nil {
+		return nil, ds, err
+	}
+	return dl, ds, nil
+}
+
+// SetBrushMonitor 登记刷流监控；替换旧实例时先停掉旧的。
+func (m *Manager) SetBrushMonitor(mon *BrushMonitor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.brushMonitor != nil && m.brushMonitor != mon {
+		m.brushMonitor.Stop()
+	}
+	m.brushMonitor = mon
+}
+
+// GetBrushMonitor 返回刷流监控，没有接线时为 nil。
+func (m *Manager) GetBrushMonitor() *BrushMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.brushMonitor
+}
+
+// BrushDownloader 按下载器 ID 取管理器里的实例（刷流列种子、删种用）；下载器不存在或未启用时返回错误。
+func (m *Manager) BrushDownloader(id uint) (downloader.Downloader, string, error) {
+	if global.GlobalDB == nil {
+		return nil, "", errors.New("数据库未初始化")
+	}
+	var ds models.DownloaderSetting
+	if err := global.GlobalDB.DB.First(&ds, id).Error; err != nil {
+		return nil, "", fmt.Errorf("下载器 %d 不存在: %w", id, err)
+	}
+	if !ds.Enabled {
+		return nil, ds.Name, fmt.Errorf("下载器 %s 未启用", ds.Name)
+	}
+	dl, err := m.downloaderManager.GetDownloader(ds.Name)
+	if err != nil {
+		return nil, ds.Name, err
+	}
+	return dl, ds.Name, nil
+}
+
+// GetAttendanceMonitor 返回每日签到监控，没有接线时为 nil。
+func (m *Manager) GetAttendanceMonitor() *AttendanceMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.attendanceMonitor
+}
+
+// CleanupStatus 是最近一轮自动删种的结果（没跑过时为空）与下一轮大约什么时候（零值是不知道，例如没启用）。
+func (m *Manager) CleanupStatus() (*CleanupRun, time.Time) {
+	return m.cleanupHist.Snapshot()
+}
+
+// CleanupPreview 按 cfg 算出现在会删哪些种子，不删：每台连得上的下载器一个结果（见 CleanupMonitor.Preview）。
+func (m *Manager) CleanupPreview(ctx context.Context, cfg *models.SettingsGlobal) []CleanupResult {
+	if global.GlobalDB == nil || cfg == nil {
+		return nil
+	}
+	mon := NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
+	defer mon.cancel()
+	mon.quiet = true
+	return mon.Preview(ctx, cfg)
 }

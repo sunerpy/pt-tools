@@ -36,6 +36,13 @@ type fakeDownloader struct {
 	trackerErr     error
 	addResult      downloader.AddTorrentResult
 	addErr         error
+	// statusBlock 不为空时 GetClientStatus 等它关掉才回（测请求结束时不再等）
+	statusBlock chan struct{}
+	// listBlock 不为空时 GetAllTorrents 等它关掉才回
+	listBlock chan struct{}
+	// paths、pathsErr 是 GetClientPaths 回的（默认保存路径）
+	paths    []string
+	pathsErr error
 }
 
 func (f *fakeDownloader) Authenticate() error { return nil }
@@ -49,6 +56,9 @@ func (f *fakeDownloader) GetClientVersion() (string, error) {
 }
 
 func (f *fakeDownloader) GetClientStatus() (downloader.ClientStatus, error) {
+	if f.statusBlock != nil {
+		<-f.statusBlock
+	}
 	return f.status, f.statusErr
 }
 
@@ -61,6 +71,9 @@ func (f *fakeDownloader) GetIncompletePendingBytes(_ context.Context) (int64, er
 }
 
 func (f *fakeDownloader) GetAllTorrents() ([]downloader.Torrent, error) {
+	if f.listBlock != nil {
+		<-f.listBlock
+	}
 	return f.torrents, f.listErr
 }
 
@@ -131,7 +144,7 @@ func (f *fakeDownloader) GetSpeedLimit() (downloader.SpeedLimit, error) {
 	return downloader.SpeedLimit{}, nil
 }
 func (f *fakeDownloader) SetSpeedLimit(_ downloader.SpeedLimit) error { return nil }
-func (f *fakeDownloader) GetClientPaths() ([]string, error)           { return nil, nil }
+func (f *fakeDownloader) GetClientPaths() ([]string, error)           { return f.paths, f.pathsErr }
 func (f *fakeDownloader) GetClientLabels() ([]string, error)          { return nil, nil }
 func (f *fakeDownloader) GetType() downloader.DownloaderType          { return f.dlType }
 func (f *fakeDownloader) GetName() string                             { return f.name }

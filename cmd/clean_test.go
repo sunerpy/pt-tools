@@ -51,7 +51,7 @@ func setupCleanHome(t *testing.T) (home string, db *models.TorrentDB, oldLog, ol
 	require.NoError(t, os.WriteFile(redlineKey, []byte("key"), 0o644))
 
 	var err error
-	db, err = core.NewTempDBDir(t.TempDir())
+	db, err = core.OpenTestDB(t)
 	require.NoError(t, err)
 	return home, db, oldLog, oldBackup, baseLog, redlineDB, redlineKey
 }

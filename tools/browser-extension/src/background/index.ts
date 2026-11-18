@@ -3,14 +3,20 @@ import { t } from "../core/i18n";
 import { logger } from "../core/logger";
 import { createMessage, onMessage, sendToContent, sendToPopup } from "../core/messages";
 import { hasWebNavigationPermission } from "../core/permissions";
+import { saveLoginSnapshot, saveSitesSnapshot } from "../core/snapshots";
 import {
   get,
   getActiveSession,
   getAutoSyncMap,
   getConnection,
   getLastSyncMap,
+  getLastSyncRun,
+  getSyncHashMap,
+  getSyncRejectedMap,
+  getSyncSchedule,
   getTabStatus,
   getTabStatusMap,
+  remove,
   removeTabStatus,
   saveSession,
   set,
@@ -18,24 +24,70 @@ import {
   setAutoSync,
   setConnection,
   setLastSync,
+  setLastSyncRun,
   setLastVisit,
+  setSyncHash,
+  setSyncRejected,
+  setSyncSchedule,
   setTabStatus,
+  updateConnection,
 } from "../core/storage";
 import type {
   CapturedPage,
   CollectionSession,
   KnownSiteStatus,
+  MessageSender,
   PtToolsConnection,
+  RejectedPush,
   SiteDetectedPayload,
   SiteInfo,
   StatusPayload,
+  SyncRunSummary,
+  SyncSchedule,
+  SyncSettingsView,
   TabSiteStatus,
   UnknownSiteStatus,
 } from "../core/types";
-import { PtToolsApiClient, checkCookieHealth, friendlyErrorMessage } from "../modules/sync";
+import {
+  FEATURE_CREDENTIAL_KEEP_ENABLED,
+  FEATURE_CREDENTIAL_VERIFY,
+  PtToolsApiClient,
+  PtToolsApiError,
+  checkCookieHealth,
+  fetchWithTimeout,
+  friendlyErrorMessage,
+} from "../modules/sync";
+import {
+  CookieCloudError,
+  EMPTY_COOKIECLOUD_STATE,
+  cookieCloudView,
+  getCookieCloudConfig,
+  getCookieCloudState,
+  mergeCookieCloudInput,
+  setCookieCloudConfig,
+  setCookieCloudState,
+  testCookieCloud,
+  uploadToCookieCloud,
+} from "../modules/cookiecloud";
 import type { SiteLoginStateRecord } from "../modules/sync";
 import { autoCollect } from "../modules/collector/auto-collector";
 import { extractDomain, matchKnownSite } from "../utils";
+import {
+  type BackendPendingAction,
+  createPendingActionPoller,
+  isPendingActionArray,
+} from "./pending-actions";
+import {
+  AuthExpiredError,
+  DEFAULT_SYNC_SCHEDULE,
+  type ScheduledSyncDeps,
+  createLock,
+  normalizeSchedule,
+  problemsOf,
+  pushFingerprint,
+  runSync,
+} from "./scheduled-sync";
+import { createTabGenerations } from "./tab-generation";
 
 interface MessageResponse<T> {
   ok: boolean;
@@ -80,20 +132,21 @@ function toCurrentSite(status: TabSiteStatus): SiteInfo | null {
   return null;
 }
 
-async function updateBadge(status: TabSiteStatus): Promise<void> {
+/** Badge 按标签页设置：不带 tabId 改的是全局默认值，后台标签页加载完 PT 站，当前标签页的图标也跟着变 */
+async function updateBadge(tabId: number, status: TabSiteStatus): Promise<void> {
   if (status.mode === "known") {
-    await chrome.action.setBadgeText({ text: "✓" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#1f8a70" });
+    await chrome.action.setBadgeText({ tabId, text: "✓" });
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: "#1f8a70" });
     return;
   }
 
   if (status.mode === "unknown") {
-    await chrome.action.setBadgeText({ text: "?" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#e6a23c" });
+    await chrome.action.setBadgeText({ tabId, text: "?" });
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: "#e6a23c" });
     return;
   }
 
-  await chrome.action.setBadgeText({ text: "" });
+  await chrome.action.setBadgeText({ tabId, text: "" });
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
@@ -101,11 +154,28 @@ async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   return tab ?? null;
 }
 
+/**
+ * rejectedReason 是 pt-tools 验证后拒绝保存现在这组 Cookie 的原因：以前只记下来免得重复推，行上看不到（issue #864）。
+ * 只认这组 Cookie 本身被拒绝的（指纹同 pushFingerprint）：Cookie 变了、或者换了 pt-tools 地址，上次的原因就不算了。
+ */
+async function rejectedReason(
+  siteId: string,
+  cookieString: string,
+  baseUrl: string,
+  rejected: Record<string, RejectedPush>,
+): Promise<string | null> {
+  const entry = rejected[siteId];
+  if (!entry || !baseUrl || !cookieString) return null;
+  return entry.hash === (await pushFingerprint(baseUrl, cookieString)) ? entry.reason : null;
+}
+
 async function buildKnownSiteStatus(site: KnownSite): Promise<KnownSiteStatus> {
-  const [health, autoSyncMap, lastSyncMap] = await Promise.all([
+  const [health, autoSyncMap, lastSyncMap, rejected, connection] = await Promise.all([
     checkCookieHealth(site),
     getAutoSyncMap(),
     getLastSyncMap(),
+    getSyncRejectedMap(),
+    getConnection(),
   ]);
 
   return {
@@ -115,6 +185,12 @@ async function buildKnownSiteStatus(site: KnownSite): Promise<KnownSiteStatus> {
     hasCookie: health.hasCookie,
     lastSync: lastSyncMap[site.id] ?? null,
     autoSync: autoSyncMap[site.id] ?? false,
+    syncRejected: await rejectedReason(
+      site.id,
+      health.cookieString,
+      connection.baseUrl?.trim() ?? "",
+      rejected,
+    ),
   };
 }
 
@@ -179,19 +255,17 @@ async function detectViaContent(tabId: number): Promise<SiteDetectedPayload | nu
 
 async function setTabMode(tabId: number, status: TabSiteStatus): Promise<TabSiteStatus> {
   await setTabStatus(tabId, status);
-  await updateBadge(status);
+  await updateBadge(tabId, status);
   await publishStatus();
   return status;
 }
 
-async function resolveTabSiteStatus(tabId: number, url: string): Promise<TabSiteStatus> {
+const tabGenerations = createTabGenerations();
+
+async function detectTabSiteStatus(tabId: number, url: string): Promise<TabSiteStatus> {
   const known = matchKnownSite(url);
   if (known) {
-    const knownStatus = await buildKnownSiteStatus(known);
-    return setTabMode(tabId, {
-      mode: "known",
-      known: knownStatus,
-    });
+    return { mode: "known", known: await buildKnownSiteStatus(known) };
   }
 
   const detected = await detectViaContent(tabId);
@@ -201,10 +275,20 @@ async function resolveTabSiteStatus(tabId: number, url: string): Promise<TabSite
       pageType: detected.pageType,
       url: detected.url,
     };
-    return setTabMode(tabId, { mode: "unknown", unknown });
+    return { mode: "unknown", unknown };
   }
 
-  return setTabMode(tabId, { mode: "none" });
+  return { mode: "none" };
+}
+
+async function resolveTabSiteStatus(tabId: number, url: string): Promise<TabSiteStatus> {
+  const isCurrent = tabGenerations.begin(tabId);
+  const status = await detectTabSiteStatus(tabId, url);
+  if (!isCurrent()) {
+    // 同一标签页已经开始了更新的解析（比如已经离开这个页面）：这次的结果作废，不写状态、不动 Badge
+    return status;
+  }
+  return setTabMode(tabId, status);
 }
 
 async function resolveCurrentTabStatus(): Promise<TabSiteStatus> {
@@ -276,31 +360,70 @@ async function upsertCapturedPage(page: CapturedPage): Promise<void> {
   await publishStatus();
 }
 
-async function syncKnownSite(site: KnownSite): Promise<void> {
-  if (site.syncField !== "cookie") {
-    throw new Error(t("error.authSyncUnsupported", site.name, site.syncField));
-  }
+/** pushLock 是推 Cookie 的锁：定时同步、手动同步、批量同步与 Cookie 变化时的自动同步共用一把（见 scheduled-sync 的 createLock）。 */
+const pushLock = createLock();
 
-  const connection = await getConnection();
-  const baseUrl = connection.baseUrl?.trim();
-  if (!baseUrl) {
-    throw new Error(t("error.configurePtToolsUrl"));
-  }
+/**
+ * syncKnownSite 把站点的 Cookie 推给 pt-tools，返回推了没有。skipUnchanged 时（自动同步）和上次推给同一个 pt-tools 的一样就不推：
+ * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器。手动同步总是推。
+ * 读 Cookie、比指纹、推送、记指纹都在 pushLock 里。
+ * 格式认不出的 Cookie（unverified）带 verify_cookie 推，pt-tools 先拿它登录一次、登录上了才保存；pt-tools 不认时不推。
+ * 被拒绝的那组记下指纹：自动同步时 Cookie 没变就不再推，手动同步照推（用户点了就再验证一次）。
+ */
+function syncKnownSite(
+  site: KnownSite,
+  opts: { skipUnchanged?: boolean } = {},
+): Promise<{ pushed: boolean; warning?: string }> {
+  return pushLock(async () => {
+    if (site.syncField !== "cookie") {
+      throw new Error(t("error.authSyncUnsupported", site.name, site.syncField));
+    }
 
-  const health = await checkCookieHealth(site);
-  if (!health.cookieString || health.status === "missing") {
-    throw new Error(t("error.cookieMissingCannotSync", site.name));
-  }
+    const connection = await getConnection();
+    const baseUrl = connection.baseUrl?.trim();
+    if (!baseUrl) {
+      throw new Error(t("error.configurePtToolsUrl"));
+    }
 
-  const api = new PtToolsApiClient(baseUrl);
-  await api.syncSiteCredential(site, health.cookieString);
+    const health = await checkCookieHealth(site);
+    if (!health.cookieString || health.status === "missing") {
+      throw new Error(t("error.cookieMissingCannotSync", site.name));
+    }
+    const verify = health.status === "unverified";
 
-  const syncedAt = new Date().toISOString();
-  await setLastSync(site.id, syncedAt);
-  await setConnection({
-    ...connection,
-    connected: true,
-    lastSync: syncedAt,
+    const hash = await pushFingerprint(baseUrl, health.cookieString);
+    if (opts.skipUnchanged) {
+      if ((await getSyncHashMap())[site.id] === hash) {
+        return { pushed: false };
+      }
+      if (verify && (await getSyncRejectedMap())[site.id]?.hash === hash) {
+        return { pushed: false };
+      }
+    }
+
+    const api = new PtToolsApiClient(baseUrl);
+    if (verify && !(await api.features()).includes(FEATURE_CREDENTIAL_VERIFY)) {
+      throw new Error(t("error.cookieVerifyUnsupported", site.name));
+    }
+    let warning: string | undefined;
+    try {
+      ({ warning } = await api.syncSiteCredential(site, health.cookieString, {
+        verifyCookie: verify,
+      }));
+    } catch (error: unknown) {
+      if (verify && isVerifyRejection(error)) {
+        await setSyncRejected(site.id, { hash, reason: errorText(error) });
+      }
+      throw error;
+    }
+
+    const syncedAt = new Date().toISOString();
+    await setLastSync(site.id, syncedAt);
+    await setSyncHash(site.id, hash);
+    await setSyncRejected(site.id, null);
+    // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
+    await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
+    return { pushed: true, warning };
   });
 }
 
@@ -327,9 +450,18 @@ async function maybeAutoSyncByDomain(domain: string): Promise<void> {
   autoSyncThrottle.set(matched.id, now);
 
   try {
-    await syncKnownSite(matched);
+    const result = await syncKnownSite(matched, { skipUnchanged: true });
+    if (!result.pushed) {
+      return;
+    }
     logger.info("Auto-sync completed", { siteId: matched.id });
-    notifyAutoSync("success", matched.name, t("notification.autoSyncSuccessBody", matched.name));
+    notifyAutoSync(
+      "success",
+      matched.name,
+      result.warning
+        ? t("notification.autoSyncWarnBody", matched.name, result.warning)
+        : t("notification.autoSyncSuccessBody", matched.name),
+    );
     const [activeTab, map] = await Promise.all([getActiveTab(), getTabStatusMap()]);
     if (activeTab?.id && map[String(activeTab.id)]?.mode === "known") {
       await resolveCurrentTabStatus();
@@ -425,12 +557,54 @@ onMessage("GET_STATUS", async () => getStatusPayload());
 
 onMessage("GET_TAB_STATUS", async () => resolveCurrentTabStatus());
 
-onMessage("GET_ALL_SITES_STATUS", async () => {
-  const statuses: KnownSiteStatus[] = [];
-  for (const site of KNOWN_SITES) {
-    statuses.push(await buildKnownSiteStatus(site));
-  }
+// 六十多个站点并行读：以前逐个站点串行读 Cookie 和两份存储，弹窗要等它全部读完才显示，打开要好几秒
+onMessage("GET_ALL_SITES_STATUS", async (): Promise<KnownSiteStatus[]> => {
+  const [autoSyncMap, lastSyncMap, rejected, connection] = await Promise.all([
+    getAutoSyncMap(),
+    getLastSyncMap(),
+    getSyncRejectedMap(),
+    getConnection(),
+  ]);
+  const baseUrl = connection.baseUrl?.trim() ?? "";
+  const statuses = await Promise.all(
+    KNOWN_SITES.map(async (site): Promise<KnownSiteStatus> => {
+      const health = await checkCookieHealth(site);
+      return {
+        site,
+        cookieStatus: health.status,
+        cookieExpireDays: health.expireDays,
+        hasCookie: health.hasCookie,
+        lastSync: lastSyncMap[site.id] ?? null,
+        autoSync: autoSyncMap[site.id] ?? false,
+        syncRejected: await rejectedReason(site.id, health.cookieString, baseUrl, rejected),
+      };
+    }),
+  );
+  // 下次打开弹窗先显示这一份（core/snapshots.ts）；存不下不影响这次的结果
+  void saveSitesSnapshot(statuses).catch((error: unknown) =>
+    logger.warn("save sites snapshot failed", { error }),
+  );
   return statuses;
+});
+
+// 弹窗打开时单独问一次 pt-tools 在不在线（最多等 4 秒），页头的连接状态不用等站点列表
+const CONNECTION_CHECK_TIMEOUT_MS = 4000;
+
+onMessage("CHECK_CONNECTION", async (): Promise<PtToolsConnection> => {
+  const connection = await getConnection();
+  const baseUrl = connection.baseUrl?.trim();
+  if (!baseUrl) {
+    return { ...connection, connected: false };
+  }
+  let connected = false;
+  try {
+    await new PtToolsApiClient(baseUrl).ping(CONNECTION_CHECK_TIMEOUT_MS);
+    connected = true;
+  } catch (error: unknown) {
+    logger.warn("connection check failed", { error });
+  }
+  await updateConnection(baseUrl, { connected });
+  return { ...connection, connected };
 });
 
 onMessage("GET_SITE_LOGIN_STATE", async (): Promise<SiteLoginStateRecord[]> => {
@@ -440,7 +614,11 @@ onMessage("GET_SITE_LOGIN_STATE", async (): Promise<SiteLoginStateRecord[]> => {
     throw new Error(t("error.configurePtToolsUrl"));
   }
   const api = new PtToolsApiClient(baseUrl);
-  return api.getSiteLoginStatus();
+  const logins = await api.getSiteLoginStatus();
+  void saveLoginSnapshot(baseUrl, logins).catch((error: unknown) =>
+    logger.warn("save login snapshot failed", { error }),
+  );
+  return logins;
 });
 
 onMessage("SYNC_SITE_COOKIES", async ({ siteId }) => {
@@ -449,11 +627,12 @@ onMessage("SYNC_SITE_COOKIES", async ({ siteId }) => {
     throw new Error(t("error.unknownSite"));
   }
 
-  await syncKnownSite(site);
+  const { warning } = await syncKnownSite(site);
   const refreshed = await resolveCurrentTabStatus();
   return {
     ok: true,
     status: refreshed,
+    warning,
   };
 });
 
@@ -470,6 +649,7 @@ onMessage("TOGGLE_AUTO_SYNC", async ({ siteId, enabled }) => {
 onMessage("BATCH_SYNC_SITES", async ({ siteIds }) => {
   const synced: string[] = [];
   const failed: Array<{ siteId: string; error: string }> = [];
+  const warnings: Array<{ siteId: string; warning: string }> = [];
 
   for (const siteId of siteIds) {
     const site = KNOWN_SITES.find((item) => item.id === siteId);
@@ -479,8 +659,9 @@ onMessage("BATCH_SYNC_SITES", async ({ siteIds }) => {
     }
 
     try {
-      await syncKnownSite(site);
+      const { warning } = await syncKnownSite(site);
       synced.push(siteId);
+      if (warning) warnings.push({ siteId, warning });
     } catch (error: unknown) {
       failed.push({
         siteId,
@@ -490,7 +671,7 @@ onMessage("BATCH_SYNC_SITES", async ({ siteIds }) => {
   }
 
   await publishStatus();
-  return { synced, failed };
+  return { synced, failed, warnings };
 });
 
 onMessage("BATCH_OPEN_TABS", async ({ siteIds, timeoutMs }) => {
@@ -575,6 +756,257 @@ onMessage("SYNC_COOKIES", async ({ baseUrl, username, password }) => {
   return connection;
 });
 
+// ---- 定时同步与 CookieCloud（M22） ----
+// 逻辑在 ./scheduled-sync 与 modules/cookiecloud；这里接 chrome API、存储与网络。
+
+const SYNC_ALARM_NAME = "pt-tools-cookie-sync";
+
+async function getSchedule(): Promise<SyncSchedule> {
+  return normalizeSchedule((await getSyncSchedule()) ?? DEFAULT_SYNC_SCHEDULE);
+}
+
+/** applySyncSchedule 按设置建或删定时同步的 alarm；间隔没变时不重建（不打乱已经排好的下一次）。 */
+async function applySyncSchedule(schedule: SyncSchedule): Promise<void> {
+  const existing = await chrome.alarms.get(SYNC_ALARM_NAME);
+  if (!schedule.enabled) {
+    if (existing) {
+      await chrome.alarms.clear(SYNC_ALARM_NAME);
+    }
+    return;
+  }
+  if (existing?.periodInMinutes === schedule.intervalMinutes) {
+    return;
+  }
+  await chrome.alarms.create(SYNC_ALARM_NAME, {
+    delayInMinutes: schedule.intervalMinutes,
+    periodInMinutes: schedule.intervalMinutes,
+  });
+}
+
+function asAuthExpired(error: unknown): unknown {
+  return error instanceof PtToolsApiError && error.code === "auth_required"
+    ? new AuthExpiredError()
+    : error;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? friendlyErrorMessage(error.message) : String(error);
+}
+
+/** pt-tools 验证后拒绝保存（422：这组 Cookie 没登录上）；409（正在做登录检查）过一会儿会好，不算 */
+function isVerifyRejection(error: unknown): boolean {
+  return error instanceof PtToolsApiError && error.code === "verify_failed" && error.status === 422;
+}
+
+const scheduledSyncDeps: ScheduledSyncDeps = {
+  sites: KNOWN_SITES,
+  getSchedule,
+  getAutoSyncMap,
+  getHash: async (siteId) => (await getSyncHashMap())[siteId],
+  withPushLock: (fn) => pushLock(fn),
+  ptTools: async () => {
+    const connection = await getConnection();
+    const baseUrl = connection.baseUrl?.trim();
+    return connection.connected && baseUrl ? baseUrl : null;
+  },
+  ptToolsSites: async (baseUrl) => {
+    try {
+      const sites = await new PtToolsApiClient(baseUrl).getSites();
+      return sites.map((site) => ({ name: site.name.toLowerCase(), enabled: site.enabled }));
+    } catch (error: unknown) {
+      throw asAuthExpired(error);
+    }
+  },
+  keepEnabledSupported: async (baseUrl) => {
+    try {
+      const features = await new PtToolsApiClient(baseUrl).features();
+      return features.includes(FEATURE_CREDENTIAL_KEEP_ENABLED);
+    } catch {
+      return false;
+    }
+  },
+  verifySupported: async (baseUrl) => {
+    try {
+      const features = await new PtToolsApiClient(baseUrl).features();
+      return features.includes(FEATURE_CREDENTIAL_VERIFY);
+    } catch {
+      return false;
+    }
+  },
+  readCookie: async (site) => {
+    const health = await checkCookieHealth(site);
+    if (health.status === "valid" || health.status === "expiring") {
+      return { cookie: health.cookieString, verify: false };
+    }
+    return health.status === "unverified" ? { cookie: health.cookieString, verify: true } : null;
+  },
+  pushCookie: async (baseUrl, site, cookie, opts) => {
+    try {
+      await new PtToolsApiClient(baseUrl).syncSiteCredential(site, cookie, {
+        keepEnabled: opts.keepEnabled,
+        verifyCookie: opts.verify,
+      });
+    } catch (error: unknown) {
+      throw asAuthExpired(error);
+    }
+  },
+  recordPushed: async (siteId, hash, at) => {
+    await setSyncHash(siteId, hash);
+    await setLastSync(siteId, at);
+    await setSyncRejected(siteId, null);
+  },
+  getRejected: async (siteId) => (await getSyncRejectedMap())[siteId],
+  recordRejected: (siteId, rejected) => setSyncRejected(siteId, rejected),
+  isRejection: isVerifyRejection,
+  authExpired: async (baseUrl) => {
+    await updateConnection(baseUrl, { connected: false });
+    await clearPollAlarm();
+  },
+  getCookieCloudConfig,
+  getCookieCloudState,
+  saveCookieCloudState: setCookieCloudState,
+  upload: uploadToCookieCloud,
+  errorText,
+  now: () => new Date(),
+};
+
+let syncInFlight: Promise<SyncRunSummary> | null = null;
+
+/** runScheduledSync 跑一轮定时同步（同一时间只跑一轮），记下结果；出了和上一轮不一样的问题时发一条通知。 */
+function runScheduledSync(trigger: SyncRunSummary["trigger"]): Promise<SyncRunSummary> {
+  if (syncInFlight) {
+    return syncInFlight;
+  }
+  syncInFlight = (async () => {
+    try {
+      const previous = await getLastSyncRun();
+      const summary = await runSync(scheduledSyncDeps, trigger);
+      await setLastSyncRun(summary);
+      const problems = problemsOf(summary);
+      if (trigger === "schedule" && problems && problems !== problemsOf(previous)) {
+        notifySyncProblem(problems);
+      }
+      return summary;
+    } finally {
+      syncInFlight = null;
+    }
+  })();
+  return syncInFlight;
+}
+
+function notifySyncProblem(body: string): void {
+  if (typeof chrome === "undefined" || !chrome.notifications?.create) {
+    return;
+  }
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+    title: t("sync.problemTitle"),
+    message: body,
+    priority: 1,
+  });
+}
+
+/** requireExtensionPage 拒绝网页里的内容脚本发来的设置类消息：这些只在扩展的弹窗里改。 */
+function requireExtensionPage(sender: MessageSender): void {
+  if (sender.tabId !== undefined) {
+    throw new Error(t("error.extensionPageOnly"));
+  }
+}
+
+async function syncSettingsView(): Promise<SyncSettingsView> {
+  const [schedule, cfg, state, lastRun] = await Promise.all([
+    getSchedule(),
+    getCookieCloudConfig(),
+    getCookieCloudState(),
+    getLastSyncRun(),
+  ]);
+  return { schedule, cookieCloud: cookieCloudView(cfg, state), lastRun };
+}
+
+onMessage("GET_SYNC_SETTINGS", async (_payload, sender) => {
+  requireExtensionPage(sender);
+  return syncSettingsView();
+});
+
+onMessage("SAVE_SYNC_SCHEDULE", async (payload, sender) => {
+  requireExtensionPage(sender);
+  const schedule = normalizeSchedule(payload);
+  await setSyncSchedule(schedule);
+  await applySyncSchedule(schedule);
+  return syncSettingsView();
+});
+
+onMessage("RUN_SYNC_NOW", async (_payload, sender) => {
+  requireExtensionPage(sender);
+  await runScheduledSync("manual");
+  return syncSettingsView();
+});
+
+onMessage("SAVE_COOKIECLOUD", async (payload, sender) => {
+  requireExtensionPage(sender);
+  const current = await getCookieCloudConfig();
+  const next = mergeCookieCloudInput(payload, current);
+  await setCookieCloudConfig(next);
+  const changed =
+    next.serverUrl !== current.serverUrl ||
+    next.uuid !== current.uuid ||
+    next.password !== current.password ||
+    next.cryptoType !== current.cryptoType;
+  if (changed) {
+    // 换了服务地址、UUID、密码或加密方式：下一次定时同步重新上传
+    const state = (await getCookieCloudState()) ?? EMPTY_COOKIECLOUD_STATE;
+    await setCookieCloudState({ ...state, lastDigest: null, lastTarget: null });
+  }
+  return syncSettingsView();
+});
+
+onMessage("TEST_COOKIECLOUD", async (_payload, sender) => {
+  requireExtensionPage(sender);
+  return testCookieCloud(await getCookieCloudConfig());
+});
+
+onMessage("UPLOAD_COOKIECLOUD", async (payload, sender) => {
+  requireExtensionPage(sender);
+  const cfg = await getCookieCloudConfig();
+  const state = await getCookieCloudState();
+  try {
+    const { result, state: next } = await uploadToCookieCloud(cfg, state, {
+      force: true,
+      overwrite: payload?.overwrite === true,
+    });
+    await setCookieCloudState(next);
+    return { result, settings: await syncSettingsView() };
+  } catch (error: unknown) {
+    await setCookieCloudState({
+      ...(state ?? EMPTY_COOKIECLOUD_STATE),
+      lastError: errorText(error),
+      lastErrorAt: new Date().toISOString(),
+    });
+    if (
+      error instanceof CookieCloudError &&
+      error.code === "decrypt" &&
+      payload?.overwrite !== true
+    ) {
+      // 让弹窗问用户要不要覆盖（改过密码时）；不是错误，不抛
+      return { needsOverwrite: true, message: error.message, settings: await syncSettingsView() };
+    }
+    throw error;
+  }
+});
+
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== SYNC_ALARM_NAME) {
+      return;
+    }
+    void runScheduledSync("schedule").catch((error: unknown) => {
+      logger.warn("scheduled sync failed", error);
+    });
+  });
+}
+// ---- end 定时同步与 CookieCloud ----
+
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   void (async () => {
     try {
@@ -599,6 +1031,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  tabGenerations.forget(tabId);
   void removeTabStatus(tabId);
 });
 
@@ -689,37 +1122,15 @@ if (chrome.webNavigation?.onHistoryStateUpdated) {
 // ---- end webNavigation visit tracking ----
 
 // ---- Pending action polling (T17) ----
-// Backend queues "open SiteX tab" actions; extension polls every 30s,
-// executes via chrome.tabs.create on KNOWN_SITES only, then acks.
-// Replaces v1 batchOpenTabsForSync (push-on-demand model). R-EC10 enforces
-// 24h TTL server-side. R28 forbids setInterval — we use chrome.alarms.
+// 动作的取回、执行与 ack 见 ./pending-actions；这里只接 chrome API、存储与网络。
+// R28 forbids setInterval — we use chrome.alarms.
 
 const POLL_ALARM_NAME = "pt-tools-poll";
 const POLL_PERIOD_MINUTES = 0.5;
-const POLL_LAST_TIMESTAMP_KEY = "pt_tools_pending_actions_since";
-const POLL_MAX_ACTION_AGE_MS = 24 * 60 * 60 * 1000;
-
-interface BackendPendingAction {
-  id: number;
-  type: string;
-  target_url: string;
-  site_name?: string;
-  reason?: string;
-  created_at?: string;
-  expires_at?: string;
-}
-
-function isPendingActionArray(value: unknown): value is BackendPendingAction[] {
-  if (!Array.isArray(value)) return false;
-  return value.every(
-    (item) =>
-      typeof item === "object" &&
-      item !== null &&
-      typeof (item as { id?: unknown }).id === "number" &&
-      typeof (item as { type?: unknown }).type === "string" &&
-      typeof (item as { target_url?: unknown }).target_url === "string",
-  );
-}
+/** 旧版本按 since 游标取动作，已不再使用；启动时清掉 */
+const LEGACY_POLL_SINCE_KEY = "pt_tools_pending_actions_since";
+/** 已打开标签页、还没 ack 成功的动作 ID */
+const POLL_OPENED_IDS_KEY = "pt_tools_pending_actions_opened";
 
 function urlMatchesKnownSite(rawURL: string): KnownSite | null {
   let host: string;
@@ -739,14 +1150,6 @@ function urlMatchesKnownSite(rawURL: string): KnownSite | null {
   return null;
 }
 
-function actionTimestampMs(action: BackendPendingAction): number {
-  if (action.created_at) {
-    const t = Date.parse(action.created_at);
-    if (!Number.isNaN(t)) return t;
-  }
-  return Date.now();
-}
-
 class PendingAuthError extends Error {
   constructor() {
     super("pending poll unauthorized");
@@ -754,12 +1157,10 @@ class PendingAuthError extends Error {
   }
 }
 
-async function fetchPending(baseUrl: string, since: number): Promise<BackendPendingAction[]> {
-  const url = new URL(`${baseUrl.replace(/\/+$/, "")}/api/extension/actions/pending`);
-  if (since > 0) {
-    url.searchParams.set("since", String(since));
-  }
-  const response = await fetch(url.toString(), {
+async function fetchPending(baseUrl: string): Promise<BackendPendingAction[]> {
+  const url = `${baseUrl.replace(/\/+$/, "")}/api/extension/actions/pending`;
+  // 带超时：请求卡住时不让一轮轮询一直挂着
+  const response = await fetchWithTimeout(url, {
     method: "GET",
     headers: { Accept: "application/json" },
     credentials: "include",
@@ -784,7 +1185,7 @@ async function ackAction(baseUrl: string, actionId: number): Promise<void> {
   const url = `${baseUrl.replace(/\/+$/, "")}/api/extension/actions/${encodeURIComponent(
     String(actionId),
   )}/ack`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     credentials: "include",
@@ -795,13 +1196,18 @@ async function ackAction(baseUrl: string, actionId: number): Promise<void> {
   }
 }
 
-async function getPollSince(): Promise<number> {
-  return (await get<number>(POLL_LAST_TIMESTAMP_KEY)) ?? 0;
-}
-
-async function setPollSince(unixSeconds: number): Promise<void> {
-  await set(POLL_LAST_TIMESTAMP_KEY, unixSeconds);
-}
+const pendingPoller = createPendingActionPoller({
+  fetchPending,
+  ack: ackAction,
+  openTab: async (url) => {
+    await chrome.tabs.create({ url, active: false });
+  },
+  isKnownSiteUrl: (url) => urlMatchesKnownSite(url) !== null,
+  loadOpenedIds: async () => (await get<number[]>(POLL_OPENED_IDS_KEY)) ?? [],
+  saveOpenedIds: (ids) => set(POLL_OPENED_IDS_KEY, ids),
+  now: () => Date.now(),
+  log: logger,
+});
 
 export async function pollPendingActions(): Promise<void> {
   const connection = await getConnection();
@@ -809,75 +1215,16 @@ export async function pollPendingActions(): Promise<void> {
   if (!baseUrl || !connection.connected) {
     return;
   }
-  let actions: BackendPendingAction[];
   try {
-    const since = await getPollSince();
-    actions = await fetchPending(baseUrl, since);
+    await pendingPoller.poll(baseUrl);
   } catch (error: unknown) {
     if (error instanceof PendingAuthError) {
       await clearPollAlarm();
-      await setConnection({ ...connection, connected: false });
+      await updateConnection(baseUrl, { connected: false });
       logger.warn("pollPendingActions unauthorized; pausing poll until re-login");
       return;
     }
     logger.warn("pollPendingActions fetch failed", error);
-    return;
-  }
-  if (actions.length === 0) {
-    return;
-  }
-  const now = Date.now();
-  let maxCreatedSec = 0;
-  for (const action of actions) {
-    const createdMs = actionTimestampMs(action);
-    if (now - createdMs > POLL_MAX_ACTION_AGE_MS) {
-      logger.info("pollPendingActions skipping expired action", { id: action.id });
-      continue;
-    }
-    if (action.type !== "open_tab") {
-      logger.info("pollPendingActions skipping unsupported action type", {
-        id: action.id,
-        type: action.type,
-      });
-      try {
-        await ackAction(baseUrl, action.id);
-      } catch (error: unknown) {
-        logger.warn("ack of unsupported action failed", { id: action.id, error });
-      }
-      const createdSec = Math.floor(createdMs / 1000);
-      if (createdSec > maxCreatedSec) maxCreatedSec = createdSec;
-      continue;
-    }
-    const matched = urlMatchesKnownSite(action.target_url);
-    if (!matched) {
-      logger.warn("pollPendingActions skipping non-known-site URL", {
-        id: action.id,
-        url: action.target_url,
-      });
-      try {
-        await ackAction(baseUrl, action.id);
-      } catch (error: unknown) {
-        logger.warn("ack of skipped action failed", { id: action.id, error });
-      }
-      const createdSec = Math.floor(createdMs / 1000);
-      if (createdSec > maxCreatedSec) maxCreatedSec = createdSec;
-      continue;
-    }
-    try {
-      await chrome.tabs.create({ url: action.target_url, active: false });
-      await ackAction(baseUrl, action.id);
-      logger.info("pollPendingActions executed open_tab", {
-        id: action.id,
-        siteId: matched.id,
-      });
-      const createdSec = Math.floor(createdMs / 1000);
-      if (createdSec > maxCreatedSec) maxCreatedSec = createdSec;
-    } catch (error: unknown) {
-      logger.warn("pollPendingActions open_tab failed", { id: action.id, error });
-    }
-  }
-  if (maxCreatedSec > 0) {
-    await setPollSince(maxCreatedSec);
   }
 }
 
@@ -916,7 +1263,9 @@ void (async () => {
   } else {
     await clearPollAlarm();
   }
+  await applySyncSchedule(await getSchedule());
   void STORAGE_KEYS.batchTabQueue;
+  await remove(LEGACY_POLL_SINCE_KEY);
   const tab = await getActiveTab();
   if (tab?.id && tab.url) {
     await resolveTabSiteStatus(tab.id, tab.url);

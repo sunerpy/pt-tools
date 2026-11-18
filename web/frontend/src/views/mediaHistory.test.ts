@@ -1,0 +1,550 @@
+// @vitest-environment happy-dom
+/*
+ * 钉子：整理历史。按状态与关键字筛选；失败与跳过的可以重试并写明结果；整理好的写明刮削的结果，可以重新刮削（先确认）；
+ * 删除时可选连库里的文件一起删，移动整理的与没整理出文件的不能选；读不到时写明原因。
+ */
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMemoryHistory, createRouter } from "vue-router";
+
+import { type MountedView, mountView } from "@/test-mount";
+
+const api = vi.hoisted(() => ({
+  history: vi.fn(),
+  retry: vi.fn(),
+  rescrape: vi.fn(),
+  deleteHistory: vi.fn(),
+  preview: vi.fn(),
+  organize: vi.fn(),
+  libraries: vi.fn(),
+}));
+const ui = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+  confirm: vi.fn(),
+}));
+
+vi.mock("@/api", async (orig) => {
+  const real = await orig<typeof import("@/api")>();
+  return {
+    ...real,
+    organizeApi: api,
+    // 「手动整理」弹窗打开时读 TMDB 图片地址
+    mediaApi: { ...real.mediaApi, settings: vi.fn(async () => ({ image_base_url: "" })) },
+  };
+});
+
+vi.mock("element-plus", async (orig) => {
+  const real = await orig<typeof import("element-plus")>();
+  return {
+    ...real,
+    ElMessage: Object.assign(vi.fn(), {
+      success: ui.success,
+      error: ui.error,
+      warning: ui.warning,
+      info: ui.info,
+    }),
+    ElMessageBox: { ...real.ElMessageBox, confirm: ui.confirm },
+  };
+});
+
+let view: MountedView | null = null;
+afterEach(() => {
+  view?.unmount();
+  view = null;
+  vi.clearAllMocks();
+});
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid=${id}]`);
+
+const row = (over: Record<string, unknown>) => ({
+  id: 1,
+  downloader_id: 1,
+  downloader_name: "qb",
+  info_hash: "abc",
+  task_id: "abc",
+  torrent_name: "The.Last.of.Us.S01.2160p",
+  library_id: 2,
+  library_name: "剧集",
+  source_path: "/data/downloads/The.Last.of.Us.S01/E01.mkv",
+  target_path: "/media/tv/最后生还者 (2023)/Season 1/最后生还者 - S01E01.mkv",
+  mode: "hardlink",
+  media_type: "tv",
+  tmdb_id: 100088,
+  title: "最后生还者",
+  year: 2023,
+  season: 1,
+  episode: 1,
+  episode_end: 0,
+  size: 1 << 30,
+  status: "done",
+  message: "",
+  attempts: 0,
+  trigger: "auto",
+  subtitles: 1,
+  has_files: true,
+  scrape_status: "",
+  scrape_note: "",
+  created_at: "2026-10-07T12:00:00Z",
+  updated_at: "2026-10-07T12:00:00Z",
+  ...over,
+});
+
+async function mountPage(fail = false, extra: ReturnType<typeof row>[] = [], path = "/") {
+  if (fail) api.history.mockRejectedValue(new Error("读取整理记录失败"));
+  else
+    api.history.mockResolvedValue({
+      items: [
+        ...extra,
+        row({ scrape_status: "partial", scrape_note: "fanart.jpg: boom" }),
+        row({
+          id: 2,
+          status: "failed",
+          message: "识别失败：TMDB 暂时不能访问",
+          attempts: 1,
+          next_retry_at: "2026-10-07T12:10:00Z",
+          target_path: "",
+          has_files: false,
+        }),
+        row({ id: 3, mode: "move" }),
+        row({
+          id: 4,
+          status: "skipped",
+          message: "库里的文件已经不是当初整理出的那个（换成了别的文件或改过），不会覆盖",
+        }),
+      ],
+      total: 4,
+    });
+  const Page = (await import("./MediaHistory.vue")).default;
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: "/:p(.*)*", component: { render: () => null } }],
+  });
+  await router.push(path);
+  view = mountView(Page, { router });
+  await vi.waitFor(() => expect(api.history).toHaveBeenCalled());
+  await flush();
+  await flush();
+}
+
+describe("整理历史", () => {
+  it("首页的待处理带着筛选进来：?status=failed、?kind=recognize；不认得的当全部", async () => {
+    await mountPage(false, [], "/media/history?status=failed&kind=recognize");
+    expect(api.history.mock.calls[0]![0]).toMatchObject({ status: "failed", kind: "recognize" });
+    view?.unmount();
+    vi.clearAllMocks();
+    await mountPage(false, [], "/media/history?kind=recognize");
+    expect(api.history.mock.calls[0]![0]).toMatchObject({ status: "", kind: "recognize" });
+    view?.unmount();
+    vi.clearAllMocks();
+    await mountPage(false, [], "/media/history?status=done&kind=recognize");
+    expect(api.history.mock.calls[0]![0], "已入库没有失败分类").toMatchObject({ status: "done" });
+    expect(api.history.mock.calls[0]![0]).not.toHaveProperty("kind", "recognize");
+    view?.unmount();
+    vi.clearAllMocks();
+    await mountPage(false, [], "/media/history?status=bogus&kind=nope");
+    expect(api.history.mock.calls[0]![0]).toMatchObject({ status: "" });
+    expect(api.history.mock.calls[0]![0]).not.toHaveProperty("kind", "nope");
+  });
+
+  it("列表：条目、文件、方式与状态；失败的写明原因与下次重试", async () => {
+    await mountPage();
+    expect(api.history).toHaveBeenCalledWith({ status: "", q: "", limit: 50, offset: 0 });
+    const text = q("mh-table")!.textContent ?? "";
+    expect(text).toContain("最后生还者 (2023) S01E01");
+    expect(text).toContain("E01.mkv");
+    expect(text).toContain("1 个字幕");
+    expect(text).toContain("硬链接");
+    expect(text).toContain("已整理");
+    expect(text).toContain("下载完成后自动");
+    expect(text).toContain("识别失败：TMDB 暂时不能访问");
+    expect(text).toContain("自动重试（第 1 次失败）");
+    expect(q("mh-retry-2")).not.toBeNull();
+    expect(q("mh-retry-1"), "整理成功的不能重试").toBeNull();
+  });
+
+  it("手机上的卡片也写着字幕数与说明", async () => {
+    // useIsMobile 读的是 matchMedia("(max-width: 768px)")
+    const spy = vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes("max-width: 768px"),
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as MediaQueryList,
+    );
+    try {
+      await mountPage(false, [
+        row({ id: 7, subtitles: 2, message: "站点字幕：站点上没有这个种子的字幕" }),
+      ]);
+      expect(q("mh-table"), "手机上是卡片").toBeNull();
+      const text = document.querySelector(".mh-cards")?.textContent ?? "";
+      expect(text).toContain("2 个字幕");
+      expect(text).toContain("站点字幕：站点上没有这个种子的字幕");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("原盘的记录写明放进库的文件数", async () => {
+    await mountPage(false, [
+      row({
+        id: 9,
+        media_type: "movie",
+        tmdb_id: 872585,
+        title: "奥本海默",
+        season: 0,
+        episode: 0,
+        source_path: "/data/downloads/Oppenheimer.2023.BluRay",
+        target_path: "/media/movies/奥本海默 (2023)",
+        torrent_name: "Oppenheimer.2023.BluRay",
+        match_source: "search",
+        subtitles: 0,
+        disc_files: 5,
+      }),
+    ]);
+    const tr = q("mh-table")!.querySelector(".el-table__body tr")!.textContent ?? "";
+    expect(tr).toContain("→ /media/movies/奥本海默 (2023)");
+    // 写在条目下面那一行、种子名前面：库里的路径长，文件那一行放不下时也看得到
+    expect(tr).toContain("按名字搜索 · 原盘 5 个文件 · Oppenheimer.2023.BluRay");
+    expect(tr.split("原盘 5 个文件").length - 1, "只写一次").toBe(1);
+  });
+
+  it("识别出了条目的记录：条目名链到条目详情（剧集带季）；没识别出来的不链", async () => {
+    await mountPage(false, [
+      row({ id: 5, media_type: "", tmdb_id: 0, title: "", year: 0, season: 0, episode: 0 }),
+    ]);
+    expect(q("mh-item-1")!.getAttribute("href")).toBe(
+      "/media/item/tv/100088?from=history&season=1",
+    );
+    expect(q("mh-item-5"), "没识别出来的不链").toBeNull();
+    expect(q("mh-table")!.textContent).toContain("没识别出来");
+  });
+
+  it("写明条目从哪来：按订阅的、推送时说明的；升级前的记录不写", async () => {
+    await mountPage(false, [
+      row({ id: 3, match_source: "subscription" }),
+      row({ id: 4, match_source: "push" }),
+    ]);
+    const rows = [...q("mh-table")!.querySelectorAll(".el-table__body tr")].map(
+      (tr) => tr.textContent ?? "",
+    );
+    expect(rows[0]).toContain("按订阅的条目 · The.Last.of.Us.S01.2160p");
+    expect(rows[1]).toContain("按推送时说明的条目");
+    expect(rows[2]).not.toContain("按");
+  });
+
+  it("筛选：按状态与关键字重新读，回到第一页", async () => {
+    await mountPage();
+    const failed = [...q("mh-status")!.querySelectorAll("label")].find((l) =>
+      l.textContent?.includes("失败"),
+    )!;
+    failed.querySelector("input")!.click();
+    await vi.waitFor(() => expect(api.history).toHaveBeenCalledTimes(2));
+    expect(api.history.mock.calls[1]![0]).toMatchObject({ status: "failed" });
+    const el = q("mh-keyword")!;
+    const kw = (el instanceof HTMLInputElement ? el : el.querySelector("input"))!;
+    kw.value = " 最后生还者 ";
+    kw.dispatchEvent(new Event("input"));
+    kw.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter" }));
+    await vi.waitFor(() => expect(api.history).toHaveBeenCalledTimes(3));
+    expect(api.history.mock.calls[2]![0]).toMatchObject({
+      q: "最后生还者",
+      status: "failed",
+      offset: 0,
+    });
+  });
+
+  it("重试：写明结果并刷新", async () => {
+    await mountPage();
+    api.retry.mockResolvedValue({ created: 2, done: 0, skipped: 0, failed: 0 });
+    q("mh-retry-2")!.click();
+    await vi.waitFor(() => expect(api.retry).toHaveBeenCalledWith(2));
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("新入库 2 个，已在库里 0 个"));
+    expect(api.history).toHaveBeenCalledTimes(2);
+    // 刷新完、按钮退出加载态以后才能再点
+    await vi.waitFor(() => expect(q("mh-retry-2")!.classList.contains("is-loading")).toBe(false));
+
+    api.retry.mockResolvedValue({
+      created: 0,
+      done: 0,
+      skipped: 0,
+      failed: 1,
+      plan: { problem: "没有启用的剧集媒体库" },
+    });
+    q("mh-retry-2")!.click();
+    await vi.waitFor(() => expect(ui.warning).toHaveBeenCalledWith("没有启用的剧集媒体库"));
+  });
+
+  it("刮削：写明结果与说明；整理好的可以重新刮削，先确认", async () => {
+    await mountPage();
+    const text = q("mh-table")!.textContent ?? "";
+    expect(text).toContain("部分刮削");
+    expect(text).toContain("刮削：fanart.jpg: boom");
+    expect(q("mh-rescrape-1")).not.toBeNull();
+    expect(q("mh-rescrape-2"), "失败的不能重新刮削").toBeNull();
+
+    ui.confirm.mockRejectedValueOnce("cancel");
+    q("mh-rescrape-1")!.click();
+    await flush();
+    expect(api.rescrape).not.toHaveBeenCalled();
+
+    ui.confirm.mockResolvedValue("confirm");
+    api.rescrape.mockResolvedValue({ records: 2, written: 5, sources: "简介 TMDB，评分 TMDB" });
+    q("mh-rescrape-1")!.click();
+    await vi.waitFor(() => expect(api.rescrape).toHaveBeenCalledWith(1));
+    await vi.waitFor(() =>
+      expect(ui.success).toHaveBeenCalledWith(
+        "刮削了 2 条记录，写了 5 个文件（简介 TMDB，评分 TMDB）",
+      ),
+    );
+    expect(ui.confirm.mock.calls[1]![0]).toContain("这部剧在这个媒体库里整理好的每一集");
+    expect(api.history).toHaveBeenCalledTimes(2);
+
+    await vi.waitFor(() =>
+      expect(q("mh-rescrape-1")!.classList.contains("is-loading")).toBe(false),
+    );
+    api.rescrape.mockResolvedValue({ records: 1, written: 0, messages: ["Fanart.tv 不能用"] });
+    q("mh-rescrape-1")!.click();
+    await vi.waitFor(() =>
+      expect(ui.warning).toHaveBeenCalledWith("刮削了 1 条记录，写了 0 个文件；Fanart.tv 不能用"),
+    );
+    await vi.waitFor(() =>
+      expect(q("mh-rescrape-1")!.classList.contains("is-loading")).toBe(false),
+    );
+    api.rescrape.mockRejectedValue(new Error("媒体库「剧集」关着刮削：先在媒体库里打开"));
+    q("mh-rescrape-1")!.click();
+    await vi.waitFor(() =>
+      expect(ui.error).toHaveBeenCalledWith("媒体库「剧集」关着刮削：先在媒体库里打开"),
+    );
+  });
+
+  it("删除：可选连库里的文件一起删；移动整理的不能选", async () => {
+    await mountPage();
+    api.deleteHistory.mockResolvedValue({ ok: true });
+    q("mh-del-1")!.click();
+    await flush();
+    expect(q("mh-del-text")!.textContent).toContain("下载目录里的文件不动");
+    const box = q("mh-del-files")!;
+    expect(box.classList.contains("is-disabled")).toBe(false);
+    box.querySelector("input")!.click();
+    await flush();
+    q("mh-del-confirm")!.click();
+    await vi.waitFor(() => expect(api.deleteHistory).toHaveBeenCalledWith(1, true));
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("已删除记录与库里的文件"));
+
+    q("mh-del-3")!.click();
+    await flush();
+    expect(q("mh-del-files")!.classList.contains("is-disabled"), "移动整理的不能连文件删").toBe(
+      true,
+    );
+    expect(document.body.textContent).toContain("移动整理的文件是唯一的一份");
+    q("mh-del-confirm")!.click();
+    await vi.waitFor(() => expect(api.deleteHistory).toHaveBeenCalledWith(3, false));
+
+    q("mh-del-2")!.click();
+    await flush();
+    expect(q("mh-del-files")!.classList.contains("is-disabled"), "没整理出文件的不能选").toBe(true);
+    expect(document.body.textContent).toContain("这条记录没有整理出文件");
+  });
+
+  it("删除：跳过的记录记着之前整理出的文件时也能连文件删，换掉的文件写明留着", async () => {
+    await mountPage();
+    api.deleteHistory.mockResolvedValue({
+      ok: true,
+      kept: ["库里的 最后生还者 - S01E01.mkv 已经换成了别的文件或改过，没有删除"],
+    });
+    q("mh-del-4")!.click();
+    await flush();
+    const box = q("mh-del-files")!;
+    expect(box.classList.contains("is-disabled")).toBe(false);
+    box.querySelector("input")!.click();
+    await flush();
+    q("mh-del-confirm")!.click();
+    await vi.waitFor(() => expect(api.deleteHistory).toHaveBeenCalledWith(4, true));
+    await vi.waitFor(() =>
+      expect(ui.warning).toHaveBeenCalledWith(expect.stringContaining("这些文件留着")),
+    );
+    expect(ui.success).not.toHaveBeenCalled();
+  });
+
+  it("读不到时写明原因", async () => {
+    await mountPage(true);
+    const state = q("mh-state")!.textContent ?? "";
+    expect(state).toContain("读取整理记录失败");
+    expect(state).not.toContain("还没有整理记录");
+  });
+
+  it("还没有记录时说明可以点「手动整理」", async () => {
+    api.history.mockResolvedValue({ items: [], total: 0 });
+    const Page = (await import("./MediaHistory.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() => expect(api.history).toHaveBeenCalled());
+    await flush();
+    await flush();
+    const state = q("mh-state")!.textContent ?? "";
+    expect(state).toContain("还没有整理记录");
+    expect(state).toContain("点「手动整理」指定一个文件或目录");
+  });
+
+  it("页头的「手动整理」打开指定路径的弹窗；预览、整理以后重新读列表", async () => {
+    await mountPage();
+    api.libraries.mockResolvedValue([]);
+    q("mh-manual")!.click();
+    await vi.waitFor(() => expect(q("organize-source")).not.toBeNull());
+    expect(api.preview, "路径还没填：不预览").not.toHaveBeenCalled();
+
+    api.preview.mockResolvedValue(manualPlan);
+    const el = q("organize-source")!;
+    const input = (el instanceof HTMLInputElement ? el : el.querySelector("input"))!;
+    input.value = "/data/in/my-download-01";
+    input.dispatchEvent(new Event("input"));
+    await flush();
+    q("organize-source-preview")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({ source_path: "/data/in/my-download-01" }),
+    );
+    await vi.waitFor(() => expect((q("organize-run") as HTMLButtonElement).disabled).toBe(false));
+
+    api.organize.mockResolvedValue({ created: 1, done: 0, skipped: 0, failed: 0 });
+    q("organize-run")!.click();
+    await vi.waitFor(() =>
+      expect(api.organize).toHaveBeenCalledWith({ source_path: "/data/in/my-download-01" }),
+    );
+    await vi.waitFor(() => expect(api.history).toHaveBeenCalledTimes(2));
+  });
+
+  it("指定路径的失败、跳过的记录有「手动整理」，带着原路径打开并立即预览；整理好的与种子的记录没有", async () => {
+    const manual = {
+      downloader_id: 0,
+      downloader_name: "指定路径",
+      info_hash: "path:0123456789abcdef",
+      task_id: "",
+      torrent_name: "my-download-01",
+      trigger: "manual",
+      manual_path: "/data/in/my-download-01",
+    };
+    await mountPage(false, [
+      row({
+        ...manual,
+        id: 5,
+        status: "failed",
+        message: "没有识别出来",
+        target_path: "",
+        has_files: false,
+      }),
+      row({ ...manual, id: 6, status: "done" }),
+      row({ ...manual, id: 7, status: "skipped", message: "目标位置已经有同名文件" }),
+    ]);
+    expect(q("mh-manual-5")).not.toBeNull();
+    expect(q("mh-manual-7")).not.toBeNull();
+    expect(q("mh-manual-6"), "整理好的不用再手动整理").toBeNull();
+    expect(q("mh-manual-2"), "按种子整理的记录没有源路径").toBeNull();
+    const text = q("mh-table")!.textContent ?? "";
+    expect(text).toContain("手动（指定路径）");
+
+    api.libraries.mockResolvedValue([]);
+    api.preview.mockResolvedValue(manualPlan);
+    q("mh-manual-5")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({ source_path: "/data/in/my-download-01" }),
+    );
+  });
+
+  it("已整理的记录有「重新整理」：打开整理弹窗先预览；导入的、原盘、失败的没有", async () => {
+    await mountPage(false, [
+      row({ id: 8, mode: "existing", trigger: "import" }),
+      row({ id: 9, disc_files: 5 }),
+      row({
+        id: 10,
+        downloader_id: 0,
+        watch_dir_id: 3,
+        torrent_name: "Show.S01E01.mkv",
+        info_hash: "watch:3:x",
+      }),
+    ]);
+    expect(q("mh-reorganize-1")).not.toBeNull();
+    expect(q("mh-reorganize-3"), "移动整理的也能预览（预览写明为什么不换）").not.toBeNull();
+    expect(q("mh-reorganize-2"), "失败的用重试").toBeNull();
+    expect(q("mh-reorganize-4"), "跳过的用重试").toBeNull();
+    expect(q("mh-reorganize-8"), "导入的已有文件").toBeNull();
+    expect(q("mh-reorganize-9"), "原盘").toBeNull();
+    expect(q("mh-reorganize-10")).not.toBeNull();
+
+    api.libraries.mockResolvedValue([]);
+    api.preview.mockResolvedValue(manualPlan);
+    q("mh-reorganize-1")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({ downloader_id: 1, hash: "abc" }),
+    );
+    expect(api.retry, "先预览，不直接整理").not.toHaveBeenCalled();
+  });
+
+  it("手动整理时选过整理方式的记录：带着那个方式重新打开", async () => {
+    await mountPage(false, [
+      row({
+        downloader_id: 0,
+        downloader_name: "指定路径",
+        info_hash: "path:0123456789abcdef",
+        task_id: "",
+        torrent_name: "my-download-01",
+        trigger: "manual",
+        manual_path: "/data/in/my-download-01",
+        chosen_mode: "copy",
+        id: 5,
+        status: "failed",
+        message: "识别失败",
+        target_path: "",
+        has_files: false,
+      }),
+    ]);
+    api.libraries.mockResolvedValue([]);
+    api.preview.mockResolvedValue({ ...manualPlan, mode: "copy" });
+    q("mh-manual-5")!.click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenCalledWith({
+        source_path: "/data/in/my-download-01",
+        mode: "copy",
+      }),
+    );
+  });
+});
+
+const manualPlan = {
+  downloader_id: 0,
+  downloader_name: "指定路径",
+  hash: "path:0123456789abcdef",
+  task_id: "",
+  name: "my-download-01",
+  save_path: "/data/in",
+  local_path: "/data/in",
+  mapped: false,
+  source_path: "/data/in/my-download-01",
+  match: { id: 872585, media_type: "movie", title: "奥本海默", year: 2023 },
+  source: "manual",
+  library: {
+    id: 1,
+    name: "电影",
+    kind: "movie",
+    path: "/media/movies",
+    mode: "hardlink",
+    scrape: true,
+  },
+  mode: "hardlink",
+  items: [
+    {
+      rel: "my-download-01/video.mkv",
+      source: "/data/in/my-download-01/video.mkv",
+      size: 1,
+      target: "/media/movies/奥本海默 (2023)/奥本海默 (2023).mkv",
+      status: "pending",
+    },
+  ],
+};

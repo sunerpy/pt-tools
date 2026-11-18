@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/api";
+import {
+  chatopsApi,
+  type NotificationConfig,
+  type NotifyStatsView,
+  type RecentNotification,
+} from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -11,8 +16,17 @@ import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { NOTIFY_SOURCE_LABELS } from "@/utils/notifySource";
+
+import {
+  OUTBOUND_CHANNELS,
+  apiErrorDetail,
+  outboundChannel,
+  outboundFieldKeys,
+  outboundProblem,
+} from "@/utils/notifyChannels";
 
 /*
  * 通道类型的图标与色相：四个通道在卡片网格里必须一眼分得开，
@@ -29,6 +43,12 @@ const channelTypeOptions = [
     icon: "message-circle",
     color: "var(--pt-warn)",
   },
+  ...OUTBOUND_CHANNELS.map((c) => ({
+    value: c.type,
+    label: c.label,
+    icon: c.icon,
+    color: c.color,
+  })),
 ];
 
 const router = useRouter();
@@ -86,6 +106,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   qq_onebot: "QQ (OneBot)",
   webhook: "Webhook",
   wecom_webhook: "WeCom Webhook",
+  ...Object.fromEntries(OUTBOUND_CHANNELS.map((c) => [c.type, c.label])),
 };
 
 /** 画板右端两枚视图钮（bi-layout-grid / bi-rows-3），偏好存本地 */
@@ -119,21 +140,54 @@ const { loading, state, errorText, run, isStale } = useDataState();
 /**
  * 画板 22 在四张通道卡之后还有三张：
  *   p-policy 548 投递策略（安静时段按通道配置，就在通道自己的字段里）
- *   p-stat 516  最近投递统计（按通道分组，数据来自 RSS 通知日志）
- *   p-recent 1080 最近的通知记录
- * 后两张读 `/api/chatops/rss-notifications` 的一页，不新增后端。
+ *   p-stat 516  最近投递统计（按通道分组，读 `/api/chatops/notifications/stats`：近 7 天的 RSS 通知
+ *               与后台监控通知合在一起算。以前只数 RSS 通知日志最近 50 条，签到、战报这些通知全不在里面）
+ *   p-recent 1080 最近的通知记录（读 `/api/chatops/notifications/recent`：RSS 通知与后台通知合在一起的
+ *               最近 8 条。以前读 RSS 通知日志的一页，后台通知不在里面）
  */
-const recentLogs = ref<RSSNotificationLog[]>([]);
+const recent = ref<RecentNotification[]>([]);
+const recentFailed = ref(false);
 
 async function loadRecent() {
   try {
-    const params = new URLSearchParams({ page: "1", page_size: "50" });
-    const res = await chatopsApi.rssNotifications.list(params);
-    recentLogs.value = res.items ?? [];
+    const res = await chatopsApi.notifications.recent(8);
+    recent.value = res.items ?? [];
+    recentFailed.value = false;
   } catch {
-    /* 统计是附带信息，取不到就让卡里说明，不影响通道列表 */
-    recentLogs.value = [];
+    /* 最近记录是附带信息，取不到就让卡里说明，不影响通道列表 */
+    recent.value = [];
+    recentFailed.value = true;
   }
+}
+
+/** 结果的叫法与胶囊色，和「最近投递统计」的小字同一套说法 */
+const RESULT_VIEW: Record<
+  RecentNotification["result"],
+  { label: string; tone: "ok" | "dang" | "warn" | "neutral" }
+> = {
+  sent: { label: "已发出", tone: "ok" },
+  failed: { label: "失败", tone: "dang" },
+  pending: { label: "等待发送", tone: "neutral" },
+  canceled: { label: "取消或被取代", tone: "neutral" },
+  throttled: { label: "超出每小时上限", tone: "warn" },
+};
+
+function resultOf(r: string) {
+  return RESULT_VIEW[r as RecentNotification["result"]] ?? { label: r, tone: "neutral" as const };
+}
+
+/** 来源：RSS 再写是「仅匹配的」还是「全部新种」 */
+function sourceOf(n: RecentNotification): string {
+  const base = SOURCE_LABELS[n.source] ?? n.source;
+  if (n.source !== "rss") return base;
+  return `${base} · ${n.kind === "filtered" ? "仅匹配的" : "全部新种"}`;
+}
+
+/** 内容：通知的内置标题（不含消息模板的改动）；RSS 前面加站点，没存下标题的写种子编号 */
+function contentOf(n: RecentNotification): string {
+  if (n.source !== "rss") return n.title || SOURCE_LABELS[n.source] || n.source;
+  const what = n.title || `种子 ${n.torrent_id ?? ""}`.trim();
+  return n.site ? `${n.site} · ${what}` : what;
 }
 
 const policyRows = computed(() =>
@@ -151,29 +205,69 @@ const policyRows = computed(() =>
   }),
 );
 
-/** p-stat：这 50 条里每个通道投了多少、成了多少 */
-const statRows = computed<BreakdownRow[]>(() => {
-  const buckets = new Map<number, { total: number; sent: number }>();
-  for (const log of recentLogs.value) {
-    const cur = buckets.get(log.notification_conf_id) ?? { total: 0, sent: 0 };
-    cur.total += 1;
-    if (log.result === "sent") cur.sent += 1;
-    buckets.set(log.notification_conf_id, cur);
+const stats = ref<NotifyStatsView | null>(null);
+
+async function loadStats() {
+  try {
+    stats.value = await chatopsApi.notifications.stats();
+  } catch {
+    /* 统计是附带信息，取不到就让卡里说明，不影响通道列表 */
+    stats.value = null;
   }
-  return [...buckets.entries()]
-    .sort((a, b) => b[1].total - a[1].total)
-    .map(([id, agg]) => {
-      const conf = notifications.value.find((n) => n.id === id);
-      return {
-        key: String(id),
-        label: conf ? conf.name : `#${id}`,
-        value: `${agg.sent} / ${agg.total}`,
-        weight: agg.total,
-        tone: agg.sent === agg.total ? ("ok" as const) : ("warn" as const),
-        hint: agg.sent === agg.total ? "全部送达" : `${agg.total - agg.sent} 条没送达`,
-      };
-    });
-});
+}
+
+/** 通知来源的叫法：RSS 以外都是后台监控发的（与操作审计里的叫法同一份） */
+const SOURCE_LABELS = NOTIFY_SOURCE_LABELS;
+
+/**
+ * p-stat：每个通道近 7 天发了多少；小字写来源，再写没发出的是失败、在等、取消还是超出上限，
+ * 最后写 RSS 通知转进重发队列以后的结果（「已发出」里含这些，补发没成的要单独看得见）
+ */
+const statRows = computed<BreakdownRow[]>(() =>
+  (stats.value?.channels ?? []).map((ch) => {
+    const conf = notifications.value.find((n) => n.id === ch.conf_id);
+    const parts: string[] = [];
+    if (ch.sources.length > 0) {
+      parts.push(
+        ch.sources
+          .map((src) => `${SOURCE_LABELS[src.source] ?? src.source} ${src.total}`)
+          .join(" · "),
+      );
+    }
+    const left: string[] = [];
+    if (ch.failed > 0) left.push(`${ch.failed} 条失败`);
+    if (ch.pending > 0) left.push(`${ch.pending} 条等待发送`);
+    if (ch.canceled > 0) left.push(`${ch.canceled} 条取消或被取代`);
+    if (ch.throttled > 0) left.push(`${ch.throttled} 条超出每小时上限`);
+    const rest = ch.total - ch.sent - ch.failed - ch.pending - ch.canceled - ch.throttled;
+    if (rest > 0) left.push(`${rest} 条没发出`);
+    if (ch.total > 0) parts.push(left.length > 0 ? left.join("、") : "全部发出");
+    const q = ch.requeued;
+    if (q.total > 0) {
+      const done: string[] = [];
+      if (q.sent > 0) done.push(`${q.sent} 条已补发`);
+      if (q.pending > 0) done.push(`${q.pending} 条重试中`);
+      if (q.dead > 0) done.push(`${q.dead} 条放弃`);
+      parts.push(
+        `${q.total} 条实时没发出、转入重发${done.length > 0 ? `：${done.join("、")}` : ""}`,
+      );
+    }
+    return {
+      key: String(ch.conf_id),
+      label: conf ? conf.name : `已删除的通道 #${ch.conf_id}`,
+      value: `${ch.sent} / ${ch.total}`,
+      weight: ch.total,
+      tone: ch.failed > 0 || q.dead > 0 ? ("warn" as const) : ("ok" as const),
+      hint: parts.join("；"),
+    };
+  }),
+);
+
+const statFoot = computed(
+  () =>
+    `口径是「已发出 / 总条数」，近 ${stats.value?.days ?? 7} 天：RSS 通知和保号、签到、战报、失效种子、订阅与入库、远程访问这些后台通知都算，` +
+    "通道测试和命令回复不算。RSS 通知实时发不出去会转入重发队列，也算已发出，补发的结果写在小字里。",
+);
 
 /** 画板 head 的 sub（11.5/400 t3）：共几个通道、几个启用、都是什么类型 */
 /** 表里这一批通道 = 状态筛 + 类型筛（两条都来自画板 bar-64） */
@@ -205,17 +299,30 @@ const stateSub = computed(() => {
 const addDialogVisible = ref(false);
 const submitting = ref(false);
 
-const newChannel = ref<Partial<NotificationConfig>>({
-  channel_type: "telegram",
-  name: "",
-  enabled: true,
-  bot_token: "",
-  endpoint_url: "",
-  webhook_key: "",
-});
+/** 新建表单的初值：只有通用字段与 Telegram / Webhook / 企业微信的必填项，只出站通道的字段按需写入 */
+function blankChannel(type = "telegram", name = ""): Partial<NotificationConfig> {
+  return {
+    channel_type: type,
+    name,
+    enabled: true,
+    bot_token: "",
+    endpoint_url: "",
+    webhook_key: "",
+  };
+}
+
+const newChannel = ref<Partial<NotificationConfig>>(blankChannel());
+
+/* 换类型时清掉上一个类型填的字段（只留名称）：钉钉和飞书都有 webhook_url，留着会带着错的地址创建 */
+watch(
+  () => newChannel.value.channel_type,
+  (type, prev) => {
+    if (type !== prev) newChannel.value = blankChannel(type, newChannel.value.name);
+  },
+);
 
 onMounted(async () => {
-  await Promise.all([loadNotifications(), loadRecent()]);
+  await Promise.all([loadNotifications(), loadRecent(), loadStats()]);
 });
 
 async function loadNotifications() {
@@ -230,16 +337,41 @@ async function loadNotifications() {
   notifications.value = data;
 }
 
+/** 只出站通道的字段不在 newChannel 的初值里，按字段名读写 */
+function newField(key: string): unknown {
+  return (newChannel.value as Record<string, unknown>)[key];
+}
+function setNewField(key: string, v: unknown) {
+  (newChannel.value as Record<string, unknown>)[key] = v;
+}
+
 function openAddDialog() {
-  newChannel.value = {
-    channel_type: "telegram",
-    name: "",
-    enabled: true,
-    bot_token: "",
-    endpoint_url: "",
-    webhook_key: "",
-  };
+  newChannel.value = blankChannel();
   addDialogVisible.value = true;
+}
+
+/** 各类型新建时要发的字段：只发当前类型的，换过类型也不会把别的类型的值带进配置 */
+const CREATE_FIELDS: Record<string, (keyof NotificationConfig)[]> = {
+  telegram: ["bot_token"],
+  webhook: ["endpoint_url"],
+  wecom_webhook: ["webhook_key"],
+  qq_onebot: [],
+};
+
+function createBody(): Omit<NotificationConfig, "id"> {
+  const c = newChannel.value as Record<string, unknown>;
+  const type = newChannel.value.channel_type ?? "";
+  const body: Record<string, unknown> = {
+    channel_type: type,
+    name: newChannel.value.name,
+    enabled: newChannel.value.enabled,
+  };
+  const keys = outboundChannel(type) ? outboundFieldKeys(type) : (CREATE_FIELDS[type] ?? []);
+  for (const k of keys) {
+    const v = typeof c[k] === "string" ? (c[k] as string).trim() : c[k];
+    if (v !== undefined && v !== "") body[k] = v;
+  }
+  return body as unknown as Omit<NotificationConfig, "id">;
 }
 
 async function handleCreate() {
@@ -252,15 +384,24 @@ async function handleCreate() {
     ElMessage.warning("Telegram 通道需填写 Bot Token");
     return;
   }
+  const problem = outboundProblem(
+    newChannel.value.channel_type,
+    newChannel.value as Record<string, unknown>,
+  );
+  if (problem) {
+    ElMessage.warning(problem);
+    return;
+  }
 
   submitting.value = true;
   try {
-    await chatopsApi.notifications.create(newChannel.value as Omit<NotificationConfig, "id">);
+    await chatopsApi.notifications.create(createBody());
     ElMessage.success("添加成功");
     addDialogVisible.value = false;
     await loadNotifications();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "添加失败");
+    // 配置没通过后端检查时，detail 写明哪一项不对
+    ElMessage.error(apiErrorDetail(e, "添加失败"));
   } finally {
     submitting.value = false;
   }
@@ -508,7 +649,7 @@ function getChannelLabel(type: string) {
 
       <!--
         画板 22 的后三张卡：p-policy 548（投递策略）/ p-stat 516（最近投递统计）
-        / p-recent 1080（最近记录）。统计与记录读 RSS 通知日志的一页，不新增后端。
+        / p-recent 1080（最近记录）。统计读近 7 天的投递统计，记录读最近 8 条，两者都含 RSS 与后台监控通知。
       -->
       <PtPanel title="投递策略" icon="moon" :count="`${policyRows.length} 个通道`">
         <ul class="pol">
@@ -530,24 +671,27 @@ function getChannelLabel(type: string) {
       <PtPanel
         title="最近投递统计"
         icon="chart-pie"
-        :count="recentLogs.length > 0 ? `最近 ${recentLogs.length} 条` : '暂无'">
-        <PtBreakdown
-          v-if="statRows.length > 0"
-          :rows="statRows"
-          foot="口径是「已送达 / 总条数」，取的是 RSS 通知日志最近 50 条，不是全量历史。" />
-        <p v-else class="pol__empty">还没有投递记录，或者通知日志没取到。</p>
+        :count="stats ? `近 ${stats.days} 天` : '暂无'"
+        data-testid="notify-stats">
+        <PtBreakdown v-if="statRows.length > 0" :rows="statRows" :foot="statFoot" />
+        <p v-else class="pol__empty">
+          {{ stats ? `近 ${stats.days} 天没有投递记录。` : "投递统计没取到。" }}
+        </p>
       </PtPanel>
 
       <PtPanel
         class="pt-cards__full"
         title="最近的通知"
         icon="history"
-        :count="`${recentLogs.length} 条`">
+        :count="`${recent.length} 条`"
+        data-testid="notify-recent">
         <!--
           画板 22 的 p-recent 是一张**带表头的小表**（时间 / 通道 / 事件 / 站点 / 结果 /
           延迟 / 重试，正文 12.5、只有「结果」是胶囊），不是一排 chip。
           落地此前是无列名的 chip 串：一行里三枚色块，而且看不出哪个字段是什么。
-          「延迟」那列没有对应数据（RSS 通知日志不记投递耗时），所以不画 —— 不造数。
+          「延迟」那列没有对应数据（通知日志不记投递耗时），所以不画 —— 不造数。
+          后台通知没有站点与种子，「事件 / 站点」两列落成「来源 / 内容」：内容是通知的内置标题
+          （投递以前存下的；配了消息模板时实际收到的标题按模板，几条 RSS 合并发出时这里仍逐条列出）。
         -->
         <!--
           窄屏降级成列表，不做横向滚动表格 —— 这是设计文档 §9 的四方向共用规则，
@@ -555,66 +699,69 @@ function getChannelLabel(type: string) {
           上一版在所有视口都渲染这张七列表（单元格还都 nowrap），375 下右边两列直接被裁掉：
           外层是 overflow hidden，滚都滚不出来。一次评审查出这点，判得对。
         -->
-        <ul v-if="isMobile && recentLogs.length > 0" class="recm">
-          <li v-for="log in recentLogs.slice(0, 8)" :key="log.id" class="recm__row">
-            <span
-              class="recm__dot"
-              :class="`is-${log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'}`"
-              aria-hidden="true" />
+        <ul v-if="isMobile && recent.length > 0" class="recm">
+          <li v-for="n in recent" :key="`${n.source}-${n.log_id}`" class="recm__row">
+            <span class="recm__dot" :class="`is-${resultOf(n.result).tone}`" aria-hidden="true" />
             <span class="recm__body">
-              <span class="recm__l1">
-                {{ log.site_name || "未知站点" }}
-                <span class="recm__tid">{{ log.torrent_id }}</span>
-              </span>
+              <span class="recm__l1">{{ contentOf(n) }}</span>
               <span class="recm__l2">
-                {{ channelNameOf(log.notification_conf_id) }} ·
-                {{ log.notify_kind === "filtered" ? "仅匹配的" : "全部新种" }} · {{ log.result
-                }}<template v-if="(log.attempts ?? 0) > 1"> · 第 {{ log.attempts }} 次</template>
+                {{ resultOf(n.result).label }} · {{ channelNameOf(n.conf_id) }} · {{ sourceOf(n)
+                }}<template v-if="n.attempts > 1"> · 第 {{ n.attempts }} 次</template>
               </span>
+              <span v-if="n.error && n.result !== 'sent'" class="recm__err">{{ n.error }}</span>
             </span>
-            <span class="recm__when">{{ formatWhen(log.created_at) }}</span>
+            <span class="recm__when">{{ formatWhen(n.created_at) }}</span>
           </li>
         </ul>
 
-        <table v-else-if="recentLogs.length > 0" class="rec">
+        <table v-else-if="recent.length > 0" class="rec">
           <thead>
             <tr>
               <th>时间</th>
               <th>通道</th>
-              <th>类型</th>
-              <th>站点</th>
-              <th>种子 ID</th>
+              <th>来源</th>
+              <th>内容</th>
               <th>结果</th>
               <th class="rec__num">尝试</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="log in recentLogs.slice(0, 8)" :key="log.id">
-              <td class="rec__when">{{ formatWhen(log.created_at) }}</td>
-              <td>{{ channelNameOf(log.notification_conf_id) }}</td>
-              <td>{{ log.notify_kind === "filtered" ? "仅匹配的" : "全部新种" }}</td>
-              <td>{{ log.site_name || "未知站点" }}</td>
-              <td>{{ log.torrent_id }}</td>
+            <tr v-for="n in recent" :key="`${n.source}-${n.log_id}`">
+              <td class="rec__when">{{ formatWhen(n.created_at) }}</td>
+              <td>{{ channelNameOf(n.conf_id) }}</td>
+              <td>{{ sourceOf(n) }}</td>
               <td>
-                <PtStatusPill
-                  :tone="
-                    log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'
-                  "
-                  size="sm">
-                  {{ log.result }}
-                </PtStatusPill>
+                <span class="rec__what" :title="contentOf(n)">{{ contentOf(n) }}</span>
               </td>
-              <td class="rec__num">{{ log.attempts ?? 0 }}</td>
+              <td>
+                <!-- 没发出去的写上原因（最近一次失败）：悬停看全文，手机列表里直接铺一行 -->
+                <el-tooltip
+                  :content="n.error"
+                  placement="top"
+                  :disabled="!n.error || n.result === 'sent'">
+                  <PtStatusPill
+                    :tone="resultOf(n.result).tone"
+                    size="sm"
+                    :title="n.error && n.result !== 'sent' ? n.error : undefined">
+                    {{ resultOf(n.result).label }}
+                  </PtStatusPill>
+                </el-tooltip>
+              </td>
+              <td class="rec__num">{{ n.attempts }}</td>
             </tr>
           </tbody>
         </table>
-        <p v-else class="pol__empty">还没有通知记录。</p>
+        <p v-else class="pol__empty">
+          {{ recentFailed ? "最近的通知没取到。" : "还没有通知记录。" }}
+        </p>
         <p class="pol__foot">
-          完整清单、重试与取消在
+          RSS 通知的完整清单、重试与取消在
           <el-button link type="primary" @click="router.push('/chatops/rss-notifications')">
             RSS 通知日志
           </el-button>
-          里。
+          里；后台通知发送失败会在 1、5、30
+          分钟后各重试一次。「内容」是通知的内置标题：配了消息模板时实际收到的标题按模板，几条 RSS
+          通知合并成一条发出时这里仍逐条列出。
         </p>
       </PtPanel>
     </div>
@@ -669,6 +816,46 @@ function getChannelLabel(type: string) {
           <el-input v-model="newChannel.webhook_key" placeholder="企业微信群机器人的 key" />
           <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
         </el-form-item>
+
+        <!-- 只出站的通道：新建时就填全部字段，自建服务器的地址与鉴权不用等创建后再补 -->
+        <template v-for="f in outboundChannel(newChannel.channel_type)?.fields ?? []" :key="f.key">
+          <el-form-item :label="f.label" :required="f.required">
+            <el-switch
+              v-if="f.kind === 'switch'"
+              :model-value="newField(f.key) === true"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="
+                (v: string | number | boolean) => setNewField(f.key, v === true)
+              " />
+            <el-select
+              v-else-if="f.kind === 'select'"
+              :model-value="newField(f.key) as string | undefined"
+              :placeholder="f.options?.[0]?.label"
+              clearable
+              style="width: 100%"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="(v: string) => setNewField(f.key, v)">
+              <el-option v-for="o in f.options" :key="o.value" :label="o.label" :value="o.value" />
+            </el-select>
+            <el-input-number
+              v-else-if="f.kind === 'number'"
+              :model-value="newField(f.key) as number | undefined"
+              :min="f.min"
+              :max="f.max"
+              controls-position="right"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="(v: number | undefined) => setNewField(f.key, v ?? 0)" />
+            <el-input
+              v-else
+              :model-value="String(newField(f.key) ?? '')"
+              :type="f.kind === 'password' ? 'password' : 'text'"
+              :show-password="f.kind === 'password'"
+              :placeholder="f.placeholder"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="(v: string) => setNewField(f.key, v)" />
+            <div v-if="f.tip" class="field-tip">{{ f.tip }}</div>
+          </el-form-item>
+        </template>
 
         <div v-if="newChannel.channel_type === 'qq_onebot'" class="pt-note">
           <PtIcon name="info" :size="14" class="pt-note__icon" />
@@ -784,7 +971,7 @@ function getChannelLabel(type: string) {
   vertical-align: baseline;
 }
 
-/* 最近的通知：一行一条，站点 + 种子 ID + 通道 + 时间 */
+/* 最近的通知：一行一条，时间 + 通道 + 来源 + 内容 + 结果 */
 /*
  * 最近投递的小表 —— 画板 22 的 p-recent：表头 11/600 #7C8695 + 1px 行线，
  * 正文 12.5，时间列 500/t1（它是这一行的身份），其余 400/t2，只有「结果」是胶囊。
@@ -829,6 +1016,15 @@ function getChannelLabel(type: string) {
   text-align: right;
 }
 
+/* 内容是种子名、消息标题，长短不一：截断成一行，鼠标停上去看全名 */
+.rec__what {
+  display: inline-block;
+  max-width: 28em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
 /*
  * 窄屏的同一块数据：画板 33 的「最近投递」是四行「圆点 6 + 双行文本 + 右侧时间 +
  * 329×1 分隔线」，节奏 54。圆点承载结果的语义色 —— 一行里不再需要胶囊。
@@ -869,6 +1065,10 @@ function getChannelLabel(type: string) {
   background: var(--pt-dang);
 }
 
+.recm__dot.is-warn {
+  background: var(--pt-warn);
+}
+
 .recm__body {
   display: flex;
   flex: 1 1 auto;
@@ -886,14 +1086,16 @@ function getChannelLabel(type: string) {
   white-space: nowrap;
 }
 
-.recm__tid {
-  font-weight: 400;
-  color: var(--pt-t3);
-}
-
 .recm__l2 {
   font-size: var(--pt-fz-label);
   color: var(--pt-t3);
+}
+
+/* 没发出去的原因：长原因可以断行 */
+.recm__err {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-dang);
+  overflow-wrap: anywhere;
 }
 
 .recm__when {

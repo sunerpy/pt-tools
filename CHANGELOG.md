@@ -5,6 +5,722 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.60](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.59...v1.0.0-rc.60) (2026-11-18)
+
+
+### Features
+
+* **downloader:** 下载器 Web UI 加「活动中」状态筛选与「总速度」排序 ([#904](https://github.com/sunerpy/pt-tools/issues/904)) ([890b487](https://github.com/sunerpy/pt-tools/commit/890b48794385147fa08f567120febdb9de6f3e7e))
+
+
+### Bug Fixes
+
+* **site:** OpenCD 签到带上 CSRF 令牌，今天已签过时不再取验证码 ([#903](https://github.com/sunerpy/pt-tools/issues/903)) ([9fe0aa8](https://github.com/sunerpy/pt-tools/commit/9fe0aa8b96d4cef555b718dc0a67d0cb12b74530))
+* **site:** PTFans 副标题取对，PTFans 与 DiscFan 读出 H&R 未达标数，签到认繁体回执 ([#905](https://github.com/sunerpy/pt-tools/issues/905)) ([034149d](https://github.com/sunerpy/pt-tools/commit/034149d2577f309c2626654ceb6617cb9ae51615))
+
+## [1.0.0-rc.59](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.58...v1.0.0-rc.59) (2026-11-14)
+
+
+### Features
+
+* **media:** 刮削加 TheTVDB：每一集的标题与简介可以选它，TMDB 没有的集截图用它的 ([#898](https://github.com/sunerpy/pt-tools/issues/898)) ([8f26912](https://github.com/sunerpy/pt-tools/commit/8f26912339a28ca8f9e6883bee2495bca97d21ed))
+
+
+### Bug Fixes
+
+* **media:** 加了纠正以后已整理的文件能换到新条目，没有年份的同名候选不直接认定 ([#900](https://github.com/sunerpy/pt-tools/issues/900)) ([622393c](https://github.com/sunerpy/pt-tools/commit/622393cbe449ff5679867d2ce9acb99ea56fd208))
+
+## [1.0.0-rc.58](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.57...v1.0.0-rc.58) (2026-11-11)
+
+
+### Bug Fixes
+
+* **media:** 追剧不认领刷流的种子、被删的种子马上重新找，缺集信息的刮削自动补 ([#895](https://github.com/sunerpy/pt-tools/issues/895)) ([ad14e2b](https://github.com/sunerpy/pt-tools/commit/ad14e2b74e9b8cda330621c4c5db56a2abf41bf0))
+
+## [1.0.0-rc.57](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.56...v1.0.0-rc.57) (2026-11-11)
+
+
+### Features
+
+* **site:** 站点设置加「H&R 上传量达标」，下完以后上传够了也算 H&R 做满 ([#892](https://github.com/sunerpy/pt-tools/issues/892)) ([dada036](https://github.com/sunerpy/pt-tools/commit/dada036f3487081f37a48c486ecea06bd3900062))
+* **subscribe:** 订阅设置加「版本锁等满几天改用别的版本」，默认一直等 ([#894](https://github.com/sunerpy/pt-tools/issues/894)) ([30ee733](https://github.com/sunerpy/pt-tools/commit/30ee733d6a003ae51a4fa9350792e349ca0f8d3a))
+
+
+### Bug Fixes
+
+* **backup:** 密钥检查和备份校验补上漏掉的加密列 ([#888](https://github.com/sunerpy/pt-tools/issues/888)) ([2db1e1b](https://github.com/sunerpy/pt-tools/commit/2db1e1bc97b012877f97e5432f67a41cbb5ed14d))
+* **brush:** 优惠类型勾了免费以外的类型时读全部种子列表 ([#890](https://github.com/sunerpy/pt-tools/issues/890)) ([2277644](https://github.com/sunerpy/pt-tools/commit/2277644d8e99f630eb68b0275b0c354e2420268e))
+* **build:** Go 升到 1.26.11（标准库安全修复） ([#893](https://github.com/sunerpy/pt-tools/issues/893)) ([b450c45](https://github.com/sunerpy/pt-tools/commit/b450c458e298636c055fb7151ca17c24dbd3b5ca))
+* **subscribe:** 整理完一个种子以后马上刷新订阅 ([#891](https://github.com/sunerpy/pt-tools/issues/891)) ([858d5c8](https://github.com/sunerpy/pt-tools/commit/858d5c8835f428cd9dd6354ace50d15d161ed0b7))
+
+## [1.0.0-rc.56](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.55...v1.0.0-rc.56) (2026-11-10)
+
+
+### Features
+
+* **site:** 新增库非、杏坛、HDKylin、OshenPT、Kelu ([#884](https://github.com/sunerpy/pt-tools/issues/884)) ([0a6be10](https://github.com/sunerpy/pt-tools/commit/0a6be100adab50ca992521703815839705b2fd50))
+* 网页与手机 App 加 Star 提示，链到 GitHub 仓库 ([#875](https://github.com/sunerpy/pt-tools/issues/875)) ([6a50153](https://github.com/sunerpy/pt-tools/commit/6a5015367e2886a059f6e4e099621efc66a8e9f3))
+
+
+### Bug Fixes
+
+* **attendance:** 新版 NexusPHP 的「立即签到」表单提交一次，图片验证码交给 AI 识别；Audiences 已取消签到 ([#883](https://github.com/sunerpy/pt-tools/issues/883)) ([00bdaf5](https://github.com/sunerpy/pt-tools/commit/00bdaf5d843e104e9253d263bf52e91e2e1ded2e))
+* **media:** 条目详情页主区窄时大图的按钮一行放不下，播放只留图标，重新刮削与删除收进「更多」 ([#878](https://github.com/sunerpy/pt-tools/issues/878)) ([f207f1c](https://github.com/sunerpy/pt-tools/commit/f207f1c657b6e58b7f15c324486032c86ea80351))
+* **reseed:** IYUU token 没绑定合作站点时写明怎么绑定 ([#885](https://github.com/sunerpy/pt-tools/issues/885)) ([d1a80c3](https://github.com/sunerpy/pt-tools/commit/d1a80c30ed88a7fc7df9d407df738b95989dfc92)), closes [#740](https://github.com/sunerpy/pt-tools/issues/740)
+* **site:** 用户详情页的上传量、下载量与分享率没取到时按「传输」一行再找 ([#887](https://github.com/sunerpy/pt-tools/issues/887)) ([a1836a4](https://github.com/sunerpy/pt-tools/commit/a1836a44689fe3f4440ee51d816a40befbbe30aa))
+* **site:** 种子列表里的 2X 50% 不再读成 50% ([#886](https://github.com/sunerpy/pt-tools/issues/886)) ([4c4e404](https://github.com/sunerpy/pt-tools/commit/4c4e4042bd1244a90847f563d116e1b6a2341d9f))
+
+## [1.0.0-rc.55](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.54...v1.0.0-rc.55) (2026-11-09)
+
+
+### Features
+
+* **mobile:** 手机 App 概览页新增「下载器做种」卡，列出每台下载器正在做种的个数与体积 ([#874](https://github.com/sunerpy/pt-tools/issues/874)) ([063b84e](https://github.com/sunerpy/pt-tools/commit/063b84ee5c291b72a934009e0ae7ee9a0754b75d))
+* **userinfo:** 用户统计页新增「下载器做种」卡，列出每台下载器正在做种的个数与体积 ([#873](https://github.com/sunerpy/pt-tools/issues/873)) ([bc87cc8](https://github.com/sunerpy/pt-tools/commit/bc87cc859edf47044b04b32f12421b2bdea916e7))
+
+
+### Bug Fixes
+
+* **site:** HDArea 的做种体积改读魔力值页上的「做种总积」，做种列表一次只回 25 个种子 ([#871](https://github.com/sunerpy/pt-tools/issues/871)) ([cc0a629](https://github.com/sunerpy/pt-tools/commit/cc0a6291b8588449bed491783e52b8c5fc19c2e1))
+
+## [1.0.0-rc.54](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.53...v1.0.0-rc.54) (2026-11-08)
+
+
+### Bug Fixes
+
+* **attendance:** 签到地址回 404 时当天直接记失败、写明地址，不再重试；没有内置定义的站点显示「不支持」，关掉自动签到后不再显示「待重试」 ([#868](https://github.com/sunerpy/pt-tools/issues/868)) ([0ba51d7](https://github.com/sunerpy/pt-tools/commit/0ba51d70c3456edc2e4e73634a287aff222aab1f))
+* **extension:** U2 认出登录 Cookie，春天的 SPRINGID 先由 pt-tools 验证，「我的站点」只列启用或登录着的站点，验证没通过时行上写原因 ([#866](https://github.com/sunerpy/pt-tools/issues/866)) ([8408b0a](https://github.com/sunerpy/pt-tools/commit/8408b0aaf4e8a6bdf00936962d7e57f18f55b52f))
+* **reseed:** 辅种的种子和原种子共用的数据在站点做种容量里只算一次，原种子还在时辅种不受上限限制 ([#869](https://github.com/sunerpy/pt-tools/issues/869)) ([8414364](https://github.com/sunerpy/pt-tools/commit/8414364a09ea4b01ade650f576f06e29684564cb))
+
+## [1.0.0-rc.53](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.52...v1.0.0-rc.53) (2026-11-07)
+
+
+### Features
+
+* **backup:** 每天定时备份数据库、升级前自动备份，网页与命令行都能下载、上传与恢复 ([1a6a3c3](https://github.com/sunerpy/pt-tools/commit/1a6a3c38d57882fd982fc56ea50c92d3923bb066))
+* **health:** 系统体检加「NAS」一组：看 NAS 连没连上、存储池健不健康、有没有严重告警、硬盘热不热 ([c9116c5](https://github.com/sunerpy/pt-tools/commit/c9116c5a1d31a9be1e7ddfda19fe36764dc7fbbe))
+* **home:** 打开网页先到首页，写今天播出、待处理、最近入库与 NAS 状态；系统体检一次查完 TMDB、下载器、媒体库与备份 ([d4a99b8](https://github.com/sunerpy/pt-tools/commit/d4a99b85ce2ca3645cae4c59ae99825b8d531690))
+* **media:** Seerr 能把 pt-tools 当成 Radarr 与 Sonarr，请求的电影建成订阅、剧集的每一季建成追剧，订阅的状态与入库的文件回给 Seerr ([80f2624](https://github.com/sunerpy/pt-tools/commit/80f2624f2f4c3b709355d3f64248dc629adc0231))
+* **media:** 媒体库可以设新建订阅时带出的下载器、保存目录、分类与标签 ([4bcd2b1](https://github.com/sunerpy/pt-tools/commit/4bcd2b155ebf643ac50bee5b555e95085290af27))
+* **media:** 媒体服务器的索引、Webhook、继续观看与播放通知；详情写服务器里有没有、能直接播放，服务器里删了的会提示 ([618e78b](https://github.com/sunerpy/pt-tools/commit/618e78bf7cf2afed78ec0e1e467946a8a3833f1f))
+* **media:** 已有的媒体库能导入成整理记录，订阅不再重复下载；NFO 里的演员名能用中文，刮削没写全的每周补一次 ([75d6365](https://github.com/sunerpy/pt-tools/commit/75d6365d9a98cd3982df6c2c9a9ae59168566a69))
+* **media:** 拉黑不要的种子，订阅不再选它；没免费的种子可以等免费了再自动推送 ([a497b56](https://github.com/sunerpy/pt-tools/commit/a497b566e0927859906817097345a7a66284091f))
+* **media:** 探索页多了上映与播出的列表、按国家与类型找，以及 Bangumi 番剧日历 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **media:** 整理历史写明失败原因、能按条目看与批量处理，认不出的让 AI 认；二级分类写明原因，加了短剧，源路径能浏览选 ([c0854e9](https://github.com/sunerpy/pt-tools/commit/c0854e94d3f1fdb53a68dbb8a36dd0909317b1e6))
+* **media:** 条目详情能删除一部片，库里的文件、种子与订阅一起处理，受保护的种子要单独确认；库里的文件不见了会提示 ([dae8c05](https://github.com/sunerpy/pt-tools/commit/dae8c05e3d0837e88042901fdee91521865b4a2d))
+* **media:** 电影、剧集有了详情页；订阅日历按天列出播出的集，每天可以推送今天的更新 ([1104ec2](https://github.com/sunerpy/pt-tools/commit/1104ec297984fa5c0f419b4526dd31be94e50152))
+* **media:** 电影原盘与 ISO 能整理进媒体库，复制先试写时复制；目录监控收到改动就提前整理 ([5e02302](https://github.com/sunerpy/pt-tools/commit/5e02302eb655f41c16faa179c5f3c4ad791a1f8c))
+* **media:** 种子里没有字幕时到站点上取字幕，也能交给 ChineseSubFinder 下载 ([c17df9e](https://github.com/sunerpy/pt-tools/commit/c17df9e7bcb7838e9627360039e95fea109f83b0))
+* **media:** 订阅与按条目推送能按条目建下载子目录 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **media:** 订阅弹窗里可以试搜索：按还没保存的表单搜一次，从结果上复制标题、加进包含或排除、锁版本、选起点种子 ([4da5b6e](https://github.com/sunerpy/pt-tools/commit/4da5b6ebfd216c945089674d2eec94afa08833d6))
+* **media:** 订阅推送前能让 AI 助手复核候选是不是要的条目，说不是的跳过 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **media:** 订阅推送的种子按订阅的条目整理，推送时记下条目，整理历史写明条目从哪来 ([fd5efb9](https://github.com/sunerpy/pt-tools/commit/fd5efb946bf03d73d738783474738b479c9a0113))
+* **media:** 追剧能选 TMDB 剧集组，种子与文件名里的季集按它换成默认的季集 ([7c6b4e9](https://github.com/sunerpy/pt-tools/commit/7c6b4e9329932ce1d6cf5970651cd0371b7a961f))
+* **mobile:** 手机追剧编辑页按媒体库带出下载设置，可以试搜索并从结果设条件 ([3eefa48](https://github.com/sunerpy/pt-tools/commit/3eefa4803a59cf623f3d4444412809c16659e2a1))
+* **nas:** 接入 Glances 4：群晖、飞牛、Unraid 等 NAS 上用 Docker 跑的 Glances，首页的 NAS 概览显示它的主机、网络、存储、硬盘温度、容器与软 RAID ([62d22f0](https://github.com/sunerpy/pt-tools/commit/62d22f033630662b00f7c05219e278ce6779c3c3))
+* **nas:** 接入 TrueNAS：用只读 API Key 读主机、存储池、硬盘温度、告警与应用，首页的 NAS 概览显示它 ([c9116c5](https://github.com/sunerpy/pt-tools/commit/c9116c5a1d31a9be1e7ddfda19fe36764dc7fbbe))
+* **nas:** 接入群晖 DSM（实验性，只用假服务测过）：首页的 NAS 概览显示群晖的主机、CPU、内存、网络、存储空间与硬盘 ([3d8383f](https://github.com/sunerpy/pt-tools/commit/3d8383f2fb52ad39af563c9b42e7dd6b6749c4c3))
+* **nas:** 接入飞牛 fnOS（实验性，在 fnOS 1.2.1000 真机上验证过）：首页的 NAS 概览显示飞牛的主机、CPU、内存、网络、存储空间、硬盘与容器 ([6b0ed8a](https://github.com/sunerpy/pt-tools/commit/6b0ed8a954010b7e3091b2939c28e2ed0f939779))
+* **search:** 按条目搜索：选一部电影或剧集搜各站点，按质量档案打分、合并同一资源、写明能补上哪几集 ([2491e06](https://github.com/sunerpy/pt-tools/commit/2491e06047192c43f5de2f767e3c118f4291bda8))
+* **web:** 系统体检页改成卡片：总览卡有环形图与计数块，问题集中在「需要处理」、带「去处理」，各组按瀑布流排，结果到了依次出现 ([cf017d8](https://github.com/sunerpy/pt-tools/commit/cf017d856d0a80ad2d0181cea75b8257d78482eb))
+* **web:** 首页最上面是 NAS 概览：主机行、CPU、内存、网络与存储四张数值卡，存储池、硬盘温度与告警；新增「系统 → NAS 监控」，本机来源读 pt-tools 所在主机 ([158f2be](https://github.com/sunerpy/pt-tools/commit/158f2becf2192b2ac1105f0a1579cd7927d9ef7a))
+
+
+### Bug Fixes
+
+* **mobile:** App 探索页卡片不再溢出、可以下拉刷新，订阅详情写出版本锁，编辑页的 TMDB 编号改成普通输入框，Android 13 起复制只提示一次 ([867e2f6](https://github.com/sunerpy/pt-tools/commit/867e2f647e6f6eceb57a84b5656bca0ef3eefce7))
+* **nas:** 飞牛在 fnOS 1.2.1000 真机上验证过：内存已用与飞牛网页一致，没有容器时写 0 个，普通账号的容器写没有权限 ([1c8c343](https://github.com/sunerpy/pt-tools/commit/1c8c343b7d9204e27ee498f6f2de4656eb012c24))
+* **notify:** Telegram 长轮询失败时照常推送，后台通知的重试加上 2 小时、6 小时两档 ([#838](https://github.com/sunerpy/pt-tools/issues/838)) ([bf8adbe](https://github.com/sunerpy/pt-tools/commit/bf8adbe732f3874ee57b65bdd3f472e3ceab65ee))
+* **site:** 跳过 NexusPHP 的第一次下载提示，UHDDolby 只知道编号时用 Cookie 下载，辅种不再把网页当成种子 ([#829](https://github.com/sunerpy/pt-tools/issues/829)) ([fca0b10](https://github.com/sunerpy/pt-tools/commit/fca0b10d74b41c54f58d53b33b9d4f1105ed6273))
+* **web:** 手机上导出的海报，标题与小标签不再折行压住下一行的字 ([#854](https://github.com/sunerpy/pt-tools/issues/854)) ([17d3a1e](https://github.com/sunerpy/pt-tools/commit/17d3a1edcdf10a5c09c4568f922a0f99a5a0fcb2))
+
+## [1.0.0-rc.52](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.51...v1.0.0-rc.52) (2026-11-02)
+
+
+### Bug Fixes
+
+* **site:** HDDolby 换到 www.uhddolby.com，免费与结束时间按站点 API 读，只要 API Key，新增签到 ([#827](https://github.com/sunerpy/pt-tools/issues/827)) ([59d93f2](https://github.com/sunerpy/pt-tools/commit/59d93f2e941fe9a27838c5b7176b82ab0a50274f))
+
+## [1.0.0-rc.51](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.50...v1.0.0-rc.51) (2026-11-02)
+
+
+### Bug Fixes
+
+* **site:** CHDBits 认出文字显示的促销、限时结束时间与 H3/H5 的 H&R，运行时建站不再丢站点定义的优惠映射与副标题取法 ([#824](https://github.com/sunerpy/pt-tools/issues/824)) ([c0f8b18](https://github.com/sunerpy/pt-tools/commit/c0f8b18aab08469f05e49bd65980df4e7d7c3ee8))
+
+## [1.0.0-rc.50](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.49...v1.0.0-rc.50) (2026-11-01)
+
+
+### Features
+
+* **brush:** 删除刷流任务时可选保留种子，不活跃按下载器时间判断 ([#819](https://github.com/sunerpy/pt-tools/issues/819)) ([b78f637](https://github.com/sunerpy/pt-tools/commit/b78f63791d90b6b66a27b862d4e4682e8ac98269))
+* **cleanup:** 一键保留种子，自动删除统一遵守保留与保护规则 ([#818](https://github.com/sunerpy/pt-tools/issues/818)) ([6b6b974](https://github.com/sunerpy/pt-tools/commit/6b6b9746c80c043a10b960839544d7d1eafe3dc8))
+* **cleanup:** 做种竞争度并进自动删种，加「空间低于下限时紧急清理」 ([#820](https://github.com/sunerpy/pt-tools/issues/820)) ([2fc8dd7](https://github.com/sunerpy/pt-tools/commit/2fc8dd794f53d1c8003c8f4a3784088c45788cd6))
+* **rss:** 免费结束时没下完改成每条 RSS 选不处理、暂停或删除，去掉全局的免费结束自动删除 ([#821](https://github.com/sunerpy/pt-tools/issues/821)) ([6008945](https://github.com/sunerpy/pt-tools/commit/6008945a679f783e7f9fafed25e83b9ddd4d9916))
+
+
+### Bug Fixes
+
+* **core:** 保存站点时按编号原地更新 RSS，不再删掉重建 ([#816](https://github.com/sunerpy/pt-tools/issues/816)) ([8fe753c](https://github.com/sunerpy/pt-tools/commit/8fe753c9c8dadfbbe39fad9f855a4765a7ce5b2b))
+* **site:** 做种体积不再把标题读成几千 PB，M-Team 做种统计改从 myPeerStatus 与做种列表取，取到 0 的计数存成 0 ([#822](https://github.com/sunerpy/pt-tools/issues/822)) ([829ba55](https://github.com/sunerpy/pt-tools/commit/829ba552b191a207c7abc2588a0942a3e93983c7))
+* **subscribe:** 综艺副标题把集号写成期号时按标题的集号要，下载成功后自动记集号规则 ([#815](https://github.com/sunerpy/pt-tools/issues/815)) ([050f9e1](https://github.com/sunerpy/pt-tools/commit/050f9e1721e7aee4ceb6ed13c7bc5104a9eae56a))
+* **web:** 删除单条 RSS 时一起删过滤规则关联，全局设置不再返回新版不用的两个字段，迁移备份文件名带上真实版本 ([#823](https://github.com/sunerpy/pt-tools/issues/823)) ([24d6294](https://github.com/sunerpy/pt-tools/commit/24d6294fcf3adac010172c8fa66dcd1196d6930f))
+
+## [1.0.0-rc.49](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.48...v1.0.0-rc.49) (2026-11-01)
+
+
+### Features
+
+* **media:** 手动整理可以选这一次的整理方式，重试按选的方式 ([#811](https://github.com/sunerpy/pt-tools/issues/811)) ([e0388a1](https://github.com/sunerpy/pt-tools/commit/e0388a192a9e19776b7678df159c55bbfaf4bdcb))
+* **media:** 整理入库可以手动指定一个文件或目录，自动识别或填 TMDB 编号 ([#808](https://github.com/sunerpy/pt-tools/issues/808)) ([5bd9b74](https://github.com/sunerpy/pt-tools/commit/5bd9b74a7d4338cc78b9c82813f861bda330e5d2))
+* **site:** 新增北洋园（TJUPT），猫站补上副标题、时魔、做种体积与等级要求 ([#812](https://github.com/sunerpy/pt-tools/issues/812)) ([2e4e8b1](https://github.com/sunerpy/pt-tools/commit/2e4e8b1540826b3d6ed98e3bbc214e0dfb00e7de))
+
+
+### Bug Fixes
+
+* **cleanup:** 「不活跃」按最后活动时间判，预览写明受保护的种子为什么不删 ([#810](https://github.com/sunerpy/pt-tools/issues/810)) ([599aa14](https://github.com/sunerpy/pt-tools/commit/599aa148328073822b26dc59e971332c3d2d71a9))
+* **push:** 推送的种子出现在下载器里以后不再按预留重复扣空间 ([#813](https://github.com/sunerpy/pt-tools/issues/813)) ([299726f](https://github.com/sunerpy/pt-tools/commit/299726f067402bd44c7f8ac8b5bc8232bbde1aa0))
+
+## [1.0.0-rc.48](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.47...v1.0.0-rc.48) (2026-10-31)
+
+
+### Features
+
+* **notify:** 每日战报可以选统计前一天（默认）或当天截至发送时刻，标题写明统计的是哪一天 ([26f9588](https://github.com/sunerpy/pt-tools/commit/26f958891a33022321f2aeba1d83077aaaec10ed))
+* **settings:** 全局设置加「站点代理」，选哪些站点走代理，保存后立即生效不用重启 ([ceaa04f](https://github.com/sunerpy/pt-tools/commit/ceaa04f0563dab74dc2fecc7d08fc9389febcf7e))
+* **site:** BYR 补上等级规则，时魔从魔力值页读 ([#805](https://github.com/sunerpy/pt-tools/issues/805)) ([555dc2c](https://github.com/sunerpy/pt-tools/commit/555dc2c45c7f8391ebe1b804bc14d4dfbd2808fe))
+
+
+### Bug Fixes
+
+* **remote:** 配对会话关闭时不再截掉回应，修好远程访问的偶发测试失败 ([#802](https://github.com/sunerpy/pt-tools/issues/802)) ([0f59363](https://github.com/sunerpy/pt-tools/commit/0f593639abb372b891105417883e25a7e97ea640))
+* **rss:** RSS 下载种子也按环境变量里的代理走，以前一直直连 ([ceaa04f](https://github.com/sunerpy/pt-tools/commit/ceaa04f0563dab74dc2fecc7d08fc9389febcf7e))
+
+## [1.0.0-rc.47](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.46...v1.0.0-rc.47) (2026-10-31)
+
+
+### Bug Fixes
+
+* **site:** BYR 标为不支持签到，站点上没有签到页 ([d983d48](https://github.com/sunerpy/pt-tools/commit/d983d48e2db90c727efd33ab2ebca98f460a217f))
+* **site:** BYR 的魔力值不再被用户详情页那一格盖成 0 ([d983d48](https://github.com/sunerpy/pt-tools/commit/d983d48e2db90c727efd33ab2ebca98f460a217f))
+
+## [1.0.0-rc.46](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.45...v1.0.0-rc.46) (2026-10-30)
+
+
+### Features
+
+* **notify:** 辅种每轮结果推送到通知通道，也可以写进每日战报 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** IYUU 请求计数、每天上限与请求间隔，被限流以后按 IYUU 给的时间冷却 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种的站点用开关打开或关掉，全部关闭不再等于全部站点 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种统计面板，按日、周、月、季、年或自定义范围查看 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种记录可以筛选、分页、重试、删除与取消 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+* **reseed:** 辅种轮次可以暂停、停止与继续，提前停下的由下一轮接着查 ([17f25cb](https://github.com/sunerpy/pt-tools/commit/17f25cbb713563317b0205267ab4aede3afb0a1b))
+
+
+### Bug Fixes
+
+* **reseed:** IYUU 辅种遇到站点上已经删了的种子记为「站点已删除」，不再每 7 天重试 ([fed8867](https://github.com/sunerpy/pt-tools/commit/fed8867a11d61779b33445e87b2788a56b7e4604))
+* **site:** 站点上已经删了的种子不再报「种子格式不对」：认出 M-Team 的「種子未找到」与 NexusPHP 的「没有该ID的种子」，日志记警告 ([fed8867](https://github.com/sunerpy/pt-tools/commit/fed8867a11d61779b33445e87b2788a56b7e4604))
+
+## [1.0.0-rc.45](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.44...v1.0.0-rc.45) (2026-10-29)
+
+
+### Features
+
+* **brush:** 刷流收益按日、周、月、季、年分段查看（网页与 App） ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **chatops:** 后台通知的每一次投递记进操作审计，通知设置里显示最近一次失败的原因 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **chatops:** 绑定页列出通道与收件人，名单里的账号可以在网页上直接绑定，没用掉的绑定码可以作废 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+
+
+### Bug Fixes
+
+* **extension:** 扩展通用识别站点的登录 Cookie，认不出格式时交给 pt-tools 先验证再保存 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **notify:** QQ 与 Telegram 的每日战报、签到、追剧等通知补上收件人 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+* **site:** BYR 续期换发的登录令牌接着用并存回设置 ([6686aea](https://github.com/sunerpy/pt-tools/commit/6686aeafce4ff4a6ad1ac8fa4ae7fc18f493630f))
+
+## [1.0.0-rc.44](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.43...v1.0.0-rc.44) (2026-10-28)
+
+
+### Features
+
+* **mobile:** App 改成黑白主色，加入四套主题与描边图标 ([6b2e885](https://github.com/sunerpy/pt-tools/commit/6b2e8854cfcf87ce1f0a0c798afb2faa39468d38))
+* **mobile:** App 里可以编辑追剧与刷流任务、分享统计海报 ([6b2e885](https://github.com/sunerpy/pt-tools/commit/6b2e8854cfcf87ce1f0a0c798afb2faa39468d38))
+
+## [1.0.0-rc.43](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.42...v1.0.0-rc.43) (2026-10-27)
+
+
+### Features
+
+* **subscribe:** 订阅与追剧可以写标题包含、标题排除 ([#789](https://github.com/sunerpy/pt-tools/issues/789)) ([27d85f3](https://github.com/sunerpy/pt-tools/commit/27d85f3d47dd968d796b7fba624cc6e4664ef342))
+
+
+### Bug Fixes
+
+* **subscribe:** 综艺副标题把集号写成期号时按标题的集号 ([#788](https://github.com/sunerpy/pt-tools/issues/788)) ([f7c6649](https://github.com/sunerpy/pt-tools/commit/f7c664906923fd3025ff4ac514db6a707a4fd4ad))
+
+## [1.0.0-rc.42](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.41...v1.0.0-rc.42) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sites:** 请求站点按指数退避重试，二次验证不再误判，无穷分享率统一显示 ∞ ([#786](https://github.com/sunerpy/pt-tools/issues/786)) ([3b11395](https://github.com/sunerpy/pt-tools/commit/3b1139591bd51311a821223ac5f5f4b60c7dd6ef))
+
+## [1.0.0-rc.41](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.40...v1.0.0-rc.41) (2026-10-27)
+
+
+### Features
+
+* **brush:** 刷流任务的运行记录：每一轮的结果、步骤与错误 ([#785](https://github.com/sunerpy/pt-tools/issues/785)) ([f47e9d9](https://github.com/sunerpy/pt-tools/commit/f47e9d92a37c18c2ca325090adadbfd145e76eee))
+
+
+### Bug Fixes
+
+* **sites:** OurBits 扩展同步认 ourbits_jwt，列表认出文字促销、H&R、副标题 ([#783](https://github.com/sunerpy/pt-tools/issues/783)) ([4abb62e](https://github.com/sunerpy/pt-tools/commit/4abb62e07501ebf1cfff4985ce485908b0147cde))
+
+## [1.0.0-rc.40](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.39...v1.0.0-rc.40) (2026-10-26)
+
+
+### Features
+
+* **follow:** 修改追剧时直接改锁住的版本，可以从最近一次搜索找到的版本里选 ([#772](https://github.com/sunerpy/pt-tools/issues/772)) ([837a2a8](https://github.com/sunerpy/pt-tools/commit/837a2a8309c1ed9b4df09a1e1ac7ebd87018b4a1))
+* **sites:** PTTime 补上等级要求，用户统计里的等级不再错成「小学」 ([#782](https://github.com/sunerpy/pt-tools/issues/782)) ([f267065](https://github.com/sunerpy/pt-tools/commit/f267065e1eec53dfe2f80bad3bbcf49b1ddedc3b))
+* **ui:** 填下载器路径的地方都能选预设目录，也能直接输入 ([#781](https://github.com/sunerpy/pt-tools/issues/781)) ([04b78d2](https://github.com/sunerpy/pt-tools/commit/04b78d2870432a3d7c28ff0f18f62ae09cd5209d))
+
+
+### Bug Fixes
+
+* **brush:** 刷流任务的站点下拉框只列启用的站点 ([#778](https://github.com/sunerpy/pt-tools/issues/778)) ([b0a1159](https://github.com/sunerpy/pt-tools/commit/b0a1159177c7439621df48474a2cb20f92e4548f))
+* **extension:** 弹窗先显示上次的结果；读不到登录状态时不再写未启用；认出上一级域名的 Cookie ([#771](https://github.com/sunerpy/pt-tools/issues/771)) ([4504f74](https://github.com/sunerpy/pt-tools/commit/4504f7456f981f48784018983f2ad4e3ffbf57a5))
+* **extension:** 新版 NexusPHP 只有一个 c_secure_pass 时也算登录着 ([#775](https://github.com/sunerpy/pt-tools/issues/775)) ([25119f0](https://github.com/sunerpy/pt-tools/commit/25119f008f9ef90be2b4262137fc72b040f7d20b))
+* **follow:** 改锁的提示按有没有搜到的版本来写；分辨率框放得下占位 ([#773](https://github.com/sunerpy/pt-tools/issues/773)) ([a2b77da](https://github.com/sunerpy/pt-tools/commit/a2b77da8ae1758b7fd7c9de6b455e971e756070a))
+* **follow:** 整季包补缺的集时只下缺的集，库里已有的设成不下载 ([#774](https://github.com/sunerpy/pt-tools/issues/774)) ([86164b4](https://github.com/sunerpy/pt-tools/commit/86164b4b8d528790aa6fdca490cc3fe1ada589e7))
+* **follow:** 清掉版本锁以后不再按库里已有的集锁回去，下一个下载成功的版本成为新锁 ([#769](https://github.com/sunerpy/pt-tools/issues/769)) ([b0708be](https://github.com/sunerpy/pt-tools/commit/b0708bef7cd350031dbb91fbb94b2dbae429c28a))
+* **search:** 指定的站点都没有启用时不再变成搜所有站点 ([#776](https://github.com/sunerpy/pt-tools/issues/776)) ([8a2fd04](https://github.com/sunerpy/pt-tools/commit/8a2fd0433e128d78cf09e017eaeb8056235397e3))
+* **search:** 搜索结果的下载地址用站点注册的 ID，星陨阁等站点下载不再 404 ([#777](https://github.com/sunerpy/pt-tools/issues/777)) ([9c7d29c](https://github.com/sunerpy/pt-tools/commit/9c7d29c0e24a147e920c2740bad7ba51f8426004))
+* **sites:** PTTime 读出免费结束时间；优惠映射按最长的关键词匹配 ([#780](https://github.com/sunerpy/pt-tools/issues/780)) ([5aa7341](https://github.com/sunerpy/pt-tools/commit/5aa734120d510771963bdf91711e5cf5c48f7a25))
+
+## [1.0.0-rc.39](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.38...v1.0.0-rc.39) (2026-10-23)
+
+
+### Bug Fixes
+
+* **login:** 发封号提醒前先探测一次；Rousi 最近活跃只认站点记录，凭据写明是个人 API Key ([#767](https://github.com/sunerpy/pt-tools/issues/767)) ([a064718](https://github.com/sunerpy/pt-tools/commit/a064718fad5359c29e459025ef8f2cac7db58f36))
+
+## [1.0.0-rc.38](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.37...v1.0.0-rc.38) (2026-10-23)
+
+
+### Bug Fixes
+
+* **brush:** M-Team 刷流可选读综合区、成人区或两个都读，单种免费的种子不再扫不到 ([#765](https://github.com/sunerpy/pt-tools/issues/765)) ([8c484e4](https://github.com/sunerpy/pt-tools/commit/8c484e4a7e5deb25fe8feae6770a31c1e60a8969))
+* **extension:** 定时同步「全部站点」也推 pt-tools 里停用的站点，只存 Cookie、不替用户启用 ([#764](https://github.com/sunerpy/pt-tools/issues/764)) ([0014015](https://github.com/sunerpy/pt-tools/commit/0014015ca9346284e37c4df628f70c3304dae455))
+* **webui:** 走查修页面缺陷：表格列宽、下载器视图面板、长表单贴底保存、站点「未探测」、导出默认打码用户名 ([#763](https://github.com/sunerpy/pt-tools/issues/763)) ([057399f](https://github.com/sunerpy/pt-tools/commit/057399f7333a9de89c8512ed2e4d971e0ae9ebed))
+
+## [1.0.0-rc.37](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.36...v1.0.0-rc.37) (2026-10-22)
+
+
+### Features
+
+* **api:** 配置网关：经 MCP 工具与 App API 读改大部分配置，密钥只写不读，新增 app:config 权限 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **assistant:** AI 助手对话页改版：显示推理内容与工具调用，可选模型与推理等级，能带图片与文本附件，上下文到阈值自动压缩 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **assistant:** 会产生变更的工具先给差异预览，确认后才执行 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **assistant:** 语音输入（Voltip） ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **attendance:** 自动签到独立页与按天的签到详情，HDSky、OpenCD 的验证码与 PTCHDBits、52PT 的答题交给 AI，支持 Rousi Pro 签到 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **mcp:** MCP 接入开关与路径（新装默认关），补齐追剧、重新整理与重新刮削的工具 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **media:** 一键追剧：剧集订阅按播出时间或定时搜索，版本锁、每集台账、综艺集号与运行记录 ([#758](https://github.com/sunerpy/pt-tools/issues/758)) ([22f2dd8](https://github.com/sunerpy/pt-tools/commit/22f2dd8e2c60a531c76525938d94bf81665ac636))
+* **media:** 刮削按项选来源（TMDB、豆瓣、Bangumi、Fanart.tv、OMDb），整理历史记刮削结果、可以重新刮削 ([#757](https://github.com/sunerpy/pt-tools/issues/757)) ([bd5b2a1](https://github.com/sunerpy/pt-tools/commit/bd5b2a18c4ab3288a7e1e9a747edcf47d9e6e90d))
+* **media:** 识别比对 TMDB 各语言译名、NFO 主要评分写在最后、发布构建可以内置 TMDB Key ([0545474](https://github.com/sunerpy/pt-tools/commit/054547461ee9057671eb7473db6edb0d8a7c137d))
+* **media:** 追剧定时可按间隔或 cron，种子能重新整理与刮削，订阅可以带站点、下载器与保存路径 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **rss:** 「调度器」改名「RSS 任务」，加状态接口与没在运行时的提示条 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **rss:** 过滤规则试跑可以选一个 RSS 现拉实时数据，站点详情的 RSS 能先试一下 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **webui:** 宽屏两栏布局，浏览器扩展弹窗的主页改成「我的站点」 ([8b33244](https://github.com/sunerpy/pt-tools/commit/8b33244286fe1d4ef18eb44a7753466ea11fdceb))
+* **webui:** 数据导出海报五种样式（便当、素笺、夜幕、回顾、小票），预览就是导出的图 ([#762](https://github.com/sunerpy/pt-tools/issues/762)) ([17b676a](https://github.com/sunerpy/pt-tools/commit/17b676af15dd4366bf3e382c9f5b3358e279ef46))
+
+
+### Bug Fixes
+
+* **build:** Go 升到 1.26.10（标准库安全修复） ([#754](https://github.com/sunerpy/pt-tools/issues/754)) ([128c496](https://github.com/sunerpy/pt-tools/commit/128c496c44f40b9f0aabc29472a8fce697ab040b))
+* **media:** 追剧按真实下载修正：下载种子文件自动重试（所有站点）、没做完的提前重搜、认领按选中的文件认集 ([#759](https://github.com/sunerpy/pt-tools/issues/759)) ([fb6dfbc](https://github.com/sunerpy/pt-tools/commit/fb6dfbcee82d5362784a9c150722cf96b6a3ca29))
+* **rss:** 取 RSS 的错误分成中文提示、不再带完整地址，示例里的占位地址不开任务、不让保存 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+* **site:** 取用户信息时少了几页也回部分结果，HDSky、SSD 不再整次失败 ([#760](https://github.com/sunerpy/pt-tools/issues/760)) ([47d3ff7](https://github.com/sunerpy/pt-tools/commit/47d3ff7d291800db9db51bbb5e49e98a45c10420))
+* **webui:** 所有弹窗限高，页头页脚固定、正文滚动 ([0dd1ed7](https://github.com/sunerpy/pt-tools/commit/0dd1ed7e49914f4ae3de372447ab2f25da02c276))
+
+## [1.0.0-rc.36](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.35...v1.0.0-rc.36) (2026-10-17)
+
+
+### Features
+
+* **hdarea:** 支持 HDArea 每日自动签到 ([#744](https://github.com/sunerpy/pt-tools/issues/744)) ([323ee3f](https://github.com/sunerpy/pt-tools/commit/323ee3f40c29cee7725b2917130b4a86af13bcf4))
+
+
+### Bug Fixes
+
+* **sites:** 修正 CrabPT/GameGamePT/HDArea/OpenCD 的积分、分享率与时魔解析 ([#742](https://github.com/sunerpy/pt-tools/issues/742)) ([ca8691a](https://github.com/sunerpy/pt-tools/commit/ca8691a7a2b92903d038349c0e7116cdf292f823))
+* **sites:** 分享率不到 1 时不再取到颜色值，GameGamePT 无穷分享率按 9999999 记 ([#747](https://github.com/sunerpy/pt-tools/issues/747)) ([b9f48ad](https://github.com/sunerpy/pt-tools/commit/b9f48ad1fe6f04fa19393acba56643c71e3679e5))
+* **version:** 预发版改用 semver 库比较，修复旧版本被当成新版本 ([#743](https://github.com/sunerpy/pt-tools/issues/743)) ([8bc4621](https://github.com/sunerpy/pt-tools/commit/8bc4621b00241e766379c1a5dca3d363027c3e0f))
+
+## [1.0.0-rc.35](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.34...v1.0.0-rc.35) (2026-10-16)
+
+
+### Bug Fixes
+
+* **brush:** 站点规则里没有 H&R 做种时长时按站点设置算，整站 H&R 也能刷流 ([#738](https://github.com/sunerpy/pt-tools/issues/738)) ([375ef23](https://github.com/sunerpy/pt-tools/commit/375ef23b5116210cf3f5f089bd9c0ef3f10d1a30)), closes [#727](https://github.com/sunerpy/pt-tools/issues/727)
+
+## [1.0.0-rc.34](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.33...v1.0.0-rc.34) (2026-10-16)
+
+
+### Bug Fixes
+
+* **rss:** 已推送种子的来源与规则只跟着同一份资格一起写 ([#736](https://github.com/sunerpy/pt-tools/issues/736)) ([b52a125](https://github.com/sunerpy/pt-tools/commit/b52a12503c1dd8a7cf5cd172a5b9015112cf4e67))
+
+## [1.0.0-rc.33](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.32...v1.0.0-rc.33) (2026-10-16)
+
+
+### Bug Fixes
+
+* **rss:** 已推送的种子每轮刷新来源与命中的过滤规则，命中数按推送时的规则 ([#734](https://github.com/sunerpy/pt-tools/issues/734)) ([fafee29](https://github.com/sunerpy/pt-tools/commit/fafee29344866e1a7c6541fa6865dd8d3c0f0804))
+
+## [1.0.0-rc.32](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.31...v1.0.0-rc.32) (2026-10-16)
+
+
+### Bug Fixes
+
+* **push:** 暂存按文件名对应记录、计划暂停已到不开始、每轮刷新已有记录 ([#732](https://github.com/sunerpy/pt-tools/issues/732)) ([0b4e3b8](https://github.com/sunerpy/pt-tools/commit/0b4e3b8c669dfead8a088b085ac67e7d528c4136))
+
+## [1.0.0-rc.31](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.30...v1.0.0-rc.31) (2026-10-16)
+
+
+### Features
+
+* **push:** 免费资格门禁、RSS 暂存归属与到期暂停确认 ([#730](https://github.com/sunerpy/pt-tools/issues/730)) ([283d51c](https://github.com/sunerpy/pt-tools/commit/283d51cf22bbbee3ff4dac47705aa4a1ddfe21ac))
+
+## [1.0.0-rc.30](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.29...v1.0.0-rc.30) (2026-10-15)
+
+
+### Features
+
+* **cleanup:** 自动删种可以先预览会删哪些，页面写明上一轮的结果 ([#715](https://github.com/sunerpy/pt-tools/issues/715)) ([cb5cb19](https://github.com/sunerpy/pt-tools/commit/cb5cb195047e76479410bfaecc74c7c1dd2ee360))
+* **media:** TMDB 接口地址与图片地址可以换 ([#707](https://github.com/sunerpy/pt-tools/issues/707)) ([1f9a3b5](https://github.com/sunerpy/pt-tools/commit/1f9a3b5e8640e7d124b8382a83662c2147b93b82))
+* **media:** 刮削内容可以分别开关，海报与 Logo 可以选图片语言 ([#709](https://github.com/sunerpy/pt-tools/issues/709)) ([7626961](https://github.com/sunerpy/pt-tools/commit/7626961427c88d64e7537cd394e30ce2340da5f9))
+* **media:** 刮削的简介与评分可以用豆瓣的 ([#713](https://github.com/sunerpy/pt-tools/issues/713)) ([42d10c8](https://github.com/sunerpy/pt-tools/commit/42d10c87c2372987105ed183603eef07e6c72ce7))
+* **media:** 整理入库可以按二级分类放进子目录 ([#710](https://github.com/sunerpy/pt-tools/issues/710)) ([c0ac37a](https://github.com/sunerpy/pt-tools/commit/c0ac37a4b83294161fadf372941a666cdb899da1))
+* **media:** 整理时同名的旧版本可以按策略替换 ([#711](https://github.com/sunerpy/pt-tools/issues/711)) ([d92cd88](https://github.com/sunerpy/pt-tools/commit/d92cd8826c1bc9fd55450dd0c53de47929d2f970))
+* **media:** 没填 TMDB API Key 时媒体页写明要用它、带链接；整理设置写明扫描的上次与下次 ([#717](https://github.com/sunerpy/pt-tools/issues/717)) ([fd4aea8](https://github.com/sunerpy/pt-tools/commit/fd4aea85f9cb8e6f7ada7dc8fe1a1721dbfa45bf))
+* **media:** 目录监控：放进监控目录的视频按媒体库整理 ([#712](https://github.com/sunerpy/pt-tools/issues/712)) ([8ce72f3](https://github.com/sunerpy/pt-tools/commit/8ce72f3dd5fa542d6902ab4f64d5a9c5cee4f302))
+* **notify:** 「最近的通知」列出 RSS 与后台通知，结果写中文 ([#725](https://github.com/sunerpy/pt-tools/issues/725)) ([06bd700](https://github.com/sunerpy/pt-tools/commit/06bd7009227840c36f818d90d9cb9dfb649ef756))
+* **notify:** 通知通道的投递统计算上签到、战报等后台通知，按来源写明 ([#719](https://github.com/sunerpy/pt-tools/issues/719)) ([5ec3785](https://github.com/sunerpy/pt-tools/commit/5ec3785b32d0fbde2cc45e1f97ea4f8a512488ad))
+* **qbit:** qB 兼容入口的监听地址在页面上设，页面写明状态与登录情况 ([#714](https://github.com/sunerpy/pt-tools/issues/714)) ([832133d](https://github.com/sunerpy/pt-tools/commit/832133d61e08b980076fa9c5a4ba8e8cd6eff233))
+* **settings:** IYUU 辅种与 CookieCloud 写明每项填什么，以及上次与下次运行 ([#716](https://github.com/sunerpy/pt-tools/issues/716)) ([d09df4a](https://github.com/sunerpy/pt-tools/commit/d09df4a4831d2a5c9d814938bcd7feac861c97dc))
+* **settings:** 失效种子定时扫描写明上次与下次，保号配置写明探测周期与签到时间窗在哪 ([#718](https://github.com/sunerpy/pt-tools/issues/718)) ([58a6479](https://github.com/sunerpy/pt-tools/commit/58a6479503387d350cd08b15886eb0701435adb2))
+
+
+### Bug Fixes
+
+* **build:** CloakBrowser 的 compose 示例改用存在的镜像标签、正确的端口与数据目录 ([#722](https://github.com/sunerpy/pt-tools/issues/722)) ([4ad01a8](https://github.com/sunerpy/pt-tools/commit/4ad01a8b1b1f95438fea0b06a1a1f6296f02f493))
+* **cloak:** 登录探测的后备能连上现在的 CloakBrowser-Manager，compose 示例的镜像与健康检查 ([#724](https://github.com/sunerpy/pt-tools/issues/724)) ([3c666ef](https://github.com/sunerpy/pt-tools/commit/3c666ef536b707665b88cf271e427571b76507b2))
+* **settings:** 读不到下载器列表时失效种子扫描下一次检查就重试 ([#726](https://github.com/sunerpy/pt-tools/issues/726)) ([a6f1cd9](https://github.com/sunerpy/pt-tools/commit/a6f1cd91fef5a1d07c220825c3db60eba449275b))
+* **web:** 媒体、qB 兼容入口、远程访问等 14 个页面在导航上高亮自己 ([#720](https://github.com/sunerpy/pt-tools/issues/720)) ([ff12c2c](https://github.com/sunerpy/pt-tools/commit/ff12c2ca88d9cdfb8bbd7a7412f7fd33ab0c629c))
+
+## [1.0.0-rc.29](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.28...v1.0.0-rc.29) (2026-10-14)
+
+
+### Features
+
+* **remote:** relay 留空时默认用内置的托管 relay，可以关掉只直连 ([#705](https://github.com/sunerpy/pt-tools/issues/705)) ([9ebea36](https://github.com/sunerpy/pt-tools/commit/9ebea3643a787d0a1df50154b4ddac7715ad1f3b))
+
+## [1.0.0-rc.28](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.27...v1.0.0-rc.28) (2026-10-14)
+
+
+### Features
+
+* **mobile:** App 跟着 pt-tools 的 Release 一起发布 ([#703](https://github.com/sunerpy/pt-tools/issues/703)) ([142a7b5](https://github.com/sunerpy/pt-tools/commit/142a7b5b566da2ad5ca0ff5e3f5aa54a98c8c74e))
+
+## [1.0.0-rc.27](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.26...v1.0.0-rc.27) (2026-10-13)
+
+
+### Features
+
+* **app-api:** 在 App API 里管理消息模板 ([#685](https://github.com/sunerpy/pt-tools/issues/685)) ([30ed23a](https://github.com/sunerpy/pt-tools/commit/30ed23a3a66b4d8fbfef1f92eaabe79ee43ade9d))
+* **chatops:** ChatOps 命令回复与 AI 助手回复可以套用消息模板 ([#684](https://github.com/sunerpy/pt-tools/issues/684)) ([9d3ed66](https://github.com/sunerpy/pt-tools/commit/9d3ed662bdabc6c1d7f81cddcd92da7adadc7123))
+* **extension:** 定时同步 Cookie，并可加密上传到 CookieCloud ([#686](https://github.com/sunerpy/pt-tools/issues/686)) ([9e3db1c](https://github.com/sunerpy/pt-tools/commit/9e3db1c6fdbd45d6817d811f79d730704594ccc6))
+* **notify:** Webhook 可以按响应内容判断成败 ([#683](https://github.com/sunerpy/pt-tools/issues/683)) ([5a5734d](https://github.com/sunerpy/pt-tools/commit/5a5734d30a62634153b62fe0e57620ed1f43f8f2))
+
+
+### Bug Fixes
+
+* **extension:** 定时同步把没有可用 Cookie 的站点按名字报出来 ([#688](https://github.com/sunerpy/pt-tools/issues/688)) ([baaa57b](https://github.com/sunerpy/pt-tools/commit/baaa57b8361e905b9109347230ad1509179a74a1))
+* **sitelogin:** 没写最近动向选择器的 NexusPHP 站点不再报解析失败 ([#680](https://github.com/sunerpy/pt-tools/issues/680)) ([c9afa5b](https://github.com/sunerpy/pt-tools/commit/c9afa5bff949b859261db320a13aa5e6d4ec99a6))
+* **site:** NexusPHP 用户详情页的实际上传、下载量按通用写法取 ([#682](https://github.com/sunerpy/pt-tools/issues/682)) ([0972481](https://github.com/sunerpy/pt-tools/commit/097248113d4b6df8546cda383c8921918f9f5ff8))
+* **site:** 上游 NexusPHP 做种汇总的条数解析成 0（[#332](https://github.com/sunerpy/pt-tools/issues/332)） ([#687](https://github.com/sunerpy/pt-tools/issues/687)) ([5bd0fff](https://github.com/sunerpy/pt-tools/commit/5bd0fffab312b837263e7dccea0ec415ac3cac48))
+* **web:** 过滤规则的用途经接口存取，列表加一列用途 ([#678](https://github.com/sunerpy/pt-tools/issues/678)) ([e93f040](https://github.com/sunerpy/pt-tools/commit/e93f04099dd8628629f57a79eeefcaaf96591f01))
+
+## [1.0.0-rc.26](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.25...v1.0.0-rc.26) (2026-10-13)
+
+
+### Features
+
+* **chatops:** 消息模板：按事件自定义通知的标题与正文 ([#673](https://github.com/sunerpy/pt-tools/issues/673)) ([92bcbff](https://github.com/sunerpy/pt-tools/commit/92bcbff2df3bb2410abbd86d3fc6e3c5129922c2))
+* **chatops:** 自定义 Webhook 请求：方法、格式、请求体模板与预设 ([#676](https://github.com/sunerpy/pt-tools/issues/676)) ([f9ee075](https://github.com/sunerpy/pt-tools/commit/f9ee075207bb9fc31c7c26f2290a08fbf58cbf99))
+
+## [1.0.0-rc.25](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.24...v1.0.0-rc.25) (2026-10-12)
+
+
+### Features
+
+* **assistant:** 服务商加 Groq 与 Google AI Studio，支持获取模型列表 ([#668](https://github.com/sunerpy/pt-tools/issues/668)) ([916a101](https://github.com/sunerpy/pt-tools/commit/916a101e896c1e05c33e52427fa893f1e8ad56e9))
+
+## [1.0.0-rc.24](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.23...v1.0.0-rc.24) (2026-10-11)
+
+
+### Features
+
+* **assistant:** App 里的 AI 助手 ([#665](https://github.com/sunerpy/pt-tools/issues/665)) ([73bbae4](https://github.com/sunerpy/pt-tools/commit/73bbae466da1a294199bbbaa133e647c0bb38d2f))
+* **assistant:** 内置 AI 助手（核心与网页） ([#662](https://github.com/sunerpy/pt-tools/issues/662)) ([7d4eb79](https://github.com/sunerpy/pt-tools/commit/7d4eb794e7d7e2efab48f2b8c3017f3b07e0c211))
+* **assistant:** 通知渠道里的 AI 助手 ([#664](https://github.com/sunerpy/pt-tools/issues/664)) ([42d2a42](https://github.com/sunerpy/pt-tools/commit/42d2a4241cdf746edcc3f38f532bf4d73835106d))
+
+
+### Bug Fixes
+
+* **assistant:** 兼容 DeepSeek 经 OpenAI 兼容网关时的工具调用 ([#666](https://github.com/sunerpy/pt-tools/issues/666)) ([160fab7](https://github.com/sunerpy/pt-tools/commit/160fab709ae518e4887b77445869532c2b88c437))
+
+## [1.0.0-rc.23](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.22...v1.0.0-rc.23) (2026-10-11)
+
+
+### Bug Fixes
+
+* 到期重试不被关着的开关挤占、过滤规则建立原子化、relay 收尾核对待收尾 ([#660](https://github.com/sunerpy/pt-tools/issues/660)) ([08a8397](https://github.com/sunerpy/pt-tools/commit/08a839757b4c12af2ebeb91a084748dce22cea6a))
+
+## [1.0.0-rc.22](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.21...v1.0.0-rc.22) (2026-10-11)
+
+
+### Bug Fixes
+
+* 1.0.0-rc 报告里的已知问题（半价种子、整理重试、App 撤销提示等） ([#658](https://github.com/sunerpy/pt-tools/issues/658)) ([ac494fb](https://github.com/sunerpy/pt-tools/commit/ac494fbb06612aed385d41818c98ed7e8644833c))
+
+## [1.0.0-rc.21](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.20...v1.0.0-rc.21) (2026-10-10)
+
+
+### Features
+
+* **deploy:** 托管 relay 可以放在负载均衡器后面（--bind） ([#656](https://github.com/sunerpy/pt-tools/issues/656)) ([d7049ff](https://github.com/sunerpy/pt-tools/commit/d7049ff9d99a19f75630d0a4ba25a9505040b142))
+
+## [1.0.0-rc.20](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.19...v1.0.0-rc.20) (2026-10-10)
+
+
+### Features
+
+* **release:** 发布与部署流水线（M18） ([#654](https://github.com/sunerpy/pt-tools/issues/654)) ([2aa2685](https://github.com/sunerpy/pt-tools/commit/2aa268584624418c2f0d94c09286f63b85e06dda))
+
+## [1.0.0-rc.19](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.18...v1.0.0-rc.19) (2026-10-10)
+
+
+### Features
+
+* **relay:** 健康检查、监控、连接数上限与平滑重启 ([#652](https://github.com/sunerpy/pt-tools/issues/652)) ([99765e1](https://github.com/sunerpy/pt-tools/commit/99765e1000b0bc688258cd25f722c20cdbd153e0))
+
+## [1.0.0-rc.18](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.17...v1.0.0-rc.18) (2026-10-10)
+
+
+### Features
+
+* **app:** 手机 App（M17） ([#650](https://github.com/sunerpy/pt-tools/issues/650)) ([285bd46](https://github.com/sunerpy/pt-tools/commit/285bd4681bc03314ae9cb48f23446f976ce0f2fc))
+
+## [1.0.0-rc.17](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.16...v1.0.0-rc.17) (2026-10-09)
+
+
+### Features
+
+* **remote:** relay 的 Go 自建版与 Cloudflare 版（M16） ([#648](https://github.com/sunerpy/pt-tools/issues/648)) ([9ce0421](https://github.com/sunerpy/pt-tools/commit/9ce0421ce08cf1941f2254b68a9cb65839420d95))
+
+## [1.0.0-rc.16](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.15...v1.0.0-rc.16) (2026-10-09)
+
+
+### Features
+
+* **remote:** 远程访问协议与主机端（M15） ([#645](https://github.com/sunerpy/pt-tools/issues/645)) ([3fb885e](https://github.com/sunerpy/pt-tools/commit/3fb885eca15bdb69cc681da3e59835744fd320f3))
+
+
+### Bug Fixes
+
+* **build:** Go 升到 1.26.9（标准库安全修复） ([#646](https://github.com/sunerpy/pt-tools/issues/646)) ([9b03686](https://github.com/sunerpy/pt-tools/commit/9b036862605d4f631edb461d9d384e9ec4bad709))
+
+## [1.0.0-rc.15](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.14...v1.0.0-rc.15) (2026-10-08)
+
+
+### Features
+
+* **mcp:** MCP 接入（M14） ([#643](https://github.com/sunerpy/pt-tools/issues/643)) ([52af554](https://github.com/sunerpy/pt-tools/commit/52af554e8ed386d96feaed02ba242c08ff76b64d))
+
+## [1.0.0-rc.14](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.13...v1.0.0-rc.14) (2026-10-08)
+
+
+### Features
+
+* **web:** qB 兼容入口（M13） ([#641](https://github.com/sunerpy/pt-tools/issues/641)) ([5e885fb](https://github.com/sunerpy/pt-tools/commit/5e885fb342a3b77d3692998bcc8fa74bbc0be4fe))
+
+## [1.0.0-rc.13](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.12...v1.0.0-rc.13) (2026-10-08)
+
+
+### Features
+
+* **web:** API 令牌与 App API v1（M12） ([#639](https://github.com/sunerpy/pt-tools/issues/639)) ([853e5f7](https://github.com/sunerpy/pt-tools/commit/853e5f795e746cedaac66b96dc1382285f8b83d9))
+
+## [1.0.0-rc.12](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.11...v1.0.0-rc.12) (2026-10-08)
+
+
+### Features
+
+* **media:** 订阅、洗版、豆瓣想看与探索 ([#637](https://github.com/sunerpy/pt-tools/issues/637)) ([dd140ce](https://github.com/sunerpy/pt-tools/commit/dd140cecec863458570f4ae311f6cdef8d33f7c5))
+
+## [1.0.0-rc.11](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.10...v1.0.0-rc.11) (2026-10-07)
+
+
+### Features
+
+* **media:** 整理入库、刮削与媒体服务器 ([#634](https://github.com/sunerpy/pt-tools/issues/634)) ([2554e53](https://github.com/sunerpy/pt-tools/commit/2554e53a18ae7c576b34606e2245c351b3a87559))
+
+
+### Bug Fixes
+
+* **scheduler:** 配置重载与停止调度器之间的数据竞争 ([#636](https://github.com/sunerpy/pt-tools/issues/636)) ([1aed807](https://github.com/sunerpy/pt-tools/commit/1aed807548170354ea0fac559ce6775b4dee6ab6))
+
+## [1.0.0-rc.10](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.9...v1.0.0-rc.10) (2026-10-07)
+
+
+### Features
+
+* **media:** 媒体识别：标题解析、TMDB 匹配与 IMDb、豆瓣编号 ([#632](https://github.com/sunerpy/pt-tools/issues/632)) ([85102ed](https://github.com/sunerpy/pt-tools/commit/85102ed652cd1be8735c699416a6f916de3b9020))
+
+## [1.0.0-rc.9](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.8...v1.0.0-rc.9) (2026-10-07)
+
+
+### Features
+
+* **notify:** 新增 Bark、Server 酱、ntfy、钉钉、飞书通知通道 ([#630](https://github.com/sunerpy/pt-tools/issues/630)) ([730ee31](https://github.com/sunerpy/pt-tools/commit/730ee31a7721377b1bcbdd63bacd8bef5c25c480))
+
+## [1.0.0-rc.8](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.7...v1.0.0-rc.8) (2026-10-07)
+
+
+### Features
+
+* **cookiecloud:** CookieCloud 导入 ([#628](https://github.com/sunerpy/pt-tools/issues/628)) ([34ea75a](https://github.com/sunerpy/pt-tools/commit/34ea75ac3f1efdf99ebdb56d292258572494d27e))
+
+## [1.0.0-rc.7](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.6...v1.0.0-rc.7) (2026-10-07)
+
+
+### Features
+
+* **reseed:** IYUU 辅种 ([#626](https://github.com/sunerpy/pt-tools/issues/626)) ([37ab2b2](https://github.com/sunerpy/pt-tools/commit/37ab2b292f804341c430ce42b3215be096ead47d))
+
+## [1.0.0-rc.6](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.5...v1.0.0-rc.6) (2026-10-07)
+
+
+### Features
+
+* **transfer:** 转移做种（M5） ([#624](https://github.com/sunerpy/pt-tools/issues/624)) ([459d19f](https://github.com/sunerpy/pt-tools/commit/459d19fc33063ac03d4923e46094b6787e6d98dd))
+
+## [1.0.0-rc.5](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.4...v1.0.0-rc.5) (2026-10-07)
+
+
+### Features
+
+* **downloader:** 下载器能力扩展与下载器助手（M4） ([#622](https://github.com/sunerpy/pt-tools/issues/622)) ([6289db4](https://github.com/sunerpy/pt-tools/commit/6289db4d27a04b1b192bab9ece89ace8dc9e8550))
+
+## [1.0.0-rc.4](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.3...v1.0.0-rc.4) (2026-10-06)
+
+
+### Features
+
+* **deploy:** NAS 应用定义、国内镜像与入口脚本修复 ([#618](https://github.com/sunerpy/pt-tools/issues/618)) ([2ff3604](https://github.com/sunerpy/pt-tools/commit/2ff36048eb7c47299aa5202fac656a838bf8ffc5))
+
+## [1.0.0-rc.3](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.2...v1.0.0-rc.3) (2026-10-06)
+
+
+### Features
+
+* **brush:** 刷流任务：按条件选种、按规则删种、收益统计 ([#605](https://github.com/sunerpy/pt-tools/issues/605)) ([d30ace9](https://github.com/sunerpy/pt-tools/commit/d30ace94359d5a964f1d11c6c5203657b9b0bc50))
+* **userinfo:** 站点数据每日快照、周期增量与每日战报 ([#602](https://github.com/sunerpy/pt-tools/issues/602)) ([4b8c86b](https://github.com/sunerpy/pt-tools/commit/4b8c86bfd4070e02417f66bf1d900395c579494c))
+
+
+### Bug Fixes
+
+* **site:** 走过代理的请求之后，没配代理的请求不再被带进那个代理 ([#604](https://github.com/sunerpy/pt-tools/issues/604)) ([e7ecce2](https://github.com/sunerpy/pt-tools/commit/e7ecce23b1d4946f931eaac9dbe327a6b4cb0dda))
+
+## [1.0.0-rc.2](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.1...v1.0.0-rc.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **cmd:** 关闭流程按顺序停后台任务、调度器与下载器，Telegram 健康跟随长轮询 ([#599](https://github.com/sunerpy/pt-tools/issues/599)) ([da78bac](https://github.com/sunerpy/pt-tools/commit/da78bacf70d7329b78901105f6d91b28692a57f3))
+* **extension:** 采集脱敏、多域 Cookie、Pending Action 与存储并发的问题 ([#601](https://github.com/sunerpy/pt-tools/issues/601)) ([00646b6](https://github.com/sunerpy/pt-tools/commit/00646b6d3bccbb53d696290658b5afefef44a696))
+* **frontend:** 详情页切换参数时重新加载，RSS 链接不进控制台，保存与轮询的错误处理 ([#598](https://github.com/sunerpy/pt-tools/issues/598)) ([415cad4](https://github.com/sunerpy/pt-tools/commit/415cad477ae486aba98439bb55e64b8177b81074))
+* **internal:** 推送闸门补齐 RSS 站点容量与待占用空间 fail-closed ([#594](https://github.com/sunerpy/pt-tools/issues/594)) ([06b00ff](https://github.com/sunerpy/pt-tools/commit/06b00ff0c8fdef3b6856f2eb69e36baea475cf3f))
+* **notify:** 通知投递去重、outbox 经运行中通道重试、企业微信识别业务错误 ([#596](https://github.com/sunerpy/pt-tools/issues/596)) ([e41bd35](https://github.com/sunerpy/pt-tools/commit/e41bd35611fb4ef508578ebd92f0be6618daaa99))
+* **scheduler:** 停止任务只停 RSS，修复重载、任务计数与监控停止的竞态 ([#591](https://github.com/sunerpy/pt-tools/issues/591)) ([5d005f8](https://github.com/sunerpy/pt-tools/commit/5d005f8f9ab8ce5dc9d4616f6555e2316a92a68e))
+* **scheduler:** 免费到期监控不关共享下载器、防重复处理、批次轮转 ([#592](https://github.com/sunerpy/pt-tools/issues/592)) ([4f59eb8](https://github.com/sunerpy/pt-tools/commit/4f59eb895568ab236ad808389fdd2ee9ca824184))
+* **scheduler:** 紧急清理计入已选中种子，保留数据时不再额外删种 ([#595](https://github.com/sunerpy/pt-tools/issues/595)) ([03c4181](https://github.com/sunerpy/pt-tools/commit/03c41814594a1d821c842a2b6f379ef26cdb682a))
+* **sitelogin:** 登录探测按哨兵错误归类失败原因，出错的搜索结果不进缓存 ([#597](https://github.com/sunerpy/pt-tools/issues/597)) ([6233a03](https://github.com/sunerpy/pt-tools/commit/6233a03c9f0d92241512a85a0376b57a72010f3d))
+* 迁移原子化、批量下载限额、验证接口与审计如实报告结果 ([#600](https://github.com/sunerpy/pt-tools/issues/600)) ([aad1a6e](https://github.com/sunerpy/pt-tools/commit/aad1a6e950b080fa9d3aa337c057e756af20f86d))
+
+## [1.0.0-rc.1](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.6...v1.0.0-rc.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **chatops:** 绑定按通道隔离，QQ 通道鉴权与连接管理加固 ([#588](https://github.com/sunerpy/pt-tools/issues/588)) ([789434a](https://github.com/sunerpy/pt-tools/commit/789434a4412ad29f1e022ba022fd82a58a9a7872))
+* **core:** 密钥文件损坏时不再被覆盖，密钥与库里密文对不上时拒绝启动 ([#590](https://github.com/sunerpy/pt-tools/issues/590)) ([b927ea2](https://github.com/sunerpy/pt-tools/commit/b927ea231d29d030692d9a63d5d468d3cc597767))
+* **site:** 修复站点驱动的凭证外泄与种子下载失败 ([#585](https://github.com/sunerpy/pt-tools/issues/585)) ([7783387](https://github.com/sunerpy/pt-tools/commit/77833871155286cb83558ddbf9e94d5567d63c37))
+* **version:** 自升级核对 checksums.txt，Web 发起的升级不再被取消 ([#589](https://github.com/sunerpy/pt-tools/issues/589)) ([6e8c599](https://github.com/sunerpy/pt-tools/commit/6e8c59931548c2abaa66529ca95c7638c22b2de8))
+* **web:** 会话与登录加固，日志里的订阅地址脱敏 ([#587](https://github.com/sunerpy/pt-tools/issues/587)) ([380a25d](https://github.com/sunerpy/pt-tools/commit/380a25d0042736ad9644bb88fefa1dbfa37e0d26))
+
+## [0.49.0-rc.6](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.5...v0.49.0-rc.6) (2026-10-05)
+
+
+### Bug Fixes
+
+* **web:** 自动停用不可用站点时保留凭证 ([#583](https://github.com/sunerpy/pt-tools/issues/583)) ([c92f2cb](https://github.com/sunerpy/pt-tools/commit/c92f2cbf6cc148b85a5ecc43ab34c97b2bc26729))
+
+## [0.49.0-rc.5](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.4...v0.49.0-rc.5) (2026-10-05)
+
+
+### Bug Fixes
+
+* **config:** 拒绝修改内置站点的地址 ([#579](https://github.com/sunerpy/pt-tools/issues/579)) ([a4479c6](https://github.com/sunerpy/pt-tools/commit/a4479c64e634218d315d8eb01c293ff6b193e525))
+* **config:** 站点 Cookie 只以密文落库，并迁移清除存量明文 ([#578](https://github.com/sunerpy/pt-tools/issues/578)) ([c625d87](https://github.com/sunerpy/pt-tools/commit/c625d87a8332328a7281c8cb7a26c4d0cd49ef6d))
+
+## [0.49.0-rc.4](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.3...v0.49.0-rc.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **site-login:** 探测认证方式说明补上 Passkey ([#575](https://github.com/sunerpy/pt-tools/issues/575)) ([91dfd8d](https://github.com/sunerpy/pt-tools/commit/91dfd8dc2e0c5f40ae6903ed138698110047ce31))
+
+## [0.49.0-rc.3](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.2...v0.49.0-rc.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **site-login:** 修正投递静默判断、访问未生效清除与签到请求方法 ([#573](https://github.com/sunerpy/pt-tools/issues/573)) ([64f04db](https://github.com/sunerpy/pt-tools/commit/64f04db6a12d304c728f15b11c8fa9ceeea7a5ba))
+
+## [0.49.0-rc.2](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.1...v0.49.0-rc.2) (2026-10-05)
+
+
+### Features
+
+* **site-login:** 登录探测接通 CloakBrowser 后备 ([#571](https://github.com/sunerpy/pt-tools/issues/571)) ([74d2e9f](https://github.com/sunerpy/pt-tools/commit/74d2e9f4e3ea05cc865685607a8228edee22bf78))
+
+## [0.49.0-rc.1](https://github.com/sunerpy/pt-tools/compare/v0.48.0...v0.49.0-rc.1) (2026-10-05)
+
+
+### Features
+
+* **site-login:** 新增每日签到与 /signin 命令 ([#569](https://github.com/sunerpy/pt-tools/issues/569)) ([ad17f58](https://github.com/sunerpy/pt-tools/commit/ad17f582cebe0a90fb53a114f6246e3df948d07c))
+
+
+### Bug Fixes
+
+* **site-login:** 登录探测复用用户信息服务并在凭证更新后即时探测 ([#568](https://github.com/sunerpy/pt-tools/issues/568)) ([bc86dd7](https://github.com/sunerpy/pt-tools/commit/bc86dd7039a54cd2b1259d249d1b9c2a2dea97ab))
+* **site-login:** 登录探测改为到期调度并修复提醒投递与判定活跃 ([#566](https://github.com/sunerpy/pt-tools/issues/566)) ([b2a6f8d](https://github.com/sunerpy/pt-tools/commit/b2a6f8da2d36389f901dd3e9f7aec100af4b07f4))
+
 ## [0.48.0](https://github.com/sunerpy/pt-tools/compare/v0.47.3...v0.48.0) (2026-10-01)
 
 

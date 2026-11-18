@@ -1,0 +1,28 @@
+services:
+  pt-tools:
+    image: sunerpy/pt-tools:latest
+    container_name: ${CONTAINER_NAME}
+    restart: always
+    networks:
+      - 1panel-network
+    environment:
+      - PT_HOST=0.0.0.0
+      - PT_PORT=8080
+      - TZ=${TIME_ZONE}
+      - PUID=1000
+      - PGID=1000
+    ports:
+      - ${PANEL_APP_PORT_HTTP}:8080
+    volumes:
+      # 数据库、加密密钥 secret.key、日志与暂存种子都在这里，必须持久化并备份
+      - ./data:/app/.pt-tools
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      createdBy: "Apps"
+networks:
+  1panel-network:
+    external: true

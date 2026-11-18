@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
@@ -509,9 +511,12 @@ func TestParseRatio(t *testing.T) {
 	}{
 		{"1.5", 1.5},
 		{"0.5", 0.5},
-		{"inf", -1},
-		{"Inf", -1},
-		{"∞", -1},
+		{"inf", InfiniteRatio},
+		{"Inf.", InfiniteRatio},
+		{"∞", InfiniteRatio},
+		{"无限", InfiniteRatio},
+		{"無限", InfiniteRatio},
+		{"---", 0},
 		{"invalid", 0},
 		{"", 0},
 	}
@@ -925,6 +930,7 @@ func TestParseDiscountEndTimeFromOnmouseover(t *testing.T) {
 		wantMinute  int
 		wantSecond  int
 		wantZero    bool
+		wantErr     bool
 	}{
 		{
 			name:        "HDSky format with HTML entities",
@@ -971,11 +977,23 @@ func TestParseDiscountEndTimeFromOnmouseover(t *testing.T) {
 			onmouseover: `domTT_activate(this, event, 'content', '&lt;span title=&quot;invalid-date&quot;&gt;')`,
 			wantZero:    true,
 		},
+		{
+			// 提示里有时间却解析不了：报告出来，不能悄悄当成没有结束时间
+			name:        "out-of-range date",
+			onmouseover: `domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-13-40 25:61:00&quot;&gt;')`,
+			wantZero:    true,
+			wantErr:     true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseDiscountEndTimeFromOnmouseover(tt.onmouseover)
+			result, err := parseDiscountEndTimeFromOnmouseover(tt.onmouseover)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 			if tt.wantZero {
 				assert.True(t, result.IsZero(), "expected zero time")
 			} else {
@@ -1085,10 +1103,13 @@ func TestNexusPHPDriver_ParseDownload_NoURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "no download URL")
 }
 
+// 详情页里指向外域的绝对链接照常下载，但不能把站点 Cookie 发给外域。
 func TestNexusPHPDriver_ParseDownload_AbsoluteURL(t *testing.T) {
 	var hits int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var gotCookie string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
+		gotCookie = r.Header.Get("Cookie")
 		_, _ = w.Write([]byte("d4:info"))
 	}))
 	defer server.Close()
@@ -1100,6 +1121,49 @@ func TestNexusPHPDriver_ParseDownload_AbsoluteURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("d4:info"), data)
 	assert.Equal(t, 1, hits)
+	assert.Empty(t, gotCookie, "外域下载链接不能带站点 Cookie")
+}
+
+// 指向站点自己域名的绝对链接照旧附带 Cookie。
+func TestNexusPHPDriver_ParseDownload_SameSiteAbsoluteURLKeepsCookie(t *testing.T) {
+	var gotCookie string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCookie = r.Header.Get("Cookie")
+		_, _ = w.Write([]byte("d4:info"))
+	}))
+	defer server.Close()
+
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+	html := `<html><body><a href="` + server.URL + `/download.php?id=1">dl</a></body></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	_, err := d.ParseDownload(NexusPHPResponse{Document: doc})
+	require.NoError(t, err)
+	assert.Equal(t, "c=1", gotCookie)
+}
+
+func TestNexusPHPDriver_ParseDownload_RejectsNonHTTPScheme(t *testing.T) {
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com", Cookie: "c=1"})
+	html := `<html><body><a href="file:///etc/download.php?id=1">dl</a></body></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	_, err := d.ParseDownload(NexusPHPResponse{Document: doc})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported download URL scheme")
+}
+
+func TestNexusPHPDriver_IsSiteHost(t *testing.T) {
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://pt.example.com", Cookie: "c=1"})
+	assert.True(t, d.isSiteHost("pt.example.com"))
+	assert.True(t, d.isSiteHost("dl.example.com"), "同一可注册域名下的子域属于本站")
+	assert.False(t, d.isSiteHost("example.com.evil.net"))
+	assert.False(t, d.isSiteHost("evil.com"))
+	assert.False(t, d.isSiteHost("mirror.example.net"))
+
+	d.siteDefinition = &SiteDefinition{URLs: []string{"https://mirror.example.net/"}}
+	assert.True(t, d.isSiteHost("mirror.example.net"), "站点定义里的备用域名也算本站")
+
+	ip := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "http://192.168.1.2:8080"})
+	assert.True(t, ip.isSiteHost("192.168.1.2"))
+	assert.False(t, ip.isSiteHost("192.168.1.3"))
 }
 
 func TestNexusPHPDriver_ParseDownload_HTTPError(t *testing.T) {
@@ -1131,6 +1195,7 @@ func TestNexusPHPDriver_ParseDownload_Empty(t *testing.T) {
 }
 
 func TestNexusPHPDriver_FetchSeedingStatus_ExecuteError(t *testing.T) {
+	fastUserInfoRetries(t)
 	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "http://127.0.0.1:1", Cookie: "c=1"})
 	_, _, err := d.FetchSeedingStatus(context.Background(), "42")
 	require.Error(t, err)
@@ -1283,6 +1348,14 @@ func TestParseDiscountFromElement_Branches(t *testing.T) {
 	assert.Equal(t, DiscountPercent70, parseDiscountFromElement(discountElem(t, "pro_70pctdown", "", ""), nil))
 	assert.Equal(t, Discount2xUp, parseDiscountFromElement(discountElem(t, "pro_2up", "", ""), nil))
 	assert.Equal(t, DiscountNone, parseDiscountFromElement(discountElem(t, "normal", "", ""), nil))
+	// 2X 50%：类名同时含「50pct」与「2up」，要先认成 2X 50%，不能当成 50%
+	assert.Equal(t, Discount2x50, parseDiscountFromElement(discountElem(t, "pro_50pctdown2up", "", ""), nil))
+	assert.Equal(t, Discount2x50, parseDiscountFromElement(discountElem(t, "", "", "2X 50%"), nil))
+	assert.Equal(t, Discount2x50, parseDiscountFromElement(discountElem(t, "twouphalfdown", "", ""), nil))
+	assert.Equal(t, DiscountPercent50, parseDiscountFromElement(discountElem(t, "", "", "50%"), nil))
+	assert.Equal(t, DiscountPercent50, parseDiscountFromElement(discountElem(t, "halfdown", "", ""), nil))
+	assert.Equal(t, Discount2xFree, parseDiscountFromElement(discountElem(t, "twoupfree", "", ""), nil))
+	assert.Equal(t, Discount2xUp, parseDiscountFromElement(discountElem(t, "twoup", "", ""), nil))
 
 	// custom mapping wins
 	custom := map[string]DiscountLevel{"specialtag": Discount2x50}
@@ -1434,6 +1507,159 @@ func TestNexusPHPDriver_ParseSeedingStatus_PipeFormat(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 10, seeding)
 	assert.Greater(t, size, int64(0))
+}
+
+// upstreamSeedingPage 按上游 NexusPHP（xiaomlove/nexusphp）public/getusertorrentlistajax.php 的输出拼出
+// type=seeding 那一页：先是「<b>条数</b>条记录 | 总大小：体积」的汇总，再是分页条和当前页（每页 100 条）的表格。
+// 汇总里的条数和体积是全部做种的合计，表格只有当前页。
+func upstreamSeedingPage(summary string) string {
+	row := `<tr><td class="rowfollow nowrap" valign="middle" style='padding: 0px'><a href="torrents.php?allsec=1&amp;cat=401"><img src="pic/cattrans.gif" alt="Movies" /></a></td>
+<td class="rowfollow" width="100%" align="left"><a href="details.php?id=101&amp;hit=1" title="Demo.2025.1080p"><b>Demo.2025.1080p</b></a><br />演示</td>
+<td class="rowfollow nowrap" align="center">2025-01-01<br/>12:00:00</td><td class="rowfollow" align="center">1.23<br />GB</td>
+<td class="rowfollow" align="center">10</td><td class="rowfollow" align="center">0</td><td class="rowfollow" align="center">2.00<br />GB</td>
+<td class="rowfollow" align="center">1.23<br />GB</td><td class="rowfollow" align="center">1.626</td><td class="rowfollow" align="center">3天</td>
+<td class="rowfollow" align="center">qBittorrent 5.0<br/>51413</td><td class="rowfollow" align="center"><span class="nowrap">192.0.2.1</span></td><td class="rowfollow" align="center"></td></tr>
+`
+	return `<br/><div style="display: flex;justify-content: space-between"><div>` + summary + `</div><div></div></div>` +
+		`<p align="center" class='nexus-pagination'><b>1</b> <a href="getusertorrentlistajax.php?page=1">2</a></p>` +
+		`<table border="1" cellspacing="0" cellpadding="5" width="100%"><tr><td class="colhead" style="padding: 0px">类型</td><td class="colhead" align="center">标题</td>` +
+		`<td class="colhead" align="center">发布时间</td><td class="colhead" align="center"><img class="size" src="pic/trans.gif" alt="size" title="大小" /></td></tr>` +
+		row + row + "</table>\n"
+}
+
+func TestNexusPHPDriver_ParseSeedingStatus_UpstreamSummary(t *testing.T) {
+	// 上游三种语言包的 text_record / text_total_size（lang/{chs,cht,en}/lang_getusertorrentlistajax.php）。
+	tb := 2.756
+	want := int64(tb * 1024 * 1024 * 1024 * 1024)
+	cases := map[string]string{
+		"chs": `<b>101</b> 条记录 | 总大小：2.756 TB`,
+		"cht": `<b>101</b>條記錄 | 總大小：2.756 TB`,
+		"en":  `<b>101</b> records | Total size: 2.756 TB`,
+	}
+	for name, summary := range cases {
+		t.Run(name, func(t *testing.T) {
+			html := upstreamSeedingPage(summary)
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			require.NoError(t, err)
+			d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+			seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+			require.NoError(t, err)
+			// 用汇总的合计，不是当前页两行的累加
+			assert.Equal(t, 101, seeding)
+			assert.Equal(t, want, size)
+		})
+	}
+}
+
+// TJUPT 的做种列表开头是「<b>58</b>条记录 - 总大小3.127 TiB<br />」（2026-11-01 在站点上看的格式，数字是示例），后面是全部做种的表格。
+// 第一行标题里的「[2.21GiB]」会让表格累加把标题列当成体积列，所以要用汇总。
+func TestNexusPHPDriver_ParseSeedingStatus_TotalSizeSummary(t *testing.T) {
+	html := `<b>58</b>条记录 - 总大小3.127 TiB<br /><table class='coltable table-left torrentlist'><tr>` +
+		`<td class="colhead">类型</td><td class="colhead">标题</td><td class="colhead"><img class="size" src="pic/trans.gif" alt="size" title="大小" /></td></tr>` +
+		`<tr><td class="rowfollow">软件</td><td class="rowfollow"><a href="details.php?id=1&amp;hit=1"><b>[Windows][Demo][2.21GiB][安装包]</b></a></td><td class="rowfollow">3.00<br />GiB</td></tr>` +
+		`</table>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 58, seeding)
+	tib := 3.127
+	assert.Equal(t, int64(tib*1024*1024*1024*1024), size)
+}
+
+// hdskySeedingPage 按 HDSky 的做种列表拼（2026-11-02 在站点上看的结构，标题是示例）：开头只有「<b>N</b>条记录」、没有总体积，
+// 表头 类型|标题|大小|种子数|下载数|上传|下载|分享率，体积格是「90.55<br />GB」。
+func hdskySeedingPage(titles, sizes []string) string {
+	var b strings.Builder
+	b.WriteString(`<b>` + strconv.Itoa(len(titles)) + `</b>条记录<br /><table border="1" cellspacing="0" cellpadding="5"><tr>` +
+		`<td class="colhead">类型</td><td class="colhead">标题</td><td class="colhead">大小</td><td class="colhead">种子数</td>` +
+		`<td class="colhead">下载数</td><td class="colhead">上传</td><td class="colhead">下载</td><td class="colhead">分享率</td></tr>`)
+	for i, title := range titles {
+		num, unit, _ := strings.Cut(sizes[i], " ")
+		b.WriteString(`<tr><td class="rowfollow"><img src="pic/cattrans.gif" alt="Movies" /></td>` +
+			`<td class="rowfollow"><a href="details.php?id=` + strconv.Itoa(100+i) + `&amp;hit=1" title="` + title + `"><b>` + title + `</b></a><br />副标题</td>` +
+			`<td class="rowfollow">` + num + `<br />` + unit + `</td><td class="rowfollow">91</td><td class="rowfollow">5</td>` +
+			`<td class="rowfollow">15.32<br />GB</td><td class="rowfollow">0.00<br />KB</td><td class="rowfollow">Inf.</td></tr>`)
+	}
+	b.WriteString(`</table>`)
+	return b.String()
+}
+
+// 第一行标题里有「1940 Blu-ray」「10bit」这类字样时，按第一行猜体积列会猜成标题列；标题「The Movie 2160p UHD」又会被当成 2160 PiB，
+// 合计出几千 PB。体积列要按表头「大小」找，只加真是体积的格子。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnFromHeader(t *testing.T) {
+	titles := []string{
+		"Casablanca 1940 Blu-ray 1080p AVC REMUX",
+		"Some.Show.2023.2160p.WEB-DL.H265.10bit.DDP5.1-HDSWEB",
+		"Another.Movie.2024.2160p.UHD.BluRay.x265-HDS",
+		"The Movie 2160p UHD Blu-ray HEVC DTS-HD MA 5.1-HDSky",
+	}
+	sizes := []string{"90.55 GB", "12.50 GB", "1.25 TB", "60.00 GB"}
+	html := hdskySeedingPage(titles, sizes)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 4, seeding)
+	gib := float64(1 << 30)
+	want := int64(90.55*gib) + int64(12.50*gib) + int64(1.25*1024*gib) + int64(60*gib)
+	assert.Equal(t, want, size, "体积列是表头写着「大小」的第 3 列，不是标题列")
+}
+
+// 表头认不出时，按第一行里整格就是一个体积（数字加单位）的格子定列；标题里夹着的「10bit」「2160p」不算。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnWholeCellFallback(t *testing.T) {
+	html := `<table><tr><td>a</td><td>b</td><td>c</td></tr>` +
+		`<tr><td>Movie</td><td>Show.S01.2160p.WEB-DL.H265.10bit-XX</td><td>2.00<br />GiB</td></tr>` +
+		`<tr><td>Movie</td><td>Film.2020.2160p.UHD.BluRay-XX</td><td>3.00<br />GiB</td></tr></table>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 2, seeding)
+	assert.Equal(t, int64(5)<<30, size)
+}
+
+// 找不到体积列（表头没有、第一行也没有整格的体积），或者体积列一格也读不出来时不猜：做种数照样报，
+// 体积报 ErrSeedingSizeUnknown（按没取到算，保存时沿用上一次的），不当成 0。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeUnknown(t *testing.T) {
+	cases := map[string]string{
+		"no size column": `<table><tr><td>a</td><td>b</td><td>c</td></tr>` +
+			`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>-</td></tr></table>`,
+		"size column without a size": `<table><tr><td>类型</td><td>标题</td><td>大小</td></tr>` +
+			`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>-</td></tr></table>`,
+		"malformed size": `<table><tr><td>类型</td><td>标题</td><td>大小</td></tr>` +
+			`<tr><td>Movie</td><td>Show.S01.2160p.10bit-XX</td><td>1.2.3<br />GB</td></tr></table>`,
+	}
+	for name, html := range cases {
+		t.Run(name, func(t *testing.T) {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			require.NoError(t, err)
+			d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+			seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+			require.ErrorIs(t, err, ErrSeedingSizeUnknown)
+			assert.Equal(t, 1, seeding)
+			assert.Zero(t, size)
+		})
+	}
+}
+
+// 上游 NexusPHP 的表头是图标（<img class="size" alt="size" title="大小" />），没有文字：按图标的 title、alt、class 认。
+func TestNexusPHPDriver_ParseSeedingStatus_SizeColumnFromHeaderImage(t *testing.T) {
+	html := `<table border="1" cellspacing="0" cellpadding="5"><tr><td class="colhead">类型</td>` +
+		`<td class="colhead" align="center">标题</td><td class="colhead" align="center"><img class="size" src="pic/trans.gif" alt="size" title="大小" /></td>` +
+		`<td class="colhead" align="center"><img class="seeders" src="pic/trans.gif" alt="seeders" title="种子数" /></td></tr>` +
+		`<tr><td class="rowfollow">Movie</td><td class="rowfollow">Casablanca 1940 Blu-ray 1080p</td><td class="rowfollow">1.50<br />GB</td><td class="rowfollow">12</td></tr>` +
+		`<tr><td class="rowfollow">TV</td><td class="rowfollow">The Show 2160p UHD</td><td class="rowfollow">512.00<br />MB</td><td class="rowfollow">3</td></tr></table>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+	seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+	require.NoError(t, err)
+	assert.Equal(t, 2, seeding)
+	assert.Equal(t, int64(1.5*float64(1<<30))+int64(512)<<20, size)
 }
 
 func TestNexusPHPDriver_ParseSeedingStatus_NilDoc(t *testing.T) {
@@ -1895,4 +2121,328 @@ func TestNexusPHPDriver_ParseDownload(t *testing.T) {
 	// nil doc + empty body -> error
 	_, err = d.ParseDownload(NexusPHPResponse{})
 	assert.ErrorIs(t, err, ErrParseError)
+}
+
+// 定义里没写 lastAccessAt 的站点：在用户详情页上按通用写法找「最近动向」（保号探测靠它，取不到就报解析失败）。
+// 定义自己写了就用它的，不叠加通用写法。
+func TestNexusPHPDriver_DefaultLastAccess(t *testing.T) {
+	page := func(label string) string {
+		return `<html><body><table>
+			<tr><td class="rowhead">上传量</td><td>1.50 TB</td></tr>
+			<tr><td class="rowhead">` + label + `</td><td class="rowfollow">2026-10-12 08:30:00 (1分钟前)</td></tr>
+		</table></body></html>`
+	}
+	label := "最近动向"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(page(label)))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	newDef := func(selectors map[string]FieldSelector, fields []string) *SiteDefinition {
+		base := map[string]FieldSelector{
+			"id":   {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+			"name": {Selector: []string{"a[href*='userdetails.php']"}},
+		}
+		for k, v := range selectors {
+			base[k] = v
+		}
+		return &SiteDefinition{
+			ID: "npdef", Name: "NPDef", Schema: SchemaNexusPHP, TimezoneOffset: "+0800",
+			UserInfo: &UserInfoConfig{
+				Process: []UserInfoProcess{
+					{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+					{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: fields},
+				},
+				Selectors: base,
+			},
+		}
+	}
+	get := func(def *SiteDefinition) UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+	want := time.Date(2026, 10, 12, 8, 30, 0, 0, time.FixedZone("CST", 8*3600)).Unix()
+
+	for _, l := range []string{"最近动向", "上次访问", "最後活動", "Last access"} {
+		label = l
+		info := get(newDef(nil, []string{"uploaded"}))
+		assert.Equal(t, want, info.LastAccess, l)
+	}
+
+	// 定义自己写了 lastAccessAt：只按它取（这里故意写一个取不到的选择器）
+	label = "最近动向"
+	own := newDef(map[string]FieldSelector{"lastAccessAt": {Selector: []string{"#nope"}, Filters: []Filter{{Name: "parseTime"}}}}, []string{"lastAccessAt"})
+	assert.Zero(t, get(own).LastAccess)
+
+	// 页面上没有这一行：还是 0
+	label = "加入日期"
+	assert.Zero(t, get(newDef(nil, []string{"uploaded"})).LastAccess)
+}
+
+// #332：定义里没写实际上传 / 下载的站点，在用户详情页「传输」一行按通用写法取；写了的照旧只按自己的。
+func TestNexusPHPDriver_DefaultTrueTransfer(t *testing.T) {
+	transfer := `<strong>上传量</strong>: 1.50 TB <strong>下载量</strong>: 500.00 GB <strong>实际上传量</strong>: 1.20 TB <strong>实际下载量</strong>: 300.00 GB`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(`<html><body><table>
+				<tr><td class="rowhead">传输</td><td class="rowfollow">` + transfer + `</td></tr>
+			</table></body></html>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	newDef := func(selectors map[string]FieldSelector) *SiteDefinition {
+		base := map[string]FieldSelector{
+			"id":   {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+			"name": {Selector: []string{"a[href*='userdetails.php']"}},
+		}
+		fields := []string{}
+		for k, v := range selectors {
+			base[k] = v
+			fields = append(fields, k)
+		}
+		return &SiteDefinition{
+			ID: "npdef", Name: "NPDef", Schema: SchemaNexusPHP,
+			UserInfo: &UserInfoConfig{
+				Process: []UserInfoProcess{
+					{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+					{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: fields},
+				},
+				Selectors: base,
+			},
+		}
+	}
+	get := func(def *SiteDefinition) UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+
+	info := get(newDef(nil))
+	assert.Equal(t, parseSize("1.20 TB"), info.TrueUploaded)
+	assert.Equal(t, parseSize("300.00 GB"), info.TrueDownloaded)
+
+	// 繁体、「真实」的写法也认
+	transfer = `<b>真實上傳量</b>：900.00 GB <b>真實下載量</b>：&nbsp;100.00 GB`
+	info = get(newDef(nil))
+	assert.Equal(t, parseSize("900.00 GB"), info.TrueUploaded)
+	assert.Equal(t, parseSize("100.00 GB"), info.TrueDownloaded)
+
+	// 定义自己写了 trueUploaded（这里故意写取不到的）：不用通用写法；trueDownloaded 没写的照样取
+	own := newDef(map[string]FieldSelector{"trueUploaded": {Selector: []string{"#nope"}, Filters: []Filter{{Name: "parseSize"}}}})
+	info = get(own)
+	assert.Zero(t, info.TrueUploaded)
+	assert.Equal(t, parseSize("100.00 GB"), info.TrueDownloaded)
+
+	// 没有这两项的页面：都是 0
+	transfer = `<strong>上传量</strong>: 1.50 TB <strong>下载量</strong>: 500.00 GB`
+	info = get(newDef(nil))
+	assert.Zero(t, info.TrueUploaded)
+	assert.Zero(t, info.TrueDownloaded)
+}
+
+// 定义按分开的「上传量」「下载量」「分享率」几行写、站点用的是标准的「传输」一行时（#752 NovaHD：页面上都是 0 B、0.00），
+// 这一页要取的三项按「传输」一行的通用写法再找；「实际上传量」不当成「上传量」；定义取到了的不动。
+func TestNexusPHPDriver_GetUserInfo_TransferRowFallback(t *testing.T) {
+	transfer := `<table border="0" cellspacing="0" cellpadding="0"><tr><td class="embedded"><strong>分享率</strong>:  <font color="#0d6d00">10.004</font></td></tr>` +
+		`<tr><td class="embedded"><strong>实际上传量</strong>:  99.000 TB</td><td class="embedded">&nbsp;&nbsp;<strong>实际下载量</strong>:  88.000 GB</td></tr>` +
+		`<tr><td class="embedded"><strong>上传量</strong>:  12.345 TB</td><td class="embedded">&nbsp;&nbsp;<strong>下载量</strong>:  1.234 TB</td></tr></table>`
+	extra := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(`<html><body><table>
+				<tr><td class="rowhead nowrap" valign="top" align="right">传输</td><td class="rowfollow" valign="top" align="left">` + transfer + `</td></tr>` + extra + `
+			</table></body></html>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	def := &SiteDefinition{
+		ID: "npxfer", Name: "NPXfer", Schema: SchemaNexusPHP,
+		UserInfo: &UserInfoConfig{
+			Process: []UserInfoProcess{
+				{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+				{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: []string{"uploaded", "downloaded", "ratio"}},
+			},
+			Selectors: map[string]FieldSelector{
+				"id":         {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+				"name":       {Selector: []string{"a[href*='userdetails.php']"}},
+				"uploaded":   {Selector: []string{"td.rowhead:contains('上传量') + td"}, Filters: []Filter{{Name: "parseSize"}}},
+				"downloaded": {Selector: []string{"td.rowhead:contains('下载量') + td"}, Filters: []Filter{{Name: "parseSize"}}},
+				"ratio":      {Selector: []string{"td.rowhead:contains('分享率') + td font", "td.rowhead:contains('分享率') + td"}},
+			},
+		},
+	}
+	get := func() UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+
+	info := get()
+	assert.Equal(t, parseSize("12.345 TB"), info.Uploaded)
+	assert.Equal(t, parseSize("1.234 TB"), info.Downloaded)
+	assert.InDelta(t, 10.004, info.Ratio, 0.0001)
+
+	// 定义自己的写法取到了：照定义的
+	extra = `<tr><td class="rowhead">上传量</td><td>2.000 TB</td></tr><tr><td class="rowhead">下载量</td><td>1.000 TB</td></tr>` +
+		`<tr><td class="rowhead">分享率</td><td><font>2.000</font></td></tr>`
+	info = get()
+	assert.Equal(t, parseSize("2.000 TB"), info.Uploaded)
+	assert.Equal(t, parseSize("1.000 TB"), info.Downloaded)
+	assert.InDelta(t, 2.0, info.Ratio, 0.0001)
+
+	// 「传输」一行里只有实际上传 / 下载：不拿它们当上传量、下载量
+	extra = ""
+	transfer = `<strong>实际上传量</strong>:  99.000 TB <strong>实际下载量</strong>:  88.000 GB`
+	info = get()
+	assert.Zero(t, info.Uploaded)
+	assert.Zero(t, info.Downloaded)
+}
+
+// 详情页：免费且结束时间元素在、值解析不了时是 unknown 并记下原因；元素不在时有效性留空（Promotion 按零结束时间推出 unknown）
+func TestNexusPHPDriver_GetTorrentDetail_DiscountEndValidity(t *testing.T) {
+	pages := map[string]string{
+		"1": `<h1><font class="free">免费</font><span title="2099-10-20 12:00:00">3天</span></h1>`,
+		"2": `<h1><font class="free">免费</font><span title="3天2时">3天</span></h1>`,
+		"3": `<h1><font class="free">免费</font></h1>`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html><body><input name="torrent_name" value="T` + id + `">` +
+			`<input name="detail_torrent_id" value="` + id + `">` + pages[id] + `</body></html>`))
+	}))
+	defer server.Close()
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+
+	before := time.Now()
+	item, err := d.GetTorrentDetail(context.Background(), "1", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, item.DiscountValidity)
+	assert.Empty(t, item.DiscountErr)
+	assert.Equal(t, FreeUntil, item.Promotion(time.Now()).Validity)
+	assert.False(t, item.FetchedAt.Before(before), "详情是实时请求，FetchedAt 是取得的时间：%s", item.FetchedAt)
+	assert.False(t, item.FetchedAt.After(time.Now()))
+
+	item, err = d.GetTorrentDetail(context.Background(), "2", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.True(t, item.DiscountEndTime.IsZero())
+	assert.Equal(t, FreeUnknown, item.DiscountValidity)
+	assert.Equal(t, "discountEndTime: 时间格式无法解析", item.DiscountErr)
+	assert.Equal(t, FreeUnknown, item.Promotion(time.Now()).Validity)
+
+	item, err = d.GetTorrentDetail(context.Background(), "3", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, item.DiscountValidity)
+	assert.Empty(t, item.DiscountErr)
+	assert.Equal(t, FreeUnknown, item.Promotion(time.Now()).Validity, "没有结束时间不等于长期免费")
+}
+
+// 列表页：结束时间元素在、值解析不了时（且优惠图标里也取不到）是 unknown 并记下原因
+func TestNexusPHPDriver_ParseSearch_DiscountEndUnparsable(t *testing.T) {
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://example.org", Cookie: "c=1"})
+	row := func(id, cell string) string {
+		return `<tr><td><img alt="Movie" /></td><td><a href="details.php?id=` + id + `">T` + id + `</a>` + cell +
+			`</td><td></td><td><span>2024-01-01 00:00:00</span></td><td>1 GB</td><td>1</td><td>0</td><td>0</td></tr>`
+	}
+	free := `<img class="pro_free" src="pic/trans.gif" alt="Free" />`
+	html := `<html><body><table class="torrents"><tbody><tr><td>Header</td></tr>` +
+		row("1", free+`<span class="free_end_time" title="2099-10-20 12:00:00">3天</span>`) +
+		row("2", free+`<span class="free_end_time">剩余 3天2时</span>`) +
+		row("3", free) +
+		row("4", `<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2099-10-21 08:00:00&quot;&gt;1天&lt;/span&gt;', 'trail', false)" />`+
+			`<span class="free_end_time">剩余 3天2时</span>`) +
+		row("5", `<span class="free_end_time" title="不是时间">x</span>`) +
+		row("6", `<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-13-40 25:61:00&quot;&gt;1天&lt;/span&gt;', 'trail', false)" />`) +
+		`</tbody></table></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+
+	items, err := driver.ParseSearch(NexusPHPResponse{Document: doc})
+	require.NoError(t, err)
+	require.Len(t, items, 6)
+
+	// 只有优惠图标的提示里有时间、却解析不了：同样是 unknown 并记下原因
+	assert.Equal(t, DiscountFree, items[5].DiscountLevel)
+	assert.Equal(t, FreeUnknown, items[5].DiscountValidity)
+	assert.Equal(t, "discountEndTime: 时间格式无法解析", items[5].DiscountErr)
+	now := time.Now()
+
+	assert.Equal(t, DiscountFree, items[0].DiscountLevel)
+	assert.Empty(t, items[0].DiscountErr)
+	assert.Equal(t, FreeUntil, items[0].Promotion(now).Validity)
+
+	assert.Equal(t, DiscountFree, items[1].DiscountLevel)
+	assert.True(t, items[1].DiscountEndTime.IsZero())
+	assert.Equal(t, FreeUnknown, items[1].DiscountValidity)
+	assert.Equal(t, "discountEndTime: 时间格式无法解析", items[1].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[1].Promotion(now).Validity)
+
+	assert.Empty(t, items[2].DiscountValidity, "没有结束时间元素时不写有效性")
+	assert.Empty(t, items[2].DiscountErr)
+	assert.Equal(t, FreeUnknown, items[2].Promotion(now).Validity)
+
+	// 元素里的值解析不了，但优惠图标的提示里有结束时间：用它，不算问题
+	assert.False(t, items[3].DiscountEndTime.IsZero())
+	assert.Empty(t, items[3].DiscountValidity)
+	assert.Empty(t, items[3].DiscountErr)
+	assert.Equal(t, FreeUntil, items[3].Promotion(now).Validity)
+
+	// 没有优惠：结束时间无关，不记
+	assert.Equal(t, DiscountNone, items[4].DiscountLevel)
+	assert.Empty(t, items[4].DiscountErr)
+	assert.Equal(t, FreeNotFree, items[4].Promotion(now).Validity)
+
+	for _, it := range items {
+		assert.True(t, it.FetchedAt.IsZero(), "搜索结果不写 FetchedAt")
+	}
+}
+
+// 列表页的优惠结束时间不带时区，是站点显示的北京时间，和详情页一样按北京时间解析；
+// 当成 UTC 会让结束时刻晚 8 小时，已经结束的免费在列表结果里看起来还有 8 小时
+func TestNexusPHPDriver_ParseSearch_DiscountEndTimeIsCST(t *testing.T) {
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://example.org", Cookie: "c=1"})
+	row := func(id, cell string) string {
+		return `<tr><td><img alt="Movie" /></td><td><a href="details.php?id=` + id + `">T` + id + `</a>` + cell +
+			`</td><td></td><td><span>2024-01-01 00:00:00</span></td><td>1 GB</td><td>1</td><td>0</td><td>0</td></tr>`
+	}
+	html := `<html><body><table class="torrents"><tbody><tr><td>Header</td></tr>` +
+		row("1", `<img class="pro_free" src="pic/trans.gif" alt="Free" /><span class="free_end_time" title="2026-10-20 12:00:00">3天</span>`) +
+		row("2", `<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-10-21 08:30:00&quot;&gt;1天&lt;/span&gt;', 'trail', false)" />`) +
+		row("3", `<img class="pro_free" src="pic/trans.gif" alt="Free" /><span class="free_end_time" title="2026-10-20T12:00:00Z">3天</span>`) +
+		`</tbody></table></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+
+	items, err := driver.ParseSearch(NexusPHPResponse{Document: doc})
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.True(t, time.Date(2026, 10, 20, 12, 0, 0, 0, CSTLocation).Equal(items[0].DiscountEndTime), "got %s", items[0].DiscountEndTime.UTC())
+	assert.True(t, time.Date(2026, 10, 21, 8, 30, 0, 0, CSTLocation).Equal(items[1].DiscountEndTime), "got %s", items[1].DiscountEndTime.UTC())
+	// 带时区的写法照原样
+	assert.True(t, time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC).Equal(items[2].DiscountEndTime), "got %s", items[2].DiscountEndTime.UTC())
+
+	// 结束时刻是北京时间 2026-10-20 12:00：北京时间 13:00（UTC 05:00）时已经结束
+	afterEnd := time.Date(2026, 10, 20, 5, 0, 0, 0, time.UTC)
+	assert.Equal(t, FreeNotFree, items[0].Promotion(afterEnd).Validity)
 }

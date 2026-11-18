@@ -2,41 +2,71 @@ package cmd
 
 import (
 	"context"
-
-	"gorm.io/gorm"
+	"fmt"
+	"time"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
-	"github.com/sunerpy/pt-tools/internal/crypto"
-	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/cloakdriver/transport"
+	"github.com/sunerpy/pt-tools/internal/redact"
+	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
-type loginReminderConfLister struct {
-	db *gorm.DB
+// loginReminderSender 把登录监控的通知交给 ChatOps 的 live 通道同步发送（PushSync）。
+//
+// 不自建 notify.Router：Router 会按通道配置 registry.Make 出新实例，QQ 会在已被占用的
+// listen_addr 上再开反向 WS 服务（收不到 NapCat 连接），Telegram 会用同一个 bot token
+// 再起一个长轮询，与 ChatOps 争抢更新并丢掉被它取走的命令。
+// 也不用 Push：它在 live 发送失败后转写 outbox 并返回 nil，重试应由 MonitorNotificationLog 负责。
+func loginReminderSender(bs *chatopsBootstrap) scheduler.MonitorSender {
+	if bs == nil || bs.deps == nil || bs.deps.NotificationSvc == nil {
+		return nil
+	}
+	svc := bs.deps.NotificationSvc
+	return scheduler.MonitorSenderFunc(func(ctx context.Context, confID uint, msg scheduler.MonitorMessage) error {
+		return svc.PushSync(ctx, app.Notification{Event: msg.Event, Title: msg.Title, Text: msg.Text, SourceConfID: confID})
+	})
 }
 
-func (l loginReminderConfLister) ListNotificationConfs(ctx context.Context) ([]models.NotificationConf, error) {
-	var confs []models.NotificationConf
-	if err := l.db.WithContext(ctx).Where("enabled = ?", true).Find(&confs).Error; err != nil {
-		return nil, err
+// monitorDeliveryAudit 把后台通知（签到、追剧、每日战报、登录提醒…）的每一次投递写进操作审计，
+// 让用户看得到通知没收到的原因：命令是 notify:<来源>:<种类>，触发用户留空（系统发的），
+// 参数里有标题、第几次投递；失败时还有原因（遮掉凭证：telego 的错误会带出 bot token）与下一次重试的时间，放弃时 final。
+type monitorDeliveryAudit struct {
+	svc app.AuditService
+}
+
+func (a monitorDeliveryAudit) RecordDelivery(ctx context.Context, d scheduler.MonitorDelivery) {
+	args := map[string]any{"attempt": d.Attempt}
+	if d.Title != "" {
+		args["title"] = d.Title
 	}
-	out := make([]models.NotificationConf, 0, len(confs))
-	for i := range confs {
-		conf := confs[i]
-		if conf.ConfigJSON != "" {
-			plain, derr := crypto.Decrypt(conf.ConfigJSON)
-			if derr != nil {
-				global.GetSlogger().Warnf("登录提醒通道配置解密失败 conf_id=%d type=%s: %v", conf.ID, conf.ChannelType, derr)
-				continue
-			}
-			conf.ConfigJSON = string(plain)
+	if d.Subject != "" && d.Subject != "*" {
+		args["subject"] = d.Subject
+	}
+	result := "success"
+	if d.Err != nil {
+		result = "error:send_failed"
+		args["error"] = redact.Secrets(d.Err.Error())
+		if d.Final {
+			args["final"] = true
+		} else if !d.NextRetryAt.IsZero() {
+			args["next_retry_at"] = d.NextRetryAt.Local().Format(time.RFC3339)
 		}
-		out = append(out, conf)
 	}
-	return out, nil
+	if err := a.svc.Record(ctx, app.AuditEntry{
+		NotificationConfID: d.ConfID,
+		ChannelType:        d.ChannelType,
+		Command:            "notify:" + d.Source + ":" + d.Kind,
+		Args:               args,
+		Result:             result,
+		LatencyMs:          d.Latency.Milliseconds(),
+	}); err != nil {
+		global.GetSlogger().Warnf("通知投递审计写入失败 source=%s kind=%s conf_id=%d: %v", d.Source, d.Kind, d.ConfID, err)
+	}
 }
 
 type loginReminderDecryptor struct {
@@ -76,35 +106,195 @@ func (r loginReminderResolver) Resolve(setting models.SiteSetting) (*v2.SiteDefi
 	return def, site, nil
 }
 
+// loginReminderUserInfo 把可能为空的 UserInfoService 转成接口；直接赋值会把 nil 指针装进非空接口。
+func loginReminderUserInfo(svc *v2.UserInfoService) sitelogin.UserInfoFetcher {
+	if svc == nil {
+		return nil
+	}
+	return svc
+}
+
+// loginReminderFallback 构造 CloakBrowser 后备：每次探测从库里读三项配置（改配置不需要重启）；
+// Cookie 与主通道同一取法（ConfigStore.SiteCookiePlaintext）；身份信息取最近一次成功探测保存的用户信息。
+func loginReminderFallback(store *core.ConfigStore, userInfo *v2.UserInfoService) scheduler.FallbackProvider {
+	if store == nil {
+		return nil
+	}
+	return &transport.Provider{
+		Settings: func() (transport.Settings, error) {
+			snap, err := store.GetCloakConfig()
+			if err != nil || !snap.HasToken || snap.Endpoint == "" || snap.ProfileID == "" {
+				return transport.Settings{}, err
+			}
+			token, err := store.GetCloakToken()
+			if err != nil {
+				return transport.Settings{}, err
+			}
+			return transport.Settings{Endpoint: snap.Endpoint, Token: token, ProfileID: snap.ProfileID}, nil
+		},
+		Identity: func(ctx context.Context, siteName string) (transport.Identity, bool) {
+			if userInfo == nil {
+				return transport.Identity{}, false
+			}
+			info, err := userInfo.GetUserInfo(ctx, siteName)
+			if err != nil {
+				return transport.Identity{}, false
+			}
+			return transport.Identity{UserID: info.UserID, Username: info.Username}, true
+		},
+		Cookie: store.SiteCookiePlaintext,
+	}
+}
+
+// wireLoginReminderMonitor 构造并启动登录提醒监控。userInfo 非空时探测经它进行（共用站点实例与限速器，
+// 顺带刷新用户统计）；为空（仓库初始化失败）时退回 resolver 每次新建站点实例。
+// 返回各监控共用的通知投递器（整理入库的入库通知也经它发）；数据库没就绪时返回 nil。
 func wireLoginReminderMonitor(
 	mgr *scheduler.Manager,
 	store *core.ConfigStore,
 	siteRegistry *v2.SiteRegistry,
 	bs *chatopsBootstrap,
-) {
+	userInfo *v2.UserInfoService,
+) *scheduler.MonitorNotifier {
 	if global.GlobalDB == nil || global.GlobalDB.DB == nil {
 		global.GetSlogger().Warn("登录提醒监控器跳过初始化：数据库未就绪")
-		return
+		return nil
 	}
 	db := global.GlobalDB.DB
 
-	registry := notify.DefaultRegistry()
-	if bs != nil && bs.registry != nil {
-		registry = bs.registry
+	notifier := scheduler.NewMonitorNotifier(db, loginReminderSender(bs), nil, global.GetSlogger())
+	if !notifier.Enabled() {
+		global.GetSlogger().Warn("登录提醒监控器：ChatOps 通知服务不可用，提醒只记录决策、不发送")
 	}
-	router := notify.NewRouter(registry, nil, loginReminderConfLister{db: db})
+	if bs != nil && bs.deps != nil && bs.deps.AuditSvc != nil {
+		notifier.SetAuditor(monitorDeliveryAudit{svc: bs.deps.AuditSvc})
+	}
 
 	decryptor := loginReminderDecryptor{store: store}
 	resolver := loginReminderResolver{registry: siteRegistry, decryptor: decryptor}
 
 	mon := scheduler.NewLoginReminderMonitor(scheduler.LoginReminderConfig{
 		DB:        db,
-		Router:    router,
+		Notifier:  notifier,
+		UserInfo:  loginReminderUserInfo(userInfo),
 		Resolver:  resolver,
 		Decryptor: decryptor,
+		Fallback:  loginReminderFallback(store, userInfo),
 		Logger:    global.GetSlogger(),
 	})
 	mgr.SetLoginReminderMonitor(mon)
 	mon.Start()
 	global.GetSlogger().Info("登录提醒监控器已初始化并启动")
+
+	// 每日签到与登录探测共用单站锁和通知投递器。
+	var window scheduler.AttendanceWindowSource
+	var notifySettings scheduler.AttendanceNotifySource
+	if store != nil {
+		window = store
+		notifySettings = store
+	}
+	att := scheduler.NewAttendanceMonitor(scheduler.AttendanceMonitorConfig{
+		DB:             db,
+		Sites:          attendanceSites(userInfo),
+		Window:         window,
+		Locker:         mon,
+		Notifier:       notifier,
+		NotifySettings: notifySettings,
+		Logger:         global.GetSlogger(),
+	})
+	mgr.SetAttendanceMonitor(att)
+	att.Start()
+	global.GetSlogger().Info("每日签到监控器已初始化并启动")
+
+	wireDailyReportJob(mgr, store, userInfo, notifier)
+	wireDeadTorrentMonitor(mgr, store, notifier)
+	// 免费结束暂停连续失败时的告警也走这个投递器（发给所有启用的通道）
+	mgr.SetFreeEndNotifier(notifier)
+	return notifier
+}
+
+// wireDeadTorrentMonitor 构造并启动失效种子定时扫描（只通知、默认关闭）：与登录提醒共用通知投递器。
+func wireDeadTorrentMonitor(mgr *scheduler.Manager, store *core.ConfigStore, notifier *scheduler.MonitorNotifier) {
+	if store == nil || global.GlobalDB == nil || global.GlobalDB.DB == nil {
+		global.GetSlogger().Warn("失效种子定时扫描跳过初始化：配置或数据库未就绪")
+		return
+	}
+	mon := scheduler.NewDeadTorrentMonitor(scheduler.DeadTorrentMonitorConfig{
+		Settings: func() (bool, time.Duration, []uint, error) {
+			s, err := store.DeadTorrentScanSettings()
+			return s.Enabled, time.Duration(s.IntervalHours) * time.Hour, s.ChannelIDs, err
+		},
+		Downloaders: deadTorrentDownloaders(mgr),
+		Notifier:    notifier,
+		Logger:      global.GetSlogger(),
+	})
+	mgr.SetDeadTorrentMonitor(mon)
+	mon.Start()
+	global.GetSlogger().Info("失效种子定时扫描已初始化")
+}
+
+// deadTorrentDownloaders 返回已启用的下载器实例；连不上的下载器放进错误列表，不影响其他下载器。
+// 读不到下载器列表时返回第三个错误，这一轮整个不扫。
+func deadTorrentDownloaders(mgr *scheduler.Manager) func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error, error) {
+	return func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error, error) {
+		var settings []models.DownloaderSetting
+		if err := global.GlobalDB.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&settings).Error; err != nil {
+			return nil, nil, fmt.Errorf("读取下载器失败: %w", err)
+		}
+		dm := mgr.GetDownloaderManager()
+		out := make([]scheduler.DeadTorrentDownloader, 0, len(settings))
+		var errs []error
+		for _, s := range settings {
+			dl, err := dm.GetDownloaderContext(ctx, s.Name)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", s.Name, err))
+				continue
+			}
+			out = append(out, scheduler.DeadTorrentDownloader{Name: s.Name, DL: dl})
+		}
+		return out, errs, nil
+	}
+}
+
+// wireDailyReportJob 构造并启动每日战报任务：与登录提醒共用通知投递器；用户数据仓库没起来时不启动。
+func wireDailyReportJob(mgr *scheduler.Manager, store *core.ConfigStore, userInfo *v2.UserInfoService, notifier *scheduler.MonitorNotifier) {
+	history, ok := userInfo.History()
+	if !ok || store == nil {
+		global.GetSlogger().Warn("每日战报跳过初始化：用户数据仓库不可用")
+		return
+	}
+	job := scheduler.NewDailyReportJob(scheduler.DailyReportJobConfig{
+		DB: global.GlobalDB.DB,
+		Settings: func() (scheduler.DailyReportSchedule, error) {
+			s, err := store.DailyReportSettings()
+			return scheduler.DailyReportSchedule{Enabled: s.Enabled, Time: s.Time, ChannelIDs: s.ChannelIDs, Scope: s.Scope}, err
+		},
+		Offset: func() (time.Duration, error) {
+			return store.DailyReportOffset(scheduler.DailyReportRand)
+		},
+		EnabledSites: store.EnabledSiteNames,
+		History:      history,
+		Notifier:     notifier,
+		ReseedLine:   reseedReportLine(mgr),
+		FollowLine:   followReportLine,
+		Logger:       global.GetSlogger(),
+	})
+	mgr.SetDailyReportJob(job)
+	job.Start()
+	global.GetSlogger().Info("每日战报任务已初始化并启动")
+}
+
+// attendanceSites 从 UserInfoService 取已注册的共享站点实例签到，与搜索、登录探测共用限速器。
+func attendanceSites(svc *v2.UserInfoService) scheduler.AttendanceSites {
+	return scheduler.AttendanceSitesFunc(func(name string) (v2.AttendanceCapable, bool) {
+		if svc == nil {
+			return nil, false
+		}
+		site, ok := svc.GetSite(name)
+		if !ok {
+			return nil, false
+		}
+		capable, ok := site.(v2.AttendanceCapable)
+		return capable, ok
+	})
 }

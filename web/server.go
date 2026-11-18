@@ -13,6 +13,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"math"
 	"mime"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -29,20 +31,63 @@ import (
 	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/apitoken"
+	"github.com/sunerpy/pt-tools/internal/assistant"
+	"github.com/sunerpy/pt-tools/internal/health"
+	"github.com/sunerpy/pt-tools/internal/media/organize"
+	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/media/subscribe"
+	"github.com/sunerpy/pt-tools/internal/nas"
+	"github.com/sunerpy/pt-tools/internal/remote"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/utils"
 	"github.com/sunerpy/pt-tools/version"
+	"github.com/sunerpy/pt-tools/web/qbitcompat"
 )
 
 type Server struct {
 	store       *core.ConfigStore
 	mgr         *scheduler.Manager
 	tpl         *template.Template
-	sessions    map[string]string // sessionID -> username
+	sessions    *sessionStore // sessionID -> username，并发安全
+	logins      *loginLimiter // 登录失败计数与口令校验并发上限
 	chatopsDeps *ChatOpsDeps
-	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
-	httpServer  *http.Server         // active server, set in Serve, used by Shutdown
+	media       *recognize.Service // 媒体识别（M9）；为空时接口回 503
+	organizer   *organize.Service  // 整理入库（M10）；为空时接口回 503
+	subscriber  *subscribe.Service // 订阅（M11）；为空时接口回 503
+	// tokens 是 API 令牌（M12）；为空时令牌管理接口回 503，App API 只认 session
+	tokens *apitoken.Store
+	// appAudit 记下 API 令牌等非 session 主体经 App API 做的写操作（M12）
+	appAudit appAuditRecorder
+	// qbitCompat 是 qB 兼容入口（M13），设置页用它显示登录情况；qbitCompatCtl 管它的监听（cmd 里实现）
+	qbitCompat    *qbitcompat.Server
+	qbitCompatCtl QbitCompatControl
+	// qbitCompatMu 让存设置与换监听一次只做一个（见 apiQbitCompatPut）
+	qbitCompatMu sync.Mutex
+	// servarr 是 Servarr 兼容入口（媒体中心 M10，Seerr 把 pt-tools 当成 Radarr、Sonarr 用）；为空时 /servarr/ 回 404
+	servarr http.Handler
+	// backupMu 让网页上的「立即备份」与上传恢复一次只做一个（见 api_backup.go）
+	backupMu sync.Mutex
+	// remote 是远程访问的主机端（M15）；为空时直连入口 404，设置接口回 503
+	remote *remote.Host
+	// assistant 是内置 AI 助手（M19）；为空时接口回 503
+	assistant *assistant.Service
+	qaHook    func(*http.ServeMux) // qa-build-only test hook installer
+
+	// nasCollector 是「NAS 监控」的采集器（首页 NAS 概览）；为空时接口回 503、首页的 nas 块写原因。
+	// nasPending 暂存测试连接登录产生的新长期凭据，nasTests 让同一个来源 10 秒只测一次，nasMu 让来源与设置的保存一次只做一个（见 api_nas.go）
+	nasCollector *nas.Collector
+	nasPending   nas.Pending
+	nasTests     nasTestLimiter
+	nasMu        sync.Mutex
+
+	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
+	// 两者分别在信号处理 goroutine 与 Serve 所在 goroutine 里读写。
+	lifecycleMu  sync.Mutex
+	httpServer   *http.Server // active server, set in Serve, used by Shutdown
+	shuttingDown bool         // Shutdown 调用过：之后的 Serve 不再监听
 
 	// clientVersions 缓存每台下载器自报的版本号，键是「下载器 id + URL」。
 	//
@@ -52,7 +97,35 @@ type Server struct {
 	// 键里带 URL：换了地址就是换了一台机器，缓存必须失效。
 	clientVersionMu sync.RWMutex
 	clientVersions  map[string]string
+
+	// background 跟踪处理器派生的后台任务（如自动禁用不可用站点），测试据此等任务结束再清理临时目录。
+	background sync.WaitGroup
+
+	// attendanceRun 是网页「一键签到」的进度（见 apiAttendanceRun）
+	attendanceRun attendanceRunState
+
+	// speeds 是全部下载器的总速度的最近几条采样（首页的速度柱，见 speed_history.go）
+	speeds speedHistory
+	// homeCache 是首页上一次的结果（见 api_home.go）；health 是系统体检的执行器（见 api_system_check.go）
+	homeCache  homeCache
+	health     *health.Runner
+	healthOnce sync.Once
+
+	// verifyCookie 是扩展推来认不出格式的 Cookie 时验证它的方法（见 credential_verify.go）；为空时用 probeSiteCookie，测试里替换
+	verifyCookie cookieVerifier
+
+	// checkUpdates 是 App API 的 /updates 查新版本用的（version.Checker；测试里换成假的，不访问 GitHub）
+	checkUpdates func(ctx context.Context, opts version.CheckOptions) (*version.VersionCheckResult, error)
+
+	// configMux 是 buildHandler 建出的路由：配置网关在进程内经它调网页用的接口（见 config_gateway.go）
+	configMux atomic.Pointer[http.ServeMux]
+	// mcpHTTP 是 MCP 的处理；mcpAccess 是开关与路径，mcpGate 按它分发（见 mcp_setting.go）
+	mcpHTTP   http.Handler
+	mcpAccess atomic.Pointer[mcpAccessState]
 }
+
+// goBackground 在后台执行 fn，并计入 background。
+func (s *Server) goBackground(fn func()) { s.background.Go(fn) }
 
 // SetQAHook installs a callback invoked once during Serve, after all production
 // routes are registered. Used by the qa build tag (cmd/web_qa.go) to attach
@@ -65,8 +138,10 @@ func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
 		store:          store,
 		mgr:            mgr,
 		tpl:            t,
-		sessions:       map[string]string{},
+		sessions:       newSessionStore(),
+		logins:         newLoginLimiter(),
 		clientVersions: map[string]string{},
+		checkUpdates:   version.GetChecker().CheckForUpdates,
 	}
 }
 
@@ -92,13 +167,41 @@ func (s *Server) ensureAdminFromEnv() {
 }
 
 func (s *Server) Serve(addr string) error {
-	mux := http.NewServeMux()
 	s.ensureAdminFromEnv()
+	handler := s.buildHandler()
+	// ReadTimeout 限制读完整个请求（含请求体）的时间，避免慢速发送长期占住连接；
+	// 不设 WriteTimeout：批量下载等响应可能较久。
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+	s.lifecycleMu.Lock()
+	if s.shuttingDown {
+		// 关闭信号在 Serve 起来之前就到了：不再监听，否则进程收到信号后仍会一直运行
+		s.lifecycleMu.Unlock()
+		return nil
+	}
+	s.httpServer = srv
+	s.lifecycleMu.Unlock()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// buildHandler 建出完整的路由（接口、App API、SPA 与静态资源），Serve 与测试共用。
+// 远程访问的隧道不经这里分发：它只挂 App API 的路由（见 RemoteDispatcher）。
+func (s *Server) buildHandler() http.Handler {
+	mux := http.NewServeMux()
 	mux.HandleFunc("/login", s.loginHandler)
 	mux.HandleFunc("/logout", s.logoutHandler)
 	mux.HandleFunc("/api/ping", s.apiPing)
 	// JSON APIs
 	mux.HandleFunc("/api/global", s.auth(s.apiGlobal))
+	mux.HandleFunc("/api/site-proxy", s.auth(s.apiSiteProxy))
 	mux.HandleFunc("/api/qbit", s.auth(s.apiQbit))
 	mux.HandleFunc("/api/sites", s.auth(s.apiSites))
 	mux.HandleFunc("/api/sites/", s.auth(s.apiSiteDetail))
@@ -111,6 +214,8 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
 	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
 	mux.HandleFunc("/api/control/start", s.auth(s.apiStartAll))
+	mux.HandleFunc("/api/control/status", s.auth(s.apiControlStatus))
+	mux.HandleFunc("/api/control/auto-start", s.auth(s.apiControlAutoStart))
 	// Downloader management APIs
 	mux.HandleFunc("/api/downloaders", s.auth(s.apiDownloaders))
 	mux.HandleFunc("/api/downloaders/all-directories", s.auth(s.apiAllDownloaderDirectories))
@@ -128,6 +233,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/filter-rules/", s.auth(s.apiFilterRuleDetail))
 	// RSS-Filter association API
 	mux.HandleFunc("/api/rss/", s.auth(s.apiRSSFilterAssociation))
+	mux.HandleFunc("POST /api/rss/test", s.auth(s.apiRSSLinkTest))
 	// Log level API
 	mux.HandleFunc("/api/log-level", s.auth(s.apiLogLevel))
 	// Maintenance clean API (destructive; authenticated only)
@@ -139,8 +245,35 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/v2/userinfo/sync", s.auth(s.apiUserInfoSync))
 	mux.HandleFunc("/api/v2/userinfo/registered", s.auth(s.apiUserInfoRegisteredSites))
 	mux.HandleFunc("/api/v2/userinfo/cache/clear", s.auth(s.apiUserInfoClearCache))
+	mux.HandleFunc("/api/v2/userinfo/history", s.auth(s.apiUserInfoHistory))
+	mux.HandleFunc("/api/v2/userinfo/summary", s.auth(s.apiUserInfoSummary))
+	mux.HandleFunc("/api/v2/userinfo/trends", s.auth(s.apiUserInfoTrends))
+	mux.HandleFunc("/api/v2/userinfo/daily-report", s.auth(s.apiDailyReportSettings))
 	s.registerLoginStateRoutes(mux)
+	s.registerAttendanceRoutes(mux)
+	s.registerBrushRoutes(mux)
+	s.registerDownloaderAssistantRoutes(mux)
+	s.registerTransferRoutes(mux)
+	s.registerReseedRoutes(mux)
+	s.registerCookieCloudRoutes(mux)
+	s.registerMediaRoutes(mux)
+	s.registerOrganizeRoutes(mux)
+	s.registerSubscribeRoutes(mux)
+	s.registerBlockRoutes(mux)
+	s.registerMediaItemRoutes(mux)
+	s.registerHomeRoutes(mux)
+	s.registerNASRoutes(mux)
+	s.registerFreeWatchRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
+	s.registerTokenRoutes(mux)
+	s.registerQbitCompatRoutes(mux)
+	s.registerServarrRoutes(mux)
+	s.registerCleanupRoutes(mux)
+	s.registerBackupRoutes(mux)
+	s.registerAppV1Routes(mux)
+	s.registerMCPRoutes(mux)
+	s.registerRemoteRoutes(mux)
+	s.registerAssistantRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
 	mux.HandleFunc("/api/cloak/test", s.auth(s.apiCloakTest))
@@ -211,29 +344,33 @@ func (s *Server) Serve(addr string) error {
 	// SPA fallback - serve index.html for all routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
-		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
+		if err != nil || !s.sessions.valid(sid.Value) {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
 		// Serve Vue SPA index.html
 		http.ServeFileFS(w, r, distFS, "index.html")
 	})
-	handler := logMiddleware(mux)
-	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	s.httpServer = srv
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
+	s.configMux.Store(mux)
+	return logMiddleware(s.mcpGate(mux))
 }
 
 // Shutdown gracefully stops the underlying http.Server so Serve returns.
-// Safe to call before Serve (no-op) and concurrent with Serve.
+// Safe to call before Serve (the later Serve returns without listening) and
+// concurrent with Serve.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s == nil || s.httpServer == nil {
+	if s == nil {
 		return nil
 	}
-	return s.httpServer.Shutdown(ctx)
+	s.lifecycleMu.Lock()
+	s.shuttingDown = true
+	srv := s.httpServer
+	s.lifecycleMu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	// Serve 拿到 srv 之后、ListenAndServe 之前被关闭也没关系：http.Server 关闭后 ListenAndServe 直接返回 ErrServerClosed
+	return srv.Shutdown(ctx)
 }
 
 type statusRecorder struct {
@@ -242,6 +379,9 @@ type statusRecorder struct {
 }
 
 func (s *statusRecorder) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
+
+// Unwrap 让 http.ResponseController 与 WebSocket 找到底下的 ResponseWriter（远程访问的直连入口要 Hijack 连接）。
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -262,17 +402,22 @@ func logMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(sr, r)
 		d := time.Since(start).Milliseconds()
 		if sr.status >= 400 {
-			global.GetSlogger().Warnf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, r.URL.Path, sr.status, d, r.RemoteAddr)
+			global.GetSlogger().Warnf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, logPath(r.URL.Path), sr.status, d, r.RemoteAddr)
 		} else {
-			global.GetSlogger().Debugf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, r.URL.Path, sr.status, d, r.RemoteAddr)
+			global.GetSlogger().Debugf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, logPath(r.URL.Path), sr.status, d, r.RemoteAddr)
 		}
 	})
 }
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 配置网关在进程内发的请求（只有进程里的代码能做这个标记，见 configInternalKey）
+		if configInternal(r.Context()) {
+			next(w, r)
+			return
+		}
 		sid, err := r.Cookie("session")
-		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
+		if err != nil || !s.sessions.valid(sid.Value) {
 			// 对 API 请求返回 401 + JSON，避免浏览器扩展/CLI 客户端
 			// 因 fetch 默认 follow 302 跳转到 /login → GET /login → 405
 			// 而看不到真正的 "未登录" 提示。
@@ -317,6 +462,12 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 			Year:    time.Now().Year(),
 		})
 	case http.MethodPost:
+		ip := clientIP(r)
+		if wait, blocked := s.logins.blocked(ip); blocked {
+			http.Error(w, fmt.Sprintf("登录失败次数过多，请 %d 分钟后再试", int(math.Ceil(wait.Minutes()))), http.StatusTooManyRequests)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, loginMaxBodyBytes)
 		user, pass, err := readLogin(r)
 		if err != nil {
 			http.Error(w, "请求体错误", http.StatusBadRequest)
@@ -336,6 +487,7 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		global.GetSlogger().Infof("login_admin_lookup username=%s found=%t err=%v", user, u != nil, err)
 		if err != nil {
 			if strings.Contains(err.Error(), "record not found") {
+				s.logins.fail(ip)
 				http.Error(w, "用户不存在", http.StatusUnauthorized)
 				return
 			}
@@ -343,29 +495,38 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if u == nil {
+			s.logins.fail(ip)
 			http.Error(w, "用户不存在", http.StatusUnauthorized)
 			return
 		}
-		if !verifyPassword(u.PasswordHash, pass) {
-			if verifyLegacyPassword(u.PasswordHash, pass) {
-				u.PasswordHash = hashPassword(pass)
-				_ = s.store.UpdateAdmin(u)
-			} else {
-				http.Error(w, "密码错误", http.StatusUnauthorized)
-				return
-			}
+		release, err := s.logins.acquireVerify(r.Context())
+		if err != nil {
+			http.Error(w, "请求已取消", http.StatusServiceUnavailable)
+			return
 		}
-		sid := randomID()
-		s.sessions[sid] = u.Username
+		passOK := verifyPassword(u.PasswordHash, pass)
+		if !passOK && verifyLegacyPassword(u.PasswordHash, pass) {
+			u.PasswordHash = hashPassword(pass)
+			_ = s.store.UpdateAdmin(u)
+			passOK = true
+		}
+		release()
+		if !passOK {
+			s.logins.fail(ip)
+			http.Error(w, "密码错误", http.StatusUnauthorized)
+			return
+		}
+		s.logins.succeed(ip)
+		sid := s.sessions.create(u.Username)
 		cookie := &http.Cookie{Name: "session", Value: sid, HttpOnly: true, SameSite: http.SameSiteLaxMode, Path: "/"}
 		http.SetCookie(w, cookie)
 
 		// 登录成功后异步触发用户数据同步
 		if userInfoService != nil {
 			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 				defer cancel()
-				results, errors := userInfoService.FetchAndSaveAllWithConcurrency(ctx, 3, 30*time.Second)
+				results, errors := userInfoService.FetchAndSaveAllWithConcurrency(ctx, 3, userInfoSiteTimeout)
 				global.GetSlogger().Infof("[Login] Async sync completed: %d success, %d failed", len(results), len(errors))
 			}()
 		}
@@ -414,7 +575,7 @@ func isJSONRequest(r *http.Request) bool {
 
 func (s *Server) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("session"); err == nil {
-		delete(s.sessions, c.Value)
+		s.sessions.remove(c.Value)
 		c.MaxAge = -1
 		http.SetCookie(w, c)
 	}
@@ -683,6 +844,15 @@ const loginHTML = `{{define "login"}}
 </body>
 </html>{{end}}`
 
+// globalSettingsView 是 GET /api/global 的返回，去掉新版不再读写的两项：竞争度原来的检查间隔
+// （v16 起跟着自动删种的间隔）与全局的免费结束自动删除（v17 起每条 RSS 自己选）。两列留在库里给回退到旧版用。
+// 外层同名的 JSON 键盖过内嵌结构里的，nil 时 omitempty 不输出。
+type globalSettingsView struct {
+	models.SettingsGlobal
+	PeerRatioIntervalMin *struct{} `json:"peer_ratio_interval_min,omitempty"`
+	AutoDeleteOnFreeEnd  *struct{} `json:"auto_delete_on_free_end,omitempty"`
+}
+
 // JSON APIs
 func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -693,7 +863,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, gs)
+		writeJSON(w, globalSettingsView{SettingsGlobal: gs})
 	case http.MethodPost:
 		var req struct {
 			DefaultIntervalMinutes int32   `json:"default_interval_minutes"`
@@ -718,16 +888,15 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupSlowMaxRatio    float64 `json:"cleanup_slow_max_ratio"`
 			CleanupDelFreeExpired  bool    `json:"cleanup_del_free_expired"`
 			CleanupDiskProtect     bool    `json:"cleanup_disk_protect"`
+			CleanupEmergency       bool    `json:"cleanup_emergency"`
 			CleanupMinDiskSpaceGB  float64 `json:"cleanup_min_disk_space_gb"`
 			CleanupProtectDL       bool    `json:"cleanup_protect_dl"`
 			CleanupProtectHR       bool    `json:"cleanup_protect_hr"`
 			CleanupMinRetainH      int     `json:"cleanup_min_retain_h"`
 			CleanupProtectTags     string  `json:"cleanup_protect_tags"`
-			AutoDeleteOnFreeEnd    bool    `json:"auto_delete_on_free_end"`
 			FreeEndAdvanceMinutes  int     `json:"free_end_advance_minutes"`
 			PeerRatioEnabled       bool    `json:"peer_ratio_enabled"`
 			PeerRatioMaxSL         float64 `json:"peer_ratio_max_sl"`
-			PeerRatioIntervalMin   int     `json:"peer_ratio_interval_min"`
 			PeerRatioRemoveData    bool    `json:"peer_ratio_remove_data"`
 			DefaultFilterMode      string  `json:"default_filter_mode"`
 			DefaultEnabled         *bool   `json:"default_enabled"`
@@ -781,16 +950,15 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupSlowMaxRatio:    req.CleanupSlowMaxRatio,
 			CleanupDelFreeExpired:  req.CleanupDelFreeExpired,
 			CleanupDiskProtect:     req.CleanupDiskProtect,
+			CleanupEmergency:       req.CleanupEmergency,
 			CleanupMinDiskSpaceGB:  req.CleanupMinDiskSpaceGB,
 			CleanupProtectDL:       req.CleanupProtectDL,
 			CleanupProtectHR:       req.CleanupProtectHR,
 			CleanupMinRetainH:      req.CleanupMinRetainH,
 			CleanupProtectTags:     req.CleanupProtectTags,
-			AutoDeleteOnFreeEnd:    req.AutoDeleteOnFreeEnd,
 			FreeEndAdvanceMinutes:  req.FreeEndAdvanceMinutes,
 			PeerRatioEnabled:       req.PeerRatioEnabled,
 			PeerRatioMaxSL:         req.PeerRatioMaxSL,
-			PeerRatioIntervalMin:   req.PeerRatioIntervalMin,
 			PeerRatioRemoveData:    req.PeerRatioRemoveData,
 			DefaultFilterMode:      models.NormalizeFilterMode(models.FilterMode(req.DefaultFilterMode)),
 		}
@@ -804,19 +972,31 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[Config] 异步重载配置...")
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[Config] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// qbitSettingsResponse 是 /api/qbit 的 GET 响应：字段与 models.QbitSettings 相同，密码留空，用 has_password 表示是否已设置。
+type qbitSettingsResponse struct {
+	ID          uint      `json:"id"`
+	Enabled     bool      `json:"enabled"`
+	URL         string    `json:"url"`
+	User        string    `json:"user"`
+	Password    string    `json:"password"`
+	HasPassword bool      `json:"has_password"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
@@ -828,26 +1008,42 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, qb)
+		// 不回传下载器密码，只告诉调用方是否已经设置过。
+		writeJSON(w, qbitSettingsResponse{
+			ID:          qb.ID,
+			Enabled:     qb.Enabled,
+			URL:         qb.URL,
+			User:        qb.User,
+			Password:    "",
+			HasPassword: qb.Password != "",
+			CreatedAt:   qb.CreatedAt,
+			UpdatedAt:   qb.UpdatedAt,
+		})
 	case http.MethodPost:
 		var qb models.QbitSettings
 		if err := json.NewDecoder(r.Body).Decode(&qb); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// GET 不再返回密码，提交空密码表示沿用已保存的密码。
+		if qb.Password == "" {
+			if cur, err := s.store.GetQbitSettings(); err == nil {
+				qb.Password = cur.Password
+			}
+		}
 		if err := s.store.SaveQbitSettings(qb); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[Qbit] 异步重载配置...")
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[Qbit] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -855,24 +1051,29 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 }
 
 type SiteConfigResponse struct {
-	Enabled            *bool              `json:"enabled"`
-	AuthMethod         string             `json:"auth_method"`
-	Cookie             string             `json:"cookie,omitempty"`
-	CookieEncrypted    string             `json:"cookie_encrypted,omitempty"`
-	HasCookie          bool               `json:"has_cookie"`
-	CookieFieldVisible bool               `json:"cookie_field_visible"`
-	APIKey             string             `json:"api_key"`
-	APIUrl             string             `json:"api_url"`
-	Passkey            string             `json:"passkey"`
-	UploadLimitKBs     int                `json:"upload_limit_kbs"`
-	DownloadLimitKBs   int                `json:"download_limit_kbs"`
-	SeedingCapacityGB  float64            `json:"seeding_capacity_gb"`
-	RSS                []models.RSSConfig `json:"rss"`
-	URLs               []string           `json:"urls,omitempty"`
-	WebURL             string             `json:"web_url,omitempty"`
-	Unavailable        bool               `json:"unavailable,omitempty"`
-	UnavailableReason  string             `json:"unavailable_reason,omitempty"`
-	IsBuiltin          bool               `json:"is_builtin"`
+	Enabled            *bool   `json:"enabled"`
+	AuthMethod         string  `json:"auth_method"`
+	Cookie             string  `json:"cookie,omitempty"`
+	CookieEncrypted    string  `json:"cookie_encrypted,omitempty"`
+	HasCookie          bool    `json:"has_cookie"`
+	CookieFieldVisible bool    `json:"cookie_field_visible"`
+	APIKey             string  `json:"api_key"`
+	APIUrl             string  `json:"api_url"`
+	Passkey            string  `json:"passkey"`
+	UploadLimitKBs     int     `json:"upload_limit_kbs"`
+	DownloadLimitKBs   int     `json:"download_limit_kbs"`
+	SeedingCapacityGB  float64 `json:"seeding_capacity_gb"`
+	HRSeedTimeH        int     `json:"hr_seed_time_h"`
+	// HRUploadRatio 是「H&R 上传量达标」（#542）：下完以后上传量达到体积的这么多倍也算 H&R 达标，0 是不用
+	HRUploadRatio float64 `json:"hr_upload_ratio"`
+	// HRRuleBuiltin：站点定义里已经写了 H&R 做种时长，用户填的 HRSeedTimeH 只在定义算不出时才用
+	HRRuleBuiltin     bool               `json:"hr_rule_builtin"`
+	RSS               []models.RSSConfig `json:"rss"`
+	URLs              []string           `json:"urls,omitempty"`
+	WebURL            string             `json:"web_url,omitempty"`
+	Unavailable       bool               `json:"unavailable,omitempty"`
+	UnavailableReason string             `json:"unavailable_reason,omitempty"`
+	IsBuiltin         bool               `json:"is_builtin"`
 }
 
 func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
@@ -899,9 +1100,12 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				UploadLimitKBs:    sc.UploadLimitKBs,
 				DownloadLimitKBs:  sc.DownloadLimitKBs,
 				SeedingCapacityGB: sc.SeedingCapacityGB,
+				HRSeedTimeH:       sc.HRSeedTimeH,
+				HRUploadRatio:     sc.HRUploadRatio,
 				RSS:               sc.RSS,
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {
+				resp.HRRuleBuiltin = def.HasHRSeedTimeRule()
 				resp.URLs = def.URLs
 				resp.WebURL = def.WebURL
 				resp.Unavailable = def.Unavailable
@@ -918,7 +1122,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 			result[sg] = resp
 		}
 		if len(sitesToDisable) > 0 {
-			go s.disableUnavailableSites(sitesToDisable)
+			s.goBackground(func() { s.disableUnavailableSites(sitesToDisable) })
 		}
 		writeJSON(w, result)
 	case http.MethodDelete:
@@ -934,8 +1138,8 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		global.GetSlogger().Infof("[Site] 站点删除成功: name=%s", name)
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			// 刷新 UserInfoService 站点注册
 			if err := RefreshSiteRegistrations(s.store); err != nil {
 				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
@@ -946,17 +1150,18 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[Site] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
+// disableUnavailableSites 关掉站点定义标为不可用的站点。只改启用开关，凭证和其他配置都保留，
+// 站点恢复可用后重新启用即可。
 func (s *Server) disableUnavailableSites(sites []models.SiteGroup) {
 	for _, sg := range sites {
-		disabled := models.SiteConfig{Enabled: func() *bool { f := false; return &f }()}
-		if _, err := s.store.UpsertSite(sg, disabled); err != nil {
+		if err := s.store.SetSiteEnabled(sg, false); err != nil {
 			global.GetSlogger().Warnf("[Site] 禁用不可用站点失败: %s, err=%v", sg, err)
 			continue
 		}
@@ -972,6 +1177,10 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/sites/")
 	// 拦截 RESTful 形态的 login-state 子路径：/api/sites/{name}/login-state[/{action}]
 	// 转发到既有的 login-state 处理器，保持与 apiSiteLoginStateRouter 行为一致（siteName 原样传递）。
+	if siteName, ok := strings.CutSuffix(name, "/attendance"); ok && siteName != "" && !strings.Contains(siteName, "/") {
+		s.handleSiteAttendance(w, r, siteName)
+		return
+	}
 	if idx := strings.Index(name, "/login-state"); idx >= 0 {
 		siteName := name[:idx]
 		action := strings.TrimPrefix(name[idx:], "/login-state")
@@ -1015,10 +1224,13 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			UploadLimitKBs:     sc.UploadLimitKBs,
 			DownloadLimitKBs:   sc.DownloadLimitKBs,
 			SeedingCapacityGB:  sc.SeedingCapacityGB,
+			HRSeedTimeH:        sc.HRSeedTimeH,
+			HRUploadRatio:      sc.HRUploadRatio,
 			RSS:                sc.RSS,
 		}
 		defRegistry := v2.GetDefinitionRegistry()
 		if def, ok := defRegistry.Get(string(sg)); ok {
+			resp.HRRuleBuiltin = def.HasHRSeedTimeRule()
 			resp.URLs = def.URLs
 			resp.WebURL = def.WebURL
 			resp.Unavailable = def.Unavailable
@@ -1034,7 +1246,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		global.GetSlogger().Infof("[RSS] 保存站点配置: site=%s, rss_count=%d", name, len(sc.RSS))
 		for i, r := range sc.RSS {
-			global.GetSlogger().Infof("[RSS] RSS[%d]: name=%s, url=%s", i, r.Name, r.URL)
+			global.GetSlogger().Infof("[RSS] RSS[%d]: name=%s, url=%s", i, r.Name, utils.SanitizeURL(r.URL))
 		}
 		if err := s.store.UpsertSiteWithRSS(sg, sc); err != nil {
 			global.GetSlogger().Errorf("[RSS] 保存站点配置失败: site=%s, err=%v", name, err)
@@ -1042,11 +1254,13 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		global.GetSlogger().Infof("[RSS] 站点配置保存成功: site=%s", name)
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
-			// 刷新 UserInfoService 站点注册
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
+			// 刷新 UserInfoService 站点注册，成功后再请求一次登录探测
 			if err := RefreshSiteRegistrations(s.store); err != nil {
 				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
+			} else {
+				s.requestLoginProbe(string(sg))
 			}
 			cfg, _ := s.store.Load()
 			if cfg != nil {
@@ -1054,7 +1268,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[RSS] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
 		// 删除单条 RSS：通过查询参数 id 指定
@@ -1080,23 +1294,30 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		// 先查询要删除的 RSS 信息用于日志
 		var rssToDelete models.RSSSubscription
 		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).First(&rssToDelete).Error; err == nil {
-			global.GetSlogger().Infof("[RSS] 删除 RSS 详情: name=%s, url=%s", rssToDelete.Name, rssToDelete.URL)
+			global.GetSlogger().Infof("[RSS] 删除 RSS 详情: name=%s, url=%s", rssToDelete.Name, utils.SanitizeURL(rssToDelete.URL))
 		}
-		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{}).Error; err != nil {
+		// 和它与过滤规则的关联一起删；编号不是这个站点的 RSS 时什么都不删
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			res := tx.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{})
+			if res.Error != nil || res.RowsAffected == 0 {
+				return res.Error
+			}
+			return models.NewRSSFilterAssociationDB(tx).DeleteByRSSID(uint(rid))
+		}); err != nil {
 			global.GetSlogger().Errorf("[RSS] 删除 RSS 失败: site=%s, rss_id=%d, err=%v", name, rid, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		global.GetSlogger().Infof("[RSS] RSS 删除成功: site=%s, rss_id=%d", name, rid)
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[RSS] 异步重载配置...")
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[RSS] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "deleted"})
 	case http.MethodPut:
 		s.updateSiteCredential(w, r, sg)
@@ -1111,22 +1332,51 @@ func (s *Server) apiPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct{ Username, Old, New string }
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, loginMaxBodyBytes)).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// 登录时会去掉口令首尾空白，这里同样处理，否则带空格的新口令永远对不上。
+	// 空口令会让账号再也登录不了（登录页拒绝空口令），直接拒绝。
+	newPassword := strings.TrimSpace(body.New)
+	if newPassword == "" {
+		http.Error(w, "新密码不能为空", http.StatusBadRequest)
+		return
+	}
+	if len(newPassword) > maxPasswordBytes {
+		http.Error(w, "新密码过长", http.StatusBadRequest)
+		return
+	}
+	release, err := s.logins.acquireVerify(r.Context())
+	if err != nil {
+		http.Error(w, "请求已取消", http.StatusServiceUnavailable)
+		return
+	}
 	u, err := s.store.GetAdmin(body.Username)
-	if err != nil || u == nil || !verifyPassword(u.PasswordHash, body.Old) {
+	oldOK := err == nil && u != nil && verifyPassword(u.PasswordHash, body.Old)
+	if oldOK {
+		u.PasswordHash = hashPassword(newPassword)
+	}
+	release()
+	if !oldOK {
 		http.Error(w, "原密码错误", http.StatusUnauthorized)
 		return
 	}
-	u.PasswordHash = hashPassword(body.New)
 	if err := s.store.UpdateAdmin(u); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// 改密码后其他浏览器、设备上的旧会话立即失效，只保留发起修改的这个会话。
+	keep := ""
+	if c, err := r.Cookie("session"); err == nil {
+		keep = c.Value
+	}
+	s.sessions.removeAllExcept(keep)
 	writeJSON(w, map[string]string{"status": "ok"})
 }
+
+// maxPasswordBytes 是管理员口令的长度上限。
+const maxPasswordBytes = 256
 
 // 控制接口：一键停止/启动任务
 func (s *Server) apiStopAll(w http.ResponseWriter, r *http.Request) {
@@ -1134,7 +1384,9 @@ func (s *Server) apiStopAll(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	s.mgr.StopAll()
+	// 只停 RSS 任务：免费到期、自动删种等监控和配置热重载继续运行，「启动 RSS 任务」可以恢复。
+	// StopAll 是进程退出用的最终关闭，停掉后无法再启动。
+	s.mgr.StopJobs()
 	writeJSON(w, map[string]string{"status": "stopped"})
 }
 
@@ -1362,7 +1614,8 @@ func (s *Server) apiTaskStats(w http.ResponseWriter, r *http.Request) {
 
 // 过滤规则命中数：哪条规则真的把种子下下来了。
 //
-// TorrentInfo.FilterRuleID 记的是命中的规则，所以这是一次 GROUP BY 就能拿到的数；
+// 已推送的按 PushedFilterRuleID（把它推进下载器的规则，推送时记下）计；没推送的按 FilterRuleID（RSS 最近一次判断命中的规则）。
+// FilterRuleID 每轮刷新，免费结束或规则改了以后会变，已推送的不能按它数。
 // 规则列表接口回的是 []FilterRule，不好塞这个额外字段，于是单独开一个只回计数的接口。
 func (s *Server) apiFilterRuleHits(w http.ResponseWriter, r *http.Request) {
 	type row struct {
@@ -1370,10 +1623,11 @@ func (s *Server) apiFilterRuleHits(w http.ResponseWriter, r *http.Request) {
 		Hits         int64 `json:"hits"`
 	}
 	var rows []row
+	const rule = "CASE WHEN is_pushed = 1 THEN pushed_filter_rule_id ELSE filter_rule_id END"
 	err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
-		Select("filter_rule_id, COUNT(*) AS hits").
-		Where("filter_rule_id IS NOT NULL").
-		Group("filter_rule_id").
+		Select(rule + " AS filter_rule_id, COUNT(*) AS hits").
+		Where(rule + " IS NOT NULL").
+		Group(rule).
 		Scan(&rows).Error
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

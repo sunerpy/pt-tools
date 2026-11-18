@@ -3,7 +3,9 @@ package cloakdriver
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,13 +34,36 @@ func TestCDPSessionConnectFailsOnInvalidURL(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	sess, err := NewCDPSession(ctx, "ws://127.0.0.1:1/devtools/browser/fake")
+	sess, err := NewCDPSession(ctx, "ws://127.0.0.1:1/devtools/browser/fake", nil)
 	if err == nil {
 		t.Fatalf("expected error when connecting to fake CDP url; got session=%v", sess)
 		sess.Close()
 	}
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cdp connect")
+}
+
+// 经 Manager 转发的地址：原样拨这个地址（不去查 /json/version，那个请求带不上令牌），握手带上令牌
+func TestCDPSessionDialsManagerProxyAsIs(t *testing.T) {
+	t.Parallel()
+	type seen struct{ path, auth string }
+	got := make(chan seen, 4)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- seen{r.URL.Path, r.Header.Get("Authorization")}
+		http.Error(w, "no websocket here", http.StatusBadRequest)
+	}))
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/profiles/p1/cdp"
+	_, err := NewCDPSession(ctx, wsURL, http.Header{"Authorization": {"Bearer tok"}})
+	require.Error(t, err)
+	first := <-got
+	assert.Equal(t, seen{"/api/profiles/p1/cdp", "Bearer tok"}, first)
+	for len(got) > 0 {
+		assert.NotEqual(t, "/json/version", (<-got).path)
+	}
 }
 
 func TestCDPSessionCloseIdempotent(t *testing.T) {

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -92,6 +93,9 @@ var sensitiveParams = map[string]bool{
 	"pwd":          true,
 	"rsskey":       true,
 	"torrent_pass": true,
+	"credential":   true,
+	// playload 是 M-Team 签名下载地址跳转到的下载节点地址里加密的下载凭证（拼法照原样）
+	"playload": true,
 }
 
 // SanitizeURL 对 URL 中的敏感查询参数进行脱敏处理
@@ -122,4 +126,15 @@ func SanitizeURL(rawURL string) string {
 
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+// RedactURLError 把错误链里 *url.Error 的地址换成脱敏后的地址，返回原错误。
+// net/http 的传输错误会把完整请求地址（RSS、种子下载地址常带 passkey）写进错误文本。
+// 要在包装之前调用：fmt.Errorf 包装时就把错误文本定下了。
+func RedactURLError(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.URL != "" {
+		uerr.URL = SanitizeURL(uerr.URL)
+	}
+	return err
 }

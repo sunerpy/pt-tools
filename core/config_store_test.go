@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ func newTempDB(t *testing.T) *models.TorrentDB {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	t.Cleanup(func() { closeTestGorm(db) })
 	if err := db.AutoMigrate(&models.SettingsGlobal{}, &models.QbitSettings{}, &models.SiteSetting{}, &models.RSSSubscription{}, &models.TorrentInfo{}, &models.AdminUser{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -119,7 +121,7 @@ func TestLoadSnapshotConsistency(t *testing.T) {
 }
 
 func TestSaveGlobal_InvalidDir(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	err = s.SaveGlobal(models.SettingsGlobal{DownloadDir: "", DefaultIntervalMinutes: models.MinIntervalMinutes})
@@ -127,7 +129,7 @@ func TestSaveGlobal_InvalidDir(t *testing.T) {
 }
 
 func TestSaveQbit_InvalidFields(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	err = s.SaveQbit(models.QbitSettings{Enabled: true})
@@ -135,7 +137,7 @@ func TestSaveQbit_InvalidFields(t *testing.T) {
 }
 
 func TestAdminCRUD(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	s := NewConfigStore(db)
@@ -159,7 +161,7 @@ func TestAdminCRUD(t *testing.T) {
 }
 
 func TestQbitSettings_SaveAndGet(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	qb := models.QbitSettings{Enabled: true, URL: "http://localhost", User: "u", Password: "p"}
@@ -172,7 +174,7 @@ func TestQbitSettings_SaveAndGet(t *testing.T) {
 }
 
 func TestGetGlobalSettings_DefaultAndSave(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	gl, err := s.GetGlobalSettings()
@@ -184,7 +186,7 @@ func TestGetGlobalSettings_DefaultAndSave(t *testing.T) {
 }
 
 func TestSaveQbitSettings_InvalidAndValid(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	// invalid empty fields
@@ -198,7 +200,7 @@ func TestSaveQbitSettings_InvalidAndValid(t *testing.T) {
 }
 
 func TestSaveGlobalSettings_Invalids(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	err = s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: "", DefaultIntervalMinutes: models.MinIntervalMinutes})
@@ -213,7 +215,7 @@ func TestSaveGlobalSettings_Invalids(t *testing.T) {
 }
 
 func TestUpsertSiteWithRSS_Validations(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "invalid", APIUrl: "http://x", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
@@ -228,7 +230,7 @@ func TestUpsertSiteWithRSS_Validations(t *testing.T) {
 }
 
 func TestUpsertSiteWithRSS_SaveAndList(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "c", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}}}
@@ -240,7 +242,7 @@ func TestUpsertSiteWithRSS_SaveAndList(t *testing.T) {
 }
 
 func TestAppendRSSToSite_AppendsOneRowAndPublishesConfigChanged(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
@@ -313,7 +315,7 @@ func TestAppendRSSToSite_AppendsOneRowAndPublishesConfigChanged(t *testing.T) {
 }
 
 func TestAppendRSSToSite_RejectsDuplicateURLWithoutInsert(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
@@ -329,7 +331,7 @@ func TestAppendRSSToSite_RejectsDuplicateURLWithoutInsert(t *testing.T) {
 }
 
 func TestAppendRSSToSite_RejectsNonexistentSite(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -338,7 +340,7 @@ func TestAppendRSSToSite_RejectsNonexistentSite(t *testing.T) {
 }
 
 func TestAppendRSSToSite_RejectsNonexistentDownloader(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
@@ -354,7 +356,7 @@ func TestAppendRSSToSite_RejectsNonexistentDownloader(t *testing.T) {
 }
 
 func TestDeleteRSSFromSite_DeletesRowAndAssociationsAndPublishes(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
@@ -394,7 +396,7 @@ func TestDeleteRSSFromSite_DeletesRowAndAssociationsAndPublishes(t *testing.T) {
 }
 
 func TestDeleteRSSFromSite_RejectsNonexistentRSS(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
@@ -411,7 +413,7 @@ func TestDeleteRSSFromSite_RejectsNonexistentRSS(t *testing.T) {
 }
 
 func TestDeleteRSSFromSite_RejectsCrossSiteRSS(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	siteA := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
@@ -430,7 +432,7 @@ func TestDeleteRSSFromSite_RejectsCrossSiteRSS(t *testing.T) {
 }
 
 func TestListRSSForSite_ReturnsRowsWithFilterRuleIDs(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
@@ -456,7 +458,7 @@ func TestListRSSForSite_ReturnsRowsWithFilterRuleIDs(t *testing.T) {
 }
 
 func TestListRSSForSite_RejectsNonexistentSite(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -466,7 +468,7 @@ func TestListRSSForSite_RejectsNonexistentSite(t *testing.T) {
 
 func TestUpsertSiteWithRSS_PreservesLoginStateCookieForAPIKeySite(t *testing.T) {
 	writeTestSecretKey(t)
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -506,9 +508,37 @@ func TestUpsertSiteWithRSS_PreservesLoginStateCookieForAPIKeySite(t *testing.T) 
 	require.Equal(t, loginCookie, loaded.Cookie)
 }
 
+// 站点 Cookie 只以密文落库：两种保存方式都不再把明文写进旧的 cookie 列，读取照常得到明文。
+func TestUpsertSite_StoresCookieOnlyEncrypted(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := OpenTestDB(t)
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	enabled := true
+	cookie := "uid=1; pass=secret"
+
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: cookie, APIUrl: "http://api",
+	}))
+	_, err = s.UpsertSite(models.SiteGroup("hdsky"), models.SiteConfig{Enabled: &enabled, AuthMethod: "cookie", Cookie: cookie})
+	require.NoError(t, err)
+
+	for _, name := range []string{"springsunday", "hdsky"} {
+		var row models.SiteSetting
+		require.NoError(t, db.DB.Where("name = ?", name).First(&row).Error)
+		require.Empty(t, row.Cookie, name)
+		plain, err := s.DecryptCookie(row.CookieEncrypted)
+		require.NoError(t, err, name)
+		require.Equal(t, cookie, plain, name)
+		sc, err := s.GetSiteConf(models.SiteGroup(name))
+		require.NoError(t, err, name)
+		require.Equal(t, cookie, sc.Cookie, name)
+	}
+}
+
 func TestUpsertSiteWithRSS_CookieAuthStillEncryptsCookie(t *testing.T) {
 	writeTestSecretKey(t)
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -547,7 +577,7 @@ func TestUpsertSiteWithRSS_CookieAuthStillEncryptsCookie(t *testing.T) {
 
 func TestUpsertSiteWithRSS_CookieAndAPIKeyAcceptsEmptyCookieWhenStored(t *testing.T) {
 	writeTestSecretKey(t)
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -576,22 +606,33 @@ func TestUpsertSiteWithRSS_CookieAndAPIKeyAcceptsEmptyCookieWhenStored(t *testin
 	require.Equal(t, storedCookie, plain)
 }
 
-func TestUpsertSiteWithRSS_CookieAndAPIKeyRequiresCookieWhenNoneStored(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+// cookie_and_api_key 只要 API Key：Cookie 可选（HDDolby 的 Cookie 可选），库里没有 Cookie 也能保存；没有 API Key 照旧拒绝
+func TestUpsertSiteWithRSS_CookieAndAPIKeyCookieOptional(t *testing.T) {
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
-	err = s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
 		AuthMethod: "cookie_and_api_key",
 		APIKey:     "api-key",
-		APIUrl:     "https://www.hddolby.com",
+		APIUrl:     "https://www.uhddolby.com",
 		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+	var row models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "hddolby").First(&row).Error)
+	assert.Equal(t, "api-key", row.APIKey)
+	assert.Empty(t, row.CookieEncrypted)
+
+	err = s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		Cookie:     "uid=1",
+		APIUrl:     "https://www.uhddolby.com",
 	})
-	require.EqualError(t, err, "Cookie 不能为空")
+	require.EqualError(t, err, "API Key 不能为空")
 }
 
 func TestConfigStore_GlobalCRUD(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -610,7 +651,7 @@ func TestConfigStore_GlobalCRUD(t *testing.T) {
 // db.First(&cur) update branch must copy FreeEndAdvanceMinutes, else db.Save
 // writes back the stale value and the UI-saved advance never persists.
 func TestSaveGlobalSettings_PersistsFreeEndAdvanceOnUpdate(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -638,7 +679,7 @@ func TestSaveGlobalSettings_PersistsFreeEndAdvanceOnUpdate(t *testing.T) {
 }
 
 func TestSaveGlobalSettings_PersistsClampedFreeEndAdvance(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -660,7 +701,7 @@ func TestSaveGlobalSettings_PersistsClampedFreeEndAdvance(t *testing.T) {
 }
 
 func TestConfigStore_ListSites_Empty(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	out, err := s.ListSites()
@@ -669,7 +710,7 @@ func TestConfigStore_ListSites_Empty(t *testing.T) {
 }
 
 func TestConfigStore_SiteCRUD(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -726,7 +767,7 @@ func TestSaveQbit_PublishEvent(t *testing.T) {
 }
 
 func TestConfigStore_SaveAndGetGlobal(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -745,7 +786,7 @@ func TestConfigStore_SaveAndGetGlobal(t *testing.T) {
 }
 
 func TestConfigStore_QbitOnlyAndSiteConf(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -782,7 +823,7 @@ func TestConfigStore_QbitOnlyAndSiteConf(t *testing.T) {
 }
 
 func TestGetSiteConf_ApplyDefaults_HDSKY(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
@@ -798,7 +839,7 @@ func TestGetSiteConf_ApplyDefaults_HDSKY(t *testing.T) {
 }
 
 func TestDeleteSite_ValidateAndDelete(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
@@ -812,7 +853,7 @@ func TestDeleteSite_ValidateAndDelete(t *testing.T) {
 // SyncSites 会把站点定义注册表里的每个站点都标上 IsBuiltin，漏掉的话别的内置站点
 // 从任何入口调进来都会被真删掉，连它的 RSS 订阅一起没。
 func TestDeleteSite_RefusesBuiltinByFlag(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
@@ -835,7 +876,7 @@ func TestDeleteSite_RefusesBuiltinByFlag(t *testing.T) {
 }
 
 func TestUpsertSiteWithRSS_Validation(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "bad", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
@@ -843,19 +884,23 @@ func TestUpsertSiteWithRSS_Validation(t *testing.T) {
 	// 预置站点（SpringSunday）不需要 APIUrl，由后端常量提供
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.NoError(t, err) // 预置站点允许空 APIUrl
-	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	// 之后的保存带回已存的地址（空）：内置站点的地址由站点定义管理，不能改。
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
 	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.NoError(t, err)
 	// RSS 列表允许为空
-	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{}})
 	assert.NoError(t, err)
-	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
 	assert.NoError(t, err)
+	// 改成别的地址被拒绝。
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c"})
+	assert.ErrorContains(t, err, "内置站点的地址由站点定义管理")
 }
 
 func TestListSites_ApplyDefaults(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
@@ -887,7 +932,7 @@ func TestReplaceSiteRSS_DeleteSite(t *testing.T) {
 }
 
 func TestGetGlobalOnly_NotFound(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	// Don't save any global settings, so GetGlobalOnly should return default values
@@ -898,7 +943,7 @@ func TestGetGlobalOnly_NotFound(t *testing.T) {
 }
 
 func TestSaveGlobalSettings_AllValidations(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -937,7 +982,7 @@ func TestSaveGlobalSettings_AllValidations(t *testing.T) {
 }
 
 func TestSaveQbitSettings_AllValidations(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -986,7 +1031,7 @@ func TestSaveQbitSettings_AllValidations(t *testing.T) {
 }
 
 func TestDeleteSite_AllCases(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -1007,7 +1052,7 @@ func TestDeleteSite_AllCases(t *testing.T) {
 }
 
 func TestGetQbitSettings_NotFound(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	// Don't save any qbit settings
@@ -1018,7 +1063,7 @@ func TestGetQbitSettings_NotFound(t *testing.T) {
 }
 
 func TestReplaceSiteRSS_EmptyRSS(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
@@ -1030,7 +1075,7 @@ func TestReplaceSiteRSS_EmptyRSS(t *testing.T) {
 }
 
 func TestGetSiteConf_NotFound(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	// Try to get non-existent site
@@ -1039,7 +1084,7 @@ func TestGetSiteConf_NotFound(t *testing.T) {
 }
 
 func TestUpdateAdminPassword_NotFound(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	s := NewConfigStore(db)
@@ -1049,7 +1094,7 @@ func TestUpdateAdminPassword_NotFound(t *testing.T) {
 }
 
 func TestGetAdmin_NotFound(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	s := NewConfigStore(db)
@@ -1062,6 +1107,7 @@ func newCloakDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(
 		&models.SettingsGlobal{}, &models.QbitSettings{}, &models.SiteSetting{},
 		&models.RSSSubscription{}, &models.TorrentInfo{}, &models.AdminUser{},
@@ -1116,13 +1162,13 @@ func TestSaveCloakConfig_CreateUpdateClear(t *testing.T) {
 	db := newCloakDB(t)
 	s := NewConfigStore(db)
 
-	require.NoError(t, s.SaveCloakConfig("https://a", "tok-a", false))
+	require.NoError(t, s.SaveCloakConfig("https://a", "tok-a", false, nil))
 	cfg, err := s.GetCloakConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "https://a", cfg.Endpoint)
 	assert.True(t, cfg.HasToken)
 
-	require.NoError(t, s.SaveCloakConfig("https://b", "", false))
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, nil))
 	tok, err := s.GetCloakToken()
 	require.NoError(t, err)
 	assert.Equal(t, "tok-a", tok)
@@ -1130,10 +1176,54 @@ func TestSaveCloakConfig_CreateUpdateClear(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://b", ep)
 
-	require.NoError(t, s.SaveCloakConfig("https://b", "ignored", true))
+	require.NoError(t, s.SaveCloakConfig("https://b", "ignored", true, nil))
 	cfg, err = s.GetCloakConfig()
 	require.NoError(t, err)
 	assert.False(t, cfg.HasToken)
+}
+
+// M1d：profile ID 与 token 一样是部分更新：nil 保持不变，空串清除，前后空白去掉。
+func TestSaveCloakConfig_ProfileID(t *testing.T) {
+	writeTestSecretKey(t)
+	db := newCloakDB(t)
+	s := NewConfigStore(db)
+
+	profile := "  profile-1  "
+	require.NoError(t, s.SaveCloakConfig("https://a", "tok", false, &profile))
+	cfg, err := s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "profile-1", cfg.ProfileID)
+
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, nil))
+	cfg, err = s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "profile-1", cfg.ProfileID, "nil keeps the stored profile")
+	assert.True(t, cfg.HasToken)
+
+	empty := ""
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, &empty))
+	cfg, err = s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.ProfileID)
+}
+
+// 后备注入浏览器的 Cookie 与 ListSites 给主通道的取法一致：有密文解密，没有密文用旧版明文列。
+func TestSiteCookiePlaintext(t *testing.T) {
+	writeTestSecretKey(t)
+	s := NewConfigStore(newCloakDB(t))
+
+	cipher, err := s.EncryptCookie("uid=1; pass=abc")
+	require.NoError(t, err)
+	got, err := s.SiteCookiePlaintext(models.SiteSetting{CookieEncrypted: cipher, Cookie: "stale=1"})
+	require.NoError(t, err)
+	assert.Equal(t, "uid=1; pass=abc", got)
+
+	got, err = s.SiteCookiePlaintext(models.SiteSetting{Cookie: "legacy=1"})
+	require.NoError(t, err)
+	assert.Equal(t, "legacy=1", got)
+
+	_, err = s.SiteCookiePlaintext(models.SiteSetting{CookieEncrypted: "not-a-ciphertext"})
+	assert.Error(t, err)
 }
 
 func TestSetCloakToken_CreateWithToken(t *testing.T) {
@@ -1202,6 +1292,7 @@ func TestConfigStore_SaveGlobalAndDefaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "download", got.DownloadDir)
 	assert.True(t, got.CleanupDiskProtect)
+	assert.True(t, got.CleanupEmergency)
 	assert.Equal(t, float64(50), got.CleanupMinDiskSpaceGB)
 
 	require.NoError(t, s.SaveGlobal(models.SettingsGlobal{
@@ -1292,6 +1383,24 @@ func TestUpsertSiteWithRSS_ValidationErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "重复")
 }
 
+// 紧急清理开关能存成关（更新走整行 Save，false 不会被换成默认值）；竞争度原来的检查间隔不再改（v16 起跟着自动删种的间隔）。
+func TestSaveGlobalSettings_CleanupEmergencyAndPeerInterval(t *testing.T) {
+	db := newCloakDB(t)
+	s := NewConfigStore(db)
+	dir := t.TempDir()
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, CleanupEmergency: true, PeerRatioIntervalMin: 20}))
+	got, err := s.GetGlobalSettings()
+	require.NoError(t, err)
+	require.True(t, got.CleanupEmergency)
+	require.Equal(t, 20, got.PeerRatioIntervalMin)
+
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, CleanupEmergency: false, PeerRatioIntervalMin: 99}))
+	got, err = s.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.False(t, got.CleanupEmergency)
+	assert.Equal(t, 20, got.PeerRatioIntervalMin, "保存全局设置不再改竞争度原来的间隔")
+}
+
 func TestGetGlobalSettings_DefaultsWhenEmpty(t *testing.T) {
 	db := newCloakDB(t)
 	s := NewConfigStore(db)
@@ -1300,6 +1409,7 @@ func TestGetGlobalSettings_DefaultsWhenEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "download", gs.DownloadDir)
 	assert.True(t, gs.CleanupDiskProtect)
+	assert.True(t, gs.CleanupEmergency)
 
 	q, err := s.GetQbitSettings()
 	require.NoError(t, err)
@@ -1334,7 +1444,11 @@ func TestUpsertSiteWithRSS_ApiKeyAndRSSFieldErrors(t *testing.T) {
 		AuthMethod: "api_key", APIUrl: "https://x",
 	}))
 
+	// cookie_and_api_key 要 API Key，Cookie 可选
 	require.Error(t, s.UpsertSiteWithRSS("customx", models.SiteConfig{
+		AuthMethod: "cookie_and_api_key", APIUrl: "https://x", Cookie: "c",
+	}))
+	require.NoError(t, s.UpsertSiteWithRSS("customx", models.SiteConfig{
 		AuthMethod: "cookie_and_api_key", APIUrl: "https://x", APIKey: "k",
 	}))
 
@@ -1416,7 +1530,7 @@ func TestConfigStore_ErrorPaths_ClosedDB(t *testing.T) {
 	assert.Error(t, err)
 	assert.Error(t, s.SetCloakEndpoint("https://y"))
 	assert.Error(t, s.SetCloakToken("tok"))
-	assert.Error(t, s.SaveCloakConfig("https://y", "tok", false))
+	assert.Error(t, s.SaveCloakConfig("https://y", "tok", false, nil))
 	_, err = s.GetGlobalOnly()
 	assert.NoError(t, err)
 }
@@ -1477,13 +1591,17 @@ func TestGetQbitOnly_NoRow(t *testing.T) {
 }
 
 func TestCloakToken_EncryptErrorPaths(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	db := newCloakDB(t)
 	s := NewConfigStore(db)
 
 	require.Error(t, s.SetCloakToken("plaintext"))
-	require.Error(t, s.SaveCloakConfig("https://x", "plaintext", false))
+	require.Error(t, s.SaveCloakConfig("https://x", "plaintext", false, nil))
 
 	require.NoError(t, db.DB.Create(&models.CloakSettings{Endpoint: "https://pre"}).Error)
 	require.Error(t, s.SetCloakToken("plaintext"))
@@ -1517,4 +1635,175 @@ func TestUpsertSite_ClearCookieWhenEmpty(t *testing.T) {
 	var row models.SiteSetting
 	require.NoError(t, db.DB.First(&row, id).Error)
 	assert.Empty(t, row.CookieEncrypted)
+}
+
+// SetSiteEnabled 只改开关，其他字段原样保留；站点不存在时报错。
+func TestSetSiteEnabled_OnlyTogglesEnabled(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := OpenTestDB(t)
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	enabled := true
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "uid=1", APIUrl: "http://api", DownloadLimitKBs: 256,
+	}))
+
+	require.NoError(t, s.SetSiteEnabled(models.SiteGroup("springsunday"), false))
+	sc, err := s.GetSiteConf(models.SiteGroup("springsunday"))
+	require.NoError(t, err)
+	require.NotNil(t, sc.Enabled)
+	assert.False(t, *sc.Enabled)
+	assert.Equal(t, "cookie", sc.AuthMethod)
+	assert.Equal(t, "uid=1", sc.Cookie)
+	assert.Equal(t, "http://api", sc.APIUrl)
+	assert.Equal(t, 256, sc.DownloadLimitKBs)
+
+	require.NoError(t, s.SetSiteEnabled(models.SiteGroup("springsunday"), true))
+	sc, err = s.GetSiteConf(models.SiteGroup("springsunday"))
+	require.NoError(t, err)
+	assert.True(t, *sc.Enabled)
+
+	assert.ErrorContains(t, s.SetSiteEnabled(models.SiteGroup("missing"), false), "不存在")
+}
+
+// 读写数据库出错时把错误交回调用方，不吞掉。
+func TestSetSiteEnabled_PropagatesDBErrors(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := OpenTestDB(t)
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	enabled := true
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "c", APIUrl: "http://api",
+	}))
+
+	require.NoError(t, db.DB.Exec("CREATE TRIGGER deny_site_update BEFORE UPDATE ON site_settings BEGIN SELECT RAISE(ABORT, 'site_settings is read-only'); END;").Error)
+	assert.ErrorContains(t, s.SetSiteEnabled(models.SiteGroup("springsunday"), false), "read-only")
+	require.NoError(t, db.DB.Exec("DROP TRIGGER deny_site_update").Error)
+
+	require.NoError(t, db.DB.Migrator().DropTable(&models.SiteSetting{}))
+	assert.Error(t, s.SetSiteEnabled(models.SiteGroup("springsunday"), false))
+}
+
+// 批量写 Cookie：只改 Cookie 与启用两列、不动 RSS；不能写的站点单独列出；写进去了只发布一次配置变更。
+func TestSetSiteCookies(t *testing.T) {
+	t.Setenv("PT_TOOLS_SECRET_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	db := newTempDB(t)
+	s := NewConfigStore(db)
+	sites := []models.SiteSetting{
+		{Name: "hdsky", AuthMethod: "cookie", APIUrl: "https://hdsky.me/"},
+		{Name: "both", AuthMethod: "cookie_and_api_key", APIKey: "k"},
+		{Name: "nokey", AuthMethod: "cookie_and_api_key"},
+		{Name: "mteam", AuthMethod: "api_key", APIKey: "k", Enabled: true},
+	}
+	require.NoError(t, db.DB.Create(&sites).Error)
+	rss := models.RSSSubscription{SiteID: sites[0].ID, Name: "r", URL: "https://hdsky.me/rss", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&rss).Error)
+
+	_, ch, cancel := events.Subscribe(4)
+	defer cancel()
+	failed, err := s.SetSiteCookies(context.Background(), map[models.SiteGroup]string{
+		"hdsky": " uid=1; pass=2 ", "both": "a=1", "nokey": "a=1", "mteam": "a=1", "ghost": "a=1", "empty": " ",
+	})
+	require.NoError(t, err)
+	assert.Len(t, failed, 4)
+	for _, n := range []models.SiteGroup{"nokey", "mteam", "ghost", "empty"} {
+		assert.Contains(t, failed, n)
+	}
+	assert.Contains(t, failed["nokey"].Error(), "API Key")
+
+	sc, err := s.GetSiteConf("hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, "uid=1; pass=2", sc.Cookie)
+	require.NotNil(t, sc.Enabled)
+	assert.True(t, *sc.Enabled)
+	var row models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "hdsky").First(&row).Error)
+	assert.Empty(t, row.Cookie, "只以密文落库")
+	assert.NotContains(t, row.CookieEncrypted, "pass=2")
+	var kept models.RSSSubscription
+	require.NoError(t, db.DB.First(&kept, rss.ID).Error, "RSS 不动（id 不变）")
+
+	select {
+	case e := <-ch:
+		assert.Equal(t, events.ConfigChanged, e.Type)
+	case <-time.After(time.Second):
+		t.Fatal("expected ConfigChanged event")
+	}
+	select {
+	case e := <-ch:
+		t.Fatalf("只发布一次，又收到 %v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// 一个都没写进去：不发布
+	failed, err = s.SetSiteCookies(context.Background(), map[models.SiteGroup]string{"ghost": "a=1"})
+	require.NoError(t, err)
+	assert.Len(t, failed, 1)
+	select {
+	case e := <-ch:
+		t.Fatalf("没写进去却发布了 %v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// 示例里的占位地址（hdsky.xxx 这类）永远取不到：新填或改成它时拒绝并说清楚；已经存着的照样能保存站点的别的设置
+func TestRSSPlaceholderRejected(t *testing.T) {
+	db, err := OpenTestDB(t)
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "c", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "HDSky", URL: "https://hdsky.xxx/torrentrss.php?xxx", IntervalMinutes: 10}}}
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "第 1 条 RSS「HDSky」")
+	assert.Contains(t, err.Error(), "占位地址（hdsky.xxx）")
+
+	// 库里已经有一条占位地址的（升级前照着示例建的）：只改站点的别的设置时照样能保存
+	sc.RSS = []models.RSSConfig{{Name: "真的", URL: "https://springsunday.net/torrentrss.php?passkey=k", IntervalMinutes: 10}}
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc))
+	var site models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "springsunday").First(&site).Error)
+	stale := models.RSSSubscription{SiteID: site.ID, Name: "CMCT", URL: "https://springxxx.xxx", IntervalMinutes: 5}
+	require.NoError(t, db.DB.Create(&stale).Error)
+	cfg, err := s.Load()
+	require.NoError(t, err)
+	sc = cfg.Sites[models.SiteGroup("springsunday")]
+	sc.Cookie = "c2"
+	require.Len(t, sc.RSS, 2)
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc), "存着的占位地址没改：不卡住")
+
+	// 单条加、单条改：加占位地址拒绝；改别的字段可以，改成占位地址拒绝
+	_, err = s.AppendRSSToSite("springsunday", models.RSSConfig{Name: "又一个", URL: "https://rss.m-team.xxx/api/rss/xxx", IntervalMinutes: 10})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "占位地址")
+	cfg, err = s.Load()
+	require.NoError(t, err)
+	var cmct models.RSSConfig
+	for _, r := range cfg.Sites[models.SiteGroup("springsunday")].RSS {
+		if r.Name == "CMCT" {
+			cmct = r
+		}
+	}
+	require.NotZero(t, cmct.ID)
+	cmct.Name = "CMCT 改名"
+	_, err = s.UpdateRSSInSite("springsunday", cmct)
+	require.NoError(t, err)
+	real := cfg.Sites[models.SiteGroup("springsunday")].RSS[0]
+	real.URL = "https://hdsky.xxx/torrentrss.php"
+	_, err = s.UpdateRSSInSite("springsunday", real)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "占位地址（hdsky.xxx）")
+}
+
+// v17 起免费结束时删除还是暂停每条 RSS 自己选：保存全局设置不再改全局的「免费结束自动删除」，
+// 它留着升级前的值，给迁移 v17 换算与回退到旧版时用。
+func TestSaveGlobalSettings_KeepsLegacyAutoDeleteOnFreeEnd(t *testing.T) {
+	db := newCloakDB(t)
+	s := NewConfigStore(db)
+	dir := t.TempDir()
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, AutoDeleteOnFreeEnd: true}))
+	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, AutoDeleteOnFreeEnd: false}))
+	got, err := s.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.True(t, got.AutoDeleteOnFreeEnd)
 }

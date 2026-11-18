@@ -137,13 +137,13 @@ type addrssBindingLookup struct {
 	ok   bool
 }
 
-func (l *addrssBindingLookup) FindByChannelUser(context.Context, string, string) (chatops.BindingInfo, bool, error) {
+func (l *addrssBindingLookup) FindByChannelUser(context.Context, uint, string, string) (chatops.BindingInfo, bool, error) {
 	return l.info, l.ok, nil
 }
 
 type addrssBindCoder struct{}
 
-func (addrssBindCoder) ConsumeCode(context.Context, string, string, string) error { return nil }
+func (addrssBindCoder) ConsumeCode(context.Context, string, uint, string, string) error { return nil }
 
 type addrssAuditRecorder struct{}
 
@@ -572,7 +572,7 @@ func TestAddrssShortcutInvalidShowsExample(t *testing.T) {
 
 func setupAddrssGlobalDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	prev := global.GlobalDB
 	global.GlobalDB = db

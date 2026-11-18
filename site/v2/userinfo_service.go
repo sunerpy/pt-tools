@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -98,7 +99,9 @@ func (s *UserInfoService) ListSites() []string {
 	return ids
 }
 
-// FetchAndSave fetches user info from a site and saves it
+// FetchAndSave fetches user info from a site and saves it.
+// 站点没注册时错误包装 ErrSiteNotFound，用户名为空时包装 ErrEmptyUsername；
+// 保存失败时同时返回取到的 UserInfo 和包装 ErrUserInfoPersist 的错误（不更新缓存）。
 func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (UserInfo, error) {
 	s.mu.RLock()
 	site, ok := s.sites[siteID]
@@ -110,18 +113,32 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 
 	s.logger.Debug("Fetching user info", zap.String("site", siteID))
 
+	// 失败的原因由调用方记（并发同步时一个站点一行，带原因分类，见 FetchAndSaveAllWithConcurrency）
 	info, err := site.GetUserInfo(ctx)
-	if err != nil {
-		s.logger.Error(
-			"Failed to fetch user info",
+	var partial *PartialUserInfoError
+	if errors.As(err, &partial) && strings.TrimSpace(info.Username) != "" {
+		// 只取到一部分：缺的字段沿用上一次的；连上传、下载量都缺、又没有上一次的时不保存（免得统计里冒出 0）
+		merged, kept, ok := s.fillMissing(ctx, siteID, info, partial.Missing)
+		if !ok {
+			return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, err)
+		}
+		s.logger.Warn(
+			"Partial user info, kept previous values",
 			zap.String("site", siteID),
-			zap.Error(err),
+			zap.String("reason", FetchFailureReason(partial.Err)),
+			zap.Strings("kept", kept),
+			zap.Error(partial.Err),
 		)
+		info, err = merged, nil
+	}
+	if err != nil {
 		return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, err)
 	}
 	if strings.TrimSpace(info.Username) == "" {
-		return UserInfo{}, fmt.Errorf("fetch user info from %s: parsed empty username", siteID)
+		return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, ErrEmptyUsername)
 	}
+	// 无穷分享率统一记成 InfiniteRatio（站点写「无限」没认出来的、以前记成 -1 的），见 normalizeRatio
+	normalizeRatio(&info)
 
 	// Save to repository
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -132,20 +149,44 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 			zap.String("site", siteID),
 			zap.Error(err),
 		)
-		return UserInfo{}, fmt.Errorf("save user info for %s: %w", siteID, err)
+		// 站点本身是可达的：把取到的数据一并返回，调用方（如登录探测）可以按它判断站点状态。
+		return info, fmt.Errorf("save user info for %s: %w: %w", siteID, ErrUserInfoPersist, err)
 	}
 
 	// Update cache
 	s.cache.set(siteID, info)
 
-	s.logger.Info(
-		"User info fetched and saved",
+	// 账号的下载量有两种口径，日志里并列写明：downloaded_billed 是站点计费的下载量（按免费、折扣折算以后
+	// 计入分享率），downloaded_actual 是部分站点另外报的实际传输量（站点不报时没有这一项）。
+	// 免费种子只让实际下载增长，判断有没有产生计费下载看 downloaded_billed。
+	fields := []zap.Field{
 		zap.String("site", siteID),
 		zap.String("username", info.Username),
 		zap.Int64("uploaded", info.Uploaded),
-	)
+		zap.Int64("downloaded_billed", info.Downloaded),
+	}
+	if info.TrueDownloaded > 0 {
+		fields = append(fields, zap.Int64("downloaded_actual", info.TrueDownloaded))
+	}
+	s.logger.Info("User info fetched and saved", fields...)
 
 	return info, nil
+}
+
+// fillMissing 用上一次保存的数据补上这次没取到的字段；补了哪些一并返回。上传、下载量缺了又没有上一次的时 ok 为假。
+func (s *UserInfoService) fillMissing(ctx context.Context, siteID string, info UserInfo, missing []string) (UserInfo, []string, bool) {
+	// 部分结果常常是时限到了才回来的：读上一次的记录不跟着这个已经结束的 ctx（和下面保存一样）
+	getCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	prev, err := s.repo.Get(getCtx, siteID)
+	if err != nil {
+		if missesCore(missing) {
+			return info, nil, false
+		}
+		return info, nil, true
+	}
+	merged, kept := mergeMissingUserInfo(info, prev, missing)
+	return merged, kept, true
 }
 
 // FetchAndSaveAll fetches user info from all registered sites
@@ -332,6 +373,7 @@ func (s *UserInfoService) FetchAndSaveAllWithConcurrency(
 				s.logger.Warn(
 					"Failed to fetch user info",
 					zap.String("site", siteID),
+					zap.String("reason", FetchFailureReason(err)),
 					zap.Duration("duration", time.Since(siteStartTime)),
 					zap.Error(err),
 				)
@@ -359,4 +401,13 @@ func (s *UserInfoService) FetchAndSaveAllWithConcurrency(
 	)
 
 	return results, errors
+}
+
+// History 返回带每日快照的仓库；内存仓库没有历史数据，返回 false。
+func (s *UserInfoService) History() (UserInfoHistoryRepo, bool) {
+	if s == nil || s.repo == nil {
+		return nil, false
+	}
+	h, ok := s.repo.(UserInfoHistoryRepo)
+	return h, ok
 }

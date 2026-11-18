@@ -36,7 +36,7 @@ func closedDBServer(t *testing.T) *Server {
 	prev := global.GlobalDB
 	global.GlobalDB = &models.TorrentDB{DB: db}
 	t.Cleanup(func() { global.GlobalDB = prev })
-	return &Server{sessions: map[string]string{"sess-test": "admin"}}
+	return &Server{sessions: sessionsWith("sess-test", "admin")}
 }
 
 func TestListDynamicSites_DBError(t *testing.T) {
@@ -594,8 +594,12 @@ func TestSiteTemplates(t *testing.T) {
 		if err := db.Where("name = ?", "imported-template").First(&site).Error; err != nil {
 			t.Errorf("site not created: %v", err)
 		}
-		if site.Cookie != "import-cookie" {
-			t.Errorf("expected cookie 'import-cookie', got '%s'", site.Cookie)
+		// Cookie 只以密文落库：明文列为空，密文解出导入的值。
+		if site.Cookie != "" {
+			t.Errorf("expected no plaintext cookie, got '%s'", site.Cookie)
+		}
+		if plain, err := server.store.DecryptCookie(site.CookieEncrypted); err != nil || plain != "import-cookie" {
+			t.Errorf("expected encrypted cookie 'import-cookie', got %q (err %v)", plain, err)
 		}
 	})
 }

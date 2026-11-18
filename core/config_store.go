@@ -2,12 +2,14 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -151,13 +153,13 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 			if e != nil {
 				return e
 			}
-			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, UploadLimitKBs: sitem.UploadLimitKBs, DownloadLimitKBs: sitem.DownloadLimitKBs, SeedingCapacityGB: sitem.SeedingCapacityGB, RSS: []models.RSSConfig{}}
+			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, UploadLimitKBs: sitem.UploadLimitKBs, DownloadLimitKBs: sitem.DownloadLimitKBs, SeedingCapacityGB: sitem.SeedingCapacityGB, HRSeedTimeH: sitem.HRSeedTimeH, HRUploadRatio: sitem.HRUploadRatio, RSS: []models.RSSConfig{}}
 			var rss []models.RSSSubscription
 			if e := tx.Where("site_id = ?", sitem.ID).Find(&rss).Error; e != nil {
 				return e
 			}
 			for _, r := range rss {
-				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
+				sc.RSS = append(sc.RSS, rssConfigOf(r))
 			}
 			out.Sites[sg] = sc
 		}
@@ -233,7 +235,48 @@ func (s *ConfigStore) GetGlobalOnly() (models.SettingsGlobal, error) {
 	out.TorrentSizeGB = 200
 	out.AutoStart = false
 	out.CleanupDiskProtect = true
+	out.CleanupEmergency = true
 	out.CleanupMinDiskSpaceGB = 50
+	return out, nil
+}
+
+// SetAutoStart 只改全局设置里的「自动启动 RSS 任务」，其余设置不动；值没变时什么也不做。
+// 改了就发布配置变更，和在全局设置页保存一样：RSS 任务没在运行、也没被手动停止时，打开它会马上按配置启动。
+func (s *ConfigStore) SetAutoStart(enabled bool) error {
+	db := s.db.DB
+	var cur models.SettingsGlobal
+	if err := db.First(&cur).Error; err != nil {
+		return fmt.Errorf("读取全局设置失败: %w", err)
+	}
+	if cur.AutoStart == enabled {
+		return nil
+	}
+	if err := db.Model(&models.SettingsGlobal{}).Where("id = ?", cur.ID).Update("auto_start", enabled).Error; err != nil {
+		return fmt.Errorf("保存自动启动失败: %w", err)
+	}
+	sLogger().Infof("[全局配置已更新] 自动启动=%v", enabled)
+	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "global", At: time.Now()})
+	return nil
+}
+
+// EnabledRSS 返回已启用站点下的全部 RSS 订阅（含示例订阅，由调用方按 ShouldSkip 剔除）。
+// 只读站点的 id、enabled 与订阅表，不经过 Load：不解密 Cookie，密钥缺失时 RSS 任务的状态查询照样能用。
+func (s *ConfigStore) EnabledRSS() ([]models.RSSConfig, error) {
+	var siteIDs []uint
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("enabled = ?", true).Pluck("id", &siteIDs).Error; err != nil {
+		return nil, fmt.Errorf("读取已启用站点失败: %w", err)
+	}
+	if len(siteIDs) == 0 {
+		return nil, nil
+	}
+	var rows []models.RSSSubscription
+	if err := s.db.DB.Where("site_id IN ?", siteIDs).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取 RSS 订阅失败: %w", err)
+	}
+	out := make([]models.RSSConfig, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, IsExample: r.IsExample})
+	}
 	return out, nil
 }
 
@@ -250,6 +293,7 @@ func (s *ConfigStore) GetGlobalSettings() (models.SettingsGlobal, error) {
 		gs.TorrentSizeGB = 200
 		gs.AutoStart = false
 		gs.CleanupDiskProtect = true
+		gs.CleanupEmergency = true
 		gs.CleanupMinDiskSpaceGB = 50
 		return gs, nil
 	}
@@ -335,16 +379,17 @@ func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patc
 		cur.CleanupSlowMaxRatio = gs.CleanupSlowMaxRatio
 		cur.CleanupDelFreeExpired = gs.CleanupDelFreeExpired
 		cur.CleanupDiskProtect = gs.CleanupDiskProtect
+		cur.CleanupEmergency = gs.CleanupEmergency
 		cur.CleanupMinDiskSpaceGB = gs.CleanupMinDiskSpaceGB
 		cur.CleanupProtectDL = gs.CleanupProtectDL
 		cur.CleanupProtectHR = gs.CleanupProtectHR
 		cur.CleanupMinRetainH = gs.CleanupMinRetainH
 		cur.CleanupProtectTags = gs.CleanupProtectTags
-		cur.AutoDeleteOnFreeEnd = gs.AutoDeleteOnFreeEnd
+		// AutoDeleteOnFreeEnd 不再改：免费结束时删除还是暂停每条 RSS 自己选（v17），它留着升级前的值给旧版
 		cur.FreeEndAdvanceMinutes = gs.FreeEndAdvanceMinutes
 		cur.PeerRatioEnabled = gs.PeerRatioEnabled
 		cur.PeerRatioMaxSL = gs.PeerRatioMaxSL
-		cur.PeerRatioIntervalMin = gs.PeerRatioIntervalMin
+		// PeerRatioIntervalMin 不再改：竞争度跟着自动删种的检查间隔（v16）
 		cur.PeerRatioRemoveData = gs.PeerRatioRemoveData
 		cur.DefaultFilterMode = models.NormalizeFilterMode(gs.DefaultFilterMode)
 		if err := db.Save(&cur).Error; err != nil {
@@ -446,6 +491,24 @@ func (s *ConfigStore) SaveQbitSettings(q models.QbitSettings) error {
 	return nil
 }
 
+// SetSiteEnabled 只改站点的启用开关，认证方式、凭证、地址、限速和 RSS 都不动。
+func (s *ConfigStore) SetSiteEnabled(site models.SiteGroup, enabled bool) error {
+	var count int64
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("name = ?", string(site)).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("站点 %s 不存在", site)
+	}
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("name = ?", string(site)).Update("enabled", enabled).Error; err != nil {
+		return err
+	}
+	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
+	return nil
+}
+
+// UpsertSite 整体覆盖站点的认证信息：sc 里为空的认证方式、Cookie、API Key、地址和 Passkey 会清掉已存的值。
+// 只想改启用开关时用 SetSiteEnabled。
 func (s *ConfigStore) UpsertSite(site models.SiteGroup, sc models.SiteConfig) (uint, error) {
 	db := s.db.DB
 	var row models.SiteSetting
@@ -456,7 +519,8 @@ func (s *ConfigStore) UpsertSite(site models.SiteGroup, sc models.SiteConfig) (u
 		row.Enabled = *sc.Enabled
 	}
 	row.AuthMethod = sc.AuthMethod
-	row.Cookie = sc.Cookie
+	// Cookie 只以密文落库；旧的明文列不再写入，存量明文由 v11 迁移清除。
+	row.Cookie = ""
 	if strings.TrimSpace(sc.Cookie) == "" {
 		row.CookieEncrypted = ""
 	} else {
@@ -548,17 +612,22 @@ func (s *ConfigStore) AdminCount() (int64, error) {
 	return cnt, err
 }
 
-// UpsertSiteWithRSS 原子性保存站点与 RSS，并进行严格校验
+// UpsertSiteWithRSS 原子性保存站点与 RSS，并进行严格校验。
+// sc.RSS 是这个站点保存以后的全部 RSS：带着这个站点编号的原地更新（编号不变），编号为 0 或不是这个站点的新建，
+// 库里有、sc.RSS 里没有的连同过滤规则关联一起删掉；同一个编号出现两次时报错，什么都不保存。
 func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteConfig) error {
 	// 严格校验：
 	// 1) 认证方式必填且合法；
 	// 2) 根据认证方式二选一且对应字段不为空（api_key 或 cookie），另一项必须为空；
-	//    特殊：cookie_and_api_key 同时需要两者
+	//    特殊：cookie_and_api_key 要 API Key，Cookie 可选（时魔、签到与只知道种子编号的下载用它）
 	// 3) 对于非预置站点，API URL 必填；预置站点使用常量
 	// 4) RSS 列表可以为空，但如果有则各项字段需合法。
 	am := strings.ToLower(strings.TrimSpace(sc.AuthMethod))
 	if am != "cookie" && am != "api_key" && am != "cookie_and_api_key" && am != "passkey" {
 		return errors.New("认证方式必须为 'cookie'、'api_key'、'cookie_and_api_key' 或 'passkey'")
+	}
+	if err := validateHRUploadRatio(sc.HRUploadRatio); err != nil {
+		return err
 	}
 
 	// 检查站点是否在注册表中（有默认 URL），注册表中的站点不需要用户提供 API URL
@@ -576,6 +645,11 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		}
 	} else {
 		hasStoredCookie = strings.TrimSpace(existingSite.CookieEncrypted) != "" || strings.TrimSpace(existingSite.Cookie) != ""
+		// 内置站点的地址由站点定义管理：界面只读，启动时 SyncSitesFromRegistry 按定义对齐。
+		// 改成别的地址直接拒绝，免得写进去之后下次启动又悄悄恢复。
+		if isRegistered && strings.TrimSpace(sc.APIUrl) != strings.TrimSpace(existingSite.APIUrl) {
+			return errors.New("内置站点的地址由站点定义管理，不能修改")
+		}
 	}
 
 	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
@@ -589,9 +663,6 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	case "cookie_and_api_key":
 		if apiKeyEmpty {
 			return errors.New("API Key 不能为空")
-		}
-		if cookieEmpty {
-			return errors.New("Cookie 不能为空")
 		}
 	case "cookie":
 		if cookieEmpty {
@@ -607,12 +678,31 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	}
 	// RSS 列表允许为空，只在有内容时进行校验
 	if len(sc.RSS) > 0 {
+		// 已经存着的占位地址照样能保存（只改站点的别的设置时不卡住），新填的或改过的不行
+		storedURL := map[uint]string{}
+		if existingSite.ID != 0 {
+			var rows []models.RSSSubscription
+			if err := s.db.DB.Where("site_id = ?", existingSite.ID).Find(&rows).Error; err != nil {
+				return err
+			}
+			for _, row := range rows {
+				storedURL[row.ID] = row.URL
+			}
+		}
+		for i, r := range sc.RSS {
+			if stored, ok := storedURL[r.ID]; ok && r.ID != 0 && strings.TrimSpace(stored) == strings.TrimSpace(r.URL) {
+				continue
+			}
+			if err := rssPlaceholderError(r.URL); err != nil {
+				return fmt.Errorf("第 %d 条 RSS「%s」：%w", i+1, r.Name, err)
+			}
+		}
 		// 检查重复 RSS URL
 		urlSet := make(map[string]bool)
 		for i, r := range sc.RSS {
 			normalizedURL := strings.TrimSpace(strings.ToLower(r.URL))
 			if urlSet[normalizedURL] {
-				return fmt.Errorf("第 %d 条 RSS 的 URL 与之前的重复: %s", i+1, r.URL)
+				return fmt.Errorf("第 %d 条 RSS 的 URL 与之前的重复: %s", i+1, utils.SanitizeURL(r.URL))
 			}
 			urlSet[normalizedURL] = true
 		}
@@ -641,37 +731,83 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			row.Enabled = *sc.Enabled
 		}
 		row.AuthMethod = sc.AuthMethod
+		// Cookie 只以密文落库；旧的明文列不再写入，存量明文由 v11 迁移清除。
+		row.Cookie = ""
 		if strings.TrimSpace(sc.Cookie) != "" {
-			row.Cookie = sc.Cookie
 			cookieCipherText, err := s.EncryptCookie(sc.Cookie)
 			if err != nil {
 				return err
 			}
 			row.CookieEncrypted = cookieCipherText
-		} else {
-			// 本次保存未携带 cookie：保留已存储的登录态 cookie（含 api_key/passkey 站点），不因 auth_method 清除。
-			row.Cookie = ""
 		}
+		// 本次保存未携带 cookie：保留已存储的密文 cookie（含 api_key/passkey 站点），不因 auth_method 清除。
 		row.APIKey = sc.APIKey
 		row.APIUrl = sc.APIUrl
 		row.Passkey = sc.Passkey
 		row.UploadLimitKBs = sc.UploadLimitKBs
 		row.DownloadLimitKBs = sc.DownloadLimitKBs
 		row.SeedingCapacityGB = sc.SeedingCapacityGB
+		row.HRSeedTimeH = max(sc.HRSeedTimeH, 0)
+		row.HRUploadRatio = sc.HRUploadRatio
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
 
-		// 替换 RSS
-		if err := tx.Where("site_id = ?", row.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
+		// 按编号原地更新 RSS，不删掉重建：暂存记录的所有者、通知里的按钮都按编号认 RSS，保存以后编号不能变。
+		// 编号为 0 或不是这个站点的新建一行；库里有、这次没传的连同它的过滤规则关联一起删掉。
+		var stored []models.RSSSubscription
+		if err := tx.Where("site_id = ?", row.ID).Find(&stored).Error; err != nil {
 			return err
+		}
+		storedByID := make(map[uint]*models.RSSSubscription, len(stored))
+		for i := range stored {
+			storedByID[stored[i].ID] = &stored[i]
+		}
+		passed := make(map[uint]bool, len(sc.RSS))
+		for i, r := range sc.RSS {
+			if r.ID == 0 {
+				continue
+			}
+			if passed[r.ID] {
+				return fmt.Errorf("第 %d 条 RSS 的编号与之前的重复: %d", i+1, r.ID)
+			}
+			passed[r.ID] = true
 		}
 
 		assocDB := models.NewRSSFilterAssociationDB(tx)
 
+		for _, cur := range stored {
+			if passed[cur.ID] {
+				continue
+			}
+			if err := assocDB.DeleteByRSSID(cur.ID); err != nil {
+				return err
+			}
+			if err := tx.Where("site_id = ? AND id = ?", row.ID, cur.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
+				return err
+			}
+		}
+
 		for _, r := range sc.RSS {
 			if r.IntervalMinutes < models.MinIntervalMinutes {
 				r.IntervalMinutes = models.MinIntervalMinutes
+			}
+			// 免费结束时删除只在开着免费结束处理时有意义
+			r.FreeEndDelete = r.PauseOnFreeEnd && r.FreeEndDelete
+			if cur, ok := storedByID[r.ID]; ok {
+				// 改的字段与新建时写的相同；示例标记沿用库里的
+				cur.Name, cur.URL, cur.Category, cur.Tag = r.Name, r.URL, r.Category, r.Tag
+				cur.IntervalMinutes, cur.DownloaderID, cur.DownloadPath = r.IntervalMinutes, r.DownloaderID, r.DownloadPath
+				cur.PauseOnFreeEnd, cur.FreeEndDelete, cur.FilterMode = r.PauseOnFreeEnd, r.FreeEndDelete, r.FilterMode
+				cur.NotifyMode, cur.NotifyConfIDs, cur.MaxNotificationsPerHour = r.NotifyMode, r.NotifyConfIDs, r.MaxNotificationsPerHour
+				if err := tx.Save(cur).Error; err != nil {
+					return err
+				}
+				// 过滤规则关联整体换成这次传的，空列表就清空
+				if err := assocDB.SetFilterRulesForRSS(cur.ID, r.FilterRuleIDs); err != nil {
+					return err
+				}
+				continue
 			}
 			rr := models.RSSSubscription{
 				SiteID:                  row.ID,
@@ -683,6 +819,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 				DownloaderID:            r.DownloaderID,
 				DownloadPath:            r.DownloadPath,
 				PauseOnFreeEnd:          r.PauseOnFreeEnd,
+				FreeEndDelete:           r.FreeEndDelete,
 				FilterMode:              r.FilterMode,
 				NotifyMode:              r.NotifyMode,
 				NotifyConfIDs:           r.NotifyConfIDs,
@@ -722,11 +859,14 @@ func (s *ConfigStore) AppendRSSToSite(siteName string, entry models.RSSConfig) (
 		}
 		existing := make([]models.RSSConfig, 0, len(rows))
 		for _, r := range rows {
-			existing = append(existing, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
+			existing = append(existing, rssConfigOf(r))
 		}
 
 		normalized, err := validateAndNormalizeRSS(existing, entry)
 		if err != nil {
+			return err
+		}
+		if err := rssPlaceholderError(normalized.URL); err != nil {
 			return err
 		}
 		if normalized.DownloaderID != nil {
@@ -749,6 +889,7 @@ func (s *ConfigStore) AppendRSSToSite(siteName string, entry models.RSSConfig) (
 			DownloaderID:            normalized.DownloaderID,
 			DownloadPath:            normalized.DownloadPath,
 			PauseOnFreeEnd:          normalized.PauseOnFreeEnd,
+			FreeEndDelete:           normalized.FreeEndDelete,
 			FilterMode:              normalized.FilterMode,
 			NotifyMode:              normalized.NotifyMode,
 			NotifyConfIDs:           normalized.NotifyConfIDs,
@@ -872,11 +1013,32 @@ func boolPtr(b bool) *bool                    { return &b }
 // ReloadGlobal 从 DB 加载并刷新全局配置与目录缓存
 // 已弃用：由各业务按需读取 DB 并更新目录缓存
 // ListSites 从 DB 读取站点与 RSS 配置（不依赖 global.GlobalCfg）
+// EnabledSiteNames 返回已启用站点名（小写）的集合。用户数据的增量、走势与每日战报只算这些站点，
+// 与 /api/v2/userinfo/aggregated 口径一致。只读 name 与 enabled 两列：不经过 ListSites，
+// 密钥缺失或 Cookie 解不开时照样能用。
+func (s *ConfigStore) EnabledSiteNames() (map[string]bool, error) {
+	var names []string
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("enabled = ?", true).Pluck("name", &names).Error; err != nil {
+		return nil, fmt.Errorf("读取已启用站点失败: %w", err)
+	}
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[strings.ToLower(n)] = true
+	}
+	return out, nil
+}
+
 func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error) {
 	out := map[models.SiteGroup]models.SiteConfig{}
 	var sites []models.SiteSetting
 	if err := s.db.DB.Find(&sites).Error; err != nil {
 		return nil, err
+	}
+	// 读不出过滤规则关联时照样列出站点（与 GetSiteConf 一样），只是 RSS 不带过滤规则编号：
+	// 列表用在搜索、统计等很多地方，不能因为这一项整个读不出来
+	rules, err := models.NewRSSFilterAssociationDB(s.db.DB).FilterRuleIDsByRSS()
+	if err != nil {
+		sLogger().Warnf("[站点列表] 读取 RSS 的过滤规则关联失败: %v", err)
 	}
 	for _, ss := range sites {
 		sg := models.SiteGroup(strings.ToLower(ss.Name))
@@ -884,13 +1046,19 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 		if err != nil {
 			return nil, err
 		}
-		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, SeedingCapacityGB: ss.SeedingCapacityGB, RSS: []models.RSSConfig{}}
+		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, SeedingCapacityGB: ss.SeedingCapacityGB, HRSeedTimeH: ss.HRSeedTimeH, HRUploadRatio: ss.HRUploadRatio, RSS: []models.RSSConfig{}}
 		var rss []models.RSSSubscription
 		if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
+			cfg := rssConfigOf(r)
+			// 带上过滤规则编号：站点列表上的启用开关把列表里的配置整站存回去，不带就会把关联清掉
+			cfg.FilterRuleIDs = rules[r.ID]
+			if cfg.FilterRuleIDs == nil {
+				cfg.FilterRuleIDs = []uint{}
+			}
+			sc.RSS = append(sc.RSS, cfg)
 		}
 		// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 		out[sg] = sc
@@ -899,6 +1067,77 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 }
 
 // GetSiteConf 获取指定站点配置
+// SetSiteCookies 批量把 Cookie 写进站点并启用（CookieCloud 导入用），只改 Cookie 与启用两列，不动 RSS 等其他设置。
+// 站点必须已经存在、用 Cookie 登录；同时要 API Key 的站点必须已经填了 API Key。在一个事务里写完，写进去了就只发布一次配置变更。
+// 返回写不进去的站点和原因；数据库出错时返回错误，一个都不写。
+func (s *ConfigStore) SetSiteCookies(ctx context.Context, cookies map[models.SiteGroup]string) (map[models.SiteGroup]error, error) {
+	names := make([]string, 0, len(cookies))
+	for sg := range cookies {
+		names = append(names, string(sg))
+	}
+	sort.Strings(names)
+	failed := map[models.SiteGroup]error{}
+	written := 0
+	err := s.db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, n := range names {
+			sg := models.SiteGroup(n)
+			cookie := strings.TrimSpace(cookies[sg])
+			if cookie == "" {
+				failed[sg] = errors.New("Cookie 为空")
+				continue
+			}
+			var row models.SiteSetting
+			if err := tx.Where("name = ?", n).First(&row).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					failed[sg] = errors.New("pt-tools 里没有这个站点")
+					continue
+				}
+				return err
+			}
+			switch strings.ToLower(strings.TrimSpace(row.AuthMethod)) {
+			case "cookie":
+			case "cookie_and_api_key":
+				if strings.TrimSpace(row.APIKey) == "" {
+					failed[sg] = errors.New("这个站点还要 API Key，先在站点设置里填写")
+					continue
+				}
+			default:
+				failed[sg] = errors.New("这个站点不用 Cookie 登录")
+				continue
+			}
+			enc, err := s.EncryptCookie(cookie)
+			if err != nil {
+				return fmt.Errorf("加密 Cookie 失败: %w", err)
+			}
+			if err := tx.Model(&models.SiteSetting{}).Where("id = ?", row.ID).
+				Updates(map[string]any{"cookie_encrypted": enc, "cookie": "", "enabled": true}).Error; err != nil {
+				return err
+			}
+			written++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if written > 0 {
+		events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
+		sLogger().Infof("[站点配置已更新] 批量写入 %d 个站点的 Cookie", written)
+	}
+	return failed, nil
+}
+
+// rssConfigOf 是库里一条 RSS 订阅的运行时配置（不含过滤规则关联，要的调用方自己读）。读站点配置的几处都用它，
+// 整站保存把读出来的配置原样存回去时不会少字段。
+func rssConfigOf(r models.RSSSubscription) models.RSSConfig {
+	return models.RSSConfig{
+		ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes,
+		DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample,
+		PauseOnFreeEnd: r.PauseOnFreeEnd, FreeEndDelete: r.FreeEndDelete, FilterMode: r.FilterMode,
+		NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour,
+	}
+}
+
 func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, error) {
 	var ss models.SiteSetting
 	if err := s.db.DB.Where("name = ?", string(name)).First(&ss).Error; err != nil {
@@ -909,7 +1148,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	if err != nil {
 		return models.SiteConfig{}, err
 	}
-	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, SeedingCapacityGB: ss.SeedingCapacityGB, RSS: []models.RSSConfig{}}
+	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, SeedingCapacityGB: ss.SeedingCapacityGB, HRSeedTimeH: ss.HRSeedTimeH, HRUploadRatio: ss.HRUploadRatio, RSS: []models.RSSConfig{}}
 	var rss []models.RSSSubscription
 	if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 		return models.SiteConfig{}, err
@@ -919,22 +1158,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	assocDB := models.NewRSSFilterAssociationDB(s.db.DB)
 
 	for _, r := range rss {
-		rssCfg := models.RSSConfig{
-			ID:                      r.ID,
-			Name:                    r.Name,
-			URL:                     r.URL,
-			Category:                r.Category,
-			Tag:                     r.Tag,
-			IntervalMinutes:         r.IntervalMinutes,
-			DownloaderID:            r.DownloaderID,
-			DownloadPath:            r.DownloadPath,
-			IsExample:               r.IsExample,
-			PauseOnFreeEnd:          r.PauseOnFreeEnd,
-			FilterMode:              r.FilterMode,
-			NotifyMode:              r.NotifyMode,
-			NotifyConfIDs:           r.NotifyConfIDs,
-			MaxNotificationsPerHour: r.MaxNotificationsPerHour,
-		}
+		rssCfg := rssConfigOf(r)
 
 		// 获取关联的过滤规则 ID
 		ruleIDs, err := assocDB.GetFilterRuleIDsForRSS(r.ID)
@@ -946,6 +1170,12 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	}
 	// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 	return sc, nil
+}
+
+// SiteCookiePlaintext 按 ListSites 的同一规则取站点 Cookie 明文：有密文时解密，否则用旧版明文列。
+// 只给可信边界（CloakBrowser 后备注入浏览器）用，不要写进响应或日志。
+func (s *ConfigStore) SiteCookiePlaintext(site models.SiteSetting) (string, error) {
+	return s.cookiePlaintextForSite(site)
 }
 
 func (s *ConfigStore) cookiePlaintextForSite(site models.SiteSetting) (string, error) {
@@ -963,8 +1193,9 @@ func (s *ConfigStore) cookiePlaintextForSite(site models.SiteSetting) (string, e
 // 仅在 ConfigStore 内部及调用方使用；HTTP 层通过 web.api_cloak.go 暴露的响应类型
 // 控制对外字段，token 永远不会以明文出现在 API 响应里。
 type CloakConfigSnapshot struct {
-	Endpoint string
-	HasToken bool
+	Endpoint  string
+	HasToken  bool
+	ProfileID string
 }
 
 // GetCloakConfig 返回 endpoint + 是否已设置 token。永远不返回 token 明文。
@@ -975,8 +1206,9 @@ func (s *ConfigStore) GetCloakConfig() (CloakConfigSnapshot, error) {
 		return CloakConfigSnapshot{}, err
 	}
 	return CloakConfigSnapshot{
-		Endpoint: row.Endpoint,
-		HasToken: strings.TrimSpace(row.TokenEncrypted) != "",
+		Endpoint:  row.Endpoint,
+		HasToken:  strings.TrimSpace(row.TokenEncrypted) != "",
+		ProfileID: row.ProfileID,
 	}, nil
 }
 
@@ -1055,9 +1287,10 @@ func (s *ConfigStore) SetCloakToken(plaintext string) error {
 	return db.Save(&row).Error
 }
 
-// SaveCloakConfig 在单次事务里同时更新 endpoint + token；
+// SaveCloakConfig 在单次事务里同时更新 endpoint + token + profile ID；
 // emptyToken=true 时显式清空 token，否则 plaintextToken=="" 表示保持不变（部分更新）。
-func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToken bool) error {
+// profileID 为 nil 表示保持不变，指向空串表示清除。
+func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToken bool, profileID *string) error {
 	endpoint = strings.TrimSpace(endpoint)
 	return s.db.WithTransaction(func(tx *gorm.DB) error {
 		var row models.CloakSettings
@@ -1080,6 +1313,9 @@ func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToke
 				return encErr
 			}
 			row.TokenEncrypted = cipherText
+		}
+		if profileID != nil {
+			row.ProfileID = strings.TrimSpace(*profileID)
 		}
 		if isNew {
 			return tx.Create(&row).Error

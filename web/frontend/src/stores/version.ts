@@ -1,6 +1,6 @@
 import { ElNotification } from "element-plus";
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, onScopeDispose, ref } from "vue";
 import {
   type ReleaseInfo,
   versionApi,
@@ -154,6 +154,7 @@ export const useVersionStore = defineStore("version", () => {
   async function cancelUpgrade() {
     try {
       await versionApi.cancelUpgrade();
+      stopUpgradePolling();
       upgrading.value = false;
       upgradeProgress.value = null;
     } catch (error) {
@@ -161,49 +162,93 @@ export const useVersionStore = defineStore("version", () => {
     }
   }
 
+  /*
+   * 升级进度串行轮询：一次请求回来才排下一次，慢请求不会叠起来。
+   * 失败时按 2、4、8… 秒退避，最长 30 秒；连续失败 POLL_MAX_FAILURES 次（约 8 分钟）就停下并告知，
+   * 而不是一直每秒请求一个已经 401 / 500 的接口。服务端拒绝并发升级，停下后复位 upgrading 不会重复开升级。
+   */
+  const POLL_INTERVAL_MS = 1000;
+  const POLL_MAX_BACKOFF_MS = 30_000;
+  const POLL_MAX_FAILURES = 20;
+
   let progressPollTimer: number | null = null;
+  /** 每次开始或停止轮询换一代：上一代在途的请求回来后不再写状态、也不再排下一次 */
+  let pollGeneration = 0;
+
+  function stopUpgradePolling() {
+    pollGeneration++;
+    if (progressPollTimer !== null) {
+      clearTimeout(progressPollTimer);
+      progressPollTimer = null;
+    }
+  }
 
   function pollUpgradeProgress() {
-    if (progressPollTimer) {
-      clearInterval(progressPollTimer);
-    }
+    stopUpgradePolling();
+    const generation = pollGeneration;
+    let failures = 0;
 
-    progressPollTimer = window.setInterval(async () => {
+    const schedule = (delay: number) => {
+      progressPollTimer = window.setTimeout(() => void tick(), delay);
+    };
+
+    const tick = async () => {
+      progressPollTimer = null;
+      let progress: UpgradeProgress;
       try {
-        upgradeProgress.value = await versionApi.getUpgradeProgress();
-
-        if (
-          upgradeProgress.value.status === "completed" ||
-          upgradeProgress.value.status === "failed" ||
-          upgradeProgress.value.status === "idle"
-        ) {
-          if (progressPollTimer) {
-            clearInterval(progressPollTimer);
-            progressPollTimer = null;
-          }
-          upgrading.value = false;
-
-          if (upgradeProgress.value.status === "completed") {
-            ElNotification({
-              title: "升级完成",
-              message: "请重启应用以使用新版本",
-              type: "success",
-              duration: 0,
-            });
-          } else if (upgradeProgress.value.status === "failed") {
-            ElNotification({
-              title: "升级失败",
-              message: upgradeProgress.value.error || "未知错误",
-              type: "error",
-              duration: 0,
-            });
-          }
-        }
+        progress = await versionApi.getUpgradeProgress();
       } catch (error) {
+        if (generation !== pollGeneration) return;
+        failures++;
         console.error("Failed to poll upgrade progress:", error);
+        if (failures >= POLL_MAX_FAILURES) {
+          upgrading.value = false;
+          ElNotification({
+            title: "无法获取升级进度",
+            message: `${error instanceof Error ? error.message : "请求失败"}；刷新页面后可查看升级状态`,
+            type: "warning",
+            duration: 0,
+          });
+          return;
+        }
+        schedule(Math.min(POLL_INTERVAL_MS * 2 ** failures, POLL_MAX_BACKOFF_MS));
+        return;
       }
-    }, 1000);
+      if (generation !== pollGeneration) return;
+      failures = 0;
+      upgradeProgress.value = progress;
+
+      if (
+        progress.status === "completed" ||
+        progress.status === "failed" ||
+        progress.status === "idle"
+      ) {
+        upgrading.value = false;
+        if (progress.status === "completed") {
+          ElNotification({
+            title: "升级完成",
+            message: "请重启应用以使用新版本",
+            type: "success",
+            duration: 0,
+          });
+        } else if (progress.status === "failed") {
+          ElNotification({
+            title: "升级失败",
+            message: progress.error || "未知错误",
+            type: "error",
+            duration: 0,
+          });
+        }
+        return;
+      }
+      schedule(POLL_INTERVAL_MS);
+    };
+
+    schedule(POLL_INTERVAL_MS);
   }
+
+  // store 被销毁（$dispose）时不留定时器
+  onScopeDispose(stopUpgradePolling);
 
   async function checkForUpdates(
     options?: { force?: boolean; proxy?: string },

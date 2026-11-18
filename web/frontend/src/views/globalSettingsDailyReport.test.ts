@@ -1,0 +1,248 @@
+// @vitest-environment happy-dom
+/*
+ * 钉子：系统设置里的每日战报是保存的第三步。开启却没选通道时前端就拦下、什么都不写；
+ * 第三步失败时说清前两步已保存。
+ */
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { type MountedView, mountView } from "@/test-mount";
+
+const api = vi.hoisted(() => ({
+  saveGlobal: vi.fn(),
+  getReport: vi.fn(),
+  saveReport: vi.fn(),
+}));
+const ui = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
+
+vi.mock("@/api", async (orig) => {
+  const real = await orig<typeof import("@/api")>();
+  return {
+    ...real,
+    globalApi: {
+      get: vi.fn(() =>
+        Promise.resolve({
+          default_interval_minutes: 10,
+          download_dir: "/downloads",
+          download_limit_enabled: false,
+          download_speed_limit: 20,
+          torrent_size_gb: 200,
+          torrent_min_size_gb: 0,
+          min_free_minutes: 30,
+          auto_start: false,
+          retain_hours: 24,
+          max_retry: 3,
+          default_concurrency: 3,
+          default_enabled: false,
+          free_end_advance_minutes: 0,
+          default_filter_mode: "auto_free",
+        }),
+      ),
+      save: api.saveGlobal,
+    },
+    attendanceApi: {
+      getSettings: vi.fn(() => Promise.resolve({ window_start: "08:00", window_end: "10:00" })),
+      saveSettings: vi.fn(),
+    },
+    chatopsApi: {
+      notifications: {
+        list: vi.fn(() =>
+          Promise.resolve([{ id: 7, name: "TG", channel_type: "telegram", enabled: true }]),
+        ),
+      },
+    },
+    userInfoApi: {
+      ...real.userInfoApi,
+      getDailyReport: api.getReport,
+      saveDailyReport: api.saveReport,
+    },
+    // 备份：读到默认设置，没改就不写
+    backupApi: {
+      ...real.backupApi,
+      get: vi.fn(() =>
+        Promise.resolve({
+          settings: {
+            enabled: true,
+            time: "04:30",
+            keep: 7,
+            dir: "",
+            include_secret: true,
+            default_dir: "/root/.pt-tools/backups",
+            min_keep: 1,
+            max_keep: 60,
+          },
+          dir: "/root/.pt-tools/backups",
+          env_key: false,
+          next_at: null,
+          last: null,
+          restore: null,
+          pending: null,
+          backups: [],
+        }),
+      ),
+      saveSettings: vi.fn(),
+    },
+    // 站点代理：读到默认值（没有设置），没改就不写
+    siteProxyApi: {
+      get: vi.fn(() =>
+        Promise.resolve({
+          enabled: false,
+          proxy_url: "",
+          mode: "all",
+          sites: [],
+          updated_at: null,
+          site_options: [],
+        }),
+      ),
+      save: vi.fn(),
+    },
+  };
+});
+
+vi.mock("element-plus", async (orig) => {
+  const real = await orig<typeof import("element-plus")>();
+  return {
+    ...real,
+    ElMessage: Object.assign(vi.fn(), {
+      success: ui.success,
+      error: ui.error,
+      warning: ui.warning,
+      info: vi.fn(),
+    }),
+  };
+});
+
+let view: MountedView | null = null;
+afterEach(() => {
+  view?.unmount();
+  view = null;
+  vi.clearAllMocks();
+});
+
+function saveButton(): HTMLButtonElement {
+  const btn = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+    (b) => (b.textContent ?? "").trim() === "保存设置" && !b.disabled,
+  );
+  if (!btn) throw new Error("找不到可点的「保存设置」");
+  return btn;
+}
+
+async function mountPage() {
+  const Page = (await import("./GlobalSettings.vue")).default;
+  view = mountView(Page);
+  await vi.waitFor(() => expect(api.getReport).toHaveBeenCalled());
+  await vi.waitFor(() => saveButton());
+}
+
+async function toggleReport() {
+  const sw = document.querySelector<HTMLElement>("[data-testid=daily-report-enabled]")!;
+  sw.click();
+  await new Promise((r) => setTimeout(r, 0));
+}
+
+describe("系统设置：每日战报", () => {
+  it("开启却没选通道：直接拦下，什么都不保存", async () => {
+    api.getReport.mockResolvedValue({ enabled: false, time: "22:00", channel_ids: [] });
+    await mountPage();
+    await toggleReport();
+
+    saveButton().click();
+    await vi.waitFor(() =>
+      expect(ui.error).toHaveBeenCalledWith("开启每日战报至少要选一个通知通道"),
+    );
+    expect(api.saveGlobal).not.toHaveBeenCalled();
+    expect(api.saveReport).not.toHaveBeenCalled();
+  });
+
+  it("改了战报设置：第三步保存；它失败时说清前两步已保存", async () => {
+    api.getReport.mockResolvedValue({ enabled: true, time: "22:00", channel_ids: [7] });
+    api.saveGlobal.mockResolvedValue(undefined);
+    api.saveReport.mockRejectedValue(new Error("磁盘只读"));
+    await mountPage();
+    await toggleReport(); // 关掉
+
+    saveButton().click();
+    await vi.waitFor(() =>
+      expect(api.saveReport).toHaveBeenCalledWith({
+        enabled: false,
+        time: "22:00",
+        channel_ids: [7],
+        scope: "previous_day",
+      }),
+    );
+    await vi.waitFor(() => expect(ui.warning).toHaveBeenCalled());
+    expect(String(ui.warning.mock.calls[0]![0])).toContain("每日战报设置没有保存：磁盘只读");
+    expect(ui.success).not.toHaveBeenCalled();
+  });
+
+  it("统计范围：读不到时按前一天并写明；改成当天截至发送时刻时保存这一项，说明跟着换", async () => {
+    api.getReport.mockResolvedValue({ enabled: true, time: "22:00", channel_ids: [7] });
+    api.saveGlobal.mockResolvedValue(undefined);
+    api.saveReport.mockImplementation((v: Record<string, unknown>) => Promise.resolve({ ...v }));
+    await mountPage();
+    const group = document.querySelector<HTMLElement>("[data-testid=daily-report-scope]")!;
+    const radio = (v: string) => group.querySelector<HTMLInputElement>(`input[value=${v}]`)!;
+    expect(radio("previous_day").checked).toBe(true);
+    const tip = () => group.parentElement!.querySelector(".field-tip")?.textContent ?? "";
+    expect(tip()).toContain("前一天整天");
+
+    radio("today").click();
+    await vi.waitFor(() => expect(radio("today").checked).toBe(true));
+    expect(tip()).toContain("今天 0 点到发送时刻");
+
+    saveButton().click();
+    await vi.waitFor(() =>
+      expect(api.saveReport).toHaveBeenCalledWith({
+        enabled: true,
+        time: "22:00",
+        channel_ids: [7],
+        scope: "today",
+      }),
+    );
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledWith("保存成功"));
+
+    // 已保存的基线换成了当天：再点一次不重复写
+    await vi.waitFor(() => saveButton());
+    saveButton().click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalledTimes(2));
+    expect(api.saveReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("战报没开时统计范围不可改", async () => {
+    api.getReport.mockResolvedValue({
+      enabled: false,
+      time: "22:00",
+      channel_ids: [],
+      scope: "today",
+    });
+    await mountPage();
+    const group = document.querySelector<HTMLElement>("[data-testid=daily-report-scope]")!;
+    expect(group.querySelector<HTMLInputElement>("input[value=today]")!.checked).toBe(true);
+    expect(group.querySelector(".is-disabled")).not.toBeNull();
+  });
+
+  it("没改战报设置：不发第三步请求", async () => {
+    api.getReport.mockResolvedValue({ enabled: true, time: "22:00", channel_ids: [7] });
+    api.saveGlobal.mockResolvedValue(undefined);
+    await mountPage();
+
+    saveButton().click();
+    await vi.waitFor(() => expect(ui.success).toHaveBeenCalled());
+    expect(api.saveReport).not.toHaveBeenCalled();
+  });
+
+  it("战报设置读不回来：整段禁用并说明，保存时不会谎称战报已保存", async () => {
+    api.getReport.mockRejectedValue(new Error("502"));
+    api.saveGlobal.mockResolvedValue(undefined);
+    const Page = (await import("./GlobalSettings.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=daily-report-load-failed]")).toBeTruthy(),
+    );
+    const sw = document.querySelector<HTMLElement>("[data-testid=daily-report-enabled]")!;
+    expect(sw.classList.contains("is-disabled")).toBe(true);
+    sw.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sw.classList.contains("is-checked")).toBe(false);
+    expect(api.saveReport).not.toHaveBeenCalled();
+  });
+});

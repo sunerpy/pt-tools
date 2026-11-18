@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"sync"
 	"syscall"
 	"testing"
@@ -37,8 +38,8 @@ func freeTCPPort(t *testing.T) int {
 // tears everything down and Serve returns. Version checking is pointed at a
 // blackhole proxy so no real external network egress occurs.
 func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
-	if raceEnabled {
-		t.Skip("skips under -race: web.Server.Serve/Shutdown has a pre-existing httpServer field race owned by the web package")
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上进程发不了 SIGTERM 给自己（os.Process.Signal 只支持 Kill）")
 	}
 	// Blackhole any outbound version-check HTTP so the background goroutine
 	// fails fast instead of reaching GitHub.
@@ -51,7 +52,7 @@ func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
 	// temp DB (incl. chatops + userinfo tables) so bootstrapChatOps succeeds
 	// and the bs != nil wiring branch is exercised.
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, db.DB.AutoMigrate(
 		&models.NotificationConf{},
@@ -60,6 +61,9 @@ func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
 		&models.BotToken{},
 		&models.NotificationOutbox{},
 		&models.SiteLoginState{},
+		// NAS 监控：本机来源默认开着，启动以后就在采集；关闭流程要等它退出
+		&models.NasSource{},
+		&models.NasSetting{},
 	))
 	prevDB := global.GlobalDB
 	global.GlobalDB = db

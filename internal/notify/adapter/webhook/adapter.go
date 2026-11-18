@@ -1,12 +1,19 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -16,23 +23,72 @@ import (
 	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
+// Config 是 Webhook 通道的配置。Method、ContentType、BodyTemplate 都空着时发原来的固定 JSON（多一个 event 字段）。
+// 请求体模板里可能写着 token，和其余配置一样只存在加密的 ConfigJSON 里。
 type Config struct {
-	EndpointURL    string            `json:"endpoint_url"`
-	TimeoutSeconds int               `json:"timeout_seconds"`
-	HMACSecret     string            `json:"hmac_secret,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
+	EndpointURL    string  `json:"endpoint_url"`
+	TimeoutSeconds int     `json:"timeout_seconds"`
+	HMACSecret     string  `json:"hmac_secret,omitempty"`
+	Headers        Headers `json:"headers,omitempty"`
+	// Method 是请求方法：POST（默认）、PUT、PATCH、GET（GET 不带请求体）
+	Method string `json:"method,omitempty"`
+	// ContentType 是请求体的格式：json（默认）、text、form、custom（Content-Type 写在 Headers 里）
+	ContentType string `json:"content_type,omitempty"`
+	// BodyTemplate 是请求体模板（Go 模板，变量见消息模板的事件目录）；空着发原来的固定 JSON
+	BodyTemplate string `json:"body_template,omitempty"`
+	// SuccessTemplate 是按响应判断成败的模板（可选）：2xx 以后再用它算一遍，结果是 true 才算送到，
+	// 别的结果（false、空、或者自己写的原因）算失败。变量：status、body、json（响应是 JSON 时解出来的值）
+	SuccessTemplate string `json:"success_template,omitempty"`
 }
 
+// Headers 是自定义请求头。旧版编辑页把它存成了 JSON 文本（"{\"A\":\"b\"}"），两种写法都认。
+type Headers map[string]string
+
+func (h *Headers) UnmarshalJSON(b []byte) error {
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err == nil {
+		*h = m
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return errors.New("headers 要是 JSON 对象，键和值都是文字")
+	}
+	if strings.TrimSpace(s) == "" {
+		*h = nil
+		return nil
+	}
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return errors.New("headers 要是 JSON 对象，键和值都是文字")
+	}
+	*h = m
+	return nil
+}
+
+// get 按名字取请求头（不分大小写）。
+func (h Headers) get(name string) string {
+	for k, v := range h {
+		if strings.EqualFold(strings.TrimSpace(k), name) {
+			return v
+		}
+	}
+	return ""
+}
+
+// WebhookPayload 是不写请求体模板时发的固定 JSON。Event 是后来加的：原有字段不变。
 type WebhookPayload struct {
 	EventType string                 `json:"event_type"`
 	Title     string                 `json:"title"`
 	Text      string                 `json:"text"`
 	Link      string                 `json:"link,omitempty"`
 	Payload   map[string]interface{} `json:"payload,omitempty"`
+	Event     *notify.Event          `json:"event,omitempty"`
 }
 
 type WebhookChannel struct {
 	config *Config
+	req    *request
+	name   string
 	logger *zap.SugaredLogger
 }
 
@@ -44,25 +100,47 @@ func (w *WebhookChannel) Type() string {
 	return "webhook"
 }
 
-func (w *WebhookChannel) Init(ctx context.Context, conf *models.NotificationConf) error {
-	w.logger = sLogger()
-
+func parseConfig(raw string) (*Config, error) {
 	cfg := &Config{}
-	err := json.Unmarshal([]byte(conf.ConfigJSON), cfg)
-	if err != nil {
-		return fmt.Errorf("unmarshal config_json failed: %w", err)
+	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
+		return nil, fmt.Errorf("unmarshal config_json failed: %w", err)
 	}
-
-	if cfg.EndpointURL == "" {
-		return fmt.Errorf("endpoint_url is required")
+	if strings.TrimSpace(cfg.EndpointURL) == "" {
+		return nil, fmt.Errorf("endpoint_url is required")
 	}
-
 	if cfg.TimeoutSeconds <= 0 {
 		cfg.TimeoutSeconds = 5
 	}
+	return cfg, nil
+}
 
-	w.config = cfg
+func (w *WebhookChannel) Init(ctx context.Context, conf *models.NotificationConf) error {
+	w.logger = sLogger()
+
+	cfg, err := parseConfig(conf.ConfigJSON)
+	if err != nil {
+		return err
+	}
+	req, err := compile(cfg)
+	if err != nil {
+		return err
+	}
+	w.config, w.req, w.name = cfg, req, conf.Name
 	return nil
+}
+
+// CheckConfig 在保存前检查配置（不发请求）：方法、格式、请求头，地址与请求体模板要能用每种事件的示例数据渲染出来，
+// JSON 格式的请求体还要是合法的 JSON。
+func (w *WebhookChannel) CheckConfig(conf *models.NotificationConf) error {
+	cfg, err := parseConfig(conf.ConfigJSON)
+	if err != nil {
+		return err
+	}
+	req, err := compile(cfg)
+	if err != nil {
+		return err
+	}
+	return req.checkSamples()
 }
 
 func (w *WebhookChannel) SupportsInbound() bool {
@@ -70,66 +148,109 @@ func (w *WebhookChannel) SupportsInbound() bool {
 }
 
 func (w *WebhookChannel) Send(ctx context.Context, n notify.Notification) error {
-	if w.config == nil {
+	if w.config == nil || w.req == nil {
 		return fmt.Errorf("webhook channel not initialized")
 	}
 
-	payload := WebhookPayload{
-		EventType: "notification",
-		Title:     n.Title,
-		Text:      n.Text,
-		Link:      n.Link,
-		Payload: map[string]interface{}{
-			"channel_type":   n.ChannelType,
-			"source_conf_id": n.SourceConfID,
-		},
-	}
-
-	bodyBytes, err := json.Marshal(payload)
+	r, err := w.req.render(n, w.name, false)
 	if err != nil {
-		return fmt.Errorf("marshal payload failed: %w", err)
+		w.logger.Warnf("webhook 请求没有生成出来: %v", err)
+		return fmt.Errorf("webhook 请求没有生成出来: %w", err)
 	}
 
-	headers := make(map[string]string)
-	headers["Content-Type"] = "application/json"
-
-	if w.config.Headers != nil {
-		for k, v := range w.config.Headers {
-			headers[k] = v
-		}
+	// 先放 Content-Type，再放自定义请求头（写了的以它为准），签名最后放
+	headers := http.Header{}
+	if r.ContentType != "" {
+		headers.Set("Content-Type", r.ContentType)
 	}
-
+	keys := make([]string, 0, len(w.config.Headers))
+	for k := range w.config.Headers {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		headers.Set(strings.TrimSpace(k), w.config.Headers[k])
+	}
 	if w.config.HMACSecret != "" {
 		sig := hmac.New(sha256.New, []byte(w.config.HMACSecret))
-		sig.Write(bodyBytes)
-		headers["X-PT-Signature"] = base64.StdEncoding.EncodeToString(sig.Sum(nil))
+		sig.Write(r.Body)
+		headers.Set("X-PT-Signature", base64.StdEncoding.EncodeToString(sig.Sum(nil)))
 	}
 
 	timeout := time.Duration(w.config.TimeoutSeconds) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	opts := []httpclient.RequestOption{
-		httpclient.WithTimeout(timeout),
-		httpclient.WithContext(ctx),
-	}
-
-	for k, v := range headers {
-		opts = append(opts, httpclient.WithHeader(k, v))
-	}
-
-	resp, err := httpclient.Post(w.config.EndpointURL, bodyBytes, opts...)
+	status, respBody, err := do(ctx, r.Method, r.URL, r.Body, headers)
 	if err != nil {
+		err = reason(err)
 		w.logger.Warnf("webhook send failed: %v", err)
 		return fmt.Errorf("webhook send failed: %w", err)
 	}
 
-	if resp.IsError() {
-		w.logger.Warnf("webhook returned error status: %d", resp.StatusCode())
-		return fmt.Errorf("webhook returned status %d", resp.StatusCode())
+	// 只有 2xx 算成功：不跟随跳转，3xx 也是没送到
+	if status < 200 || status > 299 {
+		w.logger.Warnf("webhook returned status: %d", status)
+		return fmt.Errorf("webhook returned status %d", status)
+	}
+	// 写了成功条件的，再按响应内容判断（很多服务出错也回 200，错误写在响应里）。
+	// 失败原因来自对方的响应，可能把我们发过去的 token 原样回显：写进日志与错误以前去掉
+	if err := w.req.checkResponse(status, respBody); err != nil {
+		err = scrubError(err, sensitiveValues(r, w.config))
+		w.logger.Warnf("webhook response rejected: %v", err)
+		return err
 	}
 
 	return nil
+}
+
+// httpClient 发 Webhook 请求：沿用环境变量里的代理（和原来一样，连 Discord 这类服务常要代理），不跟随跳转。
+var httpClient = &http.Client{
+	Transport: func() http.RoundTripper {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.Proxy = func(req *http.Request) (*url.URL, error) {
+			if p := httpclient.ResolveProxyFromEnvironment(req.URL.String()); p != "" {
+				return url.Parse(p)
+			}
+			return nil, nil
+		}
+		return t
+	}(),
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// do 发一次请求，返回状态码与响应的前 maxResponseBody 字节（再多的不读：对方回几百 MB 也不会占住内存）。
+func do(ctx context.Context, method, rawURL string, body []byte, headers http.Header) (int, []byte, error) {
+	var rd io.Reader
+	if method != http.MethodGet {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, rd)
+	if err != nil {
+		return 0, nil, errors.New("请求地址格式不对")
+	}
+	req.Header = headers.Clone()
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	if err != nil {
+		return resp.StatusCode, nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+	return resp.StatusCode, data, nil
+}
+
+// reason 是请求错误里不带地址的那一层：net/http 与 requests 包的外层错误都写着完整的地址，
+// 地址的查询部分可能有 token 或渲染进去的内容。往里找到第一层不含地址的；找不到就只说没发出去。
+func reason(err error) error {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if !strings.Contains(e.Error(), "://") {
+			return e
+		}
+	}
+	return errors.New("请求没有发出去")
 }
 
 func (w *WebhookChannel) OnInbound(handler notify.InboundHandler) {

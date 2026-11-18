@@ -406,3 +406,28 @@ func TestSiteFactory_CreateSite_NexusPHP_CustomSelectors(t *testing.T) {
 	assert.Equal(t, "table.custom > tr", driver.Selectors.TableRows)
 	assert.Equal(t, "td.title a", driver.Selectors.Title)
 }
+
+// 优惠映射与 SubtitleSelector 以前合并时被丢掉：fixture 测试直接拿定义里的选择器建驱动，测不出来，
+// 真正运行时文字显示的 50%、2X 这类优惠都读成没有优惠，副标题也用不上定义写的取法。
+// 只写了 SubtitleSelector 的，不沿用默认的 Subtitle（ParseSearch 先看 Subtitle）。
+func TestSiteFactory_CreateSite_NexusPHP_KeepsDiscountMappingAndSubtitleSelector(t *testing.T) {
+	mapping := map[string]DiscountLevel{"halfdown": DiscountPercent50}
+	subtitle := &FieldSelector{Selector: []string{"font.subtitle"}}
+	optsBytes, err := json.Marshal(NexusPHPOptions{
+		Cookie:    "test-cookie",
+		Selectors: &SiteSelectors{DiscountMapping: mapping, SubtitleSelector: subtitle},
+	})
+	require.NoError(t, err)
+
+	site, err := NewSiteFactory(nil).CreateSite(SiteConfig{
+		Type: "nexusphp", ID: "custom", Name: "Custom Site", BaseURL: "https://example.com", Options: optsBytes,
+	})
+	require.NoError(t, err)
+	driver := site.(*BaseSite[NexusPHPRequest, NexusPHPResponse]).GetDriver().(*NexusPHPDriver)
+
+	assert.Equal(t, mapping, driver.Selectors.DiscountMapping)
+	assert.Equal(t, subtitle, driver.Selectors.SubtitleSelector)
+	assert.Empty(t, driver.Selectors.Subtitle, "SubtitleSelector 要用上，不能被默认的 Subtitle 盖掉")
+	// 别的没写的照旧用默认值
+	assert.Equal(t, DefaultNexusPHPSelectors().TableRows, driver.Selectors.TableRows)
+}

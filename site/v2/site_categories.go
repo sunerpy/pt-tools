@@ -320,7 +320,7 @@ var siteCategories = map[string]SiteCategoryConfig{
 	},
 	"hddolby": {
 		SiteID:   "hddolby",
-		SiteName: "HD Dolby",
+		SiteName: "UHDDolby",
 		Categories: []CategoryDefinition{
 			{
 				Name: "类别",

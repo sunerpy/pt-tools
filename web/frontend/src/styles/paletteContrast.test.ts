@@ -148,7 +148,8 @@ describe("t4 不用来写承载信息的文字", () => {
 /*
  * 不用 opacity 压暗承载信息的文字：opacity 合成后的对比度不在任何令牌上，令牌测试查不到它。
  * 发布前的门禁抓到状态栏陈旧态整格压 0.5（2.2–2.9:1）—— 数据正常时的扫描从来触发不到。
- * 允许的只有禁用态、箭头、头像、图标，以及导出海报的 DOM 复刻（它必须与 PNG 画布逐像素一致，属于图片内容）。
+ * 允许的只有禁用态、箭头、头像、图标。导出海报不在例外里：它的半透明一律写成带透明度的颜色（rgb / color-mix），
+ * 不用 opacity。
  */
 describe("opacity 不用来压暗承载信息的文字", () => {
   const SFC = import.meta.glob("/src/**/*.vue", {
@@ -163,10 +164,9 @@ describe("opacity 不用来压暗承载信息的文字", () => {
       .map((f) => [`styles/${f}`, readFileSync(`${stylesDir}/${f}`, "utf8")] as [string, string]),
     ...Object.entries(SFC).map(([f, src]) => [f.replace("/src/", ""), src] as [string, string]),
   ];
-  const ALLOWED =
-    /:disabled|caret|avatar|__av\b|__icon\b|\.poster|\.pstat|\.pcard|^\d+%$|^from$|^to$/;
+  const ALLOWED = /:disabled|caret|avatar|__av\b|__icon\b|^\d+%$|^from$|^to$/;
 
-  it("每一处半透明 opacity 都落在禁用态 / 箭头 / 头像 / 图标 / 导出海报上", () => {
+  it("每一处半透明 opacity 都落在禁用态 / 箭头 / 头像 / 图标上", () => {
     const bad: string[] = [];
     for (const [file, src] of sources) {
       const lines = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " ")).split("\n");

@@ -3,11 +3,15 @@ package v2
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,6 +62,18 @@ func TestMTorrentDriver_PrepareSearch(t *testing.T) {
 			query:    SearchQuery{},
 			wantMode: "normal",
 			wantKey:  "",
+			wantPage: 1,
+		},
+		{
+			name:     "adult section",
+			query:    SearchQuery{Section: "adult"},
+			wantMode: "adult",
+			wantPage: 1,
+		},
+		{
+			name:     "unknown section falls back to normal",
+			query:    SearchQuery{Section: "all"},
+			wantMode: "normal",
 			wantPage: 1,
 		},
 	}
@@ -176,6 +192,10 @@ func TestMTorrentDriver_ParseSearch_MallSingleFreeRequiresOngoingStatus(t *testi
 		BaseURL: "https://api.m-team.cc",
 		APIKey:  "test-api-key",
 	})
+	// 固定时间：基础半价到 2026-07-21 结束，过期的基础优惠不再有效
+	fixedNow, err := ParseTimeInCST("2006-01-02 15:04:05", "2026-07-01 00:00:00")
+	require.NoError(t, err)
+	driver.now = func() time.Time { return fixedNow }
 
 	res := MTorrentResponse{
 		Code:    "0",
@@ -442,7 +462,8 @@ func TestParseMTorrentDiscountWithMallSingleFree(t *testing.T) {
 			wantEndTime: "2026-02-05 19:57:34",
 		},
 		{
-			name:         "promotion takes precedence over mall single free",
+			// promotionRule 有优惠时也要看商城单种免费（以前会跳过）；两者都免费时免费期以结束更晚的为准
+			name:         "promotion and mall single free both free: later end wins",
 			baseDiscount: "PERCENT_50",
 			baseEndTime:  "2026-02-05 19:57:34",
 			promotion: &MTorrentPromotionRule{
@@ -456,7 +477,24 @@ func TestParseMTorrentDiscountWithMallSingleFree(t *testing.T) {
 				EndDate:   "2026-02-05 23:59:59",
 			},
 			wantLevel:   DiscountFree,
-			wantEndTime: "2026-02-05 22:22:22",
+			wantEndTime: "2026-02-05 23:59:59",
+		},
+		{
+			name:         "promotion ends later than mall single free: promotion wins",
+			baseDiscount: "PERCENT_50",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion: &MTorrentPromotionRule{
+				Discount:  "FREE",
+				StartTime: "2026-02-03 00:00:00",
+				EndTime:   "2026-02-06 22:22:22",
+			},
+			mallSingle: &MallSingleFree{
+				Status:    "ONGOING",
+				StartDate: "2026-02-03 00:00:00",
+				EndDate:   "2026-02-05 23:59:59",
+			},
+			wantLevel:   DiscountFree,
+			wantEndTime: "2026-02-06 22:22:22",
 		},
 	}
 
@@ -768,6 +806,89 @@ func TestMTorrentDriver_ParseDownload_Full(t *testing.T) {
 	}
 }
 
+// genDlToken 的响应就是带 sign 的下载地址，不能无条件打印到 stdout。
+func TestMTorrentDriver_Execute_DoesNotPrintDownloadToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":"https://api.m-team.cc/api/rss/dlv2?sign=TOPSECRET"}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	req, err := d.PrepareDownload("123")
+	require.NoError(t, err)
+
+	out := captureStdout(t, func() {
+		_, err = d.Execute(context.Background(), req)
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, out, "TOPSECRET")
+	assert.NotContains(t, out, "genDlToken")
+}
+
+// quickDownloadRetry 把下载种子文件的重试间隔调到 1 毫秒（测试不等真的退避）。
+func quickDownloadRetry(t *testing.T) {
+	t.Helper()
+	oldBase, oldMin := siteRetryBase, siteRetryMinAttempt
+	siteRetryBase, siteRetryMinAttempt = time.Millisecond, 0
+	t.Cleanup(func() { siteRetryBase, siteRetryMinAttempt = oldBase, oldMin })
+}
+
+// 拉种子文件的第二段请求要有超时，签名地址卡住时不能一直挂着。
+func TestMTorrentDriver_ParseDownload_FetchTimesOut(t *testing.T) {
+	quickDownloadRetry(t)
+	old := mteamTorrentFetchTimeout
+	mteamTorrentFetchTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { mteamTorrentFetchTimeout = old })
+
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	start := time.Now()
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl?sign=TOPSECRET"`)})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second)
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+}
+
+// 错误信息里的签名地址要脱敏，避免随日志泄露可复用的下载链接。
+func TestMTorrentDriver_ParseDownload_RedactsSignedURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl?sign=TOPSECRET"`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 403")
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	fn()
+
+	require.NoError(t, w.Close())
+	os.Stdout = orig
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
+}
+
 func TestMTorrentDriver_ParseDownload_APIError(t *testing.T) {
 	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
 	_, err := d.ParseDownload(MTorrentResponse{Code: "1", Message: "fail", RawBody: []byte("errbody")})
@@ -790,10 +911,128 @@ func TestMTorrentDriver_ParseDownload_BadData(t *testing.T) {
 }
 
 func TestMTorrentDriver_ParseDownload_FetchError(t *testing.T) {
+	quickDownloadRetry(t)
 	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
 	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"http://127.0.0.1:1/dl"`)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fetch torrent file")
+	assert.Contains(t, err.Error(), "(3 attempts)", "连不上是网络错误：重试两次")
+	assert.ErrorIs(t, err, ErrNetworkError)
+}
+
+// 下载节点断开连接、回 5xx 是一时的：隔一会儿重拉同一个签名地址（不再取下载令牌），拉到就成。
+func TestMTorrentDriver_ParseDownload_RetriesTransientFailures(t *testing.T) {
+	quickDownloadRetry(t)
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch hits.Add(1) {
+		case 1:
+			// 连接被重置：不回任何东西就断开
+			conn, _, err := w.(http.Hijacker).Hijack()
+			require.NoError(t, err)
+			_ = conn.Close()
+		case 2:
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			_, _ = w.Write(testTorrentBytes)
+		}
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	data, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl?sign=TOPSECRET"`)})
+	require.NoError(t, err)
+	assert.Equal(t, testTorrentBytes, data)
+	assert.Equal(t, int32(3), hits.Load())
+}
+
+// 403 这类回答、不是种子文件的内容不是一时的：不重试。
+func TestMTorrentDriver_ParseDownload_NoRetryOnRefusal(t *testing.T) {
+	quickDownloadRetry(t)
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"403", http.StatusForbidden, "", "HTTP 403"},
+		{"不是种子", http.StatusOK, "<html>下载次数超限</html>", "invalid torrent"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var hits atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer server.Close()
+			d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+			_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl"`)})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.want)
+			assert.NotContains(t, err.Error(), "attempts")
+			assert.Equal(t, int32(1), hits.Load())
+		})
+	}
+}
+
+// 签名地址跳到下载节点以后超时：错误里跳转后的地址也带签名（sign、playload），一样要脱敏。
+func TestMTorrentDriver_ParseDownload_RedactsRedirectTarget(t *testing.T) {
+	quickDownloadRetry(t)
+	old := mteamTorrentFetchTimeout
+	mteamTorrentFetchTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { mteamTorrentFetchTimeout = old })
+
+	release := make(chan struct{})
+	node := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer node.Close()
+	defer close(release)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, node.URL+"/?app_id=1&playload=NODEPAYLOAD&sign=NODESIGN&t=1", http.StatusFound)
+	}))
+	defer api.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + api.URL + `/api/rss/dlv2?sign=APISIGN&tid=1"`)})
+	require.Error(t, err)
+	for _, secret := range []string{"APISIGN", "NODEPAYLOAD", "NODESIGN"} {
+		assert.NotContains(t, err.Error(), secret)
+	}
+	assert.Contains(t, err.Error(), "(3 attempts)")
+	assert.ErrorIs(t, err, ErrNetworkError)
+}
+
+// 调用方取消了就不再重试：不等退避，马上返回。
+func TestMTorrentDriver_ParseDownloadContext_StopsWhenCanceled(t *testing.T) {
+	old, oldBase, oldMin := mteamTorrentFetchTimeout, siteRetryBase, siteRetryMinAttempt
+	mteamTorrentFetchTimeout, siteRetryBase, siteRetryMinAttempt = 100*time.Millisecond, 10*time.Second, 0
+	t.Cleanup(func() { mteamTorrentFetchTimeout, siteRetryBase, siteRetryMinAttempt = old, oldBase, oldMin })
+
+	release := make(chan struct{})
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := d.ParseDownloadContext(ctx, MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl"`)})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second, "不等 10 秒的退避")
+	assert.Equal(t, int32(1), hits.Load())
 }
 
 func TestMapMTorrentRole(t *testing.T) {
@@ -985,8 +1224,12 @@ func TestMTorrentDriver_GetUserInfo(t *testing.T) {
 			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"formulaParams":{"finalBs":"8.8"}}}`))
 		case strings.Contains(r.URL.Path, "notify/statistic"):
 			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"unMake":"2","count":"5"}}`))
-		case strings.Contains(r.URL.Path, "myPeerStatistics"):
-			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"seederCount":"20","seederSize":"2048","leecherCount":"1","leecherSize":"512"}}`))
+		case strings.Contains(r.URL.Path, "myPeerStatus"):
+			// 做种数与下载数从 myPeerStatus 取（myPeerStatistics 现在对 API Key 全返回 0）
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"seeder":"20","leecher":"1"}}`))
+		case strings.Contains(r.URL.Path, "getUserTorrentList"):
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"pageNumber":"1","pageSize":"100","total":"20","totalPages":"1",
+				"data":[{"torrent":{"size":"2048"}}]}}`))
 		default:
 			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{}}`))
 		}
@@ -1001,7 +1244,29 @@ func TestMTorrentDriver_GetUserInfo(t *testing.T) {
 	assert.Equal(t, "Power User", info.Rank)
 	assert.Equal(t, int64(10737418240), info.Uploaded)
 	assert.Equal(t, 20, info.SeederCount)
+	assert.Equal(t, int64(2048), info.SeederSize)
 	assert.Greater(t, info.LastAccess, int64(0))
+}
+
+// M1b：memberStatus.lastLogin 映射到 UserInfo.LastLogin（按站点时区 CST 解析）；访问时间的取法不变。
+func TestMTorrentDriver_ParseUserInfo_LastLogin(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.example", APIKey: "k"})
+	info, err := d.ParseUserInfo(MTorrentResponse{
+		Code: "0",
+		Data: []byte(`{"id":"1001","username":"tester","role":"2",
+			"memberStatus":{"lastLogin":"2024-06-01 10:00:00","lastBrowse":"2024-06-01 12:00:00"}}`),
+	})
+	require.NoError(t, err)
+	login, err := ParseTimeInCST("2006-01-02 15:04:05", "2024-06-01 10:00:00")
+	require.NoError(t, err)
+	browse, err := ParseTimeInCST("2006-01-02 15:04:05", "2024-06-01 12:00:00")
+	require.NoError(t, err)
+	assert.Equal(t, login.Unix(), info.LastLogin)
+	assert.Equal(t, browse.Unix(), info.LastAccess)
+
+	info, err = d.ParseUserInfo(MTorrentResponse{Code: "0", Data: []byte(`{"id":"1","username":"t","memberStatus":{"lastLogin":"not-a-time"}}`)})
+	require.NoError(t, err)
+	assert.Zero(t, info.LastLogin, "an unparsable lastLogin is left empty")
 }
 
 func TestMTorrentDriver_GetUserInfo_ProfileError(t *testing.T) {
@@ -1045,4 +1310,321 @@ func TestMTorrentDriver_GetTorrentDetail_APIError(t *testing.T) {
 	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
 	_, err := d.GetTorrentDetail(context.Background(), "1", "", "")
 	assert.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// M-Team 优惠严格解析：基础优惠、promotionRule（起止时间与适用范围）、mallSingleFree
+// ---------------------------------------------------------------------------
+
+// mteamAt 把北京时间字符串解析成时间
+func mteamAt(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := ParseTimeInCST("2006-01-02 15:04:05", s)
+	require.NoError(t, err)
+	return v
+}
+
+func TestEvaluateMTorrentDiscount(t *testing.T) {
+	now := mteamAt(t, "2026-10-16 12:00:00")
+	const (
+		past        = "2026-10-15 12:00:00"
+		startPast   = "2026-10-01 00:00:00"
+		startFuture = "2026-10-17 00:00:00"
+		future1     = "2026-10-18 12:00:00"
+		future2     = "2026-10-20 12:00:00"
+	)
+	promo := func(discount, start, end string) *MTorrentPromotionRule {
+		return &MTorrentPromotionRule{Discount: discount, StartTime: start, EndTime: end}
+	}
+	scoped := func(categories, teams []string) *MTorrentPromotionRule {
+		return &MTorrentPromotionRule{
+			Discount: "FREE", StartTime: startPast, EndTime: future2,
+			Categories: MTorrentIDList{Values: categories}, Teams: MTorrentIDList{Values: teams},
+		}
+	}
+	ongoing := func(start, end string) *MallSingleFree {
+		return &MallSingleFree{Status: "ONGOING", StartDate: start, EndDate: end}
+	}
+
+	cases := []struct {
+		name        string
+		discount    string
+		discountEnd string
+		promotion   *MTorrentPromotionRule
+		mall        *MallSingleFree
+		category    string
+		team        string
+
+		wantLevel    DiscountLevel
+		wantEnd      string       // 空表示没有结束时间
+		wantValidity FreeValidity // item.Promotion(now) 的规范状态
+		wantSource   string
+		wantErr      []string // DiscountErr 应包含的说明；为空表示不应有说明
+	}{
+		// 基础优惠
+		{name: "基础免费有将来的结束时间", discount: "FREE", discountEnd: future1, wantLevel: DiscountFree, wantEnd: future1, wantValidity: FreeUntil, wantSource: "base"},
+		{name: "基础2X免费", discount: "_2X_FREE", discountEnd: future1, wantLevel: Discount2xFree, wantEnd: future1, wantValidity: FreeUntil, wantSource: "base"},
+		{name: "基础免费已过期不再有效", discount: "FREE", discountEnd: past, wantLevel: DiscountNone, wantValidity: FreeNotFree},
+		{name: "基础半价已过期同样失效", discount: "PERCENT_50", discountEnd: past, wantLevel: DiscountNone, wantValidity: FreeNotFree},
+		{name: "基础免费恰好在现在结束", discount: "FREE", discountEnd: "2026-10-16 12:00:00", wantLevel: DiscountNone, wantValidity: FreeNotFree},
+		{name: "基础免费没有结束时间是未知", discount: "FREE", wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "base"},
+		{name: "基础免费结束时间非法是未知并记下原因", discount: "FREE", discountEnd: "2026/10/18 12:00", wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "base", wantErr: []string{"discountEndTime: 时间格式无法解析"}},
+		{name: "基础半价有将来的结束时间", discount: "PERCENT_50", discountEnd: future1, wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base"},
+		{name: "没有任何优惠", discount: "NORMAL", wantLevel: DiscountNone, wantValidity: FreeNotFree},
+
+		// promotionRule：接口没有状态字段，只按起止时间判断
+		{name: "促销的更好优惠覆盖基础优惠", discount: "PERCENT_50", discountEnd: future1, promotion: promo("FREE", startPast, future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "promotion_rule"},
+		{name: "促销还没开始不生效", discount: "PERCENT_50", discountEnd: future1, promotion: promo("FREE", startFuture, future2), wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base"},
+		{name: "促销已结束不生效", discount: "PERCENT_50", discountEnd: future1, promotion: promo("FREE", startPast, past), wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base"},
+		{name: "促销结束时间非法是未知而不是长期免费", discount: "NORMAL", promotion: promo("FREE", startPast, "not-a-time"), wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "promotion_rule", wantErr: []string{"promotionRule.endTime: 时间格式无法解析"}},
+		{name: "促销没有结束时间是未知", discount: "NORMAL", promotion: promo("FREE", startPast, ""), wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "promotion_rule"},
+		{name: "促销开始时间非法是未知", discount: "NORMAL", promotion: promo("FREE", "bad-start", future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUnknown, wantSource: "promotion_rule", wantErr: []string{"promotionRule.startTime: 时间格式无法解析"}},
+		{name: "促销开始时间非法但已经结束仍不生效", discount: "PERCENT_50", discountEnd: future1, promotion: promo("FREE", "bad-start", past), wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base", wantErr: []string{"promotionRule.startTime: 时间格式无法解析"}},
+		{name: "促销没有开始时间不限制开始", discount: "NORMAL", promotion: promo("FREE", "", future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "promotion_rule"},
+		{name: "促销与基础同级时取结束更晚的促销", discount: "FREE", discountEnd: future1, promotion: promo("FREE", startPast, future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "promotion_rule"},
+		{name: "促销与基础同级时取结束更晚的基础", discount: "FREE", discountEnd: future2, promotion: promo("FREE", startPast, future1), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "base"},
+		{name: "同为免费时可信的结束时间优先于未知", discount: "FREE", promotion: promo("FREE", startPast, future1), wantLevel: DiscountFree, wantEnd: future1, wantValidity: FreeUntil, wantSource: "promotion_rule"},
+		{name: "下载比例更低的未知候选胜出但仍是未知", discount: "PERCENT_50", discountEnd: future1, promotion: promo("FREE", startPast, "bad-end"), wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "promotion_rule", wantErr: []string{"promotionRule.endTime: 时间格式无法解析"}},
+		{name: "促销更差的优惠不覆盖基础免费", discount: "FREE", discountEnd: future1, promotion: promo("PERCENT_50", startPast, future2), wantLevel: DiscountFree, wantEnd: future1, wantValidity: FreeUntil, wantSource: "base"},
+		{name: "多处时间非法都记下", discount: "FREE", discountEnd: "bad-base", promotion: promo("FREE", startPast, "bad-end"), wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "base", wantErr: []string{"discountEndTime: 时间格式无法解析; promotionRule.endTime: 时间格式无法解析"}},
+
+		// promotionRule 的适用范围：categories、teams 为空表示全站
+		{name: "全站促销生效", discount: "PERCENT_50", discountEnd: future1, promotion: scoped(nil, nil), category: "402", team: "44", wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "promotion_rule"},
+		{name: "限定其他分类的促销不生效", discount: "PERCENT_50", discountEnd: future1, promotion: scoped([]string{"401", "419"}, nil), category: "402", wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base"},
+		{name: "限定本分类的促销生效", discount: "PERCENT_50", discountEnd: future1, promotion: scoped([]string{"401", "402"}, nil), category: "402", wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "promotion_rule"},
+		{name: "限定制作组且不含本种子的促销不生效", discount: "PERCENT_50", discountEnd: future1, promotion: scoped(nil, []string{"9"}), category: "402", team: "44", wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base"},
+		{name: "限定本制作组的促销生效", discount: "NORMAL", promotion: scoped([]string{"402"}, []string{"44"}), category: "402", team: "44", wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "promotion_rule"},
+		{name: "有分类范围但种子缺分类时不生效", discount: "NORMAL", promotion: scoped([]string{"402"}, nil), wantLevel: DiscountNone, wantValidity: FreeNotFree},
+		{name: "有制作组范围但种子缺制作组时不生效", discount: "NORMAL", promotion: scoped(nil, []string{"44"}), category: "402", wantLevel: DiscountNone, wantValidity: FreeNotFree},
+		{name: "范围解不开时不生效并记下原因", discount: "NORMAL", promotion: &MTorrentPromotionRule{Discount: "FREE", StartTime: startPast, EndTime: future2, Categories: MTorrentIDList{Invalid: true}}, category: "402", wantLevel: DiscountNone, wantValidity: FreeNotFree, wantErr: []string{"promotionRule.categories: 格式无法解析"}},
+
+		// mallSingleFree：只认 ONGOING，起止时间与 promotionRule 同样处理
+		{name: "商城单种免费进行中且在区间内", discount: "NORMAL", mall: ongoing(startPast, future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "mall_single_free"},
+		{name: "商城单种免费已结束不生效", discount: "PERCENT_50", discountEnd: future1, mall: ongoing(startPast, past), wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base"},
+		{name: "商城单种免费状态不是进行中不生效", discount: "PERCENT_50", discountEnd: future1, mall: &MallSingleFree{Status: "ENDED", StartDate: startPast, EndDate: future2}, wantLevel: DiscountPercent50, wantEnd: future1, wantValidity: FreeNotFree, wantSource: "base"},
+		{name: "商城单种免费状态不区分大小写", discount: "NORMAL", mall: &MallSingleFree{Status: " ongoing ", StartDate: startPast, EndDate: future2}, wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "mall_single_free"},
+		{name: "商城单种免费还没开始不生效", discount: "NORMAL", mall: ongoing(startFuture, future2), wantLevel: DiscountNone, wantValidity: FreeNotFree},
+		{name: "商城单种免费没有开始时间不限制开始", discount: "NORMAL", mall: ongoing("", future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "mall_single_free"},
+		{name: "商城单种免费没有结束时间是未知而不是长期免费", discount: "NORMAL", mall: ongoing(startPast, ""), wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "mall_single_free"},
+		{name: "商城单种免费结束时间非法是未知", discount: "NORMAL", mall: ongoing(startPast, "bad-end"), wantLevel: DiscountFree, wantValidity: FreeUnknown, wantSource: "mall_single_free", wantErr: []string{"mallSingleFree.endDate: 时间格式无法解析"}},
+		{name: "促销还没开始时仍看商城单种免费", discount: "PERCENT_50", discountEnd: future1, promotion: promo("FREE", startFuture, future2), mall: ongoing(startPast, future1), wantLevel: DiscountFree, wantEnd: future1, wantValidity: FreeUntil, wantSource: "mall_single_free"},
+		{name: "促销优惠更差时仍看商城单种免费", discount: "NORMAL", promotion: promo("PERCENT_50", startPast, future2), mall: ongoing(startPast, future1), wantLevel: DiscountFree, wantEnd: future1, wantValidity: FreeUntil, wantSource: "mall_single_free"},
+		{name: "促销与商城都免费时取结束更晚的", discount: "PERCENT_50", discountEnd: future1, promotion: promo("FREE", startPast, future1), mall: ongoing(startPast, future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "mall_single_free"},
+		{name: "基础2X免费不被商城单种免费降级", discount: "_2X_FREE", discountEnd: future2, mall: ongoing(startPast, future1), wantLevel: Discount2xFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "base"},
+		{name: "同样的结束时间时2X免费优先于免费", discount: "_2X_FREE", discountEnd: future1, mall: ongoing(startPast, future1), wantLevel: Discount2xFree, wantEnd: future1, wantValidity: FreeUntil, wantSource: "base"},
+		{name: "商城单种免费结束更晚时免费期以它为准", discount: "_2X_FREE", discountEnd: future1, mall: ongoing(startPast, future2), wantLevel: DiscountFree, wantEnd: future2, wantValidity: FreeUntil, wantSource: "mall_single_free"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tor := &MTorrentTorrent{Category: c.category, Team: MTorrentID(c.team)}
+			tor.Status.Discount = c.discount
+			tor.Status.DiscountEndTime = c.discountEnd
+			tor.Status.PromotionRule = c.promotion
+			tor.Status.MallSingleFree = c.mall
+
+			var item TorrentItem
+			applyMTorrentDiscount(&item, evaluateMTorrentDiscount(tor, now))
+
+			assert.Equal(t, c.wantLevel, item.DiscountLevel)
+			if c.wantEnd == "" {
+				assert.True(t, item.DiscountEndTime.IsZero(), "end = %s", item.DiscountEndTime)
+			} else {
+				assert.True(t, mteamAt(t, c.wantEnd).Equal(item.DiscountEndTime), "end = %s", item.DiscountEndTime)
+			}
+			assert.Equal(t, c.wantSource, item.DiscountSource)
+			if len(c.wantErr) == 0 {
+				assert.Empty(t, item.DiscountErr)
+			}
+			for _, e := range c.wantErr {
+				assert.Contains(t, item.DiscountErr, e)
+			}
+			// 诊断说明只写字段名与错误类型，不带原始值
+			raw := []string{c.discountEnd}
+			if c.promotion != nil {
+				raw = append(raw, c.promotion.StartTime, c.promotion.EndTime)
+			}
+			if c.mall != nil {
+				raw = append(raw, c.mall.StartDate, c.mall.EndDate)
+			}
+			for _, v := range raw {
+				if v != "" {
+					assert.NotContains(t, item.DiscountErr, v)
+				}
+			}
+
+			snap := item.Promotion(now)
+			assert.Equal(t, c.wantValidity, snap.Validity)
+			assert.NotEqual(t, FreePermanent, snap.Validity, "M-Team 没有长期有效的明确标记，不能得出长期免费")
+			assert.Equal(t, c.wantSource, snap.Source)
+		})
+	}
+}
+
+func TestMTorrentIDListAndID_Decode(t *testing.T) {
+	var rule MTorrentPromotionRule
+	require.NoError(t, json.Unmarshal([]byte(`{"discount":"FREE","categories":[401," 402 "],"teams":null}`), &rule))
+	assert.Equal(t, []string{"401", "402"}, rule.Categories.Values)
+	assert.False(t, rule.Categories.Invalid)
+	assert.True(t, rule.Categories.covers("402"))
+	assert.False(t, rule.Categories.covers("419"))
+	assert.False(t, rule.Categories.covers(""), "种子缺分类时无法证明覆盖")
+	assert.Empty(t, rule.Teams.Values)
+	assert.True(t, rule.Teams.covers("44"), "空范围表示全站")
+
+	// 解不开的范围不让整条结果解析失败，但促销不适用
+	require.NoError(t, json.Unmarshal([]byte(`{"discount":"FREE","categories":"402","teams":[{"id":1}]}`), &rule))
+	assert.True(t, rule.Categories.Invalid)
+	assert.False(t, rule.Categories.covers("402"))
+	assert.True(t, rule.Teams.Invalid)
+	assert.False(t, rule.Teams.covers("1"))
+
+	var tor MTorrentTorrent
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"1","category":"402","team":44}`), &tor))
+	assert.Equal(t, MTorrentID("44"), tor.Team)
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"1","category":"402","team":" 9 "}`), &tor))
+	assert.Equal(t, MTorrentID("9"), tor.Team)
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"1","category":"402","team":{"id":9}}`), &tor))
+	assert.Equal(t, MTorrentID(""), tor.Team, "解不开的制作组当作没有")
+}
+
+// 走真实的解码路径：搜索结果的字段形状来自接口实测（脱敏，不含 API Key、下载地址或用户数据）
+func TestMTorrentDriver_ParseSearch_StrictDiscount(t *testing.T) {
+	driver := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "test-api-key"})
+	now := mteamAt(t, "2026-10-16 12:00:00")
+	driver.now = func() time.Time { return now }
+
+	raw := `{"data":[
+		{"id":"101","name":"A","size":"1024","category":"402","team":"44",
+		 "status":{"discount":"FREE","discountEndTime":null,"promotionRule":null,"mallSingleFree":null}},
+		{"id":"102","name":"B","size":"1024","category":"402",
+		 "status":{"discount":"FREE","discountEndTime":"2026/10/20 12:00:00"}},
+		{"id":"103","name":"C","size":"1024","category":"402",
+		 "status":{"discount":"FREE","discountEndTime":"2026-10-15 12:00:00"}},
+		{"id":"104","name":"D","size":"1024","category":"402","team":44,
+		 "status":{"discount":"PERCENT_50","discountEndTime":"2026-10-18 12:00:00",
+		  "promotionRule":{"id":"7","categories":[],"teams":[],"discount":"FREE","startTime":"2026-10-01 00:00:00","endTime":null,"operator":"x"}}},
+		{"id":"105","name":"E","size":"1024","category":"402",
+		 "status":{"discount":"PERCENT_50","discountEndTime":"2026-10-18 12:00:00",
+		  "promotionRule":{"id":"8","categories":[401,"419"],"teams":[],"discount":"FREE","startTime":"2026-10-01 00:00:00","endTime":"2026-10-20 12:00:00"}}},
+		{"id":"106","name":"F","size":"1024","category":"402",
+		 "status":{"discount":"_2X_FREE","discountEndTime":"2026-10-18 12:00:00"}},
+		{"id":"107","name":"G","size":"1024","category":"402",
+		 "status":{"discount":"NORMAL","mallSingleFree":{"status":"ONGOING","endDate":"2026-10-20 12:00:00","isAdult":false}}},
+		{"id":"108","name":"H","size":"1024","category":"402","team":"44",
+		 "status":{"discount":"NORMAL",
+		  "promotionRule":{"categories":[402],"teams":["9"],"discount":"FREE","startTime":"2026-10-01 00:00:00","endTime":"2026-10-20 12:00:00"}}},
+		{"id":"109","name":"I","size":"1024","category":"402",
+		 "status":{"discount":"NORMAL",
+		  "promotionRule":{"categories":"402","discount":"FREE","startTime":"2026-10-01 00:00:00","endTime":"2026-10-20 12:00:00"}}},
+		{"id":"110","name":"J","size":"1024","category":"402",
+		 "status":{"discount":"PERCENT_50","discountEndTime":"2026-10-18 12:00:00",
+		  "promotionRule":{"categories":[402],"teams":[],"discount":"FREE","startTime":"2026-10-01 00:00:00","endTime":"2026-10-20 12:00:00"},
+		  "mallSingleFree":{"status":"ONGOING","startDate":"2026-10-01 00:00:00","endDate":"","isAdult":true}}},
+		{"id":"111","size":"1024","category":"429",
+		 "status":{"discount":"PERCENT_50",
+		  "mallSingleFree":{"status":"ONGOING","startDate":"2026-10-16 07:47:39","endDate":"2026-10-19 07:47:39"}}}
+	],"total":11}`
+	items, err := driver.ParseSearch(MTorrentResponse{Code: "0", Message: "success", Data: json.RawMessage(raw)})
+	require.NoError(t, err)
+	require.Len(t, items, 11)
+	byID := make(map[string]TorrentItem, len(items))
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+
+	cases := []struct {
+		id           string
+		wantLevel    DiscountLevel
+		wantEnd      string
+		wantValidity FreeValidity
+		wantSource   string
+		wantErr      string
+	}{
+		{"101", DiscountFree, "", FreeUnknown, "base", ""},                              // 结束时间是 null：未知，不是长期免费
+		{"102", DiscountFree, "", FreeUnknown, "base", "discountEndTime: 时间格式无法解析"},     // 结束时间格式不对
+		{"103", DiscountNone, "", FreeNotFree, "", ""},                                  // 基础免费已过期
+		{"104", DiscountFree, "", FreeUnknown, "promotion_rule", ""},                    // 促销有开始没结束（null）：未知
+		{"105", DiscountPercent50, "2026-10-18 12:00:00", FreeNotFree, "base", ""},      // 促销只覆盖别的分类
+		{"106", Discount2xFree, "2026-10-18 12:00:00", FreeUntil, "base", ""},           // _2X_FREE
+		{"107", DiscountFree, "2026-10-20 12:00:00", FreeUntil, "mall_single_free", ""}, // 商城单种免费没有 startDate
+		{"108", DiscountNone, "", FreeNotFree, "", ""},                                  // 分类覆盖但制作组不覆盖
+		{"109", DiscountNone, "", FreeNotFree, "", "promotionRule.categories: 格式无法解析"},  // 范围不是数组
+		{"110", DiscountFree, "2026-10-20 12:00:00", FreeUntil, "promotion_rule", ""},   // 可信的促销优先于没有结束时间的商城单种免费
+		{"111", DiscountFree, "2026-10-19 07:47:39", FreeUntil, "mall_single_free", ""}, // 成人区：种子本身 50%，单种免费进行中
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			item, ok := byID[c.id]
+			require.True(t, ok)
+			assert.Equal(t, c.wantLevel, item.DiscountLevel)
+			if c.wantEnd == "" {
+				assert.True(t, item.DiscountEndTime.IsZero(), "end = %s", item.DiscountEndTime)
+			} else {
+				assert.True(t, mteamAt(t, c.wantEnd).Equal(item.DiscountEndTime), "end = %s", item.DiscountEndTime)
+			}
+			assert.Equal(t, c.wantSource, item.DiscountSource)
+			assert.Equal(t, c.wantErr, item.DiscountErr)
+			assert.Equal(t, c.wantValidity, item.Promotion(now).Validity)
+			assert.True(t, item.FetchedAt.IsZero(), "搜索结果不写 FetchedAt")
+		})
+	}
+}
+
+func TestMTorrentDriver_GetTorrentDetail_StrictDiscount(t *testing.T) {
+	responses := map[string]string{
+		// 基础半价已过期；促销限定本分类、有可信结束时间；商城单种免费进行中但没有结束时间
+		"555": `{"code":"0","message":"SUCCESS","data":{
+			"id":"555","name":"Detail.Movie","size":"2147483648","category":"402","team":"44",
+			"status":{"seeders":30,"leechers":3,"timesCompleted":99,"discount":"PERCENT_50","discountEndTime":"2026-10-15 12:00:00",
+				"promotionRule":{"categories":["402"],"teams":[],"discount":"FREE","startTime":"2026-10-01 00:00:00","endTime":"2026-10-20 12:00:00"},
+				"mallSingleFree":{"status":"ONGOING","endDate":"","isAdult":false}}}}`,
+		// 基础免费的结束时间无法解析
+		"556": `{"code":"0","message":"SUCCESS","data":{
+			"id":"556","name":"Bad.Time","size":"1024","category":"402",
+			"status":{"discount":"FREE","discountEndTime":"16/10/2026"}}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		id := strings.TrimPrefix(string(body), "id=")
+		w.Write([]byte(responses[id]))
+	}))
+	defer server.Close()
+
+	now := mteamAt(t, "2026-10-16 12:00:00")
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	d.now = func() time.Time { return now }
+
+	item, err := d.GetTorrentDetail(context.Background(), "555", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.True(t, mteamAt(t, "2026-10-20 12:00:00").Equal(item.DiscountEndTime))
+	assert.Equal(t, "promotion_rule", item.DiscountSource)
+	assert.Empty(t, item.DiscountErr)
+	assert.Equal(t, FreeUntil, item.Promotion(now).Validity)
+	assert.True(t, now.Equal(item.FetchedAt), "详情是实时请求，FetchedAt 是取得的时间：%s", item.FetchedAt)
+
+	item, err = d.GetTorrentDetail(context.Background(), "556", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.True(t, item.DiscountEndTime.IsZero())
+	assert.Equal(t, FreeUnknown, item.DiscountValidity)
+	assert.Equal(t, "discountEndTime: 时间格式无法解析", item.DiscountErr)
+	assert.Equal(t, FreeUnknown, item.Promotion(now).Validity)
+}
+
+// 下载令牌接口返回异常时，错误里的原始响应要把签名下载地址的凭证参数打码（错误会进日志）。
+func TestMTorrentParseDownload_ErrorsHideSignedURL(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	const secret = "s1GnSECRET0123456789"
+	cases := []MTorrentResponse{
+		{Code: "0", Data: json.RawMessage(`{"url":"https://api.m-team.cc/api/rss/dlv2?sign=` + secret + `&t=1"}`)},
+		{Code: "1", Message: "busy", RawBody: []byte(`{"code":"1","data":"https://api.m-team.cc/api/rss/dlv2?sign=` + secret + `"}`)},
+		{Code: "1", Message: "请改用 https://api.m-team.cc/api/rss/dlv2?sign=" + secret, RawBody: []byte(`{"code":"1"}`)},
+	}
+	for _, res := range cases {
+		_, err := d.ParseDownload(res)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), secret)
+		assert.Contains(t, err.Error(), "api.m-team.cc", "地址的其余部分照样留着便于排查")
+	}
 }

@@ -163,7 +163,31 @@ func (c *httpManagerClient) LaunchProfile(ctx context.Context, profileID string)
 	if uErr := json.Unmarshal(body, &lr); uErr != nil {
 		return nil, fmt.Errorf("%w: launch response: %v", ErrManagerProtocolError, uErr)
 	}
+	lr.CdpURL, lr.CdpHeader = c.cdpEndpoint(lr.CdpURL)
 	return &lr, nil
+}
+
+// cdpEndpoint 把 Manager 回的 cdp_url 变成能直接连的地址。新版 Manager 回相对路径（/api/profiles/{id}/cdp）：
+// 浏览器的调试口只能经 Manager 转发，转发也认令牌，所以补成 Manager 地址上的 ws(s)://，并带上 Bearer 令牌。
+// 老版本回的是完整地址，原样返回，不带请求头。
+func (c *httpManagerClient) cdpEndpoint(raw string) (string, http.Header) {
+	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return raw, nil
+	}
+	u, err := url.Parse(c.baseURL + raw)
+	if err != nil {
+		return raw, nil
+	}
+	if u.Scheme == "https" {
+		u.Scheme = "wss"
+	} else {
+		u.Scheme = "ws"
+	}
+	header := http.Header{}
+	if c.token != "" {
+		header.Set("Authorization", "Bearer "+c.token)
+	}
+	return u.String(), header
 }
 
 func (c *httpManagerClient) GetProfileStatus(ctx context.Context, profileID string) (*ProfileStatus, error) {

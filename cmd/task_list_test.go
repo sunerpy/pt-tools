@@ -11,7 +11,7 @@ import (
 )
 
 func TestTaskListCmd_PrintsForDate(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -20,7 +20,7 @@ func TestTaskListCmd_PrintsForDate(t *testing.T) {
 }
 
 func TestTaskListCmd_DefaultDate(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -29,7 +29,7 @@ func TestTaskListCmd_DefaultDate(t *testing.T) {
 }
 
 func TestTaskCmd_UsageWithoutSubcommand(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db

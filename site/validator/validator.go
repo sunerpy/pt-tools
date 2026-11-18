@@ -56,7 +56,7 @@ type SiteValidator struct {
 }
 
 func NewSiteValidator() *SiteValidator {
-	session := requests.NewSession().WithTimeout(30 * time.Second)
+	session := httpclient.NewSession().WithTimeout(30 * time.Second)
 	return &SiteValidator{
 		session: session,
 		timeout: 60 * time.Second,

@@ -1214,9 +1214,9 @@ func TestQbitGetAllTorrentsAndMapping(t *testing.T) {
 				"downloaded": float64(4096), "eta": float64(0), "seeding_time": float64(3600),
 				"tracker": "http://t.example", "completion_on": float64(1600001000),
 				"num_seeds": float64(5), "num_leechs": float64(3), "availability": float64(1.5),
-				"content_path": "/downloads/torrent-one",
+				"content_path": "/downloads/torrent-one", "last_activity": float64(1600002000),
 			},
-			{"hash": "h2", "name": "torrent-two", "progress": float64(0.5), "state": "downloading"},
+			{"hash": "h2", "name": "torrent-two", "progress": float64(0.5), "state": "downloading", "last_activity": float64(-1)},
 		})
 	}))
 	defer srv.Close()
@@ -1246,9 +1246,34 @@ func TestQbitGetAllTorrentsAndMapping(t *testing.T) {
 	assert.Equal(t, 5, first.NumSeeds)
 	assert.Equal(t, 3, first.NumPeers)
 	assert.Equal(t, "test-qbit", first.ClientID)
+	assert.Equal(t, int64(1600002000), first.LastActivity, "last_activity 是最后一次上传或下载的时间")
 
 	assert.False(t, torrents[1].IsCompleted)
+	assert.Zero(t, torrents[1].LastActivity, "没有过活动（qB 给负数）时当作不知道")
 	assert.Equal(t, downloader.TorrentDownloading, torrents[1].State)
+}
+
+// 整个种子群的做种与下载人数来自 num_complete、num_incomplete（tracker 报的）；没给或给 -1 时是 -1（不知道）。
+func TestQbitGetAllTorrents_SwarmCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"hash": "h1", "state": "uploading", "num_complete": float64(40), "num_incomplete": float64(2), "num_seeds": float64(1)},
+			{"hash": "h2", "state": "uploading"},
+			{"hash": "h3", "state": "uploading", "num_complete": float64(-1), "num_incomplete": float64(0)},
+		})
+	}))
+	defer srv.Close()
+
+	torrents, err := coverageTestClient(srv.URL, false).GetAllTorrents()
+	require.NoError(t, err)
+	require.Len(t, torrents, 3)
+	assert.Equal(t, 40, torrents[0].SwarmSeeds)
+	assert.Equal(t, 2, torrents[0].SwarmLeechers)
+	assert.Equal(t, 1, torrents[0].NumSeeds, "连上的做种人数照旧来自 num_seeds")
+	assert.Equal(t, -1, torrents[1].SwarmSeeds, "没给时不知道")
+	assert.Equal(t, -1, torrents[1].SwarmLeechers)
+	assert.Equal(t, -1, torrents[2].SwarmSeeds, "qB 给 -1 时不知道")
+	assert.Equal(t, 0, torrents[2].SwarmLeechers)
 }
 
 func TestQbitMapQbitState(t *testing.T) {

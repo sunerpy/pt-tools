@@ -281,7 +281,7 @@ export function getSiteBonusName(siteId: string): string {
  */
 const siteSeedingBonusNames: Record<string, string> = {
   springsunday: "做种积分",
-  hddolby: "保种积分",
+  hddolby: "做种积分",
 };
 
 /**

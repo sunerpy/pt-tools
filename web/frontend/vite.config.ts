@@ -30,6 +30,14 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {
+            // Element-Plus-X 只有 AI 助手页用：单独一块，跟着那一页按需加载（名字里也有 element-plus，要先判断）
+            if (/[\\/](vue-element-plus-x|x-sender|virtua)[\\/]/.test(id)) {
+              return "element-plus-x";
+            }
+            // 海报转 PNG 只在数据导出页点「下载」「复制」时用：单独一块，按需加载，不进全站的 vendor
+            if (/[\\/]modern-screenshot[\\/]/.test(id)) {
+              return "modern-screenshot";
+            }
             if (id.includes("element-plus")) {
               return "element-plus";
             }
@@ -45,6 +53,10 @@ export default defineConfig({
   test: {
     // 见 src/test-setup.ts：happy-dom 的 storage 被 Node 25 的原生同名全局遮住了
     setupFiles: ["./src/test-setup.ts"],
+    // 挂载整页的视图测试在 CI 上一个要 2–5 秒，默认 5 秒的时限会偶发超时
+    testTimeout: 20_000,
+    // Element-Plus-X 的 ES 包在 JS 里 import 自己的 CSS：交给 vite 处理，不让 Node 直接加载
+    server: { deps: { inline: ["vue-element-plus-x"] } },
   },
   server: {
     proxy: {

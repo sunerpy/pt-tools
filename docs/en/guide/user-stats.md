@@ -1,0 +1,99 @@
+# Statistics and daily report
+
+The User Stats page summarizes upload, download, ratio, bonus and seeding data across your sites. pt-tools stores a snapshot for a site on each day its data is fetched successfully, and uses the snapshots to compute daily, weekly and monthly increments, draw trends on the page, and optionally send the previous day's increments (or today's up to the send time) to a notification channel (the daily report, off by default).
+
+The snapshots, increments, trends and daily report were added in the 1.0 preview; the Statistics (用户统计) page itself was already in 0.48.0.
+
+## Where the data comes from
+
+- Every time pt-tools successfully fetches a site's user data, it updates the site's record and writes that day's snapshot; fetching several times a day keeps only the last one.
+- For sites whose probe mode is "Auto", the login-state probe fetches user data roughly every 6 hours, which also refreshes the snapshot (see [Site login state and key backup](site-login-monitoring.md)).
+- Sites in "Manual" or "Disabled" probe mode only update when you sign in to the Web UI or click "Sync"; pt-tools does not visit them on a schedule.
+- Fetching one site's data takes several pages (the index, user details, bonus, the seeding list). Where the site definition sets a request delay (most NexusPHP sites), pt-tools fetches the pages one at a time with that gap, so that several simultaneous requests do not draw a Cloudflare challenge. When a page's connection is reset, times out or the site errors (5xx), it retries twice with exponential backoff (about 2 and then 4 seconds); on a Cloudflare challenge it retries once after a few seconds. One site takes at most 90 seconds (on a slow link a single page can take 20 to 30 seconds); pages still unfetched by then count as not fetched.
+- When a page still fails but the username came through, the fetch counts as successful: the items that were not fetched keep their previous values (the last-access time is taken from this visit), and the log records one line, "Partial user info, kept previous values", with the reason and the items kept. When upload or download is missing and there is no earlier record, nothing is saved this time. Without a username, or with an expired login, the fetch fails, and the log records one "Failed to fetch user info" line per site whose `reason` says whether it was a Cloudflare challenge, a network error (connection reset), a timeout or an expired login.
+
+## How increments are computed
+
+- A day's increment = that day's snapshot − the previous snapshot. If some days have no snapshot, the increment covers all of them together; nothing is interpolated.
+- A period increment (today, this week, this month) = the latest snapshot in the period − the most recent snapshot before the period starts; if there is none before the period, the earliest snapshot inside it is used. A site with a single snapshot has no increment.
+- When a site's numbers go backwards (the tracker reset its stats, or you spent bonus), that value counts as 0 and is left out of totals.
+
+## Two kinds of download figures
+
+- **Billed download (下载量（计费）)**: the download a site counts toward your ratio after free, discount and other promotions. Every download figure on the User Stats page, in site details, in the daily report, in the ChatOps `/sites <site>` reply, in the mobile app, in the App API and in MCP is this one, and each of them says so (计费 in the Web UI, `Downloaded (billed)` in the ChatOps reply).
+- **Actual download (实际下载)**: the amount actually transferred, before promotions, which some sites (M-Team, for example) report separately. It appears together with the actual upload in the "Actual transfer" (实际传输) column of the User Stats site table (hidden by default; turn it on under "Columns" (列设置)) and in the "Actual upload / download" (实际上传 / 下载) row of the "Site stats" (站点统计) card in site details. Sites that do not report it have no such figures.
+- Downloading a free torrent increases the actual download while the billed download stays the same; that is expected. To check whether a download was billed, look at the billed download and the ratio.
+- Daily snapshots keep only the billed figure: increments, trends and the daily report all use the billed download, and there is no history of the actual download.
+- With some upload and no billed download the ratio is infinite (the site shows 无限, Inf. or ∞), and every site shows ∞. The average ratio leaves it out, and ratio requirements for a class count as met. The App API and MCP give an infinite ratio as 9999999.
+
+## Where to look
+
+| Place                                  | What it shows                                                                                                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User Stats → toolbar "Period"          | Today, this week (last 7 days), this month (last 30 days)                                                                                                         |
+| User Stats → KPI "Total upload"        | The upload increment for the selected period; the bars are the daily upload increments of the last 7 days                                                         |
+| User Stats → "Upload breakdown" card   | The 6 sites with the largest upload increment in the period; ranked by current total upload until comparable snapshots exist                                      |
+| Site list (phone)                      | 8 bars on each site card: daily upload increments over the last 8 days                                                                                            |
+| Site detail → "Site stats" card        | The 30-day upload increment and its daily trend                                                                                                                   |
+| Data export (数据导出)                 | The share image can include the period increments ("Include period increments" switch and period choice); see [Exporting a share image](#exporting-a-share-image) |
+| User Stats → "Downloader seeding" card | How many torrents each downloader is seeding right now and their size; see [Downloader seeding](#downloader-seeding)                                              |
+
+Right after installation there is no history yet; increments appear once a second snapshot exists, usually the next day.
+
+## Downloader seeding
+
+The "Downloader seeding" (下载器做种) card at the bottom of the User Stats page reads the torrent lists of the downloaders directly. It has one row per enabled downloader: how many torrents it is seeding right now and their size, with the total of all downloaders in the card header. Compare it with the seeding size the sites report in the "Account totals" (账户总量) card to see which downloader seeds the most, and whether a site's reported figure is off.
+
+- Only torrents whose state is seeding count: uploading, stalledUP and forcedUP in qBittorrent, Seeding in Transmission. Completed torrents that are paused, stopped, queued, being checked or in error are listed in small text under the row ("另有 N 个下载完了没在做种": N more completed but not seeding); incomplete torrents do not count.
+- Each torrent counts with its full size. A reseed and its original torrent share one copy of the data but count once each here, the same way sites report seeding size, so the total is larger than the disk space actually used.
+- A downloader that cannot be reached shows "没连上" (not connected) with the reason underneath, at most two lines; hover over the row to read all of it. It is left out of the total.
+- The card refreshes with the page: when the page opens, after "Sync all" (同步全部) or syncing one site, and every 5 minutes. It is hidden when no downloader is enabled.
+- The mobile app shows the same card at the bottom of Overview; see [Mobile app](mobile-app.md#what-you-can-do).
+
+## Exporting a share image
+
+Overview → Data export (概览 → 数据导出) in the left navigation, or Export share (导出分享) on the User Stats toolbar, draws your statistics as an image to share.
+
+- Styles: Bento (便当, the default: tiles of different sizes, the most detail), Paper (素笺: paper background, thin rules and large serif figures), Night (夜幕: dark glass cards, with a ring showing upload against billed download), Wrapped (回顾: one large figure per sentence, the three sites with the most upload on a podium) and Receipt (小票: a thermal receipt with a red stamp and a barcode). Each style has two or three color schemes. The style and color scheme you pick are remembered in this browser.
+- The preview is the exported image. Download image (下载图片) saves a PNG at twice the size (1280 pixels wide); Copy image (复制图片) puts it on the clipboard, which needs pt-tools opened over HTTPS or on localhost. On a phone the preview is scaled down to fit the screen; the exported image is the same.
+- Masking: site names, site icons and usernames are all masked by default; each can be turned off on its own. A name keeps only its first character followed by a bar; an icon becomes a 4×4 block of its colors. The original text is not in the image and cannot be recovered.
+- The per-site details start with the 10 sites with the most upload ticked; tick the sites you want, and with none ticked the image has no per-site details. Sites are sorted by upload. The period increments can be today, this week or this month, and are left out until comparable snapshots exist.
+- The ratio on the image is the average of the sites' ratios, the same figure as Average ratio (平均分享率) on the User Stats page.
+
+## Daily report
+
+Turn it on under "Daily report" in System Settings, then set the send time (default `22:00`, server time zone), the period and the receiving channels. At least one notification channel is required when it is enabled; it is never sent to all channels by default.
+
+There are two periods (统计范围):
+
+- **Previous day** (前一天, the default): the report covers the whole previous day. The send time only decides when you receive it, so a morning send time still gives a complete day.
+- **Today up to the send time** (当天截至发送时刻): the report covers today from midnight to the send time. Uploads, check-ins and brushing after the send time are not counted, so today's numbers are complete only when the send time is close to midnight (the latest send time you can pick is 23:45).
+
+The title says which day the report covers: 📊 每日战报 2026-10-30（前一天） for the previous day and 📊 每日战报 2026-10-31（截至 22:03） for today up to 22:03, and the lines start with 昨日 (yesterday) or 今日 (today). Earlier 1.0 preview builds only had the today period; after upgrading, a daily report that is already on covers the previous day, and choosing Today up to the send time brings back the old behaviour.
+
+Each day at the send time, plus a fixed per-installation offset of up to 10 minutes (picked at random the first time it is needed and then kept, no later than 23:59), pt-tools sends one report:
+
+- upload, billed download and bonus increments per site and in total, listing up to 10 sites by upload;
+- sites whose login state is abnormal (session expired, key error, challenged, network error and so on), as it is at the send time, also when the report covers the previous day;
+- check-in results (how many sites signed in, were already signed in, or failed);
+- with In the daily report (写进每日战报) on in the IYUU cross-seeding settings, cross-seeds created, succeeded, failed and deleted on site (see [IYUU cross-seeding notifications](reseed.md#notifications));
+- with subscriptions on and episodes aired that day, a followed-show line: how many episodes of your subscriptions aired on the day covered and how many of them are in the library now (see [the subscription calendar](media-detail.md#bot-and-daily-report));
+- sites whose numbers went backwards and were counted as 0.
+
+Increments, check-ins, brushing, cross-seeding and followed shows are all counted for the day the report covers. A day's increment is that day's last snapshot minus the latest one before it, the same numbers the User Stats page shows per day: uploads after that day's last sync are counted on the next day.
+
+Only enabled sites are counted. A site whose probe mode is "Disabled" is no longer probed, so its last probe status is not reported as a login problem. When there is no snapshot from before the day the report covers and nothing can be compared yet, the report says so instead of listing zeros.
+
+Each channel receives it at most once per day, including across restarts. If a channel is in its quiet hours, the report waits until the quiet hours end; failed deliveries are retried after 1, 5 and 30 minutes, then after 2 and 6 hours. Every delivery is recorded in the ChatOps [audit log](chatops-quickstart.md#viewing-the-audit-log), with the reason when it failed. On QQ and Telegram channels the report goes to the recipient from the channel settings: the first Admin QQ number on QQ (see [the QQ lists](chatops-qq-napcat.md#q-what-is-the-difference-between-admin_qq_users-and-allowed_qq_users)) and the default chat ID on Telegram (see [the Telegram fields](chatops-telegram.md#what-the-fields-mean)). If pt-tools starts after the send time but before the day ends, it still sends that day's report; a day on which it was not running at any point between the send time and midnight is skipped, and the next day sends its own report as usual (covering the previous day or that day, depending on the period).
+
+## API
+
+| Endpoint                                                | Description                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| `GET /api/v2/userinfo/history?site=<site>&days=<1–400>` | Daily data and increments of one site over recent days              |
+| `GET /api/v2/userinfo/summary?range=today\|7d\|30d`     | Increments and totals of enabled sites over the period              |
+| `GET /api/v2/userinfo/trends?days=<1–60>`               | Daily increments and totals of enabled sites over recent days       |
+| `GET` / `PUT /api/v2/userinfo/daily-report`             | Read or update the daily report settings                            |
+| `GET /api/downloader-torrents/seeding-stats`            | How many torrents each enabled downloader is seeding and their size |
+
+All of them require a signed-in session.

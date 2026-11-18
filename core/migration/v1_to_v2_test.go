@@ -827,13 +827,12 @@ func TestMigrationService_RestoreBackup_WithRSS(t *testing.T) {
 
 // TestMigrationService_CreateBackup_ErrorCases 测试创建备份的错误情况
 func TestMigrationService_CreateBackup_ErrorCases(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("skipping test that requires permission denied errors when running as root")
-	}
 	db := setupTestDB(t)
 
-	// 使用不可写的目录
-	service := NewMigrationServiceWithBackupDir(db, "/nonexistent/path/that/does/not/exist")
+	// 备份目录的上一级是普通文件：哪个系统、哪个用户都建不出来（Windows 上 /nonexistent 会建在当前盘的根上，#542）
+	blocker := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	service := NewMigrationServiceWithBackupDir(db, filepath.Join(blocker, "backups"))
 
 	_, err := service.CreateBackup()
 	require.Error(t, err)

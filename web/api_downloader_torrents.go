@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -91,6 +92,12 @@ type DownloaderCapability struct {
 	CanRecheck        bool   `json:"can_recheck"`
 	CanViewFiles      bool   `json:"can_view_files"`
 	CanViewTrackers   bool   `json:"can_view_trackers"`
+	// CanExportTorrent 表示能把种子导出成 .torrent（qBittorrent 4.5 起；实际版本在调用时再核对）。
+	CanExportTorrent bool `json:"can_export_torrent"`
+	// CanEditTrackers 表示能修改种子的 tracker 地址（qBittorrent 与 Transmission 都支持）。
+	CanEditTrackers bool `json:"can_edit_trackers"`
+	// CanKeep 表示能一键加、去「保留」标签（pt-tools-keep）：qBittorrent 用标签，Transmission 用 labels。
+	CanKeep bool `json:"can_keep"`
 }
 
 type DownloaderCapabilitiesResponse struct {
@@ -180,32 +187,34 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := 1
-	pageSize := 100
+	q := torrentQuery{Page: 1, PageSize: 100}
 	if p := r.URL.Query().Get("page"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil && v > 0 {
-			page = v
+			q.Page = v
 		}
 	}
 	if ps := r.URL.Query().Get("page_size"); ps != "" {
 		if v, err := strconv.Atoi(ps); err == nil {
 			if v == 0 {
-				pageSize = 0
+				q.PageSize = 0
 			} else if v > 0 && v <= 500 {
-				pageSize = v
+				q.PageSize = v
 			}
 		}
 	}
 
-	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
-	stateFilter := strings.TrimSpace(r.URL.Query().Get("state"))
+	q.Search = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	q.State = strings.TrimSpace(r.URL.Query().Get("state"))
+	// 「活动中」不是下载器的一种状态，是「此刻在传数据」；只有这个网页接口认它，App API 的 state 不变
+	if q.State == torrentFilterActive {
+		q.State, q.Active = "", true
+	}
 	downloaderIDStr := strings.TrimSpace(r.URL.Query().Get("downloader_id"))
-	sortBy := strings.TrimSpace(r.URL.Query().Get("sort_by"))
-	sortOrder := strings.TrimSpace(r.URL.Query().Get("sort_order"))
-	categoryFilter := strings.TrimSpace(r.URL.Query().Get("category"))
-	tagFilter := strings.TrimSpace(r.URL.Query().Get("tag"))
+	q.SortBy = strings.TrimSpace(r.URL.Query().Get("sort_by"))
+	q.SortOrder = strings.TrimSpace(r.URL.Query().Get("sort_order"))
+	q.Category = strings.TrimSpace(r.URL.Query().Get("category"))
+	q.Tag = strings.TrimSpace(r.URL.Query().Get("tag"))
 
-	var filterDownloaderID *uint
 	if downloaderIDStr != "" {
 		id64, err := strconv.ParseUint(downloaderIDStr, 10, 64)
 		if err != nil {
@@ -213,26 +222,48 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id := uint(id64)
-		filterDownloaderID = &id
+		q.DownloaderID = &id
 	}
 
-	records, err := s.listEnabledDownloaderRecords(filterDownloaderID)
+	resp, err := s.collectDownloaderTorrents(r.Context(), q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	writeJSON(w, resp)
+}
+
+// torrentFilterActive 是网页「状态」里的「活动中」：上传或下载速度大于 0 的任务，不管下载器报的是哪种状态。
+// qBittorrent 把没人下载的做种（stalledUP）算作做种、没速度的下载（stalledDL）算作下载，光看状态挑不出它们。
+const torrentFilterActive = "active"
+
+// torrentQuery 是聚合各下载器种子列表的筛选、排序与分页。Search 要先转成小写；PageSize 为 0 时不分页。
+// Active 只留此刻在传数据的任务（见 torrentFilterActive）。
+type torrentQuery struct {
+	Page, PageSize               int
+	Search, State, Category, Tag string
+	Active                       bool
+	DownloaderID                 *uint
+	SortBy, SortOrder            string
+}
+
+// collectDownloaderTorrents 取各启用下载器的种子，筛选、排序、分页；一台取不到时记进 Failures，不让整个列表失败。
+func (s *Server) collectDownloaderTorrents(ctx context.Context, q torrentQuery) (DownloaderTorrentsResponse, error) {
+	records, err := s.listEnabledDownloaderRecords(q.DownloaderID)
+	if err != nil {
+		return DownloaderTorrentsResponse{}, err
+	}
 
 	dm := s.getDownloaderManager()
 	if dm == nil {
-		http.Error(w, "下载器管理器未初始化", http.StatusInternalServerError)
-		return
+		return DownloaderTorrentsResponse{}, errors.New("下载器管理器未初始化")
 	}
 
 	items := make([]DownloaderTorrentItem, 0)
 	// 逐台记录失败而不是只打日志：不上报的话前端拿到的是一份静默缺料的列表
 	failures := make([]DownloaderFailure, 0)
 	for _, rec := range records {
-		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
+		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
 		if dlErr != nil {
 			global.GetSlogger().Warnf("[DownloaderTorrents] 获取下载器失败: name=%s, err=%v", rec.Name, dlErr)
 			failures = append(failures, DownloaderFailure{
@@ -251,17 +282,20 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, t := range torrents {
-			if stateFilter != "" && string(t.State) != stateFilter {
+			if q.State != "" && string(t.State) != q.State {
+				continue
+			}
+			if q.Active && t.UploadSpeed <= 0 && t.DownloadSpeed <= 0 {
 				continue
 			}
 
-			if search != "" {
+			if q.Search != "" {
 				// 画板 18 的 q 写的是「搜索标题、分类、标签…」，所以分类与标签也要参与匹配：
 				// 只匹配标题时那句占位文字是在许一个做不到的承诺。
 				haystacks := []string{t.Name, t.InfoHash, rec.Name, t.Category, t.Tags}
 				hit := false
 				for _, h := range haystacks {
-					if h != "" && strings.Contains(strings.ToLower(h), search) {
+					if h != "" && strings.Contains(strings.ToLower(h), q.Search) {
 						hit = true
 						break
 					}
@@ -271,14 +305,14 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if categoryFilter != "" && t.Category != categoryFilter {
+			if q.Category != "" && t.Category != q.Category {
 				continue
 			}
 
-			if tagFilter != "" {
+			if q.Tag != "" {
 				tagFound := false
 				for _, tag := range strings.Split(t.Tags, ",") {
-					if strings.TrimSpace(tag) == tagFilter {
+					if strings.TrimSpace(tag) == q.Tag {
 						tagFound = true
 						break
 					}
@@ -318,6 +352,7 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sortOrder, sortBy := q.SortOrder, q.SortBy
 	if sortOrder != "asc" && sortOrder != "desc" {
 		sortOrder = "desc"
 	}
@@ -335,24 +370,24 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 	total := len(items)
 	start := 0
 	end := total
-	if pageSize > 0 {
-		start = (page - 1) * pageSize
+	if q.PageSize > 0 {
+		start = (q.Page - 1) * q.PageSize
 		if start > total {
 			start = total
 		}
-		end = start + pageSize
+		end = start + q.PageSize
 		if end > total {
 			end = total
 		}
 	}
 
-	writeJSON(w, DownloaderTorrentsResponse{
+	return DownloaderTorrentsResponse{
 		Items:    items[start:end],
 		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
+		Page:     q.Page,
+		PageSize: q.PageSize,
 		Failures: failures,
-	})
+	}, nil
 }
 
 func (s *Server) apiDownloaderCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -383,6 +418,7 @@ func (s *Server) apiDownloaderCapabilities(w http.ResponseWriter, r *http.Reques
 func (s *Server) registerDownloaderHubRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
 	mux.HandleFunc("/api/downloader-torrents/transfer-stats", s.auth(s.apiDownloaderTransferStats))
+	mux.HandleFunc("/api/downloader-torrents/seeding-stats", s.auth(s.apiDownloaderSeedingStats))
 	mux.HandleFunc("/api/downloader-torrents/capabilities", s.auth(s.apiDownloaderCapabilities))
 	mux.HandleFunc("/api/downloader-torrents/meta", s.auth(s.apiDownloaderTorrentMeta))
 	mux.HandleFunc("/api/downloader-torrents/batch-action", s.auth(s.apiDownloaderTorrentActions))
@@ -557,22 +593,43 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	action := strings.TrimSpace(req.Action)
-	if action == "" {
+	if strings.TrimSpace(req.Action) == "" {
 		http.Error(w, "action 不能为空", http.StatusBadRequest)
 		return
 	}
 
+	resp, err := s.runTorrentActions(r.Context(), req)
+	if errors.Is(err, errUnsupportedAction) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+var errUnsupportedAction = errors.New("不支持的 action")
+
+// runTorrentActions 对一批种子做同一个操作（暂停、继续、删除、连数据删除、改保存目录、重新校验、保留、取消保留），按下载器分组，
+// 整批失败时逐个重试，返回每个种子的结果。不认识的操作返回 errUnsupportedAction。
+func (s *Server) runTorrentActions(ctx context.Context, req BatchTorrentActionRequest) (BatchTorrentActionResponse, error) {
+	action := strings.TrimSpace(req.Action)
+	switch action {
+	case "pause", "resume", "delete", "delete_with_files", "set_location", "recheck", "keep", "unkeep":
+	default:
+		return BatchTorrentActionResponse{}, errUnsupportedAction
+	}
+
 	dm := s.getDownloaderManager()
 	if dm == nil {
-		http.Error(w, "下载器管理器未初始化", http.StatusInternalServerError)
-		return
+		return BatchTorrentActionResponse{}, errors.New("下载器管理器未初始化")
 	}
 
 	records, err := s.getDownloaderRecordMap()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return BatchTorrentActionResponse{}, err
 	}
 
 	resp := BatchTorrentActionResponse{Results: make([]BatchTorrentActionResult, 0, len(req.Targets))}
@@ -596,7 +653,7 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
+		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
 		if dlErr != nil {
 			for _, target := range targets {
 				resp.FailedCount++
@@ -617,6 +674,8 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 		}
 
 		switch action {
+		case "keep", "unkeep":
+			keepTorrents(dl, rec, targets, action == "keep", &resp)
 		case "pause", "resume", "delete", "delete_with_files":
 			var batchErr error
 			switch action {
@@ -710,13 +769,10 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 					Success:        true,
 				})
 			}
-		default:
-			http.Error(w, "不支持的 action", http.StatusBadRequest)
-			return
 		}
 	}
 
-	writeJSON(w, resp)
+	return resp, nil
 }
 
 func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request) {
@@ -775,6 +831,12 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 		Category:    req.Category,
 		Tags:        req.Tags,
 	}
+	// 下载器页面直接加任务：明确的用户操作，不要求免费，也不承诺到期暂停（没有站点资格可依据）
+	policy := ptinternal.AdmissionPolicy{SourceKind: ptinternal.SourceKindDownloaderAdd, SafetyMargin: ptinternal.DefaultSafetyMargin()}
+	if d := ptinternal.CheckAdmission(policy, nil, policy.Now()); !d.Allow {
+		http.Error(w, d.Reason, http.StatusConflict)
+		return
+	}
 
 	var torrentBytes []byte
 	if strings.TrimSpace(req.TorrentBase64) != "" {
@@ -804,7 +866,7 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 			})
 			continue
 		}
-		reservedSize, guardErr := reserveDownloaderAddDiskBudget(r.Context(), dl, torrentBytes, source)
+		release, guardErr := reserveDownloaderAddDiskBudget(r.Context(), dl, torrentBytes, source)
 		if guardErr != nil {
 			resp.FailedCount++
 			resp.Results = append(resp.Results, AddDownloaderTorrentResult{
@@ -823,9 +885,7 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 			result, err = dl.AddTorrentEx(source, opt)
 		}
 		if err != nil || !result.Success {
-			if reservedSize > 0 {
-				ptinternal.GetDiskBudget().Release(reservedSize)
-			}
+			release()
 		}
 
 		if err != nil {
@@ -858,27 +918,32 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 }
 
 // reserveDownloaderAddDiskBudget executes the disk-protect gate for the manual
-// "add torrent" endpoint. Returns the reserved torrent size on success (caller
-// is responsible for Releasing it on failure paths). When disk protection is
-// disabled, returns (0, nil) and the caller must NOT call Release.
+// "add torrent" endpoint. On success it returns the function that gives the
+// reservation back (call it when the add fails); a successful add keeps the
+// reservation until the torrent shows up in the downloader (see
+// ptinternal.PendingForGate). When disk protection is disabled it reserves
+// nothing and the returned function does nothing.
 //
 // Magnet / URL sources cannot be sized before the metadata is fetched, so they
 // are rejected when disk protection is on. This closes a bypass where a user
 // could submit a magnet and skip the gate entirely.
-func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloader, torrentBytes []byte, source string) (int64, error) {
+func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloader, torrentBytes []byte, source string) (release func(), err error) {
+	noop := func() {}
 	glOnly, err := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
 	if err != nil || !glOnly.CleanupDiskProtect || glOnly.CleanupMinDiskSpaceGB <= 0 {
-		return 0, nil
+		return noop, nil
 	}
 
 	if len(torrentBytes) == 0 {
-		return 0, fmt.Errorf("[磁盘保护] 已启用，无法在添加前确定 magnet/URL 种子大小: %s。请改用 .torrent 文件上传，或在全局设置中关闭磁盘保护。", source)
+		return noop, fmt.Errorf("[磁盘保护] 已启用，无法在添加前确定 magnet/URL 种子大小: %s。请改用 .torrent 文件上传，或在全局设置中关闭磁盘保护。", source)
 	}
 
 	torrentSize, sizeErr := qbit.ComputeTorrentSize(torrentBytes)
 	if sizeErr != nil {
-		return 0, fmt.Errorf("种子文件无效，无法解析大小: %w", sizeErr)
+		return noop, fmt.Errorf("种子文件无效，无法解析大小: %w", sizeErr)
 	}
+	// 算不出 hash 时预留照样记，只是认不出它什么时候出现在下载器里（等过期或清理监控清零）
+	torrentHash, _ := qbit.ComputeTorrentHash(torrentBytes)
 
 	mu := ptinternal.PushMutex()
 	mu.Lock()
@@ -886,9 +951,9 @@ func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloade
 
 	freeSpace, spaceErr := dl.GetClientFreeSpace(ctx)
 	if spaceErr != nil {
-		return 0, fmt.Errorf("[磁盘保护] %s: 获取磁盘空间失败，拒绝添加: %w", dl.GetName(), spaceErr)
+		return noop, fmt.Errorf("[磁盘保护] %s: 获取磁盘空间失败，拒绝添加: %w", dl.GetName(), spaceErr)
 	}
-	pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
+	pendingBytes, pendingErr := ptinternal.PendingForGate(ctx, dl, dl.GetName())
 	if pendingErr != nil {
 		pendingBytes = 0
 	}
@@ -906,15 +971,12 @@ func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloade
 		reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
 		global.GetSlogger().Warnf("[磁盘保护] %s: 空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB；有效 - 种子 %.1f GB < 保底 %.1f GB)，跳过手动添加",
 			dl.GetName(), freeGB, pendingGB, reservedGB, effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
-		if glOnly.CleanupEnabled {
+		if glOnly.CleanupEnabled && glOnly.CleanupEmergency {
 			events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "downloader-add", At: time.Now()})
 		}
-		return 0, fmt.Errorf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
+		return noop, fmt.Errorf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
 	}
-	if torrentSize > 0 {
-		budget.Reserve(torrentSize)
-	}
-	return torrentSize, nil
+	return budget.ReserveTorrent(dl.GetName(), torrentHash, torrentSize), nil
 }
 
 // downloaderAcquireTimeout 是 Web 请求获取下载器实例的预算上限。
@@ -983,6 +1045,9 @@ func downloaderCapabilityFromRecord(rec downloaderRecord) DownloaderCapability {
 		CanRecheck:        true,
 		CanViewFiles:      true,
 		CanViewTrackers:   true,
+		CanExportTorrent:  rec.Type == string(downloader.DownloaderQBittorrent),
+		CanEditTrackers:   true,
+		CanKeep:           rec.Type == string(downloader.DownloaderQBittorrent) || rec.Type == string(downloader.DownloaderTransmission),
 	}
 }
 
@@ -1006,6 +1071,12 @@ func compareDownloaderTorrentItem(a, b DownloaderTorrentItem, sortBy string) int
 		return compareInt64(a.UploadSpeed, b.UploadSpeed)
 	case "download_speed":
 		return compareInt64(a.DownloadSpeed, b.DownloadSpeed)
+	case "total_speed":
+		// 大多数任务速度是 0：速度相同按添加日期排，不然这一大片的先后每次刷新都可能换
+		if c := compareInt64(a.UploadSpeed+a.DownloadSpeed, b.UploadSpeed+b.DownloadSpeed); c != 0 {
+			return c
+		}
+		return compareInt64(a.AddedAt, b.AddedAt)
 	case "added_at":
 		return compareInt64(a.AddedAt, b.AddedAt)
 	case "completed_at":
@@ -1130,6 +1201,8 @@ type DownloaderTransferStatsResponse struct {
 	TotalSessionDownloaded int64                        `json:"total_session_downloaded"`
 	TotalFreeSpace         int64                        `json:"total_free_space"`
 	Downloaders            []DownloaderTransferStatItem `json:"downloaders"`
+	// SpeedHistory 是最近的总速度采样（首页的速度柱，旧的在前；只有 transfer-stats 接口给）
+	SpeedHistory []SpeedSample `json:"speed_history,omitempty"`
 }
 
 type DownloaderTransferStatItem struct {
@@ -1206,48 +1279,61 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	resp := s.collectTransferStats(r.Context(), dm, records)
+	resp.SpeedHistory = s.speeds.snapshot()
+	writeJSON(w, resp)
+}
+
+// transferProbeParallel 是同时探测几台下载器。
+const transferProbeParallel = 4
+
+// collectTransferStats 读这些下载器现在的传输状态与剩余空间，几台同时探测。取不到实例的那台不在结果里；
+// 取到实例但状态与剩余空间都读不出来的记 Reachable=false 与原因。ctx 结束时不再等还没回来的那几台
+// （它们的请求有各自的超时），已经读到的照常给。顺序和 records 一样。
+func (s *Server) collectTransferStats(ctx context.Context, dm *downloader.DownloaderManager, records []downloaderRecord) DownloaderTransferStatsResponse {
+	type probe struct {
+		i    int
+		item DownloaderTransferStatItem
+		ok   bool
+	}
+	results := make(chan probe, len(records))
+	sem := make(chan struct{}, transferProbeParallel)
+	for i, rec := range records {
+		go func() {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				results <- probe{i: i}
+				return
+			}
+			defer func() { <-sem }()
+			item, ok := s.probeTransfer(ctx, dm, rec)
+			results <- probe{i: i, item: item, ok: ok}
+		}()
+	}
+	got := make([]*DownloaderTransferStatItem, len(records))
+collect:
+	for range records {
+		select {
+		case p := <-results:
+			if p.ok {
+				got[p.i] = &p.item
+			}
+		case <-ctx.Done():
+			break collect
+		}
+	}
 	resp := DownloaderTransferStatsResponse{
 		Downloaders: make([]DownloaderTransferStatItem, 0, len(records)),
 	}
-
-	ctx := r.Context()
-	for _, rec := range records {
-		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
-		if dlErr != nil {
+	answered := 0
+	for _, item := range got {
+		if item == nil {
 			continue
 		}
-
-		item := DownloaderTransferStatItem{
-			DownloaderID:   rec.ID,
-			DownloaderName: rec.Name,
-			DownloaderType: rec.Type,
+		if item.Reachable {
+			answered++
 		}
-
-		status, statusErr := dl.GetClientStatus()
-		if statusErr == nil {
-			item.UploadSpeed = status.UpSpeed
-			item.DownloadSpeed = status.DlSpeed
-			item.Uploaded = status.UpData
-			item.Downloaded = status.DlData
-			item.SessionUploaded = status.SessionUpData
-			item.SessionDownloaded = status.SessionDlData
-		}
-
-		freeSpace, fsErr := dl.GetClientFreeSpace(ctx)
-		if fsErr == nil {
-			item.FreeSpace = freeSpace
-		}
-
-		// 两个探测任一成功就算连得上：有的客户端（或权限配置）拿不到剩余空间，
-		// 但状态照样能回，那台机器是活的。两个都失败才是「这一轮没连上」。
-		item.Reachable = statusErr == nil || fsErr == nil
-		if !item.Reachable {
-			item.Error = statusErr.Error()
-		} else {
-			// 只在连得上的时候问版本，且问到就缓存 —— 断线的那台不必为这一格再等一次超时
-			item.ClientVersion = s.clientVersionOf(rec.ID, rec.URL, dl)
-		}
-
 		resp.TotalUploadSpeed += item.UploadSpeed
 		resp.TotalDownloadSpeed += item.DownloadSpeed
 		resp.TotalUploaded += item.Uploaded
@@ -1255,8 +1341,52 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		resp.TotalSessionUploaded += item.SessionUploaded
 		resp.TotalSessionDownloaded += item.SessionDownloaded
 		resp.TotalFreeSpace += item.FreeSpace
-		resp.Downloaders = append(resp.Downloaders, item)
+		resp.Downloaders = append(resp.Downloaders, *item)
+	}
+	if len(records) > 0 {
+		s.speeds.record(SpeedSample{
+			At: time.Now(), Down: resp.TotalDownloadSpeed, Up: resp.TotalUploadSpeed, Answered: answered, Total: len(records),
+		})
+	}
+	return resp
+}
+
+// probeTransfer 读一台下载器的传输状态、剩余空间与版本；取不到实例时 ok 为假。
+func (s *Server) probeTransfer(ctx context.Context, dm *downloader.DownloaderManager, rec downloaderRecord) (DownloaderTransferStatItem, bool) {
+	dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
+	if dlErr != nil {
+		return DownloaderTransferStatItem{}, false
 	}
 
-	writeJSON(w, resp)
+	item := DownloaderTransferStatItem{
+		DownloaderID:   rec.ID,
+		DownloaderName: rec.Name,
+		DownloaderType: rec.Type,
+	}
+
+	status, statusErr := dl.GetClientStatus()
+	if statusErr == nil {
+		item.UploadSpeed = status.UpSpeed
+		item.DownloadSpeed = status.DlSpeed
+		item.Uploaded = status.UpData
+		item.Downloaded = status.DlData
+		item.SessionUploaded = status.SessionUpData
+		item.SessionDownloaded = status.SessionDlData
+	}
+
+	freeSpace, fsErr := dl.GetClientFreeSpace(ctx)
+	if fsErr == nil {
+		item.FreeSpace = freeSpace
+	}
+
+	// 两个探测任一成功就算连得上：有的客户端（或权限配置）拿不到剩余空间，
+	// 但状态照样能回，那台机器是活的。两个都失败才是「这一轮没连上」。
+	item.Reachable = statusErr == nil || fsErr == nil
+	if !item.Reachable {
+		item.Error = statusErr.Error()
+	} else {
+		// 只在连得上的时候问版本，且问到就缓存 —— 断线的那台不必为这一格再等一次超时
+		item.ClientVersion = s.clientVersionOf(rec.ID, rec.URL, dl)
+	}
+	return item, true
 }

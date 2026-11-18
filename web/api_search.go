@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/media/meta"
+	"github.com/sunerpy/pt-tools/internal/media/subscribe"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -70,6 +72,16 @@ type TorrentItemResponse struct {
 	DownloadURL     string   `json:"downloadUrl,omitempty"`
 	Category        string   `json:"category,omitempty"`
 	IsFree          bool     `json:"isFree"`
+	// Meta 是标题与副标题解析出的信息（分辨率、来源、平台、编码、HDR、制作组、中字、季集），页面按它筛选；没有标题时不带
+	Meta *meta.Meta `json:"meta,omitempty"`
+	// Block 是这个种子对所有条目拉黑了（关键字搜索里点的「不要」）；没拉黑时不带
+	Block *SearchBlockResponse `json:"block,omitempty"`
+}
+
+// SearchBlockResponse 是拉黑的记录：ID 用来移出黑名单。
+type SearchBlockResponse struct {
+	ID     uint   `json:"id"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // SearchErrorResponse represents a search error in API response
@@ -115,7 +127,15 @@ func (s *Server) apiMultiSiteSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enabledSites := s.getEnabledSiteIDs()
+	requested := req.Sites
 	req.Sites = filterEnabledSites(req.Sites, enabledSites)
+	// 指定了站点时只搜它们：没启用的不搜、写进 errors；一个都没启用时直接返回，
+	// 不能变成搜所有站点（空的站点列表在搜索里是全部）
+	skipped := skippedSites(requested, req.Sites)
+	if len(requested) > 0 && len(req.Sites) == 0 {
+		writeJSON(w, MultiSiteSearchResponse{Items: []TorrentItemResponse{}, SiteResults: map[string]int{}, Errors: skipped})
+		return
+	}
 
 	timeout := 30 * time.Second
 	if req.TimeoutSecs > 0 {
@@ -153,6 +173,8 @@ func (s *Server) apiMultiSiteSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to response
 	response := toMultiSiteSearchResponse(result)
+	response.Errors = append(response.Errors, skipped...)
+	s.markBlocked(r.Context(), response.Items)
 
 	global.GetSlogger().Infof("[Search] Multi-site search completed: keyword=%s, results=%d, duration=%dms",
 		req.Keyword, len(response.Items), response.DurationMs)
@@ -243,6 +265,11 @@ func toTorrentItemResponse(item v2.TorrentItem) TorrentItemResponse {
 	if !item.DiscountEndTime.IsZero() {
 		discountEndTime = item.DiscountEndTime.Unix()
 	}
+	var parsed *meta.Meta
+	if item.Title != "" || item.Subtitle != "" {
+		m := meta.Parse(item.Title, item.Subtitle)
+		parsed = &m
+	}
 
 	return TorrentItemResponse{
 		ID:              item.ID,
@@ -264,6 +291,7 @@ func toTorrentItemResponse(item v2.TorrentItem) TorrentItemResponse {
 		DownloadURL:     item.DownloadURL,
 		Category:        item.Category,
 		IsFree:          item.IsFree(),
+		Meta:            parsed,
 	}
 }
 
@@ -284,6 +312,22 @@ func (s *Server) getEnabledSiteIDs() map[string]bool {
 	return enabled
 }
 
+// skippedSites 是指定了、却因为没启用而没搜的站点（每个只记一次）。
+func skippedSites(requested, kept []string) []SearchErrorResponse {
+	keep := make(map[string]bool, len(kept))
+	for _, id := range kept {
+		keep[id] = true
+	}
+	var out []SearchErrorResponse
+	for _, id := range requested {
+		if !keep[id] {
+			keep[id] = true
+			out = append(out, SearchErrorResponse{Site: id, Error: "站点没有启用，没有搜索"})
+		}
+	}
+	return out
+}
+
 func filterEnabledSites(requested []string, enabled map[string]bool) []string {
 	if enabled == nil {
 		return requested
@@ -302,4 +346,21 @@ func filterEnabledSites(requested []string, enabled map[string]bool) []string {
 		}
 	}
 	return filtered
+}
+
+// markBlocked 给对所有条目拉黑了的结果带上 block；读不到黑名单时不标，只记日志（搜索结果照常返回）。
+func (s *Server) markBlocked(ctx context.Context, items []TorrentItemResponse) {
+	if s.subscriber == nil || len(items) == 0 {
+		return
+	}
+	blocks, err := s.subscriber.GlobalBlocks(ctx)
+	if err != nil {
+		global.GetSlogger().Warnf("[Search] 读取黑名单失败: %v", err)
+		return
+	}
+	for i := range items {
+		if b, ok := blocks[subscribe.BlockKey(items[i].SourceSite, items[i].ID)]; ok {
+			items[i].Block = &SearchBlockResponse{ID: b.ID, Reason: b.Reason}
+		}
+	}
 }

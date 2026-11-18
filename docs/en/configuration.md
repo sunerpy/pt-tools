@@ -6,16 +6,17 @@ This page describes every pt-tools setting in detail: environment variables, glo
 
 Environment variables set how pt-tools runs, which suits Docker deployments.
 
-| Variable         | Meaning                              | Default         | Example            |
-| ---------------- | ------------------------------------ | --------------- | ------------------ |
-| `PT_HOST`        | Address the web interface listens on | `0.0.0.0`       | `127.0.0.1`        |
-| `PT_PORT`        | Port the web interface listens on    | `8080`          | `8888`             |
-| `PT_ADMIN_USER`  | Admin user name                      | `admin`         | `myadmin`          |
-| `PT_ADMIN_PASS`  | Admin password                       | `adminadmin`    | `MySecurePass123`  |
-| `PT_ADMIN_RESET` | Resets the admin password            | -               | `1` (on)           |
-| `PUID`           | User ID inside the container         | `1000`          | `1001`             |
-| `PGID`           | Group ID inside the container        | `1000`          | `1001`             |
-| `TZ`             | Time zone                            | `Asia/Shanghai` | `America/New_York` |
+| Variable              | Meaning                                                                              | Default         | Example            |
+| --------------------- | ------------------------------------------------------------------------------------ | --------------- | ------------------ |
+| `PT_HOST`             | Address the web interface listens on                                                 | `0.0.0.0`       | `127.0.0.1`        |
+| `PT_PORT`             | Port the web interface listens on                                                    | `8080`          | `8888`             |
+| `PT_ADMIN_USER`       | Admin user name                                                                      | `admin`         | `myadmin`          |
+| `PT_ADMIN_PASS`       | Admin password                                                                       | `adminadmin`    | `MySecurePass123`  |
+| `PT_ADMIN_RESET`      | Resets the admin password                                                            | -               | `1` (on)           |
+| `PT_QBIT_COMPAT_ADDR` | Listen address of the [qB-compatible entrance](guide/qbit-compat.md); off when unset | -               | `0.0.0.0:8081`     |
+| `PUID`                | User ID inside the container                                                         | `1000`          | `1001`             |
+| `PGID`                | Group ID inside the container                                                        | `1000`          | `1001`             |
+| `TZ`                  | Time zone                                                                            | `Asia/Shanghai` | `America/New_York` |
 
 ### Using environment variables
 
@@ -60,7 +61,26 @@ docker run -d \
 
 ## Proxy settings
 
-pt-tools reads the standard proxy environment variables, whether it runs in Docker, under systemd or as a binary you start yourself.
+There are two ways to set a proxy. In Global settings you can send chosen sites through a proxy; a change takes effect as soon as you save it, without a restart. The standard environment variables work whether pt-tools runs in Docker, under systemd or as a binary you start yourself, and need a restart after a change. You can use both: once the site proxy is on, site requests follow Global settings and all other requests follow the environment variables.
+
+### Site proxy in Global settings
+
+In the Site proxy (站点代理) part of the Global settings page:
+
+1. Turn on Send site requests through a proxy (站点请求走代理) and enter the proxy address, for example `http://192.168.1.2:7890` or `socks5://user:password@host:1080`. http, https, socks5 and socks5h are supported.
+2. Under Which sites use the proxy (哪些站点走代理), choose All sites (全部站点), Only the selected sites (只有选中的站点) or All except the selected sites (除了选中的站点). For the last two, pick the sites in the list below. The list holds every site pt-tools supports; sites you have not enabled are marked Not enabled (未启用). All except the selected sites with nothing selected means all sites.
+3. Click Save settings (保存设置). The change takes effect at once, without a restart.
+
+Notes:
+
+- It covers the requests pt-tools sends to sites: searches and torrent lists, RSS feeds, torrent downloads (from RSS, cross-seeding or by hand), sign-in, user info and site icons. An RSS subscription follows the site it belongs to.
+- While it is on, site requests follow only this setting: the selected sites go through this proxy, the other sites connect directly, and the proxy environment variables no longer apply to sites. While it is off, site requests follow the environment variables as before.
+- It does not cover downloaders, IYUU, notification channels, TMDB and the other media data sources, the AI assistant and so on; they follow their own settings or the environment variables. CloakBrowser has its own proxy setting.
+- The proxy address is stored encrypted in the database. The page shows it with the password replaced by `***`; leaving it unchanged keeps the stored address.
+- Sites that go through the proxy see the proxy's exit IP. If a site's rules care about your IP (HDSky's seedbox rules, for example), check them before sending it through the proxy.
+- Only the web interface can change this setting; the App API and MCP can neither read nor change it.
+
+### Proxy environment variables
 
 | Variable                      | Meaning                                              | Example                    |
 | ----------------------------- | ---------------------------------------------------- | -------------------------- |
@@ -73,7 +93,10 @@ Notes:
 
 - Set both `HTTP_PROXY` and `HTTPS_PROXY`.
 - When neither `HTTP_PROXY` nor `HTTPS_PROXY` is set, site access and downloader connections fall back to `ALL_PROXY`. Fetching RSS feeds and the Telegram channel currently read only `HTTP_PROXY`/`HTTPS_PROXY`, so set those two when they need a proxy (a Telegram channel can also have its own proxy URL).
+- Torrent files that RSS tasks download used to bypass the proxy. They now follow these variables the same way site access does, `ALL_PROXY` included.
 - `NO_PROXY` is useful for local addresses: it keeps requests to local services and the LAN off the proxy.
+- Once the site proxy in Global settings is on, site requests no longer read these variables; see the previous section.
+- Restart pt-tools after changing the environment variables.
 
 ### Proxy examples
 
@@ -105,15 +128,25 @@ environment:
 
 These options are on the System → Global settings (系统 → 全局设置) page of the web interface:
 
-| Setting                                                     | Meaning                                                            | Default     | Suggested           |
-| ----------------------------------------------------------- | ------------------------------------------------------------------ | ----------- | ------------------- |
-| **Default interval in minutes (默认间隔（分钟）)**          | The default interval for RSS tasks                                 | 10          | 15-30 minutes       |
-| **Torrent file folder (种子下载目录)**                      | The folder where `.torrent` files are saved                        | `downloads` | As you need         |
-| **Download speed check (启用下载限速判断)**                 | Used to decide whether a torrent can finish within its free period | Off         | On if you need it   |
-| **Estimated download speed in MB/s (预估下载速度（MB/s）)** | Your actual average download speed                                 | -           | Your real bandwidth |
-| **Maximum torrent size in GB (最大种子大小（GB）)**         | Torrents larger than this are skipped                              | No limit    | 50-100 GB           |
-| **Minimum free time in minutes (最短免费时间（分钟）)**     | Torrents with less freeleech time left than this are skipped       | 30          | 20-60 minutes       |
-| **Start tasks automatically (自动启动任务)**                | Whether RSS tasks start when the program starts                    | No          | Yes                 |
+| Setting                                                     | Meaning                                                                                                                                      | Default     | Suggested                        |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------------- |
+| **Default interval in minutes (默认间隔（分钟）)**          | The default interval for RSS tasks                                                                                                           | 10          | 15-30 minutes                    |
+| **Torrent file folder (种子下载目录)**                      | The folder where `.torrent` files are saved                                                                                                  | `downloads` | As you need                      |
+| **Download speed check (启用下载限速判断)**                 | Used to decide whether a torrent can finish within its free period                                                                           | Off         | On if you need it                |
+| **Estimated download speed in MB/s (预估下载速度（MB/s）)** | Your actual average download speed                                                                                                           | -           | Your real bandwidth              |
+| **Maximum torrent size in GB (最大种子大小（GB）)**         | Torrents larger than this are skipped                                                                                                        | No limit    | 50-100 GB                        |
+| **Minimum free time in minutes (最短免费时间（分钟）)**     | Torrents with less freeleech time left than this are skipped                                                                                 | 30          | 20-60 minutes                    |
+| **Start RSS tasks automatically (自动启动 RSS 任务)**       | Whether RSS tasks run when the program starts, including after a container restart; see the next section                                     | No          | Yes                              |
+| **Site proxy (站点代理)**                                   | Sends the selected sites through a proxy and takes effect when you save; see [Site proxy in Global settings](#site-proxy-in-global-settings) | Off         | On when a site cannot be reached |
+
+### Starting and stopping RSS tasks
+
+RSS tasks fetch the RSS feeds of enabled sites at their check intervals and push torrents to the downloader according to the download mode and filter rules; RSS new-item notifications come from them too. Brush tasks, cross-seeding, torrent transfer, auto-delete, freeleech-end handling, sign-in, login reminders and media library organising run on their own and are not affected by starting or stopping RSS tasks. Media subscriptions still search the sites on schedule; only "also download when it appears in RSS" waits for RSS tasks to be running.
+
+- **Where**: click RSS tasks (RSS 任务) at the left end of the status bar at the bottom to open a panel (on a phone, the panel is under Me (我的) in the bottom tabs, and the status row above the tabs shows the state). The panel shows whether RSS tasks are running and how many feeds are running; when they are not running it says why, for example auto-start is off, they were stopped by hand, there is no default downloader, or the default downloader cannot be reached.
+- **Start and Stop**: Start (启动) runs all RSS feeds with the current settings; Stop (停止) stops them until they are started again. Stopping lasts only until the program restarts; after that the auto-start setting decides whether they run.
+- **Auto-start**: Start when the program starts (程序启动时自动运行) in the panel and Start RSS tasks automatically (自动启动 RSS 任务) on the Global settings (全局设置) page are the same switch, off by default. While it is off, RSS tasks must be started by hand every time the program starts, including after a container restart or an upgrade, and a notice at the top of each page says RSS tasks are not running (RSS 任务没有运行). Turning it on starts them right away with the current settings (unless they were stopped by hand) and makes them start whenever the program starts.
+- **After a settings change**: when sites, RSS feeds, global settings or other settings change, running RSS tasks restart with the new settings; tasks stopped by hand are not started. As at program start, the default downloader must be reachable first; if it is not, RSS tasks do not run and the status bar says why. Click Start once the downloader is back.
 
 ### Download speed and the free period
 
@@ -132,15 +165,17 @@ Set it to 0 to turn the check off.
 
 ### When freeleech ends
 
-| Setting                                                                     | Meaning                                                                                                    | Default | Suggested         |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------- | ----------------- |
-| **Delete when freeleech ends (免费结束自动删除)**                           | When the free period ends, unfinished torrents are deleted with their data; when off, they are only paused | Off     | On if you need it |
-| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag          | 0       | 5 minutes or more |
+| Setting                                                                     | Meaning                                                                                           | Default          | Suggested         |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| **Act early, minutes before freeleech ends (免费期结束前提前处理（分钟）)** | Pauses or deletes unfinished torrents N minutes early, to absorb deletion delay and reporting lag | 5 (new installs) | 5 minutes or more |
+
+Whether a torrent still unfinished when its free period ends is paused or deleted is chosen per RSS subscription, in Unfinished when freeleech ends (免费结束时没下完): Do nothing, Pause or Delete; see [RSS subscriptions](guide/rss-subscription.md#freeleech-eligibility-and-pausing). This used to be the global Delete when freeleech ends (免费结束自动删除): installs that had it on get Delete on the subscriptions that paused at freeleech end, and torrents already waiting for the end of freeleech are handled as before the upgrade.
 
 Acting early adds a safety margin: the pause or deletion runs at `freeleech end time - N minutes`. That absorbs the delay of the deletion itself and the lag before the downloader reports to the tracker, so that no non-free download is counted after the free period has ended.
 
 - The range is `[0, 60]` minutes; a value outside it is clamped.
-- `0` acts exactly when freeleech ends. This is the earlier behaviour, so existing setups are unchanged.
+- `0` acts exactly when freeleech ends. A value you already set before upgrading is kept; new installs default to 5. When it is 0 the settings page warns that billed download may still be counted.
+- Pushes that require freeleech (the freeleech path, filter rules with Free only on, subscriptions whose quality profile requires free, brush tasks that only take free discounts, [waiting for free](guide/torrent-search.md#waiting-for-free)) also require more than this much freeleech time left, and at least 5 minutes; otherwise they are not pushed.
 - The periodic fallback check runs every 5 minutes, so `≥5` minutes is recommended. Each torrent's own timer is accurate to the second, so the main path is not limited to that interval.
 - The margin only moves the freeleech-end action; retries keep their own schedule.
 
@@ -181,7 +216,7 @@ Each downloader can have several download folders:
 
 - The path must be valid on the machine the downloader runs on.
 - In Docker, make sure the path is mapped correctly.
-- Aliases make it quicker to choose a folder when you push a torrent.
+- Wherever a downloader path is entered (RSS subscriptions, brush tasks, follows, pushing a torrent, transfer path mappings, media library path mappings and organising scope), the field lists this downloader's folders when you open it: pick one, or type another path. Folders with an alias show the alias and the path.
 
 **Example folders**:
 
@@ -196,25 +231,25 @@ Path: /data/downloads/music     Alias: Music     Default: No
 
 RSS subscriptions are the core of pt-tools. A feed is added on the RSS subscriptions (RSS 订阅) tab of a site's page, with these fields:
 
-| Field                                            | Meaning                                      | Required | Example                     |
-| ------------------------------------------------ | -------------------------------------------- | -------- | --------------------------- |
-| **Name (名称)**                                  | A name that identifies the feed              | Yes      | `HDSky movies`, `MT series` |
-| **Link (链接)**                                  | The RSS feed URL                             | Yes      | `https://site.com/rss?...`  |
-| **Category (分类)**                              | The category in the downloader               | No       | `PT-Auto`                   |
-| **Tags (标签)**                                  | Task tags, to keep things organised          | No       | `hdsky,movie`               |
-| **Check interval in minutes (检查间隔（分钟）)** | How often the feed is fetched                | Yes      | 5-1440 minutes              |
-| **Downloader (下载器)**                          | The downloader to use                        | No       | The default when not set    |
-| **Download path (下载路径)**                     | The download folder to use                   | No       | The default when not set    |
-| **Filter rules (过滤规则)**                      | Filter rules attached to the feed            | No       | Several can be chosen       |
-| **Pause when freeleech ends (免费结束暂停)**     | Pauses the torrent when its free period ends | No       | Yes/No                      |
+| Field                                                 | Meaning                             | Required | Example                     |
+| ----------------------------------------------------- | ----------------------------------- | -------- | --------------------------- |
+| **Name (名称)**                                       | A name that identifies the feed     | Yes      | `HDSky movies`, `MT series` |
+| **Link (链接)**                                       | The RSS feed URL                    | Yes      | `https://site.com/rss?...`  |
+| **Category (分类)**                                   | The category in the downloader      | No       | `PT-Auto`                   |
+| **Tags (标签)**                                       | Task tags, to keep things organised | No       | `hdsky,movie`               |
+| **Check interval in minutes (检查间隔（分钟）)**      | How often the feed is fetched       | Yes      | 5-1440 minutes              |
+| **Downloader (下载器)**                               | The downloader to use               | No       | The default when not set    |
+| **Download path (下载路径)**                          | The download folder to use          | No       | The default when not set    |
+| **Filter rules (过滤规则)**                           | Filter rules attached to the feed   | No       | Several can be chosen       |
+| **Unfinished when freeleech ends (免费结束时没下完)** | Do nothing, Pause or Delete         | No       | Pause                       |
 
 ### Suggested RSS settings
 
-| Situation                   | Suggested interval | Pause when freeleech ends |
-| --------------------------- | ------------------ | ------------------------- |
-| **Everyday ratio building** | 15-30 minutes      | Yes                       |
-| **Following a series**      | 10-15 minutes      | Depends                   |
-| **Grabbing new releases**   | 5-10 minutes       | No                        |
+| Situation                   | Suggested interval | Unfinished when freeleech ends |
+| --------------------------- | ------------------ | ------------------------------ |
+| **Everyday ratio building** | 15-30 minutes      | Pause or Delete                |
+| **Following a series**      | 10-15 minutes      | Depends                        |
+| **Grabbing new releases**   | 5-10 minutes       | Do nothing                     |
 
 The full RSS guide is in [RSS subscriptions](guide/rss-subscription.md).
 
@@ -313,7 +348,7 @@ Then run `sudo systemctl restart docker`. ⚠️ The setting **only applies to c
 
 ### Backing up data
 
-**What to back up**: `torrents.db` (all settings and history) and `secret.key` (the key that encrypts site cookies and notification credentials). Back them up and restore them as one unit: a database restored without its original key leaves every saved cookie and notification credential unreadable.
+**What to back up**: `torrents.db` (all settings and history) and `secret.key` (the key that encrypts site cookies, notification credentials and API keys). Back them up and restore them as one unit: a database restored without its original key leaves every saved cookie, notification credential and API key unreadable.
 
 The database runs in WAL mode, so the latest writes may still be in `torrents.db-wal`. Stop pt-tools before copying:
 
@@ -362,7 +397,7 @@ services:
 
 - RSS interval: 15-30 minutes
 - Download freeleech torrents only
-- Turn on Pause when freeleech ends (免费结束暂停)
+- Set Unfinished when freeleech ends (免费结束时没下完) to Pause (or Delete)
 - Set Maximum torrent size (最大种子大小（GB）)
 
 **Setup 2: following series as well as building ratio**
@@ -370,7 +405,7 @@ services:
 - RSS interval: 10 minutes
 - Create a filter rule for the series that allows torrents that are not free
 - Create a general rule that downloads freeleech only
-- Turn on Pause when freeleech ends
+- Set Unfinished when freeleech ends to Pause (or Delete)
 
 **Setup 3: several sites**
 

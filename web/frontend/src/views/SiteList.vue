@@ -1,32 +1,49 @@
 <script setup lang="ts">
-import { ApiError, type SiteConfig, type SiteLoginState, chatopsApi, sitesApi } from "@/api";
+import {
+  ApiError,
+  type SiteAttendance,
+  type SiteConfig,
+  type SiteLoginState,
+  attendanceApi,
+  chatopsApi,
+  sitesApi,
+  type UserInfoTrendsResponse,
+  userInfoApi,
+} from "@/api";
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtBars from "@/components/ui/PtBars.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
-import { formatTimeAgo } from "@/utils/format";
+import { formatShortDateTime, formatTimeAgo } from "@/utils/format";
+import { isInteractiveClick, ROW_LINK_CLASS } from "@/utils/rowClick";
 import { isProbeSuccess, probeStatusLabel, probeStatusSeverity } from "@/utils/probeStatus";
+import { attendanceChallengeText, attendanceView } from "@/utils/attendanceStatus";
 import { type DataStateKey, useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { useLoginState } from "@/composables/useLoginState";
 import type { ReminderTier } from "@/composables/useLoginState";
 
 const router = useRouter();
+const route = useRoute();
 
 const isMobile = useIsMobile();
 const sites = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
 const probing = reactive<Record<string, boolean>>({});
 const testingReminder = reactive<Record<string, boolean>>({});
+/** 每日签到：当天的状态按站点名索引；签到接口失败时为空，不影响站点列表 */
+const attendance = ref<Record<string, SiteAttendance>>({});
+const signing = reactive<Record<string, boolean>>({});
 const bulkProbing = ref(false);
 const updatingMode = reactive<Record<string, boolean>>({});
 
@@ -34,6 +51,11 @@ const {
   loginState,
   effectiveLastActive,
   lastAccess,
+  activeSourceLabel,
+  accessStale,
+  probeNote,
+  nextProbeAt,
+  failingSince,
   daysRemaining,
   reminderTier,
   probeModeOf,
@@ -129,20 +151,42 @@ onMounted(async () => {
   await loadSites();
 });
 
+/*
+ * 画板 30 的行卡里那条 120×18 的 8 根柱：每站最近 8 天每天的上传增量（每日快照算出来的）。
+ * 拿不到就不画 —— 没有历史数据时造一条假的走势比不画更糟。
+ */
+const trends = ref<UserInfoTrendsResponse | null>(null);
+onMounted(() => {
+  void userInfoApi
+    .getTrends(8)
+    .then((t) => {
+      trends.value = t;
+    })
+    .catch(() => {
+      trends.value = null;
+    });
+});
+
+function uploadSpark(name: string): number[] {
+  return (trends.value?.sites?.[name] ?? []).map((p) => p.uploaded);
+}
+
 async function loadSites() {
   loginStatesFailed.value = false;
 
   const pending = run(async () => {
     // allSettled 而不是 all：登录状态单独挂掉时站点清单还能用，不该整页变成 error
-    const [siteRes, stateRes] = await Promise.allSettled([
+    const [siteRes, stateRes, attendanceRes] = await Promise.allSettled([
       sitesApi.list(),
       sitesApi.listLoginStates(),
+      attendanceApi.list(),
     ]);
     // 站点清单是主数据，它失败就没有「部分可用」可言，抛出去让状态机判 error / perm
     if (siteRes.status === "rejected") throw siteRes.reason;
     return {
       siteMap: siteRes.value,
       states: stateRes.status === "fulfilled" ? stateRes.value : [],
+      attendance: attendanceRes.status === "fulfilled" ? attendanceRes.value : [],
       // 留到确认这一份没过期之后再写：旧请求的登录态失败不该把新列表标成 partial
       statesFailed: stateRes.status === "rejected",
     };
@@ -166,6 +210,35 @@ async function loadSites() {
     byName[st.site_name] = st;
   }
   loginStates.value = byName;
+  const attendanceByName: Record<string, SiteAttendance> = {};
+  for (const a of data.attendance ?? []) attendanceByName[a.site_name] = a;
+  attendance.value = attendanceByName;
+}
+
+/** 签到按钮的 tooltip：当天的状态和一句说明 */
+function attendanceTip(name: string): string {
+  const a = attendance.value[name];
+  if (!a) return "立即签到";
+  const v = attendanceView(a);
+  return `签到：${v.label}（${v.detail}）`;
+}
+
+async function signSite(name: string) {
+  if (signing[name]) return;
+  signing[name] = true;
+  try {
+    const res = await attendanceApi.signNow(name);
+    attendance.value = { ...attendance.value, [name]: res };
+    const v = attendanceView(res);
+    if (res.status === "signed" || res.status === "already")
+      ElMessage.success(`${name}：${v.detail}`);
+    else if (res.status === "unsupported") ElMessage.info(`${name}：${v.detail}`);
+    else ElMessage.warning(`${name} 签到未成功：${res.last_error || v.detail}`);
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "签到失败");
+  } finally {
+    signing[name] = false;
+  }
 }
 
 async function toggleEnabled(name: string) {
@@ -366,6 +439,12 @@ function manageSite(name: string) {
   router.push(`/sites/${name}`);
 }
 
+/** 点行进站点详情；点到行里的开关、按钮时照旧做它们自己的事 */
+function onSiteRowClick(row: [string, SiteConfig], _column: unknown, event: Event) {
+  if (isInteractiveClick(event)) return;
+  manageSite(row[0]);
+}
+
 /**
  * 行卡「更多」菜单里的操作。
  *
@@ -378,6 +457,7 @@ async function onCardCommand(cmd: { act: string; name: string }) {
   if (cmd.act === "toggle") return toggleEnabled(cmd.name);
   if (cmd.act === "open") return openSite(cmd.name);
   if (cmd.act === "probe") return probeSite(cmd.name);
+  if (cmd.act === "attend") return signSite(cmd.name);
   if (cmd.act === "reminder") await sendTestReminder(cmd.name);
   else if (cmd.act === "login-config") await openConfigDialog(cmd.name);
   else if (cmd.act === "delete") await deleteSite(cmd.name);
@@ -418,23 +498,66 @@ function matchesSearch(name: string, site: SiteConfig, q: string): boolean {
  *
  * 状态的判定口径（都用本页已经有的两份数据，没有新接口）：
  *   已禁用  !site.enabled
- *   异常    启用中，且「站点暂不可用」或最近一次探测不是 OK（含从未探测成功过）
- *   正常    启用中且不异常
+ *   异常    启用中，且「站点暂不可用」或最近一次探测失败（未配置凭证、会话过期、网络错误等）
+ *   未探测  启用中，还没有探测结果：从未探测过，或探测对它不适用
+ *   不支持  启用中，pt-tools 没有它的内置定义（`is_builtin` 为 false）：探测不了登录状态，「未探测」永远不会变（issue #861）
+ *   正常    启用中，最近一次探测成功
  * 画板把状态画成四档分段（全部/正常/异常/已禁用），这里做成**可选的 chip**，
  * 因为两边的「全部」不是一回事：画板那张图是 14 个已配置站点（12+2=14，已禁用另算 1），
  * 而这个产品的 `/api/sites` 回的是**全部 66 个内置定义**（新装时一个都没启用）。
  * 把「全部」改成 66 会让默认视图变成 66 行，所以保留原来的「已启用 / 全部」作视图范围，
  * 状态与认证、探测一起做成叠加筛选。
  */
-type SiteStatus = "ok" | "bad" | "off";
+type SiteStatus = "ok" | "none" | "bad" | "unsupported" | "off";
 
 function statusOf(name: string, site: SiteConfig): SiteStatus {
   if (!site.enabled) return "off";
   if (site.unavailable) return "bad";
   const st = loginState(name)?.last_probe_status;
-  /* 从未探测过不算异常：那是「还不知道」，不是「坏了」 */
-  if (st !== undefined && st !== "" && !isProbeSuccess(st)) return "bad";
-  return "ok";
+  // 没有内置定义的站点：/api/sites 按定义注册表给 is_builtin；探测结果 UNSUPPORTED 也只出现在这种站点上
+  if (site.is_builtin === false || st === "UNSUPPORTED") return "unsupported";
+  /*
+   * 从未探测过不算异常：那是「还不知道」，不是「坏了」。中性档（不适用）同理。
+   * 但它也不是「正常」—— 以前这两种都画成绿色的「正常」，新装时一个都没探测过的站点整列都是绿的。
+   */
+  if (!st || probeStatusSeverity(st) === "info") return "none";
+  return isProbeSuccess(st) ? "ok" : "bad";
+}
+
+/** 不支持的站点上的说明：为什么一直探测不了、要支持它或者不用它时怎么办 */
+const UNSUPPORTED_NOTE =
+  "pt-tools 没有这个站点的内置定义：探测不了登录状态，也取不到用户信息。要支持它，请按文档里的「请求新增站点」提交页面数据；不用的话可以删掉这一行";
+
+/** 状态胶囊上的说明：失败给探测结果；还没有结果时说清为什么、下一步是什么 */
+function statusNote(name: string, site: SiteConfig): string {
+  const status = statusOf(name, site);
+  if (status === "unsupported") return UNSUPPORTED_NOTE;
+  if (status !== "none" || loginState(name)?.last_probe_status) return probeNote(name);
+  return probeModeOf(name) === "disabled"
+    ? "这个站点设成了不探测登录状态"
+    : "还没有探测过登录状态：自动探测会按计划进行，也可以点这一行的「立即探测」";
+}
+
+/**
+ * 「判定活跃」的补充说明：最近一次探测为何没成功、依据哪一列、下次什么时候探、失败从什么时候开始、访问是否已不生效。
+ * 桌面挂在「剩余天数」与「判定活跃」两格的 tooltip 上，移动端放进行卡里同一个口径 popover。没有可说的就回空数组。
+ */
+function activeNotes(name: string): string[] {
+  const notes: string[] = [];
+  const probe = probeNote(name);
+  if (probe) notes.push(probe);
+  const source = activeSourceLabel(name);
+  if (source) notes.push(`依据：${source}`);
+  const next = nextProbeAt(name);
+  if (next > 0 && probeModeOf(name) === "auto") {
+    notes.push(`下次探测：${formatShortDateTime(next * 1000)}`);
+  }
+  const since = failingSince(name);
+  if (since > 0) notes.push(`连续失败自：${formatShortDateTime(since * 1000)}`);
+  if (accessStale(name)) {
+    notes.push("访问未生效：探测成功，但站点的最近访问时间没有更新，需要手动登录该站");
+  }
+  return notes;
 }
 
 /* 探测模式的中文名：导出与筛选 chip 共用一份 */
@@ -529,20 +652,31 @@ function exportCsv() {
   ElMessage.success(`已导出 ${visibleEntries.value.length} 个站点`);
 }
 
-/** 勾中的状态。空集合 = 不筛（而不是全都不显示） */
-const statusFilter = ref<Set<SiteStatus>>(new Set());
+/**
+ * 勾中的状态。空集合 = 不筛（而不是全都不显示）。
+ * 首页的「登录探测失败」带着 ?status=abnormal 进来：只看异常的。
+ */
+const statusFilter = ref<Set<SiteStatus>>(
+  new Set(route.query.status === "abnormal" ? (["bad"] as const) : []),
+);
 /** 认证方式筛选，空串 = 全部（画板 chip-0「认证: 全部」） */
 const authFilter = ref("");
 /** 探测方式筛选，空串 = 全部（画板 chip-1「探测: 全部」） */
 const probeFilter = ref("");
 
 const statusCounts = computed(() => {
-  const counts: Record<SiteStatus, number> = { ok: 0, bad: 0, off: 0 };
+  const counts: Record<SiteStatus, number> = { ok: 0, none: 0, bad: 0, unsupported: 0, off: 0 };
   for (const [name, site] of allEntries.value) counts[statusOf(name, site)] += 1;
   return counts;
 });
 
-const STATUS_LABEL: Record<SiteStatus, string> = { ok: "正常", bad: "异常", off: "已禁用" };
+const STATUS_LABEL: Record<SiteStatus, string> = {
+  ok: "正常",
+  none: "未探测",
+  bad: "异常",
+  unsupported: "不支持",
+  off: "已禁用",
+};
 
 /** 状态列与工具栏 chip 共用同一套语义色 */
 function statusTone(k: SiteStatus): "ok" | "dang" | "neutral" {
@@ -551,12 +685,20 @@ function statusTone(k: SiteStatus): "ok" | "dang" | "neutral" {
   return "neutral";
 }
 
+/* 「未探测」「不支持」只在有这种站点（或正在按它筛）时出现：平常是 0，摆着只占工具栏的位置 */
 const statusChips = computed(() =>
-  (["ok", "bad", "off"] as const).map((k) => ({
-    key: k,
-    label: `${STATUS_LABEL[k]} ${statusCounts.value[k]}`,
-    active: statusFilter.value.has(k),
-  })),
+  (["ok", "bad", "none", "unsupported", "off"] as const)
+    .filter(
+      (k) =>
+        (k !== "none" && k !== "unsupported") ||
+        statusCounts.value[k] > 0 ||
+        statusFilter.value.has(k),
+    )
+    .map((k) => ({
+      key: k,
+      label: `${STATUS_LABEL[k]} ${statusCounts.value[k]}`,
+      active: statusFilter.value.has(k),
+    })),
 );
 
 function toggleStatus(k: SiteStatus) {
@@ -585,10 +727,10 @@ const visibleEntries = computed(() => {
   /*
    * 状态 chip 比「已启用 / 全部」那个视图开关更具体，所以一旦按状态筛，基集取全部站点。
    *
-   * 不这样做就是个假筛选：`statusOf` 里 `off` ⟺ 未启用、`ok`/`bad` ⟺ 已启用，
+   * 不这样做就是个假筛选：`statusOf` 里 `off` ⟺ 未启用、`ok`/`none`/`bad` ⟺ 已启用，
    * 而 chip 上的计数从**全部**站点算。基集若停在「已启用」，点那枚非零的
    * 「已禁用 N」必定筛出 0 行 —— 数字写着 N，表里一行都没有。
-   * 反过来也不会多筛：off 只可能是未启用的站点，ok/bad 只可能是已启用的。
+   * 反过来也不会多筛：off 只可能是未启用的站点，ok/none/bad 只可能是已启用的。
    */
   let base =
     statusFilter.value.size > 0 || viewMode.value === "all"
@@ -865,6 +1007,7 @@ interface LoginConfigForm {
   reminder_cron: string;
   notification_channel_ids: number[];
   probe_mode: "auto" | "manual" | "disabled";
+  attendance_enabled: boolean;
 }
 
 const configDialogVisible = ref(false);
@@ -877,7 +1020,11 @@ const configForm = reactive<LoginConfigForm>({
   reminder_cron: "0 10,22 * * *",
   notification_channel_ids: [],
   probe_mode: "auto",
+  attendance_enabled: false,
 });
+
+/** 对话框里正在编辑的站点能否开启自动签到；不能时给出原因 */
+const configAttendance = computed(() => attendance.value[configSiteName.value]);
 
 async function loadNotifyChannels() {
   if (notifyChannels.value.length > 0) return;
@@ -897,6 +1044,7 @@ async function openConfigDialog(name: string) {
   configForm.reminder_cron = st?.reminder_cron || "0 10,22 * * *";
   configForm.notification_channel_ids = [...(st?.notification_channel_ids ?? [])];
   configForm.probe_mode = probeModeOf(name);
+  configForm.attendance_enabled = attendance.value[name]?.attendance_enabled ?? false;
   configDialogVisible.value = true;
   await loadNotifyChannels();
 }
@@ -920,6 +1068,14 @@ async function saveLoginConfig() {
       st.reminder_cron = configForm.reminder_cron;
       st.notification_channel_ids = [...configForm.notification_channel_ids];
       st.probe_mode = configForm.probe_mode;
+    }
+    const att = attendance.value[name];
+    if (att && att.attendance_enabled !== configForm.attendance_enabled) {
+      const res = await attendanceApi.setEnabled(name, configForm.attendance_enabled);
+      attendance.value = {
+        ...attendance.value,
+        [name]: { ...att, attendance_enabled: res.attendance_enabled },
+      };
     }
     ElMessage.success("保号配置已更新");
     configDialogVisible.value = false;
@@ -1025,23 +1181,27 @@ async function saveLoginConfig() {
         <span v-if="isFiltered" class="pt-band__note">筛出 {{ visibleEntries.length }} 个</span>
 
         <!-- 画板 bar-64 右端的 bi-columns-3：列设置（偏好存本地） -->
-        <el-popover placement="bottom-end" trigger="click" :width="180">
-          <template #reference>
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="列设置"
-              data-testid="sites-cols-btn">
-              <PtIcon name="columns-3" :size="15" />
-            </button>
-          </template>
-          <div class="cols">
-            <label v-for="c in OPTIONAL_COLS" :key="c.key" class="cols__row">
-              <el-checkbox :model-value="colShown(c.key)" @change="toggleCol(c.key)" />
-              <span>{{ c.label }}</span>
-            </label>
-          </div>
-        </el-popover>
+        <el-tooltip content="列设置" placement="top">
+          <span class="pt-tip-anchor">
+            <el-popover placement="bottom-end" trigger="click" :width="180">
+              <template #reference>
+                <button
+                  type="button"
+                  class="pt-band__iconbtn"
+                  aria-label="列设置"
+                  data-testid="sites-cols-btn">
+                  <PtIcon name="columns-3" :size="15" />
+                </button>
+              </template>
+              <div class="cols">
+                <label v-for="c in OPTIONAL_COLS" :key="c.key" class="cols__row">
+                  <el-checkbox :model-value="colShown(c.key)" @change="toggleCol(c.key)" />
+                  <span>{{ c.label }}</span>
+                </label>
+              </div>
+            </el-popover>
+          </span>
+        </el-tooltip>
 
         <!-- 画板 bar-64 右端的 bi-file-down：导出当前筛选出的这批行 -->
         <el-tooltip content="按当前筛选导出 CSV" placement="top">
@@ -1096,13 +1256,13 @@ async function saveLoginConfig() {
                   command="probe"
                   :disabled="loading || enabledCount === 0 || bulkProbing"
                   data-testid="probe-all-enabled-button">
-                  <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测已启用</span>
+                  <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测启用站点</span>
                 </el-dropdown-item>
                 <el-dropdown-item
                   command="open"
                   :disabled="enabledCount === 0"
                   data-testid="open-all-sites-btn">
-                  <PtIcon name="external-link" :size="14" class="dd-ico" /><span>打开已启用</span>
+                  <PtIcon name="external-link" :size="14" class="dd-ico" /><span>打开启用站点</span>
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -1118,16 +1278,20 @@ async function saveLoginConfig() {
                 :disabled="loading || enabledCount === 0"
                 data-testid="probe-all-enabled-button"
                 @click="probeAllEnabled">
-                <PtIcon name="activity" :size="15" /><span>探测已启用</span>
+                <PtIcon name="activity" :size="15" /><span>探测启用站点</span>
               </el-button>
             </el-tooltip>
-            <el-button
-              size="small"
-              :disabled="enabledCount === 0"
-              data-testid="open-all-sites-btn"
-              @click="openAllEnabled">
-              <PtIcon name="external-link" :size="15" /><span>打开已启用</span>
-            </el-button>
+            <el-tooltip
+              content="在新标签页里逐个打开已启用站点的首页；浏览器拦截弹窗时要先允许"
+              placement="bottom">
+              <el-button
+                size="small"
+                :disabled="enabledCount === 0"
+                data-testid="open-all-sites-btn"
+                @click="openAllEnabled">
+                <PtIcon name="external-link" :size="15" /><span>打开启用站点</span>
+              </el-button>
+            </el-tooltip>
           </template>
 
           <el-button
@@ -1146,8 +1310,10 @@ async function saveLoginConfig() {
         v-if="!isMobile"
         :data="visibleEntries"
         :row-key="(row: [string, SiteConfig]) => row[0]"
+        :row-class-name="() => ROW_LINK_CLASS"
         class="pt-grid"
-        style="width: 100%">
+        style="width: 100%"
+        @row-click="onSiteRowClick">
         <template #empty>
           <PtDataState :state="tableState" dense :title="stateTitle" :sub="stateSub">
             <template v-if="tableState === 'error' || tableState === 'partial'" #action>
@@ -1188,14 +1354,23 @@ async function saveLoginConfig() {
 
         <!--
           画板 12 的 th-2「状态」：把「暂不可用」那枚胶囊从站点列独立出来，
-          并把它扩成三态（正常 / 异常 / 已禁用）—— 和工具栏那排状态 chip 同一套口径
+          并把它扩成四态（正常 / 异常 / 未探测 / 已禁用）—— 和工具栏那排状态 chip 同一套口径
           （statusOf），否则筛选与显示会各说一套。
         -->
         <el-table-column label="状态" width="96" align="center">
           <template #default="{ row }">
-            <PtStatusPill :tone="statusTone(statusOf(row[0], row[1]))" size="sm">
-              {{ STATUS_LABEL[statusOf(row[0], row[1])] }}
-            </PtStatusPill>
+            <!-- 「异常」「未探测」背后的原因（如未配置凭证、暂不支持探测、还没探测过）放在 tooltip 里 -->
+            <el-tooltip
+              :disabled="!statusNote(row[0], row[1])"
+              :content="statusNote(row[0], row[1])"
+              placement="top"
+              :show-after="200">
+              <span :data-testid="`site-status-${row[0]}`">
+                <PtStatusPill :tone="statusTone(statusOf(row[0], row[1]))" size="sm">
+                  {{ STATUS_LABEL[statusOf(row[0], row[1])] }}
+                </PtStatusPill>
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -1227,15 +1402,23 @@ async function saveLoginConfig() {
         <el-table-column v-if="colShown('active')" min-width="104" class-name="pt-cell-muted">
           <template #header>
             <el-tooltip
-              content="用于封禁提醒判定的有效活跃时间，优先使用站点返回的 last_access；不是网页登录时间"
+              content="用于封禁提醒判定的有效活跃时间，优先使用站点返回的 last_access；探测失败时，浏览器扩展上报的较新访问也算。不是网页登录时间"
               placement="top">
               <span class="th-help">判定活跃 <PtIcon name="info" :size="12" /></span>
             </el-tooltip>
           </template>
           <template #default="{ row }">
-            <span :data-testid="`last-login-cell-${row[0]}`" class="ts">
-              {{ formatTimeAgo(effectiveLastActive(row[0])) }}
-            </span>
+            <el-tooltip
+              :disabled="activeNotes(row[0]).length === 0"
+              placement="top"
+              :show-after="200">
+              <template #content>
+                <div v-for="note in activeNotes(row[0])" :key="note">{{ note }}</div>
+              </template>
+              <span :data-testid="`last-login-cell-${row[0]}`" class="ts">
+                {{ formatTimeAgo(effectiveLastActive(row[0])) }}
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -1263,18 +1446,38 @@ async function saveLoginConfig() {
             叠两枚之后这一列比真正的状态列还响。天数改成带语义字色的纯文本；
             档位胶囊只在**确实需要关注**时出现，「正常 / 未知」不画。
           -->
+          <!--
+            「判定活跃」列默认是藏着的，所以判定依据、下次探测、失败开始时间这些说明挂在这一格的
+            tooltip 上，默认视图也看得到。一格仍然最多一枚胶囊：「访问未生效」比档位更要紧 ——
+            它说明自动访问对这个站无效、只能手动登录，紧急程度已经由天数的字色表达。
+          -->
           <template #default="{ row }">
-            <span class="days">
-              <span :data-testid="`days-remaining-cell-${row[0]}`" :class="daysCellClass(row[0])">
-                {{ daysRemaining(row[0]) === null ? "—" : `${daysRemaining(row[0])} 天` }}
+            <el-tooltip
+              :disabled="activeNotes(row[0]).length === 0"
+              placement="top"
+              :show-after="200">
+              <template #content>
+                <div v-for="note in activeNotes(row[0])" :key="note">{{ note }}</div>
+              </template>
+              <span class="days">
+                <span :data-testid="`days-remaining-cell-${row[0]}`" :class="daysCellClass(row[0])">
+                  {{ daysRemaining(row[0]) === null ? "—" : `${daysRemaining(row[0])} 天` }}
+                </span>
+                <PtStatusPill
+                  v-if="accessStale(row[0])"
+                  :data-testid="`access-stale-${row[0]}`"
+                  tone="warn"
+                  size="sm">
+                  访问未生效
+                </PtStatusPill>
+                <PtStatusPill
+                  v-else-if="ATTENTION_TIERS.has(reminderTier(row[0]))"
+                  :tone="tierTone(reminderTier(row[0]))"
+                  size="sm">
+                  {{ tierLabel(reminderTier(row[0])) }}
+                </PtStatusPill>
               </span>
-              <PtStatusPill
-                v-if="ATTENTION_TIERS.has(reminderTier(row[0]))"
-                :tone="tierTone(reminderTier(row[0]))"
-                size="sm">
-                {{ tierLabel(reminderTier(row[0])) }}
-              </PtStatusPill>
-            </span>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -1336,7 +1539,7 @@ async function saveLoginConfig() {
           一行有六个动作，写上文字就要 400 宽，把前面几列挤成两行。
           这里只留图标 + tooltip，图标顺序按使用频率排：先看站点、再探测，删除放最后。
         -->
-        <el-table-column label="操作" width="212" fixed="right" class-name="pt-cell-act">
+        <el-table-column label="操作" width="240" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
             <el-tooltip
               :content="siteUrlOf(row[0]) ? '打开站点' : '未配置站点地址'"
@@ -1367,6 +1570,22 @@ async function saveLoginConfig() {
                   :data-testid="`probe-button-${row[0]}`"
                   @click="probeSite(row[0])">
                   <PtIcon name="activity" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+
+            <el-tooltip :content="attendanceTip(row[0])" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="立即签到"
+                  :loading="signing[row[0]]"
+                  :disabled="!attendanceView(attendance[row[0]]).canSign || signing[row[0]]"
+                  :data-testid="`attend-button-${row[0]}`"
+                  @click="signSite(row[0])">
+                  <PtIcon name="calendar-check" :size="15" />
                 </el-button>
               </span>
             </el-tooltip>
@@ -1485,6 +1704,18 @@ async function saveLoginConfig() {
           -->
           <template #meta>
             <span class="card-auth">{{ authMethodLabel(site.auth_method) }}</span>
+            <span
+              v-if="uploadSpark(name).some((v) => v > 0)"
+              class="card-spark"
+              :title="`${name} 最近 8 天每天的上传增量`">
+              <PtBars
+                :values="uploadSpark(name)"
+                baseline="zero"
+                :count="8"
+                :bar-width="12"
+                :gap="3"
+                :height="18" />
+            </span>
             <span class="rss" :class="{ 'is-zero': getRssCount(site) === 0 }">
               <PtIcon name="rss" :size="11" />
               {{ getRssCount(site) }} 条 RSS
@@ -1522,6 +1753,7 @@ async function saveLoginConfig() {
                   但少数站点按 last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，
                   别只看这里的数字。
                 </p>
+                <p v-for="note in activeNotes(name)" :key="note" class="th-help__p">{{ note }}</p>
               </el-popover>
             </span>
           </template>
@@ -1579,6 +1811,12 @@ async function saveLoginConfig() {
                     :disabled="!site.enabled || probing[name]"
                     :data-testid="`probe-button-${name}`">
                     <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    :command="{ act: 'attend', name }"
+                    :disabled="!attendanceView(attendance[name]).canSign || signing[name]"
+                    :data-testid="`attend-button-${name}`">
+                    <PtIcon name="calendar-check" :size="14" class="dd-ico" /><span>立即签到</span>
                   </el-dropdown-item>
                   <el-dropdown-item
                     :command="{ act: 'reminder', name }"
@@ -1844,7 +2082,36 @@ async function saveLoginConfig() {
             <el-option label="手动" value="manual" />
             <el-option label="禁用" value="disabled" />
           </el-select>
-          <div class="field-tip">自动 = 跟随定时任务；手动 = 只在点「立即探测」时执行</div>
+          <div class="field-tip">
+            自动 = 大约每 6 小时探测一次登录状态（各站错开），会话过期、密钥错误以后隔 24
+            小时再探；手动 = 只在点「立即探测」时执行；禁用 = 不定时探测
+          </div>
+        </el-form-item>
+
+        <el-form-item label="每日自动签到">
+          <el-switch
+            v-model="configForm.attendance_enabled"
+            :disabled="!configAttendance?.supported"
+            data-testid="login-config-attendance" />
+          <div class="field-tip">
+            {{
+              configAttendance && !configAttendance.supported
+                ? configAttendance.unsupported_reason
+                : "每天在签到时间窗内随机签到一次，失败最多重试 2 次"
+            }}
+            <template v-if="attendanceChallengeText(configAttendance?.challenge)">
+              <span data-testid="login-config-attendance-ai"
+                >{{ attendanceChallengeText(configAttendance?.challenge) }}：要在「全局设置 →
+                每日签到」打开「用 AI 签到」。</span
+              >
+            </template>
+            <router-link
+              v-if="!configAttendance || configAttendance.supported"
+              to="/global"
+              data-testid="login-config-window-link"
+              >签到时间窗在「系统设置」里改</router-link
+            >
+          </div>
         </el-form-item>
       </el-form>
 
@@ -2010,6 +2277,14 @@ async function saveLoginConfig() {
 .card-why:focus-visible {
   color: var(--pt-p);
   background: var(--pt-hover);
+}
+
+/* 画板 30 行卡里的 120×18 走势柱：跟在 meta 那行里，不另起一行把卡撑高 */
+.card-spark {
+  display: inline-flex;
+  align-items: flex-end;
+  width: 120px;
+  height: 18px;
 }
 
 /* 行卡里的认证方式：纯文本，与同一排的 RSS / 活跃 / 剩余同一档（画板 30 是 11.5/500） */

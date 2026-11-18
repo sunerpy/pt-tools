@@ -1,0 +1,150 @@
+package core
+
+import (
+	"encoding/base64"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/models"
+)
+
+// keyTestHome 把 HOME 指到临时目录并按其中的 secret.key 重新初始化密钥；测试结束后换回固定的环境变量密钥。
+func keyTestHome(t *testing.T, keyFileContent []byte) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("PT_TOOLS_SECRET_KEY", "")
+	if keyFileContent != nil {
+		dir := filepath.Join(home, ".pt-tools")
+		require.NoError(t, os.MkdirAll(dir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "secret.key"), keyFileContent, 0o600))
+	}
+	crypto.ResetForTest()
+	t.Cleanup(func() {
+		t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+		crypto.ResetForTest()
+	})
+	return home
+}
+
+func keyCheckDB(t *testing.T, withCipher bool) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}, &models.NotificationConf{}))
+	if withCipher {
+		require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", CookieEncrypted: "b2xkLWNpcGhlcg=="}).Error)
+	}
+	return db
+}
+
+// secret.key 存在却无法使用时拒绝启动，并说明怎么恢复，而不是换一把新密钥继续跑。
+func TestCheckSecretKeyFile_RejectsUnusableKeyFile(t *testing.T) {
+	keyTestHome(t, []byte("not-a-key"))
+	err := checkSecretKeyFile()
+	require.ErrorIs(t, err, ErrSecretKeyUnusable)
+	assert.Contains(t, err.Error(), "secret import")
+}
+
+func TestCheckSecretKeyFile_AcceptsValidKey(t *testing.T) {
+	keyTestHome(t, []byte(hex.EncodeToString(make([]byte, 32))))
+	assert.NoError(t, checkSecretKeyFile())
+}
+
+// 密钥文件原本不存在、库里却已有密文：原密钥丢了或没挂载进来，拒绝启动并删掉刚生成的密钥。
+func TestCheckGeneratedSecretKey_RejectsWhenDataIsEncrypted(t *testing.T) {
+	home := keyTestHome(t, nil)
+	keyFile := filepath.Join(home, ".pt-tools", "secret.key")
+	_, generated, _ := crypto.KeyStatus()
+	require.True(t, generated)
+
+	err := checkGeneratedSecretKey(keyCheckDB(t, true))
+	require.ErrorIs(t, err, ErrSecretKeyRegenerated)
+	assert.Contains(t, err.Error(), acceptNewSecretKeyEnv)
+	_, statErr := os.Stat(keyFile)
+	assert.True(t, os.IsNotExist(statErr), "新生成的密钥被删除，恢复原文件后下次启动不会误用它")
+}
+
+// 库里只有媒体库保存的 ChineseSubFinder API Key 是密文时同样拒绝启动：它也是用原密钥加密的。
+func TestCheckGeneratedSecretKey_CSFKeyCounts(t *testing.T) {
+	keyTestHome(t, nil)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaLibrary{}))
+	require.NoError(t, db.Create(&models.MediaLibrary{
+		Name: "电影", Kind: models.MediaKindMovie, Path: "/media/movies", CSFURL: "http://csf.lan/", CSFKeyEncrypted: "b2xkLWNpcGhlcg==",
+	}).Error)
+	require.ErrorIs(t, checkGeneratedSecretKey(db), ErrSecretKeyRegenerated)
+}
+
+// 用户确认原密钥已丢失时放行，保留新密钥。
+func TestCheckGeneratedSecretKey_AcceptNewKeyOptIn(t *testing.T) {
+	home := keyTestHome(t, nil)
+	t.Setenv(acceptNewSecretKeyEnv, "1")
+
+	require.NoError(t, checkGeneratedSecretKey(keyCheckDB(t, true)))
+	_, statErr := os.Stat(filepath.Join(home, ".pt-tools", "secret.key"))
+	assert.NoError(t, statErr)
+}
+
+// 全新安装（库里没有密文）照常生成密钥启动；读取已有密钥文件时不检查。
+func TestCheckGeneratedSecretKey_FreshInstallAndExistingKey(t *testing.T) {
+	keyTestHome(t, nil)
+	assert.NoError(t, checkGeneratedSecretKey(keyCheckDB(t, false)))
+
+	keyTestHome(t, []byte(hex.EncodeToString(make([]byte, 32))))
+	assert.NoError(t, checkGeneratedSecretKey(keyCheckDB(t, true)))
+}
+
+// 查不了库（列不存在等）时报错拒绝启动，不当作「没有密文」放行。
+func TestCheckGeneratedSecretKey_QueryError(t *testing.T) {
+	keyTestHome(t, nil)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("CREATE TABLE site_settings (id integer primary key)").Error)
+
+	err = checkGeneratedSecretKey(db)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "检查已加密数据失败")
+}
+
+// 新生成的密钥文件已被别的进程删掉时，删除失败只记日志，照样拒绝启动。
+func TestCheckGeneratedSecretKey_DiscardFailureStillRejects(t *testing.T) {
+	home := keyTestHome(t, nil)
+	require.NoError(t, os.Remove(filepath.Join(home, ".pt-tools", "secret.key")))
+
+	err := checkGeneratedSecretKey(keyCheckDB(t, true))
+	require.ErrorIs(t, err, ErrSecretKeyRegenerated)
+}
+
+// 加密列清单里的每一列都算数：库里只有某个模块的密钥（AI 助手的 API Key、TMDB Key、远程访问的主机密钥等）是密文时，
+// 新生成的密钥同样解不开它们，拒绝启动。
+func TestCheckGeneratedSecretKey_EveryEncryptedColumnCounts(t *testing.T) {
+	cols := map[string][]string{}
+	for _, c := range models.EncryptedColumns {
+		cols[c.Table] = append(cols[c.Table], c.Column+" text")
+	}
+	for _, c := range models.EncryptedColumns {
+		t.Run(c.Table+"."+c.Column, func(t *testing.T) {
+			keyTestHome(t, nil)
+			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			// 表里放上清单列出的这张表的全部加密列（只有一列是密文）
+			require.NoError(t, db.Exec("CREATE TABLE "+c.Table+" (id integer primary key, "+strings.Join(cols[c.Table], ", ")+")").Error)
+			require.NoError(t, db.Exec("INSERT INTO "+c.Table+" ("+c.Column+") VALUES (?)", "b2xkLWNpcGhlcg==").Error)
+			err = checkGeneratedSecretKey(db)
+			require.ErrorIs(t, err, ErrSecretKeyRegenerated)
+			assert.Contains(t, err.Error(), "API Key", "提示里写明不只是 Cookie 和通知凭证")
+		})
+	}
+}

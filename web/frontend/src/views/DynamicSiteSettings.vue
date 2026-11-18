@@ -193,8 +193,11 @@ async function validateSite() {
     });
     showValidationResult.value = true;
 
-    if (validationResult.value.valid) {
+    // 后端目前只检查必填字段、不连接站点（verified 为 false）：这时不能说「验证成功」
+    if (validationResult.value.valid && validationResult.value.verified) {
       ElMessage.success("验证成功");
+    } else if (validationResult.value.valid) {
+      ElMessage.info(validationResult.value.message);
     } else {
       ElMessage.warning(validationResult.value.message);
     }
@@ -592,13 +595,15 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
         </template>
 
         <template v-if="addForm.auth_method === 'cookie_and_api_key'">
-          <el-form-item label="Cookie" required>
+          <el-form-item label="Cookie（可选）">
             <el-input
               v-model="addForm.cookie"
               type="textarea"
               :rows="3"
               placeholder="请输入站点 Cookie" />
-            <div class="field-tip">用于抓取时魔、魔力等只在网页上出现的信息</div>
+            <div class="field-tip">
+              用于时魔、签到，以及辅种、转种这类只知道种子编号的下载，可以不填
+            </div>
           </el-form-item>
           <el-form-item label="API Key / RSS Key" required>
             <el-input v-model="addForm.api_key" placeholder="请输入 API Key 或 RSS Key" />
@@ -645,13 +650,31 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
       <div
         v-if="showValidationResult && validationResult"
         class="pt-note"
-        :class="validationResult.valid ? 'pt-note--ok' : 'pt-note--dang'">
+        :class="
+          !validationResult.valid
+            ? 'pt-note--dang'
+            : validationResult.verified
+              ? 'pt-note--ok'
+              : 'pt-note--warn'
+        ">
         <PtIcon
-          :name="validationResult.valid ? 'circle-check' : 'circle-alert'"
+          :name="
+            !validationResult.valid
+              ? 'circle-alert'
+              : validationResult.verified
+                ? 'circle-check'
+                : 'triangle-alert'
+          "
           :size="14"
           class="pt-note__icon" />
         <div class="vres">
-          <strong>{{ validationResult.valid ? "验证成功" : "验证失败" }}</strong>
+          <strong>{{
+            !validationResult.valid
+              ? "验证失败"
+              : validationResult.verified
+                ? "验证成功"
+                : "字段检查通过"
+          }}</strong>
           <span>{{ validationResult.message }}</span>
           <template v-if="validationResult.free_torrents?.length">
             <span class="vres__head">

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,11 +22,23 @@ type spyHooks struct {
 	encryptCalls atomic.Int32
 	decryptCalls atomic.Int32
 	failEncrypt  int32
+
+	mu      sync.Mutex
+	backups []string // 每次备份的「表 v旧→v新」
 }
 
-func (s *spyHooks) BackupTable(db *gorm.DB, table string) (string, error) {
+func (s *spyHooks) BackupTable(db *gorm.DB, table string, fromVer, toVer int) (string, error) {
 	s.backupCalls.Add(1)
+	s.mu.Lock()
+	s.backups = append(s.backups, fmt.Sprintf("%s v%d→v%d", table, fromVer, toVer))
+	s.mu.Unlock()
 	return filepath.Join("backup", table+".json"), nil
+}
+
+func (s *spyHooks) backupList() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.backups)
 }
 
 func (s *spyHooks) EncryptCookie(plain string) (string, error) {
@@ -68,6 +82,7 @@ func setupV8MigrationDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("创建 v8 测试数据库失败: %v", err)
 	}
+	t.Cleanup(func() { closeTestGorm(db) })
 	if err := db.AutoMigrate(&SchemaVersion{}, &SiteSetting{}); err != nil {
 		t.Fatalf("迁移 v8 基础表失败: %v", err)
 	}
@@ -116,8 +131,17 @@ func TestMigrationV8ToV9Happy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("解密站点 %s 失败: %v", site.Name, err)
 		}
-		if plain != site.Cookie {
-			t.Fatalf("站点 %s 解密结果 = %q, want %q", site.Name, plain, site.Cookie)
+		// setupV8MigrationDB 写入的明文是 uid=<序号>; token=abc（mteam 是序号 0）。
+		idx := 0
+		if site.Name != "mteam" {
+			_, _ = fmt.Sscanf(site.Name, "site-%d", &idx)
+		}
+		if want := fmt.Sprintf("uid=%d; token=abc", idx); plain != want {
+			t.Fatalf("站点 %s 解密结果 = %q, want %q", site.Name, plain, want)
+		}
+		// 迁移链会继续跑到 v11，v11 清掉明文列。
+		if site.Cookie != "" {
+			t.Fatalf("站点 %s 明文 Cookie 应被 v11 清除，实际 %q", site.Name, site.Cookie)
 		}
 	}
 
@@ -145,6 +169,7 @@ func TestMigrationV8ToV9Happy(t *testing.T) {
 	if hooks.backupCalls.Load() < 1 {
 		t.Fatal("backup hook 未调用")
 	}
+	assert.Contains(t, hooks.backupList(), "site_settings v8→v9", "备份文件名带这一步迁移的版本")
 }
 
 func TestMigrationV8ToV9RollbackOnEncryptError(t *testing.T) {
@@ -190,6 +215,22 @@ func TestMigrationV8ToV9Idempotent(t *testing.T) {
 	if calls := hooks.encryptCalls.Load(); calls != 0 {
 		t.Fatalf("重复迁移加密调用数 = %d, want 0", calls)
 	}
+}
+
+// 备份失败时 v9 不往下做：版本停在 8，Cookie 不加密。
+func TestMigrationV8ToV9StopsWhenBackupFails(t *testing.T) {
+	db := setupV8MigrationDB(t)
+	hooks := &spyHooks{}
+	failing := func(_ *gorm.DB, table string, _, _ int) (string, error) {
+		return "", fmt.Errorf("backup %s failed", table)
+	}
+	sm := NewSchemaManagerWithHooks(db, "test", failing, hooks.EncryptCookie, hooks.DecryptCookie)
+
+	require.Error(t, sm.RunMigrations())
+	version, err := sm.GetCurrentVersion()
+	require.NoError(t, err)
+	assert.Equal(t, 8, version)
+	assert.Zero(t, hooks.encryptCalls.Load())
 }
 
 func TestMigrationV8ToV9NilHook(t *testing.T) {
@@ -544,7 +585,7 @@ func TestRunMigrations_LegacyChainV1ToV10(t *testing.T) {
 	require.NoError(t, db.Create(&SiteSetting{Name: "hdsky", AuthMethod: "cookie", Cookie: "uid=1;pass=2", Enabled: true}).Error)
 	require.NoError(t, db.Create(&RSSSubscription{Name: "ex", URL: "https://example.com/rss", IntervalMinutes: 5}).Error)
 
-	backup := func(*gorm.DB, string) (string, error) { return "b", nil }
+	backup := func(*gorm.DB, string, int, int) (string, error) { return "b", nil }
 	enc := func(p string) (string, error) { return "enc:" + p, nil }
 	dec := func(c string) (string, error) { return c[4:], nil }
 
@@ -607,7 +648,7 @@ func TestSchemaManager_IsLegacyByRSSOnly(t *testing.T) {
 		&FilterRule{}, &NotificationConf{})
 	require.NoError(t, db.Create(&RSSSubscription{Name: "r", URL: "http://x", IntervalMinutes: 5}).Error)
 
-	backup := func(*gorm.DB, string) (string, error) { return "b", nil }
+	backup := func(*gorm.DB, string, int, int) (string, error) { return "b", nil }
 	enc := func(p string) (string, error) { return "e:" + p, nil }
 	dec := func(c string) (string, error) { return c[2:], nil }
 	sm := NewSchemaManagerWithHooks(db, "1.0.0", backup, enc, dec)
@@ -623,7 +664,7 @@ func TestMigrateV8ToV9_NilHooks(t *testing.T) {
 	sm := NewSchemaManager(db, "1.0.0")
 	assert.Error(t, sm.migrateV8ToV9(db))
 
-	sm.BackupTable = func(*gorm.DB, string) (string, error) { return "b", nil }
+	sm.BackupTable = func(*gorm.DB, string, int, int) (string, error) { return "b", nil }
 	assert.Error(t, sm.migrateV8ToV9(db))
 }
 
@@ -633,7 +674,7 @@ func TestMigrateV8ToV9_DecryptSanityMismatch(t *testing.T) {
 
 	sm := NewSchemaManagerWithHooks(
 		db, "1.0.0",
-		func(*gorm.DB, string) (string, error) { return "b", nil },
+		func(*gorm.DB, string, int, int) (string, error) { return "b", nil },
 		func(p string) (string, error) { return "e:" + p, nil },
 		func(string) (string, error) { return "TAMPERED", nil },
 	)
@@ -659,7 +700,7 @@ func TestMigrateV8ToV9_IdempotentColumnPresent(t *testing.T) {
 	db := newMemDB(t, &SiteSetting{}, &SiteLoginState{})
 	require.NoError(t, db.Create(&SiteSetting{Name: "s", AuthMethod: "cookie", Cookie: "raw"}).Error)
 
-	backup := func(*gorm.DB, string) (string, error) { return "b", nil }
+	backup := func(*gorm.DB, string, int, int) (string, error) { return "b", nil }
 	enc := func(p string) (string, error) { return "e:" + p, nil }
 	dec := func(c string) (string, error) { return c[2:], nil }
 	sm := NewSchemaManagerWithHooks(db, "1.0.0", backup, enc, dec)

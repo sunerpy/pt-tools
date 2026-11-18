@@ -21,6 +21,10 @@ interface ProbeStatusMeta {
 const PROBE_STATUS_MAP: Record<string, ProbeStatusMeta> = {
   OK: { severity: "success", label: "正常" },
   NOT_APPLICABLE: { severity: "info", label: "不适用" },
+  /* 缺凭证时没有向站点发请求：需要用户补凭证，按警告显示 */
+  NOT_CONFIGURED: { severity: "warning", label: "未配置凭证" },
+  /* 动态站点没有内置定义，不做登录探测：不是故障，按中性显示 */
+  UNSUPPORTED: { severity: "info", label: "暂不支持探测" },
   SESSION_EXPIRED: { severity: "warning", label: "会话已过期" },
   CHALLENGE: { severity: "warning", label: "被反爬拦截" },
   RATE_LIMITED: { severity: "warning", label: "请求过于频繁" },

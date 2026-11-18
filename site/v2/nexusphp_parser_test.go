@@ -548,6 +548,27 @@ func TestStripTrailingPromotion_RequestedCases(t *testing.T) {
 		})
 	}
 
+	// 限时促销时上游 NexusPHP 详情页 h1 写成「标题&nbsp;&nbsp;&nbsp;[免费] 剩余时间：1天17时」
+	// （functions.php 的 get_torrent_promotion_append，text_will_end_in：简体「剩余时间：」、繁体「剩餘時間：」、英文「 will end in 」），
+	// 剩余时间跟着促销标记一起去掉；促销标记后面跟着别的文字时照旧不动
+	timeLeftCases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "simplified time left", input: "机械工程控制基础-第2版    [免费] 剩余时间：1天17时", want: "机械工程控制基础-第2版"},
+		{name: "traditional time left", input: "某劇集 第一季  [50%] 剩餘時間：3天2時", want: "某劇集 第一季"},
+		{name: "english time left", input: "Some Movie 2025  [Free] will end in 1 day", want: "Some Movie 2025"},
+		{name: "promotion prefix", input: "Some Movie 2025  [2X免费] 优惠剩余时间：27天", want: "Some Movie 2025"},
+		{name: "other text after promotion", input: "Some Movie 2025  [免费] 官方", want: "Some Movie 2025  [免费] 官方"},
+		{name: "unknown label before time left", input: "Some Movie 2025  [FRDS] 剩余时间：1天", want: "Some Movie 2025  [FRDS] 剩余时间：1天"},
+	}
+	for _, tt := range timeLeftCases {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, stripTrailingPromotion(tt.input, discountMapping))
+		})
+	}
+
 	t.Run("value attribute remains byte identical", func(t *testing.T) {
 		p := NewNexusPHPParserFromDefinition(&SiteDefinition{DetailParser: &DetailParserConfig{
 			TitleSelector: "#top",
@@ -582,4 +603,36 @@ func TestNexusPHPParserFromDefinition_Default(t *testing.T) {
 	def := &SiteDefinition{DetailParser: &DetailParserConfig{TimeLayout: "2006-01-02"}}
 	p2 := NewNexusPHPParserFromDefinition(def)
 	assert.Equal(t, "2006-01-02", p2.config.TimeLayout)
+}
+
+// 结束时间元素在、值却解析不了：要能看出来（DiscountErr），不能悄悄当成没有结束时间
+func TestNexusPHPParser_ParseAll_DiscountEndUnparsable(t *testing.T) {
+	parser := NewNexusPHPParser()
+	cases := []struct {
+		name    string
+		html    string
+		level   DiscountLevel
+		zeroEnd bool
+		wantErr string
+	}{
+		{"免费且结束时间有效", `<h1><font class="free">免费</font><span title="2099-10-20 12:00:00">3天</span></h1>`, DiscountFree, false, ""},
+		{"免费但结束时间无法解析", `<h1><font class="free">免费</font><span title="3天2时">3天</span></h1>`, DiscountFree, true, "discountEndTime: 时间格式无法解析"},
+		{"免费且没有结束时间元素", `<h1><font class="free">免费</font></h1>`, DiscountFree, true, ""},
+		{"结束时间元素的 title 是空白", `<h1><font class="free">免费</font><span title=" ">3天</span></h1>`, DiscountFree, true, ""},
+		{"半价的结束时间无法解析也记下", `<h1><font class="halfdown">50%</font><span title="bad">x</span></h1>`, DiscountPercent50, true, "discountEndTime: 时间格式无法解析"},
+		{"没有优惠时不记结束时间问题", `<h1>Normal <span title="提示文字">x</span></h1>`, DiscountNone, true, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			info := parser.ParseAll(parseHTML(t, "<html><body>"+c.html+"</body></html>"))
+			assert.Equal(t, c.level, info.DiscountLevel)
+			assert.Equal(t, c.zeroEnd, info.DiscountEnd.IsZero())
+			assert.Equal(t, c.wantErr, info.DiscountErr)
+		})
+	}
+
+	// ParseDiscount 的返回值不变
+	level, end := parser.ParseDiscount(parseHTML(t, `<html><body><h1><font class="free">免费</font><span title="3天2时">3天</span></h1></body></html>`))
+	assert.Equal(t, DiscountFree, level)
+	assert.True(t, end.IsZero())
 }

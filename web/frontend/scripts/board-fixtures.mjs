@@ -182,6 +182,64 @@ const RSS_LOGS = Array.from({ length: 10 }, (_, i) => ({
   created_at: "2026-09-18T22:00:00Z",
 }));
 
+/*
+ * 「最近投递统计」与「最近的通知」的两个接口（RSS 通知加后台监控通知）。
+ * 必须单独给：它们是 /api/chatops/notifications 的子路径，前缀匹配会让它们拿到通道列表那个数组。
+ */
+const NOTIFY_STATS = {
+  since: "2026-09-12T00:00:00Z",
+  days: 7,
+  channels: [
+    {
+      conf_id: 1,
+      total: 42,
+      sent: 39,
+      failed: 1,
+      pending: 1,
+      canceled: 1,
+      throttled: 0,
+      requeued: { total: 2, sent: 1, pending: 0, dead: 1 },
+      sources: [
+        { source: "rss", total: 30, sent: 28 },
+        { source: "attendance", total: 7, sent: 7 },
+        { source: "daily_report", total: 5, sent: 4 },
+      ],
+    },
+    {
+      conf_id: 2,
+      total: 12,
+      sent: 12,
+      failed: 0,
+      pending: 0,
+      canceled: 0,
+      throttled: 0,
+      requeued: { total: 0, sent: 0, pending: 0, dead: 0 },
+      sources: [
+        { source: "login", total: 8, sent: 8 },
+        { source: "media", total: 4, sent: 4 },
+      ],
+    },
+  ],
+};
+
+const NOTIFY_RECENT = Array.from({ length: 8 }, (_, i) => {
+  const rss = i % 2 === 0;
+  return {
+    source: rss ? "rss" : ["attendance", "login", "daily_report", "media"][(i >> 1) % 4],
+    log_id: i + 1,
+    conf_id: (i % 2) + 1,
+    title: rss
+      ? `Example.Show.S01E0${i + 1}.1080p.WEB-DL`
+      : ["签到汇总", "保号提醒", "每日战报", "已入库"][(i >> 1) % 4],
+    site: rss ? SITES[i % SITES.length][0] : undefined,
+    torrent_id: rss ? `t${1000 + i}` : undefined,
+    kind: rss ? (i % 4 === 0 ? "filtered" : "all") : "daily",
+    result: ["sent", "sent", "failed", "pending", "canceled", "sent", "throttled", "sent"][i],
+    attempts: (i % 3) + 1,
+    created_at: `2026-09-18T2${3 - (i >> 2)}:${String(50 - i * 5).padStart(2, "0")}:00Z`,
+  };
+});
+
 const FILTER_RULES = Array.from({ length: 6 }, (_, i) => ({
   id: i + 1,
   name: ["4K 资源", "1080p 资源", "REMUX", "HDR", "HEVC", "国语配音"][i],
@@ -198,7 +256,11 @@ const FILTER_RULES = Array.from({ length: 6 }, (_, i) => ({
 
 const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
   id: `s${i}`,
-  title: `Search.Hit.${i + 1}.2160p.WEB-DL.H265`,
+  /* 每四条有一条是 1080p 的蓝光：「筛选」浮层里分辨率那一组要有两个选项，勾了表格才会变 */
+  title:
+    i % 4 === 3
+      ? `Search.Hit.${i + 1}.1080p.BluRay.x264-FRDS`
+      : `Search.Hit.${i + 1}.2160p.WEB-DL.H265`,
   subtitle: "示例副标题",
   sourceSite: SITES[i % SITES.length][0],
   url: "https://example.invalid/t/1",
@@ -247,7 +309,1267 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
    * 正好掩盖了「选具体档位时这些行会被整片筛掉」这个缺陷 —— 本文件开头反对的就是这种假数据。
    */
   tags: i % 3 === 1 ? ["剧情", "悬疑", "传记"] : [],
+  /* 后端按标题与副标题解析出的信息（web/api_search.go 的 meta，媒体中心 M2a 加的）：上面两种标题解析出来就是这几项 */
+  meta:
+    i % 4 === 3
+      ? { resolution: "1080p", source: "BluRay", video_codec: "H.264", group: "FRDS" }
+      : { resolution: "2160p", source: "WEB-DL", video_codec: "H.265" },
 }));
+
+/*
+ * 按条目搜索（POST /api/media/search，媒体中心 M2a，画板 06 / 09 / 10）。
+ * 字段名照 internal/media/subscribe/search_media.go 的 MediaSearchResult；值域照来源写：
+ * 集的状态是 models/media_subscribe.go 的 library / downloading / waiting_version / missing / upcoming，
+ * 订阅状态是 active / paused / pending / done，优惠是 site/v2/types.go 的 DiscountLevel（FREE、PERCENT_50、NONE）。
+ * 五组对应画板上的五种卡：两个站点的同一资源（展开后两行）、整组已入库（默认折叠）、锁定的版本、正在下载、不符合档案。
+ * 第六组（M2b）是拉黑了的：默认不显示，最后一行写它的标题与原因（画板 06 的 blocked 行），点「已拉黑 1 条」才出来。
+ * 组的顺序照服务端的排法（profile.better：拉黑的在最后，符合档案的在前，分数高的在前，同分时做种多的在前）。
+ */
+const entryMember = (site, id, over) => ({
+  site,
+  torrent_id: id,
+  title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL.H265.DV.HDR10-CHDWEB",
+  subtitle: "长夜将尽 第二季 第08集",
+  size_bytes: Math.round(4.71 * 1024 ** 3),
+  uploaded_at: 1762101000,
+  seeders: 10,
+  leechers: 1,
+  discount: "NONE",
+  free: false,
+  hr: false,
+  url: `https://example.invalid/${site.toLowerCase()}/details.php?id=${id}`,
+  download_url: `/api/site/${site.toLowerCase()}/torrent/${id}/download`,
+  meta: {
+    name_en: "Chang Ye Jiang Jin",
+    season: 2,
+    episode: 8,
+    resolution: "2160p",
+    source: "WEB-DL",
+    video_codec: "H.265",
+    hdr: ["DV", "HDR10"],
+    group: "CHDWEB",
+  },
+  verdict: { score: 92 },
+  ...over,
+});
+const entryGroup = (id, members, over) => ({
+  group_id: id,
+  members,
+  meta: members[0].meta,
+  verdict: members[0].verdict,
+  span: { start: 8, end: 8 },
+  covers: [8],
+  downloading: [],
+  in_library: false,
+  ...over,
+});
+const HHWEB_META = {
+  name_en: "Chang Ye Jiang Jin",
+  season: 2,
+  episode: 8,
+  resolution: "2160p",
+  source: "WEB-DL",
+  video_codec: "H.265",
+  group: "HHWEB",
+};
+const ENTRY_SEARCH = {
+  item: {
+    media_type: "tv",
+    tmdb_id: 231620,
+    season: 2,
+    title: "长夜将尽",
+    original_title: "Chang Ye Jiang Jin",
+    year: 2025,
+    seasons: 2,
+    total_episodes: 8,
+  },
+  subscription: { id: 3, status: "active", lock: { group: "HHWEB", resolution: "2160p" } },
+  profile: { id: 1, name: "默认（2160p 优先）" },
+  keywords: ["Chang Ye Jiang Jin S02", "长夜将尽 第二季"],
+  episodes: [
+    ...Array.from({ length: 6 }, (_, i) => ({
+      episode: i + 1,
+      state: "library",
+      air_date: `2025-10-${String(3 + i * 7).padStart(2, "0")}`,
+    })),
+    { episode: 7, state: "downloading", site: "HDSky", air_date: "2025-11-14" },
+    { episode: 8, state: "waiting_version", air_date: "2025-11-21" },
+  ],
+  groups: [
+    entryGroup("h:9f2c0d8e41b7a3c5", [
+      entryMember("OurBits", "412377", {
+        info_hash: "9f2c0d8e41b7a3c5",
+        seeders: 41,
+        discount: "FREE",
+        free: true,
+        free_left_seconds: 18 * 3600,
+      }),
+      entryMember("CHDBits", "286014", {
+        info_hash: "9f2c0d8e41b7a3c5",
+        seeders: 23,
+        uploaded_at: 1762100400,
+        discount: "PERCENT_50",
+        hr: true,
+        hr_hours: 120,
+      }),
+    ]),
+    entryGroup(
+      "h:04aa71c3e9d25b80",
+      [
+        entryMember("HDSky", "508811", {
+          info_hash: "04aa71c3e9d25b80",
+          title: "Chang.Ye.Jiang.Jin.S02E01-E06.2160p.WEB-DL.H265-HHWEB",
+          subtitle: "长夜将尽 第二季 第01-06集",
+          size_bytes: Math.round(23.6 * 1024 ** 3),
+          uploaded_at: 1761497000,
+          seeders: 64,
+          meta: { ...HHWEB_META, episode: 1, episode_end: 6 },
+          verdict: { score: 85 },
+        }),
+      ],
+      { span: { start: 1, end: 6 }, covers: [], in_library: true },
+    ),
+    entryGroup("h:c71e5a90b2d4f618", [
+      entryMember("HDHome", "190552", {
+        info_hash: "c71e5a90b2d4f618",
+        title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL.H265-HHWEB",
+        size_bytes: Math.round(3.92 * 1024 ** 3),
+        uploaded_at: 1762098300,
+        seeders: 18,
+        meta: HHWEB_META,
+        verdict: { score: 85 },
+      }),
+    ]),
+    entryGroup(
+      "s:pthome:77310",
+      [
+        entryMember("PTHome", "77310", {
+          title: "Chang.Ye.Jiang.Jin.S02E07.2160p.WEB-DL.H265-HHWEB",
+          subtitle: "长夜将尽 第二季 第07集",
+          size_bytes: Math.round(4.05 * 1024 ** 3),
+          uploaded_at: 1761497100,
+          seeders: 12,
+          meta: { ...HHWEB_META, episode: 7 },
+          verdict: { score: 85 },
+        }),
+      ],
+      { span: { start: 7, end: 7 }, covers: [], downloading: [7] },
+    ),
+    entryGroup("s:pttime:351098", [
+      entryMember("PTTime", "351098", {
+        title: "The.Long.Night.Ends.S02E08.1080p.WEB-DL.H264.AAC-ADWeb",
+        subtitle: "长夜将尽 第二季 第08集 中字",
+        size_bytes: Math.round(1.38 * 1024 ** 3),
+        uploaded_at: 1762102800,
+        seeders: 212,
+        meta: {
+          name_en: "The Long Night Ends",
+          season: 2,
+          episode: 8,
+          resolution: "1080p",
+          source: "WEB-DL",
+          video_codec: "H.264",
+          group: "ADWeb",
+          chinese_subs: true,
+        },
+        verdict: { score: 0, reject: "分辨率 1080p 不在档案里" },
+      }),
+    ]),
+    entryGroup(
+      "s:hdfans:66120",
+      [
+        entryMember("HDFans", "66120", {
+          title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL-XXWEB",
+          size_bytes: Math.round(4.4 * 1024 ** 3),
+          seeders: 6,
+          meta: { ...HHWEB_META, group: "XXWEB" },
+          verdict: { score: 85 },
+          block: { id: 7, reason: "音画不同步" },
+        }),
+      ],
+      { blocked: true },
+    ),
+  ],
+  total: 7,
+  blocked_count: 1,
+  unmatched_count: 3,
+  errors: [{ site: "TTG", error: "请求超时" }],
+};
+
+/*
+ * 条目详情（画板 04、08，媒体中心 M3）：字段照 internal/media/subscribe/item.go 的 ItemDetail / SeasonDetail。
+ * 内容照画板：长夜将尽第 2 季 12 集（E01–E06 已入库、E07 下载中、E08 等版本、E09–E12 还没播），这一季三个种子
+ * （H&R 已满足、H&R 还差 2 天、下载中），第 1 季一个整季包；导演 1 位加演员 14 位（「全部 15 位」），推荐 12 个。
+ * 图片路径都不给：无头 Chrome 连不上 TMDB，海报、背景、剧照、头像都走占位（画板「没有背景图用深色渐变」那条）。
+ * 还没播的集日期放在 2099 年，播出日那一行的文字不随运行的日子变。
+ * 媒体服务器（M6）：Jellyfin 里有这部剧 17 集，S02E03 在服务器里被删了（画板 04、08 的第 4 行与 E03 集卡）；
+ * 入库了、服务器里有的集给打开链接（播放圆）。电影不给媒体服务器（没有第 4 行、没有播放）。
+ */
+const ITEM_TV_ID = 100088;
+const ITEM_PEOPLE = [
+  ["周屿", "周远"],
+  ["林晚晴", "林晚"],
+  ["沈川", "沈队"],
+  ["许曼", "许曼"],
+  ["何青", "何青"],
+  ["顾一鸣", "老顾"],
+  ["苏禾", "苏禾"],
+  ["唐棣", "唐律师"],
+  ["梁冬", "梁冬"],
+  ["江离", "江离"],
+  ["宋知", "宋法医"],
+  ["白露", "白露"],
+  ["程野", "程野"],
+  ["叶舟", "叶舟"],
+];
+const ITEM_RECS = [
+  ["雾港", { in_library: true }],
+  ["北方来信", { subscribed: true, subscription_id: 12 }],
+  ["无声证词", {}],
+  ["潮汐之下", {}],
+  ["第七个夏天", { in_library: true }],
+  ["群山回响", { subscribed: true, subscription_id: 13 }],
+  ["夜航", {}],
+  ["灰域", {}],
+  ["迷城", {}],
+  ["光年之外", {}],
+  ["白昼之下", {}],
+  ["长街", {}],
+].map(([title, extra], i) => ({
+  id: 200001 + i,
+  media_type: "tv",
+  title,
+  original_title: title,
+  year: 2020 + (i % 5),
+  in_library: false,
+  subscribed: false,
+  ...extra,
+}));
+const itemTorrent = (over) => ({
+  site: "HDSky",
+  title: "",
+  season: 2,
+  version: "2160p HHWEB",
+  size: 0,
+  downloader_id: 1,
+  downloader: "qb",
+  hash: "",
+  state: "seeding",
+  percent: 100,
+  ratio: 1,
+  seeding_seconds: 0,
+  hr: false,
+  deletable: true,
+  reason: "可以删",
+  ...over,
+});
+const ITEM_TV = {
+  item: {
+    media_type: "tv",
+    tmdb_id: ITEM_TV_ID,
+    title: "长夜将尽",
+    original_title: "The Long Night",
+    year: 2025,
+    date: "2025-03-14",
+    overview:
+      "十年前的一桩旧案在暴雨夜重新浮出水面。刑警周远带着当年的笔记回到海港小城，一个个证人接连失踪，他不得不面对自己亲手合上的卷宗。",
+    genres: ["悬疑", "犯罪", "剧情"],
+    countries: ["CN"],
+    runtime: 45,
+    status: "Returning Series",
+    rating: 8.4,
+    votes: 1204,
+    imdb_id: "tt3581920",
+    tvdb_id: 392256,
+    studios: ["海港影业"],
+    directors: ["陈默"],
+    cast: ITEM_PEOPLE.map(([name, character], order) => ({ name, character, order })),
+    seasons_count: 2,
+    episodes_count: 24,
+  },
+  seasons: [
+    { n: 1, name: "第 1 季", episode_count: 12, air_date: "2025-03-14", have: 12 },
+    { n: 2, name: "第 2 季", episode_count: 12, air_date: "2025-10-05", have: 6 },
+    { n: 0, name: "特别篇", episode_count: 2, have: 0 },
+  ],
+  nas: {
+    library: {
+      seasons: [
+        { n: 1, have: 12, total: 12 },
+        { n: 2, have: 6, total: 12 },
+      ],
+      files: 18,
+      size: 82.6 * 1024 ** 3,
+      libraries: ["剧集库"],
+      record_id: 77,
+      missing: [],
+    },
+    seeding: { count: 4, hr_pending: 1, hr_left_seconds: 2 * 86400, lowest_ratio: 0.42 },
+  },
+  subscriptions: [
+    {
+      id: 5,
+      status: "active",
+      season: 2,
+      follow: true,
+      lock: { group: "HHWEB", resolution: "2160p" },
+    },
+  ],
+  torrents: [
+    itemTorrent({
+      torrent_id: "88210",
+      title: "The.Long.Night.S01.2160p.WEB-DL.H265.DDP5.1-HHWEB",
+      season: 1,
+      episodes: "整季",
+      size: 86.4 * 1024 ** 3,
+      hash: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      ratio: 2.14,
+      seeding_seconds: 41 * 86400,
+    }),
+    itemTorrent({
+      site: "OurBits",
+      torrent_id: "31207",
+      title: "The.Long.Night.S02E01-E04.2160p.WEB-DL.H265-HHWEB",
+      episodes: "E01–E04",
+      size: 27.3 * 1024 ** 3,
+      hash: "b2c3d4e5f60718293a4b5c6d7e8f901234567890",
+      ratio: 1.31,
+      seeding_seconds: 18 * 86400,
+      hr: true,
+      hr_hours: 72,
+      reason: "H&R 已满足",
+    }),
+    itemTorrent({
+      torrent_id: "88402",
+      title: "The.Long.Night.S02E05-E06.2160p.WEB-DL.H265-HHWEB",
+      episodes: "E05–E06",
+      size: 13.6 * 1024 ** 3,
+      downloader_id: 2,
+      downloader: "tr",
+      hash: "c3d4e5f60718293a4b5c6d7e8f9012345678901a",
+      ratio: 0.42,
+      seeding_seconds: 5 * 86400,
+      hr: true,
+      hr_hours: 168,
+      deletable: false,
+      reason: "H&R 还差 2 天",
+    }),
+    itemTorrent({
+      torrent_id: "88517",
+      title: "The.Long.Night.S02E07.2160p.WEB-DL.H265-HHWEB",
+      episodes: "E07",
+      size: 7.2 * 1024 ** 3,
+      hash: "d4e5f60718293a4b5c6d7e8f9012345678901a2b",
+      state: "downloading",
+      percent: 63,
+      eta_seconds: 720,
+      ratio: 0.05,
+      deletable: false,
+      reason: "受保护：下载中",
+    }),
+  ],
+  recommendations: ITEM_RECS,
+  servers: [
+    {
+      server_id: 1,
+      name: "Jellyfin",
+      kind: "jellyfin",
+      synced_at: "2026-11-04T06:00:00Z",
+      have: true,
+      episodes: 17,
+      seasons: [
+        { n: 1, have: 12, total: 12 },
+        { n: 2, have: 5, total: 12 },
+      ],
+      open_url: "http://jellyfin.invalid/web/#/details?id=s1&serverId=jf",
+      removed: [{ id: 31, season: 2, episode: 3 }],
+    },
+  ],
+  /* 删除时按哪几条保护（M7，SeedGuard.Rules 照全局设置的默认值） */
+  protect_rules: ["下载中", "最短保种 24 小时", "H&R", "保留与保护标签"],
+  errors: [],
+};
+const ITEM_EPISODE_NAMES = ["归来", "旧案", "雨夜", "证人", "回声", "暗涌", "失踪者", "灯塔"];
+const ITEM_TV_S2 = {
+  tmdb_id: ITEM_TV_ID,
+  season: 2,
+  name: "第 2 季",
+  air_date: "2025-10-05",
+  subscription: {
+    id: 5,
+    status: "active",
+    follow: true,
+    airtime: true,
+    search_delay_hours: 2,
+    lock: { group: "HHWEB", resolution: "2160p" },
+  },
+  episodes: Array.from({ length: 12 }, (_, i) => {
+    const n = i + 1;
+    const base = { episode: n, name: ITEM_EPISODE_NAMES[i] ?? `第 ${n} 集` };
+    if (n <= 6)
+      return {
+        ...base,
+        air_date: `2025-10-${String(4 + n).padStart(2, "0")}`,
+        state: "library",
+        version: "2160p HHWEB",
+        size: (6.8 - n * 0.1) * 1024 ** 3,
+        ...(n === 3
+          ? { server_issue: { id: 31, server: "Jellyfin" } }
+          : { open_url: `http://jellyfin.invalid/web/#/details?id=e${n}&serverId=jf` }),
+      };
+    if (n === 7)
+      return {
+        ...base,
+        air_date: "2025-10-26",
+        state: "downloading",
+        site: "HDSky",
+        percent: 63,
+        eta_seconds: 720,
+      };
+    if (n === 8) return { ...base, air_date: "2025-10-27", state: "waiting_version" };
+    return { ...base, air_date: `2099-11-${String(n - 6).padStart(2, "0")}`, state: "upcoming" };
+  }),
+  errors: [],
+};
+const ITEM_TV_S1 = {
+  tmdb_id: ITEM_TV_ID,
+  season: 1,
+  name: "第 1 季",
+  air_date: "2025-03-14",
+  episodes: Array.from({ length: 12 }, (_, i) => ({
+    episode: i + 1,
+    name: `第 ${i + 1} 集`,
+    air_date: `2025-03-${String(14 + i).padStart(2, "0")}`,
+    state: "library",
+    version: "2160p HHWEB",
+    size: 7.2 * 1024 ** 3,
+  })),
+  errors: [],
+};
+/* 电影：没有季与集；「你的 NAS 上」第一行写版本；种子块叫「这部片的种子」 */
+const ITEM_MOVIE_ID = 693134;
+const ITEM_MOVIE = {
+  item: {
+    media_type: "movie",
+    tmdb_id: ITEM_MOVIE_ID,
+    title: "沙丘2",
+    original_title: "Dune: Part Two",
+    year: 2024,
+    date: "2024-02-27",
+    overview: "保罗·厄崔迪与契妮和弗雷曼人联手，向毁灭他家族的阴谋者复仇。",
+    genres: ["科幻", "冒险"],
+    countries: ["US"],
+    runtime: 166,
+    status: "Released",
+    rating: 8.2,
+    votes: 6210,
+    imdb_id: "tt15239678",
+    studios: ["Legendary Pictures"],
+    directors: ["丹尼斯·维伦纽瓦"],
+    cast: [
+      ["提莫西·查拉梅", "保罗·厄崔迪"],
+      ["赞达亚", "契妮"],
+      ["丽贝卡·弗格森", "杰西卡女士"],
+      ["哈维尔·巴登", "斯第加"],
+    ].map(([name, character], order) => ({ name, character, order })),
+  },
+  seasons: [],
+  nas: {
+    library: {
+      seasons: [],
+      files: 1,
+      size: 58.2 * 1024 ** 3,
+      libraries: ["电影库"],
+      version: "2160p FRDS",
+      record_id: 91,
+      missing: [],
+    },
+    seeding: { count: 1, hr_pending: 0, lowest_ratio: 1.02 },
+  },
+  subscriptions: [{ id: 9, status: "done", season: 0, follow: false }],
+  torrents: [
+    itemTorrent({
+      site: "CHDBits",
+      torrent_id: "402118",
+      title: "Dune.Part.Two.2024.2160p.UHD.BluRay.x265.10bit.HDR-FRDS",
+      season: 0,
+      version: "2160p FRDS",
+      size: 58.2 * 1024 ** 3,
+      hash: "e5f60718293a4b5c6d7e8f9012345678901a2b3c",
+      ratio: 1.02,
+      seeding_seconds: 30 * 86400,
+    }),
+  ],
+  recommendations: ITEM_RECS.slice(0, 6).map((r) => ({ ...r, media_type: "movie" })),
+  protect_rules: ["下载中", "最短保种 24 小时", "H&R", "保留与保护标签"],
+  errors: [],
+};
+/*
+ * 删除这一季的预览（POST /api/media/items/delete/preview，M7）：内容照画板 03 的片段「删除这一季」——
+ * 第 2 季库里 6 个硬链接共 41.2 GB；三个种子：OurBits E01–E04（qb，H&R 已满足）、HDSky E05–E06（tr，H&R 要求 7 天还差 2 天）、
+ * HDSky E07（qb，还在下载 63%）；追剧中的订阅。字段照 internal/media/subscribe/delete.go 的 DeletePreview。
+ */
+const deleteTorrent = (t, over) => ({ ...t, covers_more: false, shares: [], ...over });
+const ITEM_TV_DELETE_S2 = {
+  files: Array.from({ length: 6 }, (_, i) => ({
+    id: 301 + i,
+    path: `/media/tv/长夜将尽 (2025)/Season 02/长夜将尽 - S02E0${i + 1}.mkv`,
+    library: "剧集库",
+    mode: "hardlink",
+    existing: false,
+    size: (41.2 / 6) * 1024 ** 3,
+    season: 2,
+    episode: i + 1,
+    episode_end: 0,
+    state: "ours",
+    deletable: true,
+    downloader_id: 1,
+  })),
+  torrents: [
+    deleteTorrent(ITEM_TV.torrents[1], {}),
+    deleteTorrent(ITEM_TV.torrents[2], {
+      rule: "hr",
+      why: "H&R 要求做种 7 天，还差 2 天",
+      protection: "H&R：要求做种 168 小时，已做 120.0 小时",
+    }),
+    deleteTorrent(ITEM_TV.torrents[3], {
+      rule: "downloading",
+      why: "还在下载（63%）",
+      protection: "正在下载或校验（打开了「保护下载中的种子」）",
+    }),
+  ],
+  subscriptions: [ITEM_TV.subscriptions[0]],
+  issues: [],
+  errors: [],
+};
+
+/*
+ * 首页（画板 02、07，媒体中心 M8）：字段照 web/api_home.go 的 homeResponse，内容照画板：今天播出五张卡（还没播、已入库、下载中、缺、已入库），
+ * 待处理六类，继续观看三张，最近入库七张，这周还要播四条，NAS 状态三块盘、两台下载器、三条状态行。
+ * 时刻都按跑验收的那天算（今天的 20:00、明天起的几天），卡上「播出 6 小时」这类相对时间随运行的时刻变，验收只量几何。
+ * 图片路径都不给：无头 Chrome 连不上 TMDB，剧照与海报走占位。
+ */
+const HOME_DAY = (offset = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+const HOME_AT = (h, m = 0, offset = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  d.setHours(h, m, 0, 0);
+  return d.toISOString();
+};
+const HOME_TODAY = [
+  {
+    subscription_id: 11,
+    tmdb_id: 100088,
+    title: "长夜将尽",
+    season: 2,
+    episode: 9,
+    name: "第 9 集",
+    state: "upcoming",
+    air_at: HOME_AT(20),
+    search_at: HOME_AT(22),
+  },
+  {
+    subscription_id: 12,
+    tmdb_id: 200101,
+    title: "雾港",
+    season: 1,
+    episode: 14,
+    name: "回航",
+    state: "library",
+    air_at: HOME_AT(19, 30),
+    version: "2160p HHWEB",
+    open_url: "http://jellyfin.qa.test/web/#/details?id=ep14",
+  },
+  {
+    subscription_id: 13,
+    tmdb_id: 200102,
+    title: "北方来信",
+    season: 3,
+    episode: 5,
+    name: "冬至",
+    state: "downloading",
+    air_at: HOME_AT(18),
+    site: "HDSky",
+    percent: 63,
+    eta_seconds: 720,
+  },
+  {
+    subscription_id: 14,
+    tmdb_id: 200103,
+    title: "繁星之下",
+    season: 1,
+    episode: 21,
+    name: "星河",
+    state: "missing",
+    air_at: HOME_AT(12),
+  },
+  {
+    subscription_id: 15,
+    tmdb_id: 200104,
+    title: "第七个夏天",
+    season: 2,
+    episode: 10,
+    name: "回声",
+    state: "library",
+    air_at: HOME_AT(10),
+    version: "1080p ADWeb",
+    open_url: "http://jellyfin.qa.test/web/#/details?id=ep10",
+  },
+].map((e) => ({ media_type: "tv", air_date: HOME_DAY(), ...e }));
+const HOME_WEEK = [
+  {
+    subscription_id: 11,
+    tmdb_id: 100088,
+    title: "长夜将尽",
+    season: 2,
+    episode: 10,
+    offset: 1,
+    at: [20, 0],
+  },
+  {
+    subscription_id: 12,
+    tmdb_id: 200101,
+    title: "雾港",
+    season: 1,
+    episode: 15,
+    offset: 2,
+    at: [19, 30],
+  },
+  {
+    subscription_id: 13,
+    tmdb_id: 200102,
+    title: "北方来信",
+    season: 3,
+    episode: 6,
+    offset: 3,
+    at: [18, 0],
+  },
+  {
+    subscription_id: 15,
+    tmdb_id: 200104,
+    title: "第七个夏天",
+    season: 2,
+    episode: 11,
+    offset: 5,
+    at: [10, 0],
+  },
+].map(({ offset, at, ...e }) => ({
+  media_type: "tv",
+  state: "upcoming",
+  air_date: HOME_DAY(offset),
+  air_at: HOME_AT(at[0], at[1], offset),
+  ...e,
+}));
+/*
+ * 首页 NAS 概览与 NAS 监控（H2，规格 docs/design/home-nas-spec.md）：GET /api/nas 与 /api/home 的 nas 块。
+ * 字段照 internal/nas 的 Snapshot、Sample 与 web/api_nas.go 的 nasView、nasSourceView、homeNAS；
+ * 本机来源的 facets 原因照 internal/nas/local.go。
+ * 默认首页显示一台接入的 TrueNAS（三个存储池、八块硬盘、七条告警、六个应用），本机来源排在它前面（「另有 1 个来源」）；
+ * localStorage 设了 pt-fixture-home-nas=local 时只有本机来源，设了 pt-fixture-home-empty 时一个能显示的来源都没有。
+ * 时间按跑起来那一刻的「现在」写；页面里每取一次都按那时的「现在」整体平移（见 QUERY_AWARE 的 NAS_RESTAMP），
+ * 验收跑得久了「刚刚更新」也不会变成「3 分钟前更新」。
+ */
+const NAS_NOW = Date.now();
+const NAS_T = (sec) => new Date(NAS_NOW + sec * 1000).toISOString();
+const GiB = 1024 ** 3;
+const NAS_KINDS = [
+  {
+    name: "truenas",
+    label: "TrueNAS",
+    experimental: false,
+    username: "none",
+    secret: "required",
+    plain: "never",
+  },
+];
+/* 最近 30 拍（30 秒一拍，最后一拍就是快照）：CPU 17–41%、内存 61–63%、下行 3–8 MB/s、上行 1–2 MB/s */
+const nasHistory = (at, f) =>
+  Array.from({ length: 30 }, (_, i) => ({ at: NAS_T(at - 30 * (29 - i)), ...f(i) }));
+const NAS_TRUENAS_HISTORY = nasHistory(-20, (i) => ({
+  cpu: Math.round((27 + Math.sin(i / 3) * 9 + (i % 4)) * 10) / 10,
+  mem: Math.round((62 + Math.sin(i / 7)) * 10) / 10,
+  rx: Math.round((5.5 + Math.sin(i / 2.5) * 2.5) * 1024 ** 2),
+  tx: Math.round((1.5 + Math.cos(i / 4) * 0.5) * 1024 ** 2),
+}));
+const NAS_LOCAL_HISTORY = nasHistory(-12, (i) => ({
+  cpu: Math.round((12 + Math.sin(i / 2) * 5) * 10) / 10,
+  mem: Math.round((38 + Math.sin(i / 6)) * 10) / 10,
+  rx: 0,
+  tx: 0,
+}));
+const nasLast = (h) => h[h.length - 1];
+const NAS_FACETS_OK = Object.fromEntries(
+  ["system", "cpu", "cpu_temp", "memory", "network", "pools", "disks", "alerts", "apps"].map(
+    (k) => [k, { status: "ok" }],
+  ),
+);
+const NAS_TRUENAS_MEM = 64 * GiB;
+const NAS_TRUENAS_SNAP = {
+  at: NAS_T(-20),
+  system: {
+    hostname: "truenas",
+    platform: "TrueNAS SCALE",
+    version: "25.04.1",
+    model: "Intel Core i5-12400",
+    cores: 12,
+    uptime_seconds: 18 * 86400 + 18 * 3600 + 7 * 60,
+  },
+  cpu: {
+    percent: nasLast(NAS_TRUENAS_HISTORY).cpu,
+    iowait: 1.2,
+    load1: 3.7,
+    load5: 3.2,
+    load15: 2.9,
+    temp_c: 52,
+  },
+  memory: {
+    total: NAS_TRUENAS_MEM,
+    used: Math.round((NAS_TRUENAS_MEM * nasLast(NAS_TRUENAS_HISTORY).mem) / 100),
+    available:
+      NAS_TRUENAS_MEM - Math.round((NAS_TRUENAS_MEM * nasLast(NAS_TRUENAS_HISTORY).mem) / 100),
+  },
+  network: {
+    rx_bps: nasLast(NAS_TRUENAS_HISTORY).rx,
+    tx_bps: nasLast(NAS_TRUENAS_HISTORY).tx,
+    interfaces: ["enp3s0"],
+  },
+  /* 可用容量（根数据集的 used + available，不是 pool.query 的裸容量）：tank 已用 85%，到了「快满了」 */
+  pools: [
+    ["tank", 28.9, 24.7, 4],
+    ["fast", 1.8, 0.6, 2],
+    ["backup", 7.2, 3.3, 2],
+  ].map(([name, size, used, disks]) => ({
+    name,
+    status: "ONLINE",
+    healthy: true,
+    size: Math.round(size * TB),
+    used: Math.round(used * TB),
+    free: Math.round((size - used) * TB),
+    disks,
+  })),
+  /* sdc 52 °C 到了机械盘的提醒线；nvme1n1 读不到温度（没有 temp_c） */
+  disks: [
+    ["sda", "WDC WUH721816ALE6L4", "hdd", 16e12, 38, "tank"],
+    ["sdb", "WDC WUH721816ALE6L4", "hdd", 16e12, 41, "tank"],
+    ["sdc", "WDC WUH721816ALE6L4", "hdd", 16e12, 52, "tank"],
+    ["sdd", "WDC WUH721816ALE6L4", "hdd", 16e12, 40, "tank"],
+    ["nvme0n1", "Samsung SSD 980 PRO 1TB", "nvme", 1e12, 47, "fast"],
+    ["nvme1n1", "Samsung SSD 980 PRO 1TB", "nvme", 1e12, undefined, "fast"],
+    ["sde", "ST8000VN004", "hdd", 8e12, 36, "backup"],
+    ["sdf", "ST8000VN004", "hdd", 8e12, 37, "backup"],
+  ].map(([name, model, kind, size, temp, pool]) => ({
+    name,
+    model,
+    kind,
+    size,
+    ...(temp === undefined ? {} : { temp_c: temp }),
+    pool,
+  })),
+  alerts: [
+    ["critical", "Rsync 任务「每日备份」失败", -2 * 3600],
+    ["critical", "应用目录同步失败", -5 * 3600],
+    ["info", "Rsync 任务「相册」成功", -6 * 3600],
+    ["info", "应用 jellyfin 有新版本", -26 * 3600],
+    ["warning", "存储池 tank 已用 85%", -30 * 3600],
+    ["info", "有可用的系统更新", -3 * 86400],
+    ["info", "Scrub 在存储池 backup 上完成", -4 * 86400],
+  ].map(([level, title, at]) => ({ level, title, at: NAS_T(at) })),
+  apps: { running: 5, total: 6, upgradable: 1 },
+  facets: NAS_FACETS_OK,
+};
+const NAS_LOCAL_MEM = 32 * GiB;
+const NAS_LOCAL_SNAP = {
+  at: NAS_T(-12),
+  system: {
+    hostname: "pt-tools-host",
+    platform: "Linux",
+    version: "6.12.15",
+    model: "AMD EPYC 7R13 Processor",
+    cores: 8,
+    uptime_seconds: 3 * 86400 + 5 * 3600,
+  },
+  cpu: {
+    percent: nasLast(NAS_LOCAL_HISTORY).cpu,
+    iowait: 0.4,
+    load1: 1.0,
+    load5: 0.8,
+    load15: 0.7,
+    temp_c: 48,
+  },
+  memory: {
+    total: NAS_LOCAL_MEM,
+    used: Math.round((NAS_LOCAL_MEM * nasLast(NAS_LOCAL_HISTORY).mem) / 100),
+    available: NAS_LOCAL_MEM - Math.round((NAS_LOCAL_MEM * nasLast(NAS_LOCAL_HISTORY).mem) / 100),
+  },
+  network: { rx_bps: 0, tx_bps: 0, interfaces: null },
+  pools: null,
+  disks: null,
+  alerts: null,
+  apps: { running: 0, total: 0, upgradable: 0 },
+  facets: {
+    ...NAS_FACETS_OK,
+    network: {
+      status: "unsupported",
+      reason: "本机来源不读网卡：容器里的网卡计数只有容器自己的流量，首页这一格用下载器的速度",
+    },
+    pools: {
+      status: "unsupported",
+      reason: "本机来源读不到存储池健康、硬盘与告警，接入 NAS 以后才有",
+    },
+    disks: {
+      status: "unsupported",
+      reason: "本机来源读不到存储池健康、硬盘与告警，接入 NAS 以后才有",
+    },
+    alerts: {
+      status: "unsupported",
+      reason: "本机来源读不到存储池健康、硬盘与告警，接入 NAS 以后才有",
+    },
+    apps: { status: "unsupported", reason: "本机来源读不到 NAS 上的应用，接入 NAS 以后才有" },
+  },
+};
+const NAS_LOCAL = {
+  id: "local",
+  name: "本机",
+  kind: "local",
+  enabled: true,
+  experimental: false,
+  has_secret: false,
+  insecure_ack: false,
+  state: "ok",
+  last_ok_at: NAS_T(-12),
+  snapshot: NAS_LOCAL_SNAP,
+  history: NAS_LOCAL_HISTORY,
+};
+const NAS_TRUENAS = {
+  id: "1",
+  name: "家里的 TrueNAS",
+  kind: "truenas",
+  enabled: true,
+  experimental: false,
+  url: "https://truenas.qa.test",
+  has_secret: true,
+  tls_pin_sha256: "9465" + "0".repeat(56) + "8985",
+  insecure_ack: false,
+  state: "ok",
+  last_ok_at: NAS_T(-20),
+  snapshot: NAS_TRUENAS_SNAP,
+  history: NAS_TRUENAS_HISTORY,
+};
+const nasView = (sources, home, over = {}) => ({
+  home_source: "",
+  home,
+  local_enabled: true,
+  local_supported: true,
+  kinds: NAS_KINDS,
+  sources,
+  ...over,
+});
+/* 同 web/api_nas.go 的 homeNASBlock：首页显示的那个来源，其余能用的来源只给名字与状态 */
+const homeNasOf = (view) => ({
+  source: view.sources.find((s) => s.id === view.home) ?? null,
+  others: view.sources
+    .filter((s) => s.id !== view.home && s.enabled && s.state !== "unsupported")
+    .map(({ id, name, kind, state }) => ({ id, name, kind, state })),
+});
+const NAS_VIEW = nasView([NAS_LOCAL, NAS_TRUENAS], "1");
+const NAS_VIEW_LOCAL = nasView([NAS_LOCAL], "local");
+/* 本机来源关着、也没接入来源（空态那一趟）：首页是「还没有 NAS 监控来源」那张卡 */
+const NAS_VIEW_EMPTY = nasView(
+  [
+    {
+      ...NAS_LOCAL,
+      enabled: false,
+      state: "disabled",
+      last_ok_at: undefined,
+      snapshot: null,
+      history: [],
+    },
+  ],
+  "",
+  { local_enabled: false },
+);
+
+const HOME = {
+  at: HOME_AT(14, 20),
+  calendar: { data: { today: HOME_TODAY, week: HOME_WEEK, errors: [], subscriptions: 9 } },
+  todo: {
+    data: {
+      groups: [
+        {
+          kind: "organize_failed",
+          count: 2,
+          label: "整理失败 2",
+          target: "/media/history?status=failed",
+          tone: "dang",
+        },
+        {
+          kind: "recognize",
+          count: 1,
+          label: "识别不出 1",
+          target: "/media/history?kind=recognize",
+          tone: "warn",
+        },
+        {
+          kind: "waiting_version",
+          count: 1,
+          label: "等版本 1",
+          target: "/media/subscriptions?state=waiting_version",
+          tone: "primary",
+        },
+        {
+          kind: "attendance_failed",
+          count: 1,
+          label: "PTTime 签到失败",
+          target: "/attendance",
+          tone: "warn",
+        },
+        {
+          kind: "server_removed",
+          count: 1,
+          label: "媒体服务器里删了 1 部",
+          target: "drawer",
+          tone: "info",
+        },
+        {
+          kind: "backup",
+          count: 1,
+          label: "备份 3 天没成功",
+          target: "/global?section=backup",
+          tone: "warn",
+        },
+      ],
+      items: [
+        {
+          kind: "organize_failed",
+          title: "雾港 S01E13",
+          detail: "目标已有文件，不会覆盖",
+          target: "/media/history?status=failed",
+          media_type: "tv",
+          tmdb_id: 200101,
+          season: 1,
+          episode: 13,
+        },
+        {
+          kind: "organize_failed",
+          title: "沙丘：第二部",
+          detail: "pt-tools 里找不到这个文件（Docker 里要把下载目录挂进容器）",
+          target: "/media/history?status=failed",
+          media_type: "movie",
+          tmdb_id: 693134,
+        },
+        {
+          kind: "recognize",
+          title: "The.Long.Night.S02E07.2160p.WEB-DL",
+          detail: "没识别出来",
+          target: "/media/history?kind=recognize",
+        },
+        {
+          kind: "waiting_version",
+          title: "长夜将尽 第 2 季",
+          detail: "第 8 集在等锁住的版本",
+          target: "/media/item/tv/100088?from=home&season=2&episode=8",
+          media_type: "tv",
+          tmdb_id: 100088,
+          season: 2,
+          episode: 8,
+        },
+        {
+          kind: "attendance_failed",
+          title: "PTTime",
+          detail: "签到页返回 502",
+          target: "/attendance",
+        },
+        {
+          kind: "server_removed",
+          title: "北方来信 第 3 季",
+          detail: "S03E02 在 Jellyfin 里被删了",
+          target: "drawer",
+          issue_ids: [31],
+          media_type: "tv",
+          tmdb_id: 200102,
+          season: 3,
+          episodes: [2],
+        },
+        {
+          kind: "backup",
+          title: "备份 3 天没成功",
+          detail: "最近一次失败：/backup 没有写权限",
+          target: "/global?section=backup",
+        },
+      ],
+    },
+  },
+  resume: {
+    data: [
+      {
+        server_id: 1,
+        name: "Jellyfin",
+        kind: "jellyfin",
+        user: "admin",
+        items: [
+          {
+            server_id: 1,
+            item_id: "r1",
+            media_type: "tv",
+            tmdb_id: 200101,
+            title: "雾港",
+            season: 1,
+            episode: 13,
+            percent: 62,
+            remaining_seconds: 18 * 60,
+            open_url: "http://jellyfin.qa.test/web/#/details?id=r1",
+          },
+          {
+            server_id: 1,
+            item_id: "r2",
+            media_type: "movie",
+            tmdb_id: 693134,
+            title: "沙丘：第二部",
+            percent: 45,
+            remaining_seconds: 72 * 60,
+            open_url: "http://jellyfin.qa.test/web/#/details?id=r2",
+          },
+          {
+            server_id: 1,
+            item_id: "r3",
+            media_type: "tv",
+            tmdb_id: 100088,
+            title: "长夜将尽",
+            season: 2,
+            episode: 5,
+            percent: 30,
+            remaining_seconds: 31 * 60,
+            open_url: "http://jellyfin.qa.test/web/#/details?id=r3",
+          },
+        ],
+      },
+    ],
+  },
+  recent: {
+    data: {
+      today_count: 7,
+      items: [
+        ["tv", 200101, "雾港", 1, 14, "2160p"],
+        ["tv", 200104, "第七个夏天", 2, 10, "1080p"],
+        ["movie", 693134, "沙丘：第二部", 0, 0, "Remux"],
+        ["tv", 100088, "长夜将尽", 2, 6, "2160p"],
+        ["movie", 980477, "哪吒之魔童闹海", 0, 0, "2160p"],
+        ["tv", 200102, "北方来信", 3, 4, "2160p"],
+        ["tv", 200105, "群山回响", 1, 1, "1080p"],
+      ].map(([media_type, tmdb_id, title, season, episode, quality], i) => ({
+        media_type,
+        tmdb_id,
+        title,
+        ...(season ? { season, episode } : {}),
+        quality,
+        source: "pt-tools",
+        at: HOME_AT(13 - i),
+      })),
+    },
+  },
+  downloaders: {
+    data: {
+      downloaders: [
+        {
+          id: 1,
+          name: "qb",
+          type: "qbittorrent",
+          online: true,
+          down: 3.0 * 1024 ** 2,
+          up: 15.2 * 1024 ** 2,
+          downloading: 4,
+          seeding: 980,
+        },
+        {
+          id: 2,
+          name: "tr",
+          type: "transmission",
+          online: true,
+          down: 0.2 * 1024 ** 2,
+          up: 3.4 * 1024 ** 2,
+          downloading: 0,
+          seeding: 304,
+        },
+      ],
+      down: 3.2 * 1024 ** 2,
+      up: 18.6 * 1024 ** 2,
+      downloading: 4,
+      seeding: 1284,
+      speed_history: Array.from({ length: 20 }, (_, i) => ({
+        at: HOME_AT(14, i),
+        down: Math.round((2 + Math.sin(i / 2) * 1.5) * 1024 ** 2),
+        up: Math.round((15 + Math.cos(i / 3) * 4) * 1024 ** 2),
+        answered: i === 6 ? 1 : 2,
+        total: 2,
+      })),
+    },
+  },
+  storage: {
+    data: [
+      {
+        kind: "download",
+        label: "下载盘 · qb、tr",
+        path: "/downloads",
+        free: 1.2 * TB,
+        total: 8 * TB,
+        low: false,
+      },
+      {
+        kind: "library",
+        label: "媒体库 · 电影",
+        path: "/media",
+        free: 2.4 * TB,
+        total: 12 * TB,
+        low: false,
+      },
+      {
+        kind: "library",
+        label: "媒体库 · 剧集",
+        path: "/tv",
+        free: 15 * 1024 ** 3,
+        total: 128 * 1024 ** 3,
+        low: true,
+      },
+    ],
+  },
+  status: {
+    data: {
+      health: {
+        at: HOME_AT(8),
+        ok: 13,
+        warn: 1,
+        fail: 0,
+        skip: 2,
+        problem: "媒体库「电影」：/media：和下载器「qb」的 /downloads 不在同一个文件系统",
+      },
+      backup: {
+        enabled: true,
+        last_at: HOME_AT(4, 30),
+        last_ok_at: HOME_AT(4, 30, -3),
+        error: "/backup 没有写权限",
+        late: true,
+        days: 3,
+      },
+      servers: [
+        {
+          id: 1,
+          name: "家里",
+          kind: "jellyfin",
+          version: "12.2",
+          online: true,
+          indexed_at: HOME_AT(14),
+          movies: 812,
+          series: 236,
+          episodes: 5120,
+          open_url: "http://jellyfin.qa.test/web/",
+        },
+      ],
+    },
+  },
+  nas: { data: homeNasOf(NAS_VIEW) },
+};
+
+/*
+ * 首页的空态（localStorage 设了 pt-fixture-home-empty 时回它，体检也回「没体检过」）：没有订阅、没有待处理、
+ * 没连媒体服务器、没有下载器与盘、没体检过、定时备份关着。不放进 emptyStubScript：那一层装上以后一直在，后面的首页那一趟就量不到有数据的样子了。
+ */
+const HOME_EMPTY = {
+  at: HOME_AT(14, 20),
+  calendar: { data: { today: [], week: [], errors: [], subscriptions: 0 } },
+  todo: { data: { groups: [], items: [] } },
+  resume: { data: [] },
+  recent: { data: { today_count: 0, items: [] } },
+  downloaders: {
+    data: { downloaders: [], down: 0, up: 0, downloading: 0, seeding: 0, speed_history: [] },
+  },
+  storage: { data: [] },
+  status: {
+    data: { health: null, backup: { enabled: false, late: false, days: -1 }, servers: [] },
+  },
+  nas: { data: homeNasOf(NAS_VIEW_EMPTY) },
+};
+
+/* 只有本机来源的那一趟（localStorage 设了 pt-fixture-home-nas=local）：别的块同 HOME，NAS 概览画本机 */
+const HOME_LOCAL = { ...HOME, nas: { data: homeNasOf(NAS_VIEW_LOCAL) } };
+
+/* 系统体检（M8）：一次体检的结果，十组都有，失败、提醒、跳过各几项（字段照 internal/health 的 Report） */
+const HEALTH_REPORT = {
+  at: HOME_AT(8),
+  duration_ms: 3240,
+  items: [
+    ["tmdb", "tmdb", "TMDB 接口", "ok", "用时 320 毫秒"],
+    ["tmdb:image", "tmdb", "TMDB 图片", "ok", "image.tmdb.org"],
+    ["site:hdsky", "sites", "HDSky", "ok", "登录正常（11-04 07:58 探测）"],
+    [
+      "site:pttime",
+      "sites",
+      "PTTime",
+      "warn",
+      "Cookie 过期（11-04 07:40 探测）",
+      "Cookie 过期了：在浏览器里重新登录站点，再用扩展同步 Cookie，或在站点设置里换上新的",
+    ],
+    ["site:ourbits", "sites", "OurBits", "skip", "关了登录探测"],
+    ["downloader:1", "downloaders", "qb", "ok", "v5.0.4 · 剩余 1.20 TiB"],
+    [
+      "downloader:2",
+      "downloaders",
+      "tr",
+      "fail",
+      "连不上：dial tcp 192.0.2.10:9091: connect: connection refused",
+      "检查下载器是不是开着，以及地址、用户名与密码",
+    ],
+    [
+      "server:1",
+      "servers",
+      "家里",
+      "ok",
+      "Jellyfin 12.2 · 索引 812 部电影、236 部剧，11-04 14:00 同步",
+    ],
+    ["path:1", "paths", "下载器「qb」的路径映射", "ok", "/downloads → /data/downloads"],
+    [
+      "library:1",
+      "libraries",
+      "媒体库「电影」",
+      "warn",
+      "/media：和下载器「qb」的 /downloads 不在同一个文件系统",
+      "存在那里的种子硬链接不进这个库：把下载目录和库放在同一块盘、同一个挂载里，或者把这个库的整理方式改成复制",
+    ],
+    [
+      "disk:/data",
+      "disks",
+      "数据目录、备份目录",
+      "ok",
+      "/config/.pt-tools：剩余 86.0 GB，共 128.0 GB",
+    ],
+    ["disk:/media", "disks", "媒体库「电影」", "ok", "/media：剩余 2.40 TB，共 12.00 TB"],
+    ["time", "time", "本机时间", "ok", "和 TMDB 的时间相差 1 秒"],
+    [
+      "backup",
+      "backup",
+      "备份",
+      "warn",
+      "最近一次备份（11-04 04:30）失败：/backup 没有写权限",
+      "在「全局设置 → 备份与恢复」里看原因，改好以后点「立即备份」",
+    ],
+    ["secret", "secret", "加密密钥", "ok", "密钥在 /config/.pt-tools/secret.key"],
+  ].map(([key, group, title, status, detail, hint]) => ({
+    key,
+    group,
+    title,
+    status,
+    detail,
+    ...(hint ? { hint } : {}),
+  })),
+  ok: 10,
+  warn: 3,
+  fail: 1,
+  skip: 1,
+};
 
 const SUPPORTED = SITES.map(([site], i) => ({
   id: site.toLowerCase(),
@@ -318,28 +1640,73 @@ const CHANNELS = [
   },
 ];
 
-const BINDINGS = [
-  {
-    id: 1,
-    channel_user_id: "123456",
-    channel_type: "telegram",
-    label: "我自己",
-    admin: true,
-    allowed: true,
-    bind_code: "",
-    bound_at: "2026-09-10T00:00:00Z",
-  },
-  {
-    id: 2,
-    channel_user_id: "",
-    channel_type: "qq_onebot",
-    label: "",
-    admin: false,
-    allowed: false,
-    bind_code: "K3F9Q2",
-    expires_at: "2026-09-19T12:00:00Z",
-  },
-];
+/* 照真实接口（web/api_chatops.go 的 listBindings）：已绑定的行与没用掉的绑定码分两组 */
+const BINDINGS = {
+  bindings: [
+    {
+      id: 1,
+      conf_id: 1,
+      channel_user_id: "123456",
+      channel_type: "telegram",
+      label: "我自己",
+      reply_lang: "zh",
+      admin: true,
+      allowed: true,
+      created_at: "2026-09-10T00:00:00Z",
+      last_active: "2026-09-18T09:30:00Z",
+    },
+  ],
+  pending: [
+    {
+      id: 7,
+      code: "K3F9Q2MX",
+      conf_id: 2,
+      label: "",
+      created_at: "2026-09-18T11:55:00Z",
+      expires_at: "2099-09-19T12:00:00Z",
+    },
+  ],
+};
+
+/* 绑定页「通道」一栏（internal/app/binding_channels.go 的 ChannelBindingView） */
+const BINDING_CHANNELS = {
+  channels: [
+    {
+      conf_id: 1,
+      name: "主 Telegram",
+      channel_type: "telegram",
+      enabled: true,
+      runtime_state: "connected",
+      notify_target: "123456",
+      notify_via: "default_chat_id",
+      users: [
+        {
+          user_id: "123456",
+          roles: ["admin"],
+          bound: true,
+          binding_id: 1,
+          last: { command: "status", result: "success", at: "2026-09-18T09:30:00Z" },
+        },
+        {
+          user_id: "7788990011",
+          roles: ["allowed"],
+          bound: false,
+          last: { command: "help", result: "denied:not_bound", at: "2026-09-18T10:02:00Z" },
+        },
+      ],
+    },
+    {
+      conf_id: 2,
+      name: "QQ 小号",
+      channel_type: "qq_onebot",
+      enabled: true,
+      runtime_state: "running",
+      notify_target: "10001",
+      notify_via: "admin",
+      users: [{ user_id: "10001", roles: ["admin"], bound: false }],
+    },
+  ],
+};
 
 const DOWNLOADERS = [
   {
@@ -402,9 +1769,181 @@ const HUB_TORRENTS = Array.from({ length: 12 }, (_, i) => ({
   eta: 600 + i * 30,
 }));
 
+const GB = 1024 ** 3;
+/** 每日快照算出来的走势与周期增量（/api/v2/userinfo/trends、summary）：8 天，按站点量级给出 */
+const TREND_DATES = Array.from(
+  { length: 8 },
+  (_, i) => `2026-09-${String(19 + i).padStart(2, "0")}`,
+);
+const TRENDS = {
+  days: 8,
+  from: TREND_DATES[0],
+  to: TREND_DATES.at(-1),
+  dates: TREND_DATES,
+  sites: Object.fromEntries(
+    SITES.map(([site, , up], s) => [
+      site,
+      TREND_DATES.map((date, d) => ({
+        date,
+        uploaded: Math.round(up * GB * (0.6 + ((d * 7 + s * 3) % 9) / 10)),
+        downloaded: Math.round(up * GB * 0.08),
+        bonus: 1200 + d * 40,
+      })),
+    ]),
+  ),
+};
+TRENDS.totals = TREND_DATES.map((date, d) =>
+  Object.values(TRENDS.sites).reduce(
+    (acc, series) => ({
+      date,
+      uploaded: acc.uploaded + series[d].uploaded,
+      downloaded: acc.downloaded + series[d].downloaded,
+      bonus: acc.bonus + series[d].bonus,
+    }),
+    { date, uploaded: 0, downloaded: 0, bonus: 0 },
+  ),
+);
+const SUMMARY_SITES = Object.entries(TRENDS.sites).map(([site, series]) => ({
+  site,
+  from: TREND_DATES[0],
+  to: TREND_DATES.at(-1),
+  uploaded: series.slice(-7).reduce((n, p) => n + p.uploaded, 0),
+  downloaded: series.slice(-7).reduce((n, p) => n + p.downloaded, 0),
+  bonus: series.slice(-7).reduce((n, p) => n + p.bonus, 0),
+  hasBaseline: true,
+  negative: false,
+}));
+const SUMMARY = {
+  range: "7d",
+  from: TREND_DATES[1],
+  to: TREND_DATES.at(-1),
+  sites: SUMMARY_SITES,
+  totalUploaded: SUMMARY_SITES.reduce((n, d) => n + d.uploaded, 0),
+  totalDownloaded: SUMMARY_SITES.reduce((n, d) => n + d.downloaded, 0),
+  totalBonus: SUMMARY_SITES.reduce((n, d) => n + d.bonus, 0),
+};
+
+/*
+ * 单站 30 天历史（/api/v2/userinfo/history?site=&days=30，site/v2/userinfo_history.go 的 DailyPoint）。
+ * 第 3 个站点每 3 天才有一份快照（spanDays=3），用来量「缺快照的日子补 0」那条走势；
+ * 第一份快照没有更早的可比，spanDays=0、增量记 0。按查询串的 site 选，见 QUERY_AWARE。
+ */
+const HISTORY_DATES = Array.from({ length: 30 }, (_, i) => {
+  const d = new Date(Date.UTC(2026, 7, 28 + i));
+  return d.toISOString().slice(0, 10);
+});
+const HISTORY = {
+  bySite: Object.fromEntries(
+    SITES.map(([site, , up, down, , seeding], s) => {
+      const step = s === 2 ? 3 : 1;
+      const dates = HISTORY_DATES.filter((_, i) => i % step === 0);
+      const deltas = dates.map((_, i) =>
+        i === 0 ? 0 : Math.round(up * GB * step * (0.5 + ((i * 5 + s) % 7) / 10)),
+      );
+      /* 最后一个点等于聚合接口的当前值（up × TB），往前倒推：两个接口说的是同一个账号 */
+      const current = AGGREGATED.perSiteStats.find((r) => r.site === site);
+      let uploaded = Math.round(current ? current.uploaded : up * TB);
+      let downloaded = Math.round(current ? current.downloaded : down * TB);
+      let bonus = Math.round(current ? current.bonus : 100000);
+      const points = [];
+      for (let i = dates.length - 1; i >= 0; i--) {
+        points.unshift({
+          date: dates[i],
+          uploaded,
+          downloaded,
+          bonus,
+          seeding,
+          deltaUploaded: deltas[i],
+          deltaDownloaded: i === 0 ? 0 : Math.round(GB * step),
+          deltaBonus: i === 0 ? 0 : 900,
+          spanDays: i === 0 ? 0 : step,
+          negative: false,
+        });
+        uploaded -= deltas[i];
+        downloaded -= i === 0 ? 0 : Math.round(GB * step);
+        bonus -= i === 0 ? 0 : 900;
+      }
+      return [site, { site, days: 30, from: HISTORY_DATES[0], to: HISTORY_DATES.at(-1), points }];
+    }),
+  ),
+};
+
+/** 签到当天：2026-09-26 08:00（Asia/Shanghai）起的 Unix 秒 */
+const ATT_DAY = "2026-09-26";
+const ATT_T0 = Date.UTC(2026, 8, 26, 0, 0, 0) / 1000;
+const ATT_UNSUPPORTED = {
+  "M-Team": "该站点的架构暂不支持签到",
+  HDSky: "签到需要验证码，暂不支持自动签到",
+};
+const ATTENDANCE = SITES.map(([site], i) => {
+  const base = {
+    site_name: site,
+    site_enabled: i % 7 !== 6,
+    attendance_enabled: false,
+    supported: true,
+    day: ATT_DAY,
+    status: "",
+    attempts: 0,
+  };
+  if (ATT_UNSUPPORTED[site]) {
+    return { ...base, supported: false, unsupported_reason: ATT_UNSUPPORTED[site] };
+  }
+  const scheduled = ATT_T0 + 3600 + i * 420;
+  switch (i % 5) {
+    case 0:
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "signed",
+        attempts: 1,
+        message: "签到成功，获得 10 魔力",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 2,
+      };
+    case 1:
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "already",
+        attempts: 1,
+        message: "今天已经签到过了",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 3,
+      };
+    case 2:
+      /* 第一次失败后等 10 分钟重试 */
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "pending",
+        attempts: 1,
+        last_error: "签到页返回 502",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 1,
+        next_attempt_at: scheduled + 601,
+      };
+    case 3:
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "failed",
+        attempts: 3,
+        last_error: "签到页返回 502",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 2401,
+      };
+    default:
+      /* 没开自动签到、今天也没手动签过：没有当天记录 */
+      return base;
+  }
+});
+
 /** 路由（去掉查询串）→ 响应体。第一个前缀命中即用。 */
 export const FIXTURES = [
   ["/api/v2/userinfo/aggregated", AGGREGATED],
+  ["/api/v2/userinfo/trends", TRENDS],
+  ["/api/v2/userinfo/summary", SUMMARY],
+  ["/api/v2/userinfo/history", HISTORY],
   /* 单站点详情要排在列表之前：前缀匹配第一个命中即用 */
   ...AGGREGATED.perSiteStats.map((row) => [`/api/v2/userinfo/sites/${row.site}`, row]),
   /* getSites 回的是 UserInfoResponse[]，不是站点名数组 */
@@ -463,6 +2002,17 @@ export const FIXTURES = [
       })),
     },
   ],
+  /*
+   * 签到（M1c）：列表回 SiteAttendanceResponse[]（web/api_site_attendance.go 的 buildAttendanceResponse）。
+   * 漏了它时 `/api/sites/attendance` 命中下面的 `/api/sites`，拿到站点配置对象，
+   * 站点列表 `for…of` 抛「object is not iterable」、详情页 `.find` 不是函数。
+   * settings 是 attendance 的子路径，要排在它前面。
+   * 值照后端语义造：能否签到由站点定义决定（M-Team 是 mTorrent 架构、HDSky 要验证码，都不支持，
+   * 不支持的站点没有当天记录、status 为空）；status 取 "" / pending / signed / already / failed；
+   * 时间戳都落在 day 当天（2026-09-26，Asia/Shanghai），重试中的 pending 带着上一次的错误与晚于首次计划的下次时刻。
+   */
+  ["/api/sites/attendance/settings", { window_start: "08:00", window_end: "10:00" }],
+  ["/api/sites/attendance", ATTENDANCE],
   /* 站点详情取的是单个站点：必须排在 /api/sites 之前，前缀匹配是第一个命中即用 */
   ...SITES.map(([site]) => [`/api/sites/${site}`, SITE_CONFIGS[site]]),
   ["/api/sites", SITE_CONFIGS],
@@ -493,8 +2043,12 @@ export const FIXTURES = [
    * 否则 `/api/chatops/notifications/1` 会拿到列表那个数组，详情页把数组当对象读，
    * 画出来就是「未命名通道 / ID -」—— 画板 23 的内容等于没进验收。
    */
+  ["/api/chatops/notifications/stats", NOTIFY_STATS],
+  ["/api/chatops/notifications/recent", { items: NOTIFY_RECENT }],
   ["/api/chatops/notifications/1", CHANNELS[0]],
   ["/api/chatops/notifications", CHANNELS],
+  /* 子路径排在 /api/chatops/bindings 之前：前缀匹配，先命中先用 */
+  ["/api/chatops/bindings/channels", BINDING_CHANNELS],
   ["/api/chatops/bindings", BINDINGS],
   /* 必须排在 /api/filter-rules 之前：前缀匹配第一个命中即用 */
   ["/api/filter-rules/hits", { hits: { 1: 128, 2: 46, 3: 12, 4: 3, 6: 1 } }],
@@ -510,6 +2064,44 @@ export const FIXTURES = [
     },
   ],
   ["/api/v2/search/sites", SITES.map(([s]) => s)],
+  ["/api/media/search", ENTRY_SEARCH],
+  /* 首页与系统体检（M8）：POST /api/system/check（立即体检）也回这一份 */
+  ["/api/home", HOME],
+  /* NAS 监控（H2）：首页的 NAS 概览先用 /api/home 的 nas 块，取到这一份以后用它（写操作是 PUT/DELETE，照常打到后端） */
+  ["/api/nas", NAS_VIEW],
+  ["/api/system/check", { report: HEALTH_REPORT }],
+  /* 条目详情（M3）：季的路径是条目路径的子路径，前缀匹配先命中先用，要排在前面 */
+  /* 删除预览（M7）：只给第 2 季的（画板 03 的片段）；执行删除不拦，验收不点「删除」 */
+  ["/api/media/items/delete/preview", ITEM_TV_DELETE_S2],
+  [`/api/media/items/tv/${ITEM_TV_ID}/seasons/2`, ITEM_TV_S2],
+  [`/api/media/items/tv/${ITEM_TV_ID}/seasons/1`, ITEM_TV_S1],
+  [`/api/media/items/tv/${ITEM_TV_ID}`, ITEM_TV],
+  [`/api/media/items/movie/${ITEM_MOVIE_ID}`, ITEM_MOVIE],
+  /* 黑名单与等免费（媒体中心 M2b）：字段照 models/media_block.go、web/api_free_watch.go */
+  [
+    "/api/media/blocks",
+    {
+      items: [
+        {
+          id: 7,
+          site_name: "HDFans",
+          torrent_id: "66120",
+          media_type: "tv",
+          tmdb_id: 231620,
+          season: 2,
+          media_title: "长夜将尽 第 2 季",
+          title: "Chang.Ye.Jiang.Jin.S02E08.2160p.WEB-DL-XXWEB",
+          reason: "音画不同步",
+          created_at: "2025-11-21T12:00:00Z",
+        },
+      ],
+    },
+  ],
+  /* 能等免费的站点（启用着、读得了种子详情）：按条目搜索假数据里的站点都能 */
+  [
+    "/api/free-watches/sites",
+    { sites: ["CHDBits", "HDFans", "HDHome", "HDSky", "OurBits", "PTHome", "PTTime"] },
+  ],
   ["/api/v2/sites/supported", SITES.map(([s2]) => s2)],
   ["/api/v2/sites/categories", {}],
   ["/api/v2/sites/levels", {}],
@@ -730,8 +2322,12 @@ export function emptyStubScript() {
   const EMPTY = [
     ["/api/tasks", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/downloader-torrents", { items: [], total: 0, page: 1, page_size: 100, failures: [] }],
+    /* 子路径排在 /api/chatops/notifications 之前：前缀匹配，先命中先用 */
+    ["/api/chatops/notifications/stats", { since: "2026-09-12T00:00:00Z", days: 7, channels: [] }],
+    ["/api/chatops/notifications/recent", { items: [] }],
     ["/api/chatops/notifications", []],
-    ["/api/chatops/bindings", []],
+    ["/api/chatops/bindings/channels", { channels: [] }],
+    ["/api/chatops/bindings", { bindings: [], pending: [] }],
     ["/api/chatops/audit", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/chatops/rss-notifications", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/filter-rules", []],
@@ -744,6 +2340,8 @@ export function emptyStubScript() {
      * 「object is not iterable」。这条坑这份文件里已经踩过三次（日志、通道详情、这里）。
      */
     ["/api/sites/login-state", []],
+    ["/api/sites/attendance/settings", { window_start: "08:00", window_end: "10:00" }],
+    ["/api/sites/attendance", []],
     ["/api/sites/definitions", []],
     ["/api/sites/templates", []],
     ["/api/sites/downloader-summary", { sites: [] }],
@@ -786,7 +2384,37 @@ export function emptyStubScript() {
  * 通道走别名归一，见 internal/app/audit_service.go）。它测的是前端有没有把对的参数发出去、
  * 并把回来的行画对；服务端那一侧由 Go 测试用生产值覆盖。
  */
+/*
+ * NAS 的时间整体平移到「现在」：快照、最后成功、下次重试、历史与告警的时间都加上「现在 − 写假数据那一刻」。
+ * 只动 at、last_ok_at、next_try_at 三个键；/api/home 只动 nas 那一块（别的块的时间按今天几点写，不平移）。
+ */
+const NAS_RESTAMP = (pick) => `(body) => {
+    const shift = Date.now() - ${NAS_NOW};
+    const keys = ['at', 'last_ok_at', 'next_try_at'];
+    const walk = (v, k) => {
+      if (Array.isArray(v)) return v.map((x) => walk(x, ''));
+      if (v && typeof v === 'object') {
+        const o = {};
+        for (const [kk, x] of Object.entries(v)) o[kk] = walk(x, kk);
+        return o;
+      }
+      if (typeof v === 'string' && keys.includes(k)) {
+        const t = Date.parse(v);
+        return Number.isNaN(t) ? v : new Date(t + shift).toISOString();
+      }
+      return v;
+    };
+    ${pick}
+  }`;
+
 const QUERY_AWARE = {
+  "/api/nas": NAS_RESTAMP("return walk(body, '');"),
+  "/api/home": NAS_RESTAMP("return Object.assign({}, body, { nas: walk(body.nas, '') });"),
+  /* 与 web/api_userinfo_history.go 同义：按 site 回该站的历史；没有快照的站点回空 points */
+  "/api/v2/userinfo/history": `(body, params) => {
+    const site = params.get('site') ?? '';
+    return body.bySite[site] ?? { site, days: 30, from: '', to: '', points: [] };
+  }`,
   "/api/chatops/audit": `(body, params) => {
     const alias = { qq: 'qq_onebot', wecom: 'wecom_webhook' };
     const list = (raw) => (raw ?? '').split(',').map((v) => v.trim()).filter(Boolean);
@@ -847,11 +2475,25 @@ export function stubScript(overrides = {}) {
     if (method === 'GET' || method === 'POST') {
       for (const [prefix, body] of table) {
         if (path === prefix || path.startsWith(prefix + '/')) {
-          let out = body;
+          let base = body;
+          /* 首页的空态那一趟（见 HOME_EMPTY）与只有本机来源的那一趟（见 HOME_LOCAL） */
+          if (localStorage.getItem('pt-fixture-home-empty') === '1') {
+            if (path === '/api/home') base = ${JSON.stringify(JSON.stringify(HOME_EMPTY))};
+            if (path === '/api/nas') base = ${JSON.stringify(JSON.stringify(NAS_VIEW_EMPTY))};
+            if (path === '/api/system/check') base = '{"report":null}';
+            /* 没有下载器时外壳取到的总速度也是 0：不然右栏写「0 台」，速度却是另一份假数据里的 93.8 MB/s */
+            if (path === '/api/downloader-torrents/transfer-stats') {
+              base = '{"total_upload_speed":0,"total_download_speed":0,"total_uploaded":0,"total_downloaded":0,"total_session_uploaded":0,"total_session_downloaded":0,"total_free_space":0,"downloaders":[]}';
+            }
+          } else if (localStorage.getItem('pt-fixture-home-nas') === 'local') {
+            if (path === '/api/home') base = ${JSON.stringify(JSON.stringify(HOME_LOCAL))};
+            if (path === '/api/nas') base = ${JSON.stringify(JSON.stringify(NAS_VIEW_LOCAL))};
+          }
+          let out = base;
           const fn = queryAware[prefix];
           if (fn && path === prefix) {
             const qs = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : '';
-            out = JSON.stringify(fn(JSON.parse(body), new URLSearchParams(qs)));
+            out = JSON.stringify(fn(JSON.parse(base), new URLSearchParams(qs)));
           }
           /*
            * 验收用的「站点很多」模式：localStorage 设了 pt-fixture-many-sites 就把聚合接口的站点扩到 40 个
