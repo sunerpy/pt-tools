@@ -160,3 +160,66 @@ func TestAppRegistry_LeftoversGoToSameConf(t *testing.T) {
 	_, _, _, got = r.claim("cli_m", &Channel{confID: 7})
 	assert.True(t, got.empty(), "取走以后就没有了")
 }
+
+// 过期在同一次加锁里做完：消息丢掉、关闭中回了 500 的删掉去重记录，还没收尾的完成信号留给之后来接手的实例。
+func TestAppRegistry_ExpireKeepsOpenBusyForClaim(t *testing.T) {
+	resetForTest()
+	defer resetForTest()
+	r := newAppRegistry()
+	defer r.reset()
+	r.leftTTL = time.Hour // 手动调 expire，不靠定时器
+	old := &Channel{confID: 7}
+	_, ok, _, _ := r.claim("cli_e", old)
+	require.True(t, ok)
+	acked := newQueued(notify.InboundMessage{ChannelUserID: "ou_a", Text: "a"}, time.Unix(1_800_000_000, 0), "om_a")
+	unacked := newQueued(notify.InboundMessage{ChannelUserID: "ou_a", Text: "b"}, time.Unix(1_800_000_001, 0), "om_b")
+	unacked.key, unacked.unacked = "cli_e\x00om_b", true
+	require.False(t, seenMessages.check(unacked.key))
+	busyOpen, busyDone := make(chan struct{}), make(chan struct{})
+	close(busyDone)
+	r.release("cli_e", old, handoff{
+		items: map[string][]*queued{"ou_a": {acked, unacked}},
+		busy:  map[string]<-chan struct{}{"ou_a": busyOpen, "ou_b": busyDone},
+	})
+	k := leftKey{appID: "cli_e", confID: 7}
+	r.mu.Lock()
+	l := r.left[k]
+	r.mu.Unlock()
+	require.NotNil(t, l)
+	r.expire(k, l)
+	assert.False(t, seenMessages.check(unacked.key), "关闭中回了 500 的删掉了去重记录")
+
+	_, ok, _, got := r.claim("cli_e", &Channel{confID: 7})
+	require.True(t, ok)
+	assert.Empty(t, got.items, "消息过期丢掉")
+	require.Len(t, got.busy, 1, "收尾了的信号不留")
+	assert.Equal(t, (<-chan struct{})(busyOpen), got.busy["ou_a"])
+}
+
+// 同一个应用换了通道编号接手：别的编号留下的、关闭中回了 500 的消息删掉去重记录并从留下的消息里拿掉
+// （平台会重推到新通道），已经回了 200 的照旧留给原来的编号。
+func TestAppRegistry_OtherConfClaimForgetsUnacked(t *testing.T) {
+	resetForTest()
+	defer resetForTest()
+	r := newAppRegistry()
+	defer r.reset()
+	old := &Channel{confID: 7}
+	_, ok, _, _ := r.claim("cli_o", old)
+	require.True(t, ok)
+	acked := newQueued(notify.InboundMessage{ChannelUserID: "ou_a", Text: "a"}, time.Unix(1_800_000_000, 0), "om_a")
+	unacked := newQueued(notify.InboundMessage{ChannelUserID: "ou_a", Text: "b"}, time.Unix(1_800_000_001, 0), "om_b")
+	unacked.key, unacked.unacked = "cli_o\x00om_b", true
+	require.False(t, seenMessages.check(unacked.key))
+	r.release("cli_o", old, handoff{items: map[string][]*queued{"ou_a": {acked, unacked}}})
+
+	other := &Channel{confID: 8}
+	_, ok, _, got := r.claim("cli_o", other)
+	require.True(t, ok)
+	assert.True(t, got.empty(), "别的编号拿不到 #7 留下的")
+	assert.False(t, seenMessages.check(unacked.key), "重推到 #8 时不会被当成重复")
+	r.release("cli_o", other, handoff{})
+
+	_, ok, _, back := r.claim("cli_o", &Channel{confID: 7})
+	require.True(t, ok)
+	assert.Equal(t, []*queued{acked}, back.items["ou_a"], "回了 500 的不再交给 #7，免得和重推的那份各处理一次")
+}

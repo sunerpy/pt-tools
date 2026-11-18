@@ -244,6 +244,29 @@ func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wak
 		delete(r.left, k)
 		items = l.items
 	}
+	// 同一个应用换了通道编号接手（例如删掉 #7、马上用同一个应用建了 #8）：别的编号留下的、关闭中回了 500 的消息
+	// 交不到这个实例，平台会把它们重推到这里。删掉它们的去重记录并从留下的消息里拿掉，重推到时照常处理；
+	// 留着的话重推会被当成重复回 200，消息就丢了
+	for lk, l := range r.left {
+		if lk.appID != appID || lk.confID == c.confID {
+			continue
+		}
+		for user, list := range l.items.items {
+			kept := list[:0]
+			for _, it := range list {
+				if it.unacked {
+					seenMessages.forget(it.key)
+					continue
+				}
+				kept = append(kept, it)
+			}
+			if len(kept) == 0 {
+				delete(l.items.items, user)
+			} else {
+				l.items.items[user] = kept
+			}
+		}
+	}
 	return 0, true, nil, items
 }
 
@@ -271,13 +294,12 @@ func (r *appRegistry) release(appID string, c *Channel, items handoff) {
 
 // expire 丢掉过了 leftTTL 还没人取的消息。
 func (r *appRegistry) expire(k leftKey, l *leftover) {
+	// 整个过期在同一次 r.mu 里做完：删掉消息、留下还没收尾的完成信号是一步，claim 不会夹在中间拿到空的交接
 	r.mu.Lock()
 	if r.left[k] != l {
 		r.mu.Unlock()
 		return
 	}
-	delete(r.left, k)
-	r.mu.Unlock()
 	unacked := 0
 	for _, list := range l.items.items {
 		for _, it := range list {
@@ -288,10 +310,7 @@ func (r *appRegistry) expire(k leftKey, l *leftover) {
 			}
 		}
 	}
-	if n := countQueued(l.items.items) - unacked; n > 0 {
-		l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
-			k.confID, n, durationText(r.ttl()))
-	}
+	dropped := countQueued(l.items.items) - unacked
 	// 还没收尾的那几个人的完成信号不随消息一起过期：重建的实例晚来也要等那一条收尾
 	open := map[string]<-chan struct{}{}
 	for user, ch := range l.items.busy {
@@ -302,13 +321,17 @@ func (r *appRegistry) expire(k leftKey, l *leftover) {
 		}
 	}
 	if len(open) > 0 {
-		r.mu.Lock()
-		if _, taken := r.left[k]; !taken {
-			kept := &leftover{items: handoff{busy: open}, log: l.log}
-			kept.timer = time.AfterFunc(r.leftTTL, func() { r.expire(k, kept) })
-			r.left[k] = kept
-		}
-		r.mu.Unlock()
+		kept := &leftover{items: handoff{busy: open}, log: l.log}
+		kept.timer = time.AfterFunc(r.leftTTL, func() { r.expire(k, kept) })
+		r.left[k] = kept
+	} else {
+		delete(r.left, k)
+	}
+	ttl := r.leftTTL
+	r.mu.Unlock()
+	if dropped > 0 {
+		l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
+			k.confID, dropped, durationText(ttl))
 	}
 }
 
