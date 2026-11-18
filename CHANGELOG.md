@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.60](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.59...v1.0.0-rc.60) (2026-11-18)
+
+
+### Features
+
+* **downloader:** 下载器 Web UI 加「活动中」状态筛选与「总速度」排序 ([#904](https://github.com/sunerpy/pt-tools/issues/904)) ([890b487](https://github.com/sunerpy/pt-tools/commit/890b48794385147fa08f567120febdb9de6f3e7e))
+
+
+### Bug Fixes
+
+* **site:** OpenCD 签到带上 CSRF 令牌，今天已签过时不再取验证码 ([#903](https://github.com/sunerpy/pt-tools/issues/903)) ([9fe0aa8](https://github.com/sunerpy/pt-tools/commit/9fe0aa8b96d4cef555b718dc0a67d0cb12b74530))
+* **site:** PTFans 副标题取对，PTFans 与 DiscFan 读出 H&R 未达标数，签到认繁体回执 ([#905](https://github.com/sunerpy/pt-tools/issues/905)) ([034149d](https://github.com/sunerpy/pt-tools/commit/034149d2577f309c2626654ceb6617cb9ae51615))
+
 ## [1.0.0-rc.59](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.58...v1.0.0-rc.59) (2026-11-14)
 
 
