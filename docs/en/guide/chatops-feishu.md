@@ -179,6 +179,7 @@ Feishu checks for an online client when saving this setting. Make sure the chann
 Search the run logs (`运行日志`) for `飞书应用机器人`. Common causes:
 
 - A wrong App ID or App Secret: the log has `长连接被飞书拒绝` (the long connection was rejected by Feishu) and `长连接出错` (a long connection error), followed by `1000040345: app_id or app_secret is invalid`; a test message fails with `code:10014` (`app secret invalid`). Correct it and save the credentials, and the channel reconnects at once.
+- Getting the tenant_access_token fails with `21001` (`Access denied due to platform policy`): Feishu's platform policy refuses this app, most likely because it was created with the wrong account or organisation. Create the app again with an account in the organisation that pt-tools should serve.
 - The bot feature of the app is not enabled: the status also shows Error while the bot info cannot be read. In the meantime pt-tools cannot tell whether a group message @-mentions the bot, so it asks Feishu to push group messages that @-mention anyone again later (per Feishu's docs at most 4 more pushes per message, each logging an Info line `还没取到机器人信息`) and handles them once the bot info is read; private chats work as usual.
 - The same Feishu app is configured on two channels: only the one that started first connects, and the other shows Error, see the next question.
 
