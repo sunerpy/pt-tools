@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="../../web/frontend/public/logo.png" alt="pt-tools" width="128" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../web/frontend/public/logo-dark.svg" />
+  <img src="../../web/frontend/public/logo.svg" alt="pt-tools" width="128" />
+</picture>
 
 # pt-tools
 
@@ -28,6 +31,33 @@ The web interface is in Chinese; the screenshot below shows it with demo data.
   <source media="(prefers-color-scheme: dark)" srcset="../public/screens/home-dark.webp" />
   <img src="../public/screens/home-light.webp" alt="The pt-tools user statistics page: upload, ratio, seeding, bonus points and class for every site" width="1440" />
 </picture>
+
+<details>
+<summary>Screenshots of following shows, brushing, the AI assistant and the mobile app (demo data)</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/media-follow-dark.webp" />
+  <img src="../public/screens/media-follow-light.webp" alt="The title page of the series 长夜将尽 (The Long Night): following season 2, 12 episodes of season 1 and 6 of season 2 in the library, locked to the HHWEB 2160p release" width="640" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/brush-dark.webp" />
+  <img src="../public/screens/brush-light.webp" alt="The brush tasks page: torrents seeding, today's upload and download, overall ratio, two brush tasks and the last 30 days of earnings" width="1440" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/assistant-dark.webp" />
+  <img src="../public/screens/assistant-light.webp" alt="The AI assistant answering how far a followed show has got: episode 7 is downloaded and hard-linked into the TV library" width="960" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../public/screens/app-overview-en-dark.webp" />
+  <img src="../public/screens/app-overview-en-light.webp" alt="The mobile app's overview: upload, download, ratio, bonus points and torrents seeding in each downloader" width="300" />
+</picture>
+
+长夜将尽 (The Long Night) is a made-up series; its poster and backdrop are generated.
+
+</details>
 
 ## 1.0 highlights
 
@@ -113,6 +143,10 @@ Download from [Releases](https://github.com/sunerpy/pt-tools/releases). Every re
 Unpack it and run `pt-tools web --host 0.0.0.0 --port 8080`. There is no macOS binary; on macOS, use Docker. For a systemd service, Windows and more Docker examples, see [Install](https://firlab.app/pt-tools/en/guide/install), the [binary guide](../../examples/binary-run.md) and the [Docker examples](../../examples/docker-run.md).
 
 The Android app (most phones need `pt-tools-app-arm64-v8a.apk`) is in the same release and has the same version number as the server; see [Mobile app](https://firlab.app/pt-tools/en/guide/mobile-app).
+
+### Upgrading from 0.48
+
+Switch to the new image or binary and start it as usual: the database schema is migrated on startup, and a backup is made automatically before the migration. To go back to 0.48.0, restore that pre-upgrade backup as described in [Upgrades and backups](https://firlab.app/pt-tools/en/guide/upgrade).
 
 ### Build from source
 

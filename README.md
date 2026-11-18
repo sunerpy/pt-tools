@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="./web/frontend/public/logo.png" alt="pt-tools" width="128" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./web/frontend/public/logo-dark.svg" />
+  <img src="./web/frontend/public/logo.svg" alt="pt-tools" width="128" />
+</picture>
 
 # pt-tools
 
@@ -26,6 +29,33 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
   <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/home-dark.webp" />
   <img src="./docs/public/screens/home-light.webp" alt="pt-tools 的用户统计页：各站点的上传量、分享率、做种数、积分和等级" width="1440" />
 </picture>
+
+<details>
+<summary>追剧、刷流、AI 助手与手机 App 的截图（演示数据）</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/media-follow-dark.webp" />
+  <img src="./docs/public/screens/media-follow-light.webp" alt="剧集「长夜将尽」的条目详情页：追剧中 · 第 2 季，库里第 1 季 12 集、第 2 季 6 集，版本锁 HHWEB 2160p" width="640" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/brush-dark.webp" />
+  <img src="./docs/public/screens/brush-light.webp" alt="刷流任务页：在做种子、今日上传与下载、累计分享率，两个刷流任务和最近 30 天的收益" width="1440" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/assistant-dark.webp" />
+  <img src="./docs/public/screens/assistant-light.webp" alt="AI 助手回答追剧进度：第 7 集已经下好并硬链接进剧集库" width="960" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/app-overview-dark.webp" />
+  <img src="./docs/public/screens/app-overview-light.webp" alt="手机 App 的概览页：上传、下载、分享率、魔力与下载器做种" width="300" />
+</picture>
+
+「长夜将尽」是编的剧，海报与背景图是生成的。
+
+</details>
 
 ## 1.0 亮点
 
@@ -111,6 +141,10 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 解压后运行 `pt-tools web --host 0.0.0.0 --port 8080`。没有 macOS 二进制，macOS 请使用 Docker。systemd 服务、Windows 与更多 Docker 示例见[安装](https://firlab.app/pt-tools/guide/install)、[二进制运行指南](examples/binary-run.md)和[Docker 示例](examples/docker-run.md)。
 
 Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在同一个 Release 里，版本号与服务端相同，见[手机 App](https://firlab.app/pt-tools/guide/mobile-app)。
+
+### 从 0.48 升级
+
+换成新的镜像或二进制，照常启动即可：数据库结构在启动时自动迁移，迁移以前会先自动备份一次。要回到 0.48.0，用这份升级前备份恢复，步骤见[升级与备份](https://firlab.app/pt-tools/guide/upgrade)。
 
 ### 从源码构建
 
