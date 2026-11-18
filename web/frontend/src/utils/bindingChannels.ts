@@ -14,8 +14,14 @@ const NOTIFY_VIA: Record<string, string> = {
   binding: "第一个绑定的账号",
 };
 
-export function notifyViaText(via: string | undefined): string {
-  return (via && NOTIFY_VIA[via]) || "";
+/** 飞书应用机器人的设置项叫「默认会话 ID」（oc_ 开头的群或单聊会话，也可以是个人 open_id） */
+const NOTIFY_VIA_BY_TYPE: Record<string, Record<string, string>> = {
+  feishu_app: { default_chat_id: "默认会话 ID" },
+};
+
+export function notifyViaText(via: string | undefined, channelType?: string): string {
+  if (!via) return "";
+  return (channelType && NOTIFY_VIA_BY_TYPE[channelType]?.[via]) || NOTIFY_VIA[via] || "";
 }
 
 const ROLE_TEXT: Record<string, string> = { admin: "管理员", allowed: "允许" };

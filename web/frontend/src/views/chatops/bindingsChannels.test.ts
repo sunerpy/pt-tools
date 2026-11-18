@@ -117,8 +117,8 @@ describe("绑定页：通道一栏", () => {
           channel_type: "feishu_app",
           enabled: true,
           runtime_state: "connected",
-          notify_target: "ou_7f3a9c2d1e",
-          notify_via: "admin",
+          notify_target: "oc_9f8e7d6c5b",
+          notify_via: "default_chat_id",
           users: [{ user_id: "ou_7f3a9c2d1e", roles: ["admin"], bound: false }],
         },
       ],
@@ -128,7 +128,7 @@ describe("绑定页：通道一栏", () => {
     await mountPage();
     const text = document.querySelector("[data-testid=binding-channels]")!.textContent ?? "";
     expect(text).toContain("飞书机器人");
-    expect(text).toContain("飞书");
+    expect(text).toContain("通知发给默认会话 ID oc***6c5b");
     expect(text).not.toContain("feishu_app");
     const btn = [
       ...document.querySelectorAll<HTMLButtonElement>("button[aria-label^='绑定 ']"),

@@ -5,6 +5,10 @@ import { activityText, maskUserId, notifyViaText, roleTexts } from "./bindingCha
 describe("绑定页「通道」一栏的读法", () => {
   it("通知收件人从哪来、名单里的身份", () => {
     expect(notifyViaText("default_chat_id")).toBe("默认 Chat ID");
+    expect(notifyViaText("default_chat_id", "feishu_app"), "飞书的设置项叫「默认会话 ID」").toBe(
+      "默认会话 ID",
+    );
+    expect(notifyViaText("admin", "feishu_app")).toBe("第一个管理员");
     expect(notifyViaText("binding")).toBe("第一个绑定的账号");
     expect(notifyViaText(undefined)).toBe("");
     expect(roleTexts(["admin", "allowed"])).toEqual(["管理员", "允许"]);

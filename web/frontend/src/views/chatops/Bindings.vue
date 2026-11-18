@@ -212,7 +212,7 @@ const CHANNEL_NAMES: Record<string, string> = {
 /** 通知（每日战报、签到、追剧…）发给谁：「默认 Chat ID 12***7890」；没有收件人时写原因 */
 function notifyLine(ch: ChatOpsBindingChannel): string {
   if (ch.notify_target) {
-    return `${notifyViaText(ch.notify_via)} ${maskUserId(ch.notify_target)}`.trim();
+    return `${notifyViaText(ch.notify_via, ch.channel_type)} ${maskUserId(ch.notify_target)}`.trim();
   }
   return ch.notify_error || "";
 }
