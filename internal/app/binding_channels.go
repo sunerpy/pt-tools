@@ -15,7 +15,7 @@ import (
 )
 
 /*
- * 绑定页的「通道」一栏：每个能收命令的通道（Telegram、QQ）名单里有谁、谁已经绑定、每个账号最近一次和机器人的往来，
+ * 绑定页的「通道」一栏：每个能收命令的通道（Telegram、QQ、飞书应用机器人）名单里有谁、谁已经绑定、每个账号最近一次和机器人的往来，
  * 以及没有指定收件人的通知（每日战报、签到、追剧…）发给谁。
  *
  * 用户（2026-10-28）：「我的 tg 机器人已经和 pt-tools 绑定了，但是却没有显示」。生产上机器人在线、通知照常发到默认 Chat ID，
@@ -31,9 +31,13 @@ var (
 	ErrAlreadyBound = errors.New("这个账号在这个通道上已经绑定了")
 )
 
+// commandChannelTypes 是能收命令的通道类型（只有它们需要绑定）。commandChannel 与 ListChannels 共用这一份，
+// 以后加类型不会漏一处。
+var commandChannelTypes = []string{"telegram", "qq_onebot", "feishu_app"}
+
 // commandChannel 报告这种通道能不能收命令（只有它们需要绑定）。
 func commandChannel(channelType string) bool {
-	return channelType == "telegram" || channelType == "qq_onebot"
+	return slices.Contains(commandChannelTypes, channelType)
 }
 
 // 账号在通道名单里的身份。
@@ -86,7 +90,7 @@ type ChannelBindingView struct {
 	ConfigError string `json:"config_error,omitempty"`
 }
 
-// channelLists 是通道配置里的名单与默认 Chat ID（只有 Telegram 有）。
+// channelLists 是通道配置里的名单与默认 Chat ID（Telegram 的默认 Chat ID、飞书应用机器人的默认会话 ID）。
 type channelLists struct {
 	admins      []string
 	allowed     []string
@@ -110,7 +114,8 @@ func readChannelLists(row models.NotificationConf) (channelLists, error) {
 		for _, id := range cfg.AllowedQQUsers {
 			out.allowed = append(out.allowed, strconv.FormatInt(id, 10))
 		}
-	case "telegram":
+	case "telegram", "feishu_app":
+		// 两者的名单与默认会话同名：Telegram 是数字 ID，飞书应用机器人是 open_id（ou_ 开头）与会话 ID（oc_ 开头）
 		var cfg map[string]json.RawMessage
 		if err := decryptConfigJSON(row.ConfigJSON, &cfg); err != nil {
 			return out, err
@@ -118,17 +123,17 @@ func readChannelLists(row models.NotificationConf) (channelLists, error) {
 		var err error
 		if raw := cfg["admin_users"]; len(raw) > 0 {
 			if out.admins, err = rawStringOrInt64Slice(raw); err != nil {
-				return out, fmt.Errorf("解析 telegram admin_users 失败: %w", err)
+				return out, fmt.Errorf("解析 %s admin_users 失败: %w", row.ChannelType, err)
 			}
 		}
 		if raw := cfg["allowed_users"]; len(raw) > 0 {
 			if out.allowed, err = rawStringOrInt64Slice(raw); err != nil {
-				return out, fmt.Errorf("解析 telegram allowed_users 失败: %w", err)
+				return out, fmt.Errorf("解析 %s allowed_users 失败: %w", row.ChannelType, err)
 			}
 		}
 		if raw := cfg["default_chat_id"]; len(raw) > 0 {
 			if out.defaultChat, err = rawStringOrInt64(raw); err != nil {
-				return out, fmt.Errorf("解析 telegram default_chat_id 失败: %w", err)
+				return out, fmt.Errorf("解析 %s default_chat_id 失败: %w", row.ChannelType, err)
 			}
 		}
 	}
@@ -150,7 +155,7 @@ func (l channelLists) rolesOf(userID string) []string {
 // ListChannels 列出能收命令的通道（按编号），每个带上名单里的账号与绑定情况、最近一次往来，以及通知发给谁。
 func (s *bindingService) ListChannels(ctx context.Context) ([]ChannelBindingView, error) {
 	var confs []models.NotificationConf
-	if err := s.db.WithContext(ctx).Where("channel_type IN ?", []string{"telegram", "qq_onebot"}).
+	if err := s.db.WithContext(ctx).Where("channel_type IN ?", commandChannelTypes).
 		Order("id ASC").Find(&confs).Error; err != nil {
 		return nil, fmt.Errorf("读取通知通道失败: %w", err)
 	}
@@ -205,7 +210,7 @@ func (s *bindingService) ListChannels(ctx context.Context) ([]ChannelBindingView
 			case slices.Contains(lists.admins, target):
 				v.NotifyTarget, v.NotifyVia = target, NotifyViaAdmin
 			case conf.ChannelType == "qq_onebot" && slices.Contains(lists.allowed, target):
-				// 只有 QQ 会退到允许名单（Telegram 没有管理员时直接用绑定的账号）
+				// 只有 QQ 会退到允许名单（Telegram 与飞书没有管理员时直接用绑定的账号）
 				v.NotifyTarget, v.NotifyVia = target, NotifyViaAllowed
 			case target != "":
 				v.NotifyTarget, v.NotifyVia = target, NotifyViaBinding

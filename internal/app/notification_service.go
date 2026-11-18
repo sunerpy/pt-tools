@@ -430,7 +430,8 @@ func (s *notificationService) TestConf(ctx context.Context, id uint) error {
 
 // withRecipient 给没有指定收件人的通知补上通道的默认收件人，规则与测试消息相同（testChatID）：
 // QQ 私聊发给第一个管理员 QQ，没有时第一个允许 QQ，再没有时第一个完成绑定的账号；
-// Telegram 先用默认 Chat ID，没有时同样退到第一个管理员用户与第一个绑定的账号。
+// Telegram 先用默认 Chat ID，没有时同样退到第一个管理员用户与第一个绑定的账号；
+// 飞书应用机器人先用默认会话 ID，没有时第一个管理员 open_id，再没有时第一个绑定的账号。
 //
 // 每日战报、签到、追剧、登录提醒与 RSS 推送都不带收件人：Telegram 自己会退到默认 Chat ID，
 // QQ 没有这一步，以前一律报「缺少目标 chat_id」，而测试消息因为另外挑了收件人照常能发。
@@ -444,7 +445,7 @@ func (s *notificationService) withRecipient(ctx context.Context, n Notification)
 		// 读不到通道就原样交给通道：通道不存在时 manager 会说「未运行」
 		return n, nil
 	}
-	if row.ChannelType != "qq_onebot" && row.ChannelType != "telegram" {
+	if !commandChannel(row.ChannelType) {
 		return n, nil
 	}
 	chatID, err := s.testChatID(ctx, row)
@@ -467,7 +468,8 @@ func (s *notificationService) testChatID(ctx context.Context, row models.Notific
 
 // defaultRecipient 是没有指定收件人的通知（测试消息、每日战报、签到…）发给谁：
 // QQ 是第一个管理员 QQ，没有时第一个允许 QQ，再没有时第一个完成绑定的账号；
-// Telegram 是默认 Chat ID，没有时第一个管理员用户，再没有时第一个完成绑定的账号。
+// Telegram 是默认 Chat ID，没有时第一个管理员用户，再没有时第一个完成绑定的账号；
+// 飞书应用机器人是默认会话 ID，没有时第一个管理员 open_id，再没有时第一个完成绑定的账号（与 Telegram 一样不退到允许名单）。
 // 其它通道不需要收件人，返回空串。绑定页上「通知发给谁」也读它。
 func defaultRecipient(ctx context.Context, db *gorm.DB, row models.NotificationConf) (string, error) {
 	switch row.ChannelType {
@@ -495,6 +497,21 @@ func defaultRecipient(ctx context.Context, db *gorm.DB, row models.NotificationC
 			return bindingChatID, err
 		}
 		return "", errors.New("Telegram 通道无可用收件人：在通道设置里填写默认 Chat ID 或管理员用户，或者先完成一次绑定")
+	case "feishu_app":
+		lists, err := readChannelLists(row)
+		if err != nil {
+			return "", err
+		}
+		if lists.defaultChat != "" {
+			return lists.defaultChat, nil
+		}
+		if len(lists.admins) > 0 {
+			return lists.admins[0], nil
+		}
+		if bindingChatID, err := firstBindingUser(ctx, db, row.ID); err != nil || bindingChatID != "" {
+			return bindingChatID, err
+		}
+		return "", errors.New("飞书应用机器人通道无可用收件人：在通道设置里填写默认会话 ID 或管理员 open_id，或者先完成一次绑定")
 	default:
 		return "", nil
 	}
