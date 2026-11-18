@@ -89,6 +89,7 @@ func TestCmdWeb_StartsWithDisabledChatOps(t *testing.T) {
 	require.NoError(t, err, "bootstrap with no NotificationConf must succeed")
 	require.NotNil(t, bs, "bootstrap must return non-nil result")
 	require.NotNil(t, bs.Deps(), "ChatOpsDeps must be populated")
+	assert.NotNil(t, bs.Deps().FeishuRegister, "扫码一键创建要接上飞书 SDK（feishuapp.RegisterApp）")
 
 	// Channels map is empty (no enabled confs).
 	assert.Equal(t, 0, bs.ChannelCount(), "expected zero initialized channels")

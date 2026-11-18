@@ -1,9 +1,11 @@
 package web
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/notify/adapter/feishuapp"
 )
 
 type ChatOpsDeps struct {
@@ -12,6 +14,8 @@ type ChatOpsDeps struct {
 	AuditSvc        app.AuditService
 	// TemplateSvc 是全局消息模板（M21）；为 nil 时模板接口回 503
 	TemplateSvc app.TemplateService
+	// FeishuRegister 是飞书应用机器人的扫码一键创建（生产里是 feishuapp.RegisterApp）；为 nil 时一键创建的接口回 503
+	FeishuRegister func(ctx context.Context, onQR func(url string, expireIn int)) (*feishuapp.RegisteredApp, error)
 }
 
 func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth func(http.Handler) http.Handler) {
@@ -53,6 +57,9 @@ func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth fu
 	mux.Handle("GET /api/chatops/rss-notifications", wrap(h.listRSSNotifications))
 	mux.Handle("POST /api/chatops/rss-notifications/{id}/retry", wrap(h.retryRSSNotification))
 	mux.Handle("POST /api/chatops/rss-notifications/{id}/cancel", wrap(h.cancelRSSNotification))
+
+	// 飞书应用机器人的扫码一键创建（api_feishu_register.go）
+	newFeishuRegistrar(deps).register(mux, wrap)
 }
 
 func (s *Server) SetChatOpsDeps(deps *ChatOpsDeps) {
