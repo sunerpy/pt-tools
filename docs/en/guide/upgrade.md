@@ -4,7 +4,7 @@ This page covers upgrading pt-tools, backing up and restoring its data, and remo
 
 ## Upgrading
 
-The database schema is migrated automatically on start, so an upgrade needs nothing done to the data. The first time a new version starts, pt-tools takes a backup automatically before it migrates the database (see [Backing up](#backing-up)), so there is no need to back up by hand before upgrading; for an extra copy, click Back up now (立即备份) in the web interface first.
+The database schema is migrated automatically on start, so an upgrade needs nothing done to the data. The first time a new version starts, pt-tools takes a backup automatically before it migrates the database (see [Backing up](#backing-up)), so there is no need to back up by hand before upgrading; for an extra copy, click Back up now (立即备份) in the web interface first (0.48.0 has no such button; when upgrading from 0.48.0, copy the data directory instead).
 
 ### Docker
 
