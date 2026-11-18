@@ -1224,6 +1224,19 @@ func TestPushSync_FillsDefaultRecipient_FeishuApp(t *testing.T) {
 			name: "没有收件人", config: `{"app_id":"cli_a","app_secret":"s","allowed_users":["ou_c"]}`,
 			wantFail: "飞书应用机器人通道无可用收件人",
 		},
+		// 名单与默认会话 ID 按适配器的规则规整（去掉首尾空白、跳过空项、去重）：适配器认为合法的配置，通知也要找得到收件人
+		{
+			name: "管理员名单里有空项", config: `{"app_id":"cli_a","app_secret":"s","admin_users":["","ou_admin"]}`,
+			want: map[string]string{"chat_id": "ou_admin"},
+		},
+		{
+			name: "默认会话 ID 只有空白", config: `{"app_id":"cli_a","app_secret":"s","default_chat_id":" ","admin_users":[" ou_admin "]}`,
+			want: map[string]string{"chat_id": "ou_admin"},
+		},
+		{
+			name: "默认会话 ID 带空白", config: `{"app_id":"cli_a","app_secret":"s","default_chat_id":" oc_group "}`,
+			want: map[string]string{"chat_id": "oc_group"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

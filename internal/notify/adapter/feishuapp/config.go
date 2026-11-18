@@ -92,7 +92,7 @@ func parseConfig(raw string) (*Config, error) {
 	return cfg, nil
 }
 
-// openIDList 读名单：字符串数组，去掉首尾空白与空项、去重。只认 ou_ 开头的 open_id，不对就拒绝保存——
+// openIDList 读名单：字符串数组，按 NormalizeIDs 规整。只认 ou_ 开头的 open_id，不对就拒绝保存——
 // 静默跳过的话，用户填了 user_id 或 union_id，保存以后就把自己关在门外了。
 func openIDList(raw json.RawMessage, what string) ([]string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -102,18 +102,27 @@ func openIDList(raw json.RawMessage, what string) ([]string, error) {
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, fmt.Errorf("%s要是字符串数组", what)
 	}
+	out := NormalizeIDs(items)
+	for _, id := range out {
+		if !strings.HasPrefix(id, "ou_") {
+			return nil, fmt.Errorf("名单里要填 open_id，以 ou_ 开头：%q 不是", shorten(id, 64))
+		}
+	}
+	return out, nil
+}
+
+// NormalizeIDs 是名单的规整规则：去掉首尾空白、跳过空项、去重，保持原来的顺序。
+// app 层读名单（绑定页、通知收件人）用的也是它，两边认的名单一样。
+func NormalizeIDs(items []string) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		id := strings.TrimSpace(item)
 		if id == "" || slices.Contains(out, id) {
 			continue
 		}
-		if !strings.HasPrefix(id, "ou_") {
-			return nil, fmt.Errorf("名单里要填 open_id，以 ou_ 开头：%q 不是", shorten(id, 64))
-		}
 		out = append(out, id)
 	}
-	return out, nil
+	return out
 }
 
 func defaultChatID(raw json.RawMessage) (string, error) {

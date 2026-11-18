@@ -227,3 +227,24 @@ func TestReadChannelLists_FeishuAppBadLists(t *testing.T) {
 		assert.Contains(t, err.Error(), "feishu_app", raw)
 	}
 }
+
+// 飞书应用机器人的名单与适配器（feishuapp.parseConfig）同一套规则：去掉首尾空白、跳过空项、去重。
+// 带空格的项不规整的话，绑定记录的 ChannelUserID 带着空格，和入站的 open_id 对不上。
+func TestReadChannelLists_FeishuAppNormalizes(t *testing.T) {
+	setupTestKey(t)
+	cipher, err := crypto.Encrypt([]byte(`{"admin_users":[""," ou_a ","ou_a","ou_b"],"allowed_users":["ou_c","","ou_c "],"default_chat_id":" oc_g "}`))
+	require.NoError(t, err)
+	lists, err := readChannelLists(models.NotificationConf{ChannelType: "feishu_app", ConfigJSON: cipher})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ou_a", "ou_b"}, lists.admins)
+	assert.Equal(t, []string{"ou_c"}, lists.allowed)
+	assert.Equal(t, "oc_g", lists.defaultChat)
+	assert.Equal(t, []string{RoleAdmin}, lists.rolesOf("ou_a"))
+
+	// Telegram 照旧：这次只改飞书应用机器人
+	tg, err := crypto.Encrypt([]byte(`{"admin_users":[1,1],"default_chat_id":"-100"}`))
+	require.NoError(t, err)
+	lists, err = readChannelLists(models.NotificationConf{ChannelType: "telegram", ConfigJSON: tg})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1", "1"}, lists.admins)
+}

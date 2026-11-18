@@ -318,6 +318,12 @@ func TestTestNotification_Cov(t *testing.T) {
 		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/notifications/1/test", tok, nil)
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+		// 排查提示要覆盖能收命令的三种通道：Telegram、QQ 与飞书应用机器人
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		for _, want := range []string{"network down", "Telegram", "QQ", "飞书应用机器人", "App Secret", "可用范围"} {
+			assert.Contains(t, string(body), want)
+		}
 	})
 }
 

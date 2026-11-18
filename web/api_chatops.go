@@ -187,7 +187,8 @@ func (h *chatopsHandlers) testNotification(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		detail := "通道发送失败：" + err.Error() +
-			"。请检查网络是否通畅、proxy_url 配置是否正确（Telegram 用户）、或 NapCat 反向 WS 连接是否在线（QQ 用户）"
+			"。请检查网络是否通畅、proxy_url 配置是否正确（Telegram 用户）、NapCat 反向 WS 连接是否在线（QQ 用户），" +
+			"或者 App ID 与 App Secret 是否正确、收件人是否在应用的可用范围里（飞书应用机器人用户）"
 		writeChatopsErr(w, http.StatusBadGateway, "send_failed", detail)
 		return
 	}
