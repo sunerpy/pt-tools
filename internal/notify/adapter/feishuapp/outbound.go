@@ -50,9 +50,10 @@ var errCodeHints = map[int]string{
 // tokenErrHints 是换 tenant_access_token 失败时的中文提示：SDK 把换 token 接口回的 code 与 msg 原样当错误返回
 // （core/tokenmanager.go 的 getCustomTenantAccessTokenThenCache 返回 CodeError）。错误码与含义照飞书官方的
 // 「服务端错误码说明」（https://open.feishu.cn/document/ukTMukTMukTM/ugjM14COyUjL4ITN），那里查不到的码不加。
+// 10014：真机实测 App Secret 填错时回的就是它（msg 是 app secret invalid）；官方说明里还包括应用被停用。
 var tokenErrHints = map[int]string{
 	10005:    "应用信息有误：到开发者后台「凭证与基础信息」核对 App ID",
-	10014:    "应用当前不可用：到开发者后台检查应用是否被停用",
+	10014:    "App Secret 不对，或者应用被停用：到开发者后台「凭证与基础信息」核对 App Secret，重置过的要填新的",
 	10015:    "App Secret 不对：到开发者后台「凭证与基础信息」核对，重置过的要填新的",
 	20002:    "App ID 与 App Secret 对不上：到开发者后台「凭证与基础信息」核对",
 	99991543: "App ID 或 App Secret 不对：到开发者后台「凭证与基础信息」核对",

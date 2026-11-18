@@ -215,7 +215,7 @@ func TestParseResult(t *testing.T) {
 func TestSend_TokenErrorHints(t *testing.T) {
 	cases := map[int]string{
 		10005:    "App ID",
-		10014:    "停用",
+		10014:    "App Secret 不对",
 		10015:    "App Secret 不对",
 		20002:    "对不上",
 		99991543: "App ID 或 App Secret 不对",
@@ -240,7 +240,7 @@ func TestSend_TokenErrorHints(t *testing.T) {
 
 func TestTokenHint_PointerCodeError(t *testing.T) {
 	assert.Contains(t, tokenHint(&larkcore.CodeError{Code: 10015}), "App Secret")
-	assert.Contains(t, tokenHint(fmt.Errorf("wrapped: %w", larkcore.CodeError{Code: 10014})), "停用")
+	assert.Contains(t, tokenHint(fmt.Errorf("wrapped: %w", larkcore.CodeError{Code: 10014})), "App Secret 不对")
 	assert.Empty(t, tokenHint(errors.New("dial tcp: refused")))
 	assert.Empty(t, tokenHint(nil))
 }
