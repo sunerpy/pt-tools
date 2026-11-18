@@ -678,6 +678,47 @@ func TestFeishuRegister_StartWhilePreviousUnsettled(t *testing.T) {
 	assert.Equal(t, feishuRegPending, out["state"])
 }
 
+// 上一个是开始接口自己结束的（这里是没等到链接），后台协程还没返回：再开始一个时先等它知道结果，
+// 不在那之前取代它。它（理论上）正好拿到了凭据的，回 409，它照常建完通道、编号照旧查得到。
+func TestFeishuRegister_StartWaitsForAbortedPrevious(t *testing.T) {
+	e := newRegEnv(t)
+	// 保存卡在 gate 上：它拿到凭据以后一直是 saving，直到开始请求回应（不然保存瞬间完成、成了 done，就该取代它了）
+	e.st.gate = make(chan struct{})
+	e.run.skipQR = func(n int) bool { return n == 1 }
+	e.run.ignoreCtx = true
+	e.r.linkWait = 50 * time.Millisecond
+	w := e.do(t, http.MethodPost, "/api/chatops/feishu-app/register", nil)
+	require.Equal(t, http.StatusGatewayTimeout, w.Code)
+	callA := e.run.next(t)
+	e.r.mu.Lock()
+	idA := e.r.cur.id
+	e.r.mu.Unlock()
+
+	got := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/chatops/feishu-app/register", nil))
+		got <- rec
+	}()
+	select {
+	case rec := <-got:
+		t.Fatalf("上一个的后台协程还没返回就回应了：%d %s", rec.Code, rec.Body.String())
+	case <-time.After(150 * time.Millisecond):
+	}
+	callA.finish(scannedApp(), nil)
+	select {
+	case rec := <-got:
+		assert.Equal(t, http.StatusConflict, rec.Code)
+		assert.Contains(t, rec.Body.String(), "正在保存通道")
+	case <-time.After(3 * time.Second):
+		t.Fatal("开始请求没有返回")
+	}
+	e.run.none(t)
+	close(e.st.gate)
+	st := e.waitState(t, idA, feishuRegDone)
+	assert.EqualValues(t, 41, st["conf_id"])
+}
+
 // 20 秒（测试里调小）内没拿到链接：取消作业、终态 failed，回 504。
 func TestFeishuRegister_NoLinkInTime(t *testing.T) {
 	e := newRegEnv(t)

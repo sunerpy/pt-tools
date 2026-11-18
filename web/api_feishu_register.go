@@ -238,15 +238,15 @@ func (r *feishuRegistrar) start(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, out)
 }
 
-// replace 把 j 设成当前这一个，成功时返回空串。上一个还在等扫码的先取消，再等后台协程知道结果（最多 cancelWait）：
-// 取消的那一刻拿到了凭据、或者本来就在保存通道的不取代，返回原因（409），免得那一边的网页按编号查不到它、
-// 把建好的通道当成作废；等不到结果的也不取代。
+// replace 把 j 设成当前这一个，成功时返回空串。只取代已经知道结果（ran 已关）的终态：上一个还在等扫码的先取消，
+// 开始接口自己结束（abort）但后台协程还没返回的也先等它，最多 cancelWait。取消的那一刻拿到了凭据、或者本来就在
+// 保存通道的不取代，返回原因（409），免得那一边的网页按编号查不到它、把建好的通道当成作废；等不到结果的也不取代。
 func (r *feishuRegistrar) replace(ctx context.Context, j *feishuReg) string {
 	for {
 		r.mu.Lock()
 		old := r.cur
 		switch {
-		case old == nil || !old.endedAt.IsZero():
+		case old == nil || (closed(old.ran) && !old.endedAt.IsZero()):
 			r.cur = j
 			r.mu.Unlock()
 			return ""
@@ -254,9 +254,11 @@ func (r *feishuRegistrar) replace(ctx context.Context, j *feishuReg) string {
 			r.mu.Unlock()
 			return msgFeishuRegSaving
 		}
-		r.requestCancelLocked(old, msgFeishuRegReplaced)
+		asked := r.requestCancelLocked(old, msgFeishuRegReplaced)
 		r.mu.Unlock()
-		old.logf(false, "取消 id=%s：开始了新的一键创建", shortRegID(old.id))
+		if asked {
+			old.logf(false, "取消 id=%s：开始了新的一键创建", shortRegID(old.id))
+		}
 		if !r.awaitRun(ctx, old) {
 			return msgFeishuRegUnsettle
 		}
@@ -264,16 +266,27 @@ func (r *feishuRegistrar) replace(ctx context.Context, j *feishuReg) string {
 	}
 }
 
-// requestCancelLocked 让还在等扫码的作业停下（调用方持有 mu）。状态由后台协程按一键创建的结果写：
-// 取消的那一刻拿到了凭据就照常保存。
-func (r *feishuRegistrar) requestCancelLocked(j *feishuReg, msg string) {
+// closed 报告 ch 是不是已经关上。
+func closed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// requestCancelLocked 让还在等扫码的作业停下（调用方持有 mu），真的要求了取消时返回 true。状态由后台协程
+// 按一键创建的结果写：取消的那一刻拿到了凭据就照常保存。
+func (r *feishuRegistrar) requestCancelLocked(j *feishuReg, msg string) bool {
 	if j.state != feishuRegPending {
-		return
+		return false
 	}
 	if j.cancelMsg == "" {
 		j.cancelMsg = msg
 	}
 	j.cancel()
+	return true
 }
 
 // awaitRun 等后台协程知道一键创建的结果，最多 cancelWait；没等到（或者网页断开）返回 false。
