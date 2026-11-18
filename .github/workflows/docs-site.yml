@@ -16,6 +16,7 @@ on:
       - "!docs/design/media-hub-board-spec.md"
       - "!docs/design/home-nas-spec.md"
       - "web/frontend/public/logo.svg"
+      - "web/frontend/public/logo-dark.svg"
       - ".github/workflows/docs-site.yml"
       - ".github/workflows/publish-docs-site.yml"
 

@@ -627,7 +627,7 @@ make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 现在按稳定版发版：`release-please-config.json` 的根包里没有预览版的设置，release PR 的版本不带后缀。预览版和稳定版一样只从受保护的 `main` 发布；要先发几个预览版时，在根包里加上 `"versioning": "prerelease"`、`"prerelease": true` 与 `"prerelease-type": "rc.1"`，其中 `"prerelease": true` 是开关：
 
 - 开启时，release PR 的版本带 `-rc.N`：从稳定版开始取下一个版本的 `rc.1`（`0.48.0` → `0.49.0-rc.1`），之后只递增 `N`（`0.49.0-rc.1` → `0.49.0-rc.2`）。draft 标为预发布，公开时不设为 Latest；安装说明使用 `.github/release-notes/rc-footer.md`；不提交 Edge 商店；容器镜像只推版本号标签，不更新 `latest` 与 `主.次`、`主` 标签。
-- 删除 `"prerelease": true` 即回到稳定版：下一个 release PR 去掉后缀（`0.49.0-rc.2` → `0.49.0`），另外两项可以保留。
+- 删除 `"prerelease": true` 即回到稳定版：下一个 release PR 去掉后缀（`0.49.0-rc.2` → `0.49.0`），另外两项可以保留。三项都删掉时，默认的版本策略会把 `-rc.N` 原样带到下一版（`1.0.0-rc.60` 加一个 feat 是 `1.1.0-rc.60`），而且没有了开关，这一版会按稳定版公开、设为 Latest、提交 Edge：所以那次合进 `main` 的提交正文要带 `Release-As: X.Y.Z`（1.0.0 就是这样发的），合并 release PR 以前核对标题正好是 `chore: release X.Y.Z`。
 - 扩展 manifest 的版本只能从 `rc.N`（N 为 1–65534）推导（`.github/scripts/extension-version.sh`），所以 `prerelease-type` 必须是 `rc.1`，不能写成 `rc` 或 `beta`。
 - 手机 App 的构建号也从版本推导（`.github/scripts/mobile-build-number.sh`），`rc.N` 的 N 不能超过 98，次版本与修订号不能超过 99，见下面的[手机 App 发版](#手机-app-发版)。
 

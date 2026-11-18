@@ -39,7 +39,7 @@ Firefox can only load it temporarily; the steps are in [Browser extension](brows
    - Edge → `edge://extensions`
 4. Turn on **Developer mode** at the top right
 5. Click **Load unpacked** and choose the unpacked folder
-6. The extension's icon appears in the toolbar (the same icon as pt-tools: a teal chevron and an orange block on a dark square)
+6. The extension's icon appears in the toolbar (the same icon as pt-tools: a white seed with the letter p cut out of it, on a dark rounded square)
 7. Click the icon for the first time and choose **🔓 Grant & Enable** to give it the permissions it needs
 
 ### Connecting to pt-tools
