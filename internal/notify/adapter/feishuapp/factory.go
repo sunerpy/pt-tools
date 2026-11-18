@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkevent "github.com/larksuite/oapi-sdk-go/v3/event"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
@@ -60,7 +59,7 @@ type botInfo struct {
 	AppName string
 }
 
-// apiSender 是发消息与取机器人信息的接口：生产实现包着 lark.Client，tenant_access_token 由 SDK 获取并缓存。
+// apiSender 是发消息与取机器人信息的接口：生产实现是 larkAPI。
 type apiSender interface {
 	SendText(ctx context.Context, receiveIDType, receiveID, content string) (sendResult, error)
 	BotInfo(ctx context.Context) (botInfo, sendResult, error)
@@ -80,32 +79,43 @@ func newTransport(cfg *Config) *http.Transport {
 	}
 }
 
-// larkAPI 是 apiSender 的生产实现。
+// larkAPI 是 apiSender 的生产实现：经 SDK 的 larkcore.Request 发请求（tenant_access_token 由 SDK 获取并缓存，
+// 遇到 token 失效码或拨号失败会再试一次）。不用 lark.NewClient：它把全部六十个服务挂在一个客户端上，
+// 二进制会因此多出十几 MiB。
 type larkAPI struct {
-	cli *lark.Client
+	config *larkcore.Config
 }
 
 func newLarkAPI(cfg *Config, log larkcore.Logger) apiSender {
 	return newLarkAPIAt(baseURL(cfg), cfg, log)
 }
 
-// newLarkAPIAt 建一个连 base 的 client，不发任何请求。不调 lark.WithTokenCache：SDK 的 token 管理器是包级的，
+// newLarkAPIAt 建一个连 base 的 client，不发任何请求。不设 TokenCache：SDK 的 token 管理器是包级的，
 // 传自定义缓存会替换所有客户端的；默认缓存按 app_id 与 secret 指纹分键，多个实例共用没有问题。
-// 也不开 WithLogReqAtDebug，它会打印请求体。
+// 也不开 LogReqAtDebug，它会打印请求体。
 func newLarkAPIAt(base string, cfg *Config, log larkcore.Logger) apiSender {
-	cli := lark.NewClient(cfg.AppID, cfg.AppSecret,
-		lark.WithOpenBaseUrl(base),
-		lark.WithHttpClient(&http.Client{Timeout: httpTimeout, Transport: newTransport(cfg)}),
-		lark.WithLogger(log),
-		lark.WithLogLevel(larkcore.LogLevelInfo),
-	)
-	return &larkAPI{cli: cli}
+	// 与 lark.NewClient 的构造步骤相同（client.go 的 NewClient），只是不初始化各个服务
+	config := &larkcore.Config{
+		BaseUrl:          base,
+		AppId:            cfg.AppID,
+		AppSecret:        cfg.AppSecret,
+		EnableTokenCache: true,
+		AppType:          larkcore.AppTypeSelfBuilt,
+		HttpClient:       &http.Client{Timeout: httpTimeout, Transport: newTransport(cfg)},
+		Logger:           log,
+		LogLevel:         larkcore.LogLevelInfo,
+	}
+	larkcore.NewLogger(config)
+	larkcore.NewCache(config)
+	larkcore.NewSerialization(config)
+	larkcore.NewHttpClient(config)
+	return &larkAPI{config: config}
 }
 
 // SendText 调 POST /open-apis/im/v1/messages?receive_id_type=…（应用身份）。自己解析响应，
 // 这样限流时也拿得到 HTTP 状态与 x-ogw-ratelimit-reset。
 func (a *larkAPI) SendText(ctx context.Context, receiveIDType, receiveID, content string) (sendResult, error) {
-	resp, err := a.cli.Do(ctx, &larkcore.ApiReq{
+	resp, err := larkcore.Request(ctx, &larkcore.ApiReq{
 		HttpMethod: http.MethodPost,
 		ApiPath:    "/open-apis/im/v1/messages",
 		Body: map[string]string{
@@ -115,7 +125,7 @@ func (a *larkAPI) SendText(ctx context.Context, receiveIDType, receiveID, conten
 		},
 		QueryParams:               larkcore.QueryParams{"receive_id_type": []string{receiveIDType}},
 		SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant},
-	})
+	}, a.config)
 	if err != nil {
 		return sendResult{}, err
 	}
@@ -124,7 +134,11 @@ func (a *larkAPI) SendText(ctx context.Context, receiveIDType, receiveID, conten
 
 // BotInfo 调 GET /open-apis/bot/v3/info：本应用机器人的 open_id，群里判断有没有 @ 它要用。
 func (a *larkAPI) BotInfo(ctx context.Context) (botInfo, sendResult, error) {
-	resp, err := a.cli.Get(ctx, "/open-apis/bot/v3/info", nil, larkcore.AccessTokenTypeTenant)
+	resp, err := larkcore.Request(ctx, &larkcore.ApiReq{
+		HttpMethod:                http.MethodGet,
+		ApiPath:                   "/open-apis/bot/v3/info",
+		SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant},
+	}, a.config)
 	if err != nil {
 		return botInfo{}, sendResult{}, err
 	}
