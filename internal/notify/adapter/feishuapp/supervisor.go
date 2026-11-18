@@ -59,7 +59,7 @@ func (c *Channel) supervise() {
 		}
 		if n := countQueued(left); n > 0 {
 			c.logger().Infof("飞书应用机器人(%d): 关闭时还有 %d 条排队的消息没开始处理，交给重建以后的通道接着处理"+
-				"（%s 内没有接手就丢掉；进程退出时不处理）", c.confID, n, durationText(apps.ttl()))
+				"（%s内没有接手就丢掉；进程退出时不处理）", c.confID, n, durationText(apps.ttl()))
 		}
 		apps.release(cfg.AppID, c, left)
 	}()

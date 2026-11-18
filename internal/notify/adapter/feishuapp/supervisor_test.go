@@ -3,6 +3,7 @@ package feishuapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -180,6 +181,8 @@ func TestSupervisor_BackoffDoublesAndResets(t *testing.T) {
 func TestDurationText(t *testing.T) {
 	assert.Equal(t, "2 分钟", durationText(defaultLeftoverTTL))
 	assert.Equal(t, "200ms", durationText(200*time.Millisecond))
+	// 日志里接「内」不留空格：「2 分钟内没有接手」
+	assert.Equal(t, "（2 分钟内", fmt.Sprintf("（%s内", durationText(defaultLeftoverTTL)))
 }
 
 func TestSupervisor_DefaultTimings(t *testing.T) {

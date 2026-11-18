@@ -278,7 +278,7 @@ func (r *appRegistry) expire(k leftKey, l *leftover) {
 	}
 	delete(r.left, k)
 	r.mu.Unlock()
-	l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s 内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
+	l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
 		k.confID, countQueued(l.items), durationText(r.ttl()))
 }
 
