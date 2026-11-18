@@ -4,6 +4,8 @@ import (
 	"container/list"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 /*
@@ -142,36 +144,117 @@ func (t *throttle) reset() {
 	t.now = time.Now
 }
 
-// appRegistry 记下每个 app_id 正被哪个通道实例使用。
+// defaultLeftoverTTL：关闭时留下的消息多久没有同一个通道的新实例来取就丢掉（通道被停用、删除或改了 App ID）。
+const defaultLeftoverTTL = 2 * time.Minute
+
+/*
+ * appRegistry 记下每个 app_id 正被哪个通道实例使用，并在热重载时交接排着队的消息。
+ *
+ * 一个应用同一时间只有一个实例连长连接：旧实例的监督循环与 SDK 的 Start 都退出以后（旧连接真正断开），
+ * 才「留下排队的消息并释放登记」，这是 release 里的一步；新实例「登记并取走留下的消息」是 claim 里的一步，
+ * 两步都在 r.mu 下，中间不会有消息落空。等登记的实例在释放的那一刻被叫醒（wake），不用等定时重试。
+ * 留下的消息只交给通道编号相同的实例（热重载以后重建的那个）；过了 leftTTL 没人取就丢掉并记一条 Warn。
+ */
 type appRegistry struct {
-	mu     sync.Mutex
-	owners map[string]*Channel
+	mu      sync.Mutex
+	owners  map[string]*Channel
+	waiters map[string]chan struct{} // app_id → 释放时关闭
+	left    map[leftKey]*leftover
+	leftTTL time.Duration
 }
 
-func newAppRegistry() *appRegistry { return &appRegistry{owners: map[string]*Channel{}} }
+type leftKey struct {
+	appID  string
+	confID uint
+}
 
-// claim 登记 c 使用 appID；已被另一个实例占着时返回那个实例的通道编号与 false。
-func (r *appRegistry) claim(appID string, c *Channel) (uint, bool) {
+// leftover 是一个实例关闭时留下、还没人取的消息。
+type leftover struct {
+	items map[string][]*queued
+	timer *time.Timer
+	log   func() *zap.SugaredLogger
+}
+
+func newAppRegistry() *appRegistry {
+	return &appRegistry{
+		owners: map[string]*Channel{}, waiters: map[string]chan struct{}{},
+		left: map[leftKey]*leftover{}, leftTTL: defaultLeftoverTTL,
+	}
+}
+
+// claim 登记 c 使用 appID，并取走同一个通道编号留下的消息。已被另一个实例占着时返回那个实例的通道编号、
+// false，以及它释放时会关闭的 wake。
+func (r *appRegistry) claim(appID string, c *Channel) (holder uint, ok bool, wake <-chan struct{}, items map[string][]*queued) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if cur := r.owners[appID]; cur != nil && cur != c {
-		return cur.confID, false
+		ch := r.waiters[appID]
+		if ch == nil {
+			ch = make(chan struct{})
+			r.waiters[appID] = ch
+		}
+		return cur.confID, false, ch, nil
 	}
 	r.owners[appID] = c
-	return 0, true
+	k := leftKey{appID: appID, confID: c.confID}
+	if l := r.left[k]; l != nil {
+		l.timer.Stop()
+		delete(r.left, k)
+		items = l.items
+	}
+	return 0, true, nil, items
 }
 
-// release 只释放 c 自己的登记。
-func (r *appRegistry) release(appID string, c *Channel) {
+// release 只释放 c 自己的登记，同时留下它排着队、还没开始处理的消息（交给同一个通道编号的下一个实例），
+// 并叫醒在等这个 app_id 的实例。
+func (r *appRegistry) release(appID string, c *Channel, items map[string][]*queued) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.owners[appID] == c {
-		delete(r.owners, appID)
+	if r.owners[appID] != c {
+		return
 	}
+	delete(r.owners, appID)
+	if countQueued(items) > 0 {
+		// c 是登记的主人，登记时已经取走了这个通道编号以前留下的，这里不会有旧的一份
+		k := leftKey{appID: appID, confID: c.confID}
+		l := &leftover{items: items, log: c.logger}
+		l.timer = time.AfterFunc(r.leftTTL, func() { r.expire(k, l) })
+		r.left[k] = l
+	}
+	if ch := r.waiters[appID]; ch != nil {
+		close(ch)
+		delete(r.waiters, appID)
+	}
+}
+
+// expire 丢掉过了 leftTTL 还没人取的消息。
+func (r *appRegistry) expire(k leftKey, l *leftover) {
+	r.mu.Lock()
+	if r.left[k] != l {
+		r.mu.Unlock()
+		return
+	}
+	delete(r.left, k)
+	r.mu.Unlock()
+	l.log().Warnf("飞书应用机器人(%d): 关闭时留下的 %d 条排队的消息在 %s 内没有重建的通道接手（通道被停用、删除或改了 App ID），丢掉",
+		k.confID, countQueued(l.items), durationText(r.ttl()))
+}
+
+// ttl 是留下的消息等多久没人取就丢掉。
+func (r *appRegistry) ttl() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.leftTTL
 }
 
 func (r *appRegistry) reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, l := range r.left {
+		l.timer.Stop()
+	}
 	r.owners = map[string]*Channel{}
+	r.waiters = map[string]chan struct{}{}
+	r.left = map[leftKey]*leftover{}
+	r.leftTTL = defaultLeftoverTTL
 }

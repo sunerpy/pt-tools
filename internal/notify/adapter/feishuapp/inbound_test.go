@@ -410,3 +410,192 @@ func TestInbound_MissingCreateTimeAndChatID(t *testing.T) {
 	require.Eventually(t, func() bool { return len(api.sent()) == 1 }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, sentText{typ: "open_id", id: "ou_nobody", content: api.sent()[0].content}, api.sent()[0], "没有会话 ID 时直接发给这个人")
 }
+
+func createdAt(t time.Time) evOpt {
+	return func(ev *larkim.P2MessageReceiveV1) {
+		ev.Event.Message.CreateTime = ptr(strconv.FormatInt(t.UnixMilli(), 10))
+	}
+}
+
+// 后发的那帧先进队（SDK 每帧一个 goroutine，谁先抢到锁谁先进队）：同一个窗口里到的按发出时间处理。
+func TestInbound_OrdersBySendTimeWithinWindow(t *testing.T) {
+	_, _, runners, rec := startChannel(t, testConfig)
+	r := runners.last()
+	base := time.Now().Add(-time.Minute)
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_w2", "ou_admin", "确认", createdAt(base.Add(2*time.Second)))))
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_w1", "ou_admin", "/delete 1", createdAt(base.Add(time.Second)))))
+	// 没有 create_time 的按收到的时间：排在两条一分钟前发的后面
+	noTime := msgEvent("om_w3", "ou_admin", "/status")
+	noTime.Event.Message.CreateTime = nil
+	require.NoError(t, r.Emit(context.Background(), noTime))
+	require.Eventually(t, func() bool { return len(rec.got()) == 3 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []string{"/delete 1", "确认", "/status"}, rec.texts())
+}
+
+// 处理过程中新到的消息按发出时间插进还没开始的那部分；已经开始处理的那条不受影响。
+func TestInbound_InsertsBySendTimeWhileProcessing(t *testing.T) {
+	_, _, runners, rec := startChannel(t, testConfig)
+	r := runners.last()
+	rec.block = make(chan struct{})
+	base := time.Now().Add(-time.Minute)
+	require.NoError(t, r.Emit(context.Background(), msgEvent("om_p0", "ou_admin", "m0", createdAt(base.Add(10*time.Second)))))
+	require.Eventually(t, func() bool { return len(rec.got()) == 1 }, 5*time.Second, time.Millisecond, "第一条正在处理")
+	for _, ev := range []*larkim.P2MessageReceiveV1{
+		msgEvent("om_p3", "ou_admin", "m3", createdAt(base.Add(13*time.Second))),
+		msgEvent("om_p1", "ou_admin", "m1", createdAt(base.Add(11*time.Second))),
+		msgEvent("om_p2", "ou_admin", "m2", createdAt(base.Add(12*time.Second))),
+		// 比正在处理的那条发得还早：只能排进还没开始的那部分
+		msgEvent("om_pe", "ou_admin", "early", createdAt(base)),
+	} {
+		require.NoError(t, r.Emit(context.Background(), ev))
+	}
+	close(rec.block)
+	require.Eventually(t, func() bool { return len(rec.got()) == 5 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []string{"m0", "early", "m1", "m2", "m3"}, rec.texts())
+}
+
+// reloadChannel 建同一个通道（编号 7）热重载以后的新实例：假 API、假长连接，接上新的 chain。
+func reloadChannel(t *testing.T, raw string, setup func(*Channel)) (*Channel, *fakeRunners, *chainRecorder) {
+	t.Helper()
+	c := New()
+	api := &fakeAPI{bot: botInfo{OpenID: "ou_bot"}}
+	runners := &fakeRunners{}
+	c.newAPI = func(*Config, larkcore.Logger) apiSender { return api }
+	c.newRunner = runners.factory
+	shortenTimings(c)
+	if setup != nil {
+		setup(c)
+	}
+	require.NoError(t, c.Init(context.Background(), confOf(7, raw)))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.Close(ctx)
+	})
+	rec := &chainRecorder{}
+	c.OnInbound(rec.handle)
+	return c, runners, rec
+}
+
+// 热重载：一条在处理、两条排着队。旧实例关闭时正在处理的那条随 ctx 取消，排着队的交给重建以后的实例，
+// 按原来的顺序各处理一次；平台重推排着队的那条也按重复丢掉。
+func TestReload_HandsQueuedMessagesToNextInstance(t *testing.T) {
+	c1, _, runners1, rec1 := startChannel(t, testConfig)
+	r1 := runners1.last()
+	rec1.block = make(chan struct{}) // 一直不放行，只能靠 ctx 取消
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_h1", "ou_admin", "/status")))
+	require.Eventually(t, func() bool { return len(rec1.got()) == 1 }, 5*time.Second, time.Millisecond, "第一条正在处理")
+	queuedA := msgEvent("om_h2", "ou_admin", "/delete 1")
+	require.NoError(t, r1.Emit(context.Background(), queuedA), "排着队的已经回了 200")
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_h3", "ou_admin", "确认")))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, c1.Close(ctx))
+	assert.Len(t, rec1.got(), 1, "旧实例只处理了第一条")
+
+	_, runners2, rec2 := reloadChannel(t, testConfig, nil)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 2 }, 5*time.Second, time.Millisecond, "新实例接着处理排着队的")
+	assert.Equal(t, []string{"/delete 1", "确认"}, rec2.texts())
+	r2 := runners2.waitRunner(t, 1)
+	require.NoError(t, r2.Emit(context.Background(), queuedA), "平台重推的副本回 200")
+	time.Sleep(50 * time.Millisecond)
+	assert.Len(t, rec2.got(), 2, "重推的副本按重复丢掉，不再处理")
+}
+
+// 处理槽全被占着时，排队的那个人的工作协程在等槽。关闭以后它不能再处理（ctx 取消以后绝不再调 deliver），
+// 这条交给新实例。
+func TestReload_NoDeliverAfterCancelWhileWaitingForSlot(t *testing.T) {
+	users := make([]string, maxHandlers+1)
+	for i := range users {
+		users[i] = "ou_slot" + strconv.Itoa(i)
+	}
+	raw := `{"app_id":"cli_test","app_secret":"sec-ret-value","admin_users":["` + strings.Join(users, `","`) + `"]}`
+	c1, _, runners1, rec1 := startChannel(t, raw)
+	r1 := runners1.last()
+	rec1.block = make(chan struct{})
+	for i := range maxHandlers {
+		require.NoError(t, r1.Emit(context.Background(), msgEvent("om_s"+strconv.Itoa(i), users[i], "busy")))
+	}
+	require.Eventually(t, func() bool { return len(rec1.got()) == maxHandlers }, 5*time.Second, time.Millisecond, "处理槽全被占着")
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_waiting", users[maxHandlers], "/status")))
+	time.Sleep(50 * time.Millisecond)
+	assert.Len(t, rec1.got(), maxHandlers, "第 17 个人在等处理槽")
+
+	require.NoError(t, c1.Close(context.Background()))
+	time.Sleep(20 * time.Millisecond)
+	assert.Len(t, rec1.got(), maxHandlers, "关闭以后旧实例不再处理")
+
+	_, _, rec2 := reloadChannel(t, raw, nil)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, users[maxHandlers], rec2.got()[0].ChannelUserID)
+}
+
+// 留下的消息只交给通道编号相同的实例；过了时限没人取就丢掉，记一条 Warn 写明几条。
+func TestReload_LeftoversOnlyForSameConfAndExpire(t *testing.T) {
+	c1, _, runners1, rec1 := startChannel(t, testConfig)
+	apps.mu.Lock()
+	apps.leftTTL = 200 * time.Millisecond
+	apps.mu.Unlock()
+	logs := observedLogger(c1)
+	r1 := runners1.last()
+	rec1.block = make(chan struct{})
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_l1", "ou_admin", "/status")))
+	require.Eventually(t, func() bool { return len(rec1.got()) == 1 }, 5*time.Second, time.Millisecond)
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_l2", "ou_admin", "/sites")))
+	require.NoError(t, r1.Emit(context.Background(), msgEvent("om_l3", "ou_user", "/help")))
+	require.NoError(t, c1.Close(context.Background()))
+	assert.Contains(t, logJoined(logs.All()), "关闭时还有 2 条排队的消息没开始处理")
+
+	// 同一个应用换了通道（编号 8）：不给它
+	other := New()
+	api := &fakeAPI{bot: botInfo{OpenID: "ou_bot"}}
+	runners := &fakeRunners{}
+	other.newAPI = func(*Config, larkcore.Logger) apiSender { return api }
+	other.newRunner = runners.factory
+	shortenTimings(other)
+	require.NoError(t, other.Init(context.Background(), confOf(8, testConfig)))
+	defer func() { _ = other.Close(context.Background()) }()
+	rec := &chainRecorder{}
+	other.OnInbound(rec.handle)
+	runners.waitRunner(t, 1)
+
+	require.Eventually(t, func() bool { return strings.Contains(logJoined(logs.All()), "没有重建的通道接手") }, 5*time.Second, 5*time.Millisecond)
+	assert.Contains(t, logJoined(logs.All()), "留下的 2 条排队的消息")
+	assert.Empty(t, rec.got(), "别的通道编号拿不到")
+	apps.mu.Lock()
+	assert.Empty(t, apps.left, "过期的已经丢掉")
+	apps.mu.Unlock()
+}
+
+// 交接不受每人 8 条的上限限制；名单在这次重建里改过、已经不在名单里的人留下的不再执行。
+func TestReload_AdoptIgnoresQueueLimitAndRechecksLists(t *testing.T) {
+	resetProcessState(t)
+	owner := &Channel{confID: 7}
+	_, ok, _, _ := apps.claim("cli_test", owner)
+	require.True(t, ok)
+	base := time.Now().Add(-time.Minute)
+	var mine, gone []*queued
+	for i := range userQueueSize + 3 {
+		in := notify.InboundMessage{ChannelType: ChannelType, SourceConfID: 7, ChannelUserID: "ou_admin", Text: "m" + strconv.Itoa(i)}
+		mine = append(mine, newQueued(in, base.Add(time.Duration(i)*time.Second), "om_a"+strconv.Itoa(i)))
+	}
+	gone = append(gone, newQueued(notify.InboundMessage{ChannelType: ChannelType, SourceConfID: 7, ChannelUserID: "ou_removed", Text: "/delete 1"}, base, "om_gone"))
+	apps.release("cli_test", owner, map[string][]*queued{"ou_admin": mine, "ou_removed": gone})
+
+	var logs *observer.ObservedLogs
+	_, _, rec := reloadChannel(t, testConfig, func(c *Channel) { logs = observedLogger(c) })
+	require.Eventually(t, func() bool { return len(rec.got()) == userQueueSize+3 }, 5*time.Second, time.Millisecond)
+	var want []string
+	for i := range userQueueSize + 3 {
+		want = append(want, "m"+strconv.Itoa(i))
+	}
+	assert.Equal(t, want, rec.texts())
+	time.Sleep(20 * time.Millisecond)
+	for _, m := range rec.got() {
+		assert.NotEqual(t, "ou_removed", m.ChannelUserID, "不在名单里的人留下的不执行")
+	}
+	joined := logJoined(logs.All())
+	assert.Contains(t, joined, "接手上一个实例留下的 11 条消息")
+	assert.Contains(t, joined, "1 条消息的发送人已经不在名单里")
+}

@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 // fakeClock 是可以手动拨动的时钟。
@@ -90,17 +92,54 @@ func TestAppRegistry(t *testing.T) {
 	r := newAppRegistry()
 	a := &Channel{confID: 1}
 	b := &Channel{confID: 2}
-	_, ok := r.claim("cli_x", a)
+	_, ok, _, _ := r.claim("cli_x", a)
 	require.True(t, ok)
-	_, ok = r.claim("cli_x", a)
+	_, ok, _, _ = r.claim("cli_x", a)
 	assert.True(t, ok, "自己重复登记没问题")
-	holder, ok := r.claim("cli_x", b)
+	holder, ok, wake, _ := r.claim("cli_x", b)
 	assert.False(t, ok)
 	assert.Equal(t, uint(1), holder)
-	r.release("cli_x", b)
-	_, ok = r.claim("cli_x", b)
+	r.release("cli_x", b, nil)
+	_, ok, _, _ = r.claim("cli_x", b)
 	assert.False(t, ok, "别人释放不了我的登记")
-	r.release("cli_x", a)
-	_, ok = r.claim("cli_x", b)
+	select {
+	case <-wake:
+		t.Fatal("还没释放就叫醒了")
+	default:
+	}
+	r.release("cli_x", a, nil)
+	select {
+	case <-wake:
+	default:
+		t.Fatal("释放时要叫醒等着的实例")
+	}
+	_, ok, _, _ = r.claim("cli_x", b)
 	assert.True(t, ok)
+}
+
+// 留下的消息只交给通道编号相同的下一个实例，取走以后就没有了；不是登记主人的实例释放不了、也留不下消息。
+func TestAppRegistry_LeftoversGoToSameConf(t *testing.T) {
+	r := newAppRegistry()
+	defer r.reset()
+	item := newQueued(notify.InboundMessage{ChannelUserID: "ou_a", Text: "x"}, time.Unix(1_800_000_000, 0), "om_x")
+	old := &Channel{confID: 7}
+	_, ok, _, _ := r.claim("cli_m", old)
+	require.True(t, ok)
+	r.release("cli_m", &Channel{confID: 7}, map[string][]*queued{"ou_a": {item}})
+	assert.Empty(t, r.left, "不是登记的主人：什么都不做")
+	r.release("cli_m", old, map[string][]*queued{"ou_a": {item}})
+
+	other := &Channel{confID: 8}
+	_, ok, _, got := r.claim("cli_m", other)
+	require.True(t, ok)
+	assert.Empty(t, got, "别的通道编号拿不到")
+	r.release("cli_m", other, nil)
+
+	next := &Channel{confID: 7}
+	_, ok, _, got = r.claim("cli_m", next)
+	require.True(t, ok)
+	assert.Equal(t, map[string][]*queued{"ou_a": {item}}, got)
+	r.release("cli_m", next, nil)
+	_, _, _, got = r.claim("cli_m", &Channel{confID: 7})
+	assert.Empty(t, got, "取走以后就没有了")
 }

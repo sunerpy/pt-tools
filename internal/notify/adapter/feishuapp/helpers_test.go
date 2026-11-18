@@ -113,6 +113,7 @@ func shortenTimings(c *Channel) {
 	c.clientErrWait = 30 * time.Millisecond
 	c.claimRetry = 10 * time.Millisecond
 	c.queueIdle = 50 * time.Millisecond
+	c.gather = 20 * time.Millisecond
 	c.noticeTimeout = time.Second
 }
 

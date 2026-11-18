@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -144,8 +145,14 @@ func (f *fakeFeishu) connCount() int {
 	return len(f.conns)
 }
 
-// push 往当前的连接推一帧接收消息事件。
+// push 往当前的连接推一帧接收消息事件，发出时间是现在。
 func (f *fakeFeishu) push(t *testing.T, frameMsgID, messageID, openID, text string) {
+	t.Helper()
+	f.pushAt(t, frameMsgID, messageID, openID, text, time.Now())
+}
+
+// pushAt 往当前的连接推一帧接收消息事件，发出时间（create_time）是 sent。
+func (f *fakeFeishu) pushAt(t *testing.T, frameMsgID, messageID, openID, text string, sent time.Time) {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{
 		"schema": "2.0",
@@ -157,7 +164,7 @@ func (f *fakeFeishu) push(t *testing.T, frameMsgID, messageID, openID, text stri
 			"sender": map[string]any{"sender_id": map[string]any{"open_id": openID}, "sender_type": "user", "tenant_key": "tk"},
 			"message": map[string]any{
 				"message_id": messageID, "chat_id": "oc_p2p_proto", "chat_type": "p2p", "message_type": "text",
-				"content": textJSON(text), "create_time": strconv.FormatInt(time.Now().UnixMilli(), 10),
+				"content": textJSON(text), "create_time": strconv.FormatInt(sent.UnixMilli(), 10),
 			},
 		},
 	})
@@ -315,4 +322,70 @@ func TestProtocol_ReloadKeepsSingleConnection(t *testing.T) {
 	f.push(t, "frame-r", "om_reload", "ou_admin", "/status")
 	assert.Equal(t, http.StatusOK, f.waitAck(t).code)
 	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 10*time.Second, 5*time.Millisecond)
+}
+
+// 真的 SDK 每帧一个 goroutine：连续两帧，第一帧的回调被拖到第二帧进队以后才跑，仍按发出时间处理。
+func TestProtocol_FramesOrderedBySendTime(t *testing.T) {
+	resetProcessState(t)
+	appID := uniqueAppID("cli_proto_order")
+	f := newFakeFeishu(t, appID, "s")
+	secondQueued := make(chan struct{})
+	c, rec := protocolChannel(t, f, 25, "s", func(c *Channel) {
+		inner := c.newRunner
+		c.newRunner = func(cfg *Config, h wsHooks, log larkcore.Logger) wsRunner {
+			onMessage := h.onMessage
+			h.onMessage = func(ctx context.Context, ev *larkim.P2MessageReceiveV1) error {
+				id := deref(ev.Event.Message.MessageId)
+				if id == "om_order_1" {
+					<-secondQueued // 第一帧的回调等第二帧进了队才跑
+				}
+				err := onMessage(ctx, ev)
+				if id == "om_order_2" {
+					close(secondQueued)
+				}
+				return err
+			}
+			return inner(cfg, h, log)
+		}
+	})
+	require.Eventually(t, func() bool { return c.LinkState() == notify.LinkConnected }, 10*time.Second, 5*time.Millisecond)
+
+	sent := time.Now().Add(-time.Minute)
+	f.pushAt(t, "frame-o1", "om_order_1", "ou_admin", "/delete 1", sent)
+	f.pushAt(t, "frame-o2", "om_order_2", "ou_admin", "确认", sent.Add(time.Second))
+	acks := []wsAck{f.waitAck(t), f.waitAck(t)}
+	assert.ElementsMatch(t, []wsAck{{messageID: "frame-o1", code: http.StatusOK}, {messageID: "frame-o2", code: http.StatusOK}}, acks)
+	require.Eventually(t, func() bool { return len(rec.got()) == 2 }, 10*time.Second, 5*time.Millisecond)
+	assert.Equal(t, []string{"/delete 1", "确认"}, rec.texts())
+}
+
+// 真的 SDK 热重载：一条在处理、一条排着队（已经回了 200）。旧实例关闭、新实例连上以后接着处理排着队的那条，
+// 只处理一次；任何时候都只有一条连接。
+func TestProtocol_ReloadHandsOffQueuedMessage(t *testing.T) {
+	resetProcessState(t)
+	appID := uniqueAppID("cli_proto_handoff")
+	f := newFakeFeishu(t, appID, "s")
+	c1, rec1 := protocolChannel(t, f, 26, "s", nil)
+	rec1.block = make(chan struct{}) // 一直不放行，只能靠 ctx 取消
+	require.Eventually(t, func() bool { return c1.LinkState() == notify.LinkConnected }, 10*time.Second, 5*time.Millisecond)
+
+	f.push(t, "frame-h1", "om_handoff_1", "ou_admin", "/status")
+	assert.Equal(t, http.StatusOK, f.waitAck(t).code)
+	require.Eventually(t, func() bool { return len(rec1.got()) == 1 }, 10*time.Second, 5*time.Millisecond, "第一条正在处理")
+	f.push(t, "frame-h2", "om_handoff_2", "ou_admin", "/sites")
+	assert.Equal(t, http.StatusOK, f.waitAck(t).code, "排着队的已经回了 200，平台不会再推")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, c1.Close(ctx))
+	require.Eventually(t, func() bool { return f.connCount() == 0 }, 10*time.Second, 5*time.Millisecond)
+
+	c2, rec2 := protocolChannel(t, f, 26, "s", nil)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 10*time.Second, 5*time.Millisecond, "新实例接着处理")
+	assert.Equal(t, "/sites", rec2.got()[0].Text)
+	require.Eventually(t, func() bool { return c2.LinkState() == notify.LinkConnected }, 10*time.Second, 5*time.Millisecond)
+	f.mu.Lock()
+	assert.Equal(t, 1, f.maxConns, "任何时候都只有一条连接")
+	f.mu.Unlock()
+	assert.Len(t, rec1.got(), 1)
 }

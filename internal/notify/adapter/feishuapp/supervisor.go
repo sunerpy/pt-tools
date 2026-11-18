@@ -3,6 +3,7 @@ package feishuapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"time"
 )
@@ -28,9 +29,14 @@ func (c *Channel) timing(v, def time.Duration) time.Duration {
 
 /*
  * supervise 是长连接的监督循环，参照 Telegram 的 runInbound：
- *  1. 先登记 app_id，被同一进程里的另一个通道占着时不连、标异常，每分钟重试；
+ *  1. 先登记 app_id，并取走同一个通道上一个实例留下的排队消息（热重载交接，见 state.go 的 appRegistry）。
+ *     被另一个实例占着时不连：占着的是这个通道的上一个实例（热重载时旧连接还没断开）就等它断开；
+ *     是别的通道就标异常。对方释放的那一刻被叫醒，另外每分钟重试一次兜底；
  *  2. Start 阻塞运行，断线重连由 SDK 自己做；
- *  3. Start 只在 ctx 取消、不可重试的错误或服务端下发的重试次数用完时返回：后两种标异常、退避、再 Start。
+ *  3. Start 只在 ctx 取消、不可重试的错误或服务端下发的重试次数用完时返回：后两种标异常、退避、再 Start；
+ *  4. 退出时（ctx 取消，SDK 的 Start 已经返回，旧连接已经断开）交出排队、还没开始处理的消息并释放登记，
+ *     这是一步：新实例要么还没登记，要么登记的同时拿到这些消息。所以 Close 超时返回时登记仍然占着，
+ *     直到旧连接真正结束。
  *
  * 客户端只在必要时新建。SDK 每新建一个客户端就留下一个停不掉的定时协程（上游缺陷：ws/client.go:227 的
  * larkcache.New(30s) 在 cache/cache.go:53 起协程、:12 靠 finalizer 停，可协程一直引用着 cache，finalizer 不会跑）。
@@ -45,21 +51,43 @@ func (c *Channel) supervise() {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
+	claimed := false
+	defer func() {
+		left := c.queues.seal()
+		if !claimed {
+			return // 没登记过就没连过长连接，也就收不到消息
+		}
+		if n := countQueued(left); n > 0 {
+			c.logger().Infof("飞书应用机器人(%d): 关闭时还有 %d 条排队的消息没开始处理，交给重建以后的通道接着处理"+
+				"（%s 内没有接手就丢掉；进程退出时不处理）", c.confID, n, durationText(apps.ttl()))
+		}
+		apps.release(cfg.AppID, c, left)
+	}()
 	for warned := false; ; warned = true {
-		holder, ok := apps.claim(cfg.AppID, c)
+		holder, ok, wake, items := apps.claim(cfg.AppID, c)
 		if ok {
+			claimed = true
+			c.adopt(items)
 			break
 		}
-		c.conflict.Store(true)
-		if !warned {
-			c.logger().Warnf("飞书应用机器人(%d): 同一个飞书应用已被通道 #%d 使用，这个通道不连长连接（一个应用只能给一个通道用），每分钟重试一次", c.confID, holder)
+		retry := c.timing(c.claimRetry, defaultClaimRetry)
+		if holder == c.confID {
+			// 这个通道的上一个实例：热重载时旧连接还没断开，断开的那一刻接手（不算异常）
+			if !warned {
+				c.logger().Infof("飞书应用机器人(%d): 上一个实例的长连接还没断开，断开以后马上接手", c.confID)
+			}
+		} else {
+			c.conflict.Store(true)
+			if !warned {
+				c.logger().Warnf("飞书应用机器人(%d): 同一个飞书应用已被通道 #%d 使用，这个通道不连长连接（一个应用只能给一个通道用），"+
+					"那个通道停下以后马上接手（另外每分钟重试一次）", c.confID, holder)
+			}
 		}
-		if !sleepCtx(ctx, c.timing(c.claimRetry, defaultClaimRetry)) {
+		if !waitClaim(ctx, wake, retry) {
 			return
 		}
 	}
 	c.conflict.Store(false)
-	defer apps.release(cfg.AppID, c)
 
 	wait := c.timing(c.backoffBase, defaultBackoffBase)
 	var r wsRunner
@@ -115,6 +143,27 @@ func (c *Channel) nextDelay(err error, ranFor, wait time.Duration) (time.Duratio
 		wait = base
 	}
 	return wait, min(wait*2, maxWait)
+}
+
+// durationText 把整分钟的时长写成「N 分钟」，其余照 Go 的写法（测试里的毫秒）。
+func durationText(d time.Duration) string {
+	if d >= time.Minute && d%time.Minute == 0 {
+		return fmt.Sprintf("%d 分钟", int(d/time.Minute))
+	}
+	return d.String()
+}
+
+// waitClaim 等占着登记的实例释放（wake 关闭）或 retry 到期；ctx 取消时返回 false。
+func waitClaim(ctx context.Context, wake <-chan struct{}, retry time.Duration) bool {
+	timer := time.NewTimer(retry)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-wake:
+	case <-timer.C:
+	}
+	return ctx.Err() == nil
 }
 
 // jitter 加上 0–50% 的抖动，避免多个实例同时重连。

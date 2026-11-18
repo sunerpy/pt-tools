@@ -80,6 +80,7 @@ type Channel struct {
 	clientErrWait time.Duration
 	claimRetry    time.Duration
 	queueIdle     time.Duration
+	gather        time.Duration
 	noticeTimeout time.Duration
 }
 
@@ -168,8 +169,9 @@ func (c *Channel) setWS(state int32) {
 	}
 }
 
-// Close 只执行一次：标记关闭，取消生命周期，释放 app_id 登记（热重载时新实例马上能接手），
-// 再等 SDK 客户端与自己的协程退出。ctx 到期就返回 ctx.Err()，不卡关机。
+// Close 只执行一次：标记关闭，取消生命周期（监督循环、队列工作协程、进行中的处理、后台提示都收到取消），
+// 再等 SDK 客户端与自己的协程退出。app_id 登记由监督循环在旧连接真正断开以后释放，同时把排队的消息
+// 交给重建的实例（见 supervise）。ctx 到期就返回 ctx.Err()，不卡关机；收尾（等协程、交接、释放）在后台接着做完。
 func (c *Channel) Close(ctx context.Context) error {
 	c.closeOnce.Do(func() {
 		c.closed.Store(true)
@@ -177,13 +179,10 @@ func (c *Channel) Close(ctx context.Context) error {
 		c.stopping = true
 		c.goMu.Unlock()
 		c.mu.RLock()
-		cancel, cfg := c.cancel, c.cfg
+		cancel := c.cancel
 		c.mu.RUnlock()
 		if cancel != nil {
 			cancel()
-		}
-		if cfg != nil {
-			apps.release(cfg.AppID, c)
 		}
 	})
 	if r := c.currentRunner(); r != nil {

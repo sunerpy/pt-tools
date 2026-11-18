@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
 )
@@ -176,6 +177,11 @@ func TestSupervisor_BackoffDoublesAndResets(t *testing.T) {
 	assert.Equal(t, time.Duration(0), jitter(0))
 }
 
+func TestDurationText(t *testing.T) {
+	assert.Equal(t, "2 分钟", durationText(defaultLeftoverTTL))
+	assert.Equal(t, "200ms", durationText(200*time.Millisecond))
+}
+
 func TestSupervisor_DefaultTimings(t *testing.T) {
 	c := New()
 	assert.Equal(t, 5*time.Second, c.timing(c.backoffBase, defaultBackoffBase))
@@ -184,6 +190,8 @@ func TestSupervisor_DefaultTimings(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, defaultResetAfter)
 	assert.Equal(t, time.Minute, defaultClaimRetry)
 	assert.Equal(t, time.Minute, defaultQueueIdle)
+	assert.Equal(t, 200*time.Millisecond, c.timing(c.gather, defaultGather))
+	assert.Equal(t, 2*time.Minute, defaultLeftoverTTL)
 }
 
 // runner 卡住（不理会 ctx、CloseAndWait 也不返回）时，Close 按 ctx 返回，不卡关机。
@@ -254,4 +262,102 @@ func TestBotInfo_RetriesUntilSuccess(t *testing.T) {
 	joined := logJoined(logs.All())
 	assert.Contains(t, joined, "99991663")
 	assert.NotContains(t, joined, "t-g1044ghJRUIJJ5ELPZNLNRIHCAAXQ1")
+}
+
+// competitor 建一个用同一个应用、通道编号 confID 的实例并接上 chain（假 API、假长连接）。
+func competitor(t *testing.T, confID uint, setup func(*Channel)) (*Channel, *fakeRunners, *chainRecorder) {
+	t.Helper()
+	c := New()
+	api := &fakeAPI{bot: botInfo{OpenID: "ou_bot"}}
+	runners := &fakeRunners{}
+	c.newAPI = func(*Config, larkcore.Logger) apiSender { return api }
+	c.newRunner = runners.factory
+	shortenTimings(c)
+	if setup != nil {
+		setup(c)
+	}
+	require.NoError(t, c.Init(context.Background(), confOf(confID, testConfig)))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.Close(ctx)
+	})
+	rec := &chainRecorder{}
+	c.OnInbound(rec.handle)
+	return c, runners, rec
+}
+
+// 旧连接卡着没断开（Close 已经超时返回）时登记仍然占着：另一个通道重试多少次都拿不到，
+// 等旧连接真正结束才释放，同一个应用任何时候只有一条连接。
+func TestSupervisor_ReleaseWaitsForOldConnection(t *testing.T) {
+	first, _, runners1 := newTestChannel(t, testConfig)
+	runners1.stuck = true
+	first.OnInbound((&chainRecorder{}).handle)
+	stuck := runners1.waitRunner(t, 1)
+	defer stuck.release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, first.Close(ctx), context.DeadlineExceeded)
+
+	second, runners2, _ := competitor(t, 8, nil) // claimRetry 10ms：等的这段时间里重试了很多次
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, 0, runners2.count(), "旧连接还没断开，不能连")
+	assert.False(t, second.Healthy(), "被别的通道占着时标异常")
+
+	stuck.release()
+	runners2.waitRunner(t, 1)
+	require.Eventually(t, second.Healthy, 5*time.Second, time.Millisecond)
+}
+
+// 等登记的实例在释放的那一刻被叫醒，不等定时重试（这里设成一小时）。
+func TestSupervisor_WaiterWakesOnRelease(t *testing.T) {
+	first, _, runners1 := newTestChannel(t, testConfig)
+	first.OnInbound((&chainRecorder{}).handle)
+	runners1.waitRunner(t, 1)
+
+	second, runners2, _ := competitor(t, 8, func(c *Channel) { c.claimRetry = time.Hour })
+	require.Eventually(t, func() bool { return !second.Healthy() }, 5*time.Second, time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
+	require.Equal(t, 0, runners2.count())
+
+	require.NoError(t, first.Close(context.Background()))
+	start := time.Now()
+	runners2.waitRunner(t, 1)
+	assert.Less(t, time.Since(start), 2*time.Second, "释放以后马上接手")
+}
+
+// 热重载时旧实例 Close 超时（旧连接卡着）：同一个通道的新实例不标异常，等旧连接真正断开的那一刻登记，
+// 同时接手排着队的消息。
+func TestReload_CloseTimeoutHandsOffWhenOldConnectionEnds(t *testing.T) {
+	c1, _, runners1 := newTestChannel(t, testConfig)
+	runners1.stuck = true
+	rec1 := &chainRecorder{block: make(chan struct{})}
+	c1.OnInbound(rec1.handle)
+	stuck := runners1.waitRunner(t, 1)
+	defer stuck.release()
+	require.NoError(t, stuck.Emit(context.Background(), msgEvent("om_t1", "ou_admin", "/status")))
+	require.Eventually(t, func() bool { return len(rec1.got()) == 1 }, 5*time.Second, time.Millisecond)
+	require.NoError(t, stuck.Emit(context.Background(), msgEvent("om_t2", "ou_admin", "/sites")))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, c1.Close(ctx), context.DeadlineExceeded)
+
+	var logs *observer.ObservedLogs
+	c2, runners2, rec2 := competitor(t, 7, func(c *Channel) {
+		c.claimRetry = time.Hour
+		logs = observedLogger(c)
+	})
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, 0, runners2.count(), "旧连接还没断开")
+	assert.True(t, c2.Healthy(), "等的是自己的上一个实例，不算异常")
+	assert.Empty(t, rec2.got())
+	assert.Contains(t, logJoined(logs.All()), "上一个实例的长连接还没断开")
+
+	stuck.release()
+	runners2.waitRunner(t, 1)
+	require.Eventually(t, func() bool { return len(rec2.got()) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, "/sites", rec2.got()[0].Text)
+	assert.Len(t, rec1.got(), 1)
 }

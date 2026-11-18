@@ -22,7 +22,8 @@ var (
 )
 
 // onMessage 处理一条「接收消息」事件。平台要求 3 秒内应答且不报错，否则重推：这里只做内存操作，
-// 要发消息的提示放进后台协程，命令交给按用户串行的队列。返回 nil 时 SDK 回 200，返回 error 时回 500。
+// 要发消息的提示放进后台协程，命令交给按用户串行、按发出时间排的队列（dispatch.go）。
+// 返回 nil 时 SDK 回 200，返回 error 时回 500。
 func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) error {
 	if ev == nil || ev.Event == nil || ev.Event.Sender == nil || ev.Event.Message == nil {
 		return nil
@@ -72,12 +73,15 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 		}
 		return nil
 	}
+	now := c.now()
+	sent := now // 没有 create_time 时按收到的时间排
 	if created, ok := createTime(msg.CreateTime); ok {
-		if age := c.now().Sub(created); age > expireAfter {
+		if age := now.Sub(created); age > expireAfter {
 			log.Infof("飞书应用机器人(%d): 消息发出已 %s，不执行 open_id=%s message_id=%s", c.confID, age.Round(time.Minute), openID, messageID)
 			c.sendNotice(noticeTarget(chatID, openID), expiredText(age))
 			return nil
 		}
+		sent = created
 	}
 	text := extractText(deref(msg.MessageType), deref(msg.Content), msg.Mentions, botID)
 	if text == "" {
@@ -94,7 +98,7 @@ func (c *Channel) onMessage(ctx context.Context, ev *larkim.P2MessageReceiveV1) 
 	if group {
 		in.MessageType = "group"
 	}
-	if !c.enqueue(openID, in) {
+	if !c.enqueue(openID, newQueued(in, sent, messageID), false) {
 		seenMessages.forget(key)
 		log.Warnf("飞书应用机器人(%d): 处理不过来，请平台重推 open_id=%s message_id=%s", c.confID, openID, messageID)
 		if c.closed.Load() {
