@@ -547,6 +547,139 @@ describe("新建通知通道", () => {
     await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
   });
 
+  it("飞书应用机器人：取消的回应迟到、已经又生成了新的二维码：不提示作废，也不动新的", async () => {
+    await openDialog();
+    await pickType("feishu_app");
+    api.regStart
+      .mockResolvedValueOnce(regStarted("reg-14"))
+      .mockResolvedValueOnce(regStarted("reg-15"));
+    api.regStatus.mockImplementation(async (id: string) => ({
+      id,
+      state: "pending",
+      expires_at: "",
+    }));
+    let release!: (v: unknown) => void;
+    api.regCancel.mockReturnValueOnce(new Promise((r) => (release = r)));
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
+    buttonByText("关闭").click();
+    await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-14"));
+    q("add-channel-btn")!.click();
+    await vi.waitFor(() => expect(q("name-input")).not.toBeNull());
+    await pickType("feishu_app");
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-open")?.getAttribute("href")).toContain("reg-15"));
+    release({ id: "reg-14", state: "canceled", expires_at: "", message: "已取消" });
+    await flush();
+    await flush();
+    expect(document.body.textContent, "迟到的作废提示会被当成新二维码的").not.toContain(
+      "二维码已经作废",
+    );
+    expect(q("feishu-reg-open")!.getAttribute("href")).toContain("reg-15");
+    expect(api.regCancel, "新的那一个不取消").toHaveBeenCalledTimes(1);
+  });
+
+  it("飞书应用机器人：取消的回应迟到说已经建好、新的二维码正在显示：照常提示建好并刷新列表，不动新的", async () => {
+    await openDialog();
+    await pickType("feishu_app");
+    api.regStart
+      .mockResolvedValueOnce(regStarted("reg-20"))
+      .mockResolvedValueOnce(regStarted("reg-21"));
+    api.regStatus.mockImplementation(async (id: string) => ({
+      id,
+      state: "pending",
+      expires_at: "",
+    }));
+    let release!: (v: unknown) => void;
+    api.regCancel.mockReturnValueOnce(new Promise((r) => (release = r)));
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
+    buttonByText("关闭").click();
+    await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-20"));
+    q("add-channel-btn")!.click();
+    await vi.waitFor(() => expect(q("name-input")).not.toBeNull());
+    await pickType("feishu_app");
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-open")?.getAttribute("href")).toContain("reg-21"));
+    release({ id: "reg-20", state: "done", expires_at: "", app_id: "cli_a", conf_id: 12 });
+    await vi.waitFor(() =>
+      expect(document.querySelector(".el-message--success")?.textContent).toContain(
+        "已经建好通道，正在连接飞书",
+      ),
+    );
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    expect(router.push, "对话框开着，不跳走").not.toHaveBeenCalled();
+    expect(q("feishu-reg-open")!.getAttribute("href"), "新的二维码还在").toContain("reg-21");
+    expect(api.regCancel, "新的那一个不取消").toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain("二维码已经作废");
+  });
+
+  it("飞书应用机器人：取消的回应迟到、对话框又打开了：不提示作废", async () => {
+    await openDialog();
+    await pickType("feishu_app");
+    api.regStart.mockResolvedValue(regStarted("reg-16"));
+    api.regStatus.mockResolvedValue({ id: "reg-16", state: "pending", expires_at: "" });
+    let release!: (v: unknown) => void;
+    api.regCancel.mockReturnValueOnce(new Promise((r) => (release = r)));
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
+    buttonByText("关闭").click();
+    await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-16"));
+    q("add-channel-btn")!.click();
+    await vi.waitFor(() => expect(q("name-input")).not.toBeNull());
+    release({ id: "reg-16", state: "canceled", expires_at: "", message: "已取消" });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("二维码已经作废");
+  });
+
+  it("飞书应用机器人：取消的回应迟到、已经离开页面：不提示作废", async () => {
+    await openDialog();
+    await pickType("feishu_app");
+    api.regStart.mockResolvedValue(regStarted("reg-17"));
+    api.regStatus.mockResolvedValue({ id: "reg-17", state: "pending", expires_at: "" });
+    let release!: (v: unknown) => void;
+    api.regCancel.mockReturnValueOnce(new Promise((r) => (release = r)));
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
+    buttonByText("关闭").click();
+    await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-17"));
+    view!.unmount();
+    view = null;
+    release({ id: "reg-17", state: "canceled", expires_at: "", message: "已取消" });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("二维码已经作废");
+  });
+
+  it("飞书应用机器人：取消没送到、已经又生成了新的二维码：不提示没能取消", async () => {
+    await openDialog();
+    await pickType("feishu_app");
+    api.regStart
+      .mockResolvedValueOnce(regStarted("reg-18"))
+      .mockResolvedValueOnce(regStarted("reg-19"));
+    api.regStatus.mockImplementation(async (id: string) => ({
+      id,
+      state: "pending",
+      expires_at: "",
+    }));
+    let fail!: (e: unknown) => void;
+    api.regCancel.mockReturnValueOnce(new Promise((_, rej) => (fail = rej)));
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-qr")).not.toBeNull());
+    buttonByText("关闭").click();
+    await vi.waitFor(() => expect(api.regCancel).toHaveBeenCalledWith("reg-18"));
+    q("add-channel-btn")!.click();
+    await vi.waitFor(() => expect(q("name-input")).not.toBeNull());
+    await pickType("feishu_app");
+    buttonByText("生成二维码").click();
+    await vi.waitFor(() => expect(q("feishu-reg-open")?.getAttribute("href")).toContain("reg-19"));
+    fail(new Error("Network Error"));
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("没能取消这个二维码");
+  });
+
   it("飞书应用机器人：离开页面时也按编号取消", async () => {
     await openDialog();
     await pickType("feishu_app");

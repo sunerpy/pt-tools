@@ -369,7 +369,10 @@ const regGone = ref(false);
 const regStarting = ref(false);
 /** 这次对话框里生成过几次二维码：第二次起写明之前的已经作废 */
 const regRounds = ref(0);
-/** 关对话框、离开页面时加一：在路上的「开始」回来时发现换了一轮，就把它取消 */
+/**
+ * 每开始一次、关一次对话框、离开页面都加一：在路上的「开始」回来时发现换了一轮，就把它取消；
+ * 关掉对话框以后迟到的取消回应发现换了一轮，就不再提示（免得被当成新二维码的）
+ */
 let regSession = 0;
 let regTimer: ReturnType<typeof setInterval> | undefined;
 let regPolling = false;
@@ -421,7 +424,7 @@ function stopRegPoll() {
 
 async function startFeishuRegister() {
   const name = (newChannel.value.name ?? "").trim() || FEISHU_REG_DEFAULT_NAME;
-  const session = regSession;
+  const session = ++regSession;
   stopRegPoll();
   regStarting.value = true;
   try {
@@ -501,7 +504,7 @@ async function finishRegister(st: FeishuRegisterStatus) {
  * 接着问到结果再提示。notify 为假（离开页面）时只取消、不提示。
  */
 async function dropRegister(notify: boolean) {
-  regSession += 1;
+  const gen = ++regSession;
   stopRegPoll();
   const cur = reg.value;
   const busy = regBusy.value;
@@ -515,20 +518,34 @@ async function dropRegister(notify: boolean) {
     st = await chatopsApi.feishuRegister.cancel(cur.id);
   } catch (e: unknown) {
     // 404：已经被别处新开的取代或过期，那一边会提示；别的错误：取消没送到，二维码过期以前仍然有效
-    if (notify && !(e instanceof ApiError && e.status === 404)) {
+    if (notify && !regStale(gen) && !(e instanceof ApiError && e.status === 404)) {
       ElMessage.warning("没能取消这个二维码：过期以前扫码确认的话，通道照常会建好");
     }
     return;
   }
-  if (notify) await settleDropped(st);
+  if (notify) await settleDropped(st, gen);
 }
 
-/** 关掉对话框以后这一个的结果：还没定下来（正在保存，或者取消还没生效）就每 2 秒再问，最多一分钟 */
-async function settleDropped(first: FeishuRegisterStatus) {
+/**
+ * 关掉的那一个的「作废」「没能取消」已经不该再说：离开了页面，或者之后又开始了一个、又关了一次（regSession 变了），
+ * 或者对话框又打开了。这两句没写是哪一个二维码，这时说出来会被当成眼前这一个的（作废那句还叫人去删应用）。
+ * 建好了、保存失败（带 App ID）这两种照样说：它们不会叫人删掉正在用的应用，不说的话用户会以为没建成、再扫一个
+ */
+function regStale(gen: number) {
+  return unmounted || gen !== regSession || addDialogVisible.value;
+}
+
+/**
+ * 关掉对话框以后这一个的结果：还没定下来（正在保存，或者取消还没生效）就每 2 秒再问，最多一分钟（离开页面就不问了）。
+ * 定下来以后：作废只在没有过时（见 regStale）时说；建好了照常提示、刷新列表（对话框又打开了不关它、不跳走）；
+ * 保存失败且飞书那边已经建好应用时提示原文
+ */
+async function settleDropped(first: FeishuRegisterStatus, gen: number) {
   let st = first;
   for (let round = 0; st.state === "pending" || st.state === "saving"; round++) {
     if (round >= REG_FOLLOW_ROUNDS || unmounted) return;
     await new Promise((r) => setTimeout(r, REG_POLL_MS));
+    if (unmounted) return;
     try {
       st = await chatopsApi.feishuRegister.status(st.id);
     } catch (e: unknown) {
@@ -539,8 +556,11 @@ async function settleDropped(first: FeishuRegisterStatus) {
       // 网络抖动：下一次再问
     }
   }
+  if (unmounted) return;
   if (st.state === "canceled") {
-    ElMessage.info("二维码已经作废，不要再扫；已经扫了的话，请到飞书开发者后台删掉多出来的应用");
+    if (!regStale(gen)) {
+      ElMessage.info("二维码已经作废，不要再扫；已经扫了的话，请到飞书开发者后台删掉多出来的应用");
+    }
   } else if (st.state === "done") {
     await finishRegister(st);
   } else if (st.state === "failed" && st.app_id && st.message) {
