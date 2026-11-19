@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.60...v1.0.0) (2026-11-19)
+
+
+### Features
+
+* **notify:** 新增飞书应用机器人通道：长连接收发命令、AI 助手对话与通知 ([#914](https://github.com/sunerpy/pt-tools/issues/914)) ([7276c11](https://github.com/sunerpy/pt-tools/commit/7276c113605f067d3c73e9661bb3eadce4aed98b))
+* **notify:** 飞书应用机器人加扫码一键创建：扫码确认以后自动建好通道并绑定扫码人 ([#915](https://github.com/sunerpy/pt-tools/issues/915)) ([a022059](https://github.com/sunerpy/pt-tools/commit/a02205999515a07983fd7561e0db7ac7a5782643))
+* **release:** 1.0.0 正式版：换上新标志，文档与发布配置按正式版更新 ([#911](https://github.com/sunerpy/pt-tools/issues/911)) ([296cc50](https://github.com/sunerpy/pt-tools/commit/296cc50be082207bf40b30956a67d77d0c7ed6d2))
+
 ## [1.0.0-rc.60](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.59...v1.0.0-rc.60) (2026-11-18)
 
 
