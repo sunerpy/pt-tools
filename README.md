@@ -73,7 +73,7 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 ## 1.0 亮点
 
 - **[AI 助手](https://firlab.app/pt-tools/guide/assistant)与 [MCP](https://firlab.app/pt-tools/guide/mcp)**：接上 OpenAI 兼容的大模型（DeepSeek、通义千问、Kimi、硅基流动、OpenRouter、Ollama 等），在网页、App、Telegram、QQ 或飞书里用自然语言查数据、搜索与推送种子、追剧和管理订阅、整理媒体库，还能[帮你改配置](https://firlab.app/pt-tools/guide/assistant#改配置)（下载器、站点、RSS、通知通道等，密钥只写不读）；改动类操作每次都先列出改以前、改以后，你确认了才执行。打开 MCP 以后，WorkBuddy、Qwen Code、Codex、Claude Code、Cursor 这类支持 MCP 的 Agent 也能调用同一套工具。
-- **[扫码一键创建飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu#扫码一键创建-推荐)**：在「ChatOps → 消息通知」添加「飞书应用机器人」通道，点「生成二维码」，用飞书扫码并确认，pt-tools 就在扫码人所在的企业里建好应用，预填收发消息要的权限与事件，随后建好并启用通道、连上飞书，扫码的人成为管理员并直接绑定。不用去飞书开发者后台开启机器人能力、开通权限、改订阅方式、发布版本；pt-tools 主动连出到飞书，不需要公网地址。
+- **[扫码一键创建飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu#扫码一键创建-推荐)**：在网页上生成二维码，用飞书扫码并确认，pt-tools 就在扫码人所在的企业里建好应用，预填收发消息要的权限与事件，随后建好并启用通道、连上飞书，扫码的人成为管理员并直接绑定。不用去飞书开发者后台开启机器人能力、开通权限、改订阅方式、发布版本；pt-tools 主动连出到飞书，不需要公网地址。
 - **[追剧与媒体库](https://firlab.app/pt-tools/guide/media-subscribe)**：订阅电影、追剧集的一季，pt-tools 到各站点搜索并按质量档案挑资源，下载完按命名模板[整理进媒体库](https://firlab.app/pt-tools/guide/media-library)、刮削 NFO 与海报、通知 Emby、Jellyfin 或 Plex，每部片的[详情页与订阅日历](https://firlab.app/pt-tools/guide/media-detail)写明每一集入库了没有。
 - **[刷流](https://firlab.app/pt-tools/guide/brush)与 [IYUU 辅种](https://firlab.app/pt-tools/guide/reseed)**：从站点的种子列表里按条件挑免费的新种做种、按规则删种，收益按天统计；IYUU 找出其他站点上数据相同的种子，校验到 100% 才开始做种，数据只存一份。
 - **[手机 App](https://firlab.app/pt-tools/guide/mobile-app)与[远程访问](https://firlab.app/pt-tools/guide/remote-access)**：Android App 扫网页上的二维码配对，先试直连、连不上再经 relay 连回 pt-tools，连接端到端加密，在外面也能看概览、管理种子与订阅。
