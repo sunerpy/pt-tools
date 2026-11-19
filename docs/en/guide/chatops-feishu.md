@@ -9,6 +9,30 @@ pt-tools receives events over the **long connection** of the official Feishu Go 
 
 ---
 
+## Creating the bot with a QR code (recommended)
+
+Scan one QR code with Feishu and pt-tools creates the app bot in your organization, with the three permissions and the Receive messages v2.0 event already filled in. **There is no subscription mode to change and no version to publish**: the channel connects to Feishu as soon as it is created.
+
+1. Open the pt-tools Web UI, go to ChatOps → Notifications (`消息通知`), click **Add channel** (`添加通道`) and select **Feishu app bot** (`飞书应用机器人`) as the channel type.
+2. Keep the creation method at **Scan to create (recommended)** (`扫码一键创建（推荐）`), change the channel name if you like (`飞书应用机器人` by default), and click **Generate QR code** (`生成二维码`).
+3. Scan the code with a Feishu account **in the organization that pt-tools should serve** (on a computer you can also click **Open in browser** (`在浏览器里打开`)) and confirm on Feishu's confirmation page. You can change the app name there.
+4. After you confirm, pt-tools creates the channel and opens its detail page, and the channel list shows **Connected** (`已连接`). Send `/help` to the bot in a private chat to try it; see section 8.
+
+What is filled in is the same as what sections 3 and 5 set up by hand: the permissions `im:message:send_as_bot`, `im:message.p2p_msg:readonly` and `im:message.group_at_msg:readonly`, and the event Receive messages v2.0 (`接收消息 v2.0`, `im.message.receive_v1`).
+
+- **The person who scans becomes the administrator and is bound at once**: Administrator open_id (`管理员 open_id`) is set to their open_id, so there is no need to message the bot for an open_id or to generate a bind code, and commands work right away. To let someone else use the bot, add their open_id to the lists in the channel detail (see section 7) and bind them. If Feishu does not return the scanner's open_id, the channel is still created, with no administrator: get the open_id as in section 7, enter it, and bind it on the bindings page.
+- The app is created **in the scanner's organization**. With the wrong account, or when that organization's platform policy refuses it, the channel shows Error (`异常`) and getting the tenant_access_token fails with `21001` in the run logs (see section 12); scan again with the right account.
+- If the scanner uses Lark, the channel's platform is set to Lark (`Lark 国际版`); this has not been tested on Lark (see section 12).
+- One app serves one pt-tools instance (see section 12). With several instances, scan once on each.
+- pt-tools stores the App ID and App Secret itself, encrypted like the ones entered by hand, and shows them only in the channel detail after login.
+- A QR code is valid for 10 minutes, and there is only one at a time: generating a new one or closing the dialog voids the previous one, unless you had already confirmed it in Feishu and pt-tools had already received the app at that moment; the channel is then created as usual and the page tells you. If closing the dialog fails to reach pt-tools to cancel (a network error), the page says so as well. While the previous one is still saving its channel, **Generate QR code** asks you to wait a few seconds. Do not scan a voided code: if it is scanned and confirmed, Feishu may still create an app. First check the channel list for a newly created channel; if there is none, delete the extra app in the [Feishu developer console](https://open.feishu.cn/app). Apps created by scanning are all named pt-tools by default, so tell them apart by App ID: an App ID that appears in a channel's details is in use, so do not delete it. Scan the code only from your own screen and do not send screenshots of it to others.
+- If the organization requires an administrator to approve apps, the confirmation page says so and the app may not be created; in that case create it by hand as described below and ask an administrator to approve it.
+- pt-tools sends the requests that create the app, and they follow only the `HTTPS_PROXY` and `NO_PROXY` environment variables: the channel does not exist yet, so its proxy URL cannot apply (see section 11).
+
+The steps from section 1 on create the app by hand.
+
+---
+
 ## 1. Before you start
 
 - A Feishu organization account that can create a **custom app** (`企业自建应用`) on the [Feishu Open Platform](https://open.feishu.cn/app). The long connection only works for custom apps.
@@ -46,7 +70,7 @@ pt-tools needs no contacts permission: it calls no contacts API and does not rea
 
 Open the pt-tools Web UI, go to ChatOps → Notifications (`消息通知`) and click **Add channel** (`添加通道`):
 
-1. Select **Feishu app bot** (`飞书应用机器人`) as the channel type, enter a channel name, the App ID and the App Secret, keep the platform at Feishu (`飞书`, or choose Lark (`Lark 国际版`)), and click **Create channel** (`创建通道`).
+1. Select **Feishu app bot** (`飞书应用机器人`) as the channel type and the creation method **Fill in App ID and App Secret** (`填写 App ID 与 App Secret`), enter a channel name, the App ID and the App Secret, keep the platform at Feishu (`飞书`, or choose Lark (`Lark 国际版`)), and click **Create channel** (`创建通道`).
 2. The channel connects to Feishu as soon as it is created. Watch its status in the channel list: **Connected** (`已连接`) means the long connection is up, which the next step needs.
 3. Open the channel detail and complete the fields below under **Credentials & connection** (`凭证与连接`), then click **Save credentials** (`保存凭证`). The channel reconnects with the new settings after saving.
 

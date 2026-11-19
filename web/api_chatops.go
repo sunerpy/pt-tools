@@ -263,20 +263,11 @@ func (h *chatopsHandlers) bindDirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto, err := h.deps.BindingSvc.BindDirect(r.Context(), body.ConfID, body.ChannelUserID)
-	result := "success"
-	switch {
-	case errors.Is(err, app.ErrBindNotInWhitelist):
-		result = "denied:not_in_whitelist"
-	case errors.Is(err, app.ErrAlreadyBound):
-		result = "denied:already_bound"
-	case err != nil:
-		result = "error:bind_failed"
-	}
 	// 通道不存在或不收命令时没有可记的通道；其余（成功、名单外、已经绑定）都记一条
 	if h.deps.AuditSvc != nil && dto.ChannelType != "" && !errors.Is(err, app.ErrBindUnsupportedChannel) {
 		_ = h.deps.AuditSvc.Record(r.Context(), app.AuditEntry{
 			NotificationConfID: body.ConfID, ChannelType: dto.ChannelType, ChannelUserID: body.ChannelUserID,
-			Command: "bind", Args: map[string]any{"via": "web"}, Result: result,
+			Command: "bind", Args: map[string]any{"via": "web"}, Result: bindAuditResult(err),
 		})
 	}
 	switch {
@@ -290,6 +281,20 @@ func (h *chatopsHandlers) bindDirect(w http.ResponseWriter, r *http.Request) {
 		writeChatopsErr(w, http.StatusConflict, "already_bound", err.Error())
 	default:
 		mapServiceErr(w, err)
+	}
+}
+
+// bindAuditResult 是直接绑定记进审计的结果：网页直接绑定与扫码一键创建用同一套取值。
+func bindAuditResult(err error) string {
+	switch {
+	case err == nil:
+		return "success"
+	case errors.Is(err, app.ErrBindNotInWhitelist):
+		return "denied:not_in_whitelist"
+	case errors.Is(err, app.ErrAlreadyBound):
+		return "denied:already_bound"
+	default:
+		return "error:bind_failed"
 	}
 }
 

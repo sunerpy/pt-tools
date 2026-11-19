@@ -2216,7 +2216,51 @@ export interface WebhookPreviewResult {
   success_reason?: string;
 }
 
+/**
+ * 飞书应用机器人「扫码一键创建」的状态：pending 等扫码与确认；saving 飞书已经建好应用、正在保存通道（这一步不能取消）；
+ * done 通道建好（conf_id 是通道编号，message 不为空时是绑定没成之类的提示）；denied / expired / canceled / failed 的原因在 message。
+ */
+export type FeishuRegisterState =
+  | "pending"
+  | "saving"
+  | "done"
+  | "denied"
+  | "expired"
+  | "canceled"
+  | "failed";
+
+/** 开始一键创建的回应：链接（带一次性的 user_code）与二维码只在这里给一次，编号用来查状态与取消 */
+export interface FeishuRegisterStart {
+  id: string;
+  url: string;
+  /** 链接的二维码（SVG 文本） */
+  qr_svg: string;
+  expires_at: string;
+  state: FeishuRegisterState;
+}
+
+/** 一次一键创建的状态：不带链接与二维码，也不带 App Secret */
+export interface FeishuRegisterStatus {
+  id: string;
+  state: FeishuRegisterState;
+  expires_at: string;
+  app_id?: string;
+  conf_id?: number;
+  message?: string;
+}
+
 export const chatopsApi = {
+  /** 飞书应用机器人的扫码一键创建：同一时间只有一个，查状态与取消都按开始时给的编号 */
+  feishuRegister: {
+    start: (name: string) =>
+      api.post<FeishuRegisterStart>("/api/chatops/feishu-app/register", { name }),
+    status: (id: string) =>
+      api.get<FeishuRegisterStatus>(`/api/chatops/feishu-app/register/${encodeURIComponent(id)}`),
+    cancel: (id: string) =>
+      api.post<FeishuRegisterStatus>(
+        `/api/chatops/feishu-app/register/${encodeURIComponent(id)}/cancel`,
+      ),
+  },
   templates: {
     list: () => api.get<NotifyTemplateCatalog>("/api/chatops/templates"),
     save: (type: string, data: NotifyTemplateInput) =>
