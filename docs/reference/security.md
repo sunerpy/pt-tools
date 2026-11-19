@@ -21,7 +21,12 @@
 - 通知通道的凭证，例如 Telegram Bot Token、OneBot Access Token 和飞书应用机器人的 App Secret；
 - CloakBrowser 的访问令牌；
 - 「全局设置」里站点代理的代理地址（可能带用户名和密码）；
-- [远程访问](../guide/remote-access.md)的主机密钥。
+- [远程访问](../guide/remote-access.md)的主机密钥；
+- [AI 助手](../guide/assistant.md)的 API Key 与代理地址，以及语音输入（Voltip）的访问令牌；
+- 媒体识别里的 TMDB API Key 与代理地址，Fanart.tv（项目的与个人的）、OMDb、TheTVDB 的 Key 与 TheTVDB 的订阅 PIN；
+- 媒体服务器（Emby、Jellyfin、Plex）的 API Key 与 ChineseSubFinder 的 API Key；
+- [IYUU 辅种](../guide/reseed.md)的 token 与 [CookieCloud](../guide/cookiecloud.md) 的端对端加密密码；
+- [NAS 监控](../guide/nas-monitor.md)来源的 API Key 或密码，以及登录以后拿到的长期凭据（群晖的设备令牌、飞牛的 token）。
 
 密钥在首次启动时自动生成；也可以通过环境变量 `PT_TOOLS_SECRET_KEY` 提供 base64 形式的密钥，它的优先级高于 `secret.key` 文件。
 
@@ -39,21 +44,24 @@
 - 30 天没有任何请求的会话自动失效；同时最多保留 256 个会话，超出时淘汰最久没用的那个。修改密码后，除发起修改的这个会话外，其他浏览器和设备上的会话全部失效。
 - 同一 IP 在 15 分钟内登录失败 10 次（含用户名不存在）后，这个 IP 暂停登录 15 分钟。部署在反向代理之后时，pt-tools 看到的都是代理的地址，失败次数会合并计算。
 - 除登录页、静态资源和健康检查接口 `/api/ping` 外，所有页面和接口都要求已登录。`/api/ping` 只返回运行状态和版本号。
-- [App API](app-api.md)（`/api/app/v1/`）、[qB 兼容入口](../guide/qbit-compat.md)与 [MCP](../guide/mcp.md)（`/mcp`）另外接受 [API 令牌](../guide/api-tokens.md)。令牌按新建时选的权限调用它们，访问不了其他接口，也不能管理令牌；库里只存令牌的 SHA-256 摘要。`/mcp` 只认令牌，网页登录的会话用不了。
+- [App API](app-api.md)（`/api/app/v1/`）、[qB 兼容入口](../guide/qbit-compat.md)、[MCP](../guide/mcp.md)（`/mcp`）与 [Servarr 兼容入口](../guide/servarr.md)（`/servarr/`）另外接受 [API 令牌](../guide/api-tokens.md)。令牌按新建时选的权限调用它们，访问不了其他接口，也不能管理令牌；库里只存令牌的 SHA-256 摘要。`/mcp` 与 `/servarr/` 只认令牌，网页登录的会话用不了；Servarr 兼容入口要有「Servarr 兼容」权限的令牌，Key 放在查询参数 `apikey` 或请求头 `X-Api-Key` 里。
 - 经[远程访问](../guide/remote-access.md)配对的设备在加密隧道里调用 App API，权限是配对时选的「完全控制」或「只读」，访问不了其他接口；撤销或改权限以后它的连接立即断开。远程访问的设置与设备管理只认网页登录。
 - 初始账号见[安装](../guide/install.md)；首次登录后请立即修改密码。忘记密码时可以用 `PT_ADMIN_RESET` 重置，见[配置说明](../configuration.md)。
 
 ## 会主动连接哪些地址
 
-| 对象                     | 用途                                                                                                                                                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 你添加的 PT 站点         | 拉取 RSS、搜索、读取用户数据、探测登录状态                                                                                                                                                                                  |
-| 你配置的下载器           | 推送种子、读取任务和剩余空间                                                                                                                                                                                                |
-| 你启用的通知通道         | 发送通知；Telegram 使用长轮询接收命令。飞书应用机器人经 `open.feishu.cn`（Lark 是 `open.larksuite.com`）取长连接地址、换取访问凭证、发消息，长连接本身连到飞书下发的地址（`feishu.cn` 或 `larksuite.com` 下的主机）接收命令 |
-| GitHub（api.github.com） | 检查新版本；二进制部署升级时下载新版本                                                                                                                                                                                      |
-| TMDB 与其它媒体数据来源  | 识别、订阅与刮削：TMDB；媒体库的数据来源选了才用的豆瓣与 Bangumi；在媒体识别里填了 Key 才用的 Fanart.tv、OMDb 与 TheTVDB                                                                                                    |
-| CloakBrowser Manager     | 仅在你填好端点、token 和 Profile ID 后，作为登录探测的后备                                                                                                                                                                  |
-| 你填的 relay             | 仅在打开远程访问后：主动连接，转发手机 App 的加密连接                                                                                                                                                                       |
+| 对象                     | 用途                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 你添加的 PT 站点         | 拉取 RSS、搜索、读取用户数据、探测登录状态                                                                                                                                                                                                                                                                                                                                                                         |
+| 你配置的下载器           | 推送种子、读取任务和剩余空间                                                                                                                                                                                                                                                                                                                                                                                       |
+| 你启用的通知通道         | 发送通知；Telegram 使用长轮询接收命令。飞书应用机器人经 `open.feishu.cn`（Lark 是 `open.larksuite.com`）取长连接地址、换取访问凭证、发消息，长连接本身连到飞书下发的地址（`feishu.cn` 或 `larksuite.com` 下的主机）接收命令；[扫码一键创建](../guide/chatops-feishu.md#扫码一键创建推荐)飞书应用机器人时，建应用的请求发到 `accounts.feishu.cn`（扫码人用 Lark 国际版时，之后的请求改发 `accounts.larksuite.com`） |
+| GitHub（api.github.com） | 检查新版本；二进制部署升级时下载新版本                                                                                                                                                                                                                                                                                                                                                                             |
+| TMDB 与其它媒体数据来源  | 识别、订阅与刮削：TMDB；豆瓣（媒体库的数据来源选了它，或者添加了[豆瓣想看](../guide/media-subscribe.md#豆瓣想看)）；Bangumi（媒体库的数据来源选了它，或者打开探索页的「番剧日历」）；在媒体识别里填了 Key 才用的 Fanart.tv、OMDb 与 TheTVDB                                                                                                                                                                        |
+| 你接的大模型服务         | 仅在「系统 → AI 助手设置」接上模型以后：发送对话内容、附件与工具查到的结果；用 AI 签到、下载前让 AI 复核、让 AI 认时，还有验证码、题目与种子标题。见 AI 助手的[隐私与安全](../guide/assistant.md#隐私与安全)                                                                                                                                                                                                       |
+| IYUU（`2025.iyuu.cn`）   | 仅在用 [IYUU 辅种](../guide/reseed.md)时：报告参与辅种的站点，把参与辅种的下载器里已下完种子的 info hash 发给它查询                                                                                                                                                                                                                                                                                                |
+| 你填了地址的其他服务     | 媒体服务器（Emby、Jellyfin、Plex）、NAS 监控的来源（TrueNAS、Glances、群晖、飞牛）、CookieCloud、ChineseSubFinder 与 Voltip：填了才连，只连你填的地址                                                                                                                                                                                                                                                              |
+| CloakBrowser Manager     | 仅在你填好端点、token 和 Profile ID 后，作为登录探测的后备                                                                                                                                                                                                                                                                                                                                                         |
+| relay                    | 仅在打开远程访问后：主动连接，转发手机 App 的加密连接。「relay 地址」留空时连内置的托管 relay（官方发布的二进制与镜像才有），填了就只连你填的；勾了「不使用 relay（只直连）」时不连 relay                                                                                                                                                                                                                          |
 
 [CloakBrowser 后备](../guide/site-login-monitoring.md#cloakbrowser-后备)会把站点 Cookie 交给你部署的 CloakBrowser，由它打开站点页面。
 
@@ -61,7 +69,7 @@
 
 ## 会监听哪些端口
 
-- Web 界面和接口：默认 `8080`。[MCP](../guide/mcp.md) 的 `/mcp` 也在这个端口上；打开[远程访问](../guide/remote-access.md)以后，直连入口 `/remote/v1/stream` 也在这里（关着时回 404）。
+- Web 界面和接口：默认 `8080`。[MCP](../guide/mcp.md) 的 `/mcp` 与 [Servarr 兼容入口](../guide/servarr.md)的 `/servarr/` 也在这个端口上；打开[远程访问](../guide/remote-access.md)以后，直连入口 `/remote/v1/stream` 也在这里（关着时回 404）。
 - [qB 兼容入口](../guide/qbit-compat.md)：在页面上设了监听地址、或者给了 `--qbit-compat-addr`、`PT_QBIT_COMPAT_ADDR` 时另外监听一个端口，用有「qB 兼容」权限的 API 令牌登录；该端口只在内网开放。
 - QQ OneBot 通道：启用后另外监听一个端口，供 NapCat 以反向 WebSocket 连接，例如 `0.0.0.0:6701` 的 `/onebot/v11/ws`。监听地址不是本机地址（127.0.0.1、localhost）时必须设置 Access Token，否则通道不会启动；该端口只在内网开放。
 - 自建的 relay（[`pt-tools relay serve`](cli.md#pt-tools-relay-serve)）是单独的进程，监听 `--listen` 指定的端口；它要对公网开放，转发的内容是端到端加密的，自己不保存任何数据。
@@ -70,7 +78,7 @@
 
 - 不要把 Web 端口直接暴露在公网上。需要远程访问时，放在启用 HTTPS 的反向代理之后，或通过 VPN 访问。会话 Cookie 没有 Secure 标记，它和 API 令牌在纯 HTTP 下都可能被同一网络中的他人截获。
 - 备份时把 `torrents.db` 和 `secret.key` 作为一个整体保存，并加密备份文件，见[升级与备份](../guide/upgrade.md)。
-- ChatOps 只执行用绑定码完成绑定的账号发来的命令，QQ、Telegram 和飞书应用机器人通道还会先按通道里的名单过滤发送者。目前每个完成绑定的账号都拥有管理员权限，可以暂停、删除种子和管理订阅，所以绑定码只发给你信任的账号。每条命令都记入操作审计，审计中的 token、passkey 等参数在写入前脱敏。
+- ChatOps 只执行完成绑定的账号（用绑定码，在「ChatOps 绑定」页直接绑定，或扫码一键创建飞书应用机器人时的扫码人）发来的命令，QQ、Telegram 和飞书应用机器人通道还会先按通道里的名单过滤发送者。目前每个完成绑定的账号都拥有管理员权限，可以暂停、删除种子和管理订阅，所以绑定码只发给你信任的账号。每条命令都记入操作审计，审计中的 token、passkey 等参数在写入前脱敏。
 
 ## 远程访问的信任模型
 

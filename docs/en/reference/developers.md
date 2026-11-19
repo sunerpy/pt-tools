@@ -46,7 +46,7 @@ The writing conventions, the format of the home page's data and the screenshot p
 
 ## Design documents
 
-These design documents are in Chinese only. They record interface contracts and future directions; they do not mean a feature is released.
+These design documents are in Chinese only. They record interface contracts and the trade-offs made when they were written; which features are released is stated in the user guide and the release notes.
 
 - [ChatOps, MCP and agent architecture](../../design/chatops-mcp-agent.md)
 - [MCP server design](../../design/phase4-mcp.md)
