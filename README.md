@@ -23,7 +23,7 @@
 
 ---
 
-pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流与 IYUU 辅种，订阅电影、追剧并整理进媒体库，每天签到、在封号前提醒，汇总各站点的数据，统一管理 qBittorrent 和 Transmission；手机 App、QQ、Telegram 与内置的 AI 助手都能查看和操作。内置 72 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
+pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流与 IYUU 辅种，订阅电影、追剧并整理进媒体库，每天签到、在封号前提醒，汇总各站点的数据，统一管理 qBittorrent 和 Transmission；手机 App、QQ、Telegram、飞书与内置的 AI 助手都能查看和操作。内置 72 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
 
 > [!TIP]
 > **不会配置，或者懒得一项项填？交给 AI。** 在「AI 助手」里填一个大模型的 API Key，直接告诉它要加哪个下载器、站点、RSS 订阅或通知通道，它列出改以前、改以后，你点确认才保存。也可以打开 [MCP](https://firlab.app/pt-tools/guide/mcp)，给令牌勾上「配置」，让你自己的 Agent（WorkBuddy、Qwen Code、Codex、Claude Code、Cursor 等）帮你读改 pt-tools 的配置。见[让助手改配置](https://firlab.app/pt-tools/guide/assistant#改配置)。
@@ -73,8 +73,9 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 ## 1.0 亮点
 
 - **[AI 助手](https://firlab.app/pt-tools/guide/assistant)与 [MCP](https://firlab.app/pt-tools/guide/mcp)**：接上 OpenAI 兼容的大模型（DeepSeek、通义千问、Kimi、硅基流动、OpenRouter、Ollama 等），在网页、App、Telegram、QQ 或飞书里用自然语言查数据、搜索与推送种子、追剧和管理订阅、整理媒体库，还能[帮你改配置](https://firlab.app/pt-tools/guide/assistant#改配置)（下载器、站点、RSS、通知通道等，密钥只写不读）；改动类操作每次都先列出改以前、改以后，你确认了才执行。打开 MCP 以后，WorkBuddy、Qwen Code、Codex、Claude Code、Cursor 这类支持 MCP 的 Agent 也能调用同一套工具。
+- **[扫码一键创建飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu#扫码一键创建-推荐)**：在「ChatOps → 消息通知」添加「飞书应用机器人」通道，点「生成二维码」，用飞书扫码并确认，pt-tools 就在扫码人所在的企业里建好应用，预填收发消息要的权限与事件，随后建好并启用通道、连上飞书，扫码的人成为管理员并直接绑定。不用去飞书开发者后台开启机器人能力、开通权限、改订阅方式、发布版本；pt-tools 主动连出到飞书，不需要公网地址。
 - **[追剧与媒体库](https://firlab.app/pt-tools/guide/media-subscribe)**：订阅电影、追剧集的一季，pt-tools 到各站点搜索并按质量档案挑资源，下载完按命名模板[整理进媒体库](https://firlab.app/pt-tools/guide/media-library)、刮削 NFO 与海报、通知 Emby、Jellyfin 或 Plex，每部片的[详情页与订阅日历](https://firlab.app/pt-tools/guide/media-detail)写明每一集入库了没有。
-- **[刷流](https://firlab.app/pt-tools/guide/brush)与 [IYUU 辅种](https://firlab.app/pt-tools/guide/reseed)**：从站点的免费列表里按条件挑新种做种、按规则删种，收益按天统计；IYUU 找出其他站点上数据相同的种子，校验到 100% 才开始做种，数据只存一份。
+- **[刷流](https://firlab.app/pt-tools/guide/brush)与 [IYUU 辅种](https://firlab.app/pt-tools/guide/reseed)**：从站点的种子列表里按条件挑免费的新种做种、按规则删种，收益按天统计；IYUU 找出其他站点上数据相同的种子，校验到 100% 才开始做种，数据只存一份。
 - **[手机 App](https://firlab.app/pt-tools/guide/mobile-app)与[远程访问](https://firlab.app/pt-tools/guide/remote-access)**：Android App 扫网页上的二维码配对，先试直连、连不上再经 relay 连回 pt-tools，连接端到端加密，在外面也能看概览、管理种子与订阅。
 - **[首页、NAS 监控与系统体检](https://firlab.app/pt-tools/guide/home-and-health)**：打开网页先到首页，上面是 NAS 的 CPU、内存、网络与存储（数据来自本机、TrueNAS、Glances 等[来源](https://firlab.app/pt-tools/guide/nas-monitor)）、今天播出的集与待处理的事；系统体检一次检查 TMDB、站点、下载器、媒体库、磁盘与备份，写明怎么修。
 - **[通知通道与消息模板](https://firlab.app/pt-tools/guide/notify-channels)**：除了 QQ、Telegram 和[飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu)，通知还能发到企业微信、钉钉、飞书群机器人、Bark、Server 酱、ntfy 与自定义 Webhook，每类事件的标题与正文都可以用模板改写。
@@ -177,7 +178,7 @@ Android App 的安装包（大多数手机用 `pt-tools-app-arm64-v8a.apk`）在
 ## 用法
 
 - **Web 界面**：站点、RSS、过滤规则、下载器、媒体库、自动清理和通知都在 Web 界面里配置；手机浏览器里同样的页面以卡片显示。
-- **ChatOps**：QQ、Telegram 和飞书应用机器人支持 `/help`、`/status`、`/version`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/signin`、`/addrss`、`/delrss`，订阅与追剧的 `/sub`、`/follow`、`/subs`、`/runs`、`/today`、`/unlock`，AI 助手的 `/newchat`，以及 `/bind` 和 `/unbind`。通道的两栏名单决定谁能与机器人对话；用绑定码完成绑定的账号都能执行管理命令，所以绑定码只发给信任的人。见 [ChatOps 快速开始](https://firlab.app/pt-tools/guide/chatops-quickstart)。
+- **ChatOps**：QQ、Telegram 和飞书应用机器人支持 `/help`、`/status`、`/version`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/signin`、`/addrss`、`/delrss`，订阅与追剧的 `/sub`、`/follow`、`/subs`、`/runs`、`/today`、`/unlock`，AI 助手的 `/newchat`，以及 `/bind` 和 `/unbind`。通道的两栏名单决定谁能与机器人对话；名单里的账号可以用绑定码绑定，也可以在「ChatOps 绑定」页直接绑定，扫码一键创建飞书应用机器人时扫码的人会被直接绑定。完成绑定的账号都能执行管理命令，所以绑定码只发给信任的人。见 [ChatOps 快速开始](https://firlab.app/pt-tools/guide/chatops-quickstart)。
 - **命令行**：`pt-tools web` 启动服务，`pt-tools db backup`、`pt-tools db restore` 备份与恢复数据，`pt-tools secret` 导出、导入加密密钥，`pt-tools clean` 预览并清理已轮转的日志、暂存种子和旧备份，`pt-tools mcp` 把 MCP 工具接给只支持 stdio 的客户端，`pt-tools relay serve` 自己运行远程访问的 relay，见[命令行](https://firlab.app/pt-tools/reference/cli)。
 
 ## 文档
