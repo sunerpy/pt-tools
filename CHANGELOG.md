@@ -5,14 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.60...v1.0.0) (2026-11-19)
+## [1.0.0](https://github.com/sunerpy/pt-tools/compare/v0.48.0...v1.0.0) (2026-11-19)
 
+1.0 是 0.48.0 之后的第一个正式版，包含其间全部预览版（0.49.0-rc.1 到 rc.6、1.0.0-rc.1 到 rc.60）的改动，以及 rc.60 之后加入的飞书应用机器人与新标志。每项功能的说明见 [1.0 新功能](https://firlab.app/pt-tools/guide/whats-new-1.0)。
 
-### Features
+### 主要变化
 
-* **notify:** 新增飞书应用机器人通道：长连接收发命令、AI 助手对话与通知 ([#914](https://github.com/sunerpy/pt-tools/issues/914)) ([7276c11](https://github.com/sunerpy/pt-tools/commit/7276c113605f067d3c73e9661bb3eadce4aed98b))
-* **notify:** 飞书应用机器人加扫码一键创建：扫码确认以后自动建好通道并绑定扫码人 ([#915](https://github.com/sunerpy/pt-tools/issues/915)) ([a022059](https://github.com/sunerpy/pt-tools/commit/a02205999515a07983fd7561e0db7ac7a5782643))
-* **release:** 1.0.0 正式版：换上新标志，文档与发布配置按正式版更新 ([#911](https://github.com/sunerpy/pt-tools/issues/911)) ([296cc50](https://github.com/sunerpy/pt-tools/commit/296cc50be082207bf40b30956a67d77d0c7ed6d2))
+- **刷流与辅种**：刷流任务从站点的种子列表里按条件挑免费的新种做种，按做种时长、分享率与上传速度删除，每一轮做了什么都记在运行记录里；IYUU 辅种校验到 100% 才开始做种，数据只存一份；下完的种子可以转移到另一台下载器继续做种。
+- **追剧与媒体库**：订阅电影、追剧集的一季；追剧按每一集的播出时间到各站点搜同一个版本，打开洗版的订阅会接着换更好的；下载完按命名模板硬链接进媒体库，写好 NFO 与海报，通知 Emby、Jellyfin 或 Plex 扫描；还有条目详情页、订阅日历与按条目搜索，也能导入已有的媒体库。
+- **手机 App 与远程访问**：Android App 扫码配对，先试直连，连不上经 relay 连回 pt-tools，连接端到端加密；安装包和服务端在同一个 Release 里。
+- **AI 助手与 MCP**：接一个 OpenAI 兼容的大模型，在网页、App、Telegram、QQ 或飞书里用自然语言查数据、推送种子、管理订阅，改动类操作每次都要你确认；Claude、Cursor 这类 MCP 客户端也能调用同一套工具。
+- **首页与 NAS 监控**：首页放今天播出的集、待处理的事、下载器与存储；NAS 概览读本机（Linux）、TrueNAS 与 Glances 的数据，群晖与飞牛是实验性的来源。
+- **飞书应用机器人**：和 Telegram、QQ 一样，私聊机器人或在群里 @ 它发命令、和 AI 助手对话，每日战报、签到、追剧这些后台通知也能发到飞书；扫码就能建好机器人，不用去开发者后台开权限、发布版本（企业要求管理员审核应用时可能建不成，那时改用手动创建）。
+- **通知**：新增钉钉、飞书群机器人、Bark、Server 酱与 ntfy；Webhook 通道可以自定义请求方法与请求体模板，内置 Discord、Slack、Gotify 等预设；每类事件的标题与正文都能用模板改写；每日战报、签到与追剧这类后台通知的投递都记进操作审计。
+- **站点**：内置站点增加到 72 个；新增每日签到（HDSky、OpenCD 的验证码与 PTCHDBits、52PT 的签到题可以交给 AI）与 CookieCloud 导入，封号提醒发出前先补探测一次；多个站点的数据解析已修正。
+- **兼容入口**：qB 兼容入口让 MoviePilot、Sonarr 这类工具把 pt-tools 当成 qBittorrent，加的种子照常经过磁盘空间与做种容量的检查；Servarr 兼容入口让 Seerr 把它当成 Radarr 与 Sonarr。
+- **可靠性**：每天定时备份数据库，换成新版本第一次启动时先自动备份；推送前对免费资格、磁盘空间与站点做种容量的检查更严；系统体检一次检查各项配置并写明怎么修。
+- **新标志**：种子徽标取代原来的终端提示符，浅色界面用墨黑版，深色界面用纯白版。
+
+### 从 0.48 升级
+
+换成新的镜像或二进制直接启动：数据库结构在启动时自动迁移，迁移以前先自动备份一次（数据目录 `backups/` 下的 `pt-tools-backup-<时间>-pre-upgrade.tar.gz`）。这份备份没做成时照常启动和迁移，结果写在「全局设置 → 备份设置」和首页「待处理」里；想稳妥，升级前先停掉 pt-tools，自己复制一份数据目录。
+
+有几项设置在升级时自动换算：只开了做种竞争度、没开自动删种的安装会打开自动删种，只按竞争度处理；全局「免费结束自动删除」改成每条 RSS 自己选；自动删种的「免费到期仍未下完的种子自动删除」（1.0 里叫「其他免费种子免费过了没下完就删」）不再受最短保种时间限制，开着它时，加进来不满最短保种时间（默认 24 小时）的种子免费一过也会被删。详见 [1.0 新功能](https://firlab.app/pt-tools/guide/whats-new-1.0#可靠性与安全)。
+
+要回到 0.48.0，不要直接换回旧镜像：0.48.0 没有恢复功能，会照常打开升级后的数据库，按换算后的设置运行。先停掉 pt-tools，把升级前备份里的 `torrents.db` 与 `secret.key` 放回数据目录，删掉 `torrents.db-wal` 与 `torrents.db-shm`，再启动 0.48.0，步骤见[升级与备份](https://firlab.app/pt-tools/guide/upgrade#不用恢复功能)。升级前备份只保留最新 3 份，要长期留着就复制到别处。
+
+Docker 的 `latest` 标签从这一版起指向 1.0。
 
 ## [1.0.0-rc.60](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.59...v1.0.0-rc.60) (2026-11-18)
 
