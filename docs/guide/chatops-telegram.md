@@ -102,7 +102,7 @@
 没有指定收件人的通知按这个顺序找收件人：`default_chat_id` → `admin_users` 里的第一个 → 这个通道上第一个完成绑定的账号。三者都没有时通知发不出去，失败原因记在「操作审计」里（见 [ChatOps 快速上手](chatops-quickstart.md#查看审计日志)）。
 
 - **入站消息**：只有出现在 `allowed_users` 或 `admin_users` 里的 user_id 能与 bot 对话，其他人会收到一条拒绝消息（`denied:not_in_whitelist`）。**两者都留空时，任何人的消息都会被拒绝**；出站推送不受影响。
-- **命令权限**：能对话之后，还要用绑定码完成绑定才能执行命令。目前**每个完成绑定的账号都拥有管理员权限**，可以执行 `/pause`、`/resume`、`/delete`、`/addrss`、`/delrss` 和 `/unbind`，与它在 `allowed_users` 还是 `admin_users` 里无关。所以绑定码只发给你信任的人。
+- **命令权限**：能对话之后，还要完成绑定才能执行命令。目前**每个完成绑定的账号都拥有管理员权限**，可以执行 `/pause`、`/resume`、`/delete`、`/addrss`、`/delrss` 和 `/unbind`，与它在 `allowed_users` 还是 `admin_users` 里无关。所以绑定码只发给你信任的人。
 
 **单人自用场景**：`admin_users = 你的 user_id`，`default_chat_id = 你的 user_id`，`allowed_users` 留空，然后用绑定码绑定自己的账号。
 
