@@ -1,6 +1,6 @@
 # Feishu app bot
 
-This page explains how to connect a Feishu (Lark) **custom app bot** to pt-tools: message the bot in a private chat or @ it in a group to send ChatOps commands and talk to the AI assistant, and receive background notifications such as the daily report, sign-ins and series tracking in Feishu.
+This page explains how to connect a Feishu (Lark) **custom app bot** to pt-tools: message the bot in a private chat or @ it in a group to send ChatOps commands and talk to the AI assistant, and receive background notifications such as the daily report, sign-ins and series tracking in Feishu. pt-tools can create the app for you when you **scan a QR code** (next section), or you can create it by hand on the Feishu Open Platform (from section 1 on).
 
 pt-tools receives events over the **long connection** of the official Feishu Go SDK: pt-tools connects out to the Feishu Open Platform, so no public address or open port is needed. Deployment is the same as with Telegram's long polling.
 
@@ -28,6 +28,7 @@ What is filled in is the same as what sections 3 and 5 set up by hand: the permi
 - A QR code is valid for 10 minutes, and there is only one at a time: generating a new one or closing the dialog voids the previous one, unless you had already confirmed it in Feishu and pt-tools had already received the app at that moment; the channel is then created as usual and the page tells you. If closing the dialog fails to reach pt-tools to cancel (a network error), the page says so as well. While the previous one is still saving its channel, **Generate QR code** asks you to wait a few seconds. Do not scan a voided code: if it is scanned and confirmed, Feishu may still create an app. First check the channel list for a newly created channel; if there is none, delete the extra app in the [Feishu developer console](https://open.feishu.cn/app). Apps created by scanning are all named pt-tools by default, so tell them apart by App ID: an App ID that appears in a channel's details is in use, so do not delete it. Scan the code only from your own screen and do not send screenshots of it to others.
 - If the organization requires an administrator to approve apps, the confirmation page says so and the app may not be created; in that case create it by hand as described below and ask an administrator to approve it.
 - pt-tools sends the requests that create the app, and they follow only the `HTTPS_PROXY` and `NO_PROXY` environment variables: the channel does not exist yet, so its proxy URL cannot apply (see section 11).
+- Scan to create is only in the web interface after you sign in: the mobile app and MCP do not have it, and when the AI assistant changes the configuration it can only create the channel from an App ID and App Secret.
 
 The steps from section 1 on create the app by hand.
 
@@ -152,7 +153,7 @@ Send `/help` to the bot in a private chat; it replies with the full command list
 
 ## 9. Using the bot in groups
 
-1. Enable the `im:message.group_at_msg:readonly` permission from section 3 and publish a version.
+1. For an app created by hand, enable the `im:message.group_at_msg:readonly` permission from section 3 and publish a version; an app created with a QR code already has it, so skip this step.
 2. Add the bot to the group: group settings → Group bots (`群机器人`) → Add bot (`添加机器人`), then choose this app.
 3. **@ the bot** followed by the command, such as `@pt-tools /status`. pt-tools ignores messages that do not @ the bot, including ones that only @ other people or other bots.
 
@@ -184,8 +185,8 @@ Networks in mainland China can usually reach `open.feishu.cn` directly. If a pro
 Check in this order:
 
 1. Is the channel status Connected (ChatOps → Notifications)?
-2. Is the subscription mode under Events & Callbacks set to the persistent connection, and is Receive messages v2.0 added?
-3. After changing permissions and events, did you **publish a version** and get it approved?
+2. For an app created by hand: is the subscription mode under Events & Callbacks set to the persistent connection, and is Receive messages v2.0 added?
+3. For an app created by hand: after changing permissions and events, did you **publish a version** and get it approved?
 4. Are you within the app's availability?
 5. Private chats need `im:message.p2p_msg:readonly`, groups need `im:message.group_at_msg:readonly`, and in groups you must @ the bot.
 6. Is your open_id in the channel's lists, and are you bound before running commands? (The channel section of ChatOps bindings shows the last interaction and its result.)
@@ -242,4 +243,4 @@ According to the Feishu documentation, a message that gets no answer is pushed a
 
 ### Q: Is Lark supported?
 
-Yes. Choose Lark (`Lark 国际版`) as the platform when creating the channel, and create the app on the [Lark Open Platform](https://open.larksuite.com/app) with the same steps. This part follows the official documentation and **has not been tested** on Lark.
+Yes. For an app created by hand, create it on the [Lark Open Platform](https://open.larksuite.com/app) with the same steps and choose Lark (`Lark 国际版`) as the platform when creating the channel; when the bot is created with a QR code and the person who scans uses Lark, the channel's platform is set to Lark automatically. This part follows the official documentation and **has not been tested** on Lark.

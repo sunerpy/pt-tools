@@ -51,7 +51,7 @@
 - [ChatOps 快速开始](guide/chatops-quickstart.md)：通道选择、命令清单与配置入口。
 - [QQ OneBot（NapCat）](guide/chatops-qq-napcat.md)：反向 WebSocket、绑定与排障。
 - [Telegram Bot](guide/chatops-telegram.md)：BotFather、代理、绑定与排障。
-- [飞书应用机器人](guide/chatops-feishu.md)：企业自建应用、权限、长连接订阅、open_id 名单、绑定、群里 @ 机器人与排障。
+- [飞书应用机器人](guide/chatops-feishu.md)：扫码一键创建，或者手动创建企业自建应用（权限、长连接订阅、发布版本）；open_id 名单、绑定、群里 @ 机器人与排障。
 - [RSS 上新通知](guide/chatops-rss-notify.md)：通知模式、静默时段、digest、重试和配额。
 - [更多通知通道](guide/notify-channels.md)：企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；按事件自定义通知的标题与正文，以及 ChatOps 命令回复与 AI 助手回复的文字（消息模板）；通用 Webhook 的请求方法、请求体与预设（自定义 Webhook）。
 - [AI 助手](guide/assistant.md)：pt-tools 内置的 AI 助手：接哪家大模型、怎么对话、改动类操作怎么确认、数据会发给谁。

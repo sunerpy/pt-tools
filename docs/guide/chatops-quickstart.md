@@ -25,7 +25,7 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 | --------------------------- | ----------------------------- | :------: | :------: | ------------------------------------------------------------------------------------------------------------- |
 | **QQ OneBot**               | OneBot v11 反向 WebSocket     |    ✅    |    ✅    | 国内用户、日常 QQ 就是主要 IM                                                                                 |
 | **Telegram**                | Bot API 长轮询                |    ✅    |    ✅    | 海外用户、需要对接外网通知                                                                                    |
-| **飞书应用机器人**          | 长连接（官方 SDK）            |    ✅    |    ✅    | 团队用飞书，见[飞书应用机器人](chatops-feishu.md)                                                             |
+| **飞书应用机器人**          | 长连接（官方 SDK）            |    ✅    |    ✅    | 用飞书；可以扫码一键创建，见[飞书应用机器人](chatops-feishu.md)                                               |
 | **企业微信群机器人**        | 企业微信 Webhook              |    ❌    |    ✅    | 出站推送（群内告警），见[更多通知通道](notify-channels.md)                                                    |
 | **钉钉 / 飞书群机器人**     | Webhook（可加签）             |    ❌    |    ✅    | 出站推送，见[更多通知通道](notify-channels.md)                                                                |
 | **Bark / Server 酱 / ntfy** | 各自的推送接口                |    ❌    |    ✅    | 推到手机，见[更多通知通道](notify-channels.md)                                                                |
@@ -37,12 +37,14 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 
 ## 选择哪个通道？
 
+能收命令的通道里，飞书应用机器人的步骤最少：[扫码一键创建](chatops-feishu.md#扫码一键创建推荐)以后，通道已经建好并连上飞书，扫码的人也已经绑定。QQ 要另外部署 NapCat，登录一个给机器人用的 QQ 号（建议用小号）；Telegram 要先在 BotFather 建机器人，国内网络要经代理；这两种建好通道以后，还要把自己的账号填进名单并完成绑定。
+
 ```
 需要在 IM 里发命令控制 pt-tools？
 │
 ├── 是 → 国内用 QQ 作为主要 IM？
 │        ├── 是 → QQ OneBot (NapCat)  →  docs/guide/chatops-qq-napcat.md
-│        └── 否 → 团队用飞书？
+│        └── 否 → 用飞书？
 │                  ├── 是 → 飞书应用机器人  →  docs/guide/chatops-feishu.md
 │                  └── 否 → 能访问 Telegram？
 │                            ├── 是 → Telegram Bot  →  docs/guide/chatops-telegram.md

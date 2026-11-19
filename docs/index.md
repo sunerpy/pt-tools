@@ -3,12 +3,12 @@ layout: home
 markdownStyles: false
 title: pt-tools：面向 PT 站点的自动化管理工具
 titleTemplate: false
-description: RSS 自动下载、刷流、IYUU 辅种、追剧与媒体库整理、多站点统计与下载器管理，在网页和手机 App 里统一操作，也可以在 QQ、Telegram 里查看和控制，或者交给 AI 助手。支持 Docker、Linux 和 Windows。
+description: RSS 自动下载、刷流、IYUU 辅种、追剧与媒体库整理、多站点统计与下载器管理，在网页和手机 App 里统一操作，也可以在 QQ、Telegram、飞书里查看和控制，或者交给 AI 助手。支持 Docker、Linux 和 Windows。
 
 hero:
   name: pt-tools
   text: PT 站点的<wbr>自动化<wbr>管理工具
-  tagline: 自动下载、刷流与 IYUU 辅种，追剧并整理进媒体库；汇总各站点的数据与登录状态，管理 qBittorrent 与 Transmission，在网页、手机 App、QQ 和 Telegram 里查看和控制。
+  tagline: 自动下载、刷流与 IYUU 辅种，追剧并整理进媒体库；汇总各站点的数据与登录状态，管理 qBittorrent 与 Transmission，在网页、手机 App、QQ、Telegram 和飞书里查看和控制。
   actions:
     - theme: brand
       text: 安装
@@ -110,10 +110,10 @@ home:
       - icon: bell
         title: QQ、Telegram、飞书与通知
         status: available
-        body: 在 QQ、Telegram、飞书里查看运行状态和种子，暂停、恢复或删除种子，添加 RSS 订阅，每条命令都记入操作审计；RSS 上新推送支持静默时段、合并摘要和每小时配额。
+        body: 飞书应用机器人可以扫码一键创建，不用去飞书开发者后台配置。在 QQ、Telegram、飞书里查看运行状态和种子，暂停、恢复或删除种子，添加 RSS 订阅，每条命令都记入操作审计；RSS 上新推送支持静默时段、合并摘要和每小时配额。
         evidence:
-          kind: chips
-          items: [/status, /tasks, /torrents, /addrss]
+          kind: code
+          text: 扫码一键创建（推荐）
         link: /guide/chatops-quickstart
       - icon: house
         title: 首页与 NAS 监控

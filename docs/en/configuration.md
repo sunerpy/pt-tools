@@ -93,6 +93,7 @@ Notes:
 
 - Set both `HTTP_PROXY` and `HTTPS_PROXY`.
 - When neither `HTTP_PROXY` nor `HTTPS_PROXY` is set, site access and downloader connections fall back to `ALL_PROXY`. Fetching RSS feeds and the Telegram channel currently read only `HTTP_PROXY`/`HTTPS_PROXY`, so set those two when they need a proxy (a Telegram channel can also have its own proxy URL).
+- The Feishu app bot reads only `HTTPS_PROXY` and `NO_PROXY` (every Feishu address is https), and its long connection needs an `http://` or `socks5://` proxy; a channel can also have its own proxy URL. When the bot is created with a QR code the channel does not exist yet, so those requests follow only the two environment variables. See [the Feishu app bot's proxy settings](guide/chatops-feishu.md#11-proxy).
 - Torrent files that RSS tasks download used to bypass the proxy. They now follow these variables the same way site access does, `ALL_PROXY` included.
 - `NO_PROXY` is useful for local addresses: it keeps requests to local services and the LAN off the proxy.
 - Once the site proxy in Global settings is on, site requests no longer read these variables; see the previous section.

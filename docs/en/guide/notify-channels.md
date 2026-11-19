@@ -44,7 +44,7 @@ DingTalk requires at least one security setting per bot: with signing, enter the
 
 The signature uses the current time; Feishu rejects messages when the clock of the machine running pt-tools is more than an hour off.
 
-A group bot only sends notifications and cannot receive commands. To send commands and talk to the AI assistant from Feishu, use the [Feishu app bot](chatops-feishu.md): a custom app that receives messages over a long connection and can also send background notifications.
+A group bot only sends notifications and cannot receive commands. To send commands and talk to the AI assistant from Feishu, use the [Feishu app bot](chatops-feishu.md): a custom app that you can [create by scanning a QR code](chatops-feishu.md#creating-the-bot-with-a-qr-code-recommended), which receives messages over a long connection and can also send background notifications.
 
 ## Bark
 
