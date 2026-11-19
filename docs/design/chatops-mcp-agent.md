@@ -613,21 +613,23 @@ type Event struct {
 
 ## 14. 当前实现状态
 
-本文最初用于规划 ChatOps、MCP 与 Agent 的演进路径。当前仓库状态如下：
+本文最初用于规划 ChatOps、MCP 与 Agent 的演进路径。1.0.0 的状态如下：
 
-| 层级           | 状态                               | 当前入口                                                          |
-| -------------- | ---------------------------------- | ----------------------------------------------------------------- |
-| 通知与 ChatOps | 已实现                             | Web UI、QQ OneBot、Telegram、企业微信 Webhook、通用 Webhook       |
-| 应用服务层     | 已实现并持续收敛                   | `internal/app/`                                                   |
-| MCP Server     | 已实现（`/mcp` 与 `pt-tools mcp`） | [`phase4-mcp.md`](phase4-mcp.md)、[MCP 使用说明](../guide/mcp.md) |
-| AI Agent       | 设计阶段，不承诺交付日期           | [`phase5-agent.md`](phase5-agent.md)                              |
+| 层级           | 状态                                                                                                                  | 当前入口                                                                                                                |
+| -------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 通知与 ChatOps | 已实现                                                                                                                | Web UI、QQ OneBot、Telegram、飞书应用机器人；只出站的企业微信、钉钉、飞书群机器人、Bark、Server 酱、ntfy 与通用 Webhook |
+| 应用服务层     | 已实现并持续收敛                                                                                                      | `internal/app/`                                                                                                         |
+| MCP Server     | 已实现（`/mcp` 与 `pt-tools mcp`）                                                                                    | [`phase4-mcp.md`](phase4-mcp.md)、[MCP 使用说明](../guide/mcp.md)                                                       |
+| AI Agent       | 已实现为内置的 AI 助手：接 OpenAI 兼容的大模型，经进程内的 MCP 工具工作，改动类操作要用户确认；外部 Agent 经 MCP 接入 | `internal/assistant/`、[AI 助手](../guide/assistant.md)；更早的设计草稿见 [`phase5-agent.md`](phase5-agent.md)          |
 
 ChatOps 的安装与运维说明已拆分到用户指南，避免设计文档重复维护配置步骤：
 
 - [ChatOps 快速开始](../guide/chatops-quickstart.md)
 - [QQ OneBot（NapCat）配置](../guide/chatops-qq-napcat.md)
 - [Telegram Bot 配置](../guide/chatops-telegram.md)
+- [飞书应用机器人配置](../guide/chatops-feishu.md)
+- [更多通知通道](../guide/notify-channels.md)
 - [RSS 上新通知](../guide/chatops-rss-notify.md)
 
-> [!IMPORTANT]
-> `internal/mcp/contract.go` 只冻结未来工具名称和风险分级，不代表 MCP transport、鉴权或运行时已经上线。对外可用能力以根 README、Web UI 和 Release 说明为准。
+> [!NOTE]
+> 对外可用的能力以用户文档、Web UI 和 Release 说明为准。

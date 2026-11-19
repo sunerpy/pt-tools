@@ -102,7 +102,7 @@ Open the pt-tools web UI, go to ChatOps → Notifications (消息通知) and cli
 A notification without its own recipient looks for one in this order: `default_chat_id`, then the first of `admin_users`, then the first account linked on this channel. With none of them the notification cannot be delivered, and the reason is recorded in the audit log (see [ChatOps quick start](chatops-quickstart.md#viewing-the-audit-log)).
 
 - **Incoming messages**: only user_ids listed in `allowed_users` or `admin_users` can talk to the bot; anyone else receives a refusal (`denied:not_in_whitelist`). **When both lists are empty, every message is refused**; outbound notifications are not affected.
-- **Command permissions**: being able to talk to the bot is not enough to run commands; the account must also be linked with a binding code. At present **every linked account has admin rights**: it can run `/pause`, `/resume`, `/delete`, `/addrss`, `/delrss` and `/unbind`, whether it is listed in `allowed_users` or in `admin_users`. So give binding codes only to people you trust.
+- **Command permissions**: being able to talk to the bot is not enough to run commands; the account must also be linked. At present **every linked account has admin rights**: it can run `/pause`, `/resume`, `/delete`, `/addrss`, `/delrss` and `/unbind`, whether it is listed in `allowed_users` or in `admin_users`. So give binding codes only to people you trust.
 
 **For yourself only**: set `admin_users` to your user_id and `default_chat_id` to your user_id, leave `allowed_users` empty, then link your account with a binding code.
 

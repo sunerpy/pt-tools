@@ -1,8 +1,11 @@
 # Phase 5 AI Agent 设计文档
 
 **版本**：草稿 v0.1  
-**状态**：设计中，不承诺交付日期  
-**依赖**：Phase 4 MCP Server 稳定上线后评估
+**状态**：没有按本文实施；1.0.0 内置的 AI 助手采用了不同的做法，见下方说明  
+**依赖**：Phase 4 MCP Server（已随 1.0.0 发布）
+
+> [!NOTE]
+> 本文写在 MCP Server 与内置 AI 助手实现以前，之后没有按实现修订。1.0.0 已经发布了 MCP Server（见 [MCP Server 设计](phase4-mcp.md)、[MCP](../guide/mcp.md)），也内置了 AI 助手（见 [AI 助手](../guide/assistant.md)）：它在 pt-tools 里接 OpenAI 兼容的大模型，经进程内的 MCP 工具工作，改动类操作每次都要用户确认；MCP 另外带着内置技能（如 `pt-tools-config`）。第 1 节「Phase 4 MCP 目前只有静态工具契约」、第 3 节「pt-tools 不内嵌 LLM」与第 7 节「不内嵌 Chatbot 或 LLM」「不直接调用 LLM API」「不提供官方 Agent 实现」都与 1.0.0 不符，现在的行为以用户文档为准。
 
 ---
 

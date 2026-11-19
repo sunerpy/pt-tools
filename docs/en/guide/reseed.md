@@ -126,7 +126,7 @@ The Statistics (统计) tab covers a day, week, month, quarter or year range, or
 - The bar chart draws the cross-seeds that succeeded in each period, and its readout shows the period's created, failed, deleted on site, skipped and IYUU requests; Details (明细) lists every period as a table, newest first.
 - By site (按站点) lists each site's created, succeeded, failed, deleted on site and skipped; Why skipped (跳过的原因) separates already in the downloader, tried before, the site's limit reached today, the site not taking part, and a job already in progress; IYUU requests (IYUU 请求) shows today's, the range's and the latest request.
 
-Created, failed, deleted on site and skipped count on the day the attempt started; succeeded and withdrawn count on the day the job finished. Periods follow the server's time zone and weeks start on Monday. Every round checks again, so the same torrent counts as skipped once in every round. On upgrading to this version, earlier cross-seeding records are added to the statistics approximately, by the time of the record; skips and IYUU requests are counted from the upgrade on. The attempt details are kept for 5 years.
+Created, failed, deleted on site and skipped count on the day the attempt started; succeeded and withdrawn count on the day the job finished. Periods follow the server's time zone and weeks start on Monday. Every round checks again, so the same torrent counts as skipped once in every round. When upgrading from 1.0.0-rc.45 or an earlier preview, earlier cross-seeding records are added to the statistics approximately, by the time of the record; skips and IYUU requests are counted from the upgrade on. The attempt details are kept for 5 years.
 
 ## Notifications
 
@@ -143,9 +143,9 @@ With In the daily report on, the [daily report](user-stats.md) gets the line �
 
 ## Upgrading and rolling back
 
-A few things behave differently after upgrading to this version: the sites taking part are set with the switches on the Sites tab; the daily allowance counts attempts (deleting records no longer frees allowance); a torrent being downloaded when a round is stopped, runs out of time or pt-tools exits is no longer recorded as failed; a round that stopped early is carried on by the next round; during an IYUU cooldown no scheduled round runs and manual runs are refused.
+0.48.0 has no IYUU cross-seeding, so nothing is cross-seeded after going back to 0.48.0; the steps for going back are in [Upgrades and backups](upgrade.md#without-the-restore-feature).
 
-Rolling back to an older version removes these features, and cross-seeding runs the old way (by the list of site names). Older versions treat an empty site list as every site, so rolling back after Turn all off would cross-seed every site: before rolling back, turn on the sites you want on the Sites tab.
+When upgrading from 1.0.0-rc.45 or an earlier preview, a few things behave differently: the sites taking part are set with the switches on the Sites tab; the daily allowance counts attempts (deleting records no longer frees allowance); a torrent being downloaded when a round is stopped, runs out of time or pt-tools exits is no longer recorded as failed; a round that stopped early is carried on by the next round; during an IYUU cooldown no scheduled round runs and manual runs are refused. Rolling back to one of those previews removes these features, and cross-seeding runs the old way (by the list of site names); those previews treat an empty site list as every site, so rolling back after Turn all off would cross-seed every site: before rolling back, turn on the sites you want on the Sites tab.
 
 ## API
 

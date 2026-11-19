@@ -51,7 +51,7 @@ This directory contains a Docker Compose template that runs pt-tools next to Clo
 
    测试连接 checks the endpoint and token only. The fallback is used only when all three are set. pt-tools does not read these settings from environment variables.
 
-   Profile ID and the login-probe fallback come with v1.0.0 (and the `v1.0.0-rc.N` previews); earlier versions only have the endpoint and token, which 测试连接 uses. Until v1.0.0 is out, `latest` is an earlier version: pin a `v1.0.0-rc.N` tag to use the fallback.
+   Profile ID and the login-probe fallback need pt-tools 1.0.0 or later; earlier versions only have the endpoint and token, which 测试连接 uses.
 
 ### Common Operations
 

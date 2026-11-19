@@ -11,7 +11,7 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 功能亮点：
 
 - **内置命令**覆盖状态查询、种子控制、任务管理和站点签到
-- **绑定后才能使用**，只有用绑定码完成绑定的账号才能执行命令；QQ、Telegram 和飞书应用机器人通道还会先按通道里的名单过滤发送者
+- **绑定后才能使用**，只有完成绑定的账号（用绑定码，在「ChatOps 绑定」页直接绑定，或扫码一键创建飞书应用机器人时的扫码人）才能执行命令；QQ、Telegram 和飞书应用机器人通道还会先按通道里的名单过滤发送者
 - **绑定码机制**，8 字符一次性码，默认 5 分钟有效（可选 1 小时到永久），通过 Web UI 生成再发给需要绑定的用户
 - **操作审计**，每条命令的执行结果、延迟、触发用户全部记录到 `action_audit` 表
 - **AES-GCM 加密落库**，Bot Token / Access Token 等凭证加密存储，截图不泄漏明文
@@ -21,15 +21,15 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 
 ## 支持的通道
 
-| 通道                        | 协议                      | 入站命令 | 出站推送  | 推荐场景                                                         |
-| --------------------------- | ------------------------- | :------: | :-------: | ---------------------------------------------------------------- |
-| **QQ OneBot**               | OneBot v11 反向 WebSocket |    ✅    |    ✅     | 国内用户、日常 QQ 就是主要 IM                                    |
-| **Telegram**                | Bot API 长轮询            |    ✅    |    ✅     | 海外用户、需要对接外网通知                                       |
-| **飞书应用机器人**          | 长连接（官方 SDK）        |    ✅    |    ✅     | 团队用飞书，见[飞书应用机器人](chatops-feishu.md)                |
-| **企业微信群机器人**        | 企业微信 Webhook          |    ❌    |    ✅     | 出站推送（群内告警），见[更多通知通道](notify-channels.md)       |
-| **钉钉 / 飞书群机器人**     | Webhook（可加签）         |    ❌    |    ✅     | 出站推送，见[更多通知通道](notify-channels.md)                   |
-| **Bark / Server 酱 / ntfy** | 各自的推送接口            |    ❌    |    ✅     | 推到手机，见[更多通知通道](notify-channels.md)                   |
-| **通用 Webhook** ⚠️         | HMAC-SHA256 HTTP          |    ❌    | 🧪 实验性 | 自定义集成、接入 n8n / Zapier 等；代码已实现，**尚未端到端验证** |
+| 通道                        | 协议                          | 入站命令 | 出站推送 | 推荐场景                                                                                                      |
+| --------------------------- | ----------------------------- | :------: | :------: | ------------------------------------------------------------------------------------------------------------- |
+| **QQ OneBot**               | OneBot v11 反向 WebSocket     |    ✅    |    ✅    | 国内用户、日常 QQ 就是主要 IM                                                                                 |
+| **Telegram**                | Bot API 长轮询                |    ✅    |    ✅    | 海外用户、需要对接外网通知                                                                                    |
+| **飞书应用机器人**          | 长连接（官方 SDK）            |    ✅    |    ✅    | 用飞书；可以扫码一键创建，见[飞书应用机器人](chatops-feishu.md)                                               |
+| **企业微信群机器人**        | 企业微信 Webhook              |    ❌    |    ✅    | 出站推送（群内告警），见[更多通知通道](notify-channels.md)                                                    |
+| **钉钉 / 飞书群机器人**     | Webhook（可加签）             |    ❌    |    ✅    | 出站推送，见[更多通知通道](notify-channels.md)                                                                |
+| **Bark / Server 酱 / ntfy** | 各自的推送接口                |    ❌    |    ✅    | 推到手机，见[更多通知通道](notify-channels.md)                                                                |
+| **通用 Webhook**            | HTTP（可选 HMAC-SHA256 签名） |    ❌    |    ✅    | 发给自己的服务，例如 n8n、Home Assistant、Discord、Slack，见[更多通知通道](notify-channels.md#自定义-webhook) |
 
 > 入站命令（IM→pt-tools）需要双向连接，Webhook 类通道只支持单向出站推送。
 
@@ -37,12 +37,14 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 
 ## 选择哪个通道？
 
+能收命令的通道里，飞书应用机器人的步骤最少：[扫码一键创建](chatops-feishu.md#扫码一键创建推荐)以后，通道已经建好并连上飞书，扫码的人也已经绑定。QQ 要另外部署 NapCat，登录一个给机器人用的 QQ 号（建议用小号）；Telegram 要先在 BotFather 建机器人，国内网络要经代理；这两种建好通道以后，还要把自己的账号填进名单并完成绑定。
+
 ```
 需要在 IM 里发命令控制 pt-tools？
 │
 ├── 是 → 国内用 QQ 作为主要 IM？
 │        ├── 是 → QQ OneBot (NapCat)  →  docs/guide/chatops-qq-napcat.md
-│        └── 否 → 团队用飞书？
+│        └── 否 → 用飞书？
 │                  ├── 是 → 飞书应用机器人  →  docs/guide/chatops-feishu.md
 │                  └── 否 → 能访问 Telegram？
 │                            ├── 是 → Telegram Bot  →  docs/guide/chatops-telegram.md
@@ -51,7 +53,7 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 └── 只需要出站通知（事件推送到群）？
      ├── 企业微信、钉钉、飞书群 → 对应的群机器人（docs/guide/notify-channels.md）
      ├── 推到手机 → Bark、Server 酱或 ntfy（docs/guide/notify-channels.md）
-     └── 自定义系统 → 配置 Generic Webhook
+     └── 自己的服务（n8n、Home Assistant 等）→ 通用 Webhook（docs/guide/notify-channels.md）
 ```
 
 ---

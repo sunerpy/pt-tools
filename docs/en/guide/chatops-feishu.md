@@ -1,6 +1,6 @@
 # Feishu app bot
 
-This page explains how to connect a Feishu (Lark) **custom app bot** to pt-tools: message the bot in a private chat or @ it in a group to send ChatOps commands and talk to the AI assistant, and receive background notifications such as the daily report, sign-ins and series tracking in Feishu.
+This page explains how to connect a Feishu (Lark) **custom app bot** to pt-tools: message the bot in a private chat or @ it in a group to send ChatOps commands and talk to the AI assistant, and receive background notifications such as the daily report, sign-ins and series tracking in Feishu. pt-tools can create the app for you when you **scan a QR code** (next section), or you can create it by hand on the Feishu Open Platform (from section 1 on).
 
 pt-tools receives events over the **long connection** of the official Feishu Go SDK: pt-tools connects out to the Feishu Open Platform, so no public address or open port is needed. Deployment is the same as with Telegram's long polling.
 
@@ -20,7 +20,7 @@ Scan one QR code with Feishu and pt-tools creates the app bot in your organizati
 
 What is filled in is the same as what sections 3 and 5 set up by hand: the permissions `im:message:send_as_bot`, `im:message.p2p_msg:readonly` and `im:message.group_at_msg:readonly`, and the event Receive messages v2.0 (`接收消息 v2.0`, `im.message.receive_v1`).
 
-- **The person who scans becomes the administrator and is bound at once**: Administrator open_id (`管理员 open_id`) is set to their open_id, so there is no need to message the bot for an open_id or to generate a bind code, and commands work right away. To let someone else use the bot, add their open_id to the lists in the channel detail (see section 7) and bind them. If Feishu does not return the scanner's open_id, the channel is still created, with no administrator: get the open_id as in section 7, enter it, and bind it on the bindings page.
+- **The person who scans becomes the administrator and is linked at once**: Administrator open_id (`管理员 open_id`) is set to their open_id, so there is no need to message the bot for an open_id or to generate a binding code, and commands work right away. To let someone else use the bot, add their open_id to the lists in the channel detail (see section 7) and bind them. If Feishu does not return the scanner's open_id, the channel is still created, with no administrator: get the open_id as in section 7, enter it, and bind it on the bindings page.
 - The app is created **in the scanner's organization**. With the wrong account, or when that organization's platform policy refuses it, the channel shows Error (`异常`) and getting the tenant_access_token fails with `21001` in the run logs (see section 12); scan again with the right account.
 - If the scanner uses Lark, the channel's platform is set to Lark (`Lark 国际版`); this has not been tested on Lark (see section 12).
 - One app serves one pt-tools instance (see section 12). With several instances, scan once on each.
@@ -28,6 +28,7 @@ What is filled in is the same as what sections 3 and 5 set up by hand: the permi
 - A QR code is valid for 10 minutes, and there is only one at a time: generating a new one or closing the dialog voids the previous one, unless you had already confirmed it in Feishu and pt-tools had already received the app at that moment; the channel is then created as usual and the page tells you. If closing the dialog fails to reach pt-tools to cancel (a network error), the page says so as well. While the previous one is still saving its channel, **Generate QR code** asks you to wait a few seconds. Do not scan a voided code: if it is scanned and confirmed, Feishu may still create an app. First check the channel list for a newly created channel; if there is none, delete the extra app in the [Feishu developer console](https://open.feishu.cn/app). Apps created by scanning are all named pt-tools by default, so tell them apart by App ID: an App ID that appears in a channel's details is in use, so do not delete it. Scan the code only from your own screen and do not send screenshots of it to others.
 - If the organization requires an administrator to approve apps, the confirmation page says so and the app may not be created; in that case create it by hand as described below and ask an administrator to approve it.
 - pt-tools sends the requests that create the app, and they follow only the `HTTPS_PROXY` and `NO_PROXY` environment variables: the channel does not exist yet, so its proxy URL cannot apply (see section 11).
+- Scan to create is only in the web interface after you sign in: the mobile app and MCP do not have it, and when the AI assistant changes the configuration it can only create the channel from an App ID and App Secret.
 
 The steps from section 1 on create the app by hand.
 
@@ -86,7 +87,7 @@ Open the pt-tools Web UI, go to ChatOps → Notifications (`消息通知`) and c
 
 - Both lists only accept open_ids (starting with `ou_`). A user_id, union_id or anything else is rejected on saving, with the offending entry named. To find your open_id, see section 7.
 - **Only people in one of the two lists can talk to the bot**; with both lists empty, no message is handled. When someone outside the lists messages the bot privately, they get a reply with their open_id (at most one every 10 minutes per person); in groups the bot stays silent.
-- A notification without a recipient goes to the first of: the default chat ID → the first administrator open_id → the first account bound on this channel. When none exists, the notification cannot be sent, and the channel section of ChatOps bindings (`ChatOps 绑定`) says why.
+- A notification without a recipient goes to the first of: the default chat ID → the first administrator open_id → the first account linked on this channel. When none exists, the notification cannot be sent, and the channel section of ChatOps bindings (`ChatOps 绑定`) says why.
 
 ---
 
@@ -139,10 +140,10 @@ Click **Send test** (`发测试消息`) on the channel card in the list, or **Se
 
 The lists only decide who can talk to the bot; **running commands also requires binding**. Open ChatOps → ChatOps bindings (`ChatOps 绑定`):
 
-- The Channels section at the top lists each account in the Feishu channel's lists and whether it is bound. Click **Bind** (`绑定`) next to an unbound account in the lists, and it can use commands once you confirm.
-- Or click **Generate bind code** (`生成绑定码`), choose the Feishu channel, get an 8-character code, and send `/bind <code>` to the bot in a **private chat**. The bot confirms the binding.
+- The Channels section at the top lists each account in the Feishu channel's lists and whether it is linked. Click **Link** (`绑定`) next to an account in the lists that is not linked, and it can use commands once you confirm.
+- Or click **Generate binding code** (`生成绑定码`), choose the Feishu channel, get an 8-character code, and send `/bind <code>` to the bot in a **private chat**. The bot confirms the binding.
 
-Currently **every bound account has administrator rights** and can pause or delete torrents and manage RSS subscriptions. Only give bind codes to people you trust.
+Currently **every linked account has administrator rights** and can pause or delete torrents and manage RSS subscriptions. Only give binding codes to people you trust.
 
 ### Testing commands
 
@@ -152,11 +153,11 @@ Send `/help` to the bot in a private chat; it replies with the full command list
 
 ## 9. Using the bot in groups
 
-1. Enable the `im:message.group_at_msg:readonly` permission from section 3 and publish a version.
+1. For an app created by hand, enable the `im:message.group_at_msg:readonly` permission from section 3 and publish a version; an app created with a QR code already has it, so skip this step.
 2. Add the bot to the group: group settings → Group bots (`群机器人`) → Add bot (`添加机器人`), then choose this app.
 3. **@ the bot** followed by the command, such as `@pt-tools /status`. pt-tools ignores messages that do not @ the bot, including ones that only @ other people or other bots.
 
-In a group, the sender also has to be in the lists and bound. Replies go to the group where every member can see them, bind codes included, so **bind in a private chat**. To send notifications such as the daily report to a group, enter the group's chat ID (starting with `oc_`) as the default chat ID. You can take the chat ID from the run logs: when someone in the lists @-mentions the bot in the group, the `收到消息` (message received) line in the run logs has `chat_id=oc_…`, which is that group's chat ID.
+In a group, the sender also has to be in the lists and linked. Replies go to the group where every member can see them, binding codes included, so **link in a private chat**. To send notifications such as the daily report to a group, enter the group's chat ID (starting with `oc_`) as the default chat ID. You can take the chat ID from the run logs: when someone in the lists @-mentions the bot in the group, the `收到消息` (message received) line in the run logs has `chat_id=oc_…`, which is that group's chat ID.
 
 ---
 
@@ -168,7 +169,7 @@ Feishu has no card buttons here: confirmations are text replies, and new RSS not
 
 ---
 
-## 11. Proxy
+## <a id="11-proxy"></a>11. Proxy
 
 Networks in mainland China can usually reach `open.feishu.cn` directly. If a proxy is needed, there are two ways:
 
@@ -184,11 +185,11 @@ Networks in mainland China can usually reach `open.feishu.cn` directly. If a pro
 Check in this order:
 
 1. Is the channel status Connected (ChatOps → Notifications)?
-2. Is the subscription mode under Events & Callbacks set to the persistent connection, and is Receive messages v2.0 added?
-3. After changing permissions and events, did you **publish a version** and get it approved?
+2. For an app created by hand: is the subscription mode under Events & Callbacks set to the persistent connection, and is Receive messages v2.0 added?
+3. For an app created by hand: after changing permissions and events, did you **publish a version** and get it approved?
 4. Are you within the app's availability?
 5. Private chats need `im:message.p2p_msg:readonly`, groups need `im:message.group_at_msg:readonly`, and in groups you must @ the bot.
-6. Is your open_id in the channel's lists, and are you bound before running commands? (The channel section of ChatOps bindings shows the last interaction and its result.)
+6. Is your open_id in the channel's lists, and is your account linked before you run commands? (The channel section of ChatOps bindings shows the last interaction and its result.)
 
 ---
 
@@ -242,4 +243,4 @@ According to the Feishu documentation, a message that gets no answer is pushed a
 
 ### Q: Is Lark supported?
 
-Yes. Choose Lark (`Lark 国际版`) as the platform when creating the channel, and create the app on the [Lark Open Platform](https://open.larksuite.com/app) with the same steps. This part follows the official documentation and **has not been tested** on Lark.
+Yes. For an app created by hand, create it on the [Lark Open Platform](https://open.larksuite.com/app) with the same steps and choose Lark (`Lark 国际版`) as the platform when creating the channel; when the bot is created with a QR code and the person who scans uses Lark, the channel's platform is set to Lark automatically. This part follows the official documentation and **has not been tested** on Lark.

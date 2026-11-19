@@ -33,7 +33,7 @@
 - [RSS 订阅配置](guide/rss-subscription.md)：订阅地址、选项、下载模式与故障排查。
 - [过滤规则与追剧](guide/filter-rules-tv-series.md)：关键词、通配符、正则和组合规则。
 - [自动删种与磁盘保护](guide/auto-cleanup.md)：清理范围、H&R 保护、磁盘门禁和工作目录清理。
-- [刷流任务](guide/brush.md)：从站点的免费列表挑种做种、按规则删种，限额与收益统计，以及从 Vertex 迁移。
+- [刷流任务](guide/brush.md)：从站点的种子列表里按条件挑免费的新种做种、按规则删种，限额与收益统计，以及从 Vertex 迁移。
 - [数据统计与每日战报](guide/user-stats.md)：每日快照、增量口径、走势图与每日战报。
 - [下载器助手](guide/downloader-assistant.md)：失效种子、补站点标签、替换 tracker 与失效种子定时扫描。
 - [转移做种](guide/torrent-transfer.md)：把种子搬到另一台下载器继续做种，路径映射与定时规则。
@@ -51,7 +51,7 @@
 - [ChatOps 快速开始](guide/chatops-quickstart.md)：通道选择、命令清单与配置入口。
 - [QQ OneBot（NapCat）](guide/chatops-qq-napcat.md)：反向 WebSocket、绑定与排障。
 - [Telegram Bot](guide/chatops-telegram.md)：BotFather、代理、绑定与排障。
-- [飞书应用机器人](guide/chatops-feishu.md)：企业自建应用、权限、长连接订阅、open_id 名单、绑定、群里 @ 机器人与排障。
+- [飞书应用机器人](guide/chatops-feishu.md)：扫码一键创建，或者手动创建企业自建应用（权限、长连接订阅、发布版本）；open_id 名单、绑定、群里 @ 机器人与排障。
 - [RSS 上新通知](guide/chatops-rss-notify.md)：通知模式、静默时段、digest、重试和配额。
 - [更多通知通道](guide/notify-channels.md)：企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；按事件自定义通知的标题与正文，以及 ChatOps 命令回复与 AI 助手回复的文字（消息模板）；通用 Webhook 的请求方法、请求体与预设（自定义 Webhook）。
 - [AI 助手](guide/assistant.md)：pt-tools 内置的 AI 助手：接哪家大模型、怎么对话、改动类操作怎么确认、数据会发给谁。
@@ -80,11 +80,11 @@
 - [ChatOps / MCP / Agent 架构](design/chatops-mcp-agent.md)：能力分层、权限模型与当前实现边界。
 - [MCP Server 设计](design/phase4-mcp.md)：MCP 工具、传输与安全边界的设计记录（用法见 [MCP](guide/mcp.md)）。
 - [远程访问协议](design/remote-access.md)：App 与 pt-tools 之间的配对链接、Noise 握手、隧道帧与 relay 的 v1 规范（用法见[远程访问](guide/remote-access.md)）。
-- [AI Agent 设计](design/phase5-agent.md)：未来 Agent 模式、接入路径与非目标。
-- [免费资格与到期处理全局安全方案](design/free-expiry-safety.md)：免费资格、延迟重推、到期暂停与多 RSS 归属的后续实施契约。
+- [AI Agent 设计](design/phase5-agent.md)：内置 AI 助手实现以前的 Agent 设计草稿，写了 Agent 模式、接入路径与非目标；1.0.0 的做法见 [AI 助手](guide/assistant.md)。
+- [免费资格与到期处理全局安全方案](design/free-expiry-safety.md)：免费资格、延迟重推、到期暂停与多 RSS 归属的方案与实施记录，已随 1.0.0 发布。
 
 > [!NOTE]
-> `docs/design/` 记录设计契约和后续演进方向，不表示相应能力已经对外发布。当前用户可用能力以文档站、Web UI 与 Release 说明为准。
+> `docs/design/` 记录设计契约和设计时的取舍：有的已经实现（例如 MCP Server、远程访问协议），有的没有按原设计实施（例如 AI Agent 设计）。当前用户可用能力以文档站、Web UI 与 Release 说明为准。
 
 ---
 
@@ -96,16 +96,16 @@
 
 下表的站点路径都相对于 `https://firlab.app/pt-tools/`，例如 `/en/` 就是 `https://firlab.app/pt-tools/en/`。
 
-| 本目录中的路径                                                                                                                                                                                | 站点路径                      | 说明                                                                                 |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `index.md`、`en/index.md`                                                                                                                                                                     | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
-| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                                                                              | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
-| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`、`design/free-expiry-safety.md`                                                             | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
-| `public/screens/`                                                                                                                                                                             | `/screens/*.webp`             | 首页与 README 的截图，见下文「截图」                                                 |
-| `guide/images/`                                                                                                                                                                               | 随页面发布                    | 页面引用的图片                                                                       |
-| `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/media-hub-board-spec.md`、`design/home-nas-spec.md`、`design/remote-access.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
+| 本目录中的路径                                                                                                                                                                                                                | 站点路径                      | 说明                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `index.md`、`en/index.md`                                                                                                                                                                                                     | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
+| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                                                                                                              | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
+| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`                                                                                                                             | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
+| `public/screens/`                                                                                                                                                                                                             | `/screens/*.webp`             | 首页与 README 的截图，见下文「截图」                                                 |
+| `guide/images/`                                                                                                                                                                                                               | 随页面发布                    | 页面引用的图片                                                                       |
+| `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/media-hub-board-spec.md`、`design/home-nas-spec.md`、`design/remote-access.md`、`design/free-expiry-safety.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
 
-`web/frontend/public/logo.svg` 也会同步过去，作为站点图标。
+`web/frontend/public/logo.svg` 与 `web/frontend/public/logo-dark.svg` 也会同步过去：`logo.svg` 是站点图标和浅色主题导航栏里的标志，`logo-dark.svg` 是深色主题导航栏里的标志。只改这两个文件的 PR 同样会触发下面的检查与发布。
 
 ### 一次修改怎么上线
 

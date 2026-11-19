@@ -139,7 +139,7 @@ Open the pt-tools web UI, go to ChatOps → Notifications (消息通知) and cli
 The WebSocket path is always `/onebot/v11/ws`; make sure the path in NapCat's URL is the same.
 
 > [!IMPORTANT]
-> Admin QQ and Allowed QQ are allow lists for talking to the bot: only messages from a QQ number in one of the two lists are handled; messages from anyone else are ignored without a reply (the log records 拒绝非授权用户, "rejected unauthorised user"). **When both lists are empty, nobody can use the bot**, not even to link an account. The lists do not grant admin rights: a number that may talk to the bot still has to be linked with a binding code before it can run commands, and **every linked account has admin rights**, so it can pause, resume and delete torrents and manage RSS subscriptions. Give binding codes only to accounts you trust, and revoke a binding under ChatOps → ChatOps binding (ChatOps 绑定) when it is no longer needed.
+> Admin QQ and Allowed QQ are allow lists for talking to the bot: only messages from a QQ number in one of the two lists are handled; messages from anyone else are ignored without a reply (the log records 拒绝非授权用户, "rejected unauthorised user"). **When both lists are empty, nobody can use the bot**, not even to link an account. The lists do not grant admin rights: a number that may talk to the bot still has to be linked before it can run commands, and **every linked account has admin rights**, so it can pause, resume and delete torrents and manage RSS subscriptions. Give binding codes only to accounts you trust, and revoke a binding under ChatOps → ChatOps binding (ChatOps 绑定) when it is no longer needed.
 
 After saving, the channel's status first shows Running (运行中: the port is listening), then Connected (已连接) once NapCat has connected.
 

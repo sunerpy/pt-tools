@@ -44,7 +44,7 @@ DingTalk requires at least one security setting per bot: with signing, enter the
 
 The signature uses the current time; Feishu rejects messages when the clock of the machine running pt-tools is more than an hour off.
 
-A group bot only sends notifications and cannot receive commands. To send commands and talk to the AI assistant from Feishu, use the [Feishu app bot](chatops-feishu.md): a custom app that receives messages over a long connection and can also send background notifications.
+A group bot only sends notifications and cannot receive commands. To send commands and talk to the AI assistant from Feishu, use the [Feishu app bot](chatops-feishu.md): a custom app that you can [create by scanning a QR code](chatops-feishu.md#creating-the-bot-with-a-qr-code-recommended), which receives messages over a long connection and can also send background notifications.
 
 ## Bark
 
@@ -199,7 +199,7 @@ The generic Webhook channel sends notifications to your own services, such as n8
   https://example.com/hook?site={{urlquery .site}}
   ```
 
-With an empty body template, the channel sends the fixed JSON: `event_type` (always `notification`), `title`, `text`, `link`, `payload`, and `event` (the event `type`, its `time`, and all of its variables in `fields`). `event` is new in this version and the other fields are unchanged: receivers that read fields are not affected, and receivers that compare the whole body need updating.
+With an empty body template, the channel sends the fixed JSON: `event_type` (always `notification`), `title`, `text`, `link`, `payload`, and `event` (the event `type`, its `time`, and all of its variables in `fields`). The fixed JSON sent by 0.48.0 has no `event`, and the other fields are the same: after upgrading from 0.48.0, receivers that read fields are not affected, and receivers that compare the whole body need updating.
 
 A webhook receives every kind of notification, so saving renders the templates once with the sample data of each event: a misspelled variable, or a JSON body that does not render to valid JSON, is not saved, and the message names the event and the line. Variables that only some events have are empty or 0 in the others. "Preview with sample data" lets you pick an event and see the rendered request without sending it.
 

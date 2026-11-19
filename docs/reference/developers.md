@@ -46,7 +46,7 @@ make check
 
 ## 设计文档
 
-以下设计文档只有中文，记录的是接口契约和后续方向，不表示相应能力已经发布：
+以下设计文档只有中文，记录接口契约和设计时的取舍；哪些能力已经发布，以用户文档和 Release 说明为准：
 
 - [ChatOps / MCP / Agent 架构](../design/chatops-mcp-agent.md)
 - [MCP Server 设计](../design/phase4-mcp.md)

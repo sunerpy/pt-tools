@@ -3,12 +3,12 @@ layout: home
 markdownStyles: false
 title: "pt-tools: automation for private trackers"
 titleTemplate: false
-description: RSS downloads, seed boosting, IYUU cross-seeding, following shows and organising your media library, statistics across sites and downloader management, in the web interface and the mobile app, with control from QQ and Telegram or through an AI assistant. Runs in Docker, on Linux and on Windows.
+description: RSS downloads, seed boosting, IYUU cross-seeding, following shows and organising your media library, statistics across sites and downloader management, in the web interface and the mobile app, with control from QQ, Telegram and Feishu or through an AI assistant. Runs in Docker, on Linux and on Windows.
 
 hero:
   name: pt-tools
   text: Automation for private trackers
-  tagline: Download, brush and cross-seed with IYUU, follow shows into your media library, and keep every site's statistics and your qBittorrent and Transmission in one place, from the web, the app, QQ or Telegram.
+  tagline: Download, brush and cross-seed with IYUU, follow shows into your media library, and keep every site's statistics and your qBittorrent and Transmission in one place, from the web, the app, QQ, Telegram or Feishu.
   actions:
     - theme: brand
       text: Install
@@ -110,10 +110,10 @@ home:
       - icon: bell
         title: QQ, Telegram, Feishu and notifications
         status: available
-        body: Check status and torrents from QQ, Telegram or Feishu, pause, resume or delete torrents and add RSS feeds, with every command recorded in the audit log. New-torrent notifications support quiet hours, digests and an hourly limit.
+        body: The Feishu app bot can be created by scanning one QR code, with nothing to set up in the Feishu developer console. Check status and torrents from QQ, Telegram or Feishu, pause, resume or delete torrents and add RSS feeds, with every command recorded in the audit log. New-torrent notifications support quiet hours, digests and an hourly limit.
         evidence:
-          kind: chips
-          items: [/status, /tasks, /torrents, /addrss]
+          kind: code
+          text: Scan to create (recommended)
         link: /en/guide/chatops-quickstart
       - icon: house
         title: Home page and NAS monitoring

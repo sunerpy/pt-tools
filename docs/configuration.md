@@ -93,7 +93,8 @@ docker run -d \
 
 - 建议同时设置 `HTTP_PROXY` 和 `HTTPS_PROXY`。
 - 如果未设置 `HTTP_PROXY`/`HTTPS_PROXY`，站点访问和下载器连接会改用 `ALL_PROXY`；RSS 拉取和 Telegram 通道目前只读取 `HTTP_PROXY`/`HTTPS_PROXY`，需要代理时请设置这两个变量（Telegram 也可以在通道里单独填写代理 URL）。
-- RSS 任务下载种子文件以前一直直连，现在和站点访问一样按这些变量走（包括 `ALL_PROXY`）。
+- 飞书应用机器人只读取 `HTTPS_PROXY` 与 `NO_PROXY`（飞书的地址都是 https），长连接要求代理是 `http://` 或 `socks5://`；通道里也可以单独填写代理 URL。扫码一键创建时通道还不存在，建应用的请求只按这两个环境变量。见[飞书应用机器人的代理设置](guide/chatops-feishu.md#11-代理)。
+- 0.48.0 里 RSS 任务下载种子文件一直直连；1.0 起和站点访问一样按这些变量走（包括 `ALL_PROXY`）。
 - `NO_PROXY` 对内网地址非常有用，可避免本地服务或局域网请求走代理。
 - 在「全局设置」里开了站点代理以后，站点请求不再看这些变量，见上一节。
 - 修改环境变量后要重启 pt-tools。

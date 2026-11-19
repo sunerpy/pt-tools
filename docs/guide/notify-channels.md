@@ -44,7 +44,7 @@
 
 签名用到当前时间，pt-tools 所在机器的时间差超过一小时时飞书会拒收。
 
-群机器人只发通知、收不到命令。要在飞书里发命令、和 AI 助手对话，用[飞书应用机器人](chatops-feishu.md)：它是企业自建应用，经长连接收消息，同样能发后台通知。
+群机器人只发通知、收不到命令。要在飞书里发命令、和 AI 助手对话，用[飞书应用机器人](chatops-feishu.md)：它是企业自建应用，可以[扫码一键创建](chatops-feishu.md#扫码一键创建推荐)，经长连接收消息，同样能发后台通知。
 
 ## Bark
 
@@ -199,7 +199,7 @@ Telegram 按纯文本发，模板里写的 HTML、Markdown 标记会原样显示
   https://example.com/hook?site={{urlquery .site}}
   ```
 
-请求体模板留空时发固定的 JSON：`event_type`（固定是 `notification`）、`title`、`text`、`link`、`payload`，以及 `event`（事件类型 `type`、时间 `time` 与这种事件的全部变量 `fields`）。`event` 是这一版新加的，其余字段不变：按字段读取的接收方不受影响，按整段内容比对的要跟着改。
+请求体模板留空时发固定的 JSON：`event_type`（固定是 `notification`）、`title`、`text`、`link`、`payload`，以及 `event`（事件类型 `type`、时间 `time` 与这种事件的全部变量 `fields`）。0.48.0 发的固定 JSON 里没有 `event`，其余字段相同：从 0.48.0 升级以后，按字段读取的接收方不受影响，按整段内容比对的要跟着改。
 
 Webhook 会收到所有种类的通知，所以保存时用每种事件的示例数据各渲染一遍：变量名写错、JSON 格式渲染出来不是合法的 JSON 时不会保存，并写明是哪种事件、第几行。只在某些事件里有的变量，在别的事件里是空值或 0。「按示例数据预览」可以选一种事件，看渲染出来的请求，不会真的发出去。
 
