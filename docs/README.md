@@ -80,11 +80,11 @@
 - [ChatOps / MCP / Agent 架构](design/chatops-mcp-agent.md)：能力分层、权限模型与当前实现边界。
 - [MCP Server 设计](design/phase4-mcp.md)：MCP 工具、传输与安全边界的设计记录（用法见 [MCP](guide/mcp.md)）。
 - [远程访问协议](design/remote-access.md)：App 与 pt-tools 之间的配对链接、Noise 握手、隧道帧与 relay 的 v1 规范（用法见[远程访问](guide/remote-access.md)）。
-- [AI Agent 设计](design/phase5-agent.md)：未来 Agent 模式、接入路径与非目标。
-- [免费资格与到期处理全局安全方案](design/free-expiry-safety.md)：免费资格、延迟重推、到期暂停与多 RSS 归属的后续实施契约。
+- [AI Agent 设计](design/phase5-agent.md)：内置 AI 助手实现以前的 Agent 设计草稿，写了 Agent 模式、接入路径与非目标；1.0.0 的做法见 [AI 助手](guide/assistant.md)。
+- [免费资格与到期处理全局安全方案](design/free-expiry-safety.md)：免费资格、延迟重推、到期暂停与多 RSS 归属的方案与实施记录，已随 1.0.0 发布。
 
 > [!NOTE]
-> `docs/design/` 记录设计契约和后续演进方向，不表示相应能力已经对外发布。当前用户可用能力以文档站、Web UI 与 Release 说明为准。
+> `docs/design/` 记录设计契约和设计时的取舍：有的已经实现（例如 MCP Server、远程访问协议），有的没有按原设计实施（例如 AI Agent 设计）。当前用户可用能力以文档站、Web UI 与 Release 说明为准。
 
 ---
 
@@ -96,16 +96,16 @@
 
 下表的站点路径都相对于 `https://firlab.app/pt-tools/`，例如 `/en/` 就是 `https://firlab.app/pt-tools/en/`。
 
-| 本目录中的路径                                                                                                                                                                                | 站点路径                      | 说明                                                                                 |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `index.md`、`en/index.md`                                                                                                                                                                     | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
-| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                                                                              | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
-| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`、`design/free-expiry-safety.md`                                                             | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
-| `public/screens/`                                                                                                                                                                             | `/screens/*.webp`             | 首页与 README 的截图，见下文「截图」                                                 |
-| `guide/images/`                                                                                                                                                                               | 随页面发布                    | 页面引用的图片                                                                       |
-| `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/media-hub-board-spec.md`、`design/home-nas-spec.md`、`design/remote-access.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
+| 本目录中的路径                                                                                                                                                                                                                | 站点路径                      | 说明                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `index.md`、`en/index.md`                                                                                                                                                                                                     | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
+| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                                                                                                              | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
+| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`                                                                                                                             | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
+| `public/screens/`                                                                                                                                                                                                             | `/screens/*.webp`             | 首页与 README 的截图，见下文「截图」                                                 |
+| `guide/images/`                                                                                                                                                                                                               | 随页面发布                    | 页面引用的图片                                                                       |
+| `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/media-hub-board-spec.md`、`design/home-nas-spec.md`、`design/remote-access.md`、`design/free-expiry-safety.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
 
-`web/frontend/public/logo.svg` 也会同步过去，作为站点图标。
+`web/frontend/public/logo.svg` 与 `web/frontend/public/logo-dark.svg` 也会同步过去：`logo.svg` 是站点图标和浅色主题导航栏里的标志，`logo-dark.svg` 是深色主题导航栏里的标志。只改这两个文件的 PR 同样会触发下面的检查与发布。
 
 ### 一次修改怎么上线
 
