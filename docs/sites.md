@@ -1,8 +1,8 @@
 # 支持站点
 
-当前已适配 **73** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构，以及 IPTorrents 这类站点自己写的程序。
+当前已适配 **74** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构，以及 IPTorrents 这类站点自己写的程序。
 
-### NexusPHP 系列（68）
+### NexusPHP 系列（69）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                                         |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------------------- |
@@ -74,9 +74,13 @@
 | **HDKylin**           | Cookie   | RSS、搜索、用户信息           | ✅       | 麒麟（www.hdkyl.in，issue #881）                                             |
 | **OshenPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | www.oshen.win（issue #882）                                                  |
 | **Kelu**              | Cookie   | RSS、搜索、用户信息           | ✅       | our.kelu.one（成人内容；H&R 情况同库非，issue #861）                         |
+| **HDWinG**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | HDChina 重开（hdwing.org，没有 H&R，暂不支持自动签到，issue #910）           |
 
 > [!WARNING]
 > 北洋园（TJUPT）规定：没在白名单里的程序、脚本用 Cookie 访问站点，会被警告或永久封号；站点自带的 RSS 不用报备。启用这个站点前，先在北洋园论坛的「机器人爬虫/程序脚本报备专帖」回帖报备 pt-tools（用途、用户 ID、IP 段、User-Agent、访问的页面与频率），管理组通过后再在 pt-tools 里启用。
+
+> [!NOTE]
+> HDWinG（hdwing.org）是 HDChina 重开的站点。它的种子列表和详情页不直接写优惠，页面打开后再向站点另取一次，pt-tools 读列表、取详情时也会这样多请求一次，免费、2X、50% 和结束时间照常显示。签到入口和签到回执没有采集到，pt-tools 暂不自动签到，请在网页上签到。站点没有 H&R，pt-tools 不按 H&R 处理它的种子。
 
 ### 其他架构（5）
 

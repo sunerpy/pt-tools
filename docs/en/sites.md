@@ -1,8 +1,8 @@
 # Supported sites
 
-**73** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi, plus sites that run their own software such as IPTorrents.
+**74** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi, plus sites that run their own software such as IPTorrents.
 
-### NexusPHP sites (68)
+### NexusPHP sites (69)
 
 | Site                  | Sign-in | Features                                   | Status | Notes                                                                                                                     |
 | --------------------- | ------- | ------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------- |
@@ -74,9 +74,13 @@
 | **HDKylin**           | Cookie  | RSS, search, user info                     | ✅     | 麒麟 (www.hdkyl.in; issue #881)                                                                                           |
 | **OshenPT**           | Cookie  | RSS, search, user info                     | ✅     | www.oshen.win (issue #882)                                                                                                |
 | **Kelu**              | Cookie  | RSS, search, user info                     | ✅     | our.kelu.one (adult content; H&R works as on 库非; issue #861)                                                            |
+| **HDWinG**            | Cookie  | RSS, search, user info, class requirements | ✅     | HDChina relaunched (hdwing.org; no H&R; no automatic sign-in yet; issue #910)                                             |
 
 > [!WARNING]
 > TJUPT warns or permanently bans accounts used by programs or scripts that access the site with your cookie unless the program is on its whitelist; the site's own RSS feed needs no registration. Before turning the site on, register pt-tools in the 机器人爬虫/程序脚本报备专帖 topic on the TJUPT forum (purpose, user ID, IP range, User-Agent, pages visited and how often), and turn it on in pt-tools after the staff approve it.
+
+> [!NOTE]
+> HDWinG (hdwing.org) is HDChina relaunched. Its torrent list and details pages leave the promotion out and fetch it from the site after the page opens; pt-tools makes the same extra request when it reads the list or a details page, so Free, 2X, 50% and their end times show as usual. The sign-in button has not been captured yet, so pt-tools does not sign in automatically; sign in on the website. The site has no H&R, and pt-tools does not treat its torrents as H&R.
 
 ### Other platforms (5)
 
