@@ -66,6 +66,8 @@ const (
 	SiteHDDolby SiteKind = "hddolby"
 	// SiteRousi represents Rousi-based sites using passkey auth
 	SiteRousi SiteKind = "rousi"
+	// SiteIPTorrents 是 IPTorrents 自己写的站点程序（网页 + Cookie）
+	SiteIPTorrents SiteKind = "iptorrents"
 )
 
 // AuthMethod represents the authentication method for a site
@@ -113,12 +115,15 @@ const (
 	SchemaHDDolby Schema = "HDDolby"
 	// SchemaRousi is RousiPro's custom architecture
 	SchemaRousi Schema = "Rousi"
+	// SchemaIPTorrents 是 IPTorrents（iptorrents.com）自己写的站点程序：不是 NexusPHP、Gazelle 或 Unit3D，
+	// 没有给第三方用的 API，用 Cookie 读网页；驱动由站点定义的 CreateDriver 提供（definitions/iptorrents.go）
+	SchemaIPTorrents Schema = "IPTorrents"
 )
 
 // IsValid checks if the schema is a known valid value
 func (s Schema) IsValid() bool {
 	switch s {
-	case SchemaNexusPHP, SchemaMTorrent, SchemaUnit3D, SchemaGazelle, SchemaHDDolby, SchemaRousi:
+	case SchemaNexusPHP, SchemaMTorrent, SchemaUnit3D, SchemaGazelle, SchemaHDDolby, SchemaRousi, SchemaIPTorrents:
 		return true
 	default:
 		return false
@@ -145,6 +150,8 @@ func (s Schema) ToSiteKind() SiteKind {
 		return SiteHDDolby
 	case SchemaRousi:
 		return SiteRousi
+	case SchemaIPTorrents:
+		return SiteIPTorrents
 	default:
 		return SiteNexusPHP // Default fallback
 	}

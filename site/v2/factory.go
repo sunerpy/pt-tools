@@ -127,6 +127,11 @@ type RousiOptions struct {
 	Cookie  string `json:"cookie,omitempty"`
 }
 
+// IPTorrentsOptions 是 IPTorrents 站点实例的凭据：登录后浏览器里的整串 Cookie（uid、pass）。
+type IPTorrentsOptions struct {
+	Cookie string `json:"cookie"`
+}
+
 type SiteFactory struct {
 	logger *zap.Logger
 }
@@ -139,12 +144,13 @@ func NewSiteFactory(logger *zap.Logger) *SiteFactory {
 }
 
 var typeToSchemaMap = map[string]Schema{
-	"nexusphp": SchemaNexusPHP,
-	"mtorrent": SchemaMTorrent,
-	"unit3d":   SchemaUnit3D,
-	"gazelle":  SchemaGazelle,
-	"hddolby":  SchemaHDDolby,
-	"rousi":    SchemaRousi,
+	"nexusphp":   SchemaNexusPHP,
+	"mtorrent":   SchemaMTorrent,
+	"unit3d":     SchemaUnit3D,
+	"gazelle":    SchemaGazelle,
+	"hddolby":    SchemaHDDolby,
+	"rousi":      SchemaRousi,
+	"iptorrents": SchemaIPTorrents,
 }
 
 func typeToSchema(t string) Schema {

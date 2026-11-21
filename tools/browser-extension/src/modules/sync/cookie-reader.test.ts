@@ -452,3 +452,40 @@ describe("checkCookieHealth: U2 的 nexusphp_u2", () => {
     expect(health.status).toBe("missing");
   });
 });
+
+/*
+ * IPTorrents 不是 NexusPHP：登录 Cookie 是 uid 与 pass（站点自己写的程序），两个都在才算认得出的登录格式。
+ */
+describe("checkCookieHealth: IPTorrents 的 uid 与 pass", () => {
+  const IPT = KNOWN_SITES.find((site) => site.id === "iptorrents") as KnownSite;
+
+  it("uid 和 pass 都在就算登录着，可以直接同步，剩余天数按这两个算", async () => {
+    jar["iptorrents.com"] = [cookie("uid", "1234567", 60), cookie("pass", "f".repeat(32), 60)];
+
+    const health = await checkCookieHealth(IPT);
+
+    expect(IPT.schema).toBe("IPTorrents");
+    expect(health.status).toBe("valid");
+    expect(health.format).toBe("declared");
+    expect(health.cookieString).toContain("uid=1234567");
+    expect(health.cookieString).toContain(`pass=${"f".repeat(32)}`);
+    expect(health.expireDays).toBeGreaterThanOrEqual(59);
+  });
+
+  it("只剩 uid 时认不出格式，交给 pt-tools 先验证再保存", async () => {
+    jar["iptorrents.com"] = [cookie("uid", "1234567", 60)];
+
+    const health = await checkCookieHealth(IPT);
+
+    expect(health.status).toBe("unverified");
+    expect(health.format).toBeNull();
+  });
+
+  it("子域名上设的 Cookie 也认（www.iptorrents.com 属于这个站点）", async () => {
+    jar[".iptorrents.com"] = [cookie("uid", "1234567", 60), cookie("pass", "f".repeat(32), 60)];
+
+    const health = await checkCookieHealth(IPT);
+
+    expect(health.status).toBe("valid");
+  });
+});

@@ -351,16 +351,21 @@ const GAZELLE_DOMAINS: string[] = [
   "uhdbits.org",
 ];
 
+/** 站点自己写程序、单独一个架构的站点 */
+const IPTORRENTS_DOMAINS: string[] = ["iptorrents.com"];
+
 const DOMAIN_SET_MAP: Array<[string[], SiteSchema]> = [
   [NEXUSPHP_DOMAINS, "NexusPHP"],
   [UNIT3D_DOMAINS, "Unit3D"],
   [GAZELLE_DOMAINS, "Gazelle"],
+  [IPTORRENTS_DOMAINS, "IPTorrents"],
 ];
 
 const ALL_PT_DOMAINS: Set<string> = new Set([
   ...NEXUSPHP_DOMAINS,
   ...UNIT3D_DOMAINS,
   ...GAZELLE_DOMAINS,
+  ...IPTORRENTS_DOMAINS,
 ]);
 
 export function lookupPtDomain(hostname: string): SiteSchema | null {

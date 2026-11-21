@@ -83,7 +83,7 @@ func (d *SiteDefinition) Validate() error {
 	}
 
 	if !d.Schema.IsValid() {
-		addErr("Schema", "InvalidValue", fmt.Sprintf("%q is not a valid schema; valid values: NexusPHP, mTorrent, Unit3D, Gazelle, HDDolby, Rousi", d.Schema))
+		addErr("Schema", "InvalidValue", fmt.Sprintf("%q is not a valid schema; valid values: NexusPHP, mTorrent, Unit3D, Gazelle, HDDolby, Rousi, IPTorrents", d.Schema))
 	}
 
 	if len(d.URLs) == 0 {
@@ -188,6 +188,12 @@ func (d *SiteDefinition) validateSchemaSpecific(addErr func(field, rule, detail 
 	case SchemaRousi:
 		if d.CreateDriver == nil {
 			addErr("CreateDriver", "SchemaRequired", "Rousi schema requires a custom CreateDriver function")
+		}
+
+	case SchemaIPTorrents:
+		// 没有按架构注册的通用驱动：站点定义自己给驱动
+		if d.CreateDriver == nil {
+			addErr("CreateDriver", "SchemaRequired", "IPTorrents schema requires a custom CreateDriver function")
 		}
 	}
 }

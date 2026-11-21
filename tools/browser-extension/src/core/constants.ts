@@ -683,6 +683,17 @@ export const KNOWN_SITES: KnownSite[] = [
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
     syncField: "cookie",
   },
+  {
+    // IPTorrents 是站点自己写的程序（不是 NexusPHP）：登录 Cookie 是 uid 与 pass（SickGear、ruTorrent 的 IPTorrents 插件都按这两个认）。
+    // 站内说明「IPTorrents has 5 domains」，换域名要重新登录；这里只登记 iptorrents.com（子域名也算），镜像域名没核实，不写。
+    id: "iptorrents",
+    name: "IPTorrents",
+    domains: ["iptorrents.com"],
+    schema: "IPTorrents",
+    authMethod: "cookie",
+    cookieNames: ["uid", "pass"],
+    syncField: "cookie",
+  },
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [

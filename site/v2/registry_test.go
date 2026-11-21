@@ -131,6 +131,25 @@ func TestSiteRegistry_CreateSite_NexusPHP(t *testing.T) {
 	assert.Equal(t, v2.SiteNexusPHP, site.Kind())
 }
 
+// IPTorrents 用 Cookie：凭据入口按 Cookie 收，建出来的实例是 IPTorrents 自己的站点类型。
+func TestSiteRegistry_CreateSite_IPTorrents(t *testing.T) {
+	registry := v2.NewSiteRegistry(nil)
+
+	meta, ok := registry.Get("iptorrents")
+	require.True(t, ok)
+	assert.Equal(t, v2.SiteIPTorrents, meta.Kind)
+	assert.Equal(t, v2.AuthMethodCookie, meta.AuthMethod)
+
+	_, err := registry.CreateSite("iptorrents", v2.SiteCredentials{}, "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "requires cookie")
+
+	site, err := registry.CreateSite("iptorrents", v2.SiteCredentials{Cookie: "uid=1; pass=fake"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, "iptorrents", site.ID())
+	assert.Equal(t, v2.SiteIPTorrents, site.Kind())
+}
+
 func TestSiteRegistry_CreateSite_CustomBaseURL(t *testing.T) {
 	registry := v2.NewSiteRegistry(nil)
 

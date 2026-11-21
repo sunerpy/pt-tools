@@ -105,11 +105,14 @@ func ResolveSiteByTracker(announceURL string) (string, bool) {
 var (
 	numericID        = regexp.MustCompile(`^\d+$`)
 	unit3dDownloadRe = regexp.MustCompile(`^/torrents?/download/(\d+)(?:\.[^/]*)?/?$`)
+	// iptDownloadRe 是 IPTorrents 的下载地址 /download.php/{id}/{文件名}.torrent（文件名可能编码过，也可能没有）
+	iptDownloadRe = regexp.MustCompile(`^/download\.php/(\d+)(?:/[^/]*)?$`)
 )
 
 // ParseDownloadURL 按站点架构从种子下载地址里取出种子 ID：
 // NexusPHP 与 HDDolby 是 download.php?id=，Unit3D 是 /torrents/download/{id}（RSS 链接带 .{key} 后缀），
-// Gazelle 是 torrents.php?action=download&id=。M-Team 的下载地址是临时签名链接、不含种子 ID，返回 false；
+// Gazelle 是 torrents.php?action=download&id=，IPTorrents 是 /download.php/{id}/{文件名}.torrent。
+// M-Team 的下载地址是临时签名链接、不含种子 ID，返回 false；
 // 地址的主机不属于这个站点时也返回 false。
 func ParseDownloadURL(def *SiteDefinition, rawURL string) (string, bool) {
 	if def == nil {
@@ -136,6 +139,10 @@ func ParseDownloadURL(def *SiteDefinition, rawURL string) (string, bool) {
 	case SchemaGazelle:
 		if strings.HasSuffix(path, "/torrents.php") && q.Get("action") == "download" && numericID.MatchString(q.Get("id")) {
 			return q.Get("id"), true
+		}
+	case SchemaIPTorrents:
+		if m := iptDownloadRe.FindStringSubmatch(u.EscapedPath()); m != nil {
+			return m[1], true
 		}
 	}
 	return "", false

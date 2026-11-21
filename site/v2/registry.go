@@ -196,6 +196,11 @@ func (r *SiteRegistry) CreateSite(siteID string, creds SiteCredentials, customBa
 			return nil, fmt.Errorf("site %s requires passkey", siteID)
 		}
 		options, err = json.Marshal(RousiOptions{Passkey: creds.Passkey, Cookie: creds.Cookie})
+	case SiteIPTorrents:
+		if creds.Cookie == "" {
+			return nil, fmt.Errorf("site %s requires cookie", siteID)
+		}
+		options, err = json.Marshal(IPTorrentsOptions{Cookie: creds.Cookie})
 	default:
 		return nil, fmt.Errorf("unsupported site kind: %s", meta.Kind)
 	}
