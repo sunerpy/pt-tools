@@ -40,8 +40,9 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | `conflict`                                                      | 409      | 改配置时保存它的接口回了冲突（例如刷流任务正在运行一轮），稍后再试                       |
 | `rate_limited`                                                  | 429      | TMDB 限流，稍后再试                                                                      |
 | `internal`                                                      | 500      | pt-tools 内部出错                                                                        |
-| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502      | 搜索、下载种子文件、签到、访问 TMDB 失败，或者改配置时保存它的接口出错                   |
+| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502      | 搜索、下载种子文件、签到、访问 TMDB 或读下载器失败，或者改配置时保存它的接口出错         |
 | `unavailable`                                                   | 503      | 对应的服务没有启动                                                                       |
+| `timeout`                                                       | 504      | 在时限内没有做完（整理入库、读下载器的种子列表）                                         |
 | `assistant_disabled`、`decided`                                 | 409      | AI 助手没有启用；这个待确认操作已经有了结论                                              |
 | `too_many`                                                      | 429      | AI 助手同时在回答的问题太多                                                              |
 
@@ -57,6 +58,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | GET    | `/torrents`                                   | 读取        | 下载器里的种子                               |
 | GET    | `/downloaders`                                | 读取        | 下载器与它们现在的速度、剩余空间             |
 | GET    | `/downloaders/seeding`                        | 读取        | 每台下载器正在做种的个数与体积               |
+| GET    | `/downloaders/{id}/labels`                    | 读取        | 一台下载器现有的分类与标签（推送时选）       |
 | POST   | `/torrents/actions`                           | 操作        | 暂停、继续、删除种子                         |
 | POST   | `/search`                                     | 读取        | 多站搜索                                     |
 | POST   | `/push`                                       | 操作        | 把搜索到的种子推送到下载器                   |
@@ -185,6 +187,10 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 每台启用的下载器正在做种的种子，和网页用户统计页的[下载器做种](../guide/user-stats.md#下载器做种)是同一份数。每项有 `id`、`name`、`type`、`reachable`（读到了种子列表）、`error`（读不到时的原因，去掉了地址）、`seeding_count` 与 `seeding_size`（状态是做种的种子个数与体积）、`idle_count` 与 `idle_size`（下载完了、但暂停、停止、排队、校验中或出错的）；`total_seeding_count`、`total_seeding_size` 是读到了的几台的合计。体积按种子大小相加，辅种和原种子各算一次，所以合计比硬盘上实际占用的多。要读每台下载器的整个种子列表，一共最多等 20 秒，没读完的那台写明没有在时限内读到。`GET /meta` 的 `features` 里有 `downloader_seeding` 时才有这个接口。
 
+### GET /downloaders/{id}/labels
+
+一台启用的下载器（`id` 取自 `GET /downloaders`）现有的分类与标签，App 推送时给用户选。读这台下载器的种子列表，汇总种子上用到的分类与标签，去掉空的与重复的，排好序；qBittorrent 里建好、没有种子用的分类也列出。回应有 `downloader_id`、`downloader`、`type`、`supports_category`、`categories`、`tags`。Transmission 没有分类：推送时给的分类会写成它的第一个 label，所以 `supports_category` 是 `false`、`categories` 是空的，种子上的 labels 都在 `tags` 里。下载器不存在或没有启用时回 404，取不到下载器或读不到种子列表时回 502（`upstream`，原因去掉了地址），15 秒内没有读完时回 504（`timeout`）。`GET /meta` 的 `features` 里有 `downloader_labels` 时才有这个接口。
+
 ### GET /torrents
 
 | 参数                | 说明                                                                                                                                                                            |
@@ -231,6 +237,8 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | `site`、`torrent_id`                     | 必填，取自搜索结果                                                             |
 | `downloader_id`                          | 推送到哪台下载器；不填时用默认下载器，没有默认下载器时用第一台启用的           |
 | `title`、`category`、`tags`、`save_path` | 可选：记录里的标题（不填时用种子文件里的名字），下载器里的分类、标签与保存目录 |
+
+`save_path` 是下载器里看到的目录，不填时用下载器自己的默认目录；网页「下载器设置」里给各下载器预设的目录在 [`GET /mobile/options`](#手机编辑与统计导出) 的 `directories` 里。`tags` 多个时用英文逗号隔开。下载器现有的分类与标签见 [`GET /downloaders/{id}/labels`](#get-downloadersidlabels)；推到 Transmission 时 `category` 会写成第一个 label。
 
 回应有 `success`、`skipped`（下载器里已经有这个种子）、`message`、`info_hash`、`downloader_id`、`downloader`。被磁盘空间保护或站点做种容量拦下时 `success` 是 `false`、`message` 写明原因，状态码仍是 200；种子文件下载失败时回 502。推送前搜索过这个种子时，搜索结果里的体积、H&R、免费与免费到期会一并记进任务记录（H&R 保护与免费到期清理要用）。
 
@@ -545,7 +553,7 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 
 ## 手机编辑与统计导出
 
-`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`；按周期分段的刷流收益（[`GET /brush/stats`](#get-brushstats)）是 `brush_stats`；新建订阅的草稿与试搜索（见下文[追剧助手](#追剧助手)）是 `subscription_assist`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
+`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`；按周期分段的刷流收益（[`GET /brush/stats`](#get-brushstats)）是 `brush_stats`；新建订阅的草稿与试搜索（见下文[追剧助手](#追剧助手)）是 `subscription_assist`；下载器的分类与标签（[`GET /downloaders/{id}/labels`](#get-downloadersidlabels)）是 `downloader_labels`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
 
 | 方法   | 路径                            | 权限 | 用途                                                                                                                                                          |
 | ------ | ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |

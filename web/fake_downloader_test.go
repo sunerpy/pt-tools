@@ -43,6 +43,10 @@ type fakeDownloader struct {
 	// paths、pathsErr 是 GetClientPaths 回的（默认保存路径）
 	paths    []string
 	pathsErr error
+	// labels、labelsErr 是 GetClientLabels 回的（qBittorrent 建好的分类）；labelsCalls 是调了几次
+	labels      []string
+	labelsErr   error
+	labelsCalls int
 }
 
 func (f *fakeDownloader) Authenticate() error { return nil }
@@ -145,12 +149,15 @@ func (f *fakeDownloader) GetSpeedLimit() (downloader.SpeedLimit, error) {
 }
 func (f *fakeDownloader) SetSpeedLimit(_ downloader.SpeedLimit) error { return nil }
 func (f *fakeDownloader) GetClientPaths() ([]string, error)           { return f.paths, f.pathsErr }
-func (f *fakeDownloader) GetClientLabels() ([]string, error)          { return nil, nil }
-func (f *fakeDownloader) GetType() downloader.DownloaderType          { return f.dlType }
-func (f *fakeDownloader) GetName() string                             { return f.name }
-func (f *fakeDownloader) IsHealthy() bool                             { return true }
-func (f *fakeDownloader) Close() error                                { return nil }
-func (f *fakeDownloader) AddTorrent(_ []byte, _, _ string) error      { return nil }
+func (f *fakeDownloader) GetClientLabels() ([]string, error) {
+	f.labelsCalls++
+	return f.labels, f.labelsErr
+}
+func (f *fakeDownloader) GetType() downloader.DownloaderType     { return f.dlType }
+func (f *fakeDownloader) GetName() string                        { return f.name }
+func (f *fakeDownloader) IsHealthy() bool                        { return true }
+func (f *fakeDownloader) Close() error                           { return nil }
+func (f *fakeDownloader) AddTorrent(_ []byte, _, _ string) error { return nil }
 func (f *fakeDownloader) AddTorrentWithPath(_ []byte, _, _, _ string) error {
 	return nil
 }

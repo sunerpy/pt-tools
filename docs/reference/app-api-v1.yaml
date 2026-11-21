@@ -145,6 +145,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppDownloaderSeedingList" }
         default: { $ref: "#/components/responses/Error" }
+  /downloaders/{id}/labels:
+    get:
+      operationId: getDownloaderLabels
+      tags: [App]
+      summary: 一台下载器现有的分类与标签（推送时选）
+      description: >-
+        读这台下载器的种子列表，汇总种子上用到的分类与标签；qBittorrent 里建好、没有种子用的分类也列出。
+        Transmission 没有分类（推送时给的分类会写成第一个 label）：supports_category 为假、categories 是空的，
+        labels 都在 tags 里。下载器不存在或没有启用时回 404，取不到实例或读不到种子列表时回 502（upstream），
+        15 秒内没有读完时回 504（timeout）。主机的 GET /meta 的 features 里有 downloader_labels 时才提供这个接口。
+      parameters:
+        - $ref: "#/components/parameters/DownloaderID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppDownloaderLabels" }
+        default: { $ref: "#/components/responses/Error" }
   /torrents:
     get:
       operationId: listTorrents
@@ -1243,6 +1262,12 @@ components:
       required: true
       description: 集号（TMDB 这一季的第几集）
       schema: { type: integer, minimum: 1 }
+    DownloaderID:
+      name: id
+      in: path
+      required: true
+      description: 下载器的编号（GET /downloaders 的 id）
+      schema: { type: integer, minimum: 1 }
     HistoryID:
       name: id
       in: path
@@ -1551,6 +1576,26 @@ components:
           }
         idle_size:
           { type: integer, format: int64, description: "下载完了、没在做种的种子体积（字节）" }
+    AppDownloaderLabels:
+      type: object
+      required: [downloader_id, downloader, type, supports_category, categories, tags]
+      properties:
+        downloader_id: { type: integer }
+        downloader: { type: string, description: "下载器的名字" }
+        type: { type: string, description: "qbittorrent 或 transmission" }
+        supports_category:
+          {
+            type: boolean,
+            description: "有没有分类：Transmission 没有（推送时给的分类会写成第一个 label）",
+          }
+        categories:
+          type: array
+          description: qBittorrent 里建好的分类加上种子上用到的分类，排好序；没有分类的下载器是空的
+          items: { type: string }
+        tags:
+          type: array
+          description: 种子上用到的标签（Transmission 是 labels），排好序
+          items: { type: string }
     AppTorrentPage:
       type: object
       required: [items, total, page, page_size, failures]

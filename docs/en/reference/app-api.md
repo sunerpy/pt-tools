@@ -40,8 +40,9 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | `conflict`                                                      | 409      | When changing configuration, the endpoint that saves it reported a conflict (such as a brush task running a round)                |
 | `rate_limited`                                                  | 429      | TMDB is rate limiting; try again later                                                                                            |
 | `internal`                                                      | 500      | An internal error in pt-tools                                                                                                     |
-| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502      | Searching, downloading the torrent file, signing in or reaching TMDB failed, or the endpoint saving a configuration change failed |
+| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502      | Searching, downloading a torrent file, signing in, reaching TMDB or reading a downloader failed, or saving a configuration failed |
 | `unavailable`                                                   | 503      | The service behind the endpoint is not running                                                                                    |
+| `timeout`                                                       | 504      | The work did not finish within the time limit (organising into a library, reading a downloader's torrent list)                    |
 | `assistant_disabled`, `decided`                                 | 409      | The AI assistant is not enabled; this pending action has already been decided                                                     |
 | `too_many`                                                      | 429      | The AI assistant is answering too many questions at once                                                                          |
 
@@ -57,6 +58,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | GET    | `/torrents`                                   | Read             | Torrents in the downloaders                                                   |
 | GET    | `/downloaders`                                | Read             | Downloaders with their current speed and free space                           |
 | GET    | `/downloaders/seeding`                        | Read             | How many torrents each downloader is seeding and their size                   |
+| GET    | `/downloaders/{id}/labels`                    | Read             | The categories and tags a downloader has (to choose from when pushing)        |
 | POST   | `/torrents/actions`                           | Operate          | Pause, resume and delete torrents                                             |
 | POST   | `/search`                                     | Read             | Multi-site search                                                             |
 | POST   | `/push`                                       | Operate          | Push a search result to a downloader                                          |
@@ -185,6 +187,10 @@ The enabled downloaders: `id`, `name`, `type` (`qbittorrent` or `transmission`),
 
 The torrents each enabled downloader is seeding, the same figures as [Downloader seeding](../guide/user-stats.md#downloader-seeding) on the User Stats page of the web UI. Each item has `id`, `name`, `type`, `reachable` (the torrent list could be read), `error` (why not, with addresses removed), `seeding_count` and `seeding_size` (torrents whose state is seeding), and `idle_count` and `idle_size` (completed torrents that are paused, stopped, queued, being checked or in error); `total_seeding_count` and `total_seeding_size` add up the downloaders that could be read. Sizes are summed per torrent, so a reseed and its original count once each and the total is larger than the disk space used. The full torrent list of every downloader is read, waiting at most 20 seconds in all; a downloader not read by then says so. The endpoint exists when `features` from `GET /meta` contains `downloader_seeding`.
 
+### GET /downloaders/{id}/labels
+
+The categories and tags an enabled downloader (`id` from `GET /downloaders`) already has, for the app to offer when pushing. pt-tools reads the downloader's torrent list and collects the categories and tags used on its torrents, without empty or duplicate entries, sorted; categories created in qBittorrent that no torrent uses yet are listed too. The response has `downloader_id`, `downloader`, `type`, `supports_category`, `categories` and `tags`. Transmission has no categories: a category given when pushing becomes its first label, so `supports_category` is `false`, `categories` is empty, and the labels on its torrents are all in `tags`. It responds with 404 when the downloader does not exist or is disabled, with 502 (`upstream`, the reason without addresses) when the downloader can't be reached or its torrent list can't be read, and with 504 (`timeout`) when reading takes longer than 15 seconds. The endpoint exists when `features` from `GET /meta` contains `downloader_labels`.
+
 ### GET /torrents
 
 | Parameter           | Description                                                                                                                                                                                     |
@@ -231,6 +237,8 @@ Pushes one torrent to a downloader: pt-tools downloads the torrent file from the
 | `site`, `torrent_id`                     | Required, taken from a search result                                                                                                   |
 | `downloader_id`                          | The downloader to push to; when empty, the default downloader, or the first enabled one if there is no default                         |
 | `title`, `category`, `tags`, `save_path` | Optional: the title for the record (the name in the torrent file when empty), and the category, tags and save folder in the downloader |
+
+`save_path` is a folder as the downloader sees it; when empty, the downloader's own default folder is used. The folders preset for each downloader under Downloader settings in the web UI are in `directories` from [`GET /mobile/options`](#mobile-editors-and-statistics-export). Separate several `tags` with commas. The categories and tags a downloader already has come from [`GET /downloaders/{id}/labels`](#get-downloadersidlabels); when pushing to Transmission, `category` becomes the first label.
 
 The response has `success`, `skipped` (the downloader already has this torrent), `message`, `info_hash`, `downloader_id` and `downloader`. When disk space protection or the site seeding capacity stops the push, `success` is `false` and `message` gives the reason, still with status 200; when the torrent file cannot be downloaded, the status is 502. If the torrent was found by a search shortly before, its size, H&R, free status and free expiry from the search result are recorded with the task (H&R protection and free-expiry cleanup use them).
 
@@ -545,7 +553,7 @@ The same body as the preview. The change is worked out again from the current st
 
 ## Mobile editors and statistics export
 
-The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` and `stats_export`; period-based brush earnings ([`GET /brush/stats`](#get-brushstats)) are `brush_stats`; the subscription draft and trial search (see [Follow assistant](#follow-assistant) below) are `subscription_assist`. Clients prompt for an upgrade when a required feature is absent rather than falling back to session-only endpoints. The API compatibility level remains 1.
+The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` and `stats_export`; period-based brush earnings ([`GET /brush/stats`](#get-brushstats)) are `brush_stats`; the subscription draft and trial search (see [Follow assistant](#follow-assistant) below) are `subscription_assist`; a downloader's categories and tags ([`GET /downloaders/{id}/labels`](#get-downloadersidlabels)) are `downloader_labels`. Clients prompt for an upgrade when a required feature is absent rather than falling back to session-only endpoints. The API compatibility level remains 1.
 
 | Method | Path                            | Permission | Purpose                                                                                                                                                                                                                                   |
 | ------ | ------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
