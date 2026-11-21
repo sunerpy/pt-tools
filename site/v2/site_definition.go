@@ -128,6 +128,15 @@ func (d *SiteDefinition) Validate() error {
 		addErr("UnavailableReason", "Required", "must provide a reason when site is marked unavailable")
 	}
 
+	if p := d.PromotionAJAX; p != nil {
+		if d.Schema != SchemaNexusPHP {
+			addErr("PromotionAJAX", "SchemaUnsupported", "only the NexusPHP driver fills promotion placeholders")
+		}
+		if !strings.HasPrefix(p.Path, "/") {
+			addErr("PromotionAJAX.Path", "Format", fmt.Sprintf("%q must be a site path starting with \"/\"", p.Path))
+		}
+	}
+
 	// === Schema-specific rules ===
 	if d.Schema.IsValid() {
 		d.validateSchemaSpecific(addErr)
@@ -386,6 +395,10 @@ type SiteDefinition struct {
 	// refresh_token 也换）。写了的 NexusPHP 站点：同一个实例的请求排队发，响应里换了这些 Cookie 就用新值接着请求，
 	// 并经 SessionCookieSink 存回站点设置（见 session_cookies.go）。没写的站点照旧只用存着的那组。
 	SessionCookies []string `json:"sessionCookies,omitempty"`
+
+	// PromotionAJAX 是优惠状态不在页面里、由页面脚本另取的 NexusPHP 站点（HDWinG）：写了的站点搜索、取详情时
+	// 照页面脚本补上优惠图标与结束时间再解析（见 promotion_ajax.go）。没写的站点不受影响。
+	PromotionAJAX *PromotionAJAXConfig `json:"promotionAjax,omitempty"`
 
 	// CreateDriver is an optional custom driver factory for this site.
 	// If nil, the driver is created based on Schema field.
