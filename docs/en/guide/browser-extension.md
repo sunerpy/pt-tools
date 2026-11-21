@@ -66,7 +66,15 @@ The extension does not follow redirects from the server (the URL contains the UU
 
 ## Collecting pages
 
-For sites pt-tools does not support yet, and for reporting a parsing problem on one it does. The extension collects a torrent list page, a torrent details page and your profile page, and removes passkeys, cookies, session IDs, email addresses, IP addresses, API keys, tokens and invitation links as it does. Afterwards you can export a ZIP or open a pre-filled GitHub issue. The full steps are in [Request a new site](request-new-site.md).
+For sites pt-tools does not support yet, and for reporting a parsing problem on one it does. The extension collects a torrent list page, a torrent details page and your profile page. As it does, it removes passkeys, cookies, session IDs, email addresses, IPv4 and IPv6 addresses, API keys, tokens, CSRF tokens and invitation links, clears credential parameters (passkey, downhash, torrent_pass, rsskey and so on) in RSS and download addresses, and replaces your username and user ID with sample values (if your username is a common word such as free or admin, it is left as it is and the extension reminds you to check the files before you submit them). Afterwards you can export a ZIP or open a pre-filled GitHub issue. The full steps are in [Request a new site](request-new-site.md).
+
+On NexusPHP sites (including HDDolby and Rousi), one-click collection also gathers the bonus, rules and FAQ pages, the RSS feed, the index page as a signed-out visitor, your seeding list and the scripts behind sign-in and promotions. It takes a minute or two; the details are in [What else is collected on NexusPHP sites](request-new-site.md#what-else-is-collected-on-nexusphp-sites). While it runs:
+
+- The extension briefly opens the list page, one details page and your profile page in background tabs to record what their scripts fetch, and closes them when it is done. Apart from the **当前做种** (current seeding) toggle on your profile page, it clicks nothing on any page.
+- The extension downloads one torrent file and keeps only the host names of its trackers; the torrent file is not saved.
+- The extension records the names of the site's cookies, never their values.
+- The extension never does the daily check-in for you and never opens the check-in address, so the page a site shows after you check in cannot be collected.
+- If you click one-click collection again before the current run has finished, the extension only asks you to wait for it to finish; it never runs two collections at once.
 
 ## Privacy
 

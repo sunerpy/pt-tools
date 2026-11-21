@@ -1,6 +1,6 @@
 # PT Tools Helper 浏览器扩展 - 隐私策略
 
-**最后更新：2026-10-14**
+**最后更新：2026-11-22**
 
 ## 简介
 
@@ -12,15 +12,18 @@ PT Tools Helper 是 [pt-tools](https://github.com/sunerpy/pt-tools) 的配套浏
 
 ### 我们读取什么
 
-| 数据                                                                           | 何时读取                                                                                | 何时传输                                                                                       | 传输到哪里                                     |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| PT 站点 Cookie（如 `c_secure_uid`、`c_secure_pass`、`SPRINGID`、`session` 等） | 用户点击「同步 Cookie」或「批量同步」按钮时，或在已开启「自动同步」的站点页面被检测到时 | 仅 HTTP POST 到用户在「全局设置」中配置的 `pt-tools URL`（默认 `http://localhost:8080`）       | 用户自部署的 pt-tools 后端                     |
-| API Key、Passkey                                                               | 同上                                                                                    | 同上                                                                                           | 同上                                           |
-| PT 站点 Cookie（受支持的 PT 站点域名下的全部 Cookie）                          | 用户点击「立即上传」，或打开了「定时同步时上传到 CookieCloud」的定时同步                | 用用户的密码端对端加密以后，HTTP POST 到用户在「CookieCloud」中配置的服务地址；密码不外发      | 用户自部署的 CookieCloud 服务端                |
-| PT 站点页面 HTML（torrents 列表/详情/用户信息页）                              | **仅在用户主动点击「📸 采集」按钮时**                                                   | 仅作为本地下载的 ZIP 文件，或在用户点击「🐙 提交 Issue」时附加到用户跳转后的 GitHub Issue 表单 | 用户本地磁盘 + 用户主动选择上传的 GitHub Issue |
-| 当前打开的 Tab URL                                                             | 用户点击扩展图标时（用于检测当前是否处于支持的 PT 站点）                                | 不外发                                                                                         | 仅用于扩展弹窗 UI                              |
-| 用户配置（pt-tools URL、用户名、自动同步开关、定时同步、采集会话）             | 设置保存时                                                                              | 不外发                                                                                         | 浏览器本地 `chrome.storage.local`              |
-| CookieCloud 设置（服务地址、用户 KEY、端对端加密密码）                         | 设置保存时                                                                              | 不外发（密码只在本地用来加密）                                                                 | 浏览器本地 `chrome.storage.local`              |
+| 数据                                                                                                                                                                                 | 何时读取                                                                                | 何时传输                                                                                       | 传输到哪里                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| PT 站点 Cookie（如 `c_secure_uid`、`c_secure_pass`、`SPRINGID`、`session` 等）                                                                                                       | 用户点击「同步 Cookie」或「批量同步」按钮时，或在已开启「自动同步」的站点页面被检测到时 | 仅 HTTP POST 到用户在「全局设置」中配置的 `pt-tools URL`（默认 `http://localhost:8080`）       | 用户自部署的 pt-tools 后端                     |
+| API Key、Passkey                                                                                                                                                                     | 同上                                                                                    | 同上                                                                                           | 同上                                           |
+| PT 站点 Cookie（受支持的 PT 站点域名下的全部 Cookie）                                                                                                                                | 用户点击「立即上传」，或打开了「定时同步时上传到 CookieCloud」的定时同步                | 用用户的密码端对端加密以后，HTTP POST 到用户在「CookieCloud」中配置的服务地址；密码不外发      | 用户自部署的 CookieCloud 服务端                |
+| PT 站点页面 HTML（torrents 列表/详情/用户信息页）                                                                                                                                    | **仅在用户主动点击「📸 采集」或「🚀 一键采集」按钮时**                                  | 仅作为本地下载的 ZIP 文件，或在用户点击「🐙 提交 Issue」时附加到用户跳转后的 GitHub Issue 表单 | 用户本地磁盘 + 用户主动选择上传的 GitHub Issue |
+| 一键采集（NexusPHP 站点）另外采的内容：魔力值/规则/常见问题页、RSS、不带 Cookie 取的首页、本人的做种列表、页面引用的本站脚本，以及在后台标签页里页面脚本发出的本站请求与渲染后的页面 | 用户点击「🚀 一键采集」时；后台标签页采完即关                                           | 同上（脱敏后放进 ZIP）                                                                         | 同上                                           |
+| PT 站点 Cookie 的**名字**（不含值）                                                                                                                                                  | 用户点击「🚀 一键采集」时                                                               | 写进导出 ZIP 的 `site-info.json`                                                               | 同上                                           |
+| 一个种子文件                                                                                                                                                                         | 用户点击「🚀 一键采集」时，从详情页的下载链接下载                                       | 不外发：只解析出 tracker 的主机名写进 `site-info.json`，种子文件本身不保存                     | 同上                                           |
+| 当前打开的 Tab URL                                                                                                                                                                   | 用户点击扩展图标时（用于检测当前是否处于支持的 PT 站点）                                | 不外发                                                                                         | 仅用于扩展弹窗 UI                              |
+| 用户配置（pt-tools URL、用户名、自动同步开关、定时同步、采集会话）                                                                                                                   | 设置保存时                                                                              | 不外发                                                                                         | 浏览器本地 `chrome.storage.local`              |
+| CookieCloud 设置（服务地址、用户 KEY、端对端加密密码）                                                                                                                               | 设置保存时                                                                              | 不外发（密码只在本地用来加密）                                                                 | 浏览器本地 `chrome.storage.local`              |
 
 ### 我们不收集什么
 
@@ -33,27 +36,31 @@ PT Tools Helper 是 [pt-tools](https://github.com/sunerpy/pt-tools) 的配套浏
 
 ## 自动脱敏
 
-在「📸 采集」流程中，扩展会在数据落盘前自动移除以下敏感字段：
+在「📸 采集」与「🚀 一键采集」流程中，扩展会在数据落盘前自动移除以下敏感字段，导出前再处理一次：
 
 - Passkey、PHPSESSID、`c_secure_*` 等 Cookie 值
 - 邮箱地址（替换为 `user@example.com`）
-- IP 地址（替换为 `127.0.0.1`）
-- API Key、Bearer Token
+- IP 地址（IPv4 替换为 `127.0.0.1`，IPv6 替换为 `::1`）
+- API Key、Bearer Token、CSRF 令牌、密码框与令牌类隐藏字段的值
+- 页面、RSS、脚本与记录到的请求里，地址和参数中的凭证（passkey、downhash、torrent_pass、rsskey、sign 等）
 - 邀请链接
+- 登录用户自己的用户名与用户 ID（替换为示例值；用户名是 free、admin 这类常见词，或在一个页面里出现超过两百次时不替换用户名，只替换用户 ID，并提示用户提交前自己检查）
 
-具体规则见源码 [`tools/browser-extension/src/core/constants.ts`](https://github.com/sunerpy/pt-tools/blob/main/tools/browser-extension/src/core/constants.ts) 的 `SANITIZE_RULES` 数组。
+具体规则见源码 [`tools/browser-extension/src/core/constants.ts`](https://github.com/sunerpy/pt-tools/blob/main/tools/browser-extension/src/core/constants.ts) 的 `SENSITIVE_PATTERNS` 与 [`tools/browser-extension/src/modules/collector/sanitizer.ts`](https://github.com/sunerpy/pt-tools/blob/main/tools/browser-extension/src/modules/collector/sanitizer.ts)。
+
+一键采集从不签到，也从不请求签到、登出等会改变账号状态的地址；在后台标签页里只点个人页上「当前做种」那一个展开按钮。
 
 ## 权限说明
 
-| 权限                        | 用途                                                                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `storage`                   | 保存用户的 pt-tools URL、自动同步开关、最近采集会话等本地配置                                                                                          |
-| `activeTab`                 | 用户点击扩展图标后，仅对**当前**标签页临时启用页面访问，用于检测站点身份                                                                               |
-| `scripting`                 | 用户点击「📸 采集」时，注入采集脚本到当前 PT 站点页面以读取并脱敏页面 HTML                                                                             |
-| `cookies`（可选权限）       | 用户在「全局设置」中授权后，读取 PT 站点 Cookie 用于同步到自部署的 pt-tools                                                                            |
-| `tabs`（可选权限）          | 检测当前活动标签页所属的 PT 站点                                                                                                                       |
-| `*://*/*`（可选 host 权限） | 用户在弹窗中点「🔓 授权并启用」时申请；仅用于 `chrome.cookies.getAll({domain})` 跨 PT 站点读取 cookie；保存 CookieCloud 设置时另外申请访问那个服务地址 |
-| `alarms`                    | 定时同步与待办动作的轮询                                                                                                                               |
+| 权限                        | 用途                                                                                                                                                                                                                    |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `storage`                   | 保存用户的 pt-tools URL、自动同步开关、最近采集会话等本地配置                                                                                                                                                           |
+| `activeTab`                 | 用户点击扩展图标后，仅对**当前**标签页临时启用页面访问，用于检测站点身份                                                                                                                                                |
+| `scripting`                 | 用户点击「📸 采集」时，注入采集脚本到当前 PT 站点页面以读取并脱敏页面 HTML；「🚀 一键采集」时，为这个站点临时注册一个只记录本站请求的脚本（采集期间这个站点新打开的页面都会装上，扩展只读后台标签页里的记录），采完注销 |
+| `cookies`（可选权限）       | 用户在「全局设置」中授权后，读取 PT 站点 Cookie 用于同步到自部署的 pt-tools；「🚀 一键采集」时只读 Cookie 的名字                                                                                                        |
+| `tabs`（可选权限）          | 检测当前活动标签页所属的 PT 站点                                                                                                                                                                                        |
+| `*://*/*`（可选 host 权限） | 用户在弹窗中点「🔓 授权并启用」时申请；仅用于 `chrome.cookies.getAll({domain})` 跨 PT 站点读取 cookie；保存 CookieCloud 设置时另外申请访问那个服务地址                                                                  |
+| `alarms`                    | 定时同步与待办动作的轮询                                                                                                                                                                                                |
 
 `cookies` / `tabs` / `host_permissions` 均为**可选权限**（`optional_permissions` / `optional_host_permissions`），在用户首次点击扩展图标并主动授权前不会被启用。
 
@@ -74,3 +81,4 @@ PT Tools Helper 是 [pt-tools](https://github.com/sunerpy/pt-tools) 的配套浏
 
 - 2026-05-23：首次发布（对应扩展 v0.2.1）
 - 2026-10-14：定时同步；可选把 PT 站点 Cookie 端对端加密以后上传到用户自部署的 CookieCloud 服务端
+- 2026-11-22：一键采集（NexusPHP 站点）另外采魔力值、规则、RSS、做种列表与页面脚本，在后台短暂打开几个站点页面，下载一个种子文件只取 tracker 主机名，记录 Cookie 的名字；脱敏增加 IPv6、CSRF 令牌、地址里的凭证参数与登录用户的用户名和 ID（用户名是常见词时不替换，并提示用户自己检查）
