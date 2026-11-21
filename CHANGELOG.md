@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/sunerpy/pt-tools/compare/v1.0.0...v1.1.0) (2026-11-21)
+
+
+### Features
+
+* **extension:** 一键采集补全新站点适配要的页面与请求，脱敏补上 IPv6 与用户名 ([#924](https://github.com/sunerpy/pt-tools/issues/924)) ([d76eb12](https://github.com/sunerpy/pt-tools/commit/d76eb1239bbe64e9f848f15edb691e29a86776d9))
+* **mobile:** 种子页与搜索结果可排序，推送时可选保存目录、分类与标签 ([#922](https://github.com/sunerpy/pt-tools/issues/922)) ([31b069c](https://github.com/sunerpy/pt-tools/commit/31b069c7ee5ace159d6d9d9537bbdf80e1dfc140))
+* **site:** 新增 HDWinG ([#923](https://github.com/sunerpy/pt-tools/issues/923)) ([3864027](https://github.com/sunerpy/pt-tools/commit/3864027d3bd42527466c1887f84ad314ac0a9cbc))
+* **site:** 新增 IPTorrents ([#921](https://github.com/sunerpy/pt-tools/issues/921)) ([6d0cd8a](https://github.com/sunerpy/pt-tools/commit/6d0cd8a4f092bb88bab892a8dcdd203dfc0b9238))
+
+
+### Bug Fixes
+
+* **site:** TangPT 时魔改取魔力值页的合计 ([#920](https://github.com/sunerpy/pt-tools/issues/920)) ([1ebe746](https://github.com/sunerpy/pt-tools/commit/1ebe74660b636c61edeabe69ca554660cf65314d))
+* **site:** 猫站签到认不出 JSON 回包 ([#920](https://github.com/sunerpy/pt-tools/issues/920)) ([1ebe746](https://github.com/sunerpy/pt-tools/commit/1ebe74660b636c61edeabe69ca554660cf65314d))
+* **subscribe:** 追剧不收英文名相同的另一部剧 ([#918](https://github.com/sunerpy/pt-tools/issues/918)) ([80d7582](https://github.com/sunerpy/pt-tools/commit/80d75829dc0cb7f030815f58e0794b5b65043b0c))
+
 ## [1.0.0](https://github.com/sunerpy/pt-tools/compare/v0.48.0...v1.0.0) (2026-11-19)
 
 1.0 是 0.48.0 之后的第一个正式版，包含其间全部预览版（0.49.0-rc.1 到 rc.6、1.0.0-rc.1 到 rc.60）的改动，以及 rc.60 之后加入的飞书应用机器人与新标志。每项功能的说明见 [1.0 新功能](https://firlab.app/pt-tools/guide/whats-new-1.0)。
