@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -127,6 +128,13 @@ const tangptDetailWithHRFixture = `<html><body>
 </table>
 <img src="pic/hit_run.gif" alt="Hit and Run" />
 </body></html>`
+
+// mybonus.php 的结构照 2026-11-21 站点页面（上游 NexusPHP 的魔力值页），数字是示例值：
+// 上方「你当前每小时能获取」只是基本奖励的基础魔力，时魔要取后面「每小时获得的合计魔力值」表格的合计
+// （601.000 + 626.250 + 7.317 + 0.000 = 1,234.567）。表格在真实页面上是一整行。
+const tangptMyBonusFixture = `<html><body><table id="outer"><tr><td id="outer">
+<ul><li><b>B0</b>为参数，代表用户1小时获得魔力值的上限。<b>B0</b> = 500</li><li><b>L</b>为参数。<b>L</b> = 300</li></ul>简言之，为做种人数少、文件体积大的种子做种能获得更多魔力值。</li><li>捐赠者每次将得到2倍的魔力值</li></ul><div align="center">你当前每小时能获取300.500个魔力值 (A = 456.8)</div><table align="center" border="0" width="400"><tr><td class="loadbarbg" style="border: none; padding: 0px;"><img class="loadbargreen" src="pic/trans.gif" style="width: 240.4px;" alt="60.1%" /></td></tr></table><h1>勋章加成每小时将额外得到如下的魔力值</h1><ul><li>勋章奖励计算公式同上，不考虑低保</li><li>最终奖励为计算所得勋章奖励乘以勋章加成系数，当前勋章加成系数为: 2.500</li></ul><h1>官种加成每小时将额外得到如下的魔力值</h1><ul><li>最终奖励为计算所得官种奖励乘以官种系数，当前官种系数为: 10</li></ul><h1>后宫加成每小时将额外得到如下的魔力值</h1><ul><li>所得奖励为全部后宫的时魔（不考虑加成）之和，乘以后宫加成系数，当前值为：0.1</li></ul><h1>每小时获得的合计魔力值</h1><div style="display: flex;justify-content: center;margin-top: 20px;"><table cellpadding="5" style="width: 50%"><tr><td class="colhead">奖励类型</td><td class="colhead">数量</td><td class="colhead">体积</td><td class="colhead">A 值</td><td class="colhead">基础魔力</td><td class="colhead">系数</td><td class="colhead">获得魔力</td><td class="colhead">合计</td></tr><tr><td>基本奖励</td><td>12</td><td>1.234 TB</td><td>456.789</td><td>300.500</td><td>2</td><td>601.000</td><td rowspan="4">1,234.567</td></tr><tr><td>勋章加成</td><td>12</td><td>1.234 TB</td><td>456.789</td><td>250.500</td><td>2.500</td><td>626.250</td></tr><tr><td>官种加成</td><td>1</td><td>4.00 GB</td><td>0.712</td><td>0.732</td><td>10.000</td><td>7.317</td></tr><tr><td>后宫加成</td><td>--</td><td>--</td><td>--</td><td>0.000</td><td>0.100</td><td>0.000</td></tr></table></div><h1>其他获取方式</h1><ul><li>发布新种子 = 15000个魔力值</li></ul>
+</td></tr></table></body></html>`
 
 // --- Helpers ---
 
@@ -263,6 +271,60 @@ func testTangPTUserInfo(t *testing.T) {
 		// 2026-07-13 16:21:37 +0800 => unix 1783930897; must be > 0 so 保号 probe gets LastAccess
 		assert.Equal(t, "1783930897", got)
 	})
+
+	t.Run("BonusPerHour", func(t *testing.T) {
+		doc := FixtureDoc(t, "tangpt_mybonus", tangptMyBonusFixture)
+		sel, ok := def.UserInfo.Selectors["bonusPerHour"]
+		require.True(t, ok, "bonusPerHour selector not found")
+		// 合计 1,234.567，不是上方「你当前每小时能获取」的 300.500
+		assert.Equal(t, "1234.567", driver.ExtractFieldValuePublic(doc, sel))
+	})
+}
+
+// 走 GetUserInfo 全流程：时魔读魔力值页的合计，三页各请求一次，用户 ID 带到个人详情页。
+func TestTangPT_GetUserInfo(t *testing.T) {
+	def := getTangPTDef(t)
+
+	var mu sync.Mutex
+	hits := map[string]int{}
+	var detailID string
+	page := func(body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			hits[r.URL.Path]++
+			if r.URL.Path == "/userdetails.php" {
+				detailID = r.URL.Query().Get("id")
+			}
+			mu.Unlock()
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/index.php", page(tangptIndexFixture))
+	mux.HandleFunc("/userdetails.php", page(tangptUserdetailsFixture))
+	mux.HandleFunc("/mybonus.php", page(tangptMyBonusFixture))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1", Selectors: def.Selectors})
+	driver.SetSiteDefinition(def)
+
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, hits["/index.php"])
+	assert.Equal(t, 1, hits["/userdetails.php"])
+	assert.Equal(t, 1, hits["/mybonus.php"])
+	assert.Equal(t, "13199", detailID)
+
+	assert.Equal(t, "13199", info.UserID)
+	assert.Equal(t, "sampleuser", info.Username)
+	assert.InDelta(t, 1234.567, info.BonusPerHour, 0.0001)
+	assert.InDelta(t, 10100.0, info.Bonus, 0.0001)
+	assert.Equal(t, int64(107374182400), info.Uploaded)
+	assert.Equal(t, 7, info.Seeding)
 }
 
 // --- Standalone: Secret leak guard ---
@@ -274,6 +336,7 @@ func TestTangPT_Fixtures_NoSecrets(t *testing.T) {
 		"userdetails": tangptUserdetailsFixture,
 		"detail":      tangptDetailFixture,
 		"detail_hr":   tangptDetailWithHRFixture,
+		"mybonus":     tangptMyBonusFixture,
 	}
 	for name, data := range fixtures {
 		t.Run(name, func(t *testing.T) {
