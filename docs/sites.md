@@ -1,6 +1,6 @@
 # 支持站点
 
-当前已适配 **72** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **73** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构，以及 IPTorrents 这类站点自己写的程序。
 
 ### NexusPHP 系列（68）
 
@@ -78,14 +78,25 @@
 > [!WARNING]
 > 北洋园（TJUPT）规定：没在白名单里的程序、脚本用 Cookie 访问站点，会被警告或永久封号；站点自带的 RSS 不用报备。启用这个站点前，先在北洋园论坛的「机器人爬虫/程序脚本报备专帖」回帖报备 pt-tools（用途、用户 ID、IP 段、User-Agent、访问的页面与频率），管理组通过后再在 pt-tools 里启用。
 
-### 其他架构（4）
+### 其他架构（5）
 
-| 站点          | 站点类型                | 认证方式                        | 支持功能                            | 适配情况 | 备注                                                |
-| ------------- | ----------------------- | ------------------------------- | ----------------------------------- | -------- | --------------------------------------------------- |
-| **M-Team**    | mTorrent                | API Key                         | RSS、搜索、用户信息、等级要求       | ✅       | 完全适配                                            |
-| **UHDDolby**  | HDDolby (NexusPHP 衍生) | API Key（RSS key），Cookie 可选 | RSS、搜索、用户信息、签到、等级要求 | ✅       | 高清杜比；Cookie 用于时魔、签到和辅种等按编号的下载 |
-| **Rousi Pro** | Rousi                   | Passkey                         | RSS、搜索、用户信息                 | ✅       | 已适配，有问题请提交 issue                          |
-| **MooKo**     | Gazelle                 | Cookie                          | RSS、搜索、用户信息、等级要求       | ✅       | 已适配，有问题请提交 issue                          |
+| 站点           | 站点类型                       | 认证方式                        | 支持功能                            | 适配情况 | 备注                                                  |
+| -------------- | ------------------------------ | ------------------------------- | ----------------------------------- | -------- | ----------------------------------------------------- |
+| **M-Team**     | mTorrent                       | API Key                         | RSS、搜索、用户信息、等级要求       | ✅       | 完全适配                                              |
+| **UHDDolby**   | HDDolby (NexusPHP 衍生)        | API Key（RSS key），Cookie 可选 | RSS、搜索、用户信息、签到、等级要求 | ✅       | 高清杜比；Cookie 用于时魔、签到和辅种等按编号的下载   |
+| **Rousi Pro**  | Rousi                          | Passkey                         | RSS、搜索、用户信息                 | ✅       | 已适配，有问题请提交 issue                            |
+| **MooKo**      | Gazelle                        | Cookie                          | RSS、搜索、用户信息、等级要求       | ✅       | 已适配，有问题请提交 issue                            |
+| **IPTorrents** | IPTorrents（站点自己写的程序） | Cookie（uid、pass）             | RSS、搜索、用户信息、等级要求       | ✅       | 英文站 iptorrents.com；整站 H&R；没有签到，见下方说明 |
+
+> [!NOTE]
+> IPTorrents（2026-11 按站点页面适配，未在实站上验证）：
+>
+> - **Cookie**：登录 iptorrents.com 后用浏览器扩展同步，或手动复制整串 Cookie（含 `uid` 与 `pass`）。站内说明换了域名要重新登录，站点地址保持 `https://iptorrents.com/`。Jackett、Prowlarr 配这个站时要求填浏览器的 User-Agent，pt-tools 用固定的 Chrome User-Agent，站点要是不认这份 Cookie，登录检查会报 Cookie 失效。
+> - **H&R**：所有种子（免费种也算）都要做种到分享率 1:1 或 336 小时，超过 5 天没做种的种子多于 40 个时站点发警告。pt-tools 按 336 小时保护；分享率 1:1 这一条可以在站点详情的设置里把「H&R 上传量达标（倍）」填成 1。VIP、Uploader 不收 H&R 警告，pt-tools 不区分等级，照样保护。
+> - **免费**：列表与详情页只标 FreeLeech，不写结束时间（社区金库开出来的免费是 7 天）。pt-tools 按「免费、结束时间未知」处理，要求免费的 RSS 规则和刷流任务不收这类种子。
+> - **签到与保号**：站点没有每日签到，积分只按做种计。账号不会因为长期不登录被删；只有一直没上传也没下载的 User 账号在注册 90 天后停用（登录不算）。用户信息里的最近访问取资料页的「Last seen」。
+> - **RSS**：在站点的 RSS 页（getrss.php）生成订阅地址，Feed Type 选 Download link（链接直接下载种子）。分享率低于 0.30 时站点停掉 RSS。
+> - **限制**：tracker 的域名未核实，没有单独登记：种子的 tracker 不在 iptorrents.com 下时，站点做种容量与下载器助手认不出这些种子是 IPTorrents 的。
 
 > [!NOTE]
 > 高清杜比换了域名，现在是 `www.uhddolby.com`，站点名改成 UHDDolby，API Key 填 RSS 页的 RSSKEY，见[获取 UHDDolby 的 RSS key](guide/get-cookie-apikey.md#uhddolby-rss-key-获取方法)。下载器里旧种子的 tracker 还是 `t.hddolby.com`，在[下载器助手](guide/downloader-assistant.md#替换-tracker)里把 `https://t.hddolby.com` 替换成 `https://www.uhddolby.com`，先预览再执行。站方提醒不要用 Transmission 自带的批量替换，会把 tracker 地址改坏。

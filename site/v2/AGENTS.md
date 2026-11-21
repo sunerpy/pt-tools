@@ -45,14 +45,15 @@ type Site interface {
 
 ## Supported Schemas
 
-| Schema     | Site kind      | Default auth      | Notes                 |
-| ---------- | -------------- | ----------------- | --------------------- |
-| `NexusPHP` | `SiteNexusPHP` | Cookie            | Most Chinese trackers |
-| `mTorrent` | `SiteMTorrent` | API key           | M-Team API            |
-| `Unit3D`   | `SiteUnit3D`   | API key           | Unit3D family         |
-| `Gazelle`  | `SiteGazelle`  | Cookie            | Gazelle family        |
-| `HDDolby`  | `SiteHDDolby`  | Cookie/API hybrid | Dedicated driver      |
-| `Rousi`    | `SiteRousi`    | Passkey           | Dedicated behavior    |
+| Schema       | Site kind        | Default auth      | Notes                                                      |
+| ------------ | ---------------- | ----------------- | ---------------------------------------------------------- |
+| `NexusPHP`   | `SiteNexusPHP`   | Cookie            | Most Chinese trackers                                      |
+| `mTorrent`   | `SiteMTorrent`   | API key           | M-Team API                                                 |
+| `Unit3D`     | `SiteUnit3D`     | API key           | Unit3D family                                              |
+| `Gazelle`    | `SiteGazelle`    | Cookie            | Gazelle family                                             |
+| `HDDolby`    | `SiteHDDolby`    | Cookie/API hybrid | Dedicated driver                                           |
+| `Rousi`      | `SiteRousi`      | Passkey           | Dedicated behavior                                         |
+| `IPTorrents` | `SiteIPTorrents` | Cookie            | Site's own software; driver in `definitions/iptorrents.go` |
 
 ## Adding or Updating a Site
 

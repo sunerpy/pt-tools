@@ -1,6 +1,6 @@
 # Supported sites
 
-**72** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi.
+**73** sites are supported, covering the main tracker platforms: NexusPHP, mTorrent, Gazelle, HDDolby and Rousi, plus sites that run their own software such as IPTorrents.
 
 ### NexusPHP sites (68)
 
@@ -78,14 +78,25 @@
 > [!WARNING]
 > TJUPT warns or permanently bans accounts used by programs or scripts that access the site with your cookie unless the program is on its whitelist; the site's own RSS feed needs no registration. Before turning the site on, register pt-tools in the 机器人爬虫/程序脚本报备专帖 topic on the TJUPT forum (purpose, user ID, IP range, User-Agent, pages visited and how often), and turn it on in pt-tools after the staff approve it.
 
-### Other platforms (4)
+### Other platforms (5)
 
-| Site          | Platform                        | Sign-in                            | Features                                            | Status | Notes                                                                                                                |
-| ------------- | ------------------------------- | ---------------------------------- | --------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
-| **M-Team**    | mTorrent                        | API Key                            | RSS, search, user info, class requirements          | ✅     | Fully supported                                                                                                      |
-| **UHDDolby**  | HDDolby (derived from NexusPHP) | API key (RSS key), cookie optional | RSS, search, user info, sign-in, class requirements | ✅     | HDDolby (高清杜比); the cookie is used for bonus per hour, sign-in and downloads by torrent ID such as cross-seeding |
-| **Rousi Pro** | Rousi                           | Passkey                            | RSS, search, user info                              | ✅     | Supported; please open an issue if something is wrong                                                                |
-| **MooKo**     | Gazelle                         | Cookie                             | RSS, search, user info, class requirements          | ✅     | Supported; please open an issue if something is wrong                                                                |
+| Site           | Platform                             | Sign-in                            | Features                                            | Status | Notes                                                                                                                |
+| -------------- | ------------------------------------ | ---------------------------------- | --------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
+| **M-Team**     | mTorrent                             | API Key                            | RSS, search, user info, class requirements          | ✅     | Fully supported                                                                                                      |
+| **UHDDolby**   | HDDolby (derived from NexusPHP)      | API key (RSS key), cookie optional | RSS, search, user info, sign-in, class requirements | ✅     | HDDolby (高清杜比); the cookie is used for bonus per hour, sign-in and downloads by torrent ID such as cross-seeding |
+| **Rousi Pro**  | Rousi                                | Passkey                            | RSS, search, user info                              | ✅     | Supported; please open an issue if something is wrong                                                                |
+| **MooKo**      | Gazelle                              | Cookie                             | RSS, search, user info, class requirements          | ✅     | Supported; please open an issue if something is wrong                                                                |
+| **IPTorrents** | IPTorrents (the site's own software) | Cookie (`uid`, `pass`)             | RSS, search, user info, class requirements          | ✅     | English site at iptorrents.com; site-wide H&R; no daily sign-in; see the note below                                  |
+
+> [!NOTE]
+> IPTorrents (supported in 2026-11 from the site's pages; not yet run against the live site):
+>
+> - **Cookie**: sign in at iptorrents.com and sync it with the browser extension, or copy the whole cookie (it includes `uid` and `pass`). The site says that switching to another of its domains asks you to sign in again, so keep the site address at `https://iptorrents.com/`. Jackett and Prowlarr ask for the browser's User-Agent for this site; pt-tools sends a fixed Chrome User-Agent, and if the site refuses the cookie because of it, the login check reports the cookie as expired.
+> - **H&R**: every torrent, freeleech included, has to be seeded to a 1:1 ratio or for 336 hours; the site warns you once more than 40 torrents have gone unseeded for over 5 days. pt-tools protects torrents for 336 hours; for the 1:1 option, set H&R upload target (times) (H&R 上传量达标（倍）) to 1 in the site's settings. VIPs and uploaders get no H&R warnings, but pt-tools does not tell classes apart and protects the torrents anyway.
+> - **Freeleech**: the list and detail pages mark FreeLeech without an end time (freeleech from the Community Vault lasts 7 days). pt-tools treats these torrents as free with an unknown end time, so RSS rules and brush tasks that require free torrents skip them.
+> - **Sign-in and keeping the account**: there is no daily sign-in; bonus points come from seeding only. Accounts are not deleted for staying away; only a User account that has never uploaded or downloaded anything is disabled 90 days after joining (signing in does not count). The last access in user info comes from "Last seen" on the profile page.
+> - **RSS**: generate the feed on the site's RSS page (getrss.php) and pick "Download link" as the feed type, so each link downloads the torrent. The site stops your feed while your ratio is below 0.30.
+> - **Limits**: the tracker's domain has not been confirmed, so it is not registered separately: when a torrent's tracker is not under iptorrents.com, the site seeding capacity and the downloader assistant cannot tell that the torrent belongs to IPTorrents.
 
 > [!NOTE]
 > HDDolby (高清杜比) has moved to `www.uhddolby.com` and is now called UHDDolby. Its API key is the RSSKEY from the RSS page; see [Getting the UHDDolby RSS key](guide/get-cookie-apikey.md#getting-the-uhddolby-rss-key). Torrents already in your downloader still announce to `t.hddolby.com`: in the [downloader assistant](guide/downloader-assistant.md#replacing-trackers), replace `https://t.hddolby.com` with `https://www.uhddolby.com`, preview first and then apply. The site's staff warn against Transmission's own batch replace, which breaks the tracker addresses.
