@@ -69,8 +69,11 @@ PT 站点数据采集助手，一键采集站点数据、同步 Cookie 到 pt-to
 采集时自动移除以下敏感信息：
 
 - Passkey、PHPSESSID、Cookie 值
-- 邮箱地址、IP 地址
-- API Key、Bearer Token、邀请链接
+- 邮箱地址、IP 地址（IPv4 与 IPv6）
+- API Key、Bearer Token、CSRF 令牌、邀请链接，以及地址里的凭证参数
+- 登录用户自己的用户名与用户 ID（换成示例值；用户名是 free、admin 这类常见词时不换，会提示你提交前自己检查）
+
+NexusPHP 站点的「🚀 一键采集」还会补采魔力值、规则、RSS、做种列表与页面脚本，在后台短暂打开几个页面、下载一个种子文件（只记 tracker 主机名），详见文档站的[请求新增站点](https://firlab.app/pt-tools/guide/request-new-site)。
 
 #### 已知站点也可采集
 

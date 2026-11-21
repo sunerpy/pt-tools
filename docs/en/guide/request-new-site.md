@@ -59,10 +59,34 @@ Firefox can only load it temporarily; the steps are in [Browser extension](brows
    - picks a torrent from the list (a free one if possible), opens its details page and extracts the HTML
    - finds your user ID, opens your profile page and extracts the HTML
    - also collects optional samples such as the home page, the free torrent listing, a details page without promotion and the H&R page (missing ones do not prevent basic support)
-   - redacts all the HTML automatically (removing passkeys, cookies, email addresses, IP addresses and so on)
-7. When it has finished, **Collection Progress** (采集进度) shows 3/3, and a message says **Auto collection complete: N page(s)** (自动采集完成 N 页)
+   - on NexusPHP sites (including HDDolby and Rousi), also collects the other evidence an adaptation needs; see [What else is collected on NexusPHP sites](#what-else-is-collected-on-nexusphp-sites) below
+   - redacts everything it collects automatically (removing passkeys, cookies, email addresses, IPv4 and IPv6 addresses and so on, and replacing your username and user ID with sample values). If your username is a common word such as free or admin, or appears more than two hundred times on one page so that it does not look like a username, the extension leaves the username alone (replacing it would also replace that word everywhere on the pages), replaces only the user ID, and reminds you to check the files before you submit them
+7. When it has finished, **Collection Progress** (采集进度) shows 3/3, and a message says **Auto collection complete: N page(s)** (自动采集完成 N 页); another message lists any samples that are missing
 
 > If automatic collection does not get all 3 pages (because no torrent ID was found, for example), expand **Manual Page-by-Page Capture** (手动逐页采集) and use the capture button on each missing page.
+
+#### What else is collected on NexusPHP sites
+
+On a NexusPHP site, one-click collection takes a minute or two and gathers the items below, so the maintainers no longer have to ask you for these pages one by one. If one item cannot be fetched, the extension notes it and carries on with the rest; it waits 1.5 seconds between requests.
+
+| Item                       | How it is collected                                                                                                                                                                                                                                                    | What it is for                                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Bonus, rules and FAQ pages | Opens `mybonus.php`, `rules.php` and `faq.php`                                                                                                                                                                                                                         | Bonus per hour, class rules, the site's own notes               |
+| RSS                        | Opens `torrentrss.php?rows=10` with your sign-in cookies; if the answer is not RSS, it is not saved and you get a note                                                                                                                                                 | The format of RSS items                                         |
+| Index page when signed out | Opens the same index page again without cookies and records the final address and status code                                                                                                                                                                          | Recognising the page the site returns when cookies have expired |
+| Your seeding list          | Tries the standard `getusertorrentlistajax.php` first; when your profile page or its scripts use another endpoint, requests that one with the method and parameters the script uses (adding the page's CSRF token for POST)                                            | Number and size of seeding torrents                             |
+| Scripts the pages load     | Scripts from the site itself, loaded by the index, profile, list and details pages, that mention sign-in, the seeding list or promotion state (common libraries such as jQuery are skipped; at most 6 files of up to 300 KB each), plus a summary of the sign-in links | How sign-in works and what the page scripts fetch               |
+| What page scripts fetch    | Briefly opens the list page, one details page and your profile page in background tabs, records the requests their scripts make to the site and the rendered page, and clicks **当前做种** (current seeding) on the profile page                                       | Promotion state and seeding lists that only appear in a browser |
+| Tracker hosts              | Downloads one torrent file from the details page's download link and keeps only the host names of its trackers; the torrent file is not saved                                                                                                                          | Recognising torrents from this site                             |
+| Cookie names               | Records the names only, never the values                                                                                                                                                                                                                               | Recognising the sign-in cookies                                 |
+
+Notes:
+
+- The background tabs close by themselves when collection is done, and your current tab stays where it is. Apart from the **当前做种** toggle on your profile page, the extension clicks nothing on any page.
+- When downloading the torrent returns a web page (a first-download notice or the login page, for example), the extension saves that page, redacted, notes that the tracker hosts were not read, and does not confirm the download for you.
+- The extension never does the daily check-in for you and never opens the check-in address (on some older NexusPHP versions, opening `attendance.php` counts as checking in). The page a site shows after you check in therefore cannot be collected; if it is needed, the maintainers will ask you to check in once and send that page.
+- A collection takes a minute or two. If you click one-click collection again before it has finished (after closing and reopening the pop-up, for example), the extension only asks you to wait for the current run; it never runs two at once. Once a run has ended, successfully or with an error, you can collect again.
+- Collections are kept in the local storage the browser gives the extension, which Chrome limits to 10 MB. Each rendered page recorded in a background tab keeps at most 256 KB (the rest is cut off), and each page's request log keeps at most 30 requests and 128 KB in total (beyond that, the last requests keep only their address and status code, without parameters or responses). If a whole collection still does not fit, the extension leaves out these two kinds (`rendered_*` and `requests_*`, which are `rendered-*.html` and `requests-*.json` in the ZIP), tells you which ones it left out, and saves the other pages as usual; it reports an error only if the rest still does not fit.
 
 ### Exporting and submitting
 
@@ -82,7 +106,9 @@ After collecting, use the **Collection Records** (采集记录) area at the bott
    - Telegram: https://t.me/+7YK2kmWIX0s1Nzdl
    - QQ group: 274984594
 
-> The collected data is already redacted and safe to submit. If you still have doubts, open the HTML files in the ZIP with a text editor and check them.
+> The collected data is already redacted and safe to submit. If you still have doubts, open the files in the ZIP with a text editor and check them (pages are `.html`, scripts `.js`, RSS `.xml` and recorded requests `.json`; `site-info.json` lists the address behind each file, plus the cookie names, tracker hosts, how the seeding list is requested and so on).
+>
+> If exporting tells you that your username is a common word and was not replaced, the files in the ZIP still contain your username (the same note is in the `warnings` of `site-info.json`); check them yourself before you submit them.
 
 ---
 

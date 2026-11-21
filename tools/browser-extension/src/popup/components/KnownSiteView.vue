@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { NEXUS_FAMILY_SCHEMAS } from "../../core/constants";
 import { t } from "../../core/i18n";
 import CookieStatus from "./CookieStatus.vue";
 import type { KnownSiteStatus, SiteSchema, ToggleAutoSyncPayload } from "../../core/types";
@@ -20,6 +21,9 @@ const emit = defineEmits<{
 }>();
 
 const isCookieSyncable = computed(() => props.status.site.syncField === "cookie");
+
+/** NexusPHP 一族的一键采集会在后台打开几个页面、下载一个种子文件：按钮下写明 */
+const opensBackgroundTabs = computed(() => NEXUS_FAMILY_SCHEMAS.includes(props.status.site.schema));
 
 const authHint = computed(() => {
   if (props.status.site.syncField === "api_key") return t("known.authHintApiKey");
@@ -112,5 +116,8 @@ function handleAutoCollect(): void {
         {{ busyCapture ? t("known.capturing") : t("known.captureCurrentPage") }}
       </button>
     </div>
+    <p v-if="opensBackgroundTabs" class="muted-line" data-testid="auto-collect-note">
+      {{ t("collect.autoCollectNote") }}
+    </p>
   </article>
 </template>

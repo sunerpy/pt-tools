@@ -18,29 +18,35 @@ function extensionManifestPlugin(): Plugin {
   };
 }
 
+/** 单独打包成一个 IIFE 文件：内容脚本与一键采集时注册进页面（MAIN world）的请求记录器都不能用模块 */
+async function buildIife(entry: string, name: string, fileName: string): Promise<void> {
+  await build({
+    configFile: false,
+    build: {
+      outDir: "dist",
+      emptyOutDir: false,
+      lib: {
+        entry: resolve(__dirname, entry),
+        name,
+        formats: ["iife"],
+        fileName: () => fileName,
+      },
+      rollupOptions: {
+        output: {
+          inlineDynamicImports: true,
+        },
+      },
+    },
+  });
+}
+
 function contentScriptPlugin(): Plugin {
   return {
     name: "content-script-iife",
     apply: "build",
     async closeBundle() {
-      await build({
-        configFile: false,
-        build: {
-          outDir: "dist",
-          emptyOutDir: false,
-          lib: {
-            entry: resolve(__dirname, "src/content/index.ts"),
-            name: "ptToolsContent",
-            formats: ["iife"],
-            fileName: () => "content.js",
-          },
-          rollupOptions: {
-            output: {
-              inlineDynamicImports: true,
-            },
-          },
-        },
-      });
+      await buildIife("src/content/index.ts", "ptToolsContent", "content.js");
+      await buildIife("src/recorder/entry.ts", "ptToolsRequestRecorder", "request-recorder.js");
     },
   };
 }

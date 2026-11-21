@@ -124,6 +124,10 @@ export default {
 
   "error.cookiePermission": "Cookie permission required. Click the extension icon to grant it.",
   "error.unsupportedSchema": "Unsupported schema for auto collection: {0}",
+  "error.autoCollectBusy":
+    "One-click collection is already running. Wait for it to finish, then try again.",
+  "error.sessionTooLarge":
+    "Not enough extension storage: the pages from this collection were not saved.",
   "error.noActiveTab": "No active tab",
   "error.scriptInjectionFailed":
     "Failed to inject collector script. Refresh the page and try again.",
@@ -171,6 +175,43 @@ export default {
   "collector.warnUserinfoPrivacy":
     "⚠ The profile page has no detail rows; privacy settings may be hiding them.",
   "collector.warnNoHR": "⚠ H&R page fetch failed, or this site has no such page.",
+  "collector.bonus": "Collecting bonus points page...",
+  "collector.rules": "Collecting rules page...",
+  "collector.faq": "Collecting FAQ page...",
+  "collector.rss": "Collecting RSS feed...",
+  "collector.loggedOut": "Collecting the index page as a signed-out visitor...",
+  "collector.scripts": "Collecting scripts the pages load...",
+  "collector.seeding": "Collecting your seeding list...",
+  "collector.tracker": "Downloading one torrent file to read its tracker hosts...",
+  "collector.tabs":
+    "Opening the list, details and profile pages in background tabs to record what their scripts fetch...",
+  "collector.cookies": "Recording the names of the site's cookies...",
+  "collector.warnNoBonus":
+    "⚠ Bonus page (mybonus.php) fetch failed, or this site has no such page.",
+  "collector.warnNoRules": "⚠ Rules page (rules.php) fetch failed, or this site has no such page.",
+  "collector.warnNoFaq": "⚠ FAQ page (faq.php) fetch failed, or this site has no such page.",
+  "collector.warnNoRss": "⚠ RSS fetch failed.",
+  "collector.warnRssNotXml": "⚠ The RSS URL did not return RSS/XML ({0}); it was not saved.",
+  "collector.warnNoLoggedOut": "⚠ Fetching the index page as a signed-out visitor failed.",
+  "collector.warnNoSeeding": "⚠ Could not get your seeding list.",
+  "collector.warnNoDownloadLink":
+    "⚠ No torrent download link on the details page; tracker hosts were not read.",
+  "collector.warnTorrentNotTorrent":
+    "⚠ Downloading the torrent returned a web page (HTTP {0}; probably a first-download notice or the login page). The page was saved; tracker hosts were not read.",
+  "collector.warnTorrentFailed":
+    "⚠ Downloading the torrent file failed ({0}); tracker hosts were not read.",
+  "collector.warnTorrentNoTracker": "⚠ The torrent file has no tracker URL.",
+  "collector.warnTabsFailed": "⚠ Recording requests in background tabs failed: {0}",
+  "collector.warnTabFailed":
+    "⚠ The {0} page opened in a background tab was not fully recorded: {1}",
+  "collector.warnNoCookiePermission":
+    "⚠ No cookie permission, so the names of the site's cookies were not recorded.",
+  "collector.warnUsernameCommon":
+    "⚠ Your username is a common word, so it was not replaced automatically. Check the files yourself before you submit them.",
+  "collector.warnQuotaDropped":
+    "⚠ Not enough extension storage, so the rendered pages and request logs recorded in background tabs were not saved: {0}",
+  "collect.autoCollectNote":
+    "Auto collection takes a minute or two. It briefly opens the list, details and profile pages in background tabs (closed when done) and downloads one torrent file, keeping only its tracker hosts, not the file. It records cookie names only, never their values, and never does the daily check-in for you.",
 
   "issue.title": "[New Site Request] {0}",
   "issue.none": "- None",

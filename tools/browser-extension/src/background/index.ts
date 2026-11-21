@@ -34,9 +34,11 @@ import {
 } from "../core/storage";
 import type {
   CapturedPage,
+  CollectedFacts,
   CollectionSession,
   KnownSiteStatus,
   MessageSender,
+  PageType,
   PtToolsConnection,
   RejectedPush,
   SiteDetectedPayload,
@@ -47,6 +49,7 @@ import type {
   SyncSettingsView,
   TabSiteStatus,
   UnknownSiteStatus,
+  UserIdentity,
 } from "../core/types";
 import {
   FEATURE_CREDENTIAL_KEEP_ENABLED,
@@ -70,7 +73,13 @@ import {
   uploadToCookieCloud,
 } from "../modules/cookiecloud";
 import type { SiteLoginStateRecord } from "../modules/sync";
-import { autoCollect } from "../modules/collector/auto-collector";
+import { THROTTLE_MS, autoCollect, type CollectorDeps } from "../modules/collector/auto-collector";
+import { mergeCollectedPages } from "../modules/collector/session-merge";
+import {
+  chromeTabRecorderApi,
+  cleanupStaleRecorder,
+  recordTabsWith,
+} from "../modules/collector/tab-recorder";
 import { extractDomain, matchKnownSite } from "../utils";
 import {
   type BackendPendingAction,
@@ -87,6 +96,7 @@ import {
   pushFingerprint,
   runSync,
 } from "./scheduled-sync";
+import { createSingleRun } from "./single-run";
 import { createTabGenerations } from "./tab-generation";
 
 interface MessageResponse<T> {
@@ -542,16 +552,88 @@ onMessage("PAGE_CAPTURED", async (payload: CapturedPage) => {
   return { stored: true };
 });
 
-onMessage("AUTO_COLLECT", async ({ siteOrigin, schema }) => {
-  const { pages, warnings } = await autoCollect(siteOrigin, schema);
-
-  for (const page of pages) {
-    await upsertCapturedPage(page);
+/** 站点 Cookie 的名字（只取名字，不碰值）；没有 Cookie 权限时回 null */
+async function readCookieNames(origin: string): Promise<string[] | null> {
+  if (!chrome.cookies?.getAll) {
+    return null;
   }
+  const cookies = await chrome.cookies.getAll({ url: `${origin}/` });
+  return [...new Set(cookies.map((cookie) => cookie.name))].sort();
+}
 
-  await publishStatus();
-  return { collected: pages.length, pages: pages.map((p) => p.pageType), warnings };
-});
+const collectorDeps: CollectorDeps = {
+  fetch: (input, init) => fetch(input, init),
+  sleep: (ms) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    }),
+  recordTabs: (origin, jobs) =>
+    recordTabsWith(chromeTabRecorderApi(), origin, jobs, { throttleMs: THROTTLE_MS }),
+  cookieNames: readCookieNames,
+};
+
+/**
+ * 一键采集的结果并进会话：页面整批合并，站点信息与（只在本地的）用户身份一并存下。
+ * 存不下时 saveSession 去掉后台标签页记下的页面再存，返回去掉了哪些、提示是什么。
+ */
+async function saveAutoCollected(
+  pages: CapturedPage[],
+  facts: CollectedFacts,
+  identity: UserIdentity | null,
+): Promise<{ dropped: PageType[]; warning: string | null }> {
+  const session = await getOrCreateUnknownSession(pages[0]);
+  const hasFacts = Object.keys(facts).length > 0;
+  const nextPages = mergeCollectedPages(session.pages, pages, { replaceAutoOnly: hasFacts });
+  const { dropped, warning } = await saveSession({
+    ...session,
+    pages: nextPages,
+    status: nextPages.length >= 3 ? "complete" : "collecting",
+    facts: hasFacts ? facts : session.facts,
+    identity: identity ?? session.identity,
+  });
+  return { dropped, warning };
+}
+
+/**
+ * NexusPHP 站点的一键采集要一两分钟，中间大段时间只有 fetch 和计时器：service worker 空闲 30 秒会被停掉
+ * （调用扩展 API 会重新计时）。采集期间每 20 秒调一次不改任何状态的 API，采完就停。
+ */
+async function withKeepAlive<T>(task: () => Promise<T>): Promise<T> {
+  const timer = setInterval(() => {
+    void chrome.runtime.getPlatformInfo().catch(() => undefined);
+  }, 20000);
+  try {
+    return await task();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+/** 一键采集同一时间只跑一次：还在采时再点直接拒绝（见 single-run.ts） */
+const autoCollectOnce = createSingleRun(() => new Error(t("error.autoCollectBusy")));
+
+onMessage("AUTO_COLLECT", ({ siteOrigin, schema }) =>
+  autoCollectOnce(async () => {
+    const { pages, warnings, facts, identity } = await withKeepAlive(() =>
+      autoCollect(siteOrigin, schema, undefined, collectorDeps),
+    );
+
+    let saved = pages;
+    const notes = [...warnings];
+    if (pages.length > 0) {
+      const { dropped, warning } = await saveAutoCollected(pages, facts, identity);
+      saved = pages.filter((page) => !dropped.includes(page.pageType));
+      if (warning) notes.push(warning);
+    }
+
+    await publishStatus();
+    return {
+      collected: saved.length,
+      pages: [...new Set(saved.map((p) => p.pageType))],
+      warnings: notes,
+    };
+  }),
+);
 
 onMessage("GET_STATUS", async () => getStatusPayload());
 
@@ -1264,6 +1346,10 @@ void (async () => {
     await clearPollAlarm();
   }
   await applySyncSchedule(await getSchedule());
+  // 一键采集中途 service worker 被停掉时留下的请求记录器注册：启动时清掉
+  await cleanupStaleRecorder().catch((error: unknown) =>
+    logger.warn("cleanup stale recorder failed", error),
+  );
   void STORAGE_KEYS.batchTabQueue;
   await remove(LEGACY_POLL_SINCE_KEY);
   const tab = await getActiveTab();
