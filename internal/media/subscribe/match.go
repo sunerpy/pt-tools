@@ -3,6 +3,7 @@ package subscribe
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
@@ -50,6 +51,9 @@ func (mt matcher) withMapper(mp *episodeMapper) matcher {
 // 对不上时第二个返回值为假、第三个写明原因（名字、季对不上的不写原因，不是这个订阅的种子）；对上了时第三个是要写进运行记录的
 // 说明（剧集组里没有写的集、按默认的季集算的），没有时为空。剧集的年份不参与（综艺常写播出的年份）。
 func (mt matcher) matchMapped(m meta.Meta, it v2.TorrentItem) (span, bool, string) {
+	if why := mt.otherShow(m, it); why != "" {
+		return span{}, false, why
+	}
 	note := ""
 	if mt.grouped() {
 		if !mt.sameTitle(m, it) {
@@ -99,12 +103,62 @@ func (mt matcher) mayMatch(m meta.Meta, it v2.TorrentItem) bool {
 	return ok
 }
 
-// sameTitle 报告种子是不是这部片：两边都有 IMDb 编号时只看编号，否则解析出的中文名或英文名要和订阅的名字之一相同。
+// sameTitle 报告种子是不是这部片：两边都有 IMDb 编号时只看编号，否则解析出的中文名或英文名要和订阅的名字之一相同，
+// 并且看不出是另一部同名的剧（见 otherShow）。
 func (mt matcher) sameTitle(m meta.Meta, it v2.TorrentItem) bool {
 	if imdb := v2.NormalizeIMDbID(it.IMDbID); imdb != "" && mt.sub.IMDbID != "" {
 		return strings.EqualFold(imdb, mt.sub.IMDbID)
 	}
+	return mt.nameHit(m) && mt.otherShow(m, it) == ""
+}
+
+// nameHit 报告解析出的中文名或英文名和订阅的名字之一相同。
+func (mt matcher) nameHit(m meta.Meta) bool {
 	return mt.names[recognize.Normalize(m.NameCN)] || mt.names[recognize.Normalize(m.NameEN)]
+}
+
+// otherShow 是名字对上了、却看得出是另一部同名剧集的原因，看不出时为空串。不同的剧英文名相同的不少（《谷雨》2026 与《宿敌》2024
+// 都叫 The Silent Storm），只按英文名会对上别的剧。两条同时成立才算另一部：
+//   - 副标题解析出了中文名，标题与副标题里却一个这部剧的中文名（包括别名）都没有。只凭这条不够：副标题解析出的中文名
+//     常常是分类、活动字样（「动画」「活動置頂220」），所以还要有下一条；
+//   - 种子写的年份比这部剧第一季的播出早两年以上（早一年的有写制作年份的）。只看第一季：后面的季的种子常写第一季的年份，
+//     订阅存的却是这一季的年份；多季合集写的也是第一季的年份，不看。
+//
+// 两边都有 IMDb 编号时只看编号（见 sameTitle），这里不判断。
+func (mt matcher) otherShow(m meta.Meta, it v2.TorrentItem) string {
+	if mt.sub.MediaType != models.MediaKindTV || mt.sub.Season > 1 || mt.sub.Year == 0 || m.Year == 0 || m.NameCN == "" {
+		return ""
+	}
+	if imdb := v2.NormalizeIMDbID(it.IMDbID); imdb != "" && mt.sub.IMDbID != "" {
+		return ""
+	}
+	if m.Year >= mt.sub.Year-1 || m.SeasonEnd > max(m.Season, 1) || !mt.nameHit(m) {
+		return ""
+	}
+	text := recognize.Normalize(it.Title + " " + it.Subtitle)
+	han := false
+	for n := range mt.names {
+		if !hasHan(n) {
+			continue
+		}
+		han = true
+		if strings.Contains(text, n) {
+			return ""
+		}
+	}
+	if !han {
+		return ""
+	}
+	return fmt.Sprintf("副标题是「%s」（%d），不是这部剧（第一季 %d 年播出）", m.NameCN, m.Year, mt.sub.Year)
+}
+
+func hasHan(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
 }
 
 func newMatcher(sub models.MediaSubscription) matcher {
