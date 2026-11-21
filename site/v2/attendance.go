@@ -1,7 +1,9 @@
 package v2
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -225,11 +227,61 @@ var (
 
 // attendancePageText 把签到页转成纯文本：去掉脚本和样式，标签换成空格，再还原实体。
 // 标签换空格而不是直接删掉，相邻元素的文字（如「签到成功」标题和下一段）才不会粘成一句。
-// JSON 返回里的 HTML 片段同样适用。
+// 回包是 JSON 时先解开（见 attendanceJSONText），字符串值里的 HTML 片段照样处理。
 func attendancePageText(body []byte) string {
+	if text, ok := attendanceJSONText(body); ok {
+		body = []byte(text)
+	}
 	text := attendanceScriptPattern.ReplaceAllString(string(body), " ")
 	text = attendanceTagPattern.ReplaceAllString(text, " ")
 	return collapseSpaces(html.UnescapeString(text))
+}
+
+// attendanceJSONText 在 body 是 JSON 对象或数组时，按出现顺序取出所有字符串值（不取键名、数字、布尔与 null），
+// 用空格连起来。签到接口多半是 PHP 的 json_encode 写的，默认把中文写成 \uXXXX、斜杠写成 \/
+// （猫站 attendance-ajax.php 回 {"status":"0","data":"抱歉","message":"您今天…"}），
+// 不解开的话，原文里根本没有「今天已经签到过」这样的字。不是合法 JSON 时返回 false，照 HTML 处理。
+func attendanceJSONText(body []byte) (string, bool) {
+	trimmed := bytes.TrimSpace(bytes.TrimPrefix(body, []byte("\xef\xbb\xbf")))
+	if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') || !json.Valid(trimmed) {
+		return "", false
+	}
+	// 用 Token 逐个读才能保住字段顺序；对象里键和值交替出现，wantKey 记着下一个字符串是不是键名
+	type container struct{ object, wantKey bool }
+	var stack []container
+	valueRead := func() {
+		if n := len(stack); n > 0 && stack[n-1].object {
+			stack[n-1].wantKey = true
+		}
+	}
+	var parts []string
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			switch v {
+			case '{', '[':
+				valueRead()
+				stack = append(stack, container{object: v == '{', wantKey: v == '{'})
+			default:
+				stack = stack[:len(stack)-1]
+			}
+		case string:
+			if n := len(stack); n > 0 && stack[n-1].object && stack[n-1].wantKey {
+				stack[n-1].wantKey = false
+				continue
+			}
+			parts = append(parts, v)
+			valueRead()
+		default:
+			valueRead()
+		}
+	}
+	return strings.Join(parts, " "), true
 }
 
 // attendanceSnippet 取匹配所在的那句话：向前补到空白或句读为止（最多 20 字），向后取到句号为止，总长不超过 120 字。

@@ -279,8 +279,27 @@ func unrecognizedAttendance(res *NexusPHPResponse, after string) error {
 	msg := after + "页面里没有签到成功或今日已签到的文字"
 	if title := attendancePageTitle(res); title != "" {
 		msg += fmt.Sprintf("（页面标题「%s」）", title)
+	} else if reply := attendanceJSONReply(res); reply != "" {
+		msg += fmt.Sprintf("（站点回复「%s」）", reply)
 	}
 	return fmt.Errorf("%w: %s", ErrAttendanceUnrecognized, msg)
+}
+
+// attendanceJSONReply 在回包是 JSON 时取出里面的文字（解开 \uXXXX、去掉标签），最多 60 字；不是 JSON 时返回空串。
+// 签到接口回 JSON 时没有页面标题，带上站点的原话，用户才知道站点说了什么。
+func attendanceJSONReply(res *NexusPHPResponse) string {
+	if res == nil {
+		return ""
+	}
+	if _, ok := attendanceJSONText(res.RawBody); !ok {
+		return ""
+	}
+	reply := attendancePageText(res.RawBody)
+	const maxRunes = 60
+	if utf8.RuneCountInString(reply) > maxRunes {
+		reply = string([]rune(reply)[:maxRunes]) + "…"
+	}
+	return reply
 }
 
 // attendancePageTitle 取页面的 <title>，空白合并，最多 60 字。

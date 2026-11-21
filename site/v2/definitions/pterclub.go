@@ -21,7 +21,9 @@ var PTerClubDefinition = &v2.SiteDefinition{
 	Aka:         []string{"猫站", "PTer", "PT之友"},
 	Description: "综合性 PT 站点",
 	Schema:      v2.SchemaNexusPHP,
-	// 首页「签到得猫粮」由 JS 发 GET attendance-ajax.php，回 JSON（status、message、data）
+	// 首页「签到得猫粮」由 JS 发 GET attendance-ajax.php，回 JSON（status、data、message）：status 为 "1" 是签到成功，
+	// message 是「这是您的第 N 次签到…」；已签过回 status "0"、message「您今天已经签到过了，请勿重复刷新。」。
+	// 中文是 json_encode 默认的 \uXXXX 转义（2026-11-21 在站点上核对），签到流程会先解开 JSON 再认这些话。
 	Attendance:     &v2.AttendanceConfig{Path: "/attendance-ajax.php"},
 	URLs:           []string{"https://pterclub.net/"},
 	FaviconURL:     "https://pterclub.net/favicon.ico",

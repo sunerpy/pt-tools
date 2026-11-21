@@ -142,14 +142,30 @@ func TestHDAreaAttendanceResponses(t *testing.T) {
 }
 
 // PTerClub 的签到接口返回 JSON，message 里是 NexusPHP 的提示语（格式取自公开的签到返回）。
+// 站点实际发出的是 PHP json_encode 的默认写法：中文写成 \uXXXX、斜杠写成 \/。2026-11-21 在已签到的账号上
+// GET /attendance-ajax.php 拿到的回包就是 already (wire) 那条，原样照抄；signed (wire) 是把 MoviePilot 记下的
+// 签到成功回包（plugins.v2/autosignin/sites/pterclub.py 的注释）按同样的写法转义。
 func TestPTerClubAttendanceResponses(t *testing.T) {
 	cases := []struct {
-		name string
-		body string
-		want v2.AttendStatus
+		name    string
+		body    string
+		want    v2.AttendStatus
+		message string
 	}{
-		{"signed", `{"status":"1","data":" (签到已成功300)","message":"<p>这是您的第<b>237</b>次签到，已连续签到<b>1</b>天，本次签到获得<b>300</b>克猫粮。</p>"}`, v2.AttendSigned},
-		{"already", `{"status":"0","data":"抱歉","message":"您今天已经签到过了，请勿重复刷新。"}`, v2.AttendAlready},
+		{"signed", `{"status":"1","data":" (签到已成功300)","message":"<p>这是您的第<b>237</b>次签到，已连续签到<b>1</b>天，本次签到获得<b>300</b>克猫粮。</p>"}`, v2.AttendSigned, "这是您的第 237 次签到"},
+		{"already", `{"status":"0","data":"抱歉","message":"您今天已经签到过了，请勿重复刷新。"}`, v2.AttendAlready, "您今天已经签到过了"},
+		{
+			"signed (wire)",
+			`{"status":"1","data":" (\u7b7e\u5230\u5df2\u6210\u529f300)","message":"<p>\u8fd9\u662f\u60a8\u7684\u7b2c<b>237<\/b>\u6b21\u7b7e\u5230\uff0c\u5df2\u8fde\u7eed\u7b7e\u5230<b>237<\/b>\u5929\u3002<\/p><p>\u672c\u6b21\u7b7e\u5230\u83b7\u5f97<b>300<\/b>\u514b\u732b\u7cae\u3002<\/p>"}`,
+			v2.AttendSigned,
+			"这是您的第 237 次签到，已连续签到 237 天。",
+		},
+		{
+			"already (wire)",
+			`{"status":"0","data":"\u62b1\u6b49","message":"\u60a8\u4eca\u5929\u5df2\u7ecf\u7b7e\u5230\u8fc7\u4e86\uff0c\u8bf7\u52ff\u91cd\u590d\u5237\u65b0\u3002"}`,
+			v2.AttendAlready,
+			"您今天已经签到过了，请勿重复刷新。",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,6 +181,7 @@ func TestPTerClubAttendanceResponses(t *testing.T) {
 			res, err := d.Attend(context.Background())
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, res.Status)
+			assert.Contains(t, res.Message, tc.message)
 			assert.Equal(t, "/attendance-ajax.php", path)
 		})
 	}

@@ -50,6 +50,25 @@ func TestAttendancePageText(t *testing.T) {
 	assert.True(t, strings.HasPrefix(res.Message, "这是您的第 128 次签到"), "got %q", res.Message)
 }
 
+// 签到接口回 JSON 时（猫站的 attendance-ajax.php），PHP 的 json_encode 默认把中文写成 \uXXXX、斜杠写成 \/：
+// 先按 JSON 解开再认。键名不参与匹配，字符串值按出现顺序用空格连起来，值里的 HTML 照样去掉标签。
+func TestAttendancePageText_JSON(t *testing.T) {
+	assert.Equal(t, "0 抱歉 您今天已经签到过了，请勿重复刷新。",
+		attendancePageText([]byte(`{"status":"0","data":"\u62b1\u6b49","message":"\u60a8\u4eca\u5929\u5df2\u7ecf\u7b7e\u5230\u8fc7\u4e86\uff0c\u8bf7\u52ff\u91cd\u590d\u5237\u65b0\u3002"}`)))
+	// 嵌套的对象和数组也取；数字、布尔、null 与键名都不取；前后的空白不影响
+	assert.Equal(t, "签到成功 第 3 次 a b",
+		attendancePageText([]byte(" {\"code\":0,\"ok\":true,\"msg\":\"\\u7b7e\\u5230\\u6210\\u529f\",\"data\":{\"tip\":\"<p>\\u7b2c<b>3<\\/b>\\u6b21<\\/p>\",\"list\":[\"a\",null,1,{\"x\":\"b\"}]}}\n")))
+	// 不是合法 JSON 的照 HTML 处理
+	assert.Equal(t, `{"message":"签到成功"`, attendancePageText([]byte(`{"message":"签到成功"`)))
+
+	res, ok := DefaultNexusPHPAttendance().Match(attendancePageText([]byte(
+		`{"status":"1","data":" (\u7b7e\u5230\u5df2\u6210\u529f300)","message":"<p>\u8fd9\u662f\u60a8\u7684\u7b2c<b>237<\/b>\u6b21\u7b7e\u5230\uff0c\u5df2\u8fde\u7eed\u7b7e\u5230<b>237<\/b>\u5929\u3002<\/p>"}`,
+	)))
+	require.True(t, ok)
+	assert.Equal(t, AttendSigned, res.Status)
+	assert.Equal(t, "这是您的第 237 次签到，已连续签到 237 天。", res.Message)
+}
+
 func TestAttendanceConfig_MatchDefaultNexusPHP(t *testing.T) {
 	cfg := DefaultNexusPHPAttendance()
 	cases := []struct {
@@ -140,6 +159,14 @@ func TestNexusPHPDriver_Attend(t *testing.T) {
 		srv, _ := fakeAttendanceSite(t, "/attendance.php", attendanceUnknownPage)
 		_, err := newAttendanceDriver(srv.URL, def).Attend(context.Background())
 		require.ErrorIs(t, err, ErrAttendanceUnrecognized)
+	})
+	// 回包是 JSON、又认不出结果时，错误里带上站点的回复，用户能看到站点说了什么
+	t.Run("unrecognized JSON reply is quoted", func(t *testing.T) {
+		custom := &SiteDefinition{ID: "qa4", Schema: SchemaNexusPHP, Attendance: &AttendanceConfig{Path: "/attendance-ajax.php"}}
+		srv, _ := fakeAttendanceSite(t, "/attendance-ajax.php", `{"status":"0","data":"\u62b1\u6b49","message":"\u7b7e\u5230\u529f\u80fd\u6682\u65f6\u5173\u95ed"}`)
+		_, err := newAttendanceDriver(srv.URL, custom).Attend(context.Background())
+		require.ErrorIs(t, err, ErrAttendanceUnrecognized)
+		assert.ErrorContains(t, err, "（站点回复「0 抱歉 签到功能暂时关闭」）")
 	})
 	t.Run("session expired", func(t *testing.T) {
 		srv, _ := fakeAttendanceSite(t, "/attendance.php", attendanceLoginPage)
