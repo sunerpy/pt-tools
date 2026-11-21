@@ -694,6 +694,17 @@ export const KNOWN_SITES: KnownSite[] = [
     cookieNames: ["uid", "pass"],
     syncField: "cookie",
   },
+  {
+    // HDChina 重开的站点。样本没有带 Cookie，登录 Cookie 的名字没核实：认不出这三个时按新版 NexusPHP 的令牌认，
+    // 再认不出就交给 pt-tools 先验证再保存（见 cookie-reader.ts）
+    id: "hdwing",
+    name: "HDWinG",
+    domains: ["hdwing.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [

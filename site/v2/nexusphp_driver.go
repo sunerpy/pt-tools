@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
@@ -36,6 +37,8 @@ type NexusPHPRequest struct {
 	Method string
 	// Referer 不为空时作为 Referer 请求头；以 / 开头的按站点地址补全（签到的验证码接口会看它）
 	Referer string
+	// FillPromotions 为真时，取到页面后照站点的 PromotionAJAX 补上优惠状态（搜索、取详情时；见 promotion_ajax.go）
+	FillPromotions bool
 }
 
 // NexusPHPResponse wraps a goquery document for parsing
@@ -292,9 +295,10 @@ func (d *NexusPHPDriver) PrepareSearch(query SearchQuery) (NexusPHPRequest, erro
 	}
 
 	return NexusPHPRequest{
-		Path:   "/torrents.php",
-		Params: params,
-		Method: "GET",
+		Path:           "/torrents.php",
+		Params:         params,
+		Method:         "GET",
+		FillPromotions: d.promotionAJAX() != nil,
 	}, nil
 }
 
@@ -403,6 +407,12 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	// Check if 2FA verification is required
 	if is2FAPage(doc) {
 		return result, withPageTitle(Err2FARequired, doc)
+	}
+
+	if req.FillPromotions {
+		if err := d.fillPromotions(ctx, doc, baseURL, fullURL); err != nil {
+			return result, err
+		}
 	}
 
 	return result, nil
@@ -1995,10 +2005,14 @@ func extractTorrentID(href string) string {
 }
 
 // parseSize parses a size string like "1.5 GB" to bytes
+// 空白全部去掉，包括 &nbsp;（U+00A0）、全角空格：HDWinG 的种子列表写成「23.47&nbsp;GB」，只去普通空格时读不到单位、按字节算。
 func parseSize(sizeStr string) int64 {
-	sizeStr = strings.TrimSpace(sizeStr)
-	sizeStr = strings.ReplaceAll(sizeStr, ",", "")
-	sizeStr = strings.ReplaceAll(sizeStr, " ", "")
+	sizeStr = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) || r == ',' {
+			return -1
+		}
+		return r
+	}, sizeStr)
 
 	// Extract number and unit
 	re := regexp.MustCompile(`([\d.]+)\s*([KMGTP]?i?B?)`)
@@ -2612,6 +2626,8 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 	if err != nil {
 		return nil, fmt.Errorf("prepare detail request: %w", err)
 	}
+	// PrepareDetail 也给字幕用：只在取详情时补优惠状态
+	req.FillPromotions = d.promotionAJAX() != nil
 
 	res, err := d.Execute(ctx, req)
 	if err != nil {
@@ -2620,6 +2636,10 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 
 	if res.Document == nil {
 		return nil, ErrParseError
+	}
+	if req.FillPromotions && promotionPending(res.Document, torrentID) {
+		// 本种的优惠状态没取回来：读不到是不是免费，不能当成没有优惠
+		return nil, fmt.Errorf("%w: 站点没回种子 %s 的优惠状态", ErrTorrentDetailUnavailable, torrentID)
 	}
 
 	fetchedAt := time.Now().UTC()

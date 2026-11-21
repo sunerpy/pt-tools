@@ -75,6 +75,7 @@ const NEXUSPHP_DOMAINS: string[] = [
   "hdts.ru",
   "hdvideo.one",
   "hdvideo.top",
+  "hdwing.org",
   "hdzone.me",
   "hhanclub.net",
   "hhanclub.top",
