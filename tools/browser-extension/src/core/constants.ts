@@ -707,6 +707,12 @@ export const KNOWN_SITES: KnownSite[] = [
   },
 ];
 
+/**
+ * 共用 NexusPHP 那套采集地址的架构（auto-collector 的 nexusPHPUrls）：一键采集会补采魔力值、规则、RSS、
+ * 做种列表与脚本，在后台打开几个页面并下载一个种子文件。弹窗按它决定要不要写那句说明。
+ */
+export const NEXUS_FAMILY_SCHEMAS: SiteSchema[] = ["NexusPHP", "HDDolby", "Rousi"];
+
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [
   // Promotion-filtered and H&R listings must precede the generic torrents.php rule.
   { pattern: /(?:torrents|browse)\.php\?[^"']*spstate=[1-9]/i, pageType: "search_free" },
@@ -714,12 +720,38 @@ export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [
   { pattern: /torrents\.php|browse\.php/i, pageType: "search" },
   { pattern: /details\.php\?id=/i, pageType: "detail" },
   { pattern: /userdetails\.php\?id=/i, pageType: "userinfo" },
+  { pattern: /\/rules\.php/i, pageType: "rules" },
+  { pattern: /\/faq\.php/i, pageType: "faq" },
   { pattern: /login\.php|signup\.php/i, pageType: "index" },
   { pattern: /upload\.php/i, pageType: "index" },
   { pattern: /\/index\.php$|\/$/i, pageType: "index" },
   { pattern: /mybonus\.php/i, pageType: "bonus" },
   { pattern: /\/api\//i, pageType: "api_response" },
 ];
+
+/**
+ * IPv6 地址：完整写法、:: 简写、末尾带 IPv4 的、带网卡名的（fe80::1%eth0），带方括号的也认（方括号留着）。
+ * 至少要有一组十六进制数：单独的「::」是 NexusPHP 标题里的分隔符（「站点 :: 首页」）。
+ * 前后不能连着字母、数字、下划线或冒号：12:34:56 这类时间、CSS 的 ::before、C++ 的 std::string 都不算。
+ */
+const IPV6_PATTERN: RegExp = (() => {
+  const h = "[0-9a-f]{1,4}";
+  const v4 = "(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}";
+  const forms = [
+    `(?:${h}:){7}${h}`,
+    `(?:${h}:){1,4}:${v4}`,
+    `::(?:ffff(?::0{1,4})?:)?${v4}`,
+    `(?:${h}:){1,6}:${h}`,
+    `(?:${h}:){1,5}(?::${h}){1,2}`,
+    `(?:${h}:){1,4}(?::${h}){1,3}`,
+    `(?:${h}:){1,3}(?::${h}){1,4}`,
+    `(?:${h}:){1,2}(?::${h}){1,5}`,
+    `${h}:(?::${h}){1,6}`,
+    `:(?::${h}){1,7}`,
+    `(?:${h}:){1,7}:`,
+  ];
+  return new RegExp(`(?<![\\w:])(?:${forms.join("|")})(?:%[0-9a-z]+)?(?![\\w:])`, "gi");
+})();
 
 export const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /passkey=[a-f0-9]{16,}/gi, replacement: "passkey=REMOVED" },
@@ -729,6 +761,8 @@ export const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; replacement: string }>
   { pattern: /c_secure_tracker_ssl=[^;]+/gi, replacement: "c_secure_tracker_ssl=REMOVED" },
   { pattern: /c_secure_login=[^;]+/gi, replacement: "c_secure_login=REMOVED" },
   { pattern: /[\w.-]+@[\w.-]+\.\w{2,}/g, replacement: "user@example.com" },
+  // IPv6 放在 IPv4 前面：::ffff:192.0.2.1 这类整个换掉
+  { pattern: IPV6_PATTERN, replacement: "::1" },
   { pattern: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, replacement: "127.0.0.1" },
   { pattern: /Bearer\s+[A-Za-z0-9_-]{32,}/g, replacement: "Bearer REMOVED" },
   { pattern: /invite[_-]?(?:code|link|url)[=:][^\s&"'<>]+/gi, replacement: "invite_code=REMOVED" },

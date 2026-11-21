@@ -1,6 +1,8 @@
 import { STORAGE_KEYS } from "./constants";
+import { t } from "./i18n";
 import type {
   CollectionSession,
+  PageType,
   PtToolsConnection,
   RejectedPush,
   SyncRunSummary,
@@ -127,7 +129,7 @@ function pruneSessions(sessions: CollectionSession[], keepId: string): Collectio
   return sessions.filter((item) => keep.has(item.id));
 }
 
-export async function saveSession(session: CollectionSession): Promise<void> {
+async function writeSession(session: CollectionSession): Promise<void> {
   await updateKey<CollectionSession[]>(STORAGE_KEYS.sessions, (current) => {
     const sessions = [...(current ?? [])];
     const index = sessions.findIndex((item) => item.id === session.id);
@@ -138,6 +140,74 @@ export async function saveSession(session: CollectionSession): Promise<void> {
     }
     return pruneSessions(sessions, session.id);
   });
+}
+
+/**
+ * 存不下时先去掉的页面：一键采集在后台标签页里记下的渲染后页面与请求记录。
+ * 它们最大（上限见 recorder/constants.ts），也最可有可无：同一页面的服务端 HTML 另有一份。
+ */
+export const OPTIONAL_PAGE_TYPES: ReadonlySet<PageType> = new Set<PageType>([
+  "rendered_search",
+  "rendered_detail",
+  "rendered_userinfo",
+  "requests_search",
+  "requests_detail",
+  "requests_userinfo",
+]);
+
+/**
+ * chrome.storage 超出配额：Chrome 现在报「Resource::kQuotaBytes quota exceeded」
+ * （settings_storage_quota_enforcer.cc），旧版本报「QUOTA_BYTES quota exceeded」。
+ */
+export function isQuotaError(error: unknown): boolean {
+  return /quota/i.test(error instanceof Error ? error.message : String(error));
+}
+
+export interface SavedSession {
+  /** 实际存下的会话：去掉了可选页面时和传进来的不一样 */
+  session: CollectionSession;
+  /** 因为存不下去掉的页面类型 */
+  dropped: PageType[];
+  /** 去掉页面时写进 facts.warnings 的那条提示；没去掉为 null */
+  warning: string | null;
+}
+
+/**
+ * 存一个采集会话。chrome.storage.local 超出配额（扩展没有 unlimitedStorage，一共 10 MiB）时，
+ * 去掉 OPTIONAL_PAGE_TYPES 这几类页面再存一次，并在 facts.warnings 里写明去掉了哪些；
+ * 还存不下才报错（报错时存储里原来的会话都不动）。不会因为可选页面存不下丢掉整次采集。
+ */
+export async function saveSession(session: CollectionSession): Promise<SavedSession> {
+  try {
+    await writeSession(session);
+    return { session, dropped: [], warning: null };
+  } catch (error: unknown) {
+    if (!isQuotaError(error)) {
+      throw error;
+    }
+    const dropped = [
+      ...new Set(
+        session.pages.map((page) => page.pageType).filter((type) => OPTIONAL_PAGE_TYPES.has(type)),
+      ),
+    ];
+    if (dropped.length === 0) {
+      throw new Error(t("error.sessionTooLarge"), { cause: error });
+    }
+    const warning = t("collector.warnQuotaDropped", dropped.join(", "));
+    const slim: CollectionSession = {
+      ...session,
+      pages: session.pages.filter((page) => !OPTIONAL_PAGE_TYPES.has(page.pageType)),
+      facts: { ...session.facts, warnings: [...(session.facts?.warnings ?? []), warning] },
+    };
+    try {
+      await writeSession(slim);
+    } catch (retryError: unknown) {
+      throw isQuotaError(retryError)
+        ? new Error(t("error.sessionTooLarge"), { cause: retryError })
+        : retryError;
+    }
+    return { session: slim, dropped, warning };
+  }
 }
 
 export async function getActiveSessionId(): Promise<string | null> {

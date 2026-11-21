@@ -22,7 +22,29 @@ export type PageType =
   | "index"
   | "bonus"
   | "api_response"
+  | "rules"
+  | "faq"
+  | "rss"
+  /** 不带 Cookie 再取一次首页：Cookie 失效（未登录）时站点回的页面 */
+  | "logged_out"
+  /** 本人的做种列表（接口回的片段或 JSON） */
+  | "seeding"
+  /** 页面引用的同源脚本里提到签到、做种列表、优惠状态的（可以有多个） */
+  | "script"
+  /** 后台标签页里页面脚本跑完以后的 DOM */
+  | "rendered_search"
+  | "rendered_detail"
+  | "rendered_userinfo"
+  /** 后台标签页里页面脚本发出的同源请求 */
+  | "requests_search"
+  | "requests_detail"
+  | "requests_userinfo"
+  /** 下载种子回的是网页（第一次下载的提示、登录页） */
+  | "download_notice"
   | "unknown";
+
+/** 采集内容的格式，决定导出的扩展名与脱敏方式；没写时按 html */
+export type PageFormat = "html" | "js" | "xml" | "json";
 
 export type SiteMode = "known" | "unknown" | "none";
 
@@ -63,9 +85,73 @@ export interface TabSiteStatus {
 export interface CapturedPage {
   pageType: PageType;
   url: string;
+  /** 采到的内容（脱敏后）；脚本、RSS、JSON 也放在这里，format 说明是什么 */
   html: string;
   capturedAt: string;
   detectedSchema: SiteSchema;
+  /** 没写时是 html（旧版本存下的页面都没有这一项） */
+  format?: PageFormat;
+}
+
+/** 做种列表实际用的请求：只记方法、路径和参数名，不记参数值 */
+export interface SeedingRequestInfo {
+  /** GET、POST（点「当前做种」时记到的照页面实际发的写） */
+  method: string;
+  path: string;
+  params: string[];
+  /** upstream：上游通用接口；script：照页面脚本里写的；click：在后台标签页点「当前做种」时页面发的 */
+  source: "upstream" | "script" | "click";
+  status?: number;
+  contentType?: string;
+}
+
+/** 页面上的签到入口：只记元素的摘要，扩展从不请求签到地址 */
+export interface SigninEntry {
+  page: PageType;
+  tag: string;
+  text: string;
+  href?: string;
+  onclick?: string;
+  id?: string;
+  className?: string;
+}
+
+/** 采到的脚本：地址、大小、是否截断、命中的关键词 */
+export interface CollectedScript {
+  url: string;
+  bytes: number;
+  truncated: boolean;
+  keywords: string[];
+}
+
+/** 一键采集记下的站点信息，导出时写进 site-info.json（都已脱敏，不含 Cookie 值） */
+export interface CollectedFacts {
+  /** 站点 Cookie 的名字（只有名字，没有值）；没有 Cookie 权限时为 null */
+  cookieNames?: string[] | null;
+  /** 种子文件里 announce、announce-list 的主机名 */
+  trackerHosts?: string[];
+  seedingRequest?: SeedingRequestInfo | null;
+  /** 试过的做种列表请求（方法、路径、参数名、状态码） */
+  seedingAttempts?: SeedingRequestInfo[];
+  signinEntries?: SigninEntry[];
+  /** 脚本里出现的同源 .php 接口 */
+  scriptEndpoints?: string[];
+  scripts?: CollectedScript[];
+  /** 不带 Cookie 取首页时的最终地址与状态码 */
+  loggedOut?: {
+    requestedUrl: string;
+    finalUrl: string;
+    status: number;
+    redirected: boolean;
+  } | null;
+  /** 采集时给用户看的提示（缺了哪些样本） */
+  warnings?: string[];
+}
+
+/** 登录用户自己的用户名与 ID：只存在本地，导出时用来把它们换成示例值，本身不导出 */
+export interface UserIdentity {
+  username?: string | null;
+  userId?: string | null;
 }
 
 export interface CollectionSession {
@@ -74,6 +160,10 @@ export interface CollectionSession {
   pages: CapturedPage[];
   createdAt: string;
   status: "collecting" | "complete" | "exported";
+  /** 一键采集记下的站点信息；旧版本存下的会话没有 */
+  facts?: CollectedFacts;
+  /** 只在本地，不导出 */
+  identity?: UserIdentity;
 }
 
 export interface PtToolsConnection {

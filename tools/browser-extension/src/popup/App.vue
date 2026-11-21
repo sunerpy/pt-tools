@@ -20,7 +20,7 @@ import type {
   TabSiteStatus,
   ToggleAutoSyncPayload,
 } from "../core/types";
-import { createGitHubIssue, createExportZip, downloadZip } from "../modules/export";
+import { createGitHubIssue, createExportZip, downloadZip, exportNotes } from "../modules/export";
 import { friendlyErrorMessage, type SiteLoginStateRecord } from "../modules/sync";
 import { useToast } from "./composables/useToast";
 import KnownSiteView from "./components/KnownSiteView.vue";
@@ -275,6 +275,13 @@ async function handleCapture(): Promise<void> {
   }
 }
 
+/** 导出以后要用户自己看一眼的提示（用户名是常见词、没有自动替换） */
+function showExportNotes(session: CollectionSession): void {
+  for (const note of exportNotes(session)) {
+    toast.warning(note);
+  }
+}
+
 async function handleExportZip(): Promise<void> {
   if (!activeSession.value) {
     toast.warning(t("feedback.noSession"));
@@ -286,6 +293,7 @@ async function handleExportZip(): Promise<void> {
     const blob = await createExportZip(activeSession.value);
     downloadZip(blob, `${activeSession.value.site.name}-${activeSession.value.id}.zip`);
     toast.success(t("feedback.zipExported"));
+    showExportNotes(activeSession.value);
   } catch (error: unknown) {
     showError(error, "feedback.exportFailed");
   } finally {
@@ -303,6 +311,8 @@ async function handleCreateIssue(): Promise<void> {
   try {
     const blob = await createExportZip(activeSession.value);
     downloadZip(blob, `${activeSession.value.site.name}-${activeSession.value.id}.zip`);
+    // 打开 Issue 页以后弹窗可能就关了：提示放在打开之前
+    showExportNotes(activeSession.value);
     await createGitHubIssue(activeSession.value, blob);
     toast.success(t("feedback.issueCreated"));
   } catch (error: unknown) {

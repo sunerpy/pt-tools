@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { NEXUS_FAMILY_SCHEMAS } from "../../core/constants";
 import { t } from "../../core/i18n";
 import type { CollectionSession, SiteSchema, UnknownSiteStatus } from "../../core/types";
 
@@ -86,6 +87,11 @@ const supportsAutoCollect = computed(() =>
   ["NexusPHP", "Unit3D", "Gazelle", "HDDolby", "Rousi"].includes(props.status.detectedSchema),
 );
 
+/** NexusPHP 一族的一键采集会在后台打开几个页面、下载一个种子文件：按钮下写明 */
+const opensBackgroundTabs = computed(() =>
+  NEXUS_FAMILY_SCHEMAS.includes(props.status.detectedSchema),
+);
+
 function handleAutoCollect(): void {
   if (!siteOrigin.value) return;
   emit("autoCollect", { siteOrigin: siteOrigin.value, schema: props.status.detectedSchema });
@@ -115,6 +121,9 @@ function handleAutoCollect(): void {
       @click="handleAutoCollect">
       {{ busyAutoCollect ? t("unknown.autoCollecting") : t("unknown.autoCollect") }}
     </button>
+    <p v-if="opensBackgroundTabs" class="muted-line" data-testid="auto-collect-note">
+      {{ t("collect.autoCollectNote") }}
+    </p>
 
     <details class="manual-section">
       <summary class="manual-toggle">{{ t("unknown.manualCapture") }}</summary>
