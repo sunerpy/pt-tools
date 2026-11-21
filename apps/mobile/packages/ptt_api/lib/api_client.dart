@@ -255,6 +255,8 @@ class ApiClient {
           return AppDownloader.fromJson(value);
         case 'AppDownloaderFailure':
           return AppDownloaderFailure.fromJson(value);
+        case 'AppDownloaderLabels':
+          return AppDownloaderLabels.fromJson(value);
         case 'AppDownloaderList':
           return AppDownloaderList.fromJson(value);
         case 'AppDownloaderSeeding':

@@ -45,6 +45,7 @@ lib/model/app_config_state.dart
 lib/model/app_delta.dart
 lib/model/app_downloader.dart
 lib/model/app_downloader_failure.dart
+lib/model/app_downloader_labels.dart
 lib/model/app_downloader_list.dart
 lib/model/app_downloader_seeding.dart
 lib/model/app_downloader_seeding_list.dart

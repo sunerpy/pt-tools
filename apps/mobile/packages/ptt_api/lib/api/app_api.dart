@@ -1096,6 +1096,66 @@ class AppApi {
     return null;
   }
 
+  /// 一台下载器现有的分类与标签（推送时选）
+  ///
+  /// 读这台下载器的种子列表，汇总种子上用到的分类与标签；qBittorrent 里建好、没有种子用的分类也列出。 Transmission 没有分类（推送时给的分类会写成第一个 label）：supports_category 为假、categories 是空的， labels 都在 tags 里。下载器不存在或没有启用时回 404，取不到实例或读不到种子列表时回 502（upstream）， 15 秒内没有读完时回 504（timeout）。主机的 GET /meta 的 features 里有 downloader_labels 时才提供这个接口。
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   下载器的编号（GET /downloaders 的 id）
+  Future<Response> getDownloaderLabelsWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/downloaders/{id}/labels'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 一台下载器现有的分类与标签（推送时选）
+  ///
+  /// 读这台下载器的种子列表，汇总种子上用到的分类与标签；qBittorrent 里建好、没有种子用的分类也列出。 Transmission 没有分类（推送时给的分类会写成第一个 label）：supports_category 为假、categories 是空的， labels 都在 tags 里。下载器不存在或没有启用时回 404，取不到实例或读不到种子列表时回 502（upstream）， 15 秒内没有读完时回 504（timeout）。主机的 GET /meta 的 features 里有 downloader_labels 时才提供这个接口。
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   下载器的编号（GET /downloaders 的 id）
+  Future<AppDownloaderLabels?> getDownloaderLabels(int id, { Future<void>? abortTrigger, }) async {
+    final response = await getDownloaderLabelsWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppDownloaderLabels',) as AppDownloaderLabels;
+
+    }
+    return null;
+  }
+
   /// 站点图标（图片）
   ///
   /// Note: This method returns the HTTP [Response].

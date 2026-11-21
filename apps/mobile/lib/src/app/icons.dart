@@ -30,6 +30,7 @@ enum PtGlyph {
   arrowUp('M12 19V5M6 11l6-6 6 6'),
   arrowDown('M12 5v14M6 13l6 6 6-6'),
   filter('M4 6h16M7 12h10M10 18h4'),
+  sort('M4 6h9M4 12h6M4 18h3M17 5v14M14 16l3 3 3-3'),
   refresh('M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5'),
   cycle(
     'M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4',

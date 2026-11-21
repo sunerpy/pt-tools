@@ -8,10 +8,13 @@ import '../../../l10n/app_localizations.dart';
 import '../format.dart';
 import '../icons.dart';
 import '../providers.dart';
+import '../sorting.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/sort.dart';
 
-/// 种子：下载器里的种子，按状态筛选、按标题搜；完全控制的设备可以暂停、继续、删除（删除要确认）。每 5 秒刷新一次。
+/// 种子：下载器里的种子，按状态筛选、按标题搜、按字段排序（主机排好再分页，选过的排序记在本机）；
+/// 完全控制的设备可以暂停、继续、删除（删除要确认）。每 5 秒刷新一次，筛选、刷新都保持排序。
 class TorrentsPage extends ConsumerStatefulWidget {
   const TorrentsPage({super.key});
 
@@ -106,7 +109,11 @@ class _TorrentsPageState extends ConsumerState<TorrentsPage> {
   @override
   Widget build(BuildContext context) {
     final s = S.of(context);
-    final query = TorrentQuery(state: _state, q: _q);
+    final query = TorrentQuery(
+      state: _state,
+      q: _q,
+      sort: ref.watch(torrentSortProvider),
+    );
     // 定时刷新
     ref.listen(
       tickerProvider,
@@ -145,6 +152,13 @@ class _TorrentsPageState extends ConsumerState<TorrentsPage> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: SortChip(
+                        list: SortList.torrents,
+                        provider: torrentSortProvider,
+                      ),
+                    ),
                     for (final st in [null, ..._states])
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),

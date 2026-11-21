@@ -432,6 +432,109 @@ class SEn extends S {
   }
 
   @override
+  String get pushDownloader => 'Downloader';
+
+  @override
+  String get pushSavePath => 'Save directory';
+
+  @override
+  String get pushSavePathHint =>
+      'Leave empty to use the downloader\'s default directory';
+
+  @override
+  String get pushPathDefault => 'Downloader default';
+
+  @override
+  String pushDirsFailed(String message) {
+    return 'Couldn\'t read the preset directories: $message';
+  }
+
+  @override
+  String get pushCategory => 'Category';
+
+  @override
+  String get pushCategoryHint => 'Leave empty for no category';
+
+  @override
+  String get pushNoCategory =>
+      'Transmission has no categories; use tags to group torrents';
+
+  @override
+  String get pushTags => 'Tags';
+
+  @override
+  String get pushTagsHint => 'New tags, separated by commas';
+
+  @override
+  String get pushTagAdd => 'Add these tags';
+
+  @override
+  String get pushLabelsLoading =>
+      'Reading categories and tags from the downloader…';
+
+  @override
+  String pushLabelsFailed(String message) {
+    return 'Couldn\'t read categories and tags: $message';
+  }
+
+  @override
+  String get pushSubmit => 'Send';
+
+  @override
+  String get sortTitle => 'Sort';
+
+  @override
+  String get sortDescending => 'Descending';
+
+  @override
+  String get sortAscending => 'Ascending';
+
+  @override
+  String get sortDefaultOrder => 'Default order';
+
+  @override
+  String get sortAddedAt => 'Date added';
+
+  @override
+  String get sortCompletedAt => 'Date completed';
+
+  @override
+  String get sortName => 'Title';
+
+  @override
+  String get sortSize => 'Size';
+
+  @override
+  String get sortProgress => 'Progress';
+
+  @override
+  String get sortRatio => 'Ratio';
+
+  @override
+  String get sortUploadSpeed => 'Upload speed';
+
+  @override
+  String get sortDownloadSpeed => 'Download speed';
+
+  @override
+  String get sortEta => 'Time left';
+
+  @override
+  String get sortSeeds => 'Seeders';
+
+  @override
+  String get sortState => 'State';
+
+  @override
+  String get sortUploadedAt => 'Published';
+
+  @override
+  String get sortLeechers => 'Leechers';
+
+  @override
+  String get sortSnatched => 'Snatched';
+
+  @override
   String get defaultBadge => 'Default';
 
   @override
