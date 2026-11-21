@@ -35,7 +35,8 @@ func (HTTPTransport) FetchUserInfo(ctx context.Context, def *v2.SiteDefinition, 
 		err = v2.IgnorePartial(info, err)
 		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)
 		return withNexusPHPAccessFallback(result, info, err, clock), nil
-	case v2.SchemaHDDolby:
+	case v2.SchemaHDDolby, v2.SchemaIPTorrents:
+		// IPTorrents 的驱动从资料页「Last seen」取最近访问时间，取不到就是解析失败，不用 NexusPHP 的按探测时间兜底
 		return ProbeNexusPHP(ctx, site, clock, ProbeSourceHTTPCookie)
 	case v2.SchemaRousi:
 		return ProbeNexusPHP(ctx, site, clock, ProbeSourceHTTPAPIKey)
@@ -60,7 +61,7 @@ func ClassifyUserInfo(def *v2.SiteDefinition, info v2.UserInfo, err error, clock
 	case v2.SchemaNexusPHP:
 		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)
 		return withNexusPHPAccessFallback(result, info, err, clock)
-	case v2.SchemaHDDolby:
+	case v2.SchemaHDDolby, v2.SchemaIPTorrents:
 		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)
 		return result
 	case v2.SchemaRousi:

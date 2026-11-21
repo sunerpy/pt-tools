@@ -150,6 +150,40 @@ func TestGetTorrentDetailForTest_NexusPHPSchema(t *testing.T) {
 	assert.True(t, res.IsFree)
 }
 
+// IPTorrents 也用 Cookie 读详情页：过滤规则测试取得到标题与免费（经站点驱动的 TorrentDetailFetcher）。
+func TestGetTorrentDetailForTest_IPTorrentsSchema(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+
+	var gotPath, gotCookie string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotCookie = r.URL.Path, r.Header.Get("Cookie")
+		_, _ = w.Write([]byte(`<html><head><title>T</title></head><body>
+			<form action="/lout.php" method="post"></form>
+			<div class="dBox"><h2>IPT.Show.S01.1080p-GRP</h2><div class="info">
+			<div><a href="download.php/42/IPT.Show.S01.1080p-GRP.torrent">dl</a></div>
+			<div class="sub">Size: 2.5 GB in <a href="/t/42/files">3 files</a></div>
+			<div class="tags sub ipx tz"><span class="tz-g"><span class="tz-free">Freeleech</span></span></div>
+			</div></div></body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("iptorrents"), models.SiteConfig{
+		Enabled: boolPtrPS(true), AuthMethod: "cookie", Cookie: "uid=1; pass=x", APIUrl: srv.URL,
+	}))
+
+	item := &gofeed.Item{Title: "fallback", GUID: "42", Link: srv.URL + "/t/42"}
+	res, err := GetTorrentDetailForTest(context.Background(), models.SiteGroup("iptorrents"), item)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.False(t, res.DetailMissing)
+	assert.Equal(t, "IPT.Show.S01.1080p-GRP", res.Title)
+	assert.True(t, res.IsFree)
+	assert.Equal(t, int64(5)<<29, res.SizeBytes)
+	assert.Equal(t, "/t/42", gotPath)
+	assert.Equal(t, "uid=1; pass=x", gotCookie)
+}
+
 func TestGetTorrentDetailForTest_NexusPHPMissingCookie(t *testing.T) {
 	db := setupDB(t)
 	t.Cleanup(func() { global.GlobalDB = nil })

@@ -214,6 +214,16 @@ func TestSchema_DefaultAuthMethod(t *testing.T) {
 	assert.Equal(t, AuthMethodPasskey, SchemaRousi.DefaultAuthMethod())
 	assert.Equal(t, AuthMethodCookie, SchemaNexusPHP.DefaultAuthMethod())
 	assert.Equal(t, AuthMethodCookie, SchemaGazelle.DefaultAuthMethod())
+	assert.Equal(t, AuthMethodCookie, SchemaIPTorrents.DefaultAuthMethod())
+}
+
+// IPTorrents 是站点自己写的程序，单独一个架构：认得出、对应自己的站点类型，不回落成 NexusPHP。
+func TestSchemaIPTorrents(t *testing.T) {
+	assert.Equal(t, Schema("IPTorrents"), SchemaIPTorrents)
+	assert.Equal(t, SiteKind("iptorrents"), SiteIPTorrents)
+	assert.True(t, SchemaIPTorrents.IsValid())
+	assert.Equal(t, SiteIPTorrents, SchemaIPTorrents.ToSiteKind())
+	assert.Equal(t, SchemaIPTorrents, typeToSchema("iptorrents"))
 }
 
 // ---------------------------------------------------------------------------

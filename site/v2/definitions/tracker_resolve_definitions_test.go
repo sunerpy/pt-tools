@@ -38,7 +38,8 @@ func TestTrackerResolverCoversAllDefinitions(t *testing.T) {
 	}
 }
 
-// 每个内置站点的下载地址都按架构解析出种子 ID；M-Team 与 Rousi 的下载地址不含可复用的种子 ID，解析不了。
+// 每个内置站点的下载地址都按架构解析出种子 ID（IPTorrents 是 /download.php/{id}/{文件名}.torrent）；
+// M-Team 与 Rousi 的下载地址不含可复用的种子 ID，解析不了。
 func TestParseDownloadURLAllDefinitions(t *testing.T) {
 	for _, def := range v2.GetDefinitionRegistry().GetAll() {
 		base := strings.TrimRight(def.URLs[0], "/")
@@ -51,6 +52,8 @@ func TestParseDownloadURLAllDefinitions(t *testing.T) {
 			raw = base + "/torrents/download/123"
 		case v2.SchemaGazelle:
 			raw = base + "/torrents.php?action=download&id=123&authkey=a&torrent_pass=b"
+		case v2.SchemaIPTorrents:
+			raw = base + "/download.php/123/Some.Release-GRP.torrent"
 		default:
 			raw, want = base+"/download.php?id=123", ""
 		}

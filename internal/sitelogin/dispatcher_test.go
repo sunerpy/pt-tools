@@ -116,7 +116,7 @@ func TestProbeDispatcherHDDolbyAndRousi(t *testing.T) {
 	access := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC).Unix()
 	happyInfo := v2.UserInfo{LastAccess: access, LastLogin: access}
 
-	for _, schema := range []v2.Schema{v2.SchemaHDDolby, v2.SchemaRousi} {
+	for _, schema := range []v2.Schema{v2.SchemaHDDolby, v2.SchemaRousi, v2.SchemaIPTorrents} {
 		t.Run(string(schema), func(t *testing.T) {
 			site := &fakeDispatchSite{info: happyInfo}
 			def := &v2.SiteDefinition{ID: "fake-" + string(schema), Schema: schema}

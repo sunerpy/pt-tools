@@ -48,6 +48,7 @@ func TestParseDownloadURL(t *testing.T) {
 	unit3d := &SiteDefinition{ID: "u3d", Schema: SchemaUnit3D, URLs: []string{"https://u3d.example.com/"}}
 	gazelle := &SiteDefinition{ID: "gz", Schema: SchemaGazelle, URLs: []string{"https://gz.example.com/"}}
 	mteam := &SiteDefinition{ID: "mteam", Schema: SchemaMTorrent, URLs: []string{"https://kp.m-team.cc/"}}
+	ipt := &SiteDefinition{ID: "ipt", Schema: SchemaIPTorrents, URLs: []string{"https://ipt.example.com/"}}
 	cases := []struct {
 		def  *SiteDefinition
 		raw  string
@@ -64,6 +65,14 @@ func TestParseDownloadURL(t *testing.T) {
 		{gazelle, "https://gz.example.com/torrents.php?action=download&id=7&authkey=a&torrent_pass=b", "7"},
 		{gazelle, "https://gz.example.com/torrents.php?id=7", ""},
 		{mteam, "https://api.m-team.cc/api/rss/dl?credential=x", ""},
+		// IPTorrents 的下载地址是 /download.php/{id}/{文件名}.torrent（列表与详情页里文件名有原样空格的，也有编码过的）
+		{ipt, "https://ipt.example.com/download.php/7835663/Some.Release-GRP.torrent", "7835663"},
+		{ipt, "https://ipt.example.com/download.php/7866288/Some%20Release%202026.torrent?torrent_pass=x", "7866288"},
+		{ipt, "https://ipt.example.com/download.php/42", "42"},
+		{ipt, "https://ipt.example.com/download.php?id=42", ""},
+		{ipt, "https://ipt.example.com/t/42", ""},
+		{ipt, "https://ipt.example.com/download.php/abc/x.torrent", ""},
+		{ipt, "https://evil.example.net/download.php/42/x.torrent", ""},
 		{nil, "https://hdsky.me/download.php?id=1", ""},
 		{nexus, "::bad", ""},
 	}

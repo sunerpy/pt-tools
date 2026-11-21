@@ -112,6 +112,7 @@ func TestClassifyUserInfo_RoutesBySchema(t *testing.T) {
 		{v2.SchemaNexusPHP, OK, ProbeSourceHTTPCookie},
 		{v2.SchemaHDDolby, OK, ProbeSourceHTTPCookie},
 		{v2.SchemaRousi, OK, ProbeSourceHTTPAPIKey},
+		{v2.SchemaIPTorrents, OK, ProbeSourceHTTPCookie},
 		{v2.SchemaMTorrent, OK, ProbeSourceHTTPAPIKey},
 		{v2.SchemaGazelle, OK, ProbeSourceHTTPCookie},
 		{v2.SchemaUnit3D, OK, ProbeSourceHTTPCookie},

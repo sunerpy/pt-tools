@@ -65,13 +65,13 @@ A probe normally sends a direct request to the site, carrying the cookie, API ke
 - When the fallback finds the session OK, its result is used. When the fallback does not succeed either, the direct request's result is kept and the reason the fallback failed is appended to the failure reason, which the message after Probe now (立即探测) shows.
 - The fallback uses only the site's cookie: a site without a cookie (for example, one with only an API key or a passkey) gets no fallback. It opens the same site address as the direct request and loads the site's cookies into the browser:
 
-| Site framework | Page opened                     | Requirement                                                                   |
-| -------------- | ------------------------------- | ----------------------------------------------------------------------------- |
-| NexusPHP       | `/userdetails.php?id=<user ID>` | The site has been probed successfully at least once, so its user ID is known  |
-| Unit3D         | `/users/<username>`             | The site has been probed successfully at least once, so its username is known |
-| Gazelle        | `/user.php?id=<user ID>`        | The site has been probed successfully at least once, so its user ID is known  |
-| M-Team         | `/profile` on the web site      | No other requirement                                                          |
-| HDDolby, Rousi | No fallback                     | —                                                                             |
+| Site framework             | Page opened                     | Requirement                                                                   |
+| -------------------------- | ------------------------------- | ----------------------------------------------------------------------------- |
+| NexusPHP                   | `/userdetails.php?id=<user ID>` | The site has been probed successfully at least once, so its user ID is known  |
+| Unit3D                     | `/users/<username>`             | The site has been probed successfully at least once, so its username is known |
+| Gazelle                    | `/user.php?id=<user ID>`        | The site has been probed successfully at least once, so its user ID is known  |
+| M-Team                     | `/profile` on the web site      | No other requirement                                                          |
+| HDDolby, Rousi, IPTorrents | No fallback                     | —                                                                             |
 
 - All sites share this one profile, so only one fallback probe runs at a time and the others wait. Waiting and the fallback both count toward the 150-second limit of a single probe.
 - Changes to these three settings take effect at the next probe, without a restart.
@@ -145,6 +145,7 @@ Signing in to HDSky, OpenCD, PTCHDBits and 52PT requires a captcha or a quiz ans
 | BTSCHOOL     | Signing in works differently from usual NexusPHP sites                                                                                          |
 | MooKo        | Not a NexusPHP site; sign-in is not supported yet                                                                                               |
 | Audiences    | The site has dropped sign-in; it no longer has a sign-in page                                                                                   |
+| IPTorrents   | It has no daily sign-in; bonus points come from seeding only                                                                                    |
 
 Signing in adds one request to the site every day; make sure the site's rules allow automatic sign-in before turning it on.
 

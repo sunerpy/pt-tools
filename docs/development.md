@@ -249,14 +249,15 @@ func init() {
 
 **Schema 枚举**（`v2.Schema` 类型，定义在 `site/v2/types.go`）：
 
-| 枚举常量            | 值           | 站点类型            | 默认 AuthMethod      |
-| ------------------- | ------------ | ------------------- | -------------------- |
-| `v2.SchemaNexusPHP` | `"NexusPHP"` | NexusPHP 架构站点   | `cookie`             |
-| `v2.SchemaMTorrent` | `"mTorrent"` | M-Team 等           | `api_key`            |
-| `v2.SchemaGazelle`  | `"Gazelle"`  | Gazelle 架构站点    | `cookie`             |
-| `v2.SchemaUnit3D`   | `"Unit3D"`   | Unit3D 架构站点     | `api_key`            |
-| `v2.SchemaHDDolby`  | `"HDDolby"`  | HDDolby 专用        | `cookie_and_api_key` |
-| `v2.SchemaRousi`    | `"Rousi"`    | RousiPro 自定义 API | `passkey`            |
+| 枚举常量              | 值             | 站点类型                                 | 默认 AuthMethod      |
+| --------------------- | -------------- | ---------------------------------------- | -------------------- |
+| `v2.SchemaNexusPHP`   | `"NexusPHP"`   | NexusPHP 架构站点                        | `cookie`             |
+| `v2.SchemaMTorrent`   | `"mTorrent"`   | M-Team 等                                | `api_key`            |
+| `v2.SchemaGazelle`    | `"Gazelle"`    | Gazelle 架构站点                         | `cookie`             |
+| `v2.SchemaUnit3D`     | `"Unit3D"`     | Unit3D 架构站点                          | `api_key`            |
+| `v2.SchemaHDDolby`    | `"HDDolby"`    | HDDolby 专用                             | `cookie_and_api_key` |
+| `v2.SchemaRousi`      | `"Rousi"`      | RousiPro 自定义 API                      | `passkey`            |
+| `v2.SchemaIPTorrents` | `"IPTorrents"` | IPTorrents 自己写的程序（网页 + Cookie） | `cookie`             |
 
 **AuthMethod 枚举**（`v2.AuthMethod` 类型，定义在 `site/v2/types.go`）：
 

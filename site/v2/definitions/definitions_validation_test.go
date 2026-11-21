@@ -290,6 +290,8 @@ func fakeOptionsForSchema(schema v2.Schema) json.RawMessage {
 	switch schema {
 	case v2.SchemaRousi:
 		return json.RawMessage(`{"passkey":"FAKE_TEST_PASSKEY_1234"}`)
+	case v2.SchemaIPTorrents:
+		return json.RawMessage(`{"cookie":"uid=1; pass=FAKE_TEST_PASS"}`)
 	default:
 		return json.RawMessage(`{}`)
 	}

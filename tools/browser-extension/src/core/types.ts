@@ -7,6 +7,7 @@ export type SiteSchema =
   | "Unit3D"
   | "HDDolby"
   | "Rousi"
+  | "IPTorrents"
   | "Unknown";
 
 export type AuthMethod = "cookie" | "api_key" | "cookie_and_api_key" | "passkey";

@@ -17,7 +17,7 @@ import (
 // crash the LoginReminderMonitor goroutine and stop progress for other
 // sites.
 //
-// HDDolby and Rousi schemas share the NexusPHP probe implementation because
+// HDDolby, Rousi and IPTorrents schemas share the NexusPHP probe implementation because
 // their drivers expose the same UserInfo shape (LastAccess + LastLogin).
 func Probe(ctx context.Context, def *v2.SiteDefinition, site v2.Site, clock Clock) (*ProbeResult, error) {
 	return ProbeWithFallback(ctx, def, site, clock, HTTPTransport{}, nil)

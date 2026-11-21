@@ -56,7 +56,8 @@ func TestClassifyUserInfo_NoLastAccessButLoggedIn(t *testing.T) {
 	assert.Equal(t, now, *res.LastAccessAt)
 	assert.Contains(t, res.Diagnostic, "最近动向")
 
-	for _, schema := range []v2.Schema{v2.SchemaHDDolby, v2.SchemaRousi} {
+	// IPTorrents 的资料页有「Last seen」，读不到就是解析失败，不按探测时间兜底
+	for _, schema := range []v2.Schema{v2.SchemaHDDolby, v2.SchemaRousi, v2.SchemaIPTorrents} {
 		res = ClassifyUserInfo(&v2.SiteDefinition{Schema: schema}, named, nil, clock)
 		assert.Equal(t, PARSE_ERROR, res.Status, schema)
 		assert.Nil(t, res.LastAccessAt, schema)

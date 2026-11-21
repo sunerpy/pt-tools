@@ -1082,12 +1082,14 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 		)
 	}
 
+	siteDef := v2.GetDefinitionRegistry().GetOrDefault(string(siteName))
 	var discarded int
 	for _, item := range feed.Items {
 		if len(item.Enclosures) == 0 && strings.TrimSpace(item.Link) == "" {
 			discarded++
 			continue
 		}
+		item.GUID = rssItemGUID(siteDef, item)
 		select {
 		case <-ctxWithTimeout.Done():
 			sLogger().Info("任务被取消")
@@ -1418,6 +1420,34 @@ func downloadWorker[T models.ResType](
 			}
 		}
 	}
+}
+
+// rssItemGUID 是 RSS 条目在种子记录（TorrentID）与暂存文件名（<站点>-<编号>.torrent）里用的编号，一般就是条目的 guid。
+// IPTorrents 的 guid 是详情页地址（https://iptorrents.com/t/{id}，2026-11 的 t.rss），早先的订阅没有 guid：原样用时
+// 暂存文件名里的「: / .」被去掉、记录与暂存文件对不上，下好的种子被当成孤立文件删掉；没有 guid 的条目又都挤在同一条记录上。
+// 这两种情况换成下载链接（<link> 或附件）里的种子编号；认不出时照旧。别的站点不动。
+func rssItemGUID(def *v2.SiteDefinition, item *gofeed.Item) string {
+	if item == nil {
+		return ""
+	}
+	if def == nil || def.Schema != v2.SchemaIPTorrents {
+		return item.GUID
+	}
+	if guid := strings.TrimSpace(item.GUID); guid != "" && !strings.Contains(guid, "://") {
+		return item.GUID
+	}
+	links := []string{item.Link}
+	for _, e := range item.Enclosures {
+		if e != nil {
+			links = append(links, e.URL)
+		}
+	}
+	for _, link := range links {
+		if id, ok := v2.ParseDownloadURL(def, link); ok {
+			return id
+		}
+	}
+	return item.GUID
 }
 
 func extractTorrentRef(item *gofeed.Item) (siteName, torrentID string) {

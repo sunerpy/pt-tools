@@ -74,7 +74,8 @@ func GetTorrentDetailForTest(ctx context.Context, siteName models.SiteGroup, ite
 			}
 			sLogger().Debugf("[TorrentDetail] %s: Name=%s, SubTitle=%s, IsFree=%v", siteName, result.Title, result.Tag, result.IsFree)
 			return result, nil
-		case v2.SchemaNexusPHP:
+		case v2.SchemaNexusPHP, v2.SchemaIPTorrents:
+			// IPTorrents 也是用 Cookie 读详情页，经站点驱动的 TorrentDetailFetcher 取（与 RSS 取详情同一条路）
 			detail, err := fetchNexusPHPDetail(ctx, siteName, item)
 			if err != nil {
 				sLogger().Debugf("[TorrentDetail] 获取 %s 种子详情失败: %v", siteName, err)
@@ -167,7 +168,7 @@ func waitMTorrentDetailRateLimit(ctx context.Context, siteName models.SiteGroup)
 	return nil
 }
 
-// fetchNexusPHPDetail 获取 NexusPHP 架构站点的种子详情
+// fetchNexusPHPDetail 获取 NexusPHP 架构站点（以及同样用 Cookie 读详情页的 IPTorrents）的种子详情
 func fetchNexusPHPDetail(ctx context.Context, siteName models.SiteGroup, item *gofeed.Item) (*TorrentDetailForTest, error) {
 	cfg, err := core.NewConfigStore(global.GlobalDB).Load()
 	if err != nil {

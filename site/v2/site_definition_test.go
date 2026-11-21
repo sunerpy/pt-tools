@@ -265,6 +265,22 @@ func TestValidate_RousiRequiresCreateDriver(t *testing.T) {
 	assert.Contains(t, err.Error(), "CreateDriver")
 }
 
+// IPTorrents 架构没有通用驱动，站点定义必须自己给 CreateDriver；给了就是合法的（不要求 NexusPHP 的选择器）。
+func TestValidate_IPTorrentsRequiresCreateDriver(t *testing.T) {
+	def := &SiteDefinition{
+		ID:     "test",
+		Name:   "Test",
+		Schema: SchemaIPTorrents,
+		URLs:   []string{"https://example.com/"},
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CreateDriver")
+
+	def.CreateDriver = func(SiteConfig, *zap.Logger) (Site, error) { return nil, nil }
+	assert.NoError(t, def.Validate())
+}
+
 func TestValidate_UserInfoFieldSelectorConsistency(t *testing.T) {
 	def := makeMinimalNexusPHP("test")
 	def.UserInfo.Process[0].Fields = []string{"id", "name", "missing_field"}
