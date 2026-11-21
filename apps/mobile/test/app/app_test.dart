@@ -1,5 +1,6 @@
 // 界面测试：整个 App 对着内存里的假主机（罐头 App API）跑，中文界面。
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import 'package:pt_tools_app/src/app/app.dart';
 import 'package:pt_tools_app/src/app/appearance.dart';
 import 'package:pt_tools_app/src/app/pages/assistant_page.dart';
 import 'package:pt_tools_app/src/app/providers.dart';
+import 'package:pt_tools_app/src/app/sorting.dart';
 import 'package:pt_tools_app/src/app/storage.dart';
 import 'package:pt_tools_app/src/app/theme.dart';
 import 'package:pt_tools_app/src/app/widgets/common.dart';
@@ -243,6 +245,94 @@ final _torrents = {
   'failures': [],
 };
 
+/// 搜索结果：主机给的先后是 A、B、C（C 没有发布时间）
+final _searchResult = {
+  'items': [
+    {
+      'site': 'hdsky',
+      'torrent_id': '101',
+      'title': '沙丘 A 2160p',
+      'size': 3 * _gib,
+      'seeders': 5,
+      'leechers': 1,
+      'uploaded_at': 1791400000,
+      'free': false,
+      'has_hr': false,
+    },
+    {
+      'site': 'hdsky',
+      'torrent_id': '102',
+      'title': '沙丘 B 1080p',
+      'size': 1 * _gib,
+      'seeders': 50,
+      'leechers': 3,
+      'uploaded_at': 1791600000,
+      'free': true,
+      'has_hr': false,
+    },
+    {
+      'site': 'hdsky',
+      'torrent_id': '103',
+      'title': '沙丘 C 720p',
+      'size': 2 * _gib,
+      'seeders': 20,
+      'leechers': 9,
+      'free': false,
+      'has_hr': false,
+    },
+  ],
+  'total': 3,
+  'sites': {'hdsky': 3},
+  'errors': [],
+  'duration_ms': 1200,
+};
+
+/// 推送用的两台下载器：qb 是默认的 qBittorrent，tr 是 Transmission
+const _pushDownloaders = [
+  {
+    'id': 1,
+    'name': 'qb',
+    'type': 'qbittorrent',
+    'default': true,
+    'reachable': true,
+    'upload_speed': 0,
+    'download_speed': 0,
+    'uploaded': 0,
+    'downloaded': 0,
+    'free_space': 1099511627776,
+  },
+  {
+    'id': 2,
+    'name': 'tr',
+    'type': 'transmission',
+    'default': false,
+    'reachable': true,
+    'upload_speed': 0,
+    'download_speed': 0,
+    'uploaded': 0,
+    'downloaded': 0,
+    'free_space': 1073741824,
+  },
+];
+
+/// 网页「下载器设置」里预设的目录：qb 两个（电影是默认，配置里排在剧集后面），tr 一个
+final _mobileOptions = {
+  'sites': [],
+  'downloaders': [],
+  'profiles': [],
+  'libraries': [],
+  'directories': [
+    {'downloader_id': 1, 'path': '/data/tv', 'alias': '剧集'},
+    {
+      'downloader_id': 1,
+      'path': '/data/movies',
+      'alias': '电影',
+      'is_default': true,
+    },
+    {'downloader_id': 2, 'path': '/tr/downloads', 'is_default': true},
+  ],
+};
+
 /// 安全存储写不进去（例如 Keystore 出错）。
 class _BrokenStore extends MemoryHostStore {
   @override
@@ -256,8 +346,19 @@ class _World {
     this.mobileFeatures = false,
     this.brushStats = false,
     this.downloaderSeeding = false,
+    this.labels = false,
+    this.downloaders = const [],
   });
   final bool mobileFeatures;
+
+  /// 主机提供下载器的分类与标签（features 里有 downloader_labels）
+  final bool labels;
+
+  /// GET /downloaders 的下载器
+  final List<Map<String, Object?>> downloaders;
+
+  /// 接下来几次 GET /downloaders/1/labels 回 502
+  int failLabels = 0;
 
   /// 主机提供各台下载器的做种情况（features 里有 downloader_seeding）
   final bool downloaderSeeding;
@@ -321,9 +422,41 @@ class _World {
             ],
             if (brushStats) 'brush_stats',
             if (downloaderSeeding) 'downloader_seeding',
+            if (labels) 'downloader_labels',
           ],
       '/api/app/v1/overview' => _overview,
-      '/api/app/v1/downloaders' => {'items': []},
+      '/api/app/v1/downloaders' => {'items': downloaders},
+      '/api/app/v1/search' => _searchResult,
+      '/api/app/v1/push' => {
+        'success': true,
+        'skipped': false,
+        'downloader_id': 1,
+        'downloader': 'qb',
+      },
+      '/api/app/v1/mobile/options' => _mobileOptions,
+      '/api/app/v1/downloaders/1/labels' when failLabels > 0 => () {
+        failLabels--;
+        return const ApiReply(502, {
+          'error': 'upstream',
+          'message': '读取下载器 qb 的分类与标签失败: EOF',
+        });
+      }(),
+      '/api/app/v1/downloaders/1/labels' => {
+        'downloader_id': 1,
+        'downloader': 'qb',
+        'type': 'qbittorrent',
+        'supports_category': true,
+        'categories': ['movie', 'tv'],
+        'tags': ['hd', 'pt'],
+      },
+      '/api/app/v1/downloaders/2/labels' => {
+        'downloader_id': 2,
+        'downloader': 'tr',
+        'type': 'transmission',
+        'supports_category': false,
+        'categories': [],
+        'tags': ['keep'],
+      },
       '/api/app/v1/downloaders/seeding' when failSeeding > 0 => () {
         failSeeding--;
         return const ApiReply(502, {'error': 'internal', 'message': '主机在重启'});
@@ -530,9 +663,12 @@ Future<_World> _pumpApp(
   bool mobileFeatures = false,
   bool brushStats = false,
   bool downloaderSeeding = false,
+  bool labels = false,
+  List<Map<String, Object?>> downloaders = const [],
   HostStore? store,
   Future<void>? hostLoaded,
   AppearanceStore? appearance,
+  SortStore? sorts,
   UrlOpener? openUrl,
 }) async {
   tester.platformDispatcher.localesTestValue = const [Locale('zh')];
@@ -546,9 +682,15 @@ Future<_World> _pumpApp(
     mobileFeatures: mobileFeatures,
     brushStats: brushStats,
     downloaderSeeding: downloaderSeeding,
+    labels: labels,
+    downloaders: downloaders,
   );
+  // 和 main 一样：启动前读出选过的排序
+  final sortStore = sorts ?? MemorySortStore();
+  late Map<SortList, SortChoice> initialSorts;
   late HostRecord rec;
   await tester.runAsync(() async {
+    initialSorts = await loadInitialSorts(sortStore);
     w.hostKey = await DhKey.generate();
     final device = await DhKey.generate();
     rec = HostRecord(
@@ -577,6 +719,8 @@ Future<_World> _pumpApp(
         appearanceStoreProvider.overrideWithValue(
           appearance ?? MemoryAppearanceStore(),
         ),
+        sortStoreProvider.overrideWithValue(sortStore),
+        initialSortsProvider.overrideWithValue(initialSorts),
         if (openUrl != null) urlOpenerProvider.overrideWithValue(openUrl),
       ],
       child: const PtToolsApp(),
@@ -886,6 +1030,507 @@ void main() {
     await _settle(tester);
     expect(find.text('Some.Movie.2026.1080p'), findsOneWidget);
     expect(find.byTooltip('操作'), findsNothing);
+  });
+
+  /// 最近一次种子列表请求的查询参数
+  Map<String, String> lastTorrentsQuery(_World w) => Uri.parse(
+    w.requests
+        .lastWhere((r) => r.startsWith('GET /api/app/v1/torrents?'))
+        .substring('GET '.length),
+  ).queryParameters;
+
+  /// 关上底部面板（点面板上方的遮罩）
+  Future<void> closeSheet(WidgetTester tester) async {
+    await tester.tapAt(const Offset(20, 20));
+    await _settle(tester);
+  }
+
+  // 2026-11-21 用户：「手机APP下载添加下排序」；排序「两处都加」（种子页与搜索结果）
+  testWidgets('种子：选了排序以后主机按它排，换状态筛选、刷新都保持，并且记下来', (tester) async {
+    final store = MemorySortStore();
+    final w = await _pumpApp(tester, sorts: store);
+    await _settle(tester);
+    await tester.tap(find.text('种子'));
+    await _settle(tester);
+    expect(
+      lastTorrentsQuery(w),
+      allOf(containsPair('sort', 'added_at'), containsPair('order', 'desc')),
+      reason: '默认按添加时间从新到旧',
+    );
+    final chip = find.byKey(const ValueKey('sort-torrents'));
+    expect(
+      find.descendant(of: chip, matching: find.text('添加时间')),
+      findsOneWidget,
+    );
+
+    await tester.tap(chip);
+    await _settle(tester);
+    await tester.tap(find.byKey(const ValueKey('sort-field-size')));
+    await _settle(tester);
+    expect(find.byKey(const ValueKey('sort-field-size')), findsNothing);
+    expect(
+      lastTorrentsQuery(w),
+      allOf(containsPair('sort', 'size'), containsPair('order', 'desc')),
+    );
+    expect(
+      find.descendant(of: chip, matching: find.text('体积')),
+      findsOneWidget,
+    );
+
+    // 换方向马上生效，面板不关
+    await tester.tap(chip);
+    await _settle(tester);
+    await tester.tap(find.text('升序'));
+    await _settle(tester);
+    expect(find.byKey(const Key('sort-direction')), findsOneWidget);
+    expect(
+      lastTorrentsQuery(w),
+      allOf(containsPair('sort', 'size'), containsPair('order', 'asc')),
+    );
+    await closeSheet(tester);
+
+    await tester.tap(find.text('做种中'));
+    await _settle(tester);
+    expect(
+      lastTorrentsQuery(w),
+      allOf(
+        containsPair('state', 'seeding'),
+        containsPair('sort', 'size'),
+        containsPair('order', 'asc'),
+      ),
+    );
+
+    // 刷新（定时刷新与下拉刷新都是重读这一页）
+    final before = w.requests.length;
+    ProviderScope.containerOf(tester.element(find.byType(PtToolsApp)))
+        .invalidate(torrentsProvider);
+    await _settle(tester);
+    expect(w.requests.length, greaterThan(before));
+    expect(
+      lastTorrentsQuery(w),
+      allOf(
+        containsPair('state', 'seeding'),
+        containsPair('sort', 'size'),
+        containsPair('order', 'asc'),
+      ),
+    );
+    expect(store.saved, {
+      SortList.torrents: const SortChoice('size', descending: false),
+    });
+  });
+
+  testWidgets('种子：重开 App 时第一次请求就按上次选的排序', (tester) async {
+    final w = await _pumpApp(
+      tester,
+      sorts: MemorySortStore({
+        SortList.torrents: const SortChoice('upload_speed'),
+      }),
+    );
+    await _settle(tester);
+    await tester.tap(find.text('种子'));
+    await _settle(tester);
+    final torrents = w.requests.where(
+      (r) => r.startsWith('GET /api/app/v1/torrents?'),
+    );
+    expect(torrents, isNotEmpty);
+    for (final r in torrents) {
+      expect(r, contains('sort=upload_speed'));
+      expect(r, contains('order=desc'));
+    }
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('sort-torrents')),
+        matching: find.text('上传速度'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  /// 打开搜索页搜「沙丘」
+  Future<void> searchDune(WidgetTester tester) async {
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('搜索'),
+      ),
+    );
+    await _settle(tester);
+    await tester.enterText(find.byKey(const Key('search-input')), '沙丘');
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('search-input')),
+        matching: find.byType(IconButton),
+      ),
+    );
+    await _settle(tester);
+  }
+
+  const resultA = '沙丘 A 2160p', resultB = '沙丘 B 1080p', resultC = '沙丘 C 720p';
+
+  /// 结果从上到下的先后
+  List<String> shownOrder(WidgetTester tester) {
+    final y = {
+      for (final t in [resultA, resultB, resultC])
+        t: tester.getTopLeft(find.text(t)).dy,
+    };
+    return y.keys.toList()..sort((a, b) => y[a]!.compareTo(y[b]!));
+  }
+
+  testWidgets('搜索：结果在手机上按做种数、发布时间排，默认顺序是主机给的先后，选过的记下来', (tester) async {
+    final store = MemorySortStore();
+    final w = await _pumpApp(tester, sorts: store);
+    await _settle(tester);
+    await searchDune(tester);
+    expect(shownOrder(tester), [resultA, resultB, resultC]);
+    final chip = find.byKey(const ValueKey('sort-search'));
+    expect(
+      find.descendant(of: chip, matching: find.text('默认顺序')),
+      findsOneWidget,
+    );
+
+    await tester.tap(chip);
+    await _settle(tester);
+    expect(
+      find.byKey(const Key('sort-direction')),
+      findsNothing,
+      reason: '默认顺序没有方向',
+    );
+    await tester.tap(find.byKey(const ValueKey('sort-field-seeders')));
+    await _settle(tester);
+    expect(shownOrder(tester), [resultB, resultC, resultA]);
+    expect(store.saved, {SortList.search: const SortChoice('seeders')});
+
+    await tester.tap(chip);
+    await _settle(tester);
+    await tester.tap(find.text('升序'));
+    await _settle(tester);
+    await closeSheet(tester);
+    expect(shownOrder(tester), [resultA, resultC, resultB]);
+
+    // 没有发布时间的（C）两个方向都在最后
+    await tester.tap(chip);
+    await _settle(tester);
+    await tester.tap(find.byKey(const ValueKey('sort-field-uploaded_at')));
+    await _settle(tester);
+    expect(shownOrder(tester), [resultA, resultB, resultC]);
+    await tester.tap(chip);
+    await _settle(tester);
+    await tester.tap(find.text('降序'));
+    await _settle(tester);
+    await closeSheet(tester);
+    expect(shownOrder(tester), [resultB, resultA, resultC]);
+
+    await tester.tap(chip);
+    await _settle(tester);
+    await tester.tap(find.byKey(const ValueKey('sort-field-default')));
+    await _settle(tester);
+    expect(shownOrder(tester), [resultA, resultB, resultC]);
+    expect(
+      w.requests.where((r) => r == 'POST /api/app/v1/search'),
+      hasLength(1),
+      reason: '在手机上排，不重新搜',
+    );
+  });
+
+  testWidgets('搜索：重开 App 以后结果按上次选的排序排', (tester) async {
+    await _pumpApp(
+      tester,
+      sorts: MemorySortStore({SortList.search: const SortChoice('size')}),
+    );
+    await _settle(tester);
+    await searchDune(tester);
+    expect(shownOrder(tester), [resultA, resultC, resultB]);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('sort-search')),
+        matching: find.text('体积'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  // 「只看免费」和排序在同一行：320 宽、字号 2 倍时两块一共比这一行宽，要能左右滑，不能溢出
+  for (final (width, scale) in const [(320.0, 2.0), (390.0, 1.3)]) {
+    testWidgets('搜索：$width 宽、字号 $scale 倍时排序那一行不溢出，排序点得到', (tester) async {
+      await _pumpApp(
+        tester,
+        sorts: MemorySortStore({
+          SortList.search: const SortChoice('uploaded_at'),
+        }),
+      );
+      tester.view.physicalSize = Size(width * 3, 2532);
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await _settle(tester);
+      // 溢出时 Flutter 报 RenderFlex overflowed，测试就失败
+      await searchDune(tester);
+      expect(find.text(resultB), findsOneWidget, reason: '按发布时间新的在前');
+      final chip = find.byKey(const ValueKey('sort-search'));
+      await tester.ensureVisible(chip);
+      await tester.pump();
+      expect(tester.getRect(chip).right, lessThanOrEqualTo(width));
+      await tester.tap(chip);
+      await _settle(tester);
+      expect(find.byKey(const ValueKey('sort-field-seeders')), findsOneWidget);
+    });
+  }
+
+  /// 发出的推送的请求体（按先后）
+  List<Map<String, Object?>> pushBodies(_World w) => [
+    for (final h in w.hosts)
+      for (final r in h.requests)
+        if (r['method'] == 'POST' && r['path'] == '/api/app/v1/push')
+          jsonDecode(utf8.decode(h.bodies[r['id']]!.toBytes()))
+              as Map<String, Object?>,
+  ];
+
+  String fieldText(WidgetTester tester, String key) =>
+      tester.widget<TextField>(find.byKey(Key(key))).controller!.text;
+
+  Future<void> tapInSheet(WidgetTester tester, Finder f) async {
+    await tester.ensureVisible(f);
+    await tester.pump();
+    await tester.tap(f);
+    await tester.pump();
+  }
+
+  // 2026-11-21 用户：「只能选下载器，选不了目录……下载时选择下载器也应支持比如选择下载器目录、分类、标签之类的」
+  testWidgets('搜索：推送时选下载器、预设目录、分类与标签；Transmission 没有分类；关掉面板不推送', (
+    tester,
+  ) async {
+    final w = await _pumpApp(
+      tester,
+      mobileFeatures: true,
+      labels: true,
+      downloaders: _pushDownloaders,
+    );
+    await _settle(tester);
+    await searchDune(tester);
+
+    await tester.tap(find.byTooltip('推送到下载器').first);
+    await _settle(tester);
+    expect(find.byKey(const Key('push-submit')), findsOneWidget);
+    await closeSheet(tester);
+    expect(find.byKey(const Key('push-submit')), findsNothing);
+    expect(pushBodies(w), isEmpty, reason: '关掉面板是不推送');
+
+    await tester.tap(find.byTooltip('推送到下载器').first);
+    await _settle(tester);
+    expect(w.requests, contains('GET /api/app/v1/mobile/options'));
+    expect(w.requests, contains('GET /api/app/v1/downloaders/1/labels'));
+    expect(
+      tester
+          .widget<ListTile>(find.byKey(const ValueKey('push-downloader-1')))
+          .selected,
+      isTrue,
+      reason: '先选默认下载器',
+    );
+    expect(
+      fieldText(tester, 'push-save-path'),
+      isEmpty,
+      reason: '默认不选预设目录，用下载器自己的默认目录（和网页的推送弹窗一样）',
+    );
+    expect(
+      tester
+          .widget<ChoiceChip>(find.byKey(const ValueKey('push-dir-default')))
+          .selected,
+      isTrue,
+    );
+    expect(
+      tester
+          .widgetList<ChoiceChip>(find.byType(ChoiceChip))
+          .map((c) => c.key)
+          .whereType<ValueKey<String>>()
+          .map((k) => k.value)
+          .where((v) => v.startsWith('push-dir-'))
+          .toList(),
+      ['push-dir-default', 'push-dir-/data/movies', 'push-dir-/data/tv'],
+      reason: '标了默认的预设目录排在最前',
+    );
+    expect(find.byKey(const ValueKey('push-category-movie')), findsOneWidget);
+    expect(find.byKey(const ValueKey('push-tag-pt')), findsOneWidget);
+
+    await tapInSheet(tester, find.byKey(const ValueKey('push-dir-/data/tv')));
+    expect(fieldText(tester, 'push-save-path'), '/data/tv');
+    await tapInSheet(tester, find.byKey(const ValueKey('push-category-tv')));
+    expect(fieldText(tester, 'push-category'), 'tv');
+    await tapInSheet(tester, find.byKey(const ValueKey('push-tag-hd')));
+    await tester.enterText(
+      find.byKey(const Key('push-tag-input')),
+      'mobile，手机',
+    );
+    await tapInSheet(tester, find.byTooltip('加上这些标签'));
+    expect(
+      tester
+          .widget<FilterChip>(find.byKey(const ValueKey('push-tag-手机')))
+          .selected,
+      isTrue,
+    );
+    expect(fieldText(tester, 'push-tag-input'), isEmpty);
+    await tapInSheet(tester, find.byKey(const Key('push-submit')));
+    await _settle(tester);
+    expect(pushBodies(w), [
+      {
+        'site': 'hdsky',
+        'torrent_id': '101',
+        'downloader_id': 1,
+        'title': resultA,
+        'category': 'tv',
+        'tags': 'hd,mobile,手机',
+        'save_path': '/data/tv',
+      },
+    ]);
+    expect(find.text('已推送到 qb'), findsOneWidget);
+
+    // 换成 Transmission：目录回到下载器默认，分类只写说明，标签只列它的
+    await tester.tap(find.byTooltip('推送到下载器').at(1));
+    await _settle(tester);
+    await tapInSheet(tester, find.byKey(const ValueKey('push-downloader-2')));
+    await _settle(tester);
+    expect(w.requests, contains('GET /api/app/v1/downloaders/2/labels'));
+    expect(fieldText(tester, 'push-save-path'), isEmpty);
+    expect(find.byKey(const Key('push-category')), findsNothing);
+    expect(find.text('Transmission 没有分类，可以用标签归类'), findsOneWidget);
+    expect(find.byKey(const ValueKey('push-tag-hd')), findsNothing);
+    await tapInSheet(tester, find.byKey(const ValueKey('push-dir-default')));
+    expect(fieldText(tester, 'push-save-path'), isEmpty);
+    await tapInSheet(tester, find.byKey(const ValueKey('push-tag-keep')));
+    await tapInSheet(tester, find.byKey(const Key('push-submit')));
+    await _settle(tester);
+    expect(pushBodies(w).last, {
+      'site': 'hdsky',
+      'torrent_id': '102',
+      'downloader_id': 2,
+      'title': resultB,
+      'category': null,
+      'tags': 'keep',
+      'save_path': null,
+    });
+  });
+
+  // 用户文档：换下载器时从上一台的标签里选的不再算，自己输入的标签留着，目录回到下载器默认
+  testWidgets('搜索：推送面板里换下载器，自己加的标签留着，从上一台选的不带', (tester) async {
+    final w = await _pumpApp(
+      tester,
+      mobileFeatures: true,
+      labels: true,
+      downloaders: _pushDownloaders,
+    );
+    await _settle(tester);
+    await searchDune(tester);
+    await tester.tap(find.byTooltip('推送到下载器').first);
+    await _settle(tester);
+    await tapInSheet(tester, find.byKey(const ValueKey('push-tag-hd')));
+    await tester.enterText(find.byKey(const Key('push-tag-input')), 'mine');
+    await tapInSheet(tester, find.byTooltip('加上这些标签'));
+
+    await tapInSheet(tester, find.byKey(const ValueKey('push-dir-/data/tv')));
+    await tapInSheet(tester, find.byKey(const ValueKey('push-downloader-2')));
+    await _settle(tester);
+    expect(
+      fieldText(tester, 'push-save-path'),
+      isEmpty,
+      reason: '上一台的预设目录不带到这一台',
+    );
+    expect(find.byKey(const ValueKey('push-tag-hd')), findsNothing);
+    expect(
+      tester
+          .widget<FilterChip>(find.byKey(const ValueKey('push-tag-mine')))
+          .selected,
+      isTrue,
+    );
+    await tapInSheet(tester, find.byKey(const ValueKey('push-tag-keep')));
+
+    // 换回第一台：之前选的 hd 不再选着
+    await tapInSheet(tester, find.byKey(const ValueKey('push-downloader-1')));
+    await _settle(tester);
+    expect(fieldText(tester, 'push-save-path'), isEmpty);
+    expect(
+      tester
+          .widget<FilterChip>(find.byKey(const ValueKey('push-tag-hd')))
+          .selected,
+      isFalse,
+    );
+    await tapInSheet(tester, find.byKey(const ValueKey('push-downloader-2')));
+    await _settle(tester);
+    await tapInSheet(tester, find.byKey(const ValueKey('push-tag-keep')));
+    await tapInSheet(
+      tester,
+      find.byKey(const ValueKey('push-dir-/tr/downloads')),
+    );
+    await tapInSheet(tester, find.byKey(const Key('push-submit')));
+    await _settle(tester);
+    expect(pushBodies(w), [
+      {
+        'site': 'hdsky',
+        'torrent_id': '101',
+        'downloader_id': 2,
+        'title': resultA,
+        'category': null,
+        'tags': 'mine,keep',
+        'save_path': '/tr/downloads',
+      },
+    ]);
+  });
+
+  testWidgets('搜索：主机没有预设目录与分类标签的接口时只有输入框，照样推送；Transmission 按类型认出来', (
+    tester,
+  ) async {
+    final w = await _pumpApp(tester, downloaders: _pushDownloaders);
+    await _settle(tester);
+    await searchDune(tester);
+    await tester.tap(find.byTooltip('推送到下载器').first);
+    await _settle(tester);
+    expect(
+      w.requests.where(
+        (r) => r.contains('/labels') || r.contains('/mobile/options'),
+      ),
+      isEmpty,
+    );
+    expect(fieldText(tester, 'push-save-path'), isEmpty);
+    await tester.enterText(find.byKey(const Key('push-save-path')), '/mnt/new');
+    await tester.enterText(find.byKey(const Key('push-category')), 'docs');
+    await tester.enterText(find.byKey(const Key('push-tag-input')), 'a, b');
+    await tapInSheet(tester, find.byKey(const Key('push-submit')));
+    await _settle(tester);
+    expect(pushBodies(w), [
+      {
+        'site': 'hdsky',
+        'torrent_id': '101',
+        'downloader_id': 1,
+        'title': resultA,
+        'category': 'docs',
+        'tags': 'a,b',
+        'save_path': '/mnt/new',
+      },
+    ]);
+
+    await tester.tap(find.byTooltip('推送到下载器').first);
+    await _settle(tester);
+    await tapInSheet(tester, find.byKey(const ValueKey('push-downloader-2')));
+    expect(find.byKey(const Key('push-category')), findsNothing);
+    expect(find.text('Transmission 没有分类，可以用标签归类'), findsOneWidget);
+  });
+
+  testWidgets('搜索：读不到分类与标签时写明原因，点重试再读；读不到也能推送', (tester) async {
+    final w = await _pumpApp(
+      tester,
+      mobileFeatures: true,
+      labels: true,
+      downloaders: _pushDownloaders,
+    );
+    w.failLabels = 1;
+    await _settle(tester);
+    await searchDune(tester);
+    await tester.tap(find.byTooltip('推送到下载器').first);
+    await _settle(tester);
+    expect(find.text('没读到分类与标签：读取下载器 qb 的分类与标签失败: EOF'), findsOneWidget);
+    expect(find.byKey(const ValueKey('push-tag-hd')), findsNothing);
+    expect(find.byKey(const Key('push-category')), findsOneWidget);
+    await tapInSheet(tester, find.text('重试'));
+    await _settle(tester);
+    expect(find.byKey(const ValueKey('push-tag-hd')), findsOneWidget);
+    expect(find.textContaining('没读到分类与标签'), findsNothing);
   });
 
   testWidgets('撤销：连接条提示重新配对，点了回到配对页', (tester) async {

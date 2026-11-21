@@ -66,6 +66,7 @@ part 'model/app_config_state.dart';
 part 'model/app_delta.dart';
 part 'model/app_downloader.dart';
 part 'model/app_downloader_failure.dart';
+part 'model/app_downloader_labels.dart';
 part 'model/app_downloader_list.dart';
 part 'model/app_downloader_seeding.dart';
 part 'model/app_downloader_seeding_list.dart';

@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/version"
 )
 
@@ -136,6 +139,123 @@ func (s *Server) appDownloaderSeeding(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	appJSON(w, out)
+}
+
+// AppDownloaderLabels 是 GET /downloaders/{id}/labels：一台启用的下载器现有的分类与标签，App 推送时给用户选。
+// 不含地址、账号与密码。
+type AppDownloaderLabels struct {
+	DownloaderID uint   `json:"downloader_id"`
+	Downloader   string `json:"downloader"`
+	Type         string `json:"type"`
+	// SupportsCategory 为假时这台下载器没有分类（Transmission 只有 labels：推送时给的分类会写成第一个 label），Categories 是空的
+	SupportsCategory bool `json:"supports_category"`
+	// Categories 是 qBittorrent 里建好的分类加上种子上用到的分类
+	Categories []string `json:"categories"`
+	// Tags 是种子上用到的标签（Transmission 是 labels）
+	Tags []string `json:"tags"`
+}
+
+// appDownloaderLabelsTimeout 是 /downloaders/{id}/labels 最多等多久（要读整个种子列表）。
+const appDownloaderLabelsTimeout = 15 * time.Second
+
+// appDownloaderLabels 是 GET /downloaders/{id}/labels：读这台下载器的种子列表，汇总上面的分类与标签
+// （和网页的 /api/downloader-torrents/meta 同一个口径，只看一台）。到了时限还没读完时回 504，不挂住。
+func (s *Server) appDownloaderLabels(w http.ResponseWriter, r *http.Request) {
+	id, ok := appID(w, r)
+	if !ok {
+		return
+	}
+	if global.GlobalDB == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")
+		return
+	}
+	var ds models.DownloaderSetting
+	if err := global.GlobalDB.DB.WithContext(r.Context()).Where("id = ? AND enabled = ?", id, true).Limit(1).Find(&ds).Error; err != nil {
+		appError(w, http.StatusInternalServerError, "internal", "读取下载器失败: "+appRedact(err.Error()))
+		return
+	}
+	if ds.ID == 0 {
+		appError(w, http.StatusNotFound, "not_found", "下载器不存在或没有启用")
+		return
+	}
+	dm := s.getDownloaderManager()
+	if dm == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "下载器管理器没有初始化")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), appDownloaderLabelsTimeout)
+	defer cancel()
+	type result struct {
+		labels AppDownloaderLabels
+		err    error
+	}
+	// 种子列表的请求不带 ctx：放在后台读，到了时限就不等它（它有自己的超时）
+	done := make(chan result, 1)
+	go func() {
+		labels, err := downloaderLabelsOf(ctx, dm, ds)
+		done <- result{labels, err}
+	}()
+	select {
+	case res := <-done:
+		if res.err != nil {
+			appError(w, http.StatusBadGateway, "upstream", "读取下载器 "+ds.Name+" 的分类与标签失败: "+appRedactAddr(res.err.Error()))
+			return
+		}
+		appJSON(w, res.labels)
+	case <-ctx.Done():
+		appError(w, http.StatusGatewayTimeout, "timeout", "没有在时限内读到下载器 "+ds.Name+" 的种子列表")
+	}
+}
+
+// downloaderLabelsOf 读一台下载器的种子列表，汇总分类与标签（去掉空的与重复的，排好序）。
+// 只有 qBittorrent 有分类：它建好、没有种子用的分类也列出（读不到时只用种子上的）；Transmission 的 labels 都算标签。
+func downloaderLabelsOf(ctx context.Context, dm *downloader.DownloaderManager, ds models.DownloaderSetting) (AppDownloaderLabels, error) {
+	out := AppDownloaderLabels{
+		DownloaderID: ds.ID, Downloader: ds.Name, Type: ds.Type,
+		SupportsCategory: ds.Type == string(downloader.DownloaderQBittorrent),
+	}
+	dl, err := acquireDownloader(ctx, dm, ds.Name)
+	if err != nil {
+		return out, err
+	}
+	torrents, err := dl.GetAllTorrents()
+	if err != nil {
+		return out, err
+	}
+	categories, tags := map[string]struct{}{}, map[string]struct{}{}
+	if out.SupportsCategory {
+		if names, err := dl.GetClientLabels(); err != nil {
+			global.GetSlogger().Warnf("[App API] 读取下载器 %s 建好的分类失败，只列种子上用到的: %v", ds.Name, err)
+		} else {
+			for _, name := range names {
+				if strings.TrimSpace(name) != "" {
+					categories[name] = struct{}{}
+				}
+			}
+		}
+	}
+	for _, t := range torrents {
+		if out.SupportsCategory && strings.TrimSpace(t.Category) != "" {
+			categories[t.Category] = struct{}{}
+		}
+		for _, tag := range strings.Split(t.Tags, ",") {
+			if tag = strings.TrimSpace(tag); tag != "" {
+				tags[tag] = struct{}{}
+			}
+		}
+	}
+	out.Categories, out.Tags = sortedNames(categories), sortedNames(tags)
+	return out, nil
+}
+
+// sortedNames 是 set 里的名字，排好序；一个也没有时是空数组（JSON 里是 []，不是 null）。
+func sortedNames(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for name := range set {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // appUpdates 是 GET /updates：有没有新版本（include_prerelease=1 时也报预览版）。只读，不会升级。

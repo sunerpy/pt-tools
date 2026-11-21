@@ -841,6 +841,198 @@ abstract class S {
   /// **'没有推送：{message}'**
   String pushBlocked(String message);
 
+  /// No description provided for @pushDownloader.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载器'**
+  String get pushDownloader;
+
+  /// No description provided for @pushSavePath.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存目录'**
+  String get pushSavePath;
+
+  /// No description provided for @pushSavePathHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'留空用下载器的默认目录'**
+  String get pushSavePathHint;
+
+  /// No description provided for @pushPathDefault.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载器默认'**
+  String get pushPathDefault;
+
+  /// No description provided for @pushDirsFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没读到预设目录：{message}'**
+  String pushDirsFailed(String message);
+
+  /// No description provided for @pushCategory.
+  ///
+  /// In zh, this message translates to:
+  /// **'分类'**
+  String get pushCategory;
+
+  /// No description provided for @pushCategoryHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'不填就不设分类'**
+  String get pushCategoryHint;
+
+  /// No description provided for @pushNoCategory.
+  ///
+  /// In zh, this message translates to:
+  /// **'Transmission 没有分类，可以用标签归类'**
+  String get pushNoCategory;
+
+  /// No description provided for @pushTags.
+  ///
+  /// In zh, this message translates to:
+  /// **'标签'**
+  String get pushTags;
+
+  /// No description provided for @pushTagsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'新标签，多个用逗号隔开'**
+  String get pushTagsHint;
+
+  /// No description provided for @pushTagAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'加上这些标签'**
+  String get pushTagAdd;
+
+  /// No description provided for @pushLabelsLoading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在读取下载器里的分类与标签…'**
+  String get pushLabelsLoading;
+
+  /// No description provided for @pushLabelsFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没读到分类与标签：{message}'**
+  String pushLabelsFailed(String message);
+
+  /// No description provided for @pushSubmit.
+  ///
+  /// In zh, this message translates to:
+  /// **'推送'**
+  String get pushSubmit;
+
+  /// No description provided for @sortTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'排序'**
+  String get sortTitle;
+
+  /// No description provided for @sortDescending.
+  ///
+  /// In zh, this message translates to:
+  /// **'降序'**
+  String get sortDescending;
+
+  /// No description provided for @sortAscending.
+  ///
+  /// In zh, this message translates to:
+  /// **'升序'**
+  String get sortAscending;
+
+  /// No description provided for @sortDefaultOrder.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认顺序'**
+  String get sortDefaultOrder;
+
+  /// No description provided for @sortAddedAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加时间'**
+  String get sortAddedAt;
+
+  /// No description provided for @sortCompletedAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'完成时间'**
+  String get sortCompletedAt;
+
+  /// No description provided for @sortName.
+  ///
+  /// In zh, this message translates to:
+  /// **'标题'**
+  String get sortName;
+
+  /// No description provided for @sortSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'体积'**
+  String get sortSize;
+
+  /// No description provided for @sortProgress.
+  ///
+  /// In zh, this message translates to:
+  /// **'进度'**
+  String get sortProgress;
+
+  /// No description provided for @sortRatio.
+  ///
+  /// In zh, this message translates to:
+  /// **'分享率'**
+  String get sortRatio;
+
+  /// No description provided for @sortUploadSpeed.
+  ///
+  /// In zh, this message translates to:
+  /// **'上传速度'**
+  String get sortUploadSpeed;
+
+  /// No description provided for @sortDownloadSpeed.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载速度'**
+  String get sortDownloadSpeed;
+
+  /// No description provided for @sortEta.
+  ///
+  /// In zh, this message translates to:
+  /// **'剩余时间'**
+  String get sortEta;
+
+  /// No description provided for @sortSeeds.
+  ///
+  /// In zh, this message translates to:
+  /// **'做种数'**
+  String get sortSeeds;
+
+  /// No description provided for @sortState.
+  ///
+  /// In zh, this message translates to:
+  /// **'状态'**
+  String get sortState;
+
+  /// No description provided for @sortUploadedAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'发布时间'**
+  String get sortUploadedAt;
+
+  /// No description provided for @sortLeechers.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载数'**
+  String get sortLeechers;
+
+  /// No description provided for @sortSnatched.
+  ///
+  /// In zh, this message translates to:
+  /// **'完成数'**
+  String get sortSnatched;
+
   /// No description provided for @defaultBadge.
   ///
   /// In zh, this message translates to:

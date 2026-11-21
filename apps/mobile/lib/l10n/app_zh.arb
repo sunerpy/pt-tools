@@ -289,6 +289,52 @@
       }
     }
   },
+  "pushDownloader": "下载器",
+  "pushSavePath": "保存目录",
+  "pushSavePathHint": "留空用下载器的默认目录",
+  "pushPathDefault": "下载器默认",
+  "pushDirsFailed": "没读到预设目录：{message}",
+  "@pushDirsFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "pushCategory": "分类",
+  "pushCategoryHint": "不填就不设分类",
+  "pushNoCategory": "Transmission 没有分类，可以用标签归类",
+  "pushTags": "标签",
+  "pushTagsHint": "新标签，多个用逗号隔开",
+  "pushTagAdd": "加上这些标签",
+  "pushLabelsLoading": "正在读取下载器里的分类与标签…",
+  "pushLabelsFailed": "没读到分类与标签：{message}",
+  "@pushLabelsFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "pushSubmit": "推送",
+  "sortTitle": "排序",
+  "sortDescending": "降序",
+  "sortAscending": "升序",
+  "sortDefaultOrder": "默认顺序",
+  "sortAddedAt": "添加时间",
+  "sortCompletedAt": "完成时间",
+  "sortName": "标题",
+  "sortSize": "体积",
+  "sortProgress": "进度",
+  "sortRatio": "分享率",
+  "sortUploadSpeed": "上传速度",
+  "sortDownloadSpeed": "下载速度",
+  "sortEta": "剩余时间",
+  "sortSeeds": "做种数",
+  "sortState": "状态",
+  "sortUploadedAt": "发布时间",
+  "sortLeechers": "下载数",
+  "sortSnatched": "完成数",
   "defaultBadge": "默认",
   "free": "免费",
   "hr": "H&R",

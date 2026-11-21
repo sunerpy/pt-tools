@@ -32,8 +32,8 @@ After pairing, the window in the web UI shows that the device is paired and the 
 | Page                       | Content                                                                                                                                                                                                       |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Overview                   | Uploaded, billed download, ratio, bonus, seeding and unread messages across enabled sites, today's numbers, downloader speeds and free space, and how many torrents each downloader is seeding and their size |
-| Torrents                   | Torrents in your downloaders, filtered by state or title; pause, resume, delete (with a confirmation, optionally with the data)                                                                               |
-| Search                     | Search all enabled sites and send a result to a downloader (with the usual disk-space and seeding-capacity checks)                                                                                            |
+| Torrents                   | Torrents in your downloaders, filtered by state or title, in the sort order you choose; pause, resume, delete (with a confirmation, optionally with the data)                                                 |
+| Search                     | Search all enabled sites and re-sort the results; when sending one, choose the downloader, save directory, category and tags (with the usual disk-space and seeding-capacity checks)                          |
 | Media                      | Subscriptions (progress, missing episodes, search now, pause, delete), recently added items, and Explore (trending, popular, search, subscribe directly)                                                      |
 | More → AI assistant        | Chat with the AI assistant built into pt-tools; devices with full control can confirm actions, see [AI assistant](assistant.md#in-the-app)                                                                    |
 | More → Sites               | Login status (days left before the inactivity limit), today's check-in, user data and unread messages; check in now                                                                                           |
@@ -49,6 +49,23 @@ Downloader seeding at the bottom of Overview shows the same figures as the card 
 Pull down on Explore to refresh it. It also reloads when you come back to it from another page, so a subscription you deleted in the web UI no longer shows as Subscribed.
 
 Read-only devices don't see write actions (pause, delete, send, check in, subscribe).
+
+## Sorting and push options
+
+- The first chip in the filter row of Torrents is the sort order (Date added with a down arrow by default). Tap it to choose the field (date added, date completed, title, size, progress, ratio, upload speed, download speed, time left, seeders, state) and Descending or Ascending. Tapping a field sorts by it and closes the panel; changing the direction applies at once. The host sorts the list before sending it, and the order stays when you change the state filter, filter by title, pull to refresh or the list refreshes on its timer.
+- Next to Free only on Search is the order of the results: Default order is the order the host returned, or sort by published time, seeders, leechers, snatched or size. The results are sorted on the phone without searching again; results without a published time stay at the end in both directions.
+- Both choices are saved on this phone and kept when you open the app again.
+
+The download button on a search result opens the push panel. The torrent is sent only when you tap Send; closing the panel sends nothing:
+
+| Item           | Contents                                                                                                                                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Downloader     | The default downloader is selected first; each one shows its free space, or Unreachable                                                                                                                                                                                                                                |
+| Save directory | Downloader default is selected first, which uses the downloader's own default directory (the same as the push dialog in the web UI); you can also pick one of the directories preset for the selected downloader under Downloader settings in the web UI (the one marked Default is listed first) or type another path |
+| Category       | The categories used by torrents in the downloader (plus categories created in qBittorrent that no torrent uses yet); tap one to select it and tap again to clear it, or type a new one. Transmission has no categories, so this item only says so                                                                      |
+| Tags           | The tags used by torrents in the downloader, several can be selected; type new tags in the field (separated by commas) and tap + to add them                                                                                                                                                                           |
+
+When you switch downloaders, the save directory goes back to Downloader default and tags picked from the previous downloader's list are dropped, while tags you typed stay. If the categories and tags can't be read, the panel says why and offers Retry; you can still send. When the host runs an older version there are no preset directories or existing categories and tags, and you type them yourself.
 
 ## Following shows, brush tasks and statistics sharing
 

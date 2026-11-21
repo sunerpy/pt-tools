@@ -6,10 +6,14 @@ import '../../../l10n/app_localizations.dart';
 import '../format.dart';
 import '../icons.dart';
 import '../providers.dart';
+import '../sorting.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/push_sheet.dart';
+import '../widgets/sort.dart';
 
-/// 搜索：多站搜索种子；完全控制的设备可以把结果推送到下载器（经磁盘空间与站点做种容量的检查）。
+/// 搜索：多站搜索种子，结果可以在手机上重新排（选过的排序记在本机）；完全控制的设备可以把结果推送到下载器，
+/// 推送时选下载器、保存目录、分类与标签（经磁盘空间与站点做种容量的检查）。
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({super.key});
 
@@ -58,63 +62,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         .read(downloadersProvider.future)
         .then((d) => d.items, onError: (_) => <AppDownloader>[]);
     if (!mounted) return;
-    final target = await showModalBottomSheet<AppDownloader?>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              title: Text(
-                s.pushTitle,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              subtitle: Text(
-                item.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            for (final d in downloaders)
-              ListTile(
-                leading: PtIcon(
-                  d.reachable ? PtGlyph.server : PtGlyph.serverOff,
-                  size: 20,
-                ),
-                title: Text(d.name),
-                subtitle: Text(
-                  [
-                    if (d.default_) s.defaultBadge,
-                    if (d.reachable)
-                      s.freeSpace(formatBytes(d.freeSpace))
-                    else
-                      s.downloaderUnreachable,
-                  ].join(' · '),
-                ),
-                onTap: () => Navigator.pop(context, d),
-              ),
-            if (downloaders.isEmpty)
-              ListTile(
-                title: Text(s.pushDefault),
-                onTap: () => Navigator.pop(context),
-              ),
-          ],
-        ),
-      ),
+    // 关掉面板是不推送；点「推送」才发
+    final options = await showPushSheet(
+      context,
+      title: item.title,
+      downloaders: downloaders,
     );
-    if (!mounted) return;
+    if (options == null || !mounted) return;
     try {
-      final r = await ref
-          .read(apiProvider)!
-          .push(
-            AppPushRequest(
-              site: item.site,
-              torrentId: item.torrentId,
-              downloaderId: target?.id,
-              title: item.title,
-            ),
-          );
+      final r = await ref.read(apiProvider)!.push(options.request(item));
       final msg = r == null
           ? s.errorPrefix('-')
           : r.skipped
@@ -135,6 +91,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final s = S.of(context);
     final canWrite = ref.watch(canWriteProvider);
     final r = _result;
+    final items = r == null
+        ? const <AppSearchItem>[]
+        : sortSearchItems(r.items, ref.watch(searchSortProvider));
     return Scaffold(
       appBar: AppBar(
         title: Text(s.navSearch),
@@ -159,20 +118,48 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     ),
                   ],
                 ),
-                Row(
-                  children: [
-                    FilterChip(
-                      label: Text(s.searchFreeOnly),
-                      selected: _freeOnly,
-                      onSelected: (v) => setState(() => _freeOnly = v),
-                    ),
-                    const Spacer(),
-                    if (r != null)
-                      Text(
-                        s.searchSites(r.sites.length, r.durationMs),
-                        style: Theme.of(context).textTheme.bodySmall,
+                // 两个块放不下（窄屏、字号大）时它们可以左右滑，不溢出；右边的站点数与用时用剩下的宽度，不够就截断
+                LayoutBuilder(
+                  builder: (context, c) => Row(
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: c.maxWidth),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              FilterChip(
+                                label: Text(s.searchFreeOnly),
+                                selected: _freeOnly,
+                                onSelected: (v) =>
+                                    setState(() => _freeOnly = v),
+                              ),
+                              const SizedBox(width: 8),
+                              SortChip(
+                                list: SortList.search,
+                                provider: searchSortProvider,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                  ],
+                      Expanded(
+                        child: r == null
+                            ? const SizedBox.shrink()
+                            : Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Text(
+                                  s.searchSites(r.sites.length, r.durationMs),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.end,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -185,11 +172,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           ? ErrorState(message: _error!, onRetry: _search)
           : r == null
           ? EmptyState(icon: PtGlyph.search, message: s.searchIntro)
-          : r.items.isEmpty
+          : items.isEmpty
           ? EmptyState(message: s.searchNoResults)
           : ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              itemCount: r.items.length + (r.errors.isEmpty ? 0 : 1),
+              itemCount: items.length + (r.errors.isEmpty ? 0 : 1),
               separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 if (r.errors.isNotEmpty && i == 0) {
@@ -209,7 +196,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     ),
                   );
                 }
-                final it = r.items[i - (r.errors.isEmpty ? 0 : 1)];
+                final it = items[i - (r.errors.isEmpty ? 0 : 1)];
                 return _ResultTile(
                   item: it,
                   canWrite: canWrite,

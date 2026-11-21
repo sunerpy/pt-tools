@@ -57,6 +57,8 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodGet, "/torrents", r, s.appTorrents},
 		{http.MethodGet, "/downloaders", r, s.appDownloaders},
 		{http.MethodGet, "/downloaders/seeding", r, s.appDownloaderSeeding},
+		// 一台下载器现有的分类与标签（推送时选）
+		{http.MethodGet, "/downloaders/{id}/labels", r, s.appDownloaderLabels},
 		{http.MethodGet, "/updates", r, s.appUpdates},
 		{http.MethodPost, "/torrents/actions", w, s.appTorrentActions},
 		// 搜索用 POST 传条件，但只读
@@ -358,7 +360,7 @@ type AppPrincipalV struct {
 }
 
 // appFeatures 是这个版本的 App API 提供的功能组。
-var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export", "brush_stats", "subscription_assist", "downloader_seeding"}
+var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export", "brush_stats", "subscription_assist", "downloader_seeding", "downloader_labels"}
 
 func (s *Server) appMeta(w http.ResponseWriter, r *http.Request) {
 	p := middleware.PrincipalFrom(r.Context())

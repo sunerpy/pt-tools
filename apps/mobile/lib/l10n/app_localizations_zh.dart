@@ -426,6 +426,106 @@ class SZh extends S {
   }
 
   @override
+  String get pushDownloader => '下载器';
+
+  @override
+  String get pushSavePath => '保存目录';
+
+  @override
+  String get pushSavePathHint => '留空用下载器的默认目录';
+
+  @override
+  String get pushPathDefault => '下载器默认';
+
+  @override
+  String pushDirsFailed(String message) {
+    return '没读到预设目录：$message';
+  }
+
+  @override
+  String get pushCategory => '分类';
+
+  @override
+  String get pushCategoryHint => '不填就不设分类';
+
+  @override
+  String get pushNoCategory => 'Transmission 没有分类，可以用标签归类';
+
+  @override
+  String get pushTags => '标签';
+
+  @override
+  String get pushTagsHint => '新标签，多个用逗号隔开';
+
+  @override
+  String get pushTagAdd => '加上这些标签';
+
+  @override
+  String get pushLabelsLoading => '正在读取下载器里的分类与标签…';
+
+  @override
+  String pushLabelsFailed(String message) {
+    return '没读到分类与标签：$message';
+  }
+
+  @override
+  String get pushSubmit => '推送';
+
+  @override
+  String get sortTitle => '排序';
+
+  @override
+  String get sortDescending => '降序';
+
+  @override
+  String get sortAscending => '升序';
+
+  @override
+  String get sortDefaultOrder => '默认顺序';
+
+  @override
+  String get sortAddedAt => '添加时间';
+
+  @override
+  String get sortCompletedAt => '完成时间';
+
+  @override
+  String get sortName => '标题';
+
+  @override
+  String get sortSize => '体积';
+
+  @override
+  String get sortProgress => '进度';
+
+  @override
+  String get sortRatio => '分享率';
+
+  @override
+  String get sortUploadSpeed => '上传速度';
+
+  @override
+  String get sortDownloadSpeed => '下载速度';
+
+  @override
+  String get sortEta => '剩余时间';
+
+  @override
+  String get sortSeeds => '做种数';
+
+  @override
+  String get sortState => '状态';
+
+  @override
+  String get sortUploadedAt => '发布时间';
+
+  @override
+  String get sortLeechers => '下载数';
+
+  @override
+  String get sortSnatched => '完成数';
+
+  @override
   String get defaultBadge => '默认';
 
   @override

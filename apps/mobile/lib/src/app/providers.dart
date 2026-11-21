@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../remote/connection.dart';
 import '../remote/host_record.dart';
 import 'brush_periods.dart';
+import 'sorting.dart';
 import 'storage.dart';
 
 /// App 的名字与版本（握手时告诉主机）。
@@ -169,24 +170,33 @@ final sitesProvider = FutureProvider.autoDispose<AppSiteList>((ref) async {
   return _need(await requireApi(ref).listSites());
 });
 
-/// 种子列表的筛选。
+/// 种子列表的筛选与排序（主机按 [sort] 排好再分页）。
 class TorrentQuery {
-  const TorrentQuery({this.state, this.q});
+  const TorrentQuery({this.state, this.q, this.sort = defaultTorrentSort});
   final String? state;
   final String? q;
+  final SortChoice sort;
   @override
   bool operator ==(Object other) =>
-      other is TorrentQuery && other.state == state && other.q == q;
+      other is TorrentQuery &&
+      other.state == state &&
+      other.q == q &&
+      other.sort == sort;
   @override
-  int get hashCode => Object.hash(state, q);
+  int get hashCode => Object.hash(state, q, sort);
 }
 
 final torrentsProvider = FutureProvider.autoDispose
     .family<AppTorrentPage, TorrentQuery>((ref, query) async {
       ref.watch(onlineEpochProvider);
       return _need(
-        await requireApi(ref)
-            .listTorrents(state: query.state, q: query.q, pageSize: 200),
+        await requireApi(ref).listTorrents(
+          state: query.state,
+          q: query.q,
+          sort: query.sort.field,
+          order: query.sort.order,
+          pageSize: 200,
+        ),
       );
     });
 
