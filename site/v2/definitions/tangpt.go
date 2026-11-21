@@ -30,6 +30,10 @@ var TangPTDefinition = &v2.SiteDefinition{
 				Assertion:     map[string]string{"id": "params.id"},
 				Fields:        []string{"uploaded", "downloaded", "levelName", "joinTime", "lastAccessAt"},
 			},
+			{
+				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
+				Fields:        []string{"bonusPerHour"},
+			},
 		},
 		Selectors: map[string]v2.FieldSelector{
 			"id": {
@@ -95,6 +99,18 @@ var TangPTDefinition = &v2.SiteDefinition{
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
 					{Name: "parseTime"},
+				},
+			},
+			// 时魔取魔力值页「每小时获得的合计魔力值」表格的合计（基本奖励 + 勋章加成 + 官种加成 + 后宫加成）。
+			// 2026-11-21 在站点上核对：上方「你当前每小时能获取X个魔力值」只是基本奖励的基础魔力，合计还要乘上
+			// 基本奖励与各项加成的系数，可能差好几倍；那句话在表格前面，不能和合计写成交替（正则取最左匹配）。
+			// 表头简体「合计」、繁体「合計」、英文「Total」（上游 resources/lang/*/bonus.php）。
+			"bonusPerHour": {
+				Selector: []string{"#outer", "body"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:合计|合計|Total)</td>.*?<td rowspan="\d+">([\d.,]+)</td>`}},
+					{Name: "parseNumber"},
 				},
 			},
 			"seeding": {
