@@ -287,7 +287,9 @@ func (d *NexusPHPDriver) PrepareSearch(query SearchQuery) (NexusPHPRequest, erro
 	if query.Category != "" {
 		params.Set("cat", query.Category)
 	}
-	if query.FreeOnly {
+	if v, ok := d.brushDiscountFilter(query.BrushDiscount); ok {
+		params.Set("spstate", v) // 刷流按优惠类型读的列表：站点定义里核实过的筛选值
+	} else if query.FreeOnly {
 		params.Set("spstate", "2") // Free torrents in NexusPHP
 	}
 	if query.Page > 0 {
@@ -300,6 +302,14 @@ func (d *NexusPHPDriver) PrepareSearch(query SearchQuery) (NexusPHPRequest, erro
 		Method:         "GET",
 		FillPromotions: d.promotionAJAX() != nil,
 	}, nil
+}
+
+// brushDiscountFilter 是站点定义里这一种优惠的列表筛选值（BrushList.DiscountFilters）；没有站点定义或者没写这一类时 ok 为假。
+func (d *NexusPHPDriver) brushDiscountFilter(lv DiscountLevel) (string, bool) {
+	if d.siteDefinition == nil {
+		return "", false
+	}
+	return d.siteDefinition.BrushList.DiscountFilter(lv)
 }
 
 // Execute performs the HTTP request
@@ -687,13 +697,51 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		items = append(items, item)
 	})
 
-	// 一个种子都没读到、没有列表的行、页面又不像登录以后的站点页面：站点回的是别的页面（拦截、维护、验证……），
-	// 报出来并写上标题，不当成「列表是空的」（刷流会记成成功、列表 0 个，看不出出了什么事）。搜不到东西的正常页面
-	// 照样有顶部的用户信息栏，不受影响
-	if len(items) == 0 && res.Document.Find(d.Selectors.TableRows).Length() == 0 && !looksSignedIn(res.Document) {
-		return nil, unexpectedPageError(res.Document)
+	if len(items) == 0 && res.Document.Find(d.Selectors.TableRows).Length() == 0 {
+		// 站点限了访问频率（HDSky 回标题为 403 的页面：「请求过于频繁，限制访问间隔 60 秒/次」）：报限流并带上原文，
+		// 调用方这一轮不再请求这个站点；限流不重试（见 retryTransient）。只认不带用户信息栏的提示页：登录以后的页面
+		// 在公告里写着这句话时仍是「列表空了」，不能当成限流（HDSky 的 2X 免费列表平时就是空的）
+		if !looksSignedIn(res.Document) && rateLimitedPage(res.Document) {
+			return nil, rateLimitedPageError(res.Document)
+		}
+		// 一个种子都没读到、没有列表的行、页面又不像登录以后的站点页面：站点回的是别的页面（拦截、维护、验证……），
+		// 报出来并写上标题，不当成「列表是空的」（刷流会记成成功、列表 0 个，看不出出了什么事）。搜不到东西的正常页面
+		// 照样有顶部的用户信息栏，不受影响
+		if !looksSignedIn(res.Document) {
+			return nil, unexpectedPageError(res.Document)
+		}
 	}
 	return items, nil
+}
+
+// nexusRateLimitTexts 是站点限了访问频率时页面上的话（HDSky：「请求过于频繁，限制访问间隔 60 秒/次」），简繁两种写法。
+var nexusRateLimitTexts = []string{"请求过于频繁", "請求過於頻繁"}
+
+// rateLimitScanLimit 是认限流页时看页面上前多少个字（看得见的，不含脚本与样式）。
+const rateLimitScanLimit = 2000
+
+// rateLimitedPage 报告页面上看得见的文字里有没有 nexusRateLimitTexts。脚本、样式里的不算，
+// 只有标题 403 的普通拒绝页也不算。调用方另外要求页面不像登录以后的站点页面。
+func rateLimitedPage(doc *goquery.Document) bool {
+	body := doc.Find("body").First()
+	if body.Length() == 0 {
+		return false
+	}
+	text := visibleText(body.Nodes[0], rateLimitScanLimit)
+	for _, s := range nexusRateLimitTexts {
+		if strings.Contains(text, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// rateLimitedPageError 是限流页的错误：包着 ErrRateLimited，写上页面的标题与开头的文字（站点的原话）。
+func rateLimitedPageError(doc *goquery.Document) error {
+	if s := pageSummary(doc); s != "" {
+		return fmt.Errorf("%w：站点限制了访问频率（%s）", ErrRateLimited, s)
+	}
+	return fmt.Errorf("%w：站点限制了访问频率", ErrRateLimited)
 }
 
 // looksSignedIn 报告页面像不像登录以后的站点页面：有退出登录、个人信息、控制面板、站内信的链接，或者顶部的用户信息栏。
@@ -704,9 +752,16 @@ func looksSignedIn(doc *goquery.Document) bool {
 // unexpectedPageTextLimit 是错误里写的页面开头文字最多多少个字。
 const unexpectedPageTextLimit = 80
 
-// unexpectedPageError 说明站点回了别的页面：写上标题与正文开头的一段文字（不含脚本与样式，都截短），
-// 看得出是拦截、维护还是验证页。
+// unexpectedPageError 说明站点回了别的页面：写上标题与正文开头的一段文字（见 pageSummary），看得出是拦截、维护还是验证页。
 func unexpectedPageError(doc *goquery.Document) error {
+	if s := pageSummary(doc); s != "" {
+		return fmt.Errorf("%w（%s）", ErrUnexpectedPage, s)
+	}
+	return ErrUnexpectedPage
+}
+
+// pageSummary 是页面的标题与正文开头的一段文字（不含脚本与样式，都截短），写进错误里看得出站点回的是哪一页；都没有时为空。
+func pageSummary(doc *goquery.Document) string {
 	var text string
 	if body := doc.Find("body").First(); body.Length() > 0 {
 		text = visibleText(body.Nodes[0], unexpectedPageTextLimit)
@@ -718,10 +773,7 @@ func unexpectedPageError(doc *goquery.Document) error {
 	if text != "" {
 		parts = append(parts, "开头："+text)
 	}
-	if len(parts) == 0 {
-		return ErrUnexpectedPage
-	}
-	return fmt.Errorf("%w（%s）", ErrUnexpectedPage, strings.Join(parts, "；"))
+	return strings.Join(parts, "；")
 }
 
 // visibleText 是 n 下面看得见的文字（跳过脚本、样式），各段之间空一格，截到 limit 个字。

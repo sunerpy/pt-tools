@@ -325,6 +325,10 @@ type SearchQuery struct {
 	OrderDesc bool `json:"orderDesc,omitempty"`
 	// Section 是站点分区：M-Team 取 normal（综合区）或 adult（成人区），空值按 normal；其他站点忽略
 	Section string `json:"section,omitempty"`
+	// BrushDiscount 只给刷流用：让站点只列这一种优惠的种子（按优惠类型各读一张列表）。NexusPHP 按站点定义的
+	// BrushList.DiscountFilters 换成 spstate，优先于 FreeOnly；站点定义里没有这一类时不加筛选。别的驱动不看它，
+	// 也不从接口的 JSON 里读。
+	BrushDiscount DiscountLevel `json:"-"`
 }
 
 // Validate validates the search query

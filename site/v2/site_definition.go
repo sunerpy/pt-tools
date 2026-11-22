@@ -137,6 +137,10 @@ func (d *SiteDefinition) Validate() error {
 		}
 	}
 
+	if d.BrushList != nil {
+		d.validateBrushList(addErr)
+	}
+
 	// === Schema-specific rules ===
 	if d.Schema.IsValid() {
 		d.validateSchemaSpecific(addErr)
@@ -399,6 +403,10 @@ type SiteDefinition struct {
 	// PromotionAJAX 是优惠状态不在页面里、由页面脚本另取的 NexusPHP 站点（HDWinG）：写了的站点搜索、取详情时
 	// 照页面脚本补上优惠图标与结束时间再解析（见 promotion_ajax.go）。没写的站点不受影响。
 	PromotionAJAX *PromotionAJAXConfig `json:"promotionAjax,omitempty"`
+
+	// BrushList 是核实过的刷流读列表能力：按优惠类型筛选列表的参数、能不能补读第 2 页、两次读列表至少隔多久（见 brush_list.go）。
+	// 没写的站点刷流照旧只读第 1 页。
+	BrushList *BrushListConfig `json:"brushList,omitempty"`
 
 	// CreateDriver is an optional custom driver factory for this site.
 	// If nil, the driver is created based on Schema field.

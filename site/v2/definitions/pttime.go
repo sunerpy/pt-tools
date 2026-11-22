@@ -207,6 +207,9 @@ var PTTimeDefinition = &v2.SiteDefinition{
 		SizeRegex:    `大小[：:]\s*(?:</?b>)*\s*([\d.]+)\s*(GB|MB|KB|TB)`,
 	},
 	LevelRequirements: pttimeLevelRequirements,
+	// 刷流读列表（2026-11-22 在已登录的浏览器里核实）：全部种子列表第 1 页与第 2 页（page=1）各约 60 个，只有置顶的两个重复。
+	// 按优惠类型筛选的列表没有核实，照旧读全部列表、在本地挑
+	BrushList: &v2.BrushListConfig{Paging: true},
 }
 
 // pttimeLevelRequirements 按站点「校验用户等级」页（action.php?type=vertify_class，2026-10-26 读）的等级规则：
