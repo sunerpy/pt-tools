@@ -123,3 +123,73 @@ func TestNexusPHPParseSearch_UnexpectedPage(t *testing.T) {
 	assert.Contains(t, err.Error(), strings.Repeat("长", pageTitleLimit)+"…")
 	assert.NotContains(t, err.Error(), strings.Repeat("字", unexpectedPageTextLimit+1))
 }
+
+// HDSky 限了访问频率时回标题为 403 的页面「请求过于频繁，限制访问间隔 60 秒/次」：认成限流并带上原文，不当成别的页面；
+// 繁体写法一样。普通的 403 页、只在脚本里出现这句话的页面、有种子的列表都不受影响。
+func TestNexusPHPParseSearch_RateLimitedPage(t *testing.T) {
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://example.test", Cookie: "c=1"})
+
+	hdsky := detectDoc(t, `<html><head><title>403</title></head><body>请求过于频繁，限制访问间隔 60 秒/次</body></html>`)
+	_, err := d.ParseSearch(NexusPHPResponse{Document: hdsky})
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.NotErrorIs(t, err, ErrUnexpectedPage)
+	assert.Contains(t, err.Error(), "页面标题：403")
+	assert.Contains(t, err.Error(), "请求过于频繁，限制访问间隔 60 秒/次")
+
+	trad := detectDoc(t, `<html><head><title>403</title></head><body><p>請求過於頻繁，限制訪問間隔 60 秒/次</p></body></html>`)
+	_, err = d.ParseSearch(NexusPHPResponse{Document: trad})
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Contains(t, err.Error(), "請求過於頻繁")
+
+	// 带用户信息栏的页面在公告里写着这句话：是登录以后的空列表，不是限流（HDSky 的 2X 免费列表平时就是空的，
+	// 当成限流会让每一轮都停读后面的列表）
+	signedIn := detectDoc(t, `<html><head><title>HDSky</title></head><body><div id="info_block"><a href="userdetails.php?id=1">me</a></div>
+<div class="notice">请求过于频繁，限制访问间隔 60 秒/次</div><h2>没有种子 :(</h2></body></html>`)
+	items, err := d.ParseSearch(NexusPHPResponse{Document: signedIn})
+	require.NoError(t, err, "登录以后的页面上的公告不算限流")
+	assert.Empty(t, items)
+
+	forbidden := detectDoc(t, `<html><head><title>403</title></head><body><h1>403 Forbidden</h1><hr><center>nginx</center></body></html>`)
+	_, err = d.ParseSearch(NexusPHPResponse{Document: forbidden})
+	require.ErrorIs(t, err, ErrUnexpectedPage, "普通的 403 页不是限流")
+	assert.NotErrorIs(t, err, ErrRateLimited)
+
+	inScript := detectDoc(t, `<html><head><title>HDSky :: 种子</title><script>var tip = "请求过于频繁";</script></head><body>
+<div id="info_block"><a href="userdetails.php?id=1">me</a></div><h2>没有种子 :(</h2></body></html>`)
+	items, err = d.ParseSearch(NexusPHPResponse{Document: inScript})
+	require.NoError(t, err, "脚本里的这句话不算")
+	assert.Empty(t, items)
+
+	withRows := detectDoc(t, `<html><body><table class="torrents"><tbody><tr><td>头</td></tr>
+<tr><td><img alt="M"></td><td><a href="details.php?id=7"><b>请求过于频繁 纪录片</b></a></td></tr></tbody></table></body></html>`)
+	items, err = d.ParseSearch(NexusPHPResponse{Document: withRows})
+	require.NoError(t, err, "有种子的列表不看这句话")
+	require.Len(t, items, 1)
+}
+
+// 限流页经 BaseSite 搜索：报 ErrRateLimited，只请求一次（限流不重试）。
+func TestNexusPHPSearch_RateLimitedPageNotRetried(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><head><title>403</title></head><body>请求过于频繁，限制访问间隔 60 秒/次</body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+	site := NewBaseSite(NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: srv.URL, Cookie: "c=1"}),
+		BaseSiteConfig{ID: "hdsky", Kind: SiteNexusPHP, RateLimit: 100, RateBurst: 100})
+	_, err := site.Search(context.Background(), SearchQuery{FreeOnly: true})
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Equal(t, 1, hits)
+}
+
+// 页面既没有标题也没有看得见的文字时，错误照样认得出是哪一类，只是不带页面的原话。
+func TestNexusPHPParseSearch_PageErrorsWithoutText(t *testing.T) {
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://example.test", Cookie: "c=1"})
+	_, err := d.ParseSearch(NexusPHPResponse{Document: detectDoc(t, `<html><head></head><body><script>var x = 1;</script></body></html>`)})
+	assert.Equal(t, ErrUnexpectedPage, err)
+
+	assert.EqualError(t, rateLimitedPageError(detectDoc(t, `<html><body></body></html>`)), "rate limited：站点限制了访问频率")
+	// 选不出 body 的文档（空的 Selection）不算限流页
+	assert.False(t, rateLimitedPage(&goquery.Document{Selection: &goquery.Selection{}}))
+}

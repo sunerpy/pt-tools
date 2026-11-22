@@ -307,6 +307,21 @@ func (b *BaseSite[Req, Res]) CurrentCookie() (string, bool) {
 	return "", false
 }
 
+// siteDefinitionDriver 是带着站点定义的驱动（NexusPHP、M-Team）。
+type siteDefinitionDriver interface {
+	GetSiteDefinition() *SiteDefinition
+}
+
+// BrushList 是驱动的站点定义里写的刷流读列表能力（见 BrushListOf）；驱动不带站点定义、或者定义里没写时为 nil。
+func (b *BaseSite[Req, Res]) BrushList() *BrushListConfig {
+	if d, ok := any(b.driver).(siteDefinitionDriver); ok {
+		if def := d.GetSiteDefinition(); def != nil {
+			return def.BrushList
+		}
+	}
+	return nil
+}
+
 // GetDriver returns the underlying driver (for testing purposes)
 func (b *BaseSite[Req, Res]) GetDriver() Driver[Req, Res] {
 	return b.driver

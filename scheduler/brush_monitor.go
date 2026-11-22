@@ -78,6 +78,9 @@ type BrushMonitorConfig struct {
 	Tick        time.Duration
 	// Location 是统计按天归档的时区，默认进程时区（time.Local）。
 	Location *time.Location
+	// Sleep 是两次读列表之间等站点要求的间隔（BrushList.MinInterval）用的，默认按真实时间等、ctx 结束时提前返回；
+	// 测试换成推进假时钟的。
+	Sleep func(ctx context.Context, d time.Duration) error
 }
 
 // BrushRunResult 是一轮运行的摘要，也是「立即运行」接口的返回值。
@@ -201,6 +204,9 @@ func NewBrushMonitor(cfg BrushMonitorConfig) *BrushMonitor {
 	}
 	if cfg.Push == nil {
 		cfg.Push = ptinternal.PushTorrentToDownloader
+	}
+	if cfg.Sleep == nil {
+		cfg.Sleep = brushSleep
 	}
 	root, cancel := context.WithCancel(context.Background())
 	return &BrushMonitor{
@@ -650,55 +656,7 @@ func withProgress(bt models.BrushTorrent, t downloader.Torrent) models.BrushTorr
 	return bt
 }
 
-// listBrushItems 读这一轮的种子列表。M-Team 按任务的分区读（两个都读时各读一次第一页、按种子编号去重）；
-// 只有一个分区读失败时另一个照常用，错误记进本轮结果；全都读失败才让这一轮失败。别的站点读一次。
-func (m *BrushMonitor) listBrushItems(ctx context.Context, site v2.Site, task models.BrushTask, res *BrushRunResult) ([]v2.TorrentItem, error) {
-	sections := brushSections(task, site.Kind())
-	freeOnly := brushListFreeOnly(task)
-	var items []v2.TorrentItem
-	var read []string
-	var failed []error
-	seen := map[string]bool{}
-	for _, section := range sections {
-		searchCtx, cancel := context.WithTimeout(ctx, brushSearchTimeout)
-		got, err := site.Search(searchCtx, v2.SearchQuery{FreeOnly: freeOnly, Section: section})
-		cancel()
-		if err != nil {
-			if len(sections) > 1 {
-				err = fmt.Errorf("%s: %w", brushSectionLabel(section), err)
-			}
-			failed = append(failed, err)
-			continue
-		}
-		read = append(read, brushSectionLabel(section))
-		for _, it := range got {
-			if seen[it.ID] {
-				continue
-			}
-			seen[it.ID] = true
-			items = append(items, it)
-		}
-	}
-	if len(read) == 0 {
-		if len(failed) == 1 {
-			return nil, fmt.Errorf("读取 %s 的种子列表失败: %w", task.SiteName, failed[0])
-		}
-		msgs := make([]string, 0, len(failed))
-		for _, err := range failed {
-			msgs = append(msgs, err.Error())
-		}
-		return nil, fmt.Errorf("读取 %s 的种子列表失败: %s", task.SiteName, strings.Join(msgs, "；"))
-	}
-	for _, err := range failed {
-		res.addError(fmt.Sprintf("读取 %s 的种子列表失败（%v），这一轮只用读到的分区", task.SiteName, err))
-	}
-	if site.Kind() == v2.SiteMTorrent {
-		res.Scope = "M-Team " + strings.Join(read, "、") + "第 1 页"
-	}
-	return items, nil
-}
-
-// admit 在限额之内从站点的免费列表里加种。
+// admit 在限额之内从站点的种子列表里加种（读哪些列表见 brushListPlan 与 listBrushItems）。
 func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl downloader.Downloader, active []models.BrushTorrent, byHash map[string]downloader.Torrent, res *BrushRunResult) error {
 	downloading := 0
 	var totalSize int64
@@ -729,31 +687,37 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 		return fmt.Errorf("站点 %s 未启用或未注册", task.SiteName)
 	}
 	// 这一轮列表的读取时间：只收免费的任务推送时以它为资格的「本次尝试」（直接问站点，不经搜索缓存）。
-	// 读两个分区时也只取一次、在读第一个之前：快照不能早于它，各取各的会让先读的分区的种子被闸门拒掉。
+	// 读几张列表、几页时也只取一次、在读第一张之前：快照不能早于它，各取各的会让先读的列表的种子被闸门拒掉。
 	searchAt := m.cfg.Clock.Now()
 	requireFree := brushRequiresFree(*task)
-	items, err := m.listBrushItems(ctx, site, *task, res)
-	if err != nil {
-		return err
-	}
-	res.Listed = len(items)
-	switch {
-	case res.Scope != "":
-		res.step(brushStepList, "读取 %s：%d 个", res.Scope, len(items))
-	case brushListFreeOnly(*task):
-		res.step(brushStepList, "读取 %s 的免费种子列表第 1 页：%d 个", task.SiteName, len(items))
-	default:
-		res.step(brushStepList, "读取 %s 的全部种子列表第 1 页（本地按优惠类型挑）：%d 个", task.SiteName, len(items))
-	}
 
 	var def *v2.SiteDefinition
 	if d, ok := v2.GetDefinitionRegistry().Get(task.SiteName); ok {
 		def = d
 	}
-	siteHR := def != nil && def.HREnabled
 	// 站点定义里没有 H&R 做种时长时用站点设置里填的（#727）：入场判断与删种保护都按它；上传量要求（#542）也一起读
-	hrSettingH := ptinternal.SiteHRSeedTimeH(task.SiteName)
-	hrRatio := ptinternal.SiteHRUploadRatio(task.SiteName)
+	picker := brushPicker{
+		task: task, def: def, siteHR: def != nil && def.HREnabled, byHash: byHash,
+		hrSettingH: ptinternal.SiteHRSeedTimeH(task.SiteName), hrRatio: ptinternal.SiteHRUploadRatio(task.SiteName),
+	}
+	plan := brushListPlan(*task, site.Kind(), v2.BrushListOf(site))
+	var need *brushNeed
+	if brushPlanPages(plan) {
+		// 补不补页看候选够不够：这里按锁外读到的「以前加过的」数，加种锁里还会重新读一次
+		seenBefore, err := m.repo.SeenSiteTorrentIDs(task.SiteName)
+		if err != nil {
+			return err
+		}
+		need = &brushNeed{slots: brushSlots(task, downloading), count: func(items []v2.TorrentItem) int {
+			return len(picker.pick(items, seenBefore, m.cfg.Clock.Now()).candidates)
+		}}
+	}
+	items, err := m.listBrushItems(ctx, site, *task, plan, need, res)
+	if err != nil {
+		return err
+	}
+	res.Listed = len(items)
+
 	// 同一站点的加种串行：「读已加过的种子 → 推送 → 记录」之间不能插进另一个任务的同一段，
 	// 否则两个任务会同时把同一个种子各加一份（库里另有 site_name+torrent_id 唯一约束兜底）
 	unlock := m.lockSite(task.SiteName)
@@ -763,63 +727,37 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 	if err != nil {
 		return err
 	}
-	candidates := make([]v2.TorrentItem, 0, len(items))
-	rejected := map[string]int{}
-	// rejectSteps 是逐个列出的不符合条件的种子（最多 brushRunMaxRejects 个），汇总之后再记
-	var rejectSteps []string
-	seenCount, inDLCount, rejectCount := 0, 0, 0
-	for _, it := range items {
-		if seen[it.ID] {
-			seenCount++
-			continue
-		}
-		if it.InfoHash != "" {
-			if _, inDL := byHash[strings.ToLower(it.InfoHash)]; inDL {
-				inDLCount++
-				continue
-			}
-		}
-		hr := brushHR{UploadRatio: hrRatio}
-		if it.HasHR || siteHR {
-			hr.SeedTimeH = v2.ResolveHRSeedTimeH(def, it.SizeBytes, hrSettingH)
-		}
-		ok, why := admitBrushItem(*task, it, siteHR, hr, now)
-		if ok {
-			candidates = append(candidates, it)
-			continue
-		}
-		rejected[why]++
-		rejectCount++
-		if len(rejectSteps) < brushRunMaxRejects {
-			rejectSteps = append(rejectSteps, it.Title+"："+why)
-		}
-	}
+	// 读列表可能用了几分钟（站点要求的间隔）：入场判断按现在的时间
+	picked := picker.pick(items, seen, m.cfg.Clock.Now())
+	candidates := picked.candidates
 	res.Eligible = len(candidates)
-	res.Rejected = sortedRejects(rejected)
+	res.Rejected = sortedRejects(picked.rejected)
 	sortBrushCandidates(candidates)
 	var counts []string
-	if seenCount > 0 {
-		counts = append(counts, fmt.Sprintf("以前加过的 %d 个", seenCount))
+	if picked.seenCount > 0 {
+		counts = append(counts, fmt.Sprintf("以前加过的 %d 个", picked.seenCount))
 	}
-	if inDLCount > 0 {
-		counts = append(counts, fmt.Sprintf("下载器里已有 %d 个", inDLCount))
+	if picked.inDLCount > 0 {
+		counts = append(counts, fmt.Sprintf("下载器里已有 %d 个", picked.inDLCount))
 	}
-	if rejectCount > 0 {
-		counts = append(counts, fmt.Sprintf("不符合条件 %d 个", rejectCount))
+	if picked.rejectCount > 0 {
+		counts = append(counts, fmt.Sprintf("不符合条件 %d 个", picked.rejectCount))
 	}
 	counts = append(counts, fmt.Sprintf("符合条件 %d 个", len(candidates)))
 	res.step(brushStepInfo, "%s", strings.Join(counts, "、"))
-	if rejectCount > 0 {
+	if picked.rejectCount > 0 {
 		res.step(brushStepReject, "%s", brushRejectReasons(res.Rejected))
-		for _, text := range rejectSteps {
+		for _, text := range picked.rejectSteps {
 			res.step(brushStepReject, "%s", text)
 		}
-		if rejectCount > len(rejectSteps) {
-			res.step(brushStepReject, "另有 %d 个不符合条件的种子没有逐个列出", rejectCount-len(rejectSteps))
+		if picked.rejectCount > len(picked.rejectSteps) {
+			res.step(brushStepReject, "另有 %d 个不符合条件的种子没有逐个列出", picked.rejectCount-len(picked.rejectSteps))
 		}
 	}
 
 	fetchFailures := 0
+	// tooLarge 是这一轮放不下的种子里最小的体积：不小于它的不用再下种子文件，也放不下（有效空间只会越来越少）
+	var tooLarge int64
 	for _, it := range candidates {
 		if ctx.Err() != nil {
 			res.stop("本轮时间用完")
@@ -833,6 +771,10 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 		if stop := brushLimitReached(task, downloading, totalSize, todayAdded, it.SizeBytes); stop != "" {
 			res.stop(stop)
 			return nil
+		}
+		if tooLarge > 0 && it.SizeBytes >= tooLarge {
+			res.addSkip(it.Title, fmt.Sprintf("体积 %s，不小于刚才放不下的 %s，跳过", brushGB(it.SizeBytes), brushGB(tooLarge)))
+			continue
 		}
 		data, err := m.fetchTorrent(ctx, site, it)
 		if err != nil {
@@ -862,10 +804,10 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 				return nil
 			}
 		}
-		hasHR := it.HasHR || siteHR
+		hasHR := it.HasHR || picker.siteHR
 		hrHours := 0
 		if hasHR {
-			hrHours = v2.ResolveHRSeedTimeH(def, size, hrSettingH)
+			hrHours = v2.ResolveHRSeedTimeH(def, size, picker.hrSettingH)
 		}
 		var freeEnd *time.Time
 		if !it.DiscountEndTime.IsZero() {
@@ -908,12 +850,20 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 			continue
 		}
 		if !pushRes.Success {
-			if pushRes.Status.IsFreeRejection() {
+			switch {
+			case pushRes.Status.IsFreeRejection():
 				// 这个种子的免费资格不够（快到期、结束时间未知）：跳过它，后面的种子不受影响
 				res.addSkip(it.Title, pushRes.Message)
 				continue
+			case pushRes.Status == ptinternal.PushStatusRejectedTooLarge:
+				// 这个种子放不下（加上它有效空间会低于保底线）：跳过它，后面更小的可能放得下
+				res.addSkip(it.Title, pushRes.Message)
+				if size > 0 && (tooLarge == 0 || size < tooLarge) {
+					tooLarge = size
+				}
+				continue
 			}
-			// 磁盘保护或站点容量闸门拒绝：后面的种子同样会被拒，停在这里
+			// 有效空间到了保底线、读不到空间，或者站点容量闸门拒绝：后面的种子同样会被拒，停在这里
 			res.stop("推送被拒绝：" + pushRes.Message)
 			return nil
 		}

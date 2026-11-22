@@ -414,6 +414,14 @@ var HDSkyDefinition = &v2.SiteDefinition{
 		DetailSubtitle:     "td.rowhead:contains('副标题') + td",
 	},
 	LevelRequirements: hdSkyNewLevelRequirements,
+	// 刷流读列表（2026-11-22 在已登录的浏览器里核实）：全部种子列表第 1 页 50 个里只有 1 个有优惠，免费列表（spstate=2）
+	// 第 1 页 50 个都是免费，第 2 页（page=1，翻页参数从 0 起）又是 50 个、和第 1 页不重复；2X 免费列表是 spstate=4。
+	// 站点限制访问频率（标题 403 的「请求过于频繁，限制访问间隔 60 秒/次」页），两次读列表隔 61 秒
+	BrushList: &v2.BrushListConfig{
+		DiscountFilters: map[v2.DiscountLevel]string{v2.DiscountFree: "2", v2.Discount2xFree: "4"},
+		Paging:          true,
+		MinInterval:     61 * time.Second,
+	},
 }
 
 // HDSkyNewRequirementsDate is the date after which new level requirements apply

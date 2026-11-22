@@ -73,11 +73,134 @@ func brushAllowedDiscounts(task models.BrushTask) map[v2.DiscountLevel]bool {
 }
 
 // brushListFreeOnly 报告这一轮让站点只列免费种（NexusPHP 的 spstate=2、Unit3D 的 freeleech、Gazelle 的 freetorrent）：
-// 允许的优惠恰好只有「免费」时为真。勾了别的类型（默认就勾着 2X 免费）时读不带筛选的第一页，交给 admitBrushItem 在本地挑：
+// 允许的优惠恰好只有「免费」时为真。勾了别的类型（默认就勾着 2X 免费）时读不带筛选的列表，交给 admitBrushItem 在本地挑：
 // 站点的免费筛选只列「免费」，2X 免费、50% 这些读不到。M-Team 等不看这个标记、本来就在本地挑的站点不受影响。
+// 站点定义写了按优惠类型筛选的站点（HDSky）不走这里，见 brushListPlan。
 func brushListFreeOnly(task models.BrushTask) bool {
 	allowed := brushAllowedDiscounts(task)
 	return len(allowed) == 1 && allowed[v2.DiscountFree]
+}
+
+// brushList 是这一轮要读的一张种子列表。
+type brushList struct {
+	// name 是运行记录里的名字：「免费列表」「2x 免费列表」（按优惠类型读的）、「免费种子列表」「全部种子列表」；M-Team 是分区名
+	name  string
+	query v2.SearchQuery
+	// local 表示列表不按优惠筛选、在本地按优惠类型挑（运行记录里注明）
+	local bool
+	// pageable 表示候选不够时可以补读第 2 页（站点定义核实过能翻页）
+	pageable bool
+}
+
+// brushDiscountListNames 是按优惠类型读的列表在运行记录里的名字。
+var brushDiscountListNames = map[v2.DiscountLevel]string{
+	v2.DiscountFree: "免费列表", v2.Discount2xFree: "2x 免费列表", v2.DiscountPercent30: "30% 列表",
+	v2.DiscountPercent50: "50% 列表", v2.DiscountPercent70: "70% 列表", v2.Discount2xUp: "2x 上传列表", v2.Discount2x50: "2x 50% 列表",
+}
+
+// brushListPlan 是这一轮要读的列表，按读的顺序：
+//   - M-Team 按任务的分区读（见 brushSections），不补页；
+//   - 站点定义（BrushList.DiscountFilters）给全了任务允许的每一种优惠时，每种读一张，按 BrushDiscountLevels 的顺序
+//     （免费在前、2X 免费在后）；
+//   - 否则读一张：只允许「免费」时读免费种子列表，不然读全部种子列表、在本地挑。
+//
+// 站点定义写了 BrushList.Paging（核实过能翻页）的，这些列表在候选不够时可以补读第 2 页。
+func brushListPlan(task models.BrushTask, kind v2.SiteKind, spec *v2.BrushListConfig) []brushList {
+	if kind == v2.SiteMTorrent {
+		sections := brushSections(task, kind)
+		lists := make([]brushList, 0, len(sections))
+		for _, section := range sections {
+			lists = append(lists, brushList{
+				name: brushSectionLabel(section), query: v2.SearchQuery{FreeOnly: brushListFreeOnly(task), Section: section},
+			})
+		}
+		return lists
+	}
+	pageable := spec != nil && spec.Paging
+	allowed := brushAllowedDiscounts(task)
+	var lists []brushList
+	for _, lv := range BrushDiscountLevels {
+		if !allowed[lv] {
+			continue
+		}
+		if _, ok := spec.DiscountFilter(lv); !ok {
+			lists = nil
+			break
+		}
+		lists = append(lists, brushList{name: brushDiscountListNames[lv], query: v2.SearchQuery{BrushDiscount: lv}, pageable: pageable})
+	}
+	// 允许的优惠里有不在 BrushDiscountLevels 里的（库里的旧值）时也读全部列表：那一种没有筛选值
+	if len(lists) > 0 && len(lists) == len(allowed) {
+		return lists
+	}
+	if brushListFreeOnly(task) {
+		return []brushList{{name: "免费种子列表", query: v2.SearchQuery{FreeOnly: true}, pageable: pageable}}
+	}
+	return []brushList{{name: "全部种子列表", local: true, pageable: pageable}}
+}
+
+// brushPlanPages 报告计划里有没有能补页的列表。
+func brushPlanPages(plan []brushList) bool {
+	for _, l := range plan {
+		if l.pageable {
+			return true
+		}
+	}
+	return false
+}
+
+// brushPicker 按任务的入场条件从列表里挑候选（见 admitBrushItem）。补页时先用它数候选够不够，加种锁里再用它定候选。
+type brushPicker struct {
+	task *models.BrushTask
+	def  *v2.SiteDefinition
+	// siteHR 是站点定义的整站 H&R；hrSettingH、hrRatio 是站点设置里填的 H&R 做种要求（#727）与上传量达标（#542）
+	siteHR     bool
+	hrSettingH int
+	hrRatio    float64
+	// byHash 是任务当前下载器里的种子（键是小写的 info hash）
+	byHash map[string]downloader.Torrent
+}
+
+// brushPicked 是从列表里挑的结果。
+type brushPicked struct {
+	candidates []v2.TorrentItem
+	// rejected 是不符合条件的原因与个数；rejectSteps 是逐个列出的（最多 brushRunMaxRejects 个）
+	rejected    map[string]int
+	rejectSteps []string
+	// seenCount 是以前加过的，inDLCount 是下载器里已有的，rejectCount 是不符合条件的
+	seenCount, inDLCount, rejectCount int
+}
+
+// pick 挑出 items 里的候选：去掉 seen 里的（任何刷流任务在这个站点加过的）、下载器里已有的、不符合入场条件的。
+func (p brushPicker) pick(items []v2.TorrentItem, seen map[string]bool, now time.Time) brushPicked {
+	out := brushPicked{candidates: make([]v2.TorrentItem, 0, len(items)), rejected: map[string]int{}}
+	for _, it := range items {
+		if seen[it.ID] {
+			out.seenCount++
+			continue
+		}
+		if it.InfoHash != "" {
+			if _, inDL := p.byHash[strings.ToLower(it.InfoHash)]; inDL {
+				out.inDLCount++
+				continue
+			}
+		}
+		hr := brushHR{UploadRatio: p.hrRatio}
+		if it.HasHR || p.siteHR {
+			hr.SeedTimeH = v2.ResolveHRSeedTimeH(p.def, it.SizeBytes, p.hrSettingH)
+		}
+		ok, why := admitBrushItem(*p.task, it, p.siteHR, hr, now)
+		if ok {
+			out.candidates = append(out.candidates, it)
+			continue
+		}
+		out.rejected[why]++
+		out.rejectCount++
+		if len(out.rejectSteps) < brushRunMaxRejects {
+			out.rejectSteps = append(out.rejectSteps, it.Title+"："+why)
+		}
+	}
+	return out
 }
 
 // brushRequiresFree 报告任务只收免费优惠（允许的优惠全是免费级别）：推送要求免费。
