@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1](https://github.com/sunerpy/pt-tools/compare/v1.1.0...v1.1.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **brush:** HDSky 按勾的优惠类型各读一张列表，候选不够时补读第 2 页，放不下的种子跳过接着试 ([#925](https://github.com/sunerpy/pt-tools/issues/925)) ([1335edb](https://github.com/sunerpy/pt-tools/commit/1335edb136c443926e8c50d43b74c89742b76cc7))
+
 ## [1.1.0](https://github.com/sunerpy/pt-tools/compare/v1.0.0...v1.1.0) (2026-11-21)
 
 
