@@ -19,6 +19,7 @@ import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import { refreshAssistantStatus } from "@/composables/useAssistantStatus";
 import { useDataState } from "@/composables/useDataState";
 import { ASSISTANT_PROVIDERS, providerOf } from "@/utils/assistant";
 import { voiceUnavailable } from "@/utils/voiceRecorder";
@@ -186,6 +187,8 @@ async function save() {
   try {
     fill(await assistantApi.saveSettings(input()));
     ElMessage.success("已保存");
+    // 每一页右下角的悬浮按钮跟着开关出现或消失，不用刷新页面
+    void refreshAssistantStatus();
   } catch (e) {
     ElMessage.error(errText(e, "保存失败"));
   } finally {

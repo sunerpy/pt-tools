@@ -44,7 +44,7 @@ const dash = computed(() => `${(Math.min(pct.value, 100) / 100) * C} ${C}`);
           :stroke-dasharray="dash"
           transform="rotate(-90 9 9)" />
       </svg>
-      <span>{{ pct }}%</span>
+      <span class="as-meter__pct">{{ pct }}%</span>
     </button>
   </el-tooltip>
 </template>
@@ -109,5 +109,16 @@ const dash = computed(() => `${(Math.min(pct.value, 100) / 100) * C} ${C}`);
   flex-direction: column;
   gap: 2px;
   line-height: 1.6;
+}
+
+/* 手机上输入框那一行放不下数字：只画圆环，点一下看数字（提示是点开的） */
+@media (max-width: 768px) {
+  .as-meter {
+    padding: 0 6px;
+  }
+
+  .as-meter__pct {
+    display: none;
+  }
 }
 </style>
