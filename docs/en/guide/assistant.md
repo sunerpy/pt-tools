@@ -93,6 +93,16 @@ Answers appear as they are generated:
 
 You can click **Stop** while it answers; a conversation answers one question at a time.
 
+### Asking from any page
+
+Once the assistant is enabled, every page except the assistant page itself has a floating button in the bottom-right corner (on phones it sits above the bottom bar). It opens a floating chat window, so you can ask without leaving the page; the page stays usable while the window is open.
+
+- The window continues the conversation you opened last (one you viewed on the assistant page counts too); the first time, it starts a new chat. **New chat** at the top right starts another conversation.
+- **Full screen** at the top right opens the assistant page on the same conversation. The address is `#/assistant?c=<conversation ID>`, so a reload stays on that conversation.
+- Click the arrow at the top right or press Esc to collapse it; what you have typed is kept. If you collapse it while it is answering, a ring spins around the button; when an action is waiting for your confirmation, the button shows how many, and opening the window lets you confirm.
+- If the button covers something in the bottom-right corner (pagination, for example), hold it and drag it up or down; this browser remembers where you put it.
+- On phones the window slides up from the bottom; tap the strip above it to collapse it.
+
 ### Choosing the model and reasoning effort
 
 Two drop-downs under the input box apply to each message:
