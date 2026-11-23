@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2](https://github.com/sunerpy/pt-tools/compare/v1.1.1...v1.1.2) (2026-11-23)
+
+
+### Features
+
+* **assistant:** 每一页右下角都能唤起 AI 助手：悬浮按钮、悬浮对话窗，一键进全屏会话 ([#927](https://github.com/sunerpy/pt-tools/issues/927)) ([567b47c](https://github.com/sunerpy/pt-tools/commit/567b47c6f376ffc67c04d3b99b8f05cdc3792fe9))
+
 ## [1.1.1](https://github.com/sunerpy/pt-tools/compare/v1.1.0...v1.1.1) (2026-11-22)
 
 
