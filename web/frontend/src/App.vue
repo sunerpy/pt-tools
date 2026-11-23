@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import PtIcon from "./components/PtIcon";
+import AssistantFloat from "./components/assistant/AssistantFloat.vue";
 import AppNav from "./components/shell/AppNav.vue";
 import AppRail from "./components/shell/AppRail.vue";
 import AppStatusBar from "./components/shell/AppStatusBar.vue";
@@ -374,6 +375,9 @@ watch(
     </main>
 
     <AppStatusBar />
+
+    <!-- 每一页右下角的 AI 助手（启用以后才出现，对话页本身不放）：悬浮按钮 + 悬浮对话窗 -->
+    <AssistantFloat />
 
     <button
       v-if="navOpen"
