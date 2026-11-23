@@ -120,6 +120,7 @@ class FakeEventSource {
 
 let view: MountedView | null = null;
 beforeEach(() => {
+  localStorage.clear();
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal(
@@ -178,7 +179,7 @@ function detail(over: Record<string, unknown> = {}) {
   };
 }
 
-async function mountPage(enabled = true) {
+async function mountPage(enabled = true, path = "/") {
   api.status.mockResolvedValue({
     enabled,
     model: "deepseek-flash",
@@ -193,11 +194,12 @@ async function mountPage(enabled = true) {
       { path: "/assistant/settings", component: { template: "<div />" } },
     ],
   });
-  await router.push("/");
+  await router.push(path);
   view = mountView(Page, { router });
   await vi.waitFor(() => expect(api.status).toHaveBeenCalled());
   await flush();
   await flush();
+  return router;
 }
 
 describe("AI 助手对话页", () => {
@@ -684,5 +686,96 @@ describe("AI 助手对话页", () => {
     del!.click();
     await vi.waitFor(() => expect(api.removeAttachment).toHaveBeenCalledWith(50));
     await vi.waitFor(() => expect(q("as-attachments")).toBeNull());
+  });
+
+  it("地址里的 ?c=<编号> 打开这个会话（悬浮窗的「全屏」就是这样进来的）；打开着的会话写回地址、记成最近打开的会话", async () => {
+    const other = { ...conv, id: 9, title: "站点保号" };
+    api.conversations.mockResolvedValue([conv, other]);
+    api.conversation.mockImplementation((id: number) =>
+      Promise.resolve(detail({ id, title: id === 9 ? "站点保号" : conv.title })),
+    );
+    const router = await mountPage(true, "/?c=9");
+    await vi.waitFor(() => expect(api.conversation).toHaveBeenCalledWith(9));
+    expect(api.conversation).not.toHaveBeenCalledWith(7);
+    await vi.waitFor(() => expect(lastES().url).toBe("/events/9?after=500"));
+    expect(q("as-conv-9")!.getAttribute("aria-current")).toBe("true");
+    expect(localStorage.getItem("assistant-last-conversation")).toBe("9");
+
+    q("as-conv-7")!.click();
+    await vi.waitFor(() => expect(router.currentRoute.value.query.c).toBe("7"));
+    await vi.waitFor(() => expect(lastES().url).toBe("/events/7?after=500"));
+    expect(localStorage.getItem("assistant-last-conversation")).toBe("7");
+
+    // 手动改地址：跟着打开
+    await router.replace("/?c=9");
+    await vi.waitFor(() => expect(lastES().url).toBe("/events/9?after=500"));
+
+    q("as-new")!.click();
+    await vi.waitFor(() => expect(router.currentRoute.value.query.c).toBe("new"));
+    expect(q("as-hello")).not.toBeNull();
+  });
+
+  it("?c=new 是新对话（不打开最近的会话）；?c= 的会话已经删了就换成新对话，不报错", async () => {
+    api.conversations.mockResolvedValue([conv]);
+    api.conversation.mockResolvedValue(detail());
+    await mountPage(true, "/?c=new");
+    expect(q("as-hello")).not.toBeNull();
+    expect(api.conversation).not.toHaveBeenCalled();
+    view?.unmount();
+    view = null;
+
+    api.conversation.mockRejectedValue(new ApiError(404, "会话不存在"));
+    const router = await mountPage(true, "/?c=999");
+    await vi.waitFor(() => expect(api.conversation).toHaveBeenCalledWith(999));
+    await vi.waitFor(() => expect(router.currentRoute.value.query.c).toBe("new"));
+    expect(q("as-hello")).not.toBeNull();
+    expect(ui.error).not.toHaveBeenCalled();
+  });
+
+  it("删掉最近打开的会话：悬浮窗不再接着它", async () => {
+    const other = { ...conv, id: 9, title: "站点保号" };
+    api.conversations.mockResolvedValue([conv, other]);
+    api.conversation.mockResolvedValue(detail());
+    await mountPage();
+    await vi.waitFor(() => expect(localStorage.getItem("assistant-last-conversation")).toBe("7"));
+    api.remove.mockResolvedValue({ ok: true });
+    q("as-del-7")!.click();
+    await vi.waitFor(() => expect(api.remove).toHaveBeenCalledWith(7));
+    await vi.waitFor(() => expect(localStorage.getItem("assistant-last-conversation")).toBeNull());
+  });
+
+  it("手机上：回到会话列表以后再点刚才那个会话，回到对话", async () => {
+    const spy = vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes("max-width: 768px"),
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as MediaQueryList,
+    );
+    try {
+      api.conversations.mockResolvedValue([conv]);
+      api.conversation.mockResolvedValue(detail());
+      await mountPage();
+      // 手机上先列会话，不自动打开
+      expect(api.conversation).not.toHaveBeenCalled();
+      q("as-conv-7")!.click();
+      await vi.waitFor(() => expect(q("as-answer")).not.toBeNull());
+      expect(q("as-chat")!.style.display).toBe("");
+      q("as-back")!.click();
+      await flush();
+      expect(q("as-chat")!.style.display).toBe("none");
+      q("as-conv-7")!.click();
+      await flush();
+      expect(q("as-chat")!.style.display).toBe("");
+      expect(api.conversation, "同一个会话不重新读").toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

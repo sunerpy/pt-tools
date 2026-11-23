@@ -36,6 +36,8 @@ const props = defineProps<{
   usage?: AssistantUsage | null;
   /** 配了语音输入（Voltip） */
   voice?: boolean;
+  /** 悬浮窗里（约 440 宽）：模型与推理等级的下拉框照手机那一档收窄 */
+  compact?: boolean;
 }>();
 
 const model = defineModel<string>("model", { required: true });
@@ -51,8 +53,9 @@ const emit = defineEmits<{
 }>();
 
 const sender = ref<InstanceType<typeof XSender> | null>(null);
-/** 手机上一行放不下「推理：不思考」：只写等级，灯泡图标说明是推理 */
+/** 手机上与悬浮窗里一行放不下「推理：不思考」：只写等级，灯泡图标说明是推理 */
 const isMobile = useIsMobile();
+const narrow = computed(() => isMobile.value || props.compact);
 const fileInput = ref<HTMLInputElement | null>(null);
 const hasText = ref(false);
 const dragging = ref(false);
@@ -229,7 +232,7 @@ async function finishVoice() {
     const sep = /[A-Za-z0-9]$/.test(text()) && /^[A-Za-z0-9]/.test(got) ? " " : "";
     sender.value?.setText(sep + got);
     hasText.value = true;
-    sender.value?.focus("end");
+    sender.value?.focus("last");
   } catch (e) {
     ElMessage.error(e instanceof ApiError ? e.message : "识别失败");
   } finally {
@@ -277,14 +280,15 @@ defineExpose({
     sender.value?.setText(t);
     hasText.value = t.trim() !== "";
   },
-  focus: () => sender.value?.focus("end"),
+  /** 光标放到最后（XSender 只认 first / last / mark：以前传的 end 什么都不做） */
+  focus: () => sender.value?.focus("last"),
 });
 </script>
 
 <template>
   <div
     class="as-composer"
-    :class="{ 'is-dragging': dragging }"
+    :class="{ 'is-dragging': dragging, 'is-compact': compact }"
     data-testid="as-composer"
     @dragover.prevent="dragging = true"
     @dragleave.prevent="dragging = false"
@@ -378,7 +382,7 @@ defineExpose({
               v-for="o in EFFORT_OPTIONS"
               :key="o.value || 'default'"
               :value="o.value || 'default'"
-              :label="isMobile ? o.label : `推理：${o.label}`" />
+              :label="narrow ? o.label : `推理：${o.label}`" />
           </el-select>
         </div>
       </template>
@@ -772,7 +776,20 @@ defineExpose({
   }
 }
 
-/* 手机上回形针、模型、推理等级与发送要放在一行（390 宽的屏幕上输入框里约 266 宽） */
+/* 悬浮窗里与手机上一样：回形针、模型、推理等级与发送放在一行 */
+.as-composer.is-compact .as-model-select {
+  width: 124px;
+}
+
+.as-composer.is-compact .as-effort-select {
+  width: 92px;
+}
+
+/*
+ * 手机上回形针、模型、推理等级与发送要放在一行（390 宽的屏幕上输入框里约 266 宽）。
+ * 有上下文用量时更窄的屏幕放不下：推理等级折到第二行。这一行原来定死 34 高，折下去的那一半被裁掉、点不到，
+ * 所以手机上改成至少 34、按内容长高；用量在手机上只画圆环（AssistantUsageMeter），少占一些地方。
+ */
 @media (max-width: 768px) {
   .as-model-select {
     width: 124px;
@@ -780,6 +797,11 @@ defineExpose({
 
   .as-effort-select {
     width: 92px;
+  }
+
+  .as-composer .as-sender :deep(.elx-x-sender__content .elx-x-sender__prefix) {
+    height: auto;
+    min-height: 34px;
   }
 }
 </style>

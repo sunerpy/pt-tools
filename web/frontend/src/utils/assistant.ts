@@ -226,6 +226,56 @@ export interface ChatState {
   compacting: boolean;
 }
 
+/** 新对话（还没发第一条消息）的状态。 */
+export function emptyChatState(): ChatState {
+  return {
+    messages: [],
+    confirmations: [],
+    running: false,
+    runId: "",
+    partial: "",
+    partialReasoning: "",
+    tool: null,
+    lastSeq: 0,
+    error: "",
+    usage: null,
+    compacting: false,
+  };
+}
+
+/*
+ * 最近打开的会话：对话页与每一页右下角的悬浮窗共用，悬浮窗打开时接着它。
+ * 和导航收起、主题一样是这台浏览器自己的偏好，存在 localStorage；读不到或者不是正整数时当作没有。
+ */
+const LAST_CONVERSATION_KEY = "assistant-last-conversation";
+
+export function lastConversation(): number | null {
+  try {
+    const n = Number(localStorage.getItem(LAST_CONVERSATION_KEY));
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberConversation(id: number | null): void {
+  try {
+    if (id === null) localStorage.removeItem(LAST_CONVERSATION_KEY);
+    else localStorage.setItem(LAST_CONVERSATION_KEY, String(id));
+  } catch {
+    /* 存不了（隐私模式之类）就不记：悬浮窗打开时是新对话 */
+  }
+}
+
+/** 对话页地址里的 ?c=：会话编号，或者 new（新对话）；别的都当作没给（null）。 */
+export function conversationFromQuery(v: unknown): number | "new" | null {
+  const s = Array.isArray(v) ? v[0] : v;
+  if (s === "new") return "new";
+  if (typeof s !== "string" || !/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 export function chatStateFrom(d: AssistantConversationDetail): ChatState {
   return {
     messages: [...d.messages],
