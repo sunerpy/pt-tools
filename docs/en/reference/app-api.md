@@ -69,6 +69,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | POST   | `/media/history/{id}/retry`                   | Operate          | Organise the torrent of one history record again                              |
 | POST   | `/media/history/{id}/scrape`                  | Operate          | Scrape the movie or show of one history record again                          |
 | GET    | `/media/libraries`                            | Read             | Media libraries                                                               |
+| GET    | `/media/libraries/{id}/items`                 | Read             | Movies and shows organised into one library                                   |
 | POST   | `/media/recognize`                            | Read             | Recognise a torrent title                                                     |
 | POST   | `/media/organize/preview`                     | Read             | Preview organising a torrent in a downloader                                  |
 | POST   | `/media/organize`                             | Operate          | Organise a torrent in a downloader into a media library                       |
@@ -290,6 +291,12 @@ Scrapes the movie or show of this record again (every history record of the same
 ### GET /media/libraries
 
 One item per library: `id`, `name`, `kind` (`movie` or `tv`), `anime` (anime only), `path` (the library folder as pt-tools sees it), `mode` (organise mode; empty means the default from the organise settings), `scrape`, `classify_dir` (put files into sub-category folders), `overwrite_mode` (empty never replaces an old version, `larger` replaces it with a larger file) and `enabled`, plus the download settings filled in when creating a subscription: `download_downloader_id` (0 means none), `download_save_path`, `download_category` and `download_tags` (empty means none), see [download settings for new subscriptions](../guide/media-library.md#download-settings-for-new-subscriptions).
+
+### GET /media/libraries/{id}/items
+
+What has been organised into one library (`id` from `GET /media/libraries`; disabled libraries can be read too), merged by title: one item per movie and one per season of a show. Files organised into the library and [imported existing files](../guide/media-library.md#importing-an-existing-library) both count; failed, skipped and removed records, and records without a recognised title, do not. The most recently added come first, paged like the other lists (`page`, `page_size` up to 100). Each item has `media_type`, `tmdb_id`, `title` (the title recorded when organising, or TMDB's when none was recorded), `year`, `season` (0 for movies), `episodes` (the episode numbers in the library, ascending and without duplicates; an empty array for movies), `files` (how many files were organised), `size` (their total size), `poster_path` (TMDB's relative poster path, fetched with `GET /images/tmdb/{size}/{file}`; absent when it can't be read) and `latest_at` (when the latest file was added). No paths or torrent names.
+
+`q` searches the titles recorded when organising: an item is listed when one of its records has a title containing `q`, and `files`, `size` and `episodes` still cover the whole item; a title filled in from TMDB for display only is not searched. Posters come from TMDB (cached) with at most 8 seconds per page; items whose poster can't be read have no `poster_path`, and the response still succeeds. It responds with 404 when the library does not exist, and with 400 for a bad id, paging, or a `q` longer than 200 bytes. The endpoint exists when `features` from `GET /meta` contains `media_library`.
 
 ### POST /media/recognize
 
@@ -553,7 +560,7 @@ The same body as the preview. The change is worked out again from the current st
 
 ## Mobile editors and statistics export
 
-The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` and `stats_export`; period-based brush earnings ([`GET /brush/stats`](#get-brushstats)) are `brush_stats`; the subscription draft and trial search (see [Follow assistant](#follow-assistant) below) are `subscription_assist`; a downloader's categories and tags ([`GET /downloaders/{id}/labels`](#get-downloadersidlabels)) are `downloader_labels`. Clients prompt for an upgrade when a required feature is absent rather than falling back to session-only endpoints. The API compatibility level remains 1.
+The `features` returned by `GET /meta` include `mobile_editors`, `brush_manage` and `stats_export`; period-based brush earnings ([`GET /brush/stats`](#get-brushstats)) are `brush_stats`; the subscription draft and trial search (see [Follow assistant](#follow-assistant) below) are `subscription_assist`; a downloader's categories and tags ([`GET /downloaders/{id}/labels`](#get-downloadersidlabels)) are `downloader_labels`; what has been organised into a library ([`GET /media/libraries/{id}/items`](#get-medialibrariesiditems)) is `media_library`. Clients prompt for an upgrade when a required feature is absent rather than falling back to session-only endpoints. The API compatibility level remains 1.
 
 | Method | Path                            | Permission | Purpose                                                                                                                                                                                                                                   |
 | ------ | ------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

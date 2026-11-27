@@ -559,6 +559,28 @@ class SEn extends S {
   String get noHistory => 'Nothing organized yet';
 
   @override
+  String get tabLibrary => 'Library';
+
+  @override
+  String get noLibraries => 'No enabled libraries';
+
+  @override
+  String get libraryEmpty => 'Nothing has been organized into this library';
+
+  @override
+  String get librarySearchHint => 'Search titles';
+
+  @override
+  String libraryEpisodes(int count) {
+    return '$count episode(s)';
+  }
+
+  @override
+  String libraryFiles(int count) {
+    return '$count file(s)';
+  }
+
+  @override
   String get subActive => 'Active';
 
   @override

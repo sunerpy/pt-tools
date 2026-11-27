@@ -347,9 +347,19 @@ class _World {
     this.brushStats = false,
     this.downloaderSeeding = false,
     this.labels = false,
+    this.mediaLibrary = false,
     this.downloaders = const [],
   });
   final bool mobileFeatures;
+
+  /// 主机提供媒体库的内容（features 里有 media_library）
+  final bool mediaLibrary;
+
+  /// 媒体库内容：设了某个库的 Completer 时，这个库的请求等它完成才回（模拟回得慢）
+  final holdLibrary = <int, Completer<void>>{};
+
+  /// 剧集库那一项的片名（下拉刷新以后换一个，看列表是不是换成了新的）
+  String tvTitle = '最后生还者';
 
   /// 主机提供下载器的分类与标签（features 里有 downloader_labels）
   final bool labels;
@@ -423,6 +433,7 @@ class _World {
             if (brushStats) 'brush_stats',
             if (downloaderSeeding) 'downloader_seeding',
             if (labels) 'downloader_labels',
+            if (mediaLibrary) 'media_library',
           ],
       '/api/app/v1/overview' => _overview,
       '/api/app/v1/downloaders' => {'items': downloaders},
@@ -434,6 +445,21 @@ class _World {
         'downloader': 'qb',
       },
       '/api/app/v1/mobile/options' => _mobileOptions,
+      '/api/app/v1/media/libraries' => [
+        _library(2, '剧集', 'tv'),
+        _library(3, '电影', 'movie'),
+        _library(4, '旧电影', 'movie', enabled: false),
+        _library(5, '空库', 'movie'),
+      ],
+      final lp
+          when lp.startsWith('/api/app/v1/media/libraries/') &&
+              lp.endsWith('/items') =>
+        () {
+          final id = int.parse(lp.split('/')[6]);
+          final reply = _libraryItems(id, Uri.parse(path).queryParameters);
+          final hold = holdLibrary[id];
+          return hold == null ? reply : hold.future.then<Object?>((_) => reply);
+        }(),
       '/api/app/v1/downloaders/1/labels' when failLabels > 0 => () {
         failLabels--;
         return const ApiReply(502, {
@@ -634,6 +660,71 @@ class _World {
     };
   }
 
+  Map<String, Object?> _library(
+    int id,
+    String name,
+    String kind, {
+    bool enabled = true,
+  }) => {
+    'id': id,
+    'name': name,
+    'kind': kind,
+    'anime': false,
+    'path': '/medias/$name',
+    'mode': '',
+    'scrape': true,
+    'classify_dir': false,
+    'overwrite_mode': '',
+    'enabled': enabled,
+    'download_downloader_id': 0,
+    'download_save_path': '',
+    'download_category': '',
+    'download_tags': '',
+  };
+
+  /// 媒体库的内容：电影库 35 部（每页 30），剧集库一季，空库什么都没有；q 按片名筛
+  Map<String, Object?> _libraryItems(int id, Map<String, String> query) {
+    final all = <Map<String, Object?>>[
+      if (id == 2)
+        {
+          'media_type': 'tv',
+          'tmdb_id': 100088,
+          'title': tvTitle,
+          'year': 2023,
+          'season': 1,
+          'episodes': [1, 2, 3, 5],
+          'files': 4,
+          'size': 4 << 30,
+          'latest_at': 1795000000,
+        },
+      if (id == 3)
+        for (var i = 1; i <= 35; i++)
+          {
+            'media_type': 'movie',
+            'tmdb_id': 1000 + i,
+            'title': '电影 $i',
+            'year': 2000 + i,
+            'season': 0,
+            'episodes': <int>[],
+            'files': i == 1 ? 2 : 1,
+            'size': 1 << 30,
+            'latest_at': 1795000000 - i,
+          },
+    ];
+    final q = query['q'];
+    final hits = q == null
+        ? all
+        : all.where((it) => (it['title'] as String).contains(q)).toList();
+    final page = int.parse(query['page'] ?? '1');
+    final size = int.parse(query['page_size'] ?? '20');
+    return {
+      'items': hits.skip((page - 1) * size).take(size).toList(),
+      'total': hits.length,
+      'page': page,
+      'page_size': size,
+    };
+  }
+
   Future<MsgChannel> dial(Uri url, Duration timeout) async {
     final (dev, host) = Pipe.pair();
     final fake = FakeHost(host, hostKey, _hostId, mode: mode, api: api);
@@ -664,6 +755,7 @@ Future<_World> _pumpApp(
   bool brushStats = false,
   bool downloaderSeeding = false,
   bool labels = false,
+  bool mediaLibrary = false,
   List<Map<String, Object?>> downloaders = const [],
   HostStore? store,
   Future<void>? hostLoaded,
@@ -683,6 +775,7 @@ Future<_World> _pumpApp(
     brushStats: brushStats,
     downloaderSeeding: downloaderSeeding,
     labels: labels,
+    mediaLibrary: mediaLibrary,
     downloaders: downloaders,
   );
   // 和 main 一样：启动前读出选过的排序
@@ -1794,6 +1887,149 @@ void main() {
     await tester.tap(find.text('媒体'));
     await _settle(tester);
     expect(find.text('已订阅'), findsOneWidget);
+  });
+
+  /// 媒体 → 媒体库
+  Future<void> openLibrary(WidgetTester tester) async {
+    await tester.tap(find.text('媒体'));
+    await _settle(tester);
+    await tester.tap(find.text('媒体库'));
+    await _settle(tester);
+  }
+
+  /// 这个库的内容请求了第几页（带不带关键字）
+  bool askedPage(_World w, int lib, int page, {String? q}) =>
+      w.requests.any((r) {
+        if (!r.startsWith('GET /api/app/v1/media/libraries/$lib/items')) {
+          return false;
+        }
+        final qp = Uri.parse(r.substring(4)).queryParameters;
+        return qp['page'] == '$page' && qp['q'] == q;
+      });
+
+  testWidgets('媒体库：主机没有 media_library 时只有三个标签', (tester) async {
+    await _pumpApp(tester);
+    await _settle(tester);
+    await tester.tap(find.text('媒体'));
+    await _settle(tester);
+    expect(find.text('媒体库'), findsNothing);
+    expect(find.text('最近入库'), findsOneWidget);
+  });
+
+  testWidgets('媒体库：第二个标签；只列启用的库，默认第一个；剧集写集数与集号', (tester) async {
+    final w = await _pumpApp(tester, mediaLibrary: true);
+    await _settle(tester);
+    await tester.tap(find.text('媒体'));
+    await _settle(tester);
+    final x = [
+      '订阅',
+      '媒体库',
+      '最近入库',
+      '探索',
+    ].map((t) => tester.getCenter(find.widgetWithText(Tab, t)).dx).toList();
+    expect(x, orderedEquals([...x]..sort()), reason: '订阅、媒体库、最近入库、探索');
+    await tester.tap(find.text('媒体库'));
+    await _settle(tester);
+    expect(find.byKey(const Key('library-chip-2')), findsOneWidget);
+    expect(find.byKey(const Key('library-chip-3')), findsOneWidget);
+    expect(find.byKey(const Key('library-chip-5')), findsOneWidget);
+    expect(
+      find.byKey(const Key('library-chip-4')),
+      findsNothing,
+      reason: '停用的库不列',
+    );
+    expect(find.text('旧电影'), findsNothing);
+    expect(askedPage(w, 2, 1), isTrue, reason: '默认第一个启用的库');
+    expect(find.text('最后生还者 S01'), findsOneWidget);
+    expect(find.textContaining('4 集 · E01–E03, E05'), findsOneWidget);
+  });
+
+  testWidgets('媒体库：滑到底取下一页；搜索带关键字从第 1 页取；空库写明', (tester) async {
+    final w = await _pumpApp(tester, mediaLibrary: true);
+    await _settle(tester);
+    await openLibrary(tester);
+    await tester.tap(find.byKey(const Key('library-chip-3')));
+    await _settle(tester);
+    expect(askedPage(w, 3, 1), isTrue);
+    expect(find.text('电影 1'), findsOneWidget);
+    expect(
+      find.textContaining('2 个文件'),
+      findsOneWidget,
+      reason: '电影多于一个文件时写文件数',
+    );
+    expect(askedPage(w, 3, 2), isFalse, reason: '还没滑到底');
+
+    final list = find.byKey(const ValueKey<(int, String?)>((3, null)));
+    for (var i = 0; i < 8 && find.text('电影 35').evaluate().isEmpty; i++) {
+      await tester.drag(list, const Offset(0, -1500));
+      await _settle(tester, 4);
+    }
+    expect(askedPage(w, 3, 2), isTrue, reason: '滑到底取第 2 页');
+    expect(find.text('电影 35'), findsOneWidget, reason: '第 2 页接在后面');
+    expect(askedPage(w, 3, 3), isFalse, reason: '取完了不再要');
+
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const Key('library-search')),
+        matching: find.byType(TextField),
+      ),
+      '电影 3',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await _settle(tester);
+    expect(askedPage(w, 3, 1, q: '电影 3'), isTrue, reason: '带关键字，从第 1 页取');
+    // 搜索框里也是「电影 3」：只看列表里的
+    expect(find.widgetWithText(ListTile, '电影 3'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, '电影 30'), findsOneWidget);
+    expect(find.text('电影 1'), findsNothing, reason: '列表换成了搜索结果');
+
+    await tester.tap(find.byKey(const Key('library-chip-5')));
+    await _settle(tester);
+    expect(find.text('没有找到'), findsOneWidget, reason: '换库以后关键字还在');
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('library-search')),
+        matching: find.byType(IconButton),
+      ),
+    );
+    await _settle(tester);
+    expect(find.text('这个库里没有整理进来的内容'), findsOneWidget);
+  });
+
+  testWidgets('媒体库：下拉刷新从第 1 页重新取，换成新的结果', (tester) async {
+    final w = await _pumpApp(tester, mediaLibrary: true);
+    await _settle(tester);
+    await openLibrary(tester);
+    expect(find.text('最后生还者 S01'), findsOneWidget);
+    final before = w.requests
+        .where((r) => r.contains('/libraries/2/items'))
+        .length;
+    w.tvTitle = '最后生还者（新）';
+    await tester.fling(find.text('最后生还者 S01'), const Offset(0, 400), 1200);
+    await tester.pump();
+    await _settle(tester, 12);
+    expect(
+      w.requests.where((r) => r.contains('/libraries/2/items')).length,
+      greaterThan(before),
+    );
+    expect(askedPage(w, 2, 1), isTrue);
+    expect(find.text('最后生还者（新） S01'), findsOneWidget);
+    expect(find.text('最后生还者 S01'), findsNothing, reason: '旧的结果换掉了');
+  });
+
+  testWidgets('媒体库：换了库以后，旧库晚回来的结果不盖掉新的', (tester) async {
+    final w = await _pumpApp(tester, mediaLibrary: true);
+    w.holdLibrary[2] = Completer<void>();
+    await _settle(tester);
+    await openLibrary(tester);
+    expect(find.text('最后生还者 S01'), findsNothing, reason: '剧集库还没回');
+    await tester.tap(find.byKey(const Key('library-chip-3')));
+    await _settle(tester);
+    expect(find.text('电影 1'), findsOneWidget);
+    w.holdLibrary.remove(2)!.complete();
+    await _settle(tester);
+    expect(find.text('电影 1'), findsOneWidget, reason: '还是电影库');
+    expect(find.text('最后生还者 S01'), findsNothing);
   });
 
   for (final (on, group, res, line) in const [

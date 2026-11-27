@@ -83,6 +83,8 @@ part 'model/app_library_ref.dart';
 part 'model/app_media_history.dart';
 part 'model/app_media_history_page.dart';
 part 'model/app_media_library.dart';
+part 'model/app_media_library_item.dart';
+part 'model/app_media_library_item_page.dart';
 part 'model/app_media_match.dart';
 part 'model/app_media_meta.dart';
 part 'model/app_message.dart';

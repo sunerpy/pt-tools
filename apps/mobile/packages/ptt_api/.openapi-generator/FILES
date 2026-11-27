@@ -62,6 +62,8 @@ lib/model/app_library_ref.dart
 lib/model/app_media_history.dart
 lib/model/app_media_history_page.dart
 lib/model/app_media_library.dart
+lib/model/app_media_library_item.dart
+lib/model/app_media_library_item_page.dart
 lib/model/app_media_match.dart
 lib/model/app_media_meta.dart
 lib/model/app_message.dart
