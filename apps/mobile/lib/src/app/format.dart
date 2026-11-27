@@ -51,3 +51,29 @@ String formatEta(int seconds) {
   if (d.inMinutes > 0) return '${d.inMinutes}m';
   return '${d.inSeconds}s';
 }
+
+/// 媒体库里一季的集号：连续的合成一段（E01–E03），单集单写（E05），集号补两位；
+/// 最多写 3 段，超过时后面加「 …」。空的返回空串。
+String formatEpisodeRanges(List<int> episodes) {
+  final eps = episodes.where((e) => e > 0).toSet().toList()..sort();
+  if (eps.isEmpty) return '';
+  String ep(int n) => 'E${n.toString().padLeft(2, '0')}';
+  final segs = <String>[];
+  var start = eps.first;
+  var prev = start;
+  void flush() =>
+      segs.add(start == prev ? ep(start) : '${ep(start)}–${ep(prev)}');
+  for (final n in eps.skip(1)) {
+    if (n == prev + 1) {
+      prev = n;
+      continue;
+    }
+    flush();
+    start = prev = n;
+  }
+  flush();
+  const maxSegs = 3;
+  return segs.length > maxSegs
+      ? '${segs.take(maxSegs).join(', ')} …'
+      : segs.join(', ');
+}

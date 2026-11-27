@@ -343,6 +343,26 @@
   "tabExplore": "探索",
   "noSubscriptions": "没有订阅；可以在「探索」里订阅",
   "noHistory": "没有整理记录",
+  "tabLibrary": "媒体库",
+  "noLibraries": "没有启用的媒体库",
+  "libraryEmpty": "这个库里没有整理进来的内容",
+  "librarySearchHint": "搜索片名",
+  "libraryEpisodes": "{count} 集",
+  "@libraryEpisodes": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "libraryFiles": "{count} 个文件",
+  "@libraryFiles": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "subActive": "订阅中",
   "subPaused": "已暂停",
   "subPending": "等待中",

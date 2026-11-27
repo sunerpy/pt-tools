@@ -29,24 +29,26 @@ After pairing, the window in the web UI shows that the device is paired and the 
 
 ## What you can do
 
-| Page                       | Content                                                                                                                                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Overview                   | Uploaded, billed download, ratio, bonus, seeding and unread messages across enabled sites, today's numbers, downloader speeds and free space, and how many torrents each downloader is seeding and their size |
-| Torrents                   | Torrents in your downloaders, filtered by state or title, in the sort order you choose; pause, resume, delete (with a confirmation, optionally with the data)                                                 |
-| Search                     | Search all enabled sites and re-sort the results; when sending one, choose the downloader, save directory, category and tags (with the usual disk-space and seeding-capacity checks)                          |
-| Media                      | Subscriptions (progress, missing episodes, search now, pause, delete), recently added items, and Explore (trending, popular, search, subscribe directly)                                                      |
-| More → AI assistant        | Chat with the AI assistant built into pt-tools; devices with full control can confirm actions, see [AI assistant](assistant.md#in-the-app)                                                                    |
-| More → Sites               | Login status (days left before the inactivity limit), today's check-in, user data and unread messages; check in now                                                                                           |
-| More → Tasks, Brush        | Send history, and brush tasks with their active torrents and totals                                                                                                                                           |
-| More → Downloaders         | Downloader speeds, free space and versions                                                                                                                                                                    |
-| More → Appearance          | Four themes (Light, Dark, Warm, Graphite) or follow the system (Light when it is light, Dark when it is dark); saved on this phone only                                                                       |
-| More → Connection & device | Connection method and address, host, this device's name and permissions; reconnect, forget this host                                                                                                          |
+| Page                       | Content                                                                                                                                                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview                   | Uploaded, billed download, ratio, bonus, seeding and unread messages across enabled sites, today's numbers, downloader speeds and free space, and how many torrents each downloader is seeding and their size        |
+| Torrents                   | Torrents in your downloaders, filtered by state or title, in the sort order you choose; pause, resume, delete (with a confirmation, optionally with the data)                                                        |
+| Search                     | Search all enabled sites and re-sort the results; when sending one, choose the downloader, save directory, category and tags (with the usual disk-space and seeding-capacity checks)                                 |
+| Media                      | Subscriptions (progress, missing episodes, search now, pause, delete), Library (the movies and shows organised into each library), recently added items, and Explore (trending, popular, search, subscribe directly) |
+| More → AI assistant        | Chat with the AI assistant built into pt-tools; devices with full control can confirm actions, see [AI assistant](assistant.md#in-the-app)                                                                           |
+| More → Sites               | Login status (days left before the inactivity limit), today's check-in, user data and unread messages; check in now                                                                                                  |
+| More → Tasks, Brush        | Send history, and brush tasks with their active torrents and totals                                                                                                                                                  |
+| More → Downloaders         | Downloader speeds, free space and versions                                                                                                                                                                           |
+| More → Appearance          | Four themes (Light, Dark, Warm, Graphite) or follow the system (Light when it is light, Dark when it is dark); saved on this phone only                                                                              |
+| More → Connection & device | Connection method and address, host, this device's name and permissions; reconnect, forget this host                                                                                                                 |
 
 The download figures on Overview and under More → Sites are the billed download (what the sites count toward your ratio after free and discount promotions), not the amount actually transferred. See [Two kinds of download figures](user-stats.md#two-kinds-of-download-figures).
 
 Downloader seeding at the bottom of Overview shows the same figures as the card of that name on the User Stats page of the web UI; see [Downloader seeding](user-stats.md#downloader-seeding) for how they are counted. There is one row per downloader, and a downloader that cannot be reached shows Unreachable with the reason, cut to at most two lines. It reads the full torrent list of every downloader, so it is read when Overview opens and when you pull to refresh, not on the timed refresh. The card is absent when the host runs an older version.
 
 Pull down on Explore to refresh it. It also reloads when you come back to it from another page, so a subscription you deleted in the web UI no longer shows as Subscribed.
+
+Library lists what has been organised into a library: one item per movie and one per season of a show, [imported existing files](media-library.md#importing-an-existing-library) included. Pick a library in the row at the top (only enabled libraries are listed; swipe sideways when there are many). Each item shows the year, how many episodes are in the library and which ones (for shows), the size and when the latest file was added. You can search by title (the title recorded when organising), pull down to refresh, and scroll to the bottom to load more. The page is absent when the host runs an older version.
 
 Read-only devices don't see write actions (pause, delete, send, check in, subscribe).
 

@@ -14,15 +14,21 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import 'mobile_editor_page.dart';
 
-/// 媒体：订阅、最近入库、探索（TMDB 的热门、流行与搜索，可以直接订阅）。
+/// 媒体：订阅、媒体库（按库看整理好的电影与剧集，主机有 media_library 时才有）、最近入库、
+/// 探索（TMDB 的热门、流行与搜索，可以直接订阅）。
 class MediaPage extends ConsumerWidget {
   const MediaPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final s = S.of(context);
+    final library =
+        ref.watch(metaProvider).value?.features.contains('media_library') ==
+        true;
     return DefaultTabController(
-      length: 3,
+      // 标签数变了（主机的能力读到了）时整个换掉，免得旧的选中位置越界
+      key: ValueKey(library),
+      length: library ? 4 : 3,
       child: Scaffold(
         appBar: AppBar(
           title: Text(s.navMedia),
@@ -41,13 +47,19 @@ class MediaPage extends ConsumerWidget {
           bottom: TabBar(
             tabs: [
               Tab(text: s.tabSubscriptions),
+              if (library) Tab(text: s.tabLibrary),
               Tab(text: s.tabHistory),
               Tab(text: s.tabExplore),
             ],
           ),
         ),
-        body: const TabBarView(
-          children: [_Subscriptions(), _History(), _Explore()],
+        body: TabBarView(
+          children: [
+            const _Subscriptions(),
+            if (library) const _Library(),
+            const _History(),
+            const _Explore(),
+          ],
         ),
       ),
     );
@@ -128,6 +140,252 @@ class _Subscriptions extends ConsumerWidget {
                   );
                 },
               ),
+      ),
+    );
+  }
+}
+
+/// 媒体库：上面一行选库（只列启用的库，横着滑），下面是这个库里整理好的电影与剧集，可以按片名搜；
+/// 滑到底接着取下一页，下拉刷新从第 1 页重新取。每一页按库、关键字与页分开缓存（libraryItemsProvider），
+/// 换了库或关键字以后，旧的请求晚回来也不会盖掉新的结果。
+class _Library extends ConsumerStatefulWidget {
+  const _Library();
+
+  @override
+  ConsumerState<_Library> createState() => _LibraryState();
+}
+
+class _LibraryState extends ConsumerState<_Library> {
+  int? _libraryId;
+  String? _q;
+
+  /// 已经要了几页（滑到底时加一）
+  int _pages = 1;
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  LibraryItemsQuery _query(int libraryId, int page) =>
+      LibraryItemsQuery(libraryId, q: _q, page: page);
+
+  void _select(int id) {
+    if (id == _libraryId) return;
+    setState(() {
+      _libraryId = id;
+      _pages = 1;
+    });
+  }
+
+  void _setQuery(String? q) {
+    final v = q == null || q.trim().isEmpty ? null : q.trim();
+    if (v == _q) return;
+    setState(() {
+      _q = v;
+      _pages = 1;
+    });
+  }
+
+  Future<void> _refresh(int libraryId) async {
+    for (var p = 1; p <= _pages; p++) {
+      ref.invalidate(libraryItemsProvider(_query(libraryId, p)));
+    }
+    ref.invalidate(mediaLibrariesProvider);
+    setState(() => _pages = 1);
+    try {
+      await ref.read(libraryItemsProvider(_query(libraryId, 1)).future);
+    } on Object {
+      // 页面显示错误
+    }
+  }
+
+  /// 列表最后一项（「加载更多」）画出来了，就是快滑到底了：要下一页。在这一帧画完以后改，
+  /// 同一页只要一次。
+  void _more(int libraryId, int pages) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _pages == pages && _libraryId == libraryId) {
+        setState(() => _pages = pages + 1);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final libs = ref.watch(mediaLibrariesProvider);
+    final list = libs.value;
+    if (list == null || list.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: () async {
+          try {
+            ref.invalidate(mediaLibrariesProvider);
+            await ref.read(mediaLibrariesProvider.future);
+          } on Object {
+            // 页面显示错误
+          }
+        },
+        child: AsyncBody<List<AppMediaLibrary>>(
+          value: libs,
+          onRetry: () => ref.invalidate(mediaLibrariesProvider),
+          data: (_) =>
+              EmptyState(icon: PtGlyph.library, message: s.noLibraries),
+        ),
+      );
+    }
+    final lib = list.firstWhere(
+      (l) => l.id == _libraryId,
+      orElse: () => list.first,
+    );
+    if (lib.id != _libraryId) {
+      // 第一次进来，或者选的库停用了：用第一个启用的库（这一帧照它画，记下来留到下一帧）
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _libraryId != lib.id) _select(lib.id);
+      });
+    }
+    final first = ref.watch(libraryItemsProvider(_query(lib.id, 1)));
+    final items = <AppMediaLibraryItem>[...?first.value?.items];
+    var last = first;
+    for (var p = 2; p <= _pages && last.hasValue; p++) {
+      last = ref.watch(libraryItemsProvider(_query(lib.id, p)));
+      items.addAll(last.value?.items ?? const []);
+    }
+    final total = first.value?.total ?? 0;
+    // 最后一页取到了东西、加起来还不到总数时才接着取（库在这期间变少了，取到空页就停）
+    final more =
+        last.hasValue &&
+        !last.isLoading &&
+        last.requireValue.items.isNotEmpty &&
+        items.length < total;
+    return Column(
+      // 选库的一行靠左，和下面的搜索框、列表对齐（不够一行宽时不居中）
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
+            children: [
+              for (final l in list)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    key: Key('library-chip-${l.id}'),
+                    label: Text(l.name),
+                    selected: l.id == lib.id,
+                    onSelected: (_) => _select(l.id),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+          child: SearchBar(
+            key: const Key('library-search'),
+            controller: _search,
+            hintText: s.librarySearchHint,
+            leading: const PtIcon(PtGlyph.search, size: 20),
+            elevation: const WidgetStatePropertyAll(0),
+            onSubmitted: _setQuery,
+            trailing: [
+              if (_q != null)
+                IconButton(
+                  icon: const PtIcon(PtGlyph.x, size: 20),
+                  onPressed: () {
+                    _search.clear();
+                    _setQuery(null);
+                  },
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () => _refresh(lib.id),
+            child: AsyncBody<AppMediaLibraryItemPage>(
+              value: first,
+              onRetry: () =>
+                  ref.invalidate(libraryItemsProvider(_query(lib.id, 1))),
+              data: (_) => items.isEmpty
+                  ? EmptyState(
+                      icon: PtGlyph.library,
+                      message: _q == null ? s.libraryEmpty : s.searchNoResults,
+                    )
+                  : ListView.separated(
+                      // 换了库或关键字时从头滑
+                      key: ValueKey((lib.id, _q)),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      itemCount:
+                          items.length +
+                          (more || last.isLoading || last.hasError ? 1 : 0),
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, i) {
+                        if (i < items.length) return _LibraryTile(items[i]);
+                        if (more) _more(lib.id, _pages);
+                        if (last.hasError && !last.isLoading) {
+                          return Center(
+                            child: TextButton(
+                              onPressed: () => ref.invalidate(
+                                libraryItemsProvider(_query(lib.id, _pages)),
+                              ),
+                              child: Text(s.retry),
+                            ),
+                          );
+                        }
+                        return const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      },
+                    ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LibraryTile extends StatelessWidget {
+  const _LibraryTile(this.item);
+  final AppMediaLibraryItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final it = item;
+    final tv = it.mediaType == 'tv';
+    final ranges = formatEpisodeRanges(it.episodes);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+        leading: Poster(it.posterPath, width: 44, size: 'w185'),
+        title: Text(
+          tv && it.season > 0
+              ? '${it.title} S${it.season.toString().padLeft(2, '0')}'
+              : it.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          [
+            if (it.year > 0) '${it.year}',
+            if (tv) ...[
+              s.libraryEpisodes(it.episodes.length),
+              if (ranges.isNotEmpty) ranges,
+            ] else if (it.files > 1)
+              s.libraryFiles(it.files),
+            formatBytes(it.size),
+            formatTime(it.latestAt),
+          ].join(' · '),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }

@@ -550,6 +550,28 @@ class SZh extends S {
   String get noHistory => '没有整理记录';
 
   @override
+  String get tabLibrary => '媒体库';
+
+  @override
+  String get noLibraries => '没有启用的媒体库';
+
+  @override
+  String get libraryEmpty => '这个库里没有整理进来的内容';
+
+  @override
+  String get librarySearchHint => '搜索片名';
+
+  @override
+  String libraryEpisodes(int count) {
+    return '$count 集';
+  }
+
+  @override
+  String libraryFiles(int count) {
+    return '$count 个文件';
+  }
+
+  @override
   String get subActive => '订阅中';
 
   @override

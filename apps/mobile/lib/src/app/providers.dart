@@ -254,6 +254,49 @@ final mediaHistoryProvider = FutureProvider.autoDispose<AppMediaHistoryPage>((
   return _need(await requireApi(ref).listMediaHistory(pageSize: 50));
 });
 
+/// 启用着的媒体库（媒体库页选库用）。
+final mediaLibrariesProvider =
+    FutureProvider.autoDispose<List<AppMediaLibrary>>((ref) async {
+      ref.watch(onlineEpochProvider);
+      final list = _need(await requireApi(ref).listMediaLibraries());
+      return list.where((l) => l.enabled).toList();
+    });
+
+/// 媒体库页每次取几项。
+const libraryPageSize = 30;
+
+/// 媒体库内容的一页：哪个库、按什么片名搜、第几页。
+class LibraryItemsQuery {
+  const LibraryItemsQuery(this.libraryId, {this.q, this.page = 1});
+  final int libraryId;
+  final String? q;
+  final int page;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LibraryItemsQuery &&
+      other.libraryId == libraryId &&
+      other.q == q &&
+      other.page == page;
+
+  @override
+  int get hashCode => Object.hash(libraryId, q, page);
+}
+
+/// 媒体库内容的一页。按库、关键字与页分开缓存：换了库或关键字，旧的请求回来也只落在旧的那一份上，不会盖掉新的结果。
+final libraryItemsProvider = FutureProvider.autoDispose
+    .family<AppMediaLibraryItemPage, LibraryItemsQuery>((ref, query) async {
+      ref.watch(onlineEpochProvider);
+      return _need(
+        await requireApi(ref).listMediaLibraryItems(
+          query.libraryId,
+          q: query.q,
+          page: query.page,
+          pageSize: libraryPageSize,
+        ),
+      );
+    });
+
 /// 探索的条件。
 class ExploreQuery {
   const ExploreQuery(this.kind, {this.list = 'trending', this.q});

@@ -1081,6 +1081,42 @@ abstract class S {
   /// **'没有整理记录'**
   String get noHistory;
 
+  /// No description provided for @tabLibrary.
+  ///
+  /// In zh, this message translates to:
+  /// **'媒体库'**
+  String get tabLibrary;
+
+  /// No description provided for @noLibraries.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有启用的媒体库'**
+  String get noLibraries;
+
+  /// No description provided for @libraryEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个库里没有整理进来的内容'**
+  String get libraryEmpty;
+
+  /// No description provided for @librarySearchHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索片名'**
+  String get librarySearchHint;
+
+  /// No description provided for @libraryEpisodes.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 集'**
+  String libraryEpisodes(int count);
+
+  /// No description provided for @libraryFiles.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个文件'**
+  String libraryFiles(int count);
+
   /// No description provided for @subActive.
   ///
   /// In zh, this message translates to:
