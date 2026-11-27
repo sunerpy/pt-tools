@@ -2,13 +2,13 @@
 
 本页介绍用 Docker、Linux 二进制和 Windows 二进制安装 pt-tools 的步骤，以及首次登录和数据目录的说明。
 
-| 方式           | 适用系统                  | 说明                                            |
-| -------------- | ------------------------- | ----------------------------------------------- |
-| Docker Compose | 任何能运行 Docker 的系统  | 推荐。升级只需要拉取新镜像                      |
-| `docker run`   | 同上                      | 单条命令，适合临时试用                          |
-| Linux 二进制   | Linux amd64、arm64        | 安装脚本会校验 SHA-256；可以注册为 systemd 服务 |
-| Windows 二进制 | Windows amd64、arm64      | PowerShell 安装脚本或手动解压                   |
-| NAS            | 1Panel、Unraid、飞牛 fnOS | 用 `deploy/` 里的应用定义安装                   |
+| 方式           | 适用系统                  | 说明                                                                     |
+| -------------- | ------------------------- | ------------------------------------------------------------------------ |
+| Docker Compose | 任何能运行 Docker 的系统  | 推荐。升级只需要拉取新镜像                                               |
+| `docker run`   | 同上                      | 单条命令，适合临时试用                                                   |
+| Linux 二进制   | Linux amd64、arm64        | 安装脚本会校验 SHA-256；可以注册为 systemd 服务                          |
+| Windows 二进制 | Windows amd64、arm64      | PowerShell 安装脚本或手动解压                                            |
+| NAS            | 1Panel、Unraid、飞牛 fnOS | 用 `deploy/` 里的应用定义安装；飞牛 fnOS 也可以装 Release 里的飞牛应用包 |
 
 不提供 macOS 二进制，macOS 请使用 Docker。
 
@@ -78,7 +78,7 @@ docker run -d \
 
 ## NAS
 
-仓库的 `deploy/` 目录里有 1Panel、Unraid 和飞牛 fnOS 的应用定义，下面是不经应用商店、直接用这些文件安装的方法。三者都把数据目录映射到容器的 `/app/.pt-tools`，升级、重装时保留这个目录并备份其中的 `secret.key`。
+仓库的 `deploy/` 目录里有 1Panel、Unraid 和飞牛 fnOS 的 Docker 应用定义，下面是不经应用商店、直接用这些文件安装的方法。这些定义都把数据目录映射到容器的 `/app/.pt-tools`，升级、重装时保留这个目录并备份其中的 `secret.key`。飞牛 fnOS 还可以装不用 Docker 的飞牛应用，见下文。
 
 容器以 `PUID`、`PGID` 指定的用户运行，启动时把 `/app` 下的文件交给这个用户。NAS 上常用的组 ID 100 在镜像里已经存在（`users` 组），直接沿用。这需要 1.0.0 或更新的镜像：0.48.0 及更早的版本在 `PGID` 是镜像里已有的组时启动失败（日志里是 `addgroup: gid in use`）。
 
@@ -92,7 +92,29 @@ docker run -d \
 
 ### 飞牛 fnOS
 
-在 fnOS 的 Docker 应用里新建一个 Compose 项目，内容用[上面的 Compose 文件](#docker-compose推荐)，把 `./data` 换成共享文件夹里的一个目录（例如 `/vol1/1000/docker/pt-tools`），再按这个目录所属用户设置 `PUID`、`PGID`（用 `ls -n` 查看）。`deploy/fnos` 是提交给第三方应用中心 fnos-apps 的打包配置。
+飞牛上有两种装法：飞牛应用（不用 Docker）和 Docker Compose，任选一种。
+
+#### 飞牛应用
+
+从 1.2.0 起，每个 [Release](https://github.com/sunerpy/pt-tools/releases/latest) 都附带飞牛应用包：x86 设备下载 `pt-tools-fnos-x86.fpk`，ARM 设备下载 `pt-tools-fnos-arm.fpk`（ARM 包还没在真机上验证过）。
+
+1. 打开「应用中心」，点左下角的「手动安装」，选存储空间，再点「从电脑上传」，选下载的 fpk。
+2. 包没有飞牛的签名，会弹出「未经验证应用的安全提示」，点「同意」继续。
+3. 安装向导里是几条提示，点「下一步」装好。桌面上会出现 pt-tools 的图标，点开就是网页 `http://<NAS 地址>:8080`。
+4. 到「系统设置 → 应用 → pt-tools → 可访问的文件」，点「添加」，选下载目录和媒体库所在的文件夹（例如 `video`），权限选「读写」。pt-tools 以自己的应用账号运行，不授权就读写不了这些文件夹，整理入库会失败。
+
+飞牛应用看到的是 NAS 上的真实路径（例如 `/vol1/1000/video/downloads`），不用挂载目录。qBittorrent 也装在这台飞牛上时，两边看到的路径相同，不用加路径映射；想用媒体库的「检查」试一下硬链接，可以在「媒体 → 媒体库」的「路径映射」里加一条两边相同的映射。
+
+- 网页固定用 8080 端口。8080 被占用时（例如 Docker 里也跑着 pt-tools，或者 qBittorrent 用了 8080），应用中心提示「无法启用 pt-tools：端口被占用」：先停掉占用的程序；要换端口，就用下面的 Docker 方式。
+- 数据在应用自己的目录里（`/vol1/@appdata/pt-tools/.pt-tools`）。备份在「全局设置 → 备份」里下载，默认带上 `secret.key`。
+- 卸载时选「保留数据」，以后重新安装数据都在；选「清除所有数据」会删掉数据库和 `secret.key`。
+- 从 Docker 版换过来：在 Docker 版的「全局设置 → 备份」里点「立即备份」并下载，停掉 Docker 版的容器，在飞牛应用的「备份与恢复」里点「上传备份恢复」，再到应用中心停用、启用一次 pt-tools，数据就换过来了。
+
+升级见[升级与备份](upgrade.md#飞牛应用)。
+
+#### Docker Compose
+
+在 fnOS 的 Docker 应用里新建一个 Compose 项目，内容用[上面的 Compose 文件](#docker-compose推荐)，把 `./data` 换成共享文件夹里的一个目录（例如 `/vol1/1000/docker/pt-tools`），再按这个目录所属用户设置 `PUID`、`PGID`（用 `ls -n` 查看）。`deploy/fnos/apps` 是提交给第三方应用中心 fnos-apps 的 Docker 版打包配置，上面的飞牛应用包在 `deploy/fnos/native`。
 
 ## Linux 二进制
 

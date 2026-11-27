@@ -92,7 +92,7 @@ pt-tools 是自托管的 PT 站点管理工具：按 RSS 自动下载，刷流�
 - **下载器**：可以添加多个 qBittorrent 和 Transmission，按 RSS 订阅、站点、默认下载器的顺序决定推送到哪一个；推送前检查剩余空间和站点做种容量，按做种时长、分享率等条件清理旧种子，并保护 H&R 种子；种子可以[转移](https://firlab.app/pt-tools/guide/torrent-transfer)到另一台下载器继续做种。
 - **ChatOps**：在 QQ（OneBot）、Telegram 和[飞书应用机器人](https://firlab.app/pt-tools/guide/chatops-feishu)（扫码就能建好机器人）里查看状态、暂停或删除种子、增删 RSS 订阅、追剧，每条命令都记入操作审计；RSS 上新通知支持静默时段、合并摘要、失败重试和每小时配额。
 - **浏览器扩展**：[PT Tools Helper](tools/browser-extension/README.md) 一键或定时同步站点 Cookie，并采集脱敏后的页面数据，用于申请新增站点。
-- **部署与维护**：Docker 镜像（amd64、arm64）与 Linux、Windows 二进制，1Panel、Unraid、飞牛 fnOS 上有应用定义；二进制部署可以在 Web 界面升级；每天定时备份数据库，可以在网页上恢复；访问站点和下载器可以走 HTTP、HTTPS 或 SOCKS5 代理，也可以只让选中的站点走代理。
+- **部署与维护**：Docker 镜像（amd64、arm64）、Linux 与 Windows 二进制和飞牛 fnOS 应用包，1Panel、Unraid、飞牛 fnOS 上有 Docker 应用定义；二进制部署可以在 Web 界面升级；每天定时备份数据库，可以在网页上恢复；访问站点和下载器可以走 HTTP、HTTPS 或 SOCKS5 代理，也可以只让选中的站点走代理。
 
 > [!WARNING]
 > RSS 未关联任何过滤规则时，pt-tools **只会下载免费种子**。追剧或下载特定的非免费资源时，请创建过滤规则并按需关闭「仅免费」。
@@ -122,7 +122,7 @@ services:
         max-file: "3"
 ```
 
-保存为 `compose.yml` 后运行 `docker compose up -d`。镜像同时发布在 Docker Hub（`sunerpy/pt-tools`）和 GHCR（`ghcr.io/sunerpy/pt-tools`），都包含 amd64 与 arm64。1Panel、Unraid 与飞牛 fnOS 的安装方法见[安装](https://firlab.app/pt-tools/guide/install#nas)。
+保存为 `compose.yml` 后运行 `docker compose up -d`。镜像同时发布在 Docker Hub（`sunerpy/pt-tools`）和 GHCR（`ghcr.io/sunerpy/pt-tools`），都包含 amd64 与 arm64。1Panel、Unraid 与飞牛 fnOS 的安装方法见[安装](https://firlab.app/pt-tools/guide/install#nas)；飞牛 fnOS 也可以在应用中心手动安装 Release 里的飞牛应用包（`pt-tools-fnos-x86.fpk`），见[安装：飞牛 fnOS](https://firlab.app/pt-tools/guide/install#飞牛-fnos)。
 
 > [!IMPORTANT]
 > 必须持久化 `/app/.pt-tools`。这个目录里有数据库、配置和用来加密站点凭证的 `secret.key`；密钥丢失后，已保存的 Cookie 无法恢复。

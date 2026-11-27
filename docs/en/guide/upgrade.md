@@ -25,6 +25,12 @@ docker run -d --name pt-tools -p 8080:8080 \
 
 The upgrade button in the web interface does not work inside a container; upgrade by changing the image.
 
+### fnOS app
+
+Download the new fnOS app package from the [release](https://github.com/sunerpy/pt-tools/releases/latest) (`pt-tools-fnos-x86.fpk` for x86, `pt-tools-fnos-arm.fpk` for ARM) and upload it under Manual install (手动安装) in App Center. After you click Agree (同意), App Center upgrades the app and keeps the data. The web interface has no upgrade button in the fnOS app.
+
+fnOS compares only the numbers in a version: after installing a preview such as `1.2.0-rc.1`, it cannot upgrade in place to the final `1.2.0` and reports that the same or a newer version is installed (已安装相同或更高版本). Uninstall pt-tools first (keep the data), then install the final version.
+
 ### Linux and Windows binaries
 
 When a new release is out, the web interface says so next to the version number at the top left. From there you can read the release notes and start the upgrade: pt-tools downloads the new version, checks its SHA-256 against that release's `checksums.txt`, and only then replaces its own executable and shows "Upgrade complete, please restart" (升级完成，请重启应用). If the checksum does not match, or the release has no `checksums.txt`, the upgrade fails and the running program is left as it was.
