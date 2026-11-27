@@ -69,6 +69,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | POST   | `/media/history/{id}/retry`                   | 操作        | 重新整理一条整理记录对应的种子               |
 | POST   | `/media/history/{id}/scrape`                  | 操作        | 重新刮削一条整理记录所在的电影或剧集         |
 | GET    | `/media/libraries`                            | 读取        | 媒体库                                       |
+| GET    | `/media/libraries/{id}/items`                 | 读取        | 一个媒体库里整理好的电影与剧集               |
 | POST   | `/media/recognize`                            | 读取        | 识别一个种子标题                             |
 | POST   | `/media/organize/preview`                     | 读取        | 预览整理下载器里的一个种子                   |
 | POST   | `/media/organize`                             | 操作        | 把下载器里的一个种子整理进媒体库             |
@@ -290,6 +291,12 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 ### GET /media/libraries
 
 每个媒体库一项：`id`、`name`、`kind`（`movie` 或 `tv`）、`anime`（只收动画）、`path`（pt-tools 里看到的库目录）、`mode`（整理方式，空的是整理设置里的默认方式）、`scrape`（刮削）、`classify_dir`（按二级分类放进子目录）、`overwrite_mode`（空的不替换旧版本，`larger` 新文件更大时替换）、`enabled`，以及新建订阅时带出的下载设置 `download_downloader_id`（0 是不指定）、`download_save_path`、`download_category`、`download_tags`（空的是不指定），见[新建订阅时带出的下载设置](../guide/media-library.md#新建订阅时带出的下载设置)。
+
+### GET /media/libraries/{id}/items
+
+一个媒体库（`id` 取自 `GET /media/libraries`，停用的库也能看）里整理好的内容，按条目合并：电影一部一项，剧集一季一项；整理进库的和[导入的已有文件](../guide/media-library.md#导入已有的媒体库)都算，失败、跳过、已删除的记录与没认出条目的不算。最近入库的在前，分页同其他列表（`page`、`page_size` 最多 100）。每项有 `media_type`、`tmdb_id`、`title`（整理时记下的片名，没记下时用 TMDB 的）、`year`、`season`（电影是 0）、`episodes`（库里有的集号，升序、去重；电影是空数组）、`files`（整理进库的文件数）、`size`（这些文件的大小合计）、`poster_path`（TMDB 海报的相对路径，用 `GET /images/tmdb/{size}/{file}` 取图；取不到时没有）、`latest_at`（最近一次入库的时间）。不带路径与种子名。
+
+`q` 按整理时记下的片名搜索：这一项里有一条记录的片名含它就列出，`files`、`size`、`episodes` 仍按整项算；只在显示时由 TMDB 补上的片名不参与搜索。海报从 TMDB 取（有缓存），一页最多等 8 秒，取不到的项没有 `poster_path`，不影响回应。媒体库不存在时回 404，编号、分页或 `q`（超过 200 字节）不对时回 400。`GET /meta` 的 `features` 里有 `media_library` 时才有这个接口。
 
 ### POST /media/recognize
 
@@ -553,7 +560,7 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 
 ## 手机编辑与统计导出
 
-`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`；按周期分段的刷流收益（[`GET /brush/stats`](#get-brushstats)）是 `brush_stats`；新建订阅的草稿与试搜索（见下文[追剧助手](#追剧助手)）是 `subscription_assist`；下载器的分类与标签（[`GET /downloaders/{id}/labels`](#get-downloadersidlabels)）是 `downloader_labels`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
+`GET /meta` 的 `features` 增加 `mobile_editors`、`brush_manage`、`stats_export`；按周期分段的刷流收益（[`GET /brush/stats`](#get-brushstats)）是 `brush_stats`；新建订阅的草稿与试搜索（见下文[追剧助手](#追剧助手)）是 `subscription_assist`；下载器的分类与标签（[`GET /downloaders/{id}/labels`](#get-downloadersidlabels)）是 `downloader_labels`；媒体库里整理好的内容（[`GET /media/libraries/{id}/items`](#get-medialibrariesiditems)）是 `media_library`。缺少能力时客户端提示升级，不尝试把请求转发到普通网页接口。App API 兼容级别保持 1。
 
 | 方法   | 路径                            | 权限 | 用途                                                                                                                                                          |
 | ------ | ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |

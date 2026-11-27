@@ -2116,6 +2116,86 @@ class AppApi {
     return null;
   }
 
+  /// 一个媒体库里整理好的内容：电影一部一项、剧集一季一项（导入的已有文件也算），最近入库的在前；`/meta` 的 features 含 media_library 时才有
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   媒体库的编号（GET /media/libraries 的 id）；停用的库也能看
+  ///
+  /// * [String] q:
+  ///   按整理时记下的片名搜索（最多 200 字节）：这一项里有一条记录的片名含它就列出（文件数、大小、集号仍按整项算）；只在显示时由 TMDB 补上的片名不参与搜索
+  ///
+  /// * [int] page:
+  ///
+  /// * [int] pageSize:
+  Future<Response> listMediaLibraryItemsWithHttpInfo(int id, { String? q, int? page, int? pageSize, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/media/libraries/{id}/items'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (q != null) {
+      queryParams.addAll(_queryParams('', 'q', q));
+    }
+    if (page != null) {
+      queryParams.addAll(_queryParams('', 'page', page));
+    }
+    if (pageSize != null) {
+      queryParams.addAll(_queryParams('', 'page_size', pageSize));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 一个媒体库里整理好的内容：电影一部一项、剧集一季一项（导入的已有文件也算），最近入库的在前；`/meta` 的 features 含 media_library 时才有
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///   媒体库的编号（GET /media/libraries 的 id）；停用的库也能看
+  ///
+  /// * [String] q:
+  ///   按整理时记下的片名搜索（最多 200 字节）：这一项里有一条记录的片名含它就列出（文件数、大小、集号仍按整项算）；只在显示时由 TMDB 补上的片名不参与搜索
+  ///
+  /// * [int] page:
+  ///
+  /// * [int] pageSize:
+  Future<AppMediaLibraryItemPage?> listMediaLibraryItems(int id, { String? q, int? page, int? pageSize, Future<void>? abortTrigger, }) async {
+    final response = await listMediaLibraryItemsWithHttpInfo(id, q: q, page: page, pageSize: pageSize, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppMediaLibraryItemPage',) as AppMediaLibraryItemPage;
+
+    }
+    return null;
+  }
+
   /// 站点、登录状态、今天的签到与站点上的用户数据
   ///
   /// Note: This method returns the HTTP [Response].

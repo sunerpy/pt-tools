@@ -81,6 +81,7 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/media/history/{id}/retry", w, s.appMediaHistoryRetry},
 		{http.MethodPost, "/media/history/{id}/scrape", w, s.appMediaHistoryScrape},
 		{http.MethodGet, "/media/libraries", r, s.appMediaLibraries},
+		{http.MethodGet, "/media/libraries/{id}/items", r, s.appMediaLibraryItems},
 		{http.MethodPost, "/media/recognize", r, s.appMediaRecognize},
 		{http.MethodPost, "/media/organize/preview", r, s.appOrganizePreview},
 		{http.MethodPost, "/media/organize", w, s.appOrganize},
@@ -360,7 +361,7 @@ type AppPrincipalV struct {
 }
 
 // appFeatures 是这个版本的 App API 提供的功能组。
-var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export", "brush_stats", "subscription_assist", "downloader_seeding", "downloader_labels"}
+var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates", "mobile_editors", "brush_manage", "stats_export", "brush_stats", "subscription_assist", "downloader_seeding", "downloader_labels", "media_library"}
 
 func (s *Server) appMeta(w http.ResponseWriter, r *http.Request) {
 	p := middleware.PrincipalFrom(r.Context())

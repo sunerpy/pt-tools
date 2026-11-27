@@ -208,6 +208,59 @@ func (s *Server) appMediaLibraries(w http.ResponseWriter, r *http.Request) {
 	appJSON(w, out)
 }
 
+// AppMediaLibraryItem 是 GET /media/libraries/{id}/items 的一项：一部电影，或剧的一季。不带路径与种子名。
+type AppMediaLibraryItem struct {
+	MediaType string `json:"media_type"`
+	TMDBID    int    `json:"tmdb_id"`
+	Title     string `json:"title"`
+	Year      int    `json:"year"`
+	Season    int    `json:"season"`
+	// Episodes 是库里有的集号（升序），电影是空数组
+	Episodes []int `json:"episodes"`
+	// Files 是整理进库的文件数
+	Files int   `json:"files"`
+	Size  int64 `json:"size"`
+	// PosterPath 是 TMDB 的海报（相对路径，经 /images/tmdb/{size}/{file} 取图），取不到时为空
+	PosterPath string `json:"poster_path,omitempty"`
+	// LatestAt 是最近一次入库的时间（Unix 秒）
+	LatestAt int64 `json:"latest_at"`
+}
+
+// appMediaLibraryItems 列出一个媒体库里整理好的电影与剧集（按条目合并，最近入库的在前）：q 按整理时记下的片名搜索。
+func (s *Server) appMediaLibraryItems(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.appOrganizer(w)
+	if !ok {
+		return
+	}
+	id, ok := appID(w, r)
+	if !ok {
+		return
+	}
+	page, size, ok := appPaging(r, 100)
+	if !ok {
+		appError(w, http.StatusBadRequest, "invalid_argument", "page 从 1 开始，page_size 在 1 到 100 之间")
+		return
+	}
+	kw := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(kw) > 200 {
+		appError(w, http.StatusBadRequest, "invalid_argument", "关键字太长")
+		return
+	}
+	res, err := svc.LibraryItems(r.Context(), organize.LibraryItemsQuery{LibraryID: id, Keyword: kw, Limit: size, Offset: (page - 1) * size})
+	if err != nil {
+		appOrganizeError(w, err)
+		return
+	}
+	out := AppPage[AppMediaLibraryItem]{Items: make([]AppMediaLibraryItem, 0, len(res.Items)), Total: int(res.Total), Page: page, PageSize: size}
+	for _, it := range res.Items {
+		out.Items = append(out.Items, AppMediaLibraryItem{
+			MediaType: it.MediaType, TMDBID: it.TMDBID, Title: it.Title, Year: it.Year, Season: it.Season, Episodes: it.Episodes,
+			Files: it.Files, Size: it.Size, PosterPath: it.PosterPath, LatestAt: it.LatestAt.Unix(),
+		})
+	}
+	appJSON(w, out)
+}
+
 func appMetaOf(m meta.Meta) AppMediaMeta {
 	return AppMediaMeta{
 		NameCN: m.NameCN, NameEN: m.NameEN, Year: m.Year, Type: string(m.Type), Season: m.Season, SeasonEnd: m.SeasonEnd,

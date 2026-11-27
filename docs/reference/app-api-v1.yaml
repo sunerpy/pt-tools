@@ -374,6 +374,30 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/AppMediaLibrary" }
         default: { $ref: "#/components/responses/Error" }
+  /media/libraries/{id}/items:
+    get:
+      operationId: listMediaLibraryItems
+      tags: [App]
+      summary: 一个媒体库里整理好的内容：电影一部一项、剧集一季一项（导入的已有文件也算），最近入库的在前；`/meta` 的 features 含 media_library 时才有
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 媒体库的编号（GET /media/libraries 的 id）；停用的库也能看
+          schema: { type: integer, minimum: 1 }
+        - name: q
+          in: query
+          description: 按整理时记下的片名搜索（最多 200 字节）：这一项里有一条记录的片名含它就列出（文件数、大小、集号仍按整项算）；只在显示时由 TMDB 补上的片名不参与搜索
+          schema: { type: string }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize100"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppMediaLibraryItemPage" }
+        default: { $ref: "#/components/responses/Error" }
   /media/recognize:
     post:
       operationId: recognizeMedia
@@ -1905,6 +1929,38 @@ components:
         status: { type: string }
         message: { type: string }
         created_at: { type: integer, format: int64 }
+    AppMediaLibraryItemPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppMediaLibraryItem" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    AppMediaLibraryItem:
+      type: object
+      description: 媒体库里的一项：一部电影，或剧的一季。不带路径与种子名。
+      required: [media_type, tmdb_id, title, year, season, episodes, files, size, latest_at]
+      properties:
+        media_type: { type: string, description: "movie 或 tv" }
+        tmdb_id: { type: integer }
+        title: { type: string, description: "整理时记下的片名；没记下时用 TMDB 的" }
+        year: { type: integer, description: "0 是不知道" }
+        season: { type: integer, description: "剧集的季；电影是 0" }
+        episodes:
+          type: array
+          description: 库里有的集号（升序、去重）；电影是空数组
+          items: { type: integer }
+        files: { type: integer, description: "整理进库的文件数（一个视频一个）" }
+        size: { type: integer, format: int64, description: "这些文件的大小合计（字节）" }
+        poster_path:
+          {
+            type: string,
+            description: "TMDB 海报的相对路径（例如 /abc.jpg），用 GET /images/tmdb/{size}/{file} 取图；取不到时没有这个字段",
+          }
+        latest_at: { type: integer, format: int64, description: "最近一次入库的时间（Unix 秒）" }
     AppMediaLibrary:
       type: object
       required:

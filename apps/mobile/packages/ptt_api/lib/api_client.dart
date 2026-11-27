@@ -289,6 +289,10 @@ class ApiClient {
           return AppMediaHistoryPage.fromJson(value);
         case 'AppMediaLibrary':
           return AppMediaLibrary.fromJson(value);
+        case 'AppMediaLibraryItem':
+          return AppMediaLibraryItem.fromJson(value);
+        case 'AppMediaLibraryItemPage':
+          return AppMediaLibraryItemPage.fromJson(value);
         case 'AppMediaMatch':
           return AppMediaMatch.fromJson(value);
         case 'AppMediaMeta':
