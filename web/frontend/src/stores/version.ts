@@ -44,6 +44,7 @@ export const useVersionStore = defineStore("version", () => {
 
   const canSelfUpgrade = computed(() => runtime.value?.can_self_upgrade === true);
   const isDocker = computed(() => runtime.value?.is_docker === true);
+  const isFnOSApp = computed(() => runtime.value?.managed_by === "fnos");
 
   const hasUpdate = computed(() => {
     if (!checkResult.value?.has_update || !checkResult.value.new_releases) return false;
@@ -339,6 +340,7 @@ export const useVersionStore = defineStore("version", () => {
     upgrading,
     canSelfUpgrade,
     isDocker,
+    isFnOSApp,
     fetchVersionInfo,
     checkForUpdates,
     dismissVersion,

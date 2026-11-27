@@ -26,6 +26,7 @@ import (
 
 var (
 	ErrDockerEnvironment    = errors.New("自动升级不支持 Docker 环境，请更新容器镜像")
+	ErrPackageManaged       = errors.New("这是飞牛应用：到 GitHub Release 下载新版 fpk，在应用中心「手动安装」里更新")
 	ErrUnsupportedPlatform  = errors.New("当前平台不支持自动升级")
 	ErrNoAssetFound         = errors.New("未找到适用于当前平台的安装包")
 	ErrUpgradeInProgress    = errors.New("升级正在进行中")
@@ -119,6 +120,9 @@ func (u *Upgrader) CanUpgrade() error {
 	env := DetectEnvironment()
 	if env.IsDocker {
 		return ErrDockerEnvironment
+	}
+	if env.ManagedBy == ManagedByFnOS {
+		return ErrPackageManaged
 	}
 	if !env.CanSelfUpgrade {
 		return ErrUnsupportedPlatform

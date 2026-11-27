@@ -1,10 +1,13 @@
 package version
 
 import (
+	"encoding/json"
+	"os"
 	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetectEnvironment(t *testing.T) {
@@ -111,3 +114,45 @@ func TestIsInAppDir(t *testing.T) {
 func TestDetectDocker(t *testing.T) {
 	assert.False(t, detectDocker(), "test host is not the pt-tools docker image")
 }
+
+// 飞牛应用的启动脚本设 PT_TOOLS_MANAGED_BY=fnos：运行环境要报出来，网页不提供应用内升级；别的值当作没设置。
+func TestDetectEnvironmentManagedBy(t *testing.T) {
+	oldOS, oldArch := BuildOS, BuildArch
+	t.Cleanup(func() { BuildOS, BuildArch = oldOS, oldArch })
+	BuildOS, BuildArch = "linux", "amd64"
+
+	tests := []struct {
+		name  string
+		value *string
+		want  string
+	}{
+		{name: "fnOS app", value: ptr("fnos"), want: ManagedByFnOS},
+		{name: "surrounding spaces", value: ptr(" fnos "), want: ManagedByFnOS},
+		{name: "unknown value", value: ptr("synology"), want: ""},
+		{name: "empty", value: ptr(""), want: ""},
+		{name: "not set", value: nil, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(managedByEnv, "")
+			if tt.value == nil {
+				require.NoError(t, os.Unsetenv(managedByEnv))
+			} else {
+				t.Setenv(managedByEnv, *tt.value)
+			}
+			env := DetectEnvironment()
+			assert.Equal(t, tt.want, env.ManagedBy)
+			raw, err := json.Marshal(env)
+			require.NoError(t, err)
+			if tt.want == "" {
+				assert.Equal(t, !env.IsDocker, env.CanSelfUpgrade)
+				assert.NotContains(t, string(raw), "managed_by")
+			} else {
+				assert.False(t, env.CanSelfUpgrade)
+				assert.Contains(t, string(raw), `"managed_by":"fnos"`)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }

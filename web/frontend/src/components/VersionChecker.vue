@@ -25,6 +25,7 @@ const {
   upgrading,
   canSelfUpgrade,
   isDocker,
+  isFnOSApp,
   showPrerelease,
   hasPrereleaseUpdate,
   onlyPrereleaseUpdates,
@@ -220,6 +221,19 @@ const isMobile = useIsMobile();
               </li>
               <li>或手动拉取新镜像: <code>docker pull sunerpy/pt-tools:latest</code></li>
             </ul>
+          </div>
+        </div>
+        <div v-else-if="isFnOSApp" class="pt-note docker-info">
+          <PtIcon name="package" :size="14" class="pt-note__icon" />
+          <div class="note-body">
+            <strong>飞牛应用</strong>
+            <p>
+              当前是飞牛应用中心安装的 pt-tools，不在网页里升级：到
+              <a href="https://github.com/sunerpy/pt-tools/releases/latest" target="_blank"
+                >GitHub Release</a
+              >
+              下载新版飞牛应用包（.fpk），在应用中心「手动安装」里上传，数据会保留。
+            </p>
           </div>
         </div>
 
