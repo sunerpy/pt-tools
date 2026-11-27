@@ -1,0 +1,32 @@
+#!/bin/bash
+# 卸载完成后：只有用户在卸载向导里选了「清除所有数据」才删数据。
+# 升级时飞牛也会跑旧版本的 uninstall_init、uninstall_callback（TRIM_APP_STATUS=UPGRADE、没有 wizard_delete_data），
+# 所以必须同时满足 TRIM_APP_STATUS=UNINSTALL 和 wizard_delete_data=true。飞牛自己不删应用的数据目录。
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+if [ "${TRIM_APP_STATUS:-}" != UNINSTALL ] || [ "${wizard_delete_data:-}" != true ]; then
+	exit 0
+fi
+
+note() {
+	printf '%s\n' "$1" >&2
+	if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+		printf '%s\n' "$1" >"$TRIM_TEMP_LOGFILE"
+	fi
+}
+
+dir=${TRIM_PKGVAR:-}
+case "$dir" in
+*/../* | */./* | */.. | */.) ok=no ;;
+/*/@appdata/pt-tools) ok=yes ;;
+*) ok=no ;;
+esac
+if [ "$ok" != yes ] || [ -L "$dir" ] || [ ! -d "$dir" ]; then
+	note "没有清除 pt-tools 的数据：数据目录不是预期的位置（${dir:-未设置}），请在文件管理里手动删除。"
+	exit 0
+fi
+# 目录本身留给飞牛；不跟随符号链接（find 默认 -P）
+if ! find "$dir" -mindepth 1 -delete; then
+	note "清除 pt-tools 的数据时有文件没删掉，剩下的在 $dir。"
+fi
+exit 0

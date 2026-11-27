@@ -1,0 +1,23 @@
+[
+  {
+    "stepTitle": "数据怎么处理",
+    "items": [
+      {
+        "type": "radio",
+        "field": "wizard_delete_data",
+        "label": "要保留 pt-tools 的数据吗？",
+        "initValue": "false",
+        "options": [
+          {
+            "label": "保留数据，以后重新安装还能用",
+            "value": "false"
+          },
+          {
+            "label": "清除所有数据（数据库、secret.key、日志，不可恢复）",
+            "value": "true"
+          }
+        ]
+      }
+    ]
+  }
+]
