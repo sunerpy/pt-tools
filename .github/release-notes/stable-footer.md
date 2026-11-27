@@ -57,6 +57,15 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/${TAG_NAME}/scripts/insta
 
 > App 与服务端是同一个版本，用法见[手机 App](https://github.com/sunerpy/pt-tools/blob/${TAG_NAME}/docs/guide/mobile-app.md)。
 
+### 飞牛 fnOS
+
+| Architecture   | File                    | Latest Link                                                                                    |
+| -------------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| x86_64         | `pt-tools-fnos-x86.fpk` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-fnos-x86.fpk) |
+| ARM（aarch64） | `pt-tools-fnos-arm.fpk` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-fnos-arm.fpk) |
+
+> 在飞牛的「应用中心 → 手动安装 → 从电脑上传」里选这个文件。包没有飞牛的签名，安装时会提示「未经验证应用的安全提示」，点「同意」继续。装好以后到「系统设置 → 应用 → pt-tools → 可访问的文件」里给下载目录和媒体库读写权限。ARM 包还没在真机上验证过。详细步骤见[安装：飞牛 fnOS](https://firlab.app/pt-tools/guide/install#飞牛-fnos)。
+
 ### Verify Integrity
 
 ```bash

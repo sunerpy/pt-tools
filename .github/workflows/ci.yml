@@ -334,6 +334,27 @@ jobs:
           GOARCH: amd64
         run: go vet ./...
 
+  # 飞牛 fnOS 应用包（deploy/fnos/native）：构建脚本产出的包结构、manifest 与生命周期脚本（start/stop/status、
+  # 陈旧 PID、强制结束、日志轮转、卸载删数据的条件），用一个假 pt-tools 跑，不需要飞牛设备。发版时 release.yml 用同一个脚本打包。
+  fnos-package:
+    name: fnOS Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: false
+
+      - name: Test the fnOS package
+        run: bash deploy/fnos/native/test-fnos-fpk.sh
+
   # 原生 Windows 测试（#542）：发布产物含 windows/amd64 与 windows/arm64，交叉编译只能证明编得过，
   # 这里在 windows-latest 上把测试真跑一遍。Windows 上打开着的文件删不掉、符号链接要特权、
   # 没有 POSIX 权限位，测试要按这些差异写。不加 -race：Windows runner 默认没有 cgo 工具链。
@@ -391,6 +412,7 @@ jobs:
         extension-build,
         cross-compile,
         go-test-windows,
+        fnos-package,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
