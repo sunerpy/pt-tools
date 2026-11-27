@@ -1,0 +1,3 @@
+#!/bin/bash
+# 升级、卸载之前先停掉 pt-tools。飞牛通常已经调过 main stop，这里兜底；停不下来时 main 会说明原因并返回 1。
+exec /bin/bash "${0%/*}/main" stop

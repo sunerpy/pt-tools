@@ -1535,6 +1535,8 @@ export interface ReleaseInfo {
 
 export interface RuntimeEnvironment {
   is_docker: boolean;
+  /** 安装包的管理方：飞牛应用中心安装的是 "fnos"，这时网页不提供升级。 */
+  managed_by?: string;
   os: string;
   arch: string;
   executable: string;

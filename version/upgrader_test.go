@@ -43,11 +43,22 @@ func TestUpgraderCanUpgrade(t *testing.T) {
 	env := DetectEnvironment()
 	if env.IsDocker {
 		assert.ErrorIs(t, err, ErrDockerEnvironment)
+	} else if env.ManagedBy == ManagedByFnOS {
+		assert.ErrorIs(t, err, ErrPackageManaged)
 	} else if !env.CanSelfUpgrade {
 		assert.ErrorIs(t, err, ErrUnsupportedPlatform)
 	} else {
 		assert.NoError(t, err)
 	}
+}
+
+// 飞牛应用不做应用内升级：二进制在应用中心的目录里，版本由应用中心记录。
+func TestUpgraderCanUpgradeRefusesFnOSApp(t *testing.T) {
+	if DetectEnvironment().IsDocker {
+		t.Skip("the Docker check comes first")
+	}
+	t.Setenv(managedByEnv, ManagedByFnOS)
+	assert.ErrorIs(t, NewUpgrader().CanUpgrade(), ErrPackageManaged)
 }
 
 func TestUpgraderFindAssetURL(t *testing.T) {

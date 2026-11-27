@@ -1,0 +1,13 @@
+{
+  ".url": {
+    "pt-tools.Application": {
+      "title": "pt-tools",
+      "icon": "images/icon_{0}.png",
+      "type": "url",
+      "protocol": "http",
+      "port": "8080",
+      "url": "/",
+      "allUsers": true
+    }
+  }
+}

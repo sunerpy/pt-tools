@@ -718,6 +718,24 @@ keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias ptt-app-signi
 
 本机构建签名的 release APK：设好 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 以后在 `apps/mobile` 里运行 `flutter build apk --release --split-per-abi`；没有设时 release 构建用 debug 签名，只能自己装着试。
 
+## 飞牛 fnOS 应用包
+
+从 1.2.0 起，每个 Release 附带飞牛 fnOS 的原生应用包 `pt-tools-fnos-x86.fpk` 与 `pt-tools-fnos-arm.fpk`，用户在飞牛「应用中心 → 手动安装」里上传就能安装、升级。源码在 `deploy/fnos/native/`，包的结构、生命周期脚本的约定和在飞牛上实测的行为见那里的 [README](https://github.com/sunerpy/pt-tools/blob/main/deploy/fnos/native/README.md)。`deploy/fnos/apps/` 是另一份 Docker 版的定义，给第三方应用中心 fnos-apps 用。
+
+- `Release` workflow 的 `fnos-fpk` job 检出 release tag、核对提交，把本次 GoReleaser 归档里的 linux-amd64、linux-arm64 二进制（与下载归档、容器镜像同一份字节）用 `build-fnos-fpk.sh` 打成两个 fpk。`Assemble checksums` 把它们传到 draft、写进 `checksums.txt`，再和其他资产一起由 `Publish Release` 校验、生成构建来源证明以后公开；打包失败时整个 Release 停在 draft，容器镜像也不推送。
+- 早于飞牛应用包的 tag 里没有打包脚本，用 `workflow_dispatch` 重建这类 draft 时 `fnos-fpk` 会失败。
+- 包没有飞牛的签名：飞牛目前没有公开申请开发者证书的渠道，手动安装时提示「未经验证应用」，点「同意」继续。
+- 飞牛应用里的 pt-tools 以 `PT_TOOLS_MANAGED_BY=fnos` 运行，网页不提供应用内升级：二进制在应用中心的目录里，版本也由应用中心记录。
+- 删数据的钩子必须同时看 `TRIM_APP_STATUS=UNINSTALL`：升级时飞牛也会跑旧版本的卸载钩子。
+- 飞牛判断能不能升级时只比较版本号里的数字：装了预览版 `X.Y.Z-rc.N` 的用户不能直接升级到正式版 `X.Y.Z`，要卸载（保留数据）再装，预览版的 Release 说明里写了这一点。
+
+本机打包和测试：
+
+```bash
+bash deploy/fnos/native/build-fnos-fpk.sh 1.2.0 x86 /path/to/linux-amd64/pt-tools /tmp/fpk
+bash deploy/fnos/native/test-fnos-fpk.sh   # 结构、manifest 与生命周期脚本；CI 的 fnOS Package job 也跑它
+```
+
 ---
 
 如有开发相关问题，欢迎在 [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions) 讨论。

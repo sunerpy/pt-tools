@@ -1,0 +1,5 @@
+#!/bin/bash
+# 不需要做什么：pt-tools 第一次启动时自己建数据目录（$TRIM_PKGVAR/.pt-tools）、迁移数据库。
+# 升级时飞牛也会跑 install_init、install_callback，所以这里不放一次性的初始化。
+# 包里没有 wizard/config，config_init、config_callback 不会被调用，留着与 fnpack 的模板一致。
+exit 0

@@ -1,0 +1,16 @@
+appname               = pt-tools
+version               = @VERSION@
+display_name          = pt-tools
+desc                  = PT 站点自动化：追剧订阅、RSS 下载、刷流、签到与保号提醒、多站点搜索和数据统计、媒体库整理，内置 AI 助手，统一管理 qBittorrent 和 Transmission。默认账号 admin，密码 adminadmin，第一次登录后请修改。
+platform              = @PLATFORM@
+source                = thirdparty
+maintainer            = sunerpy
+maintainer_url        = https://github.com/sunerpy/pt-tools
+distributor           = sunerpy
+distributor_url       = https://github.com/sunerpy/pt-tools
+desktop_uidir         = ui
+desktop_applaunchname = pt-tools.Application
+service_port          = 8080
+checkport             = true
+ctl_stop              = true
+disable_authorization_path = false

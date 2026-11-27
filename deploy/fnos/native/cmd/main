@@ -1,0 +1,205 @@
+#!/bin/bash
+# pt-tools 飞牛应用的运行控制。飞牛调用 `main start | stop | status`：
+#   start、stop 成功退出 0，失败退出 1；status 运行中退出 0，没在运行退出 3。
+# 飞牛每 30 秒调一次 status。钩子以应用用户运行，环境里没有 HOME 和 PATH，这里自己设。
+# 规范出处与实测见 deploy/fnos/native/README.md。
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ROTATE_BYTES=1048576
+
+# fail <消息>：消息写进 TRIM_TEMP_LOGFILE（飞牛把它显示给用户）和 stderr，退出 1
+fail() {
+	printf '%s\n' "$1" >&2
+	if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+		printf '%s\n' "$1" >"$TRIM_TEMP_LOGFILE"
+	fi
+	exit 1
+}
+
+# 正整数（最多 5 位），否则用默认值
+int_or() {
+	case "$1" in
+	'' | *[!0-9]*) echo "$2" ;;
+	*) if [ "${#1}" -le 5 ] && [ "$1" -ge 1 ]; then echo "$1"; else echo "$2"; fi ;;
+	esac
+}
+
+STOP_TIMEOUT=$(int_or "${PT_FNOS_STOP_TIMEOUT:-}" 30)
+START_TIMEOUT=$(int_or "${PT_FNOS_START_TIMEOUT:-}" 15)
+
+if [ -z "${TRIM_APPDEST:-}" ] || [ ! -d "$TRIM_APPDEST" ]; then
+	fail "pt-tools：找不到应用目录（TRIM_APPDEST=${TRIM_APPDEST:-未设置}），请重新安装。"
+fi
+if [ -z "${TRIM_PKGVAR:-}" ] || [ ! -d "$TRIM_PKGVAR" ]; then
+	fail "pt-tools：找不到数据目录（TRIM_PKGVAR=${TRIM_PKGVAR:-未设置}），请重新安装。"
+fi
+
+BIN="$TRIM_APPDEST/bin/pt-tools"
+BIN_REAL=$(readlink -f "$BIN" 2>/dev/null) || BIN_REAL=$BIN
+PID_FILE="$TRIM_PKGVAR/pt-tools.pid"
+LOG_DIR="$TRIM_PKGVAR/logs"
+CONSOLE_LOG="$LOG_DIR/console.log"
+APP_LOG_DIR="$TRIM_PKGVAR/.pt-tools/logs"
+
+# proc_fields <pid>：打印 /proc/<pid>/stat 里 comm 之后的字段（从第 3 列状态开始）；进程不在时失败
+proc_fields() {
+	local st
+	st=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+	# comm 在括号里，可能含空格和括号，取最后一个 ") " 之后的部分
+	printf '%s\n' "${st##*) }"
+}
+
+# proc_starttime <pid>：第 22 列（进程启动时间，开机后的时钟滴答数）
+proc_starttime() {
+	local -a f
+	read -r -a f <<<"$(proc_fields "$1")" || return 1
+	[ -n "${f[19]:-}" ] || return 1
+	printf '%s\n' "${f[19]}"
+}
+
+# alive <pid>：进程还在，而且不是僵尸
+alive() {
+	local -a f
+	read -r -a f <<<"$(proc_fields "$1")" || return 1
+	[ -n "${f[0]:-}" ] && [ "${f[0]}" != Z ]
+}
+
+# is_ours <pid> <启动时间>：进程还在、启动时间和记录的一样、可执行文件就是这个应用的 pt-tools。
+# 每次发信号之前都先过这一关：PID 文件可能是陈旧的，PID 已经被别的进程用了。
+is_ours() {
+	local pid=$1 start=$2 now exe
+	case "$pid" in '' | *[!0-9]*) return 1 ;; esac
+	now=$(proc_starttime "$pid") || return 1
+	[ "$now" = "$start" ] || return 1
+	exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || return 1
+	exe=${exe% (deleted)}
+	[ "$exe" = "$BIN_REAL" ] || [ "$exe" = "$BIN" ]
+}
+
+# read_pid_file：读出 PID 与 START（文件内容是一行「<pid> <启动时间>」）
+read_pid_file() {
+	PID=
+	START=
+	[ -f "$PID_FILE" ] || return 1
+	read -r PID START _ <"$PID_FILE" || [ -n "$PID" ] || return 1
+	[ -n "$PID" ] && [ -n "$START" ]
+}
+
+running() {
+	read_pid_file && is_ours "$PID" "$START"
+}
+
+file_size() {
+	stat -c %s "$1" 2>/dev/null || echo 0
+}
+
+# console.log 超过 1 MiB 时复制成 console.log.1（覆盖旧的）再截成 0 字节；写入方是追加打开的，截断后从头写
+rotate_log() {
+	[ -f "$CONSOLE_LOG" ] || return 0
+	[ "$(file_size "$CONSOLE_LOG")" -gt "$ROTATE_BYTES" ] || return 0
+	cp -f "$CONSOLE_LOG" "$CONSOLE_LOG.1" && : >"$CONSOLE_LOG"
+}
+
+port_in_use() {
+	(exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+# start_failed <消息> <启动前 console.log 的大小>：把这次启动新写的输出附在消息后面
+start_failed() {
+	local msg=$1 before=$2 out
+	rm -f "$PID_FILE"
+	if [ -f "$CONSOLE_LOG" ] && [ "$(file_size "$CONSOLE_LOG")" -gt "$before" ]; then
+		out=$(tail -c +"$((before + 1))" "$CONSOLE_LOG" | tail -n 5)
+		msg="$msg
+$out"
+	fi
+	fail "$msg
+详细日志：$APP_LOG_DIR/error.log、$CONSOLE_LOG"
+}
+
+do_start() {
+	local port pid start before deadline
+	if running; then
+		exit 0
+	fi
+	rm -f "$PID_FILE"
+	[ -x "$BIN" ] || fail "pt-tools：找不到程序 $BIN，请重新安装。"
+	port=${TRIM_SERVICE_PORT:-}
+	case "$port" in
+	'' | *[!0-9]*) fail "pt-tools：端口不对（TRIM_SERVICE_PORT=${port:-未设置}）。" ;;
+	esac
+	if [ "${#port}" -gt 5 ] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+		fail "pt-tools：端口不对（TRIM_SERVICE_PORT=$port）。"
+	fi
+	if port_in_use "$port"; then
+		fail "pt-tools 用的 $port 端口已经被别的程序占用（比如 Docker 里的 pt-tools 或 qBittorrent）。先停掉占用它的程序，或者改用 Docker 安装 pt-tools（可以换端口）。"
+	fi
+	mkdir -p "$LOG_DIR" || fail "pt-tools：建不了日志目录 $LOG_DIR。"
+	rotate_log
+	before=$(file_size "$CONSOLE_LOG")
+	cd "$TRIM_PKGVAR" || fail "pt-tools：进不了数据目录 $TRIM_PKGVAR。"
+	# 数据在 $HOME/.pt-tools；关掉控制台日志（pt-tools 自己的日志在 .pt-tools/logs，按设置轮转）；
+	# PT_TOOLS_MANAGED_BY=fnos 让网页不提供应用内升级（升级走应用中心）
+	HOME="$TRIM_PKGVAR" PT_TOOLS_LOG_CONSOLE=false PT_TOOLS_MANAGED_BY=fnos \
+		nohup "$BIN" web --host 0.0.0.0 --port "$port" </dev/null >>"$CONSOLE_LOG" 2>&1 &
+	pid=$!
+	start=$(proc_starttime "$pid") || start_failed "pt-tools 启动后马上退出了。" "$before"
+	if ! printf '%s %s\n' "$pid" "$start" >"$PID_FILE.tmp" || ! mv -f "$PID_FILE.tmp" "$PID_FILE"; then
+		fail "pt-tools：写不了 $PID_FILE。"
+	fi
+	# 等它开始监听，最多 START_TIMEOUT 秒；到时还在运行就算启动了（数据库迁移可能较慢），之后飞牛按 status 查
+	deadline=$((SECONDS + START_TIMEOUT))
+	while [ "$SECONDS" -lt "$deadline" ]; do
+		alive "$pid" || start_failed "pt-tools 启动后退出了。" "$before"
+		port_in_use "$port" && exit 0
+		sleep 0.5
+	done
+	alive "$pid" || start_failed "pt-tools 启动后退出了。" "$before"
+	exit 0
+}
+
+do_stop() {
+	local i
+	if ! read_pid_file; then
+		rm -f "$PID_FILE"
+		exit 0
+	fi
+	if ! is_ours "$PID" "$START"; then
+		# 陈旧的 PID 文件：这个 PID 现在不是我们的 pt-tools，不发信号
+		rm -f "$PID_FILE"
+		exit 0
+	fi
+	kill -TERM "$PID" 2>/dev/null
+	for ((i = 0; i < STOP_TIMEOUT * 2; i++)); do
+		is_ours "$PID" "$START" || break
+		sleep 0.5
+	done
+	if is_ours "$PID" "$START"; then
+		kill -KILL "$PID" 2>/dev/null
+		for ((i = 0; i < 10; i++)); do
+			is_ours "$PID" "$START" || break
+			sleep 0.5
+		done
+	fi
+	if is_ours "$PID" "$START"; then
+		fail "pt-tools 停不下来（PID $PID），请重启 NAS 后再试。"
+	fi
+	rm -f "$PID_FILE"
+	exit 0
+}
+
+do_status() {
+	if running; then
+		rotate_log
+		exit 0
+	fi
+	rm -f "$PID_FILE"
+	exit 3
+}
+
+case "${1:-}" in
+start) do_start ;;
+stop) do_stop ;;
+status) do_status ;;
+*) fail "pt-tools：不认识的命令「${1:-}」。" ;;
+esac

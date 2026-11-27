@@ -1,0 +1,23 @@
+[
+  {
+    "stepTitle": "安装前须知",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "pt-tools 的网页用 <b>8080</b> 端口。默认账号 <b>admin</b>，密码 <b>adminadmin</b>，第一次登录后请修改密码。"
+      },
+      {
+        "type": "tips",
+        "helpText": "整理入库要读写下载目录和媒体库：装好以后到「系统设置 → 应用 → pt-tools → 可访问的文件」里，给这两个文件夹读写权限。"
+      },
+      {
+        "type": "tips",
+        "helpText": "8080 端口被别的程序占用时（比如 Docker 里也装了 pt-tools，或者 qBittorrent 用了 8080），pt-tools 启动不了：先停掉占用它的程序，或者改用 Docker 安装 pt-tools（可以换端口）。"
+      },
+      {
+        "type": "tips",
+        "helpText": "数据保存在应用自己的目录里。备份在「全局设置 → 备份」下载，默认带上 <code>secret.key</code>（加密站点 Cookie 和各类密钥的密钥），请妥善保管。"
+      }
+    ]
+  }
+]
