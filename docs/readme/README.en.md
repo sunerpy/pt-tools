@@ -94,7 +94,7 @@ Everything that changed is in [What's new in 1.0](https://firlab.app/pt-tools/en
 - **Downloaders**: add several qBittorrent and Transmission instances; a torrent goes to the one bound to its RSS feed, then its site, then the default. Free space and the site's seeding capacity are checked before every push, old torrents are removed by seeding time, ratio and other conditions with H&R torrents kept, and torrents can be [transferred](https://firlab.app/pt-tools/en/guide/torrent-transfer) to another downloader to keep seeding.
 - **ChatOps**: from QQ (OneBot), Telegram or the [Feishu app bot](https://firlab.app/pt-tools/en/guide/chatops-feishu) (created by scanning one QR code), check status, pause or delete torrents, add or remove RSS feeds and follow shows, with every command in the audit log. New-torrent notifications support quiet hours, digests, retries and an hourly limit.
 - **Browser extension**: [PT Tools Helper](../../tools/browser-extension/README.md) syncs site cookies in one click or on a schedule and collects redacted pages to request support for a new site.
-- **Deployment and upkeep**: a Docker image (amd64 and arm64), binaries for Linux and Windows, and app definitions for 1Panel, Unraid and fnOS; the binary upgrades itself from the web interface; the database is backed up daily and can be restored from the web interface; sites and downloaders can be reached through an HTTP, HTTPS or SOCKS5 proxy, for all sites or only the ones you choose.
+- **Deployment and upkeep**: a Docker image (amd64 and arm64), binaries for Linux and Windows, an fnOS app package, and Docker app definitions for 1Panel, Unraid and fnOS; the binary upgrades itself from the web interface; the database is backed up daily and can be restored from the web interface; sites and downloaders can be reached through an HTTP, HTTPS or SOCKS5 proxy, for all sites or only the ones you choose.
 
 > [!WARNING]
 > An RSS feed without any filter rule downloads **freeleech torrents only**. To follow a series or download particular non-free torrents, create a filter rule and turn off "free only" (仅免费) where needed.
@@ -124,7 +124,7 @@ services:
         max-file: "3"
 ```
 
-Save it as `compose.yml` and run `docker compose up -d`. The image is published on Docker Hub (`sunerpy/pt-tools`) and GHCR (`ghcr.io/sunerpy/pt-tools`), for amd64 and arm64. For 1Panel, Unraid and fnOS, see [Install](https://firlab.app/pt-tools/en/guide/install#nas).
+Save it as `compose.yml` and run `docker compose up -d`. The image is published on Docker Hub (`sunerpy/pt-tools`) and GHCR (`ghcr.io/sunerpy/pt-tools`), for amd64 and arm64. For 1Panel, Unraid and fnOS, see [Install](https://firlab.app/pt-tools/en/guide/install#nas); on fnOS you can also install the fnOS app package from a release (`pt-tools-fnos-x86.fpk`), see [Install: fnOS](https://firlab.app/pt-tools/en/guide/install#fnos).
 
 > [!IMPORTANT]
 > Keep `/app/.pt-tools` on a volume. It holds the database, the settings and the `secret.key` that encrypts site credentials; if the key is lost, saved cookies cannot be recovered.
